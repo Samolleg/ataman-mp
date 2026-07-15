@@ -136,7 +136,7 @@ public:
     uint readQuaternion(QVector4D& data);
     uint writeQuaternion(const QVector4D data);
     uint readRectangle(SRectangle& data);
-    uint readString(QString& data, uint len);
+    uint readString(QString& data, uint len, bool* trailingNull = nullptr);
     uint writeString(const QString& data);
     uint readStringArray(QList<QString>& data);
     uint writeStringArray(const QList<QString>& data, QString keyName);

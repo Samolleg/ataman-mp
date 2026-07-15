@@ -26,6 +26,7 @@ CUnit::CUnit(const CUnit &unit):
     CWorldObj(unit)
 {
     m_prototypeName = unit.m_prototypeName;
+    m_prototypeNullTerminated = unit.m_prototypeNullTerminated;
     m_stat.reset(new SUnitStat(*unit.m_stat.get()));
     m_aQuestItem = unit.m_aQuestItem;
     m_aQuickItem = unit.m_aQuickItem;
@@ -113,7 +114,7 @@ uint CUnit::deserialize(util::CMobParser& parser)
         else if(parser.isNextTag("UNIT_PROTOTYPE"))
         {
             readByte += parser.readHeader();
-            readByte += parser.readString(m_prototypeName, parser.nodeLen());
+            readByte += parser.readString(m_prototypeName, parser.nodeLen(), &m_prototypeNullTerminated);
         }
         else if(parser.isNextTag("UNIT_ITEMS"))
         {
@@ -228,6 +229,8 @@ uint CUnit::serialize(util::CMobParser &parser)
 
     writeByte += parser.startSection("UNIT_PROTOTYPE");
     writeByte += parser.writeString(m_prototypeName);
+    if(m_prototypeNullTerminated)
+        writeByte += parser.writeByte(0);
     parser.endSection();// "UNIT_PROTOTYPE"
 
     writeByte += parser.startSection("UNIT_ARMORS");
@@ -744,7 +747,6 @@ void CLogic::createLogicLines()
             pos = pt->position();
             pos.setZ(0.0f);
             CLandscape::getInstance()->projectPt(pos);
-            pt->setPos(pos);
             pt->setDrawPosition(pos);
             m_aDrawPoint.append(pos);
             for (auto& look : pt->lookPoint())
@@ -752,7 +754,6 @@ void CLogic::createLogicLines()
                 pos = look->position();
                 pos.setZ(0.0f);
                 CLandscape::getInstance()->projectPt(pos);
-                look->setPos(pos);
                 look->setDrawPosition(pos);
             }
             pt->update();
@@ -1531,11 +1532,11 @@ void CPatrolPoint::update()
 
 //    QVector3D pos(position());
 //    pos.setZ(0.0f);
-    m_aDrawingLine.append(position()); // self position
+    m_aDrawingLine.append(drawPosition()); // terrain-projected display position
     for(auto& lp: m_aLookPt)
     {
         if(lp->isMarkDeleted()) continue;
-        m_aDrawingLine.append(lp->position());
+        m_aDrawingLine.append(lp->drawPosition());
 //        pos=lp->position();
 //        pos.setZ(0.0f);
 //        m_aDrawingLine.append(pos);   //drawing position?!

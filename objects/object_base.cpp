@@ -80,7 +80,15 @@ CObjectBase::~CObjectBase()
 
 void CObjectBase::updateFigure(ei::CFigure* fig)
 {
-    Q_ASSERT(fig);
+    if(!fig)
+    {
+        ei::log(eLogWarning, "Cannot update object figure; placeholder is unavailable for model: " + m_modelName);
+        for(auto& part: m_aPart)
+            delete part;
+        m_aPart.clear();
+        m_pFigure = nullptr;
+        return;
+    }
     m_pFigure = fig;
     recalcFigure();
 }

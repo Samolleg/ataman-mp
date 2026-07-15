@@ -393,8 +393,11 @@ void CObjectList::initResource()
 
 ei::CFigure *CObjectList::figureDefault()
 {
-    Q_ASSERT(m_aFigure.contains("cannotDisplay.mod"));
-    return m_aFigure["cannotDisplay.mod"];
+    const QString fallbackName("cannotdisplay.mod");
+    ei::CFigure* fallback = m_aFigure.value(fallbackName, nullptr);
+    if(!fallback)
+        ei::log(eLogWarning, "Default placeholder figure is unavailable: " + fallbackName);
+    return fallback;
 }
 
 

@@ -209,6 +209,7 @@ public:
 private:
     //"UNIT_R", eNull};
     QString m_prototypeName;//"UNIT_PROTOTYPE", eString};
+    bool m_prototypeNullTerminated{false};
     //"UNIT_ITEMS", eNull};
     QSharedPointer<SUnitStat> m_stat;//"UNIT_STATS", eUnitStats};
     QStringList m_aQuestItem;//"UNIT_QUEST_ITEMS", eStringArray};

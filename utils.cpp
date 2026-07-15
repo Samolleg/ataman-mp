@@ -701,10 +701,15 @@ uint util::CMobParser::readRectangle(SRectangle& data)
     return 16;
 }
 
-uint util::CMobParser::readString(QString& data, uint len)
+uint util::CMobParser::readString(QString& data, uint len, bool* trailingNull)
 {
     QByteArray str = m_stream.device()->read(len);
-    data = QString(str);
+    const bool terminated = !str.isEmpty() && str.endsWith('\0');
+    if(trailingNull)
+        *trailingNull = terminated;
+    if(terminated)
+        str.chop(1);
+    data = QString::fromLatin1(str);
     return len;
 }
 
