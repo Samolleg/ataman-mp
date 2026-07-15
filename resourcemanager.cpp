@@ -123,6 +123,67 @@ QMap<QString, QByteArray> normalizedResourceMap(const QMap<QString, QByteArray>&
     return result;
 }
 
+QVector<QString> configuredResourceSources(CSettings* settings)
+{
+    QVector<QString> explicitSources;
+    if(settings)
+    {
+        for(QString optionName : {QString("figPaths"), QString("texPaths")})
+        {
+            auto option = dynamic_cast<COptStringList*>(settings->opt(eOptSetResource, optionName));
+            if(option)
+                explicitSources.append(option->value());
+        }
+    }
+
+    static QMap<QString, QVector<QString>> cache;
+    QString cacheKey;
+    for(const QString& source : explicitSources)
+        cacheKey += source + '\n';
+    if(cache.contains(cacheKey))
+        return cache.value(cacheKey);
+
+    QVector<QString> directoryOrder;
+    QMap<QString, QVector<QString>> explicitByDirectory;
+    for(const QString& source : explicitSources)
+    {
+        const QFileInfo info(source);
+        const QString directory = info.absolutePath();
+        const QString directoryKey = QDir::cleanPath(directory).toLower();
+        if(!explicitByDirectory.contains(directoryKey))
+            directoryOrder.append(directory);
+        explicitByDirectory[directoryKey].append(info.absoluteFilePath());
+    }
+
+    QVector<QString> result;
+    QSet<QString> seen;
+    auto appendUnique = [&result, &seen](const QString& path)
+    {
+        const QString absolute = QFileInfo(path).absoluteFilePath();
+        const QString key = QDir::cleanPath(absolute).toLower();
+        if(seen.contains(key))
+            return;
+        seen.insert(key);
+        result.append(absolute);
+    };
+
+    for(const QString& directory : directoryOrder)
+    {
+        const QString directoryKey = QDir::cleanPath(directory).toLower();
+        for(const QString& source : explicitByDirectory.value(directoryKey))
+            appendUnique(source);
+
+        const QDir dir(directory);
+        for(const QFileInfo& archive : dir.entryInfoList({"*.res"}, QDir::Files, QDir::Name | QDir::IgnoreCase))
+            appendUnique(archive.absoluteFilePath());
+    }
+
+    cache.insert(cacheKey, result);
+    ei::log(eLogInfo, QString("Resource catalog expanded %1 configured archives to %2 generic sources")
+            .arg(explicitSources.size()).arg(result.size()));
+    return result;
+}
+
 int dxtLevelSize(int width, int height, int blockBytes)
 {
     return qMax(1, (width + 3) / 4) * qMax(1, (height + 3) / 4) * blockBytes;
@@ -325,8 +386,8 @@ void CObjectList::readAssembly(const QMap<QString, QByteArray>& aFile, const QSt
 
 void CObjectList::loadFigures(QSet<QString>& aFigure)
 {
-    auto pOpt = dynamic_cast<COptStringList*>(m_pSettings->opt(eOptSetResource, "figPaths"));
-    if (!pOpt || pOpt->value().isEmpty())
+    const QVector<QString> sources = configuredResourceSources(m_pSettings);
+    if(sources.isEmpty())
     {
         QMessageBox::warning(m_pSettings, "Warning","Choose path to figures.res");
         m_pSettings->onShow(eOptSetResource);
@@ -337,7 +398,7 @@ void CObjectList::loadFigures(QSet<QString>& aFigure)
     if(aFigure.isEmpty())
     {
         m_arrFigureForComboBox.clear();
-        for(const QString& name : indexedNames(pOpt->value(), ".mod"))
+        for(const QString& name : indexedNames(sources, ".mod"))
             m_arrFigureForComboBox.append(name.left(name.size() - 4));
         return;
     }
@@ -348,7 +409,7 @@ void CObjectList::loadFigures(QSet<QString>& aFigure)
         if(m_aFigure.contains(fig) || m_missingFigureNames.contains(fig))
             continue;
         QByteArray figureData;
-        if(!readIndexedResource(pOpt->value(), fig, figureData))
+        if(!readIndexedResource(sources, fig, figureData))
         {
             m_missingFigureNames.insert(fig);
             ei::log(eLogWarning, "Missing figure (negative cached): " + fig);
@@ -361,7 +422,7 @@ void CObjectList::loadFigures(QSet<QString>& aFigure)
             QByteArray bonData;
             QMap<QString, QByteArray> assemblyFiles;
             assemblyFiles.insert(fig, figureData);
-            if(readIndexedResource(pOpt->value(), bonName, bonData))
+            if(readIndexedResource(sources, bonName, bonData))
                 assemblyFiles.insert(bonName, bonData);
             readAssembly(assemblyFiles, fig);
         }
@@ -647,8 +708,8 @@ void CTextureList::initAuxTexture()
 
 void CTextureList::loadTexture(QSet<QString>& aName)
 {
-    auto pOpt = dynamic_cast<COptStringList*>(m_pSettings->opt(eOptSetResource, "texPaths"));
-    if (!pOpt || pOpt->value().isEmpty())
+    const QVector<QString> sources = configuredResourceSources(m_pSettings);
+    if(sources.isEmpty())
     {
         QMessageBox::warning(m_pSettings, "Warning", "Choose path to textures.res");
         m_pSettings->onShow(eOptSetResource);
@@ -659,7 +720,7 @@ void CTextureList::loadTexture(QSet<QString>& aName)
     if(aName.isEmpty())
     {
         m_arrCellComboBox.clear();
-        for(const QString& name : indexedNames(pOpt->value(), ".mmp"))
+        for(const QString& name : indexedNames(sources, ".mmp"))
             m_arrCellComboBox.append(name.left(name.size() - 4));
         return;
     }
@@ -670,7 +731,7 @@ void CTextureList::loadTexture(QSet<QString>& aName)
         if(m_aTexture.contains(normalized) || m_missingTextureNames.contains(normalized))
             continue;
         QByteArray textureData;
-        if(readIndexedResource(pOpt->value(), normalized + ".mmp", textureData))
+        if(readIndexedResource(sources, normalized + ".mmp", textureData))
             parse(textureData, normalized);
         if(!m_aTexture.contains(normalized))
         {
