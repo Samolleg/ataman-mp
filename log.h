@@ -47,6 +47,8 @@ namespace ei {
 void log(ELogMessageType type, const char* msg);
 void log(ELogMessageType type, const QString msg);
 void log(ELogMessageType type, const QString msg, QString func);
+void setCrashContext(const QString& context);
+const char* crashContext();
 }
 
 #endif // LOG_H

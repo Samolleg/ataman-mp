@@ -7,8 +7,51 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QTextStream>
+#include <QTimer>
+#include <cstdio>
 
 #include "endurance_document.h"
+#include "log.h"
+
+#ifdef Q_OS_WIN
+#include <windows.h>
+#endif
+
+#ifdef Q_OS_WIN
+namespace {
+LONG WINAPI enduranceUnhandledException(EXCEPTION_POINTERS* exceptionInfo)
+{
+    const DWORD code = exceptionInfo && exceptionInfo->ExceptionRecord
+            ? exceptionInfo->ExceptionRecord->ExceptionCode : 0;
+    const ULONG_PTR address = exceptionInfo && exceptionInfo->ExceptionRecord
+            ? reinterpret_cast<ULONG_PTR>(exceptionInfo->ExceptionRecord->ExceptionAddress) : 0;
+    const ULONG_PTR moduleBase = reinterpret_cast<ULONG_PTR>(GetModuleHandleW(nullptr));
+    SYSTEMTIME now;
+    GetLocalTime(&now);
+
+    char record[3072];
+    const int length = std::snprintf(record, sizeof(record),
+            "[%02u.%02u.%04u %02u:%02u:%02u] {CRASH} code=0x%08lx address=0x%p module_offset=0x%llx thread=%lu context=%s\r\n",
+            unsigned(now.wDay), unsigned(now.wMonth), unsigned(now.wYear),
+            unsigned(now.wHour), unsigned(now.wMinute), unsigned(now.wSecond),
+            static_cast<unsigned long>(code), reinterpret_cast<void*>(address),
+            static_cast<unsigned long long>(address >= moduleBase ? address - moduleBase : 0),
+            static_cast<unsigned long>(GetCurrentThreadId()), ei::crashContext());
+
+    CreateDirectoryW(L"logs", nullptr);
+    HANDLE logFile = CreateFileW(L"logs\\workflow.log", FILE_APPEND_DATA,
+            FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if(logFile != INVALID_HANDLE_VALUE)
+    {
+        DWORD written = 0;
+        WriteFile(logFile, record, DWORD(length > 0 ? length : 0), &written, nullptr);
+        FlushFileBuffers(logFile);
+        CloseHandle(logFile);
+    }
+    return EXCEPTION_CONTINUE_SEARCH;
+}
+}
+#endif
 
 namespace {
 int runHeadlessCommand(QApplication& app)
@@ -23,6 +66,7 @@ int runHeadlessCommand(QApplication& app)
     parser.addOption(validateOption);
     parser.addOption(roundtripOption);
     parser.addOption(jsonOption);
+    parser.addPositionalArgument("documents", "MPR and MOB documents to open in order.", "[documents...]");
     parser.process(app);
 
     const bool validate = parser.isSet(validateOption);
@@ -88,6 +132,10 @@ int main(int argc, char *argv[])
 {
     QApplication app(argc, argv);
 
+#ifdef Q_OS_WIN
+    SetUnhandledExceptionFilter(enduranceUnhandledException);
+#endif
+
     QCoreApplication::setOrganizationName("EI Mapper Endurance");
     QCoreApplication::setOrganizationDomain("ei-mapper-endurance.local");
     QCoreApplication::setApplicationName("EI Mapper Endurance Edition");
@@ -130,5 +178,21 @@ int main(int argc, char *argv[])
     //window.resize(window.sizeHint());
 
     window.show();
+    QStringList startupDocuments;
+    for(int i = 1; i < app.arguments().size(); ++i)
+    {
+        const QFileInfo candidate(app.arguments().at(i));
+        const QString suffix = candidate.suffix().toLower();
+        if(candidate.exists() && (suffix == "mpr" || suffix == "mob"))
+            startupDocuments.append(candidate.absoluteFilePath());
+    }
+    if(!startupDocuments.isEmpty())
+    {
+        QTimer::singleShot(0, &window, [&window, startupDocuments]()
+        {
+            for(const QString& path : startupDocuments)
+                window.openDocument(QFileInfo(path));
+        });
+    }
     return app.exec();
 }

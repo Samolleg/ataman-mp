@@ -10,7 +10,7 @@
 #include "property.h"
 
 
-COpenCommand::COpenCommand(CView* pView, QFileInfo& path, QUndoCommand *parent) : QUndoCommand(parent)
+COpenCommand::COpenCommand(CView* pView, const QFileInfo& path, QUndoCommand *parent) : QUndoCommand(parent)
     ,m_pView(pView)
     ,m_filePath(path)
 {

@@ -363,14 +363,22 @@ bool CMob::deserialize(QByteArray data)
 void CMob::updateObjects()
 {
     ei::log(eLogInfo, "Start update " + QString::number(m_aNode.size())+ " objects");
-    for(auto& node: m_aNode)
+    for(int i = 0; i < m_aNode.size(); ++i)
     {
+        CNode* node = m_aNode.at(i);
+        const QString context = QString("MOB object %1/%2 mapId=%3 type=%4 model=%5 texture=%6")
+                .arg(i + 1).arg(m_aNode.size()).arg(node->mapId()).arg(int(node->nodeType()))
+                .arg(node->modelName(), node->textureName());
+        ei::setCrashContext(context + " phase=loadFigure");
         node->loadFigure();
+        ei::setCrashContext(context + " phase=loadTexture");
         node->loadTexture();
     }
+    ei::setCrashContext("MOB projection phase");
     CLandscape::getInstance()->projectPositions(m_aNode);
     m_pProgress->update(50);
     ei::log(eLogInfo, "End update objects");
+    ei::setCrashContext("idle after MOB update");
 }
 
 void CMob::delNodes()

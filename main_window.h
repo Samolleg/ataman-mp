@@ -8,6 +8,7 @@
 #include <QUndoView>
 #include <QPlainTextEdit>
 #include <QTableWidget>
+#include <QFileInfo>
 #include "types.h"
 
 namespace Ui {
@@ -36,6 +37,7 @@ class MainWindow : public QMainWindow
 public:
     explicit MainWindow(QWidget* parent = nullptr);
     ~MainWindow();
+    bool openDocument(const QFileInfo& fileName);
 
     void testFunc1();
 

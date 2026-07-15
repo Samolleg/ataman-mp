@@ -4,7 +4,14 @@
 #include <QDateTime>
 #include <QCoreApplication>
 #include <QDebug>
+#include <QDir>
+#include <QFileInfo>
+#include <cstring>
 #include "settings.h"
+
+namespace {
+char g_crashContext[2048] = "startup";
+}
 
 CLogger* CLogger::m_pLogger = nullptr;
 
@@ -25,6 +32,12 @@ void CLogger::log(ELogMessageType type, const QString msg)
     if(m_loglvl<type)
         return;
 
+    if(!log_file.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text))
+    {
+        qWarning() << "Cannot open workflow log:" << log_file.fileName() << log_file.errorString();
+        return;
+    }
+
     QString dt = QDateTime::currentDateTime().toString("dd.MM.yyyy hh:mm:ss");
     QString txt = QString("[%1] ").arg(dt);
 
@@ -43,8 +56,9 @@ void CLogger::log(ELogMessageType type, const QString msg)
         txt = QString("[   %1\t  %2  ] {%3} \t %4").arg("DATE", "TIME", "TYPE", "MESSAGE"); break;
     }
 
-    log_file.open(QIODevice::WriteOnly | QIODevice::Append);
     textStream << txt << endl;
+    textStream.flush();
+    log_file.flush();
     log_file.close();
 
 #ifdef QT_DEBUG
@@ -61,10 +75,33 @@ void CLogger::attachSettings(CSettings *pSet)
 }
 
 CLogger::CLogger()
-    :log_file("workflow.log")
+    :log_file()
     ,m_pSettings(nullptr)
     ,m_loglvl(eLogDebug)
 {
+    QDir current = QDir::current();
+    current.mkpath("logs");
+    QDir logDir(current.filePath("logs"));
+
+    auto rotateLog = [&logDir](const QString& sourcePath)
+    {
+        QFileInfo source(sourcePath);
+        if(!source.exists() || source.size() == 0)
+            return;
+
+        const QString timestamp = source.lastModified().toString("yyyyMMdd-HHmmss");
+        QString destination = logDir.filePath(QString("workflow-%1.log").arg(timestamp));
+        int suffix = 1;
+        while(QFile::exists(destination))
+            destination = logDir.filePath(QString("workflow-%1-%2.log").arg(timestamp).arg(suffix++));
+
+        if(!QFile::rename(source.absoluteFilePath(), destination))
+            qWarning() << "Cannot rotate workflow log" << source.absoluteFilePath() << "to" << destination;
+    };
+
+    rotateLog(logDir.filePath("workflow.log"));
+    rotateLog(current.filePath("workflow.log")); // migrate the legacy root-level log once
+    log_file.setFileName(logDir.filePath("workflow.log"));
     log(eLogInit, "Log started");
 }
 
@@ -94,4 +131,17 @@ void ei::log(ELogMessageType type, const char *msg)
 void ei::log(ELogMessageType type, const QString msg, QString func)
 {
     CLogger::getInstance()->log(type, msg +"\t|" + func);
+}
+
+void ei::setCrashContext(const QString& context)
+{
+    const QByteArray encoded = context.toUtf8();
+    const int length = qMin(encoded.size(), int(sizeof(g_crashContext) - 1));
+    std::memcpy(g_crashContext, encoded.constData(), size_t(length));
+    g_crashContext[length] = '\0';
+}
+
+const char* ei::crashContext()
+{
+    return g_crashContext;
 }

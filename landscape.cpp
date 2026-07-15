@@ -261,8 +261,9 @@ bool CLandscape::projectPt(QVector3D& point)
 {
     int xIndex = int(point.x()/32.0f);
     int yIndex = int(point.y()/32.0f);
-    if(yIndex < 0 || yIndex > m_aSector.size()
-        || xIndex < 0 || xIndex > m_aSector.first().size())
+    if(m_aSector.isEmpty() || yIndex < 0 || yIndex >= m_aSector.size()
+        || m_aSector.at(yIndex).isEmpty() || xIndex < 0 || xIndex >= m_aSector.at(yIndex).size()
+        || m_aSector.at(yIndex).at(xIndex) == nullptr)
     {
 //        point.setX(0.0f);
 //        point.setY(0.0f);
@@ -270,8 +271,7 @@ bool CLandscape::projectPt(QVector3D& point)
         return false;
     }
     //Q_ASSERT(yIndex < m_aSector.size() && xIndex < m_aSector.first().size());
-    if(yIndex < m_aSector.size() && xIndex < m_aSector.first().size())
-        m_aSector[yIndex][xIndex]->projectPt(point);
+    m_aSector[yIndex][xIndex]->projectPt(point);
     return true;
 }
 
@@ -312,25 +312,25 @@ bool CLandscape::pickTile(QVector3D& point, CTile*& pTileOut, STileLocation& til
 {
     int xIndex = int(point.x()/32.0f);
     int yIndex = int(point.y()/32.0f);
-    if(yIndex < 0 || yIndex > m_aSector.size()
-        || xIndex < 0 || xIndex > m_aSector.first().size())
+    if(m_aSector.isEmpty() || yIndex < 0 || yIndex >= m_aSector.size()
+        || m_aSector.at(yIndex).isEmpty() || xIndex < 0 || xIndex >= m_aSector.at(yIndex).size()
+        || m_aSector.at(yIndex).at(xIndex) == nullptr)
     {
         return false;
     }
 
     point.setZ(-1.0f);
     int row, col;
-    if(yIndex < m_aSector.size() && xIndex < m_aSector.first().size())
-        if(m_aSector[yIndex][xIndex]->pickTile(row, col, point, bLand))
-        {
-            tileLoc = STileLocation{xIndex, yIndex, row, col, bLand};
-            if(bLand)
-                pTileOut = &(m_aSector[yIndex][xIndex]->arrTileEdit()[row][col]);
-            else
-                pTileOut = &(m_aSector[yIndex][xIndex]->arrWaterEdit()[row][col]);
+    if(m_aSector[yIndex][xIndex]->pickTile(row, col, point, bLand))
+    {
+        tileLoc = STileLocation{xIndex, yIndex, row, col, bLand};
+        if(bLand)
+            pTileOut = &(m_aSector[yIndex][xIndex]->arrTileEdit()[row][col]);
+        else
+            pTileOut = &(m_aSector[yIndex][xIndex]->arrWaterEdit()[row][col]);
 
-            return true;
-        }
+        return true;
+    }
 
     return false;
 }

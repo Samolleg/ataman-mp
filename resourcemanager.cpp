@@ -177,55 +177,150 @@ void CObjectList::readFigure(const QByteArray& file, const QString& name)
 //in: aFile, assemblyRoot
 void CObjectList::readAssembly(const QMap<QString, QByteArray>& aFile, const QString& assemblyRoot)
 {
-    CResFile model(aFile[assemblyRoot]);
-    QMap<QString, QByteArray> aComponent = normalizedResourceMap(model.bufferOfFiles());
     const QString normalizedRoot = assemblyRoot.toLower();
-    QDataStream lnkStream(aComponent[normalizedRoot.split(".mod").first()]);
+    const QMap<QString, QByteArray> normalizedFiles = normalizedResourceMap(aFile);
+    const QByteArray modelData = normalizedFiles.value(normalizedRoot);
+    if(modelData.isEmpty())
+    {
+        ei::log(eLogWarning, "Assembly archive is missing: " + normalizedRoot);
+        return;
+    }
+
+    CResFile model(modelData);
+    QMap<QString, QByteArray> aComponent = normalizedResourceMap(model.bufferOfFiles());
+    const QString linkName = normalizedRoot.split(".mod").first();
+    const QByteArray linkData = aComponent.value(linkName);
+    if(linkData.isEmpty())
+    {
+        ei::log(eLogWarning, "Assembly link table is missing: " + normalizedRoot);
+        return;
+    }
+
+    QDataStream lnkStream(linkData);
     util::formatStream(lnkStream);
     int nLink;
     lnkStream >> nLink;
+    if(lnkStream.status() != QDataStream::Ok || nLink <= 0 || nLink > 10000)
+    {
+        ei::log(eLogWarning, "Invalid assembly link count: " + normalizedRoot);
+        return;
+    }
 
-    int compLength;
-    QVector<char> name;
-    QString compName;
+    struct SAssemblyLink
+    {
+        QString componentName;
+        QString parentName;
+        ei::CFigure* figure = nullptr;
+    };
+
+    auto readLinkName = [&lnkStream](QString& result, bool allowEmpty) -> bool
+    {
+        int length = 0;
+        lnkStream >> length;
+        if(lnkStream.status() != QDataStream::Ok || length < 0 || length > 4096 || (!allowEmpty && length == 0))
+            return false;
+        if(length == 0)
+        {
+            result.clear();
+            return true;
+        }
+
+        QByteArray raw(length, Qt::Uninitialized);
+        if(lnkStream.readRawData(raw.data(), length) != length)
+            return false;
+        while(!raw.isEmpty() && raw.endsWith('\0'))
+            raw.chop(1);
+        result = QString::fromLatin1(raw).toLower();
+        return !result.isEmpty() || allowEmpty;
+    };
+
+    QVector<SAssemblyLink> links;
+    links.reserve(nLink);
     QMap<QString, ei::CFigure*> aParent;
     for (int i(0); i<nLink; ++i)
     {
-        lnkStream >> compLength;
-        name.resize(compLength);
-        lnkStream.readRawData(name.data(), name.size());
-        compName = QString(name.data()).toLower();
-        //create node
-        QDataStream compStream(aComponent[compName]);
-        util::formatStream(compStream);
-        ei::CFigure* fig = new ei::CFigure;
-        aParent.insert(compName, fig);
-        fig->readData(compStream);
-        fig->setName(compName);
-        lnkStream >> compLength;
-        if (compLength == 0)
-        { // place root figure to object list
-            m_aFigure.insert(assemblyRoot, fig);
+        SAssemblyLink link;
+        if(!readLinkName(link.componentName, false) || !readLinkName(link.parentName, true))
+        {
+            ei::log(eLogWarning, QString("Invalid assembly link %1 in %2").arg(i).arg(normalizedRoot));
+            break;
+        }
+
+        const QByteArray componentData = aComponent.value(link.componentName);
+        if(componentData.isEmpty())
+        {
+            ei::log(eLogWarning, QString("Assembly %1 is missing component %2").arg(normalizedRoot, link.componentName));
             continue;
         }
-        name.resize(compLength);
-        lnkStream.readRawData(name.data(), name.size());
-        compName = QString(name.data()).toLower();
-        aParent[compName]->addChild(fig);
+
+        QDataStream compStream(componentData);
+        util::formatStream(compStream);
+        link.figure = new ei::CFigure;
+        if(!link.figure->readData(compStream))
+        {
+            ei::log(eLogWarning, QString("Assembly %1 has an invalid component %2").arg(normalizedRoot, link.componentName));
+            delete link.figure;
+            continue;
+        }
+        link.figure->setName(link.componentName);
+        aParent.insert(link.componentName, link.figure);
+        links.append(link);
     }
 
-    //.bon file parse here
-    QString bonFile (normalizedRoot.split(".mod").first());
-    bonFile.append(".bon");
-    CResFile position(aFile[bonFile]);
-    aComponent = normalizedResourceMap(position.bufferOfFiles());
-    for (auto& fig: aParent.values())
+    ei::CFigure* rootFigure = nullptr;
+    for(const SAssemblyLink& link : links)
     {
-        QDataStream bonStream(aComponent[fig->name().toLower()]);
-        util::formatStream(bonStream);
-        fig->readAssemblyOffset(bonStream);
+        if(!link.parentName.isEmpty())
+            continue;
+        if(!rootFigure)
+            rootFigure = link.figure;
+        else
+            rootFigure->addChild(link.figure);
     }
-    m_aFigure[assemblyRoot]->applyAssemblyOffset();
+
+    for(const SAssemblyLink& link : links)
+    {
+        if(link.parentName.isEmpty())
+            continue;
+
+        ei::CFigure* parentFigure = aParent.value(link.parentName, nullptr);
+        if(parentFigure)
+            parentFigure->addChild(link.figure);
+        else
+        {
+            ei::log(eLogWarning, QString("Assembly %1 component %2 references missing parent %3")
+                    .arg(normalizedRoot, link.componentName, link.parentName));
+            if(rootFigure)
+                rootFigure->addChild(link.figure);
+        }
+    }
+
+    if(!rootFigure)
+    {
+        ei::log(eLogWarning, "Assembly has no usable root: " + normalizedRoot);
+        return;
+    }
+    m_aFigure.insert(normalizedRoot, rootFigure);
+
+    //.bon file parse here
+    QString bonFile(linkName);
+    bonFile.append(".bon");
+    const QByteArray positionData = normalizedFiles.value(bonFile);
+    if(!positionData.isEmpty())
+    {
+        CResFile position(positionData);
+        aComponent = normalizedResourceMap(position.bufferOfFiles());
+        for (auto& fig: aParent.values())
+        {
+            const QByteArray offsetData = aComponent.value(fig->name().toLower());
+            if(offsetData.isEmpty())
+                continue;
+            QDataStream bonStream(offsetData);
+            util::formatStream(bonStream);
+            fig->readAssemblyOffset(bonStream);
+        }
+    }
+    rootFigure->applyAssemblyOffset();
 }
 
 void CObjectList::loadFigures(QSet<QString>& aFigure)

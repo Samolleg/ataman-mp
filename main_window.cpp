@@ -255,6 +255,22 @@ void MainWindow::on_actionOpen_triggered()
     }
 }
 
+bool MainWindow::openDocument(const QFileInfo& fileName)
+{
+    const QString suffix = fileName.suffix().toLower();
+    if(!fileName.exists() || (suffix != "mpr" && suffix != "mob"))
+    {
+        ei::log(eLogWarning, "Cannot open document: " + fileName.absoluteFilePath());
+        return false;
+    }
+
+    COptString* opt = dynamic_cast<COptString*>(m_settings->opt(eOptSetGeneral, "lastVisitedFolder"));
+    if(opt)
+        opt->setValue(fileName.dir().path());
+    m_undoStack->push(new COpenCommand(m_pView, fileName));
+    return true;
+}
+
 void MainWindow::on_actionOpen_MPR_triggered()
 {
     COptString* opt = dynamic_cast<COptString*>(m_settings->opt(eOptSetGeneral, "lastVisitedFolder"));

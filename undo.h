@@ -20,7 +20,7 @@ class COpenCommand: public QUndoCommand, public QObject
 public:
     enum { Id = 100 };
 
-    COpenCommand(CView* pView, QFileInfo& path/*, MainWindow* pMain*/, QUndoCommand *parent = nullptr);
+    COpenCommand(CView* pView, const QFileInfo& path/*, MainWindow* pMain*/, QUndoCommand *parent = nullptr);
 
     void undo() override;
     void redo() override;
