@@ -34,7 +34,11 @@ void EnduranceDocumentTests::duplicateMobIdsAreWarningsOnly()
     QTemporaryFile file;
     QVERIFY(file.open());
     QByteArray bytes(32, '\0');
-    bytes.append("NewObject - 1000100\0NewObject - 1000100\0NewObject - 7");
+    bytes.append("NewObject - 1000100");
+    bytes.append('\0');
+    bytes.append("NewObject - 1000100");
+    bytes.append('\0');
+    bytes.append("NewObject - 7");
     QCOMPARE(file.write(bytes), qint64(bytes.size()));
     file.flush();
 

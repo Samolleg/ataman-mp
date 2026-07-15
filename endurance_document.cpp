@@ -4,7 +4,6 @@
 #include <QFile>
 #include <QJsonObject>
 #include <QMap>
-#include <QRegularExpression>
 #include <QTextStream>
 
 namespace {
@@ -101,16 +100,37 @@ bool CMobDocument::load(const QFileInfo& file, CValidationReport* report)
         return false;
     }
 
-    const QString searchable = QString::fromLatin1(m_originalBytes);
-    const QRegularExpression marker("NewObject\\s*-\\s*(\\d+)");
-    QRegularExpressionMatchIterator it = marker.globalMatch(searchable);
     QMap<quint32, int> counts;
-    while(it.hasNext())
+    const QByteArray marker("NewObject");
+    int markerOffset = 0;
+    while((markerOffset = m_originalBytes.indexOf(marker, markerOffset)) >= 0)
     {
+        int cursor = markerOffset + marker.size();
+        while(cursor < m_originalBytes.size() &&
+              (m_originalBytes.at(cursor) == '\0' ||
+               m_originalBytes.at(cursor) == ' ' ||
+               m_originalBytes.at(cursor) == '\t'))
+            ++cursor;
+        if(cursor >= m_originalBytes.size() || m_originalBytes.at(cursor) != '-')
+        {
+            markerOffset += marker.size();
+            continue;
+        }
+        ++cursor;
+        while(cursor < m_originalBytes.size() &&
+              (m_originalBytes.at(cursor) == '\0' ||
+               m_originalBytes.at(cursor) == ' ' ||
+               m_originalBytes.at(cursor) == '\t'))
+            ++cursor;
+        const int firstDigit = cursor;
+        while(cursor < m_originalBytes.size() &&
+              m_originalBytes.at(cursor) >= '0' && m_originalBytes.at(cursor) <= '9')
+            ++cursor;
         bool ok = false;
-        const quint32 id = it.next().captured(1).toUInt(&ok);
+        const quint32 id = m_originalBytes.mid(firstDigit, cursor - firstDigit).toUInt(&ok);
         if(ok)
             counts[id] += 1;
+        markerOffset = qMax(cursor, markerOffset + marker.size());
     }
     for(auto countIt = counts.constBegin(); countIt != counts.constEnd(); ++countIt)
     {

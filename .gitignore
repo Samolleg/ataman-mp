@@ -1,6 +1,4 @@
-<<<<<<< HEAD
-# C++ objects and libs
-
+# C++ objects and libraries
 *.slo
 *.lo
 *.o
@@ -10,9 +8,9 @@
 *.so
 *.dll
 *.dylib
+*.stackdump
 
-# Qt-es
-
+# Qt generated files and local builds
 object_script.*.Release
 object_script.*.Debug
 *_plugin_import.cpp
@@ -29,24 +27,14 @@ qrc_*.cpp
 ui_*.h
 Makefile*
 *build-*
-
-
-# Qt unit tests
 target_wrapper.*
-
-
-# QtCreator
-
 *.autosave
-
-# QtCtreator Qml
 *.qmlproject.user
 *.qmlproject.user.*
-
-# QtCtreator CMake
 CMakeLists.txt.user*
-=======
-*.user
-*.stackdump
-bin
-/nvtt
+
+# Local toolchains and generated packages
+/.tooling/
+/aqtinstall.log
+/bin/
+/nvtt/
