@@ -1,5 +1,6 @@
 #include <QFileInfo>
 #include <QRandomGenerator>
+#include <QSaveFile>
 
 #include "landscape.h"
 #include "res_file.h"
@@ -110,7 +111,7 @@ bool CLandscape::serializeMpr(const QString& zoneName, CResFile& mprFile)
         mpStream << animTile;
     }
     // end of header data
-    mprFile.addFiledata(zoneName + ".mp", mpData);
+    mprFile.addFiledataCaseInsensitive(zoneName + ".mp", mpData);
 
     for(int row(0); row < m_aSector.size(); ++row)
     {
@@ -118,7 +119,7 @@ bool CLandscape::serializeMpr(const QString& zoneName, CResFile& mprFile)
         {
             QByteArray secData = m_aSector[row][col]->serializeSector();
             QString secName = QString("%1%2%3.sec").arg(zoneName).arg(col, 3, 10, QChar('0')).arg(row, 3, 10, QChar('0'));
-            mprFile.addFiledata(secName, secData);
+            mprFile.addFiledataCaseInsensitive(secName, secData);
         }
     }
     return true;
@@ -156,6 +157,10 @@ void CLandscape::readMap(const QFileInfo& path)
 
     m_filePath = path;
 
+    QFile source(path.filePath());
+    if(source.open(QIODevice::ReadOnly))
+        m_originalMprData = source.readAll();
+
     ei::log(eLogInfo, "Start read terrain: " + m_filePath.absoluteFilePath());
     CResFile map(path.filePath());
     QMap<QString, QByteArray> aTmp =  map.bufferOfFiles();  // map contains DIfferentCaseName
@@ -168,6 +173,7 @@ void CLandscape::readMap(const QFileInfo& path)
         if(fName.endsWith(".mp"))
             innerMapName = fName.split(".").front(); //todo: dont split multiple dot names (zone.1.gipath.mp)
     }
+    m_innerMapName = innerMapName;
 
     int texCount;
     m_texture = CTextureList::getInstance()->buildLandTex(innerMapName, texCount);
@@ -212,11 +218,24 @@ void CLandscape::saveMapAs(const QFileInfo& path)
 
     //QString filePath = path.filePath();
     //QFile file(filePath);
-    QString zoneName(path.completeBaseName());
-    CResFile mprFile;
-    serializeMpr(zoneName, mprFile);
-    QByteArray data = mprFile.generateResData();
-    mprFile.saveToFile(path.filePath());
+    if(!m_bDirty && !m_originalMprData.isEmpty())
+    {
+        QSaveFile out(path.filePath());
+        if(!out.open(QIODevice::WriteOnly) || out.write(m_originalMprData) != m_originalMprData.size() || !out.commit())
+            ei::log(eLogFatal, QString("Atomic MPR copy failed:%1").arg(path.filePath()));
+        return;
+    }
+
+    CResFile mprFile(m_originalMprData);
+    serializeMpr(m_innerMapName, mprFile);
+    const QByteArray data = mprFile.generateResData();
+    QSaveFile out(path.filePath());
+    if(!out.open(QIODevice::WriteOnly) || out.write(data) != data.size() || !out.commit())
+    {
+        ei::log(eLogFatal, QString("Atomic MPR save failed:%1").arg(path.filePath()));
+        return;
+    }
+    m_originalMprData = data;
     m_bDirty = false;
 }
 
@@ -271,7 +290,11 @@ bool CLandscape::projectPt(QVector<QVector3D>& aPoint)
 void CLandscape::projectPosition(CNode* pNode)
 {
     if(!isMprLoad())
+    {
+        // Standalone MOB mode: stored coordinates are also display coordinates.
+        pNode->setDrawPosition(pNode->position());
         return;
+    }
 
     if(pNode->nodeType() == eParticle || pNode->nodeType() == eLight || pNode->nodeType() == eSound || pNode->nodeType() == ePatrolPoint || pNode->nodeType() == eLookPoint)
     {

@@ -11,6 +11,7 @@
 #include <QListWidgetItem>
 #include <QLineEdit>
 #include <QShortcut>
+#include <QFileSystemWatcher>
 
 #include "mob.h"
 
@@ -113,6 +114,7 @@ private slots:
     void onMobUnload(CMob* pMob);
     void on_listRanges_itemDoubleClicked(QListWidgetItem *item);
     void on_pushButtonOpenExtEditor_clicked();
+    void onExternalScriptChanged(const QString& path);
     void updateMobParamsOnly();
     void updateDiplomacyTable();
     void updateDiplomacyTable(int row, int column);
@@ -134,6 +136,8 @@ private:
     QVector<CParamLineEdit*> m_arrMobParam;
     bool m_isDurty;
     QShortcut* m_pShortcut;
+    QFileSystemWatcher* m_externalScriptWatcher;
+    QString m_externalScriptPath;
 };
 
 ///

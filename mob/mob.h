@@ -63,6 +63,8 @@ public:
     bool isQuestMob() {return m_mobType == EMobType::eEMobTypeQuest;}
     void setDirty(bool bDurty = true) {m_bDirty = bDurty;}
     bool isDirty() const {return m_bDirty;}
+    const QVector<uint>& duplicateIds() const {return m_duplicateIds;}
+    const QByteArray& originalData() const {return m_originalData;}
     void generateDiplomacyTable();
     void clearDiplomacyTable();
     void setRanges(bool bMain, const QVector<SRange>& range);
@@ -100,7 +102,6 @@ private:
     bool isFreeMapId(uint id);
     void collectTreeView();
     QVector<uint> findIdDuplicate();
-    void autoFixDuplicateId(QVector<uint>& arrId);
 
 private:
     //todo: global text data, script
@@ -119,6 +120,8 @@ private:
     QByteArray m_directory;
     QByteArray m_directoryElements;
     QByteArray m_aiGraph;
+    QByteArray m_originalData;
+    QVector<uint> m_duplicateIds;
 
     //todo: include ALL nodes into these lists, for node assemly use children\parents
     QList<CNode*> m_aNode;

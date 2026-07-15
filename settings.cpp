@@ -15,8 +15,8 @@
 CSettings::CSettings(QWidget *parent) :
     QWidget(parent)
     ,ui(new Ui::CSettings)
-    ,m_fileOpt("options.json")
-  ,m_version(3.0)
+    ,m_fileOpt("endurance-options.json")
+  ,m_version(1.0)
 {
     ui->setupUi(this);
     ui->rangeIncrement->setValidator(new QIntValidator(1, 1000000, this));

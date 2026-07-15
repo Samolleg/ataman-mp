@@ -78,6 +78,7 @@ public:
     void saveToFile(QString path);
 
     void addFiledata(const QString name, const QByteArray data);
+    void addFiledataCaseInsensitive(const QString& name, const QByteArray& data);
     QByteArray generateResData();
 
 private:

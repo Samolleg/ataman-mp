@@ -8,6 +8,10 @@
 #include <QDir>
 #include <QMessageBox>
 #include <QHeaderView>
+#include <QSaveFile>
+#include <QStandardPaths>
+#include <QCryptographicHash>
+#include <QDateTime>
 
 #include "mob.h"
 #include "utils.h"
@@ -872,7 +876,8 @@ int CMob::readMob(QFileInfo &path)
             return 2;
         }
 
-        deserialize(file.readAll());
+        m_originalData = file.readAll();
+        deserialize(m_originalData);
 
         file.close();
     }
@@ -881,11 +886,14 @@ int CMob::readMob(QFileInfo &path)
         qDebug() << ex.what();
         file.close();
     }
-    auto arrId = findIdDuplicate();
-    if(!arrId.isEmpty())
+    m_duplicateIds = findIdDuplicate();
+    if(!m_duplicateIds.isEmpty())
     {
-        QMessageBox::warning(nullptr, "Map checker", "Mob file contains objects with duplicate IDs. It's not a valid file. IDs will be generated from available IDs for correct operation. You can see the details in the log.");
-        autoFixDuplicateId(arrId);
+        QMessageBox::warning(nullptr, "Endurance validation",
+            QString("This MOB contains %1 duplicate ID occurrence(s).\n\n"
+                    "Endurance Edition preserved every ID exactly as stored. "
+                    "Use an explicit repair command only after reviewing references.")
+                .arg(m_duplicateIds.size()));
     }
     updateObjects();
     logicNodesUpdate();
@@ -1076,27 +1084,6 @@ QVector<uint> CMob::findIdDuplicate()
             arrId.insert(mapId);
     }
     return arrDuplicate;
-}
-
-void CMob::autoFixDuplicateId(QVector<uint>& arrId)
-{
-    uint mapId;
-    CNode* pNode = nullptr;
-    foreach(pNode, m_aNode)
-    {
-        if(arrId.isEmpty())
-            return;
-
-        mapId = pNode->mapId();
-        if(arrId.contains(mapId))
-        {
-            uint freeId = freeMapId();
-            pNode->setMapId(freeId);
-            ei::log(eLogInfo, "duplicate id changed from: " + QString::number(mapId) + " to: " + QString::number(freeId));
-            arrId.removeOne(mapId);
-            setDirty();
-        }
-    }
 }
 
 /// file - inout. mob file
@@ -1292,7 +1279,7 @@ void CMob::serializeMob(QByteArray& data)
         parser.endSection(); //"WS_AMBIENT"
 
         writeByte += parser.startSection("WS_SUN_LIGHT");
-        writeByte += parser.writeFloat(m_worldSet.data(eWsTypeAmbient).toFloat());
+        writeByte += parser.writeFloat(m_worldSet.data(eWsTypeSunLight).toFloat());
         parser.endSection(); //Sun Light
         parser.endSection();//"WORLD_SET"
     }
@@ -1458,25 +1445,50 @@ void CMob::clearSelect(bool bClearLogic)
 
 void CMob::saveAs(const QFileInfo& path)
 {
-    QString filePath = path.filePath();
-    QFile file(filePath);
+    const QString filePath = path.filePath();
     try
     {
-        file.open(QIODevice::WriteOnly);
-        if (file.error() != QFile::NoError)
+        QByteArray data;
+        if(!m_bDirty && !m_originalData.isEmpty())
         {
-            ei::log(eLogFatal, QString("Have no access to MOB file:%1").arg(file.fileName()));
+            data = m_originalData;
+            ei::log(eLogInfo, "Writing byte-identical MOB copy (document is unchanged)");
+        }
+        else
+        {
+            serializeMob(data);
+        }
+
+        if(data.size() < 16 || (!m_originalData.isEmpty() && data.left(4) != m_originalData.left(4)))
+        {
+            ei::log(eLogFatal, QString("Refusing to save structurally invalid MOB output:%1").arg(filePath));
+            QMessageBox::critical(nullptr, "Endurance safe save", "The staged MOB failed its envelope check. The source file was not replaced.");
             return;
         }
-        QByteArray data;
-        serializeMob(data);
-        file.write(data);
-        file.close();
+
+        if(QFileInfo(filePath).exists() && m_bDirty)
+        {
+            const QByteArray sourceHash = QCryptographicHash::hash(m_originalData, QCryptographicHash::Sha256).toHex();
+            const QString backupRoot = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation)
+                    + QDir::separator() + "backups" + QDir::separator() + sourceHash;
+            QDir().mkpath(backupRoot);
+            const QString backupName = QFileInfo(filePath).fileName() + "."
+                    + QDateTime::currentDateTimeUtc().toString("yyyyMMdd-HHmmss-zzz") + ".bak";
+            QFile::copy(filePath, backupRoot + QDir::separator() + backupName);
+        }
+
+        QSaveFile file(filePath);
+        if(!file.open(QIODevice::WriteOnly) || file.write(data) != data.size() || !file.commit())
+        {
+            ei::log(eLogFatal, QString("Atomic MOB save failed:%1 error:%2").arg(filePath, file.errorString()));
+            QMessageBox::critical(nullptr, "Endurance safe save", "Atomic save failed. The source file was not replaced.");
+            return;
+        }
+        m_originalData = data;
     }
-    catch (std::exception ex)
+    catch (const std::exception& ex)
     {
         ei::log(eLogFatal, ex.what());
-        file.close();
     }
 
 }

@@ -155,21 +155,28 @@
        </layout>
       </item>
       <item>
-       <layout class="QVBoxLayout" name="workSpaceLayout">
-        <property name="bottomMargin">
-         <number>0</number>
+       <widget class="QSplitter" name="workspaceSplitter">
+        <property name="orientation">
+         <enum>Qt::Horizontal</enum>
         </property>
-       </layout>
-      </item>
-      <item>
-       <layout class="QVBoxLayout" name="outlinerLayout" stretch="0,1">
-        <property name="rightMargin">
-         <number>0</number>
+        <property name="childrenCollapsible">
+         <bool>false</bool>
         </property>
-        <property name="bottomMargin">
-         <number>0</number>
-        </property>
-        <item>
+        <widget class="QWidget" name="workspaceContainer">
+         <layout class="QVBoxLayout" name="workSpaceLayout">
+          <property name="leftMargin"><number>0</number></property>
+          <property name="topMargin"><number>0</number></property>
+          <property name="rightMargin"><number>0</number></property>
+          <property name="bottomMargin"><number>0</number></property>
+         </layout>
+        </widget>
+        <widget class="QSplitter" name="outlinerSplitter">
+         <property name="orientation">
+          <enum>Qt::Vertical</enum>
+         </property>
+         <property name="childrenCollapsible">
+          <bool>false</bool>
+         </property>
          <widget class="CTreeView" name="treeWidget">
           <property name="sizePolicy">
            <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
@@ -206,8 +213,6 @@
            </property>
           </column>
          </widget>
-        </item>
-        <item>
          <widget class="QTableWidget" name="tableWidget">
           <property name="sizePolicy">
            <sizepolicy hsizetype="Preferred" vsizetype="Expanding">
@@ -239,8 +244,8 @@
           <column/>
           <column/>
          </widget>
-        </item>
-       </layout>
+        </widget>
+       </widget>
       </item>
      </layout>
     </item>
@@ -324,6 +329,8 @@
     <property name="title">
      <string>&amp;File</string>
     </property>
+    <addaction name="actionOpen_MPR"/>
+    <addaction name="actionOpen_MOB"/>
     <addaction name="actionOpen"/>
     <addaction name="actionOpen_recent"/>
     <addaction name="actionSave"/>
@@ -402,7 +409,17 @@
   </widget>
   <action name="actionOpen">
    <property name="text">
-    <string>Open...</string>
+    <string>Open MPR or MOB...</string>
+   </property>
+  </action>
+  <action name="actionOpen_MPR">
+   <property name="text">
+    <string>Open MPR...</string>
+   </property>
+  </action>
+  <action name="actionOpen_MOB">
+   <property name="text">
+    <string>Open MOB(s)...</string>
    </property>
   </action>
   <action name="actionSave">

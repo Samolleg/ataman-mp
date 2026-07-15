@@ -8,6 +8,8 @@
 #include <QJsonParseError>
 #include <QJsonObject>
 #include <QJsonArray>
+#include <QFile>
+#include <QTextCodec>
 
 #include "res_file.h"
 #include "utils.h"
@@ -19,6 +21,113 @@
 CObjectList* CObjectList::m_pObjectContainer = nullptr;
 CTextureList* CTextureList::m_pTextureContainer = nullptr;
 CSessionDataManager* CSessionDataManager::m_pSessionDataManger = nullptr;
+
+namespace {
+struct SCachedArchiveIndex
+{
+    qint64 size{-1};
+    QDateTime modified;
+    QMap<QString, SResFileEntry> entries;
+};
+
+const SCachedArchiveIndex& archiveIndex(const QString& path)
+{
+    static QMap<QString, SCachedArchiveIndex> cache;
+    const QFileInfo info(path);
+    SCachedArchiveIndex& cached = cache[path];
+    if(cached.size == info.size() && cached.modified == info.lastModified())
+        return cached;
+
+    cached = SCachedArchiveIndex();
+    cached.size = info.size();
+    cached.modified = info.lastModified();
+    QFile file(path);
+    if(!file.open(QIODevice::ReadOnly))
+        return cached;
+
+    QDataStream stream(&file);
+    util::formatStream(stream);
+    SResFileHeader header;
+    stream >> header;
+    if(header.Signature != 0x019CE23C || header.TableSize > 10000000)
+        return cached;
+
+    stream.device()->seek(header.TableOffset);
+    QVector<SResHashTable> table;
+    table.resize(int(header.TableSize));
+    for(auto& entry : table)
+        stream >> entry;
+    const QByteArray names = stream.device()->read(header.NamesLenght);
+    QTextCodec* codec = QTextCodec::codecForName("CP1251");
+    for(const auto& raw : table)
+    {
+        if(raw.NameOffset + raw.NameLength > uint(names.size()) || raw.DataOffset + raw.DataSize > quint64(file.size()))
+            continue;
+        SResFileEntry entry;
+        entry.FileName = codec->toUnicode(names.mid(int(raw.NameOffset), int(raw.NameLength)));
+        entry.Position = int(raw.DataOffset);
+        entry.Size = int(raw.DataSize);
+        entry.LastWriteTime = QDateTime::fromTime_t(raw.LastWriteTime);
+        cached.entries.insert(entry.FileName.toLower(), entry);
+    }
+    ei::log(eLogInfo, QString("Indexed RES table: %1 entries:%2").arg(path).arg(cached.entries.size()));
+    return cached;
+}
+
+bool readIndexedResource(const QVector<QString>& sources, const QString& requestedName, QByteArray& output, QString* sourcePath = nullptr)
+{
+    const QString normalized = requestedName.toLower();
+    for(const QString& path : sources)
+    {
+        const auto& index = archiveIndex(path);
+        auto found = index.entries.constFind(normalized);
+        if(found == index.entries.constEnd())
+            continue;
+        QFile file(path);
+        if(!file.open(QIODevice::ReadOnly) || !file.seek(found->Position))
+            continue;
+        output = file.read(found->Size);
+        if(output.size() != found->Size)
+            continue;
+        if(sourcePath)
+            *sourcePath = path;
+        return true;
+    }
+    return false;
+}
+
+QStringList indexedNames(const QVector<QString>& sources, const QString& suffix)
+{
+    QSet<QString> seen;
+    QStringList result;
+    for(const QString& path : sources)
+    {
+        const auto& index = archiveIndex(path);
+        for(auto it = index.entries.constBegin(); it != index.entries.constEnd(); ++it)
+        {
+            if(!it.key().endsWith(suffix) || seen.contains(it.key()))
+                continue;
+            seen.insert(it.key());
+            result.append(it.key());
+        }
+    }
+    result.sort(Qt::CaseInsensitive);
+    return result;
+}
+
+QMap<QString, QByteArray> normalizedResourceMap(const QMap<QString, QByteArray>& source)
+{
+    QMap<QString, QByteArray> result;
+    for(auto it = source.constBegin(); it != source.constEnd(); ++it)
+        result.insert(it.key().toLower(), it.value());
+    return result;
+}
+
+int dxtLevelSize(int width, int height, int blockBytes)
+{
+    return qMax(1, (width + 3) / 4) * qMax(1, (height + 3) / 4) * blockBytes;
+}
+}
 
 CObjectList *CObjectList::getInstance()
 {
@@ -69,8 +178,9 @@ void CObjectList::readFigure(const QByteArray& file, const QString& name)
 void CObjectList::readAssembly(const QMap<QString, QByteArray>& aFile, const QString& assemblyRoot)
 {
     CResFile model(aFile[assemblyRoot]);
-    QMap<QString, QByteArray> aComponent  = model.bufferOfFiles();
-    QDataStream lnkStream(aComponent[assemblyRoot.split(".mod").first()]);
+    QMap<QString, QByteArray> aComponent = normalizedResourceMap(model.bufferOfFiles());
+    const QString normalizedRoot = assemblyRoot.toLower();
+    QDataStream lnkStream(aComponent[normalizedRoot.split(".mod").first()]);
     util::formatStream(lnkStream);
     int nLink;
     lnkStream >> nLink;
@@ -84,7 +194,7 @@ void CObjectList::readAssembly(const QMap<QString, QByteArray>& aFile, const QSt
         lnkStream >> compLength;
         name.resize(compLength);
         lnkStream.readRawData(name.data(), name.size());
-        compName = name.data();
+        compName = QString(name.data()).toLower();
         //create node
         QDataStream compStream(aComponent[compName]);
         util::formatStream(compStream);
@@ -100,18 +210,18 @@ void CObjectList::readAssembly(const QMap<QString, QByteArray>& aFile, const QSt
         }
         name.resize(compLength);
         lnkStream.readRawData(name.data(), name.size());
-        compName = name.data();
+        compName = QString(name.data()).toLower();
         aParent[compName]->addChild(fig);
     }
 
     //.bon file parse here
-    QString bonFile (assemblyRoot.split(".mod").first());
+    QString bonFile (normalizedRoot.split(".mod").first());
     bonFile.append(".bon");
     CResFile position(aFile[bonFile]);
-    aComponent  = position.bufferOfFiles();
+    aComponent = normalizedResourceMap(position.bufferOfFiles());
     for (auto& fig: aParent.values())
     {
-        QDataStream bonStream(aComponent[fig->name()]);
+        QDataStream bonStream(aComponent[fig->name().toLower()]);
         util::formatStream(bonStream);
         fig->readAssemblyOffset(bonStream);
     }
@@ -129,51 +239,47 @@ void CObjectList::loadFigures(QSet<QString>& aFigure)
         return;
     }
 
-    uint n(0);
-    QString figName;
-    for(auto& file: pOpt->value())
+    if(aFigure.isEmpty())
     {
-        CResFile res(file);
-        QMap<QString, QByteArray> aFile = res.bufferOfFiles();
-        if(aFigure.isEmpty())
-        {
-            QRegExp rx("(infa\\S+face)|(init(ar|we|li|qi|qu)\\S*\\d+(armor|weapon|item))"); //TODO: remove this if figure will load faster
-            for (auto& fig : aFile.toStdMap())
-            {
-                figName = fig.first.split(".")[0];
-                if(rx.exactMatch(figName)) continue;
-
-                if(m_aFigure.contains(fig.first)) continue;
-                if(fig.first.contains(".mod"))
-                    readAssembly(aFile, fig.first);
-                else if(fig.first.contains(".fig"))
-                    readFigure(aFile[fig.second], fig.first);
-                else //bon, lnk files
-                    continue;
-
-                m_arrFigureForComboBox.append(figName);
-                ++n;
-            }
-        }
-
-        for (auto& fig: aFigure)
-        {
-            if(m_aFigure.contains(fig)) continue;
-            if(!aFile.contains(fig)) continue;
-
-            //parse *.mod & *.bon files for assembly
-            if(fig.contains(".mod"))
-                readAssembly(aFile, fig);
-            else if(fig.contains(".fig"))
-                readFigure(aFile[fig], fig);
-        }
+        m_arrFigureForComboBox.clear();
+        for(const QString& name : indexedNames(pOpt->value(), ".mod"))
+            m_arrFigureForComboBox.append(name.left(name.size() - 4));
+        return;
     }
-    std::sort(m_arrFigureForComboBox.begin(), m_arrFigureForComboBox.end());
+
+    for(const auto& requestedFig : aFigure)
+    {
+        const QString fig = requestedFig.toLower();
+        if(m_aFigure.contains(fig) || m_missingFigureNames.contains(fig))
+            continue;
+        QByteArray figureData;
+        if(!readIndexedResource(pOpt->value(), fig, figureData))
+        {
+            m_missingFigureNames.insert(fig);
+            ei::log(eLogWarning, "Missing figure (negative cached): " + fig);
+            continue;
+        }
+
+        if(fig.endsWith(".mod"))
+        {
+            const QString bonName = fig.left(fig.size() - 4) + ".bon";
+            QByteArray bonData;
+            QMap<QString, QByteArray> assemblyFiles;
+            assemblyFiles.insert(fig, figureData);
+            if(readIndexedResource(pOpt->value(), bonName, bonData))
+                assemblyFiles.insert(bonName, bonData);
+            readAssembly(assemblyFiles, fig);
+        }
+        else if(fig.endsWith(".fig"))
+            readFigure(figureData, fig);
+    }
 }
 
 ei::CFigure* CObjectList::getFigure(const QString& name)
 {
-    QString figureName = name + ".mod";
+    QString figureName = name.toLower() + ".mod";
+    if(m_missingFigureNames.contains(figureName))
+        return figureDefault();
     if(!m_aFigure.contains(figureName))
     {
         QSet<QString> figure;
@@ -346,20 +452,44 @@ void CTextureList::parse(QByteArray& data, const QString& name)
     {
         texture->setFormat(QOpenGLTexture::TextureFormat::RGBA_DXT1);
         texture->setSize(int(header.m_width), int(header.m_height));
+        texture->setMipLevels(qMax(1, header.m_mipcount));
         texture->allocateStorage(QOpenGLTexture::RGBA, QOpenGLTexture::UInt8);
-        const int size = int(header.m_width * header.m_height)/2;
-        texture->setCompressedData(0, 0, size, data.data() + header.size());
+        int offset = header.size();
+        for(int i(0); i<qMax(1, header.m_mipcount); ++i)
+        {
+            const int size = dxtLevelSize(qMax(1, header.m_width >> i), qMax(1, header.m_height >> i), 8);
+            texture->setCompressedData(i, 0, size, data.data() + offset);
+            offset += size;
+        }
         break;
     }
+    case ETextureFormat::eMMP_DXT2:
     case ETextureFormat::eMMP_DXT3:
     {
         texture->setFormat(QOpenGLTexture::TextureFormat::RGBA_DXT3);
         texture->setSize(int(header.m_width), int(header.m_height));
+        texture->setMipLevels(qMax(1, header.m_mipcount));
         texture->allocateStorage(QOpenGLTexture::RGBA, QOpenGLTexture::UInt8);
         int offset = header.size();
-        for(int i(0); i<header.m_mipcount; ++i)
+        for(int i(0); i<qMax(1, header.m_mipcount); ++i)
         {
-            const int size = header.m_width / qPow(2,i) * header.m_height / qPow(2,i);
+            const int size = dxtLevelSize(qMax(1, header.m_width >> i), qMax(1, header.m_height >> i), 16);
+            texture->setCompressedData(i, 0, size, data.data() + offset);
+            offset += size;
+        }
+        break;
+    }
+    case ETextureFormat::eMMP_DXT4:
+    case ETextureFormat::eMMP_DXT5:
+    {
+        texture->setFormat(QOpenGLTexture::TextureFormat::RGBA_DXT5);
+        texture->setSize(int(header.m_width), int(header.m_height));
+        texture->setMipLevels(qMax(1, header.m_mipcount));
+        texture->allocateStorage(QOpenGLTexture::RGBA, QOpenGLTexture::UInt8);
+        int offset = header.size();
+        for(int i(0); i<qMax(1, header.m_mipcount); ++i)
+        {
+            const int size = dxtLevelSize(qMax(1, header.m_width >> i), qMax(1, header.m_height >> i), 16);
             texture->setCompressedData(i, 0, size, data.data() + offset);
             offset += size;
         }
@@ -383,16 +513,14 @@ void CTextureList::parse(QByteArray& data, const QString& name)
         texture->setData(img);
         break;
     }
-    case ETextureFormat::eMMP_5550    :qDebug() << "eMMP_5550"  << name; return; // not found
-    case ETextureFormat::eMMP_DXT2    :qDebug() << "eMMP_DXT2"  << name; return; // not found
-    case ETextureFormat::eMMP_DXT4    :qDebug() << "eMMP_DXT4"  << name; return; // not found
-    case ETextureFormat::eMMP_DXT5    :qDebug() << "eMMP_DXT5"  << name; return; // not found
-    case ETextureFormat::eMMP_DXTN    :qDebug() << "eMMP_DXTN"  << name; return; // not found
-    case ETextureFormat::eMMP_PAINT   :qDebug() << "eMMP_PAINT" << name; return; // not found
-    case ETextureFormat::eMMP_PAINT32 :qDebug() << "eMMP_PNT32" << name; return; // not found
+    case ETextureFormat::eMMP_5550    :qDebug() << "eMMP_5550"  << name; delete texture; return;
+    case ETextureFormat::eMMP_DXTN    :qDebug() << "eMMP_DXTN"  << name; delete texture; return;
+    case ETextureFormat::eMMP_PAINT   :qDebug() << "eMMP_PAINT" << name; delete texture; return;
+    case ETextureFormat::eMMP_PAINT32 :qDebug() << "eMMP_PNT32" << name; delete texture; return;
     default:
     {
         Q_ASSERT("unknown texture format" && false);
+        delete texture;
         return;
     }
     }
@@ -406,7 +534,7 @@ void CTextureList::initAuxTexture()
     auto auxFile = QFileInfo(":/auxData.res");
 
     CResFile res(auxFile.filePath());
-    QMap<QString, QByteArray> aFile = res.bufferOfFiles();
+    QMap<QString, QByteArray> aFile = normalizedResourceMap(res.bufferOfFiles());
 
     QString texName;
     for (auto& packedTex : aFile.toStdMap())
@@ -430,49 +558,35 @@ void CTextureList::loadTexture(QSet<QString>& aName)
         return;
     }
 
-    QString texName;
-
-    uint n(0);
-    for(auto& file: pOpt->value())
+    if(aName.isEmpty())
     {
-        CResFile res(file);
-        QMap<QString, QByteArray> aFile = res.bufferOfFiles();
-        if (aName.isEmpty())
-        {
-
-            //load all textures exclude "special"
-            QRegExp rx("((material|spell|modifier|prototype|qitem|quitem|litem|skill)\\d{2,4})|(^\\S+\\d{3})|(_\\d{2}\\.\\d)|(face\\S*\\d+\\S*)|((sm_)?cursor_\\S+)|(zone\\S+(questm?|map))|(un(mo|un)\\S+w[1-3])"); //TODO: delete this when loading textures will be faster...
-            rx.setCaseSensitivity(Qt::CaseInsensitive);
-            for (auto& packedTex : aFile.toStdMap())
-            {
-                texName = packedTex.first.split(".")[0];
-                texName = texName.toLower();
-                if(rx.exactMatch(texName)) continue;
-                if(m_aTexture.contains(texName)) continue;
-                //if(packedTex.first.toLower().contains("zone")) continue;
-                parse(packedTex.second, texName);
-                m_arrCellComboBox.append(texName);
-                ++n;
-            }
-
-        }
-        else
-            for(auto& name: aName)
-            {
-                texName = name.toLower();
-                //if(!name.contains(".mmp")) continue;
-                if(m_aTexture.contains(texName)) continue;
-                if(!aFile.contains(name + ".mmp")) continue;
-
-                parse(aFile[name + ".mmp"], name);
-            }
+        m_arrCellComboBox.clear();
+        for(const QString& name : indexedNames(pOpt->value(), ".mmp"))
+            m_arrCellComboBox.append(name.left(name.size() - 4));
+        return;
     }
-    std::sort(m_arrCellComboBox.begin(), m_arrCellComboBox.end());
+
+    for(const auto& requestedTexture : aName)
+    {
+        const QString normalized = requestedTexture.toLower();
+        if(m_aTexture.contains(normalized) || m_missingTextureNames.contains(normalized))
+            continue;
+        QByteArray textureData;
+        if(readIndexedResource(pOpt->value(), normalized + ".mmp", textureData))
+            parse(textureData, normalized);
+        if(!m_aTexture.contains(normalized))
+        {
+            m_missingTextureNames.insert(normalized);
+            ei::log(eLogWarning, "Missing texture (negative cached): " + normalized);
+        }
+    }
 }
 
 QOpenGLTexture* CTextureList::texture(const QString& name)
 {
     QString texName(name.toLower());
+    if(m_missingTextureNames.contains(texName))
+        return textureDefault();
     if(!m_aTexture.contains(texName))
     {
         QSet<QString> texture;
@@ -1283,5 +1397,5 @@ CSessionDataManager::CSessionDataManager()
 
 QString CSessionDataManager::sessionDataFile()
 {
-    return QString("%1%2%3").arg(QDir::tempPath()).arg(QDir::separator()).arg("ei_maper_session.json");
+    return QString("%1%2%3").arg(QDir::tempPath()).arg(QDir::separator()).arg("ei_mapper_endurance_session.json");
 }

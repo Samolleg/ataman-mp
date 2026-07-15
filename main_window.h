@@ -50,6 +50,8 @@ private slots:
     void showOutliner(bool bShow);
     void on_actionExit_triggered();
     void on_actionOpen_triggered();
+    void on_actionOpen_MPR_triggered();
+    void on_actionOpen_MOB_triggered();
     void on_actionSettings_triggered();
     void on_actionSave_as_triggered();
     void on_actionSelect_All_triggered();

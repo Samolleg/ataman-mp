@@ -1,5 +1,6 @@
 #include "QDebug"
 #include <QTextCodec>
+#include <QSaveFile>
 #include "res_file.h"
 #include "utils.h"
 
@@ -121,13 +122,15 @@ void buildResHashTable(QMap<QString, QByteArray> entries, uint& tableOffset,
 
         outHashTable[index].LastWriteTime = unixTime;
         outHashTable[index].DataOffset    = (uint)tableOffset; tableOffset += entry.second.size();
-        uint alignOffset = 16-tableOffset%16;
+        uint alignOffset = (16-tableOffset%16)%16;
         outAlignOffset.append(alignOffset);
         tableOffset += alignOffset;
 
         outHashTable[index].DataSize      = (uint)entry.second.size();
+        QTextCodec* codec = QTextCodec::codecForName("CP1251");
+        const QByteArray encodedName = codec->fromUnicode(entry.first);
         outHashTable[index].NameOffset    = (uint)outName.size();
-        outHashTable[index].NameLength    = (uint)entry.first.length(); outName.append(entry.first);
+        outHashTable[index].NameLength    = (uint)encodedName.size(); outName.append(encodedName);
         outHashTable[index].NextIndex = -1;
     }
 }
@@ -231,7 +234,7 @@ CResFile::CResFile(const QByteArray& data)
 
 void CResFile::saveToFile(QString path)
 {
-    QFile file(path);
+    QSaveFile file(path);
     try
     {
         file.open(QIODevice::WriteOnly);
@@ -242,7 +245,8 @@ void CResFile::saveToFile(QString path)
         }
         QByteArray resData = generateResData();
         file.write(resData);
-        file.close();
+        if(!file.commit())
+            qDebug() << file.fileName() << " Error while committing res-file" << file.errorString();
     }
     catch (std::exception ex)
     {
@@ -252,6 +256,19 @@ void CResFile::saveToFile(QString path)
 
 void CResFile::addFiledata(const QString name, const QByteArray data)
 {
+    m_aFiles[name] = data;
+}
+
+void CResFile::addFiledataCaseInsensitive(const QString& name, const QByteArray& data)
+{
+    for(auto it = m_aFiles.begin(); it != m_aFiles.end(); ++it)
+    {
+        if(QString::compare(it.key(), name, Qt::CaseInsensitive) == 0)
+        {
+            it.value() = data;
+            return;
+        }
+    }
     m_aFiles[name] = data;
 }
 

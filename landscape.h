@@ -83,6 +83,7 @@ public:
     void updateSectorDrawData(int xSec, int ySec);
     void setDirty(bool bDirty) {m_bDirty = bDirty;}
     bool isDirty() const {return m_bDirty;}
+    const QString& mapName() const {return m_innerMapName;}
 
 private:
     CLandscape();
@@ -99,6 +100,8 @@ private:
     QVector<QVector<CSector*>> m_aSector;
     QOpenGLTexture* m_texture;
     QFileInfo m_filePath;
+    QString m_innerMapName;
+    QByteArray m_originalMprData;
     QVector<int> m_arrIncorectTiles;
     bool m_bDirty;
 };

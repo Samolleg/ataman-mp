@@ -3,6 +3,13 @@
 #include <QTextBlock>
 #include <QMenu>
 #include <QTextCodec>
+#include <QTextCursor>
+#include <QDesktopServices>
+#include <QStandardPaths>
+#include <QCryptographicHash>
+#include <QFile>
+#include <QDir>
+#include <QUrl>
 
 #include "mob_parameters.h"
 #include "ui_mob_parameters.h"
@@ -19,8 +26,9 @@ CMobParameters::CMobParameters(QWidget* parent, CMob* pMob, CView* pView):
   ,m_pCurMob(pMob)
   ,m_pHighlighter(nullptr)
   ,m_pView(pView)
-  ,m_isDurty(false)
-  ,m_pShortcut(nullptr)
+   ,m_isDurty(false)
+   ,m_pShortcut(nullptr)
+  ,m_externalScriptWatcher(new QFileSystemWatcher(this))
 {
     ui->setupUi(this);
     setWindowFlags(windowFlags() & ~Qt::WindowCloseButtonHint);
@@ -34,6 +42,7 @@ CMobParameters::CMobParameters(QWidget* parent, CMob* pMob, CView* pView):
     m_pTable.reset(new QTableWidget(32, 32));
     QObject::connect(m_pTable.get(), SIGNAL(cellDoubleClicked(int,int)), this, SLOT(tableItemClicked(int,int)));
     m_pShortcut = new QShortcut(QKeySequence(Qt::CTRL + eKey_S), this, SLOT(onSaveShortcut()));
+    QObject::connect(m_externalScriptWatcher, SIGNAL(fileChanged(QString)), this, SLOT(onExternalScriptChanged(QString)));
     //m_aCell.clear();
     m_aCell.resize(32*32);
     for (int i(0); i < 32; ++i)
@@ -532,7 +541,70 @@ void CMobParameters::on_listRanges_itemDoubleClicked(QListWidgetItem *item)
 
 void CMobParameters::on_pushButtonOpenExtEditor_clicked()
 {
+    if(!m_pCurMob)
+        return;
 
+    const QByteArray mobHash = QCryptographicHash::hash(m_pCurMob->originalData(), QCryptographicHash::Sha256).toHex();
+    const QString workspace = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation)
+            + QDir::separator() + "script-workspaces" + QDir::separator() + mobHash;
+    if(!QDir().mkpath(workspace))
+    {
+        QMessageBox::critical(this, "External editor", "Could not create the managed script workspace.");
+        return;
+    }
+
+    m_externalScriptPath = workspace + QDir::separator() + m_pCurMob->filePath().completeBaseName() + ".lua";
+    QFile scriptFile(m_externalScriptPath);
+    if(!scriptFile.open(QIODevice::WriteOnly | QIODevice::Truncate))
+    {
+        QMessageBox::critical(this, "External editor", "Could not write the managed UTF-8 script file.");
+        return;
+    }
+    scriptFile.write(ui->plainTextEdit->toPlainText().toUtf8());
+    scriptFile.close();
+
+    if(!m_externalScriptWatcher->files().contains(m_externalScriptPath))
+        m_externalScriptWatcher->addPath(m_externalScriptPath);
+
+    if(!QDesktopServices::openUrl(QUrl::fromLocalFile(m_externalScriptPath)))
+        QMessageBox::warning(this, "External editor", "No application is associated with script files. Configure a Windows file association and try again.");
+}
+
+void CMobParameters::onExternalScriptChanged(const QString& path)
+{
+    QFile scriptFile(path);
+    if(!scriptFile.open(QIODevice::ReadOnly))
+        return;
+    const QString externalText = QString::fromUtf8(scriptFile.readAll());
+    scriptFile.close();
+
+    // Editors that replace files atomically remove the watch; restore it.
+    if(QFileInfo(path).exists() && !m_externalScriptWatcher->files().contains(path))
+        m_externalScriptWatcher->addPath(path);
+
+    if(externalText == ui->plainTextEdit->toPlainText())
+        return;
+
+    QTextCodec* cp1251 = QTextCodec::codecForName("Windows-1251");
+    const QByteArray encoded = cp1251->fromUnicode(externalText);
+    if(cp1251->toUnicode(encoded) != externalText)
+    {
+        QMessageBox::critical(this, "External script changed",
+            "The external file contains characters that cannot round-trip through Windows-1251. The embedded script was not changed.");
+        return;
+    }
+
+    if(QMessageBox::question(this, "External script changed",
+        "Import the changed external script into the MOB editor? This remains unsaved until Apply changes is pressed.",
+        QMessageBox::Yes | QMessageBox::No) != QMessageBox::Yes)
+        return;
+
+    QTextCursor cursor(ui->plainTextEdit->document());
+    cursor.beginEditBlock();
+    cursor.select(QTextCursor::Document);
+    cursor.insertText(externalText);
+    cursor.endEditBlock();
+    setDurty(true);
 }
 
 void CMobParameters::updateMobParamsOnly()

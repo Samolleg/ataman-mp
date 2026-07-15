@@ -901,6 +901,7 @@ void CView::loadMob(QFileInfo &filePath)
     pMob->attach(this, m_pProgress);
     pMob->readMob(filePath);
     m_aMob.append(pMob);
+    changeCurrentMob(pMob);
 }
 
 void CView::saveMobAs()

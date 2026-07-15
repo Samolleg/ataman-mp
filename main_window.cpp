@@ -8,6 +8,7 @@
 #include <QFileDialog>
 #include <QMessageBox>
 #include <QUndoView>
+#include <QSettings>
 
 #include "resourcemanager.h"
 #include "landscape.h"
@@ -56,6 +57,11 @@ MainWindow::MainWindow(QWidget* parent) :
     m_settings->attachMainWindow(this);
     m_ui->setupUi(this); //init CView core also
 
+    QSettings uiSettings;
+    restoreGeometry(uiSettings.value("ui/mainWindowGeometry").toByteArray());
+    m_ui->workspaceSplitter->restoreState(uiSettings.value("ui/workspaceSplitter").toByteArray());
+    m_ui->outlinerSplitter->restoreState(uiSettings.value("ui/outlinerSplitter").toByteArray());
+
     m_pView = new CView(m_ui->centralWidget, m_createDialog.get()->viewWidget());
     m_createDialog->viewWidget()->attachView(m_pView);
     m_createDialog->viewWidget()->attachSettings(m_settings.get());
@@ -101,6 +107,10 @@ MainWindow::MainWindow(QWidget* parent) :
 
 MainWindow::~MainWindow()
 {
+    QSettings uiSettings;
+    uiSettings.setValue("ui/mainWindowGeometry", saveGeometry());
+    uiSettings.setValue("ui/workspaceSplitter", m_ui->workspaceSplitter->saveState());
+    uiSettings.setValue("ui/outlinerSplitter", m_ui->outlinerSplitter->saveState());
     delete m_pView;
     delete m_ui;
     CIconManager::getInstance()->~CIconManager();
@@ -227,13 +237,8 @@ void MainWindow::on_actionOpen_triggered()
     COptString* opt = dynamic_cast<COptString*>(m_settings->opt(eOptSetGeneral, "lastVisitedFolder"));
     Q_ASSERT(opt);
 
-    QFileInfo fileName;
-    if(CLandscape::getInstance()->isMprLoad())
-        fileName = QFileDialog::getOpenFileName(this, "Open MOB", opt->value(), tr("MOB (*.mob)"));
-    else
-    {
-        fileName = QFileDialog::getOpenFileName(this, "Open MPR", opt->value(), tr("MPR (*.mpr)"));
-    }
+    QFileInfo fileName = QFileDialog::getOpenFileName(this, "Open MPR or MOB", opt->value(),
+                                                       tr("Evil Islands maps (*.mpr *.mob);;MPR (*.mpr);;MOB (*.mob)"));
 
     if(!fileName.path().isEmpty())
         opt->setValue(fileName.dir().path());
@@ -245,16 +250,32 @@ void MainWindow::on_actionOpen_triggered()
     }
     else if(fileName.fileName().toLower().endsWith(".mob"))
     {
-        if(!CLandscape::getInstance()->isMprLoad())
-        {
-            QMessageBox::warning(this, "Warning","Landscape must be loaded first (*.mpr)");
-            return;
-        }
-
         COpenCommand* pLoadCommand = new COpenCommand(m_pView, fileName);
         m_undoStack->push(pLoadCommand);
-        CRoundMobCommand* pRound = new CRoundMobCommand(m_pView);
-        m_undoStack->push(pRound);
+    }
+}
+
+void MainWindow::on_actionOpen_MPR_triggered()
+{
+    COptString* opt = dynamic_cast<COptString*>(m_settings->opt(eOptSetGeneral, "lastVisitedFolder"));
+    Q_ASSERT(opt);
+    QFileInfo fileName = QFileDialog::getOpenFileName(this, "Open MPR", opt->value(), tr("MPR (*.mpr)"));
+    if(fileName.fileName().isEmpty())
+        return;
+    opt->setValue(fileName.dir().path());
+    m_undoStack->push(new COpenCommand(m_pView, fileName));
+}
+
+void MainWindow::on_actionOpen_MOB_triggered()
+{
+    COptString* opt = dynamic_cast<COptString*>(m_settings->opt(eOptSetGeneral, "lastVisitedFolder"));
+    Q_ASSERT(opt);
+    const QStringList paths = QFileDialog::getOpenFileNames(this, "Open one or more MOB files", opt->value(), tr("MOB (*.mob)"));
+    for(const QString& path : paths)
+    {
+        QFileInfo fileName(path);
+        opt->setValue(fileName.dir().path());
+        m_undoStack->push(new COpenCommand(m_pView, fileName));
     }
 }
 
@@ -358,7 +379,7 @@ void MainWindow::updateWindowTitle(eTitleTypeData type, QString data)
         Q_ASSERT(false);
         break;
     }
-    QString title = "ei_maper";
+    QString title = QString("EI Mapper: Endurance Edition %1").arg(QCoreApplication::applicationVersion());
     if(!m_sWindowTitle.mpr.isEmpty())
     {
         title += QString(" MPR: (%1)").arg(m_sWindowTitle.mpr);
@@ -458,7 +479,12 @@ void MainWindow::on_actionReset_selected_IDs_triggered()
 
 void MainWindow::on_action_About_triggered()
 {
-    QMessageBox::information(this, "About","Map editor for Evil Islands game v0.3\n\nAuthor: konstvest\nHome page: https://github.com/konstvest/ei_maper\nLicense: GNU GPL-3.0");
+    QMessageBox::information(this, "About",
+        QString("EI Mapper: Endurance Edition %1\n\n"
+                "A private, independently versioned derivative of EI Mapper by konstvest.\n"
+                "Upstream: https://github.com/konstvest/ei_maper\n"
+                "License: GNU GPL-3.0")
+            .arg(QCoreApplication::applicationVersion()));
 }
 
 

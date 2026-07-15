@@ -290,7 +290,7 @@
        <item>
         <widget class="QPushButton" name="pushButtonOpenExtEditor">
          <property name="enabled">
-          <bool>false</bool>
+          <bool>true</bool>
          </property>
          <property name="text">
           <string>Open with external editor...</string>

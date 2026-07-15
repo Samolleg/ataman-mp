@@ -42,6 +42,7 @@ private:
     static CObjectList* m_pObjectContainer;
     CSettings* m_pSettings;
     QMap<QString, ei::CFigure*> m_aFigure;
+    QSet<QString> m_missingFigureNames;
     QList<QString> m_arrFigureForComboBox; //optimization for cell widget
 };
 
@@ -127,6 +128,7 @@ private:
 private:
     static CTextureList* m_pTextureContainer;
     QMap<QString, QOpenGLTexture*> m_aTexture;
+    QSet<QString> m_missingTextureNames;
     CSettings* m_pSettings;
     QList<QString> m_arrCellComboBox; //optimization for cell widget
 };
