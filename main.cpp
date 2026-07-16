@@ -15,6 +15,8 @@
 #include "endurance_document.h"
 #include "log.h"
 #include "resource_profile.h"
+#include "resourcemanager.h"
+#include "layout_components/tablemanager.h"
 
 #ifdef Q_OS_WIN
 #include <windows.h>
@@ -164,6 +166,7 @@ int runHeadlessCommand(QApplication& app)
     QCommandLineOption jsonOption("json", "Emit machine-readable JSON.");
     QCommandLineOption profileLoadOption("profile-load", "Discover the recommended resource profile for a game installation.", "game-root");
     QCommandLineOption mobDiffOption("mob-diff", "Compare a baseline MOB with another MOB.", "baseline");
+    QCommandLineOption uiWidgetCheckOption("ui-widget-check", "Run non-interactive asset-picker regression checks.");
     QCommandLineOption againstOption("against", "Candidate MOB used with --mob-diff.", "candidate");
     QCommandLineOption angleOpenGlOption("angle-opengl", "Use Qt's ANGLE/OpenGL ES implementation (diagnostic GUI mode).");
     QCommandLineOption desktopOpenGlOption("desktop-opengl", "Use the system desktop OpenGL implementation (diagnostic GUI mode).");
@@ -172,6 +175,7 @@ int runHeadlessCommand(QApplication& app)
     parser.addOption(jsonOption);
     parser.addOption(profileLoadOption);
     parser.addOption(mobDiffOption);
+    parser.addOption(uiWidgetCheckOption);
     parser.addOption(againstOption);
     parser.addOption(angleOpenGlOption);
     parser.addOption(desktopOpenGlOption);
@@ -182,12 +186,44 @@ int runHeadlessCommand(QApplication& app)
     const bool roundtrip = parser.isSet(roundtripOption);
     const bool profileLoad = parser.isSet(profileLoadOption);
     const bool mobDiff = parser.isSet(mobDiffOption);
-    if(!validate && !roundtrip && !profileLoad && !mobDiff)
+    const bool uiWidgetCheck = parser.isSet(uiWidgetCheckOption);
+    if(!validate && !roundtrip && !profileLoad && !mobDiff && !uiWidgetCheck)
         return -1;
-    if((validate ? 1 : 0) + (roundtrip ? 1 : 0) + (profileLoad ? 1 : 0) + (mobDiff ? 1 : 0) > 1)
+    if((validate ? 1 : 0) + (roundtrip ? 1 : 0) + (profileLoad ? 1 : 0)
+            + (mobDiff ? 1 : 0) + (uiWidgetCheck ? 1 : 0) > 1)
     {
         QTextStream(stderr) << "Choose one headless command.\n";
         return 2;
+    }
+
+    if(uiWidgetCheck)
+    {
+        QList<QString>& figures = CObjectList::getInstance()->figureList();
+        figures = {"alpha", "hammer", "Harpy", "echo", "house"};
+        QSharedPointer<IPropertyBase> value(new propStr(eObjParam_TEMPLATE, "original_model"));
+        CComboDynItem combo(value);
+        int appliedChanges = 0;
+        QObject::connect(&combo, &CComboDynItem::onParamChange,
+                         [&appliedChanges](const QSharedPointer<IPropertyBase>&) { ++appliedChanges; });
+        combo.setEditText("h");
+        combo._onFilterTextChanged("h");
+
+        QStringList completions;
+        QAbstractItemModel* completionModel = combo.completer()->completionModel();
+        for(int row = 0; completionModel && row < completionModel->rowCount(); ++row)
+            completions.append(completionModel->index(row, 0).data().toString());
+
+        bool prefixesOnly = !completions.isEmpty();
+        for(const QString& completion : completions)
+            prefixesOnly = prefixesOnly && completion.startsWith("h", Qt::CaseInsensitive);
+        const bool valueStable = combo.currentText() == "h"
+                && combo.value()->toString() == "original_model" && appliedChanges == 0;
+        QTextStream output(stdout);
+        output << "asset-picker prefixes=" << completions.join(",") << "\n"
+               << (prefixesOnly && valueStable ? "PASS" : "FAIL")
+               << ": prefix filtering does not auto-apply a result\n";
+        output.flush();
+        return prefixesOnly && valueStable ? 0 : 1;
     }
 
     if(mobDiff)

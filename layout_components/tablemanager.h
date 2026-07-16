@@ -9,7 +9,7 @@
 #include <QSharedPointer>
 #include <QLineEdit>
 #include <QStringListModel>
-#include <QSortFilterProxyModel>
+#include <QCompleter>
 
 #include "types.h"
 #include "undo.h"
@@ -149,7 +149,7 @@ private:
     QSharedPointer<IPropertyBase> m_pValue; //stored value;
     QStringList m_valueList;
     QSharedPointer<QStringListModel> m_pListModel;
-    QSharedPointer<QSortFilterProxyModel> m_pFilterModel;
+    QCompleter* m_pCompleter;
     bool m_optionsLoaded;
 };
 

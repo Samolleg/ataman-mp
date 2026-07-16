@@ -6,6 +6,7 @@
 #include <QLabel>
 #include <QGuiApplication>
 #include <QClipboard>
+#include <QSignalBlocker>
 
 #include "tablemanager.h"
 #include "resourcemanager.h"
@@ -647,7 +648,8 @@ CValueItem::CValueItem(const QSharedPointer<IPropertyBase>& prop):
 
 
 CComboDynItem::CComboDynItem(const QSharedPointer<IPropertyBase> &prop)
-    : m_optionsLoaded(false)
+    : m_pCompleter(nullptr)
+    , m_optionsLoaded(false)
 {
     setFocusPolicy(Qt::FocusPolicy::StrongFocus);
     setStyleSheet("combobox-popup: 0;");
@@ -656,11 +658,12 @@ CComboDynItem::CComboDynItem(const QSharedPointer<IPropertyBase> &prop)
     setInsertPolicy(QComboBox::NoInsert);
     view()->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     m_pListModel.reset(new QStringListModel());
-    m_pFilterModel.reset(new QSortFilterProxyModel(this));
-    m_pFilterModel->setSourceModel(m_pListModel.get());
-    m_pFilterModel->setFilterCaseSensitivity(Qt::CaseInsensitive);
-    m_pFilterModel->setFilterKeyColumn(0);
-    setModel(m_pFilterModel.get());
+    setModel(m_pListModel.get());
+    m_pCompleter = new QCompleter(m_pListModel.get(), this);
+    m_pCompleter->setCaseSensitivity(Qt::CaseInsensitive);
+    m_pCompleter->setCompletionMode(QCompleter::PopupCompletion);
+    m_pCompleter->setFilterMode(Qt::MatchStartsWith);
+    setCompleter(m_pCompleter);
     m_pValue.reset(prop->clone());
 
     if(m_pValue->isInit())
@@ -670,6 +673,7 @@ CComboDynItem::CComboDynItem(const QSharedPointer<IPropertyBase> &prop)
     // A proxy-model refresh may highlight its first row. Only a deliberate
     // user activation is allowed to commit a dropdown value.
     QObject::connect(this, SIGNAL(activated(QString)), this, SLOT(_onChange(QString)));
+    QObject::connect(m_pCompleter, SIGNAL(activated(QString)), this, SLOT(_onChange(QString)));
     QObject::connect(lineEdit(), SIGNAL(editingFinished()), this, SLOT(_onEditingFinished()));
     QObject::connect(lineEdit(), SIGNAL(textEdited(QString)), this, SLOT(_onFilterTextChanged(QString)));
 }
@@ -678,6 +682,8 @@ void CComboDynItem::ensureOptionsLoaded()
 {
     if(m_optionsLoaded)
         return;
+    const QString current = currentText();
+    const QSignalBlocker blocker(this);
     if(m_pValue->type() == eObjParam_PRIM_TXTR)
         m_pListModel->setStringList(CTextureList::getInstance()->textureList());
     else if(m_pValue->type() == eObjParam_TEMPLATE)
@@ -687,17 +693,17 @@ void CComboDynItem::ensureOptionsLoaded()
         Q_ASSERT(false && "not defined");
         return;
     }
+    setCurrentIndex(-1);
+    setEditText(current);
     m_optionsLoaded = true;
 }
 
 void CComboDynItem::showPopup()
 {
     const QString current = currentText();
-    blockSignals(true);
+    const QSignalBlocker blocker(this);
     ensureOptionsLoaded();
-    m_pFilterModel->setFilterRegExp(QRegExp());
     setEditText(current);
-    blockSignals(false);
     QComboBox::showPopup();
 }
 
@@ -720,14 +726,12 @@ void CComboDynItem::_onEditingFinished()
 
 void CComboDynItem::_onFilterTextChanged(const QString& text)
 {
-    blockSignals(true);
     ensureOptionsLoaded();
-    // The editor's asset pickers are prefix searches: typing "h" shows
-    // names beginning with h, not every name that happens to contain it.
-    m_pFilterModel->setFilterRegExp(QRegExp("^" + QRegExp::escape(text), Qt::CaseInsensitive));
-    setEditText(text);
-    blockSignals(false);
-    QComboBox::showPopup();
+    // Keep the combo model stable while typing. Filtering the combo's own
+    // model promotes its first row to the current value; a popup completer
+    // provides prefix-only suggestions without changing or applying a value.
+    m_pCompleter->setCompletionPrefix(text);
+    m_pCompleter->complete();
 }
 
 C3DItem::C3DItem(const QSharedPointer<IPropertyBase>& propX,const QSharedPointer<IPropertyBase>& propY, const QSharedPointer<IPropertyBase>& propZ)

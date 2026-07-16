@@ -167,6 +167,7 @@ CSelectionCommand::CSelectionCommand(CView* pView, const QList<CNode*>& before,
     , m_pView(pView)
     , m_before(before)
     , m_after(after)
+    , m_firstRedo(true)
 {
     setText(text);
 }
@@ -179,6 +180,15 @@ void CSelectionCommand::undo()
 
 void CSelectionCommand::redo()
 {
+    // recordSelectionChange() is called after the selection was applied.
+    // QUndoStack::push() invokes redo() immediately, so replaying here would
+    // redundantly rebuild the property panel and scroll the outliner. Viewport
+    // picking performs its own explicit reveal after the command is recorded.
+    if(m_firstRedo)
+    {
+        m_firstRedo = false;
+        return;
+    }
     if(m_pView)
         m_pView->restoreSelection(m_after);
 }

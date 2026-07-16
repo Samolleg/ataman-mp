@@ -104,6 +104,7 @@ private:
     CView* m_pView;
     QList<CNode*> m_before;
     QList<CNode*> m_after;
+    bool m_firstRedo;
 };
 
 class CChangeLogicParam : public QObject, public QUndoCommand
