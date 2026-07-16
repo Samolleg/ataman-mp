@@ -33,8 +33,18 @@
 #include "layout_components/tree_view.h"
 #include "property.h"
 #include "tile.h"
+#include "duplicate_id_report.h"
 
 class CLogic;
+
+namespace {
+void showDuplicateIdWarning(QWidget* parent, const QVector<uint>& duplicates)
+{
+    if(!duplicates.isEmpty())
+        QMessageBox::warning(parent, "Duplicate object IDs",
+            ei::duplicateIdWarningText(duplicates));
+}
+}
 
 CView::CView(QWidget *parent, const QGLWidget *pShareWidget) : QGLWidget(parent, pShareWidget)
   ,m_pSettings(nullptr)
@@ -910,9 +920,11 @@ void CView::saveMobAs()
         return;
 
     const QFileInfo fileName = QFileDialog::getSaveFileName(this, "Save " + m_activeMob->mobName() + " as... ", "" , tr("Map objects (*.mob);;Mob as JSON(*.json)"));
+    if(fileName.filePath().isEmpty())
+        return;
 
     QSet<uint> aId;
-    m_activeMob->checkUniqueId(aId);
+    showDuplicateIdWarning(this, m_activeMob->checkUniqueId(aId));
     if (fileName.fileName().endsWith(".json"))
         m_activeMob->serializeJson(fileName);
     else if (fileName.fileName().endsWith(".mob"))
@@ -929,7 +941,7 @@ void CView::saveActiveMob()
         return;
 
     QSet<uint> aId;
-    m_activeMob->checkUniqueId(aId);
+    showDuplicateIdWarning(this, m_activeMob->checkUniqueId(aId));
     m_activeMob->save();
     m_activeMob->setDirty(false);
     emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataDirtyFlag, "");
@@ -939,9 +951,13 @@ void CView::saveAllMob()
 {
     CMob* pMob = nullptr;
     QSet<uint> aId;
+    QVector<uint> duplicates;
+    foreach(pMob, m_aMob)
+        duplicates += pMob->checkUniqueId(aId);
+    showDuplicateIdWarning(this, duplicates);
+
     foreach(pMob, m_aMob)
     {
-        pMob->checkUniqueId(aId);
         pMob->save();
         pMob->setDirty(false);
     }

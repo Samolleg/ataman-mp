@@ -28,7 +28,7 @@ public:
     ~CMob();
     void attach(CView* view, CProgressView* pProgress);
     int readMob(QFileInfo& path);
-    void checkUniqueId(QSet<uint>& aId);
+    QVector<uint> checkUniqueId(QSet<uint>& aId);
     void saveAs(const QFileInfo& path);
     void save();
     void serializeJson(const QFileInfo& file);

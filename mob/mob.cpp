@@ -29,6 +29,7 @@
 #include "scene.h"
 #include "layout_components/tree_view.h"
 #include "backup_manager.h"
+#include "duplicate_id_report.h"
 
 CMob::CMob():
     m_view(nullptr)
@@ -911,26 +912,34 @@ int CMob::readMob(QFileInfo &path)
     m_duplicateIds = findIdDuplicate();
     if(!m_duplicateIds.isEmpty())
     {
-        QMessageBox::warning(nullptr, "Endurance validation",
-            QString("This MOB contains %1 duplicate ID occurrence(s).\n\n"
-                    "Endurance Edition preserved every ID exactly as stored. "
-                    "Use an explicit repair command only after reviewing references.")
-                .arg(m_duplicateIds.size()));
+        QMessageBox::warning(nullptr, "Duplicate object IDs",
+            ei::duplicateIdWarningText(m_duplicateIds));
     }
     updateObjects();
     logicNodesUpdate();
     return 0;
 }
 
-void CMob::checkUniqueId(QSet<uint> &aId)
+QVector<uint> CMob::checkUniqueId(QSet<uint> &aId)
 {
-    for(auto& node : m_aNode)
+    QVector<uint> duplicates;
+    for(int objectIndex = 0; objectIndex < m_aNode.size(); ++objectIndex)
     {
+        CNode* node = m_aNode.at(objectIndex);
         if(aId.contains(node->mapId()))
-            QMessageBox::warning(nullptr, "Map checker", "Object with ID " + QString::number(node->mapId()) + " has duplicate\nThis can occurs crash in Evil Islands.\nPlease set unique ID");
+        {
+            duplicates.append(node->mapId());
+            ei::log(eLogWarning,
+                QString("Duplicate object ID during save validation mob:%1 objectIndex:%2 objectName:%3 id:%4")
+                    .arg(mobName())
+                    .arg(objectIndex)
+                    .arg(node->mapName())
+                    .arg(node->mapId()));
+        }
         else
             aId.insert(node->mapId());
     }
+    return duplicates;
 }
 
 QString CMob::getAuxDirName()
@@ -1094,16 +1103,23 @@ QVector<uint> CMob::findIdDuplicate()
     QVector<uint> arrDuplicate;
     uint mapId;
     CNode* pNode = nullptr;
+    int objectIndex = 0;
     foreach(pNode, m_aNode)
     {
         mapId = pNode->mapId();
         if(arrId.contains(mapId))
         {
-            ei::log(eLogWarning, "duplicate id found:" + QString::number(mapId));
+            ei::log(eLogWarning,
+                QString("Duplicate object ID during load validation mob:%1 objectIndex:%2 objectName:%3 id:%4")
+                    .arg(mobName())
+                    .arg(objectIndex)
+                    .arg(pNode->mapName())
+                    .arg(mapId));
             arrDuplicate.append(mapId);
         }
         else
             arrId.insert(mapId);
+        ++objectIndex;
     }
     return arrDuplicate;
 }

@@ -32,6 +32,10 @@ mingw32-make -j4
 qmake resource_name_tests.pro CONFIG+=release
 mingw32-make -j4
 .\release\resource_name_tests.exe
+
+qmake duplicate_id_report_tests.pro CONFIG+=release
+mingw32-make -j4
+.\release\duplicate_id_report_tests.exe
 ```
 
 ## Private JMV validation
