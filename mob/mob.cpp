@@ -1634,6 +1634,18 @@ bool CMob::saveAs(const QFileInfo& path)
                 ei::log(eLogInfo, QString("Shadow MOB transaction validated path:%1 edits:%2 size:%3 sha256:%4")
                     .arg(filePath).arg(shadowTransaction.edits().size())
                     .arg(shadowCandidate.size()).arg(candidateHash));
+                for(int editIndex = 0; editIndex < shadowTransaction.edits().size(); ++editIndex)
+                {
+                    const SMobLeafEdit& edit = shadowTransaction.edits().at(editIndex);
+                    const QString replacementHash = QString::fromLatin1(
+                        QCryptographicHash::hash(edit.replacementPayload,
+                                                 QCryptographicHash::Sha256).toHex());
+                    ei::log(eLogInfo, QString("Shadow MOB leaf edit index:%1/%2 path:%3 sourceSectionSha256:%4 replacementSize:%5 replacementSha256:%6")
+                        .arg(editIndex + 1).arg(shadowTransaction.edits().size())
+                        .arg(edit.sectionPath,
+                             QString::fromLatin1(edit.expectedSectionSha256.toHex()))
+                        .arg(edit.replacementPayload.size()).arg(replacementHash));
+                }
             }
             else
             {
