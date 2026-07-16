@@ -17,11 +17,15 @@ QString createJmvInstall(QTemporaryDir* temporary)
 {
     const QString root = temporary->path();
     createFile(QDir(root).filePath("game.exe"));
+    createFile(QDir(root).filePath("Starter/Engine/game.exe"));
+    createFile(QDir(root).filePath("Starter/addon.dll"));
+    createFile(QDir(root).filePath("Starter/Engine/SpellAddonX.asi"));
     createFile(QDir(root).filePath("Res/textures.res"));
     QDir().mkpath(QDir(root).filePath("Maps"));
     const QString mod = QDir(root).filePath("Starter/MODS/JamaisVu135");
     createFile(QDir(mod).filePath("main.lua"));
     createFile(QDir(mod).filePath("addon.dll"));
+    createFile(QDir(mod).filePath("SPELLADDON.INI"));
     createFile(QDir(mod).filePath("res/databaseJmv.res"));
     QDir().mkpath(QDir(mod).filePath("Maps"));
     return root;
@@ -54,6 +58,11 @@ void ResourceProfileTests::jmvPresetFindsModAndBaseResources()
     QCOMPARE(result.mapDirectories.size(), 2);
     QVERIFY(result.mapDirectories[0].endsWith("JamaisVu135/Maps"));
     QVERIFY(result.mapDirectories[1].endsWith("Maps"));
+    QVERIFY(result.runtimeStackComplete);
+    QVERIFY(!result.runtimeStackValidated);
+    QCOMPARE(result.runtimeComponents.size(), 6);
+    QCOMPARE(profileCapabilityStatusName(result.capabilities.value("runtime.directMapLaunch").status),
+             QString("unsupported"));
 }
 
 void ResourceProfileTests::basePresetDoesNotRequireJmv()
@@ -69,6 +78,7 @@ void ResourceProfileTests::basePresetDoesNotRequireJmv()
     QCOMPARE(result.resourceDirectories.size(), 1);
     QCOMPARE(result.mapDirectories.size(), 1);
     QVERIFY(result.mapDirectories[0].endsWith("Maps"));
+    QVERIFY(result.runtimeStackComplete);
 }
 
 void ResourceProfileTests::invalidGameRootIsRejected()

@@ -1,6 +1,7 @@
 #include "resource_profile.h"
 
 #include <QCoreApplication>
+#include <QCryptographicHash>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -20,6 +21,49 @@ QStringList jsonStrings(const QJsonObject& object, const char* key)
     return result;
 }
 
+EProfileCapabilityStatus capabilityStatusFromString(const QString& value)
+{
+    if(value.compare("experimental", Qt::CaseInsensitive) == 0)
+        return EProfileCapabilityStatus::Experimental;
+    if(value.compare("available", Qt::CaseInsensitive) == 0)
+        return EProfileCapabilityStatus::Available;
+    if(value.compare("validated", Qt::CaseInsensitive) == 0)
+        return EProfileCapabilityStatus::Validated;
+    return EProfileCapabilityStatus::Unsupported;
+}
+
+SProfileCapability capability(const QString& id, EProfileCapabilityStatus status,
+                              const QString& reason, const QString& manifest = QString())
+{
+    SProfileCapability value;
+    value.id = id;
+    value.status = status;
+    value.reason = reason;
+    value.runtimeManifestId = manifest;
+    return value;
+}
+
+SRuntimeComponent runtimeComponent(const QString& id, const QString& path,
+                                   const QStringList& acceptedSha256 = QStringList())
+{
+    SRuntimeComponent value;
+    value.id = id;
+    value.path = path;
+    value.acceptedSha256 = acceptedSha256;
+    return value;
+}
+
+QString sha256File(const QString& path)
+{
+    QFile file(path);
+    if(!file.open(QIODevice::ReadOnly))
+        return QString();
+    QCryptographicHash hash(QCryptographicHash::Sha256);
+    if(!hash.addData(&file))
+        return QString();
+    return QString::fromLatin1(hash.result().toHex()).toUpper();
+}
+
 bool profileFromJson(const QByteArray& bytes, const QString& source,
                      SResourceProfile* profile, QString* error)
 {
@@ -32,7 +76,8 @@ bool profileFromJson(const QByteArray& bytes, const QString& source,
         return false;
     }
     const QJsonObject object = document.object();
-    if(object.value("schemaVersion").toInt() != 1)
+    const int schemaVersion = object.value("schemaVersion").toInt();
+    if(schemaVersion != 1 && schemaVersion != 2)
     {
         if(error)
             *error = "Unsupported or missing schemaVersion";
@@ -40,6 +85,7 @@ bool profileFromJson(const QByteArray& bytes, const QString& source,
     }
 
     SResourceProfile value;
+    value.schemaVersion = schemaVersion;
     value.id = object.value("id").toString().trimmed();
     value.displayName = object.value("displayName").toString().trimmed();
     value.source = source;
@@ -51,6 +97,38 @@ bool profileFromJson(const QByteArray& bytes, const QString& source,
     value.signatureFiles = jsonStrings(object, "signatureFiles");
     value.resourceDirectories = jsonStrings(object, "resourceDirectories");
     value.mapDirectories = jsonStrings(object, "mapDirectories");
+    if(schemaVersion >= 2)
+    {
+        const QJsonObject runtime = object.value("runtime").toObject();
+        value.runtimeManifestId = runtime.value("manifestId").toString().trimmed();
+        for(const QJsonValue& componentValue : runtime.value("components").toArray())
+        {
+            const QJsonObject componentObject = componentValue.toObject();
+            SRuntimeComponent component;
+            component.id = componentObject.value("id").toString().trimmed();
+            component.path = componentObject.value("path").toString().trimmed();
+            component.required = !componentObject.contains("required") || componentObject.value("required").toBool();
+            component.acceptedSha256 = jsonStrings(componentObject, "acceptedSha256");
+            if(!component.id.isEmpty() && !component.path.isEmpty())
+                value.runtimeComponents.append(component);
+        }
+        const QJsonObject capabilities = object.value("capabilities").toObject();
+        for(auto it = capabilities.constBegin(); it != capabilities.constEnd(); ++it)
+        {
+            SProfileCapability profileCapability;
+            profileCapability.id = it.key();
+            if(it.value().isString())
+                profileCapability.status = capabilityStatusFromString(it.value().toString());
+            else
+            {
+                const QJsonObject capabilityObject = it.value().toObject();
+                profileCapability.status = capabilityStatusFromString(capabilityObject.value("status").toString());
+                profileCapability.reason = capabilityObject.value("reason").toString();
+                profileCapability.runtimeManifestId = capabilityObject.value("runtimeManifestId").toString();
+            }
+            value.capabilities.insert(profileCapability.id, profileCapability);
+        }
+    }
     if(value.id.isEmpty() || value.displayName.isEmpty() || value.resourceDirectories.isEmpty())
     {
         if(error)
@@ -115,6 +193,7 @@ void appendUnique(QStringList* values, const QString& path)
 QVector<SResourceProfile> builtInResourceProfiles()
 {
     SResourceProfile jmv;
+    jmv.schemaVersion = 2;
     jmv.id = "jamais-vu";
     jmv.displayName = "Jamais Vu (JMV)";
     jmv.source = "built-in";
@@ -126,13 +205,59 @@ QVector<SResourceProfile> builtInResourceProfiles()
     jmv.signatureFiles = QStringList() << "res/databaseJmv.res";
     jmv.resourceDirectories = QStringList() << "{modRoot}/res" << "{gameRoot}/Res";
     jmv.mapDirectories = QStringList() << "{modRoot}/Maps" << "{gameRoot}/Maps";
+    jmv.runtimeManifestId = "jmv-development-stack-v1";
+    jmv.runtimeComponents
+        << runtimeComponent("starter-engine", "{gameRoot}/Starter/Engine/game.exe",
+                            {"BE0FC330035E03983CCE590038CC7F881F1F5D1BCF082717F31776DD4DEE94E2"})
+        << runtimeComponent("starter-addon", "{gameRoot}/Starter/addon.dll",
+                            {"C02F6766B23F549A17455491B4EBC3B339F31AC153918D43B0183FD506ED11A9"})
+        << runtimeComponent("spell-addon", "{gameRoot}/Starter/Engine/SpellAddonX.asi",
+                            {"E6E0C8773CB8A2B064532D2E5AC5AD6D521129F8330FB30884D569E5CA52D151"})
+        << runtimeComponent("jmv-addon", "{modRoot}/addon.dll",
+                            {"9339552E199966A48ABD92808EA29674A0217FEC4DDBFCBCE27FECD7D85CA4A2"})
+        << runtimeComponent("jmv-lua", "{modRoot}/main.lua",
+                            {"23BC21E8A28126ACE5233413B75C51B21C1CFA97461E2BFC8EBAEE60F9C19318"})
+        << runtimeComponent("spell-addon-config", "{modRoot}/SPELLADDON.INI",
+                            {"7A096E354B02B82141DBE7E6E85917ED330BB374825F902FC1D6CB98718DF605"});
+    jmv.capabilities.insert("mob.losslessEditing", capability("mob.losslessEditing", EProfileCapabilityStatus::Experimental,
+        "Lossless section-tree hardening is under corpus validation."));
+    jmv.capabilities.insert("mob.perspectiveDiff", capability("mob.perspectiveDiff", EProfileCapabilityStatus::Experimental,
+        "Structural diff is available headlessly; perspective overlay is under development."));
+    jmv.capabilities.insert("runtime.directMapLaunch", capability("runtime.directMapLaunch", EProfileCapabilityStatus::Unsupported,
+        "No safe direct-map launch mechanism has passed the JMV feasibility gate.", jmv.runtimeManifestId));
+    jmv.capabilities.insert("runtime.multiMobLaunch", capability("runtime.multiMobLaunch", EProfileCapabilityStatus::Unsupported,
+        "JMV supplemental MOB discovery order has not been proven.", jmv.runtimeManifestId));
+    jmv.capabilities.insert("runtime.appearanceResolver", capability("runtime.appearanceResolver", EProfileCapabilityStatus::Experimental,
+        "Database-backed appearance resolution is incomplete.", jmv.runtimeManifestId));
+    jmv.capabilities.insert("runtime.equipmentResolver", capability("runtime.equipmentResolver", EProfileCapabilityStatus::Unsupported,
+        "JMV equipment-layout rules are not implemented.", jmv.runtimeManifestId));
+    jmv.capabilities.insert("runtime.semanticValidation", capability("runtime.semanticValidation", EProfileCapabilityStatus::Experimental,
+        "Runtime validation requires manual JMV game tests.", jmv.runtimeManifestId));
 
     SResourceProfile base;
+    base.schemaVersion = 2;
     base.id = "base-game";
     base.displayName = "Base game only";
     base.source = "built-in";
     base.resourceDirectories = QStringList() << "{gameRoot}/Res";
     base.mapDirectories = QStringList() << "{gameRoot}/Maps";
+    base.runtimeManifestId = "base-ei-v1";
+    base.runtimeComponents << runtimeComponent("base-game", "{gameRoot}/game.exe",
+        {"B871991C204617851CFE0F56B2F4430B44378D4625F46D815FF62E04BAF9E570"});
+    base.capabilities.insert("mob.losslessEditing", capability("mob.losslessEditing", EProfileCapabilityStatus::Experimental,
+        "Lossless section-tree hardening is under corpus validation."));
+    base.capabilities.insert("mob.perspectiveDiff", capability("mob.perspectiveDiff", EProfileCapabilityStatus::Experimental,
+        "Structural diff is available headlessly; perspective overlay is under development."));
+    base.capabilities.insert("runtime.directMapLaunch", capability("runtime.directMapLaunch", EProfileCapabilityStatus::Unsupported,
+        "Direct map launch is not in Base EI scope."));
+    base.capabilities.insert("runtime.multiMobLaunch", capability("runtime.multiMobLaunch", EProfileCapabilityStatus::Unsupported,
+        "Direct multi-MOB launch is not in Base EI scope."));
+    base.capabilities.insert("runtime.appearanceResolver", capability("runtime.appearanceResolver", EProfileCapabilityStatus::Experimental,
+        "Base database-backed appearance resolution is incomplete."));
+    base.capabilities.insert("runtime.equipmentResolver", capability("runtime.equipmentResolver", EProfileCapabilityStatus::Unsupported,
+        "Base equipped-character rendering is not implemented."));
+    base.capabilities.insert("runtime.semanticValidation", capability("runtime.semanticValidation", EProfileCapabilityStatus::Experimental,
+        "Runtime validation requires manual Base EI game tests."));
 
     return {jmv, base};
 }
@@ -175,6 +300,8 @@ SResourceProfileEvaluation evaluateResourceProfile(const QString& gameRoot,
     result.gameRoot = QDir::cleanPath(QFileInfo(gameRoot).absoluteFilePath());
     result.profileId = profile.id;
     result.profileName = profile.displayName;
+    result.runtimeManifestId = profile.runtimeManifestId;
+    result.capabilities = profile.capabilities;
     if(!QFileInfo(QDir(result.gameRoot).filePath("game.exe")).isFile())
     {
         result.messages.append("The selected folder does not contain game.exe.");
@@ -237,8 +364,37 @@ SResourceProfileEvaluation evaluateResourceProfile(const QString& gameRoot,
         else
             result.messages.append("Optional map directory not found: " + expanded);
     }
+    bool runtimeComplete = true;
+    bool runtimeValidated = !profile.runtimeComponents.isEmpty();
+    for(const SRuntimeComponent& component : profile.runtimeComponents)
+    {
+        SRuntimeComponentEvaluation evaluation;
+        evaluation.id = component.id;
+        evaluation.path = expandPath(component.path, result.gameRoot, result.modRoot);
+        const QFileInfo componentInfo(evaluation.path);
+        evaluation.exists = componentInfo.isFile();
+        if(evaluation.exists)
+        {
+            evaluation.size = componentInfo.size();
+            evaluation.sha256 = sha256File(evaluation.path);
+            evaluation.hashAccepted = component.acceptedSha256.isEmpty();
+            for(const QString& accepted : component.acceptedSha256)
+                if(accepted.compare(evaluation.sha256, Qt::CaseInsensitive) == 0)
+                    evaluation.hashAccepted = true;
+        }
+        if(component.required && !evaluation.exists)
+        {
+            runtimeComplete = false;
+            result.messages.append("Missing runtime component: " + evaluation.path);
+        }
+        if(component.required && (!evaluation.exists || !evaluation.hashAccepted || component.acceptedSha256.isEmpty()))
+            runtimeValidated = false;
+        result.runtimeComponents.append(evaluation);
+    }
+    result.runtimeStackComplete = runtimeComplete;
+    result.runtimeStackValidated = runtimeValidated && runtimeComplete;
     result.valid = result.resourceDirectories.size() == profile.resourceDirectories.size() &&
-                   result.archiveCount > 0;
+                   result.archiveCount > 0 && result.runtimeStackComplete;
     return result;
 }
 
@@ -261,4 +417,16 @@ QStringList discoverGameInstallations()
             appendUnique(&result, QFileInfo(candidate).absoluteFilePath());
     }
     return result;
+}
+
+QString profileCapabilityStatusName(EProfileCapabilityStatus status)
+{
+    switch(status)
+    {
+    case EProfileCapabilityStatus::Experimental: return "experimental";
+    case EProfileCapabilityStatus::Available: return "available";
+    case EProfileCapabilityStatus::Validated: return "validated";
+    case EProfileCapabilityStatus::Unsupported: return "unsupported";
+    }
+    return "unsupported";
 }

@@ -3,10 +3,46 @@
 
 #include <QString>
 #include <QStringList>
+#include <QMap>
 #include <QVector>
+
+enum class EProfileCapabilityStatus
+{
+    Unsupported,
+    Experimental,
+    Available,
+    Validated
+};
+
+struct SProfileCapability
+{
+    QString id;
+    EProfileCapabilityStatus status{EProfileCapabilityStatus::Unsupported};
+    QString reason;
+    QString runtimeManifestId;
+};
+
+struct SRuntimeComponent
+{
+    QString id;
+    QString path;
+    bool required{true};
+    QStringList acceptedSha256;
+};
+
+struct SRuntimeComponentEvaluation
+{
+    QString id;
+    QString path;
+    bool exists{false};
+    bool hashAccepted{false};
+    qint64 size{0};
+    QString sha256;
+};
 
 struct SResourceProfile
 {
+    int schemaVersion{1};
     QString id;
     QString displayName;
     QString source;
@@ -18,6 +54,9 @@ struct SResourceProfile
     QStringList signatureFiles;
     QStringList resourceDirectories;
     QStringList mapDirectories;
+    QString runtimeManifestId;
+    QVector<SRuntimeComponent> runtimeComponents;
+    QMap<QString, SProfileCapability> capabilities;
 };
 
 struct SResourceProfileEvaluation
@@ -31,6 +70,11 @@ struct SResourceProfileEvaluation
     QStringList mapDirectories;
     QStringList messages;
     int archiveCount{0};
+    QString runtimeManifestId;
+    bool runtimeStackComplete{false};
+    bool runtimeStackValidated{false};
+    QVector<SRuntimeComponentEvaluation> runtimeComponents;
+    QMap<QString, SProfileCapability> capabilities;
 };
 
 QVector<SResourceProfile> builtInResourceProfiles();
@@ -38,5 +82,6 @@ QVector<SResourceProfile> loadResourceProfiles(const QString& externalDirectory 
 SResourceProfileEvaluation evaluateResourceProfile(const QString& gameRoot,
                                                    const SResourceProfile& profile);
 QStringList discoverGameInstallations();
+QString profileCapabilityStatusName(EProfileCapabilityStatus status);
 
 #endif // RESOURCE_PROFILE_H
