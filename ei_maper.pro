@@ -33,6 +33,7 @@ SOURCES += \
     resource_setup_dialog.cpp \
     staged_save_validator.cpp \
     runtime_providers.cpp \
+    mob_diff_dialog.cpp \
     endurance_document.cpp \
     bodypartedit_form.cpp \
     createobjectform.cpp \
@@ -97,6 +98,7 @@ HEADERS += \
     resource_setup_dialog.h \
     staged_save_validator.h \
     runtime_providers.h \
+    mob_diff_dialog.h \
     endurance_document.h \
     bodypartedit_form.h \
     createobjectform.h \

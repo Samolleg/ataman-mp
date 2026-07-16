@@ -30,6 +30,7 @@
 #include "scene.h"
 #include "backup_manager.h"
 #include "resource_setup_dialog.h"
+#include "mob_diff_dialog.h"
 
 void testFunc()
 {
@@ -68,9 +69,11 @@ MainWindow::MainWindow(QWidget* parent) :
     QAction* openLogsFolder = new QAction(tr("Open Logs Folder"), this);
     QAction* openBugReportingGuide = new QAction(tr("Open Bug Reporting Guide"), this);
     QAction* gameAndModSetup = new QAction(tr("Game and Mod Setup..."), this);
+    QAction* compareMobFiles = new QAction(tr("Compare MOB Files..."), this);
     m_ui->menuSettings->insertAction(m_ui->actionOpen_2, gameAndModSetup);
     m_ui->menuSettings->insertSeparator(m_ui->actionOpen_2);
     m_ui->menuTools->addSeparator();
+    m_ui->menuTools->addAction(compareMobFiles);
     m_ui->menuTools->addAction(openBackupFolder);
     m_ui->menuTools->addAction(openLogsFolder);
     m_ui->menuTools->addAction(openBugReportingGuide);
@@ -96,6 +99,27 @@ MainWindow::MainWindow(QWidget* parent) :
                 tr("BUG_REPORTING.md was not found beside the editor executable."));
     });
     connect(gameAndModSetup, &QAction::triggered, this, &MainWindow::showGameAndModSetup);
+    connect(compareMobFiles, &QAction::triggered, this, [this]()
+    {
+        activateWindow();
+        raise();
+        QString startDirectory;
+        if(COptString* lastFolder = dynamic_cast<COptString*>(m_settings->opt("lastVisitedFolder")))
+            startDirectory = lastFolder->value();
+        const QString baseline = QFileDialog::getOpenFileName(this, tr("Select baseline MOB"),
+            startDirectory, tr("Evil Islands MOB (*.mob)"));
+        if(baseline.isEmpty())
+            return;
+        const QString candidate = QFileDialog::getOpenFileName(this, tr("Select candidate MOB"),
+            QFileInfo(baseline).absolutePath(), tr("Evil Islands MOB (*.mob)"));
+        if(candidate.isEmpty())
+            return;
+        CMobDiffDialog* dialog = new CMobDiffDialog(QFileInfo(baseline), QFileInfo(candidate), this);
+        dialog->setAttribute(Qt::WA_DeleteOnClose);
+        dialog->show();
+        dialog->raise();
+        dialog->activateWindow();
+    });
 
     const bool firstRunSetup = !m_settings->hasConfiguredResources();
     // Complete first-run setup before constructing the OpenGL view. Opening the
