@@ -49,9 +49,14 @@ behavior.
 - [x] Recompute MOB dirty state against its loaded projection after edit and
   undo/redo, allowing byte-identical Save As once every projected change is
   undone. ([`d7feaab`](https://github.com/Ilufus/ei-mapper-endurance/commit/d7feaab))
-- [ ] Validate exact snapshot-based undo for compound unit, patrol, and look
+- [x] Validate exact snapshot-based undo for compound unit, patrol, and look
   point movement across repeated undo/redo cycles. Implementation:
-  [`7a9bed4`](https://github.com/Ilufus/ei-mapper-endurance/commit/7a9bed4); tester confirmation remains open.
+  [`7a9bed4`](https://github.com/Ilufus/ei-mapper-endurance/commit/7a9bed4);
+  confirmed in alpha.17 testing.
+- [ ] Validate alpha.18 selection-history behavior and exact-instance
+  create/delete redo across repeated copy/paste cycles. Implementation:
+  [`99f841f`](https://github.com/Ilufus/ei-mapper-endurance/commit/99f841f);
+  focused test instructions are in [ALPHA18_VALIDATION.md](ALPHA18_VALIDATION.md).
 - [ ] Finish lossless preservation of MPR archive details.
 
 These are the remaining safety gates before editing live maps can be recommended.
