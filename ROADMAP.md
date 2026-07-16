@@ -32,6 +32,10 @@ behavior.
 | Setup moved under Settings | [`8528799`](https://github.com/Ilufus/ei-mapper-endurance/commit/8528799) | [alpha.13 validation](ALPHA13_VALIDATION.md) |
 | Database-backed humanoid candidate lookup | [`94e0b9d`](https://github.com/Ilufus/ei-mapper-endurance/commit/94e0b9d) | [resource-name tests](tests/resource_name_tests.cpp); base rendering remains unresolved |
 | Alpha.14 testing-group release | [`800a011`](https://github.com/Ilufus/ei-mapper-endurance/commit/800a011) | [alpha.14 validation](ALPHA14_VALIDATION.md) |
+| Capability profiles and fingerprinted Base/JMV runtime manifests | [`97b6991`](https://github.com/Ilufus/ei-mapper-endurance/commit/97b6991) | [resource-profile tests](tests/resource_profile_tests.cpp) |
+| Strict raw-section MOB tree and deterministic semantic diff | [`aaef298`](https://github.com/Ilufus/ei-mapper-endurance/commit/aaef298) | [252-file corpus validation](MOB_HARDENING_VALIDATION.md) |
+| Provenance-checked MOB leaf transactions | [`660a542`](https://github.com/Ilufus/ei-mapper-endurance/commit/660a542) | [document tests](tests/endurance_document_tests.cpp) |
+| Profile provider API and safe JMV test-run manifest contract | [`b467d87`](https://github.com/Ilufus/ei-mapper-endurance/commit/b467d87) | [runtime-provider tests](tests/runtime_provider_tests.cpp) |
 
 ## Current focus
 
@@ -39,7 +43,9 @@ behavior.
   tests, workflow logs, source hashes, load order, MobExplorer comparisons, and
   focused in-game results.
 - [ ] Expand changed-save regression coverage across the private JMV map corpus.
-- [ ] Finish lossless preservation of unknown MOB records and MPR archive details.
+- [ ] Migrate changed MOB saves from the legacy serializer to raw-tree transactions;
+  no-op raw preservation is validated, but changed-save preservation is not complete.
+- [ ] Finish lossless preservation of MPR archive details.
 
 These are the remaining safety gates before editing live maps can be recommended.
 
@@ -87,8 +93,20 @@ These are the remaining safety gates before editing live maps can be recommended
 - [x] Add a rotating backup retention policy and **Tools > Open Backup Folder**. ([`8a7bc3c`](https://github.com/Ilufus/ei-mapper-endurance/commit/8a7bc3c))
 - [x] Verify backup creation, metadata, hashes, and source preservation in a disposable end-to-end test. ([backup tests](tests/backup_manager_tests.cpp))
 - [x] Validate the staged document with a fresh parser before committing it. ([`c8d8b3a`](https://github.com/Ilufus/ei-mapper-endurance/commit/c8d8b3a))
-- [ ] Preserve every unknown MOB record, nested length, ordering detail, and raw payload.
-- [ ] Complete corpus tests for every observed object family and optional section.
+- [x] Parse every MOB section with strict bounds and complete byte coverage;
+  preserve numeric IDs, occurrences, ordering, raw bytes, paths, and hashes, with
+  unknown payloads retained as opaque leaves. ([`aaef298`](https://github.com/Ilufus/ei-mapper-endurance/commit/aaef298), [validation](MOB_HARDENING_VALIDATION.md))
+- [x] Pass byte-identical no-op checks across all 252 MOBs in the current Base/JMV
+  Maps corpus. ([validation](MOB_HARDENING_VALIDATION.md))
+- [x] Add the core provenance-checked `MobEditTransaction` leaf patcher with
+  byte-exact untouched leaves, derived ancestor lengths, strict candidate reparse,
+  stale-hash rejection, and strict CP1251 encoding. ([`660a542`](https://github.com/Ilufus/ei-mapper-endurance/commit/660a542), [document tests](tests/endurance_document_tests.cpp))
+- [ ] Route all existing UI edit commands through `MobEditTransaction`; the core
+  patcher exists, but the legacy projection remains the active changed-save path.
+- [ ] Block candidate saves whose semantic diff contains changes not authorized by
+  the accepted transaction.
+- [ ] Copy/delete exact raw object subtrees and create new objects only from
+  profile-approved raw templates.
 - [ ] Complete lossless MPR preservation for names, timestamps, alignment, and extra entries.
 - [ ] Verify CP1251 script byte lengths and round trips across the corpus.
 - [ ] Add an explicit duplicate-ID Repair preview with reference and script auditing.
@@ -149,6 +167,10 @@ These are the remaining safety gates before editing live maps can be recommended
 - [ ] Disable only terrain-dependent tools in MOB-only mode.
 - [ ] Add independent `.mpr` and `.mob` drag-and-drop behavior.
 - [x] Add headless `--profile-load` discovery and JSON output. ([`7b206c8`](https://github.com/Ilufus/ei-mapper-endurance/commit/7b206c8))
+- [x] Add explicit profile capabilities and fingerprinted Base/JMV runtime-stack
+  manifests. ([`97b6991`](https://github.com/Ilufus/ei-mapper-endurance/commit/97b6991))
+- [x] Add deterministic headless MOB comparison with `--mob-diff <baseline>
+  --against <candidate>` and JSON output. ([`aaef298`](https://github.com/Ilufus/ei-mapper-endurance/commit/aaef298))
 - [ ] Add Open Workspace support through portable `.collection` manifests
   (high-priority scope is tracked in the wishlist below).
 
@@ -180,6 +202,43 @@ These are the remaining safety gates before editing live maps can be recommended
 - [ ] Maintain a hash inventory for the private Zone 1/3/4/6/12/18/19 integration corpus.
 - [ ] Automate semantic comparison with MobExplorer where its interfaces permit it.
 - [ ] Compare ID-preserving and explicit-repair builds before linking ID changes to earlier game crashes.
+
+## Perspective MOB diff
+
+- [x] Build immutable object snapshots from raw subtrees and match exact subtree
+  hashes, unique family-scoped NIDs, then unique type/prototype/name identity.
+  Ambiguous identities remain unresolved. ([`aaef298`](https://github.com/Ilufus/ei-mapper-endurance/commit/aaef298))
+- [x] Classify unchanged, added, removed, modified, moved, and ambiguous entries;
+  export deterministic text/JSON reports. ([`aaef298`](https://github.com/Ilufus/ei-mapper-endurance/commit/aaef298))
+- [ ] Add the filterable in-app details panel with paths, occurrences, hashes,
+  compatibility findings, and match confidence.
+- [ ] Add the read-only 3D overlay with red removals, green additions, amber
+  modifications, movement vectors, terrain/grid selection, filters, and isolated picking.
+- [ ] Add original-versus-current and candidate-save-versus-transaction entry points.
+- [ ] Keep diff-to-merge deferred until the read-only workflow is validated.
+
+## Profile-specific runtime and JMV test launch
+
+- [x] Declare profile-scoped capability states for lossless editing, perspective
+  diff, direct/multi-MOB launch, appearance/equipment resolution, and semantic
+  validation. ([`97b6991`](https://github.com/Ilufus/ei-mapper-endurance/commit/97b6991))
+- [x] Fingerprint the approved Base executable and complete JMV Starter/addon/
+  SpellAddon/JMV addon/Lua/config stack without loading runtime DLLs in-process.
+  ([`97b6991`](https://github.com/Ilufus/ei-mapper-endurance/commit/97b6991))
+- [x] Define profile-scoped provider interfaces for appearance, equipment,
+  prototypes, semantic validation, and map test launch. ([`b467d87`](https://github.com/Ilufus/ei-mapper-endurance/commit/b467d87))
+- [x] Define and validate the versioned JMV test-run request manifest, including
+  ordered MOBs, active MOB, runtime/source/staged hashes, logs/results, safe run
+  IDs, JMV-only scope, and mandatory containment inside the disposable run root.
+  ([`b467d87`](https://github.com/Ilufus/ei-mapper-endurance/commit/b467d87), [runtime-provider tests](tests/runtime_provider_tests.cpp))
+- [ ] Implement concrete provider backends; interface and manifest contracts are
+  present, but appearance/equipment/semantic/launch providers remain disabled.
+- [ ] Run the non-destructive JMV feasibility ladder: `server <map>`, supplemental
+  `Auto<map>*.mob` discovery/order, then autorun-script `AddMobEx`.
+- [ ] Implement manifest staging and disposable test state only after one
+  mechanism proves exact ordered loading, readiness reporting, and cleanup.
+- [ ] Keep direct launch disabled for Base EI and unavailable for JMV until the
+  feasibility gate passes; do not redirect live Maps or Starter configuration.
 
 ## Release gates
 
@@ -249,7 +308,9 @@ or move it into the relevant section above without losing its history.
   - Treat MOBs similarly to Unreal Engine sublevels within the loaded map workspace.
 - [ ] Allow unit texture fields to support both database-backed dropdown selection and manual keyboard entry.
 - [ ] Add periodic autosave with recoverable, versioned backup states.
-- [ ] Add a command to launch the currently loaded MPR and MOB set directly in Evil Islands for testing.
+- [ ] Add a command to launch the currently loaded MPR and MOB set directly in
+  game for testing (**JMV-only stretch goal**; gated by the profile provider and
+  non-destructive feasibility protocol above).
 - [ ] Add a resizable workflow-log panel along the bottom of the viewport, similar to the UE4 output log.
 
 ### Medium priority

@@ -44,6 +44,10 @@ mingw32-make -j4
 qmake duplicate_id_report_tests.pro CONFIG+=release
 mingw32-make -j4
 .\release\duplicate_id_report_tests.exe
+
+qmake runtime_provider_tests.pro CONFIG+=release
+mingw32-make -j4
+.\release\runtime_provider_tests.exe
 ```
 
 ## Private JMV validation
