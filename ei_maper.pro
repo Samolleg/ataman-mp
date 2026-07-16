@@ -45,6 +45,7 @@ SOURCES += \
     multiline_edit_form.cpp \
     randomize_form.cpp \
     resource_name.cpp \
+    unit_appearance.cpp \
     property.cpp \
     main_window.cpp \
     objects/lever.cpp \
@@ -107,6 +108,7 @@ HEADERS += \
     multiline_edit_form.h \
     randomize_form.h \
     resource_name.h \
+    unit_appearance.h \
     main_window.h \
     objects/lever.h \
     objects/light.h \

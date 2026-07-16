@@ -22,9 +22,17 @@ Validation date: 2026-07-16
 
 - Complete Windows x64 Qt 5.12.12/MinGW application build: passed.
 - Document, backup, resource-profile, resource-name, and duplicate-ID suites:
-  32 passed, 0 failed.
+  35 passed, 0 failed.
 - Resource-profile tests assert JMV Maps-before-base-Maps ordering and base Maps
   selection.
+- Synthetic and read-only live-database checks resolve `OrcMaleF3` to
+  `unormaskin_00.mmp` and `Human Gipath Brigand Boots F1` to
+  `unhumaskin_04.mmp` from the base `units.udb`.
+- A read-only JMV database check resolves `GZOrcMaleF3` through the active mod
+  `database.res`; adjacent original/unmodified database archives cannot take
+  precedence for unit appearance lookup.
+- The resolved base textures were confirmed present in `redress.res` without
+  extracting or modifying the archive.
 
 ## Read-only real-installation check
 
@@ -41,5 +49,7 @@ and returned exit code 0 without validation messages.
 - MOB-first mode supports camera movement immediately.
 - Attaching the matching MPR corrects display projection without reloading MOB.
 - Detaching terrain restores standalone display projection.
+- With the base-game profile, `zone3obr.mob` humans and orcs render their
+  database-selected primary skins instead of the missing-texture placeholder.
 
 This candidate must not be published until the manual test gate is confirmed.

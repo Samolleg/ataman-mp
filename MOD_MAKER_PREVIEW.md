@@ -54,3 +54,9 @@ For alpha.13, please test both load orders after a fresh start: MPR then MOB,
 and MOB then MPR. Confirm that MOB-only camera movement works immediately and
 that attaching/detaching terrain updates display positions without changing the
 stored MOB coordinates.
+
+Also test at least one humanoid-heavy map with the selected profile. For the
+base-game profile, `zone3obr.mob` is the current regression case: humans and
+orcs should resolve their primary skins from the active database and
+`redress.res`. If a unit remains untextured, include the current log; it records
+the prototype, model, resolved texture, database archive, and texture archive.

@@ -18,6 +18,7 @@
 #include "settings.h"
 #include "log.h"
 #include "resource_name.h"
+#include "unit_appearance.h"
 
 CObjectList* CObjectList::m_pObjectContainer = nullptr;
 CTextureList* CTextureList::m_pTextureContainer = nullptr;
@@ -122,6 +123,74 @@ QMap<QString, QByteArray> normalizedResourceMap(const QMap<QString, QByteArray>&
     for(auto it = source.constBegin(); it != source.constEnd(); ++it)
         result.insert(it.key().toLower(), it.value());
     return result;
+}
+
+QString resourceSourceFingerprint(const QVector<QString>& sources)
+{
+    QString result;
+    for(const QString& path : sources)
+    {
+        const QFileInfo info(path);
+        result += info.absoluteFilePath().toLower() + '|'
+                + QString::number(info.size()) + '|'
+                + QString::number(info.lastModified().toMSecsSinceEpoch()) + '\n';
+    }
+    return result;
+}
+
+bool readPreferredUnitDatabase(const QVector<QString>& sources, QByteArray& unitsDatabase,
+                               QString* sourcePath)
+{
+    // Mod packages sometimes keep an original-unmodified database beside the
+    // active database.res. Prefer the active conventional name in each source
+    // tier so an alphabetically earlier backup cannot silently define unit
+    // appearances.
+    for(const QString& path : sources)
+    {
+        if(QFileInfo(path).fileName().compare("database.res", Qt::CaseInsensitive) != 0)
+            continue;
+        if(readIndexedResource({path}, "units.udb", unitsDatabase, sourcePath))
+            return true;
+    }
+    for(const QString& path : sources)
+    {
+        const QString name = QFileInfo(path).fileName().toLower();
+        if(name.contains("backup") || name.contains("original")
+                || name.contains("unmodified") || name.contains(".old"))
+            continue;
+        if(readIndexedResource({path}, "units.udb", unitsDatabase, sourcePath))
+            return true;
+    }
+    return readIndexedResource(sources, "units.udb", unitsDatabase, sourcePath);
+}
+
+QString databaseHumanoidTexture(const QVector<QString>& sources, const QString& prototypeName,
+                                const QString& modelName, QString* databaseSource)
+{
+    static QMap<QString, QMap<QString, int>> skinIndexCache;
+    static QMap<QString, QString> databaseSourceCache;
+    const QString fingerprint = resourceSourceFingerprint(sources);
+    if(!skinIndexCache.contains(fingerprint))
+    {
+        QByteArray unitsDatabase;
+        QString source;
+        if(readPreferredUnitDatabase(sources, unitsDatabase, &source))
+        {
+            skinIndexCache.insert(fingerprint, ei::unitPrototypeSkinIndices(unitsDatabase));
+            databaseSourceCache.insert(fingerprint, source);
+            ei::log(eLogInfo, QString("Indexed unit appearances: %1 prototypes from %2")
+                    .arg(skinIndexCache.value(fingerprint).size()).arg(source));
+        }
+        else
+        {
+            skinIndexCache.insert(fingerprint, QMap<QString, int>());
+            ei::log(eLogWarning, "No units.udb found in configured resource sources");
+        }
+    }
+    if(databaseSource)
+        *databaseSource = databaseSourceCache.value(fingerprint);
+    const auto cached = skinIndexCache.constFind(fingerprint);
+    return ei::humanoidTextureResourceName(cached.value(), prototypeName, modelName);
 }
 
 QVector<QString> configuredResourceSources(CSettings* settings)
@@ -780,6 +849,28 @@ QOpenGLTexture* CTextureList::loadTextureResource(const QString& name, const QSt
                              candidate, sourcePath));
             return m_aTexture.value(cacheKey);
         }
+    }
+
+
+    QString databaseSource;
+    const QString databaseCandidate = databaseHumanoidTexture(sources, name, modelName,
+                                                               &databaseSource);
+    if(!databaseCandidate.isEmpty())
+    {
+        QByteArray textureData;
+        QString textureSource;
+        if(readIndexedResource(sources, databaseCandidate, textureData, &textureSource))
+        {
+            parse(textureData, cacheKey);
+            if(m_aTexture.contains(cacheKey))
+            {
+                ei::log(eLogInfo, QString("Resolved database unit texture %1 model:%2 -> %3 (database:%4 texture:%5)")
+                        .arg(name, modelName, databaseCandidate, databaseSource, textureSource));
+                return m_aTexture.value(cacheKey);
+            }
+        }
+        ei::log(eLogWarning, QString("Database unit texture is missing: %1 model:%2 resolved:%3 database:%4")
+                .arg(name, modelName, databaseCandidate, databaseSource));
     }
 
     m_missingTextureNames.insert(cacheKey);

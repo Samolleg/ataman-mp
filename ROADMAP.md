@@ -69,6 +69,10 @@ These are the remaining safety gates before editing live maps can be recommended
 - [x] Resolve the previously missing representative Zone 3/18 JMV figures.
 - [x] Preserve unit figure, texture, and database fields during changed saves.
 - [x] Resolve model-qualified `_xN` unit skins such as Zone 12 skeleton textures.
+- [x] Resolve human and orc prototype names through the active `units.udb` skin
+  index, including base-game Zone 3 and JMV-prefixed prototypes.
+- [x] Prefer an active mod `database.res` over adjacent backup or
+  `original-unmodified` database archives for unit appearance lookup.
 - [x] Log and display the nearest existing family variation when a MOB references an absent skin, without changing the stored field.
 - [x] Resolve complete terrain-atlas sets case-insensitively with deterministic JMV-first provenance.
 - [x] Refuse partial terrain-atlas assembly and use a complete diagnostic fallback instead.
@@ -147,6 +151,8 @@ or move it into the relevant section above without losing its history.
 ### Medium priority
 
 - [ ] Load database-defined humanoid textures for humans, skeletons, and orcs where applicable.
+  - Base-game/JMV primary skin lookup is implemented; keep this open until
+    visual corpus testing covers all humanoid models and secondary layers.
 - [ ] Render humans with the weapons and armor assigned by their database setup.
   - Account for one-handed weapon plus shield, dual-wield, and two-handed configurations.
 
