@@ -35,6 +35,7 @@ behavior.
 | Capability profiles and fingerprinted Base/JMV runtime manifests | [`97b6991`](https://github.com/Ilufus/ei-mapper-endurance/commit/97b6991) | [resource-profile tests](tests/resource_profile_tests.cpp) |
 | Strict raw-section MOB tree and deterministic semantic diff | [`aaef298`](https://github.com/Ilufus/ei-mapper-endurance/commit/aaef298) | [252-file corpus validation](MOB_HARDENING_VALIDATION.md) |
 | Provenance-checked MOB leaf transactions | [`660a542`](https://github.com/Ilufus/ei-mapper-endurance/commit/660a542) | [document tests](tests/endurance_document_tests.cpp) |
+| Fail-closed UI projection shadow transactions | [`3106fac`](https://github.com/Ilufus/ei-mapper-endurance/commit/3106fac) | [254-file corpus validation](MOB_SHADOW_TRANSACTION_VALIDATION.md) |
 | Profile provider API and safe JMV test-run manifest contract | [`b467d87`](https://github.com/Ilufus/ei-mapper-endurance/commit/b467d87) | [runtime-provider tests](tests/runtime_provider_tests.cpp) |
 | Filterable read-only MOB diff details dialog | [`fd30be0`](https://github.com/Ilufus/ei-mapper-endurance/commit/fd30be0) | production MinGW build and [semantic-diff tests](tests/endurance_document_tests.cpp) |
 | Selection UX, recent files, open/save shortcuts, and editable model/texture filters | [`06d1c9b`](https://github.com/Ilufus/ei-mapper-endurance/commit/06d1c9b) | clean production MinGW build, six regression suites, Zone 1 no-op round trip, and [alpha.22 manual checks](ALPHA22_VALIDATION.md) |
@@ -48,7 +49,10 @@ behavior.
   outcomes across additional maps and edit types.
 - [ ] Expand changed-save regression coverage across the private JMV map corpus.
 - [ ] Migrate changed MOB saves from the legacy serializer to raw-tree transactions;
-  no-op raw preservation is validated, but changed-save preservation is not complete.
+  no-op raw preservation is validated and leaf-only UI deltas now run through a
+  fail-closed shadow transaction bridge, but changed-save output remains disabled.
+  ([`3106fac`](https://github.com/Ilufus/ei-mapper-endurance/commit/3106fac),
+  [validation](MOB_SHADOW_TRANSACTION_VALIDATION.md))
 - [x] Recompute MOB dirty state against its loaded projection after edit and
   undo/redo, allowing byte-identical Save As once every projected change is
   undone. ([`d7feaab`](https://github.com/Ilufus/ei-mapper-endurance/commit/d7feaab))
@@ -151,6 +155,11 @@ These are the remaining safety gates before editing live maps can be recommended
   stale-hash rejection, and strict CP1251 encoding. ([`660a542`](https://github.com/Ilufus/ei-mapper-endurance/commit/660a542), [document tests](tests/endurance_document_tests.cpp))
 - [ ] Route all existing UI edit commands through `MobEditTransaction`; the core
   patcher exists, but the UI edit model still projects through legacy objects.
+- [x] Add a fail-closed shadow bridge for leaf-only UI projection deltas. It binds
+  changes to exact raw-source hashes, rejects structural and canonicalized-source
+  changes, preserves source-only records, and never writes its candidate.
+  ([`3106fac`](https://github.com/Ilufus/ei-mapper-endurance/commit/3106fac),
+  [validation](MOB_SHADOW_TRANSACTION_VALIDATION.md))
 - [x] Disable the legacy changed-MOB serializer at the Save boundary; dirty MOB
   saves are refused until their UI edits have transaction provenance. Unchanged
   byte-identical Save As remains available. ([`912d00c`](https://github.com/Ilufus/ei-mapper-endurance/commit/912d00c))
