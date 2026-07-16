@@ -32,6 +32,7 @@ SOURCES += \
     resource_profile.cpp \
     resource_setup_dialog.cpp \
     staged_save_validator.cpp \
+    runtime_providers.cpp \
     endurance_document.cpp \
     bodypartedit_form.cpp \
     createobjectform.cpp \
@@ -95,6 +96,7 @@ HEADERS += \
     resource_profile.h \
     resource_setup_dialog.h \
     staged_save_validator.h \
+    runtime_providers.h \
     endurance_document.h \
     bodypartedit_form.h \
     createobjectform.h \
