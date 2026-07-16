@@ -27,6 +27,7 @@ private:
     uint m_max;
     //m_power"SOUND_VOLUME", eNull};
     QStringList m_aResName;
+    QStringList m_serializedFieldOrder;
     bool m_bAmbient;
     bool m_bMusic;
 };

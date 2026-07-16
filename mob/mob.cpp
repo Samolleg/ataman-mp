@@ -35,6 +35,7 @@
 CMob::CMob():
     m_view(nullptr)
   ,m_pProgress(nullptr)
+  ,m_hasVssSection(false)
   ,m_bDirty(false)
   ,m_activeRangeId(0)
 {
@@ -197,7 +198,11 @@ bool CMob::deserialize(QByteArray data)
                     readByte += parser.skipHeader();
                     QVector3D dir;
                     readByte += parser.readPlot(dir);
-                    m_worldSet.setData(eWsTypeWindDir, util::makeString(dir));
+                    m_worldSet.setData(eWsTypeWindDir,
+                        QString("(%1,%2,%3)")
+                            .arg(QString::number(dir.x(), 'g', 9))
+                            .arg(QString::number(dir.y(), 'g', 9))
+                            .arg(QString::number(dir.z(), 'g', 9)));
                 }
                 else if(parser.isNextTag("WS_WIND_STR"))
                 {
@@ -236,6 +241,7 @@ bool CMob::deserialize(QByteArray data)
         //vss section
         else if(parser.isNextTag("VSS_SECTION"))
         {
+            m_hasVssSection = true;
             readByte += parser.readHeader();
             readByte += parser.readByteArray(m_vss_section, parser.nodeLen());
         }
@@ -1292,7 +1298,7 @@ void CMob::serializeMob(QByteArray& data)
         parser.endSection();//"WORLD_SET"
     }
 
-    //if (!m_vss_section.isEmpty())
+    if (m_hasVssSection || !m_vss_section.isEmpty())
     {
         writeByte += parser.startSection("VSS_SECTION");
         writeByte += parser.writeByteArray(m_vss_section, uint(m_vss_section.size()));

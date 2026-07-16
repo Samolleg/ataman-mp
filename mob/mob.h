@@ -117,6 +117,7 @@ private:
     QList<QString> m_aDiplomacyFieldName;
     CWorldSet m_worldSet;
     QByteArray m_vss_section;
+    bool m_hasVssSection;
     QByteArray m_directory;
     QByteArray m_directoryElements;
     QByteArray m_aiGraph;

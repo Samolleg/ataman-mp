@@ -3,6 +3,16 @@
 #include "resourcemanager.h"
 #include "property.h"
 
+namespace {
+QStringList canonicalSoundFieldOrder()
+{
+    return QStringList()
+        << "SOUND_ID" << "SOUND_POSITION" << "SOUND_RANGE" << "SOUND_NAME"
+        << "SOUND_MIN" << "SOUND_MAX" << "SOUND_COMMENTS" << "SOUND_RESNAME"
+        << "SOUND_RANGE2" << "SOUND_AMBIENT" << "SOUND_IS_MUSIC";
+}
+}
+
 CSound::CSound():
     m_range(0)
     ,m_range2(0)
@@ -23,6 +33,7 @@ CSound::CSound(const CSound &sound):
     m_min = sound.m_min;
     m_max = sound.m_max;
     m_aResName = sound.m_aResName;
+    m_serializedFieldOrder = sound.m_serializedFieldOrder;
     m_bAmbient = sound.m_bAmbient;
     m_bMusic = sound.m_bMusic;
     updateFigure(CObjectList::getInstance()->getFigure("sound"));
@@ -51,40 +62,48 @@ CSound::CSound(QJsonObject data):
 uint CSound::deserialize(util::CMobParser &parser)
 {
     uint readByte(0);
+    m_serializedFieldOrder.clear();
     while(true)
     {
         if(parser.isNextTag("SOUND_ID"))
         {
+            m_serializedFieldOrder.append("SOUND_ID");
             readByte += parser.skipHeader();
             readByte += parser.readDword(m_mapID);
         }
         else if(parser.isNextTag("SOUND_POSITION"))
         {
+            m_serializedFieldOrder.append("SOUND_POSITION");
             readByte += parser.skipHeader();
             readByte += parser.readPlot(m_position);
         }
         else if(parser.isNextTag("SOUND_RANGE"))
         {
+            m_serializedFieldOrder.append("SOUND_RANGE");
             readByte += parser.skipHeader();
             readByte += parser.readDword(m_range);
         }
         else if(parser.isNextTag("SOUND_NAME"))
         {
+            m_serializedFieldOrder.append("SOUND_NAME");
             readByte += parser.readHeader();
             readByte += parser.readString(m_name, parser.nodeLen());
         }
         else if(parser.isNextTag("SOUND_MIN"))
         {
+            m_serializedFieldOrder.append("SOUND_MIN");
             readByte += parser.skipHeader();
             readByte += parser.readDword(m_min);
         }
         else if(parser.isNextTag("SOUND_MAX"))
         {
+            m_serializedFieldOrder.append("SOUND_MAX");
             readByte += parser.skipHeader();
             readByte += parser.readDword(m_max);
         }
         else if(parser.isNextTag("SOUND_COMMENTS"))
         {
+            m_serializedFieldOrder.append("SOUND_COMMENTS");
             readByte += parser.readHeader();
             readByte += parser.readString(m_comment, parser.nodeLen());
         }
@@ -96,21 +115,25 @@ uint CSound::deserialize(util::CMobParser &parser)
         }
         else if(parser.isNextTag("SOUND_RESNAME"))
         {
+            m_serializedFieldOrder.append("SOUND_RESNAME");
             readByte += parser.skipHeader();
             readByte += parser.readStringArray(m_aResName);
         }
         else if(parser.isNextTag("SOUND_RANGE2"))
         {
+            m_serializedFieldOrder.append("SOUND_RANGE2");
             readByte += parser.skipHeader();
             readByte += parser.readDword(m_range2);
         }
         else if(parser.isNextTag("SOUND_AMBIENT"))
         {
+            m_serializedFieldOrder.append("SOUND_AMBIENT");
             readByte += parser.skipHeader();
             readByte += parser.readBool(m_bAmbient);
         }
         else if(parser.isNextTag("SOUND_IS_MUSIC"))
         {
+            m_serializedFieldOrder.append("SOUND_IS_MUSIC");
             readByte += parser.skipHeader();
             readByte += parser.readBool(m_bMusic);
         }
@@ -143,49 +166,35 @@ uint CSound::serialize(util::CMobParser& parser)
     uint writeByte(0);
     writeByte += parser.startSection("SOUND");
 
-    writeByte += parser.startSection("SOUND_ID");
-    writeByte += parser.writeDword(m_mapID);
-    parser.endSection(); //SOUND_ID
-
-    writeByte += parser.startSection("SOUND_POSITION");
-    writeByte += parser.writePlot(m_position);
-    parser.endSection(); //SOUND_POSITION
-
-    writeByte += parser.startSection("SOUND_RANGE");
-    writeByte += parser.writeDword(m_range);
-    parser.endSection(); //SOUND_RANGE
-
-    writeByte += parser.startSection("SOUND_NAME");
-    writeByte += parser.writeString(m_name);
-    parser.endSection(); //SOUND_NAME
-
-    writeByte += parser.startSection("SOUND_MIN");
-    writeByte += parser.writeDword(m_min);
-    parser.endSection(); //SOUND_MIN
-
-    writeByte += parser.startSection("SOUND_MAX");
-    writeByte += parser.writeDword(m_max);
-    parser.endSection(); //SOUND_MAX
-
-    writeByte += parser.startSection("SOUND_COMMENTS");
-    writeByte += parser.writeString(m_comment);
-    parser.endSection(); //SOUND_COMMENTS
-
-    writeByte += parser.startSection("SOUND_RESNAME");
-    writeByte += parser.writeStringArray(m_aResName, "SOUND_RESNAME");
-    parser.endSection(); //SOUND_RESNAME
-
-    writeByte += parser.startSection("SOUND_RANGE2");
-    writeByte += parser.writeDword(m_range2);
-    parser.endSection(); //SOUND_RANGE2
-
-    writeByte += parser.startSection("SOUND_AMBIENT");
-    writeByte += parser.writeBool(m_bAmbient);
-    parser.endSection(); //SOUND_AMBIENT
-
-    writeByte += parser.startSection("SOUND_IS_MUSIC");
-    writeByte += parser.writeBool(m_bMusic);
-    parser.endSection(); //SOUND_IS_MUSIC
+    const QStringList fieldOrder = m_serializedFieldOrder.isEmpty()
+        ? canonicalSoundFieldOrder() : m_serializedFieldOrder;
+    for (const QString& field : fieldOrder)
+    {
+        writeByte += parser.startSection(field);
+        if (field == "SOUND_ID")
+            writeByte += parser.writeDword(m_mapID);
+        else if (field == "SOUND_POSITION")
+            writeByte += parser.writePlot(m_position);
+        else if (field == "SOUND_RANGE")
+            writeByte += parser.writeDword(m_range);
+        else if (field == "SOUND_NAME")
+            writeByte += parser.writeString(m_name);
+        else if (field == "SOUND_MIN")
+            writeByte += parser.writeDword(m_min);
+        else if (field == "SOUND_MAX")
+            writeByte += parser.writeDword(m_max);
+        else if (field == "SOUND_COMMENTS")
+            writeByte += parser.writeString(m_comment);
+        else if (field == "SOUND_RESNAME")
+            writeByte += parser.writeStringArray(m_aResName, "SOUND_RESNAME");
+        else if (field == "SOUND_RANGE2")
+            writeByte += parser.writeDword(m_range2);
+        else if (field == "SOUND_AMBIENT")
+            writeByte += parser.writeBool(m_bAmbient);
+        else if (field == "SOUND_IS_MUSIC")
+            writeByte += parser.writeBool(m_bMusic);
+        parser.endSection();
+    }
 
     parser.endSection(); //"SOUND"
     return writeByte;
