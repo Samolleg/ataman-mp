@@ -1541,7 +1541,14 @@ bool CMob::saveAs(const QFileInfo& path)
         }
         else
         {
-            serializeMob(data);
+            ei::log(eLogFatal, QString("Refusing dirty MOB save until UI edits use provenance transactions path:%1")
+                .arg(filePath));
+            QMessageBox::critical(nullptr, "Lossless MOB save not available yet",
+                "This document contains edits, but the edited UI fields have not yet been migrated to the "
+                "provenance-based MobEditTransaction save path.\n\n"
+                "Endurance will not fall back to the legacy rebuilding serializer. No destination or backup "
+                "file was changed. You can still use Save As on an unchanged MOB for a byte-identical copy.");
+            return false;
         }
 
         if(data.size() < 16 || (!m_originalData.isEmpty() && data.left(4) != m_originalData.left(4)))
