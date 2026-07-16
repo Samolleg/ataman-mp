@@ -9,11 +9,32 @@ Current development release: `0.1.0-alpha.14`.
 
 ## Current focus
 
-- [x] Reopen and structurally validate staged MOB/MPR output before atomic replacement.
+- [ ] Collect structured alpha.14 testing-group results, including successful
+  tests, workflow logs, source hashes, load order, MobExplorer comparisons, and
+  focused in-game results.
 - [ ] Expand changed-save regression coverage across the private JMV map corpus.
 - [ ] Finish lossless preservation of unknown MOB records and MPR archive details.
 
 These are the remaining safety gates before editing live maps can be recommended.
+
+## Alpha.14 testing campaign
+
+- [x] Build and checksum-verify the private alpha.14 testing-group package.
+- [x] Include source, symbols, GPL notices, validation notes, safe-test rules,
+  bug-report instructions, and a shared test matrix.
+- [x] Record base-game `zone3obr.mob` humanoid textures as a known unresolved
+  issue instead of treating candidate-name lookup as a rendering fix.
+- [ ] Collect coverage for MPR-first, MOB-first, MOB-only, terrain
+  attach/detach, repeated open/close, and cold/warm loading.
+- [ ] Collect narrow changed-save tests for properties, copied objects, patrol
+  points, scripts, and terrain, followed by Endurance reopen, MobExplorer
+  comparison, `drawall`, unload/reload, and graceful exit.
+- [ ] Triage every crash against its matching rotated workflow log and exact
+  reproduction steps; do not infer one cause from a shared crash address.
+- [ ] Convert confirmed regressions into minimized synthetic fixtures where the
+  format permits it without distributing game or JMV assets.
+- [ ] Publish the next private alpha only after fixes and package validation;
+  keep alpha.14 immutable once it has been handed to testers.
 
 ## Foundation and identity
 
@@ -97,10 +118,12 @@ These are the remaining safety gates before editing live maps can be recommended
 - [ ] Introduce the full `MapWorkspace` model: optional MPR, multiple MOBs, explicit active document.
 - [ ] Add Close MPR and Close Active MOB commands.
 - [ ] Add an explicit Open Matching MOB convenience command.
-- [ ] Reproject display positions safely when terrain is attached or detached.
+- [x] Reproject display positions safely when terrain is attached or detached
+  without changing stored MOB coordinates.
 - [ ] Disable only terrain-dependent tools in MOB-only mode.
 - [ ] Add independent `.mpr` and `.mob` drag-and-drop behavior.
-- [ ] Add Open Workspace and `--profile-load` support.
+- [x] Add headless `--profile-load` discovery and JSON output.
+- [ ] Add Open Workspace support.
 
 ## UI and script workflow
 
@@ -120,6 +143,11 @@ These are the remaining safety gates before editing live maps can be recommended
 - [x] Keep all live maps untouched during automated tests; use hashed disposable copies.
 - [x] Provide `--validate`, `--roundtrip-check`, and JSON output for automation.
 - [x] Add the JMV setup wizard with auto-discovery and explicit confirmation.
+- [x] Move Game and Mod Setup under Settings and suppress automatic legacy
+  resource dialogs and warnings.
+- [x] Use the selected profile's preferred Maps directory for Open dialogs.
+- [x] Refresh resource state and viewport geometry after setup without requiring
+  an editor restart.
 - [ ] Validate archive signatures and show source precedence during setup.
 - [ ] Offer a read-only, previewed import of compatible upstream `options.json` values.
 - [ ] Maintain a hash inventory for the private Zone 1/3/4/6/12/18/19 integration corpus.
@@ -132,6 +160,8 @@ These are the remaining safety gates before editing live maps can be recommended
 - [x] `0.1.0-alpha.14`: testing-group build with Settings-based setup,
   explicit base-game humanoid known issue, database appearance diagnostics, and
   a coordinated test/report matrix.
+- [ ] Next private alpha: address confirmed alpha.14 regressions and publish a
+  coverage summary from the group test matrix.
 - [ ] `0.1.0-beta.1`: correct indexed resources and responsive fast loading.
 - [ ] `0.1.0-rc.1`: independent workspace workflow, UI, script editing, and completed safety validation.
 - [ ] `1.0.0`: JMV-ready release passing the full corpus, MobExplorer, and in-game validation matrix.
@@ -158,8 +188,11 @@ or move it into the relevant section above without losing its history.
 ### Medium priority
 
 - [ ] Load database-defined humanoid textures for humans, skeletons, and orcs where applicable.
-  - Base-game/JMV primary skin lookup is implemented; keep this open until
-    visual corpus testing covers all humanoid models and secondary layers.
+  - Prototype skin-index parsing and candidate lookup are implemented.
+  - JMV remains the working visual baseline; base-game `zone3obr.mob` is still
+    incorrect and must be retested against the full database/template pipeline.
+  - Keep this open until visual corpus testing covers primary and secondary
+    layers for all supported humanoid models.
 - [ ] Render humans with the weapons and armor assigned by their database setup.
   - Account for one-handed weapon plus shield, dual-wield, and two-handed configurations.
 
