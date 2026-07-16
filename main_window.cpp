@@ -10,6 +10,10 @@
 #include <QUndoView>
 #include <QSettings>
 #include <QAction>
+#include <QDesktopServices>
+#include <QTimer>
+#include <QUrl>
+#include <QPushButton>
 
 #include "resourcemanager.h"
 #include "landscape.h"
@@ -60,14 +64,55 @@ MainWindow::MainWindow(QWidget* parent) :
     m_ui->setupUi(this); //init CView core also
 
     QAction* openBackupFolder = new QAction(tr("Open Backup Folder"), this);
+    QAction* openLogsFolder = new QAction(tr("Open Logs Folder"), this);
+    QAction* openBugReportingGuide = new QAction(tr("Open Bug Reporting Guide"), this);
     m_ui->menuTools->addSeparator();
     m_ui->menuTools->addAction(openBackupFolder);
+    m_ui->menuTools->addAction(openLogsFolder);
+    m_ui->menuTools->addAction(openBugReportingGuide);
     connect(openBackupFolder, &QAction::triggered, this, [this]()
     {
         QString error;
         if(!CBackupManager::openBackupFolder(&error))
             QMessageBox::warning(this, tr("Endurance backups"), error);
     });
+    connect(openLogsFolder, &QAction::triggered, this, [this]()
+    {
+        const QString path = QDir::current().absoluteFilePath("logs");
+        QDir().mkpath(path);
+        if(!QDesktopServices::openUrl(QUrl::fromLocalFile(path)))
+            QMessageBox::warning(this, tr("Endurance logs"),
+                tr("Could not open the logs folder:\n%1").arg(path));
+    });
+    connect(openBugReportingGuide, &QAction::triggered, this, [this]()
+    {
+        const QString path = QDir::current().absoluteFilePath("BUG_REPORTING.md");
+        if(!QFileInfo::exists(path) || !QDesktopServices::openUrl(QUrl::fromLocalFile(path)))
+            QMessageBox::warning(this, tr("Endurance bug reports"),
+                tr("BUG_REPORTING.md was not found beside the editor executable."));
+    });
+
+    if(!m_settings->hasConfiguredResources())
+    {
+        QTimer::singleShot(0, this, [this]()
+        {
+            QMessageBox prompt(this);
+            prompt.setIcon(QMessageBox::Information);
+            prompt.setWindowTitle(tr("Configure game resources"));
+            prompt.setText(tr("No Evil Islands resource archives are configured yet."));
+            prompt.setInformativeText(tr(
+                "Before loading maps, add one RES archive from each resource directory you need. "
+                "Endurance will index every RES archive in those directories. Put mod archives above base-game archives to give them priority."));
+            QPushButton* configure = prompt.addButton(tr("Open Resource Settings"), QMessageBox::AcceptRole);
+            prompt.addButton(tr("Continue Without Resources"), QMessageBox::RejectRole);
+            prompt.exec();
+            if(prompt.clickedButton() == configure)
+            {
+                m_settings->onShow(eOptSetResource);
+                setEnabled(false);
+            }
+        });
+    }
 
     QSettings uiSettings;
     restoreGeometry(uiSettings.value("ui/mainWindowGeometry").toByteArray());

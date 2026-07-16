@@ -5,11 +5,11 @@ An item is checked only after its implementation has landed and received the
 listed level of validation. New findings and wishlist requests belong here so
 they do not get lost between test sessions.
 
-Current development release: `0.1.0-alpha.10`.
+Current development release: `0.1.0-alpha.11`.
 
 ## Current focus
 
-- [ ] Reopen and structurally validate staged MOB/MPR output before atomic replacement.
+- [x] Reopen and structurally validate staged MOB/MPR output before atomic replacement.
 - [ ] Expand changed-save regression coverage across the private JMV map corpus.
 - [ ] Finish lossless preservation of unknown MOB records and MPR archive details.
 
@@ -39,7 +39,7 @@ These are the remaining safety gates before editing live maps can be recommended
 - [x] Refuse replacement when the required pre-save backup fails.
 - [x] Add a rotating backup retention policy and **Tools > Open Backup Folder**.
 - [x] Verify backup creation, metadata, hashes, and source preservation in a disposable end-to-end test.
-- [ ] Validate the staged document with a fresh parser before committing it.
+- [x] Validate the staged document with a fresh parser before committing it.
 - [ ] Preserve every unknown MOB record, nested length, ordering detail, and raw payload.
 - [ ] Complete corpus tests for every observed object family and optional section.
 - [ ] Complete lossless MPR preservation for names, timestamps, alignment, and extra entries.
@@ -120,7 +120,7 @@ These are the remaining safety gates before editing live maps can be recommended
 
 ## Release gates
 
-- [x] `0.1.0-alpha.1` through `0.1.0-alpha.10`: initial safety, diagnostics, resources, serializer fixes, backups, model-qualified skins, terrain-atlas correctness, and consolidated duplicate-ID reporting.
+- [x] `0.1.0-alpha.1` through `0.1.0-alpha.11`: initial safety, diagnostics, resources, serializer fixes, backups, model-qualified skins, terrain-atlas correctness, consolidated duplicate-ID reporting, staged-save validation, and mod-maker preview reporting.
 - [ ] `0.1.0-beta.1`: correct indexed resources and responsive fast loading.
 - [ ] `0.1.0-rc.1`: independent workspace workflow, UI, script editing, and completed safety validation.
 - [ ] `1.0.0`: JMV-ready release passing the full corpus, MobExplorer, and in-game validation matrix.

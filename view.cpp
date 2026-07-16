@@ -322,7 +322,10 @@ void CView::unloadLand()
         QMessageBox::StandardButton reply;
         reply = QMessageBox::question(this, "Unload MPR", m_pLand->filePath().baseName() + " has unsaved changes.\nDo you want to save changes?", QMessageBox::Save|QMessageBox::No|QMessageBox::Cancel);
         if(reply == QMessageBox::Save)
-            m_pLand->save();
+        {
+            if(!m_pLand->save())
+                return;
+        }
         else if(reply == QMessageBox::Cancel)
             return;
 
@@ -339,8 +342,8 @@ void CView::saveLand()
 {
     if(m_pLand->isMprLoad())
     {
-        m_pLand->save();
-        emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMprDirtyFlag, "");
+        if(m_pLand->save())
+            emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMprDirtyFlag, "");
     }
 }
 
@@ -350,11 +353,15 @@ void CView::saveLandAs()
         return;
 
     const QFileInfo fileName = QFileDialog::getSaveFileName(this, "Save " + m_pLand->filePath().fileName() + " as... ", "" , tr("Landscape (*.mpr);;)"));
+    if(fileName.filePath().isEmpty())
+        return;
     //QFileInfo fileName("c:\\konst\\Проклятые Земли (Дополнение)\\Mods\\ferneo_mod\\Maps\\zone1gTest.mpr");
 
-    m_pLand->saveMapAs(fileName);
-    emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMpr, fileName.baseName());
-    emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMprDirtyFlag, "");
+    if(m_pLand->saveMapAs(fileName))
+    {
+        emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMpr, fileName.baseName());
+        emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMprDirtyFlag, "");
+    }
 }
 
 int CView::select(const SSelect &selectParam, bool bAddToSelect)
@@ -928,11 +935,13 @@ void CView::saveMobAs()
     if (fileName.fileName().endsWith(".json"))
         m_activeMob->serializeJson(fileName);
     else if (fileName.fileName().endsWith(".mob"))
-        m_activeMob->saveAs(fileName);
-
-    m_activeMob->setFileName(fileName);
-    emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataActiveMob, fileName.baseName());
-    emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataDirtyFlag, "");
+    {
+        if(!m_activeMob->saveAs(fileName))
+            return;
+        m_activeMob->setFileName(fileName);
+        emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataActiveMob, fileName.baseName());
+        emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataDirtyFlag, "");
+    }
 }
 
 void CView::saveActiveMob()
@@ -942,9 +951,8 @@ void CView::saveActiveMob()
 
     QSet<uint> aId;
     showDuplicateIdWarning(this, m_activeMob->checkUniqueId(aId));
-    m_activeMob->save();
-    m_activeMob->setDirty(false);
-    emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataDirtyFlag, "");
+    if(m_activeMob->save())
+        emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataDirtyFlag, "");
 }
 
 void CView::saveAllMob()
@@ -959,9 +967,9 @@ void CView::saveAllMob()
     foreach(pMob, m_aMob)
     {
         pMob->save();
-        pMob->setDirty(false);
     }
-    emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataDirtyFlag, "");
+    if(m_activeMob && !m_activeMob->isDirty())
+        emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataDirtyFlag, "");
 }
 
 void CView::unloadActiveMob()
@@ -981,7 +989,10 @@ void CView::unloadActiveMob()
             QMessageBox::StandardButton reply;
             reply = QMessageBox::question(this, "Unload MOB", pMob->mobName() + " has unsaved changes.\nDo you want to save changes?", QMessageBox::Save|QMessageBox::No|QMessageBox::Cancel);
             if(reply == QMessageBox::Save)
-                pMob->save();
+            {
+                if(!pMob->save())
+                    return;
+            }
             else if(reply == QMessageBox::Cancel)
                 return;
 
@@ -1346,7 +1357,13 @@ bool CView::onExit()
         QMessageBox::StandardButton reply;
         reply = QMessageBox::question(this, "Exit", pMob->mobName() + " has unsaved changes.\nDo you want to save changes?", QMessageBox::Save|QMessageBox::No|QMessageBox::Cancel);
         if(reply == QMessageBox::Save)
-            pMob->save();
+        {
+            if(!pMob->save())
+            {
+                bCloseAllowed = false;
+                break;
+            }
+        }
         else if(reply == QMessageBox::Cancel)
         {
             bCloseAllowed = false;
@@ -1361,7 +1378,10 @@ bool CView::onExit()
         QMessageBox::StandardButton reply;
         reply = QMessageBox::question(this, "Exit", m_pLand->filePath().baseName() + " has unsaved changes.\nDo you want to save changes?", QMessageBox::Save|QMessageBox::No|QMessageBox::Cancel);
         if(reply == QMessageBox::Save)
-            m_pLand->save();
+        {
+            if(!m_pLand->save())
+                bCloseAllowed = false;
+        }
         else if(reply == QMessageBox::Cancel)
         {
             bCloseAllowed = false;

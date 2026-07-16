@@ -3,7 +3,7 @@
 ## Supported baseline
 
 - Windows x64
-- Qt 5.15.x with the MinGW x64 toolchain
+- Qt 5.12 or newer with the MinGW x64 toolchain
 - qmake
 - C++11
 
@@ -28,6 +28,10 @@ Set-Location tests
 qmake endurance_document_tests.pro CONFIG+=release
 mingw32-make -j4
 .\release\endurance_document_tests.exe
+
+qmake backup_manager_tests.pro CONFIG+=release
+mingw32-make -j4
+.\release\backup_manager_tests.exe
 
 qmake resource_name_tests.pro CONFIG+=release
 mingw32-make -j4

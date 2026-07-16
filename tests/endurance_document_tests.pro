@@ -7,6 +7,9 @@ TARGET = endurance_document_tests
 INCLUDEPATH += ..
 SOURCES += \
     endurance_document_tests.cpp \
-    ../endurance_document.cpp
+    ../endurance_document.cpp \
+    ../staged_save_validator.cpp
 
-HEADERS += ../endurance_document.h
+HEADERS += \
+    ../endurance_document.h \
+    ../staged_save_validator.h

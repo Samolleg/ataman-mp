@@ -38,6 +38,7 @@ public:
     void onShow(EOptSet optSet = eOptSetGeneral);
     bool onClose();
     void resetOptions();
+    bool hasConfiguredResources() const;
     void attachMainWindow(MainWindow* mainWindow) {m_mainWindow = mainWindow;}
 
 protected:

@@ -10,6 +10,7 @@
 #include "node.h"
 #include "sector.h"
 #include "backup_manager.h"
+#include "staged_save_validator.h"
 #include "log.h"
 
 CLandscape* CLandscape::m_pLand = nullptr;
@@ -223,17 +224,43 @@ void CLandscape::readMap(const QFileInfo& path)
     ei::log(eLogInfo, "End read terrain");
 }
 
-void CLandscape::save()
+bool CLandscape::save()
 {
-    saveMapAs(m_filePath);
+    return saveMapAs(m_filePath);
 }
 
-void CLandscape::saveMapAs(const QFileInfo& path)
+bool CLandscape::saveMapAs(const QFileInfo& path)
 {
     // TODO: check if source texture has correct textureSize and tileSize with map header
 
     //QString filePath = path.filePath();
     //QFile file(filePath);
+    QByteArray data;
+
+    if(!m_bDirty && !m_originalMprData.isEmpty())
+    {
+        data = m_originalMprData;
+    }
+    else
+    {
+        CResFile mprFile(m_originalMprData);
+        serializeMpr(m_innerMapName, mprFile);
+        data = mprFile.generateResData();
+    }
+
+    const SStagedSaveValidation validation = validateStagedSave(data, path);
+    if(!validation.success)
+    {
+        ei::log(eLogFatal, QString("Refusing MPR save because staged validation failed path:%1 error:%2")
+            .arg(path.absoluteFilePath(), validation.error));
+        QMessageBox::critical(nullptr, "Endurance safe save",
+            QString("The staged MPR failed fresh validation, so the destination was not replaced.\n\n%1")
+                .arg(validation.error));
+        return false;
+    }
+    ei::log(eLogInfo, QString("Staged MPR validation passed path:%1 size:%2 sha256:%3")
+        .arg(path.absoluteFilePath()).arg(validation.size).arg(validation.sha256));
+
     if(path.exists())
     {
         const SBackupResult saveBackup = CBackupManager().snapshotBeforeSave(path);
@@ -244,29 +271,21 @@ void CLandscape::saveMapAs(const QFileInfo& path)
             QMessageBox::critical(nullptr, "Endurance safe save",
                 QString("The pre-save backup failed, so the source file was not replaced.\n\n%1")
                     .arg(saveBackup.error));
-            return;
+            return false;
         }
     }
 
-    if(!m_bDirty && !m_originalMprData.isEmpty())
-    {
-        QSaveFile out(path.filePath());
-        if(!out.open(QIODevice::WriteOnly) || out.write(m_originalMprData) != m_originalMprData.size() || !out.commit())
-            ei::log(eLogFatal, QString("Atomic MPR copy failed:%1").arg(path.filePath()));
-        return;
-    }
-
-    CResFile mprFile(m_originalMprData);
-    serializeMpr(m_innerMapName, mprFile);
-    const QByteArray data = mprFile.generateResData();
     QSaveFile out(path.filePath());
     if(!out.open(QIODevice::WriteOnly) || out.write(data) != data.size() || !out.commit())
     {
         ei::log(eLogFatal, QString("Atomic MPR save failed:%1").arg(path.filePath()));
-        return;
+        QMessageBox::critical(nullptr, "Endurance safe save",
+            "Atomic MPR save failed. The destination was not replaced.");
+        return false;
     }
     m_originalMprData = data;
     m_bDirty = false;
+    return true;
 }
 
 void CLandscape::draw(QOpenGLShaderProgram* program)

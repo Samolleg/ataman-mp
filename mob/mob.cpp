@@ -30,6 +30,7 @@
 #include "layout_components/tree_view.h"
 #include "backup_manager.h"
 #include "duplicate_id_report.h"
+#include "staged_save_validator.h"
 
 CMob::CMob():
     m_view(nullptr)
@@ -1481,7 +1482,7 @@ void CMob::clearSelect(bool bClearLogic)
     }
 }
 
-void CMob::saveAs(const QFileInfo& path)
+bool CMob::saveAs(const QFileInfo& path)
 {
     const QString filePath = path.filePath();
     try
@@ -1501,8 +1502,21 @@ void CMob::saveAs(const QFileInfo& path)
         {
             ei::log(eLogFatal, QString("Refusing to save structurally invalid MOB output:%1").arg(filePath));
             QMessageBox::critical(nullptr, "Endurance safe save", "The staged MOB failed its envelope check. The source file was not replaced.");
-            return;
+            return false;
         }
+
+        const SStagedSaveValidation validation = validateStagedSave(data, path);
+        if(!validation.success)
+        {
+            ei::log(eLogFatal, QString("Refusing MOB save because staged validation failed path:%1 error:%2")
+                .arg(filePath, validation.error));
+            QMessageBox::critical(nullptr, "Endurance safe save",
+                QString("The staged MOB failed fresh validation, so the destination was not replaced.\n\n%1")
+                    .arg(validation.error));
+            return false;
+        }
+        ei::log(eLogInfo, QString("Staged MOB validation passed path:%1 size:%2 sha256:%3")
+            .arg(filePath).arg(validation.size).arg(validation.sha256));
 
         if(QFileInfo(filePath).exists())
         {
@@ -1514,7 +1528,7 @@ void CMob::saveAs(const QFileInfo& path)
                 QMessageBox::critical(nullptr, "Endurance safe save",
                     QString("The pre-save backup failed, so the source file was not replaced.\n\n%1")
                         .arg(saveBackup.error));
-                return;
+                return false;
             }
         }
 
@@ -1523,18 +1537,22 @@ void CMob::saveAs(const QFileInfo& path)
         {
             ei::log(eLogFatal, QString("Atomic MOB save failed:%1 error:%2").arg(filePath, file.errorString()));
             QMessageBox::critical(nullptr, "Endurance safe save", "Atomic save failed. The source file was not replaced.");
-            return;
+            return false;
         }
         m_originalData = data;
+        m_bDirty = false;
+        return true;
     }
     catch (const std::exception& ex)
     {
         ei::log(eLogFatal, ex.what());
+        QMessageBox::critical(nullptr, "Endurance safe save",
+            QString("The MOB save failed before replacement.\n\n%1").arg(ex.what()));
+        return false;
     }
-
 }
 
-void CMob::save()
+bool CMob::save()
 {
-    saveAs(m_filePath);
+    return saveAs(m_filePath);
 }

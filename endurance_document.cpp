@@ -100,6 +100,49 @@ bool CMobDocument::load(const QFileInfo& file, CValidationReport* report)
         return false;
     }
 
+    QDataStream rootStream(m_originalBytes);
+    rootStream.setByteOrder(QDataStream::LittleEndian);
+    quint32 rootType = 0;
+    quint32 rootLength = 0;
+    rootStream >> rootType >> rootLength;
+    if(rootType != 40960 || rootLength < 8 || rootLength > quint32(m_originalBytes.size()))
+    {
+        if(report)
+            report->add("mob.root", EValidationSeverity::Error,
+                        QString("Invalid MOB root header (type %1, length %2, file size %3)")
+                            .arg(rootType).arg(rootLength).arg(m_originalBytes.size()),
+                        file.filePath());
+        return false;
+    }
+
+    quint32 topLevelOffset = rootLength;
+    while(topLevelOffset < quint32(m_originalBytes.size()))
+    {
+        if(quint64(topLevelOffset) + 8 > quint64(m_originalBytes.size()))
+        {
+            if(report)
+                report->add("mob.trailing_header", EValidationSeverity::Error,
+                            "A trailing MOB section has an incomplete header", file.filePath());
+            return false;
+        }
+        QDataStream trailingStream(m_originalBytes.mid(int(topLevelOffset), 8));
+        trailingStream.setByteOrder(QDataStream::LittleEndian);
+        quint32 trailingType = 0;
+        quint32 trailingLength = 0;
+        trailingStream >> trailingType >> trailingLength;
+        if(trailingType != 826366246 || trailingLength < 8 ||
+           quint64(topLevelOffset) + trailingLength > quint64(m_originalBytes.size()))
+        {
+            if(report)
+                report->add("mob.trailing_section", EValidationSeverity::Error,
+                            QString("Invalid trailing MOB section at offset %1 (type %2, length %3)")
+                                .arg(topLevelOffset).arg(trailingType).arg(trailingLength),
+                            file.filePath());
+            return false;
+        }
+        topLevelOffset += trailingLength;
+    }
+
     QMap<quint32, int> counts;
     const QByteArray marker("NewObject");
     int markerOffset = 0;
@@ -163,12 +206,58 @@ bool CMprDocument::load(const QFileInfo& file, CValidationReport* report)
     QDataStream stream(m_originalBytes);
     stream.setByteOrder(QDataStream::LittleEndian);
     quint32 signature = 0;
-    stream >> signature;
+    quint32 tableSize = 0;
+    quint32 tableOffset = 0;
+    quint32 namesLength = 0;
+    stream >> signature >> tableSize >> tableOffset >> namesLength;
     if(signature != 0x019CE23C)
     {
         if(report)
             report->add("mpr.signature", EValidationSeverity::Error, "Invalid MPR/RES signature", file.filePath());
         return false;
+    }
+    const quint64 entrySize = 22;
+    const quint64 tableBytes = quint64(tableSize) * entrySize;
+    const quint64 namesOffset = quint64(tableOffset) + tableBytes;
+    if(tableOffset < 16 || namesOffset > quint64(m_originalBytes.size()) ||
+       namesOffset + namesLength > quint64(m_originalBytes.size()))
+    {
+        if(report)
+            report->add("mpr.table", EValidationSeverity::Error,
+                        "The RES table or filename buffer extends outside the MPR file",
+                        file.filePath());
+        return false;
+    }
+
+    if(!stream.device()->seek(tableOffset))
+    {
+        if(report)
+            report->add("mpr.table_seek", EValidationSeverity::Error,
+                        "Could not seek to the MPR resource table", file.filePath());
+        return false;
+    }
+    for(quint32 index = 0; index < tableSize; ++index)
+    {
+        quint32 nextIndex = 0;
+        quint32 dataSize = 0;
+        quint32 dataOffset = 0;
+        quint32 lastWriteTime = 0;
+        quint16 nameLength = 0;
+        quint32 nameOffset = 0;
+        stream >> nextIndex >> dataSize >> dataOffset >> lastWriteTime >> nameLength >> nameOffset;
+        Q_UNUSED(lastWriteTime);
+        const bool nextIndexValid = nextIndex == quint32(-1) || nextIndex < tableSize;
+        const bool dataValid = dataOffset >= 16 &&
+            quint64(dataOffset) + dataSize <= quint64(tableOffset);
+        const bool nameValid = quint64(nameOffset) + nameLength <= namesLength;
+        if(stream.status() != QDataStream::Ok || !nextIndexValid || !dataValid || !nameValid)
+        {
+            if(report)
+                report->add("mpr.entry", EValidationSeverity::Error,
+                            QString("Invalid MPR resource-table entry %1").arg(index),
+                            file.filePath());
+            return false;
+        }
     }
     if(report)
         report->add("mpr.lossless", EValidationSeverity::Info, "Unchanged serialization is byte-identical", file.fileName());

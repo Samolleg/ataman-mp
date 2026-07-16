@@ -126,6 +126,22 @@ void CSettings::resetOptions()
         m_fileOpt.remove();
 }
 
+bool CSettings::hasConfiguredResources() const
+{
+    for(EOptSet set : {eOptSetGeneral, eOptSetResource})
+    {
+        for(const auto& option : m_aOptCategory.value(set))
+        {
+            if(option->name() != "figPaths" && option->name() != "texPaths")
+                continue;
+            const COptStringList* paths = dynamic_cast<const COptStringList*>(option.get());
+            if(paths && !paths->value().isEmpty())
+                return true;
+        }
+    }
+    return false;
+}
+
 void CSettings::updateOptUi()
 {
     for (auto& cat: m_aOptCategory)

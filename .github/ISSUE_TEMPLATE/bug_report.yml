@@ -1,0 +1,74 @@
+name: Endurance preview report
+description: Report a bug, crash, save test, or successful validation result
+title: "[alpha preview] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not attach game maps, RES archives, extracted assets, or crash dumps. Review workflow logs for private paths before uploading them.
+  - type: input
+    id: version
+    attributes:
+      label: Endurance version
+      placeholder: 0.1.0-alpha.11
+    validations:
+      required: true
+  - type: dropdown
+    id: result_type
+    attributes:
+      label: Report type
+      options:
+        - Hard crash
+        - Save or structural difference
+        - Missing or incorrect resource
+        - Visual/rendering problem
+        - Performance or responsiveness
+        - UI/workflow problem
+        - Successful validation test
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+      description: Start from launching the editor and include MPR/MOB opening order.
+      placeholder: |
+        1. Launch Endurance
+        2. Open ...
+        3. Change ...
+        4. Save/reopen/test ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected_actual
+    attributes:
+      label: Expected and actual result
+    validations:
+      required: true
+  - type: textarea
+    id: inputs
+    attributes:
+      label: Input identification
+      description: List filenames and SHA-256 hashes. Do not upload the files.
+    validations:
+      required: true
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Test safety
+      options:
+        - label: I tested disposable copies and retained the originals.
+          required: true
+        - label: I reviewed attached logs for private paths.
+          required: true
+  - type: textarea
+    id: intended_edits
+    attributes:
+      label: Intended edits and validation
+      description: For save tests, list the exact objects/fields changed, MobExplorer comparison, and in-game test.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Workflow log and additional context
+      description: Drag the affected workflow log here after reviewing it. Never attach a crash dump to an ordinary issue.
