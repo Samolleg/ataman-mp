@@ -880,14 +880,17 @@ void CMob::deleteNode(uint mapId)
     }
 }
 
-CNode *CMob::undo_deleteNode(uint mapId)
+CNode *CMob::undo_deleteNode(uint mapId, int restoreIndex)
 {
     CNode* pNode = nullptr;
     foreach(pNode, m_aDeletedNode)
     {
         if(pNode->mapId() == mapId)
         {
-            m_aNode.append(pNode);
+            if(restoreIndex >= 0 && restoreIndex <= m_aNode.size())
+                m_aNode.insert(restoreIndex, pNode);
+            else
+                m_aNode.append(pNode);
             m_aDeletedNode.removeOne(pNode);
             ei::log(eLogDebug, QString("node with %1 restored").arg(pNode->mapId()));
             logicNodesUpdate();
@@ -964,6 +967,7 @@ int CMob::readMob(QFileInfo &path)
     }
     updateObjects();
     logicNodesUpdate();
+    captureCleanProjection();
     return 0;
 }
 
@@ -1249,9 +1253,10 @@ void CMob::serializeJson(const QFileInfo& file)
     f.close();
 }
 
-void CMob::serializeMob(QByteArray& data)
+void CMob::serializeMob(QByteArray& data, bool writeLog)
 {
-    ei::log(eLogInfo, "Start write mob");
+    if(writeLog)
+        ei::log(eLogInfo, "Start write mob");
     uint writeByte(0);
     util::CMobParser parser(data, true);
     //header "OBJECT_DB_FILE"
@@ -1416,8 +1421,36 @@ void CMob::serializeMob(QByteArray& data)
         writeByte += parser.writeAiGraph(m_aiGraph, m_aiGraph.length());
         parser.endSection();
     }
-    ei::log(eLogInfo, "End write mob");
+    if(writeLog)
+        ei::log(eLogInfo, "End write mob");
     return;
+}
+
+void CMob::captureCleanProjection()
+{
+    m_cleanProjection.clear();
+    serializeMob(m_cleanProjection, false);
+    m_bDirty = false;
+}
+
+bool CMob::refreshDirtyFromProjection()
+{
+    const bool wasDirty = m_bDirty;
+    if(m_cleanProjection.isEmpty())
+    {
+        m_bDirty = true;
+        return m_bDirty;
+    }
+
+    QByteArray currentProjection;
+    serializeMob(currentProjection, false);
+    m_bDirty = currentProjection != m_cleanProjection;
+    if(wasDirty != m_bDirty)
+    {
+        ei::log(eLogInfo, QString("MOB projected dirty state changed mob:%1 dirty:%2")
+                .arg(mobName()).arg(m_bDirty ? "true" : "false"));
+    }
+    return m_bDirty;
 }
 
 void CMob::createNode(CNode *pNode)
@@ -1533,6 +1566,7 @@ bool CMob::saveAs(const QFileInfo& path)
     const QString filePath = path.filePath();
     try
     {
+        refreshDirtyFromProjection();
         QByteArray data;
         if(!m_bDirty && !m_originalData.isEmpty())
         {
@@ -1547,7 +1581,8 @@ bool CMob::saveAs(const QFileInfo& path)
                 "This document contains edits, but the edited UI fields have not yet been migrated to the "
                 "provenance-based MobEditTransaction save path.\n\n"
                 "Endurance will not fall back to the legacy rebuilding serializer. No destination or backup "
-                "file was changed. You can still use Save As on an unchanged MOB for a byte-identical copy.");
+                "file was changed. Undo every edit until the title's changed marker disappears, then Save As "
+                "can create a byte-identical copy of the original MOB.");
             return false;
         }
 
@@ -1593,7 +1628,7 @@ bool CMob::saveAs(const QFileInfo& path)
             return false;
         }
         m_originalData = data;
-        m_bDirty = false;
+        captureCleanProjection();
         return true;
     }
     catch (const std::exception& ex)

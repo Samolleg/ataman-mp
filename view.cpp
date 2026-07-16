@@ -106,6 +106,10 @@ void CView::attach(CSettings* pSettings, QTableWidget* pParam, QUndoStack* pStac
     m_tableManager.reset(new CTableManager(pParam));
     QObject::connect(m_tableManager.get(), SIGNAL(onUpdateProperty(const QSharedPointer<IPropertyBase>)), this, SLOT(onParamChange(const QSharedPointer<IPropertyBase>&)));
     m_pUndoStack = pStack;
+    connect(m_pUndoStack, &QUndoStack::indexChanged, this, [this](int)
+    {
+        refreshMobDirtyStates();
+    });
 
     m_pProgress = pProgress;
     m_pOp.reset(new COperation(new CSelect(this)));
@@ -2299,13 +2303,24 @@ void CView::setDirtyMpr()
 
 void CView::setDurty(CMob* pMob)
 {
-    if(pMob && pMob != m_activeMob)
-        pMob->setDirty();
-    else
+    CMob* changedMob = pMob ? pMob : m_activeMob;
+    if(!changedMob)
+        return;
+
+    changedMob->refreshDirtyFromProjection();
+    if(changedMob == m_activeMob)
+        emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataDirtyFlag, changedMob->isDirty() ? "*" : "");
+}
+
+void CView::refreshMobDirtyStates()
+{
+    for(CMob* mob : m_aMob)
     {
-        m_activeMob->setDirty(true);
-        emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataDirtyFlag, "*");
+        if(mob)
+            mob->refreshDirtyFromProjection();
     }
+    emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataDirtyFlag,
+            (m_activeMob && m_activeMob->isDirty()) ? "*" : "");
 }
 
 void CView::resetCamPosition()

@@ -32,7 +32,7 @@ public:
     bool saveAs(const QFileInfo& path);
     bool save();
     void serializeJson(const QFileInfo& file);
-    void serializeMob(QByteArray& data);
+    void serializeMob(QByteArray& data, bool writeLog = true);
     void addNode(QList<CNode*>& aNode) {m_aNode.append(aNode); }
     void addNode(CNode* aNode) {m_aNode.append(aNode); }
     void createNode(CNode* pNode);
@@ -40,7 +40,7 @@ public:
     void undo_createNode(uint mapId);
     QList<CNode*>& nodes();
     void deleteNode(uint mapId);
-    CNode* undo_deleteNode(uint mapId);
+    CNode* undo_deleteNode(uint mapId, int restoreIndex = -1);
     void deleteNode(CNode* pNode);
     void clearSelect(bool bClearLogic = true);
     void delNodes();
@@ -63,6 +63,8 @@ public:
     bool isQuestMob() {return m_mobType == EMobType::eEMobTypeQuest;}
     void setDirty(bool bDurty = true) {m_bDirty = bDurty;}
     bool isDirty() const {return m_bDirty;}
+    void captureCleanProjection();
+    bool refreshDirtyFromProjection();
     const QVector<uint>& duplicateIds() const {return m_duplicateIds;}
     const QByteArray& originalData() const {return m_originalData;}
     void generateDiplomacyTable();
@@ -123,6 +125,7 @@ private:
     QByteArray m_directoryElements;
     QByteArray m_aiGraph;
     QByteArray m_originalData;
+    QByteArray m_cleanProjection;
     QVector<uint> m_duplicateIds;
 
     //todo: include ALL nodes into these lists, for node assemly use children\parents

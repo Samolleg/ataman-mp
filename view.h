@@ -136,6 +136,7 @@ protected:
     void focusOutEvent(QFocusEvent* event) override;
 
 private:
+    void refreshMobDirtyStates();
     void initShaders();
     void draw();
     CNode* pickObject(QList<CNode*>& aNode, int x, int y);

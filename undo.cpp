@@ -74,12 +74,15 @@ CDeleteNodeCommand::CDeleteNodeCommand(CView* pView, uint nodeId, QUndoCommand *
     :QUndoCommand(parent)
     ,m_pView(pView)
     ,m_nodeId(nodeId)
+    ,m_originalIndex(-1)
 {
+    if(m_pView && m_pView->currentMob())
+        m_originalIndex = m_pView->currentMob()->nodes().indexOf(m_pView->currentMob()->nodeByMapId(nodeId));
 }
 
 void CDeleteNodeCommand::undo()
 {
-    auto pNode = m_pView->currentMob()->undo_deleteNode(m_nodeId);
+    auto pNode = m_pView->currentMob()->undo_deleteNode(m_nodeId, m_originalIndex);
     if(nullptr != pNode)
         emit undo_deleteNodeSignal(pNode);
     m_pView->setDurty();

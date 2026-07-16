@@ -55,6 +55,7 @@ signals:
 private:
     CView* m_pView;
     uint m_nodeId;
+    int m_originalIndex;
 };
 
 class CDeleteLogicPoint: public QUndoCommand
