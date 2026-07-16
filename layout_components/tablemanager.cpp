@@ -7,6 +7,8 @@
 #include <QGuiApplication>
 #include <QClipboard>
 #include <QSignalBlocker>
+#include <QFocusEvent>
+#include <QKeyEvent>
 
 #include "tablemanager.h"
 #include "resourcemanager.h"
@@ -667,15 +669,22 @@ CComboDynItem::CComboDynItem(const QSharedPointer<IPropertyBase> &prop)
     m_pValue.reset(prop->clone());
 
     if(m_pValue->isInit())
+    {
         setEditText(m_pValue->toString());
+        m_committedText = m_pValue->toString();
+    }
     else
+    {
         lineEdit()->setPlaceholderText("undefined/different");
+        m_committedText.clear();
+    }
     // A proxy-model refresh may highlight its first row. Only a deliberate
     // user activation is allowed to commit a dropdown value.
     QObject::connect(this, SIGNAL(activated(QString)), this, SLOT(_onChange(QString)));
     QObject::connect(m_pCompleter, SIGNAL(activated(QString)), this, SLOT(_onChange(QString)));
-    QObject::connect(lineEdit(), SIGNAL(editingFinished()), this, SLOT(_onEditingFinished()));
+    QObject::connect(lineEdit(), SIGNAL(returnPressed()), this, SLOT(_onEditingFinished()));
     QObject::connect(lineEdit(), SIGNAL(textEdited(QString)), this, SLOT(_onFilterTextChanged(QString)));
+    lineEdit()->installEventFilter(this);
 }
 
 void CComboDynItem::ensureOptionsLoaded()
@@ -709,6 +718,7 @@ void CComboDynItem::showPopup()
 
 void CComboDynItem::_onChange(QString str)
 {
+    m_committedText = str;
     if(m_pValue->isEqual(str))
         return;
 
@@ -732,6 +742,49 @@ void CComboDynItem::_onFilterTextChanged(const QString& text)
     // provides prefix-only suggestions without changing or applying a value.
     m_pCompleter->setCompletionPrefix(text);
     m_pCompleter->complete();
+}
+
+void CComboDynItem::keyPressEvent(QKeyEvent* event)
+{
+    if(event->key() == Qt::Key_Escape)
+    {
+        cancelPendingEdit();
+        event->accept();
+        return;
+    }
+    QComboBox::keyPressEvent(event);
+}
+
+void CComboDynItem::focusOutEvent(QFocusEvent* event)
+{
+    // Typed text is only a filter preview until Enter or an explicit
+    // suggestion activation commits it.
+    QComboBox::focusOutEvent(event);
+    cancelPendingEdit();
+}
+
+bool CComboDynItem::eventFilter(QObject* watched, QEvent* event)
+{
+    if(watched == lineEdit() && event->type() == QEvent::FocusOut)
+        cancelPendingEdit();
+    if(watched == lineEdit() && event->type() == QEvent::KeyPress)
+    {
+        QKeyEvent* keyEvent = static_cast<QKeyEvent*>(event);
+        if(keyEvent->key() == Qt::Key_Escape)
+        {
+            cancelPendingEdit();
+            return true;
+        }
+    }
+    return QComboBox::eventFilter(watched, event);
+}
+
+void CComboDynItem::cancelPendingEdit()
+{
+    if(m_pCompleter && m_pCompleter->popup())
+        m_pCompleter->popup()->hide();
+    hidePopup();
+    setEditText(m_committedText);
 }
 
 C3DItem::C3DItem(const QSharedPointer<IPropertyBase>& propX,const QSharedPointer<IPropertyBase>& propY, const QSharedPointer<IPropertyBase>& propZ)

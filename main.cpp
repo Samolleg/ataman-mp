@@ -218,12 +218,35 @@ int runHeadlessCommand(QApplication& app)
             prefixesOnly = prefixesOnly && completion.startsWith("h", Qt::CaseInsensitive);
         const bool valueStable = combo.currentText() == "h"
                 && combo.value()->toString() == "original_model" && appliedChanges == 0;
+        QFocusEvent focusOut(QEvent::FocusOut, Qt::OtherFocusReason);
+        QApplication::sendEvent(combo.lineEdit(), &focusOut);
+        const bool focusCancel = combo.currentText() == "original_model"
+                && combo.value()->toString() == "original_model" && appliedChanges == 0;
+        combo.setEditText("house");
+        combo._onFilterTextChanged("house");
+        QKeyEvent escape(QEvent::KeyPress, Qt::Key_Escape, Qt::NoModifier);
+        QApplication::sendEvent(combo.lineEdit(), &escape);
+        const bool escapeCancel = combo.currentText() == "original_model"
+                && combo.value()->toString() == "original_model" && appliedChanges == 0;
+        combo.setEditText("custom_model");
+        combo._onEditingFinished();
+        const bool enterCommit = combo.value()->toString() == "custom_model" && appliedChanges == 1;
+        combo._onChange("house");
+        const bool clickCommit = combo.value()->toString() == "house" && appliedChanges == 2;
+        const bool passed = prefixesOnly && valueStable && focusCancel && escapeCancel
+                && enterCommit && clickCommit;
         QTextStream output(stdout);
         output << "asset-picker prefixes=" << completions.join(",") << "\n"
-               << (prefixesOnly && valueStable ? "PASS" : "FAIL")
-               << ": prefix filtering does not auto-apply a result\n";
+               << "prefixesOnly=" << prefixesOnly
+               << " valueStable=" << valueStable
+               << " focusCancel=" << focusCancel
+               << " escapeCancel=" << escapeCancel
+               << " enterCommit=" << enterCommit
+               << " clickCommit=" << clickCommit << "\n"
+               << (passed ? "PASS" : "FAIL")
+               << ": prefix preview cancels on focus/Escape and commits on Enter/click\n";
         output.flush();
-        return prefixesOnly && valueStable ? 0 : 1;
+        return passed ? 0 : 1;
     }
 
     if(mobDiff)

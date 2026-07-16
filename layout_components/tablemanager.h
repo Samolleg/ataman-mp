@@ -134,6 +134,9 @@ public:
             QComboBox::wheelEvent(e);
     }
     void showPopup() override;
+    void keyPressEvent(QKeyEvent* event) override;
+    void focusOutEvent(QFocusEvent* event) override;
+    bool eventFilter(QObject* watched, QEvent* event) override;
 
 public slots:
     void _onChange(QString str); //override default 'on change event'
@@ -151,6 +154,9 @@ private:
     QSharedPointer<QStringListModel> m_pListModel;
     QCompleter* m_pCompleter;
     bool m_optionsLoaded;
+    QString m_committedText;
+
+    void cancelPendingEdit();
 };
 
 ///
