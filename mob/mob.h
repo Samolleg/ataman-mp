@@ -43,6 +43,7 @@ public:
     void deleteNode(uint mapId);
     CNode* undo_deleteNode(uint mapId, int restoreIndex = -1);
     void deleteNode(CNode* pNode);
+    void discardUncommittedNode(CNode* pNode);
     void clearSelect(bool bClearLogic = true);
     void delNodes();
     CNode* nodeByMapId(uint id);

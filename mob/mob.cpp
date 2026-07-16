@@ -1563,6 +1563,18 @@ void CMob::deleteNode(CNode *pNode)
     }
 }
 
+void CMob::discardUncommittedNode(CNode* pNode)
+{
+    if(!pNode)
+        return;
+    const bool removedActive = m_aNode.removeOne(pNode);
+    const bool removedDeleted = m_aDeletedNode.removeOne(pNode);
+    if(!removedActive && !removedDeleted)
+        return;
+    logicNodesUpdate();
+    delete pNode;
+}
+
 void CMob::clearSelect(bool bClearLogic)
 {
     CNode* pNode;

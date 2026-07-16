@@ -51,6 +51,7 @@ CView::CView(QWidget *parent, const QGLWidget *pShareWidget) : QGLWidget(parent,
   ,m_pUndoStack(nullptr)
   ,m_pProgress(nullptr)
   ,m_pendingOperationOwnsPaste(false)
+  ,m_pendingPasteMob(nullptr)
   ,m_clipboard_buffer_file(QString("%1%2%3").arg(QDir::tempPath()).arg(QDir::separator()).arg("copy_paste_buffer.json"))
   ,m_recentOpenedFile_file(QString("%1%2%3").arg(QDir::tempPath()).arg(QDir::separator()).arg("recent_opened.json"))
   ,m_activeMob(nullptr)
@@ -1885,6 +1886,10 @@ bool CView::cancelPendingOperation()
         return false;
 
     const EOperationMethod method = m_pOp->operationMethod();
+    const bool cancelPastePreview = m_pendingOperationOwnsPaste;
+    CMob* pasteMob = m_pendingPasteMob;
+    const QList<CNode*> pasteNodes = m_pendingPasteNodes;
+    const QList<CNode*> originalSelection = m_pendingPasteOriginalSelection;
     QString methodName;
     switch(method)
     {
@@ -1912,6 +1917,24 @@ bool CView::cancelPendingOperation()
     m_operationBackup.clear();
     m_unitMovementBackup.clear();
     m_pendingOperationOwnsPaste = false;
+    m_pendingPasteMob = nullptr;
+    m_pendingPasteNodes.clear();
+    m_pendingPasteOriginalSelection.clear();
+
+    if(cancelPastePreview && pasteMob)
+    {
+        for(CNode* node : pasteNodes)
+        {
+            if(!node || !pasteMob->nodes().contains(node))
+                continue;
+            const uint nodeId = node->mapId();
+            pasteMob->discardUncommittedNode(node);
+            if(m_pTree)
+                m_pTree->onNodeDelete(nodeId);
+        }
+        restoreSelection(originalSelection);
+        setDurty(pasteMob);
+    }
     m_pOp->changeState(new CSelect(this));
     ei::log(eLogInfo, QString("Cancelled pending viewport operation method:%1 trackedObjects:%2")
             .arg(methodName).arg(trackedObjects));
@@ -1923,13 +1946,10 @@ bool CView::prepareUndo()
     if(!m_pOp || m_pOp->operationMethod() == eOperationMethodSelect)
         return true;
 
-    // A pasted object is created before its automatic placement transform begins.
-    // In that one case Undo cancels placement and also undoes the paste command.
-    // For every other unfinished transform, Undo only cancels the gesture because
-    // there is no committed movement command on the stack yet.
-    const bool undoPaste = m_pendingOperationOwnsPaste;
+    // Unfinished transforms are previews, not committed history entries.
+    // Cancelling a paste preview also removes its temporary objects.
     cancelPendingOperation();
-    return undoPaste;
+    return false;
 }
 
 void CView::operationSetBackup(EOperationAxisType operationType)
@@ -1993,6 +2013,28 @@ void CView::operationRevert(EOperationAxisType operationType)
 
 void CView::operationApply(EOperationAxisType operationType)
 {
+    if(m_pendingOperationOwnsPaste && m_pendingPasteMob && !m_pendingPasteNodes.isEmpty())
+    {
+        m_pUndoStack->beginMacro(QString("Paste %1 object%2")
+                .arg(m_pendingPasteNodes.size())
+                .arg(m_pendingPasteNodes.size() == 1 ? "" : "s"));
+        for(CNode* node : m_pendingPasteNodes)
+        {
+            CCreateNodeCommand* create = new CCreateNodeCommand(this, m_pendingPasteMob, node);
+            QObject::connect(create, SIGNAL(addNodeSignal(CNode*)), m_pTree, SLOT(addNodeToTree(CNode*)));
+            QObject::connect(create, SIGNAL(undo_addNodeSignal(uint)), m_pTree, SLOT(onNodeDelete(uint)));
+            m_pUndoStack->push(create);
+        }
+        m_pUndoStack->push(new CSelectionCommand(this, m_pendingPasteOriginalSelection,
+                                                  m_pendingPasteNodes,
+                                                  "Select pasted objects"));
+        m_pUndoStack->endMacro();
+        m_pendingOperationOwnsPaste = false;
+        m_pendingPasteMob = nullptr;
+        m_pendingPasteNodes.clear();
+        m_pendingPasteOriginalSelection.clear();
+    }
+
     QQuaternion quat;
     QVector3D rot;
     const bool grouped = m_operationBackup.size() > 1;
@@ -2381,20 +2423,21 @@ void CView::clipboradObjectsToScene()
     }
 
     const QList<CNode*> originalSelection = selectionSnapshot();
-    m_pUndoStack->beginMacro(QString("Paste %1 object%2")
-            .arg(array.size()).arg(array.size() == 1 ? "" : "s"));
+    QList<CNode*> previewNodes;
     m_activeMob->clearSelect();
     for(auto it = array.begin(); it < array.end(); ++it)
     {
-        CCreateNodeCommand* pUndo = new CCreateNodeCommand(this, it->toObject());
-        QObject::connect(pUndo, SIGNAL(addNodeSignal(CNode*)), m_pTree, SLOT(addNodeToTree(CNode*)));
-        QObject::connect(pUndo, SIGNAL(undo_addNodeSignal(uint)), m_pTree, SLOT(onNodeDelete(uint)));
-        m_pUndoStack->push(pUndo);
+        CNode* node = m_activeMob->createNode(it->toObject());
+        if(!node)
+            continue;
+        previewNodes.append(node);
+        m_pTree->addNodeToTree(node);
     }
-    const QList<CNode*> pastedSelection = selectionSnapshot();
-    m_pUndoStack->push(new CSelectionCommand(this, originalSelection, pastedSelection,
-                                              "Select pasted objects"));
-    m_pUndoStack->endMacro();
+    if(previewNodes.isEmpty())
+    {
+        restoreSelection(originalSelection);
+        return;
+    }
     //move copyed nodes to new mouse position
     QVector3D oldMousePos;
     QJsonArray arrPoint = obj["Mouse position"].toArray();
@@ -2405,8 +2448,11 @@ void CView::clipboradObjectsToScene()
     auto posOnLand = getTerrainPos(pos.x(), pos.y());
     auto mouseDif = posOnLand - oldMousePos;
     mouseDif.setZ(0.0f);
-    m_pOp->changeState(new CMoveAxis(this, EOperateAxisXY));
     m_pendingOperationOwnsPaste = true;
+    m_pendingPasteMob = m_activeMob;
+    m_pendingPasteNodes = previewNodes;
+    m_pendingPasteOriginalSelection = originalSelection;
+    m_pOp->changeState(new CMoveAxis(this, EOperateAxisXY));
     moveTo(mouseDif);
 
     viewParameters();

@@ -199,6 +199,9 @@ private:
     QMap<CNode*, QVector3D> m_operationBackup;
     QMap<CUnit*, QVector<QVector3D>> m_unitMovementBackup;
     bool m_pendingOperationOwnsPaste;
+    CMob* m_pendingPasteMob;
+    QList<CNode*> m_pendingPasteNodes;
+    QList<CNode*> m_pendingPasteOriginalSelection;
     //EOperationType m_operationType;
     QSharedPointer<CSelectFrame> m_selectFrame;
     QFile m_clipboard_buffer_file;

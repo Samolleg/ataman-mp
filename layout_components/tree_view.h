@@ -44,10 +44,11 @@ private:
     void recalcParent(QTreeWidgetItem* pItem);
     QTreeWidgetItem* category(QString& categoryName);
 
-private slots:
+public slots:
     void itemClickedOver(QTreeWidgetItem* pItem, int column);
     void onNodeDelete(uint nodeId);
     void addNodeToTree(CNode* pNode);
+private slots:
     void onChangeNodeId(uint oldId, uint newId);
     void onChangeObjectName(CNode* pNode);
 

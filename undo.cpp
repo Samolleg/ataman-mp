@@ -85,8 +85,22 @@ CCreateNodeCommand::CCreateNodeCommand(CView* pView, QJsonObject nodeData, QUndo
     ,m_createdNodeId(0)
     ,m_createdNodeIndex(-1)
     ,m_created(false)
+    ,m_skipInitialRedo(false)
 {
     //setText("Node created");
+}
+
+CCreateNodeCommand::CCreateNodeCommand(CView* pView, CMob* pMob,
+                                       CNode* existingNode, QUndoCommand *parent):
+    QUndoCommand(parent)
+    ,m_pView(pView)
+    ,m_pMob(pMob)
+    ,m_pCreatedNode(existingNode)
+    ,m_createdNodeId(existingNode ? existingNode->mapId() : 0)
+    ,m_createdNodeIndex(pMob && existingNode ? pMob->nodes().indexOf(existingNode) : -1)
+    ,m_created(existingNode != nullptr)
+    ,m_skipInitialRedo(existingNode != nullptr)
+{
 }
 
 void CCreateNodeCommand::undo()
@@ -104,7 +118,13 @@ void CCreateNodeCommand::undo()
 void CCreateNodeCommand::redo()
 {
     CNode* pNode = nullptr;
-    if(!m_created)
+    const bool adoptingExistingNode = m_skipInitialRedo;
+    if(adoptingExistingNode)
+    {
+        m_skipInitialRedo = false;
+        pNode = m_pCreatedNode;
+    }
+    else if(!m_created)
     {
         pNode = m_pMob ? m_pMob->createNode(m_nodeData) : nullptr;
         if(!pNode)
@@ -131,10 +151,13 @@ void CCreateNodeCommand::redo()
             return;
         }
     }
+    if(!pNode)
+        return;
     pNode->setState(ENodeState::eSelect);
     setText("Node created ID: " + QString::number(m_createdNodeId));
     m_pView->setDurty(m_pMob);
-    emit addNodeSignal(pNode);
+    if(!adoptingExistingNode)
+        emit addNodeSignal(pNode);
 }
 
 CSelectionCommand::CSelectionCommand(CView* pView, const QList<CNode*>& before,

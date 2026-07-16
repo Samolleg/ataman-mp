@@ -65,6 +65,8 @@ public:
     enum { Id = 106 };
     CCreateNodeCommand() = delete;
     CCreateNodeCommand(CView* pView, QJsonObject nodeData, QUndoCommand *parent = nullptr);
+    CCreateNodeCommand(CView* pView, CMob* pMob, CNode* existingNode,
+                       QUndoCommand *parent = nullptr);
 
     void undo() override;
     void redo() override;
@@ -83,6 +85,7 @@ private:
     uint m_createdNodeId;
     int m_createdNodeIndex;
     bool m_created;
+    bool m_skipInitialRedo;
 };
 
 class CSelectionCommand: public QUndoCommand
