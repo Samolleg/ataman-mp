@@ -33,6 +33,10 @@ qmake backup_manager_tests.pro CONFIG+=release
 mingw32-make -j4
 .\release\backup_manager_tests.exe
 
+qmake resource_profile_tests.pro CONFIG+=release
+mingw32-make -j4
+.\release\resource_profile_tests.exe
+
 qmake resource_name_tests.pro CONFIG+=release
 mingw32-make -j4
 .\release\resource_name_tests.exe
@@ -52,6 +56,9 @@ copies:
 EIMapperEndurance.exe --validate <map.mob>
 EIMapperEndurance.exe --roundtrip-check <map.mob> --json
 EIMapperEndurance.exe --roundtrip-check <map.mpr> --json
+EIMapperEndurance.exe --profile-load <game-installation> --json
 ```
 
 `--roundtrip-check` never writes the input file.
+`--profile-load` only discovers and validates a recommended resource profile;
+it does not write settings or modify the installation.

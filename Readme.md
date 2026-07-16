@@ -4,7 +4,7 @@ EI Mapper: Endurance Edition is an independently versioned derivative of
 [`konstvest/ei_maper`](https://github.com/konstvest/ei_maper), focused on safe,
 fast Evil Islands and Jamais Vu map editing.
 
-Current development version: `0.1.0-alpha.11`.
+Current development version: `0.1.0-alpha.12`.
 
 Project status and upcoming work are tracked in the living
 [Endurance roadmap](ROADMAP.md).
@@ -36,6 +36,8 @@ commit `1cebe83d` tagged as `upstream-1cebe83d`.
 - The outliner is resizable and its layout is persisted.
 - Embedded scripts can be opened through the OS editor and explicitly imported.
 - Headless `--validate` and `--roundtrip-check` commands are available.
+- First-run setup accepts the game installation folder and automatically
+  configures built-in or external mod resource profiles.
 
 The alpha is not yet a production replacement for the original editor. In
 particular, changed MOB serialization still needs corpus-wide losslessness and

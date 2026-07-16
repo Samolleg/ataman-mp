@@ -30,6 +30,7 @@
 #include "log.h"
 #include "scene.h"
 #include "backup_manager.h"
+#include "resource_setup_dialog.h"
 
 void testFunc()
 {
@@ -66,7 +67,9 @@ MainWindow::MainWindow(QWidget* parent) :
     QAction* openBackupFolder = new QAction(tr("Open Backup Folder"), this);
     QAction* openLogsFolder = new QAction(tr("Open Logs Folder"), this);
     QAction* openBugReportingGuide = new QAction(tr("Open Bug Reporting Guide"), this);
+    QAction* gameAndModSetup = new QAction(tr("Game and Mod Setup..."), this);
     m_ui->menuTools->addSeparator();
+    m_ui->menuTools->addAction(gameAndModSetup);
     m_ui->menuTools->addAction(openBackupFolder);
     m_ui->menuTools->addAction(openLogsFolder);
     m_ui->menuTools->addAction(openBugReportingGuide);
@@ -91,27 +94,11 @@ MainWindow::MainWindow(QWidget* parent) :
             QMessageBox::warning(this, tr("Endurance bug reports"),
                 tr("BUG_REPORTING.md was not found beside the editor executable."));
     });
+    connect(gameAndModSetup, &QAction::triggered, this, &MainWindow::showGameAndModSetup);
 
     if(!m_settings->hasConfiguredResources())
     {
-        QTimer::singleShot(0, this, [this]()
-        {
-            QMessageBox prompt(this);
-            prompt.setIcon(QMessageBox::Information);
-            prompt.setWindowTitle(tr("Configure game resources"));
-            prompt.setText(tr("No Evil Islands resource archives are configured yet."));
-            prompt.setInformativeText(tr(
-                "Before loading maps, add one RES archive from each resource directory you need. "
-                "Endurance will index every RES archive in those directories. Put mod archives above base-game archives to give them priority."));
-            QPushButton* configure = prompt.addButton(tr("Open Resource Settings"), QMessageBox::AcceptRole);
-            prompt.addButton(tr("Continue Without Resources"), QMessageBox::RejectRole);
-            prompt.exec();
-            if(prompt.clickedButton() == configure)
-            {
-                m_settings->onShow(eOptSetResource);
-                setEnabled(false);
-            }
-        });
+        QTimer::singleShot(0, this, &MainWindow::showGameAndModSetup);
     }
 
     QSettings uiSettings;
@@ -310,6 +297,19 @@ void MainWindow::on_actionOpen_triggered()
         COpenCommand* pLoadCommand = new COpenCommand(m_pView, fileName);
         m_undoStack->push(pLoadCommand);
     }
+}
+
+void MainWindow::showGameAndModSetup()
+{
+    CResourceSetupDialog dialog(m_settings->configuredGameRoot(), this);
+    if(dialog.exec() != QDialog::Accepted)
+        return;
+    const SResourceProfileEvaluation profile = dialog.evaluation();
+    m_settings->applyResourceProfile(profile);
+    QMessageBox::information(this, tr("Game and mod setup"),
+        tr("%1 is ready. Endurance found %2 RES archives across %3 ordered resource folders.")
+            .arg(profile.profileName).arg(profile.archiveCount)
+            .arg(profile.resourceDirectories.size()));
 }
 
 bool MainWindow::openDocument(const QFileInfo& fileName)

@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "id": "jamais-vu-derived-example",
+  "displayName": "My mod",
+  "fixedModRoots": ["Starter/MODS/MyMod"],
+  "searchParent": "Starter/MODS",
+  "directoryNameContains": ["MyMod"],
+  "requiredFiles": ["main.lua", "addon.dll"],
+  "requiredDirectories": ["res", "Maps"],
+  "signatureFiles": ["res/databaseMyMod.res"],
+  "resourceDirectories": ["{modRoot}/res", "{gameRoot}/Res"],
+  "mapDirectories": ["{modRoot}/Maps", "{gameRoot}/Maps"]
+}

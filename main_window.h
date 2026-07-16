@@ -47,6 +47,7 @@ private:
     void connectUiButtons();
     bool isExitAllowed();
     void closeAll();
+    void showGameAndModSetup();
 
 private slots:
     void showOutliner(bool bShow);

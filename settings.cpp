@@ -11,6 +11,7 @@
 #include "main_window.h"
 #include "utils.h"
 #include "log.h"
+#include "resource_profile.h"
 
 CSettings::CSettings(QWidget *parent) :
     QWidget(parent)
@@ -132,7 +133,8 @@ bool CSettings::hasConfiguredResources() const
     {
         for(const auto& option : m_aOptCategory.value(set))
         {
-            if(option->name() != "figPaths" && option->name() != "texPaths")
+            if(option->name() != "resourceRoots" &&
+               option->name() != "figPaths" && option->name() != "texPaths")
                 continue;
             const COptStringList* paths = dynamic_cast<const COptStringList*>(option.get());
             if(paths && !paths->value().isEmpty())
@@ -140,6 +142,41 @@ bool CSettings::hasConfiguredResources() const
         }
     }
     return false;
+}
+
+QString CSettings::configuredGameRoot() const
+{
+    for(const auto& option : m_aOptCategory.value(eOptSetGeneral))
+    {
+        if(option->name() == "gameRoot")
+        {
+            const COptString* root = dynamic_cast<const COptString*>(option.get());
+            return root ? root->value() : QString();
+        }
+    }
+    return QString();
+}
+
+void CSettings::applyResourceProfile(const SResourceProfileEvaluation& profile)
+{
+    if(!profile.valid)
+        return;
+    if(COptString* root = dynamic_cast<COptString*>(opt(eOptSetGeneral, "gameRoot")))
+        root->setValue(profile.gameRoot);
+    if(COptString* id = dynamic_cast<COptString*>(opt(eOptSetResource, "resourceProfile")))
+        id->setValue(profile.profileId);
+    if(COptStringList* roots = dynamic_cast<COptStringList*>(opt(eOptSetResource, "resourceRoots")))
+        roots->setValue(profile.resourceDirectories.toVector());
+    if(COptStringList* maps = dynamic_cast<COptStringList*>(opt(eOptSetResource, "mapRoots")))
+        maps->setValue(profile.mapDirectories.toVector());
+    for(const char* legacyName : {"figPaths", "texPaths"})
+        if(COptStringList* legacy = dynamic_cast<COptStringList*>(opt(eOptSetResource, legacyName)))
+            legacy->setValue(QVector<QString>());
+    updateOptUi();
+    saveOptions();
+    ei::log(eLogInfo, QString("Applied resource profile id:%1 gameRoot:%2 resourceDirectories:%3 archives:%4")
+            .arg(profile.profileId, profile.gameRoot)
+            .arg(profile.resourceDirectories.size()).arg(profile.archiveCount));
 }
 
 void CSettings::updateOptUi()
@@ -254,6 +291,10 @@ void CSettings::initOptions()
     //init default options for strings
     aOpt.append(QSharedPointer<COpt>(new COptStringList("figPaths", {})));
     aOpt.append(QSharedPointer<COpt>(new COptStringList("texPaths", {})));
+    aOpt.append(QSharedPointer<COpt>(new COptStringList("resourceRoots", {})));
+    aOpt.append(QSharedPointer<COpt>(new COptStringList("mapRoots", {})));
+    aOpt.append(QSharedPointer<COpt>(new COptString("resourceProfile", "")));
+    aOpt.append(QSharedPointer<COpt>(new COptString("gameRoot", "")));
     aOpt.append(QSharedPointer<COpt>(new COptString("lastVisitedFolder", "")));
 
     //init default options for bools
@@ -476,11 +517,11 @@ void CSettings::on_buttonApply_clicked()
 void CSettings::on_figPathAdd_clicked()
 {
     COptString* option = dynamic_cast<COptString*>(opt(eOptSetGeneral, "lastVisitedFolder"));
-    QFileInfo fileName = QFileDialog::getOpenFileName(this, "Choose path to Figures", option->value(), tr("RES (*.res)"));
-    if(!fileName.path().isEmpty())
+    const QString directory = QFileDialog::getExistingDirectory(this, "Choose legacy figure resource directory", option->value());
+    if(!directory.isEmpty())
     {
-        ui->figPaths->addItem(fileName.filePath());
-        option->setValue(fileName.path());
+        ui->figPaths->addItem(directory);
+        option->setValue(directory);
     }
 }
 
@@ -488,11 +529,11 @@ void CSettings::on_figPathAdd_clicked()
 void CSettings::on_texPathAdd_clicked()
 {
     COptString* option = dynamic_cast<COptString*>(opt(eOptSetGeneral, "lastVisitedFolder"));
-    QFileInfo fileName = QFileDialog::getOpenFileName(this, "Choose path to mod Textures", option->value(), tr("RES (*.res)"));
-    if(!fileName.path().isEmpty())
+    const QString directory = QFileDialog::getExistingDirectory(this, "Choose legacy texture resource directory", option->value());
+    if(!directory.isEmpty())
     {
-        ui->texPaths->addItem(fileName.filePath());
-        option->setValue(fileName.path());
+        ui->texPaths->addItem(directory);
+        option->setValue(directory);
     }
 }
 

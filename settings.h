@@ -20,6 +20,7 @@ enum EOptSet
     ,eOptSetCount
 };
 class MainWindow;
+struct SResourceProfileEvaluation;
 
 ///
 /// \brief The CSettings class provides a UI for changing options.
@@ -39,6 +40,8 @@ public:
     bool onClose();
     void resetOptions();
     bool hasConfiguredResources() const;
+    QString configuredGameRoot() const;
+    void applyResourceProfile(const SResourceProfileEvaluation& profile);
     void attachMainWindow(MainWindow* mainWindow) {m_mainWindow = mainWindow;}
 
 protected:

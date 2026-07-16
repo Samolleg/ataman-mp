@@ -129,11 +129,19 @@ QVector<QString> configuredResourceSources(CSettings* settings)
     QVector<QString> explicitSources;
     if(settings)
     {
-        for(QString optionName : {QString("figPaths"), QString("texPaths")})
+        auto roots = dynamic_cast<COptStringList*>(settings->opt(eOptSetResource, "resourceRoots"));
+        if(roots && !roots->value().isEmpty())
         {
-            auto option = dynamic_cast<COptStringList*>(settings->opt(eOptSetResource, optionName));
-            if(option)
-                explicitSources.append(option->value());
+            explicitSources = roots->value();
+        }
+        else
+        {
+            for(QString optionName : {QString("figPaths"), QString("texPaths")})
+            {
+                auto option = dynamic_cast<COptStringList*>(settings->opt(eOptSetResource, optionName));
+                if(option)
+                    explicitSources.append(option->value());
+            }
         }
     }
 
@@ -149,11 +157,12 @@ QVector<QString> configuredResourceSources(CSettings* settings)
     for(const QString& source : explicitSources)
     {
         const QFileInfo info(source);
-        const QString directory = info.absolutePath();
+        const QString directory = info.isDir() ? info.absoluteFilePath() : info.absolutePath();
         const QString directoryKey = QDir::cleanPath(directory).toLower();
         if(!explicitByDirectory.contains(directoryKey))
             directoryOrder.append(directory);
-        explicitByDirectory[directoryKey].append(info.absoluteFilePath());
+        if(info.isFile())
+            explicitByDirectory[directoryKey].append(info.absoluteFilePath());
     }
 
     QVector<QString> result;

@@ -865,7 +865,7 @@
            <item row="0" column="0">
             <widget class="QLabel" name="label">
              <property name="text">
-              <string>Figure Paths</string>
+              <string>Legacy figure folders (advanced)</string>
              </property>
             </widget>
            </item>
@@ -924,7 +924,7 @@
            <item row="1" column="0">
             <widget class="QLabel" name="label_4">
              <property name="text">
-              <string>Texture Paths</string>
+              <string>Legacy texture folders (advanced)</string>
              </property>
             </widget>
            </item>

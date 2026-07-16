@@ -5,7 +5,7 @@ An item is checked only after its implementation has landed and received the
 listed level of validation. New findings and wishlist requests belong here so
 they do not get lost between test sessions.
 
-Current development release: `0.1.0-alpha.11`.
+Current development release: `0.1.0-alpha.12`.
 
 ## Current focus
 
@@ -120,7 +120,7 @@ These are the remaining safety gates before editing live maps can be recommended
 
 ## Release gates
 
-- [x] `0.1.0-alpha.1` through `0.1.0-alpha.11`: initial safety, diagnostics, resources, serializer fixes, backups, model-qualified skins, terrain-atlas correctness, consolidated duplicate-ID reporting, staged-save validation, and mod-maker preview reporting.
+- [x] `0.1.0-alpha.1` through `0.1.0-alpha.12`: initial safety, diagnostics, resources, serializer fixes, backups, model-qualified skins, terrain-atlas correctness, consolidated duplicate-ID reporting, staged-save validation, mod-maker preview reporting, and installation-based reusable resource profiles.
 - [ ] `0.1.0-beta.1`: correct indexed resources and responsive fast loading.
 - [ ] `0.1.0-rc.1`: independent workspace workflow, UI, script editing, and completed safety validation.
 - [ ] `1.0.0`: JMV-ready release passing the full corpus, MobExplorer, and in-game validation matrix.

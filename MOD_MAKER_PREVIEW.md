@@ -8,12 +8,16 @@ It is not yet approved for editing the only copy of a production map.
 1. Extract the complete ZIP to a writable folder.
 2. Run `Start EI Mapper Endurance.cmd` so settings, logs, and support files use
    that folder.
-3. When prompted, open Resource Settings.
-4. Add one `.res` archive from the mod resource directory and one from the base
-   game `Res` directory. Endurance indexes every `.res` archive beside each
-   selected file.
-5. Keep the mod source above the base-game source. Higher sources override lower
-   sources. The legacy Figure/Texture labels both feed the same generic catalog.
+3. In **Game and Mod Setup**, choose the Evil Islands installation folder—the
+   folder containing `game.exe`.
+4. Endurance automatically selects the JMV preset when Jamais Vu is installed,
+   discovers its resource and map directories, and previews the result.
+5. Confirm that the JMV resource directory appears above the base-game `Res`
+   directory, then press **OK**. No individual archive selection is required.
+
+Use **Tools > Game and Mod Setup...** to change the installation or profile
+later. Other mods can add JSON presets in the `resource-profiles` directory by
+following its README and example.
 
 Do not copy another tester's `endurance-options.json`: it contains paths specific
 to their machine. Endurance does not read or overwrite upstream EI Mapper's

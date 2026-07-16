@@ -1,4 +1,5 @@
 Option set name:General
+gameRoot
 lastVisitedFolder
 version
 mouseSenseX
@@ -8,6 +9,9 @@ rangeIncrement
 logLevel
 landCheckTime
 Option set name:Resource
+resourceProfile
+resourceRoots
+mapRoots
 figPaths
 texPaths
 Option set name:Render

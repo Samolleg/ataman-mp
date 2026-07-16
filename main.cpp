@@ -5,6 +5,7 @@
 #include <QCommandLineParser>
 #include <QFileInfo>
 #include <QJsonDocument>
+#include <QJsonArray>
 #include <QJsonObject>
 #include <QTextStream>
 #include <QTimer>
@@ -12,6 +13,7 @@
 
 #include "endurance_document.h"
 #include "log.h"
+#include "resource_profile.h"
 
 #ifdef Q_OS_WIN
 #include <windows.h>
@@ -63,20 +65,52 @@ int runHeadlessCommand(QApplication& app)
     QCommandLineOption validateOption("validate", "Validate a MOB or MPR without changing it.", "file");
     QCommandLineOption roundtripOption("roundtrip-check", "Verify byte-identical unchanged serialization.", "file");
     QCommandLineOption jsonOption("json", "Emit machine-readable JSON.");
+    QCommandLineOption profileLoadOption("profile-load", "Discover the recommended resource profile for a game installation.", "game-root");
     parser.addOption(validateOption);
     parser.addOption(roundtripOption);
     parser.addOption(jsonOption);
+    parser.addOption(profileLoadOption);
     parser.addPositionalArgument("documents", "MPR and MOB documents to open in order.", "[documents...]");
     parser.process(app);
 
     const bool validate = parser.isSet(validateOption);
     const bool roundtrip = parser.isSet(roundtripOption);
-    if(!validate && !roundtrip)
+    const bool profileLoad = parser.isSet(profileLoadOption);
+    if(!validate && !roundtrip && !profileLoad)
         return -1;
-    if(validate && roundtrip)
+    if((validate ? 1 : 0) + (roundtrip ? 1 : 0) + (profileLoad ? 1 : 0) > 1)
     {
-        QTextStream(stderr) << "Choose either --validate or --roundtrip-check.\n";
+        QTextStream(stderr) << "Choose one headless command.\n";
         return 2;
+    }
+
+    if(profileLoad)
+    {
+        SResourceProfileEvaluation selected;
+        for(const SResourceProfile& profile : loadResourceProfiles())
+        {
+            const SResourceProfileEvaluation candidate =
+                evaluateResourceProfile(parser.value(profileLoadOption), profile);
+            if(candidate.valid)
+            {
+                selected = candidate;
+                break;
+            }
+            if(selected.profileId.isEmpty())
+                selected = candidate;
+        }
+        QJsonObject root;
+        root.insert("valid", selected.valid);
+        root.insert("profileId", selected.profileId);
+        root.insert("profileName", selected.profileName);
+        root.insert("gameRoot", selected.gameRoot);
+        root.insert("modRoot", selected.modRoot);
+        root.insert("archiveCount", selected.archiveCount);
+        root.insert("resourceDirectories", QJsonArray::fromStringList(selected.resourceDirectories));
+        root.insert("mapDirectories", QJsonArray::fromStringList(selected.mapDirectories));
+        root.insert("messages", QJsonArray::fromStringList(selected.messages));
+        QTextStream(stdout) << QJsonDocument(root).toJson(QJsonDocument::Indented);
+        return selected.valid ? 0 : 1;
     }
 
     const QString path = parser.value(validate ? validateOption : roundtripOption);
