@@ -16,7 +16,7 @@ No game or mod files were written, copied into Git, or opened through the editor
 - Full focused suite: 44 passed, 0 failed (document 13, profile 6, runtime
   provider 4, backup 6, duplicate-ID reporting 4, resource naming 11).
 - Production executable SHA-256:
-  `FBFAD35E81DD8BFC9FA15B8943D7BA8D92AAF48B62DC9B9CB681C907AB86EA98`.
+  `83E3B260FA1F3A5CBC2674FEA013D0127906162E50F596140B755FF963988209`.
 
 ## Private integration corpus
 

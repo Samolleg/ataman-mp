@@ -36,6 +36,7 @@ behavior.
 | Strict raw-section MOB tree and deterministic semantic diff | [`aaef298`](https://github.com/Ilufus/ei-mapper-endurance/commit/aaef298) | [252-file corpus validation](MOB_HARDENING_VALIDATION.md) |
 | Provenance-checked MOB leaf transactions | [`660a542`](https://github.com/Ilufus/ei-mapper-endurance/commit/660a542) | [document tests](tests/endurance_document_tests.cpp) |
 | Profile provider API and safe JMV test-run manifest contract | [`b467d87`](https://github.com/Ilufus/ei-mapper-endurance/commit/b467d87) | [runtime-provider tests](tests/runtime_provider_tests.cpp) |
+| Filterable read-only MOB diff details dialog | [`fd30be0`](https://github.com/Ilufus/ei-mapper-endurance/commit/fd30be0) | production MinGW build and [semantic-diff tests](tests/endurance_document_tests.cpp) |
 
 ## Current focus
 
@@ -213,8 +214,11 @@ These are the remaining safety gates before editing live maps can be recommended
   Ambiguous identities remain unresolved. ([`aaef298`](https://github.com/Ilufus/ei-mapper-endurance/commit/aaef298))
 - [x] Classify unchanged, added, removed, modified, moved, and ambiguous entries;
   export deterministic text/JSON reports. ([`aaef298`](https://github.com/Ilufus/ei-mapper-endurance/commit/aaef298))
-- [ ] Add the filterable in-app details panel with paths, occurrences, hashes,
-  compatibility findings, and match confidence.
+- [x] Add **Tools > Compare MOB Files** with strict validation, filterable
+  classification/match/confidence/NID/name/prototype/path/hash details, and
+  deterministic text/JSON export. ([`fd30be0`](https://github.com/Ilufus/ei-mapper-endurance/commit/fd30be0))
+- [ ] Add profile-compatibility findings to each in-app diff entry after concrete
+  runtime semantic validators exist.
 - [ ] Add the read-only 3D overlay with red removals, green additions, amber
   modifications, movement vectors, terrain/grid selection, filters, and isolated picking.
 - [ ] Add original-versus-current and candidate-save-versus-transaction entry points.
