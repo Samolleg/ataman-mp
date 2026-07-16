@@ -15,7 +15,7 @@ It is not yet approved for editing the only copy of a production map.
 5. Confirm that the JMV resource directory appears above the base-game `Res`
    directory, then press **OK**. No individual archive selection is required.
 
-Use **Tools > Game and Mod Setup...** to change the installation or profile
+Use **Settings > Game and Mod Setup...** to change the installation or profile
 later. Other mods can add JSON presets in the `resource-profiles` directory by
 following its README and example.
 

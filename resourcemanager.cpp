@@ -399,7 +399,7 @@ void CObjectList::loadFigures(QSet<QString>& aFigure)
     const QVector<QString> sources = configuredResourceSources(m_pSettings);
     if(sources.isEmpty())
     {
-        ei::log(eLogWarning, "No figure resources configured. Use Tools > Game and Mod Setup, or the advanced legacy resource settings.");
+        ei::log(eLogWarning, "No figure resources configured. Use Settings > Game and Mod Setup, or the advanced legacy resource settings.");
         return;
     }
 
@@ -726,7 +726,7 @@ void CTextureList::loadTexture(QSet<QString>& aName)
     const QVector<QString> sources = configuredResourceSources(m_pSettings);
     if(sources.isEmpty())
     {
-        ei::log(eLogWarning, "No texture resources configured. Use Tools > Game and Mod Setup, or the advanced legacy resource settings.");
+        ei::log(eLogWarning, "No texture resources configured. Use Settings > Game and Mod Setup, or the advanced legacy resource settings.");
         return;
     }
 
@@ -972,7 +972,7 @@ QOpenGLTexture* CTextureList::buildLandTex(const QString& name, int expectedTexC
     const QVector<QString> sources = configuredResourceSources(m_pSettings);
     if(sources.isEmpty())
     {
-        ei::log(eLogWarning, "Cannot build terrain textures because no resources are configured. Use Tools > Game and Mod Setup.");
+        ei::log(eLogWarning, "Cannot build terrain textures because no resources are configured. Use Settings > Game and Mod Setup.");
     }
 
     const QStringList textureNames = ei::terrainTextureResourceNames(name, expectedTexCount);

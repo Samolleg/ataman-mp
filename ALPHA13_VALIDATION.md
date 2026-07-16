@@ -5,6 +5,8 @@ Validation date: 2026-07-16
 ## First-run and viewport corrections
 
 - Game and Mod Setup now completes before the OpenGL viewport is constructed.
+- Game and Mod Setup is available under Settings alongside the advanced legacy
+  resource controls; diagnostic and support actions remain under Tools.
 - Automatic legacy resource warnings and dialogs are suppressed. The legacy
   resource-folder UI remains available as an explicitly labeled advanced action.
 - A first-run workspace receives a usable viewport/outliner split instead of

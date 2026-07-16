@@ -68,8 +68,9 @@ MainWindow::MainWindow(QWidget* parent) :
     QAction* openLogsFolder = new QAction(tr("Open Logs Folder"), this);
     QAction* openBugReportingGuide = new QAction(tr("Open Bug Reporting Guide"), this);
     QAction* gameAndModSetup = new QAction(tr("Game and Mod Setup..."), this);
+    m_ui->menuSettings->insertAction(m_ui->actionOpen_2, gameAndModSetup);
+    m_ui->menuSettings->insertSeparator(m_ui->actionOpen_2);
     m_ui->menuTools->addSeparator();
-    m_ui->menuTools->addAction(gameAndModSetup);
     m_ui->menuTools->addAction(openBackupFolder);
     m_ui->menuTools->addAction(openLogsFolder);
     m_ui->menuTools->addAction(openBugReportingGuide);
