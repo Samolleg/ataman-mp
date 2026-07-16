@@ -5,7 +5,7 @@ An item is checked only after its implementation has landed and received the
 listed level of validation. New findings and wishlist requests belong here so
 they do not get lost between test sessions.
 
-Current development release: `0.1.0-alpha.14`.
+Current development release: `0.1.0-alpha.22`.
 
 ## Implementation evidence
 
@@ -37,6 +37,7 @@ behavior.
 | Provenance-checked MOB leaf transactions | [`660a542`](https://github.com/Ilufus/ei-mapper-endurance/commit/660a542) | [document tests](tests/endurance_document_tests.cpp) |
 | Profile provider API and safe JMV test-run manifest contract | [`b467d87`](https://github.com/Ilufus/ei-mapper-endurance/commit/b467d87) | [runtime-provider tests](tests/runtime_provider_tests.cpp) |
 | Filterable read-only MOB diff details dialog | [`fd30be0`](https://github.com/Ilufus/ei-mapper-endurance/commit/fd30be0) | production MinGW build and [semantic-diff tests](tests/endurance_document_tests.cpp) |
+| Selection UX, recent files, open/save shortcuts, and editable model/texture filters | [`06d1c9b`](https://github.com/Ilufus/ei-mapper-endurance/commit/06d1c9b) | clean production MinGW build, six regression suites, Zone 1 no-op round trip, and [alpha.22 manual checks](ALPHA22_VALIDATION.md) |
 
 ## Current focus
 
@@ -76,6 +77,10 @@ behavior.
   including duplicate-NID objects
   ([`193966e`](https://github.com/Ilufus/ei-mapper-endurance/commit/193966e)).
   Focused test instructions are in [ALPHA21_VALIDATION.md](ALPHA21_VALIDATION.md).
+- [ ] Validate alpha.22 selection UX, persistent recent-file list, open/save
+  shortcuts, and keyboard-filterable model/texture fields. Implementation:
+  [`06d1c9b`](https://github.com/Ilufus/ei-mapper-endurance/commit/06d1c9b);
+  focused test instructions are in [ALPHA22_VALIDATION.md](ALPHA22_VALIDATION.md).
 - [ ] Finish lossless preservation of MPR archive details.
 
 These are the remaining safety gates before editing live maps can be recommended.
@@ -349,7 +354,9 @@ or move it into the relevant section above without losing its history.
   - Make the currently selected/active MOB explicit; new objects and pasted objects go there.
   - Show which loaded MOB owns the currently selected object.
   - Treat MOBs similarly to Unreal Engine sublevels within the loaded map workspace.
-- [ ] Allow unit texture fields to support both database-backed dropdown selection and manual keyboard entry.
+- [x] Allow model and unit texture fields to support both dropdown selection and
+  manual keyboard entry with case-insensitive filtering.
+  ([`06d1c9b`](https://github.com/Ilufus/ei-mapper-endurance/commit/06d1c9b))
 - [ ] Add periodic autosave with recoverable, versioned backup states.
 - [ ] Add a command to launch the currently loaded MPR and MOB set directly in
   game for testing (**JMV-only stretch goal**; gated by the profile provider and
