@@ -387,6 +387,19 @@ void CMob::updateObjects()
     ei::setCrashContext("idle after MOB update");
 }
 
+void CMob::reprojectForCurrentTerrain()
+{
+    CLandscape::getInstance()->projectPositions(m_aNode);
+    for(CNode* node : m_aNode)
+    {
+        if(CUnit* unit = dynamic_cast<CUnit*>(node))
+            unit->refreshLogicProjection();
+    }
+    ei::log(eLogInfo, QString("Reprojected %1 objects for %2 terrain mode")
+            .arg(m_aNode.size())
+            .arg(CLandscape::getInstance()->isMprLoad() ? "attached" : "standalone"));
+}
+
 void CMob::delNodes()
 {
     QVector<int> aInd;

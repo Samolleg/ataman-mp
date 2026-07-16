@@ -11,7 +11,6 @@
 #include <QSettings>
 #include <QAction>
 #include <QDesktopServices>
-#include <QTimer>
 #include <QUrl>
 #include <QPushButton>
 
@@ -49,7 +48,8 @@ void MainWindow::on_toolButton_2_clicked()
 
 MainWindow::MainWindow(QWidget* parent) :
     QMainWindow(parent),
-    m_ui(new Ui::MainWindow)
+    m_ui(new Ui::MainWindow),
+    m_pView(nullptr)
 {
 #ifdef QT_DEBUG
     testFunc();
@@ -96,10 +96,11 @@ MainWindow::MainWindow(QWidget* parent) :
     });
     connect(gameAndModSetup, &QAction::triggered, this, &MainWindow::showGameAndModSetup);
 
-    if(!m_settings->hasConfiguredResources())
-    {
-        QTimer::singleShot(0, this, &MainWindow::showGameAndModSetup);
-    }
+    const bool firstRunSetup = !m_settings->hasConfiguredResources();
+    // Complete first-run setup before constructing the OpenGL view. Opening the
+    // wizard later allowed initializeGL() to run against empty legacy settings.
+    if(firstRunSetup)
+        showGameAndModSetup();
 
     QSettings uiSettings;
     restoreGeometry(uiSettings.value("ui/mainWindowGeometry").toByteArray());
@@ -119,6 +120,15 @@ MainWindow::MainWindow(QWidget* parent) :
     m_pView->setMinimumSize(QSize(200, 200));
     m_pView->setMouseTracking(true);
     m_ui->workSpaceLayout->addWidget(m_pView);
+    m_ui->workspaceSplitter->setStretchFactor(0, 4);
+    m_ui->workspaceSplitter->setStretchFactor(1, 1);
+    if(firstRunSetup)
+    {
+        // Do not carry a cramped, partially initialized splitter state into the
+        // first usable session after setup.
+        m_ui->workspaceSplitter->setSizes(QList<int>() << 960 << 320);
+        m_ui->outlinerSplitter->setSizes(QList<int>() << 420 << 300);
+    }
 
 #ifndef QT_DEBUG
   m_ui->toolButton_2->hide();
@@ -306,6 +316,8 @@ void MainWindow::showGameAndModSetup()
         return;
     const SResourceProfileEvaluation profile = dialog.evaluation();
     m_settings->applyResourceProfile(profile);
+    if(m_pView)
+        m_pView->refreshAfterResourceSetup();
     QMessageBox::information(this, tr("Game and mod setup"),
         tr("%1 is ready. Endurance found %2 RES archives across %3 ordered resource folders.")
             .arg(profile.profileName).arg(profile.archiveCount)

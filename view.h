@@ -52,6 +52,7 @@ public:
     ~CView();
 
     void loadLandscape(const QFileInfo& filePath);
+    void refreshAfterResourceSetup();
     void unloadLand();
     void saveLand();
     void saveLandAs();

@@ -19,6 +19,11 @@ Use **Tools > Game and Mod Setup...** to change the installation or profile
 later. Other mods can add JSON presets in the `resource-profiles` directory by
 following its README and example.
 
+The first Open dialog starts in the preset's preferred map directory. For JMV,
+that is the Jamais Vu `Maps` directory; for the base profile, it is the game's
+root `Maps` directory. Legacy per-resource folder settings remain available as
+an explicitly labeled advanced option and never open automatically.
+
 Do not copy another tester's `endurance-options.json`: it contains paths specific
 to their machine. Endurance does not read or overwrite upstream EI Mapper's
 `options.json`.
@@ -44,3 +49,8 @@ every unknown record in every map variant.
 Use `Tools > Open Logs Folder` and follow `BUG_REPORTING.md`. Report successful
 edit tests too: knowing which map families and edit types work is part of the
 validation corpus.
+
+For alpha.13, please test both load orders after a fresh start: MPR then MOB,
+and MOB then MPR. Confirm that MOB-only camera movement works immediately and
+that attaching/detaching terrain updates display positions without changing the
+stored MOB coordinates.

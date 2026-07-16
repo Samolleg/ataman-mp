@@ -399,9 +399,7 @@ void CObjectList::loadFigures(QSet<QString>& aFigure)
     const QVector<QString> sources = configuredResourceSources(m_pSettings);
     if(sources.isEmpty())
     {
-        QMessageBox::warning(m_pSettings, "Warning","Choose path to figures.res");
-        m_pSettings->onShow(eOptSetResource);
-        //todo: wait until user choose resource file and continue
+        ei::log(eLogWarning, "No figure resources configured. Use Tools > Game and Mod Setup, or the advanced legacy resource settings.");
         return;
     }
 
@@ -458,6 +456,13 @@ ei::CFigure* CObjectList::getFigure(const QString& name)
 
 void CObjectList::initResource()
 {
+    QSet<QString> empty;
+    loadFigures(empty);
+}
+
+void CObjectList::refreshConfiguredSources()
+{
+    m_missingFigureNames.clear();
     QSet<QString> empty;
     loadFigures(empty);
 }
@@ -721,9 +726,7 @@ void CTextureList::loadTexture(QSet<QString>& aName)
     const QVector<QString> sources = configuredResourceSources(m_pSettings);
     if(sources.isEmpty())
     {
-        QMessageBox::warning(m_pSettings, "Warning", "Choose path to textures.res");
-        m_pSettings->onShow(eOptSetResource);
-        //todo: wait until user choose resource file and continue
+        ei::log(eLogWarning, "No texture resources configured. Use Tools > Game and Mod Setup, or the advanced legacy resource settings.");
         return;
     }
 
@@ -969,9 +972,7 @@ QOpenGLTexture* CTextureList::buildLandTex(const QString& name, int expectedTexC
     const QVector<QString> sources = configuredResourceSources(m_pSettings);
     if(sources.isEmpty())
     {
-        Q_ASSERT("ahtung. texture resource not found" && false);
-        QMessageBox::warning(m_pSettings, "Warning", "Choose path to textures.res");
-        m_pSettings->onShow(eOptSetResource);
+        ei::log(eLogWarning, "Cannot build terrain textures because no resources are configured. Use Tools > Game and Mod Setup.");
     }
 
     const QStringList textureNames = ei::terrainTextureResourceNames(name, expectedTexCount);
@@ -1073,6 +1074,13 @@ QOpenGLTexture* CTextureList::buildLandTex(const QString& name, int expectedTexC
     ei::log(eLogInfo, QString("Terrain atlas set ready map:%1 expected:%2 loaded:%3")
             .arg(name).arg(expectedTexCount).arg(texCount));
     return texture;
+}
+
+void CTextureList::refreshConfiguredSources()
+{
+    m_missingTextureNames.clear();
+    QSet<QString> empty;
+    loadTexture(empty);
 }
 
 

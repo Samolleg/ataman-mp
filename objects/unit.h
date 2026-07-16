@@ -205,6 +205,7 @@ public:
     void undo_createViewByIndex(int pointId, int viewId);
     CPatrolPoint *patrolByIndex(int index);
     void resetLogic();
+    void refreshLogicProjection();
 
 private:
     //"UNIT_R", eNull};

@@ -51,6 +51,9 @@ void ResourceProfileTests::jmvPresetFindsModAndBaseResources()
     QCOMPARE(result.archiveCount, 2);
     QVERIFY(result.resourceDirectories[0].endsWith("JamaisVu135/res"));
     QVERIFY(result.resourceDirectories[1].endsWith("Res"));
+    QCOMPARE(result.mapDirectories.size(), 2);
+    QVERIFY(result.mapDirectories[0].endsWith("JamaisVu135/Maps"));
+    QVERIFY(result.mapDirectories[1].endsWith("Maps"));
 }
 
 void ResourceProfileTests::basePresetDoesNotRequireJmv()
@@ -64,6 +67,8 @@ void ResourceProfileTests::basePresetDoesNotRequireJmv()
     const SResourceProfileEvaluation result = evaluateResourceProfile(root, builtInResourceProfiles()[1]);
     QVERIFY2(result.valid, qPrintable(result.messages.join('\n')));
     QCOMPARE(result.resourceDirectories.size(), 1);
+    QCOMPARE(result.mapDirectories.size(), 1);
+    QVERIFY(result.mapDirectories[0].endsWith("Maps"));
 }
 
 void ResourceProfileTests::invalidGameRootIsRejected()

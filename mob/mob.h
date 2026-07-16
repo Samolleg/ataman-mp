@@ -78,6 +78,7 @@ public:
     //functions for logic processing
     QList<CNode*>& logicNodes();
     void logicNodesUpdate();
+    void reprojectForCurrentTerrain();
     void getPatrolHash(int& unitMapIdOut, int& pointIdOut, CPatrolPoint* pPoint);
     void getViewHash(int& unitMapIdOut, int& pointIdOut, int& viewIdOut, CLookPoint* pPoint);
     int getPatrolId(uint unitMapId, CPatrolPoint* pPoint);

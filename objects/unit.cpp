@@ -568,6 +568,12 @@ void CUnit::resetLogic()
     }
 }
 
+void CUnit::refreshLogicProjection()
+{
+    for(CLogic* logic : m_aLogic)
+        logic->createLogicLines();
+}
+
 CLogic::CLogic(CUnit* unit, bool bUse):
     m_indexBuf(QOpenGLBuffer::IndexBuffer)
   ,m_helpIndexBuf(QOpenGLBuffer::IndexBuffer)

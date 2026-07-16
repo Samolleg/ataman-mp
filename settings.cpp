@@ -169,6 +169,11 @@ void CSettings::applyResourceProfile(const SResourceProfileEvaluation& profile)
         roots->setValue(profile.resourceDirectories.toVector());
     if(COptStringList* maps = dynamic_cast<COptStringList*>(opt(eOptSetResource, "mapRoots")))
         maps->setValue(profile.mapDirectories.toVector());
+    if(!profile.mapDirectories.isEmpty())
+    {
+        if(COptString* lastFolder = dynamic_cast<COptString*>(opt(eOptSetGeneral, "lastVisitedFolder")))
+            lastFolder->setValue(profile.mapDirectories.first());
+    }
     for(const char* legacyName : {"figPaths", "texPaths"})
         if(COptStringList* legacy = dynamic_cast<COptStringList*>(opt(eOptSetResource, legacyName)))
             legacy->setValue(QVector<QString>());

@@ -117,6 +117,22 @@ void CView::attach(CSettings* pSettings, QTableWidget* pParam, QUndoStack* pStac
     m_pTree = pTree;
     m_pTree->attachView(this);
     m_pTileForm = pTileForm;
+
+    // MOB-only workspaces need the same responsive viewport as terrain-backed
+    // workspaces. Previously this timer was started only by loadLandscape().
+    m_timer->setInterval(15);
+    m_timer->start();
+}
+
+void CView::refreshAfterResourceSetup()
+{
+    CObjectList::getInstance()->refreshConfiguredSources();
+    CTextureList::getInstance()->refreshConfiguredSources();
+    updateGeometry();
+    if(width() > 0 && height() > 0)
+        resizeGL(width(), height());
+    updateGL();
+    ei::log(eLogInfo, "Viewport and resource lists refreshed after game/mod setup");
 }
 
 void CView::updateWindow()
@@ -296,10 +312,15 @@ void CView::loadLandscape(const QFileInfo& filePath)
     }
 
     m_pLand->readMap(filePath);
+    if(!m_pLand->isMprLoad())
+    {
+        ei::log(eLogWarning, "Landscape failed to load: " + filePath.absoluteFilePath());
+        return;
+    }
+    for(CMob* mob : m_aMob)
+        mob->reprojectForCurrentTerrain();
     emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMpr, filePath.baseName());
     emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMprDirtyFlag, m_pLand->isDirty() ? "*" : "");
-    m_timer->setInterval(15); //"fps" for drawing
-    m_timer->start();
     m_lastModifiedLand = filePath.lastModified();
     connect(m_pTileForm, SIGNAL(applyChangesSignal()), this, SLOT(onMapMaterialUpdate()));
     COptInt* pOpt = dynamic_cast<COptInt*>(settings()->opt("landCheckTime"));
@@ -333,6 +354,8 @@ void CView::unloadLand()
 
     m_mprModifyTimer->stop();
     m_pLand->unloadMpr();
+    for(CMob* mob : m_aMob)
+        mob->reprojectForCurrentTerrain();
     emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMpr, "");
     m_pPreviewTile.clear();
     ei::log(eLogInfo, "Landscape unloaded");

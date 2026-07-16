@@ -32,6 +32,7 @@ public:
     QList<QString>& figureList() {return m_arrFigureForComboBox;}
 
     void initResource();
+    void refreshConfiguredSources();
 
 private:
     CObjectList();
@@ -116,6 +117,7 @@ public:
     QOpenGLTexture* textureDefault();
     void attachSettings(CSettings* pSettings) {m_pSettings = pSettings;};
     void initResource();
+    void refreshConfiguredSources();
     const QList<QString>& textureList() const {return m_arrCellComboBox;}
     int extractMmpToDxt1(QVector<QImage>& outArrImage, const QStringList& inArrTextureName);
     int extractMmpToDxt1(QImage& outImage, const QString textureName);

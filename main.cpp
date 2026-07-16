@@ -173,6 +173,7 @@ int main(int argc, char *argv[])
     QCoreApplication::setOrganizationName("EI Mapper Endurance");
     QCoreApplication::setOrganizationDomain("ei-mapper-endurance.local");
     QCoreApplication::setApplicationName("EI Mapper Endurance Edition");
+    // Version is independent from upstream EI Mapper releases.
     QCoreApplication::setApplicationVersion(ENDURANCE_VERSION);
 
     const int commandResult = runHeadlessCommand(app);

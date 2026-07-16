@@ -5,7 +5,7 @@ An item is checked only after its implementation has landed and received the
 listed level of validation. New findings and wishlist requests belong here so
 they do not get lost between test sessions.
 
-Current development release: `0.1.0-alpha.12`.
+Current development release: `0.1.0-alpha.13`.
 
 ## Current focus
 
@@ -111,7 +111,7 @@ These are the remaining safety gates before editing live maps can be recommended
 - [x] Configure and test the development build against a confirmed JMV installation using settings outside upstream v0.3.
 - [x] Keep all live maps untouched during automated tests; use hashed disposable copies.
 - [x] Provide `--validate`, `--roundtrip-check`, and JSON output for automation.
-- [ ] Add the JMV setup wizard with auto-discovery and explicit confirmation.
+- [x] Add the JMV setup wizard with auto-discovery and explicit confirmation.
 - [ ] Validate archive signatures and show source precedence during setup.
 - [ ] Offer a read-only, previewed import of compatible upstream `options.json` values.
 - [ ] Maintain a hash inventory for the private Zone 1/3/4/6/12/18/19 integration corpus.
@@ -120,7 +120,7 @@ These are the remaining safety gates before editing live maps can be recommended
 
 ## Release gates
 
-- [x] `0.1.0-alpha.1` through `0.1.0-alpha.12`: initial safety, diagnostics, resources, serializer fixes, backups, model-qualified skins, terrain-atlas correctness, consolidated duplicate-ID reporting, staged-save validation, mod-maker preview reporting, and installation-based reusable resource profiles.
+- [x] `0.1.0-alpha.1` through `0.1.0-alpha.13`: initial safety, diagnostics, resources, serializer fixes, backups, model-qualified skins, terrain-atlas correctness, consolidated duplicate-ID reporting, staged-save validation, mod-maker preview reporting, installation-based reusable resource profiles, and corrected first-run/MOB-only viewport initialization.
 - [ ] `0.1.0-beta.1`: correct indexed resources and responsive fast loading.
 - [ ] `0.1.0-rc.1`: independent workspace workflow, UI, script editing, and completed safety validation.
 - [ ] `1.0.0`: JMV-ready release passing the full corpus, MobExplorer, and in-game validation matrix.

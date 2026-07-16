@@ -522,7 +522,7 @@
   </action>
   <action name="actionOpen_2">
    <property name="text">
-    <string>Open</string>
+    <string>Legacy Resource Folders (Advanced)...</string>
    </property>
   </action>
   <action name="actionImport">
