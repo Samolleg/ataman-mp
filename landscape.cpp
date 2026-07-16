@@ -159,6 +159,7 @@ void CLandscape::readMap(const QFileInfo& path)
     if (!path.exists())
         return;
 
+    ei::setCrashContext("mpr/open/source:" + path.fileName());
     m_filePath = path;
 
     QFile source(path.filePath());
@@ -177,8 +178,12 @@ void CLandscape::readMap(const QFileInfo& path)
     }
 
     ei::log(eLogInfo, "Start read terrain: " + m_filePath.absoluteFilePath());
+    ei::setCrashContext("mpr/archive/read:" + path.fileName());
     CResFile map(path.filePath());
     QMap<QString, QByteArray> aTmp =  map.bufferOfFiles();  // map contains DIfferentCaseName
+    ei::log(eLogInfo, QString("MPR archive read complete file:%1 members:%2")
+            .arg(path.fileName()).arg(aTmp.size()));
+    ei::setCrashContext("mpr/archive/normalize:" + path.fileName());
     QMap<QString, QByteArray> aComponent;
     QString innerMapName;
     for (auto& file: aTmp.toStdMap())
@@ -192,13 +197,20 @@ void CLandscape::readMap(const QFileInfo& path)
 
     QDataStream mpStream(aComponent[innerMapName + ".mp"]);
     util::formatStream(mpStream);
+    ei::setCrashContext("mpr/header/read:" + path.fileName());
     if (!readHeader(mpStream))
+    {
+        ei::setCrashContext("idle");
         return;
+    }
 
     ei::log(eLogInfo, QString("MPR namespace outer:%1 inner:%2 expectedTerrainAtlases:%3")
             .arg(path.baseName(), innerMapName).arg(m_header.nTexture));
     int texCount;
+    ei::setCrashContext("mpr/terrain-atlas/build:" + path.fileName());
     m_texture = CTextureList::getInstance()->buildLandTex(innerMapName, int(m_header.nTexture), texCount);
+    ei::log(eLogInfo, QString("MPR terrain atlas complete file:%1 textureCount:%2")
+            .arg(path.fileName()).arg(texCount));
 
     // read sectors
     UI2 secIndex;
@@ -207,6 +219,7 @@ void CLandscape::readMap(const QFileInfo& path)
         QVector<CSector*> xSec;
         for (uint x(0); x<m_header.nXSector; ++x)
         {
+            ei::setCrashContext(QString("mpr/sector/read:%1:%2,%3").arg(path.fileName()).arg(x).arg(y));
             secIndex.reset(x, y);
             QDataStream secStream(aComponent.take(innerMapName + genSectorSuffix(int(x), int(y)) + ".sec"));
             util::formatStream(secStream);
@@ -222,6 +235,7 @@ void CLandscape::readMap(const QFileInfo& path)
     }
 
     ei::log(eLogInfo, "End read terrain");
+    ei::setCrashContext("idle");
 }
 
 bool CLandscape::save()

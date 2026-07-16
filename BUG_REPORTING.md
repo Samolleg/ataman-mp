@@ -20,6 +20,12 @@ preview with you.
   test performed.
 - `logs/workflow.log` from the affected session. If the editor was restarted,
   attach the matching timestamped `workflow-YYYYMMDD-HHMMSS.log` instead.
+- For a hard crash, privately send the matching `logs/crash-*.dmp` to an
+  Endurance maintainer. A minidump contains module, thread, stack, and path
+  information and must not be attached to an ordinary issue.
+- On old Windows/graphics hardware, state whether normal startup and `Start EI
+  Mapper Endurance (ANGLE compatibility).cmd` behave differently. Use the same
+  copied test map for both attempts.
 
 Use `Tools > Open Logs Folder` to find the logs. Each launch rotates the previous
 session, so reproduce once, close the editor, and copy the matching log before

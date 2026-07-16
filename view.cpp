@@ -185,9 +185,9 @@ void CView::initShaders()
 
 void CView::initializeGL()
 {
-    //logOpenGlData();
-    //qDebug() << QOpenGLContext::openGLModuleType();
+    ei::setCrashContext("opengl/initialize");
     makeCurrent();
+    logOpenGlData();
     qglClearColor(Qt::black);
     //glEnable(GL_EXT_texture_filter_anisotropic);
     glEnable(GL_DEPTH_TEST);
@@ -201,6 +201,7 @@ void CView::initializeGL()
 
     CTextureList::getInstance()->initResource();
     CObjectList::getInstance()->initResource();
+    ei::setCrashContext("idle");
     //doneCurrent();
 }
 
@@ -311,6 +312,7 @@ void CView::loadLandscape(const QFileInfo& filePath)
         return;
     }
 
+    ei::setCrashContext("mpr/open/dispatch:" + filePath.fileName());
     m_pLand->readMap(filePath);
     if(!m_pLand->isMprLoad())
     {
@@ -743,9 +745,13 @@ QString stringFromUnsignedChar(const unsigned char *str ){
 void CView::logOpenGlData()
 {
     const GLubyte * version = glGetString(GL_VERSION);
-    ei::log(eLogInfo, (char*)version);
-    const GLubyte * funcs = glGetString(GL_EXTENSIONS);
-    ei::log(eLogInfo, (char*)funcs);
+    const GLubyte * vendor = glGetString(GL_VENDOR);
+    const GLubyte * renderer = glGetString(GL_RENDERER);
+    ei::log(eLogInfo, QString("OpenGL module:%1 version:%2 vendor:%3 renderer:%4")
+            .arg(QOpenGLContext::openGLModuleType() == QOpenGLContext::LibGLES ? "GLES/ANGLE" : "Desktop")
+            .arg(version ? reinterpret_cast<const char*>(version) : "unavailable")
+            .arg(vendor ? reinterpret_cast<const char*>(vendor) : "unavailable")
+            .arg(renderer ? reinterpret_cast<const char*>(renderer) : "unavailable"));
 }
 
 void CView::checkOpenGlError()

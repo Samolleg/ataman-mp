@@ -1052,6 +1052,7 @@ struct STexSpecified
 
 QOpenGLTexture* CTextureList::buildLandTex(const QString& name, int expectedTexCount, int& texCount)
 {
+    ei::setCrashContext("mpr/terrain-atlas/cache:" + name);
     const QString cacheKey = name.toLower();
     if(m_aTexture.contains(cacheKey))
     {
@@ -1070,6 +1071,7 @@ QOpenGLTexture* CTextureList::buildLandTex(const QString& name, int expectedTexC
     QStringList missingTextures;
     for(const QString& texName : textureNames)
     {
+        ei::setCrashContext("mpr/terrain-atlas/resolve:" + texName);
         QByteArray textureData;
         QString sourcePath;
         if(!readIndexedResource(sources, texName, textureData, &sourcePath))
@@ -1114,6 +1116,7 @@ QOpenGLTexture* CTextureList::buildLandTex(const QString& name, int expectedTexC
         }
     }
     //get min texture size
+    ei::setCrashContext("mpr/terrain-atlas/combine:" + name);
     int minTexSize(aPart.first().header.m_width);
     for(auto& part: aPart)
     {
@@ -1151,6 +1154,9 @@ QOpenGLTexture* CTextureList::buildLandTex(const QString& name, int expectedTexC
         }
     }
 
+    ei::log(eLogInfo, QString("Uploading terrain atlas map:%1 parts:%2 dimensions:%3x%4 compressedBytes:%5")
+            .arg(name).arg(texCount).arg(minTexSize * texCount).arg(minTexSize).arg(combineTextureData.size()));
+    ei::setCrashContext("mpr/terrain-atlas/opengl-create:" + name);
     QOpenGLTexture* texture = new QOpenGLTexture(QOpenGLTexture::Target2D);
     texture->setMinificationFilter(QOpenGLTexture::NearestMipMapNearest);
     texture->setMagnificationFilter(QOpenGLTexture::NearestMipMapNearest);
@@ -1158,8 +1164,10 @@ QOpenGLTexture* CTextureList::buildLandTex(const QString& name, int expectedTexC
     texture->setFormat(QOpenGLTexture::TextureFormat::RGBA_DXT1); //todo: read texture format from file. EI can use both dxt3 and dxt1
     //texture->setMipLevels(4);
     texture->setSize(minTexSize*texCount, minTexSize);
+    ei::setCrashContext("mpr/terrain-atlas/opengl-allocate:" + name);
     texture->allocateStorage(QOpenGLTexture::RGBA, QOpenGLTexture::UInt8);
     const int size = minTexSize*minTexSize*texCount/2;
+    ei::setCrashContext("mpr/terrain-atlas/opengl-upload:" + name);
     texture->setCompressedData(0, 0, size, combineTextureData.data());
     m_aTexture[cacheKey] = texture;
     ei::log(eLogInfo, QString("Terrain atlas set ready map:%1 expected:%2 loaded:%3")

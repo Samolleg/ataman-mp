@@ -10,6 +10,7 @@
 #include <QTextStream>
 #include <QTimer>
 #include <cstdio>
+#include <cstring>
 
 #include "endurance_document.h"
 #include "log.h"
@@ -17,43 +18,139 @@
 
 #ifdef Q_OS_WIN
 #include <windows.h>
+#include <DbgHelp.h>
 #endif
 
-#ifdef Q_OS_WIN
 namespace {
+const char* requestedOpenGlBackend(int argc, char* argv[])
+{
+    for(int i = 1; i < argc; ++i)
+    {
+        if(std::strcmp(argv[i], "--angle-opengl") == 0)
+            return "angle";
+        if(std::strcmp(argv[i], "--desktop-opengl") == 0)
+            return "desktop";
+    }
+    return "automatic";
+}
+
+#ifdef Q_OS_WIN
+const char* accessViolationOperation(const EXCEPTION_RECORD* record)
+{
+    if(!record || record->NumberParameters < 2)
+        return "unknown";
+    switch(record->ExceptionInformation[0])
+    {
+    case 0: return "read";
+    case 1: return "write";
+    case 8: return "execute";
+    default: return "unknown";
+    }
+}
+
 LONG WINAPI enduranceUnhandledException(EXCEPTION_POINTERS* exceptionInfo)
 {
-    const DWORD code = exceptionInfo && exceptionInfo->ExceptionRecord
-            ? exceptionInfo->ExceptionRecord->ExceptionCode : 0;
-    const ULONG_PTR address = exceptionInfo && exceptionInfo->ExceptionRecord
-            ? reinterpret_cast<ULONG_PTR>(exceptionInfo->ExceptionRecord->ExceptionAddress) : 0;
-    const ULONG_PTR moduleBase = reinterpret_cast<ULONG_PTR>(GetModuleHandleW(nullptr));
+    const EXCEPTION_RECORD* exceptionRecord = exceptionInfo ? exceptionInfo->ExceptionRecord : nullptr;
+    const DWORD code = exceptionRecord ? exceptionRecord->ExceptionCode : 0;
+    const ULONG_PTR address = exceptionRecord
+            ? reinterpret_cast<ULONG_PTR>(exceptionRecord->ExceptionAddress) : 0;
+    const ULONG_PTR target = exceptionRecord && exceptionRecord->NumberParameters >= 2
+            ? exceptionRecord->ExceptionInformation[1] : 0;
+
+    MEMORY_BASIC_INFORMATION memoryInfo = {};
+    const bool foundAllocation = address != 0
+            && VirtualQuery(reinterpret_cast<LPCVOID>(address), &memoryInfo, sizeof(memoryInfo)) == sizeof(memoryInfo);
+    const HMODULE faultModule = foundAllocation ? static_cast<HMODULE>(memoryInfo.AllocationBase) : nullptr;
+    const ULONG_PTR moduleBase = reinterpret_cast<ULONG_PTR>(faultModule);
+    wchar_t modulePathW[MAX_PATH] = L"unknown";
+    if(faultModule)
+        GetModuleFileNameW(faultModule, modulePathW, MAX_PATH);
+    const wchar_t* moduleNameW = modulePathW;
+    for(const wchar_t* cursor = modulePathW; *cursor; ++cursor)
+    {
+        if(*cursor == L'\\' || *cursor == L'/')
+            moduleNameW = cursor + 1;
+    }
+    char moduleName[4 * MAX_PATH] = "unknown";
+    WideCharToMultiByte(CP_UTF8, 0, moduleNameW, -1, moduleName, int(sizeof(moduleName)), nullptr, nullptr);
     SYSTEMTIME now;
     GetLocalTime(&now);
 
-    char record[3072];
+    CreateDirectoryW(L"logs", nullptr);
+    wchar_t dumpPath[256];
+    std::swprintf(dumpPath, sizeof(dumpPath) / sizeof(dumpPath[0]),
+            L"logs\\crash-%04u%02u%02u-%02u%02u%02u-p%lu-t%lu.dmp",
+            unsigned(now.wYear), unsigned(now.wMonth), unsigned(now.wDay),
+            unsigned(now.wHour), unsigned(now.wMinute), unsigned(now.wSecond),
+            static_cast<unsigned long>(GetCurrentProcessId()), static_cast<unsigned long>(GetCurrentThreadId()));
+    bool dumpWritten = false;
+    DWORD dumpError = ERROR_SUCCESS;
+    HANDLE dumpFile = CreateFileW(dumpPath, GENERIC_WRITE, FILE_SHARE_READ, nullptr,
+            CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if(dumpFile != INVALID_HANDLE_VALUE)
+    {
+        MINIDUMP_EXCEPTION_INFORMATION dumpException = {};
+        dumpException.ThreadId = GetCurrentThreadId();
+        dumpException.ExceptionPointers = exceptionInfo;
+        dumpException.ClientPointers = FALSE;
+        dumpWritten = MiniDumpWriteDump(GetCurrentProcess(), GetCurrentProcessId(), dumpFile,
+                MiniDumpNormal, exceptionInfo ? &dumpException : nullptr, nullptr, nullptr) != FALSE;
+        if(!dumpWritten)
+            dumpError = GetLastError();
+        FlushFileBuffers(dumpFile);
+        CloseHandle(dumpFile);
+    }
+    else
+        dumpError = GetLastError();
+
+    char registers[1024] = "registers=unavailable";
+    if(exceptionInfo && exceptionInfo->ContextRecord)
+    {
+#if defined(_M_X64) || defined(__x86_64__)
+        const CONTEXT* context = exceptionInfo->ContextRecord;
+        std::snprintf(registers, sizeof(registers),
+                "rip=0x%llx rsp=0x%llx rbp=0x%llx rax=0x%llx rbx=0x%llx rcx=0x%llx rdx=0x%llx",
+                static_cast<unsigned long long>(context->Rip), static_cast<unsigned long long>(context->Rsp),
+                static_cast<unsigned long long>(context->Rbp), static_cast<unsigned long long>(context->Rax),
+                static_cast<unsigned long long>(context->Rbx), static_cast<unsigned long long>(context->Rcx),
+                static_cast<unsigned long long>(context->Rdx));
+#elif defined(_M_IX86) || defined(__i386__)
+        const CONTEXT* context = exceptionInfo->ContextRecord;
+        std::snprintf(registers, sizeof(registers),
+                "eip=0x%lx esp=0x%lx ebp=0x%lx eax=0x%lx ebx=0x%lx ecx=0x%lx edx=0x%lx",
+                static_cast<unsigned long>(context->Eip), static_cast<unsigned long>(context->Esp),
+                static_cast<unsigned long>(context->Ebp), static_cast<unsigned long>(context->Eax),
+                static_cast<unsigned long>(context->Ebx), static_cast<unsigned long>(context->Ecx),
+                static_cast<unsigned long>(context->Edx));
+#endif
+    }
+
+    char record[4096];
     const int length = std::snprintf(record, sizeof(record),
-            "[%02u.%02u.%04u %02u:%02u:%02u] {CRASH} code=0x%08lx address=0x%p module_offset=0x%llx thread=%lu context=%s\r\n",
+            "[%02u.%02u.%04u %02u:%02u:%02u] {CRASH} code=0x%08lx address=0x%p module=%s module_base=0x%p module_offset=0x%llx access=%s target=0x%p thread=%lu context=%s dump=%s dump_error=%lu %s\r\n",
             unsigned(now.wDay), unsigned(now.wMonth), unsigned(now.wYear),
             unsigned(now.wHour), unsigned(now.wMinute), unsigned(now.wSecond),
-            static_cast<unsigned long>(code), reinterpret_cast<void*>(address),
-            static_cast<unsigned long long>(address >= moduleBase ? address - moduleBase : 0),
-            static_cast<unsigned long>(GetCurrentThreadId()), ei::crashContext());
+            static_cast<unsigned long>(code), reinterpret_cast<void*>(address), moduleName,
+            reinterpret_cast<void*>(moduleBase),
+            static_cast<unsigned long long>(moduleBase && address >= moduleBase ? address - moduleBase : 0),
+            code == EXCEPTION_ACCESS_VIOLATION ? accessViolationOperation(exceptionRecord) : "n/a",
+            reinterpret_cast<void*>(target), static_cast<unsigned long>(GetCurrentThreadId()),
+            ei::crashContext(), dumpWritten ? "written" : "failed", static_cast<unsigned long>(dumpError), registers);
 
-    CreateDirectoryW(L"logs", nullptr);
     HANDLE logFile = CreateFileW(L"logs\\workflow.log", FILE_APPEND_DATA,
             FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
     if(logFile != INVALID_HANDLE_VALUE)
     {
         DWORD written = 0;
-        WriteFile(logFile, record, DWORD(length > 0 ? length : 0), &written, nullptr);
+        const DWORD safeLength = DWORD(length > 0 ? qMin(length, int(sizeof(record) - 1)) : 0);
+        WriteFile(logFile, record, safeLength, &written, nullptr);
         FlushFileBuffers(logFile);
         CloseHandle(logFile);
     }
     return EXCEPTION_CONTINUE_SEARCH;
 }
-}
 #endif
+}
 
 namespace {
 int runHeadlessCommand(QApplication& app)
@@ -68,12 +165,16 @@ int runHeadlessCommand(QApplication& app)
     QCommandLineOption profileLoadOption("profile-load", "Discover the recommended resource profile for a game installation.", "game-root");
     QCommandLineOption mobDiffOption("mob-diff", "Compare a baseline MOB with another MOB.", "baseline");
     QCommandLineOption againstOption("against", "Candidate MOB used with --mob-diff.", "candidate");
+    QCommandLineOption angleOpenGlOption("angle-opengl", "Use Qt's ANGLE/OpenGL ES implementation (diagnostic GUI mode).");
+    QCommandLineOption desktopOpenGlOption("desktop-opengl", "Use the system desktop OpenGL implementation (diagnostic GUI mode).");
     parser.addOption(validateOption);
     parser.addOption(roundtripOption);
     parser.addOption(jsonOption);
     parser.addOption(profileLoadOption);
     parser.addOption(mobDiffOption);
     parser.addOption(againstOption);
+    parser.addOption(angleOpenGlOption);
+    parser.addOption(desktopOpenGlOption);
     parser.addPositionalArgument("documents", "MPR and MOB documents to open in order.", "[documents...]");
     parser.process(app);
 
@@ -238,6 +339,12 @@ int runHeadlessCommand(QApplication& app)
 
 int main(int argc, char *argv[])
 {
+    const char* openGlBackend = requestedOpenGlBackend(argc, argv);
+    if(std::strcmp(openGlBackend, "angle") == 0)
+        QCoreApplication::setAttribute(Qt::AA_UseOpenGLES);
+    else if(std::strcmp(openGlBackend, "desktop") == 0)
+        QCoreApplication::setAttribute(Qt::AA_UseDesktopOpenGL);
+
     QApplication app(argc, argv);
 
 #ifdef Q_OS_WIN
@@ -249,6 +356,9 @@ int main(int argc, char *argv[])
     QCoreApplication::setApplicationName("EI Mapper Endurance Edition");
     // Version is independent from upstream EI Mapper releases.
     QCoreApplication::setApplicationVersion(ENDURANCE_VERSION);
+    ei::log(eLogInfo, QString("Runtime version:%1 qt:%2 architecture:%3 OpenGL-request:%4")
+            .arg(QCoreApplication::applicationVersion(), QT_VERSION_STR,
+                 QString::number(sizeof(void*) * 8), QString::fromLatin1(openGlBackend)));
 
     const int commandResult = runHeadlessCommand(app);
     if(commandResult >= 0)

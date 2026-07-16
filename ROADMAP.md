@@ -128,6 +128,11 @@ These are the remaining safety gates before editing live maps can be recommended
 - [ ] Add a diagnostics panel for phase timings, validation findings, and missing resources.
 - [ ] Add an opt-in crash bundle creator that removes private paths and game assets.
 - [ ] Exercise hard-crash logging with controlled parser, decoder, and OpenGL failures.
+- [x] Correct crash fault-module attribution, capture access details/registers
+  and a normal minidump, and add phase-specific MPR/OpenGL breadcrumbs.
+- [ ] Resolve the alpha.14 Windows 7 MPR-open crash using an alpha.15 normal vs
+  ANGLE controlled retry; retain the exact map hash, GPU/driver, workflow log,
+  and private minidump before assigning a root cause.
 
 ## Resources, figures, textures, and performance
 
