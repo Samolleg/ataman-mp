@@ -57,6 +57,11 @@ behavior.
   create/delete redo across repeated copy/paste cycles. Implementation:
   [`99f841f`](https://github.com/Ilufus/ei-mapper-endurance/commit/99f841f);
   focused test instructions are in [ALPHA18_VALIDATION.md](ALPHA18_VALIDATION.md).
+- [ ] Validate alpha.19 gesture-level undo, pasted-selection restoration,
+  selected-object overlap rendering, and cancellation of unfinished transforms
+  before Close All. Implementation:
+  [`95c9094`](https://github.com/Ilufus/ei-mapper-endurance/commit/95c9094);
+  focused test instructions are in [ALPHA19_VALIDATION.md](ALPHA19_VALIDATION.md).
 - [ ] Finish lossless preservation of MPR archive details.
 
 These are the remaining safety gates before editing live maps can be recommended.
