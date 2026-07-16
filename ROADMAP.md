@@ -149,7 +149,8 @@ These are the remaining safety gates before editing live maps can be recommended
 - [ ] Disable only terrain-dependent tools in MOB-only mode.
 - [ ] Add independent `.mpr` and `.mob` drag-and-drop behavior.
 - [x] Add headless `--profile-load` discovery and JSON output. ([`7b206c8`](https://github.com/Ilufus/ei-mapper-endurance/commit/7b206c8))
-- [ ] Add Open Workspace support.
+- [ ] Add Open Workspace support through portable `.collection` manifests
+  (high-priority scope is tracked in the wishlist below).
 
 ## UI and script workflow
 
@@ -201,6 +202,21 @@ or move it into the relevant section above without losing its history.
 
 ### High priority
 
+- [ ] Add a portable Endurance `.collection` format for reusable MPR/MOB sets.
+  - A collection is a small manifest listing one optional MPR and one or more
+    MOB files; it never embeds, copies, or modifies the referenced map assets.
+  - Load a collection and open its complete MPR/MOB set without selecting each
+    file manually.
+  - Add **Save Collection** and **Save Collection As** for the currently loaded
+    set.
+  - Store collections by default in the editor installation's `collections/`
+    folder so files can be copied and shared with other mod makers.
+  - Use portable profile/map-root-relative references where possible; do not
+    write user-specific absolute paths into shared collection files.
+  - Report missing or ambiguous files together and let the user review the
+    resolved paths before opening the set.
+  - Stretch goal: add an **Edit Collection** submenu for adding, removing,
+    reordering, and replacing entries without first loading the whole set.
 - [ ] Replace the secondary-MOB workflow with Unreal-style multi-MOB loading and editing.
   - Show all open MOBs in a **Loaded MOBs** tab/list.
   - Allow individual MOBs to be locked against selection and accidental edits.
