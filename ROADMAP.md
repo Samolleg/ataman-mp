@@ -80,7 +80,10 @@ behavior.
 - [ ] Validate alpha.22 selection UX, persistent recent-file list, open/save
   shortcuts, and keyboard-filterable model/texture fields. Implementation:
   [`06d1c9b`](https://github.com/Ilufus/ei-mapper-endurance/commit/06d1c9b);
-  focused test instructions are in [ALPHA22_VALIDATION.md](ALPHA22_VALIDATION.md).
+  the reported property-panel selection slowdown, unintended first-match
+  application, contains-style filtering, and MPR/MOB menu ordering are fixed in
+  [`0436992`](https://github.com/Ilufus/ei-mapper-endurance/commit/0436992).
+  Focused test instructions are in [ALPHA22_VALIDATION.md](ALPHA22_VALIDATION.md).
 - [ ] Finish lossless preservation of MPR archive details.
 
 These are the remaining safety gates before editing live maps can be recommended.
