@@ -132,7 +132,28 @@ These are the remaining safety gates before editing live maps can be recommended
 Add requested enhancements here first. We can then assign each one to a release
 or move it into the relevant section above without losing its history.
 
-- [ ] Collect and prioritize the current user wishlist.
+### High priority
+
+- [ ] Replace the secondary-MOB workflow with Unreal-style multi-MOB loading and editing.
+  - Show all open MOBs in a **Loaded MOBs** tab/list.
+  - Allow individual MOBs to be locked against selection and accidental edits.
+  - Make the currently selected/active MOB explicit; new objects and pasted objects go there.
+  - Treat MOBs similarly to Unreal Engine sublevels within the loaded map workspace.
+- [ ] Allow unit texture fields to support both database-backed dropdown selection and manual keyboard entry.
+- [ ] Add periodic autosave with recoverable, versioned backup states.
+- [ ] Add a command to launch the currently loaded MPR and MOB set directly in Evil Islands for testing.
+- [ ] Add a resizable workflow-log panel along the bottom of the viewport, similar to the UE4 output log.
+
+### Medium priority
+
+- [ ] Load database-defined humanoid textures for humans, skeletons, and orcs where applicable.
+- [ ] Render humans with the weapons and armor assigned by their database setup.
+  - Account for one-handed weapon plus shield, dual-wield, and two-handed configurations.
+
+### Low priority
+
+- [ ] Add configurable UI font-size scaling for 4K displays and accessibility.
+- [ ] Add a Russian translation and an in-app language switch.
 
 ## Updating this checklist
 
