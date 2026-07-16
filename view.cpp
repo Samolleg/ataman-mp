@@ -48,7 +48,9 @@ void showDuplicateIdWarning(QWidget* parent, const QVector<uint>& duplicates)
 
 CView::CView(QWidget *parent, const QGLWidget *pShareWidget) : QGLWidget(parent, pShareWidget)
   ,m_pSettings(nullptr)
+  ,m_pUndoStack(nullptr)
   ,m_pProgress(nullptr)
+  ,m_pendingOperationOwnsPaste(false)
   ,m_clipboard_buffer_file(QString("%1%2%3").arg(QDir::tempPath()).arg(QDir::separator()).arg("copy_paste_buffer.json"))
   ,m_recentOpenedFile_file(QString("%1%2%3").arg(QDir::tempPath()).arg(QDir::separator()).arg("recent_opened.json"))
   ,m_activeMob(nullptr)
@@ -995,6 +997,8 @@ void CView::unloadActiveMob()
                 return;
 
         }
+        if(m_pUndoStack)
+            m_pUndoStack->clear();
         m_aMob.removeOne(pMob);
         emit unloadMob(pMob);
         delete pMob;
@@ -1039,6 +1043,8 @@ void CView::unloadMob(QString mobName)
         return;
 
     cancelPendingOperation();
+    if(m_pUndoStack)
+        m_pUndoStack->clear();
     ei::log(eLogInfo, "unloading mob " + mobName);
     CMob* pMob = nullptr;
     if(mobName.isEmpty())
@@ -1905,10 +1911,25 @@ bool CView::cancelPendingOperation()
     const int trackedObjects = m_operationBackup.size();
     m_operationBackup.clear();
     m_unitMovementBackup.clear();
+    m_pendingOperationOwnsPaste = false;
     m_pOp->changeState(new CSelect(this));
-    ei::log(eLogInfo, QString("Cancelled pending viewport operation method:%1 trackedObjects:%2 before document lifecycle change")
+    ei::log(eLogInfo, QString("Cancelled pending viewport operation method:%1 trackedObjects:%2")
             .arg(methodName).arg(trackedObjects));
     return true;
+}
+
+bool CView::prepareUndo()
+{
+    if(!m_pOp || m_pOp->operationMethod() == eOperationMethodSelect)
+        return true;
+
+    // A pasted object is created before its automatic placement transform begins.
+    // In that one case Undo cancels placement and also undoes the paste command.
+    // For every other unfinished transform, Undo only cancels the gesture because
+    // there is no committed movement command on the stack yet.
+    const bool undoPaste = m_pendingOperationOwnsPaste;
+    cancelPendingOperation();
+    return undoPaste;
 }
 
 void CView::operationSetBackup(EOperationAxisType operationType)
@@ -2090,6 +2111,7 @@ void CView::operationApply(EOperationAxisType operationType)
         m_pUndoStack->endMacro();
     m_operationBackup.clear();
     m_unitMovementBackup.clear();
+    m_pendingOperationOwnsPaste = false;
 }
 
 void CView::moveTo(QVector3D &dir)
@@ -2384,6 +2406,7 @@ void CView::clipboradObjectsToScene()
     auto mouseDif = posOnLand - oldMousePos;
     mouseDif.setZ(0.0f);
     m_pOp->changeState(new CMoveAxis(this, EOperateAxisXY));
+    m_pendingOperationOwnsPaste = true;
     moveTo(mouseDif);
 
     viewParameters();
@@ -2647,17 +2670,20 @@ void CView::undo_roundActiveMob()
 
 void CView::execUnloadCommand()
 {
-    if(!m_pLand->isMprLoad())
+    if(!m_pLand->isMprLoad() && m_activeMob == nullptr)
         return;
 
     if(m_activeMob == nullptr)
     {
+        cancelPendingOperation();
+        m_pUndoStack->clear();
         unloadLand();
         return;
     }
 
-    CCloseActiveMobCommand* pCommand = new CCloseActiveMobCommand(this);
-    m_pUndoStack->push(pCommand);
+    cancelPendingOperation();
+    m_pUndoStack->clear();
+    unloadActiveMob();
 }
 
 void CView::iterateRoundMob()
@@ -2745,9 +2771,9 @@ void CView::loadSession()
         ei::log(eLogWarning, "Cannot find MPR file: " + mprFile.absoluteFilePath());
         return;
     }
-    m_pUndoStack->beginMacro("Open last session");
-    QUndoCommand* loadMpr = new COpenCommand(this, mprFile);
-    m_pUndoStack->push(loadMpr);
+    cancelPendingOperation();
+    m_pUndoStack->clear();
+    loadLandscape(mprFile);
 
     for(const auto& mobPath: arrMobPath)
     {
@@ -2757,12 +2783,9 @@ void CView::loadSession()
             ei::log(eLogWarning, "Cannot find MOB file: " + mobFile.absoluteFilePath());
             continue;
         }
-        COpenCommand* pLoadCommand = new COpenCommand(this, mobFile);
-        m_pUndoStack->push(pLoadCommand);
-        CRoundMobCommand* pRound = new CRoundMobCommand(this);
-        m_pUndoStack->push(pRound);
+        loadMob(mobFile);
+        roundActiveMob();
     }
-    m_pUndoStack->endMacro();
 
     QVector3D pos, pivot, rot;
     if(pManager->getCameraData(pos, pivot, rot))

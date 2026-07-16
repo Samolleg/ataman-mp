@@ -15,26 +15,6 @@ class CLookPoint;
 class CUnit;
 class IPropertyBase;
 
-class COpenCommand: public QUndoCommand, public QObject
-{
-public:
-    enum { Id = 100 };
-
-    COpenCommand(CView* pView, const QFileInfo& path/*, MainWindow* pMain*/, QUndoCommand *parent = nullptr);
-
-    void undo() override;
-    void redo() override;
-    //bool mergeWith(const QUndoCommand *command) override;
-    int id() const override { return Id; }
-
-
-private:
-    CView *m_pView;
-    QFileInfo m_filePath;
-    //MainWindow* m_pMain;
-
-};
-
 class CDeleteNodeCommand: public QObject, public QUndoCommand
 {
     Q_OBJECT
@@ -197,25 +177,6 @@ public:
 
 private:
     CView* m_pView;
-};
-
-class CCloseActiveMobCommand: public QUndoCommand
-{
-public:
-    enum { Id = 110 };
-
-    CCloseActiveMobCommand(CView* pView, QUndoCommand *parent = nullptr);
-
-    void undo() override;
-    void redo() override;
-    //bool mergeWith(const QUndoCommand *command) override;
-    int id() const override { return Id; }
-
-private:
-    CView *m_pView;
-    QFileInfo m_filePath;
-    MainWindow* m_pMain;
-
 };
 
 class CSwitchToQuestMobCommand: public QObject, public QUndoCommand

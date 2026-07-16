@@ -291,9 +291,9 @@ void MainWindow::closeAll()
 {
     if(isExitAllowed())
     {
+        m_undoStack->clear();
         m_pView->unloadMob("");
         m_pView->unloadLand();
-        m_undoStack->clear();
     }
 }
 
@@ -330,13 +330,14 @@ void MainWindow::on_actionOpen_triggered()
 
     if(fileName.fileName().toLower().endsWith(".mpr"))
     {
-        QUndoCommand* loadMpr = new COpenCommand(m_pView, fileName);
-        m_undoStack->push(loadMpr);
+        m_pView->cancelPendingOperation();
+        m_undoStack->clear();
+        m_pView->loadLandscape(fileName);
     }
     else if(fileName.fileName().toLower().endsWith(".mob"))
     {
-        COpenCommand* pLoadCommand = new COpenCommand(m_pView, fileName);
-        m_undoStack->push(pLoadCommand);
+        m_pView->cancelPendingOperation();
+        m_pView->loadMob(fileName);
     }
 }
 
@@ -367,7 +368,17 @@ bool MainWindow::openDocument(const QFileInfo& fileName)
     COptString* opt = dynamic_cast<COptString*>(m_settings->opt(eOptSetGeneral, "lastVisitedFolder"));
     if(opt)
         opt->setValue(fileName.dir().path());
-    m_undoStack->push(new COpenCommand(m_pView, fileName));
+    m_pView->cancelPendingOperation();
+    if(suffix == "mpr")
+    {
+        m_undoStack->clear();
+        m_pView->loadLandscape(fileName);
+    }
+    else
+    {
+        QFileInfo mobFile(fileName);
+        m_pView->loadMob(mobFile);
+    }
     return true;
 }
 
@@ -379,7 +390,9 @@ void MainWindow::on_actionOpen_MPR_triggered()
     if(fileName.fileName().isEmpty())
         return;
     opt->setValue(fileName.dir().path());
-    m_undoStack->push(new COpenCommand(m_pView, fileName));
+    m_pView->cancelPendingOperation();
+    m_undoStack->clear();
+    m_pView->loadLandscape(fileName);
 }
 
 void MainWindow::on_actionOpen_MOB_triggered()
@@ -387,17 +400,13 @@ void MainWindow::on_actionOpen_MOB_triggered()
     COptString* opt = dynamic_cast<COptString*>(m_settings->opt(eOptSetGeneral, "lastVisitedFolder"));
     Q_ASSERT(opt);
     const QStringList paths = QFileDialog::getOpenFileNames(this, "Open one or more MOB files", opt->value(), tr("MOB (*.mob)"));
-    const bool grouped = paths.size() > 1;
-    if(grouped)
-        m_undoStack->beginMacro(QString("Open %1 MOB files").arg(paths.size()));
+    m_pView->cancelPendingOperation();
     for(const QString& path : paths)
     {
         QFileInfo fileName(path);
         opt->setValue(fileName.dir().path());
-        m_undoStack->push(new COpenCommand(m_pView, fileName));
+        m_pView->loadMob(fileName);
     }
-    if(grouped)
-        m_undoStack->endMacro();
 }
 
 void MainWindow::on_actionSettings_triggered()
@@ -445,7 +454,8 @@ void MainWindow::on_action_Mob_parameters_triggered()
 
 void MainWindow::on_actionUndo_triggered()
 {
-    m_undoStack->undo();
+    if(m_pView->prepareUndo())
+        m_undoStack->undo();
 }
 
 void MainWindow::on_selectButton_clicked()
@@ -462,6 +472,8 @@ void MainWindow::on_moveButton_clicked()
 
 void MainWindow::on_actionRedo_triggered()
 {
+    if(m_pView->cancelPendingOperation())
+        return;
     m_undoStack->redo();
 }
 

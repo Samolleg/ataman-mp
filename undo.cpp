@@ -10,35 +10,6 @@
 #include "property.h"
 
 
-COpenCommand::COpenCommand(CView* pView, const QFileInfo& path, QUndoCommand *parent) : QUndoCommand(parent)
-    ,m_pView(pView)
-    ,m_filePath(path)
-{
-    setText("Load: " + path.fileName());
-}
-
-void COpenCommand::undo()
-{
-    if(m_filePath.fileName().toLower().endsWith(".mpr"))
-    {
-        m_pView->unloadLand();
-    }
-    else
-    {
-        m_pView->unloadMob(m_filePath.fileName());
-    }
-}
-void COpenCommand::redo()
-{
-    if(m_filePath.fileName().toLower().endsWith(".mpr"))
-        m_pView->loadLandscape(m_filePath);
-    else
-    {
-        m_pView->loadMob(m_filePath);
-    }
-
-}
-
 //CChangeModelParam::CChangeModelParam(CView* pView, uint nodeId, EObjParam &objParam, QString value, QUndoCommand *parent):
 //    CChangeStringParam(pView, nodeId, objParam, value, parent)
 //{
@@ -355,31 +326,6 @@ void CRoundMobCommand::redo()
 {
     m_pView->roundActiveMob();
     setText("Switch Mob to " + m_pView->currentMob()->mobName());
-}
-
-CCloseActiveMobCommand::CCloseActiveMobCommand(CView *pView, QUndoCommand *parent):
-    QUndoCommand(parent)
-  ,m_pView(pView)
-{
-    CMob* pMob = m_pView->currentMob();
-    if(nullptr != pMob)
-        m_filePath = pMob->filePath();
-}
-
-void CCloseActiveMobCommand::undo()
-{
-    m_pView->loadMob(m_filePath);
-    m_pView->changeCurrentMob(m_pView->mob(m_filePath.fileName()));
-}
-
-void CCloseActiveMobCommand::redo()
-{
-    CMob* pMob = m_pView->currentMob();
-    if(nullptr != pMob)
-    {
-        setText("unloaded " + pMob->mobName());
-        m_pView->unloadActiveMob();
-    }
 }
 
 CSwitchToQuestMobCommand::CSwitchToQuestMobCommand(CMob* pMob, QUndoCommand *parent):

@@ -79,6 +79,7 @@ public:
     void operationRevert(EOperationAxisType operationType);
     void operationApply(EOperationAxisType operationType);
     bool cancelPendingOperation();
+    bool prepareUndo();
     void moveTo(QVector3D& dir);
     void rotateTo(QVector3D& rot);
     void scaleTo(QVector3D& scale);
@@ -197,6 +198,7 @@ private:
     QSharedPointer<COperation> m_pOp;
     QMap<CNode*, QVector3D> m_operationBackup;
     QMap<CUnit*, QVector<QVector3D>> m_unitMovementBackup;
+    bool m_pendingOperationOwnsPaste;
     //EOperationType m_operationType;
     QSharedPointer<CSelectFrame> m_selectFrame;
     QFile m_clipboard_buffer_file;
