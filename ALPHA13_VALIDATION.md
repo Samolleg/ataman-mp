@@ -1,5 +1,11 @@
 # EI Mapper Endurance 0.1.0-alpha.13 validation
 
+> Post-validation correction: manual testing found that base-game
+> `zone3obr.mob` humans and orcs still render without their correct textures.
+> The automated database lookup checks below prove candidate-name resolution,
+> not complete character rendering. This is an unresolved known issue and the
+> alpha.13 r3 package must not be distributed as a validated group build.
+
 Validation date: 2026-07-16
 
 ## First-run and viewport corrections
@@ -49,7 +55,7 @@ and returned exit code 0 without validation messages.
 - MOB-first mode supports camera movement immediately.
 - Attaching the matching MPR corrects display projection without reloading MOB.
 - Detaching terrain restores standalone display projection.
-- With the base-game profile, `zone3obr.mob` humans and orcs render their
-  database-selected primary skins instead of the missing-texture placeholder.
+- Base-game `zone3obr.mob` humanoid rendering: **failed**; deferred to the full
+  database/template-driven character appearance work.
 
 This candidate must not be published until the manual test gate is confirmed.

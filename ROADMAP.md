@@ -5,7 +5,7 @@ An item is checked only after its implementation has landed and received the
 listed level of validation. New findings and wishlist requests belong here so
 they do not get lost between test sessions.
 
-Current development release: `0.1.0-alpha.13`.
+Current development release: `0.1.0-alpha.14`.
 
 ## Current focus
 
@@ -69,8 +69,12 @@ These are the remaining safety gates before editing live maps can be recommended
 - [x] Resolve the previously missing representative Zone 3/18 JMV figures.
 - [x] Preserve unit figure, texture, and database fields during changed saves.
 - [x] Resolve model-qualified `_xN` unit skins such as Zone 12 skeleton textures.
-- [x] Resolve human and orc prototype names through the active `units.udb` skin
-  index, including base-game Zone 3 and JMV-prefixed prototypes.
+- [x] Parse human and orc prototype skin indices from the active `units.udb`
+  and produce model-qualified candidate texture names.
+- [ ] Complete database/template-driven character rendering, including race
+  texture lists, secondary layers, and equipped visuals. Base-game
+  `zone3obr.mob` remains the known primary-skin regression case; JMV rendering
+  remains the current priority.
 - [x] Prefer an active mod `database.res` over adjacent backup or
   `original-unmodified` database archives for unit appearance lookup.
 - [x] Log and display the nearest existing family variation when a MOB references an absent skin, without changing the stored field.
@@ -125,6 +129,9 @@ These are the remaining safety gates before editing live maps can be recommended
 ## Release gates
 
 - [x] `0.1.0-alpha.1` through `0.1.0-alpha.13`: initial safety, diagnostics, resources, serializer fixes, backups, model-qualified skins, terrain-atlas correctness, consolidated duplicate-ID reporting, staged-save validation, mod-maker preview reporting, installation-based reusable resource profiles, and corrected first-run/MOB-only viewport initialization.
+- [x] `0.1.0-alpha.14`: testing-group build with Settings-based setup,
+  explicit base-game humanoid known issue, database appearance diagnostics, and
+  a coordinated test/report matrix.
 - [ ] `0.1.0-beta.1`: correct indexed resources and responsive fast loading.
 - [ ] `0.1.0-rc.1`: independent workspace workflow, UI, script editing, and completed safety validation.
 - [ ] `1.0.0`: JMV-ready release passing the full corpus, MobExplorer, and in-game validation matrix.

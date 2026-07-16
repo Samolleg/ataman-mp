@@ -50,13 +50,15 @@ Use `Tools > Open Logs Folder` and follow `BUG_REPORTING.md`. Report successful
 edit tests too: knowing which map families and edit types work is part of the
 validation corpus.
 
-For alpha.13, please test both load orders after a fresh start: MPR then MOB,
+For alpha.14, please test both load orders after a fresh start: MPR then MOB,
 and MOB then MPR. Confirm that MOB-only camera movement works immediately and
 that attaching/detaching terrain updates display positions without changing the
 stored MOB coordinates.
 
-Also test at least one humanoid-heavy map with the selected profile. For the
-base-game profile, `zone3obr.mob` is the current regression case: humans and
-orcs should resolve their primary skins from the active database and
-`redress.res`. If a unit remains untextured, include the current log; it records
-the prototype, model, resolved texture, database archive, and texture archive.
+JMV is the primary target for this testing round. Base-game `zone3obr.mob`
+humans and orcs are a known unresolved texture case: the current candidate-name
+lookup does not yet reproduce the game's full database/template appearance
+pipeline. Do not file duplicate reports for that known case unless the behavior
+changes, crashes, or affects JMV. For any new resource failure, include the
+current log; it records the prototype, model, resolved texture, database
+archive, and texture archive.
