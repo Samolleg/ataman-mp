@@ -54,6 +54,8 @@ signals:
 
 private:
     CView* m_pView;
+    CMob* m_pMob;
+    CNode* m_pNode;
     uint m_nodeId;
     int m_originalIndex;
 };
@@ -94,8 +96,30 @@ signals:
 
 private:
     CView* m_pView;
+    CMob* m_pMob;
     QJsonObject m_nodeData;
+    CNode* m_pCreatedNode;
     uint m_createdNodeId;
+    int m_createdNodeIndex;
+    bool m_created;
+};
+
+class CSelectionCommand: public QUndoCommand
+{
+public:
+    enum { Id = 119 };
+    CSelectionCommand(CView* pView, const QList<CNode*>& before,
+                      const QList<CNode*>& after, const QString& text,
+                      QUndoCommand *parent = nullptr);
+
+    void undo() override;
+    void redo() override;
+    int id() const override { return Id; }
+
+private:
+    CView* m_pView;
+    QList<CNode*> m_before;
+    QList<CNode*> m_after;
 };
 
 class CChangeLogicParam : public QObject, public QUndoCommand

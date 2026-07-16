@@ -396,7 +396,6 @@ void MainWindow::on_actionOpen_MOB_triggered()
 
 void MainWindow::on_actionSettings_triggered()
 {
-
 }
 
 void MainWindow::on_actionSave_as_triggered()
@@ -552,7 +551,7 @@ void MainWindow::on_actionCopy_IDs_to_clipboard_triggered()
 
 void MainWindow::on_actionOpen_2_triggered()
 {
-    m_settings->onShow(eOptSetResource);
+    m_settings->onShow(eOptSetGeneral);
     setEnabled(false);
 }
 

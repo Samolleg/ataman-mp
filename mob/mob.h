@@ -38,6 +38,7 @@ public:
     void createNode(CNode* pNode);
     CNode* createNode(QJsonObject data);
     void undo_createNode(uint mapId);
+    CNode* restoreDeletedNode(CNode* pNode, int restoreIndex = -1);
     QList<CNode*>& nodes();
     void deleteNode(uint mapId);
     CNode* undo_deleteNode(uint mapId, int restoreIndex = -1);

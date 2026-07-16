@@ -73,16 +73,18 @@ void COpenCommand::redo()
 CDeleteNodeCommand::CDeleteNodeCommand(CView* pView, uint nodeId, QUndoCommand *parent)
     :QUndoCommand(parent)
     ,m_pView(pView)
+    ,m_pMob(pView ? pView->currentMob() : nullptr)
+    ,m_pNode(m_pMob ? m_pMob->nodeByMapId(nodeId) : nullptr)
     ,m_nodeId(nodeId)
     ,m_originalIndex(-1)
 {
-    if(m_pView && m_pView->currentMob())
-        m_originalIndex = m_pView->currentMob()->nodes().indexOf(m_pView->currentMob()->nodeByMapId(nodeId));
+    if(m_pMob && m_pNode)
+        m_originalIndex = m_pMob->nodes().indexOf(m_pNode);
 }
 
 void CDeleteNodeCommand::undo()
 {
-    auto pNode = m_pView->currentMob()->undo_deleteNode(m_nodeId, m_originalIndex);
+    auto pNode = m_pMob ? m_pMob->restoreDeletedNode(m_pNode, m_originalIndex) : nullptr;
     if(nullptr != pNode)
         emit undo_deleteNodeSignal(pNode);
     m_pView->setDurty();
@@ -90,10 +92,15 @@ void CDeleteNodeCommand::undo()
 
 void CDeleteNodeCommand::redo()
 {
-    auto pNode = m_pView->currentMob()->nodeByMapId(m_nodeId);
+    auto pNode = m_pNode;
+    if(!m_pMob || !pNode || !m_pMob->nodes().contains(pNode))
+    {
+        ei::log(eLogWarning, QString("Delete redo skipped because exact node %1 is unavailable").arg(m_nodeId));
+        return;
+    }
     setText(QString("Delete node ID: %1").arg(pNode->mapId()));
     ei::log(eLogInfo, "Delete node ID: " + QString::number(pNode->mapId()));
-    m_pView->currentMob()->deleteNode(m_nodeId);
+    m_pMob->deleteNode(pNode);
     emit deleteNodeSignal(m_nodeId);
     m_pView->setDurty();
 }
@@ -101,26 +108,85 @@ void CDeleteNodeCommand::redo()
 CCreateNodeCommand::CCreateNodeCommand(CView* pView, QJsonObject nodeData, QUndoCommand *parent):
     QUndoCommand(parent)
     ,m_pView(pView)
+    ,m_pMob(pView ? pView->currentMob() : nullptr)
     ,m_nodeData(nodeData)
+    ,m_pCreatedNode(nullptr)
     ,m_createdNodeId(0)
+    ,m_createdNodeIndex(-1)
+    ,m_created(false)
 {
     //setText("Node created");
 }
 
 void CCreateNodeCommand::undo()
 {
-    m_pView->currentMob()->undo_createNode(m_createdNodeId);
+    if(!m_pMob || !m_pCreatedNode || !m_pMob->nodes().contains(m_pCreatedNode))
+    {
+        ei::log(eLogWarning, QString("Create undo skipped because exact node %1 is unavailable").arg(m_createdNodeId));
+        return;
+    }
+    m_pMob->deleteNode(m_pCreatedNode);
     m_pView->setDurty();
     emit undo_addNodeSignal(m_createdNodeId);
 }
 
 void CCreateNodeCommand::redo()
 {
-    auto pNode = m_pView->currentMob()->createNode(m_nodeData);
-    m_createdNodeId = pNode->mapId();
-    setText("Node created ID: " + QString::number(pNode->mapId()));
+    CNode* pNode = nullptr;
+    if(!m_created)
+    {
+        pNode = m_pMob ? m_pMob->createNode(m_nodeData) : nullptr;
+        if(!pNode)
+        {
+            ei::log(eLogWarning, "Create node command failed");
+            return;
+        }
+        m_pCreatedNode = pNode;
+        m_createdNodeId = pNode->mapId();
+        m_createdNodeIndex = m_pMob->nodes().indexOf(pNode);
+        m_created = true;
+    }
+    else
+    {
+        if(m_pMob->nodes().contains(m_pCreatedNode))
+        {
+            ei::log(eLogWarning, QString("Create redo refused duplicate insertion for node %1").arg(m_createdNodeId));
+            return;
+        }
+        pNode = m_pMob->restoreDeletedNode(m_pCreatedNode, m_createdNodeIndex);
+        if(!pNode)
+        {
+            ei::log(eLogWarning, QString("Create redo failed to restore exact node %1").arg(m_createdNodeId));
+            return;
+        }
+    }
+    pNode->setState(ENodeState::eSelect);
+    setText("Node created ID: " + QString::number(m_createdNodeId));
     m_pView->setDurty();
     emit addNodeSignal(pNode);
+}
+
+CSelectionCommand::CSelectionCommand(CView* pView, const QList<CNode*>& before,
+                                     const QList<CNode*>& after, const QString& text,
+                                     QUndoCommand* parent)
+    : QUndoCommand(parent)
+    , m_pView(pView)
+    , m_before(before)
+    , m_after(after)
+{
+    setText(text);
+}
+
+void CSelectionCommand::undo()
+{
+    if(m_pView)
+        m_pView->restoreSelection(m_before);
+}
+
+void CSelectionCommand::redo()
+{
+    if(m_pView)
+        m_pView->restoreSelection(m_after);
 }
 
 CChangeLogicParam::CChangeLogicParam(CView* pView, QString pointHash, const QSharedPointer<IPropertyBase>& prop, QUndoCommand *parent):

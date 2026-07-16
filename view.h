@@ -107,6 +107,9 @@ public:
     CTreeView* objectTree() {return m_pTree;}
     int nSelectedNodes();
     QList<CNode*> selectedNodes();
+    QList<CNode*> selectionSnapshot();
+    void restoreSelection(const QList<CNode*>& selection);
+    void recordSelectionChange(const QList<CNode*>& before, const QString& text = QString("Select objects"));
     void setRandomComplection(const EObjParam param, const float min, const float max);
     void resetSelectedId();
     void openMapParameters();

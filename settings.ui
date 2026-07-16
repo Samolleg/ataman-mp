@@ -49,6 +49,9 @@
             <layout class="QHBoxLayout" name="horizontalLayout_7">
              <item>
               <widget class="QLabel" name="label_38">
+               <property name="toolTip">
+                <string>Controls detail written to the workflow log: 0 Off, 1 Fatal errors, 2 Warnings, 3 Information, 4 Debug. Use Information for normal testing and Debug when reproducing a problem.</string>
+               </property>
                <property name="text">
                 <string>Log level</string>
                </property>
@@ -57,7 +60,7 @@
              <item>
               <widget class="QSlider" name="logLevel">
                <property name="toolTip">
-                <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;0 - nothing&lt;/p&gt;&lt;p&gt;1-only errors&lt;/p&gt;&lt;p&gt;2-erorrs and warnings&lt;/p&gt;&lt;p&gt;3-any info&lt;/p&gt;&lt;p&gt;4-debug information&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+                 <string>0 Off; 1 Fatal errors; 2 Warnings; 3 Information; 4 Debug. Information is recommended for testing; Debug produces the most diagnostic detail.</string>
                </property>
                <property name="maximum">
                 <number>4</number>
@@ -73,6 +76,9 @@
             <layout class="QHBoxLayout" name="horizontalLayoutUndoHistory">
              <item>
               <widget class="QLabel" name="labelUndoHistoryLimit">
+               <property name="toolTip">
+                <string>Maximum number of editor commands retained for Undo and Redo, including selection changes. The default is 512. Applied after restarting the editor.</string>
+               </property>
                <property name="text">
                 <string>Undo history limit</string>
                </property>
@@ -81,7 +87,7 @@
              <item>
               <widget class="QLineEdit" name="undoHistoryLimit">
                <property name="toolTip">
-                <string>Maximum number of undo commands retained. Applied after restarting the editor.</string>
+                 <string>Maximum number of editor commands retained for Undo and Redo, including selection changes. The default is 512. Applied after restarting the editor.</string>
                </property>
               </widget>
              </item>
@@ -89,6 +95,9 @@
            </item>
            <item row="0" column="0">
             <widget class="QCheckBox" name="dipEditSymmetric">
+             <property name="toolTip">
+              <string>When editing diplomacy, automatically applies the reciprocal relationship in the opposite direction.</string>
+             </property>
              <property name="text">
               <string>Two-way diplomacy changes</string>
              </property>
@@ -104,6 +113,9 @@
              </property>
              <item>
               <widget class="QLabel" name="labelSenseY">
+               <property name="toolTip">
+                <string>Vertical mouse-look sensitivity for the 3D viewport camera.</string>
+               </property>
                <property name="text">
                 <string>Sense Y:</string>
                </property>
@@ -111,6 +123,9 @@
              </item>
              <item>
               <widget class="QSlider" name="mouseSenseY">
+               <property name="toolTip">
+                <string>Vertical mouse-look sensitivity for the 3D viewport camera.</string>
+               </property>
                <property name="minimum">
                 <number>1</number>
                </property>
@@ -157,13 +172,20 @@
              </property>
              <item>
               <widget class="QLabel" name="labelRangeInc">
+               <property name="toolTip">
+                <string>Size of a newly added MOB object-ID range. The new range starts after the highest existing range and ends at start plus this value.</string>
+               </property>
                <property name="text">
-                <string>Range auto inc</string>
+                 <string>New ID range size</string>
                </property>
               </widget>
              </item>
              <item>
-              <widget class="QLineEdit" name="rangeIncrement"/>
+              <widget class="QLineEdit" name="rangeIncrement">
+               <property name="toolTip">
+                <string>Size of a newly added MOB object-ID range. Default: 999.</string>
+               </property>
+              </widget>
              </item>
             </layout>
            </item>
@@ -177,6 +199,9 @@
              </property>
              <item>
               <widget class="QLabel" name="labelSenseX">
+               <property name="toolTip">
+                <string>Horizontal mouse-look sensitivity for the 3D viewport camera.</string>
+               </property>
                <property name="text">
                 <string>Sense X:</string>
                </property>
@@ -184,6 +209,9 @@
              </item>
              <item>
               <widget class="QSlider" name="mouseSenseX">
+               <property name="toolTip">
+                <string>Horizontal mouse-look sensitivity for the 3D viewport camera.</string>
+               </property>
                <property name="minimum">
                 <number>1</number>
                </property>
@@ -201,13 +229,22 @@
              </property>
              <item>
               <widget class="QLabel" name="labellandCheckTime">
+               <property name="toolTip">
+                <string>Reserved for polling externally modified MPR files. This feature is currently disabled, so this value has no effect.</string>
+               </property>
                <property name="text">
-                <string>Land modify time(msec)</string>
+                 <string>External MPR polling (inactive)</string>
                </property>
               </widget>
              </item>
              <item>
               <widget class="QSlider" name="landCheckTime">
+               <property name="enabled">
+                <bool>false</bool>
+               </property>
+               <property name="toolTip">
+                <string>Currently inactive. Intended polling interval in milliseconds for detecting MPR changes made by another program.</string>
+               </property>
                <property name="minimumSize">
                 <size>
                  <width>50</width>
@@ -279,6 +316,9 @@
            </property>
            <item>
             <widget class="QCheckBox" name="drawLogic">
+             <property name="toolTip">
+              <string>Shows unit patrol routes and other unit logic even when their owning unit is not selected.</string>
+             </property>
              <property name="text">
               <string>Always draw units logic</string>
              </property>
@@ -286,6 +326,9 @@
            </item>
            <item>
             <widget class="QCheckBox" name="freeCamera">
+             <property name="toolTip">
+              <string>Uses unrestricted viewport camera movement instead of terrain-constrained navigation.</string>
+             </property>
              <property name="text">
               <string>Free Camera</string>
              </property>
@@ -293,6 +336,9 @@
            </item>
            <item>
             <widget class="QCheckBox" name="drawWater">
+             <property name="toolTip">
+              <string>Displays MPR water, swamp, and similar surface overlays in the viewport.</string>
+             </property>
              <property name="text">
               <string>Draw water</string>
              </property>
@@ -300,6 +346,9 @@
            </item>
            <item>
             <widget class="QCheckBox" name="drawHelp">
+             <property name="toolTip">
+              <string>Displays helper-radius guides for applicable objects while editing logic.</string>
+             </property>
              <property name="text">
               <string>Draw help radius in logic mode</string>
              </property>
@@ -882,6 +931,9 @@
            </property>
            <item row="0" column="0">
             <widget class="QLabel" name="label">
+              <property name="toolTip">
+               <string>Advanced fallback sources for figure/model data. Normally managed by Game and Mod Setup. Entries nearer the top have higher lookup priority.</string>
+              </property>
              <property name="text">
               <string>Legacy figure folders (advanced)</string>
              </property>
@@ -891,6 +943,9 @@
             <layout class="QHBoxLayout" name="horizontalLayout_4">
              <item>
               <widget class="QListWidget" name="figPaths">
+                <property name="toolTip">
+                 <string>Advanced fallback sources for figure/model data. Normally managed by Game and Mod Setup. Entries nearer the top have higher lookup priority.</string>
+                </property>
                <property name="sizePolicy">
                 <sizepolicy hsizetype="Expanding" vsizetype="Ignored">
                  <horstretch>0</horstretch>
@@ -941,6 +996,9 @@
            </item>
            <item row="1" column="0">
             <widget class="QLabel" name="label_4">
+              <property name="toolTip">
+               <string>Advanced fallback sources for texture data. Normally managed by Game and Mod Setup. Entries nearer the top have higher lookup priority.</string>
+              </property>
              <property name="text">
               <string>Legacy texture folders (advanced)</string>
              </property>
@@ -950,6 +1008,9 @@
             <layout class="QHBoxLayout" name="horizontalLayout_6">
              <item>
               <widget class="QListWidget" name="texPaths">
+                <property name="toolTip">
+                 <string>Advanced fallback sources for texture data. Normally managed by Game and Mod Setup. Entries nearer the top have higher lookup priority.</string>
+                </property>
                <property name="sizePolicy">
                 <sizepolicy hsizetype="Expanding" vsizetype="Ignored">
                  <horstretch>0</horstretch>

@@ -46,7 +46,12 @@ CMob::CMob():
 
 CMob::~CMob()
 {
-    for (auto& node: m_aNode)
+    QSet<CNode*> ownedNodes;
+    for(CNode* node : m_aNode)
+        ownedNodes.insert(node);
+    for(CNode* node : m_aDeletedNode)
+        ownedNodes.insert(node);
+    for(CNode* node : ownedNodes)
         delete node;
 }
 
@@ -813,6 +818,7 @@ void CMob::undo_createNode(uint mapId)
             //m_aDeletedNode.append(pNode);
             m_aNode.removeAt(m_aNode.indexOf(pNode));
             ei::log(eLogDebug, QString("undo create node with %1 map ID").arg(pNode->mapId()));
+            logicNodesUpdate();
             return;
         }
     }
@@ -969,6 +975,21 @@ int CMob::readMob(QFileInfo &path)
     logicNodesUpdate();
     captureCleanProjection();
     return 0;
+}
+
+CNode* CMob::restoreDeletedNode(CNode* pNode, int restoreIndex)
+{
+    if(!pNode || m_aNode.contains(pNode) || !m_aDeletedNode.contains(pNode))
+        return nullptr;
+
+    if(restoreIndex >= 0 && restoreIndex <= m_aNode.size())
+        m_aNode.insert(restoreIndex, pNode);
+    else
+        m_aNode.append(pNode);
+    m_aDeletedNode.removeOne(pNode);
+    logicNodesUpdate();
+    ei::log(eLogDebug, QString("exact node with %1 restored").arg(pNode->mapId()));
+    return pNode;
 }
 
 QVector<uint> CMob::checkUniqueId(QSet<uint> &aId)
@@ -1533,7 +1554,8 @@ void CMob::deleteNode(CNode *pNode)
     const int ind = m_aNode.indexOf(pNode);
     if(ind >=0)
     {
-        m_aDeletedNode.append(m_aNode.at(ind));
+        if(!m_aDeletedNode.contains(pNode))
+            m_aDeletedNode.append(pNode);
         //m_aNode.at(ind)->setState(ENodeState::eDraw);
         m_aNode.removeAt(ind);
         ei::log(eLogDebug, QString("delete node with %1").arg(pNode->mapId()));

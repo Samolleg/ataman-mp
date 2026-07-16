@@ -399,6 +399,8 @@ int CView::select(const SSelect &selectParam, bool bAddToSelect)
     if(nullptr == m_activeMob)
         return 0;
 
+    const QList<CNode*> selectionBefore = selectionSnapshot();
+
     CNode* pNode = nullptr;
     foreach (pNode, m_activeMob->nodes())
     {
@@ -562,6 +564,7 @@ int CView::select(const SSelect &selectParam, bool bAddToSelect)
             break;
         }
     }
+    recordSelectionChange(selectionBefore);
     viewParameters();
     return nSelectedNodes();
 }
@@ -886,6 +889,8 @@ void CView::pickObject(const QRect &rect, bool bAddToSelect)
         return;
     }
 
+    const QList<CNode*> selectionBefore = selectionSnapshot();
+
     if (!m_selectProgram.bind())
         close();
 
@@ -936,6 +941,7 @@ void CView::pickObject(const QRect &rect, bool bAddToSelect)
             }
 
     m_selectFrame->reset();
+    recordSelectionChange(selectionBefore);
 }
 
 QVector3D CView::getTerrainPos(bool bLand)
@@ -1131,6 +1137,71 @@ QList<CNode *> CView::selectedNodes()
                 arrNode.append(node);
     }
     return arrNode;
+}
+
+QList<CNode*> CView::selectionSnapshot()
+{
+    QList<CNode*> selection;
+    for(CMob* mob : m_aMob)
+    {
+        if(!mob)
+            continue;
+        for(CNode* node : mob->nodes())
+        {
+            if(node && node->nodeState() == ENodeState::eSelect && !selection.contains(node))
+                selection.append(node);
+        }
+        for(CNode* node : mob->logicNodes())
+        {
+            if(node && node->nodeState() == ENodeState::eSelect && !selection.contains(node))
+                selection.append(node);
+        }
+    }
+    return selection;
+}
+
+void CView::restoreSelection(const QList<CNode*>& selection)
+{
+    QList<CNode*> available;
+    for(CMob* mob : m_aMob)
+    {
+        if(!mob)
+            continue;
+        mob->clearSelect(true);
+        for(CNode* node : mob->nodes())
+        {
+            if(node && !available.contains(node))
+                available.append(node);
+        }
+        for(CNode* node : mob->logicNodes())
+        {
+            if(node && !available.contains(node))
+                available.append(node);
+        }
+    }
+
+    for(CNode* node : selection)
+    {
+        if(node && available.contains(node))
+            node->setState(ENodeState::eSelect);
+    }
+    viewParameters();
+    update();
+}
+
+void CView::recordSelectionChange(const QList<CNode*>& before, const QString& text)
+{
+    const QList<CNode*> after = selectionSnapshot();
+    QSet<CNode*> beforeSet;
+    QSet<CNode*> afterSet;
+    for(CNode* node : before)
+        beforeSet.insert(node);
+    for(CNode* node : after)
+        afterSet.insert(node);
+    if(beforeSet == afterSet)
+        return;
+
+    m_pUndoStack->push(new CSelectionCommand(this, before, after, text));
 }
 
 void CView::setRandomComplection(const EObjParam param, const float min, const float max)
