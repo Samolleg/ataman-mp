@@ -68,6 +68,11 @@ behavior.
   Implementation:
   [`554b0d4`](https://github.com/Ilufus/ei-mapper-endurance/commit/554b0d4);
   focused test instructions are in [ALPHA20_VALIDATION.md](ALPHA20_VALIDATION.md).
+- [ ] Validate alpha.21 deferred paste transactions. Unconfirmed copies are
+  preview-only and cannot create a dirty empty Redo entry; confirmed placement
+  creates distinct Paste and Move entries. Implementation:
+  [`ff043cf`](https://github.com/Ilufus/ei-mapper-endurance/commit/ff043cf);
+  focused test instructions are in [ALPHA21_VALIDATION.md](ALPHA21_VALIDATION.md).
 - [ ] Finish lossless preservation of MPR archive details.
 
 These are the remaining safety gates before editing live maps can be recommended.
