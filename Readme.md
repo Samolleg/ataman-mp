@@ -6,6 +6,9 @@ fast Evil Islands and Jamais Vu map editing.
 
 Current development version: `0.1.0-alpha.7`.
 
+Project status and upcoming work are tracked in the living
+[Endurance roadmap](ROADMAP.md).
+
 Endurance creates hash-addressed recovery snapshots when MOB/MPR documents are opened and
 timestamped pre-save revisions before replacing existing files. Backups and their JSON metadata
 are stored under `%LOCALAPPDATA%\\EI Mapper Endurance\\backups`; use **Tools → Open Backup
