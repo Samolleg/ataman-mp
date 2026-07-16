@@ -72,7 +72,10 @@ behavior.
   preview-only and cannot create a dirty empty Redo entry; confirmed placement
   creates distinct Paste and Move entries. Implementation:
   [`ff043cf`](https://github.com/Ilufus/ei-mapper-endurance/commit/ff043cf);
-  focused test instructions are in [ALPHA21_VALIDATION.md](ALPHA21_VALIDATION.md).
+  viewport selections also reveal their exact pointer-backed outliner entry,
+  including duplicate-NID objects
+  ([`193966e`](https://github.com/Ilufus/ei-mapper-endurance/commit/193966e)).
+  Focused test instructions are in [ALPHA21_VALIDATION.md](ALPHA21_VALIDATION.md).
 - [ ] Finish lossless preservation of MPR archive details.
 
 These are the remaining safety gates before editing live maps can be recommended.
