@@ -7,6 +7,32 @@ they do not get lost between test sessions.
 
 Current development release: `0.1.0-alpha.14`.
 
+## Implementation evidence
+
+Completed code items below carry an inline commit link. Validation and packaging
+evidence is linked separately where a commit alone does not prove runtime
+behavior.
+
+| Change group | Commit | Validation |
+|---|---|---|
+| Endurance identity, safe no-op documents, indexed resources, independent opening, outliner, external editor | [`054959b`](https://github.com/Ilufus/ei-mapper-endurance/commit/054959b) | [initial document tests](tests/endurance_document_tests.cpp) |
+| NUL-delimited MOB validation | [`34b9ec8`](https://github.com/Ilufus/ei-mapper-endurance/commit/34b9ec8) | [document tests](tests/endurance_document_tests.cpp) |
+| Crash diagnostics and rotating workflow logs | [`2568e38`](https://github.com/Ilufus/ei-mapper-endurance/commit/2568e38) | [bug-report workflow](BUG_REPORTING.md) |
+| Missing figures and unit path preservation | [`6454de7`](https://github.com/Ilufus/ei-mapper-endurance/commit/6454de7) | private JMV map checks |
+| Generic JMV RES discovery | [`44ab888`](https://github.com/Ilufus/ei-mapper-endurance/commit/44ab888) | private JMV resource checks |
+| SOUND/world serialization preservation | [`62b824a`](https://github.com/Ilufus/ei-mapper-endurance/commit/62b824a) | private changed-save comparisons |
+| Unit guard/patrol height preservation | [`e0ac92a`](https://github.com/Ilufus/ei-mapper-endurance/commit/e0ac92a) | private Zone 1 changed-save comparison |
+| Recoverable backups | [`8a7bc3c`](https://github.com/Ilufus/ei-mapper-endurance/commit/8a7bc3c) | [backup tests](tests/backup_manager_tests.cpp) |
+| Model-qualified unit skins | [`35a43c8`](https://github.com/Ilufus/ei-mapper-endurance/commit/35a43c8) | [resource-name tests](tests/resource_name_tests.cpp) |
+| Complete terrain atlases and internal map namespace | [`530bb16`](https://github.com/Ilufus/ei-mapper-endurance/commit/530bb16) | [resource-name tests](tests/resource_name_tests.cpp) |
+| Consolidated duplicate-ID reporting | [`a39ef57`](https://github.com/Ilufus/ei-mapper-endurance/commit/a39ef57) | [duplicate-ID tests](tests/duplicate_id_report_tests.cpp) |
+| Staged fresh-parser validation and alpha.11 preview | [`c8d8b3a`](https://github.com/Ilufus/ei-mapper-endurance/commit/c8d8b3a) | [alpha.11 validation](ALPHA11_VALIDATION.md) |
+| Installation-based profiles | [`7b206c8`](https://github.com/Ilufus/ei-mapper-endurance/commit/7b206c8) | [resource-profile tests](tests/resource_profile_tests.cpp) |
+| First-run and MOB-only viewport initialization | [`54d8070`](https://github.com/Ilufus/ei-mapper-endurance/commit/54d8070) | [alpha.13 validation](ALPHA13_VALIDATION.md) |
+| Setup moved under Settings | [`8528799`](https://github.com/Ilufus/ei-mapper-endurance/commit/8528799) | [alpha.13 validation](ALPHA13_VALIDATION.md) |
+| Database-backed humanoid candidate lookup | [`94e0b9d`](https://github.com/Ilufus/ei-mapper-endurance/commit/94e0b9d) | [resource-name tests](tests/resource_name_tests.cpp); base rendering remains unresolved |
+| Alpha.14 testing-group release | [`800a011`](https://github.com/Ilufus/ei-mapper-endurance/commit/800a011) | [alpha.14 validation](ALPHA14_VALIDATION.md) |
+
 ## Current focus
 
 - [ ] Collect structured alpha.14 testing-group results, including successful
@@ -19,11 +45,11 @@ These are the remaining safety gates before editing live maps can be recommended
 
 ## Alpha.14 testing campaign
 
-- [x] Build and checksum-verify the private alpha.14 testing-group package.
+- [x] Build and checksum-verify the private alpha.14 testing-group package. ([`800a011`](https://github.com/Ilufus/ei-mapper-endurance/commit/800a011), [validation](ALPHA14_VALIDATION.md))
 - [x] Include source, symbols, GPL notices, validation notes, safe-test rules,
-  bug-report instructions, and a shared test matrix.
+  bug-report instructions, and a shared test matrix. ([`800a011`](https://github.com/Ilufus/ei-mapper-endurance/commit/800a011))
 - [x] Record base-game `zone3obr.mob` humanoid textures as a known unresolved
-  issue instead of treating candidate-name lookup as a rendering fix.
+  issue instead of treating candidate-name lookup as a rendering fix. ([`800a011`](https://github.com/Ilufus/ei-mapper-endurance/commit/800a011))
 - [ ] Collect coverage for MPR-first, MOB-first, MOB-only, terrain
   attach/detach, repeated open/close, and cold/warm loading.
 - [ ] Collect narrow changed-save tests for properties, copied objects, patrol
@@ -38,29 +64,29 @@ These are the remaining safety gates before editing live maps can be recommended
 
 ## Foundation and identity
 
-- [x] Create an independent private repository with complete upstream history.
-- [x] Keep the public project as the read-only `upstream` remote.
-- [x] Tag the imported upstream baseline at commit `1cebe83d`.
-- [x] Brand the product and executable as EI Mapper: Endurance Edition.
-- [x] Start independent SemVer at `0.1.0` and separate Endurance settings/log paths.
-- [x] Preserve GPL-3.0, upstream attribution, history, and `NOTICE.md`.
-- [x] Keep game assets, private paths, dumps, and integration fixtures out of Git.
+- [x] Create an independent private repository with complete upstream history. ([`054959b`](https://github.com/Ilufus/ei-mapper-endurance/commit/054959b))
+- [x] Keep the public project as the read-only `upstream` remote. ([`054959b`](https://github.com/Ilufus/ei-mapper-endurance/commit/054959b))
+- [x] Tag the imported upstream baseline at commit `1cebe83d`. ([baseline](https://github.com/Ilufus/ei-mapper-endurance/tree/upstream-1cebe83d))
+- [x] Brand the product and executable as EI Mapper: Endurance Edition. ([`054959b`](https://github.com/Ilufus/ei-mapper-endurance/commit/054959b))
+- [x] Start independent SemVer at `0.1.0` and separate Endurance settings/log paths. ([`054959b`](https://github.com/Ilufus/ei-mapper-endurance/commit/054959b))
+- [x] Preserve GPL-3.0, upstream attribution, history, and `NOTICE.md`. ([`054959b`](https://github.com/Ilufus/ei-mapper-endurance/commit/054959b))
+- [x] Keep game assets, private paths, dumps, and integration fixtures out of Git. ([repository tree](https://github.com/Ilufus/ei-mapper-endurance/tree/main))
 
 ## Stability and safe saving
 
-- [x] Stop automatic duplicate-ID repair while opening a MOB.
-- [x] Report duplicate IDs without changing the source or dirty state.
-- [x] Preserve exact bytes for unchanged MOB/MPR Save As operations.
-- [x] Use `QSaveFile` for atomic replacement.
-- [x] Fix sunlight/ambient serialization confusion.
-- [x] Preserve unit prototype trailing bytes required by existing maps.
-- [x] Keep patrol/look coordinates and unit height in stored map coordinates.
-- [x] Correct SOUND field ordering, wind float preservation, and optional VSS handling.
+- [x] Stop automatic duplicate-ID repair while opening a MOB. ([`054959b`](https://github.com/Ilufus/ei-mapper-endurance/commit/054959b))
+- [x] Report duplicate IDs without changing the source or dirty state. ([`054959b`](https://github.com/Ilufus/ei-mapper-endurance/commit/054959b), [`34b9ec8`](https://github.com/Ilufus/ei-mapper-endurance/commit/34b9ec8))
+- [x] Preserve exact bytes for unchanged MOB/MPR Save As operations. ([`054959b`](https://github.com/Ilufus/ei-mapper-endurance/commit/054959b))
+- [x] Use `QSaveFile` for atomic replacement. ([`054959b`](https://github.com/Ilufus/ei-mapper-endurance/commit/054959b))
+- [x] Fix sunlight/ambient serialization confusion. ([`054959b`](https://github.com/Ilufus/ei-mapper-endurance/commit/054959b))
+- [x] Preserve unit prototype trailing bytes required by existing maps. ([`6454de7`](https://github.com/Ilufus/ei-mapper-endurance/commit/6454de7))
+- [x] Keep patrol/look coordinates and unit height in stored map coordinates. ([`e0ac92a`](https://github.com/Ilufus/ei-mapper-endurance/commit/e0ac92a))
+- [x] Correct SOUND field ordering, wind float preservation, and optional VSS handling. ([`62b824a`](https://github.com/Ilufus/ei-mapper-endurance/commit/62b824a))
 - [x] Add deduplicated open snapshots and timestamped pre-save backups. ([alpha.7](https://github.com/Ilufus/ei-mapper-endurance/commit/8a7bc3c))
-- [x] Refuse replacement when the required pre-save backup fails.
-- [x] Add a rotating backup retention policy and **Tools > Open Backup Folder**.
-- [x] Verify backup creation, metadata, hashes, and source preservation in a disposable end-to-end test.
-- [x] Validate the staged document with a fresh parser before committing it.
+- [x] Refuse replacement when the required pre-save backup fails. ([`8a7bc3c`](https://github.com/Ilufus/ei-mapper-endurance/commit/8a7bc3c))
+- [x] Add a rotating backup retention policy and **Tools > Open Backup Folder**. ([`8a7bc3c`](https://github.com/Ilufus/ei-mapper-endurance/commit/8a7bc3c))
+- [x] Verify backup creation, metadata, hashes, and source preservation in a disposable end-to-end test. ([backup tests](tests/backup_manager_tests.cpp))
+- [x] Validate the staged document with a fresh parser before committing it. ([`c8d8b3a`](https://github.com/Ilufus/ei-mapper-endurance/commit/c8d8b3a))
 - [ ] Preserve every unknown MOB record, nested length, ordering detail, and raw payload.
 - [ ] Complete corpus tests for every observed object family and optional section.
 - [ ] Complete lossless MPR preservation for names, timestamps, alignment, and extra entries.
@@ -73,35 +99,35 @@ These are the remaining safety gates before editing live maps can be recommended
 
 ## Diagnostics and crash recovery
 
-- [x] Put workflow logs in a dedicated Endurance logs folder.
-- [x] Start a clean current log and timestamp the previous log on launch.
-- [x] Record file-open phases and last-operation breadcrumbs for hard-crash investigation.
-- [x] Add crash handling that preserves useful diagnostic context where Windows permits it.
+- [x] Put workflow logs in a dedicated Endurance logs folder. ([`2568e38`](https://github.com/Ilufus/ei-mapper-endurance/commit/2568e38))
+- [x] Start a clean current log and timestamp the previous log on launch. ([`2568e38`](https://github.com/Ilufus/ei-mapper-endurance/commit/2568e38))
+- [x] Record file-open phases and last-operation breadcrumbs for hard-crash investigation. ([`2568e38`](https://github.com/Ilufus/ei-mapper-endurance/commit/2568e38))
+- [x] Add crash handling that preserves useful diagnostic context where Windows permits it. ([`2568e38`](https://github.com/Ilufus/ei-mapper-endurance/commit/2568e38))
 - [ ] Add a diagnostics panel for phase timings, validation findings, and missing resources.
 - [ ] Add an opt-in crash bundle creator that removes private paths and game assets.
 - [ ] Exercise hard-crash logging with controlled parser, decoder, and OpenGL failures.
 
 ## Resources, figures, textures, and performance
 
-- [x] Index RES tables and lazily read payloads instead of expanding whole archives repeatedly.
-- [x] Normalize mixed-case archive lookups and cache missing-resource results.
-- [x] Treat configured RES archives as generic sources with deterministic priority.
-- [x] Discover JMV archives beyond the old figure/texture category restrictions.
-- [x] Resolve the previously missing representative Zone 3/18 JMV figures.
-- [x] Preserve unit figure, texture, and database fields during changed saves.
-- [x] Resolve model-qualified `_xN` unit skins such as Zone 12 skeleton textures.
+- [x] Index RES tables and lazily read payloads instead of expanding whole archives repeatedly. ([`054959b`](https://github.com/Ilufus/ei-mapper-endurance/commit/054959b))
+- [x] Normalize mixed-case archive lookups and cache missing-resource results. ([`054959b`](https://github.com/Ilufus/ei-mapper-endurance/commit/054959b))
+- [x] Treat configured RES archives as generic sources with deterministic priority. ([`44ab888`](https://github.com/Ilufus/ei-mapper-endurance/commit/44ab888))
+- [x] Discover JMV archives beyond the old figure/texture category restrictions. ([`44ab888`](https://github.com/Ilufus/ei-mapper-endurance/commit/44ab888))
+- [x] Resolve the previously missing representative Zone 3/18 JMV figures. ([`6454de7`](https://github.com/Ilufus/ei-mapper-endurance/commit/6454de7))
+- [x] Preserve unit figure, texture, and database fields during changed saves. ([`6454de7`](https://github.com/Ilufus/ei-mapper-endurance/commit/6454de7))
+- [x] Resolve model-qualified `_xN` unit skins such as Zone 12 skeleton textures. ([`35a43c8`](https://github.com/Ilufus/ei-mapper-endurance/commit/35a43c8))
 - [x] Parse human and orc prototype skin indices from the active `units.udb`
-  and produce model-qualified candidate texture names.
+  and produce model-qualified candidate texture names. ([`94e0b9d`](https://github.com/Ilufus/ei-mapper-endurance/commit/94e0b9d))
 - [ ] Complete database/template-driven character rendering, including race
   texture lists, secondary layers, and equipped visuals. Base-game
   `zone3obr.mob` remains the known primary-skin regression case; JMV rendering
   remains the current priority.
 - [x] Prefer an active mod `database.res` over adjacent backup or
-  `original-unmodified` database archives for unit appearance lookup.
-- [x] Log and display the nearest existing family variation when a MOB references an absent skin, without changing the stored field.
-- [x] Resolve complete terrain-atlas sets case-insensitively with deterministic JMV-first provenance.
-- [x] Refuse partial terrain-atlas assembly and use a complete diagnostic fallback instead.
-- [x] Use the embedded MPR map namespace for Tile Parameters, adapting upstream PR #19.
+  `original-unmodified` database archives for unit appearance lookup. ([`94e0b9d`](https://github.com/Ilufus/ei-mapper-endurance/commit/94e0b9d))
+- [x] Log and display the nearest existing family variation when a MOB references an absent skin, without changing the stored field. ([`35a43c8`](https://github.com/Ilufus/ei-mapper-endurance/commit/35a43c8))
+- [x] Resolve complete terrain-atlas sets case-insensitively with deterministic JMV-first provenance. ([`530bb16`](https://github.com/Ilufus/ei-mapper-endurance/commit/530bb16))
+- [x] Refuse partial terrain-atlas assembly and use a complete diagnostic fallback instead. ([`530bb16`](https://github.com/Ilufus/ei-mapper-endurance/commit/530bb16))
+- [x] Use the embedded MPR map namespace for Tile Parameters, adapting upstream PR #19. ([`530bb16`](https://github.com/Ilufus/ei-mapper-endurance/commit/530bb16))
 - [ ] Persist catalog indexes and invalidate them by path, size, timestamp, and header hash.
 - [ ] Inventory and support every MMP format found in the private JMV corpus.
 - [ ] Show diagnostic placeholders with asset, archive, format, and failure reason.
@@ -112,23 +138,23 @@ These are the remaining safety gates before editing live maps can be recommended
 
 ## Document workflow
 
-- [x] Provide separate Open MPR and Open MOB commands.
-- [x] Allow basic MOB-only opening and rendering without automatically loading terrain.
-- [x] Keep an MPR open while independently choosing a MOB.
+- [x] Provide separate Open MPR and Open MOB commands. ([`054959b`](https://github.com/Ilufus/ei-mapper-endurance/commit/054959b))
+- [x] Allow basic MOB-only opening and rendering without automatically loading terrain. ([`054959b`](https://github.com/Ilufus/ei-mapper-endurance/commit/054959b), [`54d8070`](https://github.com/Ilufus/ei-mapper-endurance/commit/54d8070))
+- [x] Keep an MPR open while independently choosing a MOB. ([`054959b`](https://github.com/Ilufus/ei-mapper-endurance/commit/054959b))
 - [ ] Introduce the full `MapWorkspace` model: optional MPR, multiple MOBs, explicit active document.
 - [ ] Add Close MPR and Close Active MOB commands.
 - [ ] Add an explicit Open Matching MOB convenience command.
 - [x] Reproject display positions safely when terrain is attached or detached
-  without changing stored MOB coordinates.
+  without changing stored MOB coordinates. ([`54d8070`](https://github.com/Ilufus/ei-mapper-endurance/commit/54d8070))
 - [ ] Disable only terrain-dependent tools in MOB-only mode.
 - [ ] Add independent `.mpr` and `.mob` drag-and-drop behavior.
-- [x] Add headless `--profile-load` discovery and JSON output.
+- [x] Add headless `--profile-load` discovery and JSON output. ([`7b206c8`](https://github.com/Ilufus/ei-mapper-endurance/commit/7b206c8))
 - [ ] Add Open Workspace support.
 
 ## UI and script workflow
 
-- [x] Make the object outliner resizable and persist its splitter layout.
-- [x] Enable the external-script-editor button with OS association fallback.
+- [x] Make the object outliner resizable and persist its splitter layout. ([`054959b`](https://github.com/Ilufus/ei-mapper-endurance/commit/054959b))
+- [x] Enable the external-script-editor button with OS association fallback. ([`054959b`](https://github.com/Ilufus/ei-mapper-endurance/commit/054959b))
 - [ ] Convert the outliner to a resizable/detachable dock.
 - [ ] Add stable filtering by text, type, ID, model, database name, and validation state.
 - [ ] Add a configurable external editor executable.
@@ -139,15 +165,15 @@ These are the remaining safety gates before editing live maps can be recommended
 
 ## JMV setup and validation
 
-- [x] Configure and test the development build against a confirmed JMV installation using settings outside upstream v0.3.
-- [x] Keep all live maps untouched during automated tests; use hashed disposable copies.
-- [x] Provide `--validate`, `--roundtrip-check`, and JSON output for automation.
-- [x] Add the JMV setup wizard with auto-discovery and explicit confirmation.
+- [x] Configure and test the development build against a confirmed JMV installation using settings outside upstream v0.3. ([`c8d8b3a`](https://github.com/Ilufus/ei-mapper-endurance/commit/c8d8b3a), [validation](ALPHA11_VALIDATION.md))
+- [x] Keep all live maps untouched during automated tests; use hashed disposable copies. ([validation](ALPHA11_VALIDATION.md))
+- [x] Provide `--validate`, `--roundtrip-check`, and JSON output for automation. ([`054959b`](https://github.com/Ilufus/ei-mapper-endurance/commit/054959b))
+- [x] Add the JMV setup wizard with auto-discovery and explicit confirmation. ([`7b206c8`](https://github.com/Ilufus/ei-mapper-endurance/commit/7b206c8))
 - [x] Move Game and Mod Setup under Settings and suppress automatic legacy
-  resource dialogs and warnings.
-- [x] Use the selected profile's preferred Maps directory for Open dialogs.
+  resource dialogs and warnings. ([`8528799`](https://github.com/Ilufus/ei-mapper-endurance/commit/8528799))
+- [x] Use the selected profile's preferred Maps directory for Open dialogs. ([`7b206c8`](https://github.com/Ilufus/ei-mapper-endurance/commit/7b206c8))
 - [x] Refresh resource state and viewport geometry after setup without requiring
-  an editor restart.
+  an editor restart. ([`54d8070`](https://github.com/Ilufus/ei-mapper-endurance/commit/54d8070))
 - [ ] Validate archive signatures and show source precedence during setup.
 - [ ] Offer a read-only, previewed import of compatible upstream `options.json` values.
 - [ ] Maintain a hash inventory for the private Zone 1/3/4/6/12/18/19 integration corpus.
@@ -156,10 +182,10 @@ These are the remaining safety gates before editing live maps can be recommended
 
 ## Release gates
 
-- [x] `0.1.0-alpha.1` through `0.1.0-alpha.13`: initial safety, diagnostics, resources, serializer fixes, backups, model-qualified skins, terrain-atlas correctness, consolidated duplicate-ID reporting, staged-save validation, mod-maker preview reporting, installation-based reusable resource profiles, and corrected first-run/MOB-only viewport initialization.
+- [x] `0.1.0-alpha.1` through `0.1.0-alpha.13`: initial safety, diagnostics, resources, serializer fixes, backups, model-qualified skins, terrain-atlas correctness, consolidated duplicate-ID reporting, staged-save validation, mod-maker preview reporting, installation-based reusable resource profiles, and corrected first-run/MOB-only viewport initialization. ([implementation evidence](#implementation-evidence))
 - [x] `0.1.0-alpha.14`: testing-group build with Settings-based setup,
   explicit base-game humanoid known issue, database appearance diagnostics, and
-  a coordinated test/report matrix.
+  a coordinated test/report matrix. ([`800a011`](https://github.com/Ilufus/ei-mapper-endurance/commit/800a011), [validation](ALPHA14_VALIDATION.md))
 - [ ] Next private alpha: address confirmed alpha.14 regressions and publish a
   coverage summary from the group test matrix.
 - [ ] `0.1.0-beta.1`: correct indexed resources and responsive fast loading.
