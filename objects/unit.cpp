@@ -998,7 +998,6 @@ void CLogic::drawHelp(bool isActive, QOpenGLShaderProgram *program)
 void CLogic::updatePos(QVector3D& offset)
 {
     m_guardPlacement += offset;
-    CLandscape::getInstance()->projectPt(m_guardPlacement);
     for(auto& patrol : m_aPatrolPt)
     {
         for(auto& look : patrol->lookPoint())
