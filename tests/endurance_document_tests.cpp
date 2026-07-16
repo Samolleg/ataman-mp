@@ -70,6 +70,9 @@ private slots:
     void unknownLeafIsPreservedAsOpaque();
     void malformedMobRootIsRejected();
     void semanticDiffClassifiesMovementAndAddition();
+    void transactionPatchesOnlyAuthorizedLeaf();
+    void transactionRejectsStaleProvenance();
+    void cp1251EncodingIsStrict();
     void unchangedMprIsByteIdentical();
     void malformedMprTableIsRejected();
     void stagedMobIsReopenedWithoutCreatingDestination();
@@ -170,6 +173,64 @@ void EnduranceDocumentTests::semanticDiffClassifiesMovementAndAddition()
     }
     QVERIFY2(moved == 1, qPrintable(diff.toText()));
     QCOMPARE(added, 1);
+}
+
+void EnduranceDocumentTests::transactionPatchesOnlyAuthorizedLeaf()
+{
+    QTemporaryFile file;
+    QVERIFY(file.open());
+    const QByteArray untouched = section(0x11111111, "untouched");
+    const QByteArray editable = section(0x22222222, "before");
+    const QByteArray bytes = validMob(untouched + editable);
+    QCOMPARE(file.write(bytes), qint64(bytes.size()));
+    file.flush();
+
+    CMobDocument document;
+    QVERIFY(document.load(QFileInfo(file.fileName())));
+    const SMobSection& leaf = document.sections().front().children.at(1);
+    CMobEditTransaction transaction("test leaf edit");
+    transaction.replaceLeafPayload(leaf.path, leaf.sha256, "after-value");
+    QByteArray candidate;
+    CValidationReport report;
+    QVERIFY2(document.applyTransaction(transaction, &candidate, &report), qPrintable(report.toText()));
+    QCOMPARE(candidate, validMob(untouched + section(0x22222222, "after-value")));
+
+    QTemporaryFile candidateFile;
+    QVERIFY(candidateFile.open());
+    candidateFile.write(candidate);
+    candidateFile.flush();
+    CMobDocument reparsed;
+    QVERIFY(reparsed.load(QFileInfo(candidateFile.fileName())));
+}
+
+void EnduranceDocumentTests::transactionRejectsStaleProvenance()
+{
+    QTemporaryFile file;
+    QVERIFY(file.open());
+    const QByteArray bytes = validMob(section(0x22222222, "before"));
+    file.write(bytes);
+    file.flush();
+
+    CMobDocument document;
+    QVERIFY(document.load(QFileInfo(file.fileName())));
+    const SMobSection& leaf = document.sections().front().children.front();
+    CMobEditTransaction transaction("stale edit");
+    transaction.replaceLeafPayload(leaf.path, QByteArray(32, '\x7f'), "after");
+    QByteArray candidate;
+    CValidationReport report;
+    QVERIFY(!document.applyTransaction(transaction, &candidate, &report));
+    QVERIFY(candidate.isEmpty());
+    QVERIFY(report.hasErrors());
+}
+
+void EnduranceDocumentTests::cp1251EncodingIsStrict()
+{
+    QByteArray encoded;
+    QString error;
+    QVERIFY(CMobDocument::encodeCp1251Strict(QString::fromUtf8("Привет"), &encoded, &error));
+    QVERIFY(!encoded.isEmpty());
+    QVERIFY(!CMobDocument::encodeCp1251Strict(QString::fromUtf8("狼"), &encoded, &error));
+    QVERIFY(!error.isEmpty());
 }
 
 void EnduranceDocumentTests::unchangedMprIsByteIdentical()

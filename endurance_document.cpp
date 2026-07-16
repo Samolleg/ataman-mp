@@ -61,6 +61,13 @@ float readFloat32(const QByteArray& bytes, int offset)
     return value;
 }
 
+void appendU32(QByteArray& bytes, quint32 value)
+{
+    uchar encoded[4];
+    qToLittleEndian<quint32>(value, encoded);
+    bytes.append(reinterpret_cast<const char*>(encoded), 4);
+}
+
 bool isMobContainer(quint32 type)
 {
     static const QSet<quint32> containers = {
@@ -278,6 +285,68 @@ bool positionsDiffer(const SMobObjectSnapshot& a, const SMobObjectSnapshot& b)
            std::fabs(a.positionY - b.positionY) > 0.0001f ||
            std::fabs(a.positionZ - b.positionZ) > 0.0001f;
 }
+
+bool emitTransactionSection(const SMobSection& section,
+                            const QMap<QString, SMobLeafEdit>& edits,
+                            QSet<QString>* applied, QByteArray* output,
+                            CValidationReport* report)
+{
+    const auto editIt = edits.constFind(section.path);
+    if(editIt != edits.constEnd())
+    {
+        if(section.container)
+        {
+            if(report)
+                report->add("mob.transaction.container", EValidationSeverity::Error,
+                            "A leaf transaction cannot replace a record container", section.path);
+            return false;
+        }
+        if(editIt->expectedSectionSha256.isEmpty() ||
+           editIt->expectedSectionSha256 != section.sha256)
+        {
+            if(report)
+                report->add("mob.transaction.provenance", EValidationSeverity::Error,
+                            "The source section hash no longer matches the edit provenance", section.path);
+            return false;
+        }
+        const quint64 newLength = quint64(editIt->replacementPayload.size()) + 8;
+        if(newLength > quint64(UINT_MAX))
+        {
+            if(report)
+                report->add("mob.transaction.overflow", EValidationSeverity::Error,
+                            "Replacement payload exceeds the MOB section length limit", section.path);
+            return false;
+        }
+        appendU32(*output, section.type);
+        appendU32(*output, quint32(newLength));
+        output->append(editIt->replacementPayload);
+        applied->insert(section.path);
+        return true;
+    }
+
+    if(!section.container || section.children.isEmpty())
+    {
+        output->append(section.rawBytes);
+        return true;
+    }
+
+    QByteArray childBytes;
+    for(const SMobSection& child : section.children)
+        if(!emitTransactionSection(child, edits, applied, &childBytes, report))
+            return false;
+    const quint64 newLength = quint64(childBytes.size()) + 8;
+    if(newLength > quint64(UINT_MAX))
+    {
+        if(report)
+            report->add("mob.transaction.overflow", EValidationSeverity::Error,
+                        "Rebuilt container exceeds the MOB section length limit", section.path);
+        return false;
+    }
+    appendU32(*output, section.type);
+    appendU32(*output, quint32(newLength));
+    output->append(childBytes);
+    return true;
+}
 }
 
 QJsonObject SValidationFinding::toJson() const
@@ -294,6 +363,13 @@ QJsonObject SValidationFinding::toJson() const
 void CValidationReport::add(const QString& code, EValidationSeverity severity, const QString& message, const QString& location)
 {
     m_findings.append({code, severity, message, location});
+}
+
+void CMobEditTransaction::replaceLeafPayload(const QString& sectionPath,
+                                             const QByteArray& expectedSectionSha256,
+                                             const QByteArray& replacementPayload)
+{
+    m_edits.append({sectionPath, expectedSectionSha256, replacementPayload});
 }
 
 bool CValidationReport::hasErrors() const
@@ -511,6 +587,103 @@ QString CMobSemanticDiff::toText() const
         stream << "\n";
     }
     return output;
+}
+
+bool CMobDocument::applyTransaction(const CMobEditTransaction& transaction,
+                                    QByteArray* output, CValidationReport* report) const
+{
+    if(!output)
+        return false;
+    output->clear();
+    if(m_originalBytes.isEmpty() || m_sections.isEmpty())
+    {
+        if(report)
+            report->add("mob.transaction.document", EValidationSeverity::Error,
+                        "No parsed source document is available");
+        return false;
+    }
+    if(transaction.isEmpty())
+    {
+        *output = m_originalBytes;
+        return true;
+    }
+
+    QMap<QString, SMobLeafEdit> edits;
+    for(const SMobLeafEdit& edit : transaction.edits())
+    {
+        if(edit.sectionPath.isEmpty() || edits.contains(edit.sectionPath))
+        {
+            if(report)
+                report->add("mob.transaction.duplicate_path", EValidationSeverity::Error,
+                            "Each transaction path must be non-empty and unique", edit.sectionPath);
+            return false;
+        }
+        edits.insert(edit.sectionPath, edit);
+    }
+
+    QSet<QString> applied;
+    for(const SMobSection& section : m_sections)
+        if(!emitTransactionSection(section, edits, &applied, output, report))
+        {
+            output->clear();
+            return false;
+        }
+    if(applied.size() != edits.size())
+    {
+        if(report)
+            for(auto it = edits.constBegin(); it != edits.constEnd(); ++it)
+                if(!applied.contains(it.key()))
+                    report->add("mob.transaction.missing_path", EValidationSeverity::Error,
+                                "The transaction path does not exist in the source document", it.key());
+        output->clear();
+        return false;
+    }
+
+    QVector<SMobSection> candidateSections;
+    MobSectionParser candidateParser(*output, report, "transaction-output");
+    if(!candidateParser.parseRange(0, quint64(output->size()), QString(), candidateSections, 0) ||
+       candidateSections.isEmpty() || candidateSections.front().type != 0xA000)
+    {
+        output->clear();
+        return false;
+    }
+    for(int index = 1; index < candidateSections.size(); ++index)
+        if(candidateSections.at(index).type != 0x31415926)
+        {
+            if(report)
+                report->add("mob.transaction.top_level", EValidationSeverity::Error,
+                            "Transaction produced an unexpected top-level section",
+                            candidateSections.at(index).path);
+            output->clear();
+            return false;
+        }
+    if(report)
+        report->add("mob.transaction.authorized", EValidationSeverity::Info,
+                    QString("Applied %1 provenance-checked leaf edit(s); all other leaves were emitted byte-for-byte")
+                        .arg(applied.size()), transaction.description());
+    return true;
+}
+
+bool CMobDocument::encodeCp1251Strict(const QString& value, QByteArray* output, QString* error)
+{
+    if(!output)
+        return false;
+    QTextCodec* codec = QTextCodec::codecForName("Windows-1251");
+    if(!codec)
+    {
+        if(error)
+            *error = "Windows-1251 codec is unavailable";
+        return false;
+    }
+    const QByteArray encoded = codec->fromUnicode(value);
+    if(codec->toUnicode(encoded) != value)
+    {
+        if(error)
+            *error = "Text contains characters that cannot round-trip through Windows-1251";
+        return false;
+    }
+    *output = encoded;
+    return true;
 }
 
 bool CMobDocument::load(const QFileInfo& file, CValidationReport* report)

@@ -38,6 +38,31 @@ private:
     QVector<SValidationFinding> m_findings;
 };
 
+struct SMobLeafEdit
+{
+    QString sectionPath;
+    QByteArray expectedSectionSha256;
+    QByteArray replacementPayload;
+};
+
+class CMobEditTransaction
+{
+public:
+    explicit CMobEditTransaction(const QString& description = QString())
+        : m_description(description) {}
+
+    void replaceLeafPayload(const QString& sectionPath,
+                            const QByteArray& expectedSectionSha256,
+                            const QByteArray& replacementPayload);
+    const QString& description() const { return m_description; }
+    const QVector<SMobLeafEdit>& edits() const { return m_edits; }
+    bool isEmpty() const { return m_edits.isEmpty(); }
+
+private:
+    QString m_description;
+    QVector<SMobLeafEdit> m_edits;
+};
+
 struct SMobSection
 {
     quint32 type = 0;
@@ -125,6 +150,10 @@ public:
     const QVector<SMobSection>& sections() const { return m_sections; }
     const QVector<SMobObjectSnapshot>& objects() const { return m_objects; }
     const QVector<quint32>& duplicateIds() const { return m_duplicateIds; }
+    bool applyTransaction(const CMobEditTransaction& transaction,
+                          QByteArray* output, CValidationReport* report = nullptr) const;
+    static bool encodeCp1251Strict(const QString& value, QByteArray* output,
+                                   QString* error = nullptr);
     bool isDirty() const { return false; }
 
 private:
