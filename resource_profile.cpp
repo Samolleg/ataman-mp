@@ -219,8 +219,8 @@ QVector<SResourceProfile> builtInResourceProfiles()
                             {"23BC21E8A28126ACE5233413B75C51B21C1CFA97461E2BFC8EBAEE60F9C19318"})
         << runtimeComponent("spell-addon-config", "{modRoot}/SPELLADDON.INI",
                             {"7A096E354B02B82141DBE7E6E85917ED330BB374825F902FC1D6CB98718DF605"});
-    jmv.capabilities.insert("mob.losslessEditing", capability("mob.losslessEditing", EProfileCapabilityStatus::Experimental,
-        "Lossless section-tree hardening is under corpus validation."));
+    jmv.capabilities.insert("mob.losslessEditing", capability("mob.losslessEditing", EProfileCapabilityStatus::Unsupported,
+        "Copy-only hardening is active until UI edits are migrated to provenance transactions."));
     jmv.capabilities.insert("mob.perspectiveDiff", capability("mob.perspectiveDiff", EProfileCapabilityStatus::Experimental,
         "Structural diff is available headlessly; perspective overlay is under development."));
     jmv.capabilities.insert("runtime.directMapLaunch", capability("runtime.directMapLaunch", EProfileCapabilityStatus::Unsupported,
@@ -244,8 +244,8 @@ QVector<SResourceProfile> builtInResourceProfiles()
     base.runtimeManifestId = "base-ei-v1";
     base.runtimeComponents << runtimeComponent("base-game", "{gameRoot}/game.exe",
         {"B871991C204617851CFE0F56B2F4430B44378D4625F46D815FF62E04BAF9E570"});
-    base.capabilities.insert("mob.losslessEditing", capability("mob.losslessEditing", EProfileCapabilityStatus::Experimental,
-        "Lossless section-tree hardening is under corpus validation."));
+    base.capabilities.insert("mob.losslessEditing", capability("mob.losslessEditing", EProfileCapabilityStatus::Unsupported,
+        "Copy-only hardening is active until UI edits are migrated to provenance transactions."));
     base.capabilities.insert("mob.perspectiveDiff", capability("mob.perspectiveDiff", EProfileCapabilityStatus::Experimental,
         "Structural diff is available headlessly; perspective overlay is under development."));
     base.capabilities.insert("runtime.directMapLaunch", capability("runtime.directMapLaunch", EProfileCapabilityStatus::Unsupported,
