@@ -872,12 +872,14 @@ void CView::pickObject(const QRect &rect, bool bAddToSelect)
     if (!bAddToSelect) // clear selection buffer if we click out of objects in single selection mode
         m_activeMob->clearSelect(true);
 
+    CNode* lastPickedNode = nullptr;
     if (!aColor.isEmpty())
         foreach (auto& node, CScene::getInstance()->getMode() == eEditModeLogic ? m_activeMob->logicNodes() : m_activeMob->nodes())
             foreach (const auto& color, aColor)
             {
                 if (node->isColorSuitable(color))
                 {
+                    lastPickedNode = node;
                     if (bAddToSelect)
                     {//shift pressed
 
@@ -902,6 +904,8 @@ void CView::pickObject(const QRect &rect, bool bAddToSelect)
 
     m_selectFrame->reset();
     recordSelectionChange(selectionBefore);
+    if(lastPickedNode && lastPickedNode->nodeState() == ENodeState::eSelect && m_pTree)
+        m_pTree->revealNode(lastPickedNode);
 }
 
 QVector3D CView::getTerrainPos(bool bLand)
@@ -1656,23 +1660,23 @@ void CView::collectObjectTreeData()
     m_pTree->header()->setSectionResizeMode(0, QHeaderView::Stretch);
     m_pTree->resizeColumnToContents(1);
     //generate common object types
-    QMap<QString, QMap<QString, QList<uint>>> aObjList; //base group -> inner object group -> object string array (todo: item class with node map ID)
+    QMap<QString, QMap<QString, QList<CNode*>>> aObjList;
     CNode* pNode = nullptr;
     ENodeType type = ENodeType::eBaseType;
     QString groupName;
-    auto fillObjectByType=[&aObjList, &type, &groupName, this](uint objId) -> void
+    auto fillObjectByType=[&aObjList, &type, &groupName, this](CNode* object) -> void
     {
         QString typeString = m_pTree->objectNameByType(type);
         if(aObjList.contains(typeString))
         {
             auto& group = aObjList[typeString];
-            group[groupName].append(objId);
+            group[groupName].append(object);
 
         }
         else
         {
-            QMap<QString, QList<uint>> map;
-            map[groupName].append(objId);
+            QMap<QString, QList<CNode*>> map;
+            map[groupName].append(object);
             aObjList[typeString] = map;
         }
     };
@@ -1691,14 +1695,14 @@ void CView::collectObjectTreeData()
         case ENodeType::eWorldObject:
         {
             groupName = pNode->mapName();
-            fillObjectByType(pNode->mapId());
+            fillObjectByType(pNode);
             break;
         }
         case ENodeType::eUnit:
         {
             auto pUnitItem = dynamic_cast<CUnit*>(pNode);
             groupName = pUnitItem->databaseName();
-            fillObjectByType(pNode->mapId());
+            fillObjectByType(pNode);
             break;
         }
         default:
@@ -1717,20 +1721,20 @@ void CView::collectObjectTreeData()
         m_pTree->addTopLevelItem(pTopItem);
         for(auto& group : item.second.toStdMap())
         {
-            auto pGroupItem = new CTreeObject(pTopItem, 0);
+            auto pGroupItem = new CTreeObject(pTopItem, nullptr);
             pGroupItem->setText(1, QString::number(group.second.size()));
             if(group.second.size() == 1)
             {
                 // +"(id:"+QString::number(group.second.first())+")"
                 pGroupItem->setText(0, group.first);
-                pGroupItem->setId(group.second.front());
+                pGroupItem->setNode(group.second.front());
                 continue;
             }
             pGroupItem->setText(0, group.first);
-            for(auto& object : group.second)
+            for(CNode* object : group.second)
             {
                 auto pObjectItem = new CTreeObject(pGroupItem, object);
-                pObjectItem->setText(0, QString::number(object));
+                pObjectItem->setText(0, QString::number(object->mapId()));
             }
         }
     }

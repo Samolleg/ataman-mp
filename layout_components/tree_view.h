@@ -14,13 +14,17 @@ class CTreeObject : public QTreeWidgetItem//, public QObject
     //Q_OBJECT
 public:
     CTreeObject(QTreeWidget* pParent);
-    CTreeObject(QTreeWidgetItem* pParent, uint nodeId);
-    CTreeObject(CTreeObject* pParent, uint id);
-    uint nodeId() {return m_nodeId;}
+    CTreeObject(QTreeWidgetItem* pParent, CNode* pNode);
+    CTreeObject(CTreeObject* pParent, CNode* pNode);
+    uint nodeId() const;
+    uint storedId() const {return m_nodeId;}
     void setId(uint id) {m_nodeId = id;}
+    CNode* node() const {return m_pNode;}
+    void setNode(CNode* node);
 
 private:
     uint m_nodeId;
+    CNode* m_pNode;
 };
 
 ///
@@ -35,6 +39,7 @@ public:
     void attachView(CView* pView) {m_pView = pView;}
     QString objectNameByType(ENodeType type);
     ENodeType objectTypeByString(QString str);
+    void revealNode(CNode* pNode);
 
 protected:
     void keyPressEvent(QKeyEvent* event) override;

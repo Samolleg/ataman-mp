@@ -220,14 +220,14 @@ void CTreeView::addNodeToTree(CNode *pNode)
                 if(pChild->text(0) == groupName)
                 {
                     bFound = true;
-                    auto pItem = new CTreeObject(dynamic_cast<CTreeObject*>(pChild), pNode->mapId());
+                    auto pItem = new CTreeObject(dynamic_cast<CTreeObject*>(pChild), pNode);
                     pItem->setText(0, QString::number(pNode->mapId()));
                     recalcParent(pChild);
                 }
             }
             if(!bFound)
             {
-                auto pItem = new CTreeObject(dynamic_cast<CTreeObject*>(pCatItem), pNode->mapId());
+                auto pItem = new CTreeObject(dynamic_cast<CTreeObject*>(pCatItem), pNode);
                 pItem->setText(0, groupName);
                 pItem->setText(1, "1");
                 recalcParent(pCatItem);
@@ -238,13 +238,33 @@ void CTreeView::addNodeToTree(CNode *pNode)
     }
 }
 
+void CTreeView::revealNode(CNode* pNode)
+{
+    if(!pNode)
+        return;
+    QTreeWidgetItemIterator it(this);
+    while(*it)
+    {
+        CTreeObject* item = dynamic_cast<CTreeObject*>(*it);
+        if(item && item->node() == pNode)
+        {
+            for(QTreeWidgetItem* parent = item->parent(); parent; parent = parent->parent())
+                parent->setExpanded(true);
+            setCurrentItem(item, 0, QItemSelectionModel::ClearAndSelect);
+            scrollToItem(item, QAbstractItemView::PositionAtCenter);
+            return;
+        }
+        ++it;
+    }
+}
+
 void CTreeView::onChangeNodeId(uint oldId, uint newId)
 {
     QTreeWidgetItemIterator it(this);
     while (*it)
     {
         auto pNode = dynamic_cast<CTreeObject*>(*it);
-        if (pNode && pNode->nodeId()==oldId)
+        if (pNode && pNode->storedId()==oldId)
         {
             pNode->setId(newId);
             if(pNode->text(0) == QString::number(oldId))
@@ -280,24 +300,39 @@ void CTreeView::onChangeObjectName(CNode *pNode)
 
 CTreeObject::CTreeObject(QTreeWidget *pParent): QTreeWidgetItem(pParent)
   ,m_nodeId(0)
+  ,m_pNode(nullptr)
 {
 
 }
 
-CTreeObject::CTreeObject(QTreeWidgetItem *pParent, uint nodeId) : QTreeWidgetItem(pParent)
-  ,m_nodeId(nodeId)
+CTreeObject::CTreeObject(QTreeWidgetItem *pParent, CNode* pNode) : QTreeWidgetItem(pParent)
+  ,m_nodeId(pNode ? pNode->mapId() : 0)
+  ,m_pNode(pNode)
 {
 
 }
 
-CTreeObject::CTreeObject(CTreeObject *pParent, uint id) : QTreeWidgetItem(pParent)
-  ,m_nodeId(id)
+CTreeObject::CTreeObject(CTreeObject *pParent, CNode* pNode) : QTreeWidgetItem(pParent)
+  ,m_nodeId(pNode ? pNode->mapId() : 0)
+  ,m_pNode(pNode)
 {
-    auto parentId = pParent->nodeId();
-    if(parentId > 0)
+    CNode* parentNode = pParent->node();
+    if(parentNode)
     {
         pParent->setId(0);
-        auto pItem = new CTreeObject(pParent, parentId);
-        pItem->setText(0, QString::number(parentId));
+        pParent->setNode(nullptr);
+        auto pItem = new CTreeObject(pParent, parentNode);
+        pItem->setText(0, QString::number(parentNode->mapId()));
     }
+}
+
+uint CTreeObject::nodeId() const
+{
+    return m_pNode ? m_pNode->mapId() : m_nodeId;
+}
+
+void CTreeObject::setNode(CNode* node)
+{
+    m_pNode = node;
+    m_nodeId = node ? node->mapId() : 0;
 }
