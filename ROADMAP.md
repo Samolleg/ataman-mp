@@ -179,6 +179,7 @@ or move it into the relevant section above without losing its history.
   - Show all open MOBs in a **Loaded MOBs** tab/list.
   - Allow individual MOBs to be locked against selection and accidental edits.
   - Make the currently selected/active MOB explicit; new objects and pasted objects go there.
+  - Show which loaded MOB owns the currently selected object.
   - Treat MOBs similarly to Unreal Engine sublevels within the loaded map workspace.
 - [ ] Allow unit texture fields to support both database-backed dropdown selection and manual keyboard entry.
 - [ ] Add periodic autosave with recoverable, versioned backup states.
@@ -193,8 +194,13 @@ or move it into the relevant section above without losing its history.
     incorrect and must be retested against the full database/template pipeline.
   - Keep this open until visual corpus testing covers primary and secondary
     layers for all supported humanoid models.
-- [ ] Render humans with the weapons and armor assigned by their database setup.
-  - Account for one-handed weapon plus shield, dual-wield, and two-handed configurations.
+- [ ] Render every applicable humanoid with the weapons and armor assigned by
+  its database setup, including humans, orcs, undead, and any other humanoid
+  race that equips items in game.
+  - Core scope: reproduce the normal equipped armor and weapon visuals defined
+    by each supported database/template entry.
+  - **Stretch goal (JMV only):** correctly assemble one-handed weapon plus
+    shield, dual-wield, and two-handed configurations.
 
 ### Low priority
 
