@@ -734,6 +734,81 @@ static bool verifyAuthorizedTransactionOutput(const QVector<SMobSection>& source
     return true;
 }
 
+bool CMobDocument::deriveLeafTransaction(const CMobDocument& cleanProjection,
+                                         const CMobDocument& editedProjection,
+                                         CMobEditTransaction* transaction,
+                                         CValidationReport* report) const
+{
+    if(!transaction || !transaction->isEmpty())
+    {
+        if(report)
+            report->add("mob.projection_transaction.output", EValidationSeverity::Error,
+                        "Projection transaction output must exist and start empty");
+        return false;
+    }
+    if(m_sections.isEmpty() || cleanProjection.m_sections.isEmpty() ||
+       editedProjection.m_sections.isEmpty())
+    {
+        if(report)
+            report->add("mob.projection_transaction.document", EValidationSeverity::Error,
+                        "Source, clean projection, and edited projection must all be parsed");
+        return false;
+    }
+
+    QMap<QString, const SMobSection*> sourceLeaves;
+    QMap<QString, const SMobSection*> cleanLeaves;
+    QMap<QString, const SMobSection*> editedLeaves;
+    collectLeafSections(m_sections, &sourceLeaves);
+    collectLeafSections(cleanProjection.m_sections, &cleanLeaves);
+    collectLeafSections(editedProjection.m_sections, &editedLeaves);
+
+    if(cleanLeaves.keys() != editedLeaves.keys())
+    {
+        if(report)
+            report->add("mob.projection_transaction.structure", EValidationSeverity::Error,
+                        "The UI edit changed record topology; leaf-only shadow migration is not applicable");
+        return false;
+    }
+
+    QVector<SMobLeafEdit> derivedEdits;
+    for(auto it = cleanLeaves.constBegin(); it != cleanLeaves.constEnd(); ++it)
+    {
+        const SMobSection& clean = *it.value();
+        const SMobSection& edited = *editedLeaves.value(it.key());
+        if(clean.type != edited.type)
+        {
+            if(report)
+                report->add("mob.projection_transaction.type", EValidationSeverity::Error,
+                            "A projection leaf changed its numeric section type", it.key());
+            return false;
+        }
+        if(clean.rawBytes == edited.rawBytes)
+            continue;
+
+        const auto sourceIt = sourceLeaves.constFind(it.key());
+        if(sourceIt == sourceLeaves.constEnd() || (*sourceIt)->type != clean.type ||
+           (*sourceIt)->rawBytes != clean.rawBytes)
+        {
+            if(report)
+                report->add("mob.projection_transaction.provenance", EValidationSeverity::Error,
+                            "A changed projection leaf does not byte-match its clean source record",
+                            it.key());
+            return false;
+        }
+        derivedEdits.append({it.key(), (*sourceIt)->sha256, edited.rawBytes.mid(8)});
+    }
+
+    for(const SMobLeafEdit& edit : derivedEdits)
+        transaction->replaceLeafPayload(edit.sectionPath, edit.expectedSectionSha256,
+                                        edit.replacementPayload);
+
+    if(report)
+        report->add("mob.projection_transaction.derived", EValidationSeverity::Info,
+                    QString("Derived %1 source-hash-bound leaf edit(s); structural edits remain blocked")
+                        .arg(derivedEdits.size()), transaction->description());
+    return true;
+}
+
 bool CMobDocument::encodeCp1251Strict(const QString& value, QByteArray* output, QString* error)
 {
     if(!output)
@@ -758,21 +833,32 @@ bool CMobDocument::encodeCp1251Strict(const QString& value, QByteArray* output, 
 
 bool CMobDocument::load(const QFileInfo& file, CValidationReport* report)
 {
+    QByteArray bytes;
+    if(!readWholeFile(file, bytes, report))
+        return false;
+    return loadBytes(bytes, file.filePath(), report);
+}
+
+bool CMobDocument::loadBytes(const QByteArray& bytes, const QString& sourceName,
+                             CValidationReport* report)
+{
     m_originalBytes.clear();
     m_sections.clear();
     m_objects.clear();
     m_duplicateIds.clear();
-    if(!readWholeFile(file, m_originalBytes, report))
-        return false;
+    m_originalBytes = bytes;
+    const QFileInfo sourceInfo(sourceName);
+    const QString sourcePath = sourceName.isEmpty() ? QString("memory.mob") : sourceName;
 
     if(m_originalBytes.size() < 8)
     {
         if(report)
-            report->add("mob.envelope", EValidationSeverity::Error, "MOB is too small to contain a valid root section", file.filePath());
+            report->add("mob.envelope", EValidationSeverity::Error,
+                        "MOB is too small to contain a valid root section", sourcePath);
         return false;
     }
 
-    MobSectionParser parser(m_originalBytes, report, file.filePath());
+    MobSectionParser parser(m_originalBytes, report, sourcePath);
     if(!parser.parseRange(0, quint64(m_originalBytes.size()), QString(), m_sections, 0))
         return false;
     if(m_sections.isEmpty() || m_sections.front().type != 0xA000)
@@ -780,7 +866,7 @@ bool CMobDocument::load(const QFileInfo& file, CValidationReport* report)
         if(report)
             report->add("mob.root", EValidationSeverity::Error,
                         "The first top-level section is not OBJECT_DB_FILE",
-                        file.filePath());
+                        sourcePath);
         return false;
     }
     for(int index = 1; index < m_sections.size(); ++index)
@@ -791,7 +877,7 @@ bool CMobDocument::load(const QFileInfo& file, CValidationReport* report)
                 report->add("mob.trailing_section", EValidationSeverity::Error,
                             QString("Unexpected top-level section %1 after OBJECT_DB_FILE")
                                 .arg(sectionTypeName(m_sections.at(index).type)),
-                            file.filePath());
+                            sourcePath);
             return false;
         }
     }
@@ -810,15 +896,16 @@ bool CMobDocument::load(const QFileInfo& file, CValidationReport* report)
             if(report)
                 report->add("mob.duplicate_id", EValidationSeverity::Warning,
                             QString("ID %1 occurs %2 times; it was preserved").arg(countIt.key()).arg(countIt.value()),
-                            file.fileName());
+                            sourceInfo.fileName());
         }
     }
     if(report)
     {
         report->add("mob.byte_coverage", EValidationSeverity::Info,
                     QString("Strict section parsing covered all %1 bytes and found %2 objects")
-                        .arg(m_originalBytes.size()).arg(m_objects.size()), file.fileName());
-        report->add("mob.lossless", EValidationSeverity::Info, "Unchanged serialization is byte-identical", file.fileName());
+                        .arg(m_originalBytes.size()).arg(m_objects.size()), sourceInfo.fileName());
+        report->add("mob.lossless", EValidationSeverity::Info,
+                    "Unchanged serialization is byte-identical", sourceInfo.fileName());
     }
     return true;
 }

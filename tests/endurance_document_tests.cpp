@@ -72,6 +72,10 @@ private slots:
     void semanticDiffClassifiesMovementAndAddition();
     void transactionPatchesOnlyAuthorizedLeaf();
     void transactionPreservesEmptyContainers();
+    void projectionDeltaPreservesRawSourceStructure();
+    void projectionDeltaRejectsStructuralEdits();
+    void projectionDeltaRejectsMissingSourceRecord();
+    void projectionDeltaRejectsCanonicalizedSourceLeaf();
     void transactionRejectsStaleProvenance();
     void cp1251EncodingIsStrict();
     void unchangedMprIsByteIdentical();
@@ -226,6 +230,86 @@ void EnduranceDocumentTests::transactionPreservesEmptyContainers()
     QVERIFY2(document.applyTransaction(transaction, &candidate, &report), qPrintable(report.toText()));
     QCOMPARE(candidate, validMob(emptyDirectory + emptyDirectoryElements +
                                  section(0x22222222, "after")));
+}
+
+void EnduranceDocumentTests::projectionDeltaPreservesRawSourceStructure()
+{
+    const QByteArray emptyDirectory = section(0xE000);
+    const QByteArray unknown = section(0xDEADBEEF, "opaque-source-data");
+    const QByteArray sourceBytes = validMob(emptyDirectory + unknown +
+                                            section(0x22222222, "clean-canonical"));
+    const QByteArray cleanBytes = validMob(section(0x22222222, "clean-canonical"));
+    const QByteArray editedBytes = validMob(section(0x22222222, "edited-value"));
+
+    CMobDocument source;
+    CMobDocument clean;
+    CMobDocument edited;
+    QVERIFY(source.loadBytes(sourceBytes, "source.mob"));
+    QVERIFY(clean.loadBytes(cleanBytes, "clean-projection.mob"));
+    QVERIFY(edited.loadBytes(editedBytes, "edited-projection.mob"));
+
+    CMobEditTransaction transaction("shadow projection delta");
+    CValidationReport report;
+    QVERIFY2(source.deriveLeafTransaction(clean, edited, &transaction, &report),
+             qPrintable(report.toText()));
+    QCOMPARE(transaction.edits().size(), 1);
+
+    QByteArray candidate;
+    QVERIFY2(source.applyTransaction(transaction, &candidate, &report),
+             qPrintable(report.toText()));
+    QCOMPARE(candidate, validMob(emptyDirectory + unknown +
+                                 section(0x22222222, "edited-value")));
+}
+
+void EnduranceDocumentTests::projectionDeltaRejectsStructuralEdits()
+{
+    const QByteArray sourceBytes = validMob(section(0xB000, object(42, "boar")));
+    const QByteArray editedBytes = validMob(section(0xB000,
+        object(42, "boar") + object(43, "wolf")));
+    CMobDocument source;
+    CMobDocument clean;
+    CMobDocument edited;
+    QVERIFY(source.loadBytes(sourceBytes, "source.mob"));
+    QVERIFY(clean.loadBytes(sourceBytes, "clean-projection.mob"));
+    QVERIFY(edited.loadBytes(editedBytes, "edited-projection.mob"));
+
+    CMobEditTransaction transaction("unsupported structural delta");
+    CValidationReport report;
+    QVERIFY(!source.deriveLeafTransaction(clean, edited, &transaction, &report));
+    QVERIFY(transaction.isEmpty());
+    QVERIFY(report.hasErrors());
+}
+
+void EnduranceDocumentTests::projectionDeltaRejectsMissingSourceRecord()
+{
+    CMobDocument source;
+    CMobDocument clean;
+    CMobDocument edited;
+    QVERIFY(source.loadBytes(validMob(section(0x11111111, "source")), "source.mob"));
+    QVERIFY(clean.loadBytes(validMob(section(0x22222222, "clean")), "clean-projection.mob"));
+    QVERIFY(edited.loadBytes(validMob(section(0x22222222, "edited")), "edited-projection.mob"));
+
+    CMobEditTransaction transaction("missing source provenance");
+    CValidationReport report;
+    QVERIFY(!source.deriveLeafTransaction(clean, edited, &transaction, &report));
+    QVERIFY(transaction.isEmpty());
+    QVERIFY(report.hasErrors());
+}
+
+void EnduranceDocumentTests::projectionDeltaRejectsCanonicalizedSourceLeaf()
+{
+    CMobDocument source;
+    CMobDocument clean;
+    CMobDocument edited;
+    QVERIFY(source.loadBytes(validMob(section(0x22222222, "raw-source")), "source.mob"));
+    QVERIFY(clean.loadBytes(validMob(section(0x22222222, "legacy-clean")), "clean-projection.mob"));
+    QVERIFY(edited.loadBytes(validMob(section(0x22222222, "edited")), "edited-projection.mob"));
+
+    CMobEditTransaction transaction("canonicalized source must not be guessed");
+    CValidationReport report;
+    QVERIFY(!source.deriveLeafTransaction(clean, edited, &transaction, &report));
+    QVERIFY(transaction.isEmpty());
+    QVERIFY(report.hasErrors());
 }
 
 void EnduranceDocumentTests::transactionRejectsStaleProvenance()

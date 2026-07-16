@@ -9,6 +9,7 @@
 #include <QMessageBox>
 #include <QHeaderView>
 #include <QSaveFile>
+#include <QCryptographicHash>
 
 #include "mob.h"
 #include "utils.h"
@@ -1609,11 +1610,43 @@ bool CMob::saveAs(const QFileInfo& path)
         }
         else
         {
+            QByteArray currentProjection;
+            serializeMob(currentProjection, false);
+            CValidationReport shadowReport;
+            CMobDocument sourceDocument;
+            CMobDocument cleanProjectionDocument;
+            CMobDocument editedProjectionDocument;
+            CMobEditTransaction shadowTransaction("dirty UI projection shadow migration");
+            QByteArray shadowCandidate;
+            const bool shadowReady =
+                sourceDocument.loadBytes(m_originalData, m_filePath.filePath(), &shadowReport) &&
+                cleanProjectionDocument.loadBytes(m_cleanProjection, "clean-ui-projection.mob", &shadowReport) &&
+                editedProjectionDocument.loadBytes(currentProjection, "edited-ui-projection.mob", &shadowReport) &&
+                sourceDocument.deriveLeafTransaction(cleanProjectionDocument,
+                                                      editedProjectionDocument,
+                                                      &shadowTransaction, &shadowReport) &&
+                !shadowTransaction.isEmpty() &&
+                sourceDocument.applyTransaction(shadowTransaction, &shadowCandidate, &shadowReport);
+            if(shadowReady)
+            {
+                const QString candidateHash = QString::fromLatin1(
+                    QCryptographicHash::hash(shadowCandidate, QCryptographicHash::Sha256).toHex());
+                ei::log(eLogInfo, QString("Shadow MOB transaction validated path:%1 edits:%2 size:%3 sha256:%4")
+                    .arg(filePath).arg(shadowTransaction.edits().size())
+                    .arg(shadowCandidate.size()).arg(candidateHash));
+            }
+            else
+            {
+                ei::log(eLogWarning, QString("Shadow MOB transaction not applicable path:%1 findings:%2")
+                    .arg(filePath, shadowReport.toText().trimmed()));
+            }
             ei::log(eLogFatal, QString("Refusing dirty MOB save until UI edits use provenance transactions path:%1")
                 .arg(filePath));
             QMessageBox::critical(nullptr, "Lossless MOB save not available yet",
                 "This document contains edits, but the edited UI fields have not yet been migrated to the "
                 "provenance-based MobEditTransaction save path.\n\n"
+                "Endurance evaluated this state through the new shadow transaction bridge and recorded the "
+                "result in logs/workflow.log, but shadow candidates are never written.\n\n"
                 "Endurance will not fall back to the legacy rebuilding serializer. No destination or backup "
                 "file was changed. Undo every edit until the title's changed marker disappears, then Save As "
                 "can create a byte-identical copy of the original MOB.");

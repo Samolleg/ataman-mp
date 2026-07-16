@@ -145,6 +145,8 @@ class CMobDocument
 {
 public:
     bool load(const QFileInfo& file, CValidationReport* report = nullptr);
+    bool loadBytes(const QByteArray& bytes, const QString& sourceName,
+                   CValidationReport* report = nullptr);
     QByteArray serialize() const { return m_originalBytes; }
     const QByteArray& originalBytes() const { return m_originalBytes; }
     const QVector<SMobSection>& sections() const { return m_sections; }
@@ -152,6 +154,10 @@ public:
     const QVector<quint32>& duplicateIds() const { return m_duplicateIds; }
     bool applyTransaction(const CMobEditTransaction& transaction,
                           QByteArray* output, CValidationReport* report = nullptr) const;
+    bool deriveLeafTransaction(const CMobDocument& cleanProjection,
+                               const CMobDocument& editedProjection,
+                               CMobEditTransaction* transaction,
+                               CValidationReport* report = nullptr) const;
     static bool encodeCp1251Strict(const QString& value, QByteArray* output,
                                    QString* error = nullptr);
     bool isDirty() const { return false; }
