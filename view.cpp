@@ -278,8 +278,20 @@ void CView::draw()
                 node->draw(false, &m_program);
         }
 
-        for (auto& node: m_activeMob->nodes())
-            node->draw(true, &m_program);
+        // Draw the active MOB in two passes so a selected duplicate remains
+        // visible when it occupies exactly the same depth as its source.
+        for(auto& node : m_activeMob->nodes())
+        {
+            if(node->nodeState() != ENodeState::eSelect)
+                node->draw(true, &m_program);
+        }
+        glDepthFunc(GL_LEQUAL);
+        for(auto& node : m_activeMob->nodes())
+        {
+            if(node->nodeState() == ENodeState::eSelect)
+                node->draw(true, &m_program);
+        }
+        glDepthFunc(GL_LESS);
     }
 
     if (m_pLand && m_pLand->isMprLoad() && m_bDrawWater)
@@ -652,73 +664,18 @@ void CView::changeCurrentMob(QString mobName)
 
 void CView::onParamChangeLogic(CNode *pNode, const QSharedPointer<IPropertyBase>& prop)
 {
-    ENodeType type = pNode->nodeType();
-    switch(type)
+    if(!pNode)
+        return;
+    switch(pNode->nodeType())
     {
     case eMagicTrap:
-    {
-        CChangeLogicParam* pChanger = new CChangeLogicParam(this, QString::number(pNode->mapId()), prop);
-        QObject::connect(pChanger, SIGNAL(updateParam()), this, SLOT(viewParameters()));
-        m_pUndoStack->push(pChanger);
-        break;
-    }
     case eUnit:
-    {
-        CChangeLogicParam* pChanger = new CChangeLogicParam(this, QString::number(pNode->mapId()), prop);
-        QObject::connect(pChanger, SIGNAL(updateParam()), this, SLOT(viewParameters()));
-        m_pUndoStack->push(pChanger);
-        break;
-    }
     case ePatrolPoint:
-    {
-        auto pPoint = dynamic_cast<CPatrolPoint*>(pNode);
-        int unitId(0);
-        int patrolId(0);
-        m_activeMob->getPatrolHash(unitId, patrolId, pPoint);
-        QString hash = QString("%1.%2").arg(unitId).arg(patrolId);
-        CChangeLogicParam* pOp = new CChangeLogicParam(this, hash, prop);
-        QObject::connect(pOp, SIGNAL(updateParam()), this, SLOT(viewParameters()));
-        m_pUndoStack->push(pOp);
-        break;
-    }
     case eLookPoint:
-    {
-        auto pPoint = dynamic_cast<CLookPoint*>(pNode);
-        int unitId(0);
-        int patrolId(0);
-        int viewId(0);
-        m_activeMob->getViewHash(unitId, patrolId, viewId, pPoint);
-        QString hash = QString("%1.%2.%3").arg(unitId).arg(patrolId).arg(viewId);
-        CChangeLogicParam* pOp = new CChangeLogicParam(this, hash, prop);
-        QObject::connect(pOp, SIGNAL(updateParam()), this, SLOT(viewParameters()));
-        m_pUndoStack->push(pOp);
-        break;
-    }
     case eTrapActZone:
-    {
-        auto pZone = dynamic_cast<CActivationZone*>(pNode);
-        int unitId(0);
-        int patrolId(-2);
-        int viewId(-2);
-        int zoneId(0);
-        m_activeMob->getTrapZoneHash(unitId, zoneId, pZone);
-        QString hash = QString("%1.%2.%3.%4").arg(unitId).arg(patrolId).arg(viewId).arg(zoneId);
-        CChangeLogicParam* pOp = new CChangeLogicParam(this, hash, prop);
-        QObject::connect(pOp, SIGNAL(updateParam()), this, SLOT(viewParameters()));
-        m_pUndoStack->push(pOp);
-        break;
-    }
     case eTrapCastPoint:
     {
-        auto pCast = dynamic_cast<CTrapCastPoint*>(pNode);
-        int unitId(0);
-        int patrolId(-2);
-        int viewId(-2);
-        int zoneId(-2);
-        int castPointId(0);
-        m_activeMob->getTrapCastHash(unitId, castPointId, pCast);
-        QString hash = QString("%1.%2.%3.%4.%5").arg(unitId).arg(patrolId).arg(viewId).arg(zoneId).arg(castPointId);
-        CChangeLogicParam* pOp = new CChangeLogicParam(this, hash, prop);
+        CChangeLogicParam* pOp = new CChangeLogicParam(this, pNode, prop);
         QObject::connect(pOp, SIGNAL(updateParam()), this, SLOT(viewParameters()));
         m_pUndoStack->push(pOp);
         break;
@@ -1017,6 +974,7 @@ void CView::unloadActiveMob()
     if(nullptr == m_activeMob)
         return;
 
+    cancelPendingOperation();
     ei::log(eLogInfo, "unloading mob " + m_activeMob->mobName());
     CMob* pMob = nullptr;
     foreach(pMob, m_aMob)
@@ -1080,6 +1038,7 @@ void CView::unloadMob(QString mobName)
     if(m_aMob.isEmpty())
         return;
 
+    cancelPendingOperation();
     ei::log(eLogInfo, "unloading mob " + mobName);
     CMob* pMob = nullptr;
     if(mobName.isEmpty())
@@ -1209,19 +1168,30 @@ void CView::setRandomComplection(const EObjParam param, const float min, const f
     if(nullptr == m_activeMob)
         return;
 
-    CNode* pNode = nullptr;
-    foreach(pNode, m_activeMob->nodes())
+    QList<CNode*> targets;
+    for(CNode* node : m_activeMob->nodes())
     {
-        if (pNode->nodeState() != ENodeState::eSelect)
-            continue;
+        if(node && node->nodeState() == ENodeState::eSelect)
+            targets.append(node);
+    }
+    if(targets.isEmpty())
+        return;
+    const bool grouped = targets.size() > 1;
+    if(grouped)
+        m_pUndoStack->beginMacro(QString("Randomize %1 objects").arg(targets.size()));
 
+    CNode* pNode = nullptr;
+    foreach(pNode, targets)
+    {
         float value = util::randomFloat(min ,max);
         QSharedPointer<propFloat> complexity(new propFloat(param, value));
-        CChangeProp* pChanger = new CChangeProp(this, pNode->mapId(), complexity);
+        CChangeProp* pChanger = new CChangeProp(this, pNode, complexity);
         QObject::connect(pChanger, SIGNAL(updateParam()), this, SLOT(viewParameters()));
         //QObject::connect(pChanger, SIGNAL(updatePosOnLand(CNode*)), this, SLOT(landPositionUpdate(CNode*)));
         m_pUndoStack->push(pChanger);
     }
+    if(grouped)
+        m_pUndoStack->endMacro();
     updateParameter(param);
 }
 
@@ -1582,18 +1552,35 @@ void CView::onParamChange(const QSharedPointer<IPropertyBase>& prop)
     if(nullptr == m_activeMob)
         return;
 
-    CNode* pNode = nullptr;
-    foreach (pNode, CScene::getInstance()->getMode() == eEditModeLogic ? m_activeMob->logicNodes() : m_activeMob->nodes())
+    QList<CNode*> targets;
+    for(CNode* node : CScene::getInstance()->getMode() == eEditModeLogic ? m_activeMob->logicNodes() : m_activeMob->nodes())
     {
-        if (pNode->nodeState() != ENodeState::eSelect)
-            continue;
+        if(node && node->nodeState() == ENodeState::eSelect)
+            targets.append(node);
+    }
+    if(targets.isEmpty())
+        return;
+    if(prop->type() == eObjParam_NID && targets.size() > 1)
+    {
+        ei::log(eLogWarning, "Cannot assign one identifier to multiple objects");
+        QMessageBox::warning(this, "Operation Error",
+                             "One identifier cannot be assigned to multiple objects.");
+        return;
+    }
 
+    const bool grouped = targets.size() > 1;
+    if(grouped)
+        m_pUndoStack->beginMacro(QString("Change %1 objects").arg(targets.size()));
+
+    CNode* pNode = nullptr;
+    foreach(pNode, targets)
+    {
         switch (prop->type()) {
 
         case eObjParam_ROTATION: //todo: need recalc landscape position for objects?
         case eObjParam_COMPLECTION:
         {
-            CChangeProp* pChanger = new CChangeProp(this, pNode->mapId(), prop);
+            CChangeProp* pChanger = new CChangeProp(this, pNode, prop);
             QObject::connect(pChanger, SIGNAL(updateParam()), this, SLOT(viewParameters()));
             //QObject::connect(pChanger, SIGNAL(updatePosOnLand(CNode*)), this, SLOT(landPositionUpdate(CNode*)));
             m_pUndoStack->push(pChanger);
@@ -1601,7 +1588,7 @@ void CView::onParamChange(const QSharedPointer<IPropertyBase>& prop)
         }
         case eObjParam_TEMPLATE:
         {
-            CChangeProp* pChanger = new CChangeProp(this, pNode->mapId(), prop); // #todo: update node pos after undo-redo
+            CChangeProp* pChanger = new CChangeProp(this, pNode, prop); // #todo: update node pos after undo-redo
             QObject::connect(pChanger, SIGNAL(updateParam()), this, SLOT(viewParameters()));
             //QObject::connect(pChanger, SIGNAL(updatePosOnLand(CNode*)), this, SLOT(landPositionUpdate(CNode*)));
             m_pUndoStack->push(pChanger);
@@ -1609,12 +1596,6 @@ void CView::onParamChange(const QSharedPointer<IPropertyBase>& prop)
         }
         case eObjParam_NID:
         {
-            if(nSelectedNodes() > 1)
-            {
-                ei::log(eLogWarning, "incorrect operation. You cannot set the same identifier for several objects");
-                QMessageBox::warning(nullptr, "Operation Error", "incorrect operation. You cannot set the same identifier for several objects");
-                return;
-            }
             auto pId = dynamic_cast<propUint*>(prop.get());
             if(!m_activeMob->isFreeId(pId->value()))
             {
@@ -1622,7 +1603,7 @@ void CView::onParamChange(const QSharedPointer<IPropertyBase>& prop)
                 QMessageBox::warning(nullptr, "Operation Error", "incorrect operation. Duplicate id");
                 return;
             }
-            CChangeProp* pChanger = new CChangeProp(this, pNode->mapId(), prop);
+            CChangeProp* pChanger = new CChangeProp(this, pNode, prop);
             QObject::connect(pChanger, SIGNAL(updateParam()), this, SLOT(viewParameters()));
             QObject::connect(pChanger, SIGNAL(changeIdSignal(uint,uint)), m_pTree, SLOT(onChangeNodeId(uint,uint)));
             QObject::connect(pChanger, SIGNAL(changeTreeName(CNode*)), m_pTree, SLOT(onChangeObjectName(CNode*)));
@@ -1637,7 +1618,7 @@ void CView::onParamChange(const QSharedPointer<IPropertyBase>& prop)
             }
             else
             {
-                CChangeProp* pChanger = new CChangeProp(this, pNode->mapId(), prop);
+                CChangeProp* pChanger = new CChangeProp(this, pNode, prop);
                 QObject::connect(pChanger, SIGNAL(updateParam()), this, SLOT(viewParameters()));
                 QObject::connect(pChanger, SIGNAL(changeIdSignal(uint,uint)), m_pTree, SLOT(onChangeNodeId(uint,uint)));
                 QObject::connect(pChanger, SIGNAL(changeTreeName(CNode*)), m_pTree, SLOT(onChangeObjectName(CNode*)));
@@ -1648,6 +1629,8 @@ void CView::onParamChange(const QSharedPointer<IPropertyBase>& prop)
         }
     }
 
+    if(grouped)
+        m_pUndoStack->endMacro();
 }
 
 
@@ -1875,6 +1858,7 @@ QVector3D CView::getTerrainPos(const int cursorPosX, const int cursorPosY, bool 
 
 void CView::changeOperation(EButtonOp type)
 {
+    cancelPendingOperation();
     switch (type) {
     case EButtonOpSelect:
         m_pOp->changeState(new CSelect(this)); break;
@@ -1887,6 +1871,44 @@ void CView::changeOperation(EButtonOp type)
     case EButtonOpTilebrush:
         m_pOp->changeState(new CTileBrush(this)); break;
     }
+}
+
+bool CView::cancelPendingOperation()
+{
+    if(!m_pOp)
+        return false;
+
+    const EOperationMethod method = m_pOp->operationMethod();
+    QString methodName;
+    switch(method)
+    {
+    case eOperationMethodMoveAxis:
+        methodName = "move";
+        operationRevert(EOperationAxisType::eMove);
+        break;
+    case eOperationMethodRotateAxis:
+        methodName = "rotate";
+        operationRevert(EOperationAxisType::eRotate);
+        break;
+    case eOperationMethodScaleAxis:
+        methodName = "scale";
+        operationRevert(EOperationAxisType::eScale);
+        break;
+    case eOperationMethodTileBrush:
+        methodName = "tile-brush";
+        endTileBrushGroup();
+        break;
+    case eOperationMethodSelect:
+        return false;
+    }
+
+    const int trackedObjects = m_operationBackup.size();
+    m_operationBackup.clear();
+    m_unitMovementBackup.clear();
+    m_pOp->changeState(new CSelect(this));
+    ei::log(eLogInfo, QString("Cancelled pending viewport operation method:%1 trackedObjects:%2 before document lifecycle change")
+            .arg(methodName).arg(trackedObjects));
+    return true;
 }
 
 void CView::operationSetBackup(EOperationAxisType operationType)
@@ -1952,6 +1974,18 @@ void CView::operationApply(EOperationAxisType operationType)
 {
     QQuaternion quat;
     QVector3D rot;
+    const bool grouped = m_operationBackup.size() > 1;
+    if(grouped)
+    {
+        QString action = "Transform";
+        if(operationType == EOperationAxisType::eMove)
+            action = "Move";
+        else if(operationType == EOperationAxisType::eRotate)
+            action = "Rotate";
+        else if(operationType == EOperationAxisType::eScale)
+            action = "Scale";
+        m_pUndoStack->beginMacro(QString("%1 %2 objects").arg(action).arg(m_operationBackup.size()));
+    }
     for(auto& pair : m_operationBackup.toStdMap())
     {
         switch (operationType)
@@ -1966,7 +2000,7 @@ void CView::operationApply(EOperationAxisType operationType)
                 case eUnit:
                 {
                     QSharedPointer<IPropertyBase> pos (new prop3D(eObjParam_POSITION, pair.first->position()));
-                    CChangeProp* pOp = new CChangeProp(this, pair.first->mapId(), pos);
+                    CChangeProp* pOp = new CChangeProp(this, pair.first, pos);
                     QObject::connect(pOp, SIGNAL(updateParam()), this, SLOT(viewParameters()));
                     pair.first->updatePos(m_operationBackup[pair.first]);
                     m_pUndoStack->push(pOp);
@@ -1974,13 +2008,8 @@ void CView::operationApply(EOperationAxisType operationType)
                 }
                 case ePatrolPoint:
                 {
-                    auto pPoint = dynamic_cast<CPatrolPoint*>(pair.first);
-                    int unitId(0);
-                    int patrolId(0);
-                    m_activeMob->getPatrolHash(unitId, patrolId, pPoint);
-                    QString hash = QString("%1.%2").arg(unitId).arg(patrolId);
                     QSharedPointer<IPropertyBase> pos (new prop3D(eObjParam_POSITION, pair.first->position()));
-                    CChangeLogicParam* pOp = new CChangeLogicParam(this, hash, pos);
+                    CChangeLogicParam* pOp = new CChangeLogicParam(this, pair.first, pos);
                     QObject::connect(pOp, SIGNAL(updateParam()), this, SLOT(viewParameters()));
                     pair.first->updatePos(m_operationBackup[pair.first]); //revert position to start (it will apply in 'push' operation
                     m_pUndoStack->push(pOp);
@@ -1988,14 +2017,8 @@ void CView::operationApply(EOperationAxisType operationType)
                 }
                 case eLookPoint:
                 {
-                    auto pPoint = dynamic_cast<CLookPoint*>(pair.first);
-                    int unitId(0);
-                    int patrolId(0);
-                    int viewId(0);
-                    m_activeMob->getViewHash(unitId, patrolId, viewId, pPoint);
-                    QString hash = QString("%1.%2.%3").arg(unitId).arg(patrolId).arg(viewId);
                     QSharedPointer<IPropertyBase> pos (new prop3D(eObjParam_POSITION, pair.first->position()));
-                    CChangeLogicParam* pOp = new CChangeLogicParam(this, hash, pos);
+                    CChangeLogicParam* pOp = new CChangeLogicParam(this, pair.first, pos);
                     QObject::connect(pOp, SIGNAL(updateParam()), this, SLOT(viewParameters()));
                     pair.first->updatePos(m_operationBackup[pair.first]); //revert position to start (it will apply in 'push' operation
                     m_pUndoStack->push(pOp);
@@ -2003,15 +2026,8 @@ void CView::operationApply(EOperationAxisType operationType)
                 }
                 case eTrapActZone:
                 {
-                    auto pZone = dynamic_cast<CActivationZone*>(pair.first);
-                    int unitId(0);
-                    int patrolId(-2);
-                    int viewId(-2);
-                    int zoneId(0);
-                    m_activeMob->getTrapZoneHash(unitId, zoneId, pZone);
-                    QString hash = QString("%1.%2.%3.%4").arg(unitId).arg(patrolId).arg(viewId).arg(zoneId);
                     QSharedPointer<IPropertyBase> pos (new prop3D(eObjParam_POSITION, pair.first->position()));
-                    CChangeLogicParam* pOp = new CChangeLogicParam(this, hash, pos);
+                    CChangeLogicParam* pOp = new CChangeLogicParam(this, pair.first, pos);
                     QObject::connect(pOp, SIGNAL(updateParam()), this, SLOT(viewParameters()));
                     pair.first->updatePos(m_operationBackup[pair.first]); //revert position to start (it will apply in 'push' operation
                     m_pUndoStack->push(pOp);
@@ -2019,16 +2035,8 @@ void CView::operationApply(EOperationAxisType operationType)
                 }
                 case eTrapCastPoint:
                 {
-                    auto pCast = dynamic_cast<CTrapCastPoint*>(pair.first);
-                    int unitId(0);
-                    int patrolId(-2);
-                    int viewId(-2);
-                    int zoneId(-2);
-                    int castPointId(0);
-                    m_activeMob->getTrapCastHash(unitId, castPointId, pCast);
-                    QString hash = QString("%1.%2.%3.%4.%5").arg(unitId).arg(patrolId).arg(viewId).arg(zoneId).arg(castPointId);
                     QSharedPointer<IPropertyBase> pos (new prop3D(eObjParam_POSITION, pair.first->position()));
-                    CChangeLogicParam* pOp = new CChangeLogicParam(this, hash, pos);
+                    CChangeLogicParam* pOp = new CChangeLogicParam(this, pair.first, pos);
                     QObject::connect(pOp, SIGNAL(updateParam()), this, SLOT(viewParameters()));
                     pair.first->updatePos(m_operationBackup[pair.first]); //revert position to start (it will apply in 'push' operation
                     m_pUndoStack->push(pOp);
@@ -2043,7 +2051,7 @@ void CView::operationApply(EOperationAxisType operationType)
             else
             {
                 QSharedPointer<IPropertyBase> pos (new prop3D(eObjParam_POSITION, pair.first->position()));
-                CChangeProp* pOp = new CChangeProp(this, pair.first->mapId(), pos);
+                CChangeProp* pOp = new CChangeProp(this, pair.first, pos);
                 QObject::connect(pOp, SIGNAL(updateParam()), this, SLOT(viewParameters()));
                 CUnit* unit = dynamic_cast<CUnit*>(pair.first);
                 if(unit && m_unitMovementBackup.contains(unit))
@@ -2059,7 +2067,7 @@ void CView::operationApply(EOperationAxisType operationType)
         {
             rot = pair.first->getEulerRotation();
             QSharedPointer<IPropertyBase> rotation (new prop3D(eObjParam_ROTATION, rot));
-            CChangeProp* pOp = new CChangeProp(this, pair.first->mapId(), rotation);
+            CChangeProp* pOp = new CChangeProp(this, pair.first, rotation);
             QObject::connect(pOp, SIGNAL(updateParam()), this, SLOT(viewParameters()));
             quat = QQuaternion::fromEulerAngles(m_operationBackup[pair.first]);
             pair.first->setRot(quat);
@@ -2069,7 +2077,7 @@ void CView::operationApply(EOperationAxisType operationType)
         case EOperationAxisType::eScale:
         {
             QSharedPointer<IPropertyBase> complection (new prop3D(eObjParam_COMPLECTION, pair.first->constitution()));
-            CChangeProp* pOp = new CChangeProp(this, pair.first->mapId(), complection);
+            CChangeProp* pOp = new CChangeProp(this, pair.first, complection);
             QObject::connect(pOp, SIGNAL(updateParam()), this, SLOT(viewParameters()));
             pair.first->setConstitution(m_operationBackup[pair.first]);
             m_pUndoStack->push(pOp);
@@ -2078,6 +2086,8 @@ void CView::operationApply(EOperationAxisType operationType)
         }
 
     }
+    if(grouped)
+        m_pUndoStack->endMacro();
     m_operationBackup.clear();
     m_unitMovementBackup.clear();
 }
@@ -2183,13 +2193,26 @@ void CView::resetUnitLogicPaths()
 
 void CView::deleteSelectedNodes()
 {
+    if(!m_activeMob)
+        return;
+
+    QList<CNode*> targets;
+    for(CNode* node : CScene::getInstance()->getMode()==eEditModeLogic ? m_activeMob->logicNodes() : m_activeMob->nodes())
+    {
+        if(node && node->nodeState() == ENodeState::eSelect)
+            targets.append(node);
+    }
+    if(targets.isEmpty())
+        return;
+
+    const bool grouped = targets.size() > 1;
+    if(grouped)
+        m_pUndoStack->beginMacro(QString("Delete %1 objects").arg(targets.size()));
+
     QVector<uint> arrMapId;
     CNode* pNode = nullptr;
-    foreach(pNode, CScene::getInstance()->getMode()==eEditModeLogic ? m_activeMob->logicNodes() : m_activeMob->nodes())
+    foreach(pNode, targets)
     {
-        if (pNode->nodeState() != ENodeState::eSelect)
-            continue;
-
         auto type = pNode->nodeType();
         switch(type)
         {
@@ -2259,6 +2282,8 @@ void CView::deleteSelectedNodes()
         m_pUndoStack->push(pUndo);
     }
 
+    if(grouped)
+        m_pUndoStack->endMacro();
     viewParameters();
     //updateViewTree();
 }
@@ -2303,6 +2328,9 @@ void CView::selectedObjectToClipboardBuffer()
 
 void CView::clipboradObjectsToScene()
 {
+    if(!m_activeMob)
+        return;
+
     if (!m_clipboard_buffer_file.open(QIODevice::ReadOnly))
     {
         Q_ASSERT("Couldn't open option file." && false);
@@ -2330,6 +2358,9 @@ void CView::clipboradObjectsToScene()
         return;
     }
 
+    const QList<CNode*> originalSelection = selectionSnapshot();
+    m_pUndoStack->beginMacro(QString("Paste %1 object%2")
+            .arg(array.size()).arg(array.size() == 1 ? "" : "s"));
     m_activeMob->clearSelect();
     for(auto it = array.begin(); it < array.end(); ++it)
     {
@@ -2338,6 +2369,10 @@ void CView::clipboradObjectsToScene()
         QObject::connect(pUndo, SIGNAL(undo_addNodeSignal(uint)), m_pTree, SLOT(onNodeDelete(uint)));
         m_pUndoStack->push(pUndo);
     }
+    const QList<CNode*> pastedSelection = selectionSnapshot();
+    m_pUndoStack->push(new CSelectionCommand(this, originalSelection, pastedSelection,
+                                              "Select pasted objects"));
+    m_pUndoStack->endMacro();
     //move copyed nodes to new mouse position
     QVector3D oldMousePos;
     QJsonArray arrPoint = obj["Mouse position"].toArray();
@@ -2418,13 +2453,23 @@ void CView::addLogicPoint(bool bLookPoint)
     if(nullptr == m_activeMob)
         return;
 
+    QList<CNode*> targets;
+    for(CNode* node : m_activeMob->logicNodes())
+    {
+        if(node && node->nodeState() == ENodeState::eSelect)
+            targets.append(node);
+    }
+    if(targets.isEmpty())
+        return;
+    const bool grouped = targets.size() > 1;
+    if(grouped)
+        m_pUndoStack->beginMacro(QString("Add logic points to %1 objects").arg(targets.size()));
+
     bool bChangeToMove = false;
 
     CNode* pNode = nullptr;
-    foreach(pNode, m_activeMob->logicNodes())
+    foreach(pNode, targets)
     {
-        if(pNode->nodeState() != ENodeState::eSelect)
-            continue;
         ENodeType type = pNode->nodeType();
         switch(type)
         {
@@ -2510,6 +2555,8 @@ void CView::addLogicPoint(bool bLookPoint)
 
     }
 
+    if(grouped)
+        m_pUndoStack->endMacro();
     if(bChangeToMove)
         m_pOp->changeState(new CMoveAxis(this, EOperateAxisXY));
 }
@@ -2698,6 +2745,7 @@ void CView::loadSession()
         ei::log(eLogWarning, "Cannot find MPR file: " + mprFile.absoluteFilePath());
         return;
     }
+    m_pUndoStack->beginMacro("Open last session");
     QUndoCommand* loadMpr = new COpenCommand(this, mprFile);
     m_pUndoStack->push(loadMpr);
 
@@ -2714,6 +2762,7 @@ void CView::loadSession()
         CRoundMobCommand* pRound = new CRoundMobCommand(this);
         m_pUndoStack->push(pRound);
     }
+    m_pUndoStack->endMacro();
 
     QVector3D pos, pivot, rot;
     if(pManager->getCameraData(pos, pivot, rot))

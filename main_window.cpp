@@ -283,6 +283,7 @@ void MainWindow::connectUiButtons()
 
 bool MainWindow::isExitAllowed()
 {
+    m_pView->cancelPendingOperation();
     return m_pView->onExit();
 }
 
@@ -386,12 +387,17 @@ void MainWindow::on_actionOpen_MOB_triggered()
     COptString* opt = dynamic_cast<COptString*>(m_settings->opt(eOptSetGeneral, "lastVisitedFolder"));
     Q_ASSERT(opt);
     const QStringList paths = QFileDialog::getOpenFileNames(this, "Open one or more MOB files", opt->value(), tr("MOB (*.mob)"));
+    const bool grouped = paths.size() > 1;
+    if(grouped)
+        m_undoStack->beginMacro(QString("Open %1 MOB files").arg(paths.size()));
     for(const QString& path : paths)
     {
         QFileInfo fileName(path);
         opt->setValue(fileName.dir().path());
         m_undoStack->push(new COpenCommand(m_pView, fileName));
     }
+    if(grouped)
+        m_undoStack->endMacro();
 }
 
 void MainWindow::on_actionSettings_triggered()

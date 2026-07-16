@@ -78,6 +78,7 @@ public:
     void operationSetBackup(EOperationAxisType operationType);
     void operationRevert(EOperationAxisType operationType);
     void operationApply(EOperationAxisType operationType);
+    bool cancelPendingOperation();
     void moveTo(QVector3D& dir);
     void rotateTo(QVector3D& rot);
     void scaleTo(QVector3D& scale);

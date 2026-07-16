@@ -74,6 +74,7 @@ public:
 
 private:
     CView* m_pView;
+    CMob* m_pMob;
     QString m_nodeHash;
 };
 
@@ -128,7 +129,7 @@ class CChangeLogicParam : public QObject, public QUndoCommand
 public:
     enum { Id = 107 };
     CChangeLogicParam() = delete;
-    CChangeLogicParam(CView* pView, QString pointHash, const QSharedPointer<IPropertyBase>& prop, QUndoCommand *parent = nullptr);
+    CChangeLogicParam(CView* pView, CNode* pNode, const QSharedPointer<IPropertyBase>& prop, QUndoCommand *parent = nullptr);
 
     void undo() override;
     void redo() override;
@@ -141,7 +142,8 @@ signals:
 
 protected:
     CView* m_pView;
-    QString m_pointHash;
+    CMob* m_pMob;
+    CNode* m_pNode;
     QSharedPointer<IPropertyBase> m_oldValue;
     QSharedPointer<IPropertyBase> m_newValue;
 };
@@ -339,7 +341,7 @@ class CChangeProp : public QObject, public QUndoCommand
 public:
     enum { Id = 116 };
     CChangeProp() = delete;
-    CChangeProp(CView* pView, uint nodeId, const QSharedPointer<IPropertyBase>& prop, QUndoCommand *parent = nullptr);
+    CChangeProp(CView* pView, CNode* pNode, const QSharedPointer<IPropertyBase>& prop, QUndoCommand *parent = nullptr);
 
     void undo() override;
     void redo() override;
@@ -354,6 +356,8 @@ signals:
 
 protected:
     CView* m_pView;
+    CMob* m_pMob;
+    CNode* m_pNode;
     uint m_nodeId;
     QSharedPointer<IPropertyBase> m_oldValue;
     QSharedPointer<IPropertyBase> m_newValue;

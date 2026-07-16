@@ -87,7 +87,7 @@ void CDeleteNodeCommand::undo()
     auto pNode = m_pMob ? m_pMob->restoreDeletedNode(m_pNode, m_originalIndex) : nullptr;
     if(nullptr != pNode)
         emit undo_deleteNodeSignal(pNode);
-    m_pView->setDurty();
+    m_pView->setDurty(m_pMob);
 }
 
 void CDeleteNodeCommand::redo()
@@ -102,7 +102,7 @@ void CDeleteNodeCommand::redo()
     ei::log(eLogInfo, "Delete node ID: " + QString::number(pNode->mapId()));
     m_pMob->deleteNode(pNode);
     emit deleteNodeSignal(m_nodeId);
-    m_pView->setDurty();
+    m_pView->setDurty(m_pMob);
 }
 
 CCreateNodeCommand::CCreateNodeCommand(CView* pView, QJsonObject nodeData, QUndoCommand *parent):
@@ -126,7 +126,7 @@ void CCreateNodeCommand::undo()
         return;
     }
     m_pMob->deleteNode(m_pCreatedNode);
-    m_pView->setDurty();
+    m_pView->setDurty(m_pMob);
     emit undo_addNodeSignal(m_createdNodeId);
 }
 
@@ -162,7 +162,7 @@ void CCreateNodeCommand::redo()
     }
     pNode->setState(ENodeState::eSelect);
     setText("Node created ID: " + QString::number(m_createdNodeId));
-    m_pView->setDurty();
+    m_pView->setDurty(m_pMob);
     emit addNodeSignal(pNode);
 }
 
@@ -189,83 +189,34 @@ void CSelectionCommand::redo()
         m_pView->restoreSelection(m_after);
 }
 
-CChangeLogicParam::CChangeLogicParam(CView* pView, QString pointHash, const QSharedPointer<IPropertyBase>& prop, QUndoCommand *parent):
+CChangeLogicParam::CChangeLogicParam(CView* pView, CNode* pNode, const QSharedPointer<IPropertyBase>& prop, QUndoCommand *parent):
     QUndoCommand(parent)
   ,m_pView(pView)
-  ,m_pointHash(pointHash)
+  ,m_pMob(pView ? pView->currentMob() : nullptr)
+  ,m_pNode(pNode)
 {
     m_newValue.reset(prop->clone());
 }
 
 void CChangeLogicParam::undo()
 {
-    QStringList list = m_pointHash.split(".");
-    if(list.size()==1)
-    {//unit
-        auto pUnit = m_pView->currentMob()->nodeByMapId(list[0].toUInt());
-        pUnit->applyLogicParam(m_oldValue);
-    }
-    else if(list.size()==2)
-    {//patrol point
-        CPatrolPoint* pPoint = m_pView->currentMob()->patrolPointById(list[0].toInt(), list[1].toInt());
-        pPoint->applyLogicParam(m_oldValue);
-    }
-    else if(list.size()==3)
-    {//look point
-        CLookPoint* pPoint = m_pView->currentMob()->viewPointById(list[0].toInt(), list[1].toInt(), list[2].toInt());
-        pPoint->applyLogicParam(m_oldValue);
-    }
-    else if(list.size() == 4) //trap zone
-    {
-        CActivationZone* pZone = m_pView->currentMob()->actZoneById(list[0].toInt(), list[3].toInt());
-        pZone->applyLogicParam(m_oldValue);
-    }
-    else if(list.size() == 5) //trap cast point
-    {
-        CTrapCastPoint* pCast = m_pView->currentMob()->trapCastById(list[0].toInt(), list[4].toInt());
-        pCast->applyLogicParam(m_oldValue);
-    }
+    if(!m_pNode)
+        return;
+    m_pNode->applyLogicParam(m_oldValue);
 
     emit updateParam();
-    m_pView->setDurty();
+    m_pView->setDurty(m_pMob);
 }
 
 void CChangeLogicParam::redo()
 {
-    QStringList list = m_pointHash.split(".");
-    if(list.size()==1)
-    {//unit
-        auto pUnit = m_pView->currentMob()->nodeByMapId(list[0].toUInt()); //can be magic trap
-        pUnit->getLogicParam(m_oldValue, m_newValue->type());
-        pUnit->applyLogicParam(m_newValue);
-    }
-    else if(list.size()==2)
-    {//patrol point
-        CPatrolPoint* pPoint = m_pView->currentMob()->patrolPointById(list[0].toInt(), list[1].toInt());
-        pPoint->getLogicParam(m_oldValue, m_newValue->type());
-        pPoint->applyLogicParam(m_newValue);
-    }
-    else if(list.size()==3)
-    {//look point
-        CLookPoint* pPoint = m_pView->currentMob()->viewPointById(list[0].toInt(), list[1].toInt(), list[2].toInt());
-        pPoint->getLogicParam(m_oldValue, m_newValue->type());
-        pPoint->applyLogicParam(m_newValue);
-    }
-    else if(list.size() == 4) //trap zone
-    {
-        CActivationZone* pZone = m_pView->currentMob()->actZoneById(list[0].toInt(), list[3].toInt());
-        pZone->getLogicParam(m_oldValue, m_newValue->type());
-        pZone->applyLogicParam(m_newValue);
-    }
-    else if(list.size() == 5) //trap cast point
-    {
-        CTrapCastPoint* pCast = m_pView->currentMob()->trapCastById(list[0].toInt(), list[4].toInt());
-        pCast->getLogicParam(m_oldValue, m_newValue->type());
-        pCast->applyLogicParam(m_newValue);
-    }
+    if(!m_pNode)
+        return;
+    m_pNode->getLogicParam(m_oldValue, m_newValue->type());
+    m_pNode->applyLogicParam(m_newValue);
 
     emit updateParam();
-    m_pView->setDurty();
+    m_pView->setDurty(m_pMob);
     setText("Change value to " + m_newValue->toString());
 }
 
@@ -324,6 +275,7 @@ void CCreateTrapPointCommand::redo()
 CDeleteLogicPoint::CDeleteLogicPoint(CView *pView, QString hash, QUndoCommand *parent):
     QUndoCommand(parent)
   ,m_pView(pView)
+  ,m_pMob(pView ? pView->currentMob() : nullptr)
   ,m_nodeHash(hash)
 {
 }
@@ -337,22 +289,22 @@ void CDeleteLogicPoint::undo()
     }
     else if(list.size()==2)
     {//patrol point
-        CPatrolPoint* pPoint = m_pView->currentMob()->patrolPointById(list[0].toInt(), list[1].toInt());
+        CPatrolPoint* pPoint = m_pMob->patrolPointById(list[0].toInt(), list[1].toInt());
         pPoint->markAsDeleted(false);
     }
     else if(list.size()==3)
     {//look point
-        CLookPoint* pPoint = m_pView->currentMob()->viewPointById(list[0].toInt(), list[1].toInt(), list[2].toInt());
+        CLookPoint* pPoint = m_pMob->viewPointById(list[0].toInt(), list[1].toInt(), list[2].toInt());
         pPoint->markAsDeleted(false);
     }
     else if(list.size() == 4) //trap zone
     {
-        CActivationZone* pZone = m_pView->currentMob()->actZoneById(list[0].toInt(), list[3].toInt());
+        CActivationZone* pZone = m_pMob->actZoneById(list[0].toInt(), list[3].toInt());
         pZone->markAsDeleted(false);
     }
     else if(list.size() == 5) //trap cast point
     {
-        CTrapCastPoint* pCast = m_pView->currentMob()->trapCastById(list[0].toInt(), list[4].toInt());
+        CTrapCastPoint* pCast = m_pMob->trapCastById(list[0].toInt(), list[4].toInt());
         pCast->markAsDeleted(false);
     }
 }
@@ -366,26 +318,26 @@ void CDeleteLogicPoint::redo()
     }
     else if(list.size()==2)
     {//patrol point
-        CPatrolPoint* pPoint = m_pView->currentMob()->patrolPointById(list[0].toInt(), list[1].toInt());
+        CPatrolPoint* pPoint = m_pMob->patrolPointById(list[0].toInt(), list[1].toInt());
         pPoint->markAsDeleted(true);
     }
     else if(list.size()==3)
     {//look point
-        CLookPoint* pPoint = m_pView->currentMob()->viewPointById(list[0].toInt(), list[1].toInt(), list[2].toInt());
+        CLookPoint* pPoint = m_pMob->viewPointById(list[0].toInt(), list[1].toInt(), list[2].toInt());
         pPoint->markAsDeleted(true);
     }
     else if(list.size() == 4) //trap zone
     {
-        CActivationZone* pZone = m_pView->currentMob()->actZoneById(list[0].toInt(), list[3].toInt());
+        CActivationZone* pZone = m_pMob->actZoneById(list[0].toInt(), list[3].toInt());
         pZone->markAsDeleted(true);
     }
     else if(list.size() == 5) //trap cast point
     {
-        CTrapCastPoint* pCast = m_pView->currentMob()->trapCastById(list[0].toInt(), list[4].toInt());
+        CTrapCastPoint* pCast = m_pMob->trapCastById(list[0].toInt(), list[4].toInt());
         pCast->markAsDeleted(true);
     }
     setText("Point deleted");
-    m_pView->setDurty();
+    m_pView->setDurty(m_pMob);
 }
 
 CRoundMobCommand::CRoundMobCommand(CView *pView, QUndoCommand *parent):
@@ -629,10 +581,12 @@ void CChangeActiveMobCommand::redo()
     setText("Change MOB to:" + m_mobName);
 }
 
-CChangeProp::CChangeProp(CView* pView, uint nodeId, const QSharedPointer<IPropertyBase>& prop, QUndoCommand* parent):
+CChangeProp::CChangeProp(CView* pView, CNode* pNode, const QSharedPointer<IPropertyBase>& prop, QUndoCommand* parent):
     QUndoCommand(parent)
   ,m_pView(pView)
-  ,m_nodeId(nodeId)
+  ,m_pMob(pView ? pView->currentMob() : nullptr)
+  ,m_pNode(pNode)
+  ,m_nodeId(pNode ? pNode->mapId() : 0)
   ,m_unitMovementStateCaptured(false)
 {
     m_newValue.reset(prop->clone());
@@ -640,7 +594,9 @@ CChangeProp::CChangeProp(CView* pView, uint nodeId, const QSharedPointer<IProper
 
 void CChangeProp::undo()
 {
-    auto pNode = m_pView->currentMob()->nodeByMapId(m_nodeId);
+    auto pNode = m_pNode;
+    if(!pNode)
+        return;
     CUnit* unit = dynamic_cast<CUnit*>(pNode);
     if(unit && m_unitMovementStateCaptured && m_oldValue->type() == eObjParam_POSITION)
         unit->restoreMovementState(m_oldUnitMovementState);
@@ -658,13 +614,15 @@ void CChangeProp::undo()
     }
     emit updateParam();
     //emit updatePosOnLand(m_pNode);
-    m_pView->setDurty();
+    m_pView->setDurty(m_pMob);
 }
 
 void CChangeProp::redo()
 {
     setText("Change value to " + m_newValue->toString());
-    auto pNode = m_pView->currentMob()->nodeByMapId(m_nodeId);
+    auto pNode = m_pNode;
+    if(!pNode)
+        return;
     CUnit* unit = dynamic_cast<CUnit*>(pNode);
     if(unit && m_newValue->type() == eObjParam_POSITION)
     {
@@ -704,7 +662,7 @@ void CChangeProp::redo()
 
     emit updateParam();
     //emit updatePosOnLand(m_pNode);
-    m_pView->setDurty();
+    m_pView->setDurty(m_pMob);
 }
 
 CResetIdCommand::CResetIdCommand(CView* pView, QMap<uint, uint>& reconnectId, QUndoCommand* parent):
