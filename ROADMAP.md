@@ -202,6 +202,30 @@ or move it into the relevant section above without losing its history.
 
 ### High priority
 
+- [ ] Add a supported **Landscape Editing** mode for MPR/SEC terrain.
+  - Gate editing on lossless MPR/SEC saves: preserve untouched archive members,
+    sector bytes, names, ordering, alignment, and metadata, then stage, reopen,
+    and validate every save before replacing the destination.
+  - Refactor terrain ownership around each sector's canonical 33x33 vertex
+    lattice instead of independently duplicated tile vertices, including seam
+    synchronization between neighboring sectors.
+  - Add undoable raise/lower, flatten, smooth, and ramp height tools with brush
+    radius, strength, falloff, and numeric-height controls.
+  - Recalculate only affected normals, preserve untouched packed vertex bits,
+    and warn before height changes require lossy `maxZ` rescaling.
+  - Productionize the existing hidden tile brush with explicit layer, atlas,
+    category, rotation, brush-shape, preview, and validation controls.
+  - Implement visual texture blending through transition-tile painting and
+    optional autotiling; the SEC format has packed tile selection/rotation but
+    no arbitrary per-vertex texture-blend weights.
+  - Add creation, removal, sculpting, visibility, texture, and material editing
+    for the separate overlay surface used by water, swamp, ice, and lava.
+  - Provide validated material presets for base EI and JMV while retaining
+    manual controls for mod-specific terrain materials.
+  - Warn when terrain edits can invalidate MOB object placement or the AI
+    navigation graph, and provide validation reports before save/test launch.
+  - Require copied-map round-trip checks, untouched-member/sector diffs, and
+    focused in-game traversal tests before enabling this for live maps.
 - [ ] Add a portable Endurance `.collection` format for reusable MPR/MOB sets.
   - A collection is a small manifest listing one optional MPR and one or more
     MOB files; it never embeds, copies, or modifies the referenced map assets.
