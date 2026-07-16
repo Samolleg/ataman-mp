@@ -130,6 +130,7 @@ These are the remaining safety gates before editing live maps can be recommended
 - [ ] Exercise hard-crash logging with controlled parser, decoder, and OpenGL failures.
 - [x] Correct crash fault-module attribution, capture access details/registers
   and a normal minidump, and add phase-specific MPR/OpenGL breadcrumbs.
+  ([`4991011`](https://github.com/Ilufus/ei-mapper-endurance/commit/4991011))
 - [ ] Resolve the alpha.14 Windows 7 MPR-open crash using an alpha.15 normal vs
   ANGLE controlled retry; retain the exact map hash, GPU/driver, workflow log,
   and private minidump before assigning a root cause.
