@@ -102,7 +102,10 @@ These are the remaining safety gates before editing live maps can be recommended
   byte-exact untouched leaves, derived ancestor lengths, strict candidate reparse,
   stale-hash rejection, and strict CP1251 encoding. ([`660a542`](https://github.com/Ilufus/ei-mapper-endurance/commit/660a542), [document tests](tests/endurance_document_tests.cpp))
 - [ ] Route all existing UI edit commands through `MobEditTransaction`; the core
-  patcher exists, but the legacy projection remains the active changed-save path.
+  patcher exists, but the UI edit model still projects through legacy objects.
+- [x] Disable the legacy changed-MOB serializer at the Save boundary; dirty MOB
+  saves are refused until their UI edits have transaction provenance. Unchanged
+  byte-identical Save As remains available. ([`912d00c`](https://github.com/Ilufus/ei-mapper-endurance/commit/912d00c))
 - [ ] Block candidate saves whose semantic diff contains changes not authorized by
   the accepted transaction.
 - [ ] Copy/delete exact raw object subtrees and create new objects only from
