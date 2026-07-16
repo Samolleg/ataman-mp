@@ -7,6 +7,7 @@
 #include "tile_form.h"
 #include "ui_tile_form.h"
 #include "resourcemanager.h"
+#include "resource_name.h"
 #include "log.h"
 
 #include "layout_components/tablemanager.h"
@@ -263,16 +264,17 @@ public:
 void CTileForm::fillTable(QString mapName, int textureAtlasNumber)
 {
 
-    QStringList arrTexName;
-    for(int i(0); i<textureAtlasNumber; ++i)
-    {
-        arrTexName.append(mapName + "00" + QString::number(i) + ".mmp");
-    }
+    const QStringList arrTexName = ei::terrainTextureResourceNames(mapName, textureAtlasNumber);
     QVector<QImage> arrImage;
-    CTextureList::getInstance()->extractMmpToDxt1(arrImage, arrTexName);
+    if(!CTextureList::getInstance()->extractMmpToDxt1(arrImage, arrTexName) || arrImage.isEmpty())
+    {
+        ei::log(eLogFatal, QString("Cannot build complete tile table for map:%1 expectedAtlases:%2")
+                .arg(mapName).arg(textureAtlasNumber));
+        return;
+    }
     for(const auto& img: arrImage)
     {
-        if(img.width() != img.height())
+        if(img.isNull() || img.width() != img.height())
         {
             ei::log(eLogFatal, "Texture has incorrect aspect");
             return;

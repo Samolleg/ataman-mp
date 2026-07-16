@@ -8,6 +8,7 @@ namespace ei {
 
 QString textureCacheKey(const QString& textureName, const QString& modelName = QString());
 QStringList textureResourceCandidates(const QString& textureName, const QString& modelName = QString());
+QStringList terrainTextureResourceNames(const QString& mapName, int textureAtlasCount);
 
 }
 

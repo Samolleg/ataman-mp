@@ -887,47 +887,43 @@ int CTextureList::extractMmpToDxt1(QVector<QImage>& outArrImage, const QStringLi
 {
     outArrImage.clear();
     outArrImage.resize(inArrTextureName.size());
-    QStringList arrPath;
-
-    auto pOpt = dynamic_cast<COptStringList*>(m_pSettings->opt(eOptSetResource, "texPaths"));
-    if(pOpt && !(pOpt->value().isEmpty()))
-        arrPath = QStringList::fromVector(pOpt->value());
+    const QVector<QString> sources = configuredResourceSources(m_pSettings);
+    if(sources.isEmpty())
+        return false;
 
     int nCount(0);
-    for(auto& path: arrPath)
+    for(int index = 0; index < inArrTextureName.size(); ++index)
     {
-        if(nCount == inArrTextureName.size()) //all textures already found
-            break;
-        CResFile res(path);
-        QMap<QString, QByteArray> aFile = res.bufferOfFiles();
-
-        for(const auto& texName: inArrTextureName)
+        const QString texName = inArrTextureName.at(index).toLower();
+        QByteArray textureData;
+        QString sourcePath;
+        if(!readIndexedResource(sources, texName, textureData, &sourcePath))
         {
-            if(!aFile.contains(texName))
-                continue;
-
-            QDataStream stream(aFile[texName]);
-            util::formatStream(stream);
-
-            SMmpHeader header;
-            stream >> header;
-            if(header.m_signature != 0x00504D4D)
-            {
-                Q_ASSERT("incorrect texture signature" && false);
-                return -1;
-            }
-            if(header.m_format != ETextureFormat::eMMP_DXT1)
-            {
-                ei::log(eLogWarning, "texture has a different format than dxt1 or dxt3");
-                continue;
-            }
-
-            stream.device()->seek(header.size());
-            QImage& img = outArrImage[inArrTextureName.indexOf(texName)];
-            img =  convert_DXT(stream, header.m_width, header.m_height);
-            img = img.mirrored(false, true);
-            ++nCount;
+            ei::log(eLogWarning, "Missing terrain texture: " + texName);
+            continue;
         }
+
+        QDataStream stream(textureData);
+        util::formatStream(stream);
+        SMmpHeader header;
+        stream >> header;
+        if(header.m_signature != 0x00504D4D)
+        {
+            ei::log(eLogWarning, "Invalid terrain texture signature: " + texName + " source:" + sourcePath);
+            continue;
+        }
+        if(header.m_format != ETextureFormat::eMMP_DXT1)
+        {
+            ei::log(eLogWarning, "Unsupported terrain texture format: " + texName + " source:" + sourcePath);
+            continue;
+        }
+
+        stream.device()->seek(header.size());
+        QImage& img = outArrImage[index];
+        img = convert_DXT(stream, header.m_width, header.m_height).mirrored(false, true);
+        ++nCount;
+        ei::log(eLogInfo, QString("Resolved terrain tile atlas %1 source:%2 size:%3x%4")
+                .arg(texName, sourcePath).arg(header.m_width).arg(header.m_height));
     }
     return nCount == inArrTextureName.size();
 }
@@ -951,67 +947,67 @@ struct STexSpecified
     int startPos;
 };
 
-QOpenGLTexture* CTextureList::buildLandTex(QString& name, int& texCount)
+QOpenGLTexture* CTextureList::buildLandTex(const QString& name, int expectedTexCount, int& texCount)
 {
-    if(m_aTexture.contains(name))
+    const QString cacheKey = name.toLower();
+    if(m_aTexture.contains(cacheKey))
     {
-        texCount = m_aTexture[name]->width()/m_aTexture[name]->height();
-        return m_aTexture[name];
+        texCount = m_aTexture[cacheKey]->width()/m_aTexture[cacheKey]->height();
+        return m_aTexture[cacheKey];
     }
 
-    QString tex;
     QVector<STexSpecified> aPart;
-
-    //todo: remove code dublication. use the same way to load map texture and common texture {
-    auto pOpt = dynamic_cast<COptStringList*>(m_pSettings->opt(eOptSetResource, "texPaths"));
-    if (!pOpt || pOpt->value().isEmpty())
+    const QVector<QString> sources = configuredResourceSources(m_pSettings);
+    if(sources.isEmpty())
     {
         Q_ASSERT("ahtung. texture resource not found" && false);
         QMessageBox::warning(m_pSettings, "Warning", "Choose path to textures.res");
         m_pSettings->onShow(eOptSetResource);
-        //todo: wait until user choose resource file and continue
     }
-    //<- todo}
 
-    for(auto& file: pOpt->value())
+    const QStringList textureNames = ei::terrainTextureResourceNames(name, expectedTexCount);
+    QStringList missingTextures;
+    for(const QString& texName : textureNames)
     {
-        if(!aPart.isEmpty())
-            break;
-
-        CResFile res(file);
-        QMap<QString, QByteArray> aFile = res.bufferOfFiles();
-        for(int i(0); i<8; ++i)
+        QByteArray textureData;
+        QString sourcePath;
+        if(!readIndexedResource(sources, texName, textureData, &sourcePath))
         {
-            tex = name + "00" + QString::number(i) + ".mmp";
-            if(!aFile.contains(tex))
-            {
-                if(!aPart.empty())
-                    break;
-
-                continue;
-            }
-
-            STexSpecified part;
-            part.data = aFile[tex];
-            QDataStream stream(part.data);
-            util::formatStream(stream);
-            stream >> part.header;
-            aPart.append(part);
+            missingTextures.append(texName);
+            continue;
         }
+
+        STexSpecified part;
+        part.data = textureData;
+        QDataStream stream(part.data);
+        util::formatStream(stream);
+        stream >> part.header;
+        if(part.header.m_signature != 0x00504D4D || part.header.m_format != ETextureFormat::eMMP_DXT1)
+        {
+            missingTextures.append(texName);
+            ei::log(eLogWarning, "Invalid or unsupported terrain atlas: " + texName + " source:" + sourcePath);
+            continue;
+        }
+        aPart.append(part);
+        ei::log(eLogInfo, QString("Resolved terrain atlas %1 source:%2 size:%3x%4")
+                .arg(texName, sourcePath).arg(part.header.m_width).arg(part.header.m_height));
     }
 
-    if(aPart.empty())
+    if(expectedTexCount <= 0 || !missingTextures.isEmpty() || aPart.size() != expectedTexCount)
     {
-        ei::log(ELogMessageType::eLogWarning, "cannot find texture for zone, loading default");
+        ei::log(ELogMessageType::eLogWarning,
+                QString("Incomplete terrain atlas set map:%1 expected:%2 loaded:%3 missing:%4; loading defaults")
+                .arg(name).arg(expectedTexCount).arg(aPart.size()).arg(missingTextures.join(", ")));
+        aPart.clear();
         STexSpecified part;
         auto auxFile = QFileInfo(":/auxData.res");
         CResFile res(auxFile.filePath());
-        QMap<QString, QByteArray> aFile = res.bufferOfFiles();
+        QMap<QString, QByteArray> aFile = normalizedResourceMap(res.bufferOfFiles());
         part.data = aFile["default_zone.mmp"];
         QDataStream stream(part.data);
         util::formatStream(stream);
         stream >> part.header;
-        for(int i(0); i<8; ++i)
+        for(int i(0); i<qMax(1, expectedTexCount); ++i)
         {
             aPart.append(part);
         }
@@ -1064,7 +1060,9 @@ QOpenGLTexture* CTextureList::buildLandTex(QString& name, int& texCount)
     texture->allocateStorage(QOpenGLTexture::RGBA, QOpenGLTexture::UInt8);
     const int size = minTexSize*minTexSize*texCount/2;
     texture->setCompressedData(0, 0, size, combineTextureData.data());
-    m_aTexture[name] = texture;
+    m_aTexture[cacheKey] = texture;
+    ei::log(eLogInfo, QString("Terrain atlas set ready map:%1 expected:%2 loaded:%3")
+            .arg(name).arg(expectedTexCount).arg(texCount));
     return texture;
 }
 

@@ -4,7 +4,7 @@ EI Mapper: Endurance Edition is an independently versioned derivative of
 [`konstvest/ei_maper`](https://github.com/konstvest/ei_maper), focused on safe,
 fast Evil Islands and Jamais Vu map editing.
 
-Current development version: `0.1.0-alpha.8`.
+Current development version: `0.1.0-alpha.9`.
 
 Project status and upcoming work are tracked in the living
 [Endurance roadmap](ROADMAP.md).
@@ -26,6 +26,10 @@ commit `1cebe83d` tagged as `upstream-1cebe83d`.
 - Changed saves are staged atomically and MOB backups are retained separately.
 - MPR writes retain extra archive members and the original internal map name.
 - Resource lookup uses case-normalized RES table indexes and lazy payload reads.
+- Terrain and tile-panel atlases use the same indexed, case-insensitive source
+  priority, require the complete atlas set declared by the MPR, and report provenance.
+- Tile Parameters uses the embedded `.MP` namespace when it differs from the
+  outer `.mpr` filename, incorporating the map-name concept from upstream PR #19.
 - Model-qualified `_xN` unit skins resolve to their physical archive names, with
   a logged viewer-only nearest-family fallback when a referenced variation is absent.
 - MPR and MOB files can be opened independently, including MOB-only rendering.

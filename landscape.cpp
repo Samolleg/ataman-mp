@@ -185,17 +185,19 @@ void CLandscape::readMap(const QFileInfo& path)
         QString fName = file.first.toLower();
         aComponent.insert(fName, file.second);
         if(fName.endsWith(".mp"))
-            innerMapName = fName.split(".").front(); //todo: dont split multiple dot names (zone.1.gipath.mp)
+            innerMapName = fName.left(fName.size() - 3);
     }
     m_innerMapName = innerMapName;
-
-    int texCount;
-    m_texture = CTextureList::getInstance()->buildLandTex(innerMapName, texCount);
 
     QDataStream mpStream(aComponent[innerMapName + ".mp"]);
     util::formatStream(mpStream);
     if (!readHeader(mpStream))
         return;
+
+    ei::log(eLogInfo, QString("MPR namespace outer:%1 inner:%2 expectedTerrainAtlases:%3")
+            .arg(path.baseName(), innerMapName).arg(m_header.nTexture));
+    int texCount;
+    m_texture = CTextureList::getInstance()->buildLandTex(innerMapName, int(m_header.nTexture), texCount);
 
     // read sectors
     UI2 secIndex;

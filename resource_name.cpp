@@ -83,4 +83,20 @@ QStringList textureResourceCandidates(const QString& textureName, const QString&
     return result;
 }
 
+QStringList terrainTextureResourceNames(const QString& mapName, int textureAtlasCount)
+{
+    QString normalizedMapName = mapName.trimmed().toLower();
+    if(normalizedMapName.endsWith(".mpr"))
+        normalizedMapName.chop(4);
+    else if(normalizedMapName.endsWith(".mp"))
+        normalizedMapName.chop(3);
+
+    QStringList result;
+    if(normalizedMapName.isEmpty() || textureAtlasCount <= 0)
+        return result;
+    for(int atlas = 0; atlas < textureAtlasCount; ++atlas)
+        result.append(QString("%1%2.mmp").arg(normalizedMapName).arg(atlas, 3, 10, QChar('0')));
+    return result;
+}
+
 }

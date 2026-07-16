@@ -12,3 +12,7 @@ Endurance Edition changes focus on lossless map handling, explicit validation,
 resource compatibility, performance, and Jamais Vu modding workflows. The
 Endurance name and version line do not imply endorsement by the upstream
 maintainer.
+
+The embedded MPR map-name handling incorporates the concept proposed by
+Grabarrz90 in upstream pull request #19, with additional Endurance validation
+and indexed resource-resolution changes.

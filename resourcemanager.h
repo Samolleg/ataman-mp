@@ -112,7 +112,7 @@ public:
     void loadTexture(QSet<QString>& aName);
     QOpenGLTexture* texture(const QString& name);
     QOpenGLTexture* texture(const QString& name, const QString& modelName);
-    QOpenGLTexture* buildLandTex(QString& name, int& texCount);
+    QOpenGLTexture* buildLandTex(const QString& name, int expectedTexCount, int& texCount);
     QOpenGLTexture* textureDefault();
     void attachSettings(CSettings* pSettings) {m_pSettings = pSettings;};
     void initResource();

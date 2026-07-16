@@ -12,6 +12,7 @@ private slots:
     void fallsBackWithinMissingSkeletonFamily();
     void keepsModelFamiliesInSeparateCacheEntries();
     void acceptsMmpExtensionWithoutDuplicatingIt();
+    void buildsCompleteTerrainAtlasNames();
 };
 
 void ResourceNameTests::preservesLiteralName()
@@ -51,6 +52,15 @@ void ResourceNameTests::keepsModelFamiliesInSeparateCacheEntries()
 void ResourceNameTests::acceptsMmpExtensionWithoutDuplicatingIt()
 {
     QCOMPARE(ei::textureResourceCandidates("Skeleton00.MMP"), QStringList({"skeleton00.mmp"}));
+}
+
+void ResourceNameTests::buildsCompleteTerrainAtlasNames()
+{
+    QCOMPARE(ei::terrainTextureResourceNames("Zone10.MP", 8), QStringList({
+        "zone10000.mmp", "zone10001.mmp", "zone10002.mmp", "zone10003.mmp",
+        "zone10004.mmp", "zone10005.mmp", "zone10006.mmp", "zone10007.mmp"
+    }));
+    QVERIFY(ei::terrainTextureResourceNames("zone10", 0).isEmpty());
 }
 
 QTEST_APPLESS_MAIN(ResourceNameTests)
