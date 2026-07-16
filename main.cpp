@@ -66,22 +66,70 @@ int runHeadlessCommand(QApplication& app)
     QCommandLineOption roundtripOption("roundtrip-check", "Verify byte-identical unchanged serialization.", "file");
     QCommandLineOption jsonOption("json", "Emit machine-readable JSON.");
     QCommandLineOption profileLoadOption("profile-load", "Discover the recommended resource profile for a game installation.", "game-root");
+    QCommandLineOption mobDiffOption("mob-diff", "Compare a baseline MOB with another MOB.", "baseline");
+    QCommandLineOption againstOption("against", "Candidate MOB used with --mob-diff.", "candidate");
     parser.addOption(validateOption);
     parser.addOption(roundtripOption);
     parser.addOption(jsonOption);
     parser.addOption(profileLoadOption);
+    parser.addOption(mobDiffOption);
+    parser.addOption(againstOption);
     parser.addPositionalArgument("documents", "MPR and MOB documents to open in order.", "[documents...]");
     parser.process(app);
 
     const bool validate = parser.isSet(validateOption);
     const bool roundtrip = parser.isSet(roundtripOption);
     const bool profileLoad = parser.isSet(profileLoadOption);
-    if(!validate && !roundtrip && !profileLoad)
+    const bool mobDiff = parser.isSet(mobDiffOption);
+    if(!validate && !roundtrip && !profileLoad && !mobDiff)
         return -1;
-    if((validate ? 1 : 0) + (roundtrip ? 1 : 0) + (profileLoad ? 1 : 0) > 1)
+    if((validate ? 1 : 0) + (roundtrip ? 1 : 0) + (profileLoad ? 1 : 0) + (mobDiff ? 1 : 0) > 1)
     {
         QTextStream(stderr) << "Choose one headless command.\n";
         return 2;
+    }
+
+    if(mobDiff)
+    {
+        if(!parser.isSet(againstOption))
+        {
+            QTextStream(stderr) << "--mob-diff requires --against <candidate.mob>.\n";
+            return 2;
+        }
+        const QFileInfo baselineInfo(parser.value(mobDiffOption));
+        const QFileInfo candidateInfo(parser.value(againstOption));
+        CValidationReport baselineReport;
+        CValidationReport candidateReport;
+        CMobDocument baseline;
+        CMobDocument candidate;
+        const bool baselineLoaded = baseline.load(baselineInfo, &baselineReport);
+        const bool candidateLoaded = candidate.load(candidateInfo, &candidateReport);
+        if(!baselineLoaded || !candidateLoaded)
+        {
+            if(parser.isSet(jsonOption))
+            {
+                QJsonObject failure;
+                failure.insert("baselineLoaded", baselineLoaded);
+                failure.insert("candidateLoaded", candidateLoaded);
+                failure.insert("baselineFindings", baselineReport.toJson());
+                failure.insert("candidateFindings", candidateReport.toJson());
+                QTextStream(stdout) << QJsonDocument(failure).toJson(QJsonDocument::Indented);
+            }
+            else
+                QTextStream(stdout) << baselineReport.toText() << candidateReport.toText();
+            return 1;
+        }
+        const CMobSemanticDiff diff = CMobSemanticDiff::compare(baseline, candidate);
+        if(parser.isSet(jsonOption))
+        {
+            QJsonObject result = diff.toJson();
+            result.insert("baseline", baselineInfo.absoluteFilePath());
+            result.insert("candidate", candidateInfo.absoluteFilePath());
+            QTextStream(stdout) << QJsonDocument(result).toJson(QJsonDocument::Indented);
+        }
+        else
+            QTextStream(stdout) << diff.toText();
+        return 0;
     }
 
     if(profileLoad)
@@ -106,6 +154,32 @@ int runHeadlessCommand(QApplication& app)
         root.insert("gameRoot", selected.gameRoot);
         root.insert("modRoot", selected.modRoot);
         root.insert("archiveCount", selected.archiveCount);
+        root.insert("runtimeManifestId", selected.runtimeManifestId);
+        root.insert("runtimeStackComplete", selected.runtimeStackComplete);
+        root.insert("runtimeStackValidated", selected.runtimeStackValidated);
+        QJsonArray runtimeComponents;
+        for(const SRuntimeComponentEvaluation& component : selected.runtimeComponents)
+        {
+            QJsonObject value;
+            value.insert("id", component.id);
+            value.insert("path", component.path);
+            value.insert("exists", component.exists);
+            value.insert("size", double(component.size));
+            value.insert("sha256", component.sha256);
+            value.insert("hashAccepted", component.hashAccepted);
+            runtimeComponents.append(value);
+        }
+        root.insert("runtimeComponents", runtimeComponents);
+        QJsonObject capabilities;
+        for(auto it = selected.capabilities.constBegin(); it != selected.capabilities.constEnd(); ++it)
+        {
+            QJsonObject value;
+            value.insert("status", profileCapabilityStatusName(it.value().status));
+            value.insert("reason", it.value().reason);
+            value.insert("runtimeManifestId", it.value().runtimeManifestId);
+            capabilities.insert(it.key(), value);
+        }
+        root.insert("capabilities", capabilities);
         root.insert("resourceDirectories", QJsonArray::fromStringList(selected.resourceDirectories));
         root.insert("mapDirectories", QJsonArray::fromStringList(selected.mapDirectories));
         root.insert("messages", QJsonArray::fromStringList(selected.messages));

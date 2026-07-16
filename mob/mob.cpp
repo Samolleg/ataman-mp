@@ -31,6 +31,7 @@
 #include "backup_manager.h"
 #include "duplicate_id_report.h"
 #include "staged_save_validator.h"
+#include "endurance_document.h"
 
 CMob::CMob():
     m_view(nullptr)
@@ -307,30 +308,36 @@ bool CMob::deserialize(QByteArray data)
                 else if(parser.isNextTag("LIGHT"))
                 {
                     CLight* light = new CLight();
-                    readByte += parser.skipHeader(); // "LIGHT";
-                    readByte += light->deserialize(parser);
+                    readSecByte += parser.skipHeader(); // "LIGHT";
+                    readSecByte += light->deserialize(parser);
                     addNode(light);
                 }
                 else if(parser.isNextTag("SOUND"))
                 {
                     CSound* sound = new CSound();
-                    readByte += parser.skipHeader(); // "SOUND";
-                    readByte += sound->deserialize(parser);
+                    readSecByte += parser.skipHeader(); // "SOUND";
+                    readSecByte += sound->deserialize(parser);
                     addNode(sound);
                 }
                 else if(parser.isNextTag("PARTICL"))
                 {
                     CParticle* particle = new CParticle();
-                    readByte += parser.skipHeader(); // "PARTICL";
-                    readByte += particle->deserialize(parser);
+                    readSecByte += parser.skipHeader(); // "PARTICL";
+                    readSecByte += particle->deserialize(parser);
                     addNode(particle);
                 }
                 else {
-                    auto a = parser.nextTag();
-                    break;
+                    ei::log(eLogFatal, QString("Unsupported object record while projecting MOB tag:%1 bytes:%2/%3")
+                        .arg(parser.nextTag()).arg(readSecByte).arg(objSecLen));
+                    return false;
                 }
             }
-            Q_ASSERT(readSecByte <= objSecLen);
+            if(readSecByte != objSecLen)
+            {
+                ei::log(eLogFatal, QString("Object-section projection length mismatch read:%1 expected:%2")
+                    .arg(readSecByte).arg(objSecLen));
+                return false;
+            }
             readByte += readSecByte;
             m_pProgress->update(step);
         }
@@ -356,9 +363,12 @@ bool CMob::deserialize(QByteArray data)
         }
         else
         {
-            auto a = parser.nextTag();
-            Q_ASSERT(parser.nextTag() == "ROOT"); // zone3obr.mob has current code
-            break;
+            const QString tag = parser.nextTag();
+            if(tag == "ROOT")
+                break;
+            ei::log(eLogFatal, QString("Unsupported top-level MOB record while projecting tag:%1 bytes:%2")
+                .arg(tag).arg(readByte));
+            return false;
         }
     }
     m_pProgress->update(step);
@@ -904,6 +914,18 @@ int CMob::readMob(QFileInfo &path)
         }
 
         m_originalData = file.readAll();
+        CValidationReport structuralReport;
+        CMobDocument structuralDocument;
+        if(!structuralDocument.load(m_filePath, &structuralReport))
+        {
+            ei::log(eLogFatal, QString("Refusing MOB open after strict structural validation failed path:%1 findings:%2")
+                .arg(m_filePath.absoluteFilePath(), structuralReport.toText().trimmed()));
+            QMessageBox::critical(nullptr, "Invalid MOB structure",
+                QString("Endurance could not account for the complete MOB structure. The file was not opened.\n\n%1")
+                    .arg(structuralReport.toText().trimmed()));
+            file.close();
+            return 3;
+        }
         const SBackupResult openBackup = CBackupManager().snapshotOnOpen(m_filePath);
         if(!openBackup.success)
         {
@@ -914,14 +936,25 @@ int CMob::readMob(QFileInfo &path)
                         "Do not edit or save this file until the backup location is writable.")
                     .arg(openBackup.error));
         }
-        deserialize(m_originalData);
+        if(!deserialize(m_originalData))
+        {
+            ei::log(eLogFatal, QString("Legacy MOB projection stopped before completing path:%1")
+                .arg(m_filePath.absoluteFilePath()));
+            QMessageBox::critical(nullptr, "Unsupported MOB projection",
+                "The MOB is structurally valid, but the current editor projection could not interpret it completely. "
+                "No editable document was opened; details are in logs/workflow.log.");
+            file.close();
+            return 4;
+        }
 
         file.close();
     }
-    catch (std::exception ex)
+    catch (const std::exception& ex)
     {
-        qDebug() << ex.what();
+        ei::log(eLogFatal, QString("Exception while opening MOB path:%1 error:%2")
+            .arg(m_filePath.absoluteFilePath(), QString::fromLocal8Bit(ex.what())));
         file.close();
+        return 5;
     }
     m_duplicateIds = findIdDuplicate();
     if(!m_duplicateIds.isEmpty())

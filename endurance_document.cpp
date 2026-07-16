@@ -1,10 +1,20 @@
 #include "endurance_document.h"
 
 #include <QDataStream>
+#include <QCryptographicHash>
 #include <QFile>
+#include <QJsonArray>
+#include <QJsonDocument>
 #include <QJsonObject>
 #include <QMap>
+#include <QSet>
+#include <QTextCodec>
 #include <QTextStream>
+#include <QtEndian>
+
+#include <cmath>
+#include <climits>
+#include <cstring>
 
 namespace {
 QString severityName(EValidationSeverity severity)
@@ -35,6 +45,238 @@ bool readWholeFile(const QFileInfo& info, QByteArray& output, CValidationReport*
         return false;
     }
     return true;
+}
+
+quint32 readU32(const QByteArray& bytes, int offset)
+{
+    return qFromLittleEndian<quint32>(reinterpret_cast<const uchar*>(bytes.constData() + offset));
+}
+
+float readFloat32(const QByteArray& bytes, int offset)
+{
+    const quint32 raw = readU32(bytes, offset);
+    float value = 0.0f;
+    static_assert(sizeof(value) == sizeof(raw), "32-bit float required");
+    std::memcpy(&value, &raw, sizeof(value));
+    return value;
+}
+
+bool isMobContainer(quint32 type)
+{
+    static const QSet<quint32> containers = {
+        0x1E00, 0x1E01, 0x1E02, 0x1E03, 0x1E0B, 0x1E0E,
+        0xA000, 0xAA01, 0xABD0, 0xB000, 0xB001,
+        0xBBAB0000, 0xBBAC0000, 0xBBBB0000, 0xBBBC0000,
+        0xBBBD0000, 0xBBBE0000, 0xBBBF0000,
+        0xCC01, 0xDD01, 0xDDDDDDD1,
+        0xE000, 0xE001, 0xF000, 0xFF00, 0xFF01, 0xFF02
+    };
+    return containers.contains(type);
+}
+
+QString sectionTypeName(quint32 type)
+{
+    static const QMap<quint32, QString> names = {
+        {0xA000, "OBJECT_DB_FILE"}, {0xB000, "OBJECT_SECTION"}, {0xB001, "OBJECT"},
+        {0xB002, "NID"}, {0xB003, "OBJ_TYPE"}, {0xB004, "OBJ_NAME"},
+        {0xB006, "OBJ_TEMPLATE"}, {0xB009, "OBJ_POSITION"},
+        {0xBBBB0000, "UNIT"}, {0xBBBB0002, "UNIT_PROTOTYPE"},
+        {0xAA01, "LIGHT"}, {0xCC01, "SOUND"}, {0xDD01, "PARTICL"},
+        {0x31415926, "AI_GRAPH"}
+    };
+    const auto it = names.constFind(type);
+    return it == names.constEnd() ? QString("0x%1").arg(type, 8, 16, QLatin1Char('0')).toUpper() : it.value();
+}
+
+class MobSectionParser
+{
+public:
+    MobSectionParser(const QByteArray& bytes, CValidationReport* report, const QString& source)
+        : m_bytes(bytes), m_report(report), m_source(source)
+    {
+    }
+
+    bool parseRange(quint64 begin, quint64 end, const QString& parentPath,
+                    QVector<SMobSection>& output, int depth)
+    {
+        if(depth > 128)
+            return fail("mob.depth", "MOB section nesting exceeds 128 levels", parentPath);
+
+        QMap<quint32, int> occurrences;
+        quint64 cursor = begin;
+        while(cursor < end)
+        {
+            if(end - cursor < 8)
+                return fail("mob.section_header", "Section has an incomplete 8-byte header", parentPath);
+            if(cursor > quint64(INT_MAX))
+                return fail("mob.offset_overflow", "Section offset cannot be represented safely", parentPath);
+
+            const quint32 type = readU32(m_bytes, int(cursor));
+            const quint32 length = readU32(m_bytes, int(cursor + 4));
+            const int occurrence = occurrences[type]++;
+            const QString path = parentPath + "/" + sectionTypeName(type) +
+                QString("[%1]").arg(occurrence);
+            if(length < 8)
+                return fail("mob.section_length", QString("Section declares invalid length %1").arg(length), path);
+            const quint64 sectionEnd = cursor + quint64(length);
+            if(sectionEnd < cursor || sectionEnd > end)
+                return fail("mob.section_bounds",
+                            QString("Section [%1, %2) exceeds parent boundary %3")
+                                .arg(cursor).arg(sectionEnd).arg(end), path);
+
+            SMobSection section;
+            section.type = type;
+            section.declaredLength = length;
+            section.offset = cursor;
+            section.occurrence = occurrence;
+            section.path = path;
+            section.rawBytes = m_bytes.mid(int(cursor), int(length));
+            section.sha256 = QCryptographicHash::hash(section.rawBytes, QCryptographicHash::Sha256);
+            section.container = isMobContainer(type);
+            section.opaque = !section.container;
+            if(section.container && length > 8)
+            {
+                if(!parseRange(cursor + 8, sectionEnd, path, section.children, depth + 1))
+                    return false;
+                section.opaque = false;
+            }
+            output.append(section);
+            ++m_sectionCount;
+            if(m_sectionCount > (m_bytes.size() / 8) + 1)
+                return fail("mob.zero_progress", "Section parser exceeded the maximum possible section count", path);
+            cursor = sectionEnd;
+        }
+        return cursor == end;
+    }
+
+private:
+    bool fail(const QString& code, const QString& message, const QString& location)
+    {
+        if(m_report)
+            m_report->add(code, EValidationSeverity::Error, message, m_source + ":" + location);
+        return false;
+    }
+
+    const QByteArray& m_bytes;
+    CValidationReport* m_report = nullptr;
+    QString m_source;
+    int m_sectionCount = 0;
+};
+
+const SMobSection* findSection(const SMobSection& root, quint32 type)
+{
+    if(root.type == type)
+        return &root;
+    for(const SMobSection& child : root.children)
+        if(const SMobSection* found = findSection(child, type))
+            return found;
+    return nullptr;
+}
+
+QString decodeCp1251(const QByteArray& bytes)
+{
+    QByteArray value = bytes;
+    if(value.endsWith('\0'))
+        value.chop(1);
+    QTextCodec* codec = QTextCodec::codecForName("Windows-1251");
+    return codec ? codec->toUnicode(value) : QString::fromLatin1(value);
+}
+
+QByteArray payload(const SMobSection& section)
+{
+    return section.rawBytes.mid(8);
+}
+
+SMobObjectSnapshot snapshotObject(const SMobSection& section)
+{
+    SMobObjectSnapshot object;
+    object.sectionPath = section.path;
+    object.sectionType = section.type;
+    object.occurrence = section.occurrence;
+    object.subtreeSha256 = section.sha256;
+    if(const SMobSection* nid = findSection(section, 0xB002))
+    {
+        const QByteArray data = payload(*nid);
+        if(data.size() == 4)
+        {
+            object.hasNid = true;
+            object.nid = readU32(data, 0);
+        }
+    }
+    if(const SMobSection* type = findSection(section, 0xB003))
+    {
+        const QByteArray data = payload(*type);
+        if(data.size() == 4)
+        {
+            object.hasObjectType = true;
+            object.objectType = readU32(data, 0);
+        }
+    }
+    if(const SMobSection* name = findSection(section, 0xB004))
+        object.name = decodeCp1251(payload(*name));
+    const SMobSection* prototype = findSection(section, 0xBBBB0002);
+    if(!prototype)
+        prototype = findSection(section, 0xB006);
+    if(prototype)
+        object.prototype = decodeCp1251(payload(*prototype));
+    if(const SMobSection* position = findSection(section, 0xB009))
+    {
+        const QByteArray data = payload(*position);
+        if(data.size() == 12)
+        {
+            object.hasPosition = true;
+            object.positionX = readFloat32(data, 0);
+            object.positionY = readFloat32(data, 4);
+            object.positionZ = readFloat32(data, 8);
+        }
+    }
+    return object;
+}
+
+void collectObjects(const QVector<SMobSection>& sections, QVector<SMobObjectSnapshot>& objects)
+{
+    for(const SMobSection& section : sections)
+    {
+        if(section.type == 0xB000)
+        {
+            for(const SMobSection& child : section.children)
+                objects.append(snapshotObject(child));
+        }
+        else
+            collectObjects(section.children, objects);
+    }
+}
+
+QString diffKindName(EMobDiffKind kind)
+{
+    switch(kind)
+    {
+    case EMobDiffKind::Unchanged: return "unchanged";
+    case EMobDiffKind::Added: return "added";
+    case EMobDiffKind::Removed: return "removed";
+    case EMobDiffKind::Modified: return "modified";
+    case EMobDiffKind::Moved: return "moved";
+    case EMobDiffKind::Ambiguous: return "ambiguous";
+    }
+    return "ambiguous";
+}
+
+QString objectIdentity(const SMobObjectSnapshot& object)
+{
+    return QString::number(object.sectionType) + ":" +
+        (object.hasObjectType ? QString::number(object.objectType) : QString("-")) + ":" +
+        object.prototype + ":" + object.name;
+}
+
+bool positionsDiffer(const SMobObjectSnapshot& a, const SMobObjectSnapshot& b)
+{
+    if(a.hasPosition != b.hasPosition)
+        return true;
+    if(!a.hasPosition)
+        return false;
+    return std::fabs(a.positionX - b.positionX) > 0.0001f ||
+           std::fabs(a.positionY - b.positionY) > 0.0001f ||
+           std::fabs(a.positionZ - b.positionZ) > 0.0001f;
 }
 }
 
@@ -86,95 +328,236 @@ QString CValidationReport::toText() const
     return result;
 }
 
+QJsonObject SMobObjectSnapshot::toJson() const
+{
+    QJsonObject result;
+    result.insert("path", sectionPath);
+    result.insert("sectionType", QString("0x%1").arg(sectionType, 8, 16, QLatin1Char('0')).toUpper());
+    result.insert("occurrence", occurrence);
+    if(hasNid)
+        result.insert("nid", double(nid));
+    if(hasObjectType)
+        result.insert("objectType", double(objectType));
+    if(!name.isEmpty())
+        result.insert("name", name);
+    if(!prototype.isEmpty())
+        result.insert("prototype", prototype);
+    if(hasPosition)
+    {
+        QJsonArray position;
+        position.append(positionX);
+        position.append(positionY);
+        position.append(positionZ);
+        result.insert("position", position);
+    }
+    result.insert("sha256", QString::fromLatin1(subtreeSha256.toHex()));
+    return result;
+}
+
+QJsonObject SMobDiffEntry::toJson(const QVector<SMobObjectSnapshot>& baseline,
+                                  const QVector<SMobObjectSnapshot>& candidate) const
+{
+    QJsonObject result;
+    result.insert("kind", diffKindName(kind));
+    result.insert("matchMethod", matchMethod);
+    result.insert("confidence", confidence);
+    if(baselineIndex >= 0 && baselineIndex < baseline.size())
+        result.insert("baseline", baseline.at(baselineIndex).toJson());
+    if(candidateIndex >= 0 && candidateIndex < candidate.size())
+        result.insert("candidate", candidate.at(candidateIndex).toJson());
+    return result;
+}
+
+CMobSemanticDiff CMobSemanticDiff::compare(const CMobDocument& baseline,
+                                           const CMobDocument& candidate)
+{
+    CMobSemanticDiff result;
+    result.m_baseline = baseline.objects();
+    result.m_candidate = candidate.objects();
+    QSet<int> matchedBaseline;
+    QSet<int> matchedCandidate;
+
+    QMultiMap<QByteArray, int> candidateHashes;
+    for(int i = 0; i < result.m_candidate.size(); ++i)
+        candidateHashes.insert(result.m_candidate.at(i).subtreeSha256, i);
+    for(int i = 0; i < result.m_baseline.size(); ++i)
+    {
+        const QList<int> candidates = candidateHashes.values(result.m_baseline.at(i).subtreeSha256);
+        int available = -1;
+        int availableCount = 0;
+        for(int index : candidates)
+            if(!matchedCandidate.contains(index))
+            {
+                available = index;
+                ++availableCount;
+            }
+        if(availableCount == 1)
+        {
+            result.m_entries.append({EMobDiffKind::Unchanged, i, available, "exact-subtree-hash", 1.0});
+            matchedBaseline.insert(i);
+            matchedCandidate.insert(available);
+        }
+    }
+
+    QMultiMap<QString, int> baselineNids;
+    QMultiMap<QString, int> candidateNids;
+    for(int i = 0; i < result.m_baseline.size(); ++i)
+        if(!matchedBaseline.contains(i) && result.m_baseline.at(i).hasNid)
+            baselineNids.insert(QString::number(result.m_baseline.at(i).sectionType) + ":" +
+                                QString::number(result.m_baseline.at(i).nid), i);
+    for(int i = 0; i < result.m_candidate.size(); ++i)
+        if(!matchedCandidate.contains(i) && result.m_candidate.at(i).hasNid)
+            candidateNids.insert(QString::number(result.m_candidate.at(i).sectionType) + ":" +
+                                 QString::number(result.m_candidate.at(i).nid), i);
+    for(auto it = baselineNids.constBegin(); it != baselineNids.constEnd(); )
+    {
+        const QString key = it.key();
+        const QList<int> left = baselineNids.values(key);
+        const QList<int> right = candidateNids.values(key);
+        if(left.size() == 1 && right.size() == 1)
+        {
+            const int baselineIndex = left.front();
+            const int candidateIndex = right.front();
+            const SMobObjectSnapshot& before = result.m_baseline.at(baselineIndex);
+            const SMobObjectSnapshot& after = result.m_candidate.at(candidateIndex);
+            const bool movedOnly = positionsDiffer(before, after) &&
+                objectIdentity(before) == objectIdentity(after);
+            result.m_entries.append({movedOnly ? EMobDiffKind::Moved : EMobDiffKind::Modified,
+                                     baselineIndex, candidateIndex, "unique-family-nid", 0.95});
+            matchedBaseline.insert(baselineIndex);
+            matchedCandidate.insert(candidateIndex);
+        }
+        it = baselineNids.upperBound(key);
+    }
+
+    QMultiMap<QString, int> baselineIdentity;
+    QMultiMap<QString, int> candidateIdentity;
+    for(int i = 0; i < result.m_baseline.size(); ++i)
+        if(!matchedBaseline.contains(i))
+            baselineIdentity.insert(objectIdentity(result.m_baseline.at(i)), i);
+    for(int i = 0; i < result.m_candidate.size(); ++i)
+        if(!matchedCandidate.contains(i))
+            candidateIdentity.insert(objectIdentity(result.m_candidate.at(i)), i);
+    for(auto it = baselineIdentity.constBegin(); it != baselineIdentity.constEnd(); )
+    {
+        const QString key = it.key();
+        const QList<int> left = baselineIdentity.values(key);
+        const QList<int> right = candidateIdentity.values(key);
+        if(left.size() == 1 && right.size() == 1)
+        {
+            result.m_entries.append({positionsDiffer(result.m_baseline.at(left.front()), result.m_candidate.at(right.front()))
+                                         ? EMobDiffKind::Moved : EMobDiffKind::Modified,
+                                     left.front(), right.front(), "unique-type-prototype-name", 0.75});
+            matchedBaseline.insert(left.front());
+            matchedCandidate.insert(right.front());
+        }
+        else if(!right.isEmpty())
+        {
+            for(int baselineIndex : left)
+            {
+                result.m_entries.append({EMobDiffKind::Ambiguous, baselineIndex, -1,
+                                         "non-unique-type-prototype-name", 0.0});
+                matchedBaseline.insert(baselineIndex);
+            }
+        }
+        it = baselineIdentity.upperBound(key);
+    }
+
+    for(int i = 0; i < result.m_baseline.size(); ++i)
+        if(!matchedBaseline.contains(i))
+            result.m_entries.append({EMobDiffKind::Removed, i, -1, "unmatched", 1.0});
+    for(int i = 0; i < result.m_candidate.size(); ++i)
+        if(!matchedCandidate.contains(i))
+            result.m_entries.append({EMobDiffKind::Added, -1, i, "unmatched", 1.0});
+    return result;
+}
+
+QJsonObject CMobSemanticDiff::toJson() const
+{
+    QJsonArray entries;
+    QMap<QString, int> counts;
+    for(const SMobDiffEntry& entry : m_entries)
+    {
+        entries.append(entry.toJson(m_baseline, m_candidate));
+        counts[diffKindName(entry.kind)] += 1;
+    }
+    QJsonObject summary;
+    for(auto it = counts.constBegin(); it != counts.constEnd(); ++it)
+        summary.insert(it.key(), it.value());
+    QJsonObject result;
+    result.insert("summary", summary);
+    result.insert("entries", entries);
+    return result;
+}
+
+QString CMobSemanticDiff::toText() const
+{
+    QString output;
+    QTextStream stream(&output);
+    QMap<QString, int> counts;
+    for(const SMobDiffEntry& entry : m_entries)
+        counts[diffKindName(entry.kind)] += 1;
+    stream << "MOB perspective diff:";
+    for(auto it = counts.constBegin(); it != counts.constEnd(); ++it)
+        stream << " " << it.key() << "=" << it.value();
+    stream << "\n";
+    for(const SMobDiffEntry& entry : m_entries)
+    {
+        stream << diffKindName(entry.kind).toUpper() << " " << entry.matchMethod;
+        if(entry.baselineIndex >= 0)
+            stream << " baseline=" << m_baseline.at(entry.baselineIndex).sectionPath;
+        if(entry.candidateIndex >= 0)
+            stream << " candidate=" << m_candidate.at(entry.candidateIndex).sectionPath;
+        stream << "\n";
+    }
+    return output;
+}
+
 bool CMobDocument::load(const QFileInfo& file, CValidationReport* report)
 {
     m_originalBytes.clear();
+    m_sections.clear();
+    m_objects.clear();
     m_duplicateIds.clear();
     if(!readWholeFile(file, m_originalBytes, report))
         return false;
 
-    if(m_originalBytes.size() < 16)
+    if(m_originalBytes.size() < 8)
     {
         if(report)
             report->add("mob.envelope", EValidationSeverity::Error, "MOB is too small to contain a valid root section", file.filePath());
         return false;
     }
 
-    QDataStream rootStream(m_originalBytes);
-    rootStream.setByteOrder(QDataStream::LittleEndian);
-    quint32 rootType = 0;
-    quint32 rootLength = 0;
-    rootStream >> rootType >> rootLength;
-    if(rootType != 40960 || rootLength < 8 || rootLength > quint32(m_originalBytes.size()))
+    MobSectionParser parser(m_originalBytes, report, file.filePath());
+    if(!parser.parseRange(0, quint64(m_originalBytes.size()), QString(), m_sections, 0))
+        return false;
+    if(m_sections.isEmpty() || m_sections.front().type != 0xA000)
     {
         if(report)
             report->add("mob.root", EValidationSeverity::Error,
-                        QString("Invalid MOB root header (type %1, length %2, file size %3)")
-                            .arg(rootType).arg(rootLength).arg(m_originalBytes.size()),
+                        "The first top-level section is not OBJECT_DB_FILE",
                         file.filePath());
         return false;
     }
-
-    quint32 topLevelOffset = rootLength;
-    while(topLevelOffset < quint32(m_originalBytes.size()))
+    for(int index = 1; index < m_sections.size(); ++index)
     {
-        if(quint64(topLevelOffset) + 8 > quint64(m_originalBytes.size()))
-        {
-            if(report)
-                report->add("mob.trailing_header", EValidationSeverity::Error,
-                            "A trailing MOB section has an incomplete header", file.filePath());
-            return false;
-        }
-        QDataStream trailingStream(m_originalBytes.mid(int(topLevelOffset), 8));
-        trailingStream.setByteOrder(QDataStream::LittleEndian);
-        quint32 trailingType = 0;
-        quint32 trailingLength = 0;
-        trailingStream >> trailingType >> trailingLength;
-        if(trailingType != 826366246 || trailingLength < 8 ||
-           quint64(topLevelOffset) + trailingLength > quint64(m_originalBytes.size()))
+        if(m_sections.at(index).type != 0x31415926)
         {
             if(report)
                 report->add("mob.trailing_section", EValidationSeverity::Error,
-                            QString("Invalid trailing MOB section at offset %1 (type %2, length %3)")
-                                .arg(topLevelOffset).arg(trailingType).arg(trailingLength),
+                            QString("Unexpected top-level section %1 after OBJECT_DB_FILE")
+                                .arg(sectionTypeName(m_sections.at(index).type)),
                             file.filePath());
             return false;
         }
-        topLevelOffset += trailingLength;
     }
 
+    collectObjects(m_sections, m_objects);
     QMap<quint32, int> counts;
-    const QByteArray marker("NewObject");
-    int markerOffset = 0;
-    while((markerOffset = m_originalBytes.indexOf(marker, markerOffset)) >= 0)
-    {
-        int cursor = markerOffset + marker.size();
-        while(cursor < m_originalBytes.size() &&
-              (m_originalBytes.at(cursor) == '\0' ||
-               m_originalBytes.at(cursor) == ' ' ||
-               m_originalBytes.at(cursor) == '\t'))
-            ++cursor;
-        if(cursor >= m_originalBytes.size() || m_originalBytes.at(cursor) != '-')
-        {
-            markerOffset += marker.size();
-            continue;
-        }
-        ++cursor;
-        while(cursor < m_originalBytes.size() &&
-              (m_originalBytes.at(cursor) == '\0' ||
-               m_originalBytes.at(cursor) == ' ' ||
-               m_originalBytes.at(cursor) == '\t'))
-            ++cursor;
-        const int firstDigit = cursor;
-        while(cursor < m_originalBytes.size() &&
-              m_originalBytes.at(cursor) >= '0' && m_originalBytes.at(cursor) <= '9')
-            ++cursor;
-        bool ok = false;
-        const quint32 id = m_originalBytes.mid(firstDigit, cursor - firstDigit).toUInt(&ok);
-        if(ok)
-            counts[id] += 1;
-        markerOffset = qMax(cursor, markerOffset + marker.size());
-    }
+    for(const SMobObjectSnapshot& object : m_objects)
+        if(object.hasNid)
+            counts[object.nid] += 1;
     for(auto countIt = counts.constBegin(); countIt != counts.constEnd(); ++countIt)
     {
         if(countIt.value() > 1)
@@ -188,7 +571,12 @@ bool CMobDocument::load(const QFileInfo& file, CValidationReport* report)
         }
     }
     if(report)
+    {
+        report->add("mob.byte_coverage", EValidationSeverity::Info,
+                    QString("Strict section parsing covered all %1 bytes and found %2 objects")
+                        .arg(m_originalBytes.size()).arg(m_objects.size()), file.fileName());
         report->add("mob.lossless", EValidationSeverity::Info, "Unchanged serialization is byte-identical", file.fileName());
+    }
     return true;
 }
 

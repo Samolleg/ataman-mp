@@ -38,17 +38,99 @@ private:
     QVector<SValidationFinding> m_findings;
 };
 
+struct SMobSection
+{
+    quint32 type = 0;
+    quint32 declaredLength = 0;
+    quint64 offset = 0;
+    int occurrence = 0;
+    QString path;
+    QByteArray rawBytes;
+    QByteArray sha256;
+    bool container = false;
+    bool opaque = true;
+    QVector<SMobSection> children;
+};
+
+struct SMobObjectSnapshot
+{
+    QString sectionPath;
+    quint32 sectionType = 0;
+    int occurrence = 0;
+    bool hasNid = false;
+    quint32 nid = 0;
+    bool hasObjectType = false;
+    quint32 objectType = 0;
+    QString name;
+    QString prototype;
+    bool hasPosition = false;
+    float positionX = 0.0f;
+    float positionY = 0.0f;
+    float positionZ = 0.0f;
+    QByteArray subtreeSha256;
+
+    QJsonObject toJson() const;
+};
+
+enum class EMobDiffKind
+{
+    Unchanged,
+    Added,
+    Removed,
+    Modified,
+    Moved,
+    Ambiguous
+};
+
+struct SMobDiffEntry
+{
+    SMobDiffEntry() = default;
+    SMobDiffEntry(EMobDiffKind entryKind, int before, int after,
+                  const QString& method, double matchConfidence)
+        : kind(entryKind), baselineIndex(before), candidateIndex(after),
+          matchMethod(method), confidence(matchConfidence) {}
+
+    EMobDiffKind kind = EMobDiffKind::Unchanged;
+    int baselineIndex = -1;
+    int candidateIndex = -1;
+    QString matchMethod;
+    double confidence = 0.0;
+
+    QJsonObject toJson(const QVector<SMobObjectSnapshot>& baseline,
+                       const QVector<SMobObjectSnapshot>& candidate) const;
+};
+
+class CMobSemanticDiff
+{
+public:
+    static CMobSemanticDiff compare(const class CMobDocument& baseline,
+                                    const class CMobDocument& candidate);
+
+    const QVector<SMobDiffEntry>& entries() const { return m_entries; }
+    QJsonObject toJson() const;
+    QString toText() const;
+
+private:
+    QVector<SMobObjectSnapshot> m_baseline;
+    QVector<SMobObjectSnapshot> m_candidate;
+    QVector<SMobDiffEntry> m_entries;
+};
+
 class CMobDocument
 {
 public:
     bool load(const QFileInfo& file, CValidationReport* report = nullptr);
     QByteArray serialize() const { return m_originalBytes; }
     const QByteArray& originalBytes() const { return m_originalBytes; }
+    const QVector<SMobSection>& sections() const { return m_sections; }
+    const QVector<SMobObjectSnapshot>& objects() const { return m_objects; }
     const QVector<quint32>& duplicateIds() const { return m_duplicateIds; }
     bool isDirty() const { return false; }
 
 private:
     QByteArray m_originalBytes;
+    QVector<SMobSection> m_sections;
+    QVector<SMobObjectSnapshot> m_objects;
     QVector<quint32> m_duplicateIds;
 };
 
