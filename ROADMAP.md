@@ -41,9 +41,11 @@ behavior.
 
 ## Current focus
 
-- [ ] Collect structured alpha.14 testing-group results, including successful
-  tests, workflow logs, source hashes, load order, MobExplorer comparisons, and
-  focused in-game results.
+- [x] Analyze the first structured alpha.14 testing-group changed-save report,
+  including workflow/hash correlation, independent MobExplorer comparison, runtime
+  resource evidence, and raw structural preservation. ([Zone 5 report](ALPHA14_TESTER_ZONE5_VALIDATION.md))
+- [ ] Continue collecting structured testing-group results and focused in-game
+  outcomes across additional maps and edit types.
 - [ ] Expand changed-save regression coverage across the private JMV map corpus.
 - [ ] Migrate changed MOB saves from the legacy serializer to raw-tree transactions;
   no-op raw preservation is validated, but changed-save preservation is not complete.
@@ -86,6 +88,9 @@ behavior.
   The remaining Qt combo auto-completion path and outliner-originated automatic
   scrolling are corrected in
   [`c5d785a`](https://github.com/Ilufus/ei-mapper-endurance/commit/c5d785a).
+  Typed model/texture previews now commit only on Enter or an explicit dropdown
+  activation; focus loss and Escape restore the accepted value
+  ([`bcab5cb`](https://github.com/Ilufus/ei-mapper-endurance/commit/bcab5cb)).
   Latest focused test instructions are in
   [ALPHA24_VALIDATION.md](ALPHA24_VALIDATION.md).
 - [ ] Finish lossless preservation of MPR archive details.
@@ -149,8 +154,10 @@ These are the remaining safety gates before editing live maps can be recommended
 - [x] Disable the legacy changed-MOB serializer at the Save boundary; dirty MOB
   saves are refused until their UI edits have transaction provenance. Unchanged
   byte-identical Save As remains available. ([`912d00c`](https://github.com/Ilufus/ei-mapper-endurance/commit/912d00c))
-- [ ] Block candidate saves whose semantic diff contains changes not authorized by
-  the accepted transaction.
+- [x] Independently reparse transaction output and block any changed, missing, or
+  added leaf outside the accepted provenance-checked edit. Empty structural
+  containers are covered by a regression derived from the first tester report.
+  ([`66fbca0`](https://github.com/Ilufus/ei-mapper-endurance/commit/66fbca0))
 - [ ] Copy/delete exact raw object subtrees and create new objects only from
   profile-approved raw templates.
 - [ ] Complete lossless MPR preservation for names, timestamps, alignment, and extra entries.
