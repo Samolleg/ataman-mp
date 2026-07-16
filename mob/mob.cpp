@@ -9,9 +9,6 @@
 #include <QMessageBox>
 #include <QHeaderView>
 #include <QSaveFile>
-#include <QStandardPaths>
-#include <QCryptographicHash>
-#include <QDateTime>
 
 #include "mob.h"
 #include "utils.h"
@@ -31,6 +28,7 @@
 #include "log.h"
 #include "scene.h"
 #include "layout_components/tree_view.h"
+#include "backup_manager.h"
 
 CMob::CMob():
     m_view(nullptr)
@@ -891,6 +889,16 @@ int CMob::readMob(QFileInfo &path)
         }
 
         m_originalData = file.readAll();
+        const SBackupResult openBackup = CBackupManager().snapshotOnOpen(m_filePath);
+        if(!openBackup.success)
+        {
+            ei::log(eLogWarning, QString("MOB opened without recovery snapshot:%1 error:%2")
+                .arg(m_filePath.absoluteFilePath(), openBackup.error));
+            QMessageBox::warning(nullptr, "Endurance backup warning",
+                QString("The MOB was opened, but its recovery snapshot could not be created.\n\n%1\n\n"
+                        "Do not edit or save this file until the backup location is writable.")
+                    .arg(openBackup.error));
+        }
         deserialize(m_originalData);
 
         file.close();
@@ -1480,15 +1488,18 @@ void CMob::saveAs(const QFileInfo& path)
             return;
         }
 
-        if(QFileInfo(filePath).exists() && m_bDirty)
+        if(QFileInfo(filePath).exists())
         {
-            const QByteArray sourceHash = QCryptographicHash::hash(m_originalData, QCryptographicHash::Sha256).toHex();
-            const QString backupRoot = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation)
-                    + QDir::separator() + "backups" + QDir::separator() + sourceHash;
-            QDir().mkpath(backupRoot);
-            const QString backupName = QFileInfo(filePath).fileName() + "."
-                    + QDateTime::currentDateTimeUtc().toString("yyyyMMdd-HHmmss-zzz") + ".bak";
-            QFile::copy(filePath, backupRoot + QDir::separator() + backupName);
+            const SBackupResult saveBackup = CBackupManager().snapshotBeforeSave(QFileInfo(filePath));
+            if(!saveBackup.success)
+            {
+                ei::log(eLogFatal, QString("Refusing MOB save because pre-save backup failed:%1 error:%2")
+                    .arg(filePath, saveBackup.error));
+                QMessageBox::critical(nullptr, "Endurance safe save",
+                    QString("The pre-save backup failed, so the source file was not replaced.\n\n%1")
+                        .arg(saveBackup.error));
+                return;
+            }
         }
 
         QSaveFile file(filePath);

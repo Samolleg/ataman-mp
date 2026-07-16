@@ -4,7 +4,12 @@ EI Mapper: Endurance Edition is an independently versioned derivative of
 [`konstvest/ei_maper`](https://github.com/konstvest/ei_maper), focused on safe,
 fast Evil Islands and Jamais Vu map editing.
 
-Current development version: `0.1.0-alpha.6`.
+Current development version: `0.1.0-alpha.7`.
+
+Endurance creates hash-addressed recovery snapshots when MOB/MPR documents are opened and
+timestamped pre-save revisions before replacing existing files. Backups and their JSON metadata
+are stored under `%LOCALAPPDATA%\\EI Mapper Endurance\\backups`; use **Tools → Open Backup
+Folder** to inspect them. A save is refused if its pre-save backup cannot be completed.
 
 This private development line preserves the complete upstream history. The
 public project remains configured as the read-only `upstream` remote, with

@@ -11,7 +11,7 @@ greaterThan(QT_MAJOR_VERSION, 4): QT += widgets
 TARGET = EIMapperEndurance
 TEMPLATE = app
 
-DEFINES += ENDURANCE_VERSION=\\\"0.1.0-alpha.6\\\"
+DEFINES += ENDURANCE_VERSION=\\\"0.1.0-alpha.7\\\"
 
 # The following define makes your compiler emit warnings if you use
 # any feature of Qt which has been marked as deprecated (the exact warnings
@@ -27,6 +27,7 @@ DEFINES += ENDURANCE_VERSION=\\\"0.1.0-alpha.6\\\"
 CONFIG += c++11
 
 SOURCES += \
+    backup_manager.cpp \
     endurance_document.cpp \
     bodypartedit_form.cpp \
     createobjectform.cpp \
@@ -83,6 +84,7 @@ SOURCES += \
     mob/range_dialog.cpp
 
 HEADERS += \
+    backup_manager.h \
     endurance_document.h \
     bodypartedit_form.h \
     createobjectform.h \

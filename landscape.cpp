@@ -1,6 +1,7 @@
 #include <QFileInfo>
 #include <QRandomGenerator>
 #include <QSaveFile>
+#include <QMessageBox>
 
 #include "landscape.h"
 #include "res_file.h"
@@ -8,6 +9,8 @@
 #include "resourcemanager.h"
 #include "node.h"
 #include "sector.h"
+#include "backup_manager.h"
+#include "log.h"
 
 CLandscape* CLandscape::m_pLand = nullptr;
 
@@ -161,6 +164,17 @@ void CLandscape::readMap(const QFileInfo& path)
     if(source.open(QIODevice::ReadOnly))
         m_originalMprData = source.readAll();
 
+    const SBackupResult openBackup = CBackupManager().snapshotOnOpen(path);
+    if(!openBackup.success)
+    {
+        ei::log(eLogWarning, QString("MPR opened without recovery snapshot:%1 error:%2")
+            .arg(path.absoluteFilePath(), openBackup.error));
+        QMessageBox::warning(nullptr, "Endurance backup warning",
+            QString("The MPR was opened, but its recovery snapshot could not be created.\n\n%1\n\n"
+                    "Do not edit or save this file until the backup location is writable.")
+                .arg(openBackup.error));
+    }
+
     ei::log(eLogInfo, "Start read terrain: " + m_filePath.absoluteFilePath());
     CResFile map(path.filePath());
     QMap<QString, QByteArray> aTmp =  map.bufferOfFiles();  // map contains DIfferentCaseName
@@ -218,6 +232,20 @@ void CLandscape::saveMapAs(const QFileInfo& path)
 
     //QString filePath = path.filePath();
     //QFile file(filePath);
+    if(path.exists())
+    {
+        const SBackupResult saveBackup = CBackupManager().snapshotBeforeSave(path);
+        if(!saveBackup.success)
+        {
+            ei::log(eLogFatal, QString("Refusing MPR save because pre-save backup failed:%1 error:%2")
+                .arg(path.absoluteFilePath(), saveBackup.error));
+            QMessageBox::critical(nullptr, "Endurance safe save",
+                QString("The pre-save backup failed, so the source file was not replaced.\n\n%1")
+                    .arg(saveBackup.error));
+            return;
+        }
+    }
+
     if(!m_bDirty && !m_originalMprData.isEmpty())
     {
         QSaveFile out(path.filePath());

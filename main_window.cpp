@@ -9,6 +9,7 @@
 #include <QMessageBox>
 #include <QUndoView>
 #include <QSettings>
+#include <QAction>
 
 #include "resourcemanager.h"
 #include "landscape.h"
@@ -24,6 +25,7 @@
 #include "preview.h"
 #include "log.h"
 #include "scene.h"
+#include "backup_manager.h"
 
 void testFunc()
 {
@@ -56,6 +58,16 @@ MainWindow::MainWindow(QWidget* parent) :
     m_pTileForm.reset(new CTileForm(this));
     m_settings->attachMainWindow(this);
     m_ui->setupUi(this); //init CView core also
+
+    QAction* openBackupFolder = new QAction(tr("Open Backup Folder"), this);
+    m_ui->menuTools->addSeparator();
+    m_ui->menuTools->addAction(openBackupFolder);
+    connect(openBackupFolder, &QAction::triggered, this, [this]()
+    {
+        QString error;
+        if(!CBackupManager::openBackupFolder(&error))
+            QMessageBox::warning(this, tr("Endurance backups"), error);
+    });
 
     QSettings uiSettings;
     restoreGeometry(uiSettings.value("ui/mainWindowGeometry").toByteArray());
