@@ -21,6 +21,7 @@ class CCreateObjectForm;
 class CView;
 class CRandomizeForm;
 class CTileForm;
+class QMenu;
 
 struct SWindowTitle
 {
@@ -48,6 +49,8 @@ private:
     bool isExitAllowed();
     void closeAll();
     void showGameAndModSetup();
+    void rememberRecentFile(const QFileInfo& fileName);
+    void rebuildRecentFilesMenu();
 
 private slots:
     void showOutliner(bool bShow);
@@ -102,6 +105,7 @@ private:
     CView* m_pView;
     SWindowTitle m_sWindowTitle;
     QTableWidget* m_testTable;
+    QMenu* m_recentFilesMenu;
 };
 
 #endif // MAIN_WINDOW_H

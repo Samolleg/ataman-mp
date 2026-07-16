@@ -904,8 +904,19 @@ void CView::pickObject(const QRect &rect, bool bAddToSelect)
 
     m_selectFrame->reset();
     recordSelectionChange(selectionBefore);
-    if(lastPickedNode && lastPickedNode->nodeState() == ENodeState::eSelect && m_pTree)
-        m_pTree->revealNode(lastPickedNode);
+    if(m_pTree)
+    {
+        if(lastPickedNode && lastPickedNode->nodeState() == ENodeState::eSelect)
+            m_pTree->revealNode(lastPickedNode);
+        else
+        {
+            const QList<CNode*> selected = selectionSnapshot();
+            if(selected.isEmpty())
+                m_pTree->clearViewportSelectionMarker();
+            else
+                m_pTree->revealNode(selected.back());
+        }
+    }
 }
 
 QVector3D CView::getTerrainPos(bool bLand)
@@ -1155,6 +1166,32 @@ void CView::restoreSelection(const QList<CNode*>& selection)
         if(node && available.contains(node))
             node->setState(ENodeState::eSelect);
     }
+    if(m_pTree)
+    {
+        if(selection.isEmpty())
+            m_pTree->clearViewportSelectionMarker();
+        else
+            m_pTree->revealNode(selection.back());
+    }
+    viewParameters();
+    update();
+}
+
+void CView::clearObjectSelection()
+{
+    if(!m_activeMob)
+        return;
+    const QList<CNode*> before = selectionSnapshot();
+    if(before.isEmpty())
+    {
+        if(m_pTree)
+            m_pTree->clearViewportSelectionMarker();
+        return;
+    }
+    m_activeMob->clearSelect(true);
+    recordSelectionChange(before, "Clear selection");
+    if(m_pTree)
+        m_pTree->clearViewportSelectionMarker();
     viewParameters();
     update();
 }

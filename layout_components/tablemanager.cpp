@@ -648,53 +648,50 @@ CValueItem::CValueItem(const QSharedPointer<IPropertyBase>& prop):
 
 CComboDynItem::CComboDynItem(const QSharedPointer<IPropertyBase> &prop)
 {
-    setFocusPolicy(Qt::FocusPolicy::TabFocus);
+    setFocusPolicy(Qt::FocusPolicy::StrongFocus);
     setStyleSheet("combobox-popup: 0;");
     setMaxVisibleItems(20);
+    setEditable(true);
+    setInsertPolicy(QComboBox::NoInsert);
     view()->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     m_pListModel.reset(new QStringListModel());
+    m_pFilterModel.reset(new QSortFilterProxyModel(this));
+    m_pFilterModel->setSourceModel(m_pListModel.get());
+    m_pFilterModel->setFilterCaseSensitivity(Qt::CaseInsensitive);
+    m_pFilterModel->setFilterKeyColumn(0);
+    setModel(m_pFilterModel.get());
     m_pValue.reset(prop->clone());
 
+    if(m_pValue->type() == eObjParam_PRIM_TXTR)
+        m_pListModel->setStringList(CTextureList::getInstance()->textureList());
+    else if(m_pValue->type() == eObjParam_TEMPLATE)
+        m_pListModel->setStringList(CObjectList::getInstance()->figureList());
+
     if(m_pValue->isInit())
-    {
-        insertItem(0, m_pValue->toString());
-        setCurrentIndex(0);
-    }
+        setEditText(m_pValue->toString());
     else
-    {
-        insertItem(0, "undefined/different");
-        setCurrentIndex(0);
-    }
+        lineEdit()->setPlaceholderText("undefined/different");
     QObject::connect(this, SIGNAL(currentIndexChanged(QString)), this, SLOT(_onChange(QString))); //reconnect default currentIndexChanged to override
+    QObject::connect(lineEdit(), SIGNAL(editingFinished()), this, SLOT(_onEditingFinished()));
+    QObject::connect(lineEdit(), SIGNAL(textEdited(QString)), this, SLOT(_onFilterTextChanged(QString)));
 }
 
 void CComboDynItem::showPopup()
 {
+    const QString current = currentText();
     blockSignals(true);
-    clear();
     if(m_pValue->type() == eObjParam_PRIM_TXTR)
-    {
         m_pListModel->setStringList(CTextureList::getInstance()->textureList());
-    }
     else if(m_pValue->type() == eObjParam_TEMPLATE)
-    {
         m_pListModel->setStringList(CObjectList::getInstance()->figureList());
-    }
     else
     {
         Q_ASSERT(false && "not defined");
+        blockSignals(false);
         return;
     }
-
-    setModel(m_pListModel.get());
-    if(m_pValue->isInit())
-        setCurrentText(m_pValue->toString());
-    else
-    {
-        insertItem(0, "undefined/different");
-        setCurrentIndex(0);
-    }
-
+    m_pFilterModel->setFilterFixedString(QString());
+    setEditText(current);
     blockSignals(false);
     QComboBox::showPopup();
 }
@@ -706,6 +703,23 @@ void CComboDynItem::_onChange(QString str)
 
     m_pValue->resetFromString(str);
     emit onParamChange(m_pValue);
+}
+
+void CComboDynItem::_onEditingFinished()
+{
+    const QString value = currentText().trimmed();
+    if(value.isEmpty())
+        return;
+    _onChange(value);
+}
+
+void CComboDynItem::_onFilterTextChanged(const QString& text)
+{
+    blockSignals(true);
+    m_pFilterModel->setFilterFixedString(text);
+    setEditText(text);
+    blockSignals(false);
+    QComboBox::showPopup();
 }
 
 C3DItem::C3DItem(const QSharedPointer<IPropertyBase>& propX,const QSharedPointer<IPropertyBase>& propY, const QSharedPointer<IPropertyBase>& propZ)

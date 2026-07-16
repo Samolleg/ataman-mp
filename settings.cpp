@@ -302,6 +302,7 @@ void CSettings::initOptions()
     aOpt.append(QSharedPointer<COpt>(new COptString("resourceProfile", "")));
     aOpt.append(QSharedPointer<COpt>(new COptString("gameRoot", "")));
     aOpt.append(QSharedPointer<COpt>(new COptString("lastVisitedFolder", "")));
+    aOpt.append(QSharedPointer<COpt>(new COptStringList("recentFiles", {})));
 
     //init default options for bools
     aOpt.append(QSharedPointer<COpt>(new COptBool("drawLogic", false)));

@@ -9,6 +9,7 @@
 #include <QSharedPointer>
 #include <QLineEdit>
 #include <QStringListModel>
+#include <QSortFilterProxyModel>
 
 #include "types.h"
 #include "undo.h"
@@ -136,6 +137,8 @@ public:
 
 public slots:
     void _onChange(QString str); //override default 'on change event'
+    void _onEditingFinished();
+    void _onFilterTextChanged(const QString& text);
 
 signals:
     void onParamChange(const QSharedPointer<IPropertyBase>&);
@@ -144,6 +147,7 @@ private:
     QSharedPointer<IPropertyBase> m_pValue; //stored value;
     QStringList m_valueList;
     QSharedPointer<QStringListModel> m_pListModel;
+    QSharedPointer<QSortFilterProxyModel> m_pFilterModel;
 };
 
 ///

@@ -13,6 +13,7 @@
 #include <QDesktopServices>
 #include <QUrl>
 #include <QPushButton>
+#include <QMenu>
 
 #include "resourcemanager.h"
 #include "landscape.h"
@@ -50,7 +51,8 @@ void MainWindow::on_toolButton_2_clicked()
 MainWindow::MainWindow(QWidget* parent) :
     QMainWindow(parent),
     m_ui(new Ui::MainWindow),
-    m_pView(nullptr)
+    m_pView(nullptr),
+    m_recentFilesMenu(nullptr)
 {
 #ifdef QT_DEBUG
     testFunc();
@@ -64,6 +66,8 @@ MainWindow::MainWindow(QWidget* parent) :
     m_pTileForm.reset(new CTileForm(this));
     m_settings->attachMainWindow(this);
     m_ui->setupUi(this); //init CView core also
+    m_recentFilesMenu = new QMenu(tr("Open Recent"), this);
+    m_ui->menuFile->insertMenu(m_ui->actionOpen_recent, m_recentFilesMenu);
 
     QAction* openBackupFolder = new QAction(tr("Open Backup Folder"), this);
     QAction* openLogsFolder = new QAction(tr("Open Logs Folder"), this);
@@ -185,6 +189,7 @@ MainWindow::MainWindow(QWidget* parent) :
     CTextureList::getInstance()->attachSettings(m_settings.get());
     CObjectList::getInstance()->attachSettings(m_settings.get());
     m_createDialog.get()->attach(m_pView, m_undoStack);
+    rebuildRecentFilesMenu();
 //    if(m_pView->isRecentAvailable())
 //        m_ui->actionOpen_recent->setEnabled(true);
 }
@@ -247,8 +252,11 @@ void MainWindow::initShortcuts()
 {
     m_ui->actionSelect_by->setShortcut(QKeySequence(Qt::CTRL + Qt::Key_F));
     m_ui->actionOpen->setShortcut(QKeySequence(Qt::CTRL + Qt::Key_O));
+    m_ui->actionOpen_MOB->setShortcut(QKeySequence(Qt::ALT + Qt::SHIFT + Qt::Key_O));
+    m_ui->actionOpen_MPR->setShortcut(QKeySequence(Qt::CTRL + Qt::SHIFT + Qt::Key_O));
 
     m_ui->actionSave->setShortcut(QKeySequence(Qt::CTRL + eKey_S));
+    m_ui->actionSave_all_MOB_s->setShortcut(QKeySequence(Qt::ALT + Qt::SHIFT + Qt::Key_S));
     //m_ui->actionSave_all_MOB_s->setShortcut(QKeySequence(Qt::CTRL + Qt::SHIFT + eKey_S));
     //m_ui->actionSave_as->setShortcut(QKeySequence(Qt::CTRL + Qt::ALT + eKey_S));
     m_ui->actionSave_landscape_MPR->setShortcut(QKeySequence(Qt::CTRL + Qt::SHIFT + eKey_S));
@@ -333,11 +341,13 @@ void MainWindow::on_actionOpen_triggered()
         m_pView->cancelPendingOperation();
         m_undoStack->clear();
         m_pView->loadLandscape(fileName);
+        rememberRecentFile(fileName);
     }
     else if(fileName.fileName().toLower().endsWith(".mob"))
     {
         m_pView->cancelPendingOperation();
         m_pView->loadMob(fileName);
+        rememberRecentFile(fileName);
     }
 }
 
@@ -354,6 +364,79 @@ void MainWindow::showGameAndModSetup()
         tr("%1 is ready. Endurance found %2 RES archives across %3 ordered resource folders.")
             .arg(profile.profileName).arg(profile.archiveCount)
             .arg(profile.resourceDirectories.size()));
+}
+
+void MainWindow::rememberRecentFile(const QFileInfo& fileName)
+{
+    if(!fileName.exists())
+        return;
+    COptStringList* option = dynamic_cast<COptStringList*>(m_settings->opt(eOptSetGeneral, "recentFiles"));
+    if(!option)
+        return;
+
+    const QString path = fileName.absoluteFilePath();
+    QVector<QString> files = option->value();
+    for(int i = files.size() - 1; i >= 0; --i)
+    {
+        if(QString::compare(files.at(i), path, Qt::CaseInsensitive) == 0)
+            files.remove(i);
+    }
+    files.prepend(path);
+    while(files.size() > 12)
+        files.removeLast();
+    option->setValue(files);
+    rebuildRecentFilesMenu();
+}
+
+void MainWindow::rebuildRecentFilesMenu()
+{
+    if(!m_recentFilesMenu)
+        return;
+    m_recentFilesMenu->clear();
+    COptStringList* option = dynamic_cast<COptStringList*>(m_settings->opt(eOptSetGeneral, "recentFiles"));
+    QVector<QString> files = option ? option->value() : QVector<QString>();
+    if(files.isEmpty())
+    {
+        QAction* empty = m_recentFilesMenu->addAction(tr("No recent files"));
+        empty->setEnabled(false);
+        return;
+    }
+
+    for(const QString& path : files)
+    {
+        QFileInfo file(path);
+        QAction* action = m_recentFilesMenu->addAction(QString("%1  —  %2")
+                .arg(file.fileName(), QDir::toNativeSeparators(file.absolutePath())));
+        action->setToolTip(QDir::toNativeSeparators(path));
+        connect(action, &QAction::triggered, this, [this, path]()
+        {
+            QFileInfo recent(path);
+            if(!recent.exists())
+            {
+                COptStringList* recentOption = dynamic_cast<COptStringList*>(m_settings->opt(eOptSetGeneral, "recentFiles"));
+                if(recentOption)
+                {
+                    QVector<QString> remaining = recentOption->value();
+                    for(int i = remaining.size() - 1; i >= 0; --i)
+                        if(QString::compare(remaining.at(i), path, Qt::CaseInsensitive) == 0)
+                            remaining.remove(i);
+                    recentOption->setValue(remaining);
+                }
+                rebuildRecentFilesMenu();
+                QMessageBox::warning(this, tr("Open recent file"), tr("The file no longer exists:\n%1").arg(path));
+                return;
+            }
+            openDocument(recent);
+        });
+    }
+    m_recentFilesMenu->addSeparator();
+    QAction* clear = m_recentFilesMenu->addAction(tr("Clear Recent Files"));
+    connect(clear, &QAction::triggered, this, [this]()
+    {
+        if(COptStringList* option = dynamic_cast<COptStringList*>(m_settings->opt(eOptSetGeneral, "recentFiles")))
+            option->setValue({});
+        rebuildRecentFilesMenu();
+    });
 }
 
 bool MainWindow::openDocument(const QFileInfo& fileName)
@@ -379,6 +462,7 @@ bool MainWindow::openDocument(const QFileInfo& fileName)
         QFileInfo mobFile(fileName);
         m_pView->loadMob(mobFile);
     }
+    rememberRecentFile(fileName);
     return true;
 }
 
@@ -393,6 +477,7 @@ void MainWindow::on_actionOpen_MPR_triggered()
     m_pView->cancelPendingOperation();
     m_undoStack->clear();
     m_pView->loadLandscape(fileName);
+    rememberRecentFile(fileName);
 }
 
 void MainWindow::on_actionOpen_MOB_triggered()
@@ -406,6 +491,7 @@ void MainWindow::on_actionOpen_MOB_triggered()
         QFileInfo fileName(path);
         opt->setValue(fileName.dir().path());
         m_pView->loadMob(fileName);
+        rememberRecentFile(fileName);
     }
 }
 

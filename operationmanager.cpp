@@ -57,6 +57,11 @@ void strToOperValue(QVector3D& vec, const EOperateAxis axis, const QString& valu
 void CSelect::keyPress(COperation *pOp, EKeyCode key)
 {
     switch (key) {
+    case eKey_Esc:
+    {
+        m_pView->clearObjectSelection();
+        break;
+    }
     case eKey_G:
     {
         pOp->setCurrent(new CMoveAxis(m_pView, EOperateAxisXY));
@@ -276,9 +281,7 @@ void CMoveAxis::keyPress(COperation *pOp, EKeyCode key)
     case eKey_Esc:
     {
         qDebug() << "exit moveAxis operation";
-        m_pView->operationRevert(EOperationAxisType::eMove);
-        pOp->setCurrent(new CSelect(m_pView));
-        delete this;
+        m_pView->cancelPendingOperation();
         break;
     }
     case eKey_X:
@@ -515,9 +518,7 @@ void CRotateAxis::keyPress(COperation *pOp, EKeyCode key)
     case eKey_Esc:
     {
         qDebug() << "exit CRotateAxis operation";
-        m_pView->operationRevert(EOperationAxisType::eRotate);
-        pOp->setCurrent(new CSelect(m_pView));
-        delete this;
+        m_pView->cancelPendingOperation();
         break;
     }
     case eKey_Minus:
@@ -793,9 +794,7 @@ void CScaleAxis::keyPress(COperation *pOp, EKeyCode key)
     case eKey_Esc:
     {
         qDebug() << "exit CScaleAxis operation";
-        m_pView->operationRevert(EOperationAxisType::eScale);
-        pOp->setCurrent(new CSelect(m_pView));
-        delete this;
+        m_pView->cancelPendingOperation();
         break;
     }
     case eKey_Minus:

@@ -40,6 +40,7 @@ public:
     QString objectNameByType(ENodeType type);
     ENodeType objectTypeByString(QString str);
     void revealNode(CNode* pNode);
+    void clearViewportSelectionMarker();
 
 protected:
     void keyPressEvent(QKeyEvent* event) override;
@@ -51,6 +52,7 @@ private:
 
 public slots:
     void itemClickedOver(QTreeWidgetItem* pItem, int column);
+    void itemDoubleClickedOver(QTreeWidgetItem* pItem, int column);
     void onNodeDelete(uint nodeId);
     void addNodeToTree(CNode* pNode);
 private slots:

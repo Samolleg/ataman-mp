@@ -9,6 +9,7 @@
 CTreeView::CTreeView(QWidget *parent) : QTreeWidget(parent)
 {
     QObject::connect(this, SIGNAL(itemClicked(QTreeWidgetItem*,int)), this, SLOT(itemClickedOver(QTreeWidgetItem*,int)));
+    QObject::connect(this, SIGNAL(itemDoubleClicked(QTreeWidgetItem*,int)), this, SLOT(itemDoubleClickedOver(QTreeWidgetItem*,int)));
 }
 
 void CTreeView::keyPressEvent(QKeyEvent *pEvent)
@@ -138,8 +139,6 @@ void CTreeView::itemClickedOver(QTreeWidgetItem *pItem, int column)
         //sel.param2 = sel.param1; //for hard comparison
         sel.exactMatch = true;
         m_pView->select(sel, false);
-        if(pItem->text(1).toInt() == 1)
-            m_pView->moveCamToSelectedObjects();
         break;
     }
     case 2:
@@ -149,7 +148,6 @@ void CTreeView::itemClickedOver(QTreeWidgetItem *pItem, int column)
         sel.param1 = pItem->text(0);
         sel.param2 = pItem->text(0);
         m_pView->select(sel, false);
-        m_pView->moveCamToSelectedObjects();
         break;
     }
 
@@ -238,6 +236,13 @@ void CTreeView::addNodeToTree(CNode *pNode)
     }
 }
 
+void CTreeView::itemDoubleClickedOver(QTreeWidgetItem* pItem, int column)
+{
+    if(!pItem || column != 0 || parentDeepCount(pItem) == 0)
+        return;
+    m_pView->moveCamToSelectedObjects();
+}
+
 void CTreeView::revealNode(CNode* pNode)
 {
     if(!pNode)
@@ -256,6 +261,12 @@ void CTreeView::revealNode(CNode* pNode)
         }
         ++it;
     }
+}
+
+void CTreeView::clearViewportSelectionMarker()
+{
+    clearSelection();
+    setCurrentItem(nullptr);
 }
 
 void CTreeView::onChangeNodeId(uint oldId, uint newId)
