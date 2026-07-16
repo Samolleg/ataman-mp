@@ -5,7 +5,7 @@ An item is checked only after its implementation has landed and received the
 listed level of validation. New findings and wishlist requests belong here so
 they do not get lost between test sessions.
 
-Current development release: `0.1.0-alpha.23`.
+Current development release: `0.1.0-alpha.24`.
 
 ## Implementation evidence
 
@@ -83,7 +83,11 @@ behavior.
   the reported property-panel selection slowdown, unintended first-match
   application, contains-style filtering, and MPR/MOB menu ordering are fixed in
   [`0436992`](https://github.com/Ilufus/ei-mapper-endurance/commit/0436992).
-  Focused test instructions are in [ALPHA22_VALIDATION.md](ALPHA22_VALIDATION.md).
+  The remaining Qt combo auto-completion path and outliner-originated automatic
+  scrolling are corrected in
+  [`c5d785a`](https://github.com/Ilufus/ei-mapper-endurance/commit/c5d785a).
+  Latest focused test instructions are in
+  [ALPHA24_VALIDATION.md](ALPHA24_VALIDATION.md).
 - [ ] Finish lossless preservation of MPR archive details.
 
 These are the remaining safety gates before editing live maps can be recommended.
