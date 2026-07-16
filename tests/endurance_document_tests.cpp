@@ -71,6 +71,7 @@ private slots:
     void malformedMobRootIsRejected();
     void semanticDiffClassifiesMovementAndAddition();
     void transactionPatchesOnlyAuthorizedLeaf();
+    void transactionPreservesEmptyContainers();
     void transactionRejectsStaleProvenance();
     void cp1251EncodingIsStrict();
     void unchangedMprIsByteIdentical();
@@ -194,6 +195,7 @@ void EnduranceDocumentTests::transactionPatchesOnlyAuthorizedLeaf()
     CValidationReport report;
     QVERIFY2(document.applyTransaction(transaction, &candidate, &report), qPrintable(report.toText()));
     QCOMPARE(candidate, validMob(untouched + section(0x22222222, "after-value")));
+    QVERIFY(report.toText().contains("independently verified"));
 
     QTemporaryFile candidateFile;
     QVERIFY(candidateFile.open());
@@ -201,6 +203,29 @@ void EnduranceDocumentTests::transactionPatchesOnlyAuthorizedLeaf()
     candidateFile.flush();
     CMobDocument reparsed;
     QVERIFY(reparsed.load(QFileInfo(candidateFile.fileName())));
+}
+
+void EnduranceDocumentTests::transactionPreservesEmptyContainers()
+{
+    QTemporaryFile file;
+    QVERIFY(file.open());
+    const QByteArray emptyDirectory = section(0xE000);
+    const QByteArray emptyDirectoryElements = section(0xE001);
+    const QByteArray editable = section(0x22222222, "before");
+    const QByteArray bytes = validMob(emptyDirectory + emptyDirectoryElements + editable);
+    QCOMPARE(file.write(bytes), qint64(bytes.size()));
+    file.flush();
+
+    CMobDocument document;
+    QVERIFY(document.load(QFileInfo(file.fileName())));
+    const SMobSection& leaf = document.sections().front().children.at(2);
+    CMobEditTransaction transaction("edit beside empty structural sections");
+    transaction.replaceLeafPayload(leaf.path, leaf.sha256, "after");
+    QByteArray candidate;
+    CValidationReport report;
+    QVERIFY2(document.applyTransaction(transaction, &candidate, &report), qPrintable(report.toText()));
+    QCOMPARE(candidate, validMob(emptyDirectory + emptyDirectoryElements +
+                                 section(0x22222222, "after")));
 }
 
 void EnduranceDocumentTests::transactionRejectsStaleProvenance()

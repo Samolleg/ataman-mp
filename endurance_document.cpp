@@ -589,6 +589,13 @@ QString CMobSemanticDiff::toText() const
     return output;
 }
 
+static void collectLeafSections(const QVector<SMobSection>& sections,
+                                QMap<QString, const SMobSection*>* leaves);
+static bool verifyAuthorizedTransactionOutput(const QVector<SMobSection>& sourceSections,
+                                              const QVector<SMobSection>& candidateSections,
+                                              const QMap<QString, SMobLeafEdit>& edits,
+                                              CValidationReport* report);
+
 bool CMobDocument::applyTransaction(const CMobEditTransaction& transaction,
                                     QByteArray* output, CValidationReport* report) const
 {
@@ -657,10 +664,73 @@ bool CMobDocument::applyTransaction(const CMobEditTransaction& transaction,
             output->clear();
             return false;
         }
+    if(!verifyAuthorizedTransactionOutput(m_sections, candidateSections, edits, report))
+    {
+        output->clear();
+        return false;
+    }
     if(report)
         report->add("mob.transaction.authorized", EValidationSeverity::Info,
-                    QString("Applied %1 provenance-checked leaf edit(s); all other leaves were emitted byte-for-byte")
+                    QString("Applied and independently verified %1 provenance-checked leaf edit(s); all other leaves were emitted byte-for-byte")
                         .arg(applied.size()), transaction.description());
+    return true;
+}
+
+static void collectLeafSections(const QVector<SMobSection>& sections,
+                                QMap<QString, const SMobSection*>* leaves)
+{
+    for(const SMobSection& section : sections)
+    {
+        if(section.container && !section.children.isEmpty())
+            collectLeafSections(section.children, leaves);
+        else
+            leaves->insert(section.path, &section);
+    }
+}
+
+static bool verifyAuthorizedTransactionOutput(const QVector<SMobSection>& sourceSections,
+                                              const QVector<SMobSection>& candidateSections,
+                                              const QMap<QString, SMobLeafEdit>& edits,
+                                              CValidationReport* report)
+{
+    QMap<QString, const SMobSection*> sourceLeaves;
+    QMap<QString, const SMobSection*> candidateLeaves;
+    collectLeafSections(sourceSections, &sourceLeaves);
+    collectLeafSections(candidateSections, &candidateLeaves);
+
+    if(sourceLeaves.keys() != candidateLeaves.keys())
+    {
+        if(report)
+            report->add("mob.transaction.structure", EValidationSeverity::Error,
+                        "The candidate leaf structure differs from the source document");
+        return false;
+    }
+
+    for(auto it = sourceLeaves.constBegin(); it != sourceLeaves.constEnd(); ++it)
+    {
+        const SMobSection& source = *it.value();
+        const SMobSection& candidate = *candidateLeaves.value(it.key());
+        const auto edit = edits.constFind(it.key());
+        if(edit == edits.constEnd())
+        {
+            if(source.rawBytes != candidate.rawBytes)
+            {
+                if(report)
+                    report->add("mob.transaction.unauthorized_change", EValidationSeverity::Error,
+                                "A leaf outside the accepted transaction changed", it.key());
+                return false;
+            }
+            continue;
+        }
+
+        if(candidate.type != source.type || candidate.rawBytes.mid(8) != edit->replacementPayload)
+        {
+            if(report)
+                report->add("mob.transaction.payload_mismatch", EValidationSeverity::Error,
+                            "The candidate does not contain the authorized replacement payload", it.key());
+            return false;
+        }
+    }
     return true;
 }
 
