@@ -62,6 +62,12 @@ behavior.
   before Close All. Implementation:
   [`95c9094`](https://github.com/Ilufus/ei-mapper-endurance/commit/95c9094);
   focused test instructions are in [ALPHA19_VALIDATION.md](ALPHA19_VALIDATION.md).
+- [ ] Validate alpha.20 cancellation of unfinished movement and the document
+  lifecycle boundary. Open/close operations are no longer undo commands, and
+  history is cleared before documents are destroyed or terrain is replaced.
+  Implementation:
+  [`554b0d4`](https://github.com/Ilufus/ei-mapper-endurance/commit/554b0d4);
+  focused test instructions are in [ALPHA20_VALIDATION.md](ALPHA20_VALIDATION.md).
 - [ ] Finish lossless preservation of MPR archive details.
 
 These are the remaining safety gates before editing live maps can be recommended.
