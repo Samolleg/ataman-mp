@@ -333,6 +333,9 @@ protected:
     uint m_nodeId;
     QSharedPointer<IPropertyBase> m_oldValue;
     QSharedPointer<IPropertyBase> m_newValue;
+    QVector<QVector3D> m_oldUnitMovementState;
+    QVector<QVector3D> m_newUnitMovementState;
+    bool m_unitMovementStateCaptured;
 };
 
 class CResetIdCommand: public QObject, public QUndoCommand

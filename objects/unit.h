@@ -110,6 +110,8 @@ public:
     uint serialize(util::CMobParser& parser);
     bool isUse() {return m_use;}
     void updatePos(QVector3D& offset);
+    void appendMovementState(QVector<QVector3D>& state) const;
+    bool restoreMovementState(const QVector<QVector3D>& state, int& index);
     void collectPatrolNodes(QList<CNode*>& arrNode);
     void clearPatrolSelect();
     void clearLogicPaths();
@@ -206,6 +208,8 @@ public:
     CPatrolPoint *patrolByIndex(int index);
     void resetLogic();
     void refreshLogicProjection();
+    QVector<QVector3D> movementState() const;
+    bool restoreMovementState(const QVector<QVector3D>& state);
 
 private:
     //"UNIT_R", eNull};

@@ -18,6 +18,7 @@ class CKeyManager;
 class CMob;
 class CCamera;
 class CNode;
+class CUnit;
 class CKeyManager;
 class CSettings;
 class CStringItem;
@@ -191,6 +192,7 @@ private:
     CProgressView* m_pProgress;
     QSharedPointer<COperation> m_pOp;
     QMap<CNode*, QVector3D> m_operationBackup;
+    QMap<CUnit*, QVector<QVector3D>> m_unitMovementBackup;
     //EOperationType m_operationType;
     QSharedPointer<CSelectFrame> m_selectFrame;
     QFile m_clipboard_buffer_file;

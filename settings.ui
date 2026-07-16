@@ -69,6 +69,24 @@
              </item>
             </layout>
            </item>
+           <item row="5" column="0">
+            <layout class="QHBoxLayout" name="horizontalLayoutUndoHistory">
+             <item>
+              <widget class="QLabel" name="labelUndoHistoryLimit">
+               <property name="text">
+                <string>Undo history limit</string>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QLineEdit" name="undoHistoryLimit">
+               <property name="toolTip">
+                <string>Maximum number of undo commands retained. Applied after restarting the editor.</string>
+               </property>
+              </widget>
+             </item>
+            </layout>
+           </item>
            <item row="0" column="0">
             <widget class="QCheckBox" name="dipEditSymmetric">
              <property name="text">

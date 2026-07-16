@@ -567,6 +567,7 @@ CChangeProp::CChangeProp(CView* pView, uint nodeId, const QSharedPointer<IProper
     QUndoCommand(parent)
   ,m_pView(pView)
   ,m_nodeId(nodeId)
+  ,m_unitMovementStateCaptured(false)
 {
     m_newValue.reset(prop->clone());
 }
@@ -574,7 +575,11 @@ CChangeProp::CChangeProp(CView* pView, uint nodeId, const QSharedPointer<IProper
 void CChangeProp::undo()
 {
     auto pNode = m_pView->currentMob()->nodeByMapId(m_nodeId);
-    pNode->applyParam(m_oldValue);
+    CUnit* unit = dynamic_cast<CUnit*>(pNode);
+    if(unit && m_unitMovementStateCaptured && m_oldValue->type() == eObjParam_POSITION)
+        unit->restoreMovementState(m_oldUnitMovementState);
+    else
+        pNode->applyParam(m_oldValue);
     if(m_oldValue->type() == eObjParam_NID)
     {
         m_nodeId = dynamic_cast<propUint*>(m_oldValue.get())->value();
@@ -594,8 +599,25 @@ void CChangeProp::redo()
 {
     setText("Change value to " + m_newValue->toString());
     auto pNode = m_pView->currentMob()->nodeByMapId(m_nodeId);
-    pNode->getParam(m_oldValue, m_newValue->type());
-    pNode->applyParam(m_newValue);
+    CUnit* unit = dynamic_cast<CUnit*>(pNode);
+    if(unit && m_newValue->type() == eObjParam_POSITION)
+    {
+        if(!m_unitMovementStateCaptured)
+        {
+            m_oldUnitMovementState = unit->movementState();
+            pNode->getParam(m_oldValue, m_newValue->type());
+            pNode->applyParam(m_newValue);
+            m_newUnitMovementState = unit->movementState();
+            m_unitMovementStateCaptured = true;
+        }
+        else
+            unit->restoreMovementState(m_newUnitMovementState);
+    }
+    else
+    {
+        pNode->getParam(m_oldValue, m_newValue->type());
+        pNode->applyParam(m_newValue);
+    }
     switch (m_newValue->type()) {
     case eObjParam_NID:
     {

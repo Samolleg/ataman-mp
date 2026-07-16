@@ -68,6 +68,7 @@ CView::CView(QWidget *parent, const QGLWidget *pShareWidget) : QGLWidget(parent,
     m_mprModifyTimer = new QTimer;
     connect(m_mprModifyTimer, SIGNAL(timeout()), this, SLOT(checkNewLandVersion()));
     m_operationBackup.clear();
+    m_unitMovementBackup.clear();
     m_selectFrame.reset(new CSelectFrame);
     //qDebug() << format();
     //qDebug() << isSharing();
@@ -1823,6 +1824,7 @@ void CView::operationSetBackup(EOperationAxisType operationType)
         return;
 
     m_operationBackup.clear();
+    m_unitMovementBackup.clear();
     for (auto& node : CScene::getInstance()->getMode() == eEditModeLogic ? m_activeMob->logicNodes() : m_activeMob->nodes())
     {
         if (node->nodeState() != ENodeState::eSelect)
@@ -1833,7 +1835,10 @@ void CView::operationSetBackup(EOperationAxisType operationType)
         switch (operationType)
         {
         case EOperationAxisType::eMove:
-            m_operationBackup[node] = node->position(); break;
+            m_operationBackup[node] = node->position();
+            if(CUnit* unit = dynamic_cast<CUnit*>(node))
+                m_unitMovementBackup.insert(unit, unit->movementState());
+            break;
         case EOperationAxisType::eRotate:
             m_operationBackup[node] = node->getEulerRotation(); break;
         case EOperationAxisType::eScale:
@@ -1853,7 +1858,11 @@ void CView::operationRevert(EOperationAxisType operationType)
         {
         case EOperationAxisType::eMove:
         {
-            pair.first->updatePos(pair.second);
+            CUnit* unit = dynamic_cast<CUnit*>(pair.first);
+            if(unit && m_unitMovementBackup.contains(unit))
+                unit->restoreMovementState(m_unitMovementBackup.value(unit));
+            else
+                pair.first->updatePos(pair.second);
             break;
         }
         case EOperationAxisType::eRotate:
@@ -1965,7 +1974,11 @@ void CView::operationApply(EOperationAxisType operationType)
                 QSharedPointer<IPropertyBase> pos (new prop3D(eObjParam_POSITION, pair.first->position()));
                 CChangeProp* pOp = new CChangeProp(this, pair.first->mapId(), pos);
                 QObject::connect(pOp, SIGNAL(updateParam()), this, SLOT(viewParameters()));
-                pair.first->updatePos(m_operationBackup[pair.first]);
+                CUnit* unit = dynamic_cast<CUnit*>(pair.first);
+                if(unit && m_unitMovementBackup.contains(unit))
+                    unit->restoreMovementState(m_unitMovementBackup.value(unit));
+                else
+                    pair.first->updatePos(m_operationBackup[pair.first]);
                 m_pUndoStack->push(pOp);
             }
 
@@ -1995,6 +2008,7 @@ void CView::operationApply(EOperationAxisType operationType)
 
     }
     m_operationBackup.clear();
+    m_unitMovementBackup.clear();
 }
 
 void CView::moveTo(QVector3D &dir)

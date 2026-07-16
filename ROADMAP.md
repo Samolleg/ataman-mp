@@ -49,6 +49,8 @@ behavior.
 - [x] Recompute MOB dirty state against its loaded projection after edit and
   undo/redo, allowing byte-identical Save As once every projected change is
   undone. ([`d7feaab`](https://github.com/Ilufus/ei-mapper-endurance/commit/d7feaab))
+- [ ] Validate exact snapshot-based undo for compound unit, patrol, and look
+  point movement across repeated undo/redo cycles.
 - [ ] Finish lossless preservation of MPR archive details.
 
 These are the remaining safety gates before editing live maps can be recommended.

@@ -574,6 +574,31 @@ void CUnit::refreshLogicProjection()
         logic->createLogicLines();
 }
 
+QVector<QVector3D> CUnit::movementState() const
+{
+    QVector<QVector3D> state;
+    state.append(m_position);
+    for(const CLogic* logic : m_aLogic)
+        logic->appendMovementState(state);
+    return state;
+}
+
+bool CUnit::restoreMovementState(const QVector<QVector3D>& state)
+{
+    if(state.isEmpty())
+        return false;
+
+    int index = 0;
+    QVector3D unitPosition = state.at(index++);
+    CObjectBase::updatePos(unitPosition); // Do not translate logic children by an inverse delta.
+    for(CLogic* logic : m_aLogic)
+    {
+        if(!logic->restoreMovementState(state, index))
+            return false;
+    }
+    return index == state.size();
+}
+
 CLogic::CLogic(CUnit* unit, bool bUse):
     m_indexBuf(QOpenGLBuffer::IndexBuffer)
   ,m_helpIndexBuf(QOpenGLBuffer::IndexBuffer)
@@ -1012,6 +1037,40 @@ void CLogic::updatePos(QVector3D& offset)
         patrol->position() += offset;
     }
     createLogicLines();
+}
+
+void CLogic::appendMovementState(QVector<QVector3D>& state) const
+{
+    state.append(m_guardPlacement);
+    for(CPatrolPoint* patrol : m_aPatrolPt)
+    {
+        state.append(patrol->position());
+        for(CLookPoint* look : patrol->lookPoint())
+            state.append(look->position());
+    }
+}
+
+bool CLogic::restoreMovementState(const QVector<QVector3D>& state, int& index)
+{
+    if(index >= state.size())
+        return false;
+    m_guardPlacement = state.at(index++);
+    for(CPatrolPoint* patrol : m_aPatrolPt)
+    {
+        if(index >= state.size())
+            return false;
+        QVector3D patrolPosition = state.at(index++);
+        patrol->setPos(patrolPosition);
+        for(CLookPoint* look : patrol->lookPoint())
+        {
+            if(index >= state.size())
+                return false;
+            QVector3D lookPosition = state.at(index++);
+            look->setPos(lookPosition);
+        }
+    }
+    createLogicLines();
+    return true;
 }
 
 void CLogic::collectPatrolNodes(QList<CNode *> &arrNode)

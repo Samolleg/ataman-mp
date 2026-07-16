@@ -162,6 +162,11 @@ MainWindow::MainWindow(QWidget* parent) :
     m_selector->attachParents(m_pView);
     m_randomizeForm->attachView(m_pView);
     m_undoStack = new QUndoStack(this);
+    int undoHistoryLimit = 512;
+    if(COptInt* configuredLimit = dynamic_cast<COptInt*>(m_settings->opt(eOptSetGeneral, "undoHistoryLimit")))
+        undoHistoryLimit = qBound(1, configuredLimit->value(), 1000000);
+    m_undoStack->setUndoLimit(undoHistoryLimit);
+    ei::log(eLogInfo, QString("Undo history limit:%1").arg(undoHistoryLimit));
     createUndoView();
     CStatusConnector::getInstance()->attach(m_ui->statusIco, m_ui->statusBar);
     connectUiButtons();

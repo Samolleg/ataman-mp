@@ -21,6 +21,7 @@ CSettings::CSettings(QWidget *parent) :
 {
     ui->setupUi(this);
     ui->rangeIncrement->setValidator(new QIntValidator(1, 1000000, this));
+    ui->undoHistoryLimit->setValidator(new QIntValidator(1, 1000000, this));
     initOptions();
     readOptions();
 }
@@ -317,6 +318,7 @@ void CSettings::initOptions()
     aOpt.append(QSharedPointer<COpt>(new COptInt("mouseSenseY", 25)));
     aOpt.append(QSharedPointer<COpt>(new COptInt("rangeIncrement", 999)));
     aOpt.append(QSharedPointer<COpt>(new COptInt("landCheckTime", 0)));
+    aOpt.append(QSharedPointer<COpt>(new COptInt("undoHistoryLimit", 512)));
 
     //split options into different category
     QFile inputFile(":/optSet.txt");

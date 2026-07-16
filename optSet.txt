@@ -8,6 +8,7 @@ dipEditSymmetric
 rangeIncrement
 logLevel
 landCheckTime
+undoHistoryLimit
 Option set name:Resource
 resourceProfile
 resourceRoots
