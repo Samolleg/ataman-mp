@@ -48,7 +48,7 @@ behavior.
   no-op raw preservation is validated, but changed-save preservation is not complete.
 - [x] Recompute MOB dirty state against its loaded projection after edit and
   undo/redo, allowing byte-identical Save As once every projected change is
-  undone.
+  undone. ([`d7feaab`](https://github.com/Ilufus/ei-mapper-endurance/commit/d7feaab))
 - [ ] Finish lossless preservation of MPR archive details.
 
 These are the remaining safety gates before editing live maps can be recommended.
