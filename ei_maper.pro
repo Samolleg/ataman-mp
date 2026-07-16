@@ -11,7 +11,7 @@ greaterThan(QT_MAJOR_VERSION, 4): QT += widgets
 TARGET = EIMapperEndurance
 TEMPLATE = app
 
-DEFINES += ENDURANCE_VERSION=\\\"0.1.0-alpha.7\\\"
+DEFINES += ENDURANCE_VERSION=\\\"0.1.0-alpha.8\\\"
 
 # The following define makes your compiler emit warnings if you use
 # any feature of Qt which has been marked as deprecated (the exact warnings
@@ -40,6 +40,7 @@ SOURCES += \
     layout_components/tablemanager.cpp \
     multiline_edit_form.cpp \
     randomize_form.cpp \
+    resource_name.cpp \
     property.cpp \
     main_window.cpp \
     objects/lever.cpp \
@@ -97,6 +98,7 @@ HEADERS += \
     layout_components/tablemanager.h \
     multiline_edit_form.h \
     randomize_form.h \
+    resource_name.h \
     main_window.h \
     objects/lever.h \
     objects/light.h \

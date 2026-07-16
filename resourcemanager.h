@@ -111,6 +111,7 @@ public:
 
     void loadTexture(QSet<QString>& aName);
     QOpenGLTexture* texture(const QString& name);
+    QOpenGLTexture* texture(const QString& name, const QString& modelName);
     QOpenGLTexture* buildLandTex(QString& name, int& texCount);
     QOpenGLTexture* textureDefault();
     void attachSettings(CSettings* pSettings) {m_pSettings = pSettings;};
@@ -124,6 +125,7 @@ private:
     ~CTextureList();
     void parse(QByteArray& data, const QString& name);
     void initAuxTexture();
+    QOpenGLTexture* loadTextureResource(const QString& name, const QString& modelName);
 
 private:
     static CTextureList* m_pTextureContainer;

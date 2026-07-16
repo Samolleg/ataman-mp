@@ -4,7 +4,7 @@ EI Mapper: Endurance Edition is an independently versioned derivative of
 [`konstvest/ei_maper`](https://github.com/konstvest/ei_maper), focused on safe,
 fast Evil Islands and Jamais Vu map editing.
 
-Current development version: `0.1.0-alpha.7`.
+Current development version: `0.1.0-alpha.8`.
 
 Project status and upcoming work are tracked in the living
 [Endurance roadmap](ROADMAP.md).
@@ -26,6 +26,8 @@ commit `1cebe83d` tagged as `upstream-1cebe83d`.
 - Changed saves are staged atomically and MOB backups are retained separately.
 - MPR writes retain extra archive members and the original internal map name.
 - Resource lookup uses case-normalized RES table indexes and lazy payload reads.
+- Model-qualified `_xN` unit skins resolve to their physical archive names, with
+  a logged viewer-only nearest-family fallback when a referenced variation is absent.
 - MPR and MOB files can be opened independently, including MOB-only rendering.
 - The outliner is resizable and its layout is persisted.
 - Embedded scripts can be opened through the OS editor and explicitly imported.

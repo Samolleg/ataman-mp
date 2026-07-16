@@ -185,7 +185,7 @@ uint CWorldObj::deserialize(util::CMobParser& parser)
 void CWorldObj::loadTexture()
 {
     QString texName(m_primaryTexture);
-    setTexture(CTextureList::getInstance()->texture(texName));
+    setTexture(CTextureList::getInstance()->texture(texName, m_modelName));
 }
 
 void CWorldObj::serializeJson(QJsonObject& obj)

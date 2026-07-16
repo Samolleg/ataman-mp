@@ -17,6 +17,7 @@
 #include "types.h"
 #include "settings.h"
 #include "log.h"
+#include "resource_name.h"
 
 CObjectList* CObjectList::m_pObjectContainer = nullptr;
 CTextureList* CTextureList::m_pTextureContainer = nullptr;
@@ -741,6 +742,40 @@ void CTextureList::loadTexture(QSet<QString>& aName)
     }
 }
 
+QOpenGLTexture* CTextureList::loadTextureResource(const QString& name, const QString& modelName)
+{
+    const QString cacheKey = ei::textureCacheKey(name, modelName);
+    if(m_aTexture.contains(cacheKey))
+        return m_aTexture.value(cacheKey);
+    if(m_missingTextureNames.contains(cacheKey))
+        return textureDefault();
+
+    const QVector<QString> sources = configuredResourceSources(m_pSettings);
+    const QStringList candidates = ei::textureResourceCandidates(name, modelName);
+    for(int candidateIndex = 0; candidateIndex < candidates.size(); ++candidateIndex)
+    {
+        const QString& candidate = candidates.at(candidateIndex);
+        QByteArray textureData;
+        QString sourcePath;
+        if(!readIndexedResource(sources, candidate, textureData, &sourcePath))
+            continue;
+        parse(textureData, cacheKey);
+        if(m_aTexture.contains(cacheKey))
+        {
+            if(candidate != name.toLower() + ".mmp")
+                ei::log(eLogInfo, QString("Resolved texture %1 %2 model:%3 -> %4 in %5")
+                        .arg(candidateIndex >= 3 ? "fallback" : "alias", name, modelName,
+                             candidate, sourcePath));
+            return m_aTexture.value(cacheKey);
+        }
+    }
+
+    m_missingTextureNames.insert(cacheKey);
+    ei::log(eLogWarning, QString("Missing texture (negative cached): %1 model:%2 candidates:%3")
+            .arg(name, modelName, candidates.join(", ")));
+    return textureDefault();
+}
+
 QOpenGLTexture* CTextureList::texture(const QString& name)
 {
     QString texName(name.toLower());
@@ -754,6 +789,11 @@ QOpenGLTexture* CTextureList::texture(const QString& name)
     }
 
     return m_aTexture.contains(texName) ? m_aTexture[texName] : textureDefault();
+}
+
+QOpenGLTexture* CTextureList::texture(const QString& name, const QString& modelName)
+{
+    return loadTextureResource(name.toLower(), modelName.toLower());
 }
 
 QOpenGLTexture* CTextureList::textureDefault()

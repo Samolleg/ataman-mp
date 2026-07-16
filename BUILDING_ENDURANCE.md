@@ -28,6 +28,10 @@ Set-Location tests
 qmake endurance_document_tests.pro CONFIG+=release
 mingw32-make -j4
 .\release\endurance_document_tests.exe
+
+qmake resource_name_tests.pro CONFIG+=release
+mingw32-make -j4
+.\release\resource_name_tests.exe
 ```
 
 ## Private JMV validation

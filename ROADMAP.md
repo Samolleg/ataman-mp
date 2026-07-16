@@ -5,7 +5,7 @@ An item is checked only after its implementation has landed and received the
 listed level of validation. New findings and wishlist requests belong here so
 they do not get lost between test sessions.
 
-Current development release: `0.1.0-alpha.7`.
+Current development release: `0.1.0-alpha.8`.
 
 ## Current focus
 
@@ -68,6 +68,8 @@ These are the remaining safety gates before editing live maps can be recommended
 - [x] Discover JMV archives beyond the old figure/texture category restrictions.
 - [x] Resolve the previously missing representative Zone 3/18 JMV figures.
 - [x] Preserve unit figure, texture, and database fields during changed saves.
+- [x] Resolve model-qualified `_xN` unit skins such as Zone 12 skeleton textures.
+- [x] Log and display the nearest existing family variation when a MOB references an absent skin, without changing the stored field.
 - [ ] Persist catalog indexes and invalidate them by path, size, timestamp, and header hash.
 - [ ] Inventory and support every MMP format found in the private JMV corpus.
 - [ ] Show diagnostic placeholders with asset, archive, format, and failure reason.
@@ -115,7 +117,7 @@ These are the remaining safety gates before editing live maps can be recommended
 
 ## Release gates
 
-- [x] `0.1.0-alpha.1` through `0.1.0-alpha.7`: initial safety, diagnostics, resources, serializer fixes, and backups.
+- [x] `0.1.0-alpha.1` through `0.1.0-alpha.8`: initial safety, diagnostics, resources, serializer fixes, backups, and model-qualified skins.
 - [ ] `0.1.0-beta.1`: correct indexed resources and responsive fast loading.
 - [ ] `0.1.0-rc.1`: independent workspace workflow, UI, script editing, and completed safety validation.
 - [ ] `1.0.0`: JMV-ready release passing the full corpus, MobExplorer, and in-game validation matrix.
