@@ -647,6 +647,7 @@ CValueItem::CValueItem(const QSharedPointer<IPropertyBase>& prop):
 
 
 CComboDynItem::CComboDynItem(const QSharedPointer<IPropertyBase> &prop)
+    : m_optionsLoaded(false)
 {
     setFocusPolicy(Qt::FocusPolicy::StrongFocus);
     setStyleSheet("combobox-popup: 0;");
@@ -662,24 +663,21 @@ CComboDynItem::CComboDynItem(const QSharedPointer<IPropertyBase> &prop)
     setModel(m_pFilterModel.get());
     m_pValue.reset(prop->clone());
 
-    if(m_pValue->type() == eObjParam_PRIM_TXTR)
-        m_pListModel->setStringList(CTextureList::getInstance()->textureList());
-    else if(m_pValue->type() == eObjParam_TEMPLATE)
-        m_pListModel->setStringList(CObjectList::getInstance()->figureList());
-
     if(m_pValue->isInit())
         setEditText(m_pValue->toString());
     else
         lineEdit()->setPlaceholderText("undefined/different");
-    QObject::connect(this, SIGNAL(currentIndexChanged(QString)), this, SLOT(_onChange(QString))); //reconnect default currentIndexChanged to override
+    // A proxy-model refresh may highlight its first row. Only a deliberate
+    // user activation is allowed to commit a dropdown value.
+    QObject::connect(this, SIGNAL(activated(QString)), this, SLOT(_onChange(QString)));
     QObject::connect(lineEdit(), SIGNAL(editingFinished()), this, SLOT(_onEditingFinished()));
     QObject::connect(lineEdit(), SIGNAL(textEdited(QString)), this, SLOT(_onFilterTextChanged(QString)));
 }
 
-void CComboDynItem::showPopup()
+void CComboDynItem::ensureOptionsLoaded()
 {
-    const QString current = currentText();
-    blockSignals(true);
+    if(m_optionsLoaded)
+        return;
     if(m_pValue->type() == eObjParam_PRIM_TXTR)
         m_pListModel->setStringList(CTextureList::getInstance()->textureList());
     else if(m_pValue->type() == eObjParam_TEMPLATE)
@@ -687,10 +685,17 @@ void CComboDynItem::showPopup()
     else
     {
         Q_ASSERT(false && "not defined");
-        blockSignals(false);
         return;
     }
-    m_pFilterModel->setFilterFixedString(QString());
+    m_optionsLoaded = true;
+}
+
+void CComboDynItem::showPopup()
+{
+    const QString current = currentText();
+    blockSignals(true);
+    ensureOptionsLoaded();
+    m_pFilterModel->setFilterRegExp(QRegExp());
     setEditText(current);
     blockSignals(false);
     QComboBox::showPopup();
@@ -716,7 +721,10 @@ void CComboDynItem::_onEditingFinished()
 void CComboDynItem::_onFilterTextChanged(const QString& text)
 {
     blockSignals(true);
-    m_pFilterModel->setFilterFixedString(text);
+    ensureOptionsLoaded();
+    // The editor's asset pickers are prefix searches: typing "h" shows
+    // names beginning with h, not every name that happens to contain it.
+    m_pFilterModel->setFilterRegExp(QRegExp("^" + QRegExp::escape(text), Qt::CaseInsensitive));
     setEditText(text);
     blockSignals(false);
     QComboBox::showPopup();

@@ -330,8 +330,8 @@
      <string>&amp;File</string>
     </property>
     <addaction name="actionOpen"/>
-    <addaction name="actionOpen_MOB"/>
     <addaction name="actionOpen_MPR"/>
+    <addaction name="actionOpen_MOB"/>
     <addaction name="actionOpen_recent"/>
     <addaction name="actionSave"/>
     <addaction name="actionSave_all_MOB_s"/>

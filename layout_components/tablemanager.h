@@ -144,10 +144,13 @@ signals:
     void onParamChange(const QSharedPointer<IPropertyBase>&);
 
 private:
+    void ensureOptionsLoaded();
+
     QSharedPointer<IPropertyBase> m_pValue; //stored value;
     QStringList m_valueList;
     QSharedPointer<QStringListModel> m_pListModel;
     QSharedPointer<QSortFilterProxyModel> m_pFilterModel;
+    bool m_optionsLoaded;
 };
 
 ///
