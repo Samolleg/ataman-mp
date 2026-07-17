@@ -66,6 +66,8 @@ private:
     const QVector<SRange>& activeRanges();
     void setDurty(bool isDurty);
     void generateTitle();
+    void applyParameterChanges();
+    bool resolveCloseRequest();
 
 private slots:
     void updateWindow();

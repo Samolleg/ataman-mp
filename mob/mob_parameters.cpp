@@ -274,32 +274,10 @@ void CMobParameters::tableItemClicked(int r, int c)
 
 void CMobParameters::on_pushCancel_clicked()
 {
-    if(m_pUndoStack->count() != 0)
-    {
-        QMessageBox::StandardButton reply;
-        reply = QMessageBox::question(this, "Closing", "Parameters has local changes.\nDo you want to Apply them?", QMessageBox::Yes|QMessageBox::No|QMessageBox::Cancel);
-        if(reply == QMessageBox::Yes)
-        {
-            on_pushApply_clicked();
-            return;
-        }
-        else if(reply == QMessageBox::No)
-        {
-            while(m_pUndoStack->canUndo())
-                m_pUndoStack->undo();
-        }
-        else if(reply == QMessageBox::Cancel)
-        {
-            return;
-        }
-
-    }
-    emit editFinishedSignal(this);
-    m_closeAccepted = true;
     close();
 }
 
-void CMobParameters::on_pushApply_clicked()
+void CMobParameters::applyParameterChanges()
 {
     SMobParameterState finalState = m_pCurMob->parameterState();
     // A script may have changed through the independent editor while this
@@ -307,6 +285,31 @@ void CMobParameters::on_pushApply_clicked()
     m_initialState.script = finalState.script;
     m_pUndoStack->clear();
     m_pView->commitMobParameterEdit(m_pCurMob, m_initialState, finalState);
+}
+
+bool CMobParameters::resolveCloseRequest()
+{
+    if(!m_pUndoStack->isClean())
+    {
+        const QMessageBox::StandardButton reply = QMessageBox::question(
+            this, "Closing", "Parameters has local changes.\nDo you want to Apply them?",
+            QMessageBox::Yes | QMessageBox::No | QMessageBox::Cancel);
+        if(reply == QMessageBox::Yes)
+            applyParameterChanges();
+        else if(reply == QMessageBox::No)
+        {
+            while(m_pUndoStack->canUndo())
+                m_pUndoStack->undo();
+        }
+        else if(reply == QMessageBox::Cancel)
+            return false;
+    }
+    return true;
+}
+
+void CMobParameters::on_pushApply_clicked()
+{
+    applyParameterChanges();
     emit editFinishedSignal(this);
     m_closeAccepted = true;
     close();
@@ -320,8 +323,15 @@ void CMobParameters::closeEvent(QCloseEvent* event)
         return;
     }
 
-    event->ignore();
-    on_pushCancel_clicked();
+    if(!resolveCloseRequest())
+    {
+        event->ignore();
+        return;
+    }
+
+    emit editFinishedSignal(this);
+    m_closeAccepted = true;
+    event->accept();
 }
 
 #if 0 // Legacy script highlighter moved to mob/script_highlighter.cpp.

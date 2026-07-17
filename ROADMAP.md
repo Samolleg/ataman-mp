@@ -5,7 +5,7 @@ An item is checked only after its implementation has landed and received the
 listed level of validation. New findings and wishlist requests belong here so
 they do not get lost between test sessions.
 
-Current development release: `0.1.0-alpha.37`.
+Current development release: `0.1.0-alpha.38`.
 
 ## Implementation evidence
 
