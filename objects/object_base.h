@@ -67,6 +67,8 @@ private:
     QOpenGLTexture* m_texture;
     ei::CFigure* m_pFigure;
     bool m_bDeleted;
+    CBox m_cachedBBox;
+    bool m_bboxDirty;
 };
 
 #endif // OBJECT_H

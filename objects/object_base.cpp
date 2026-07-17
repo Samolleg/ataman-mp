@@ -15,12 +15,14 @@ CObjectBase::CObjectBase():
   ,m_texture(nullptr)
   ,m_pFigure(nullptr)
   ,m_bDeleted(false)
+  ,m_bboxDirty(true)
 {
 
 }
 
 CObjectBase::CObjectBase(const CObjectBase &base):
     CNode(base)
+  ,m_bboxDirty(true)
 {
     m_complection = base.m_complection;
     m_texture = base.m_texture;
@@ -39,6 +41,7 @@ CObjectBase::CObjectBase(QJsonObject data):
     m_texture(nullptr)
     ,m_pFigure(nullptr)
   ,m_bDeleted(false)
+  ,m_bboxDirty(true)
 {
 
     //m_mapID = data["Id"].toVariant().toUInt(); //TODO: generate mapID
@@ -69,6 +72,8 @@ CObjectBase::CObjectBase(CNode* node):
     CNode(node)
     ,m_texture(nullptr)
     ,m_pFigure(nullptr)
+    ,m_bDeleted(false)
+    ,m_bboxDirty(true)
 {
 }
 
@@ -80,6 +85,7 @@ CObjectBase::~CObjectBase()
 
 void CObjectBase::updateFigure(ei::CFigure* fig)
 {
+    m_bboxDirty = true;
     if(!fig)
     {
         ei::log(eLogWarning, "Cannot update object figure; placeholder is unavailable for model: " + m_modelName);
@@ -261,6 +267,8 @@ QJsonObject CObjectBase::toJson()
 
 CBox CObjectBase::getBBox()
 {
+    if(!m_bboxDirty)
+        return m_cachedBBox;
     QVector3D min;
     QVector3D max;
     bool bInit = false;
@@ -305,13 +313,15 @@ CBox CObjectBase::getBBox()
         }
     }
 
-   CBox bbox(min, max);
-   return bbox;
+   m_cachedBBox = CBox(min, max);
+   m_bboxDirty = false;
+   return m_cachedBBox;
 }
 
 void CObjectBase::setRot(const QQuaternion& quat)
 {
     CNode::setRot(quat);
+    m_bboxDirty = true;
     recalcMinPos();
 }
 
@@ -451,6 +461,7 @@ void CObjectBase::applyLogicParam(const QSharedPointer<IPropertyBase>& prop)
 
 void CObjectBase::recalcFigure()
 {
+    m_bboxDirty = true;
     for(auto& part: m_aPart)
         delete part;
     m_aPart.clear();

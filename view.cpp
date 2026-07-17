@@ -34,6 +34,7 @@
 #include "property.h"
 #include "tile.h"
 #include "duplicate_id_report.h"
+#include "view_frustum.h"
 
 class CLogic;
 
@@ -242,6 +243,21 @@ void CView::draw()
 {
 
     QMatrix4x4 camMatrix = m_cam->update();
+    const COptBool* cullingOption = m_pSettings
+        ? dynamic_cast<const COptBool*>(m_pSettings->opt("frustumCulling")) : nullptr;
+    const bool cullingEnabled = (!cullingOption || cullingOption->value())
+        && CScene::getInstance()->getMode() != eEditModeLogic;
+    const CViewFrustum frustum(m_projection * camMatrix);
+    const auto visible = [&frustum, cullingEnabled](CNode* node)
+    {
+        if(!node || !cullingEnabled || node->nodeState() == ENodeState::eSelect)
+            return true;
+        CBox bounds = node->getBBox();
+        if(!bounds.isInit())
+            return true;
+        return frustum.intersectsSphere(bounds.center() + node->drawPosition(),
+                                        bounds.radius());
+    };
     // Set modelview-projection matrix
 
     // Bind shader pipeline for use
@@ -278,14 +294,15 @@ void CView::draw()
                 continue; //skip drawing active mob
 
             for (auto& node: mob->nodes())
-                node->draw(false, &m_program);
+                if(visible(node))
+                    node->draw(false, &m_program);
         }
 
         // Draw the active MOB in two passes so a selected duplicate remains
         // visible when it occupies exactly the same depth as its source.
         for(auto& node : m_activeMob->nodes())
         {
-            if(node->nodeState() != ENodeState::eSelect)
+            if(node->nodeState() != ENodeState::eSelect && visible(node))
                 node->draw(true, &m_program);
         }
         glDepthFunc(GL_LEQUAL);
@@ -854,15 +871,32 @@ void CView::pickObject(const QRect &rect, bool bAddToSelect)
     if (!m_selectProgram.bind())
         close();
 
+    const QMatrix4x4 viewMatrix = m_cam->update();
     m_selectProgram.setUniformValue("u_projMmatrix", m_projection);
-    m_selectProgram.setUniformValue("u_viewMmatrix", m_cam->update());
+    m_selectProgram.setUniformValue("u_viewMmatrix", viewMatrix);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+    const COptBool* cullingOption = m_pSettings
+        ? dynamic_cast<const COptBool*>(m_pSettings->opt("frustumCulling")) : nullptr;
+    const bool cullingEnabled = (!cullingOption || cullingOption->value())
+        && CScene::getInstance()->getMode() != eEditModeLogic;
+    const CViewFrustum frustum(m_projection * viewMatrix);
 
     //if(m_operationType == EOperationTypeObjects)
     //for(const auto& mob : m_aMob)
     //foreach(const auto& mob, m_aMob)
     foreach (auto& node, CScene::getInstance()->getMode() == eEditModeLogic ? m_activeMob->logicNodes() : m_activeMob->nodes())
-        node->drawSelect(&m_selectProgram);
+    {
+        bool drawNode = true;
+        if(cullingEnabled && node && node->nodeState() != ENodeState::eSelect)
+        {
+            CBox bounds = node->getBBox();
+            drawNode = !bounds.isInit() || frustum.intersectsSphere(
+                bounds.center() + node->drawPosition(), bounds.radius());
+        }
+        if(drawNode)
+            node->drawSelect(&m_selectProgram);
+    }
 
     QVector<SColor> aColor;
     getColorFromRect(rect, aColor);
@@ -1842,13 +1876,28 @@ CNode* CView::pickObject(QList<CNode*>& aNode, int x, int y)
     if (!m_selectProgram.bind())
         close();
 
+    const QMatrix4x4 viewMatrix = m_cam->update();
     m_selectProgram.setUniformValue("u_projMmatrix", m_projection);
-    m_selectProgram.setUniformValue("u_viewMmatrix", m_cam->update());
+    m_selectProgram.setUniformValue("u_viewMmatrix", viewMatrix);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+    const COptBool* cullingOption = m_pSettings
+        ? dynamic_cast<const COptBool*>(m_pSettings->opt("frustumCulling")) : nullptr;
+    const bool cullingEnabled = (!cullingOption || cullingOption->value())
+        && CScene::getInstance()->getMode() != eEditModeLogic;
+    const CViewFrustum frustum(m_projection * viewMatrix);
 
     for (auto node: aNode)
     {
-        node->drawSelect(&m_selectProgram);
+        bool drawNode = true;
+        if(cullingEnabled && node && node->nodeState() != ENodeState::eSelect)
+        {
+            CBox bounds = node->getBBox();
+            drawNode = !bounds.isInit() || frustum.intersectsSphere(
+                bounds.center() + node->drawPosition(), bounds.radius());
+        }
+        if(drawNode)
+            node->drawSelect(&m_selectProgram);
     }
 
     GLubyte pixel[3];

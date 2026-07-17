@@ -70,6 +70,7 @@ private slots:
     void unknownLeafIsPreservedAsOpaque();
     void malformedMobRootIsRejected();
     void semanticDiffClassifiesMovementAndAddition();
+    void semanticDiffPairsIdenticalDuplicatesByOccurrence();
     void transactionPatchesOnlyAuthorizedLeaf();
     void transactionPreservesEmptyContainers();
     void objectSubtreeDuplicateAndDeleteAreExact();
@@ -182,6 +183,28 @@ void EnduranceDocumentTests::semanticDiffClassifiesMovementAndAddition()
     }
     QVERIFY2(moved == 1, qPrintable(diff.toText()));
     QCOMPARE(added, 1);
+}
+
+void EnduranceDocumentTests::semanticDiffPairsIdenticalDuplicatesByOccurrence()
+{
+    const QByteArray duplicate = object(1000100, "duplicate");
+    CMobDocument baseline;
+    CMobDocument candidate;
+    QVERIFY(baseline.loadBytes(validMob(section(0xB000,
+        duplicate + duplicate + object(9, "unique"))), "baseline.mob"));
+    QVERIFY(candidate.loadBytes(validMob(section(0xB000,
+        object(9, "unique") + duplicate + duplicate)), "candidate.mob"));
+
+    const CMobSemanticDiff diff = CMobSemanticDiff::compare(baseline, candidate);
+    int unchanged = 0;
+    for(const SMobDiffEntry& entry : diff.entries())
+    {
+        QCOMPARE(entry.kind, EMobDiffKind::Unchanged);
+        QVERIFY(entry.baselineIndex >= 0);
+        QVERIFY(entry.candidateIndex >= 0);
+        ++unchanged;
+    }
+    QCOMPARE(unchanged, 3);
 }
 
 void EnduranceDocumentTests::transactionPatchesOnlyAuthorizedLeaf()

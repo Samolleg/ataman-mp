@@ -969,29 +969,48 @@ int CMob::readMob(QFileInfo &path)
             return 4;
         }
 
+        QByteArray cleanProjectionBytes;
+        serializeMob(cleanProjectionBytes, false);
+        CMobDocument cleanProjectionDocument;
+        CValidationReport projectionReport;
+        const bool projectionParsed = cleanProjectionDocument.loadBytes(
+            cleanProjectionBytes, "clean-ui-projection.mob", &projectionReport);
         const QVector<SMobObjectSnapshot>& rawObjects = structuralDocument.objects();
         const QByteArray sourceDocumentSha256 = QCryptographicHash::hash(
             m_originalData, QCryptographicHash::Sha256);
-        bool provenanceAligned = rawObjects.size() == m_aNode.size();
+        QVector<int> projectedToRaw(m_aNode.size(), -1);
+        bool provenanceAligned = projectionParsed
+                && rawObjects.size() == m_aNode.size()
+                && cleanProjectionDocument.objects().size() == m_aNode.size();
         if(provenanceAligned)
         {
-            for(int index = 0; index < rawObjects.size(); ++index)
+            const CMobSemanticDiff alignment = CMobSemanticDiff::compare(
+                structuralDocument, cleanProjectionDocument);
+            QSet<int> usedRawObjects;
+            for(const SMobDiffEntry& entry : alignment.entries())
             {
-                const SMobObjectSnapshot& rawObject = rawObjects.at(index);
-                CNode* node = m_aNode.at(index);
-                if(!node || !rawObject.hasNid || node->mapId() != rawObject.nid)
+                if(entry.baselineIndex < 0 || entry.candidateIndex < 0
+                   || entry.candidateIndex >= projectedToRaw.size()
+                   || usedRawObjects.contains(entry.baselineIndex)
+                   || projectedToRaw.at(entry.candidateIndex) >= 0)
                 {
                     provenanceAligned = false;
                     break;
                 }
+                projectedToRaw[entry.candidateIndex] = entry.baselineIndex;
+                usedRawObjects.insert(entry.baselineIndex);
             }
+            provenanceAligned = provenanceAligned
+                    && usedRawObjects.size() == rawObjects.size()
+                    && !projectedToRaw.contains(-1);
         }
         if(provenanceAligned)
         {
-            for(int index = 0; index < rawObjects.size(); ++index)
+            for(int projectedIndex = 0; projectedIndex < projectedToRaw.size(); ++projectedIndex)
             {
-                const SMobObjectSnapshot& rawObject = rawObjects.at(index);
-                m_aNode.at(index)->setRawObjectProvenance(
+                const SMobObjectSnapshot& rawObject = rawObjects.at(
+                    projectedToRaw.at(projectedIndex));
+                m_aNode.at(projectedIndex)->setRawObjectProvenance(
                     sourceDocumentSha256, rawObject.sectionPath,
                     rawObject.subtreeSha256, false);
             }
@@ -1001,8 +1020,9 @@ int CMob::readMob(QFileInfo &path)
         }
         else
         {
-            ei::log(eLogWarning, QString("Raw MOB provenance binding unavailable because projection order did not align path:%1 rawObjects:%2 projectedObjects:%3")
-                .arg(m_filePath.absoluteFilePath()).arg(rawObjects.size()).arg(m_aNode.size()));
+            ei::log(eLogWarning, QString("Raw MOB provenance binding unavailable because semantic projection alignment was incomplete path:%1 rawObjects:%2 projectedObjects:%3 findings:%4")
+                .arg(m_filePath.absoluteFilePath()).arg(rawObjects.size()).arg(m_aNode.size())
+                .arg(projectionReport.toText().trimmed()));
         }
 
         file.close();

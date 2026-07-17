@@ -143,6 +143,7 @@ HEADERS += \
     undo.h \
     unitstat_form.h \
     view.h \
+    view_frustum.h \
     figure.h \
     types.h \
     vectors.h \

@@ -311,6 +311,7 @@ void CSettings::initOptions()
     aOpt.append(QSharedPointer<COpt>(new COptBool("dipEditSymmetric", true)));
     aOpt.append(QSharedPointer<COpt>(new COptInt("logLevel", 2)));
     aOpt.append(QSharedPointer<COpt>(new COptBool("drawHelp", false)));
+    aOpt.append(QSharedPointer<COpt>(new COptBool("frustumCulling", true)));
 
 
     //init default options for digits

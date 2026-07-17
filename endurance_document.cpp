@@ -12,6 +12,7 @@
 #include <QTextStream>
 #include <QtEndian>
 
+#include <algorithm>
 #include <cmath>
 #include <climits>
 #include <cstring>
@@ -531,26 +532,32 @@ CMobSemanticDiff CMobSemanticDiff::compare(const CMobDocument& baseline,
     QSet<int> matchedBaseline;
     QSet<int> matchedCandidate;
 
+    QMultiMap<QByteArray, int> baselineHashes;
     QMultiMap<QByteArray, int> candidateHashes;
+    for(int i = 0; i < result.m_baseline.size(); ++i)
+        baselineHashes.insert(result.m_baseline.at(i).subtreeSha256, i);
     for(int i = 0; i < result.m_candidate.size(); ++i)
         candidateHashes.insert(result.m_candidate.at(i).subtreeSha256, i);
-    for(int i = 0; i < result.m_baseline.size(); ++i)
+    for(auto it = baselineHashes.constBegin(); it != baselineHashes.constEnd(); )
     {
-        const QList<int> candidates = candidateHashes.values(result.m_baseline.at(i).subtreeSha256);
-        int available = -1;
-        int availableCount = 0;
-        for(int index : candidates)
-            if(!matchedCandidate.contains(index))
-            {
-                available = index;
-                ++availableCount;
-            }
-        if(availableCount == 1)
+        const QByteArray hash = it.key();
+        QList<int> baselineMatches = baselineHashes.values(hash);
+        QList<int> candidateMatches = candidateHashes.values(hash);
+        std::sort(baselineMatches.begin(), baselineMatches.end());
+        std::sort(candidateMatches.begin(), candidateMatches.end());
+        if(!baselineMatches.isEmpty() && baselineMatches.size() == candidateMatches.size())
         {
-            result.m_entries.append({EMobDiffKind::Unchanged, i, available, "exact-subtree-hash", 1.0});
-            matchedBaseline.insert(i);
-            matchedCandidate.insert(available);
+            for(int pairIndex = 0; pairIndex < baselineMatches.size(); ++pairIndex)
+            {
+                const int baselineIndex = baselineMatches.at(pairIndex);
+                const int candidateIndex = candidateMatches.at(pairIndex);
+                result.m_entries.append({EMobDiffKind::Unchanged, baselineIndex,
+                                         candidateIndex, "exact-subtree-hash", 1.0});
+                matchedBaseline.insert(baselineIndex);
+                matchedCandidate.insert(candidateIndex);
+            }
         }
+        it = baselineHashes.upperBound(hash);
     }
 
     QMultiMap<QString, int> baselineNids;
