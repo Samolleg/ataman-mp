@@ -224,7 +224,7 @@ QVector<SResourceProfile> builtInResourceProfiles()
     jmv.capabilities.insert("mob.perspectiveDiff", capability("mob.perspectiveDiff", EProfileCapabilityStatus::Experimental,
         "Structural diff is available headlessly; perspective overlay is under development."));
     jmv.capabilities.insert("runtime.directMapLaunch", capability("runtime.directMapLaunch", EProfileCapabilityStatus::Experimental,
-        "A temporary-map/autoexec launcher is implemented and awaits focused runtime validation.", jmv.runtimeManifestId));
+        "A fingerprinted temporary JMV bridge is implemented after the public console route was rejected; runtime validation is pending.", jmv.runtimeManifestId));
     jmv.capabilities.insert("runtime.multiMobLaunch", capability("runtime.multiMobLaunch", EProfileCapabilityStatus::Unsupported,
         "JMV supplemental MOB discovery order has not been proven.", jmv.runtimeManifestId));
     jmv.capabilities.insert("runtime.appearanceResolver", capability("runtime.appearanceResolver", EProfileCapabilityStatus::Experimental,

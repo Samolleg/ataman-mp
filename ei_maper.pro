@@ -41,6 +41,7 @@ INCLUDEPATH += \
     $$PWD/source/ui
 
 SOURCES += $$files($$PWD/source/*.cpp, true)
+SOURCES -= $$PWD/source/runtime/jmv_bridge/jmv_launch_bridge.cpp
 HEADERS += $$files($$PWD/source/*.h, true)
 FORMS += $$files($$PWD/source/*.ui, true)
 LIBS += -lglu32 -lopengl32 -ldbghelp

@@ -12,6 +12,7 @@
 #include <QStandardPaths>
 #include <QTextStream>
 #include <QTimer>
+#include <QProcessEnvironment>
 
 #include "endurance_document.h"
 #include "runtime_providers.h"
@@ -196,6 +197,9 @@ bool restoreAutoexec(const QJsonObject& manifest, QStringList* messages)
 bool cleanupManifest(const QJsonObject& manifest, QStringList* messages)
 {
     bool success = restoreAutoexec(manifest, messages);
+    const QJsonObject bridge = manifest.value("bridge").toObject();
+    success = removeIfOwned(bridge.value("path").toString(),
+                            bridge.value("sha256").toString(), messages) && success;
     const QJsonObject live = manifest.value("liveFiles").toObject();
     success = removeIfOwned(live.value("mprPath").toString(),
                             live.value("mprSha256").toString(), messages) && success;
@@ -247,7 +251,12 @@ CJmvMapTestLauncher::CJmvMapTestLauncher(QObject* parent)
     {
         appendRunLog(QString("game.exe finished exitCode=%1 status=%2")
                      .arg(exitCode).arg(int(status)));
-        const QString cleanupMessage = cleanup();
+        const QString bridgeResult = bridgeResultSummary();
+        appendRunLog(bridgeResult);
+        QString cleanupMessage = cleanup();
+        if(!cleanupMessage.isEmpty())
+            cleanupMessage += "\n";
+        cleanupMessage += bridgeResult;
         emit testFinished(m_runId, exitCode, cleanupMessage);
     });
     connect(m_process, &QProcess::errorOccurred, this, [this](QProcess::ProcessError error)
@@ -366,6 +375,11 @@ bool CJmvMapTestLauncher::launch(const SJmvMapTestLaunchInput& input, QString* e
         cleanup();
         return false;
     }
+    if(!installBridge(error))
+    {
+        cleanup();
+        return false;
+    }
     if(!patchAutoexec(error))
     {
         cleanup();
@@ -380,6 +394,10 @@ bool CJmvMapTestLauncher::launch(const SJmvMapTestLaunchInput& input, QString* e
                  .arg(m_gameExePath, m_engineDirectory, m_temporaryMapName));
     m_process->setProgram(m_gameExePath);
     m_process->setWorkingDirectory(m_engineDirectory);
+    QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
+    environment.insert("EI_MAPPER_ENDURANCE_MAP", m_temporaryMapName);
+    environment.insert("EI_MAPPER_ENDURANCE_BRIDGE_RESULT", m_bridgeResultPath);
+    m_process->setProcessEnvironment(environment);
     m_process->start();
     return true;
 }
@@ -411,10 +429,23 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
     }
     m_gameExePath = QDir(input.profile.gameRoot).filePath("Starter/Engine/game.exe");
     m_engineDirectory = QFileInfo(m_gameExePath).absolutePath();
-    m_autoexecPath = QDir(m_engineDirectory).filePath("autoexec.cfg");
+    m_autoexecPath = QDir(m_engineDirectory).filePath("2utoexec.cfg");
+    m_bridgeSourcePath = QDir(QCoreApplication::applicationDirPath())
+            .filePath("runtime/EIMapperEnduranceJmvBridge.asi");
+    m_bridgeLivePath = QDir(m_engineDirectory).filePath("EIMapperEnduranceJmvBridge.asi");
     if(!QFileInfo(m_gameExePath).isFile())
     {
         if(error) *error = "The validated Starter game.exe is missing.";
+        return false;
+    }
+    if(!QFileInfo(m_bridgeSourcePath).isFile())
+    {
+        if(error) *error = "The packaged JMV launch bridge is missing. Reinstall this Endurance build.";
+        return false;
+    }
+    if(QFileInfo::exists(m_bridgeLivePath))
+    {
+        if(error) *error = "A JMV launch bridge already exists beside game.exe. Run recovery or remove the stale test build first.";
         return false;
     }
 
@@ -424,6 +455,7 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
     m_runRoot = QDir(testRunsRoot()).filePath(m_runId);
     m_manifestPath = QDir(m_runRoot).filePath("manifest.json");
     m_runLogPath = QDir(m_runRoot).filePath("runtime.log");
+    m_bridgeResultPath = QDir(m_runRoot).filePath("bridge-result.log");
     m_autoexecBackupPath = QDir(m_runRoot).filePath("autoexec.original.cfg");
     m_liveMprPath = QDir(mapsDirectory).filePath(m_temporaryMapName + ".mpr");
     m_liveMobPath = QDir(mapsDirectory).filePath(m_temporaryMapName + ".mob");
@@ -545,6 +577,30 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
     return writeManifest("staged", error);
 }
 
+bool CJmvMapTestLauncher::installBridge(QString* error)
+{
+    QByteArray bridge;
+    if(!readFile(m_bridgeSourcePath, &bridge, error) || bridge.isEmpty())
+        return false;
+    m_bridgeSha256 = sha256(bridge);
+    QJsonObject bridgeManifest;
+    bridgeManifest.insert("sourcePath", m_bridgeSourcePath);
+    bridgeManifest.insert("path", m_bridgeLivePath);
+    bridgeManifest.insert("sha256", m_bridgeSha256);
+    bridgeManifest.insert("resultPath", m_bridgeResultPath);
+    m_manifest.insert("bridge", bridgeManifest);
+    if(!atomicWrite(m_bridgeLivePath, bridge, error) ||
+       fileSha256(m_bridgeLivePath).compare(m_bridgeSha256, Qt::CaseInsensitive) != 0)
+    {
+        if(error && error->isEmpty())
+            *error = "The temporary JMV launch bridge failed its SHA-256 check.";
+        return false;
+    }
+    appendRunLog(QString("Installed temporary JMV launch bridge sha256=%1 path=%2")
+                 .arg(m_bridgeSha256, m_bridgeLivePath));
+    return writeManifest("bridge-installed", error);
+}
+
 bool CJmvMapTestLauncher::patchAutoexec(QString* error)
 {
     QByteArray original;
@@ -557,7 +613,7 @@ bool CJmvMapTestLauncher::patchAutoexec(QString* error)
     QByteArray patched = original;
     if(!patched.isEmpty() && !patched.endsWith('\n'))
         patched.append("\r\n");
-    patched.append("server ");
+    patched.append("endurance_launch ");
     patched.append(m_temporaryMapName.toLatin1());
     patched.append("\r\n");
     m_patchedAutoexecSha256 = sha256(patched);
@@ -572,7 +628,7 @@ bool CJmvMapTestLauncher::patchAutoexec(QString* error)
        fileSha256(m_autoexecPath) != m_patchedAutoexecSha256)
     {
         if(error && error->isEmpty())
-            *error = "The temporary 2utoexec.cfg patch failed its SHA-256 check.";
+            *error = "The temporary JMV 2utoexec.cfg marker failed its SHA-256 check.";
         return false;
     }
     appendRunLog(QString("Patched autoexec originalSha256=%1 patchedSha256=%2")
@@ -600,6 +656,17 @@ void CJmvMapTestLauncher::appendRunLog(const QString& message)
         stream << QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs)
                << " " << message << "\n";
     }
+}
+
+QString CJmvMapTestLauncher::bridgeResultSummary() const
+{
+    QFile result(m_bridgeResultPath);
+    if(!result.open(QIODevice::ReadOnly | QIODevice::Text))
+        return "JMV bridge produced no result log; the runtime may not have loaded the temporary ASI.";
+    const QString text = QString::fromUtf8(result.readAll()).trimmed();
+    return text.isEmpty() ?
+        "JMV bridge result log was empty; the runtime did not report bridge readiness." :
+        "JMV bridge result:\n" + text;
 }
 
 QString CJmvMapTestLauncher::cleanup()

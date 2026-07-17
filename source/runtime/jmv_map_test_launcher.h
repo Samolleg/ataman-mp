@@ -50,10 +50,12 @@ signals:
 
 private:
     bool stage(const SJmvMapTestLaunchInput& input, QString* error);
+    bool installBridge(QString* error);
     bool patchAutoexec(QString* error);
     QString cleanup();
     bool writeManifest(const QString& state, QString* error = nullptr);
     void appendRunLog(const QString& message);
+    QString bridgeResultSummary() const;
     void focusGameWindow();
 
     QProcess* m_process;
@@ -66,6 +68,10 @@ private:
     QString m_liveMobPath;
     QString m_autoexecPath;
     QString m_autoexecBackupPath;
+    QString m_bridgeSourcePath;
+    QString m_bridgeLivePath;
+    QString m_bridgeResultPath;
+    QString m_bridgeSha256;
     bool m_originalAutoexecExisted;
     QString m_originalAutoexecSha256;
     QString m_patchedAutoexecSha256;

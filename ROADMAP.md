@@ -5,7 +5,7 @@ An item is checked only after its implementation has landed and received the
 listed level of validation. New findings and wishlist requests belong here so
 they do not get lost between test sessions.
 
-Current development release: `0.1.0-alpha.41`.
+Current development release: `0.1.0-alpha.44`.
 
 ## Implementation evidence
 
@@ -375,13 +375,20 @@ MOB editing does not imply that landscape saving is supported.
 - [x] Implement the first experimental JMV `MapTestLauncher` backend for one
   loaded MPR plus one active MOB. It stages the exact validated in-memory MOB,
   injects a disposable player bootstrap, writes uniquely named temporary map
-  copies into the active JMV `Maps` folder, and launches through `server <name>`.
+  copies into the active JMV `Maps` folder. Alpha.42/43 proved staging and
+  cleanup but rejected the attempted console route: `server` is not registered
+  as an accessible command in the validated JMV runtime.
   It never replaces a source/live map or rewrites `texts.res`.
 - [x] Choose a deterministic spawn from the map table's travel-zone deploy
   rectangles without assuming their centers are free. Score candidates against
   physical MOB object bounds and rectangle edges, fall back across travel zones,
   and refuse launch when no candidate has the required clearance.
-- [x] Back up `Engine/autoexec.cfg` byte-for-byte before its temporary command,
+- [x] Add a temporary, fingerprinted x86 JMV bridge which intercepts only a
+  private `endurance_launch ed????????` transition marker and invokes the
+  existing internal server handler on the game thread. The ASI is never loaded
+  into Endurance, refuses unknown game hashes/signatures, and is removed only
+  while its installed hash still matches.
+- [x] Back up `Engine/2utoexec.cfg` byte-for-byte before its temporary marker,
   hash-check all temporary writes, restore only the exact Endurance-owned patch,
   remove only hash-matching temporary maps, retain run manifests/logs, and recover
   interrupted cleanup at the next editor start.
@@ -392,8 +399,9 @@ MOB editing does not imply that landscape saving is supported.
   temporary state after normal exit, launch failure, and a forced crash.
 - [ ] Determine supplemental `Auto<map>*.mob` discovery/order and then prototype
   declared multi-MOB test loading through the existing convention or `AddMobEx`.
-- [ ] Add bridge readiness/loaded-map identity reporting if the console/server
-  prototype cannot prove the requested map and MOB set loaded exactly once.
+- [x] Add bridge readiness and request diagnostics to each retained test-run log.
+- [ ] Add loaded-map identity reporting; readiness/request logs alone do not yet
+  prove the requested map and MOB set loaded exactly once.
 - [ ] Keep direct launch disabled for Base EI. JMV remains explicitly
   experimental until the focused runtime gate above passes.
 
@@ -414,6 +422,9 @@ MOB editing does not imply that landscape saving is supported.
   candidate with lossless in-memory staging, obstruction-aware travel-zone
   spawn selection, hash-owned temporary Maps files, and recoverable autoexec
   restoration. Availability remains experimental pending the focused in-game gate.
+- [x] `0.1.0-alpha.44`: replace the rejected public-console command with a
+  temporary fingerprinted JMV bridge and run-specific bridge diagnostics.
+  Availability remains experimental pending the focused in-game gate.
 - [x] `0.1.0-alpha.41`: redo-safe raw provenance and the July 17 multi-edit/UI
   fixes passed owner testing and were handed to the closed tester group.
   ([`db3fa31`](https://github.com/Ilufus/ei-mapper-endurance/commit/db3fa31),

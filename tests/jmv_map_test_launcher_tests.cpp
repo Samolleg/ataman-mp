@@ -17,6 +17,8 @@ private slots:
     void rejectsMalformedExistingWorldScript();
     void recoveryRemovesAutoexecCreatedByEndurance();
     void recoveryRestoresPreexistingAutoexec();
+    void recoveryRemovesOwnedBridge();
+    void recoveryRetainsChangedBridge();
 };
 
 static QString hash(const QByteArray& data)
@@ -35,7 +37,9 @@ static QString createRecoveryManifest(const QString& autoexecPath,
                                       const QString& backupPath,
                                       bool originalExisted,
                                       const QByteArray& original,
-                                      const QByteArray& patched)
+                                      const QByteArray& patched,
+                                      const QString& bridgePath = QString(),
+                                      const QByteArray& bridgeBytes = QByteArray())
 {
     const QString root = QDir(QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation))
             .filePath("test-runs");
@@ -52,6 +56,13 @@ static QString createRecoveryManifest(const QString& autoexecPath,
     manifest.insert("state", "launching");
     manifest.insert("pid", 0);
     manifest.insert("autoexec", autoexec);
+    if(!bridgePath.isEmpty())
+    {
+        QJsonObject bridge;
+        bridge.insert("path", bridgePath);
+        bridge.insert("sha256", hash(bridgeBytes));
+        manifest.insert("bridge", bridge);
+    }
     writeFile(QDir(run).filePath("manifest.json"),
               QJsonDocument(manifest).toJson(QJsonDocument::Indented));
     return run;
@@ -99,7 +110,7 @@ void JmvMapTestLauncherTests::recoveryRemovesAutoexecCreatedByEndurance()
     QTemporaryDir temp;
     QVERIFY(temp.isValid());
     const QString autoexec = QDir(temp.path()).filePath("autoexec.cfg");
-    const QByteArray patched("server ed12345678\r\n");
+    const QByteArray patched("endurance_launch ed12345678\r\n");
     writeFile(autoexec, patched);
     const QString run = createRecoveryManifest(autoexec,
         QDir(temp.path()).filePath("autoexec.original.cfg"), false, QByteArray(), patched);
@@ -117,7 +128,7 @@ void JmvMapTestLauncherTests::recoveryRestoresPreexistingAutoexec()
     const QString autoexec = QDir(temp.path()).filePath("autoexec.cfg");
     const QString backup = QDir(temp.path()).filePath("autoexec.original.cfg");
     const QByteArray original("fps 1\r\n");
-    const QByteArray patched(original + "server ed12345678\r\n");
+    const QByteArray patched(original + "endurance_launch ed12345678\r\n");
     writeFile(autoexec, patched);
     writeFile(backup, original);
     const QString run = createRecoveryManifest(autoexec, backup, true, original, patched);
@@ -127,6 +138,38 @@ void JmvMapTestLauncherTests::recoveryRestoresPreexistingAutoexec()
     QVERIFY(restored.open(QIODevice::ReadOnly));
     QCOMPARE(restored.readAll(), original);
     QVERIFY(summary.contains("Restored autoexec file"));
+    QDir(run).removeRecursively();
+}
+
+void JmvMapTestLauncherTests::recoveryRemovesOwnedBridge()
+{
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+    const QString bridge = QDir(temp.path()).filePath("EIMapperEnduranceJmvBridge.asi");
+    const QByteArray bridgeBytes("fingerprinted bridge");
+    writeFile(bridge, bridgeBytes);
+    const QString run = createRecoveryManifest(QString(), QString(), false,
+        QByteArray(), QByteArray(), bridge, bridgeBytes);
+    QVERIFY(!run.isEmpty());
+    const QString summary = CJmvMapTestLauncher::recoverInterruptedRuns();
+    QVERIFY2(!QFileInfo::exists(bridge), qPrintable(summary));
+    QVERIFY(summary.contains("Removed temporary file"));
+    QDir(run).removeRecursively();
+}
+
+void JmvMapTestLauncherTests::recoveryRetainsChangedBridge()
+{
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+    const QString bridge = QDir(temp.path()).filePath("EIMapperEnduranceJmvBridge.asi");
+    const QByteArray owned("fingerprinted bridge");
+    writeFile(bridge, QByteArray("externally changed"));
+    const QString run = createRecoveryManifest(QString(), QString(), false,
+        QByteArray(), QByteArray(), bridge, owned);
+    QVERIFY(!run.isEmpty());
+    const QString summary = CJmvMapTestLauncher::recoverInterruptedRuns();
+    QVERIFY(QFileInfo::exists(bridge));
+    QVERIFY(summary.contains("Retained changed temporary file"));
     QDir(run).removeRecursively();
 }
 
