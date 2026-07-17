@@ -61,6 +61,15 @@ installed MOB that contains objects: 252 passed, 2 objectless MOBs skipped, and 
 failed. All pre-existing and remaining object subtree hashes stayed in exact order.
 This is document-layer evidence only; UI copy/delete remains disconnected.
 
+Commit [`f68ce87`](https://github.com/Ilufus/ei-mapper-endurance/commit/f68ce87)
+adds the first UI structural bridge: after strict parsing and legacy projection,
+Endurance binds each projected object to the source document SHA-256, exact raw
+section path, and subtree SHA-256 only when the complete ordered NID sequence
+aligns. Clipboard copies retain that provenance and are explicitly marked as
+copies. A mismatch fails closed and is logged; it does not fall back to NID-only
+identity. Structural saves remain disabled until this provenance can be replayed
+and the resulting semantic diff can be authorized as a whole.
+
 ## Real UI evidence
 
 The first alpha.25 tester case changed one unit's diplomacy/player assignment from

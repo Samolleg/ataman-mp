@@ -184,8 +184,11 @@ These are the remaining safety gates before editing live maps can be recommended
 - [ ] Copy/delete exact raw object subtrees and create new objects only from
   profile-approved raw templates. The provenance-checked document core now
   duplicates/removes exact object bytes and passed 252/252 installed MOBs that
-  contain objects; UI provenance binding, copied-leaf edits, undo integration,
-  and template creation remain. ([`8013339`](https://github.com/Ilufus/ei-mapper-endurance/commit/8013339))
+  contain objects. Loaded UI objects are now bound to source-document, section,
+  and subtree hashes, and same-MOB clipboard copies carry that identity through
+  undo/redo. Replaying copied-leaf edits, final semantic authorization, and
+  profile-approved template creation remain. ([`8013339`](https://github.com/Ilufus/ei-mapper-endurance/commit/8013339),
+  [`f68ce87`](https://github.com/Ilufus/ei-mapper-endurance/commit/f68ce87))
 - [ ] Complete lossless MPR preservation for names, timestamps, alignment, and extra entries.
 - [ ] Verify CP1251 script byte lengths and round trips across the corpus.
 - [ ] Add an explicit duplicate-ID Repair preview with reference and script auditing.
