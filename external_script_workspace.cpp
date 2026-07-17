@@ -10,6 +10,7 @@
 #include <QTextCodec>
 #include <QUrl>
 #include <QProcess>
+#include <QApplication>
 
 #include "mob/mob.h"
 #include "log.h"
@@ -26,6 +27,15 @@ CExternalScriptWorkspaceManager::CExternalScriptWorkspaceManager(
             this, &CExternalScriptWorkspaceManager::onDirectoryChanged);
     connect(&m_debounce, &QTimer::timeout,
             this, &CExternalScriptWorkspaceManager::processPendingChange);
+    if(QApplication* application = qobject_cast<QApplication*>(QApplication::instance()))
+    {
+        connect(application, &QGuiApplication::applicationStateChanged, this,
+                [this](Qt::ApplicationState state)
+        {
+            if(state == Qt::ApplicationActive)
+                continuePending();
+        });
+    }
 }
 
 QString CExternalScriptWorkspaceManager::displayScript(CMob* mob)
@@ -82,7 +92,10 @@ QString CExternalScriptWorkspaceManager::pendingMarkerPath(const QString& path)
 
 void CExternalScriptWorkspaceManager::markPending(const QString& path)
 {
-    QFile marker(pendingMarkerPath(path));
+    const QString markerPath = pendingMarkerPath(path);
+    if(QFileInfo::exists(markerPath))
+        return;
+    QFile marker(markerPath);
     if(marker.open(QIODevice::WriteOnly | QIODevice::Truncate))
     {
         marker.write("unimported external script change\n");
@@ -273,6 +286,13 @@ void CExternalScriptWorkspaceManager::processPendingChange()
 {
     if(m_promptOpen || m_pendingPaths.isEmpty())
         return;
+    if(QApplication::applicationState() != Qt::ApplicationActive)
+    {
+        // Saving in an external editor must not create a modal prompt behind
+        // that editor. Keep the change queued and show it when Endurance regains
+        // foreground focus via applicationStateChanged.
+        return;
+    }
     const QString path = *m_pendingPaths.constBegin();
     m_pendingPaths.remove(path);
     CMob* mob = m_pathMobs.value(path, nullptr);
@@ -322,8 +342,11 @@ void CExternalScriptWorkspaceManager::processPendingChange()
     }
 
     m_promptOpen = true;
+    QWidget* promptWindow = m_promptParent ? m_promptParent->window() : nullptr;
+    ei::log(eLogInfo, QString("Showing external script import prompt mob:%1 path:%2")
+            .arg(mob->mobName(), path));
     const QMessageBox::StandardButton answer = QMessageBox::question(
-            m_promptParent, "External script changed",
+            promptWindow, "External script changed",
             QString("Import the changed external script into %1? This will create one undo-history entry.")
                     .arg(mob->mobName()), QMessageBox::Yes | QMessageBox::No);
     m_promptOpen = false;
