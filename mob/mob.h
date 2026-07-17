@@ -17,6 +17,8 @@ class CPatrolPoint;
 class CLookPoint;
 class CActivationZone;
 class CTrapCastPoint;
+class CMobEditTransaction;
+class CValidationReport;
 
 ///
 /// \brief The CMob class provides reading, saving and editing of *.mob file.
@@ -99,6 +101,11 @@ public:
     // <== end functions of logic
 
 private:
+    bool buildRawObjectSequenceCandidate(const QByteArray& currentProjection,
+                                         CMobEditTransaction* transaction,
+                                         QByteArray* candidate,
+                                         CValidationReport* report,
+                                         QString* saveClass) const;
     QString getAuxDirName();
     bool deserialize(QByteArray data);
     void updateObjects();

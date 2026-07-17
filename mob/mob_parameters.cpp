@@ -313,7 +313,15 @@ void CMobParameters::on_pushCancel_clicked()
 void CMobParameters::on_pushApply_clicked()
 {
     QTextCodec* pDefaultTextCodec = QTextCodec::codecForName("Windows-1251");
-    auto strArr = pDefaultTextCodec->fromUnicode(ui->plainTextEdit->toPlainText()); //convert from script unicode to win1251 byte array
+    const QString editorText = ui->plainTextEdit->toPlainText();
+    auto strArr = pDefaultTextCodec->fromUnicode(editorText); //convert from script unicode to win1251 byte array
+    if(pDefaultTextCodec->toUnicode(strArr) != editorText)
+    {
+        QMessageBox::critical(this, "Script encoding",
+            "The script contains characters that cannot be stored in Windows-1251. "
+            "Nothing was applied; remove or replace the unsupported characters.");
+        return;
+    }
     QString str = QString::fromLatin1(strArr); //convert byte array to qstring
 
     m_pCurMob->setScript(str);

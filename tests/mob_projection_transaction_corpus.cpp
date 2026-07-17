@@ -77,6 +77,35 @@ int main(int argc, char* argv[])
             continue;
         }
 
+        if(!source.objects().isEmpty())
+        {
+            QStringList objectPaths;
+            QVector<QByteArray> objectHashes;
+            for(const SMobObjectSnapshot& object : source.objects())
+            {
+                objectPaths.append(object.sectionPath);
+                objectHashes.append(object.subtreeSha256);
+            }
+            QByteArray rebuiltSequence;
+            if(!source.rebuildObjectSequence(objectPaths, objectHashes,
+                                             &rebuiltSequence, &report) ||
+               rebuiltSequence != source.originalBytes())
+            {
+                output << "FAIL no-op object sequence " << path << "\n" << report.toText();
+                ++failed;
+                continue;
+            }
+        }
+        QByteArray reconciledLogic;
+        if(!source.reconcileLogicPointStructure(source, source,
+                                                &reconciledLogic, &report) ||
+           reconciledLogic != source.originalBytes())
+        {
+            output << "FAIL no-op logic structure " << path << "\n" << report.toText();
+            ++failed;
+            continue;
+        }
+
         QByteArray replacement = leaf->rawBytes.mid(8);
         replacement[replacement.size() - 1] = char(replacement.back() ^ 0x01);
         CMobEditTransaction seed("corpus seed leaf mutation");

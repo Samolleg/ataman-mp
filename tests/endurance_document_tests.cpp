@@ -45,6 +45,21 @@ QByteArray object(quint32 nid, const QByteArray& name = "test", float x = 0.0f)
     return section(0xB001, payload);
 }
 
+QByteArray lookPoint(float x)
+{
+    return section(0xBBBE0000,
+        section(0xBBBE0001, plot(x, 2.0f, 3.0f)) +
+        section(0xBBBE0002, u32(0)) +
+        section(0xBBBE0003, u32(0)) +
+        section(0xBBBE0004, QByteArray(1, '\0')));
+}
+
+QByteArray patrolPoint(float x, const QByteArray& looks = QByteArray())
+{
+    return section(0xBBBD0000,
+        section(0xBBBD0001, plot(x, 2.0f, 3.0f)) + looks);
+}
+
 QByteArray validMob(const QByteArray& rootChild = QByteArray())
 {
     return section(0xA000, rootChild);
@@ -75,6 +90,9 @@ private slots:
     void transactionPreservesEmptyContainers();
     void objectSubtreeDuplicateAndDeleteAreExact();
     void objectSubtreeRejectsStaleProvenance();
+    void objectSequenceRebuildIsExactAndOrdered();
+    void copiedObjectSequenceAcceptsOnlyIntendedLeafEdits();
+    void patrolAndLookPointStructureIsReconciledExactly();
     void projectionDeltaPreservesRawSourceStructure();
     void projectionDeltaRejectsStructuralEdits();
     void projectionDeltaRejectsMissingSourceRecord();
@@ -308,6 +326,152 @@ void EnduranceDocumentTests::objectSubtreeRejectsStaleProvenance()
                                            QByteArray(32, '\x7f'), &output, &report));
     QVERIFY(output.isEmpty());
     QVERIFY(report.hasErrors());
+}
+
+void EnduranceDocumentTests::objectSequenceRebuildIsExactAndOrdered()
+{
+    const QByteArray firstBytes = object(10, "first");
+    const QByteArray secondBytes = object(20, "second");
+    CMobDocument source;
+    CValidationReport report;
+    QVERIFY2(source.loadBytes(validMob(section(0xB000, firstBytes + secondBytes)),
+                              "sequence-source.mob", &report),
+             qPrintable(report.toText()));
+    QCOMPARE(source.objects().size(), 2);
+    const SMobObjectSnapshot first = source.objects().at(0);
+    const SMobObjectSnapshot second = source.objects().at(1);
+
+    QByteArray rebuiltBytes;
+    QVERIFY2(source.rebuildObjectSequence(
+                 QStringList() << second.sectionPath << first.sectionPath << first.sectionPath,
+                 QVector<QByteArray>() << second.subtreeSha256
+                                       << first.subtreeSha256
+                                       << first.subtreeSha256,
+                 &rebuiltBytes, &report), qPrintable(report.toText()));
+    CMobDocument rebuilt;
+    QVERIFY(rebuilt.loadBytes(rebuiltBytes, "sequence-output.mob", &report));
+    QCOMPARE(rebuilt.objects().size(), 3);
+    QCOMPARE(rebuilt.objects().at(0).nid, quint32(20));
+    QCOMPARE(rebuilt.objects().at(1).nid, quint32(10));
+    QCOMPARE(rebuilt.objects().at(2).nid, quint32(10));
+    QCOMPARE(rebuilt.objects().at(0).subtreeSha256, second.subtreeSha256);
+    QCOMPARE(rebuilt.objects().at(1).subtreeSha256, first.subtreeSha256);
+    QCOMPARE(rebuilt.objects().at(2).subtreeSha256, first.subtreeSha256);
+
+    QVERIFY(!source.rebuildObjectSequence(
+                QStringList() << first.sectionPath,
+                QVector<QByteArray>() << QByteArray(32, '\x7f'),
+                &rebuiltBytes, &report));
+    QVERIFY(rebuiltBytes.isEmpty());
+}
+
+void EnduranceDocumentTests::copiedObjectSequenceAcceptsOnlyIntendedLeafEdits()
+{
+    const QByteArray unknown = section(0xDEADBEEF, "opaque-object-data");
+    const QByteArray cleanObject = object(42, "wolf", 1.0f);
+    QByteArray rawPayload = cleanObject.mid(8);
+    rawPayload += unknown;
+    const QByteArray rawObject = section(0xB001, rawPayload);
+    const QByteArray sourceBytes = validMob(section(0xB000, rawObject));
+    const QByteArray cleanBytes = validMob(section(0xB000, cleanObject));
+    const QByteArray editedBytes = validMob(section(0xB000,
+        cleanObject + object(43, "wolf", 10.0f)));
+
+    CMobDocument source;
+    CMobDocument clean;
+    CValidationReport report;
+    QVERIFY(source.loadBytes(sourceBytes, "copy-source.mob", &report));
+    QVERIFY(clean.loadBytes(cleanBytes, "copy-clean.mob", &report));
+    QByteArray structuralSource;
+    QByteArray structuralClean;
+    const SMobObjectSnapshot raw = source.objects().front();
+    const SMobObjectSnapshot projected = clean.objects().front();
+    QVERIFY(source.rebuildObjectSequence(
+        QStringList() << raw.sectionPath << raw.sectionPath,
+        QVector<QByteArray>() << raw.subtreeSha256 << raw.subtreeSha256,
+        &structuralSource, &report));
+    QVERIFY(clean.rebuildObjectSequence(
+        QStringList() << projected.sectionPath << projected.sectionPath,
+        QVector<QByteArray>() << projected.subtreeSha256 << projected.subtreeSha256,
+        &structuralClean, &report));
+
+    CMobEditTransaction transaction;
+    QByteArray candidate;
+    QVERIFY2(CMobDocument::buildProjectionTransactionCandidate(
+        structuralSource, "copy-structural-source.mob", structuralClean,
+        editedBytes, &transaction, &candidate, &report), qPrintable(report.toText()));
+    QVERIFY(transaction.validatedChangedSaveClass());
+    QCOMPARE(transaction.edits().size(), 2);
+
+    QByteArray editedRawPayload = object(43, "wolf", 10.0f).mid(8);
+    editedRawPayload += unknown;
+    const QByteArray expected = validMob(section(0xB000,
+        rawObject + section(0xB001, editedRawPayload)));
+    QCOMPARE(candidate, expected);
+}
+
+void EnduranceDocumentTests::patrolAndLookPointStructureIsReconciledExactly()
+{
+    const QByteArray fixedLogic = section(0xBBBC0002, QByteArray(1, '\1'));
+    const QByteArray first = patrolPoint(1.0f, lookPoint(1.5f));
+    const QByteArray sourceFirst = section(0xBBBD0000,
+        section(0xBBBD0001, plot(1.0f, 2.0f, 3.0f)) +
+        section(0xDEAD0001, "point-opaque") + lookPoint(1.5f));
+    const QByteArray editedFirst = patrolPoint(1.0f,
+        lookPoint(1.5f) + lookPoint(1.8f));
+    const QByteArray second = patrolPoint(2.0f);
+    const QByteArray added = patrolPoint(1.25f, lookPoint(1.75f));
+    const QByteArray sourceObject = section(0xB001,
+        section(0xB002, u32(42)) + section(0xB003, u32(1)) +
+        section(0xDEADBEEF, "preserve-me") +
+        section(0xBBBC0000, fixedLogic + sourceFirst + second));
+    const QByteArray cleanObject = section(0xB001,
+        section(0xB002, u32(42)) + section(0xB003, u32(1)) +
+        section(0xBBBC0000, fixedLogic + first + second));
+    const QByteArray editedObject = section(0xB001,
+        section(0xB002, u32(42)) + section(0xB003, u32(1)) +
+        section(0xBBBC0000, fixedLogic + editedFirst + added));
+
+    CMobDocument source;
+    CMobDocument clean;
+    CMobDocument edited;
+    CValidationReport report;
+    QVERIFY(source.loadBytes(validMob(section(0xB000, sourceObject)),
+                             "logic-source.mob", &report));
+    QVERIFY(clean.loadBytes(validMob(section(0xB000, cleanObject)),
+                            "logic-clean.mob", &report));
+    QVERIFY(edited.loadBytes(validMob(section(0xB000, editedObject)),
+                             "logic-edited.mob", &report));
+    QByteArray structuralSource;
+    QByteArray structuralClean;
+    QVERIFY2(source.reconcileLogicPointStructure(clean, edited, &structuralSource, &report),
+             qPrintable(report.toText()));
+    QVERIFY2(clean.reconcileLogicPointStructure(clean, edited, &structuralClean, &report),
+             qPrintable(report.toText()));
+    CMobEditTransaction transaction;
+    QByteArray candidate;
+    QVERIFY2(CMobDocument::buildProjectionTransactionCandidate(
+        structuralSource, "logic-structural-source.mob", structuralClean,
+        edited.originalBytes(), &transaction, &candidate, &report),
+        qPrintable(report.toText()));
+    const QByteArray expectedObject = section(0xB001,
+        section(0xB002, u32(42)) + section(0xB003, u32(1)) +
+        section(0xDEADBEEF, "preserve-me") +
+        section(0xBBBC0000, fixedLogic +
+            section(0xBBBD0000,
+                section(0xBBBD0001, plot(1.0f, 2.0f, 3.0f)) +
+                section(0xDEAD0001, "point-opaque") +
+                lookPoint(1.5f) + lookPoint(1.8f)) + added));
+    const QByteArray expectedBytes = validMob(section(0xB000, expectedObject));
+    int mismatch = 0;
+    while(mismatch < candidate.size() && mismatch < expectedBytes.size() &&
+          candidate.at(mismatch) == expectedBytes.at(mismatch))
+        ++mismatch;
+    QVERIFY2(candidate == expectedBytes,
+             qPrintable(QString("logic candidate mismatch offset=%1 actual=%2 expected=%3")
+                .arg(mismatch)
+                .arg(QString::fromLatin1(candidate.mid(mismatch, 48).toHex()))
+                .arg(QString::fromLatin1(expectedBytes.mid(mismatch, 48).toHex()))));
 }
 
 void EnduranceDocumentTests::projectionDeltaPreservesRawSourceStructure()

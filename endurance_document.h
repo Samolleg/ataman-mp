@@ -175,6 +175,14 @@ public:
                              const QByteArray& expectedSubtreeSha256,
                              QByteArray* output,
                              CValidationReport* report = nullptr) const;
+    bool rebuildObjectSequence(const QStringList& objectPaths,
+                               const QVector<QByteArray>& expectedSubtreeSha256,
+                               QByteArray* output,
+                               CValidationReport* report = nullptr) const;
+    bool reconcileLogicPointStructure(const CMobDocument& cleanProjection,
+                                      const CMobDocument& editedProjection,
+                                      QByteArray* output,
+                                      CValidationReport* report = nullptr) const;
     bool deriveLeafTransaction(const CMobDocument& cleanProjection,
                                const CMobDocument& editedProjection,
                                CMobEditTransaction* transaction,

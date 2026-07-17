@@ -1664,6 +1664,122 @@ void CMob::clearSelect(bool bClearLogic)
     }
 }
 
+bool CMob::buildRawObjectSequenceCandidate(
+    const QByteArray& currentProjection, CMobEditTransaction* transaction,
+    QByteArray* candidate, CValidationReport* report, QString* saveClass) const
+{
+    if(!transaction || !candidate || !saveClass)
+        return false;
+    *transaction = CMobEditTransaction("raw object sequence save");
+    candidate->clear();
+    saveClass->clear();
+
+    CMobDocument sourceDocument;
+    CMobDocument cleanDocument;
+    CMobDocument editedDocument;
+    if(!sourceDocument.loadBytes(m_originalData, m_filePath.filePath(), report) ||
+       !cleanDocument.loadBytes(m_cleanProjection, "clean-ui-projection.mob", report) ||
+       !editedDocument.loadBytes(currentProjection, "edited-ui-projection.mob", report))
+        return false;
+
+    QMap<QString, const SMobObjectSnapshot*> cleanBySourcePath;
+    const CMobSemanticDiff alignment = CMobSemanticDiff::compare(sourceDocument, cleanDocument);
+    for(const SMobDiffEntry& entry : alignment.entries())
+    {
+        if(entry.baselineIndex < 0 || entry.candidateIndex < 0)
+            return false;
+        const SMobObjectSnapshot& source = sourceDocument.objects().at(entry.baselineIndex);
+        const SMobObjectSnapshot& clean = cleanDocument.objects().at(entry.candidateIndex);
+        if(cleanBySourcePath.contains(source.sectionPath))
+            return false;
+        cleanBySourcePath.insert(source.sectionPath, &clean);
+    }
+    if(cleanBySourcePath.size() != sourceDocument.objects().size())
+        return false;
+
+    const QByteArray sourceDocumentSha256 = QCryptographicHash::hash(
+        m_originalData, QCryptographicHash::Sha256);
+    QStringList sourcePaths;
+    QVector<QByteArray> sourceHashes;
+    QStringList cleanPaths;
+    QVector<QByteArray> cleanHashes;
+    sourcePaths.reserve(m_aNode.size());
+    sourceHashes.reserve(m_aNode.size());
+    cleanPaths.reserve(m_aNode.size());
+    cleanHashes.reserve(m_aNode.size());
+    for(CNode* node : m_aNode)
+    {
+        if(!node || !node->hasRawObjectProvenance() ||
+           node->rawSourceDocumentSha256() != sourceDocumentSha256 ||
+           !cleanBySourcePath.contains(node->rawSourceObjectPath()))
+        {
+            if(report)
+                report->add("mob.object_sequence.ui_provenance", EValidationSeverity::Error,
+                            "A current object has no matching raw source subtree",
+                            node ? QString::number(node->mapId()) : QString("null"));
+            return false;
+        }
+        const SMobObjectSnapshot* clean = cleanBySourcePath.value(
+            node->rawSourceObjectPath());
+        sourcePaths.append(node->rawSourceObjectPath());
+        sourceHashes.append(node->rawSourceSubtreeSha256());
+        cleanPaths.append(clean->sectionPath);
+        cleanHashes.append(clean->subtreeSha256);
+    }
+
+    QByteArray structuralSource;
+    QByteArray structuralClean;
+    if(!sourceDocument.rebuildObjectSequence(sourcePaths, sourceHashes,
+                                             &structuralSource, report) ||
+       !cleanDocument.rebuildObjectSequence(cleanPaths, cleanHashes,
+                                            &structuralClean, report))
+        return false;
+
+    CMobDocument structuralSourceDocument;
+    CMobDocument structuralCleanDocument;
+    if(!structuralSourceDocument.loadBytes(structuralSource,
+                                           "raw-object-sequence.mob", report) ||
+       !structuralCleanDocument.loadBytes(structuralClean,
+                                          "clean-object-sequence.mob", report))
+        return false;
+    QByteArray reconciledSource;
+    QByteArray reconciledClean;
+    if(!structuralSourceDocument.reconcileLogicPointStructure(
+           structuralCleanDocument, editedDocument, &reconciledSource, report) ||
+       !structuralCleanDocument.reconcileLogicPointStructure(
+           structuralCleanDocument, editedDocument, &reconciledClean, report))
+        return false;
+    structuralSource = reconciledSource;
+    structuralClean = reconciledClean;
+    if(structuralSource == m_originalData && structuralClean == m_cleanProjection)
+        return false;
+
+    if(currentProjection == structuralClean ||
+       (m_aNode.isEmpty() && editedDocument.objects().isEmpty()))
+    {
+        *candidate = structuralSource;
+        *saveClass = "RAW_OBJECT_SEQUENCE";
+    }
+    else
+    {
+        if(!CMobDocument::buildProjectionTransactionCandidate(
+               structuralSource, m_filePath.filePath(), structuralClean,
+               currentProjection, transaction, candidate, report) ||
+           !transaction->validatedChangedSaveClass(saveClass))
+            return false;
+        *saveClass = "RAW_OBJECT_SEQUENCE+" + *saveClass;
+    }
+
+    CMobDocument candidateDocument;
+    if(!candidateDocument.loadBytes(*candidate, "object-sequence-candidate.mob", report) ||
+       candidateDocument.objects().size() != m_aNode.size())
+    {
+        candidate->clear();
+        return false;
+    }
+    return true;
+}
+
 bool CMob::saveAs(const QFileInfo& path)
 {
     const QString filePath = path.filePath();
@@ -1683,9 +1799,33 @@ bool CMob::saveAs(const QFileInfo& path)
             CValidationReport transactionReport;
             CMobEditTransaction transaction;
             QByteArray transactionCandidate;
-            const bool candidateReady = CMobDocument::buildProjectionTransactionCandidate(
+            bool candidateReady = CMobDocument::buildProjectionTransactionCandidate(
                 m_originalData, m_filePath.filePath(), m_cleanProjection,
                 currentProjection, &transaction, &transactionCandidate, &transactionReport);
+            QString validatedClassName;
+            if(candidateReady)
+                candidateReady = transaction.validatedChangedSaveClass(&validatedClassName);
+            if(!candidateReady)
+            {
+                CValidationReport structuralReport;
+                CMobEditTransaction structuralTransaction;
+                QByteArray structuralCandidate;
+                QString structuralClass;
+                if(buildRawObjectSequenceCandidate(currentProjection,
+                                                   &structuralTransaction,
+                                                   &structuralCandidate,
+                                                   &structuralReport,
+                                                   &structuralClass))
+                {
+                    transaction = structuralTransaction;
+                    transactionCandidate = structuralCandidate;
+                    validatedClassName = structuralClass;
+                    transactionReport = structuralReport;
+                    candidateReady = true;
+                }
+                else
+                    transactionReport = structuralReport;
+            }
             if(candidateReady)
             {
                 const QString candidateHash = QString::fromLatin1(
@@ -1706,16 +1846,9 @@ bool CMob::saveAs(const QFileInfo& path)
                              QString::fromLatin1(edit.expectedSectionSha256.toHex()))
                         .arg(edit.replacementPayload.size()).arg(replacementHash));
                 }
-                QString validatedClassName;
-                if(transaction.validatedChangedSaveClass(&validatedClassName))
-                {
-                    data = transactionCandidate;
-                    ei::log(eLogInfo, QString("MOB transaction save authorized class:%1 path:%2 edits:%3")
-                        .arg(validatedClassName, filePath).arg(transaction.edits().size()));
-                }
-                else
-                    ei::log(eLogWarning, QString("MOB transaction candidate is missing raw-leaf provenance path:%1")
-                        .arg(filePath));
+                data = transactionCandidate;
+                ei::log(eLogInfo, QString("MOB transaction save authorized class:%1 path:%2 edits:%3")
+                    .arg(validatedClassName, filePath).arg(transaction.edits().size()));
             }
             else
             {
@@ -1727,9 +1860,10 @@ bool CMob::saveAs(const QFileInfo& path)
                 ei::log(eLogFatal, QString("Refusing dirty MOB save because the edit could not be mapped safely to the original raw tree path:%1")
                     .arg(filePath));
                 QMessageBox::critical(nullptr, "Lossless MOB save not available for this edit",
-                    "Endurance could not map this complete edit set onto the original MOB's existing raw fields. "
-                    "Ordinary property and transform edits save automatically; edits that add, remove, or reorder "
-                    "MOB sections are not yet handled by the raw-tree transaction path.\n\n"
+                    "Endurance could not map this complete edit set onto verified raw MOB records. "
+                    "Properties, transforms, same-MOB copy/paste, deletion, and known patrol/look-point "
+                    "changes save automatically. A newly created object requires a selected same-type raw "
+                    "template, and unrecognized structural records remain protected.\n\n"
                     "No destination or backup file was changed. Endurance will not fall back to the legacy "
                     "rebuilding serializer.");
                 return false;

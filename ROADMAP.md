@@ -5,7 +5,7 @@ An item is checked only after its implementation has landed and received the
 listed level of validation. New findings and wishlist requests belong here so
 they do not get lost between test sessions.
 
-Current development release: `0.1.0-alpha.30`.
+Current development release: `0.1.0-alpha.31`.
 
 ## Implementation evidence
 
@@ -58,13 +58,15 @@ behavior.
 
 ## Current focus
 
-- [ ] Package alpha.30 for normal-edit testing: move units, change mixed property
+- [x] Implement the final hardening-alpha save scope: normal mixed leaf edits,
+  exact same-MOB copy/paste and deletion, known patrol/look-point structure, and
+  selected same-type raw templates for object creation.
+- [ ] Package alpha.31 for normal and structural edit testing: move units, change mixed property
   fields, undo back to clean, save/reopen, and verify the resulting maps in JMV.
-  ([implementation](https://github.com/Ilufus/ei-mapper-endurance/commit/843ba9c),
-  [test matrix](ALPHA30_VALIDATION.md))
-- [ ] Finish structural MOB saves for copy/paste, object creation/deletion, and
-  adding/removing patrol or look points. Reuse exact source subtrees for copies
-  and profile-approved templates for genuinely new objects.
+  ([test matrix](ALPHA31_VALIDATION.md))
+- [x] Connect structural MOB saves for same-MOB copy/paste, object deletion, and
+  adding/removing known patrol or look points. Reuse exact source subtrees for
+  copies and require an explicit selected same-type template for new objects.
 - [ ] Verify structural saves with automated untouched-data comparison, Endurance
   reopen, MobExplorer comparison, and focused JMV `drawall`/unload/reload tests.
 - [ ] Verify scripts and all edited text round-trip through CP1251 without changing
@@ -315,11 +317,11 @@ These are the remaining safety gates before editing live maps can be recommended
 - [x] `0.1.0-alpha.14`: testing-group build with Settings-based setup,
   explicit base-game humanoid known issue, database appearance diagnostics, and
   a coordinated test/report matrix. ([`800a011`](https://github.com/Ilufus/ei-mapper-endurance/commit/800a011), [validation](ALPHA14_VALIDATION.md))
-- [ ] `0.1.0-alpha.30`: tester build for ordinary mixed MOB property/transform
-  saves with invisible raw preservation checks; structural copy/delete/patrol
-  changes remain the clearly reported limitation.
-- [ ] Following private alpha: enable and validate structural MOB operations,
-  then publish a concise Base/JMV coverage summary from tester results.
+- [ ] `0.1.0-alpha.31`: final hardening tester build covering ordinary mixed
+  property/transform saves, exact same-MOB copy/delete, and known patrol/look
+  structural edits with invisible raw preservation checks.
+- [ ] Following private alpha: fix issues found by the closed test group and
+  publish a concise Base/JMV coverage summary; no new hardening architecture.
 - [ ] `0.1.0-beta.1`: correct indexed resources and responsive fast loading.
 - [ ] `0.1.0-rc.1`: independent workspace workflow, UI, script editing, and completed safety validation.
 - [ ] `1.0.0`: JMV-ready release passing the full corpus, MobExplorer, and in-game validation matrix.

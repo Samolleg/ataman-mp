@@ -15,6 +15,7 @@
 #include "undo.h"
 #include "layout_components/tree_view.h"
 #include <QJsonArray>
+#include <QMessageBox>
 
 CCreateObjectForm::CCreateObjectForm(QWidget *parent) :
     QDialog(parent),
@@ -242,10 +243,24 @@ void CCreateObjectForm::on_buttonCreate_clicked()
         return;
     }
     auto pMob = m_pView->currentMob();
+    const ENodeType type = m_pNode->nodeType();
+    CNode* rawTemplate = nullptr;
+    const QList<CNode*> selected = m_pView->selectedNodes();
+    if(selected.size() == 1 && selected.front()->nodeType() == type &&
+       selected.front()->hasRawObjectProvenance())
+        rawTemplate = selected.front();
+    if(!rawTemplate)
+    {
+        QMessageBox::information(this, "Select a creation template",
+            "To preserve complete MOB data, select one existing object of the same type "
+            "before opening Create Object. Endurance will use its complete raw record as "
+            "the template and apply the values entered here. You can also copy and paste "
+            "an existing object.");
+        return;
+    }
     pMob->clearSelect();
     auto pos = QWidget::mapFromGlobal(QCursor::pos());
     auto posOnLand = m_pView->getTerrainPos(pos.x(), pos.y());
-    ENodeType type = m_pNode->nodeType();
     switch (type)
     {
     case eWorldObject:
@@ -265,7 +280,15 @@ void CCreateObjectForm::on_buttonCreate_clicked()
     m_pNode->updatePos(posOnLand);
     CLandscape::getInstance()->projectPosition(m_pNode);
 
-    CCreateNodeCommand* pUndo = new CCreateNodeCommand(m_pView, m_pNode->toJson());
+    QJsonObject nodeData = m_pNode->toJson();
+    QJsonObject provenance;
+    provenance.insert("sourceDocumentSha256",
+        QString::fromLatin1(rawTemplate->rawSourceDocumentSha256().toHex()));
+    provenance.insert("sourceObjectPath", rawTemplate->rawSourceObjectPath());
+    provenance.insert("sourceSubtreeSha256",
+        QString::fromLatin1(rawTemplate->rawSourceSubtreeSha256().toHex()));
+    nodeData.insert("_Endurance raw provenance", provenance);
+    CCreateNodeCommand* pUndo = new CCreateNodeCommand(m_pView, nodeData);
     QObject::connect(pUndo, SIGNAL(addNodeSignal(CNode*)), m_pView->objectTree(), SLOT(addNodeToTree(CNode*)));
     QObject::connect(pUndo, SIGNAL(undo_addNodeSignal(uint)), m_pView->objectTree(), SLOT(onNodeDelete(uint)));
     m_pUndoStack->push(pUndo);

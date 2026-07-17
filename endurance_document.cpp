@@ -410,6 +410,298 @@ bool emitObjectSubtreeChange(const SMobSection& section, const QString& targetPa
     output->append(childBytes);
     return true;
 }
+
+bool emitObjectSequence(const SMobSection& section,
+                        const QVector<const SMobSection*>& objects,
+                        bool* applied, QByteArray* output,
+                        CValidationReport* report)
+{
+    if(section.type == 0xB000)
+    {
+        if(*applied)
+        {
+            if(report)
+                report->add("mob.object_sequence.multiple_sections",
+                            EValidationSeverity::Error,
+                            "The MOB contains more than one OBJECT_SECTION",
+                            section.path);
+            return false;
+        }
+        *applied = true;
+        QByteArray childBytes;
+        // Every direct OBJECT_SECTION child is one object record. Different
+        // profiles use more than one numeric root type, so do not assume B001.
+        for(const SMobSection* object : objects)
+            childBytes.append(object->rawBytes);
+        const quint64 newLength = quint64(childBytes.size()) + 8;
+        if(newLength > quint64(UINT_MAX))
+        {
+            if(report)
+                report->add("mob.object_sequence.overflow", EValidationSeverity::Error,
+                            "Rebuilt OBJECT_SECTION exceeds the MOB length limit",
+                            section.path);
+            return false;
+        }
+        appendU32(*output, section.type);
+        appendU32(*output, quint32(newLength));
+        output->append(childBytes);
+        return true;
+    }
+
+    if(!section.container || section.children.isEmpty())
+    {
+        output->append(section.rawBytes);
+        return true;
+    }
+    QByteArray childBytes;
+    for(const SMobSection& child : section.children)
+        if(!emitObjectSequence(child, objects, applied, &childBytes, report))
+            return false;
+    const quint64 newLength = quint64(childBytes.size()) + 8;
+    if(newLength > quint64(UINT_MAX))
+        return false;
+    appendU32(*output, section.type);
+    appendU32(*output, quint32(newLength));
+    output->append(childBytes);
+    return true;
+}
+
+const SMobSection* childByTypeOccurrence(const SMobSection* parent,
+                                         quint32 type, int occurrence)
+{
+    if(!parent)
+        return nullptr;
+    int found = 0;
+    for(const SMobSection& child : parent->children)
+        if(child.type == type)
+        {
+            if(found == occurrence)
+                return &child;
+            ++found;
+        }
+    return nullptr;
+}
+
+QVector<const SMobSection*> childrenOfType(const SMobSection& parent, quint32 type)
+{
+    QVector<const SMobSection*> result;
+    for(const SMobSection& child : parent.children)
+        if(child.type == type)
+            result.append(&child);
+    return result;
+}
+
+QVector<int> exactSequenceMatches(const QVector<const SMobSection*>& clean,
+                                  const QVector<const SMobSection*>& edited)
+{
+    const int rows = clean.size() + 1;
+    const int columns = edited.size() + 1;
+    QVector<int> lengths(rows * columns, 0);
+    for(int i = clean.size() - 1; i >= 0; --i)
+        for(int j = edited.size() - 1; j >= 0; --j)
+            lengths[i * columns + j] = clean.at(i)->rawBytes == edited.at(j)->rawBytes
+                ? 1 + lengths[(i + 1) * columns + j + 1]
+                : qMax(lengths[(i + 1) * columns + j],
+                       lengths[i * columns + j + 1]);
+    QVector<int> editedToClean(edited.size(), -1);
+    int i = 0;
+    int j = 0;
+    while(i < clean.size() && j < edited.size())
+    {
+        if(clean.at(i)->rawBytes == edited.at(j)->rawBytes)
+        {
+            editedToClean[j++] = i++;
+        }
+        else if(lengths[(i + 1) * columns + j] >=
+                lengths[i * columns + j + 1])
+            ++i;
+        else
+            ++j;
+    }
+    QSet<int> usedClean;
+    for(int match : editedToClean)
+        if(match >= 0)
+            usedClean.insert(match);
+
+    // A patrol container changes byte hash when a look point is added or
+    // removed. Pair such records by their direct position leaf before treating
+    // them as delete+add, so source-only fields remain attached to the point.
+    const auto identityLeaf = [](const SMobSection* section) -> QByteArray {
+        if(!section)
+            return QByteArray();
+        const quint32 identityType = section->type == 0xBBBD0000
+            ? 0xBBBD0001 : (section->type == 0xBBBE0000 ? 0xBBBE0001 : 0);
+        if(identityType == 0)
+            return QByteArray();
+        for(const SMobSection& child : section->children)
+            if(child.type == identityType)
+                return child.rawBytes;
+        return QByteArray();
+    };
+    for(int editedIndex = 0; editedIndex < edited.size(); ++editedIndex)
+    {
+        if(editedToClean.at(editedIndex) >= 0)
+            continue;
+        const QByteArray identity = identityLeaf(edited.at(editedIndex));
+        if(identity.isEmpty())
+            continue;
+        int uniqueMatch = -1;
+        for(int cleanIndex = 0; cleanIndex < clean.size(); ++cleanIndex)
+            if(!usedClean.contains(cleanIndex) &&
+               identityLeaf(clean.at(cleanIndex)) == identity)
+            {
+                if(uniqueMatch >= 0)
+                {
+                    uniqueMatch = -1;
+                    break;
+                }
+                uniqueMatch = cleanIndex;
+            }
+        if(uniqueMatch >= 0)
+        {
+            editedToClean[editedIndex] = uniqueMatch;
+            usedClean.insert(uniqueMatch);
+        }
+    }
+    if(clean.size() == edited.size())
+    {
+        QVector<int> remainingClean;
+        QVector<int> remainingEdited;
+        for(int cleanIndex = 0; cleanIndex < clean.size(); ++cleanIndex)
+            if(!usedClean.contains(cleanIndex))
+                remainingClean.append(cleanIndex);
+        for(int editedIndex = 0; editedIndex < edited.size(); ++editedIndex)
+            if(editedToClean.at(editedIndex) < 0)
+                remainingEdited.append(editedIndex);
+        if(remainingClean.size() == remainingEdited.size())
+            for(int index = 0; index < remainingClean.size(); ++index)
+                editedToClean[remainingEdited.at(index)] = remainingClean.at(index);
+    }
+    return editedToClean;
+}
+
+bool knownLogicPoint(const SMobSection& section)
+{
+    if(section.type == 0xBBBD0000)
+    {
+        for(const SMobSection& child : section.children)
+            if(child.type != 0xBBBD0001 && child.type != 0xBBBE0000)
+                return false;
+        return true;
+    }
+    if(section.type == 0xBBBE0000)
+    {
+        for(const SMobSection& child : section.children)
+            if(child.type < 0xBBBE0001 || child.type > 0xBBBE0004)
+                return false;
+        return true;
+    }
+    return false;
+}
+
+bool emitLogicStructure(const SMobSection& source,
+                        const SMobSection* clean,
+                        const SMobSection* edited,
+                        QByteArray* output,
+                        CValidationReport* report)
+{
+    if(!source.container || source.children.isEmpty() || !clean || !edited ||
+       source.type != clean->type || clean->type != edited->type)
+    {
+        output->append(source.rawBytes);
+        return true;
+    }
+
+    quint32 sequenceType = 0;
+    if(source.type == 0xBBBC0000)
+        sequenceType = 0xBBBD0000;
+    else if(source.type == 0xBBBD0000)
+        sequenceType = 0xBBBE0000;
+
+    QByteArray childBytes;
+    if(sequenceType != 0)
+    {
+        const QVector<const SMobSection*> sourceSequence = childrenOfType(source, sequenceType);
+        const QVector<const SMobSection*> cleanSequence = childrenOfType(*clean, sequenceType);
+        const QVector<const SMobSection*> editedSequence = childrenOfType(*edited, sequenceType);
+        if(sourceSequence.size() != cleanSequence.size())
+        {
+            if(report)
+                report->add("mob.logic_structure.provenance", EValidationSeverity::Error,
+                            "Raw and clean logic-point counts differ", source.path);
+            return false;
+        }
+        const QVector<int> matches = exactSequenceMatches(cleanSequence, editedSequence);
+        bool inserted = false;
+        for(const SMobSection& child : source.children)
+        {
+            if(child.type == sequenceType)
+            {
+                if(inserted)
+                    continue;
+                inserted = true;
+                for(int editedIndex = 0; editedIndex < editedSequence.size(); ++editedIndex)
+                {
+                    const int cleanIndex = matches.at(editedIndex);
+                    if(cleanIndex >= 0)
+                    {
+                        if(!emitLogicStructure(*sourceSequence.at(cleanIndex),
+                                               cleanSequence.at(cleanIndex),
+                                               editedSequence.at(editedIndex),
+                                               &childBytes, report))
+                            return false;
+                    }
+                    else
+                    {
+                        if(!knownLogicPoint(*editedSequence.at(editedIndex)))
+                        {
+                            if(report)
+                                report->add("mob.logic_structure.unknown_addition",
+                                            EValidationSeverity::Error,
+                                            "A new patrol/look point contains an unknown field",
+                                            editedSequence.at(editedIndex)->path);
+                            return false;
+                        }
+                        childBytes.append(editedSequence.at(editedIndex)->rawBytes);
+                    }
+                }
+                continue;
+            }
+            const SMobSection* cleanChild = childByTypeOccurrence(
+                clean, child.type, child.occurrence);
+            const SMobSection* editedChild = childByTypeOccurrence(
+                edited, child.type, child.occurrence);
+            if(!emitLogicStructure(child, cleanChild, editedChild, &childBytes, report))
+                return false;
+        }
+        if(!inserted)
+            for(const SMobSection* added : editedSequence)
+            {
+                if(!knownLogicPoint(*added))
+                    return false;
+                childBytes.append(added->rawBytes);
+            }
+    }
+    else
+    {
+        for(const SMobSection& child : source.children)
+        {
+            const SMobSection* cleanChild = childByTypeOccurrence(
+                clean, child.type, child.occurrence);
+            const SMobSection* editedChild = childByTypeOccurrence(
+                edited, child.type, child.occurrence);
+            if(!emitLogicStructure(child, cleanChild, editedChild, &childBytes, report))
+                return false;
+        }
+    }
+    const quint64 newLength = quint64(childBytes.size()) + 8;
+    if(newLength > quint64(UINT_MAX))
+        return false;
+    appendU32(*output, source.type);
+    appendU32(*output, quint32(newLength));
+    output->append(childBytes);
+    return true;
+}
 }
 
 QJsonObject SValidationFinding::toJson() const
@@ -860,6 +1152,110 @@ bool CMobDocument::removeObjectSubtree(const QString& objectPath,
 {
     return applyObjectSubtreeChange(*this, objectPath, expectedSubtreeSha256,
                                     false, output, report);
+}
+
+bool CMobDocument::rebuildObjectSequence(
+    const QStringList& objectPaths,
+    const QVector<QByteArray>& expectedSubtreeSha256,
+    QByteArray* output, CValidationReport* report) const
+{
+    if(!output)
+        return false;
+    output->clear();
+    if(objectPaths.size() != expectedSubtreeSha256.size())
+    {
+        if(report)
+            report->add("mob.object_sequence.input", EValidationSeverity::Error,
+                        "Object path and provenance hash counts differ");
+        return false;
+    }
+    QVector<const SMobSection*> requested;
+    requested.reserve(objectPaths.size());
+    for(int index = 0; index < objectPaths.size(); ++index)
+    {
+        const SMobSection* object = findObjectChild(m_sections, objectPaths.at(index));
+        if(!object || expectedSubtreeSha256.at(index).size() != 32 ||
+           object->sha256 != expectedSubtreeSha256.at(index))
+        {
+            if(report)
+                report->add("mob.object_sequence.provenance", EValidationSeverity::Error,
+                            "An object source path or subtree hash is stale",
+                            objectPaths.at(index));
+            return false;
+        }
+        requested.append(object);
+    }
+
+    bool applied = false;
+    for(const SMobSection& section : m_sections)
+        if(!emitObjectSequence(section, requested, &applied, output, report))
+        {
+            output->clear();
+            return false;
+        }
+    if(!applied)
+    {
+        if(report)
+            report->add("mob.object_sequence.missing_section", EValidationSeverity::Error,
+                        "The MOB has no OBJECT_SECTION to rebuild");
+        output->clear();
+        return false;
+    }
+
+    CMobDocument reparsed;
+    if(!reparsed.loadBytes(*output, "object-sequence-output.mob", report) ||
+       reparsed.objects().size() != requested.size())
+    {
+        if(report && !report->hasErrors())
+            report->add("mob.object_sequence.count", EValidationSeverity::Error,
+                        "Rebuilt object count does not match the requested sequence");
+        output->clear();
+        return false;
+    }
+    for(int index = 0; index < requested.size(); ++index)
+        if(reparsed.objects().at(index).subtreeSha256 != requested.at(index)->sha256)
+        {
+            if(report)
+                report->add("mob.object_sequence.bytes", EValidationSeverity::Error,
+                            "A rebuilt object subtree was not emitted byte-for-byte",
+                            objectPaths.at(index));
+            output->clear();
+            return false;
+        }
+    if(report)
+        report->add("mob.object_sequence.authorized", EValidationSeverity::Info,
+                    QString("Rebuilt %1 object entries from exact source subtrees")
+                        .arg(requested.size()));
+    return true;
+}
+
+bool CMobDocument::reconcileLogicPointStructure(
+    const CMobDocument& cleanProjection,
+    const CMobDocument& editedProjection,
+    QByteArray* output, CValidationReport* report) const
+{
+    if(!output)
+        return false;
+    output->clear();
+    if(m_sections.size() != cleanProjection.sections().size() ||
+       cleanProjection.sections().size() != editedProjection.sections().size())
+        return false;
+    for(int index = 0; index < m_sections.size(); ++index)
+        if(!emitLogicStructure(m_sections.at(index),
+                               &cleanProjection.sections().at(index),
+                               &editedProjection.sections().at(index),
+                               output, report))
+        {
+            output->clear();
+            return false;
+        }
+    CMobDocument reparsed;
+    if(!reparsed.loadBytes(*output, "logic-structure-output.mob", report))
+    {
+        output->clear();
+        return false;
+    }
+    return true;
 }
 
 static void collectLeafSections(const QVector<SMobSection>& sections,
