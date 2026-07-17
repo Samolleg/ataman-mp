@@ -38,6 +38,7 @@ class IPropertyBase;
 class CTileForm;
 class CPreviewTile;
 class CLandscape;
+struct SMobParameterState;
 
 ///
 /// \brief The CView class is the main class for managing and editing 3D scene contents. It is also a link between read out *.mob files and their editing. It also controls the camera and current operations.
@@ -63,6 +64,9 @@ public:
     void saveAllMob();
     void unloadActiveMob();
     void openActiveMobEditParams();
+    void commitMobParameterEdit(CMob* mob, const SMobParameterState& before,
+                                const SMobParameterState& after);
+    bool hasActiveMob() const { return m_activeMob != nullptr; }
     void unloadMob(QString mobName);
     void attach(CSettings* pSettings, QTableWidget* pParam, QUndoStack* pStack, CProgressView* pProgress, QLineEdit* pMouseCoord, CTreeView* pTree, CTileForm* pTileForm);
     CSettings* settings() {Q_ASSERT(m_pSettings); return m_pSettings;}

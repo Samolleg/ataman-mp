@@ -10,6 +10,8 @@
 #include <QFile>
 #include <QDir>
 #include <QUrl>
+#include <QTimer>
+#include <QPointer>
 
 #include "mob_parameters.h"
 #include "ui_mob_parameters.h"
@@ -27,8 +29,9 @@ CMobParameters::CMobParameters(QWidget* parent, CMob* pMob, CView* pView):
   ,m_pHighlighter(nullptr)
   ,m_pView(pView)
    ,m_isDurty(false)
-   ,m_pShortcut(nullptr)
+  ,m_pShortcut(nullptr)
   ,m_externalScriptWatcher(new QFileSystemWatcher(this))
+  ,m_externalScriptReadRetries(0)
 {
     ui->setupUi(this);
     setWindowFlags(windowFlags() & ~Qt::WindowCloseButtonHint);
@@ -45,6 +48,7 @@ CMobParameters::CMobParameters(QWidget* parent, CMob* pMob, CView* pView):
     QObject::connect(m_pTable.get(), SIGNAL(cellDoubleClicked(int,int)), this, SLOT(tableItemClicked(int,int)));
     m_pShortcut = new QShortcut(QKeySequence(Qt::CTRL + eKey_S), this, SLOT(onSaveShortcut()));
     QObject::connect(m_externalScriptWatcher, SIGNAL(fileChanged(QString)), this, SLOT(onExternalScriptChanged(QString)));
+    QObject::connect(m_externalScriptWatcher, SIGNAL(directoryChanged(QString)), this, SLOT(onExternalScriptDirectoryChanged(QString)));
     //m_aCell.clear();
     m_aCell.resize(32*32);
     for (int i(0); i < 32; ++i)
@@ -61,6 +65,7 @@ CMobParameters::CMobParameters(QWidget* parent, CMob* pMob, CView* pView):
     ui->listRanges->setContextMenuPolicy(Qt::CustomContextMenu);
     connect(ui->listRanges, SIGNAL(customContextMenuRequested(QPoint)), this, SLOT(showContextMenu(QPoint)));
     updateWindow();
+    m_initialState = m_pCurMob->parameterState();
 }
 
 CMobParameters::~CMobParameters()
@@ -293,11 +298,12 @@ void CMobParameters::on_pushCancel_clicked()
         reply = QMessageBox::question(this, "Closing", "Parameters has local changes.\nDo you want to Apply them?", QMessageBox::Yes|QMessageBox::No|QMessageBox::Cancel);
         if(reply == QMessageBox::Yes)
         {
-            m_pView->setDurty(m_pCurMob);
+            on_pushApply_clicked();
+            return;
         }
         else if(reply == QMessageBox::No)
         {
-            for(int i(0); i<m_pUndoStack->count(); ++i)
+            while(m_pUndoStack->canUndo())
                 m_pUndoStack->undo();
         }
         else if(reply == QMessageBox::Cancel)
@@ -325,12 +331,9 @@ void CMobParameters::on_pushApply_clicked()
     QString str = QString::fromLatin1(strArr); //convert byte array to qstring
 
     m_pCurMob->setScript(str);
-    //if(m_pUndoStack->count() > 0)
-    if(true) //forced set durty flag. todo: add script changes to undo stack
-    {
-        m_pUndoStack->clear();
-        m_pView->setDurty(m_pCurMob);
-    }
+    const SMobParameterState finalState = m_pCurMob->parameterState();
+    m_pUndoStack->clear();
+    m_pView->commitMobParameterEdit(m_pCurMob, m_initialState, finalState);
     emit editFinishedSignal(this);
     close();
 }
@@ -564,6 +567,7 @@ void CMobParameters::on_pushButtonOpenExtEditor_clicked()
     }
 
     m_externalScriptPath = workspace + QDir::separator() + m_pCurMob->filePath().completeBaseName() + ".lua";
+    m_externalScriptReadRetries = 0;
     QFile scriptFile(m_externalScriptPath);
     if(!scriptFile.open(QIODevice::WriteOnly | QIODevice::Truncate))
     {
@@ -575,6 +579,8 @@ void CMobParameters::on_pushButtonOpenExtEditor_clicked()
 
     if(!m_externalScriptWatcher->files().contains(m_externalScriptPath))
         m_externalScriptWatcher->addPath(m_externalScriptPath);
+    if(!m_externalScriptWatcher->directories().contains(workspace))
+        m_externalScriptWatcher->addPath(workspace);
 
     if(!QDesktopServices::openUrl(QUrl::fromLocalFile(m_externalScriptPath)))
         QMessageBox::warning(this, "External editor", "No application is associated with script files. Configure a Windows file association and try again.");
@@ -582,39 +588,71 @@ void CMobParameters::on_pushButtonOpenExtEditor_clicked()
 
 void CMobParameters::onExternalScriptChanged(const QString& path)
 {
-    QFile scriptFile(path);
-    if(!scriptFile.open(QIODevice::ReadOnly))
-        return;
-    const QString externalText = QString::fromUtf8(scriptFile.readAll());
-    scriptFile.close();
-
-    // Editors that replace files atomically remove the watch; restore it.
-    if(QFileInfo(path).exists() && !m_externalScriptWatcher->files().contains(path))
-        m_externalScriptWatcher->addPath(path);
-
-    if(externalText == ui->plainTextEdit->toPlainText())
-        return;
-
-    QTextCodec* cp1251 = QTextCodec::codecForName("Windows-1251");
-    const QByteArray encoded = cp1251->fromUnicode(externalText);
-    if(cp1251->toUnicode(encoded) != externalText)
+    ei::log(eLogInfo, QString("External script file notification path:%1").arg(path));
+    const QString requestedPath = path;
+    QPointer<CMobParameters> self(this);
+    QTimer::singleShot(150, this, [self, requestedPath]()
     {
-        QMessageBox::critical(this, "External script changed",
-            "The external file contains characters that cannot round-trip through Windows-1251. The embedded script was not changed.");
-        return;
-    }
+        if(!self)
+            return;
+        const QString scriptPath = QFileInfo(requestedPath).isDir()
+                ? self->m_externalScriptPath : requestedPath;
+        QFile scriptFile(scriptPath);
+        if(!scriptFile.open(QIODevice::ReadOnly))
+        {
+            if(!QFileInfo(scriptPath).exists())
+                return; // directoryChanged will notify us when an atomic replacement appears
+            if(++self->m_externalScriptReadRetries > 5)
+            {
+                ei::log(eLogWarning, QString("External script remained unreadable after retries path:%1").arg(scriptPath));
+                self->m_externalScriptReadRetries = 0;
+                return;
+            }
+            QTimer::singleShot(350, self, [self, scriptPath]()
+            {
+                if(self)
+                    self->onExternalScriptChanged(scriptPath);
+            });
+            return;
+        }
+        self->m_externalScriptReadRetries = 0;
+        const QString externalText = QString::fromUtf8(scriptFile.readAll());
+        scriptFile.close();
 
-    if(QMessageBox::question(this, "External script changed",
-        "Import the changed external script into the MOB editor? This remains unsaved until Apply changes is pressed.",
-        QMessageBox::Yes | QMessageBox::No) != QMessageBox::Yes)
-        return;
+        if(QFileInfo(scriptPath).exists() && !self->m_externalScriptWatcher->files().contains(scriptPath))
+            self->m_externalScriptWatcher->addPath(scriptPath);
+        if(externalText == self->ui->plainTextEdit->toPlainText())
+            return;
 
-    QTextCursor cursor(ui->plainTextEdit->document());
-    cursor.beginEditBlock();
-    cursor.select(QTextCursor::Document);
-    cursor.insertText(externalText);
-    cursor.endEditBlock();
-    setDurty(true);
+        QTextCodec* cp1251 = QTextCodec::codecForName("Windows-1251");
+        const QByteArray encoded = cp1251->fromUnicode(externalText);
+        if(cp1251->toUnicode(encoded) != externalText)
+        {
+            QMessageBox::critical(self, "External script changed",
+                "The external file contains characters that cannot round-trip through Windows-1251. The embedded script was not changed.");
+            return;
+        }
+        if(QMessageBox::question(self, "External script changed",
+            "Import the changed external script into the MOB editor? This remains unsaved until Apply changes is pressed.",
+            QMessageBox::Yes | QMessageBox::No) != QMessageBox::Yes)
+            return;
+
+        QTextCursor cursor(self->ui->plainTextEdit->document());
+        cursor.beginEditBlock();
+        cursor.select(QTextCursor::Document);
+        cursor.insertText(externalText);
+        cursor.endEditBlock();
+        self->setDurty(true);
+        ei::log(eLogInfo, QString("External script imported into MOB Parameters path:%1 characters:%2")
+                .arg(scriptPath).arg(externalText.size()));
+    });
+}
+
+void CMobParameters::onExternalScriptDirectoryChanged(const QString& path)
+{
+    ei::log(eLogInfo, QString("External script workspace notification path:%1").arg(path));
+    if(!m_externalScriptPath.isEmpty())
+        onExternalScriptChanged(m_externalScriptPath);
 }
 
 void CMobParameters::updateMobParamsOnly()

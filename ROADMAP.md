@@ -5,7 +5,7 @@ An item is checked only after its implementation has landed and received the
 listed level of validation. New findings and wishlist requests belong here so
 they do not get lost between test sessions.
 
-Current development release: `0.1.0-alpha.31`.
+Current development release: `0.1.0-alpha.32`.
 
 ## Implementation evidence
 
@@ -77,6 +77,12 @@ behavior.
   unrelated bytes; reject only characters that the game encoding cannot store.
 - [ ] Stress repeated edit/undo/redo/save/open/close cycles on large JMV maps and
   fix any crash, stale-selection, or dirty-state regression found by testers.
+- [x] Route MOB Parameters and embedded-script Apply through the main undo
+  history; reload external-editor atomic replacements; remove stale patrol-node
+  pointers from undo; and rebind saved raw-object provenance for subsequent saves.
+- [x] Add destination-typed property clipboard validation. Copied values remain
+  plain text for external editors, while Endurance rejects incompatible field
+  pastes and keeps editable asset pastes pending until Enter or an explicit choice.
 - [ ] Finish lossless MPR archive preservation before enabling landscape editing.
 
 These are the remaining safety gates before editing live maps can be recommended.

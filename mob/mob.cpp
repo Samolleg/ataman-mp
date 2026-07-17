@@ -1913,6 +1913,9 @@ bool CMob::saveAs(const QFileInfo& path)
         }
         m_originalData = data;
         captureCleanProjection();
+        if(!rebindRawObjectProvenance())
+            ei::log(eLogWarning, QString("Saved MOB reopened, but raw object provenance could not be rebound path:%1")
+                    .arg(filePath));
         return true;
     }
     catch (const std::exception& ex)
@@ -1927,4 +1930,87 @@ bool CMob::saveAs(const QFileInfo& path)
 bool CMob::save()
 {
     return saveAs(m_filePath);
+}
+bool SMobParameterState::operator==(const SMobParameterState& other) const
+{
+    if(questMob != other.questMob || mainRanges != other.mainRanges
+       || secondaryRanges != other.secondaryRanges || diplomacy != other.diplomacy
+       || diplomacyNames != other.diplomacyNames || script != other.script
+       || activeRangeId != other.activeRangeId)
+        return false;
+    for(int i = 0; i < eWsTypeCount; ++i)
+    {
+        CWorldSet left = worldSet;
+        CWorldSet right = other.worldSet;
+        if(left.data(static_cast<EWsType>(i)) != right.data(static_cast<EWsType>(i)))
+            return false;
+    }
+    return true;
+}
+
+SMobParameterState CMob::parameterState()
+{
+    SMobParameterState state;
+    state.questMob = isQuestMob();
+    state.worldSet = m_worldSet;
+    state.mainRanges = m_aMainRange;
+    state.secondaryRanges = m_aSecRange;
+    state.diplomacy = m_diplomacyFoF;
+    state.diplomacyNames = m_aDiplomacyFieldName;
+    state.script = m_script;
+    state.activeRangeId = m_activeRangeId;
+    return state;
+}
+
+void CMob::applyParameterState(const SMobParameterState& state)
+{
+    setQuestMob(state.questMob);
+    m_worldSet = state.worldSet;
+    m_aMainRange = state.mainRanges;
+    m_aSecRange = state.secondaryRanges;
+    m_diplomacyFoF = state.diplomacy;
+    m_aDiplomacyFieldName = state.diplomacyNames;
+    m_script = state.script;
+    const QVector<SRange>& active = state.questMob ? m_aSecRange : m_aMainRange;
+    m_activeRangeId = active.isEmpty() ? 0 : qMin(state.activeRangeId, uint(active.size() - 1));
+    logicNodesUpdate();
+}
+
+bool CMob::rebindRawObjectProvenance()
+{
+    CValidationReport report;
+    CMobDocument sourceDocument;
+    CMobDocument projectionDocument;
+    if(!sourceDocument.loadBytes(m_originalData, m_filePath.filePath(), &report)
+       || !projectionDocument.loadBytes(m_cleanProjection, "saved-ui-projection.mob", &report)
+       || sourceDocument.objects().size() != m_aNode.size()
+       || projectionDocument.objects().size() != m_aNode.size())
+        return false;
+
+    QVector<int> projectedToSource(m_aNode.size(), -1);
+    QSet<int> usedSource;
+    const CMobSemanticDiff alignment = CMobSemanticDiff::compare(sourceDocument, projectionDocument);
+    for(const SMobDiffEntry& entry : alignment.entries())
+    {
+        if(entry.baselineIndex < 0 || entry.candidateIndex < 0
+           || entry.candidateIndex >= projectedToSource.size()
+           || usedSource.contains(entry.baselineIndex)
+           || projectedToSource.at(entry.candidateIndex) >= 0)
+            return false;
+        projectedToSource[entry.candidateIndex] = entry.baselineIndex;
+        usedSource.insert(entry.baselineIndex);
+    }
+    if(projectedToSource.contains(-1) || usedSource.size() != m_aNode.size())
+        return false;
+
+    const QByteArray documentHash = QCryptographicHash::hash(m_originalData, QCryptographicHash::Sha256);
+    for(int i = 0; i < projectedToSource.size(); ++i)
+    {
+        const SMobObjectSnapshot& object = sourceDocument.objects().at(projectedToSource.at(i));
+        m_aNode.at(i)->setRawObjectProvenance(documentHash, object.sectionPath,
+                                              object.subtreeSha256, false);
+    }
+    ei::log(eLogInfo, QString("Rebound raw MOB provenance after save objects:%1 sourceSha256:%2")
+            .arg(m_aNode.size()).arg(QString::fromLatin1(documentHash.toHex())));
+    return true;
 }

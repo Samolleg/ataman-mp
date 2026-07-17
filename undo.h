@@ -4,6 +4,7 @@
 #include <QJsonObject>
 #include <QMessageBox>
 #include "view.h"
+#include "mob/mob.h"
 
 ///
 /// THis file presents types of operations that can be realized with undo\redo mechanism.
@@ -125,11 +126,37 @@ signals:
     void updatePosOnLand(CNode* pNode);
 
 protected:
+    CNode* resolveNode() const;
     CView* m_pView;
     CMob* m_pMob;
     CNode* m_pNode;
     QSharedPointer<IPropertyBase> m_oldValue;
     QSharedPointer<IPropertyBase> m_newValue;
+    ENodeType m_nodeType;
+    uint m_ownerMapId;
+    int m_patrolId;
+    int m_viewId;
+    int m_auxPointId;
+    bool m_oldValueCaptured;
+};
+
+class CChangeMobParametersCommand : public QUndoCommand
+{
+public:
+    CChangeMobParametersCommand(CView* view, CMob* mob,
+                                const SMobParameterState& before,
+                                const SMobParameterState& after,
+                                QUndoCommand* parent = nullptr);
+    void undo() override;
+    void redo() override;
+
+private:
+    void apply(const SMobParameterState& state);
+    CView* m_view;
+    CMob* m_mob;
+    SMobParameterState m_before;
+    SMobParameterState m_after;
+    bool m_firstRedo;
 };
 
 class CCreatePatrolCommand: public QUndoCommand

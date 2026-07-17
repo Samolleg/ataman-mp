@@ -14,6 +14,8 @@
 #include <QTemporaryDir>
 #include <QUndoCommand>
 #include <QUndoStack>
+#include <QClipboard>
+#include <QMimeData>
 #include <cstdio>
 #include <cstring>
 
@@ -253,6 +255,27 @@ int runHeadlessCommand(QApplication& app)
         combo._onChange("house");
         const bool clickCommit = combo.value()->toString() == "house" && appliedChanges == 2;
 
+        QSharedPointer<IPropertyBase> textureValue(new propStr(eObjParam_PRIM_TXTR, "original_texture"));
+        CComboDynItem textureCombo(textureValue);
+        QMimeData* incompatibleMime = new QMimeData;
+        incompatibleMime->setText("model_value");
+        incompatibleMime->setData("application/x-ei-mapper-property-type",
+                                  QByteArray::number(int(eObjParam_TEMPLATE)));
+        QGuiApplication::clipboard()->setMimeData(incompatibleMime);
+        QKeyEvent pasteIncompatible(QEvent::KeyPress, Qt::Key_V, Qt::ControlModifier);
+        QApplication::sendEvent(textureCombo.lineEdit(), &pasteIncompatible);
+        const bool incompatiblePasteBlocked = textureCombo.currentText() == "original_texture"
+                && textureCombo.value()->toString() == "original_texture";
+
+        QGuiApplication::clipboard()->setText("custom_texture");
+        textureCombo.lineEdit()->selectAll();
+        QKeyEvent pastePlainText(QEvent::KeyPress, Qt::Key_V, Qt::ControlModifier);
+        QApplication::sendEvent(textureCombo.lineEdit(), &pastePlainText);
+        const bool compatiblePastePending = textureCombo.currentText() == "custom_texture"
+                && textureCombo.value()->toString() == "original_texture";
+        textureCombo._onEditingFinished();
+        const bool compatiblePasteCommitted = textureCombo.value()->toString() == "custom_texture";
+
         QWidget primaryWindow;
         bool settingsTabsUsable = false;
         {
@@ -301,7 +324,8 @@ int runHeadlessCommand(QApplication& app)
 
         const bool passed = prefixesOnly && valueStable && focusCancel && escapeCancel
                 && enterCommit && clickCommit && settingsTabsUsable && secondaryWindowsClosed
-                && pasteSingleAction && pasteUndoAtomic && pasteRedoAtomic;
+                && pasteSingleAction && pasteUndoAtomic && pasteRedoAtomic
+                && incompatiblePasteBlocked && compatiblePastePending && compatiblePasteCommitted;
         QTextStream output(stdout);
         output << "asset-picker prefixes=" << completions.join(",") << "\n"
                << "prefixesOnly=" << prefixesOnly
@@ -314,7 +338,10 @@ int runHeadlessCommand(QApplication& app)
                << " secondaryWindowsClosed=" << secondaryWindowsClosed
                << " pasteSingleAction=" << pasteSingleAction
                << " pasteUndoAtomic=" << pasteUndoAtomic
-               << " pasteRedoAtomic=" << pasteRedoAtomic << "\n"
+               << " pasteRedoAtomic=" << pasteRedoAtomic
+               << " incompatiblePasteBlocked=" << incompatiblePasteBlocked
+               << " compatiblePastePending=" << compatiblePastePending
+               << " compatiblePasteCommitted=" << compatiblePasteCommitted << "\n"
                << (passed ? "PASS" : "FAIL")
                << ": widget interaction and secondary-window lifecycle checks\n";
         output.flush();

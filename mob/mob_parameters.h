@@ -115,6 +115,7 @@ private slots:
     void on_listRanges_itemDoubleClicked(QListWidgetItem *item);
     void on_pushButtonOpenExtEditor_clicked();
     void onExternalScriptChanged(const QString& path);
+    void onExternalScriptDirectoryChanged(const QString& path);
     void updateMobParamsOnly();
     void updateDiplomacyTable();
     void updateDiplomacyTable(int row, int column);
@@ -138,6 +139,8 @@ private:
     QShortcut* m_pShortcut;
     QFileSystemWatcher* m_externalScriptWatcher;
     QString m_externalScriptPath;
+    int m_externalScriptReadRetries;
+    SMobParameterState m_initialState;
 };
 
 ///

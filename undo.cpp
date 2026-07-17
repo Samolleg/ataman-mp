@@ -198,14 +198,64 @@ CChangeLogicParam::CChangeLogicParam(CView* pView, CNode* pNode, const QSharedPo
   ,m_pView(pView)
   ,m_pMob(pView ? pView->currentMob() : nullptr)
   ,m_pNode(pNode)
+  ,m_nodeType(pNode ? pNode->nodeType() : eUnknown)
+  ,m_ownerMapId(pNode ? pNode->mapId() : 0)
+  ,m_patrolId(-1)
+  ,m_viewId(-1)
+  ,m_auxPointId(-1)
+  ,m_oldValueCaptured(false)
 {
     m_newValue.reset(prop->clone());
+    if(!m_pMob || !pNode)
+        return;
+    if(m_nodeType == ePatrolPoint)
+    {
+        int owner = 0;
+        m_pMob->getPatrolHash(owner, m_patrolId, static_cast<CPatrolPoint*>(pNode));
+        m_ownerMapId = uint(owner);
+    }
+    else if(m_nodeType == eLookPoint)
+    {
+        int owner = 0;
+        m_pMob->getViewHash(owner, m_patrolId, m_viewId, static_cast<CLookPoint*>(pNode));
+        m_ownerMapId = uint(owner);
+    }
+    else if(m_nodeType == eTrapActZone)
+    {
+        int owner = 0;
+        m_pMob->getTrapZoneHash(owner, m_auxPointId, static_cast<CActivationZone*>(pNode));
+        m_ownerMapId = uint(owner);
+    }
+    else if(m_nodeType == eTrapCastPoint)
+    {
+        int owner = 0;
+        m_pMob->getTrapCastHash(owner, m_auxPointId, static_cast<CTrapCastPoint*>(pNode));
+        m_ownerMapId = uint(owner);
+    }
+}
+
+CNode* CChangeLogicParam::resolveNode() const
+{
+    if(!m_pMob)
+        return nullptr;
+    switch(m_nodeType)
+    {
+    case ePatrolPoint: return m_pMob->patrolPointById(int(m_ownerMapId), m_patrolId);
+    case eLookPoint: return m_pMob->viewPointById(int(m_ownerMapId), m_patrolId, m_viewId);
+    case eTrapActZone: return m_pMob->actZoneById(int(m_ownerMapId), m_auxPointId);
+    case eTrapCastPoint: return m_pMob->trapCastById(int(m_ownerMapId), m_auxPointId);
+    default: return m_pMob->nodeByMapId(m_ownerMapId);
+    }
 }
 
 void CChangeLogicParam::undo()
 {
-    if(!m_pNode)
+    m_pNode = resolveNode();
+    if(!m_pNode || !m_oldValueCaptured)
+    {
+        ei::log(eLogWarning, "Logic property undo skipped because its target no longer exists");
         return;
+    }
     m_pNode->applyLogicParam(m_oldValue);
 
     emit updateParam();
@@ -214,14 +264,60 @@ void CChangeLogicParam::undo()
 
 void CChangeLogicParam::redo()
 {
+    m_pNode = resolveNode();
     if(!m_pNode)
+    {
+        ei::log(eLogWarning, "Logic property redo skipped because its target no longer exists");
         return;
-    m_pNode->getLogicParam(m_oldValue, m_newValue->type());
+    }
+    if(!m_oldValueCaptured)
+    {
+        m_pNode->getLogicParam(m_oldValue, m_newValue->type());
+        m_oldValueCaptured = !m_oldValue.isNull();
+    }
     m_pNode->applyLogicParam(m_newValue);
 
     emit updateParam();
     m_pView->setDurty(m_pMob);
     setText("Change value to " + m_newValue->toString());
+}
+
+CChangeMobParametersCommand::CChangeMobParametersCommand(
+        CView* view, CMob* mob, const SMobParameterState& before,
+        const SMobParameterState& after, QUndoCommand* parent)
+    : QUndoCommand(parent), m_view(view), m_mob(mob), m_before(before),
+      m_after(after), m_firstRedo(true)
+{
+    setText("Edit MOB parameters");
+}
+
+void CChangeMobParametersCommand::apply(const SMobParameterState& state)
+{
+    if(!m_mob)
+        return;
+    m_mob->applyParameterState(state);
+    if(m_view)
+    {
+        m_view->setDurty(m_mob);
+        m_view->viewParameters();
+    }
+}
+
+void CChangeMobParametersCommand::undo()
+{
+    apply(m_before);
+}
+
+void CChangeMobParametersCommand::redo()
+{
+    if(m_firstRedo)
+    {
+        m_firstRedo = false;
+        if(m_view)
+            m_view->setDurty(m_mob);
+        return;
+    }
+    apply(m_after);
 }
 
 CCreatePatrolCommand::CCreatePatrolCommand(CView* pView, QString pointHash, QUndoCommand *parent):

@@ -20,6 +20,21 @@ class CTrapCastPoint;
 class CMobEditTransaction;
 class CValidationReport;
 
+struct SMobParameterState
+{
+    bool questMob{false};
+    CWorldSet worldSet;
+    QVector<SRange> mainRanges;
+    QVector<SRange> secondaryRanges;
+    QVector<QVector<uint>> diplomacy;
+    QList<QString> diplomacyNames;
+    QString script;
+    uint activeRangeId{0};
+
+    bool operator==(const SMobParameterState& other) const;
+    bool operator!=(const SMobParameterState& other) const { return !(*this == other); }
+};
+
 ///
 /// \brief The CMob class provides reading, saving and editing of *.mob file.
 ///
@@ -58,7 +73,7 @@ public:
     void setWorldSet(const CWorldSet& ws){m_worldSet = ws;}
     const QVector<SRange>& ranges(bool bMain);
     const QList<QString>& diplomacyNames() {return m_aDiplomacyFieldName;}
-    void setDiplomacyNames(QList<QString>& arrName) {m_aDiplomacyFieldName = arrName;}
+    void setDiplomacyNames(const QList<QString>& arrName) {m_aDiplomacyFieldName = arrName;}
     QVector<QVector<uint>>& diplomacyField() {return m_diplomacyFoF;}
     void setDiplomacyField(const QVector<QVector<uint>>& df) {m_diplomacyFoF = df;}
     const QString& script() {return m_script;}
@@ -79,6 +94,8 @@ public:
     const SRange& activeRange();
     uint activeRangeId() {return m_activeRangeId;}
     void setActiveRange(uint rangeId);
+    SMobParameterState parameterState();
+    void applyParameterState(const SMobParameterState& state);
     uint freeMapId();
 
     //functions for logic processing
@@ -106,6 +123,7 @@ private:
                                          QByteArray* candidate,
                                          CValidationReport* report,
                                          QString* saveClass) const;
+    bool rebindRawObjectProvenance();
     QString getAuxDirName();
     bool deserialize(QByteArray data);
     void updateObjects();

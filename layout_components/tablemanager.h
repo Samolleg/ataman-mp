@@ -36,6 +36,7 @@ public:
     const QSharedPointer<IPropertyBase>& value() {return m_pValue;}
     void skipNextCheck() {bSkip = true;} //skip checking value for reverting (on lost focus)
     void renewValue(QString value);
+    void keyPressEvent(QKeyEvent* event) override;
 
 private:
     //void setValue()
@@ -102,6 +103,7 @@ public:
         if(hasFocus())
             QComboBox::wheelEvent(e);
     }
+    void keyPressEvent(QKeyEvent* event) override;
 
 public slots:
     void _onChange(QString str); //override default 'on change event'
@@ -196,6 +198,7 @@ public:
     ~CColorButtonItem();
     CColorButtonItem(const QSharedPointer<IPropertyBase>& prop);
     void renewColor(const QVector3D& prop); // for usage in tile form
+    void keyPressEvent(QKeyEvent* event) override;
 private:
     void updateColor(const QColor& color);
     void setColor(QVector3D clr);
@@ -220,6 +223,7 @@ class CMultiLineButtonItem: public QToolButton
 public:
     CMultiLineButtonItem() = delete;
     CMultiLineButtonItem(const QSharedPointer<IPropertyBase>& prop);
+    void keyPressEvent(QKeyEvent* event) override;
 
 signals:
     void onTextChange(const QSharedPointer<IPropertyBase>);
@@ -244,6 +248,7 @@ class CUnitStatItem: public QToolButton
 public:
     CUnitStatItem() = delete;
     CUnitStatItem(const QSharedPointer<IPropertyBase>& prop);
+    void keyPressEvent(QKeyEvent* event) override;
 
 signals:
     void onTextChange(const QSharedPointer<IPropertyBase>);
@@ -268,6 +273,7 @@ class CBodyPartItem: public QToolButton
 public:
     CBodyPartItem() = delete;
     CBodyPartItem(const QSharedPointer<IPropertyBase>& prop);
+    void keyPressEvent(QKeyEvent* event) override;
 
 signals:
     void onTextChange(const QSharedPointer<IPropertyBase>);

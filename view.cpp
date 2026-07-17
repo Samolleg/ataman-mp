@@ -987,7 +987,10 @@ void CView::saveMobAs()
     if(nullptr == m_activeMob)
         return;
 
-    const QFileInfo fileName = QFileDialog::getSaveFileName(this, "Save " + m_activeMob->mobName() + " as... ", "" , tr("Map objects (*.mob);;Mob as JSON(*.json)"));
+    const QFileInfo fileName = QFileDialog::getSaveFileName(
+            this, "Save " + m_activeMob->mobName() + " as... ",
+            m_activeMob->filePath().absoluteFilePath(),
+            tr("Map objects (*.mob);;Mob as JSON(*.json)"));
     if(fileName.filePath().isEmpty())
         return;
 
@@ -1097,6 +1100,17 @@ void CView::openActiveMobEditParams()
     QObject::connect(pParam, SIGNAL(editFinishedSignal(CMobParameters*)), this, SLOT(onMobParamEditFinished(CMobParameters*)));
     m_arrParamWindow.append(pParam);
     pParam->show();
+}
+
+void CView::commitMobParameterEdit(CMob* mob, const SMobParameterState& before,
+                                   const SMobParameterState& after)
+{
+    if(!mob || before == after)
+    {
+        setDurty(mob);
+        return;
+    }
+    m_pUndoStack->push(new CChangeMobParametersCommand(this, mob, before, after));
 }
 
 void CView::unloadMob(QString mobName)
@@ -1852,6 +1866,18 @@ void CView::moveCamToSelectedObjects()
 
 void CView::mousePressEvent(QMouseEvent* event)
 {
+    if(event->modifiers() == Qt::ShiftModifier && event->button() == Qt::RightButton)
+    {
+        selectedObjectToClipboardBuffer();
+        event->accept();
+        return;
+    }
+    if(event->modifiers() == Qt::ShiftModifier && event->button() == Qt::LeftButton)
+    {
+        clipboradObjectsToScene();
+        event->accept();
+        return;
+    }
     m_pOp->mousePressEvent(event);
 }
 

@@ -15,6 +15,7 @@
 #include <QPushButton>
 #include <QMenu>
 #include <QApplication>
+#include <QStatusBar>
 
 #include "resourcemanager.h"
 #include "landscape.h"
@@ -568,6 +569,11 @@ void MainWindow::on_actionRedo_triggered()
 
 void MainWindow::on_actionCreate_new_object_triggered()
 {
+    if(!m_pView || !m_pView->hasActiveMob())
+    {
+        statusBar()->showMessage(tr("Open or activate a MOB before creating an object."), 4000);
+        return;
+    }
     m_createDialog->show();
     m_createDialog->activateWindow();
 }

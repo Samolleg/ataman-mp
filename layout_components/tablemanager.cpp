@@ -9,6 +9,9 @@
 #include <QSignalBlocker>
 #include <QFocusEvent>
 #include <QKeyEvent>
+#include <QMimeData>
+#include <QApplication>
+#include <QToolTip>
 
 #include "tablemanager.h"
 #include "resourcemanager.h"
@@ -16,6 +19,77 @@
 #include "multiline_edit_form.h"
 #include "unitstat_form.h"
 #include "bodypartedit_form.h"
+
+namespace {
+const char* kPropertyMimeType = "application/x-ei-mapper-property-type";
+QSharedPointer<IPropertyBase> g_propertyClipboard;
+
+void copyProperty(const QSharedPointer<IPropertyBase>& property, const QString& displayText)
+{
+    if(property.isNull())
+        return;
+    g_propertyClipboard.reset(property->clone());
+    QMimeData* mime = new QMimeData;
+    mime->setText(displayText);
+    mime->setData(kPropertyMimeType, QByteArray::number(int(property->type())));
+    QGuiApplication::clipboard()->setMimeData(mime);
+}
+
+bool clipboardMatches(EObjParam destination)
+{
+    const QMimeData* mime = QGuiApplication::clipboard()->mimeData();
+    if(!mime || !mime->hasFormat(kPropertyMimeType))
+        return true;
+    bool ok = false;
+    const int source = mime->data(kPropertyMimeType).toInt(&ok);
+    return ok && source == int(destination);
+}
+
+bool compatibleText(EObjParam param, const QString& value)
+{
+    switch(param)
+    {
+    case eObjParam_NID:
+    case eObjParam_RANGE:
+    case eObjParam_SOUND_RANGE:
+    case eObjParam_SOUND_MIN:
+    case eObjParam_SOUND_MAX:
+    case eObjParam_LEVER_SCIENCE_STATS_Key_ID:
+    case eObjParam_LEVER_SCIENCE_STATS_Hands_Sleight:
+    case eObjParam_LEVER_TOTAL_STATE:
+    case eObjParam_LEVER_CUR_STATE:
+    case eObjParam_VIEW_WAIT:
+    case eObjParam_VIEW_TURN_SPEED:
+    case eObjParam_TRAP_CAST_INTERVAL:
+        return QRegExp("[0-9]+").exactMatch(value);
+    case eObjParam_PARENT_ID:
+    case eObjParam_TRAP_DIPLOMACY:
+        return QRegExp("-?[0-9]+").exactMatch(value);
+    case eObjParam_GUARD_RADIUS:
+    case eObjParam_GUARD_ALARM:
+    case eObjParam_TORCH_STRENGHT:
+    case eObjParam_PARTICL_SCALE:
+    case eObjParam_TRAP_AREA_RADIUS:
+        return QRegExp("\\s*-?\\d+(\\.\\d+)?").exactMatch(value);
+    case eObjParam_UNIT_PROTOTYPE:
+    case eObjParam_TEMPLATE:
+    case eObjParam_PRIM_TXTR:
+        return !value.trimmed().isEmpty();
+    default:
+        return true;
+    }
+}
+
+bool rejectIncompatiblePaste(QWidget* destination, EObjParam param, const QString& text)
+{
+    if(clipboardMatches(param) && compatibleText(param, text))
+        return false;
+    QApplication::beep();
+    QToolTip::showText(destination->mapToGlobal(QPoint(0, destination->height())),
+                       QObject::tr("Clipboard value is not compatible with this field."), destination);
+    return true;
+}
+}
 
 CTableManager::CTableManager(QTableWidget* pTable):
     m_pTable(pTable)
@@ -505,6 +579,7 @@ void CColorButtonItem::applyColor()
 
 CColorButtonItem::CColorButtonItem(const QSharedPointer<IPropertyBase>& prop)
 {
+    setFocusPolicy(Qt::StrongFocus);
     if(prop->isInit())
         m_pValue.reset(prop->clone());
     else
@@ -581,6 +656,14 @@ void CValueItem::onTextChangeEnd()
     if(m_pValue->isInit() && (m_pValue->toString() == val))
         return;
 
+    if(!compatibleText(m_pValue->type(), val))
+    {
+        QApplication::beep();
+        const QString oldValue = m_pValue->isInit() ? m_pValue->toString() : QString();
+        setText(oldValue);
+        m_filter->updateValue(oldValue);
+        return;
+    }
     m_pValue->resetFromString(val);
     m_filter->updateValue(val);
     emit onParamChange(m_pValue);
@@ -687,6 +770,33 @@ CComboDynItem::CComboDynItem(const QSharedPointer<IPropertyBase> &prop)
     lineEdit()->installEventFilter(this);
 }
 
+void CColorButtonItem::keyPressEvent(QKeyEvent* event)
+{
+    if(event->matches(QKeySequence::Copy))
+    {
+        copyProperty(m_pValue, m_pValue->toString());
+        event->accept();
+        return;
+    }
+    if(event->matches(QKeySequence::Paste))
+    {
+        if(!clipboardMatches(m_pValue->type()) || g_propertyClipboard.isNull()
+           || g_propertyClipboard->type() != m_pValue->type())
+        {
+            rejectIncompatiblePaste(this, m_pValue->type(), QGuiApplication::clipboard()->text());
+            event->accept();
+            return;
+        }
+        m_pValue.reset(g_propertyClipboard->clone());
+        const QVector3D color = dynamic_cast<prop3D*>(m_pValue.get())->value();
+        setColor(color);
+        emit onColorChange(m_pValue);
+        event->accept();
+        return;
+    }
+    QToolButton::keyPressEvent(event);
+}
+
 void CComboDynItem::ensureOptionsLoaded()
 {
     if(m_optionsLoaded)
@@ -726,6 +836,52 @@ void CComboDynItem::_onChange(QString str)
     emit onParamChange(m_pValue);
 }
 
+void CComboStItem::keyPressEvent(QKeyEvent* event)
+{
+    if(event->matches(QKeySequence::Copy))
+    {
+        copyProperty(m_pValue, currentText());
+        event->accept();
+        return;
+    }
+    if(event->matches(QKeySequence::Paste))
+    {
+        const QString value = QGuiApplication::clipboard()->text();
+        if(rejectIncompatiblePaste(this, m_pValue->type(), value)
+           || !m_valueList.values().contains(value))
+        {
+            QApplication::beep();
+            event->accept();
+            return;
+        }
+        setCurrentText(value);
+        _onChange(value);
+        event->accept();
+        return;
+    }
+    QComboBox::keyPressEvent(event);
+}
+
+void CValueItem::keyPressEvent(QKeyEvent* event)
+{
+    if(event->matches(QKeySequence::Copy))
+    {
+        copyProperty(m_pValue, hasSelectedText() ? selectedText() : text());
+        event->accept();
+        return;
+    }
+    if(event->matches(QKeySequence::Paste))
+    {
+        const QString value = QGuiApplication::clipboard()->text();
+        if(rejectIncompatiblePaste(this, m_pValue->type(), value))
+        {
+            event->accept();
+            return;
+        }
+    }
+    QLineEdit::keyPressEvent(event);
+}
+
 void CComboDynItem::_onEditingFinished()
 {
     const QString value = currentText().trimmed();
@@ -746,6 +902,18 @@ void CComboDynItem::_onFilterTextChanged(const QString& text)
 
 void CComboDynItem::keyPressEvent(QKeyEvent* event)
 {
+    if(event->matches(QKeySequence::Copy))
+    {
+        copyProperty(m_pValue, currentText());
+        event->accept();
+        return;
+    }
+    if(event->matches(QKeySequence::Paste)
+       && rejectIncompatiblePaste(this, m_pValue->type(), QGuiApplication::clipboard()->text()))
+    {
+        event->accept();
+        return;
+    }
     if(event->key() == Qt::Key_Escape)
     {
         cancelPendingEdit();
@@ -770,6 +938,15 @@ bool CComboDynItem::eventFilter(QObject* watched, QEvent* event)
     if(watched == lineEdit() && event->type() == QEvent::KeyPress)
     {
         QKeyEvent* keyEvent = static_cast<QKeyEvent*>(event);
+        if(keyEvent->matches(QKeySequence::Copy))
+        {
+            copyProperty(m_pValue, lineEdit()->hasSelectedText()
+                         ? lineEdit()->selectedText() : lineEdit()->text());
+            return true;
+        }
+        if(keyEvent->matches(QKeySequence::Paste)
+           && rejectIncompatiblePaste(this, m_pValue->type(), QGuiApplication::clipboard()->text()))
+            return true;
         if(keyEvent->key() == Qt::Key_Escape)
         {
             cancelPendingEdit();
@@ -816,9 +993,11 @@ void C3DItem::keyPressEvent(QKeyEvent *event)
         if(!m_xValue->isInit() || !m_yValue->isInit() || !m_zValue->isInit())
             return;
 
-        QClipboard *clipboard = QGuiApplication::clipboard();
         auto val = QString("%1, %2, %3").arg(m_xValue->toString(), m_yValue->toString(), m_zValue->toString());
-        clipboard->setText(val);
+        const QVector3D vector(m_xValue->toString().toFloat(), m_yValue->toString().toFloat(),
+                               m_zValue->toString().toFloat());
+        QSharedPointer<IPropertyBase> aggregate(new prop3D(EObjParam(m_xValue->type() + 3), vector));
+        copyProperty(aggregate, val);
         event->accept();
         return;
     }
@@ -826,6 +1005,11 @@ void C3DItem::keyPressEvent(QKeyEvent *event)
     {
         QClipboard *pClipboard = QGuiApplication::clipboard();
         QString val = pClipboard->text();
+        if(rejectIncompatiblePaste(this, EObjParam(m_xValue->type() + 3), val))
+        {
+            event->accept();
+            return;
+        }
         QRegExp re(R"((\s*-?\d+(\.\d+)?\,){2}(\s*-?\d+(\.\d+)?))");
         if(re.exactMatch(val))
         {
@@ -857,6 +1041,7 @@ void CLineEditEventFilter::restoreValue()
 
 CMultiLineButtonItem::CMultiLineButtonItem(const QSharedPointer<IPropertyBase> &prop)
 {
+    setFocusPolicy(Qt::StrongFocus);
     if(prop->isInit())
     {
         m_pValue.reset(prop->clone());
@@ -877,6 +1062,30 @@ CMultiLineButtonItem::CMultiLineButtonItem(const QSharedPointer<IPropertyBase> &
         setText("undefined/different");
     }
     QObject::connect(this, SIGNAL(clicked()), this, SLOT(onTextEditOpen()));
+}
+
+void CMultiLineButtonItem::keyPressEvent(QKeyEvent* event)
+{
+    if(event->matches(QKeySequence::Copy))
+    {
+        const QString text = dynamic_cast<propStrAr*>(m_pValue.get())->value().join('\n');
+        copyProperty(m_pValue, text);
+        event->accept();
+        return;
+    }
+    if(event->matches(QKeySequence::Paste))
+    {
+        const QString text = QGuiApplication::clipboard()->text();
+        if(rejectIncompatiblePaste(this, m_pValue->type(), text))
+        {
+            event->accept();
+            return;
+        }
+        onTextEdit(text);
+        event->accept();
+        return;
+    }
+    QToolButton::keyPressEvent(event);
 }
 
 void CMultiLineButtonItem::onTextEditOpen()
@@ -910,6 +1119,7 @@ void CMultiLineButtonItem::onTextEdit(QString str)
 
 CUnitStatItem::CUnitStatItem(const QSharedPointer<IPropertyBase> &prop)
 {
+    setFocusPolicy(Qt::StrongFocus);
     setText("Edit Unit stats");
     if(prop->type() != eObjParam_UNIT_STATS)
     {
@@ -919,6 +1129,31 @@ CUnitStatItem::CUnitStatItem(const QSharedPointer<IPropertyBase> &prop)
     m_pValue.reset(prop->clone());
     QObject::connect(this, SIGNAL(clicked()), this, SLOT(onStatEditOpen()));
 
+}
+
+void CUnitStatItem::keyPressEvent(QKeyEvent* event)
+{
+    if(event->matches(QKeySequence::Copy))
+    {
+        copyProperty(m_pValue, m_pValue->toString());
+        event->accept();
+        return;
+    }
+    if(event->matches(QKeySequence::Paste))
+    {
+        if(!clipboardMatches(m_pValue->type()) || g_propertyClipboard.isNull()
+           || g_propertyClipboard->type() != m_pValue->type())
+        {
+            rejectIncompatiblePaste(this, m_pValue->type(), QGuiApplication::clipboard()->text());
+            event->accept();
+            return;
+        }
+        m_pValue.reset(g_propertyClipboard->clone());
+        emit onParamChange(m_pValue);
+        event->accept();
+        return;
+    }
+    QToolButton::keyPressEvent(event);
 }
 
 void CUnitStatItem::onStatEditOpen()
@@ -934,14 +1169,41 @@ void CUnitStatItem::onStatEditOpen()
 
 void CUnitStatItem::_onParamChange(const QSharedPointer<IPropertyBase>& prop)
 {
+    m_pValue.reset(prop->clone());
     emit onParamChange(prop);
 }
 
 CBodyPartItem::CBodyPartItem(const QSharedPointer<IPropertyBase>& prop)
 {
+    setFocusPolicy(Qt::StrongFocus);
     setText("Edit parts");
     m_pValue.reset(prop->clone());
     QObject::connect(this, SIGNAL(clicked()), this, SLOT(onPartEditOpen()));
+}
+
+void CBodyPartItem::keyPressEvent(QKeyEvent* event)
+{
+    if(event->matches(QKeySequence::Copy))
+    {
+        copyProperty(m_pValue, m_pValue->toString());
+        event->accept();
+        return;
+    }
+    if(event->matches(QKeySequence::Paste))
+    {
+        if(!clipboardMatches(m_pValue->type()) || g_propertyClipboard.isNull()
+           || g_propertyClipboard->type() != m_pValue->type())
+        {
+            rejectIncompatiblePaste(this, m_pValue->type(), QGuiApplication::clipboard()->text());
+            event->accept();
+            return;
+        }
+        m_pValue.reset(g_propertyClipboard->clone());
+        emit onParamChange(m_pValue);
+        event->accept();
+        return;
+    }
+    QToolButton::keyPressEvent(event);
 }
 
 void CBodyPartItem::onPartEditOpen()
@@ -957,5 +1219,6 @@ void CBodyPartItem::onPartEditOpen()
 
 void CBodyPartItem::_onParamChange(const QSharedPointer<IPropertyBase>& prop)
 {
+    m_pValue.reset(prop->clone());
     emit onParamChange(prop);
 }
