@@ -40,6 +40,7 @@ behavior.
 | Filterable read-only MOB diff details dialog | [`fd30be0`](https://github.com/Ilufus/ei-mapper-endurance/commit/fd30be0) | production MinGW build and [semantic-diff tests](tests/endurance_document_tests.cpp) |
 | Selection UX, recent files, open/save shortcuts, and editable model/texture filters | [`06d1c9b`](https://github.com/Ilufus/ei-mapper-endurance/commit/06d1c9b) | clean production MinGW build, six regression suites, Zone 1 no-op round trip, and [alpha.22 manual checks](ALPHA22_VALIDATION.md) |
 | Semantic raw-object provenance and cached frustum culling | [`1ab2935`](https://github.com/Ilufus/ei-mapper-endurance/commit/1ab2935) | 254-file projection corpus, document/frustum tests, and [alpha.28 checks](ALPHA28_VALIDATION.md) |
+| Generic topology-preserving MOB leaf saves | [`843ba9c`](https://github.com/Ilufus/ei-mapper-endurance/commit/843ba9c) | 254/254 Base/JMV projection corpus, 24 document tests, and [alpha.30 checks](ALPHA30_VALIDATION.md) |
 
 ## Current focus
 
@@ -80,6 +81,7 @@ behavior.
   This is automatic and has no save-preview workflow. Structural edits still need
   exact raw-subtree transactions before the migration is complete. ([`3106fac`](https://github.com/Ilufus/ei-mapper-endurance/commit/3106fac),
   [`3cd2b3c`](https://github.com/Ilufus/ei-mapper-endurance/commit/3cd2b3c),
+  [`843ba9c`](https://github.com/Ilufus/ei-mapper-endurance/commit/843ba9c),
   [validation](MOB_SHADOW_TRANSACTION_VALIDATION.md))
 - [x] Recompute MOB dirty state against its loaded projection after edit and
   undo/redo, allowing byte-identical Save As once every projected change is
