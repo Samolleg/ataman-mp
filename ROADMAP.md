@@ -5,7 +5,7 @@ An item is checked only after its implementation has landed and received the
 listed level of validation. New findings and wishlist requests belong here so
 they do not get lost between test sessions.
 
-Current development release: `0.1.0-alpha.48`.
+Current development release: `0.1.0-alpha.49`.
 
 ## Implementation evidence
 
@@ -452,6 +452,10 @@ MOB editing does not imply that landscape saving is supported.
 - [x] `0.1.0-alpha.48`: replace the non-firing callback-thread timer with a
   bounded game-window discovery worker and one-shot window-message dispatch.
   The engine handler still executes only on the game window's own thread.
+- [x] `0.1.0-alpha.49`: alpha.48 found a game-owned window and queued its
+  message before the final message path was stable, but the callback was never
+  dispatched. Require the same visible window for two seconds and use bounded
+  `SendMessageTimeout` dispatch so receipt or timeout is directly observable.
 - [x] `0.1.0-alpha.41`: redo-safe raw provenance and the July 17 multi-edit/UI
   fixes passed owner testing and were handed to the closed tester group.
   ([`db3fa31`](https://github.com/Ilufus/ei-mapper-endurance/commit/db3fa31))

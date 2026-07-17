@@ -493,12 +493,28 @@ BOOL CALLBACK FindLargestGameWindow(HWND window, LPARAM parameter)
 DWORD WINAPI DispatchLaunchToGameWindow(void*)
 {
     Log(L"Waiting for a visible game window with an active message thread");
+    HWND stableWindow = nullptr;
+    int stablePolls = 0;
     for(int attempt = 0; attempt < 300; ++attempt)
     {
         WindowCandidate candidate;
         EnumWindows(&FindLargestGameWindow, reinterpret_cast<LPARAM>(&candidate));
         if(candidate.window && candidate.area >= 640 * 480)
         {
+            if(candidate.window != stableWindow)
+            {
+                stableWindow = candidate.window;
+                stablePolls = 1;
+            }
+            else
+            {
+                ++stablePolls;
+            }
+            if(stablePolls < 20)
+            {
+                Sleep(100);
+                continue;
+            }
             WNDPROC original = reinterpret_cast<WNDPROC>(
                 GetWindowLongPtrW(candidate.window, GWLP_WNDPROC));
             if(!original)
@@ -526,19 +542,28 @@ DWORD WINAPI DispatchLaunchToGameWindow(void*)
             DWORD windowThread = GetWindowThreadProcessId(candidate.window, nullptr);
             wchar_t message[256]{};
             _snwprintf_s(message, sizeof(message) / sizeof(message[0]), _TRUNCATE,
-                         L"Posting deferred launch to game window thread %lu from worker %lu",
+                         L"Sending deferred launch to stable game window thread %lu from worker %lu",
                          windowThread, GetCurrentThreadId());
             Log(message);
-            if(!PostMessageW(candidate.window, kDeferredLaunchMessage, 0, 0))
+            DWORD_PTR dispatchResult = 0;
+            SetLastError(0);
+            if(!SendMessageTimeoutW(candidate.window, kDeferredLaunchMessage, 0, 0,
+                                    SMTO_ABORTIFHUNG | SMTO_BLOCK, 5000,
+                                    &dispatchResult))
             {
-                SetWindowLongPtrW(candidate.window, GWLP_WNDPROC,
-                                  reinterpret_cast<LONG_PTR>(original));
-                g_gameWindow = nullptr;
-                Log(L"Could not post the deferred launch message to the game window");
+                const DWORD error = GetLastError();
+                wchar_t failure[192]{};
+                _snwprintf_s(failure, sizeof(failure) / sizeof(failure[0]), _TRUNCATE,
+                             L"Game-window launch dispatch failed or timed out (error=%lu)",
+                             error);
+                Log(failure);
                 return 1;
             }
+            Log(L"Game-window launch dispatch completed");
             return 0;
         }
+        stableWindow = nullptr;
+        stablePolls = 0;
         Sleep(100);
     }
     Log(L"Deferred launch timed out waiting for the game window");
