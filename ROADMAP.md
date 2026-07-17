@@ -42,92 +42,36 @@ behavior.
 | Semantic raw-object provenance and cached frustum culling | [`1ab2935`](https://github.com/Ilufus/ei-mapper-endurance/commit/1ab2935) | 254-file projection corpus, document/frustum tests, and [alpha.28 checks](ALPHA28_VALIDATION.md) |
 | Generic topology-preserving MOB leaf saves | [`843ba9c`](https://github.com/Ilufus/ei-mapper-endurance/commit/843ba9c) | 254/254 Base/JMV projection corpus, 24 document tests, and [alpha.30 checks](ALPHA30_VALIDATION.md) |
 
+## Product contract
+
+- Normal editing must feel normal: no save preview, no per-field approval list,
+  and no warning merely because the user moved a unit or changed several fields.
+- Preserve every source MOB byte that the user did not intentionally change and
+  propagate every intended edit into the saved MOB.
+- Run raw-data checks, fresh reopen validation, backups, and atomic replacement
+  automatically in the background.
+- Refuse a save only when Endurance genuinely cannot represent the requested
+  operation without risking unrelated MOB data. Treat that as an implementation
+  gap to fix, not as a permanent user workflow.
+- The game is the final compatibility target. Corpus checks and MobExplorer are
+  development evidence; focused Base/JMV in-game tests decide release readiness.
+
 ## Current focus
 
-- [x] Analyze the first structured alpha.14 testing-group changed-save report,
-  including workflow/hash correlation, independent MobExplorer comparison, runtime
-  resource evidence, and raw structural preservation. ([Zone 5 report](ALPHA14_TESTER_ZONE5_VALIDATION.md))
-- [ ] Continue collecting structured testing-group results and focused in-game
-  outcomes across additional maps and edit types.
-- [x] Validate an alpha.25 real-UI diplomacy edit (`OBJ_PLAYER` 4 -> 12) against
-  an independently generated MobExplorer candidate: exact full-file SHA-256 match,
-  one modified object, no added/removed objects, and no unrelated field changes.
-  ([validation](MOB_SHADOW_TRANSACTION_VALIDATION.md))
-- [x] Ensure MOB Parameters and every other editor-created top-level window close
-  with the main editor. Auxiliary windows now have explicit owners, shutdown has
-  a fallback top-level sweep, and the headless widget check covers both owned and
-  accidentally orphaned windows. ([`f9fa250`](https://github.com/Ilufus/ei-mapper-endurance/commit/f9fa250))
-- [ ] Expand changed-save regression coverage across the private JMV map corpus.
-- [x] Replace fragile index-based raw-object provenance with deterministic
-  semantic alignment, including equal-count byte-identical duplicate subtrees.
-  The installed Base/JMV projection corpus passes 254/254 and mismatches still
-  fail closed. ([`1ab2935`](https://github.com/Ilufus/ei-mapper-endurance/commit/1ab2935))
-- [x] Validate alpha.28 cached frustum culling on large JMV maps. Normal object
-  rendering and GPU picking skip objects whose cached bounds are fully outside
-  the camera frustum. Zone 18 improved from the former severe slowdown to a
-  visually correct stable 60+ FPS in tester observation. The test exposed that
-  alpha.28 disabled all culling in Logic mode and that the modal Settings owner
-  was accidentally disabled; both regressions move to alpha.29.
-  ([validation](ALPHA28_VALIDATION.md))
-- [x] Validate alpha.29 split object/logic rendering. Off-screen object geometry
-  remains culled in Logic mode while unit paths, patrol/look points, trap cast
-  points, and activation zones retain their existing visualization behavior.
-  Settings now uses Qt window modality without disabling its own owner chain, so
-  every tab remains selectable. Tester confirmation reports the Logic-mode
-  performance regression fixed with no visual issue. ([validation](ALPHA29_VALIDATION.md))
-- [ ] Migrate changed MOB saves from the legacy serializer to raw-tree transactions;
-  no-op raw preservation is validated and topology-preserving UI edits now save as
-  provenance-checked raw leaf patches, including mixed property and transform edits.
-  This is automatic and has no save-preview workflow. Structural edits still need
-  exact raw-subtree transactions before the migration is complete. ([`3106fac`](https://github.com/Ilufus/ei-mapper-endurance/commit/3106fac),
-  [`3cd2b3c`](https://github.com/Ilufus/ei-mapper-endurance/commit/3cd2b3c),
-  [`843ba9c`](https://github.com/Ilufus/ei-mapper-endurance/commit/843ba9c),
-  [validation](MOB_SHADOW_TRANSACTION_VALIDATION.md))
-- [x] Recompute MOB dirty state against its loaded projection after edit and
-  undo/redo, allowing byte-identical Save As once every projected change is
-  undone. ([`d7feaab`](https://github.com/Ilufus/ei-mapper-endurance/commit/d7feaab))
-- [x] Validate exact snapshot-based undo for compound unit, patrol, and look
-  point movement across repeated undo/redo cycles. Implementation:
-  [`7a9bed4`](https://github.com/Ilufus/ei-mapper-endurance/commit/7a9bed4);
-  confirmed in alpha.17 testing.
-- [ ] Validate alpha.18 selection-history behavior and exact-instance
-  create/delete redo across repeated copy/paste cycles. Implementation:
-  [`99f841f`](https://github.com/Ilufus/ei-mapper-endurance/commit/99f841f);
-  focused test instructions are in [ALPHA18_VALIDATION.md](ALPHA18_VALIDATION.md).
-- [ ] Validate alpha.19 gesture-level undo, pasted-selection restoration,
-  selected-object overlap rendering, and cancellation of unfinished transforms
-  before Close All. Implementation:
-  [`95c9094`](https://github.com/Ilufus/ei-mapper-endurance/commit/95c9094);
-  focused test instructions are in [ALPHA19_VALIDATION.md](ALPHA19_VALIDATION.md).
-- [ ] Validate alpha.20 cancellation of unfinished movement and the document
-  lifecycle boundary. Open/close operations are no longer undo commands, and
-  history is cleared before documents are destroyed or terrain is replaced.
-  Implementation:
-  [`554b0d4`](https://github.com/Ilufus/ei-mapper-endurance/commit/554b0d4);
-  focused test instructions are in [ALPHA20_VALIDATION.md](ALPHA20_VALIDATION.md).
-- [ ] Validate alpha.21 deferred paste transactions. Unconfirmed copies are
-  preview-only and cannot create a dirty empty Redo entry; confirmed placement
-  creates distinct Paste and Move entries. Implementation:
-  [`ff043cf`](https://github.com/Ilufus/ei-mapper-endurance/commit/ff043cf);
-  viewport selections also reveal their exact pointer-backed outliner entry,
-  including duplicate-NID objects
-  ([`193966e`](https://github.com/Ilufus/ei-mapper-endurance/commit/193966e)).
-  Focused test instructions are in [ALPHA21_VALIDATION.md](ALPHA21_VALIDATION.md).
-- [ ] Validate alpha.22 selection UX, persistent recent-file list, open/save
-  shortcuts, and keyboard-filterable model/texture fields. Implementation:
-  [`06d1c9b`](https://github.com/Ilufus/ei-mapper-endurance/commit/06d1c9b);
-  the reported property-panel selection slowdown, unintended first-match
-  application, contains-style filtering, and MPR/MOB menu ordering are fixed in
-  [`0436992`](https://github.com/Ilufus/ei-mapper-endurance/commit/0436992).
-  The remaining Qt combo auto-completion path and outliner-originated automatic
-  scrolling are corrected in
-  [`c5d785a`](https://github.com/Ilufus/ei-mapper-endurance/commit/c5d785a).
-  Typed model/texture previews now commit only on Enter or an explicit dropdown
-  activation; focus loss and Escape restore the accepted value
-  ([`bcab5cb`](https://github.com/Ilufus/ei-mapper-endurance/commit/bcab5cb)).
-  Latest focused test instructions are in
-  [ALPHA24_VALIDATION.md](ALPHA24_VALIDATION.md).
-- [ ] Finish lossless preservation of MPR archive details.
+- [ ] Package alpha.30 for normal-edit testing: move units, change mixed property
+  fields, undo back to clean, save/reopen, and verify the resulting maps in JMV.
+  ([implementation](https://github.com/Ilufus/ei-mapper-endurance/commit/843ba9c),
+  [test matrix](ALPHA30_VALIDATION.md))
+- [ ] Finish structural MOB saves for copy/paste, object creation/deletion, and
+  adding/removing patrol or look points. Reuse exact source subtrees for copies
+  and profile-approved templates for genuinely new objects.
+- [ ] Verify structural saves with automated untouched-data comparison, Endurance
+  reopen, MobExplorer comparison, and focused JMV `drawall`/unload/reload tests.
+- [ ] Verify scripts and all edited text round-trip through CP1251 without changing
+  unrelated bytes; reject only characters that the game encoding cannot store.
+- [ ] Stress repeated edit/undo/redo/save/open/close cycles on large JMV maps and
+  fix any crash, stale-selection, or dirty-state regression found by testers.
+- [ ] Finish lossless MPR archive preservation before enabling landscape editing.
 
 These are the remaining safety gates before editing live maps can be recommended.
 
@@ -183,17 +127,18 @@ These are the remaining safety gates before editing live maps can be recommended
 - [x] Add the core provenance-checked `MobEditTransaction` leaf patcher with
   byte-exact untouched leaves, derived ancestor lengths, strict candidate reparse,
   stale-hash rejection, and strict CP1251 encoding. ([`660a542`](https://github.com/Ilufus/ei-mapper-endurance/commit/660a542), [document tests](tests/endurance_document_tests.cpp))
-- [ ] Route all existing UI edit commands through `MobEditTransaction`; the core
-  patcher exists, but the UI edit model still projects through legacy objects.
-- [x] Add a fail-closed shadow bridge for leaf-only UI projection deltas. It binds
-  changes to exact raw-source hashes, rejects structural and canonicalized-source
-  changes, preserves source-only records, and never writes its candidate.
+- [x] Connect existing topology-preserving UI edits to raw-tree output through
+  the projection bridge. The internal legacy object model may remain as the UI
+  representation as long as saved output is produced only by exact raw patches.
+- [x] Add a fail-closed bridge for UI projection deltas. It binds changes to exact
+  raw-source hashes, rejects canonicalized-source mismatches, preserves source-only
+  records, and supplies the validated candidate to the normal save pipeline.
   ([`3106fac`](https://github.com/Ilufus/ei-mapper-endurance/commit/3106fac),
   [validation](MOB_SHADOW_TRANSACTION_VALIDATION.md))
-- [x] Promote the independently cross-validated one-byte `OBJ_PLAYER` edit class
-  into real changed output through the raw transaction, fresh staged validation,
-  pre-save backup, and atomic replacement path. Mixed or unvalidated edit sets
-  remain wholly blocked. ([`3cd2b3c`](https://github.com/Ilufus/ei-mapper-endurance/commit/3cd2b3c))
+- [x] Enable generic topology-preserving raw-leaf output. Mixed property and
+  transform edits save normally without a preview or field whitelist, followed
+  by fresh staged validation, backup, and atomic replacement.
+  ([`843ba9c`](https://github.com/Ilufus/ei-mapper-endurance/commit/843ba9c))
 - [ ] Validate alpha.30 generic raw-leaf saving with ordinary mixed property and
   transform edits. There is no preview or field whitelist: the invariant is that
   every intended replacement is exact and all untouched leaves remain byte-identical.
@@ -205,17 +150,17 @@ These are the remaining safety gates before editing live maps can be recommended
   added leaf outside the accepted provenance-checked edit. Empty structural
   containers are covered by a regression derived from the first tester report.
   ([`66fbca0`](https://github.com/Ilufus/ei-mapper-endurance/commit/66fbca0))
-- [ ] Copy/delete exact raw object subtrees and create new objects only from
-  profile-approved raw templates. The provenance-checked document core now
-  duplicates/removes exact object bytes and passed 252/252 installed MOBs that
-  contain objects. Loaded UI objects are now bound to source-document, section,
-  and subtree hashes, and same-MOB clipboard copies carry that identity through
-  undo/redo. Replaying copied-leaf edits, final semantic authorization, and
-  profile-approved template creation remain. ([`8013339`](https://github.com/Ilufus/ei-mapper-endurance/commit/8013339),
+- [ ] Save copy/paste and delete by inserting/removing the exact raw object
+  subtree, then apply the pasted object's intended field changes as raw leaves.
+  Save newly created objects from profile-approved raw templates. The document
+  core already duplicates/removes exact object bytes and passed 252/252 installed
+  MOBs containing objects; the remaining task is connecting those operations to
+  the normal UI save path and validating them in JMV. ([`8013339`](https://github.com/Ilufus/ei-mapper-endurance/commit/8013339),
   [`f68ce87`](https://github.com/Ilufus/ei-mapper-endurance/commit/f68ce87))
 - [ ] Complete lossless MPR preservation for names, timestamps, alignment, and extra entries.
 - [ ] Verify CP1251 script byte lengths and round trips across the corpus.
-- [ ] Add an explicit duplicate-ID Repair preview with reference and script auditing.
+- [ ] Add optional explicit duplicate-ID Repair with reference and script auditing.
+  This is a separate user-invoked repair tool, never part of ordinary open/save.
 - [ ] Add in-app backup browsing and one-click restore to a user-selected destination.
 - [ ] Add integrated failure-injection tests for backup, staging, validation, and replacement failures.
 - [ ] Stress repeated open/close/save/cancel and abnormal-exit behavior on large maps.
@@ -370,8 +315,11 @@ These are the remaining safety gates before editing live maps can be recommended
 - [x] `0.1.0-alpha.14`: testing-group build with Settings-based setup,
   explicit base-game humanoid known issue, database appearance diagnostics, and
   a coordinated test/report matrix. ([`800a011`](https://github.com/Ilufus/ei-mapper-endurance/commit/800a011), [validation](ALPHA14_VALIDATION.md))
-- [ ] Next private alpha: address confirmed alpha.14 regressions and publish a
-  coverage summary from the group test matrix.
+- [ ] `0.1.0-alpha.30`: tester build for ordinary mixed MOB property/transform
+  saves with invisible raw preservation checks; structural copy/delete/patrol
+  changes remain the clearly reported limitation.
+- [ ] Following private alpha: enable and validate structural MOB operations,
+  then publish a concise Base/JMV coverage summary from tester results.
 - [ ] `0.1.0-beta.1`: correct indexed resources and responsive fast loading.
 - [ ] `0.1.0-rc.1`: independent workspace workflow, UI, script editing, and completed safety validation.
 - [ ] `1.0.0`: JMV-ready release passing the full corpus, MobExplorer, and in-game validation matrix.
