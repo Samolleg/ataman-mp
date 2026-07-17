@@ -658,7 +658,6 @@ void MainWindow::on_actionCopy_IDs_to_clipboard_triggered()
 void MainWindow::on_actionOpen_2_triggered()
 {
     m_settings->onShow(eOptSetGeneral);
-    setEnabled(false);
 }
 
 void MainWindow::closeEvent(QCloseEvent *e)

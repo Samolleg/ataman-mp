@@ -180,6 +180,8 @@ public:
     ENodeType nodeType() override {return ENodeType::eUnit; }
     uint deserialize(util::CMobParser& parser) override;
     void draw(bool isActive, QOpenGLShaderProgram* program) override;
+    void drawObjectVisual(bool isActive, QOpenGLShaderProgram* program) override;
+    void drawLogicVisual(bool isActive, QOpenGLShaderProgram* program) override;
     void drawSelect(QOpenGLShaderProgram* program = nullptr) override;
     void serializeJson(QJsonObject& obj) override;
     uint serialize(util::CMobParser& parser) override;

@@ -20,6 +20,7 @@ CSettings::CSettings(QWidget *parent) :
   ,m_version(1.0)
 {
     ui->setupUi(this);
+    setWindowModality(Qt::WindowModal);
     ui->rangeIncrement->setValidator(new QIntValidator(1, 1000000, this));
     ui->undoHistoryLimit->setValidator(new QIntValidator(1, 1000000, this));
     initOptions();
@@ -100,7 +101,6 @@ void CSettings::onShow(EOptSet optSet)
 
 bool CSettings::onClose()
 {
-    m_mainWindow->setEnabled(true);
     saveOptions();
     return QWidget::close();
 }

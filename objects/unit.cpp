@@ -83,7 +83,17 @@ CUnit::~CUnit()
 
 void CUnit::draw(bool isActive, QOpenGLShaderProgram* program)
 {
+    drawObjectVisual(isActive, program);
+    drawLogicVisual(isActive, program);
+}
+
+void CUnit::drawObjectVisual(bool isActive, QOpenGLShaderProgram* program)
+{
     CObjectBase::draw(isActive, program);
+}
+
+void CUnit::drawLogicVisual(bool isActive, QOpenGLShaderProgram* program)
+{
     if (m_aLogic.empty() || m_state == ENodeState::eHidden)
         return;
 

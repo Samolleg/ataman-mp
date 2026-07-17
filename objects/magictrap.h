@@ -80,6 +80,8 @@ public:
     ~CMagicTrap();
     ENodeType nodeType() override {return ENodeType::eMagicTrap; }
     void draw(bool isActive, QOpenGLShaderProgram* program) override;
+    void drawObjectVisual(bool isActive, QOpenGLShaderProgram* program) override;
+    void drawLogicVisual(bool isActive, QOpenGLShaderProgram* program) override;
     uint deserialize(util::CMobParser& parser) override;
     void serializeJson(QJsonObject& obj) override;
     uint serialize(util::CMobParser& parser) override;

@@ -9,6 +9,9 @@
 #include <QJsonObject>
 #include <QTextStream>
 #include <QTimer>
+#include <QDir>
+#include <QTabWidget>
+#include <QTemporaryDir>
 #include <QUndoCommand>
 #include <QUndoStack>
 #include <cstdio>
@@ -20,6 +23,7 @@
 #include "resourcemanager.h"
 #include "layout_components/tablemanager.h"
 #include "window_lifecycle.h"
+#include "settings.h"
 
 #ifdef Q_OS_WIN
 #include <windows.h>
@@ -250,6 +254,24 @@ int runHeadlessCommand(QApplication& app)
         const bool clickCommit = combo.value()->toString() == "house" && appliedChanges == 2;
 
         QWidget primaryWindow;
+        bool settingsTabsUsable = false;
+        {
+            const QString previousDirectory = QDir::currentPath();
+            QTemporaryDir settingsDirectory;
+            if(settingsDirectory.isValid())
+                QDir::setCurrent(settingsDirectory.path());
+            {
+                CSettings settingsWindow(&primaryWindow);
+                QTabWidget* settingsTabs = settingsWindow.findChild<QTabWidget*>("tabWidget");
+                if(settingsTabs && settingsTabs->count() > 1)
+                {
+                    settingsTabs->setCurrentIndex(1);
+                    settingsTabsUsable = settingsWindow.windowModality() == Qt::WindowModal
+                            && settingsTabs->isEnabled() && settingsTabs->currentIndex() == 1;
+                }
+            }
+            QDir::setCurrent(previousDirectory);
+        }
         QWidget ownedWindow(&primaryWindow, Qt::Window);
         QWidget orphanWindow(nullptr, Qt::Window);
         ownedWindow.setAttribute(Qt::WA_DontShowOnScreen);
@@ -278,7 +300,7 @@ int runHeadlessCommand(QApplication& app)
                 && pastedObjects == 1 && placementChanges == 1;
 
         const bool passed = prefixesOnly && valueStable && focusCancel && escapeCancel
-                && enterCommit && clickCommit && secondaryWindowsClosed
+                && enterCommit && clickCommit && settingsTabsUsable && secondaryWindowsClosed
                 && pasteSingleAction && pasteUndoAtomic && pasteRedoAtomic;
         QTextStream output(stdout);
         output << "asset-picker prefixes=" << completions.join(",") << "\n"
@@ -288,6 +310,7 @@ int runHeadlessCommand(QApplication& app)
                << " escapeCancel=" << escapeCancel
                << " enterCommit=" << enterCommit
                << " clickCommit=" << clickCommit
+               << " settingsTabsUsable=" << settingsTabsUsable
                << " secondaryWindowsClosed=" << secondaryWindowsClosed
                << " pasteSingleAction=" << pasteSingleAction
                << " pasteUndoAtomic=" << pasteUndoAtomic

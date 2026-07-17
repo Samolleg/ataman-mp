@@ -91,7 +91,17 @@ CMagicTrap::~CMagicTrap()
 
 void CMagicTrap::draw(bool isActive, QOpenGLShaderProgram* program)
 {
+    drawObjectVisual(isActive, program);
+    drawLogicVisual(isActive, program);
+}
+
+void CMagicTrap::drawObjectVisual(bool isActive, QOpenGLShaderProgram* program)
+{
     CObjectBase::draw(isActive, program);
+}
+
+void CMagicTrap::drawLogicVisual(bool isActive, QOpenGLShaderProgram* program)
+{
     for(auto& pCast : m_aCastPoint)
         pCast->draw(isActive, program);
 

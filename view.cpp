@@ -245,11 +245,7 @@ void CView::draw()
     QMatrix4x4 camMatrix = m_cam->update();
     const COptBool* cullingOption = m_pSettings
         ? dynamic_cast<const COptBool*>(m_pSettings->opt("frustumCulling")) : nullptr;
-    const COptBool* drawLogicOption = m_pSettings
-        ? dynamic_cast<const COptBool*>(m_pSettings->opt("drawLogic")) : nullptr;
-    const bool cullingEnabled = (!cullingOption || cullingOption->value())
-        && (!drawLogicOption || !drawLogicOption->value())
-        && CScene::getInstance()->getMode() != eEditModeLogic;
+    const bool cullingEnabled = !cullingOption || cullingOption->value();
     const CViewFrustum frustum(m_projection * camMatrix);
     const auto visible = [&frustum, cullingEnabled](CNode* node)
     {
@@ -297,22 +293,32 @@ void CView::draw()
                 continue; //skip drawing active mob
 
             for (auto& node: mob->nodes())
+            {
                 if(visible(node))
-                    node->draw(false, &m_program);
+                    node->drawObjectVisual(false, &m_program);
+                node->drawLogicVisual(false, &m_program);
+            }
         }
 
         // Draw the active MOB in two passes so a selected duplicate remains
         // visible when it occupies exactly the same depth as its source.
         for(auto& node : m_activeMob->nodes())
         {
-            if(node->nodeState() != ENodeState::eSelect && visible(node))
-                node->draw(true, &m_program);
+            if(node->nodeState() != ENodeState::eSelect)
+            {
+                if(visible(node))
+                    node->drawObjectVisual(true, &m_program);
+                node->drawLogicVisual(true, &m_program);
+            }
         }
         glDepthFunc(GL_LEQUAL);
         for(auto& node : m_activeMob->nodes())
         {
             if(node->nodeState() == ENodeState::eSelect)
-                node->draw(true, &m_program);
+            {
+                node->drawObjectVisual(true, &m_program);
+                node->drawLogicVisual(true, &m_program);
+            }
         }
         glDepthFunc(GL_LESS);
     }

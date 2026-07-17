@@ -30,6 +30,12 @@ public:
     static uint s_freeId;
     virtual ~CNode();
     virtual void draw(bool isActive, QOpenGLShaderProgram* program = nullptr) = 0;
+    // Rendering is split so the view can cull heavy object geometry while
+    // retaining logic helpers whose paths may extend into the viewport.
+    virtual void drawObjectVisual(bool isActive, QOpenGLShaderProgram* program = nullptr)
+        { draw(isActive, program); }
+    virtual void drawLogicVisual(bool isActive, QOpenGLShaderProgram* program = nullptr)
+        { Q_UNUSED(isActive); Q_UNUSED(program); }
     virtual void drawSelect(QOpenGLShaderProgram* program = nullptr) = 0;
     virtual ENodeType nodeType() = 0;
     virtual uint deserialize(util::CMobParser& parser) {Q_UNUSED(parser); Q_ASSERT("pure virtual" && false); return 0;} //todo: define this method in CObjectBase

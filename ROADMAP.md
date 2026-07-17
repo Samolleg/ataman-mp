@@ -5,7 +5,7 @@ An item is checked only after its implementation has landed and received the
 listed level of validation. New findings and wishlist requests belong here so
 they do not get lost between test sessions.
 
-Current development release: `0.1.0-alpha.28`.
+Current development release: `0.1.0-alpha.29`.
 
 ## Implementation evidence
 
@@ -61,12 +61,18 @@ behavior.
   semantic alignment, including equal-count byte-identical duplicate subtrees.
   The installed Base/JMV projection corpus passes 254/254 and mismatches still
   fail closed. ([`1ab2935`](https://github.com/Ilufus/ei-mapper-endurance/commit/1ab2935))
-- [ ] Validate alpha.28 cached frustum culling on large JMV maps. Normal object
+- [x] Validate alpha.28 cached frustum culling on large JMV maps. Normal object
   rendering and GPU picking skip objects whose cached bounds are fully outside
-  the camera frustum. Selected objects, logic editing, and Draw Logic bypass
-  culling to avoid hiding extended paths. GPU occlusion queries remain deferred
-  until profiling shows that their synchronization cost is justified.
+  the camera frustum. Zone 18 improved from the former severe slowdown to a
+  visually correct stable 60+ FPS in tester observation. The test exposed that
+  alpha.28 disabled all culling in Logic mode and that the modal Settings owner
+  was accidentally disabled; both regressions move to alpha.29.
   ([validation](ALPHA28_VALIDATION.md))
+- [ ] Validate alpha.29 split object/logic rendering. Off-screen object geometry
+  remains culled in Logic mode while unit paths, patrol/look points, trap cast
+  points, and activation zones retain their existing visualization behavior.
+  Settings now uses Qt window modality without disabling its own owner chain, so
+  every tab remains selectable. ([validation](ALPHA29_VALIDATION.md))
 - [ ] Migrate changed MOB saves from the legacy serializer to raw-tree transactions;
   no-op raw preservation is validated, leaf-only UI deltas run through a fail-closed
   transaction bridge, and independently validated `OBJ_PLAYER` edits now use the

@@ -63,3 +63,19 @@ copy, delete, and other unvalidated edits must still be refused as a whole.
 - Installed Base/JMV projection corpus: 254 passed, 0 failed.
 - Source round-trip and hidden UI regression checks are required on the packaged
   build before publishing.
+
+## Tester result
+
+Zone 18 rendered smoothly at a stable reported 60+ FPS with no observed visual
+problems. Semantic provenance bound all 4,463 Zone 18 objects, all 1,693 Zone 1
+objects, and all 118 Autozone objects. The Settings window could not switch tabs,
+preventing the requested enabled/disabled A/B comparison. Entering Logic mode
+reduced performance to 10-20 FPS because alpha.28 conservatively disabled culling
+for the entire scene; this is corrected in alpha.29 by separating object geometry
+from logic-helper drawing.
+
+The returned Autozone save is 78,598 bytes, matching its source size. It contains
+one byte change at offset `0x8FDA`, `OBJ_PLAYER` 12 to 13, on `UNIT[17]` (`NewObject
+- 1000014`, NID 1000014). Semantic comparison reports 117 unchanged objects and
+one modified object, with no additions, removals, or unrelated byte changes. A
+subsequent prototype edit was rejected as an unvalidated save class.
