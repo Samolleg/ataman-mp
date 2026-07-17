@@ -5,7 +5,7 @@ An item is checked only after its implementation has landed and received the
 listed level of validation. New findings and wishlist requests belong here so
 they do not get lost between test sessions.
 
-Current development release: `0.1.0-alpha.46`.
+Current development release: `0.1.0-alpha.47`.
 
 ## Implementation evidence
 
@@ -383,21 +383,25 @@ MOB editing does not imply that landscape saving is supported.
   rectangles without assuming their centers are free. Score candidates against
   physical MOB object bounds and rectangle edges, fall back across travel zones,
   and refuse launch when no candidate has the required clearance.
-- [x] Add a temporary, fingerprinted x86 JMV provider which intercepts only a
-  private `endurance_launch ed????????` transition marker and invokes the
-  existing internal server handler on the game thread. Alpha.44 proved the ASI
-  prototype loads and reaches the handler, but Starter warns about unknown ASIs
-  and a random outer filename is not a usable map identity.
+- [x] Add a temporary, fingerprinted x86 JMV provider. Alpha.44 proved the ASI
+  prototype and private autoexec marker can reach the internal handler, but
+  Starter warns about unknown ASIs and a random outer filename is not a usable
+  map identity.
 - [x] Audit Starter's supported external-provider interface and call the handler
   with the real maps.txt map identity. Runtime evidence showed loose `.plg`
   files are not discovered by JMV's current configuration; use its declared,
   otherwise absent `DEV/Plugin=plugin.dll` slot. Redirect only exact source-map
   MPR/MOB opens to the hash-owned temporary files so the live map and embedded
   MP/SEC namespace remain untouched.
-- [x] Back up `Engine/2utoexec.cfg` byte-for-byte before its temporary marker,
-  hash-check all temporary writes, restore only the exact Endurance-owned patch,
-  remove only hash-matching temporary maps, retain run manifests/logs, and recover
-  interrupted cleanup at the next editor start.
+- [x] Retain backward-compatible recovery for interrupted alpha.43-alpha.46
+  `2utoexec.cfg` markers, but stop modifying autoexec in current runs. Hash-check
+  all temporary writes, remove only hash-matching provider/maps, retain run
+  manifests/logs, and recover interrupted cleanup at the next editor start.
+- [x] Alpha.46 runtime evidence proved the configured provider loads and both
+  callbacks succeed, but its autoexec marker has already run before plugin
+  readiness. Schedule a one-shot Windows timer from `EntryAfterPatch`; its
+  callback executes on the game thread after the message loop begins, installs
+  the exact redirects, and invokes the fingerprinted handler directly.
 - [ ] Perform the focused JMV runtime feasibility test: confirm that the engine
   accepts the temporary outer map name while preserving the MPR internal name,
   executes the MOB bootstrap exactly once, creates/controls the test player at
@@ -440,10 +444,12 @@ MOB editing does not imply that landscape saving is supported.
   loader's error/assert path. Runtime evidence also showed loose `.plg` files
   are not discovered by this JMV profile: install temporarily into its declared,
   otherwise absent `DEV/Plugin=plugin.dll` slot without rewriting config.reg.
+- [x] `0.1.0-alpha.47`: remove the failed autoexec timing dependency. Schedule
+  the map request from a one-shot game-thread timer after `EntryAfterPatch`, and
+  leave `2utoexec.cfg` untouched while retaining legacy interrupted-run recovery.
 - [x] `0.1.0-alpha.41`: redo-safe raw provenance and the July 17 multi-edit/UI
   fixes passed owner testing and were handed to the closed tester group.
-  ([`db3fa31`](https://github.com/Ilufus/ei-mapper-endurance/commit/db3fa31),
-  [validation](docs/releases/ALPHA41_VALIDATION.md))
+  ([`db3fa31`](https://github.com/Ilufus/ei-mapper-endurance/commit/db3fa31))
 - [ ] Following private alpha: fix issues found by the closed test group and
   publish a concise Base/JMV coverage summary; no new hardening architecture.
 - [ ] `0.1.0-beta.1`: correct indexed resources and responsive fast loading.

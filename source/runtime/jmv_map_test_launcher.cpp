@@ -236,7 +236,7 @@ BOOL CALLBACK findWindowForProcess(HWND window, LPARAM parameter)
 
 CJmvMapTestLauncher::CJmvMapTestLauncher(QObject* parent)
     : QObject(parent), m_process(new QProcess(this)),
-      m_originalAutoexecExisted(false), m_cleanupComplete(true)
+      m_cleanupComplete(true)
 {
     connect(m_process, &QProcess::started, this, [this]()
     {
@@ -387,11 +387,6 @@ bool CJmvMapTestLauncher::launch(const SJmvMapTestLaunchInput& input, QString* e
         cleanup();
         return false;
     }
-    if(!patchAutoexec(error))
-    {
-        cleanup();
-        return false;
-    }
     if(!writeManifest("launching", error))
     {
         cleanup();
@@ -445,7 +440,6 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
     }
     m_gameExePath = QDir(input.profile.gameRoot).filePath("Starter/Engine/game.exe");
     m_engineDirectory = QFileInfo(m_gameExePath).absolutePath();
-    m_autoexecPath = QDir(m_engineDirectory).filePath("2utoexec.cfg");
     m_bridgeSourcePath = QDir(QCoreApplication::applicationDirPath())
             .filePath("runtime/EIMapperEnduranceJmvBridge.plg");
     const QString modConfigPath = QDir(input.profile.modRoot).filePath("config.reg");
@@ -485,7 +479,6 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
     m_manifestPath = QDir(m_runRoot).filePath("manifest.json");
     m_runLogPath = QDir(m_runRoot).filePath("runtime.log");
     m_bridgeResultPath = QDir(m_runRoot).filePath("bridge-result.log");
-    m_autoexecBackupPath = QDir(m_runRoot).filePath("autoexec.original.cfg");
     m_liveMprPath = QDir(mapsDirectory).filePath(m_temporaryMapName + ".mpr");
     m_liveMobPath = QDir(mapsDirectory).filePath(m_temporaryMapName + ".mob");
     if(QFileInfo::exists(m_liveMprPath) || QFileInfo::exists(m_liveMobPath))
@@ -628,41 +621,6 @@ bool CJmvMapTestLauncher::installBridge(QString* error)
     appendRunLog(QString("Installed temporary JMV launch bridge sha256=%1 path=%2")
                  .arg(m_bridgeSha256, m_bridgeLivePath));
     return writeManifest("bridge-installed", error);
-}
-
-bool CJmvMapTestLauncher::patchAutoexec(QString* error)
-{
-    QByteArray original;
-    m_originalAutoexecExisted = QFileInfo::exists(m_autoexecPath);
-    if(m_originalAutoexecExisted && !readFile(m_autoexecPath, &original, error))
-        return false;
-    m_originalAutoexecSha256 = sha256(original);
-    if(m_originalAutoexecExisted && !atomicWrite(m_autoexecBackupPath, original, error))
-        return false;
-    QByteArray patched = original;
-    if(!patched.isEmpty() && !patched.endsWith('\n'))
-        patched.append("\r\n");
-    patched.append("endurance_launch ");
-    patched.append(m_temporaryMapName.toLatin1());
-    patched.append("\r\n");
-    m_patchedAutoexecSha256 = sha256(patched);
-    QJsonObject autoexec;
-    autoexec.insert("path", m_autoexecPath);
-    autoexec.insert("backupPath", m_autoexecBackupPath);
-    autoexec.insert("originalExisted", m_originalAutoexecExisted);
-    autoexec.insert("originalSha256", m_originalAutoexecSha256);
-    autoexec.insert("patchedSha256", m_patchedAutoexecSha256);
-    m_manifest.insert("autoexec", autoexec);
-    if(!atomicWrite(m_autoexecPath, patched, error) ||
-       fileSha256(m_autoexecPath) != m_patchedAutoexecSha256)
-    {
-        if(error && error->isEmpty())
-            *error = "The temporary JMV 2utoexec.cfg marker failed its SHA-256 check.";
-        return false;
-    }
-    appendRunLog(QString("Patched autoexec originalSha256=%1 patchedSha256=%2")
-                 .arg(m_originalAutoexecSha256, m_patchedAutoexecSha256));
-    return true;
 }
 
 bool CJmvMapTestLauncher::writeManifest(const QString& state, QString* error)

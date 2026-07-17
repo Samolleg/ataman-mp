@@ -14,14 +14,13 @@ constexpr unsigned char kExpectedGameSha256[32] = {
     0x1F, 0x1F, 0x5D, 0x1B, 0xCF, 0x08, 0x27, 0x17,
     0xF3, 0x17, 0x76, 0xDD, 0x4D, 0xEE, 0x94, 0xE2
 };
-constexpr uintptr_t kConsoleExecuteAddress = 0x005DC620;
 constexpr uintptr_t kGameStringCtorAddress = 0x007009DE;
 constexpr uintptr_t kGameStringDtorAddress = 0x00700970;
 constexpr uintptr_t kServerHandlerAddress = 0x005DF490;
-constexpr unsigned char kConsoleExecutePrologue[7] = {
-    0x6A, 0xFF, 0x68, 0x80, 0x89, 0x72, 0x00
+constexpr unsigned char kServerHandlerPrologue[13] = {
+    0x64, 0xA1, 0x00, 0x00, 0x00, 0x00, 0x6A,
+    0xFF, 0x68, 0xC0, 0x8B, 0x72, 0x00
 };
-constexpr char kMarkerPrefix[] = "endurance_launch ";
 
 using CreateFileAFn = HANDLE (WINAPI*)(LPCSTR, DWORD, DWORD, LPSECURITY_ATTRIBUTES,
                                       DWORD, DWORD, HANDLE);
@@ -31,7 +30,6 @@ using GetFileAttributesAFn = DWORD (WINAPI*)(LPCSTR);
 using GetFileAttributesWFn = DWORD (WINAPI*)(LPCWSTR);
 
 HMODULE g_instance = nullptr;
-void* g_consoleTrampoline = nullptr;
 volatile LONG g_initialized = 0;
 volatile LONG g_launchHandled = 0;
 volatile LONG g_redirectCount = 0;
@@ -121,8 +119,8 @@ bool VerifyRuntime()
     if(!HashFileSha256(gamePath, hash) ||
        std::memcmp(hash, kExpectedGameSha256, sizeof(hash)) != 0)
         return false;
-    return std::memcmp(reinterpret_cast<const void*>(kConsoleExecuteAddress),
-                       kConsoleExecutePrologue, sizeof(kConsoleExecutePrologue)) == 0;
+    return std::memcmp(reinterpret_cast<const void*>(kServerHandlerAddress),
+                       kServerHandlerPrologue, sizeof(kServerHandlerPrologue)) == 0;
 }
 
 bool IsSafeMapName(const wchar_t* map, size_t maximum)
@@ -137,19 +135,6 @@ bool IsSafeMapName(const wchar_t* map, size_t maximum)
         const wchar_t value = map[index];
         if(!((value >= L'0' && value <= L'9') ||
              (value >= L'a' && value <= L'z') || value == L'_'))
-            return false;
-    }
-    return true;
-}
-
-bool IsValidTemporaryMap(const char* map)
-{
-    if(!map || std::strlen(map) != 10 || map[0] != 'e' || map[1] != 'd')
-        return false;
-    for(int index = 2; index < 10; ++index)
-    {
-        const char value = map[index];
-        if(!((value >= '0' && value <= '9') || (value >= 'a' && value <= 'f')))
             return false;
     }
     return true;
@@ -235,17 +220,41 @@ HANDLE WINAPI HookCreateFileA(LPCSTR path, DWORD access, DWORD share,
                               DWORD flags, HANDLE templateFile)
 {
     const char* redirected = RedirectedPath(path);
+    if(redirected != path)
+    {
+        wchar_t sourceW[MAX_PATH * 4]{};
+        wchar_t destinationW[MAX_PATH * 4]{};
+        MultiByteToWideChar(CP_ACP, 0, path, -1, sourceW,
+                            int(sizeof(sourceW) / sizeof(sourceW[0])));
+        MultiByteToWideChar(CP_ACP, 0, redirected, -1, destinationW,
+                            int(sizeof(destinationW) / sizeof(destinationW[0])));
+        LogRedirect(L"CreateFileA", sourceW, destinationW);
+    }
     return g_originalCreateFileA(redirected, access, share, security, creation, flags, templateFile);
 }
 
 DWORD WINAPI HookGetFileAttributesW(LPCWSTR path)
 {
-    return g_originalGetFileAttributesW(RedirectedPath(path));
+    const wchar_t* redirected = RedirectedPath(path);
+    if(redirected != path)
+        LogRedirect(L"GetFileAttributesW", path, redirected);
+    return g_originalGetFileAttributesW(redirected);
 }
 
 DWORD WINAPI HookGetFileAttributesA(LPCSTR path)
 {
-    return g_originalGetFileAttributesA(RedirectedPath(path));
+    const char* redirected = RedirectedPath(path);
+    if(redirected != path)
+    {
+        wchar_t sourceW[MAX_PATH * 4]{};
+        wchar_t destinationW[MAX_PATH * 4]{};
+        MultiByteToWideChar(CP_ACP, 0, path, -1, sourceW,
+                            int(sizeof(sourceW) / sizeof(sourceW[0])));
+        MultiByteToWideChar(CP_ACP, 0, redirected, -1, destinationW,
+                            int(sizeof(destinationW) / sizeof(destinationW[0])));
+        LogRedirect(L"GetFileAttributesA", sourceW, destinationW);
+    }
+    return g_originalGetFileAttributesA(redirected);
 }
 
 void* ReplacementFor(const char* name)
@@ -375,84 +384,6 @@ bool QueueServerLaunch(const char* map)
     return true;
 }
 
-extern "C" int __stdcall TryHandleCommand(const char* command)
-{
-    if(!command || std::strncmp(command, kMarkerPrefix, sizeof(kMarkerPrefix) - 1) != 0)
-        return 0;
-    const char* map = command + sizeof(kMarkerPrefix) - 1;
-    if(!IsValidTemporaryMap(map))
-    {
-        Log(L"Rejected malformed Endurance launch marker");
-        return 1;
-    }
-    char expected[32]{};
-    WideCharToMultiByte(CP_ACP, 0, g_expectedTemporaryMap, -1, expected,
-                        int(sizeof(expected)), nullptr, nullptr);
-    if(std::strcmp(map, expected) != 0)
-    {
-        Log(L"Rejected Endurance launch marker that did not match the inherited manifest map");
-        return 1;
-    }
-    if(InterlockedCompareExchange(&g_launchHandled, 1, 0) != 0)
-        return 1;
-    if(!InstallFileRedirectHooks())
-    {
-        Log(L"Launch refused: no supported file imports could be redirected");
-        return 1;
-    }
-    Log(L"Accepted Endurance launch marker; invoking the internal server handler with the source map identity");
-    QueueServerLaunch(g_sourceMapA);
-    Log(L"Engine server launch request queued");
-    return 1;
-}
-
-__declspec(naked) void ConsoleExecuteHook()
-{
-    __asm {
-        pushfd
-        pushad
-        push ecx
-        call TryHandleCommand
-        test eax, eax
-        jz pass_through
-        popad
-        popfd
-        ret
-    pass_through:
-        popad
-        popfd
-        jmp dword ptr [g_consoleTrampoline]
-    }
-}
-
-bool InstallConsoleHook()
-{
-    auto* target = reinterpret_cast<unsigned char*>(kConsoleExecuteAddress);
-    constexpr SIZE_T overwritten = sizeof(kConsoleExecutePrologue);
-    auto* trampoline = static_cast<unsigned char*>(VirtualAlloc(
-        nullptr, overwritten + 5, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE));
-    if(!trampoline)
-        return false;
-    std::memcpy(trampoline, target, overwritten);
-    trampoline[overwritten] = 0xE9;
-    *reinterpret_cast<long*>(trampoline + overwritten + 1) =
-        long((target + overwritten) - (trampoline + overwritten + 5));
-    g_consoleTrampoline = trampoline;
-
-    DWORD oldProtect = 0;
-    if(!VirtualProtect(target, overwritten, PAGE_EXECUTE_READWRITE, &oldProtect))
-        return false;
-    target[0] = 0xE9;
-    *reinterpret_cast<long*>(target + 1) =
-        long(reinterpret_cast<unsigned char*>(&ConsoleExecuteHook) - (target + 5));
-    target[5] = 0x90;
-    target[6] = 0x90;
-    FlushInstructionCache(GetCurrentProcess(), target, overwritten);
-    DWORD ignored = 0;
-    VirtualProtect(target, overwritten, oldProtect, &ignored);
-    return true;
-}
-
 bool ReadEnvironment()
 {
     GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_MAP", g_expectedTemporaryMap,
@@ -490,30 +421,55 @@ bool InitializeBridge()
     Log(L"EI Mapper Endurance JMV plugin bridge initializing");
     if(!VerifyRuntime())
     {
-        Log(L"Bridge disabled: game hash or console hook signature mismatch");
+        Log(L"Bridge disabled: game hash or server-handler signature mismatch");
         return false;
     }
-    if(!InstallConsoleHook())
+    Log(L"Bridge ready; waiting for the deferred game-thread launch timer");
+    return true;
+}
+
+void CALLBACK DeferredLaunchTimer(HWND, UINT, UINT_PTR timerId, DWORD)
+{
+    KillTimer(nullptr, timerId);
+    if(InterlockedCompareExchange(&g_launchHandled, 1, 0) != 0)
+        return;
+    Log(L"Deferred game-thread launch timer fired");
+    if(!InstallFileRedirectHooks())
     {
-        Log(L"Bridge disabled: console transition hook installation failed");
+        Log(L"Launch refused: no supported file imports could be redirected");
+        return;
+    }
+    Log(L"Invoking the internal server handler with the source map identity");
+    QueueServerLaunch(g_sourceMapA);
+    Log(L"Engine server launch request queued");
+}
+
+bool ScheduleDeferredLaunch()
+{
+    if(!InitializeBridge())
+        return false;
+    const UINT_PTR timer = SetTimer(nullptr, 0, 1000, &DeferredLaunchTimer);
+    if(!timer)
+    {
+        Log(L"Bridge disabled: could not create the deferred game-thread timer");
         return false;
     }
-    Log(L"Bridge ready; waiting for the private Endurance launch marker");
+    Log(L"Deferred game-thread launch scheduled for 1000 ms after Starter patches");
     return true;
 }
 }
 
 extern "C" __declspec(dllexport) int __cdecl EntryBeforePatch(const char*)
 {
-    InitializeBridge();
-    // Starter's plugin contract treats any non-zero callback result as an
-    // error/assert condition. Initialization failures are reported through the
-    // run-specific bridge log and leave the runtime unpatched.
     return 0;
 }
 
 extern "C" __declspec(dllexport) int __cdecl EntryAfterPatch(const char*)
 {
+    // Starter treats any non-zero callback result as an error/assert condition.
+    // Failures are reported through the run-specific log and leave the runtime
+    // unpatched while the loader still receives its required zero result.
+    ScheduleDeferredLaunch();
     return 0;
 }
 
