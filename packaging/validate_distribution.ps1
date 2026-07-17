@@ -21,7 +21,9 @@ if (Test-Path -LiteralPath $logsRoot) {
     }
 }
 
-foreach ($dump in Get-ChildItem -LiteralPath $root -Recurse -File -Include '*.dmp', '*.mdmp') {
+foreach ($dump in Get-ChildItem -LiteralPath $root -Recurse -File | Where-Object {
+    $_.Extension -in @('.dmp', '.mdmp')
+}) {
     $failures.Add("crash dump included: $($dump.FullName.Substring($root.Length + 1))")
 }
 
