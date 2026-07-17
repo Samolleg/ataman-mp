@@ -29,12 +29,14 @@ CNode::CNode():
     ,m_comment("")
     ,m_parent(nullptr)
     ,m_state(eDraw)
+    ,m_rawCopiedObject(false)
 {
     init();
 }
 
 CNode::CNode(CNode* parent):
     m_position(0.0, 0.0, 0.0)
+    ,m_rawCopiedObject(false)
 {
     if (m_parent)
         m_parent = parent;
@@ -51,6 +53,10 @@ CNode::CNode(const CNode &node):
   ,m_rotation(node.m_rotation)
   ,m_parent(node.m_parent)
   ,m_state(node.m_state)
+  ,m_rawSourceDocumentSha256(node.m_rawSourceDocumentSha256)
+  ,m_rawSourceObjectPath(node.m_rawSourceObjectPath)
+  ,m_rawSourceSubtreeSha256(node.m_rawSourceSubtreeSha256)
+  ,m_rawCopiedObject(node.m_rawCopiedObject)
 {
     init();
     //children?

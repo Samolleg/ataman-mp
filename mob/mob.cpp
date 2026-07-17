@@ -720,6 +720,7 @@ uint CMob::trapIdByPoint(CTrapCastPoint *pPoint)
 
 CNode* CMob::createNode(QJsonObject data)
 {
+    const QJsonObject enduranceProvenance = data.value("_Endurance raw provenance").toObject();
     auto wo = data;
     if (data.find("World object") != data.end())
         wo = wo["World object"].toObject();
@@ -804,6 +805,17 @@ CNode* CMob::createNode(QJsonObject data)
 
     pNode->setMapId(freeMapId());
     pNode->setState(ENodeState::eSelect);
+    const QByteArray sourceDocumentSha256 = QByteArray::fromHex(
+        enduranceProvenance.value("sourceDocumentSha256").toString().toLatin1());
+    const QByteArray sourceSubtreeSha256 = QByteArray::fromHex(
+        enduranceProvenance.value("sourceSubtreeSha256").toString().toLatin1());
+    const QString sourceObjectPath = enduranceProvenance.value("sourceObjectPath").toString();
+    if(sourceDocumentSha256.size() == 32 && sourceSubtreeSha256.size() == 32
+       && !sourceObjectPath.isEmpty())
+    {
+        pNode->setRawObjectProvenance(sourceDocumentSha256, sourceObjectPath,
+                                      sourceSubtreeSha256, true);
+    }
 
 
     return pNode;
@@ -955,6 +967,42 @@ int CMob::readMob(QFileInfo &path)
                 "No editable document was opened; details are in logs/workflow.log.");
             file.close();
             return 4;
+        }
+
+        const QVector<SMobObjectSnapshot>& rawObjects = structuralDocument.objects();
+        const QByteArray sourceDocumentSha256 = QCryptographicHash::hash(
+            m_originalData, QCryptographicHash::Sha256);
+        bool provenanceAligned = rawObjects.size() == m_aNode.size();
+        if(provenanceAligned)
+        {
+            for(int index = 0; index < rawObjects.size(); ++index)
+            {
+                const SMobObjectSnapshot& rawObject = rawObjects.at(index);
+                CNode* node = m_aNode.at(index);
+                if(!node || !rawObject.hasNid || node->mapId() != rawObject.nid)
+                {
+                    provenanceAligned = false;
+                    break;
+                }
+            }
+        }
+        if(provenanceAligned)
+        {
+            for(int index = 0; index < rawObjects.size(); ++index)
+            {
+                const SMobObjectSnapshot& rawObject = rawObjects.at(index);
+                m_aNode.at(index)->setRawObjectProvenance(
+                    sourceDocumentSha256, rawObject.sectionPath,
+                    rawObject.subtreeSha256, false);
+            }
+            ei::log(eLogInfo, QString("Bound raw MOB provenance to %1 projected objects sourceSha256:%2")
+                .arg(rawObjects.size())
+                .arg(QString::fromLatin1(sourceDocumentSha256.toHex())));
+        }
+        else
+        {
+            ei::log(eLogWarning, QString("Raw MOB provenance binding unavailable because projection order did not align path:%1 rawObjects:%2 projectedObjects:%3")
+                .arg(m_filePath.absoluteFilePath()).arg(rawObjects.size()).arg(m_aNode.size()));
         }
 
         file.close();

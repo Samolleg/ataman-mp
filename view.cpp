@@ -2409,7 +2409,20 @@ void CView::selectedObjectToClipboardBuffer()
     //for(auto& mob: m_aMob)
     foreach(pNode, m_activeMob->nodes())
         if (pNode->nodeState() & ENodeState::eSelect)
-            arrObj.append(pNode->toJson());
+        {
+            QJsonObject nodeData = pNode->toJson();
+            if(pNode->hasRawObjectProvenance())
+            {
+                QJsonObject provenance;
+                provenance.insert("sourceDocumentSha256",
+                    QString::fromLatin1(pNode->rawSourceDocumentSha256().toHex()));
+                provenance.insert("sourceObjectPath", pNode->rawSourceObjectPath());
+                provenance.insert("sourceSubtreeSha256",
+                    QString::fromLatin1(pNode->rawSourceSubtreeSha256().toHex()));
+                nodeData.insert("_Endurance raw provenance", provenance);
+            }
+            arrObj.append(nodeData);
+        }
 
     QJsonObject obj;
     obj.insert("Version", 2);

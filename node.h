@@ -7,6 +7,7 @@
 #include <QOpenGLShaderProgram>
 #include <QOpenGLTexture>
 #include <QJsonObject>
+#include <QByteArray>
 
 #include "types.h"
 #include "utils.h"
@@ -77,6 +78,27 @@ public:
     void setState(ENodeState state) {m_state = state;}
     ENodeState nodeState() {return m_state;}
 
+    void setRawObjectProvenance(const QByteArray& documentSha256,
+                                const QString& sectionPath,
+                                const QByteArray& subtreeSha256,
+                                bool copiedObject = false)
+    {
+        m_rawSourceDocumentSha256 = documentSha256;
+        m_rawSourceObjectPath = sectionPath;
+        m_rawSourceSubtreeSha256 = subtreeSha256;
+        m_rawCopiedObject = copiedObject;
+    }
+    bool hasRawObjectProvenance() const
+    {
+        return m_rawSourceDocumentSha256.size() == 32
+                && !m_rawSourceObjectPath.isEmpty()
+                && m_rawSourceSubtreeSha256.size() == 32;
+    }
+    const QByteArray& rawSourceDocumentSha256() const { return m_rawSourceDocumentSha256; }
+    const QString& rawSourceObjectPath() const { return m_rawSourceObjectPath; }
+    const QByteArray& rawSourceSubtreeSha256() const { return m_rawSourceSubtreeSha256; }
+    bool isRawCopiedObject() const { return m_rawCopiedObject; }
+
 private:
     void init();
 
@@ -92,6 +114,10 @@ protected:
     CNode* m_parent;
     SColor m_pickingColor;
     ENodeState m_state;
+    QByteArray m_rawSourceDocumentSha256;
+    QString m_rawSourceObjectPath;
+    QByteArray m_rawSourceSubtreeSha256;
+    bool m_rawCopiedObject;
 
 private:
     uint m_id;
