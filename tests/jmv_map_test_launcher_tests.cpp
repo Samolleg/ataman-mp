@@ -15,6 +15,7 @@ private slots:
     void injectsIntoExistingWorldScript();
     void ignoresWorldScriptInStringsAndComments();
     void rejectsMalformedExistingWorldScript();
+    void recognizesConfiguredJmvPluginSlot();
     void recoveryRemovesAutoexecCreatedByEndurance();
     void recoveryRestoresPreexistingAutoexec();
     void recoveryRemovesOwnedBridge();
@@ -74,6 +75,15 @@ void JmvMapTestLauncherTests::initTestCase()
     const QString root = QDir(QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation))
             .filePath("test-runs");
     QDir(root).removeRecursively();
+}
+
+void JmvMapTestLauncherTests::recognizesConfiguredJmvPluginSlot()
+{
+    const QByteArray expected = QByteArray::fromHex(
+        "01000300444556ffff0d000000020600506c7567696e0a00706c7567696e2e646c6c");
+    QVERIFY(CJmvMapTestLauncher::hasConfiguredJmvPluginSlot(expected));
+    QVERIFY(!CJmvMapTestLauncher::hasConfiguredJmvPluginSlot(
+                QByteArray("Plugin=EIMapperEnduranceJmvBridge.plg")));
 }
 
 void JmvMapTestLauncherTests::injectsIntoExistingWorldScript()
@@ -145,7 +155,7 @@ void JmvMapTestLauncherTests::recoveryRemovesOwnedBridge()
 {
     QTemporaryDir temp;
     QVERIFY(temp.isValid());
-    const QString bridge = QDir(temp.path()).filePath("EIMapperEnduranceJmvBridge.plg");
+    const QString bridge = QDir(temp.path()).filePath("plugin.dll");
     const QByteArray bridgeBytes("fingerprinted bridge");
     writeFile(bridge, bridgeBytes);
     const QString run = createRecoveryManifest(QString(), QString(), false,
@@ -161,7 +171,7 @@ void JmvMapTestLauncherTests::recoveryRetainsChangedBridge()
 {
     QTemporaryDir temp;
     QVERIFY(temp.isValid());
-    const QString bridge = QDir(temp.path()).filePath("EIMapperEnduranceJmvBridge.plg");
+    const QString bridge = QDir(temp.path()).filePath("plugin.dll");
     const QByteArray owned("fingerprinted bridge");
     writeFile(bridge, QByteArray("externally changed"));
     const QString run = createRecoveryManifest(QString(), QString(), false,

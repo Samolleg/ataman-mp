@@ -505,12 +505,16 @@ bool InitializeBridge()
 
 extern "C" __declspec(dllexport) int __cdecl EntryBeforePatch(const char*)
 {
-    return InitializeBridge() ? 1 : 0;
+    InitializeBridge();
+    // Starter's plugin contract treats any non-zero callback result as an
+    // error/assert condition. Initialization failures are reported through the
+    // run-specific bridge log and leave the runtime unpatched.
+    return 0;
 }
 
 extern "C" __declspec(dllexport) int __cdecl EntryAfterPatch(const char*)
 {
-    return 1;
+    return 0;
 }
 
 BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, void*)

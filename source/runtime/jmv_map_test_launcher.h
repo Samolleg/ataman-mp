@@ -42,6 +42,7 @@ public:
                                            const QString& commands,
                                            QString* output,
                                            QString* error = nullptr);
+    static bool hasConfiguredJmvPluginSlot(const QByteArray& configReg);
 
 signals:
     void testStarted(const QString& runId, const QString& temporaryMapName);

@@ -5,7 +5,7 @@ An item is checked only after its implementation has landed and received the
 listed level of validation. New findings and wishlist requests belong here so
 they do not get lost between test sessions.
 
-Current development release: `0.1.0-alpha.45`.
+Current development release: `0.1.0-alpha.46`.
 
 ## Implementation evidence
 
@@ -388,10 +388,12 @@ MOB editing does not imply that landscape saving is supported.
   existing internal server handler on the game thread. Alpha.44 proved the ASI
   prototype loads and reaches the handler, but Starter warns about unknown ASIs
   and a random outer filename is not a usable map identity.
-- [x] Move the provider to Starter's supported mod-scoped `*.plg` interface and
-  call the handler with the real maps.txt map identity. Redirect only exact
-  source-map MPR/MOB opens to the hash-owned temporary files so the live map and
-  embedded MP/SEC namespace remain untouched.
+- [x] Audit Starter's supported external-provider interface and call the handler
+  with the real maps.txt map identity. Runtime evidence showed loose `.plg`
+  files are not discovered by JMV's current configuration; use its declared,
+  otherwise absent `DEV/Plugin=plugin.dll` slot. Redirect only exact source-map
+  MPR/MOB opens to the hash-owned temporary files so the live map and embedded
+  MP/SEC namespace remain untouched.
 - [x] Back up `Engine/2utoexec.cfg` byte-for-byte before its temporary marker,
   hash-check all temporary writes, restore only the exact Endurance-owned patch,
   remove only hash-matching temporary maps, retain run manifests/logs, and recover
@@ -429,9 +431,15 @@ MOB editing does not imply that landscape saving is supported.
 - [x] `0.1.0-alpha.44`: replace the rejected public-console command with a
   temporary fingerprinted JMV bridge and run-specific bridge diagnostics.
   Availability remains experimental pending the focused in-game gate.
-- [x] `0.1.0-alpha.45`: replace the warning-producing ASI prototype with a
-  supported mod-scoped Starter plugin and exact temporary-map file redirection.
-  Availability remains experimental pending the focused in-game gate.
+- [x] `0.1.0-alpha.45`: probe a loose mod-scoped `.plg` plus exact temporary-map
+  file redirection. Three runtime attempts proved this JMV configuration does
+  not discover loose `.plg` files; no provider callback or bridge log occurred.
+- [x] `0.1.0-alpha.46`: correct the Starter plugin callback contract after
+  static disassembly confirmed that `EntryBeforePatch`/`EntryAfterPatch` are
+  one-argument `cdecl` callbacks where zero is success and nonzero enters the
+  loader's error/assert path. Runtime evidence also showed loose `.plg` files
+  are not discovered by this JMV profile: install temporarily into its declared,
+  otherwise absent `DEV/Plugin=plugin.dll` slot without rewriting config.reg.
 - [x] `0.1.0-alpha.41`: redo-safe raw provenance and the July 17 multi-edit/UI
   fixes passed owner testing and were handed to the closed tester group.
   ([`db3fa31`](https://github.com/Ilufus/ei-mapper-endurance/commit/db3fa31),

@@ -358,6 +358,12 @@ bool CJmvMapTestLauncher::injectWorldScriptBootstrap(const QString& script,
     return true;
 }
 
+bool CJmvMapTestLauncher::hasConfiguredJmvPluginSlot(const QByteArray& configReg)
+{
+    static const QByteArray record("\x02\x06\x00Plugin\x0a\x00plugin.dll", 21);
+    return configReg.contains(record);
+}
+
 bool CJmvMapTestLauncher::launch(const SJmvMapTestLaunchInput& input, QString* error)
 {
     if(isRunning())
@@ -442,7 +448,20 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
     m_autoexecPath = QDir(m_engineDirectory).filePath("2utoexec.cfg");
     m_bridgeSourcePath = QDir(QCoreApplication::applicationDirPath())
             .filePath("runtime/EIMapperEnduranceJmvBridge.plg");
-    m_bridgeLivePath = QDir(input.profile.modRoot).filePath("EIMapperEnduranceJmvBridge.plg");
+    const QString modConfigPath = QDir(input.profile.modRoot).filePath("config.reg");
+    QByteArray modConfig;
+    if(!readFile(modConfigPath, &modConfig, error) ||
+       !hasConfiguredJmvPluginSlot(modConfig))
+    {
+        if(error && error->isEmpty())
+            *error = "The active JMV config.reg does not declare the supported DEV Plugin=plugin.dll slot.";
+        return false;
+    }
+    // JMV's config.reg declares DEV/Plugin as plugin.dll. Starter loads that
+    // exact configured file; its *.plg scan is used only when the configured
+    // value names a directory. Keep the packaged provider descriptively named,
+    // but install it temporarily into the already-declared, currently empty slot.
+    m_bridgeLivePath = QDir(input.profile.modRoot).filePath("plugin.dll");
     if(!QFileInfo(m_gameExePath).isFile())
     {
         if(error) *error = "The validated Starter game.exe is missing.";
@@ -455,7 +474,7 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
     }
     if(QFileInfo::exists(m_bridgeLivePath))
     {
-        if(error) *error = "A JMV launch bridge already exists in the active mod folder. Run recovery or remove the stale test build first.";
+        if(error) *error = "The JMV DEV Plugin path already exists. Endurance will not replace an installed mod plugin; run recovery or inspect plugin.dll first.";
         return false;
     }
 
@@ -672,7 +691,7 @@ QString CJmvMapTestLauncher::bridgeResultSummary() const
 {
     QFile result(m_bridgeResultPath);
     if(!result.open(QIODevice::ReadOnly | QIODevice::Text))
-        return "JMV bridge produced no result log; the runtime may not have loaded the temporary ASI.";
+        return "JMV bridge produced no result log; Starter may not have loaded the temporary provider.";
     const QString text = QString::fromUtf8(result.readAll()).trimmed();
     return text.isEmpty() ?
         "JMV bridge result log was empty; the runtime did not report bridge readiness." :
