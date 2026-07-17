@@ -730,6 +730,7 @@ CChangeProp::CChangeProp(CView* pView, CNode* pNode, const QSharedPointer<IPrope
   ,m_pNode(pNode)
   ,m_nodeId(pNode ? pNode->mapId() : 0)
   ,m_unitMovementStateCaptured(false)
+  ,m_modelStateCaptured(false)
 {
     m_newValue.reset(prop->clone());
 }
@@ -742,6 +743,11 @@ void CChangeProp::undo()
     CUnit* unit = dynamic_cast<CUnit*>(pNode);
     if(unit && m_unitMovementStateCaptured && m_oldValue->type() == eObjParam_POSITION)
         unit->restoreMovementState(m_oldUnitMovementState);
+    else if(m_modelStateCaptured && m_oldValue->type() == eObjParam_TEMPLATE)
+    {
+        pNode->applyParam(m_oldValue);
+        pNode->applyParam(m_oldModelParts);
+    }
     else
         pNode->applyParam(m_oldValue);
     if(m_oldValue->type() == eObjParam_NID)
@@ -778,6 +784,22 @@ void CChangeProp::redo()
         }
         else
             unit->restoreMovementState(m_newUnitMovementState);
+    }
+    else if(m_newValue->type() == eObjParam_TEMPLATE)
+    {
+        if(!m_modelStateCaptured)
+        {
+            pNode->getParam(m_oldValue, m_newValue->type());
+            pNode->getParam(m_oldModelParts, eObjParam_BODYPARTS);
+            pNode->applyParam(m_newValue);
+            pNode->getParam(m_newModelParts, eObjParam_BODYPARTS);
+            m_modelStateCaptured = true;
+        }
+        else
+        {
+            pNode->applyParam(m_newValue);
+            pNode->applyParam(m_newModelParts);
+        }
     }
     else
     {

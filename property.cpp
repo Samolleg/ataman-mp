@@ -285,10 +285,14 @@ IPropertyBase *CPropertyObjectParts::clone() const
     }
     if(m_bInit)
     {
-        return new CPropertyObjectParts(type(), pProp->value());
+        QMap<QString, QSharedPointer<propBool>> copied;
+        for(auto it = pProp->value().constBegin(); it != pProp->value().constEnd(); ++it)
+            copied.insert(it.key(), QSharedPointer<propBool>(
+                dynamic_cast<propBool*>(it.value()->clone())));
+        return new CPropertyObjectParts(type(), copied);
     }
     else
-        return new CPropertyUnitStat(type());
+        return new CPropertyObjectParts(type());
 }
 
 bool CPropertyObjectParts::isEqual(const IPropertyBase *pProp) const

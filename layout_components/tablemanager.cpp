@@ -199,8 +199,8 @@ QString CTableManager::propertyDisplayText(int row) const
     {
         QStringList lines;
         for(auto it = parts->value().constBegin(); it != parts->value().constEnd(); ++it)
-            lines.append(QString("%1=%2").arg(it.key(), it.value()->toString()));
-        return lines.join('\n');
+            lines.append(QString("  %1=%2").arg(it.key(), it.value()->toString()));
+        return QString("{\n%1\n}").arg(lines.join('\n'));
     }
     if(propUnitStat* stats = dynamic_cast<propUnitStat*>(value.get()))
     {

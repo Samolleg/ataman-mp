@@ -377,6 +377,9 @@ protected:
     QVector<QVector3D> m_oldUnitMovementState;
     QVector<QVector3D> m_newUnitMovementState;
     bool m_unitMovementStateCaptured;
+    QSharedPointer<IPropertyBase> m_oldModelParts;
+    QSharedPointer<IPropertyBase> m_newModelParts;
+    bool m_modelStateCaptured;
 };
 
 class CResetIdCommand: public QObject, public QUndoCommand
