@@ -5,7 +5,7 @@ An item is checked only after its implementation has landed and received the
 listed level of validation. New findings and wishlist requests belong here so
 they do not get lost between test sessions.
 
-Current development release: `0.1.0-alpha.35`.
+Current development release: `0.1.0-alpha.36`.
 
 ## Implementation evidence
 
@@ -46,10 +46,13 @@ behavior.
 | Debounced external-script import and row-based typed property clipboard | [`5192c4d`](https://github.com/Ilufus/ei-mapper-endurance/commit/5192c4d) | Extended UI clipboard checks, seven regression suites, Zone 1 no-op round trip, and [alpha.33 checks](ALPHA33_VALIDATION.md) |
 | Document-owned script workspace, independent script editor, first patrol creation, duplicate/history shortcuts, and persisted application keybinds | [`258893c`](https://github.com/Ilufus/ei-mapper-endurance/commit/258893c) | Production MinGW build, extended UI/settings checks, and [alpha.34 checks](ALPHA34_VALIDATION.md) |
 | Non-interactive version probing and clean first-run distribution gate | [`b10261f`](https://github.com/Ilufus/ei-mapper-endurance/commit/b10261f), [`a3a416b`](https://github.com/Ilufus/ei-mapper-endurance/commit/a3a416b) | [alpha.35 clean-package checks](ALPHA35_VALIDATION.md) |
+| Synchronized internal/external MOB scripts, explicit editor selection, script shortcuts, and MOB Parameters close lifecycle | [`607715a`](https://github.com/Ilufus/ei-mapper-endurance/commit/607715a) | Production MinGW build, seven regression suites, headless UI check, and [alpha.36 checks](ALPHA36_VALIDATION.md) |
+| Exact model-parts snapshot across multi-property paste undo/redo | [`749b850`](https://github.com/Ilufus/ei-mapper-endurance/commit/749b850) | Production MinGW build and [alpha.36 focused check](ALPHA36_VALIDATION.md) |
 
 Alpha.34 packaging is withdrawn: it accidentally included a developer-local
 `endurance-options.json`, which suppressed first-run setup and exposed local game
-paths/recent files. Alpha.35 supersedes it with a clean-settings package gate.
+paths/recent files. Alpha.36 supersedes it with a clean-settings package gate
+and the corrected script workflow.
 
 ## Product contract
 

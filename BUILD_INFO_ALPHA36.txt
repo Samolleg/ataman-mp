@@ -1,0 +1,25 @@
+EI Mapper: Endurance Edition 0.1.0-alpha.36
+Implementation commit: 607715a
+Model-parts undo fix: 749b850
+Purpose: corrected script workflow and clean first-run tester package
+
+Alpha.36 contains no user settings, logs, or crash dumps. It restores first-run
+Game and Mod Setup for every clean extraction.
+
+Persistent external workspaces no longer produce a false change prompt when a
+MOB opens. BOM and CRLF/LF-only differences are no-ops and do not dirty the MOB.
+The standalone internal editor restores syntax highlighting and uses Apply and
+Close. Opening the external editor first runs Save/Discard/Cancel, synchronizes
+the managed UTF-8 file from the current embedded MOB script, and only then opens
+the OS editor. Internal and external editors are never intentionally left open
+together.
+
+Accepted external imports also refresh an already-open internal script editor.
+The MOB Parameters title-bar close button is restored and follows the same
+Apply/Discard/Cancel path as the window's Close button.
+
+Ctrl+Alt+M opens the active script externally and is customizable under Key
+Bindings. Settings > General can select an external editor executable; clearing
+the field restores the Windows .lua association fallback.
+
+Follow ALPHA36_VALIDATION.md.
