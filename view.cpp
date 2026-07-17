@@ -245,7 +245,10 @@ void CView::draw()
     QMatrix4x4 camMatrix = m_cam->update();
     const COptBool* cullingOption = m_pSettings
         ? dynamic_cast<const COptBool*>(m_pSettings->opt("frustumCulling")) : nullptr;
+    const COptBool* drawLogicOption = m_pSettings
+        ? dynamic_cast<const COptBool*>(m_pSettings->opt("drawLogic")) : nullptr;
     const bool cullingEnabled = (!cullingOption || cullingOption->value())
+        && (!drawLogicOption || !drawLogicOption->value())
         && CScene::getInstance()->getMode() != eEditModeLogic;
     const CViewFrustum frustum(m_projection * camMatrix);
     const auto visible = [&frustum, cullingEnabled](CNode* node)
@@ -878,7 +881,10 @@ void CView::pickObject(const QRect &rect, bool bAddToSelect)
 
     const COptBool* cullingOption = m_pSettings
         ? dynamic_cast<const COptBool*>(m_pSettings->opt("frustumCulling")) : nullptr;
+    const COptBool* drawLogicOption = m_pSettings
+        ? dynamic_cast<const COptBool*>(m_pSettings->opt("drawLogic")) : nullptr;
     const bool cullingEnabled = (!cullingOption || cullingOption->value())
+        && (!drawLogicOption || !drawLogicOption->value())
         && CScene::getInstance()->getMode() != eEditModeLogic;
     const CViewFrustum frustum(m_projection * viewMatrix);
 
@@ -1883,7 +1889,10 @@ CNode* CView::pickObject(QList<CNode*>& aNode, int x, int y)
 
     const COptBool* cullingOption = m_pSettings
         ? dynamic_cast<const COptBool*>(m_pSettings->opt("frustumCulling")) : nullptr;
+    const COptBool* drawLogicOption = m_pSettings
+        ? dynamic_cast<const COptBool*>(m_pSettings->opt("drawLogic")) : nullptr;
     const bool cullingEnabled = (!cullingOption || cullingOption->value())
+        && (!drawLogicOption || !drawLogicOption->value())
         && CScene::getInstance()->getMode() != eEditModeLogic;
     const CViewFrustum frustum(m_projection * viewMatrix);
 

@@ -275,7 +275,7 @@ CBox CObjectBase::getBBox()
     QMatrix4x4 rtMatrix;
     rtMatrix.setToIdentity();
     rtMatrix.rotate(m_rotation);
-    const auto fillPoint = [&min, &max](QVector3D& vec)
+    const auto fillPoint = [&min, &max](const QVector3D& vec)
     {
         //x
         if(vec.x() < min.x())
@@ -294,21 +294,19 @@ CBox CObjectBase::getBBox()
             max.setZ(vec.z());
     };
 
-    QVector3D rotatedPos;
     for(auto& part: m_aPart)
     {
         auto& arrVert = part->vertData();
         for(int i(0); i < arrVert.size(); ++i)
         {
+            const QVector3D rotatedPos = rtMatrix*arrVert[i].position;
             if(!bInit)
             {
-                min = arrVert[i].position;
-                max = arrVert[i].position;
+                min = rotatedPos;
+                max = rotatedPos;
                 bInit = true;
                 continue;
             }
-
-            rotatedPos = rtMatrix*arrVert[i].position; //get vector, rotated with matrix
             fillPoint(rotatedPos);
         }
     }
