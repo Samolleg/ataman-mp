@@ -17,7 +17,7 @@ behavior.
 |---|---|---|
 | Endurance identity, safe no-op documents, indexed resources, independent opening, outliner, external editor | [`054959b`](https://github.com/Ilufus/ei-mapper-endurance/commit/054959b) | [initial document tests](tests/endurance_document_tests.cpp) |
 | NUL-delimited MOB validation | [`34b9ec8`](https://github.com/Ilufus/ei-mapper-endurance/commit/34b9ec8) | [document tests](tests/endurance_document_tests.cpp) |
-| Crash diagnostics and rotating workflow logs | [`2568e38`](https://github.com/Ilufus/ei-mapper-endurance/commit/2568e38) | [bug-report workflow](BUG_REPORTING.md) |
+| Crash diagnostics and rotating workflow logs | [`2568e38`](https://github.com/Ilufus/ei-mapper-endurance/commit/2568e38) | [bug-report workflow](docs/BUG_REPORTING.md) |
 | Missing figures and unit path preservation | [`6454de7`](https://github.com/Ilufus/ei-mapper-endurance/commit/6454de7) | private JMV map checks |
 | Generic JMV RES discovery | [`44ab888`](https://github.com/Ilufus/ei-mapper-endurance/commit/44ab888) | private JMV resource checks |
 | SOUND/world serialization preservation | [`62b824a`](https://github.com/Ilufus/ei-mapper-endurance/commit/62b824a) | private changed-save comparisons |
@@ -26,34 +26,34 @@ behavior.
 | Model-qualified unit skins | [`35a43c8`](https://github.com/Ilufus/ei-mapper-endurance/commit/35a43c8) | [resource-name tests](tests/resource_name_tests.cpp) |
 | Complete terrain atlases and internal map namespace | [`530bb16`](https://github.com/Ilufus/ei-mapper-endurance/commit/530bb16) | [resource-name tests](tests/resource_name_tests.cpp) |
 | Consolidated duplicate-ID reporting | [`a39ef57`](https://github.com/Ilufus/ei-mapper-endurance/commit/a39ef57) | [duplicate-ID tests](tests/duplicate_id_report_tests.cpp) |
-| Staged fresh-parser validation and alpha.11 preview | [`c8d8b3a`](https://github.com/Ilufus/ei-mapper-endurance/commit/c8d8b3a) | [alpha.11 validation](ALPHA11_VALIDATION.md) |
+| Staged fresh-parser validation and alpha.11 preview | [`c8d8b3a`](https://github.com/Ilufus/ei-mapper-endurance/commit/c8d8b3a) | Historical alpha validation retired |
 | Installation-based profiles | [`7b206c8`](https://github.com/Ilufus/ei-mapper-endurance/commit/7b206c8) | [resource-profile tests](tests/resource_profile_tests.cpp) |
-| First-run and MOB-only viewport initialization | [`54d8070`](https://github.com/Ilufus/ei-mapper-endurance/commit/54d8070) | [alpha.13 validation](ALPHA13_VALIDATION.md) |
-| Setup moved under Settings | [`8528799`](https://github.com/Ilufus/ei-mapper-endurance/commit/8528799) | [alpha.13 validation](ALPHA13_VALIDATION.md) |
+| First-run and MOB-only viewport initialization | [`54d8070`](https://github.com/Ilufus/ei-mapper-endurance/commit/54d8070) | Historical alpha validation retired |
+| Setup moved under Settings | [`8528799`](https://github.com/Ilufus/ei-mapper-endurance/commit/8528799) | Historical alpha validation retired |
 | Database-backed humanoid candidate lookup | [`94e0b9d`](https://github.com/Ilufus/ei-mapper-endurance/commit/94e0b9d) | [resource-name tests](tests/resource_name_tests.cpp); base rendering remains unresolved |
-| Alpha.14 testing-group release | [`800a011`](https://github.com/Ilufus/ei-mapper-endurance/commit/800a011) | [alpha.14 validation](ALPHA14_VALIDATION.md) |
+| Alpha.14 testing-group release | [`800a011`](https://github.com/Ilufus/ei-mapper-endurance/commit/800a011) | Historical alpha validation retired |
 | Capability profiles and fingerprinted Base/JMV runtime manifests | [`97b6991`](https://github.com/Ilufus/ei-mapper-endurance/commit/97b6991) | [resource-profile tests](tests/resource_profile_tests.cpp) |
-| Strict raw-section MOB tree and deterministic semantic diff | [`aaef298`](https://github.com/Ilufus/ei-mapper-endurance/commit/aaef298) | [252-file corpus validation](MOB_HARDENING_VALIDATION.md) |
+| Strict raw-section MOB tree and deterministic semantic diff | [`aaef298`](https://github.com/Ilufus/ei-mapper-endurance/commit/aaef298) | [252-file corpus validation](docs/validation/MOB_HARDENING_VALIDATION.md) |
 | Provenance-checked MOB leaf transactions | [`660a542`](https://github.com/Ilufus/ei-mapper-endurance/commit/660a542) | [document tests](tests/endurance_document_tests.cpp) |
-| Fail-closed UI projection shadow transactions | [`3106fac`](https://github.com/Ilufus/ei-mapper-endurance/commit/3106fac) | [254-file corpus validation](MOB_SHADOW_TRANSACTION_VALIDATION.md) |
+| Fail-closed UI projection shadow transactions | [`3106fac`](https://github.com/Ilufus/ei-mapper-endurance/commit/3106fac) | [254-file corpus validation](docs/validation/MOB_SHADOW_TRANSACTION_VALIDATION.md) |
 | Profile provider API and safe JMV test-run manifest contract | [`b467d87`](https://github.com/Ilufus/ei-mapper-endurance/commit/b467d87) | [runtime-provider tests](tests/runtime_provider_tests.cpp) |
 | Filterable read-only MOB diff details dialog | [`fd30be0`](https://github.com/Ilufus/ei-mapper-endurance/commit/fd30be0) | production MinGW build and [semantic-diff tests](tests/endurance_document_tests.cpp) |
-| Selection UX, recent files, open/save shortcuts, and editable model/texture filters | [`06d1c9b`](https://github.com/Ilufus/ei-mapper-endurance/commit/06d1c9b) | clean production MinGW build, six regression suites, Zone 1 no-op round trip, and [alpha.22 manual checks](ALPHA22_VALIDATION.md) |
-| Semantic raw-object provenance and cached frustum culling | [`1ab2935`](https://github.com/Ilufus/ei-mapper-endurance/commit/1ab2935) | 254-file projection corpus, document/frustum tests, and [alpha.28 checks](ALPHA28_VALIDATION.md) |
-| Generic topology-preserving MOB leaf saves | [`843ba9c`](https://github.com/Ilufus/ei-mapper-endurance/commit/843ba9c) | 254/254 Base/JMV projection corpus, 24 document tests, and [alpha.30 checks](ALPHA30_VALIDATION.md) |
-| Exact object sequence and patrol/look structural saves | [`11698ad`](https://github.com/Ilufus/ei-mapper-endurance/commit/11698ad) | 254/254 Base/JMV corpus, 27 document tests, six regression suites, and [alpha.31 checks](ALPHA31_VALIDATION.md) |
-| MOB-parameter transactions, stable logic undo, repeated-save provenance, and typed property clipboard | [`f4b107c`](https://github.com/Ilufus/ei-mapper-endurance/commit/f4b107c) | Seven regression suites, UI widget checks, Zone 1 no-op round trip, and [alpha.32 checks](ALPHA32_VALIDATION.md) |
-| Debounced external-script import and row-based typed property clipboard | [`5192c4d`](https://github.com/Ilufus/ei-mapper-endurance/commit/5192c4d) | Extended UI clipboard checks, seven regression suites, Zone 1 no-op round trip, and [alpha.33 checks](ALPHA33_VALIDATION.md) |
-| Document-owned script workspace, independent script editor, first patrol creation, duplicate/history shortcuts, and persisted application keybinds | [`258893c`](https://github.com/Ilufus/ei-mapper-endurance/commit/258893c) | Production MinGW build, extended UI/settings checks, and [alpha.34 checks](ALPHA34_VALIDATION.md) |
-| Non-interactive version probing and clean first-run distribution gate | [`b10261f`](https://github.com/Ilufus/ei-mapper-endurance/commit/b10261f), [`a3a416b`](https://github.com/Ilufus/ei-mapper-endurance/commit/a3a416b), [`b025265`](https://github.com/Ilufus/ei-mapper-endurance/commit/b025265) | [alpha.35 clean-package checks](ALPHA35_VALIDATION.md) and Unicode-path-safe alpha.36 gate |
-| Synchronized internal/external MOB scripts, explicit editor selection, script shortcuts, and MOB Parameters close lifecycle | [`607715a`](https://github.com/Ilufus/ei-mapper-endurance/commit/607715a) | Production MinGW build, seven regression suites, headless UI check, and [alpha.36 checks](ALPHA36_VALIDATION.md) |
-| Exact model-parts snapshot across multi-property paste undo/redo | [`749b850`](https://github.com/Ilufus/ei-mapper-endurance/commit/749b850) | Production MinGW build and [alpha.36 focused check](ALPHA36_VALIDATION.md) |
-| Multi-field property context-menu copy/paste | [`7eba358`](https://github.com/Ilufus/ei-mapper-endurance/commit/7eba358) | Headless UI clipboard checks and [alpha.36 focused check](ALPHA36_VALIDATION.md) |
-| Focus-aware external-script import and idempotent watcher markers | [`54e7cfb`](https://github.com/Ilufus/ei-mapper-endurance/commit/54e7cfb) | Production MinGW build, seven regression suites, and [alpha.37 critical check](ALPHA37_VALIDATION.md) |
-| Unified one-click MOB Parameters X/Close lifecycle | [`280470f`](https://github.com/Ilufus/ei-mapper-endurance/commit/280470f) | Production MinGW build and [alpha.38 focused check](ALPHA38_VALIDATION.md) |
-| Coalesced external-script file watching without directory feedback | [`9b0f18a`](https://github.com/Ilufus/ei-mapper-endurance/commit/9b0f18a) | Alpha.38 logs showing 14,337-event failure, production build, seven regression suites, and [alpha.39 focused check](ALPHA39_VALIDATION.md) |
+| Selection UX, recent files, open/save shortcuts, and editable model/texture filters | [`06d1c9b`](https://github.com/Ilufus/ei-mapper-endurance/commit/06d1c9b) | Clean production MinGW build, six regression suites, and Zone 1 no-op round trip |
+| Semantic raw-object provenance and cached frustum culling | [`1ab2935`](https://github.com/Ilufus/ei-mapper-endurance/commit/1ab2935) | 254-file projection corpus and document/frustum tests |
+| Generic topology-preserving MOB leaf saves | [`843ba9c`](https://github.com/Ilufus/ei-mapper-endurance/commit/843ba9c) | 254/254 Base/JMV projection corpus and 24 document tests |
+| Exact object sequence and patrol/look structural saves | [`11698ad`](https://github.com/Ilufus/ei-mapper-endurance/commit/11698ad) | 254/254 Base/JMV corpus, 27 document tests, and six regression suites |
+| MOB-parameter transactions, stable logic undo, repeated-save provenance, and typed property clipboard | [`f4b107c`](https://github.com/Ilufus/ei-mapper-endurance/commit/f4b107c) | Seven regression suites, UI widget checks, and Zone 1 no-op round trip |
+| Debounced external-script import and row-based typed property clipboard | [`5192c4d`](https://github.com/Ilufus/ei-mapper-endurance/commit/5192c4d) | Extended UI clipboard checks, seven regression suites, and Zone 1 no-op round trip |
+| Document-owned script workspace, independent script editor, first patrol creation, duplicate/history shortcuts, and persisted application keybinds | [`258893c`](https://github.com/Ilufus/ei-mapper-endurance/commit/258893c) | Production MinGW build and extended UI/settings checks |
+| Non-interactive version probing and clean first-run distribution gate | [`b10261f`](https://github.com/Ilufus/ei-mapper-endurance/commit/b10261f), [`a3a416b`](https://github.com/Ilufus/ei-mapper-endurance/commit/a3a416b), [`b025265`](https://github.com/Ilufus/ei-mapper-endurance/commit/b025265) | Clean-package and Unicode-path-safe gates |
+| Synchronized internal/external MOB scripts, explicit editor selection, script shortcuts, and MOB Parameters close lifecycle | [`607715a`](https://github.com/Ilufus/ei-mapper-endurance/commit/607715a) | Production MinGW build, seven regression suites, and headless UI check |
+| Exact model-parts snapshot across multi-property paste undo/redo | [`749b850`](https://github.com/Ilufus/ei-mapper-endurance/commit/749b850) | Production MinGW build and focused regression check |
+| Multi-field property context-menu copy/paste | [`7eba358`](https://github.com/Ilufus/ei-mapper-endurance/commit/7eba358) | Headless UI clipboard checks |
+| Focus-aware external-script import and idempotent watcher markers | [`54e7cfb`](https://github.com/Ilufus/ei-mapper-endurance/commit/54e7cfb) | Production MinGW build and seven regression suites |
+| Unified one-click MOB Parameters X/Close lifecycle | [`280470f`](https://github.com/Ilufus/ei-mapper-endurance/commit/280470f) | Production MinGW build and focused regression check |
+| Coalesced external-script file watching without directory feedback | [`9b0f18a`](https://github.com/Ilufus/ei-mapper-endurance/commit/9b0f18a) | Production build and seven regression suites |
 | Embedded-script and document-section MOB diff | [`0a4624f`](https://github.com/Ilufus/ei-mapper-endurance/commit/0a4624f) | Synthetic encrypted-script regression plus the supplied Zone 1/Zone 1 Test comparison |
-| Redo-safe raw provenance, mixed model-parts editing, atomic logic-point placement, and heavy-history progress | [`db3fa31`](https://github.com/Ilufus/ei-mapper-endurance/commit/db3fa31) | Seven regression suites, UI widget checks, and [alpha.41 supplied-map validation](ALPHA41_VALIDATION.md) |
+| Redo-safe raw provenance, mixed model-parts editing, atomic logic-point placement, and heavy-history progress | [`db3fa31`](https://github.com/Ilufus/ei-mapper-endurance/commit/db3fa31) | Seven regression suites, UI widget checks, and [latest supplied-map validation](docs/releases/ALPHA41_VALIDATION.md) |
 
 Alpha.34 packaging is withdrawn: it accidentally included a developer-local
 `endurance-options.json`, which suppressed first-run setup and exposed local game
@@ -83,7 +83,7 @@ and the corrected script workflow.
 - [x] Package alpha.31 for normal and structural edit testing: move units, change mixed property
   fields, undo back to clean, save/reopen, and verify the resulting maps in JMV.
   The immutable source is tagged `v0.1.0-alpha.31`; the package includes source,
-  symbols, checksums, rollback guidance, and the focused [test matrix](ALPHA31_VALIDATION.md).
+  symbols, checksums, rollback guidance, and the focused release test matrix.
 - [x] Connect structural MOB saves for same-MOB copy/paste, object deletion, and
   adding/removing known patrol or look points. Reuse exact source subtrees for
   copies and require an explicit selected same-type template for new objects.
@@ -127,7 +127,7 @@ MOB editing does not imply that landscape saving is supported.
 
 ## Alpha.14 testing campaign
 
-- [x] Build and checksum-verify the private alpha.14 testing-group package. ([`800a011`](https://github.com/Ilufus/ei-mapper-endurance/commit/800a011), [validation](ALPHA14_VALIDATION.md))
+- [x] Build and checksum-verify the private alpha.14 testing-group package. ([`800a011`](https://github.com/Ilufus/ei-mapper-endurance/commit/800a011))
 - [x] Include source, symbols, GPL notices, validation notes, safe-test rules,
   bug-report instructions, and a shared test matrix. ([`800a011`](https://github.com/Ilufus/ei-mapper-endurance/commit/800a011))
 - [x] Record base-game `zone3obr.mob` humanoid textures as a known unresolved
@@ -171,9 +171,9 @@ MOB editing does not imply that landscape saving is supported.
 - [x] Validate the staged document with a fresh parser before committing it. ([`c8d8b3a`](https://github.com/Ilufus/ei-mapper-endurance/commit/c8d8b3a))
 - [x] Parse every MOB section with strict bounds and complete byte coverage;
   preserve numeric IDs, occurrences, ordering, raw bytes, paths, and hashes, with
-  unknown payloads retained as opaque leaves. ([`aaef298`](https://github.com/Ilufus/ei-mapper-endurance/commit/aaef298), [validation](MOB_HARDENING_VALIDATION.md))
+  unknown payloads retained as opaque leaves. ([`aaef298`](https://github.com/Ilufus/ei-mapper-endurance/commit/aaef298), [validation](docs/validation/MOB_HARDENING_VALIDATION.md))
 - [x] Pass byte-identical no-op checks across all 252 MOBs in the current Base/JMV
-  Maps corpus. ([validation](MOB_HARDENING_VALIDATION.md))
+  Maps corpus. ([validation](docs/validation/MOB_HARDENING_VALIDATION.md))
 - [x] Add the core provenance-checked `MobEditTransaction` leaf patcher with
   byte-exact untouched leaves, derived ancestor lengths, strict candidate reparse,
   stale-hash rejection, and strict CP1251 encoding. ([`660a542`](https://github.com/Ilufus/ei-mapper-endurance/commit/660a542), [document tests](tests/endurance_document_tests.cpp))
@@ -184,7 +184,7 @@ MOB editing does not imply that landscape saving is supported.
   raw-source hashes, rejects canonicalized-source mismatches, preserves source-only
   records, and supplies the validated candidate to the normal save pipeline.
   ([`3106fac`](https://github.com/Ilufus/ei-mapper-endurance/commit/3106fac),
-  [validation](MOB_SHADOW_TRANSACTION_VALIDATION.md))
+  [validation](docs/validation/MOB_SHADOW_TRANSACTION_VALIDATION.md))
 - [x] Enable generic topology-preserving raw-leaf output. Mixed property and
   transform edits save normally without a preview or field whitelist, followed
   by fresh staged validation, backup, and atomic replacement.
@@ -192,7 +192,7 @@ MOB editing does not imply that landscape saving is supported.
 - [x] Validate alpha.30 generic raw-leaf saving with ordinary mixed property and
   transform edits. There is no preview or field whitelist: the invariant is that
   every intended replacement is exact and all untouched leaves remain byte-identical.
-  ([validation](ALPHA30_VALIDATION.md))
+  (historical alpha validation retired)
 - [x] Disable the legacy changed-MOB serializer at the Save boundary; dirty MOB
   saves are refused until their UI edits have transaction provenance. Unchanged
   byte-identical Save As remains available. ([`912d00c`](https://github.com/Ilufus/ei-mapper-endurance/commit/912d00c))
@@ -323,8 +323,8 @@ MOB editing does not imply that landscape saving is supported.
 
 ## JMV setup and validation
 
-- [x] Configure and test the development build against a confirmed JMV installation using settings outside upstream v0.3. ([`c8d8b3a`](https://github.com/Ilufus/ei-mapper-endurance/commit/c8d8b3a), [validation](ALPHA11_VALIDATION.md))
-- [x] Keep all live maps untouched during automated tests; use hashed disposable copies. ([validation](ALPHA11_VALIDATION.md))
+- [x] Configure and test the development build against a confirmed JMV installation using settings outside upstream v0.3. ([`c8d8b3a`](https://github.com/Ilufus/ei-mapper-endurance/commit/c8d8b3a))
+- [x] Keep all live maps untouched during automated tests; use hashed disposable copies.
 - [x] Provide `--validate`, `--roundtrip-check`, and JSON output for automation. ([`054959b`](https://github.com/Ilufus/ei-mapper-endurance/commit/054959b))
 - [x] Add the JMV setup wizard with auto-discovery and explicit confirmation. ([`7b206c8`](https://github.com/Ilufus/ei-mapper-endurance/commit/7b206c8))
 - [x] Move Game and Mod Setup under Settings and suppress automatic legacy
@@ -395,7 +395,7 @@ MOB editing does not imply that landscape saving is supported.
 - [x] `0.1.0-alpha.1` through `0.1.0-alpha.13`: initial safety, diagnostics, resources, serializer fixes, backups, model-qualified skins, terrain-atlas correctness, consolidated duplicate-ID reporting, staged-save validation, mod-maker preview reporting, installation-based reusable resource profiles, and corrected first-run/MOB-only viewport initialization. ([implementation evidence](#implementation-evidence))
 - [x] `0.1.0-alpha.14`: testing-group build with Settings-based setup,
   explicit base-game humanoid known issue, database appearance diagnostics, and
-  a coordinated test/report matrix. ([`800a011`](https://github.com/Ilufus/ei-mapper-endurance/commit/800a011), [validation](ALPHA14_VALIDATION.md))
+  a coordinated test/report matrix. ([`800a011`](https://github.com/Ilufus/ei-mapper-endurance/commit/800a011))
 - [x] `0.1.0-alpha.31`: final hardening tester build covering ordinary mixed
   property/transform saves, exact same-MOB copy/delete, and known patrol/look
   structural edits with invisible raw preservation checks.
@@ -406,7 +406,7 @@ MOB editing does not imply that landscape saving is supported.
 - [x] `0.1.0-alpha.41`: redo-safe raw provenance and the July 17 multi-edit/UI
   fixes passed owner testing and were handed to the closed tester group.
   ([`db3fa31`](https://github.com/Ilufus/ei-mapper-endurance/commit/db3fa31),
-  [validation](ALPHA41_VALIDATION.md))
+  [validation](docs/releases/ALPHA41_VALIDATION.md))
 - [ ] Following private alpha: fix issues found by the closed test group and
   publish a concise Base/JMV coverage summary; no new hardening architecture.
 - [ ] `0.1.0-beta.1`: correct indexed resources and responsive fast loading.
@@ -422,7 +422,7 @@ or move it into the relevant section above without losing its history.
 
 ### High priority
 
-- [ ] Warn before changing an object ID that is referenced by the active MOB's
+- [x] Warn before changing or deleting an object ID that is referenced by the active MOB's
   embedded script.
   - Scan the decoded script for exact references to the old ID before an ID
     edit or explicit ID-repair transaction is committed.
@@ -432,9 +432,13 @@ or move it into the relevant section above without losing its history.
   - Treat the result as a warning, not an automatic rewrite or save blocker.
     Script syntax and dynamically constructed IDs can be ambiguous, so only an
     explicit user-approved script edit may replace a referenced ID.
-  - Re-run the check for undo/redo and batch ID repair, and cover duplicate IDs
-    without assuming which duplicate a script reference resolves to at runtime.
-- [ ] Add a hideable **Maps and Collections** browser before implementing the
+  - The warning is issued for the initiating user action, before the undoable
+    transaction is created; undo/redo does not interrupt history playback with
+    another prompt. Duplicate IDs are reported as references without assuming
+    which duplicate the script resolves to at runtime.
+  - Implemented by [the script-reference analyzer](source/documents/script_reference_analyzer.cpp)
+    with [focused tests](tests/script_reference_analyzer_tests.cpp).
+- [x] Add a hideable **Maps and Collections** browser before implementing the
   standalone custom-collection workflow.
   - Read the Base/JMV map list from the active profile's `texts.res` map-table
     member and show map codenames in a tree.
@@ -446,6 +450,11 @@ or move it into the relevant section above without losing its history.
   - Place the browser in a left-side hideable panel and make `Ctrl+Space` its
     default customizable visibility shortcut.
   - Report missing/ambiguous map files without silently selecting a fallback.
+  - The Maps MVP reads `map.txt` from the active profile's highest-priority
+    `texts.res`, resolves the MPR/MOB pair case-insensitively, and leaves the
+    Collections group ready for the later portable format.
+    See [the map catalog](source/resources/map_catalog.cpp) and
+    [focused tests](tests/map_catalog_tests.cpp).
 - [ ] Populate database/prototype fields from the active profile database with
   prefix filtering and manual entry where the format permits it. Warn when a
   placed object's referenced entry is missing or was deleted; do not silently

@@ -27,157 +27,22 @@ DEFINES += ENDURANCE_VERSION=\\\"$${ENDURANCE_VERSION}\\\"
 
 CONFIG += c++11
 
-SOURCES += \
-    external_script_workspace.cpp \
-    mob_script_window.cpp \
-    mob/script_highlighter.cpp \
-    backup_manager.cpp \
-    duplicate_id_report.cpp \
-    resource_profile.cpp \
-    resource_setup_dialog.cpp \
-    staged_save_validator.cpp \
-    runtime_providers.cpp \
-    mob_diff_dialog.cpp \
-    endurance_document.cpp \
-    bodypartedit_form.cpp \
-    createobjectform.cpp \
-    key_manager.cpp \
-    layout_components/bodypart_checkbox.cpp \
-    layout_components/connectors_ui.cpp \
-    layout_components/dynamiccombobox.cpp \
-    layout_components/progressview.cpp \
-    layout_components/tree_view.cpp \
-    layout_components/tablemanager.cpp \
-    multiline_edit_form.cpp \
-    randomize_form.cpp \
-    resource_name.cpp \
-    unit_appearance.cpp \
-    property.cpp \
-    main_window.cpp \
-    objects/lever.cpp \
-    objects/light.cpp \
-    log.cpp \
-    objects/magictrap.cpp \
-    main.cpp \
-    math_utils.cpp \
-    objects/object_base.cpp \
-    ogl_utils.cpp \
-    operationmanager.cpp \
-    options.cpp \
-    part.cpp \
-    objects/particle.cpp \
-    preview.cpp \
-    resourcemanager.cpp \
-    round_mob_form.cpp \
-    scene.cpp \
-    sector.cpp \
-    select_window.cpp \
-    settings.cpp \
-    objects/sound.cpp \
-    objects/torch.cpp \
-    objects/unit.cpp \
-    tile.cpp \
-    tile_form.cpp \
-    types.cpp \
-    undo.cpp \
-    unitstat_form.cpp \
-    view.cpp \
-    figure.cpp \
-    res_file.cpp \
-    node.cpp \
-    utils.cpp \
-    landscape.cpp \
-    view_keybinding.cpp \
-    camera.cpp \
-    objects/worldobj.cpp \
-    mob/mob_parameters.cpp \
-    mob/mob.cpp \
-    mob/script_editor.cpp \
-    mob/range_dialog.cpp
+INCLUDEPATH += \
+    $$PWD/source \
+    $$PWD/source/app \
+    $$PWD/source/core \
+    $$PWD/source/documents \
+    $$PWD/source/layout_components \
+    $$PWD/source/mob \
+    $$PWD/source/objects \
+    $$PWD/source/render \
+    $$PWD/source/resources \
+    $$PWD/source/runtime \
+    $$PWD/source/ui
 
-HEADERS += \
-    external_script_workspace.h \
-    mob_script_window.h \
-    mob/script_highlighter.h \
-    backup_manager.h \
-    window_lifecycle.h \
-    duplicate_id_report.h \
-    resource_profile.h \
-    resource_setup_dialog.h \
-    staged_save_validator.h \
-    runtime_providers.h \
-    mob_diff_dialog.h \
-    endurance_document.h \
-    bodypartedit_form.h \
-    createobjectform.h \
-    key_manager.h \
-    layout_components/bodypart_checkbox.h \
-    layout_components/connectors_ui.h \
-    layout_components/dynamiccombobox.h \
-    layout_components/progressview.h \
-    layout_components/tree_view.h \
-    layout_components/tablemanager.h \
-    multiline_edit_form.h \
-    randomize_form.h \
-    resource_name.h \
-    unit_appearance.h \
-    main_window.h \
-    objects/lever.h \
-    objects/light.h \
-    log.h \
-    objects/magictrap.h \
-    math_utils.h \
-    objects/object_base.h \
-    ogl_utils.h \
-    operationmanager.h \
-    options.h \
-    part.h \
-    objects/particle.h \
-    preview.h \
-    property.h \
-    resourcemanager.h \
-    round_mob_form.h \
-    scene.h \
-    sector.h \
-    select_window.h \
-    settings.h \
-    objects/sound.h \
-    objects/torch.h \
-    objects/unit.h \
-    tile.h \
-    tile_form.h \
-    undo.h \
-    unitstat_form.h \
-    view.h \
-    view_frustum.h \
-    figure.h \
-    types.h \
-    vectors.h \
-    res_file.h \
-    node.h \
-    utils.h \
-    landscape.h \
-    camera.h \
-    objects/worldobj.h \
-    mob/mob_parameters.h \
-    mob/mob.h \
-    mob/script_editor.h \
-    mob/range_dialog.h
-
-FORMS += \
-        bodypartedit_form.ui \
-        createobjectform.ui \
-        main_window.ui \
-        multiline_edit_form.ui \
-        randomize_form.ui \
-        round_mob_form.ui \
-        select_window.ui \
-        settings.ui \
-        mob/mob_parameters.ui \
-        mob/range_dialog.ui \
-        tile_form.ui \
-        unitstat_form.ui
-
+SOURCES += $$files($$PWD/source/*.cpp, true)
+HEADERS += $$files($$PWD/source/*.h, true)
+FORMS += $$files($$PWD/source/*.ui, true)
 LIBS += -lglu32 -lopengl32 -ldbghelp
 # Default rules for deployment.
 qnx: target.path = /tmp/$${TARGET}/bin
@@ -187,6 +52,6 @@ else: unix:!android: target.path = /opt/$${TARGET}/bin
 RC_ICONS = icon.ico
 
 RESOURCES += \
-    data.qrc \
-    shaders.qrc \
-    textures.qrc
+    assets/resources/data.qrc \
+    assets/resources/shaders.qrc \
+    assets/resources/textures.qrc

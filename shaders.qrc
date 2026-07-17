@@ -1,8 +1,0 @@
-<RCC>
-    <qresource prefix="/">
-        <file>vshader.vsh</file>
-        <file>fshader.fsh</file>
-        <file>landshader.fsh</file>
-        <file>select.fsh</file>
-    </qresource>
-</RCC>

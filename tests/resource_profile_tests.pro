@@ -4,9 +4,9 @@ CONFIG += testcase c++11
 TEMPLATE = app
 TARGET = resource_profile_tests
 
-INCLUDEPATH += ..
+INCLUDEPATH += ../source/resources
 SOURCES += \
     resource_profile_tests.cpp \
-    ../resource_profile.cpp
+    ../source/resources/resource_profile.cpp
 
-HEADERS += ../resource_profile.h
+HEADERS += ../source/resources/resource_profile.h

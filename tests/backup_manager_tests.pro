@@ -3,12 +3,12 @@ CONFIG += testcase c++11 console
 TEMPLATE = app
 TARGET = backup_manager_tests
 
-INCLUDEPATH += ..
+INCLUDEPATH += ../source/documents ../source/core
 SOURCES += \
     backup_manager_tests.cpp \
-    ../backup_manager.cpp \
-    ../log.cpp
+    ../source/documents/backup_manager.cpp \
+    ../source/core/log.cpp
 
 HEADERS += \
-    ../backup_manager.h \
-    ../log.h
+    ../source/documents/backup_manager.h \
+    ../source/core/log.h

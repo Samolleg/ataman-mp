@@ -1,9 +1,0 @@
-EI Mapper: Endurance Edition 0.1.0-alpha.40
-Embedded script MOB diff: 0a4624f
-Purpose: closed-group MOB-hardening tester candidate
-
-Compared with alpha.14, this build includes the completed provenance-checked
-MOB save path, undo/script workflow fixes, renderer culling, improved diagnostics,
-and readable embedded-script changes in MOB Diff.
-
-See CHANGELOG_ALPHA40_RU.md and ALPHA40_VALIDATION.md.

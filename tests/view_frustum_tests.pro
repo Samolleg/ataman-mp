@@ -3,6 +3,6 @@ CONFIG += testcase c++11 console
 TEMPLATE = app
 TARGET = view_frustum_tests
 
-INCLUDEPATH += ..
+INCLUDEPATH += ../source/render
 SOURCES += view_frustum_tests.cpp
-HEADERS += ../view_frustum.h
+HEADERS += ../source/render/view_frustum.h

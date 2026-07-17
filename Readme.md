@@ -54,7 +54,7 @@ path without a preview or field-specific approval. Edits that change the MOB
 section tree itself (such as some create/delete operations) remain under active
 hardening and are blocked rather than falling back to the rebuilding serializer.
 
-See [BUILDING_ENDURANCE.md](BUILDING_ENDURANCE.md) for build and test commands,
+See [BUILDING_ENDURANCE.md](docs/BUILDING_ENDURANCE.md) for build and test commands,
 and [NOTICE.md](NOTICE.md) for attribution and licensing information.
 
 ## Safety

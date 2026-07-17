@@ -1,0 +1,8 @@
+<RCC>
+    <qresource prefix="/">
+        <file alias="vshader.vsh">../shaders/vshader.vsh</file>
+        <file alias="fshader.fsh">../shaders/fshader.fsh</file>
+        <file alias="landshader.fsh">../shaders/landshader.fsh</file>
+        <file alias="select.fsh">../shaders/select.fsh</file>
+    </qresource>
+</RCC>

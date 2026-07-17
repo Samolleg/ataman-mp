@@ -4,12 +4,12 @@ CONFIG += testcase c++11 console
 TEMPLATE = app
 TARGET = endurance_document_tests
 
-INCLUDEPATH += ..
+INCLUDEPATH += ../source/documents
 SOURCES += \
     endurance_document_tests.cpp \
-    ../endurance_document.cpp \
-    ../staged_save_validator.cpp
+    ../source/documents/endurance_document.cpp \
+    ../source/documents/staged_save_validator.cpp
 
 HEADERS += \
-    ../endurance_document.h \
-    ../staged_save_validator.h
+    ../source/documents/endurance_document.h \
+    ../source/documents/staged_save_validator.h

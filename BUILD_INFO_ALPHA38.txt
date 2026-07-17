@@ -1,9 +1,0 @@
-EI Mapper: Endurance Edition 0.1.0-alpha.38
-MOB Parameters close implementation: 280470f
-Purpose: identical one-click title-bar X and Close-button behavior
-
-Alpha.38 retains the alpha.37 external-script critical hotfix. The MOB
-Parameters title-bar X and Close button now enter the same Apply/Discard/Cancel
-resolver and accept the original close event instead of recursively closing.
-
-Follow ALPHA38_VALIDATION.md and ALPHA37_VALIDATION.md.
