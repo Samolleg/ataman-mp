@@ -5,7 +5,7 @@ An item is checked only after its implementation has landed and received the
 listed level of validation. New findings and wishlist requests belong here so
 they do not get lost between test sessions.
 
-Current development release: `0.1.0-alpha.32`.
+Current development release: `0.1.0-alpha.33`.
 
 ## Implementation evidence
 
@@ -84,8 +84,14 @@ behavior.
   ([`f4b107c`](https://github.com/Ilufus/ei-mapper-endurance/commit/f4b107c))
 - [x] Add destination-typed property clipboard validation. Copied values remain
   plain text for external editors, while Endurance rejects incompatible field
-  pastes and keeps editable asset pastes pending until Enter or an explicit choice.
+  pastes. Alpha.33 supersedes the original pending asset-paste behavior: an
+  explicit paste commits immediately, while ordinary filter typing still waits
+  for Enter or an explicit choice.
   ([`f4b107c`](https://github.com/Ilufus/ei-mapper-endurance/commit/f4b107c))
+- [x] Coalesce external-script watcher notifications and prevent nested import
+  prompts; move clipboard operations to property rows and labels; support typed
+  multi-row and structured-value paste as one undo action; remove viewport
+  Shift-click object shortcuts; and disable MOB Parameters without an active MOB.
 - [ ] Finish lossless MPR archive preservation before enabling landscape editing.
 
 These are the remaining safety gates before editing live maps can be recommended.

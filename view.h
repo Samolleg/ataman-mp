@@ -167,6 +167,7 @@ public slots:
     void viewParameters();
     void updateReadState(EReadState state); //get signal from reading texture/objects/map/mob
     void onParamChange(const QSharedPointer<IPropertyBase>& prop);
+    void onPropertiesChange(const QList<QSharedPointer<IPropertyBase>>& properties);
     void collectObjectTreeData();
     void onRestoreCursor();
     void onChangeCursorTile(QPixmap ico);

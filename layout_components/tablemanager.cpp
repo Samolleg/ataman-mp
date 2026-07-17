@@ -12,6 +12,9 @@
 #include <QMimeData>
 #include <QApplication>
 #include <QToolTip>
+#include <QContextMenuEvent>
+#include <QMenu>
+#include <QSet>
 
 #include "tablemanager.h"
 #include "resourcemanager.h"
@@ -22,13 +25,37 @@
 
 namespace {
 const char* kPropertyMimeType = "application/x-ei-mapper-property-type";
-QSharedPointer<IPropertyBase> g_propertyClipboard;
+QList<QSharedPointer<IPropertyBase>> g_propertyClipboard;
+
+QSharedPointer<IPropertyBase> clonePropertyValue(const QSharedPointer<IPropertyBase>& property)
+{
+    if(property.isNull())
+        return QSharedPointer<IPropertyBase>();
+    if(!property->isInit())
+        return property->createEmptyCopy();
+    if(const propBodyPart* parts = dynamic_cast<const propBodyPart*>(property.get()))
+    {
+        QMap<QString, QSharedPointer<propBool>> copied;
+        for(auto it = parts->value().constBegin(); it != parts->value().constEnd(); ++it)
+            copied.insert(it.key(), QSharedPointer<propBool>(dynamic_cast<propBool*>(it.value()->clone())));
+        return QSharedPointer<IPropertyBase>(new propBodyPart(property->type(), copied));
+    }
+    if(const propUnitStat* stats = dynamic_cast<const propUnitStat*>(property.get()))
+    {
+        QVector<QSharedPointer<IPropertyBase>> copied;
+        for(const QSharedPointer<IPropertyBase>& value : stats->value())
+            copied.append(QSharedPointer<IPropertyBase>(value->clone()));
+        return QSharedPointer<IPropertyBase>(new propUnitStat(property->type(), copied));
+    }
+    return QSharedPointer<IPropertyBase>(property->clone());
+}
 
 void copyProperty(const QSharedPointer<IPropertyBase>& property, const QString& displayText)
 {
     if(property.isNull())
         return;
-    g_propertyClipboard.reset(property->clone());
+    g_propertyClipboard.clear();
+    g_propertyClipboard.append(clonePropertyValue(property));
     QMimeData* mime = new QMimeData;
     mime->setText(displayText);
     mime->setData(kPropertyMimeType, QByteArray::number(int(property->type())));
@@ -95,12 +122,17 @@ CTableManager::CTableManager(QTableWidget* pTable):
     m_pTable(pTable)
 {
     initRowName();
+    m_pTable->setSelectionMode(QAbstractItemView::ExtendedSelection);
+    m_pTable->setSelectionBehavior(QAbstractItemView::SelectItems);
+    m_pTable->installEventFilter(this);
+    m_pTable->viewport()->installEventFilter(this);
     reset();
     //QObject::connect(m_pTable, SIGNAL(itemChanged(QTableWidgetItem*)), this, SLOT(onCellEdit(QTableWidgetItem*)));
 }
 
 void CTableManager::reset()
 {
+    m_rowValues.clear();
     m_pTable->clear();
     m_pTable->setColumnCount(2);
     m_pTable->setRowCount(0);
@@ -111,6 +143,262 @@ void CTableManager::reset()
     m_pTable->horizontalHeader()->setVisible(true);
     m_pTable->verticalHeader()->hide();
     //m_pTable->setSizeAdjustPolicy(QAbstractScrollArea::AdjustToContents); //adjust whole table. now both columns fill qtablewidget but it occurs blink and offset for main window
+}
+
+void CTableManager::installClipboardFilter(QWidget* widget, int row)
+{
+    if(!widget)
+        return;
+    widget->setProperty("propertyRow", row);
+    widget->installEventFilter(this);
+    const QList<QLineEdit*> editors = widget->findChildren<QLineEdit*>();
+    for(QLineEdit* child : editors)
+    {
+        child->setProperty("propertyRow", row);
+        child->installEventFilter(this);
+    }
+}
+
+void CTableManager::registerPropertyRow(int row, const QSharedPointer<IPropertyBase>& value)
+{
+    if(row < 0 || value.isNull())
+        return;
+    m_rowValues.insert(row, clonePropertyValue(value));
+    if(QTableWidgetItem* label = m_pTable->item(row, 0))
+        label->setData(Qt::UserRole, int(value->type()));
+    installClipboardFilter(m_pTable->cellWidget(row, 1), row);
+}
+
+QList<int> CTableManager::selectedPropertyRows(int fallbackRow) const
+{
+    QSet<int> uniqueRows;
+    for(QTableWidgetItem* item : m_pTable->selectedItems())
+    {
+        if(item && item->column() == 0 && m_rowValues.contains(item->row()))
+            uniqueRows.insert(item->row());
+    }
+    if(uniqueRows.isEmpty() && fallbackRow >= 0 && m_rowValues.contains(fallbackRow))
+        uniqueRows.insert(fallbackRow);
+    QList<int> rows = uniqueRows.values();
+    std::sort(rows.begin(), rows.end());
+    return rows;
+}
+
+QString CTableManager::propertyDisplayText(int row) const
+{
+    const QSharedPointer<IPropertyBase> value = m_rowValues.value(row);
+    if(value.isNull() || !value->isInit())
+        return QString();
+    if(QComboBox* combo = qobject_cast<QComboBox*>(m_pTable->cellWidget(row, 1)))
+        return combo->currentText();
+    if(QLineEdit* line = qobject_cast<QLineEdit*>(m_pTable->cellWidget(row, 1)))
+        return line->text();
+    if(propStrAr* strings = dynamic_cast<propStrAr*>(value.get()))
+        return strings->value().join('\n');
+    if(propBodyPart* parts = dynamic_cast<propBodyPart*>(value.get()))
+    {
+        QStringList lines;
+        for(auto it = parts->value().constBegin(); it != parts->value().constEnd(); ++it)
+            lines.append(QString("%1=%2").arg(it.key(), it.value()->toString()));
+        return lines.join('\n');
+    }
+    if(propUnitStat* stats = dynamic_cast<propUnitStat*>(value.get()))
+    {
+        QStringList lines;
+        const auto& values = stats->value();
+        for(int i = 0; i < values.size(); ++i)
+            lines.append(QString("%1=%2").arg(i).arg(values.at(i)->toString()));
+        return lines.join('\n');
+    }
+    return value->toString();
+}
+
+void CTableManager::copyRows(const QList<int>& rows)
+{
+    if(rows.isEmpty())
+        return;
+    g_propertyClipboard.clear();
+    QStringList types;
+    QStringList plainText;
+    for(int row : rows)
+    {
+        const QSharedPointer<IPropertyBase> value = m_rowValues.value(row);
+        if(value.isNull())
+            return;
+        g_propertyClipboard.append(clonePropertyValue(value));
+        types.append(QString::number(int(value->type())));
+        const QString display = propertyDisplayText(row);
+        if(rows.size() == 1)
+            plainText.append(display);
+        else
+        {
+            const QString label = m_pTable->item(row, 0) ? m_pTable->item(row, 0)->text() : QString::number(row);
+            plainText.append(QString("%1: %2").arg(label, display));
+        }
+    }
+    QMimeData* mime = new QMimeData;
+    mime->setText(plainText.join('\n'));
+    mime->setData(kPropertyMimeType, types.join(',').toLatin1());
+    QGuiApplication::clipboard()->setMimeData(mime);
+}
+
+bool CTableManager::buildPasteValues(const QList<int>& rows,
+                                     QList<QSharedPointer<IPropertyBase>>* values,
+                                     QString* error) const
+{
+    if(values)
+        values->clear();
+    if(rows.isEmpty())
+    {
+        if(error) *error = tr("Select one or more property labels first.");
+        return false;
+    }
+    const QMimeData* mime = QGuiApplication::clipboard()->mimeData();
+    if(mime && mime->hasFormat(kPropertyMimeType))
+    {
+        const QList<QByteArray> encodedTypes = mime->data(kPropertyMimeType).split(',');
+        if(encodedTypes.size() != rows.size() || g_propertyClipboard.size() != rows.size())
+        {
+            if(error) *error = tr("The number of copied properties does not match the selected fields.");
+            return false;
+        }
+        for(int i = 0; i < rows.size(); ++i)
+        {
+            bool ok = false;
+            const int encodedType = encodedTypes.at(i).toInt(&ok);
+            const QSharedPointer<IPropertyBase> destination = m_rowValues.value(rows.at(i));
+            const QSharedPointer<IPropertyBase> source = g_propertyClipboard.at(i);
+            if(!ok || destination.isNull() || source.isNull()
+               || encodedType != int(destination->type()) || source->type() != destination->type())
+            {
+                if(error) *error = tr("Copied property types do not match every selected field.");
+                return false;
+            }
+            if(values)
+                values->append(clonePropertyValue(source));
+        }
+        return true;
+    }
+
+    if(rows.size() != 1 || !mime || !mime->hasText())
+    {
+        if(error) *error = tr("Plain text can be pasted into one compatible field at a time.");
+        return false;
+    }
+    const int row = rows.first();
+    const QSharedPointer<IPropertyBase> destination = m_rowValues.value(row);
+    const QString text = mime->text();
+    if(destination.isNull() || dynamic_cast<propBodyPart*>(destination.get())
+       || dynamic_cast<propUnitStat*>(destination.get()))
+    {
+        if(error) *error = tr("This structured field requires a value copied from the same Endurance property type.");
+        return false;
+    }
+    QSharedPointer<IPropertyBase> parsed(destination->clone());
+    if(CComboStItem* combo = qobject_cast<CComboStItem*>(m_pTable->cellWidget(row, 1)))
+    {
+        QMap<uint, QString> choices;
+        if(!CResourceStringList::getInstance()->getPropList(choices, destination->type())
+           || !choices.values().contains(text))
+        {
+            if(error) *error = tr("The clipboard text is not a valid choice for this field.");
+            return false;
+        }
+        parsed->resetFromString(QString::number(choices.key(text)));
+        Q_UNUSED(combo);
+    }
+    else if(propStrAr* strings = dynamic_cast<propStrAr*>(parsed.get()))
+    {
+        const QStringList lines = text.split(QRegularExpression("\\r?\\n"), QString::SkipEmptyParts);
+        parsed.reset(new propStrAr(destination->type(), lines));
+        Q_UNUSED(strings);
+    }
+    else
+    {
+        if(!compatibleText(destination->type(), text))
+        {
+            if(error) *error = tr("Clipboard text is not valid for this field.");
+            return false;
+        }
+        parsed->resetFromString(text);
+    }
+    if(values)
+        values->append(parsed);
+    return true;
+}
+
+void CTableManager::pasteRows(const QList<int>& rows)
+{
+    QList<QSharedPointer<IPropertyBase>> values;
+    QString error;
+    if(!buildPasteValues(rows, &values, &error))
+    {
+        QApplication::beep();
+        QToolTip::showText(QCursor::pos(), error, m_pTable);
+        return;
+    }
+    if(values.size() == 1)
+        emit onUpdateProperty(values.first());
+    else
+        emit onUpdateProperties(values);
+}
+
+void CTableManager::showPropertyContextMenu(const QList<int>& rows, const QPoint& globalPos)
+{
+    if(rows.isEmpty())
+        return;
+    QMenu menu(m_pTable);
+    QAction* copy = menu.addAction(tr("Copy value"));
+    QAction* paste = menu.addAction(tr("Paste value"));
+    copy->setShortcut(QKeySequence::Copy);
+    paste->setShortcut(QKeySequence::Paste);
+    QString ignored;
+    paste->setEnabled(buildPasteValues(rows, nullptr, &ignored));
+    QAction* selected = menu.exec(globalPos);
+    if(selected == copy)
+        copyRows(rows);
+    else if(selected == paste)
+        pasteRows(rows);
+}
+
+bool CTableManager::eventFilter(QObject* watched, QEvent* event)
+{
+    const QVariant rowProperty = watched ? watched->property("propertyRow") : QVariant();
+    const int widgetRow = rowProperty.isValid() ? rowProperty.toInt() : -1;
+    if(event->type() == QEvent::ContextMenu)
+    {
+        QContextMenuEvent* context = static_cast<QContextMenuEvent*>(event);
+        QList<int> rows;
+        if(widgetRow >= 0)
+            rows << widgetRow;
+        else if(watched == m_pTable->viewport())
+        {
+            const int clickedRow = m_pTable->indexAt(context->pos()).row();
+            rows = selectedPropertyRows(clickedRow);
+            if(!rows.contains(clickedRow) && clickedRow >= 0)
+                rows = QList<int>() << clickedRow;
+        }
+        else
+            rows = selectedPropertyRows();
+        showPropertyContextMenu(rows, context->globalPos());
+        return !rows.isEmpty();
+    }
+    if(event->type() == QEvent::KeyPress)
+    {
+        QKeyEvent* key = static_cast<QKeyEvent*>(event);
+        const QList<int> rows = widgetRow >= 0 ? QList<int>() << widgetRow : selectedPropertyRows();
+        if(key->matches(QKeySequence::Copy) && !rows.isEmpty())
+        {
+            copyRows(rows);
+            return true;
+        }
+        if(key->matches(QKeySequence::Paste) && !rows.isEmpty())
+        {
+            pasteRows(rows);
+            return true;
+        }
+    }
+    return QObject::eventFilter(watched, event);
 }
 
 
@@ -270,6 +558,28 @@ bool CTableManager::isValidValue(const EObjParam param, const QString &value)
 
 void CTableManager::onParamChange(const QSharedPointer<IPropertyBase>& pProp)
 {
+    for(auto it = m_rowValues.begin(); it != m_rowValues.end(); ++it)
+    {
+        if(it.value()->type() == pProp->type())
+        {
+            it.value() = clonePropertyValue(pProp);
+            break;
+        }
+        prop3D* vector = dynamic_cast<prop3D*>(it.value().get());
+        const EObjParam vectorType = it.value()->type();
+        const int component = int(pProp->type()) - (int(it.value()->type()) - 3);
+        if(vector && (vectorType == eObjParam_POSITION || vectorType == eObjParam_ROTATION
+                      || vectorType == eObjParam_COMPLECTION || vectorType == eObjParam_GUARD_PLACE)
+           && component >= 0 && component < 3)
+        {
+            QVector3D value = vector->value();
+            if(component == 0) value.setX(pProp->toString().toFloat());
+            if(component == 1) value.setY(pProp->toString().toFloat());
+            if(component == 2) value.setZ(pProp->toString().toFloat());
+            it.value().reset(new prop3D(it.value()->type(), value));
+            break;
+        }
+    }
     emit onUpdateProperty(pProp);
 }
 
@@ -312,6 +622,16 @@ void CTableManager::setNewData(const QList<QSharedPointer<IPropertyBase>>& aProp
         auto* pItem = new C3DItem(util::constProp(aProp, xPosProp), util::constProp(aProp, EObjParam(xPosProp+1)), util::constProp(aProp, EObjParam(xPosProp+2)));
         QObject::connect(pItem, SIGNAL(onParamChange(QSharedPointer<IPropertyBase>)), this, SLOT(onParamChange(QSharedPointer<IPropertyBase>)));
         m_pTable->setCellWidget(row,1, pItem);
+        const QSharedPointer<IPropertyBase> x = util::constProp(aProp, xPosProp);
+        const QSharedPointer<IPropertyBase> y = util::constProp(aProp, EObjParam(xPosProp+1));
+        const QSharedPointer<IPropertyBase> z = util::constProp(aProp, EObjParam(xPosProp+2));
+        QSharedPointer<IPropertyBase> aggregate;
+        if(x->isInit() && y->isInit() && z->isInit())
+            aggregate.reset(new prop3D(EObjParam(xPosProp+3), x->toString().toFloat(),
+                                       y->toString().toFloat(), z->toString().toFloat()));
+        else
+            aggregate.reset(new prop3D(EObjParam(xPosProp+3)));
+        registerPropertyRow(row, aggregate);
         m_pTable->setRowHeight(row, pItem->height()*3);
     };
 
@@ -351,6 +671,7 @@ void CTableManager::setNewData(const QList<QSharedPointer<IPropertyBase>>& aProp
             CComboStItem* pCombo = new CComboStItem(item);
             QObject::connect(pCombo, SIGNAL(onParamChange(QSharedPointer<IPropertyBase>)), this, SLOT(onParamChange(QSharedPointer<IPropertyBase>)));
             m_pTable->setCellWidget(i, 1, pCombo);
+            registerPropertyRow(i, item);
             ++i;
             break;
         }
@@ -362,6 +683,7 @@ void CTableManager::setNewData(const QList<QSharedPointer<IPropertyBase>>& aProp
             CComboDynItem* pCombo = new CComboDynItem(item);
             QObject::connect(pCombo, SIGNAL(onParamChange(QSharedPointer<IPropertyBase>)), this, SLOT(onParamChange(QSharedPointer<IPropertyBase>)));
             m_pTable->setCellWidget(i, 1, pCombo);
+            registerPropertyRow(i, item);
             ++i;
             break;
         }
@@ -377,6 +699,7 @@ void CTableManager::setNewData(const QList<QSharedPointer<IPropertyBase>>& aProp
             CComboDynItem* pCombo = new CComboDynItem(item);
             QObject::connect(pCombo, SIGNAL(onParamChange(QSharedPointer<IPropertyBase>)), this, SLOT(onParamChange(QSharedPointer<IPropertyBase>)));
             m_pTable->setCellWidget(i, 1, pCombo);
+            registerPropertyRow(i, item);
             ++i;
             if(item->isInit())
             {
@@ -389,6 +712,7 @@ void CTableManager::setNewData(const QList<QSharedPointer<IPropertyBase>>& aProp
                     CBodyPartItem* pPart = new CBodyPartItem(bodyPart);
                     QObject::connect(pPart, SIGNAL(onParamChange(QSharedPointer<IPropertyBase>)), this, SLOT(onParamChange(QSharedPointer<IPropertyBase>)));
                     m_pTable->setCellWidget(i, 1, pPart);
+                    registerPropertyRow(i, bodyPart);
                     ++i;
                 }
             }
@@ -430,6 +754,7 @@ void CTableManager::setNewData(const QList<QSharedPointer<IPropertyBase>>& aProp
             CComboStItem* pCombo = new CComboStItem(item);
             QObject::connect(pCombo, SIGNAL(onParamChange(QSharedPointer<IPropertyBase>)), this, SLOT(onParamChange(QSharedPointer<IPropertyBase>)));
             m_pTable->setCellWidget(i, 1, pCombo);
+            registerPropertyRow(i, item);
             ++i;
 
             if(item->isInit() && (EBehaviourType(dynamic_cast<propUint*>(item.get())->value()) == EBehaviourType::eRadius))
@@ -440,6 +765,7 @@ void CTableManager::setNewData(const QList<QSharedPointer<IPropertyBase>>& aProp
                 auto* pCellValue = new CValueItem(util::constProp(aProp, eObjParam_GUARD_RADIUS));
                 QObject::connect(pCellValue, SIGNAL(onParamChange(QSharedPointer<IPropertyBase>)), this, SLOT(onParamChange(QSharedPointer<IPropertyBase>)));
                 m_pTable->setCellWidget(i, 1, pCellValue);
+                registerPropertyRow(i, util::constProp(aProp, eObjParam_GUARD_RADIUS));
                 m_pTable->resizeColumnToContents(0);
                 ++i;
             }
@@ -462,6 +788,7 @@ void CTableManager::setNewData(const QList<QSharedPointer<IPropertyBase>>& aProp
             CComboStItem* pCombo = new CComboStItem(item);
             QObject::connect(pCombo, SIGNAL(onParamChange(QSharedPointer<IPropertyBase>)), this, SLOT(onParamChange(QSharedPointer<IPropertyBase>)));
             m_pTable->setCellWidget(i, 1, pCombo);
+            registerPropertyRow(i, item);
             ++i;
             if(item->isInit() && dynamic_cast<propBool*>(item.get())->value() == true) // is need import unit stats == true
             {
@@ -474,6 +801,7 @@ void CTableManager::setNewData(const QList<QSharedPointer<IPropertyBase>>& aProp
                 auto* pMulti = new CUnitStatItem(ustat);
                 QObject::connect(pMulti, SIGNAL(onParamChange(QSharedPointer<IPropertyBase>)), this, SLOT(onParamChange(QSharedPointer<IPropertyBase>)));
                 m_pTable->setCellWidget(i, 1, pMulti);
+                registerPropertyRow(i, ustat);
                 m_pTable->resizeColumnToContents(0);
                 ++i;
                 //importStats[0] = eObjParam_UNIT_STATS;
@@ -490,6 +818,7 @@ void CTableManager::setNewData(const QList<QSharedPointer<IPropertyBase>>& aProp
                     auto* pMulti = new CMultiLineButtonItem(util::constProp(aProp, importStats[j]));
                     QObject::connect(pMulti, SIGNAL(onParamChange(QSharedPointer<IPropertyBase>)), this, SLOT(onParamChange(QSharedPointer<IPropertyBase>)));
                     m_pTable->setCellWidget(i, 1, pMulti);
+                    registerPropertyRow(i, util::constProp(aProp, importStats[j]));
                     m_pTable->resizeColumnToContents(0);
                     ++i;
                 }
@@ -504,6 +833,7 @@ void CTableManager::setNewData(const QList<QSharedPointer<IPropertyBase>>& aProp
             auto* pMulti = new CMultiLineButtonItem(item);
             QObject::connect(pMulti, SIGNAL(onParamChange(QSharedPointer<IPropertyBase>)), this, SLOT(onParamChange(QSharedPointer<IPropertyBase>)));
             m_pTable->setCellWidget(i, 1, pMulti);
+            registerPropertyRow(i, item);
             ++i;
             break;
         }
@@ -516,6 +846,7 @@ void CTableManager::setNewData(const QList<QSharedPointer<IPropertyBase>>& aProp
             pColorButton = new CColorButtonItem(item);
             QObject::connect(pColorButton, SIGNAL(onColorChange(QSharedPointer<IPropertyBase>)), this, SLOT(onParamChange(QSharedPointer<IPropertyBase>)));
             m_pTable->setCellWidget(i, 1, pColorButton);
+            registerPropertyRow(i, item);
             ++i;
             break;
         }
@@ -551,6 +882,7 @@ void CTableManager::setNewData(const QList<QSharedPointer<IPropertyBase>>& aProp
             CValueItem* pCellValue = new CValueItem(item);
             QObject::connect(pCellValue, SIGNAL(onParamChange(QSharedPointer<IPropertyBase>)), this, SLOT(onParamChange(QSharedPointer<IPropertyBase>)));
             m_pTable->setCellWidget(i, 1, pCellValue);
+            registerPropertyRow(i, item);
             m_pTable->resizeColumnToContents(0);
             ++i;
             break;
@@ -780,14 +1112,14 @@ void CColorButtonItem::keyPressEvent(QKeyEvent* event)
     }
     if(event->matches(QKeySequence::Paste))
     {
-        if(!clipboardMatches(m_pValue->type()) || g_propertyClipboard.isNull()
-           || g_propertyClipboard->type() != m_pValue->type())
+        if(!clipboardMatches(m_pValue->type()) || g_propertyClipboard.size() != 1
+           || g_propertyClipboard.first()->type() != m_pValue->type())
         {
             rejectIncompatiblePaste(this, m_pValue->type(), QGuiApplication::clipboard()->text());
             event->accept();
             return;
         }
-        m_pValue.reset(g_propertyClipboard->clone());
+        m_pValue.reset(g_propertyClipboard.first()->clone());
         const QVector3D color = dynamic_cast<prop3D*>(m_pValue.get())->value();
         setColor(color);
         emit onColorChange(m_pValue);
@@ -908,9 +1240,14 @@ void CComboDynItem::keyPressEvent(QKeyEvent* event)
         event->accept();
         return;
     }
-    if(event->matches(QKeySequence::Paste)
-       && rejectIncompatiblePaste(this, m_pValue->type(), QGuiApplication::clipboard()->text()))
+    if(event->matches(QKeySequence::Paste))
     {
+        const QString text = QGuiApplication::clipboard()->text().trimmed();
+        if(!rejectIncompatiblePaste(this, m_pValue->type(), text))
+        {
+            setEditText(text);
+            _onChange(text);
+        }
         event->accept();
         return;
     }
@@ -944,9 +1281,16 @@ bool CComboDynItem::eventFilter(QObject* watched, QEvent* event)
                          ? lineEdit()->selectedText() : lineEdit()->text());
             return true;
         }
-        if(keyEvent->matches(QKeySequence::Paste)
-           && rejectIncompatiblePaste(this, m_pValue->type(), QGuiApplication::clipboard()->text()))
+        if(keyEvent->matches(QKeySequence::Paste))
+        {
+            const QString text = QGuiApplication::clipboard()->text().trimmed();
+            if(!rejectIncompatiblePaste(this, m_pValue->type(), text))
+            {
+                setEditText(text);
+                _onChange(text);
+            }
             return true;
+        }
         if(keyEvent->key() == Qt::Key_Escape)
         {
             cancelPendingEdit();
@@ -1141,14 +1485,14 @@ void CUnitStatItem::keyPressEvent(QKeyEvent* event)
     }
     if(event->matches(QKeySequence::Paste))
     {
-        if(!clipboardMatches(m_pValue->type()) || g_propertyClipboard.isNull()
-           || g_propertyClipboard->type() != m_pValue->type())
+        if(!clipboardMatches(m_pValue->type()) || g_propertyClipboard.size() != 1
+           || g_propertyClipboard.first()->type() != m_pValue->type())
         {
             rejectIncompatiblePaste(this, m_pValue->type(), QGuiApplication::clipboard()->text());
             event->accept();
             return;
         }
-        m_pValue.reset(g_propertyClipboard->clone());
+        m_pValue.reset(g_propertyClipboard.first()->clone());
         emit onParamChange(m_pValue);
         event->accept();
         return;
@@ -1191,14 +1535,14 @@ void CBodyPartItem::keyPressEvent(QKeyEvent* event)
     }
     if(event->matches(QKeySequence::Paste))
     {
-        if(!clipboardMatches(m_pValue->type()) || g_propertyClipboard.isNull()
-           || g_propertyClipboard->type() != m_pValue->type())
+        if(!clipboardMatches(m_pValue->type()) || g_propertyClipboard.size() != 1
+           || g_propertyClipboard.first()->type() != m_pValue->type())
         {
             rejectIncompatiblePaste(this, m_pValue->type(), QGuiApplication::clipboard()->text());
             event->accept();
             return;
         }
-        m_pValue.reset(g_propertyClipboard->clone());
+        m_pValue.reset(g_propertyClipboard.first()->clone());
         emit onParamChange(m_pValue);
         event->accept();
         return;

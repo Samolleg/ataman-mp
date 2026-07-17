@@ -11,7 +11,6 @@
 #include <QDir>
 #include <QUrl>
 #include <QTimer>
-#include <QPointer>
 
 #include "mob_parameters.h"
 #include "ui_mob_parameters.h"
@@ -31,7 +30,10 @@ CMobParameters::CMobParameters(QWidget* parent, CMob* pMob, CView* pView):
    ,m_isDurty(false)
   ,m_pShortcut(nullptr)
   ,m_externalScriptWatcher(new QFileSystemWatcher(this))
+  ,m_externalScriptDebounce(new QTimer(this))
   ,m_externalScriptReadRetries(0)
+  ,m_externalImportPromptOpen(false)
+  ,m_externalReloadPending(false)
 {
     ui->setupUi(this);
     setWindowFlags(windowFlags() & ~Qt::WindowCloseButtonHint);
@@ -49,6 +51,9 @@ CMobParameters::CMobParameters(QWidget* parent, CMob* pMob, CView* pView):
     m_pShortcut = new QShortcut(QKeySequence(Qt::CTRL + eKey_S), this, SLOT(onSaveShortcut()));
     QObject::connect(m_externalScriptWatcher, SIGNAL(fileChanged(QString)), this, SLOT(onExternalScriptChanged(QString)));
     QObject::connect(m_externalScriptWatcher, SIGNAL(directoryChanged(QString)), this, SLOT(onExternalScriptDirectoryChanged(QString)));
+    m_externalScriptDebounce->setSingleShot(true);
+    m_externalScriptDebounce->setInterval(250);
+    QObject::connect(m_externalScriptDebounce, SIGNAL(timeout()), this, SLOT(processExternalScriptChange()));
     //m_aCell.clear();
     m_aCell.resize(32*32);
     for (int i(0); i < 32; ++i)
@@ -568,6 +573,8 @@ void CMobParameters::on_pushButtonOpenExtEditor_clicked()
 
     m_externalScriptPath = workspace + QDir::separator() + m_pCurMob->filePath().completeBaseName() + ".lua";
     m_externalScriptReadRetries = 0;
+    m_externalReloadPending = false;
+    m_externalLastHandledText.clear();
     QFile scriptFile(m_externalScriptPath);
     if(!scriptFile.open(QIODevice::WriteOnly | QIODevice::Truncate))
     {
@@ -589,70 +596,90 @@ void CMobParameters::on_pushButtonOpenExtEditor_clicked()
 void CMobParameters::onExternalScriptChanged(const QString& path)
 {
     ei::log(eLogInfo, QString("External script file notification path:%1").arg(path));
-    const QString requestedPath = path;
-    QPointer<CMobParameters> self(this);
-    QTimer::singleShot(150, this, [self, requestedPath]()
+    if(m_externalScriptPath.isEmpty())
+        return;
+    m_externalReloadPending = true;
+    m_externalScriptDebounce->start();
+}
+
+void CMobParameters::processExternalScriptChange()
+{
+    if(m_externalScriptPath.isEmpty() || !m_externalReloadPending)
+        return;
+    if(m_externalImportPromptOpen)
     {
-        if(!self)
-            return;
-        const QString scriptPath = QFileInfo(requestedPath).isDir()
-                ? self->m_externalScriptPath : requestedPath;
-        QFile scriptFile(scriptPath);
-        if(!scriptFile.open(QIODevice::ReadOnly))
+        // A modal question runs a nested Qt event loop. Never allow another
+        // watcher notification to create a second question inside it.
+        return;
+    }
+    m_externalReloadPending = false;
+    QFile scriptFile(m_externalScriptPath);
+    if(!scriptFile.open(QIODevice::ReadOnly))
+    {
+        if(!QFileInfo(m_externalScriptPath).exists())
+            return; // directoryChanged will notify us when an atomic replacement appears
+        if(++m_externalScriptReadRetries > 5)
         {
-            if(!QFileInfo(scriptPath).exists())
-                return; // directoryChanged will notify us when an atomic replacement appears
-            if(++self->m_externalScriptReadRetries > 5)
-            {
-                ei::log(eLogWarning, QString("External script remained unreadable after retries path:%1").arg(scriptPath));
-                self->m_externalScriptReadRetries = 0;
-                return;
-            }
-            QTimer::singleShot(350, self, [self, scriptPath]()
-            {
-                if(self)
-                    self->onExternalScriptChanged(scriptPath);
-            });
+            ei::log(eLogWarning, QString("External script remained unreadable after retries path:%1")
+                    .arg(m_externalScriptPath));
+            m_externalScriptReadRetries = 0;
             return;
         }
-        self->m_externalScriptReadRetries = 0;
-        const QString externalText = QString::fromUtf8(scriptFile.readAll());
-        scriptFile.close();
+        m_externalReloadPending = true;
+        m_externalScriptDebounce->start(350);
+        return;
+    }
+    m_externalScriptReadRetries = 0;
+    const QString externalText = QString::fromUtf8(scriptFile.readAll());
+    scriptFile.close();
 
-        if(QFileInfo(scriptPath).exists() && !self->m_externalScriptWatcher->files().contains(scriptPath))
-            self->m_externalScriptWatcher->addPath(scriptPath);
-        if(externalText == self->ui->plainTextEdit->toPlainText())
-            return;
+    if(QFileInfo(m_externalScriptPath).exists()
+       && !m_externalScriptWatcher->files().contains(m_externalScriptPath))
+        m_externalScriptWatcher->addPath(m_externalScriptPath);
+    if(externalText == ui->plainTextEdit->toPlainText()
+       || externalText == m_externalLastHandledText)
+        return;
 
-        QTextCodec* cp1251 = QTextCodec::codecForName("Windows-1251");
-        const QByteArray encoded = cp1251->fromUnicode(externalText);
-        if(cp1251->toUnicode(encoded) != externalText)
-        {
-            QMessageBox::critical(self, "External script changed",
-                "The external file contains characters that cannot round-trip through Windows-1251. The embedded script was not changed.");
-            return;
-        }
-        if(QMessageBox::question(self, "External script changed",
+    QTextCodec* cp1251 = QTextCodec::codecForName("Windows-1251");
+    const QByteArray encoded = cp1251->fromUnicode(externalText);
+    if(cp1251->toUnicode(encoded) != externalText)
+    {
+        m_externalLastHandledText = externalText;
+        m_externalImportPromptOpen = true;
+        QMessageBox::critical(this, "External script changed",
+            "The external file contains characters that cannot round-trip through Windows-1251. The embedded script was not changed.");
+        m_externalImportPromptOpen = false;
+        if(m_externalReloadPending)
+            m_externalScriptDebounce->start();
+        return;
+    }
+
+    m_externalImportPromptOpen = true;
+    const QMessageBox::StandardButton answer = QMessageBox::question(
+            this, "External script changed",
             "Import the changed external script into the MOB editor? This remains unsaved until Apply changes is pressed.",
-            QMessageBox::Yes | QMessageBox::No) != QMessageBox::Yes)
-            return;
-
-        QTextCursor cursor(self->ui->plainTextEdit->document());
+            QMessageBox::Yes | QMessageBox::No);
+    m_externalImportPromptOpen = false;
+    m_externalLastHandledText = externalText;
+    if(answer == QMessageBox::Yes)
+    {
+        QTextCursor cursor(ui->plainTextEdit->document());
         cursor.beginEditBlock();
         cursor.select(QTextCursor::Document);
         cursor.insertText(externalText);
         cursor.endEditBlock();
-        self->setDurty(true);
+        setDurty(true);
         ei::log(eLogInfo, QString("External script imported into MOB Parameters path:%1 characters:%2")
-                .arg(scriptPath).arg(externalText.size()));
-    });
+                .arg(m_externalScriptPath).arg(externalText.size()));
+    }
+    if(m_externalReloadPending)
+        m_externalScriptDebounce->start();
 }
 
 void CMobParameters::onExternalScriptDirectoryChanged(const QString& path)
 {
     ei::log(eLogInfo, QString("External script workspace notification path:%1").arg(path));
-    if(!m_externalScriptPath.isEmpty())
-        onExternalScriptChanged(m_externalScriptPath);
+    onExternalScriptChanged(m_externalScriptPath);
 }
 
 void CMobParameters::updateMobParamsOnly()

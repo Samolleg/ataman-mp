@@ -10,6 +10,7 @@
 #include <QLineEdit>
 #include <QStringListModel>
 #include <QCompleter>
+#include <QMap>
 
 #include "types.h"
 #include "undo.h"
@@ -302,12 +303,25 @@ public:
     void reset();
     void setNewData(const QList<QSharedPointer<IPropertyBase>>& aProp);
 
+    bool eventFilter(QObject* watched, QEvent* event) override;
+
 private:
     void initRowName();
     bool isValidValue(const EObjParam param, const QString& value);
+    void registerPropertyRow(int row, const QSharedPointer<IPropertyBase>& value);
+    void installClipboardFilter(QWidget* widget, int row);
+    QList<int> selectedPropertyRows(int fallbackRow = -1) const;
+    QString propertyDisplayText(int row) const;
+    void copyRows(const QList<int>& rows);
+    bool buildPasteValues(const QList<int>& rows,
+                          QList<QSharedPointer<IPropertyBase>>* values,
+                          QString* error) const;
+    void pasteRows(const QList<int>& rows);
+    void showPropertyContextMenu(const QList<int>& rows, const QPoint& globalPos);
 
 signals:
     void onUpdateProperty(const QSharedPointer<IPropertyBase>); //retranslate value changing from ui to view class
+    void onUpdateProperties(const QList<QSharedPointer<IPropertyBase>>& properties);
 
 public slots:
     void onParamChange(const QSharedPointer<IPropertyBase>& pProp); //get value for translating it to view class
@@ -317,6 +331,7 @@ private:
     QTableWidget* m_pTable;
     QMap<EObjParam, QString> m_aRowName;
     QMap<EObjParam, QMap<uint, QString>> m_comboMap;
+    QMap<int, QSharedPointer<IPropertyBase>> m_rowValues;
 };
 
 #endif // CTABLEMANAGER_H

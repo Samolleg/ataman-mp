@@ -110,6 +110,8 @@ void CView::attach(CSettings* pSettings, QTableWidget* pParam, QUndoStack* pStac
     m_cam->reset();
     m_tableManager.reset(new CTableManager(pParam));
     QObject::connect(m_tableManager.get(), SIGNAL(onUpdateProperty(const QSharedPointer<IPropertyBase>)), this, SLOT(onParamChange(const QSharedPointer<IPropertyBase>&)));
+    QObject::connect(m_tableManager.get(), SIGNAL(onUpdateProperties(const QList<QSharedPointer<IPropertyBase>>&)),
+                     this, SLOT(onPropertiesChange(const QList<QSharedPointer<IPropertyBase>>&)));
     m_pUndoStack = pStack;
     connect(m_pUndoStack, &QUndoStack::indexChanged, this, [this](int)
     {
@@ -1741,6 +1743,18 @@ void CView::onParamChange(const QSharedPointer<IPropertyBase>& prop)
         m_pUndoStack->endMacro();
 }
 
+void CView::onPropertiesChange(const QList<QSharedPointer<IPropertyBase>>& properties)
+{
+    if(properties.isEmpty() || !m_pUndoStack)
+        return;
+    if(properties.size() > 1)
+        m_pUndoStack->beginMacro(QString("Paste %1 properties").arg(properties.size()));
+    for(const QSharedPointer<IPropertyBase>& property : properties)
+        onParamChange(property);
+    if(properties.size() > 1)
+        m_pUndoStack->endMacro();
+}
+
 
 
 void CView::collectObjectTreeData()
@@ -1866,18 +1880,6 @@ void CView::moveCamToSelectedObjects()
 
 void CView::mousePressEvent(QMouseEvent* event)
 {
-    if(event->modifiers() == Qt::ShiftModifier && event->button() == Qt::RightButton)
-    {
-        selectedObjectToClipboardBuffer();
-        event->accept();
-        return;
-    }
-    if(event->modifiers() == Qt::ShiftModifier && event->button() == Qt::LeftButton)
-    {
-        clipboradObjectsToScene();
-        event->accept();
-        return;
-    }
     m_pOp->mousePressEvent(event);
 }
 

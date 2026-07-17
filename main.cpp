@@ -271,10 +271,112 @@ int runHeadlessCommand(QApplication& app)
         textureCombo.lineEdit()->selectAll();
         QKeyEvent pastePlainText(QEvent::KeyPress, Qt::Key_V, Qt::ControlModifier);
         QApplication::sendEvent(textureCombo.lineEdit(), &pastePlainText);
-        const bool compatiblePastePending = textureCombo.currentText() == "custom_texture"
-                && textureCombo.value()->toString() == "original_texture";
-        textureCombo._onEditingFinished();
-        const bool compatiblePasteCommitted = textureCombo.value()->toString() == "custom_texture";
+        const bool compatiblePasteImmediate = textureCombo.currentText() == "custom_texture"
+                && textureCombo.value()->toString() == "custom_texture";
+
+        const auto rowForType = [](QTableWidget& table, EObjParam type)
+        {
+            for(int row = 0; row < table.rowCount(); ++row)
+            {
+                QTableWidgetItem* label = table.item(row, 0);
+                if(label && label->data(Qt::UserRole).toInt() == int(type))
+                    return row;
+            }
+            return -1;
+        };
+        QList<QSharedPointer<IPropertyBase>> sourceProperties;
+        sourceProperties << QSharedPointer<IPropertyBase>(new propStr(eObjParam_TEMPLATE, "copied_model"))
+                         << QSharedPointer<IPropertyBase>(new propStr(eObjParam_PRIM_TXTR, "copied_texture"));
+        QTableWidget sourcePropertyTable;
+        CTableManager sourcePropertyManager(&sourcePropertyTable);
+        sourcePropertyManager.setNewData(sourceProperties);
+        const int sourceModelRow = rowForType(sourcePropertyTable, eObjParam_TEMPLATE);
+        const int sourceTextureRow = rowForType(sourcePropertyTable, eObjParam_PRIM_TXTR);
+        sourcePropertyTable.item(sourceModelRow, 0)->setSelected(true);
+        sourcePropertyTable.item(sourceTextureRow, 0)->setSelected(true);
+        QKeyEvent copySelectedProperties(QEvent::KeyPress, Qt::Key_C, Qt::ControlModifier);
+        QApplication::sendEvent(&sourcePropertyTable, &copySelectedProperties);
+
+        QList<QSharedPointer<IPropertyBase>> destinationProperties;
+        destinationProperties << QSharedPointer<IPropertyBase>(new propStr(eObjParam_TEMPLATE, "old_model"))
+                              << QSharedPointer<IPropertyBase>(new propStr(eObjParam_PRIM_TXTR, "old_texture"));
+        QTableWidget destinationPropertyTable;
+        CTableManager destinationPropertyManager(&destinationPropertyTable);
+        destinationPropertyManager.setNewData(destinationProperties);
+        const int destinationModelRow = rowForType(destinationPropertyTable, eObjParam_TEMPLATE);
+        const int destinationTextureRow = rowForType(destinationPropertyTable, eObjParam_PRIM_TXTR);
+        destinationPropertyTable.item(destinationModelRow, 0)->setSelected(true);
+        destinationPropertyTable.item(destinationTextureRow, 0)->setSelected(true);
+        QList<QSharedPointer<IPropertyBase>> pastedPropertyBundle;
+        QObject::connect(&destinationPropertyManager, &CTableManager::onUpdateProperties,
+                         [&pastedPropertyBundle](const QList<QSharedPointer<IPropertyBase>>& values)
+        {
+            pastedPropertyBundle = values;
+        });
+        QKeyEvent pasteSelectedProperties(QEvent::KeyPress, Qt::Key_V, Qt::ControlModifier);
+        QApplication::sendEvent(&destinationPropertyTable, &pasteSelectedProperties);
+        const bool multiPropertyPaste = pastedPropertyBundle.size() == 2
+                && pastedPropertyBundle.at(0)->type() == eObjParam_TEMPLATE
+                && pastedPropertyBundle.at(0)->toString() == "copied_model"
+                && pastedPropertyBundle.at(1)->type() == eObjParam_PRIM_TXTR
+                && pastedPropertyBundle.at(1)->toString() == "copied_texture";
+
+        destinationPropertyTable.clearSelection();
+        destinationPropertyTable.item(destinationTextureRow, 0)->setSelected(true);
+        pastedPropertyBundle.clear();
+        QKeyEvent rejectMismatchedBundle(QEvent::KeyPress, Qt::Key_V, Qt::ControlModifier);
+        QApplication::sendEvent(&destinationPropertyTable, &rejectMismatchedBundle);
+        const bool mismatchedPropertyPasteBlocked = pastedPropertyBundle.isEmpty();
+
+        sourcePropertyTable.clearSelection();
+        sourcePropertyTable.item(sourceModelRow, 0)->setSelected(true);
+        QKeyEvent copyModelProperty(QEvent::KeyPress, Qt::Key_C, Qt::ControlModifier);
+        QApplication::sendEvent(&sourcePropertyTable, &copyModelProperty);
+        QSharedPointer<IPropertyBase> immediateModelPaste;
+        QObject::connect(&destinationPropertyManager, &CTableManager::onUpdateProperty,
+                         [&immediateModelPaste](const QSharedPointer<IPropertyBase>& value)
+        {
+            immediateModelPaste.reset(value->clone());
+        });
+        CComboDynItem* destinationModel = qobject_cast<CComboDynItem*>(
+                    destinationPropertyTable.cellWidget(destinationModelRow, 1));
+        QKeyEvent pasteModelField(QEvent::KeyPress, Qt::Key_V, Qt::ControlModifier);
+        QApplication::sendEvent(destinationModel->lineEdit(), &pasteModelField);
+        const bool fieldPasteImmediate = !immediateModelPaste.isNull()
+                && immediateModelPaste->type() == eObjParam_TEMPLATE
+                && immediateModelPaste->toString() == "copied_model";
+
+        QKeyEvent copyModelField(QEvent::KeyPress, Qt::Key_C, Qt::ControlModifier);
+        QApplication::sendEvent(sourcePropertyTable.cellWidget(sourceModelRow, 1), &copyModelField);
+        const bool fieldCopyAvailable = QGuiApplication::clipboard()->text() == "copied_model";
+
+        QList<QSharedPointer<IPropertyBase>> colorSource;
+        colorSource << QSharedPointer<IPropertyBase>(new prop3D(eObjParam_LIGHT_COLOR, 0.1f, 0.2f, 0.3f));
+        QTableWidget colorSourceTable;
+        CTableManager colorSourceManager(&colorSourceTable);
+        colorSourceManager.setNewData(colorSource);
+        colorSourceTable.item(0, 0)->setSelected(true);
+        QKeyEvent copyColor(QEvent::KeyPress, Qt::Key_C, Qt::ControlModifier);
+        QApplication::sendEvent(&colorSourceTable, &copyColor);
+        QList<QSharedPointer<IPropertyBase>> colorDestination;
+        colorDestination << QSharedPointer<IPropertyBase>(new prop3D(eObjParam_LIGHT_COLOR, 0.8f, 0.8f, 0.8f));
+        QTableWidget colorDestinationTable;
+        CTableManager colorDestinationManager(&colorDestinationTable);
+        colorDestinationManager.setNewData(colorDestination);
+        colorDestinationTable.item(0, 0)->setSelected(true);
+        QSharedPointer<IPropertyBase> pastedColor;
+        QObject::connect(&colorDestinationManager, &CTableManager::onUpdateProperty,
+                         [&pastedColor](const QSharedPointer<IPropertyBase>& value)
+        {
+            pastedColor.reset(value->clone());
+        });
+        QKeyEvent pasteColor(QEvent::KeyPress, Qt::Key_V, Qt::ControlModifier);
+        QApplication::sendEvent(&colorDestinationTable, &pasteColor);
+        const prop3D* colorValue = dynamic_cast<prop3D*>(pastedColor.get());
+        const bool nonTextPropertyPaste = colorValue
+                && qFuzzyCompare(colorValue->value().x(), 0.1f)
+                && qFuzzyCompare(colorValue->value().y(), 0.2f)
+                && qFuzzyCompare(colorValue->value().z(), 0.3f);
 
         QWidget primaryWindow;
         bool settingsTabsUsable = false;
@@ -325,7 +427,9 @@ int runHeadlessCommand(QApplication& app)
         const bool passed = prefixesOnly && valueStable && focusCancel && escapeCancel
                 && enterCommit && clickCommit && settingsTabsUsable && secondaryWindowsClosed
                 && pasteSingleAction && pasteUndoAtomic && pasteRedoAtomic
-                && incompatiblePasteBlocked && compatiblePastePending && compatiblePasteCommitted;
+                && incompatiblePasteBlocked && compatiblePasteImmediate
+                && multiPropertyPaste && mismatchedPropertyPasteBlocked
+                && fieldPasteImmediate && fieldCopyAvailable && nonTextPropertyPaste;
         QTextStream output(stdout);
         output << "asset-picker prefixes=" << completions.join(",") << "\n"
                << "prefixesOnly=" << prefixesOnly
@@ -340,8 +444,12 @@ int runHeadlessCommand(QApplication& app)
                << " pasteUndoAtomic=" << pasteUndoAtomic
                << " pasteRedoAtomic=" << pasteRedoAtomic
                << " incompatiblePasteBlocked=" << incompatiblePasteBlocked
-               << " compatiblePastePending=" << compatiblePastePending
-               << " compatiblePasteCommitted=" << compatiblePasteCommitted << "\n"
+               << " compatiblePasteImmediate=" << compatiblePasteImmediate
+               << " multiPropertyPaste=" << multiPropertyPaste
+               << " mismatchedPropertyPasteBlocked=" << mismatchedPropertyPasteBlocked
+               << " fieldPasteImmediate=" << fieldPasteImmediate
+               << " fieldCopyAvailable=" << fieldCopyAvailable
+               << " nonTextPropertyPaste=" << nonTextPropertyPaste << "\n"
                << (passed ? "PASS" : "FAIL")
                << ": widget interaction and secondary-window lifecycle checks\n";
         output.flush();

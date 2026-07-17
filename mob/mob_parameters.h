@@ -12,6 +12,7 @@
 #include <QLineEdit>
 #include <QShortcut>
 #include <QFileSystemWatcher>
+#include <QTimer>
 
 #include "mob.h"
 
@@ -116,6 +117,7 @@ private slots:
     void on_pushButtonOpenExtEditor_clicked();
     void onExternalScriptChanged(const QString& path);
     void onExternalScriptDirectoryChanged(const QString& path);
+    void processExternalScriptChange();
     void updateMobParamsOnly();
     void updateDiplomacyTable();
     void updateDiplomacyTable(int row, int column);
@@ -138,8 +140,12 @@ private:
     bool m_isDurty;
     QShortcut* m_pShortcut;
     QFileSystemWatcher* m_externalScriptWatcher;
+    QTimer* m_externalScriptDebounce;
     QString m_externalScriptPath;
     int m_externalScriptReadRetries;
+    bool m_externalImportPromptOpen;
+    bool m_externalReloadPending;
+    QString m_externalLastHandledText;
     SMobParameterState m_initialState;
 };
 

@@ -179,6 +179,7 @@ MainWindow::MainWindow(QWidget* parent) :
     connectUiButtons();
     m_pView->attach(m_settings.get(), m_ui->tableWidget, m_undoStack, m_ui->progressBar, m_ui->mousePosText, m_ui->treeWidget, m_pTileForm.get());
     initShortcuts();
+    m_ui->action_Mob_parameters->setEnabled(false);
     QObject::connect(m_pView, SIGNAL(updateMainWindowTitle(eTitleTypeData,QString)), this, SLOT(updateWindowTitle(eTitleTypeData,QString)));
     QObject::connect(CScene::getInstance(), SIGNAL(modeChanged()), m_pView, SLOT(viewParameters()));
     QObject::connect(m_pView, SIGNAL(showOutlinerSignal(bool)), this, SLOT(showOutliner(bool)));
@@ -537,7 +538,8 @@ void MainWindow::on_actionSave_triggered()
 
 void MainWindow::on_action_Mob_parameters_triggered()
 {
-    m_pView->openActiveMobEditParams();
+    if(m_pView && m_pView->hasActiveMob())
+        m_pView->openActiveMobEditParams();
 }
 
 
@@ -584,6 +586,7 @@ void MainWindow::updateWindowTitle(eTitleTypeData type, QString data)
         case eTitleTypeData::eTitleTypeDataActiveMob:
     {
         m_sWindowTitle.activeMob = data;
+        m_ui->action_Mob_parameters->setEnabled(!data.isEmpty());
         break;
     }
     case eTitleTypeData::eTitleTypeDataMpr:
