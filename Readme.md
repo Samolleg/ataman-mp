@@ -23,9 +23,10 @@ commit `1cebe83d` tagged as `upstream-1cebe83d`.
 - MOB loading no longer repairs duplicate IDs automatically; duplicates are
   reported without dirtying the document.
 - Unchanged MOB and MPR Save As operations preserve the original bytes.
-- Dirty MOB saves remain blocked while UI edits migrate to raw transactions.
-  Save attempts evaluate a non-writing shadow candidate and record structured
-  leaf provenance in the workflow log.
+- Changed MOB output is enabled only for independently validated transaction
+  classes. The first enabled class is the one-byte `OBJ_PLAYER` unit assignment;
+  other leaf edits continue producing diagnostic candidates, and structural
+  edits remain blocked.
 - MPR writes retain extra archive members and the original internal map name.
 - Resource lookup uses case-normalized RES table indexes and lazy payload reads.
 - Terrain and tile-panel atlases use the same indexed, case-insensitive source
@@ -42,8 +43,8 @@ commit `1cebe83d` tagged as `upstream-1cebe83d`.
   configures built-in or external mod resource profiles.
 
 The alpha is not yet a production replacement for the original editor. In
-particular, changed MOB output remains disabled until real UI shadow results,
-raw structural transactions, and game validation are complete.
+particular, most changed MOB output remains disabled until its field class or raw
+structural transaction passes independent comparison and focused game validation.
 
 See [BUILDING_ENDURANCE.md](BUILDING_ENDURANCE.md) for build and test commands,
 and [NOTICE.md](NOTICE.md) for attribution and licensing information.

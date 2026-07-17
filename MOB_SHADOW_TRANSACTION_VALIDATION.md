@@ -54,6 +54,13 @@ derivation, and exact transaction reapplication for every currently installed MO
 No map or installation file was modified. The harness and document tests returned
 exit code 0, and the production MinGW build plus UI widget regression check passed.
 
+The later raw-subtree core in
+[`8013339`](https://github.com/Ilufus/ei-mapper-endurance/commit/8013339)
+also duplicated and removed one exact provenance-checked object subtree in every
+installed MOB that contains objects: 252 passed, 2 objectless MOBs skipped, and 0
+failed. All pre-existing and remaining object subtree hashes stayed in exact order.
+This is document-layer evidence only; UI copy/delete remains disconnected.
+
 ## Real UI evidence
 
 The first alpha.25 tester case changed one unit's diplomacy/player assignment from
@@ -73,13 +80,15 @@ exact same candidate SHA-256. An independent object comparison reported 1 modifi
 field. Endurance then strictly reparsed all 1,586,436 bytes and passed a
 byte-identical unchanged round trip of that candidate.
 
-This validates the `OBJ_PLAYER` byte-leaf edit class in shadow mode. It does not by
-itself authorize changed output or validate unrelated property types.
+This validates the `OBJ_PLAYER` byte-leaf edit class. Commit
+[`3cd2b3c`](https://github.com/Ilufus/ei-mapper-endurance/commit/3cd2b3c)
+promotes only this exact one-byte class into the provenance-checked staged-save,
+backup, and atomic-replacement pipeline. Unrelated property types remain blocked.
 
 ## Remaining gate
 
-Real UI operations must now produce representative shadow logs. Leaf-only property,
-position, world-setting, diplomacy, and script edits can then be reviewed by field
-class. Structural operations require explicit raw subtree transactions and remain
-out of scope for the bridge. Dirty-save output stays disabled until this evidence
-is complete and the accepted transaction is connected to atomic staged saving.
+Real UI operations must now produce representative transaction logs. Leaf-only
+property, position, world-setting, and script edits can then be reviewed by field
+class and individually promoted. Structural operations require explicit raw subtree
+transactions and remain out of scope for the bridge. Any edit set containing an
+unvalidated class remains entirely blocked; there is no partial or unsafe save.

@@ -57,9 +57,11 @@ behavior.
   accidentally orphaned windows. ([`f9fa250`](https://github.com/Ilufus/ei-mapper-endurance/commit/f9fa250))
 - [ ] Expand changed-save regression coverage across the private JMV map corpus.
 - [ ] Migrate changed MOB saves from the legacy serializer to raw-tree transactions;
-  no-op raw preservation is validated and leaf-only UI deltas now run through a
-  fail-closed shadow transaction bridge, but changed-save output remains disabled.
-  ([`3106fac`](https://github.com/Ilufus/ei-mapper-endurance/commit/3106fac),
+  no-op raw preservation is validated, leaf-only UI deltas run through a fail-closed
+  transaction bridge, and independently validated `OBJ_PLAYER` edits now use the
+  staged backup/atomic-save pipeline. Other leaf classes and all structural edits
+  remain blocked. ([`3106fac`](https://github.com/Ilufus/ei-mapper-endurance/commit/3106fac),
+  [`3cd2b3c`](https://github.com/Ilufus/ei-mapper-endurance/commit/3cd2b3c),
   [validation](MOB_SHADOW_TRANSACTION_VALIDATION.md))
 - [x] Recompute MOB dirty state against its loaded projection after edit and
   undo/redo, allowing byte-identical Save As once every projected change is
@@ -168,6 +170,10 @@ These are the remaining safety gates before editing live maps can be recommended
   changes, preserves source-only records, and never writes its candidate.
   ([`3106fac`](https://github.com/Ilufus/ei-mapper-endurance/commit/3106fac),
   [validation](MOB_SHADOW_TRANSACTION_VALIDATION.md))
+- [x] Promote the independently cross-validated one-byte `OBJ_PLAYER` edit class
+  into real changed output through the raw transaction, fresh staged validation,
+  pre-save backup, and atomic replacement path. Mixed or unvalidated edit sets
+  remain wholly blocked. ([`3cd2b3c`](https://github.com/Ilufus/ei-mapper-endurance/commit/3cd2b3c))
 - [x] Disable the legacy changed-MOB serializer at the Save boundary; dirty MOB
   saves are refused until their UI edits have transaction provenance. Unchanged
   byte-identical Save As remains available. ([`912d00c`](https://github.com/Ilufus/ei-mapper-endurance/commit/912d00c))
@@ -176,7 +182,10 @@ These are the remaining safety gates before editing live maps can be recommended
   containers are covered by a regression derived from the first tester report.
   ([`66fbca0`](https://github.com/Ilufus/ei-mapper-endurance/commit/66fbca0))
 - [ ] Copy/delete exact raw object subtrees and create new objects only from
-  profile-approved raw templates.
+  profile-approved raw templates. The provenance-checked document core now
+  duplicates/removes exact object bytes and passed 252/252 installed MOBs that
+  contain objects; UI provenance binding, copied-leaf edits, undo integration,
+  and template creation remain. ([`8013339`](https://github.com/Ilufus/ei-mapper-endurance/commit/8013339))
 - [ ] Complete lossless MPR preservation for names, timestamps, alignment, and extra entries.
 - [ ] Verify CP1251 script byte lengths and round trips across the corpus.
 - [ ] Add an explicit duplicate-ID Repair preview with reference and script auditing.
