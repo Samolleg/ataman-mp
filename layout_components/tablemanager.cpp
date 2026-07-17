@@ -701,20 +701,17 @@ void CTableManager::setNewData(const QList<QSharedPointer<IPropertyBase>>& aProp
             m_pTable->setCellWidget(i, 1, pCombo);
             registerPropertyRow(i, item);
             ++i;
-            if(item->isInit())
+            auto bodyPart = util::constProp(aProp, eObjParam_BODYPARTS);
+            if(!bodyPart.isNull())
             {
-                auto bodyPart = util::constProp(aProp, eObjParam_BODYPARTS);
-                if(!bodyPart.isNull())
-                {
-                    m_pTable->insertRow(i);
-                    m_pTable->setItem(i, 0, new QTableWidgetItem(m_aRowName[eObjParam_BODYPARTS]));
-                    blockEditWidget(m_pTable->item(i, 0));
-                    CBodyPartItem* pPart = new CBodyPartItem(bodyPart);
-                    QObject::connect(pPart, SIGNAL(onParamChange(QSharedPointer<IPropertyBase>)), this, SLOT(onParamChange(QSharedPointer<IPropertyBase>)));
-                    m_pTable->setCellWidget(i, 1, pPart);
-                    registerPropertyRow(i, bodyPart);
-                    ++i;
-                }
+                m_pTable->insertRow(i);
+                m_pTable->setItem(i, 0, new QTableWidgetItem(m_aRowName[eObjParam_BODYPARTS]));
+                blockEditWidget(m_pTable->item(i, 0));
+                CBodyPartItem* pPart = new CBodyPartItem(bodyPart);
+                QObject::connect(pPart, SIGNAL(onParamChange(QSharedPointer<IPropertyBase>)), this, SLOT(onParamChange(QSharedPointer<IPropertyBase>)));
+                m_pTable->setCellWidget(i, 1, pPart);
+                registerPropertyRow(i, bodyPart);
+                ++i;
             }
             break;
         }

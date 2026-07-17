@@ -1287,10 +1287,6 @@ void util::bodyPartToProp(QMap<QString, QSharedPointer<propBool>>& arrBodyPart, 
 
 void util::addBodyPartParam(QList<QSharedPointer<IPropertyBase>>& aProp, IPropertyBase* pProp)
 {
-    auto pTemplate = constProp(aProp, eObjParam_TEMPLATE);
-    if(!pTemplate->isInit())
-        return;
-
     bool bFound = false;
     for(auto& prop : aProp)
     {

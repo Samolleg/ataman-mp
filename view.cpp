@@ -54,6 +54,7 @@ CView::CView(QWidget *parent, const QGLWidget *pShareWidget) : QGLWidget(parent,
   ,m_pUndoStack(nullptr)
   ,m_pProgress(nullptr)
   ,m_pendingOperationOwnsPaste(false)
+  ,m_pendingLogicPlacementMacro(false)
   ,m_pendingPasteMob(nullptr)
   ,m_clipboard_buffer_file(QString("%1%2%3").arg(QDir::tempPath()).arg(QDir::separator()).arg("copy_paste_buffer.json"))
   ,m_recentOpenedFile_file(QString("%1%2%3").arg(QDir::tempPath()).arg(QDir::separator()).arg("recent_opened.json"))
@@ -2131,6 +2132,7 @@ bool CView::cancelPendingOperation()
 
     const EOperationMethod method = m_pOp->operationMethod();
     const bool cancelPastePreview = m_pendingOperationOwnsPaste;
+    const bool cancelLogicPlacement = m_pendingLogicPlacementMacro;
     CMob* pasteMob = m_pendingPasteMob;
     const QList<CNode*> pasteNodes = m_pendingPasteNodes;
     const QList<CNode*> originalSelection = m_pendingPasteOriginalSelection;
@@ -2161,6 +2163,7 @@ bool CView::cancelPendingOperation()
     m_operationBackup.clear();
     m_unitMovementBackup.clear();
     m_pendingOperationOwnsPaste = false;
+    m_pendingLogicPlacementMacro = false;
     m_pendingPasteMob = nullptr;
     m_pendingPasteNodes.clear();
     m_pendingPasteOriginalSelection.clear();
@@ -2178,6 +2181,11 @@ bool CView::cancelPendingOperation()
         }
         restoreSelection(originalSelection);
         setDurty(pasteMob);
+    }
+    if(cancelLogicPlacement && m_pUndoStack)
+    {
+        m_pUndoStack->endMacro();
+        m_pUndoStack->undo();
     }
     m_pOp->changeState(new CSelect(this));
     ei::log(eLogInfo, QString("Cancelled pending viewport operation method:%1 trackedObjects:%2")
@@ -2281,7 +2289,8 @@ void CView::operationApply(EOperationAxisType operationType)
     // A paste and its automatically-started placement transform are one user
     // action. Keep the Paste macro open through the transform commands so one
     // Undo removes the pasted objects instead of merely moving them back.
-    const bool grouped = !committingPaste && m_operationBackup.size() > 1;
+    const bool grouped = !committingPaste && !m_pendingLogicPlacementMacro
+            && m_operationBackup.size() > 1;
     if(grouped)
     {
         QString action = "Transform";
@@ -2397,9 +2406,12 @@ void CView::operationApply(EOperationAxisType operationType)
         m_pUndoStack->endMacro();
     if(committingPaste)
         m_pUndoStack->endMacro();
+    if(m_pendingLogicPlacementMacro)
+        m_pUndoStack->endMacro();
     m_operationBackup.clear();
     m_unitMovementBackup.clear();
     m_pendingOperationOwnsPaste = false;
+    m_pendingLogicPlacementMacro = false;
     m_pendingPasteMob = nullptr;
     m_pendingPasteNodes.clear();
     m_pendingPasteOriginalSelection.clear();
@@ -2800,11 +2812,16 @@ void CView::addLogicPoint(bool bLookPoint)
     }
     if(targets.isEmpty())
         return;
-    const bool grouped = targets.size() > 1;
-    if(grouped)
-        m_pUndoStack->beginMacro(QString("Add logic points to %1 objects").arg(targets.size()));
-
     bool bChangeToMove = false;
+    int createdCount = 0;
+    const auto beginPlacement = [this, &createdCount, &targets]()
+    {
+        if(createdCount == 0)
+            m_pUndoStack->beginMacro(targets.size() > 1
+                ? QString("Create and place logic points on %1 objects").arg(targets.size())
+                : QString("Create and place logic point"));
+        ++createdCount;
+    };
 
     CNode* pNode = nullptr;
     foreach(pNode, targets)
@@ -2823,6 +2840,7 @@ void CView::addLogicPoint(bool bLookPoint)
             auto pLook = dynamic_cast<CLookPoint*>(pNode);
             m_activeMob->getViewHash(unitId, patrolId, viewId, pLook);
             QString hash = QString("%1.%2.%3").arg(unitId).arg(patrolId).arg(viewId);
+            beginPlacement();
             CCreatePatrolCommand* pUndo = new CCreatePatrolCommand(this, hash);
             m_pUndoStack->push(pUndo);
             bChangeToMove = true;
@@ -2841,6 +2859,7 @@ void CView::addLogicPoint(bool bLookPoint)
             else
                 hash = QString("%1.%2").arg(unitId).arg(patrolId); // for creating patrol point
 
+            beginPlacement();
             CCreatePatrolCommand* pUndo = new CCreatePatrolCommand(this, hash);
             m_pUndoStack->push(pUndo);
             bChangeToMove = true;
@@ -2852,6 +2871,7 @@ void CView::addLogicPoint(bool bLookPoint)
                 break; //dont create look point for unit
 
             QString hash = QString("%1.%2").arg(pNode->mapId()).arg(-1);
+            beginPlacement();
             CCreatePatrolCommand* pUndo = new CCreatePatrolCommand(this, hash);
             m_pUndoStack->push(pUndo);
             bChangeToMove = true;
@@ -2859,6 +2879,7 @@ void CView::addLogicPoint(bool bLookPoint)
         }
         case eMagicTrap:
         {
+            beginPlacement();
             CCreateTrapPointCommand* pUndo = new CCreateTrapPointCommand(this, pNode->mapId(), !bLookPoint);
             m_pUndoStack->push(pUndo);
             bChangeToMove = true;
@@ -2867,6 +2888,7 @@ void CView::addLogicPoint(bool bLookPoint)
         case eTrapActZone:
         {
             uint trapId = m_activeMob->trapIdByPoint(dynamic_cast<CActivationZone*>(pNode));
+            beginPlacement();
             CCreateTrapPointCommand* pUndo = new CCreateTrapPointCommand(this, trapId, !bLookPoint);
             m_pUndoStack->push(pUndo);
             bChangeToMove = true;
@@ -2875,6 +2897,7 @@ void CView::addLogicPoint(bool bLookPoint)
         case eTrapCastPoint:
         {
             uint trapId = m_activeMob->trapIdByPoint(dynamic_cast<CTrapCastPoint*>(pNode));
+            beginPlacement();
             CCreateTrapPointCommand* pUndo = new CCreateTrapPointCommand(this, trapId, !bLookPoint);
             m_pUndoStack->push(pUndo);
             bChangeToMove = true;
@@ -2888,10 +2911,11 @@ void CView::addLogicPoint(bool bLookPoint)
 
     }
 
-    if(grouped)
-        m_pUndoStack->endMacro();
     if(bChangeToMove)
+    {
+        m_pendingLogicPlacementMacro = true;
         m_pOp->changeState(new CMoveAxis(this, EOperateAxisXY));
+    }
 }
 
 void CView::copySelectedIDsToClipboard()

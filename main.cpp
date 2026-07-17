@@ -393,6 +393,19 @@ int runHeadlessCommand(QApplication& app)
                 && qFuzzyCompare(colorValue->value().y(), 0.2f)
                 && qFuzzyCompare(colorValue->value().z(), 0.3f);
 
+        QMap<QString, QSharedPointer<propBool>> mixedParts;
+        mixedParts.insert("head", QSharedPointer<propBool>(new propBool(eObjParam_BODYPARTS)));
+        mixedParts.insert("body", QSharedPointer<propBool>(new propBool(eObjParam_BODYPARTS, true)));
+        QList<QSharedPointer<IPropertyBase>> mixedModelProperties;
+        mixedModelProperties << QSharedPointer<IPropertyBase>(new propStr(eObjParam_TEMPLATE))
+                             << QSharedPointer<IPropertyBase>(new propBodyPart(eObjParam_BODYPARTS,
+                                                                              mixedParts));
+        QTableWidget mixedModelTable;
+        CTableManager mixedModelManager(&mixedModelTable);
+        mixedModelManager.setNewData(mixedModelProperties);
+        const bool mixedModelPartsVisible = rowForType(mixedModelTable,
+                                                       eObjParam_BODYPARTS) >= 0;
+
         QWidget primaryWindow;
         bool settingsTabsUsable = false;
         bool settingsShortcutsPersist = false;
@@ -451,13 +464,29 @@ int runHeadlessCommand(QApplication& app)
         const bool pasteRedoAtomic = pasteHistory.index() == 1
                 && pastedObjects == 1 && placementChanges == 1;
 
+        QUndoStack logicPointHistory;
+        int logicPoints = 0;
+        int logicPlacementChanges = 0;
+        logicPointHistory.beginMacro("Create and place logic point");
+        logicPointHistory.push(new CCounterUndoCommand(&logicPoints, 1));
+        logicPointHistory.push(new CCounterUndoCommand(&logicPlacementChanges, 1));
+        logicPointHistory.endMacro();
+        logicPointHistory.undo();
+        const bool logicPointUndoAtomic = logicPointHistory.index() == 0
+                && logicPoints == 0 && logicPlacementChanges == 0;
+        logicPointHistory.redo();
+        const bool logicPointRedoAtomic = logicPointHistory.index() == 1
+                && logicPoints == 1 && logicPlacementChanges == 1;
+
         const bool passed = prefixesOnly && valueStable && focusCancel && escapeCancel
                 && enterCommit && clickCommit && settingsTabsUsable && settingsShortcutsPersist
                 && secondaryWindowsClosed
                 && pasteSingleAction && pasteUndoAtomic && pasteRedoAtomic
                 && incompatiblePasteBlocked && compatiblePasteImmediate
                 && multiPropertyPaste && mismatchedPropertyPasteBlocked
-                && fieldPasteImmediate && fieldCopyAvailable && nonTextPropertyPaste;
+                && fieldPasteImmediate && fieldCopyAvailable && nonTextPropertyPaste
+                && mixedModelPartsVisible
+                && logicPointUndoAtomic && logicPointRedoAtomic;
         QTextStream output(stdout);
         output << "asset-picker prefixes=" << completions.join(",") << "\n"
                << "prefixesOnly=" << prefixesOnly
@@ -479,6 +508,9 @@ int runHeadlessCommand(QApplication& app)
                << " fieldPasteImmediate=" << fieldPasteImmediate
                << " fieldCopyAvailable=" << fieldCopyAvailable
                << " nonTextPropertyPaste=" << nonTextPropertyPaste << "\n"
+               << " mixedModelPartsVisible=" << mixedModelPartsVisible
+               << " logicPointUndoAtomic=" << logicPointUndoAtomic
+               << " logicPointRedoAtomic=" << logicPointRedoAtomic << "\n"
                << (passed ? "PASS" : "FAIL")
                << ": widget interaction and secondary-window lifecycle checks\n";
         output.flush();
@@ -678,13 +710,19 @@ int main(int argc, char *argv[])
     darkPalette.setColor(QPalette::HighlightedText, Qt::black);
 
     darkPalette.setColor(QPalette::Disabled, QPalette::Base, QColor(65, 65, 65));
-    darkPalette.setColor(QPalette::Disabled, QPalette::ButtonText, Qt::darkGray);
+    const QColor disabledText(128, 128, 128);
+    darkPalette.setColor(QPalette::Disabled, QPalette::WindowText, disabledText);
+    darkPalette.setColor(QPalette::Disabled, QPalette::Text, disabledText);
+    darkPalette.setColor(QPalette::Disabled, QPalette::ButtonText, disabledText);
+    darkPalette.setColor(QPalette::Disabled, QPalette::HighlightedText, disabledText);
 
     qApp->setPalette(darkPalette);
 
-    //qApp->setStyleSheet("QToolTip { color: #ffffff; background-color: #2a82da; border: 1px solid white; }");
-    qApp->setStyleSheet("QToolTip { color: #ffffff; background-color: #07be07; border: 1px solid white; }"); //background color (tooltips foreground also)
-    qApp->setStyleSheet("QToolButton:pressed { background-color: #3c583d }"); //background color for pressed button
+    qApp->setStyleSheet(
+        "QToolTip { color: #ffffff; background-color: #07be07; border: 1px solid white; }"
+        "QToolButton:pressed { background-color: #3c583d; }"
+        "QWidget:disabled { color: #808080; }"
+        "QMenu::item:disabled { color: #808080; font-weight: normal; }");
 
 
     MainWindow window;

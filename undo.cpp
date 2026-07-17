@@ -101,6 +101,11 @@ CCreateNodeCommand::CCreateNodeCommand(CView* pView, CMob* pMob,
     ,m_created(existingNode != nullptr)
     ,m_skipInitialRedo(existingNode != nullptr)
 {
+    if(existingNode && existingNode->hasRawObjectProvenance())
+    {
+        m_rawTemplatePath = existingNode->rawSourceObjectPath();
+        m_rawTemplateSubtreeSha256 = existingNode->rawSourceSubtreeSha256();
+    }
 }
 
 void CCreateNodeCommand::undo()
@@ -153,6 +158,18 @@ void CCreateNodeCommand::redo()
     }
     if(!pNode)
         return;
+    if(m_rawTemplateSubtreeSha256.size() == 32 && !m_rawTemplatePath.isEmpty()
+       && !m_pMob->rebaseCopiedObjectProvenance(pNode, m_rawTemplatePath,
+                                                m_rawTemplateSubtreeSha256))
+    {
+        ei::log(eLogWarning, QString("Create redo restored node %1 without rebased raw template")
+                .arg(m_createdNodeId));
+    }
+    else if(m_rawTemplateSubtreeSha256.isEmpty() && pNode->hasRawObjectProvenance())
+    {
+        m_rawTemplatePath = pNode->rawSourceObjectPath();
+        m_rawTemplateSubtreeSha256 = pNode->rawSourceSubtreeSha256();
+    }
     pNode->setState(ENodeState::eSelect);
     setText("Node created ID: " + QString::number(m_createdNodeId));
     m_pView->setDurty(m_pMob);

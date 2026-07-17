@@ -30,6 +30,8 @@ CCreateObjectForm::CCreateObjectForm(QWidget *parent) :
     QObject::connect(this, SIGNAL(sendNewBbbox(CBox)), m_pPreview, SLOT(refreshCam(CBox)));
     m_tableManager.reset(new CTableManager(ui->tableParameters));
     QObject::connect(m_tableManager.get(), SIGNAL(onUpdateProperty(QSharedPointer<IPropertyBase>)), this, SLOT(onParamChange(QSharedPointer<IPropertyBase>)));
+    QObject::connect(m_tableManager.get(), SIGNAL(onUpdateProperties(QList<QSharedPointer<IPropertyBase>>)),
+                     this, SLOT(onPropertiesChange(QList<QSharedPointer<IPropertyBase>>)));
 
     setWindowTitle("Creating object dialog");
     setWindowFlag(Qt::WindowContextHelpButtonHint, false);
@@ -225,6 +227,24 @@ void CCreateObjectForm::onParamChange(const QSharedPointer<IPropertyBase> prop)
     {
         emit sendNewBbbox(m_pNode->getBBox());
     }
+    updateTable();
+}
+
+void CCreateObjectForm::onPropertiesChange(
+    const QList<QSharedPointer<IPropertyBase>>& properties)
+{
+    if(!m_pNode || properties.isEmpty())
+        return;
+    bool modelChanged = false;
+    for(const QSharedPointer<IPropertyBase>& property : properties)
+    {
+        if(property.isNull())
+            continue;
+        m_pNode->applyParam(property);
+        modelChanged = modelChanged || property->type() == eObjParam_TEMPLATE;
+    }
+    if(modelChanged)
+        emit sendNewBbbox(m_pNode->getBBox());
     updateTable();
 }
 

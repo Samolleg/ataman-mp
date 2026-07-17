@@ -16,6 +16,8 @@
 #include <QMenu>
 #include <QApplication>
 #include <QStatusBar>
+#include <QProgressDialog>
+#include <QMouseEvent>
 
 #include "resourcemanager.h"
 #include "landscape.h"
@@ -79,6 +81,7 @@ MainWindow::MainWindow(QWidget* parent) :
     });
     m_recentFilesMenu = new QMenu(tr("Open Recent"), this);
     m_ui->menuFile->insertMenu(m_ui->actionOpen_recent, m_recentFilesMenu);
+    m_ui->actionCreate_new_object->setEnabled(false);
 
     QAction* openBackupFolder = new QAction(tr("Open Backup Folder"), this);
     QAction* openLogsFolder = new QAction(tr("Open Logs Folder"), this);
@@ -262,6 +265,77 @@ void MainWindow::createUndoView()
     m_undoView->setWindowFlag(Qt::Window, true);
     m_undoView->setWindowTitle(tr("History"));
     m_undoView->setAttribute(Qt::WA_QuitOnClose, false);
+    m_undoView->viewport()->installEventFilter(this);
+}
+
+namespace {
+int undoWorkUnits(const QUndoCommand* command)
+{
+    if(!command)
+        return 0;
+    int units = 1;
+    for(int index = 0; index < command->childCount(); ++index)
+        units += undoWorkUnits(command->child(index));
+    return units;
+}
+}
+
+void MainWindow::runUndoToIndex(int targetIndex)
+{
+    if(!m_undoStack)
+        return;
+    targetIndex = qBound(0, targetIndex, m_undoStack->count());
+    const int currentIndex = m_undoStack->index();
+    if(targetIndex == currentIndex)
+        return;
+    int workUnits = 0;
+    const int first = qMin(currentIndex, targetIndex);
+    const int last = qMax(currentIndex, targetIndex);
+    for(int index = first; index < last; ++index)
+        workUnits += undoWorkUnits(m_undoStack->command(index));
+
+    QScopedPointer<QProgressDialog> progress;
+    if(last - first > 1 || workUnits >= 8)
+    {
+        progress.reset(new QProgressDialog(
+            targetIndex < currentIndex ? tr("Applying undo history...")
+                                       : tr("Applying redo history..."),
+            QString(), 0, 0, this));
+        progress->setWindowTitle(tr("Updating map"));
+        progress->setCancelButton(nullptr);
+        progress->setWindowModality(Qt::ApplicationModal);
+        progress->setMinimumDuration(0);
+        progress->setAutoClose(false);
+        progress->setAutoReset(false);
+        progress->show();
+        QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+    }
+    ei::log(eLogInfo, QString("Applying undo history current:%1 target:%2 workUnits:%3 progress:%4")
+            .arg(currentIndex).arg(targetIndex).arg(workUnits).arg(!progress.isNull()));
+    m_undoStack->setIndex(targetIndex);
+    if(progress)
+        progress->close();
+}
+
+bool MainWindow::eventFilter(QObject* watched, QEvent* event)
+{
+    if(m_undoView && watched == m_undoView->viewport()
+       && event->type() == QEvent::MouseButtonPress)
+    {
+        QMouseEvent* mouse = static_cast<QMouseEvent*>(event);
+        if(mouse->button() == Qt::LeftButton)
+        {
+            const QModelIndex item = m_undoView->indexAt(mouse->pos());
+            if(item.isValid())
+            {
+                if(m_pView->cancelPendingOperation())
+                    return true;
+                runUndoToIndex(item.row());
+                return true;
+            }
+        }
+    }
+    return QMainWindow::eventFilter(watched, event);
 }
 
 void MainWindow::initShortcuts()
@@ -566,7 +640,7 @@ void MainWindow::on_action_Mob_parameters_triggered()
 void MainWindow::on_actionUndo_triggered()
 {
     if(m_pView->prepareUndo())
-        m_undoStack->undo();
+        runUndoToIndex(m_undoStack->index() - 1);
 }
 
 void MainWindow::on_selectButton_clicked()
@@ -585,7 +659,7 @@ void MainWindow::on_actionRedo_triggered()
 {
     if(m_pView->cancelPendingOperation())
         return;
-    m_undoStack->redo();
+    runUndoToIndex(m_undoStack->index() + 1);
 }
 
 void MainWindow::on_actionOpen_MOB_Script_triggered()
@@ -621,6 +695,7 @@ void MainWindow::updateWindowTitle(eTitleTypeData type, QString data)
         m_ui->action_Mob_parameters->setEnabled(!data.isEmpty());
         m_ui->actionOpen_MOB_Script->setEnabled(!data.isEmpty());
         m_externalScriptAction->setEnabled(!data.isEmpty());
+        m_ui->actionCreate_new_object->setEnabled(!data.isEmpty());
         break;
     }
     case eTitleTypeData::eTitleTypeDataMpr:

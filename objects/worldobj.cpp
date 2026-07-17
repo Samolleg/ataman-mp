@@ -483,7 +483,21 @@ void CWorldObj::applyParam(const QSharedPointer<IPropertyBase>& prop)
     {
     case eObjParam_BODYPARTS:
     {
-        util::propToBodyPart(m_bodyParts, dynamic_cast<propBodyPart*>(prop.get())->value());
+        const auto& supplied = dynamic_cast<propBodyPart*>(prop.get())->value();
+        QMap<QString, QSharedPointer<propBool>> compatible = supplied;
+        if(ei::CFigure* figure = CObjectList::getInstance()->getFigure(m_modelName))
+        {
+            QStringList modelParts;
+            figure->getPartNames(modelParts);
+            if(!modelParts.isEmpty())
+            {
+                compatible.clear();
+                for(const QString& part : modelParts)
+                    if(supplied.contains(part))
+                        compatible.insert(part, supplied.value(part));
+            }
+        }
+        util::propToBodyPart(m_bodyParts, compatible);
         recalcFigure();
         updatePos(m_position);
         break;

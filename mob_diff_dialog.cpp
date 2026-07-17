@@ -48,6 +48,7 @@ CMobDiffDialog::CMobDiffDialog(const QFileInfo& baseline, const QFileInfo& candi
     : QDialog(parent)
 {
     setWindowTitle(tr("Perspective MOB Diff - Details"));
+    setWindowFlag(Qt::WindowContextHelpButtonHint, false);
     resize(1200, 720);
     setModal(false);
 

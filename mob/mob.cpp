@@ -2014,3 +2014,51 @@ bool CMob::rebindRawObjectProvenance()
             .arg(m_aNode.size()).arg(QString::fromLatin1(documentHash.toHex())));
     return true;
 }
+
+bool CMob::rebaseCopiedObjectProvenance(CNode* node, const QString& templatePath,
+                                        const QByteArray& templateSubtreeSha256)
+{
+    if(!node || templateSubtreeSha256.size() != 32 || m_originalData.isEmpty())
+        return false;
+    CValidationReport report;
+    CMobDocument document;
+    if(!document.loadBytes(m_originalData, m_filePath.filePath(), &report))
+        return false;
+
+    const SMobObjectSnapshot* selected = nullptr;
+    for(const SMobObjectSnapshot& object : document.objects())
+    {
+        if(object.sectionPath == templatePath && object.subtreeSha256 == templateSubtreeSha256)
+        {
+            selected = &object;
+            break;
+        }
+    }
+    if(!selected)
+    {
+        for(const SMobObjectSnapshot& object : document.objects())
+        {
+            if(object.subtreeSha256 == templateSubtreeSha256)
+            {
+                selected = &object;
+                break;
+            }
+        }
+    }
+    if(!selected)
+    {
+        ei::log(eLogWarning, QString("Could not rebase copied-object raw template mapId:%1 path:%2 hash:%3")
+                .arg(node->mapId()).arg(templatePath,
+                     QString::fromLatin1(templateSubtreeSha256.toHex())));
+        return false;
+    }
+
+    const QByteArray documentHash = QCryptographicHash::hash(m_originalData,
+                                                              QCryptographicHash::Sha256);
+    node->setRawObjectProvenance(documentHash, selected->sectionPath,
+                                 selected->subtreeSha256, true);
+    ei::log(eLogInfo, QString("Rebased copied-object raw template after redo mapId:%1 path:%2 sourceSha256:%3")
+            .arg(node->mapId()).arg(selected->sectionPath,
+                 QString::fromLatin1(documentHash.toHex())));
+    return true;
+}

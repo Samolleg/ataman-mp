@@ -338,13 +338,23 @@ QSharedPointer<IPropertyBase> CPropertyObjectParts::createEmptyCopy()
 void CPropertyObjectParts::mergePartDataFromProp(CPropertyObjectParts* partFrom)
 {
     auto mapPart = partFrom->value();
-    Q_ASSERT(mapPart.keys() == m_value.keys());
-    for(auto& key : m_value.keys())
+    const QStringList existingKeys = m_value.keys();
+    for(const QString& key : existingKeys)
     {
-        if(!m_value[key]->isInit())
-            continue;
-
-        if(!m_value[key]->isEqual(mapPart[key].get()))
+        if(!mapPart.contains(key))
+        {
             m_value[key]->reset();
+            continue;
+        }
+        if(!m_value[key]->isInit() || !mapPart[key]->isInit()
+           || !m_value[key]->isEqual(mapPart[key].get()))
+            m_value[key]->reset();
+    }
+    for(auto it = mapPart.constBegin(); it != mapPart.constEnd(); ++it)
+    {
+        if(m_value.contains(it.key()))
+            continue;
+        QSharedPointer<propBool> different(new propBool(eObjParam_BODYPARTS));
+        m_value.insert(it.key(), different);
     }
 }

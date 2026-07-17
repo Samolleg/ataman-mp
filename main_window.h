@@ -52,6 +52,7 @@ private:
     void showGameAndModSetup();
     void rememberRecentFile(const QFileInfo& fileName);
     void rebuildRecentFilesMenu();
+    void runUndoToIndex(int targetIndex);
 
 private slots:
     void showOutliner(bool bShow);
@@ -95,6 +96,7 @@ private slots:
 
 protected:
     void closeEvent(QCloseEvent* e);
+    bool eventFilter(QObject* watched, QEvent* event) override;
 
 private:
     Ui::MainWindow* m_ui;

@@ -87,6 +87,8 @@ private:
     int m_createdNodeIndex;
     bool m_created;
     bool m_skipInitialRedo;
+    QString m_rawTemplatePath;
+    QByteArray m_rawTemplateSubtreeSha256;
 };
 
 class CSelectionCommand: public QUndoCommand

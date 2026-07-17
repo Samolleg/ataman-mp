@@ -221,6 +221,7 @@ private:
     QMap<CNode*, QVector3D> m_operationBackup;
     QMap<CUnit*, QVector<QVector3D>> m_unitMovementBackup;
     bool m_pendingOperationOwnsPaste;
+    bool m_pendingLogicPlacementMacro;
     CMob* m_pendingPasteMob;
     QList<CNode*> m_pendingPasteNodes;
     QList<CNode*> m_pendingPasteOriginalSelection;
