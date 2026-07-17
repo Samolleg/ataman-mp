@@ -5,7 +5,7 @@ An item is checked only after its implementation has landed and received the
 listed level of validation. New findings and wishlist requests belong here so
 they do not get lost between test sessions.
 
-Current development release: `0.1.0-alpha.39`.
+Current development release: `0.1.0-alpha.40`.
 
 ## Implementation evidence
 
@@ -52,6 +52,7 @@ behavior.
 | Focus-aware external-script import and idempotent watcher markers | [`54e7cfb`](https://github.com/Ilufus/ei-mapper-endurance/commit/54e7cfb) | Production MinGW build, seven regression suites, and [alpha.37 critical check](ALPHA37_VALIDATION.md) |
 | Unified one-click MOB Parameters X/Close lifecycle | [`280470f`](https://github.com/Ilufus/ei-mapper-endurance/commit/280470f) | Production MinGW build and [alpha.38 focused check](ALPHA38_VALIDATION.md) |
 | Coalesced external-script file watching without directory feedback | [`9b0f18a`](https://github.com/Ilufus/ei-mapper-endurance/commit/9b0f18a) | Alpha.38 logs showing 14,337-event failure, production build, seven regression suites, and [alpha.39 focused check](ALPHA39_VALIDATION.md) |
+| Embedded-script and document-section MOB diff | [`0a4624f`](https://github.com/Ilufus/ei-mapper-endurance/commit/0a4624f) | Synthetic encrypted-script regression plus the supplied Zone 1/Zone 1 Test comparison |
 
 Alpha.34 packaging is withdrawn: it accidentally included a developer-local
 `endurance-options.json`, which suppressed first-run setup and exposed local game
@@ -86,8 +87,11 @@ and the corrected script workflow.
   adding/removing known patrol or look points. Reuse exact source subtrees for
   copies and require an explicit selected same-type template for new objects.
   ([`11698ad`](https://github.com/Ilufus/ei-mapper-endurance/commit/11698ad))
-- [ ] Verify structural saves with automated untouched-data comparison, Endurance
+- [x] Verify structural saves with automated untouched-data comparison, Endurance
   reopen, MobExplorer comparison, and focused JMV `drawall`/unload/reload tests.
+  Exact subtree/leaf regressions, the Base/JMV corpus, and closed-tester maps now
+  cover copy/delete, patrol/look points, ordinary properties, diplomacy, scripts,
+  repeated saves, and in-game `drawall`/load checks.
 - [x] Decouple scripts from MOB Parameters: provide an independent internal
   editor, keep the external watcher alive for the loaded MOB document, and route
   internal/external imports through the main undo history with strict CP1251
@@ -113,7 +117,10 @@ and the corrected script workflow.
   ([`5192c4d`](https://github.com/Ilufus/ei-mapper-endurance/commit/5192c4d))
 - [ ] Finish lossless MPR archive preservation before enabling landscape editing.
 
-These are the remaining safety gates before editing live maps can be recommended.
+MOB hardening implementation is complete for the supported edit classes. The
+remaining gate is closed-group validation of alpha.40 and any concrete bugs it
+finds. Lossless MPR editing is a separate future workstream; opening terrain for
+MOB editing does not imply that landscape saving is supported.
 
 ## Alpha.14 testing campaign
 
@@ -179,7 +186,7 @@ These are the remaining safety gates before editing live maps can be recommended
   transform edits save normally without a preview or field whitelist, followed
   by fresh staged validation, backup, and atomic replacement.
   ([`843ba9c`](https://github.com/Ilufus/ei-mapper-endurance/commit/843ba9c))
-- [ ] Validate alpha.30 generic raw-leaf saving with ordinary mixed property and
+- [x] Validate alpha.30 generic raw-leaf saving with ordinary mixed property and
   transform edits. There is no preview or field whitelist: the invariant is that
   every intended replacement is exact and all untouched leaves remain byte-identical.
   ([validation](ALPHA30_VALIDATION.md))
@@ -190,15 +197,20 @@ These are the remaining safety gates before editing live maps can be recommended
   added leaf outside the accepted provenance-checked edit. Empty structural
   containers are covered by a regression derived from the first tester report.
   ([`66fbca0`](https://github.com/Ilufus/ei-mapper-endurance/commit/66fbca0))
-- [ ] Save copy/paste and delete by inserting/removing the exact raw object
+- [x] Save copy/paste and delete by inserting/removing the exact raw object
   subtree, then apply the pasted object's intended field changes as raw leaves.
   Save newly created objects from profile-approved raw templates. The document
   core already duplicates/removes exact object bytes and passed 252/252 installed
   MOBs containing objects; the remaining task is connecting those operations to
   the normal UI save path and validating them in JMV. ([`8013339`](https://github.com/Ilufus/ei-mapper-endurance/commit/8013339),
-  [`f68ce87`](https://github.com/Ilufus/ei-mapper-endurance/commit/f68ce87))
+  [`f68ce87`](https://github.com/Ilufus/ei-mapper-endurance/commit/f68ce87),
+  [`11698ad`](https://github.com/Ilufus/ei-mapper-endurance/commit/11698ad))
 - [ ] Complete lossless MPR preservation for names, timestamps, alignment, and extra entries.
-- [ ] Verify CP1251 script byte lengths and round trips across the corpus.
+- [x] Preserve unchanged script bytes exactly and strictly reject edited text
+  that cannot round-trip through CP1251. Internal and external imports are one
+  undoable transaction; encrypted-script differences are now independently
+  visible in MOB Diff. ([`258893c`](https://github.com/Ilufus/ei-mapper-endurance/commit/258893c),
+  [`0a4624f`](https://github.com/Ilufus/ei-mapper-endurance/commit/0a4624f))
 - [ ] Add optional explicit duplicate-ID Repair with reference and script auditing.
   This is a separate user-invoked repair tool, never part of ordinary open/save.
 - [ ] Add in-app backup browsing and one-click restore to a user-selected destination.
@@ -286,10 +298,11 @@ These are the remaining safety gates before editing live maps can be recommended
 - [x] Enable the external-script-editor button with OS association fallback. ([`054959b`](https://github.com/Ilufus/ei-mapper-endurance/commit/054959b))
 - [ ] Convert the outliner to a resizable/detachable dock.
 - [ ] Add stable filtering by text, type, ID, model, database name, and validation state.
-- [ ] Add a configurable external editor executable.
-- [ ] Export embedded CP1251 scripts to managed UTF-8 workspaces.
-- [ ] Watch external edits, display a diff, and require explicit import.
-- [ ] Make script import one undoable edit and reject non-CP1251 characters clearly.
+- [x] Add a configurable external editor executable and customizable shortcut.
+- [x] Export embedded CP1251 scripts to managed UTF-8 workspaces.
+- [x] Watch external edits, coalesce atomic-save notifications, and require
+  explicit import only when the text actually differs.
+- [x] Make script import one undoable edit and reject non-CP1251 characters clearly.
 - [ ] Recover unimported script workspaces after an abnormal exit.
 
 ## JMV setup and validation
@@ -319,6 +332,9 @@ These are the remaining safety gates before editing live maps can be recommended
 - [x] Add **Tools > Compare MOB Files** with strict validation, filterable
   classification/match/confidence/NID/name/prototype/path/hash details, and
   deterministic text/JSON export. ([`fd30be0`](https://github.com/Ilufus/ei-mapper-endurance/commit/fd30be0))
+- [x] Include non-object document sections in MOB Diff and decode embedded
+  `SS_TEXT`/legacy script changes into readable line additions/removals in the
+  UI and text/JSON exports. ([`0a4624f`](https://github.com/Ilufus/ei-mapper-endurance/commit/0a4624f))
 - [ ] Add profile-compatibility findings to each in-app diff entry after concrete
   runtime semantic validators exist.
 - [ ] Add the read-only 3D overlay with red removals, green additions, amber
@@ -358,6 +374,10 @@ These are the remaining safety gates before editing live maps can be recommended
 - [x] `0.1.0-alpha.31`: final hardening tester build covering ordinary mixed
   property/transform saves, exact same-MOB copy/delete, and known patrol/look
   structural edits with invisible raw preservation checks.
+- [x] `0.1.0-alpha.40`: MOB-hardening tester candidate incorporating all known
+  alpha.14-group fixes, synchronized internal/external scripts, and readable
+  embedded-script MOB diffs. The supported MOB edit implementation is complete;
+  promotion now depends on closed-group regression and game testing.
 - [ ] Following private alpha: fix issues found by the closed test group and
   publish a concise Base/JMV coverage summary; no new hardening architecture.
 - [ ] `0.1.0-beta.1`: correct indexed resources and responsive fast loading.
