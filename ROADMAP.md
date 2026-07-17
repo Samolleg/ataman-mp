@@ -63,9 +63,10 @@ behavior.
   exact same-MOB copy/paste and deletion, known patrol/look-point structure, and
   selected same-type raw templates for object creation.
   ([`11698ad`](https://github.com/Ilufus/ei-mapper-endurance/commit/11698ad))
-- [ ] Package alpha.31 for normal and structural edit testing: move units, change mixed property
+- [x] Package alpha.31 for normal and structural edit testing: move units, change mixed property
   fields, undo back to clean, save/reopen, and verify the resulting maps in JMV.
-  ([test matrix](ALPHA31_VALIDATION.md))
+  The immutable source is tagged `v0.1.0-alpha.31`; the package includes source,
+  symbols, checksums, rollback guidance, and the focused [test matrix](ALPHA31_VALIDATION.md).
 - [x] Connect structural MOB saves for same-MOB copy/paste, object deletion, and
   adding/removing known patrol or look points. Reuse exact source subtrees for
   copies and require an explicit selected same-type template for new objects.
@@ -320,7 +321,7 @@ These are the remaining safety gates before editing live maps can be recommended
 - [x] `0.1.0-alpha.14`: testing-group build with Settings-based setup,
   explicit base-game humanoid known issue, database appearance diagnostics, and
   a coordinated test/report matrix. ([`800a011`](https://github.com/Ilufus/ei-mapper-endurance/commit/800a011), [validation](ALPHA14_VALIDATION.md))
-- [ ] `0.1.0-alpha.31`: final hardening tester build covering ordinary mixed
+- [x] `0.1.0-alpha.31`: final hardening tester build covering ordinary mixed
   property/transform saves, exact same-MOB copy/delete, and known patrol/look
   structural edits with invisible raw preservation checks.
 - [ ] Following private alpha: fix issues found by the closed test group and
