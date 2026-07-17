@@ -197,8 +197,8 @@ MainWindow::MainWindow(QWidget* parent) :
     connect(m_mapTestLauncher, &CJmvMapTestLauncher::testStarted, this,
             [this](const QString& runId, const QString& mapName)
     {
-        ei::log(eLogInfo, QString("JMV test launch started run:%1 map:%2").arg(runId, mapName));
-        statusBar()->showMessage(tr("JMV test is running with temporary map %1").arg(mapName));
+        ei::log(eLogInfo, QString("JMV transition probe started run:%1 staged-map:%2").arg(runId, mapName));
+        statusBar()->showMessage(tr("JMV transition probe is recording. Start New Game or travel normally, then exit the game."));
         updateMapTestAction();
     });
     connect(m_mapTestLauncher, &CJmvMapTestLauncher::testFinished, this,
@@ -206,7 +206,7 @@ MainWindow::MainWindow(QWidget* parent) :
     {
         ei::log(eLogInfo, QString("JMV test launch finished run:%1 exit:%2 cleanup:%3")
                 .arg(runId).arg(exitCode).arg(cleanupMessage));
-        statusBar()->showMessage(tr("JMV test finished (exit code %1). Temporary files were cleaned up.").arg(exitCode), 8000);
+        statusBar()->showMessage(tr("JMV transition probe finished (exit code %1). Probe files were cleaned up.").arg(exitCode), 8000);
         updateMapTestAction();
         if(m_closeAfterTestStop)
         {
@@ -456,22 +456,22 @@ void MainWindow::updateMapTestAction()
         return;
     if(m_mapTestLauncher && m_mapTestLauncher->isRunning())
     {
-        m_mapTestAction->setText(tr("Stop JMV Test"));
+        m_mapTestAction->setText(tr("Stop JMV Transition Probe"));
         m_mapTestAction->setEnabled(true);
         return;
     }
-    m_mapTestAction->setText(tr("Test Current Map in JMV"));
+    m_mapTestAction->setText(tr("Probe JMV Map Transition"));
     COptString* profile = dynamic_cast<COptString*>(m_settings->opt(eOptSetResource, "resourceProfile"));
     const bool isJmv = profile && profile->value().compare("jamais-vu", Qt::CaseInsensitive) == 0;
     const bool hasPair = m_pView && m_pView->hasActiveMob()
             && m_pView->mobs().size() == 1 && CLandscape::getInstance()->isMprLoad();
     m_mapTestAction->setEnabled(isJmv && hasPair);
     if(!isJmv)
-        m_mapTestAction->setToolTip(tr("Direct map testing is currently an experimental JMV-only capability."));
+        m_mapTestAction->setToolTip(tr("The transition probe is currently a JMV-only diagnostic capability."));
     else if(!hasPair)
-        m_mapTestAction->setToolTip(tr("Load one MPR and exactly one active MOB to test the current map."));
+        m_mapTestAction->setToolTip(tr("Load one MPR and exactly one active MOB before recording a JMV transition probe."));
     else
-        m_mapTestAction->setToolTip(tr("Stages unique temporary map copies and launches the validated JMV runtime (Ctrl+F5)."));
+        m_mapTestAction->setToolTip(tr("Launches JMV with an observe-only probe. Start New Game or travel normally to record the engine transition path (Ctrl+F5)."));
 }
 
 void MainWindow::launchCurrentMapTest()
@@ -586,12 +586,13 @@ void MainWindow::launchCurrentMapTest()
     }
 
     const QString confirmation = tr(
-        "Endurance will create uniquely named temporary MPR/MOB files in the active JMV Maps folder and temporarily fill JMV's configured and otherwise empty plugin.dll slot with its fingerprinted provider. After Starter finishes applying patches, the provider dispatches the selected map through the game window thread and redirects only that map identity to the temporary files.\n\n"
-        "Source maps and JMV configuration are not changed. Temporary runtime files are hash-owned and deleted after exit. Unsaved MOB edits are included.\n\n"
-        "Spawn: travel exit %1 at (%2, %3), verified clearance %4.\n\nContinue?")
+        "This diagnostic build does not launch the editor map yet. Endurance will temporarily fill JMV's configured and otherwise empty plugin.dll slot with a fingerprinted, observe-only transition probe. It records MPR/MOB/MQ file activity and engine call-stack addresses while you use JMV normally. It sends no game command and redirects no file.\n\n"
+        "After JMV reaches the main menu, start New Game and enter a map normally. If convenient, also travel to another zone. Then exit the game normally and return the run's bridge-result.log.\n\n"
+        "The already validated staging step still creates hash-owned temporary copies for run correlation, but the probe does not load them. Source maps and JMV configuration are not changed; temporary files are deleted after exit.\n\n"
+        "Future test target: travel exit %1 at (%2, %3), verified clearance %4.\n\nStart the transition probe?")
         .arg(spawn.exitId).arg(spawn.position.x(), 0, 'f', 2)
         .arg(spawn.position.y(), 0, 'f', 2).arg(spawn.clearance, 0, 'f', 2);
-    if(QMessageBox::question(this, tr("Experimental JMV test launch"), confirmation,
+    if(QMessageBox::question(this, tr("JMV single-player transition probe"), confirmation,
                              QMessageBox::Yes | QMessageBox::Cancel) != QMessageBox::Yes)
         return;
 

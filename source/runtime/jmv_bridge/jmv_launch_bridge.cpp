@@ -14,13 +14,6 @@ constexpr unsigned char kExpectedGameSha256[32] = {
     0x1F, 0x1F, 0x5D, 0x1B, 0xCF, 0x08, 0x27, 0x17,
     0xF3, 0x17, 0x76, 0xDD, 0x4D, 0xEE, 0x94, 0xE2
 };
-constexpr uintptr_t kGameStringCtorAddress = 0x007009DE;
-constexpr uintptr_t kGameStringDtorAddress = 0x00700970;
-constexpr uintptr_t kServerHandlerAddress = 0x005DF490;
-constexpr unsigned char kServerHandlerPrologue[13] = {
-    0x64, 0xA1, 0x00, 0x00, 0x00, 0x00, 0x6A,
-    0xFF, 0x68, 0xC0, 0x8B, 0x72, 0x00
-};
 
 using CreateFileAFn = HANDLE (WINAPI*)(LPCSTR, DWORD, DWORD, LPSECURITY_ATTRIBUTES,
                                       DWORD, DWORD, HANDLE);
@@ -28,26 +21,38 @@ using CreateFileWFn = HANDLE (WINAPI*)(LPCWSTR, DWORD, DWORD, LPSECURITY_ATTRIBU
                                       DWORD, DWORD, HANDLE);
 using GetFileAttributesAFn = DWORD (WINAPI*)(LPCSTR);
 using GetFileAttributesWFn = DWORD (WINAPI*)(LPCWSTR);
+using CaptureStackFn = USHORT (WINAPI*)(ULONG, ULONG, PVOID*, PULONG);
 
 HMODULE g_instance = nullptr;
 volatile LONG g_initialized = 0;
-volatile LONG g_launchHandled = 0;
-volatile LONG g_redirectCount = 0;
-constexpr UINT kDeferredLaunchMessage = WM_APP + 0x347;
-WNDPROC g_originalWindowProc = nullptr;
-HWND g_gameWindow = nullptr;
-wchar_t g_expectedTemporaryMap[32] = {};
-wchar_t g_sourceMap[64] = {};
-wchar_t g_temporaryMpr[MAX_PATH * 4] = {};
-wchar_t g_temporaryMob[MAX_PATH * 4] = {};
+volatile LONG g_observationCount = 0;
 wchar_t g_resultPath[MAX_PATH * 4] = {};
-char g_sourceMapA[64] = {};
-char g_temporaryMprA[MAX_PATH * 4] = {};
-char g_temporaryMobA[MAX_PATH * 4] = {};
 CreateFileAFn g_originalCreateFileA = nullptr;
 CreateFileWFn g_originalCreateFileW = nullptr;
 GetFileAttributesAFn g_originalGetFileAttributesA = nullptr;
 GetFileAttributesWFn g_originalGetFileAttributesW = nullptr;
+CaptureStackFn g_captureStack = nullptr;
+
+const wchar_t* FileNamePart(const wchar_t* path)
+{
+    if(!path)
+        return nullptr;
+    const wchar_t* slash = std::wcsrchr(path, L'\\');
+    const wchar_t* forward = std::wcsrchr(path, L'/');
+    if(!slash || (forward && forward > slash))
+        slash = forward;
+    return slash ? slash + 1 : path;
+}
+
+bool HasObservedExtension(const wchar_t* path)
+{
+    const wchar_t* name = FileNamePart(path);
+    const wchar_t* extension = name ? std::wcsrchr(name, L'.') : nullptr;
+    return extension &&
+        (_wcsicmp(extension, L".mpr") == 0 ||
+         _wcsicmp(extension, L".mob") == 0 ||
+         _wcsicmp(extension, L".mq") == 0);
+}
 
 void Log(const wchar_t* message)
 {
@@ -59,14 +64,14 @@ void Log(const wchar_t* message)
         return;
     SYSTEMTIME time{};
     GetSystemTime(&time);
-    wchar_t line[1024]{};
+    wchar_t line[4096]{};
     const int count = _snwprintf_s(line, sizeof(line) / sizeof(line[0]), _TRUNCATE,
         L"%04u-%02u-%02uT%02u:%02u:%02u.%03uZ %s\r\n",
         time.wYear, time.wMonth, time.wDay, time.wHour, time.wMinute,
         time.wSecond, time.wMilliseconds, message);
     if(count > 0)
     {
-        char utf8[4096]{};
+        char utf8[16384]{};
         const int bytes = WideCharToMultiByte(CP_UTF8, 0, line, count, utf8,
                                                int(sizeof(utf8)), nullptr, nullptr);
         DWORD written = 0;
@@ -119,92 +124,68 @@ bool VerifyRuntime()
     if(!GetModuleFileNameW(nullptr, gamePath, DWORD(sizeof(gamePath) / sizeof(gamePath[0]))))
         return false;
     unsigned char hash[32]{};
-    if(!HashFileSha256(gamePath, hash) ||
-       std::memcmp(hash, kExpectedGameSha256, sizeof(hash)) != 0)
-        return false;
-    return std::memcmp(reinterpret_cast<const void*>(kServerHandlerAddress),
-                       kServerHandlerPrologue, sizeof(kServerHandlerPrologue)) == 0;
+    return HashFileSha256(gamePath, hash) &&
+           std::memcmp(hash, kExpectedGameSha256, sizeof(hash)) == 0;
 }
 
-bool IsSafeMapName(const wchar_t* map, size_t maximum)
+void AppendText(wchar_t* destination, size_t capacity, const wchar_t* text)
 {
-    if(!map)
-        return false;
-    const size_t length = std::wcslen(map);
-    if(length == 0 || length >= maximum)
-        return false;
-    for(size_t index = 0; index < length; ++index)
-    {
-        const wchar_t value = map[index];
-        if(!((value >= L'0' && value <= L'9') ||
-             (value >= L'a' && value <= L'z') || value == L'_'))
-            return false;
-    }
-    return true;
-}
-
-const wchar_t* FileNamePart(const wchar_t* path)
-{
-    if(!path)
-        return nullptr;
-    const wchar_t* slash = std::wcsrchr(path, L'\\');
-    const wchar_t* forward = std::wcsrchr(path, L'/');
-    if(!slash || (forward && forward > slash))
-        slash = forward;
-    return slash ? slash + 1 : path;
-}
-
-const char* FileNamePart(const char* path)
-{
-    if(!path)
-        return nullptr;
-    const char* slash = std::strrchr(path, '\\');
-    const char* forward = std::strrchr(path, '/');
-    if(!slash || (forward && forward > slash))
-        slash = forward;
-    return slash ? slash + 1 : path;
-}
-
-const wchar_t* RedirectedPath(const wchar_t* path)
-{
-    const wchar_t* name = FileNamePart(path);
-    if(!name)
-        return path;
-    wchar_t expected[96]{};
-    _snwprintf_s(expected, sizeof(expected) / sizeof(expected[0]), _TRUNCATE,
-                 L"%s.mpr", g_sourceMap);
-    if(_wcsicmp(name, expected) == 0)
-        return g_temporaryMpr;
-    _snwprintf_s(expected, sizeof(expected) / sizeof(expected[0]), _TRUNCATE,
-                 L"%s.mob", g_sourceMap);
-    if(_wcsicmp(name, expected) == 0)
-        return g_temporaryMob;
-    return path;
-}
-
-const char* RedirectedPath(const char* path)
-{
-    const char* name = FileNamePart(path);
-    if(!name)
-        return path;
-    char expected[96]{};
-    _snprintf_s(expected, sizeof(expected), _TRUNCATE, "%s.mpr", g_sourceMapA);
-    if(_stricmp(name, expected) == 0)
-        return g_temporaryMprA;
-    _snprintf_s(expected, sizeof(expected), _TRUNCATE, "%s.mob", g_sourceMapA);
-    if(_stricmp(name, expected) == 0)
-        return g_temporaryMobA;
-    return path;
-}
-
-void LogRedirect(const wchar_t* kind, const wchar_t* source, const wchar_t* destination)
-{
-    const LONG count = InterlockedIncrement(&g_redirectCount);
-    if(count > 16)
+    if(!destination || !capacity || !text)
         return;
-    wchar_t message[900]{};
+    const size_t used = std::wcslen(destination);
+    if(used + 1 >= capacity)
+        return;
+    wcsncat_s(destination, capacity, text, capacity - used - 1);
+}
+
+void FormatStack(wchar_t* output, size_t capacity)
+{
+    if(!output || !capacity)
+        return;
+    output[0] = L'\0';
+    if(!g_captureStack)
+    {
+        AppendText(output, capacity, L"unavailable");
+        return;
+    }
+    void* frames[16]{};
+    const USHORT count = g_captureStack(2, 16, frames, nullptr);
+    for(USHORT index = 0; index < count; ++index)
+    {
+        MEMORY_BASIC_INFORMATION memory{};
+        wchar_t modulePath[MAX_PATH * 4]{};
+        const HMODULE module = VirtualQuery(frames[index], &memory, sizeof(memory)) == sizeof(memory)
+            ? static_cast<HMODULE>(memory.AllocationBase) : nullptr;
+        const wchar_t* moduleName = L"unknown";
+        if(module && GetModuleFileNameW(module, modulePath,
+                                       DWORD(sizeof(modulePath) / sizeof(modulePath[0]))))
+            moduleName = FileNamePart(modulePath);
+        wchar_t frame[192]{};
+        _snwprintf_s(frame, sizeof(frame) / sizeof(frame[0]), _TRUNCATE,
+                     index == 0 ? L"%s+0x%08lX" : L">%s+0x%08lX",
+                     moduleName,
+                     module ? DWORD(reinterpret_cast<uintptr_t>(frames[index]) -
+                                    reinterpret_cast<uintptr_t>(module))
+                            : DWORD(reinterpret_cast<uintptr_t>(frames[index])));
+        AppendText(output, capacity, frame);
+    }
+}
+
+void Observe(const wchar_t* operation, const wchar_t* path, ULONG_PTR result,
+             DWORD error, DWORD access = 0, DWORD creation = 0)
+{
+    if(!HasObservedExtension(path))
+        return;
+    const LONG sequence = InterlockedIncrement(&g_observationCount);
+    if(sequence > 512)
+        return;
+    wchar_t stack[2500]{};
+    FormatStack(stack, sizeof(stack) / sizeof(stack[0]));
+    wchar_t message[3900]{};
     _snwprintf_s(message, sizeof(message) / sizeof(message[0]), _TRUNCATE,
-                 L"Redirected %s: %s -> %s", kind, source, destination);
+                 L"TRANSITION_PROBE seq=%ld thread=%lu op=%s path=\"%s\" result=0x%08lX error=%lu access=0x%08lX creation=%lu stack=%s",
+                 sequence, GetCurrentThreadId(), operation, path ? path : L"<null>",
+                 DWORD(result), error, access, creation, stack);
     Log(message);
 }
 
@@ -212,52 +193,52 @@ HANDLE WINAPI HookCreateFileW(LPCWSTR path, DWORD access, DWORD share,
                               LPSECURITY_ATTRIBUTES security, DWORD creation,
                               DWORD flags, HANDLE templateFile)
 {
-    const wchar_t* redirected = RedirectedPath(path);
-    if(redirected != path)
-        LogRedirect(L"CreateFileW", path, redirected);
-    return g_originalCreateFileW(redirected, access, share, security, creation, flags, templateFile);
+    HANDLE result = g_originalCreateFileW(path, access, share, security, creation, flags, templateFile);
+    const DWORD error = GetLastError();
+    Observe(L"CreateFileW", path, reinterpret_cast<ULONG_PTR>(result), error, access, creation);
+    SetLastError(error);
+    return result;
 }
 
 HANDLE WINAPI HookCreateFileA(LPCSTR path, DWORD access, DWORD share,
                               LPSECURITY_ATTRIBUTES security, DWORD creation,
                               DWORD flags, HANDLE templateFile)
 {
-    const char* redirected = RedirectedPath(path);
-    if(redirected != path)
+    HANDLE result = g_originalCreateFileA(path, access, share, security, creation, flags, templateFile);
+    const DWORD error = GetLastError();
+    if(path)
     {
-        wchar_t sourceW[MAX_PATH * 4]{};
-        wchar_t destinationW[MAX_PATH * 4]{};
-        MultiByteToWideChar(CP_ACP, 0, path, -1, sourceW,
-                            int(sizeof(sourceW) / sizeof(sourceW[0])));
-        MultiByteToWideChar(CP_ACP, 0, redirected, -1, destinationW,
-                            int(sizeof(destinationW) / sizeof(destinationW[0])));
-        LogRedirect(L"CreateFileA", sourceW, destinationW);
+        wchar_t pathW[MAX_PATH * 4]{};
+        MultiByteToWideChar(CP_ACP, 0, path, -1, pathW,
+                            int(sizeof(pathW) / sizeof(pathW[0])));
+        Observe(L"CreateFileA", pathW, reinterpret_cast<ULONG_PTR>(result), error, access, creation);
     }
-    return g_originalCreateFileA(redirected, access, share, security, creation, flags, templateFile);
+    SetLastError(error);
+    return result;
 }
 
 DWORD WINAPI HookGetFileAttributesW(LPCWSTR path)
 {
-    const wchar_t* redirected = RedirectedPath(path);
-    if(redirected != path)
-        LogRedirect(L"GetFileAttributesW", path, redirected);
-    return g_originalGetFileAttributesW(redirected);
+    const DWORD result = g_originalGetFileAttributesW(path);
+    const DWORD error = GetLastError();
+    Observe(L"GetFileAttributesW", path, result, error);
+    SetLastError(error);
+    return result;
 }
 
 DWORD WINAPI HookGetFileAttributesA(LPCSTR path)
 {
-    const char* redirected = RedirectedPath(path);
-    if(redirected != path)
+    const DWORD result = g_originalGetFileAttributesA(path);
+    const DWORD error = GetLastError();
+    if(path)
     {
-        wchar_t sourceW[MAX_PATH * 4]{};
-        wchar_t destinationW[MAX_PATH * 4]{};
-        MultiByteToWideChar(CP_ACP, 0, path, -1, sourceW,
-                            int(sizeof(sourceW) / sizeof(sourceW[0])));
-        MultiByteToWideChar(CP_ACP, 0, redirected, -1, destinationW,
-                            int(sizeof(destinationW) / sizeof(destinationW[0])));
-        LogRedirect(L"GetFileAttributesA", sourceW, destinationW);
+        wchar_t pathW[MAX_PATH * 4]{};
+        MultiByteToWideChar(CP_ACP, 0, path, -1, pathW,
+                            int(sizeof(pathW) / sizeof(pathW[0])));
+        Observe(L"GetFileAttributesA", pathW, result, error);
     }
-    return g_originalGetFileAttributesA(redirected);
+    SetLastError(error);
+    return result;
 }
 
 void* ReplacementFor(const char* name)
@@ -322,25 +303,28 @@ int PatchModuleImports(HMODULE module)
     return patched;
 }
 
-bool InstallFileRedirectHooks()
+int InstallFileObservationHooks()
 {
     HMODULE kernel = GetModuleHandleW(L"KERNEL32.dll");
+    HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
     if(!kernel)
-        return false;
+        return 0;
     g_originalCreateFileA = reinterpret_cast<CreateFileAFn>(GetProcAddress(kernel, "CreateFileA"));
     g_originalCreateFileW = reinterpret_cast<CreateFileWFn>(GetProcAddress(kernel, "CreateFileW"));
     g_originalGetFileAttributesA = reinterpret_cast<GetFileAttributesAFn>(
         GetProcAddress(kernel, "GetFileAttributesA"));
     g_originalGetFileAttributesW = reinterpret_cast<GetFileAttributesWFn>(
         GetProcAddress(kernel, "GetFileAttributesW"));
+    g_captureStack = ntdll ? reinterpret_cast<CaptureStackFn>(
+        GetProcAddress(ntdll, "RtlCaptureStackBackTrace")) : nullptr;
     if(!g_originalCreateFileA || !g_originalCreateFileW ||
        !g_originalGetFileAttributesA || !g_originalGetFileAttributesW)
-        return false;
+        return 0;
 
     HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32,
                                                GetCurrentProcessId());
     if(snapshot == INVALID_HANDLE_VALUE)
-        return false;
+        return 0;
     MODULEENTRY32W entry{};
     entry.dwSize = sizeof(entry);
     int patched = 0;
@@ -348,241 +332,41 @@ bool InstallFileRedirectHooks()
     {
         do
         {
+            wchar_t message[900]{};
+            _snwprintf_s(message, sizeof(message) / sizeof(message[0]), _TRUNCATE,
+                         L"TRANSITION_PROBE module=%s base=0x%08lX size=0x%08lX",
+                         entry.szExePath, DWORD(reinterpret_cast<uintptr_t>(entry.modBaseAddr)),
+                         entry.modBaseSize);
+            Log(message);
             patched += PatchModuleImports(entry.hModule);
         }
         while(Module32NextW(snapshot, &entry));
     }
     CloseHandle(snapshot);
-    wchar_t message[160]{};
-    _snwprintf_s(message, sizeof(message) / sizeof(message[0]), _TRUNCATE,
-                 L"Installed %d temporary map file redirect imports", patched);
-    Log(message);
-    return patched > 0;
+    return patched;
 }
 
-struct GameString { char* value; };
-struct FakeCommandArguments
-{
-    unsigned long unused = 0;
-    GameString* arguments = nullptr;
-    unsigned long count = 0;
-};
-
-bool QueueServerLaunch(const char* map)
-{
-    using GameStringCtor = GameString* (__thiscall*)(GameString*, const char*);
-    using GameStringDtor = void (__thiscall*)(GameString*);
-    using ServerHandler = void (__thiscall*)(FakeCommandArguments*);
-    auto ctor = reinterpret_cast<GameStringCtor>(kGameStringCtorAddress);
-    auto dtor = reinterpret_cast<GameStringDtor>(kGameStringDtorAddress);
-    auto handler = reinterpret_cast<ServerHandler>(kServerHandlerAddress);
-
-    GameString argument{};
-    ctor(&argument, map);
-    FakeCommandArguments command;
-    command.arguments = &argument;
-    command.count = 1;
-    handler(&command);
-    dtor(&argument);
-    return true;
-}
-
-bool ReadEnvironment()
-{
-    GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_MAP", g_expectedTemporaryMap,
-                            DWORD(sizeof(g_expectedTemporaryMap) / sizeof(g_expectedTemporaryMap[0])));
-    GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_SOURCE_MAP", g_sourceMap,
-                            DWORD(sizeof(g_sourceMap) / sizeof(g_sourceMap[0])));
-    GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_TEMP_MPR", g_temporaryMpr,
-                            DWORD(sizeof(g_temporaryMpr) / sizeof(g_temporaryMpr[0])));
-    GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_TEMP_MOB", g_temporaryMob,
-                            DWORD(sizeof(g_temporaryMob) / sizeof(g_temporaryMob[0])));
-    GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_BRIDGE_RESULT", g_resultPath,
-                            DWORD(sizeof(g_resultPath) / sizeof(g_resultPath[0])));
-    if(!IsSafeMapName(g_expectedTemporaryMap, sizeof(g_expectedTemporaryMap) / sizeof(wchar_t)) ||
-       !IsSafeMapName(g_sourceMap, sizeof(g_sourceMap) / sizeof(wchar_t)) ||
-       !g_temporaryMpr[0] || !g_temporaryMob[0] || !g_resultPath[0])
-        return false;
-    if(GetFileAttributesW(g_temporaryMpr) == INVALID_FILE_ATTRIBUTES ||
-       GetFileAttributesW(g_temporaryMob) == INVALID_FILE_ATTRIBUTES)
-        return false;
-    WideCharToMultiByte(CP_ACP, 0, g_sourceMap, -1, g_sourceMapA,
-                        int(sizeof(g_sourceMapA)), nullptr, nullptr);
-    WideCharToMultiByte(CP_ACP, 0, g_temporaryMpr, -1, g_temporaryMprA,
-                        int(sizeof(g_temporaryMprA)), nullptr, nullptr);
-    WideCharToMultiByte(CP_ACP, 0, g_temporaryMob, -1, g_temporaryMobA,
-                        int(sizeof(g_temporaryMobA)), nullptr, nullptr);
-    return g_sourceMapA[0] && g_temporaryMprA[0] && g_temporaryMobA[0];
-}
-
-bool InitializeBridge()
+bool InitializeProbe()
 {
     if(InterlockedCompareExchange(&g_initialized, 1, 0) != 0)
         return true;
-    if(!ReadEnvironment())
+    GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_BRIDGE_RESULT", g_resultPath,
+                            DWORD(sizeof(g_resultPath) / sizeof(g_resultPath[0])));
+    if(!g_resultPath[0])
         return false;
-    Log(L"EI Mapper Endurance JMV plugin bridge initializing");
+    Log(L"EI Mapper Endurance JMV single-player transition probe initializing");
     if(!VerifyRuntime())
     {
-        Log(L"Bridge disabled: game hash or server-handler signature mismatch");
+        Log(L"TRANSITION_PROBE disabled: game.exe SHA-256 does not match the validated JMV runtime");
         return false;
     }
-    Log(L"Bridge ready; waiting for deferred dispatch through the game window thread");
-    return true;
-}
-
-void PerformDeferredLaunch()
-{
-    if(InterlockedCompareExchange(&g_launchHandled, 1, 0) != 0)
-        return;
-    Log(L"Deferred launch message reached the game window thread");
-    if(!InstallFileRedirectHooks())
-    {
-        Log(L"Launch refused: no supported file imports could be redirected");
-        return;
-    }
-    Log(L"Invoking the internal server handler with the source map identity");
-    QueueServerLaunch(g_sourceMapA);
-    Log(L"Engine server launch request queued");
-}
-
-LRESULT CALLBACK DeferredGameWindowProc(HWND window, UINT message,
-                                        WPARAM wParam, LPARAM lParam)
-{
-    WNDPROC original = g_originalWindowProc;
-    if(message == kDeferredLaunchMessage)
-    {
-        if(original)
-            SetWindowLongPtrW(window, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(original));
-        g_gameWindow = nullptr;
-        PerformDeferredLaunch();
-        return 0;
-    }
-    return original ? CallWindowProcW(original, window, message, wParam, lParam)
-                    : DefWindowProcW(window, message, wParam, lParam);
-}
-
-struct WindowCandidate
-{
-    HWND window = nullptr;
-    LONG area = 0;
-};
-
-BOOL CALLBACK FindLargestGameWindow(HWND window, LPARAM parameter)
-{
-    DWORD processId = 0;
-    GetWindowThreadProcessId(window, &processId);
-    if(processId != GetCurrentProcessId() || !IsWindowVisible(window) ||
-       GetWindow(window, GW_OWNER) != nullptr)
-        return TRUE;
-    RECT rectangle{};
-    if(!GetClientRect(window, &rectangle))
-        return TRUE;
-    const LONG width = rectangle.right - rectangle.left;
-    const LONG height = rectangle.bottom - rectangle.top;
-    const LONG area = width > 0 && height > 0 ? width * height : 0;
-    auto* candidate = reinterpret_cast<WindowCandidate*>(parameter);
-    if(area > candidate->area)
-    {
-        candidate->window = window;
-        candidate->area = area;
-    }
-    return TRUE;
-}
-
-DWORD WINAPI DispatchLaunchToGameWindow(void*)
-{
-    Log(L"Waiting for a visible game window with an active message thread");
-    HWND stableWindow = nullptr;
-    int stablePolls = 0;
-    for(int attempt = 0; attempt < 300; ++attempt)
-    {
-        WindowCandidate candidate;
-        EnumWindows(&FindLargestGameWindow, reinterpret_cast<LPARAM>(&candidate));
-        if(candidate.window && candidate.area >= 640 * 480)
-        {
-            if(candidate.window != stableWindow)
-            {
-                stableWindow = candidate.window;
-                stablePolls = 1;
-            }
-            else
-            {
-                ++stablePolls;
-            }
-            if(stablePolls < 20)
-            {
-                Sleep(100);
-                continue;
-            }
-            WNDPROC original = reinterpret_cast<WNDPROC>(
-                GetWindowLongPtrW(candidate.window, GWLP_WNDPROC));
-            if(!original)
-            {
-                Sleep(100);
-                continue;
-            }
-            g_originalWindowProc = original;
-            SetLastError(0);
-            const LONG_PTR replaced = SetWindowLongPtrW(
-                candidate.window, GWLP_WNDPROC,
-                reinterpret_cast<LONG_PTR>(&DeferredGameWindowProc));
-            if(!replaced && GetLastError() != 0)
-            {
-                Log(L"Could not subclass the game window for deferred launch");
-                return 1;
-            }
-            if(reinterpret_cast<WNDPROC>(replaced) != original)
-            {
-                SetWindowLongPtrW(candidate.window, GWLP_WNDPROC, replaced);
-                Log(L"Game window procedure changed during deferred-launch setup");
-                return 1;
-            }
-            g_gameWindow = candidate.window;
-            DWORD windowThread = GetWindowThreadProcessId(candidate.window, nullptr);
-            wchar_t message[256]{};
-            _snwprintf_s(message, sizeof(message) / sizeof(message[0]), _TRUNCATE,
-                         L"Sending deferred launch to stable game window thread %lu from worker %lu",
-                         windowThread, GetCurrentThreadId());
-            Log(message);
-            DWORD_PTR dispatchResult = 0;
-            SetLastError(0);
-            if(!SendMessageTimeoutW(candidate.window, kDeferredLaunchMessage, 0, 0,
-                                    SMTO_ABORTIFHUNG | SMTO_BLOCK, 5000,
-                                    &dispatchResult))
-            {
-                const DWORD error = GetLastError();
-                wchar_t failure[192]{};
-                _snwprintf_s(failure, sizeof(failure) / sizeof(failure[0]), _TRUNCATE,
-                             L"Game-window launch dispatch failed or timed out (error=%lu)",
-                             error);
-                Log(failure);
-                return 1;
-            }
-            Log(L"Game-window launch dispatch completed");
-            return 0;
-        }
-        stableWindow = nullptr;
-        stablePolls = 0;
-        Sleep(100);
-    }
-    Log(L"Deferred launch timed out waiting for the game window");
-    return 1;
-}
-
-bool ScheduleDeferredLaunch()
-{
-    if(!InitializeBridge())
-        return false;
-    HANDLE worker = CreateThread(nullptr, 0, &DispatchLaunchToGameWindow, nullptr, 0, nullptr);
-    if(!worker)
-    {
-        Log(L"Bridge disabled: could not create the window-dispatch worker");
-        return false;
-    }
-    CloseHandle(worker);
-    Log(L"Deferred game-window dispatch scheduled after Starter patches");
-    return true;
+    const int patched = InstallFileObservationHooks();
+    wchar_t message[256]{};
+    _snwprintf_s(message, sizeof(message) / sizeof(message[0]), _TRUNCATE,
+                 L"TRANSITION_PROBE active imports=%d stack_capture=%s mode=observe-only commands=none redirects=none",
+                 patched, g_captureStack ? L"available" : L"unavailable");
+    Log(message);
+    return patched > 0;
 }
 }
 
@@ -593,10 +377,9 @@ extern "C" __declspec(dllexport) int __cdecl EntryBeforePatch(const char*)
 
 extern "C" __declspec(dllexport) int __cdecl EntryAfterPatch(const char*)
 {
-    // Starter treats any non-zero callback result as an error/assert condition.
-    // Failures are reported through the run-specific log and leave the runtime
-    // unpatched while the loader still receives its required zero result.
-    ScheduleDeferredLaunch();
+    // Starter treats non-zero as an assertion condition. Probe failures are
+    // recorded in the run log and leave the runtime otherwise untouched.
+    InitializeProbe();
     return 0;
 }
 

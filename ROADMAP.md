@@ -404,6 +404,21 @@ MOB editing does not imply that landscape saving is supported.
   the visible game window from a bounded worker, subclass it only long enough
   to post one private message, restore its original window procedure, then
   install redirects and invoke the handler on the actual game-window thread.
+- [x] Reject the internal `server <map>` route. Alpha.49 proved that Endurance
+  invoked its fingerprinted handler on the game-window thread after the main
+  menu MPR had rendered, but the requested MPR/MOB was never opened. The menu
+  instead entered an incomplete server/multiplayer transition and could freeze
+  or crash. Additional movie skipping and fixed-delay changes cannot satisfy
+  the local single-player launch gate.
+- [x] Replace the rejected handler in alpha.50 with a telemetry-only
+  single-player transition probe. It records `.mpr`, `.mob`, and `.mq` file
+  operations, thread IDs, module inventories, and bounded module-relative call
+  stacks while the user starts New Game or travels normally. It invokes no
+  command, redirects no file, and makes no readiness assumption.
+- [ ] Use alpha.50 evidence to identify and fingerprint the actual
+  single-player transition entry point and required session/player state.
+- [ ] Implement a new JMV launch provider only after that observed path can load
+  the staged pair without modifying live maps, configuration, movies, or saves.
 - [ ] Perform the focused JMV runtime feasibility test: confirm that the engine
   accepts the temporary outer map name while preserving the MPR internal name,
   executes the MOB bootstrap exactly once, creates/controls the test player at
@@ -456,6 +471,10 @@ MOB editing does not imply that landscape saving is supported.
   message before the final message path was stable, but the callback was never
   dispatched. Require the same visible window for two seconds and use bounded
   `SendMessageTimeout` dispatch so receipt or timeout is directly observable.
+- [x] `0.1.0-alpha.50`: retire the disproven internal server-handler launch and
+  ship an observe-only transition probe. The focused test is normal New Game
+  and optional zone travel; the retained log must expose the real MPR/MOB call
+  path before direct launch development resumes.
 - [x] `0.1.0-alpha.41`: redo-safe raw provenance and the July 17 multi-edit/UI
   fixes passed owner testing and were handed to the closed tester group.
   ([`db3fa31`](https://github.com/Ilufus/ei-mapper-endurance/commit/db3fa31))

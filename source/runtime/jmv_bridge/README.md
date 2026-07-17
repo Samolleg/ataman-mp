@@ -1,27 +1,36 @@
-# JMV launch bridge
+# JMV single-player transition probe
 
-This x86 `.plg` is a profile-specific, temporary runtime provider for the
-validated JMV stack. It is not loaded into EI Mapper itself. During a test run
-the editor copies the bridge into JMV's configured `DEV/Plugin=plugin.dll` slot,
-where Starter's plugin loader calls `EntryBeforePatch`/`EntryAfterPatch`. The
-slot must be absent before the run; Endurance never replaces an installed mod
-plugin. The editor verifies its SHA-256, passes the source and disposable map
-paths through the child environment, and removes the bridge only if its hash
-still matches.
+This x86 `.plg` is a temporary, telemetry-only provider for the fingerprinted
+JMV runtime stack. It is not loaded into EI Mapper itself. During a probe run
+the editor copies it into JMV's configured `DEV/Plugin=plugin.dll` slot, where
+Starter calls `EntryBeforePatch` and `EntryAfterPatch`. The slot must be absent;
+Endurance never replaces an installed mod plugin. The provider and other
+temporary files are removed after exit only when their SHA-256 values still
+match the run manifest.
 
-The installed Starter loader calls each export as a one-argument `cdecl`
-function and treats zero as success. Both callbacks therefore return zero;
-initialization failures are reported through the run-specific log.
+The provider verifies the exact approved `game.exe` hash and patches the
+already loaded modules' imports of `CreateFileA/W` and
+`GetFileAttributesA/W`. It records only `.mpr`, `.mob`, and `.mq` operations,
+including thread ID and a bounded module-relative call stack, in the run's
+`bridge-result.log`. Module bases are recorded so addresses can be reconciled
+offline.
 
-After `EntryAfterPatch`, a bounded worker waits until the same visible game
-window remains stable for two seconds. It temporarily subclasses that
-same-process window and performs a five-second-bounded `SendMessageTimeout`
-dispatch, restoring the original window procedure when the message arrives.
-The callback therefore verifies and invokes the engine only on the actual
-game-window thread, redirects only the selected source map's
-`.mpr`/`.mob` file opens to hash-owned temporary copies, and uses the real map
-identity. It does not modify `2utoexec.cfg`. Any mismatch leaves the runtime
-untouched and is written to the run-specific log.
+The probe is deliberately passive:
 
-Build with `build-x86.cmd` from an x86 Visual Studio 2022 tool environment. The
-generated binary and PDB under `bin/` are local build artifacts.
+- it invokes no console or internal game command;
+- it performs no map redirection;
+- it does not modify Starter, JMV configuration, maps, saves, or movie files;
+- it does not attempt to infer readiness from a fixed delay.
+
+The user should reach the main menu, start New Game normally, optionally travel
+to another zone, and exit normally. Those transitions provide the evidence
+needed to locate the real single-player map-loading path. The previously tested
+internal `server` handler is intentionally absent because runtime evidence
+showed it enters an incomplete multiplayer/server transition instead.
+
+Starter treats a non-zero callback return as an assertion condition, so both
+exports always return zero. Initialization failures are reported in the probe
+log and otherwise leave the runtime untouched.
+
+Build with `build-x86.cmd` from an x86 Visual Studio 2022 environment. Generated
+binary/PDB files under `bin/` are local build artifacts.
