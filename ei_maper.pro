@@ -11,7 +11,8 @@ greaterThan(QT_MAJOR_VERSION, 4): QT += widgets
 TARGET = EIMapperEndurance
 TEMPLATE = app
 
-DEFINES += ENDURANCE_VERSION=\\\"0.1.0-alpha.25\\\"
+ENDURANCE_VERSION = $$cat($$PWD/VERSION, lines)
+DEFINES += ENDURANCE_VERSION=\\\"$${ENDURANCE_VERSION}\\\"
 
 # The following define makes your compiler emit warnings if you use
 # any feature of Qt which has been marked as deprecated (the exact warnings
