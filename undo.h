@@ -159,6 +159,23 @@ private:
     bool m_firstRedo;
 };
 
+class CChangeMobScriptCommand : public QUndoCommand
+{
+public:
+    CChangeMobScriptCommand(CView* view, CMob* mob, const QString& before,
+                            const QString& after, const QString& text,
+                            QUndoCommand* parent = nullptr);
+    void undo() override;
+    void redo() override;
+
+private:
+    void apply(const QString& script);
+    CView* m_view;
+    CMob* m_mob;
+    QString m_before;
+    QString m_after;
+};
+
 class CCreatePatrolCommand: public QUndoCommand
 {
 public:
@@ -173,7 +190,11 @@ public:
 
 private:
     CView* m_pView;
+    CMob* m_mob;
     QString m_pointHash;
+    CUnit* m_firstPointUnit;
+    uint m_previousBehaviour;
+    bool m_switchesToPath;
 };
 
 class CCreateTrapPointCommand: public QUndoCommand

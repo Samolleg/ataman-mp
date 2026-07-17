@@ -514,7 +514,7 @@
                 </widget>
                </item>
                <item row="7" column="1">
-                <widget class="QKeySequenceEdit" name="keySequenceEdit_19">
+                <widget class="QKeySequenceEdit" name="shortcutResetCamera">
                  <property name="keySequence">
                   <string>Ctrl+R</string>
                  </property>
@@ -594,7 +594,7 @@
               </widget>
              </item>
              <item row="7" column="1">
-              <widget class="QKeySequenceEdit" name="keySequenceEdit_12">
+              <widget class="QKeySequenceEdit" name="shortcutSwitchMode">
                <property name="keySequence">
                 <string>Ctrl+Tab</string>
                </property>
@@ -720,7 +720,7 @@
               </widget>
              </item>
              <item row="1" column="1">
-              <widget class="QKeySequenceEdit" name="keySequenceEdit_11">
+              <widget class="QKeySequenceEdit" name="shortcutCreateObject">
                <property name="keySequence">
                 <string>Ctrl+N</string>
                </property>
@@ -734,7 +734,7 @@
               </widget>
              </item>
              <item row="4" column="1">
-              <widget class="QKeySequenceEdit" name="keySequenceEdit_24">
+              <widget class="QKeySequenceEdit" name="shortcutUndo">
                <property name="keySequence">
                 <string>Ctrl+Z</string>
                </property>
@@ -748,7 +748,7 @@
               </widget>
              </item>
              <item row="5" column="1">
-              <widget class="QKeySequenceEdit" name="keySequenceEdit_25">
+              <widget class="QKeySequenceEdit" name="shortcutRedo">
                <property name="keySequence">
                 <string>Ctrl+Y</string>
                </property>
@@ -762,7 +762,7 @@
               </widget>
              </item>
              <item row="6" column="1">
-              <widget class="QKeySequenceEdit" name="keySequenceEdit_26">
+              <widget class="QKeySequenceEdit" name="shortcutMobParameters">
                <property name="keySequence">
                 <string>Ctrl+M</string>
                </property>
@@ -780,6 +780,86 @@
                <property name="keySequence">
                 <string>Ctrl+X</string>
                </property>
+              </widget>
+             </item>
+             <item row="17" column="0">
+              <widget class="QLabel" name="labelDuplicateObjects">
+               <property name="text"><string>Duplicate selected objects</string></property>
+              </widget>
+             </item>
+             <item row="17" column="1">
+              <widget class="QKeySequenceEdit" name="shortcutDuplicateObjects">
+               <property name="keySequence"><string>Ctrl+D</string></property>
+              </widget>
+             </item>
+             <item row="18" column="0">
+              <widget class="QLabel" name="labelHistoryShortcut">
+               <property name="text"><string>Open undo history</string></property>
+              </widget>
+             </item>
+             <item row="18" column="1">
+              <widget class="QKeySequenceEdit" name="shortcutHistory">
+               <property name="keySequence"><string>Ctrl+L</string></property>
+              </widget>
+             </item>
+             <item row="19" column="0">
+              <widget class="QLabel" name="labelMobScriptShortcut">
+               <property name="text"><string>Open MOB script</string></property>
+              </widget>
+             </item>
+             <item row="19" column="1">
+              <widget class="QKeySequenceEdit" name="shortcutMobScript">
+               <property name="keySequence"><string>Ctrl+Shift+M</string></property>
+              </widget>
+             </item>
+             <item row="20" column="0">
+              <widget class="QLabel" name="labelOpenMobShortcut">
+               <property name="text"><string>Open MOB(s)</string></property>
+              </widget>
+             </item>
+             <item row="20" column="1">
+              <widget class="QKeySequenceEdit" name="shortcutOpenMob">
+               <property name="keySequence"><string>Alt+Shift+O</string></property>
+              </widget>
+             </item>
+             <item row="21" column="0">
+              <widget class="QLabel" name="labelOpenMprShortcut">
+               <property name="text"><string>Open MPR</string></property>
+              </widget>
+             </item>
+             <item row="21" column="1">
+              <widget class="QKeySequenceEdit" name="shortcutOpenMpr">
+               <property name="keySequence"><string>Ctrl+Shift+O</string></property>
+              </widget>
+             </item>
+             <item row="22" column="0">
+              <widget class="QLabel" name="labelSaveAllShortcut">
+               <property name="text"><string>Save all MOBs</string></property>
+              </widget>
+             </item>
+             <item row="22" column="1">
+              <widget class="QKeySequenceEdit" name="shortcutSaveAllMobs">
+               <property name="keySequence"><string>Alt+Shift+S</string></property>
+              </widget>
+             </item>
+             <item row="23" column="0">
+              <widget class="QLabel" name="labelOpenShortcut">
+               <property name="text"><string>Open MPR or MOB</string></property>
+              </widget>
+             </item>
+             <item row="23" column="1">
+              <widget class="QKeySequenceEdit" name="shortcutOpen">
+               <property name="keySequence"><string>Ctrl+O</string></property>
+              </widget>
+             </item>
+             <item row="24" column="0">
+              <widget class="QLabel" name="labelSaveActiveShortcut">
+               <property name="text"><string>Save active MOB</string></property>
+              </widget>
+             </item>
+             <item row="24" column="1">
+              <widget class="QKeySequenceEdit" name="shortcutSaveActiveMob">
+               <property name="keySequence"><string>Ctrl+S</string></property>
               </widget>
              </item>
             </layout>
@@ -865,7 +945,7 @@
               </widget>
              </item>
              <item row="5" column="1">
-              <widget class="QKeySequenceEdit" name="keySequenceEdit_29">
+              <widget class="QKeySequenceEdit" name="shortcutResetLogicPaths">
                <property name="keySequence">
                 <string>Ctrl+P</string>
                </property>

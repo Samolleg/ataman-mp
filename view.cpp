@@ -35,6 +35,8 @@
 #include "tile.h"
 #include "duplicate_id_report.h"
 #include "view_frustum.h"
+#include "external_script_workspace.h"
+#include "mob_script_window.h"
 
 class CLogic;
 
@@ -82,6 +84,9 @@ CView::CView(QWidget *parent, const QGLWidget *pShareWidget) : QGLWidget(parent,
     QString lang = a.languageToString(a.language());
     a.setDefault(QLocale::English);
     m_pLand = CLandscape::getInstance();
+    m_scriptWorkspaces.reset(new CExternalScriptWorkspaceManager(this, this));
+    connect(m_scriptWorkspaces.get(), &CExternalScriptWorkspaceManager::scriptImportAccepted,
+            this, &CView::importExternalMobScript);
 }
 
 void CView::updateReadState(EReadState state)
@@ -99,7 +104,10 @@ CView::~CView()
 //    }
 
     for(auto& mob: m_aMob)
+    {
+        m_scriptWorkspaces->unregisterMob(mob);
         delete mob;
+    }
 }
 
 
@@ -981,6 +989,7 @@ void CView::loadMob(QFileInfo &filePath)
     pMob->attach(this, m_pProgress);
     pMob->readMob(filePath);
     m_aMob.append(pMob);
+    m_scriptWorkspaces->registerMob(pMob);
     changeCurrentMob(pMob);
 }
 
@@ -1044,6 +1053,8 @@ void CView::unloadActiveMob()
         return;
 
     cancelPendingOperation();
+    if(!closeMobScriptWindow(m_activeMob))
+        return;
     ei::log(eLogInfo, "unloading mob " + m_activeMob->mobName());
     CMob* pMob = nullptr;
     foreach(pMob, m_aMob)
@@ -1067,6 +1078,7 @@ void CView::unloadActiveMob()
         if(m_pUndoStack)
             m_pUndoStack->clear();
         m_aMob.removeOne(pMob);
+        m_scriptWorkspaces->unregisterMob(pMob);
         emit unloadMob(pMob);
         delete pMob;
         break;
@@ -1104,6 +1116,35 @@ void CView::openActiveMobEditParams()
     pParam->show();
 }
 
+void CView::openActiveMobScript()
+{
+    if(!m_activeMob)
+        return;
+    QPointer<CMobScriptWindow> existing = m_scriptWindows.value(m_activeMob);
+    if(existing)
+    {
+        existing->show();
+        existing->raise();
+        existing->activateWindow();
+        return;
+    }
+
+    CMob* mob = m_activeMob;
+    CMobScriptWindow* window = new CMobScriptWindow(mob, this, this);
+    m_scriptWindows.insert(mob, window);
+    connect(this, &CView::mobScriptChanged, window, &CMobScriptWindow::onMobScriptChanged);
+    connect(window, &QObject::destroyed, this, [this, mob]() { m_scriptWindows.remove(mob); });
+    window->show();
+    window->raise();
+    window->activateWindow();
+}
+
+void CView::openExternalMobScript(CMob* mob)
+{
+    if(mob)
+        m_scriptWorkspaces->openEditor(mob);
+}
+
 void CView::commitMobParameterEdit(CMob* mob, const SMobParameterState& before,
                                    const SMobParameterState& after)
 {
@@ -1115,12 +1156,64 @@ void CView::commitMobParameterEdit(CMob* mob, const SMobParameterState& before,
     m_pUndoStack->push(new CChangeMobParametersCommand(this, mob, before, after));
 }
 
+void CView::commitMobScriptEdit(CMob* mob, const QString& storedScript,
+                                const QString& commandText)
+{
+    if(!mob || mob->script() == storedScript || !m_pUndoStack)
+        return;
+    m_pUndoStack->push(new CChangeMobScriptCommand(
+        this, mob, mob->script(), storedScript, commandText));
+}
+
+void CView::notifyMobScriptChanged(CMob* mob)
+{
+    if(!mob)
+        return;
+    QTextCodec* cp1251 = QTextCodec::codecForName("Windows-1251");
+    emit mobScriptChanged(mob, cp1251->toUnicode(mob->script().toLatin1()));
+}
+
+void CView::importExternalMobScript(CMob* mob, const QString& storedScript,
+                                    const QString& displayScript)
+{
+    Q_UNUSED(displayScript);
+    commitMobScriptEdit(mob, storedScript, tr("Import external MOB script"));
+}
+
+bool CView::closeMobScriptWindow(CMob* mob)
+{
+    QPointer<CMobScriptWindow> window = m_scriptWindows.value(mob);
+    return !window || window->requestClose();
+}
+
+bool CView::closeAllMobScriptWindows()
+{
+    const QList<QPointer<CMobScriptWindow>> windows = m_scriptWindows.values();
+    for(const QPointer<CMobScriptWindow>& window : windows)
+    {
+        if(window && !window->requestClose())
+            return false;
+    }
+    return true;
+}
+
 void CView::unloadMob(QString mobName)
 {
     if(m_aMob.isEmpty())
         return;
 
     cancelPendingOperation();
+    if(mobName.isEmpty())
+    {
+        if(!closeAllMobScriptWindows())
+            return;
+    }
+    else
+    {
+        CMob* closingMob = mob(mobName);
+        if(closingMob && !closeMobScriptWindow(closingMob))
+            return;
+    }
     if(m_pUndoStack)
         m_pUndoStack->clear();
     ei::log(eLogInfo, "unloading mob " + mobName);
@@ -1129,6 +1222,7 @@ void CView::unloadMob(QString mobName)
     {
         foreach(pMob, m_aMob)
         {
+            m_scriptWorkspaces->unregisterMob(pMob);
             emit unloadMob(pMob);
             delete pMob;
         }
@@ -1141,6 +1235,7 @@ void CView::unloadMob(QString mobName)
         {
             if (pMob->mobName().toLower() == mobName.toLower())
             {
+                m_scriptWorkspaces->unregisterMob(pMob);
                 emit unloadMob(pMob);
                 delete pMob;
                 m_aMob.removeOne(pMob);
@@ -1532,6 +1627,8 @@ void CView::endTileBrushGroup()
 
 bool CView::onExit()
 {
+    if(!closeAllMobScriptWindows())
+        return false;
     bool bCloseAllowed = true;
     CMob* pMob = nullptr;
     foreach(pMob, m_aMob)
@@ -2652,6 +2749,14 @@ void CView::setDurty(CMob* pMob)
         emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataDirtyFlag, changedMob->isDirty() ? "*" : "");
 }
 
+void CView::duplicateSelectedObjects()
+{
+    if(!m_activeMob || nSelectedNodes() == 0)
+        return;
+    selectedObjectToClipboardBuffer();
+    clipboradObjectsToScene();
+}
+
 void CView::refreshMobDirtyStates()
 {
     for(CMob* mob : m_aMob)
@@ -2731,12 +2836,6 @@ void CView::addLogicPoint(bool bLookPoint)
         {
             if(bLookPoint)
                 break; //dont create look point for unit
-
-            if(!dynamic_cast<CUnit*>(pNode)->isBehaviourPath())
-            {
-                ei::log(eLogInfo, "object has non-Path behaviour. adding patrol point skipped");
-                break; //skip non-path behaviour
-            }
 
             QString hash = QString("%1.%2").arg(pNode->mapId()).arg(-1);
             CCreatePatrolCommand* pUndo = new CCreatePatrolCommand(this, hash);

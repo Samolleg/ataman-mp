@@ -2,15 +2,6 @@
 #include <QMessageBox>
 #include <QTextBlock>
 #include <QMenu>
-#include <QTextCodec>
-#include <QTextCursor>
-#include <QDesktopServices>
-#include <QStandardPaths>
-#include <QCryptographicHash>
-#include <QFile>
-#include <QDir>
-#include <QUrl>
-#include <QTimer>
 
 #include "mob_parameters.h"
 #include "ui_mob_parameters.h"
@@ -29,11 +20,6 @@ CMobParameters::CMobParameters(QWidget* parent, CMob* pMob, CView* pView):
   ,m_pView(pView)
    ,m_isDurty(false)
   ,m_pShortcut(nullptr)
-  ,m_externalScriptWatcher(new QFileSystemWatcher(this))
-  ,m_externalScriptDebounce(new QTimer(this))
-  ,m_externalScriptReadRetries(0)
-  ,m_externalImportPromptOpen(false)
-  ,m_externalReloadPending(false)
 {
     ui->setupUi(this);
     setWindowFlags(windowFlags() & ~Qt::WindowCloseButtonHint);
@@ -49,11 +35,6 @@ CMobParameters::CMobParameters(QWidget* parent, CMob* pMob, CView* pView):
     m_pTable->setAttribute(Qt::WA_QuitOnClose, false);
     QObject::connect(m_pTable.get(), SIGNAL(cellDoubleClicked(int,int)), this, SLOT(tableItemClicked(int,int)));
     m_pShortcut = new QShortcut(QKeySequence(Qt::CTRL + eKey_S), this, SLOT(onSaveShortcut()));
-    QObject::connect(m_externalScriptWatcher, SIGNAL(fileChanged(QString)), this, SLOT(onExternalScriptChanged(QString)));
-    QObject::connect(m_externalScriptWatcher, SIGNAL(directoryChanged(QString)), this, SLOT(onExternalScriptDirectoryChanged(QString)));
-    m_externalScriptDebounce->setSingleShot(true);
-    m_externalScriptDebounce->setInterval(250);
-    QObject::connect(m_externalScriptDebounce, SIGNAL(timeout()), this, SLOT(processExternalScriptChange()));
     //m_aCell.clear();
     m_aCell.resize(32*32);
     for (int i(0); i < 32; ++i)
@@ -66,7 +47,10 @@ CMobParameters::CMobParameters(QWidget* parent, CMob* pMob, CView* pView):
         }
     }
     //connect(m_pTable.get(), SIGNAL(cellClicked(int, int)), this, SLOT(tableItemClicked(int, int)));
-    m_pHighlighter = new Highlighter(ui->plainTextEdit->document());
+    // Script editing is document-level and intentionally lives in its own window.
+    ui->scriptLabel->hide();
+    ui->pushButtonOpenExtEditor->hide();
+    ui->plainTextEdit->hide();
     ui->listRanges->setContextMenuPolicy(Qt::CustomContextMenu);
     connect(ui->listRanges, SIGNAL(customContextMenuRequested(QPoint)), this, SLOT(showContextMenu(QPoint)));
     updateWindow();
@@ -88,7 +72,6 @@ void CMobParameters::reset()
     paramLine(eWsTypeTime)->clear();
     paramLine(eWsTypeSunLight)->clear();
     ui->listRanges->clear();
-    ui->plainTextEdit->clear();
     ui->isPrimaryBox->setChecked(false);
     m_pCurMob = nullptr;
 }
@@ -214,12 +197,6 @@ void CMobParameters::updateWindow()
 //            pItem->setFlags(pItem->flags() | Qt::ItemIsEditable);
     }
 
-    ui->plainTextEdit->clear();
-    QTextCodec* pDefaultTextCodec = QTextCodec::codecForName("Windows-1251");
-    QTextDecoder* pDecoder = new QTextDecoder(pDefaultTextCodec);
-    QString str = pDecoder->toUnicode(m_pCurMob->script().toLatin1());
-    ui->plainTextEdit->setPlainText(str);
-
     //diplomacy
     QStringList dipName = m_pCurMob->diplomacyNames();
     QVector<QVector<uint>>& dipTable = m_pCurMob->diplomacyField();
@@ -323,20 +300,10 @@ void CMobParameters::on_pushCancel_clicked()
 
 void CMobParameters::on_pushApply_clicked()
 {
-    QTextCodec* pDefaultTextCodec = QTextCodec::codecForName("Windows-1251");
-    const QString editorText = ui->plainTextEdit->toPlainText();
-    auto strArr = pDefaultTextCodec->fromUnicode(editorText); //convert from script unicode to win1251 byte array
-    if(pDefaultTextCodec->toUnicode(strArr) != editorText)
-    {
-        QMessageBox::critical(this, "Script encoding",
-            "The script contains characters that cannot be stored in Windows-1251. "
-            "Nothing was applied; remove or replace the unsupported characters.");
-        return;
-    }
-    QString str = QString::fromLatin1(strArr); //convert byte array to qstring
-
-    m_pCurMob->setScript(str);
-    const SMobParameterState finalState = m_pCurMob->parameterState();
+    SMobParameterState finalState = m_pCurMob->parameterState();
+    // A script may have changed through the independent editor while this
+    // window was open. Never fold that change into this parameters command.
+    m_initialState.script = finalState.script;
     m_pUndoStack->clear();
     m_pView->commitMobParameterEdit(m_pCurMob, m_initialState, finalState);
     emit editFinishedSignal(this);
@@ -559,127 +526,8 @@ void CMobParameters::on_listRanges_itemDoubleClicked(QListWidgetItem *item)
 
 void CMobParameters::on_pushButtonOpenExtEditor_clicked()
 {
-    if(!m_pCurMob)
-        return;
-
-    const QByteArray mobHash = QCryptographicHash::hash(m_pCurMob->originalData(), QCryptographicHash::Sha256).toHex();
-    const QString workspace = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation)
-            + QDir::separator() + "script-workspaces" + QDir::separator() + mobHash;
-    if(!QDir().mkpath(workspace))
-    {
-        QMessageBox::critical(this, "External editor", "Could not create the managed script workspace.");
-        return;
-    }
-
-    m_externalScriptPath = workspace + QDir::separator() + m_pCurMob->filePath().completeBaseName() + ".lua";
-    m_externalScriptReadRetries = 0;
-    m_externalReloadPending = false;
-    m_externalLastHandledText.clear();
-    QFile scriptFile(m_externalScriptPath);
-    if(!scriptFile.open(QIODevice::WriteOnly | QIODevice::Truncate))
-    {
-        QMessageBox::critical(this, "External editor", "Could not write the managed UTF-8 script file.");
-        return;
-    }
-    scriptFile.write(ui->plainTextEdit->toPlainText().toUtf8());
-    scriptFile.close();
-
-    if(!m_externalScriptWatcher->files().contains(m_externalScriptPath))
-        m_externalScriptWatcher->addPath(m_externalScriptPath);
-    if(!m_externalScriptWatcher->directories().contains(workspace))
-        m_externalScriptWatcher->addPath(workspace);
-
-    if(!QDesktopServices::openUrl(QUrl::fromLocalFile(m_externalScriptPath)))
-        QMessageBox::warning(this, "External editor", "No application is associated with script files. Configure a Windows file association and try again.");
-}
-
-void CMobParameters::onExternalScriptChanged(const QString& path)
-{
-    ei::log(eLogInfo, QString("External script file notification path:%1").arg(path));
-    if(m_externalScriptPath.isEmpty())
-        return;
-    m_externalReloadPending = true;
-    m_externalScriptDebounce->start();
-}
-
-void CMobParameters::processExternalScriptChange()
-{
-    if(m_externalScriptPath.isEmpty() || !m_externalReloadPending)
-        return;
-    if(m_externalImportPromptOpen)
-    {
-        // A modal question runs a nested Qt event loop. Never allow another
-        // watcher notification to create a second question inside it.
-        return;
-    }
-    m_externalReloadPending = false;
-    QFile scriptFile(m_externalScriptPath);
-    if(!scriptFile.open(QIODevice::ReadOnly))
-    {
-        if(!QFileInfo(m_externalScriptPath).exists())
-            return; // directoryChanged will notify us when an atomic replacement appears
-        if(++m_externalScriptReadRetries > 5)
-        {
-            ei::log(eLogWarning, QString("External script remained unreadable after retries path:%1")
-                    .arg(m_externalScriptPath));
-            m_externalScriptReadRetries = 0;
-            return;
-        }
-        m_externalReloadPending = true;
-        m_externalScriptDebounce->start(350);
-        return;
-    }
-    m_externalScriptReadRetries = 0;
-    const QString externalText = QString::fromUtf8(scriptFile.readAll());
-    scriptFile.close();
-
-    if(QFileInfo(m_externalScriptPath).exists()
-       && !m_externalScriptWatcher->files().contains(m_externalScriptPath))
-        m_externalScriptWatcher->addPath(m_externalScriptPath);
-    if(externalText == ui->plainTextEdit->toPlainText()
-       || externalText == m_externalLastHandledText)
-        return;
-
-    QTextCodec* cp1251 = QTextCodec::codecForName("Windows-1251");
-    const QByteArray encoded = cp1251->fromUnicode(externalText);
-    if(cp1251->toUnicode(encoded) != externalText)
-    {
-        m_externalLastHandledText = externalText;
-        m_externalImportPromptOpen = true;
-        QMessageBox::critical(this, "External script changed",
-            "The external file contains characters that cannot round-trip through Windows-1251. The embedded script was not changed.");
-        m_externalImportPromptOpen = false;
-        if(m_externalReloadPending)
-            m_externalScriptDebounce->start();
-        return;
-    }
-
-    m_externalImportPromptOpen = true;
-    const QMessageBox::StandardButton answer = QMessageBox::question(
-            this, "External script changed",
-            "Import the changed external script into the MOB editor? This remains unsaved until Apply changes is pressed.",
-            QMessageBox::Yes | QMessageBox::No);
-    m_externalImportPromptOpen = false;
-    m_externalLastHandledText = externalText;
-    if(answer == QMessageBox::Yes)
-    {
-        QTextCursor cursor(ui->plainTextEdit->document());
-        cursor.beginEditBlock();
-        cursor.select(QTextCursor::Document);
-        cursor.insertText(externalText);
-        cursor.endEditBlock();
-        setDurty(true);
-        ei::log(eLogInfo, QString("External script imported into MOB Parameters path:%1 characters:%2")
-                .arg(m_externalScriptPath).arg(externalText.size()));
-    }
-    if(m_externalReloadPending)
-        m_externalScriptDebounce->start();
-}
-
-void CMobParameters::onExternalScriptDirectoryChanged(const QString& path)
-{
-    ei::log(eLogInfo, QString("External script workspace notification path:%1").arg(path));
-    onExternalScriptChanged(m_externalScriptPath);
+    if(m_pView && m_pCurMob)
+        m_pView->openExternalMobScript(m_pCurMob);
 }
 
 void CMobParameters::updateMobParamsOnly()
@@ -752,7 +600,6 @@ void CMobParameters::on_pushCheck_clicked()
 
 void CMobParameters::onSaveShortcut()
 {
-    ui->plainTextEdit->document()->clearUndoRedoStacks();
     m_pUndoStack->clear();
     setDurty(false);
 }

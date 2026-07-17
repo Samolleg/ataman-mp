@@ -320,22 +320,89 @@ void CChangeMobParametersCommand::redo()
     apply(m_after);
 }
 
+CChangeMobScriptCommand::CChangeMobScriptCommand(
+        CView* view, CMob* mob, const QString& before, const QString& after,
+        const QString& text, QUndoCommand* parent)
+    : QUndoCommand(parent), m_view(view), m_mob(mob), m_before(before), m_after(after)
+{
+    setText(text);
+}
+
+void CChangeMobScriptCommand::apply(const QString& script)
+{
+    if(!m_mob)
+        return;
+    m_mob->setScript(script);
+    if(m_view)
+    {
+        m_view->setDurty(m_mob);
+        m_view->notifyMobScriptChanged(m_mob);
+    }
+}
+
+void CChangeMobScriptCommand::undo()
+{
+    apply(m_before);
+}
+
+void CChangeMobScriptCommand::redo()
+{
+    apply(m_after);
+}
+
 CCreatePatrolCommand::CCreatePatrolCommand(CView* pView, QString pointHash, QUndoCommand *parent):
     QUndoCommand(parent)
   ,m_pView(pView)
+  ,m_mob(pView ? pView->currentMob() : nullptr)
   ,m_pointHash(pointHash)
+  ,m_firstPointUnit(nullptr)
+  ,m_previousBehaviour(0)
+  ,m_switchesToPath(false)
 {
+    const QStringList parts = pointHash.split(".");
+    if(m_mob && parts.size() == 2 && parts[1].toInt() == -1)
+    {
+        m_firstPointUnit = dynamic_cast<CUnit*>(m_mob->nodeByMapId(parts[0].toUInt()));
+        if(m_firstPointUnit)
+        {
+            QSharedPointer<IPropertyBase> behaviour;
+            m_firstPointUnit->getLogicParam(behaviour, eObjParam_LOGIC_BEHAVIOUR);
+            const propUint* value = dynamic_cast<const propUint*>(behaviour.get());
+            if(value)
+            {
+                m_previousBehaviour = value->value();
+                m_switchesToPath = m_previousBehaviour != uint(EBehaviourType::ePath);
+            }
+        }
+    }
 }
 
 void CCreatePatrolCommand::undo()
 {
-    m_pView->currentMob()->undo_createPatrolByHash(m_pointHash);
+    if(!m_mob)
+        return;
+    m_mob->undo_createPatrolByHash(m_pointHash);
+    if(m_switchesToPath && m_firstPointUnit)
+    {
+        QSharedPointer<IPropertyBase> behaviour(
+            new propUint(eObjParam_LOGIC_BEHAVIOUR, m_previousBehaviour));
+        m_firstPointUnit->applyLogicParam(behaviour);
+    }
 }
 
 void CCreatePatrolCommand::redo()
 {
-    m_pView->currentMob()->createPatrolByHash(m_pointHash);
-    setText("Created new point");
+    if(m_switchesToPath && m_firstPointUnit)
+    {
+        QSharedPointer<IPropertyBase> behaviour(
+            new propUint(eObjParam_LOGIC_BEHAVIOUR, uint(EBehaviourType::ePath)));
+        m_firstPointUnit->applyLogicParam(behaviour);
+    }
+    if(!m_mob)
+        return;
+    m_mob->createPatrolByHash(m_pointHash);
+    setText(m_switchesToPath ? "Create first patrol point and enable Path behaviour"
+                             : "Create patrol point");
 }
 
 CCreateTrapPointCommand::CCreateTrapPointCommand(CView *pView, uint trapId, bool bActZone, QUndoCommand *parent):

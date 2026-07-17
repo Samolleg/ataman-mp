@@ -9,6 +9,8 @@
 #include <QTableWidget>
 #include <QTreeWidgetItem>
 #include <QDateTime>
+#include <QHash>
+#include <QPointer>
 
 #include "types.h"
 #include "select_window.h"
@@ -38,6 +40,8 @@ class IPropertyBase;
 class CTileForm;
 class CPreviewTile;
 class CLandscape;
+class CExternalScriptWorkspaceManager;
+class CMobScriptWindow;
 struct SMobParameterState;
 
 ///
@@ -64,8 +68,13 @@ public:
     void saveAllMob();
     void unloadActiveMob();
     void openActiveMobEditParams();
+    void openActiveMobScript();
+    void openExternalMobScript(CMob* mob);
     void commitMobParameterEdit(CMob* mob, const SMobParameterState& before,
                                 const SMobParameterState& after);
+    void commitMobScriptEdit(CMob* mob, const QString& storedScript,
+                             const QString& commandText);
+    void notifyMobScriptChanged(CMob* mob);
     bool hasActiveMob() const { return m_activeMob != nullptr; }
     void unloadMob(QString mobName);
     void attach(CSettings* pSettings, QTableWidget* pParam, QUndoStack* pStack, CProgressView* pProgress, QLineEdit* pMouseCoord, CTreeView* pTree, CTileForm* pTileForm);
@@ -91,6 +100,7 @@ public:
     void deleteSelectedNodes();
     void selectedObjectToClipboardBuffer();
     void clipboradObjectsToScene();
+    void duplicateSelectedObjects();
     void hideSelectedNodes();
     void unHideAll();
     CMob* currentMob() {return m_activeMob;}
@@ -159,6 +169,8 @@ private:
     void drawTilePreview(QOpenGLShaderProgram* program);
     void updateTileForm(bool bGenerateNewTable = false);
     void saveSession();
+    bool closeMobScriptWindow(CMob* mob);
+    bool closeAllMobScriptWindows();
 
 
 public slots:
@@ -179,12 +191,15 @@ public slots:
     void clearHistory();
     void onMobParamEditFinished(CMobParameters* pMob);
     void checkNewLandVersion();
+    void importExternalMobScript(CMob* mob, const QString& storedScript,
+                                 const QString& displayScript);
 
 signals:
     void updateMsg(QString msg);
     void unloadMob(CMob*);
     void updateMainWindowTitle(eTitleTypeData, QString);
     void showOutlinerSignal(bool bShow);
+    void mobScriptChanged(CMob* mob, const QString& displayScript);
 
 private:
     int m_height; //for redraw window
@@ -215,6 +230,8 @@ private:
     CMob* m_activeMob;
     CTreeView* m_pTree;
     QList<CMobParameters*> m_arrParamWindow;
+    QSharedPointer<CExternalScriptWorkspaceManager> m_scriptWorkspaces;
+    QHash<CMob*, QPointer<CMobScriptWindow>> m_scriptWindows;
     CRoundMobForm* m_pRoundForm;
     QTimer* m_mprModifyTimer;
     QDateTime m_lastModifiedLand;

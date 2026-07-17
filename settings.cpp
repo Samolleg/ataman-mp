@@ -5,6 +5,7 @@
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QCheckBox>
+#include <QKeySequenceEdit>
 
 #include "settings.h"
 #include "ui_settings.h"
@@ -193,6 +194,12 @@ void CSettings::updateOptUi()
         {
             if (COptString* pOpt = dynamic_cast<COptString*>(opt.get()))
             {
+                QKeySequenceEdit* keyEdit = ui->tabWidget->findChild<QKeySequenceEdit*>(pOpt->name());
+                if(keyEdit)
+                {
+                    keyEdit->setKeySequence(QKeySequence(pOpt->value()));
+                    continue;
+                }
                 //find label, text edit
                 QLineEdit* pLineEdit = ui->tabWidget->findChild<QLineEdit*>(pOpt->name());
                 if (pLineEdit)
@@ -244,6 +251,12 @@ void CSettings::updateOptFromUi()
         {
             if (COptString* pOpt = dynamic_cast<COptString*>(opt.get()))
             {
+                QKeySequenceEdit* keyEdit = ui->tabWidget->findChild<QKeySequenceEdit*>(pOpt->name());
+                if(keyEdit)
+                {
+                    pOpt->setValue(keyEdit->keySequence().toString(QKeySequence::PortableText));
+                    continue;
+                }
                 //find label, text edit
                 QLineEdit* pLineEdit = ui->tabWidget->findChild<QLineEdit*>(pOpt->name());
                 if (pLineEdit)
@@ -321,6 +334,27 @@ void CSettings::initOptions()
     aOpt.append(QSharedPointer<COpt>(new COptInt("rangeIncrement", 999)));
     aOpt.append(QSharedPointer<COpt>(new COptInt("landCheckTime", 0)));
     aOpt.append(QSharedPointer<COpt>(new COptInt("undoHistoryLimit", 512)));
+
+    const QMap<QString, QString> shortcutDefaults = {
+        {"shortcutOpen", "Ctrl+O"},
+        {"shortcutOpenMob", "Alt+Shift+O"},
+        {"shortcutOpenMpr", "Ctrl+Shift+O"},
+        {"shortcutSaveActiveMob", "Ctrl+S"},
+        {"shortcutSaveAllMobs", "Alt+Shift+S"},
+        {"shortcutUndo", "Ctrl+Z"},
+        {"shortcutRedo", "Ctrl+Y"},
+        {"shortcutHistory", "Ctrl+L"},
+        {"shortcutCreateObject", "Ctrl+N"},
+        {"shortcutDuplicateObjects", "Ctrl+D"},
+        {"shortcutMobParameters", "Ctrl+M"},
+        {"shortcutMobScript", "Ctrl+Shift+M"},
+        {"shortcutResetCamera", "Ctrl+R"},
+        {"shortcutResetLogicPaths", "Ctrl+P"},
+        {"shortcutSwitchMode", "Ctrl+Tab"}
+    };
+    for(auto it = shortcutDefaults.constBegin(); it != shortcutDefaults.constEnd(); ++it)
+        m_aOptCategory[eOptSetKeyBinding].append(
+            QSharedPointer<COpt>(new COptString(it.key(), it.value())));
 
     //split options into different category
     QFile inputFile(":/optSet.txt");
@@ -520,6 +554,7 @@ void CSettings::saveOptions()
 void CSettings::on_buttonApply_clicked()
 {
     updateOptFromUi();
+    emit shortcutsChanged();
     onClose();
 }
 

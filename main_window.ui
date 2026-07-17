@@ -386,6 +386,8 @@
     <addaction name="actionRedo"/>
     <addaction name="actionUndo"/>
     <addaction name="action_Mob_parameters"/>
+    <addaction name="actionOpen_MOB_Script"/>
+    <addaction name="actionDuplicate_selected_objects"/>
     <addaction name="actionChange_mod_e"/>
     <addaction name="menuUnit"/>
     <addaction name="actionReset_selected_IDs"/>
@@ -488,6 +490,22 @@
   <action name="action_Mob_parameters">
    <property name="text">
     <string>&amp;Mob Parameters</string>
+   </property>
+  </action>
+  <action name="actionOpen_MOB_Script">
+   <property name="text">
+    <string>Open MOB Script...</string>
+   </property>
+   <property name="toolTip">
+    <string>Edit the active MOB's embedded script in a separate window</string>
+   </property>
+  </action>
+  <action name="actionDuplicate_selected_objects">
+   <property name="text">
+    <string>Duplicate Selected Objects</string>
+   </property>
+   <property name="toolTip">
+    <string>Copy and paste the selected objects as one pending placement operation</string>
    </property>
   </action>
   <action name="actionUndo">

@@ -66,6 +66,8 @@ private slots:
     void on_actionClose_all_triggered();
     void on_actionSave_triggered();
     void on_action_Mob_parameters_triggered();
+    void on_actionOpen_MOB_Script_triggered();
+    void on_actionDuplicate_selected_objects_triggered();
     void on_actionUndo_triggered();
     void on_toolButton_2_clicked();
     void on_selectButton_clicked();

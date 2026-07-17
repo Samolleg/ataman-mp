@@ -11,6 +11,7 @@
 #include <QTimer>
 #include <QDir>
 #include <QTabWidget>
+#include <QKeySequenceEdit>
 #include <QTemporaryDir>
 #include <QUndoCommand>
 #include <QUndoStack>
@@ -380,6 +381,7 @@ int runHeadlessCommand(QApplication& app)
 
         QWidget primaryWindow;
         bool settingsTabsUsable = false;
+        bool settingsShortcutsPersist = false;
         {
             const QString previousDirectory = QDir::currentPath();
             QTemporaryDir settingsDirectory;
@@ -393,6 +395,17 @@ int runHeadlessCommand(QApplication& app)
                     settingsTabs->setCurrentIndex(1);
                     settingsTabsUsable = settingsWindow.windowModality() == Qt::WindowModal
                             && settingsTabs->isEnabled() && settingsTabs->currentIndex() == 1;
+                }
+                QKeySequenceEdit* historyShortcut = settingsWindow.findChild<QKeySequenceEdit*>("shortcutHistory");
+                QKeySequenceEdit* duplicateShortcut = settingsWindow.findChild<QKeySequenceEdit*>("shortcutDuplicateObjects");
+                if(historyShortcut && duplicateShortcut)
+                {
+                    historyShortcut->setKeySequence(QKeySequence("Alt+L"));
+                    QMetaObject::invokeMethod(&settingsWindow, "on_buttonApply_clicked", Qt::DirectConnection);
+                    COptString* saved = dynamic_cast<COptString*>(
+                        settingsWindow.opt(eOptSetKeyBinding, "shortcutHistory"));
+                    settingsShortcutsPersist = saved && saved->value() == "Alt+L"
+                            && duplicateShortcut->keySequence() == QKeySequence("Ctrl+D");
                 }
             }
             QDir::setCurrent(previousDirectory);
@@ -425,7 +438,8 @@ int runHeadlessCommand(QApplication& app)
                 && pastedObjects == 1 && placementChanges == 1;
 
         const bool passed = prefixesOnly && valueStable && focusCancel && escapeCancel
-                && enterCommit && clickCommit && settingsTabsUsable && secondaryWindowsClosed
+                && enterCommit && clickCommit && settingsTabsUsable && settingsShortcutsPersist
+                && secondaryWindowsClosed
                 && pasteSingleAction && pasteUndoAtomic && pasteRedoAtomic
                 && incompatiblePasteBlocked && compatiblePasteImmediate
                 && multiPropertyPaste && mismatchedPropertyPasteBlocked
@@ -439,6 +453,7 @@ int runHeadlessCommand(QApplication& app)
                << " enterCommit=" << enterCommit
                << " clickCommit=" << clickCommit
                << " settingsTabsUsable=" << settingsTabsUsable
+               << " settingsShortcutsPersist=" << settingsShortcutsPersist
                << " secondaryWindowsClosed=" << secondaryWindowsClosed
                << " pasteSingleAction=" << pasteSingleAction
                << " pasteUndoAtomic=" << pasteUndoAtomic

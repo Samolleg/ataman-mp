@@ -179,7 +179,9 @@ MainWindow::MainWindow(QWidget* parent) :
     connectUiButtons();
     m_pView->attach(m_settings.get(), m_ui->tableWidget, m_undoStack, m_ui->progressBar, m_ui->mousePosText, m_ui->treeWidget, m_pTileForm.get());
     initShortcuts();
+    connect(m_settings.get(), &CSettings::shortcutsChanged, this, &MainWindow::initShortcuts);
     m_ui->action_Mob_parameters->setEnabled(false);
+    m_ui->actionOpen_MOB_Script->setEnabled(false);
     QObject::connect(m_pView, SIGNAL(updateMainWindowTitle(eTitleTypeData,QString)), this, SLOT(updateWindowTitle(eTitleTypeData,QString)));
     QObject::connect(CScene::getInstance(), SIGNAL(modeChanged()), m_pView, SLOT(viewParameters()));
     QObject::connect(m_pView, SIGNAL(showOutlinerSignal(bool)), this, SLOT(showOutliner(bool)));
@@ -255,27 +257,35 @@ void MainWindow::createUndoView()
 
 void MainWindow::initShortcuts()
 {
+    const auto shortcut = [this](const char* name, const char* fallback)
+    {
+        COptString* option = dynamic_cast<COptString*>(m_settings->opt(eOptSetKeyBinding, name));
+        return QKeySequence(option ? option->value() : QString::fromLatin1(fallback));
+    };
     m_ui->actionSelect_by->setShortcut(QKeySequence(Qt::CTRL + Qt::Key_F));
-    m_ui->actionOpen->setShortcut(QKeySequence(Qt::CTRL + Qt::Key_O));
-    m_ui->actionOpen_MOB->setShortcut(QKeySequence(Qt::ALT + Qt::SHIFT + Qt::Key_O));
-    m_ui->actionOpen_MPR->setShortcut(QKeySequence(Qt::CTRL + Qt::SHIFT + Qt::Key_O));
+    m_ui->actionOpen->setShortcut(shortcut("shortcutOpen", "Ctrl+O"));
+    m_ui->actionOpen_MOB->setShortcut(shortcut("shortcutOpenMob", "Alt+Shift+O"));
+    m_ui->actionOpen_MPR->setShortcut(shortcut("shortcutOpenMpr", "Ctrl+Shift+O"));
 
-    m_ui->actionSave->setShortcut(QKeySequence(Qt::CTRL + eKey_S));
-    m_ui->actionSave_all_MOB_s->setShortcut(QKeySequence(Qt::ALT + Qt::SHIFT + Qt::Key_S));
+    m_ui->actionSave->setShortcut(shortcut("shortcutSaveActiveMob", "Ctrl+S"));
+    m_ui->actionSave_all_MOB_s->setShortcut(shortcut("shortcutSaveAllMobs", "Alt+Shift+S"));
     //m_ui->actionSave_all_MOB_s->setShortcut(QKeySequence(Qt::CTRL + Qt::SHIFT + eKey_S));
     //m_ui->actionSave_as->setShortcut(QKeySequence(Qt::CTRL + Qt::ALT + eKey_S));
     m_ui->actionSave_landscape_MPR->setShortcut(QKeySequence(Qt::CTRL + Qt::SHIFT + eKey_S));
 
     m_ui->actionSelect_All->setShortcut(QKeySequence(Qt::CTRL + eKey_A));
     m_ui->actionClose_all->setShortcut(QKeySequence(Qt::CTRL + eKey_Q));
-    m_ui->actionUndo->setShortcut(QKeySequence(Qt::CTRL + Qt::Key_Z));
-    m_ui->actionRedo->setShortcut(QKeySequence(Qt::CTRL + Qt::Key_Y));
-    m_ui->actionCreate_new_object->setShortcut(QKeySequence(Qt::CTRL + Qt::Key_N));
-    m_ui->actionReset_cam_position->setShortcut(QKeySequence(Qt::CTRL + Qt::Key_R));
-    m_ui->actionChange_mod_e->setShortcut(QKeySequence(Qt::CTRL + Qt::Key_Tab));
+    m_ui->actionUndo->setShortcut(shortcut("shortcutUndo", "Ctrl+Z"));
+    m_ui->actionRedo->setShortcut(shortcut("shortcutRedo", "Ctrl+Y"));
+    m_ui->actionShow_undo_redo->setShortcut(shortcut("shortcutHistory", "Ctrl+L"));
+    m_ui->actionCreate_new_object->setShortcut(shortcut("shortcutCreateObject", "Ctrl+N"));
+    m_ui->actionDuplicate_selected_objects->setShortcut(shortcut("shortcutDuplicateObjects", "Ctrl+D"));
+    m_ui->actionReset_cam_position->setShortcut(shortcut("shortcutResetCamera", "Ctrl+R"));
+    m_ui->actionChange_mod_e->setShortcut(shortcut("shortcutSwitchMode", "Ctrl+Tab"));
     //m_ui->actionSwitch_active_MOB->setShortcut(QKeySequence(Qt::CTRL + Qt::Key_T));
-    m_ui->action_Mob_parameters->setShortcut(QKeySequence(Qt::CTRL + Qt::Key_M));
-    m_ui->actionReset_logic_paths->setShortcut(QKeySequence(Qt::CTRL + Qt::Key_P));
+    m_ui->action_Mob_parameters->setShortcut(shortcut("shortcutMobParameters", "Ctrl+M"));
+    m_ui->actionOpen_MOB_Script->setShortcut(shortcut("shortcutMobScript", "Ctrl+Shift+M"));
+    m_ui->actionReset_logic_paths->setShortcut(shortcut("shortcutResetLogicPaths", "Ctrl+P"));
 }
 
 void MainWindow::connectUiButtons()
@@ -568,6 +578,18 @@ void MainWindow::on_actionRedo_triggered()
     m_undoStack->redo();
 }
 
+void MainWindow::on_actionOpen_MOB_Script_triggered()
+{
+    if(m_pView && m_pView->hasActiveMob())
+        m_pView->openActiveMobScript();
+}
+
+void MainWindow::on_actionDuplicate_selected_objects_triggered()
+{
+    if(m_pView)
+        m_pView->duplicateSelectedObjects();
+}
+
 
 void MainWindow::on_actionCreate_new_object_triggered()
 {
@@ -587,6 +609,7 @@ void MainWindow::updateWindowTitle(eTitleTypeData type, QString data)
     {
         m_sWindowTitle.activeMob = data;
         m_ui->action_Mob_parameters->setEnabled(!data.isEmpty());
+        m_ui->actionOpen_MOB_Script->setEnabled(!data.isEmpty());
         break;
     }
     case eTitleTypeData::eTitleTypeDataMpr:

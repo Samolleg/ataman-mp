@@ -50,6 +50,9 @@ protected:
 public Q_SLOTS:
     bool close();
 
+signals:
+    void shortcutsChanged();
+
 private slots:
     void on_buttonApply_clicked();
     void on_buttonCancel_clicked();

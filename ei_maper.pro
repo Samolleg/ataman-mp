@@ -28,6 +28,8 @@ DEFINES += ENDURANCE_VERSION=\\\"$${ENDURANCE_VERSION}\\\"
 CONFIG += c++11
 
 SOURCES += \
+    external_script_workspace.cpp \
+    mob_script_window.cpp \
     backup_manager.cpp \
     duplicate_id_report.cpp \
     resource_profile.cpp \
@@ -93,6 +95,8 @@ SOURCES += \
     mob/range_dialog.cpp
 
 HEADERS += \
+    external_script_workspace.h \
+    mob_script_window.h \
     backup_manager.h \
     window_lifecycle.h \
     duplicate_id_report.h \
