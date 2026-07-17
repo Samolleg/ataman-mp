@@ -4,7 +4,7 @@ EI Mapper: Endurance Edition is an independently versioned derivative of
 [`konstvest/ei_maper`](https://github.com/konstvest/ei_maper), focused on safe,
 fast Evil Islands and Jamais Vu map editing.
 
-Current development version: `0.1.0-alpha.27`.
+Current development version: `0.1.0-alpha.28`.
 
 Project status and upcoming work are tracked in the living
 [Endurance roadmap](ROADMAP.md).
@@ -41,6 +41,9 @@ commit `1cebe83d` tagged as `upstream-1cebe83d`.
 - Headless `--validate` and `--roundtrip-check` commands are available.
 - First-run setup accepts the game installation folder and automatically
   configures built-in or external mod resource profiles.
+- Cached CPU frustum culling avoids submitting off-screen MOB objects in normal
+  object view. It can be disabled under **Settings > Render** for A/B testing;
+  selected objects, logic editing, and always-visible logic paths remain conservative.
 
 The alpha is not yet a production replacement for the original editor. In
 particular, most changed MOB output remains disabled until its field class or raw
