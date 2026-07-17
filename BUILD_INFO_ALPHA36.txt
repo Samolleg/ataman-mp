@@ -2,6 +2,7 @@ EI Mapper: Endurance Edition 0.1.0-alpha.36
 Implementation commit: 607715a
 Model-parts undo fix: 749b850
 Multi-field context clipboard fix: 7eba358
+Unicode-safe distribution gate: b025265
 Purpose: corrected script workflow and clean first-run tester package
 
 Alpha.36 contains no user settings, logs, or crash dumps. It restores first-run
