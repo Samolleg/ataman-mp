@@ -47,6 +47,10 @@ behavior.
   resource evidence, and raw structural preservation. ([Zone 5 report](ALPHA14_TESTER_ZONE5_VALIDATION.md))
 - [ ] Continue collecting structured testing-group results and focused in-game
   outcomes across additional maps and edit types.
+- [x] Validate an alpha.25 real-UI diplomacy edit (`OBJ_PLAYER` 4 -> 12) against
+  an independently generated MobExplorer candidate: exact full-file SHA-256 match,
+  one modified object, no added/removed objects, and no unrelated field changes.
+  ([validation](MOB_SHADOW_TRANSACTION_VALIDATION.md))
 - [ ] Expand changed-save regression coverage across the private JMV map corpus.
 - [ ] Migrate changed MOB saves from the legacy serializer to raw-tree transactions;
   no-op raw preservation is validated and leaf-only UI deltas now run through a

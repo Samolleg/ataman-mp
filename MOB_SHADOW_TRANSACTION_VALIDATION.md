@@ -54,6 +54,28 @@ derivation, and exact transaction reapplication for every currently installed MO
 No map or installation file was modified. The harness and document tests returned
 exit code 0, and the production MinGW build plus UI widget regression check passed.
 
+## Real UI evidence
+
+The first alpha.25 tester case changed one unit's diplomacy/player assignment from
+4 to 12 and then attempted Save As. The structured workflow log identified exactly
+one replacement leaf:
+
+- object: `WolfTutor-1364` (NID 1364, prototype `WolfGreyF0F`);
+- source path: `/OBJECT_DB_FILE[0]/OBJECT_SECTION[0]/UNIT[90]/0X0000B011[0]`;
+- field: `OBJ_PLAYER`, byte value 4 -> 12;
+- source MOB SHA-256: `DB5F3AB08E8D6EA920096887B17BE498A1E81A315AB50C85754922150C6A4D34`;
+- shadow candidate SHA-256: `A970310DB4886A668A539EE2AA16CA29D094A10C6FF32EC344CD2F6228E71729`.
+
+No output file was created by Endurance. The same edit was independently applied
+with the fingerprinted MobExplorer/EILib build. Its complete output MOB had the
+exact same candidate SHA-256. An independent object comparison reported 1 modified,
+0 added, 0 removed, and 1692 unchanged objects; `OBJ_PLAYER` was the only changed
+field. Endurance then strictly reparsed all 1,586,436 bytes and passed a
+byte-identical unchanged round trip of that candidate.
+
+This validates the `OBJ_PLAYER` byte-leaf edit class in shadow mode. It does not by
+itself authorize changed output or validate unrelated property types.
+
 ## Remaining gate
 
 Real UI operations must now produce representative shadow logs. Leaf-only property,

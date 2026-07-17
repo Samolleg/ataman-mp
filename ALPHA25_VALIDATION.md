@@ -48,3 +48,11 @@ Automated companion evidence is recorded in
 [MOB_SHADOW_TRANSACTION_VALIDATION.md](MOB_SHADOW_TRANSACTION_VALIDATION.md):
 254/254 installed Base/JMV MOBs passed in-memory transaction derivation and exact
 reapplication, alongside the document and UI regression suites.
+
+## Confirmed tester cases
+
+- [x] Diplomacy/player assignment: one existing unit changed from player 4 to
+  player 12. Endurance logged one `OBJ_PLAYER` byte leaf and no structural delta.
+  A fingerprinted MobExplorer reproduction produced the exact same complete MOB
+  SHA-256, with 1 modified object, 0 added, 0 removed, and no other changed field.
+  The candidate also passed Endurance's strict complete-byte round-trip check.
