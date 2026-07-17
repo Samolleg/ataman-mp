@@ -6,6 +6,8 @@
 #include <QFileInfo>
 #include <QCheckBox>
 #include <QKeySequenceEdit>
+#include <QHBoxLayout>
+#include <QPushButton>
 
 #include "settings.h"
 #include "ui_settings.h"
@@ -21,6 +23,29 @@ CSettings::CSettings(QWidget *parent) :
   ,m_version(1.0)
 {
     ui->setupUi(this);
+    QLabel* editorLabel = new QLabel(tr("External script editor"), ui->tabGeneral);
+    editorLabel->setToolTip(tr("Executable used to edit managed MOB scripts. Clear this field to use the Windows .lua file association."));
+    QLineEdit* editorPath = new QLineEdit(ui->tabGeneral);
+    editorPath->setObjectName("externalEditorPath");
+    editorPath->setPlaceholderText(tr("Windows file association"));
+    editorPath->setToolTip(editorLabel->toolTip());
+    QPushButton* browseEditor = new QPushButton(tr("Browse..."), ui->tabGeneral);
+    QPushButton* clearEditor = new QPushButton(tr("Clear"), ui->tabGeneral);
+    QHBoxLayout* editorControls = new QHBoxLayout;
+    editorControls->addWidget(editorPath, 1);
+    editorControls->addWidget(browseEditor);
+    editorControls->addWidget(clearEditor);
+    ui->gridLayout->addWidget(editorLabel, 6, 0);
+    ui->gridLayout->addLayout(editorControls, 6, 1);
+    connect(browseEditor, &QPushButton::clicked, this, [this, editorPath]()
+    {
+        const QString selected = QFileDialog::getOpenFileName(this,
+            tr("Select external script editor"), editorPath->text(),
+            tr("Applications (*.exe);;All files (*)"));
+        if(!selected.isEmpty())
+            editorPath->setText(QDir::toNativeSeparators(selected));
+    });
+    connect(clearEditor, &QPushButton::clicked, editorPath, &QLineEdit::clear);
     setWindowModality(Qt::WindowModal);
     ui->rangeIncrement->setValidator(new QIntValidator(1, 1000000, this));
     ui->undoHistoryLimit->setValidator(new QIntValidator(1, 1000000, this));
@@ -315,6 +340,7 @@ void CSettings::initOptions()
     aOpt.append(QSharedPointer<COpt>(new COptString("resourceProfile", "")));
     aOpt.append(QSharedPointer<COpt>(new COptString("gameRoot", "")));
     aOpt.append(QSharedPointer<COpt>(new COptString("lastVisitedFolder", "")));
+    aOpt.append(QSharedPointer<COpt>(new COptString("externalEditorPath", "")));
     aOpt.append(QSharedPointer<COpt>(new COptStringList("recentFiles", {})));
 
     //init default options for bools
@@ -348,6 +374,7 @@ void CSettings::initOptions()
         {"shortcutDuplicateObjects", "Ctrl+D"},
         {"shortcutMobParameters", "Ctrl+M"},
         {"shortcutMobScript", "Ctrl+Shift+M"},
+        {"shortcutExternalMobScript", "Ctrl+Alt+M"},
         {"shortcutResetCamera", "Ctrl+R"},
         {"shortcutResetLogicPaths", "Ctrl+P"},
         {"shortcutSwitchMode", "Ctrl+Tab"}

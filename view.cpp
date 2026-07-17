@@ -1133,6 +1133,8 @@ void CView::openActiveMobScript()
     CMobScriptWindow* window = new CMobScriptWindow(mob, this, this);
     m_scriptWindows.insert(mob, window);
     connect(this, &CView::mobScriptChanged, window, &CMobScriptWindow::onMobScriptChanged);
+    connect(this, &CView::externalMobScriptImported,
+            window, &CMobScriptWindow::onExternalMobScriptImported);
     connect(window, &QObject::destroyed, this, [this, mob]() { m_scriptWindows.remove(mob); });
     window->show();
     window->raise();
@@ -1142,7 +1144,15 @@ void CView::openActiveMobScript()
 void CView::openExternalMobScript(CMob* mob)
 {
     if(mob)
-        m_scriptWorkspaces->openEditor(mob);
+    {
+        QString editorExecutable;
+        if(m_pSettings)
+        {
+            if(COptString* option = dynamic_cast<COptString*>(m_pSettings->opt("externalEditorPath")))
+                editorExecutable = option->value();
+        }
+        m_scriptWorkspaces->openEditor(mob, editorExecutable);
+    }
 }
 
 void CView::commitMobParameterEdit(CMob* mob, const SMobParameterState& before,
@@ -1176,8 +1186,12 @@ void CView::notifyMobScriptChanged(CMob* mob)
 void CView::importExternalMobScript(CMob* mob, const QString& storedScript,
                                     const QString& displayScript)
 {
-    Q_UNUSED(displayScript);
     commitMobScriptEdit(mob, storedScript, tr("Import external MOB script"));
+    // An accepted import is authoritative. If the internal editor happens to
+    // be open (for example because the managed file was edited directly), show
+    // the imported document state instead of retaining a stale local draft.
+    if(mob && mob->script() == storedScript)
+        emit externalMobScriptImported(mob, displayScript);
 }
 
 bool CView::closeMobScriptWindow(CMob* mob)

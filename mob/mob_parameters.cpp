@@ -2,6 +2,7 @@
 #include <QMessageBox>
 #include <QTextBlock>
 #include <QMenu>
+#include <QCloseEvent>
 
 #include "mob_parameters.h"
 #include "ui_mob_parameters.h"
@@ -16,13 +17,12 @@ CMobParameters::CMobParameters(QWidget* parent, CMob* pMob, CView* pView):
     QWidget(parent, Qt::Window)
   ,ui(new Ui::CMobParameters)
   ,m_pCurMob(pMob)
-  ,m_pHighlighter(nullptr)
   ,m_pView(pView)
    ,m_isDurty(false)
+  ,m_closeAccepted(false)
   ,m_pShortcut(nullptr)
 {
     ui->setupUi(this);
-    setWindowFlags(windowFlags() & ~Qt::WindowCloseButtonHint);
     initLineEdit();
 
     m_pUndoStack.reset(new QUndoStack(this));
@@ -295,6 +295,7 @@ void CMobParameters::on_pushCancel_clicked()
 
     }
     emit editFinishedSignal(this);
+    m_closeAccepted = true;
     close();
 }
 
@@ -307,9 +308,23 @@ void CMobParameters::on_pushApply_clicked()
     m_pUndoStack->clear();
     m_pView->commitMobParameterEdit(m_pCurMob, m_initialState, finalState);
     emit editFinishedSignal(this);
+    m_closeAccepted = true;
     close();
 }
 
+void CMobParameters::closeEvent(QCloseEvent* event)
+{
+    if(m_closeAccepted)
+    {
+        event->accept();
+        return;
+    }
+
+    event->ignore();
+    on_pushCancel_clicked();
+}
+
+#if 0 // Legacy script highlighter moved to mob/script_highlighter.cpp.
 Highlighter::Highlighter(QTextDocument *parent)
     : QSyntaxHighlighter(parent)
 {
@@ -419,6 +434,8 @@ void Highlighter::highlightBlock(const QString &text)
       }
 }
 
+
+#endif
 
 void CMobParameters::on_isPrimaryBox_clicked()
 {

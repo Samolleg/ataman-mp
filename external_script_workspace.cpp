@@ -9,6 +9,7 @@
 #include <QStandardPaths>
 #include <QTextCodec>
 #include <QUrl>
+#include <QProcess>
 
 #include "mob/mob.h"
 #include "log.h"
@@ -35,11 +36,25 @@ QString CExternalScriptWorkspaceManager::displayScript(CMob* mob)
     return cp1251->toUnicode(mob->script().toLatin1());
 }
 
-bool CExternalScriptWorkspaceManager::encodeScript(const QString& display, QString* stored)
+QString CExternalScriptWorkspaceManager::canonicalScriptText(QString text)
 {
+    if(!text.isEmpty() && text.front() == QChar(0xfeff))
+        text.remove(0, 1);
+    text.replace("\r\n", "\n");
+    text.replace('\r', '\n');
+    return text;
+}
+
+bool CExternalScriptWorkspaceManager::encodeScript(
+        CMob* mob, const QString& display, QString* stored)
+{
+    QString normalized = canonicalScriptText(display);
+    const QString current = displayScript(mob);
+    if(current.contains("\r\n"))
+        normalized.replace("\n", "\r\n");
     QTextCodec* cp1251 = QTextCodec::codecForName("Windows-1251");
-    const QByteArray encoded = cp1251->fromUnicode(display);
-    if(cp1251->toUnicode(encoded) != display)
+    const QByteArray encoded = cp1251->fromUnicode(normalized);
+    if(cp1251->toUnicode(encoded) != normalized)
         return false;
     if(stored)
         *stored = QString::fromLatin1(encoded);
@@ -60,6 +75,26 @@ QString CExternalScriptWorkspaceManager::createWorkspacePath(CMob* mob) const
     return directory + QDir::separator() + mob->filePath().completeBaseName() + ".lua";
 }
 
+QString CExternalScriptWorkspaceManager::pendingMarkerPath(const QString& path)
+{
+    return path + ".pending";
+}
+
+void CExternalScriptWorkspaceManager::markPending(const QString& path)
+{
+    QFile marker(pendingMarkerPath(path));
+    if(marker.open(QIODevice::WriteOnly | QIODevice::Truncate))
+    {
+        marker.write("unimported external script change\n");
+        marker.close();
+    }
+}
+
+void CExternalScriptWorkspaceManager::clearPending(const QString& path)
+{
+    QFile::remove(pendingMarkerPath(path));
+}
+
 QString CExternalScriptWorkspaceManager::registerMob(CMob* mob)
 {
     if(!mob)
@@ -77,7 +112,9 @@ QString CExternalScriptWorkspaceManager::registerMob(CMob* mob)
     }
 
     const bool existingWorkspace = QFileInfo::exists(path);
-    if(!existingWorkspace)
+    const bool recoverableWorkspace = existingWorkspace
+            && QFileInfo::exists(pendingMarkerPath(path));
+    if(!recoverableWorkspace)
     {
         QFile file(path);
         if(!file.open(QIODevice::WriteOnly | QIODevice::Truncate))
@@ -85,8 +122,9 @@ QString CExternalScriptWorkspaceManager::registerMob(CMob* mob)
             ei::log(eLogWarning, QString("Could not initialize external script workspace path:%1").arg(path));
             return QString();
         }
-        file.write(displayScript(mob).toUtf8());
+        file.write(canonicalScriptText(displayScript(mob)).toUtf8());
         file.close();
+        clearPending(path);
     }
 
     m_mobPaths.insert(mob, path);
@@ -98,15 +136,17 @@ QString CExternalScriptWorkspaceManager::registerMob(CMob* mob)
     ei::log(eLogInfo, QString("Registered external script workspace mob:%1 path:%2")
             .arg(mob->mobName(), path));
 
-    if(existingWorkspace)
+    if(recoverableWorkspace)
     {
         QFile file(path);
         if(file.open(QIODevice::ReadOnly))
         {
-            const QString externalText = QString::fromUtf8(file.readAll());
+            const QString externalText = canonicalScriptText(QString::fromUtf8(file.readAll()));
             file.close();
-            if(externalText != displayScript(mob))
+            if(externalText != canonicalScriptText(displayScript(mob)))
                 schedulePath(path, 0);
+            else
+                clearPending(path);
         }
     }
     return path;
@@ -137,12 +177,46 @@ QString CExternalScriptWorkspaceManager::workspacePath(CMob* mob) const
     return m_mobPaths.value(mob);
 }
 
-bool CExternalScriptWorkspaceManager::openEditor(CMob* mob)
+bool CExternalScriptWorkspaceManager::openEditor(CMob* mob, const QString& editorExecutable)
 {
     const QString path = registerMob(mob);
     if(path.isEmpty())
         return false;
-    const bool opened = QDesktopServices::openUrl(QUrl::fromLocalFile(path));
+    if(!QFileInfo::exists(pendingMarkerPath(path)))
+    {
+        // Internal edits may have changed the embedded script since the MOB was
+        // registered. Start an external session from the current document, not
+        // from an obsolete managed file, without generating our own import event.
+        m_watcher.removePath(path);
+        QFile file(path);
+        if(!file.open(QIODevice::WriteOnly | QIODevice::Truncate))
+        {
+            m_watcher.addPath(path);
+            QMessageBox::warning(m_promptParent, "External editor",
+                "Could not synchronize the managed script file with the active MOB.");
+            return false;
+        }
+        file.write(canonicalScriptText(displayScript(mob)).toUtf8());
+        file.close();
+        clearPending(path);
+        m_lastHandledText.remove(path);
+        m_watcher.addPath(path);
+    }
+    bool opened = false;
+    if(!editorExecutable.trimmed().isEmpty())
+    {
+        const QFileInfo executable(editorExecutable.trimmed());
+        if(!executable.isFile())
+        {
+            QMessageBox::warning(m_promptParent, "External editor",
+                QString("The configured external editor does not exist:\n%1\n\nChoose another editor in Settings > General, or clear it to use the Windows file association.")
+                    .arg(QDir::toNativeSeparators(editorExecutable)));
+            return false;
+        }
+        opened = QProcess::startDetached(executable.absoluteFilePath(), QStringList() << path);
+    }
+    else
+        opened = QDesktopServices::openUrl(QUrl::fromLocalFile(path));
     if(!opened)
         QMessageBox::warning(m_promptParent, "External editor",
             "No application is associated with script files. Configure a Windows file association and try again.");
@@ -161,6 +235,7 @@ void CExternalScriptWorkspaceManager::schedulePath(const QString& path, int dela
 void CExternalScriptWorkspaceManager::onFileChanged(const QString& path)
 {
     ei::log(eLogInfo, QString("External script file notification path:%1").arg(path));
+    markPending(path);
     schedulePath(path);
 }
 
@@ -170,7 +245,21 @@ void CExternalScriptWorkspaceManager::onDirectoryChanged(const QString& director
     for(auto it = m_pathMobs.constBegin(); it != m_pathMobs.constEnd(); ++it)
     {
         if(QFileInfo(it.key()).absolutePath() == directory)
-            schedulePath(it.key());
+        {
+            const QString path = it.key();
+            if(QFileInfo::exists(path) && !m_watcher.files().contains(path))
+                m_watcher.addPath(path);
+            QFile file(path);
+            if(!file.open(QIODevice::ReadOnly))
+                continue;
+            const QString text = canonicalScriptText(QString::fromUtf8(file.readAll()));
+            file.close();
+            if(text == canonicalScriptText(displayScript(it.value()))
+               || text == m_lastHandledText.value(path))
+                continue; // Ignore our own marker create/remove notifications.
+            markPending(path);
+            schedulePath(path);
+        }
     }
 }
 
@@ -207,24 +296,27 @@ void CExternalScriptWorkspaceManager::processPendingChange()
         return;
     }
     m_readRetries.remove(path);
-    const QString externalText = QString::fromUtf8(file.readAll());
+    const QString externalText = canonicalScriptText(QString::fromUtf8(file.readAll()));
     file.close();
     if(QFileInfo::exists(path) && !m_watcher.files().contains(path))
         m_watcher.addPath(path);
-    if(externalText == displayScript(mob) || externalText == m_lastHandledText.value(path))
+    if(externalText == canonicalScriptText(displayScript(mob))
+       || externalText == m_lastHandledText.value(path))
     {
+        clearPending(path);
         continuePending();
         return;
     }
 
     QString storedScript;
-    if(!encodeScript(externalText, &storedScript))
+    if(!encodeScript(mob, externalText, &storedScript))
     {
         m_lastHandledText.insert(path, externalText);
         m_promptOpen = true;
         QMessageBox::critical(m_promptParent, "External script changed",
             "The external file contains characters that cannot round-trip through Windows-1251. The MOB script was not changed.");
         m_promptOpen = false;
+        clearPending(path);
         continuePending();
         return;
     }
@@ -236,6 +328,7 @@ void CExternalScriptWorkspaceManager::processPendingChange()
                     .arg(mob->mobName()), QMessageBox::Yes | QMessageBox::No);
     m_promptOpen = false;
     m_lastHandledText.insert(path, externalText);
+    clearPending(path);
     if(answer == QMessageBox::Yes)
     {
         emit scriptImportAccepted(mob, storedScript, externalText);

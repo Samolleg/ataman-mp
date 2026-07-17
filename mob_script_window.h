@@ -18,6 +18,7 @@ public:
 
 public slots:
     void onMobScriptChanged(CMob* mob, const QString& displayScript);
+    void onExternalMobScriptImported(CMob* mob, const QString& displayScript);
 
 protected:
     void closeEvent(QCloseEvent* event) override;
@@ -28,6 +29,7 @@ private slots:
 
 private:
     static QString displayScript(CMob* mob);
+    static QString canonicalScriptText(QString text);
     bool applyCurrentText();
     bool hasLocalChanges() const;
 

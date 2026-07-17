@@ -7,48 +7,11 @@
 #include <QPlainTextEdit>
 #include <QUndoStack>
 #include <QUndoView>
-#include <QSyntaxHighlighter>
 #include <QListWidgetItem>
 #include <QLineEdit>
 #include <QShortcut>
 
 #include "mob.h"
-
-///
-/// \brief The Highlighter class provides syntax highlighting for the *.mob file script.
-///
-class Highlighter : public QSyntaxHighlighter
- {
-     Q_OBJECT
-
- public:
-     Highlighter(QTextDocument *parent = 0);
-
- protected:
-     void highlightBlock(const QString &text);
-
- private:
-     struct HighlightingRule
-     {
-         QRegExp pattern;
-         QTextCharFormat format;
-     };
-     QVector<HighlightingRule> highlightingRules;
-
-     QRegExp commentStartExpression;
-     QRegExp commentEndExpression;
-
-     QTextCharFormat keywordFormat;
-     QTextCharFormat classFormat;
-     QTextCharFormat singleLineCommentFormat;
-     QTextCharFormat multiLineCommentFormat;
-     QTextCharFormat quotationFormat;
-     QTextCharFormat functionFormat;
-     QTextCharFormat customFunctionFormat;
-     QTextCharFormat typesFormat;
-     QTextCharFormat numberFormat;
- };
-
 
 class CMobParameters;
 class CParamLineEdit : public QLineEdit
@@ -90,6 +53,9 @@ public:
     void setNewRange(SRange& arrRanges, int index);
     const CMob* mob() {return m_pCurMob;}
 
+protected:
+    void closeEvent(QCloseEvent* event) override;
+
 signals:
     void editFinishedSignal(CMobParameters*); //todo: add signal for pressing 'X'
 
@@ -127,12 +93,12 @@ private:
     CMob* m_pCurMob;
     QVector<QSharedPointer<QTableWidgetItem>> m_aCell;
     QSharedPointer<QTableWidget> m_pTable;
-    Highlighter* m_pHighlighter;
     QString m_lastItemText;
     CView* m_pView;
     QSharedPointer<QUndoStack> m_pUndoStack;
     QVector<CParamLineEdit*> m_arrMobParam;
     bool m_isDurty;
+    bool m_closeAccepted;
     QShortcut* m_pShortcut;
     SMobParameterState m_initialState;
 };

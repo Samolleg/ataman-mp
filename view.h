@@ -200,6 +200,7 @@ signals:
     void updateMainWindowTitle(eTitleTypeData, QString);
     void showOutlinerSignal(bool bShow);
     void mobScriptChanged(CMob* mob, const QString& displayScript);
+    void externalMobScriptImported(CMob* mob, const QString& displayScript);
 
 private:
     int m_height; //for redraw window

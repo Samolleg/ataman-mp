@@ -55,7 +55,8 @@ MainWindow::MainWindow(QWidget* parent) :
     QMainWindow(parent),
     m_ui(new Ui::MainWindow),
     m_pView(nullptr),
-    m_recentFilesMenu(nullptr)
+    m_recentFilesMenu(nullptr),
+    m_externalScriptAction(nullptr)
 {
 #ifdef QT_DEBUG
     testFunc();
@@ -69,6 +70,13 @@ MainWindow::MainWindow(QWidget* parent) :
     m_pTileForm.reset(new CTileForm(this));
     m_settings->attachMainWindow(this);
     m_ui->setupUi(this); //init CView core also
+    m_externalScriptAction = new QAction(tr("Open MOB Script in External Editor"), this);
+    m_ui->menuEdit->addAction(m_externalScriptAction);
+    connect(m_externalScriptAction, &QAction::triggered, this, [this]()
+    {
+        if(m_pView && m_pView->hasActiveMob())
+            m_pView->openExternalMobScript(m_pView->currentMob());
+    });
     m_recentFilesMenu = new QMenu(tr("Open Recent"), this);
     m_ui->menuFile->insertMenu(m_ui->actionOpen_recent, m_recentFilesMenu);
 
@@ -182,6 +190,7 @@ MainWindow::MainWindow(QWidget* parent) :
     connect(m_settings.get(), &CSettings::shortcutsChanged, this, &MainWindow::initShortcuts);
     m_ui->action_Mob_parameters->setEnabled(false);
     m_ui->actionOpen_MOB_Script->setEnabled(false);
+    m_externalScriptAction->setEnabled(false);
     QObject::connect(m_pView, SIGNAL(updateMainWindowTitle(eTitleTypeData,QString)), this, SLOT(updateWindowTitle(eTitleTypeData,QString)));
     QObject::connect(CScene::getInstance(), SIGNAL(modeChanged()), m_pView, SLOT(viewParameters()));
     QObject::connect(m_pView, SIGNAL(showOutlinerSignal(bool)), this, SLOT(showOutliner(bool)));
@@ -285,6 +294,7 @@ void MainWindow::initShortcuts()
     //m_ui->actionSwitch_active_MOB->setShortcut(QKeySequence(Qt::CTRL + Qt::Key_T));
     m_ui->action_Mob_parameters->setShortcut(shortcut("shortcutMobParameters", "Ctrl+M"));
     m_ui->actionOpen_MOB_Script->setShortcut(shortcut("shortcutMobScript", "Ctrl+Shift+M"));
+    m_externalScriptAction->setShortcut(shortcut("shortcutExternalMobScript", "Ctrl+Alt+M"));
     m_ui->actionReset_logic_paths->setShortcut(shortcut("shortcutResetLogicPaths", "Ctrl+P"));
 }
 
@@ -610,6 +620,7 @@ void MainWindow::updateWindowTitle(eTitleTypeData type, QString data)
         m_sWindowTitle.activeMob = data;
         m_ui->action_Mob_parameters->setEnabled(!data.isEmpty());
         m_ui->actionOpen_MOB_Script->setEnabled(!data.isEmpty());
+        m_externalScriptAction->setEnabled(!data.isEmpty());
         break;
     }
     case eTitleTypeData::eTitleTypeDataMpr:

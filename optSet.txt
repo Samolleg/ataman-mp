@@ -1,6 +1,7 @@
 Option set name:General
 gameRoot
 lastVisitedFolder
+externalEditorPath
 recentFiles
 version
 mouseSenseX

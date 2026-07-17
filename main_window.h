@@ -22,6 +22,7 @@ class CView;
 class CRandomizeForm;
 class CTileForm;
 class QMenu;
+class QAction;
 
 struct SWindowTitle
 {
@@ -108,6 +109,7 @@ private:
     SWindowTitle m_sWindowTitle;
     QTableWidget* m_testTable;
     QMenu* m_recentFilesMenu;
+    QAction* m_externalScriptAction;
 };
 
 #endif // MAIN_WINDOW_H

@@ -10,6 +10,7 @@
 
 #include "mob/mob.h"
 #include "mob/script_editor.h"
+#include "mob/script_highlighter.h"
 #include "view.h"
 
 CMobScriptWindow::CMobScriptWindow(CMob* mob, CView* view, QWidget* parent)
@@ -25,7 +26,7 @@ CMobScriptWindow::CMobScriptWindow(CMob* mob, CView* view, QWidget* parent)
     layout->addWidget(m_editor);
     QHBoxLayout* buttons = new QHBoxLayout;
     QPushButton* external = new QPushButton(tr("Open External Editor"), this);
-    QPushButton* apply = new QPushButton(tr("Apply"), this);
+    QPushButton* apply = new QPushButton(tr("Apply and Close"), this);
     QPushButton* closeButton = new QPushButton(tr("Close"), this);
     buttons->addWidget(external);
     buttons->addStretch();
@@ -35,6 +36,8 @@ CMobScriptWindow::CMobScriptWindow(CMob* mob, CView* view, QWidget* parent)
 
     m_committedDisplayScript = displayScript(mob);
     m_editor->setPlainText(m_committedDisplayScript);
+    m_committedDisplayScript = m_editor->toPlainText();
+    new CScriptHighlighter(m_editor->document());
     connect(external, &QPushButton::clicked, this, &CMobScriptWindow::openExternalEditor);
     connect(apply, &QPushButton::clicked, this, &CMobScriptWindow::applyScript);
     connect(closeButton, &QPushButton::clicked, this, &QWidget::close);
@@ -50,6 +53,15 @@ QString CMobScriptWindow::displayScript(CMob* mob)
     return cp1251->toUnicode(mob->script().toLatin1());
 }
 
+QString CMobScriptWindow::canonicalScriptText(QString text)
+{
+    if(!text.isEmpty() && text.front() == QChar(0xfeff))
+        text.remove(0, 1);
+    text.replace("\r\n", "\n");
+    text.replace('\r', '\n');
+    return text;
+}
+
 bool CMobScriptWindow::hasLocalChanges() const
 {
     return m_editor->toPlainText() != m_committedDisplayScript;
@@ -59,10 +71,20 @@ bool CMobScriptWindow::applyCurrentText()
 {
     if(!m_mob || !m_view)
         return false;
-    const QString display = m_editor->toPlainText();
+    const QString display = canonicalScriptText(m_editor->toPlainText());
+    const QString currentDisplay = displayScript(m_mob);
+    if(display == canonicalScriptText(currentDisplay))
+    {
+        m_committedDisplayScript = m_editor->toPlainText();
+        m_editor->document()->setModified(false);
+        return true;
+    }
+    QString storedDisplay = display;
+    if(currentDisplay.contains("\r\n"))
+        storedDisplay.replace("\n", "\r\n");
     QTextCodec* cp1251 = QTextCodec::codecForName("Windows-1251");
-    const QByteArray encoded = cp1251->fromUnicode(display);
-    if(cp1251->toUnicode(encoded) != display)
+    const QByteArray encoded = cp1251->fromUnicode(storedDisplay);
+    if(cp1251->toUnicode(encoded) != storedDisplay)
     {
         QMessageBox::critical(this, tr("Script encoding"),
             tr("The script contains characters that cannot be stored in Windows-1251. Nothing was applied."));
@@ -71,7 +93,7 @@ bool CMobScriptWindow::applyCurrentText()
     const QString stored = QString::fromLatin1(encoded);
     if(stored != m_mob->script())
         m_view->commitMobScriptEdit(m_mob, stored, tr("Edit MOB script"));
-    m_committedDisplayScript = display;
+    m_committedDisplayScript = m_editor->toPlainText();
     setWindowTitle(QString("MOB Script: %1").arg(m_mob->filePath().absoluteFilePath()));
     m_editor->document()->setModified(false);
     return true;
@@ -79,22 +101,26 @@ bool CMobScriptWindow::applyCurrentText()
 
 void CMobScriptWindow::applyScript()
 {
-    applyCurrentText();
+    if(applyCurrentText())
+        close();
 }
 
 void CMobScriptWindow::openExternalEditor()
 {
-    if(m_view && m_mob)
-        m_view->openExternalMobScript(m_mob);
+    CView* view = m_view;
+    CMob* mob = m_mob;
+    if(view && mob && requestClose())
+        view->openExternalMobScript(mob);
 }
 
 void CMobScriptWindow::onMobScriptChanged(CMob* mob, const QString& display)
 {
     if(mob != m_mob)
         return;
-    if(display == m_editor->toPlainText())
+    const QString normalizedDisplay = canonicalScriptText(display);
+    if(normalizedDisplay == canonicalScriptText(m_editor->toPlainText()))
     {
-        m_committedDisplayScript = display;
+        m_committedDisplayScript = m_editor->toPlainText();
         setWindowTitle(QString("MOB Script: %1").arg(m_mob->filePath().absoluteFilePath()));
         m_editor->document()->setModified(false);
         return;
@@ -104,13 +130,25 @@ void CMobScriptWindow::onMobScriptChanged(CMob* mob, const QString& display)
         // Undo, redo, or an accepted external import changed the document while
         // this editor has its own unapplied text. Preserve both: the document
         // becomes the new base and the local text remains available to apply.
-        m_committedDisplayScript = display;
+        m_committedDisplayScript = normalizedDisplay;
         setWindowTitle(QString("MOB Script: %1 [unapplied local text retained]")
                        .arg(m_mob->filePath().absoluteFilePath()));
         return;
     }
-    m_editor->setPlainText(display);
-    m_committedDisplayScript = display;
+    m_editor->setPlainText(normalizedDisplay);
+    m_committedDisplayScript = m_editor->toPlainText();
+    setWindowTitle(QString("MOB Script: %1").arg(m_mob->filePath().absoluteFilePath()));
+    m_editor->document()->setModified(false);
+}
+
+void CMobScriptWindow::onExternalMobScriptImported(CMob* mob, const QString& display)
+{
+    if(mob != m_mob)
+        return;
+
+    const QString normalizedDisplay = canonicalScriptText(display);
+    m_editor->setPlainText(normalizedDisplay);
+    m_committedDisplayScript = m_editor->toPlainText();
     setWindowTitle(QString("MOB Script: %1").arg(m_mob->filePath().absoluteFilePath()));
     m_editor->document()->setModified(false);
 }

@@ -30,6 +30,7 @@ CONFIG += c++11
 SOURCES += \
     external_script_workspace.cpp \
     mob_script_window.cpp \
+    mob/script_highlighter.cpp \
     backup_manager.cpp \
     duplicate_id_report.cpp \
     resource_profile.cpp \
@@ -97,6 +98,7 @@ SOURCES += \
 HEADERS += \
     external_script_workspace.h \
     mob_script_window.h \
+    mob/script_highlighter.h \
     backup_manager.h \
     window_lifecycle.h \
     duplicate_id_report.h \

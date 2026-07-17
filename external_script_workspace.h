@@ -19,7 +19,7 @@ public:
 
     QString registerMob(CMob* mob);
     void unregisterMob(CMob* mob);
-    bool openEditor(CMob* mob);
+    bool openEditor(CMob* mob, const QString& editorExecutable = QString());
     QString workspacePath(CMob* mob) const;
 
 signals:
@@ -33,8 +33,12 @@ private slots:
 
 private:
     static QString displayScript(CMob* mob);
-    static bool encodeScript(const QString& display, QString* stored);
+    static QString canonicalScriptText(QString text);
+    static bool encodeScript(CMob* mob, const QString& display, QString* stored);
     QString createWorkspacePath(CMob* mob) const;
+    static QString pendingMarkerPath(const QString& path);
+    static void markPending(const QString& path);
+    static void clearPending(const QString& path);
     void schedulePath(const QString& path, int delayMs = 250);
     void continuePending();
 
