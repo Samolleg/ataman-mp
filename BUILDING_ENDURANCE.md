@@ -21,6 +21,10 @@ mingw32-make -j4
 
 Build into a separate shadow-build directory for normal development.
 
+For unattended build verification, use `--ui-widget-check`, the headless MOB/MPR
+commands below, or the non-dialog `--version` option. Validation must not launch
+the editor without an explicit file or leave About/version windows open.
+
 ## Unit tests
 
 ```powershell

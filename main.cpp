@@ -182,7 +182,12 @@ int runHeadlessCommand(QApplication& app)
     QCommandLineParser parser;
     parser.setApplicationDescription("EI Mapper: Endurance Edition validation tools");
     parser.addHelpOption();
-    parser.addVersionOption();
+    // QCommandLineParser's built-in version option uses a QMessageBox for a
+    // Windows GUI executable. Keep version probes non-interactive so automated
+    // builds never leave an editor-name/version window for the user to close.
+    QCommandLineOption versionOption(QStringList() << "v" << "version",
+                                     "Print the application version without opening a window.");
+    parser.addOption(versionOption);
     QCommandLineOption validateOption("validate", "Validate a MOB or MPR without changing it.", "file");
     QCommandLineOption roundtripOption("roundtrip-check", "Verify byte-identical unchanged serialization.", "file");
     QCommandLineOption jsonOption("json", "Emit machine-readable JSON.");
@@ -203,6 +208,15 @@ int runHeadlessCommand(QApplication& app)
     parser.addOption(desktopOpenGlOption);
     parser.addPositionalArgument("documents", "MPR and MOB documents to open in order.", "[documents...]");
     parser.process(app);
+
+    if(parser.isSet(versionOption))
+    {
+        QTextStream output(stdout);
+        output << QCoreApplication::applicationName() << " "
+               << QCoreApplication::applicationVersion() << "\n";
+        output.flush();
+        return 0;
+    }
 
     const bool validate = parser.isSet(validateOption);
     const bool roundtrip = parser.isSet(roundtripOption);
