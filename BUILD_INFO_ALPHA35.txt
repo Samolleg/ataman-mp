@@ -1,4 +1,7 @@
 EI Mapper: Endurance Edition 0.1.0-alpha.35
+Non-interactive version commit: b10261f
+Clean-package implementation commit: a3a416b
+Package source snapshot: tag v0.1.0-alpha.35
 Purpose: clean first-run tester package and non-interactive build verification
 
 Alpha.35 supersedes the withdrawn alpha.34 package. Alpha.34 accidentally

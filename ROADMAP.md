@@ -45,6 +45,7 @@ behavior.
 | MOB-parameter transactions, stable logic undo, repeated-save provenance, and typed property clipboard | [`f4b107c`](https://github.com/Ilufus/ei-mapper-endurance/commit/f4b107c) | Seven regression suites, UI widget checks, Zone 1 no-op round trip, and [alpha.32 checks](ALPHA32_VALIDATION.md) |
 | Debounced external-script import and row-based typed property clipboard | [`5192c4d`](https://github.com/Ilufus/ei-mapper-endurance/commit/5192c4d) | Extended UI clipboard checks, seven regression suites, Zone 1 no-op round trip, and [alpha.33 checks](ALPHA33_VALIDATION.md) |
 | Document-owned script workspace, independent script editor, first patrol creation, duplicate/history shortcuts, and persisted application keybinds | [`258893c`](https://github.com/Ilufus/ei-mapper-endurance/commit/258893c) | Production MinGW build, extended UI/settings checks, and [alpha.34 checks](ALPHA34_VALIDATION.md) |
+| Non-interactive version probing and clean first-run distribution gate | [`b10261f`](https://github.com/Ilufus/ei-mapper-endurance/commit/b10261f), [`a3a416b`](https://github.com/Ilufus/ei-mapper-endurance/commit/a3a416b) | [alpha.35 clean-package checks](ALPHA35_VALIDATION.md) |
 
 Alpha.34 packaging is withdrawn: it accidentally included a developer-local
 `endurance-options.json`, which suppressed first-run setup and exposed local game
