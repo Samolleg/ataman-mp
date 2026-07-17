@@ -1612,57 +1612,61 @@ bool CMob::saveAs(const QFileInfo& path)
         {
             QByteArray currentProjection;
             serializeMob(currentProjection, false);
-            CValidationReport shadowReport;
-            CMobDocument sourceDocument;
-            CMobDocument cleanProjectionDocument;
-            CMobDocument editedProjectionDocument;
-            CMobEditTransaction shadowTransaction("dirty UI projection shadow migration");
-            QByteArray shadowCandidate;
-            const bool shadowReady =
-                sourceDocument.loadBytes(m_originalData, m_filePath.filePath(), &shadowReport) &&
-                cleanProjectionDocument.loadBytes(m_cleanProjection, "clean-ui-projection.mob", &shadowReport) &&
-                editedProjectionDocument.loadBytes(currentProjection, "edited-ui-projection.mob", &shadowReport) &&
-                sourceDocument.deriveLeafTransaction(cleanProjectionDocument,
-                                                      editedProjectionDocument,
-                                                      &shadowTransaction, &shadowReport) &&
-                !shadowTransaction.isEmpty() &&
-                sourceDocument.applyTransaction(shadowTransaction, &shadowCandidate, &shadowReport);
-            if(shadowReady)
+            CValidationReport transactionReport;
+            CMobEditTransaction transaction;
+            QByteArray transactionCandidate;
+            const bool candidateReady = CMobDocument::buildProjectionTransactionCandidate(
+                m_originalData, m_filePath.filePath(), m_cleanProjection,
+                currentProjection, &transaction, &transactionCandidate, &transactionReport);
+            if(candidateReady)
             {
                 const QString candidateHash = QString::fromLatin1(
-                    QCryptographicHash::hash(shadowCandidate, QCryptographicHash::Sha256).toHex());
-                ei::log(eLogInfo, QString("Shadow MOB transaction validated path:%1 edits:%2 size:%3 sha256:%4")
-                    .arg(filePath).arg(shadowTransaction.edits().size())
-                    .arg(shadowCandidate.size()).arg(candidateHash));
-                for(int editIndex = 0; editIndex < shadowTransaction.edits().size(); ++editIndex)
+                    QCryptographicHash::hash(transactionCandidate, QCryptographicHash::Sha256).toHex());
+                ei::log(eLogInfo, QString("MOB transaction candidate validated path:%1 edits:%2 size:%3 sha256:%4")
+                    .arg(filePath).arg(transaction.edits().size())
+                    .arg(transactionCandidate.size()).arg(candidateHash));
+                for(int editIndex = 0; editIndex < transaction.edits().size(); ++editIndex)
                 {
-                    const SMobLeafEdit& edit = shadowTransaction.edits().at(editIndex);
+                    const SMobLeafEdit& edit = transaction.edits().at(editIndex);
                     const QString replacementHash = QString::fromLatin1(
                         QCryptographicHash::hash(edit.replacementPayload,
                                                  QCryptographicHash::Sha256).toHex());
-                    ei::log(eLogInfo, QString("Shadow MOB leaf edit index:%1/%2 path:%3 sourceSectionSha256:%4 replacementSize:%5 replacementSha256:%6")
-                        .arg(editIndex + 1).arg(shadowTransaction.edits().size())
+                    ei::log(eLogInfo, QString("MOB transaction leaf edit index:%1/%2 type:0x%3 path:%4 sourceSectionSha256:%5 replacementSize:%6 replacementSha256:%7")
+                        .arg(editIndex + 1).arg(transaction.edits().size())
+                        .arg(edit.sectionType, 8, 16, QLatin1Char('0'))
                         .arg(edit.sectionPath,
                              QString::fromLatin1(edit.expectedSectionSha256.toHex()))
                         .arg(edit.replacementPayload.size()).arg(replacementHash));
                 }
+                QString validatedClassName;
+                if(transaction.validatedChangedSaveClass(&validatedClassName))
+                {
+                    data = transactionCandidate;
+                    ei::log(eLogInfo, QString("MOB transaction save authorized class:%1 path:%2 edits:%3")
+                        .arg(validatedClassName, filePath).arg(transaction.edits().size()));
+                }
+                else
+                    ei::log(eLogWarning, QString("MOB transaction candidate uses an unvalidated save class path:%1")
+                        .arg(filePath));
             }
             else
             {
-                ei::log(eLogWarning, QString("Shadow MOB transaction not applicable path:%1 findings:%2")
-                    .arg(filePath, shadowReport.toText().trimmed()));
+                ei::log(eLogWarning, QString("MOB transaction candidate not applicable path:%1 findings:%2")
+                    .arg(filePath, transactionReport.toText().trimmed()));
             }
-            ei::log(eLogFatal, QString("Refusing dirty MOB save until UI edits use provenance transactions path:%1")
-                .arg(filePath));
-            QMessageBox::critical(nullptr, "Lossless MOB save not available yet",
-                "This document contains edits, but the edited UI fields have not yet been migrated to the "
-                "provenance-based MobEditTransaction save path.\n\n"
-                "Endurance evaluated this state through the new shadow transaction bridge and recorded the "
-                "result in logs/workflow.log, but shadow candidates are never written.\n\n"
-                "Endurance will not fall back to the legacy rebuilding serializer. No destination or backup "
-                "file was changed. Undo every edit until the title's changed marker disappears, then Save As "
-                "can create a byte-identical copy of the original MOB.");
-            return false;
+            if(data.isEmpty())
+            {
+                ei::log(eLogFatal, QString("Refusing dirty MOB save because its transaction class is not enabled path:%1")
+                    .arg(filePath));
+                QMessageBox::critical(nullptr, "Lossless MOB save not available for this edit",
+                    "Endurance could not authorize this complete edit set for changed output.\n\n"
+                    "Only the independently validated unit player/diplomacy assignment field is currently "
+                    "enabled for provenance-checked changed saves. Other leaf candidates are logged for "
+                    "validation, while copied/deleted objects and patrol-point changes remain blocked.\n\n"
+                    "No destination or backup file was changed. Endurance will not fall back to the legacy "
+                    "rebuilding serializer.");
+                return false;
+            }
         }
 
         if(data.size() < 16 || (!m_originalData.isEmpty() && data.left(4) != m_originalData.left(4)))

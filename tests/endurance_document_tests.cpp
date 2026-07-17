@@ -76,6 +76,8 @@ private slots:
     void projectionDeltaRejectsStructuralEdits();
     void projectionDeltaRejectsMissingSourceRecord();
     void projectionDeltaRejectsCanonicalizedSourceLeaf();
+    void projectionSaveCandidateIsProvenanceChecked();
+    void projectionSaveCandidateRejectsStructuralEdit();
     void transactionRejectsStaleProvenance();
     void cp1251EncodingIsStrict();
     void unchangedMprIsByteIdentical();
@@ -328,6 +330,47 @@ void EnduranceDocumentTests::transactionRejectsStaleProvenance()
     QByteArray candidate;
     CValidationReport report;
     QVERIFY(!document.applyTransaction(transaction, &candidate, &report));
+    QVERIFY(candidate.isEmpty());
+    QVERIFY(report.hasErrors());
+}
+
+void EnduranceDocumentTests::projectionSaveCandidateIsProvenanceChecked()
+{
+    const QByteArray emptyDirectory = section(0xE000);
+    const QByteArray sourceBytes = validMob(emptyDirectory + section(0xB011, QByteArray(1, '\x04')));
+    const QByteArray cleanBytes = validMob(section(0xB011, QByteArray(1, '\x04')));
+    const QByteArray editedBytes = validMob(section(0xB011, QByteArray(1, '\x0c')));
+    CMobEditTransaction transaction;
+    QByteArray candidate;
+    CValidationReport report;
+    QVERIFY2(CMobDocument::buildProjectionTransactionCandidate(
+                 sourceBytes, "source.mob", cleanBytes, editedBytes,
+                 &transaction, &candidate, &report), qPrintable(report.toText()));
+    QCOMPARE(transaction.edits().size(), 1);
+    QCOMPARE(transaction.edits().front().sectionType, quint32(0xB011));
+    QCOMPARE(transaction.edits().front().replacementPayload, QByteArray(1, '\x0c'));
+    QString saveClass;
+    QVERIFY(transaction.validatedChangedSaveClass(&saveClass));
+    QCOMPARE(saveClass, QString("OBJ_PLAYER"));
+    QCOMPARE(candidate, validMob(emptyDirectory + section(0xB011, QByteArray(1, '\x0c'))));
+
+    CMobEditTransaction unvalidated("unvalidated class");
+    unvalidated.replaceLeafPayload("/OTHER[0]", QByteArray(32, '\0'), "text", 0xB004);
+    QVERIFY(!unvalidated.validatedChangedSaveClass());
+}
+
+void EnduranceDocumentTests::projectionSaveCandidateRejectsStructuralEdit()
+{
+    const QByteArray sourceBytes = validMob(section(0xB000, object(42, "boar")));
+    const QByteArray editedBytes = validMob(section(0xB000,
+        object(42, "boar") + object(43, "wolf")));
+    CMobEditTransaction transaction;
+    QByteArray candidate("must be cleared");
+    CValidationReport report;
+    QVERIFY(!CMobDocument::buildProjectionTransactionCandidate(
+                sourceBytes, "source.mob", sourceBytes, editedBytes,
+                &transaction, &candidate, &report));
+    QVERIFY(transaction.isEmpty());
     QVERIFY(candidate.isEmpty());
     QVERIFY(report.hasErrors());
 }

@@ -367,9 +367,25 @@ void CValidationReport::add(const QString& code, EValidationSeverity severity, c
 
 void CMobEditTransaction::replaceLeafPayload(const QString& sectionPath,
                                              const QByteArray& expectedSectionSha256,
-                                             const QByteArray& replacementPayload)
+                                             const QByteArray& replacementPayload,
+                                             quint32 sectionType)
 {
-    m_edits.append({sectionPath, expectedSectionSha256, replacementPayload});
+    m_edits.append(SMobLeafEdit(sectionPath, expectedSectionSha256,
+                                replacementPayload, sectionType));
+}
+
+bool CMobEditTransaction::validatedChangedSaveClass(QString* className) const
+{
+    if(className)
+        className->clear();
+    if(m_edits.isEmpty())
+        return false;
+    for(const SMobLeafEdit& edit : m_edits)
+        if(edit.sectionType != 0xB011 || edit.replacementPayload.size() != 1)
+            return false;
+    if(className)
+        *className = "OBJ_PLAYER";
+    return true;
 }
 
 bool CValidationReport::hasErrors() const
@@ -795,17 +811,63 @@ bool CMobDocument::deriveLeafTransaction(const CMobDocument& cleanProjection,
                             it.key());
             return false;
         }
-        derivedEdits.append({it.key(), (*sourceIt)->sha256, edited.rawBytes.mid(8)});
+        derivedEdits.append(SMobLeafEdit(it.key(), (*sourceIt)->sha256,
+                                         edited.rawBytes.mid(8), edited.type));
     }
 
     for(const SMobLeafEdit& edit : derivedEdits)
         transaction->replaceLeafPayload(edit.sectionPath, edit.expectedSectionSha256,
-                                        edit.replacementPayload);
+                                        edit.replacementPayload, edit.sectionType);
 
     if(report)
         report->add("mob.projection_transaction.derived", EValidationSeverity::Info,
                     QString("Derived %1 source-hash-bound leaf edit(s); structural edits remain blocked")
                         .arg(derivedEdits.size()), transaction->description());
+    return true;
+}
+
+bool CMobDocument::buildProjectionTransactionCandidate(
+    const QByteArray& sourceBytes, const QString& sourceName,
+    const QByteArray& cleanProjectionBytes, const QByteArray& editedProjectionBytes,
+    CMobEditTransaction* transaction, QByteArray* candidate,
+    CValidationReport* report)
+{
+    if(!transaction || !candidate)
+    {
+        if(report)
+            report->add("mob.projection_save.output", EValidationSeverity::Error,
+                        "Transaction and candidate outputs are required");
+        return false;
+    }
+    *transaction = CMobEditTransaction("dirty UI projection transaction save");
+    candidate->clear();
+
+    CMobDocument sourceDocument;
+    CMobDocument cleanProjectionDocument;
+    CMobDocument editedProjectionDocument;
+    CMobEditTransaction derived("dirty UI projection transaction save");
+    QByteArray derivedCandidate;
+    if(!sourceDocument.loadBytes(sourceBytes, sourceName, report) ||
+       !cleanProjectionDocument.loadBytes(cleanProjectionBytes,
+                                          "clean-ui-projection.mob", report) ||
+       !editedProjectionDocument.loadBytes(editedProjectionBytes,
+                                           "edited-ui-projection.mob", report) ||
+       !sourceDocument.deriveLeafTransaction(cleanProjectionDocument,
+                                             editedProjectionDocument,
+                                             &derived, report))
+        return false;
+    if(derived.isEmpty())
+    {
+        if(report)
+            report->add("mob.projection_save.no_changes", EValidationSeverity::Error,
+                        "The dirty projection did not produce an authorized leaf edit");
+        return false;
+    }
+    if(!sourceDocument.applyTransaction(derived, &derivedCandidate, report))
+        return false;
+
+    *transaction = derived;
+    *candidate = derivedCandidate;
     return true;
 }
 

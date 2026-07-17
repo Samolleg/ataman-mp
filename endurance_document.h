@@ -40,9 +40,16 @@ private:
 
 struct SMobLeafEdit
 {
+    SMobLeafEdit() = default;
+    SMobLeafEdit(const QString& path, const QByteArray& expectedSha256,
+                 const QByteArray& payload, quint32 type = 0)
+        : sectionPath(path), expectedSectionSha256(expectedSha256),
+          replacementPayload(payload), sectionType(type) {}
+
     QString sectionPath;
     QByteArray expectedSectionSha256;
     QByteArray replacementPayload;
+    quint32 sectionType = 0;
 };
 
 class CMobEditTransaction
@@ -53,10 +60,12 @@ public:
 
     void replaceLeafPayload(const QString& sectionPath,
                             const QByteArray& expectedSectionSha256,
-                            const QByteArray& replacementPayload);
+                            const QByteArray& replacementPayload,
+                            quint32 sectionType = 0);
     const QString& description() const { return m_description; }
     const QVector<SMobLeafEdit>& edits() const { return m_edits; }
     bool isEmpty() const { return m_edits.isEmpty(); }
+    bool validatedChangedSaveClass(QString* className = nullptr) const;
 
 private:
     QString m_description;
@@ -158,6 +167,12 @@ public:
                                const CMobDocument& editedProjection,
                                CMobEditTransaction* transaction,
                                CValidationReport* report = nullptr) const;
+    static bool buildProjectionTransactionCandidate(
+        const QByteArray& sourceBytes, const QString& sourceName,
+        const QByteArray& cleanProjectionBytes,
+        const QByteArray& editedProjectionBytes,
+        CMobEditTransaction* transaction, QByteArray* candidate,
+        CValidationReport* report = nullptr);
     static bool encodeCp1251Strict(const QString& value, QByteArray* output,
                                    QString* error = nullptr);
     bool isDirty() const { return false; }
