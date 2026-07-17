@@ -145,7 +145,7 @@ void JmvMapTestLauncherTests::recoveryRemovesOwnedBridge()
 {
     QTemporaryDir temp;
     QVERIFY(temp.isValid());
-    const QString bridge = QDir(temp.path()).filePath("EIMapperEnduranceJmvBridge.asi");
+    const QString bridge = QDir(temp.path()).filePath("EIMapperEnduranceJmvBridge.plg");
     const QByteArray bridgeBytes("fingerprinted bridge");
     writeFile(bridge, bridgeBytes);
     const QString run = createRecoveryManifest(QString(), QString(), false,
@@ -161,7 +161,7 @@ void JmvMapTestLauncherTests::recoveryRetainsChangedBridge()
 {
     QTemporaryDir temp;
     QVERIFY(temp.isValid());
-    const QString bridge = QDir(temp.path()).filePath("EIMapperEnduranceJmvBridge.asi");
+    const QString bridge = QDir(temp.path()).filePath("EIMapperEnduranceJmvBridge.plg");
     const QByteArray owned("fingerprinted bridge");
     writeFile(bridge, QByteArray("externally changed"));
     const QString run = createRecoveryManifest(QString(), QString(), false,

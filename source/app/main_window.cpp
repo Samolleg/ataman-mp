@@ -586,7 +586,7 @@ void MainWindow::launchCurrentMapTest()
     }
 
     const QString confirmation = tr(
-        "Endurance will create uniquely named temporary MPR/MOB files in the active JMV Maps folder, temporarily install its fingerprinted JMV launch bridge, and add one private marker to Engine\\2utoexec.cfg.\n\n"
+        "Endurance will create uniquely named temporary MPR/MOB files in the active JMV Maps folder, temporarily install its fingerprinted Starter plugin in the active mod folder, and add one private marker to Engine\\2utoexec.cfg. The plugin redirects only this run's selected map identity to those temporary files.\n\n"
         "Source maps are not changed. Temporary runtime files are hash-owned, the exact 2utoexec bytes are backed up and restored, and temporary maps are deleted after exit. Unsaved MOB edits are included.\n\n"
         "Spawn: travel exit %1 at (%2, %3), verified clearance %4.\n\nContinue?")
         .arg(spawn.exitId).arg(spawn.position.x(), 0, 'f', 2)

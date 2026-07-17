@@ -8,6 +8,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QRandomGenerator>
+#include <QRegularExpression>
 #include <QSaveFile>
 #include <QStandardPaths>
 #include <QTextStream>
@@ -396,6 +397,9 @@ bool CJmvMapTestLauncher::launch(const SJmvMapTestLaunchInput& input, QString* e
     m_process->setWorkingDirectory(m_engineDirectory);
     QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
     environment.insert("EI_MAPPER_ENDURANCE_MAP", m_temporaryMapName);
+    environment.insert("EI_MAPPER_ENDURANCE_SOURCE_MAP", input.mapEntry.mprName.toLower());
+    environment.insert("EI_MAPPER_ENDURANCE_TEMP_MPR", m_liveMprPath);
+    environment.insert("EI_MAPPER_ENDURANCE_TEMP_MOB", m_liveMobPath);
     environment.insert("EI_MAPPER_ENDURANCE_BRIDGE_RESULT", m_bridgeResultPath);
     m_process->setProcessEnvironment(environment);
     m_process->start();
@@ -420,6 +424,12 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
         if(error) *error = "The active JMV profile has no writable mod Maps directory.";
         return false;
     }
+    const QString sourceMapName = input.mapEntry.mprName.toLower();
+    if(!QRegularExpression("^[a-z0-9_]{1,63}$").match(sourceMapName).hasMatch())
+    {
+        if(error) *error = "The selected map has no safe runtime map identity for the JMV bridge.";
+        return false;
+    }
 
     const QString mapsDirectory = QDir(input.profile.modRoot).filePath("Maps");
     if(normalized(input.profile.mapDirectories.first()).compare(normalized(mapsDirectory), Qt::CaseInsensitive) != 0)
@@ -431,8 +441,8 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
     m_engineDirectory = QFileInfo(m_gameExePath).absolutePath();
     m_autoexecPath = QDir(m_engineDirectory).filePath("2utoexec.cfg");
     m_bridgeSourcePath = QDir(QCoreApplication::applicationDirPath())
-            .filePath("runtime/EIMapperEnduranceJmvBridge.asi");
-    m_bridgeLivePath = QDir(m_engineDirectory).filePath("EIMapperEnduranceJmvBridge.asi");
+            .filePath("runtime/EIMapperEnduranceJmvBridge.plg");
+    m_bridgeLivePath = QDir(input.profile.modRoot).filePath("EIMapperEnduranceJmvBridge.plg");
     if(!QFileInfo(m_gameExePath).isFile())
     {
         if(error) *error = "The validated Starter game.exe is missing.";
@@ -445,7 +455,7 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
     }
     if(QFileInfo::exists(m_bridgeLivePath))
     {
-        if(error) *error = "A JMV launch bridge already exists beside game.exe. Run recovery or remove the stale test build first.";
+        if(error) *error = "A JMV launch bridge already exists in the active mod folder. Run recovery or remove the stale test build first.";
         return false;
     }
 

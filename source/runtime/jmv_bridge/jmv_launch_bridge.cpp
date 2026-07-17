@@ -1,8 +1,10 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <tlhelp32.h>
 #include <wincrypt.h>
 
 #include <cstdio>
+#include <cwchar>
 #include <cstring>
 
 namespace {
@@ -21,10 +23,30 @@ constexpr unsigned char kConsoleExecutePrologue[7] = {
 };
 constexpr char kMarkerPrefix[] = "endurance_launch ";
 
+using CreateFileAFn = HANDLE (WINAPI*)(LPCSTR, DWORD, DWORD, LPSECURITY_ATTRIBUTES,
+                                      DWORD, DWORD, HANDLE);
+using CreateFileWFn = HANDLE (WINAPI*)(LPCWSTR, DWORD, DWORD, LPSECURITY_ATTRIBUTES,
+                                      DWORD, DWORD, HANDLE);
+using GetFileAttributesAFn = DWORD (WINAPI*)(LPCSTR);
+using GetFileAttributesWFn = DWORD (WINAPI*)(LPCWSTR);
+
+HMODULE g_instance = nullptr;
 void* g_consoleTrampoline = nullptr;
+volatile LONG g_initialized = 0;
 volatile LONG g_launchHandled = 0;
-wchar_t g_expectedMap[32] = {};
+volatile LONG g_redirectCount = 0;
+wchar_t g_expectedTemporaryMap[32] = {};
+wchar_t g_sourceMap[64] = {};
+wchar_t g_temporaryMpr[MAX_PATH * 4] = {};
+wchar_t g_temporaryMob[MAX_PATH * 4] = {};
 wchar_t g_resultPath[MAX_PATH * 4] = {};
+char g_sourceMapA[64] = {};
+char g_temporaryMprA[MAX_PATH * 4] = {};
+char g_temporaryMobA[MAX_PATH * 4] = {};
+CreateFileAFn g_originalCreateFileA = nullptr;
+CreateFileWFn g_originalCreateFileW = nullptr;
+GetFileAttributesAFn g_originalGetFileAttributesA = nullptr;
+GetFileAttributesWFn g_originalGetFileAttributesW = nullptr;
 
 void Log(const wchar_t* message)
 {
@@ -103,6 +125,23 @@ bool VerifyRuntime()
                        kConsoleExecutePrologue, sizeof(kConsoleExecutePrologue)) == 0;
 }
 
+bool IsSafeMapName(const wchar_t* map, size_t maximum)
+{
+    if(!map)
+        return false;
+    const size_t length = std::wcslen(map);
+    if(length == 0 || length >= maximum)
+        return false;
+    for(size_t index = 0; index < length; ++index)
+    {
+        const wchar_t value = map[index];
+        if(!((value >= L'0' && value <= L'9') ||
+             (value >= L'a' && value <= L'z') || value == L'_'))
+            return false;
+    }
+    return true;
+}
+
 bool IsValidTemporaryMap(const char* map)
 {
     if(!map || std::strlen(map) != 10 || map[0] != 'e' || map[1] != 'd')
@@ -114,6 +153,199 @@ bool IsValidTemporaryMap(const char* map)
             return false;
     }
     return true;
+}
+
+const wchar_t* FileNamePart(const wchar_t* path)
+{
+    if(!path)
+        return nullptr;
+    const wchar_t* slash = std::wcsrchr(path, L'\\');
+    const wchar_t* forward = std::wcsrchr(path, L'/');
+    if(!slash || (forward && forward > slash))
+        slash = forward;
+    return slash ? slash + 1 : path;
+}
+
+const char* FileNamePart(const char* path)
+{
+    if(!path)
+        return nullptr;
+    const char* slash = std::strrchr(path, '\\');
+    const char* forward = std::strrchr(path, '/');
+    if(!slash || (forward && forward > slash))
+        slash = forward;
+    return slash ? slash + 1 : path;
+}
+
+const wchar_t* RedirectedPath(const wchar_t* path)
+{
+    const wchar_t* name = FileNamePart(path);
+    if(!name)
+        return path;
+    wchar_t expected[96]{};
+    _snwprintf_s(expected, sizeof(expected) / sizeof(expected[0]), _TRUNCATE,
+                 L"%s.mpr", g_sourceMap);
+    if(_wcsicmp(name, expected) == 0)
+        return g_temporaryMpr;
+    _snwprintf_s(expected, sizeof(expected) / sizeof(expected[0]), _TRUNCATE,
+                 L"%s.mob", g_sourceMap);
+    if(_wcsicmp(name, expected) == 0)
+        return g_temporaryMob;
+    return path;
+}
+
+const char* RedirectedPath(const char* path)
+{
+    const char* name = FileNamePart(path);
+    if(!name)
+        return path;
+    char expected[96]{};
+    _snprintf_s(expected, sizeof(expected), _TRUNCATE, "%s.mpr", g_sourceMapA);
+    if(_stricmp(name, expected) == 0)
+        return g_temporaryMprA;
+    _snprintf_s(expected, sizeof(expected), _TRUNCATE, "%s.mob", g_sourceMapA);
+    if(_stricmp(name, expected) == 0)
+        return g_temporaryMobA;
+    return path;
+}
+
+void LogRedirect(const wchar_t* kind, const wchar_t* source, const wchar_t* destination)
+{
+    const LONG count = InterlockedIncrement(&g_redirectCount);
+    if(count > 16)
+        return;
+    wchar_t message[900]{};
+    _snwprintf_s(message, sizeof(message) / sizeof(message[0]), _TRUNCATE,
+                 L"Redirected %s: %s -> %s", kind, source, destination);
+    Log(message);
+}
+
+HANDLE WINAPI HookCreateFileW(LPCWSTR path, DWORD access, DWORD share,
+                              LPSECURITY_ATTRIBUTES security, DWORD creation,
+                              DWORD flags, HANDLE templateFile)
+{
+    const wchar_t* redirected = RedirectedPath(path);
+    if(redirected != path)
+        LogRedirect(L"CreateFileW", path, redirected);
+    return g_originalCreateFileW(redirected, access, share, security, creation, flags, templateFile);
+}
+
+HANDLE WINAPI HookCreateFileA(LPCSTR path, DWORD access, DWORD share,
+                              LPSECURITY_ATTRIBUTES security, DWORD creation,
+                              DWORD flags, HANDLE templateFile)
+{
+    const char* redirected = RedirectedPath(path);
+    return g_originalCreateFileA(redirected, access, share, security, creation, flags, templateFile);
+}
+
+DWORD WINAPI HookGetFileAttributesW(LPCWSTR path)
+{
+    return g_originalGetFileAttributesW(RedirectedPath(path));
+}
+
+DWORD WINAPI HookGetFileAttributesA(LPCSTR path)
+{
+    return g_originalGetFileAttributesA(RedirectedPath(path));
+}
+
+void* ReplacementFor(const char* name)
+{
+    if(std::strcmp(name, "CreateFileA") == 0)
+        return reinterpret_cast<void*>(&HookCreateFileA);
+    if(std::strcmp(name, "CreateFileW") == 0)
+        return reinterpret_cast<void*>(&HookCreateFileW);
+    if(std::strcmp(name, "GetFileAttributesA") == 0)
+        return reinterpret_cast<void*>(&HookGetFileAttributesA);
+    if(std::strcmp(name, "GetFileAttributesW") == 0)
+        return reinterpret_cast<void*>(&HookGetFileAttributesW);
+    return nullptr;
+}
+
+int PatchModuleImports(HMODULE module)
+{
+    if(!module || module == g_instance)
+        return 0;
+    auto* base = reinterpret_cast<unsigned char*>(module);
+    auto* dos = reinterpret_cast<IMAGE_DOS_HEADER*>(base);
+    if(dos->e_magic != IMAGE_DOS_SIGNATURE)
+        return 0;
+    auto* nt = reinterpret_cast<IMAGE_NT_HEADERS*>(base + dos->e_lfanew);
+    if(nt->Signature != IMAGE_NT_SIGNATURE)
+        return 0;
+    const IMAGE_DATA_DIRECTORY directory =
+        nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
+    if(!directory.VirtualAddress || !directory.Size)
+        return 0;
+    int patched = 0;
+    auto* descriptor = reinterpret_cast<IMAGE_IMPORT_DESCRIPTOR*>(base + directory.VirtualAddress);
+    for(; descriptor->Name; ++descriptor)
+    {
+        const char* library = reinterpret_cast<const char*>(base + descriptor->Name);
+        if(_stricmp(library, "KERNEL32.dll") != 0 &&
+           _stricmp(library, "KERNELBASE.dll") != 0)
+            continue;
+        if(!descriptor->OriginalFirstThunk)
+            continue;
+        auto* original = reinterpret_cast<IMAGE_THUNK_DATA*>(base + descriptor->OriginalFirstThunk);
+        auto* resolved = reinterpret_cast<IMAGE_THUNK_DATA*>(base + descriptor->FirstThunk);
+        for(; original->u1.AddressOfData; ++original, ++resolved)
+        {
+            if(IMAGE_SNAP_BY_ORDINAL(original->u1.Ordinal))
+                continue;
+            auto* import = reinterpret_cast<IMAGE_IMPORT_BY_NAME*>(base + original->u1.AddressOfData);
+            void* replacement = ReplacementFor(reinterpret_cast<const char*>(import->Name));
+            if(!replacement || resolved->u1.Function == reinterpret_cast<ULONG_PTR>(replacement))
+                continue;
+            DWORD oldProtect = 0;
+            if(!VirtualProtect(&resolved->u1.Function, sizeof(resolved->u1.Function),
+                               PAGE_READWRITE, &oldProtect))
+                continue;
+            resolved->u1.Function = reinterpret_cast<ULONG_PTR>(replacement);
+            DWORD ignored = 0;
+            VirtualProtect(&resolved->u1.Function, sizeof(resolved->u1.Function),
+                           oldProtect, &ignored);
+            ++patched;
+        }
+    }
+    return patched;
+}
+
+bool InstallFileRedirectHooks()
+{
+    HMODULE kernel = GetModuleHandleW(L"KERNEL32.dll");
+    if(!kernel)
+        return false;
+    g_originalCreateFileA = reinterpret_cast<CreateFileAFn>(GetProcAddress(kernel, "CreateFileA"));
+    g_originalCreateFileW = reinterpret_cast<CreateFileWFn>(GetProcAddress(kernel, "CreateFileW"));
+    g_originalGetFileAttributesA = reinterpret_cast<GetFileAttributesAFn>(
+        GetProcAddress(kernel, "GetFileAttributesA"));
+    g_originalGetFileAttributesW = reinterpret_cast<GetFileAttributesWFn>(
+        GetProcAddress(kernel, "GetFileAttributesW"));
+    if(!g_originalCreateFileA || !g_originalCreateFileW ||
+       !g_originalGetFileAttributesA || !g_originalGetFileAttributesW)
+        return false;
+
+    HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32,
+                                               GetCurrentProcessId());
+    if(snapshot == INVALID_HANDLE_VALUE)
+        return false;
+    MODULEENTRY32W entry{};
+    entry.dwSize = sizeof(entry);
+    int patched = 0;
+    if(Module32FirstW(snapshot, &entry))
+    {
+        do
+        {
+            patched += PatchModuleImports(entry.hModule);
+        }
+        while(Module32NextW(snapshot, &entry));
+    }
+    CloseHandle(snapshot);
+    wchar_t message[160]{};
+    _snwprintf_s(message, sizeof(message) / sizeof(message[0]), _TRUNCATE,
+                 L"Installed %d temporary map file redirect imports", patched);
+    Log(message);
+    return patched > 0;
 }
 
 struct GameString { char* value; };
@@ -154,7 +386,8 @@ extern "C" int __stdcall TryHandleCommand(const char* command)
         return 1;
     }
     char expected[32]{};
-    WideCharToMultiByte(CP_ACP, 0, g_expectedMap, -1, expected, int(sizeof(expected)), nullptr, nullptr);
+    WideCharToMultiByte(CP_ACP, 0, g_expectedTemporaryMap, -1, expected,
+                        int(sizeof(expected)), nullptr, nullptr);
     if(std::strcmp(map, expected) != 0)
     {
         Log(L"Rejected Endurance launch marker that did not match the inherited manifest map");
@@ -162,8 +395,13 @@ extern "C" int __stdcall TryHandleCommand(const char* command)
     }
     if(InterlockedCompareExchange(&g_launchHandled, 1, 0) != 0)
         return 1;
-    Log(L"Accepted Endurance launch marker; invoking the fingerprinted engine server handler");
-    QueueServerLaunch(map);
+    if(!InstallFileRedirectHooks())
+    {
+        Log(L"Launch refused: no supported file imports could be redirected");
+        return 1;
+    }
+    Log(L"Accepted Endurance launch marker; invoking the internal server handler with the source map identity");
+    QueueServerLaunch(g_sourceMapA);
     Log(L"Engine server launch request queued");
     return 1;
 }
@@ -187,7 +425,7 @@ __declspec(naked) void ConsoleExecuteHook()
     }
 }
 
-bool InstallHook()
+bool InstallConsoleHook()
 {
     auto* target = reinterpret_cast<unsigned char*>(kConsoleExecuteAddress);
     constexpr SIZE_T overwritten = sizeof(kConsoleExecutePrologue);
@@ -215,38 +453,72 @@ bool InstallHook()
     return true;
 }
 
-DWORD WINAPI InitializeBridge(void*)
+bool ReadEnvironment()
 {
-    GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_MAP", g_expectedMap,
-                            DWORD(sizeof(g_expectedMap) / sizeof(g_expectedMap[0])));
+    GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_MAP", g_expectedTemporaryMap,
+                            DWORD(sizeof(g_expectedTemporaryMap) / sizeof(g_expectedTemporaryMap[0])));
+    GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_SOURCE_MAP", g_sourceMap,
+                            DWORD(sizeof(g_sourceMap) / sizeof(g_sourceMap[0])));
+    GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_TEMP_MPR", g_temporaryMpr,
+                            DWORD(sizeof(g_temporaryMpr) / sizeof(g_temporaryMpr[0])));
+    GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_TEMP_MOB", g_temporaryMob,
+                            DWORD(sizeof(g_temporaryMob) / sizeof(g_temporaryMob[0])));
     GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_BRIDGE_RESULT", g_resultPath,
                             DWORD(sizeof(g_resultPath) / sizeof(g_resultPath[0])));
-    if(!g_expectedMap[0] || !g_resultPath[0])
-        return 0;
-    Log(L"EI Mapper Endurance JMV bridge initializing");
+    if(!IsSafeMapName(g_expectedTemporaryMap, sizeof(g_expectedTemporaryMap) / sizeof(wchar_t)) ||
+       !IsSafeMapName(g_sourceMap, sizeof(g_sourceMap) / sizeof(wchar_t)) ||
+       !g_temporaryMpr[0] || !g_temporaryMob[0] || !g_resultPath[0])
+        return false;
+    if(GetFileAttributesW(g_temporaryMpr) == INVALID_FILE_ATTRIBUTES ||
+       GetFileAttributesW(g_temporaryMob) == INVALID_FILE_ATTRIBUTES)
+        return false;
+    WideCharToMultiByte(CP_ACP, 0, g_sourceMap, -1, g_sourceMapA,
+                        int(sizeof(g_sourceMapA)), nullptr, nullptr);
+    WideCharToMultiByte(CP_ACP, 0, g_temporaryMpr, -1, g_temporaryMprA,
+                        int(sizeof(g_temporaryMprA)), nullptr, nullptr);
+    WideCharToMultiByte(CP_ACP, 0, g_temporaryMob, -1, g_temporaryMobA,
+                        int(sizeof(g_temporaryMobA)), nullptr, nullptr);
+    return g_sourceMapA[0] && g_temporaryMprA[0] && g_temporaryMobA[0];
+}
+
+bool InitializeBridge()
+{
+    if(InterlockedCompareExchange(&g_initialized, 1, 0) != 0)
+        return true;
+    if(!ReadEnvironment())
+        return false;
+    Log(L"EI Mapper Endurance JMV plugin bridge initializing");
     if(!VerifyRuntime())
     {
-        Log(L"Bridge disabled: game hash or hook signature mismatch");
-        return 0;
+        Log(L"Bridge disabled: game hash or console hook signature mismatch");
+        return false;
     }
-    if(!InstallHook())
+    if(!InstallConsoleHook())
     {
         Log(L"Bridge disabled: console transition hook installation failed");
-        return 0;
+        return false;
     }
     Log(L"Bridge ready; waiting for the private Endurance launch marker");
-    return 0;
+    return true;
 }
+}
+
+extern "C" __declspec(dllexport) int __cdecl EntryBeforePatch(const char*)
+{
+    return InitializeBridge() ? 1 : 0;
+}
+
+extern "C" __declspec(dllexport) int __cdecl EntryAfterPatch(const char*)
+{
+    return 1;
 }
 
 BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, void*)
 {
     if(reason == DLL_PROCESS_ATTACH)
     {
+        g_instance = instance;
         DisableThreadLibraryCalls(instance);
-        HANDLE thread = CreateThread(nullptr, 0, InitializeBridge, nullptr, 0, nullptr);
-        if(thread)
-            CloseHandle(thread);
     }
     return TRUE;
 }

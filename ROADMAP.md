@@ -5,7 +5,7 @@ An item is checked only after its implementation has landed and received the
 listed level of validation. New findings and wishlist requests belong here so
 they do not get lost between test sessions.
 
-Current development release: `0.1.0-alpha.44`.
+Current development release: `0.1.0-alpha.45`.
 
 ## Implementation evidence
 
@@ -383,11 +383,15 @@ MOB editing does not imply that landscape saving is supported.
   rectangles without assuming their centers are free. Score candidates against
   physical MOB object bounds and rectangle edges, fall back across travel zones,
   and refuse launch when no candidate has the required clearance.
-- [x] Add a temporary, fingerprinted x86 JMV bridge which intercepts only a
+- [x] Add a temporary, fingerprinted x86 JMV provider which intercepts only a
   private `endurance_launch ed????????` transition marker and invokes the
-  existing internal server handler on the game thread. The ASI is never loaded
-  into Endurance, refuses unknown game hashes/signatures, and is removed only
-  while its installed hash still matches.
+  existing internal server handler on the game thread. Alpha.44 proved the ASI
+  prototype loads and reaches the handler, but Starter warns about unknown ASIs
+  and a random outer filename is not a usable map identity.
+- [x] Move the provider to Starter's supported mod-scoped `*.plg` interface and
+  call the handler with the real maps.txt map identity. Redirect only exact
+  source-map MPR/MOB opens to the hash-owned temporary files so the live map and
+  embedded MP/SEC namespace remain untouched.
 - [x] Back up `Engine/2utoexec.cfg` byte-for-byte before its temporary marker,
   hash-check all temporary writes, restore only the exact Endurance-owned patch,
   remove only hash-matching temporary maps, retain run manifests/logs, and recover
@@ -424,6 +428,9 @@ MOB editing does not imply that landscape saving is supported.
   restoration. Availability remains experimental pending the focused in-game gate.
 - [x] `0.1.0-alpha.44`: replace the rejected public-console command with a
   temporary fingerprinted JMV bridge and run-specific bridge diagnostics.
+  Availability remains experimental pending the focused in-game gate.
+- [x] `0.1.0-alpha.45`: replace the warning-producing ASI prototype with a
+  supported mod-scoped Starter plugin and exact temporary-map file redirection.
   Availability remains experimental pending the focused in-game gate.
 - [x] `0.1.0-alpha.41`: redo-safe raw provenance and the July 17 multi-edit/UI
   fixes passed owner testing and were handed to the closed tester group.

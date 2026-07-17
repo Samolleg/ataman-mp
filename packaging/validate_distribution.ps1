@@ -7,9 +7,9 @@ $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path -LiteralPath $PackageRoot).Path
 $failures = [System.Collections.Generic.List[string]]::new()
 
-$bridge = Join-Path $root 'runtime\EIMapperEnduranceJmvBridge.asi'
+$bridge = Join-Path $root 'runtime\EIMapperEnduranceJmvBridge.plg'
 if (-not (Test-Path -LiteralPath $bridge -PathType Leaf)) {
-    $failures.Add('packaged JMV launch bridge is missing: runtime\EIMapperEnduranceJmvBridge.asi')
+    $failures.Add('packaged JMV launch bridge is missing: runtime\EIMapperEnduranceJmvBridge.plg')
 }
 
 foreach ($name in @('endurance-options.json', 'options.json')) {
