@@ -51,6 +51,10 @@ behavior.
   an independently generated MobExplorer candidate: exact full-file SHA-256 match,
   one modified object, no added/removed objects, and no unrelated field changes.
   ([validation](MOB_SHADOW_TRANSACTION_VALIDATION.md))
+- [x] Ensure MOB Parameters and every other editor-created top-level window close
+  with the main editor. Auxiliary windows now have explicit owners, shutdown has
+  a fallback top-level sweep, and the headless widget check covers both owned and
+  accidentally orphaned windows. ([`f9fa250`](https://github.com/Ilufus/ei-mapper-endurance/commit/f9fa250))
 - [ ] Expand changed-save regression coverage across the private JMV map corpus.
 - [ ] Migrate changed MOB saves from the legacy serializer to raw-tree transactions;
   no-op raw preservation is validated and leaf-only UI deltas now run through a
