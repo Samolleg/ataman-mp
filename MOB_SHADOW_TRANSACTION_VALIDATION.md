@@ -94,6 +94,16 @@ This validates the `OBJ_PLAYER` byte-leaf edit class. Commit
 promotes only this exact one-byte class into the provenance-checked staged-save,
 backup, and atomic-replacement pipeline. Unrelated property types remain blocked.
 
+The earlier Autozone chest test supplies a second real-world leaf-edit example.
+MobExplorer reopened both 118-object files; exactly two intended chest objects
+changed, all other objects and top-level sections were byte-identical, and the
+complete raw diff contained only Hands values 0 to 100 and 85 to 120. This is
+real-world evidence for the generic provenance-checked raw-leaf path: the editor
+patches the exact changed payload while preserving every untouched raw section.
+Authorization is structural rather than a per-field whitelist. Any values the
+user did not edit, including the opening-mode and key-ID dwords in that test,
+must remain byte-identical. Multiple intended leaf edits may share one transaction.
+
 ## Remaining gate
 
 Real UI operations must now produce representative transaction logs. Leaf-only

@@ -5,7 +5,7 @@ An item is checked only after its implementation has landed and received the
 listed level of validation. New findings and wishlist requests belong here so
 they do not get lost between test sessions.
 
-Current development release: `0.1.0-alpha.29`.
+Current development release: `0.1.0-alpha.30`.
 
 ## Implementation evidence
 
@@ -68,16 +68,17 @@ behavior.
   alpha.28 disabled all culling in Logic mode and that the modal Settings owner
   was accidentally disabled; both regressions move to alpha.29.
   ([validation](ALPHA28_VALIDATION.md))
-- [ ] Validate alpha.29 split object/logic rendering. Off-screen object geometry
+- [x] Validate alpha.29 split object/logic rendering. Off-screen object geometry
   remains culled in Logic mode while unit paths, patrol/look points, trap cast
   points, and activation zones retain their existing visualization behavior.
   Settings now uses Qt window modality without disabling its own owner chain, so
-  every tab remains selectable. ([validation](ALPHA29_VALIDATION.md))
+  every tab remains selectable. Tester confirmation reports the Logic-mode
+  performance regression fixed with no visual issue. ([validation](ALPHA29_VALIDATION.md))
 - [ ] Migrate changed MOB saves from the legacy serializer to raw-tree transactions;
-  no-op raw preservation is validated, leaf-only UI deltas run through a fail-closed
-  transaction bridge, and independently validated `OBJ_PLAYER` edits now use the
-  staged backup/atomic-save pipeline. Other leaf classes and all structural edits
-  remain blocked. ([`3106fac`](https://github.com/Ilufus/ei-mapper-endurance/commit/3106fac),
+  no-op raw preservation is validated and topology-preserving UI edits now save as
+  provenance-checked raw leaf patches, including mixed property and transform edits.
+  This is automatic and has no save-preview workflow. Structural edits still need
+  exact raw-subtree transactions before the migration is complete. ([`3106fac`](https://github.com/Ilufus/ei-mapper-endurance/commit/3106fac),
   [`3cd2b3c`](https://github.com/Ilufus/ei-mapper-endurance/commit/3cd2b3c),
   [validation](MOB_SHADOW_TRANSACTION_VALIDATION.md))
 - [x] Recompute MOB dirty state against its loaded projection after edit and
@@ -191,6 +192,10 @@ These are the remaining safety gates before editing live maps can be recommended
   into real changed output through the raw transaction, fresh staged validation,
   pre-save backup, and atomic replacement path. Mixed or unvalidated edit sets
   remain wholly blocked. ([`3cd2b3c`](https://github.com/Ilufus/ei-mapper-endurance/commit/3cd2b3c))
+- [ ] Validate alpha.30 generic raw-leaf saving with ordinary mixed property and
+  transform edits. There is no preview or field whitelist: the invariant is that
+  every intended replacement is exact and all untouched leaves remain byte-identical.
+  ([validation](ALPHA30_VALIDATION.md))
 - [x] Disable the legacy changed-MOB serializer at the Save boundary; dirty MOB
   saves are refused until their UI edits have transaction provenance. Unchanged
   byte-identical Save As remains available. ([`912d00c`](https://github.com/Ilufus/ei-mapper-endurance/commit/912d00c))

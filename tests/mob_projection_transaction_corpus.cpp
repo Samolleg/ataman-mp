@@ -100,6 +100,7 @@ int main(int argc, char* argv[])
         QByteArray derivedBytes;
         if(!source.deriveLeafTransaction(source, editedProjection, &derived, &report) ||
            derived.edits().size() != 1 ||
+           !derived.validatedChangedSaveClass() ||
            !source.applyTransaction(derived, &derivedBytes, &report) ||
            derivedBytes != editedBytes)
         {

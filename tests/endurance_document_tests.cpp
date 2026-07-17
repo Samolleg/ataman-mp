@@ -80,6 +80,7 @@ private slots:
     void projectionDeltaRejectsMissingSourceRecord();
     void projectionDeltaRejectsCanonicalizedSourceLeaf();
     void projectionSaveCandidateIsProvenanceChecked();
+    void topologyPreservingLeafEditsAreAuthorizedTogether();
     void projectionSaveCandidateRejectsStructuralEdit();
     void transactionRejectsStaleProvenance();
     void cp1251EncodingIsStrict();
@@ -423,15 +424,56 @@ void EnduranceDocumentTests::projectionSaveCandidateIsProvenanceChecked()
                  &transaction, &candidate, &report), qPrintable(report.toText()));
     QCOMPARE(transaction.edits().size(), 1);
     QCOMPARE(transaction.edits().front().sectionType, quint32(0xB011));
+    QCOMPARE(transaction.edits().front().sourcePayload, QByteArray(1, '\x04'));
     QCOMPARE(transaction.edits().front().replacementPayload, QByteArray(1, '\x0c'));
     QString saveClass;
     QVERIFY(transaction.validatedChangedSaveClass(&saveClass));
-    QCOMPARE(saveClass, QString("OBJ_PLAYER"));
+    QCOMPARE(saveClass, QString("RAW_LEAF_EDITS"));
     QCOMPARE(candidate, validMob(emptyDirectory + section(0xB011, QByteArray(1, '\x0c'))));
 
     CMobEditTransaction unvalidated("unvalidated class");
-    unvalidated.replaceLeafPayload("/OTHER[0]", QByteArray(32, '\0'), "text", 0xB004);
+    unvalidated.replaceLeafPayload("/OTHER[0]", QByteArray(31, '\0'), "text", 0xB004);
     QVERIFY(!unvalidated.validatedChangedSaveClass());
+}
+
+void EnduranceDocumentTests::topologyPreservingLeafEditsAreAuthorizedTogether()
+{
+    const QByteArray sourceStats = u32(5) + u32(1234) + u32(85);
+    const QByteArray editedStats = u32(5) + u32(1234) + u32(120);
+    const QByteArray sourcePosition = plot(1.0f, 2.0f, 3.0f);
+    const QByteArray editedPosition = plot(10.0f, 20.0f, 30.0f);
+    const QByteArray sourceBytes = validMob(
+        section(0xB011, QByteArray(1, '\x04')) +
+        section(0xBBAC0006, sourceStats) +
+        section(0xB009, sourcePosition));
+    const QByteArray editedBytes = validMob(
+        section(0xB011, QByteArray(1, '\x0c')) +
+        section(0xBBAC0006, editedStats) +
+        section(0xB009, editedPosition));
+    CMobEditTransaction transaction;
+    QByteArray candidate;
+    CValidationReport report;
+    QVERIFY2(CMobDocument::buildProjectionTransactionCandidate(
+                 sourceBytes, "lever-source.mob", sourceBytes, editedBytes,
+                 &transaction, &candidate, &report), qPrintable(report.toText()));
+    QCOMPARE(transaction.edits().size(), 3);
+    QCOMPARE(transaction.edits().at(0).sourcePayload, QByteArray(1, '\x04'));
+    QCOMPARE(transaction.edits().at(1).sourcePayload, sourceStats);
+    QCOMPARE(transaction.edits().at(2).sourcePayload, sourcePosition);
+    QString saveClass;
+    QVERIFY(transaction.validatedChangedSaveClass(&saveClass));
+    QCOMPARE(saveClass, QString("RAW_LEAF_EDITS"));
+    QCOMPARE(candidate, editedBytes);
+
+    CMobEditTransaction unchanged("not an edit");
+    unchanged.replaceLeafPayload("/OBJ_NAME[0]", QByteArray(32, '\0'),
+                                 "wolf", 0xB004, "wolf");
+    QVERIFY(!unchanged.validatedChangedSaveClass());
+
+    CMobEditTransaction missingProvenance("missing provenance");
+    missingProvenance.replaceLeafPayload("/OBJ_NAME[0]", QByteArray(31, '\0'),
+                                         "boar", 0xB004, "wolf");
+    QVERIFY(!missingProvenance.validatedChangedSaveClass());
 }
 
 void EnduranceDocumentTests::projectionSaveCandidateRejectsStructuralEdit()

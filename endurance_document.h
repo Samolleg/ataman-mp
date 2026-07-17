@@ -42,14 +42,17 @@ struct SMobLeafEdit
 {
     SMobLeafEdit() = default;
     SMobLeafEdit(const QString& path, const QByteArray& expectedSha256,
-                 const QByteArray& payload, quint32 type = 0)
+                 const QByteArray& payload, quint32 type = 0,
+                 const QByteArray& originalPayload = QByteArray())
         : sectionPath(path), expectedSectionSha256(expectedSha256),
-          replacementPayload(payload), sectionType(type) {}
+          replacementPayload(payload), sectionType(type),
+          sourcePayload(originalPayload) {}
 
     QString sectionPath;
     QByteArray expectedSectionSha256;
     QByteArray replacementPayload;
     quint32 sectionType = 0;
+    QByteArray sourcePayload;
 };
 
 class CMobEditTransaction
@@ -61,7 +64,8 @@ public:
     void replaceLeafPayload(const QString& sectionPath,
                             const QByteArray& expectedSectionSha256,
                             const QByteArray& replacementPayload,
-                            quint32 sectionType = 0);
+                            quint32 sectionType = 0,
+                            const QByteArray& sourcePayload = QByteArray());
     const QString& description() const { return m_description; }
     const QVector<SMobLeafEdit>& edits() const { return m_edits; }
     bool isEmpty() const { return m_edits.isEmpty(); }

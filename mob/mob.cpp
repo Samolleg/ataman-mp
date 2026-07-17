@@ -1714,7 +1714,7 @@ bool CMob::saveAs(const QFileInfo& path)
                         .arg(validatedClassName, filePath).arg(transaction.edits().size()));
                 }
                 else
-                    ei::log(eLogWarning, QString("MOB transaction candidate uses an unvalidated save class path:%1")
+                    ei::log(eLogWarning, QString("MOB transaction candidate is missing raw-leaf provenance path:%1")
                         .arg(filePath));
             }
             else
@@ -1724,13 +1724,12 @@ bool CMob::saveAs(const QFileInfo& path)
             }
             if(data.isEmpty())
             {
-                ei::log(eLogFatal, QString("Refusing dirty MOB save because its transaction class is not enabled path:%1")
+                ei::log(eLogFatal, QString("Refusing dirty MOB save because the edit could not be mapped safely to the original raw tree path:%1")
                     .arg(filePath));
                 QMessageBox::critical(nullptr, "Lossless MOB save not available for this edit",
-                    "Endurance could not authorize this complete edit set for changed output.\n\n"
-                    "Only the independently validated unit player/diplomacy assignment field is currently "
-                    "enabled for provenance-checked changed saves. Other leaf candidates are logged for "
-                    "validation, while copied/deleted objects and patrol-point changes remain blocked.\n\n"
+                    "Endurance could not map this complete edit set onto the original MOB's existing raw fields. "
+                    "Ordinary property and transform edits save automatically; edits that add, remove, or reorder "
+                    "MOB sections are not yet handled by the raw-tree transaction path.\n\n"
                     "No destination or backup file was changed. Endurance will not fall back to the legacy "
                     "rebuilding serializer.");
                 return false;

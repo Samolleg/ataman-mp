@@ -4,7 +4,7 @@ EI Mapper: Endurance Edition is an independently versioned derivative of
 [`konstvest/ei_maper`](https://github.com/konstvest/ei_maper), focused on safe,
 fast Evil Islands and Jamais Vu map editing.
 
-Current development version: `0.1.0-alpha.29`.
+Current development version: `0.1.0-alpha.30`.
 
 Project status and upcoming work are tracked in the living
 [Endurance roadmap](ROADMAP.md).
@@ -23,10 +23,9 @@ commit `1cebe83d` tagged as `upstream-1cebe83d`.
 - MOB loading no longer repairs duplicate IDs automatically; duplicates are
   reported without dirtying the document.
 - Unchanged MOB and MPR Save As operations preserve the original bytes.
-- Changed MOB output is enabled only for independently validated transaction
-  classes. The first enabled class is the one-byte `OBJ_PLAYER` unit assignment;
-  other leaf edits continue producing diagnostic candidates, and structural
-  edits remain blocked.
+- Changed MOB output patches provenance-checked existing raw leaves directly.
+  Ordinary property and transform fields can be mixed in one save; structural
+  edits that add, remove, or reorder raw sections remain blocked.
 - MPR writes retain extra archive members and the original internal map name.
 - Resource lookup uses case-normalized RES table indexes and lazy payload reads.
 - Terrain and tile-panel atlases use the same indexed, case-insensitive source
@@ -46,9 +45,11 @@ commit `1cebe83d` tagged as `upstream-1cebe83d`.
   selected objects remain conservative. Logic helpers are rendered separately,
   allowing their owning off-screen object geometry to remain culled.
 
-The alpha is not yet a production replacement for the original editor. In
-particular, most changed MOB output remains disabled until its field class or raw
-structural transaction passes independent comparison and focused game validation.
+The alpha is not yet a production replacement for the original editor. Existing
+MOB fields can be edited and saved through the provenance-checked raw transaction
+path without a preview or field-specific approval. Edits that change the MOB
+section tree itself (such as some create/delete operations) remain under active
+hardening and are blocked rather than falling back to the rebuilding serializer.
 
 See [BUILDING_ENDURANCE.md](BUILDING_ENDURANCE.md) for build and test commands,
 and [NOTICE.md](NOTICE.md) for attribution and licensing information.

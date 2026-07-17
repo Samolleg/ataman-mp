@@ -431,10 +431,11 @@ void CValidationReport::add(const QString& code, EValidationSeverity severity, c
 void CMobEditTransaction::replaceLeafPayload(const QString& sectionPath,
                                              const QByteArray& expectedSectionSha256,
                                              const QByteArray& replacementPayload,
-                                             quint32 sectionType)
+                                             quint32 sectionType,
+                                             const QByteArray& sourcePayload)
 {
     m_edits.append(SMobLeafEdit(sectionPath, expectedSectionSha256,
-                                replacementPayload, sectionType));
+                                replacementPayload, sectionType, sourcePayload));
 }
 
 bool CMobEditTransaction::validatedChangedSaveClass(QString* className) const
@@ -444,10 +445,19 @@ bool CMobEditTransaction::validatedChangedSaveClass(QString* className) const
     if(m_edits.isEmpty())
         return false;
     for(const SMobLeafEdit& edit : m_edits)
-        if(edit.sectionType != 0xB011 || edit.replacementPayload.size() != 1)
+    {
+        // The authorization boundary is structural, not a growing whitelist of
+        // UI fields. deriveLeafTransaction() supplies these values only after
+        // proving that the clean projection still matches the original raw
+        // section at this exact path. applyTransaction() then rechecks the hash,
+        // reparses the result, and verifies every untouched section byte-for-byte.
+        if(edit.sectionPath.isEmpty() || edit.sectionType == 0 ||
+           edit.expectedSectionSha256.size() != 32 ||
+           edit.sourcePayload == edit.replacementPayload)
             return false;
+    }
     if(className)
-        *className = "OBJ_PLAYER";
+        *className = "RAW_LEAF_EDITS";
     return true;
 }
 
@@ -972,12 +982,14 @@ bool CMobDocument::deriveLeafTransaction(const CMobDocument& cleanProjection,
             return false;
         }
         derivedEdits.append(SMobLeafEdit(it.key(), (*sourceIt)->sha256,
-                                         edited.rawBytes.mid(8), edited.type));
+                                         edited.rawBytes.mid(8), edited.type,
+                                         clean.rawBytes.mid(8)));
     }
 
     for(const SMobLeafEdit& edit : derivedEdits)
         transaction->replaceLeafPayload(edit.sectionPath, edit.expectedSectionSha256,
-                                        edit.replacementPayload, edit.sectionType);
+                                        edit.replacementPayload, edit.sectionType,
+                                        edit.sourcePayload);
 
     if(report)
         report->add("mob.projection_transaction.derived", EValidationSeverity::Info,
