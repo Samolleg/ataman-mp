@@ -147,8 +147,28 @@ bool restoreAutoexec(const QJsonObject& manifest, QStringList* messages)
     const QString backupPath = autoexec.value("backupPath").toString();
     const QString originalHash = autoexec.value("originalSha256").toString();
     const QString patchedHash = autoexec.value("patchedSha256").toString();
-    if(path.isEmpty() || backupPath.isEmpty())
+    const bool originalExisted = autoexec.value("originalExisted").toBool(true);
+    if(path.isEmpty())
         return true;
+    if(!originalExisted)
+    {
+        if(!QFileInfo::exists(path))
+            return true;
+        if(fileSha256(path).compare(patchedHash, Qt::CaseInsensitive) != 0)
+        {
+            messages->append(QString("Did not remove externally changed temporary autoexec file: %1").arg(path));
+            return false;
+        }
+        if(!QFile::remove(path))
+        {
+            messages->append(QString("Could not remove temporary autoexec file: %1").arg(path));
+            return false;
+        }
+        messages->append(QString("Removed temporary autoexec file: %1").arg(path));
+        return true;
+    }
+    if(backupPath.isEmpty())
+        return false;
     const QString currentHash = fileSha256(path);
     if(currentHash.compare(originalHash, Qt::CaseInsensitive) == 0)
         return true;
@@ -210,7 +230,8 @@ BOOL CALLBACK findWindowForProcess(HWND window, LPARAM parameter)
 }
 
 CJmvMapTestLauncher::CJmvMapTestLauncher(QObject* parent)
-    : QObject(parent), m_process(new QProcess(this)), m_cleanupComplete(true)
+    : QObject(parent), m_process(new QProcess(this)),
+      m_originalAutoexecExisted(false), m_cleanupComplete(true)
 {
     connect(m_process, &QProcess::started, this, [this]()
     {
@@ -390,10 +411,10 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
     }
     m_gameExePath = QDir(input.profile.gameRoot).filePath("Starter/Engine/game.exe");
     m_engineDirectory = QFileInfo(m_gameExePath).absolutePath();
-    m_autoexecPath = QDir(m_engineDirectory).filePath("2utoexec.cfg");
-    if(!QFileInfo(m_gameExePath).isFile() || !QFileInfo(m_autoexecPath).isFile())
+    m_autoexecPath = QDir(m_engineDirectory).filePath("autoexec.cfg");
+    if(!QFileInfo(m_gameExePath).isFile())
     {
-        if(error) *error = "The validated Starter game.exe or 2utoexec.cfg is missing.";
+        if(error) *error = "The validated Starter game.exe is missing.";
         return false;
     }
 
@@ -403,7 +424,7 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
     m_runRoot = QDir(testRunsRoot()).filePath(m_runId);
     m_manifestPath = QDir(m_runRoot).filePath("manifest.json");
     m_runLogPath = QDir(m_runRoot).filePath("runtime.log");
-    m_autoexecBackupPath = QDir(m_runRoot).filePath("2utoexec.original.cfg");
+    m_autoexecBackupPath = QDir(m_runRoot).filePath("autoexec.original.cfg");
     m_liveMprPath = QDir(mapsDirectory).filePath(m_temporaryMapName + ".mpr");
     m_liveMobPath = QDir(mapsDirectory).filePath(m_temporaryMapName + ".mob");
     if(QFileInfo::exists(m_liveMprPath) || QFileInfo::exists(m_liveMobPath))
@@ -527,10 +548,11 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
 bool CJmvMapTestLauncher::patchAutoexec(QString* error)
 {
     QByteArray original;
-    if(!readFile(m_autoexecPath, &original, error))
+    m_originalAutoexecExisted = QFileInfo::exists(m_autoexecPath);
+    if(m_originalAutoexecExisted && !readFile(m_autoexecPath, &original, error))
         return false;
     m_originalAutoexecSha256 = sha256(original);
-    if(!atomicWrite(m_autoexecBackupPath, original, error))
+    if(m_originalAutoexecExisted && !atomicWrite(m_autoexecBackupPath, original, error))
         return false;
     QByteArray patched = original;
     if(!patched.isEmpty() && !patched.endsWith('\n'))
@@ -542,6 +564,7 @@ bool CJmvMapTestLauncher::patchAutoexec(QString* error)
     QJsonObject autoexec;
     autoexec.insert("path", m_autoexecPath);
     autoexec.insert("backupPath", m_autoexecBackupPath);
+    autoexec.insert("originalExisted", m_originalAutoexecExisted);
     autoexec.insert("originalSha256", m_originalAutoexecSha256);
     autoexec.insert("patchedSha256", m_patchedAutoexecSha256);
     m_manifest.insert("autoexec", autoexec);

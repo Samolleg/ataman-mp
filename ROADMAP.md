@@ -381,7 +381,7 @@ MOB editing does not imply that landscape saving is supported.
   rectangles without assuming their centers are free. Score candidates against
   physical MOB object bounds and rectangle edges, fall back across travel zones,
   and refuse launch when no candidate has the required clearance.
-- [x] Back up `Engine/2utoexec.cfg` byte-for-byte before its temporary command,
+- [x] Back up `Engine/autoexec.cfg` byte-for-byte before its temporary command,
   hash-check all temporary writes, restore only the exact Endurance-owned patch,
   remove only hash-matching temporary maps, retain run manifests/logs, and recover
   interrupted cleanup at the next editor start.
@@ -410,7 +410,7 @@ MOB editing does not imply that landscape saving is supported.
   alpha.14-group fixes, synchronized internal/external scripts, and readable
   embedded-script MOB diffs. The supported MOB edit implementation is complete;
   promotion now depends on closed-group regression and game testing.
-- [x] `0.1.0-alpha.42`: experimental single-MPR/single-MOB JMV direct-launch
+- [x] `0.1.0-alpha.43`: experimental single-MPR/single-MOB JMV direct-launch
   candidate with lossless in-memory staging, obstruction-aware travel-zone
   spawn selection, hash-owned temporary Maps files, and recoverable autoexec
   restoration. Availability remains experimental pending the focused in-game gate.

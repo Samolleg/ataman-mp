@@ -586,7 +586,7 @@ void MainWindow::launchCurrentMapTest()
     }
 
     const QString confirmation = tr(
-        "Endurance will create uniquely named temporary MPR/MOB files in the active JMV Maps folder, temporarily append one server command to Engine\\2utoexec.cfg, and launch the validated JMV game.exe.\n\n"
+        "Endurance will create uniquely named temporary MPR/MOB files in the active JMV Maps folder, temporarily create or patch Engine\\autoexec.cfg with one server command, and launch the validated JMV game.exe.\n\n"
         "Source maps are not changed. The exact autoexec bytes are backed up and restored, and temporary maps are deleted after exit. Unsaved MOB edits are included.\n\n"
         "Spawn: travel exit %1 at (%2, %3), verified clearance %4.\n\nContinue?")
         .arg(spawn.exitId).arg(spawn.position.x(), 0, 'f', 2)

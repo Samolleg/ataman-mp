@@ -66,6 +66,7 @@ private:
     QString m_liveMobPath;
     QString m_autoexecPath;
     QString m_autoexecBackupPath;
+    bool m_originalAutoexecExisted;
     QString m_originalAutoexecSha256;
     QString m_patchedAutoexecSha256;
     QString m_liveMprSha256;
