@@ -5,7 +5,7 @@ An item is checked only after its implementation has landed and received the
 listed level of validation. New findings and wishlist requests belong here so
 they do not get lost between test sessions.
 
-Current development release: `0.1.0-alpha.27`.
+Current development release: `0.1.0-alpha.28`.
 
 ## Implementation evidence
 
@@ -39,6 +39,7 @@ behavior.
 | Profile provider API and safe JMV test-run manifest contract | [`b467d87`](https://github.com/Ilufus/ei-mapper-endurance/commit/b467d87) | [runtime-provider tests](tests/runtime_provider_tests.cpp) |
 | Filterable read-only MOB diff details dialog | [`fd30be0`](https://github.com/Ilufus/ei-mapper-endurance/commit/fd30be0) | production MinGW build and [semantic-diff tests](tests/endurance_document_tests.cpp) |
 | Selection UX, recent files, open/save shortcuts, and editable model/texture filters | [`06d1c9b`](https://github.com/Ilufus/ei-mapper-endurance/commit/06d1c9b) | clean production MinGW build, six regression suites, Zone 1 no-op round trip, and [alpha.22 manual checks](ALPHA22_VALIDATION.md) |
+| Semantic raw-object provenance and cached frustum culling | [`1ab2935`](https://github.com/Ilufus/ei-mapper-endurance/commit/1ab2935) | 254-file projection corpus, document/frustum tests, and [alpha.28 checks](ALPHA28_VALIDATION.md) |
 
 ## Current focus
 
@@ -56,6 +57,16 @@ behavior.
   a fallback top-level sweep, and the headless widget check covers both owned and
   accidentally orphaned windows. ([`f9fa250`](https://github.com/Ilufus/ei-mapper-endurance/commit/f9fa250))
 - [ ] Expand changed-save regression coverage across the private JMV map corpus.
+- [x] Replace fragile index-based raw-object provenance with deterministic
+  semantic alignment, including equal-count byte-identical duplicate subtrees.
+  The installed Base/JMV projection corpus passes 254/254 and mismatches still
+  fail closed. ([`1ab2935`](https://github.com/Ilufus/ei-mapper-endurance/commit/1ab2935))
+- [ ] Validate alpha.28 cached frustum culling on large JMV maps. Normal object
+  rendering and GPU picking skip objects whose cached bounds are fully outside
+  the camera frustum. Selected objects, logic editing, and Draw Logic bypass
+  culling to avoid hiding extended paths. GPU occlusion queries remain deferred
+  until profiling shows that their synchronization cost is justified.
+  ([validation](ALPHA28_VALIDATION.md))
 - [ ] Migrate changed MOB saves from the legacy serializer to raw-tree transactions;
   no-op raw preservation is validated, leaf-only UI deltas run through a fail-closed
   transaction bridge, and independently validated `OBJ_PLAYER` edits now use the
@@ -214,6 +225,15 @@ These are the remaining safety gates before editing live maps can be recommended
   and private minidump before assigning a root cause.
 
 ## Resources, figures, textures, and performance
+
+- [x] Add optional cached CPU frustum culling for normal rendering and picking,
+  with conservative handling of rotations, selection, and logic visualization.
+  ([`1ab2935`](https://github.com/Ilufus/ei-mapper-endurance/commit/1ab2935),
+  [`ff1c9a0`](https://github.com/Ilufus/ei-mapper-endurance/commit/ff1c9a0))
+- [ ] Profile remaining large-map bottlenecks after alpha.28 field measurements.
+  Consider spatial partitioning, batching, level-of-detail, and only then
+  occlusion culling; avoid per-object GPU queries on the legacy renderer without
+  evidence because query synchronization can reduce performance.
 
 - [x] Index RES tables and lazily read payloads instead of expanding whole archives repeatedly. ([`054959b`](https://github.com/Ilufus/ei-mapper-endurance/commit/054959b))
 - [x] Normalize mixed-case archive lookups and cache missing-resource results. ([`054959b`](https://github.com/Ilufus/ei-mapper-endurance/commit/054959b))
