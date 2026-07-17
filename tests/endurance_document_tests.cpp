@@ -65,6 +65,19 @@ QByteArray validMob(const QByteArray& rootChild = QByteArray())
     return section(0xA000, rootChild);
 }
 
+QByteArray encryptedScript(const QByteArray& script, quint32 key = 0x12345678)
+{
+    QByteArray encrypted = u32(key);
+    for(char character : script)
+    {
+        quint32 temporaryKey = ((((key * 13) << 4) + key) << 8) - key;
+        key += (temporaryKey << 2) + 2531011;
+        temporaryKey = key >> 16;
+        encrypted.append(char(character ^ char(temporaryKey)));
+    }
+    return section(0xACCEECCB, encrypted);
+}
+
 QByteArray emptyMpr()
 {
     QByteArray bytes;
@@ -86,6 +99,7 @@ private slots:
     void malformedMobRootIsRejected();
     void semanticDiffClassifiesMovementAndAddition();
     void semanticDiffPairsIdenticalDuplicatesByOccurrence();
+    void semanticDiffReportsReadableScriptChanges();
     void transactionPatchesOnlyAuthorizedLeaf();
     void transactionPreservesEmptyContainers();
     void objectSubtreeDuplicateAndDeleteAreExact();
@@ -224,6 +238,28 @@ void EnduranceDocumentTests::semanticDiffPairsIdenticalDuplicatesByOccurrence()
         ++unchanged;
     }
     QCOMPARE(unchanged, 3);
+}
+
+void EnduranceDocumentTests::semanticDiffReportsReadableScriptChanges()
+{
+    CMobDocument baseline;
+    CMobDocument candidate;
+    QVERIFY(baseline.loadBytes(validMob(encryptedScript("first()\nold_value()\nlast()")),
+                               "baseline.mob"));
+    QVERIFY(candidate.loadBytes(validMob(encryptedScript("first()\nnew_value()\nlast()")),
+                                "candidate.mob"));
+
+    const CMobSemanticDiff diff = CMobSemanticDiff::compare(baseline, candidate);
+    QCOMPARE(diff.documentEntries().size(), 1);
+    const SMobDocumentDiffEntry& script = diff.documentEntries().front();
+    QCOMPARE(script.kind, QString("modified"));
+    QCOMPARE(script.category, QString("script"));
+    QVERIFY(script.details.contains("-2: old_value()"));
+    QVERIFY(script.details.contains("+2: new_value()"));
+    QVERIFY(diff.toText().contains("MODIFIED script"));
+    const QJsonArray entries = diff.toJson().value("documentEntries").toArray();
+    QCOMPARE(entries.size(), 1);
+    QCOMPARE(entries.at(0).toObject().value("category").toString(), QString("script"));
 }
 
 void EnduranceDocumentTests::transactionPatchesOnlyAuthorizedLeaf()

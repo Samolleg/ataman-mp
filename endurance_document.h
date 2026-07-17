@@ -138,6 +138,19 @@ struct SMobDiffEntry
                        const QVector<SMobObjectSnapshot>& candidate) const;
 };
 
+struct SMobDocumentDiffEntry
+{
+    QString kind;
+    QString category;
+    QString sectionPath;
+    quint32 sectionType = 0;
+    QByteArray baselineSha256;
+    QByteArray candidateSha256;
+    QString details;
+
+    QJsonObject toJson() const;
+};
+
 class CMobSemanticDiff
 {
 public:
@@ -145,6 +158,7 @@ public:
                                     const class CMobDocument& candidate);
 
     const QVector<SMobDiffEntry>& entries() const { return m_entries; }
+    const QVector<SMobDocumentDiffEntry>& documentEntries() const { return m_documentEntries; }
     QJsonObject toJson() const;
     QString toText() const;
 
@@ -152,6 +166,7 @@ private:
     QVector<SMobObjectSnapshot> m_baseline;
     QVector<SMobObjectSnapshot> m_candidate;
     QVector<SMobDiffEntry> m_entries;
+    QVector<SMobDocumentDiffEntry> m_documentEntries;
 };
 
 class CMobDocument

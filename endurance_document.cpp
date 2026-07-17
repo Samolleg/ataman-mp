@@ -287,6 +287,168 @@ bool positionsDiffer(const SMobObjectSnapshot& a, const SMobObjectSnapshot& b)
            std::fabs(a.positionZ - b.positionZ) > 0.0001f;
 }
 
+constexpr quint32 MobScriptSection = 0xACCEECCB;
+constexpr quint32 MobOldScriptSection = 0xACCEECCA;
+
+void collectDocumentLeaves(const QVector<SMobSection>& sections,
+                           QMap<QString, const SMobSection*>* leaves,
+                           bool insideObjectSection = false)
+{
+    for(const SMobSection& section : sections)
+    {
+        const bool objectSection = insideObjectSection || section.type == 0xB000;
+        if(objectSection)
+            continue;
+        if(section.container && !section.children.isEmpty())
+            collectDocumentLeaves(section.children, leaves, false);
+        else
+            leaves->insert(section.path, &section);
+    }
+}
+
+QString decodeEncryptedScript(const SMobSection* section)
+{
+    if(!section)
+        return QString();
+    const QByteArray data = payload(*section);
+    if(data.size() < 4)
+        return QString();
+    quint32 key = readU32(data, 0);
+    QByteArray decrypted;
+    decrypted.reserve(data.size() - 4);
+    for(int i = 4; i < data.size(); ++i)
+    {
+        quint32 temporaryKey = ((((key * 13) << 4) + key) << 8) - key;
+        key += (temporaryKey << 2) + 2531011;
+        temporaryKey = key >> 16;
+        decrypted.append(char(data.at(i) ^ char(temporaryKey)));
+    }
+    return decodeCp1251(decrypted);
+}
+
+QString readableLineDiff(const QString& baseline, const QString& candidate)
+{
+    const QStringList before = baseline.split('\n');
+    const QStringList after = candidate.split('\n');
+    const qint64 cells = qint64(before.size() + 1) * qint64(after.size() + 1);
+    if(cells > 4000000)
+    {
+        int prefix = 0;
+        while(prefix < before.size() && prefix < after.size() && before.at(prefix) == after.at(prefix))
+            ++prefix;
+        int suffix = 0;
+        while(suffix < before.size() - prefix && suffix < after.size() - prefix &&
+              before.at(before.size() - 1 - suffix) == after.at(after.size() - 1 - suffix))
+            ++suffix;
+        const int removed = before.size() - prefix - suffix;
+        const int added = after.size() - prefix - suffix;
+        QString output;
+        QTextStream stream(&output);
+        stream << "--- baseline script\n+++ candidate script\n"
+               << "Large script: " << before.size() << " -> " << after.size()
+               << " lines; changed block starts at line " << (prefix + 1) << "\n";
+        constexpr int MaximumLines = 400;
+        int emitted = 0;
+        for(int index = 0; index < removed && emitted < MaximumLines; ++index, ++emitted)
+            stream << "-" << (prefix + index + 1) << ": " << before.at(prefix + index) << "\n";
+        for(int index = 0; index < added && emitted < MaximumLines; ++index, ++emitted)
+            stream << "+" << (prefix + index + 1) << ": " << after.at(prefix + index) << "\n";
+        if(removed + added > MaximumLines)
+            stream << "... diff truncated after " << MaximumLines << " changed lines\n";
+        return output;
+    }
+
+    const int columns = after.size() + 1;
+    QVector<int> lcs((before.size() + 1) * columns, 0);
+    for(int i = before.size() - 1; i >= 0; --i)
+        for(int j = after.size() - 1; j >= 0; --j)
+            lcs[i * columns + j] = before.at(i) == after.at(j)
+                ? 1 + lcs[(i + 1) * columns + j + 1]
+                : qMax(lcs[(i + 1) * columns + j], lcs[i * columns + j + 1]);
+
+    QString output;
+    QTextStream stream(&output);
+    stream << "--- baseline script\n+++ candidate script\n";
+    int i = 0;
+    int j = 0;
+    int emitted = 0;
+    constexpr int MaximumLines = 400;
+    while((i < before.size() || j < after.size()) && emitted < MaximumLines)
+    {
+        if(i < before.size() && j < after.size() && before.at(i) == after.at(j))
+        {
+            ++i;
+            ++j;
+            continue;
+        }
+        if(j < after.size() && (i == before.size() ||
+           lcs[i * columns + j + 1] >= lcs[(i + 1) * columns + j]))
+        {
+            stream << "+" << (j + 1) << ": " << after.at(j) << "\n";
+            ++j;
+        }
+        else if(i < before.size())
+        {
+            stream << "-" << (i + 1) << ": " << before.at(i) << "\n";
+            ++i;
+        }
+        ++emitted;
+    }
+    if(i < before.size() || j < after.size())
+        stream << "... diff truncated after " << MaximumLines << " changed lines\n";
+    return output;
+}
+
+QString documentCategory(quint32 type)
+{
+    if(type == MobScriptSection)
+        return "script";
+    if(type == MobOldScriptSection)
+        return "old-script";
+    return "document-section";
+}
+
+void compareDocumentLeaves(const CMobDocument& baseline, const CMobDocument& candidate,
+                           QVector<SMobDocumentDiffEntry>* entries)
+{
+    QMap<QString, const SMobSection*> before;
+    QMap<QString, const SMobSection*> after;
+    collectDocumentLeaves(baseline.sections(), &before);
+    collectDocumentLeaves(candidate.sections(), &after);
+    QSet<QString> paths;
+    for(auto it = before.constBegin(); it != before.constEnd(); ++it)
+        paths.insert(it.key());
+    for(auto it = after.constBegin(); it != after.constEnd(); ++it)
+        paths.insert(it.key());
+    QStringList orderedPaths = paths.values();
+    std::sort(orderedPaths.begin(), orderedPaths.end());
+    for(const QString& path : orderedPaths)
+    {
+        const SMobSection* left = before.value(path, nullptr);
+        const SMobSection* right = after.value(path, nullptr);
+        if(left && right && left->sha256 == right->sha256)
+            continue;
+        SMobDocumentDiffEntry entry;
+        entry.kind = !left ? "added" : (!right ? "removed" : "modified");
+        entry.sectionPath = path;
+        entry.sectionType = left ? left->type : right->type;
+        entry.category = documentCategory(entry.sectionType);
+        if(left)
+            entry.baselineSha256 = left->sha256;
+        if(right)
+            entry.candidateSha256 = right->sha256;
+        if(entry.sectionType == MobScriptSection)
+            entry.details = readableLineDiff(decodeEncryptedScript(left), decodeEncryptedScript(right));
+        else if(entry.sectionType == MobOldScriptSection)
+            entry.details = readableLineDiff(left ? decodeCp1251(payload(*left)) : QString(),
+                                             right ? decodeCp1251(payload(*right)) : QString());
+        else
+            entry.details = QString("Raw section changed (%1 -> %2 bytes).")
+                .arg(left ? left->rawBytes.size() : 0).arg(right ? right->rawBytes.size() : 0);
+        entries->append(entry);
+    }
+}
+
 bool emitTransactionSection(const SMobSection& section,
                             const QMap<QString, SMobLeafEdit>& edits,
                             QSet<QString>* applied, QByteArray* output,
@@ -825,10 +987,26 @@ QJsonObject SMobDiffEntry::toJson(const QVector<SMobObjectSnapshot>& baseline,
     return result;
 }
 
+QJsonObject SMobDocumentDiffEntry::toJson() const
+{
+    QJsonObject result;
+    result.insert("kind", kind);
+    result.insert("category", category);
+    result.insert("path", sectionPath);
+    result.insert("sectionType", QString("0x%1").arg(sectionType, 8, 16, QLatin1Char('0')).toUpper());
+    if(!baselineSha256.isEmpty())
+        result.insert("baselineSha256", QString::fromLatin1(baselineSha256.toHex()));
+    if(!candidateSha256.isEmpty())
+        result.insert("candidateSha256", QString::fromLatin1(candidateSha256.toHex()));
+    result.insert("details", details);
+    return result;
+}
+
 CMobSemanticDiff CMobSemanticDiff::compare(const CMobDocument& baseline,
                                            const CMobDocument& candidate)
 {
     CMobSemanticDiff result;
+    compareDocumentLeaves(baseline, candidate, &result.m_documentEntries);
     result.m_baseline = baseline.objects();
     result.m_candidate = candidate.objects();
     QSet<int> matchedBaseline;
@@ -938,11 +1116,17 @@ CMobSemanticDiff CMobSemanticDiff::compare(const CMobDocument& baseline,
 QJsonObject CMobSemanticDiff::toJson() const
 {
     QJsonArray entries;
+    QJsonArray documentEntries;
     QMap<QString, int> counts;
     for(const SMobDiffEntry& entry : m_entries)
     {
         entries.append(entry.toJson(m_baseline, m_candidate));
         counts[diffKindName(entry.kind)] += 1;
+    }
+    for(const SMobDocumentDiffEntry& entry : m_documentEntries)
+    {
+        documentEntries.append(entry.toJson());
+        counts[entry.kind] += 1;
     }
     QJsonObject summary;
     for(auto it = counts.constBegin(); it != counts.constEnd(); ++it)
@@ -950,6 +1134,7 @@ QJsonObject CMobSemanticDiff::toJson() const
     QJsonObject result;
     result.insert("summary", summary);
     result.insert("entries", entries);
+    result.insert("documentEntries", documentEntries);
     return result;
 }
 
@@ -960,6 +1145,8 @@ QString CMobSemanticDiff::toText() const
     QMap<QString, int> counts;
     for(const SMobDiffEntry& entry : m_entries)
         counts[diffKindName(entry.kind)] += 1;
+    for(const SMobDocumentDiffEntry& entry : m_documentEntries)
+        counts[entry.kind] += 1;
     stream << "MOB perspective diff:";
     for(auto it = counts.constBegin(); it != counts.constEnd(); ++it)
         stream << " " << it.key() << "=" << it.value();
@@ -972,6 +1159,14 @@ QString CMobSemanticDiff::toText() const
         if(entry.candidateIndex >= 0)
             stream << " candidate=" << m_candidate.at(entry.candidateIndex).sectionPath;
         stream << "\n";
+    }
+    for(const SMobDocumentDiffEntry& entry : m_documentEntries)
+    {
+        stream << entry.kind.toUpper() << " " << entry.category
+               << " section=" << entry.sectionPath << "\n";
+        stream << entry.details;
+        if(!entry.details.endsWith('\n'))
+            stream << "\n";
     }
     return output;
 }

@@ -11,6 +11,7 @@
 #include <QLineEdit>
 #include <QMessageBox>
 #include <QPushButton>
+#include <QPlainTextEdit>
 #include <QSaveFile>
 #include <QTableWidget>
 #include <QVBoxLayout>
@@ -97,7 +98,8 @@ CMobDiffDialog::CMobDiffDialog(const QFileInfo& baseline, const QFileInfo& candi
     m_table->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_table->setSortingEnabled(false);
     const QJsonArray entries = report.value("entries").toArray();
-    m_table->setRowCount(entries.size());
+    const QJsonArray documentEntries = report.value("documentEntries").toArray();
+    m_table->setRowCount(entries.size() + documentEntries.size());
     for(int row = 0; row < entries.size(); ++row)
     {
         const QJsonObject entry = entries.at(row).toObject();
@@ -109,11 +111,32 @@ CMobDiffDialog::CMobDiffDialog(const QFileInfo& baseline, const QFileInfo& candi
         m_table->setItem(row, 5, new QTableWidgetItem(entry.value("baseline").toObject().value("sha256").toString()));
         m_table->setItem(row, 6, new QTableWidgetItem(entry.value("candidate").toObject().value("sha256").toString()));
     }
+    for(int index = 0; index < documentEntries.size(); ++index)
+    {
+        const int row = entries.size() + index;
+        const QJsonObject entry = documentEntries.at(index).toObject();
+        QTableWidgetItem* kind = new QTableWidgetItem(entry.value("kind").toString());
+        kind->setData(Qt::UserRole, entry.value("details").toString());
+        m_table->setItem(row, 0, kind);
+        m_table->setItem(row, 1, new QTableWidgetItem(entry.value("category").toString()));
+        m_table->setItem(row, 2, new QTableWidgetItem(QString()));
+        const QString path = entry.value("path").toString();
+        m_table->setItem(row, 3, new QTableWidgetItem(entry.value("kind").toString() == "added" ? QString() : path));
+        m_table->setItem(row, 4, new QTableWidgetItem(entry.value("kind").toString() == "removed" ? QString() : path));
+        m_table->setItem(row, 5, new QTableWidgetItem(entry.value("baselineSha256").toString()));
+        m_table->setItem(row, 6, new QTableWidgetItem(entry.value("candidateSha256").toString()));
+    }
     m_table->setSortingEnabled(true);
     m_table->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
     m_table->horizontalHeader()->setSectionResizeMode(3, QHeaderView::Stretch);
     m_table->horizontalHeader()->setSectionResizeMode(4, QHeaderView::Stretch);
     layout->addWidget(m_table, 1);
+
+    m_details = new QPlainTextEdit(this);
+    m_details->setReadOnly(true);
+    m_details->setPlaceholderText(tr("Select a script or document-section change to see its readable diff."));
+    m_details->setMinimumHeight(140);
+    layout->addWidget(m_details);
 
     QHBoxLayout* actions = new QHBoxLayout();
     QPushButton* exportText = new QPushButton(tr("Export Text..."), this);
@@ -125,6 +148,11 @@ CMobDiffDialog::CMobDiffDialog(const QFileInfo& baseline, const QFileInfo& candi
     actions->addWidget(close);
     layout->addLayout(actions);
     connect(m_filter, &QLineEdit::textChanged, this, [this](const QString& text) { applyFilter(text); });
+    connect(m_table, &QTableWidget::currentCellChanged, this,
+            [this](int row, int, int, int) {
+        const QTableWidgetItem* kind = row >= 0 ? m_table->item(row, 0) : nullptr;
+        m_details->setPlainText(kind ? kind->data(Qt::UserRole).toString() : QString());
+    });
     connect(exportText, &QPushButton::clicked, this, [this]() { exportReport(false); });
     connect(exportJson, &QPushButton::clicked, this, [this]() { exportReport(true); });
     connect(close, &QPushButton::clicked, this, &QDialog::accept);
@@ -141,6 +169,8 @@ void CMobDiffDialog::applyFilter(const QString& text)
         for(int column = 0; column < m_table->columnCount(); ++column)
             if(const QTableWidgetItem* item = m_table->item(row, column))
                 haystack += item->text() + ' ';
+        if(const QTableWidgetItem* kind = m_table->item(row, 0))
+            haystack += kind->data(Qt::UserRole).toString();
         m_table->setRowHidden(row, !needle.isEmpty() && !haystack.contains(needle, Qt::CaseInsensitive));
     }
 }

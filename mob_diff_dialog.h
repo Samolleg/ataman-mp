@@ -7,6 +7,7 @@
 
 class QLineEdit;
 class QLabel;
+class QPlainTextEdit;
 class QTableWidget;
 
 class CMobDiffDialog : public QDialog
@@ -22,6 +23,7 @@ private:
     QLineEdit* m_filter = nullptr;
     QLabel* m_summary = nullptr;
     QTableWidget* m_table = nullptr;
+    QPlainTextEdit* m_details = nullptr;
     QByteArray m_jsonReport;
     QByteArray m_textReport;
 };
