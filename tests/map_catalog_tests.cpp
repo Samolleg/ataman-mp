@@ -9,6 +9,7 @@ class MapCatalogTests : public QObject
 private slots:
     void parsesResourcePairsOnly();
     void acceptsWhitespaceAndCase();
+    void parsesTravelZoneSpawnData();
 };
 
 void MapCatalogTests::parsesResourcePairsOnly()
@@ -42,6 +43,30 @@ void MapCatalogTests::acceptsWhitespaceAndCase()
         "  #ZONE   zone18   gz18   jmv  \n #RES \n zone18   zone18  \n");
     QCOMPARE(entries.size(), 1);
     QCOMPARE(entries.first().zoneType, QString("jmv"));
+}
+
+void MapCatalogTests::parsesTravelZoneSpawnData()
+{
+    const QVector<SMapCatalogEntry> entries = CMapCatalog::parseMapTable(
+        "#zone gz1g gipat game\n"
+        "#res\nzone1 zone1\n"
+        "#exit 2\nbz1g 1\n"
+        "#deploy\n184 101 190 108\n"
+        "#remove\n181 108 193 120\n"
+        "#view\n135.2\n"
+        "#exit 3\nnone 0\n");
+
+    QCOMPARE(entries.size(), 1);
+    QCOMPARE(entries.first().travelZones.size(), 2);
+    const SMapTravelZone& spawn = entries.first().travelZones.first();
+    QCOMPARE(spawn.exitId, 2);
+    QCOMPARE(spawn.destinationZoneId, QString("bz1g"));
+    QCOMPARE(spawn.destinationExitId, 1);
+    QVERIFY(spawn.hasDeployRectangle);
+    QCOMPARE(spawn.spawnPoint(), QPointF(187.0, 104.5));
+    QVERIFY(spawn.hasViewAngle);
+    QCOMPARE(spawn.viewAngle, 135.2);
+    QVERIFY(!entries.first().travelZones.at(1).hasDeployRectangle);
 }
 
 QTEST_APPLESS_MAIN(MapCatalogTests)
