@@ -1,0 +1,21 @@
+EI Mapper: Endurance Edition 0.1.0-alpha.33
+Binary implementation commit: 5192c4d
+Package source snapshot: tag v0.1.0-alpha.33
+Purpose: external-script prompt crash and property clipboard correction
+
+File and directory watcher notifications are coalesced through one single-shot
+reload timer. A modal import or encoding question cannot be entered recursively,
+and notifications received during a question are folded into one later recheck.
+
+Property clipboard operations now belong to the property table. Value widgets
+and labels expose Copy value and Paste value; selected labels support Ctrl+C and
+Ctrl+V; exact typed bundles support compatible multi-property paste; structured
+values use deep typed copies; and a multi-property paste is one undo action.
+Explicit model/texture paste applies immediately. Ordinary filter typing still
+requires Enter or an explicit dropdown selection.
+
+The misplaced viewport Shift-click object shortcuts were removed. MOB Parameters
+is disabled whenever no MOB is active.
+
+The extended UI interaction checks, seven focused regression suites, and the
+Zone 1 byte-identical no-op round trip passed. Follow ALPHA33_VALIDATION.md.

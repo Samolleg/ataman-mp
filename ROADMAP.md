@@ -43,6 +43,7 @@ behavior.
 | Generic topology-preserving MOB leaf saves | [`843ba9c`](https://github.com/Ilufus/ei-mapper-endurance/commit/843ba9c) | 254/254 Base/JMV projection corpus, 24 document tests, and [alpha.30 checks](ALPHA30_VALIDATION.md) |
 | Exact object sequence and patrol/look structural saves | [`11698ad`](https://github.com/Ilufus/ei-mapper-endurance/commit/11698ad) | 254/254 Base/JMV corpus, 27 document tests, six regression suites, and [alpha.31 checks](ALPHA31_VALIDATION.md) |
 | MOB-parameter transactions, stable logic undo, repeated-save provenance, and typed property clipboard | [`f4b107c`](https://github.com/Ilufus/ei-mapper-endurance/commit/f4b107c) | Seven regression suites, UI widget checks, Zone 1 no-op round trip, and [alpha.32 checks](ALPHA32_VALIDATION.md) |
+| Debounced external-script import and row-based typed property clipboard | [`5192c4d`](https://github.com/Ilufus/ei-mapper-endurance/commit/5192c4d) | Extended UI clipboard checks, seven regression suites, Zone 1 no-op round trip, and [alpha.33 checks](ALPHA33_VALIDATION.md) |
 
 ## Product contract
 
@@ -92,6 +93,7 @@ behavior.
   prompts; move clipboard operations to property rows and labels; support typed
   multi-row and structured-value paste as one undo action; remove viewport
   Shift-click object shortcuts; and disable MOB Parameters without an active MOB.
+  ([`5192c4d`](https://github.com/Ilufus/ei-mapper-endurance/commit/5192c4d))
 - [ ] Finish lossless MPR archive preservation before enabling landscape editing.
 
 These are the remaining safety gates before editing live maps can be recommended.
