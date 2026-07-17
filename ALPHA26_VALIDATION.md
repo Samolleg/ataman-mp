@@ -47,3 +47,19 @@ The mixed edit must be rejected as a whole.
 Send the clean-session `logs/workflow.log`, source/output hashes, MOB filename,
 and a one-line description of the isolated action. Keep logs private because
 they contain installation paths. Do not send game resources unless requested.
+
+## Completed JMV evidence (2026-07-17)
+
+The tester changed one unit's Player value and saved `zone1test2.mob` from
+`zone1test1.mob`. Endurance logged one authorized `OBJ_PLAYER` leaf transaction
+and a successful fresh staged validation. Independent comparison found:
+
+- source SHA-256 `DB5F3AB08E8D6EA920096887B17BE498A1E81A315AB50C85754922150C6A4D34`;
+- output SHA-256 `1DA45CA074ECE8DC07085E639CEED18432570B79EECA1ECC26AE1CB00C4F7BBD`;
+- identical 1,586,436-byte file sizes and object counts;
+- 1,692 unchanged objects and exactly one modified object, `WolfTutor-1364`
+  at `/OBJECT_DB_FILE[0]/OBJECT_SECTION[0]/UNIT[90]`;
+- exactly one changed byte at file offset `0x2E31A`, from Player 4 to Player 9.
+
+A combined model/texture plus Player edit was refused as a whole, as was a
+copy/paste structural edit. Neither unsupported candidate was serialized.

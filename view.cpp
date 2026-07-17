@@ -2054,7 +2054,9 @@ void CView::operationRevert(EOperationAxisType operationType)
 
 void CView::operationApply(EOperationAxisType operationType)
 {
-    if(m_pendingOperationOwnsPaste && m_pendingPasteMob && !m_pendingPasteNodes.isEmpty())
+    const bool committingPaste = m_pendingOperationOwnsPaste
+            && m_pendingPasteMob && !m_pendingPasteNodes.isEmpty();
+    if(committingPaste)
     {
         m_pUndoStack->beginMacro(QString("Paste %1 object%2")
                 .arg(m_pendingPasteNodes.size())
@@ -2069,16 +2071,14 @@ void CView::operationApply(EOperationAxisType operationType)
         m_pUndoStack->push(new CSelectionCommand(this, m_pendingPasteOriginalSelection,
                                                   m_pendingPasteNodes,
                                                   "Select pasted objects"));
-        m_pUndoStack->endMacro();
-        m_pendingOperationOwnsPaste = false;
-        m_pendingPasteMob = nullptr;
-        m_pendingPasteNodes.clear();
-        m_pendingPasteOriginalSelection.clear();
     }
 
     QQuaternion quat;
     QVector3D rot;
-    const bool grouped = m_operationBackup.size() > 1;
+    // A paste and its automatically-started placement transform are one user
+    // action. Keep the Paste macro open through the transform commands so one
+    // Undo removes the pasted objects instead of merely moving them back.
+    const bool grouped = !committingPaste && m_operationBackup.size() > 1;
     if(grouped)
     {
         QString action = "Transform";
@@ -2192,9 +2192,14 @@ void CView::operationApply(EOperationAxisType operationType)
     }
     if(grouped)
         m_pUndoStack->endMacro();
+    if(committingPaste)
+        m_pUndoStack->endMacro();
     m_operationBackup.clear();
     m_unitMovementBackup.clear();
     m_pendingOperationOwnsPaste = false;
+    m_pendingPasteMob = nullptr;
+    m_pendingPasteNodes.clear();
+    m_pendingPasteOriginalSelection.clear();
 }
 
 void CView::moveTo(QVector3D &dir)

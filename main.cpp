@@ -9,6 +9,8 @@
 #include <QJsonObject>
 #include <QTextStream>
 #include <QTimer>
+#include <QUndoCommand>
+#include <QUndoStack>
 #include <cstdio>
 #include <cstring>
 
@@ -25,6 +27,18 @@
 #endif
 
 namespace {
+class CCounterUndoCommand final: public QUndoCommand
+{
+public:
+    CCounterUndoCommand(int* value, int delta): m_value(value), m_delta(delta) {}
+    void undo() override { if(m_value) *m_value -= m_delta; }
+    void redo() override { if(m_value) *m_value += m_delta; }
+
+private:
+    int* m_value;
+    int m_delta;
+};
+
 const char* requestedOpenGlBackend(int argc, char* argv[])
 {
     for(int i = 1; i < argc; ++i)
@@ -245,8 +259,27 @@ int runHeadlessCommand(QApplication& app)
         ei::closeSecondaryWindows(&primaryWindow);
         const bool secondaryWindowsClosed = !ownedWindow.isVisible() && !orphanWindow.isVisible();
 
+        // Paste creation and its automatic placement transform must be one
+        // top-level history item. This mirrors CView::operationApply().
+        QUndoStack pasteHistory;
+        int pastedObjects = 0;
+        int placementChanges = 0;
+        pasteHistory.beginMacro("Paste 1 object");
+        pasteHistory.push(new CCounterUndoCommand(&pastedObjects, 1));
+        pasteHistory.push(new CCounterUndoCommand(&placementChanges, 1));
+        pasteHistory.endMacro();
+        const bool pasteSingleAction = pasteHistory.count() == 1
+                && pastedObjects == 1 && placementChanges == 1;
+        pasteHistory.undo();
+        const bool pasteUndoAtomic = pasteHistory.index() == 0
+                && pastedObjects == 0 && placementChanges == 0;
+        pasteHistory.redo();
+        const bool pasteRedoAtomic = pasteHistory.index() == 1
+                && pastedObjects == 1 && placementChanges == 1;
+
         const bool passed = prefixesOnly && valueStable && focusCancel && escapeCancel
-                && enterCommit && clickCommit && secondaryWindowsClosed;
+                && enterCommit && clickCommit && secondaryWindowsClosed
+                && pasteSingleAction && pasteUndoAtomic && pasteRedoAtomic;
         QTextStream output(stdout);
         output << "asset-picker prefixes=" << completions.join(",") << "\n"
                << "prefixesOnly=" << prefixesOnly
@@ -255,7 +288,10 @@ int runHeadlessCommand(QApplication& app)
                << " escapeCancel=" << escapeCancel
                << " enterCommit=" << enterCommit
                << " clickCommit=" << clickCommit
-               << " secondaryWindowsClosed=" << secondaryWindowsClosed << "\n"
+               << " secondaryWindowsClosed=" << secondaryWindowsClosed
+               << " pasteSingleAction=" << pasteSingleAction
+               << " pasteUndoAtomic=" << pasteUndoAtomic
+               << " pasteRedoAtomic=" << pasteRedoAtomic << "\n"
                << (passed ? "PASS" : "FAIL")
                << ": widget interaction and secondary-window lifecycle checks\n";
         output.flush();
