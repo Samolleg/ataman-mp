@@ -44,6 +44,8 @@ candidate. Use copied MOB files or Save As outputs.
 2. Undo once. Confirm the original model and its exact original selected-part
    set return; it must not switch to all parts selected.
 3. Redo once and confirm the copied model and exact copied part set return.
+4. Select several property rows, then right-click one selected field or its
+   value widget. Confirm Copy/Paste operates on the entire selected row set.
 
 Also repeat the first-patrol, Ctrl+D, keybinding, and preservation checks from
 `ALPHA34_VALIDATION.md`.

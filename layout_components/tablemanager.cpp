@@ -174,7 +174,7 @@ QList<int> CTableManager::selectedPropertyRows(int fallbackRow) const
     QSet<int> uniqueRows;
     for(QTableWidgetItem* item : m_pTable->selectedItems())
     {
-        if(item && item->column() == 0 && m_rowValues.contains(item->row()))
+        if(item && m_rowValues.contains(item->row()))
             uniqueRows.insert(item->row());
     }
     if(uniqueRows.isEmpty() && fallbackRow >= 0 && m_rowValues.contains(fallbackRow))
@@ -370,7 +370,7 @@ bool CTableManager::eventFilter(QObject* watched, QEvent* event)
         QContextMenuEvent* context = static_cast<QContextMenuEvent*>(event);
         QList<int> rows;
         if(widgetRow >= 0)
-            rows << widgetRow;
+            rows = selectedPropertyRows(widgetRow);
         else if(watched == m_pTable->viewport())
         {
             const int clickedRow = m_pTable->indexAt(context->pos()).row();
