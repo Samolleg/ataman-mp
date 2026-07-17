@@ -1,5 +1,6 @@
 EI Mapper: Endurance Edition 0.1.0-alpha.31
-Source commit: 73b79f53ec1b (main; implementation commit 11698ad)
+Binary implementation commit: 11698ad
+Package source snapshot: tag v0.1.0-alpha.31
 Purpose: final private MOB hardening alpha for closed-group testing
 
 This build saves ordinary mixed property/transform edits without a preview or
