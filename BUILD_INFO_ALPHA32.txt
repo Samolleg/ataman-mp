@@ -1,0 +1,19 @@
+EI Mapper: Endurance Edition 0.1.0-alpha.32
+Binary implementation commit: f4b107c
+Package source snapshot: tag v0.1.0-alpha.32
+Purpose: alpha.31 transaction and undo regression fixes for closed-group testing
+
+MOB Parameters and embedded scripts now apply as one entry in the main undo
+history. External script workspaces watch both the file and directory so editors
+that replace files atomically can be imported. Logic-property undo resolves
+patrol/look/trap targets by stable identity rather than retaining deleted node
+pointers. Successful structural saves rebind raw provenance for later saves.
+
+Object-detail clipboard content remains readable plain text for use in external
+editors. Endurance-to-Endurance paste records the source property type and
+rejects incompatible destination fields. Editable model/texture paste remains
+pending until Enter or an explicit dropdown selection.
+
+Seven focused regression suites, the non-interactive UI widget checks, and the
+Zone 1 no-op round-trip check passed. Use copied maps and follow
+ALPHA32_VALIDATION.md.

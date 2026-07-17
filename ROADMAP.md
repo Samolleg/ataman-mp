@@ -42,6 +42,7 @@ behavior.
 | Semantic raw-object provenance and cached frustum culling | [`1ab2935`](https://github.com/Ilufus/ei-mapper-endurance/commit/1ab2935) | 254-file projection corpus, document/frustum tests, and [alpha.28 checks](ALPHA28_VALIDATION.md) |
 | Generic topology-preserving MOB leaf saves | [`843ba9c`](https://github.com/Ilufus/ei-mapper-endurance/commit/843ba9c) | 254/254 Base/JMV projection corpus, 24 document tests, and [alpha.30 checks](ALPHA30_VALIDATION.md) |
 | Exact object sequence and patrol/look structural saves | [`11698ad`](https://github.com/Ilufus/ei-mapper-endurance/commit/11698ad) | 254/254 Base/JMV corpus, 27 document tests, six regression suites, and [alpha.31 checks](ALPHA31_VALIDATION.md) |
+| MOB-parameter transactions, stable logic undo, repeated-save provenance, and typed property clipboard | [`f4b107c`](https://github.com/Ilufus/ei-mapper-endurance/commit/f4b107c) | Seven regression suites, UI widget checks, Zone 1 no-op round trip, and [alpha.32 checks](ALPHA32_VALIDATION.md) |
 
 ## Product contract
 
@@ -80,9 +81,11 @@ behavior.
 - [x] Route MOB Parameters and embedded-script Apply through the main undo
   history; reload external-editor atomic replacements; remove stale patrol-node
   pointers from undo; and rebind saved raw-object provenance for subsequent saves.
+  ([`f4b107c`](https://github.com/Ilufus/ei-mapper-endurance/commit/f4b107c))
 - [x] Add destination-typed property clipboard validation. Copied values remain
   plain text for external editors, while Endurance rejects incompatible field
   pastes and keeps editable asset pastes pending until Enter or an explicit choice.
+  ([`f4b107c`](https://github.com/Ilufus/ei-mapper-endurance/commit/f4b107c))
 - [ ] Finish lossless MPR archive preservation before enabling landscape editing.
 
 These are the remaining safety gates before editing live maps can be recommended.
