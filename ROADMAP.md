@@ -261,6 +261,8 @@ MOB editing does not imply that landscape saving is supported.
   texture lists, secondary layers, and equipped visuals. Base-game
   `zone3obr.mob` remains the known primary-skin regression case; JMV rendering
   remains the current priority.
+- [ ] Render humanoids in an appropriate database/profile-derived idle pose
+  instead of the current null/T-pose fallback.
 - [x] Prefer an active mod `database.res` over adjacent backup or
   `original-unmodified` database archives for unit appearance lookup. ([`94e0b9d`](https://github.com/Ilufus/ei-mapper-endurance/commit/94e0b9d))
 - [x] Log and display the nearest existing family variation when a MOB references an absent skin, without changing the stored field. ([`35a43c8`](https://github.com/Ilufus/ei-mapper-endurance/commit/35a43c8))
@@ -273,6 +275,12 @@ MOB editing does not imply that landscape saving is supported.
 - [ ] Move indexing, parsing, and CPU decoding to cancellable worker tasks.
 - [ ] Batch OpenGL uploads on the GUI thread without freezing the editor.
 - [ ] Report archive precedence, collisions, and shadowed assets.
+- [ ] Accept unpacked asset directories and ZIP archives containing loose MMPs
+  as profile resource sources. Index ZIP central-directory entries without
+  extracting the whole archive, apply the same normalized lookup/precedence
+  rules as RES sources, and report malformed or shadowed assets. Primary repro:
+  the successfully opened oversized custom MPR whose texture pack was supplied
+  as a ZIP of MMP files rather than a RES archive.
 - [ ] Meet the warm-load target: at least 10x faster than v0.3 and within 15 seconds on representative maps.
 
 ## Document workflow
@@ -287,6 +295,11 @@ MOB editing does not imply that landscape saving is supported.
   without changing stored MOB coordinates. ([`54d8070`](https://github.com/Ilufus/ei-mapper-endurance/commit/54d8070))
 - [ ] Disable only terrain-dependent tools in MOB-only mode.
 - [ ] Add independent `.mpr` and `.mob` drag-and-drop behavior.
+- [ ] When opening an MPR while another workspace is loaded, offer to close and
+  replace the current MPR/MOB set. Prompt once for all dirty documents, allow
+  cancel, and clear document-bound undo state only after the close succeeds.
+- [ ] Add optional Windows file associations for `.mpr` and `.mob`, registered
+  only with explicit user consent and removable from Settings/uninstall.
 - [x] Add headless `--profile-load` discovery and JSON output. ([`7b206c8`](https://github.com/Ilufus/ei-mapper-endurance/commit/7b206c8))
 - [x] Add explicit profile capabilities and fingerprinted Base/JMV runtime-stack
   manifests. ([`97b6991`](https://github.com/Ilufus/ei-mapper-endurance/commit/97b6991))
@@ -361,8 +374,17 @@ MOB editing does not imply that landscape saving is supported.
   ([`b467d87`](https://github.com/Ilufus/ei-mapper-endurance/commit/b467d87), [runtime-provider tests](tests/runtime_provider_tests.cpp))
 - [ ] Implement concrete provider backends; interface and manifest contracts are
   present, but appearance/equipment/semantic/launch providers remain disabled.
-- [ ] Run the non-destructive JMV feasibility ladder: `server <map>`, supplemental
-  `Auto<map>*.mob` discovery/order, then autorun-script `AddMobEx`.
+- [ ] Run the non-destructive JMV feasibility ladder: stage a temporary map-list
+  entry from the `texts.res` map table, invoke the map codename through the
+  console/server path, determine supplemental `Auto<map>*.mob` discovery/order,
+  then test an autorun script using `AddMobEx`.
+  - Prefer a temporary resource overlay or isolated replacement rather than
+    modifying the installed `texts.res`.
+  - Prototype an automatic boot path that skips cutscenes/menu, invokes the map
+    command, and unconditionally loads declared Auto MOBs through a temporary
+    script so testing does not require manual console interaction.
+  - Verify the exact map-list member name and Base/JMV behavior before treating
+    this as an available runtime contract.
 - [ ] Implement manifest staging and disposable test state only after one
   mechanism proves exact ordered loading, readiness reporting, and cleanup.
 - [ ] Keep direct launch disabled for Base EI and unavailable for JMV until the
@@ -381,6 +403,10 @@ MOB editing does not imply that landscape saving is supported.
   alpha.14-group fixes, synchronized internal/external scripts, and readable
   embedded-script MOB diffs. The supported MOB edit implementation is complete;
   promotion now depends on closed-group regression and game testing.
+- [x] `0.1.0-alpha.41`: redo-safe raw provenance and the July 17 multi-edit/UI
+  fixes passed owner testing and were handed to the closed tester group.
+  ([`db3fa31`](https://github.com/Ilufus/ei-mapper-endurance/commit/db3fa31),
+  [validation](ALPHA41_VALIDATION.md))
 - [ ] Following private alpha: fix issues found by the closed test group and
   publish a concise Base/JMV coverage summary; no new hardening architecture.
 - [ ] `0.1.0-beta.1`: correct indexed resources and responsive fast loading.
@@ -395,6 +421,27 @@ Add requested enhancements here first. We can then assign each one to a release
 or move it into the relevant section above without losing its history.
 
 ### High priority
+
+- [ ] Add a hideable **Maps and Collections** browser before implementing the
+  standalone custom-collection workflow.
+  - Read the Base/JMV map list from the active profile's `texts.res` map-table
+    member and show map codenames in a tree.
+  - Loading a map entry resolves and opens its corresponding MPR plus primary
+    MOB as one workspace operation, with a combined dirty-document prompt when
+    replacing the current workspace.
+  - Use top-level **Maps** and **Collections** groups; collections append to the
+    same navigation model rather than creating a separate competing browser.
+  - Place the browser in a left-side hideable panel and make `Ctrl+Space` its
+    default customizable visibility shortcut.
+  - Report missing/ambiguous map files without silently selecting a fallback.
+- [ ] Populate database/prototype fields from the active profile database with
+  prefix filtering and manual entry where the format permits it. Warn when a
+  placed object's referenced entry is missing or was deleted; do not silently
+  rewrite or clear the stored value.
+- [ ] Make the main workspace panels dockable, detachable, and persistently
+  rearrangeable. Support docking to window edges, beside other docks, and as
+  tabs with another dock, approximating the useful UE5 layout behavior within
+  Qt5's supported docking model.
 
 - [ ] Add a supported **Landscape Editing** mode for MPR/SEC terrain.
   - Gate editing on lossless MPR/SEC saves: preserve untouched archive members,
@@ -421,6 +468,8 @@ or move it into the relevant section above without losing its history.
   - Require copied-map round-trip checks, untouched-member/sector diffs, and
     focused in-game traversal tests before enabling this for live maps.
 - [ ] Add a portable Endurance `.collection` format for reusable MPR/MOB sets.
+  - Implement this on top of the **Maps and Collections** browser/navigation
+    model so custom collections extend the same workflow as profile maps.
   - A collection is a small manifest listing one optional MPR and one or more
     MOB files; it never embeds, copies, or modifies the referenced map assets.
   - Load a collection and open its complete MPR/MOB set without selecting each
@@ -449,8 +498,16 @@ or move it into the relevant section above without losing its history.
   game for testing (**JMV-only stretch goal**; gated by the profile provider and
   non-destructive feasibility protocol above).
 - [ ] Add a resizable workflow-log panel along the bottom of the viewport, similar to the UE4 output log.
+- [ ] Add a blocking, phase-aware progress dialog for MOB/MPR saves, including
+  serialization, validation, backup, and atomic replacement. Never imply that
+  replacement completed while validation or backup is still running.
 
 ### Medium priority
+
+- [ ] Add optional external MOB diff-tool integration. Pass two explicit files
+  or exported snapshots to a configured executable without replacing the
+  built-in deterministic semantic diff or exposing unsaved/private data without
+  confirmation.
 
 - [ ] Load database-defined humanoid textures for humans, skeletons, and orcs where applicable.
   - Prototype skin-index parsing and candidate lookup are implemented.
@@ -470,6 +527,53 @@ or move it into the relevant section above without losing its history.
 
 - [ ] Add configurable UI font-size scaling for 4K displays and accessibility.
 - [ ] Add a Russian translation and an in-app language switch.
+- [ ] Correct spacing/alignment offsets for disabled menu items after the
+  alpha.41 disabled-color fix.
+
+### Completed from the July 17 intake
+
+- [x] Disable **Create New Object** without an active MOB.
+- [x] Use visibly muted, non-bold styling for disabled fields and menu items.
+- [x] Remove the inactive context-help button from MOB Diff.
+- [x] Keep Model Parts visible as undefined/different for mixed selections and
+  allow compatible parts to be pasted across multiple objects.
+- [x] Support compatible multi-field paste in **Create Object**.
+- [x] Treat logic-point creation plus placement as one Undo/Redo operation.
+- [x] Show a blocking progress indicator for long Undo/Redo operations and
+  history jumps.
+  ([`db3fa31`](https://github.com/Ilufus/ei-mapper-endurance/commit/db3fa31))
+
+## Feature-development knowledge notes
+
+These are implementation leads supplied by active mod development, not yet
+universal Base/JMV engine guarantees. Confirm them against representative MOBs,
+database entries, and the fingerprinted runtime profile before encoding them as
+validation rules or save behavior.
+
+- For humanoid units, the database/prototype name is reported to control visual
+  appearance and equipment; the MOB texture field is reportedly ignored. The
+  model name remains required and materially affects rendering.
+- Do not conflate that required model name with the separate MOB `Template`
+  field. The `Template` field, inner-map name, and `ParentID` are reported to
+  have no normal runtime effect, but Endurance must still preserve them and must
+  verify edge cases before hiding them or weakening validation.
+- Model Parts can technically add character parts, but ordinary humanoids should
+  retain the known-good/default parts copied from an existing unit. Weapons and
+  other equipped visuals should come from the database/equipment resolver rather
+  than being invented as model parts.
+- `Import`/`Is need import = true` reportedly switches equipment, dropped items,
+  and related unit data from database-derived values to MOB-embedded values.
+- `InScript`/`Is use in script = true` is reported to matter primarily for
+  dynamic non-character objects that scripts move or destroy. Do not generalize
+  that interpretation without Base/JMV corpus checks.
+- Navigation/movement graph data was historically stored in MOB files, but map
+  modders lacked a graph-generation tool. A known workaround places a very large
+  door over the map and opens it by script on first load to force runtime graph
+  regeneration. Landscape editing and direct launch must detect/preserve this
+  convention rather than deleting or "fixing" it automatically.
+- A larger-than-normally-allowed MPR has opened successfully in Endurance. This
+  is evidence that editor-side size assumptions should remain permissive, but
+  runtime limits still require profile-specific in-game validation.
 
 ## Updating this checklist
 
