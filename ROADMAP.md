@@ -422,6 +422,18 @@ or move it into the relevant section above without losing its history.
 
 ### High priority
 
+- [ ] Warn before changing an object ID that is referenced by the active MOB's
+  embedded script.
+  - Scan the decoded script for exact references to the old ID before an ID
+    edit or explicit ID-repair transaction is committed.
+  - Show the reference count and readable line/context examples so the user can
+    identify the affected script logic; write the complete list to the workflow
+    log when there are many matches.
+  - Treat the result as a warning, not an automatic rewrite or save blocker.
+    Script syntax and dynamically constructed IDs can be ambiguous, so only an
+    explicit user-approved script edit may replace a referenced ID.
+  - Re-run the check for undo/redo and batch ID repair, and cover duplicate IDs
+    without assuming which duplicate a script reference resolves to at runtime.
 - [ ] Add a hideable **Maps and Collections** browser before implementing the
   standalone custom-collection workflow.
   - Read the Base/JMV map list from the active profile's `texts.res` map-table
