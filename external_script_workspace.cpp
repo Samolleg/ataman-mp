@@ -23,8 +23,6 @@ CExternalScriptWorkspaceManager::CExternalScriptWorkspaceManager(
     m_debounce.setInterval(250);
     connect(&m_watcher, &QFileSystemWatcher::fileChanged,
             this, &CExternalScriptWorkspaceManager::onFileChanged);
-    connect(&m_watcher, &QFileSystemWatcher::directoryChanged,
-            this, &CExternalScriptWorkspaceManager::onDirectoryChanged);
     connect(&m_debounce, &QTimer::timeout,
             this, &CExternalScriptWorkspaceManager::processPendingChange);
     if(QApplication* application = qobject_cast<QApplication*>(QApplication::instance()))
@@ -144,8 +142,6 @@ QString CExternalScriptWorkspaceManager::registerMob(CMob* mob)
     m_pathMobs.insert(path, mob);
     if(!m_watcher.files().contains(path))
         m_watcher.addPath(path);
-    if(!m_watcher.directories().contains(directory))
-        m_watcher.addPath(directory);
     ei::log(eLogInfo, QString("Registered external script workspace mob:%1 path:%2")
             .arg(mob->mobName(), path));
 
@@ -170,18 +166,12 @@ void CExternalScriptWorkspaceManager::unregisterMob(CMob* mob)
     const QString path = m_mobPaths.take(mob);
     if(path.isEmpty())
         return;
-    const QString directory = QFileInfo(path).absolutePath();
     m_pathMobs.remove(path);
     m_pendingPaths.remove(path);
     m_readRetries.remove(path);
     m_lastHandledText.remove(path);
+    m_notificationCounts.remove(path);
     m_watcher.removePath(path);
-
-    bool directoryStillUsed = false;
-    for(const QString& remaining : m_mobPaths)
-        directoryStillUsed = directoryStillUsed || QFileInfo(remaining).absolutePath() == directory;
-    if(!directoryStillUsed)
-        m_watcher.removePath(directory);
     ei::log(eLogInfo, QString("Unregistered external script workspace path:%1").arg(path));
 }
 
@@ -247,33 +237,10 @@ void CExternalScriptWorkspaceManager::schedulePath(const QString& path, int dela
 
 void CExternalScriptWorkspaceManager::onFileChanged(const QString& path)
 {
-    ei::log(eLogInfo, QString("External script file notification path:%1").arg(path));
-    markPending(path);
+    ++m_notificationCounts[path];
+    if(!m_pendingPaths.contains(path))
+        markPending(path);
     schedulePath(path);
-}
-
-void CExternalScriptWorkspaceManager::onDirectoryChanged(const QString& directory)
-{
-    ei::log(eLogInfo, QString("External script workspace notification path:%1").arg(directory));
-    for(auto it = m_pathMobs.constBegin(); it != m_pathMobs.constEnd(); ++it)
-    {
-        if(QFileInfo(it.key()).absolutePath() == directory)
-        {
-            const QString path = it.key();
-            if(QFileInfo::exists(path) && !m_watcher.files().contains(path))
-                m_watcher.addPath(path);
-            QFile file(path);
-            if(!file.open(QIODevice::ReadOnly))
-                continue;
-            const QString text = canonicalScriptText(QString::fromUtf8(file.readAll()));
-            file.close();
-            if(text == canonicalScriptText(displayScript(it.value()))
-               || text == m_lastHandledText.value(path))
-                continue; // Ignore our own marker create/remove notifications.
-            markPending(path);
-            schedulePath(path);
-        }
-    }
 }
 
 void CExternalScriptWorkspaceManager::continuePending()
@@ -295,6 +262,10 @@ void CExternalScriptWorkspaceManager::processPendingChange()
     }
     const QString path = *m_pendingPaths.constBegin();
     m_pendingPaths.remove(path);
+    const int notificationCount = m_notificationCounts.take(path);
+    if(notificationCount > 0)
+        ei::log(eLogInfo, QString("Processing external script change path:%1 coalescedNotifications:%2")
+                .arg(path).arg(notificationCount));
     CMob* mob = m_pathMobs.value(path, nullptr);
     if(!mob)
     {
@@ -305,7 +276,7 @@ void CExternalScriptWorkspaceManager::processPendingChange()
     QFile file(path);
     if(!file.open(QIODevice::ReadOnly))
     {
-        if(QFileInfo::exists(path) && ++m_readRetries[path] <= 5)
+        if(++m_readRetries[path] <= 5)
             schedulePath(path, 350);
         else
         {

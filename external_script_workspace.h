@@ -28,7 +28,6 @@ signals:
 
 private slots:
     void onFileChanged(const QString& path);
-    void onDirectoryChanged(const QString& directory);
     void processPendingChange();
 
 private:
@@ -49,6 +48,7 @@ private:
     QHash<QString, CMob*> m_pathMobs;
     QHash<QString, int> m_readRetries;
     QHash<QString, QString> m_lastHandledText;
+    QHash<QString, int> m_notificationCounts;
     QSet<QString> m_pendingPaths;
     bool m_promptOpen;
 };
