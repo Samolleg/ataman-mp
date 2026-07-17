@@ -57,6 +57,8 @@ int main(int argc, char* argv[])
 
     int passed = 0;
     int failed = 0;
+    int subtreePassed = 0;
+    int subtreeSkipped = 0;
     for(const QString& path : files)
     {
         CValidationReport report;
@@ -105,10 +107,54 @@ int main(int argc, char* argv[])
             ++failed;
             continue;
         }
+
+        if(source.objects().isEmpty())
+            ++subtreeSkipped;
+        else
+        {
+            const SMobObjectSnapshot& target = source.objects().front();
+            QByteArray duplicatedBytes;
+            QByteArray removedBytes;
+            CMobDocument duplicated;
+            CMobDocument removed;
+            if(!source.duplicateObjectSubtree(target.sectionPath, target.subtreeSha256,
+                                              &duplicatedBytes, &report) ||
+               !duplicated.loadBytes(duplicatedBytes, "duplicated-corpus.mob", &report) ||
+               duplicated.objects().size() != source.objects().size() + 1 ||
+               duplicated.objects().at(0).subtreeSha256 != target.subtreeSha256 ||
+               duplicated.objects().at(1).subtreeSha256 != target.subtreeSha256 ||
+               !source.removeObjectSubtree(target.sectionPath, target.subtreeSha256,
+                                           &removedBytes, &report) ||
+               !removed.loadBytes(removedBytes, "removed-corpus.mob", &report) ||
+               removed.objects().size() != source.objects().size() - 1)
+            {
+                output << "FAIL subtree " << path << "\n" << report.toText();
+                ++failed;
+                continue;
+            }
+            bool sequenceExact = true;
+            for(int index = 1; index < source.objects().size(); ++index)
+            {
+                sequenceExact = sequenceExact &&
+                    duplicated.objects().at(index + 1).subtreeSha256 ==
+                        source.objects().at(index).subtreeSha256 &&
+                    removed.objects().at(index - 1).subtreeSha256 ==
+                        source.objects().at(index).subtreeSha256;
+            }
+            if(!sequenceExact)
+            {
+                output << "FAIL subtree sequence " << path << "\n";
+                ++failed;
+                continue;
+            }
+            ++subtreePassed;
+        }
         ++passed;
     }
 
     output << "Projection transaction corpus: passed=" << passed
-           << " failed=" << failed << " total=" << files.size() << "\n";
+           << " failed=" << failed << " total=" << files.size()
+           << " subtreePassed=" << subtreePassed
+           << " subtreeSkipped=" << subtreeSkipped << "\n";
     return failed == 0 ? 0 : 1;
 }

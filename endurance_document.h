@@ -163,6 +163,14 @@ public:
     const QVector<quint32>& duplicateIds() const { return m_duplicateIds; }
     bool applyTransaction(const CMobEditTransaction& transaction,
                           QByteArray* output, CValidationReport* report = nullptr) const;
+    bool duplicateObjectSubtree(const QString& objectPath,
+                                const QByteArray& expectedSubtreeSha256,
+                                QByteArray* output,
+                                CValidationReport* report = nullptr) const;
+    bool removeObjectSubtree(const QString& objectPath,
+                             const QByteArray& expectedSubtreeSha256,
+                             QByteArray* output,
+                             CValidationReport* report = nullptr) const;
     bool deriveLeafTransaction(const CMobDocument& cleanProjection,
                                const CMobDocument& editedProjection,
                                CMobEditTransaction* transaction,

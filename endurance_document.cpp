@@ -347,6 +347,68 @@ bool emitTransactionSection(const SMobSection& section,
     output->append(childBytes);
     return true;
 }
+
+const SMobSection* findObjectChild(const QVector<SMobSection>& sections,
+                                   const QString& path)
+{
+    for(const SMobSection& section : sections)
+    {
+        if(section.type == 0xB000)
+            for(const SMobSection& object : section.children)
+                if(object.path == path)
+                    return &object;
+        if(const SMobSection* found = findObjectChild(section.children, path))
+            return found;
+    }
+    return nullptr;
+}
+
+bool emitObjectSubtreeChange(const SMobSection& section, const QString& targetPath,
+                             bool duplicate, int* applications, QByteArray* output,
+                             CValidationReport* report)
+{
+    if(section.path == targetPath)
+    {
+        if(++(*applications) != 1)
+        {
+            if(report)
+                report->add("mob.subtree.duplicate_path", EValidationSeverity::Error,
+                            "The object path was encountered more than once", targetPath);
+            return false;
+        }
+        if(duplicate)
+        {
+            output->append(section.rawBytes);
+            output->append(section.rawBytes);
+        }
+        return true;
+    }
+
+    if(!section.container || section.children.isEmpty())
+    {
+        output->append(section.rawBytes);
+        return true;
+    }
+
+    QByteArray childBytes;
+    for(const SMobSection& child : section.children)
+        if(!emitObjectSubtreeChange(child, targetPath, duplicate, applications,
+                                    &childBytes, report))
+            return false;
+    const quint64 newLength = quint64(childBytes.size()) + 8;
+    if(newLength > quint64(UINT_MAX))
+    {
+        if(report)
+            report->add("mob.subtree.overflow", EValidationSeverity::Error,
+                        "Rebuilt container exceeds the MOB section length limit",
+                        section.path);
+        return false;
+    }
+    appendU32(*output, section.type);
+    appendU32(*output, quint32(newLength));
+    output->append(childBytes);
+    return true;
+}
 }
 
 QJsonObject SValidationFinding::toJson() const
@@ -690,6 +752,97 @@ bool CMobDocument::applyTransaction(const CMobEditTransaction& transaction,
                     QString("Applied and independently verified %1 provenance-checked leaf edit(s); all other leaves were emitted byte-for-byte")
                         .arg(applied.size()), transaction.description());
     return true;
+}
+
+static bool applyObjectSubtreeChange(const CMobDocument& document,
+                                     const QString& objectPath,
+                                     const QByteArray& expectedSubtreeSha256,
+                                     bool duplicate, QByteArray* output,
+                                     CValidationReport* report)
+{
+    if(!output)
+        return false;
+    output->clear();
+    const SMobSection* object = findObjectChild(document.sections(), objectPath);
+    if(!object)
+    {
+        if(report)
+            report->add("mob.subtree.missing_path", EValidationSeverity::Error,
+                        "The object path is not a direct OBJECT_SECTION child",
+                        objectPath);
+        return false;
+    }
+    if(expectedSubtreeSha256.isEmpty() || object->sha256 != expectedSubtreeSha256)
+    {
+        if(report)
+            report->add("mob.subtree.provenance", EValidationSeverity::Error,
+                        "The source object subtree hash no longer matches the operation provenance",
+                        objectPath);
+        return false;
+    }
+
+    int applications = 0;
+    for(const SMobSection& section : document.sections())
+        if(!emitObjectSubtreeChange(section, objectPath, duplicate, &applications,
+                                    output, report))
+        {
+            output->clear();
+            return false;
+        }
+    if(applications != 1)
+    {
+        if(report)
+            report->add("mob.subtree.application_count", EValidationSeverity::Error,
+                        "The object subtree operation did not apply exactly once",
+                        objectPath);
+        output->clear();
+        return false;
+    }
+
+    CMobDocument reparsed;
+    CValidationReport localReport;
+    CValidationReport* validationReport = report ? report : &localReport;
+    if(!reparsed.loadBytes(*output, "subtree-transaction-output.mob", validationReport))
+    {
+        output->clear();
+        return false;
+    }
+    const int expectedCount = document.objects().size() + (duplicate ? 1 : -1);
+    if(reparsed.objects().size() != expectedCount)
+    {
+        if(report)
+            report->add("mob.subtree.object_count", EValidationSeverity::Error,
+                        QString("Object count is %1; expected %2")
+                            .arg(reparsed.objects().size()).arg(expectedCount),
+                        objectPath);
+        output->clear();
+        return false;
+    }
+    if(report)
+        report->add("mob.subtree.authorized", EValidationSeverity::Info,
+                    duplicate
+                        ? "Duplicated one exact provenance-checked raw object subtree"
+                        : "Removed one exact provenance-checked raw object subtree",
+                    objectPath);
+    return true;
+}
+
+bool CMobDocument::duplicateObjectSubtree(const QString& objectPath,
+                                          const QByteArray& expectedSubtreeSha256,
+                                          QByteArray* output,
+                                          CValidationReport* report) const
+{
+    return applyObjectSubtreeChange(*this, objectPath, expectedSubtreeSha256,
+                                    true, output, report);
+}
+
+bool CMobDocument::removeObjectSubtree(const QString& objectPath,
+                                       const QByteArray& expectedSubtreeSha256,
+                                       QByteArray* output,
+                                       CValidationReport* report) const
+{
+    return applyObjectSubtreeChange(*this, objectPath, expectedSubtreeSha256,
+                                    false, output, report);
 }
 
 static void collectLeafSections(const QVector<SMobSection>& sections,

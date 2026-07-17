@@ -72,6 +72,8 @@ private slots:
     void semanticDiffClassifiesMovementAndAddition();
     void transactionPatchesOnlyAuthorizedLeaf();
     void transactionPreservesEmptyContainers();
+    void objectSubtreeDuplicateAndDeleteAreExact();
+    void objectSubtreeRejectsStaleProvenance();
     void projectionDeltaPreservesRawSourceStructure();
     void projectionDeltaRejectsStructuralEdits();
     void projectionDeltaRejectsMissingSourceRecord();
@@ -232,6 +234,56 @@ void EnduranceDocumentTests::transactionPreservesEmptyContainers()
     QVERIFY2(document.applyTransaction(transaction, &candidate, &report), qPrintable(report.toText()));
     QCOMPARE(candidate, validMob(emptyDirectory + emptyDirectoryElements +
                                  section(0x22222222, "after")));
+}
+
+void EnduranceDocumentTests::objectSubtreeDuplicateAndDeleteAreExact()
+{
+    const QByteArray emptyDirectory = section(0xE000);
+    const QByteArray firstObject = object(42, "boar");
+    const QByteArray secondObject = object(43, "wolf");
+    const QByteArray sourceBytes = validMob(emptyDirectory +
+        section(0xB000, firstObject + secondObject));
+    CMobDocument source;
+    QVERIFY(source.loadBytes(sourceBytes, "source.mob"));
+    QCOMPARE(source.objects().size(), 2);
+
+    const SMobObjectSnapshot first = source.objects().front();
+    QByteArray duplicated;
+    CValidationReport duplicateReport;
+    QVERIFY2(source.duplicateObjectSubtree(first.sectionPath, first.subtreeSha256,
+                                           &duplicated, &duplicateReport),
+             qPrintable(duplicateReport.toText()));
+    QCOMPARE(duplicated, validMob(emptyDirectory +
+        section(0xB000, firstObject + firstObject + secondObject)));
+    CMobDocument duplicateDocument;
+    QVERIFY(duplicateDocument.loadBytes(duplicated, "duplicated.mob"));
+    QCOMPARE(duplicateDocument.objects().size(), 3);
+    QCOMPARE(duplicateDocument.objects().at(0).subtreeSha256,
+             duplicateDocument.objects().at(1).subtreeSha256);
+
+    QByteArray removed;
+    CValidationReport removeReport;
+    QVERIFY2(source.removeObjectSubtree(first.sectionPath, first.subtreeSha256,
+                                        &removed, &removeReport),
+             qPrintable(removeReport.toText()));
+    QCOMPARE(removed, validMob(emptyDirectory + section(0xB000, secondObject)));
+    CMobDocument removedDocument;
+    QVERIFY(removedDocument.loadBytes(removed, "removed.mob"));
+    QCOMPARE(removedDocument.objects().size(), 1);
+    QCOMPARE(removedDocument.objects().front().nid, quint32(43));
+}
+
+void EnduranceDocumentTests::objectSubtreeRejectsStaleProvenance()
+{
+    CMobDocument source;
+    QVERIFY(source.loadBytes(validMob(section(0xB000, object(42, "boar"))),
+                             "source.mob"));
+    QByteArray output("must be cleared");
+    CValidationReport report;
+    QVERIFY(!source.duplicateObjectSubtree(source.objects().front().sectionPath,
+                                           QByteArray(32, '\x7f'), &output, &report));
+    QVERIFY(output.isEmpty());
+    QVERIFY(report.hasErrors());
 }
 
 void EnduranceDocumentTests::projectionDeltaPreservesRawSourceStructure()
