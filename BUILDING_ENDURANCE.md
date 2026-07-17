@@ -25,6 +25,16 @@ For unattended build verification, use `--ui-widget-check`, the headless MOB/MPR
 commands below, or the non-dialog `--version` option. Validation must not launch
 the editor without an explicit file or leave About/version windows open.
 
+Before creating a distribution archive, run:
+
+```powershell
+.\packaging\validate_distribution.ps1 <staged-package-directory>
+```
+
+The staged package must not contain `endurance-options.json`, upstream
+`options.json`, workflow logs, or crash dumps. A fresh extracted package must
+therefore enter first-run game/mod setup.
+
 ## Unit tests
 
 ```powershell
