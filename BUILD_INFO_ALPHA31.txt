@@ -1,0 +1,16 @@
+EI Mapper: Endurance Edition 0.1.0-alpha.31
+Source commit: 73b79f53ec1b (main; implementation commit 11698ad)
+Purpose: final private MOB hardening alpha for closed-group testing
+
+This build saves ordinary mixed property/transform edits without a preview or
+field whitelist. Same-MOB copy/paste and deletion rebuild the object sequence
+from exact raw source subtrees. Known patrol/look-point additions and removals
+are reconciled while source-only records remain attached. New objects require a
+selected same-type source object as their complete raw template.
+
+The installed Base/JMV corpus passed 254/254 projection, no-op object-sequence,
+logic-structure, and raw-subtree checks. Focused document tests passed 27/27,
+six regression suites passed, and Zone 1 MOB/MPR no-op round trips passed.
+
+Use copied maps. See ALPHA31_VALIDATION.md. Cross-MOB paste, changed MPR output,
+landscape editing, and direct game launch are outside this alpha's save scope.
