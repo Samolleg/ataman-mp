@@ -5,7 +5,7 @@ An item is checked only after its implementation has landed and received the
 listed level of validation. New findings and wishlist requests belong here so
 they do not get lost between test sessions.
 
-Current development release: `0.1.0-alpha.40`.
+Current development release: `0.1.0-alpha.41`.
 
 ## Implementation evidence
 
@@ -53,6 +53,7 @@ behavior.
 | Unified one-click MOB Parameters X/Close lifecycle | [`280470f`](https://github.com/Ilufus/ei-mapper-endurance/commit/280470f) | Production MinGW build and [alpha.38 focused check](ALPHA38_VALIDATION.md) |
 | Coalesced external-script file watching without directory feedback | [`9b0f18a`](https://github.com/Ilufus/ei-mapper-endurance/commit/9b0f18a) | Alpha.38 logs showing 14,337-event failure, production build, seven regression suites, and [alpha.39 focused check](ALPHA39_VALIDATION.md) |
 | Embedded-script and document-section MOB diff | [`0a4624f`](https://github.com/Ilufus/ei-mapper-endurance/commit/0a4624f) | Synthetic encrypted-script regression plus the supplied Zone 1/Zone 1 Test comparison |
+| Redo-safe raw provenance, mixed model-parts editing, atomic logic-point placement, and heavy-history progress | [`db3fa31`](https://github.com/Ilufus/ei-mapper-endurance/commit/db3fa31) | Seven regression suites, UI widget checks, and [alpha.41 supplied-map validation](ALPHA41_VALIDATION.md) |
 
 Alpha.34 packaging is withdrawn: it accidentally included a developer-local
 `endurance-options.json`, which suppressed first-run setup and exposed local game
@@ -100,6 +101,8 @@ and the corrected script workflow.
   only their intended CP1251 leaves across Base/JMV saves.
 - [ ] Stress repeated edit/undo/redo/save/open/close cycles on large JMV maps and
   fix any crash, stale-selection, or dirty-state regression found by testers.
+  Alpha.41 fixes the first confirmed save/undo/save/redo provenance failure;
+  closed-group repetition remains the release gate.
 - [x] Route MOB Parameters through the main undo history; reload external-editor
   atomic replacements; remove stale patrol-node pointers from undo; and rebind
   saved raw-object provenance for subsequent saves.
