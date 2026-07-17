@@ -41,6 +41,7 @@ behavior.
 | Selection UX, recent files, open/save shortcuts, and editable model/texture filters | [`06d1c9b`](https://github.com/Ilufus/ei-mapper-endurance/commit/06d1c9b) | clean production MinGW build, six regression suites, Zone 1 no-op round trip, and [alpha.22 manual checks](ALPHA22_VALIDATION.md) |
 | Semantic raw-object provenance and cached frustum culling | [`1ab2935`](https://github.com/Ilufus/ei-mapper-endurance/commit/1ab2935) | 254-file projection corpus, document/frustum tests, and [alpha.28 checks](ALPHA28_VALIDATION.md) |
 | Generic topology-preserving MOB leaf saves | [`843ba9c`](https://github.com/Ilufus/ei-mapper-endurance/commit/843ba9c) | 254/254 Base/JMV projection corpus, 24 document tests, and [alpha.30 checks](ALPHA30_VALIDATION.md) |
+| Exact object sequence and patrol/look structural saves | [`11698ad`](https://github.com/Ilufus/ei-mapper-endurance/commit/11698ad) | 254/254 Base/JMV corpus, 27 document tests, six regression suites, and [alpha.31 checks](ALPHA31_VALIDATION.md) |
 
 ## Product contract
 
@@ -61,12 +62,14 @@ behavior.
 - [x] Implement the final hardening-alpha save scope: normal mixed leaf edits,
   exact same-MOB copy/paste and deletion, known patrol/look-point structure, and
   selected same-type raw templates for object creation.
+  ([`11698ad`](https://github.com/Ilufus/ei-mapper-endurance/commit/11698ad))
 - [ ] Package alpha.31 for normal and structural edit testing: move units, change mixed property
   fields, undo back to clean, save/reopen, and verify the resulting maps in JMV.
   ([test matrix](ALPHA31_VALIDATION.md))
 - [x] Connect structural MOB saves for same-MOB copy/paste, object deletion, and
   adding/removing known patrol or look points. Reuse exact source subtrees for
   copies and require an explicit selected same-type template for new objects.
+  ([`11698ad`](https://github.com/Ilufus/ei-mapper-endurance/commit/11698ad))
 - [ ] Verify structural saves with automated untouched-data comparison, Endurance
   reopen, MobExplorer comparison, and focused JMV `drawall`/unload/reload tests.
 - [ ] Verify scripts and all edited text round-trip through CP1251 without changing
