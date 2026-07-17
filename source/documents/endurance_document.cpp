@@ -1258,6 +1258,75 @@ bool CMobDocument::applyTransaction(const CMobEditTransaction& transaction,
     return true;
 }
 
+bool CMobDocument::replaceEmbeddedScript(const QString& script, QByteArray* output,
+                                         CValidationReport* report) const
+{
+    if(!output)
+        return false;
+    output->clear();
+
+    QMap<QString, const SMobSection*> leaves;
+    collectLeafSections(m_sections, &leaves);
+    const SMobSection* scriptSection = nullptr;
+    for(auto it = leaves.constBegin(); it != leaves.constEnd(); ++it)
+    {
+        if(it.value()->type != MobScriptSection)
+            continue;
+        if(scriptSection)
+        {
+            if(report)
+                report->add("mob.script.multiple", EValidationSeverity::Error,
+                            "The MOB contains more than one encrypted script section; the launch bootstrap was not injected");
+            return false;
+        }
+        scriptSection = it.value();
+    }
+    if(!scriptSection)
+    {
+        if(report)
+            report->add("mob.script.missing", EValidationSeverity::Error,
+                        "The MOB has no existing encrypted script leaf that can be replaced losslessly");
+        return false;
+    }
+
+    const QByteArray originalPayload = payload(*scriptSection);
+    if(originalPayload.size() < 4)
+    {
+        if(report)
+            report->add("mob.script.payload", EValidationSeverity::Error,
+                        "The encrypted script payload is shorter than its key",
+                        scriptSection->path);
+        return false;
+    }
+    QByteArray encoded;
+    QString encodingError;
+    if(!encodeCp1251Strict(script, &encoded, &encodingError))
+    {
+        if(report)
+            report->add("mob.script.encoding", EValidationSeverity::Error,
+                        encodingError, scriptSection->path);
+        return false;
+    }
+
+    quint32 key = readU32(originalPayload, 0);
+    QByteArray replacement;
+    appendU32(replacement, key);
+    replacement.reserve(4 + encoded.size());
+    for(char character : encoded)
+    {
+        quint32 temporaryKey = ((((key * 13) << 4) + key) << 8) - key;
+        key += (temporaryKey << 2) + 2531011;
+        temporaryKey = key >> 16;
+        replacement.append(char(character ^ char(temporaryKey)));
+    }
+
+    CMobEditTransaction transaction("Replace embedded script");
+    transaction.replaceLeafPayload(scriptSection->path, scriptSection->sha256,
+                                   replacement, scriptSection->type,
+                                   originalPayload);
+    return applyTransaction(transaction, output, report);
+}
+
 static bool applyObjectSubtreeChange(const CMobDocument& document,
                                      const QString& objectPath,
                                      const QByteArray& expectedSubtreeSha256,

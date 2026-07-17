@@ -223,8 +223,8 @@ QVector<SResourceProfile> builtInResourceProfiles()
         "Copy-only hardening is active until UI edits are migrated to provenance transactions."));
     jmv.capabilities.insert("mob.perspectiveDiff", capability("mob.perspectiveDiff", EProfileCapabilityStatus::Experimental,
         "Structural diff is available headlessly; perspective overlay is under development."));
-    jmv.capabilities.insert("runtime.directMapLaunch", capability("runtime.directMapLaunch", EProfileCapabilityStatus::Unsupported,
-        "No safe direct-map launch mechanism has passed the JMV feasibility gate.", jmv.runtimeManifestId));
+    jmv.capabilities.insert("runtime.directMapLaunch", capability("runtime.directMapLaunch", EProfileCapabilityStatus::Experimental,
+        "A temporary-map/autoexec launcher is implemented and awaits focused runtime validation.", jmv.runtimeManifestId));
     jmv.capabilities.insert("runtime.multiMobLaunch", capability("runtime.multiMobLaunch", EProfileCapabilityStatus::Unsupported,
         "JMV supplemental MOB discovery order has not been proven.", jmv.runtimeManifestId));
     jmv.capabilities.insert("runtime.appearanceResolver", capability("runtime.appearanceResolver", EProfileCapabilityStatus::Experimental,

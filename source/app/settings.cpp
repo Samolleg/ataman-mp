@@ -376,6 +376,7 @@ void CSettings::initOptions()
         {"shortcutMobScript", "Ctrl+Shift+M"},
         {"shortcutExternalMobScript", "Ctrl+Alt+M"},
         {"shortcutMapsBrowser", "Ctrl+Space"},
+        {"shortcutTestMap", "Ctrl+F5"},
         {"shortcutResetCamera", "Ctrl+R"},
         {"shortcutResetLogicPaths", "Ctrl+P"},
         {"shortcutSwitchMode", "Ctrl+Tab"}

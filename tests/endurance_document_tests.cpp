@@ -100,6 +100,7 @@ private slots:
     void semanticDiffClassifiesMovementAndAddition();
     void semanticDiffPairsIdenticalDuplicatesByOccurrence();
     void semanticDiffReportsReadableScriptChanges();
+    void embeddedScriptReplacementPreservesOtherLeaves();
     void transactionPatchesOnlyAuthorizedLeaf();
     void transactionPreservesEmptyContainers();
     void objectSubtreeDuplicateAndDeleteAreExact();
@@ -260,6 +261,28 @@ void EnduranceDocumentTests::semanticDiffReportsReadableScriptChanges()
     const QJsonArray entries = diff.toJson().value("documentEntries").toArray();
     QCOMPARE(entries.size(), 1);
     QCOMPARE(entries.at(0).toObject().value("category").toString(), QString("script"));
+}
+
+void EnduranceDocumentTests::embeddedScriptReplacementPreservesOtherLeaves()
+{
+    const QByteArray original = validMob(
+        encryptedScript("WorldScript(ConsoleString(\"before\"))") +
+        section(0x12345678, "opaque-data"));
+    CMobDocument document;
+    CValidationReport report;
+    QVERIFY(document.loadBytes(original, "script-source.mob", &report));
+
+    QByteArray candidate;
+    QVERIFY2(document.replaceEmbeddedScript(
+        "WorldScript(ConsoleString(\"after\"))", &candidate, &report),
+        qPrintable(report.toText()));
+    CMobDocument changed;
+    QVERIFY(changed.loadBytes(candidate, "script-candidate.mob", &report));
+    const CMobSemanticDiff diff = CMobSemanticDiff::compare(document, changed);
+    QCOMPARE(diff.documentEntries().size(), 1);
+    QCOMPARE(diff.documentEntries().front().category, QString("script"));
+    QVERIFY(diff.documentEntries().front().details.contains("after"));
+    QVERIFY(candidate.contains("opaque-data"));
 }
 
 void EnduranceDocumentTests::transactionPatchesOnlyAuthorizedLeaf()

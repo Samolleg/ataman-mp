@@ -1780,100 +1780,134 @@ bool CMob::buildRawObjectSequenceCandidate(
     return true;
 }
 
+bool CMob::buildValidatedCandidate(QByteArray* data,
+                                   CValidationReport* report,
+                                   QString* saveClass)
+{
+    if(!data)
+        return false;
+    data->clear();
+    if(saveClass)
+        saveClass->clear();
+
+    refreshDirtyFromProjection();
+    if(!m_bDirty && !m_originalData.isEmpty())
+    {
+        *data = m_originalData;
+        if(saveClass)
+            *saveClass = "BYTE_IDENTICAL";
+        ei::log(eLogInfo, "Prepared byte-identical MOB candidate (document is unchanged)");
+    }
+    else
+    {
+        QByteArray currentProjection;
+        serializeMob(currentProjection, false);
+        CValidationReport transactionReport;
+        CMobEditTransaction transaction;
+        QByteArray transactionCandidate;
+        bool candidateReady = CMobDocument::buildProjectionTransactionCandidate(
+            m_originalData, m_filePath.filePath(), m_cleanProjection,
+            currentProjection, &transaction, &transactionCandidate, &transactionReport);
+        QString validatedClassName;
+        if(candidateReady)
+            candidateReady = transaction.validatedChangedSaveClass(&validatedClassName);
+        if(!candidateReady)
+        {
+            CValidationReport structuralReport;
+            CMobEditTransaction structuralTransaction;
+            QByteArray structuralCandidate;
+            QString structuralClass;
+            if(buildRawObjectSequenceCandidate(currentProjection,
+                                               &structuralTransaction,
+                                               &structuralCandidate,
+                                               &structuralReport,
+                                               &structuralClass))
+            {
+                transaction = structuralTransaction;
+                transactionCandidate = structuralCandidate;
+                validatedClassName = structuralClass;
+                transactionReport = structuralReport;
+                candidateReady = true;
+            }
+            else
+                transactionReport = structuralReport;
+        }
+        if(candidateReady)
+        {
+            const QString candidateHash = QString::fromLatin1(
+                QCryptographicHash::hash(transactionCandidate, QCryptographicHash::Sha256).toHex());
+            ei::log(eLogInfo, QString("MOB transaction candidate validated path:%1 edits:%2 size:%3 sha256:%4")
+                .arg(m_filePath.filePath()).arg(transaction.edits().size())
+                .arg(transactionCandidate.size()).arg(candidateHash));
+            for(int editIndex = 0; editIndex < transaction.edits().size(); ++editIndex)
+            {
+                const SMobLeafEdit& edit = transaction.edits().at(editIndex);
+                const QString replacementHash = QString::fromLatin1(
+                    QCryptographicHash::hash(edit.replacementPayload,
+                                             QCryptographicHash::Sha256).toHex());
+                ei::log(eLogInfo, QString("MOB transaction leaf edit index:%1/%2 type:0x%3 path:%4 sourceSectionSha256:%5 replacementSize:%6 replacementSha256:%7")
+                    .arg(editIndex + 1).arg(transaction.edits().size())
+                    .arg(edit.sectionType, 8, 16, QLatin1Char('0'))
+                    .arg(edit.sectionPath,
+                         QString::fromLatin1(edit.expectedSectionSha256.toHex()))
+                    .arg(edit.replacementPayload.size()).arg(replacementHash));
+            }
+            *data = transactionCandidate;
+            if(saveClass)
+                *saveClass = validatedClassName;
+            ei::log(eLogInfo, QString("MOB transaction candidate authorized class:%1 path:%2 edits:%3")
+                .arg(validatedClassName, m_filePath.filePath()).arg(transaction.edits().size()));
+        }
+        else
+        {
+            if(report)
+                *report = transactionReport;
+            ei::log(eLogWarning, QString("MOB transaction candidate not applicable path:%1 findings:%2")
+                .arg(m_filePath.filePath(), transactionReport.toText().trimmed()));
+            return false;
+        }
+    }
+
+    if(data->size() < 16 || (!m_originalData.isEmpty() && data->left(4) != m_originalData.left(4)))
+    {
+        if(report)
+            report->add("mob.candidate.envelope", EValidationSeverity::Error,
+                        "The generated MOB candidate failed its envelope check",
+                        m_filePath.filePath());
+        data->clear();
+        return false;
+    }
+    CValidationReport freshReport;
+    CMobDocument freshDocument;
+    if(!freshDocument.loadBytes(*data, "in-memory-save-candidate.mob", &freshReport))
+    {
+        if(report)
+            *report = freshReport;
+        data->clear();
+        return false;
+    }
+    return true;
+}
+
 bool CMob::saveAs(const QFileInfo& path)
 {
     const QString filePath = path.filePath();
     try
     {
-        refreshDirtyFromProjection();
         QByteArray data;
-        if(!m_bDirty && !m_originalData.isEmpty())
+        CValidationReport candidateReport;
+        QString saveClass;
+        if(!buildValidatedCandidate(&data, &candidateReport, &saveClass))
         {
-            data = m_originalData;
-            ei::log(eLogInfo, "Writing byte-identical MOB copy (document is unchanged)");
-        }
-        else
-        {
-            QByteArray currentProjection;
-            serializeMob(currentProjection, false);
-            CValidationReport transactionReport;
-            CMobEditTransaction transaction;
-            QByteArray transactionCandidate;
-            bool candidateReady = CMobDocument::buildProjectionTransactionCandidate(
-                m_originalData, m_filePath.filePath(), m_cleanProjection,
-                currentProjection, &transaction, &transactionCandidate, &transactionReport);
-            QString validatedClassName;
-            if(candidateReady)
-                candidateReady = transaction.validatedChangedSaveClass(&validatedClassName);
-            if(!candidateReady)
-            {
-                CValidationReport structuralReport;
-                CMobEditTransaction structuralTransaction;
-                QByteArray structuralCandidate;
-                QString structuralClass;
-                if(buildRawObjectSequenceCandidate(currentProjection,
-                                                   &structuralTransaction,
-                                                   &structuralCandidate,
-                                                   &structuralReport,
-                                                   &structuralClass))
-                {
-                    transaction = structuralTransaction;
-                    transactionCandidate = structuralCandidate;
-                    validatedClassName = structuralClass;
-                    transactionReport = structuralReport;
-                    candidateReady = true;
-                }
-                else
-                    transactionReport = structuralReport;
-            }
-            if(candidateReady)
-            {
-                const QString candidateHash = QString::fromLatin1(
-                    QCryptographicHash::hash(transactionCandidate, QCryptographicHash::Sha256).toHex());
-                ei::log(eLogInfo, QString("MOB transaction candidate validated path:%1 edits:%2 size:%3 sha256:%4")
-                    .arg(filePath).arg(transaction.edits().size())
-                    .arg(transactionCandidate.size()).arg(candidateHash));
-                for(int editIndex = 0; editIndex < transaction.edits().size(); ++editIndex)
-                {
-                    const SMobLeafEdit& edit = transaction.edits().at(editIndex);
-                    const QString replacementHash = QString::fromLatin1(
-                        QCryptographicHash::hash(edit.replacementPayload,
-                                                 QCryptographicHash::Sha256).toHex());
-                    ei::log(eLogInfo, QString("MOB transaction leaf edit index:%1/%2 type:0x%3 path:%4 sourceSectionSha256:%5 replacementSize:%6 replacementSha256:%7")
-                        .arg(editIndex + 1).arg(transaction.edits().size())
-                        .arg(edit.sectionType, 8, 16, QLatin1Char('0'))
-                        .arg(edit.sectionPath,
-                             QString::fromLatin1(edit.expectedSectionSha256.toHex()))
-                        .arg(edit.replacementPayload.size()).arg(replacementHash));
-                }
-                data = transactionCandidate;
-                ei::log(eLogInfo, QString("MOB transaction save authorized class:%1 path:%2 edits:%3")
-                    .arg(validatedClassName, filePath).arg(transaction.edits().size()));
-            }
-            else
-            {
-                ei::log(eLogWarning, QString("MOB transaction candidate not applicable path:%1 findings:%2")
-                    .arg(filePath, transactionReport.toText().trimmed()));
-            }
-            if(data.isEmpty())
-            {
-                ei::log(eLogFatal, QString("Refusing dirty MOB save because the edit could not be mapped safely to the original raw tree path:%1")
-                    .arg(filePath));
-                QMessageBox::critical(nullptr, "Lossless MOB save not available for this edit",
-                    "Endurance could not map this complete edit set onto verified raw MOB records. "
-                    "Properties, transforms, same-MOB copy/paste, deletion, and known patrol/look-point "
-                    "changes save automatically. A newly created object requires a selected same-type raw "
-                    "template, and unrecognized structural records remain protected.\n\n"
-                    "No destination or backup file was changed. Endurance will not fall back to the legacy "
-                    "rebuilding serializer.");
-                return false;
-            }
-        }
-
-        if(data.size() < 16 || (!m_originalData.isEmpty() && data.left(4) != m_originalData.left(4)))
-        {
-            ei::log(eLogFatal, QString("Refusing to save structurally invalid MOB output:%1").arg(filePath));
-            QMessageBox::critical(nullptr, "Endurance safe save", "The staged MOB failed its envelope check. The source file was not replaced.");
+            ei::log(eLogFatal, QString("Refusing dirty MOB save because the edit could not be mapped safely to the original raw tree path:%1")
+                .arg(filePath));
+            QMessageBox::critical(nullptr, "Lossless MOB save not available for this edit",
+                "Endurance could not map this complete edit set onto verified raw MOB records. "
+                "Properties, transforms, same-MOB copy/paste, deletion, and known patrol/look-point "
+                "changes save automatically. A newly created object requires a selected same-type raw "
+                "template, and unrecognized structural records remain protected.\n\n"
+                "No destination or backup file was changed. Endurance will not fall back to the legacy "
+                "rebuilding serializer.\n\n" + candidateReport.toText().trimmed());
             return false;
         }
 

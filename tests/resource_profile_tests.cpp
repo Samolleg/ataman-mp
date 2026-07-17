@@ -62,7 +62,7 @@ void ResourceProfileTests::jmvPresetFindsModAndBaseResources()
     QVERIFY(!result.runtimeStackValidated);
     QCOMPARE(result.runtimeComponents.size(), 6);
     QCOMPARE(profileCapabilityStatusName(result.capabilities.value("runtime.directMapLaunch").status),
-             QString("unsupported"));
+             QString("experimental"));
 }
 
 void ResourceProfileTests::basePresetDoesNotRequireJmv()

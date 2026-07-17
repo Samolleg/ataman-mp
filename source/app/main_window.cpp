@@ -19,6 +19,8 @@
 #include <QProgressDialog>
 #include <QMouseEvent>
 #include <QDockWidget>
+#include <QFile>
+#include <QTimer>
 
 #include "resourcemanager.h"
 #include "landscape.h"
@@ -39,6 +41,11 @@
 #include "mob_diff_dialog.h"
 #include "window_lifecycle.h"
 #include "maps_browser.h"
+#include "map_catalog.h"
+#include "map_spawn_planner.h"
+#include "jmv_map_test_launcher.h"
+#include "resource_profile.h"
+#include "endurance_document.h"
 
 void testFunc()
 {
@@ -62,7 +69,10 @@ MainWindow::MainWindow(QWidget* parent) :
     m_recentFilesMenu(nullptr),
     m_externalScriptAction(nullptr),
     m_mapsDock(nullptr),
-    m_mapsBrowser(nullptr)
+    m_mapsBrowser(nullptr),
+    m_mapTestAction(nullptr),
+    m_mapTestLauncher(nullptr),
+    m_closeAfterTestStop(false)
 {
 #ifdef QT_DEBUG
     testFunc();
@@ -103,10 +113,13 @@ MainWindow::MainWindow(QWidget* parent) :
     QAction* openBugReportingGuide = new QAction(tr("Open Bug Reporting Guide"), this);
     QAction* gameAndModSetup = new QAction(tr("Game and Mod Setup..."), this);
     QAction* compareMobFiles = new QAction(tr("Compare MOB Files..."), this);
+    m_mapTestAction = new QAction(tr("Test Current Map in JMV"), this);
+    m_mapTestAction->setToolTip(tr("Stages unique temporary MPR/MOB copies and launches the validated JMV runtime. No source map is overwritten."));
     m_ui->menuSettings->insertAction(m_ui->actionOpen_2, gameAndModSetup);
     m_ui->menuSettings->insertSeparator(m_ui->actionOpen_2);
     m_ui->menuTools->addSeparator();
     m_ui->menuTools->addAction(compareMobFiles);
+    m_ui->menuTools->addAction(m_mapTestAction);
     m_ui->menuTools->addAction(openBackupFolder);
     m_ui->menuTools->addAction(openLogsFolder);
     m_ui->menuTools->addAction(openBugReportingGuide);
@@ -155,6 +168,17 @@ MainWindow::MainWindow(QWidget* parent) :
         dialog->raise();
         dialog->activateWindow();
     });
+    connect(m_mapTestAction, &QAction::triggered, this, [this]()
+    {
+        if(m_mapTestLauncher && m_mapTestLauncher->isRunning())
+        {
+            if(QMessageBox::question(this, tr("Stop JMV test"),
+                    tr("Stop the game process launched by Endurance?")) == QMessageBox::Yes)
+                m_mapTestLauncher->stop();
+            return;
+        }
+        launchCurrentMapTest();
+    });
 
     const bool firstRunSetup = !m_settings->hasConfiguredResources();
     // Complete first-run setup before constructing the OpenGL view. Opening the
@@ -169,6 +193,37 @@ MainWindow::MainWindow(QWidget* parent) :
     m_ui->outlinerSplitter->restoreState(uiSettings.value("ui/outlinerSplitter").toByteArray());
 
     m_pView = new CView(m_ui->centralWidget, m_createDialog.get()->viewWidget());
+    m_mapTestLauncher = new CJmvMapTestLauncher(this);
+    connect(m_mapTestLauncher, &CJmvMapTestLauncher::testStarted, this,
+            [this](const QString& runId, const QString& mapName)
+    {
+        ei::log(eLogInfo, QString("JMV test launch started run:%1 map:%2").arg(runId, mapName));
+        statusBar()->showMessage(tr("JMV test is running with temporary map %1").arg(mapName));
+        updateMapTestAction();
+    });
+    connect(m_mapTestLauncher, &CJmvMapTestLauncher::testFinished, this,
+            [this](const QString& runId, int exitCode, const QString& cleanupMessage)
+    {
+        ei::log(eLogInfo, QString("JMV test launch finished run:%1 exit:%2 cleanup:%3")
+                .arg(runId).arg(exitCode).arg(cleanupMessage));
+        statusBar()->showMessage(tr("JMV test finished (exit code %1). Temporary files were cleaned up.").arg(exitCode), 8000);
+        updateMapTestAction();
+        if(m_closeAfterTestStop)
+        {
+            m_closeAfterTestStop = false;
+            QTimer::singleShot(0, this, &MainWindow::close);
+        }
+    });
+    connect(m_mapTestLauncher, &CJmvMapTestLauncher::testError, this,
+            [this](const QString& message)
+    {
+        ei::log(eLogFatal, message);
+        QMessageBox::critical(this, tr("JMV test launch"), message);
+        updateMapTestAction();
+    });
+    const QString recovery = CJmvMapTestLauncher::recoverInterruptedRuns();
+    if(!recovery.isEmpty())
+        ei::log(eLogWarning, "Recovered interrupted JMV test run(s):\n" + recovery);
     m_createDialog->viewWidget()->attachView(m_pView);
     m_createDialog->viewWidget()->attachSettings(m_settings.get());
 
@@ -227,6 +282,7 @@ MainWindow::MainWindow(QWidget* parent) :
     m_createDialog.get()->attach(m_pView, m_undoStack);
     rebuildRecentFilesMenu();
     refreshMapsBrowser();
+    updateMapTestAction();
 //    if(m_pView->isRecentAvailable())
 //        m_ui->actionOpen_recent->setEnabled(true);
 }
@@ -391,6 +447,167 @@ void MainWindow::initShortcuts()
     m_externalScriptAction->setShortcut(shortcut("shortcutExternalMobScript", "Ctrl+Alt+M"));
     m_ui->actionReset_logic_paths->setShortcut(shortcut("shortcutResetLogicPaths", "Ctrl+P"));
     m_mapsDock->toggleViewAction()->setShortcut(shortcut("shortcutMapsBrowser", "Ctrl+Space"));
+    m_mapTestAction->setShortcut(shortcut("shortcutTestMap", "Ctrl+F5"));
+}
+
+void MainWindow::updateMapTestAction()
+{
+    if(!m_mapTestAction)
+        return;
+    if(m_mapTestLauncher && m_mapTestLauncher->isRunning())
+    {
+        m_mapTestAction->setText(tr("Stop JMV Test"));
+        m_mapTestAction->setEnabled(true);
+        return;
+    }
+    m_mapTestAction->setText(tr("Test Current Map in JMV"));
+    COptString* profile = dynamic_cast<COptString*>(m_settings->opt(eOptSetResource, "resourceProfile"));
+    const bool isJmv = profile && profile->value().compare("jamais-vu", Qt::CaseInsensitive) == 0;
+    const bool hasPair = m_pView && m_pView->hasActiveMob()
+            && m_pView->mobs().size() == 1 && CLandscape::getInstance()->isMprLoad();
+    m_mapTestAction->setEnabled(isJmv && hasPair);
+    if(!isJmv)
+        m_mapTestAction->setToolTip(tr("Direct map testing is currently an experimental JMV-only capability."));
+    else if(!hasPair)
+        m_mapTestAction->setToolTip(tr("Load one MPR and exactly one active MOB to test the current map."));
+    else
+        m_mapTestAction->setToolTip(tr("Stages unique temporary map copies and launches the validated JMV runtime (Ctrl+F5)."));
+}
+
+void MainWindow::launchCurrentMapTest()
+{
+    activateWindow();
+    raise();
+    if(!m_pView || !m_pView->hasActiveMob() || m_pView->mobs().size() != 1
+       || !CLandscape::getInstance()->isMprLoad())
+    {
+        QMessageBox::warning(this, tr("JMV test launch"),
+            tr("Load one MPR and exactly one MOB before starting a test."));
+        return;
+    }
+    if(m_pView->cancelPendingOperation())
+        statusBar()->showMessage(tr("Pending object movement was cancelled before staging the test."), 4000);
+    CLandscape* landscape = CLandscape::getInstance();
+    if(landscape->isDirty())
+    {
+        QMessageBox::warning(this, tr("JMV test launch"),
+            tr("Unsaved MPR edits cannot yet be staged losslessly. Save or revert the landscape first."));
+        return;
+    }
+
+    COptString* profileId = dynamic_cast<COptString*>(m_settings->opt(eOptSetResource, "resourceProfile"));
+    SResourceProfileEvaluation profile;
+    for(const SResourceProfile& candidate : loadResourceProfiles())
+    {
+        if(profileId && candidate.id.compare(profileId->value(), Qt::CaseInsensitive) == 0)
+        {
+            profile = evaluateResourceProfile(m_settings->configuredGameRoot(), candidate);
+            break;
+        }
+    }
+    if(profile.profileId.compare("jamais-vu", Qt::CaseInsensitive) != 0
+       || !profile.valid || !profile.runtimeStackValidated)
+    {
+        QMessageBox::warning(this, tr("JMV test launch"),
+            tr("The active JMV installation does not match the validated runtime-stack manifest. Run Game and Mod Setup again and review its diagnostics."));
+        return;
+    }
+
+    QVector<QString> resourceRoots;
+    QVector<QString> mapRoots;
+    if(COptStringList* value = dynamic_cast<COptStringList*>(m_settings->opt(eOptSetResource, "resourceRoots")))
+        resourceRoots = value->value();
+    if(COptStringList* value = dynamic_cast<COptStringList*>(m_settings->opt(eOptSetResource, "mapRoots")))
+        mapRoots = value->value();
+    const SMapCatalogResult catalog = CMapCatalog::load(resourceRoots, mapRoots);
+    SMapCatalogEntry entry;
+    const QString loadedMpr = QFileInfo(landscape->filePath()).absoluteFilePath();
+    for(const SMapCatalogEntry& candidate : catalog.entries)
+    {
+        if(QFileInfo(candidate.mprPath).absoluteFilePath().compare(loadedMpr, Qt::CaseInsensitive) == 0
+           || candidate.mprName.compare(QFileInfo(loadedMpr).completeBaseName(), Qt::CaseInsensitive) == 0)
+        {
+            entry = candidate;
+            break;
+        }
+    }
+    if(entry.travelZones.isEmpty())
+    {
+        QMessageBox::warning(this, tr("JMV test launch"),
+            tr("No travel/deploy zone was found for the loaded MPR in the active map table. Endurance will not guess a player spawn."));
+        return;
+    }
+
+    QVector<SMapSpawnObstacle> obstacles;
+    CMob* mob = m_pView->currentMob();
+    for(CNode* node : mob->nodes())
+    {
+        if(!node || node->isMarkDeleted())
+            continue;
+        switch(node->nodeType())
+        {
+        case eWorldObject:
+        case eUnit:
+        case eTorch:
+        case eLever:
+            break;
+        default:
+            continue;
+        }
+        CBox box = node->getBBox();
+        const double radius = box.isInit() ? qMax(0.75, double(box.radius()) * 0.5) : 0.75;
+        SMapSpawnObstacle obstacle;
+        obstacle.position = QPointF(node->position().x(), node->position().y());
+        obstacle.radius = radius;
+        obstacles.append(obstacle);
+    }
+    const SMapSpawnPlan spawn = CMapSpawnPlanner::choose(entry.travelZones, obstacles);
+    if(!spawn.valid)
+    {
+        QMessageBox::warning(this, tr("JMV test launch"),
+            tr("No sufficiently clear point exists inside any travel-zone deploy rectangle. Move blocking objects or choose another map before testing.\n\n%1").arg(spawn.reason));
+        return;
+    }
+
+    QFile mprFile(landscape->filePath().absoluteFilePath());
+    if(!mprFile.open(QIODevice::ReadOnly))
+    {
+        QMessageBox::warning(this, tr("JMV test launch"), mprFile.errorString());
+        return;
+    }
+    QByteArray mobData;
+    CValidationReport mobReport;
+    QString saveClass;
+    if(!mob->buildValidatedCandidate(&mobData, &mobReport, &saveClass))
+    {
+        QMessageBox::warning(this, tr("JMV test launch"),
+            tr("The current MOB edits could not be staged safely:\n\n%1").arg(mobReport.toText()));
+        return;
+    }
+
+    const QString confirmation = tr(
+        "Endurance will create uniquely named temporary MPR/MOB files in the active JMV Maps folder, temporarily append one server command to Engine\\2utoexec.cfg, and launch the validated JMV game.exe.\n\n"
+        "Source maps are not changed. The exact autoexec bytes are backed up and restored, and temporary maps are deleted after exit. Unsaved MOB edits are included.\n\n"
+        "Spawn: travel exit %1 at (%2, %3), verified clearance %4.\n\nContinue?")
+        .arg(spawn.exitId).arg(spawn.position.x(), 0, 'f', 2)
+        .arg(spawn.position.y(), 0, 'f', 2).arg(spawn.clearance, 0, 'f', 2);
+    if(QMessageBox::question(this, tr("Experimental JMV test launch"), confirmation,
+                             QMessageBox::Yes | QMessageBox::Cancel) != QMessageBox::Yes)
+        return;
+
+    SJmvMapTestLaunchInput input;
+    input.profile = profile;
+    input.sourceMpr = landscape->filePath();
+    input.sourceMob = mob->filePath();
+    input.mprData = mprFile.readAll();
+    input.mobData = mobData;
+    input.embeddedScript = mob->script();
+    input.mapEntry = entry;
+    input.spawn = spawn;
+    QString error;
+    if(!m_mapTestLauncher->launch(input, &error))
+        QMessageBox::critical(this, tr("JMV test launch"), error);
+    updateMapTestAction();
 }
 
 void MainWindow::refreshMapsBrowser()
@@ -793,6 +1010,7 @@ void MainWindow::updateWindowTitle(eTitleTypeData type, QString data)
 
 
     setWindowTitle(title);
+    updateMapTestAction();
 }
 
 
@@ -839,6 +1057,22 @@ void MainWindow::on_actionOpen_2_triggered()
 
 void MainWindow::closeEvent(QCloseEvent *e)
 {
+    if(m_mapTestLauncher && m_mapTestLauncher->isRunning())
+    {
+        const QMessageBox::StandardButton answer = QMessageBox::question(this,
+            tr("JMV test is running"),
+            tr("Stop the game process launched by Endurance, clean up its temporary files, and exit?"),
+            QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel);
+        if(answer != QMessageBox::Yes)
+        {
+            e->ignore();
+            return;
+        }
+        m_closeAfterTestStop = true;
+        m_mapTestLauncher->stop();
+        e->ignore();
+        return;
+    }
     if(!isExitAllowed())
     {
         e->ignore();

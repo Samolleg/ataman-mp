@@ -48,6 +48,9 @@ public:
     QVector<uint> checkUniqueId(QSet<uint>& aId);
     bool saveAs(const QFileInfo& path);
     bool save();
+    bool buildValidatedCandidate(QByteArray* data,
+                                 CValidationReport* report = nullptr,
+                                 QString* saveClass = nullptr);
     void serializeJson(const QFileInfo& file);
     void serializeMob(QByteArray& data, bool writeLog = true);
     void addNode(QList<CNode*>& aNode) {m_aNode.append(aNode); }

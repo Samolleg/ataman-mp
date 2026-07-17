@@ -372,23 +372,30 @@ MOB editing does not imply that landscape saving is supported.
   ordered MOBs, active MOB, runtime/source/staged hashes, logs/results, safe run
   IDs, JMV-only scope, and mandatory containment inside the disposable run root.
   ([`b467d87`](https://github.com/Ilufus/ei-mapper-endurance/commit/b467d87), [runtime-provider tests](tests/runtime_provider_tests.cpp))
-- [ ] Implement concrete provider backends; interface and manifest contracts are
-  present, but appearance/equipment/semantic/launch providers remain disabled.
-- [ ] Run the non-destructive JMV feasibility ladder: stage a temporary map-list
-  entry from the `texts.res` map table, invoke the map codename through the
-  console/server path, determine supplemental `Auto<map>*.mob` discovery/order,
-  then test an autorun script using `AddMobEx`.
-  - Prefer a temporary resource overlay or isolated replacement rather than
-    modifying the installed `texts.res`.
-  - Prototype an automatic boot path that skips cutscenes/menu, invokes the map
-    command, and unconditionally loads declared Auto MOBs through a temporary
-    script so testing does not require manual console interaction.
-  - Verify the exact map-list member name and Base/JMV behavior before treating
-    this as an available runtime contract.
-- [ ] Implement manifest staging and disposable test state only after one
-  mechanism proves exact ordered loading, readiness reporting, and cleanup.
-- [ ] Keep direct launch disabled for Base EI and unavailable for JMV until the
-  feasibility gate passes; do not redirect live Maps or Starter configuration.
+- [x] Implement the first experimental JMV `MapTestLauncher` backend for one
+  loaded MPR plus one active MOB. It stages the exact validated in-memory MOB,
+  injects a disposable player bootstrap, writes uniquely named temporary map
+  copies into the active JMV `Maps` folder, and launches through `server <name>`.
+  It never replaces a source/live map or rewrites `texts.res`.
+- [x] Choose a deterministic spawn from the map table's travel-zone deploy
+  rectangles without assuming their centers are free. Score candidates against
+  physical MOB object bounds and rectangle edges, fall back across travel zones,
+  and refuse launch when no candidate has the required clearance.
+- [x] Back up `Engine/2utoexec.cfg` byte-for-byte before its temporary command,
+  hash-check all temporary writes, restore only the exact Endurance-owned patch,
+  remove only hash-matching temporary maps, retain run manifests/logs, and recover
+  interrupted cleanup at the next editor start.
+- [ ] Perform the focused JMV runtime feasibility test: confirm that the engine
+  accepts the temporary outer map name while preserving the MPR internal name,
+  executes the MOB bootstrap exactly once, creates/controls the test player at
+  the selected free position, supports `drawall` and traversal, and restores all
+  temporary state after normal exit, launch failure, and a forced crash.
+- [ ] Determine supplemental `Auto<map>*.mob` discovery/order and then prototype
+  declared multi-MOB test loading through the existing convention or `AddMobEx`.
+- [ ] Add bridge readiness/loaded-map identity reporting if the console/server
+  prototype cannot prove the requested map and MOB set loaded exactly once.
+- [ ] Keep direct launch disabled for Base EI. JMV remains explicitly
+  experimental until the focused runtime gate above passes.
 
 ## Release gates
 
@@ -403,6 +410,10 @@ MOB editing does not imply that landscape saving is supported.
   alpha.14-group fixes, synchronized internal/external scripts, and readable
   embedded-script MOB diffs. The supported MOB edit implementation is complete;
   promotion now depends on closed-group regression and game testing.
+- [x] `0.1.0-alpha.42`: experimental single-MPR/single-MOB JMV direct-launch
+  candidate with lossless in-memory staging, obstruction-aware travel-zone
+  spawn selection, hash-owned temporary Maps files, and recoverable autoexec
+  restoration. Availability remains experimental pending the focused in-game gate.
 - [x] `0.1.0-alpha.41`: redo-safe raw provenance and the July 17 multi-edit/UI
   fixes passed owner testing and were handed to the closed tester group.
   ([`db3fa31`](https://github.com/Ilufus/ei-mapper-endurance/commit/db3fa31),

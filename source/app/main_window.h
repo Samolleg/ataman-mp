@@ -25,6 +25,7 @@ class QMenu;
 class QAction;
 class QDockWidget;
 class CMapsBrowser;
+class CJmvMapTestLauncher;
 
 struct SWindowTitle
 {
@@ -57,6 +58,8 @@ private:
     void runUndoToIndex(int targetIndex);
     void refreshMapsBrowser();
     void openMapPair(const QString& mprPath, const QString& mobPath, const QString& zoneId);
+    void updateMapTestAction();
+    void launchCurrentMapTest();
 
 private slots:
     void showOutliner(bool bShow);
@@ -118,6 +121,9 @@ private:
     QAction* m_externalScriptAction;
     QDockWidget* m_mapsDock;
     CMapsBrowser* m_mapsBrowser;
+    QAction* m_mapTestAction;
+    CJmvMapTestLauncher* m_mapTestLauncher;
+    bool m_closeAfterTestStop;
 };
 
 #endif // MAIN_WINDOW_H
