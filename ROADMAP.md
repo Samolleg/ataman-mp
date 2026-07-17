@@ -5,7 +5,7 @@ An item is checked only after its implementation has landed and received the
 listed level of validation. New findings and wishlist requests belong here so
 they do not get lost between test sessions.
 
-Current development release: `0.1.0-alpha.33`.
+Current development release: `0.1.0-alpha.34`.
 
 ## Implementation evidence
 
@@ -44,6 +44,7 @@ behavior.
 | Exact object sequence and patrol/look structural saves | [`11698ad`](https://github.com/Ilufus/ei-mapper-endurance/commit/11698ad) | 254/254 Base/JMV corpus, 27 document tests, six regression suites, and [alpha.31 checks](ALPHA31_VALIDATION.md) |
 | MOB-parameter transactions, stable logic undo, repeated-save provenance, and typed property clipboard | [`f4b107c`](https://github.com/Ilufus/ei-mapper-endurance/commit/f4b107c) | Seven regression suites, UI widget checks, Zone 1 no-op round trip, and [alpha.32 checks](ALPHA32_VALIDATION.md) |
 | Debounced external-script import and row-based typed property clipboard | [`5192c4d`](https://github.com/Ilufus/ei-mapper-endurance/commit/5192c4d) | Extended UI clipboard checks, seven regression suites, Zone 1 no-op round trip, and [alpha.33 checks](ALPHA33_VALIDATION.md) |
+| Document-owned script workspace, independent script editor, first patrol creation, duplicate/history shortcuts, and persisted application keybinds | [`258893c`](https://github.com/Ilufus/ei-mapper-endurance/commit/258893c) | Production MinGW build, extended UI/settings checks, and [alpha.34 checks](ALPHA34_VALIDATION.md) |
 
 ## Product contract
 
@@ -75,13 +76,17 @@ behavior.
   ([`11698ad`](https://github.com/Ilufus/ei-mapper-endurance/commit/11698ad))
 - [ ] Verify structural saves with automated untouched-data comparison, Endurance
   reopen, MobExplorer comparison, and focused JMV `drawall`/unload/reload tests.
-- [ ] Verify scripts and all edited text round-trip through CP1251 without changing
-  unrelated bytes; reject only characters that the game encoding cannot store.
+- [x] Decouple scripts from MOB Parameters: provide an independent internal
+  editor, keep the external watcher alive for the loaded MOB document, and route
+  internal/external imports through the main undo history with strict CP1251
+  conversion. ([`258893c`](https://github.com/Ilufus/ei-mapper-endurance/commit/258893c))
+- [ ] Complete tester coverage proving edited scripts and all other text change
+  only their intended CP1251 leaves across Base/JMV saves.
 - [ ] Stress repeated edit/undo/redo/save/open/close cycles on large JMV maps and
   fix any crash, stale-selection, or dirty-state regression found by testers.
-- [x] Route MOB Parameters and embedded-script Apply through the main undo
-  history; reload external-editor atomic replacements; remove stale patrol-node
-  pointers from undo; and rebind saved raw-object provenance for subsequent saves.
+- [x] Route MOB Parameters through the main undo history; reload external-editor
+  atomic replacements; remove stale patrol-node pointers from undo; and rebind
+  saved raw-object provenance for subsequent saves.
   ([`f4b107c`](https://github.com/Ilufus/ei-mapper-endurance/commit/f4b107c))
 - [x] Add destination-typed property clipboard validation. Copied values remain
   plain text for external editors, while Endurance rejects incompatible field
