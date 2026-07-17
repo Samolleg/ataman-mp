@@ -49,6 +49,7 @@ behavior.
 | Synchronized internal/external MOB scripts, explicit editor selection, script shortcuts, and MOB Parameters close lifecycle | [`607715a`](https://github.com/Ilufus/ei-mapper-endurance/commit/607715a) | Production MinGW build, seven regression suites, headless UI check, and [alpha.36 checks](ALPHA36_VALIDATION.md) |
 | Exact model-parts snapshot across multi-property paste undo/redo | [`749b850`](https://github.com/Ilufus/ei-mapper-endurance/commit/749b850) | Production MinGW build and [alpha.36 focused check](ALPHA36_VALIDATION.md) |
 | Multi-field property context-menu copy/paste | [`7eba358`](https://github.com/Ilufus/ei-mapper-endurance/commit/7eba358) | Headless UI clipboard checks and [alpha.36 focused check](ALPHA36_VALIDATION.md) |
+| Focus-aware external-script import and idempotent watcher markers | [`54e7cfb`](https://github.com/Ilufus/ei-mapper-endurance/commit/54e7cfb) | Production MinGW build, seven regression suites, and [alpha.37 critical check](ALPHA37_VALIDATION.md) |
 
 Alpha.34 packaging is withdrawn: it accidentally included a developer-local
 `endurance-options.json`, which suppressed first-run setup and exposed local game

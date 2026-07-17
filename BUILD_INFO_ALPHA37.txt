@@ -1,0 +1,9 @@
+EI Mapper: Endurance Edition 0.1.0-alpha.37
+Critical external-script hotfix commit: 54e7cfb
+Purpose: eliminate watcher feedback and hidden modal import prompts
+
+Alpha.37 supersedes alpha.36 for all testing. Pending marker creation is
+idempotent. External script changes remain queued while another application is
+active, then display one import question after Endurance regains focus.
+
+Follow ALPHA37_VALIDATION.md.
