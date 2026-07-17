@@ -5,7 +5,7 @@ An item is checked only after its implementation has landed and received the
 listed level of validation. New findings and wishlist requests belong here so
 they do not get lost between test sessions.
 
-Current development release: `0.1.0-alpha.47`.
+Current development release: `0.1.0-alpha.48`.
 
 ## Implementation evidence
 
@@ -399,9 +399,11 @@ MOB editing does not imply that landscape saving is supported.
   manifests/logs, and recover interrupted cleanup at the next editor start.
 - [x] Alpha.46 runtime evidence proved the configured provider loads and both
   callbacks succeed, but its autoexec marker has already run before plugin
-  readiness. Schedule a one-shot Windows timer from `EntryAfterPatch`; its
-  callback executes on the game thread after the message loop begins, installs
-  the exact redirects, and invokes the fingerprinted handler directly.
+  readiness. Alpha.47 then proved the Starter callback thread does not pump
+  timer messages: scheduling succeeded but the callback never fired. Wait for
+  the visible game window from a bounded worker, subclass it only long enough
+  to post one private message, restore its original window procedure, then
+  install redirects and invoke the handler on the actual game-window thread.
 - [ ] Perform the focused JMV runtime feasibility test: confirm that the engine
   accepts the temporary outer map name while preserving the MPR internal name,
   executes the MOB bootstrap exactly once, creates/controls the test player at
@@ -447,6 +449,9 @@ MOB editing does not imply that landscape saving is supported.
 - [x] `0.1.0-alpha.47`: remove the failed autoexec timing dependency. Schedule
   the map request from a one-shot game-thread timer after `EntryAfterPatch`, and
   leave `2utoexec.cfg` untouched while retaining legacy interrupted-run recovery.
+- [x] `0.1.0-alpha.48`: replace the non-firing callback-thread timer with a
+  bounded game-window discovery worker and one-shot window-message dispatch.
+  The engine handler still executes only on the game window's own thread.
 - [x] `0.1.0-alpha.41`: redo-safe raw provenance and the July 17 multi-edit/UI
   fixes passed owner testing and were handed to the closed tester group.
   ([`db3fa31`](https://github.com/Ilufus/ei-mapper-endurance/commit/db3fa31))

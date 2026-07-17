@@ -33,6 +33,9 @@ HMODULE g_instance = nullptr;
 volatile LONG g_initialized = 0;
 volatile LONG g_launchHandled = 0;
 volatile LONG g_redirectCount = 0;
+constexpr UINT kDeferredLaunchMessage = WM_APP + 0x347;
+WNDPROC g_originalWindowProc = nullptr;
+HWND g_gameWindow = nullptr;
 wchar_t g_expectedTemporaryMap[32] = {};
 wchar_t g_sourceMap[64] = {};
 wchar_t g_temporaryMpr[MAX_PATH * 4] = {};
@@ -424,16 +427,15 @@ bool InitializeBridge()
         Log(L"Bridge disabled: game hash or server-handler signature mismatch");
         return false;
     }
-    Log(L"Bridge ready; waiting for the deferred game-thread launch timer");
+    Log(L"Bridge ready; waiting for deferred dispatch through the game window thread");
     return true;
 }
 
-void CALLBACK DeferredLaunchTimer(HWND, UINT, UINT_PTR timerId, DWORD)
+void PerformDeferredLaunch()
 {
-    KillTimer(nullptr, timerId);
     if(InterlockedCompareExchange(&g_launchHandled, 1, 0) != 0)
         return;
-    Log(L"Deferred game-thread launch timer fired");
+    Log(L"Deferred launch message reached the game window thread");
     if(!InstallFileRedirectHooks())
     {
         Log(L"Launch refused: no supported file imports could be redirected");
@@ -444,17 +446,117 @@ void CALLBACK DeferredLaunchTimer(HWND, UINT, UINT_PTR timerId, DWORD)
     Log(L"Engine server launch request queued");
 }
 
+LRESULT CALLBACK DeferredGameWindowProc(HWND window, UINT message,
+                                        WPARAM wParam, LPARAM lParam)
+{
+    WNDPROC original = g_originalWindowProc;
+    if(message == kDeferredLaunchMessage)
+    {
+        if(original)
+            SetWindowLongPtrW(window, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(original));
+        g_gameWindow = nullptr;
+        PerformDeferredLaunch();
+        return 0;
+    }
+    return original ? CallWindowProcW(original, window, message, wParam, lParam)
+                    : DefWindowProcW(window, message, wParam, lParam);
+}
+
+struct WindowCandidate
+{
+    HWND window = nullptr;
+    LONG area = 0;
+};
+
+BOOL CALLBACK FindLargestGameWindow(HWND window, LPARAM parameter)
+{
+    DWORD processId = 0;
+    GetWindowThreadProcessId(window, &processId);
+    if(processId != GetCurrentProcessId() || !IsWindowVisible(window) ||
+       GetWindow(window, GW_OWNER) != nullptr)
+        return TRUE;
+    RECT rectangle{};
+    if(!GetClientRect(window, &rectangle))
+        return TRUE;
+    const LONG width = rectangle.right - rectangle.left;
+    const LONG height = rectangle.bottom - rectangle.top;
+    const LONG area = width > 0 && height > 0 ? width * height : 0;
+    auto* candidate = reinterpret_cast<WindowCandidate*>(parameter);
+    if(area > candidate->area)
+    {
+        candidate->window = window;
+        candidate->area = area;
+    }
+    return TRUE;
+}
+
+DWORD WINAPI DispatchLaunchToGameWindow(void*)
+{
+    Log(L"Waiting for a visible game window with an active message thread");
+    for(int attempt = 0; attempt < 300; ++attempt)
+    {
+        WindowCandidate candidate;
+        EnumWindows(&FindLargestGameWindow, reinterpret_cast<LPARAM>(&candidate));
+        if(candidate.window && candidate.area >= 640 * 480)
+        {
+            WNDPROC original = reinterpret_cast<WNDPROC>(
+                GetWindowLongPtrW(candidate.window, GWLP_WNDPROC));
+            if(!original)
+            {
+                Sleep(100);
+                continue;
+            }
+            g_originalWindowProc = original;
+            SetLastError(0);
+            const LONG_PTR replaced = SetWindowLongPtrW(
+                candidate.window, GWLP_WNDPROC,
+                reinterpret_cast<LONG_PTR>(&DeferredGameWindowProc));
+            if(!replaced && GetLastError() != 0)
+            {
+                Log(L"Could not subclass the game window for deferred launch");
+                return 1;
+            }
+            if(reinterpret_cast<WNDPROC>(replaced) != original)
+            {
+                SetWindowLongPtrW(candidate.window, GWLP_WNDPROC, replaced);
+                Log(L"Game window procedure changed during deferred-launch setup");
+                return 1;
+            }
+            g_gameWindow = candidate.window;
+            DWORD windowThread = GetWindowThreadProcessId(candidate.window, nullptr);
+            wchar_t message[256]{};
+            _snwprintf_s(message, sizeof(message) / sizeof(message[0]), _TRUNCATE,
+                         L"Posting deferred launch to game window thread %lu from worker %lu",
+                         windowThread, GetCurrentThreadId());
+            Log(message);
+            if(!PostMessageW(candidate.window, kDeferredLaunchMessage, 0, 0))
+            {
+                SetWindowLongPtrW(candidate.window, GWLP_WNDPROC,
+                                  reinterpret_cast<LONG_PTR>(original));
+                g_gameWindow = nullptr;
+                Log(L"Could not post the deferred launch message to the game window");
+                return 1;
+            }
+            return 0;
+        }
+        Sleep(100);
+    }
+    Log(L"Deferred launch timed out waiting for the game window");
+    return 1;
+}
+
 bool ScheduleDeferredLaunch()
 {
     if(!InitializeBridge())
         return false;
-    const UINT_PTR timer = SetTimer(nullptr, 0, 1000, &DeferredLaunchTimer);
-    if(!timer)
+    HANDLE worker = CreateThread(nullptr, 0, &DispatchLaunchToGameWindow, nullptr, 0, nullptr);
+    if(!worker)
     {
-        Log(L"Bridge disabled: could not create the deferred game-thread timer");
+        Log(L"Bridge disabled: could not create the window-dispatch worker");
         return false;
     }
-    Log(L"Deferred game-thread launch scheduled for 1000 ms after Starter patches");
+    CloseHandle(worker);
+    Log(L"Deferred game-window dispatch scheduled after Starter patches");
     return true;
 }
 }

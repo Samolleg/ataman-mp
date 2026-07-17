@@ -586,7 +586,7 @@ void MainWindow::launchCurrentMapTest()
     }
 
     const QString confirmation = tr(
-        "Endurance will create uniquely named temporary MPR/MOB files in the active JMV Maps folder and temporarily fill JMV's configured and otherwise empty plugin.dll slot with its fingerprinted provider. After Starter finishes applying patches, the provider schedules the selected map on the game thread and redirects only that map identity to the temporary files.\n\n"
+        "Endurance will create uniquely named temporary MPR/MOB files in the active JMV Maps folder and temporarily fill JMV's configured and otherwise empty plugin.dll slot with its fingerprinted provider. After Starter finishes applying patches, the provider dispatches the selected map through the game window thread and redirects only that map identity to the temporary files.\n\n"
         "Source maps and JMV configuration are not changed. Temporary runtime files are hash-owned and deleted after exit. Unsaved MOB edits are included.\n\n"
         "Spawn: travel exit %1 at (%2, %3), verified clearance %4.\n\nContinue?")
         .arg(spawn.exitId).arg(spawn.position.x(), 0, 'f', 2)
