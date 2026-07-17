@@ -14,6 +14,7 @@
 #include <QUrl>
 #include <QPushButton>
 #include <QMenu>
+#include <QApplication>
 
 #include "resourcemanager.h"
 #include "landscape.h"
@@ -32,6 +33,7 @@
 #include "backup_manager.h"
 #include "resource_setup_dialog.h"
 #include "mob_diff_dialog.h"
+#include "window_lifecycle.h"
 
 void testFunc()
 {
@@ -59,10 +61,10 @@ MainWindow::MainWindow(QWidget* parent) :
 #endif
     CIconManager::getInstance()->init();
 
-    m_settings.reset(new CSettings());
+    m_settings.reset(new CSettings(this));
     m_selector.reset(new CSelectForm(this));
-    m_createDialog.reset(new CCreateObjectForm());
-    m_randomizeForm.reset(new CRandomizeForm());
+    m_createDialog.reset(new CCreateObjectForm(this));
+    m_randomizeForm.reset(new CRandomizeForm(this));
     m_pTileForm.reset(new CTileForm(this));
     m_settings->attachMainWindow(this);
     m_ui->setupUi(this); //init CView core also
@@ -243,7 +245,8 @@ void MainWindow::testFunc1()
 
 void MainWindow::createUndoView()
 {
-    m_undoView = new QUndoView(m_undoStack);
+    m_undoView = new QUndoView(m_undoStack, this);
+    m_undoView->setWindowFlag(Qt::Window, true);
     m_undoView->setWindowTitle(tr("History"));
     m_undoView->setAttribute(Qt::WA_QuitOnClose, false);
 }
@@ -321,8 +324,7 @@ void MainWindow::showOutliner(bool bShow)
 
 void MainWindow::on_actionExit_triggered()
 {
-    if(isExitAllowed())
-        close();
+    close();
 }
 
 void MainWindow::on_actionOpen_triggered()
@@ -661,13 +663,14 @@ void MainWindow::on_actionOpen_2_triggered()
 
 void MainWindow::closeEvent(QCloseEvent *e)
 {
-    if(isExitAllowed())
+    if(!isExitAllowed())
     {
-        //m_pView->~CView();
-        close();
-    }
-    else
         e->ignore();
+        return;
+    }
+
+    ei::closeSecondaryWindows(this);
+    e->accept();
 }
 
 void MainWindow::on_actionOpen_recent_triggered()

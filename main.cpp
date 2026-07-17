@@ -17,6 +17,7 @@
 #include "resource_profile.h"
 #include "resourcemanager.h"
 #include "layout_components/tablemanager.h"
+#include "window_lifecycle.h"
 
 #ifdef Q_OS_WIN
 #include <windows.h>
@@ -233,8 +234,19 @@ int runHeadlessCommand(QApplication& app)
         const bool enterCommit = combo.value()->toString() == "custom_model" && appliedChanges == 1;
         combo._onChange("house");
         const bool clickCommit = combo.value()->toString() == "house" && appliedChanges == 2;
+
+        QWidget primaryWindow;
+        QWidget ownedWindow(&primaryWindow, Qt::Window);
+        QWidget orphanWindow(nullptr, Qt::Window);
+        ownedWindow.setAttribute(Qt::WA_DontShowOnScreen);
+        orphanWindow.setAttribute(Qt::WA_DontShowOnScreen);
+        ownedWindow.show();
+        orphanWindow.show();
+        ei::closeSecondaryWindows(&primaryWindow);
+        const bool secondaryWindowsClosed = !ownedWindow.isVisible() && !orphanWindow.isVisible();
+
         const bool passed = prefixesOnly && valueStable && focusCancel && escapeCancel
-                && enterCommit && clickCommit;
+                && enterCommit && clickCommit && secondaryWindowsClosed;
         QTextStream output(stdout);
         output << "asset-picker prefixes=" << completions.join(",") << "\n"
                << "prefixesOnly=" << prefixesOnly
@@ -242,9 +254,10 @@ int runHeadlessCommand(QApplication& app)
                << " focusCancel=" << focusCancel
                << " escapeCancel=" << escapeCancel
                << " enterCommit=" << enterCommit
-               << " clickCommit=" << clickCommit << "\n"
+               << " clickCommit=" << clickCommit
+               << " secondaryWindowsClosed=" << secondaryWindowsClosed << "\n"
                << (passed ? "PASS" : "FAIL")
-               << ": prefix preview cancels on focus/Escape and commits on Enter/click\n";
+               << ": widget interaction and secondary-window lifecycle checks\n";
         output.flush();
         return passed ? 0 : 1;
     }

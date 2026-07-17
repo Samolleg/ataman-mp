@@ -1046,7 +1046,7 @@ void CView::openActiveMobEditParams()
         }
     }
 
-    auto pParam = new CMobParameters(nullptr, m_activeMob, this);
+    auto pParam = new CMobParameters(this, m_activeMob, this);
     QObject::connect(this, SIGNAL(unloadMob(CMob*)), pParam, SLOT(onMobUnload(CMob*)));
     QObject::connect(pParam, SIGNAL(editFinishedSignal(CMobParameters*)), this, SLOT(onMobParamEditFinished(CMobParameters*)));
     m_arrParamWindow.append(pParam);
@@ -2788,7 +2788,7 @@ void CView::iterateRoundMob()
                 continue;
             arrMob.append(mob->mobName());
         }
-        m_pRoundForm = new CRoundMobForm();
+        m_pRoundForm = new CRoundMobForm(this);
         m_pRoundForm->initMobList(arrMob);
         m_pRoundForm->show();
         return;

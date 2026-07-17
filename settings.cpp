@@ -14,7 +14,7 @@
 #include "resource_profile.h"
 
 CSettings::CSettings(QWidget *parent) :
-    QWidget(parent)
+    QWidget(parent, Qt::Window)
     ,ui(new Ui::CSettings)
     ,m_fileOpt("endurance-options.json")
   ,m_version(1.0)

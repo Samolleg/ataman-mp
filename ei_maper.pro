@@ -93,6 +93,7 @@ SOURCES += \
 
 HEADERS += \
     backup_manager.h \
+    window_lifecycle.h \
     duplicate_id_report.h \
     resource_profile.h \
     resource_setup_dialog.h \

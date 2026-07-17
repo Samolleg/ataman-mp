@@ -21,7 +21,7 @@
 #include "layout_components\connectors_ui.h"
 
 CMobParameters::CMobParameters(QWidget* parent, CMob* pMob, CView* pView):
-    QWidget(parent)
+    QWidget(parent, Qt::Window)
   ,ui(new Ui::CMobParameters)
   ,m_pCurMob(pMob)
   ,m_pHighlighter(nullptr)
@@ -39,7 +39,9 @@ CMobParameters::CMobParameters(QWidget* parent, CMob* pMob, CView* pView):
 
     generateTitle();
     ui->listRanges->setSizeAdjustPolicy(QAbstractScrollArea::AdjustToContents);
-    m_pTable.reset(new QTableWidget(32, 32));
+    m_pTable.reset(new QTableWidget(32, 32, this));
+    m_pTable->setWindowFlag(Qt::Window, true);
+    m_pTable->setAttribute(Qt::WA_QuitOnClose, false);
     QObject::connect(m_pTable.get(), SIGNAL(cellDoubleClicked(int,int)), this, SLOT(tableItemClicked(int,int)));
     m_pShortcut = new QShortcut(QKeySequence(Qt::CTRL + eKey_S), this, SLOT(onSaveShortcut()));
     QObject::connect(m_externalScriptWatcher, SIGNAL(fileChanged(QString)), this, SLOT(onExternalScriptChanged(QString)));
