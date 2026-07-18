@@ -530,11 +530,6 @@ bool CUnit::isBehaviourPath()
     return m_aLogic.front()->isBehaviourPath();
 }
 
-int CUnit::firstAvailablePatrolIndex() const
-{
-    return m_aLogic.front()->firstAvailablePatrolIndex();
-}
-
 int CUnit::getPatrolId(CPatrolPoint *pPoint)
 {
     return m_aLogic.front()->getPatrolId(pPoint);
@@ -1250,16 +1245,6 @@ void CLogic::undo_addFirstPoint()
     CPatrolPoint* pPoint = m_aPatrolPt.front();
     m_aPatrolPt.pop_front();
     delete pPoint;
-}
-
-int CLogic::firstAvailablePatrolIndex() const
-{
-    for(int index = 0; index < m_aPatrolPt.size(); ++index)
-    {
-        if(m_aPatrolPt.at(index) && !m_aPatrolPt.at(index)->isMarkDeleted())
-            return index;
-    }
-    return -1;
 }
 
 int CLogic::getPatrolId(CPatrolPoint *pPoint)

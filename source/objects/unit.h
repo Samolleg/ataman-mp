@@ -123,7 +123,6 @@ public:
     void addFirstPoint(QVector3D& pos);
     void undo_addFirstPoint();
     bool isBehaviourPath() {return m_behaviour == EBehaviourType::ePath;}
-    int firstAvailablePatrolIndex() const;
     int getPatrolId(CPatrolPoint* pPoint);
     void getViewId(int& parentPatrol, int& parentView, CLookPoint* pPoint);
     void createPatrolByIndex(int index);
@@ -203,7 +202,6 @@ public:
     void addFirstPatrolPoint();
     void undo_addFirstPatrolPoint();
     bool isBehaviourPath();
-    int firstAvailablePatrolIndex() const;
     int getPatrolId(CPatrolPoint* pPoint);
     void getViewId(int& parentPatrol, int& parentView, CLookPoint* pPoint);
     void createPatrolByIndex(int index);

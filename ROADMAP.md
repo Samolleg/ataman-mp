@@ -189,10 +189,14 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
 - [x] Add a non-destructive collision-aware Play from Here picker and requested/resolved marker.
   - `0.2.0-alpha.4` replaces the framebuffer/depth redraw picker that could
     flicker and corrupt render state with a CPU ray/heightfield intersection.
+  - `0.2.0-alpha.9` restores the established P behavior after corpus review:
+    selecting a Radius unit and pressing P inserts a new first patrol point and
+    changes the behavior to Path. Any dormant stored route is preserved and
+    becomes visible; it is not silently reused or replaced.
   - `0.2.0-alpha.8` hardens logic-point editing: selected patrol/look markers
-    render last, hidden retained patrol paths are reused instead of duplicated,
-    new look points inherit timing settings, and G/Move recognizes patrol,
-    look, activation, and cast-point selections.
+    render last, new look points inherit timing settings, and G/Move recognizes
+    patrol, look, activation, and cast-point selections. Its experimental
+    retained-point reuse policy is superseded by alpha.9.
   - `0.2.0-alpha.7` replaces the screen crosshair with a terrain-projected hero
     outline and uses the process-owned JMV autorun bootstrap to apply the chosen
     position with `SetCPFast` after normal player/session initialization.

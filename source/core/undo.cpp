@@ -375,7 +375,6 @@ CCreatePatrolCommand::CCreatePatrolCommand(CView* pView, QString pointHash, QUnd
   ,m_firstPointUnit(nullptr)
   ,m_previousBehaviour(0)
   ,m_switchesToPath(false)
-  ,m_reusedPatrolId(-1)
 {
     const QStringList parts = pointHash.split(".");
     if(m_mob && parts.size() == 2 && parts[1].toInt() == -1)
@@ -390,8 +389,6 @@ CCreatePatrolCommand::CCreatePatrolCommand(CView* pView, QString pointHash, QUnd
             {
                 m_previousBehaviour = value->value();
                 m_switchesToPath = m_previousBehaviour != uint(EBehaviourType::ePath);
-                if(m_switchesToPath)
-                    m_reusedPatrolId = m_firstPointUnit->firstAvailablePatrolIndex();
             }
         }
     }
@@ -401,16 +398,7 @@ void CCreatePatrolCommand::undo()
 {
     if(!m_mob)
         return;
-    if(m_reusedPatrolId >= 0)
-    {
-        if(CPatrolPoint* point = m_firstPointUnit->patrolByIndex(m_reusedPatrolId))
-            point->setState(ENodeState::eDraw);
-        m_mob->logicNodesUpdate();
-    }
-    else
-    {
-        m_mob->undo_createPatrolByHash(m_pointHash);
-    }
+    m_mob->undo_createPatrolByHash(m_pointHash);
     if(m_switchesToPath && m_firstPointUnit)
     {
         QSharedPointer<IPropertyBase> behaviour(
@@ -429,21 +417,9 @@ void CCreatePatrolCommand::redo()
     }
     if(!m_mob)
         return;
-    if(m_reusedPatrolId >= 0)
-    {
-        if(CPatrolPoint* point = m_firstPointUnit->patrolByIndex(m_reusedPatrolId))
-            point->setState(ENodeState::eSelect);
-        m_mob->logicNodesUpdate();
-        ei::log(eLogInfo, QString("Reused retained patrol point %1 for unit %2 while enabling Path behaviour")
-                .arg(m_reusedPatrolId).arg(m_firstPointUnit->mapId()));
-        setText("Enable Path behaviour and place existing patrol point");
-    }
-    else
-    {
-        m_mob->createPatrolByHash(m_pointHash);
-        setText(m_switchesToPath ? "Create first patrol point and enable Path behaviour"
-                                 : "Create patrol point");
-    }
+    m_mob->createPatrolByHash(m_pointHash);
+    setText(m_switchesToPath ? "Create first patrol point and enable Path behaviour"
+                             : "Create patrol point");
 }
 
 CCreateTrapPointCommand::CCreateTrapPointCommand(CView *pView, uint trapId, bool bActZone, QUndoCommand *parent):

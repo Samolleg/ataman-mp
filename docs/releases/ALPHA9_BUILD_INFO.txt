@@ -1,0 +1,7 @@
+EI Mapper: Endurance Edition 0.2.0-alpha.9
+Branch: feature/viewport-test-controls-base-probe
+Editor: Qt 5.12.12 / MinGW 7.3 x64 release build
+Runtime bridge: unchanged MSVC 2022 x86 release from alpha.8
+Base runtime host: unchanged MSVC 2022 x86 release from alpha.8
+Changes: restores established P semantics for Radius units with dormant patrol data; retains selected-marker rendering, look-setting inheritance, and G/Move logic-point fixes from alpha.8
+Validation: clean MinGW compile; attached zone1test5.mob structural validation and byte-identical no-op round trip; UI widget regression check; no interactive editor or game window launched; installed Base/JMV maps and runtime files remain untouched
