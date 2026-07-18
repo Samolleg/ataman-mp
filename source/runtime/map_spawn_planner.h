@@ -15,6 +15,7 @@ struct SMapSpawnObstacle
 struct SMapSpawnPlan
 {
     bool valid{false};
+    bool unobstructed{false};
     int exitId{0};
     QPointF position;
     double viewAngle{0.0};

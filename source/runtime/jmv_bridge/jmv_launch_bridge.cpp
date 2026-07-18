@@ -4,6 +4,7 @@
 #include <wincrypt.h>
 
 #include <cstdio>
+#include <cstdlib>
 #include <cwchar>
 #include <cstring>
 #include <intrin.h>
@@ -44,6 +45,8 @@ using CaptureStackFn = USHORT (WINAPI*)(ULONG, ULONG, PVOID*, PULONG);
 using MapLoadFn = int (__thiscall*)(void*, const char*, const char*, void*);
 using ZoneTransitionFn = int (__thiscall*)(void*, const char*, int);
 using NewGameBootstrapFn = void (__thiscall*)(void*);
+using PlayerDefaultsResetFn = void (__thiscall*)(void*);
+using GameStringAssignFn = void (__thiscall*)(void*, const char*);
 
 HMODULE g_instance = nullptr;
 volatile LONG g_initialized = 0;
@@ -75,6 +78,9 @@ constexpr DWORD kMapLoadEntryRva = 0x00195480;
 constexpr DWORD kStartZoneTransitionRva = 0x0017C460;
 constexpr DWORD kStartZoneMapLoadReturnRva = 0x0017A61B;
 constexpr DWORD kNewGameBootstrapRva = 0x0017BD10;
+constexpr DWORD kPlayerDefaultsResetRva = 0x000A5BD0;
+constexpr DWORD kPlayerDefaultsManagerRva = 0x003AA5C4;
+constexpr DWORD kGameStringAssignRva = 0x00300AF9;
 constexpr UINT kDirectLaunchMessage = WM_APP + 0x45D;
 constexpr unsigned char kMapLoadEntryBytes[6] = {
     0x64, 0xA1, 0x00, 0x00, 0x00, 0x00
@@ -85,9 +91,13 @@ constexpr unsigned char kStartZoneTransitionBytes[7] = {
 constexpr unsigned char kNewGameBootstrapBytes[7] = {
     0x6A, 0xFF, 0x68, 0xF0, 0x37, 0x72, 0x00
 };
+constexpr unsigned char kPlayerDefaultsResetBytes[6] = {
+    0x64, 0xA1, 0x00, 0x00, 0x00, 0x00
+};
 
 MapLoadFn g_originalMapLoad = nullptr;
 ZoneTransitionFn g_originalZoneTransition = nullptr;
+PlayerDefaultsResetFn g_originalPlayerDefaultsReset = nullptr;
 HMODULE g_gameModule = nullptr;
 HHOOK g_directLaunchHook = nullptr;
 volatile LONG g_directLaunchState = 0;
@@ -97,6 +107,7 @@ void* g_zoneTransitionController = nullptr;
 char g_temporaryMpr[MAX_PATH * 4] = {};
 char g_temporaryMob[MAX_PATH * 4] = {};
 char g_sourceZone[128] = {};
+int g_targetExit = 0;
 wchar_t g_liveSaves[MAX_PATH * 4] = {};
 wchar_t g_testSaves[MAX_PATH * 4] = {};
 volatile LONG g_saveRedirectLogCount = 0;
@@ -106,6 +117,7 @@ int __fastcall MapLoadDetour(void* self, void*, const char* mprPath,
                              const char* mobPath, void* context);
 int __fastcall ZoneTransitionDetour(void* self, void*, const char* zoneName,
                                     int requestedMode);
+void __fastcall PlayerDefaultsResetDetour(void* self, void*);
 LRESULT CALLBACK DirectLaunchMessageHook(int code, WPARAM wParam, LPARAM lParam);
 
 const wchar_t* FileNamePart(const wchar_t* path)
@@ -701,12 +713,15 @@ bool ReadDirectLaunchPaths()
     wchar_t mpr[MAX_PATH * 4]{};
     wchar_t mob[MAX_PATH * 4]{};
     wchar_t sourceZone[128]{};
+    wchar_t targetExit[16]{};
     if(!GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_TEMP_MPR", mpr,
                                 DWORD(sizeof(mpr) / sizeof(mpr[0]))) ||
        !GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_TEMP_MOB", mob,
                                 DWORD(sizeof(mob) / sizeof(mob[0]))) ||
        !GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_SOURCE_ZONE", sourceZone,
                                 DWORD(sizeof(sourceZone) / sizeof(sourceZone[0]))) ||
+       !GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_TARGET_EXIT", targetExit,
+                                DWORD(sizeof(targetExit) / sizeof(targetExit[0]))) ||
        !GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_LIVE_SAVES", g_liveSaves,
                                 DWORD(sizeof(g_liveSaves) / sizeof(g_liveSaves[0]))) ||
        !GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_TEST_SAVES", g_testSaves,
@@ -717,6 +732,14 @@ bool ReadDirectLaunchPaths()
         Log(L"DIRECT_LAUNCH disabled: staged MPR/MOB environment paths are missing or unreadable");
         return false;
     }
+    wchar_t* exitEnd = nullptr;
+    const long parsedExit = std::wcstol(targetExit, &exitEnd, 10);
+    if(exitEnd == targetExit || *exitEnd != L'\0' || parsedExit <= 0 || parsedExit > 1024)
+    {
+        Log(L"DIRECT_LAUNCH disabled: selected map-table entrance is invalid");
+        return false;
+    }
+    g_targetExit = int(parsedExit);
     NormalizeSlashes(g_liveSaves);
     NormalizeSlashes(g_testSaves);
     while(std::wcslen(g_liveSaves) > 3 &&
@@ -742,8 +765,8 @@ bool ReadDirectLaunchPaths()
     }
     wchar_t message[1800]{};
     _snwprintf_s(message, sizeof(message) / sizeof(message[0]), _TRUNCATE,
-                 L"DIRECT_LAUNCH profile zone=\"%s\" isolated_saves=\"%s\" live_saves_protected=\"%s\"",
-                 sourceZone, g_testSaves, g_liveSaves);
+                 L"DIRECT_LAUNCH profile zone=\"%s\" entrance=%d isolated_saves=\"%s\" live_saves_protected=\"%s\"",
+                 sourceZone, g_targetExit, g_testSaves, g_liveSaves);
     Log(message);
     return true;
 }
@@ -782,6 +805,44 @@ bool QueueDirectLaunchOnCurrentThread()
     return true;
 }
 
+void __fastcall PlayerDefaultsResetDetour(void* self, void*)
+{
+    g_originalPlayerDefaultsReset(self);
+    if(InterlockedCompareExchange(&g_directLaunchState, 0, 0) != 3 ||
+       !g_gameModule || !g_sourceZone[0] || g_targetExit <= 0)
+        return;
+
+    auto* game = reinterpret_cast<unsigned char*>(g_gameModule);
+    if(self != game + kPlayerDefaultsManagerRva)
+    {
+        Log(L"DIRECT_LAUNCH failed: New Game reset used an unexpected player-default manager");
+        InterlockedExchange(&g_directLaunchState, -1);
+        return;
+    }
+    void* begin = *reinterpret_cast<void**>(self);
+    void* allocation = begin ? *reinterpret_cast<void**>(begin) : nullptr;
+    if(!allocation)
+    {
+        Log(L"DIRECT_LAUNCH failed: New Game reset did not create the default player record");
+        InterlockedExchange(&g_directLaunchState, -1);
+        return;
+    }
+
+    auto* player = reinterpret_cast<unsigned char*>(allocation) + 8;
+    const auto assign = reinterpret_cast<GameStringAssignFn>(game + kGameStringAssignRva);
+    assign(player + 0x68, g_sourceZone);
+    *reinterpret_cast<int*>(player + 0x6C) = g_targetExit;
+
+    wchar_t selected[256] = L"<unrepresentable>";
+    MultiByteToWideChar(CP_ACP, 0, g_sourceZone, -1, selected,
+                        int(sizeof(selected) / sizeof(selected[0])));
+    wchar_t message[512]{};
+    _snwprintf_s(message, sizeof(message) / sizeof(message[0]), _TRUNCATE,
+                 L"DIRECT_LAUNCH initialized New Game player zone=\"%s\" entrance=%d before transition",
+                 selected, g_targetExit);
+    Log(message);
+}
+
 int __fastcall ZoneTransitionDetour(void* self, void*, const char* zoneName,
                                     int requestedMode)
 {
@@ -796,10 +857,14 @@ int __fastcall ZoneTransitionDetour(void* self, void*, const char* zoneName,
         MultiByteToWideChar(CP_ACP, 0, g_sourceZone, -1, selected,
                             int(sizeof(selected) / sizeof(selected[0])));
         wchar_t message[700]{};
+        const bool identityMatches = zoneName && _stricmp(zoneName, g_sourceZone) == 0;
         _snwprintf_s(message, sizeof(message) / sizeof(message[0]), _TRUNCATE,
-                     L"DIRECT_LAUNCH substituting New Game zone original=\"%s\" selected=\"%s\" mode=%d",
-                     original, selected, requestedMode);
+                     L"DIRECT_LAUNCH New Game zone identity original=\"%s\" selected=\"%s\" mode=%d result=%s",
+                     original, selected, requestedMode,
+                     identityMatches ? L"verified" : L"fallback-substitution");
         Log(message);
+        // The player-default hook should make these identical. Keep the
+        // substitution only as a non-destructive fallback for diagnostics.
         return g_originalZoneTransition(self, g_sourceZone, requestedMode);
     }
     if(requestedMode == 2 && zoneName && _stricmp(zoneName, "MainMenu") == 0)
@@ -912,6 +977,49 @@ LRESULT CALLBACK DirectLaunchMessageHook(int code, WPARAM wParam, LPARAM lParam)
     return next;
 }
 
+bool InstallPlayerDefaultsResetDetour()
+{
+    auto* game = reinterpret_cast<unsigned char*>(g_gameModule);
+    unsigned char* target = game + kPlayerDefaultsResetRva;
+    if(std::memcmp(target, kPlayerDefaultsResetBytes,
+                   sizeof(kPlayerDefaultsResetBytes)) != 0)
+    {
+        Log(L"DIRECT_LAUNCH disabled: validated player-default reset bytes do not match");
+        return false;
+    }
+    auto* trampoline = static_cast<unsigned char*>(VirtualAlloc(nullptr, 16,
+        MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE));
+    if(!trampoline)
+    {
+        Log(L"DIRECT_LAUNCH disabled: player-default reset trampoline allocation failed");
+        return false;
+    }
+    std::memcpy(trampoline, target, sizeof(kPlayerDefaultsResetBytes));
+    trampoline[sizeof(kPlayerDefaultsResetBytes)] = 0xE9;
+    *reinterpret_cast<LONG*>(trampoline + sizeof(kPlayerDefaultsResetBytes) + 1) =
+        LONG((target + sizeof(kPlayerDefaultsResetBytes)) -
+             (trampoline + sizeof(kPlayerDefaultsResetBytes) + 5));
+    g_originalPlayerDefaultsReset = reinterpret_cast<PlayerDefaultsResetFn>(trampoline);
+
+    DWORD oldProtect = 0;
+    if(!VirtualProtect(target, sizeof(kPlayerDefaultsResetBytes),
+                       PAGE_EXECUTE_READWRITE, &oldProtect))
+    {
+        VirtualFree(trampoline, 0, MEM_RELEASE);
+        g_originalPlayerDefaultsReset = nullptr;
+        Log(L"DIRECT_LAUNCH disabled: player-default reset protection change failed");
+        return false;
+    }
+    target[0] = 0xE9;
+    *reinterpret_cast<LONG*>(target + 1) =
+        LONG(reinterpret_cast<unsigned char*>(&PlayerDefaultsResetDetour) - (target + 5));
+    target[5] = 0x90;
+    FlushInstructionCache(GetCurrentProcess(), target, sizeof(kPlayerDefaultsResetBytes));
+    DWORD ignored = 0;
+    VirtualProtect(target, sizeof(kPlayerDefaultsResetBytes), oldProtect, &ignored);
+    return true;
+}
+
 bool InstallMapLoadDetour()
 {
     g_gameModule = GetModuleHandleW(nullptr);
@@ -926,6 +1034,8 @@ bool InstallMapLoadDetour()
         Log(L"DIRECT_LAUNCH disabled: validated transition/New Game bootstrap bytes do not match");
         return false;
     }
+    if(!InstallPlayerDefaultsResetDetour())
+        return false;
     unsigned char* target = game + kMapLoadEntryRva;
     if(std::memcmp(target, kMapLoadEntryBytes, sizeof(kMapLoadEntryBytes)) != 0)
     {

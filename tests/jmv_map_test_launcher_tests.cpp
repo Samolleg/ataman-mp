@@ -18,6 +18,7 @@ private slots:
     void rejectsMalformedExistingWorldScript();
     void recognizesConfiguredJmvPluginSlot();
     void exposesTestRunsQuickAccessPath();
+    void isolatesPersistentSavesByProfileInstallation();
     void recoveryRemovesAutoexecCreatedByEndurance();
     void recoveryRestoresPreexistingAutoexec();
     void recoveryRemovesOwnedBridge();
@@ -98,6 +99,22 @@ void JmvMapTestLauncherTests::exposesTestRunsQuickAccessPath()
         QStandardPaths::AppLocalDataLocation)).filePath("test-runs");
     QCOMPARE(QDir::cleanPath(CJmvMapTestLauncher::testRunsRootPath()),
              QDir::cleanPath(expected));
+}
+
+void JmvMapTestLauncherTests::isolatesPersistentSavesByProfileInstallation()
+{
+    SResourceProfileEvaluation first;
+    first.profileId = "jamais-vu";
+    first.modRoot = "C:/Games/Evil Islands/Starter/MODS/JamaisVu135";
+    SResourceProfileEvaluation same = first;
+    SResourceProfileEvaluation other = first;
+    other.modRoot = "D:/Games/Evil Islands/Starter/MODS/JamaisVu135";
+
+    const QString firstPath = CJmvMapTestLauncher::testSavesPathForProfile(first);
+    QCOMPARE(CJmvMapTestLauncher::testSavesPathForProfile(same), firstPath);
+    QVERIFY(CJmvMapTestLauncher::testSavesPathForProfile(other) != firstPath);
+    QVERIFY(firstPath.contains("runtime-profiles"));
+    QVERIFY(firstPath.endsWith("saves"));
 }
 
 void JmvMapTestLauncherTests::injectsIntoExistingWorldScript()

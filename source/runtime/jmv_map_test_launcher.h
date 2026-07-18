@@ -38,6 +38,7 @@ public:
     void stop();
 
     static QString testRunsRootPath();
+    static QString testSavesPathForProfile(const SResourceProfileEvaluation& profile);
     static QString recoverInterruptedRuns();
     static bool injectWorldScriptBootstrap(const QString& script,
                                            const QString& commands,

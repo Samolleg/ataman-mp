@@ -124,6 +124,18 @@ QString normalized(const QString& path)
     return QDir::fromNativeSeparators(QFileInfo(path).absoluteFilePath());
 }
 
+QString persistentTestSavesPath(const SResourceProfileEvaluation& profile)
+{
+    const QByteArray identity = (profile.profileId.toLower() + "\n" +
+        normalized(profile.modRoot).toLower()).toUtf8();
+    const QString suffix = QString::fromLatin1(
+        QCryptographicHash::hash(identity, QCryptographicHash::Sha256).toHex().left(12));
+    QString profileName = profile.profileId.toLower();
+    profileName.replace(QRegularExpression("[^a-z0-9_-]+"), "-");
+    return QDir(QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation))
+        .filePath(QString("runtime-profiles/%1-%2/saves").arg(profileName, suffix));
+}
+
 bool removeIfOwned(const QString& path, const QString& expectedHash, QStringList* messages)
 {
     if(!QFileInfo::exists(path))
@@ -284,6 +296,11 @@ CJmvMapTestLauncher::~CJmvMapTestLauncher()
 QString CJmvMapTestLauncher::testRunsRootPath()
 {
     return testRunsRoot();
+}
+
+QString CJmvMapTestLauncher::testSavesPathForProfile(const SResourceProfileEvaluation& profile)
+{
+    return persistentTestSavesPath(profile);
 }
 
 bool CJmvMapTestLauncher::isRunning() const
@@ -505,7 +522,7 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
     m_manifestPath = QDir(m_runRoot).filePath("manifest.json");
     m_runLogPath = QDir(m_runRoot).filePath("runtime.log");
     m_bridgeResultPath = QDir(m_runRoot).filePath("bridge-result.log");
-    m_testSavesPath = QDir(m_runRoot).filePath("runtime-state/isolated-saves");
+    m_testSavesPath = testSavesPathForProfile(input.profile);
     m_liveMprPath = QDir(mapsDirectory).filePath(m_temporaryMapName + ".mpr");
     m_liveMobPath = QDir(mapsDirectory).filePath(m_temporaryMapName + ".mob");
     if(QFileInfo::exists(m_liveMprPath) || QFileInfo::exists(m_liveMobPath))
@@ -515,7 +532,7 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
     }
     if(!QDir().mkpath(m_runRoot) || !QDir().mkpath(m_testSavesPath))
     {
-        if(error) *error = "Could not create the disposable Endurance test-run directory.";
+        if(error) *error = "Could not create the Endurance test-run or persistent isolated-save directory.";
         return false;
     }
 
@@ -594,6 +611,7 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
     request.sessionSettings.insert("spawnX", input.spawn.position.x());
     request.sessionSettings.insert("spawnY", input.spawn.position.y());
     request.sessionSettings.insert("clearance", input.spawn.clearance);
+    request.sessionSettings.insert("unobstructed", input.spawn.unobstructed);
     request.logPath = m_runLogPath;
     request.resultPath = QDir(m_runRoot).filePath("result.json");
     QStringList requestErrors;
@@ -608,11 +626,11 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
     m_manifest.insert("temporaryMapName", m_temporaryMapName);
     m_manifest.insert("liveFiles", liveFiles);
     QJsonObject isolatedSaves;
-    isolatedSaves.insert("mode", "runtime-path-redirection");
+    isolatedSaves.insert("mode", "persistent-profile-runtime-path-redirection");
     isolatedSaves.insert("livePath", QDir(input.profile.modRoot).filePath("saves"));
     isolatedSaves.insert("testPath", m_testSavesPath);
     m_manifest.insert("isolatedSaves", isolatedSaves);
-    appendRunLog(QString("Prepared isolated JMV test saves path=%1; live saves remain untouched")
+    appendRunLog(QString("Prepared persistent profile-isolated JMV test saves path=%1; live saves remain untouched")
                  .arg(m_testSavesPath));
     appendRunLog(QString("Staged temporary map=%1 exit=%2 spawn=(%3,%4) clearance=%5")
                  .arg(m_temporaryMapName).arg(input.spawn.exitId)

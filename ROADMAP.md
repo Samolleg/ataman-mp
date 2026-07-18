@@ -133,6 +133,10 @@ path and must never fall back to the legacy rebuilding serializer.
 ## 0.2.0 release gate
 
 `0.1.0-alpha.58` is the immutable selected-zone/save-isolation test build.
+`0.2.0-alpha.1` moves the selected zone and entrance into the engine's New
+Game player record before transition, permits authored entrances when the
+editor's conservative clearance check cannot prove them clear, and persists
+profile-isolated test saves between launches. Runtime validation is pending.
 Publish the first immutable `0.2.0` package after the following runtime contract
 is demonstrated on normal gameplay, dungeon, and briefing maps.
 
@@ -148,7 +152,7 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
   - A completed main-menu map load does not prove UI/session initialization is
     finished on all hardware.
   - Observe a fingerprinted engine state; do not add another fixed delay.
-- [ ] Prove and enforce exactly one controlled player.
+- [x] Prove exactly one controlled player in the Alpha.58 runtime tests.
   - Alpha.58 removed temporary MOB script injection and now stages the exact
     validated in-memory MOB candidate.
   - Detect missing or duplicate controlled characters and fail clearly.
@@ -156,8 +160,9 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
   - Prefer the first hand-placed entrance center, including inactive entrances.
   - Ground- and collision-check it; use a nearby point inside the same entrance
     only when its center is blocked.
-  - Alpha.58 selects and records this entrance but final deployment is still
-    delegated to JMV and requires runtime proof.
+  - Alpha.58 selected and recorded the entrance but did not apply it.
+  - `0.2.0-alpha.1` writes the selected zone and entrance to the fingerprinted
+    New Game player record before transition; runtime proof is still required.
 - [ ] Validate or correct selected-zone session metadata.
   - Correct zone identity, minimap, music, and gameplay UI.
   - Prevent zone1 quest-log leakage. Use a blank test state when a meaningful
@@ -169,8 +174,10 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
   - Add explicit metadata for new maps that do not yet have a map-table entry.
 - [ ] Fully validate the isolated test-save namespace.
   - Live campaign saves must not appear in Save/Load.
-  - Create, enumerate, load, rename, and delete only below the run's
-    `runtime-state/isolated-saves` directory.
+  - Create, enumerate, load, rename, and delete only below the active runtime
+    profile's persistent AppData save directory.
+  - Preserve those isolated saves between Ctrl+F5 launches without exposing
+    the live mod save tree.
   - If any filesystem route bypasses redirection, disable Save/Load rather than
     exposing live saves.
 - [ ] Verify startup-movie suppression for root and active-mod movie paths.

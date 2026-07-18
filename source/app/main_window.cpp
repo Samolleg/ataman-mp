@@ -594,7 +594,7 @@ void MainWindow::launchCurrentMapTest()
     if(!spawn.valid)
     {
         QMessageBox::warning(this, tr("JMV test launch"),
-            tr("No sufficiently clear point exists inside any travel-zone deploy rectangle. Move blocking objects or choose another map before testing.\n\n%1").arg(spawn.reason));
+            tr("No deploy rectangle was found in the selected zone's map-table entrances. Endurance will not invent a player entrance.\n\n%1").arg(spawn.reason));
         return;
     }
     progress.setLabelText(tr("Validating the current in-memory map pair..."));
@@ -617,13 +617,16 @@ void MainWindow::launchCurrentMapTest()
         return;
     }
 
+    const QString entranceAssessment = spawn.unobstructed
+        ? tr("its checked clear point is (%1, %2)")
+              .arg(spawn.position.x(), 0, 'f', 2).arg(spawn.position.y(), 0, 'f', 2)
+        : tr("the editor could not prove that its center is clear, so the game will perform the final deployment");
     const QString confirmation = tr(
         "This experimental JMV-only test stages the exact current MPR/MOB pair, including unsaved in-memory edits, under a unique temporary name. After JMV completes its normal menu load, Endurance invokes the fingerprinted single-player New Game path on the game thread and supplies the staged pair. No console/server command or fixed delay is used.\n\n"
-        "JMV initializes one normal player through map-table zone %1. Endurance selected hand-placed entrance %2; its checked clear point is (%3, %4). The engine remains responsible for the final profile-specific deployment.\n\n"
-        "Source maps, JMV configuration, and live campaign saves are not changed. Every save/load path is redirected into this test run's private AppData folder for the lifetime of the launched game. Intro movies are hidden only for the test process. Returning to the menu or travelling away may use original installed maps; use Stop Test when finished.\n\nStart the direct JMV map test?")
-        .arg(entry.zoneId).arg(spawn.exitId).arg(spawn.position.x(), 0, 'f', 2)
-        .arg(spawn.position.y(), 0, 'f', 2);
-    constexpr int kMapTestWarningVersion = 2;
+        "JMV initializes one normal player through map-table zone %1 and hand-placed entrance %2; %3.\n\n"
+        "Source maps, JMV configuration, and live campaign saves are not changed. Every save/load path is redirected into a persistent profile-specific AppData folder shared by Endurance test runs. Intro movies are hidden only for the test process. Returning to the menu or travelling away may use original installed maps; use Stop Test when finished.\n\nStart the direct JMV map test?")
+        .arg(entry.zoneId).arg(spawn.exitId).arg(entranceAssessment);
+    constexpr int kMapTestWarningVersion = 3;
     COptInt* warningVersion = dynamic_cast<COptInt*>(
                 m_settings->opt(eOptSetGeneral, "mapTestWarningVersion"));
     if(!warningVersion || warningVersion->value() < kMapTestWarningVersion)

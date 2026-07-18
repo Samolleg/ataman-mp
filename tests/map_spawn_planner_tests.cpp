@@ -8,7 +8,7 @@ class MapSpawnPlannerTests : public QObject
 
 private slots:
     void avoidsBlockedCenter();
-    void rejectsFullyBlockedTravelZones();
+    void permitsAuthoredEntranceWhenEveryPointLooksBlocked();
     void fallsBackToAnotherTravelZone();
     void prefersFirstHandPlacedEntranceCenter();
     void keepsNearbyFallbackInsideFirstUsableEntrance();
@@ -39,14 +39,17 @@ void MapSpawnPlannerTests::avoidsBlockedCenter()
     QVERIFY(qSqrt(dx * dx + dy * dy) - obstacle.radius >= 1.0);
 }
 
-void MapSpawnPlannerTests::rejectsFullyBlockedTravelZones()
+void MapSpawnPlannerTests::permitsAuthoredEntranceWhenEveryPointLooksBlocked()
 {
     const SMapTravelZone travel = zone(1, QRectF(0.0, 0.0, 3.0, 3.0));
     SMapSpawnObstacle obstacle;
     obstacle.position = QPointF(1.5, 1.5);
     obstacle.radius = 10.0;
     const SMapSpawnPlan plan = CMapSpawnPlanner::choose({travel}, {obstacle});
-    QVERIFY(!plan.valid);
+    QVERIFY(plan.valid);
+    QVERIFY(!plan.unobstructed);
+    QCOMPARE(plan.exitId, 1);
+    QCOMPARE(plan.position, travel.spawnPoint());
     QVERIFY(!plan.reason.isEmpty());
 }
 
