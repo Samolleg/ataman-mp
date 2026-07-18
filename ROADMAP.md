@@ -135,8 +135,10 @@ path and must never fall back to the legacy rebuilding serializer.
 `0.1.0-alpha.58` is the immutable selected-zone/save-isolation test build.
 `0.2.0-alpha.1` moves the selected zone and entrance into the engine's New
 Game player record before transition, permits authored entrances when the
-editor's conservative clearance check cannot prove them clear, and persists
-profile-isolated test saves between launches. Runtime validation is pending.
+editor's conservative clearance check cannot prove them clear, and introduced
+profile-isolated test saves. Runtime testing subsequently rejected persistent
+Save/Load for temporary map instances; active Ctrl+F5 sessions will disable
+those commands instead.
 Publish the first immutable `0.2.0` package after the following runtime contract
 is demonstrated on normal gameplay, dungeon, and briefing maps.
 
@@ -159,30 +161,30 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
   - Alpha.58 removed temporary MOB script injection and now stages the exact
     validated in-memory MOB candidate.
   - Detect missing or duplicate controlled characters and fail clearly.
-- [ ] Apply the selected map-table entrance during runtime initialization.
+- [x] Apply the selected map-table entrance during runtime initialization.
   - Prefer the first hand-placed entrance center, including inactive entrances.
   - Ground- and collision-check it; use a nearby point inside the same entrance
     only when its center is blocked.
   - Alpha.58 selected and recorded the entrance but did not apply it.
   - `0.2.0-alpha.1` writes the selected zone and entrance to the fingerprinted
-    New Game player record before transition; runtime proof is still required.
-- [ ] Validate or correct selected-zone session metadata.
+    New Game player record before transition; runtime testing confirmed correct
+    entry behavior across the tested map set.
+- [x] Validate or correct selected-zone session metadata.
   - Correct zone identity, minimap, music, and gameplay UI.
   - Prevent zone1 quest-log leakage. Use a blank test state when a meaningful
     quest state cannot be constructed without a selected save.
   - Do not invent minimap/music/quest metadata for a new map silently.
-- [ ] Initialize briefing maps through their briefing path.
+- [x] Initialize briefing maps through their briefing path.
   - Read zone type from `map.txt` rather than assuming every staged pair is an
     ordinary gameplay zone.
   - Add explicit metadata for new maps that do not yet have a map-table entry.
-- [ ] Fully validate the isolated test-save namespace.
-  - Live campaign saves must not appear in Save/Load.
-  - Create, enumerate, load, rename, and delete only below the active runtime
-    profile's persistent AppData save directory.
-  - Preserve those isolated saves between Ctrl+F5 launches without exposing
-    the live mod save tree.
-  - If any filesystem route bypasses redirection, disable Save/Load rather than
-    exposing live saves.
+- [ ] Disable **Save** and **Load** after the staged map becomes active.
+  - The temporary map instance and its staged identity are valid only for one
+    Ctrl+F5 run; saves from an earlier run are deliberately unsupported.
+  - Disable the existing in-game actions using their normal disabled state,
+    alongside **Main Menu**. No replacement save namespace is required.
+  - Runtime evidence: loading a save associated with an earlier Ctrl+F5 run
+    crashed after the temporary map instance had been replaced.
 - [x] Verify startup-movie suppression for root and active-mod movie paths.
   - Alpha.58 hides `1c.bik` and `nival.bik` in-process without renaming them.
   - Preserve map-specific cutscenes; only startup movies are skipped by default.
@@ -195,7 +197,25 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
   - Normal JMV gameplay map.
   - Zone17/zone18 or another map that previously refused script injection.
   - Dungeon map and `bz` briefing map.
-  - `drawall`, traversal, isolated save/load, return/stop, and graceful exit.
+  - `drawall`, traversal, disabled Save/Load/Main Menu, return/stop, and graceful
+    exit.
+
+### Confirmed runtime behavior and research risks
+
+- [x] Confirm that the staged edited map remains mounted for the lifetime of a
+  single Ctrl+F5 run: travelling into a connected installed zone and returning
+  reloads the staged edited version with its changes intact.
+- [ ] Audit scripts that depend on exact zone IDs, primary MOB names, or
+  `Auto<zone>*.mob` naming/discovery.
+  - Determine whether the temporary map identity changes any script lookup or
+    supplemental-MOB behavior.
+  - Do not rewrite embedded scripts speculatively. First inventory concrete
+    zone/MOB-name references and prove which engine or addon lookup consumes
+    each one.
+  - Existing evidence is mixed but encouraging: location-first-entry scripts,
+    including the tested zone11 behavior, execute in instantiated maps.
+  - If redirection is required, prefer profile-scoped runtime lookup aliases
+    over destructive script text replacement.
 
 ### Implemented in Alpha.58, awaiting runtime confirmation
 
@@ -203,8 +223,10 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
   in-memory MOB. ([`1810546`](https://github.com/Ilufus/ei-mapper-endurance/commit/18105469f0b0f5cd46189824ca65dbdde3f3ce23))
 - [x] Substitute the selected `map.txt` zone during the normal New Game
   bootstrap. ([`1810546`](https://github.com/Ilufus/ei-mapper-endurance/commit/18105469f0b0f5cd46189824ca65dbdde3f3ce23))
-- [x] Redirect recognized runtime save filesystem operations to a retained
-  per-run AppData tree. ([`1810546`](https://github.com/Ilufus/ei-mapper-endurance/commit/18105469f0b0f5cd46189824ca65dbdde3f3ce23))
+- [x] Prototype redirecting recognized runtime save filesystem operations to a
+  retained AppData tree. Runtime testing rejected cross-run persistence for
+  temporary map identities; this is superseded by disabling Save/Load.
+  ([`1810546`](https://github.com/Ilufus/ei-mapper-endurance/commit/18105469f0b0f5cd46189824ca65dbdde3f3ce23))
 - [x] Suppress the two known startup movies without renaming live files.
   ([`1810546`](https://github.com/Ilufus/ei-mapper-endurance/commit/18105469f0b0f5cd46189824ca65dbdde3f3ce23))
 - [x] Show launch-preparation progress immediately and allow the safety warning
