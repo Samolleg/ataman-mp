@@ -86,6 +86,7 @@ MainWindow::MainWindow(QWidget* parent) :
     m_closeAfterTestStop(false),
     m_entranceCombo(nullptr),
     m_playFromHereButton(nullptr),
+    m_gotoEntranceButton(nullptr),
     m_godmodeCheckBox(nullptr),
     m_spawnPositionLabel(nullptr),
     m_borrowedMapIdentity(false),
@@ -453,8 +454,12 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event)
                     m_playFromHereButton->setChecked(false);
                     return true;
                 }
-                const QVector3D requested = m_pView->getTerrainPos(
-                    mouse->pos().x(), mouse->pos().y());
+                QVector3D requested;
+                if(!m_pView->terrainPositionAt(mouse->pos(), &requested))
+                {
+                    statusBar()->showMessage(tr("The terrain was not hit at that point. Pick visible terrain."), 5000);
+                    return true;
+                }
                 SMapSpawnPlan plan = CMapSpawnPlanner::chooseCustom(
                     QPointF(requested.x(), requested.y()), entrance->exitId,
                     mapTestObstacles());
@@ -584,6 +589,24 @@ void MainWindow::populateEntranceCombo()
     }
     else
         m_entranceCombo->setEnabled(true);
+    updateEntranceOverlays();
+}
+
+void MainWindow::updateEntranceOverlays()
+{
+    if(!m_pView)
+        return;
+    QVector<QRectF> rectangles;
+    QStringList labels;
+    for(const SMapTravelZone& entrance : m_validEntrances)
+    {
+        rectangles.append(entrance.deployRectangle.normalized());
+        labels.append(tr("Entrance %1").arg(entrance.exitId));
+    }
+    const int selected = m_entranceCombo ? m_entranceCombo->currentData().toInt() : -1;
+    m_pView->setTestEntranceOverlays(rectangles, labels, selected);
+    if(m_gotoEntranceButton)
+        m_gotoEntranceButton->setEnabled(selected >= 0 && selected < rectangles.size());
 }
 
 void MainWindow::refreshMapTestContext()
@@ -784,8 +807,11 @@ void MainWindow::createViewportToolbars()
     m_playFromHereButton->setText(tr("Play from Here"));
     m_playFromHereButton->setCheckable(true);
     m_playFromHereButton->setToolTip(tr("Pick a custom terrain spawn. The selected entrance still initializes zone metadata."));
+    m_gotoEntranceButton = new QToolButton(testBar);
+    m_gotoEntranceButton->setText(tr("Go to Entrance"));
+    m_gotoEntranceButton->setToolTip(tr("Centers the editor camera on the selected map.txt deploy area."));
     m_godmodeCheckBox = new QCheckBox(tr("Godmode"), testBar);
-    m_godmodeCheckBox->setToolTip(tr("For this test process, invoke @godmode(0,3) through a temporary hash-restored autoexec.cfg."));
+    m_godmodeCheckBox->setToolTip(tr("For this JMV test process, invoke GodMode(0,3) through a run-local lossless copy of SpellAddon's autorun MOB. The installed MOB is never changed."));
     if(COptBool* option = dynamic_cast<COptBool*>(m_settings->opt(eOptSetGeneral, "mapTestGodmode")))
         m_godmodeCheckBox->setChecked(option->value());
     m_spawnPositionLabel = new QLabel(tr("Entrance spawn"), testBar);
@@ -795,6 +821,7 @@ void MainWindow::createViewportToolbars()
     testLayout->addSpacing(8);
     testLayout->addWidget(new QLabel(tr("Entrance:"), testBar));
     testLayout->addWidget(m_entranceCombo, 1);
+    testLayout->addWidget(m_gotoEntranceButton);
     testLayout->addWidget(m_playFromHereButton);
     testLayout->addWidget(m_spawnPositionLabel);
     testLayout->addWidget(m_godmodeCheckBox);
@@ -860,7 +887,16 @@ void MainWindow::createViewportToolbars()
             chooseBorrowedMapIdentity();
         if(m_playFromHereButton->isChecked())
             m_playFromHereButton->setChecked(false);
+        updateEntranceOverlays();
         updateMapTestAction();
+    });
+    connect(m_gotoEntranceButton, &QToolButton::clicked, this, [this]()
+    {
+        const SMapTravelZone* entrance = selectedTravelZone();
+        if(!entrance || !m_pView)
+            return;
+        const QPointF center = entrance->spawnPoint();
+        m_pView->moveCameraToPoint(QVector3D(center.x(), center.y(), 0.0f));
     });
     connect(m_playFromHereButton, &QToolButton::toggled,
             this, &MainWindow::setCustomSpawnPicking);
@@ -883,6 +919,7 @@ void MainWindow::updateMapTestAction()
         m_mapTestAction->setEnabled(false);
         m_stopMapTestAction->setEnabled(true);
         if(m_entranceCombo) m_entranceCombo->setEnabled(false);
+        if(m_gotoEntranceButton) m_gotoEntranceButton->setEnabled(false);
         if(m_playFromHereButton) m_playFromHereButton->setEnabled(false);
         if(m_godmodeCheckBox) m_godmodeCheckBox->setEnabled(false);
         return;
@@ -904,6 +941,8 @@ void MainWindow::updateMapTestAction()
     if(m_entranceCombo)
         m_entranceCombo->setEnabled(hasPair &&
             (!m_validEntrances.isEmpty() || m_entranceCombo->findData(-1) >= 0));
+    if(m_gotoEntranceButton)
+        m_gotoEntranceButton->setEnabled(hasPair && hasEntrance);
     if(m_playFromHereButton) m_playFromHereButton->setEnabled(hasPair && hasEntrance);
     if(m_godmodeCheckBox) m_godmodeCheckBox->setEnabled(isJmv && hasPair);
     if(!isJmv && !isBaseProbe)
@@ -1130,12 +1169,33 @@ void MainWindow::connectUiButtons()
     CButtonConnector::getInstance()->addButton(EButtonOpRotate, m_ui->rotateButton);
     CButtonConnector::getInstance()->addButton(EButtonOpScale, m_ui->scaleButton);
     CButtonConnector::getInstance()->addButton(EButtonOpTilebrush, m_ui->tileBrushButton);
-    //disable buttons bcs operations works bad for mouse'moove' action without start point. op's starts work frommouse button position
-    m_ui->selectButton->setEnabled(false);
-    m_ui->moveButton->setEnabled(false);
-    m_ui->rotateButton->setEnabled(false);
-    m_ui->scaleButton->setEnabled(false);
-    m_ui->tileBrushButton->setEnabled(false);
+    connect(m_pView, &CView::selectionStateChanged,
+            this, &MainWindow::updateOperationAvailability);
+    updateOperationAvailability(false);
+}
+
+void MainWindow::updateOperationAvailability(bool hasSelection)
+{
+    const bool hasMob = m_pView && m_pView->hasActiveMob();
+    // Selection notifications can arrive while a batched tree/viewport update is
+    // still settling.  The view is the source of truth for toolbar and shortcut
+    // availability, so never leave the controls disabled because of a stale
+    // notification argument.
+    hasSelection = hasMob && m_pView->nSelectedNodes() > 0;
+    const bool hasMpr = CLandscape::getInstance()->isMprLoad();
+    const struct { EButtonOp type; QToolButton* button; bool enabled; } states[] = {
+        {EButtonOpSelect, m_ui->selectButton, hasMob},
+        {EButtonOpMove, m_ui->moveButton, hasMob && hasSelection},
+        {EButtonOpRotate, m_ui->rotateButton, hasMob && hasSelection},
+        {EButtonOpScale, m_ui->scaleButton, hasMob && hasSelection},
+        {EButtonOpTilebrush, m_ui->tileBrushButton, hasMpr}
+    };
+    for(const auto& state : states)
+    {
+        state.button->setEnabled(state.enabled);
+        if(QAction* action = m_operationActions.value(state.type, nullptr))
+            action->setEnabled(state.enabled);
+    }
 }
 
 bool MainWindow::isExitAllowed()
@@ -1450,6 +1510,7 @@ void MainWindow::updateWindowTitle(eTitleTypeData type, QString data)
         m_ui->actionOpen_MOB_Script->setEnabled(!data.isEmpty());
         m_externalScriptAction->setEnabled(!data.isEmpty());
         m_ui->actionCreate_new_object->setEnabled(!data.isEmpty());
+        updateOperationAvailability(m_pView && m_pView->nSelectedNodes() > 0);
         break;
     }
     case eTitleTypeData::eTitleTypeDataMpr:

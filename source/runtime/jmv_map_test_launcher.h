@@ -54,6 +54,12 @@ public:
                                          bool godmode,
                                          QJsonObject* manifest,
                                          QString* error = nullptr);
+    static bool prepareGodmodeBootstrap(const QStringList& mapDirectories,
+                                        const QString& runRoot,
+                                        bool godmode,
+                                        QJsonObject* manifest,
+                                        QString* outputPath,
+                                        QString* error = nullptr);
 
 signals:
     void testStarted(const QString& runId, const QString& temporaryMapName);

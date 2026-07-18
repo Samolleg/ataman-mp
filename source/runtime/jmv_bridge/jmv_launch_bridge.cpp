@@ -116,7 +116,9 @@ char g_sourceZone[128] = {};
 int g_targetExit = 0;
 wchar_t g_liveSaves[MAX_PATH * 4] = {};
 wchar_t g_testSaves[MAX_PATH * 4] = {};
+wchar_t g_godmodeMob[MAX_PATH * 4] = {};
 volatile LONG g_saveRedirectLogCount = 0;
+volatile LONG g_godmodeRedirectLogged = 0;
 volatile LONG g_introSkipMask = 0;
 int g_baseProbeLevel = 0;
 
@@ -409,6 +411,42 @@ bool ShouldSkipIntroA(LPCSTR path)
                                int(sizeof(wide) / sizeof(wide[0]))) && ShouldSkipIntroW(wide);
 }
 
+bool RewriteGodmodeMobW(LPCWSTR path, wchar_t* output, size_t capacity)
+{
+    if(!path || !output || !capacity || !g_godmodeMob[0])
+        return false;
+    const wchar_t* name = FileNamePart(path);
+    if(!name || _wcsicmp(name, L"AutoRunSpellAddon123.mob") != 0)
+        return false;
+    if(wcsncpy_s(output, capacity, g_godmodeMob, _TRUNCATE) != 0)
+        return false;
+    if(InterlockedCompareExchange(&g_godmodeRedirectLogged, 1, 0) == 0)
+    {
+        wchar_t message[1800]{};
+        _snwprintf_s(message, sizeof(message) / sizeof(message[0]), _TRUNCATE,
+                     L"GODMODE_BOOTSTRAP redirect from=\"%s\" to=\"%s\" command=GodMode(0,3)",
+                     path, output);
+        Log(message);
+    }
+    return true;
+}
+
+bool RewriteGodmodeMobA(LPCSTR path, char* output, size_t capacity)
+{
+    if(!path || !output || !capacity)
+        return false;
+    wchar_t wide[MAX_PATH * 4]{};
+    wchar_t rewritten[MAX_PATH * 4]{};
+    if(!MultiByteToWideChar(CP_ACP, 0, path, -1, wide,
+                            int(sizeof(wide) / sizeof(wide[0]))) ||
+       !RewriteGodmodeMobW(wide, rewritten,
+                           sizeof(rewritten) / sizeof(rewritten[0])))
+        return false;
+    BOOL substituted = FALSE;
+    return WideCharToMultiByte(CP_ACP, WC_NO_BEST_FIT_CHARS, rewritten, -1,
+                               output, int(capacity), nullptr, &substituted) != 0 && !substituted;
+}
+
 HANDLE WINAPI HookCreateFileW(LPCWSTR path, DWORD access, DWORD share,
                               LPSECURITY_ATTRIBUTES security, DWORD creation,
                               DWORD flags, HANDLE templateFile)
@@ -417,8 +455,8 @@ HANDLE WINAPI HookCreateFileW(LPCWSTR path, DWORD access, DWORD share,
     if(ShouldSkipIntroW(path))
         return INVALID_HANDLE_VALUE;
     wchar_t redirected[MAX_PATH * 4]{};
-    LPCWSTR selected = RewriteSavePathW(path, redirected, sizeof(redirected) / sizeof(redirected[0]))
-        ? redirected : path;
+    LPCWSTR selected = (RewriteGodmodeMobW(path, redirected, sizeof(redirected) / sizeof(redirected[0]))
+        || RewriteSavePathW(path, redirected, sizeof(redirected) / sizeof(redirected[0]))) ? redirected : path;
     HANDLE result = g_originalCreateFileW(selected, access, share, security, creation, flags, templateFile);
     const DWORD error = GetLastError();
     Observe(L"CreateFileW", path, reinterpret_cast<ULONG_PTR>(result), error, caller, access, creation);
@@ -434,7 +472,8 @@ HANDLE WINAPI HookCreateFileA(LPCSTR path, DWORD access, DWORD share,
     if(ShouldSkipIntroA(path))
         return INVALID_HANDLE_VALUE;
     char redirected[MAX_PATH * 4]{};
-    LPCSTR selected = RewriteSavePathA(path, redirected, sizeof(redirected)) ? redirected : path;
+    LPCSTR selected = (RewriteGodmodeMobA(path, redirected, sizeof(redirected))
+        || RewriteSavePathA(path, redirected, sizeof(redirected))) ? redirected : path;
     HANDLE result = g_originalCreateFileA(selected, access, share, security, creation, flags, templateFile);
     const DWORD error = GetLastError();
     if(path)
@@ -454,8 +493,8 @@ DWORD WINAPI HookGetFileAttributesW(LPCWSTR path)
     if(ShouldSkipIntroW(path))
         return INVALID_FILE_ATTRIBUTES;
     wchar_t redirected[MAX_PATH * 4]{};
-    LPCWSTR selected = RewriteSavePathW(path, redirected, sizeof(redirected) / sizeof(redirected[0]))
-        ? redirected : path;
+    LPCWSTR selected = (RewriteGodmodeMobW(path, redirected, sizeof(redirected) / sizeof(redirected[0]))
+        || RewriteSavePathW(path, redirected, sizeof(redirected) / sizeof(redirected[0]))) ? redirected : path;
     const DWORD result = g_originalGetFileAttributesW(selected);
     const DWORD error = GetLastError();
     Observe(L"GetFileAttributesW", path, result, error, caller);
@@ -469,7 +508,8 @@ DWORD WINAPI HookGetFileAttributesA(LPCSTR path)
     if(ShouldSkipIntroA(path))
         return INVALID_FILE_ATTRIBUTES;
     char redirected[MAX_PATH * 4]{};
-    LPCSTR selected = RewriteSavePathA(path, redirected, sizeof(redirected)) ? redirected : path;
+    LPCSTR selected = (RewriteGodmodeMobA(path, redirected, sizeof(redirected))
+        || RewriteSavePathA(path, redirected, sizeof(redirected))) ? redirected : path;
     const DWORD result = g_originalGetFileAttributesA(selected);
     const DWORD error = GetLastError();
     if(path)
@@ -728,6 +768,10 @@ bool ReadDirectLaunchPaths()
     wchar_t mob[MAX_PATH * 4]{};
     wchar_t sourceZone[128]{};
     wchar_t targetExit[16]{};
+    GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_GODMODE_MOB", g_godmodeMob,
+                            DWORD(sizeof(g_godmodeMob) / sizeof(g_godmodeMob[0])));
+    if(g_godmodeMob[0])
+        NormalizeSlashes(g_godmodeMob);
     if(!GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_TEMP_MPR", mpr,
                                 DWORD(sizeof(mpr) / sizeof(mpr[0]))) ||
        !GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_TEMP_MOB", mob,
@@ -1225,6 +1269,14 @@ extern "C" __declspec(dllexport) DWORD WINAPI EnduranceInitialize(void*)
 {
     return InitializeDirectLaunch() ? 1u : 0u;
 }
+
+// The Base owned-process injector resolves this export by its stable protocol
+// name. MSVC decorates x86 __stdcall exports unless an explicit alias is
+// supplied; Starter's plugin loader does not exercise this path, which is why
+// a stale/missing alias only surfaced in the Base probe.
+#if defined(_M_IX86)
+#pragma comment(linker, "/EXPORT:EnduranceInitialize=_EnduranceInitialize@4")
+#endif
 
 BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, void*)
 {

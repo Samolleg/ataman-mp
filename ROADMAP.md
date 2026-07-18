@@ -186,19 +186,32 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
   - Preserve `map.txt` source order and include inactive authored entrances.
   - Unregistered MPR identities are explicit, warned, and retained only for
     the currently loaded terrain.
-- [x] Add a collision-aware Play from Here picker and requested/resolved marker.
+- [x] Add a non-destructive collision-aware Play from Here picker and requested/resolved marker.
+  - `0.2.0-alpha.4` replaces the framebuffer/depth redraw picker that could
+    flicker and corrupt render state with a CPU ray/heightfield intersection.
   - Runtime position application remains gated on a fingerprinted post-ready
     adapter; the editor must not claim a custom coordinate was applied until
     the bridge reports it.
-- [x] Add temporary JMV Godmode delivery through owned `autoexec.cfg` state.
-  - Exactly `@godmode(0,3)` is appended, backed up atomically, hash checked,
-    and restored/removed on cleanup and interrupted-run recovery.
+- [ ] Validate temporary JMV Godmode delivery through a run-local SpellAddon
+  autorun MOB.
+  - Runtime testing proved that the safely installed temporary `autoexec.cfg`
+    was ignored. `0.2.0-alpha.4` instead losslessly patches a run-local copy of
+    `AutoRunSpellAddon123.mob` with `GodMode(0,3)` and redirects only the owned
+    test process. The installed autorun MOB remains untouched.
 - [x] Implement the exact-hash Base EI feasibility transport and four-level
   probe ladder. See [the static compatibility record](docs/base-runtime-probe.md).
   - Base is launched suspended by an editor-owned 32-bit helper; the run-local
     bridge initializes outside `DllMain` and resumes only after hash/byte guards.
   - Observation, pass-through, byte-identical redirect, and edited-state
     redirect results remain separate. General Base support is not claimed.
+  - `0.2.0-alpha.3` never entered the ladder because the packaged x86 bridge
+    exposed only the decorated initialization name. `alpha.4` exports the
+    stable protocol name; all four levels require a fresh runtime test.
+
+- [x] Visualize authored entrance deploy rectangles in the viewport and add
+  **Go to Entrance** camera navigation.
+  - Use the overlay to distinguish a wrong entrance ID from normal engine
+    placement within a deploy rectangle or an obstructed authored entrance.
 
 - [ ] Block **Main Menu** after the staged map becomes active.
   - The initial main menu remains part of bootstrap, so arm the restriction only

@@ -184,6 +184,8 @@ public:
                           QByteArray* output, CValidationReport* report = nullptr) const;
     bool replaceEmbeddedScript(const QString& script, QByteArray* output,
                                CValidationReport* report = nullptr) const;
+    bool embeddedScript(QString* script,
+                        CValidationReport* report = nullptr) const;
     bool duplicateObjectSubtree(const QString& objectPath,
                                 const QByteArray& expectedSubtreeSha256,
                                 QByteArray* output,

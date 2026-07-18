@@ -1470,6 +1470,54 @@ bool CMobDocument::replaceEmbeddedScript(const QString& script, QByteArray* outp
     return applyTransaction(transaction, output, report);
 }
 
+bool CMobDocument::embeddedScript(QString* script, CValidationReport* report) const
+{
+    if(!script)
+        return false;
+    script->clear();
+    QMap<QString, const SMobSection*> leaves;
+    collectLeafSections(m_sections, &leaves);
+    const SMobSection* scriptSection = nullptr;
+    for(auto it = leaves.constBegin(); it != leaves.constEnd(); ++it)
+    {
+        if(it.value()->type != MobScriptSection)
+            continue;
+        if(scriptSection)
+        {
+            if(report)
+                report->add("mob.script.multiple", EValidationSeverity::Error,
+                            "The MOB contains more than one encrypted script section");
+            return false;
+        }
+        scriptSection = it.value();
+    }
+    if(!scriptSection)
+    {
+        if(report)
+            report->add("mob.script.missing", EValidationSeverity::Error,
+                        "The MOB has no encrypted script section");
+        return false;
+    }
+    const QByteArray originalPayload = payload(*scriptSection);
+    if(originalPayload.size() < 4)
+        return false;
+    quint32 key = readU32(originalPayload, 0);
+    QByteArray decoded;
+    decoded.reserve(originalPayload.size() - 4);
+    for(int index = 4; index < originalPayload.size(); ++index)
+    {
+        quint32 temporaryKey = ((((key * 13) << 4) + key) << 8) - key;
+        key += (temporaryKey << 2) + 2531011;
+        temporaryKey = key >> 16;
+        decoded.append(char(originalPayload.at(index) ^ char(temporaryKey)));
+    }
+    QTextCodec* codec = QTextCodec::codecForName("Windows-1251");
+    if(!codec)
+        return false;
+    *script = codec->toUnicode(decoded);
+    return true;
+}
+
 static bool applyObjectSubtreeChange(const CMobDocument& document,
                                      const QString& objectPath,
                                      const QByteArray& expectedSubtreeSha256,

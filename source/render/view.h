@@ -11,6 +11,8 @@
 #include <QDateTime>
 #include <QHash>
 #include <QPointer>
+#include <QRectF>
+#include <QStringList>
 
 #include "types.h"
 #include "select_window.h"
@@ -87,9 +89,14 @@ public:
     void pickObject(const QRect& rect, bool bAddToSelect);
     QVector3D getTerrainPos(bool bLand = true);
     QVector3D getTerrainPos(const int cursorPosX, const int cursorPosY, bool bLand = true);
+    bool terrainPositionAt(const QPoint& viewportPosition, QVector3D* position);
     QPoint operationAnchor() const;
     void setTestSpawnMarker(const QVector3D& position, bool adjusted = false);
     void clearTestSpawnMarker();
+    void setTestEntranceOverlays(const QVector<QRectF>& rectangles,
+                                 const QStringList& labels,
+                                 int selectedIndex);
+    void moveCameraToPoint(const QVector3D& position);
     void changeOperation(EButtonOp type);
     void operationSetBackup(EOperationAxisType operationType);
     void operationRevert(EOperationAxisType operationType);
@@ -206,6 +213,7 @@ signals:
     void showOutlinerSignal(bool bShow);
     void mobScriptChanged(CMob* mob, const QString& displayScript);
     void externalMobScriptImported(CMob* mob, const QString& displayScript);
+    void selectionStateChanged(bool hasSelection);
 
 private:
     int m_height; //for redraw window
@@ -254,6 +262,9 @@ private:
     QVector3D m_testSpawnMarker;
     bool m_testSpawnMarkerValid;
     bool m_testSpawnMarkerAdjusted;
+    QVector<QRectF> m_testEntranceRectangles;
+    QStringList m_testEntranceLabels;
+    int m_selectedTestEntrance{-1};
 };
 
 #endif // MYGLWIDGET_H

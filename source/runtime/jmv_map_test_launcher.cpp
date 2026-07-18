@@ -66,6 +66,19 @@ bool atomicWrite(const QString& path, const QByteArray& bytes, QString* error)
     return true;
 }
 
+QString findCaseInsensitiveFile(const QStringList& directories,
+                                const QString& fileName)
+{
+    for(const QString& directory : directories)
+    {
+        const QFileInfoList files = QDir(directory).entryInfoList(QDir::Files | QDir::Readable);
+        for(const QFileInfo& file : files)
+            if(file.fileName().compare(fileName, Qt::CaseInsensitive) == 0)
+                return file.absoluteFilePath();
+    }
+    return QString();
+}
+
 bool processExists(qint64 pid)
 {
 #ifdef Q_OS_WIN
@@ -454,6 +467,64 @@ bool CJmvMapTestLauncher::prepareTemporaryAutoexec(const QString& engineDirector
     return true;
 }
 
+bool CJmvMapTestLauncher::prepareGodmodeBootstrap(
+    const QStringList& mapDirectories, const QString& runRoot,
+    bool godmode, QJsonObject* manifest, QString* outputPath, QString* error)
+{
+    if(outputPath)
+        outputPath->clear();
+    if(!godmode)
+        return true;
+    if(!manifest || !outputPath || runRoot.isEmpty())
+    {
+        if(error) *error = "Godmode bootstrap paths are incomplete.";
+        return false;
+    }
+    const QString sourcePath = findCaseInsensitiveFile(
+        mapDirectories, "AutoRunSpellAddon123.mob");
+    if(sourcePath.isEmpty())
+    {
+        if(error) *error = "JMV Godmode requires the profile's AutoRunSpellAddon123.mob.";
+        return false;
+    }
+    CMobDocument document;
+    CValidationReport report;
+    if(!document.load(QFileInfo(sourcePath), &report))
+    {
+        if(error) *error = "Could not validate the JMV autorun MOB:\n" + report.toText();
+        return false;
+    }
+    QString script;
+    if(!document.embeddedScript(&script, &report))
+    {
+        if(error) *error = "Could not read the JMV autorun script:\n" + report.toText();
+        return false;
+    }
+    const QString marker = "// EI Mapper Endurance owned Godmode bootstrap";
+    if(!script.endsWith('\n') && !script.isEmpty())
+        script.append("\r\n");
+    script.append(marker + "\r\nGodMode(0,3);\r\n");
+    QByteArray patched;
+    if(!document.replaceEmbeddedScript(script, &patched, &report))
+    {
+        if(error) *error = "Could not create the lossless Godmode autorun MOB:\n" + report.toText();
+        return false;
+    }
+    const QString ownedPath = QDir(runRoot).filePath("godmode/AutoRunSpellAddon123.mob");
+    if(!QDir().mkpath(QFileInfo(ownedPath).absolutePath())
+       || !atomicWrite(ownedPath, patched, error))
+        return false;
+    QJsonObject bootstrap;
+    bootstrap.insert("sourcePath", sourcePath);
+    bootstrap.insert("sourceSha256", fileSha256(sourcePath));
+    bootstrap.insert("path", ownedPath);
+    bootstrap.insert("sha256", sha256(patched));
+    bootstrap.insert("command", "GodMode(0,3)");
+    manifest->insert("godmodeBootstrap", bootstrap);
+    *outputPath = ownedPath;
+    return true;
+}
+
 bool CJmvMapTestLauncher::launch(const SJmvMapTestLaunchInput& input, QString* error)
 {
     if(isRunning())
@@ -526,6 +597,9 @@ bool CJmvMapTestLauncher::launch(const SJmvMapTestLaunchInput& input, QString* e
     environment.insert("EI_MAPPER_ENDURANCE_LIVE_SAVES", m_liveSavesPath);
     environment.insert("EI_MAPPER_ENDURANCE_TEST_SAVES", m_testSavesPath);
     environment.insert("EI_MAPPER_ENDURANCE_SKIP_INTROS", "1");
+    const QString godmodeBootstrapPath = m_manifest.value("godmodeBootstrapPath").toString();
+    if(!godmodeBootstrapPath.isEmpty())
+        environment.insert("EI_MAPPER_ENDURANCE_GODMODE_MOB", godmodeBootstrapPath);
     if(m_baseProbe)
         environment.insert("EI_MAPPER_ENDURANCE_BASE_PROBE_LEVEL",
                            QString::number(input.baseProbeLevel));
@@ -773,9 +847,13 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
     m_manifest.insert("createdUtc", QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
     m_manifest.insert("temporaryMapName", m_temporaryMapName);
     m_manifest.insert("liveFiles", liveFiles);
-    if(!prepareTemporaryAutoexec(m_engineDirectory, m_runRoot, input.godmode,
-                                 &m_manifest, error))
+    QString godmodeBootstrapPath;
+    if(isJmv && !prepareGodmodeBootstrap(input.profile.mapDirectories, m_runRoot,
+                                         input.godmode, &m_manifest,
+                                         &godmodeBootstrapPath, error))
         return false;
+    if(!godmodeBootstrapPath.isEmpty())
+        m_manifest.insert("godmodeBootstrapPath", godmodeBootstrapPath);
     QJsonObject isolatedSaves;
     isolatedSaves.insert("mode", "persistent-profile-runtime-path-redirection");
     isolatedSaves.insert("livePath", m_liveSavesPath);

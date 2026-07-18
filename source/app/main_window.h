@@ -74,6 +74,8 @@ private:
     void populateEntranceCombo();
     void chooseBorrowedMapIdentity();
     void setCustomSpawnPicking(bool enabled);
+    void updateEntranceOverlays();
+    void updateOperationAvailability(bool hasSelection = false);
     QVector<SMapSpawnObstacle> mapTestObstacles() const;
     const SMapTravelZone* selectedTravelZone() const;
     SResourceProfileEvaluation activeResourceProfile() const;
@@ -145,6 +147,7 @@ private:
     QMap<EButtonOp, QAction*> m_operationActions;
     QComboBox* m_entranceCombo;
     QToolButton* m_playFromHereButton;
+    QToolButton* m_gotoEntranceButton;
     QCheckBox* m_godmodeCheckBox;
     QLabel* m_spawnPositionLabel;
     SMapCatalogResult m_mapCatalog;

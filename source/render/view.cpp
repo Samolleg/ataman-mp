@@ -251,15 +251,56 @@ void CView::paintGL()
     makeCurrent();
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     draw();
-    if(m_testSpawnMarkerValid)
+    if(!m_testEntranceRectangles.isEmpty() || m_testSpawnMarkerValid)
     {
         const QRect viewport(0, 0, width(), height());
-        const QVector3D projected = m_testSpawnMarker.project(
-            m_cam->viewMatrix(), m_projection, viewport);
-        if(projected.z() >= 0.0f && projected.z() <= 1.0f)
+        const QMatrix4x4 view = m_cam->viewMatrix();
+        QPainter painter(this);
+        painter.setRenderHint(QPainter::Antialiasing);
+        for(int index = 0; index < m_testEntranceRectangles.size(); ++index)
         {
-            QPainter painter(this);
-            painter.setRenderHint(QPainter::Antialiasing);
+            const QRectF area = m_testEntranceRectangles.at(index).normalized();
+            const QPointF corners[] = {
+                area.topLeft(), area.topRight(), area.bottomRight(), area.bottomLeft()
+            };
+            QPolygonF polygon;
+            bool visible = true;
+            for(const QPointF& corner : corners)
+            {
+                QVector3D world(corner.x(), corner.y(), 0.0f);
+                if(!CLandscape::getInstance()->projectPt(world))
+                {
+                    visible = false;
+                    break;
+                }
+                world.setZ(world.z() + 0.15f);
+                const QVector3D projected = world.project(view, m_projection, viewport);
+                if(projected.z() < 0.0f || projected.z() > 1.0f)
+                {
+                    visible = false;
+                    break;
+                }
+                polygon << QPointF(projected.x(), height() - projected.y());
+            }
+            if(!visible || polygon.size() != 4)
+                continue;
+            const bool selected = index == m_selectedTestEntrance;
+            painter.setPen(QPen(selected ? QColor(255, 225, 70) : QColor(235, 190, 45),
+                                selected ? 3 : 1));
+            painter.setBrush(QColor(255, 205, 35, selected ? 95 : 50));
+            painter.drawPolygon(polygon);
+            painter.setPen(QPen(QColor(255, 245, 180), 1));
+            painter.drawText(polygon.boundingRect().adjusted(3, 3, -3, -3),
+                             Qt::AlignCenter | Qt::TextWordWrap,
+                             index < m_testEntranceLabels.size()
+                                 ? m_testEntranceLabels.at(index)
+                                 : QString::number(index + 1));
+        }
+        if(m_testSpawnMarkerValid)
+        {
+            const QVector3D projected = m_testSpawnMarker.project(view, m_projection, viewport);
+            if(projected.z() >= 0.0f && projected.z() <= 1.0f)
+            {
             QPen pen(m_testSpawnMarkerAdjusted ? QColor(255, 190, 50) : QColor(80, 255, 120));
             pen.setWidth(3);
             painter.setPen(pen);
@@ -267,6 +308,7 @@ void CView::paintGL()
             painter.drawEllipse(center, 8, 8);
             painter.drawLine(center + QPoint(-12, 0), center + QPoint(12, 0));
             painter.drawLine(center + QPoint(0, -12), center + QPoint(0, 12));
+            }
         }
     }
     //doneCurrent();
@@ -1750,6 +1792,7 @@ void CView::viewParameters()
     if(nullptr == m_activeMob)
     {
         m_tableManager->reset(); //clear table data if empty current mob
+        emit selectionStateChanged(false);
         return;
     }
 
@@ -1769,6 +1812,7 @@ void CView::viewParameters()
     if (aType.isEmpty())
     {//reset parameters if not selected objects
         m_tableManager->reset();
+        emit selectionStateChanged(false);
         return;
     }
 
@@ -1791,6 +1835,7 @@ void CView::viewParameters()
     }
 
     m_tableManager->setNewData(aProp);
+    emit selectionStateChanged(true);
 }
 
 void CView::onParamChange(const QSharedPointer<IPropertyBase>& prop)
@@ -2059,6 +2104,86 @@ void CView::clearTestSpawnMarker()
 {
     m_testSpawnMarkerValid = false;
     update();
+}
+
+void CView::setTestEntranceOverlays(const QVector<QRectF>& rectangles,
+                                    const QStringList& labels,
+                                    int selectedIndex)
+{
+    m_testEntranceRectangles = rectangles;
+    m_testEntranceLabels = labels;
+    m_selectedTestEntrance = selectedIndex;
+    update();
+}
+
+void CView::moveCameraToPoint(const QVector3D& position)
+{
+    QVector3D terrainPosition(position.x(), position.y(), 0.0f);
+    if(CLandscape::getInstance()->projectPt(terrainPosition))
+    {
+        m_cam->moveTo(terrainPosition);
+        update();
+    }
+}
+
+bool CView::terrainPositionAt(const QPoint& viewportPosition, QVector3D* position)
+{
+    if(!position || !m_pLand || !m_pLand->isMprLoad()
+       || !rect().contains(viewportPosition) || width() <= 0 || height() <= 0)
+        return false;
+
+    const QRect viewport(0, 0, width(), height());
+    const float screenY = float(height() - viewportPosition.y());
+    const QMatrix4x4 view = m_cam->viewMatrix();
+    const QVector3D rayStart = QVector3D(float(viewportPosition.x()), screenY, 0.0f)
+        .unproject(view, m_projection, viewport);
+    const QVector3D rayEnd = QVector3D(float(viewportPosition.x()), screenY, 1.0f)
+        .unproject(view, m_projection, viewport);
+
+    bool havePrevious = false;
+    float previousT = 0.0f;
+    float previousDelta = 0.0f;
+    constexpr int steps = 512;
+    for(int step = 0; step <= steps; ++step)
+    {
+        const float t = float(step) / float(steps);
+        const QVector3D rayPoint = rayStart + (rayEnd - rayStart) * t;
+        QVector3D terrain(rayPoint.x(), rayPoint.y(), 0.0f);
+        if(!CLandscape::getInstance()->projectPt(terrain))
+        {
+            havePrevious = false;
+            continue;
+        }
+        const float delta = rayPoint.z() - terrain.z();
+        if(havePrevious && previousDelta >= 0.0f && delta <= 0.0f)
+        {
+            float low = previousT;
+            float high = t;
+            QVector3D resolved = terrain;
+            for(int iteration = 0; iteration < 14; ++iteration)
+            {
+                const float middle = (low + high) * 0.5f;
+                const QVector3D sample = rayStart + (rayEnd - rayStart) * middle;
+                QVector3D ground(sample.x(), sample.y(), 0.0f);
+                if(!CLandscape::getInstance()->projectPt(ground))
+                {
+                    low = middle;
+                    continue;
+                }
+                resolved = ground;
+                if(sample.z() - ground.z() > 0.0f)
+                    low = middle;
+                else
+                    high = middle;
+            }
+            *position = resolved;
+            return true;
+        }
+        havePrevious = true;
+        previousT = t;
+        previousDelta = delta;
+    }
+    return false;
 }
 
 void CView::wheelEvent(QWheelEvent* event)
