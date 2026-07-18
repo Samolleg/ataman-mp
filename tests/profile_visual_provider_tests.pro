@@ -1,5 +1,4 @@
-QT += core testlib
-QT -= gui
+QT += core gui testlib
 CONFIG += testcase console c++11
 TEMPLATE = app
 TARGET = profile_visual_provider_tests
@@ -8,6 +7,7 @@ INCLUDEPATH += ../source/resources ../source/runtime ../source/runtime/providers
 SOURCES += \
     profile_visual_provider_tests.cpp \
     ../source/resources/profile_database.cpp \
+    ../source/runtime/unit_animation.cpp \
     ../source/runtime/profile_visual_provider.cpp \
     ../source/runtime/providers/profile_visual_resolver_support.cpp \
     ../source/runtime/providers/base_profile_visual_provider.cpp \

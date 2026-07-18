@@ -15,6 +15,8 @@ public:
         const QSharedPointer<const ei::SProfileDatabaseSnapshot>& database) const = 0;
     virtual QSharedPointer<IEquipmentLayoutResolver> equipmentResolver(
         const QSharedPointer<const ei::SProfileDatabaseSnapshot>& database) const = 0;
+    virtual QSharedPointer<IUnitAnimationResolver> animationResolver(
+        const QSharedPointer<const ei::SProfileDatabaseSnapshot>& database) const = 0;
 };
 
 class ProfileVisualProviderService
@@ -28,6 +30,10 @@ public:
         const QSharedPointer<const ei::SProfileDatabaseSnapshot>& database,
         QString* diagnostic = nullptr) const;
     QSharedPointer<IEquipmentLayoutResolver> equipmentResolver(
+        const QString& providerId,
+        const QSharedPointer<const ei::SProfileDatabaseSnapshot>& database,
+        QString* diagnostic = nullptr) const;
+    QSharedPointer<IUnitAnimationResolver> animationResolver(
         const QString& providerId,
         const QSharedPointer<const ei::SProfileDatabaseSnapshot>& database,
         QString* diagnostic = nullptr) const;

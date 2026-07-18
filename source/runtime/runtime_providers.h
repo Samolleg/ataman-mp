@@ -116,6 +116,23 @@ public:
                                            QJsonObject* equipmentLayout) const = 0;
 };
 
+struct SUnitAnimationRequest
+{
+    QString profileId;
+    QString runtimeManifestId;
+    QString model;
+    QStringList weapons;
+};
+
+class IUnitAnimationResolver
+{
+public:
+    virtual ~IUnitAnimationResolver() = default;
+    virtual QString providerId() const = 0;
+    virtual SRuntimeProviderResult resolve(const SUnitAnimationRequest& request,
+                                           QJsonObject* animation) const = 0;
+};
+
 class IPrototypeResolver
 {
 public:

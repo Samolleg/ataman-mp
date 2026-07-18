@@ -11,6 +11,8 @@ public:
         const QSharedPointer<const ei::SProfileDatabaseSnapshot>& database) const override;
     QSharedPointer<IEquipmentLayoutResolver> equipmentResolver(
         const QSharedPointer<const ei::SProfileDatabaseSnapshot>& database) const override;
+    QSharedPointer<IUnitAnimationResolver> animationResolver(
+        const QSharedPointer<const ei::SProfileDatabaseSnapshot>& database) const override;
 };
 
 #endif

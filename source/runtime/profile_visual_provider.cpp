@@ -51,3 +51,16 @@ QSharedPointer<IEquipmentLayoutResolver> ProfileVisualProviderService::equipment
     }
     return provider->equipmentResolver(database);
 }
+
+QSharedPointer<IUnitAnimationResolver> ProfileVisualProviderService::animationResolver(
+    const QString& providerId, const QSharedPointer<const ei::SProfileDatabaseSnapshot>& database,
+    QString* diagnostic) const
+{
+    const auto provider = m_providers.value(providerId.trimmed().toLower());
+    if(provider.isNull())
+    {
+        if(diagnostic) *diagnostic = "Unknown animation provider; no fallback was selected.";
+        return {};
+    }
+    return provider->animationResolver(database);
+}
