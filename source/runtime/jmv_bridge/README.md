@@ -1,4 +1,4 @@
-# JMV single-player transition probe
+# JMV single-player map-loader entry probe
 
 This x86 `.plg` is a temporary, telemetry-only provider for the fingerprinted
 JMV runtime stack. It is not loaded into EI Mapper itself. During a probe run
@@ -12,8 +12,10 @@ The provider verifies the exact approved `game.exe` hash and patches the
 already loaded modules' imports of `CreateFileA/W` and
 `GetFileAttributesA/W`. It records only `.mpr`, `.mob`, and `.mq` operations,
 including thread ID and a bounded module-relative call stack, in the run's
-`bridge-result.log`. Module bases are recorded so addresses can be reconciled
-offline.
+`bridge-result.log`. It also installs a byte-guarded entry probe at the normal
+single-player loader identified by the alpha.51 evidence. That probe records
+the loader's caller, owning controller, and three arguments without changing
+them. Module bases are recorded so addresses can be reconciled offline.
 
 The probe is deliberately passive:
 

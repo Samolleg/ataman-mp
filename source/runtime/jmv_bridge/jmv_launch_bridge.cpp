@@ -36,6 +36,48 @@ GetFileAttributesAFn g_originalGetFileAttributesA = nullptr;
 GetFileAttributesWFn g_originalGetFileAttributesW = nullptr;
 CaptureStackFn g_captureStack = nullptr;
 
+constexpr DWORD kMapLoadEntryRva = 0x00195480;
+constexpr unsigned char kMapLoadEntryBytes[6] = {
+    0x64, 0xA1, 0x00, 0x00, 0x00, 0x00
+};
+
+void* g_mapLoadTrampoline = nullptr;
+volatile LONG g_mapCaptureReady = 0;
+volatile DWORD g_mapCaptureThread = 0;
+volatile DWORD g_mapCaptureCaller = 0;
+volatile DWORD g_mapCaptureThis = 0;
+volatile DWORD g_mapCaptureArg1 = 0;
+volatile DWORD g_mapCaptureArg2 = 0;
+volatile DWORD g_mapCaptureArg3 = 0;
+
+__declspec(naked) void MapLoadEntryHook()
+{
+    __asm
+    {
+        pushfd
+        push eax
+        cmp dword ptr [g_mapCaptureReady], 0
+        jne capture_done
+        mov eax, dword ptr fs:[24h]
+        mov dword ptr [g_mapCaptureThread], eax
+        mov eax, dword ptr [esp+8]
+        mov dword ptr [g_mapCaptureCaller], eax
+        mov eax, ecx
+        mov dword ptr [g_mapCaptureThis], eax
+        mov eax, dword ptr [esp+0Ch]
+        mov dword ptr [g_mapCaptureArg1], eax
+        mov eax, dword ptr [esp+10h]
+        mov dword ptr [g_mapCaptureArg2], eax
+        mov eax, dword ptr [esp+14h]
+        mov dword ptr [g_mapCaptureArg3], eax
+        mov dword ptr [g_mapCaptureReady], 1
+capture_done:
+        pop eax
+        popfd
+        jmp dword ptr [g_mapLoadTrampoline]
+    }
+}
+
 const wchar_t* FileNamePart(const wchar_t* path)
 {
     if(!path)
@@ -382,6 +424,141 @@ int InstallFileObservationHooks()
     return patched;
 }
 
+bool ReadPlausibleAnsi(DWORD address, wchar_t* output, size_t capacity)
+{
+    if(!output || !capacity || !address)
+        return false;
+    output[0] = L'\0';
+    char text[1024]{};
+    size_t length = 0;
+    __try
+    {
+        MEMORY_BASIC_INFORMATION memory{};
+        if(VirtualQuery(reinterpret_cast<void*>(address), &memory, sizeof(memory)) != sizeof(memory) ||
+           memory.State != MEM_COMMIT || (memory.Protect & (PAGE_NOACCESS | PAGE_GUARD)))
+            return false;
+        const char* source = reinterpret_cast<const char*>(address);
+        for(; length + 1 < sizeof(text); ++length)
+        {
+            const unsigned char value = static_cast<unsigned char>(source[length]);
+            if(value == 0)
+                break;
+            if(value < 0x20 || value == 0x7F)
+                return false;
+            text[length] = static_cast<char>(value);
+        }
+        if(length == 0 || length + 1 >= sizeof(text))
+            return false;
+    }
+    __except(EXCEPTION_EXECUTE_HANDLER)
+    {
+        return false;
+    }
+    return MultiByteToWideChar(CP_ACP, 0, text, int(length), output,
+                               int(capacity - 1)) > 0;
+}
+
+void FormatMapArgument(DWORD value, wchar_t* output, size_t capacity)
+{
+    if(!output || !capacity)
+        return;
+    wchar_t text[1024]{};
+    if(value && ReadPlausibleAnsi(value, text, sizeof(text) / sizeof(text[0])))
+        _snwprintf_s(output, capacity, _TRUNCATE, L"0x%08lX=\"%s\"", value, text);
+    else
+        _snwprintf_s(output, capacity, _TRUNCATE, L"0x%08lX", value);
+}
+
+DWORD WINAPI MapCaptureWorker(void*)
+{
+    LONG sequence = 0;
+    for(;;)
+    {
+        if(InterlockedCompareExchange(&g_mapCaptureReady, 2, 1) == 1)
+        {
+            const DWORD thread = g_mapCaptureThread;
+            const DWORD caller = g_mapCaptureCaller;
+            const DWORD self = g_mapCaptureThis;
+            const DWORD arg1 = g_mapCaptureArg1;
+            const DWORD arg2 = g_mapCaptureArg2;
+            const DWORD arg3 = g_mapCaptureArg3;
+            InterlockedExchange(&g_mapCaptureReady, 0);
+
+            wchar_t arg1Text[1200]{};
+            wchar_t arg2Text[1200]{};
+            wchar_t arg3Text[1200]{};
+            FormatMapArgument(arg1, arg1Text, sizeof(arg1Text) / sizeof(arg1Text[0]));
+            FormatMapArgument(arg2, arg2Text, sizeof(arg2Text) / sizeof(arg2Text[0]));
+            FormatMapArgument(arg3, arg3Text, sizeof(arg3Text) / sizeof(arg3Text[0]));
+            wchar_t callerText[256]{};
+            FormatAddress(reinterpret_cast<void*>(caller), callerText,
+                          sizeof(callerText) / sizeof(callerText[0]));
+            wchar_t message[4096]{};
+            _snwprintf_s(message, sizeof(message) / sizeof(message[0]), _TRUNCATE,
+                         L"MAP_LOAD_ENTRY seq=%ld thread=%lu caller=%s this=0x%08lX arg1=%s arg2=%s arg3=%s",
+                         ++sequence, thread, callerText, self, arg1Text, arg2Text, arg3Text);
+            Log(message);
+        }
+        Sleep(10);
+    }
+}
+
+bool InstallMapLoadEntryProbe()
+{
+    auto* game = reinterpret_cast<unsigned char*>(GetModuleHandleW(nullptr));
+    if(!game)
+        return false;
+    unsigned char* target = game + kMapLoadEntryRva;
+    if(std::memcmp(target, kMapLoadEntryBytes, sizeof(kMapLoadEntryBytes)) != 0)
+    {
+        Log(L"MAP_LOAD_ENTRY disabled: validated entry bytes do not match");
+        return false;
+    }
+
+    auto* trampoline = static_cast<unsigned char*>(VirtualAlloc(nullptr, 16,
+        MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE));
+    if(!trampoline)
+    {
+        Log(L"MAP_LOAD_ENTRY disabled: trampoline allocation failed");
+        return false;
+    }
+    std::memcpy(trampoline, target, sizeof(kMapLoadEntryBytes));
+    trampoline[6] = 0xE9;
+    *reinterpret_cast<LONG*>(trampoline + 7) =
+        LONG((target + sizeof(kMapLoadEntryBytes)) - (trampoline + 11));
+    g_mapLoadTrampoline = trampoline;
+
+    DWORD oldProtect = 0;
+    if(!VirtualProtect(target, sizeof(kMapLoadEntryBytes), PAGE_EXECUTE_READWRITE, &oldProtect))
+    {
+        VirtualFree(trampoline, 0, MEM_RELEASE);
+        g_mapLoadTrampoline = nullptr;
+        Log(L"MAP_LOAD_ENTRY disabled: entry protection change failed");
+        return false;
+    }
+    target[0] = 0xE9;
+    *reinterpret_cast<LONG*>(target + 1) =
+        LONG(reinterpret_cast<unsigned char*>(&MapLoadEntryHook) - (target + 5));
+    target[5] = 0x90;
+    FlushInstructionCache(GetCurrentProcess(), target, sizeof(kMapLoadEntryBytes));
+    DWORD ignored = 0;
+    VirtualProtect(target, sizeof(kMapLoadEntryBytes), oldProtect, &ignored);
+
+    HANDLE worker = CreateThread(nullptr, 0, &MapCaptureWorker, nullptr, 0, nullptr);
+    if(!worker)
+    {
+        Log(L"MAP_LOAD_ENTRY warning: hook installed but telemetry worker failed");
+        return false;
+    }
+    CloseHandle(worker);
+    wchar_t message[256]{};
+    _snwprintf_s(message, sizeof(message) / sizeof(message[0]), _TRUNCATE,
+                 L"MAP_LOAD_ENTRY active address=0x%08lX mode=observe-only",
+                 DWORD(reinterpret_cast<uintptr_t>(target)));
+    Log(message);
+    return true;
+}
+
 bool InitializeProbe()
 {
     if(InterlockedCompareExchange(&g_initialized, 1, 0) != 0)
@@ -390,19 +567,21 @@ bool InitializeProbe()
                             DWORD(sizeof(g_resultPath) / sizeof(g_resultPath[0])));
     if(!g_resultPath[0])
         return false;
-    Log(L"EI Mapper Endurance JMV single-player transition probe initializing");
+    Log(L"EI Mapper Endurance JMV single-player map-loader entry probe initializing");
     if(!VerifyRuntime())
     {
         Log(L"TRANSITION_PROBE disabled: game.exe SHA-256 does not match the validated JMV runtime");
         return false;
     }
     const int patched = InstallFileObservationHooks();
+    const bool mapEntryProbe = InstallMapLoadEntryProbe();
     wchar_t message[256]{};
     _snwprintf_s(message, sizeof(message) / sizeof(message[0]), _TRUNCATE,
-                 L"TRANSITION_PROBE active imports=%d stack_capture=%s mode=observe-only commands=none redirects=none",
-                 patched, g_captureStack ? L"available" : L"unavailable");
+                 L"TRANSITION_PROBE active imports=%d stack_capture=%s map_entry=%s mode=observe-only commands=none redirects=none",
+                 patched, g_captureStack ? L"available" : L"unavailable",
+                 mapEntryProbe ? L"available" : L"unavailable");
     Log(message);
-    return patched > 0;
+    return patched > 0 && mapEntryProbe;
 }
 }
 

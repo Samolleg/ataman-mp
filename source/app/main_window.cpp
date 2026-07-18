@@ -197,8 +197,8 @@ MainWindow::MainWindow(QWidget* parent) :
     connect(m_mapTestLauncher, &CJmvMapTestLauncher::testStarted, this,
             [this](const QString& runId, const QString& mapName)
     {
-        ei::log(eLogInfo, QString("JMV transition probe started run:%1 staged-map:%2").arg(runId, mapName));
-        statusBar()->showMessage(tr("JMV transition probe is recording. Start New Game or travel normally, then exit the game."));
+        ei::log(eLogInfo, QString("JMV map-loader entry probe started run:%1 staged-map:%2").arg(runId, mapName));
+        statusBar()->showMessage(tr("JMV map-loader entry probe is recording. Start New Game or travel normally, then exit the game."));
         updateMapTestAction();
     });
     connect(m_mapTestLauncher, &CJmvMapTestLauncher::testFinished, this,
@@ -206,7 +206,7 @@ MainWindow::MainWindow(QWidget* parent) :
     {
         ei::log(eLogInfo, QString("JMV test launch finished run:%1 exit:%2 cleanup:%3")
                 .arg(runId).arg(exitCode).arg(cleanupMessage));
-        statusBar()->showMessage(tr("JMV transition probe finished (exit code %1). Probe files were cleaned up.").arg(exitCode), 8000);
+        statusBar()->showMessage(tr("JMV map-loader entry probe finished (exit code %1). Probe files were cleaned up.").arg(exitCode), 8000);
         updateMapTestAction();
         if(m_closeAfterTestStop)
         {
@@ -467,11 +467,11 @@ void MainWindow::updateMapTestAction()
             && m_pView->mobs().size() == 1 && CLandscape::getInstance()->isMprLoad();
     m_mapTestAction->setEnabled(isJmv && hasPair);
     if(!isJmv)
-        m_mapTestAction->setToolTip(tr("The transition probe is currently a JMV-only diagnostic capability."));
+        m_mapTestAction->setToolTip(tr("The map-loader entry probe is currently a JMV-only diagnostic capability."));
     else if(!hasPair)
-        m_mapTestAction->setToolTip(tr("Load one MPR and exactly one active MOB before recording a JMV transition probe."));
+        m_mapTestAction->setToolTip(tr("Load one MPR and exactly one active MOB before recording a JMV map-loader entry probe."));
     else
-        m_mapTestAction->setToolTip(tr("Launches JMV with an observe-only probe. Start New Game or travel normally to record the engine transition path (Ctrl+F5)."));
+        m_mapTestAction->setToolTip(tr("Launches JMV with an observe-only map-loader entry probe. Start New Game or travel normally to record its arguments (Ctrl+F5)."));
 }
 
 void MainWindow::launchCurrentMapTest()
@@ -586,13 +586,13 @@ void MainWindow::launchCurrentMapTest()
     }
 
     const QString confirmation = tr(
-        "This diagnostic build does not launch the editor map yet. Endurance will temporarily fill JMV's configured and otherwise empty plugin.dll slot with a fingerprinted, observe-only transition probe. It records MPR/MOB/MQ file activity and engine call-stack addresses while you use JMV normally. It sends no game command and redirects no file.\n\n"
+        "This diagnostic build does not launch the editor map yet. Endurance will temporarily fill JMV's configured and otherwise empty plugin.dll slot with a fingerprinted, observe-only map-loader entry probe. It records the normal single-player loader's owner, caller, thread, and arguments alongside MPR/MOB/MQ file activity. It sends no game command and redirects no file.\n\n"
         "After JMV reaches the main menu, start New Game and enter a map normally. If convenient, also travel to another zone. Then exit the game normally and return the run's bridge-result.log.\n\n"
         "The already validated staging step still creates hash-owned temporary copies for run correlation, but the probe does not load them. Source maps and JMV configuration are not changed; temporary files are deleted after exit.\n\n"
-        "Future test target: travel exit %1 at (%2, %3), verified clearance %4.\n\nStart the transition probe?")
+        "Future test target: travel exit %1 at (%2, %3), verified clearance %4.\n\nStart the map-loader entry probe?")
         .arg(spawn.exitId).arg(spawn.position.x(), 0, 'f', 2)
         .arg(spawn.position.y(), 0, 'f', 2).arg(spawn.clearance, 0, 'f', 2);
-    if(QMessageBox::question(this, tr("JMV single-player transition probe"), confirmation,
+    if(QMessageBox::question(this, tr("JMV map-loader entry probe"), confirmation,
                              QMessageBox::Yes | QMessageBox::Cancel) != QMessageBox::Yes)
         return;
 

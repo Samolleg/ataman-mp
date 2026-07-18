@@ -487,6 +487,16 @@ MOB editing does not imply that landscape saving is supported.
   path before direct launch development resumes.
 - [x] `0.1.0-alpha.51`: add reliable immediate-caller telemetry after the first
   alpha.50 run captured the complete file sequence but empty optional stacks.
+  The focused run exited normally with code 0 and captured the same engine
+  chain for main menu, New Game into `zone1`, travel into `zone7`, and return
+  to the menu. Static reconciliation identifies `game.exe+0x00195480` as the
+  normal three-argument single-player map-loader entry on the approved JMV
+  runtime.
+- [x] `0.1.0-alpha.52`: add a fingerprint- and byte-guarded, observe-only entry
+  probe for `game.exe+0x00195480`. It records the owning game-controller
+  pointer, caller, thread, and three raw/string arguments for each normal map
+  transition. It still issues no command and performs no redirect; this is the
+  final signature/lifecycle gate before implementing the staged-map call.
 - [x] `0.1.0-alpha.41`: redo-safe raw provenance and the July 17 multi-edit/UI
   fixes passed owner testing and were handed to the closed tester group.
   ([`db3fa31`](https://github.com/Ilufus/ei-mapper-endurance/commit/db3fa31))
