@@ -392,7 +392,20 @@ bool CJmvMapTestLauncher::injectWorldScriptBootstrap(const QString& script,
                 *error = "WorldScript is present but is not followed by an opening parenthesis.";
             return false;
         }
-        *output = script.left(open + 1) + "\n" + commands.trimmed() + "\n" + script.mid(open + 1);
+        // JMV's autorun MOB deliberately begins WorldScript with a short
+        // Sleep while the player/party record is registered. Running
+        // SetCPFast or GodMode before that point is a silent no-op. Preserve
+        // the source delay and insert immediately after it when present.
+        int insertion = open + 1;
+        const QString body = script.mid(insertion);
+        const QRegularExpression leadingDelay(
+            "^\\s*Sleep\\s*\\([^\\)]*\\)",
+            QRegularExpression::CaseInsensitiveOption);
+        const QRegularExpressionMatch delay = leadingDelay.match(body);
+        if(delay.hasMatch())
+            insertion += delay.capturedEnd();
+        *output = script.left(insertion) + "\n" + commands.trimmed()
+            + "\n" + script.mid(insertion);
         return true;
     }
     if(state == State::String || state == State::BlockComment)

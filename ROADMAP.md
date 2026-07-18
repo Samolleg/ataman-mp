@@ -101,6 +101,13 @@ path and must never fall back to the legacy rebuilding serializer.
 
 ## Lossless MPR/SEC foundation
 
+Isolated implementation status: `feature/landscape-editing` has clean commits
+`201b3ff` (lossless archive document) and `195e469` (canonical terrain lattice
+and undoable sculpt-command foundation). Its focused suite passes 38/38 and a
+copied 8-Base/32-JMV corpus round-trips byte-identically. These commits are not
+merged; packed-normal recalculation and renderer/UI integration remain the
+next gate, and changed landscape saving remains disabled.
+
 - [ ] Preserve untouched archive members, internal names, member order,
   timestamps/metadata, alignment, unknown entries, and original MP/SEC
   namespaces.
@@ -189,7 +196,8 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
 - [x] Add a non-destructive collision-aware Play from Here picker and requested/resolved marker.
   - `0.2.0-alpha.4` replaces the framebuffer/depth redraw picker that could
     flicker and corrupt render state with a CPU ray/heightfield intersection.
-  - `0.2.0-alpha.9` restores the established P behavior after corpus review:
+  - Source after alpha.8 restores the established P behavior after corpus review
+    (held for the next combined test build; no alpha.9 package was published):
     selecting a Radius unit and pressing P inserts a new first patrol point and
     changes the behavior to Path. Any dormant stored route is preserved and
     becomes visible; it is not silently reused or replaced.
@@ -209,6 +217,10 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
   - Alpha.6 proved the redirect happened but the appended command did not run.
     Alpha.7 injects both spawn placement and Godmode at the beginning of the
     existing `WorldScript` body, before early returns or `KillScript` paths.
+  - Current run logs prove the redirected autorun MOB is opened, but its
+    commands were inserted before the MOB's own leading initialization delay.
+    Current source preserves that delay and injects `SetCPFast`/`GodMode`
+    immediately after it. Runtime confirmation is still required.
 - [x] Implement the exact-hash Base EI feasibility transport and four-level
   probe ladder. See [the static compatibility record](docs/base-runtime-probe.md).
   - Base is launched suspended by an editor-owned 32-bit helper; the run-local
@@ -233,10 +245,23 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
   - Alpha.7 corrects label texture orientation, locks the authored entrance
     selector while a custom entrance is active, and makes Go to Entrance focus
     either the selected authored entrance or the custom anchor.
+  - Current source isolates custom-entrance clicks from object selection, lets
+    the transient hero marker be selected and moved with G, maps Delete to
+    Clear entrance, and renders the selected authored entrance in green only
+    while no custom marker is active. This remains unnumbered pending the next
+    combined test build.
+  - Runtime evidence from zone1 and zone2 proved the engine player record uses
+    a zero-based entrance-array index, not the one-based `#exit` ID. Current
+    source translates ID to index explicitly; this is the focused fix for
+    Entrance 1 selecting Entrance 2 and the final entrance falling out of
+    range.
 
 - [x] Make profile context explicit and safe to change.
   - The active editing profile appears in the window title and is preselected
     in Game and Mod Setup.
+  - Current source prevents the setup dialog's initial focus change from
+    silently recommending and selecting the first valid profile over the
+    configured profile.
   - Switching Base/JMV profiles closes loaded documents first so resource-backed
     scene state cannot survive into the new profile.
 
@@ -332,6 +357,10 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
 
 ## 0.2.1: JMV hot reload and test-session continuity
 
+- [x] Define a versioned, hash-carrying hot-reload request schema that rejects
+  payloads outside the Endurance-owned test-run directory. Runtime consumption
+  remains disabled until game-thread teardown/reload is proven.
+
 - [ ] Make repeated Ctrl+F5 hot-reload the Endurance-owned game process.
   - Validate and restage the exact current in-memory pair.
   - Request teardown/reload on the verified game thread without restarting JMV.
@@ -369,7 +398,12 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
   - Store them under `collections/` by default.
   - Prefer profile/map-root-relative references and report unresolved paths
     together before opening.
-  - Stretch: edit/reorder a collection without loading the complete set.
+  - Current source implements the UTF-8 `key=value` v1 document, ordered MOB
+    list, create/edit/open/save/save-as UI, grouped missing-reference errors,
+    browser population, and explicit refresh. It is held for the next combined
+    build while deterministic multi-MOB test loading remains unfinished.
+  - Edit/reorder without loading is included in the editor dialog rather than
+    deferred.
 - [x] Add the hideable **Maps and Collections** browser with a `map.txt`-based
   Maps MVP and customizable Ctrl+Space shortcut. ([`a8e1ac7`](https://github.com/Ilufus/ei-mapper-endurance/commit/a8e1ac7), [`d86188f`](https://github.com/Ilufus/ei-mapper-endurance/commit/d86188f))
 
@@ -396,6 +430,14 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
   active MOB script. ([`a8e1ac7`](https://github.com/Ilufus/ei-mapper-endurance/commit/a8e1ac7))
 
 ## 0.2.x: resources, appearance, and performance
+
+Isolated implementation status: profile-correct visuals are under active
+runtime correction. `feature/humanoid-equipment` is clean at `7dcdfac`; the
+cumulative equipment/idle-animation line reached `b38d7b4` with 13/13 visual
+provider tests and 12/12 animation tests before the current corpus correction
+pass. Nothing is merged. Known remaining classes include striped equipment
+materials, non-humanoid empty-mask handling, weapon duplication, missing model
+parts/textures, standing-idle selection, dragon wings, and large-map progress.
 
 - [ ] Complete cancellable asynchronous RES indexing, MOB parsing, and CPU
   decoding while keeping OpenGL creation in bounded GUI-thread batches.

@@ -53,6 +53,8 @@
 #include "jmv_map_test_launcher.h"
 #include "resource_profile.h"
 #include "endurance_document.h"
+#include "collection_document.h"
+#include "collection_editor_dialog.h"
 
 void testFunc()
 {
@@ -115,6 +117,10 @@ MainWindow::MainWindow(QWidget* parent) :
     viewMenu->addAction(m_mapsDock->toggleViewAction());
     connect(m_mapsBrowser, &CMapsBrowser::openMapRequested,
             this, &MainWindow::openMapPair);
+    connect(m_mapsBrowser, &CMapsBrowser::openCollectionRequested,
+            this, &MainWindow::openCollection);
+    connect(m_mapsBrowser, &CMapsBrowser::refreshRequested,
+            this, [this]() { refreshMapsBrowser(); refreshMapTestContext(); });
     m_externalScriptAction = new QAction(tr("Open MOB Script in External Editor"), this);
     m_ui->menuEdit->addAction(m_externalScriptAction);
     connect(m_externalScriptAction, &QAction::triggered, this, [this]()
@@ -125,6 +131,25 @@ MainWindow::MainWindow(QWidget* parent) :
     m_recentFilesMenu = new QMenu(tr("Open Recent"), this);
     m_ui->menuFile->insertMenu(m_ui->actionOpen_recent, m_recentFilesMenu);
     m_ui->actionCreate_new_object->setEnabled(false);
+
+    QMenu* collectionMenu = m_ui->menuFile->addMenu(tr("Collections"));
+    QAction* newCollectionAction = collectionMenu->addAction(tr("New Collection..."));
+    QAction* openCollectionAction = collectionMenu->addAction(tr("Open Collection..."));
+    QAction* editCollectionAction = collectionMenu->addAction(tr("Edit Collection..."));
+    collectionMenu->addSeparator();
+    QAction* saveCollectionAction = collectionMenu->addAction(tr("Save Collection"));
+    QAction* saveCollectionAsAction = collectionMenu->addAction(tr("Save Collection As..."));
+    connect(newCollectionAction, &QAction::triggered, this, &MainWindow::newCollection);
+    connect(openCollectionAction, &QAction::triggered, this, [this]()
+    {
+        QDir().mkpath(CCollectionDocument::defaultDirectory());
+        const QString path = QFileDialog::getOpenFileName(this, tr("Open Collection"),
+            CCollectionDocument::defaultDirectory(), tr("Endurance Collection (*.collection)"));
+        if(!path.isEmpty()) openCollection(path);
+    });
+    connect(editCollectionAction, &QAction::triggered, this, &MainWindow::editCollection);
+    connect(saveCollectionAction, &QAction::triggered, this, [this]() { saveCollection(false); });
+    connect(saveCollectionAsAction, &QAction::triggered, this, [this]() { saveCollection(true); });
 
     QAction* openBackupFolder = new QAction(tr("Open Backup Folder"), this);
     QAction* openLogsFolder = new QAction(tr("Open Logs Folder"), this);
@@ -433,6 +458,40 @@ void MainWindow::runUndoToIndex(int targetIndex)
 
 bool MainWindow::eventFilter(QObject* watched, QEvent* event)
 {
+    if(m_pView && watched == m_pView && m_suppressSpawnRelease
+       && event->type() == QEvent::MouseButtonRelease)
+    {
+        m_suppressSpawnRelease = false;
+        return true;
+    }
+    if(m_pView && watched == m_pView && m_customSpawn.valid && !m_pickSpawnPending)
+    {
+        if(event->type() == QEvent::KeyPress && m_customSpawnSelected)
+        {
+            QKeyEvent* key = static_cast<QKeyEvent*>(event);
+            if(key->key() == Qt::Key_Delete)
+            {
+                m_playFromHereButton->setChecked(false);
+                return true;
+            }
+        }
+        if(event->type() == QEvent::MouseButtonPress)
+        {
+            QMouseEvent* mouse = static_cast<QMouseEvent*>(event);
+            if(mouse->button() == Qt::LeftButton)
+            {
+                const bool hit = m_pView->testSpawnMarkerAt(mouse->pos());
+                m_customSpawnSelected = hit;
+                m_pView->setTestSpawnMarkerSelected(hit);
+                updateOperationAvailability();
+                if(hit)
+                {
+                    m_suppressSpawnRelease = true;
+                    return true;
+                }
+            }
+        }
+    }
     if(m_pView && watched == m_pView && m_pickSpawnPending)
     {
         if(event->type() == QEvent::KeyPress)
@@ -440,7 +499,22 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event)
             QKeyEvent* key = static_cast<QKeyEvent*>(event);
             if(key->key() == Qt::Key_Escape)
             {
-                m_playFromHereButton->setChecked(false);
+                if(m_movingCustomSpawn)
+                {
+                    m_pickSpawnPending = false;
+                    m_movingCustomSpawn = false;
+                    m_customSpawnSelected = true;
+                    m_pView->unsetCursor();
+                    m_pView->setTestSpawnMarker(m_customSpawnPosition,
+                                                m_customSpawn.adjusted);
+                    m_pView->setTestSpawnMarkerSelected(true);
+                    updateCustomSpawnControls();
+                    updateEntranceOverlays();
+                    updateOperationAvailability();
+                    updateMapTestAction();
+                }
+                else
+                    m_playFromHereButton->setChecked(false);
                 return true;
             }
         }
@@ -482,13 +556,19 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event)
                 m_customSpawn = plan;
                 m_customSpawnPosition = resolved;
                 m_pickSpawnPending = false;
+                m_movingCustomSpawn = false;
+                m_customSpawnSelected = true;
+                m_suppressSpawnRelease = true;
                 m_pView->unsetCursor();
                 m_pView->setTestSpawnMarker(resolved, plan.adjusted);
+                m_pView->setTestSpawnMarkerSelected(true);
                 m_spawnPositionLabel->setText(tr("Custom: %1, %2, %3%4")
                     .arg(resolved.x(), 0, 'f', 2).arg(resolved.y(), 0, 'f', 2)
                     .arg(resolved.z(), 0, 'f', 2)
                     .arg(plan.adjusted ? tr(" (adjusted)") : QString()));
                 updateCustomSpawnControls();
+                updateEntranceOverlays();
+                updateOperationAvailability();
                 updateMapTestAction();
                 return true;
             }
@@ -625,7 +705,8 @@ void MainWindow::updateEntranceOverlays()
                 .arg(entrance.destinationZoneId)
                 .arg(entrance.destinationExitId));
     }
-    const int selected = m_entranceCombo ? m_entranceCombo->currentData().toInt() : -1;
+    const int selected = (m_customSpawn.valid && m_customSpawn.custom) ? -1
+        : (m_entranceCombo ? m_entranceCombo->currentData().toInt() : -1);
     m_pView->setTestEntranceOverlays(rectangles, labels, selected);
     updateCustomSpawnControls();
 }
@@ -635,6 +716,8 @@ void MainWindow::refreshMapTestContext()
     m_mapTestEntry = SMapCatalogEntry();
     m_borrowedMapIdentity = false;
     m_customSpawn = SMapSpawnPlan();
+    m_movingCustomSpawn = false;
+    m_customSpawnSelected = false;
     if(m_pView)
         m_pView->clearTestSpawnMarker();
     if(m_playFromHereButton)
@@ -722,6 +805,8 @@ void MainWindow::setCustomSpawnPicking(bool enabled)
     if(!m_pView || !enabled)
     {
         m_pickSpawnPending = false;
+        m_movingCustomSpawn = false;
+        m_customSpawnSelected = false;
         m_customSpawn = SMapSpawnPlan();
         if(m_pView)
         {
@@ -731,6 +816,8 @@ void MainWindow::setCustomSpawnPicking(bool enabled)
         if(m_spawnPositionLabel)
             m_spawnPositionLabel->setText(tr("Entrance spawn"));
         updateCustomSpawnControls();
+        updateEntranceOverlays();
+        updateOperationAvailability();
         updateMapTestAction();
         return;
     }
@@ -743,11 +830,15 @@ void MainWindow::setCustomSpawnPicking(bool enabled)
     }
     m_pView->cancelPendingOperation();
     m_pickSpawnPending = true;
+    m_movingCustomSpawn = false;
+    m_customSpawnSelected = false;
     m_customSpawn = SMapSpawnPlan();
     m_pView->setCursor(Qt::CrossCursor);
     m_pView->setFocus();
     m_spawnPositionLabel->setText(tr("Click terrain (Esc cancels)"));
     updateCustomSpawnControls();
+    updateEntranceOverlays();
+    updateOperationAvailability();
     updateMapTestAction();
 }
 
@@ -755,8 +846,9 @@ void MainWindow::updateCustomSpawnControls()
 {
     const bool customActive = m_customSpawn.valid && m_customSpawn.custom;
     if(m_playFromHereButton)
-        m_playFromHereButton->setText(customActive ? tr("Clear entrance")
-                                                   : (m_pickSpawnPending ? tr("Cancel Play from Here")
+        m_playFromHereButton->setText(customActive && !m_pickSpawnPending ? tr("Clear entrance")
+                                                   : (m_pickSpawnPending ? (m_movingCustomSpawn
+                                                       ? tr("Cancel Move Entrance") : tr("Cancel Play from Here"))
                                                                          : tr("Play from Here")));
     if(m_entranceCombo && (!m_mapTestLauncher || !m_mapTestLauncher->isRunning()))
         m_entranceCombo->setEnabled(!customActive && !m_pickSpawnPending
@@ -911,6 +1003,20 @@ void MainWindow::createViewportToolbars()
         {
             if(!m_pView)
                 return;
+            if(operation.type == EButtonOpMove && m_customSpawnSelected
+               && m_customSpawn.valid && m_customSpawn.custom)
+            {
+                m_pView->cancelPendingOperation();
+                m_pickSpawnPending = true;
+                m_movingCustomSpawn = true;
+                m_pView->setCursor(Qt::CrossCursor);
+                m_pView->setFocus();
+                m_spawnPositionLabel->setText(tr("Click terrain to move entrance (Esc cancels)"));
+                updateCustomSpawnControls();
+                updateEntranceOverlays();
+                updateMapTestAction();
+                return;
+            }
             if(operation.type == EButtonOpSelect)
             {
                 if(m_pickSpawnPending && m_playFromHereButton)
@@ -986,7 +1092,8 @@ void MainWindow::updateMapTestAction()
     // provider. Base keeps the picker unavailable until it has an equivalent
     // exact-hash runtime position provider.
     const bool customRequested = m_playFromHereButton && m_playFromHereButton->isChecked();
-    const bool customReady = !customRequested || (isJmv && m_customSpawn.valid);
+    const bool customReady = !customRequested
+        || (isJmv && m_customSpawn.valid && !m_pickSpawnPending);
     const bool profileReady = (isJmv || isBaseProbe) && profile.valid
         && profile.runtimeStackValidated;
     m_mapTestAction->setEnabled(profileReady && hasPair && hasEntrance && customReady);
@@ -1192,7 +1299,173 @@ void MainWindow::refreshMapsBrowser()
         resources = option->value();
     if(COptStringList* option = dynamic_cast<COptStringList*>(m_settings->opt(eOptSetResource, "mapRoots")))
         maps = option->value();
-    m_mapsBrowser->refresh(resources, maps);
+    QDir().mkpath(CCollectionDocument::defaultDirectory());
+    m_mapsBrowser->refresh(resources, maps, CCollectionDocument::defaultDirectory());
+}
+
+QVector<QString> MainWindow::activeMapRoots() const
+{
+    if(COptStringList* option = dynamic_cast<COptStringList*>(
+           m_settings->opt(eOptSetResource, "mapRoots")))
+        return option->value();
+    return QVector<QString>();
+}
+
+void MainWindow::openCollection(const QString& path)
+{
+    SEnduranceCollection document;
+    QString error;
+    if(!CCollectionDocument::load(path, &document, &error))
+    {
+        QMessageBox::warning(this, tr("Open Collection"), error);
+        return;
+    }
+    const SResolvedCollection resolved = CCollectionDocument::resolve(document, activeMapRoots());
+    if(!resolved.isValid())
+    {
+        QMessageBox::warning(this, tr("Open Collection"),
+            tr("These collection references could not be resolved:\n\n%1")
+                .arg(resolved.errors.join('\n')));
+        return;
+    }
+    const QString profileId = activeResourceProfile().profileId;
+    if(!document.profileId.isEmpty()
+       && document.profileId.compare(profileId, Qt::CaseInsensitive) != 0
+       && QMessageBox::warning(this, tr("Collection profile"),
+            tr("This collection was saved for profile '%1', while '%2' is active. "
+               "Opening it will not switch resources automatically. Continue?")
+                .arg(document.profileId, profileId),
+            QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes)
+        return;
+    if(!isExitAllowed())
+        return;
+    m_undoStack->clear();
+    m_pView->unloadMob("");
+    m_pView->unloadLand();
+    m_openedMapZoneId = document.mapZoneId;
+    m_currentCollectionPath = QFileInfo(path).absoluteFilePath();
+    m_pView->loadLandscape(QFileInfo(resolved.mprPath));
+    for(const QString& mobPath : resolved.mobPaths)
+    {
+        QFileInfo mob(mobPath);
+        m_pView->loadMob(mob);
+        rememberRecentFile(mob);
+    }
+    rememberRecentFile(QFileInfo(resolved.mprPath));
+    refreshMapTestContext();
+    ei::log(eLogInfo, QString("Opened collection path:%1 map:%2 mpr:%3 mobs:%4")
+        .arg(path, document.mapZoneId, resolved.mprPath)
+        .arg(resolved.mobPaths.size()));
+}
+
+void MainWindow::newCollection()
+{
+    SEnduranceCollection initial;
+    initial.profileId = activeResourceProfile().profileId;
+    initial.mapZoneId = m_mapTestEntry.zoneId;
+    initial.name = m_mapTestEntry.zoneId.isEmpty() ? tr("New collection")
+                                                   : m_mapTestEntry.zoneId;
+    if(CLandscape::getInstance()->isMprLoad())
+        initial.mprReference = CLandscape::getInstance()->filePath().absoluteFilePath();
+    if(m_pView)
+        for(CMob* mob : m_pView->mobs())
+            if(mob) initial.mobReferences.append(mob->filePath().absoluteFilePath());
+    CCollectionEditorDialog dialog(initial, m_mapCatalog.entries, this);
+    if(dialog.exec() != QDialog::Accepted)
+        return;
+    QDir().mkpath(CCollectionDocument::defaultDirectory());
+    QString suggested = dialog.collection().name;
+    suggested.replace(QRegularExpression("[^A-Za-z0-9_.-]+"), "-");
+    const QString path = QFileDialog::getSaveFileName(this, tr("Save Collection"),
+        QDir(CCollectionDocument::defaultDirectory()).filePath(suggested + ".collection"),
+        tr("Endurance Collection (*.collection)"));
+    if(path.isEmpty())
+        return;
+    SEnduranceCollection value = dialog.collection();
+    value.mprReference = CCollectionDocument::portableReference(
+        value.mprReference, path, activeMapRoots());
+    for(QString& mob : value.mobReferences)
+        mob = CCollectionDocument::portableReference(mob, path, activeMapRoots());
+    QString error;
+    if(!CCollectionDocument::save(path, value, &error))
+        QMessageBox::warning(this, tr("Save Collection"), error);
+    else
+    {
+        m_currentCollectionPath = QFileInfo(path).absoluteFilePath();
+        refreshMapsBrowser();
+    }
+}
+
+void MainWindow::editCollection()
+{
+    QDir().mkpath(CCollectionDocument::defaultDirectory());
+    const QString path = QFileDialog::getOpenFileName(this, tr("Edit Collection"),
+        m_currentCollectionPath.isEmpty() ? CCollectionDocument::defaultDirectory()
+                                          : m_currentCollectionPath,
+        tr("Endurance Collection (*.collection)"));
+    if(path.isEmpty()) return;
+    SEnduranceCollection value;
+    QString error;
+    if(!CCollectionDocument::load(path, &value, &error))
+    {
+        QMessageBox::warning(this, tr("Edit Collection"), error);
+        return;
+    }
+    const SResolvedCollection resolved = CCollectionDocument::resolve(value, activeMapRoots());
+    if(!resolved.mprPath.isEmpty()) value.mprReference = resolved.mprPath;
+    if(resolved.mobPaths.size() == value.mobReferences.size())
+        value.mobReferences = resolved.mobPaths;
+    CCollectionEditorDialog dialog(value, m_mapCatalog.entries, this);
+    if(dialog.exec() != QDialog::Accepted) return;
+    value = dialog.collection();
+    value.mprReference = CCollectionDocument::portableReference(
+        value.mprReference, path, activeMapRoots());
+    for(QString& mob : value.mobReferences)
+        mob = CCollectionDocument::portableReference(mob, path, activeMapRoots());
+    if(!CCollectionDocument::save(path, value, &error))
+        QMessageBox::warning(this, tr("Edit Collection"), error);
+    else
+    {
+        m_currentCollectionPath = QFileInfo(path).absoluteFilePath();
+        refreshMapsBrowser();
+    }
+}
+
+void MainWindow::saveCollection(bool saveAs)
+{
+    if(!m_pView || !CLandscape::getInstance()->isMprLoad() || m_pView->mobs().isEmpty())
+    {
+        QMessageBox::warning(this, tr("Save Collection"),
+            tr("Load one MPR and at least one MOB first."));
+        return;
+    }
+    QString path = saveAs ? QString() : m_currentCollectionPath;
+    if(path.isEmpty())
+    {
+        QDir().mkpath(CCollectionDocument::defaultDirectory());
+        path = QFileDialog::getSaveFileName(this, tr("Save Collection As"),
+            CCollectionDocument::defaultDirectory(), tr("Endurance Collection (*.collection)"));
+    }
+    if(path.isEmpty()) return;
+    if(!path.endsWith(".collection", Qt::CaseInsensitive)) path += ".collection";
+    SEnduranceCollection value;
+    value.name = QFileInfo(path).completeBaseName();
+    value.profileId = activeResourceProfile().profileId;
+    value.mapZoneId = m_mapTestEntry.zoneId;
+    value.mprReference = CCollectionDocument::portableReference(
+        CLandscape::getInstance()->filePath().absoluteFilePath(), path, activeMapRoots());
+    for(CMob* mob : m_pView->mobs())
+        if(mob) value.mobReferences.append(CCollectionDocument::portableReference(
+            mob->filePath().absoluteFilePath(), path, activeMapRoots()));
+    QString error;
+    if(!CCollectionDocument::save(path, value, &error))
+        QMessageBox::warning(this, tr("Save Collection"), error);
+    else
+    {
+        m_currentCollectionPath = QFileInfo(path).absoluteFilePath();
+        refreshMapsBrowser();
+        statusBar()->showMessage(tr("Collection saved: %1").arg(path), 5000);
+    }
 }
 
 void MainWindow::openMapPair(const QString& mprPath, const QString& mobPath,
@@ -1211,6 +1484,7 @@ void MainWindow::openMapPair(const QString& mprPath, const QString& mobPath,
     m_pView->unloadMob("");
     m_pView->unloadLand();
     m_openedMapZoneId = zoneId;
+    m_currentCollectionPath.clear();
     m_pView->loadLandscape(QFileInfo(mprPath));
     QFileInfo mobFile(mobPath);
     m_pView->loadMob(mobFile);
@@ -1251,9 +1525,11 @@ void MainWindow::updateOperationAvailability(bool hasSelection)
     // notification argument.
     hasSelection = hasMob && m_pView->nSelectedNodes() > 0;
     const bool hasMpr = CLandscape::getInstance()->isMprLoad();
+    const bool hasMovableSelection = (hasMob && hasSelection)
+        || (m_customSpawnSelected && m_customSpawn.valid && m_customSpawn.custom);
     const struct { EButtonOp type; QToolButton* button; bool enabled; } states[] = {
         {EButtonOpSelect, m_ui->selectButton, hasMob},
-        {EButtonOpMove, m_ui->moveButton, hasMob && hasSelection},
+        {EButtonOpMove, m_ui->moveButton, hasMovableSelection},
         {EButtonOpRotate, m_ui->rotateButton, hasMob && hasSelection},
         {EButtonOpScale, m_ui->scaleButton, hasMob && hasSelection},
         {EButtonOpTilebrush, m_ui->tileBrushButton, hasMpr}

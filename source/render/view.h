@@ -93,6 +93,8 @@ public:
     bool terrainPositionAt(const QPoint& viewportPosition, QVector3D* position);
     QPoint operationAnchor() const;
     void setTestSpawnMarker(const QVector3D& position, bool adjusted = false);
+    void setTestSpawnMarkerSelected(bool selected);
+    bool testSpawnMarkerAt(const QPoint& viewportPosition, int tolerance = 18) const;
     void clearTestSpawnMarker();
     void setTestEntranceOverlays(const QVector<QRectF>& rectangles,
                                  const QStringList& labels,
@@ -264,6 +266,7 @@ private:
     QVector3D m_testSpawnMarker;
     bool m_testSpawnMarkerValid;
     bool m_testSpawnMarkerAdjusted;
+    bool m_testSpawnMarkerSelected{false};
     QVector<QRectF> m_testEntranceRectangles;
     QStringList m_testEntranceLabels;
     QVector<QImage> m_testEntranceLabelImages;

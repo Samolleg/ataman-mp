@@ -8,6 +8,7 @@
 
 class QLabel;
 class QLineEdit;
+class QPushButton;
 class QTreeWidget;
 class QTreeWidgetItem;
 
@@ -17,10 +18,13 @@ class CMapsBrowser : public QWidget
 
 public:
     explicit CMapsBrowser(QWidget* parent = nullptr);
-    void refresh(const QVector<QString>& resourceRoots, const QVector<QString>& mapRoots);
+    void refresh(const QVector<QString>& resourceRoots, const QVector<QString>& mapRoots,
+                 const QString& collectionsRoot);
 
 signals:
     void openMapRequested(QString mprPath, QString mobPath, QString zoneId);
+    void openCollectionRequested(QString path);
+    void refreshRequested();
 
 private slots:
     void applyFilter(const QString& text);
@@ -32,7 +36,9 @@ private:
     QLineEdit* m_filter;
     QTreeWidget* m_tree;
     QLabel* m_status;
+    QPushButton* m_refresh;
     QVector<SMapCatalogEntry> m_entries;
+    QStringList m_collectionPaths;
 };
 
 #endif // MAPS_BROWSER_H

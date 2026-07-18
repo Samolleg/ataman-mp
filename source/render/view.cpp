@@ -327,13 +327,13 @@ void CView::drawTestOverlaysOpenGl()
 
         const bool selected = index == m_selectedTestEntrance;
         m_program.setUniformValue("customColor",
-            selected ? QVector4D(1.0f, 0.80f, 0.14f, 0.37f)
+            selected ? QVector4D(0.20f, 1.0f, 0.38f, 0.37f)
                      : QVector4D(0.92f, 0.70f, 0.12f, 0.20f));
         m_program.setAttributeArray(position, vertices.constData());
         glDrawArrays(GL_TRIANGLE_FAN, 0, vertices.size());
 
         m_program.setUniformValue("customColor",
-            selected ? QVector4D(1.0f, 0.90f, 0.28f, 0.95f)
+            selected ? QVector4D(0.38f, 1.0f, 0.50f, 0.95f)
                      : QVector4D(0.92f, 0.75f, 0.18f, 0.80f));
         glLineWidth(selected ? 3.0f : 1.0f);
         glDrawArrays(GL_LINE_LOOP, 0, vertices.size());
@@ -406,8 +406,9 @@ void CView::drawTestOverlaysOpenGl()
         m_program.setUniformValue("u_viewMmatrix", m_cam->viewMatrix());
         m_program.setUniformValue("u_projMmatrix", m_projection);
         m_program.setUniformValue("customColor",
-            m_testSpawnMarkerAdjusted ? QVector4D(1.0f, 0.67f, 0.18f, 0.82f)
-                                      : QVector4D(0.31f, 1.0f, 0.47f, 0.72f));
+            m_testSpawnMarkerSelected ? QVector4D(0.92f, 1.0f, 0.32f, 1.0f)
+            : m_testSpawnMarkerAdjusted ? QVector4D(1.0f, 0.67f, 0.18f, 0.82f)
+                                        : QVector4D(0.31f, 1.0f, 0.47f, 0.72f));
         glEnable(GL_DEPTH_TEST);
         glLineWidth(3.0f);
         QVector<QVector3D> figure;
@@ -2247,9 +2248,33 @@ void CView::setTestSpawnMarker(const QVector3D& position, bool adjusted)
     update();
 }
 
+void CView::setTestSpawnMarkerSelected(bool selected)
+{
+    m_testSpawnMarkerSelected = m_testSpawnMarkerValid && selected;
+    update();
+}
+
+bool CView::testSpawnMarkerAt(const QPoint& viewportPosition, int tolerance) const
+{
+    if(!m_testSpawnMarkerValid || !m_cam || width() <= 0 || height() <= 0)
+        return false;
+    const QVector3D marker = QVector3D(m_testSpawnMarker.x(), m_testSpawnMarker.y(),
+                                       m_testSpawnMarker.z() + 1.0f).project(
+        m_cam->viewMatrix(), m_projection, QRect(0, 0, width(), height()));
+    if(marker.z() < 0.0f || marker.z() > 1.0f)
+        return false;
+    // QVector3D::project uses the OpenGL bottom-left viewport origin, while
+    // QMouseEvent positions use Qt's top-left widget origin.
+    const QPointF markerInWidget(marker.x(), height() - marker.y());
+    const QPointF delta = markerInWidget - viewportPosition;
+    return delta.x() * delta.x() + delta.y() * delta.y()
+        <= double(tolerance * tolerance);
+}
+
 void CView::clearTestSpawnMarker()
 {
     m_testSpawnMarkerValid = false;
+    m_testSpawnMarkerSelected = false;
     update();
 }
 

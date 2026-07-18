@@ -15,6 +15,7 @@ class JmvMapTestLauncherTests : public QObject
 private slots:
     void initTestCase();
     void injectsIntoExistingWorldScript();
+    void injectsAfterLeadingWorldScriptDelay();
     void ignoresWorldScriptInStringsAndComments();
     void rejectsMalformedExistingWorldScript();
     void injectsActualAutorunRuntimeBootstrap();
@@ -169,6 +170,21 @@ void JmvMapTestLauncherTests::injectsIntoExistingWorldScript()
     QVERIFY2(CJmvMapTestLauncher::injectWorldScriptBootstrap(
                  source, "ConsoleString(\"test\")", &output, &error), qPrintable(error));
     QVERIFY(output.contains("WorldScript(\nConsoleString(\"test\")\n\nConsoleString(\"original\")"));
+}
+
+void JmvMapTestLauncherTests::injectsAfterLeadingWorldScriptDelay()
+{
+    const QString source = "WorldScript(\n  Sleep( 2 )\n  ConsoleString(\"original\")\n)\n";
+    QString output;
+    QString error;
+    QVERIFY2(CJmvMapTestLauncher::injectWorldScriptBootstrap(
+        source, "GodMode(0,3);", &output, &error), qPrintable(error));
+    const int delay = output.indexOf("Sleep( 2 )");
+    const int command = output.indexOf("GodMode(0,3);");
+    const int original = output.indexOf("ConsoleString(\"original\")");
+    QVERIFY(delay >= 0);
+    QVERIFY(command > delay);
+    QVERIFY(original > command);
 }
 
 void JmvMapTestLauncherTests::ignoresWorldScriptInStringsAndComments()

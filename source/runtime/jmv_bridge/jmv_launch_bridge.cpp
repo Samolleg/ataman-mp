@@ -113,7 +113,8 @@ void* g_zoneTransitionController = nullptr;
 char g_temporaryMpr[MAX_PATH * 4] = {};
 char g_temporaryMob[MAX_PATH * 4] = {};
 char g_sourceZone[128] = {};
-int g_targetExit = 0;
+int g_targetExit = -1;
+int g_targetExitId = 0;
 wchar_t g_liveSaves[MAX_PATH * 4] = {};
 wchar_t g_testSaves[MAX_PATH * 4] = {};
 wchar_t g_godmodeMob[MAX_PATH * 4] = {};
@@ -797,7 +798,12 @@ bool ReadDirectLaunchPaths()
         Log(L"DIRECT_LAUNCH disabled: selected map-table entrance is invalid");
         return false;
     }
-    g_targetExit = int(parsedExit);
+    // map.txt exposes human-facing #exit IDs beginning at one, while the
+    // player-default record stores the zero-based entrance array index. Passing
+    // the ID unchanged selected the following entrance and made the final one
+    // fall out of range (observed in both zone1 and zone2).
+    g_targetExitId = int(parsedExit);
+    g_targetExit = g_targetExitId - 1;
     NormalizeSlashes(g_liveSaves);
     NormalizeSlashes(g_testSaves);
     while(std::wcslen(g_liveSaves) > 3 &&
@@ -823,8 +829,8 @@ bool ReadDirectLaunchPaths()
     }
     wchar_t message[1800]{};
     _snwprintf_s(message, sizeof(message) / sizeof(message[0]), _TRUNCATE,
-                 L"DIRECT_LAUNCH profile zone=\"%s\" entrance=%d isolated_saves=\"%s\" live_saves_protected=\"%s\"",
-                 sourceZone, g_targetExit, g_testSaves, g_liveSaves);
+                 L"DIRECT_LAUNCH profile zone=\"%s\" entrance_id=%d entrance_index=%d isolated_saves=\"%s\" live_saves_protected=\"%s\"",
+                 sourceZone, g_targetExitId, g_targetExit, g_testSaves, g_liveSaves);
     Log(message);
     return true;
 }
@@ -867,7 +873,7 @@ void __fastcall PlayerDefaultsResetDetour(void* self, void*)
 {
     g_originalPlayerDefaultsReset(self);
     if(InterlockedCompareExchange(&g_directLaunchState, 0, 0) != 3 ||
-       !g_gameModule || !g_sourceZone[0] || g_targetExit <= 0)
+       !g_gameModule || !g_sourceZone[0] || g_targetExit < 0)
         return;
 
     auto* game = reinterpret_cast<unsigned char*>(g_gameModule);
@@ -896,8 +902,8 @@ void __fastcall PlayerDefaultsResetDetour(void* self, void*)
                         int(sizeof(selected) / sizeof(selected[0])));
     wchar_t message[512]{};
     _snwprintf_s(message, sizeof(message) / sizeof(message[0]), _TRUNCATE,
-                 L"DIRECT_LAUNCH initialized New Game player zone=\"%s\" entrance=%d before transition",
-                 selected, g_targetExit);
+                 L"DIRECT_LAUNCH initialized New Game player zone=\"%s\" entrance_id=%d entrance_index=%d before transition",
+                 selected, g_targetExitId, g_targetExit);
     Log(message);
 }
 

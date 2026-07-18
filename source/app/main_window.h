@@ -67,6 +67,11 @@ private:
     void runUndoToIndex(int targetIndex);
     void refreshMapsBrowser();
     void openMapPair(const QString& mprPath, const QString& mobPath, const QString& zoneId);
+    void openCollection(const QString& path);
+    void newCollection();
+    void editCollection();
+    void saveCollection(bool saveAs);
+    QVector<QString> activeMapRoots() const;
     void updateMapTestAction();
     void launchCurrentMapTest();
     void createViewportToolbars();
@@ -157,8 +162,12 @@ private:
     SMapCatalogEntry m_mapTestEntry;
     QVector<SMapTravelZone> m_validEntrances;
     QString m_openedMapZoneId;
+    QString m_currentCollectionPath;
     bool m_borrowedMapIdentity;
     bool m_pickSpawnPending;
+    bool m_movingCustomSpawn{false};
+    bool m_customSpawnSelected{false};
+    bool m_suppressSpawnRelease{false};
     SMapSpawnPlan m_customSpawn;
     QVector3D m_customSpawnPosition;
 };
