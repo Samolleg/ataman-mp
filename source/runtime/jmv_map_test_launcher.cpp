@@ -398,7 +398,7 @@ bool CJmvMapTestLauncher::launch(const SJmvMapTestLaunchInput& input, QString* e
     m_process->setWorkingDirectory(m_engineDirectory);
     QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
     environment.insert("EI_MAPPER_ENDURANCE_MAP", m_temporaryMapName);
-    environment.insert("EI_MAPPER_ENDURANCE_SOURCE_MAP", input.mapEntry.mprName.toLower());
+    environment.insert("EI_MAPPER_ENDURANCE_SOURCE_MAP", input.mapEntry.zoneId.toLower());
     environment.insert("EI_MAPPER_ENDURANCE_TEMP_MPR", m_liveMprPath);
     environment.insert("EI_MAPPER_ENDURANCE_TEMP_MOB", m_liveMobPath);
     environment.insert("EI_MAPPER_ENDURANCE_BRIDGE_RESULT", m_bridgeResultPath);
@@ -429,6 +429,12 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
     if(!QRegularExpression("^[a-z0-9_]{1,63}$").match(sourceMapName).hasMatch())
     {
         if(error) *error = "The selected map has no safe runtime map identity for the JMV bridge.";
+        return false;
+    }
+    const QString sourceZoneId = input.mapEntry.zoneId.toLower();
+    if(!QRegularExpression("^[a-z0-9_]{1,63}$").match(sourceZoneId).hasMatch())
+    {
+        if(error) *error = "The selected map has no safe JMV zone-table identity for direct launch.";
         return false;
     }
 

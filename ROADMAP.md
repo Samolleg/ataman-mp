@@ -499,12 +499,16 @@ MOB editing does not imply that landscape saving is supported.
   final signature/lifecycle gate before implementing the staged-map call.
 - [x] `0.1.0-alpha.53`: implement the first actual staged-map launch using the
   normal JMV single-player path. After the verified main-menu loader returns,
-  queue a private message to that exact game thread, invoke the engine's full
-  New Game initializer at `game.exe+0x00056140`, and substitute only its
-  verified MPR/MOB loader arguments with the hash-owned staged pair. No fixed
-  delay, console/server command, live-map overwrite, or campaign save is used.
-  Runtime validation remains required before the experimental capability can
-  be considered available.
+  queue a private message to that exact game thread. Runtime testing proved the
+  inferred `game.exe+0x00056140` entry is startup/menu initialization rather
+  than the complete New Game action: it returned `1`, reloaded the main menu,
+  and never reached the expected loader call.
+- [x] `0.1.0-alpha.54`: replace the disproven initializer with the actual
+  map-table-driven single-player transition seen during manual New Game. The
+  bridge resolves the selected `map.txt` zone through the fingerprinted engine
+  catalog, invokes `game.exe+0x0017C460` on the verified game thread, and
+  substitutes only its loader call returning at `game.exe+0x0017A61B` with the
+  hash-owned staged pair. Runtime validation remains required.
 - [x] `0.1.0-alpha.41`: redo-safe raw provenance and the July 17 multi-edit/UI
   fixes passed owner testing and were handed to the closed tester group.
   ([`db3fa31`](https://github.com/Ilufus/ei-mapper-endurance/commit/db3fa31))

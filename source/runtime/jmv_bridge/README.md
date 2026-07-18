@@ -16,17 +16,18 @@ including thread ID and a bounded module-relative call stack, in the run's
 single-player loader identified by the alpha.51/52 evidence.
 
 After the ordinary main-menu loader returns, the provider queues a private
-message to that same game thread. The message hook invokes the engine's full
-New Game initializer, and the loader detour substitutes only that initializer's
-verified MPR/MOB arguments with the staged Endurance paths. The engine retains
-its normal session and player initialization. Module bases and each relevant
-file open remain recorded for runtime verification.
+message to that same game thread. The message hook resolves the requested
+`map.txt` zone record and invokes the engine's normal single-player transition
+routine. The loader detour substitutes only that transition's verified MPR/MOB
+arguments with the staged Endurance paths. The engine retains its normal
+session, zone, and player initialization. Module bases and each relevant file
+open remain recorded for runtime verification.
 
 The provider remains deliberately narrow:
 
-- it invokes the fingerprinted normal New Game initializer, not a console or
-  multiplayer/server command;
-- it redirects only the expected loader call made by that initializer;
+- it invokes the fingerprinted normal single-player zone transition, not a
+  console or multiplayer/server command;
+- it redirects only the expected loader call made by that transition;
 - it does not modify Starter, JMV configuration, maps, saves, or movie files;
 - it does not infer readiness from a fixed delay; the normal main-menu loader
   return and game-thread message loop provide the lifecycle boundary.
