@@ -50,9 +50,11 @@ MobExplorer independently declares the tag as `ST_DWORD`, matching installed EIL
 The adjacent `0xBBAC0005` field is not part of that discrepancy. All 47 paired occurrences declare
 9 bytes and contain the one-byte value `0` or `1`, matching `LEVER_CAST_ONCE`/CastOnce. Thus
 "reloading" and "cast interval" are compatible descriptions of `0xBBAB0005`; only the manuals'
-Byte/boolean detail is wrong. The most likely unit for the DWord interval is the engine's 15 Hz game
-tick, but this unit still requires a controlled runtime timing test before Endurance displays a
-converted seconds value. See `docs/validation/MT_CAST_INTERVAL_AUDIT.md`.
+Byte/boolean detail is wrong. Base-engine disassembly confirms that the DWord is copied unchanged
+into a runtime countdown, decremented once per logic update, and reset after casting. It is therefore
+measured in the engine's 15 Hz game ticks: `15` is one second and `150` is ten seconds. Preserve the
+raw integer; a UI may show the exact `ticks / 15` conversion without rounding the stored value. See
+`docs/validation/MT_CAST_INTERVAL_AUDIT.md`.
 
 ## MOB information absent from the manuals
 
@@ -104,8 +106,6 @@ states and are emitted to both validation output and the workflow log.
 
 ## Research queue
 
-- Confirm the time unit of `0xBBAB0005` with a controlled runtime timing test; its DWord encoding
-  and reload/cast-interval role are already confirmed.
 - Establish exact runtime grammar/semantics for InScript, Parent/ParentID, QuestInfo, inventory and
   spell strings, logic flags/timing, sound/light units, and all 51 Stats fields.
 - Complete object and particle type maps, directory membership semantics, optional record coverage,

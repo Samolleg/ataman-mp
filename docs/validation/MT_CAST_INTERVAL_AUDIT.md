@@ -47,12 +47,24 @@ Representative hashed inputs:
 | JMV | `zone13.mob` | `78FE8AF66CFCD00CEA5B5418C2B1ABB7F8B17DFCC973CD5A8BD90EEA8AE3559A` | `90` |
 | Legacy | `zone13 (6).mob` | `3FCBE733F01C2510CB62741E5622CC66DBCE76C37B4D2FAD3B766C7FDD4331AD` | `150` |
 
-## Unit status
+## Runtime-unit confirmation
 
-Game ticks at 15 Hz are the strongest current interpretation: other documented EI timing fields use
-15 ticks per second, several authored values are exact multiples of 15, and the full 15–150 range is
-plausible as approximately 1–10 seconds. This remains an inference rather than direct runtime
-evidence. Endurance should therefore display and preserve the raw DWord for now, optionally showing
-the tick/seconds interpretation as unconfirmed. A controlled A/B test of the same repeating trap at
-15 and 150 is required before seconds conversion becomes authoritative.
+The Base executable with SHA-256
+`B871D70D3876B2A5634F0920C92118BC49058B50C7D8CBE68376349F51C2E570` confirms the unit and
+behavior:
 
+- the MOB loader reads `0xBBAB0005` through its DWord reader and stores it in the magic-trap source
+  object;
+- runtime initialization copies that DWord unchanged into the trap's interval field;
+- after a cast, the engine copies the interval into a separate countdown field;
+- the trap's logic-update method decrements that countdown by exactly one and casts again when it
+  reaches zero;
+- EI logic time is 15 updates per second.
+
+`0xBBAB0005` is therefore an unsigned interval measured in 15 Hz game ticks: `15` is one second and
+`150` is ten seconds. Endurance should preserve the raw DWord and may display seconds as
+`ticks / 15`. Non-multiples such as `43`, `44`, `74`, and `104` are valid fractional-second
+intervals and must not be rounded during editing or serialization.
+
+The nearby `0xBBAC0005` value is loaded separately as a one-byte Boolean and controls CastOnce; it
+does not encode the reload interval.
