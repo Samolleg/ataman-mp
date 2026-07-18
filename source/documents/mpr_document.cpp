@@ -58,6 +58,11 @@ quint32 readU32(const QByteArray& bytes, quint64 offset)
         reinterpret_cast<const uchar*>(bytes.constData() + offset));
 }
 
+qint32 readI32(const QByteArray& bytes, quint64 offset)
+{
+    return qint32(readU32(bytes, offset));
+}
+
 float readF32(const QByteArray& bytes, quint64 offset)
 {
     const quint32 raw = readU32(bytes, offset);
@@ -90,6 +95,30 @@ QString memberKindName(EMprMemberKind kind)
     }
     return QStringLiteral("unknown");
 }
+}
+
+qint32 SMprMapInfo::tileType(int atlasSlot, bool* found) const
+{
+    const bool present = atlasSlot >= 0 && atlasSlot < tileTypes.size();
+    if(found)
+        *found = present;
+    return present ? tileTypes.at(atlasSlot) : 0;
+}
+
+SMprPackedTile SMprPackedTile::decode(quint16 packed)
+{
+    SMprPackedTile tile;
+    tile.tileIndex = quint8(packed & 0x3F);
+    tile.atlasIndex = quint8((packed >> 6) & 0xFF);
+    tile.rotation = quint8((packed >> 14) & 0x03);
+    return tile;
+}
+
+quint16 SMprPackedTile::encode() const
+{
+    return quint16(tileIndex & 0x3F)
+        | quint16(quint16(atlasIndex) << 6)
+        | quint16(quint16(rotation & 0x03) << 14);
 }
 
 void CMprEditTransaction::replaceMemberPayload(
@@ -274,6 +303,11 @@ bool CMprDocument::loadBytes(const QByteArray& bytes, const QString& sourceName,
                             "The MP arrays extend beyond the member payload", mpMember.name);
             return false;
         }
+        const quint64 tileTypeOffset = kMapHeaderSize
+            + quint64(m_mapInfo.materialCount) * kMaterialSize;
+        m_mapInfo.tileTypes.reserve(int(m_mapInfo.tileCount));
+        for(quint32 tile = 0; tile < m_mapInfo.tileCount; ++tile)
+            m_mapInfo.tileTypes.append(readI32(mp, tileTypeOffset + quint64(tile) * 4));
         if(m_mapInfo.parsedSize < quint64(mp.size()) && report)
             report->add("mpr.mp_trailing", EValidationSeverity::Warning,
                         QString("MP has %1 trailing bytes; they are preserved")
@@ -348,13 +382,14 @@ bool CMprDocument::loadBytes(const QByteArray& bytes, const QString& sourceName,
                 {
                     if(materials && materials->at(int(tile)) == -1)
                         continue;
-                    const quint16 packed = readU16(sec, tileOffset + tile * 2);
-                    const quint16 atlas = (packed >> 6) & 0xFF;
-                    if(atlas >= m_mapInfo.textureCount && report)
+                    const SMprPackedTile packed = SMprPackedTile::decode(
+                        readU16(sec, tileOffset + tile * 2));
+                    if(packed.atlasIndex >= m_mapInfo.textureCount && report)
                     {
                         report->add("mpr.atlas_namespace", EValidationSeverity::Warning,
                                     QString("%1 tile %2 references atlas %3, outside namespace count %4")
-                                        .arg(layer).arg(tile).arg(atlas).arg(m_mapInfo.textureCount),
+                                        .arg(layer).arg(tile).arg(packed.atlasIndex)
+                                        .arg(m_mapInfo.textureCount),
                                     member.name);
                     }
                 }

@@ -47,6 +47,22 @@ struct SMprMapInfo
     quint16 materialCount{0};
     quint32 animatedTileCount{0};
     quint64 parsedSize{0};
+    // Raw, read-only atlas slot categories from the MP member. Endurance uses
+    // these for selection/diagnostics; changing them would be atlas editing.
+    QVector<qint32> tileTypes;
+
+    qint32 tileType(int atlasSlot, bool* found = nullptr) const;
+};
+
+struct SMprPackedTile
+{
+    quint8 tileIndex{0};
+    quint8 atlasIndex{0};
+    quint8 rotation{0};
+
+    static SMprPackedTile decode(quint16 packed);
+    quint16 encode() const;
+    int atlasSlot() const { return int(atlasIndex) * 64 + int(tileIndex); }
 };
 
 struct SMprSectorInfo

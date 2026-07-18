@@ -16,3 +16,8 @@ maintainer.
 The embedded MPR map-name handling incorporates the concept proposed by
 Grabarrz90 in upstream pull request #19, with additional Endurance validation
 and indexed resource-resolution changes.
+
+Landscape-atlas format research also consulted aspadm's
+[EI-HD-tiles](https://github.com/aspadm/EI-HD-tiles) documentation and map
+descriptions. Endurance does not include its tools, generated atlases, source,
+or assets; the project is acknowledged here as an independent research source.
