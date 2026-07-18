@@ -162,12 +162,16 @@ void convertUVCoords(QVector<F2>& coordsUV, int convertCount)
 //Creates trianlge from vertex component
 // in. aIndOrigin - triangle indices
 // in. aVertComp - vertex components
-void ei::CFigure::generateTriangles(QVector<SVertexData>& aVrtData, QVector<QVector3D>& aMorphVertex)
+void ei::CFigure::generateTriangles(QVector<SVertexData>& aVrtData, QVector<QVector3D>& aMorphVertex,
+                                    QVector<int>* sourceVertexIndices)
 {
     for(auto& ind: m_aInd)
+    {
         aVrtData.append(SVertexData(aMorphVertex[m_aVertComp[ind].x]
                           ,m_aNormal[m_aVertComp[ind].y]
                           ,m_aUvCoord[m_aVertComp[ind].z]));
+        if(sourceVertexIndices) sourceVertexIndices->append(int(m_aVertComp[ind].x));
+    }
 }
 
 //load morphing_vertices, indices, normals, texture coordinates
@@ -260,7 +264,8 @@ void calcComplection(QVector3D& complexPoint, QVector<QVector3D>& data, QVector3
 }
 
 //todo: request constitution from object
-void ei::CFigure::calculateConstitution(QVector<SVertexData>& aVrtData, QVector3D& constitute)
+void ei::CFigure::calculateConstitution(QVector<SVertexData>& aVrtData, QVector3D& constitute,
+                                        QVector<int>* sourceVertexIndices)
 { //x == str, y == dex, z == scale
     QVector3D res0;
     QVector3D res1;
@@ -284,7 +289,7 @@ void ei::CFigure::calculateConstitution(QVector<SVertexData>& aVrtData, QVector3
         res0 = res0 + (res1 - res0) * constitute.x();
         aMorphVertex.append(res2 + (res0 - res2) * constitute.z() + offset);
     }
-    generateTriangles(aVrtData, aMorphVertex);
+    generateTriangles(aVrtData, aMorphVertex, sourceVertexIndices);
 }
 
 void ei::CFigure::getVertexData(QVector<CPart*>& model, QVector3D& complection, QList<QString>& aBodyParts)
@@ -315,7 +320,9 @@ void ei::CFigure::appendVertexData(QVector<CPart*>& model, QVector3D& complectio
         QVector3D restOffset;
         calcComplection(restOffset, m_offset, complection);
         part->setRestOffset(restOffset);
-        calculateConstitution(part->vertData(), complection);
+        QVector<int> sourceVertexIndices;
+        calculateConstitution(part->vertData(), complection, &sourceVertexIndices);
+        part->setSourceVertexIndices(sourceVertexIndices);
         part->update();
         model.append(part);
     }

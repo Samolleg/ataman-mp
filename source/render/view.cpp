@@ -1000,7 +1000,24 @@ void CView::loadMob(QFileInfo &filePath)
     m_pProgress->reset();
     CMob* pMob = new CMob;
     pMob->attach(this, m_pProgress);
-    pMob->readMob(filePath);
+    if(pMob->readMob(filePath) != 0)
+    {
+        delete pMob;
+        return;
+    }
+    QElapsedTimer preloadTimer;
+    preloadTimer.start();
+    int preloadedUnits = 0;
+    makeCurrent();
+    for(CNode* node : pMob->nodes())
+        if(CUnit* unit = dynamic_cast<CUnit*>(node))
+        {
+            unit->preloadVisualResources();
+            ++preloadedUnits;
+        }
+    doneCurrent();
+    ei::log(eLogInfo, QString("Preloaded visual resources for %1 units during MOB load in %2 ms")
+            .arg(preloadedUnits).arg(preloadTimer.elapsed()));
     m_aMob.append(pMob);
     m_scriptWorkspaces->registerMob(pMob);
     changeCurrentMob(pMob);

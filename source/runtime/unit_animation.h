@@ -27,6 +27,7 @@ struct SAnimationChannel
     QString component;
     QVector<QQuaternion> rotations;
     QVector<QVector3D> translations;
+    QVector<QVector<QVector3D>> morphations;
 };
 
 struct SAnimationClip
@@ -41,6 +42,7 @@ struct SAnimationClip
 struct SAnimationLocalPose
 {
     QMap<QString, QMatrix4x4> transforms;
+    QMap<QString, QVector<QVector3D>> morphDeltas;
 };
 
 struct SAnimationSkeleton
@@ -64,6 +66,9 @@ QVector<SAdbAction> parseAdbActions(const QByteArray& bytes, QStringList* diagno
 bool selectDefaultIdleAction(const QVector<SAdbAction>& actions, int weaponTypeId,
                              bool allowExtendedWeaponMask, SAdbAction* selected,
                              QString* diagnostic = nullptr);
+bool selectJmvDefaultIdleAction(const QVector<SAdbAction>& actions, const QString& model,
+                                int weaponTypeId, SAdbAction* selected,
+                                QString* diagnostic = nullptr);
 SAnimationClip parseNestedAnimationClip(const QByteArray& modelAnimationArchive,
                                         const QString& actionName, int logicalLength);
 SAnimationLocalPose interpolateAnimationPose(const SAnimationClip& clip, double logicalFrame);

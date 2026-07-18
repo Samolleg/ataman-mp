@@ -69,6 +69,19 @@ QByteArray channel()
     return bytes;
 }
 
+QByteArray morphChannel()
+{
+    QByteArray bytes = channel();
+    QDataStream out(&bytes, QIODevice::Append);
+    out.setByteOrder(QDataStream::LittleEndian);
+    out.setFloatingPointPrecision(QDataStream::SinglePrecision);
+    out << quint32(3) << quint32(1);
+    out << float(0) << float(0) << float(0);
+    out << float(2) << float(0) << float(0);
+    out << float(0) << float(0) << float(0);
+    return bytes;
+}
+
 }
 
 class UnitAnimationTests : public QObject
@@ -77,7 +90,10 @@ class UnitAnimationTests : public QObject
 private slots:
     void parsesAndSelectsDeterministically();
     void providersSeparateBaseAndJmvMasks();
+    void jmvSelectsStandingModelSpecificIdles();
     void parsesNestedClipAndClosingSample();
+    void anchorsRootTranslationToBindPose();
+    void interpolatesMorphClosingSample();
     void propagatesPoseToNumberedEquipment();
     void preservesChildBindOffsetAndIgnoresChildTranslation();
     void appliesDistanceTiers();
@@ -96,7 +112,7 @@ void UnitAnimationTests::parsesAndSelectsDeterministically()
 void UnitAnimationTests::providersSeparateBaseAndJmvMasks()
 {
     QSharedPointer<ei::SProfileDatabaseSnapshot> db(new ei::SProfileDatabaseSnapshot);
-    db->actionTables.insert("unhuma.adb", adb({{"extended", 1, idlePacked(quint16(1 << 10)), 100, 2}}));
+    db->actionTables.insert("unhuma.adb", adb({{"cidle", 1, idlePacked(quint16(1 << 10), 2), 100, 2}}));
     ei::SItemDatabaseRecord weapon; weapon.name = "great"; weapon.category = "weapons"; weapon.typeId = 10;
     db->items.insert("great", weapon);
     ProfileVisualProviderService providers;
@@ -104,7 +120,59 @@ void UnitAnimationTests::providersSeparateBaseAndJmvMasks()
     QJsonObject output;
     QVERIFY(!providers.animationResolver("base.standard.v1", db)->resolve(request, &output).success);
     QVERIFY(providers.animationResolver("jmv.v1", db)->resolve(request, &output).success);
-    QCOMPARE(output.value("actionName").toString(), QString("extended"));
+    QCOMPARE(output.value("actionName").toString(), QString("cidle"));
+}
+
+void UnitAnimationTests::jmvSelectsStandingModelSpecificIdles()
+{
+    const QVector<SAdbAction> normal = parseAdbActions(adb({
+        {"crest", 1, idlePacked(0, 1), 100, 10},
+        {"cidle", 2, idlePacked(127, 2), 100, 10}
+    }));
+    SAdbAction selected;
+    QVERIFY(selectJmvDefaultIdleAction(normal, "unmogo", -1, &selected));
+    QCOMPARE(selected.name, QString("cidle"));
+
+    const QVector<SAdbAction> lizard = parseAdbActions(adb({
+        {"cidle01", 1, idlePacked(0, 2), 100, 10},
+        {"cidle02", 2, idlePacked(0, 2), 50, 10}
+    }));
+    QVERIFY(selectJmvDefaultIdleAction(lizard, "unmoli", -1, &selected));
+    QCOMPARE(selected.name, QString("cidle02"));
+
+    const QVector<SAdbAction> twoHand = parseAdbActions(adb({
+        {"cidle01", 1, idlePacked(121, 2), 100, 10},
+        {"2hscidle01", 2, idlePacked(31, 2), 100, 10}
+    }));
+    QVERIFY(selectJmvDefaultIdleAction(twoHand, "unhufe", 12, &selected));
+    QCOMPARE(selected.name, QString("2hscidle01"));
+}
+
+void UnitAnimationTests::anchorsRootTranslationToBindPose()
+{
+    SAnimationClip clip;
+    clip.logicalLength = 2;
+    SAnimationChannel channel;
+    channel.component = "root";
+    channel.rotations << QQuaternion() << QQuaternion() << QQuaternion();
+    channel.translations << QVector3D(10, 0, 0) << QVector3D(12, 0, 0) << QVector3D(10, 0, 0);
+    clip.channels.insert("root", channel);
+    SAnimationSkeleton skeleton;
+    skeleton.restOffsets.insert("root", QVector3D(5, 0, 0));
+    const auto first = propagateAnimationHierarchy(interpolateAnimationPose(clip, 0), skeleton);
+    QCOMPARE(first.value("root").column(3).x(), 0.0f);
+    const auto moved = propagateAnimationHierarchy(interpolateAnimationPose(clip, 1), skeleton);
+    QCOMPARE(moved.value("root").column(3).x(), 2.0f);
+}
+
+void UnitAnimationTests::interpolatesMorphClosingSample()
+{
+    const SAnimationClip clip = parseNestedAnimationClip(
+        res({{"idle", res({{"wing", morphChannel()}})}}), "idle", 2);
+    QVERIFY2(clip.valid(), qPrintable(clip.diagnostics.join(';')));
+    const SAnimationLocalPose pose = interpolateAnimationPose(clip, 1.5);
+    QCOMPARE(pose.morphDeltas.value("wing").size(), 1);
+    QCOMPARE(pose.morphDeltas.value("wing").first().x(), 1.0f);
 }
 
 void UnitAnimationTests::parsesNestedClipAndClosingSample()
@@ -123,7 +191,7 @@ void UnitAnimationTests::propagatesPoseToNumberedEquipment()
     SAnimationLocalPose pose; QMatrix4x4 animated; animated.translate(3, 0, 0);
     pose.transforms.insert("rh3.sword00", animated);
     const auto transforms = propagateAnimationHierarchy(pose, skeleton);
-    QCOMPARE(transforms.value("rh3.sword12").column(3).x(), 1.0f);
+    QCOMPARE(transforms.value("rh3.sword12").column(3).x(), 3.0f);
 }
 
 void UnitAnimationTests::preservesChildBindOffsetAndIgnoresChildTranslation()

@@ -62,6 +62,7 @@ protected:
     void invalidateTransientVisual() { m_transientVisualFingerprint.clear(); }
     SAnimationSkeleton transientAnimationSkeleton() const;
     void applyTransientPartPoses(const QMap<QString, QMatrix4x4>& poses);
+    void applyTransientPartMorphs(const QMap<QString, QVector<QVector3D>>& morphs);
     //void updateVisibility(QVector<QString>& aPart);
 
 protected:

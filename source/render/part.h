@@ -28,6 +28,8 @@ public:
     void setRestOffset(const QVector3D& offset) { m_restOffset = offset; }
     const QVector3D& restOffset() const { return m_restOffset; }
     void setPoseMatrix(const QMatrix4x4& matrix) { m_poseMatrix = matrix; }
+    void setSourceVertexIndices(const QVector<int>& indices) { m_sourceVertexIndices = indices; }
+    void setMorphDeltas(const QVector<QVector3D>& deltas);
 
 private:
     QOpenGLBuffer m_vertexBuf;
@@ -38,6 +40,9 @@ private:
     QVector3D m_restOffset;
     QMatrix4x4 m_poseMatrix;
     QVector<SVertexData> m_aVertData;
+    QVector<SVertexData> m_baseVertData;
+    QVector<int> m_sourceVertexIndices;
+    bool m_morphApplied{false};
     bool m_bShow;
 };
 

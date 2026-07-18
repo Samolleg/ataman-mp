@@ -185,12 +185,24 @@ QString equipmentTextureName(const QString& model, const QString& itemType, int 
     };
     const QString code = weapon ? weaponCodes.value(typeId)
                                 : armorCodes.value(itemType.trimmed().toLower());
-    if(code.isEmpty() || tti <= 0 || materialCode.isEmpty())
+    if(code.isEmpty() || tti < 0 || textureVariant < 0 || materialCode.isEmpty())
         return QString();
+    // The standard humanoid assemblies share the Unhuma equipment atlases.
+    // Female, orc, and skeleton model names select different geometry/UV
+    // regions, but there are no parallel Unhufe/Unorfe/Unhusk equipment MMP
+    // families in the shipped Base/JMV corpus.
+    QString textureModel = model.trimmed().toLower();
+    static const QSet<QString> sharedHumanoidAtlases = {
+        "unhuma", "unhufe", "unorma", "unorfe", "unhusk"
+    };
+    if(sharedHumanoidAtlases.contains(textureModel))
+        textureModel = "unhuma";
     return QString("%1%2_%3.%4.%5.%6.mmp")
-        .arg(model.trimmed().toLower(), code)
-        .arg(tti - 1, 2, 10, QChar('0')).arg(materialCode.trimmed().toLower())
-        .arg(qMax(0, textureVariant - 1)).arg(!weapon && itemType.compare("helm", Qt::CaseInsensitive) != 0
+        .arg(textureModel, code)
+        // TTI and TTI2 are the literal zero-based MMP indices. TTI 0 uses
+        // both the base component and the _00 texture; it is not "missing".
+        .arg(tti, 2, 10, QChar('0')).arg(materialCode.trimmed().toLower())
+        .arg(textureVariant).arg(!weapon && itemType.compare("helm", Qt::CaseInsensitive) != 0
                                                ? "x4" : "x2");
 }
 
@@ -210,7 +222,10 @@ QStringList appendArmorComponents(const ei::SItemDatabaseRecord& item,
     const QString suffix = componentSuffix("armor", item.textureType1);
     for(const QString& slot : armorParts)
     {
-        const QString expected = slot + suffix;
+        // TTI zero is the textured anatomical/base component. Assemblies do
+        // not contain .armor00 members, so replacing the base part here makes
+        // lightly clothed units (notably JMV females) appear naked.
+        const QString expected = item.textureType1 == 0 ? slot : slot + suffix;
         if(request.assemblyParts.isEmpty())
         {
             components->append(expected);
@@ -355,7 +370,7 @@ SRuntimeProviderResult resolveEquipmentLayout(
             else
                 for(const QString& component : matched) componentTextures.insert(component, texture);
         }
-        if(item->type.compare("helm", Qt::CaseInsensitive) != 0)
+        if(item->textureType1 > 0 && item->type.compare("helm", Qt::CaseInsensitive) != 0)
             for(const QString& slot : armorSlots(item->type)) replacedParts.append(slot);
     }
 

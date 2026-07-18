@@ -212,6 +212,12 @@ void CObjectBase::applyTransientPartPoses(const QMap<QString, QMatrix4x4>& poses
     }
 }
 
+void CObjectBase::applyTransientPartMorphs(const QMap<QString, QVector<QVector3D>>& morphs)
+{
+    for(CPart* part : m_aPart)
+        part->setMorphDeltas(morphs.value(part->name().toLower()));
+}
+
 void CObjectBase::serializeJson(QJsonObject& obj)
 {
     obj.insert("Model name", m_modelName);

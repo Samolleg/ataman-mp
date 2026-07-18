@@ -65,7 +65,7 @@ SRuntimeProviderResult JmvAnimationResolver::resolve(const SUnitAnimationRequest
         if(m_database->items.contains(key)) { weaponType = m_database->items.value(key).typeId; break; }
     }
     SAdbAction selected;
-    if(!selectDefaultIdleAction(actions, weaponType, true, &selected, &result.message))
+    if(!selectJmvDefaultIdleAction(actions, request.model, weaponType, &selected, &result.message))
     { result.code = "animation.idle.missing"; result.evidence.insert("diagnostics", QJsonArray::fromStringList(diagnostics)); return result; }
     animation->insert("providerId", providerId()); animation->insert("actionName", selected.name);
     animation->insert("actionNumber", int(selected.number)); animation->insert("length", int(selected.length));

@@ -89,6 +89,39 @@ SAnimationChannel parseChannel(const QString& name, const QByteArray& bytes, QSt
         stream >> x >> y >> z;
         result.translations.append(QVector3D(x, y, z));
     }
+    if(quint64(stream.device()->pos()) + 4 <= quint64(bytes.size()))
+    {
+        quint32 morphFrames = 0;
+        stream >> morphFrames;
+        if(morphFrames > 10000)
+        {
+            diagnostics->append(name + ": invalid morph frame count");
+            return result;
+        }
+        if(morphFrames > 0)
+        {
+            quint32 morphVertices = 0;
+            stream >> morphVertices;
+            const quint64 values = quint64(morphFrames) * quint64(morphVertices);
+            if(morphVertices > 100000 || values > 10000000
+                    || quint64(stream.device()->pos()) + values * 12 > quint64(bytes.size()))
+            {
+                diagnostics->append(name + ": invalid morph vertex payload");
+                return result;
+            }
+            result.morphations.resize(int(morphFrames));
+            for(quint32 frame = 0; frame < morphFrames; ++frame)
+            {
+                result.morphations[int(frame)].reserve(int(morphVertices));
+                for(quint32 vertex = 0; vertex < morphVertices; ++vertex)
+                {
+                    float x = 0, y = 0, z = 0;
+                    stream >> x >> y >> z;
+                    result.morphations[int(frame)].append(QVector3D(x, y, z));
+                }
+            }
+        }
+    }
     return result;
 }
 
@@ -123,7 +156,8 @@ QMatrix4x4 localAt(const SAnimationClip& clip, const QString& component, double 
         const int b = channel.translations.size() > length
             ? qMin(base + 1, channel.translations.size() - 1)
             : qMin(next, channel.translations.size() - 1);
-        translation = channel.translations[a] * (1.0f - alpha) + channel.translations[b] * alpha;
+        translation = channel.translations[a] * (1.0f - alpha) + channel.translations[b] * alpha
+            - channel.translations.first();
     }
     QQuaternion rotation;
     if(!channel.rotations.isEmpty())
@@ -137,6 +171,28 @@ QMatrix4x4 localAt(const SAnimationClip& clip, const QString& component, double 
     matrix.translate(translation);
     matrix.rotate(rotation);
     return matrix;
+}
+
+QVector<QVector3D> morphAt(const SAnimationClip& clip, const SAnimationChannel& channel,
+                           double frame)
+{
+    QVector<QVector3D> result;
+    if(channel.morphations.isEmpty())
+        return result;
+    const int length = qMax(1, clip.logicalLength);
+    const int base = int(qFloor(frame)) % length;
+    const int next = (base + 1) % length;
+    const float alpha = float(frame - qFloor(frame));
+    const int a = qMin(base, channel.morphations.size() - 1);
+    const int b = channel.morphations.size() > length
+        ? qMin(base + 1, channel.morphations.size() - 1)
+        : qMin(next, channel.morphations.size() - 1);
+    const int vertices = qMin(channel.morphations[a].size(), channel.morphations[b].size());
+    result.reserve(vertices);
+    for(int vertex = 0; vertex < vertices; ++vertex)
+        result.append(channel.morphations[a][vertex] * (1.0f - alpha)
+                      + channel.morphations[b][vertex] * alpha);
+    return result;
 }
 
 }
@@ -224,6 +280,68 @@ bool selectDefaultIdleAction(const QVector<SAdbAction>& actions, int weaponTypeI
     return true;
 }
 
+bool selectJmvDefaultIdleAction(const QVector<SAdbAction>& actions, const QString& model,
+                                int weaponTypeId, SAdbAction* selected, QString* diagnostic)
+{
+    if(!selected) return false;
+    QVector<SAdbAction> standing;
+    for(const SAdbAction& action : actions)
+        if(action.actionType == 6 && action.stage == 2 && action.length > 0
+                && action.allowedState == 2)
+            standing.append(action);
+    if(standing.isEmpty())
+    {
+        if(diagnostic) *diagnostic = "JMV ADB has no standing IDLE cycle (allowed state 2).";
+        return false;
+    }
+
+    QStringList preferredNames;
+    const QString normalizedModel = model.trimmed().toLower();
+    if(normalizedModel == "unmoli")
+        preferredNames << "cidle02";
+    if((normalizedModel == "unhuma" || normalizedModel == "unhufe"
+            || normalizedModel == "unorma" || normalizedModel == "unorfe"
+            || normalizedModel == "unhusk") && weaponTypeId >= 10 && weaponTypeId <= 15)
+        preferredNames << ((weaponTypeId == 13 || weaponTypeId == 14)
+                              ? "2hacidle01" : "2hscidle01");
+    preferredNames << "cidle01" << "cidle" << "cidle02";
+
+    auto deterministicBest = [](QVector<SAdbAction> candidates) -> SAdbAction
+    {
+        std::sort(candidates.begin(), candidates.end(), [](const SAdbAction& a, const SAdbAction& b)
+        {
+            if(a.probability != b.probability) return a.probability > b.probability;
+            return a.number < b.number;
+        });
+        return candidates.first();
+    };
+    for(const QString& name : preferredNames)
+    {
+        QVector<SAdbAction> named;
+        for(const SAdbAction& action : standing)
+            if(action.name.compare(name, Qt::CaseInsensitive) == 0)
+                named.append(action);
+        if(!named.isEmpty())
+        {
+            *selected = deterministicBest(named);
+            return true;
+        }
+    }
+
+    QVector<SAdbAction> compatible;
+    for(const SAdbAction& action : standing)
+    {
+        // JMV action tables commonly use a non-zero aggregate mask even for
+        // unarmed cycles (unmogo cidle uses 127), so unarmed cannot mean mask 0.
+        if(weaponTypeId < 0 || action.weaponMask == 0
+                || (weaponTypeId < 15 && (action.weaponMask & (quint16(1) << weaponTypeId))))
+            compatible.append(action);
+    }
+    if(compatible.isEmpty()) compatible = standing;
+    *selected = deterministicBest(compatible);
+    return true;
+}
+
 SAnimationClip parseNestedAnimationClip(const QByteArray& modelAnimationArchive,
                                         const QString& actionName, int logicalLength)
 {
@@ -241,7 +359,8 @@ SAnimationClip parseNestedAnimationClip(const QByteArray& modelAnimationArchive,
     for(auto it = components.constBegin(); it != components.constEnd(); ++it)
     {
         SAnimationChannel channel = parseChannel(it.key(), it.value(), &result.diagnostics);
-        if(!channel.rotations.isEmpty() || !channel.translations.isEmpty())
+        if(!channel.rotations.isEmpty() || !channel.translations.isEmpty()
+                || !channel.morphations.isEmpty())
             result.channels.insert(it.key().toLower(), channel);
     }
     return result;
@@ -251,7 +370,11 @@ SAnimationLocalPose interpolateAnimationPose(const SAnimationClip& clip, double 
 {
     SAnimationLocalPose result;
     for(auto it = clip.channels.constBegin(); it != clip.channels.constEnd(); ++it)
+    {
         result.transforms.insert(it.key(), localAt(clip, it.key(), logicalFrame));
+        const QVector<QVector3D> morph = morphAt(clip, it.value(), logicalFrame);
+        if(!morph.isEmpty()) result.morphDeltas.insert(it.key(), morph);
+    }
     return result;
 }
 
@@ -292,7 +415,7 @@ QMap<QString, QMatrix4x4> propagateAnimationHierarchy(
             position = currentPositions.value(parent)
                 + absoluteRotations.value(parent).rotatedVector(rest - skeleton.restOffsets.value(parent));
         else if(animated)
-            position = channel.value().column(3).toVector3D();
+            position = rest + channel.value().column(3).toVector3D();
 
         QMatrix4x4 animatedGlobal;
         animatedGlobal.setToIdentity();

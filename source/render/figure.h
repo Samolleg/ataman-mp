@@ -56,8 +56,10 @@ public:
                               QVector3D& complection);
 
 private:
-    void generateTriangles(QVector<SVertexData>& aVrtData, QVector<QVector3D>& aMorphVertex);
-    void calculateConstitution (QVector<SVertexData>& aVrtData, QVector3D& constitute);
+    void generateTriangles(QVector<SVertexData>& aVrtData, QVector<QVector3D>& aMorphVertex,
+                           QVector<int>* sourceVertexIndices = nullptr);
+    void calculateConstitution (QVector<SVertexData>& aVrtData, QVector3D& constitute,
+                                QVector<int>* sourceVertexIndices = nullptr);
     void appendVertexData(QVector<CPart*>& model, QVector3D& complection,
                           QList<QString>& aBodyParts);
 

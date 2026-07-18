@@ -46,7 +46,13 @@ edit `database.res`, JMV/Base archives, live MOBs, maps, or the game install.
 8. Confirm armor and weapons use the per-item texture resource derived from the
    model, slot/type, TTI, TTI2, and material code. For example, a human boot
    with TTI 1 and `ogre leather` (`lo`) resolves the shipped
-   `unhumabt_00.lo.0.x4.mmp` family rather than the face/skin texture.
+   `unhumabt_01.lo.0.x4.mmp` family rather than the face/skin texture. TTI and
+   TTI2 are zero-based resource indices: do not subtract one. TTI 0 armor keeps
+   the base anatomical component and applies its `_00` equipment texture.
+9. Confirm female humans, male/female orcs, and skeletons resolve equipment
+   textures from the shared `unhuma` equipment atlases. Their face/skin atlas
+   remains model-specific. Validate JMV `zone1.mob` IDs 203, 221, and 224;
+   ID 224 must retain its body components with the TTI 0 clothing textures.
 
 ## UI and performance sanity
 
@@ -54,8 +60,10 @@ edit `database.res`, JMV/Base archives, live MOBs, maps, or the game install.
    controls refresh after profile changes and retain unknown current values.
 2. Open several MOBs and switch profiles repeatedly; confirm snapshot provenance
    and provider IDs remain profile-scoped and memory does not grow per frame.
-3. Pan across a dense humanoid scene. Transient geometry may rebuild when a
-   profile or unit visual field changes, but must not rebuild every frame.
+3. Load a dense MOB and inspect the `Preloaded visual resources` timing log.
+   Pan across the map afterward: bringing a unit into frame for the first time
+   must not trigger its database/figure/texture resolution. Transient geometry
+   may rebuild when a profile or unit visual field changes, but not per frame.
 4. Configure the profile with the complete Base/JMV `Res` directories, not a
    hand-picked figures/textures subset. The catalog must discover JMV face,
    armor, weapon, and material atlases such as `faces.res`, `UnhumaBT.res`,

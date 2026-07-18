@@ -125,6 +125,14 @@ void CUnit::drawSelect(QOpenGLShaderProgram* program)
     }
 }
 
+void CUnit::preloadVisualResources()
+{
+    // Called with the viewport GL context current immediately after MOB
+    // projection. This resolves figure and texture resources before the unit
+    // first enters the camera frustum; it does not alter serialized MOB data.
+    refreshTransientVisual();
+}
+
 namespace {
 
 QStringList jsonStringList(const QJsonObject& object, const char* key)
@@ -258,6 +266,7 @@ void CUnit::refreshAnimationPose()
     if(!frame.enabled() || m_resolvedAnimationModel.isEmpty())
     {
         applyTransientPartPoses(staticPose);
+        applyTransientPartMorphs({});
         return;
     }
 
@@ -304,6 +313,7 @@ void CUnit::refreshAnimationPose()
     {
         frame.counters().staticFallbacks++;
         applyTransientPartPoses(staticPose);
+        applyTransientPartMorphs({});
         return;
     }
 
@@ -318,6 +328,7 @@ void CUnit::refreshAnimationPose()
                                                          m_idleClip.logicalLength, m_mapID);
     const SAnimationLocalPose local = interpolateAnimationPose(m_idleClip, logicalFrame);
     applyTransientPartPoses(propagateAnimationHierarchy(local, transientAnimationSkeleton()));
+    applyTransientPartMorphs(local.morphDeltas);
 }
 
 uint CUnit::deserialize(util::CMobParser& parser)

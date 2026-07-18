@@ -11,6 +11,7 @@ ei::SItemDatabaseRecord item(const QString& name, const QString& category,
     ei::SItemDatabaseRecord value;
     value.name = name; value.category = category; value.typeId = typeId;
     value.textureType1 = tti;
+    value.textureType2 = 0;
     value.type = category == "armor" ? "shirt" : "weapon";
     value.materialType = category == "armor" ? "Leather" : "Metal";
     return value;
@@ -79,6 +80,7 @@ private slots:
     void jmvLayoutsAreIndependentlyGated();
     void validatesAssemblyPartsWithPlaceholders();
     void armorUsesSlotsAndMaterialTextureResources();
+    void zeroTtiArmorTexturesBaseParts();
     void jmvIgnoresWeaponsBeyondFirstPair();
     void unknownVisualProviderFailsClosed();
 };
@@ -207,8 +209,29 @@ void ProfileVisualProviderTests::armorUsesSlotsAndMaterialTextureResources()
     QCOMPARE(jsonStrings(output, "components"), QStringList({"lh1.armor12", "rh1.armor12"}));
     QCOMPARE(jsonStrings(output, "replacedParts"), QStringList({"lh1", "rh1"}));
     const QJsonObject textures = output.value("componentTextures").toObject();
-    QCOMPARE(textures.value("lh1.armor12").toString(), QString("unhufesh_11.le.0.x4.mmp"));
-    QCOMPARE(textures.value("rh1.armor12").toString(), QString("unhufesh_11.le.0.x4.mmp"));
+    QCOMPARE(textures.value("lh1.armor12").toString(), QString("unhumash_12.le.0.x4.mmp"));
+    QCOMPARE(textures.value("rh1.armor12").toString(), QString("unhumash_12.le.0.x4.mmp"));
+}
+
+void ProfileVisualProviderTests::zeroTtiArmorTexturesBaseParts()
+{
+    auto db = database();
+    ei::SItemDatabaseRecord thin = item("thin shirt", "armor", 3, 0);
+    thin.textureType2 = 0;
+    db->items.insert("thin shirt", thin);
+    ProfileVisualProviderService service;
+    const auto resolver = service.equipmentResolver("jmv.v1", db);
+    SEquipmentLayoutRequest request;
+    request.model = "unhufe";
+    request.armor << "thin shirt.leather";
+    request.assemblyParts << "lh1" << "rh1" << "lh1.armor01" << "rh1.armor01";
+    QJsonObject output;
+    QVERIFY(resolver->resolve(request, &output).success);
+    QCOMPARE(jsonStrings(output, "components"), QStringList({"lh1", "rh1"}));
+    QVERIFY(jsonStrings(output, "replacedParts").isEmpty());
+    const QJsonObject textures = output.value("componentTextures").toObject();
+    QCOMPARE(textures.value("lh1").toString(), QString("unhumash_00.le.0.x4.mmp"));
+    QCOMPARE(textures.value("rh1").toString(), QString("unhumash_00.le.0.x4.mmp"));
 }
 
 void ProfileVisualProviderTests::jmvIgnoresWeaponsBeyondFirstPair()

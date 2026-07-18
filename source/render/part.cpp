@@ -17,6 +17,9 @@ CPart::CPart(const CPart &part):
     m_poseMatrix = part.m_poseMatrix;
     m_bShow = part.m_bShow;
     m_aVertData = part.m_aVertData;
+    m_baseVertData = part.m_baseVertData;
+    m_sourceVertexIndices = part.m_sourceVertexIndices;
+    m_morphApplied = part.m_morphApplied;
     update(); //create new index and vertex buffers
 }
 
@@ -28,6 +31,8 @@ CPart::~CPart()
 
 void CPart::update()
 {
+    if(m_baseVertData.size() != m_aVertData.size())
+        m_baseVertData = m_aVertData;
     // Generate VBOs and transfer data
     m_vertexBuf.create();
     m_vertexBuf.bind();
@@ -42,6 +47,30 @@ void CPart::update()
     m_indexBuf.bind();
     m_indexBuf.allocate(aInd.data(), aInd.count() * int(sizeof(ushort)));
     m_indexBuf.release();
+}
+
+void CPart::setMorphDeltas(const QVector<QVector3D>& deltas)
+{
+    const bool canApply = !deltas.isEmpty()
+        && m_sourceVertexIndices.size() == m_baseVertData.size();
+    if(!canApply && !m_morphApplied)
+        return;
+    if(m_aVertData.size() != m_baseVertData.size())
+        m_aVertData = m_baseVertData;
+    for(int vertex = 0; vertex < m_aVertData.size(); ++vertex)
+    {
+        m_aVertData[vertex].position = m_baseVertData[vertex].position;
+        if(canApply)
+        {
+            const int source = m_sourceVertexIndices.at(vertex);
+            if(source >= 0 && source < deltas.size())
+                m_aVertData[vertex].position += deltas.at(source);
+        }
+    }
+    m_vertexBuf.bind();
+    m_vertexBuf.write(0, m_aVertData.constData(), m_aVertData.size() * int(sizeof(SVertexData)));
+    m_vertexBuf.release();
+    m_morphApplied = canApply;
 }
 
 void CPart::draw(QOpenGLShaderProgram* program)

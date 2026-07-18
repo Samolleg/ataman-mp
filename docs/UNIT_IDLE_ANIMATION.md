@@ -15,12 +15,21 @@ model-local ANM action, and `.mod`/`.bon` assembly hierarchy—not by hardcoded
 model-name or humanoid-name lists.
 
 The selected model's `.anm` resource is a nested RES archive: the selected
-action member contains one quaternion/translation channel per component. The
+action member contains quaternion/translation channels and, where present,
+per-frame vertex morph deltas for each component. The
 logical timeline runs at 15 Hz and preserves the extra closing loop sample.
 Component matrices propagate through the figure link hierarchy, including
 canonical equipment attachment channels such as `rh3.sword00` applied to the
 selected TTI variant. Color and selection passes use the same cached frame
-context and part matrices; vertex buffers are not rebuilt per frame.
+context, part matrices, and morph-updated buffers. Morph buffers are updated in
+place; figure topology and buffer objects are not rebuilt per frame.
+
+The JMV provider selects only standing-state (`allowedState == 2`) defaults.
+It prefers `cidle01` for ordinary actors, `cidle02` for the two-handed
+`unmoli` family, and the matching JMV 2H action family for equipped humanoids.
+Aggregate ADB weapon masks remain compatible with unarmed actors, which is
+required by the `unmogo` family. Root translation is applied relative to its
+first animation sample so the actor stays at its MOB position.
 
 ## Performance policy and diagnostics
 
@@ -54,6 +63,11 @@ Validate each case in both a Base profile and the JMV reference profile:
 7. Use a profile with an unknown animation provider and a test copy missing an
    ADB or ANM action. Confirm a diagnostic/static fallback and no Base/JMV
    substitution.
+8. JMV: check `zone9.mob` ID 207 and representative `unhufe`/`unorfe` units;
+   they must use a standing idle. Check `unmogo` actors animate, `unmoli` uses
+   its two-handed ready idle, and no actor moves vertically from its MOB origin.
+9. JMV: check `unmodg` wing membranes. The membrane vertices must follow their
+   ANM morph frames while their parts follow the animated wing hierarchy.
 
 Synthetic coverage lives in `tests/unit_animation_tests.cpp` and checks ADB
 bounds/mask selection, Base/JMV isolation, nested ANM closing-sample

@@ -195,6 +195,7 @@ public:
     bool usesEmbeddedMobData() const { return m_bImport; }
     const QStringList& embeddedWeapons() const { return m_aWeapon; }
     const QStringList& embeddedArmor() const { return m_aArmor; }
+    void preloadVisualResources();
     bool updatePos(QVector3D& pos) override;
     QJsonObject toJson() override;
     void collectLogicNodes(QList<CNode*>& arrNode);
