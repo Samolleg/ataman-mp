@@ -50,7 +50,11 @@ Current development line: `0.2.0`.
     preserve a backup, reparse the result, and prove that unrelated bytes and
     semantics remain unchanged.
   - Apply this discussion first to legacy MapED `MT_AREAS`/`MT_TARGETS` lengths
-    and then to any other narrowly recognized malformed structures.
+    and then to any other narrowly recognized malformed structures. This
+    exception exists because MapEd was a popular legacy map editor and its
+    four-byte-short trap arrays are consequently present in maps shipped by
+    multiple existing mods; it is compatibility with a known historical tool,
+    not general acceptance of malformed MOB data.
 - [ ] Define object-aware duplicate-ID validation and repair policy.
   - Do not assign one severity to every duplicate: duplicated static decorative
     objects such as bushes may be harmless, while units, logic-bearing objects,

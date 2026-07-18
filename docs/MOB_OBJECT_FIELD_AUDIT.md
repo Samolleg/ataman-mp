@@ -61,7 +61,10 @@ SHA-256: `3FCBE733F01C2510CB62741E5622CC66DBCE76C37B4D2FAD3B766C7FDD4331AD`.
 - At offset `0x2B713`, `MT_TARGETS` declares `0x10` bytes for one 8-byte tuple. The exact total is
   `8-byte header + 4-byte count + 8-byte payload = 0x14`; it is four bytes short.
 
-The bytes exactly match the modder's report. MapED omitted the count DWord from each declared total.
+The bytes exactly match the modder's report. MapEd omitted the count DWord from each declared total.
+MapEd was a popular legacy editor used to create maps for multiple existing mods, so this defect is
+expected to occur in historically important content. Supporting it is a targeted compatibility and
+recovery measure for known MapEd output, not a general relaxation of MOB structural validation.
 Endurance's generated serializer already computes both totals correctly.
 
 The strict document parser now accepts only this exact count-derived legacy shape, retains the
