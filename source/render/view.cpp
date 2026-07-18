@@ -248,67 +248,93 @@ void CView::resizeGL(int width, int height)
 
 void CView::paintGL()
 {
-    makeCurrent();
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-    draw();
-    if(!m_testEntranceRectangles.isEmpty() || m_testSpawnMarkerValid)
+    const bool hasOverlay = !m_testEntranceRectangles.isEmpty()
+        || m_testSpawnMarkerValid;
+    const auto renderScene = [this]()
     {
-        const QRect viewport(0, 0, width(), height());
-        const QMatrix4x4 view = m_cam->viewMatrix();
-        QPainter painter(this);
-        painter.setRenderHint(QPainter::Antialiasing);
-        for(int index = 0; index < m_testEntranceRectangles.size(); ++index)
+        // QPainter's OpenGL paint engine resets native state. Re-establish the
+        // persistent state expected by the legacy renderer before every frame.
+        glViewport(0, 0, width(), height());
+        glEnable(GL_DEPTH_TEST);
+        glDepthMask(GL_TRUE);
+        glEnable(GL_ALPHA_TEST);
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        draw();
+    };
+
+    makeCurrent();
+    if(!hasOverlay)
+    {
+        renderScene();
+        return;
+    }
+
+    // Keep raw OpenGL inside QPainter's native-painting scope, then composite
+    // the 2D test overlay. Creating QPainter only after draw() could reinitialize
+    // and overwrite an already completed framebuffer.
+    QPainter painter(this);
+    painter.beginNativePainting();
+    renderScene();
+    painter.endNativePainting();
+
+    const QRect viewport(0, 0, width(), height());
+    const QMatrix4x4 view = m_cam->viewMatrix();
+    painter.setRenderHint(QPainter::Antialiasing);
+    for(int index = 0; index < m_testEntranceRectangles.size(); ++index)
+    {
+        const QRectF area = m_testEntranceRectangles.at(index).normalized();
+        const QPointF corners[] = {
+            area.topLeft(), area.topRight(), area.bottomRight(), area.bottomLeft()
+        };
+        QPolygonF polygon;
+        bool visible = true;
+        for(const QPointF& corner : corners)
         {
-            const QRectF area = m_testEntranceRectangles.at(index).normalized();
-            const QPointF corners[] = {
-                area.topLeft(), area.topRight(), area.bottomRight(), area.bottomLeft()
-            };
-            QPolygonF polygon;
-            bool visible = true;
-            for(const QPointF& corner : corners)
+            QVector3D world(corner.x(), corner.y(), 0.0f);
+            if(!CLandscape::getInstance()->projectPt(world))
             {
-                QVector3D world(corner.x(), corner.y(), 0.0f);
-                if(!CLandscape::getInstance()->projectPt(world))
-                {
-                    visible = false;
-                    break;
-                }
-                world.setZ(world.z() + 0.15f);
-                const QVector3D projected = world.project(view, m_projection, viewport);
-                if(projected.z() < 0.0f || projected.z() > 1.0f)
-                {
-                    visible = false;
-                    break;
-                }
-                polygon << QPointF(projected.x(), height() - projected.y());
+                visible = false;
+                break;
             }
-            if(!visible || polygon.size() != 4)
-                continue;
-            const bool selected = index == m_selectedTestEntrance;
-            painter.setPen(QPen(selected ? QColor(255, 225, 70) : QColor(235, 190, 45),
-                                selected ? 3 : 1));
-            painter.setBrush(QColor(255, 205, 35, selected ? 95 : 50));
-            painter.drawPolygon(polygon);
-            painter.setPen(QPen(QColor(255, 245, 180), 1));
-            painter.drawText(polygon.boundingRect().adjusted(3, 3, -3, -3),
-                             Qt::AlignCenter | Qt::TextWordWrap,
-                             index < m_testEntranceLabels.size()
-                                 ? m_testEntranceLabels.at(index)
-                                 : QString::number(index + 1));
-        }
-        if(m_testSpawnMarkerValid)
-        {
-            const QVector3D projected = m_testSpawnMarker.project(view, m_projection, viewport);
-            if(projected.z() >= 0.0f && projected.z() <= 1.0f)
+            world.setZ(world.z() + 0.15f);
+            const QVector3D projected = world.project(view, m_projection, viewport);
+            if(projected.z() < 0.0f || projected.z() > 1.0f)
             {
+                visible = false;
+                break;
+            }
+            polygon << QPointF(projected.x(), height() - projected.y());
+        }
+        if(!visible || polygon.size() != 4)
+            continue;
+        const bool selected = index == m_selectedTestEntrance;
+        painter.setPen(QPen(selected ? QColor(255, 225, 70) : QColor(235, 190, 45),
+                            selected ? 3 : 1));
+        painter.setBrush(QColor(255, 205, 35, selected ? 95 : 50));
+        painter.drawPolygon(polygon);
+        painter.setPen(QPen(QColor(255, 245, 180), 1));
+        painter.drawText(polygon.boundingRect().adjusted(3, 3, -3, -3),
+                         Qt::AlignCenter | Qt::TextWordWrap,
+                         index < m_testEntranceLabels.size()
+                             ? m_testEntranceLabels.at(index)
+                             : QString::number(index + 1));
+    }
+    if(m_testSpawnMarkerValid)
+    {
+        const QVector3D projected = m_testSpawnMarker.project(view, m_projection, viewport);
+        if(projected.z() >= 0.0f && projected.z() <= 1.0f)
+        {
             QPen pen(m_testSpawnMarkerAdjusted ? QColor(255, 190, 50) : QColor(80, 255, 120));
             pen.setWidth(3);
             painter.setPen(pen);
+            painter.setBrush(Qt::NoBrush);
             const QPoint center(qRound(projected.x()), height() - qRound(projected.y()));
             painter.drawEllipse(center, 8, 8);
             painter.drawLine(center + QPoint(-12, 0), center + QPoint(12, 0));
             painter.drawLine(center + QPoint(0, -12), center + QPoint(0, 12));
-            }
         }
     }
     //doneCurrent();

@@ -212,6 +212,8 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
   **Go to Entrance** camera navigation.
   - Use the overlay to distinguish a wrong entrance ID from normal engine
     placement within a deploy rectangle or an obstructed authored entrance.
+  - `0.2.0-alpha.5` fixes the overlay's OpenGL/QPainter composition after
+    `alpha.4` caused a continuously cleared/flickering viewport.
 
 - [ ] Block **Main Menu** after the staged map becomes active.
   - The initial main menu remains part of bootstrap, so arm the restriction only
