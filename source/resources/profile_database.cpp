@@ -2,6 +2,7 @@
 
 #include <QCryptographicHash>
 #include <QDataStream>
+#include <QDateTime>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -69,6 +70,19 @@ int fieldInt(const QMap<int, QByteArray>& fields, int id, int fallback = -1)
 {
     const QByteArray value = fields.value(id);
     return value.size() == 4 ? int(qint32(u32(value, 0))) : fallback;
+}
+
+float fieldFloat(const QMap<int, QByteArray>& fields, int id, float fallback = 1.0f)
+{
+    const QByteArray value = fields.value(id);
+    if(value.size() != 4)
+        return fallback;
+    QDataStream stream(value);
+    stream.setByteOrder(QDataStream::LittleEndian);
+    stream.setFloatingPointPrecision(QDataStream::SinglePrecision);
+    float result = fallback;
+    stream >> result;
+    return stream.status() == QDataStream::Ok ? result : fallback;
 }
 
 void nestedStrings(const QByteArray& data, int begin, int end, QStringList* result, int depth = 0)
@@ -159,9 +173,13 @@ QVector<QMap<int, QByteArray>> tableRecords(const QByteArray& data, int wantedTa
 
 QStringList stringListField(const QMap<int, QByteArray>& fields, int id)
 {
-    QStringList result;
+    QStringList encoded;
     const QByteArray value = fields.value(id);
-    nestedStrings(value, 0, value.size(), &result);
+    nestedStrings(value, 0, value.size(), &encoded);
+    QStringList result;
+    for(const QString& entry : encoded)
+        for(const QString& part : entry.split(',', QString::SkipEmptyParts))
+            result.append(part.trimmed());
     result.removeDuplicates();
     return result;
 }
@@ -221,6 +239,10 @@ SParsedDatabaseMembers parseProfileDatabaseMembers(const QMap<QString, QByteArra
             record.name = fieldString(fields, 0);
             record.baseRace = fieldString(fields, 1);
             record.skinIndex = fieldInt(fields, 3);
+            record.hairIndex = fieldInt(fields, 4);
+            record.complexionX = fieldFloat(fields, 5);
+            record.complexionY = fieldFloat(fields, 6);
+            record.complexionZ = fieldFloat(fields, 7);
             record.wears = stringListField(fields, 32);
             const QStringList weapons = stringListField(fields, 33);
             record.weapon = weapons.value(0);
@@ -380,11 +402,19 @@ ProfileDatabaseContext& ProfileDatabaseContext::instance()
     return context;
 }
 
-void ProfileDatabaseContext::activate(const QSharedPointer<const SProfileDatabaseSnapshot>& snapshot)
+void ProfileDatabaseContext::activate(const QSharedPointer<const SProfileDatabaseSnapshot>& snapshot,
+                                      const QMap<QString, QString>& providerBindings)
 {
     QWriteLocker locker(&m_lock);
     m_current = snapshot;
+    m_providerBindings = providerBindings;
     ++m_generation;
+}
+
+QString ProfileDatabaseContext::providerForRole(const QString& role) const
+{
+    QReadLocker locker(&m_lock);
+    return m_providerBindings.value(role);
 }
 
 QSharedPointer<const SProfileDatabaseSnapshot> ProfileDatabaseContext::current() const

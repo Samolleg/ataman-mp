@@ -30,6 +30,7 @@ public:
     CSettings* settings(){Q_ASSERT(m_pSettings); return m_pSettings;}
     void attachSettings(CSettings* pSettings) {m_pSettings = pSettings;};
     QList<QString>& figureList() {return m_arrFigureForComboBox;}
+    QStringList figurePartNames(const QString& name);
 
     void initResource();
     void refreshConfiguredSources();

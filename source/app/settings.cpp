@@ -231,14 +231,17 @@ void CSettings::applyResourceProfile(const SResourceProfileEvaluation& profile)
             legacy->setValue(QVector<QString>());
     // One pointer swap publishes the new profile-scoped database to every
     // dropdown and resolver after all profile options have been replaced.
-    ei::ProfileDatabaseContext::instance().activate(database);
+    QMap<QString, QString> providerBindings;
+    for(auto it = profile.providers.constBegin(); it != profile.providers.constEnd(); ++it)
+        providerBindings.insert(it.key(), it->id);
+    ei::ProfileDatabaseContext::instance().activate(database, providerBindings);
     updateOptUi();
     saveOptions();
     ei::log(eLogInfo, QString("Applied resource profile id:%1 gameRoot:%2 resourceDirectories:%3 archives:%4")
             .arg(profile.profileId, profile.gameRoot)
             .arg(profile.resourceDirectories.size()).arg(profile.archiveCount));
     for(const ei::SDatabaseDiagnostic& diagnostic : database->diagnostics)
-        ei::log(diagnostic.severity == ei::EDatabaseDiagnosticSeverity::Error ? eLogError : eLogWarning,
+        ei::log(eLogWarning,
                 QString("Profile database [%1] %2").arg(diagnostic.code, diagnostic.message));
 }
 

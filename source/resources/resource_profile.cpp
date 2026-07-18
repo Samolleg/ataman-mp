@@ -246,10 +246,10 @@ QVector<SResourceProfile> builtInResourceProfiles()
         "A fingerprinted temporary JMV bridge is implemented after the public console route was rejected; runtime validation is pending.", jmv.runtimeManifestId));
     jmv.capabilities.insert("runtime.multiMobLaunch", capability("runtime.multiMobLaunch", EProfileCapabilityStatus::Unsupported,
         "JMV supplemental MOB discovery order has not been proven.", jmv.runtimeManifestId));
-    jmv.capabilities.insert("runtime.appearanceResolver", capability("runtime.appearanceResolver", EProfileCapabilityStatus::Experimental,
-        "Database-backed appearance resolution is incomplete.", jmv.runtimeManifestId));
-    jmv.capabilities.insert("runtime.equipmentResolver", capability("runtime.equipmentResolver", EProfileCapabilityStatus::Unsupported,
-        "JMV equipment-layout rules are not implemented.", jmv.runtimeManifestId));
+    jmv.capabilities.insert("runtime.appearanceResolver", capability("runtime.appearanceResolver", EProfileCapabilityStatus::Available,
+        "Profile-database and strict embedded-MOB appearance precedence is implemented.", jmv.runtimeManifestId));
+    jmv.capabilities.insert("runtime.equipmentResolver", capability("runtime.equipmentResolver", EProfileCapabilityStatus::Available,
+        "Ordinary, 1H+shield, dual-1H, and single-2H layouts are available; dual-2H and 2H+shield remain diagnostic-only.", jmv.runtimeManifestId));
     jmv.capabilities.insert("runtime.semanticValidation", capability("runtime.semanticValidation", EProfileCapabilityStatus::Experimental,
         "Runtime validation requires manual JMV game tests.", jmv.runtimeManifestId));
 
@@ -275,10 +275,10 @@ QVector<SResourceProfile> builtInResourceProfiles()
         "Direct map launch is not in Base EI scope."));
     base.capabilities.insert("runtime.multiMobLaunch", capability("runtime.multiMobLaunch", EProfileCapabilityStatus::Unsupported,
         "Direct multi-MOB launch is not in Base EI scope."));
-    base.capabilities.insert("runtime.appearanceResolver", capability("runtime.appearanceResolver", EProfileCapabilityStatus::Experimental,
-        "Base database-backed appearance resolution is incomplete."));
-    base.capabilities.insert("runtime.equipmentResolver", capability("runtime.equipmentResolver", EProfileCapabilityStatus::Unsupported,
-        "Base equipped-character rendering is not implemented."));
+    base.capabilities.insert("runtime.appearanceResolver", capability("runtime.appearanceResolver", EProfileCapabilityStatus::Available,
+        "Profile-database and strict embedded-MOB appearance precedence is implemented."));
+    base.capabilities.insert("runtime.equipmentResolver", capability("runtime.equipmentResolver", EProfileCapabilityStatus::Available,
+        "Ordinary armor and the Base single 1H/ranged weapon rule are implemented."));
     base.capabilities.insert("runtime.semanticValidation", capability("runtime.semanticValidation", EProfileCapabilityStatus::Experimental,
         "Runtime validation requires manual Base EI game tests."));
 

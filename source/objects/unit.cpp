@@ -8,6 +8,11 @@
 #include "log.h"
 #include "scene.h"
 #include "property.h"
+#include "profile_database.h"
+#include "profile_visual_provider.h"
+
+#include <QJsonArray>
+#include <QRegularExpression>
 
 CUnit::CUnit():
     m_prototypeName("")
@@ -89,6 +94,7 @@ void CUnit::draw(bool isActive, QOpenGLShaderProgram* program)
 
 void CUnit::drawObjectVisual(bool isActive, QOpenGLShaderProgram* program)
 {
+    refreshTransientVisual();
     CObjectBase::draw(isActive, program);
 }
 
@@ -102,11 +108,130 @@ void CUnit::drawLogicVisual(bool isActive, QOpenGLShaderProgram* program)
 
 void CUnit::drawSelect(QOpenGLShaderProgram* program)
 {
+    refreshTransientVisual();
     CObjectBase::drawSelect(program);
     for(auto& logic: m_aLogic)
     {
         logic->drawSelect(program);
     }
+}
+
+namespace {
+
+QStringList jsonStringList(const QJsonObject& object, const char* key)
+{
+    QStringList result;
+    for(const QJsonValue& value : object.value(key).toArray())
+        result.append(value.toString());
+    return result;
+}
+
+QString normalizedModel(QString model)
+{
+    model = model.trimmed().toLower();
+    if(model.endsWith(".mod")) model.chop(4);
+    return model;
+}
+
+bool optionalEquipmentPart(const QString& part)
+{
+    static const QRegularExpression optional(
+        "\\.(?:armor|sword|axe|dagger|pike|club|bow|crossbow|shield|dsword|daxe|dpike|dclub|staff|dstaff|hair)\\d+$",
+        QRegularExpression::CaseInsensitiveOption);
+    return optional.match(part).hasMatch();
+}
+
+}
+
+void CUnit::refreshTransientVisual()
+{
+    ei::ProfileDatabaseContext& context = ei::ProfileDatabaseContext::instance();
+    const quint64 generation = context.generation();
+    if(m_resolvedDatabaseGeneration == generation && m_resolvedVisualRevision == m_visualRevision)
+        return;
+    m_resolvedDatabaseGeneration = generation;
+    m_resolvedVisualRevision = m_visualRevision;
+    const auto database = context.current();
+    static ProfileVisualProviderService providers;
+    QString diagnostic;
+    const auto appearanceResolver = providers.appearanceResolver(
+        context.providerForRole("characterAppearance"), database, &diagnostic);
+    const auto equipmentResolver = providers.equipmentResolver(
+        context.providerForRole("equipmentLayout"), database, &diagnostic);
+    if(appearanceResolver.isNull() || equipmentResolver.isNull())
+    {
+        ei::log(eLogWarning, "Unit visual provider unavailable: " + diagnostic);
+        applyTransientVisual("cannotdisplay", "default", {}, QVector3D(1, 1, 1));
+        return;
+    }
+
+    SCharacterAppearanceRequest appearanceRequest;
+    appearanceRequest.profileId = database.isNull() ? QString() : database->profileId;
+    appearanceRequest.runtimeManifestId = database.isNull() ? QString() : database->runtimeManifestId;
+    appearanceRequest.prototype = m_prototypeName;
+    appearanceRequest.model = m_modelName;
+    appearanceRequest.primaryTexture = m_primaryTexture;
+    appearanceRequest.secondaryTexture = m_secondaryTexture;
+    appearanceRequest.bodyParts = m_bodyParts;
+    appearanceRequest.dataSource = m_bImport ? EUnitVisualDataSource::EmbeddedMob
+                                             : EUnitVisualDataSource::ProfileDatabase;
+    QJsonObject appearance;
+    const SRuntimeProviderResult appearanceResult = appearanceResolver->resolve(appearanceRequest, &appearance);
+    if(!appearanceResult.success)
+    {
+        ei::log(eLogWarning, QString("Unit %1 appearance placeholder [%2]: %3")
+                .arg(m_prototypeName, appearanceResult.code, appearanceResult.message));
+        applyTransientVisual("cannotdisplay", "default", {}, QVector3D(1, 1, 1));
+        return;
+    }
+
+    const QString model = appearance.value("model").toString();
+    const QString texture = appearance.value("primaryTexture").toString();
+    const QStringList assemblyParts = CObjectList::getInstance()->figurePartNames(model);
+    QStringList visibleParts;
+    if(m_bImport && !m_bodyParts.isEmpty())
+        visibleParts = m_bodyParts;
+    else
+        for(const QString& part : assemblyParts)
+            if(!optionalEquipmentPart(part))
+                visibleParts.append(part);
+
+    QVector3D complexion = m_complection;
+    if(!m_bImport)
+    {
+        const QJsonArray values = appearance.value("complexion").toArray();
+        if(values.size() == 3)
+            complexion = QVector3D(float(values[0].toDouble(1.0)), float(values[1].toDouble(1.0)),
+                                   float(values[2].toDouble(1.0)));
+        const int hair = appearance.value("hairIndex").toInt(-1);
+        if(hair >= 0)
+        {
+            const QString hairPart = QString("%1.hair%2").arg(normalizedModel(model)).arg(hair, 2, 10, QChar('0'));
+            if(assemblyParts.contains(hairPart, Qt::CaseInsensitive))
+                visibleParts.append(hairPart);
+        }
+    }
+
+    SEquipmentLayoutRequest equipmentRequest;
+    equipmentRequest.profileId = appearanceRequest.profileId;
+    equipmentRequest.runtimeManifestId = appearanceRequest.runtimeManifestId;
+    equipmentRequest.prototype = m_prototypeName;
+    equipmentRequest.model = model;
+    equipmentRequest.assemblyParts = assemblyParts;
+    equipmentRequest.dataSource = appearanceRequest.dataSource;
+    equipmentRequest.armor = m_bImport ? m_aArmor : jsonStringList(appearance, "armor");
+    equipmentRequest.weapons = m_bImport ? m_aWeapon : jsonStringList(appearance, "weapons");
+    QJsonObject equipment;
+    const SRuntimeProviderResult equipmentResult = equipmentResolver->resolve(equipmentRequest, &equipment);
+    for(const QString& component : jsonStringList(equipment, "components"))
+        if(!visibleParts.contains(component, Qt::CaseInsensitive))
+            visibleParts.append(component);
+    for(const QJsonValue& finding : equipment.value("diagnostics").toArray())
+        ei::log(eLogWarning, QString("Unit %1 equipment: %2").arg(m_prototypeName, finding.toString()));
+    if(!equipmentResult.success && equipment.value("placeholders").toArray().isEmpty())
+        ei::log(eLogWarning, QString("Unit %1 equipment [%2]: %3")
+                .arg(m_prototypeName, equipmentResult.code, equipmentResult.message));
+    applyTransientVisual(model, texture, visibleParts, complexion);
 }
 
 uint CUnit::deserialize(util::CMobParser& parser)
@@ -378,6 +503,8 @@ void CUnit::getParam(QSharedPointer<IPropertyBase>& prop, EObjParam propType)
 
 void CUnit::applyParam(const QSharedPointer<IPropertyBase>& prop)
 {
+    ++m_visualRevision;
+    invalidateTransientVisual();
     switch (prop->type())
     {
     case eObjParam_UNIT_NEED_IMPORT:

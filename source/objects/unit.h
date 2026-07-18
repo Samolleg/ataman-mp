@@ -191,7 +191,10 @@ public:
     void applyParam(const QSharedPointer<IPropertyBase>& prop) override;
     void getLogicParam(QSharedPointer<IPropertyBase>& prop, EObjParam propType) override;
     void applyLogicParam(const QSharedPointer<IPropertyBase>& prop) override final;
-    const QString& databaseName(){return m_prototypeName;}
+    const QString& databaseName() const {return m_prototypeName;}
+    bool usesEmbeddedMobData() const { return m_bImport; }
+    const QStringList& embeddedWeapons() const { return m_aWeapon; }
+    const QStringList& embeddedArmor() const { return m_aArmor; }
     bool updatePos(QVector3D& pos) override;
     QJsonObject toJson() override;
     void collectLogicNodes(QList<CNode*>& arrNode);
@@ -214,6 +217,7 @@ public:
     bool restoreMovementState(const QVector<QVector3D>& state);
 
 private:
+    void refreshTransientVisual();
     //"UNIT_R", eNull};
     QString m_prototypeName;//"UNIT_PROTOTYPE", eString};
     bool m_prototypeNullTerminated{false};
@@ -227,6 +231,9 @@ private:
     bool m_bImport;//"UNIT_NEED_IMPORT", eByte};
     //
     QVector<CLogic*> m_aLogic;
+    quint64 m_visualRevision{1};
+    quint64 m_resolvedVisualRevision{0};
+    quint64 m_resolvedDatabaseGeneration{0};
 };
 
 #endif // UNIT_H

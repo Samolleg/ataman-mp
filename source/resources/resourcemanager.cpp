@@ -523,6 +523,15 @@ ei::CFigure* CObjectList::getFigure(const QString& name)
     return m_aFigure.contains(figureName) ? m_aFigure[figureName] : figureDefault();
 }
 
+QStringList CObjectList::figurePartNames(const QString& name)
+{
+    QStringList result;
+    ei::CFigure* figure = getFigure(name);
+    if(figure)
+        figure->getPartNames(result);
+    return result;
+}
+
 void CObjectList::initResource()
 {
     QSet<QString> empty;

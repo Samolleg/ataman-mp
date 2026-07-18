@@ -67,6 +67,12 @@ struct SRuntimeProviderResult
     QJsonObject evidence;
 };
 
+enum class EUnitVisualDataSource
+{
+    ProfileDatabase,
+    EmbeddedMob
+};
+
 struct SCharacterAppearanceRequest
 {
     QString profileId;
@@ -75,6 +81,8 @@ struct SCharacterAppearanceRequest
     QString model;
     QString primaryTexture;
     QString secondaryTexture;
+    QStringList bodyParts;
+    EUnitVisualDataSource dataSource{EUnitVisualDataSource::ProfileDatabase};
 };
 
 class ICharacterAppearanceResolver
@@ -94,6 +102,9 @@ struct SEquipmentLayoutRequest
     QStringList weapons;
     QStringList armor;
     QStringList perks;
+    QString model;
+    QStringList assemblyParts;
+    EUnitVisualDataSource dataSource{EUnitVisualDataSource::ProfileDatabase};
 };
 
 class IEquipmentLayoutResolver

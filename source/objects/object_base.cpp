@@ -467,6 +467,32 @@ void CObjectBase::recalcFigure()
     recalcMinPos();
 }
 
+void CObjectBase::applyTransientVisual(const QString& modelName, const QString& textureName,
+                                       const QStringList& visibleParts, const QVector3D& complexion)
+{
+    const QString fingerprint = modelName.toLower() + '|' + textureName.toLower() + '|'
+        + visibleParts.join(';').toLower() + '|' + QString::number(complexion.x(), 'g', 8)
+        + ',' + QString::number(complexion.y(), 'g', 8) + ',' + QString::number(complexion.z(), 'g', 8);
+    if(fingerprint == m_transientVisualFingerprint)
+        return;
+    m_transientVisualFingerprint = fingerprint;
+    m_pFigure = CObjectList::getInstance()->getFigure(modelName);
+    // The caller already resolved profile-vs-import precedence. Using the
+    // literal texture lookup prevents the legacy heuristic from substituting
+    // a database skin for incomplete embedded-MOB data.
+    m_texture = CTextureList::getInstance()->texture(textureName);
+    m_bboxDirty = true;
+    for(CPart* part : m_aPart)
+        delete part;
+    m_aPart.clear();
+    if(!m_pFigure)
+        return;
+    QStringList parts = visibleParts;
+    QVector3D renderComplexion = complexion;
+    m_pFigure->getVertexData(m_aPart, renderComplexion, parts);
+    recalcMinPos();
+}
+
 void CObjectBase::recalcMinPos()
 {
     float min(1000.0f); // 0.0f?

@@ -164,7 +164,7 @@ void ProfileDatabaseTests::providersAreStrictAndJmvOverlaysOnlyActions()
     request.providerId = "jmv.v1";
     request.profileId = "compatible-jmv-mod";
     request.runtimeManifestId = "test-jmv";
-    request.resourceDirectories = {root.filePath("jmv"), root.filePath("base")};
+    request.resourceDirectories = QStringList() << root.filePath("jmv") << root.filePath("base");
     auto jmvSnapshot = service.snapshot(request);
     QVERIFY(jmvSnapshot->usable());
     QCOMPARE(jmvSnapshot->actionTables.value("unhuma.adb"), QByteArray("jmv-overlay-action"));

@@ -42,6 +42,10 @@ struct SMonsterDatabaseRecord
     QString name;
     QString baseRace;
     int skinIndex{-1};
+    int hairIndex{-1};
+    float complexionX{1.0f};
+    float complexionY{1.0f};
+    float complexionZ{1.0f};
     QStringList wears;
     QString weapon;
     QString secondWeapon;
@@ -143,15 +147,18 @@ class ProfileDatabaseContext
 {
 public:
     static ProfileDatabaseContext& instance();
-    void activate(const QSharedPointer<const SProfileDatabaseSnapshot>& snapshot);
+    void activate(const QSharedPointer<const SProfileDatabaseSnapshot>& snapshot,
+                  const QMap<QString, QString>& providerBindings = QMap<QString, QString>());
     QSharedPointer<const SProfileDatabaseSnapshot> current() const;
     quint64 generation() const;
+    QString providerForRole(const QString& role) const;
 
 private:
     ProfileDatabaseContext() = default;
     mutable QReadWriteLock m_lock;
     QSharedPointer<const SProfileDatabaseSnapshot> m_current;
     quint64 m_generation{0};
+    QMap<QString, QString> m_providerBindings;
 };
 
 }

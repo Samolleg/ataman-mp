@@ -54,6 +54,9 @@ public:
 protected:
     void recalcFigure();
     void recalcMinPos();
+    void applyTransientVisual(const QString& modelName, const QString& textureName,
+                              const QStringList& visibleParts, const QVector3D& complexion);
+    void invalidateTransientVisual() { m_transientVisualFingerprint.clear(); }
     //void updateVisibility(QVector<QString>& aPart);
 
 protected:
@@ -69,6 +72,7 @@ private:
     bool m_bDeleted;
     CBox m_cachedBBox;
     bool m_bboxDirty;
+    QString m_transientVisualFingerprint;
 };
 
 #endif // OBJECT_H
