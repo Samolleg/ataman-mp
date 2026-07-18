@@ -1,7 +1,7 @@
-# JMV single-player map-loader entry probe
+# JMV direct single-player map launcher
 
-This x86 `.plg` is a temporary, telemetry-only provider for the fingerprinted
-JMV runtime stack. It is not loaded into EI Mapper itself. During a probe run
+This x86 `.plg` is a temporary, profile-specific provider for the fingerprinted
+JMV runtime stack. It is not loaded into EI Mapper itself. During a test run
 the editor copies it into JMV's configured `DEV/Plugin=plugin.dll` slot, where
 Starter calls `EntryBeforePatch` and `EntryAfterPatch`. The slot must be absent;
 Endurance never replaces an installed mod plugin. The provider and other
@@ -12,26 +12,33 @@ The provider verifies the exact approved `game.exe` hash and patches the
 already loaded modules' imports of `CreateFileA/W` and
 `GetFileAttributesA/W`. It records only `.mpr`, `.mob`, and `.mq` operations,
 including thread ID and a bounded module-relative call stack, in the run's
-`bridge-result.log`. It also installs a byte-guarded entry probe at the normal
-single-player loader identified by the alpha.51 evidence. That probe records
-the loader's caller, owning controller, and three arguments without changing
-them. Module bases are recorded so addresses can be reconciled offline.
+`bridge-result.log`. It installs a byte-guarded detour at the normal
+single-player loader identified by the alpha.51/52 evidence.
 
-The probe is deliberately passive:
+After the ordinary main-menu loader returns, the provider queues a private
+message to that same game thread. The message hook invokes the engine's full
+New Game initializer, and the loader detour substitutes only that initializer's
+verified MPR/MOB arguments with the staged Endurance paths. The engine retains
+its normal session and player initialization. Module bases and each relevant
+file open remain recorded for runtime verification.
 
-- it invokes no console or internal game command;
-- it performs no map redirection;
+The provider remains deliberately narrow:
+
+- it invokes the fingerprinted normal New Game initializer, not a console or
+  multiplayer/server command;
+- it redirects only the expected loader call made by that initializer;
 - it does not modify Starter, JMV configuration, maps, saves, or movie files;
-- it does not attempt to infer readiness from a fixed delay.
+- it does not infer readiness from a fixed delay; the normal main-menu loader
+  return and game-thread message loop provide the lifecycle boundary.
 
-The user should reach the main menu, start New Game normally, optionally travel
-to another zone, and exit normally. Those transitions provide the evidence
-needed to locate the real single-player map-loading path. The previously tested
-internal `server` handler is intentionally absent because runtime evidence
-showed it enters an incomplete multiplayer/server transition instead.
+The user launches with Ctrl+F5 and waits for the normal intro/menu lifecycle.
+The provider should automatically enter the staged map without a manual New
+Game click. The previously tested internal `server` handler remains absent
+because runtime evidence showed it enters an incomplete multiplayer/server
+transition instead.
 
 Starter treats a non-zero callback return as an assertion condition, so both
-exports always return zero. Initialization failures are reported in the probe
+exports always return zero. Initialization failures are reported in the run
 log and otherwise leave the runtime untouched.
 
 Build with `build-x86.cmd` from an x86 Visual Studio 2022 environment. Generated

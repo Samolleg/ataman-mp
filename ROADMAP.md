@@ -497,6 +497,14 @@ MOB editing does not imply that landscape saving is supported.
   pointer, caller, thread, and three raw/string arguments for each normal map
   transition. It still issues no command and performs no redirect; this is the
   final signature/lifecycle gate before implementing the staged-map call.
+- [x] `0.1.0-alpha.53`: implement the first actual staged-map launch using the
+  normal JMV single-player path. After the verified main-menu loader returns,
+  queue a private message to that exact game thread, invoke the engine's full
+  New Game initializer at `game.exe+0x00056140`, and substitute only its
+  verified MPR/MOB loader arguments with the hash-owned staged pair. No fixed
+  delay, console/server command, live-map overwrite, or campaign save is used.
+  Runtime validation remains required before the experimental capability can
+  be considered available.
 - [x] `0.1.0-alpha.41`: redo-safe raw provenance and the July 17 multi-edit/UI
   fixes passed owner testing and were handed to the closed tester group.
   ([`db3fa31`](https://github.com/Ilufus/ei-mapper-endurance/commit/db3fa31))

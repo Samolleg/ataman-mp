@@ -25,6 +25,8 @@ using CreateFileWFn = HANDLE (WINAPI*)(LPCWSTR, DWORD, DWORD, LPSECURITY_ATTRIBU
 using GetFileAttributesAFn = DWORD (WINAPI*)(LPCSTR);
 using GetFileAttributesWFn = DWORD (WINAPI*)(LPCWSTR);
 using CaptureStackFn = USHORT (WINAPI*)(ULONG, ULONG, PVOID*, PULONG);
+using MapLoadFn = int (__thiscall*)(void*, const char*, const char*, void*);
+using NewGameFn = ULONG_PTR (__cdecl*)();
 
 HMODULE g_instance = nullptr;
 volatile LONG g_initialized = 0;
@@ -37,46 +39,24 @@ GetFileAttributesWFn g_originalGetFileAttributesW = nullptr;
 CaptureStackFn g_captureStack = nullptr;
 
 constexpr DWORD kMapLoadEntryRva = 0x00195480;
+constexpr DWORD kNewGameEntryRva = 0x00056140;
+constexpr DWORD kNewGameMapLoadReturnRva = 0x000561F5;
+constexpr UINT kDirectLaunchMessage = WM_APP + 0x45D;
 constexpr unsigned char kMapLoadEntryBytes[6] = {
     0x64, 0xA1, 0x00, 0x00, 0x00, 0x00
 };
 
-void* g_mapLoadTrampoline = nullptr;
-volatile LONG g_mapCaptureReady = 0;
-volatile DWORD g_mapCaptureThread = 0;
-volatile DWORD g_mapCaptureCaller = 0;
-volatile DWORD g_mapCaptureThis = 0;
-volatile DWORD g_mapCaptureArg1 = 0;
-volatile DWORD g_mapCaptureArg2 = 0;
-volatile DWORD g_mapCaptureArg3 = 0;
+MapLoadFn g_originalMapLoad = nullptr;
+HMODULE g_gameModule = nullptr;
+HHOOK g_directLaunchHook = nullptr;
+volatile LONG g_directLaunchState = 0;
+DWORD g_gameThreadId = 0;
+char g_temporaryMpr[MAX_PATH * 4] = {};
+char g_temporaryMob[MAX_PATH * 4] = {};
 
-__declspec(naked) void MapLoadEntryHook()
-{
-    __asm
-    {
-        pushfd
-        push eax
-        cmp dword ptr [g_mapCaptureReady], 0
-        jne capture_done
-        mov eax, dword ptr fs:[24h]
-        mov dword ptr [g_mapCaptureThread], eax
-        mov eax, dword ptr [esp+8]
-        mov dword ptr [g_mapCaptureCaller], eax
-        mov eax, ecx
-        mov dword ptr [g_mapCaptureThis], eax
-        mov eax, dword ptr [esp+0Ch]
-        mov dword ptr [g_mapCaptureArg1], eax
-        mov eax, dword ptr [esp+10h]
-        mov dword ptr [g_mapCaptureArg2], eax
-        mov eax, dword ptr [esp+14h]
-        mov dword ptr [g_mapCaptureArg3], eax
-        mov dword ptr [g_mapCaptureReady], 1
-capture_done:
-        pop eax
-        popfd
-        jmp dword ptr [g_mapLoadTrampoline]
-    }
-}
+int __fastcall MapLoadDetour(void* self, void*, const char* mprPath,
+                             const char* mobPath, void* context);
+LRESULT CALLBACK DirectLaunchMessageHook(int code, WPARAM wParam, LPARAM lParam);
 
 const wchar_t* FileNamePart(const wchar_t* path)
 {
@@ -424,94 +404,162 @@ int InstallFileObservationHooks()
     return patched;
 }
 
-bool ReadPlausibleAnsi(DWORD address, wchar_t* output, size_t capacity)
+const char* FileNamePartA(const char* path)
 {
-    if(!output || !capacity || !address)
+    if(!path)
+        return nullptr;
+    const char* slash = std::strrchr(path, '\\');
+    const char* forward = std::strrchr(path, '/');
+    if(!slash || (forward && forward > slash))
+        slash = forward;
+    return slash ? slash + 1 : path;
+}
+
+bool IsMainMenuMpr(const char* path)
+{
+    const char* name = FileNamePartA(path);
+    return name && _stricmp(name, "ZoneMainMenuNew.mpr") == 0;
+}
+
+bool ReadDirectLaunchPaths()
+{
+    wchar_t mpr[MAX_PATH * 4]{};
+    wchar_t mob[MAX_PATH * 4]{};
+    if(!GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_TEMP_MPR", mpr,
+                                DWORD(sizeof(mpr) / sizeof(mpr[0]))) ||
+       !GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_TEMP_MOB", mob,
+                                DWORD(sizeof(mob) / sizeof(mob[0]))) ||
+       GetFileAttributesW(mpr) == INVALID_FILE_ATTRIBUTES ||
+       GetFileAttributesW(mob) == INVALID_FILE_ATTRIBUTES)
+    {
+        Log(L"DIRECT_LAUNCH disabled: staged MPR/MOB environment paths are missing or unreadable");
         return false;
-    output[0] = L'\0';
-    char text[1024]{};
-    size_t length = 0;
-    __try
-    {
-        MEMORY_BASIC_INFORMATION memory{};
-        if(VirtualQuery(reinterpret_cast<void*>(address), &memory, sizeof(memory)) != sizeof(memory) ||
-           memory.State != MEM_COMMIT || (memory.Protect & (PAGE_NOACCESS | PAGE_GUARD)))
-            return false;
-        const char* source = reinterpret_cast<const char*>(address);
-        for(; length + 1 < sizeof(text); ++length)
-        {
-            const unsigned char value = static_cast<unsigned char>(source[length]);
-            if(value == 0)
-                break;
-            if(value < 0x20 || value == 0x7F)
-                return false;
-            text[length] = static_cast<char>(value);
-        }
-        if(length == 0 || length + 1 >= sizeof(text))
-            return false;
     }
-    __except(EXCEPTION_EXECUTE_HANDLER)
+    BOOL mprSubstitution = FALSE;
+    BOOL mobSubstitution = FALSE;
+    if(!WideCharToMultiByte(CP_ACP, WC_NO_BEST_FIT_CHARS, mpr, -1,
+                            g_temporaryMpr, int(sizeof(g_temporaryMpr)), nullptr,
+                            &mprSubstitution) ||
+       !WideCharToMultiByte(CP_ACP, WC_NO_BEST_FIT_CHARS, mob, -1,
+                            g_temporaryMob, int(sizeof(g_temporaryMob)), nullptr,
+                            &mobSubstitution) || mprSubstitution || mobSubstitution)
     {
+        Log(L"DIRECT_LAUNCH disabled: staged paths cannot be represented in the game ANSI code page");
         return false;
     }
-    return MultiByteToWideChar(CP_ACP, 0, text, int(length), output,
-                               int(capacity - 1)) > 0;
+    return true;
 }
 
-void FormatMapArgument(DWORD value, wchar_t* output, size_t capacity)
+bool QueueDirectLaunchOnCurrentThread()
 {
-    if(!output || !capacity)
-        return;
-    wchar_t text[1024]{};
-    if(value && ReadPlausibleAnsi(value, text, sizeof(text) / sizeof(text[0])))
-        _snwprintf_s(output, capacity, _TRUNCATE, L"0x%08lX=\"%s\"", value, text);
-    else
-        _snwprintf_s(output, capacity, _TRUNCATE, L"0x%08lX", value);
-}
-
-DWORD WINAPI MapCaptureWorker(void*)
-{
-    LONG sequence = 0;
-    for(;;)
+    g_gameThreadId = GetCurrentThreadId();
+    g_directLaunchHook = SetWindowsHookExW(WH_GETMESSAGE, &DirectLaunchMessageHook,
+                                           g_instance, g_gameThreadId);
+    if(!g_directLaunchHook)
     {
-        if(InterlockedCompareExchange(&g_mapCaptureReady, 2, 1) == 1)
-        {
-            const DWORD thread = g_mapCaptureThread;
-            const DWORD caller = g_mapCaptureCaller;
-            const DWORD self = g_mapCaptureThis;
-            const DWORD arg1 = g_mapCaptureArg1;
-            const DWORD arg2 = g_mapCaptureArg2;
-            const DWORD arg3 = g_mapCaptureArg3;
-            InterlockedExchange(&g_mapCaptureReady, 0);
-
-            wchar_t arg1Text[1200]{};
-            wchar_t arg2Text[1200]{};
-            wchar_t arg3Text[1200]{};
-            FormatMapArgument(arg1, arg1Text, sizeof(arg1Text) / sizeof(arg1Text[0]));
-            FormatMapArgument(arg2, arg2Text, sizeof(arg2Text) / sizeof(arg2Text[0]));
-            FormatMapArgument(arg3, arg3Text, sizeof(arg3Text) / sizeof(arg3Text[0]));
-            wchar_t callerText[256]{};
-            FormatAddress(reinterpret_cast<void*>(caller), callerText,
-                          sizeof(callerText) / sizeof(callerText[0]));
-            wchar_t message[4096]{};
-            _snwprintf_s(message, sizeof(message) / sizeof(message[0]), _TRUNCATE,
-                         L"MAP_LOAD_ENTRY seq=%ld thread=%lu caller=%s this=0x%08lX arg1=%s arg2=%s arg3=%s",
-                         ++sequence, thread, callerText, self, arg1Text, arg2Text, arg3Text);
-            Log(message);
-        }
-        Sleep(10);
+        Log(L"DIRECT_LAUNCH failed: could not install the game-thread message hook");
+        InterlockedExchange(&g_directLaunchState, -1);
+        return false;
     }
+    if(InterlockedCompareExchange(&g_directLaunchState, 2, 1) != 1 ||
+       !PostThreadMessageW(g_gameThreadId, kDirectLaunchMessage, 0, 0))
+    {
+        UnhookWindowsHookEx(g_directLaunchHook);
+        g_directLaunchHook = nullptr;
+        Log(L"DIRECT_LAUNCH failed: could not queue the game-thread launch request");
+        InterlockedExchange(&g_directLaunchState, -1);
+        return false;
+    }
+    wchar_t message[256]{};
+    _snwprintf_s(message, sizeof(message) / sizeof(message[0]), _TRUNCATE,
+                 L"DIRECT_LAUNCH queued thread=%lu after normal main-menu load",
+                 g_gameThreadId);
+    Log(message);
+    return true;
 }
 
-bool InstallMapLoadEntryProbe()
+int __fastcall MapLoadDetour(void* self, void*, const char* mprPath,
+                             const char* mobPath, void* context)
 {
-    auto* game = reinterpret_cast<unsigned char*>(GetModuleHandleW(nullptr));
-    if(!game)
+    void* caller = _ReturnAddress();
+    const auto* expectedNewGameReturn = reinterpret_cast<unsigned char*>(g_gameModule)
+        + kNewGameMapLoadReturnRva;
+    const bool redirect = g_directLaunchState == 3 &&
+        caller == expectedNewGameReturn &&
+        InterlockedCompareExchange(&g_directLaunchState, 4, 3) == 3;
+    const char* selectedMpr = redirect ? g_temporaryMpr : mprPath;
+    const char* selectedMob = redirect ? g_temporaryMob : mobPath;
+    if(redirect)
+    {
+        wchar_t mpr[MAX_PATH * 4]{};
+        wchar_t mob[MAX_PATH * 4]{};
+        MultiByteToWideChar(CP_ACP, 0, selectedMpr, -1, mpr,
+                            int(sizeof(mpr) / sizeof(mpr[0])));
+        MultiByteToWideChar(CP_ACP, 0, selectedMob, -1, mob,
+                            int(sizeof(mob) / sizeof(mob[0])));
+        wchar_t message[3000]{};
+        _snwprintf_s(message, sizeof(message) / sizeof(message[0]), _TRUNCATE,
+                     L"DIRECT_LAUNCH redirecting normal New Game loader mpr=\"%s\" mob=\"%s\" context=0x%08lX",
+                     mpr, mob, DWORD(reinterpret_cast<uintptr_t>(context)));
+        Log(message);
+    }
+
+    const int result = g_originalMapLoad(self, selectedMpr, selectedMob, context);
+    if(redirect)
+    {
+        wchar_t message[256]{};
+        _snwprintf_s(message, sizeof(message) / sizeof(message[0]), _TRUNCATE,
+                     L"DIRECT_LAUNCH staged map loader returned result=%d", result);
+        Log(message);
+    }
+    else if(g_directLaunchState == 1 && IsMainMenuMpr(mprPath))
+        QueueDirectLaunchOnCurrentThread();
+    return result;
+}
+
+LRESULT CALLBACK DirectLaunchMessageHook(int code, WPARAM wParam, LPARAM lParam)
+{
+    MSG* message = reinterpret_cast<MSG*>(lParam);
+    if(code < 0 || wParam != PM_REMOVE || !message ||
+       message->message != kDirectLaunchMessage)
+        return CallNextHookEx(g_directLaunchHook, code, wParam, lParam);
+
+    message->message = WM_NULL;
+    const LRESULT next = CallNextHookEx(g_directLaunchHook, code, wParam, lParam);
+    HHOOK hook = g_directLaunchHook;
+    g_directLaunchHook = nullptr;
+    if(hook)
+        UnhookWindowsHookEx(hook);
+    if(InterlockedCompareExchange(&g_directLaunchState, 3, 2) != 2)
+        return next;
+
+    Log(L"DIRECT_LAUNCH invoking the normal New Game initializer on the game thread");
+    const auto newGame = reinterpret_cast<NewGameFn>(
+        reinterpret_cast<unsigned char*>(g_gameModule) + kNewGameEntryRva);
+    const ULONG_PTR result = newGame();
+    const bool redirected = InterlockedCompareExchange(&g_directLaunchState, 6, 4) == 4;
+    if(!redirected)
+        InterlockedExchange(&g_directLaunchState, -1);
+    wchar_t resultMessage[320]{};
+    _snwprintf_s(resultMessage, sizeof(resultMessage) / sizeof(resultMessage[0]), _TRUNCATE,
+                 redirected
+                    ? L"DIRECT_LAUNCH New Game initializer completed result=0x%08lX staged_loader=observed"
+                    : L"DIRECT_LAUNCH failed: New Game initializer completed result=0x%08lX without the expected staged loader call",
+                 DWORD(result));
+    Log(resultMessage);
+    return next;
+}
+
+bool InstallMapLoadDetour()
+{
+    g_gameModule = GetModuleHandleW(nullptr);
+    auto* game = reinterpret_cast<unsigned char*>(g_gameModule);
+    if(!game || !ReadDirectLaunchPaths())
         return false;
     unsigned char* target = game + kMapLoadEntryRva;
     if(std::memcmp(target, kMapLoadEntryBytes, sizeof(kMapLoadEntryBytes)) != 0)
     {
-        Log(L"MAP_LOAD_ENTRY disabled: validated entry bytes do not match");
+        Log(L"DIRECT_LAUNCH disabled: validated map-loader entry bytes do not match");
         return false;
     }
 
@@ -519,47 +567,42 @@ bool InstallMapLoadEntryProbe()
         MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE));
     if(!trampoline)
     {
-        Log(L"MAP_LOAD_ENTRY disabled: trampoline allocation failed");
+        Log(L"DIRECT_LAUNCH disabled: map-loader trampoline allocation failed");
         return false;
     }
     std::memcpy(trampoline, target, sizeof(kMapLoadEntryBytes));
     trampoline[6] = 0xE9;
     *reinterpret_cast<LONG*>(trampoline + 7) =
         LONG((target + sizeof(kMapLoadEntryBytes)) - (trampoline + 11));
-    g_mapLoadTrampoline = trampoline;
+    g_originalMapLoad = reinterpret_cast<MapLoadFn>(trampoline);
 
     DWORD oldProtect = 0;
     if(!VirtualProtect(target, sizeof(kMapLoadEntryBytes), PAGE_EXECUTE_READWRITE, &oldProtect))
     {
         VirtualFree(trampoline, 0, MEM_RELEASE);
-        g_mapLoadTrampoline = nullptr;
-        Log(L"MAP_LOAD_ENTRY disabled: entry protection change failed");
+        g_originalMapLoad = nullptr;
+        Log(L"DIRECT_LAUNCH disabled: map-loader protection change failed");
         return false;
     }
     target[0] = 0xE9;
     *reinterpret_cast<LONG*>(target + 1) =
-        LONG(reinterpret_cast<unsigned char*>(&MapLoadEntryHook) - (target + 5));
+        LONG(reinterpret_cast<unsigned char*>(&MapLoadDetour) - (target + 5));
     target[5] = 0x90;
     FlushInstructionCache(GetCurrentProcess(), target, sizeof(kMapLoadEntryBytes));
     DWORD ignored = 0;
     VirtualProtect(target, sizeof(kMapLoadEntryBytes), oldProtect, &ignored);
 
-    HANDLE worker = CreateThread(nullptr, 0, &MapCaptureWorker, nullptr, 0, nullptr);
-    if(!worker)
-    {
-        Log(L"MAP_LOAD_ENTRY warning: hook installed but telemetry worker failed");
-        return false;
-    }
-    CloseHandle(worker);
+    InterlockedExchange(&g_directLaunchState, 1);
     wchar_t message[256]{};
     _snwprintf_s(message, sizeof(message) / sizeof(message[0]), _TRUNCATE,
-                 L"MAP_LOAD_ENTRY active address=0x%08lX mode=observe-only",
-                 DWORD(reinterpret_cast<uintptr_t>(target)));
+                 L"DIRECT_LAUNCH armed map_loader=0x%08lX new_game=0x%08lX mode=single-player",
+                 DWORD(reinterpret_cast<uintptr_t>(target)),
+                 DWORD(reinterpret_cast<uintptr_t>(game + kNewGameEntryRva)));
     Log(message);
     return true;
 }
 
-bool InitializeProbe()
+bool InitializeDirectLaunch()
 {
     if(InterlockedCompareExchange(&g_initialized, 1, 0) != 0)
         return true;
@@ -567,21 +610,21 @@ bool InitializeProbe()
                             DWORD(sizeof(g_resultPath) / sizeof(g_resultPath[0])));
     if(!g_resultPath[0])
         return false;
-    Log(L"EI Mapper Endurance JMV single-player map-loader entry probe initializing");
+    Log(L"EI Mapper Endurance JMV direct single-player map launch initializing");
     if(!VerifyRuntime())
     {
-        Log(L"TRANSITION_PROBE disabled: game.exe SHA-256 does not match the validated JMV runtime");
+        Log(L"DIRECT_LAUNCH disabled: game.exe SHA-256 does not match the validated JMV runtime");
         return false;
     }
     const int patched = InstallFileObservationHooks();
-    const bool mapEntryProbe = InstallMapLoadEntryProbe();
+    const bool directLaunch = InstallMapLoadDetour();
     wchar_t message[256]{};
     _snwprintf_s(message, sizeof(message) / sizeof(message[0]), _TRUNCATE,
-                 L"TRANSITION_PROBE active imports=%d stack_capture=%s map_entry=%s mode=observe-only commands=none redirects=none",
+                 L"DIRECT_LAUNCH active imports=%d stack_capture=%s map_loader=%s trigger=normal-new-game",
                  patched, g_captureStack ? L"available" : L"unavailable",
-                 mapEntryProbe ? L"available" : L"unavailable");
+                 directLaunch ? L"available" : L"unavailable");
     Log(message);
-    return patched > 0 && mapEntryProbe;
+    return patched > 0 && directLaunch;
 }
 }
 
@@ -592,9 +635,9 @@ extern "C" __declspec(dllexport) int __cdecl EntryBeforePatch(const char*)
 
 extern "C" __declspec(dllexport) int __cdecl EntryAfterPatch(const char*)
 {
-    // Starter treats non-zero as an assertion condition. Probe failures are
+    // Starter treats non-zero as an assertion condition. Launch failures are
     // recorded in the run log and leave the runtime otherwise untouched.
-    InitializeProbe();
+    InitializeDirectLaunch();
     return 0;
 }
 
