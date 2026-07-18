@@ -84,6 +84,10 @@ void CMapsBrowser::rebuildTree()
             item->setToolTip(1, tr("The MPR or MOB file is missing from the active map roots."));
         }
     }
+    QTreeWidgetItem* collections = new QTreeWidgetItem(m_tree, {tr("Collections")});
+    collections->setFirstColumnSpanned(true);
+    collections->setExpanded(true);
+    collections->setToolTip(0, tr("Portable collections will appear here when collection-file support is added."));
     applyFilter(m_filter->text());
 }
 

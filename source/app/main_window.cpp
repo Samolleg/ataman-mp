@@ -456,11 +456,11 @@ void MainWindow::updateMapTestAction()
         return;
     if(m_mapTestLauncher && m_mapTestLauncher->isRunning())
     {
-        m_mapTestAction->setText(tr("Stop JMV Transition Probe"));
+        m_mapTestAction->setText(tr("Stop JMV Map Test"));
         m_mapTestAction->setEnabled(true);
         return;
     }
-    m_mapTestAction->setText(tr("Probe JMV Map Transition"));
+    m_mapTestAction->setText(tr("Test Current Map in JMV"));
     COptString* profile = dynamic_cast<COptString*>(m_settings->opt(eOptSetResource, "resourceProfile"));
     const bool isJmv = profile && profile->value().compare("jamais-vu", Qt::CaseInsensitive) == 0;
     const bool hasPair = m_pView && m_pView->hasActiveMob()
