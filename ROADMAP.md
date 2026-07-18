@@ -415,6 +415,16 @@ MOB editing does not imply that landscape saving is supported.
   operations, thread IDs, module inventories, and bounded module-relative call
   stacks while the user starts New Game or travels normally. It invokes no
   command, redirects no file, and makes no readiness assumption.
+- [x] Analyze the first alpha.50 transition run. It confirmed the normal JMV
+  sequence `ZoneMainMenuNew` -> `zone1` -> `zone7` -> `ZoneMainMenuNew`, with
+  `AutoRunSpellAddon123.mob` and `Autozone1gate.mob` supplementing `zone1`.
+  The user-visible game session exited normally. The optional stack walker
+  returned no frames, so this run identifies the file sequence but not yet the
+  engine transition callsite.
+- [x] Alpha.51 records the immediate IAT caller address before each observed
+  file operation and disables frame-pointer omission in the probe build. This
+  remains observe-only and provides a reliable module-relative address even
+  when `RtlCaptureStackBackTrace` supplies no deeper frames.
 - [ ] Use alpha.50 evidence to identify and fingerprint the actual
   single-player transition entry point and required session/player state.
 - [ ] Implement a new JMV launch provider only after that observed path can load
@@ -475,6 +485,8 @@ MOB editing does not imply that landscape saving is supported.
   ship an observe-only transition probe. The focused test is normal New Game
   and optional zone travel; the retained log must expose the real MPR/MOB call
   path before direct launch development resumes.
+- [x] `0.1.0-alpha.51`: add reliable immediate-caller telemetry after the first
+  alpha.50 run captured the complete file sequence but empty optional stacks.
 - [x] `0.1.0-alpha.41`: redo-safe raw provenance and the July 17 multi-edit/UI
   fixes passed owner testing and were handed to the closed tester group.
   ([`db3fa31`](https://github.com/Ilufus/ei-mapper-endurance/commit/db3fa31))

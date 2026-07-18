@@ -6,6 +6,9 @@
 #include <cstdio>
 #include <cwchar>
 #include <cstring>
+#include <intrin.h>
+
+#pragma intrinsic(_ReturnAddress)
 
 namespace {
 constexpr unsigned char kExpectedGameSha256[32] = {
@@ -171,8 +174,35 @@ void FormatStack(wchar_t* output, size_t capacity)
     }
 }
 
+void FormatAddress(void* address, wchar_t* output, size_t capacity)
+{
+    if(!output || !capacity)
+        return;
+    output[0] = L'\0';
+    if(!address)
+    {
+        AppendText(output, capacity, L"unavailable");
+        return;
+    }
+
+    MEMORY_BASIC_INFORMATION memory{};
+    wchar_t modulePath[MAX_PATH * 4]{};
+    const HMODULE module = VirtualQuery(address, &memory, sizeof(memory)) == sizeof(memory)
+        ? static_cast<HMODULE>(memory.AllocationBase) : nullptr;
+    const wchar_t* moduleName = L"unknown";
+    if(module && GetModuleFileNameW(module, modulePath,
+                                   DWORD(sizeof(modulePath) / sizeof(modulePath[0]))))
+        moduleName = FileNamePart(modulePath);
+    _snwprintf_s(output, capacity, _TRUNCATE, L"%s+0x%08lX@0x%08lX",
+                 moduleName,
+                 module ? DWORD(reinterpret_cast<uintptr_t>(address) -
+                                reinterpret_cast<uintptr_t>(module))
+                        : DWORD(reinterpret_cast<uintptr_t>(address)),
+                 DWORD(reinterpret_cast<uintptr_t>(address)));
+}
+
 void Observe(const wchar_t* operation, const wchar_t* path, ULONG_PTR result,
-             DWORD error, DWORD access = 0, DWORD creation = 0)
+             DWORD error, void* caller, DWORD access = 0, DWORD creation = 0)
 {
     if(!HasObservedExtension(path))
         return;
@@ -181,11 +211,13 @@ void Observe(const wchar_t* operation, const wchar_t* path, ULONG_PTR result,
         return;
     wchar_t stack[2500]{};
     FormatStack(stack, sizeof(stack) / sizeof(stack[0]));
+    wchar_t callerText[256]{};
+    FormatAddress(caller, callerText, sizeof(callerText) / sizeof(callerText[0]));
     wchar_t message[3900]{};
     _snwprintf_s(message, sizeof(message) / sizeof(message[0]), _TRUNCATE,
-                 L"TRANSITION_PROBE seq=%ld thread=%lu op=%s path=\"%s\" result=0x%08lX error=%lu access=0x%08lX creation=%lu stack=%s",
+                 L"TRANSITION_PROBE seq=%ld thread=%lu op=%s path=\"%s\" result=0x%08lX error=%lu access=0x%08lX creation=%lu caller=%s stack=%s",
                  sequence, GetCurrentThreadId(), operation, path ? path : L"<null>",
-                 DWORD(result), error, access, creation, stack);
+                 DWORD(result), error, access, creation, callerText, stack);
     Log(message);
 }
 
@@ -193,9 +225,10 @@ HANDLE WINAPI HookCreateFileW(LPCWSTR path, DWORD access, DWORD share,
                               LPSECURITY_ATTRIBUTES security, DWORD creation,
                               DWORD flags, HANDLE templateFile)
 {
+    void* caller = _ReturnAddress();
     HANDLE result = g_originalCreateFileW(path, access, share, security, creation, flags, templateFile);
     const DWORD error = GetLastError();
-    Observe(L"CreateFileW", path, reinterpret_cast<ULONG_PTR>(result), error, access, creation);
+    Observe(L"CreateFileW", path, reinterpret_cast<ULONG_PTR>(result), error, caller, access, creation);
     SetLastError(error);
     return result;
 }
@@ -204,6 +237,7 @@ HANDLE WINAPI HookCreateFileA(LPCSTR path, DWORD access, DWORD share,
                               LPSECURITY_ATTRIBUTES security, DWORD creation,
                               DWORD flags, HANDLE templateFile)
 {
+    void* caller = _ReturnAddress();
     HANDLE result = g_originalCreateFileA(path, access, share, security, creation, flags, templateFile);
     const DWORD error = GetLastError();
     if(path)
@@ -211,7 +245,7 @@ HANDLE WINAPI HookCreateFileA(LPCSTR path, DWORD access, DWORD share,
         wchar_t pathW[MAX_PATH * 4]{};
         MultiByteToWideChar(CP_ACP, 0, path, -1, pathW,
                             int(sizeof(pathW) / sizeof(pathW[0])));
-        Observe(L"CreateFileA", pathW, reinterpret_cast<ULONG_PTR>(result), error, access, creation);
+        Observe(L"CreateFileA", pathW, reinterpret_cast<ULONG_PTR>(result), error, caller, access, creation);
     }
     SetLastError(error);
     return result;
@@ -219,15 +253,17 @@ HANDLE WINAPI HookCreateFileA(LPCSTR path, DWORD access, DWORD share,
 
 DWORD WINAPI HookGetFileAttributesW(LPCWSTR path)
 {
+    void* caller = _ReturnAddress();
     const DWORD result = g_originalGetFileAttributesW(path);
     const DWORD error = GetLastError();
-    Observe(L"GetFileAttributesW", path, result, error);
+    Observe(L"GetFileAttributesW", path, result, error, caller);
     SetLastError(error);
     return result;
 }
 
 DWORD WINAPI HookGetFileAttributesA(LPCSTR path)
 {
+    void* caller = _ReturnAddress();
     const DWORD result = g_originalGetFileAttributesA(path);
     const DWORD error = GetLastError();
     if(path)
@@ -235,7 +271,7 @@ DWORD WINAPI HookGetFileAttributesA(LPCSTR path)
         wchar_t pathW[MAX_PATH * 4]{};
         MultiByteToWideChar(CP_ACP, 0, path, -1, pathW,
                             int(sizeof(pathW) / sizeof(pathW[0])));
-        Observe(L"GetFileAttributesA", pathW, result, error);
+        Observe(L"GetFileAttributesA", pathW, result, error, caller);
     }
     SetLastError(error);
     return result;
