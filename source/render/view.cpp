@@ -1008,12 +1008,19 @@ void CView::loadMob(QFileInfo &filePath)
     QElapsedTimer preloadTimer;
     preloadTimer.start();
     int preloadedUnits = 0;
+    int unitCount = 0;
+    for(CNode* node : pMob->nodes())
+        if(dynamic_cast<CUnit*>(node))
+            ++unitCount;
+    if(unitCount > 0)
+        m_pProgress->reset();
     makeCurrent();
     for(CNode* node : pMob->nodes())
         if(CUnit* unit = dynamic_cast<CUnit*>(node))
         {
             unit->preloadVisualResources();
             ++preloadedUnits;
+            m_pProgress->update(100.0 / unitCount);
         }
     doneCurrent();
     ei::log(eLogInfo, QString("Preloaded visual resources for %1 units during MOB load in %2 ms")
