@@ -542,6 +542,7 @@ MOB editing does not imply that landscape saving is supported.
   Ctrl+F5 now displays preparation progress immediately and its safety warning
   can be acknowledged once. Runtime validation remains required for the new
   player, zone metadata, briefing-map, intro, and save-isolation behavior.
+  ([`1810546`](https://github.com/Ilufus/ei-mapper-endurance/commit/18105469f0b0f5cd46189824ca65dbdde3f3ce23))
 - [x] `0.1.0-alpha.41`: redo-safe raw provenance and the July 17 multi-edit/UI
   fixes passed owner testing and were handed to the closed tester group.
   ([`db3fa31`](https://github.com/Ilufus/ei-mapper-endurance/commit/db3fa31))
