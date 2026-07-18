@@ -54,12 +54,29 @@ bool numberedHumanoidSkin(const QString& model)
     return models.contains(model.trimmed().toLower());
 }
 
+bool numberedZombieSkin(const QString& model)
+{
+    static const QSet<QString> models = {"unhuzm", "unhuzf"};
+    return models.contains(model.trimmed().toLower());
+}
+
 QString jmvMonsterTextureName(const SCharacterAppearanceRequest& request, const QString& model,
                               const QStringList& primary, int skinIndex)
 {
     if(numberedHumanoidSkin(model))
         return skinIndex < 0 ? QString()
-            : textureName(model, QString("skin_%1").arg(skinIndex, 2, 10, QChar('0')));
+            : textureName(model, QString("skin_%1_x4").arg(skinIndex, 2, 10, QChar('0')));
+
+    if(numberedZombieSkin(model))
+        return skinIndex < 0 ? QString()
+            : textureName(model, QString("skin_%1_x4").arg(skinIndex, 2, 10, QChar('0')));
+
+    // JMV frequently changes a creature's RaceModels assembly while the MOB
+    // retains the older embedded model/token.  A bounded database texture row
+    // is authoritative for a normal (non-imported) unit and is compatible with
+    // the database-selected assembly by construction.
+    if(skinIndex >= 0 && skinIndex < primary.size())
+        return textureName(model, primary.at(skinIndex));
 
     // JMV's non-humanoid numeric Graphics Data Skin Index is not an index into
     // RaceModels.FLD31 (GoblinSentryF2 is 91 while the race row has two names).
@@ -68,7 +85,6 @@ QString jmvMonsterTextureName(const SCharacterAppearanceRequest& request, const 
     if(model.compare(request.model.trimmed(), Qt::CaseInsensitive) == 0
             && !request.primaryTexture.trimmed().isEmpty())
         return textureName(model, request.primaryTexture);
-    Q_UNUSED(primary);
     return QString();
 }
 
@@ -193,7 +209,7 @@ QString equipmentTextureName(const QString& model, const QString& itemType, int 
     // families in the shipped Base/JMV corpus.
     QString textureModel = model.trimmed().toLower();
     static const QSet<QString> sharedHumanoidAtlases = {
-        "unhuma", "unhufe", "unorma", "unorfe", "unhusk"
+        "unhuma", "unhufe", "unorma", "unorfe", "unhusk", "unhuzm", "unhuzf"
     };
     if(sharedHumanoidAtlases.contains(textureModel))
         textureModel = "unhuma";
@@ -371,7 +387,16 @@ SRuntimeProviderResult resolveEquipmentLayout(
                 for(const QString& component : matched) componentTextures.insert(component, texture);
         }
         if(item->textureType1 > 0 && item->type.compare("helm", Qt::CaseInsensitive) != 0)
-            for(const QString& slot : armorSlots(item->type)) replacedParts.append(slot);
+            for(const QString& component : matched)
+            {
+                const int separator = component.indexOf(".armor", 0, Qt::CaseInsensitive);
+                if(separator > 0)
+                {
+                    const QString slot = component.left(separator);
+                    if(!replacedParts.contains(slot))
+                        replacedParts.append(slot);
+                }
+            }
     }
 
     struct Weapon { QString reference; ei::SItemDatabaseRecord item; EWeaponClass kind; };

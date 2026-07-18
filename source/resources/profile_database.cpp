@@ -89,6 +89,16 @@ void nestedStrings(const QByteArray& data, int begin, int end, QStringList* resu
 {
     if(depth > 8 || begin >= end)
         return;
+    // A leaf may begin with bytes that also happen to form a valid tag header
+    // (notably "2h ...": 0x32, 0x68).  Prefer a bounded printable leaf before
+    // attempting recursive tag decoding; container payloads contain tag header
+    // control bytes and therefore fail text().
+    const QString directLeaf = text(data.mid(begin, end - begin));
+    if(!directLeaf.isEmpty())
+    {
+        result->append(directLeaf);
+        return;
+    }
     int cursor = begin;
     bool parsed = false;
     while(cursor < end)
@@ -178,8 +188,25 @@ QStringList stringListField(const QMap<int, QByteArray>& fields, int id)
     nestedStrings(value, 0, value.size(), &encoded);
     QStringList result;
     for(const QString& entry : encoded)
-        for(const QString& part : entry.split(',', QString::SkipEmptyParts))
-            result.append(part.trimmed());
+    {
+        int squareDepth = 0;
+        int braceDepth = 0;
+        int start = 0;
+        for(int index = 0; index <= entry.size(); ++index)
+        {
+            const QChar c = index < entry.size() ? entry.at(index) : QChar(',');
+            if(c == '[') ++squareDepth;
+            else if(c == ']') squareDepth = qMax(0, squareDepth - 1);
+            else if(c == '{') ++braceDepth;
+            else if(c == '}') braceDepth = qMax(0, braceDepth - 1);
+            if(c == ',' && squareDepth == 0 && braceDepth == 0)
+            {
+                const QString part = entry.mid(start, index - start).trimmed();
+                if(!part.isEmpty()) result.append(part);
+                start = index + 1;
+            }
+        }
+    }
     result.removeDuplicates();
     return result;
 }

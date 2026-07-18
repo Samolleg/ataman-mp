@@ -146,7 +146,7 @@ QStringList jsonStringList(const QJsonObject& object, const char* key)
 bool optionalEquipmentPart(const QString& part)
 {
     static const QRegularExpression optional(
-        "(?:\\.(?:armor|sword|axe|dagger|pike|club|bow|crossbow|shield|dsword|daxe|dpike|dclub|staff|dstaff)\\d+|hr\\.\\d+)$",
+        "(?:^(?:sling)$|\\.(?:armor|sword|axe|dagger|pike|club|bow|crossbow|shield|dsword|daxe|dpike|dclub|staff|dstaff)\\d+|hr\\.\\d+)$",
         QRegularExpression::CaseInsensitiveOption);
     return optional.match(part).hasMatch();
 }
@@ -205,11 +205,17 @@ void CUnit::refreshTransientVisual()
     // model/equipment values are resolved. Ignoring it for database-backed
     // units exposes every mutually-exclusive human body/armor component.
     if(!m_bodyParts.isEmpty())
-        visibleParts = m_bodyParts;
+    {
+        for(const QString& part : m_bodyParts)
+            if(m_bImport || !optionalEquipmentPart(part))
+                visibleParts.append(part);
+    }
     else
+    {
         for(const QString& part : assemblyParts)
             if(!optionalEquipmentPart(part))
                 visibleParts.append(part);
+    }
 
     QVector3D complexion = m_complection;
     if(!m_bImport)

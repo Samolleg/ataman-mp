@@ -712,6 +712,12 @@ void CTextureList::parse(QByteArray& data, const QString& name)
         return;
     }
 
+    // SMmpHeader serializes a fixed 76-byte header.  The uncompressed and
+    // PNT3 decoders consume QDataStream directly, so leave it at the payload
+    // boundary rather than immediately after the fields read by operator>>.
+    // Compressed DXT uploads below use explicit byte offsets and are unchanged.
+    stream.device()->seek(header.size());
+
     QOpenGLTexture* texture = new QOpenGLTexture(QOpenGLTexture::Target2D);
     texture->setMinificationFilter(QOpenGLTexture::NearestMipMapNearest);
     texture->setMagnificationFilter(QOpenGLTexture::NearestMipMapNearest);

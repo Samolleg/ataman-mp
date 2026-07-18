@@ -74,13 +74,16 @@ class ProfileVisualProviderTests : public QObject
 private slots:
     void resolvesDatabaseHumanoidsAcrossFamilies();
     void resolvesHumanoidSkinNumberBeyondRaceModelExamples();
-    void jmvUsesCompatibleEmbeddedNonHumanoidTextureToken();
+    void jmvUsesDatabaseNonHumanoidTextureAcrossModelChanges();
+    void jmvResolvesZombieX4Textures();
     void importedAppearanceNeverFallsBack();
     void basePreservesSingleWeaponBehavior();
     void jmvLayoutsAreIndependentlyGated();
     void validatesAssemblyPartsWithPlaceholders();
     void armorUsesSlotsAndMaterialTextureResources();
     void zeroTtiArmorTexturesBaseParts();
+    void missingArmorGeometryPreservesBaseParts();
+    void zombieEquipmentUsesSharedHumanoidAtlas();
     void jmvIgnoresWeaponsBeyondFirstPair();
     void unknownVisualProviderFailsClosed();
 };
@@ -114,23 +117,39 @@ void ProfileVisualProviderTests::resolvesHumanoidSkinNumberBeyondRaceModelExampl
     request.prototype = "Human Extended Skin";
     QJsonObject output;
     QVERIFY(resolver->resolve(request, &output).success);
-    QCOMPARE(output.value("primaryTexture").toString(), QString("unhumaskin_39.mmp"));
+    QCOMPARE(output.value("primaryTexture").toString(), QString("unhumaskin_39_x4.mmp"));
 }
 
-void ProfileVisualProviderTests::jmvUsesCompatibleEmbeddedNonHumanoidTextureToken()
+void ProfileVisualProviderTests::jmvUsesDatabaseNonHumanoidTextureAcrossModelChanges()
 {
     ProfileVisualProviderService service;
     const auto resolver = service.appearanceResolver("jmv.v1", database());
     SCharacterAppearanceRequest request;
     request.prototype = "Skeleton Test";
-    request.model = "unmosk";
+    request.model = "older_skeleton_model";
     request.primaryTexture = "instance_skeleton_03";
     QJsonObject output;
     QVERIFY(resolver->resolve(request, &output).success);
     QCOMPARE(output.value("model").toString(), QString("unmosk"));
-    QCOMPARE(output.value("primaryTexture").toString(), QString("instance_skeleton_03.mmp"));
-    request.model = "unrelated";
-    QVERIFY(!resolver->resolve(request, &output).success);
+    QCOMPARE(output.value("primaryTexture").toString(), QString("skeleton00.mmp"));
+}
+
+void ProfileVisualProviderTests::jmvResolvesZombieX4Textures()
+{
+    auto db = database();
+    ei::SRaceModelDatabaseRecord race;
+    race.name = "Zombie Female"; race.model = "unhuzf";
+    race.primaryTextures << "ZombieFemale00.x4";
+    db->raceModels.insert(race.name.toLower(), race);
+    ei::SMonsterDatabaseRecord monster;
+    monster.name = "Zombie Female Test"; monster.baseRace = race.name; monster.skinIndex = 1;
+    db->monsters.insert(monster.name.toLower(), monster);
+    ProfileVisualProviderService service;
+    const auto resolver = service.appearanceResolver("jmv.v1", db);
+    SCharacterAppearanceRequest request; request.prototype = monster.name;
+    QJsonObject output;
+    QVERIFY(resolver->resolve(request, &output).success);
+    QCOMPARE(output.value("primaryTexture").toString(), QString("unhuzfskin_01_x4.mmp"));
 }
 
 void ProfileVisualProviderTests::importedAppearanceNeverFallsBack()
@@ -232,6 +251,33 @@ void ProfileVisualProviderTests::zeroTtiArmorTexturesBaseParts()
     const QJsonObject textures = output.value("componentTextures").toObject();
     QCOMPARE(textures.value("lh1").toString(), QString("unhumash_00.le.0.x4.mmp"));
     QCOMPARE(textures.value("rh1").toString(), QString("unhumash_00.le.0.x4.mmp"));
+}
+
+void ProfileVisualProviderTests::missingArmorGeometryPreservesBaseParts()
+{
+    ProfileVisualProviderService service;
+    const auto resolver = service.equipmentResolver("jmv.v1", database());
+    SEquipmentLayoutRequest request;
+    request.model = "unhufe"; request.armor << "shirt.leather";
+    request.assemblyParts << "lh1" << "rh1" << "lh1.armor12";
+    QJsonObject output;
+    QVERIFY(!resolver->resolve(request, &output).success);
+    QCOMPARE(jsonStrings(output, "components"), QStringList({"lh1.armor12"}));
+    QCOMPARE(jsonStrings(output, "replacedParts"), QStringList({"lh1"}));
+    QVERIFY(jsonStrings(output, "placeholders").contains("rh1.armor12"));
+}
+
+void ProfileVisualProviderTests::zombieEquipmentUsesSharedHumanoidAtlas()
+{
+    ProfileVisualProviderService service;
+    const auto resolver = service.equipmentResolver("jmv.v1", database());
+    SEquipmentLayoutRequest request;
+    request.model = "unhuzf"; request.armor << "shirt.leather";
+    request.assemblyParts << "lh1.armor12" << "rh1.armor12";
+    QJsonObject output;
+    QVERIFY(resolver->resolve(request, &output).success);
+    const QJsonObject textures = output.value("componentTextures").toObject();
+    QCOMPARE(textures.value("lh1.armor12").toString(), QString("unhumash_12.le.0.x4.mmp"));
 }
 
 void ProfileVisualProviderTests::jmvIgnoresWeaponsBeyondFirstPair()
