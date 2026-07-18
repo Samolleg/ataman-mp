@@ -19,6 +19,8 @@ private slots:
     void recognizesConfiguredJmvPluginSlot();
     void exposesTestRunsQuickAccessPath();
     void isolatesPersistentSavesByProfileInstallation();
+    void preparesOwnedGodmodeAutoexec();
+    void preservesExistingAutoexecForRecovery();
     void recoveryRemovesAutoexecCreatedByEndurance();
     void recoveryRestoresPreexistingAutoexec();
     void recoveryRemovesOwnedBridge();
@@ -115,6 +117,46 @@ void JmvMapTestLauncherTests::isolatesPersistentSavesByProfileInstallation()
     QVERIFY(CJmvMapTestLauncher::testSavesPathForProfile(other) != firstPath);
     QVERIFY(firstPath.contains("runtime-profiles"));
     QVERIFY(firstPath.endsWith("saves"));
+}
+
+void JmvMapTestLauncherTests::preparesOwnedGodmodeAutoexec()
+{
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+    const QString engine = QDir(temp.path()).filePath("Engine");
+    const QString run = QDir(temp.path()).filePath("run");
+    QVERIFY(QDir().mkpath(engine));
+    QVERIFY(QDir().mkpath(run));
+    QJsonObject manifest;
+    QString error;
+    QVERIFY2(CJmvMapTestLauncher::prepareTemporaryAutoexec(
+        engine, run, true, &manifest, &error), qPrintable(error));
+    QFile generated(QDir(engine).filePath("autoexec.cfg"));
+    QVERIFY(generated.open(QIODevice::ReadOnly));
+    const QByteArray contents = generated.readAll();
+    QCOMPARE(contents.count("@godmode(0,3)"), 1);
+    QCOMPARE(manifest.value("autoexec").toObject().value("originalExisted").toBool(), false);
+}
+
+void JmvMapTestLauncherTests::preservesExistingAutoexecForRecovery()
+{
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+    const QString engine = QDir(temp.path()).filePath("Engine");
+    const QString run = QDir(temp.path()).filePath("run");
+    QVERIFY(QDir().mkpath(engine));
+    QVERIFY(QDir().mkpath(run));
+    const QByteArray original("fps 1\r\n");
+    writeFile(QDir(engine).filePath("autoexec.cfg"), original);
+    QJsonObject manifest;
+    QString error;
+    QVERIFY2(CJmvMapTestLauncher::prepareTemporaryAutoexec(
+        engine, run, true, &manifest, &error), qPrintable(error));
+    QFile backup(QDir(run).filePath("autoexec.original.cfg"));
+    QVERIFY(backup.open(QIODevice::ReadOnly));
+    QCOMPARE(backup.readAll(), original);
+    QCOMPARE(manifest.value("autoexec").toObject().value("originalSha256").toString(),
+             hash(original));
 }
 
 void JmvMapTestLauncherTests::injectsIntoExistingWorldScript()

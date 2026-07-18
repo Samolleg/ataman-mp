@@ -66,6 +66,9 @@ CView::CView(QWidget *parent, const QGLWidget *pShareWidget) : QGLWidget(parent,
   ,m_bDrawWater(true)
   ,m_bPreviewTile(false)
   ,m_tileBrushCommandId(0)
+  ,m_hasViewportMousePos(false)
+  ,m_testSpawnMarkerValid(false)
+  ,m_testSpawnMarkerAdjusted(false)
 {
     setFocusPolicy(Qt::ClickFocus);
 
@@ -248,6 +251,24 @@ void CView::paintGL()
     makeCurrent();
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     draw();
+    if(m_testSpawnMarkerValid)
+    {
+        const QRect viewport(0, 0, width(), height());
+        const QVector3D projected = m_testSpawnMarker.project(
+            m_cam->viewMatrix(), m_projection, viewport);
+        if(projected.z() >= 0.0f && projected.z() <= 1.0f)
+        {
+            QPainter painter(this);
+            painter.setRenderHint(QPainter::Antialiasing);
+            QPen pen(m_testSpawnMarkerAdjusted ? QColor(255, 190, 50) : QColor(80, 255, 120));
+            pen.setWidth(3);
+            painter.setPen(pen);
+            const QPoint center(qRound(projected.x()), height() - qRound(projected.y()));
+            painter.drawEllipse(center, 8, 8);
+            painter.drawLine(center + QPoint(-12, 0), center + QPoint(12, 0));
+            painter.drawLine(center + QPoint(0, -12), center + QPoint(0, 12));
+        }
+    }
     //doneCurrent();
 }
 
@@ -2000,17 +2021,44 @@ void CView::moveCamToSelectedObjects()
 
 void CView::mousePressEvent(QMouseEvent* event)
 {
+    m_lastViewportMousePos = event->pos();
+    m_hasViewportMousePos = rect().contains(event->pos());
     m_pOp->mousePressEvent(event);
 }
 
 void CView::mouseMoveEvent(QMouseEvent* event)
 {
+    m_lastViewportMousePos = event->pos();
+    m_hasViewportMousePos = rect().contains(event->pos());
     m_pOp->mouseMoveEvent(event);
 }
 
 void CView::mouseReleaseEvent(QMouseEvent *event)
 {
+    m_lastViewportMousePos = event->pos();
+    m_hasViewportMousePos = rect().contains(event->pos());
     m_pOp->mouseReleaseEvent(event);
+}
+
+QPoint CView::operationAnchor() const
+{
+    if(m_hasViewportMousePos && rect().contains(m_lastViewportMousePos))
+        return m_lastViewportMousePos;
+    return rect().center();
+}
+
+void CView::setTestSpawnMarker(const QVector3D& position, bool adjusted)
+{
+    m_testSpawnMarker = position;
+    m_testSpawnMarkerValid = true;
+    m_testSpawnMarkerAdjusted = adjusted;
+    update();
+}
+
+void CView::clearTestSpawnMarker()
+{
+    m_testSpawnMarkerValid = false;
+    update();
 }
 
 void CView::wheelEvent(QWheelEvent* event)

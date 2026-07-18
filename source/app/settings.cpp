@@ -351,6 +351,7 @@ void CSettings::initOptions()
     aOpt.append(QSharedPointer<COpt>(new COptInt("logLevel", 2)));
     aOpt.append(QSharedPointer<COpt>(new COptBool("drawHelp", false)));
     aOpt.append(QSharedPointer<COpt>(new COptBool("frustumCulling", true)));
+    aOpt.append(QSharedPointer<COpt>(new COptBool("mapTestGodmode", false)));
 
 
     //init default options for digits
@@ -381,7 +382,12 @@ void CSettings::initOptions()
         {"shortcutStopMapTest", "Shift+Esc"},
         {"shortcutResetCamera", "Ctrl+R"},
         {"shortcutResetLogicPaths", "Ctrl+P"},
-        {"shortcutSwitchMode", "Ctrl+Tab"}
+        {"shortcutSwitchMode", "Ctrl+Tab"},
+        {"shortcutSelectTool", "Esc"},
+        {"shortcutMoveTool", "G"},
+        {"shortcutRotateTool", "R"},
+        {"shortcutScaleTool", "T"},
+        {"shortcutTileBrushTool", "B"}
     };
     for(auto it = shortcutDefaults.constBegin(); it != shortcutDefaults.constEnd(); ++it)
         m_aOptCategory[eOptSetKeyBinding].append(

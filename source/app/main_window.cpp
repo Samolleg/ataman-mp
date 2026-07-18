@@ -23,6 +23,11 @@
 #include <QTimer>
 #include <QCheckBox>
 #include <QToolButton>
+#include <QComboBox>
+#include <QLabel>
+#include <QHBoxLayout>
+#include <QActionGroup>
+#include <QInputDialog>
 
 #include "resourcemanager.h"
 #include "landscape.h"
@@ -75,7 +80,13 @@ MainWindow::MainWindow(QWidget* parent) :
     m_mapTestAction(nullptr),
     m_stopMapTestAction(nullptr),
     m_mapTestLauncher(nullptr),
-    m_closeAfterTestStop(false)
+    m_closeAfterTestStop(false),
+    m_entranceCombo(nullptr),
+    m_playFromHereButton(nullptr),
+    m_godmodeCheckBox(nullptr),
+    m_spawnPositionLabel(nullptr),
+    m_borrowedMapIdentity(false),
+    m_pickSpawnPending(false)
 {
 #ifdef QT_DEBUG
     testFunc();
@@ -117,15 +128,11 @@ MainWindow::MainWindow(QWidget* parent) :
     QAction* openBugReportingGuide = new QAction(tr("Open Bug Reporting Guide"), this);
     QAction* gameAndModSetup = new QAction(tr("Game and Mod Setup..."), this);
     QAction* compareMobFiles = new QAction(tr("Compare MOB Files..."), this);
-    m_mapTestAction = new QAction(tr("Test Current Map in JMV"), this);
-    m_mapTestAction->setToolTip(tr("Stages unique temporary MPR/MOB copies and launches the validated JMV runtime. No source map is overwritten."));
-    m_stopMapTestAction = new QAction(tr("Stop JMV Map Test"), this);
+    m_mapTestAction = new QAction(tr("Test Current Map"), this);
+    m_mapTestAction->setToolTip(tr("Stages unique temporary MPR/MOB copies and launches the active validated runtime profile. No source map is overwritten."));
+    m_stopMapTestAction = new QAction(tr("Stop Test"), this);
     m_stopMapTestAction->setEnabled(false);
     m_stopMapTestAction->setToolTip(tr("Stops only the game process launched by Endurance."));
-    QToolButton* stopMapTestButton = new QToolButton(this);
-    stopMapTestButton->setDefaultAction(m_stopMapTestAction);
-    stopMapTestButton->setToolButtonStyle(Qt::ToolButtonTextOnly);
-    statusBar()->addPermanentWidget(stopMapTestButton);
     m_ui->menuSettings->insertAction(m_ui->actionOpen_2, gameAndModSetup);
     m_ui->menuSettings->insertSeparator(m_ui->actionOpen_2);
     m_ui->menuTools->addSeparator();
@@ -214,6 +221,7 @@ MainWindow::MainWindow(QWidget* parent) :
     m_ui->outlinerSplitter->restoreState(uiSettings.value("ui/outlinerSplitter").toByteArray());
 
     m_pView = new CView(m_ui->centralWidget, m_createDialog.get()->viewWidget());
+    m_pView->installEventFilter(this);
     m_mapTestLauncher = new CJmvMapTestLauncher(this);
     connect(m_mapTestLauncher, &CJmvMapTestLauncher::testStarted, this,
             [this](const QString& runId, const QString& mapName)
@@ -256,7 +264,7 @@ MainWindow::MainWindow(QWidget* parent) :
     m_pView->setSizePolicy(sizePolicy);
     m_pView->setMinimumSize(QSize(200, 200));
     m_pView->setMouseTracking(true);
-    m_ui->workSpaceLayout->addWidget(m_pView);
+    createViewportToolbars();
     m_ui->workspaceSplitter->setStretchFactor(0, 4);
     m_ui->workspaceSplitter->setStretchFactor(1, 1);
     if(firstRunSetup)
@@ -303,6 +311,7 @@ MainWindow::MainWindow(QWidget* parent) :
     m_createDialog.get()->attach(m_pView, m_undoStack);
     rebuildRecentFilesMenu();
     refreshMapsBrowser();
+    refreshMapTestContext();
     updateMapTestAction();
 //    if(m_pView->isRecentAvailable())
 //        m_ui->actionOpen_recent->setEnabled(true);
@@ -416,6 +425,53 @@ void MainWindow::runUndoToIndex(int targetIndex)
 
 bool MainWindow::eventFilter(QObject* watched, QEvent* event)
 {
+    if(m_pView && watched == m_pView && m_pickSpawnPending)
+    {
+        if(event->type() == QEvent::KeyPress)
+        {
+            QKeyEvent* key = static_cast<QKeyEvent*>(event);
+            if(key->key() == Qt::Key_Escape)
+            {
+                m_playFromHereButton->setChecked(false);
+                return true;
+            }
+        }
+        if(event->type() == QEvent::MouseButtonPress)
+        {
+            QMouseEvent* mouse = static_cast<QMouseEvent*>(event);
+            if(mouse->button() == Qt::LeftButton)
+            {
+                const SMapTravelZone* entrance = selectedTravelZone();
+                if(!entrance)
+                {
+                    m_playFromHereButton->setChecked(false);
+                    return true;
+                }
+                const QVector3D requested = m_pView->getTerrainPos(
+                    mouse->pos().x(), mouse->pos().y());
+                SMapSpawnPlan plan = CMapSpawnPlanner::chooseCustom(
+                    QPointF(requested.x(), requested.y()), entrance->exitId,
+                    mapTestObstacles());
+                QVector3D resolved(plan.position.x(), plan.position.y(), 0.0f);
+                if(!plan.valid || !CLandscape::getInstance()->projectPt(resolved))
+                {
+                    statusBar()->showMessage(tr("No clear terrain spawn was found near that point. Pick another location."), 5000);
+                    return true;
+                }
+                m_customSpawn = plan;
+                m_customSpawnPosition = resolved;
+                m_pickSpawnPending = false;
+                m_pView->unsetCursor();
+                m_pView->setTestSpawnMarker(resolved, plan.adjusted);
+                m_spawnPositionLabel->setText(tr("Custom: %1, %2, %3%4")
+                    .arg(resolved.x(), 0, 'f', 2).arg(resolved.y(), 0, 'f', 2)
+                    .arg(resolved.z(), 0, 'f', 2)
+                    .arg(plan.adjusted ? tr(" (adjusted)") : QString()));
+                updateMapTestAction();
+                return true;
+            }
+        }
+    }
     if(m_undoView && watched == m_undoView->viewport()
        && event->type() == QEvent::MouseButtonPress)
     {
@@ -433,6 +489,213 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event)
         }
     }
     return QMainWindow::eventFilter(watched, event);
+}
+
+SResourceProfileEvaluation MainWindow::activeResourceProfile() const
+{
+    COptString* profileId = dynamic_cast<COptString*>(
+        m_settings->opt(eOptSetResource, "resourceProfile"));
+    for(const SResourceProfile& candidate : loadResourceProfiles())
+        if(profileId && candidate.id.compare(profileId->value(), Qt::CaseInsensitive) == 0)
+            return evaluateResourceProfile(m_settings->configuredGameRoot(), candidate);
+    return SResourceProfileEvaluation();
+}
+
+QVector<SMapSpawnObstacle> MainWindow::mapTestObstacles() const
+{
+    QVector<SMapSpawnObstacle> obstacles;
+    if(!m_pView || !m_pView->currentMob())
+        return obstacles;
+    for(CNode* node : m_pView->currentMob()->nodes())
+    {
+        if(!node || node->isMarkDeleted())
+            continue;
+        switch(node->nodeType())
+        {
+        case eWorldObject:
+        case eUnit:
+        case eTorch:
+        case eLever:
+            break;
+        default:
+            continue;
+        }
+        CBox box = node->getBBox();
+        SMapSpawnObstacle obstacle;
+        obstacle.position = QPointF(node->position().x(), node->position().y());
+        obstacle.radius = box.isInit() ? qMax(0.75, double(box.radius()) * 0.5) : 0.75;
+        obstacles.append(obstacle);
+    }
+    return obstacles;
+}
+
+const SMapTravelZone* MainWindow::selectedTravelZone() const
+{
+    if(!m_entranceCombo)
+        return nullptr;
+    const int index = m_entranceCombo->currentData().toInt();
+    return index >= 0 && index < m_validEntrances.size()
+        ? &m_validEntrances[index] : nullptr;
+}
+
+void MainWindow::populateEntranceCombo()
+{
+    if(!m_entranceCombo)
+        return;
+    const QSignalBlocker blocker(m_entranceCombo);
+    m_entranceCombo->clear();
+    m_validEntrances.clear();
+    if(!CLandscape::getInstance()->isMprLoad())
+    {
+        m_entranceCombo->addItem(tr("Open an MPR"), -2);
+        m_entranceCombo->setEnabled(false);
+        return;
+    }
+    if(m_mapTestEntry.zoneId.isEmpty())
+    {
+        m_entranceCombo->addItem(tr("Choose map.txt identity..."), -1);
+        m_entranceCombo->setEnabled(true);
+        return;
+    }
+    for(const SMapTravelZone& entrance : m_mapTestEntry.travelZones)
+    {
+        if(entrance.exitId <= 0 || !entrance.hasDeployRectangle
+           || entrance.deployRectangle.normalized().isEmpty())
+            continue;
+        const int dataIndex = m_validEntrances.size();
+        m_validEntrances.append(entrance);
+        const QPointF center = entrance.spawnPoint();
+        const QString destination = entrance.destinationZoneId.isEmpty()
+            ? tr("none") : entrance.destinationZoneId;
+        m_entranceCombo->addItem(tr("Entrance %1 -> %2:%3 — (%4, %5)")
+            .arg(entrance.exitId).arg(destination).arg(entrance.destinationExitId)
+            .arg(center.x(), 0, 'f', 1).arg(center.y(), 0, 'f', 1), dataIndex);
+    }
+    if(m_validEntrances.isEmpty())
+    {
+        m_entranceCombo->addItem(tr("No valid #deploy entrances"), -2);
+        m_entranceCombo->setEnabled(false);
+    }
+    else
+        m_entranceCombo->setEnabled(true);
+}
+
+void MainWindow::refreshMapTestContext()
+{
+    m_mapTestEntry = SMapCatalogEntry();
+    m_borrowedMapIdentity = false;
+    m_customSpawn = SMapSpawnPlan();
+    if(m_pView)
+        m_pView->clearTestSpawnMarker();
+    if(m_playFromHereButton)
+    {
+        const QSignalBlocker blocker(m_playFromHereButton);
+        m_playFromHereButton->setChecked(false);
+    }
+    if(m_spawnPositionLabel)
+        m_spawnPositionLabel->setText(tr("Entrance spawn"));
+
+    QVector<QString> resources;
+    QVector<QString> maps;
+    if(COptStringList* value = dynamic_cast<COptStringList*>(m_settings->opt(eOptSetResource, "resourceRoots")))
+        resources = value->value();
+    if(COptStringList* value = dynamic_cast<COptStringList*>(m_settings->opt(eOptSetResource, "mapRoots")))
+        maps = value->value();
+    m_mapCatalog = CMapCatalog::load(resources, maps);
+    if(CLandscape::getInstance()->isMprLoad())
+    {
+        const QString loaded = QFileInfo(CLandscape::getInstance()->filePath()).absoluteFilePath();
+        QVector<SMapCatalogEntry> nameMatches;
+        for(const SMapCatalogEntry& entry : m_mapCatalog.entries)
+        {
+            if(!m_openedMapZoneId.isEmpty()
+               && entry.zoneId.compare(m_openedMapZoneId, Qt::CaseInsensitive) == 0)
+            {
+                m_mapTestEntry = entry;
+                break;
+            }
+            if(!entry.mprPath.isEmpty()
+               && QFileInfo(entry.mprPath).absoluteFilePath().compare(loaded, Qt::CaseInsensitive) == 0)
+            {
+                m_mapTestEntry = entry;
+                break;
+            }
+            if(entry.mprName.compare(QFileInfo(loaded).completeBaseName(), Qt::CaseInsensitive) == 0)
+                nameMatches.append(entry);
+        }
+        if(m_mapTestEntry.zoneId.isEmpty() && nameMatches.size() == 1)
+            m_mapTestEntry = nameMatches.first();
+    }
+    populateEntranceCombo();
+    updateMapTestAction();
+}
+
+void MainWindow::chooseBorrowedMapIdentity()
+{
+    QStringList labels;
+    QVector<SMapCatalogEntry> choices;
+    for(const SMapCatalogEntry& entry : m_mapCatalog.entries)
+    {
+        bool valid = false;
+        for(const SMapTravelZone& zone : entry.travelZones)
+            valid = valid || (zone.exitId > 0 && zone.hasDeployRectangle
+                              && !zone.deployRectangle.normalized().isEmpty());
+        if(valid)
+        {
+            choices.append(entry);
+            labels.append(QString("%1 — %2 / %3").arg(entry.zoneId, entry.mprName, entry.mobName));
+        }
+    }
+    bool accepted = false;
+    const QString selected = QInputDialog::getItem(this, tr("Borrow map.txt identity"),
+        tr("This gives the test map another zone's minimap, quest, travel and script identity. It is remembered only while the current MPR is loaded."),
+        labels, 0, true, &accepted);
+    const int index = labels.indexOf(selected);
+    if(!accepted || index < 0)
+    {
+        populateEntranceCombo();
+        return;
+    }
+    m_mapTestEntry = choices[index];
+    m_borrowedMapIdentity = true;
+    ei::log(eLogWarning, QString("Borrowed map.txt identity zone:%1 for unregistered MPR:%2")
+        .arg(m_mapTestEntry.zoneId, CLandscape::getInstance()->filePath().absoluteFilePath()));
+    populateEntranceCombo();
+    m_entranceCombo->setToolTip(tr("Borrowed map identity: %1. Runtime metadata and scripts belong to that registered zone.")
+        .arg(m_mapTestEntry.zoneId));
+    updateMapTestAction();
+}
+
+void MainWindow::setCustomSpawnPicking(bool enabled)
+{
+    if(!m_pView || !enabled)
+    {
+        m_pickSpawnPending = false;
+        m_customSpawn = SMapSpawnPlan();
+        if(m_pView)
+        {
+            m_pView->unsetCursor();
+            m_pView->clearTestSpawnMarker();
+        }
+        if(m_spawnPositionLabel)
+            m_spawnPositionLabel->setText(tr("Entrance spawn"));
+        updateMapTestAction();
+        return;
+    }
+    if(!selectedTravelZone())
+    {
+        QSignalBlocker blocker(m_playFromHereButton);
+        m_playFromHereButton->setChecked(false);
+        statusBar()->showMessage(tr("Select a valid map.txt entrance before choosing a custom spawn."), 5000);
+        return;
+    }
+    m_pView->cancelPendingOperation();
+    m_pickSpawnPending = true;
+    m_customSpawn = SMapSpawnPlan();
+    m_pView->setCursor(Qt::CrossCursor);
+    m_pView->setFocus();
+    m_spawnPositionLabel->setText(tr("Click terrain (Esc cancels)"));
+    updateMapTestAction();
 }
 
 void MainWindow::initShortcuts()
@@ -470,6 +733,139 @@ void MainWindow::initShortcuts()
     m_mapsDock->toggleViewAction()->setShortcut(shortcut("shortcutMapsBrowser", "Ctrl+Space"));
     m_mapTestAction->setShortcut(shortcut("shortcutTestMap", "Ctrl+F5"));
     m_stopMapTestAction->setShortcut(shortcut("shortcutStopMapTest", "Shift+Esc"));
+    const struct { EButtonOp type; const char* option; const char* fallback; const char* label; } operations[] = {
+        {EButtonOpSelect, "shortcutSelectTool", "Esc", "Select / cancel tool"},
+        {EButtonOpMove, "shortcutMoveTool", "G", "Move selected objects"},
+        {EButtonOpRotate, "shortcutRotateTool", "R", "Rotate selected objects"},
+        {EButtonOpScale, "shortcutScaleTool", "T", "Scale selected objects"},
+        {EButtonOpTilebrush, "shortcutTileBrushTool", "B", "Terrain tile brush"}
+    };
+    for(const auto& operation : operations)
+    {
+        QAction* action = m_operationActions.value(operation.type, nullptr);
+        if(!action)
+            continue;
+        action->setShortcut(shortcut(operation.option, operation.fallback));
+        action->setShortcutContext(Qt::ApplicationShortcut);
+        const QString tip = tr(operation.label) + " (" + action->shortcut().toString(QKeySequence::NativeText) + ")";
+        action->setToolTip(tip);
+    }
+    if(m_ui->selectButton) m_ui->selectButton->setToolTip(m_operationActions.value(EButtonOpSelect)->toolTip());
+    if(m_ui->moveButton) m_ui->moveButton->setToolTip(m_operationActions.value(EButtonOpMove)->toolTip());
+    if(m_ui->rotateButton) m_ui->rotateButton->setToolTip(m_operationActions.value(EButtonOpRotate)->toolTip());
+    if(m_ui->scaleButton) m_ui->scaleButton->setToolTip(m_operationActions.value(EButtonOpScale)->toolTip());
+    if(m_ui->tileBrushButton) m_ui->tileBrushButton->setToolTip(m_operationActions.value(EButtonOpTilebrush)->toolTip());
+}
+
+void MainWindow::createViewportToolbars()
+{
+    QWidget* testBar = new QWidget(m_ui->workspaceContainer);
+    testBar->setObjectName("mapTestToolbar");
+    QHBoxLayout* testLayout = new QHBoxLayout(testBar);
+    testLayout->setContentsMargins(4, 3, 4, 3);
+    testLayout->setSpacing(5);
+    QToolButton* testButton = new QToolButton(testBar);
+    testButton->setDefaultAction(m_mapTestAction);
+    testButton->setToolButtonStyle(Qt::ToolButtonTextOnly);
+    QToolButton* stopButton = new QToolButton(testBar);
+    stopButton->setDefaultAction(m_stopMapTestAction);
+    stopButton->setToolButtonStyle(Qt::ToolButtonTextOnly);
+    m_entranceCombo = new QComboBox(testBar);
+    m_entranceCombo->setMinimumContentsLength(28);
+    m_entranceCombo->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+    m_entranceCombo->setToolTip(tr("Selects the map.txt entrance used to initialize the runtime session."));
+    m_playFromHereButton = new QToolButton(testBar);
+    m_playFromHereButton->setText(tr("Play from Here"));
+    m_playFromHereButton->setCheckable(true);
+    m_playFromHereButton->setToolTip(tr("Pick a custom terrain spawn. The selected entrance still initializes zone metadata."));
+    m_godmodeCheckBox = new QCheckBox(tr("Godmode"), testBar);
+    m_godmodeCheckBox->setToolTip(tr("For this test process, invoke @godmode(0,3) through a temporary hash-restored autoexec.cfg."));
+    if(COptBool* option = dynamic_cast<COptBool*>(m_settings->opt(eOptSetGeneral, "mapTestGodmode")))
+        m_godmodeCheckBox->setChecked(option->value());
+    m_spawnPositionLabel = new QLabel(tr("Entrance spawn"), testBar);
+    m_spawnPositionLabel->setMinimumWidth(150);
+    testLayout->addWidget(testButton);
+    testLayout->addWidget(stopButton);
+    testLayout->addSpacing(8);
+    testLayout->addWidget(new QLabel(tr("Entrance:"), testBar));
+    testLayout->addWidget(m_entranceCombo, 1);
+    testLayout->addWidget(m_playFromHereButton);
+    testLayout->addWidget(m_spawnPositionLabel);
+    testLayout->addWidget(m_godmodeCheckBox);
+
+    QWidget* operationBar = new QWidget(m_ui->workspaceContainer);
+    operationBar->setObjectName("viewportOperationToolbar");
+    QHBoxLayout* operationLayout = new QHBoxLayout(operationBar);
+    operationLayout->setContentsMargins(4, 2, 4, 2);
+    operationLayout->setSpacing(4);
+    const struct { EButtonOp type; QToolButton* button; const char* text; } operations[] = {
+        {EButtonOpSelect, m_ui->selectButton, "Select"},
+        {EButtonOpMove, m_ui->moveButton, "Move"},
+        {EButtonOpRotate, m_ui->rotateButton, "Rotate"},
+        {EButtonOpScale, m_ui->scaleButton, "Scale"},
+        {EButtonOpTilebrush, m_ui->tileBrushButton, "Tile Brush"}
+    };
+    QActionGroup* actionGroup = new QActionGroup(this);
+    actionGroup->setExclusive(true);
+    for(const auto& operation : operations)
+    {
+        QAction* action = new QAction(tr(operation.text), this);
+        action->setCheckable(true);
+        actionGroup->addAction(action);
+        addAction(action);
+        m_operationActions.insert(operation.type, action);
+        operation.button->setCheckable(true);
+        operation.button->setAutoRaise(true);
+        operation.button->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+        operation.button->setText(tr(operation.text));
+        operationLayout->addWidget(operation.button);
+        connect(action, &QAction::triggered, this, [this, operation]()
+        {
+            if(!m_pView)
+                return;
+            if(operation.type == EButtonOpSelect)
+            {
+                if(m_pickSpawnPending && m_playFromHereButton)
+                {
+                    m_playFromHereButton->setChecked(false);
+                    return;
+                }
+                if(!m_pView->cancelPendingOperation())
+                    m_pView->clearObjectSelection();
+                CButtonConnector::getInstance()->pressButton(EButtonOpSelect);
+            }
+            else
+                CButtonConnector::getInstance()->clickButton(operation.type);
+            m_pView->setFocus();
+        });
+    }
+    operationLayout->addStretch(1);
+    m_ui->toolsLayout->setContentsMargins(0, 0, 0, 0);
+    m_ui->toolsLayout->setSpacing(0);
+
+    m_ui->workSpaceLayout->addWidget(testBar);
+    m_ui->workSpaceLayout->addWidget(m_pView, 1);
+    m_ui->workSpaceLayout->addWidget(operationBar);
+
+    connect(m_entranceCombo, QOverload<int>::of(&QComboBox::activated), this,
+            [this](int index)
+    {
+        if(m_entranceCombo->itemData(index).toInt() == -1)
+            chooseBorrowedMapIdentity();
+        if(m_playFromHereButton->isChecked())
+            m_playFromHereButton->setChecked(false);
+        updateMapTestAction();
+    });
+    connect(m_playFromHereButton, &QToolButton::toggled,
+            this, &MainWindow::setCustomSpawnPicking);
+    connect(m_godmodeCheckBox, &QCheckBox::toggled, this, [this](bool checked)
+    {
+        if(COptBool* option = dynamic_cast<COptBool*>(m_settings->opt(eOptSetGeneral, "mapTestGodmode")))
+        {
+            option->setValue(checked);
+            m_settings->persistOptions();
+        }
+    });
 }
 
 void MainWindow::updateMapTestAction()
@@ -480,20 +876,44 @@ void MainWindow::updateMapTestAction()
     {
         m_mapTestAction->setEnabled(false);
         m_stopMapTestAction->setEnabled(true);
+        if(m_entranceCombo) m_entranceCombo->setEnabled(false);
+        if(m_playFromHereButton) m_playFromHereButton->setEnabled(false);
+        if(m_godmodeCheckBox) m_godmodeCheckBox->setEnabled(false);
         return;
     }
     m_stopMapTestAction->setEnabled(false);
-    COptString* profile = dynamic_cast<COptString*>(m_settings->opt(eOptSetResource, "resourceProfile"));
-    const bool isJmv = profile && profile->value().compare("jamais-vu", Qt::CaseInsensitive) == 0;
+    const SResourceProfileEvaluation profile = activeResourceProfile();
+    const bool isJmv = profile.profileId.compare("jamais-vu", Qt::CaseInsensitive) == 0;
+    const bool isBaseProbe = profile.profileId.compare("base-game", Qt::CaseInsensitive) == 0;
     const bool hasPair = m_pView && m_pView->hasActiveMob()
             && m_pView->mobs().size() == 1 && CLandscape::getInstance()->isMprLoad();
-    m_mapTestAction->setEnabled(isJmv && hasPair);
-    if(!isJmv)
-        m_mapTestAction->setToolTip(tr("Direct map testing is currently available only for the validated JMV runtime profile."));
+    const bool hasEntrance = selectedTravelZone() != nullptr;
+    // The picker and manifest are implemented, but no fingerprinted runtime
+    // position adapter exists yet. Never advertise a coordinate the game will
+    // silently ignore.
+    const bool customReady = !m_playFromHereButton || !m_playFromHereButton->isChecked();
+    const bool profileReady = (isJmv || isBaseProbe) && profile.valid
+        && profile.runtimeStackValidated;
+    m_mapTestAction->setEnabled(profileReady && hasPair && hasEntrance && customReady);
+    if(m_entranceCombo)
+        m_entranceCombo->setEnabled(hasPair &&
+            (!m_validEntrances.isEmpty() || m_entranceCombo->findData(-1) >= 0));
+    if(m_playFromHereButton) m_playFromHereButton->setEnabled(hasPair && hasEntrance);
+    if(m_godmodeCheckBox) m_godmodeCheckBox->setEnabled(isJmv && hasPair);
+    if(!isJmv && !isBaseProbe)
+        m_mapTestAction->setToolTip(tr("The active profile has no Endurance direct-map-test provider."));
+    else if(!profileReady)
+        m_mapTestAction->setToolTip(tr("The active runtime does not match an exact experimental manifest."));
     else if(!hasPair)
-        m_mapTestAction->setToolTip(tr("Load one MPR and exactly one active MOB before launching a JMV map test."));
+        m_mapTestAction->setToolTip(tr("Load one MPR and exactly one active MOB before launching a map test."));
+    else if(!hasEntrance)
+        m_mapTestAction->setToolTip(tr("Select a valid map.txt entrance or explicitly borrow a registered map identity."));
+    else if(!customReady)
+        m_mapTestAction->setToolTip(tr("Play from Here is staged for UI testing, but launch remains blocked until the fingerprinted runtime position adapter is validated."));
     else
-        m_mapTestAction->setToolTip(tr("Stages the current pair and launches it through JMV's normal single-player New Game path (Ctrl+F5)."));
+        m_mapTestAction->setToolTip(isBaseProbe
+            ? tr("Runs the exact-hash Base EI direct-launch feasibility probe (Ctrl+F5).")
+            : tr("Stages the current pair and launches it through JMV's normal single-player New Game path (Ctrl+F5)."));
 }
 
 void MainWindow::launchCurrentMapTest()
@@ -507,8 +927,8 @@ void MainWindow::launchCurrentMapTest()
             tr("Load one MPR and exactly one MOB before starting a test."));
         return;
     }
-    QProgressDialog progress(tr("Preparing JMV map test..."), QString(), 0, 6, this);
-    progress.setWindowTitle(tr("JMV test launch"));
+    QProgressDialog progress(tr("Preparing map test..."), QString(), 0, 6, this);
+    progress.setWindowTitle(tr("Map test launch"));
     progress.setWindowModality(Qt::WindowModal);
     progress.setCancelButton(nullptr);
     progress.setMinimumDuration(0);
@@ -525,50 +945,26 @@ void MainWindow::launchCurrentMapTest()
             tr("Unsaved MPR edits cannot yet be staged losslessly. Save or revert the landscape first."));
         return;
     }
-    progress.setLabelText(tr("Validating the JMV runtime profile..."));
+    progress.setLabelText(tr("Validating the active runtime profile..."));
     progress.setValue(1);
     QApplication::processEvents();
 
-    COptString* profileId = dynamic_cast<COptString*>(m_settings->opt(eOptSetResource, "resourceProfile"));
-    SResourceProfileEvaluation profile;
-    for(const SResourceProfile& candidate : loadResourceProfiles())
+    const SResourceProfileEvaluation profile = activeResourceProfile();
+    const bool isJmv = profile.profileId.compare("jamais-vu", Qt::CaseInsensitive) == 0;
+    const bool isBase = profile.profileId.compare("base-game", Qt::CaseInsensitive) == 0;
+    if((!isJmv && !isBase) || !profile.valid || !profile.runtimeStackValidated)
     {
-        if(profileId && candidate.id.compare(profileId->value(), Qt::CaseInsensitive) == 0)
-        {
-            profile = evaluateResourceProfile(m_settings->configuredGameRoot(), candidate);
-            break;
-        }
-    }
-    if(profile.profileId.compare("jamais-vu", Qt::CaseInsensitive) != 0
-       || !profile.valid || !profile.runtimeStackValidated)
-    {
-        QMessageBox::warning(this, tr("JMV test launch"),
-            tr("The active JMV installation does not match the validated runtime-stack manifest. Run Game and Mod Setup again and review its diagnostics."));
+        QMessageBox::warning(this, tr("Map test launch"),
+            tr("The active installation does not match an exact supported or experimental runtime manifest. Run Game and Mod Setup again and review its diagnostics."));
         return;
     }
     progress.setLabelText(tr("Reading map-table metadata..."));
     progress.setValue(2);
     QApplication::processEvents();
 
-    QVector<QString> resourceRoots;
-    QVector<QString> mapRoots;
-    if(COptStringList* value = dynamic_cast<COptStringList*>(m_settings->opt(eOptSetResource, "resourceRoots")))
-        resourceRoots = value->value();
-    if(COptStringList* value = dynamic_cast<COptStringList*>(m_settings->opt(eOptSetResource, "mapRoots")))
-        mapRoots = value->value();
-    const SMapCatalogResult catalog = CMapCatalog::load(resourceRoots, mapRoots);
-    SMapCatalogEntry entry;
-    const QString loadedMpr = QFileInfo(landscape->filePath()).absoluteFilePath();
-    for(const SMapCatalogEntry& candidate : catalog.entries)
-    {
-        if(QFileInfo(candidate.mprPath).absoluteFilePath().compare(loadedMpr, Qt::CaseInsensitive) == 0
-           || candidate.mprName.compare(QFileInfo(loadedMpr).completeBaseName(), Qt::CaseInsensitive) == 0)
-        {
-            entry = candidate;
-            break;
-        }
-    }
-    if(entry.travelZones.isEmpty())
+    const SMapCatalogEntry entry = m_mapTestEntry;
+    const SMapTravelZone* entrance = selectedTravelZone();
+    if(entry.zoneId.isEmpty() || !entrance)
     {
         QMessageBox::warning(this, tr("JMV test launch"),
             tr("No travel/deploy zone was found for the loaded MPR in the active map table. Endurance will not guess a player spawn."));
@@ -578,30 +974,10 @@ void MainWindow::launchCurrentMapTest()
     progress.setValue(3);
     QApplication::processEvents();
 
-    QVector<SMapSpawnObstacle> obstacles;
     CMob* mob = m_pView->currentMob();
-    for(CNode* node : mob->nodes())
-    {
-        if(!node || node->isMarkDeleted())
-            continue;
-        switch(node->nodeType())
-        {
-        case eWorldObject:
-        case eUnit:
-        case eTorch:
-        case eLever:
-            break;
-        default:
-            continue;
-        }
-        CBox box = node->getBBox();
-        const double radius = box.isInit() ? qMax(0.75, double(box.radius()) * 0.5) : 0.75;
-        SMapSpawnObstacle obstacle;
-        obstacle.position = QPointF(node->position().x(), node->position().y());
-        obstacle.radius = radius;
-        obstacles.append(obstacle);
-    }
-    const SMapSpawnPlan spawn = CMapSpawnPlanner::choose(entry.travelZones, obstacles);
+    const SMapSpawnPlan spawn = m_playFromHereButton && m_playFromHereButton->isChecked()
+        ? m_customSpawn
+        : CMapSpawnPlanner::chooseEntrance(*entrance, mapTestObstacles());
     if(!spawn.valid)
     {
         QMessageBox::warning(this, tr("JMV test launch"),
@@ -632,11 +1008,12 @@ void MainWindow::launchCurrentMapTest()
         ? tr("its checked clear point is (%1, %2)")
               .arg(spawn.position.x(), 0, 'f', 2).arg(spawn.position.y(), 0, 'f', 2)
         : tr("the editor could not prove that its center is clear, so the game will perform the final deployment");
-    const QString confirmation = tr(
+    const QString confirmation = isJmv ? tr(
         "This experimental JMV-only test stages the exact current MPR/MOB pair, including unsaved in-memory edits, under a unique temporary name. After JMV completes its normal menu load, Endurance invokes the fingerprinted single-player New Game path on the game thread and supplies the staged pair. No console/server command or fixed delay is used.\n\n"
         "JMV initializes one normal player through map-table zone %1 and hand-placed entrance %2; %3.\n\n"
         "Source maps, JMV configuration, and live campaign saves are not changed. Every save/load path is redirected into a persistent profile-specific AppData folder shared by Endurance test runs. Intro movies are hidden only for the test process. Returning to the menu or travelling away may use original installed maps; use Stop Test when finished.\n\nStart the direct JMV map test?")
-        .arg(entry.zoneId).arg(spawn.exitId).arg(entranceAssessment);
+        .arg(entry.zoneId).arg(spawn.exitId).arg(entranceAssessment)
+        : tr("This exact-hash Base EI feasibility probe uses an editor-owned 32-bit host. It creates Base game.exe suspended, loads the run-local bridge only into that owned process, calls its explicit initializer outside DllMain, and resumes only after fingerprint and byte guards pass.\n\nRun the probe levels in order. Source maps and the Base game installation are not modified.\n\nContinue to probe-level selection?");
     constexpr int kMapTestWarningVersion = 3;
     COptInt* warningVersion = dynamic_cast<COptInt*>(
                 m_settings->opt(eOptSetGeneral, "mapTestWarningVersion"));
@@ -644,7 +1021,8 @@ void MainWindow::launchCurrentMapTest()
     {
         progress.hide();
         QMessageBox confirmationBox(QMessageBox::Question,
-            tr("Direct JMV map test (experimental)"), confirmation,
+            isJmv ? tr("Direct JMV map test (experimental)")
+                  : tr("Base EI feasibility probe (experimental)"), confirmation,
             QMessageBox::Yes | QMessageBox::Cancel, this);
         QCheckBox* dontShowAgain = new QCheckBox(tr("Don't show this warning again"), &confirmationBox);
         confirmationBox.setCheckBox(dontShowAgain);
@@ -670,11 +1048,31 @@ void MainWindow::launchCurrentMapTest()
     input.embeddedScript = mob->script();
     input.mapEntry = entry;
     input.spawn = spawn;
+    input.spawnZ = spawn.custom ? m_customSpawnPosition.z() : 0.0;
+    input.godmode = isJmv && m_godmodeCheckBox && m_godmodeCheckBox->isChecked();
+    input.borrowedMapIdentity = m_borrowedMapIdentity;
+    if(isBase)
+    {
+        const QStringList levels = {
+            tr("1 - Observation only (menu and normal exit)"),
+            tr("2 - Pass-through hooks (start Base New Game manually)"),
+            tr("3 - Byte-identical staged redirect"),
+            tr("4 - Current editor-state redirect")
+        };
+        bool accepted = false;
+        const QString selected = QInputDialog::getItem(this,
+            tr("Base EI feasibility probe"),
+            tr("Run probe levels in order. A failure leaves Base direct launch unsupported."),
+            levels, 0, false, &accepted);
+        if(!accepted)
+            return;
+        input.baseProbeLevel = levels.indexOf(selected) + 1;
+    }
     QString error;
     if(!m_mapTestLauncher->launch(input, &error))
     {
-        ei::log(eLogWarning, "JMV test launch refused: " + error);
-        QMessageBox::critical(this, tr("JMV test launch"), error);
+        ei::log(eLogWarning, "Map test launch refused: " + error);
+        QMessageBox::critical(this, tr("Map test launch"), error);
     }
     progress.setValue(6);
     updateMapTestAction();
@@ -708,6 +1106,7 @@ void MainWindow::openMapPair(const QString& mprPath, const QString& mobPath,
     m_undoStack->clear();
     m_pView->unloadMob("");
     m_pView->unloadLand();
+    m_openedMapZoneId = zoneId;
     m_pView->loadLandscape(QFileInfo(mprPath));
     QFileInfo mobFile(mobPath);
     m_pView->loadMob(mobFile);
@@ -781,6 +1180,7 @@ void MainWindow::on_actionOpen_triggered()
 
     if(fileName.fileName().toLower().endsWith(".mpr"))
     {
+        m_openedMapZoneId.clear();
         m_pView->cancelPendingOperation();
         m_undoStack->clear();
         m_pView->loadLandscape(fileName);
@@ -898,6 +1298,7 @@ bool MainWindow::openDocument(const QFileInfo& fileName)
     m_pView->cancelPendingOperation();
     if(suffix == "mpr")
     {
+        m_openedMapZoneId.clear();
         m_undoStack->clear();
         m_pView->loadLandscape(fileName);
     }
@@ -920,6 +1321,7 @@ void MainWindow::on_actionOpen_MPR_triggered()
     opt->setValue(fileName.dir().path());
     m_pView->cancelPendingOperation();
     m_undoStack->clear();
+    m_openedMapZoneId.clear();
     m_pView->loadLandscape(fileName);
     rememberRecentFile(fileName);
 }
@@ -1081,6 +1483,8 @@ void MainWindow::updateWindowTitle(eTitleTypeData type, QString data)
 
     setWindowTitle(title);
     updateMapTestAction();
+    if(type == eTitleTypeData::eTitleTypeDataMpr)
+        refreshMapTestContext();
 }
 
 

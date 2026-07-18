@@ -87,6 +87,9 @@ public:
     void pickObject(const QRect& rect, bool bAddToSelect);
     QVector3D getTerrainPos(bool bLand = true);
     QVector3D getTerrainPos(const int cursorPosX, const int cursorPosY, bool bLand = true);
+    QPoint operationAnchor() const;
+    void setTestSpawnMarker(const QVector3D& position, bool adjusted = false);
+    void clearTestSpawnMarker();
     void changeOperation(EButtonOp type);
     void operationSetBackup(EOperationAxisType operationType);
     void operationRevert(EOperationAxisType operationType);
@@ -246,6 +249,11 @@ private:
     QSharedPointer<CPreviewTile> m_pPreviewTile;
     CLandscape* m_pLand;
     short m_tileBrushCommandId;
+    QPoint m_lastViewportMousePos;
+    bool m_hasViewportMousePos;
+    QVector3D m_testSpawnMarker;
+    bool m_testSpawnMarkerValid;
+    bool m_testSpawnMarkerAdjusted;
 };
 
 #endif // MYGLWIDGET_H

@@ -9,7 +9,11 @@
 #include <QPlainTextEdit>
 #include <QTableWidget>
 #include <QFileInfo>
+#include <QMap>
+#include <QVector3D>
 #include "types.h"
+#include "map_catalog.h"
+#include "map_spawn_planner.h"
 
 namespace Ui {
 class MainWindow;
@@ -26,6 +30,11 @@ class QAction;
 class QDockWidget;
 class CMapsBrowser;
 class CJmvMapTestLauncher;
+struct SResourceProfileEvaluation;
+class QComboBox;
+class QCheckBox;
+class QToolButton;
+class QLabel;
 
 struct SWindowTitle
 {
@@ -60,6 +69,14 @@ private:
     void openMapPair(const QString& mprPath, const QString& mobPath, const QString& zoneId);
     void updateMapTestAction();
     void launchCurrentMapTest();
+    void createViewportToolbars();
+    void refreshMapTestContext();
+    void populateEntranceCombo();
+    void chooseBorrowedMapIdentity();
+    void setCustomSpawnPicking(bool enabled);
+    QVector<SMapSpawnObstacle> mapTestObstacles() const;
+    const SMapTravelZone* selectedTravelZone() const;
+    SResourceProfileEvaluation activeResourceProfile() const;
 
 private slots:
     void showOutliner(bool bShow);
@@ -125,6 +142,19 @@ private:
     QAction* m_stopMapTestAction;
     CJmvMapTestLauncher* m_mapTestLauncher;
     bool m_closeAfterTestStop;
+    QMap<EButtonOp, QAction*> m_operationActions;
+    QComboBox* m_entranceCombo;
+    QToolButton* m_playFromHereButton;
+    QCheckBox* m_godmodeCheckBox;
+    QLabel* m_spawnPositionLabel;
+    SMapCatalogResult m_mapCatalog;
+    SMapCatalogEntry m_mapTestEntry;
+    QVector<SMapTravelZone> m_validEntrances;
+    QString m_openedMapZoneId;
+    bool m_borrowedMapIdentity;
+    bool m_pickSpawnPending;
+    SMapSpawnPlan m_customSpawn;
+    QVector3D m_customSpawnPosition;
 };
 
 #endif // MAIN_WINDOW_H

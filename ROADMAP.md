@@ -12,10 +12,6 @@ Current development line: `0.2.0`.
 
 ## Compatibility and profile support
 
-- [ ] Investigate Base EI direct-map launch as a separate profile capability.
-  - Base `game.exe` is immutable and supports original data/maps only.
-  - JMV launch behavior, addon DLLs, Lua rules, equipment extensions, or map
-    conventions must never become Base requirements.
 - [ ] Define a documented provider/extension contract for other mods.
   - A mod opts into only the capabilities it actually implements.
   - Unsupported profile features remain hidden or disabled with a reason.
@@ -150,6 +146,10 @@ path and must never fall back to the legacy rebuilding serializer.
 
 ## Landscape safety and game validation
 
+- [ ] Add a complete `map.txt` metadata editor for registered and new maps,
+  including zone identity/type, entrances, destinations, minimap, music, and
+  profile-specific metadata validation.
+
 - [ ] Warn when terrain edits can invalidate MOB object heights or the AI
   navigation graph.
 - [ ] Detect and preserve the known oversized-door runtime graph-regeneration
@@ -176,6 +176,29 @@ Publish the first immutable `0.2.0` package after the following runtime contract
 is demonstrated on normal gameplay, dungeon, and briefing maps.
 
 ### P0: direct-launch stabilization
+
+- [x] Add horizontal viewport operation controls and a top map-test toolbar.
+  - Select/Move/Rotate/Scale/Tile Brush share configurable actions with
+    `Esc`/`G`/`R`/`T`/`B`, and toolbar clicks cannot become world anchors.
+  - Test/Stop, authored entrance selection, Play from Here, and Godmode are
+    presented beside the viewport.
+- [x] Add selected-entrance and borrowed-identity launch preparation.
+  - Preserve `map.txt` source order and include inactive authored entrances.
+  - Unregistered MPR identities are explicit, warned, and retained only for
+    the currently loaded terrain.
+- [x] Add a collision-aware Play from Here picker and requested/resolved marker.
+  - Runtime position application remains gated on a fingerprinted post-ready
+    adapter; the editor must not claim a custom coordinate was applied until
+    the bridge reports it.
+- [x] Add temporary JMV Godmode delivery through owned `autoexec.cfg` state.
+  - Exactly `@godmode(0,3)` is appended, backed up atomically, hash checked,
+    and restored/removed on cleanup and interrupted-run recovery.
+- [x] Implement the exact-hash Base EI feasibility transport and four-level
+  probe ladder. See [the static compatibility record](docs/base-runtime-probe.md).
+  - Base is launched suspended by an editor-owned 32-bit helper; the run-local
+    bridge initializes outside `DllMain` and resumes only after hash/byte guards.
+  - Observation, pass-through, byte-identical redirect, and edited-state
+    redirect results remain separate. General Base support is not claimed.
 
 - [ ] Block **Main Menu** after the staged map becomes active.
   - The initial main menu remains part of bootstrap, so arm the restriction only

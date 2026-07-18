@@ -62,34 +62,11 @@ void CSelect::keyPress(COperation *pOp, EKeyCode key)
         m_pView->clearObjectSelection();
         break;
     }
-    case eKey_G:
-    {
-        pOp->setCurrent(new CMoveAxis(m_pView, EOperateAxisXY));
-        delete this;
-        break;
-    }
-    case eKey_R:
-    {
-        pOp->setCurrent(new CRotateAxis(m_pView, EOperateAxisZ));
-        delete this;
-        break;
-    }
-    case eKey_B:
-    {
-        pOp->setCurrent(new CTileBrush(m_pView));
-        delete this;
-        break;
-    }
     case eKey_T:
     {
         if (pOp->keyManager()->isPressed(eKey_Ctrl))
         {
             m_pView->iterateRoundMob();
-        }
-        else
-        {
-            pOp->setCurrent(new CScaleAxis(m_pView, EOperateAxisZ));
-            delete this;
         }
         break;
     }
@@ -268,7 +245,7 @@ CMoveAxis::CMoveAxis(CView *pView, EOperateAxis ax)
 {
     qDebug()<< "CMoveAxis init with: " << ax;
     axis = ax;
-    m_lastPos = m_pView->mapFromGlobal(QCursor::pos());
+    m_lastPos = m_pView->operationAnchor();
     lastLandPos = m_pView->getTerrainPos(m_lastPos.x(), m_lastPos.y());
     pView->operationSetBackup(EOperationAxisType::eMove);
     CStatusConnector::getInstance()->updateStatus("move.ico", "shift+Z(x,y) = exclude Z(x,y,) axis, X(y,z) - move X(y,z), Esc - Cancel, LMB - apply");
@@ -505,7 +482,7 @@ CRotateAxis::CRotateAxis(CView *pView, EOperateAxis ax)
 {
     qDebug()<< "CRotateAxis init with: " << ax;
     axis = ax;
-    m_lastPos = m_pView->mapFromGlobal(QCursor::pos());
+    m_lastPos = m_pView->operationAnchor();
     pView->operationSetBackup(EOperationAxisType::eRotate);
     CStatusConnector::getInstance()->updateStatus("rotate.ico", "Z(x,y) - rotate Z(x,y). Esc - Cancel, LMB - apply");
     CButtonConnector::getInstance()->pressButton(EButtonOpRotate);
@@ -781,7 +758,7 @@ CScaleAxis::CScaleAxis(CView *pView, EOperateAxis ax)
 {
     qDebug()<< "CScaleAxis init with: " << ax;
     axis = ax;
-    m_lastPos = m_pView->mapFromGlobal(QCursor::pos());
+    m_lastPos = m_pView->operationAnchor();
     pView->operationSetBackup(EOperationAxisType::eScale);
     CStatusConnector::getInstance()->updateStatus("scale.ico", "X(y,z) - scale X(y,z), shift+Z(x,y) = exclude Z(x,y,) axis. Esc - Cancel, LMB - apply");
     CButtonConnector::getInstance()->pressButton(EButtonOpScale);

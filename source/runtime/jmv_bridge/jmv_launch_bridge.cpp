@@ -18,6 +18,12 @@ constexpr unsigned char kExpectedGameSha256[32] = {
     0x1F, 0x1F, 0x5D, 0x1B, 0xCF, 0x08, 0x27, 0x17,
     0xF3, 0x17, 0x76, 0xDD, 0x4D, 0xEE, 0x94, 0xE2
 };
+constexpr unsigned char kExpectedBaseGameSha256[32] = {
+    0xB8, 0x71, 0xD7, 0x0D, 0x38, 0x76, 0xB2, 0xA5,
+    0x63, 0x4F, 0x09, 0x20, 0xC9, 0x21, 0x18, 0xBC,
+    0x49, 0x05, 0x8B, 0x50, 0xC7, 0xD8, 0xCB, 0xE6,
+    0x83, 0x76, 0x34, 0x9F, 0x51, 0xC2, 0xE5, 0x70
+};
 
 using CreateFileAFn = HANDLE (WINAPI*)(LPCSTR, DWORD, DWORD, LPSECURITY_ATTRIBUTES,
                                       DWORD, DWORD, HANDLE);
@@ -112,6 +118,7 @@ wchar_t g_liveSaves[MAX_PATH * 4] = {};
 wchar_t g_testSaves[MAX_PATH * 4] = {};
 volatile LONG g_saveRedirectLogCount = 0;
 volatile LONG g_introSkipMask = 0;
+int g_baseProbeLevel = 0;
 
 int __fastcall MapLoadDetour(void* self, void*, const char* mprPath,
                              const char* mobPath, void* context);
@@ -205,14 +212,21 @@ bool HashFileSha256(const wchar_t* path, unsigned char output[32])
     return success;
 }
 
-bool VerifyRuntime()
+enum class RuntimeBuild { Unsupported, JmvStarter, BaseEi };
+
+RuntimeBuild VerifyRuntime()
 {
     wchar_t gamePath[MAX_PATH * 4]{};
     if(!GetModuleFileNameW(nullptr, gamePath, DWORD(sizeof(gamePath) / sizeof(gamePath[0]))))
-        return false;
+        return RuntimeBuild::Unsupported;
     unsigned char hash[32]{};
-    return HashFileSha256(gamePath, hash) &&
-           std::memcmp(hash, kExpectedGameSha256, sizeof(hash)) == 0;
+    if(!HashFileSha256(gamePath, hash))
+        return RuntimeBuild::Unsupported;
+    if(std::memcmp(hash, kExpectedGameSha256, sizeof(hash)) == 0)
+        return RuntimeBuild::JmvStarter;
+    if(std::memcmp(hash, kExpectedBaseGameSha256, sizeof(hash)) == 0)
+        return RuntimeBuild::BaseEi;
+    return RuntimeBuild::Unsupported;
 }
 
 void AppendText(wchar_t* destination, size_t capacity, const wchar_t* text)
@@ -1147,14 +1161,43 @@ bool InitializeDirectLaunch()
                             DWORD(sizeof(g_resultPath) / sizeof(g_resultPath[0])));
     if(!g_resultPath[0])
         return false;
-    Log(L"EI Mapper Endurance JMV direct single-player map launch initializing");
-    if(!VerifyRuntime())
+    const RuntimeBuild runtime = VerifyRuntime();
+    Log(runtime == RuntimeBuild::BaseEi
+        ? L"EI Mapper Endurance Base EI direct-map feasibility bridge initializing"
+        : L"EI Mapper Endurance JMV direct single-player map launch initializing");
+    if(runtime == RuntimeBuild::Unsupported)
     {
-        Log(L"DIRECT_LAUNCH disabled: game.exe SHA-256 does not match the validated JMV runtime");
+        Log(L"DIRECT_LAUNCH disabled: game.exe SHA-256 does not match an exact validated runtime manifest");
         return false;
     }
+    if(runtime == RuntimeBuild::BaseEi)
+    {
+        wchar_t level[8]{};
+        GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_BASE_PROBE_LEVEL", level,
+                                DWORD(sizeof(level) / sizeof(level[0])));
+        g_baseProbeLevel = _wtoi(level);
+        if(g_baseProbeLevel < 1 || g_baseProbeLevel > 4)
+        {
+            Log(L"BASE_PROBE disabled: invalid or missing probe level");
+            return false;
+        }
+    }
     const int patched = InstallFileObservationHooks();
+    if(runtime == RuntimeBuild::BaseEi && g_baseProbeLevel == 1)
+    {
+        Log(patched > 0
+            ? L"BASE_PROBE level=1 injection=ready observation_hooks=ready redirect=disabled"
+            : L"BASE_PROBE level=1 injection=ready observation_hooks=failed redirect=disabled");
+        return patched > 0;
+    }
     const bool directLaunch = InstallMapLoadDetour();
+    if(runtime == RuntimeBuild::BaseEi && g_baseProbeLevel == 2 && directLaunch)
+    {
+        // Keep the byte-guarded detours installed, but use a state which can
+        // never queue or redirect a transition. Calls retain their arguments.
+        InterlockedExchange(&g_directLaunchState, 10);
+        Log(L"BASE_PROBE level=2 hook_signatures=ready mode=pass-through redirect=disabled; start a normal Base New Game manually");
+    }
     wchar_t message[256]{};
     _snwprintf_s(message, sizeof(message) / sizeof(message[0]), _TRUNCATE,
                  L"DIRECT_LAUNCH active imports=%d stack_capture=%s map_loader=%s trigger=complete-new-game-bootstrap",
@@ -1176,6 +1219,11 @@ extern "C" __declspec(dllexport) int __cdecl EntryAfterPatch(const char*)
     // recorded in the run log and leave the runtime otherwise untouched.
     InitializeDirectLaunch();
     return 0;
+}
+
+extern "C" __declspec(dllexport) DWORD WINAPI EnduranceInitialize(void*)
+{
+    return InitializeDirectLaunch() ? 1u : 0u;
 }
 
 BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, void*)

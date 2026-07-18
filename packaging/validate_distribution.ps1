@@ -11,6 +11,11 @@ $bridge = Join-Path $root 'runtime\EIMapperEnduranceJmvBridge.plg'
 if (-not (Test-Path -LiteralPath $bridge -PathType Leaf)) {
     $failures.Add('packaged JMV launch bridge is missing: runtime\EIMapperEnduranceJmvBridge.plg')
 }
+$runtimeHost = Join-Path $root 'runtime\EIMapperEnduranceRuntimeHost.exe'
+if(-not (Test-Path -LiteralPath $runtimeHost -PathType Leaf))
+{
+    $failures.Add('packaged Base runtime host is missing: runtime\EIMapperEnduranceRuntimeHost.exe')
+}
 
 foreach ($name in @('endurance-options.json', 'options.json')) {
     $matches = Get-ChildItem -LiteralPath $root -Recurse -File -Filter $name

@@ -84,6 +84,16 @@ bool processExists(qint64 pid)
 #endif
 }
 
+qint64 readOwnedGamePid(const QString& path)
+{
+    QFile file(path);
+    if(!file.open(QIODevice::ReadOnly | QIODevice::Text))
+        return 0;
+    bool ok = false;
+    const qint64 pid = QString::fromLatin1(file.readAll()).trimmed().toLongLong(&ok);
+    return ok ? pid : 0;
+}
+
 bool anotherGameIsRunning()
 {
 #ifdef Q_OS_WIN
@@ -127,6 +137,7 @@ QString normalized(const QString& path)
 QString persistentTestSavesPath(const SResourceProfileEvaluation& profile)
 {
     const QByteArray identity = (profile.profileId.toLower() + "\n" +
+        normalized(profile.gameRoot).toLower() + "\n" +
         normalized(profile.modRoot).toLower()).toUtf8();
     const QString suffix = QString::fromLatin1(
         QCryptographicHash::hash(identity, QCryptographicHash::Sha256).toHex().left(12));
@@ -250,11 +261,13 @@ BOOL CALLBACK findWindowForProcess(HWND window, LPARAM parameter)
 
 CJmvMapTestLauncher::CJmvMapTestLauncher(QObject* parent)
     : QObject(parent), m_process(new QProcess(this)),
-      m_cleanupComplete(true)
+      m_cleanupComplete(true), m_baseProbe(false)
 {
     connect(m_process, &QProcess::started, this, [this]()
     {
-        appendRunLog(QString("game.exe started pid=%1").arg(m_process->processId()));
+        appendRunLog(QString("%1 started pid=%2")
+                     .arg(m_baseProbe ? "Base runtime host" : "game.exe")
+                     .arg(m_process->processId()));
         m_manifest.insert("pid", double(m_process->processId()));
         writeManifest("running");
         emit testStarted(m_runId, m_temporaryMapName);
@@ -388,6 +401,59 @@ bool CJmvMapTestLauncher::hasConfiguredJmvPluginSlot(const QByteArray& configReg
     return configReg.contains(record);
 }
 
+bool CJmvMapTestLauncher::prepareTemporaryAutoexec(const QString& engineDirectory,
+                                                   const QString& runRoot,
+                                                   bool godmode,
+                                                   QJsonObject* manifest,
+                                                   QString* error)
+{
+    if(!godmode)
+        return true;
+    if(!manifest || engineDirectory.isEmpty() || runRoot.isEmpty())
+    {
+        if(error) *error = "Temporary Godmode autoexec paths are incomplete.";
+        return false;
+    }
+    const QString path = QDir(engineDirectory).filePath("autoexec.cfg");
+    const QString backupPath = QDir(runRoot).filePath("autoexec.original.cfg");
+    const bool existed = QFileInfo::exists(path);
+    QByteArray original;
+    if(existed && !readFile(path, &original, error))
+        return false;
+    if(existed)
+    {
+        if(!atomicWrite(backupPath, original, error)
+           || fileSha256(backupPath).compare(sha256(original), Qt::CaseInsensitive) != 0)
+        {
+            if(error && error->isEmpty()) *error = "The temporary autoexec backup failed verification.";
+            return false;
+        }
+    }
+    QByteArray patched = original;
+    if(!patched.isEmpty() && !patched.endsWith('\n'))
+        patched.append("\r\n");
+    patched.append("// EI Mapper Endurance owned test command\r\n@godmode(0,3)\r\n");
+    QJsonObject autoexec;
+    autoexec.insert("path", path);
+    autoexec.insert("backupPath", existed ? backupPath : QString());
+    autoexec.insert("originalExisted", existed);
+    autoexec.insert("originalSha256", sha256(original));
+    autoexec.insert("patchedSha256", sha256(patched));
+    autoexec.insert("command", "@godmode(0,3)");
+    // Record ownership before touching the live file so every failure path can
+    // invoke the same hash-checked restoration routine.
+    manifest->insert("autoexec", autoexec);
+    if(!atomicWrite(path, patched, error)
+       || fileSha256(path).compare(sha256(patched), Qt::CaseInsensitive) != 0)
+    {
+        if(error && error->isEmpty()) *error = "The temporary Godmode autoexec failed verification.";
+        QStringList rollback;
+        restoreAutoexec(*manifest, &rollback);
+        return false;
+    }
+    return true;
+}
+
 bool CJmvMapTestLauncher::launch(const SJmvMapTestLaunchInput& input, QString* error)
 {
     if(isRunning())
@@ -412,6 +478,10 @@ bool CJmvMapTestLauncher::launch(const SJmvMapTestLaunchInput& input, QString* e
     m_bridgeSha256.clear();
     m_liveMprSha256.clear();
     m_liveMobSha256.clear();
+    m_runtimeHostPath.clear();
+    m_gamePidPath.clear();
+    m_liveSavesPath.clear();
+    m_baseProbe = false;
     m_manifest = QJsonObject();
     m_cleanupComplete = false;
     if(!stage(input, error))
@@ -431,21 +501,34 @@ bool CJmvMapTestLauncher::launch(const SJmvMapTestLaunchInput& input, QString* e
         cleanup();
         return false;
     }
-    appendRunLog(QString("Launching %1 workingDirectory=%2 map=%3")
-                 .arg(m_gameExePath, m_engineDirectory, m_temporaryMapName));
-    m_process->setProgram(m_gameExePath);
+    appendRunLog(QString("Launching %1 workingDirectory=%2 map=%3 transport=%4")
+                 .arg(m_gameExePath, m_engineDirectory, m_temporaryMapName,
+                      m_baseProbe ? "owned-x86-injector" : "starter-plugin-slot"));
+    m_process->setProgram(m_baseProbe ? m_runtimeHostPath : m_gameExePath);
+    if(m_baseProbe)
+        m_process->setArguments(QStringList() << m_gameExePath << m_bridgeLivePath
+            << m_engineDirectory << m_gamePidPath
+            << QDir(m_runRoot).filePath("runtime-host.log"));
+    else
+        m_process->setArguments(QStringList());
     m_process->setWorkingDirectory(m_engineDirectory);
     QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
     environment.insert("EI_MAPPER_ENDURANCE_MAP", m_temporaryMapName);
     environment.insert("EI_MAPPER_ENDURANCE_SOURCE_ZONE", input.mapEntry.zoneId);
     environment.insert("EI_MAPPER_ENDURANCE_TARGET_EXIT", QString::number(input.spawn.exitId));
+    environment.insert("EI_MAPPER_ENDURANCE_SPAWN_MODE", input.spawn.custom ? "custom" : "entrance");
+    environment.insert("EI_MAPPER_ENDURANCE_SPAWN_X", QString::number(input.spawn.position.x(), 'f', 6));
+    environment.insert("EI_MAPPER_ENDURANCE_SPAWN_Y", QString::number(input.spawn.position.y(), 'f', 6));
+    environment.insert("EI_MAPPER_ENDURANCE_SPAWN_Z", QString::number(input.spawnZ, 'f', 6));
     environment.insert("EI_MAPPER_ENDURANCE_TEMP_MPR", m_liveMprPath);
     environment.insert("EI_MAPPER_ENDURANCE_TEMP_MOB", m_liveMobPath);
     environment.insert("EI_MAPPER_ENDURANCE_BRIDGE_RESULT", m_bridgeResultPath);
-    environment.insert("EI_MAPPER_ENDURANCE_LIVE_SAVES",
-                       QDir(input.profile.modRoot).filePath("saves"));
+    environment.insert("EI_MAPPER_ENDURANCE_LIVE_SAVES", m_liveSavesPath);
     environment.insert("EI_MAPPER_ENDURANCE_TEST_SAVES", m_testSavesPath);
     environment.insert("EI_MAPPER_ENDURANCE_SKIP_INTROS", "1");
+    if(m_baseProbe)
+        environment.insert("EI_MAPPER_ENDURANCE_BASE_PROBE_LEVEL",
+                           QString::number(input.baseProbeLevel));
     m_process->setProcessEnvironment(environment);
     m_process->start();
     return true;
@@ -453,10 +536,12 @@ bool CJmvMapTestLauncher::launch(const SJmvMapTestLaunchInput& input, QString* e
 
 bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* error)
 {
-    if(input.profile.profileId.compare("jamais-vu", Qt::CaseInsensitive) != 0 ||
-       !input.profile.valid || !input.profile.runtimeStackValidated)
+    const bool isJmv = input.profile.profileId.compare("jamais-vu", Qt::CaseInsensitive) == 0;
+    const bool isBase = input.profile.profileId.compare("base-game", Qt::CaseInsensitive) == 0;
+    m_baseProbe = isBase;
+    if((!isJmv && !isBase) || !input.profile.valid || !input.profile.runtimeStackValidated)
     {
-        if(error) *error = "The active JMV runtime stack is incomplete or does not match the validated manifest.";
+        if(error) *error = "The active runtime stack is incomplete or does not match an exact manifest.";
         return false;
     }
     if(!input.spawn.valid || input.mprData.isEmpty() || input.mobData.isEmpty())
@@ -464,7 +549,17 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
         if(error) *error = "The loaded map pair or its unobstructed travel-zone spawn is incomplete.";
         return false;
     }
-    if(input.profile.mapDirectories.isEmpty() || input.profile.modRoot.isEmpty())
+    if(input.spawn.custom)
+    {
+        if(error) *error = "Play from Here has no validated runtime position adapter yet; use the selected authored entrance for this build.";
+        return false;
+    }
+    if(isBase && (input.baseProbeLevel < 1 || input.baseProbeLevel > 4))
+    {
+        if(error) *error = "Select Base feasibility probe level 1 through 4.";
+        return false;
+    }
+    if(input.profile.mapDirectories.isEmpty() || (isJmv && input.profile.modRoot.isEmpty()))
     {
         if(error) *error = "The active JMV profile has no writable mod Maps directory.";
         return false;
@@ -475,30 +570,43 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
         if(error) *error = "The selected map has no safe runtime map identity for the JMV bridge.";
         return false;
     }
-    const QString mapsDirectory = QDir(input.profile.modRoot).filePath("Maps");
-    if(normalized(input.profile.mapDirectories.first()).compare(normalized(mapsDirectory), Qt::CaseInsensitive) != 0)
+    const QString profileMapsDirectory = isJmv
+        ? QDir(input.profile.modRoot).filePath("Maps")
+        : input.profile.mapDirectories.first();
+    if(isJmv && normalized(input.profile.mapDirectories.first()).compare(
+           normalized(profileMapsDirectory), Qt::CaseInsensitive) != 0)
     {
         if(error) *error = "The highest-priority Maps directory is not the active JMV mod Maps directory.";
         return false;
     }
-    m_gameExePath = QDir(input.profile.gameRoot).filePath("Starter/Engine/game.exe");
+    m_gameExePath = isJmv
+        ? QDir(input.profile.gameRoot).filePath("Starter/Engine/game.exe")
+        : QDir(input.profile.gameRoot).filePath("game.exe");
     m_engineDirectory = QFileInfo(m_gameExePath).absolutePath();
     m_bridgeSourcePath = QDir(QCoreApplication::applicationDirPath())
             .filePath("runtime/EIMapperEnduranceJmvBridge.plg");
-    const QString modConfigPath = QDir(input.profile.modRoot).filePath("config.reg");
-    QByteArray modConfig;
-    if(!readFile(modConfigPath, &modConfig, error) ||
-       !hasConfiguredJmvPluginSlot(modConfig))
+    if(isJmv)
     {
-        if(error && error->isEmpty())
-            *error = "The active JMV config.reg does not declare the supported DEV Plugin=plugin.dll slot.";
-        return false;
+        const QString modConfigPath = QDir(input.profile.modRoot).filePath("config.reg");
+        QByteArray modConfig;
+        if(!readFile(modConfigPath, &modConfig, error) ||
+           !hasConfiguredJmvPluginSlot(modConfig))
+        {
+            if(error && error->isEmpty())
+                *error = "The active JMV config.reg does not declare the supported DEV Plugin=plugin.dll slot.";
+            return false;
+        }
+        m_bridgeLivePath = QDir(input.profile.modRoot).filePath("plugin.dll");
+        if(QFileInfo::exists(m_bridgeLivePath))
+        {
+            if(error) *error = "The JMV DEV Plugin path already exists. Endurance will not replace an installed mod plugin; run recovery or inspect plugin.dll first.";
+            return false;
+        }
     }
     // JMV's config.reg declares DEV/Plugin as plugin.dll. Starter loads that
     // exact configured file; its *.plg scan is used only when the configured
     // value names a directory. Keep the packaged provider descriptively named,
     // but install it temporarily into the already-declared, currently empty slot.
-    m_bridgeLivePath = QDir(input.profile.modRoot).filePath("plugin.dll");
     if(!QFileInfo(m_gameExePath).isFile())
     {
         if(error) *error = "The validated Starter game.exe is missing.";
@@ -509,12 +617,6 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
         if(error) *error = "The packaged JMV launch bridge is missing. Reinstall this Endurance build.";
         return false;
     }
-    if(QFileInfo::exists(m_bridgeLivePath))
-    {
-        if(error) *error = "The JMV DEV Plugin path already exists. Endurance will not replace an installed mod plugin; run recovery or inspect plugin.dll first.";
-        return false;
-    }
-
     m_runId = QDateTime::currentDateTimeUtc().toString("yyyyMMdd-HHmmss-") +
             QString::number(QRandomGenerator::global()->generate(), 16).rightJustified(8, '0');
     m_temporaryMapName = "ed" + m_runId.right(8).toLower();
@@ -523,8 +625,33 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
     m_runLogPath = QDir(m_runRoot).filePath("runtime.log");
     m_bridgeResultPath = QDir(m_runRoot).filePath("bridge-result.log");
     m_testSavesPath = testSavesPathForProfile(input.profile);
-    m_liveMprPath = QDir(mapsDirectory).filePath(m_temporaryMapName + ".mpr");
-    m_liveMobPath = QDir(mapsDirectory).filePath(m_temporaryMapName + ".mob");
+    m_liveSavesPath = isJmv ? QDir(input.profile.modRoot).filePath("saves")
+                            : QDir(input.profile.gameRoot).filePath("saves");
+    if(isBase)
+    {
+        const QString liveDirectory = QDir(m_runRoot).filePath("live");
+        if(!QDir().mkpath(liveDirectory))
+        {
+            if(error) *error = "Could not create the Base EI run-local map directory.";
+            return false;
+        }
+        m_bridgeLivePath = QDir(m_runRoot).filePath("EIMapperEnduranceRuntimeBridge.dll");
+        m_runtimeHostPath = QDir(QCoreApplication::applicationDirPath())
+            .filePath("runtime/EIMapperEnduranceRuntimeHost.exe");
+        m_gamePidPath = QDir(m_runRoot).filePath("game.pid");
+        if(!QFileInfo(m_runtimeHostPath).isFile())
+        {
+            if(error) *error = "The packaged x86 Base EI runtime host is missing.";
+            return false;
+        }
+        m_liveMprPath = QDir(liveDirectory).filePath(m_temporaryMapName + ".mpr");
+        m_liveMobPath = QDir(liveDirectory).filePath(m_temporaryMapName + ".mob");
+    }
+    else
+    {
+        m_liveMprPath = QDir(profileMapsDirectory).filePath(m_temporaryMapName + ".mpr");
+        m_liveMobPath = QDir(profileMapsDirectory).filePath(m_temporaryMapName + ".mob");
+    }
     if(QFileInfo::exists(m_liveMprPath) || QFileInfo::exists(m_liveMobPath))
     {
         if(error) *error = "The randomly generated Endurance test-map name already exists; retry the launch.";
@@ -546,6 +673,19 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
         return false;
     }
     const QByteArray stagedMob = input.mobData;
+    if(isBase && input.baseProbeLevel == 3)
+    {
+        QByteArray sourceMpr;
+        QByteArray sourceMobBytes;
+        if(!readFile(input.sourceMpr.absoluteFilePath(), &sourceMpr, error)
+           || !readFile(input.sourceMob.absoluteFilePath(), &sourceMobBytes, error))
+            return false;
+        if(sourceMpr != input.mprData || sourceMobBytes != input.mobData)
+        {
+            if(error) *error = "Base probe level 3 requires byte-identical, unedited source MPR/MOB data.";
+            return false;
+        }
+    }
 
     const QString payloadDirectory = QDir(m_runRoot).filePath("payload");
     if(!QDir().mkpath(payloadDirectory))
@@ -610,6 +750,14 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
                                    ? "briefing" : "gameplay");
     request.sessionSettings.insert("spawnX", input.spawn.position.x());
     request.sessionSettings.insert("spawnY", input.spawn.position.y());
+    request.sessionSettings.insert("spawnZ", input.spawnZ);
+    request.sessionSettings.insert("spawnMode", input.spawn.custom ? "custom" : "entrance");
+    request.sessionSettings.insert("requestedSpawnX", input.spawn.requestedPosition.x());
+    request.sessionSettings.insert("requestedSpawnY", input.spawn.requestedPosition.y());
+    request.sessionSettings.insert("spawnAdjusted", input.spawn.adjusted);
+    request.sessionSettings.insert("godmode", input.godmode);
+    request.sessionSettings.insert("borrowedMapIdentity", input.borrowedMapIdentity);
+    request.sessionSettings.insert("baseProbeLevel", input.baseProbeLevel);
     request.sessionSettings.insert("clearance", input.spawn.clearance);
     request.sessionSettings.insert("unobstructed", input.spawn.unobstructed);
     request.logPath = m_runLogPath;
@@ -625,9 +773,12 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
     m_manifest.insert("createdUtc", QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
     m_manifest.insert("temporaryMapName", m_temporaryMapName);
     m_manifest.insert("liveFiles", liveFiles);
+    if(!prepareTemporaryAutoexec(m_engineDirectory, m_runRoot, input.godmode,
+                                 &m_manifest, error))
+        return false;
     QJsonObject isolatedSaves;
     isolatedSaves.insert("mode", "persistent-profile-runtime-path-redirection");
-    isolatedSaves.insert("livePath", QDir(input.profile.modRoot).filePath("saves"));
+    isolatedSaves.insert("livePath", m_liveSavesPath);
     isolatedSaves.insert("testPath", m_testSavesPath);
     m_manifest.insert("isolatedSaves", isolatedSaves);
     appendRunLog(QString("Prepared persistent profile-isolated JMV test saves path=%1; live saves remain untouched")
@@ -688,11 +839,11 @@ QString CJmvMapTestLauncher::bridgeResultSummary() const
 {
     QFile result(m_bridgeResultPath);
     if(!result.open(QIODevice::ReadOnly | QIODevice::Text))
-        return "JMV bridge produced no result log; Starter may not have loaded the temporary provider.";
+        return "Runtime bridge produced no result log; the temporary provider may not have initialized.";
     const QString text = QString::fromUtf8(result.readAll()).trimmed();
     return text.isEmpty() ?
-        "JMV bridge result log was empty; the runtime did not report bridge readiness." :
-        "JMV bridge result:\n" + text;
+        "Runtime bridge result log was empty; the runtime did not report bridge readiness." :
+        "Runtime bridge result:\n" + text;
 }
 
 QString CJmvMapTestLauncher::cleanup()
@@ -728,7 +879,14 @@ void CJmvMapTestLauncher::focusGameWindow()
 #ifdef Q_OS_WIN
     if(!isRunning())
         return;
-    FocusContext context{DWORD(m_process->processId()), nullptr};
+    const qint64 ownedPid = m_baseProbe ? readOwnedGamePid(m_gamePidPath)
+                                       : m_process->processId();
+    if(ownedPid <= 0)
+    {
+        appendRunLog("Owned game PID is not available for focus yet");
+        return;
+    }
+    FocusContext context{DWORD(ownedPid), nullptr};
     EnumWindows(findWindowForProcess, LPARAM(&context));
     if(context.window)
     {

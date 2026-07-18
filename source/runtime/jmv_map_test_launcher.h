@@ -21,6 +21,10 @@ struct SJmvMapTestLaunchInput
     QString embeddedScript;
     SMapCatalogEntry mapEntry;
     SMapSpawnPlan spawn;
+    double spawnZ{0.0};
+    bool godmode{false};
+    bool borrowedMapIdentity{false};
+    int baseProbeLevel{0};
 };
 
 class CJmvMapTestLauncher : public QObject
@@ -45,6 +49,11 @@ public:
                                            QString* output,
                                            QString* error = nullptr);
     static bool hasConfiguredJmvPluginSlot(const QByteArray& configReg);
+    static bool prepareTemporaryAutoexec(const QString& engineDirectory,
+                                         const QString& runRoot,
+                                         bool godmode,
+                                         QJsonObject* manifest,
+                                         QString* error = nullptr);
 
 signals:
     void testStarted(const QString& runId, const QString& temporaryMapName);
@@ -77,8 +86,12 @@ private:
     QString m_liveMobSha256;
     QString m_gameExePath;
     QString m_engineDirectory;
+    QString m_runtimeHostPath;
+    QString m_gamePidPath;
+    QString m_liveSavesPath;
     QJsonObject m_manifest;
     bool m_cleanupComplete;
+    bool m_baseProbe;
 };
 
 #endif // JMV_MAP_TEST_LAUNCHER_H
