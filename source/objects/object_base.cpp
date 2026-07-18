@@ -501,10 +501,10 @@ void CObjectBase::applyTransientVisual(const QString& modelName, const QString& 
         return;
     m_transientVisualFingerprint = fingerprint;
     m_pFigure = CObjectList::getInstance()->getFigure(modelName);
-    // The caller already resolved profile-vs-import precedence. Using the
-    // literal texture lookup prevents the legacy heuristic from substituting
-    // a database skin for incomplete embedded-MOB data.
-    m_texture = CTextureList::getInstance()->texture(textureName);
+    // The caller already resolved profile-vs-import precedence. The
+    // model-aware lookup normalizes a supplied .mmp suffix and resolves only
+    // aliases belonging to that model/profile resource catalog.
+    m_texture = CTextureList::getInstance()->texture(textureName, modelName);
     m_bboxDirty = true;
     for(CPart* part : m_aPart)
         delete part;

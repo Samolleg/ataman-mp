@@ -193,7 +193,10 @@ void CUnit::refreshTransientVisual()
     const QString texture = appearance.value("primaryTexture").toString();
     const QStringList assemblyParts = CObjectList::getInstance()->figurePartNames(model);
     QStringList visibleParts;
-    if(m_bImport && !m_bodyParts.isEmpty())
+    // OBJ_BODYPARTS is the instance component-enable mask regardless of where
+    // model/equipment values are resolved. Ignoring it for database-backed
+    // units exposes every mutually-exclusive human body/armor component.
+    if(!m_bodyParts.isEmpty())
         visibleParts = m_bodyParts;
     else
         for(const QString& part : assemblyParts)

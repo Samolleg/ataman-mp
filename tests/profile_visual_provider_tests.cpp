@@ -42,6 +42,11 @@ QSharedPointer<ei::SProfileDatabaseSnapshot> database()
     db->items.insert("shield", item("shield", "weapons", 9, 4));
     db->items.insert("great sword", item("great sword", "weapons", 12, 5));
     db->items.insert("great axe", item("great axe", "weapons", 13, 6));
+    ei::SMonsterDatabaseRecord extendedSkin;
+    extendedSkin.name = "Human Extended Skin";
+    extendedSkin.baseRace = "Human Male";
+    extendedSkin.skinIndex = 39;
+    db->monsters.insert(extendedSkin.name.toLower(), extendedSkin);
     return db;
 }
 
@@ -59,6 +64,7 @@ class ProfileVisualProviderTests : public QObject
     Q_OBJECT
 private slots:
     void resolvesDatabaseHumanoidsAcrossFamilies();
+    void resolvesHumanoidSkinNumberBeyondRaceModelExamples();
     void importedAppearanceNeverFallsBack();
     void basePreservesSingleWeaponBehavior();
     void jmvLayoutsAreIndependentlyGated();
@@ -85,6 +91,17 @@ void ProfileVisualProviderTests::resolvesDatabaseHumanoidsAcrossFamilies()
         QCOMPARE(output.value("primaryTexture").toString(), it.value());
         QVERIFY(output.value("model").toString() != request.model);
     }
+}
+
+void ProfileVisualProviderTests::resolvesHumanoidSkinNumberBeyondRaceModelExamples()
+{
+    ProfileVisualProviderService service;
+    const auto resolver = service.appearanceResolver("jmv.v1", database());
+    SCharacterAppearanceRequest request;
+    request.prototype = "Human Extended Skin";
+    QJsonObject output;
+    QVERIFY(resolver->resolve(request, &output).success);
+    QCOMPARE(output.value("primaryTexture").toString(), QString("unhumaskin_39.mmp"));
 }
 
 void ProfileVisualProviderTests::importedAppearanceNeverFallsBack()

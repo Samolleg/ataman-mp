@@ -34,6 +34,19 @@ QString textureName(const QString& model, const QString& token)
     return value;
 }
 
+QString monsterTextureName(const QString& model, const QStringList& primary, int skinIndex)
+{
+    if(skinIndex < 0)
+        return QString();
+    // Human/orc RaceModels describe the texture family, while the Monsters
+    // skin field is the actual numbered member. JMV legitimately uses numbers
+    // beyond the representative RaceModels list (for example skin 39).
+    for(const QString& token : primary)
+        if(token.trimmed().startsWith("skin_", Qt::CaseInsensitive))
+            return textureName(model, QString("skin_%1").arg(skinIndex, 2, 10, QChar('0')));
+    return skinIndex < primary.size() ? textureName(model, primary.at(skinIndex)) : QString();
+}
+
 QString itemPrototype(const QString& reference)
 {
     return reference.section('[', 0, 0).section('.', 0, 0).trimmed().toLower();
@@ -125,12 +138,13 @@ SRuntimeProviderResult resolveDatabaseAppearance(
     if(race == database->raceModels.constEnd())
         return failure("appearance.race.missing", "Monster base-race link is absent from RaceModels.");
     const QStringList primary = expandedList(race->primaryTextures);
-    if(monster->skinIndex < 0 || monster->skinIndex >= primary.size())
+    const QString primaryTexture = monsterTextureName(race->model, primary, monster->skinIndex);
+    if(primaryTexture.isEmpty())
         return failure("appearance.skin.invalid", "Monster skin index is outside the RaceModels primary texture list.");
     const QStringList secondary = expandedList(race->secondaryTextures);
     appearance->insert("source", "profileDatabase");
     appearance->insert("model", race->model);
-    appearance->insert("primaryTexture", textureName(race->model, primary.at(monster->skinIndex)));
+    appearance->insert("primaryTexture", primaryTexture);
     appearance->insert("secondaryTexture", secondary.isEmpty() ? QString() : textureName(race->model, secondary.first()));
     appearance->insert("armor", QJsonArray::fromStringList(monster->wears));
     appearance->insert("hairIndex", monster->hairIndex);
