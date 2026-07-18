@@ -12,7 +12,9 @@
 #include <QPushButton>
 #include <QVBoxLayout>
 
-CResourceSetupDialog::CResourceSetupDialog(const QString& initialGameRoot, QWidget* parent)
+CResourceSetupDialog::CResourceSetupDialog(const QString& initialGameRoot,
+                                           const QString& initialProfileId,
+                                           QWidget* parent)
     : QDialog(parent)
     , m_gameRoot(new QLineEdit(this))
     , m_profile(new QComboBox(this))
@@ -50,6 +52,10 @@ CResourceSetupDialog::CResourceSetupDialog(const QString& initialGameRoot, QWidg
     for(const SResourceProfile& profile : m_profiles)
         m_profile->addItem(profile.displayName, profile.id);
 
+    const int configuredProfile = m_profile->findData(initialProfileId);
+    if(configuredProfile >= 0)
+        m_profile->setCurrentIndex(configuredProfile);
+
     QString root = initialGameRoot;
     if(root.isEmpty())
     {
@@ -65,7 +71,7 @@ CResourceSetupDialog::CResourceSetupDialog(const QString& initialGameRoot, QWidg
             this, [this](int) { refresh(false); });
     connect(m_buttons, &QDialogButtonBox::accepted, this, &CResourceSetupDialog::accept);
     connect(m_buttons, &QDialogButtonBox::rejected, this, &CResourceSetupDialog::reject);
-    refresh(true);
+    refresh(configuredProfile < 0);
 }
 
 void CResourceSetupDialog::chooseGameRoot()

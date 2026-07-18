@@ -6,6 +6,7 @@
 
 #include "jmv_map_test_launcher.h"
 #include "current_session_backup.h"
+#include "endurance_document.h"
 
 class JmvMapTestLauncherTests : public QObject
 {
@@ -16,6 +17,7 @@ private slots:
     void injectsIntoExistingWorldScript();
     void ignoresWorldScriptInStringsAndComments();
     void rejectsMalformedExistingWorldScript();
+    void injectsActualAutorunRuntimeBootstrap();
     void recognizesConfiguredJmvPluginSlot();
     void exposesTestRunsQuickAccessPath();
     void isolatesPersistentSavesByProfileInstallation();
@@ -186,6 +188,48 @@ void JmvMapTestLauncherTests::rejectsMalformedExistingWorldScript()
     QVERIFY(!CJmvMapTestLauncher::injectWorldScriptBootstrap(
                 "WorldScript broken", "ConsoleString(\"test\")", &output, &error));
     QVERIFY(!error.isEmpty());
+}
+
+void JmvMapTestLauncherTests::injectsActualAutorunRuntimeBootstrap()
+{
+    const QString maps = QString::fromLocal8Bit(qgetenv("EI_TEST_JMV_MAPS"));
+    if(maps.isEmpty())
+        QSKIP("Set EI_TEST_JMV_MAPS to run the private-corpus autorun check.");
+    const QString source = QDir(maps).filePath("AutoRunSpellAddon123.mob");
+    QVERIFY(QFileInfo::exists(source));
+    QFile original(source);
+    QVERIFY(original.open(QIODevice::ReadOnly));
+    const QByteArray originalBytes = original.readAll();
+
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+    SMapSpawnPlan spawn;
+    spawn.valid = true;
+    spawn.custom = true;
+    spawn.exitId = 5;
+    spawn.position = QPointF(290.5, 219.2);
+    QJsonObject manifest;
+    QString outputPath;
+    QString error;
+    QVERIFY2(CJmvMapTestLauncher::prepareGodmodeBootstrap(
+        QStringList() << maps, temp.path(), spawn, 12.75, true,
+        &manifest, &outputPath, &error), qPrintable(error));
+
+    CMobDocument output;
+    CValidationReport report;
+    QVERIFY2(output.load(QFileInfo(outputPath), &report), qPrintable(report.toText()));
+    QString script;
+    QVERIFY2(output.embeddedScript(&script, &report), qPrintable(report.toText()));
+    const int worldScript = script.indexOf("WorldScript", 0, Qt::CaseInsensitive);
+    const int marker = script.indexOf("// EI Mapper Endurance owned runtime bootstrap");
+    QVERIFY(worldScript >= 0);
+    QVERIFY(marker > worldScript);
+    QVERIFY(script.contains("SetCPFast(GetUnitOfPlayer(0,0), 290.500000, 219.200000, 12.750000);"));
+    QVERIFY(script.contains("GodMode(0,3);"));
+
+    QFile unchanged(source);
+    QVERIFY(unchanged.open(QIODevice::ReadOnly));
+    QCOMPARE(unchanged.readAll(), originalBytes);
 }
 
 void JmvMapTestLauncherTests::recoveryRemovesAutoexecCreatedByEndurance()

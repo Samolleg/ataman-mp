@@ -469,22 +469,23 @@ bool CJmvMapTestLauncher::prepareTemporaryAutoexec(const QString& engineDirector
 
 bool CJmvMapTestLauncher::prepareGodmodeBootstrap(
     const QStringList& mapDirectories, const QString& runRoot,
-    bool godmode, QJsonObject* manifest, QString* outputPath, QString* error)
+    const SMapSpawnPlan& spawn, double spawnZ, bool godmode,
+    QJsonObject* manifest, QString* outputPath, QString* error)
 {
     if(outputPath)
         outputPath->clear();
-    if(!godmode)
+    if(!spawn.valid && !godmode)
         return true;
     if(!manifest || !outputPath || runRoot.isEmpty())
     {
-        if(error) *error = "Godmode bootstrap paths are incomplete.";
+        if(error) *error = "JMV runtime bootstrap paths are incomplete.";
         return false;
     }
     const QString sourcePath = findCaseInsensitiveFile(
         mapDirectories, "AutoRunSpellAddon123.mob");
     if(sourcePath.isEmpty())
     {
-        if(error) *error = "JMV Godmode requires the profile's AutoRunSpellAddon123.mob.";
+        if(error) *error = "JMV runtime positioning requires the profile's AutoRunSpellAddon123.mob.";
         return false;
     }
     CMobDocument document;
@@ -500,14 +501,28 @@ bool CJmvMapTestLauncher::prepareGodmodeBootstrap(
         if(error) *error = "Could not read the JMV autorun script:\n" + report.toText();
         return false;
     }
-    const QString marker = "// EI Mapper Endurance owned Godmode bootstrap";
-    if(!script.endsWith('\n') && !script.isEmpty())
-        script.append("\r\n");
-    script.append(marker + "\r\nGodMode(0,3);\r\n");
-    QByteArray patched;
-    if(!document.replaceEmbeddedScript(script, &patched, &report))
+    QStringList commands;
+    commands.append("// EI Mapper Endurance owned runtime bootstrap");
+    if(spawn.valid)
+        commands.append(QString("SetCPFast(GetUnitOfPlayer(0,0), %1, %2, %3);")
+            .arg(spawn.position.x(), 0, 'f', 6)
+            .arg(spawn.position.y(), 0, 'f', 6)
+            .arg(spawnZ, 0, 'f', 6));
+    if(godmode)
+        commands.append("GodMode(0,3);");
+    QString bootstrappedScript;
+    QString bootstrapError;
+    if(!injectWorldScriptBootstrap(script, commands.join("\r\n"),
+                                   &bootstrappedScript, &bootstrapError))
     {
-        if(error) *error = "Could not create the lossless Godmode autorun MOB:\n" + report.toText();
+        if(error) *error = "Could not inject the JMV runtime commands into WorldScript: "
+            + bootstrapError;
+        return false;
+    }
+    QByteArray patched;
+    if(!document.replaceEmbeddedScript(bootstrappedScript, &patched, &report))
+    {
+        if(error) *error = "Could not create the lossless JMV runtime autorun MOB:\n" + report.toText();
         return false;
     }
     const QString ownedPath = QDir(runRoot).filePath("godmode/AutoRunSpellAddon123.mob");
@@ -519,7 +534,11 @@ bool CJmvMapTestLauncher::prepareGodmodeBootstrap(
     bootstrap.insert("sourceSha256", fileSha256(sourcePath));
     bootstrap.insert("path", ownedPath);
     bootstrap.insert("sha256", sha256(patched));
-    bootstrap.insert("command", "GodMode(0,3)");
+    bootstrap.insert("commands", commands.join(" "));
+    bootstrap.insert("spawnX", spawn.position.x());
+    bootstrap.insert("spawnY", spawn.position.y());
+    bootstrap.insert("spawnZ", spawnZ);
+    bootstrap.insert("godmode", godmode);
     manifest->insert("godmodeBootstrap", bootstrap);
     *outputPath = ownedPath;
     return true;
@@ -621,11 +640,6 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
     if(!input.spawn.valid || input.mprData.isEmpty() || input.mobData.isEmpty())
     {
         if(error) *error = "The loaded map pair or its unobstructed travel-zone spawn is incomplete.";
-        return false;
-    }
-    if(input.spawn.custom)
-    {
-        if(error) *error = "Play from Here has no validated runtime position adapter yet; use the selected authored entrance for this build.";
         return false;
     }
     if(isBase && (input.baseProbeLevel < 1 || input.baseProbeLevel > 4))
@@ -849,7 +863,7 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
     m_manifest.insert("liveFiles", liveFiles);
     QString godmodeBootstrapPath;
     if(isJmv && !prepareGodmodeBootstrap(input.profile.mapDirectories, m_runRoot,
-                                         input.godmode, &m_manifest,
+                                         input.spawn, input.spawnZ, input.godmode, &m_manifest,
                                          &godmodeBootstrapPath, error))
         return false;
     if(!godmodeBootstrapPath.isEmpty())

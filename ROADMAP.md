@@ -189,15 +189,18 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
 - [x] Add a non-destructive collision-aware Play from Here picker and requested/resolved marker.
   - `0.2.0-alpha.4` replaces the framebuffer/depth redraw picker that could
     flicker and corrupt render state with a CPU ray/heightfield intersection.
-  - Runtime position application remains gated on a fingerprinted post-ready
-    adapter; the editor must not claim a custom coordinate was applied until
-    the bridge reports it.
+  - `0.2.0-alpha.7` replaces the screen crosshair with a terrain-projected hero
+    outline and uses the process-owned JMV autorun bootstrap to apply the chosen
+    position with `SetCPFast` after normal player/session initialization.
 - [ ] Validate temporary JMV Godmode delivery through a run-local SpellAddon
   autorun MOB.
   - Runtime testing proved that the safely installed temporary `autoexec.cfg`
     was ignored. `0.2.0-alpha.4` instead losslessly patches a run-local copy of
     `AutoRunSpellAddon123.mob` with `GodMode(0,3)` and redirects only the owned
     test process. The installed autorun MOB remains untouched.
+  - Alpha.6 proved the redirect happened but the appended command did not run.
+    Alpha.7 injects both spawn placement and Godmode at the beginning of the
+    existing `WorldScript` body, before early returns or `KillScript` paths.
 - [x] Implement the exact-hash Base EI feasibility transport and four-level
   probe ladder. See [the static compatibility record](docs/base-runtime-probe.md).
   - Base is launched suspended by an editor-owned 32-bit helper; the run-local
@@ -206,7 +209,9 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
     redirect results remain separate. General Base support is not claimed.
   - `0.2.0-alpha.3` never entered the ladder because the packaged x86 bridge
     exposed only the decorated initialization name. `alpha.4` exports the
-    stable protocol name; all four levels require a fresh runtime test.
+    stable protocol name. Local alpha.6 testing confirmed probe levels 3 and 4
+    both load the staged Base map pair; Base remains exact-hash Experimental
+    pending a recorded full-ladder validation package.
 
 - [x] Visualize authored entrance deploy rectangles in the viewport and add
   **Go to Entrance** camera navigation.
@@ -217,6 +222,15 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
   - `0.2.0-alpha.6` removes same-framebuffer QPainter composition entirely
     after alpha.5 still produced alternating dark frames on NVIDIA. Entrance
     areas and the custom-spawn marker now stay in the native OpenGL pass.
+  - Alpha.7 corrects label texture orientation, locks the authored entrance
+    selector while a custom entrance is active, and makes Go to Entrance focus
+    either the selected authored entrance or the custom anchor.
+
+- [x] Make profile context explicit and safe to change.
+  - The active editing profile appears in the window title and is preselected
+    in Game and Mod Setup.
+  - Switching Base/JMV profiles closes loaded documents first so resource-backed
+    scene state cannot survive into the new profile.
 
 - [ ] Block **Main Menu** after the staged map becomes active.
   - The initial main menu remains part of bootstrap, so arm the restriction only

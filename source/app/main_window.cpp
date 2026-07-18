@@ -320,6 +320,7 @@ MainWindow::MainWindow(QWidget* parent) :
     refreshMapsBrowser();
     refreshMapTestContext();
     updateMapTestAction();
+    updateWindowTitle(eTitleTypeData::eTitleTypeDataMpr, QString());
 //    if(m_pView->isRecentAvailable())
 //        m_ui->actionOpen_recent->setEnabled(true);
 }
@@ -443,6 +444,15 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event)
                 return true;
             }
         }
+        if(event->type() == QEvent::MouseMove)
+        {
+            QMouseEvent* mouse = static_cast<QMouseEvent*>(event);
+            QVector3D preview;
+            if(m_pView->terrainPositionAt(mouse->pos(), &preview))
+                m_pView->setTestSpawnMarker(preview, false);
+            else
+                m_pView->clearTestSpawnMarker();
+        }
         if(event->type() == QEvent::MouseButtonPress)
         {
             QMouseEvent* mouse = static_cast<QMouseEvent*>(event);
@@ -478,6 +488,7 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event)
                     .arg(resolved.x(), 0, 'f', 2).arg(resolved.y(), 0, 'f', 2)
                     .arg(resolved.z(), 0, 'f', 2)
                     .arg(plan.adjusted ? tr(" (adjusted)") : QString()));
+                updateCustomSpawnControls();
                 updateMapTestAction();
                 return true;
             }
@@ -510,6 +521,12 @@ SResourceProfileEvaluation MainWindow::activeResourceProfile() const
         if(profileId && candidate.id.compare(profileId->value(), Qt::CaseInsensitive) == 0)
             return evaluateResourceProfile(m_settings->configuredGameRoot(), candidate);
     return SResourceProfileEvaluation();
+}
+
+QString MainWindow::activeProfileDisplayName() const
+{
+    const SResourceProfileEvaluation profile = activeResourceProfile();
+    return profile.profileName.isEmpty() ? tr("Not configured") : profile.profileName;
 }
 
 QVector<SMapSpawnObstacle> MainWindow::mapTestObstacles() const
@@ -610,8 +627,7 @@ void MainWindow::updateEntranceOverlays()
     }
     const int selected = m_entranceCombo ? m_entranceCombo->currentData().toInt() : -1;
     m_pView->setTestEntranceOverlays(rectangles, labels, selected);
-    if(m_gotoEntranceButton)
-        m_gotoEntranceButton->setEnabled(selected >= 0 && selected < rectangles.size());
+    updateCustomSpawnControls();
 }
 
 void MainWindow::refreshMapTestContext()
@@ -661,6 +677,7 @@ void MainWindow::refreshMapTestContext()
             m_mapTestEntry = nameMatches.first();
     }
     populateEntranceCombo();
+    updateCustomSpawnControls();
     updateMapTestAction();
 }
 
@@ -713,6 +730,7 @@ void MainWindow::setCustomSpawnPicking(bool enabled)
         }
         if(m_spawnPositionLabel)
             m_spawnPositionLabel->setText(tr("Entrance spawn"));
+        updateCustomSpawnControls();
         updateMapTestAction();
         return;
     }
@@ -729,7 +747,39 @@ void MainWindow::setCustomSpawnPicking(bool enabled)
     m_pView->setCursor(Qt::CrossCursor);
     m_pView->setFocus();
     m_spawnPositionLabel->setText(tr("Click terrain (Esc cancels)"));
+    updateCustomSpawnControls();
     updateMapTestAction();
+}
+
+void MainWindow::updateCustomSpawnControls()
+{
+    const bool customActive = m_customSpawn.valid && m_customSpawn.custom;
+    if(m_playFromHereButton)
+        m_playFromHereButton->setText(customActive ? tr("Clear entrance")
+                                                   : (m_pickSpawnPending ? tr("Cancel Play from Here")
+                                                                         : tr("Play from Here")));
+    if(m_entranceCombo && (!m_mapTestLauncher || !m_mapTestLauncher->isRunning()))
+        m_entranceCombo->setEnabled(!customActive && !m_pickSpawnPending
+            && CLandscape::getInstance()->isMprLoad()
+            && (!m_validEntrances.isEmpty() || m_entranceCombo->findData(-1) >= 0));
+    if(m_gotoEntranceButton)
+        m_gotoEntranceButton->setEnabled(customActive || selectedTravelZone());
+}
+
+void MainWindow::moveCameraToActiveSpawn()
+{
+    if(!m_pView)
+        return;
+    if(m_customSpawn.valid && m_customSpawn.custom)
+    {
+        m_pView->moveCameraToPoint(m_customSpawnPosition);
+        return;
+    }
+    const SMapTravelZone* entrance = selectedTravelZone();
+    if(!entrance)
+        return;
+    const QPointF center = entrance->spawnPoint();
+    m_pView->moveCameraToPoint(QVector3D(center.x(), center.y(), 0.0f));
 }
 
 void MainWindow::initShortcuts()
@@ -897,11 +947,7 @@ void MainWindow::createViewportToolbars()
     });
     connect(m_gotoEntranceButton, &QToolButton::clicked, this, [this]()
     {
-        const SMapTravelZone* entrance = selectedTravelZone();
-        if(!entrance || !m_pView)
-            return;
-        const QPointF center = entrance->spawnPoint();
-        m_pView->moveCameraToPoint(QVector3D(center.x(), center.y(), 0.0f));
+        moveCameraToActiveSpawn();
     });
     connect(m_playFromHereButton, &QToolButton::toggled,
             this, &MainWindow::setCustomSpawnPicking);
@@ -936,19 +982,20 @@ void MainWindow::updateMapTestAction()
     const bool hasPair = m_pView && m_pView->hasActiveMob()
             && m_pView->mobs().size() == 1 && CLandscape::getInstance()->isMprLoad();
     const bool hasEntrance = selectedTravelZone() != nullptr;
-    // The picker and manifest are implemented, but no fingerprinted runtime
-    // position adapter exists yet. Never advertise a coordinate the game will
-    // silently ignore.
-    const bool customReady = !m_playFromHereButton || !m_playFromHereButton->isChecked();
+    // JMV applies a placed custom entrance through its process-owned autorun
+    // provider. Base keeps the picker unavailable until it has an equivalent
+    // exact-hash runtime position provider.
+    const bool customRequested = m_playFromHereButton && m_playFromHereButton->isChecked();
+    const bool customReady = !customRequested || (isJmv && m_customSpawn.valid);
     const bool profileReady = (isJmv || isBaseProbe) && profile.valid
         && profile.runtimeStackValidated;
     m_mapTestAction->setEnabled(profileReady && hasPair && hasEntrance && customReady);
     if(m_entranceCombo)
-        m_entranceCombo->setEnabled(hasPair &&
+        m_entranceCombo->setEnabled(hasPair && !customRequested &&
             (!m_validEntrances.isEmpty() || m_entranceCombo->findData(-1) >= 0));
     if(m_gotoEntranceButton)
         m_gotoEntranceButton->setEnabled(hasPair && hasEntrance);
-    if(m_playFromHereButton) m_playFromHereButton->setEnabled(hasPair && hasEntrance);
+    if(m_playFromHereButton) m_playFromHereButton->setEnabled(isJmv && hasPair && hasEntrance);
     if(m_godmodeCheckBox) m_godmodeCheckBox->setEnabled(isJmv && hasPair);
     if(!isJmv && !isBaseProbe)
         m_mapTestAction->setToolTip(tr("The active profile has no Endurance direct-map-test provider."));
@@ -959,7 +1006,7 @@ void MainWindow::updateMapTestAction()
     else if(!hasEntrance)
         m_mapTestAction->setToolTip(tr("Select a valid map.txt entrance or explicitly borrow a registered map identity."));
     else if(!customReady)
-        m_mapTestAction->setToolTip(tr("Play from Here is staged for UI testing, but launch remains blocked until the fingerprinted runtime position adapter is validated."));
+        m_mapTestAction->setToolTip(tr("Finish placing the JMV custom entrance before launching the map test."));
     else
         m_mapTestAction->setToolTip(isBaseProbe
             ? tr("Runs the exact-hash Base EI direct-launch feasibility probe (Ctrl+F5).")
@@ -1098,7 +1145,14 @@ void MainWindow::launchCurrentMapTest()
     input.embeddedScript = mob->script();
     input.mapEntry = entry;
     input.spawn = spawn;
-    input.spawnZ = spawn.custom ? m_customSpawnPosition.z() : 0.0;
+    QVector3D runtimeSpawn(spawn.position.x(), spawn.position.y(), 0.0f);
+    if(!CLandscape::getInstance()->projectPt(runtimeSpawn))
+    {
+        QMessageBox::warning(this, tr("Map test launch"),
+            tr("The selected entrance could not be projected onto the loaded terrain."));
+        return;
+    }
+    input.spawnZ = runtimeSpawn.z();
     input.godmode = isJmv && m_godmodeCheckBox && m_godmodeCheckBox->isChecked();
     input.borrowedMapIdentity = m_borrowedMapIdentity;
     if(isBase)
@@ -1164,6 +1218,15 @@ void MainWindow::openMapPair(const QString& mprPath, const QString& mobPath,
     rememberRecentFile(QFileInfo(mobPath));
     ei::log(eLogInfo, QString("Opened profile map zone:%1 mpr:%2 mob:%3")
         .arg(zoneId, mprPath, mobPath));
+    QTimer::singleShot(0, this, [this]()
+    {
+        if(!m_validEntrances.isEmpty())
+        {
+            m_entranceCombo->setCurrentIndex(0);
+            updateEntranceOverlays();
+            moveCameraToActiveSpawn();
+        }
+    });
 }
 
 void MainWindow::connectUiButtons()
@@ -1267,14 +1330,33 @@ void MainWindow::on_actionOpen_triggered()
 
 void MainWindow::showGameAndModSetup()
 {
-    CResourceSetupDialog dialog(m_settings->configuredGameRoot(), this);
+    COptString* configuredProfile = dynamic_cast<COptString*>(
+        m_settings->opt(eOptSetResource, "resourceProfile"));
+    CResourceSetupDialog dialog(m_settings->configuredGameRoot(),
+        configuredProfile ? configuredProfile->value() : QString(), this);
     if(dialog.exec() != QDialog::Accepted)
         return;
     const SResourceProfileEvaluation profile = dialog.evaluation();
+    const QString previousProfile = configuredProfile ? configuredProfile->value() : QString();
+    const bool profileChanged = previousProfile.compare(profile.profileId,
+        Qt::CaseInsensitive) != 0;
+    if(profileChanged && m_pView
+       && (CLandscape::getInstance()->isMprLoad() || m_pView->hasActiveMob()))
+    {
+        if(!isExitAllowed())
+            return;
+        m_undoStack->clear();
+        m_pView->unloadMob("");
+        m_pView->unloadLand();
+        m_openedMapZoneId.clear();
+        ei::log(eLogInfo, QString("Unloaded documents before resource profile switch %1 -> %2")
+            .arg(previousProfile, profile.profileId));
+    }
     m_settings->applyResourceProfile(profile);
     if(m_pView)
         m_pView->refreshAfterResourceSetup();
     refreshMapsBrowser();
+    updateWindowTitle(eTitleTypeData::eTitleTypeDataMpr, m_sWindowTitle.mpr);
     QMessageBox::information(this, tr("Game and mod setup"),
         tr("%1 is ready. Endurance found %2 RES archives across %3 ordered resource folders.")
             .arg(profile.profileName).arg(profile.archiveCount)
@@ -1537,7 +1619,8 @@ void MainWindow::updateWindowTitle(eTitleTypeData type, QString data)
         Q_ASSERT(false);
         break;
     }
-    QString title = QString("EI Mapper: Endurance Edition %1").arg(QCoreApplication::applicationVersion());
+    QString title = QString("EI Mapper: Endurance Edition %1 [%2]")
+        .arg(QCoreApplication::applicationVersion(), activeProfileDisplayName());
     if(!m_sWindowTitle.mpr.isEmpty())
     {
         title += QString(" MPR: (%1)").arg(m_sWindowTitle.mpr);

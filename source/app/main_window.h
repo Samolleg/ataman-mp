@@ -74,11 +74,14 @@ private:
     void populateEntranceCombo();
     void chooseBorrowedMapIdentity();
     void setCustomSpawnPicking(bool enabled);
+    void updateCustomSpawnControls();
+    void moveCameraToActiveSpawn();
     void updateEntranceOverlays();
     void updateOperationAvailability(bool hasSelection = false);
     QVector<SMapSpawnObstacle> mapTestObstacles() const;
     const SMapTravelZone* selectedTravelZone() const;
     SResourceProfileEvaluation activeResourceProfile() const;
+    QString activeProfileDisplayName() const;
 
 private slots:
     void showOutliner(bool bShow);

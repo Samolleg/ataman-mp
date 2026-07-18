@@ -424,7 +424,7 @@ bool RewriteGodmodeMobW(LPCWSTR path, wchar_t* output, size_t capacity)
     {
         wchar_t message[1800]{};
         _snwprintf_s(message, sizeof(message) / sizeof(message[0]), _TRUNCATE,
-                     L"GODMODE_BOOTSTRAP redirect from=\"%s\" to=\"%s\" command=GodMode(0,3)",
+                     L"RUNTIME_BOOTSTRAP redirect from=\"%s\" to=\"%s\"",
                      path, output);
         Log(message);
     }

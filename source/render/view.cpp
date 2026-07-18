@@ -363,8 +363,8 @@ void CView::drawTestOverlaysOpenGl()
         glDisable(GL_DEPTH_TEST);
         const QRect viewport(0, 0, width(), height());
         const QVector<QVector2D> textureCoordinates = {
-            QVector2D(0.0f, 1.0f), QVector2D(1.0f, 1.0f),
-            QVector2D(1.0f, 0.0f), QVector2D(0.0f, 0.0f)
+            QVector2D(0.0f, 0.0f), QVector2D(1.0f, 0.0f),
+            QVector2D(1.0f, 1.0f), QVector2D(0.0f, 1.0f)
         };
 
         const int count = qMin(m_testEntranceRectangles.size(),
@@ -403,45 +403,45 @@ void CView::drawTestOverlaysOpenGl()
 
     if(m_testSpawnMarkerValid)
     {
-        const QRect viewport(0, 0, width(), height());
-        const QVector3D projected = m_testSpawnMarker.project(
-            m_cam->viewMatrix(), m_projection, viewport);
-        if(projected.z() >= 0.0f && projected.z() <= 1.0f)
+        m_program.setUniformValue("u_viewMmatrix", m_cam->viewMatrix());
+        m_program.setUniformValue("u_projMmatrix", m_projection);
+        m_program.setUniformValue("customColor",
+            m_testSpawnMarkerAdjusted ? QVector4D(1.0f, 0.67f, 0.18f, 0.82f)
+                                      : QVector4D(0.31f, 1.0f, 0.47f, 0.72f));
+        glEnable(GL_DEPTH_TEST);
+        glLineWidth(3.0f);
+        QVector<QVector3D> figure;
+        const float z = m_testSpawnMarker.z() + 0.08f;
+        const int segments = 24;
+        for(int i = 0; i < segments; ++i)
         {
-            const float centerX = (2.0f * projected.x() / float(width())) - 1.0f;
-            const float centerY = (2.0f * projected.y() / float(height())) - 1.0f;
-            const float radiusX = 16.0f / float(width());
-            const float radiusY = 16.0f / float(height());
-            QVector<QVector3D> circle;
-            const int segments = 32;
-            circle.reserve(segments);
-            for(int i = 0; i < segments; ++i)
-            {
-                const float angle = float(i) * 2.0f * float(M_PI) / float(segments);
-                circle.append(QVector3D(centerX + qCos(angle) * radiusX,
-                                       centerY + qSin(angle) * radiusY, 0.0f));
-            }
-            const float crossX = 24.0f / float(width());
-            const float crossY = 24.0f / float(height());
-            const QVector<QVector3D> cross = {
-                QVector3D(centerX - crossX, centerY, 0.0f),
-                QVector3D(centerX + crossX, centerY, 0.0f),
-                QVector3D(centerX, centerY - crossY, 0.0f),
-                QVector3D(centerX, centerY + crossY, 0.0f)
-            };
-
-            m_program.setUniformValue("u_viewMmatrix", identity);
-            m_program.setUniformValue("u_projMmatrix", identity);
-            m_program.setUniformValue("customColor",
-                m_testSpawnMarkerAdjusted ? QVector4D(1.0f, 0.67f, 0.18f, 1.0f)
-                                          : QVector4D(0.31f, 1.0f, 0.47f, 1.0f));
-            glDisable(GL_DEPTH_TEST);
-            glLineWidth(3.0f);
-            m_program.setAttributeArray(position, circle.constData());
-            glDrawArrays(GL_LINE_LOOP, 0, circle.size());
-            m_program.setAttributeArray(position, cross.constData());
-            glDrawArrays(GL_LINES, 0, cross.size());
+            const float angle = float(i) * 2.0f * float(M_PI) / float(segments);
+            figure.append(QVector3D(m_testSpawnMarker.x() + qCos(angle) * 0.55f,
+                                    m_testSpawnMarker.y() + qSin(angle) * 0.55f, z));
         }
+        m_program.setAttributeArray(position, figure.constData());
+        glDrawArrays(GL_LINE_LOOP, 0, figure.size());
+        const QVector<QVector3D> body = {
+            QVector3D(m_testSpawnMarker.x(), m_testSpawnMarker.y(), z + 1.72f),
+            QVector3D(m_testSpawnMarker.x(), m_testSpawnMarker.y(), z + 0.72f),
+            QVector3D(m_testSpawnMarker.x() - 0.42f, m_testSpawnMarker.y(), z + 1.25f),
+            QVector3D(m_testSpawnMarker.x() + 0.42f, m_testSpawnMarker.y(), z + 1.25f),
+            QVector3D(m_testSpawnMarker.x(), m_testSpawnMarker.y(), z + 0.72f),
+            QVector3D(m_testSpawnMarker.x() - 0.34f, m_testSpawnMarker.y(), z),
+            QVector3D(m_testSpawnMarker.x(), m_testSpawnMarker.y(), z + 0.72f),
+            QVector3D(m_testSpawnMarker.x() + 0.34f, m_testSpawnMarker.y(), z)
+        };
+        m_program.setAttributeArray(position, body.constData());
+        glDrawArrays(GL_LINES, 0, body.size());
+        QVector<QVector3D> head;
+        for(int i = 0; i < segments; ++i)
+        {
+            const float angle = float(i) * 2.0f * float(M_PI) / float(segments);
+            head.append(QVector3D(m_testSpawnMarker.x() + qCos(angle) * 0.24f,
+                                  m_testSpawnMarker.y(), z + 1.93f + qSin(angle) * 0.24f));
+        }
+        m_program.setAttributeArray(position, head.constData());
+        glDrawArrays(GL_LINE_LOOP, 0, head.size());
     }
 
     m_program.disableAttributeArray(position);

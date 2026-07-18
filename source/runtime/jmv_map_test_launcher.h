@@ -56,6 +56,8 @@ public:
                                          QString* error = nullptr);
     static bool prepareGodmodeBootstrap(const QStringList& mapDirectories,
                                         const QString& runRoot,
+                                        const SMapSpawnPlan& spawn,
+                                        double spawnZ,
                                         bool godmode,
                                         QJsonObject* manifest,
                                         QString* outputPath,
