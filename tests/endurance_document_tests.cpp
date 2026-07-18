@@ -1,8 +1,10 @@
 #include <QtTest>
+#include <QCryptographicHash>
 #include <QTemporaryFile>
 #include <QTemporaryDir>
 
 #include "endurance_document.h"
+#include "terrain_edit_model.h"
 #include "staged_save_validator.h"
 
 namespace {
@@ -190,6 +192,46 @@ QByteArray syntheticMpr()
     bytes.replace(0, header.size(), header);
     return bytes;
 }
+
+QByteArray syntheticLandSector(quint16 height)
+{
+    QByteArray bytes;
+    QDataStream stream(&bytes, QIODevice::WriteOnly);
+    stream.setByteOrder(QDataStream::LittleEndian);
+    stream << quint32(0xCF4BF774) << quint8(0);
+    for(int y = 0; y < 33; ++y)
+        for(int x = 0; x < 33; ++x)
+            stream << qint8(0) << qint8(0) << height << quint32(0xFA07D3E8);
+    bytes.append(QByteArray(16 * 16 * 2, '\0'));
+    return bytes;
+}
+
+quint16 sectorHeight(const QByteArray& sector, int x, int y)
+{
+    const int offset = 5 + (y * 33 + x) * 8 + 2;
+    QDataStream stream(sector.mid(offset, 2));
+    stream.setByteOrder(QDataStream::LittleEndian);
+    quint16 value = 0;
+    stream >> value;
+    return value;
+}
+
+QVector<STerrainSectorSource> twoSectorTerrain(quint16 height)
+{
+    QVector<STerrainSectorSource> sources;
+    for(int x = 0; x < 2; ++x)
+    {
+        STerrainSectorSource source;
+        source.memberName = QString("test%1000.sec").arg(x, 3, 10, QChar('0'));
+        source.sectorX = x;
+        source.sectorY = 0;
+        source.payload = syntheticLandSector(height);
+        source.expectedPayloadSha256 = QCryptographicHash::hash(
+            source.payload, QCryptographicHash::Sha256).toHex();
+        sources.append(source);
+    }
+    return sources;
+}
 }
 
 class EnduranceDocumentTests : public QObject
@@ -228,6 +270,9 @@ private slots:
     void mprSectorPatchIsProvenanceCheckedAndLocal();
     void mprLengthChangingAndStaleTransactionsFailClosed();
     void failedStagedMprSaveLeavesNoDestination();
+    void canonicalTerrainSeamsAreEditedAndUndoneTogether();
+    void terrainBrushToolsAreDeterministicAndFailClosed();
+    void conflictingTerrainSeamIsPreservedAndNotEditable();
     void malformedMprTableIsRejected();
     void stagedMobIsReopenedWithoutCreatingDestination();
 };
@@ -995,6 +1040,106 @@ void EnduranceDocumentTests::failedStagedMprSaveLeavesNoDestination()
     const SStagedSaveValidation result = validateStagedSave(syntheticMpr(), destination);
     QVERIFY(!result.success);
     QVERIFY(!destination.exists());
+}
+
+void EnduranceDocumentTests::canonicalTerrainSeamsAreEditedAndUndoneTogether()
+{
+    CTerrainEditModel terrain;
+    CValidationReport loadReport;
+    QVERIFY2(terrain.loadSources(2, 1, twoSectorTerrain(1000), &loadReport),
+             qPrintable(loadReport.toText()));
+    QCOMPARE(terrain.vertexCountX(), 65);
+    QCOMPARE(terrain.vertexCountY(), 33);
+    QVERIFY(!terrain.hasSeamConflicts());
+
+    STerrainBrush brush;
+    brush.centerX = 32.0f;
+    brush.centerY = 10.0f;
+    brush.radius = 0.0f;
+    brush.falloff = ETerrainBrushFalloff::Constant;
+    const STerrainHeightCommand raise = terrain.makeRaiseLower(brush, 250.0f);
+    QCOMPARE(raise.deltas.size(), 1);
+    CTerrainEditHistory history;
+    QVERIFY(history.execute(&terrain, raise));
+    QCOMPARE(terrain.height(32, 10), quint16(1250));
+    QCOMPARE(sectorHeight(terrain.sectorPayload(0, 0), 32, 10), quint16(1250));
+    QCOMPARE(sectorHeight(terrain.sectorPayload(1, 0), 0, 10), quint16(1250));
+    QCOMPARE(history.undoCount(), 1);
+
+    QVERIFY(history.undo(&terrain));
+    QCOMPARE(terrain.height(32, 10), quint16(1000));
+    QCOMPARE(sectorHeight(terrain.sectorPayload(0, 0), 32, 10), quint16(1000));
+    QCOMPARE(sectorHeight(terrain.sectorPayload(1, 0), 0, 10), quint16(1000));
+    QVERIFY(!terrain.isDirty());
+    QVERIFY(history.redo(&terrain));
+    QCOMPARE(terrain.height(32, 10), quint16(1250));
+
+    CMprEditTransaction transaction("height candidate");
+    CValidationReport saveReport;
+    QVERIFY(!terrain.appendSectorEdits(&transaction, &saveReport));
+    QVERIFY(saveReport.hasErrors());
+}
+
+void EnduranceDocumentTests::terrainBrushToolsAreDeterministicAndFailClosed()
+{
+    CTerrainEditModel terrain;
+    QVERIFY(terrain.loadSources(2, 1, twoSectorTerrain(1000)));
+    CTerrainEditHistory history;
+
+    STerrainBrush point;
+    point.centerX = 5.0f;
+    point.centerY = 5.0f;
+    point.radius = 0.0f;
+    point.falloff = ETerrainBrushFalloff::Constant;
+    QVERIFY(history.execute(&terrain, terrain.makeFlatten(point, 3000, 1.0f)));
+    QCOMPARE(terrain.height(5, 5), quint16(3000));
+
+    STerrainBrush smooth = point;
+    smooth.radius = 1.0f;
+    QVERIFY(history.execute(&terrain, terrain.makeSmooth(smooth, 1.0f)));
+    QVERIFY(terrain.height(5, 5) < 3000);
+    QVERIFY(terrain.height(5, 5) > 1000);
+
+    const STerrainHeightCommand ramp = terrain.makeRamp(
+        10.0f, 10.0f, 2000, 20.0f, 10.0f, 4000,
+        0.0f, 1.0f, ETerrainBrushFalloff::Constant);
+    QVERIFY(!ramp.isEmpty());
+    QVERIFY(history.execute(&terrain, ramp));
+    QCOMPARE(terrain.height(10, 10), quint16(2000));
+    QCOMPARE(terrain.height(20, 10), quint16(4000));
+    QCOMPARE(terrain.height(15, 10), quint16(3000));
+
+    CValidationReport staleReport;
+    QVERIFY(!terrain.apply(ramp, true, &staleReport));
+    QVERIFY(staleReport.hasErrors());
+}
+
+void EnduranceDocumentTests::conflictingTerrainSeamIsPreservedAndNotEditable()
+{
+    QVector<STerrainSectorSource> sources = twoSectorTerrain(1000);
+    QByteArray right = sources[1].payload;
+    const int offset = 5 + (10 * 33) * 8 + 2;
+    right[offset] = char(0xD0);
+    right[offset + 1] = char(0x07); // 2000, little endian
+    sources[1].payload = right;
+
+    CTerrainEditModel terrain;
+    CValidationReport loadReport;
+    QVERIFY(terrain.loadSources(2, 1, sources, &loadReport));
+    QVERIFY(terrain.hasSeamConflicts());
+    QCOMPARE(sectorHeight(terrain.sectorPayload(0, 0), 32, 10), quint16(1000));
+    QCOMPARE(sectorHeight(terrain.sectorPayload(1, 0), 0, 10), quint16(2000));
+
+    STerrainBrush brush;
+    brush.centerX = 32.0f;
+    brush.centerY = 10.0f;
+    brush.radius = 0.0f;
+    brush.falloff = ETerrainBrushFalloff::Constant;
+    const STerrainHeightCommand command = terrain.makeRaiseLower(brush, 100.0f);
+    CValidationReport editReport;
+    QVERIFY(!terrain.apply(command, true, &editReport));
+    QCOMPARE(sectorHeight(terrain.sectorPayload(0, 0), 32, 10), quint16(1000));
+    QCOMPARE(sectorHeight(terrain.sectorPayload(1, 0), 0, 10), quint16(2000));
 }
 
 void EnduranceDocumentTests::malformedMprTableIsRejected()
