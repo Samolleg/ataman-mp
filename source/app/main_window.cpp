@@ -110,6 +110,7 @@ MainWindow::MainWindow(QWidget* parent) :
 
     QAction* openBackupFolder = new QAction(tr("Open Backup Folder"), this);
     QAction* openLogsFolder = new QAction(tr("Open Logs Folder"), this);
+    QAction* openTestRunsFolder = new QAction(tr("Open JMV Test Runs Folder"), this);
     QAction* openBugReportingGuide = new QAction(tr("Open Bug Reporting Guide"), this);
     QAction* gameAndModSetup = new QAction(tr("Game and Mod Setup..."), this);
     QAction* compareMobFiles = new QAction(tr("Compare MOB Files..."), this);
@@ -122,6 +123,7 @@ MainWindow::MainWindow(QWidget* parent) :
     m_ui->menuTools->addAction(m_mapTestAction);
     m_ui->menuTools->addAction(openBackupFolder);
     m_ui->menuTools->addAction(openLogsFolder);
+    m_ui->menuTools->addAction(openTestRunsFolder);
     m_ui->menuTools->addAction(openBugReportingGuide);
     connect(openBackupFolder, &QAction::triggered, this, [this]()
     {
@@ -136,6 +138,14 @@ MainWindow::MainWindow(QWidget* parent) :
         if(!QDesktopServices::openUrl(QUrl::fromLocalFile(path)))
             QMessageBox::warning(this, tr("Endurance logs"),
                 tr("Could not open the logs folder:\n%1").arg(path));
+    });
+    connect(openTestRunsFolder, &QAction::triggered, this, [this]()
+    {
+        const QString path = CJmvMapTestLauncher::testRunsRootPath();
+        QDir().mkpath(path);
+        if(!QDesktopServices::openUrl(QUrl::fromLocalFile(path)))
+            QMessageBox::warning(this, tr("JMV test runs"),
+                tr("Could not open the JMV test-runs folder:\n%1").arg(path));
     });
     connect(openBugReportingGuide, &QAction::triggered, this, [this]()
     {

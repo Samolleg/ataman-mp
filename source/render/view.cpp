@@ -1454,6 +1454,8 @@ void CView::resetSelectedId()
     }
     if(arrNodes.isEmpty())
         return;
+    if(!confirmScriptReferencedObjectIds(arrNodes, tr("reset these object IDs")))
+        return;
     // find range of free IDs
     std::sort(arrBusyId.begin(), arrBusyId.end());
     uint min;

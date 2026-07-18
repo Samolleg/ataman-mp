@@ -53,7 +53,7 @@ behavior.
 | Unified one-click MOB Parameters X/Close lifecycle | [`280470f`](https://github.com/Ilufus/ei-mapper-endurance/commit/280470f) | Production MinGW build and focused regression check |
 | Coalesced external-script file watching without directory feedback | [`9b0f18a`](https://github.com/Ilufus/ei-mapper-endurance/commit/9b0f18a) | Production build and seven regression suites |
 | Embedded-script and document-section MOB diff | [`0a4624f`](https://github.com/Ilufus/ei-mapper-endurance/commit/0a4624f) | Synthetic encrypted-script regression plus the supplied Zone 1/Zone 1 Test comparison |
-| Redo-safe raw provenance, mixed model-parts editing, atomic logic-point placement, and heavy-history progress | [`db3fa31`](https://github.com/Ilufus/ei-mapper-endurance/commit/db3fa31) | Seven regression suites, UI widget checks, and [latest supplied-map validation](docs/releases/ALPHA41_VALIDATION.md) |
+| Redo-safe raw provenance, mixed model-parts editing, atomic logic-point placement, and heavy-history progress | [`db3fa31`](https://github.com/Ilufus/ei-mapper-endurance/commit/db3fa31) | Seven regression suites, UI widget checks, and retained commit evidence; superseded alpha validation documents are intentionally retired |
 
 Alpha.34 packaging is withdrawn: it accidentally included a developer-local
 `endurance-options.json`, which suppressed first-run setup and exposed local game

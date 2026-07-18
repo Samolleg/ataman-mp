@@ -279,6 +279,11 @@ CJmvMapTestLauncher::~CJmvMapTestLauncher()
         cleanup();
 }
 
+QString CJmvMapTestLauncher::testRunsRootPath()
+{
+    return testRunsRoot();
+}
+
 bool CJmvMapTestLauncher::isRunning() const
 {
     return m_process->state() != QProcess::NotRunning;

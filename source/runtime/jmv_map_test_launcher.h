@@ -37,6 +37,7 @@ public:
     QString temporaryMapName() const { return m_temporaryMapName; }
     void stop();
 
+    static QString testRunsRootPath();
     static QString recoverInterruptedRuns();
     static bool injectWorldScriptBootstrap(const QString& script,
                                            const QString& commands,

@@ -16,6 +16,7 @@ private slots:
     void ignoresWorldScriptInStringsAndComments();
     void rejectsMalformedExistingWorldScript();
     void recognizesConfiguredJmvPluginSlot();
+    void exposesTestRunsQuickAccessPath();
     void recoveryRemovesAutoexecCreatedByEndurance();
     void recoveryRestoresPreexistingAutoexec();
     void recoveryRemovesOwnedBridge();
@@ -84,6 +85,14 @@ void JmvMapTestLauncherTests::recognizesConfiguredJmvPluginSlot()
     QVERIFY(CJmvMapTestLauncher::hasConfiguredJmvPluginSlot(expected));
     QVERIFY(!CJmvMapTestLauncher::hasConfiguredJmvPluginSlot(
                 QByteArray("Plugin=EIMapperEnduranceJmvBridge.plg")));
+}
+
+void JmvMapTestLauncherTests::exposesTestRunsQuickAccessPath()
+{
+    const QString expected = QDir(QStandardPaths::writableLocation(
+        QStandardPaths::AppLocalDataLocation)).filePath("test-runs");
+    QCOMPARE(QDir::cleanPath(CJmvMapTestLauncher::testRunsRootPath()),
+             QDir::cleanPath(expected));
 }
 
 void JmvMapTestLauncherTests::injectsIntoExistingWorldScript()
