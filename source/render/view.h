@@ -10,6 +10,7 @@
 #include <QTreeWidgetItem>
 #include <QDateTime>
 #include <QHash>
+#include <QImage>
 #include <QPointer>
 #include <QRectF>
 #include <QStringList>
@@ -170,6 +171,7 @@ private:
     void refreshMobDirtyStates();
     void initShaders();
     void draw();
+    void drawTestOverlaysOpenGl();
     CNode* pickObject(QList<CNode*>& aNode, int x, int y);
     void applyParam(SParam& param);
     void getColorFromRect(const QRect& rect, QVector<SColor>& aColor);
@@ -264,6 +266,9 @@ private:
     bool m_testSpawnMarkerAdjusted;
     QVector<QRectF> m_testEntranceRectangles;
     QStringList m_testEntranceLabels;
+    QVector<QImage> m_testEntranceLabelImages;
+    QVector<GLuint> m_testEntranceLabelTextures;
+    bool m_testEntranceLabelTexturesDirty{false};
     int m_selectedTestEntrance{-1};
 };
 

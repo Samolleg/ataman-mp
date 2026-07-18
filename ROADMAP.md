@@ -214,6 +214,9 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
     placement within a deploy rectangle or an obstructed authored entrance.
   - `0.2.0-alpha.5` fixes the overlay's OpenGL/QPainter composition after
     `alpha.4` caused a continuously cleared/flickering viewport.
+  - `0.2.0-alpha.6` removes same-framebuffer QPainter composition entirely
+    after alpha.5 still produced alternating dark frames on NVIDIA. Entrance
+    areas and the custom-spawn marker now stay in the native OpenGL pass.
 
 - [ ] Block **Main Menu** after the staged map becomes active.
   - The initial main menu remains part of bootstrap, so arm the restriction only

@@ -113,6 +113,15 @@ CView::~CView()
         m_scriptWorkspaces->unregisterMob(mob);
         delete mob;
     }
+
+    if(isValid() && !m_testEntranceLabelTextures.isEmpty())
+    {
+        makeCurrent();
+        glDeleteTextures(m_testEntranceLabelTextures.size(),
+                         m_testEntranceLabelTextures.constData());
+        m_testEntranceLabelTextures.clear();
+        doneCurrent();
+    }
 }
 
 
@@ -248,96 +257,198 @@ void CView::resizeGL(int width, int height)
 
 void CView::paintGL()
 {
-    const bool hasOverlay = !m_testEntranceRectangles.isEmpty()
-        || m_testSpawnMarkerValid;
-    const auto renderScene = [this]()
-    {
-        // QPainter's OpenGL paint engine resets native state. Re-establish the
-        // persistent state expected by the legacy renderer before every frame.
-        glViewport(0, 0, width(), height());
-        glEnable(GL_DEPTH_TEST);
-        glDepthMask(GL_TRUE);
-        glEnable(GL_ALPHA_TEST);
-        glEnable(GL_BLEND);
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-        glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-        draw();
-    };
-
     makeCurrent();
-    if(!hasOverlay)
-    {
-        renderScene();
+    glViewport(0, 0, width(), height());
+    glEnable(GL_DEPTH_TEST);
+    glDepthMask(GL_TRUE);
+    glEnable(GL_ALPHA_TEST);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    draw();
+    drawTestOverlaysOpenGl();
+    //doneCurrent();
+}
+
+void CView::drawTestOverlaysOpenGl()
+{
+    if((m_testEntranceRectangles.isEmpty() && !m_testSpawnMarkerValid)
+       || width() <= 0 || height() <= 0)
         return;
-    }
 
-    // Keep raw OpenGL inside QPainter's native-painting scope, then composite
-    // the 2D test overlay. Creating QPainter only after draw() could reinitialize
-    // and overwrite an already completed framebuffer.
-    QPainter painter(this);
-    painter.beginNativePainting();
-    renderScene();
-    painter.endNativePainting();
+    // QPainter and QGLWidget do not compose reliably on every double-buffered
+    // driver. In particular, painting the entrance labels on the QGLWidget's
+    // back buffer caused alternating dark frames on current NVIDIA drivers.
+    // Keep the entire per-frame overlay in the native OpenGL pass.
+    if(!m_program.bind())
+        return;
 
-    const QRect viewport(0, 0, width(), height());
-    const QMatrix4x4 view = m_cam->viewMatrix();
-    painter.setRenderHint(QPainter::Antialiasing);
+    QOpenGLBuffer::release(QOpenGLBuffer::VertexBuffer);
+    QOpenGLBuffer::release(QOpenGLBuffer::IndexBuffer);
+    const int position = m_program.attributeLocation("a_position");
+    if(position < 0)
+        return;
+
+    m_program.enableAttributeArray(position);
+    QMatrix4x4 identity;
+    identity.setToIdentity();
+    m_program.setUniformValue("u_modelMmatrix", identity);
+    m_program.setUniformValue("u_viewMmatrix", m_cam->viewMatrix());
+    m_program.setUniformValue("u_projMmatrix", m_projection);
+    m_program.setUniformValue("u_highlight", false);
+
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glEnable(GL_DEPTH_TEST);
+    glDepthMask(GL_FALSE);
+
     for(int index = 0; index < m_testEntranceRectangles.size(); ++index)
     {
         const QRectF area = m_testEntranceRectangles.at(index).normalized();
         const QPointF corners[] = {
             area.topLeft(), area.topRight(), area.bottomRight(), area.bottomLeft()
         };
-        QPolygonF polygon;
-        bool visible = true;
+        QVector<QVector3D> vertices;
+        vertices.reserve(4);
         for(const QPointF& corner : corners)
         {
             QVector3D world(corner.x(), corner.y(), 0.0f);
             if(!CLandscape::getInstance()->projectPt(world))
             {
-                visible = false;
+                vertices.clear();
                 break;
             }
             world.setZ(world.z() + 0.15f);
-            const QVector3D projected = world.project(view, m_projection, viewport);
-            if(projected.z() < 0.0f || projected.z() > 1.0f)
-            {
-                visible = false;
-                break;
-            }
-            polygon << QPointF(projected.x(), height() - projected.y());
+            vertices.append(world);
         }
-        if(!visible || polygon.size() != 4)
+        if(vertices.size() != 4)
             continue;
+
         const bool selected = index == m_selectedTestEntrance;
-        painter.setPen(QPen(selected ? QColor(255, 225, 70) : QColor(235, 190, 45),
-                            selected ? 3 : 1));
-        painter.setBrush(QColor(255, 205, 35, selected ? 95 : 50));
-        painter.drawPolygon(polygon);
-        painter.setPen(QPen(QColor(255, 245, 180), 1));
-        painter.drawText(polygon.boundingRect().adjusted(3, 3, -3, -3),
-                         Qt::AlignCenter | Qt::TextWordWrap,
-                         index < m_testEntranceLabels.size()
-                             ? m_testEntranceLabels.at(index)
-                             : QString::number(index + 1));
+        m_program.setUniformValue("customColor",
+            selected ? QVector4D(1.0f, 0.80f, 0.14f, 0.37f)
+                     : QVector4D(0.92f, 0.70f, 0.12f, 0.20f));
+        m_program.setAttributeArray(position, vertices.constData());
+        glDrawArrays(GL_TRIANGLE_FAN, 0, vertices.size());
+
+        m_program.setUniformValue("customColor",
+            selected ? QVector4D(1.0f, 0.90f, 0.28f, 0.95f)
+                     : QVector4D(0.92f, 0.75f, 0.18f, 0.80f));
+        glLineWidth(selected ? 3.0f : 1.0f);
+        glDrawArrays(GL_LINE_LOOP, 0, vertices.size());
     }
+
+    if(m_testEntranceLabelTexturesDirty)
+    {
+        if(!m_testEntranceLabelTextures.isEmpty())
+            glDeleteTextures(m_testEntranceLabelTextures.size(),
+                             m_testEntranceLabelTextures.constData());
+        m_testEntranceLabelTextures.clear();
+        for(const QImage& image : m_testEntranceLabelImages)
+            m_testEntranceLabelTextures.append(bindTexture(image, GL_TEXTURE_2D, GL_RGBA));
+        m_testEntranceLabelTexturesDirty = false;
+    }
+
+    // Labels are painted once into off-screen images and then composited as
+    // ordinary OpenGL textures. QPainter never touches QGLWidget's framebuffer.
+    const int texture = m_program.attributeLocation("a_texture");
+    if(texture >= 0 && !m_testEntranceLabelTextures.isEmpty())
+    {
+        m_program.enableAttributeArray(texture);
+        m_program.setUniformValue("u_viewMmatrix", identity);
+        m_program.setUniformValue("u_projMmatrix", identity);
+        m_program.setUniformValue("customColor", QVector4D(0.0f, 0.0f, 0.0f, 0.0f));
+        m_program.setUniformValue("qt_Texture0", 0);
+        glDisable(GL_DEPTH_TEST);
+        const QRect viewport(0, 0, width(), height());
+        const QVector<QVector2D> textureCoordinates = {
+            QVector2D(0.0f, 1.0f), QVector2D(1.0f, 1.0f),
+            QVector2D(1.0f, 0.0f), QVector2D(0.0f, 0.0f)
+        };
+
+        const int count = qMin(m_testEntranceRectangles.size(),
+                               m_testEntranceLabelTextures.size());
+        for(int index = 0; index < count; ++index)
+        {
+            const QRectF area = m_testEntranceRectangles.at(index).normalized();
+            QVector3D center(area.center().x(), area.center().y(), 0.0f);
+            if(!CLandscape::getInstance()->projectPt(center))
+                continue;
+            center.setZ(center.z() + 0.25f);
+            const QVector3D projected = center.project(
+                m_cam->viewMatrix(), m_projection, viewport);
+            if(projected.z() < 0.0f || projected.z() > 1.0f)
+                continue;
+
+            const QImage& image = m_testEntranceLabelImages.at(index);
+            const float centerX = (2.0f * projected.x() / float(width())) - 1.0f;
+            const float centerY = (2.0f * projected.y() / float(height())) - 1.0f;
+            const float halfWidth = float(image.width()) / float(width());
+            const float halfHeight = float(image.height()) / float(height());
+            const QVector<QVector3D> quad = {
+                QVector3D(centerX - halfWidth, centerY - halfHeight, 0.0f),
+                QVector3D(centerX + halfWidth, centerY - halfHeight, 0.0f),
+                QVector3D(centerX + halfWidth, centerY + halfHeight, 0.0f),
+                QVector3D(centerX - halfWidth, centerY + halfHeight, 0.0f)
+            };
+            glBindTexture(GL_TEXTURE_2D, m_testEntranceLabelTextures.at(index));
+            m_program.setAttributeArray(position, quad.constData());
+            m_program.setAttributeArray(texture, textureCoordinates.constData());
+            glDrawArrays(GL_TRIANGLE_FAN, 0, quad.size());
+        }
+        glBindTexture(GL_TEXTURE_2D, 0);
+        m_program.disableAttributeArray(texture);
+    }
+
     if(m_testSpawnMarkerValid)
     {
-        const QVector3D projected = m_testSpawnMarker.project(view, m_projection, viewport);
+        const QRect viewport(0, 0, width(), height());
+        const QVector3D projected = m_testSpawnMarker.project(
+            m_cam->viewMatrix(), m_projection, viewport);
         if(projected.z() >= 0.0f && projected.z() <= 1.0f)
         {
-            QPen pen(m_testSpawnMarkerAdjusted ? QColor(255, 190, 50) : QColor(80, 255, 120));
-            pen.setWidth(3);
-            painter.setPen(pen);
-            painter.setBrush(Qt::NoBrush);
-            const QPoint center(qRound(projected.x()), height() - qRound(projected.y()));
-            painter.drawEllipse(center, 8, 8);
-            painter.drawLine(center + QPoint(-12, 0), center + QPoint(12, 0));
-            painter.drawLine(center + QPoint(0, -12), center + QPoint(0, 12));
+            const float centerX = (2.0f * projected.x() / float(width())) - 1.0f;
+            const float centerY = (2.0f * projected.y() / float(height())) - 1.0f;
+            const float radiusX = 16.0f / float(width());
+            const float radiusY = 16.0f / float(height());
+            QVector<QVector3D> circle;
+            const int segments = 32;
+            circle.reserve(segments);
+            for(int i = 0; i < segments; ++i)
+            {
+                const float angle = float(i) * 2.0f * float(M_PI) / float(segments);
+                circle.append(QVector3D(centerX + qCos(angle) * radiusX,
+                                       centerY + qSin(angle) * radiusY, 0.0f));
+            }
+            const float crossX = 24.0f / float(width());
+            const float crossY = 24.0f / float(height());
+            const QVector<QVector3D> cross = {
+                QVector3D(centerX - crossX, centerY, 0.0f),
+                QVector3D(centerX + crossX, centerY, 0.0f),
+                QVector3D(centerX, centerY - crossY, 0.0f),
+                QVector3D(centerX, centerY + crossY, 0.0f)
+            };
+
+            m_program.setUniformValue("u_viewMmatrix", identity);
+            m_program.setUniformValue("u_projMmatrix", identity);
+            m_program.setUniformValue("customColor",
+                m_testSpawnMarkerAdjusted ? QVector4D(1.0f, 0.67f, 0.18f, 1.0f)
+                                          : QVector4D(0.31f, 1.0f, 0.47f, 1.0f));
+            glDisable(GL_DEPTH_TEST);
+            glLineWidth(3.0f);
+            m_program.setAttributeArray(position, circle.constData());
+            glDrawArrays(GL_LINE_LOOP, 0, circle.size());
+            m_program.setAttributeArray(position, cross.constData());
+            glDrawArrays(GL_LINES, 0, cross.size());
         }
     }
-    //doneCurrent();
+
+    m_program.disableAttributeArray(position);
+    m_program.setUniformValue("customColor", QVector4D(0.0f, 0.0f, 0.0f, 0.0f));
+    glLineWidth(1.0f);
+    glDepthMask(GL_TRUE);
+    glEnable(GL_DEPTH_TEST);
 }
 
 void CView::draw()
@@ -2138,6 +2249,30 @@ void CView::setTestEntranceOverlays(const QVector<QRectF>& rectangles,
 {
     m_testEntranceRectangles = rectangles;
     m_testEntranceLabels = labels;
+    m_testEntranceLabelImages.clear();
+    const QFont labelFont = font();
+    const QFontMetrics metrics(labelFont);
+    for(const QString& label : labels)
+    {
+        QRect bounds = metrics.boundingRect(QRect(0, 0, 240, 96),
+                                            Qt::AlignCenter | Qt::TextWordWrap,
+                                            label);
+        bounds.setSize(bounds.size().expandedTo(QSize(36, metrics.height())));
+        QImage image(bounds.width() + 12, bounds.height() + 8,
+                     QImage::Format_ARGB32_Premultiplied);
+        image.fill(Qt::transparent);
+        QPainter painter(&image);
+        painter.setRenderHint(QPainter::Antialiasing);
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(QColor(20, 20, 20, 180));
+        painter.drawRoundedRect(image.rect().adjusted(0, 0, -1, -1), 4, 4);
+        painter.setFont(labelFont);
+        painter.setPen(QColor(255, 245, 180));
+        painter.drawText(image.rect().adjusted(6, 4, -6, -4),
+                         Qt::AlignCenter | Qt::TextWordWrap, label);
+        m_testEntranceLabelImages.append(image);
+    }
+    m_testEntranceLabelTexturesDirty = true;
     m_selectedTestEntrance = selectedIndex;
     update();
 }
