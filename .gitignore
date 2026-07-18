@@ -43,3 +43,5 @@ CMakeLists.txt.user*
 /source/runtime/jmv_bridge/bin/
 /source/runtime/jmv_bridge/bin-*/
 !/source/runtime/jmv_bridge/build-x86.cmd
+/source/runtime/base_runtime_host/bin/
+!/source/runtime/base_runtime_host/build-x86.cmd
