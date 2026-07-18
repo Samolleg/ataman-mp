@@ -38,11 +38,21 @@ AI graph and VSS internals, and raw directory-membership IDs should not clutter 
 view. They belong in diagnostics or an advanced/raw inspector. The typed editor must still preserve
 them exactly.
 
-## Manual discrepancy
+## Confirmed manual error: `0xBBAB0005`
 
-Both manuals call `0xBBAB0005` a Byte magic-trap reload flag. Endurance and installed EILib evidence
-identify it as the DWord `MT_CAST_INTERVAL`; `0xBBAC0005` is the Byte `LEVER_CAST_ONCE`. This remains
-a research discrepancy and is not enough evidence to change the working schema.
+The manuals correctly associate `0xBBAB0005` with magic-trap reloading, but incorrectly describe
+its representation as a Byte boolean. A hashed Base/JMV/legacy corpus audit found 47 occurrences in
+16 paths. Every occurrence declares 12 bytes and contains a four-byte little-endian payload; the
+observed values are `15, 25, 30, 43, 44, 50, 74, 75, 90, 100, 104, 105, 150`, never `0` or `1`.
+MobExplorer independently declares the tag as `ST_DWORD`, matching installed EILib and Endurance's
+`MT_CAST_INTERVAL` implementation.
+
+The adjacent `0xBBAC0005` field is not part of that discrepancy. All 47 paired occurrences declare
+9 bytes and contain the one-byte value `0` or `1`, matching `LEVER_CAST_ONCE`/CastOnce. Thus
+"reloading" and "cast interval" are compatible descriptions of `0xBBAB0005`; only the manuals'
+Byte/boolean detail is wrong. The most likely unit for the DWord interval is the engine's 15 Hz game
+tick, but this unit still requires a controlled runtime timing test before Endurance displays a
+converted seconds value. See `docs/validation/MT_CAST_INTERVAL_AUDIT.md`.
 
 ## MOB information absent from the manuals
 
@@ -94,7 +104,8 @@ states and are emitted to both validation output and the workflow log.
 
 ## Research queue
 
-- Resolve the `0xBBAB0005` conflict using Base/JMV corpus and runtime evidence.
+- Confirm the time unit of `0xBBAB0005` with a controlled runtime timing test; its DWord encoding
+  and reload/cast-interval role are already confirmed.
 - Establish exact runtime grammar/semantics for InScript, Parent/ParentID, QuestInfo, inventory and
   spell strings, logic flags/timing, sound/light units, and all 51 Stats fields.
 - Complete object and particle type maps, directory membership semantics, optional record coverage,
