@@ -11,6 +11,8 @@
 
 #include "view.h"
 #include "camera.h"
+#include "unit_animation.h"
+#include <QDateTime>
 #include "mob\mob.h"
 #include "resourcemanager.h"
 #include "node.h"
@@ -255,6 +257,12 @@ void CView::draw()
 {
 
     QMatrix4x4 camMatrix = m_cam->update();
+    QVector3D cameraPosition, cameraPivot, cameraRotation;
+    m_cam->getLocation(cameraPosition, cameraPivot, cameraRotation);
+    const COptBool* animationOption = m_pSettings
+        ? dynamic_cast<const COptBool*>(m_pSettings->opt("animateUnits")) : nullptr;
+    AnimationFrameContext::instance().beginFrame(cameraPosition,
+        QDateTime::currentMSecsSinceEpoch(), !animationOption || animationOption->value());
     const COptBool* cullingOption = m_pSettings
         ? dynamic_cast<const COptBool*>(m_pSettings->opt("frustumCulling")) : nullptr;
     const bool cullingEnabled = !cullingOption || cullingOption->value();
@@ -266,8 +274,11 @@ void CView::draw()
         CBox bounds = node->getBBox();
         if(!bounds.isInit())
             return true;
-        return frustum.intersectsSphere(bounds.center() + node->drawPosition(),
-                                        bounds.radius());
+        const bool isVisible = frustum.intersectsSphere(bounds.center() + node->drawPosition(),
+                                                         bounds.radius());
+        if(!isVisible && node->nodeType() == ENodeType::eUnit)
+            AnimationFrameContext::instance().counters().skippedOffscreen++;
+        return isVisible;
     };
     // Set modelview-projection matrix
 

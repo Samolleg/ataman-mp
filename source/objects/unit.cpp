@@ -94,7 +94,13 @@ void CUnit::draw(bool isActive, QOpenGLShaderProgram* program)
 
 void CUnit::drawObjectVisual(bool isActive, QOpenGLShaderProgram* program)
 {
+    if(m_state == ENodeState::eHidden)
+    {
+        AnimationFrameContext::instance().counters().skippedOffscreen++;
+        return;
+    }
     refreshTransientVisual();
+    refreshAnimationPose();
     CObjectBase::draw(isActive, program);
 }
 
@@ -108,7 +114,10 @@ void CUnit::drawLogicVisual(bool isActive, QOpenGLShaderProgram* program)
 
 void CUnit::drawSelect(QOpenGLShaderProgram* program)
 {
+    if(m_state == ENodeState::eHidden)
+        return;
     refreshTransientVisual();
+    refreshAnimationPose();
     CObjectBase::drawSelect(program);
     for(auto& logic: m_aLogic)
     {
@@ -155,6 +164,7 @@ void CUnit::refreshTransientVisual()
     {
         ei::log(eLogWarning, "Unit visual provider unavailable: " + diagnostic);
         applyTransientVisual("cannotdisplay", "default", {}, QVector3D(1, 1, 1));
+        m_resolvedAnimationModel.clear(); m_resolvedAnimationWeapons.clear();
         return;
     }
 
@@ -175,6 +185,7 @@ void CUnit::refreshTransientVisual()
         ei::log(eLogWarning, QString("Unit %1 appearance placeholder [%2]: %3")
                 .arg(m_prototypeName, appearanceResult.code, appearanceResult.message));
         applyTransientVisual("cannotdisplay", "default", {}, QVector3D(1, 1, 1));
+        m_resolvedAnimationModel.clear(); m_resolvedAnimationWeapons.clear();
         return;
     }
 
@@ -225,6 +236,77 @@ void CUnit::refreshTransientVisual()
         ei::log(eLogWarning, QString("Unit %1 equipment [%2]: %3")
                 .arg(m_prototypeName, equipmentResult.code, equipmentResult.message));
     applyTransientVisual(model, texture, visibleParts, complexion);
+    m_resolvedAnimationModel = model;
+    m_resolvedAnimationWeapons = equipmentRequest.weapons;
+}
+
+void CUnit::refreshAnimationPose()
+{
+    AnimationFrameContext& frame = AnimationFrameContext::instance();
+    QMap<QString, QMatrix4x4> staticPose;
+    if(!frame.enabled() || m_resolvedAnimationModel.isEmpty())
+    {
+        applyTransientPartPoses(staticPose);
+        return;
+    }
+
+    const float distance = (m_drawPosition - frame.cameraPosition()).length();
+    const EAnimationDistanceTier tier = animationDistanceTier(true,
+        m_state == ENodeState::eSelect, distance);
+    const auto database = ei::ProfileDatabaseContext::instance().current();
+    const QString providerId = ei::ProfileDatabaseContext::instance().providerForRole("unitAnimation");
+    const QString fingerprint = providerId + '|' + QString::number(
+        ei::ProfileDatabaseContext::instance().generation()) + '|' + m_resolvedAnimationModel.toLower()
+        + '|' + m_resolvedAnimationWeapons.join(';').toLower();
+    if(fingerprint != m_animationFingerprint)
+    {
+        m_animationFingerprint = fingerprint;
+        m_idleClip = SAnimationClip();
+        static ProfileVisualProviderService providers;
+        QString diagnostic;
+        const auto resolver = providers.animationResolver(providerId, database, &diagnostic);
+        QJsonObject resolved;
+        SRuntimeProviderResult result;
+        if(!resolver.isNull())
+        {
+            SUnitAnimationRequest request;
+            request.profileId = database.isNull() ? QString() : database->profileId;
+            request.runtimeManifestId = database.isNull() ? QString() : database->runtimeManifestId;
+            request.model = m_resolvedAnimationModel;
+            request.weapons = m_resolvedAnimationWeapons;
+            result = resolver->resolve(request, &resolved);
+        }
+        else
+        { result.code = "animation.provider.unavailable"; result.message = diagnostic; }
+        if(result.success)
+            m_idleClip = parseNestedAnimationClip(
+                CObjectList::getInstance()->modelAnimation(m_resolvedAnimationModel),
+                resolved.value("actionName").toString(), resolved.value("length").toInt());
+        if(!result.success || !m_idleClip.valid())
+        {
+            const QString detail = !result.message.isEmpty() ? result.message : m_idleClip.diagnostics.join("; ");
+            ei::log(eLogWarning, QString("Unit %1 static animation fallback [%2]: %3")
+                    .arg(m_prototypeName, result.code, detail));
+        }
+    }
+    if(!m_idleClip.valid())
+    {
+        frame.counters().staticFallbacks++;
+        applyTransientPartPoses(staticPose);
+        return;
+    }
+
+    switch(tier)
+    {
+    case EAnimationDistanceTier::Full: frame.counters().fullEvaluations++; break;
+    case EAnimationDistanceTier::HalfRate: frame.counters().halfRateEvaluations++; break;
+    case EAnimationDistanceTier::FirstPose: frame.counters().firstPoseEvaluations++; break;
+    case EAnimationDistanceTier::Skip: frame.counters().skippedOffscreen++; return;
+    }
+    const double logicalFrame = quantizedAnimationFrame(tier, frame.elapsedMilliseconds(),
+                                                         m_idleClip.logicalLength, m_mapID);
+    const SAnimationLocalPose local = interpolateAnimationPose(m_idleClip, logicalFrame);
+    applyTransientPartPoses(propagateAnimationHierarchy(local, transientAnimationSkeleton()));
 }
 
 uint CUnit::deserialize(util::CMobParser& parser)

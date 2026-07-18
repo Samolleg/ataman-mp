@@ -3,6 +3,7 @@
 #include <QString>
 #include <QOpenGLBuffer>
 #include <QOpenGLShaderProgram>
+#include <QMatrix4x4>
 #include "types.h"
 
 ///
@@ -16,17 +17,26 @@ public:
     ~CPart();
     QVector<SVertexData>& vertData() {return m_aVertData; }
     QString& name() {return m_name; }
+    const QString& name() const {return m_name; }
     void setName(QString& name) {m_name = name; }
     void setVisible(bool bShow = true) {m_bShow = bShow;}
     void update(); //update shader buffers
     void draw(QOpenGLShaderProgram* program);
     void drawSelect(QOpenGLShaderProgram* program);
+    void setParentName(const QString& name) { m_parentName = name.toLower(); }
+    const QString& parentName() const { return m_parentName; }
+    void setRestOffset(const QVector3D& offset) { m_restOffset = offset; }
+    const QVector3D& restOffset() const { return m_restOffset; }
+    void setPoseMatrix(const QMatrix4x4& matrix) { m_poseMatrix = matrix; }
 
 private:
     QOpenGLBuffer m_vertexBuf;
     QOpenGLBuffer m_indexBuf;
 
     QString m_name;
+    QString m_parentName;
+    QVector3D m_restOffset;
+    QMatrix4x4 m_poseMatrix;
     QVector<SVertexData> m_aVertData;
     bool m_bShow;
 };

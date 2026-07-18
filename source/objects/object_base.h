@@ -9,6 +9,7 @@
 //#include <QOpenGLTexture>
 #include "node.h"
 #include "part.h"
+#include "unit_animation.h"
 
 class CMob;
 
@@ -57,6 +58,8 @@ protected:
     void applyTransientVisual(const QString& modelName, const QString& textureName,
                               const QStringList& visibleParts, const QVector3D& complexion);
     void invalidateTransientVisual() { m_transientVisualFingerprint.clear(); }
+    SAnimationSkeleton transientAnimationSkeleton() const;
+    void applyTransientPartPoses(const QMap<QString, QMatrix4x4>& poses);
     //void updateVisibility(QVector<QString>& aPart);
 
 protected:
@@ -73,6 +76,7 @@ private:
     CBox m_cachedBBox;
     bool m_bboxDirty;
     QString m_transientVisualFingerprint;
+    QVector3D m_figureComplexion{1.0f, 1.0f, 1.0f};
 };
 
 #endif // OBJECT_H

@@ -80,6 +80,7 @@ private slots:
     void parsesNestedClipAndClosingSample();
     void propagatesPoseToNumberedEquipment();
     void appliesDistanceTiers();
+    void malformedAndUnknownInputsFailStatic();
 };
 
 void UnitAnimationTests::parsesAndSelectsDeterministically()
@@ -132,6 +133,19 @@ void UnitAnimationTests::appliesDistanceTiers()
     QCOMPARE(animationDistanceTier(true, false, 101), EAnimationDistanceTier::HalfRate);
     QCOMPARE(animationDistanceTier(true, false, 301), EAnimationDistanceTier::FirstPose);
     QCOMPARE(quantizedAnimationFrame(EAnimationDistanceTier::HalfRate, 100, 10, 0), 0.0);
+}
+
+void UnitAnimationTests::malformedAndUnknownInputsFailStatic()
+{
+    QStringList diagnostics;
+    QVERIFY(parseAdbActions(QByteArray("bad"), &diagnostics).isEmpty());
+    QVERIFY(!diagnostics.isEmpty());
+    const SAnimationClip clip = parseNestedAnimationClip(res({{"other", QByteArray("bad")}}), "idle", 2);
+    QVERIFY(!clip.valid());
+    QString providerDiagnostic;
+    ProfileVisualProviderService providers;
+    QVERIFY(providers.animationResolver("missing.mod.v1", {}, &providerDiagnostic).isNull());
+    QVERIFY(providerDiagnostic.contains("no fallback", Qt::CaseInsensitive));
 }
 
 QTEST_APPLESS_MAIN(UnitAnimationTests)

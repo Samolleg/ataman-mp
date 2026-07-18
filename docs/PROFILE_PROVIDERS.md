@@ -59,3 +59,5 @@ unmodified, or old content are not candidates.
 6. Keep MOB and database inputs immutable and produce transient render plans.
 
 See `resource-profiles/jamais-vu.json.example` for the reference manifest.
+The animation role and runtime validation matrix are documented in
+`docs/UNIT_IDLE_ANIMATION.md`.

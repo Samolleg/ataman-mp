@@ -218,6 +218,7 @@ public:
 
 private:
     void refreshTransientVisual();
+    void refreshAnimationPose();
     //"UNIT_R", eNull};
     QString m_prototypeName;//"UNIT_PROTOTYPE", eString};
     bool m_prototypeNullTerminated{false};
@@ -234,6 +235,10 @@ private:
     quint64 m_visualRevision{1};
     quint64 m_resolvedVisualRevision{0};
     quint64 m_resolvedDatabaseGeneration{0};
+    QString m_resolvedAnimationModel;
+    QStringList m_resolvedAnimationWeapons;
+    QString m_animationFingerprint;
+    SAnimationClip m_idleClip;
 };
 
 #endif // UNIT_H

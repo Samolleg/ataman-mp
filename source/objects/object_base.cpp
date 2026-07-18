@@ -29,6 +29,7 @@ CObjectBase::CObjectBase(const CObjectBase &base):
     m_pFigure = base.m_pFigure;
     m_minPoint = base.m_minPoint;
     m_bodyParts = base.m_bodyParts;
+    m_figureComplexion = base.m_figureComplexion;
 
     m_aPart.clear();
     for(auto& part:base.m_aPart)
@@ -152,6 +153,7 @@ void CObjectBase::draw(bool isActive, QOpenGLShaderProgram* program)
     program->setUniformValue("qt_Texture0", 0);
     for(auto& part: m_aPart)
         part->draw(program);
+    program->setUniformValue("u_partAnimated", false);
 
     program->setUniformValue("u_highlight", false);
 }
@@ -184,6 +186,27 @@ void CObjectBase::drawSelect(QOpenGLShaderProgram* program)
 
     for(auto& part: m_aPart)
         part->drawSelect(program);
+    program->setUniformValue("u_partAnimated", false);
+}
+
+SAnimationSkeleton CObjectBase::transientAnimationSkeleton() const
+{
+    SAnimationSkeleton skeleton;
+    if(m_pFigure)
+    {
+        QVector3D complexion = m_figureComplexion;
+        m_pFigure->getAssemblyHierarchy(skeleton.parents, skeleton.restOffsets, complexion);
+    }
+    return skeleton;
+}
+
+void CObjectBase::applyTransientPartPoses(const QMap<QString, QMatrix4x4>& poses)
+{
+    for(CPart* part : m_aPart)
+    {
+        QMatrix4x4 identity; identity.setToIdentity();
+        part->setPoseMatrix(poses.value(part->name().toLower(), identity));
+    }
 }
 
 void CObjectBase::serializeJson(QJsonObject& obj)
@@ -463,6 +486,7 @@ void CObjectBase::recalcFigure()
     for(auto& part: m_aPart)
         delete part;
     m_aPart.clear();
+    m_figureComplexion = m_complection;
     m_pFigure->getVertexData(m_aPart, m_complection, m_bodyParts);
     recalcMinPos();
 }
@@ -489,6 +513,7 @@ void CObjectBase::applyTransientVisual(const QString& modelName, const QString& 
         return;
     QStringList parts = visibleParts;
     QVector3D renderComplexion = complexion;
+    m_figureComplexion = complexion;
     m_pFigure->getVertexData(m_aPart, renderComplexion, parts);
     recalcMinPos();
 }

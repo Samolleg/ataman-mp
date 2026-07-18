@@ -532,6 +532,22 @@ QStringList CObjectList::figurePartNames(const QString& name)
     return result;
 }
 
+QByteArray CObjectList::modelAnimation(const QString& name)
+{
+    const QString member = name.toLower() + ".anm";
+    if(m_animationArchives.contains(member)) return m_animationArchives.value(member);
+    if(m_missingAnimationNames.contains(member)) return {};
+    QByteArray bytes;
+    if(!readIndexedResource(configuredResourceSources(m_pSettings), member, bytes))
+    {
+        m_missingAnimationNames.insert(member);
+        ei::log(eLogWarning, "Missing model animation archive: " + member);
+        return {};
+    }
+    m_animationArchives.insert(member, bytes);
+    return bytes;
+}
+
 void CObjectList::initResource()
 {
     QSet<QString> empty;
@@ -541,6 +557,8 @@ void CObjectList::initResource()
 void CObjectList::refreshConfiguredSources()
 {
     m_missingFigureNames.clear();
+    m_animationArchives.clear();
+    m_missingAnimationNames.clear();
     QSet<QString> empty;
     loadFigures(empty);
 }

@@ -31,6 +31,7 @@ public:
     void attachSettings(CSettings* pSettings) {m_pSettings = pSettings;};
     QList<QString>& figureList() {return m_arrFigureForComboBox;}
     QStringList figurePartNames(const QString& name);
+    QByteArray modelAnimation(const QString& name);
 
     void initResource();
     void refreshConfiguredSources();
@@ -45,6 +46,8 @@ private:
     CSettings* m_pSettings;
     QMap<QString, ei::CFigure*> m_aFigure;
     QSet<QString> m_missingFigureNames;
+    QMap<QString, QByteArray> m_animationArchives;
+    QSet<QString> m_missingAnimationNames;
     QList<QString> m_arrFigureForComboBox; //optimization for cell widget
 };
 

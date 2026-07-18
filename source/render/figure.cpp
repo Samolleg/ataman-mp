@@ -2,6 +2,9 @@
 #include <QVector4D>
 #include "figure.h"
 
+void calcComplection(QVector3D& complexPoint, QVector<QVector3D>& data,
+                     QVector3D& constitute);
+
 void ei::SHeader::read(QDataStream& stream)
 {
     stream >> vertBlocks >> normalBlocks >> uvCount >> indexCount
@@ -286,16 +289,38 @@ void ei::CFigure::calculateConstitution(QVector<SVertexData>& aVrtData, QVector3
 
 void ei::CFigure::getVertexData(QVector<CPart*>& model, QVector3D& complection, QList<QString>& aBodyParts)
 {
+    appendVertexData(model, complection, aBodyParts);
+}
+
+void ei::CFigure::getAssemblyHierarchy(QMap<QString, QString>& parents,
+                                       QMap<QString, QVector3D>& restOffsets,
+                                       QVector3D& complection)
+{
+    QVector3D restOffset;
+    calcComplection(restOffset, m_offset, complection);
+    parents.insert(m_name.toLower(), m_parentName.toLower());
+    restOffsets.insert(m_name.toLower(), restOffset);
+    for(ei::CFigure* child : m_aChild)
+        child->getAssemblyHierarchy(parents, restOffsets, complection);
+}
+
+void ei::CFigure::appendVertexData(QVector<CPart*>& model, QVector3D& complection,
+                                   QList<QString>& aBodyParts)
+{
     if (aBodyParts.isEmpty() || aBodyParts.contains(m_name)) // calc only visible body parts
     {
         CPart* part = new CPart();
         part->setName(m_name);
+        part->setParentName(m_parentName);
+        QVector3D restOffset;
+        calcComplection(restOffset, m_offset, complection);
+        part->setRestOffset(restOffset);
         calculateConstitution(part->vertData(), complection);
         part->update();
         model.append(part);
     }
     for(auto& child : m_aChild)
-        child->getVertexData(model, complection, aBodyParts);
+        child->appendVertexData(model, complection, aBodyParts);
 }
 
 void ei::CFigure::getMinimumBboxZ(float& value, QVector3D& complection)

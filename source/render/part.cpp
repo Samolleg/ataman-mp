@@ -5,12 +5,16 @@ CPart::CPart():
   ,m_bShow(true)
 {
     m_aVertData.clear();
+    m_poseMatrix.setToIdentity();
 }
 
 CPart::CPart(const CPart &part):
     m_indexBuf(QOpenGLBuffer::IndexBuffer)
 {
     m_name = part.m_name;
+    m_parentName = part.m_parentName;
+    m_restOffset = part.m_restOffset;
+    m_poseMatrix = part.m_poseMatrix;
     m_bShow = part.m_bShow;
     m_aVertData = part.m_aVertData;
     update(); //create new index and vertex buffers
@@ -45,6 +49,9 @@ void CPart::draw(QOpenGLShaderProgram* program)
     if (!m_bShow || m_aVertData.count() == 0)
         return;
 
+    program->setUniformValue("u_partAnimated", true);
+    program->setUniformValue("u_partMmatrix", m_poseMatrix);
+
     int offset(0);
     // Tell OpenGL which VBOs to use
     m_vertexBuf.bind();
@@ -73,6 +80,9 @@ void CPart::drawSelect(QOpenGLShaderProgram *program)
 {
     if (!m_bShow || m_aVertData.count() == 0)
         return;
+
+    program->setUniformValue("u_partAnimated", true);
+    program->setUniformValue("u_partMmatrix", m_poseMatrix);
 
     int offset(0);
     // Tell OpenGL which VBOs to use

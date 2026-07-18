@@ -4,6 +4,7 @@
 #include <QDataStream>
 #include <QVector>
 #include <QVector4D>
+#include <QMap>
 #include "types.h"
 #include "part.h"
 
@@ -43,17 +44,22 @@ public:
     void readAssemblyOffset(QDataStream& stream);
     void applyAssemblyOffset(QVector<QVector3D>* offset = nullptr);
 
-    void addChild(ei::CFigure* fig) {m_aChild.append(fig); }
+    void addChild(ei::CFigure* fig) {m_aChild.append(fig); fig->m_parentName = m_name; }
     QList<ei::CFigure*>& children() {return m_aChild; }
     void setName (const QString& name) {m_name = name; }
     QString& name() {return m_name;}
     void setOffset(QVector<QVector3D>& offset) {m_offset = offset; }
     QVector<QVector3D>& offset() {return m_offset; }
     void getPartNames(QStringList& arrBodyParts);
+    void getAssemblyHierarchy(QMap<QString, QString>& parents,
+                              QMap<QString, QVector3D>& restOffsets,
+                              QVector3D& complection);
 
 private:
     void generateTriangles(QVector<SVertexData>& aVrtData, QVector<QVector3D>& aMorphVertex);
     void calculateConstitution (QVector<SVertexData>& aVrtData, QVector3D& constitute);
+    void appendVertexData(QVector<CPart*>& model, QVector3D& complection,
+                          QList<QString>& aBodyParts);
 
 private:
     //TODO: change vector to array
@@ -80,6 +86,7 @@ private:
     QVector<ushort> m_aInd;
     QVector<US3> m_aVertComp;
     QString m_name;
+    QString m_parentName;
     QList<ei::CFigure*> m_aChild;
 
 };

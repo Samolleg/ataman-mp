@@ -368,6 +368,19 @@
             </widget>
            </item>
            <item>
+            <widget class="QCheckBox" name="animateUnits">
+             <property name="toolTip">
+              <string>Plays provider-resolved default unit idle cycles. Distant units use reduced pose update rates.</string>
+             </property>
+             <property name="text">
+              <string>Animate unit idle cycles</string>
+             </property>
+             <property name="checked">
+              <bool>true</bool>
+             </property>
+            </widget>
+           </item>
+           <item>
             <spacer name="verticalSpacer">
              <property name="orientation">
               <enum>Qt::Vertical</enum>
