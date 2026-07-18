@@ -79,6 +79,7 @@ private slots:
     void providersSeparateBaseAndJmvMasks();
     void parsesNestedClipAndClosingSample();
     void propagatesPoseToNumberedEquipment();
+    void preservesChildBindOffsetAndIgnoresChildTranslation();
     void appliesDistanceTiers();
     void malformedAndUnknownInputsFailStatic();
 };
@@ -123,6 +124,25 @@ void UnitAnimationTests::propagatesPoseToNumberedEquipment()
     pose.transforms.insert("rh3.sword00", animated);
     const auto transforms = propagateAnimationHierarchy(pose, skeleton);
     QCOMPARE(transforms.value("rh3.sword12").column(3).x(), 1.0f);
+}
+
+void UnitAnimationTests::preservesChildBindOffsetAndIgnoresChildTranslation()
+{
+    SAnimationSkeleton skeleton;
+    skeleton.restOffsets.insert("root", QVector3D());
+    skeleton.restOffsets.insert("child", QVector3D(2, 0, 0));
+    skeleton.parents.insert("child", "root");
+    SAnimationLocalPose pose;
+    QMatrix4x4 root;
+    root.rotate(90, 0, 0, 1);
+    pose.transforms.insert("root", root);
+    QMatrix4x4 child;
+    child.translate(99, 0, 0);
+    pose.transforms.insert("child", child);
+    const auto transforms = propagateAnimationHierarchy(pose, skeleton);
+    const QVector3D animatedJoint = transforms.value("child") * QVector3D(2, 0, 0);
+    QVERIFY(qAbs(animatedJoint.x()) < 0.0001f);
+    QVERIFY(qAbs(animatedJoint.y() - 2.0f) < 0.0001f);
 }
 
 void UnitAnimationTests::appliesDistanceTiers()

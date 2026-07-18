@@ -259,28 +259,56 @@ QMap<QString, QMatrix4x4> propagateAnimationHierarchy(
     const SAnimationLocalPose& pose, const SAnimationSkeleton& skeleton)
 {
     QMap<QString, QMatrix4x4> current;
-    QMap<QString, QMatrix4x4> bind;
+    QMap<QString, QQuaternion> absoluteRotations;
+    QMap<QString, QVector3D> currentPositions;
+    QSet<QString> resolving;
     std::function<void(const QString&)> resolve = [&](const QString& component)
     {
         if(current.contains(component)) return;
+        if(resolving.contains(component))
+        {
+            QMatrix4x4 identity;
+            identity.setToIdentity();
+            current.insert(component, identity);
+            return;
+        }
+        resolving.insert(component);
         const QString parent = skeleton.parents.value(component);
-        if(!parent.isEmpty() && skeleton.restOffsets.contains(parent)) resolve(parent);
-        const QVector3D parentRest = skeleton.restOffsets.value(parent);
+        const bool hasParent = !parent.isEmpty() && skeleton.restOffsets.contains(parent);
+        if(hasParent) resolve(parent);
         const QVector3D rest = skeleton.restOffsets.value(component);
-        QMatrix4x4 bindLocal;
-        bindLocal.setToIdentity();
-        bindLocal.translate(rest - parentRest);
-        QMatrix4x4 currentLocal = pose.transforms.value(component,
-            pose.transforms.value(canonicalChannel(component), bindLocal));
-        bind.insert(component, parent.isEmpty() ? bindLocal : bind.value(parent) * bindLocal);
-        current.insert(component, parent.isEmpty() ? currentLocal : current.value(parent) * currentLocal);
+        auto channel = pose.transforms.constFind(component);
+        if(channel == pose.transforms.constEnd())
+            channel = pose.transforms.constFind(canonicalChannel(component));
+        const bool animated = channel != pose.transforms.constEnd();
+        const QQuaternion localRotation = animated
+            ? QQuaternion::fromRotationMatrix(channel.value().normalMatrix()).normalized()
+            : QQuaternion();
+        const QQuaternion absoluteRotation = hasParent
+            ? (absoluteRotations.value(parent) * localRotation).normalized()
+            : localRotation;
+        QVector3D position = rest;
+        if(hasParent)
+            position = currentPositions.value(parent)
+                + absoluteRotations.value(parent).rotatedVector(rest - skeleton.restOffsets.value(parent));
+        else if(animated)
+            position = channel.value().column(3).toVector3D();
+
+        QMatrix4x4 animatedGlobal;
+        animatedGlobal.setToIdentity();
+        animatedGlobal.translate(position);
+        animatedGlobal.rotate(absoluteRotation);
+        QMatrix4x4 inverseBind;
+        inverseBind.setToIdentity();
+        inverseBind.translate(-rest);
+        current.insert(component, animatedGlobal * inverseBind);
+        absoluteRotations.insert(component, absoluteRotation);
+        currentPositions.insert(component, position);
+        resolving.remove(component);
     };
     for(auto it = skeleton.restOffsets.constBegin(); it != skeleton.restOffsets.constEnd(); ++it)
         resolve(it.key());
-    QMap<QString, QMatrix4x4> skin;
-    for(auto it = current.constBegin(); it != current.constEnd(); ++it)
-        skin.insert(it.key(), it.value() * bind.value(it.key()).inverted());
-    return skin;
+    return current;
 }
 
 EAnimationDistanceTier animationDistanceTier(bool visible, bool selected, float distance)
