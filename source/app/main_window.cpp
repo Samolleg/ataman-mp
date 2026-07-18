@@ -22,6 +22,7 @@
 #include <QFile>
 #include <QTimer>
 #include <QCheckBox>
+#include <QToolButton>
 
 #include "resourcemanager.h"
 #include "landscape.h"
@@ -72,6 +73,7 @@ MainWindow::MainWindow(QWidget* parent) :
     m_mapsDock(nullptr),
     m_mapsBrowser(nullptr),
     m_mapTestAction(nullptr),
+    m_stopMapTestAction(nullptr),
     m_mapTestLauncher(nullptr),
     m_closeAfterTestStop(false)
 {
@@ -117,11 +119,19 @@ MainWindow::MainWindow(QWidget* parent) :
     QAction* compareMobFiles = new QAction(tr("Compare MOB Files..."), this);
     m_mapTestAction = new QAction(tr("Test Current Map in JMV"), this);
     m_mapTestAction->setToolTip(tr("Stages unique temporary MPR/MOB copies and launches the validated JMV runtime. No source map is overwritten."));
+    m_stopMapTestAction = new QAction(tr("Stop JMV Map Test"), this);
+    m_stopMapTestAction->setEnabled(false);
+    m_stopMapTestAction->setToolTip(tr("Stops only the game process launched by Endurance."));
+    QToolButton* stopMapTestButton = new QToolButton(this);
+    stopMapTestButton->setDefaultAction(m_stopMapTestAction);
+    stopMapTestButton->setToolButtonStyle(Qt::ToolButtonTextOnly);
+    statusBar()->addPermanentWidget(stopMapTestButton);
     m_ui->menuSettings->insertAction(m_ui->actionOpen_2, gameAndModSetup);
     m_ui->menuSettings->insertSeparator(m_ui->actionOpen_2);
     m_ui->menuTools->addSeparator();
     m_ui->menuTools->addAction(compareMobFiles);
     m_ui->menuTools->addAction(m_mapTestAction);
+    m_ui->menuTools->addAction(m_stopMapTestAction);
     m_ui->menuTools->addAction(openBackupFolder);
     m_ui->menuTools->addAction(openLogsFolder);
     m_ui->menuTools->addAction(openTestRunsFolder);
@@ -181,14 +191,14 @@ MainWindow::MainWindow(QWidget* parent) :
     });
     connect(m_mapTestAction, &QAction::triggered, this, [this]()
     {
-        if(m_mapTestLauncher && m_mapTestLauncher->isRunning())
-        {
-            if(QMessageBox::question(this, tr("Stop JMV test"),
-                    tr("Stop the game process launched by Endurance?")) == QMessageBox::Yes)
-                m_mapTestLauncher->stop();
-            return;
-        }
         launchCurrentMapTest();
+    });
+    connect(m_stopMapTestAction, &QAction::triggered, this, [this]()
+    {
+        if(m_mapTestLauncher && m_mapTestLauncher->isRunning() &&
+           QMessageBox::question(this, tr("Stop JMV test"),
+                tr("Stop the game process launched by Endurance?")) == QMessageBox::Yes)
+            m_mapTestLauncher->stop();
     });
 
     const bool firstRunSetup = !m_settings->hasConfiguredResources();
@@ -459,19 +469,20 @@ void MainWindow::initShortcuts()
     m_ui->actionReset_logic_paths->setShortcut(shortcut("shortcutResetLogicPaths", "Ctrl+P"));
     m_mapsDock->toggleViewAction()->setShortcut(shortcut("shortcutMapsBrowser", "Ctrl+Space"));
     m_mapTestAction->setShortcut(shortcut("shortcutTestMap", "Ctrl+F5"));
+    m_stopMapTestAction->setShortcut(shortcut("shortcutStopMapTest", "Shift+Esc"));
 }
 
 void MainWindow::updateMapTestAction()
 {
-    if(!m_mapTestAction)
+    if(!m_mapTestAction || !m_stopMapTestAction)
         return;
     if(m_mapTestLauncher && m_mapTestLauncher->isRunning())
     {
-        m_mapTestAction->setText(tr("Stop JMV Map Test"));
-        m_mapTestAction->setEnabled(true);
+        m_mapTestAction->setEnabled(false);
+        m_stopMapTestAction->setEnabled(true);
         return;
     }
-    m_mapTestAction->setText(tr("Test Current Map in JMV"));
+    m_stopMapTestAction->setEnabled(false);
     COptString* profile = dynamic_cast<COptString*>(m_settings->opt(eOptSetResource, "resourceProfile"));
     const bool isJmv = profile && profile->value().compare("jamais-vu", Qt::CaseInsensitive) == 0;
     const bool hasPair = m_pView && m_pView->hasActiveMob()

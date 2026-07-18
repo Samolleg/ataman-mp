@@ -425,14 +425,16 @@ int runHeadlessCommand(QApplication& app)
                 }
                 QKeySequenceEdit* historyShortcut = settingsWindow.findChild<QKeySequenceEdit*>("shortcutHistory");
                 QKeySequenceEdit* duplicateShortcut = settingsWindow.findChild<QKeySequenceEdit*>("shortcutDuplicateObjects");
-                if(historyShortcut && duplicateShortcut)
+                QKeySequenceEdit* stopTestShortcut = settingsWindow.findChild<QKeySequenceEdit*>("shortcutStopMapTest");
+                if(historyShortcut && duplicateShortcut && stopTestShortcut)
                 {
                     historyShortcut->setKeySequence(QKeySequence("Alt+L"));
                     QMetaObject::invokeMethod(&settingsWindow, "on_buttonApply_clicked", Qt::DirectConnection);
                     COptString* saved = dynamic_cast<COptString*>(
                         settingsWindow.opt(eOptSetKeyBinding, "shortcutHistory"));
                     settingsShortcutsPersist = saved && saved->value() == "Alt+L"
-                            && duplicateShortcut->keySequence() == QKeySequence("Ctrl+D");
+                            && duplicateShortcut->keySequence() == QKeySequence("Ctrl+D")
+                            && stopTestShortcut->keySequence() == QKeySequence("Shift+Esc");
                 }
             }
             QDir::setCurrent(previousDirectory);

@@ -843,6 +843,18 @@
                <property name="keySequence"><string>Ctrl+F5</string></property>
               </widget>
              </item>
+             <item row="28" column="0">
+              <widget class="QLabel" name="labelStopMapTestShortcut">
+               <property name="toolTip"><string>Stops only the game process launched by Endurance.</string></property>
+               <property name="text"><string>Stop JMV map test</string></property>
+              </widget>
+             </item>
+             <item row="28" column="1">
+              <widget class="QKeySequenceEdit" name="shortcutStopMapTest">
+               <property name="toolTip"><string>Customizable shortcut for stopping the active Endurance-owned JMV test session.</string></property>
+               <property name="keySequence"><string>Shift+Esc</string></property>
+              </widget>
+             </item>
              <item row="19" column="1">
               <widget class="QKeySequenceEdit" name="shortcutMobScript">
                <property name="keySequence"><string>Ctrl+Shift+M</string></property>

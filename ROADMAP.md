@@ -145,9 +145,11 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
 - [ ] Block **Main Menu** after the staged map becomes active.
   - The initial main menu remains part of bootstrap, so arm the restriction only
     after the staged loader succeeds.
-  - Replace the gameplay pause-menu action with **End Test**, or disable it with
-    a clear explanation.
+  - Disable the existing pause-menu button using the engine's normal disabled
+    action state; no replacement in-game command is needed.
   - Endurance **Stop Test** and normal process exit must remain functional.
+- [x] Expose **Stop JMV Map Test** in Endurance while its owned game process is
+  active, with customizable `Shift+Esc` as the default shortcut.
 - [ ] Replace loader-return timing with a reliable runtime-readiness gate.
   - A completed main-menu map load does not prove UI/session initialization is
     finished on all hardware.
@@ -180,7 +182,7 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
     the live mod save tree.
   - If any filesystem route bypasses redirection, disable Save/Load rather than
     exposing live saves.
-- [ ] Verify startup-movie suppression for root and active-mod movie paths.
+- [x] Verify startup-movie suppression for root and active-mod movie paths.
   - Alpha.58 hides `1c.bik` and `nival.bik` in-process without renaming them.
   - Preserve map-specific cutscenes; only startup movies are skipped by default.
 - [ ] Add authoritative bridge results.
@@ -225,8 +227,9 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
 - [ ] Keep the staged version mounted when travelling away and returning.
   - Returning to the edited map must not silently load the installed original.
   - Record every active staged map identity and hash.
-- [ ] Provide an in-game **End Test** route and restore editor focus only after
-  the game exits or test termination is confirmed.
+- [ ] Keep Endurance's **Stop JMV Map Test** control available during hot reload
+  and restore editor focus only after exit or confirmed termination. No in-game
+  End Test integration is required; normal `Alt+F4` remains available.
 
 ## 0.2.x: multi-MOB and workspace workflow
 

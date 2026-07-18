@@ -122,6 +122,7 @@ private:
     QDockWidget* m_mapsDock;
     CMapsBrowser* m_mapsBrowser;
     QAction* m_mapTestAction;
+    QAction* m_stopMapTestAction;
     CJmvMapTestLauncher* m_mapTestLauncher;
     bool m_closeAfterTestStop;
 };
