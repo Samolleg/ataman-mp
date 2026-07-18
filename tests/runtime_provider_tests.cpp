@@ -8,9 +8,41 @@ class RuntimeProviderTests : public QObject
     Q_OBJECT
 
 private slots:
+    void builtInProvidersAreRoleSelected();
+    void providerSelectionFailsClosed();
     void validJmvManifestStaysInsideRunRoot();
     void livePathsAndBaseProfileAreRejected();
 };
+
+void RuntimeProviderTests::builtInProvidersAreRoleSelected()
+{
+    const ProfileProviderRegistry registry = ProfileProviderRegistry::builtIns();
+    const SProfileProviderSelection base = registry.select(
+        EProfileProviderRole::Database, "base.standard.v1");
+    QVERIFY(base.valid);
+    QCOMPARE(base.providerId, QString("base.standard.v1"));
+    const SProfileProviderSelection jmv = registry.select(
+        EProfileProviderRole::EquipmentLayout, "JMV.V1");
+    QVERIFY(jmv.valid);
+    QCOMPARE(jmv.providerId, QString("jmv.v1"));
+}
+
+void RuntimeProviderTests::providerSelectionFailsClosed()
+{
+    ProfileProviderRegistry registry = ProfileProviderRegistry::builtIns();
+    const SProfileProviderSelection unknown = registry.select(
+        EProfileProviderRole::CharacterAppearance, "future-mod.v1");
+    QVERIFY(!unknown.valid);
+    QVERIFY(unknown.diagnostic.contains("Unknown"));
+
+    SProfileProviderDescriptor databaseOnly;
+    databaseOnly.id = "test.database.v2";
+    databaseOnly.interfaceVersion = 2;
+    databaseOnly.roles.insert(EProfileProviderRole::Database);
+    QVERIFY(registry.registerProvider(databaseOnly));
+    QVERIFY(!registry.select(EProfileProviderRole::Database, databaseOnly.id, 1).valid);
+    QVERIFY(!registry.select(EProfileProviderRole::UnitAnimation, databaseOnly.id, 2).valid);
+}
 
 void RuntimeProviderTests::validJmvManifestStaysInsideRunRoot()
 {

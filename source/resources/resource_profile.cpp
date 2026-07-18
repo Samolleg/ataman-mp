@@ -128,6 +128,21 @@ bool profileFromJson(const QByteArray& bytes, const QString& source,
             }
             value.capabilities.insert(profileCapability.id, profileCapability);
         }
+        const QJsonObject providers = object.value("providers").toObject();
+        for(auto it = providers.constBegin(); it != providers.constEnd(); ++it)
+        {
+            SProfileProviderBinding binding;
+            if(it.value().isString())
+                binding.id = it.value().toString().trimmed();
+            else
+            {
+                const QJsonObject providerObject = it.value().toObject();
+                binding.id = providerObject.value("id").toString().trimmed();
+                binding.interfaceVersion = providerObject.value("interfaceVersion").toInt(1);
+            }
+            if(!binding.id.isEmpty())
+                value.providers.insert(it.key(), binding);
+        }
     }
     if(value.id.isEmpty() || value.displayName.isEmpty() || value.resourceDirectories.isEmpty())
     {
@@ -206,6 +221,10 @@ QVector<SResourceProfile> builtInResourceProfiles()
     jmv.resourceDirectories = QStringList() << "{modRoot}/res" << "{gameRoot}/Res";
     jmv.mapDirectories = QStringList() << "{modRoot}/Maps" << "{gameRoot}/Maps";
     jmv.runtimeManifestId = "jmv-development-stack-v1";
+    for(const QString& role : {QString("database"), QString("characterAppearance"),
+                               QString("equipmentLayout"), QString("unitAnimation"),
+                               QString("semanticValidation")})
+        jmv.providers.insert(role, {"jmv.v1", 1});
     jmv.runtimeComponents
         << runtimeComponent("starter-engine", "{gameRoot}/Starter/Engine/game.exe",
                             {"BE0FC330035E03983CCE590038CC7F881F1F5D1BCF082717F31776DD4DEE94E2"})
@@ -242,6 +261,10 @@ QVector<SResourceProfile> builtInResourceProfiles()
     base.resourceDirectories = QStringList() << "{gameRoot}/Res";
     base.mapDirectories = QStringList() << "{gameRoot}/Maps";
     base.runtimeManifestId = "base-ei-v1";
+    for(const QString& role : {QString("database"), QString("characterAppearance"),
+                               QString("equipmentLayout"), QString("unitAnimation"),
+                               QString("semanticValidation")})
+        base.providers.insert(role, {"base.standard.v1", 1});
     base.runtimeComponents << runtimeComponent("base-game", "{gameRoot}/game.exe",
         {"B871991C204617851CFE0F56B2F4430B44378D4625F46D815FF62E04BAF9E570"});
     base.capabilities.insert("mob.losslessEditing", capability("mob.losslessEditing", EProfileCapabilityStatus::Unsupported,
@@ -302,6 +325,7 @@ SResourceProfileEvaluation evaluateResourceProfile(const QString& gameRoot,
     result.profileName = profile.displayName;
     result.runtimeManifestId = profile.runtimeManifestId;
     result.capabilities = profile.capabilities;
+    result.providers = profile.providers;
     if(!QFileInfo(QDir(result.gameRoot).filePath("game.exe")).isFile())
     {
         result.messages.append("The selected folder does not contain game.exe.");

@@ -5,6 +5,59 @@
 #include <QString>
 #include <QStringList>
 #include <QVector>
+#include <QMap>
+#include <QSet>
+
+enum class EProfileProviderRole
+{
+    Database,
+    CharacterAppearance,
+    EquipmentLayout,
+    UnitAnimation,
+    SemanticValidation
+};
+
+inline uint qHash(EProfileProviderRole role, uint seed = 0)
+{
+    return ::qHash(static_cast<int>(role), seed);
+}
+
+QString profileProviderRoleName(EProfileProviderRole role);
+
+struct SProfileProviderDescriptor
+{
+    SProfileProviderDescriptor() = default;
+    SProfileProviderDescriptor(const QString& providerId, int version,
+                               const QSet<EProfileProviderRole>& providerRoles,
+                               const QString& providerDescription)
+        : id(providerId), interfaceVersion(version), roles(providerRoles),
+          description(providerDescription) {}
+    QString id;
+    int interfaceVersion{1};
+    QSet<EProfileProviderRole> roles;
+    QString description;
+};
+
+struct SProfileProviderSelection
+{
+    bool valid{false};
+    QString providerId;
+    EProfileProviderRole role{EProfileProviderRole::Database};
+    QString diagnostic;
+};
+
+class ProfileProviderRegistry
+{
+public:
+    bool registerProvider(const SProfileProviderDescriptor& descriptor, QString* diagnostic = nullptr);
+    SProfileProviderSelection select(EProfileProviderRole role, const QString& providerId,
+                                     int requestedInterfaceVersion = 1) const;
+    QVector<SProfileProviderDescriptor> providers() const;
+    static ProfileProviderRegistry builtIns();
+
+private:
+    QMap<QString, SProfileProviderDescriptor> m_providers;
+};
 
 struct SRuntimeProviderResult
 {

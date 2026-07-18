@@ -63,6 +63,8 @@ void ResourceProfileTests::jmvPresetFindsModAndBaseResources()
     QCOMPARE(result.runtimeComponents.size(), 6);
     QCOMPARE(profileCapabilityStatusName(result.capabilities.value("runtime.directMapLaunch").status),
              QString("experimental"));
+    QCOMPARE(result.providers.value("database").id, QString("jmv.v1"));
+    QCOMPARE(result.providers.value("equipmentLayout").id, QString("jmv.v1"));
 }
 
 void ResourceProfileTests::basePresetDoesNotRequireJmv()
@@ -79,6 +81,7 @@ void ResourceProfileTests::basePresetDoesNotRequireJmv()
     QCOMPARE(result.mapDirectories.size(), 1);
     QVERIFY(result.mapDirectories[0].endsWith("Maps"));
     QVERIFY(result.runtimeStackComplete);
+    QCOMPARE(result.providers.value("database").id, QString("base.standard.v1"));
 }
 
 void ResourceProfileTests::invalidGameRootIsRejected()
@@ -95,11 +98,14 @@ void ResourceProfileTests::externalProfileCanBeAdded()
     QTemporaryDir temporary;
     QVERIFY(temporary.isValid());
     const QByteArray json = R"JSON({
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "id": "test-mod",
         "displayName": "Test Mod",
         "resourceDirectories": ["{gameRoot}/TestRes"],
-        "mapDirectories": ["{gameRoot}/TestMaps"]
+        "mapDirectories": ["{gameRoot}/TestMaps"],
+        "providers": {
+            "database": {"id": "base.standard.v1", "interfaceVersion": 1}
+        }
     })JSON";
     createFile(QDir(temporary.path()).filePath("test-mod.json"), json);
     const QVector<SResourceProfile> profiles = loadResourceProfiles(temporary.path());
@@ -108,6 +114,9 @@ void ResourceProfileTests::externalProfileCanBeAdded()
         if(profile.id == "test-mod")
             found = true;
     QVERIFY(found);
+    for(const SResourceProfile& profile : profiles)
+        if(profile.id == "test-mod")
+            QCOMPARE(profile.providers.value("database").id, QString("base.standard.v1"));
 }
 
 QTEST_APPLESS_MAIN(ResourceProfileTests)
