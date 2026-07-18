@@ -532,6 +532,7 @@ MOB editing does not imply that landscape saving is supported.
   SHA-256, and restore its exact contents after exit or interrupted-run
   recovery. The runtime result remains experimental until a live test proves
   staged terrain, objects, and a controllable player.
+  ([`28300cb`](https://github.com/Ilufus/ei-mapper-endurance/commit/28300cb))
 - [x] `0.1.0-alpha.41`: redo-safe raw provenance and the July 17 multi-edit/UI
   fixes passed owner testing and were handed to the closed tester group.
   ([`db3fa31`](https://github.com/Ilufus/ei-mapper-endurance/commit/db3fa31))
