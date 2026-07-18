@@ -197,6 +197,7 @@ private:
     CUnit* m_firstPointUnit;
     uint m_previousBehaviour;
     bool m_switchesToPath;
+    int m_reusedPatrolId;
 };
 
 class CCreateTrapPointCommand: public QUndoCommand

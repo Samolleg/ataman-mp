@@ -22,6 +22,8 @@ CObjectBase::CObjectBase():
 
 CObjectBase::CObjectBase(const CObjectBase &base):
     CNode(base)
+  ,m_modelName(base.m_modelName)
+  ,m_bDeleted(base.m_bDeleted)
   ,m_bboxDirty(true)
 {
     m_complection = base.m_complection;

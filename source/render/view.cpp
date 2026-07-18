@@ -1474,9 +1474,19 @@ int CView::nSelectedNodes()
     int n = 0;
     for(const auto& mob: m_aMob)
     {
+        QList<CNode*> counted;
         for(const auto& node: mob->nodes())
-            if(node->nodeState() == ENodeState::eSelect)
+            if(node->nodeState() == ENodeState::eSelect && !counted.contains(node))
+            {
+                counted.append(node);
                 ++n;
+            }
+        for(const auto& node: mob->logicNodes())
+            if(node->nodeState() == ENodeState::eSelect && !counted.contains(node))
+            {
+                counted.append(node);
+                ++n;
+            }
     }
     return n;
 }
@@ -3174,7 +3184,9 @@ bool CView::confirmScriptReferencedObjectIds(const QVector<uint>& objectIds,
 
 void CView::duplicateSelectedObjects()
 {
-    if(!m_activeMob || nSelectedNodes() == 0)
+    // Logic points have their own P/L creation workflow and must not cause
+    // Ctrl+D to replay a stale normal-object clipboard.
+    if(!m_activeMob || selectedNodes().isEmpty())
         return;
     selectedObjectToClipboardBuffer();
     clipboradObjectsToScene();

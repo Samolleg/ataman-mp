@@ -48,6 +48,7 @@ public:
     ENodeType nodeType() override {return ENodeType::ePatrolPoint;}
     void draw(bool isActive, QOpenGLShaderProgram* program) override final;
     void drawSelect(QOpenGLShaderProgram* program = nullptr) override final;
+    bool hasSelectedLookPoint() const;
     uint deserialize(util::CMobParser& parser) override final;
     void getLogicParam(QSharedPointer<IPropertyBase>& prop, EObjParam propType) override final;
     void applyLogicParam(const QSharedPointer<IPropertyBase>& prop) override final;
@@ -122,6 +123,7 @@ public:
     void addFirstPoint(QVector3D& pos);
     void undo_addFirstPoint();
     bool isBehaviourPath() {return m_behaviour == EBehaviourType::ePath;}
+    int firstAvailablePatrolIndex() const;
     int getPatrolId(CPatrolPoint* pPoint);
     void getViewId(int& parentPatrol, int& parentView, CLookPoint* pPoint);
     void createPatrolByIndex(int index);
@@ -201,6 +203,7 @@ public:
     void addFirstPatrolPoint();
     void undo_addFirstPatrolPoint();
     bool isBehaviourPath();
+    int firstAvailablePatrolIndex() const;
     int getPatrolId(CPatrolPoint* pPoint);
     void getViewId(int& parentPatrol, int& parentView, CLookPoint* pPoint);
     void createPatrolByIndex(int index);

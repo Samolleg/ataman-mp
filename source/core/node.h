@@ -82,7 +82,7 @@ public:
     QVector3D& position() {return m_position; }
     QVector3D& drawPosition() {return m_drawPosition;}
     void setState(ENodeState state) {m_state = state;}
-    ENodeState nodeState() {return m_state;}
+    ENodeState nodeState() const {return m_state;}
 
     void setRawObjectProvenance(const QByteArray& documentSha256,
                                 const QString& sectionPath,
