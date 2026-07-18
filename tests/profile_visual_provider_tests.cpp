@@ -109,9 +109,10 @@ void ProfileVisualProviderTests::basePreservesSingleWeaponBehavior()
     SEquipmentLayoutRequest request;
     request.model = "unhuma";
     request.weapons << "sword.iron" << "axe.iron";
+    request.assemblyParts << "rh3.sword01" << "rh3.axe02";
     QJsonObject output;
     resolver->resolve(request, &output);
-    QCOMPARE(jsonStrings(output, "components"), QStringList({"unhuma.sword01"}));
+    QCOMPARE(jsonStrings(output, "components"), QStringList({"rh3.sword01"}));
     QVERIFY(output.value("diagnostics").toArray().first().toString().contains("Base"));
 }
 
@@ -130,6 +131,8 @@ void ProfileVisualProviderTests::jmvLayoutsAreIndependentlyGated()
     for(const Case& test : cases)
     {
         SEquipmentLayoutRequest request; request.model = "unhuma"; request.weapons = test.weapons;
+        request.assemblyParts << "rh3.sword01" << "rh3.axe02" << "lh2.shield04"
+                              << "rh3.dsword05" << "rh3.daxe06";
         QJsonObject output; resolver->resolve(request, &output);
         QCOMPARE(output.value("layout").toString(), test.layout);
         QCOMPARE(!output.value("placeholders").toArray().isEmpty(), test.gated);
@@ -142,9 +145,9 @@ void ProfileVisualProviderTests::validatesAssemblyPartsWithPlaceholders()
     const auto resolver = service.equipmentResolver("base.standard.v1", database());
     SEquipmentLayoutRequest request;
     request.model = "unhuma"; request.armor << "shirt.leather";
-    request.assemblyParts << "unhuma.armor99";
+    request.assemblyParts << "bd.armor99";
     QJsonObject output; resolver->resolve(request, &output);
-    QCOMPARE(jsonStrings(output, "placeholders"), QStringList({"unhuma.armor12"}));
+    QCOMPARE(jsonStrings(output, "placeholders"), QStringList({".armor12"}));
 }
 
 void ProfileVisualProviderTests::unknownVisualProviderFailsClosed()

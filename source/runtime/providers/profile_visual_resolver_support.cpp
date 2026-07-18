@@ -60,26 +60,34 @@ QString weaponFamily(int typeId)
     return families.value(typeId);
 }
 
-QString component(const QString& model, const QString& family, int tti)
+QString componentSuffix(const QString& family, int tti)
 {
-    QString normalized = model.toLower();
-    if(normalized.endsWith(".mod")) normalized.chop(4);
-    return QString("%1.%2%3").arg(normalized, family).arg(tti, 2, 10, QChar('0'));
+    return QString(".%1%2").arg(family).arg(tti, 2, 10, QChar('0'));
 }
 
-void appendComponent(const QString& value, const SEquipmentLayoutRequest& request,
-                     QJsonArray* components, QJsonArray* placeholders, QJsonArray* diagnostics)
+void appendComponents(const QString& family, int tti, const SEquipmentLayoutRequest& request,
+                      QJsonArray* components, QJsonArray* placeholders, QJsonArray* diagnostics)
 {
-    if(value.isEmpty())
+    if(family.isEmpty() || tti < 0)
         return;
-    if(!request.assemblyParts.isEmpty()
-            && !request.assemblyParts.contains(value, Qt::CaseInsensitive))
+    const QString suffix = componentSuffix(family, tti);
+    if(request.assemblyParts.isEmpty())
     {
-        placeholders->append(value);
-        diagnostics->append("Selected model assembly has no component " + value);
+        components->append(suffix);
         return;
     }
-    components->append(value);
+    int matched = 0;
+    for(const QString& part : request.assemblyParts)
+        if(part.endsWith(suffix, Qt::CaseInsensitive))
+        {
+            components->append(part);
+            ++matched;
+        }
+    if(matched == 0)
+    {
+        placeholders->append(suffix);
+        diagnostics->append("Selected model assembly has no component matching *" + suffix);
+    }
 }
 
 }
@@ -169,11 +177,9 @@ SRuntimeProviderResult resolveEquipmentLayout(
             continue;
         }
         if(item->textureType1 >= 0)
-            appendComponent(component(request.model, "armor", item->textureType1), request,
-                            &components, &placeholders, &diagnostics);
+            appendComponents("armor", item->textureType1, request, &components, &placeholders, &diagnostics);
         if(item->textureType2 > 0)
-            appendComponent(component(request.model, "armor", item->textureType2), request,
-                            &components, &placeholders, &diagnostics);
+            appendComponents("armor", item->textureType2, request, &components, &placeholders, &diagnostics);
     }
 
     struct Weapon { QString reference; ei::SItemDatabaseRecord item; EWeaponClass kind; };
@@ -248,11 +254,9 @@ SRuntimeProviderResult resolveEquipmentLayout(
                 diagnostics.append(weapon.reference + ": weapon TTI component mapping is incomplete");
                 continue;
             }
-            appendComponent(component(request.model, family, weapon.item.textureType1), request,
-                            &components, &placeholders, &diagnostics);
+            appendComponents(family, weapon.item.textureType1, request, &components, &placeholders, &diagnostics);
             if(weapon.item.textureType2 > 0)
-                appendComponent(component(request.model, family, weapon.item.textureType2), request,
-                                &components, &placeholders, &diagnostics);
+                appendComponents(family, weapon.item.textureType2, request, &components, &placeholders, &diagnostics);
         }
     equipmentLayout->insert("layout", layout);
     equipmentLayout->insert("components", components);

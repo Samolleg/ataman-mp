@@ -126,17 +126,10 @@ QStringList jsonStringList(const QJsonObject& object, const char* key)
     return result;
 }
 
-QString normalizedModel(QString model)
-{
-    model = model.trimmed().toLower();
-    if(model.endsWith(".mod")) model.chop(4);
-    return model;
-}
-
 bool optionalEquipmentPart(const QString& part)
 {
     static const QRegularExpression optional(
-        "\\.(?:armor|sword|axe|dagger|pike|club|bow|crossbow|shield|dsword|daxe|dpike|dclub|staff|dstaff|hair)\\d+$",
+        "(?:\\.(?:armor|sword|axe|dagger|pike|club|bow|crossbow|shield|dsword|daxe|dpike|dclub|staff|dstaff)\\d+|hr\\.\\d+)$",
         QRegularExpression::CaseInsensitiveOption);
     return optional.match(part).hasMatch();
 }
@@ -206,7 +199,7 @@ void CUnit::refreshTransientVisual()
         const int hair = appearance.value("hairIndex").toInt(-1);
         if(hair >= 0)
         {
-            const QString hairPart = QString("%1.hair%2").arg(normalizedModel(model)).arg(hair, 2, 10, QChar('0'));
+            const QString hairPart = QString("hr.%1").arg(hair, 2, 10, QChar('0'));
             if(assemblyParts.contains(hairPart, Qt::CaseInsensitive))
                 visibleParts.append(hairPart);
         }
