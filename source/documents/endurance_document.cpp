@@ -87,8 +87,10 @@ QString sectionTypeName(quint32 type)
     static const QMap<quint32, QString> names = {
         {0xA000, "OBJECT_DB_FILE"}, {0xB000, "OBJECT_SECTION"}, {0xB001, "OBJECT"},
         {0xB002, "NID"}, {0xB003, "OBJ_TYPE"}, {0xB004, "OBJ_NAME"},
-        {0xB006, "OBJ_TEMPLATE"}, {0xB009, "OBJ_POSITION"},
+        {0xB006, "OBJ_TEMPLATE"}, {0xB009, "OBJ_POSITION"}, {0xB00D, "OBJ_BODYPARTS"},
         {0xBBBB0000, "UNIT"}, {0xBBBB0002, "UNIT_PROTOTYPE"},
+        {0xBBAB0000, "MAGIC_TRAP"}, {0xBBAB0003, "MT_AREAS"},
+        {0xBBAB0004, "MT_TARGETS"},
         {0xAA01, "LIGHT"}, {0xCC01, "SOUND"}, {0xDD01, "PARTICL"},
         {0x31415926, "AI_GRAPH"}
     };
@@ -126,7 +128,33 @@ public:
                 QString("[%1]").arg(occurrence);
             if(length < 8)
                 return fail("mob.section_length", QString("Section declares invalid length %1").arg(length), path);
-            const quint64 sectionEnd = cursor + quint64(length);
+            quint64 effectiveLength = length;
+            // MapED is known to write MT_AREAS and MT_TARGETS four bytes short:
+            // it includes the element bytes in the declared length but omits the
+            // leading count DWord. The game accepts those files. Recognize only
+            // the exact count-derived shape so the original malformed header can
+            // remain byte-identical until that array is deliberately edited.
+            if((type == 0xBBAB0003 || type == 0xBBAB0004) &&
+               end - cursor >= 12)
+            {
+                const quint32 count = readU32(m_bytes, int(cursor + 8));
+                const quint64 stride = type == 0xBBAB0003 ? 12u : 8u;
+                const quint64 expectedLength = 12u + quint64(count) * stride;
+                if(expectedLength <= quint64(UINT_MAX) &&
+                   quint64(length) + 4u == expectedLength &&
+                   cursor + expectedLength >= cursor &&
+                   cursor + expectedLength <= end)
+                {
+                    effectiveLength = expectedLength;
+                    if(m_report)
+                        m_report->add("mob.compat.maped_array_length",
+                                      EValidationSeverity::Warning,
+                                      QString("Accepted legacy MapED array length %1 at byte offset %2; count-derived length is %3")
+                                          .arg(length).arg(cursor).arg(expectedLength),
+                                      m_source + ":" + path);
+                }
+            }
+            const quint64 sectionEnd = cursor + effectiveLength;
             if(sectionEnd < cursor || sectionEnd > end)
                 return fail("mob.section_bounds",
                             QString("Section [%1, %2) exceeds parent boundary %3")
@@ -138,7 +166,7 @@ public:
             section.offset = cursor;
             section.occurrence = occurrence;
             section.path = path;
-            section.rawBytes = m_bytes.mid(int(cursor), int(length));
+            section.rawBytes = m_bytes.mid(int(cursor), int(effectiveLength));
             section.sha256 = QCryptographicHash::hash(section.rawBytes, QCryptographicHash::Sha256);
             section.container = isMobContainer(type);
             section.opaque = !section.container;
@@ -252,6 +280,121 @@ void collectObjects(const QVector<SMobSection>& sections, QVector<SMobObjectSnap
         }
         else
             collectObjects(section.children, objects);
+    }
+}
+
+void collectSections(const QVector<SMobSection>& sections, quint32 type,
+                     QVector<const SMobSection*>& matches)
+{
+    for(const SMobSection& section : sections)
+    {
+        if(section.type == type)
+            matches.append(&section);
+        collectSections(section.children, type, matches);
+    }
+}
+
+void collectObjectSections(const QVector<SMobSection>& sections,
+                           QVector<const SMobSection*>& objects)
+{
+    for(const SMobSection& section : sections)
+    {
+        if(section.type == 0xB000)
+        {
+            for(const SMobSection& child : section.children)
+                objects.append(&child);
+        }
+        else
+            collectObjectSections(section.children, objects);
+    }
+}
+
+bool decodeStringArray(const SMobSection& section, QStringList* values)
+{
+    if(!values)
+        return false;
+    values->clear();
+    const QByteArray data = payload(section);
+    if(data.size() < 4)
+        return false;
+    const quint32 count = readU32(data, 0);
+    quint64 cursor = 4;
+    for(quint32 index = 0; index < count; ++index)
+    {
+        if(cursor + 8 > quint64(data.size()))
+            return false;
+        const quint32 length = readU32(data, int(cursor + 4));
+        if(length < 8 || cursor + length > quint64(data.size()))
+            return false;
+        values->append(decodeCp1251(data.mid(int(cursor + 8), int(length - 8))));
+        cursor += length;
+    }
+    return cursor == quint64(data.size());
+}
+
+QString equipmentSlotForPart(const QString& part)
+{
+    const int separator = part.indexOf('.');
+    if(separator <= 0)
+        return QString();
+    const QString root = part.left(separator).toLower();
+    int stemLength = root.size();
+    while(stemLength > 0 && root.at(stemLength - 1).isDigit())
+        --stemLength;
+    const QString stem = root.left(stemLength);
+    static const QSet<QString> equipmentRoots = {
+        "hd", "hp", "bd", "rh", "lh", "lg"
+    };
+    return equipmentRoots.contains(stem) ? root : QString();
+}
+
+void addMobSemanticWarnings(const QVector<SMobSection>& sections,
+                            const QString& sourcePath, CValidationReport* report)
+{
+    if(!report)
+        return;
+
+    QVector<const SMobSection*> targets;
+    collectSections(sections, 0xBBAB0004, targets);
+    for(const SMobSection* target : targets)
+    {
+        const QByteArray data = payload(*target);
+        if(data.size() >= 4 && readU32(data, 0) == 0)
+            report->add("mob.semantic.empty_trap_targets", EValidationSeverity::Warning,
+                        "Magic trap has an empty targets array; the game tolerates it but the trap may have no valid cast destination",
+                        sourcePath + ":" + target->path);
+    }
+
+    QVector<const SMobSection*> objects;
+    collectObjectSections(sections, objects);
+    for(const SMobSection* object : objects)
+    {
+        if(!findSection(*object, 0xBBBB0000))
+            continue;
+        const SMobSection* bodyParts = findSection(*object, 0xB00D);
+        if(!bodyParts)
+            continue;
+        QStringList enabledParts;
+        if(!decodeStringArray(*bodyParts, &enabledParts))
+            continue;
+        QMap<QString, QStringList> partsBySlot;
+        for(const QString& part : enabledParts)
+        {
+            const QString slot = equipmentSlotForPart(part);
+            if(!slot.isEmpty())
+                partsBySlot[slot].append(part);
+        }
+        for(auto it = partsBySlot.constBegin(); it != partsBySlot.constEnd(); ++it)
+        {
+            if(it.value().size() < 2)
+                continue;
+            const SMobObjectSnapshot snapshot = snapshotObject(*object);
+            report->add("mob.semantic.overlapping_unit_parts", EValidationSeverity::Warning,
+                        QString("Unit %1 enables multiple model parts in logical slot '%2': %3")
+                            .arg(snapshot.hasNid ? QString::number(snapshot.nid) : snapshot.name,
+                                 it.key(), it.value().join(", ")),
+                        sourcePath + ":" + bodyParts->path);
+        }
     }
 }
 
@@ -1777,6 +1920,7 @@ bool CMobDocument::loadBytes(const QByteArray& bytes, const QString& sourceName,
     }
 
     collectObjects(m_sections, m_objects);
+    addMobSemanticWarnings(m_sections, sourcePath, report);
     QMap<quint32, int> counts;
     for(const SMobObjectSnapshot& object : m_objects)
         if(object.hasNid)

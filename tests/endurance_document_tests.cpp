@@ -65,6 +65,25 @@ QByteArray validMob(const QByteArray& rootChild = QByteArray())
     return section(0xA000, rootChild);
 }
 
+QByteArray mapEdCountedArray(quint32 type, quint32 count, const QByteArray& elements)
+{
+    QByteArray bytes = section(type, u32(count) + elements);
+    const quint32 shortLength = quint32(bytes.size() - 4);
+    bytes[4] = char(shortLength & 0xFF);
+    bytes[5] = char((shortLength >> 8) & 0xFF);
+    bytes[6] = char((shortLength >> 16) & 0xFF);
+    bytes[7] = char((shortLength >> 24) & 0xFF);
+    return bytes;
+}
+
+QByteArray stringArray(quint32 type, const QStringList& values)
+{
+    QByteArray data = u32(quint32(values.size()));
+    for(const QString& value : values)
+        data += section(type, value.toLatin1());
+    return section(type, data);
+}
+
 QByteArray encryptedScript(const QByteArray& script, quint32 key = 0x12345678)
 {
     QByteArray encrypted = u32(key);
@@ -97,6 +116,8 @@ private slots:
     void duplicateMobIdsAreWarningsOnly();
     void unknownLeafIsPreservedAsOpaque();
     void malformedMobRootIsRejected();
+    void legacyMapEdTrapArrayLengthsArePreserved();
+    void semanticAnomaliesAreWarningsOnly();
     void semanticDiffClassifiesMovementAndAddition();
     void semanticDiffPairsIdenticalDuplicatesByOccurrence();
     void semanticDiffReportsReadableScriptChanges();
@@ -187,6 +208,52 @@ void EnduranceDocumentTests::malformedMobRootIsRejected()
     CValidationReport report;
     QVERIFY(!document.load(QFileInfo(file.fileName()), &report));
     QVERIFY(report.hasErrors());
+}
+
+void EnduranceDocumentTests::legacyMapEdTrapArrayLengthsArePreserved()
+{
+    const QByteArray areas = mapEdCountedArray(
+        0xBBAB0003, 2, plot(83.988685f, 53.219536f, 4.0f) +
+                            plot(86.446106f, 58.720936f, 5.0f));
+    const QByteArray targets = mapEdCountedArray(
+        0xBBAB0004, 1, plot(84.295219f, 55.768169f, 0.0f).left(8));
+    const QByteArray bytes = validMob(section(
+        0xB000, section(0xBBAB0000, areas + targets)));
+
+    CMobDocument document;
+    CValidationReport report;
+    QVERIFY2(document.loadBytes(bytes, "maped-trap-arrays.mob", &report),
+             qPrintable(report.toText()));
+    QCOMPARE(document.serialize(), bytes);
+    QVERIFY(!report.hasErrors());
+    int compatibilityWarnings = 0;
+    for(const SValidationFinding& finding : report.findings())
+    {
+        if(finding.code == "mob.compat.maped_array_length")
+            ++compatibilityWarnings;
+    }
+    QCOMPARE(compatibilityWarnings, 2);
+}
+
+void EnduranceDocumentTests::semanticAnomaliesAreWarningsOnly()
+{
+    const QByteArray emptyTargets = section(0xBBAB0004, u32(0));
+    const QByteArray overlappingParts = stringArray(
+        0xB00D, QStringList() << "hd.armor00" << "hd.armor01" << "bd");
+    const QByteArray unitObject = section(
+        0xB001, section(0xB002, u32(42)) + section(0xBBBB0000, QByteArray()) +
+                    overlappingParts);
+    const QByteArray bytes = validMob(
+        section(0xB000, unitObject) + section(0xBBAB0000, emptyTargets));
+
+    CMobDocument document;
+    CValidationReport report;
+    QVERIFY2(document.loadBytes(bytes, "semantic-warnings.mob", &report),
+             qPrintable(report.toText()));
+    QVERIFY(!report.hasErrors());
+    QCOMPARE(document.serialize(), bytes);
+    QVERIFY(report.toText().contains("mob.semantic.empty_trap_targets"));
+    QVERIFY(report.toText().contains("mob.semantic.overlapping_unit_parts"));
 }
 
 void EnduranceDocumentTests::semanticDiffClassifiesMovementAndAddition()

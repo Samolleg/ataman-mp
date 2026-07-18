@@ -948,6 +948,15 @@ int CMob::readMob(QFileInfo &path)
             file.close();
             return 3;
         }
+        for(const SValidationFinding& finding : structuralReport.findings())
+        {
+            if(finding.severity != EValidationSeverity::Warning)
+                continue;
+            ei::log(eLogWarning,
+                    QString("MOB validation warning code:%1 path:%2 location:%3 message:%4")
+                        .arg(finding.code, m_filePath.absoluteFilePath(),
+                             finding.location, finding.message));
+        }
         const SBackupResult openBackup = CBackupManager().snapshotOnOpen(m_filePath);
         if(!openBackup.success)
         {
