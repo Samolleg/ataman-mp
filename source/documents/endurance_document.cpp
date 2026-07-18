@@ -28,7 +28,6 @@ QString severityName(EValidationSeverity severity)
     }
     return "error";
 }
-
 bool readWholeFile(const QFileInfo& info, QByteArray& output, CValidationReport* report)
 {
     QFile file(info.filePath());
@@ -47,7 +46,6 @@ bool readWholeFile(const QFileInfo& info, QByteArray& output, CValidationReport*
     }
     return true;
 }
-
 quint32 readU32(const QByteArray& bytes, int offset)
 {
     return qFromLittleEndian<quint32>(reinterpret_cast<const uchar*>(bytes.constData() + offset));
@@ -1945,77 +1943,5 @@ bool CMobDocument::loadBytes(const QByteArray& bytes, const QString& sourceName,
         report->add("mob.lossless", EValidationSeverity::Info,
                     "Unchanged serialization is byte-identical", sourceInfo.fileName());
     }
-    return true;
-}
-
-bool CMprDocument::load(const QFileInfo& file, CValidationReport* report)
-{
-    m_originalBytes.clear();
-    if(!readWholeFile(file, m_originalBytes, report))
-        return false;
-    if(m_originalBytes.size() < 16)
-    {
-        if(report)
-            report->add("mpr.envelope", EValidationSeverity::Error, "MPR is smaller than a RES header", file.filePath());
-        return false;
-    }
-    QDataStream stream(m_originalBytes);
-    stream.setByteOrder(QDataStream::LittleEndian);
-    quint32 signature = 0;
-    quint32 tableSize = 0;
-    quint32 tableOffset = 0;
-    quint32 namesLength = 0;
-    stream >> signature >> tableSize >> tableOffset >> namesLength;
-    if(signature != 0x019CE23C)
-    {
-        if(report)
-            report->add("mpr.signature", EValidationSeverity::Error, "Invalid MPR/RES signature", file.filePath());
-        return false;
-    }
-    const quint64 entrySize = 22;
-    const quint64 tableBytes = quint64(tableSize) * entrySize;
-    const quint64 namesOffset = quint64(tableOffset) + tableBytes;
-    if(tableOffset < 16 || namesOffset > quint64(m_originalBytes.size()) ||
-       namesOffset + namesLength > quint64(m_originalBytes.size()))
-    {
-        if(report)
-            report->add("mpr.table", EValidationSeverity::Error,
-                        "The RES table or filename buffer extends outside the MPR file",
-                        file.filePath());
-        return false;
-    }
-
-    if(!stream.device()->seek(tableOffset))
-    {
-        if(report)
-            report->add("mpr.table_seek", EValidationSeverity::Error,
-                        "Could not seek to the MPR resource table", file.filePath());
-        return false;
-    }
-    for(quint32 index = 0; index < tableSize; ++index)
-    {
-        quint32 nextIndex = 0;
-        quint32 dataSize = 0;
-        quint32 dataOffset = 0;
-        quint32 lastWriteTime = 0;
-        quint16 nameLength = 0;
-        quint32 nameOffset = 0;
-        stream >> nextIndex >> dataSize >> dataOffset >> lastWriteTime >> nameLength >> nameOffset;
-        Q_UNUSED(lastWriteTime);
-        const bool nextIndexValid = nextIndex == quint32(-1) || nextIndex < tableSize;
-        const bool dataValid = dataOffset >= 16 &&
-            quint64(dataOffset) + dataSize <= quint64(tableOffset);
-        const bool nameValid = quint64(nameOffset) + nameLength <= namesLength;
-        if(stream.status() != QDataStream::Ok || !nextIndexValid || !dataValid || !nameValid)
-        {
-            if(report)
-                report->add("mpr.entry", EValidationSeverity::Error,
-                            QString("Invalid MPR resource-table entry %1").arg(index),
-                            file.filePath());
-            return false;
-        }
-    }
-    if(report)
-        report->add("mpr.lossless", EValidationSeverity::Info, "Unchanged serialization is byte-identical", file.fileName());
     return true;
 }

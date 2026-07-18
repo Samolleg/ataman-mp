@@ -105,6 +105,91 @@ QByteArray emptyMpr()
     stream << quint32(0x019CE23C) << quint32(0) << quint32(16) << quint32(0);
     return bytes;
 }
+
+QByteArray syntheticMp()
+{
+    QByteArray bytes;
+    QDataStream stream(&bytes, QIODevice::WriteOnly);
+    stream.setByteOrder(QDataStream::LittleEndian);
+    stream.setFloatingPointPrecision(QDataStream::SinglePrecision);
+    stream << quint32(0xCE4AF672) << float(100.0f)
+           << quint32(1) << quint32(1)
+           << quint32(2) << quint32(512)
+           << quint32(2) << quint32(64)
+           << quint16(2) << quint32(0);
+    for(int material = 0; material < 2; ++material)
+    {
+        stream << qint32(3)
+               << float(0.2f + material * 0.1f) << float(0.3f) << float(0.6f)
+               << float(0.7f) << float(0.0f) << float(0.5f)
+               << float(0.0f) << float(0.0f) << float(0.0f) << float(0.0f);
+    }
+    stream << qint32(1) << qint32(2);
+    return bytes;
+}
+
+QByteArray syntheticOverlaySector()
+{
+    QByteArray bytes;
+    QDataStream stream(&bytes, QIODevice::WriteOnly);
+    stream.setByteOrder(QDataStream::LittleEndian);
+    stream << quint32(0xCF4BF774) << quint8(3);
+    bytes.append(QByteArray(33 * 33 * 8 * 2, '\0'));
+    bytes.append(QByteArray(16 * 16 * 2, '\0'));
+    QDataStream overlayTiles(&bytes, QIODevice::Append);
+    overlayTiles.setByteOrder(QDataStream::LittleEndian);
+    for(int tile = 0; tile < 16 * 16; ++tile)
+        overlayTiles << quint16((tile % 3) == 0 ? 0xFFFF : 0);
+    QDataStream materials(&bytes, QIODevice::Append);
+    materials.setByteOrder(QDataStream::LittleEndian);
+    for(int tile = 0; tile < 16 * 16; ++tile)
+        materials << qint16((tile % 3) == 0 ? -1 : 1);
+    return bytes;
+}
+
+QByteArray syntheticMpr()
+{
+    struct Member
+    {
+        QByteArray name;
+        QByteArray payload;
+        quint32 timestamp;
+        quint32 offset;
+    };
+    QVector<Member> members;
+    members.append({QByteArray("unknown.bin"), QByteArray("opaque-unknown-payload"), 0x10203040, 0});
+    members.append({QByteArray("CaveSet.MP"), syntheticMp(), 0x50607080, 0});
+    members.append({QByteArray("CaveSet000000.SEC"), syntheticOverlaySector(), 0x90A0B0C0, 0});
+
+    QByteArray bytes(16, '\0');
+    for(int index = 0; index < members.size(); ++index)
+    {
+        members[index].offset = quint32(bytes.size());
+        bytes.append(members.at(index).payload);
+        const int padding = (16 - (bytes.size() % 16)) % 16;
+        bytes.append(QByteArray(padding, char(0xA0 + index)));
+    }
+    const quint32 tableOffset = quint32(bytes.size());
+    QByteArray names;
+    QDataStream table(&bytes, QIODevice::Append);
+    table.setByteOrder(QDataStream::LittleEndian);
+    for(const Member& member : members)
+    {
+        table << quint32(-1) << quint32(member.payload.size()) << member.offset
+              << member.timestamp << quint16(member.name.size()) << quint32(names.size());
+        names.append(member.name);
+    }
+    bytes.append(names);
+    bytes.append("preserved-trailer");
+
+    QByteArray header;
+    QDataStream headerStream(&header, QIODevice::WriteOnly);
+    headerStream.setByteOrder(QDataStream::LittleEndian);
+    headerStream << quint32(0x019CE23C) << quint32(members.size())
+                 << tableOffset << quint32(names.size());
+    bytes.replace(0, header.size(), header);
+    return bytes;
+}
 }
 
 class EnduranceDocumentTests : public QObject
@@ -139,6 +224,10 @@ private slots:
     void transactionRejectsStaleProvenance();
     void cp1251EncodingIsStrict();
     void unchangedMprIsByteIdentical();
+    void syntheticMprPreservesArchiveNamespaceAndInactiveSentinel();
+    void mprSectorPatchIsProvenanceCheckedAndLocal();
+    void mprLengthChangingAndStaleTransactionsFailClosed();
+    void failedStagedMprSaveLeavesNoDestination();
     void malformedMprTableIsRejected();
     void stagedMobIsReopenedWithoutCreatingDestination();
 };
@@ -805,6 +894,107 @@ void EnduranceDocumentTests::unchangedMprIsByteIdentical()
     QVERIFY(document.load(QFileInfo(file.fileName()), &report));
     QCOMPARE(document.serialize(), bytes);
     QVERIFY(!document.isDirty());
+}
+
+void EnduranceDocumentTests::syntheticMprPreservesArchiveNamespaceAndInactiveSentinel()
+{
+    const QByteArray bytes = syntheticMpr();
+    CMprDocument document;
+    CValidationReport report;
+    QVERIFY2(document.loadBytes(bytes, "DifferentOuterName.mpr", &report),
+             qPrintable(report.toText()));
+    QVERIFY2(!report.hasErrors(), qPrintable(report.toText()));
+    QCOMPARE(document.serialize(), bytes);
+    QCOMPARE(document.members().size(), 3);
+    QCOMPARE(document.members().at(0).name, QString("unknown.bin"));
+    QCOMPARE(document.members().at(1).name, QString("CaveSet.MP"));
+    QCOMPARE(document.members().at(2).name, QString("CaveSet000000.SEC"));
+    QCOMPARE(document.members().at(0).lastWriteTime, quint32(0x10203040));
+    QCOMPARE(document.mapInfo().innerNamespace, QString("CaveSet"));
+    QCOMPARE(document.mapInfo().textureCount, quint32(2));
+    QCOMPARE(document.sectors().size(), 1);
+    QVERIFY(document.sectors().front().hasOverlay);
+    QCOMPARE(document.sectors().front().overlayMaterialIndices.size(), 256);
+    QCOMPARE(document.sectors().front().overlayMaterialIndices.at(0), qint16(-1));
+    QCOMPARE(document.sectors().front().overlayMaterialIndices.at(1), qint16(1));
+    for(const SValidationFinding& finding : report.findings())
+        QVERIFY(finding.code != "mpr.atlas_namespace");
+}
+
+void EnduranceDocumentTests::mprSectorPatchIsProvenanceCheckedAndLocal()
+{
+    const QByteArray bytes = syntheticMpr();
+    CMprDocument baseline;
+    CValidationReport baselineReport;
+    QVERIFY2(baseline.loadBytes(bytes, "baseline.mpr", &baselineReport),
+             qPrintable(baselineReport.toText()));
+    const SMprArchiveMember sector = baseline.members().at(2);
+    QByteArray replacement = sector.payload;
+    const int landTileOffset = int(baseline.sectors().front().landTileOffset);
+    replacement[landTileOffset + 1] = char(quint8(replacement.at(landTileOffset + 1)) ^ 0x40);
+
+    CMprEditTransaction transaction("rotate one synthetic land tile");
+    transaction.replaceMemberPayload(sector.name, sector.sha256, replacement);
+    QByteArray candidateBytes;
+    CValidationReport transactionReport;
+    QVERIFY2(baseline.applyTransaction(transaction, &candidateBytes, &transactionReport),
+             qPrintable(transactionReport.toText()));
+    QCOMPARE(candidateBytes.size(), bytes.size());
+    int changedByteCount = 0;
+    for(int index = 0; index < bytes.size(); ++index)
+        changedByteCount += bytes.at(index) != candidateBytes.at(index);
+    QCOMPARE(changedByteCount, 1);
+
+    CMprDocument candidate;
+    CValidationReport candidateReport;
+    QVERIFY2(candidate.loadBytes(candidateBytes, "candidate.mpr", &candidateReport),
+             qPrintable(candidateReport.toText()));
+    QCOMPARE(candidate.memberPayload("unknown.bin"), baseline.memberPayload("unknown.bin"));
+    QCOMPARE(candidate.memberPayload("caveset.mp"), baseline.memberPayload("CaveSet.MP"));
+    for(int index = 0; index < baseline.members().size(); ++index)
+    {
+        QCOMPARE(candidate.members().at(index).encodedName, baseline.members().at(index).encodedName);
+        QCOMPARE(candidate.members().at(index).lastWriteTime, baseline.members().at(index).lastWriteTime);
+        QCOMPARE(candidate.members().at(index).dataOffset, baseline.members().at(index).dataOffset);
+    }
+    const CMprSemanticDiff diff = CMprSemanticDiff::compare(baseline, candidate);
+    QCOMPARE(diff.entries().size(), 1);
+    QCOMPARE(diff.entries().front().kind, QString("modified"));
+    QCOMPARE(diff.entries().front().memberName, sector.name);
+}
+
+void EnduranceDocumentTests::mprLengthChangingAndStaleTransactionsFailClosed()
+{
+    CMprDocument document;
+    CValidationReport loadReport;
+    QVERIFY(document.loadBytes(syntheticMpr(), "synthetic.mpr", &loadReport));
+    const SMprArchiveMember sector = document.members().at(2);
+
+    CMprEditTransaction lengthChange("unproven overlay structure change");
+    lengthChange.replaceMemberPayload(sector.name, sector.sha256, sector.payload + QByteArray("x"));
+    QByteArray output("must be cleared");
+    CValidationReport lengthReport;
+    QVERIFY(!document.applyTransaction(lengthChange, &output, &lengthReport));
+    QVERIFY(output.isEmpty());
+    QVERIFY(lengthReport.hasErrors());
+
+    CMprEditTransaction stale("stale edit");
+    stale.replaceMemberPayload(sector.name, QByteArray(64, '0'), sector.payload);
+    output = "must be cleared";
+    CValidationReport staleReport;
+    QVERIFY(!document.applyTransaction(stale, &output, &staleReport));
+    QVERIFY(output.isEmpty());
+    QVERIFY(staleReport.hasErrors());
+}
+
+void EnduranceDocumentTests::failedStagedMprSaveLeavesNoDestination()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QFileInfo destination(dir.filePath("missing/subdirectory/test.mpr"));
+    const SStagedSaveValidation result = validateStagedSave(syntheticMpr(), destination);
+    QVERIFY(!result.success);
+    QVERIFY(!destination.exists());
 }
 
 void EnduranceDocumentTests::malformedMprTableIsRejected()

@@ -5,6 +5,7 @@
 #include <QTemporaryFile>
 
 #include "endurance_document.h"
+#include "mpr_document.h"
 
 SStagedSaveValidation validateStagedSave(const QByteArray& data,
                                          const QFileInfo& destination)

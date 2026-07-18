@@ -221,16 +221,6 @@ private:
     QVector<quint32> m_duplicateIds;
 };
 
-class CMprDocument
-{
-public:
-    bool load(const QFileInfo& file, CValidationReport* report = nullptr);
-    QByteArray serialize() const { return m_originalBytes; }
-    const QByteArray& originalBytes() const { return m_originalBytes; }
-    bool isDirty() const { return false; }
-
-private:
-    QByteArray m_originalBytes;
-};
+#include "mpr_document.h"
 
 #endif

@@ -247,19 +247,22 @@ bool CLandscape::saveMapAs(const QFileInfo& path)
 {
     // TODO: check if source texture has correct textureSize and tileSize with map header
 
-    //QString filePath = path.filePath();
-    //QFile file(filePath);
-    QByteArray data;
-
-    if(!m_bDirty && !m_originalMprData.isEmpty())
+    if(m_bDirty)
     {
-        data = m_originalMprData;
+        ei::log(eLogFatal,
+            QString("Refusing changed MPR save through the legacy rebuilding serializer path:%1")
+                .arg(path.absoluteFilePath()));
+        QMessageBox::critical(nullptr, "Endurance safe save",
+            "Changed landscape saving remains disabled while the lossless MPR/SEC edit path is "
+            "being validated. The destination was not created or replaced.");
+        return false;
     }
-    else
+    const QByteArray data = m_originalMprData;
+    if(data.isEmpty())
     {
-        CResFile mprFile(m_originalMprData);
-        serializeMpr(m_innerMapName, mprFile);
-        data = mprFile.generateResData();
+        QMessageBox::critical(nullptr, "Endurance safe save",
+            "The original MPR bytes are unavailable. The destination was not created or replaced.");
+        return false;
     }
 
     const SStagedSaveValidation validation = validateStagedSave(data, path);
