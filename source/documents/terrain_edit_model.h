@@ -25,6 +25,7 @@ struct STerrainHeightDelta
     int globalY{0};
     quint16 before{0};
     quint16 after{0};
+    bool clamped{false};
 };
 
 struct STerrainHeightCommand
@@ -32,6 +33,65 @@ struct STerrainHeightCommand
     QString description;
     QVector<STerrainHeightDelta> deltas;
     bool isEmpty() const { return deltas.isEmpty(); }
+    bool requiresMaxZDecision() const
+    {
+        for(const STerrainHeightDelta& delta : deltas)
+            if(delta.clamped)
+                return true;
+        return false;
+    }
+};
+
+struct STerrainObjectHeightProbe
+{
+    QString identity;
+    // Positions use the canonical terrain lattice. Height diagnostics sample
+    // that lattice bilinearly; this is a conservative editor warning, not the
+    // engine's collision/contact projection.
+    float positionX{0.0f};
+    float positionY{0.0f};
+    float positionZ{0.0f};
+};
+
+struct STerrainObjectHeightFinding
+{
+    QString identity;
+    float objectZ{0.0f};
+    float terrainBeforeZ{0.0f};
+    float terrainAfterZ{0.0f};
+    float terrainDelta{0.0f};
+    float clearanceBefore{0.0f};
+    float clearanceAfter{0.0f};
+    bool exceedsThreshold{false};
+};
+
+struct STerrainDiagnosticPolicy
+{
+    // Negative values disable threshold classification. The exact engine
+    // navigation and placement limits are not known, so callers must choose
+    // and label profile-specific thresholds explicitly.
+    float steepSlopeDegrees{-1.0f};
+    float objectVerticalDelta{-1.0f};
+};
+
+struct STerrainEditDiagnostics
+{
+    bool valid{false};
+    bool requiresMaxZDecision{false};
+    bool navigationGraphMayBeStale{false};
+    bool steepSlopeRisk{false};
+    int changedVertexCount{0};
+    int sharedSeamVertexCount{0};
+    int affectedSectorCount{0};
+    quint16 minimumBefore{0};
+    quint16 maximumBefore{0};
+    quint16 minimumAfter{0};
+    quint16 maximumAfter{0};
+    float minimumWorldDelta{0.0f};
+    float maximumWorldDelta{0.0f};
+    float maximumSlopeBeforeDegrees{0.0f};
+    float maximumSlopeAfterDegrees{0.0f};
+    QVector<STerrainObjectHeightFinding> objectFindings;
 };
 
 enum class ETerrainBrushFalloff
@@ -74,8 +134,14 @@ public:
                                    float endX, float endY, quint16 endHeight,
                                    float radius, float strength,
                                    ETerrainBrushFalloff falloff) const;
+    STerrainEditDiagnostics diagnose(
+        const STerrainHeightCommand& command,
+        const QVector<STerrainObjectHeightProbe>& objects = QVector<STerrainObjectHeightProbe>(),
+        const STerrainDiagnosticPolicy& policy = STerrainDiagnosticPolicy(),
+        CValidationReport* report = nullptr) const;
     bool apply(const STerrainHeightCommand& command, bool forward,
-               CValidationReport* report = nullptr);
+               CValidationReport* report = nullptr,
+               bool allowHeightClamping = false);
     bool appendSectorEdits(CMprEditTransaction* transaction,
                            CValidationReport* report = nullptr) const;
     QByteArray sectorPayload(int sectorX, int sectorY) const;
@@ -122,9 +188,11 @@ class CTerrainEditHistory
 {
 public:
     bool execute(CTerrainEditModel* model, const STerrainHeightCommand& command,
-                 CValidationReport* report = nullptr);
+                 CValidationReport* report = nullptr,
+                 bool allowHeightClamping = false);
     bool undo(CTerrainEditModel* model, CValidationReport* report = nullptr);
-    bool redo(CTerrainEditModel* model, CValidationReport* report = nullptr);
+    bool redo(CTerrainEditModel* model, CValidationReport* report = nullptr,
+              bool allowHeightClamping = false);
     int undoCount() const { return m_undo.size(); }
     int redoCount() const { return m_redo.size(); }
     void clear();

@@ -284,6 +284,7 @@ private slots:
     void failedStagedMprSaveLeavesNoDestination();
     void canonicalTerrainSeamsAreEditedAndUndoneTogether();
     void terrainBrushToolsAreDeterministicAndFailClosed();
+    void terrainDiagnosticsArePreApplyAndPolicyExplicit();
     void terrainHeightTransactionReopensAndPreservesOverlay();
     void conflictingTerrainSeamIsPreservedAndNotEditable();
     void malformedMprTableIsRejected();
@@ -1142,6 +1143,92 @@ void EnduranceDocumentTests::terrainBrushToolsAreDeterministicAndFailClosed()
 
     CValidationReport staleReport;
     QVERIFY(!terrain.apply(ramp, true, &staleReport));
+    QVERIFY(staleReport.hasErrors());
+}
+
+void EnduranceDocumentTests::terrainDiagnosticsArePreApplyAndPolicyExplicit()
+{
+    CTerrainEditModel terrain;
+    QVERIFY(terrain.loadSources(1, 1, 100.0f, twoSectorTerrain(1000).mid(0, 1)));
+    STerrainBrush brush;
+    brush.centerX = 10.0f;
+    brush.centerY = 10.0f;
+    brush.radius = 0.0f;
+    brush.falloff = ETerrainBrushFalloff::Constant;
+    const STerrainHeightCommand saturated = terrain.makeRaiseLower(brush, 70000.0f);
+    QCOMPARE(saturated.deltas.size(), 1);
+    QVERIFY(saturated.requiresMaxZDecision());
+
+    STerrainObjectHeightProbe object;
+    object.identity = "synthetic object 7";
+    object.positionX = 10.0f;
+    object.positionY = 10.0f;
+    object.positionZ = float(1000) * 100.0f / 65535.0f;
+    STerrainDiagnosticPolicy policy;
+    policy.steepSlopeDegrees = 10.0f;
+    policy.objectVerticalDelta = 0.5f;
+    CValidationReport report;
+    const STerrainEditDiagnostics diagnostics = terrain.diagnose(
+        saturated, QVector<STerrainObjectHeightProbe>() << object, policy, &report);
+    QVERIFY(diagnostics.valid);
+    QVERIFY(diagnostics.requiresMaxZDecision);
+    QVERIFY(diagnostics.navigationGraphMayBeStale);
+    QVERIFY(diagnostics.steepSlopeRisk);
+    QCOMPARE(diagnostics.changedVertexCount, 1);
+    QCOMPARE(diagnostics.sharedSeamVertexCount, 0);
+    QCOMPARE(diagnostics.affectedSectorCount, 1);
+    QCOMPARE(diagnostics.maximumAfter, quint16(65535));
+    QCOMPARE(diagnostics.objectFindings.size(), 1);
+    QVERIFY(diagnostics.objectFindings.front().exceedsThreshold);
+    QVERIFY(diagnostics.objectFindings.front().terrainDelta > 90.0f);
+    QCOMPARE(terrain.height(10, 10), quint16(1000));
+    bool sawMaxZ = false;
+    bool sawNavigation = false;
+    bool sawSlope = false;
+    bool sawObject = false;
+    for(const SValidationFinding& finding : report.findings())
+    {
+        sawMaxZ |= finding.code == "terrain.maxz_saturation";
+        sawNavigation |= finding.code == "terrain.navigation_stale";
+        sawSlope |= finding.code == "terrain.slope_risk";
+        sawObject |= finding.code == "terrain.mob_height_risk";
+    }
+    QVERIFY(sawMaxZ);
+    QVERIFY(sawNavigation);
+    QVERIFY(sawSlope);
+    QVERIFY(sawObject);
+
+    const STerrainEditDiagnostics withoutThresholds = terrain.diagnose(
+        saturated, QVector<STerrainObjectHeightProbe>() << object);
+    QVERIFY(withoutThresholds.valid);
+    QVERIFY(!withoutThresholds.steepSlopeRisk);
+    QCOMPARE(withoutThresholds.objectFindings.size(), 1);
+    QVERIFY(!withoutThresholds.objectFindings.front().exceedsThreshold);
+
+    CTerrainEditModel seamTerrain;
+    QVERIFY(seamTerrain.loadSources(2, 1, 100.0f, twoSectorTerrain(1000)));
+    brush.centerX = 32.0f;
+    const STerrainHeightCommand seam = seamTerrain.makeRaiseLower(brush, 1000.0f);
+    const STerrainEditDiagnostics seamDiagnostics = seamTerrain.diagnose(seam);
+    QVERIFY(seamDiagnostics.valid);
+    QVERIFY(!seamDiagnostics.requiresMaxZDecision);
+    QCOMPARE(seamDiagnostics.sharedSeamVertexCount, 1);
+    QCOMPARE(seamDiagnostics.affectedSectorCount, 2);
+
+    STerrainHeightCommand duplicate = seam;
+    duplicate.deltas.append(seam.deltas.front());
+    CValidationReport duplicateReport;
+    QVERIFY(!seamTerrain.apply(duplicate, true, &duplicateReport));
+    QVERIFY(duplicateReport.hasErrors());
+
+    CValidationReport blockedReport;
+    QVERIFY(!terrain.apply(saturated, true, &blockedReport));
+    QVERIFY(blockedReport.hasErrors());
+    QCOMPARE(terrain.height(10, 10), quint16(1000));
+    QVERIFY(terrain.apply(saturated, true, nullptr, true));
+    CValidationReport staleReport;
+    QVERIFY(!terrain.diagnose(saturated, QVector<STerrainObjectHeightProbe>(),
+                              policy, &staleReport).valid);
     QVERIFY(staleReport.hasErrors());
 }
 

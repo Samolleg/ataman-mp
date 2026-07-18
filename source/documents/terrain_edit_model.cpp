@@ -81,8 +81,10 @@ bool normalize(SVector3* value)
     return true;
 }
 
-quint16 clampedHeight(float value)
+quint16 clampedHeight(float value, bool* wasClamped = nullptr)
 {
+    if(wasClamped)
+        *wasClamped = value < 0.0f || value > 65535.0f;
     return quint16(qBound(0, int(std::lround(value)), 65535));
 }
 }
@@ -300,7 +302,8 @@ STerrainHeightCommand CTerrainEditModel::makeRaiseLower(
             delta.globalX = x;
             delta.globalY = y;
             delta.before = height(x, y);
-            delta.after = clampedHeight(float(delta.before) + rawHeightDelta * weight);
+            delta.after = clampedHeight(float(delta.before) + rawHeightDelta * weight,
+                                        &delta.clamped);
             if(delta.before != delta.after)
                 command.deltas.append(delta);
         }
@@ -331,7 +334,7 @@ STerrainHeightCommand CTerrainEditModel::makeBlendedCommand(
             delta.globalY = y;
             delta.before = m_heights.at(index);
             delta.after = clampedHeight(float(delta.before)
-                + (targets.at(index) - float(delta.before)) * weight);
+                + (targets.at(index) - float(delta.before)) * weight, &delta.clamped);
             if(delta.before != delta.after)
                 command.deltas.append(delta);
         }
@@ -411,7 +414,7 @@ STerrainHeightCommand CTerrainEditModel::makeRamp(
             const float target = float(startHeight)
                 + (float(endHeight) - float(startHeight)) * t;
             delta.after = clampedHeight(float(delta.before)
-                + (target - float(delta.before)) * weight);
+                + (target - float(delta.before)) * weight, &delta.clamped);
             if(delta.before != delta.after)
                 command.deltas.append(delta);
         }
@@ -419,9 +422,217 @@ STerrainHeightCommand CTerrainEditModel::makeRamp(
     return command;
 }
 
-bool CTerrainEditModel::apply(const STerrainHeightCommand& command, bool forward,
-                              CValidationReport* report)
+STerrainEditDiagnostics CTerrainEditModel::diagnose(
+    const STerrainHeightCommand& command,
+    const QVector<STerrainObjectHeightProbe>& objects,
+    const STerrainDiagnosticPolicy& policy,
+    CValidationReport* report) const
 {
+    STerrainEditDiagnostics result;
+    if(command.isEmpty())
+    {
+        result.valid = true;
+        return result;
+    }
+
+    QMap<int, quint16> afterHeights;
+    QSet<int> affectedSectors;
+    bool firstDelta = true;
+    for(const STerrainHeightDelta& delta : command.deltas)
+    {
+        if(delta.globalX < 0 || delta.globalX >= m_vertexCountX ||
+           delta.globalY < 0 || delta.globalY >= m_vertexCountY)
+        {
+            if(report)
+                report->add("terrain.diagnostic_bounds", EValidationSeverity::Error,
+                            "Height diagnostic references a vertex outside the terrain");
+            return result;
+        }
+        const int index = globalIndex(delta.globalX, delta.globalY);
+        if(afterHeights.contains(index))
+        {
+            if(report)
+                report->add("terrain.diagnostic_duplicate", EValidationSeverity::Error,
+                            "Height diagnostic contains the same vertex more than once",
+                            QString("%1,%2").arg(delta.globalX).arg(delta.globalY));
+            return result;
+        }
+        if(m_conflictedVertices.at(index) || m_heights.at(index) != delta.before)
+        {
+            if(report)
+                report->add("terrain.diagnostic_provenance", EValidationSeverity::Error,
+                            "Height diagnostic no longer matches editable canonical terrain",
+                            QString("%1,%2").arg(delta.globalX).arg(delta.globalY));
+            return result;
+        }
+        afterHeights.insert(index, delta.after);
+        for(const SVertexRef& ref : m_refs.at(index))
+            affectedSectors.insert(ref.sectorIndex);
+        if(m_refs.at(index).size() > 1)
+            ++result.sharedSeamVertexCount;
+        const float worldDelta = (float(delta.after) - float(delta.before))
+            * m_maxZ / 65535.0f;
+        if(firstDelta)
+        {
+            result.minimumBefore = result.maximumBefore = delta.before;
+            result.minimumAfter = result.maximumAfter = delta.after;
+            result.minimumWorldDelta = result.maximumWorldDelta = worldDelta;
+            firstDelta = false;
+        }
+        else
+        {
+            result.minimumBefore = qMin(result.minimumBefore, delta.before);
+            result.maximumBefore = qMax(result.maximumBefore, delta.before);
+            result.minimumAfter = qMin(result.minimumAfter, delta.after);
+            result.maximumAfter = qMax(result.maximumAfter, delta.after);
+            result.minimumWorldDelta = qMin(result.minimumWorldDelta, worldDelta);
+            result.maximumWorldDelta = qMax(result.maximumWorldDelta, worldDelta);
+        }
+    }
+
+    result.valid = true;
+    result.requiresMaxZDecision = command.requiresMaxZDecision();
+    result.navigationGraphMayBeStale = true;
+    result.changedVertexCount = afterHeights.size();
+    result.affectedSectorCount = affectedSectors.size();
+
+    const auto rawHeight = [this, &afterHeights](int index, bool after) {
+        return after && afterHeights.contains(index)
+            ? afterHeights.value(index) : m_heights.at(index);
+    };
+    const auto position = [this, &rawHeight](int index, bool after) {
+        const int x = index % m_vertexCountX;
+        const int y = index / m_vertexCountX;
+        return SVector3(double(x) + double(m_xOffsets.at(index)) / 254.0,
+                        double(y) + double(m_yOffsets.at(index)) / 254.0,
+                        double(rawHeight(index, after)) * double(m_maxZ) / 65535.0);
+    };
+    QSet<quint64> measuredEdges;
+    for(auto changed = afterHeights.cbegin(); changed != afterHeights.cend(); ++changed)
+    {
+        const int center = changed.key();
+        const int centerX = center % m_vertexCountX;
+        const int centerY = center / m_vertexCountX;
+        for(int offsetY = -1; offsetY <= 1; ++offsetY)
+        {
+            for(int offsetX = -1; offsetX <= 1; ++offsetX)
+            {
+                if(offsetX == 0 && offsetY == 0)
+                    continue;
+                const int x = centerX + offsetX;
+                const int y = centerY + offsetY;
+                if(x < 0 || x >= m_vertexCountX || y < 0 || y >= m_vertexCountY)
+                    continue;
+                const int neighbor = globalIndex(x, y);
+                const quint32 low = quint32(qMin(center, neighbor));
+                const quint32 high = quint32(qMax(center, neighbor));
+                const quint64 edge = (quint64(low) << 32) | high;
+                if(measuredEdges.contains(edge))
+                    continue;
+                measuredEdges.insert(edge);
+                for(int state = 0; state < 2; ++state)
+                {
+                    const SVector3 first = position(center, state == 1);
+                    const SVector3 second = position(neighbor, state == 1);
+                    const double horizontal = std::sqrt(
+                        (second.x - first.x) * (second.x - first.x)
+                        + (second.y - first.y) * (second.y - first.y));
+                    const float degrees = horizontal > 0.000000001
+                        ? float(std::atan2(std::fabs(second.z - first.z), horizontal)
+                                * 57.29577951308232)
+                        : 90.0f;
+                    if(state == 0)
+                        result.maximumSlopeBeforeDegrees = qMax(
+                            result.maximumSlopeBeforeDegrees, degrees);
+                    else
+                        result.maximumSlopeAfterDegrees = qMax(
+                            result.maximumSlopeAfterDegrees, degrees);
+                }
+            }
+        }
+    }
+    result.steepSlopeRisk = policy.steepSlopeDegrees >= 0.0f
+        && result.maximumSlopeAfterDegrees > policy.steepSlopeDegrees
+        && result.maximumSlopeAfterDegrees > result.maximumSlopeBeforeDegrees + 0.0001f;
+
+    const auto sampledTerrainZ = [this, &rawHeight](float x, float y, bool after,
+                                                     float* value) {
+        if(x < 0.0f || y < 0.0f || x > float(m_vertexCountX - 1)
+           || y > float(m_vertexCountY - 1))
+            return false;
+        const int x0 = qBound(0, int(std::floor(x)), m_vertexCountX - 1);
+        const int y0 = qBound(0, int(std::floor(y)), m_vertexCountY - 1);
+        const int x1 = qMin(x0 + 1, m_vertexCountX - 1);
+        const int y1 = qMin(y0 + 1, m_vertexCountY - 1);
+        const float fractionX = x - float(x0);
+        const float fractionY = y - float(y0);
+        const float bottom = float(rawHeight(globalIndex(x0, y0), after)) * (1.0f - fractionX)
+            + float(rawHeight(globalIndex(x1, y0), after)) * fractionX;
+        const float top = float(rawHeight(globalIndex(x0, y1), after)) * (1.0f - fractionX)
+            + float(rawHeight(globalIndex(x1, y1), after)) * fractionX;
+        *value = (bottom * (1.0f - fractionY) + top * fractionY) * m_maxZ / 65535.0f;
+        return true;
+    };
+    for(const STerrainObjectHeightProbe& object : objects)
+    {
+        float beforeZ = 0.0f;
+        float afterZ = 0.0f;
+        if(!sampledTerrainZ(object.positionX, object.positionY, false, &beforeZ)
+           || !sampledTerrainZ(object.positionX, object.positionY, true, &afterZ))
+            continue;
+        const float delta = afterZ - beforeZ;
+        if(std::fabs(delta) <= 0.000001f)
+            continue;
+        STerrainObjectHeightFinding finding;
+        finding.identity = object.identity;
+        finding.objectZ = object.positionZ;
+        finding.terrainBeforeZ = beforeZ;
+        finding.terrainAfterZ = afterZ;
+        finding.terrainDelta = delta;
+        finding.clearanceBefore = object.positionZ - beforeZ;
+        finding.clearanceAfter = object.positionZ - afterZ;
+        finding.exceedsThreshold = policy.objectVerticalDelta >= 0.0f
+            && std::fabs(delta) > policy.objectVerticalDelta;
+        result.objectFindings.append(finding);
+    }
+
+    if(report && result.requiresMaxZDecision)
+        report->add("terrain.maxz_saturation", EValidationSeverity::Warning,
+                    "The requested edit exceeded the raw height range; reduce it or make an explicit maxZ decision before applying");
+    if(report)
+        report->add("terrain.navigation_stale", EValidationSeverity::Warning,
+                    "Terrain geometry changed; existing AI navigation data may require regeneration");
+    if(report && result.steepSlopeRisk)
+        report->add("terrain.slope_risk", EValidationSeverity::Warning,
+                    QString("The edit increases local slope to %1 degrees, above the caller-selected %2-degree threshold")
+                        .arg(result.maximumSlopeAfterDegrees, 0, 'f', 2)
+                        .arg(policy.steepSlopeDegrees, 0, 'f', 2));
+    if(report)
+    {
+        for(const STerrainObjectHeightFinding& finding : result.objectFindings)
+        {
+            if(finding.exceedsThreshold)
+                report->add("terrain.mob_height_risk", EValidationSeverity::Warning,
+                            QString("Terrain under the object moves by %1 world units, above the caller-selected %2-unit threshold")
+                                .arg(finding.terrainDelta, 0, 'f', 3)
+                                .arg(policy.objectVerticalDelta, 0, 'f', 3),
+                            finding.identity);
+        }
+    }
+    return result;
+}
+
+bool CTerrainEditModel::apply(const STerrainHeightCommand& command, bool forward,
+                              CValidationReport* report, bool allowHeightClamping)
+{
+    if(forward && command.requiresMaxZDecision() && !allowHeightClamping)
+    {
+        if(report)
+            report->add("terrain.maxz_decision", EValidationSeverity::Error,
+                        "The command reaches the raw height limit and requires an explicit maxZ/clamping decision");
+        return false;
+    }
+    QSet<int> commandVertices;
     for(const STerrainHeightDelta& delta : command.deltas)
     {
         if(delta.globalX < 0 || delta.globalX >= m_vertexCountX ||
@@ -433,6 +644,15 @@ bool CTerrainEditModel::apply(const STerrainHeightCommand& command, bool forward
             return false;
         }
         const int index = globalIndex(delta.globalX, delta.globalY);
+        if(commandVertices.contains(index))
+        {
+            if(report)
+                report->add("terrain.command_duplicate", EValidationSeverity::Error,
+                            "Height command references the same vertex more than once",
+                            QString("%1,%2").arg(delta.globalX).arg(delta.globalY));
+            return false;
+        }
+        commandVertices.insert(index);
         if(m_conflictedVertices.at(index))
         {
             if(report)
@@ -617,9 +837,10 @@ QByteArray CTerrainEditModel::sectorPayload(int sectorX, int sectorY) const
 
 bool CTerrainEditHistory::execute(CTerrainEditModel* model,
                                   const STerrainHeightCommand& command,
-                                  CValidationReport* report)
+                                  CValidationReport* report, bool allowHeightClamping)
 {
-    if(!model || command.isEmpty() || !model->apply(command, true, report))
+    if(!model || command.isEmpty()
+       || !model->apply(command, true, report, allowHeightClamping))
         return false;
     m_undo.append(command);
     m_redo.clear();
@@ -638,12 +859,13 @@ bool CTerrainEditHistory::undo(CTerrainEditModel* model, CValidationReport* repo
     return true;
 }
 
-bool CTerrainEditHistory::redo(CTerrainEditModel* model, CValidationReport* report)
+bool CTerrainEditHistory::redo(CTerrainEditModel* model, CValidationReport* report,
+                               bool allowHeightClamping)
 {
     if(!model || m_redo.isEmpty())
         return false;
     const STerrainHeightCommand command = m_redo.back();
-    if(!model->apply(command, true, report))
+    if(!model->apply(command, true, report, allowHeightClamping))
         return false;
     m_redo.removeLast();
     m_undo.append(command);
