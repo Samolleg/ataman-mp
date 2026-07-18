@@ -513,8 +513,15 @@ MOB editing does not imply that landscape saving is supported.
   dedicated main-menu branch.
 - [x] `0.1.0-alpha.55`: capture the real transition controller from the
   engine's own guarded `MainMenu`, mode-2 call, then request the selected zone
-  through generic mode `0`. Preserve the exact loader-return guard and staged
-  path substitution. Runtime validation remains required.
+  through generic mode `0`. Runtime evidence proved the transition can enter a
+  gameplay-like shell with a working pause menu but no terrain or player. The
+  later `zone1` load in that trace was manually initiated, not asynchronous.
+  The staged pair was not opened because the request had already been disarmed.
+- [x] `0.1.0-alpha.56`: keep that request armed and record the caller, arguments,
+  controller, context, and thread for follow-on calls to the verified map-loader
+  entry. Preserve the exact Alpha.55 return-site guard: a verified normal
+  single-player call receives the staged pair; every other caller remains
+  observe-only.
 - [x] `0.1.0-alpha.41`: redo-safe raw provenance and the July 17 multi-edit/UI
   fixes passed owner testing and were handed to the closed tester group.
   ([`db3fa31`](https://github.com/Ilufus/ei-mapper-endurance/commit/db3fa31))

@@ -60,6 +60,7 @@ ZoneTransitionFn g_originalZoneTransition = nullptr;
 HMODULE g_gameModule = nullptr;
 HHOOK g_directLaunchHook = nullptr;
 volatile LONG g_directLaunchState = 0;
+volatile LONG g_pendingMapLoadProbeCount = 0;
 DWORD g_gameThreadId = 0;
 void* g_zoneTransitionController = nullptr;
 char g_temporaryMpr[MAX_PATH * 4] = {};
@@ -527,6 +528,29 @@ int __fastcall MapLoadDetour(void* self, void*, const char* mprPath,
     void* caller = _ReturnAddress();
     const auto* expectedTransitionReturn = reinterpret_cast<unsigned char*>(g_gameModule)
         + kStartZoneMapLoadReturnRva;
+    const LONG stateOnEntry = InterlockedCompareExchange(&g_directLaunchState, 0, 0);
+    if(stateOnEntry == 3 && InterlockedIncrement(&g_pendingMapLoadProbeCount) <= 32)
+    {
+        wchar_t mpr[MAX_PATH * 4] = L"<null>";
+        wchar_t mob[MAX_PATH * 4] = L"<null>";
+        if(mprPath)
+            MultiByteToWideChar(CP_ACP, 0, mprPath, -1, mpr,
+                                int(sizeof(mpr) / sizeof(mpr[0])));
+        if(mobPath)
+            MultiByteToWideChar(CP_ACP, 0, mobPath, -1, mob,
+                                int(sizeof(mob) / sizeof(mob[0])));
+        const uintptr_t callerAddress = reinterpret_cast<uintptr_t>(caller);
+        const uintptr_t gameBase = reinterpret_cast<uintptr_t>(g_gameModule);
+        const DWORD callerRva = callerAddress >= gameBase
+            ? DWORD(callerAddress - gameBase) : 0xFFFFFFFF;
+        wchar_t message[3000]{};
+        _snwprintf_s(message, sizeof(message) / sizeof(message[0]), _TRUNCATE,
+                     L"DIRECT_LAUNCH pending loader observed caller=0x%08lX caller_rva=0x%08lX expected_rva=0x%08lX mpr=\"%s\" mob=\"%s\" self=0x%08lX context=0x%08lX thread=%lu",
+                     DWORD(callerAddress), callerRva, kStartZoneMapLoadReturnRva,
+                     mpr, mob, DWORD(reinterpret_cast<uintptr_t>(self)),
+                     DWORD(reinterpret_cast<uintptr_t>(context)), GetCurrentThreadId());
+        Log(message);
+    }
     const bool redirect = g_directLaunchState == 3 &&
         caller == expectedTransitionReturn &&
         InterlockedCompareExchange(&g_directLaunchState, 4, 3) == 3;
@@ -602,17 +626,16 @@ LRESULT CALLBACK DirectLaunchMessageHook(int code, WPARAM wParam, LPARAM lParam)
                  DWORD(reinterpret_cast<uintptr_t>(g_zoneTransitionController)),
                  GetCurrentThreadId());
     Log(transitionMessage);
+    InterlockedExchange(&g_pendingMapLoadProbeCount, 0);
     const int result = g_originalZoneTransition(g_zoneTransitionController,
                                                 g_sourceZone, 0);
     const bool redirected = InterlockedCompareExchange(&g_directLaunchState, 6, 4) == 4;
-    if(!redirected)
-        InterlockedExchange(&g_directLaunchState, -1);
     wchar_t resultMessage[320]{};
     _snwprintf_s(resultMessage, sizeof(resultMessage) / sizeof(resultMessage[0]), _TRUNCATE,
-                 redirected
-                     ? L"DIRECT_LAUNCH single-player transition completed result=0x%08lX staged_loader=observed"
-                     : L"DIRECT_LAUNCH failed: single-player transition completed result=0x%08lX without the expected staged loader call",
-                 DWORD(result));
+                  redirected
+                      ? L"DIRECT_LAUNCH single-player transition completed result=0x%08lX staged_loader=observed"
+                      : L"DIRECT_LAUNCH single-player transition returned result=0x%08lX; request remains armed for a verified follow-on loader",
+                  DWORD(result));
     Log(resultMessage);
     return next;
 }
