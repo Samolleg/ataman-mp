@@ -27,7 +27,7 @@ using GetFileAttributesWFn = DWORD (WINAPI*)(LPCWSTR);
 using CaptureStackFn = USHORT (WINAPI*)(ULONG, ULONG, PVOID*, PULONG);
 using MapLoadFn = int (__thiscall*)(void*, const char*, const char*, void*);
 using FindZoneFn = void* (__thiscall*)(void*, const char*);
-using StartZoneTransitionFn = int (__thiscall*)(void*, const char*, int);
+using ZoneTransitionFn = int (__thiscall*)(void*, const char*, int);
 
 HMODULE g_instance = nullptr;
 volatile LONG g_initialized = 0;
@@ -56,16 +56,20 @@ constexpr unsigned char kStartZoneTransitionBytes[7] = {
 };
 
 MapLoadFn g_originalMapLoad = nullptr;
+ZoneTransitionFn g_originalZoneTransition = nullptr;
 HMODULE g_gameModule = nullptr;
 HHOOK g_directLaunchHook = nullptr;
 volatile LONG g_directLaunchState = 0;
 DWORD g_gameThreadId = 0;
+void* g_zoneTransitionController = nullptr;
 char g_temporaryMpr[MAX_PATH * 4] = {};
 char g_temporaryMob[MAX_PATH * 4] = {};
 char g_sourceZone[128] = {};
 
 int __fastcall MapLoadDetour(void* self, void*, const char* mprPath,
                              const char* mobPath, void* context);
+int __fastcall ZoneTransitionDetour(void* self, void*, const char* zoneName,
+                                    int requestedMode);
 LRESULT CALLBACK DirectLaunchMessageHook(int code, WPARAM wParam, LPARAM lParam);
 
 const wchar_t* FileNamePart(const wchar_t* path)
@@ -470,6 +474,12 @@ bool ReadDirectLaunchPaths()
 
 bool QueueDirectLaunchOnCurrentThread()
 {
+    if(!g_zoneTransitionController)
+    {
+        Log(L"DIRECT_LAUNCH failed: normal main-menu transition controller was not captured");
+        InterlockedExchange(&g_directLaunchState, -1);
+        return false;
+    }
     g_gameThreadId = GetCurrentThreadId();
     g_directLaunchHook = SetWindowsHookExW(WH_GETMESSAGE, &DirectLaunchMessageHook,
                                            g_instance, g_gameThreadId);
@@ -494,6 +504,21 @@ bool QueueDirectLaunchOnCurrentThread()
                  g_gameThreadId);
     Log(message);
     return true;
+}
+
+int __fastcall ZoneTransitionDetour(void* self, void*, const char* zoneName,
+                                    int requestedMode)
+{
+    if(requestedMode == 2 && zoneName && _stricmp(zoneName, "MainMenu") == 0)
+    {
+        g_zoneTransitionController = self;
+        wchar_t message[256]{};
+        _snwprintf_s(message, sizeof(message) / sizeof(message[0]), _TRUNCATE,
+                     L"DIRECT_LAUNCH captured normal transition controller=0x%08lX thread=%lu",
+                     DWORD(reinterpret_cast<uintptr_t>(self)), GetCurrentThreadId());
+        Log(message);
+    }
+    return g_originalZoneTransition(self, zoneName, requestedMode);
 }
 
 int __fastcall MapLoadDetour(void* self, void*, const char* mprPath,
@@ -570,14 +595,15 @@ LRESULT CALLBACK DirectLaunchMessageHook(int code, WPARAM wParam, LPARAM lParam)
     wchar_t sourceZone[128]{};
     MultiByteToWideChar(CP_ACP, 0, g_sourceZone, -1, sourceZone,
                         int(sizeof(sourceZone) / sizeof(sourceZone[0])));
-    wchar_t transitionMessage[384]{};
+    wchar_t transitionMessage[448]{};
     _snwprintf_s(transitionMessage, sizeof(transitionMessage) / sizeof(transitionMessage[0]), _TRUNCATE,
-                 L"DIRECT_LAUNCH invoking normal single-player transition zone=\"%s\" record=0x%08lX thread=%lu",
-                 sourceZone, DWORD(reinterpret_cast<uintptr_t>(zone)), GetCurrentThreadId());
+                 L"DIRECT_LAUNCH invoking normal single-player transition zone=\"%s\" record=0x%08lX controller=0x%08lX requested_mode=0 thread=%lu",
+                 sourceZone, DWORD(reinterpret_cast<uintptr_t>(zone)),
+                 DWORD(reinterpret_cast<uintptr_t>(g_zoneTransitionController)),
+                 GetCurrentThreadId());
     Log(transitionMessage);
-    const auto startTransition = reinterpret_cast<StartZoneTransitionFn>(
-        game + kStartZoneTransitionRva);
-    const int result = startTransition(zone, "MainMenu", 2);
+    const int result = g_originalZoneTransition(g_zoneTransitionController,
+                                                g_sourceZone, 0);
     const bool redirected = InterlockedCompareExchange(&g_directLaunchState, 6, 4) == 4;
     if(!redirected)
         InterlockedExchange(&g_directLaunchState, -1);
@@ -612,10 +638,66 @@ bool InstallMapLoadDetour()
         return false;
     }
 
+    unsigned char* transitionTarget = game + kStartZoneTransitionRva;
+    auto* transitionTrampoline = static_cast<unsigned char*>(VirtualAlloc(nullptr, 16,
+        MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE));
+    if(!transitionTrampoline)
+    {
+        Log(L"DIRECT_LAUNCH disabled: zone-transition trampoline allocation failed");
+        return false;
+    }
+    std::memcpy(transitionTrampoline, transitionTarget,
+                sizeof(kStartZoneTransitionBytes));
+    transitionTrampoline[sizeof(kStartZoneTransitionBytes)] = 0xE9;
+    *reinterpret_cast<LONG*>(transitionTrampoline + sizeof(kStartZoneTransitionBytes) + 1) =
+        LONG((transitionTarget + sizeof(kStartZoneTransitionBytes)) -
+             (transitionTrampoline + sizeof(kStartZoneTransitionBytes) + 5));
+    g_originalZoneTransition = reinterpret_cast<ZoneTransitionFn>(transitionTrampoline);
+
+    DWORD transitionOldProtect = 0;
+    if(!VirtualProtect(transitionTarget, sizeof(kStartZoneTransitionBytes),
+                       PAGE_EXECUTE_READWRITE, &transitionOldProtect))
+    {
+        VirtualFree(transitionTrampoline, 0, MEM_RELEASE);
+        g_originalZoneTransition = nullptr;
+        Log(L"DIRECT_LAUNCH disabled: zone-transition protection change failed");
+        return false;
+    }
+    transitionTarget[0] = 0xE9;
+    *reinterpret_cast<LONG*>(transitionTarget + 1) =
+        LONG(reinterpret_cast<unsigned char*>(&ZoneTransitionDetour) -
+             (transitionTarget + 5));
+    transitionTarget[5] = 0x90;
+    transitionTarget[6] = 0x90;
+    FlushInstructionCache(GetCurrentProcess(), transitionTarget,
+                          sizeof(kStartZoneTransitionBytes));
+    DWORD transitionIgnored = 0;
+    VirtualProtect(transitionTarget, sizeof(kStartZoneTransitionBytes),
+                   transitionOldProtect, &transitionIgnored);
+
+    const auto restoreTransition = [&]()
+    {
+        DWORD writable = 0;
+        if(VirtualProtect(transitionTarget, sizeof(kStartZoneTransitionBytes),
+                          PAGE_EXECUTE_READWRITE, &writable))
+        {
+            std::memcpy(transitionTarget, kStartZoneTransitionBytes,
+                        sizeof(kStartZoneTransitionBytes));
+            FlushInstructionCache(GetCurrentProcess(), transitionTarget,
+                                  sizeof(kStartZoneTransitionBytes));
+            DWORD ignored = 0;
+            VirtualProtect(transitionTarget, sizeof(kStartZoneTransitionBytes),
+                           writable, &ignored);
+        }
+        VirtualFree(transitionTrampoline, 0, MEM_RELEASE);
+        g_originalZoneTransition = nullptr;
+    };
+
     auto* trampoline = static_cast<unsigned char*>(VirtualAlloc(nullptr, 16,
         MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE));
     if(!trampoline)
     {
+        restoreTransition();
         Log(L"DIRECT_LAUNCH disabled: map-loader trampoline allocation failed");
         return false;
     }
@@ -630,6 +712,7 @@ bool InstallMapLoadDetour()
     {
         VirtualFree(trampoline, 0, MEM_RELEASE);
         g_originalMapLoad = nullptr;
+        restoreTransition();
         Log(L"DIRECT_LAUNCH disabled: map-loader protection change failed");
         return false;
     }

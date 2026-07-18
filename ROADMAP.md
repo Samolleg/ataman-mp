@@ -508,7 +508,13 @@ MOB editing does not imply that landscape saving is supported.
   bridge resolves the selected `map.txt` zone through the fingerprinted engine
   catalog, invokes `game.exe+0x0017C460` on the verified game thread, and
   substitutes only its loader call returning at `game.exe+0x0017A61B` with the
-  hash-owned staged pair. Runtime validation remains required.
+  hash-owned staged pair. Runtime evidence showed that passing the zone record
+  as `this` and mode `2` reloaded `ZoneMainMenuNew`; mode `2` is the engine's
+  dedicated main-menu branch.
+- [x] `0.1.0-alpha.55`: capture the real transition controller from the
+  engine's own guarded `MainMenu`, mode-2 call, then request the selected zone
+  through generic mode `0`. Preserve the exact loader-return guard and staged
+  path substitution. Runtime validation remains required.
 - [x] `0.1.0-alpha.41`: redo-safe raw provenance and the July 17 multi-edit/UI
   fixes passed owner testing and were handed to the closed tester group.
   ([`db3fa31`](https://github.com/Ilufus/ei-mapper-endurance/commit/db3fa31))
