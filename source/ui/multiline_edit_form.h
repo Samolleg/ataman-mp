@@ -2,6 +2,10 @@
 #define MULTILINE_EDIT_FORM_H
 
 #include <QDialog>
+#include <QStringList>
+
+class QComboBox;
+class QLabel;
 
 namespace Ui {
 class CMultiLineEditForm;
@@ -18,6 +22,7 @@ public:
     explicit CMultiLineEditForm(QWidget *parent = nullptr);
     ~CMultiLineEditForm();
     void setText(const QString& text);
+    void setSuggestions(const QStringList& suggestions, bool itemGrammar);
 
 signals:
     void onTextApplySignal(QString);
@@ -28,6 +33,10 @@ private slots:
 
 private:
     Ui::CMultiLineEditForm *ui;
+    QComboBox* m_suggestions;
+    QLabel* m_diagnostic;
+    QStringList m_knownValues;
+    bool m_itemGrammar{false};
 };
 
 #endif // MULTILINE_EDIT_FORM_H

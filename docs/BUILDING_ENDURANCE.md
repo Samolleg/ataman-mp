@@ -61,6 +61,9 @@ mingw32-make -j4
 
 qmake runtime_provider_tests.pro CONFIG+=release
 mingw32-make -j4
+
+qmake profile_database_tests.pro CONFIG+=release
+mingw32-make -j4
 .\release\runtime_provider_tests.exe
 
 qmake view_frustum_tests.pro CONFIG+=release

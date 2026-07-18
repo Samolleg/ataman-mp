@@ -151,6 +151,7 @@ signals:
 
 private:
     void ensureOptionsLoaded();
+    void updateDatabaseDiagnostic(const QString& value);
 
     QSharedPointer<IPropertyBase> m_pValue; //stored value;
     QStringList m_valueList;

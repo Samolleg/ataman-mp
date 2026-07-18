@@ -15,6 +15,7 @@
 #include "utils.h"
 #include "log.h"
 #include "resource_profile.h"
+#include "profile_database.h"
 
 CSettings::CSettings(QWidget *parent) :
     QWidget(parent, Qt::Window)
@@ -51,6 +52,20 @@ CSettings::CSettings(QWidget *parent) :
     ui->undoHistoryLimit->setValidator(new QIntValidator(1, 1000000, this));
     initOptions();
     readOptions();
+    const COptString* savedProfile = dynamic_cast<const COptString*>(opt(eOptSetResource, "resourceProfile"));
+    const QString savedRoot = configuredGameRoot();
+    if(savedProfile && !savedProfile->value().isEmpty() && !savedRoot.isEmpty())
+    {
+        for(const SResourceProfile& candidate : loadResourceProfiles())
+        {
+            if(candidate.id.compare(savedProfile->value(), Qt::CaseInsensitive) != 0)
+                continue;
+            const SResourceProfileEvaluation evaluation = evaluateResourceProfile(savedRoot, candidate);
+            if(evaluation.valid)
+                applyResourceProfile(evaluation);
+            break;
+        }
+    }
 }
 
 CSettings::~CSettings()
@@ -188,6 +203,16 @@ void CSettings::applyResourceProfile(const SResourceProfileEvaluation& profile)
 {
     if(!profile.valid)
         return;
+    ei::SProfileDatabaseLoadRequest databaseRequest;
+    const SProfileProviderBinding databaseBinding = profile.providers.value("database");
+    databaseRequest.providerId = databaseBinding.id;
+    databaseRequest.providerInterfaceVersion = databaseBinding.interfaceVersion;
+    databaseRequest.profileId = profile.profileId;
+    databaseRequest.runtimeManifestId = profile.runtimeManifestId;
+    databaseRequest.resourceDirectories = profile.resourceDirectories;
+    static ei::ProfileDatabaseService databaseService;
+    const QSharedPointer<const ei::SProfileDatabaseSnapshot> database =
+        databaseService.snapshot(databaseRequest);
     if(COptString* root = dynamic_cast<COptString*>(opt(eOptSetGeneral, "gameRoot")))
         root->setValue(profile.gameRoot);
     if(COptString* id = dynamic_cast<COptString*>(opt(eOptSetResource, "resourceProfile")))
@@ -204,11 +229,17 @@ void CSettings::applyResourceProfile(const SResourceProfileEvaluation& profile)
     for(const char* legacyName : {"figPaths", "texPaths"})
         if(COptStringList* legacy = dynamic_cast<COptStringList*>(opt(eOptSetResource, legacyName)))
             legacy->setValue(QVector<QString>());
+    // One pointer swap publishes the new profile-scoped database to every
+    // dropdown and resolver after all profile options have been replaced.
+    ei::ProfileDatabaseContext::instance().activate(database);
     updateOptUi();
     saveOptions();
     ei::log(eLogInfo, QString("Applied resource profile id:%1 gameRoot:%2 resourceDirectories:%3 archives:%4")
             .arg(profile.profileId, profile.gameRoot)
             .arg(profile.resourceDirectories.size()).arg(profile.archiveCount));
+    for(const ei::SDatabaseDiagnostic& diagnostic : database->diagnostics)
+        ei::log(diagnostic.severity == ei::EDatabaseDiagnosticSeverity::Error ? eLogError : eLogWarning,
+                QString("Profile database [%1] %2").arg(diagnostic.code, diagnostic.message));
 }
 
 void CSettings::updateOptUi()
