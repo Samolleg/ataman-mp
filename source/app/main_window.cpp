@@ -601,7 +601,12 @@ void MainWindow::updateEntranceOverlays()
     for(const SMapTravelZone& entrance : m_validEntrances)
     {
         rectangles.append(entrance.deployRectangle.normalized());
-        labels.append(tr("Entrance %1").arg(entrance.exitId));
+        labels.append(entrance.destinationZoneId.isEmpty()
+            ? tr("Entrance %1").arg(entrance.exitId)
+            : tr("Entrance %1 -> %2:%3")
+                .arg(entrance.exitId)
+                .arg(entrance.destinationZoneId)
+                .arg(entrance.destinationExitId));
     }
     const int selected = m_entranceCombo ? m_entranceCombo->currentData().toInt() : -1;
     m_pView->setTestEntranceOverlays(rectangles, labels, selected);
