@@ -21,6 +21,7 @@
 #include <QDockWidget>
 #include <QFile>
 #include <QTimer>
+#include <QCheckBox>
 
 #include "resourcemanager.h"
 #include "landscape.h"
@@ -495,6 +496,15 @@ void MainWindow::launchCurrentMapTest()
             tr("Load one MPR and exactly one MOB before starting a test."));
         return;
     }
+    QProgressDialog progress(tr("Preparing JMV map test..."), QString(), 0, 6, this);
+    progress.setWindowTitle(tr("JMV test launch"));
+    progress.setWindowModality(Qt::WindowModal);
+    progress.setCancelButton(nullptr);
+    progress.setMinimumDuration(0);
+    progress.setAutoClose(false);
+    progress.setValue(0);
+    progress.show();
+    QApplication::processEvents();
     if(m_pView->cancelPendingOperation())
         statusBar()->showMessage(tr("Pending object movement was cancelled before staging the test."), 4000);
     CLandscape* landscape = CLandscape::getInstance();
@@ -504,6 +514,9 @@ void MainWindow::launchCurrentMapTest()
             tr("Unsaved MPR edits cannot yet be staged losslessly. Save or revert the landscape first."));
         return;
     }
+    progress.setLabelText(tr("Validating the JMV runtime profile..."));
+    progress.setValue(1);
+    QApplication::processEvents();
 
     COptString* profileId = dynamic_cast<COptString*>(m_settings->opt(eOptSetResource, "resourceProfile"));
     SResourceProfileEvaluation profile;
@@ -522,6 +535,9 @@ void MainWindow::launchCurrentMapTest()
             tr("The active JMV installation does not match the validated runtime-stack manifest. Run Game and Mod Setup again and review its diagnostics."));
         return;
     }
+    progress.setLabelText(tr("Reading map-table metadata..."));
+    progress.setValue(2);
+    QApplication::processEvents();
 
     QVector<QString> resourceRoots;
     QVector<QString> mapRoots;
@@ -547,6 +563,9 @@ void MainWindow::launchCurrentMapTest()
             tr("No travel/deploy zone was found for the loaded MPR in the active map table. Endurance will not guess a player spawn."));
         return;
     }
+    progress.setLabelText(tr("Choosing a safe map-table entrance..."));
+    progress.setValue(3);
+    QApplication::processEvents();
 
     QVector<SMapSpawnObstacle> obstacles;
     CMob* mob = m_pView->currentMob();
@@ -578,6 +597,9 @@ void MainWindow::launchCurrentMapTest()
             tr("No sufficiently clear point exists inside any travel-zone deploy rectangle. Move blocking objects or choose another map before testing.\n\n%1").arg(spawn.reason));
         return;
     }
+    progress.setLabelText(tr("Validating the current in-memory map pair..."));
+    progress.setValue(4);
+    QApplication::processEvents();
 
     QFile mprFile(landscape->filePath().absoluteFilePath());
     if(!mprFile.open(QIODevice::ReadOnly))
@@ -597,13 +619,33 @@ void MainWindow::launchCurrentMapTest()
 
     const QString confirmation = tr(
         "This experimental JMV-only test stages the exact current MPR/MOB pair, including unsaved in-memory edits, under a unique temporary name. After JMV completes its normal menu load, Endurance invokes the fingerprinted single-player New Game path on the game thread and supplies the staged pair. No console/server command or fixed delay is used.\n\n"
-        "The staged MOB creates a disposable default player at travel exit %1, position (%2, %3), with verified clearance %4. The session does not load a campaign save.\n\n"
-        "Source maps and JMV configuration are not changed. Before launch, Endurance makes a hash-verified snapshot of JMV's transient saves\\current directory; it restores that exact scratch-session content after the game exits or during recovery on the next editor start. Hash-owned temporary files are then deleted, while failed runs retain their logs for diagnosis.\n\nStart the direct JMV map test?")
-        .arg(spawn.exitId).arg(spawn.position.x(), 0, 'f', 2)
-        .arg(spawn.position.y(), 0, 'f', 2).arg(spawn.clearance, 0, 'f', 2);
-    if(QMessageBox::question(this, tr("Direct JMV map test (experimental)"), confirmation,
-                             QMessageBox::Yes | QMessageBox::Cancel) != QMessageBox::Yes)
-        return;
+        "JMV initializes one normal player through map-table zone %1. Endurance selected hand-placed entrance %2; its checked clear point is (%3, %4). The engine remains responsible for the final profile-specific deployment.\n\n"
+        "Source maps, JMV configuration, and live campaign saves are not changed. Every save/load path is redirected into this test run's private AppData folder for the lifetime of the launched game. Intro movies are hidden only for the test process. Returning to the menu or travelling away may use original installed maps; use Stop Test when finished.\n\nStart the direct JMV map test?")
+        .arg(entry.zoneId).arg(spawn.exitId).arg(spawn.position.x(), 0, 'f', 2)
+        .arg(spawn.position.y(), 0, 'f', 2);
+    constexpr int kMapTestWarningVersion = 2;
+    COptInt* warningVersion = dynamic_cast<COptInt*>(
+                m_settings->opt(eOptSetGeneral, "mapTestWarningVersion"));
+    if(!warningVersion || warningVersion->value() < kMapTestWarningVersion)
+    {
+        progress.hide();
+        QMessageBox confirmationBox(QMessageBox::Question,
+            tr("Direct JMV map test (experimental)"), confirmation,
+            QMessageBox::Yes | QMessageBox::Cancel, this);
+        QCheckBox* dontShowAgain = new QCheckBox(tr("Don't show this warning again"), &confirmationBox);
+        confirmationBox.setCheckBox(dontShowAgain);
+        if(confirmationBox.exec() != QMessageBox::Yes)
+            return;
+        if(warningVersion && dontShowAgain->isChecked())
+        {
+            warningVersion->setValue(kMapTestWarningVersion);
+            m_settings->persistOptions();
+        }
+        progress.show();
+    }
+    progress.setLabelText(tr("Staging temporary maps and isolated test state..."));
+    progress.setValue(5);
+    QApplication::processEvents();
 
     SJmvMapTestLaunchInput input;
     input.profile = profile;
@@ -616,7 +658,11 @@ void MainWindow::launchCurrentMapTest()
     input.spawn = spawn;
     QString error;
     if(!m_mapTestLauncher->launch(input, &error))
+    {
+        ei::log(eLogWarning, "JMV test launch refused: " + error);
         QMessageBox::critical(this, tr("JMV test launch"), error);
+    }
+    progress.setValue(6);
     updateMapTestAction();
 }
 

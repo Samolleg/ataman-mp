@@ -533,6 +533,15 @@ MOB editing does not imply that landscape saving is supported.
   recovery. The runtime result remains experimental until a live test proves
   staged terrain, objects, and a controllable player.
   ([`28300cb`](https://github.com/Ilufus/ei-mapper-endurance/commit/28300cb))
+- [x] `0.1.0-alpha.58`: incorporate the first playable direct-launch evidence.
+  Remove disposable-player script injection, initialize the selected
+  `map.txt` zone through the normal New Game transition, preserve the staged MOB
+  exactly, prioritize hand-placed entrance order with collision-safe fallback,
+  hide intro movies in-process, redirect the launched runtime's save tree into
+  its retained AppData run folder, and reset per-run state after failed staging.
+  Ctrl+F5 now displays preparation progress immediately and its safety warning
+  can be acknowledged once. Runtime validation remains required for the new
+  player, zone metadata, briefing-map, intro, and save-isolation behavior.
 - [x] `0.1.0-alpha.41`: redo-safe raw provenance and the July 17 multi-edit/UI
   fixes passed owner testing and were handed to the closed tester group.
   ([`db3fa31`](https://github.com/Ilufus/ei-mapper-endurance/commit/db3fa31))
@@ -550,6 +559,14 @@ Add requested enhancements here first. We can then assign each one to a release
 or move it into the relevant section above without losing its history.
 
 ### High priority
+
+- [ ] Add JMV map-test hot reload on repeated Ctrl+F5 for the game process
+  launched and owned by Endurance. Restage and reload the current pair without
+  restarting JMV; for the same map, restore captured player position/facing only
+  after ground and collision validation, otherwise use the map-table entrance.
+  A different editor map uses its own normal entrance. Never attach to or stop
+  an independently launched game, and never replace a staged file while the
+  runtime loader still owns it.
 
 - [x] Warn before changing or deleting an object ID that is referenced by the active MOB's
   embedded script.

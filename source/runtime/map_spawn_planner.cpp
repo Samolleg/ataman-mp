@@ -32,8 +32,8 @@ SMapSpawnPlan CMapSpawnPlanner::choose(const QVector<SMapTravelZone>& travelZone
                                        double playerRadius,
                                        int gridResolution)
 {
-    SMapSpawnPlan best;
-    best.reason = "No travel zone has enough unobstructed space for the test player.";
+    SMapSpawnPlan failure;
+    failure.reason = "No map-table travel entrance has enough unobstructed space for the test player.";
     playerRadius = qMax(0.1, playerRadius);
     gridResolution = qBound(3, gridResolution, 31);
 
@@ -46,8 +46,23 @@ SMapSpawnPlan CMapSpawnPlanner::choose(const QVector<SMapTravelZone>& travelZone
            rectangle.height() < playerRadius * 2.0)
             continue;
 
-        QVector<QPointF> candidates;
-        candidates.append(rectangle.center());
+        const QPointF handPlacedCenter = rectangle.center();
+        const double centerClearance = qMin(boundaryClearance(handPlacedCenter, rectangle),
+                                            obstacleClearance(handPlacedCenter, obstacles));
+        if(centerClearance + 0.0001 >= playerRadius)
+        {
+            SMapSpawnPlan preferred;
+            preferred.valid = true;
+            preferred.exitId = travelZone.exitId;
+            preferred.position = handPlacedCenter;
+            preferred.viewAngle = travelZone.viewAngle;
+            preferred.hasViewAngle = travelZone.hasViewAngle;
+            preferred.clearance = centerClearance;
+            preferred.reason = "Using the hand-placed center of the first clear map-table entrance.";
+            return preferred;
+        }
+
+        SMapSpawnPlan nearby;
         for(int y = 0; y < gridResolution; ++y)
         {
             const double fy = double(y) / double(gridResolution - 1);
@@ -59,28 +74,24 @@ SMapSpawnPlan CMapSpawnPlanner::choose(const QVector<SMapTravelZone>& travelZone
                 const double px = rectangle.left() + playerRadius
                         + fx * (rectangle.width() - playerRadius * 2.0);
                 const QPointF point(px, py);
-                if(point != rectangle.center())
-                    candidates.append(point);
+                const double clearance = qMin(boundaryClearance(point, rectangle),
+                                              obstacleClearance(point, obstacles));
+                if(clearance + 0.0001 < playerRadius)
+                    continue;
+                if(!nearby.valid || clearance > nearby.clearance + 0.0001)
+                {
+                    nearby.valid = true;
+                    nearby.exitId = travelZone.exitId;
+                    nearby.position = point;
+                    nearby.viewAngle = travelZone.viewAngle;
+                    nearby.hasViewAngle = travelZone.hasViewAngle;
+                    nearby.clearance = clearance;
+                    nearby.reason = "The hand-placed entrance center is blocked; using the nearest safe point inside the same entrance.";
+                }
             }
         }
-
-        for(const QPointF& candidate : candidates)
-        {
-            const double clearance = qMin(boundaryClearance(candidate, rectangle),
-                                           obstacleClearance(candidate, obstacles));
-            if(clearance + 0.0001 < playerRadius)
-                continue;
-            if(!best.valid || clearance > best.clearance + 0.0001)
-            {
-                best.valid = true;
-                best.exitId = travelZone.exitId;
-                best.position = candidate;
-                best.viewAngle = travelZone.viewAngle;
-                best.hasViewAngle = travelZone.hasViewAngle;
-                best.clearance = clearance;
-                best.reason.clear();
-            }
-        }
+        if(nearby.valid)
+            return nearby;
     }
-    return best;
+    return failure;
 }

@@ -24,6 +24,22 @@ using CreateFileWFn = HANDLE (WINAPI*)(LPCWSTR, DWORD, DWORD, LPSECURITY_ATTRIBU
                                       DWORD, DWORD, HANDLE);
 using GetFileAttributesAFn = DWORD (WINAPI*)(LPCSTR);
 using GetFileAttributesWFn = DWORD (WINAPI*)(LPCWSTR);
+using SetFileAttributesAFn = BOOL (WINAPI*)(LPCSTR, DWORD);
+using SetFileAttributesWFn = BOOL (WINAPI*)(LPCWSTR, DWORD);
+using CreateDirectoryAFn = BOOL (WINAPI*)(LPCSTR, LPSECURITY_ATTRIBUTES);
+using CreateDirectoryWFn = BOOL (WINAPI*)(LPCWSTR, LPSECURITY_ATTRIBUTES);
+using RemoveDirectoryAFn = BOOL (WINAPI*)(LPCSTR);
+using RemoveDirectoryWFn = BOOL (WINAPI*)(LPCWSTR);
+using DeleteFileAFn = BOOL (WINAPI*)(LPCSTR);
+using DeleteFileWFn = BOOL (WINAPI*)(LPCWSTR);
+using FindFirstFileAFn = HANDLE (WINAPI*)(LPCSTR, LPWIN32_FIND_DATAA);
+using FindFirstFileWFn = HANDLE (WINAPI*)(LPCWSTR, LPWIN32_FIND_DATAW);
+using MoveFileAFn = BOOL (WINAPI*)(LPCSTR, LPCSTR);
+using MoveFileWFn = BOOL (WINAPI*)(LPCWSTR, LPCWSTR);
+using MoveFileExAFn = BOOL (WINAPI*)(LPCSTR, LPCSTR, DWORD);
+using MoveFileExWFn = BOOL (WINAPI*)(LPCWSTR, LPCWSTR, DWORD);
+using CopyFileAFn = BOOL (WINAPI*)(LPCSTR, LPCSTR, BOOL);
+using CopyFileWFn = BOOL (WINAPI*)(LPCWSTR, LPCWSTR, BOOL);
 using CaptureStackFn = USHORT (WINAPI*)(ULONG, ULONG, PVOID*, PULONG);
 using MapLoadFn = int (__thiscall*)(void*, const char*, const char*, void*);
 using ZoneTransitionFn = int (__thiscall*)(void*, const char*, int);
@@ -37,6 +53,22 @@ CreateFileAFn g_originalCreateFileA = nullptr;
 CreateFileWFn g_originalCreateFileW = nullptr;
 GetFileAttributesAFn g_originalGetFileAttributesA = nullptr;
 GetFileAttributesWFn g_originalGetFileAttributesW = nullptr;
+SetFileAttributesAFn g_originalSetFileAttributesA = nullptr;
+SetFileAttributesWFn g_originalSetFileAttributesW = nullptr;
+CreateDirectoryAFn g_originalCreateDirectoryA = nullptr;
+CreateDirectoryWFn g_originalCreateDirectoryW = nullptr;
+RemoveDirectoryAFn g_originalRemoveDirectoryA = nullptr;
+RemoveDirectoryWFn g_originalRemoveDirectoryW = nullptr;
+DeleteFileAFn g_originalDeleteFileA = nullptr;
+DeleteFileWFn g_originalDeleteFileW = nullptr;
+FindFirstFileAFn g_originalFindFirstFileA = nullptr;
+FindFirstFileWFn g_originalFindFirstFileW = nullptr;
+MoveFileAFn g_originalMoveFileA = nullptr;
+MoveFileWFn g_originalMoveFileW = nullptr;
+MoveFileExAFn g_originalMoveFileExA = nullptr;
+MoveFileExWFn g_originalMoveFileExW = nullptr;
+CopyFileAFn g_originalCopyFileA = nullptr;
+CopyFileWFn g_originalCopyFileW = nullptr;
 CaptureStackFn g_captureStack = nullptr;
 
 constexpr DWORD kMapLoadEntryRva = 0x00195480;
@@ -64,6 +96,11 @@ DWORD g_gameThreadId = 0;
 void* g_zoneTransitionController = nullptr;
 char g_temporaryMpr[MAX_PATH * 4] = {};
 char g_temporaryMob[MAX_PATH * 4] = {};
+char g_sourceZone[128] = {};
+wchar_t g_liveSaves[MAX_PATH * 4] = {};
+wchar_t g_testSaves[MAX_PATH * 4] = {};
+volatile LONG g_saveRedirectLogCount = 0;
+volatile LONG g_introSkipMask = 0;
 
 int __fastcall MapLoadDetour(void* self, void*, const char* mprPath,
                              const char* mobPath, void* context);
@@ -256,12 +293,107 @@ void Observe(const wchar_t* operation, const wchar_t* path, ULONG_PTR result,
     Log(message);
 }
 
+bool IsPathBoundary(wchar_t value)
+{
+    return value == L'\0' || value == L'\\' || value == L'/';
+}
+
+void NormalizeSlashes(wchar_t* path)
+{
+    if(!path)
+        return;
+    for(wchar_t* cursor = path; *cursor; ++cursor)
+        if(*cursor == L'/')
+            *cursor = L'\\';
+}
+
+bool RewriteSavePathW(LPCWSTR path, wchar_t* output, size_t capacity)
+{
+    if(!path || !output || !capacity || !g_liveSaves[0] || !g_testSaves[0])
+        return false;
+    wchar_t full[MAX_PATH * 4]{};
+    const DWORD length = GetFullPathNameW(path, DWORD(sizeof(full) / sizeof(full[0])), full, nullptr);
+    if(!length || length >= sizeof(full) / sizeof(full[0]))
+        return false;
+    NormalizeSlashes(full);
+    const size_t liveLength = std::wcslen(g_liveSaves);
+    if(_wcsnicmp(full, g_liveSaves, liveLength) != 0 || !IsPathBoundary(full[liveLength]))
+        return false;
+    const wchar_t* suffix = full + liveLength;
+    if(_snwprintf_s(output, capacity, _TRUNCATE, L"%s%s", g_testSaves, suffix) < 0)
+        return false;
+    const LONG sequence = InterlockedIncrement(&g_saveRedirectLogCount);
+    if(sequence <= 64)
+    {
+        wchar_t message[1900]{};
+        _snwprintf_s(message, sizeof(message) / sizeof(message[0]), _TRUNCATE,
+                     L"SAVE_REDIRECT seq=%ld from=\"%s\" to=\"%s\"", sequence, full, output);
+        Log(message);
+    }
+    return true;
+}
+
+bool RewriteSavePathA(LPCSTR path, char* output, size_t capacity)
+{
+    if(!path || !output || !capacity)
+        return false;
+    wchar_t wide[MAX_PATH * 4]{};
+    wchar_t rewritten[MAX_PATH * 4]{};
+    if(!MultiByteToWideChar(CP_ACP, 0, path, -1, wide,
+                            int(sizeof(wide) / sizeof(wide[0]))) ||
+       !RewriteSavePathW(wide, rewritten, sizeof(rewritten) / sizeof(rewritten[0])))
+        return false;
+    BOOL substituted = FALSE;
+    return WideCharToMultiByte(CP_ACP, WC_NO_BEST_FIT_CHARS, rewritten, -1,
+                               output, int(capacity), nullptr, &substituted) != 0 && !substituted;
+}
+
+bool ShouldSkipIntroW(LPCWSTR path)
+{
+    wchar_t enabled[8]{};
+    if(!path || !GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_SKIP_INTROS", enabled,
+                                          DWORD(sizeof(enabled) / sizeof(enabled[0]))) ||
+       enabled[0] != L'1')
+        return false;
+    const wchar_t* name = FileNamePart(path);
+    LONG bit = 0;
+    if(name && _wcsicmp(name, L"1c.bik") == 0)
+        bit = 1;
+    else if(name && _wcsicmp(name, L"nival.bik") == 0)
+        bit = 2;
+    if(!bit)
+        return false;
+    if(!(InterlockedOr(&g_introSkipMask, bit) & bit))
+    {
+        wchar_t message[512]{};
+        _snwprintf_s(message, sizeof(message) / sizeof(message[0]), _TRUNCATE,
+                     L"INTRO_SKIP hid test-run movie path=\"%s\"", path);
+        Log(message);
+    }
+    SetLastError(ERROR_FILE_NOT_FOUND);
+    return true;
+}
+
+bool ShouldSkipIntroA(LPCSTR path)
+{
+    if(!path)
+        return false;
+    wchar_t wide[MAX_PATH * 4]{};
+    return MultiByteToWideChar(CP_ACP, 0, path, -1, wide,
+                               int(sizeof(wide) / sizeof(wide[0]))) && ShouldSkipIntroW(wide);
+}
+
 HANDLE WINAPI HookCreateFileW(LPCWSTR path, DWORD access, DWORD share,
                               LPSECURITY_ATTRIBUTES security, DWORD creation,
                               DWORD flags, HANDLE templateFile)
 {
     void* caller = _ReturnAddress();
-    HANDLE result = g_originalCreateFileW(path, access, share, security, creation, flags, templateFile);
+    if(ShouldSkipIntroW(path))
+        return INVALID_HANDLE_VALUE;
+    wchar_t redirected[MAX_PATH * 4]{};
+    LPCWSTR selected = RewriteSavePathW(path, redirected, sizeof(redirected) / sizeof(redirected[0]))
+        ? redirected : path;
+    HANDLE result = g_originalCreateFileW(selected, access, share, security, creation, flags, templateFile);
     const DWORD error = GetLastError();
     Observe(L"CreateFileW", path, reinterpret_cast<ULONG_PTR>(result), error, caller, access, creation);
     SetLastError(error);
@@ -273,7 +405,11 @@ HANDLE WINAPI HookCreateFileA(LPCSTR path, DWORD access, DWORD share,
                               DWORD flags, HANDLE templateFile)
 {
     void* caller = _ReturnAddress();
-    HANDLE result = g_originalCreateFileA(path, access, share, security, creation, flags, templateFile);
+    if(ShouldSkipIntroA(path))
+        return INVALID_HANDLE_VALUE;
+    char redirected[MAX_PATH * 4]{};
+    LPCSTR selected = RewriteSavePathA(path, redirected, sizeof(redirected)) ? redirected : path;
+    HANDLE result = g_originalCreateFileA(selected, access, share, security, creation, flags, templateFile);
     const DWORD error = GetLastError();
     if(path)
     {
@@ -289,7 +425,12 @@ HANDLE WINAPI HookCreateFileA(LPCSTR path, DWORD access, DWORD share,
 DWORD WINAPI HookGetFileAttributesW(LPCWSTR path)
 {
     void* caller = _ReturnAddress();
-    const DWORD result = g_originalGetFileAttributesW(path);
+    if(ShouldSkipIntroW(path))
+        return INVALID_FILE_ATTRIBUTES;
+    wchar_t redirected[MAX_PATH * 4]{};
+    LPCWSTR selected = RewriteSavePathW(path, redirected, sizeof(redirected) / sizeof(redirected[0]))
+        ? redirected : path;
+    const DWORD result = g_originalGetFileAttributesW(selected);
     const DWORD error = GetLastError();
     Observe(L"GetFileAttributesW", path, result, error, caller);
     SetLastError(error);
@@ -299,7 +440,11 @@ DWORD WINAPI HookGetFileAttributesW(LPCWSTR path)
 DWORD WINAPI HookGetFileAttributesA(LPCSTR path)
 {
     void* caller = _ReturnAddress();
-    const DWORD result = g_originalGetFileAttributesA(path);
+    if(ShouldSkipIntroA(path))
+        return INVALID_FILE_ATTRIBUTES;
+    char redirected[MAX_PATH * 4]{};
+    LPCSTR selected = RewriteSavePathA(path, redirected, sizeof(redirected)) ? redirected : path;
+    const DWORD result = g_originalGetFileAttributesA(selected);
     const DWORD error = GetLastError();
     if(path)
     {
@@ -312,6 +457,79 @@ DWORD WINAPI HookGetFileAttributesA(LPCSTR path)
     return result;
 }
 
+#define REDIRECT_ONE_W(name, original, resultType, failure, parameters, arguments) \
+resultType WINAPI name parameters { wchar_t redirected[MAX_PATH * 4]{}; \
+LPCWSTR selected = RewriteSavePathW(path, redirected, sizeof(redirected) / sizeof(redirected[0])) ? redirected : path; \
+return original arguments; }
+#define REDIRECT_ONE_A(name, original, resultType, failure, parameters, arguments) \
+resultType WINAPI name parameters { char redirected[MAX_PATH * 4]{}; \
+LPCSTR selected = RewriteSavePathA(path, redirected, sizeof(redirected)) ? redirected : path; \
+return original arguments; }
+
+REDIRECT_ONE_W(HookSetFileAttributesW, g_originalSetFileAttributesW, BOOL, FALSE,
+               (LPCWSTR path, DWORD attributes), (selected, attributes))
+REDIRECT_ONE_A(HookSetFileAttributesA, g_originalSetFileAttributesA, BOOL, FALSE,
+               (LPCSTR path, DWORD attributes), (selected, attributes))
+REDIRECT_ONE_W(HookCreateDirectoryW, g_originalCreateDirectoryW, BOOL, FALSE,
+               (LPCWSTR path, LPSECURITY_ATTRIBUTES security), (selected, security))
+REDIRECT_ONE_A(HookCreateDirectoryA, g_originalCreateDirectoryA, BOOL, FALSE,
+               (LPCSTR path, LPSECURITY_ATTRIBUTES security), (selected, security))
+REDIRECT_ONE_W(HookRemoveDirectoryW, g_originalRemoveDirectoryW, BOOL, FALSE,
+               (LPCWSTR path), (selected))
+REDIRECT_ONE_A(HookRemoveDirectoryA, g_originalRemoveDirectoryA, BOOL, FALSE,
+               (LPCSTR path), (selected))
+REDIRECT_ONE_W(HookDeleteFileW, g_originalDeleteFileW, BOOL, FALSE,
+               (LPCWSTR path), (selected))
+REDIRECT_ONE_A(HookDeleteFileA, g_originalDeleteFileA, BOOL, FALSE,
+               (LPCSTR path), (selected))
+REDIRECT_ONE_W(HookFindFirstFileW, g_originalFindFirstFileW, HANDLE, INVALID_HANDLE_VALUE,
+               (LPCWSTR path, LPWIN32_FIND_DATAW data), (selected, data))
+REDIRECT_ONE_A(HookFindFirstFileA, g_originalFindFirstFileA, HANDLE, INVALID_HANDLE_VALUE,
+               (LPCSTR path, LPWIN32_FIND_DATAA data), (selected, data))
+
+BOOL WINAPI HookMoveFileW(LPCWSTR from, LPCWSTR to)
+{
+    wchar_t redirectedFrom[MAX_PATH * 4]{}, redirectedTo[MAX_PATH * 4]{};
+    LPCWSTR selectedFrom = RewriteSavePathW(from, redirectedFrom, sizeof(redirectedFrom) / sizeof(redirectedFrom[0])) ? redirectedFrom : from;
+    LPCWSTR selectedTo = RewriteSavePathW(to, redirectedTo, sizeof(redirectedTo) / sizeof(redirectedTo[0])) ? redirectedTo : to;
+    return g_originalMoveFileW(selectedFrom, selectedTo);
+}
+BOOL WINAPI HookMoveFileA(LPCSTR from, LPCSTR to)
+{
+    char redirectedFrom[MAX_PATH * 4]{}, redirectedTo[MAX_PATH * 4]{};
+    LPCSTR selectedFrom = RewriteSavePathA(from, redirectedFrom, sizeof(redirectedFrom)) ? redirectedFrom : from;
+    LPCSTR selectedTo = RewriteSavePathA(to, redirectedTo, sizeof(redirectedTo)) ? redirectedTo : to;
+    return g_originalMoveFileA(selectedFrom, selectedTo);
+}
+BOOL WINAPI HookMoveFileExW(LPCWSTR from, LPCWSTR to, DWORD flags)
+{
+    wchar_t redirectedFrom[MAX_PATH * 4]{}, redirectedTo[MAX_PATH * 4]{};
+    LPCWSTR selectedFrom = RewriteSavePathW(from, redirectedFrom, sizeof(redirectedFrom) / sizeof(redirectedFrom[0])) ? redirectedFrom : from;
+    LPCWSTR selectedTo = RewriteSavePathW(to, redirectedTo, sizeof(redirectedTo) / sizeof(redirectedTo[0])) ? redirectedTo : to;
+    return g_originalMoveFileExW(selectedFrom, selectedTo, flags);
+}
+BOOL WINAPI HookMoveFileExA(LPCSTR from, LPCSTR to, DWORD flags)
+{
+    char redirectedFrom[MAX_PATH * 4]{}, redirectedTo[MAX_PATH * 4]{};
+    LPCSTR selectedFrom = RewriteSavePathA(from, redirectedFrom, sizeof(redirectedFrom)) ? redirectedFrom : from;
+    LPCSTR selectedTo = RewriteSavePathA(to, redirectedTo, sizeof(redirectedTo)) ? redirectedTo : to;
+    return g_originalMoveFileExA(selectedFrom, selectedTo, flags);
+}
+BOOL WINAPI HookCopyFileW(LPCWSTR from, LPCWSTR to, BOOL failIfExists)
+{
+    wchar_t redirectedFrom[MAX_PATH * 4]{}, redirectedTo[MAX_PATH * 4]{};
+    LPCWSTR selectedFrom = RewriteSavePathW(from, redirectedFrom, sizeof(redirectedFrom) / sizeof(redirectedFrom[0])) ? redirectedFrom : from;
+    LPCWSTR selectedTo = RewriteSavePathW(to, redirectedTo, sizeof(redirectedTo) / sizeof(redirectedTo[0])) ? redirectedTo : to;
+    return g_originalCopyFileW(selectedFrom, selectedTo, failIfExists);
+}
+BOOL WINAPI HookCopyFileA(LPCSTR from, LPCSTR to, BOOL failIfExists)
+{
+    char redirectedFrom[MAX_PATH * 4]{}, redirectedTo[MAX_PATH * 4]{};
+    LPCSTR selectedFrom = RewriteSavePathA(from, redirectedFrom, sizeof(redirectedFrom)) ? redirectedFrom : from;
+    LPCSTR selectedTo = RewriteSavePathA(to, redirectedTo, sizeof(redirectedTo)) ? redirectedTo : to;
+    return g_originalCopyFileA(selectedFrom, selectedTo, failIfExists);
+}
+
 void* ReplacementFor(const char* name)
 {
     if(std::strcmp(name, "CreateFileA") == 0)
@@ -322,6 +540,24 @@ void* ReplacementFor(const char* name)
         return reinterpret_cast<void*>(&HookGetFileAttributesA);
     if(std::strcmp(name, "GetFileAttributesW") == 0)
         return reinterpret_cast<void*>(&HookGetFileAttributesW);
+#define REPLACE(api) if(std::strcmp(name, #api) == 0) return reinterpret_cast<void*>(&Hook##api)
+    REPLACE(SetFileAttributesA);
+    REPLACE(SetFileAttributesW);
+    REPLACE(CreateDirectoryA);
+    REPLACE(CreateDirectoryW);
+    REPLACE(RemoveDirectoryA);
+    REPLACE(RemoveDirectoryW);
+    REPLACE(DeleteFileA);
+    REPLACE(DeleteFileW);
+    REPLACE(FindFirstFileA);
+    REPLACE(FindFirstFileW);
+    REPLACE(MoveFileA);
+    REPLACE(MoveFileW);
+    REPLACE(MoveFileExA);
+    REPLACE(MoveFileExW);
+    REPLACE(CopyFileA);
+    REPLACE(CopyFileW);
+#undef REPLACE
     return nullptr;
 }
 
@@ -386,10 +622,36 @@ int InstallFileObservationHooks()
         GetProcAddress(kernel, "GetFileAttributesA"));
     g_originalGetFileAttributesW = reinterpret_cast<GetFileAttributesWFn>(
         GetProcAddress(kernel, "GetFileAttributesW"));
+#define LOAD_ORIGINAL(api) g_original##api = reinterpret_cast<api##Fn>(GetProcAddress(kernel, #api))
+    LOAD_ORIGINAL(SetFileAttributesA);
+    LOAD_ORIGINAL(SetFileAttributesW);
+    LOAD_ORIGINAL(CreateDirectoryA);
+    LOAD_ORIGINAL(CreateDirectoryW);
+    LOAD_ORIGINAL(RemoveDirectoryA);
+    LOAD_ORIGINAL(RemoveDirectoryW);
+    LOAD_ORIGINAL(DeleteFileA);
+    LOAD_ORIGINAL(DeleteFileW);
+    LOAD_ORIGINAL(FindFirstFileA);
+    LOAD_ORIGINAL(FindFirstFileW);
+    LOAD_ORIGINAL(MoveFileA);
+    LOAD_ORIGINAL(MoveFileW);
+    LOAD_ORIGINAL(MoveFileExA);
+    LOAD_ORIGINAL(MoveFileExW);
+    LOAD_ORIGINAL(CopyFileA);
+    LOAD_ORIGINAL(CopyFileW);
+#undef LOAD_ORIGINAL
     g_captureStack = ntdll ? reinterpret_cast<CaptureStackFn>(
         GetProcAddress(ntdll, "RtlCaptureStackBackTrace")) : nullptr;
     if(!g_originalCreateFileA || !g_originalCreateFileW ||
-       !g_originalGetFileAttributesA || !g_originalGetFileAttributesW)
+       !g_originalGetFileAttributesA || !g_originalGetFileAttributesW ||
+       !g_originalSetFileAttributesA || !g_originalSetFileAttributesW ||
+       !g_originalCreateDirectoryA || !g_originalCreateDirectoryW ||
+       !g_originalRemoveDirectoryA || !g_originalRemoveDirectoryW ||
+       !g_originalDeleteFileA || !g_originalDeleteFileW ||
+       !g_originalFindFirstFileA || !g_originalFindFirstFileW ||
+       !g_originalMoveFileA || !g_originalMoveFileW ||
+       !g_originalMoveFileExA || !g_originalMoveFileExW ||
+       !g_originalCopyFileA || !g_originalCopyFileW)
         return 0;
 
     HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32,
@@ -438,16 +700,31 @@ bool ReadDirectLaunchPaths()
 {
     wchar_t mpr[MAX_PATH * 4]{};
     wchar_t mob[MAX_PATH * 4]{};
+    wchar_t sourceZone[128]{};
     if(!GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_TEMP_MPR", mpr,
                                 DWORD(sizeof(mpr) / sizeof(mpr[0]))) ||
        !GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_TEMP_MOB", mob,
                                 DWORD(sizeof(mob) / sizeof(mob[0]))) ||
+       !GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_SOURCE_ZONE", sourceZone,
+                                DWORD(sizeof(sourceZone) / sizeof(sourceZone[0]))) ||
+       !GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_LIVE_SAVES", g_liveSaves,
+                                DWORD(sizeof(g_liveSaves) / sizeof(g_liveSaves[0]))) ||
+       !GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_TEST_SAVES", g_testSaves,
+                                DWORD(sizeof(g_testSaves) / sizeof(g_testSaves[0]))) ||
        GetFileAttributesW(mpr) == INVALID_FILE_ATTRIBUTES ||
        GetFileAttributesW(mob) == INVALID_FILE_ATTRIBUTES)
     {
         Log(L"DIRECT_LAUNCH disabled: staged MPR/MOB environment paths are missing or unreadable");
         return false;
     }
+    NormalizeSlashes(g_liveSaves);
+    NormalizeSlashes(g_testSaves);
+    while(std::wcslen(g_liveSaves) > 3 &&
+          IsPathBoundary(g_liveSaves[std::wcslen(g_liveSaves) - 1]))
+        g_liveSaves[std::wcslen(g_liveSaves) - 1] = L'\0';
+    while(std::wcslen(g_testSaves) > 3 &&
+          IsPathBoundary(g_testSaves[std::wcslen(g_testSaves) - 1]))
+        g_testSaves[std::wcslen(g_testSaves) - 1] = L'\0';
     BOOL mprSubstitution = FALSE;
     BOOL mobSubstitution = FALSE;
     if(!WideCharToMultiByte(CP_ACP, WC_NO_BEST_FIT_CHARS, mpr, -1,
@@ -456,11 +733,18 @@ bool ReadDirectLaunchPaths()
        !WideCharToMultiByte(CP_ACP, WC_NO_BEST_FIT_CHARS, mob, -1,
                             g_temporaryMob, int(sizeof(g_temporaryMob)), nullptr,
                             &mobSubstitution) ||
+       !WideCharToMultiByte(CP_ACP, WC_NO_BEST_FIT_CHARS, sourceZone, -1,
+                            g_sourceZone, int(sizeof(g_sourceZone)), nullptr, nullptr) ||
        mprSubstitution || mobSubstitution)
     {
         Log(L"DIRECT_LAUNCH disabled: staged paths cannot be represented in the game ANSI code page");
         return false;
     }
+    wchar_t message[1800]{};
+    _snwprintf_s(message, sizeof(message) / sizeof(message[0]), _TRUNCATE,
+                 L"DIRECT_LAUNCH profile zone=\"%s\" isolated_saves=\"%s\" live_saves_protected=\"%s\"",
+                 sourceZone, g_testSaves, g_liveSaves);
+    Log(message);
     return true;
 }
 
@@ -501,6 +785,23 @@ bool QueueDirectLaunchOnCurrentThread()
 int __fastcall ZoneTransitionDetour(void* self, void*, const char* zoneName,
                                     int requestedMode)
 {
+    const LONG state = InterlockedCompareExchange(&g_directLaunchState, 0, 0);
+    if(state == 3 && requestedMode == 0 && g_sourceZone[0])
+    {
+        wchar_t original[256] = L"<null>";
+        wchar_t selected[256] = L"<unrepresentable>";
+        if(zoneName)
+            MultiByteToWideChar(CP_ACP, 0, zoneName, -1, original,
+                                int(sizeof(original) / sizeof(original[0])));
+        MultiByteToWideChar(CP_ACP, 0, g_sourceZone, -1, selected,
+                            int(sizeof(selected) / sizeof(selected[0])));
+        wchar_t message[700]{};
+        _snwprintf_s(message, sizeof(message) / sizeof(message[0]), _TRUNCATE,
+                     L"DIRECT_LAUNCH substituting New Game zone original=\"%s\" selected=\"%s\" mode=%d",
+                     original, selected, requestedMode);
+        Log(message);
+        return g_originalZoneTransition(self, g_sourceZone, requestedMode);
+    }
     if(requestedMode == 2 && zoneName && _stricmp(zoneName, "MainMenu") == 0)
     {
         g_zoneTransitionController = self;

@@ -11,6 +11,7 @@ rangeIncrement
 logLevel
 landCheckTime
 undoHistoryLimit
+mapTestWarningVersion
 Option set name:Resource
 resourceProfile
 resourceRoots

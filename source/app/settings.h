@@ -43,6 +43,7 @@ public:
     QString configuredGameRoot() const;
     void applyResourceProfile(const SResourceProfileEvaluation& profile);
     void attachMainWindow(MainWindow* mainWindow) {m_mainWindow = mainWindow;}
+    void persistOptions();
 
 protected:
     void closeEvent(QCloseEvent* e);

@@ -70,6 +70,7 @@ private:
     QString m_bridgeSourcePath;
     QString m_bridgeLivePath;
     QString m_bridgeResultPath;
+    QString m_testSavesPath;
     QString m_bridgeSha256;
     QString m_liveMprSha256;
     QString m_liveMobSha256;

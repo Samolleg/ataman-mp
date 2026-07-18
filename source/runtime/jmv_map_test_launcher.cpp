@@ -383,9 +383,24 @@ bool CJmvMapTestLauncher::launch(const SJmvMapTestLaunchInput& input, QString* e
         if(error) *error = "A game.exe process is already running. Close it before starting an Endurance test.";
         return false;
     }
+    m_runId.clear();
+    m_temporaryMapName.clear();
+    m_runRoot.clear();
+    m_manifestPath.clear();
+    m_runLogPath.clear();
+    m_liveMprPath.clear();
+    m_liveMobPath.clear();
+    m_bridgeResultPath.clear();
+    m_testSavesPath.clear();
+    m_bridgeSha256.clear();
+    m_liveMprSha256.clear();
+    m_liveMobSha256.clear();
+    m_manifest = QJsonObject();
     m_cleanupComplete = false;
     if(!stage(input, error))
     {
+        if(error && !error->isEmpty())
+            appendRunLog("Preflight/staging failed: " + *error);
         cleanup();
         return false;
     }
@@ -405,9 +420,15 @@ bool CJmvMapTestLauncher::launch(const SJmvMapTestLaunchInput& input, QString* e
     m_process->setWorkingDirectory(m_engineDirectory);
     QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
     environment.insert("EI_MAPPER_ENDURANCE_MAP", m_temporaryMapName);
+    environment.insert("EI_MAPPER_ENDURANCE_SOURCE_ZONE", input.mapEntry.zoneId);
+    environment.insert("EI_MAPPER_ENDURANCE_TARGET_EXIT", QString::number(input.spawn.exitId));
     environment.insert("EI_MAPPER_ENDURANCE_TEMP_MPR", m_liveMprPath);
     environment.insert("EI_MAPPER_ENDURANCE_TEMP_MOB", m_liveMobPath);
     environment.insert("EI_MAPPER_ENDURANCE_BRIDGE_RESULT", m_bridgeResultPath);
+    environment.insert("EI_MAPPER_ENDURANCE_LIVE_SAVES",
+                       QDir(input.profile.modRoot).filePath("saves"));
+    environment.insert("EI_MAPPER_ENDURANCE_TEST_SAVES", m_testSavesPath);
+    environment.insert("EI_MAPPER_ENDURANCE_SKIP_INTROS", "1");
     m_process->setProcessEnvironment(environment);
     m_process->start();
     return true;
@@ -484,6 +505,7 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
     m_manifestPath = QDir(m_runRoot).filePath("manifest.json");
     m_runLogPath = QDir(m_runRoot).filePath("runtime.log");
     m_bridgeResultPath = QDir(m_runRoot).filePath("bridge-result.log");
+    m_testSavesPath = QDir(m_runRoot).filePath("runtime-state/isolated-saves");
     m_liveMprPath = QDir(mapsDirectory).filePath(m_temporaryMapName + ".mpr");
     m_liveMobPath = QDir(mapsDirectory).filePath(m_temporaryMapName + ".mob");
     if(QFileInfo::exists(m_liveMprPath) || QFileInfo::exists(m_liveMobPath))
@@ -491,26 +513,14 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
         if(error) *error = "The randomly generated Endurance test-map name already exists; retry the launch.";
         return false;
     }
-    if(!QDir().mkpath(m_runRoot))
+    if(!QDir().mkpath(m_runRoot) || !QDir().mkpath(m_testSavesPath))
     {
         if(error) *error = "Could not create the disposable Endurance test-run directory.";
         return false;
     }
 
-    const QString heroName = "edhero" + m_runId.right(8).toLower();
     const QString x = QString::number(input.spawn.position.x(), 'f', 3);
     const QString y = QString::number(input.spawn.position.y(), 'f', 3);
-    const QString commands = QString(
-        "ConsoleString(\"Endurance test run %1\")\n"
-        "AddUnitToServer(\"%2\",\"Human Hero\",\"\",%3,%4,GetZValue(%3,%4))\n"
-        "SetPlayer(GetObjectByName(\"%2\"),0)\n"
-        "AddUnitUnderControl(0,GetObjectByName(\"%2\"))\n"
-        "RedeployParty(0)")
-        .arg(m_runId, heroName, x, y);
-    QString testScript;
-    if(!injectWorldScriptBootstrap(input.embeddedScript, commands, &testScript, error))
-        return false;
-
     CMobDocument sourceMob;
     CValidationReport report;
     if(!sourceMob.loadBytes(input.mobData, "test-run-source.mob", &report))
@@ -518,12 +528,7 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
         if(error) *error = "The in-memory MOB candidate failed validation:\n" + report.toText();
         return false;
     }
-    QByteArray stagedMob;
-    if(!sourceMob.replaceEmbeddedScript(testScript, &stagedMob, &report))
-    {
-        if(error) *error = "Could not inject the disposable player bootstrap losslessly:\n" + report.toText();
-        return false;
-    }
+    const QByteArray stagedMob = input.mobData;
 
     const QString payloadDirectory = QDir(m_runRoot).filePath("payload");
     if(!QDir().mkpath(payloadDirectory))
@@ -582,6 +587,10 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
     request.stagedSha256.insert(QFileInfo(stagedMprPath).fileName(), m_liveMprSha256);
     request.stagedSha256.insert(QFileInfo(stagedMobPath).fileName(), m_liveMobSha256);
     request.sessionSettings.insert("travelExit", input.spawn.exitId);
+    request.sessionSettings.insert("sourceZone", input.mapEntry.zoneId);
+    request.sessionSettings.insert("zoneType",
+                                   input.mapEntry.zoneId.startsWith("bz", Qt::CaseInsensitive)
+                                   ? "briefing" : "gameplay");
     request.sessionSettings.insert("spawnX", input.spawn.position.x());
     request.sessionSettings.insert("spawnY", input.spawn.position.y());
     request.sessionSettings.insert("clearance", input.spawn.clearance);
@@ -598,14 +607,13 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
     m_manifest.insert("createdUtc", QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
     m_manifest.insert("temporaryMapName", m_temporaryMapName);
     m_manifest.insert("liveFiles", liveFiles);
-    QJsonObject currentSessionBackup;
-    if(!snapshotCurrentSession(QDir(input.profile.modRoot).filePath("saves/current"),
-                               m_runRoot, &currentSessionBackup, error))
-        return false;
-    m_manifest.insert("currentSessionBackup", currentSessionBackup);
-    appendRunLog(QString("Snapshotted JMV current-session state path=%1 files=%2")
-                 .arg(currentSessionBackup.value("path").toString())
-                 .arg(currentSessionBackup.value("files").toArray().size()));
+    QJsonObject isolatedSaves;
+    isolatedSaves.insert("mode", "runtime-path-redirection");
+    isolatedSaves.insert("livePath", QDir(input.profile.modRoot).filePath("saves"));
+    isolatedSaves.insert("testPath", m_testSavesPath);
+    m_manifest.insert("isolatedSaves", isolatedSaves);
+    appendRunLog(QString("Prepared isolated JMV test saves path=%1; live saves remain untouched")
+                 .arg(m_testSavesPath));
     appendRunLog(QString("Staged temporary map=%1 exit=%2 spawn=(%3,%4) clearance=%5")
                  .arg(m_temporaryMapName).arg(input.spawn.exitId)
                  .arg(x, y).arg(input.spawn.clearance, 0, 'f', 3));

@@ -360,6 +360,7 @@ void CSettings::initOptions()
     aOpt.append(QSharedPointer<COpt>(new COptInt("rangeIncrement", 999)));
     aOpt.append(QSharedPointer<COpt>(new COptInt("landCheckTime", 0)));
     aOpt.append(QSharedPointer<COpt>(new COptInt("undoHistoryLimit", 512)));
+    aOpt.append(QSharedPointer<COpt>(new COptInt("mapTestWarningVersion", 0)));
 
     const QMap<QString, QString> shortcutDefaults = {
         {"shortcutOpen", "Ctrl+O"},
@@ -585,6 +586,11 @@ void CSettings::on_buttonApply_clicked()
     updateOptFromUi();
     emit shortcutsChanged();
     onClose();
+}
+
+void CSettings::persistOptions()
+{
+    saveOptions();
 }
 
 void CSettings::on_figPathAdd_clicked()

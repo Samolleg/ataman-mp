@@ -10,6 +10,8 @@ private slots:
     void avoidsBlockedCenter();
     void rejectsFullyBlockedTravelZones();
     void fallsBackToAnotherTravelZone();
+    void prefersFirstHandPlacedEntranceCenter();
+    void keepsNearbyFallbackInsideFirstUsableEntrance();
 };
 
 static SMapTravelZone zone(int id, const QRectF& rectangle)
@@ -58,6 +60,30 @@ void MapSpawnPlannerTests::fallsBackToAnotherTravelZone()
     const SMapSpawnPlan plan = CMapSpawnPlanner::choose({blocked, free}, {obstacle});
     QVERIFY(plan.valid);
     QCOMPARE(plan.exitId, 4);
+}
+
+void MapSpawnPlannerTests::prefersFirstHandPlacedEntranceCenter()
+{
+    const SMapTravelZone first = zone(2, QRectF(10.0, 20.0, 8.0, 6.0));
+    const SMapTravelZone roomier = zone(7, QRectF(100.0, 100.0, 40.0, 40.0));
+    const SMapSpawnPlan plan = CMapSpawnPlanner::choose({first, roomier}, {});
+    QVERIFY(plan.valid);
+    QCOMPARE(plan.exitId, 2);
+    QCOMPARE(plan.position, first.spawnPoint());
+}
+
+void MapSpawnPlannerTests::keepsNearbyFallbackInsideFirstUsableEntrance()
+{
+    const SMapTravelZone first = zone(3, QRectF(0.0, 0.0, 12.0, 12.0));
+    const SMapTravelZone second = zone(9, QRectF(40.0, 40.0, 20.0, 20.0));
+    SMapSpawnObstacle centerBlock;
+    centerBlock.position = first.spawnPoint();
+    centerBlock.radius = 1.25;
+    const SMapSpawnPlan plan = CMapSpawnPlanner::choose({first, second}, {centerBlock});
+    QVERIFY(plan.valid);
+    QCOMPARE(plan.exitId, 3);
+    QVERIFY(first.deployRectangle.contains(plan.position));
+    QVERIFY(plan.position != first.spawnPoint());
 }
 
 QTEST_APPLESS_MAIN(MapSpawnPlannerTests)

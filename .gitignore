@@ -41,4 +41,5 @@ CMakeLists.txt.user*
 /logs/
 /validation-*/
 /source/runtime/jmv_bridge/bin/
+/source/runtime/jmv_bridge/bin-*/
 !/source/runtime/jmv_bridge/build-x86.cmd
