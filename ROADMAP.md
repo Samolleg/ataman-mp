@@ -33,6 +33,35 @@ Current development line: `0.2.0`.
 
 ## General validation backlog
 
+- [ ] Decide and validate the recovery-versus-output policy for files containing
+  known game-tolerated defects.
+  - Opening must remain permissive enough to inspect and rescue recognized
+    broken data, with every exception identified in validation and logs.
+  - Repair is opt-in: opening a file must never silently normalize it or dirty
+    the document.
+  - Discuss whether every save of a document that still contains a recognized
+    defect, including byte-identical Save As, must present a consolidated
+    choice such as **Repair and save** (recommended), **Preserve known defects**
+    (explicit consent), or **Cancel**.
+  - Endurance must not silently create or propagate a known-invalid structure.
+    Preserving one should require an explicit user decision recorded in the
+    workflow log and validation report.
+  - An explicit rescue/repair operation must preview its scope, be undoable,
+    preserve a backup, reparse the result, and prove that unrelated bytes and
+    semantics remain unchanged.
+  - Apply this discussion first to legacy MapED `MT_AREAS`/`MT_TARGETS` lengths
+    and then to any other narrowly recognized malformed structures.
+- [ ] Define object-aware duplicate-ID validation and repair policy.
+  - Do not assign one severity to every duplicate: duplicated static decorative
+    objects such as bushes may be harmless, while units, logic-bearing objects,
+    or IDs referenced from scripts can be unsafe.
+  - Classify findings using object family, logic/script references, and active
+    runtime profile. Keep uncertain cases visible rather than guessing.
+  - Opening preserves all IDs. Any repair remains an explicit previewed
+    operation that updates only unambiguous structured references and reports
+    ambiguous/script references for manual review.
+  - Decide whether saving unresolved high-risk duplicates requires the same
+    explicit preserve/repair/cancel consent as other known defects.
 - [ ] Stress repeated open/close/save/cancel and abnormal-exit behavior on large
   Base/JMV maps.
 - [ ] Complete the broad game matrix: `drawall`, save/load, unload/reload,

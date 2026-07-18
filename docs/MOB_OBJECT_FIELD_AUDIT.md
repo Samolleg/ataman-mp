@@ -66,8 +66,15 @@ Endurance's generated serializer already computes both totals correctly.
 
 The strict document parser now accepts only this exact count-derived legacy shape, retains the
 malformed header for a byte-identical no-op save, and reports warning code
-`mob.compat.maped_array_length` in validation and the workflow log. Newly generated or deliberately
-edited arrays remain correctly sized. Broader malformed lengths are still errors.
+`mob.compat.maped_array_length` in validation and the workflow log. Endurance's array writer
+calculates correct lengths, but hardened saving currently blocks direct edits to one of these
+malformed arrays until a dedicated repair/edit transaction is implemented. Broader malformed
+lengths are still errors.
+
+The current byte-preserving save behavior is not the final validation policy. The roadmap now tracks
+whether saving any recognized game-tolerated defect should require an explicit consolidated choice:
+repair it, knowingly preserve it, or cancel. Recovery on open should remain non-destructive, while
+repair remains opt-in and Endurance must never silently produce known-invalid output.
 
 ## Initial semantic warnings
 
