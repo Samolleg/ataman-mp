@@ -521,7 +521,17 @@ MOB editing does not imply that landscape saving is supported.
   controller, context, and thread for follow-on calls to the verified map-loader
   entry. Preserve the exact Alpha.55 return-site guard: a verified normal
   single-player call receives the staged pair; every other caller remains
-  observe-only.
+  observe-only. Two runtime traces showed that no gameplay loader follows the
+  incomplete transition: the only later loader was the user's return to
+  `ZoneMainMenuNew`. The shell path is therefore retired.
+- [x] `0.1.0-alpha.57`: call the fingerprinted complete New Game bootstrap at
+  `game.exe+0x0017BD10` on the captured game controller and game thread. That
+  engine path prepares the current session and player before reaching the
+  existing guarded map-loader substitution. Snapshot JMV's transient
+  `saves/current` tree into the disposable run directory, verify every file by
+  SHA-256, and restore its exact contents after exit or interrupted-run
+  recovery. The runtime result remains experimental until a live test proves
+  staged terrain, objects, and a controllable player.
 - [x] `0.1.0-alpha.41`: redo-safe raw provenance and the July 17 multi-edit/UI
   fixes passed owner testing and were handed to the closed tester group.
   ([`db3fa31`](https://github.com/Ilufus/ei-mapper-endurance/commit/db3fa31))

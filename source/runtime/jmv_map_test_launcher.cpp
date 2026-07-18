@@ -16,6 +16,7 @@
 #include <QProcessEnvironment>
 
 #include "endurance_document.h"
+#include "current_session_backup.h"
 #include "runtime_providers.h"
 
 #ifdef Q_OS_WIN
@@ -197,7 +198,8 @@ bool restoreAutoexec(const QJsonObject& manifest, QStringList* messages)
 
 bool cleanupManifest(const QJsonObject& manifest, QStringList* messages)
 {
-    bool success = restoreAutoexec(manifest, messages);
+    bool success = restoreCurrentSession(manifest.value("currentSessionBackup").toObject(), messages);
+    success = restoreAutoexec(manifest, messages) && success;
     const QJsonObject bridge = manifest.value("bridge").toObject();
     success = removeIfOwned(bridge.value("path").toString(),
                             bridge.value("sha256").toString(), messages) && success;
@@ -403,7 +405,6 @@ bool CJmvMapTestLauncher::launch(const SJmvMapTestLaunchInput& input, QString* e
     m_process->setWorkingDirectory(m_engineDirectory);
     QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
     environment.insert("EI_MAPPER_ENDURANCE_MAP", m_temporaryMapName);
-    environment.insert("EI_MAPPER_ENDURANCE_SOURCE_MAP", input.mapEntry.zoneId.toLower());
     environment.insert("EI_MAPPER_ENDURANCE_TEMP_MPR", m_liveMprPath);
     environment.insert("EI_MAPPER_ENDURANCE_TEMP_MOB", m_liveMobPath);
     environment.insert("EI_MAPPER_ENDURANCE_BRIDGE_RESULT", m_bridgeResultPath);
@@ -436,13 +437,6 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
         if(error) *error = "The selected map has no safe runtime map identity for the JMV bridge.";
         return false;
     }
-    const QString sourceZoneId = input.mapEntry.zoneId.toLower();
-    if(!QRegularExpression("^[a-z0-9_]{1,63}$").match(sourceZoneId).hasMatch())
-    {
-        if(error) *error = "The selected map has no safe JMV zone-table identity for direct launch.";
-        return false;
-    }
-
     const QString mapsDirectory = QDir(input.profile.modRoot).filePath("Maps");
     if(normalized(input.profile.mapDirectories.first()).compare(normalized(mapsDirectory), Qt::CaseInsensitive) != 0)
     {
@@ -604,6 +598,14 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
     m_manifest.insert("createdUtc", QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
     m_manifest.insert("temporaryMapName", m_temporaryMapName);
     m_manifest.insert("liveFiles", liveFiles);
+    QJsonObject currentSessionBackup;
+    if(!snapshotCurrentSession(QDir(input.profile.modRoot).filePath("saves/current"),
+                               m_runRoot, &currentSessionBackup, error))
+        return false;
+    m_manifest.insert("currentSessionBackup", currentSessionBackup);
+    appendRunLog(QString("Snapshotted JMV current-session state path=%1 files=%2")
+                 .arg(currentSessionBackup.value("path").toString())
+                 .arg(currentSessionBackup.value("files").toArray().size()));
     appendRunLog(QString("Staged temporary map=%1 exit=%2 spawn=(%3,%4) clearance=%5")
                  .arg(m_temporaryMapName).arg(input.spawn.exitId)
                  .arg(x, y).arg(input.spawn.clearance, 0, 'f', 3));

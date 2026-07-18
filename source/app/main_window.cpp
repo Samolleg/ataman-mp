@@ -598,7 +598,7 @@ void MainWindow::launchCurrentMapTest()
     const QString confirmation = tr(
         "This experimental JMV-only test stages the exact current MPR/MOB pair, including unsaved in-memory edits, under a unique temporary name. After JMV completes its normal menu load, Endurance invokes the fingerprinted single-player New Game path on the game thread and supplies the staged pair. No console/server command or fixed delay is used.\n\n"
         "The staged MOB creates a disposable default player at travel exit %1, position (%2, %3), with verified clearance %4. The session does not load a campaign save.\n\n"
-        "Source maps and JMV configuration are not changed. Hash-owned temporary files are deleted after the game exits, while failed runs retain their logs for diagnosis.\n\nStart the direct JMV map test?")
+        "Source maps and JMV configuration are not changed. Before launch, Endurance makes a hash-verified snapshot of JMV's transient saves\\current directory; it restores that exact scratch-session content after the game exits or during recovery on the next editor start. Hash-owned temporary files are then deleted, while failed runs retain their logs for diagnosis.\n\nStart the direct JMV map test?")
         .arg(spawn.exitId).arg(spawn.position.x(), 0, 'f', 2)
         .arg(spawn.position.y(), 0, 'f', 2).arg(spawn.clearance, 0, 'f', 2);
     if(QMessageBox::question(this, tr("Direct JMV map test (experimental)"), confirmation,

@@ -26,8 +26,8 @@ using GetFileAttributesAFn = DWORD (WINAPI*)(LPCSTR);
 using GetFileAttributesWFn = DWORD (WINAPI*)(LPCWSTR);
 using CaptureStackFn = USHORT (WINAPI*)(ULONG, ULONG, PVOID*, PULONG);
 using MapLoadFn = int (__thiscall*)(void*, const char*, const char*, void*);
-using FindZoneFn = void* (__thiscall*)(void*, const char*);
 using ZoneTransitionFn = int (__thiscall*)(void*, const char*, int);
+using NewGameBootstrapFn = void (__thiscall*)(void*);
 
 HMODULE g_instance = nullptr;
 volatile LONG g_initialized = 0;
@@ -40,19 +40,18 @@ GetFileAttributesWFn g_originalGetFileAttributesW = nullptr;
 CaptureStackFn g_captureStack = nullptr;
 
 constexpr DWORD kMapLoadEntryRva = 0x00195480;
-constexpr DWORD kFindZoneEntryRva = 0x0005E850;
-constexpr DWORD kZoneCatalogRva = 0x0039BF00;
 constexpr DWORD kStartZoneTransitionRva = 0x0017C460;
 constexpr DWORD kStartZoneMapLoadReturnRva = 0x0017A61B;
+constexpr DWORD kNewGameBootstrapRva = 0x0017BD10;
 constexpr UINT kDirectLaunchMessage = WM_APP + 0x45D;
 constexpr unsigned char kMapLoadEntryBytes[6] = {
     0x64, 0xA1, 0x00, 0x00, 0x00, 0x00
 };
-constexpr unsigned char kFindZoneEntryBytes[6] = {
-    0x53, 0x55, 0x56, 0x8B, 0xF1, 0x57
-};
 constexpr unsigned char kStartZoneTransitionBytes[7] = {
     0x6A, 0xFF, 0x68, 0x28, 0x39, 0x72, 0x00
+};
+constexpr unsigned char kNewGameBootstrapBytes[7] = {
+    0x6A, 0xFF, 0x68, 0xF0, 0x37, 0x72, 0x00
 };
 
 MapLoadFn g_originalMapLoad = nullptr;
@@ -65,7 +64,6 @@ DWORD g_gameThreadId = 0;
 void* g_zoneTransitionController = nullptr;
 char g_temporaryMpr[MAX_PATH * 4] = {};
 char g_temporaryMob[MAX_PATH * 4] = {};
-char g_sourceZone[128] = {};
 
 int __fastcall MapLoadDetour(void* self, void*, const char* mprPath,
                              const char* mobPath, void* context);
@@ -440,13 +438,10 @@ bool ReadDirectLaunchPaths()
 {
     wchar_t mpr[MAX_PATH * 4]{};
     wchar_t mob[MAX_PATH * 4]{};
-    wchar_t sourceZone[128]{};
     if(!GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_TEMP_MPR", mpr,
                                 DWORD(sizeof(mpr) / sizeof(mpr[0]))) ||
        !GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_TEMP_MOB", mob,
                                 DWORD(sizeof(mob) / sizeof(mob[0]))) ||
-       !GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_SOURCE_MAP", sourceZone,
-                                DWORD(sizeof(sourceZone) / sizeof(sourceZone[0]))) ||
        GetFileAttributesW(mpr) == INVALID_FILE_ATTRIBUTES ||
        GetFileAttributesW(mob) == INVALID_FILE_ATTRIBUTES)
     {
@@ -455,17 +450,13 @@ bool ReadDirectLaunchPaths()
     }
     BOOL mprSubstitution = FALSE;
     BOOL mobSubstitution = FALSE;
-    BOOL zoneSubstitution = FALSE;
     if(!WideCharToMultiByte(CP_ACP, WC_NO_BEST_FIT_CHARS, mpr, -1,
                             g_temporaryMpr, int(sizeof(g_temporaryMpr)), nullptr,
                             &mprSubstitution) ||
        !WideCharToMultiByte(CP_ACP, WC_NO_BEST_FIT_CHARS, mob, -1,
                             g_temporaryMob, int(sizeof(g_temporaryMob)), nullptr,
                             &mobSubstitution) ||
-       !WideCharToMultiByte(CP_ACP, WC_NO_BEST_FIT_CHARS, sourceZone, -1,
-                            g_sourceZone, int(sizeof(g_sourceZone)), nullptr,
-                            &zoneSubstitution) ||
-       mprSubstitution || mobSubstitution || zoneSubstitution)
+       mprSubstitution || mobSubstitution)
     {
         Log(L"DIRECT_LAUNCH disabled: staged paths cannot be represented in the game ANSI code page");
         return false;
@@ -601,42 +592,22 @@ LRESULT CALLBACK DirectLaunchMessageHook(int code, WPARAM wParam, LPARAM lParam)
         return next;
 
     auto* game = reinterpret_cast<unsigned char*>(g_gameModule);
-    const auto findZone = reinterpret_cast<FindZoneFn>(game + kFindZoneEntryRva);
-    void* zone = findZone(game + kZoneCatalogRva, g_sourceZone);
-    if(!zone)
-    {
-        wchar_t sourceZone[128]{};
-        MultiByteToWideChar(CP_ACP, 0, g_sourceZone, -1, sourceZone,
-                            int(sizeof(sourceZone) / sizeof(sourceZone[0])));
-        wchar_t failure[320]{};
-        _snwprintf_s(failure, sizeof(failure) / sizeof(failure[0]), _TRUNCATE,
-                     L"DIRECT_LAUNCH failed: map-table zone \"%s\" was not found", sourceZone);
-        Log(failure);
-        InterlockedExchange(&g_directLaunchState, -1);
-        return next;
-    }
-
-    wchar_t sourceZone[128]{};
-    MultiByteToWideChar(CP_ACP, 0, g_sourceZone, -1, sourceZone,
-                        int(sizeof(sourceZone) / sizeof(sourceZone[0])));
-    wchar_t transitionMessage[448]{};
-    _snwprintf_s(transitionMessage, sizeof(transitionMessage) / sizeof(transitionMessage[0]), _TRUNCATE,
-                 L"DIRECT_LAUNCH invoking normal single-player transition zone=\"%s\" record=0x%08lX controller=0x%08lX requested_mode=0 thread=%lu",
-                 sourceZone, DWORD(reinterpret_cast<uintptr_t>(zone)),
+    wchar_t bootstrapMessage[384]{};
+    _snwprintf_s(bootstrapMessage, sizeof(bootstrapMessage) / sizeof(bootstrapMessage[0]), _TRUNCATE,
+                 L"DIRECT_LAUNCH invoking complete New Game bootstrap entry=0x%08lX controller=0x%08lX thread=%lu",
+                 DWORD(reinterpret_cast<uintptr_t>(game + kNewGameBootstrapRva)),
                  DWORD(reinterpret_cast<uintptr_t>(g_zoneTransitionController)),
                  GetCurrentThreadId());
-    Log(transitionMessage);
+    Log(bootstrapMessage);
     InterlockedExchange(&g_pendingMapLoadProbeCount, 0);
-    const int result = g_originalZoneTransition(g_zoneTransitionController,
-                                                g_sourceZone, 0);
+    const auto newGame = reinterpret_cast<NewGameBootstrapFn>(game + kNewGameBootstrapRva);
+    newGame(g_zoneTransitionController);
     const bool redirected = InterlockedCompareExchange(&g_directLaunchState, 6, 4) == 4;
-    wchar_t resultMessage[320]{};
-    _snwprintf_s(resultMessage, sizeof(resultMessage) / sizeof(resultMessage[0]), _TRUNCATE,
-                  redirected
-                      ? L"DIRECT_LAUNCH single-player transition completed result=0x%08lX staged_loader=observed"
-                      : L"DIRECT_LAUNCH single-player transition returned result=0x%08lX; request remains armed for a verified follow-on loader",
-                  DWORD(result));
-    Log(resultMessage);
+    if(!redirected)
+        InterlockedExchange(&g_directLaunchState, -1);
+    Log(redirected
+        ? L"DIRECT_LAUNCH complete New Game bootstrap returned staged_loader=observed"
+        : L"DIRECT_LAUNCH failed: complete New Game bootstrap returned without the verified staged loader call");
     return next;
 }
 
@@ -646,12 +617,12 @@ bool InstallMapLoadDetour()
     auto* game = reinterpret_cast<unsigned char*>(g_gameModule);
     if(!game || !ReadDirectLaunchPaths())
         return false;
-    if(std::memcmp(game + kFindZoneEntryRva, kFindZoneEntryBytes,
-                   sizeof(kFindZoneEntryBytes)) != 0 ||
-       std::memcmp(game + kStartZoneTransitionRva, kStartZoneTransitionBytes,
-                   sizeof(kStartZoneTransitionBytes)) != 0)
+    if(std::memcmp(game + kStartZoneTransitionRva, kStartZoneTransitionBytes,
+                   sizeof(kStartZoneTransitionBytes)) != 0 ||
+       std::memcmp(game + kNewGameBootstrapRva, kNewGameBootstrapBytes,
+                   sizeof(kNewGameBootstrapBytes)) != 0)
     {
-        Log(L"DIRECT_LAUNCH disabled: validated zone resolver/transition entry bytes do not match");
+        Log(L"DIRECT_LAUNCH disabled: validated transition/New Game bootstrap bytes do not match");
         return false;
     }
     unsigned char* target = game + kMapLoadEntryRva;
@@ -750,9 +721,9 @@ bool InstallMapLoadDetour()
     InterlockedExchange(&g_directLaunchState, 1);
     wchar_t message[256]{};
     _snwprintf_s(message, sizeof(message) / sizeof(message[0]), _TRUNCATE,
-                 L"DIRECT_LAUNCH armed map_loader=0x%08lX transition=0x%08lX mode=single-player",
+                 L"DIRECT_LAUNCH armed map_loader=0x%08lX new_game_bootstrap=0x%08lX mode=single-player",
                  DWORD(reinterpret_cast<uintptr_t>(target)),
-                 DWORD(reinterpret_cast<uintptr_t>(game + kStartZoneTransitionRva)));
+                 DWORD(reinterpret_cast<uintptr_t>(game + kNewGameBootstrapRva)));
     Log(message);
     return true;
 }
@@ -775,7 +746,7 @@ bool InitializeDirectLaunch()
     const bool directLaunch = InstallMapLoadDetour();
     wchar_t message[256]{};
     _snwprintf_s(message, sizeof(message) / sizeof(message[0]), _TRUNCATE,
-                 L"DIRECT_LAUNCH active imports=%d stack_capture=%s map_loader=%s trigger=zone-table-transition",
+                 L"DIRECT_LAUNCH active imports=%d stack_capture=%s map_loader=%s trigger=complete-new-game-bootstrap",
                  patched, g_captureStack ? L"available" : L"unavailable",
                  directLaunch ? L"available" : L"unavailable");
     Log(message);

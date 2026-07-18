@@ -5,6 +5,7 @@
 #include <QTemporaryDir>
 
 #include "jmv_map_test_launcher.h"
+#include "current_session_backup.h"
 
 class JmvMapTestLauncherTests : public QObject
 {
@@ -21,6 +22,10 @@ private slots:
     void recoveryRestoresPreexistingAutoexec();
     void recoveryRemovesOwnedBridge();
     void recoveryRetainsChangedBridge();
+    void currentSessionSnapshotRestoresExistingTree();
+    void currentSessionSnapshotRemovesDisposableTreeWhenOriginallyAbsent();
+    void currentSessionRestoreRejectsTamperedBackupWithoutTouchingLiveTree();
+    void currentSessionSnapshotRejectsUnsafePath();
 };
 
 static QString hash(const QByteArray& data)
@@ -190,6 +195,92 @@ void JmvMapTestLauncherTests::recoveryRetainsChangedBridge()
     QVERIFY(QFileInfo::exists(bridge));
     QVERIFY(summary.contains("Retained changed temporary file"));
     QDir(run).removeRecursively();
+}
+
+void JmvMapTestLauncherTests::currentSessionSnapshotRestoresExistingTree()
+{
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+    const QString current = QDir(temp.path()).filePath("saves/current");
+    const QString nested = QDir(current).filePath("nested");
+    const QString empty = QDir(current).filePath("empty");
+    QVERIFY(QDir().mkpath(nested));
+    QVERIFY(QDir().mkpath(empty));
+    const QByteArray original("original session\0bytes", 22);
+    writeFile(QDir(nested).filePath("state.bin"), original);
+
+    const QString run = QDir(temp.path()).filePath("run");
+    QVERIFY(QDir().mkpath(run));
+    QJsonObject snapshot;
+    QString error;
+    QVERIFY2(snapshotCurrentSession(current, run, &snapshot, &error), qPrintable(error));
+
+    writeFile(QDir(nested).filePath("state.bin"), QByteArray("temporary state"));
+    writeFile(QDir(current).filePath("new.tmp"), QByteArray("new"));
+    QVERIFY(QDir(empty).removeRecursively());
+
+    QStringList messages;
+    QVERIFY2(restoreCurrentSession(snapshot, &messages), qPrintable(messages.join('\n')));
+    QFile restored(QDir(nested).filePath("state.bin"));
+    QVERIFY(restored.open(QIODevice::ReadOnly));
+    QCOMPARE(restored.readAll(), original);
+    QVERIFY(QFileInfo::exists(empty));
+    QVERIFY(!QFileInfo::exists(QDir(current).filePath("new.tmp")));
+}
+
+void JmvMapTestLauncherTests::currentSessionSnapshotRemovesDisposableTreeWhenOriginallyAbsent()
+{
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+    const QString current = QDir(temp.path()).filePath("saves/current");
+    const QString run = QDir(temp.path()).filePath("run");
+    QVERIFY(QDir().mkpath(run));
+    QJsonObject snapshot;
+    QString error;
+    QVERIFY2(snapshotCurrentSession(current, run, &snapshot, &error), qPrintable(error));
+    QVERIFY(!snapshot.value("originalExisted").toBool());
+
+    QVERIFY(QDir().mkpath(current));
+    writeFile(QDir(current).filePath("test.sav"), QByteArray("disposable"));
+    QStringList messages;
+    QVERIFY2(restoreCurrentSession(snapshot, &messages), qPrintable(messages.join('\n')));
+    QVERIFY(!QFileInfo::exists(current));
+}
+
+void JmvMapTestLauncherTests::currentSessionRestoreRejectsTamperedBackupWithoutTouchingLiveTree()
+{
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+    const QString current = QDir(temp.path()).filePath("saves/current");
+    QVERIFY(QDir().mkpath(current));
+    writeFile(QDir(current).filePath("state.bin"), QByteArray("original"));
+    const QString run = QDir(temp.path()).filePath("run");
+    QVERIFY(QDir().mkpath(run));
+    QJsonObject snapshot;
+    QString error;
+    QVERIFY2(snapshotCurrentSession(current, run, &snapshot, &error), qPrintable(error));
+
+    writeFile(QDir(current).filePath("state.bin"), QByteArray("live disposable state"));
+    const QJsonObject entry = snapshot.value("files").toArray().first().toObject();
+    writeFile(QDir(snapshot.value("backupPath").toString()).filePath(entry.value("path").toString()),
+              QByteArray("tampered backup"));
+    QStringList messages;
+    QVERIFY(!restoreCurrentSession(snapshot, &messages));
+    QFile live(QDir(current).filePath("state.bin"));
+    QVERIFY(live.open(QIODevice::ReadOnly));
+    QCOMPARE(live.readAll(), QByteArray("live disposable state"));
+}
+
+void JmvMapTestLauncherTests::currentSessionSnapshotRejectsUnsafePath()
+{
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+    QJsonObject snapshot;
+    QString error;
+    QVERIFY(!snapshotCurrentSession(QDir(temp.path()).filePath("current"),
+                                    QDir(temp.path()).filePath("run"),
+                                    &snapshot, &error));
+    QVERIFY(!error.isEmpty());
 }
 
 QTEST_APPLESS_MAIN(JmvMapTestLauncherTests)
