@@ -221,6 +221,7 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
     commands were inserted before the MOB's own leading initialization delay.
     Current source preserves that delay and injects `SetCPFast`/`GodMode`
     immediately after it. Runtime confirmation is still required.
+    ([`4e62424`](https://github.com/Ilufus/ei-mapper-endurance/commit/4e62424))
 - [x] Implement the exact-hash Base EI feasibility transport and four-level
   probe ladder. See [the static compatibility record](docs/base-runtime-probe.md).
   - Base is launched suspended by an editor-owned 32-bit helper; the run-local
@@ -249,19 +250,19 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
     the transient hero marker be selected and moved with G, maps Delete to
     Clear entrance, and renders the selected authored entrance in green only
     while no custom marker is active. This remains unnumbered pending the next
-    combined test build.
+    combined test build. ([`4e62424`](https://github.com/Ilufus/ei-mapper-endurance/commit/4e62424))
   - Runtime evidence from zone1 and zone2 proved the engine player record uses
     a zero-based entrance-array index, not the one-based `#exit` ID. Current
     source translates ID to index explicitly; this is the focused fix for
     Entrance 1 selecting Entrance 2 and the final entrance falling out of
-    range.
+    range. ([`4e62424`](https://github.com/Ilufus/ei-mapper-endurance/commit/4e62424))
 
 - [x] Make profile context explicit and safe to change.
   - The active editing profile appears in the window title and is preselected
     in Game and Mod Setup.
   - Current source prevents the setup dialog's initial focus change from
     silently recommending and selecting the first valid profile over the
-    configured profile.
+    configured profile. ([`4e62424`](https://github.com/Ilufus/ei-mapper-endurance/commit/4e62424))
   - Switching Base/JMV profiles closes loaded documents first so resource-backed
     scene state cannot survive into the new profile.
 
@@ -360,6 +361,7 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
 - [x] Define a versioned, hash-carrying hot-reload request schema that rejects
   payloads outside the Endurance-owned test-run directory. Runtime consumption
   remains disabled until game-thread teardown/reload is proven.
+  ([`4e62424`](https://github.com/Ilufus/ei-mapper-endurance/commit/4e62424))
 
 - [ ] Make repeated Ctrl+F5 hot-reload the Endurance-owned game process.
   - Validate and restage the exact current in-memory pair.
@@ -402,6 +404,7 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
     list, create/edit/open/save/save-as UI, grouped missing-reference errors,
     browser population, and explicit refresh. It is held for the next combined
     build while deterministic multi-MOB test loading remains unfinished.
+    ([`4e62424`](https://github.com/Ilufus/ei-mapper-endurance/commit/4e62424))
   - Edit/reorder without loading is included in the editor dialog rather than
     deferred.
 - [x] Add the hideable **Maps and Collections** browser with a `map.txt`-based
