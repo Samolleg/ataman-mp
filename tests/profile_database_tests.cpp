@@ -53,7 +53,9 @@ QMap<QString, QByteArray> relationalMembers()
     for(int index = 0; index < names.size(); ++index)
     {
         QByteArray fields = stringField(0, names.at(index).toLatin1());
-        if(index > 0)
+        if(index == 0)
+            fields += stringField(1, "Metal") + stringField(2, "ir") + intField(3, 7);
+        else
             fields += stringField(1, index == 1 ? "weapon" : "item") + intField(2, index)
                 + stringField(3, "metal") + intField(5, 1);
         itemTables.append(record(fields));
@@ -120,6 +122,8 @@ void ProfileDatabaseTests::parsesStableLinksAndCurrentNames()
     QCOMPARE(parsed.monsters.value("human test").weapon, QString("sword.iron"));
     QCOMPARE(parsed.raceModels.value("human male").model, QString("unhuma"));
     QCOMPARE(parsed.items.value("sword").typeId, 1);
+    QCOMPARE(parsed.materialRecords.value("iron").code, QString("ir"));
+    QCOMPARE(parsed.materialRecords.value("iron").id, 7);
     QVERIFY(parsed.namesByCategory.value("spells").contains("fireball"));
     QVERIFY(parsed.namesByCategory.value("perks").contains("two_handed"));
 }

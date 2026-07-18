@@ -26,6 +26,7 @@ CObjectBase::CObjectBase(const CObjectBase &base):
 {
     m_complection = base.m_complection;
     m_texture = base.m_texture;
+    m_partTextures = base.m_partTextures;
     m_pFigure = base.m_pFigure;
     m_minPoint = base.m_minPoint;
     m_bodyParts = base.m_bodyParts;
@@ -134,7 +135,6 @@ void CObjectBase::draw(bool isActive, QOpenGLShaderProgram* program)
         return;
     }
 
-    m_texture->bind(0);
     //if (!m_parent)
     {
         QMatrix4x4 matrix;
@@ -152,7 +152,10 @@ void CObjectBase::draw(bool isActive, QOpenGLShaderProgram* program)
 
     program->setUniformValue("qt_Texture0", 0);
     for(auto& part: m_aPart)
+    {
+        m_partTextures.value(part->name().toLower(), m_texture)->bind(0);
         part->draw(program);
+    }
     program->setUniformValue("u_partAnimated", false);
 
     program->setUniformValue("u_highlight", false);
@@ -492,11 +495,16 @@ void CObjectBase::recalcFigure()
 }
 
 void CObjectBase::applyTransientVisual(const QString& modelName, const QString& textureName,
-                                       const QStringList& visibleParts, const QVector3D& complexion)
+                                       const QStringList& visibleParts, const QVector3D& complexion,
+                                       const QMap<QString, QString>& partTextureNames)
 {
+    QString textureFingerprint;
+    for(auto it = partTextureNames.constBegin(); it != partTextureNames.constEnd(); ++it)
+        textureFingerprint += it.key().toLower() + '=' + it.value().toLower() + ';';
     const QString fingerprint = modelName.toLower() + '|' + textureName.toLower() + '|'
         + visibleParts.join(';').toLower() + '|' + QString::number(complexion.x(), 'g', 8)
-        + ',' + QString::number(complexion.y(), 'g', 8) + ',' + QString::number(complexion.z(), 'g', 8);
+        + ',' + QString::number(complexion.y(), 'g', 8) + ',' + QString::number(complexion.z(), 'g', 8)
+        + '|' + textureFingerprint;
     if(fingerprint == m_transientVisualFingerprint)
         return;
     m_transientVisualFingerprint = fingerprint;
@@ -505,6 +513,10 @@ void CObjectBase::applyTransientVisual(const QString& modelName, const QString& 
     // model-aware lookup normalizes a supplied .mmp suffix and resolves only
     // aliases belonging to that model/profile resource catalog.
     m_texture = CTextureList::getInstance()->texture(textureName, modelName);
+    m_partTextures.clear();
+    for(auto it = partTextureNames.constBegin(); it != partTextureNames.constEnd(); ++it)
+        m_partTextures.insert(it.key().toLower(),
+            CTextureList::getInstance()->texture(it.value(), modelName));
     m_bboxDirty = true;
     for(CPart* part : m_aPart)
         delete part;

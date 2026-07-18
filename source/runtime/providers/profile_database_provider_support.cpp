@@ -129,6 +129,7 @@ void applyRelationalMembers(const QMap<QString, QByteArray>& members, const QStr
     snapshot->monsters = parsed.monsters;
     snapshot->raceModels = parsed.raceModels;
     snapshot->items = parsed.items;
+    snapshot->materialRecords = parsed.materialRecords;
     snapshot->materials = parsed.namesByCategory.value("materials");
     snapshot->weapons = parsed.namesByCategory.value("weapons");
     snapshot->armor = parsed.namesByCategory.value("armor");

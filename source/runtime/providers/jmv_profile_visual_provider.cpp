@@ -13,7 +13,7 @@ public:
     QString providerId() const override { return "jmv.v1"; }
     SRuntimeProviderResult resolve(const SCharacterAppearanceRequest& request,
                                    QJsonObject* appearance) const override
-    { return resolveDatabaseAppearance(providerId(), m_database, request, appearance); }
+    { return resolveDatabaseAppearance(providerId(), true, m_database, request, appearance); }
 private:
     QSharedPointer<const ei::SProfileDatabaseSnapshot> m_database;
 };

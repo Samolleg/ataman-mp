@@ -230,6 +230,10 @@ void CUnit::refreshTransientVisual()
     equipmentRequest.weapons = m_bImport ? m_aWeapon : jsonStringList(appearance, "weapons");
     QJsonObject equipment;
     const SRuntimeProviderResult equipmentResult = equipmentResolver->resolve(equipmentRequest, &equipment);
+    for(const QString& replaced : jsonStringList(equipment, "replacedParts"))
+        for(int index = visibleParts.size() - 1; index >= 0; --index)
+            if(visibleParts.at(index).compare(replaced, Qt::CaseInsensitive) == 0)
+                visibleParts.removeAt(index);
     for(const QString& component : jsonStringList(equipment, "components"))
         if(!visibleParts.contains(component, Qt::CaseInsensitive))
             visibleParts.append(component);
@@ -238,7 +242,11 @@ void CUnit::refreshTransientVisual()
     if(!equipmentResult.success && equipment.value("placeholders").toArray().isEmpty())
         ei::log(eLogWarning, QString("Unit %1 equipment [%2]: %3")
                 .arg(m_prototypeName, equipmentResult.code, equipmentResult.message));
-    applyTransientVisual(model, texture, visibleParts, complexion);
+    QMap<QString, QString> componentTextures;
+    const QJsonObject textureObject = equipment.value("componentTextures").toObject();
+    for(auto it = textureObject.constBegin(); it != textureObject.constEnd(); ++it)
+        componentTextures.insert(it.key(), it.value().toString());
+    applyTransientVisual(model, texture, visibleParts, complexion, componentTextures);
     m_resolvedAnimationModel = model;
     m_resolvedAnimationWeapons = equipmentRequest.weapons;
 }

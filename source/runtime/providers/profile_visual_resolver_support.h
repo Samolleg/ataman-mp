@@ -15,7 +15,7 @@ struct SJmvEquipmentGates
 };
 
 SRuntimeProviderResult resolveDatabaseAppearance(
-    const QString& providerId,
+    const QString& providerId, bool jmv,
     const QSharedPointer<const ei::SProfileDatabaseSnapshot>& database,
     const SCharacterAppearanceRequest& request, QJsonObject* appearance);
 SRuntimeProviderResult resolveEquipmentLayout(

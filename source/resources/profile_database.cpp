@@ -265,6 +265,17 @@ SParsedDatabaseMembers parseProfileDatabaseMembers(const QMap<QString, QByteArra
             addNames(records, categories.at(table), &output);
             for(const auto& fields : records)
             {
+                if(table == 0)
+                {
+                    SMaterialDatabaseRecord material;
+                    material.name = fieldString(fields, 0);
+                    material.type = fieldString(fields, 1);
+                    material.code = fieldString(fields, 2);
+                    material.id = fieldInt(fields, 3);
+                    if(!material.name.isEmpty())
+                        output.materialRecords.insert(material.name.toLower(), material);
+                    continue;
+                }
                 SItemDatabaseRecord record;
                 record.name = fieldString(fields, 0);
                 record.category = categories.at(table);

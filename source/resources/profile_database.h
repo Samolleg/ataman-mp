@@ -71,6 +71,14 @@ struct SItemDatabaseRecord
     int wearOrder{-1};
 };
 
+struct SMaterialDatabaseRecord
+{
+    QString name;
+    QString type;
+    QString code;
+    int id{-1};
+};
+
 struct SProfileDatabaseSnapshot
 {
     QString providerId;
@@ -80,6 +88,7 @@ struct SProfileDatabaseSnapshot
     QMap<QString, SMonsterDatabaseRecord> monsters;
     QMap<QString, SRaceModelDatabaseRecord> raceModels;
     QMap<QString, SItemDatabaseRecord> items;
+    QMap<QString, SMaterialDatabaseRecord> materialRecords;
     QStringList materials;
     QStringList weapons;
     QStringList armor;
@@ -110,6 +119,7 @@ struct SParsedDatabaseMembers
     QMap<QString, SMonsterDatabaseRecord> monsters;
     QMap<QString, SRaceModelDatabaseRecord> raceModels;
     QMap<QString, SItemDatabaseRecord> items;
+    QMap<QString, SMaterialDatabaseRecord> materialRecords;
     QMap<QString, QStringList> namesByCategory;
     QVector<SDatabaseDiagnostic> diagnostics;
 };

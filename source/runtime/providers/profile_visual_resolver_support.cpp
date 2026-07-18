@@ -1,6 +1,7 @@
 #include "profile_visual_resolver_support.h"
 
 #include <QJsonArray>
+#include <QRegularExpression>
 #include <QSet>
 
 namespace {
@@ -47,9 +48,39 @@ QString monsterTextureName(const QString& model, const QStringList& primary, int
     return skinIndex < primary.size() ? textureName(model, primary.at(skinIndex)) : QString();
 }
 
+bool numberedHumanoidSkin(const QString& model)
+{
+    static const QSet<QString> models = {"unhuma", "unhufe", "unorma", "unorfe"};
+    return models.contains(model.trimmed().toLower());
+}
+
+QString jmvMonsterTextureName(const SCharacterAppearanceRequest& request, const QString& model,
+                              const QStringList& primary, int skinIndex)
+{
+    if(numberedHumanoidSkin(model))
+        return skinIndex < 0 ? QString()
+            : textureName(model, QString("skin_%1").arg(skinIndex, 2, 10, QChar('0')));
+
+    // JMV's non-humanoid numeric Graphics Data Skin Index is not an index into
+    // RaceModels.FLD31 (GoblinSentryF2 is 91 while the race row has two names).
+    // The MOB stores the already-resolved graphical token. It is safe to use
+    // only when the database-selected model agrees with the embedded model.
+    if(model.compare(request.model.trimmed(), Qt::CaseInsensitive) == 0
+            && !request.primaryTexture.trimmed().isEmpty())
+        return textureName(model, request.primaryTexture);
+    Q_UNUSED(primary);
+    return QString();
+}
+
 QString itemPrototype(const QString& reference)
 {
     return reference.section('[', 0, 0).section('.', 0, 0).trimmed().toLower();
+}
+
+QString itemMaterial(const QString& reference)
+{
+    const QString base = reference.section('[', 0, 0);
+    return base.section('.', 1, 1).trimmed().toLower();
 }
 
 enum class EWeaponClass { OneHand, Ranged, Shield, TwoHand, Unknown };
@@ -79,7 +110,8 @@ QString componentSuffix(const QString& family, int tti)
 }
 
 void appendComponents(const QString& family, int tti, const SEquipmentLayoutRequest& request,
-                      QJsonArray* components, QJsonArray* placeholders, QJsonArray* diagnostics)
+                      QJsonArray* components, QJsonArray* placeholders, QJsonArray* diagnostics,
+                      QStringList* matchedComponents = nullptr)
 {
     if(family.isEmpty() || tti < 0)
         return;
@@ -94,6 +126,7 @@ void appendComponents(const QString& family, int tti, const SEquipmentLayoutRequ
         if(part.endsWith(suffix, Qt::CaseInsensitive))
         {
             components->append(part);
+            if(matchedComponents) matchedComponents->append(part);
             ++matched;
         }
     if(matched == 0)
@@ -103,10 +136,113 @@ void appendComponents(const QString& family, int tti, const SEquipmentLayoutRequ
     }
 }
 
+void appendHandComponent(const QString& hand, const QString& family, int tti,
+                         const SEquipmentLayoutRequest& request, QJsonArray* components,
+                         QJsonArray* placeholders, QJsonArray* diagnostics,
+                         QStringList* matchedComponents)
+{
+    const QString expected = hand + componentSuffix(family, tti);
+    if(request.assemblyParts.isEmpty())
+    {
+        components->append(expected);
+        matchedComponents->append(expected);
+        return;
+    }
+    for(const QString& part : request.assemblyParts)
+        if(part.compare(expected, Qt::CaseInsensitive) == 0)
+        {
+            components->append(part);
+            matchedComponents->append(part);
+            return;
+        }
+    placeholders->append(expected);
+    diagnostics->append("Selected model assembly has no component " + expected);
+}
+
+QStringList armorSlots(const QString& type)
+{
+    static const QMap<QString, QStringList> armorPartMap = {
+        {"helm", {"hd"}}, {"plate", {"bd"}}, {"leggings", {"hp"}},
+        {"shirt", {"lh1", "rh1"}}, {"pants", {"ll1", "rl1"}},
+        {"boots", {"ll2", "ll3", "rl2", "rl3"}},
+        {"gloves", {"lh2", "lh3", "rh2", "rh3"}}
+    };
+    return armorPartMap.value(type.trimmed().toLower());
+}
+
+QString equipmentTextureName(const QString& model, const QString& itemType, int typeId,
+                             int tti, int textureVariant, const QString& materialCode,
+                             bool weapon)
+{
+    static const QMap<QString, QString> armorCodes = {
+        {"helm", "hl"}, {"plate", "pl"}, {"leggings", "lg"}, {"shirt", "sh"},
+        {"pants", "pt"}, {"boots", "bt"}, {"gloves", "gl"}
+    };
+    static const QMap<int, QString> weaponCodes = {
+        {0, "sw"}, {1, "ax"}, {2, "dg"}, {3, "sp"}, {4, "hm"},
+        {5, "bw"}, {6, "cb"}, {9, "sh"}, {10, "sp"}, {11, "sf"},
+        {12, "sd"}, {13, "ax"}, {14, "hm"}, {15, "sf"}
+    };
+    const QString code = weapon ? weaponCodes.value(typeId)
+                                : armorCodes.value(itemType.trimmed().toLower());
+    if(code.isEmpty() || tti <= 0 || materialCode.isEmpty())
+        return QString();
+    return QString("%1%2_%3.%4.%5.%6.mmp")
+        .arg(model.trimmed().toLower(), code)
+        .arg(tti - 1, 2, 10, QChar('0')).arg(materialCode.trimmed().toLower())
+        .arg(qMax(0, textureVariant - 1)).arg(!weapon && itemType.compare("helm", Qt::CaseInsensitive) != 0
+                                               ? "x4" : "x2");
+}
+
+QStringList appendArmorComponents(const ei::SItemDatabaseRecord& item,
+                                  const SEquipmentLayoutRequest& request,
+                                  QJsonArray* components, QJsonArray* placeholders,
+                                  QJsonArray* diagnostics)
+{
+    QStringList matched;
+    const QStringList armorParts = armorSlots(item.type);
+    if(armorParts.isEmpty())
+    {
+        placeholders->append(item.name);
+        diagnostics->append(item.name + ": unsupported armor slot type " + item.type);
+        return matched;
+    }
+    const QString suffix = componentSuffix("armor", item.textureType1);
+    for(const QString& slot : armorParts)
+    {
+        const QString expected = slot + suffix;
+        if(request.assemblyParts.isEmpty())
+        {
+            components->append(expected);
+            matched.append(expected);
+            continue;
+        }
+        int index = -1;
+        for(int candidate = 0; candidate < request.assemblyParts.size(); ++candidate)
+            if(request.assemblyParts.at(candidate).compare(expected, Qt::CaseInsensitive) == 0)
+            {
+                index = candidate;
+                break;
+            }
+        if(index >= 0)
+        {
+            const QString actual = request.assemblyParts.at(index);
+            components->append(actual);
+            matched.append(actual);
+        }
+        else
+        {
+            placeholders->append(expected);
+            diagnostics->append("Selected model assembly has no component " + expected);
+        }
+    }
+    return matched;
+}
+
 }
 
 SRuntimeProviderResult resolveDatabaseAppearance(
-    const QString& providerId,
+    const QString& providerId, bool jmv,
     const QSharedPointer<const ei::SProfileDatabaseSnapshot>& database,
     const SCharacterAppearanceRequest& request, QJsonObject* appearance)
 {
@@ -138,9 +274,13 @@ SRuntimeProviderResult resolveDatabaseAppearance(
     if(race == database->raceModels.constEnd())
         return failure("appearance.race.missing", "Monster base-race link is absent from RaceModels.");
     const QStringList primary = expandedList(race->primaryTextures);
-    const QString primaryTexture = monsterTextureName(race->model, primary, monster->skinIndex);
+    const QString primaryTexture = jmv
+        ? jmvMonsterTextureName(request, race->model, primary, monster->skinIndex)
+        : monsterTextureName(race->model, primary, monster->skinIndex);
     if(primaryTexture.isEmpty())
-        return failure("appearance.skin.invalid", "Monster skin index is outside the RaceModels primary texture list.");
+        return failure("appearance.skin.invalid", jmv
+            ? "JMV database model and embedded resolved texture are inconsistent."
+            : "Monster skin index is outside the RaceModels primary texture list.");
     const QStringList secondary = expandedList(race->secondaryTextures);
     appearance->insert("source", "profileDatabase");
     appearance->insert("model", race->model);
@@ -171,6 +311,8 @@ SRuntimeProviderResult resolveEquipmentLayout(
     equipmentLayout->insert("source", request.dataSource == EUnitVisualDataSource::EmbeddedMob
         ? "embeddedMob" : "profileDatabase");
     QJsonArray components, placeholders, diagnostics;
+    QJsonObject componentTextures;
+    QJsonArray replacedParts;
     if(database.isNull())
         return failure("equipment.database.unavailable", "Item-name interpretation requires the active profile database.");
 
@@ -190,15 +332,45 @@ SRuntimeProviderResult resolveEquipmentLayout(
             diagnostics.append(reference + ": armor prototype is absent from the active database");
             continue;
         }
-        if(item->textureType1 >= 0)
-            appendComponents("armor", item->textureType1, request, &components, &placeholders, &diagnostics);
-        if(item->textureType2 > 0)
-            appendComponents("armor", item->textureType2, request, &components, &placeholders, &diagnostics);
+        const QStringList matched = appendArmorComponents(item.value(), request, &components,
+                                                          &placeholders, &diagnostics);
+        const QString materialName = itemMaterial(reference);
+        const auto material = database->materialRecords.constFind(materialName);
+        if(materialName.isEmpty() || material == database->materialRecords.constEnd()
+                || material->type.compare(item->materialType, Qt::CaseInsensitive) != 0)
+        {
+            placeholders.append(reference);
+            diagnostics.append(reference + ": material is absent or incompatible with armor material type "
+                               + item->materialType);
+        }
+        else
+        {
+            const QString texture = equipmentTextureName(request.model, item->type, item->typeId,
+                item->textureType1, item->textureType2, material->code, false);
+            if(texture.isEmpty())
+            {
+                placeholders.append(reference);
+                diagnostics.append(reference + ": armor texture resource name cannot be derived");
+            }
+            else
+                for(const QString& component : matched) componentTextures.insert(component, texture);
+        }
+        if(item->type.compare("helm", Qt::CaseInsensitive) != 0)
+            for(const QString& slot : armorSlots(item->type)) replacedParts.append(slot);
     }
 
     struct Weapon { QString reference; ei::SItemDatabaseRecord item; EWeaponClass kind; };
     QVector<Weapon> weapons;
-    for(const QString& reference : request.weapons)
+    QStringList weaponReferences = request.weapons;
+    const int weaponLimit = jmv ? 2 : 1;
+    if(weaponReferences.size() > weaponLimit)
+    {
+        diagnostics.append(jmv
+            ? "Only the first two JMV weapon slots participate in layout resolution."
+            : "Base supports one one-handed or ranged weapon; additional weapons are ignored.");
+        weaponReferences = weaponReferences.mid(0, weaponLimit);
+    }
+    for(const QString& reference : weaponReferences)
     {
         const auto item = database->items.constFind(itemPrototype(reference));
         if(item == database->items.constEnd() || item->category != "weapons")
@@ -212,11 +384,6 @@ SRuntimeProviderResult resolveEquipmentLayout(
 
     QString layout = "ordinary";
     bool renderWeapons = true;
-    if(!jmv && weapons.size() > 1)
-    {
-        diagnostics.append("Base supports one one-handed or ranged weapon; additional weapons are ignored.");
-        weapons.resize(1);
-    }
     if(!jmv && !weapons.isEmpty()
             && weapons.first().kind != EWeaponClass::OneHand && weapons.first().kind != EWeaponClass::Ranged)
     {
@@ -246,9 +413,6 @@ SRuntimeProviderResult resolveEquipmentLayout(
                 diagnostics.append("JMV weapon combination has no established equipment layout.");
                 renderWeapons = false;
             }
-            if(weapons.size() > 2)
-                diagnostics.append("Only the first two JMV weapon slots participate in layout resolution.");
-            weapons.resize(2);
         }
         else
             renderWeapons = gates.ordinary;
@@ -259,8 +423,9 @@ SRuntimeProviderResult resolveEquipmentLayout(
         }
     }
     if(renderWeapons)
-        for(const Weapon& weapon : weapons)
+        for(int weaponIndex = 0; weaponIndex < weapons.size(); ++weaponIndex)
         {
+            const Weapon& weapon = weapons.at(weaponIndex);
             const QString family = weaponFamily(weapon.item.typeId);
             if(family.isEmpty() || weapon.item.textureType1 < 0)
             {
@@ -268,12 +433,44 @@ SRuntimeProviderResult resolveEquipmentLayout(
                 diagnostics.append(weapon.reference + ": weapon TTI component mapping is incomplete");
                 continue;
             }
-            appendComponents(family, weapon.item.textureType1, request, &components, &placeholders, &diagnostics);
-            if(weapon.item.textureType2 > 0)
-                appendComponents(family, weapon.item.textureType2, request, &components, &placeholders, &diagnostics);
+            QStringList matched;
+            if(weapon.kind == EWeaponClass::Shield)
+                appendHandComponent("lh2", family, weapon.item.textureType1, request, &components,
+                                    &placeholders, &diagnostics, &matched);
+            else if(weapon.kind == EWeaponClass::OneHand || weapon.kind == EWeaponClass::TwoHand)
+                appendHandComponent(weaponIndex == 0 ? "rh3" : "lh3", family,
+                                    weapon.item.textureType1, request, &components,
+                                    &placeholders, &diagnostics, &matched);
+            else
+                appendComponents(family, weapon.item.textureType1, request, &components,
+                                 &placeholders, &diagnostics, &matched);
+            const QString materialName = itemMaterial(weapon.reference);
+            const auto material = database->materialRecords.constFind(materialName);
+            if(materialName.isEmpty() || material == database->materialRecords.constEnd()
+                    || material->type.compare(weapon.item.materialType, Qt::CaseInsensitive) != 0)
+            {
+                placeholders.append(weapon.reference);
+                diagnostics.append(weapon.reference + ": material is absent or incompatible with weapon material type "
+                                   + weapon.item.materialType);
+            }
+            else
+            {
+                const QString texture = equipmentTextureName(request.model, weapon.item.type,
+                    weapon.item.typeId, weapon.item.textureType1, weapon.item.textureType2,
+                    material->code, true);
+                if(texture.isEmpty())
+                {
+                    placeholders.append(weapon.reference);
+                    diagnostics.append(weapon.reference + ": weapon texture resource name cannot be derived");
+                }
+                else
+                    for(const QString& component : matched) componentTextures.insert(component, texture);
+            }
         }
     equipmentLayout->insert("layout", layout);
     equipmentLayout->insert("components", components);
+    equipmentLayout->insert("componentTextures", componentTextures);
+    equipmentLayout->insert("replacedParts", replacedParts);
     equipmentLayout->insert("placeholders", placeholders);
     equipmentLayout->insert("diagnostics", diagnostics);
     SRuntimeProviderResult result;
