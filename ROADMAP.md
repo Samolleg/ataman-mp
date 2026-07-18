@@ -149,7 +149,8 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
     action state; no replacement in-game command is needed.
   - Endurance **Stop Test** and normal process exit must remain functional.
 - [x] Expose **Stop JMV Map Test** in Endurance while its owned game process is
-  active, with customizable `Shift+Esc` as the default shortcut.
+  active, with customizable `Shift+Esc` as the default shortcut
+  ([implementation](https://github.com/Ilufus/ei-mapper-endurance/commit/5f693b2)).
 - [ ] Replace loader-return timing with a reliable runtime-readiness gate.
   - A completed main-menu map load does not prove UI/session initialization is
     finished on all hardware.
