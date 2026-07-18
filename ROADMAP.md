@@ -5,7 +5,25 @@ An item is checked only after its implementation has landed and received the
 listed level of validation. New findings and wishlist requests belong here so
 they do not get lost between test sessions.
 
-Current development release: `0.1.0-alpha.49`.
+Current development line: `0.2.0`.
+
+## Version milestones
+
+- `0.1.x` is the completed foundation and MOB-hardening campaign. It established
+  lossless/provenance-checked MOB editing, backups, diagnostics, resource
+  profiles, independent file workflows, script editing, diff, and the first
+  experimental JMV launch bridge.
+- `0.2.0` is the hardened MOB editor and JMV direct-to-gameplay milestone. The
+  version line begins now; the first immutable `0.2.0` tester package follows
+  runtime confirmation of Alpha.58's selected-zone, one-player, intro-skip, and
+  isolated-save contract.
+- `0.2.x` covers direct-launch stabilization and hot reload, multi-MOB/workspace
+  editing, collections, resource/performance work, and related usability polish.
+- `0.3.0` is the first landscape/MPR editing milestone: lossless MPR/SEC writes,
+  height editing, terrain texture painting, and overlay surfaces such as water,
+  swamp, ice, and lava.
+- `1.0.0` remains the first production release after the complete Base/JMV
+  compatibility and game-validation matrix passes.
 
 ## Implementation evidence
 
@@ -76,6 +94,12 @@ and the corrected script workflow.
 
 ## Current focus
 
+The MOB hardening implementation is complete. Current `0.2.x` work validates
+and stabilizes the playable JMV launch path, then adds Endurance-owned hot
+reload. Multi-MOB/workspace and collection workflows follow without reopening
+the serializer redesign. Landscape writes remain disabled until the dedicated
+`0.3.0` MPR/SEC workstream.
+
 - [x] Implement the final hardening-alpha save scope: normal mixed leaf edits,
   exact same-MOB copy/paste and deletion, known patrol/look-point structure, and
   selected same-type raw templates for object creation.
@@ -118,7 +142,8 @@ and the corrected script workflow.
   multi-row and structured-value paste as one undo action; remove viewport
   Shift-click object shortcuts; and disable MOB Parameters without an active MOB.
   ([`5192c4d`](https://github.com/Ilufus/ei-mapper-endurance/commit/5192c4d))
-- [ ] Finish lossless MPR archive preservation before enabling landscape editing.
+- [ ] For `0.3.0`, finish lossless MPR archive preservation before enabling
+  landscape editing.
 
 MOB hardening implementation is complete for the supported edit classes. The
 remaining gate is closed-group validation of alpha.40 and any concrete bugs it
@@ -548,8 +573,13 @@ MOB editing does not imply that landscape saving is supported.
   ([`db3fa31`](https://github.com/Ilufus/ei-mapper-endurance/commit/db3fa31))
 - [ ] Following private alpha: fix issues found by the closed test group and
   publish a concise Base/JMV coverage summary; no new hardening architecture.
-- [ ] `0.1.0-beta.1`: correct indexed resources and responsive fast loading.
-- [ ] `0.1.0-rc.1`: independent workspace workflow, UI, script editing, and completed safety validation.
+- [ ] Publish the immutable `0.2.0` tester package after Alpha.58 proves one
+  player, selected-zone metadata, briefing behavior, intro suppression, and
+  complete isolation from live campaign saves.
+- [ ] Continue `0.2.x` with hot reload, multi-MOB/workspace editing,
+  collections, indexed-resource performance, and UI polish.
+- [ ] Begin `0.3.0` only with lossless MPR/SEC preservation in place; terrain
+  editing must not fall back to the legacy rebuilding serializer.
 - [ ] `1.0.0`: JMV-ready release passing the full corpus, MobExplorer, and in-game validation matrix.
 - [ ] Package releases with executable, Qt runtime, source snapshot, GPL notices, build instructions, checksums, and rollback guidance.
 - [ ] Consider Qt6/CMake modernization only after 1.0; use a major version if compatibility breaks.
@@ -611,7 +641,8 @@ or move it into the relevant section above without losing its history.
   tabs with another dock, approximating the useful UE5 layout behavior within
   Qt5's supported docking model.
 
-- [ ] Add a supported **Landscape Editing** mode for MPR/SEC terrain.
+- [ ] Add a supported **Landscape Editing** mode for MPR/SEC terrain
+  (**target: 0.3.0**).
   - Gate editing on lossless MPR/SEC saves: preserve untouched archive members,
     sector bytes, names, ordering, alignment, and metadata, then stage, reopen,
     and validate every save before replacing the destination.
@@ -662,9 +693,11 @@ or move it into the relevant section above without losing its history.
   manual keyboard entry with case-insensitive filtering.
   ([`06d1c9b`](https://github.com/Ilufus/ei-mapper-endurance/commit/06d1c9b))
 - [ ] Add periodic autosave with recoverable, versioned backup states.
-- [ ] Add a command to launch the currently loaded MPR and MOB set directly in
-  game for testing (**JMV-only stretch goal**; gated by the profile provider and
-  non-destructive feasibility protocol above).
+- [x] Add an experimental command to launch the currently loaded MPR and MOB
+  set directly in game for testing (JMV profile only). Alpha.57 proved the
+  direct-to-gameplay mechanism; Alpha.58 is the selected-zone and isolated-save
+  runtime-validation candidate. Hot reload remains pending under `0.2.x`.
+  ([`1810546`](https://github.com/Ilufus/ei-mapper-endurance/commit/18105469f0b0f5cd46189824ca65dbdde3f3ce23))
 - [ ] Add a resizable workflow-log panel along the bottom of the viewport, similar to the UE4 output log.
 - [ ] Add a blocking, phase-aware progress dialog for MOB/MPR saves, including
   serialization, validation, backup, and atomic replacement. Never imply that
