@@ -53,7 +53,7 @@ class CTerrainEditModel
 {
 public:
     bool load(const CMprDocument& document, CValidationReport* report = nullptr);
-    bool loadSources(int sectorCountX, int sectorCountY,
+    bool loadSources(int sectorCountX, int sectorCountY, float maxZ,
                      const QVector<STerrainSectorSource>& sources,
                      CValidationReport* report = nullptr);
 
@@ -95,6 +95,8 @@ private:
     };
 
     int globalIndex(int x, int y) const;
+    quint32 packedNormal(int globalX, int globalY) const;
+    bool normalNeighborhoodIsEditable(int globalX, int globalY) const;
     float brushWeight(float distance, float radius, ETerrainBrushFalloff falloff) const;
     STerrainHeightCommand makeBlendedCommand(const QString& description,
                                              const STerrainBrush& brush,
@@ -105,7 +107,11 @@ private:
     int m_sectorCountY{0};
     int m_vertexCountX{0};
     int m_vertexCountY{0};
+    float m_maxZ{0.0f};
     QVector<quint16> m_heights;
+    QVector<quint16> m_originalHeights;
+    QVector<qint8> m_xOffsets;
+    QVector<qint8> m_yOffsets;
     QVector<QVector<SVertexRef>> m_refs;
     QVector<bool> m_conflictedVertices;
     QVector<SSector> m_sectors;

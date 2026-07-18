@@ -1,5 +1,6 @@
 #include <QtTest>
 #include <QCryptographicHash>
+#include <QSet>
 #include <QTemporaryFile>
 #include <QTemporaryDir>
 
@@ -201,9 +202,20 @@ QByteArray syntheticLandSector(quint16 height)
     stream << quint32(0xCF4BF774) << quint8(0);
     for(int y = 0; y < 33; ++y)
         for(int x = 0; x < 33; ++x)
-            stream << qint8(0) << qint8(0) << height << quint32(0xFA07D3E8);
+            stream << qint8(0) << qint8(0) << height
+                   << quint32((1000u << 22) | (1000u << 11) | 1000u);
     bytes.append(QByteArray(16 * 16 * 2, '\0'));
     return bytes;
+}
+
+quint32 sectorPackedNormal(const QByteArray& sector, int x, int y)
+{
+    const int offset = 5 + (y * 33 + x) * 8 + 4;
+    QDataStream stream(sector.mid(offset, 4));
+    stream.setByteOrder(QDataStream::LittleEndian);
+    quint32 value = 0;
+    stream >> value;
+    return value;
 }
 
 quint16 sectorHeight(const QByteArray& sector, int x, int y)
@@ -272,6 +284,7 @@ private slots:
     void failedStagedMprSaveLeavesNoDestination();
     void canonicalTerrainSeamsAreEditedAndUndoneTogether();
     void terrainBrushToolsAreDeterministicAndFailClosed();
+    void terrainHeightTransactionReopensAndPreservesOverlay();
     void conflictingTerrainSeamIsPreservedAndNotEditable();
     void malformedMprTableIsRejected();
     void stagedMobIsReopenedWithoutCreatingDestination();
@@ -1046,7 +1059,8 @@ void EnduranceDocumentTests::canonicalTerrainSeamsAreEditedAndUndoneTogether()
 {
     CTerrainEditModel terrain;
     CValidationReport loadReport;
-    QVERIFY2(terrain.loadSources(2, 1, twoSectorTerrain(1000), &loadReport),
+    const QVector<STerrainSectorSource> sources = twoSectorTerrain(1000);
+    QVERIFY2(terrain.loadSources(2, 1, 100.0f, sources, &loadReport),
              qPrintable(loadReport.toText()));
     QCOMPARE(terrain.vertexCountX(), 65);
     QCOMPARE(terrain.vertexCountY(), 33);
@@ -1066,24 +1080,41 @@ void EnduranceDocumentTests::canonicalTerrainSeamsAreEditedAndUndoneTogether()
     QCOMPARE(sectorHeight(terrain.sectorPayload(1, 0), 0, 10), quint16(1250));
     QCOMPARE(history.undoCount(), 1);
 
+    CMprEditTransaction firstTransaction("height candidate");
+    CValidationReport firstSaveReport;
+    QVERIFY2(terrain.appendSectorEdits(&firstTransaction, &firstSaveReport),
+             qPrintable(firstSaveReport.toText()));
+    QCOMPARE(firstTransaction.edits().size(), 2);
+    QCOMPARE(sectorPackedNormal(firstTransaction.edits().at(0).replacementPayload, 32, 10),
+             sectorPackedNormal(firstTransaction.edits().at(1).replacementPayload, 0, 10));
+    QCOMPARE(sectorPackedNormal(firstTransaction.edits().at(0).replacementPayload, 5, 5),
+             sectorPackedNormal(sources.at(0).payload, 5, 5));
+
     QVERIFY(history.undo(&terrain));
     QCOMPARE(terrain.height(32, 10), quint16(1000));
     QCOMPARE(sectorHeight(terrain.sectorPayload(0, 0), 32, 10), quint16(1000));
     QCOMPARE(sectorHeight(terrain.sectorPayload(1, 0), 0, 10), quint16(1000));
     QVERIFY(!terrain.isDirty());
+    CMprEditTransaction undoneTransaction("undone height candidate");
+    QVERIFY(terrain.appendSectorEdits(&undoneTransaction));
+    QVERIFY(undoneTransaction.isEmpty());
     QVERIFY(history.redo(&terrain));
     QCOMPARE(terrain.height(32, 10), quint16(1250));
 
-    CMprEditTransaction transaction("height candidate");
-    CValidationReport saveReport;
-    QVERIFY(!terrain.appendSectorEdits(&transaction, &saveReport));
-    QVERIFY(saveReport.hasErrors());
+    CMprEditTransaction redoneTransaction("redone height candidate");
+    CValidationReport redoneSaveReport;
+    QVERIFY2(terrain.appendSectorEdits(&redoneTransaction, &redoneSaveReport),
+             qPrintable(redoneSaveReport.toText()));
+    QCOMPARE(redoneTransaction.edits().size(), firstTransaction.edits().size());
+    for(int index = 0; index < firstTransaction.edits().size(); ++index)
+        QCOMPARE(redoneTransaction.edits().at(index).replacementPayload,
+                 firstTransaction.edits().at(index).replacementPayload);
 }
 
 void EnduranceDocumentTests::terrainBrushToolsAreDeterministicAndFailClosed()
 {
     CTerrainEditModel terrain;
-    QVERIFY(terrain.loadSources(2, 1, twoSectorTerrain(1000)));
+    QVERIFY(terrain.loadSources(2, 1, 100.0f, twoSectorTerrain(1000)));
     CTerrainEditHistory history;
 
     STerrainBrush point;
@@ -1114,6 +1145,76 @@ void EnduranceDocumentTests::terrainBrushToolsAreDeterministicAndFailClosed()
     QVERIFY(staleReport.hasErrors());
 }
 
+void EnduranceDocumentTests::terrainHeightTransactionReopensAndPreservesOverlay()
+{
+    const QByteArray bytes = syntheticMpr();
+    CMprDocument baseline;
+    CValidationReport baselineReport;
+    QVERIFY2(baseline.loadBytes(bytes, "overlay-height-baseline.mpr", &baselineReport),
+             qPrintable(baselineReport.toText()));
+    QCOMPARE(baseline.sectors().size(), 1);
+    QVERIFY(baseline.sectors().front().hasOverlay);
+
+    CTerrainEditModel terrain;
+    CValidationReport terrainReport;
+    QVERIFY2(terrain.load(baseline, &terrainReport), qPrintable(terrainReport.toText()));
+    STerrainBrush brush;
+    brush.centerX = 10.0f;
+    brush.centerY = 10.0f;
+    brush.radius = 0.0f;
+    brush.falloff = ETerrainBrushFalloff::Constant;
+    CTerrainEditHistory history;
+    QVERIFY(history.execute(&terrain, terrain.makeRaiseLower(brush, 2000.0f)));
+
+    CMprEditTransaction transaction("raise one overlay-sector land vertex");
+    CValidationReport editReport;
+    QVERIFY2(terrain.appendSectorEdits(&transaction, &editReport),
+             qPrintable(editReport.toText()));
+    QCOMPARE(transaction.edits().size(), 1);
+    const SMprMemberEdit edit = transaction.edits().front();
+    const QByteArray originalSector = baseline.memberPayload(edit.memberName);
+    QCOMPARE(edit.replacementPayload.size(), originalSector.size());
+    const int overlayOffset = int(baseline.sectors().front().overlayVertexOffset);
+    QVERIFY(overlayOffset > 0);
+    QCOMPARE(edit.replacementPayload.mid(overlayOffset), originalSector.mid(overlayOffset));
+    QCOMPARE(sectorHeight(edit.replacementPayload, 10, 10), quint16(2000));
+    QCOMPARE(sectorPackedNormal(edit.replacementPayload, 2, 2),
+             sectorPackedNormal(originalSector, 2, 2));
+    QSet<int> allowedChangedBytes;
+    const int changedVertexOffset = 5 + (10 * 33 + 10) * 8;
+    allowedChangedBytes.insert(changedVertexOffset + 2);
+    allowedChangedBytes.insert(changedVertexOffset + 3);
+    for(int y = 9; y <= 11; ++y)
+    {
+        for(int x = 9; x <= 11; ++x)
+        {
+            const int normalOffset = 5 + (y * 33 + x) * 8 + 4;
+            for(int byte = 0; byte < 4; ++byte)
+                allowedChangedBytes.insert(normalOffset + byte);
+        }
+    }
+    for(int offset = 0; offset < originalSector.size(); ++offset)
+    {
+        if(!allowedChangedBytes.contains(offset))
+            QCOMPARE(edit.replacementPayload.at(offset), originalSector.at(offset));
+    }
+
+    QByteArray candidateBytes;
+    CValidationReport transactionReport;
+    QVERIFY2(baseline.applyTransaction(transaction, &candidateBytes, &transactionReport),
+             qPrintable(transactionReport.toText()));
+    CMprDocument candidate;
+    CValidationReport candidateReport;
+    QVERIFY2(candidate.loadBytes(candidateBytes, "overlay-height-candidate.mpr", &candidateReport),
+             qPrintable(candidateReport.toText()));
+    QCOMPARE(candidate.memberPayload("unknown.bin"), baseline.memberPayload("unknown.bin"));
+    QCOMPARE(candidate.memberPayload("caveset.mp"), baseline.memberPayload("caveset.mp"));
+    QCOMPARE(candidate.memberPayload(edit.memberName), edit.replacementPayload);
+    const CMprSemanticDiff diff = CMprSemanticDiff::compare(baseline, candidate);
+    QCOMPARE(diff.entries().size(), 1);
+    QCOMPARE(diff.entries().front().memberName, edit.memberName);
+}
+
 void EnduranceDocumentTests::conflictingTerrainSeamIsPreservedAndNotEditable()
 {
     QVector<STerrainSectorSource> sources = twoSectorTerrain(1000);
@@ -1125,7 +1226,7 @@ void EnduranceDocumentTests::conflictingTerrainSeamIsPreservedAndNotEditable()
 
     CTerrainEditModel terrain;
     CValidationReport loadReport;
-    QVERIFY(terrain.loadSources(2, 1, sources, &loadReport));
+    QVERIFY(terrain.loadSources(2, 1, 100.0f, sources, &loadReport));
     QVERIFY(terrain.hasSeamConflicts());
     QCOMPARE(sectorHeight(terrain.sectorPayload(0, 0), 32, 10), quint16(1000));
     QCOMPARE(sectorHeight(terrain.sectorPayload(1, 0), 0, 10), quint16(2000));
@@ -1140,6 +1241,15 @@ void EnduranceDocumentTests::conflictingTerrainSeamIsPreservedAndNotEditable()
     QVERIFY(!terrain.apply(command, true, &editReport));
     QCOMPARE(sectorHeight(terrain.sectorPayload(0, 0), 32, 10), quint16(1000));
     QCOMPARE(sectorHeight(terrain.sectorPayload(1, 0), 0, 10), quint16(2000));
+
+    brush.centerX = 31.0f;
+    const STerrainHeightCommand adjacent = terrain.makeRaiseLower(brush, 100.0f);
+    QVERIFY(terrain.apply(adjacent, true));
+    CMprEditTransaction transaction("normal touches conflicting seam");
+    CValidationReport serializationReport;
+    QVERIFY(!terrain.appendSectorEdits(&transaction, &serializationReport));
+    QVERIFY(serializationReport.hasErrors());
+    QVERIFY(transaction.isEmpty());
 }
 
 void EnduranceDocumentTests::malformedMprTableIsRejected()

@@ -1,6 +1,7 @@
 #include "terrain_edit_model.h"
 
 #include <QCryptographicHash>
+#include <QSet>
 #include <QtEndian>
 
 #include <cmath>
@@ -29,6 +30,55 @@ void writeHeight(QByteArray& payload, int localX, int localY, quint16 height)
     qToLittleEndian<quint16>(height, encoded);
     payload[offset] = char(encoded[0]);
     payload[offset + 1] = char(encoded[1]);
+}
+
+qint8 readOffset(const QByteArray& payload, int localX, int localY, int component)
+{
+    const int offset = kLandVertexOffset + (localY * kSectorVertices + localX) * kVertexSize
+        + component;
+    return qint8(payload.at(offset));
+}
+
+void writePackedNormal(QByteArray& payload, int localX, int localY, quint32 packed)
+{
+    const int offset = kLandVertexOffset + (localY * kSectorVertices + localX) * kVertexSize + 4;
+    uchar encoded[4];
+    qToLittleEndian<quint32>(packed, encoded);
+    for(int byte = 0; byte < 4; ++byte)
+        payload[offset + byte] = char(encoded[byte]);
+}
+
+struct SVector3
+{
+    SVector3(double valueX = 0.0, double valueY = 0.0, double valueZ = 0.0)
+        : x(valueX), y(valueY), z(valueZ) {}
+    double x;
+    double y;
+    double z;
+};
+
+SVector3 subtract(const SVector3& left, const SVector3& right)
+{
+    return {left.x - right.x, left.y - right.y, left.z - right.z};
+}
+
+SVector3 cross(const SVector3& left, const SVector3& right)
+{
+    return {left.y * right.z - left.z * right.y,
+            left.z * right.x - left.x * right.z,
+            left.x * right.y - left.y * right.x};
+}
+
+bool normalize(SVector3* value)
+{
+    const double length = std::sqrt(value->x * value->x + value->y * value->y
+                                    + value->z * value->z);
+    if(length <= 0.000000001)
+        return false;
+    value->x /= length;
+    value->y /= length;
+    value->z /= length;
+    return true;
 }
 
 quint16 clampedHeight(float value)
@@ -61,10 +111,11 @@ bool CTerrainEditModel::load(const CMprDocument& document, CValidationReport* re
         sources.append(source);
     }
     return loadSources(int(document.mapInfo().sectorCountX),
-                       int(document.mapInfo().sectorCountY), sources, report);
+                       int(document.mapInfo().sectorCountY), document.mapInfo().maxZ,
+                       sources, report);
 }
 
-bool CTerrainEditModel::loadSources(int sectorCountX, int sectorCountY,
+bool CTerrainEditModel::loadSources(int sectorCountX, int sectorCountY, float maxZ,
                                     const QVector<STerrainSectorSource>& sources,
                                     CValidationReport* report)
 {
@@ -72,16 +123,20 @@ bool CTerrainEditModel::loadSources(int sectorCountX, int sectorCountY,
     m_sectorCountY = 0;
     m_vertexCountX = 0;
     m_vertexCountY = 0;
+    m_maxZ = 0.0f;
     m_heights.clear();
+    m_originalHeights.clear();
+    m_xOffsets.clear();
+    m_yOffsets.clear();
     m_refs.clear();
     m_conflictedVertices.clear();
     m_sectors.clear();
     m_sectorLookup.clear();
-    if(sectorCountX <= 0 || sectorCountY <= 0)
+    if(sectorCountX <= 0 || sectorCountY <= 0 || !std::isfinite(maxZ) || maxZ <= 0.0f)
     {
         if(report)
             report->add("terrain.dimensions", EValidationSeverity::Error,
-                        "Terrain sector dimensions must be positive");
+                        "Terrain sector dimensions and maxZ must be positive");
         return false;
     }
 
@@ -126,10 +181,13 @@ bool CTerrainEditModel::loadSources(int sectorCountX, int sectorCountY,
 
     m_sectorCountX = sectorCountX;
     m_sectorCountY = sectorCountY;
+    m_maxZ = maxZ;
     m_vertexCountX = sectorCountX * kSectorStride + 1;
     m_vertexCountY = sectorCountY * kSectorStride + 1;
     const int globalCount = m_vertexCountX * m_vertexCountY;
     m_heights.fill(0, globalCount);
+    m_xOffsets.fill(0, globalCount);
+    m_yOffsets.fill(0, globalCount);
     m_refs.resize(globalCount);
     m_conflictedVertices.fill(false, globalCount);
     QVector<bool> initialized(globalCount, false);
@@ -150,17 +208,22 @@ bool CTerrainEditModel::loadSources(int sectorCountX, int sectorCountY,
                     const int globalY = sectorY * kSectorStride + localY;
                     const int index = globalIndex(globalX, globalY);
                     const quint16 value = readHeight(payload, localX, localY);
+                    const qint8 xOffset = readOffset(payload, localX, localY, 0);
+                    const qint8 yOffset = readOffset(payload, localX, localY, 1);
                     if(!initialized.at(index))
                     {
                         initialized[index] = true;
                         m_heights[index] = value;
+                        m_xOffsets[index] = xOffset;
+                        m_yOffsets[index] = yOffset;
                     }
-                    else if(m_heights.at(index) != value)
+                    else if(m_heights.at(index) != value || m_xOffsets.at(index) != xOffset
+                            || m_yOffsets.at(index) != yOffset)
                     {
                         m_conflictedVertices[index] = true;
                         if(report)
                             report->add("terrain.seam_conflict", EValidationSeverity::Warning,
-                                QString("Shared vertex %1,%2 differs across sectors; editing it is disabled")
+                                QString("Shared vertex %1,%2 has conflicting geometry across sectors; editing it is disabled")
                                     .arg(globalX).arg(globalY), m_sectors.at(sectorIndex).source.memberName);
                     }
                     SVertexRef ref;
@@ -172,6 +235,7 @@ bool CTerrainEditModel::loadSources(int sectorCountX, int sectorCountY,
             }
         }
     }
+    m_originalHeights = m_heights;
     return true;
 }
 
@@ -413,14 +477,136 @@ bool CTerrainEditModel::appendSectorEdits(CMprEditTransaction* transaction,
                         "No MPR transaction was supplied");
         return false;
     }
-    if(isDirty())
+    QSet<int> changedVertices;
+    for(int index = 0; index < m_heights.size(); ++index)
+        if(m_heights.at(index) != m_originalHeights.at(index))
+            changedVertices.insert(index);
+    if(changedVertices.isEmpty())
+        return true;
+
+    QSet<int> affectedNormals;
+    for(int index : changedVertices)
     {
-        if(report)
-            report->add("terrain.normals_pending", EValidationSeverity::Error,
-                        "Height serialization remains disabled until affected packed normals are recalculated");
-        return false;
+        const int centerX = index % m_vertexCountX;
+        const int centerY = index / m_vertexCountX;
+        for(int offsetY = -1; offsetY <= 1; ++offsetY)
+        {
+            for(int offsetX = -1; offsetX <= 1; ++offsetX)
+            {
+                const int x = centerX + offsetX;
+                const int y = centerY + offsetY;
+                if(x >= 0 && x < m_vertexCountX && y >= 0 && y < m_vertexCountY)
+                    affectedNormals.insert(globalIndex(x, y));
+            }
+        }
+    }
+
+    QVector<QByteArray> replacements;
+    replacements.reserve(m_sectors.size());
+    for(const SSector& sector : m_sectors)
+        replacements.append(sector.currentPayload);
+    for(int index : affectedNormals)
+    {
+        const int x = index % m_vertexCountX;
+        const int y = index / m_vertexCountX;
+        if(!normalNeighborhoodIsEditable(x, y))
+        {
+            if(report)
+                report->add("terrain.normal_seam", EValidationSeverity::Error,
+                            "An affected normal depends on a pre-existing conflicting seam",
+                            QString("%1,%2").arg(x).arg(y));
+            return false;
+        }
+        const quint32 packed = packedNormal(x, y);
+        for(const SVertexRef& ref : m_refs.at(index))
+            writePackedNormal(replacements[ref.sectorIndex], ref.localX, ref.localY, packed);
+    }
+
+    int editedSectorCount = 0;
+    for(int index = 0; index < m_sectors.size(); ++index)
+    {
+        const SSector& sector = m_sectors.at(index);
+        if(replacements.at(index) == sector.source.payload)
+            continue;
+        transaction->replaceMemberPayload(sector.source.memberName,
+                                          sector.source.expectedPayloadSha256,
+                                          replacements.at(index));
+        ++editedSectorCount;
+    }
+    if(report)
+        report->add("terrain.transaction", EValidationSeverity::Info,
+                    QString("Prepared %1 sector patch(es) for %2 changed height vertex/vertices and %3 affected normal(s)")
+                        .arg(editedSectorCount).arg(changedVertices.size()).arg(affectedNormals.size()));
+    return true;
+}
+
+bool CTerrainEditModel::normalNeighborhoodIsEditable(int globalX, int globalY) const
+{
+    for(int offsetY = -1; offsetY <= 1; ++offsetY)
+    {
+        for(int offsetX = -1; offsetX <= 1; ++offsetX)
+        {
+            const int x = globalX + offsetX;
+            const int y = globalY + offsetY;
+            if(x < 0 || x >= m_vertexCountX || y < 0 || y >= m_vertexCountY)
+                continue;
+            if(m_conflictedVertices.at(globalIndex(x, y)))
+                return false;
+        }
     }
     return true;
+}
+
+quint32 CTerrainEditModel::packedNormal(int globalX, int globalY) const
+{
+    // Copied Base/JMV fixtures match a unit-weight average of the normalized
+    // faces in the eight-neighbour fan. Horizontal jitter uses the renderer's
+    // observed signed-offset scale; the stored maxZ converts raw height to the
+    // same world-space slope used when the sector is drawn.
+    const auto position = [this](int x, int y) {
+        const int index = globalIndex(x, y);
+        SVector3 value;
+        value.x = double(x) + double(m_xOffsets.at(index)) / 254.0;
+        value.y = double(y) + double(m_yOffsets.at(index)) / 254.0;
+        value.z = double(m_heights.at(index)) * double(m_maxZ) / 65535.0;
+        return value;
+    };
+    static const int ring[8][2] = {
+        {1, 0}, {1, 1}, {0, 1}, {-1, 1},
+        {-1, 0}, {-1, -1}, {0, -1}, {1, -1}
+    };
+    const SVector3 center = position(globalX, globalY);
+    SVector3 normal;
+    for(int index = 0; index < 8; ++index)
+    {
+        const int next = (index + 1) % 8;
+        const int firstX = globalX + ring[index][0];
+        const int firstY = globalY + ring[index][1];
+        const int secondX = globalX + ring[next][0];
+        const int secondY = globalY + ring[next][1];
+        if(firstX < 0 || firstX >= m_vertexCountX || firstY < 0 || firstY >= m_vertexCountY ||
+           secondX < 0 || secondX >= m_vertexCountX || secondY < 0 || secondY >= m_vertexCountY)
+            continue;
+        SVector3 face = cross(subtract(position(firstX, firstY), center),
+                              subtract(position(secondX, secondY), center));
+        if(face.z < 0.0)
+        {
+            face.x = -face.x;
+            face.y = -face.y;
+            face.z = -face.z;
+        }
+        if(!normalize(&face))
+            continue;
+        normal.x += face.x;
+        normal.y += face.y;
+        normal.z += face.z;
+    }
+    if(!normalize(&normal))
+        normal = {0.0, 0.0, 1.0};
+    const quint32 packedX = quint32(qBound(0, int(normal.x * 1000.0 + 1000.0), 2047));
+    const quint32 packedY = quint32(qBound(0, int(normal.y * 1000.0 + 1000.0), 2047));
+    const quint32 packedZ = quint32(qBound(0, int(normal.z * 1000.0), 1023));
+    return (packedZ << 22) | (packedX << 11) | packedY;
 }
 
 QByteArray CTerrainEditModel::sectorPayload(int sectorX, int sectorY) const
