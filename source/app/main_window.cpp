@@ -72,7 +72,10 @@ void MainWindow::on_toolButton_2_clicked()
 MainWindow::MainWindow(QWidget* parent) :
     QMainWindow(parent),
     m_ui(new Ui::MainWindow),
+    m_undoStack(nullptr),
+    m_undoView(nullptr),
     m_pView(nullptr),
+    m_testTable(nullptr),
     m_recentFilesMenu(nullptr),
     m_externalScriptAction(nullptr),
     m_mapsDock(nullptr),
@@ -221,7 +224,6 @@ MainWindow::MainWindow(QWidget* parent) :
     m_ui->outlinerSplitter->restoreState(uiSettings.value("ui/outlinerSplitter").toByteArray());
 
     m_pView = new CView(m_ui->centralWidget, m_createDialog.get()->viewWidget());
-    m_pView->installEventFilter(this);
     m_mapTestLauncher = new CJmvMapTestLauncher(this);
     connect(m_mapTestLauncher, &CJmvMapTestLauncher::testStarted, this,
             [this](const QString& runId, const QString& mapName)
@@ -288,6 +290,10 @@ MainWindow::MainWindow(QWidget* parent) :
     m_undoStack->setUndoLimit(undoHistoryLimit);
     ei::log(eLogInfo, QString("Undo history limit:%1").arg(undoHistoryLimit));
     createUndoView();
+    // View construction and reparenting can dispatch events immediately. Do
+    // not let eventFilter() inspect constructor-owned widgets until every
+    // pointer it uses (notably m_undoView) has been initialized.
+    m_pView->installEventFilter(this);
     CStatusConnector::getInstance()->attach(m_ui->statusIco, m_ui->statusBar);
     connectUiButtons();
     m_pView->attach(m_settings.get(), m_ui->tableWidget, m_undoStack, m_ui->progressBar, m_ui->mousePosText, m_ui->treeWidget, m_pTileForm.get());
