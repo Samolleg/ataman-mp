@@ -297,8 +297,6 @@ bool selectJmvDefaultIdleAction(const QVector<SAdbAction>& actions, const QStrin
 
     QStringList preferredNames;
     const QString normalizedModel = model.trimmed().toLower();
-    if(normalizedModel == "unmoli")
-        preferredNames << "cidle02";
     if((normalizedModel == "unhuma" || normalizedModel == "unhufe"
             || normalizedModel == "unorma" || normalizedModel == "unorfe"
             || normalizedModel == "unhusk") && weaponTypeId >= 10 && weaponTypeId <= 15)
@@ -407,8 +405,12 @@ QMap<QString, QMatrix4x4> propagateAnimationHierarchy(
         const QQuaternion localRotation = animated
             ? QQuaternion::fromRotationMatrix(channel.value().normalMatrix()).normalized()
             : QQuaternion();
+        // ei_figer establishes that EI child rotations pre-multiply the
+        // parent's absolute rotation. Reversing this order makes articulated
+        // parts orbit away from their joints and rotates attached weapons in
+        // the wrong basis.
         const QQuaternion absoluteRotation = hasParent
-            ? (absoluteRotations.value(parent) * localRotation).normalized()
+            ? (localRotation * absoluteRotations.value(parent)).normalized()
             : localRotation;
         QVector3D position = rest;
         if(hasParent)

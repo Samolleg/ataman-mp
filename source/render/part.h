@@ -27,6 +27,8 @@ public:
     const QString& parentName() const { return m_parentName; }
     void setRestOffset(const QVector3D& offset) { m_restOffset = offset; }
     const QVector3D& restOffset() const { return m_restOffset; }
+    void setTextureNumber(int textureNumber) { m_textureNumber = textureNumber; }
+    int textureNumber() const { return m_textureNumber; }
     void setPoseMatrix(const QMatrix4x4& matrix) { m_poseMatrix = matrix; }
     void setSourceVertexIndices(const QVector<int>& indices) { m_sourceVertexIndices = indices; }
     void setMorphDeltas(const QVector<QVector3D>& deltas);
@@ -38,6 +40,7 @@ private:
     QString m_name;
     QString m_parentName;
     QVector3D m_restOffset;
+    int m_textureNumber{0};
     QMatrix4x4 m_poseMatrix;
     QVector<SVertexData> m_aVertData;
     QVector<SVertexData> m_baseVertData;

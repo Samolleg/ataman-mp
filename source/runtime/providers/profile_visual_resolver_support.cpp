@@ -3,6 +3,7 @@
 #include <QJsonArray>
 #include <QRegularExpression>
 #include <QSet>
+#include <algorithm>
 
 namespace {
 
@@ -50,7 +51,7 @@ QString monsterTextureName(const QString& model, const QStringList& primary, int
 
 bool numberedHumanoidSkin(const QString& model)
 {
-    static const QSet<QString> models = {"unhuma", "unhufe", "unorma", "unorfe"};
+    static const QSet<QString> models = {"unhuma", "unhufe", "unorma", "unorfe", "unhusk"};
     return models.contains(model.trimmed().toLower());
 }
 
@@ -186,6 +187,61 @@ void appendHandComponent(const QString& hand, const QString& family, int tti,
     diagnostics->append("Selected model assembly has no component " + expected);
 }
 
+QStringList jmvEmbeddedCreatureParts(const QString& model, QStringList parts)
+{
+    // The goblin assembly includes the sling as its unarmed/default integral
+    // weapon. Spear/axe variants can retain that member in OBJ_BODYPARTS, but
+    // the explicit right-hand weapon is mutually exclusive in the game.
+    if(model.compare("unmogo", Qt::CaseInsensitive) == 0)
+    {
+        bool explicitWeapon = false;
+        for(const QString& part : parts)
+            if(part.startsWith("rh3.pike", Qt::CaseInsensitive)
+                    || part.startsWith("rh3.daxe", Qt::CaseInsensitive))
+                explicitWeapon = true;
+        if(explicitWeapon)
+            for(int i = parts.size() - 1; i >= 0; --i)
+                if(parts.at(i).compare("sling", Qt::CaseInsensitive) == 0)
+                    parts.removeAt(i);
+    }
+    return parts;
+}
+
+void appendRangedComponents(int typeId, int tti, const SEquipmentLayoutRequest& request,
+                            QJsonArray* components, QJsonArray* placeholders,
+                            QJsonArray* diagnostics, QStringList* matchedComponents)
+{
+    QStringList expected;
+    if(typeId == 5)
+    {
+        const QString index = QString::number(tti).rightJustified(2, '0');
+        expected << "bwparta" + index << "lh3.bwpartb" + index
+                 << "bwtetivaa" + index << "bwtetivab" + index;
+    }
+    else if(typeId == 6)
+    {
+        const QString index = QString::number(tti + 1).rightJustified(2, '0');
+        expected << "rh3.crbow" + index + "main"
+                 << "crbow" + index + "part01" << "crbow" + index + "part02"
+                 << "crbow" + index + "tetiva01" << "crbow" + index + "tetiva02";
+    }
+    for(const QString& wanted : expected)
+    {
+        const auto found = std::find_if(request.assemblyParts.constBegin(), request.assemblyParts.constEnd(),
+            [&](const QString& part) { return part.compare(wanted, Qt::CaseInsensitive) == 0; });
+        if(found != request.assemblyParts.constEnd())
+        {
+            components->append(*found);
+            matchedComponents->append(*found);
+        }
+    }
+    if(matchedComponents->isEmpty())
+    {
+        placeholders->append(typeId == 5 ? "bow" : "crossbow");
+        diagnostics->append("Selected model assembly has no compatible ranged-weapon components.");
+    }
+}
+
 QStringList armorSlots(const QString& type)
 {
     static const QMap<QString, QStringList> armorPartMap = {
@@ -207,7 +263,7 @@ QString equipmentTextureName(const QString& model, const QString& itemType, int 
     };
     static const QMap<int, QString> weaponCodes = {
         {0, "sw"}, {1, "ax"}, {2, "dg"}, {3, "sp"}, {4, "hm"},
-        {5, "bw"}, {6, "cb"}, {9, "sh"}, {10, "sp"}, {11, "sf"},
+        {5, "bw"}, {6, "cb"}, {9, "mt"}, {10, "sp"}, {11, "sf"},
         {12, "sd"}, {13, "ax"}, {14, "hm"}, {15, "sf"}
     };
     const QString code = weapon ? weaponCodes.value(typeId)
@@ -226,9 +282,9 @@ QString equipmentTextureName(const QString& model, const QString& itemType, int 
         textureModel = "unhuma";
     return QString("%1%2_%3.%4.%5.%6.mmp")
         .arg(textureModel, code)
-        // TTI and TTI2 are the literal zero-based MMP indices. TTI 0 uses
-        // both the base component and the _00 texture; it is not "missing".
-        .arg(tti, 2, 10, QChar('0')).arg(materialCode.trimmed().toLower())
+        // Wearable atlases use the geometry TTI literally. Weapon geometry is
+        // zero-based while its MMP atlas number is one-based in Base and JMV.
+        .arg(weapon ? tti + 1 : tti, 2, 10, QChar('0')).arg(materialCode.trimmed().toLower())
         .arg(textureVariant).arg(!weapon && itemType.compare("helm", Qt::CaseInsensitive) != 0
                                                ? "x4" : "x2");
 }
@@ -327,7 +383,8 @@ SRuntimeProviderResult resolveDatabaseAppearance(
         appearance->insert("model", request.model);
         appearance->insert("primaryTexture", request.primaryTexture);
         appearance->insert("secondaryTexture", request.secondaryTexture);
-        appearance->insert("bodyParts", QJsonArray::fromStringList(request.bodyParts));
+        appearance->insert("bodyParts", QJsonArray::fromStringList(
+            jmv ? jmvEmbeddedCreatureParts(request.model, request.bodyParts) : request.bodyParts));
         appearance->insert("armor", QJsonArray());
         appearance->insert("weapons", QJsonArray());
         SRuntimeProviderResult result; result.success = true;
@@ -511,6 +568,9 @@ SRuntimeProviderResult resolveEquipmentLayout(
                 appendHandComponent(weaponIndex == 0 ? "rh3" : "lh3", family,
                                     weapon.item.textureType1, request, &components,
                                     &placeholders, &diagnostics, &matched);
+            else if(weapon.kind == EWeaponClass::Ranged)
+                appendRangedComponents(weapon.item.typeId, weapon.item.textureType1, request,
+                                       &components, &placeholders, &diagnostics, &matched);
             else
                 appendComponents(family, weapon.item.textureType1, request, &components,
                                  &placeholders, &diagnostics, &matched);

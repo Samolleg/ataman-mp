@@ -58,7 +58,8 @@ protected:
     void recalcMinPos();
     void applyTransientVisual(const QString& modelName, const QString& textureName,
                               const QStringList& visibleParts, const QVector3D& complexion,
-                              const QMap<QString, QString>& partTextureNames = {});
+                              const QMap<QString, QString>& partTextureNames = {},
+                              const QString& secondaryTextureName = QString());
     void invalidateTransientVisual() { m_transientVisualFingerprint.clear(); }
     SAnimationSkeleton transientAnimationSkeleton() const;
     void applyTransientPartPoses(const QMap<QString, QMatrix4x4>& poses);
@@ -74,6 +75,7 @@ private:
     QVector<CPart*> m_aPart;
     QVector3D m_minPoint;   // min position of model bound boxes(units half body under ground)
     QOpenGLTexture* m_texture;
+    QOpenGLTexture* m_secondaryTexture{nullptr};
     QMap<QString, QOpenGLTexture*> m_partTextures;
     ei::CFigure* m_pFigure;
     bool m_bDeleted;

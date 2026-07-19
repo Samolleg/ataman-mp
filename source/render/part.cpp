@@ -14,6 +14,7 @@ CPart::CPart(const CPart &part):
     m_name = part.m_name;
     m_parentName = part.m_parentName;
     m_restOffset = part.m_restOffset;
+    m_textureNumber = part.m_textureNumber;
     m_poseMatrix = part.m_poseMatrix;
     m_bShow = part.m_bShow;
     m_aVertData = part.m_aVertData;

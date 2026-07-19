@@ -96,6 +96,7 @@ private slots:
     void interpolatesMorphClosingSample();
     void propagatesPoseToNumberedEquipment();
     void preservesChildBindOffsetAndIgnoresChildTranslation();
+    void preMultipliesChildRotationInEiOrder();
     void appliesDistanceTiers();
     void malformedAndUnknownInputsFailStatic();
 };
@@ -138,7 +139,7 @@ void UnitAnimationTests::jmvSelectsStandingModelSpecificIdles()
         {"cidle02", 2, idlePacked(0, 2), 50, 10}
     }));
     QVERIFY(selectJmvDefaultIdleAction(lizard, "unmoli", -1, &selected));
-    QCOMPARE(selected.name, QString("cidle02"));
+    QCOMPARE(selected.name, QString("cidle01"));
 
     const QVector<SAdbAction> twoHand = parseAdbActions(adb({
         {"cidle01", 1, idlePacked(121, 2), 100, 10},
@@ -211,6 +212,23 @@ void UnitAnimationTests::preservesChildBindOffsetAndIgnoresChildTranslation()
     const QVector3D animatedJoint = transforms.value("child") * QVector3D(2, 0, 0);
     QVERIFY(qAbs(animatedJoint.x()) < 0.0001f);
     QVERIFY(qAbs(animatedJoint.y() - 2.0f) < 0.0001f);
+}
+
+void UnitAnimationTests::preMultipliesChildRotationInEiOrder()
+{
+    SAnimationSkeleton skeleton;
+    skeleton.restOffsets.insert("root", QVector3D());
+    skeleton.restOffsets.insert("child", QVector3D());
+    skeleton.parents.insert("child", "root");
+    const QQuaternion parentRotation = QQuaternion::fromAxisAndAngle(0, 0, 1, 90);
+    const QQuaternion childRotation = QQuaternion::fromAxisAndAngle(1, 0, 0, 90);
+    SAnimationLocalPose pose;
+    QMatrix4x4 parent; parent.rotate(parentRotation); pose.transforms.insert("root", parent);
+    QMatrix4x4 child; child.rotate(childRotation); pose.transforms.insert("child", child);
+    const auto transforms = propagateAnimationHierarchy(pose, skeleton);
+    const QVector3D actual = transforms.value("child") * QVector3D(0, 1, 0);
+    const QVector3D expected = (childRotation * parentRotation).rotatedVector(QVector3D(0, 1, 0));
+    QVERIFY((actual - expected).length() < 0.0001f);
 }
 
 void UnitAnimationTests::appliesDistanceTiers()

@@ -48,8 +48,10 @@ edit `database.res`, JMV/Base archives, live MOBs, maps, or the game install.
    model, slot/type, TTI, TTI2, and material code. For example, a human boot
    with TTI 1 and `ogre leather` (`lo`) resolves the shipped
    `unhumabt_01.lo.0.x4.mmp` family rather than the face/skin texture. TTI and
-   TTI2 are zero-based resource indices: do not subtract one. TTI 0 armor keeps
-   the base anatomical component and applies its `_00` equipment texture.
+   TTI2 use the database values directly for armor. Weapon FIG components are
+   zero-based, while the corresponding weapon MMP filename is one-based
+   (`rh3.sword00` uses `UnhumaSW_01...`). TTI 0 armor keeps the base anatomical
+   component and applies its `_00` equipment texture.
 9. Confirm female humans, male/female orcs, and skeletons resolve equipment
    textures from the shared `unhuma` equipment atlases. Their face/skin atlas
    remains model-specific. Validate JMV `zone1.mob` IDs 203, 221, and 224;
@@ -72,6 +74,13 @@ edit `database.res`, JMV/Base archives, live MOBs, maps, or the game install.
 5. Validate PNT3 equipment atlases with large transparent tails. Armor, weapon,
    and TTI-0 anatomical components must not show stripes, random alpha, or
    pixels from outside the decoded buffer.
+6. Validate `zone1` ID 221 with its four bow members (`bwparta`, `bwpartb`, and
+   both `bwtetiva` members), `zon3obr` IDs 233/234 with `UnhumaMT` shield
+   textures, and `zon3obr` ID 198 with its `hd.armorNN` helmet.
+7. Validate spear goblins with only the explicit pike visible and ogres with
+   their club using OBJ secondary texture. This follows the FIG header texture
+   selector (`1` primary, `2` secondary); body texture must not propagate to
+   a texture-2 integral weapon.
 
 Default-idle animation validation is specified with the animation follow-up and
 is not a prerequisite for this equipment integration.

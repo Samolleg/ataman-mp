@@ -87,6 +87,7 @@ private:
     QVector<QVector3D> m_offset; //8x3 assembly offset from bon file
     QVector<ushort> m_aInd;
     QVector<US3> m_aVertComp;
+    int m_textureNumber{0};
     QString m_name;
     QString m_parentName;
     QList<ei::CFigure*> m_aChild;

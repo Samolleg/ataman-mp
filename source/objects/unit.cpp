@@ -199,15 +199,18 @@ void CUnit::refreshTransientVisual()
 
     const QString model = appearance.value("model").toString();
     const QString texture = appearance.value("primaryTexture").toString();
+    const QString secondaryTexture = appearance.value("secondaryTexture").toString();
     const bool databaseEquipmentPlan = appearance.value("source").toString() == "profileDatabase";
     const QStringList assemblyParts = CObjectList::getInstance()->figurePartNames(model);
+    const QStringList resolvedBodyParts = appearance.contains("bodyParts")
+        ? jsonStringList(appearance, "bodyParts") : m_bodyParts;
     QStringList visibleParts;
     // OBJ_BODYPARTS is the instance component-enable mask regardless of where
     // model/equipment values are resolved. Ignoring it for database-backed
     // units exposes every mutually-exclusive human body/armor component.
-    if(!m_bodyParts.isEmpty())
+    if(!resolvedBodyParts.isEmpty())
     {
-        for(const QString& part : m_bodyParts)
+        for(const QString& part : resolvedBodyParts)
             if(!databaseEquipmentPlan || !optionalEquipmentPart(part))
                 visibleParts.append(part);
     }
@@ -263,7 +266,8 @@ void CUnit::refreshTransientVisual()
     const QJsonObject textureObject = equipment.value("componentTextures").toObject();
     for(auto it = textureObject.constBegin(); it != textureObject.constEnd(); ++it)
         componentTextures.insert(it.key(), it.value().toString());
-    applyTransientVisual(model, texture, visibleParts, complexion, componentTextures);
+    applyTransientVisual(model, texture, visibleParts, complexion, componentTextures,
+                         secondaryTexture);
     m_resolvedAnimationModel = model;
     m_resolvedAnimationWeapons = equipmentRequest.weapons;
 }

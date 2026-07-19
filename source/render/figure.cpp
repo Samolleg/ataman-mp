@@ -185,6 +185,7 @@ bool ei::CFigure::readData(QDataStream& stream)
 
     ei::SHeader header;
     header.read(stream);
+    m_textureNumber = header.textureNumber;
 
     //read center
     //QVector<F3> bboxCentr;
@@ -320,6 +321,7 @@ void ei::CFigure::appendVertexData(QVector<CPart*>& model, QVector3D& complectio
         QVector3D restOffset;
         calcComplection(restOffset, m_offset, complection);
         part->setRestOffset(restOffset);
+        part->setTextureNumber(m_textureNumber);
         QVector<int> sourceVertexIndices;
         calculateConstitution(part->vertData(), complection, &sourceVertexIndices);
         part->setSourceVertexIndices(sourceVertexIndices);
