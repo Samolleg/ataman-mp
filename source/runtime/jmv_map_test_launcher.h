@@ -2,16 +2,24 @@
 #define JMV_MAP_TEST_LAUNCHER_H
 
 #include <QObject>
+#include <QByteArray>
 #include <QFileInfo>
 #include <QJsonObject>
 #include <QPointer>
 #include <QProcess>
+#include <QVector>
 
 #include "map_catalog.h"
 #include "map_spawn_planner.h"
 #include "resource_profile.h"
 
 class QTimer;
+
+struct SJmvSupplementalMobInput
+{
+    QFileInfo sourceMob;
+    QByteArray mobData;
+};
 
 struct SJmvMapTestLaunchInput
 {
@@ -20,6 +28,7 @@ struct SJmvMapTestLaunchInput
     QFileInfo sourceMob;
     QByteArray mprData;
     QByteArray mobData;
+    QVector<SJmvSupplementalMobInput> supplementalMobs;
     QString embeddedScript;
     SMapCatalogEntry mapEntry;
     SMapSpawnPlan spawn;
@@ -109,6 +118,7 @@ private:
     QString m_liveSavesPath;
     QString m_hotReloadRequestPath;
     QString m_hotReloadThreadPath;
+    QString m_supplementalMobDirectory;
     QString m_profileId;
     QString m_currentZoneId;
     QJsonObject m_manifest;

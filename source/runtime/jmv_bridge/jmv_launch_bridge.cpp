@@ -120,6 +120,7 @@ int g_targetExitId = 0;
 wchar_t g_liveSaves[MAX_PATH * 4] = {};
 wchar_t g_testSaves[MAX_PATH * 4] = {};
 wchar_t g_godmodeMob[MAX_PATH * 4] = {};
+wchar_t g_supplementalMobDirectory[MAX_PATH * 4] = {};
 wchar_t g_hotReloadRequestPath[MAX_PATH * 4] = {};
 wchar_t g_hotReloadThreadPath[MAX_PATH * 4] = {};
 wchar_t g_hotReloadRoot[MAX_PATH * 4] = {};
@@ -634,6 +635,45 @@ bool RewriteGodmodeMobA(LPCSTR path, char* output, size_t capacity)
                                output, int(capacity), nullptr, &substituted) != 0 && !substituted;
 }
 
+bool RewriteSupplementalMobW(LPCWSTR path, wchar_t* output, size_t capacity)
+{
+    if(!path || !output || !capacity || !g_supplementalMobDirectory[0])
+        return false;
+    const wchar_t* name = FileNamePart(path);
+    const wchar_t* extension = name ? std::wcsrchr(name, L'.') : nullptr;
+    if(!name || !extension || _wcsicmp(extension, L".mob") != 0
+       || _wcsicmp(name, L"AutoRunSpellAddon123.mob") == 0)
+        return false;
+    if(_snwprintf_s(output, capacity, _TRUNCATE, L"%s\\%s",
+                    g_supplementalMobDirectory, name) < 0)
+        return false;
+    const DWORD attributes = g_originalGetFileAttributesW
+        ? g_originalGetFileAttributesW(output) : GetFileAttributesW(output);
+    if(attributes == INVALID_FILE_ATTRIBUTES || (attributes & FILE_ATTRIBUTE_DIRECTORY))
+        return false;
+    wchar_t message[1800]{};
+    _snwprintf_s(message, sizeof(message) / sizeof(message[0]), _TRUNCATE,
+                 L"SUPPLEMENTAL_MOB redirect from=\"%s\" to=\"%s\"", path, output);
+    Log(message);
+    return true;
+}
+
+bool RewriteSupplementalMobA(LPCSTR path, char* output, size_t capacity)
+{
+    if(!path || !output || !capacity)
+        return false;
+    wchar_t wide[MAX_PATH * 4]{};
+    wchar_t rewritten[MAX_PATH * 4]{};
+    if(!MultiByteToWideChar(CP_ACP, 0, path, -1, wide,
+                            int(sizeof(wide) / sizeof(wide[0])))
+       || !RewriteSupplementalMobW(wide, rewritten,
+                                   sizeof(rewritten) / sizeof(rewritten[0])))
+        return false;
+    BOOL substituted = FALSE;
+    return WideCharToMultiByte(CP_ACP, WC_NO_BEST_FIT_CHARS, rewritten, -1,
+                               output, int(capacity), nullptr, &substituted) != 0 && !substituted;
+}
+
 HANDLE WINAPI HookCreateFileW(LPCWSTR path, DWORD access, DWORD share,
                               LPSECURITY_ATTRIBUTES security, DWORD creation,
                               DWORD flags, HANDLE templateFile)
@@ -643,6 +683,7 @@ HANDLE WINAPI HookCreateFileW(LPCWSTR path, DWORD access, DWORD share,
         return INVALID_HANDLE_VALUE;
     wchar_t redirected[MAX_PATH * 4]{};
     LPCWSTR selected = (RewriteGodmodeMobW(path, redirected, sizeof(redirected) / sizeof(redirected[0]))
+        || RewriteSupplementalMobW(path, redirected, sizeof(redirected) / sizeof(redirected[0]))
         || RewriteSavePathW(path, redirected, sizeof(redirected) / sizeof(redirected[0]))) ? redirected : path;
     HANDLE result = g_originalCreateFileW(selected, access, share, security, creation, flags, templateFile);
     const DWORD error = GetLastError();
@@ -660,6 +701,7 @@ HANDLE WINAPI HookCreateFileA(LPCSTR path, DWORD access, DWORD share,
         return INVALID_HANDLE_VALUE;
     char redirected[MAX_PATH * 4]{};
     LPCSTR selected = (RewriteGodmodeMobA(path, redirected, sizeof(redirected))
+        || RewriteSupplementalMobA(path, redirected, sizeof(redirected))
         || RewriteSavePathA(path, redirected, sizeof(redirected))) ? redirected : path;
     HANDLE result = g_originalCreateFileA(selected, access, share, security, creation, flags, templateFile);
     const DWORD error = GetLastError();
@@ -681,6 +723,7 @@ DWORD WINAPI HookGetFileAttributesW(LPCWSTR path)
         return INVALID_FILE_ATTRIBUTES;
     wchar_t redirected[MAX_PATH * 4]{};
     LPCWSTR selected = (RewriteGodmodeMobW(path, redirected, sizeof(redirected) / sizeof(redirected[0]))
+        || RewriteSupplementalMobW(path, redirected, sizeof(redirected) / sizeof(redirected[0]))
         || RewriteSavePathW(path, redirected, sizeof(redirected) / sizeof(redirected[0]))) ? redirected : path;
     const DWORD result = g_originalGetFileAttributesW(selected);
     const DWORD error = GetLastError();
@@ -696,6 +739,7 @@ DWORD WINAPI HookGetFileAttributesA(LPCSTR path)
         return INVALID_FILE_ATTRIBUTES;
     char redirected[MAX_PATH * 4]{};
     LPCSTR selected = (RewriteGodmodeMobA(path, redirected, sizeof(redirected))
+        || RewriteSupplementalMobA(path, redirected, sizeof(redirected))
         || RewriteSavePathA(path, redirected, sizeof(redirected))) ? redirected : path;
     const DWORD result = g_originalGetFileAttributesA(selected);
     const DWORD error = GetLastError();
@@ -959,6 +1003,19 @@ bool ReadDirectLaunchPaths()
                             DWORD(sizeof(g_godmodeMob) / sizeof(g_godmodeMob[0])));
     if(g_godmodeMob[0])
         NormalizeSlashes(g_godmodeMob);
+    GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_SUPPLEMENTAL_MOB_DIR",
+                            g_supplementalMobDirectory,
+                            DWORD(sizeof(g_supplementalMobDirectory)
+                                  / sizeof(g_supplementalMobDirectory[0])));
+    if(g_supplementalMobDirectory[0])
+    {
+        NormalizeSlashes(g_supplementalMobDirectory);
+        while(std::wcslen(g_supplementalMobDirectory) > 3
+              && IsPathBoundary(g_supplementalMobDirectory[
+                     std::wcslen(g_supplementalMobDirectory) - 1]))
+            g_supplementalMobDirectory[
+                std::wcslen(g_supplementalMobDirectory) - 1] = L'\0';
+    }
     if(!GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_TEMP_MPR", mpr,
                                 DWORD(sizeof(mpr) / sizeof(mpr[0]))) ||
        !GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_TEMP_MOB", mob,

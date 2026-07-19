@@ -470,11 +470,23 @@ void MainWindow::runUndoToIndex(int targetIndex)
 
 bool MainWindow::eventFilter(QObject* watched, QEvent* event)
 {
-    if(m_pView && watched == m_pView && m_suppressSpawnRelease
-       && event->type() == QEvent::MouseButtonRelease)
+    if(m_pView && watched == m_pView && m_suppressSpawnRelease)
     {
-        m_suppressSpawnRelease = false;
-        return true;
+        // Placement/marker selection owns the complete pointer sequence. If
+        // move events leak through before the matching release, CView can
+        // begin a landscape selection rectangle from the same click.
+        if(event->type() == QEvent::MouseMove)
+        {
+            QMouseEvent* mouse = static_cast<QMouseEvent*>(event);
+            if(mouse->buttons().testFlag(Qt::LeftButton))
+                return true;
+            m_suppressSpawnRelease = false;
+        }
+        if(event->type() == QEvent::MouseButtonRelease)
+        {
+            m_suppressSpawnRelease = false;
+            return true;
+        }
     }
     if(m_pView && watched == m_pView && m_customSpawn.valid && !m_pickSpawnPending)
     {
@@ -571,6 +583,11 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event)
                 m_movingCustomSpawn = false;
                 m_customSpawnSelected = true;
                 m_suppressSpawnRelease = true;
+                if(m_playFromHereButton && !m_playFromHereButton->isChecked())
+                {
+                    const QSignalBlocker blocker(m_playFromHereButton);
+                    m_playFromHereButton->setChecked(true);
+                }
                 m_pView->unsetCursor();
                 m_pView->setTestSpawnMarker(resolved, plan.adjusted);
                 m_pView->setTestSpawnMarkerSelected(true);
@@ -1086,10 +1103,12 @@ void MainWindow::updateMapTestAction()
     const SResourceProfileEvaluation profile = activeResourceProfile();
     const bool isJmv = profile.profileId.compare("jamais-vu", Qt::CaseInsensitive) == 0;
     const bool isBaseProbe = profile.profileId.compare("base-game", Qt::CaseInsensitive) == 0;
-    const bool hasPair = m_pView && m_pView->hasActiveMob()
-            && m_pView->mobs().size() == 1 && CLandscape::getInstance()->isMprLoad();
+    const bool hasMobs = m_pView && m_pView->hasActiveMob()
+            && !m_pView->mobs().isEmpty() && CLandscape::getInstance()->isMprLoad();
+    const bool hasPair = hasMobs && (isJmv || m_pView->mobs().size() == 1);
     const bool hasEntrance = selectedTravelZone() != nullptr;
-    const bool customRequested = m_playFromHereButton && m_playFromHereButton->isChecked();
+    const bool customRequested = (m_customSpawn.valid && m_customSpawn.custom)
+        || (m_playFromHereButton && m_playFromHereButton->isChecked());
     const bool customReady = !customRequested
         || (isJmv && m_customSpawn.valid && !m_pickSpawnPending);
     const bool profileReady = (isJmv || isBaseProbe) && profile.valid
@@ -1115,7 +1134,7 @@ void MainWindow::updateMapTestAction()
                 ? tr("Waiting for the current hot reload to complete.")
                 : (!runtimeReady
                 ? tr("Waiting for the initial staged map to report hot-reload readiness.")
-                : tr("Hot reload requires a validated JMV profile, one MPR/MOB pair, and a valid entrance."))));
+                : tr("Hot reload requires a validated JMV profile, one MPR with its MOB set, and a valid entrance."))));
         return;
     }
     m_mapTestAction->setText(tr("Test Current Map"));
@@ -1136,7 +1155,9 @@ void MainWindow::updateMapTestAction()
     else if(!profileReady)
         m_mapTestAction->setToolTip(tr("The active runtime does not match an exact experimental manifest."));
     else if(!hasPair)
-        m_mapTestAction->setToolTip(tr("Load one MPR and exactly one active MOB before launching a map test."));
+        m_mapTestAction->setToolTip(isJmv
+            ? tr("Load one MPR and at least one MOB before launching a map test.")
+            : tr("The Base probe requires exactly one MPR/MOB pair."));
     else if(!hasEntrance)
         m_mapTestAction->setToolTip(tr("Select a valid map.txt entrance or explicitly borrow a registered map identity."));
     else if(!customReady)
@@ -1152,11 +1173,11 @@ void MainWindow::launchCurrentMapTest()
     activateWindow();
     raise();
     const bool hotReloadRequested = m_mapTestLauncher && m_mapTestLauncher->isRunning();
-    if(!m_pView || !m_pView->hasActiveMob() || m_pView->mobs().size() != 1
+    if(!m_pView || !m_pView->hasActiveMob() || m_pView->mobs().isEmpty()
        || !CLandscape::getInstance()->isMprLoad())
     {
         QMessageBox::warning(this, tr("JMV test launch"),
-            tr("Load one MPR and exactly one MOB before starting a test."));
+            tr("Load one MPR and at least one MOB before starting a test."));
         return;
     }
     QProgressDialog progress(hotReloadRequested ? tr("Preparing hot reload...")
@@ -1215,8 +1236,28 @@ void MainWindow::launchCurrentMapTest()
     progress.setValue(3);
     QApplication::processEvents();
 
-    CMob* mob = m_pView->currentMob();
-    const SMapSpawnPlan spawn = m_playFromHereButton && m_playFromHereButton->isChecked()
+    CMob* mob = nullptr;
+    const QString expectedMain = entry.mobName;
+    for(CMob* candidate : m_pView->mobs())
+    {
+        if(candidate && (QFileInfo(candidate->filePath()).completeBaseName().compare(
+                             expectedMain, Qt::CaseInsensitive) == 0
+                          || QFileInfo(candidate->filePath()).fileName().compare(
+                              expectedMain, Qt::CaseInsensitive) == 0))
+        {
+            mob = candidate;
+            break;
+        }
+    }
+    if(!mob && !m_pView->mobs().isEmpty())
+        mob = m_pView->mobs().first();
+    if(isBase && m_pView->mobs().size() != 1)
+    {
+        QMessageBox::warning(this, tr("Base EI feasibility probe"),
+            tr("The Base probe currently accepts exactly one MOB. Supplemental MOB redirection is JMV-only."));
+        return;
+    }
+    const SMapSpawnPlan spawn = m_customSpawn.valid && m_customSpawn.custom
         ? m_customSpawn
         : CMapSpawnPlanner::chooseEntrance(*entrance, mapTestObstacles());
     if(!spawn.valid)
@@ -1243,6 +1284,27 @@ void MainWindow::launchCurrentMapTest()
         QMessageBox::warning(this, tr("JMV test launch"),
             tr("The current MOB edits could not be staged safely:\n\n%1").arg(mobReport.toText()));
         return;
+    }
+    QVector<SJmvSupplementalMobInput> supplementalMobs;
+    for(CMob* supplemental : m_pView->mobs())
+    {
+        if(!supplemental || supplemental == mob)
+            continue;
+        QByteArray data;
+        CValidationReport supplementalReport;
+        QString supplementalSaveClass;
+        if(!supplemental->buildValidatedCandidate(
+               &data, &supplementalReport, &supplementalSaveClass))
+        {
+            QMessageBox::warning(this, tr("JMV test launch"),
+                tr("Supplemental MOB '%1' could not be staged safely:\n\n%2")
+                    .arg(supplemental->filePath().fileName(), supplementalReport.toText()));
+            return;
+        }
+        SJmvSupplementalMobInput staged;
+        staged.sourceMob = supplemental->filePath();
+        staged.mobData = data;
+        supplementalMobs.append(staged);
     }
 
     const QString entranceAssessment = spawn.unobstructed
@@ -1287,6 +1349,7 @@ void MainWindow::launchCurrentMapTest()
     input.sourceMob = mob->filePath();
     input.mprData = mprFile.readAll();
     input.mobData = mobData;
+    input.supplementalMobs = supplementalMobs;
     input.embeddedScript = mob->script();
     input.mapEntry = entry;
     input.spawn = spawn;

@@ -178,9 +178,9 @@ void JmvMapTestLauncherTests::injectsAfterLeadingWorldScriptDelay()
     QString output;
     QString error;
     QVERIFY2(CJmvMapTestLauncher::injectWorldScriptBootstrap(
-        source, "GodMode(0,3);", &output, &error), qPrintable(error));
+        source, "GodMode(0,3)", &output, &error), qPrintable(error));
     const int delay = output.indexOf("Sleep( 2 )");
-    const int command = output.indexOf("GodMode(0,3);");
+    const int command = output.indexOf("GodMode(0,3)");
     const int original = output.indexOf("ConsoleString(\"original\")");
     QVERIFY(delay >= 0);
     QVERIFY(command > delay);
@@ -240,8 +240,9 @@ void JmvMapTestLauncherTests::injectsActualAutorunRuntimeBootstrap()
     const int marker = script.indexOf("// EI Mapper Endurance owned runtime bootstrap");
     QVERIFY(worldScript >= 0);
     QVERIFY(marker > worldScript);
-    QVERIFY(script.contains("SetCPFast(GetUnitOfPlayer(0,0), 290.500000, 219.200000, 12.750000);"));
-    QVERIFY(script.contains("GodMode(0,3);"));
+    QVERIFY(script.contains("SetCPFast(GetLeader(), 290.500000, 219.200000, 12.750000)"));
+    QVERIFY(script.contains("GodMode(0,3)"));
+    QVERIFY(!script.contains("GodMode(0,3);"));
 
     QFile unchanged(source);
     QVERIFY(unchanged.open(QIODevice::ReadOnly));

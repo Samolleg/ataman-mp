@@ -5,11 +5,13 @@
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
+#include <QHash>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QRandomGenerator>
 #include <QRegularExpression>
 #include <QSaveFile>
+#include <QSet>
 #include <QStandardPaths>
 #include <QTextStream>
 #include <QTimer>
@@ -620,12 +622,12 @@ bool CJmvMapTestLauncher::prepareGodmodeBootstrap(
     QStringList commands;
     commands.append("// EI Mapper Endurance owned runtime bootstrap");
     if(spawn.valid)
-        commands.append(QString("SetCPFast(GetUnitOfPlayer(0,0), %1, %2, %3);")
+        commands.append(QString("SetCPFast(GetLeader(), %1, %2, %3)")
             .arg(spawn.position.x(), 0, 'f', 6)
             .arg(spawn.position.y(), 0, 'f', 6)
             .arg(spawnZ, 0, 'f', 6));
     if(godmode)
-        commands.append("GodMode(0,3);");
+        commands.append("GodMode(0,3)");
     QString bootstrappedScript;
     QString bootstrapError;
     if(!injectWorldScriptBootstrap(script, commands.join("\r\n"),
@@ -741,6 +743,9 @@ bool CJmvMapTestLauncher::launch(const SJmvMapTestLaunchInput& input, QString* e
     environment.insert("EI_MAPPER_ENDURANCE_SKIP_INTROS", "1");
     environment.insert("EI_MAPPER_ENDURANCE_HOT_RELOAD_REQUEST", m_hotReloadRequestPath);
     environment.insert("EI_MAPPER_ENDURANCE_HOT_RELOAD_THREAD", m_hotReloadThreadPath);
+    if(!m_supplementalMobDirectory.isEmpty())
+        environment.insert("EI_MAPPER_ENDURANCE_SUPPLEMENTAL_MOB_DIR",
+                           m_supplementalMobDirectory);
     const QString godmodeBootstrapPath = m_manifest.value("godmodeBootstrapPath").toString();
     if(!godmodeBootstrapPath.isEmpty())
         environment.insert("EI_MAPPER_ENDURANCE_GODMODE_MOB", godmodeBootstrapPath);
@@ -842,6 +847,7 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
                             : QDir(input.profile.gameRoot).filePath("saves");
     m_hotReloadRequestPath = QDir(m_runRoot).filePath("hot-reload.request");
     m_hotReloadThreadPath = QDir(m_runRoot).filePath("game-thread.id");
+    m_supplementalMobDirectory = QDir(m_runRoot).filePath("supplemental-mobs");
     m_profileId = input.profile.profileId;
     m_currentZoneId = input.mapEntry.zoneId;
     if(isBase)
@@ -928,6 +934,45 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
         return false;
     }
 
+    QStringList stagedSupplementalPaths;
+    QSet<QString> supplementalNames;
+    if(!input.supplementalMobs.isEmpty() && !isJmv)
+    {
+        if(error) *error = "Supplemental MOB test staging is available only for JMV.";
+        return false;
+    }
+    if(!input.supplementalMobs.isEmpty() && !QDir().mkpath(m_supplementalMobDirectory))
+    {
+        if(error) *error = "Could not create the owned supplemental-MOB directory.";
+        return false;
+    }
+    for(const SJmvSupplementalMobInput& supplemental : input.supplementalMobs)
+    {
+        const QString name = supplemental.sourceMob.fileName();
+        const QString folded = name.toCaseFolded();
+        if(name.isEmpty() || !name.endsWith(".mob", Qt::CaseInsensitive)
+           || name.compare(input.sourceMob.fileName(), Qt::CaseInsensitive) == 0
+           || name.compare("AutoRunSpellAddon123.mob", Qt::CaseInsensitive) == 0
+           || supplementalNames.contains(folded))
+        {
+            if(error) *error = "Supplemental MOB names must be unique, ordinary .mob filenames.";
+            return false;
+        }
+        supplementalNames.insert(folded);
+        const QString stagedPath = QDir(m_supplementalMobDirectory).filePath(name);
+        if(!atomicWrite(stagedPath, supplemental.mobData, error))
+            return false;
+        CMobDocument supplementalDocument;
+        CValidationReport supplementalReport;
+        if(!supplementalDocument.load(QFileInfo(stagedPath), &supplementalReport))
+        {
+            if(error) *error = "A staged supplemental MOB failed validation:\n"
+                + supplementalReport.toText();
+            return false;
+        }
+        stagedSupplementalPaths.append(stagedPath);
+    }
+
     m_liveMprSha256 = sha256(input.mprData);
     m_liveMobSha256 = sha256(stagedMob);
     QJsonObject liveFiles;
@@ -953,11 +998,21 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
     request.stagedMprPath = stagedMprPath;
     request.internalMapName = input.mapEntry.mprName;
     request.orderedStagedMobPaths << stagedMobPath;
+    request.orderedStagedMobPaths << stagedSupplementalPaths;
     request.activeMobPath = stagedMobPath;
     request.sourceSha256.insert(input.sourceMpr.absoluteFilePath(),
                                 fileSha256(input.sourceMpr.absoluteFilePath()));
     request.sourceSha256.insert(input.sourceMob.absoluteFilePath(),
                                 fileSha256(input.sourceMob.absoluteFilePath()));
+    for(int index = 0; index < input.supplementalMobs.size(); ++index)
+    {
+        const SJmvSupplementalMobInput& supplemental = input.supplementalMobs.at(index);
+        const QString stagedPath = stagedSupplementalPaths.at(index);
+        request.sourceSha256.insert(supplemental.sourceMob.absoluteFilePath(),
+                                    fileSha256(supplemental.sourceMob.absoluteFilePath()));
+        request.stagedSha256.insert(QFileInfo(stagedPath).fileName(),
+                                    sha256(supplemental.mobData));
+    }
     request.stagedSha256.insert(QFileInfo(stagedMprPath).fileName(), m_liveMprSha256);
     request.stagedSha256.insert(QFileInfo(stagedMobPath).fileName(), m_liveMobSha256);
     request.sessionSettings.insert("travelExit", input.spawn.exitId);
@@ -990,6 +1045,13 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
     m_manifest.insert("createdUtc", QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
     m_manifest.insert("temporaryMapName", m_temporaryMapName);
     m_manifest.insert("liveFiles", liveFiles);
+    if(!stagedSupplementalPaths.isEmpty())
+    {
+        QJsonArray supplemental;
+        for(const QString& path : stagedSupplementalPaths)
+            supplemental.append(path);
+        m_manifest.insert("supplementalMobPaths", supplemental);
+    }
     QString godmodeBootstrapPath;
     if(isJmv && !prepareGodmodeBootstrap(input.profile.mapDirectories, m_runRoot,
                                          input.spawn, input.spawnZ, input.godmode, &m_manifest,
@@ -1060,6 +1122,42 @@ bool CJmvMapTestLauncher::hotReload(const SJmvMapTestLaunchInput& input,
         return false;
     }
 
+    QHash<QString, QByteArray> desiredSupplemental;
+    QStringList desiredSupplementalNames;
+    const QString reloadSupplementalDirectory = QDir(reloadRoot).filePath("supplemental");
+    if(!input.supplementalMobs.isEmpty()
+       && !QDir().mkpath(reloadSupplementalDirectory))
+    {
+        if(error) *error = "Could not create the hot-reload supplemental-MOB directory.";
+        return false;
+    }
+    for(const SJmvSupplementalMobInput& supplemental : input.supplementalMobs)
+    {
+        const QString name = supplemental.sourceMob.fileName();
+        const QString folded = name.toCaseFolded();
+        if(name.isEmpty() || !name.endsWith(".mob", Qt::CaseInsensitive)
+           || name.compare(input.sourceMob.fileName(), Qt::CaseInsensitive) == 0
+           || name.compare("AutoRunSpellAddon123.mob", Qt::CaseInsensitive) == 0
+           || desiredSupplemental.contains(folded))
+        {
+            if(error) *error = "Hot-reload supplemental MOB names must be unique ordinary .mob filenames.";
+            return false;
+        }
+        const QString auditPath = QDir(reloadSupplementalDirectory).filePath(name);
+        if(!atomicWrite(auditPath, supplemental.mobData, error))
+            return false;
+        CMobDocument supplementalDocument;
+        CValidationReport supplementalReport;
+        if(!supplementalDocument.load(QFileInfo(auditPath), &supplementalReport))
+        {
+            if(error) *error = "A hot-reload supplemental MOB failed validation:\n"
+                + supplementalReport.toText();
+            return false;
+        }
+        desiredSupplemental.insert(folded, supplemental.mobData);
+        desiredSupplementalNames.append(name);
+    }
+
     QJsonObject reloadManifest;
     QString bootstrapPath;
     if(!prepareGodmodeBootstrap(input.profile.mapDirectories, reloadRoot,
@@ -1095,7 +1193,20 @@ bool CJmvMapTestLauncher::hotReload(const SJmvMapTestLaunchInput& input,
     if(!readFile(m_liveMprPath, &previousMpr, error)
        || !readFile(m_liveMobPath, &previousMob, error))
         return false;
-    const auto restoreLivePair = [this, &previousMpr, &previousMob]()
+    QHash<QString, QByteArray> previousSupplemental;
+    QHash<QString, QString> previousSupplementalNames;
+    QDir stableSupplemental(m_supplementalMobDirectory);
+    for(const QFileInfo& file : stableSupplemental.entryInfoList(
+            QStringList() << "*.mob", QDir::Files | QDir::Readable, QDir::Name))
+    {
+        QByteArray bytes;
+        if(!readFile(file.absoluteFilePath(), &bytes, error))
+            return false;
+        previousSupplemental.insert(file.fileName().toCaseFolded(), bytes);
+        previousSupplementalNames.insert(file.fileName().toCaseFolded(), file.fileName());
+    }
+    const auto restoreLivePair = [this, &previousMpr, &previousMob,
+                                  &previousSupplemental, &previousSupplementalNames]()
     {
         QString ignored;
         atomicWrite(m_liveMprPath, previousMpr, &ignored);
@@ -1106,8 +1217,45 @@ bool CJmvMapTestLauncher::hotReload(const SJmvMapTestLaunchInput& input,
         live.insert("mprSha256", m_liveMprSha256);
         live.insert("mobSha256", m_liveMobSha256);
         m_manifest.insert("liveFiles", live);
+        QDir directory(m_supplementalMobDirectory);
+        for(const QFileInfo& file : directory.entryInfoList(
+                QStringList() << "*.mob", QDir::Files, QDir::Name))
+            QFile::remove(file.absoluteFilePath());
+        for(auto it = previousSupplemental.cbegin(); it != previousSupplemental.cend(); ++it)
+            atomicWrite(directory.filePath(previousSupplementalNames.value(it.key())),
+                        it.value(), &ignored);
         writeManifest("running");
     };
+    if(!QDir().mkpath(m_supplementalMobDirectory))
+    {
+        if(error) *error = "Could not prepare the stable supplemental-MOB directory.";
+        return false;
+    }
+    for(const QFileInfo& file : stableSupplemental.entryInfoList(
+            QStringList() << "*.mob", QDir::Files, QDir::Name))
+    {
+        if(!desiredSupplemental.contains(file.fileName().toCaseFolded())
+           && !QFile::remove(file.absoluteFilePath()))
+        {
+            restoreLivePair();
+            if(error) *error = "Could not retire an owned supplemental MOB before hot reload.";
+            return false;
+        }
+    }
+    for(int index = 0; index < desiredSupplementalNames.size(); ++index)
+    {
+        const QString name = desiredSupplementalNames.at(index);
+        const QByteArray bytes = desiredSupplemental.value(name.toCaseFolded());
+        const QString path = stableSupplemental.filePath(name);
+        if(!atomicWrite(path, bytes, error)
+           || fileSha256(path).compare(sha256(bytes), Qt::CaseInsensitive) != 0)
+        {
+            restoreLivePair();
+            if(error && error->isEmpty())
+                *error = "A supplemental MOB failed its hot-reload SHA-256 check.";
+            return false;
+        }
+    }
     if(!atomicWrite(m_liveMprPath, input.mprData, error)
        || !atomicWrite(m_liveMobPath, input.mobData, error)
        || fileSha256(m_liveMprPath).compare(request.mprSha256, Qt::CaseInsensitive) != 0
@@ -1174,6 +1322,10 @@ bool CJmvMapTestLauncher::hotReload(const SJmvMapTestLaunchInput& input,
     m_currentZoneId = input.mapEntry.zoneId;
     QJsonArray reloads = m_manifest.value("hotReloads").toArray();
     QJsonObject audit = mapHotReloadRequestToJson(request);
+    QJsonArray supplementalAudit;
+    for(const QString& name : desiredSupplementalNames)
+        supplementalAudit.append(stableSupplemental.filePath(name));
+    audit.insert("supplementalMobPaths", supplementalAudit);
     audit.insert("auditPath", auditPath);
     audit.insert("queuedUtc", QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
     reloads.append(audit);
