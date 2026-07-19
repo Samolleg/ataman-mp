@@ -375,6 +375,7 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
   - [ ] Runtime-prove that the verified normal zone-transition controller safely
     unloads and reloads the same staged pair without restarting JMV. Current
     source is an experimental probe and is not yet considered validated.
+  - Implementation: [`5011954`](https://github.com/Ilufus/ei-mapper-endurance/commit/5011954).
 - [ ] Preserve position on same-map reload.
   - Capture player position and facing before teardown.
   - Restore them only after ground, bounds, and collision validation.
