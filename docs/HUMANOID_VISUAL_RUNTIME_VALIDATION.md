@@ -40,12 +40,13 @@ edit `database.res`, JMV/Base archives, live MOBs, maps, or the game install.
    a structured diagnostic/placeholder is shown.
 5. Confirm the visual and picking passes use the same transient component plan.
 6. JMV: validate `zone1.mob` ID 205 and representative `unhufe`, `unorfe`, and
-   `unorma` units. Armor starts with its ordinary database slot. When the
-   selected assembly contains overlapping geometry for the same TTI, top armor
-   wins across its lower-layer group: `plate > shirt/gloves` and
-   `leggings > pants/boots`; helmet is likewise top armor. A lower component
-   remains visible only when the selected top-armor TTI has no replacement for
-   that anatomical slot.
+   `unorma` units. Shirt, gloves, pants, and boots always use the base anatomical
+   geometry (`Bd/Hp/Lh1-3/Rh1-3/Ll1-3/Rl1-3`); their TTI selects the body-atlas
+   layer and never selects `.armorNN` geometry. When the selected assembly
+   contains an exact upper-armor member, top armor wins across its lower-layer
+   group: `plate > shirt/gloves` and `leggings > pants/boots`; helmet is likewise
+   top armor. Base anatomy remains visible only where the selected top-armor TTI
+   has no replacement for that anatomical slot.
    A missing optional overlap retains the lower item and is not diagnosed as a
    missing required component. Base keeps the ordinary disjoint slot mapping.
    The displaced anatomical part must not remain visible underneath a winner.
@@ -103,6 +104,9 @@ edit `database.res`, JMV/Base archives, live MOBs, maps, or the game install.
    controls refresh after profile changes and retain unknown current values.
 2. Open several MOBs and switch profiles repeatedly; confirm snapshot provenance
    and provider IDs remain profile-scoped and memory does not grow per frame.
+   Repeatedly switch among `bz8k`, `zone18`, and `zone3obr`; terrain-atlas upload
+   must complete without a `QOpenGLTexture` access violation after MOB cache
+   cleanup.
 3. Load a dense MOB and inspect the `Preloaded visual resources` timing log.
    Pan across the map afterward: bringing a unit into frame for the first time
    must not trigger its database/figure/texture resolution. Transient geometry
