@@ -14,6 +14,9 @@ const int kSectorVertices = 33;
 const int kSectorStride = 32;
 const int kVertexSize = 8;
 const int kLandVertexOffset = 5;
+const int kSectorTiles = 16;
+const int kSectorTileCount = kSectorTiles * kSectorTiles;
+const int kTileSize = 2;
 const quint32 kSectorSignature = 0xCF4BF774;
 
 quint16 readHeight(const QByteArray& payload, int localX, int localY)
@@ -46,6 +49,27 @@ void writePackedNormal(QByteArray& payload, int localX, int localY, quint32 pack
     qToLittleEndian<quint32>(packed, encoded);
     for(int byte = 0; byte < 4; ++byte)
         payload[offset + byte] = char(encoded[byte]);
+}
+
+quint16 readPackedTile(const QByteArray& payload, quint64 baseOffset, int localTile)
+{
+    const quint64 offset = baseOffset + quint64(localTile) * kTileSize;
+    return qFromLittleEndian<quint16>(
+        reinterpret_cast<const uchar*>(payload.constData() + offset));
+}
+
+void writePackedTile(QByteArray& payload, quint64 baseOffset, int localTile, quint16 packed)
+{
+    const quint64 offset = baseOffset + quint64(localTile) * kTileSize;
+    uchar encoded[2];
+    qToLittleEndian<quint16>(packed, encoded);
+    payload[int(offset)] = char(encoded[0]);
+    payload[int(offset) + 1] = char(encoded[1]);
+}
+
+qint16 readOverlayMaterial(const QByteArray& payload, quint64 baseOffset, int localTile)
+{
+    return qint16(readPackedTile(payload, baseOffset, localTile));
 }
 
 struct SVector3
@@ -89,6 +113,97 @@ quint16 clampedHeight(float value, bool* wasClamped = nullptr)
 }
 }
 
+STerrainTransitionSignature CTerrainTransitionCatalog::rotated(
+    const STerrainTransitionSignature& signature, int clockwiseQuarterTurns)
+{
+    STerrainTransitionSignature result = signature;
+    int turns = clockwiseQuarterTurns % 4;
+    if(turns < 0)
+        turns += 4;
+    while(turns-- > 0)
+    {
+        const STerrainTransitionSignature before = result;
+        result.northWest = before.southWest;
+        result.northEast = before.northWest;
+        result.southEast = before.northEast;
+        result.southWest = before.southEast;
+    }
+    return result;
+}
+
+bool CTerrainTransitionCatalog::addVariant(const STerrainTransitionVariant& variant,
+                                           CValidationReport* report)
+{
+    if(variant.distributionWeight <= 0)
+    {
+        if(report)
+            report->add("terrain.transition_weight", EValidationSeverity::Error,
+                        "Transition variants require a positive distribution weight");
+        return false;
+    }
+    for(const STerrainTransitionVariant& existing : m_variants)
+    {
+        if(existing.signature == variant.signature
+           && existing.packedTile == variant.packedTile)
+        {
+            if(report)
+                report->add("terrain.transition_duplicate", EValidationSeverity::Error,
+                            "Transition catalog contains the same oriented tile twice");
+            return false;
+        }
+    }
+    m_variants.append(variant);
+    return true;
+}
+
+quint16 CTerrainTransitionCatalog::select(
+    const STerrainTransitionSignature& signature, int globalX, int globalY,
+    quint32 distributionSeed, bool* found) const
+{
+    quint64 totalWeight = 0;
+    for(const STerrainTransitionVariant& variant : m_variants)
+        if(variant.signature == signature)
+            totalWeight += quint64(variant.distributionWeight);
+    if(totalWeight == 0)
+    {
+        if(found)
+            *found = false;
+        return 0;
+    }
+
+    quint32 hash = 2166136261u;
+    const auto mix = [&hash](quint32 value) {
+        for(int byte = 0; byte < 4; ++byte)
+        {
+            hash ^= (value >> (byte * 8)) & 0xFFu;
+            hash *= 16777619u;
+        }
+    };
+    mix(distributionSeed);
+    mix(quint32(globalX));
+    mix(quint32(globalY));
+    mix(quint32(signature.northWest));
+    mix(quint32(signature.northEast));
+    mix(quint32(signature.southEast));
+    mix(quint32(signature.southWest));
+    quint64 selection = quint64(hash) % totalWeight;
+    for(const STerrainTransitionVariant& variant : m_variants)
+    {
+        if(!(variant.signature == signature))
+            continue;
+        if(selection < quint64(variant.distributionWeight))
+        {
+            if(found)
+                *found = true;
+            return variant.packedTile;
+        }
+        selection -= quint64(variant.distributionWeight);
+    }
+    if(found)
+        *found = false;
+    return 0;
+}
+
 bool CTerrainEditModel::load(const CMprDocument& document, CValidationReport* report)
 {
     if(!document.mapInfo().valid)
@@ -109,23 +224,31 @@ bool CTerrainEditModel::load(const CMprDocument& document, CValidationReport* re
         source.expectedPayloadSha256 = member.sha256;
         source.sectorX = sector.sectorX;
         source.sectorY = sector.sectorY;
+        source.type = sector.type;
+        source.landTileOffset = sector.landTileOffset;
+        source.overlayTileOffset = sector.overlayTileOffset;
+        source.overlayMaterialOffset = sector.overlayMaterialOffset;
         source.payload = member.payload;
         sources.append(source);
     }
     return loadSources(int(document.mapInfo().sectorCountX),
                        int(document.mapInfo().sectorCountY), document.mapInfo().maxZ,
-                       sources, report);
+                       sources, report, int(document.mapInfo().textureCount),
+                       document.mapInfo().tileTypes);
 }
 
 bool CTerrainEditModel::loadSources(int sectorCountX, int sectorCountY, float maxZ,
                                     const QVector<STerrainSectorSource>& sources,
-                                    CValidationReport* report)
+                                    CValidationReport* report, int textureCount,
+                                    const QVector<qint32>& tileTypes)
 {
     m_sectorCountX = 0;
     m_sectorCountY = 0;
     m_vertexCountX = 0;
     m_vertexCountY = 0;
     m_maxZ = 0.0f;
+    m_textureCount = 0;
+    m_tileTypes.clear();
     m_heights.clear();
     m_originalHeights.clear();
     m_xOffsets.clear();
@@ -158,6 +281,24 @@ bool CTerrainEditModel::loadSources(int sectorCountX, int sectorCountY, float ma
                             source.memberName);
             return false;
         }
+        if(textureCount > 0)
+        {
+            const quint64 landEnd = source.landTileOffset
+                + quint64(kSectorTileCount) * kTileSize;
+            const quint64 overlayEnd = source.overlayMaterialOffset
+                + quint64(kSectorTileCount) * kTileSize;
+            if(source.landTileOffset == 0 || landEnd > quint64(source.payload.size())
+               || (source.type == 3 && (source.overlayTileOffset == 0
+                   || source.overlayMaterialOffset == 0
+                   || overlayEnd > quint64(source.payload.size()))))
+            {
+                if(report)
+                    report->add("terrain.tile_arrays", EValidationSeverity::Error,
+                                "Terrain sector has truncated or missing tile arrays",
+                                source.memberName);
+                return false;
+            }
+        }
         const QPair<int, int> key(source.sectorX, source.sectorY);
         if(m_sectorLookup.contains(key))
         {
@@ -184,6 +325,8 @@ bool CTerrainEditModel::loadSources(int sectorCountX, int sectorCountY, float ma
     m_sectorCountX = sectorCountX;
     m_sectorCountY = sectorCountY;
     m_maxZ = maxZ;
+    m_textureCount = qMax(0, textureCount);
+    m_tileTypes = tileTypes;
     m_vertexCountX = sectorCountX * kSectorStride + 1;
     m_vertexCountY = sectorCountY * kSectorStride + 1;
     const int globalCount = m_vertexCountX * m_vertexCountY;
@@ -260,6 +403,70 @@ bool CTerrainEditModel::isDirty() const
         if(sector.dirty)
             return true;
     return false;
+}
+
+bool CTerrainEditModel::tileLocation(int globalX, int globalY, int* sectorIndex,
+                                     int* localTile, CValidationReport* report) const
+{
+    if(globalX < 0 || globalX >= tileCountX() ||
+       globalY < 0 || globalY >= tileCountY())
+    {
+        if(report)
+            report->add("terrain.tile_bounds", EValidationSeverity::Error,
+                        "Tile command references a cell outside the terrain",
+                        QString("%1,%2").arg(globalX).arg(globalY));
+        return false;
+    }
+    const int sectorX = globalX / kSectorTiles;
+    const int sectorY = globalY / kSectorTiles;
+    const int index = m_sectorLookup.value(QPair<int, int>(sectorX, sectorY), -1);
+    if(index < 0)
+        return false;
+    if(sectorIndex)
+        *sectorIndex = index;
+    if(localTile)
+        *localTile = (globalY % kSectorTiles) * kSectorTiles
+            + (globalX % kSectorTiles);
+    return true;
+}
+
+bool CTerrainEditModel::overlayTileIsActive(const SSector& sector, int localTile) const
+{
+    return sector.source.type == 3 && sector.source.overlayMaterialOffset > 0
+        && readOverlayMaterial(sector.currentPayload,
+                               sector.source.overlayMaterialOffset, localTile) != -1;
+}
+
+quint16 CTerrainEditModel::packedTile(int globalX, int globalY,
+                                      ETerrainTileLayer layer, bool* available) const
+{
+    int sectorIndex = -1;
+    int localTile = -1;
+    if(!tileLocation(globalX, globalY, &sectorIndex, &localTile))
+    {
+        if(available)
+            *available = false;
+        return 0;
+    }
+    const SSector& sector = m_sectors.at(sectorIndex);
+    const bool present = layer == ETerrainTileLayer::Land
+        ? sector.source.landTileOffset > 0 : overlayTileIsActive(sector, localTile);
+    if(available)
+        *available = present;
+    if(!present)
+        return 0;
+    const quint64 offset = layer == ETerrainTileLayer::Land
+        ? sector.source.landTileOffset : sector.source.overlayTileOffset;
+    return readPackedTile(sector.currentPayload, offset, localTile);
+}
+
+qint32 CTerrainEditModel::tileType(quint16 packed, bool* found) const
+{
+    const int slot = SMprPackedTile::decode(packed).atlasSlot();
+    const bool present = slot >= 0 && slot < m_tileTypes.size();
+    if(found)
+        *found = present;
+    return present ? m_tileTypes.at(slot) : 0;
 }
 
 bool CTerrainEditModel::hasSeamConflicts() const
@@ -687,6 +894,136 @@ bool CTerrainEditModel::apply(const STerrainHeightCommand& command, bool forward
     return true;
 }
 
+STerrainTileCommand CTerrainEditModel::makeTilePaint(
+    const STerrainTileBrush& brush, ETerrainTileLayer layer,
+    quint8 atlasIndex, quint8 tileIndex, quint8 rotation) const
+{
+    STerrainTileCommand command;
+    command.description = layer == ETerrainTileLayer::Land
+        ? QStringLiteral("Paint terrain tiles") : QStringLiteral("Paint overlay tiles");
+    if(brush.radius < 0.0f || tileIndex >= 64 || rotation >= 4
+       || atlasIndex >= m_textureCount)
+        return command;
+    SMprPackedTile selected;
+    selected.atlasIndex = atlasIndex;
+    selected.tileIndex = tileIndex;
+    selected.rotation = rotation;
+    if(selected.atlasSlot() >= m_tileTypes.size())
+        return command;
+    const quint16 after = selected.encode();
+    const int minimumX = qMax(0, int(std::ceil(brush.centerX - brush.radius)));
+    const int maximumX = qMin(tileCountX() - 1,
+                              int(std::floor(brush.centerX + brush.radius)));
+    const int minimumY = qMax(0, int(std::ceil(brush.centerY - brush.radius)));
+    const int maximumY = qMin(tileCountY() - 1,
+                              int(std::floor(brush.centerY + brush.radius)));
+    for(int y = minimumY; y <= maximumY; ++y)
+    {
+        for(int x = minimumX; x <= maximumX; ++x)
+        {
+            const float dx = std::fabs(float(x) - brush.centerX);
+            const float dy = std::fabs(float(y) - brush.centerY);
+            const bool inside = brush.shape == ETerrainTileBrushShape::Square
+                ? qMax(dx, dy) <= brush.radius
+                : std::sqrt(dx * dx + dy * dy) <= brush.radius;
+            if(!inside)
+                continue;
+            bool available = false;
+            const quint16 before = packedTile(x, y, layer, &available);
+            if(!available || before == after)
+                continue;
+            STerrainTileDelta delta;
+            delta.globalX = x;
+            delta.globalY = y;
+            delta.layer = layer;
+            delta.before = before;
+            delta.after = after;
+            command.deltas.append(delta);
+        }
+    }
+    return command;
+}
+
+bool CTerrainEditModel::apply(const STerrainTileCommand& command, bool forward,
+                              CValidationReport* report)
+{
+    QSet<int> commandTiles;
+    struct SResolvedTile
+    {
+        int sectorIndex;
+        int localTile;
+        quint64 offset;
+    };
+    QVector<SResolvedTile> resolved;
+    resolved.reserve(command.deltas.size());
+    for(const STerrainTileDelta& delta : command.deltas)
+    {
+        int sectorIndex = -1;
+        int localTile = -1;
+        if(!tileLocation(delta.globalX, delta.globalY, &sectorIndex, &localTile, report))
+            return false;
+        const int key = ((delta.layer == ETerrainTileLayer::Overlay) ? 1 : 0)
+            * tileCountX() * tileCountY() + delta.globalY * tileCountX() + delta.globalX;
+        if(commandTiles.contains(key))
+        {
+            if(report)
+                report->add("terrain.tile_duplicate", EValidationSeverity::Error,
+                            "Tile command references the same layer cell more than once",
+                            QString("%1,%2").arg(delta.globalX).arg(delta.globalY));
+            return false;
+        }
+        commandTiles.insert(key);
+        const SSector& sector = m_sectors.at(sectorIndex);
+        if(delta.layer == ETerrainTileLayer::Overlay
+           && !overlayTileIsActive(sector, localTile))
+        {
+            if(report)
+                report->add("terrain.overlay_inactive", EValidationSeverity::Error,
+                            "Tile painting cannot create an overlay surface implicitly",
+                            QString("%1,%2").arg(delta.globalX).arg(delta.globalY));
+            return false;
+        }
+        const quint64 offset = delta.layer == ETerrainTileLayer::Land
+            ? sector.source.landTileOffset : sector.source.overlayTileOffset;
+        if(offset == 0)
+            return false;
+        const quint16 expected = forward ? delta.before : delta.after;
+        if(readPackedTile(sector.currentPayload, offset, localTile) != expected)
+        {
+            if(report)
+                report->add("terrain.tile_provenance", EValidationSeverity::Error,
+                            "Tile command no longer matches the canonical sector payload",
+                            QString("%1,%2").arg(delta.globalX).arg(delta.globalY));
+            return false;
+        }
+        if(forward)
+        {
+            const SMprPackedTile selected = SMprPackedTile::decode(delta.after);
+            if(selected.atlasIndex >= m_textureCount
+               || selected.atlasSlot() >= m_tileTypes.size())
+            {
+                if(report)
+                    report->add("terrain.tile_namespace", EValidationSeverity::Error,
+                                "Tile command selects a slot outside the MPR atlas namespace",
+                                QString("%1,%2").arg(delta.globalX).arg(delta.globalY));
+                return false;
+            }
+        }
+        resolved.append({sectorIndex, localTile, offset});
+    }
+
+    for(int index = 0; index < command.deltas.size(); ++index)
+    {
+        const STerrainTileDelta& delta = command.deltas.at(index);
+        const SResolvedTile& target = resolved.at(index);
+        SSector& sector = m_sectors[target.sectorIndex];
+        writePackedTile(sector.currentPayload, target.offset, target.localTile,
+                        forward ? delta.after : delta.before);
+        sector.dirty = sector.currentPayload != sector.source.payload;
+    }
+    return true;
+}
+
 bool CTerrainEditModel::appendSectorEdits(CMprEditTransaction* transaction,
                                           CValidationReport* report) const
 {
@@ -701,9 +1038,6 @@ bool CTerrainEditModel::appendSectorEdits(CMprEditTransaction* transaction,
     for(int index = 0; index < m_heights.size(); ++index)
         if(m_heights.at(index) != m_originalHeights.at(index))
             changedVertices.insert(index);
-    if(changedVertices.isEmpty())
-        return true;
-
     QSet<int> affectedNormals;
     for(int index : changedVertices)
     {
@@ -755,8 +1089,9 @@ bool CTerrainEditModel::appendSectorEdits(CMprEditTransaction* transaction,
     }
     if(report)
         report->add("terrain.transaction", EValidationSeverity::Info,
-                    QString("Prepared %1 sector patch(es) for %2 changed height vertex/vertices and %3 affected normal(s)")
-                        .arg(editedSectorCount).arg(changedVertices.size()).arg(affectedNormals.size()));
+                    QString("Prepared %1 sector patch(es) for %2 changed height vertex/vertices, %3 affected normal(s), and localized tile edits")
+                        .arg(editedSectorCount).arg(changedVertices.size())
+                        .arg(affectedNormals.size()));
     return true;
 }
 
@@ -833,6 +1168,49 @@ QByteArray CTerrainEditModel::sectorPayload(int sectorX, int sectorY) const
 {
     const int index = m_sectorLookup.value(QPair<int, int>(sectorX, sectorY), -1);
     return index >= 0 ? m_sectors.at(index).currentPayload : QByteArray();
+}
+
+bool CTerrainTileEditHistory::execute(CTerrainEditModel* model,
+                                      const STerrainTileCommand& command,
+                                      CValidationReport* report)
+{
+    if(!model || command.isEmpty() || !model->apply(command, true, report))
+        return false;
+    m_undo.append(command);
+    m_redo.clear();
+    return true;
+}
+
+bool CTerrainTileEditHistory::undo(CTerrainEditModel* model,
+                                   CValidationReport* report)
+{
+    if(!model || m_undo.isEmpty())
+        return false;
+    const STerrainTileCommand command = m_undo.back();
+    if(!model->apply(command, false, report))
+        return false;
+    m_undo.removeLast();
+    m_redo.append(command);
+    return true;
+}
+
+bool CTerrainTileEditHistory::redo(CTerrainEditModel* model,
+                                   CValidationReport* report)
+{
+    if(!model || m_redo.isEmpty())
+        return false;
+    const STerrainTileCommand command = m_redo.back();
+    if(!model->apply(command, true, report))
+        return false;
+    m_redo.removeLast();
+    m_undo.append(command);
+    return true;
+}
+
+void CTerrainTileEditHistory::clear()
+{
+    m_undo.clear();
+    m_redo.clear();
 }
 
 bool CTerrainEditHistory::execute(CTerrainEditModel* model,

@@ -285,6 +285,7 @@ private slots:
     void canonicalTerrainSeamsAreEditedAndUndoneTogether();
     void terrainBrushToolsAreDeterministicAndFailClosed();
     void terrainDiagnosticsArePreApplyAndPolicyExplicit();
+    void terrainTilePaintingIsUndoableLocalizedAndNamespaceSafe();
     void terrainHeightTransactionReopensAndPreservesOverlay();
     void conflictingTerrainSeamIsPreservedAndNotEditable();
     void malformedMprTableIsRejected();
@@ -1246,6 +1247,179 @@ void EnduranceDocumentTests::terrainDiagnosticsArePreApplyAndPolicyExplicit()
     QVERIFY(!terrain.diagnose(saturated, QVector<STerrainObjectHeightProbe>(),
                               policy, &staleReport).valid);
     QVERIFY(staleReport.hasErrors());
+}
+
+void EnduranceDocumentTests::terrainTilePaintingIsUndoableLocalizedAndNamespaceSafe()
+{
+    STerrainTransitionSignature signature;
+    signature.northWest = 1;
+    signature.northEast = 2;
+    signature.southEast = 3;
+    signature.southWest = 4;
+    const STerrainTransitionSignature rotated =
+        CTerrainTransitionCatalog::rotated(signature, 1);
+    QCOMPARE(rotated.northWest, qint32(4));
+    QCOMPARE(rotated.northEast, qint32(1));
+    QCOMPARE(rotated.southEast, qint32(2));
+    QCOMPARE(rotated.southWest, qint32(3));
+    QCOMPARE(CTerrainTransitionCatalog::rotated(rotated, -1), signature);
+    CTerrainTransitionCatalog catalog;
+    STerrainTransitionVariant firstVariant;
+    firstVariant.signature = signature;
+    firstVariant.packedTile = 1;
+    STerrainTransitionVariant secondVariant = firstVariant;
+    secondVariant.packedTile = 2;
+    secondVariant.distributionWeight = 3;
+    QVERIFY(catalog.addVariant(firstVariant));
+    QVERIFY(catalog.addVariant(secondVariant));
+    QVERIFY(!catalog.addVariant(firstVariant));
+    QSet<quint16> distributed;
+    for(int x = 0; x < 64; ++x)
+    {
+        bool found = false;
+        const quint16 selected = catalog.select(signature, x, 7, 12345, &found);
+        QVERIFY(found);
+        QCOMPARE(selected, catalog.select(signature, x, 7, 12345));
+        distributed.insert(selected);
+    }
+    QCOMPARE(distributed, QSet<quint16>({1, 2}));
+    bool foundTransition = true;
+    STerrainTransitionSignature missingSignature;
+    QCOMPARE(catalog.select(missingSignature, 0, 0, 0, &foundTransition), quint16(0));
+    QVERIFY(!foundTransition);
+
+    CMprDocument baseline;
+    CValidationReport baselineReport;
+    QVERIFY(baseline.loadBytes(syntheticMpr(), "tile-paint-baseline.mpr", &baselineReport));
+    QVERIFY(!baselineReport.hasErrors());
+
+    CTerrainEditModel terrain;
+    CValidationReport loadReport;
+    QVERIFY(terrain.load(baseline, &loadReport));
+    QVERIFY(!loadReport.hasErrors());
+    QCOMPARE(terrain.tileCountX(), 16);
+    QCOMPARE(terrain.tileCountY(), 16);
+    bool available = false;
+    QCOMPARE(terrain.packedTile(0, 0, ETerrainTileLayer::Land, &available), quint16(0));
+    QVERIFY(available);
+    QCOMPARE(terrain.tileType(quint16(1), &available), qint32(2));
+    QVERIFY(available);
+
+    STerrainTileBrush area;
+    area.centerX = 5.0f;
+    area.centerY = 5.0f;
+    area.radius = 1.0f;
+    area.shape = ETerrainTileBrushShape::Circle;
+    QCOMPARE(terrain.makeTilePaint(area, ETerrainTileLayer::Land,
+                                   0, 1, 0).deltas.size(), 5);
+    area.shape = ETerrainTileBrushShape::Square;
+    QCOMPARE(terrain.makeTilePaint(area, ETerrainTileLayer::Land,
+                                   0, 1, 0).deltas.size(), 9);
+
+    STerrainTileBrush point;
+    point.centerX = 0.0f;
+    point.centerY = 0.0f;
+    point.radius = 0.0f;
+    const STerrainTileCommand land = terrain.makeTilePaint(
+        point, ETerrainTileLayer::Land, 0, 1, 3);
+    QCOMPARE(land.deltas.size(), 1);
+    STerrainTileCommand duplicateLand = land;
+    duplicateLand.deltas.append(land.deltas.front());
+    CValidationReport duplicateReport;
+    QVERIFY(!terrain.apply(duplicateLand, true, &duplicateReport));
+    QVERIFY(duplicateReport.hasErrors());
+    CTerrainTileEditHistory history;
+    QVERIFY(history.execute(&terrain, land));
+    QCOMPARE(SMprPackedTile::decode(
+        terrain.packedTile(0, 0, ETerrainTileLayer::Land)).rotation, quint8(3));
+    QVERIFY(history.undo(&terrain));
+    QCOMPARE(terrain.packedTile(0, 0, ETerrainTileLayer::Land), quint16(0));
+    QVERIFY(history.redo(&terrain));
+    CValidationReport staleTileReport;
+    QVERIFY(!terrain.apply(land, true, &staleTileReport));
+    QVERIFY(staleTileReport.hasErrors());
+
+    point.centerX = 1.0f;
+    const STerrainTileCommand overlay = terrain.makeTilePaint(
+        point, ETerrainTileLayer::Overlay, 0, 1, 1);
+    QCOMPARE(overlay.deltas.size(), 1);
+    QVERIFY(terrain.apply(overlay, true));
+    point.centerX = 0.0f;
+    QVERIFY(terrain.makeTilePaint(point, ETerrainTileLayer::Overlay,
+                                  0, 1, 1).isEmpty());
+
+    STerrainTileCommand inactive;
+    STerrainTileDelta inactiveDelta;
+    inactiveDelta.globalX = 0;
+    inactiveDelta.globalY = 0;
+    inactiveDelta.layer = ETerrainTileLayer::Overlay;
+    inactiveDelta.before = quint16(0xFFFF);
+    inactiveDelta.after = quint16(1);
+    inactive.deltas.append(inactiveDelta);
+    CValidationReport inactiveReport;
+    QVERIFY(!terrain.apply(inactive, true, &inactiveReport));
+    QVERIFY(inactiveReport.hasErrors());
+
+    STerrainTileCommand outsideNamespace;
+    STerrainTileDelta invalidDelta;
+    invalidDelta.globalX = 2;
+    invalidDelta.globalY = 0;
+    invalidDelta.before = terrain.packedTile(2, 0, ETerrainTileLayer::Land);
+    SMprPackedTile invalidSelection;
+    invalidSelection.atlasIndex = 1;
+    invalidDelta.after = invalidSelection.encode();
+    outsideNamespace.deltas.append(invalidDelta);
+    CValidationReport namespaceReport;
+    QVERIFY(!terrain.apply(outsideNamespace, true, &namespaceReport));
+    QVERIFY(namespaceReport.hasErrors());
+
+    CMprEditTransaction transaction("paint synthetic land and overlay tiles");
+    CValidationReport editReport;
+    QVERIFY(terrain.appendSectorEdits(&transaction, &editReport));
+    QCOMPARE(transaction.edits().size(), 1);
+    QByteArray candidateBytes;
+    QVERIFY(baseline.applyTransaction(transaction, &candidateBytes, &editReport));
+    CMprDocument candidate;
+    CValidationReport candidateReport;
+    QVERIFY(candidate.loadBytes(candidateBytes, "tile-paint-candidate.mpr", &candidateReport));
+    QVERIFY(!candidateReport.hasErrors());
+    QCOMPARE(CMprSemanticDiff::compare(baseline, candidate).entries().size(), 1);
+
+    const SMprSectorInfo& sector = baseline.sectors().front();
+    const QByteArray original = baseline.members().at(sector.memberIndex).payload;
+    QByteArray localized = candidate.members().at(candidate.sectors().front().memberIndex).payload;
+    localized.replace(int(sector.landTileOffset), 2,
+                      original.mid(int(sector.landTileOffset), 2));
+    localized.replace(int(sector.overlayTileOffset + 2), 2,
+                      original.mid(int(sector.overlayTileOffset + 2), 2));
+    QCOMPARE(localized, original);
+
+    CTerrainEditModel reopened;
+    QVERIFY(reopened.load(candidate));
+    QCOMPARE(reopened.packedTile(0, 0, ETerrainTileLayer::Land), land.deltas.front().after);
+    QCOMPARE(reopened.packedTile(1, 0, ETerrainTileLayer::Overlay),
+             overlay.deltas.front().after);
+
+    STerrainBrush heightPoint;
+    heightPoint.centerX = 10.0f;
+    heightPoint.centerY = 10.0f;
+    heightPoint.radius = 0.0f;
+    heightPoint.falloff = ETerrainBrushFalloff::Constant;
+    QVERIFY(terrain.apply(terrain.makeRaiseLower(heightPoint, 100.0f), true));
+    CMprEditTransaction combined("combine height and tile edits");
+    QVERIFY(terrain.appendSectorEdits(&combined));
+    QCOMPARE(combined.edits().size(), 1);
+    QByteArray combinedBytes;
+    QVERIFY(baseline.applyTransaction(combined, &combinedBytes));
+    CMprDocument combinedCandidate;
+    QVERIFY(combinedCandidate.loadBytes(combinedBytes, "combined-height-tile.mpr"));
+    CTerrainEditModel combinedReopened;
+    QVERIFY(combinedReopened.load(combinedCandidate));
+    QCOMPARE(combinedReopened.height(10, 10), quint16(100));
+    QCOMPARE(combinedReopened.packedTile(0, 0, ETerrainTileLayer::Land),
+             land.deltas.front().after);
+    QCOMPARE(combinedReopened.packedTile(1, 0, ETerrainTileLayer::Overlay),
+             overlay.deltas.front().after);
 }
 
 void EnduranceDocumentTests::terrainHeightTransactionReopensAndPreservesOverlay()
