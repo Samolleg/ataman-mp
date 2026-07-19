@@ -1262,16 +1262,21 @@ bool ProcessHotReloadOnGameThread()
         Log(L"HOT_RELOAD refused: request, ownership, sequence, or payload hash validation failed");
         return false;
     }
-    wchar_t liveMpr[MAX_PATH * 4]{};
-    wchar_t liveMob[MAX_PATH * 4]{};
-    if(!MultiByteToWideChar(CP_ACP, MB_ERR_INVALID_CHARS, g_temporaryMpr, -1,
-                            liveMpr, int(sizeof(liveMpr) / sizeof(liveMpr[0])))
-       || !MultiByteToWideChar(CP_ACP, MB_ERR_INVALID_CHARS, g_temporaryMob, -1,
-                               liveMob, int(sizeof(liveMob) / sizeof(liveMob[0])))
-       || !HashMatches(liveMpr, request.mprSha256)
-       || !HashMatches(liveMob, request.mobSha256))
+    if(!HashMatches(request.mprPath, request.mprSha256)
+       || !HashMatches(request.mobPath, request.mobSha256))
     {
-        Log(L"HOT_RELOAD refused: Endurance-owned live map pair does not match the staged request hashes");
+        Log(L"HOT_RELOAD refused: owned generation payload does not match the staged request hashes");
+        return false;
+    }
+    BOOL usedDefault = FALSE;
+    if(!WideCharToMultiByte(CP_ACP, WC_NO_BEST_FIT_CHARS, request.mprPath, -1,
+                            g_temporaryMpr, int(sizeof(g_temporaryMpr)),
+                            nullptr, &usedDefault) || usedDefault
+       || !WideCharToMultiByte(CP_ACP, WC_NO_BEST_FIT_CHARS, request.mobPath, -1,
+                               g_temporaryMob, int(sizeof(g_temporaryMob)),
+                               nullptr, &usedDefault) || usedDefault)
+    {
+        Log(L"HOT_RELOAD refused: owned generation paths cannot round-trip through the game code page");
         return false;
     }
     if(strcpy_s(g_sourceZone, request.zone) != 0)

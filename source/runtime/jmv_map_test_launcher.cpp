@@ -442,9 +442,10 @@ bool CJmvMapTestLauncher::isHotReloadReady() const
 bool CJmvMapTestLauncher::injectWorldScriptBootstrap(const QString& script,
                                                      const QString& commands,
                                                      QString* output,
-                                                     QString* error)
+                                                     QString* error,
+                                                     const QString& immediateCommands)
 {
-    if(!output || commands.trimmed().isEmpty())
+    if(!output || (commands.trimmed().isEmpty() && immediateCommands.trimmed().isEmpty()))
         return false;
     enum class State { Code, String, LineComment, BlockComment };
     State state = State::Code;
@@ -501,7 +502,8 @@ bool CJmvMapTestLauncher::injectWorldScriptBootstrap(const QString& script,
         // Sleep while the player/party record is registered. Running
         // SetCPFast or GodMode before that point is a silent no-op. Preserve
         // the source delay and insert immediately after it when present.
-        int insertion = open + 1;
+        const int bodyStart = open + 1;
+        int insertion = bodyStart;
         const QString body = script.mid(insertion);
         const QRegularExpression leadingDelay(
             "^\\s*Sleep\\s*\\([^\\)]*\\)",
@@ -509,8 +511,13 @@ bool CJmvMapTestLauncher::injectWorldScriptBootstrap(const QString& script,
         const QRegularExpressionMatch delay = leadingDelay.match(body);
         if(delay.hasMatch())
             insertion += delay.capturedEnd();
-        *output = script.left(insertion) + "\n" + commands.trimmed()
-            + "\n" + script.mid(insertion);
+        *output = script.left(bodyStart);
+        if(!immediateCommands.trimmed().isEmpty())
+            output->append("\n" + immediateCommands.trimmed() + "\n");
+        output->append(script.mid(bodyStart, insertion - bodyStart));
+        if(!commands.trimmed().isEmpty())
+            output->append("\n" + commands.trimmed() + "\n");
+        output->append(script.mid(insertion));
         return true;
     }
     if(state == State::String || state == State::BlockComment)
@@ -522,7 +529,12 @@ bool CJmvMapTestLauncher::injectWorldScriptBootstrap(const QString& script,
     *output = script;
     if(!output->isEmpty() && !output->endsWith('\n'))
         output->append('\n');
-    output->append("WorldScript(\n" + commands.trimmed() + "\n)\n");
+    QStringList generatedBody;
+    if(!immediateCommands.trimmed().isEmpty())
+        generatedBody.append(immediateCommands.trimmed());
+    if(!commands.trimmed().isEmpty())
+        generatedBody.append(commands.trimmed());
+    output->append("WorldScript(\n" + generatedBody.join("\n") + "\n)\n");
     return true;
 }
 
@@ -588,11 +600,12 @@ bool CJmvMapTestLauncher::prepareTemporaryAutoexec(const QString& engineDirector
 bool CJmvMapTestLauncher::prepareGodmodeBootstrap(
     const QStringList& mapDirectories, const QString& runRoot,
     const SMapSpawnPlan& spawn, double spawnZ, bool godmode,
+    const QStringList& supplementalMobNames,
     QJsonObject* manifest, QString* outputPath, QString* error)
 {
     if(outputPath)
         outputPath->clear();
-    if(!spawn.valid && !godmode)
+    if((!spawn.valid || !spawn.custom) && !godmode && supplementalMobNames.isEmpty())
         return true;
     if(!manifest || !outputPath || runRoot.isEmpty())
     {
@@ -621,17 +634,39 @@ bool CJmvMapTestLauncher::prepareGodmodeBootstrap(
     }
     QStringList commands;
     commands.append("// EI Mapper Endurance owned runtime bootstrap");
-    if(spawn.valid)
-        commands.append(QString("SetCPFast(GetLeader(), %1, %2, %3)")
+    // SetCPFast's final value is a height offset, not an absolute terrain Z.
+    // Normal entrance starts already use the map table and must not be moved a
+    // second time. Custom starts are grounded by requesting a zero offset.
+    QString immediatePositionCommand;
+    if(spawn.valid && spawn.custom)
+    {
+        immediatePositionCommand = QString("SetCPFast(GetLeader(), %1, %2, 0)")
             .arg(spawn.position.x(), 0, 'f', 6)
-            .arg(spawn.position.y(), 0, 'f', 6)
-            .arg(spawnZ, 0, 'f', 6));
+            .arg(spawn.position.y(), 0, 'f', 6);
+        // Try before the source autorun delay so a ready player starts at the
+        // requested point before the first rendered frame. Repeat after the
+        // delay as the guarded fallback for runtimes that register the leader
+        // asynchronously.
+        commands.append(immediatePositionCommand);
+    }
+    for(const QString& name : supplementalMobNames)
+    {
+        const QFileInfo file(name);
+        if(file.fileName() != name || !name.endsWith(".mob", Qt::CaseInsensitive)
+           || name.contains('"') || name.contains('\\') || name.contains('/'))
+        {
+            if(error) *error = "A supplemental MOB bootstrap name is unsafe.";
+            return false;
+        }
+        commands.append(QString("AddMob(\"%1\")").arg(name));
+    }
     if(godmode)
         commands.append("GodMode(0,3)");
     QString bootstrappedScript;
     QString bootstrapError;
     if(!injectWorldScriptBootstrap(script, commands.join("\r\n"),
-                                   &bootstrappedScript, &bootstrapError))
+                                   &bootstrappedScript, &bootstrapError,
+                                   immediatePositionCommand))
     {
         if(error) *error = "Could not inject the JMV runtime commands into WorldScript: "
             + bootstrapError;
@@ -657,6 +692,11 @@ bool CJmvMapTestLauncher::prepareGodmodeBootstrap(
     bootstrap.insert("spawnY", spawn.position.y());
     bootstrap.insert("spawnZ", spawnZ);
     bootstrap.insert("godmode", godmode);
+    bootstrap.insert("runtimeSpawnHeightOffset", 0.0);
+    QJsonArray explicitMobs;
+    for(const QString& name : supplementalMobNames)
+        explicitMobs.append(name);
+    bootstrap.insert("explicitSupplementalMobs", explicitMobs);
     manifest->insert("godmodeBootstrap", bootstrap);
     *outputPath = ownedPath;
     return true;
@@ -1053,8 +1093,12 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
         m_manifest.insert("supplementalMobPaths", supplemental);
     }
     QString godmodeBootstrapPath;
+    QStringList supplementalMobNames;
+    for(const QString& path : stagedSupplementalPaths)
+        supplementalMobNames.append(QFileInfo(path).fileName());
     if(isJmv && !prepareGodmodeBootstrap(input.profile.mapDirectories, m_runRoot,
-                                         input.spawn, input.spawnZ, input.godmode, &m_manifest,
+                                         input.spawn, input.spawnZ, input.godmode,
+                                         supplementalMobNames, &m_manifest,
                                          &godmodeBootstrapPath, error))
         return false;
     if(!godmodeBootstrapPath.isEmpty())
@@ -1162,6 +1206,7 @@ bool CJmvMapTestLauncher::hotReload(const SJmvMapTestLaunchInput& input,
     QString bootstrapPath;
     if(!prepareGodmodeBootstrap(input.profile.mapDirectories, reloadRoot,
                                 input.spawn, input.spawnZ, input.godmode,
+                                desiredSupplementalNames,
                                 &reloadManifest, &bootstrapPath, error))
         return false;
 
@@ -1188,11 +1233,6 @@ bool CJmvMapTestLauncher::hotReload(const SJmvMapTestLaunchInput& input,
         return false;
     }
 
-    QByteArray previousMpr;
-    QByteArray previousMob;
-    if(!readFile(m_liveMprPath, &previousMpr, error)
-       || !readFile(m_liveMobPath, &previousMob, error))
-        return false;
     QHash<QString, QByteArray> previousSupplemental;
     QHash<QString, QString> previousSupplementalNames;
     QDir stableSupplemental(m_supplementalMobDirectory);
@@ -1205,18 +1245,10 @@ bool CJmvMapTestLauncher::hotReload(const SJmvMapTestLaunchInput& input,
         previousSupplemental.insert(file.fileName().toCaseFolded(), bytes);
         previousSupplementalNames.insert(file.fileName().toCaseFolded(), file.fileName());
     }
-    const auto restoreLivePair = [this, &previousMpr, &previousMob,
-                                  &previousSupplemental, &previousSupplementalNames]()
+    const auto restoreSupplemental = [this, &previousSupplemental,
+                                      &previousSupplementalNames]()
     {
         QString ignored;
-        atomicWrite(m_liveMprPath, previousMpr, &ignored);
-        atomicWrite(m_liveMobPath, previousMob, &ignored);
-        m_liveMprSha256 = sha256(previousMpr);
-        m_liveMobSha256 = sha256(previousMob);
-        QJsonObject live = m_manifest.value("liveFiles").toObject();
-        live.insert("mprSha256", m_liveMprSha256);
-        live.insert("mobSha256", m_liveMobSha256);
-        m_manifest.insert("liveFiles", live);
         QDir directory(m_supplementalMobDirectory);
         for(const QFileInfo& file : directory.entryInfoList(
                 QStringList() << "*.mob", QDir::Files, QDir::Name))
@@ -1237,7 +1269,7 @@ bool CJmvMapTestLauncher::hotReload(const SJmvMapTestLaunchInput& input,
         if(!desiredSupplemental.contains(file.fileName().toCaseFolded())
            && !QFile::remove(file.absoluteFilePath()))
         {
-            restoreLivePair();
+            restoreSupplemental();
             if(error) *error = "Could not retire an owned supplemental MOB before hot reload.";
             return false;
         }
@@ -1250,23 +1282,12 @@ bool CJmvMapTestLauncher::hotReload(const SJmvMapTestLaunchInput& input,
         if(!atomicWrite(path, bytes, error)
            || fileSha256(path).compare(sha256(bytes), Qt::CaseInsensitive) != 0)
         {
-            restoreLivePair();
+            restoreSupplemental();
             if(error && error->isEmpty())
                 *error = "A supplemental MOB failed its hot-reload SHA-256 check.";
             return false;
         }
     }
-    if(!atomicWrite(m_liveMprPath, input.mprData, error)
-       || !atomicWrite(m_liveMobPath, input.mobData, error)
-       || fileSha256(m_liveMprPath).compare(request.mprSha256, Qt::CaseInsensitive) != 0
-       || fileSha256(m_liveMobPath).compare(request.mobSha256, Qt::CaseInsensitive) != 0)
-    {
-        restoreLivePair();
-        if(error && error->isEmpty())
-            *error = "The Endurance-owned live map pair could not be replaced and was restored.";
-        return false;
-    }
-
     const QString auditPath = QDir(reloadRoot).filePath("request.json");
     if(!atomicWrite(auditPath,
                     QJsonDocument(mapHotReloadRequestToJson(request)).toJson(QJsonDocument::Indented),
@@ -1274,22 +1295,7 @@ bool CJmvMapTestLauncher::hotReload(const SJmvMapTestLaunchInput& input,
        || !atomicWrite(m_hotReloadRequestPath,
                        mapHotReloadRequestToControlBytes(request), error))
     {
-        restoreLivePair();
-        return false;
-    }
-
-    // Publish the replacement hashes before the game-thread signal. If the
-    // game exits immediately during reload, interrupted-run cleanup must still
-    // recognize and remove the exact current Endurance-owned live files.
-    m_liveMprSha256 = request.mprSha256;
-    m_liveMobSha256 = request.mobSha256;
-    QJsonObject live = m_manifest.value("liveFiles").toObject();
-    live.insert("mprSha256", m_liveMprSha256);
-    live.insert("mobSha256", m_liveMobSha256);
-    m_manifest.insert("liveFiles", live);
-    if(!writeManifest("running", error))
-    {
-        restoreLivePair();
+        restoreSupplemental();
         return false;
     }
 
@@ -1304,13 +1310,13 @@ bool CJmvMapTestLauncher::hotReload(const SJmvMapTestLaunchInput& input,
     constexpr UINT kHotReloadMessage = WM_APP + 0x45E;
     if(!ownsThread || !PostThreadMessageW(DWORD(threadId), kHotReloadMessage, 0, 0))
     {
-        restoreLivePair();
+        restoreSupplemental();
         if(error) *error = "The verified JMV game thread is unavailable for hot reload.";
         return false;
     }
 #else
     Q_UNUSED(threadId);
-    restoreLivePair();
+    restoreSupplemental();
     if(error) *error = "JMV hot reload is currently available only on Windows.";
     return false;
 #endif

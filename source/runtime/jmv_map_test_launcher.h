@@ -61,7 +61,8 @@ public:
     static bool injectWorldScriptBootstrap(const QString& script,
                                            const QString& commands,
                                            QString* output,
-                                           QString* error = nullptr);
+                                           QString* error = nullptr,
+                                           const QString& immediateCommands = QString());
     static bool hasConfiguredJmvPluginSlot(const QByteArray& configReg);
     static bool prepareTemporaryAutoexec(const QString& engineDirectory,
                                          const QString& runRoot,
@@ -73,6 +74,7 @@ public:
                                         const SMapSpawnPlan& spawn,
                                         double spawnZ,
                                         bool godmode,
+                                        const QStringList& supplementalMobNames,
                                         QJsonObject* manifest,
                                         QString* outputPath,
                                         QString* error = nullptr);

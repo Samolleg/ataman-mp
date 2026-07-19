@@ -24,17 +24,21 @@ The first collection MOB matching the `map.txt` primary name is staged as the
 normal temporary map MOB. Every other loaded collection MOB is validated and
 staged under its original filename in the run-owned supplemental directory.
 
-The runtime bridge redirects a `.mob` request only when that basename exists in
-the owned supplemental directory. The original main and supplemental scripts
-remain byte-for-byte unchanged. Consequently:
+An explicitly listed collection MOB is part of the requested test composition,
+so the run-owned autorun bootstrap calls `AddMob("filename.mob")` for it in
+collection order. The runtime bridge redirects that request only when the exact
+basename exists in the owned supplemental directory. The original main and
+supplemental scripts remain byte-for-byte unchanged. Consequently:
 
-- quest and global-variable conditions still decide whether a supplemental MOB
-  loads;
+- collection-listed supplemental MOBs load explicitly instead of depending on
+  campaign quest state;
 - nested `AddMob` calls work through the same filename lookup;
 - an unlisted supplemental filename falls back to the installed JMV map;
 - Endurance does not scan and force-load every `Auto*.mob`;
-- hot reload atomically replaces the owned supplemental set and rolls it back
-  with the main pair if preparation fails.
+- hot reload keeps each MPR/MOB generation immutable and retains it until the
+  game exits, avoiding replacement of files held open by the engine;
+- duplicate loading remains a runtime validation target when an explicitly
+  listed file is also requested later by conditional map script logic.
 
 ## Runtime validation still required
 

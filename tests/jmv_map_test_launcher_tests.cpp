@@ -229,6 +229,7 @@ void JmvMapTestLauncherTests::injectsActualAutorunRuntimeBootstrap()
     QString error;
     QVERIFY2(CJmvMapTestLauncher::prepareGodmodeBootstrap(
         QStringList() << maps, temp.path(), spawn, 12.75, true,
+        QStringList() << "Autozone1cyclopus.mob",
         &manifest, &outputPath, &error), qPrintable(error));
 
     CMobDocument output;
@@ -240,13 +241,34 @@ void JmvMapTestLauncherTests::injectsActualAutorunRuntimeBootstrap()
     const int marker = script.indexOf("// EI Mapper Endurance owned runtime bootstrap");
     QVERIFY(worldScript >= 0);
     QVERIFY(marker > worldScript);
-    QVERIFY(script.contains("SetCPFast(GetLeader(), 290.500000, 219.200000, 12.750000)"));
+    QVERIFY(script.contains("SetCPFast(GetLeader(), 290.500000, 219.200000, 0)"));
+    QCOMPARE(script.count("SetCPFast(GetLeader(), 290.500000, 219.200000, 0)"), 2);
+    QVERIFY(script.contains("AddMob(\"Autozone1cyclopus.mob\")"));
     QVERIFY(script.contains("GodMode(0,3)"));
     QVERIFY(!script.contains("GodMode(0,3);"));
 
     QFile unchanged(source);
     QVERIFY(unchanged.open(QIODevice::ReadOnly));
     QCOMPARE(unchanged.readAll(), originalBytes);
+
+    QTemporaryDir entranceTemp;
+    QVERIFY(entranceTemp.isValid());
+    SMapSpawnPlan entrance = spawn;
+    entrance.custom = false;
+    QJsonObject entranceManifest;
+    QString entranceOutputPath;
+    QVERIFY2(CJmvMapTestLauncher::prepareGodmodeBootstrap(
+        QStringList() << maps, entranceTemp.path(), entrance, 12.75, true,
+        QStringList(), &entranceManifest, &entranceOutputPath, &error),
+        qPrintable(error));
+    CMobDocument entranceOutput;
+    QVERIFY2(entranceOutput.load(QFileInfo(entranceOutputPath), &report),
+             qPrintable(report.toText()));
+    QString entranceScript;
+    QVERIFY2(entranceOutput.embeddedScript(&entranceScript, &report),
+             qPrintable(report.toText()));
+    QVERIFY(!entranceScript.contains("SetCPFast(GetLeader()"));
+    QVERIFY(entranceScript.contains("GodMode(0,3)"));
 }
 
 void JmvMapTestLauncherTests::recoveryRemovesAutoexecCreatedByEndurance()

@@ -337,10 +337,10 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
   - Runtime logs independently show those filenames being opened after the
     primary MOB and SpellAddon autorun MOB. `AddMobEx` exists in Starter's
     addon exports but is not used by the inspected JMV MOB corpus.
-  - Endurance therefore preserves every script unchanged and redirects only a
-    requested supplemental filename that has a matching validated collection
-    MOB staged under the owned run directory. It never force-loads every
-    `Auto*.mob`, which would bypass quest conditions and risk duplicates.
+  - Endurance preserves every source script unchanged. MOBs explicitly listed
+    in a collection are loaded in collection order through a run-owned autorun
+    bootstrap; matching runtime requests are redirected to validated staged
+    copies. Unlisted nested/conditional `AddMob` calls retain installed behavior.
   - Research record: [JMV supplemental MOB loading](docs/research/jmv-supplemental-mob-loading.md).
 
 ### Implemented in Alpha.58, awaiting runtime confirmation
@@ -371,8 +371,9 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
     run, with fresh hashes and a losslessly patched autorun bootstrap.
   - [x] Keep a process-private message hook on the captured game thread and
     accept only monotonic, owned, hash-matching control requests.
-  - [x] Replace only the two Endurance-created temporary live files, using
-    atomic writes, post-write hashes, and pair rollback before signalling.
+  - [x] Stage every reload as a new immutable, hash-verified generation under
+    the run directory. Retain older generations until exit so Windows file
+    locks cannot force replacement of the active pair.
   - [x] Restage the collection's supplemental MOBs under stable original
     filenames so repeated script-driven `AddMob` calls resolve to the current
     editor versions after hot reload. ([`c1ea993`](https://github.com/Ilufus/ei-mapper-endurance/commit/c1ea993))
@@ -407,8 +408,8 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
 - [ ] Runtime-validate deterministic multi-MOB JMV test loading.
   - [x] Identify the primary MOB from `map.txt` (falling back to collection
     order), validate every loaded MOB, and inventory all source/staged hashes.
-  - [x] Preserve original supplemental filenames and let the unchanged main
-    script's `AddMob` conditions determine whether and when each is loaded.
+  - [x] Preserve original supplemental filenames and explicitly load collection
+    members in their declared order through the run-owned bootstrap.
   - [x] Redirect only matching run-owned supplemental files; unlisted calls
     continue to the installed JMV file. No `AddMobEx` assumption is required.
   - [ ] Runtime-test immediate, conditional, and nested supplemental loads,
