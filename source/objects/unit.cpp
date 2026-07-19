@@ -292,12 +292,20 @@ void CUnit::refreshTransientVisual()
         QStringList texturePlan;
         for(auto it = componentTextures.constBegin(); it != componentTextures.constEnd(); ++it)
             texturePlan.append(it.key() + '=' + it.value());
-        ei::log(eLogInfo, QString("Unit visual plan id=%1 prototype=%2 model=%3 parts=%4 textures=%5")
-                .arg(m_mapID).arg(m_prototypeName, model, visibleParts.join(","),
-                                  texturePlan.join(",")));
+        ei::log(eLogInfo, QString("Unit visual plan id=%1 prototype=%2 model=%3 parts=%4 textures=%5 bodyLayers=%6")
+                .arg(m_mapID).arg(m_prototypeName).arg(model).arg(visibleParts.join(","))
+                .arg(texturePlan.join(","))
+                .arg(jsonStringList(equipment, "bodyTextureLayers").join(",")));
+    }
+    const QStringList equipmentBodyLayers = jsonStringList(equipment, "bodyTextureLayers");
+    QStringList bodyTextureLayers;
+    if(databaseEquipmentPlan && !equipmentBodyLayers.isEmpty())
+    {
+        bodyTextureLayers.append(texture);
+        bodyTextureLayers.append(equipmentBodyLayers);
     }
     applyTransientVisual(model, texture, visibleParts, complexion, componentTextures,
-                         secondaryTexture);
+                         secondaryTexture, bodyTextureLayers);
     m_resolvedAnimationModel = model;
     m_resolvedAnimationWeapons = equipmentRequest.weapons;
 }

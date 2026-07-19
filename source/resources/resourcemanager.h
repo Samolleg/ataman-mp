@@ -117,6 +117,7 @@ public:
     void loadTexture(QSet<QString>& aName);
     QOpenGLTexture* texture(const QString& name);
     QOpenGLTexture* texture(const QString& name, const QString& modelName);
+    QOpenGLTexture* layeredTexture(const QStringList& layerNames, const QString& modelName);
     QOpenGLTexture* buildLandTex(const QString& name, int expectedTexCount, int& texCount);
     QOpenGLTexture* textureDefault();
     void attachSettings(CSettings* pSettings) {m_pSettings = pSettings;};
@@ -132,10 +133,12 @@ private:
     void parse(QByteArray& data, const QString& name);
     void initAuxTexture();
     QOpenGLTexture* loadTextureResource(const QString& name, const QString& modelName);
+    QImage loadTextureImageResource(const QString& name, const QString& modelName);
 
 private:
     static CTextureList* m_pTextureContainer;
     QMap<QString, QOpenGLTexture*> m_aTexture;
+    QMap<QString, QImage> m_aTextureImages;
     QSet<QString> m_missingTextureNames;
     CSettings* m_pSettings;
     QList<QString> m_arrCellComboBox; //optimization for cell widget

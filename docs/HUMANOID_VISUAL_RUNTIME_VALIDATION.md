@@ -51,24 +51,34 @@ edit `database.res`, JMV/Base archives, live MOBs, maps, or the game install.
    pair is parsed and rendered; an invalid third entry must not create a
    placeholder.
 8. Confirm armor and weapons use the per-item texture resource derived from the
-   model, slot/type, TTI, TTI2, and material code. For example, a human boot
+   model, slot/type, TTI, TTI2, and material code. Humanoid skin and non-helmet
+   armor are one shared, non-overlapping whole-body UV atlas (except the `hp`
+   region): compose the base skin, shirt/gloves/pants/boots, then plate/leggings
+   with source-over alpha. Do not bind an isolated armor layer as the final
+   texture of only its replacement mesh; transparent pixels must reveal the
+   lower atlas rather than make limbs disappear. For example, a human boot
    with TTI 1 and `ogre leather` (`lo`) resolves the shipped
    `unhumabt_01.lo.0.x4.mmp` family rather than the face/skin texture. TTI and
    TTI2 use the database values directly. Weapon FIG components and MMP
    filenames use the same literal TTI (`rh3.sword01` uses
    `UnhumaSW_01...`). TTI 0 armor keeps the base anatomical component and
    applies its `_00` equipment texture.
-9. Confirm female humans, male/female orcs, and skeletons resolve equipment
+9. For JMV top armor, validate exact assembly-driven replacement. A
+   `rh3.armor01` member replaces `rh3` only when that exact member exists in
+   the selected ANHUM assembly. If it is absent, retain the lower `rh3` mesh;
+   do not synthesize geometry or a placeholder. Apply the same rule to every
+   exact helmet, plate, and leggings member.
+10. Confirm female humans, male/female orcs, and skeletons resolve equipment
    textures from the shared `unhuma` equipment atlases. Their face/skin atlas
    remains model-specific. Validate JMV `zone1.mob` IDs 203, 221, and 224;
    ID 224 must retain its body components with the TTI 0 clothing textures.
-10. Confirm packed `.x2` helmets, weapons, and shields use the established 2x
+11. Confirm packed `.x2` helmets, weapons, and shields use the established 2x
     FIG UV transform. Body armor and skin `.x4` atlases must keep their stored
     FIG UVs unchanged: `.x4` identifies that atlas family but is not a general
     4x coordinate multiplier. In particular, check the back half of helmets,
     weapon blades, and shield faces without reintroducing stripes on torsos or
     limbs.
-11. Equip a helmet on a unit with database hair. Confirm the helmet component
+12. Equip a helmet on a unit with database hair. Confirm the helmet component
     is visible and the `hr.NN` component is omitted; removing the helmet must
     restore the selected hair.
 

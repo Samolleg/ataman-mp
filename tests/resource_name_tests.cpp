@@ -25,6 +25,7 @@ private slots:
     void preservesLowAlphaPnt3Literal();
     void treatsOutOfBoundsPnt3MarkerAsLiteral();
     void rejectsUnalignedPnt3Payload();
+    void compositesTransparentArmorOverBodyAtlas();
 };
 
 namespace {
@@ -210,6 +211,21 @@ void ResourceNameTests::rejectsUnalignedPnt3Payload()
     QVERIFY(!ei::decodePnt3(QByteArray("abc", 3), 16, &decoded, &diagnostic));
     QVERIFY(!diagnostic.isEmpty());
     QVERIFY(decoded.isEmpty());
+}
+
+void ResourceNameTests::compositesTransparentArmorOverBodyAtlas()
+{
+    QImage body(2, 1, QImage::Format_ARGB32);
+    body.fill(QColor(200, 100, 50, 255));
+    QImage armor(2, 1, QImage::Format_ARGB32);
+    armor.fill(Qt::transparent);
+    armor.setPixelColor(1, 0, QColor(20, 40, 200, 255));
+    QImage composite;
+    QString diagnostic;
+    QVERIFY2(ei::compositeTextureLayers({body, armor}, &composite, &diagnostic),
+             qPrintable(diagnostic));
+    QCOMPARE(composite.pixelColor(0, 0), body.pixelColor(0, 0));
+    QCOMPARE(composite.pixelColor(1, 0), armor.pixelColor(1, 0));
 }
 
 QTEST_APPLESS_MAIN(ResourceNameTests)

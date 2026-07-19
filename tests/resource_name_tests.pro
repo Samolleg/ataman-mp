@@ -1,5 +1,4 @@
-QT += core testlib
-QT -= gui
+QT += core gui testlib
 
 CONFIG += testcase console c++11
 TEMPLATE = app

@@ -925,6 +925,80 @@ QOpenGLTexture* CTextureList::texture(const QString& name, const QString& modelN
     return loadTextureResource(name.toLower(), modelName.toLower());
 }
 
+QImage CTextureList::loadTextureImageResource(const QString& name, const QString& modelName)
+{
+    const QVector<QString> sources = configuredResourceSources(m_pSettings);
+    const QString key = resourceSourceFingerprint(sources) + '|'
+        + ei::textureCacheKey(name, modelName);
+    if(m_aTextureImages.contains(key))
+        return m_aTextureImages.value(key);
+    for(const QString& candidate : ei::textureResourceCandidates(name, modelName))
+    {
+        QByteArray data;
+        if(!readIndexedResource(sources, candidate, data))
+            continue;
+        QDataStream stream(data);
+        util::formatStream(stream);
+        SMmpHeader header;
+        stream >> header;
+        if(header.m_signature != 0x00504D4D || header.m_format != ETextureFormat::eMMP_PNT3)
+        {
+            ei::log(eLogWarning, "Shared body-atlas composition currently requires PNT3: " + candidate);
+            return QImage();
+        }
+        QImage image(header.m_width, header.m_height, QImage::Format_RGBA64);
+        QString diagnostic;
+        if(!decompressPnt3(image, data, uint(header.m_mipcount), &diagnostic))
+        {
+            ei::log(eLogWarning, "Invalid body-atlas layer " + candidate + ": " + diagnostic);
+            return QImage();
+        }
+        m_aTextureImages.insert(key, image);
+        return image;
+    }
+    ei::log(eLogWarning, QString("Missing body-atlas layer: %1 model:%2").arg(name, modelName));
+    return QImage();
+}
+
+QOpenGLTexture* CTextureList::layeredTexture(const QStringList& layerNames,
+                                             const QString& modelName)
+{
+    const QString cacheKey = "layers|"
+        + resourceSourceFingerprint(configuredResourceSources(m_pSettings)) + '|'
+        + modelName.toLower() + '|'
+        + layerNames.join(';').toLower();
+    if(m_aTexture.contains(cacheKey))
+        return m_aTexture.value(cacheKey);
+    QVector<QImage> layers;
+    for(const QString& name : layerNames)
+    {
+        const QImage image = loadTextureImageResource(name, modelName);
+        if(image.isNull())
+        {
+            // A missing base atlas cannot produce a valid actor. A missing
+            // overlay, however, must not erase an otherwise renderable body.
+            if(layers.isEmpty())
+                return textureDefault();
+            ei::log(eLogWarning, "Skipping unavailable humanoid body-atlas overlay: " + name);
+            continue;
+        }
+        layers.append(image);
+    }
+    QImage composite;
+    QString diagnostic;
+    if(!ei::compositeTextureLayers(layers, &composite, &diagnostic))
+    {
+        ei::log(eLogWarning, "Cannot compose humanoid body atlas: " + diagnostic);
+        return textureDefault();
+    }
+    QOpenGLTexture* texture = new QOpenGLTexture(composite);
+    texture->setMinificationFilter(QOpenGLTexture::Nearest);
+    texture->setMagnificationFilter(QOpenGLTexture::Nearest);
+    texture->setWrapMode(QOpenGLTexture::Repeat);
+    m_aTexture.insert(cacheKey, texture);
+    return texture;
+}
+
 QOpenGLTexture* CTextureList::textureDefault()
 {
     Q_ASSERT(m_aTexture.contains("default"));
@@ -1204,6 +1278,14 @@ QOpenGLTexture* CTextureList::buildLandTex(const QString& name, int expectedTexC
 void CTextureList::refreshConfiguredSources()
 {
     m_missingTextureNames.clear();
+    m_aTextureImages.clear();
+    for(auto it = m_aTexture.begin(); it != m_aTexture.end();)
+    {
+        if(it.key().startsWith("layers|"))
+            it = m_aTexture.erase(it);
+        else
+            ++it;
+    }
     QSet<QString> empty;
     loadTexture(empty);
 }

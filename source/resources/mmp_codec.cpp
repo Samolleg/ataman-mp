@@ -1,6 +1,7 @@
 #include "mmp_codec.h"
 
 #include <QtEndian>
+#include <QPainter>
 
 namespace ei {
 
@@ -57,6 +58,34 @@ bool decodePnt3(const QByteArray& compressed, int decodedSize,
     }
     decoded->append(compressed.constData() + literalStart, cursor - literalStart);
     decoded->append(QByteArray(decodedSize - decoded->size(), '\0'));
+    return true;
+}
+
+bool compositeTextureLayers(const QVector<QImage>& layers, QImage* composite,
+                            QString* diagnostic)
+{
+    if(!composite || layers.isEmpty() || layers.first().isNull())
+    {
+        if(diagnostic) *diagnostic = "Texture composition requires a non-empty base layer.";
+        return false;
+    }
+    const QSize size = layers.first().size();
+    *composite = QImage(size, QImage::Format_ARGB32_Premultiplied);
+    composite->fill(Qt::transparent);
+    QPainter painter(composite);
+    painter.setCompositionMode(QPainter::CompositionMode_SourceOver);
+    for(const QImage& layer : layers)
+    {
+        if(layer.isNull() || layer.size() != size)
+        {
+            painter.end();
+            composite->fill(Qt::transparent);
+            if(diagnostic) *diagnostic = "Texture layers have inconsistent dimensions.";
+            return false;
+        }
+        painter.drawImage(0, 0, layer);
+    }
+    painter.end();
     return true;
 }
 

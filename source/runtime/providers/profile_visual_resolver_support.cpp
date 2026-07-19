@@ -271,16 +271,14 @@ int armorLayerPriority(const QString& type)
     return normalized == "helm" || normalized == "plate" || normalized == "leggings" ? 1 : 0;
 }
 
-bool optionalJmvArmorOverlap(const QString& type, const QString& slot)
+bool optionalJmvTopArmorComponent(const QString& type)
 {
     const QString normalized = type.trimmed().toLower();
-    if(normalized == "plate")
-        return QStringList({"lh1", "rh1", "lh2", "lh3", "rh2", "rh3"})
-            .contains(slot, Qt::CaseInsensitive);
-    if(normalized == "leggings")
-        return QStringList({"ll1", "rl1", "ll2", "ll3", "rl2", "rl3"})
-            .contains(slot, Qt::CaseInsensitive);
-    return false;
+    // JMV top armor is an availability-driven overlay. Every exact
+    // part.armorNN member is optional: when the ANHUM assembly has it, it
+    // replaces that anatomical/lower-armor part; when absent, the lower part
+    // remains. Do not synthesize a placeholder merely from the database slot.
+    return normalized == "helm" || normalized == "plate" || normalized == "leggings";
 }
 
 QString armorComponentSlot(const QString& component)
@@ -368,7 +366,7 @@ QStringList appendArmorComponents(const ei::SItemDatabaseRecord& item,
         }
         else
         {
-            if(jmv && optionalJmvArmorOverlap(item.type, slot))
+            if(jmv && optionalJmvTopArmorComponent(item.type))
                 continue;
             placeholders->append(expected);
             diagnostics->append("Selected model assembly has no component " + expected);
@@ -470,6 +468,7 @@ SRuntimeProviderResult resolveEquipmentLayout(
         ? "embeddedMob" : "profileDatabase");
     QJsonArray components, placeholders, diagnostics;
     QJsonObject componentTextures;
+    QJsonArray bodyTextureLayers;
     QJsonArray replacedParts;
     bool hidesHair = false;
     if(database.isNull())
@@ -547,8 +546,11 @@ SRuntimeProviderResult resolveEquipmentLayout(
                 placeholders.append(reference);
                 diagnostics.append(reference + ": armor texture resource name cannot be derived");
             }
+            else if(item->type.compare("helm", Qt::CaseInsensitive) == 0)
+                for(const QString& component : matched)
+                    componentTextures.insert(component, texture);
             else
-                for(const QString& component : matched) componentTextures.insert(component, texture);
+                bodyTextureLayers.append(texture);
         }
         if(item->textureType1 > 0 && item->type.compare("helm", Qt::CaseInsensitive) != 0)
             for(const QString& component : matched)
@@ -677,6 +679,7 @@ SRuntimeProviderResult resolveEquipmentLayout(
     equipmentLayout->insert("layout", layout);
     equipmentLayout->insert("components", components);
     equipmentLayout->insert("componentTextures", componentTextures);
+    equipmentLayout->insert("bodyTextureLayers", bodyTextureLayers);
     equipmentLayout->insert("replacedParts", replacedParts);
     equipmentLayout->insert("hidesHair", hidesHair);
     equipmentLayout->insert("placeholders", placeholders);

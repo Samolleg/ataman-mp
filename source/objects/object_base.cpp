@@ -509,13 +509,15 @@ void CObjectBase::recalcFigure()
 void CObjectBase::applyTransientVisual(const QString& modelName, const QString& textureName,
                                        const QStringList& visibleParts, const QVector3D& complexion,
                                        const QMap<QString, QString>& partTextureNames,
-                                       const QString& secondaryTextureName)
+                                       const QString& secondaryTextureName,
+                                       const QStringList& bodyTextureLayers)
 {
     QString textureFingerprint;
     for(auto it = partTextureNames.constBegin(); it != partTextureNames.constEnd(); ++it)
         textureFingerprint += it.key().toLower() + '=' + it.value().toLower() + ';';
     const QString fingerprint = modelName.toLower() + '|' + textureName.toLower() + '|'
         + secondaryTextureName.toLower() + '|'
+        + bodyTextureLayers.join(';').toLower() + '|'
         + visibleParts.join(';').toLower() + '|' + QString::number(complexion.x(), 'g', 8)
         + ',' + QString::number(complexion.y(), 'g', 8) + ',' + QString::number(complexion.z(), 'g', 8)
         + '|' + textureFingerprint;
@@ -526,7 +528,9 @@ void CObjectBase::applyTransientVisual(const QString& modelName, const QString& 
     // The caller already resolved profile-vs-import precedence. The
     // model-aware lookup normalizes a supplied .mmp suffix and resolves only
     // aliases belonging to that model/profile resource catalog.
-    m_texture = CTextureList::getInstance()->texture(textureName, modelName);
+    m_texture = bodyTextureLayers.isEmpty()
+        ? CTextureList::getInstance()->texture(textureName, modelName)
+        : CTextureList::getInstance()->layeredTexture(bodyTextureLayers, modelName);
     m_secondaryTexture = secondaryTextureName.trimmed().isEmpty() ? nullptr
         : CTextureList::getInstance()->texture(secondaryTextureName, modelName);
     m_partTextures.clear();

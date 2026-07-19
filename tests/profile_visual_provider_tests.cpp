@@ -95,6 +95,7 @@ private slots:
     void armorUsesSlotsAndMaterialTextureResources();
     void jmvTopArmorWinsAvailableLowerLayerOverlaps();
     void jmvMissingTopOverlapRetainsLowerArmor();
+    void jmvMissingExactTopPartsAreNotSynthesized();
     void baseArmorKeepsDisjointSlots();
     void zeroTtiArmorTexturesBaseParts();
     void missingArmorGeometryPreservesBaseParts();
@@ -296,9 +297,9 @@ void ProfileVisualProviderTests::armorUsesSlotsAndMaterialTextureResources()
     QVERIFY(resolver->resolve(request, &output).success);
     QCOMPARE(jsonStrings(output, "components"), QStringList({"lh1.armor12", "rh1.armor12"}));
     QCOMPARE(jsonStrings(output, "replacedParts"), QStringList({"lh1", "rh1"}));
-    const QJsonObject textures = output.value("componentTextures").toObject();
-    QCOMPARE(textures.value("lh1.armor12").toString(), QString("unhumash_12.le.0.x4.mmp"));
-    QCOMPARE(textures.value("rh1.armor12").toString(), QString("unhumash_12.le.0.x4.mmp"));
+    QCOMPARE(jsonStrings(output, "bodyTextureLayers"),
+             QStringList({"unhumash_12.le.0.x4.mmp"}));
+    QVERIFY(output.value("componentTextures").toObject().isEmpty());
 }
 
 void ProfileVisualProviderTests::jmvTopArmorWinsAvailableLowerLayerOverlaps()
@@ -360,11 +361,10 @@ void ProfileVisualProviderTests::jmvTopArmorWinsAvailableLowerLayerOverlaps()
     QVERIFY(components.contains("rl1.armor09"));
     QVERIFY(components.contains("ll2.armor09"));
     QVERIFY(components.contains("rl2.armor09"));
-    const QJsonObject textures = output.value("componentTextures").toObject();
-    QCOMPARE(textures.value("lh1.armor08").toString(), QString("unhumapl_08.le.0.x4.mmp"));
-    QCOMPARE(textures.value("lh2.armor08").toString(), QString("unhumapl_08.le.0.x4.mmp"));
-    QCOMPARE(textures.value("ll1.armor09").toString(), QString("unhumalg_09.le.0.x4.mmp"));
-    QCOMPARE(textures.value("ll2.armor09").toString(), QString("unhumalg_09.le.0.x4.mmp"));
+    QCOMPARE(jsonStrings(output, "bodyTextureLayers"), QStringList({
+        "unhumash_04.le.0.x4.mmp", "unhumagl_05.le.0.x4.mmp",
+        "unhumapt_07.le.0.x4.mmp", "unhumabt_06.le.0.x4.mmp",
+        "unhumapl_08.le.0.x4.mmp", "unhumalg_09.le.0.x4.mmp"}));
 }
 
 void ProfileVisualProviderTests::jmvMissingTopOverlapRetainsLowerArmor()
@@ -412,6 +412,30 @@ void ProfileVisualProviderTests::jmvMissingTopOverlapRetainsLowerArmor()
     QVERIFY(jsonStrings(output, "placeholders").isEmpty());
 }
 
+void ProfileVisualProviderTests::jmvMissingExactTopPartsAreNotSynthesized()
+{
+    auto db = database();
+    ei::SItemDatabaseRecord plate = item("plate", "armor", 1, 8);
+    plate.type = "plate";
+    ei::SItemDatabaseRecord leggings = item("leggings", "armor", 2, 9);
+    leggings.type = "leggings";
+    db->items.insert("plate", plate);
+    db->items.insert("leggings", leggings);
+
+    ProfileVisualProviderService service;
+    const auto resolver = service.equipmentResolver("jmv.v1", db);
+    SEquipmentLayoutRequest request;
+    request.model = "unhuma";
+    request.armor << "plate.leather" << "leggings.leather";
+    request.assemblyParts << "bd" << "hp" << "lh1" << "rh1" << "ll1" << "rl1";
+    QJsonObject output;
+    QVERIFY(resolver->resolve(request, &output).success);
+    QVERIFY(jsonStrings(output, "components").isEmpty());
+    QVERIFY(jsonStrings(output, "placeholders").isEmpty());
+    QCOMPARE(jsonStrings(output, "bodyTextureLayers"), QStringList({
+        "unhumapl_08.le.0.x4.mmp", "unhumalg_09.le.0.x4.mmp"}));
+}
+
 void ProfileVisualProviderTests::baseArmorKeepsDisjointSlots()
 {
     auto db = database();
@@ -455,9 +479,8 @@ void ProfileVisualProviderTests::zeroTtiArmorTexturesBaseParts()
     QVERIFY(resolver->resolve(request, &output).success);
     QCOMPARE(jsonStrings(output, "components"), QStringList({"lh1", "rh1"}));
     QVERIFY(jsonStrings(output, "replacedParts").isEmpty());
-    const QJsonObject textures = output.value("componentTextures").toObject();
-    QCOMPARE(textures.value("lh1").toString(), QString("unhumash_00.le.0.x4.mmp"));
-    QCOMPARE(textures.value("rh1").toString(), QString("unhumash_00.le.0.x4.mmp"));
+    QCOMPARE(jsonStrings(output, "bodyTextureLayers"),
+             QStringList({"unhumash_00.le.0.x4.mmp"}));
 }
 
 void ProfileVisualProviderTests::missingArmorGeometryPreservesBaseParts()
@@ -483,8 +506,8 @@ void ProfileVisualProviderTests::zombieEquipmentUsesSharedHumanoidAtlas()
     request.assemblyParts << "lh1.armor12" << "rh1.armor12";
     QJsonObject output;
     QVERIFY(resolver->resolve(request, &output).success);
-    const QJsonObject textures = output.value("componentTextures").toObject();
-    QCOMPARE(textures.value("lh1.armor12").toString(), QString("unhumash_12.le.0.x4.mmp"));
+    QCOMPARE(jsonStrings(output, "bodyTextureLayers"),
+             QStringList({"unhumash_12.le.0.x4.mmp"}));
 }
 
 void ProfileVisualProviderTests::helmetAddsDatabaseGeometryAndAtlas()

@@ -59,7 +59,8 @@ protected:
     void applyTransientVisual(const QString& modelName, const QString& textureName,
                               const QStringList& visibleParts, const QVector3D& complexion,
                               const QMap<QString, QString>& partTextureNames = {},
-                              const QString& secondaryTextureName = QString());
+                              const QString& secondaryTextureName = QString(),
+                              const QStringList& bodyTextureLayers = {});
     void invalidateTransientVisual() { m_transientVisualFingerprint.clear(); }
     SAnimationSkeleton transientAnimationSkeleton() const;
     void applyTransientPartPoses(const QMap<QString, QMatrix4x4>& poses);

@@ -3,6 +3,8 @@
 
 #include <QByteArray>
 #include <QString>
+#include <QImage>
+#include <QVector>
 
 namespace ei {
 
@@ -12,6 +14,12 @@ namespace ei {
 // compressed payload.
 bool decodePnt3(const QByteArray& compressed, int decodedSize,
                 QByteArray* decoded, QString* diagnostic = nullptr);
+
+// Source-over composition for the shared humanoid body atlas. Every input
+// must have identical dimensions; transparent armor pixels reveal lower
+// clothing/skin instead of making the assembled body transparent.
+bool compositeTextureLayers(const QVector<QImage>& layers, QImage* composite,
+                            QString* diagnostic = nullptr);
 
 }
 
