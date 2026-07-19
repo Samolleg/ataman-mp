@@ -5,7 +5,7 @@ work is ordered from the newest planned minor line to the oldest completed one.
 An item is checked only after its implementation has landed and received the
 stated validation. Completed code should carry a commit, test, or release link.
 
-Current development line: `0.2.1-alpha.7` focused closed testing.
+Current development line: `0.2.1-alpha.8` focused closed testing.
 
 <details open>
 <summary><strong>General wishlist — not assigned to a release</strong></summary>
@@ -173,8 +173,8 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
 
 ### Current 0.2.x status
 
-- **Current tester build:** `0.2.1-alpha.7`, refining validation warning and
-  panel UX after the alpha.6 source/projection hardening pass.
+- **Current tester build:** `0.2.1-alpha.8`, adding fuzzy parameter-aware
+  object filtering on top of the alpha.7 validation UX pass.
 - **MOB hardening:** complete for the supported editing surface. Remaining work
   is validation breadth and new editing features, not another serializer
   rewrite.
@@ -523,6 +523,8 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
   - Current source adds 150 ms debouncing, fuzzy bare terms, quoted phrases,
     AND-combined terms, and explicit `name:`, `id:`, `type:`, `model:`,
     `texture:`, `db:`/`prototype:`, `mob:`, and `validation:` fields.
+  - Implementation: local commit `1685bdd`; alpha.8 tester validation remains
+    required before this stable editor gate is considered runtime-confirmed.
 - [ ] When opening an MPR while another workspace is loaded, offer to save
   changed MOB/MPR documents and replace the current workspace in one guarded
   action instead of only displaying a close-first warning.
