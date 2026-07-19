@@ -56,6 +56,13 @@ class CView : public QGLWidget
     Q_OBJECT
 
 public:
+    struct SNidRepair
+    {
+        QString mobPath;
+        QString sectionPath;
+        quint32 oldNid = 0;
+        quint32 newNid = 0;
+    };
     explicit CView(QWidget* parent=nullptr) = delete;
     explicit CView(QWidget* parent=nullptr, const QGLWidget* pShareWidget=nullptr);
     ~CView();
@@ -142,6 +149,8 @@ public:
     void recordSelectionChange(const QList<CNode*>& before, const QString& text = QString("Select objects"));
     void setRandomComplection(const EObjParam param, const float min, const float max);
     void resetSelectedId();
+    bool applyFamilyNidRepairs(const QVector<SNidRepair>& repairs, QString* error = nullptr);
+    quint32 suggestFamilyNid(CMob* mob, quint32 localSuggestion);
     void openMapParameters();
     void pickTile(QVector3D posOnLand, bool bLand = true);
     void setTile(QVector3D posOnLand, bool bLand = true);
@@ -218,6 +227,9 @@ signals:
     void mobScriptChanged(CMob* mob, const QString& displayScript);
     void externalMobScriptImported(CMob* mob, const QString& displayScript);
     void selectionStateChanged(bool hasSelection);
+    void mobStateChanged();
+    void nidChangeProposed(quint32 nid, const QString& mobPath);
+    void nidAllocationRequested(const QString& mobPath, quint32* suggestion);
 
 private:
     int m_height; //for redraw window

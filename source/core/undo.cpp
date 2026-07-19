@@ -741,9 +741,15 @@ void CChangeActiveMobCommand::redo()
 }
 
 CChangeProp::CChangeProp(CView* pView, CNode* pNode, const QSharedPointer<IPropertyBase>& prop, QUndoCommand* parent):
+    CChangeProp(pView, pView ? pView->currentMob() : nullptr, pNode, prop, parent)
+{
+}
+
+CChangeProp::CChangeProp(CView* pView, CMob* pMob, CNode* pNode,
+                         const QSharedPointer<IPropertyBase>& prop, QUndoCommand* parent):
     QUndoCommand(parent)
   ,m_pView(pView)
-  ,m_pMob(pView ? pView->currentMob() : nullptr)
+  ,m_pMob(pMob)
   ,m_pNode(pNode)
   ,m_nodeId(pNode ? pNode->mapId() : 0)
   ,m_unitMovementStateCaptured(false)

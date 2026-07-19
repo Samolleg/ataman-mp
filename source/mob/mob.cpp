@@ -1252,6 +1252,8 @@ uint CMob::freeMapId()
         ei::log(ELogMessageType::eLogFatal, "Cant find suit ID for object");
         Q_ASSERT(false);
     }
+    if(m_view)
+        id = m_view->suggestFamilyNid(this, id);
     return id;
 }
 

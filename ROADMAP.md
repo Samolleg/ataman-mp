@@ -173,30 +173,37 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
 
 ### Critical: structural zone-family NID validation
 
-- [ ] Detect intra-file duplicates and cross-file NID collisions across the
+- [x] Detect intra-file duplicates and cross-file NID collisions across the
   complete active zone family before more multi-MOB editing is released.
   This is critical because the confirmed `zone7.mob` / `Autozone7altar.mob`
   cross-type collisions break active mod work and correlate strongly with an
   unchecked game lookup crash and an invisible enemy.
   - Use `CMobDocument` object snapshots and section provenance, never raw
     `NewObject` marker boundaries.
-  - Resolve suffixed families such as `zone3obr` using the longest matching
-    registered base-map stem, with numeric boundaries that never mix Zone 1
-    with Zones 10-19.
+  - Runtime families now start with the selected `map.txt` primary or explicit
+    collection members and follow transitive, case-insensitive `AddMob(...)`
+    script edges. Constant string concatenation is supported; unresolved
+    dynamic calls are reported as incomplete instead of guessed.
   - Report NID, source MOB, object name, section/OBJTYPE, prototype, source
     path, and incompatible-type severity.
-  - Run debounced read-only validation after import/add/paste/duplicate/direct
-    ID edits and require a fresh whole-family preflight for save/save-as, Test
-    Current Map, export, and release/package operations.
+  - Debounced read-only validation runs after loaded-MOB edits/undo/redo and a
+    fresh whole-family preflight runs before Save, Save As, Save All, Test
+    Current Map, and hot reload. Findings are consolidated and never block
+    editing, saving, or runtime testing.
   - Preserve established base-map IDs. Suggest deterministic unused IDs for
     newly added or currently edited objects; never silently renumber a base
     MOB.
-  - Implement repair only as an atomic undoable reference-aware transaction.
-    Update confirmed typed references and refuse automatic repair when script
-    or opaque/raw references remain unresolved.
-  - Regression-test the supplied eight-collision fixture, ordinary intra-file
-    duplicates, Zone 10/11 separation, `zone3obr` ownership, allocation,
-    repair/refusal, undo/redo, failed saves, and byte-identical no-op output.
+  - [x] Add deterministic range-aware suggestions and a conservative guided
+    repair dialog. Selected loaded objects are renumbered in one undoable
+    action; the primary MOB is preserved by default. Script and `ParentID`
+    evidence disables automatic repair rather than guessing.
+  - [ ] Add explicit per-reference assignment and coordinated multi-MOB Save
+    All for repairs that genuinely cross document boundaries.
+  - [x] Regression-test the supplied Zone 7 fixture: six resolved family
+    members, six legacy range overlaps, all eight incompatible NID collisions,
+    and deterministic Autozone suggestions `1000321`-`1000328`.
+  - [ ] Freeze the complete 162-MOB JMV family manifest and add synthetic
+    intra-file, incomplete-family, undo/redo, and reference-refusal fixtures.
   - Detailed design: [structural MOB NID validation plan](docs/research/structural-mob-nid-validation-plan.md).
 
 ### P0: direct-launch stabilization

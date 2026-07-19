@@ -1,7 +1,8 @@
 # Structural MOB NID validation plan
 
-Status: planned critical `0.2.x` work. No parser, editor, save, package, or
-runtime behavior is changed by this document.
+Status: implementation underway on the critical `0.2.x` line. Parser-backed
+family/range/NID indexing, diagnostics, non-blocking preflights, deterministic
+suggestions, and conservative single-workspace repair are implemented.
 
 ## Why this is critical
 
@@ -57,19 +58,15 @@ family members from read-only parser results cached by absolute path, size,
 modification time, and a header/content hash. Never use raw `NewObject` scanning
 as the authoritative object boundary.
 
-### `CZoneFamilyResolver`
+### Runtime-family resolver
 
-Derive candidate base stems from the active profile's registered map table,
-loaded collection, and existing main MOB files. Normalize case and extensions.
-For a supplemental filename, choose the longest existing base-map stem that
-matches after the `Auto` prefix. Tokenize the numeric zone prefix so `zone1`
-cannot own `zone10` through `zone19`. Thus `zone3obr` wins over `zone3` when
-both are registered and the supplemental stem begins with `zone3obr`.
-
-If ownership is ambiguous or no registered/existing base stem can be proven,
-report `family-unresolved`; never silently choose a shorter prefix. Manual
-selected-file validation remains available without claiming whole-family
-coverage.
+Start from the selected `map.txt` primary or the collection's explicit MOB
+members, then follow active transitive `AddMob(...)` calls. Comments are
+ignored; literal strings, `StrCat`, and constant `+` expressions are resolved.
+Conditional calls remain potential runtime edges. Dynamic expressions,
+missing targets, and unreadable files produce incomplete-family evidence.
+Collections are authoritative, so a custom primary does not silently inherit
+the installed MOB with a similar filename.
 
 ### `CMobNidValidator`
 
@@ -95,36 +92,30 @@ Profile providers may refine severity, but cannot hide raw evidence.
 
 ### Non-blocking automatic validation
 
-After import, add, paste, duplicate, and direct NID edits, debounce a
-cancellable background validation. Incrementally re-index only affected open
-documents where safe. Show findings in a Validation panel and decorate affected
-objects/MOBs in the outliner. Do not display one modal per collision and do not
-renumber anything automatically.
+After loaded-MOB changes, undo, redo, and direct NID edits, debounce validation.
+Show the complete family membership, ranges, collisions, provenance, and
+suggestions in the MOB Family Validation dock. A newly introduced risk receives
+one consolidated warning; direct ID entry shows every current owner/range. No
+edit is blocked and nothing is renumbered automatically.
 
 ### Mandatory fresh preflight
 
 Before Save, Save As, Save All, Test Current Map/hot reload, export, and a future
 package/release action, rebuild candidates and run a fresh complete-family pass.
 
-- Newly introduced incompatible-type or referenced collisions block all
-  critical operations.
-- Pre-existing high-risk collisions block Test/export/package. A normal Save or
-  Save As may preserve them only through one consolidated explicit
-  **Preserve known collisions** decision, with scope and hashes written to the
-  workflow log; no silent normalization occurs. This keeps rescue editing
-  possible without pretending the file is safe.
-- A proven same-type, unreferenced static duplicate warns. Save/test may proceed
-  only after a consolidated acknowledgement; the profile validator records the
-  override.
-- Incomplete whole-family discovery blocks Test/export/package and warns before
-  Save. The user may save a copy after acknowledging that only partial scope was
-  validated.
+- Newly introduced incompatible-type or referenced collisions warn immediately.
+- Existing collision, range, and incomplete-family findings are consolidated in
+  one preflight report and the workflow log.
+- Save, Save As, Save All, Test Current Map, and hot reload always remain
+  available. Runtime testing is intentionally retained as an important oracle
+  for collision behavior the editor does not yet understand.
 - Byte-identical no-op open/save remains possible, but never produces a false
   clean report.
 
-The dialog offers **Review**, **Repair selected**, **Preserve/continue** only
-where policy permits, and **Cancel**. Show the first bounded set in the dialog
-and place the deterministic full report in the Validation panel/log.
+The guided repair dialog is opt-in. It preserves the mapped primary by default,
+offers deterministic IDs for loaded supplemental objects, and applies selected
+safe rows as one undoable action. Rows with script or typed `ParentID` evidence
+remain visible but require manual resolution.
 
 ## Deterministic suggestions
 
@@ -187,7 +178,8 @@ complete.
 - Eight supplied Zone 7 cross-file collisions with exact metadata/severity.
 - Intra-file duplicates, including repeated static decorations and units.
 - Zone 1 versus Zones 10-19 separation.
-- Longest-stem ownership for `zone3obr` versus `zone3`.
+- Independent map-table roots for `zone3obr`, `zone12dun2`, and the numbered
+  Zone 1/10-19 families, plus their actual transitive `AddMob` closures.
 - Ambiguous/unregistered family refusal.
 - Deterministic `1000321`-`1000328` allocation and occupied-range skipping.
 - Typed Parent/ParentID, directory, and logic reference rewrites.
@@ -197,7 +189,7 @@ complete.
 - Failed candidate/stage/backup/replacement behavior without partial silent
   success.
 - Byte-identical no-op round trips and unchanged-subtree equality.
-- Save/Test/export trigger matrix and explicit-override logging.
+- Save/Test/export trigger matrix and non-blocking continuation logging.
 - Focused runtime control: renumbered copied fixture, `drawall`, reported Zone 7
   encounter, save, unload/reload, and graceful exit.
 
@@ -205,8 +197,8 @@ complete.
 
 1. Family resolver, structural read-only index, manual reports, and supplied
    fixture tests.
-2. Debounced editor integration and critical-operation preflight; warnings and
-   blocks only, no repair.
+2. Debounced editor integration and non-blocking critical-operation preflight;
+   warnings only, no repair.
 3. Deterministic ownership/allocation suggestions and Validation-panel UX.
 4. Single-document typed-reference repair transaction with undo/redo.
 5. Coordinated multi-document repair/save cohort after all reference schemas

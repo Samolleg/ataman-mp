@@ -88,6 +88,10 @@ QString sectionTypeName(quint32 type)
         {0xA000, "OBJECT_DB_FILE"}, {0xB000, "OBJECT_SECTION"}, {0xB001, "OBJECT"},
         {0xB002, "NID"}, {0xB003, "OBJ_TYPE"}, {0xB004, "OBJ_NAME"},
         {0xB006, "OBJ_TEMPLATE"}, {0xB009, "OBJ_POSITION"}, {0xB00D, "OBJ_BODYPARTS"},
+        {0xB012, "OBJ_PARENT_ID"}, {0xB013, "OBJ_USE_IN_SCRIPT"},
+        {0xC000, "SC_OBJECT_DB_FILE"}, {0xD000, "PR_OBJECT_DB_FILE"},
+        {0xFF00, "SEC_RANGE"}, {0xFF01, "MAIN_RANGE"}, {0xFF02, "RANGE"},
+        {0xFF05, "MIN_ID"}, {0xFF06, "MAX_ID"},
         {0xBBBB0000, "UNIT"}, {0xBBBB0002, "UNIT_PROTOTYPE"},
         {0xBBAB0000, "MAGIC_TRAP"}, {0xBBAB0003, "MT_AREAS"},
         {0xBBAB0004, "MT_TARGETS"},
@@ -248,6 +252,21 @@ SMobObjectSnapshot snapshotObject(const SMobSection& section)
             object.objectType = readU32(data, 0);
         }
     }
+    if(const SMobSection* parent = findSection(section, 0xB012))
+    {
+        const QByteArray data = payload(*parent);
+        if(data.size() == 4)
+        {
+            object.hasParentId = true;
+            object.parentId = readU32(data, 0);
+        }
+    }
+    if(const SMobSection* used = findSection(section, 0xB013))
+    {
+        const QByteArray data = payload(*used);
+        if(data.size() == 1)
+            object.useInScript = data.at(0) != 0;
+    }
     if(const SMobSection* name = findSection(section, 0xB004))
         object.name = decodeCp1251(payload(*name));
     const SMobSection* prototype = findSection(section, 0xBBBB0002);
@@ -267,6 +286,42 @@ SMobObjectSnapshot snapshotObject(const SMobSection& section)
         }
     }
     return object;
+}
+
+void collectIdRanges(const QVector<SMobSection>& sections, bool questMob,
+                     QVector<SMobIdRangeSnapshot>& ranges)
+{
+    for(const SMobSection& section : sections)
+    {
+        if(section.type == 0xFF00 || section.type == 0xFF01)
+        {
+            const bool mainRange = section.type == 0xFF01;
+            int occurrence = 0;
+            for(const SMobSection& child : section.children)
+            {
+                if(child.type != 0xFF02)
+                    continue;
+                const SMobSection* minimum = findSection(child, 0xFF05);
+                const SMobSection* maximum = findSection(child, 0xFF06);
+                if(!minimum || !maximum)
+                    continue;
+                const QByteArray minData = payload(*minimum);
+                const QByteArray maxData = payload(*maximum);
+                if(minData.size() != 4 || maxData.size() != 4)
+                    continue;
+                SMobIdRangeSnapshot range;
+                range.sectionPath = child.path;
+                range.mainRange = mainRange;
+                range.effective = questMob ? !mainRange : mainRange;
+                range.minimum = readU32(minData, 0);
+                range.maximum = readU32(maxData, 0);
+                range.occurrence = occurrence++;
+                ranges.append(range);
+            }
+        }
+        else
+            collectIdRanges(section.children, questMob, ranges);
+    }
 }
 
 void collectObjects(const QVector<SMobSection>& sections, QVector<SMobObjectSnapshot>& objects)
@@ -1100,6 +1155,9 @@ QJsonObject SMobObjectSnapshot::toJson() const
         result.insert("nid", double(nid));
     if(hasObjectType)
         result.insert("objectType", double(objectType));
+    if(hasParentId)
+        result.insert("parentId", double(parentId));
+    result.insert("useInScript", useInScript);
     if(!name.isEmpty())
         result.insert("name", name);
     if(!prototype.isEmpty())
@@ -1992,7 +2050,9 @@ bool CMobDocument::loadBytes(const QByteArray& bytes, const QString& sourceName,
     m_originalBytes.clear();
     m_sections.clear();
     m_objects.clear();
+    m_idRanges.clear();
     m_duplicateIds.clear();
+    m_questMob = false;
     m_originalBytes = bytes;
     const QFileInfo sourceInfo(sourceName);
     const QString sourcePath = sourceName.isEmpty() ? QString("memory.mob") : sourceName;
@@ -2029,7 +2089,9 @@ bool CMobDocument::loadBytes(const QByteArray& bytes, const QString& sourceName,
         }
     }
 
+    m_questMob = findSection(m_sections.front(), 0xD000) != nullptr;
     collectObjects(m_sections, m_objects);
+    collectIdRanges(m_sections, m_questMob, m_idRanges);
     addMobSemanticWarnings(m_sections, sourcePath, report);
     QMap<quint32, int> counts;
     for(const SMobObjectSnapshot& object : m_objects)

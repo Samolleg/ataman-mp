@@ -26,8 +26,14 @@
 #include <QComboBox>
 #include <QLabel>
 #include <QHBoxLayout>
+#include <QVBoxLayout>
 #include <QActionGroup>
 #include <QInputDialog>
+#include <QTreeWidget>
+#include <QHeaderView>
+#include <QDialogButtonBox>
+
+#include <limits>
 
 #include "resourcemanager.h"
 #include "landscape.h"
@@ -55,6 +61,7 @@
 #include "endurance_document.h"
 #include "collection_document.h"
 #include "collection_editor_dialog.h"
+#include "script_reference_analyzer.h"
 
 void testFunc()
 {
@@ -81,6 +88,10 @@ MainWindow::MainWindow(QWidget* parent) :
     m_recentFilesMenu(nullptr),
     m_externalScriptAction(nullptr),
     m_mapsDock(nullptr),
+    m_validationDock(nullptr),
+    m_validationTree(nullptr),
+    m_validationSummary(nullptr),
+    m_validationTimer(nullptr),
     m_mapsBrowser(nullptr),
     m_mapTestAction(nullptr),
     m_stopMapTestAction(nullptr),
@@ -112,9 +123,33 @@ MainWindow::MainWindow(QWidget* parent) :
     m_mapsDock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
     m_mapsDock->setWidget(m_mapsBrowser);
     addDockWidget(Qt::LeftDockWidgetArea, m_mapsDock);
+    QWidget* validationWidget = new QWidget(this);
+    QVBoxLayout* validationLayout = new QVBoxLayout(validationWidget);
+    validationLayout->setContentsMargins(4, 4, 4, 4);
+    m_validationSummary = new QLabel(tr("No active MOB family."), validationWidget);
+    m_validationSummary->setWordWrap(true);
+    m_validationTree = new QTreeWidget(validationWidget);
+    m_validationTree->setColumnCount(3);
+    m_validationTree->setHeaderLabels(QStringList() << tr("Severity") << tr("Type") << tr("Details"));
+    m_validationTree->header()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
+    m_validationTree->header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
+    m_validationTree->header()->setSectionResizeMode(2, QHeaderView::Stretch);
+    validationLayout->addWidget(m_validationSummary);
+    validationLayout->addWidget(m_validationTree);
+    m_validationDock = new QDockWidget(tr("MOB Family Validation"), this);
+    m_validationDock->setObjectName("mobFamilyValidationDock");
+    m_validationDock->setAllowedAreas(Qt::BottomDockWidgetArea | Qt::LeftDockWidgetArea |
+                                      Qt::RightDockWidgetArea);
+    m_validationDock->setWidget(validationWidget);
+    addDockWidget(Qt::BottomDockWidgetArea, m_validationDock);
+    m_validationDock->hide();
+    m_validationTimer = new QTimer(this);
+    m_validationTimer->setSingleShot(true);
+    connect(m_validationTimer, &QTimer::timeout, this, &MainWindow::refreshMobFamilyValidation);
     QMenu* viewMenu = new QMenu(tr("View"), this);
     m_ui->menuBar->insertMenu(m_ui->menuSettings->menuAction(), viewMenu);
     viewMenu->addAction(m_mapsDock->toggleViewAction());
+    viewMenu->addAction(m_validationDock->toggleViewAction());
     connect(m_mapsBrowser, &CMapsBrowser::openMapRequested,
             this, &MainWindow::openMapPair);
     connect(m_mapsBrowser, &CMapsBrowser::openCollectionRequested,
@@ -157,6 +192,10 @@ MainWindow::MainWindow(QWidget* parent) :
     QAction* openBugReportingGuide = new QAction(tr("Open Bug Reporting Guide"), this);
     QAction* gameAndModSetup = new QAction(tr("Game and Mod Setup..."), this);
     QAction* compareMobFiles = new QAction(tr("Compare MOB Files..."), this);
+    QAction* validateMobFamily = new QAction(tr("Validate Active MOB Family"), this);
+    QAction* validateCurrentMob = new QAction(tr("Validate Current MOB Only"), this);
+    QAction* validateSelectedMobs = new QAction(tr("Validate Selected MOB Files..."), this);
+    QAction* repairMobFamily = new QAction(tr("Review and Repair NID Collisions..."), this);
     m_mapTestAction = new QAction(tr("Test Current Map"), this);
     m_mapTestAction->setToolTip(tr("Stages unique temporary MPR/MOB copies and launches the active validated runtime profile. No source map is overwritten."));
     m_stopMapTestAction = new QAction(tr("Stop Test"), this);
@@ -166,6 +205,10 @@ MainWindow::MainWindow(QWidget* parent) :
     m_ui->menuSettings->insertSeparator(m_ui->actionOpen_2);
     m_ui->menuTools->addSeparator();
     m_ui->menuTools->addAction(compareMobFiles);
+    m_ui->menuTools->addAction(validateMobFamily);
+    m_ui->menuTools->addAction(validateCurrentMob);
+    m_ui->menuTools->addAction(validateSelectedMobs);
+    m_ui->menuTools->addAction(repairMobFamily);
     m_ui->menuTools->addAction(m_mapTestAction);
     m_ui->menuTools->addAction(m_stopMapTestAction);
     m_ui->menuTools->addAction(openBackupFolder);
@@ -225,6 +268,56 @@ MainWindow::MainWindow(QWidget* parent) :
         dialog->raise();
         dialog->activateWindow();
     });
+    connect(validateMobFamily, &QAction::triggered, this, &MainWindow::showMobFamilyValidation);
+    connect(validateCurrentMob, &QAction::triggered, this, [this]()
+    {
+        if(!m_pView || !m_pView->currentMob())
+        {
+            QMessageBox::information(this, tr("MOB validation"), tr("No active MOB is loaded."));
+            return;
+        }
+        SMobFamilyValidationRequest request;
+        request.familyLabel = m_pView->currentMob()->filePath().fileName();
+        request.profileId = activeResourceProfile().profileId;
+        request.explicitComposition = true;
+        request.includeProfileWideMobs = false;
+        request.mapRoots = activeMapRoots().toList();
+        const QString path = m_pView->currentMob()->filePath().absoluteFilePath();
+        request.seedMobPaths << path;
+        QByteArray data;
+        CValidationReport candidateReport;
+        if(m_pView->currentMob()->buildValidatedCandidate(&data, &candidateReport, nullptr))
+            request.inMemoryMobData.insert(QDir::cleanPath(path).toLower(), data);
+        m_familyValidation = CMobFamilyValidator::validate(request);
+        updateMobFamilyValidationPanel();
+        m_validationDock->show();
+        m_validationDock->raise();
+        ei::log(m_familyValidation.criticalCount() ? eLogWarning : eLogInfo,
+                m_familyValidation.toText());
+    });
+    connect(validateSelectedMobs, &QAction::triggered, this, [this]()
+    {
+        const QString start = activeMapRoots().isEmpty() ? QString()
+            : activeMapRoots().first();
+        const QStringList files = QFileDialog::getOpenFileNames(this,
+            tr("Validate Selected MOB Files"), start, tr("MOB files (*.mob)"));
+        if(files.isEmpty())
+            return;
+        SMobFamilyValidationRequest request;
+        request.familyLabel = tr("selected files");
+        request.profileId = activeResourceProfile().profileId;
+        request.explicitComposition = true;
+        request.includeProfileWideMobs = false;
+        request.seedMobPaths = files;
+        request.mapRoots = activeMapRoots().toList();
+        m_familyValidation = CMobFamilyValidator::validate(request);
+        updateMobFamilyValidationPanel();
+        m_validationDock->show();
+        m_validationDock->raise();
+        ei::log(m_familyValidation.criticalCount() ? eLogWarning : eLogInfo,
+                m_familyValidation.toText());
+    });
+    connect(repairMobFamily, &QAction::triggered, this, &MainWindow::reviewAndRepairNidCollisions);
     connect(m_mapTestAction, &QAction::triggered, this, [this]()
     {
         launchCurrentMapTest();
@@ -335,6 +428,43 @@ MainWindow::MainWindow(QWidget* parent) :
     CStatusConnector::getInstance()->attach(m_ui->statusIco, m_ui->statusBar);
     connectUiButtons();
     m_pView->attach(m_settings.get(), m_ui->tableWidget, m_undoStack, m_ui->progressBar, m_ui->mousePosText, m_ui->treeWidget, m_pTileForm.get());
+    connect(m_pView, &CView::mobStateChanged, this, [this]() { scheduleMobFamilyValidation(); });
+    connect(m_pView, &CView::nidChangeProposed, this, &MainWindow::notifyProposedNid);
+    connect(m_pView, &CView::nidAllocationRequested, this,
+            [this](const QString& mobPath, quint32* suggestion)
+    {
+        if(!suggestion)
+            return;
+        bool familyContainsOwner = false;
+        for(const SMobFamilyMember& member : m_familyValidation.members)
+            familyContainsOwner = familyContainsOwner || QDir::cleanPath(member.path).compare(
+                QDir::cleanPath(mobPath), Qt::CaseInsensitive) == 0;
+        if(!familyContainsOwner)
+            m_familyValidation = CMobFamilyValidator::validate(mobFamilyValidationRequest());
+        quint32 familySuggestion = 0;
+        bool shared = false;
+        if(m_familyValidation.suggestReplacementNid(mobPath, &familySuggestion, &shared,
+                                                     m_sessionAllocatedNids))
+        {
+            *suggestion = familySuggestion;
+            m_sessionAllocatedNids.insert(familySuggestion);
+            ei::log(shared ? eLogWarning : eLogInfo,
+                QString("Allocated family-aware NID %1 for %2%3")
+                    .arg(familySuggestion).arg(QFileInfo(mobPath).fileName())
+                    .arg(shared ? " inside a legacy-shared range" : ""));
+            const QString foldedMob = QDir::cleanPath(mobPath).toLower();
+            if(shared && !m_warnedSharedAllocationMobs.contains(foldedMob))
+            {
+                m_warnedSharedAllocationMobs.insert(foldedMob);
+                QMessageBox::warning(this, tr("Shared MOB ID range"),
+                    tr("Every available ID in %1's effective range is also declared by another "
+                       "runtime-family MOB. Endurance selected unused NID %2 and will continue, "
+                       "but the family ranges should eventually be reviewed.")
+                        .arg(QFileInfo(mobPath).fileName()).arg(familySuggestion));
+            }
+        }
+    }, Qt::DirectConnection);
+    connect(m_undoStack, &QUndoStack::indexChanged, this, [this](int) { scheduleMobFamilyValidation(500); });
     initShortcuts();
     connect(m_settings.get(), &CSettings::shortcutsChanged, this, &MainWindow::initShortcuts);
     m_ui->action_Mob_parameters->setEnabled(false);
@@ -1180,6 +1310,7 @@ void MainWindow::launchCurrentMapTest()
             tr("Load one MPR and at least one MOB before starting a test."));
         return;
     }
+    notifyFamilyPreflight(hotReloadRequested ? tr("Hot Reload Map") : tr("Test Current Map"));
     QProgressDialog progress(hotReloadRequested ? tr("Preparing hot reload...")
                                                : tr("Preparing map test..."),
                              QString(), 0, 6, this);
@@ -1417,6 +1548,382 @@ QVector<QString> MainWindow::activeMapRoots() const
            m_settings->opt(eOptSetResource, "mapRoots")))
         return option->value();
     return QVector<QString>();
+}
+
+SMobFamilyValidationRequest MainWindow::mobFamilyValidationRequest()
+{
+    SMobFamilyValidationRequest request;
+    const SResourceProfileEvaluation profile = activeResourceProfile();
+    request.profileId = profile.profileId;
+    request.mapRoots = activeMapRoots().toList();
+    request.explicitComposition = !m_currentCollectionPath.isEmpty();
+    if(!request.explicitComposition && !m_mapTestEntry.mobPath.isEmpty())
+        request.mappedPrimaryMobPath = m_mapTestEntry.mobPath;
+    request.familyLabel = !m_mapTestEntry.zoneId.isEmpty()
+        ? m_mapTestEntry.zoneId
+        : (!m_currentCollectionPath.isEmpty()
+            ? QFileInfo(m_currentCollectionPath).completeBaseName()
+            : QString("standalone"));
+    if(!m_pView)
+        return request;
+    for(CMob* mob : m_pView->mobs())
+    {
+        if(!mob)
+            continue;
+        const QString path = mob->filePath().absoluteFilePath();
+        request.seedMobPaths.append(path);
+        QByteArray data;
+        CValidationReport candidateReport;
+        QString saveClass;
+        if(mob->buildValidatedCandidate(&data, &candidateReport, &saveClass))
+            request.inMemoryMobData.insert(QDir::cleanPath(path).toLower(), data);
+        else
+            ei::log(eLogWarning, QString("Family validation used the on-disk MOB because the current in-memory candidate could not be mapped safely: %1\n%2")
+                .arg(path, candidateReport.toText()));
+    }
+    request.seedMobPaths.removeDuplicates();
+    return request;
+}
+
+void MainWindow::scheduleMobFamilyValidation(int delayMs)
+{
+    if(m_validationTimer)
+        m_validationTimer->start(qMax(0, delayMs));
+}
+
+void MainWindow::refreshMobFamilyValidation()
+{
+    if(!m_pView || m_pView->mobs().isEmpty())
+    {
+        m_familyValidation = CMobFamilyValidationReport();
+        m_acknowledgedFindingDigest.clear();
+        m_previousFamilyRiskKeys.clear();
+        m_sessionAllocatedNids.clear();
+        m_warnedSharedAllocationMobs.clear();
+        m_familyRiskBaselineReady = false;
+        updateMobFamilyValidationPanel();
+        return;
+    }
+    const QByteArray previousDigest = m_familyValidation.findingDigest();
+    m_familyValidation = CMobFamilyValidator::validate(mobFamilyValidationRequest());
+    const QByteArray currentDigest = m_familyValidation.findingDigest();
+    if(previousDigest != currentDigest)
+        m_acknowledgedFindingDigest.clear();
+    QSet<QString> currentRisks;
+    for(const SMobFamilyFinding& finding : m_familyValidation.findings)
+    {
+        if(finding.code != "nid.collision" && finding.code != "range.legacy_overlap")
+            continue;
+        QStringList locations = finding.locations;
+        locations.sort(Qt::CaseInsensitive);
+        currentRisks.insert(QString("%1|%2|%3")
+            .arg(finding.code).arg(finding.nid).arg(locations.join('|')));
+    }
+    if(m_familyRiskBaselineReady)
+    {
+        QSet<QString> introduced = currentRisks;
+        introduced.subtract(m_previousFamilyRiskKeys);
+        if(!introduced.isEmpty())
+        {
+            ei::log(eLogWarning, QString("Editing introduced %1 new runtime-family NID/range risk(s)")
+                .arg(introduced.size()));
+            QMessageBox::warning(this, tr("New family ID risk"),
+                tr("This edit or family-composition change introduced %1 new NID collision or range overlap. "
+                   "The operation was kept and nothing is blocked. Review the MOB Family Validation panel.")
+                    .arg(introduced.size()));
+        }
+    }
+    m_previousFamilyRiskKeys = currentRisks;
+    m_familyRiskBaselineReady = true;
+    updateMobFamilyValidationPanel();
+    ei::log(m_familyValidation.criticalCount() > 0 ? eLogWarning : eLogInfo,
+            m_familyValidation.toText());
+}
+
+void MainWindow::updateMobFamilyValidationPanel()
+{
+    if(!m_validationTree || !m_validationSummary)
+        return;
+    m_validationTree->clear();
+    if(m_familyValidation.members.isEmpty())
+    {
+        m_validationSummary->setText(tr("No active MOB family."));
+        return;
+    }
+    m_validationSummary->setText(m_familyValidation.summary());
+    QTreeWidgetItem* membersRoot = new QTreeWidgetItem(m_validationTree,
+        QStringList() << tr("INFO") << tr("Family members")
+                      << tr("%1 MOB(s)").arg(m_familyValidation.members.size()));
+    for(const SMobFamilyMember& member : m_familyValidation.members)
+    {
+        const QString status = member.missing ? tr("missing")
+            : (!member.error.isEmpty() ? tr("unreadable")
+                                       : (member.inMemory ? tr("in-memory") : tr("disk")));
+        QTreeWidgetItem* item = new QTreeWidgetItem(membersRoot,
+            QStringList() << status.toUpper() << member.fileName << member.inclusionReason);
+        item->setToolTip(2, member.path + (member.requestedBy.isEmpty()
+            ? QString() : QString("\nRequested by: %1").arg(member.requestedBy))
+            + (member.sourceSha256.isEmpty() ? QString()
+               : QString("\nSHA-256: %1").arg(QString::fromLatin1(member.sourceSha256.toHex()))));
+    }
+    for(const SMobFamilyFinding& finding : m_familyValidation.findings)
+    {
+        QString severity;
+        QColor color;
+        switch(finding.severity)
+        {
+        case EMobFamilyFindingSeverity::Critical:
+            severity = tr("CRITICAL"); color = QColor(220, 70, 70); break;
+        case EMobFamilyFindingSeverity::Warning:
+            severity = tr("WARNING"); color = QColor(230, 160, 45); break;
+        case EMobFamilyFindingSeverity::Incomplete:
+            severity = tr("INCOMPLETE"); color = QColor(190, 120, 230); break;
+        case EMobFamilyFindingSeverity::Info:
+            severity = tr("INFO"); color = QColor(130, 160, 190); break;
+        }
+        QTreeWidgetItem* item = new QTreeWidgetItem(m_validationTree,
+            QStringList() << severity << finding.category << finding.message);
+        item->setForeground(0, QBrush(color));
+        item->setToolTip(2, finding.locations.join('\n'));
+        for(const QString& location : finding.locations)
+            new QTreeWidgetItem(item, QStringList() << QString() << tr("Location") << location);
+        if(finding.hasNid && finding.code == "nid.collision")
+        {
+            const QVector<SMobNidOwner> owners = m_familyValidation.nidOwners.value(finding.nid);
+            for(const SMobNidOwner& owner : owners)
+            {
+                quint32 suggestion = 0;
+                bool shared = false;
+                const QString detail = m_familyValidation.suggestReplacementNid(
+                    owner.mobPath, &suggestion, &shared)
+                    ? tr("Suggested for %1: %2%3")
+                        .arg(owner.mobName).arg(suggestion)
+                        .arg(shared ? tr(" (unused, but inside a shared range)") : QString())
+                    : tr("No free ID remains in %1's effective range").arg(owner.mobName);
+                new QTreeWidgetItem(item, QStringList() << QString() << tr("Repair option") << detail);
+            }
+        }
+    }
+    membersRoot->setExpanded(true);
+    if(m_familyValidation.criticalCount() > 0 && m_validationDock)
+        m_validationDock->show();
+}
+
+void MainWindow::showMobFamilyValidation()
+{
+    QApplication::setOverrideCursor(Qt::WaitCursor);
+    refreshMobFamilyValidation();
+    QApplication::restoreOverrideCursor();
+    if(m_validationDock)
+    {
+        m_validationDock->show();
+        m_validationDock->raise();
+    }
+}
+
+void MainWindow::reviewAndRepairNidCollisions()
+{
+    refreshMobFamilyValidation();
+    QVector<SMobNidOwner> rows;
+    for(auto it = m_familyValidation.nidOwners.constBegin();
+        it != m_familyValidation.nidOwners.constEnd(); ++it)
+    {
+        if(it.value().size() < 2)
+            continue;
+        bool critical = false;
+        for(const SMobFamilyFinding& finding : m_familyValidation.findings)
+            if(finding.code == "nid.collision" && finding.hasNid && finding.nid == it.key())
+            {
+                critical = true;
+                break;
+            }
+        if(critical)
+            rows += it.value();
+    }
+    if(rows.isEmpty())
+    {
+        QMessageBox::information(this, tr("NID repair"),
+            tr("No repairable critical NID collision is present in the active runtime family."));
+        return;
+    }
+
+    QSet<QString> loadedPaths;
+    for(CMob* mob : m_pView->mobs())
+        if(mob)
+            loadedPaths.insert(QDir::cleanPath(mob->filePath().absoluteFilePath()).toLower());
+    const QString primaryPath = QDir::cleanPath(m_mapTestEntry.mobPath).toLower();
+
+    QDialog dialog(this);
+    dialog.setWindowTitle(tr("Review and Repair NID Collisions"));
+    dialog.resize(1080, 520);
+    QVBoxLayout* layout = new QVBoxLayout(&dialog);
+    QLabel* explanation = new QLabel(tr(
+        "Nothing is changed automatically. Select the newly added/edited owners to renumber. "
+        "Endurance preserves the map-table primary by default and refuses automatic repair when "
+        "a script or typed ParentID reference is ambiguous. Save and Test Current Map remain available."),
+        &dialog);
+    explanation->setWordWrap(true);
+    layout->addWidget(explanation);
+    QTableWidget* table = new QTableWidget(rows.size(), 7, &dialog);
+    table->setHorizontalHeaderLabels(QStringList() << tr("Repair") << tr("Current NID")
+        << tr("MOB") << tr("Object") << tr("OBJTYPE") << tr("Replacement") << tr("Safety"));
+    table->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
+    table->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
+    table->horizontalHeader()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
+    table->horizontalHeader()->setSectionResizeMode(3, QHeaderView::Stretch);
+    table->horizontalHeader()->setSectionResizeMode(4, QHeaderView::ResizeToContents);
+    table->horizontalHeader()->setSectionResizeMode(5, QHeaderView::ResizeToContents);
+    table->horizontalHeader()->setSectionResizeMode(6, QHeaderView::Stretch);
+
+    QSet<quint32> suggestedIds;
+    for(int row = 0; row < rows.size(); ++row)
+    {
+        const SMobNidOwner& owner = rows.at(row);
+        QTableWidgetItem* check = new QTableWidgetItem;
+        check->setFlags(Qt::ItemIsEnabled | Qt::ItemIsUserCheckable);
+        const QString ownerPath = QDir::cleanPath(owner.mobPath).toLower();
+        const bool loaded = loadedPaths.contains(ownerPath);
+        QStringList blockers;
+        QVector<quint32> ids{owner.nid};
+        for(const SMobFamilyMember& member : m_familyValidation.members)
+        {
+            const QVector<SMobScriptReference> references =
+                CScriptReferenceAnalyzer::findObjectIds(member.script, ids);
+            for(const SMobScriptReference& reference : references)
+                blockers.append(tr("script %1:%2").arg(member.fileName).arg(reference.line));
+            for(const SMobObjectSnapshot& object : member.objects)
+                if(object.hasParentId && object.parentId == owner.nid)
+                    blockers.append(tr("ParentID in %1:%2").arg(member.fileName, object.sectionPath));
+        }
+        if(!loaded)
+            blockers.prepend(tr("MOB is not loaded for editing"));
+        const bool safe = blockers.isEmpty();
+        check->setCheckState(safe && ownerPath != primaryPath ? Qt::Checked : Qt::Unchecked);
+        if(!safe)
+            check->setFlags(Qt::NoItemFlags);
+        table->setItem(row, 0, check);
+        table->setItem(row, 1, new QTableWidgetItem(QString::number(owner.nid)));
+        table->setItem(row, 2, new QTableWidgetItem(owner.mobName));
+        table->setItem(row, 3, new QTableWidgetItem(QString("%1 / %2")
+            .arg(owner.objectName.isEmpty() ? owner.sectionPath : owner.objectName,
+                 owner.prototype.isEmpty() ? QString("-") : owner.prototype)));
+        table->setItem(row, 4, new QTableWidgetItem(owner.hasObjectType
+            ? QString::number(owner.objectType) : tr("unknown")));
+        quint32 suggestion = 0;
+        bool shared = false;
+        const bool hasSuggestion = m_familyValidation.suggestReplacementNid(
+            owner.mobPath, &suggestion, &shared, suggestedIds);
+        if(hasSuggestion)
+            suggestedIds.insert(suggestion);
+        QTableWidgetItem* replacement = new QTableWidgetItem(
+            hasSuggestion ? QString::number(suggestion) : QString());
+        if(!safe || !hasSuggestion)
+            replacement->setFlags(Qt::NoItemFlags);
+        table->setItem(row, 5, replacement);
+        QString safety = blockers.isEmpty()
+            ? (shared ? tr("Unused, but declared by another MOB range") : tr("Ready"))
+            : tr("Manual resolution required: %1").arg(blockers.join(", "));
+        table->setItem(row, 6, new QTableWidgetItem(safety));
+        for(int column = 1; column < 5; ++column)
+            table->item(row, column)->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
+        table->item(row, 6)->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
+    }
+    layout->addWidget(table);
+    QDialogButtonBox* buttons = new QDialogButtonBox(
+        QDialogButtonBox::Apply | QDialogButtonBox::Cancel, &dialog);
+    layout->addWidget(buttons);
+    connect(buttons->button(QDialogButtonBox::Cancel), &QPushButton::clicked,
+            &dialog, &QDialog::reject);
+    connect(buttons->button(QDialogButtonBox::Apply), &QPushButton::clicked,
+            &dialog, &QDialog::accept);
+    if(dialog.exec() != QDialog::Accepted)
+        return;
+
+    QVector<CView::SNidRepair> repairs;
+    QSet<quint32> replacements;
+    QMap<quint32, int> selectedPerCollision;
+    for(int row = 0; row < rows.size(); ++row)
+    {
+        if(!table->item(row, 0) || table->item(row, 0)->checkState() != Qt::Checked)
+            continue;
+        bool valid = false;
+        const quint64 parsed = table->item(row, 5)->text().toULongLong(&valid);
+        if(!valid || parsed > std::numeric_limits<quint32>::max())
+        {
+            QMessageBox::warning(this, tr("NID repair"), tr("Row %1 has an invalid replacement ID.").arg(row + 1));
+            return;
+        }
+        const quint32 replacement = quint32(parsed);
+        if(replacements.contains(replacement) || m_familyValidation.nidOwners.contains(replacement))
+        {
+            QMessageBox::warning(this, tr("NID repair"),
+                tr("Replacement NID %1 is already used by the family or another selected repair.").arg(replacement));
+            return;
+        }
+        replacements.insert(replacement);
+        selectedPerCollision[rows.at(row).nid] += 1;
+        CView::SNidRepair repair;
+        repair.mobPath = rows.at(row).mobPath;
+        repair.sectionPath = rows.at(row).sectionPath;
+        repair.oldNid = rows.at(row).nid;
+        repair.newNid = replacement;
+        repairs.append(repair);
+    }
+    if(repairs.isEmpty())
+    {
+        QMessageBox::information(this, tr("NID repair"), tr("No repair rows were selected."));
+        return;
+    }
+    for(auto it = selectedPerCollision.constBegin(); it != selectedPerCollision.constEnd(); ++it)
+        if(it.value() >= m_familyValidation.nidOwners.value(it.key()).size())
+        {
+            QMessageBox::warning(this, tr("NID repair"),
+                tr("At least one owner of NID %1 must keep the established ID.").arg(it.key()));
+            return;
+        }
+    QString error;
+    if(!m_pView->applyFamilyNidRepairs(repairs, &error))
+    {
+        QMessageBox::warning(this, tr("NID repair"), error);
+        return;
+    }
+    ei::log(eLogInfo, QString("Applied one undoable family NID repair transaction with %1 object(s)")
+        .arg(repairs.size()));
+    scheduleMobFamilyValidation(0);
+}
+
+void MainWindow::notifyFamilyPreflight(const QString& operation)
+{
+    if(!m_pView || m_pView->mobs().isEmpty())
+        return;
+    refreshMobFamilyValidation();
+    if(!m_familyValidation.hasActionableFindings())
+        return;
+    const QByteArray digest = m_familyValidation.findingDigest();
+    if(digest == m_acknowledgedFindingDigest)
+        return;
+    m_acknowledgedFindingDigest = digest;
+    ei::log(eLogWarning, QString("User continued with %1 after non-blocking MOB family validation findings:\n%2")
+        .arg(operation, m_familyValidation.toText()));
+    QMessageBox::warning(this, tr("MOB family validation"),
+        tr("%1 found possible runtime-family ID problems. Endurance will not block %2.\n\n%3\n\n"
+           "Review the MOB Family Validation panel for the complete report.")
+            .arg(m_familyValidation.summary(), operation,
+                 m_familyValidation.toText(8)));
+}
+
+void MainWindow::notifyProposedNid(quint32 nid, const QString& mobPath)
+{
+    refreshMobFamilyValidation();
+    const QString details = m_familyValidation.describeProposedNid(nid, mobPath);
+    if(details.isEmpty())
+        return;
+    ei::log(eLogWarning, QString("Proposed NID %1 overlaps the active family:\n%2")
+        .arg(nid).arg(details));
+    QMessageBox::warning(this, tr("NID overlap"),
+        tr("NID %1 overlaps an object or declared range in the active runtime family. "
+           "The edit will still be applied.\n\n%2")
+            .arg(nid).arg(details));
 }
 
 void MainWindow::openCollection(const QString& path)
@@ -1884,6 +2391,7 @@ void MainWindow::on_actionSettings_triggered()
 
 void MainWindow::on_actionSave_as_triggered()
 {
+    notifyFamilyPreflight(tr("Save As"));
     m_pView->saveMobAs();
 }
 
@@ -1912,6 +2420,7 @@ void MainWindow::on_actionClose_all_triggered()
 
 void MainWindow::on_actionSave_triggered()
 {
+    notifyFamilyPreflight(tr("Save"));
     m_pView->saveActiveMob();
 }
 
@@ -2029,6 +2538,7 @@ void MainWindow::updateWindowTitle(eTitleTypeData type, QString data)
 
 void MainWindow::on_actionSave_all_MOB_s_triggered()
 {
+    notifyFamilyPreflight(tr("Save All MOBs"));
     m_pView->saveAllMob();
 }
 

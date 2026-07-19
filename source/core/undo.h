@@ -357,6 +357,8 @@ public:
     enum { Id = 116 };
     CChangeProp() = delete;
     CChangeProp(CView* pView, CNode* pNode, const QSharedPointer<IPropertyBase>& prop, QUndoCommand *parent = nullptr);
+    CChangeProp(CView* pView, CMob* pMob, CNode* pNode,
+                const QSharedPointer<IPropertyBase>& prop, QUndoCommand *parent = nullptr);
 
     void undo() override;
     void redo() override;

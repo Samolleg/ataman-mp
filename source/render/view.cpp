@@ -33,22 +33,12 @@
 #include "layout_components/tree_view.h"
 #include "property.h"
 #include "tile.h"
-#include "duplicate_id_report.h"
 #include "view_frustum.h"
 #include "external_script_workspace.h"
 #include "mob_script_window.h"
 #include "script_reference_analyzer.h"
 
 class CLogic;
-
-namespace {
-void showDuplicateIdWarning(QWidget* parent, const QVector<uint>& duplicates)
-{
-    if(!duplicates.isEmpty())
-        QMessageBox::warning(parent, "Duplicate object IDs",
-            ei::duplicateIdWarningText(duplicates));
-}
-}
 
 CView::CView(QWidget *parent, const QGLWidget *pShareWidget) : QGLWidget(parent, pShareWidget)
   ,m_pSettings(nullptr)
@@ -1194,6 +1184,7 @@ void CView::loadMob(QFileInfo &filePath)
     m_aMob.append(pMob);
     m_scriptWorkspaces->registerMob(pMob);
     changeCurrentMob(pMob);
+    emit mobStateChanged();
 }
 
 void CView::saveMobAs()
@@ -1208,8 +1199,6 @@ void CView::saveMobAs()
     if(fileName.filePath().isEmpty())
         return;
 
-    QSet<uint> aId;
-    showDuplicateIdWarning(this, m_activeMob->checkUniqueId(aId));
     if (fileName.fileName().endsWith(".json"))
         m_activeMob->serializeJson(fileName);
     else if (fileName.fileName().endsWith(".mob"))
@@ -1227,8 +1216,6 @@ void CView::saveActiveMob()
     if(nullptr == m_activeMob)
         return;
 
-    QSet<uint> aId;
-    showDuplicateIdWarning(this, m_activeMob->checkUniqueId(aId));
     if(m_activeMob->save())
         emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataDirtyFlag, "");
 }
@@ -1236,12 +1223,6 @@ void CView::saveActiveMob()
 void CView::saveAllMob()
 {
     CMob* pMob = nullptr;
-    QSet<uint> aId;
-    QVector<uint> duplicates;
-    foreach(pMob, m_aMob)
-        duplicates += pMob->checkUniqueId(aId);
-    showDuplicateIdWarning(this, duplicates);
-
     foreach(pMob, m_aMob)
     {
         pMob->save();
@@ -1294,6 +1275,7 @@ void CView::unloadActiveMob()
 
     ei::log(eLogInfo, "Mob unloaded");
     viewParameters();
+    emit mobStateChanged();
 }
 
 void CView::openActiveMobEditParams()
@@ -1468,6 +1450,7 @@ void CView::unloadMob(QString mobName)
 
     ei::log(eLogInfo, "Mob unloaded");
     viewParameters();
+    emit mobStateChanged();
 }
 
 int CView::nSelectedNodes()
@@ -2038,12 +2021,7 @@ void CView::onParamChange(const QSharedPointer<IPropertyBase>& prop)
             auto pId = dynamic_cast<propUint*>(prop.get());
             if(!pId || pId->value() == pNode->mapId())
                 break;
-            if(!m_activeMob->isFreeId(pId->value()))
-            {
-                ei::log(eLogWarning, "incorrect operation. Duplicate id");
-                QMessageBox::warning(nullptr, "Operation Error", "incorrect operation. Duplicate id");
-                return;
-            }
+            emit nidChangeProposed(pId->value(), m_activeMob->filePath().absoluteFilePath());
             if(!confirmScriptReferencedObjectIds({pNode->mapId()},
                                                  tr("change this object ID")))
                 return;
@@ -2075,6 +2053,77 @@ void CView::onParamChange(const QSharedPointer<IPropertyBase>& prop)
 
     if(grouped)
         m_pUndoStack->endMacro();
+}
+
+bool CView::applyFamilyNidRepairs(const QVector<SNidRepair>& repairs, QString* error)
+{
+    struct ResolvedRepair { CMob* mob; CNode* node; SNidRepair repair; };
+    QVector<ResolvedRepair> resolved;
+    QSet<quint32> replacements;
+    for(const SNidRepair& repair : repairs)
+    {
+        if(repair.oldNid == repair.newNid || replacements.contains(repair.newNid))
+        {
+            if(error) *error = tr("The repair contains a duplicate or unchanged replacement ID.");
+            return false;
+        }
+        CMob* targetMob = nullptr;
+        const QString wanted = QDir::cleanPath(QFileInfo(repair.mobPath).absoluteFilePath());
+        for(CMob* mob : m_aMob)
+            if(mob && QDir::cleanPath(mob->filePath().absoluteFilePath()).compare(
+                   wanted, Qt::CaseInsensitive) == 0)
+            {
+                targetMob = mob;
+                break;
+            }
+        if(!targetMob)
+        {
+            if(error) *error = tr("Repair target is not loaded: %1").arg(repair.mobPath);
+            return false;
+        }
+        CNode* targetNode = nullptr;
+        for(CNode* node : targetMob->nodes())
+            if(node && node->mapId() == repair.oldNid
+               && node->rawSourceObjectPath() == repair.sectionPath)
+            {
+                targetNode = node;
+                break;
+            }
+        if(!targetNode)
+        {
+            if(error) *error = tr("Could not map NID %1 at %2 onto a loaded raw object.")
+                .arg(repair.oldNid).arg(repair.sectionPath);
+            return false;
+        }
+        replacements.insert(repair.newNid);
+        resolved.append({targetMob, targetNode, repair});
+    }
+    if(resolved.isEmpty())
+    {
+        if(error) *error = tr("No repair rows were selected.");
+        return false;
+    }
+
+    m_pUndoStack->beginMacro(tr("Repair %1 family NID collision(s)").arg(resolved.size()));
+    for(const ResolvedRepair& item : resolved)
+    {
+        QSharedPointer<IPropertyBase> value(new propUint(eObjParam_NID, item.repair.newNid));
+        CChangeProp* command = new CChangeProp(this, item.mob, item.node, value);
+        connect(command, SIGNAL(updateParam()), this, SLOT(viewParameters()));
+        connect(command, SIGNAL(changeIdSignal(uint,uint)), m_pTree, SLOT(onChangeNodeId(uint,uint)));
+        m_pUndoStack->push(command);
+    }
+    m_pUndoStack->endMacro();
+    emit mobStateChanged();
+    return true;
+}
+
+quint32 CView::suggestFamilyNid(CMob* mob, quint32 localSuggestion)
+{
+    quint32 suggestion = localSuggestion;
+    if(mob)
+        emit nidAllocationRequested(mob->filePath().absoluteFilePath(), &suggestion);
+    return suggestion;
 }
 
 void CView::onPropertiesChange(const QList<QSharedPointer<IPropertyBase>>& properties)
@@ -3177,6 +3226,7 @@ void CView::setDurty(CMob* pMob)
     changedMob->refreshDirtyFromProjection();
     if(changedMob == m_activeMob)
         emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataDirtyFlag, changedMob->isDirty() ? "*" : "");
+    emit mobStateChanged();
 }
 
 bool CView::confirmScriptReferencedObjectIds(const QVector<uint>& objectIds,

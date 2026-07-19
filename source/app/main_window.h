@@ -10,10 +10,12 @@
 #include <QTableWidget>
 #include <QFileInfo>
 #include <QMap>
+#include <QSet>
 #include <QVector3D>
 #include "types.h"
 #include "map_catalog.h"
 #include "map_spawn_planner.h"
+#include "mob_family_validation.h"
 
 namespace Ui {
 class MainWindow;
@@ -35,6 +37,8 @@ class QComboBox;
 class QCheckBox;
 class QToolButton;
 class QLabel;
+class QTreeWidget;
+class QTimer;
 
 struct SWindowTitle
 {
@@ -87,6 +91,14 @@ private:
     const SMapTravelZone* selectedTravelZone() const;
     SResourceProfileEvaluation activeResourceProfile() const;
     QString activeProfileDisplayName() const;
+    SMobFamilyValidationRequest mobFamilyValidationRequest();
+    void scheduleMobFamilyValidation(int delayMs = 300);
+    void refreshMobFamilyValidation();
+    void updateMobFamilyValidationPanel();
+    void showMobFamilyValidation();
+    void reviewAndRepairNidCollisions();
+    void notifyFamilyPreflight(const QString& operation);
+    void notifyProposedNid(quint32 nid, const QString& mobPath);
 
 private slots:
     void showOutliner(bool bShow);
@@ -147,6 +159,16 @@ private:
     QMenu* m_recentFilesMenu;
     QAction* m_externalScriptAction;
     QDockWidget* m_mapsDock;
+    QDockWidget* m_validationDock;
+    QTreeWidget* m_validationTree;
+    QLabel* m_validationSummary;
+    QTimer* m_validationTimer;
+    CMobFamilyValidationReport m_familyValidation;
+    QByteArray m_acknowledgedFindingDigest;
+    QSet<QString> m_previousFamilyRiskKeys;
+    QSet<quint32> m_sessionAllocatedNids;
+    QSet<QString> m_warnedSharedAllocationMobs;
+    bool m_familyRiskBaselineReady{false};
     CMapsBrowser* m_mapsBrowser;
     QAction* m_mapTestAction;
     QAction* m_stopMapTestAction;
