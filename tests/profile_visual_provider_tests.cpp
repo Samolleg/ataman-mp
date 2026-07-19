@@ -39,12 +39,19 @@ QSharedPointer<ei::SProfileDatabaseSnapshot> database()
         db->monsters.insert(monster.name.toLower(), monster);
     }
     db->items.insert("shirt", item("shirt", "armor", 3, 12));
+    ei::SItemDatabaseRecord helmet = item("helmet", "armor", 0, 8);
+    helmet.type = "helm";
+    helmet.materialType = "Metal";
+    db->items.insert("helmet", helmet);
     db->items.insert("sword", item("sword", "weapons", 0, 1));
     db->items.insert("axe", item("axe", "weapons", 1, 2));
     db->items.insert("bow", item("bow", "weapons", 5, 3));
     db->items.insert("shield", item("shield", "weapons", 9, 4));
-    db->items.insert("great sword", item("great sword", "weapons", 12, 5));
-    db->items.insert("great axe", item("great axe", "weapons", 13, 6));
+    db->items.insert("great sword", item("great sword", "weapons", 12, 1));
+    db->items.insert("great axe", item("great axe", "weapons", 13, 3));
+    db->items.insert("great pike", item("great pike", "weapons", 10, 2));
+    db->items.insert("great hammer", item("great hammer", "weapons", 14, 3));
+    db->items.insert("great staff", item("great staff", "weapons", 15, 1));
     ei::SMaterialDatabaseRecord iron;
     iron.name = "iron"; iron.type = "Metal"; iron.code = "ir"; iron.id = 7;
     db->materialRecords.insert("iron", iron);
@@ -86,7 +93,9 @@ private slots:
     void zeroTtiArmorTexturesBaseParts();
     void missingArmorGeometryPreservesBaseParts();
     void zombieEquipmentUsesSharedHumanoidAtlas();
-    void weaponAtlasesUseOneBasedIndicesAndShieldMaterialFamily();
+    void helmetAddsDatabaseGeometryAndAtlas();
+    void weaponAtlasesUseLiteralTtiAndEstablishedFamilies();
+    void jmvTwoHandWeaponsUseDedicatedAtlasFamilies();
     void resolvesCompoundBowGeometry();
     void jmvIgnoresWeaponsBeyondFirstPair();
     void unknownVisualProviderFailsClosed();
@@ -249,7 +258,7 @@ void ProfileVisualProviderTests::jmvLayoutsAreIndependentlyGated()
     {
         SEquipmentLayoutRequest request; request.model = "unhuma"; request.weapons = test.weapons;
         request.assemblyParts << "rh3.sword01" << "lh3.axe02" << "lh2.shield04"
-                              << "rh3.dsword05" << "rh3.daxe06";
+                              << "rh3.dsword01" << "rh3.daxe03";
         QJsonObject output; resolver->resolve(request, &output);
         QCOMPARE(output.value("layout").toString(), test.layout);
         QCOMPARE(!output.value("placeholders").toArray().isEmpty(), test.gated);
@@ -332,7 +341,23 @@ void ProfileVisualProviderTests::zombieEquipmentUsesSharedHumanoidAtlas()
     QCOMPARE(textures.value("lh1.armor12").toString(), QString("unhumash_12.le.0.x4.mmp"));
 }
 
-void ProfileVisualProviderTests::weaponAtlasesUseOneBasedIndicesAndShieldMaterialFamily()
+void ProfileVisualProviderTests::helmetAddsDatabaseGeometryAndAtlas()
+{
+    ProfileVisualProviderService service;
+    const auto resolver = service.equipmentResolver("jmv.v1", database());
+    SEquipmentLayoutRequest request;
+    request.model = "unorfe";
+    request.armor << "helmet.iron";
+    request.assemblyParts << "hd" << "hd.armor08";
+    QJsonObject output;
+    QVERIFY(resolver->resolve(request, &output).success);
+    QCOMPARE(jsonStrings(output, "components"), QStringList({"hd.armor08"}));
+    QVERIFY(jsonStrings(output, "replacedParts").isEmpty());
+    QCOMPARE(output.value("componentTextures").toObject().value("hd.armor08").toString(),
+             QString("unhumahl_08.ir.0.x2.mmp"));
+}
+
+void ProfileVisualProviderTests::weaponAtlasesUseLiteralTtiAndEstablishedFamilies()
 {
     ProfileVisualProviderService service;
     const auto resolver = service.equipmentResolver("jmv.v1", database());
@@ -343,8 +368,31 @@ void ProfileVisualProviderTests::weaponAtlasesUseOneBasedIndicesAndShieldMateria
     QJsonObject output;
     QVERIFY(resolver->resolve(request, &output).success);
     const QJsonObject textures = output.value("componentTextures").toObject();
-    QCOMPARE(textures.value("rh3.sword01").toString(), QString("unhumasw_02.ir.0.x2.mmp"));
-    QCOMPARE(textures.value("lh2.shield04").toString(), QString("unhumamt_05.ir.0.x2.mmp"));
+    QCOMPARE(textures.value("rh3.sword01").toString(), QString("unhumasw_01.ir.0.x2.mmp"));
+    QCOMPARE(textures.value("lh2.shield04").toString(), QString("unhumasd_04.ir.0.x2.mmp"));
+}
+
+void ProfileVisualProviderTests::jmvTwoHandWeaponsUseDedicatedAtlasFamilies()
+{
+    ProfileVisualProviderService service;
+    const auto resolver = service.equipmentResolver("jmv.v1", database());
+    const struct Test { const char* reference; const char* component; const char* texture; } tests[] = {
+        {"great sword.iron", "rh3.dsword01", "unhumats_01.ir.0.x2.mmp"},
+        {"great pike.iron", "rh3.dpike02", "unhumatp_02.ir.0.x2.mmp"},
+        {"great hammer.iron", "rh3.dclub03", "unhumath_03.ir.0.x2.mmp"},
+        {"great staff.iron", "rh3.dstaff01", "unhumatf_01.ir.0.x2.mmp"}
+    };
+    for(const Test& test : tests)
+    {
+        SEquipmentLayoutRequest request;
+        request.model = "unhuma";
+        request.weapons << test.reference;
+        request.assemblyParts << test.component;
+        QJsonObject output;
+        QVERIFY(resolver->resolve(request, &output).success);
+        QCOMPARE(output.value("componentTextures").toObject().value(test.component).toString(),
+                 QString(test.texture));
+    }
 }
 
 void ProfileVisualProviderTests::resolvesCompoundBowGeometry()
@@ -355,13 +403,13 @@ void ProfileVisualProviderTests::resolvesCompoundBowGeometry()
     request.model = "unhuma";
     request.weapons << "bow.iron";
     request.assemblyParts << "bwparta03" << "lh3.bwpartb03"
-                          << "bwtetivaa03" << "bwtetivab03";
+                          << "bwtetivaa03" << "bwtetivab03" << "quiver" << "arrows";
     QJsonObject output;
     QVERIFY(resolver->resolve(request, &output).success);
     QCOMPARE(jsonStrings(output, "components"), request.assemblyParts);
     const QJsonObject textures = output.value("componentTextures").toObject();
     for(const QString& component : request.assemblyParts)
-        QCOMPARE(textures.value(component).toString(), QString("unhumabw_04.ir.0.x2.mmp"));
+        QCOMPARE(textures.value(component).toString(), QString("unhumabw_03.ir.0.x2.mmp"));
 }
 
 void ProfileVisualProviderTests::jmvIgnoresWeaponsBeyondFirstPair()

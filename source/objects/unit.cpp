@@ -146,7 +146,12 @@ QStringList jsonStringList(const QJsonObject& object, const char* key)
 bool optionalEquipmentPart(const QString& part)
 {
     static const QRegularExpression optional(
-        "(?:^(?:sling)$|\\.(?:armor|sword|axe|dagger|pike|club|bow|crossbow|shield|dsword|daxe|dpike|dclub|staff|dstaff)\\d+|hr\\.\\d+)$",
+        "(?:^(?:sling|quiver|arrows|basearrow\\d+|rh3\\.arrow\\d+|"
+        "bwparta\\d+|lh3\\.bwpartb\\d+|bwtetiva[ab]\\d+|"
+        "rh3\\.crbow\\d+main|crbow\\d+(?:part|tetiva)\\d+|"
+        "baserh3|(?:l\\.)?base(?:sword|pike|club|axe|dagger|staff|"
+        "dsword|dpike|dclub|daxe|dstaff)\\d+)$|"
+        "\\.(?:armor|sword|axe|dagger|pike|club|bow|crossbow|shield|dsword|daxe|dpike|dclub|staff|dstaff)\\d+|hr\\.\\d+)$",
         QRegularExpression::CaseInsensitiveOption);
     return optional.match(part).hasMatch();
 }
@@ -205,20 +210,27 @@ void CUnit::refreshTransientVisual()
     const QStringList resolvedBodyParts = appearance.contains("bodyParts")
         ? jsonStringList(appearance, "bodyParts") : m_bodyParts;
     QStringList visibleParts;
-    // OBJ_BODYPARTS is the instance component-enable mask regardless of where
-    // model/equipment values are resolved. Ignoring it for database-backed
-    // units exposes every mutually-exclusive human body/armor component.
-    if(!resolvedBodyParts.isEmpty())
+    // A normal unit's database-selected race can differ from its embedded MOB
+    // assembly. Reusing that instance mask drops anatomical components (most
+    // visibly limbs on humans, orcs, and skeletons). Build the database body
+    // from the selected assembly's non-optional base members, then add exactly
+    // the resolved hair/equipment components below. Imported units remain
+    // strictly controlled by their embedded mask.
+    if(databaseEquipmentPlan)
+    {
+        for(const QString& part : assemblyParts)
+            if(!optionalEquipmentPart(part))
+                visibleParts.append(part);
+    }
+    else if(!resolvedBodyParts.isEmpty())
     {
         for(const QString& part : resolvedBodyParts)
-            if(!databaseEquipmentPlan || !optionalEquipmentPart(part))
-                visibleParts.append(part);
+            visibleParts.append(part);
     }
     else
     {
         for(const QString& part : assemblyParts)
-            if(!databaseEquipmentPlan || !optionalEquipmentPart(part))
-                visibleParts.append(part);
+            visibleParts.append(part);
     }
 
     QVector3D complexion = m_complection;

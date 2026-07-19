@@ -70,17 +70,33 @@ edit `database.res`, JMV/Base archives, live MOBs, maps, or the game install.
 4. Configure the profile with the complete Base/JMV `Res` directories, not a
    hand-picked figures/textures subset. The catalog must discover JMV face,
    armor, weapon, and material atlases such as `faces.res`, `UnhumaBT.res`,
-   `UnhumaPL.res`, `UnhumaSW.res`, and `UnhumaMT.res` read-only.
+   `UnhumaPL.res`, `UnhumaSW.res`, `UnhumaSD.res`, and `UnhumaMT.res` read-only.
 5. Validate PNT3 equipment atlases with large transparent tails. Armor, weapon,
    and TTI-0 anatomical components must not show stripes, random alpha, or
    pixels from outside the decoded buffer.
-6. Validate `zone1` ID 221 with its four bow members (`bwparta`, `bwpartb`, and
-   both `bwtetiva` members), `zon3obr` IDs 233/234 with `UnhumaMT` shield
-   textures, and `zon3obr` ID 198 with its `hd.armorNN` helmet.
+6. Validate `zone1` ID 221 with its six bow members (`bwparta`, `bwpartb`, both
+   `bwtetiva` members, `quiver`, and `arrows`), `zon3obr` IDs 233/234 with
+   `UnhumaSD` shield textures, and `zon3obr` ID 198 with its `hd.armorNN`
+   helmet.
 7. Validate spear goblins with only the explicit pike visible and ogres with
    their club using OBJ secondary texture. This follows the FIG header texture
    selector (`1` primary, `2` secondary); body texture must not propagate to
    a texture-2 integral weapon.
+8. Normal database-backed humans, orcs, and skeletons rebuild their anatomical
+   base from the database-selected assembly. Their embedded MOB part mask is
+   not reused after a race/model substitution. Imported units continue to use
+   the embedded mask exactly.
+
+## Corpus-established JMV equipment atlas mapping
+
+- Database `TTI` is the literal FIG and MMP index; it is not incremented.
+- 1H: `SW`, `AX`, `DG`, `SP`, `HM`; ranged: `BW`, `CB`; shield: `SD`.
+- 2H: pike `TP`, sword `TS`, axe `TA`, hammer `TH`, staff `TF`.
+- Helmets use `HL`; `UnhumaMT` contains generic `materialNNNN` textures and is
+  not the shield family.
+- JMV material rows `silver` (`sv`) and `gold` (`gd`) have no matching wearable
+  or weapon atlas members in the audited Base/JMV resource set. Do not invent a
+  fallback mapping without provider or game-developer evidence.
 
 Default-idle animation validation is specified with the animation follow-up and
 is not a prerequisite for this equipment integration.

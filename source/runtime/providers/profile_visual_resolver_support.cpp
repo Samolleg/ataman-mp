@@ -216,11 +216,12 @@ void appendRangedComponents(int typeId, int tti, const SEquipmentLayoutRequest& 
     {
         const QString index = QString::number(tti).rightJustified(2, '0');
         expected << "bwparta" + index << "lh3.bwpartb" + index
-                 << "bwtetivaa" + index << "bwtetivab" + index;
+                 << "bwtetivaa" + index << "bwtetivab" + index
+                 << "quiver" << "arrows";
     }
     else if(typeId == 6)
     {
-        const QString index = QString::number(tti + 1).rightJustified(2, '0');
+        const QString index = QString::number(tti).rightJustified(2, '0');
         expected << "rh3.crbow" + index + "main"
                  << "crbow" + index + "part01" << "crbow" + index + "part02"
                  << "crbow" + index + "tetiva01" << "crbow" + index + "tetiva02";
@@ -263,8 +264,8 @@ QString equipmentTextureName(const QString& model, const QString& itemType, int 
     };
     static const QMap<int, QString> weaponCodes = {
         {0, "sw"}, {1, "ax"}, {2, "dg"}, {3, "sp"}, {4, "hm"},
-        {5, "bw"}, {6, "cb"}, {9, "mt"}, {10, "sp"}, {11, "sf"},
-        {12, "sd"}, {13, "ax"}, {14, "hm"}, {15, "sf"}
+        {5, "bw"}, {6, "cb"}, {9, "sd"}, {10, "tp"}, {11, "sf"},
+        {12, "ts"}, {13, "ta"}, {14, "th"}, {15, "tf"}
     };
     const QString code = weapon ? weaponCodes.value(typeId)
                                 : armorCodes.value(itemType.trimmed().toLower());
@@ -282,9 +283,10 @@ QString equipmentTextureName(const QString& model, const QString& itemType, int 
         textureModel = "unhuma";
     return QString("%1%2_%3.%4.%5.%6.mmp")
         .arg(textureModel, code)
-        // Wearable atlases use the geometry TTI literally. Weapon geometry is
-        // zero-based while its MMP atlas number is one-based in Base and JMV.
-        .arg(weapon ? tti + 1 : tti, 2, 10, QChar('0')).arg(materialCode.trimmed().toLower())
+        // Database TTI is the literal geometry and MMP family index. Archive
+        // inventories show, for example, bow TTI 3 -> UnhumaBW_03 and shield
+        // TTI 6 -> UnhumaSD_06; incrementing it selects a different item.
+        .arg(tti, 2, 10, QChar('0')).arg(materialCode.trimmed().toLower())
         .arg(textureVariant).arg(!weapon && itemType.compare("helm", Qt::CaseInsensitive) != 0
                                                ? "x4" : "x2");
 }
