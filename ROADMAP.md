@@ -5,7 +5,7 @@ work is ordered from the newest planned minor line to the oldest completed one.
 An item is checked only after its implementation has landed and received the
 stated validation. Completed code should carry a commit, test, or release link.
 
-Current development line: `0.2.1`.
+Current development line: `0.2.1-alpha.5` focused closed testing.
 
 <details open>
 <summary><strong>General wishlist — not assigned to a release</strong></summary>
@@ -171,6 +171,26 @@ those commands instead.
 Publish the first immutable `0.2.0` package after the following runtime contract
 is demonstrated on normal gameplay, dungeon, and briefing maps.
 
+### Current 0.2.x status
+
+- **Current tester build:** `0.2.1-alpha.5`, focused on warning-heavy
+  runtime-family range/NID validation and opt-in conservative repair.
+- **MOB hardening:** complete for the supported editing surface. Remaining work
+  is validation breadth and new editing features, not another serializer
+  rewrite.
+- **Direct JMV gameplay:** working on tested normal, dungeon, and briefing maps,
+  including selected entrances, zone metadata, startup-movie suppression,
+  Godmode, supplemental `AddMob` loading, and temporary-map staging.
+- **0.2.0 runtime release blockers:** disable in-game Main Menu/Save/Load during
+  a staged session, add authoritative readiness/results, then run the final
+  focused gameplay matrix.
+- **0.2.1 hot reload:** the owned-process protocol and immutable generations are
+  implemented. Main-MOB reload has worked in testing; supplemental/collection
+  reload and same-position restoration remain unfinished.
+- **Next high-priority editor UX task after alpha.5 feedback:** fuzzy,
+  parameter-aware outliner filtering. Unreal-style MOB ownership/locking is the
+  larger workspace follow-up.
+
 ### Critical: structural zone-family NID validation
 
 - [x] Detect intra-file duplicates and cross-file NID collisions across the
@@ -204,6 +224,10 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
     and deterministic Autozone suggestions `1000321`-`1000328`.
   - [ ] Freeze the complete 162-MOB JMV family manifest and add synthetic
     intra-file, incomplete-family, undo/redo, and reference-refusal fixtures.
+  - Implementation and focused corpus harness: local commit `9ddc802`;
+    [alpha.5 validation](docs/releases/0.2.1-alpha.5-validation.md). The commit
+    is not yet on GitHub because the push was denied until the private remote is
+    explicitly re-authorized.
   - Detailed design: [structural MOB NID validation plan](docs/research/structural-mob-nid-validation-plan.md).
 
 ### P0: direct-launch stabilization
@@ -232,7 +256,7 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
   - `0.2.0-alpha.7` replaces the screen crosshair with a terrain-projected hero
     outline and uses the process-owned JMV autorun bootstrap to apply the chosen
     position with `SetCPFast` after normal player/session initialization.
-- [ ] Validate temporary JMV Godmode delivery through a run-local SpellAddon
+- [x] Validate temporary JMV Godmode delivery through a run-local SpellAddon
   autorun MOB.
   - Runtime testing proved that the safely installed temporary `autoexec.cfg`
     was ignored. `0.2.0-alpha.4` instead losslessly patches a run-local copy of
@@ -241,12 +265,9 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
   - Alpha.6 proved the redirect happened but the appended command did not run.
     Alpha.7 injects both spawn placement and Godmode at the beginning of the
     existing `WorldScript` body, before early returns or `KillScript` paths.
-  - Current run logs prove the redirected autorun MOB is opened, but its
-    commands were inserted before the MOB's own leading initialization delay.
-    Alpha.2 preserves that delay, uses the already initialized `GetLeader()`
-    object for placement, and removes invalid C-style semicolons from the EI
-    script statements. Runtime confirmation of both placement and Godmode is
-    still required.
+  - The final path preserves the MOB's leading initialization delay, uses the
+    initialized `GetLeader()` object, and removes invalid C-style semicolons
+    from EI script statements. User runtime testing confirmed Godmode works.
     ([`c1ea993`](https://github.com/Ilufus/ei-mapper-endurance/commit/c1ea993))
 - [x] Implement the exact-hash Base EI feasibility transport and four-level
   probe ladder. See [the static compatibility record](docs/base-runtime-probe.md).
@@ -406,7 +427,11 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
     each reload completion/failure back to the editor with a 20-second timeout.
   - [ ] Runtime-prove that the verified normal zone-transition controller safely
     unloads and reloads the same staged pair without restarting JMV. Current
-    source is an experimental probe and is not yet considered validated.
+    source has reloaded the primary MOB in testing, but is not considered fully
+    validated until supplemental/collection MOBs also reload exactly once.
+  - [ ] Re-test cross-MOB copied objects during hot reload with alpha.4 or later;
+    alpha.4 fixed the provenance rejection that previously stopped trees copied
+    from `zone1.mob` into `Autozone1cyclopus.mob` from staging.
   - Implementation: [`5011954`](https://github.com/Ilufus/ei-mapper-endurance/commit/5011954).
 - [ ] Preserve position on same-map reload.
   - Capture player position and facing before teardown.
@@ -571,8 +596,10 @@ parts/textures, standing-idle selection, dragon wings, and large-map progress.
   validation, and map-test provider interfaces. ([`b467d87`](https://github.com/Ilufus/ei-mapper-endurance/commit/b467d87))
 - [x] Keep JMV DLL-defined behavior out of the editor process; use a
   fingerprinted isolated runtime provider.
-- [ ] Keep direct launch disabled for Base unless a separate Base provider is
-  explicitly implemented and validated.
+- [x] Keep generalized Base direct launch disabled while exposing only the
+  fingerprinted experimental Base provider. Local testing confirmed exact-hash
+  probe levels 3 and 4; this does not claim support for arbitrary Base
+  executables or other mods.
 
 </details>
 
