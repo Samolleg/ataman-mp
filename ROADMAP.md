@@ -5,7 +5,7 @@ work is ordered from the newest planned minor line to the oldest completed one.
 An item is checked only after its implementation has landed and received the
 stated validation. Completed code should carry a commit, test, or release link.
 
-Current development line: `0.2.0`.
+Current development line: `0.2.1`.
 
 <details open>
 <summary><strong>General wishlist — not assigned to a release</strong></summary>
@@ -51,17 +51,6 @@ Current development line: `0.2.0`.
     four-byte-short trap arrays are consequently present in maps shipped by
     multiple existing mods; it is compatibility with a known historical tool,
     not general acceptance of malformed MOB data.
-- [ ] Define object-aware duplicate-ID validation and repair policy.
-  - Do not assign one severity to every duplicate: duplicated static decorative
-    objects such as bushes may be harmless, while units, logic-bearing objects,
-    or IDs referenced from scripts can be unsafe.
-  - Classify findings using object family, logic/script references, and active
-    runtime profile. Keep uncertain cases visible rather than guessing.
-  - Opening preserves all IDs. Any repair remains an explicit previewed
-    operation that updates only unambiguous structured references and reports
-    ambiguous/script references for manual review.
-  - Decide whether saving unresolved high-risk duplicates requires the same
-    explicit preserve/repair/cancel consent as other known defects.
 - [ ] Stress repeated open/close/save/cancel and abnormal-exit behavior on large
   Base/JMV maps.
 - [ ] Complete the broad game matrix: `drawall`, save/load, unload/reload,
@@ -181,6 +170,34 @@ Save/Load for temporary map instances; active Ctrl+F5 sessions will disable
 those commands instead.
 Publish the first immutable `0.2.0` package after the following runtime contract
 is demonstrated on normal gameplay, dungeon, and briefing maps.
+
+### Critical: structural zone-family NID validation
+
+- [ ] Detect intra-file duplicates and cross-file NID collisions across the
+  complete active zone family before more multi-MOB editing is released.
+  This is critical because the confirmed `zone7.mob` / `Autozone7altar.mob`
+  cross-type collisions break active mod work and correlate strongly with an
+  unchecked game lookup crash and an invisible enemy.
+  - Use `CMobDocument` object snapshots and section provenance, never raw
+    `NewObject` marker boundaries.
+  - Resolve suffixed families such as `zone3obr` using the longest matching
+    registered base-map stem, with numeric boundaries that never mix Zone 1
+    with Zones 10-19.
+  - Report NID, source MOB, object name, section/OBJTYPE, prototype, source
+    path, and incompatible-type severity.
+  - Run debounced read-only validation after import/add/paste/duplicate/direct
+    ID edits and require a fresh whole-family preflight for save/save-as, Test
+    Current Map, export, and release/package operations.
+  - Preserve established base-map IDs. Suggest deterministic unused IDs for
+    newly added or currently edited objects; never silently renumber a base
+    MOB.
+  - Implement repair only as an atomic undoable reference-aware transaction.
+    Update confirmed typed references and refuse automatic repair when script
+    or opaque/raw references remain unresolved.
+  - Regression-test the supplied eight-collision fixture, ordinary intra-file
+    duplicates, Zone 10/11 separation, `zone3obr` ownership, allocation,
+    repair/refusal, undo/redo, failed saves, and byte-identical no-op output.
+  - Detailed design: [structural MOB NID validation plan](docs/research/structural-mob-nid-validation-plan.md).
 
 ### P0: direct-launch stabilization
 
@@ -438,11 +455,25 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
 
 ## 0.2.x: MOB editing workflow and recovery
 
+- [ ] **High priority:** add a fuzzy, parameter-aware outliner filter.
+  - Search object name, NID, type, model, texture, database/prototype name,
+    MOB ownership, and validation state rather than only visible tree labels.
+  - A query such as `unhufe` must return objects whose model is `unhufe`.
+  - Preserve selection and hierarchy context, show match counts, debounce large
+    maps, and keep filtering independent from viewport selection/scrolling.
+- [ ] When opening an MPR while another workspace is loaded, offer to save
+  changed MOB/MPR documents and replace the current workspace in one guarded
+  action instead of only displaying a close-first warning.
+- [ ] Add opt-in Windows file associations for `.mpr`, `.mob`, and
+  `.collection`, with correct single-instance/open-argument behavior and an
+  explicit removal path.
 - [ ] Add periodic autosave with versioned, recoverable backup states.
 - [ ] Add a resizable bottom workflow-log panel with filtering, copy/export, and
   quick access to the full rotated log.
 - [ ] Add phase-aware blocking progress for MOB/MPR save, including
   serialization, validation, backup, and atomic replacement.
+- [ ] Move any remaining blocking MPR/MOB open phases into a cancellable modal
+  progress workflow so large maps never appear to freeze the editor.
 - [ ] Stress large-map edit/undo/redo/save/open/close cycles with scripts,
   model parts, multi-selection, copy/delete, and patrol/look structures.
 - [ ] Finish closed-group coverage proving scripts and all CP1251 text edits
@@ -453,6 +484,9 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
   history when documents unload.
 - [x] Support typed multi-field property copy/paste, including model parts and
   Create Object, with destination compatibility checks.
+- [ ] Allow copying/pasting one selected component of compound property values,
+  especially individual X/Y/Z vector components, while retaining the existing
+  type-compatibility checks.
 - [x] Provide independent internal/external MOB script editing with document-
   owned workspaces, undoable imports, recovery, and configurable editor path.
 - [x] Warn before changing/resetting/deleting object IDs referenced by the
@@ -477,6 +511,10 @@ parts/textures, standing-idle selection, dragon wings, and large-map progress.
 - [ ] Cover every MMP format found in the JMV corpus. Unsupported or malformed
   textures display a diagnostic placeholder with asset, archive, format, and
   failure reason.
+- [ ] Accept explicitly configured ZIP archives as read-only loose resource
+  sources for supplied `.mmp` packs. Index entries without extracting into the
+  game tree, retain deterministic precedence/provenance, reject unsafe paths,
+  and keep RES handling unchanged.
 - [ ] Re-run cold/warm performance acceptance on representative JMV maps and
   keep the post-index target at least 10x faster than original v0.3 where the
   current machine permits it.
@@ -488,6 +526,9 @@ parts/textures, standing-idle selection, dragon wings, and large-map progress.
   - JMV profile scope: armor and ordinary equipped visuals.
   - JMV stretch: 1H+shield, dual 1H, 2H, dual 2H with perk, and 2H+shield with
     the applicable perk.
+- [ ] Select and render a profile-correct standing idle animation for units
+  instead of leaving characters in the null/T pose. Keep corpus correction and
+  missing-animation fallback diagnostic rather than inventing an animation.
 - [ ] Populate prototype/model/texture fields from the active database with
   prefix filtering and manual entry where valid. Warn on missing entries rather
   than silently clearing stored values.
@@ -500,6 +541,8 @@ parts/textures, standing-idle selection, dragon wings, and large-map progress.
 
 ## 0.2.x: MOB diff and validation tools
 
+- [ ] Add a **Swap baseline/candidate** action without reopening the dialog and
+  make all diff-table columns manually resizable with persisted widths.
 - [ ] Add original-versus-current and candidate-save-versus-transaction entry
   points to the existing MOB diff.
 - [ ] Add the read-only 3D perspective overlay.
@@ -599,8 +642,9 @@ an operation safely.
 ## Independent editor workflow and UI
 
 - [x] Open MPR and MOB independently, including MOB-only neutral-grid rendering.
-- [x] Add resizable outliner/property layouts, filtering, recent files,
-  independent shortcuts, and persisted UI state.
+- [x] Add resizable outliner/property layouts, grouped object navigation,
+  recent files, independent shortcuts, and persisted UI state. Full fuzzy
+  parameter filtering remains a high-priority `0.2.x` task.
 - [x] Add model/texture prefix filtering with explicit commit and manual entry.
 - [x] Add configurable undo-history limit, selection undo, atomic multi-object
   actions, and protected document lifecycles.
