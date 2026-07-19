@@ -1,7 +1,8 @@
 #include <QtTest>
 
-#include "../resource_name.h"
-#include "../unit_appearance.h"
+#include "resource_name.h"
+#include "mmp_codec.h"
+#include "unit_appearance.h"
 
 #include <QFile>
 
@@ -19,6 +20,10 @@ private slots:
     void resolvesDatabaseHumanoidSkin();
     void ignoresNonHumanoidDatabaseSkin();
     void resolvesLiveBaseDatabaseWhenProvided();
+    void decodesSparsePnt3WithTrailingTransparency();
+    void preservesLowAlphaPnt3Literal();
+    void treatsOutOfBoundsPnt3MarkerAsLiteral();
+    void rejectsUnalignedPnt3Payload();
 };
 
 namespace {
@@ -148,6 +153,51 @@ void ResourceNameTests::resolvesLiveBaseDatabaseWhenProvided()
              QString("unormaskin_00.mmp"));
     QCOMPARE(ei::humanoidTextureResourceName(skins, "Human Gipath Brigand Boots F1", "unhuma"),
              QString("unhumaskin_04.mmp"));
+}
+
+void ResourceNameTests::decodesSparsePnt3WithTrailingTransparency()
+{
+    QByteArray compressed;
+    appendDword(compressed, 16); // leading transparent bytes
+    compressed.append("\x11\x22\x33\x44", 4); // final literal BGRA pixel
+    QByteArray decoded;
+    QString diagnostic;
+    QVERIFY2(ei::decodePnt3(compressed, 24, &decoded, &diagnostic), qPrintable(diagnostic));
+    QCOMPARE(decoded.size(), 24);
+    QCOMPARE(decoded.mid(16, 4), QByteArray("\x11\x22\x33\x44", 4));
+    QCOMPARE(decoded.left(16), QByteArray(16, '\0'));
+    QCOMPARE(decoded.right(4), QByteArray(4, '\0'));
+}
+
+void ResourceNameTests::treatsOutOfBoundsPnt3MarkerAsLiteral()
+{
+    QByteArray compressed;
+    appendDword(compressed, 32);
+    QByteArray decoded;
+    QString diagnostic;
+    QVERIFY(ei::decodePnt3(compressed, 16, &decoded, &diagnostic));
+    QCOMPARE(decoded.left(4), compressed);
+    QCOMPARE(decoded.right(12), QByteArray(12, '\0'));
+}
+
+void ResourceNameTests::preservesLowAlphaPnt3Literal()
+{
+    QByteArray compressed;
+    appendDword(compressed, 20); // plausible low-alpha BGRA, not a 16-byte run
+    QByteArray decoded;
+    QString diagnostic;
+    QVERIFY(ei::decodePnt3(compressed, 64, &decoded, &diagnostic));
+    QCOMPARE(decoded.left(4), compressed);
+    QCOMPARE(decoded.right(60), QByteArray(60, '\0'));
+}
+
+void ResourceNameTests::rejectsUnalignedPnt3Payload()
+{
+    QByteArray decoded;
+    QString diagnostic;
+    QVERIFY(!ei::decodePnt3(QByteArray("abc", 3), 16, &decoded, &diagnostic));
+    QVERIFY(!diagnostic.isEmpty());
+    QVERIFY(decoded.isEmpty());
 }
 
 QTEST_APPLESS_MAIN(ResourceNameTests)

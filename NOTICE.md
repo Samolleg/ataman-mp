@@ -16,3 +16,8 @@ maintainer.
 The embedded MPR map-name handling incorporates the concept proposed by
 Grabarrz90 in upstream pull request #19, with additional Endurance validation
 and indexed resource-resolution changes.
+
+Character FIG/UV pipeline research was cross-checked against
+[konstvest/ei_figer](https://github.com/konstvest/ei_figer), the GPL-3.0 Blender
+add-on for importing and exporting Evil Islands models. No game or mod assets
+are redistributed with Endurance.

@@ -74,7 +74,7 @@ class ProfileVisualProviderTests : public QObject
 private slots:
     void resolvesDatabaseHumanoidsAcrossFamilies();
     void resolvesHumanoidSkinNumberBeyondRaceModelExamples();
-    void jmvUsesDatabaseNonHumanoidTextureAcrossModelChanges();
+    void jmvPreservesEmbeddedNonHumanoidAppearance();
     void jmvResolvesZombieX4Textures();
     void importedAppearanceNeverFallsBack();
     void basePreservesSingleWeaponBehavior();
@@ -120,18 +120,28 @@ void ProfileVisualProviderTests::resolvesHumanoidSkinNumberBeyondRaceModelExampl
     QCOMPARE(output.value("primaryTexture").toString(), QString("unhumaskin_39_x4.mmp"));
 }
 
-void ProfileVisualProviderTests::jmvUsesDatabaseNonHumanoidTextureAcrossModelChanges()
+void ProfileVisualProviderTests::jmvPreservesEmbeddedNonHumanoidAppearance()
 {
+    auto db = database();
+    ei::SRaceModelDatabaseRecord creature;
+    creature.name = "Ogre"; creature.model = "unmoog2";
+    creature.primaryTextures << "Ogre03";
+    db->raceModels.insert(creature.name.toLower(), creature);
+    ei::SMonsterDatabaseRecord ogre;
+    ogre.name = "Ogre Test"; ogre.baseRace = creature.name; ogre.skinIndex = 0;
+    db->monsters.insert(ogre.name.toLower(), ogre);
     ProfileVisualProviderService service;
-    const auto resolver = service.appearanceResolver("jmv.v1", database());
+    const auto resolver = service.appearanceResolver("jmv.v1", db);
     SCharacterAppearanceRequest request;
-    request.prototype = "Skeleton Test";
-    request.model = "older_skeleton_model";
-    request.primaryTexture = "instance_skeleton_03";
+    request.prototype = ogre.name;
+    request.model = "unmoog1";
+    request.primaryTexture = "ogreblack";
     QJsonObject output;
     QVERIFY(resolver->resolve(request, &output).success);
-    QCOMPARE(output.value("model").toString(), QString("unmosk"));
-    QCOMPARE(output.value("primaryTexture").toString(), QString("skeleton00.mmp"));
+    QCOMPARE(output.value("source").toString(), QString("embeddedMobCreature"));
+    QCOMPARE(output.value("model").toString(), QString("unmoog1"));
+    QCOMPARE(output.value("primaryTexture").toString(), QString("ogreblack"));
+    QVERIFY(output.value("weapons").toArray().isEmpty());
 }
 
 void ProfileVisualProviderTests::jmvResolvesZombieX4Textures()

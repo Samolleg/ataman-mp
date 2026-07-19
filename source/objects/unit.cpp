@@ -199,6 +199,7 @@ void CUnit::refreshTransientVisual()
 
     const QString model = appearance.value("model").toString();
     const QString texture = appearance.value("primaryTexture").toString();
+    const bool databaseEquipmentPlan = appearance.value("source").toString() == "profileDatabase";
     const QStringList assemblyParts = CObjectList::getInstance()->figurePartNames(model);
     QStringList visibleParts;
     // OBJ_BODYPARTS is the instance component-enable mask regardless of where
@@ -207,18 +208,18 @@ void CUnit::refreshTransientVisual()
     if(!m_bodyParts.isEmpty())
     {
         for(const QString& part : m_bodyParts)
-            if(m_bImport || !optionalEquipmentPart(part))
+            if(!databaseEquipmentPlan || !optionalEquipmentPart(part))
                 visibleParts.append(part);
     }
     else
     {
         for(const QString& part : assemblyParts)
-            if(!optionalEquipmentPart(part))
+            if(!databaseEquipmentPlan || !optionalEquipmentPart(part))
                 visibleParts.append(part);
     }
 
     QVector3D complexion = m_complection;
-    if(!m_bImport)
+    if(databaseEquipmentPlan)
     {
         const QJsonArray values = appearance.value("complexion").toArray();
         if(values.size() == 3)
@@ -240,8 +241,10 @@ void CUnit::refreshTransientVisual()
     equipmentRequest.model = model;
     equipmentRequest.assemblyParts = assemblyParts;
     equipmentRequest.dataSource = appearanceRequest.dataSource;
-    equipmentRequest.armor = m_bImport ? m_aArmor : jsonStringList(appearance, "armor");
-    equipmentRequest.weapons = m_bImport ? m_aWeapon : jsonStringList(appearance, "weapons");
+    equipmentRequest.armor = m_bImport ? m_aArmor
+        : (databaseEquipmentPlan ? jsonStringList(appearance, "armor") : QStringList());
+    equipmentRequest.weapons = m_bImport ? m_aWeapon
+        : (databaseEquipmentPlan ? jsonStringList(appearance, "weapons") : QStringList());
     QJsonObject equipment;
     const SRuntimeProviderResult equipmentResult = equipmentResolver->resolve(equipmentRequest, &equipment);
     for(const QString& replaced : jsonStringList(equipment, "replacedParts"))

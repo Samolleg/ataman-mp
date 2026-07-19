@@ -49,9 +49,10 @@ relational rows from Base. Archives whose names indicate backup, original,
 unmodified, or old content are not candidates.
 
 JMV visual resolution owns its corpus-specific exceptions. Numeric human and
-orc skin values select numbered face resources. Non-humanoid JMV skin values
-are not RaceModels-list indices; when the database-selected model agrees with
-the MOB model, the provider uses the MOB's already-resolved texture token.
+orc skin values select numbered face resources. Database appearance/equipment
+substitution is limited to known wearable humanoid assemblies. Creature actors
+retain their MOB-resolved model, texture, component mask, and integral parts;
+their numeric database skin values are not RaceModels-list indices.
 Equipment textures are derived from item slot/type, TTI/TTI2, and material
 code, then bound per assembly part. Base and future providers do not inherit
 these rules implicitly.

@@ -1,4 +1,5 @@
 #include "resourcemanager.h"
+#include "mmp_codec.h"
 #include <QDebug>
 #include <QMessageBox>
 #include <QtMath>
@@ -631,38 +632,21 @@ SColor getPixelData(QDataStream &stream, uint pixelSize, SMmpColor& color)
     return colPix;
 }
 
-void decompressPnt3(QImage& image, QDataStream& data, uint mipCount)
+bool decompressPnt3(QImage& image, const QByteArray& data, uint compressedSize,
+                    QString* diagnostic)
 {
-    const uint offset = 76;
-    QByteArray destination;
-
-    uint src = 0;
-    uint n = 0;
-    uint v;
-    while(src < mipCount)
+    const int offset = 76;
+    if(compressedSize > uint(qMax(0, data.size() - offset)))
     {
-        data.device()->seek(offset + src);
-        data >> v;
-        src += 4;
-
-        if(v > 1000000 || v == 0)
-        {
-            n += 1;
-        }
-        else
-        {
-            data.device()->seek(offset + (src - (1 + n) * 4));
-            destination.append(data.device()->read(src-4));
-            for(uint i(0); i< v; i++)
-                destination.append('\x00');
-            n = 0;
-        }
+        if(diagnostic) *diagnostic = "PNT3 compressed size exceeds its MMP payload.";
+        return false;
     }
+    QByteArray destination;
+    if(!ei::decodePnt3(data.mid(offset, int(compressedSize)),
+                       image.width() * image.height() * 4, &destination, diagnostic))
+        return false;
 
-    data.device()->seek(offset + (src - n * 4));
-    destination.append(data.device()->read(src));
-
-    n = 0;
+    int n = 0;
     for(int h(0); h < image.height(); ++h)
     {
         for(int w(0); w < image.width(); ++w)
@@ -678,6 +662,7 @@ void decompressPnt3(QImage& image, QDataStream& data, uint mipCount)
     matrix.translate(center.x(), center.y());
     matrix.rotate(270);
     image = image.transformed(matrix).mirrored();
+    return true;
 }
 
 
@@ -783,9 +768,17 @@ void CTextureList::parse(QByteArray& data, const QString& name)
     }
     case ETextureFormat::eMMP_PNT3    :
     {
-        // very slow. 50-100ms
+        // JMV equipment/face atlases predominantly use sparse PNT3. Shipped
+        // payloads omit trailing transparent pixels; decode into an exact,
+        // zero-filled image instead of reading beyond the RLE output.
         QImage img(header.m_width, header.m_height, QImage::Format_RGBA64);
-        decompressPnt3(img, stream, uint(header.m_mipcount));
+        QString diagnostic;
+        if(!decompressPnt3(img, data, uint(header.m_mipcount), &diagnostic))
+        {
+            ei::log(eLogWarning, "Invalid PNT3 texture " + name + ": " + diagnostic);
+            delete texture;
+            return;
+        }
         texture->setData(img);
         break;
     }

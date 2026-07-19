@@ -20,9 +20,10 @@ edit `database.res`, JMV/Base archives, live MOBs, maps, or the game install.
    substitution.
 5. Bind an unknown provider ID in a disposable profile and confirm database,
    dropdown, appearance, and equipment resolution disable with diagnostics.
-6. JMV non-humanoids: open `zone1.mob` ID 76 and `zone9.mob` IDs 1503 and
-   2344. Confirm the provider selects the database race model but retains the
-   compatible MOB-resolved texture token; none may become `cannotdisplay`.
+6. JMV non-humanoids: validate goblins, ogres, lizards, dragons, and animals.
+   Confirm the provider retains each MOB-resolved model, texture, component
+   mask, and integral weapon part; none may become `cannotdisplay` merely
+   because its database race points at another creature variant.
 
 ## Equipment layouts
 
@@ -68,6 +69,9 @@ edit `database.res`, JMV/Base archives, live MOBs, maps, or the game install.
    hand-picked figures/textures subset. The catalog must discover JMV face,
    armor, weapon, and material atlases such as `faces.res`, `UnhumaBT.res`,
    `UnhumaPL.res`, `UnhumaSW.res`, and `UnhumaMT.res` read-only.
+5. Validate PNT3 equipment atlases with large transparent tails. Armor, weapon,
+   and TTI-0 anatomical components must not show stripes, random alpha, or
+   pixels from outside the decoded buffer.
 
 Default-idle animation validation is specified with the animation follow-up and
 is not a prerequisite for this equipment integration.

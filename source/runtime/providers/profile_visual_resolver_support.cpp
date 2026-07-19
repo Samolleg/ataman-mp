@@ -60,6 +60,17 @@ bool numberedZombieSkin(const QString& model)
     return models.contains(model.trimmed().toLower());
 }
 
+bool databaseEquippedHumanoid(const QString& model)
+{
+    // Corpus-backed wearable/equipped actor assemblies. Creature actors keep
+    // their already-resolved MOB assembly, texture, and integral parts.
+    static const QSet<QString> models = {
+        "unhuma", "unhufe", "unorma", "unorfe", "unhusk", "unhuzm", "unhuzf",
+        "unmosk", "unmoud", "unmozo", "unmozo0"
+    };
+    return models.contains(model.trimmed().toLower());
+}
+
 QString jmvMonsterTextureName(const SCharacterAppearanceRequest& request, const QString& model,
                               const QStringList& primary, int skinIndex)
 {
@@ -304,6 +315,25 @@ SRuntimeProviderResult resolveDatabaseAppearance(
     const auto race = database->raceModels.constFind(monster->baseRace.trimmed().toLower());
     if(race == database->raceModels.constEnd())
         return failure("appearance.race.missing", "Monster base-race link is absent from RaceModels.");
+    // Normal non-humanoids are not imports, but their MOB graphical fields are
+    // authoritative. Applying JMV RaceModels here loses creature textures and
+    // integral weapons when a prototype points at a different model variant.
+    if(!databaseEquippedHumanoid(race->model))
+    {
+        if(request.model.trimmed().isEmpty() || request.primaryTexture.trimmed().isEmpty())
+            return failure("appearance.creature.incomplete",
+                "Non-humanoid MOB appearance is incomplete; database substitution is forbidden.");
+        appearance->insert("source", "embeddedMobCreature");
+        appearance->insert("model", request.model);
+        appearance->insert("primaryTexture", request.primaryTexture);
+        appearance->insert("secondaryTexture", request.secondaryTexture);
+        appearance->insert("bodyParts", QJsonArray::fromStringList(request.bodyParts));
+        appearance->insert("armor", QJsonArray());
+        appearance->insert("weapons", QJsonArray());
+        SRuntimeProviderResult result; result.success = true;
+        result.code = "appearance.creature.resolved";
+        return result;
+    }
     const QStringList primary = expandedList(race->primaryTextures);
     const QString primaryTexture = jmv
         ? jmvMonsterTextureName(request, race->model, primary, monster->skinIndex)
