@@ -35,7 +35,6 @@ public:
 
     void initResource();
     void refreshConfiguredSources();
-
 private:
     CObjectList();
     ~CObjectList();
@@ -123,6 +122,9 @@ public:
     void attachSettings(CSettings* pSettings) {m_pSettings = pSettings;};
     void initResource();
     void refreshConfiguredSources();
+    // Drop map-local composed humanoid atlases while an OpenGL context is
+    // current. Ordinary resource textures remain shared across maps.
+    void clearTransientVisualCache();
     const QList<QString>& textureList() const {return m_arrCellComboBox;}
     int extractMmpToDxt1(QVector<QImage>& outArrImage, const QStringList& inArrTextureName);
     int extractMmpToDxt1(QImage& outImage, const QString textureName);

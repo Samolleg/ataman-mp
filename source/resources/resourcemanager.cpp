@@ -1294,6 +1294,27 @@ void CTextureList::refreshConfiguredSources()
     loadTexture(empty);
 }
 
+void CTextureList::clearTransientVisualCache()
+{
+    m_aTextureImages.clear();
+    for(auto it = m_aTexture.begin(); it != m_aTexture.end();)
+    {
+        if(!it.key().startsWith("layers|"))
+        {
+            ++it;
+            continue;
+        }
+        QOpenGLTexture* texture = it.value();
+        it = m_aTexture.erase(it);
+        if(texture)
+        {
+            if(texture->isCreated())
+                texture->destroy();
+            delete texture;
+        }
+    }
+}
+
 
 bool isDIfferent(const QString &value)
 {

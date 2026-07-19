@@ -28,9 +28,10 @@ public:
                                    QJsonObject* equipment) const override
     {
         SJmvEquipmentGates gates;
-        // These four layouts are established in the current JMV corpus.
-        // dualTwoHand and twoHandShield remain explicitly disabled until the
-        // perk/addon authorization source is proven.
+        // Database rows can list paired TypeID 15 staffs, but the corresponding
+        // dual-two-hand layout requires the TitanGrip perk. The authoritative
+        // per-unit Lua/perk source is not resolved here, so dual-two-hand and
+        // two-hand+shield remain diagnostic-only instead of bypassing gameplay.
         return resolveEquipmentLayout(providerId(), true, gates, m_database, request, equipment);
     }
 private:

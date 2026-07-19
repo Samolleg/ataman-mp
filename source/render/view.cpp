@@ -1126,7 +1126,12 @@ void CView::unloadActiveMob()
     if(!m_aMob.isEmpty())
         changeCurrentMob(m_aMob.back());
     else
+    {
         changeCurrentMob(nullptr);
+        makeCurrent();
+        CTextureList::getInstance()->clearTransientVisualCache();
+        doneCurrent();
+    }
 
     ei::log(eLogInfo, "Mob unloaded");
     viewParameters();
@@ -1300,7 +1305,12 @@ void CView::unloadMob(QString mobName)
     if(!m_aMob.isEmpty())
         changeCurrentMob(m_aMob.back());
     else
+    {
         changeCurrentMob(nullptr);
+        makeCurrent();
+        CTextureList::getInstance()->clearTransientVisualCache();
+        doneCurrent();
+    }
 
     ei::log(eLogInfo, "Mob unloaded");
     viewParameters();

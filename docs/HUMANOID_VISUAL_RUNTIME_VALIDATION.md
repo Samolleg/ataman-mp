@@ -32,7 +32,9 @@ edit `database.res`, JMV/Base archives, live MOBs, maps, or the game install.
 2. JMV: independently validate ordinary, 1H+shield, dual 1H, and single 2H on
    models that contain the requested TTI components.
 3. JMV: request dual 2H and 2H+shield. Confirm both remain diagnostic-only and
-   display placeholders; no inferred perk authorization is accepted.
+   display placeholders. A paired TypeID 15 database row (for example `zone18`
+   ID 47533) does not prove that the placed unit has the required `TitanGrip`
+   perk; no inferred Lua/perk authorization is accepted.
 4. Use an item whose TTI component is absent from the selected assembly and an
    unbalanced modifier string. Confirm the original field remains unchanged and
    a structured diagnostic/placeholder is shown.
@@ -81,6 +83,19 @@ edit `database.res`, JMV/Base archives, live MOBs, maps, or the game install.
 12. Equip a helmet on a unit with database hair. Confirm the helmet component
     is visible and the `hr.NN` component is omitted; removing the helmet must
     restore the selected hair.
+13. Validate an explicit JMV cross-family material suffix, such as the Metal
+    `hmsh`/`hmgl`/`hmpt`/`hmbt` prototypes equipped with the Hide-family
+    `dragon red` material by `Human Kania NPC Sorceress M10` (`bz8k` ID
+    1000292348). The suffix is a database-selected texture code and must not be
+    rejected merely because gameplay material families differ. Missing material
+    rows or empty texture codes must still diagnose and produce placeholders.
+14. Validate ordinary staff classification with `cz19h` ID 1600 (paired
+    TypeID 11 agility staffs) and ID 8888 (TypeID 11 staff plus shield). Confirm
+    these use dual-one-hand and one-hand+shield respectively, while TypeID 15
+    remains the dedicated two-handed staff family.
+15. Compare actor body proportions before and after database visual resolution.
+    The placed MOB instance's complexion/constitution is authoritative; the
+    Monster row is a prototype default and must not thicken every instance.
 
 ## UI and performance sanity
 
@@ -120,6 +135,26 @@ edit `database.res`, JMV/Base archives, live MOBs, maps, or the game install.
     components. Move an item to an equipped armor/weapon slot and confirm it is
     rendered normally when the profile supplies compatible geometry and a
     material texture.
+11. Switch repeatedly between dense maps after their visual preload completes.
+    Confirm map-local composed `layers|...` atlases are released when the last
+    MOB unloads, ordinary archive textures remain cached, and switching does not
+    crash or accumulate one full decoded body atlas per prior unit.
+
+## Known unresolved validation probes
+
+- `bz8k` ID 919536 and `zone3obr` ID 253 still need a corpus-proven explanation
+  for skin showing through or being sampled by lower clothing/shoulder meshes.
+  Do not apply a global UV flip: faces and many humanoids already validate with
+  the stored `.x4` UV convention.
+- JMV `UndeadF16`/`UndeadF17` currently resolve the database-declared
+  `UndeadMale -> unmozo0` model, but the available RaceModels texture list only
+  establishes `vurdalak_00` through `_03`, not a synthetic `vurdalak_29`, and
+  that creature assembly lacks the requested humanoid equipment components.
+  Keep this diagnostic/fail-closed until the intended race/model/skin mapping is
+  established from the database, addon code, or developer documentation.
+- Shield placement follows the assembly's `lh2.shieldNN -> lh2.shield00 -> lh2`
+  link hierarchy. Any offset correction must be derived from the FIG/LNK rest
+  transforms or animation channels, not a per-character coordinate adjustment.
 
 ## Corpus-established JMV equipment atlas mapping
 

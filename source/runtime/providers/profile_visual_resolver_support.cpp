@@ -151,10 +151,13 @@ enum class EWeaponClass { OneHand, Ranged, Shield, TwoHand, Unknown };
 
 EWeaponClass weaponClass(int typeId)
 {
-    if(typeId >= 0 && typeId <= 4) return EWeaponClass::OneHand;
+    // JMV keeps the ordinary staff (TypeID 11) in a hand-sized family. Its
+    // database contains staff+shield and paired-staff actors; only TypeID 15
+    // is the dedicated two-handed staff family.
+    if((typeId >= 0 && typeId <= 4) || typeId == 11) return EWeaponClass::OneHand;
     if(typeId == 5 || typeId == 6) return EWeaponClass::Ranged;
     if(typeId == 9) return EWeaponClass::Shield;
-    if(typeId >= 10 && typeId <= 15) return EWeaponClass::TwoHand;
+    if(typeId == 10 || (typeId >= 12 && typeId <= 15)) return EWeaponClass::TwoHand;
     return EWeaponClass::Unknown;
 }
 
@@ -567,14 +570,21 @@ SRuntimeProviderResult resolveEquipmentLayout(
         const QString materialName = itemMaterial(reference);
         const auto material = database->materialRecords.constFind(materialName);
         if(materialName.isEmpty() || material == database->materialRecords.constEnd()
-                || material->type.compare(item->materialType, Qt::CaseInsensitive) != 0)
+                || material->code.trimmed().isEmpty())
         {
             placeholders.append(reference);
-            diagnostics.append(reference + ": material is absent or incompatible with armor material type "
-                               + item->materialType);
+            diagnostics.append(reference + ": material is absent or has no texture code");
         }
         else
         {
+            // Material.Type describes gameplay/stat families, not a strict
+            // rendering compatibility constraint. JMV deliberately equips
+            // Metal prototypes with Hide materials (for example hmsh.dragon
+            // red) and ships the corresponding .dr texture atlases.
+            if(material->type.compare(item->materialType, Qt::CaseInsensitive) != 0)
+                diagnostics.append(reference + ": material type " + material->type
+                                   + " differs from item type " + item->materialType
+                                   + "; using the explicit database material texture code");
             const QString texture = equipmentTextureName(request.model, item->type, item->typeId,
                 item->textureType1, item->textureType2, material->code, false);
             if(texture.isEmpty())
@@ -692,14 +702,17 @@ SRuntimeProviderResult resolveEquipmentLayout(
             const QString materialName = itemMaterial(weapon.reference);
             const auto material = database->materialRecords.constFind(materialName);
             if(materialName.isEmpty() || material == database->materialRecords.constEnd()
-                    || material->type.compare(weapon.item.materialType, Qt::CaseInsensitive) != 0)
+                    || material->code.trimmed().isEmpty())
             {
                 placeholders.append(weapon.reference);
-                diagnostics.append(weapon.reference + ": material is absent or incompatible with weapon material type "
-                                   + weapon.item.materialType);
+                diagnostics.append(weapon.reference + ": material is absent or has no texture code");
             }
             else
             {
+                if(material->type.compare(weapon.item.materialType, Qt::CaseInsensitive) != 0)
+                    diagnostics.append(weapon.reference + ": material type " + material->type
+                                       + " differs from item type " + weapon.item.materialType
+                                       + "; using the explicit database material texture code");
                 const QString texture = equipmentTextureName(request.model, weapon.item.type,
                     weapon.item.typeId, weapon.item.textureType1, weapon.item.textureType2,
                     material->code, true);

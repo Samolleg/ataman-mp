@@ -52,6 +52,7 @@ QSharedPointer<ei::SProfileDatabaseSnapshot> database()
     db->items.insert("great pike", item("great pike", "weapons", 10, 2));
     db->items.insert("great hammer", item("great hammer", "weapons", 14, 3));
     db->items.insert("great staff", item("great staff", "weapons", 15, 1));
+    db->items.insert("agility staff", item("agility staff", "weapons", 11, 2));
     ei::SMaterialDatabaseRecord iron;
     iron.name = "iron"; iron.type = "Metal"; iron.code = "ir"; iron.id = 7;
     db->materialRecords.insert("iron", iron);
@@ -61,6 +62,10 @@ QSharedPointer<ei::SProfileDatabaseSnapshot> database()
     ei::SMaterialDatabaseRecord silver;
     silver.name = "silver"; silver.type = "Metal"; silver.code = "sv"; silver.id = 9;
     db->materialRecords.insert("silver", silver);
+    ei::SMaterialDatabaseRecord dragonRed;
+    dragonRed.name = "dragon red"; dragonRed.type = "Hide"; dragonRed.code = "dr";
+    dragonRed.id = 10;
+    db->materialRecords.insert("dragon red", dragonRed);
     ei::SMonsterDatabaseRecord extendedSkin;
     extendedSkin.name = "Human Extended Skin";
     extendedSkin.baseRace = "Human Male";
@@ -94,6 +99,7 @@ private slots:
     void jmvLayoutsAreIndependentlyGated();
     void validatesAssemblyPartsWithPlaceholders();
     void armorUsesSlotsAndMaterialTextureResources();
+    void jmvExplicitMaterialSuffixCanCrossGameplayMaterialFamilies();
     void jmvTopArmorWinsAvailableLowerLayerOverlaps();
     void jmvMissingTopOverlapRetainsLowerArmor();
     void jmvMissingExactTopPartsAreNotSynthesized();
@@ -277,6 +283,7 @@ void ProfileVisualProviderTests::jmvLayoutsAreIndependentlyGated()
     struct Case { QStringList weapons; QString layout; bool gated; };
     const QVector<Case> cases = {
         {{"sword.iron", "shield.iron"}, "oneHandShield", false},
+        {{"agility staff.iron", "shield.iron"}, "oneHandShield", false},
         {{"sword.iron", "axe.iron"}, "dualOneHand", false},
         {{"great sword.iron"}, "singleTwoHand", false},
         {{"great sword.iron", "great axe.iron"}, "dualTwoHand", true},
@@ -285,8 +292,9 @@ void ProfileVisualProviderTests::jmvLayoutsAreIndependentlyGated()
     for(const Case& test : cases)
     {
         SEquipmentLayoutRequest request; request.model = "unhuma"; request.weapons = test.weapons;
-        request.assemblyParts << "rh3.sword01" << "lh3.axe02" << "lh2.shield04"
-                              << "rh3.dsword01" << "rh3.daxe03";
+        request.assemblyParts << "rh3.sword01" << "rh3.staff02"
+                              << "lh3.axe02" << "lh2.shield04"
+                              << "rh3.dsword01" << "rh3.daxe03" << "lh3.daxe03";
         QJsonObject output; resolver->resolve(request, &output);
         QCOMPARE(output.value("layout").toString(), test.layout);
         QCOMPARE(!output.value("placeholders").toArray().isEmpty(), test.gated);
@@ -319,6 +327,28 @@ void ProfileVisualProviderTests::armorUsesSlotsAndMaterialTextureResources()
     QCOMPARE(jsonStrings(output, "bodyTextureLayers"),
              QStringList({"unhumash_12.le.0.x4.mmp"}));
     QVERIFY(output.value("componentTextures").toObject().isEmpty());
+}
+
+void ProfileVisualProviderTests::jmvExplicitMaterialSuffixCanCrossGameplayMaterialFamilies()
+{
+    auto db = database();
+    ei::SItemDatabaseRecord shirt = item("metal shirt", "armor", 3, 14);
+    shirt.type = "shirt";
+    shirt.materialType = "Metal";
+    db->items.insert("metal shirt", shirt);
+
+    ProfileVisualProviderService service;
+    const auto resolver = service.equipmentResolver("jmv.v1", db);
+    SEquipmentLayoutRequest request;
+    request.model = "unhufe";
+    request.armor << "metal shirt.dragon red";
+    request.assemblyParts << "lh1.armor14" << "rh1.armor14";
+    QJsonObject output;
+    QVERIFY(resolver->resolve(request, &output).success);
+    QCOMPARE(jsonStrings(output, "bodyTextureLayers"),
+             QStringList({"unhumash_14.dr.0.x4.mmp"}));
+    QVERIFY(jsonStrings(output, "placeholders").isEmpty());
+    QVERIFY(jsonStrings(output, "diagnostics").first().contains("explicit database"));
 }
 
 void ProfileVisualProviderTests::jmvTopArmorWinsAvailableLowerLayerOverlaps()

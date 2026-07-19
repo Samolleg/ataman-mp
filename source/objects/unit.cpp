@@ -239,10 +239,9 @@ void CUnit::refreshTransientVisual()
     QVector3D complexion = m_complection;
     if(databaseEquipmentPlan)
     {
-        const QJsonArray values = appearance.value("complexion").toArray();
-        if(values.size() == 3)
-            complexion = QVector3D(float(values[0].toDouble(1.0)), float(values[1].toDouble(1.0)),
-                                   float(values[2].toDouble(1.0)));
+        // Constitution/complection is serialized per MOB instance and is the
+        // actor's actual body shape. Monster database values are prototype
+        // defaults, not a reason to overwrite an already placed unit.
         const int hair = appearance.value("hairIndex").toInt(-1);
         if(hair >= 0)
         {
