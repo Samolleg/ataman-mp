@@ -90,6 +90,42 @@ QString jmvMonsterTextureName(const SCharacterAppearanceRequest& request, const 
     if(skinIndex >= 0 && skinIndex < primary.size())
         return textureName(model, primary.at(skinIndex));
 
+    // Some JMV RaceModels rows contain representative members of a numbered
+    // texture family rather than an exhaustive list. Derive only when every
+    // listed member proves a single sequential family (for example
+    // vurdalak_00.x4 ... vurdalak_03.x4); otherwise fail closed below.
+    if(skinIndex >= 0 && !primary.isEmpty())
+    {
+        static const QRegularExpression numberedFamily("^(.*?)([0-9]+)(\\.x[0-9]+)?(?:\\.mmp)?$");
+        QString prefix, suffix;
+        int width = 0;
+        bool sequential = true;
+        for(int index = 0; index < primary.size(); ++index)
+        {
+            const QRegularExpressionMatch match = numberedFamily.match(primary.at(index).trimmed());
+            if(!match.hasMatch() || match.captured(2).toInt() != index)
+            {
+                sequential = false;
+                break;
+            }
+            if(index == 0)
+            {
+                prefix = match.captured(1); suffix = match.captured(3);
+                width = match.captured(2).size();
+            }
+            else if(match.captured(1).compare(prefix, Qt::CaseInsensitive) != 0
+                    || match.captured(3).compare(suffix, Qt::CaseInsensitive) != 0
+                    || match.captured(2).size() != width)
+            {
+                sequential = false;
+                break;
+            }
+        }
+        if(sequential)
+            return textureName(model, prefix
+                + QString("%1").arg(skinIndex, width, 10, QChar('0')) + suffix);
+    }
+
     // JMV's non-humanoid numeric Graphics Data Skin Index is not an index into
     // RaceModels.FLD31 (GoblinSentryF2 is 91 while the race row has two names).
     // The MOB stores the already-resolved graphical token. It is safe to use
@@ -552,7 +588,7 @@ SRuntimeProviderResult resolveEquipmentLayout(
             else
                 bodyTextureLayers.append(texture);
         }
-        if(item->textureType1 > 0)
+        if(item->textureType1 > 0 && item->type.compare("helm", Qt::CaseInsensitive) != 0)
             for(const QString& component : matched)
             {
                 const int separator = component.indexOf(".armor", 0, Qt::CaseInsensitive);

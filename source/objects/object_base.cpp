@@ -537,6 +537,12 @@ void CObjectBase::applyTransientVisual(const QString& modelName, const QString& 
     for(auto it = partTextureNames.constBegin(); it != partTextureNames.constEnd(); ++it)
         m_partTextures.insert(it.key().toLower(),
             CTextureList::getInstance()->texture(it.value(), modelName));
+    if(!bodyTextureLayers.isEmpty())
+        for(const QString& partName : visibleParts)
+            if(ei::usesUnlayeredHumanoidTexture(partName)
+                    && !m_partTextures.contains(partName.toLower()))
+                m_partTextures.insert(partName.toLower(),
+                    CTextureList::getInstance()->texture(textureName, modelName));
     m_bboxDirty = true;
     for(CPart* part : m_aPart)
         delete part;
@@ -549,7 +555,8 @@ void CObjectBase::applyTransientVisual(const QString& modelName, const QString& 
     m_pFigure->getVertexData(m_aPart, renderComplexion, parts);
     for(CPart* part : m_aPart)
     {
-        const QString partTexture = partTextureNames.value(part->name(),
+        const QString partTexture = ei::usesUnlayeredHumanoidTexture(part->name())
+                && !bodyTextureLayers.isEmpty() ? textureName : partTextureNames.value(part->name(),
             part->textureNumber() == 2 && !secondaryTextureName.trimmed().isEmpty()
                 ? secondaryTextureName : textureName);
         part->setTextureUvScale(ei::textureUvScale(partTexture));

@@ -84,6 +84,7 @@ class ProfileVisualProviderTests : public QObject
 private slots:
     void resolvesDatabaseHumanoidsAcrossFamilies();
     void resolvesHumanoidSkinNumberBeyondRaceModelExamples();
+    void jmvDerivesProvenNumberedTextureFamily();
     void jmvPreservesEmbeddedNonHumanoidAppearance();
     void jmvHidesGoblinSlingWhenExplicitWeaponIsEnabled();
     void jmvResolvesZombieX4Textures();
@@ -140,6 +141,24 @@ void ProfileVisualProviderTests::resolvesHumanoidSkinNumberBeyondRaceModelExampl
     QJsonObject output;
     QVERIFY(resolver->resolve(request, &output).success);
     QCOMPARE(output.value("primaryTexture").toString(), QString("unhumaskin_39_x4.mmp"));
+}
+
+void ProfileVisualProviderTests::jmvDerivesProvenNumberedTextureFamily()
+{
+    auto db = database();
+    ei::SRaceModelDatabaseRecord race;
+    race.name = "UndeadMale"; race.model = "unmozo0";
+    race.primaryTextures << "vurdalak_00.x4,vurdalak_01.x4,vurdalak_02.x4,vurdalak_03.x4";
+    db->raceModels.insert(race.name.toLower(), race);
+    ei::SMonsterDatabaseRecord monster;
+    monster.name = "UndeadF16"; monster.baseRace = race.name; monster.skinIndex = 29;
+    db->monsters.insert(monster.name.toLower(), monster);
+    ProfileVisualProviderService service;
+    const auto resolver = service.appearanceResolver("jmv.v1", db);
+    SCharacterAppearanceRequest request; request.prototype = monster.name;
+    QJsonObject output;
+    QVERIFY(resolver->resolve(request, &output).success);
+    QCOMPARE(output.value("primaryTexture").toString(), QString("vurdalak_29.x4.mmp"));
 }
 
 void ProfileVisualProviderTests::jmvPreservesEmbeddedNonHumanoidAppearance()
@@ -521,7 +540,7 @@ void ProfileVisualProviderTests::helmetAddsDatabaseGeometryAndAtlas()
     QJsonObject output;
     QVERIFY(resolver->resolve(request, &output).success);
     QCOMPARE(jsonStrings(output, "components"), QStringList({"hd.armor08"}));
-    QCOMPARE(jsonStrings(output, "replacedParts"), QStringList({"hd"}));
+    QVERIFY(jsonStrings(output, "replacedParts").isEmpty());
     QVERIFY(output.value("hidesHair").toBool());
     QCOMPARE(output.value("componentTextures").toObject().value("hd.armor08").toString(),
              QString("unhumahl_08.ir.0.x2.mmp"));

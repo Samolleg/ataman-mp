@@ -26,6 +26,7 @@ private slots:
     void treatsOutOfBoundsPnt3MarkerAsLiteral();
     void rejectsUnalignedPnt3Payload();
     void compositesTransparentArmorOverBodyAtlas();
+    void keepsFaceAndHairOnSkinAtlas();
 };
 
 namespace {
@@ -226,6 +227,14 @@ void ResourceNameTests::compositesTransparentArmorOverBodyAtlas()
              qPrintable(diagnostic));
     QCOMPARE(composite.pixelColor(0, 0), body.pixelColor(0, 0));
     QCOMPARE(composite.pixelColor(1, 0), armor.pixelColor(1, 0));
+}
+
+void ResourceNameTests::keepsFaceAndHairOnSkinAtlas()
+{
+    QVERIFY(ei::usesUnlayeredHumanoidTexture("hd"));
+    QVERIFY(ei::usesUnlayeredHumanoidTexture("HR.03"));
+    QVERIFY(!ei::usesUnlayeredHumanoidTexture("hd.armor05"));
+    QVERIFY(!ei::usesUnlayeredHumanoidTexture("bd.armor05"));
 }
 
 QTEST_APPLESS_MAIN(ResourceNameTests)

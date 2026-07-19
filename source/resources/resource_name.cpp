@@ -39,6 +39,15 @@ float textureUvScale(const QString& textureName)
     return 1.0f;
 }
 
+bool usesUnlayeredHumanoidTexture(const QString& partName)
+{
+    const QString normalized = partName.trimmed().toLower();
+    // Clothing/armor atlases share body UV space, but the face and selected
+    // hair remain sourced from the profile skin atlas. Applying the composed
+    // clothing atlas to these components can paint pants/armor over a face.
+    return normalized == "hd" || normalized.startsWith("hr.");
+}
+
 QString textureCacheKey(const QString& textureName, const QString& modelName)
 {
     const QString texture = normalizedTextureName(textureName);
