@@ -48,10 +48,10 @@ edit `database.res`, JMV/Base archives, live MOBs, maps, or the game install.
    model, slot/type, TTI, TTI2, and material code. For example, a human boot
    with TTI 1 and `ogre leather` (`lo`) resolves the shipped
    `unhumabt_01.lo.0.x4.mmp` family rather than the face/skin texture. TTI and
-   TTI2 use the database values directly for armor. Weapon FIG components are
-   zero-based, while the corresponding weapon MMP filename is one-based
-   (`rh3.sword00` uses `UnhumaSW_01...`). TTI 0 armor keeps the base anatomical
-   component and applies its `_00` equipment texture.
+   TTI2 use the database values directly. Weapon FIG components and MMP
+   filenames use the same literal TTI (`rh3.sword01` uses
+   `UnhumaSW_01...`). TTI 0 armor keeps the base anatomical component and
+   applies its `_00` equipment texture.
 9. Confirm female humans, male/female orcs, and skeletons resolve equipment
    textures from the shared `unhuma` equipment atlases. Their face/skin atlas
    remains model-specific. Validate JMV `zone1.mob` IDs 203, 221, and 224;
@@ -86,6 +86,15 @@ edit `database.res`, JMV/Base archives, live MOBs, maps, or the game install.
    base from the database-selected assembly. Their embedded MOB part mask is
    not reused after a race/model substitution. Imported units continue to use
    the embedded mask exactly.
+9. Equip different weapon families while keeping the same gloves. The ordinary
+   or armor-selected `lh3`/`rh3` hand geometry must remain unchanged. Optional
+   `base*`/`l.base*` assembly variants must not appear or replace glove parts;
+   only the resolved weapon geometry is added.
+10. Populate quick, quest, and loot inventory fields with valid items. Confirm
+    they remain available to dropdowns and validation but add no avatar render
+    components. Move an item to an equipped armor/weapon slot and confirm it is
+    rendered normally when the profile supplies compatible geometry and a
+    material texture.
 
 ## Corpus-established JMV equipment atlas mapping
 
@@ -94,9 +103,12 @@ edit `database.res`, JMV/Base archives, live MOBs, maps, or the game install.
 - 2H: pike `TP`, sword `TS`, axe `TA`, hammer `TH`, staff `TF`.
 - Helmets use `HL`; `UnhumaMT` contains generic `materialNNNN` textures and is
   not the shield family.
-- JMV material rows `silver` (`sv`) and `gold` (`gd`) have no matching wearable
-  or weapon atlas members in the audited Base/JMV resource set. Do not invent a
-  fallback mapping without provider or game-developer evidence.
+- Equipment materials are profile-extensible and slot-driven. An equipped
+  silver (`sv`) or gold (`gd`) item must render if its profile supplies the
+  corresponding atlas member; a missing member produces a diagnostic rather
+  than an alias to another material. The audited JMV corpus currently contains
+  no equipped `sv`/`gd` examples or matching equipment atlases. Quick items are
+  never rendered on gameplay avatars regardless of material.
 
 Default-idle animation validation is specified with the animation follow-up and
 is not a prerequisite for this equipment integration.

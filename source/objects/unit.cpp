@@ -145,6 +145,9 @@ QStringList jsonStringList(const QJsonObject& object, const char* key)
 
 bool optionalEquipmentPart(const QString& part)
 {
+    // base*/l.base* members are mutually-exclusive assembly variants, not the
+    // avatar's equipped hand slot. Keep the ordinary lh3/rh3 anatomy (or its
+    // glove replacement) and add only the resolver-selected weapon geometry.
     static const QRegularExpression optional(
         "(?:^(?:sling|quiver|arrows|basearrow\\d+|rh3\\.arrow\\d+|"
         "bwparta\\d+|lh3\\.bwpartb\\d+|bwtetiva[ab]\\d+|"
@@ -260,6 +263,8 @@ void CUnit::refreshTransientVisual()
         : (databaseEquipmentPlan ? jsonStringList(appearance, "armor") : QStringList());
     equipmentRequest.weapons = m_bImport ? m_aWeapon
         : (databaseEquipmentPlan ? jsonStringList(appearance, "weapons") : QStringList());
+    // Quick/quest/loot inventory is intentionally absent: inventory slots are
+    // valid database references but never form part of an avatar render plan.
     QJsonObject equipment;
     const SRuntimeProviderResult equipmentResult = equipmentResolver->resolve(equipmentRequest, &equipment);
     for(const QString& replaced : jsonStringList(equipment, "replacedParts"))

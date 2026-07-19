@@ -58,6 +58,9 @@ QSharedPointer<ei::SProfileDatabaseSnapshot> database()
     ei::SMaterialDatabaseRecord leather;
     leather.name = "leather"; leather.type = "Leather"; leather.code = "le"; leather.id = 8;
     db->materialRecords.insert("leather", leather);
+    ei::SMaterialDatabaseRecord silver;
+    silver.name = "silver"; silver.type = "Metal"; silver.code = "sv"; silver.id = 9;
+    db->materialRecords.insert("silver", silver);
     ei::SMonsterDatabaseRecord extendedSkin;
     extendedSkin.name = "Human Extended Skin";
     extendedSkin.baseRace = "Human Male";
@@ -95,6 +98,8 @@ private slots:
     void zombieEquipmentUsesSharedHumanoidAtlas();
     void helmetAddsDatabaseGeometryAndAtlas();
     void weaponAtlasesUseLiteralTtiAndEstablishedFamilies();
+    void weaponGeometryDoesNotReplaceHandsOrGloves();
+    void equippedMaterialsRemainProfileExtensible();
     void jmvTwoHandWeaponsUseDedicatedAtlasFamilies();
     void resolvesCompoundBowGeometry();
     void jmvIgnoresWeaponsBeyondFirstPair();
@@ -370,6 +375,35 @@ void ProfileVisualProviderTests::weaponAtlasesUseLiteralTtiAndEstablishedFamilie
     const QJsonObject textures = output.value("componentTextures").toObject();
     QCOMPARE(textures.value("rh3.sword01").toString(), QString("unhumasw_01.ir.0.x2.mmp"));
     QCOMPARE(textures.value("lh2.shield04").toString(), QString("unhumasd_04.ir.0.x2.mmp"));
+}
+
+void ProfileVisualProviderTests::weaponGeometryDoesNotReplaceHandsOrGloves()
+{
+    ProfileVisualProviderService service;
+    const auto resolver = service.equipmentResolver("jmv.v1", database());
+    SEquipmentLayoutRequest request;
+    request.model = "unhuma";
+    request.weapons << "sword.iron";
+    request.assemblyParts << "rh3" << "rh3.armor05" << "baserh3"
+                          << "basesword01" << "l.basesword01" << "rh3.sword01";
+    QJsonObject output;
+    QVERIFY(resolver->resolve(request, &output).success);
+    QCOMPARE(jsonStrings(output, "components"), QStringList({"rh3.sword01"}));
+    QVERIFY(jsonStrings(output, "replacedParts").isEmpty());
+}
+
+void ProfileVisualProviderTests::equippedMaterialsRemainProfileExtensible()
+{
+    ProfileVisualProviderService service;
+    const auto resolver = service.equipmentResolver("jmv.v1", database());
+    SEquipmentLayoutRequest request;
+    request.model = "unorfe";
+    request.armor << "helmet.silver";
+    request.assemblyParts << "hd" << "hd.armor08";
+    QJsonObject output;
+    QVERIFY(resolver->resolve(request, &output).success);
+    QCOMPARE(output.value("componentTextures").toObject().value("hd.armor08").toString(),
+             QString("unhumahl_08.sv.0.x2.mmp"));
 }
 
 void ProfileVisualProviderTests::jmvTwoHandWeaponsUseDedicatedAtlasFamilies()
