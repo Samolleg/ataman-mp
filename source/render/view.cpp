@@ -38,10 +38,27 @@
 #include "external_script_workspace.h"
 #include "mob_script_window.h"
 #include "script_reference_analyzer.h"
+#include "landscape_tools.h"
+#include "endurance_document.h"
 
 class CLogic;
 
 namespace {
+class CTerrainHeightPreviewCommand : public QUndoCommand
+{
+public:
+    CTerrainHeightPreviewCommand(CView* view, const STerrainHeightCommand& command)
+        : m_view(view), m_command(command)
+    {
+        setText(command.description);
+    }
+    void undo() override { m_view->applyTerrainHeightPreview(m_command, false); }
+    void redo() override { m_view->applyTerrainHeightPreview(m_command, true); }
+private:
+    CView* m_view;
+    STerrainHeightCommand m_command;
+};
+
 void showDuplicateIdWarning(QWidget* parent, const QVector<uint>& duplicates)
 {
     if(!duplicates.isEmpty())
@@ -66,6 +83,9 @@ CView::CView(QWidget *parent, const QGLWidget *pShareWidget) : QGLWidget(parent,
   ,m_bDrawWater(true)
   ,m_bPreviewTile(false)
   ,m_tileBrushCommandId(0)
+  ,m_landscapeTools(nullptr)
+  ,m_terrainEditAvailable(false)
+  ,m_sculptStrokeActive(false)
 {
     setFocusPolicy(Qt::ClickFocus);
 
@@ -89,6 +109,14 @@ CView::CView(QWidget *parent, const QGLWidget *pShareWidget) : QGLWidget(parent,
     m_scriptWorkspaces.reset(new CExternalScriptWorkspaceManager(this, this));
     connect(m_scriptWorkspaces.get(), &CExternalScriptWorkspaceManager::scriptImportAccepted,
             this, &CView::importExternalMobScript);
+}
+
+void CView::attachLandscapeTools(CLandscapeTools* tools)
+{
+    m_landscapeTools = tools;
+    if(m_landscapeTools)
+        connect(m_landscapeTools, &CLandscapeTools::importHeightmapRequested,
+                this, &CView::importTerrainHeightmap);
 }
 
 void CView::updateReadState(EReadState state)
@@ -377,6 +405,21 @@ void CView::loadLandscape(const QFileInfo& filePath)
         ei::log(eLogWarning, "Landscape failed to load: " + filePath.absoluteFilePath());
         return;
     }
+    CValidationReport canonicalReport;
+    m_terrainEditAvailable = m_mprDocument.load(filePath, &canonicalReport)
+        && !canonicalReport.hasErrors()
+        && m_terrainEdit.load(m_mprDocument, &canonicalReport)
+        && !canonicalReport.hasErrors();
+    if(!m_terrainEditAvailable)
+    {
+        ei::log(eLogWarning, "Canonical terrain editing disabled for this MPR:\n"
+            + canonicalReport.toText());
+    }
+    else
+    {
+        ei::log(eLogInfo, QString("Canonical terrain preview ready: %1 x %2 vertices")
+            .arg(m_terrainEdit.vertexCountX()).arg(m_terrainEdit.vertexCountY()));
+    }
     for(CMob* mob : m_aMob)
         mob->reprojectForCurrentTerrain();
     emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMpr, filePath.baseName());
@@ -413,6 +456,10 @@ void CView::unloadLand()
     }
 
     m_mprModifyTimer->stop();
+    m_terrainEditAvailable = false;
+    m_sculptStrokeActive = false;
+    m_terrainEdit = CTerrainEditModel();
+    m_mprDocument = CMprDocument();
     m_pLand->unloadMpr();
     for(CMob* mob : m_aMob)
         mob->reprojectForCurrentTerrain();
@@ -839,10 +886,8 @@ void CView::onMapMaterialUpdate()
 {
     if(!m_pLand->isMprLoad())
         return;
-
-    m_pLand->setMaterials(m_pTileForm->material());
-    m_pLand->setAnimTils(m_pTileForm->animTile());
-    m_pLand->setTileTypes(m_pTileForm->tileTypes());
+    QMessageBox::information(this, tr("MPR metadata"),
+        tr("Direct atlas-category and liquid-material mutation is disabled until it uses the canonical staged MPR transaction path."));
 }
 
 void CView::onRestoreTileData()
@@ -1591,10 +1636,53 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
 
 void CView::setTile(QMap<STileLocation, STileInfo>& arrTileData)
 {
-    if(!m_pLand->isMprLoad())
+    if(!m_pLand->isMprLoad() || !m_terrainEditAvailable)
         return;
 
-    m_pLand->setTile(arrTileData);
+    STerrainTileCommand command;
+    command.description = tr("Paint terrain tiles");
+    for(auto entry = arrTileData.constBegin(); entry != arrTileData.constEnd(); ++entry)
+    {
+        const STileLocation& location = entry.key();
+        const STileInfo& requested = entry.value();
+        const int globalX = location.xSec * 16 + location.col;
+        const int globalY = location.ySec * 16 + location.row;
+        const ETerrainTileLayer layer = location.bLand
+            ? ETerrainTileLayer::Land : ETerrainTileLayer::Overlay;
+        bool available = false;
+        const quint16 before = m_terrainEdit.packedTile(globalX, globalY, layer, &available);
+        if(!available || requested.index < 0)
+            continue;
+        SMprPackedTile packed;
+        packed.atlasIndex = quint8(requested.index / 64);
+        packed.tileIndex = quint8(requested.index % 64);
+        packed.rotation = quint8(requested.rotNum & 3);
+        const quint16 after = packed.encode();
+        if(before == after)
+            continue;
+        STerrainTileDelta delta;
+        delta.globalX = globalX;
+        delta.globalY = globalY;
+        delta.layer = layer;
+        delta.before = before;
+        delta.after = after;
+        command.deltas.append(delta);
+    }
+    if(command.isEmpty())
+        return;
+    CValidationReport report;
+    if(!m_terrainEdit.apply(command, true, &report))
+    {
+        ei::log(eLogWarning, "Canonical tile preview refused:\n" + report.toText());
+        return;
+    }
+    for(const STerrainTileDelta& delta : command.deltas)
+        m_pLand->previewCanonicalTile(delta.globalX, delta.globalY,
+            delta.layer == ETerrainTileLayer::Land, delta.after);
+    m_pLand->setDirty(m_terrainEdit.isDirty());
+    emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMprDirtyFlag,
+                              m_terrainEdit.isDirty() ? "*" : "");
+    update();
 }
 
 void CView::updatePreviewTile(QVector3D posOnLand, bool bLand)
@@ -2000,16 +2088,206 @@ void CView::moveCamToSelectedObjects()
 
 void CView::mousePressEvent(QMouseEvent* event)
 {
+    if(m_landscapeTools && m_landscapeTools->sculptEnabled()
+        && m_terrainEditAvailable && event->button() == Qt::LeftButton)
+    {
+        m_sculptStrokeActive = true;
+        m_lastSculptPoint = getTerrainPos(event->x(), event->y(), true);
+        m_pUndoStack->beginMacro(tr("Sculpt terrain"));
+        sculptTerrainAt(m_lastSculptPoint);
+        event->accept();
+        return;
+    }
     m_pOp->mousePressEvent(event);
+}
+
+void CView::sculptTerrainAt(const QVector3D& position)
+{
+    if(!m_terrainEditAvailable || !m_landscapeTools)
+        return;
+
+    STerrainBrush brush;
+    brush.centerX = position.x();
+    brush.centerY = position.y();
+    brush.radius = m_landscapeTools->radius();
+    brush.falloff = ETerrainBrushFalloff::Smooth;
+
+    STerrainHeightCommand command;
+    switch(m_landscapeTools->sculptTool())
+    {
+    case ELandscapeSculptTool::Raise:
+        command = m_terrainEdit.makeRaiseLower(
+            brush, m_landscapeTools->rawDelta() * m_landscapeTools->strength());
+        break;
+    case ELandscapeSculptTool::Lower:
+        command = m_terrainEdit.makeRaiseLower(
+            brush, -m_landscapeTools->rawDelta() * m_landscapeTools->strength());
+        break;
+    case ELandscapeSculptTool::Flatten:
+        command = m_terrainEdit.makeFlatten(
+            brush, m_landscapeTools->flattenHeight(), m_landscapeTools->strength());
+        break;
+    case ELandscapeSculptTool::Smooth:
+        command = m_terrainEdit.makeSmooth(brush, m_landscapeTools->strength());
+        break;
+    }
+    if(command.isEmpty())
+        return;
+    if(command.requiresMaxZDecision())
+    {
+        emit updateMsg(tr("Sculpt stamp refused: it would clamp the MPR raw-height range."));
+        return;
+    }
+    m_pUndoStack->push(new CTerrainHeightPreviewCommand(this, command));
+}
+
+bool CView::applyTerrainHeightPreview(const STerrainHeightCommand& command, bool forward)
+{
+    if(!m_terrainEditAvailable)
+        return false;
+    CValidationReport report;
+    if(!m_terrainEdit.apply(command, forward, &report, false))
+    {
+        ei::log(eLogWarning, "Terrain preview command refused:\n" + report.toText());
+        return false;
+    }
+
+    QSet<QPair<int, int>> sectors;
+    const int sectorCountX = int(m_mprDocument.mapInfo().sectorCountX);
+    const int sectorCountY = int(m_mprDocument.mapInfo().sectorCountY);
+    for(const STerrainHeightDelta& delta : command.deltas)
+    {
+        QVector<int> xs;
+        QVector<int> ys;
+        int sx = qMin(delta.globalX / 32, sectorCountX - 1);
+        int sy = qMin(delta.globalY / 32, sectorCountY - 1);
+        xs.append(sx);
+        ys.append(sy);
+        if(delta.globalX > 0 && delta.globalX % 32 == 0)
+            xs.append(sx - 1);
+        if(delta.globalY > 0 && delta.globalY % 32 == 0)
+            ys.append(sy - 1);
+        for(int x : xs)
+            for(int y : ys)
+                if(x >= 0 && y >= 0)
+                    sectors.insert(qMakePair(x, y));
+    }
+    for(const QPair<int, int>& sector : sectors)
+    {
+        if(!m_pLand->previewCanonicalSector(
+            sector.first, sector.second,
+            m_terrainEdit.sectorPayload(sector.first, sector.second)))
+        {
+            ei::log(eLogWarning, QString("Terrain preview renderer rejected sector %1,%2")
+                .arg(sector.first).arg(sector.second));
+        }
+    }
+    for(CMob* mob : m_aMob)
+        mob->reprojectForCurrentTerrain();
+    m_pLand->setDirty(m_terrainEdit.isDirty());
+    emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMprDirtyFlag,
+                              m_terrainEdit.isDirty() ? "*" : "");
+    emit updateMsg(tr("Terrain preview changed %1 vertices in %2 sector(s); navigation data may need review.")
+        .arg(command.deltas.size()).arg(sectors.size()));
+    update();
+    return true;
+}
+
+void CView::importTerrainHeightmap()
+{
+    if(!m_terrainEditAvailable)
+    {
+        QMessageBox::information(this, tr("Heightmap import"),
+            tr("Open a supported MPR before importing a heightmap."));
+        return;
+    }
+    const QString path = QFileDialog::getOpenFileName(this, tr("Import grayscale heightmap"),
+        QString(), tr("Heightmaps (*.png *.bmp *.tif *.tiff);;Images (*)"));
+    if(path.isEmpty())
+        return;
+    QImage image(path);
+    if(image.isNull())
+    {
+        QMessageBox::warning(this, tr("Heightmap import"), tr("The image could not be decoded."));
+        return;
+    }
+    bool accepted = false;
+    const double minimum = QInputDialog::getDouble(this, tr("Heightmap minimum"),
+        tr("Raw MPR height for black (0-65535):"), 0.0, 0.0, 65535.0, 0, &accepted);
+    if(!accepted)
+        return;
+    const double maximum = QInputDialog::getDouble(this, tr("Heightmap maximum"),
+        tr("Raw MPR height for white (0-65535):"), 65535.0, 0.0, 65535.0, 0, &accepted);
+    if(!accepted || maximum < minimum)
+    {
+        if(accepted)
+            QMessageBox::warning(this, tr("Heightmap import"), tr("Maximum height must not be below minimum height."));
+        return;
+    }
+
+    STerrainHeightmapGrid grid;
+    grid.width = image.width();
+    grid.height = image.height();
+    grid.samples.reserve(grid.width * grid.height);
+    const bool flip = m_landscapeTools && m_landscapeTools->flipHeightmapVertically();
+    for(int outputY = 0; outputY < grid.height; ++outputY)
+    {
+        const int imageY = flip ? grid.height - 1 - outputY : outputY;
+        for(int x = 0; x < grid.width; ++x)
+            grid.samples.append(float(qGray(image.pixel(x, imageY))) / 255.0f);
+    }
+    STerrainHeightmapImportSettings settings;
+    settings.placement = ETerrainHeightmapPlacement::StretchToTerrain;
+    settings.minimumRawHeight = float(minimum);
+    settings.maximumRawHeight = float(maximum);
+    settings.strength = 1.0f;
+    CValidationReport report;
+    const STerrainHeightCommand command = m_terrainEdit.makeHeightmapImport(grid, settings, &report);
+    if(command.isEmpty() || report.hasErrors() || command.requiresMaxZDecision())
+    {
+        QMessageBox::warning(this, tr("Heightmap import"),
+            tr("The heightmap preview was refused.\n\n%1").arg(report.toText()));
+        return;
+    }
+    const QString orientation = flip ? tr("bottom row first") : tr("top row first");
+    if(QMessageBox::question(this, tr("Confirm heightmap preview"),
+        tr("Stretch %1 x %2 samples across %3 x %4 terrain vertices?\n"
+           "Orientation: %5\nRaw range: %6 to %7\n\n"
+           "This is undoable and cannot yet be saved to MPR.")
+            .arg(grid.width).arg(grid.height)
+            .arg(m_terrainEdit.vertexCountX()).arg(m_terrainEdit.vertexCountY())
+            .arg(orientation).arg(minimum).arg(maximum)) != QMessageBox::Yes)
+        return;
+    m_pUndoStack->push(new CTerrainHeightPreviewCommand(this, command));
 }
 
 void CView::mouseMoveEvent(QMouseEvent* event)
 {
+    if(m_sculptStrokeActive && (event->buttons() & Qt::LeftButton)
+        && m_landscapeTools && m_terrainEditAvailable)
+    {
+        const QVector3D position = getTerrainPos(event->x(), event->y(), true);
+        const float spacing = qMax(0.5f, m_landscapeTools->radius() * 0.25f);
+        if(position.distanceToPoint(m_lastSculptPoint) >= spacing)
+        {
+            sculptTerrainAt(position);
+            m_lastSculptPoint = position;
+        }
+        event->accept();
+        return;
+    }
     m_pOp->mouseMoveEvent(event);
 }
 
 void CView::mouseReleaseEvent(QMouseEvent *event)
 {
+    if(m_sculptStrokeActive && event->button() == Qt::LeftButton)
+    {
+        m_sculptStrokeActive = false;
+        m_pUndoStack->endMacro();
+        event->accept();
+        return;
+    }
     m_pOp->mouseReleaseEvent(event);
 }
 
@@ -2786,8 +3064,9 @@ void CView::unHideAll()
 
 void CView::setDirtyMpr()
 {
-    m_pLand->setDirty(true);
-    emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMprDirtyFlag, "*");
+    const bool dirty = m_terrainEditAvailable ? m_terrainEdit.isDirty() : true;
+    m_pLand->setDirty(dirty);
+    emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMprDirtyFlag, dirty ? "*" : "");
 }
 
 void CView::setDurty(CMob* pMob)

@@ -56,6 +56,7 @@ public:
     QVector<QVector<CTile>>& arrWaterEdit() {return m_arrWater;};
     bool existsTileIndices(const QVector<int>& arrInd); // function for find incorrect\coorrupt tile indices
     void updateDrawData();
+    bool previewCanonicalPayload(const QByteArray& payload);
 
 private:
     void updatePosition();

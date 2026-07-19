@@ -156,6 +156,49 @@ CSector::CSector(QDataStream& stream, float maxZ, int texCount)
     generateVertexDataFromTile();
 }
 
+bool CSector::previewCanonicalPayload(const QByteArray& payload)
+{
+    QByteArray copy = payload;
+    QDataStream stream(&copy, QIODevice::ReadOnly);
+    util::formatStream(stream);
+
+    quint32 signature = 0;
+    quint8 type = 0;
+    stream >> signature >> type;
+    if(signature != secSignature || (type != 0 && type != 3))
+        return false;
+
+    QVector<QVector<SSecVertex>> landVertex(nVertex);
+    for(int row = 0; row < nVertex; ++row)
+    {
+        landVertex[row].resize(nVertex);
+        for(int col = 0; col < nVertex; ++col)
+            stream >> landVertex[row][col];
+    }
+    if(stream.status() != QDataStream::Ok)
+        return false;
+
+    QVector<SSecVertex> tileVertices(9);
+    for(int row = 0; row < nTile; ++row)
+    {
+        for(int col = 0; col < nTile; ++col)
+        {
+            tileVertices[0] = landVertex[row * 2][col * 2];
+            tileVertices[1] = landVertex[row * 2][col * 2 + 1];
+            tileVertices[2] = landVertex[row * 2][col * 2 + 2];
+            tileVertices[3] = landVertex[row * 2 + 1][col * 2];
+            tileVertices[4] = landVertex[row * 2 + 1][col * 2 + 1];
+            tileVertices[5] = landVertex[row * 2 + 1][col * 2 + 2];
+            tileVertices[6] = landVertex[row * 2 + 2][col * 2];
+            tileVertices[7] = landVertex[row * 2 + 2][col * 2 + 1];
+            tileVertices[8] = landVertex[row * 2 + 2][col * 2 + 2];
+            m_arrLand[row][col].resetVertices(tileVertices);
+        }
+    }
+    updateDrawData();
+    return true;
+}
+
 QByteArray CSector::serializeSector()
 {
     QByteArray secData;

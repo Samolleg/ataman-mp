@@ -26,6 +26,7 @@ class QAction;
 class QDockWidget;
 class CMapsBrowser;
 class CJmvMapTestLauncher;
+class CLandscapeTools;
 
 struct SWindowTitle
 {
@@ -120,6 +121,8 @@ private:
     QMenu* m_recentFilesMenu;
     QAction* m_externalScriptAction;
     QDockWidget* m_mapsDock;
+    QDockWidget* m_landscapeToolsDock;
+    CLandscapeTools* m_landscapeTools;
     CMapsBrowser* m_mapsBrowser;
     QAction* m_mapTestAction;
     QAction* m_stopMapTestAction;

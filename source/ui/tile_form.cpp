@@ -20,6 +20,16 @@ CTileForm::CTileForm(QWidget *parent) :
   ,m_tileRot(0)
 {
     ui->setupUi(this);
+    setWindowTitle(tr("MPR Atlas Tiles"));
+    ui->label->setText(tr("Atlas category (read-only)"));
+    ui->comboTileType->setEnabled(false);
+    ui->comboTileType->setToolTip(tr("Atlas slot categories are MPR metadata and are not edited by the painting brush."));
+    ui->comboActiveLiquidMaterial->setEnabled(false);
+    ui->comboActiveLiquidMaterial->setToolTip(tr("Overlay material editing is not enabled in this preview build."));
+    ui->tabWidget->setTabEnabled(1, false);
+    ui->tabWidget->setTabToolTip(1, tr("Liquid material editing will use the staged MPR transaction path in a later increment."));
+    ui->buttonApply->hide();
+    ui->buttonCancel->setText(tr("Close"));
     setAttribute(Qt::WA_ShowWithoutActivating);
     ui->comboTileType->addItems(CResourceStringList::getInstance()->tileTypes().values());
     //connect(ui->tableTile, SIGNAL(cellClicked(int,int)), this, SLOT(onCellClicked(int,int)));

@@ -48,6 +48,7 @@
 #include "jmv_map_test_launcher.h"
 #include "resource_profile.h"
 #include "endurance_document.h"
+#include "landscape_tools.h"
 
 void testFunc()
 {
@@ -72,6 +73,8 @@ MainWindow::MainWindow(QWidget* parent) :
     m_externalScriptAction(nullptr),
     m_mapsDock(nullptr),
     m_mapsBrowser(nullptr),
+    m_landscapeToolsDock(nullptr),
+    m_landscapeTools(nullptr),
     m_mapTestAction(nullptr),
     m_stopMapTestAction(nullptr),
     m_mapTestLauncher(nullptr),
@@ -98,6 +101,14 @@ MainWindow::MainWindow(QWidget* parent) :
     QMenu* viewMenu = new QMenu(tr("View"), this);
     m_ui->menuBar->insertMenu(m_ui->menuSettings->menuAction(), viewMenu);
     viewMenu->addAction(m_mapsDock->toggleViewAction());
+    m_landscapeTools = new CLandscapeTools(this);
+    m_landscapeToolsDock = new QDockWidget(tr("Landscape Tools (Preview)"), this);
+    m_landscapeToolsDock->setObjectName("landscapeToolsDock");
+    m_landscapeToolsDock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
+    m_landscapeToolsDock->setWidget(m_landscapeTools);
+    addDockWidget(Qt::RightDockWidgetArea, m_landscapeToolsDock);
+    m_landscapeToolsDock->hide();
+    viewMenu->addAction(m_landscapeToolsDock->toggleViewAction());
     connect(m_mapsBrowser, &CMapsBrowser::openMapRequested,
             this, &MainWindow::openMapPair);
     m_externalScriptAction = new QAction(tr("Open MOB Script in External Editor"), this);
@@ -283,6 +294,8 @@ MainWindow::MainWindow(QWidget* parent) :
     CStatusConnector::getInstance()->attach(m_ui->statusIco, m_ui->statusBar);
     connectUiButtons();
     m_pView->attach(m_settings.get(), m_ui->tableWidget, m_undoStack, m_ui->progressBar, m_ui->mousePosText, m_ui->treeWidget, m_pTileForm.get());
+    m_pView->attachLandscapeTools(m_landscapeTools);
+    m_ui->actionMap_parameters->setText(tr("MPR Atlas Tiles..."));
     initShortcuts();
     connect(m_settings.get(), &CSettings::shortcutsChanged, this, &MainWindow::initShortcuts);
     m_ui->action_Mob_parameters->setEnabled(false);

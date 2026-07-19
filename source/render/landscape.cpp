@@ -12,6 +12,7 @@
 #include "backup_manager.h"
 #include "staged_save_validator.h"
 #include "log.h"
+#include "mpr_document.h"
 
 CLandscape* CLandscape::m_pLand = nullptr;
 
@@ -432,6 +433,36 @@ void CLandscape::setTile(const QMap<STileLocation, STileInfo>& arrTileInfo)
 void CLandscape::updateSectorDrawData(int xSec, int ySec)
 {
     m_aSector[ySec][xSec]->updateDrawData();
+}
+
+bool CLandscape::previewCanonicalSector(int xSec, int ySec, const QByteArray& payload)
+{
+    if(ySec < 0 || ySec >= m_aSector.size() || xSec < 0
+        || xSec >= m_aSector.at(ySec).size() || !m_aSector.at(ySec).at(xSec))
+        return false;
+    return m_aSector[ySec][xSec]->previewCanonicalPayload(payload);
+}
+
+bool CLandscape::previewCanonicalTile(int globalX, int globalY, bool land, quint16 packedTile)
+{
+    if(globalX < 0 || globalY < 0)
+        return false;
+    const int xSec = globalX / 16;
+    const int ySec = globalY / 16;
+    if(ySec >= m_aSector.size() || xSec >= m_aSector.at(ySec).size()
+        || !m_aSector.at(ySec).at(xSec))
+        return false;
+    QVector<QVector<CTile>>& tiles = land
+        ? m_aSector[ySec][xSec]->arrTileEdit()
+        : m_aSector[ySec][xSec]->arrWaterEdit();
+    if(tiles.isEmpty())
+        return false;
+    const int row = globalY % 16;
+    const int col = globalX % 16;
+    const SMprPackedTile decoded = SMprPackedTile::decode(packedTile);
+    tiles[row][col].setTile(decoded.atlasSlot(), decoded.rotation);
+    m_aSector[ySec][xSec]->updateDrawData();
+    return true;
 }
 
 void CLandscape::projectPositions(QList<CNode*>& aNode)

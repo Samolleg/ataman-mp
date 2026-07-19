@@ -14,6 +14,8 @@
 
 #include "types.h"
 #include "select_window.h"
+#include "mpr_document.h"
+#include "terrain_edit_model.h"
 
 class QLineEdit;
 class CKeyManager;
@@ -38,6 +40,7 @@ class CRoundMobForm;
 class CTreeView;
 class IPropertyBase;
 class CTileForm;
+class CLandscapeTools;
 class CPreviewTile;
 class CLandscape;
 class CExternalScriptWorkspaceManager;
@@ -78,6 +81,7 @@ public:
     bool hasActiveMob() const { return m_activeMob != nullptr; }
     void unloadMob(QString mobName);
     void attach(CSettings* pSettings, QTableWidget* pParam, QUndoStack* pStack, CProgressView* pProgress, QLineEdit* pMouseCoord, CTreeView* pTree, CTileForm* pTileForm);
+    void attachLandscapeTools(CLandscapeTools* tools);
     CSettings* settings() {Q_ASSERT(m_pSettings); return m_pSettings;}
     int select(const SSelect& selectParam, bool bAddToSelect = false);
     CMob* mob(QString mobName);
@@ -141,6 +145,7 @@ public:
     void showOutliner(bool bShow = true);
     void pickQuickAccessTile(int index);
     void endTileBrushGroup();
+    bool applyTerrainHeightPreview(const STerrainHeightCommand& command, bool forward);
     void loadSession();
     bool onExit();
 
@@ -173,6 +178,7 @@ private:
     bool closeAllMobScriptWindows();
     bool confirmScriptReferencedObjectIds(const QVector<uint>& objectIds,
                                           const QString& operation);
+    void sculptTerrainAt(const QVector3D& position);
 
 
 public slots:
@@ -195,6 +201,7 @@ public slots:
     void checkNewLandVersion();
     void importExternalMobScript(CMob* mob, const QString& storedScript,
                                  const QString& displayScript);
+    void importTerrainHeightmap();
 
 signals:
     void updateMsg(QString msg);
@@ -246,6 +253,12 @@ private:
     QSharedPointer<CPreviewTile> m_pPreviewTile;
     CLandscape* m_pLand;
     short m_tileBrushCommandId;
+    CLandscapeTools* m_landscapeTools;
+    CMprDocument m_mprDocument;
+    CTerrainEditModel m_terrainEdit;
+    bool m_terrainEditAvailable;
+    bool m_sculptStrokeActive;
+    QVector3D m_lastSculptPoint;
 };
 
 #endif // MYGLWIDGET_H
