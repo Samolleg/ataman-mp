@@ -33,6 +33,8 @@
 #include <QHeaderView>
 #include <QDialogButtonBox>
 #include <QClipboard>
+#include <QLineEdit>
+#include <QSplitter>
 #include <QtConcurrent/QtConcurrentRun>
 
 #include <limits>
@@ -144,6 +146,35 @@ MainWindow::MainWindow(QWidget* parent) :
     m_pTileForm.reset(new CTileForm(this));
     m_settings->attachMainWindow(this);
     m_ui->setupUi(this); //init CView core also
+    QWidget* outlinerContainer = new QWidget(m_ui->outlinerSplitter);
+    QVBoxLayout* outlinerLayout = new QVBoxLayout(outlinerContainer);
+    outlinerLayout->setContentsMargins(0, 0, 0, 0);
+    outlinerLayout->setSpacing(3);
+    QHBoxLayout* filterLayout = new QHBoxLayout;
+    filterLayout->setContentsMargins(0, 0, 0, 0);
+    m_outlinerFilterEdit = new QLineEdit(outlinerContainer);
+    m_outlinerFilterEdit->setClearButtonEnabled(true);
+    m_outlinerFilterEdit->setPlaceholderText(tr("Filter objects (name, ID, model, texture, database...)") );
+    m_outlinerFilterEdit->setToolTip(tr(
+        "Fuzzy-searches object fields. Combine terms with spaces. Optional fields: "
+        "name:, id:, type:, model:, texture:, db:, prototype:, mob:, validation:."));
+    m_outlinerFilterStatus = new QLabel(tr("0 / 0"), outlinerContainer);
+    m_outlinerFilterStatus->setMinimumWidth(72);
+    m_outlinerFilterStatus->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+    filterLayout->addWidget(m_outlinerFilterEdit, 1);
+    filterLayout->addWidget(m_outlinerFilterStatus);
+    outlinerLayout->addLayout(filterLayout);
+    m_ui->treeWidget->setParent(outlinerContainer);
+    outlinerLayout->addWidget(m_ui->treeWidget, 1);
+    m_ui->outlinerSplitter->insertWidget(0, outlinerContainer);
+    connect(m_outlinerFilterEdit, &QLineEdit::textChanged,
+            m_ui->treeWidget, &CTreeView::setFilterText);
+    connect(m_ui->treeWidget, &CTreeView::filterMatchCountChanged,
+            this, [this](int visible, int total)
+    {
+        m_outlinerFilterStatus->setText(tr("%1 / %2").arg(visible).arg(total));
+        m_outlinerFilterStatus->setToolTip(tr("%1 matching objects out of %2").arg(visible).arg(total));
+    });
     m_mapsBrowser = new CMapsBrowser(this);
     m_mapsDock = new QDockWidget(tr("Maps and Collections"), this);
     m_mapsDock->setObjectName("mapsAndCollectionsDock");
@@ -1679,6 +1710,8 @@ void MainWindow::refreshMobFamilyValidation()
         m_sessionAllocatedNids.clear();
         m_warnedSharedAllocationMobs.clear();
         m_familyRiskBaselineReady = false;
+        if(m_ui && m_ui->treeWidget)
+            m_ui->treeWidget->setValidationNids(QSet<uint>(), QSet<uint>());
         updateMobFamilyValidationPanel();
         return;
     }
@@ -1751,6 +1784,19 @@ void MainWindow::applyMobFamilyValidationReport(const CMobFamilyValidationReport
     }
     m_previousFamilyRiskKeys = currentRisks;
     m_familyRiskBaselineReady = true;
+    QSet<uint> criticalNids;
+    QSet<uint> warningNids;
+    for(const SMobFamilyFinding& finding : m_familyValidation.findings)
+    {
+        if(!finding.hasNid)
+            continue;
+        if(finding.severity == EMobFamilyFindingSeverity::Critical)
+            criticalNids.insert(finding.nid);
+        else if(finding.severity == EMobFamilyFindingSeverity::Warning
+                || finding.severity == EMobFamilyFindingSeverity::Incomplete)
+            warningNids.insert(finding.nid);
+    }
+    m_ui->treeWidget->setValidationNids(criticalNids, warningNids);
     updateMobFamilyValidationPanel();
     ei::log(m_familyValidation.criticalCount() > 0 ? eLogWarning : eLogInfo,
             m_familyValidation.toText());

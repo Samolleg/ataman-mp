@@ -2051,6 +2051,7 @@ void CView::onParamChange(const QSharedPointer<IPropertyBase>& prop)
         {
             CChangeProp* pChanger = new CChangeProp(this, pNode, prop);
             QObject::connect(pChanger, SIGNAL(updateParam()), this, SLOT(viewParameters()));
+            QObject::connect(pChanger, SIGNAL(updateParam()), m_pTree, SLOT(applyFilter()));
             //QObject::connect(pChanger, SIGNAL(updatePosOnLand(CNode*)), this, SLOT(landPositionUpdate(CNode*)));
             m_pUndoStack->push(pChanger);
             break;
@@ -2059,6 +2060,7 @@ void CView::onParamChange(const QSharedPointer<IPropertyBase>& prop)
         {
             CChangeProp* pChanger = new CChangeProp(this, pNode, prop); // #todo: update node pos after undo-redo
             QObject::connect(pChanger, SIGNAL(updateParam()), this, SLOT(viewParameters()));
+            QObject::connect(pChanger, SIGNAL(updateParam()), m_pTree, SLOT(applyFilter()));
             //QObject::connect(pChanger, SIGNAL(updatePosOnLand(CNode*)), this, SLOT(landPositionUpdate(CNode*)));
             m_pUndoStack->push(pChanger);
             break;
@@ -2074,6 +2076,7 @@ void CView::onParamChange(const QSharedPointer<IPropertyBase>& prop)
                 return;
             CChangeProp* pChanger = new CChangeProp(this, pNode, prop);
             QObject::connect(pChanger, SIGNAL(updateParam()), this, SLOT(viewParameters()));
+            QObject::connect(pChanger, SIGNAL(updateParam()), m_pTree, SLOT(applyFilter()));
             QObject::connect(pChanger, SIGNAL(changeIdSignal(uint,uint)), m_pTree, SLOT(onChangeNodeId(uint,uint)));
             QObject::connect(pChanger, SIGNAL(changeTreeName(CNode*)), m_pTree, SLOT(onChangeObjectName(CNode*)));
             m_pUndoStack->push(pChanger);
@@ -2089,6 +2092,7 @@ void CView::onParamChange(const QSharedPointer<IPropertyBase>& prop)
             {
                 CChangeProp* pChanger = new CChangeProp(this, pNode, prop);
                 QObject::connect(pChanger, SIGNAL(updateParam()), this, SLOT(viewParameters()));
+                QObject::connect(pChanger, SIGNAL(updateParam()), m_pTree, SLOT(applyFilter()));
                 QObject::connect(pChanger, SIGNAL(changeIdSignal(uint,uint)), m_pTree, SLOT(onChangeNodeId(uint,uint)));
                 QObject::connect(pChanger, SIGNAL(changeTreeName(CNode*)), m_pTree, SLOT(onChangeObjectName(CNode*)));
                 m_pUndoStack->push(pChanger);
@@ -2189,9 +2193,13 @@ void CView::onPropertiesChange(const QList<QSharedPointer<IPropertyBase>>& prope
 
 void CView::collectObjectTreeData()
 {
+    m_pTree->prepareForRebuild();
     m_pTree->clear();
     if(nullptr == m_activeMob)
+    {
+        m_pTree->applyFilter();
         return;
+    }
 
     m_pTree->setColumnCount(2);
     QStringList labels;
@@ -2280,6 +2288,7 @@ void CView::collectObjectTreeData()
         }
     }
     m_pTree->sortItems(0, Qt::SortOrder::AscendingOrder);
+    m_pTree->applyFilter();
 }
 
 void CView::onRestoreCursor()

@@ -42,6 +42,7 @@ class QTreeWidget;
 class QTreeWidgetItem;
 class QTimer;
 class QPushButton;
+class QLineEdit;
 
 struct SWindowTitle
 {
@@ -179,6 +180,8 @@ private:
     bool m_hasPendingValidation{false};
     int m_validationFindingLimit{250};
     QPushButton* m_validationShowMore{nullptr};
+    QLineEdit* m_outlinerFilterEdit{nullptr};
+    QLabel* m_outlinerFilterStatus{nullptr};
     CMobFamilyValidationReport m_familyValidation;
     QByteArray m_acknowledgedFindingDigest;
     QSet<QString> m_previousFamilyRiskKeys;

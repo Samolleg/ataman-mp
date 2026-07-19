@@ -1,10 +1,13 @@
 #ifndef CTREEVIEW_H
 #define CTREEVIEW_H
 #include <QTreeWidget>
+#include <QHash>
+#include <QSet>
 #include "types.h"
 
 class CView;
 class CNode;
+class QTimer;
 
 ///
 /// \brief The CTreeObject class stores additional information about the object ID so that it can be selected in the 3D scene.
@@ -37,10 +40,15 @@ class CTreeView : public QTreeWidget
 public:
     explicit CTreeView(QWidget *parent = nullptr);
     void attachView(CView* pView) {m_pView = pView;}
-    QString objectNameByType(ENodeType type);
-    ENodeType objectTypeByString(QString str);
+    QString objectNameByType(ENodeType type) const;
+    ENodeType objectTypeByString(QString str) const;
     void revealNode(CNode* pNode);
     void clearViewportSelectionMarker();
+    void prepareForRebuild();
+    void setValidationNids(const QSet<uint>& critical, const QSet<uint>& warning);
+
+signals:
+    void filterMatchCountChanged(int visible, int total);
 
 protected:
     void keyPressEvent(QKeyEvent* event) override;
@@ -49,8 +57,15 @@ private:
     int parentDeepCount(QTreeWidgetItem* pItem);
     void recalcParent(QTreeWidgetItem* pItem);
     QTreeWidgetItem* category(QString& categoryName);
+    bool filterItem(QTreeWidgetItem* item, const QStringList& terms,
+                    bool ancestorMatched, int* visible, int* total);
+    bool nodeMatches(CNode* node, const QStringList& terms) const;
+    bool textMatches(const QString& candidate, const QString& query) const;
+    QString validationState(CNode* node) const;
 
 public slots:
+    void setFilterText(const QString& text);
+    void applyFilter();
     void itemClickedOver(QTreeWidgetItem* pItem, int column);
     void itemDoubleClickedOver(QTreeWidgetItem* pItem, int column);
     void onNodeDelete(uint nodeId);
@@ -61,6 +76,11 @@ private slots:
 
 private:
     CView* m_pView;
+    QTimer* m_filterTimer;
+    QString m_filterText;
+    QHash<QTreeWidgetItem*, bool> m_expansionBeforeFilter;
+    QSet<uint> m_criticalNids;
+    QSet<uint> m_warningNids;
 };
 
 #endif // CTREEVIEW_H

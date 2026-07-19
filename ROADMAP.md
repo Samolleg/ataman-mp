@@ -182,14 +182,13 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
   including selected entrances, zone metadata, startup-movie suppression,
   Godmode, supplemental `AddMob` loading, and temporary-map staging.
 - **0.2.0 runtime release blockers:** disable in-game Main Menu/Save/Load during
-  a staged session, add authoritative readiness/results, then run the final
-  focused gameplay matrix.
+  a staged session, add authoritative readiness/results, finish the promoted
+  outliner filter, then run the final focused gameplay matrix.
 - **0.2.1 hot reload:** the owned-process protocol and immutable generations are
   implemented. Main-MOB reload has worked in testing; supplemental/collection
   reload and same-position restoration remain unfinished.
-- **Next high-priority editor UX task after alpha.6 validation:** fuzzy,
-  parameter-aware outliner filtering. Unreal-style MOB ownership/locking is the
-  larger workspace follow-up.
+- **Stable 0.2.0 editor gate:** fuzzy, parameter-aware outliner filtering.
+  Unreal-style MOB ownership/locking remains the larger workspace follow-up.
 
 ### Critical: structural zone-family NID validation
 
@@ -515,12 +514,15 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
 
 ## 0.2.x: MOB editing workflow and recovery
 
-- [ ] **High priority:** add a fuzzy, parameter-aware outliner filter.
+- [x] **Stable 0.2.0 gate:** add a fuzzy, parameter-aware outliner filter.
   - Search object name, NID, type, model, texture, database/prototype name,
     MOB ownership, and validation state rather than only visible tree labels.
   - A query such as `unhufe` must return objects whose model is `unhufe`.
   - Preserve selection and hierarchy context, show match counts, debounce large
     maps, and keep filtering independent from viewport selection/scrolling.
+  - Current source adds 150 ms debouncing, fuzzy bare terms, quoted phrases,
+    AND-combined terms, and explicit `name:`, `id:`, `type:`, `model:`,
+    `texture:`, `db:`/`prototype:`, `mob:`, and `validation:` fields.
 - [ ] When opening an MPR while another workspace is loaded, offer to save
   changed MOB/MPR documents and replace the current workspace in one guarded
   action instead of only displaying a close-first warning.

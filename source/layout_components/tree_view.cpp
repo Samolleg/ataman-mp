@@ -4,12 +4,168 @@
 #include "view.h"
 #include "node.h"
 #include <QHeaderView>
+#include <QTimer>
+#include <QRegularExpression>
+#include <algorithm>
 #include "objects/unit.h"
 
-CTreeView::CTreeView(QWidget *parent) : QTreeWidget(parent)
+CTreeView::CTreeView(QWidget *parent) : QTreeWidget(parent), m_pView(nullptr),
+    m_filterTimer(new QTimer(this))
 {
+    m_filterTimer->setSingleShot(true);
+    m_filterTimer->setInterval(150);
+    connect(m_filterTimer, &QTimer::timeout, this, &CTreeView::applyFilter);
     QObject::connect(this, SIGNAL(itemClicked(QTreeWidgetItem*,int)), this, SLOT(itemClickedOver(QTreeWidgetItem*,int)));
     QObject::connect(this, SIGNAL(itemDoubleClicked(QTreeWidgetItem*,int)), this, SLOT(itemDoubleClickedOver(QTreeWidgetItem*,int)));
+}
+
+void CTreeView::prepareForRebuild()
+{
+    m_expansionBeforeFilter.clear();
+}
+
+void CTreeView::setValidationNids(const QSet<uint>& critical,
+                                  const QSet<uint>& warning)
+{
+    m_criticalNids = critical;
+    m_warningNids = warning;
+    if(!m_filterText.trimmed().isEmpty())
+        applyFilter();
+}
+
+void CTreeView::setFilterText(const QString& text)
+{
+    const bool wasEmpty = m_filterText.trimmed().isEmpty();
+    m_filterText = text;
+    if(wasEmpty && !m_filterText.trimmed().isEmpty())
+    {
+        m_expansionBeforeFilter.clear();
+        QTreeWidgetItemIterator it(this);
+        while(*it)
+        {
+            m_expansionBeforeFilter.insert(*it, (*it)->isExpanded());
+            ++it;
+        }
+    }
+    m_filterTimer->start();
+}
+
+bool CTreeView::textMatches(const QString& candidate, const QString& query) const
+{
+    const QString haystack = candidate.toCaseFolded();
+    const QString needle = query.toCaseFolded();
+    if(needle.isEmpty() || haystack.contains(needle))
+        return true;
+    int at = 0;
+    for(const QChar ch : haystack)
+        if(at < needle.size() && ch == needle.at(at))
+            ++at;
+    return at == needle.size();
+}
+
+QString CTreeView::validationState(CNode* node) const
+{
+    if(!node)
+        return QString();
+    if(m_criticalNids.contains(node->mapId()))
+        return "critical";
+    if(m_warningNids.contains(node->mapId()))
+        return "warning";
+    return "clean";
+}
+
+bool CTreeView::nodeMatches(CNode* node, const QStringList& terms) const
+{
+    if(!node)
+        return false;
+    CUnit* unit = dynamic_cast<CUnit*>(node);
+    const QString type = objectNameByType(node->nodeType()) + " "
+        + QString::number(int(node->nodeType()));
+    const QString database = unit ? unit->databaseName() : QString();
+    const QString mob = m_pView && m_pView->currentMob()
+        ? m_pView->currentMob()->mobName() : QString();
+    const QMap<QString, QString> fields{
+        {"name", node->mapName()}, {"id", QString::number(node->mapId())},
+        {"nid", QString::number(node->mapId())}, {"type", type},
+        {"model", node->modelName()}, {"texture", node->textureName()},
+        {"db", database}, {"database", database}, {"prototype", database},
+        {"mob", mob}, {"validation", validationState(node)}
+    };
+    const QString everything = QStringList(fields.values()).join(' ');
+    for(const QString& rawTerm : terms)
+    {
+        const int colon = rawTerm.indexOf(':');
+        const int equals = rawTerm.indexOf('=');
+        const int separator = colon > 0 && equals > 0 ? qMin(colon, equals)
+            : qMax(colon, equals);
+        if(separator > 0)
+        {
+            const QString key = rawTerm.left(separator).toCaseFolded();
+            const QString value = rawTerm.mid(separator + 1);
+            if(fields.contains(key))
+            {
+                if(!textMatches(fields.value(key), value))
+                    return false;
+                continue;
+            }
+        }
+        if(!textMatches(everything, rawTerm))
+            return false;
+    }
+    return true;
+}
+
+bool CTreeView::filterItem(QTreeWidgetItem* item, const QStringList& terms,
+                           bool ancestorMatched, int* visible, int* total)
+{
+    CTreeObject* objectItem = dynamic_cast<CTreeObject*>(item);
+    CNode* node = objectItem ? objectItem->node() : nullptr;
+    if(node && total)
+        ++(*total);
+    const bool textualGroupMatch = !node && !terms.isEmpty()
+        && std::all_of(terms.begin(), terms.end(), [this, item](const QString& term)
+           { return !term.contains(':') && !term.contains('=')
+               && textMatches(item->text(0), term); });
+    const bool selfMatches = terms.isEmpty() || (node && nodeMatches(node, terms))
+        || textualGroupMatch;
+    bool childMatches = false;
+    for(int index = 0; index < item->childCount(); ++index)
+        childMatches = filterItem(item->child(index), terms,
+                                  ancestorMatched || selfMatches,
+                                  visible, total) || childMatches;
+    const bool shown = ancestorMatched || selfMatches || childMatches;
+    item->setHidden(!shown);
+    if(node && shown && visible)
+        ++(*visible);
+    if(!terms.isEmpty() && shown && item->childCount() > 0)
+        item->setExpanded(true);
+    return shown;
+}
+
+void CTreeView::applyFilter()
+{
+    QString normalized = m_filterText.trimmed();
+    normalized.replace(QRegularExpression("\\s*([:=])\\s*"), "\\1");
+    QStringList terms;
+    const QRegularExpression tokenExpression("\\\"([^\\\"]+)\\\"|(\\S+)");
+    QRegularExpressionMatchIterator matches = tokenExpression.globalMatch(normalized);
+    while(matches.hasNext())
+    {
+        const QRegularExpressionMatch match = matches.next();
+        terms.append(match.captured(1).isEmpty() ? match.captured(2) : match.captured(1));
+    }
+    int visible = 0;
+    int total = 0;
+    for(int index = 0; index < topLevelItemCount(); ++index)
+        filterItem(topLevelItem(index), terms, false, &visible, &total);
+    if(terms.isEmpty() && !m_expansionBeforeFilter.isEmpty())
+    {
+        for(auto it = m_expansionBeforeFilter.constBegin();
+            it != m_expansionBeforeFilter.constEnd(); ++it)
+            if(it.key()) it.key()->setExpanded(it.value());
+        m_expansionBeforeFilter.clear();
+    }
+    emit filterMatchCountChanged(visible, total);
 }
 
 void CTreeView::keyPressEvent(QKeyEvent *pEvent)
@@ -87,7 +243,7 @@ QTreeWidgetItem *CTreeView::category(QString &categoryName)
     return nullptr;
 }
 
-QString CTreeView::objectNameByType(ENodeType type)
+QString CTreeView::objectNameByType(ENodeType type) const
 {
     QMap<ENodeType, QString> type2str;
     type2str.insert(ENodeType::eWorldObject, "World objects");
@@ -102,7 +258,7 @@ QString CTreeView::objectNameByType(ENodeType type)
     return type2str[type];
 }
 
-ENodeType CTreeView::objectTypeByString(QString str)
+ENodeType CTreeView::objectTypeByString(QString str) const
 {
     QMap<ENodeType, QString> type2str;
     type2str.insert(ENodeType::eWorldObject, "World objects");
@@ -233,6 +389,7 @@ void CTreeView::addNodeToTree(CNode *pNode)
         }
         clearSelection();
         sortItems(0, Qt::SortOrder::AscendingOrder);
+        applyFilter();
     }
 }
 
@@ -261,6 +418,7 @@ void CTreeView::revealNode(CNode* pNode)
         }
         ++it;
     }
+    applyFilter();
 }
 
 void CTreeView::clearViewportSelectionMarker()
@@ -285,6 +443,7 @@ void CTreeView::onChangeNodeId(uint oldId, uint newId)
         ++it;
     }
     sortItems(0, Qt::SortOrder::AscendingOrder);
+    applyFilter();
 }
 
 void CTreeView::onChangeObjectName(CNode *pNode)
