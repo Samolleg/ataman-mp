@@ -2482,7 +2482,15 @@ QVector3D CView::getTerrainPos(const int cursorPosX, const int cursorPosY, bool 
 
 void CView::changeOperation(EButtonOp type)
 {
+    const bool leavingTileBrush = m_pOp
+        && m_pOp->operationMethod() == eOperationMethodTileBrush
+        && type != EButtonOpTilebrush;
     cancelPendingOperation();
+    if(leavingTileBrush)
+    {
+        setPreviewTile(false);
+        unsetCursor();
+    }
     if(type != EButtonOpTilebrush && m_landscapeTools
         && (m_landscapeTools->editMode() == ELandscapeEditMode::TilePaint
             || m_landscapeTools->editMode() == ELandscapeEditMode::OverlayPaint))
@@ -2571,11 +2579,14 @@ bool CView::cancelPendingOperation()
 
 bool CView::prepareUndo()
 {
-    if(!m_pOp || m_pOp->operationMethod() == eOperationMethodSelect)
+    if(!m_pOp || m_pOp->operationMethod() == eOperationMethodSelect
+       || m_pOp->operationMethod() == eOperationMethodTileBrush)
         return true;
 
     // Unfinished transforms are previews, not committed history entries.
     // Cancelling a paste preview also removes its temporary objects.
+    // Tile painting is a persistent tool, so Undo must operate on its history
+    // without cancelling the brush or consuming a key press first.
     cancelPendingOperation();
     return false;
 }

@@ -51,6 +51,13 @@ void writePackedNormal(QByteArray& payload, int localX, int localY, quint32 pack
         payload[offset + byte] = char(encoded[byte]);
 }
 
+quint32 readPackedNormal(const QByteArray& payload, int localX, int localY)
+{
+    const int offset = kLandVertexOffset + (localY * kSectorVertices + localX) * kVertexSize + 4;
+    return qFromLittleEndian<quint32>(
+        reinterpret_cast<const uchar*>(payload.constData() + offset));
+}
+
 quint16 readPackedTile(const QByteArray& payload, quint64 baseOffset, int localTile)
 {
     const quint64 offset = baseOffset + quint64(localTile) * kTileSize;
@@ -938,6 +945,7 @@ bool CTerrainEditModel::apply(const STerrainHeightCommand& command, bool forward
         return false;
     }
     QSet<int> commandVertices;
+    QSet<int> affectedNormals;
     for(const STerrainHeightDelta& delta : command.deltas)
     {
         if(delta.globalX < 0 || delta.globalX >= m_vertexCountX ||
@@ -958,6 +966,16 @@ bool CTerrainEditModel::apply(const STerrainHeightCommand& command, bool forward
             return false;
         }
         commandVertices.insert(index);
+        for(int offsetY = -1; offsetY <= 1; ++offsetY)
+        {
+            for(int offsetX = -1; offsetX <= 1; ++offsetX)
+            {
+                const int x = delta.globalX + offsetX;
+                const int y = delta.globalY + offsetY;
+                if(x >= 0 && x < m_vertexCountX && y >= 0 && y < m_vertexCountY)
+                    affectedNormals.insert(globalIndex(x, y));
+            }
+        }
         if(m_conflictedVertices.at(index))
         {
             if(report)
@@ -977,6 +995,20 @@ bool CTerrainEditModel::apply(const STerrainHeightCommand& command, bool forward
         }
     }
 
+    for(int index : affectedNormals)
+    {
+        const int x = index % m_vertexCountX;
+        const int y = index / m_vertexCountX;
+        if(!normalNeighborhoodIsEditable(x, y))
+        {
+            if(report)
+                report->add("terrain.normal_seam", EValidationSeverity::Error,
+                            "An affected preview normal depends on a pre-existing conflicting seam",
+                            QString("%1,%2").arg(x).arg(y));
+            return false;
+        }
+    }
+
     for(const STerrainHeightDelta& delta : command.deltas)
     {
         const int index = globalIndex(delta.globalX, delta.globalY);
@@ -986,9 +1018,49 @@ bool CTerrainEditModel::apply(const STerrainHeightCommand& command, bool forward
         {
             SSector& sector = m_sectors[ref.sectorIndex];
             writeHeight(sector.currentPayload, ref.localX, ref.localY, value);
-            sector.dirty = sector.currentPayload != sector.source.payload;
         }
     }
+
+
+    // The renderer consumes normals directly from the current SEC payload. Keep
+    // them synchronized for live sculpt/import previews instead of waiting for
+    // staged serialization. When an undo restores an untouched neighbourhood,
+    // restore each source normal byte-for-byte; fixture normals are authoritative
+    // and are not silently normalized by the editor.
+    for(int index : affectedNormals)
+    {
+        const int x = index % m_vertexCountX;
+        const int y = index / m_vertexCountX;
+        bool sourceGeometry = true;
+        for(int offsetY = -1; offsetY <= 1 && sourceGeometry; ++offsetY)
+        {
+            for(int offsetX = -1; offsetX <= 1; ++offsetX)
+            {
+                const int sampleX = x + offsetX;
+                const int sampleY = y + offsetY;
+                if(sampleX < 0 || sampleX >= m_vertexCountX
+                   || sampleY < 0 || sampleY >= m_vertexCountY)
+                    continue;
+                const int sample = globalIndex(sampleX, sampleY);
+                if(m_heights.at(sample) != m_originalHeights.at(sample))
+                {
+                    sourceGeometry = false;
+                    break;
+                }
+            }
+        }
+        const quint32 rebuilt = sourceGeometry ? 0u : packedNormal(x, y);
+        for(const SVertexRef& ref : m_refs.at(index))
+        {
+            SSector& sector = m_sectors[ref.sectorIndex];
+            const quint32 value = sourceGeometry
+                ? readPackedNormal(sector.source.payload, ref.localX, ref.localY)
+                : rebuilt;
+            writePackedNormal(sector.currentPayload, ref.localX, ref.localY, value);
+        }
+    }
+    for(SSector& sector : m_sectors)
+        sector.dirty = sector.currentPayload != sector.source.payload;
     return true;
 }
 
