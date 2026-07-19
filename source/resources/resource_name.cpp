@@ -33,9 +33,6 @@ namespace ei {
 float textureUvScale(const QString& textureName)
 {
     const QString normalized = textureName.trimmed().toLower();
-    if(normalized.endsWith(".x4") || normalized.endsWith(".x4.mmp")
-            || normalized.endsWith("_x4") || normalized.endsWith("_x4.mmp"))
-        return 4.0f;
     if(normalized.endsWith(".x2") || normalized.endsWith(".x2.mmp")
             || normalized.endsWith("_x2") || normalized.endsWith("_x2.mmp"))
         return 2.0f;

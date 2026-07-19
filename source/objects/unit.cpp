@@ -287,6 +287,15 @@ void CUnit::refreshTransientVisual()
     const QJsonObject textureObject = equipment.value("componentTextures").toObject();
     for(auto it = textureObject.constBegin(); it != textureObject.constEnd(); ++it)
         componentTextures.insert(it.key(), it.value().toString());
+    if(databaseEquipmentPlan)
+    {
+        QStringList texturePlan;
+        for(auto it = componentTextures.constBegin(); it != componentTextures.constEnd(); ++it)
+            texturePlan.append(it.key() + '=' + it.value());
+        ei::log(eLogInfo, QString("Unit visual plan id=%1 prototype=%2 model=%3 parts=%4 textures=%5")
+                .arg(m_mapID).arg(m_prototypeName, model, visibleParts.join(","),
+                                  texturePlan.join(",")));
+    }
     applyTransientVisual(model, texture, visibleParts, complexion, componentTextures,
                          secondaryTexture);
     m_resolvedAnimationModel = model;

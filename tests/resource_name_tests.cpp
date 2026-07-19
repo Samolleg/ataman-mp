@@ -159,8 +159,11 @@ void ResourceNameTests::resolvesLiveBaseDatabaseWhenProvided()
 void ResourceNameTests::derivesEquipmentAtlasUvScale()
 {
     QCOMPARE(ei::textureUvScale("UnhumaHL_05.bl.2.x2.mmp"), 2.0f);
-    QCOMPARE(ei::textureUvScale("UnhumaPL_05.bl.0.x4.mmp"), 4.0f);
-    QCOMPARE(ei::textureUvScale("unskskin_02_x4"), 4.0f);
+    // The suffix is not a universal multiplier: JMV body/skin x4 atlases use
+    // their stored FIG UVs directly. Corpus and runtime evidence only establish
+    // the packed helmet/weapon/shield x2 transform.
+    QCOMPARE(ei::textureUvScale("UnhumaPL_05.bl.0.x4.mmp"), 1.0f);
+    QCOMPARE(ei::textureUvScale("unskskin_02_x4"), 1.0f);
     QCOMPARE(ei::textureUvScale("unhumaskin_04.mmp"), 1.0f);
 }
 
