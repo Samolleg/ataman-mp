@@ -93,7 +93,7 @@ private slots:
     void jmvLayoutsAreIndependentlyGated();
     void validatesAssemblyPartsWithPlaceholders();
     void armorUsesSlotsAndMaterialTextureResources();
-    void jmvTopArmorWinsAvailableGloveAndBootOverlaps();
+    void jmvTopArmorWinsAvailableLowerLayerOverlaps();
     void jmvMissingTopOverlapRetainsLowerArmor();
     void baseArmorKeepsDisjointSlots();
     void zeroTtiArmorTexturesBaseParts();
@@ -301,19 +301,25 @@ void ProfileVisualProviderTests::armorUsesSlotsAndMaterialTextureResources()
     QCOMPARE(textures.value("rh1.armor12").toString(), QString("unhumash_12.le.0.x4.mmp"));
 }
 
-void ProfileVisualProviderTests::jmvTopArmorWinsAvailableGloveAndBootOverlaps()
+void ProfileVisualProviderTests::jmvTopArmorWinsAvailableLowerLayerOverlaps()
 {
     auto db = database();
+    ei::SItemDatabaseRecord shirt = item("shirt", "armor", 3, 4);
+    shirt.type = "shirt";
     ei::SItemDatabaseRecord gloves = item("gloves", "armor", 6, 5);
     gloves.type = "gloves";
     ei::SItemDatabaseRecord plate = item("plate", "armor", 1, 8);
     plate.type = "plate";
+    ei::SItemDatabaseRecord pants = item("pants", "armor", 4, 7);
+    pants.type = "pants";
     ei::SItemDatabaseRecord boots = item("boots", "armor", 5, 6);
     boots.type = "boots";
     ei::SItemDatabaseRecord leggings = item("leggings", "armor", 2, 9);
     leggings.type = "leggings";
+    db->items.insert("shirt", shirt);
     db->items.insert("gloves", gloves);
     db->items.insert("plate", plate);
+    db->items.insert("pants", pants);
     db->items.insert("boots", boots);
     db->items.insert("leggings", leggings);
 
@@ -323,55 +329,86 @@ void ProfileVisualProviderTests::jmvTopArmorWinsAvailableGloveAndBootOverlaps()
     request.model = "unhuma";
     // Put top armor first to prove precedence is independent of MOB/database order.
     request.armor << "plate.leather" << "leggings.leather"
-                  << "gloves.leather" << "boots.leather";
+                  << "shirt.leather" << "gloves.leather"
+                  << "pants.leather" << "boots.leather";
     request.assemblyParts << "bd.armor08"
+                          << "lh1.armor04" << "rh1.armor04"
+                          << "lh1.armor08" << "rh1.armor08"
                           << "lh2.armor05" << "lh3.armor05" << "rh2.armor05" << "rh3.armor05"
                           << "lh2.armor08" << "lh3.armor08" << "rh2.armor08" << "rh3.armor08"
                           << "hp.armor09"
+                          << "ll1.armor07" << "rl1.armor07"
+                          << "ll1.armor09" << "rl1.armor09"
                           << "ll2.armor06" << "ll3.armor06" << "rl2.armor06" << "rl3.armor06"
                           << "ll2.armor09" << "ll3.armor09" << "rl2.armor09" << "rl3.armor09";
     QJsonObject output;
     QVERIFY(resolver->resolve(request, &output).success);
     const QStringList components = jsonStrings(output, "components");
+    QVERIFY(!components.contains("lh1.armor04"));
+    QVERIFY(!components.contains("rh1.armor04"));
     QVERIFY(!components.contains("lh2.armor05"));
     QVERIFY(!components.contains("rh2.armor05"));
     QVERIFY(!components.contains("ll2.armor06"));
     QVERIFY(!components.contains("rl2.armor06"));
+    QVERIFY(!components.contains("ll1.armor07"));
+    QVERIFY(!components.contains("rl1.armor07"));
+    QVERIFY(components.contains("lh1.armor08"));
+    QVERIFY(components.contains("rh1.armor08"));
     QVERIFY(components.contains("lh2.armor08"));
     QVERIFY(components.contains("rh2.armor08"));
+    QVERIFY(components.contains("ll1.armor09"));
+    QVERIFY(components.contains("rl1.armor09"));
     QVERIFY(components.contains("ll2.armor09"));
     QVERIFY(components.contains("rl2.armor09"));
     const QJsonObject textures = output.value("componentTextures").toObject();
+    QCOMPARE(textures.value("lh1.armor08").toString(), QString("unhumapl_08.le.0.x4.mmp"));
     QCOMPARE(textures.value("lh2.armor08").toString(), QString("unhumapl_08.le.0.x4.mmp"));
+    QCOMPARE(textures.value("ll1.armor09").toString(), QString("unhumalg_09.le.0.x4.mmp"));
     QCOMPARE(textures.value("ll2.armor09").toString(), QString("unhumalg_09.le.0.x4.mmp"));
 }
 
 void ProfileVisualProviderTests::jmvMissingTopOverlapRetainsLowerArmor()
 {
     auto db = database();
+    ei::SItemDatabaseRecord shirt = item("shirt", "armor", 3, 4);
+    shirt.type = "shirt";
     ei::SItemDatabaseRecord gloves = item("gloves", "armor", 6, 5);
     gloves.type = "gloves";
     ei::SItemDatabaseRecord plate = item("plate", "armor", 1, 8);
     plate.type = "plate";
+    ei::SItemDatabaseRecord pants = item("pants", "armor", 4, 7);
+    pants.type = "pants";
+    ei::SItemDatabaseRecord leggings = item("leggings", "armor", 2, 9);
+    leggings.type = "leggings";
+    db->items.insert("shirt", shirt);
     db->items.insert("gloves", gloves);
     db->items.insert("plate", plate);
+    db->items.insert("pants", pants);
+    db->items.insert("leggings", leggings);
 
     ProfileVisualProviderService service;
     const auto resolver = service.equipmentResolver("jmv.v1", db);
     SEquipmentLayoutRequest request;
     request.model = "unhuma";
-    request.armor << "plate.leather" << "gloves.leather";
+    request.armor << "plate.leather" << "leggings.leather"
+                  << "shirt.leather" << "gloves.leather" << "pants.leather";
     request.assemblyParts << "bd.armor08"
+                          << "lh1.armor04" << "rh1.armor04"
                           << "lh2.armor05" << "lh3.armor05"
-                          << "rh2.armor05" << "rh3.armor05";
+                          << "rh2.armor05" << "rh3.armor05"
+                          << "hp.armor09" << "ll1.armor07" << "rl1.armor07";
     QJsonObject output;
     QVERIFY(resolver->resolve(request, &output).success);
     const QStringList components = jsonStrings(output, "components");
     QVERIFY(components.contains("bd.armor08"));
+    QVERIFY(components.contains("lh1.armor04"));
+    QVERIFY(components.contains("rh1.armor04"));
     QVERIFY(components.contains("lh2.armor05"));
     QVERIFY(components.contains("lh3.armor05"));
     QVERIFY(components.contains("rh2.armor05"));
     QVERIFY(components.contains("rh3.armor05"));
+    QVERIFY(components.contains("ll1.armor07"));
+    QVERIFY(components.contains("rl1.armor07"));
     QVERIFY(jsonStrings(output, "placeholders").isEmpty());
 }
 

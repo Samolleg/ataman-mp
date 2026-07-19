@@ -253,14 +253,15 @@ QStringList armorSlots(const QString& type, bool jmv)
     };
     const QString normalized = type.trimmed().toLower();
     QStringList parts = armorPartMap.value(normalized);
-    // JMV top armor can contribute geometry in the lower armor region. Only
-    // claim an overlap when that TTI component actually exists in the active
-    // model assembly (appendArmorComponents performs that check). The game
-    // gives top armor priority: plate over gloves, leggings over boots.
+    // JMV top armor can contribute geometry throughout its lower-layer group.
+    // Only claim an overlap when that TTI component actually exists in the
+    // active model assembly (appendArmorComponents performs that check). The
+    // game gives plate priority over shirt/gloves and leggings priority over
+    // pants/boots, while retaining lower geometry where the top TTI has none.
     if(jmv && normalized == "plate")
-        parts << armorPartMap.value("gloves");
+        parts << armorPartMap.value("shirt") << armorPartMap.value("gloves");
     else if(jmv && normalized == "leggings")
-        parts << armorPartMap.value("boots");
+        parts << armorPartMap.value("pants") << armorPartMap.value("boots");
     return parts;
 }
 
@@ -274,9 +275,11 @@ bool optionalJmvArmorOverlap(const QString& type, const QString& slot)
 {
     const QString normalized = type.trimmed().toLower();
     if(normalized == "plate")
-        return QStringList({"lh2", "lh3", "rh2", "rh3"}).contains(slot, Qt::CaseInsensitive);
+        return QStringList({"lh1", "rh1", "lh2", "lh3", "rh2", "rh3"})
+            .contains(slot, Qt::CaseInsensitive);
     if(normalized == "leggings")
-        return QStringList({"ll2", "ll3", "rl2", "rl3"}).contains(slot, Qt::CaseInsensitive);
+        return QStringList({"ll1", "rl1", "ll2", "ll3", "rl2", "rl3"})
+            .contains(slot, Qt::CaseInsensitive);
     return false;
 }
 

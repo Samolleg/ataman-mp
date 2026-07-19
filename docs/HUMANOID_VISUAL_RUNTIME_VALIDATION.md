@@ -40,7 +40,10 @@ edit `database.res`, JMV/Base archives, live MOBs, maps, or the game install.
 6. JMV: validate `zone1.mob` ID 205 and representative `unhufe`, `unorfe`, and
    `unorma` units. Armor starts with its ordinary database slot. When the
    selected assembly contains overlapping geometry for the same TTI, top armor
-   wins: `plate > gloves` and `leggings > boots`; helmet is likewise top armor.
+   wins across its lower-layer group: `plate > shirt/gloves` and
+   `leggings > pants/boots`; helmet is likewise top armor. A lower component
+   remains visible only when the selected top-armor TTI has no replacement for
+   that anatomical slot.
    A missing optional overlap retains the lower item and is not diagnosed as a
    missing required component. Base keeps the ordinary disjoint slot mapping.
    The displaced anatomical part must not remain visible underneath a winner.
