@@ -12,6 +12,7 @@ class CProgressView : public QProgressBar
 public:
     explicit CProgressView(QWidget* parent = nullptr);
     void reset();
+    void finish();
     void setStageCount(int value);
     void update(double value);
 

@@ -1023,6 +1023,8 @@ void CView::loadMob(QFileInfo &filePath)
             m_pProgress->update(100.0 / unitCount);
         }
     doneCurrent();
+    if(unitCount > 0)
+        m_pProgress->finish();
     ei::log(eLogInfo, QString("Preloaded visual resources for %1 units during MOB load in %2 ms")
             .arg(preloadedUnits).arg(preloadTimer.elapsed()));
     m_aMob.append(pMob);
