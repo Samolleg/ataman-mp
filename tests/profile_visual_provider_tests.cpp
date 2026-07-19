@@ -93,6 +93,9 @@ private slots:
     void jmvLayoutsAreIndependentlyGated();
     void validatesAssemblyPartsWithPlaceholders();
     void armorUsesSlotsAndMaterialTextureResources();
+    void jmvTopArmorWinsAvailableGloveAndBootOverlaps();
+    void jmvMissingTopOverlapRetainsLowerArmor();
+    void baseArmorKeepsDisjointSlots();
     void zeroTtiArmorTexturesBaseParts();
     void missingArmorGeometryPreservesBaseParts();
     void zombieEquipmentUsesSharedHumanoidAtlas();
@@ -296,6 +299,107 @@ void ProfileVisualProviderTests::armorUsesSlotsAndMaterialTextureResources()
     const QJsonObject textures = output.value("componentTextures").toObject();
     QCOMPARE(textures.value("lh1.armor12").toString(), QString("unhumash_12.le.0.x4.mmp"));
     QCOMPARE(textures.value("rh1.armor12").toString(), QString("unhumash_12.le.0.x4.mmp"));
+}
+
+void ProfileVisualProviderTests::jmvTopArmorWinsAvailableGloveAndBootOverlaps()
+{
+    auto db = database();
+    ei::SItemDatabaseRecord gloves = item("gloves", "armor", 6, 5);
+    gloves.type = "gloves";
+    ei::SItemDatabaseRecord plate = item("plate", "armor", 1, 8);
+    plate.type = "plate";
+    ei::SItemDatabaseRecord boots = item("boots", "armor", 5, 6);
+    boots.type = "boots";
+    ei::SItemDatabaseRecord leggings = item("leggings", "armor", 2, 9);
+    leggings.type = "leggings";
+    db->items.insert("gloves", gloves);
+    db->items.insert("plate", plate);
+    db->items.insert("boots", boots);
+    db->items.insert("leggings", leggings);
+
+    ProfileVisualProviderService service;
+    const auto resolver = service.equipmentResolver("jmv.v1", db);
+    SEquipmentLayoutRequest request;
+    request.model = "unhuma";
+    // Put top armor first to prove precedence is independent of MOB/database order.
+    request.armor << "plate.leather" << "leggings.leather"
+                  << "gloves.leather" << "boots.leather";
+    request.assemblyParts << "bd.armor08"
+                          << "lh2.armor05" << "lh3.armor05" << "rh2.armor05" << "rh3.armor05"
+                          << "lh2.armor08" << "lh3.armor08" << "rh2.armor08" << "rh3.armor08"
+                          << "hp.armor09"
+                          << "ll2.armor06" << "ll3.armor06" << "rl2.armor06" << "rl3.armor06"
+                          << "ll2.armor09" << "ll3.armor09" << "rl2.armor09" << "rl3.armor09";
+    QJsonObject output;
+    QVERIFY(resolver->resolve(request, &output).success);
+    const QStringList components = jsonStrings(output, "components");
+    QVERIFY(!components.contains("lh2.armor05"));
+    QVERIFY(!components.contains("rh2.armor05"));
+    QVERIFY(!components.contains("ll2.armor06"));
+    QVERIFY(!components.contains("rl2.armor06"));
+    QVERIFY(components.contains("lh2.armor08"));
+    QVERIFY(components.contains("rh2.armor08"));
+    QVERIFY(components.contains("ll2.armor09"));
+    QVERIFY(components.contains("rl2.armor09"));
+    const QJsonObject textures = output.value("componentTextures").toObject();
+    QCOMPARE(textures.value("lh2.armor08").toString(), QString("unhumapl_08.le.0.x4.mmp"));
+    QCOMPARE(textures.value("ll2.armor09").toString(), QString("unhumalg_09.le.0.x4.mmp"));
+}
+
+void ProfileVisualProviderTests::jmvMissingTopOverlapRetainsLowerArmor()
+{
+    auto db = database();
+    ei::SItemDatabaseRecord gloves = item("gloves", "armor", 6, 5);
+    gloves.type = "gloves";
+    ei::SItemDatabaseRecord plate = item("plate", "armor", 1, 8);
+    plate.type = "plate";
+    db->items.insert("gloves", gloves);
+    db->items.insert("plate", plate);
+
+    ProfileVisualProviderService service;
+    const auto resolver = service.equipmentResolver("jmv.v1", db);
+    SEquipmentLayoutRequest request;
+    request.model = "unhuma";
+    request.armor << "plate.leather" << "gloves.leather";
+    request.assemblyParts << "bd.armor08"
+                          << "lh2.armor05" << "lh3.armor05"
+                          << "rh2.armor05" << "rh3.armor05";
+    QJsonObject output;
+    QVERIFY(resolver->resolve(request, &output).success);
+    const QStringList components = jsonStrings(output, "components");
+    QVERIFY(components.contains("bd.armor08"));
+    QVERIFY(components.contains("lh2.armor05"));
+    QVERIFY(components.contains("lh3.armor05"));
+    QVERIFY(components.contains("rh2.armor05"));
+    QVERIFY(components.contains("rh3.armor05"));
+    QVERIFY(jsonStrings(output, "placeholders").isEmpty());
+}
+
+void ProfileVisualProviderTests::baseArmorKeepsDisjointSlots()
+{
+    auto db = database();
+    ei::SItemDatabaseRecord gloves = item("gloves", "armor", 6, 5);
+    gloves.type = "gloves";
+    ei::SItemDatabaseRecord plate = item("plate", "armor", 1, 8);
+    plate.type = "plate";
+    db->items.insert("gloves", gloves);
+    db->items.insert("plate", plate);
+
+    ProfileVisualProviderService service;
+    const auto resolver = service.equipmentResolver("base.standard.v1", db);
+    SEquipmentLayoutRequest request;
+    request.model = "unhuma";
+    request.armor << "plate.leather" << "gloves.leather";
+    request.assemblyParts << "bd.armor08" << "lh2.armor05" << "rh2.armor05"
+                          << "lh2.armor08" << "rh2.armor08";
+    QJsonObject output;
+    QVERIFY(!resolver->resolve(request, &output).success); // lh3/rh3 glove members are absent.
+    const QStringList components = jsonStrings(output, "components");
+    QVERIFY(components.contains("bd.armor08"));
+    QVERIFY(components.contains("lh2.armor05"));
+    QVERIFY(components.contains("rh2.armor05"));
+    QVERIFY(!components.contains("lh2.armor08"));
+    QVERIFY(!components.contains("rh2.armor08"));
 }
 
 void ProfileVisualProviderTests::zeroTtiArmorTexturesBaseParts()

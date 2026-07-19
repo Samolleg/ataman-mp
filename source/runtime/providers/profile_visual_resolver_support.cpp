@@ -243,7 +243,7 @@ void appendRangedComponents(int typeId, int tti, const SEquipmentLayoutRequest& 
     }
 }
 
-QStringList armorSlots(const QString& type)
+QStringList armorSlots(const QString& type, bool jmv)
 {
     static const QMap<QString, QStringList> armorPartMap = {
         {"helm", {"hd"}}, {"plate", {"bd"}}, {"leggings", {"hp"}},
@@ -251,7 +251,39 @@ QStringList armorSlots(const QString& type)
         {"boots", {"ll2", "ll3", "rl2", "rl3"}},
         {"gloves", {"lh2", "lh3", "rh2", "rh3"}}
     };
-    return armorPartMap.value(type.trimmed().toLower());
+    const QString normalized = type.trimmed().toLower();
+    QStringList parts = armorPartMap.value(normalized);
+    // JMV top armor can contribute geometry in the lower armor region. Only
+    // claim an overlap when that TTI component actually exists in the active
+    // model assembly (appendArmorComponents performs that check). The game
+    // gives top armor priority: plate over gloves, leggings over boots.
+    if(jmv && normalized == "plate")
+        parts << armorPartMap.value("gloves");
+    else if(jmv && normalized == "leggings")
+        parts << armorPartMap.value("boots");
+    return parts;
+}
+
+int armorLayerPriority(const QString& type)
+{
+    const QString normalized = type.trimmed().toLower();
+    return normalized == "helm" || normalized == "plate" || normalized == "leggings" ? 1 : 0;
+}
+
+bool optionalJmvArmorOverlap(const QString& type, const QString& slot)
+{
+    const QString normalized = type.trimmed().toLower();
+    if(normalized == "plate")
+        return QStringList({"lh2", "lh3", "rh2", "rh3"}).contains(slot, Qt::CaseInsensitive);
+    if(normalized == "leggings")
+        return QStringList({"ll2", "ll3", "rl2", "rl3"}).contains(slot, Qt::CaseInsensitive);
+    return false;
+}
+
+QString armorComponentSlot(const QString& component)
+{
+    const int separator = component.indexOf(".armor", 0, Qt::CaseInsensitive);
+    return separator > 0 ? component.left(separator) : component;
 }
 
 QString equipmentTextureName(const QString& model, const QString& itemType, int typeId,
@@ -292,12 +324,13 @@ QString equipmentTextureName(const QString& model, const QString& itemType, int 
 }
 
 QStringList appendArmorComponents(const ei::SItemDatabaseRecord& item,
+                                  bool jmv,
                                   const SEquipmentLayoutRequest& request,
                                   QJsonArray* components, QJsonArray* placeholders,
                                   QJsonArray* diagnostics)
 {
     QStringList matched;
-    const QStringList armorParts = armorSlots(item.type);
+    const QStringList armorParts = armorSlots(item.type, jmv);
     if(armorParts.isEmpty())
     {
         placeholders->append(item.name);
@@ -332,6 +365,8 @@ QStringList appendArmorComponents(const ei::SItemDatabaseRecord& item,
         }
         else
         {
+            if(jmv && optionalJmvArmorOverlap(item.type, slot))
+                continue;
             placeholders->append(expected);
             diagnostics->append("Selected model assembly has no component " + expected);
         }
@@ -437,7 +472,18 @@ SRuntimeProviderResult resolveEquipmentLayout(
     if(database.isNull())
         return failure("equipment.database.unavailable", "Item-name interpretation requires the active profile database.");
 
-    for(const QString& reference : request.armor)
+    QStringList armorReferences = request.armor;
+    std::stable_sort(armorReferences.begin(), armorReferences.end(), [&](const QString& left,
+                                                                         const QString& right) {
+        const auto leftItem = database->items.constFind(itemPrototype(left));
+        const auto rightItem = database->items.constFind(itemPrototype(right));
+        const int leftPriority = leftItem == database->items.constEnd()
+            ? 0 : armorLayerPriority(leftItem->type);
+        const int rightPriority = rightItem == database->items.constEnd()
+            ? 0 : armorLayerPriority(rightItem->type);
+        return leftPriority < rightPriority;
+    });
+    for(const QString& reference : armorReferences)
     {
         QString syntax;
         if(!ei::validateItemReferenceSyntax(reference, &syntax))
@@ -453,8 +499,31 @@ SRuntimeProviderResult resolveEquipmentLayout(
             diagnostics.append(reference + ": armor prototype is absent from the active database");
             continue;
         }
-        const QStringList matched = appendArmorComponents(item.value(), request, &components,
+        const QStringList matched = appendArmorComponents(item.value(), jmv, request, &components,
                                                           &placeholders, &diagnostics);
+        // The stable layer ordering puts JMV top armor last. Replace any
+        // already-selected lower-layer component in the same anatomical slot,
+        // while retaining the lower layer when the top TTI has no geometry.
+        if(jmv && armorLayerPriority(item->type) > 0)
+            for(const QString& component : matched)
+            {
+                const QString slot = armorComponentSlot(component);
+                bool keptWinner = false;
+                for(int old = components.size() - 1; old >= 0; --old)
+                {
+                    const QString oldComponent = components.at(old).toString();
+                    if(armorComponentSlot(oldComponent).compare(slot, Qt::CaseInsensitive) == 0)
+                    {
+                        if(!keptWinner && oldComponent.compare(component, Qt::CaseInsensitive) == 0)
+                            keptWinner = true;
+                        else
+                        {
+                            components.removeAt(old);
+                            componentTextures.remove(oldComponent);
+                        }
+                    }
+                }
+            }
         if(item->type.compare("helm", Qt::CaseInsensitive) == 0 && !matched.isEmpty())
             hidesHair = true;
         const QString materialName = itemMaterial(reference);

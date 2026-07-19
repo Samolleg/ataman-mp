@@ -38,9 +38,12 @@ edit `database.res`, JMV/Base archives, live MOBs, maps, or the game install.
    a structured diagnostic/placeholder is shown.
 5. Confirm the visual and picking passes use the same transient component plan.
 6. JMV: validate `zone1.mob` ID 205 and representative `unhufe`, `unorfe`, and
-   `unorma` units. Each armor record must enable only its database slot
-   (`helm`, `plate`, `leggings`, `shirt`, `pants`, `boots`, or `gloves`), and
-   the displaced anatomical part must not remain visible underneath it.
+   `unorma` units. Armor starts with its ordinary database slot. When the
+   selected assembly contains overlapping geometry for the same TTI, top armor
+   wins: `plate > gloves` and `leggings > boots`; helmet is likewise top armor.
+   A missing optional overlap retains the lower item and is not diagnosed as a
+   missing required component. Base keeps the ordinary disjoint slot mapping.
+   The displaced anatomical part must not remain visible underneath a winner.
 7. Give a JMV unit three or more weapon/shield entries. Confirm only the first
    pair is parsed and rendered; an invalid third entry must not create a
    placeholder.
