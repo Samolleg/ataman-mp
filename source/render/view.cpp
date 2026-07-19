@@ -1175,16 +1175,24 @@ QVector3D CView::getTerrainPos(bool bLand)
     return getTerrainPos(localCursorPos.x(), localCursorPos.y(), bLand);
 }
 
-void CView::loadMob(QFileInfo &filePath)
+bool CView::loadMob(QFileInfo &filePath)
 {
     m_pProgress->reset();
     CMob* pMob = new CMob;
     pMob->attach(this, m_pProgress);
-    pMob->readMob(filePath);
+    const int result = pMob->readMob(filePath);
+    if(result != 0)
+    {
+        ei::log(eLogWarning, QString("MOB load was rejected without registering a partial document path:%1 result:%2")
+            .arg(filePath.absoluteFilePath()).arg(result));
+        delete pMob;
+        return false;
+    }
     m_aMob.append(pMob);
     m_scriptWorkspaces->registerMob(pMob);
     changeCurrentMob(pMob);
     emit mobStateChanged();
+    return true;
 }
 
 void CView::saveMobAs()

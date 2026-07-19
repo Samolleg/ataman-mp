@@ -32,6 +32,8 @@
 #include <QTreeWidget>
 #include <QHeaderView>
 #include <QDialogButtonBox>
+#include <QClipboard>
+#include <QtConcurrent/QtConcurrentRun>
 
 #include <limits>
 
@@ -129,13 +131,20 @@ MainWindow::MainWindow(QWidget* parent) :
     m_validationSummary = new QLabel(tr("No active MOB family."), validationWidget);
     m_validationSummary->setWordWrap(true);
     m_validationTree = new QTreeWidget(validationWidget);
-    m_validationTree->setColumnCount(3);
-    m_validationTree->setHeaderLabels(QStringList() << tr("Severity") << tr("Type") << tr("Details"));
+    m_validationTree->setColumnCount(4);
+    m_validationTree->setHeaderLabels(QStringList() << tr("Severity") << tr("MOB / Type")
+                                      << tr("Source path") << tr("Details"));
     m_validationTree->header()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
     m_validationTree->header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
     m_validationTree->header()->setSectionResizeMode(2, QHeaderView::Stretch);
+    m_validationTree->header()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
+    m_validationTree->setUniformRowHeights(true);
+    m_validationTree->setContextMenuPolicy(Qt::CustomContextMenu);
     validationLayout->addWidget(m_validationSummary);
     validationLayout->addWidget(m_validationTree);
+    m_validationShowMore = new QPushButton(tr("Show 250 more findings"), validationWidget);
+    m_validationShowMore->hide();
+    validationLayout->addWidget(m_validationShowMore);
     m_validationDock = new QDockWidget(tr("MOB Family Validation"), this);
     m_validationDock->setObjectName("mobFamilyValidationDock");
     m_validationDock->setAllowedAreas(Qt::BottomDockWidgetArea | Qt::LeftDockWidgetArea |
@@ -146,6 +155,28 @@ MainWindow::MainWindow(QWidget* parent) :
     m_validationTimer = new QTimer(this);
     m_validationTimer->setSingleShot(true);
     connect(m_validationTimer, &QTimer::timeout, this, &MainWindow::refreshMobFamilyValidation);
+    m_validationWatcher = new QFutureWatcher<CMobFamilyValidationReport>(this);
+    connect(m_validationWatcher, &QFutureWatcher<CMobFamilyValidationReport>::finished,
+            this, &MainWindow::finishMobFamilyValidation);
+    connect(m_validationShowMore, &QPushButton::clicked, this, [this]() {
+        m_validationFindingLimit += 250;
+        updateMobFamilyValidationPanel();
+    });
+    connect(m_validationTree, &QTreeWidget::customContextMenuRequested,
+            this, [this](const QPoint& point) {
+        QTreeWidgetItem* item = m_validationTree->itemAt(point);
+        if(!item) return;
+        QMenu menu(this);
+        QAction* copyPath = menu.addAction(tr("Copy source path"));
+        QAction* copyFinding = menu.addAction(tr("Copy complete entry"));
+        copyPath->setEnabled(!item->data(0, Qt::UserRole).toString().isEmpty());
+        copyFinding->setEnabled(!item->data(0, Qt::UserRole + 1).toString().isEmpty());
+        QAction* selected = menu.exec(m_validationTree->viewport()->mapToGlobal(point));
+        if(selected == copyPath)
+            QApplication::clipboard()->setText(item->data(0, Qt::UserRole).toString());
+        else if(selected == copyFinding)
+            QApplication::clipboard()->setText(item->data(0, Qt::UserRole + 1).toString());
+    });
     QMenu* viewMenu = new QMenu(tr("View"), this);
     m_ui->menuBar->insertMenu(m_ui->menuSettings->menuAction(), viewMenu);
     viewMenu->addAction(m_mapsDock->toggleViewAction());
@@ -1566,12 +1597,17 @@ SMobFamilyValidationRequest MainWindow::mobFamilyValidationRequest()
             : QString("standalone"));
     if(!m_pView)
         return request;
+    if(m_pView->currentMob())
+        request.preferredMobPath = m_pView->currentMob()->filePath().absoluteFilePath();
     for(CMob* mob : m_pView->mobs())
     {
         if(!mob)
             continue;
         const QString path = mob->filePath().absoluteFilePath();
         request.seedMobPaths.append(path);
+        const QString workspaceRoot = QFileInfo(path).absolutePath();
+        if(!request.workspaceRoots.contains(workspaceRoot, Qt::CaseInsensitive))
+            request.workspaceRoots.prepend(workspaceRoot);
         QByteArray data;
         CValidationReport candidateReport;
         QString saveClass;
@@ -1595,6 +1631,8 @@ void MainWindow::refreshMobFamilyValidation()
 {
     if(!m_pView || m_pView->mobs().isEmpty())
     {
+        ++m_validationGeneration;
+        m_hasPendingValidation = false;
         m_familyValidation = CMobFamilyValidationReport();
         m_acknowledgedFindingDigest.clear();
         m_previousFamilyRiskKeys.clear();
@@ -1604,8 +1642,38 @@ void MainWindow::refreshMobFamilyValidation()
         updateMobFamilyValidationPanel();
         return;
     }
+    m_pendingValidationRequest = mobFamilyValidationRequest();
+    m_hasPendingValidation = true;
+    ++m_validationGeneration;
+    m_validationSummary->setText(tr("Validating runtime MOB family…"));
+    startPendingMobFamilyValidation();
+}
+
+void MainWindow::startPendingMobFamilyValidation()
+{
+    if(!m_validationWatcher || m_validationWatcher->isRunning() || !m_hasPendingValidation)
+        return;
+    const SMobFamilyValidationRequest request = m_pendingValidationRequest;
+    m_hasPendingValidation = false;
+    m_runningValidationGeneration = m_validationGeneration;
+    m_validationWatcher->setFuture(QtConcurrent::run([request]() {
+        return CMobFamilyValidator::validate(request);
+    }));
+}
+
+void MainWindow::finishMobFamilyValidation()
+{
+    const CMobFamilyValidationReport result = m_validationWatcher->result();
+    if(m_runningValidationGeneration == m_validationGeneration)
+        applyMobFamilyValidationReport(result);
+    startPendingMobFamilyValidation();
+}
+
+void MainWindow::applyMobFamilyValidationReport(const CMobFamilyValidationReport& report)
+{
     const QByteArray previousDigest = m_familyValidation.findingDigest();
-    m_familyValidation = CMobFamilyValidator::validate(mobFamilyValidationRequest());
+    m_familyValidation = report;
+    m_validationFindingLimit = 250;
     const QByteArray currentDigest = m_familyValidation.findingDigest();
     if(previousDigest != currentDigest)
         m_acknowledgedFindingDigest.clear();
@@ -1627,7 +1695,7 @@ void MainWindow::refreshMobFamilyValidation()
         {
             ei::log(eLogWarning, QString("Editing introduced %1 new runtime-family NID/range risk(s)")
                 .arg(introduced.size()));
-            QMessageBox::warning(this, tr("New family ID risk"),
+            showValidationWarning(tr("New family ID risk"),
                 tr("This edit or family-composition change introduced %1 new NID collision or range overlap. "
                    "The operation was kept and nothing is blocked. Review the MOB Family Validation panel.")
                     .arg(introduced.size()));
@@ -1645,6 +1713,8 @@ void MainWindow::updateMobFamilyValidationPanel()
     if(!m_validationTree || !m_validationSummary)
         return;
     m_validationTree->clear();
+    if(m_validationShowMore)
+        m_validationShowMore->hide();
     if(m_familyValidation.members.isEmpty())
     {
         m_validationSummary->setText(tr("No active MOB family."));
@@ -1653,21 +1723,39 @@ void MainWindow::updateMobFamilyValidationPanel()
     m_validationSummary->setText(m_familyValidation.summary());
     QTreeWidgetItem* membersRoot = new QTreeWidgetItem(m_validationTree,
         QStringList() << tr("INFO") << tr("Family members")
-                      << tr("%1 MOB(s)").arg(m_familyValidation.members.size()));
+                      << QString() << tr("%1 MOB(s)").arg(m_familyValidation.members.size()));
     for(const SMobFamilyMember& member : m_familyValidation.members)
     {
         const QString status = member.missing ? tr("missing")
             : (!member.error.isEmpty() ? tr("unreadable")
                                        : (member.inMemory ? tr("in-memory") : tr("disk")));
         QTreeWidgetItem* item = new QTreeWidgetItem(membersRoot,
-            QStringList() << status.toUpper() << member.fileName << member.inclusionReason);
+            QStringList() << status.toUpper() << member.fileName << member.path
+                          << QString("%1; %2").arg(member.sourceRole, member.inclusionReason));
+        item->setData(0, Qt::UserRole, member.path);
+        item->setData(0, Qt::UserRole + 1,
+                      QString("%1\nSource: %2\nRole: %3\nReason: %4")
+                          .arg(member.fileName, member.path, member.sourceRole,
+                               member.inclusionReason));
         item->setToolTip(2, member.path + (member.requestedBy.isEmpty()
             ? QString() : QString("\nRequested by: %1").arg(member.requestedBy))
             + (member.sourceSha256.isEmpty() ? QString()
                : QString("\nSHA-256: %1").arg(QString::fromLatin1(member.sourceSha256.toHex()))));
+        for(const QString& shadowed : member.shadowedPaths)
+        {
+            QTreeWidgetItem* shadow = new QTreeWidgetItem(item,
+                QStringList() << tr("SHADOWED") << member.fileName << shadowed
+                              << tr("Not collision-checked; workspace source overrides it"));
+            shadow->setData(0, Qt::UserRole, shadowed);
+            shadow->setData(0, Qt::UserRole + 1,
+                            tr("Shadowed source for %1\n%2").arg(member.fileName, shadowed));
+        }
     }
-    for(const SMobFamilyFinding& finding : m_familyValidation.findings)
+    const int visibleFindingCount = qMin(m_validationFindingLimit,
+                                         m_familyValidation.findings.size());
+    for(int findingIndex = 0; findingIndex < visibleFindingCount; ++findingIndex)
     {
+        const SMobFamilyFinding& finding = m_familyValidation.findings.at(findingIndex);
         QString severity;
         QColor color;
         switch(finding.severity)
@@ -1682,11 +1770,20 @@ void MainWindow::updateMobFamilyValidationPanel()
             severity = tr("INFO"); color = QColor(130, 160, 190); break;
         }
         QTreeWidgetItem* item = new QTreeWidgetItem(m_validationTree,
-            QStringList() << severity << finding.category << finding.message);
+            QStringList() << severity << finding.category
+                          << (finding.locations.isEmpty() ? QString() : finding.locations.first())
+                          << finding.message);
         item->setForeground(0, QBrush(color));
         item->setToolTip(2, finding.locations.join('\n'));
+        item->setData(0, Qt::UserRole,
+                      finding.locations.isEmpty() ? QString() : finding.locations.first());
+        item->setData(0, Qt::UserRole + 1,
+                      QString("%1 %2\n%3\n%4")
+                          .arg(severity, finding.category, finding.message,
+                               finding.locations.join('\n')));
         for(const QString& location : finding.locations)
-            new QTreeWidgetItem(item, QStringList() << QString() << tr("Location") << location);
+            new QTreeWidgetItem(item, QStringList() << QString() << tr("Location")
+                                                    << location << QString());
         if(finding.hasNid && finding.code == "nid.collision")
         {
             const QVector<SMobNidOwner> owners = m_familyValidation.nidOwners.value(finding.nid);
@@ -1700,9 +1797,16 @@ void MainWindow::updateMobFamilyValidationPanel()
                         .arg(owner.mobName).arg(suggestion)
                         .arg(shared ? tr(" (unused, but inside a shared range)") : QString())
                     : tr("No free ID remains in %1's effective range").arg(owner.mobName);
-                new QTreeWidgetItem(item, QStringList() << QString() << tr("Repair option") << detail);
+                new QTreeWidgetItem(item, QStringList() << QString() << tr("Repair option")
+                                                        << owner.mobPath << detail);
             }
         }
+    }
+    if(m_validationShowMore && visibleFindingCount < m_familyValidation.findings.size())
+    {
+        m_validationShowMore->setText(tr("Show 250 more findings (%1 remaining)")
+            .arg(m_familyValidation.findings.size() - visibleFindingCount));
+        m_validationShowMore->show();
     }
     membersRoot->setExpanded(true);
     if(m_familyValidation.criticalCount() > 0 && m_validationDock)
@@ -1711,14 +1815,24 @@ void MainWindow::updateMobFamilyValidationPanel()
 
 void MainWindow::showMobFamilyValidation()
 {
-    QApplication::setOverrideCursor(Qt::WaitCursor);
     refreshMobFamilyValidation();
-    QApplication::restoreOverrideCursor();
     if(m_validationDock)
     {
         m_validationDock->show();
         m_validationDock->raise();
+        m_validationDock->setFocus();
     }
+}
+
+void MainWindow::showValidationWarning(const QString& title, const QString& text)
+{
+    QMessageBox message(QMessageBox::Warning, title, text, QMessageBox::NoButton, this);
+    QPushButton* openPanel = message.addButton(tr("Open Validation Panel"),
+                                               QMessageBox::ActionRole);
+    message.addButton(QMessageBox::Ok);
+    message.exec();
+    if(message.clickedButton() == openPanel)
+        showMobFamilyValidation();
 }
 
 void MainWindow::reviewAndRepairNidCollisions()
@@ -1905,7 +2019,7 @@ void MainWindow::notifyFamilyPreflight(const QString& operation)
     m_acknowledgedFindingDigest = digest;
     ei::log(eLogWarning, QString("User continued with %1 after non-blocking MOB family validation findings:\n%2")
         .arg(operation, m_familyValidation.toText()));
-    QMessageBox::warning(this, tr("MOB family validation"),
+    showValidationWarning(tr("MOB family validation"),
         tr("%1 found possible runtime-family ID problems. Endurance will not block %2.\n\n%3\n\n"
            "Review the MOB Family Validation panel for the complete report.")
             .arg(m_familyValidation.summary(), operation,
@@ -1920,7 +2034,7 @@ void MainWindow::notifyProposedNid(quint32 nid, const QString& mobPath)
         return;
     ei::log(eLogWarning, QString("Proposed NID %1 overlaps the active family:\n%2")
         .arg(nid).arg(details));
-    QMessageBox::warning(this, tr("NID overlap"),
+    showValidationWarning(tr("NID overlap"),
         tr("NID %1 overlaps an object or declared range in the active runtime family. "
            "The edit will still be applied.\n\n%2")
             .arg(nid).arg(details));

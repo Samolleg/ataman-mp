@@ -105,6 +105,18 @@ QByteArray emptyMpr()
     stream << quint32(0x019CE23C) << quint32(0) << quint32(16) << quint32(0);
     return bytes;
 }
+
+const SMobSection* firstSectionOfType(const QVector<SMobSection>& sections, quint32 type)
+{
+    for(const SMobSection& candidate : sections)
+    {
+        if(candidate.type == type)
+            return &candidate;
+        if(const SMobSection* nested = firstSectionOfType(candidate.children, type))
+            return nested;
+    }
+    return nullptr;
+}
 }
 
 class EnduranceDocumentTests : public QObject
@@ -115,6 +127,7 @@ private slots:
     void unchangedMobIsByteIdentical();
     void duplicateMobIdsAreWarningsOnly();
     void unknownLeafIsPreservedAsOpaque();
+    void suppliedOpaqueChestCanPatchKnownLeafSafely();
     void malformedMobRootIsRejected();
     void legacyMapEdTrapArrayLengthsArePreserved();
     void semanticAnomaliesAreWarningsOnly();
@@ -194,6 +207,55 @@ void EnduranceDocumentTests::unknownLeafIsPreservedAsOpaque()
     QVERIFY(leaf.opaque);
     QCOMPARE(leaf.rawBytes, unknown);
     QCOMPARE(document.serialize(), bytes);
+    int opaqueWarnings = 0;
+    for(const SValidationFinding& finding : report.findings())
+    {
+        if(finding.code != "mob.opaque_unknown")
+            continue;
+        ++opaqueWarnings;
+        QVERIFY(finding.message.contains("0xdeadbeef", Qt::CaseInsensitive));
+        QVERIFY(finding.message.contains("offset 8"));
+    }
+    QCOMPARE(opaqueWarnings, 1);
+    QVERIFY(!report.hasErrors());
+}
+
+void EnduranceDocumentTests::suppliedOpaqueChestCanPatchKnownLeafSafely()
+{
+    const QString fixture = qEnvironmentVariable("ENDURANCE_CHEST_FIXTURE");
+    if(fixture.isEmpty())
+        QSKIP("ENDURANCE_CHEST_FIXTURE was not provided");
+    CMobDocument source;
+    CValidationReport openReport;
+    QVERIFY(source.load(QFileInfo(fixture), &openReport));
+    const QByteArray original = source.serialize();
+    QCOMPARE(original.size(), 1532);
+    const SMobSection* opaque = firstSectionOfType(source.sections(), 0xACCEECCC);
+    QVERIFY(opaque);
+    QCOMPARE(opaque->offset, quint64(1166));
+    QCOMPARE(opaque->declaredLength, quint32(12));
+    QCOMPARE(opaque->rawBytes.mid(8), QByteArray(4, '\0'));
+    const QByteArray opaqueBytes = opaque->rawBytes;
+
+    const SMobSection* nid = firstSectionOfType(source.sections(), 0xB002);
+    QVERIFY(nid);
+    quint32 oldNid = 0;
+    QDataStream nidStream(nid->rawBytes.mid(8));
+    nidStream.setByteOrder(QDataStream::LittleEndian);
+    nidStream >> oldNid;
+    CMobEditTransaction transaction("opaque fixture known-leaf edit");
+    transaction.replaceLeafPayload(nid->path, nid->sha256, u32(oldNid + 1), nid->type,
+                                   nid->rawBytes.mid(8));
+    QByteArray candidate;
+    CValidationReport transactionReport;
+    QVERIFY(source.applyTransaction(transaction, &candidate, &transactionReport));
+    QVERIFY(candidate != original);
+    CMobDocument reopened;
+    QVERIFY(reopened.loadBytes(candidate, "opaque-chest-candidate.mob", &transactionReport));
+    const SMobSection* candidateOpaque = firstSectionOfType(reopened.sections(), 0xACCEECCC);
+    QVERIFY(candidateOpaque);
+    QCOMPARE(candidateOpaque->rawBytes, opaqueBytes);
+    QCOMPARE(source.serialize(), original);
 }
 
 void EnduranceDocumentTests::malformedMobRootIsRejected()

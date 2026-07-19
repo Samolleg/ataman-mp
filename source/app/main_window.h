@@ -12,6 +12,7 @@
 #include <QMap>
 #include <QSet>
 #include <QVector3D>
+#include <QFutureWatcher>
 #include "types.h"
 #include "map_catalog.h"
 #include "map_spawn_planner.h"
@@ -39,6 +40,7 @@ class QToolButton;
 class QLabel;
 class QTreeWidget;
 class QTimer;
+class QPushButton;
 
 struct SWindowTitle
 {
@@ -94,8 +96,12 @@ private:
     SMobFamilyValidationRequest mobFamilyValidationRequest();
     void scheduleMobFamilyValidation(int delayMs = 300);
     void refreshMobFamilyValidation();
+    void startPendingMobFamilyValidation();
+    void finishMobFamilyValidation();
+    void applyMobFamilyValidationReport(const CMobFamilyValidationReport& report);
     void updateMobFamilyValidationPanel();
     void showMobFamilyValidation();
+    void showValidationWarning(const QString& title, const QString& text);
     void reviewAndRepairNidCollisions();
     void notifyFamilyPreflight(const QString& operation);
     void notifyProposedNid(quint32 nid, const QString& mobPath);
@@ -163,6 +169,13 @@ private:
     QTreeWidget* m_validationTree;
     QLabel* m_validationSummary;
     QTimer* m_validationTimer;
+    QFutureWatcher<CMobFamilyValidationReport>* m_validationWatcher{nullptr};
+    SMobFamilyValidationRequest m_pendingValidationRequest;
+    quint64 m_validationGeneration{0};
+    quint64 m_runningValidationGeneration{0};
+    bool m_hasPendingValidation{false};
+    int m_validationFindingLimit{250};
+    QPushButton* m_validationShowMore{nullptr};
     CMobFamilyValidationReport m_familyValidation;
     QByteArray m_acknowledgedFindingDigest;
     QSet<QString> m_previousFamilyRiskKeys;

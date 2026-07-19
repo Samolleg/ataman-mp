@@ -13,12 +13,15 @@ int main(int argc, char* argv[])
     QCommandLineOption seed(QStringList() << "s" << "seed", "Explicit MOB seed", "path");
     QCommandLineOption primary(QStringList() << "p" << "primary", "map.txt primary MOB", "path");
     QCommandLineOption root(QStringList() << "r" << "map-root", "MOB lookup root", "directory");
+    QCommandLineOption workspaceRoot("workspace-root", "Workspace overlay root", "directory");
+    QCommandLineOption preferred("preferred", "Preferred opened MOB source", "path");
     QCommandLineOption profile("profile", "Compatibility profile id", "id", "jmv");
     QCommandLineOption expectNid("expect-nid", "Require a critical collision for this NID", "nid");
     QCommandLineOption expectMember("expect-member", "Require this family member", "file");
     QCommandLineOption suggestFor("suggest-for", "Print deterministic repairs for owners in this MOB", "file");
     QCommandLineOption expectSuggestions("expect-suggestions", "Require comma-separated deterministic repairs", "ids");
-    parser.addOptions({seed, primary, root, profile, expectNid, expectMember,
+    parser.addOptions({seed, primary, root, workspaceRoot, preferred,
+                       profile, expectNid, expectMember,
                        suggestFor, expectSuggestions});
     parser.process(app);
 
@@ -28,6 +31,8 @@ int main(int argc, char* argv[])
     request.seedMobPaths = parser.values(seed);
     request.mappedPrimaryMobPath = parser.value(primary);
     request.mapRoots = parser.values(root);
+    request.workspaceRoots = parser.values(workspaceRoot);
+    request.preferredMobPath = parser.value(preferred);
     if(request.seedMobPaths.isEmpty() && request.mappedPrimaryMobPath.isEmpty())
     {
         QTextStream(stderr) << "At least one --seed or --primary is required.\n";

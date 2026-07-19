@@ -19,6 +19,11 @@ QString foldedPath(const QString& path)
     return QDir::cleanPath(QFileInfo(path).absoluteFilePath()).toLower();
 }
 
+QString logicalMobName(const QString& path)
+{
+    return QFileInfo(path).fileName().toLower();
+}
+
 QString severityName(EMobFamilyFindingSeverity severity)
 {
     switch(severity)
@@ -248,6 +253,67 @@ QString resolveMob(const QString& name, const QString& requestingPath,
     return QString();
 }
 
+QString resolveOverlayMob(const QString& name, const QString& requestingPath,
+                          const SMobFamilyValidationRequest& request)
+{
+    const QString logical = logicalMobName(name);
+    auto matchingPath = [&logical](const QString& candidate) -> QString
+    {
+        const QFileInfo info(candidate);
+        return info.exists() && logicalMobName(candidate) == logical
+            ? info.absoluteFilePath() : QString();
+    };
+    QString found = matchingPath(request.preferredMobPath);
+    if(!found.isEmpty()) return found;
+    for(int index = request.seedMobPaths.size() - 1; index >= 0; --index)
+    {
+        found = matchingPath(request.seedMobPaths.at(index));
+        if(!found.isEmpty()) return found;
+    }
+    for(const QString& root : request.workspaceRoots)
+    {
+        found = findCaseInsensitive(root, QFileInfo(name).fileName());
+        if(!found.isEmpty()) return found;
+    }
+    if(!requestingPath.isEmpty())
+    {
+        found = findCaseInsensitive(QFileInfo(requestingPath).absolutePath(),
+                                    QFileInfo(name).fileName());
+        if(!found.isEmpty()) return found;
+    }
+    return resolveMob(name, QString(), request.mapRoots);
+}
+
+QStringList shadowedOverlayPaths(const QString& logicalName, const QString& activePath,
+                                 const SMobFamilyValidationRequest& request)
+{
+    QStringList candidates = request.seedMobPaths;
+    if(!request.mappedPrimaryMobPath.isEmpty())
+        candidates.append(request.mappedPrimaryMobPath);
+    for(const QString& root : request.workspaceRoots)
+    {
+        const QString path = findCaseInsensitive(root, logicalName);
+        if(!path.isEmpty()) candidates.append(path);
+    }
+    for(const QString& root : request.mapRoots)
+    {
+        const QString path = findCaseInsensitive(root, logicalName);
+        if(!path.isEmpty()) candidates.append(path);
+    }
+    QStringList result;
+    const QString activeKey = foldedPath(activePath);
+    for(const QString& candidate : candidates)
+    {
+        if(logicalMobName(candidate) != logicalName.toLower()
+           || foldedPath(candidate) == activeKey)
+            continue;
+        const QString absolute = QFileInfo(candidate).absoluteFilePath();
+        if(!result.contains(absolute, Qt::CaseInsensitive))
+            result.append(absolute);
+    }
+    return result;
+}
+
 bool rangeContains(const SMobIdRangeSnapshot& range, quint32 id)
 {
     return range.minimum <= range.maximum && id >= range.minimum && id <= range.maximum;
@@ -435,15 +501,15 @@ CMobFamilyValidationReport CMobFamilyValidator::validate(
 
     struct Pending { QString path; QString reason; QString requestedBy; };
     QQueue<Pending> pending;
-    if(!request.explicitComposition && !request.mappedPrimaryMobPath.isEmpty())
-        pending.enqueue({request.mappedPrimaryMobPath, "map.txt primary", QString()});
     for(const QString& seed : request.seedMobPaths)
         pending.enqueue({seed, "explicit seed", QString()});
+    if(!request.explicitComposition && !request.mappedPrimaryMobPath.isEmpty())
+        pending.enqueue({request.mappedPrimaryMobPath, "map.txt primary", QString()});
     if(request.includeProfileWideMobs &&
        (request.profileId.contains("jamais", Qt::CaseInsensitive) ||
         request.profileId.compare("jmv", Qt::CaseInsensitive) == 0))
     {
-        const QString autorun = resolveMob("AutoRunSpellAddon123.mob", QString(), request.mapRoots);
+        const QString autorun = resolveOverlayMob("AutoRunSpellAddon123.mob", QString(), request);
         if(!autorun.isEmpty())
             pending.enqueue({autorun, "profile-wide autorun", QString()});
     }
@@ -452,12 +518,10 @@ CMobFamilyValidationReport CMobFamilyValidator::validate(
     while(!pending.isEmpty())
     {
         const Pending item = pending.dequeue();
-        QString path = item.path;
-        if(!QFileInfo(path).exists())
-            path = resolveMob(path, item.requestedBy, request.mapRoots);
+        QString path = resolveOverlayMob(item.path, item.requestedBy, request);
         const QString key = path.isEmpty()
             ? QString("missing:%1:%2").arg(item.requestedBy, item.path).toLower()
-            : foldedPath(path);
+            : logicalMobName(path);
         if(visited.contains(key))
             continue;
         visited.insert(key);
@@ -465,8 +529,38 @@ CMobFamilyValidationReport CMobFamilyValidator::validate(
         SMobFamilyMember member;
         member.path = path.isEmpty() ? item.path : QFileInfo(path).absoluteFilePath();
         member.fileName = QFileInfo(member.path).fileName();
+        member.logicalName = member.fileName.toLower();
+        member.shadowedPaths = path.isEmpty() ? QStringList()
+            : shadowedOverlayPaths(member.logicalName, member.path, request);
+        const QString pathKey = foldedPath(member.path);
+        if(request.inMemoryMobData.contains(pathKey))
+            member.sourceRole = "in-memory workspace";
+        else if(request.seedMobPaths.contains(member.path, Qt::CaseInsensitive))
+            member.sourceRole = request.explicitComposition ? "collection" : "opened workspace";
+        else if(!item.requestedBy.isEmpty()
+                && QFileInfo(item.requestedBy).absolutePath().compare(
+                    QFileInfo(member.path).absolutePath(), Qt::CaseInsensitive) == 0)
+            member.sourceRole = "workspace dependency";
+        else
+            member.sourceRole = item.reason == "profile-wide autorun"
+                ? "profile-wide" : "installed fallback";
         member.inclusionReason = item.reason;
         member.requestedBy = item.requestedBy;
+        QStringList competingOpenSources;
+        for(const QString& shadowed : member.shadowedPaths)
+            if(request.seedMobPaths.contains(shadowed, Qt::CaseInsensitive))
+                competingOpenSources.append(shadowed);
+        if(!competingOpenSources.isEmpty())
+        {
+            SMobFamilyFinding finding;
+            finding.severity = EMobFamilyFindingSeverity::Warning;
+            finding.code = "family.source_ambiguous";
+            finding.category = "Source ambiguity";
+            finding.message = QString("Multiple opened MOBs use logical name %1; %2 is authoritative")
+                .arg(member.fileName, member.path);
+            finding.locations << member.path << competingOpenSources;
+            report.findings.append(finding);
+        }
         if(path.isEmpty())
         {
             member.missing = true;
@@ -526,7 +620,7 @@ CMobFamilyValidationReport CMobFamilyValidator::validate(
                 report.findings.append(finding);
                 continue;
             }
-            const QString target = resolveMob(reference.fileName, path, request.mapRoots);
+            const QString target = resolveOverlayMob(reference.fileName, path, request);
             pending.enqueue({target.isEmpty() ? reference.fileName : target,
                              QString("AddMob at line %1").arg(reference.line), path});
         }
@@ -629,6 +723,22 @@ CMobFamilyValidationReport CMobFamilyValidator::validate(
         }
     }
 
+    QVector<uint> collidingIds;
+    for(auto it = report.nidOwners.constBegin(); it != report.nidOwners.constEnd(); ++it)
+        if(it.value().size() >= 2)
+            collidingIds.append(it.key());
+    QSet<quint32> typedReferences;
+    QSet<quint32> scriptReferences;
+    for(const SMobFamilyMember& member : report.members)
+    {
+        if(member.missing || !member.error.isEmpty()) continue;
+        for(const SMobObjectSnapshot& object : member.objects)
+            if(object.hasParentId)
+                typedReferences.insert(object.parentId);
+        for(const SMobScriptReference& reference :
+            CScriptReferenceAnalyzer::findObjectIds(member.script, collidingIds))
+            scriptReferences.insert(reference.objectId);
+    }
     for(auto it = report.nidOwners.constBegin(); it != report.nidOwners.constEnd(); ++it)
     {
         if(it.value().size() < 2)
@@ -643,15 +753,8 @@ CMobFamilyValidationReport CMobFamilyValidator::validate(
                          (!owner.hasParentId || owner.parentId == 0
                           || owner.parentId == std::numeric_limits<quint32>::max());
         }
-        for(const SMobFamilyMember& member : report.members)
-        {
-            if(member.missing || member.script.isEmpty()) continue;
-            if(!CScriptReferenceAnalyzer::findObjectIds(member.script, ids).isEmpty())
-                safeStatic = false;
-            for(const SMobObjectSnapshot& object : member.objects)
-                if(object.hasParentId && object.parentId == it.key())
-                    safeStatic = false;
-        }
+        if(scriptReferences.contains(it.key()) || typedReferences.contains(it.key()))
+            safeStatic = false;
         SMobFamilyFinding finding;
         finding.severity = safeStatic ? EMobFamilyFindingSeverity::Info
                                       : EMobFamilyFindingSeverity::Critical;

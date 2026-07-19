@@ -409,6 +409,30 @@ void addMobSemanticWarnings(const QVector<SMobSection>& sections,
     if(!report)
         return;
 
+    // These are the documented/confirmed direct children of OBJECT_DB_FILE.
+    // A bounded leaf outside this set is still structurally safe to retain,
+    // but its meaning is not known and must not be silently normalized.
+    static const QSet<quint32> knownRootChildren = {
+        0xC000, 0xD000, 0xACCEECCA, 0xACCEECCB,
+        0xFF00, 0xFF01, 0xDDDDDDD1, 0xABD0, 0x1E00,
+        0xE000, 0xF000, 0xB000, 0xAA00, 0xCC00, 0xDD00,
+        0x31415926
+    };
+    if(!sections.isEmpty() && sections.front().type == 0xA000)
+    {
+        for(const SMobSection& child : sections.front().children)
+        {
+            if(knownRootChildren.contains(child.type))
+                continue;
+            report->add("mob.opaque_unknown", EValidationSeverity::Warning,
+                        QString("Preserving unknown opaque MOB record type 0x%1 at byte offset %2; length %3, SHA-256 %4")
+                            .arg(child.type, 8, 16, QLatin1Char('0'))
+                            .arg(child.offset).arg(child.declaredLength)
+                            .arg(QString::fromLatin1(child.sha256.toHex())),
+                        sourcePath + ":" + child.path);
+        }
+    }
+
     QVector<const SMobSection*> targets;
     collectSections(sections, 0xBBAB0004, targets);
     for(const SMobSection* target : targets)

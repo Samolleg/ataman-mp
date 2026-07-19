@@ -5,7 +5,7 @@ work is ordered from the newest planned minor line to the oldest completed one.
 An item is checked only after its implementation has landed and received the
 stated validation. Completed code should carry a commit, test, or release link.
 
-Current development line: `0.2.1-alpha.5` focused closed testing.
+Current development line: `0.2.1-alpha.6` focused closed testing.
 
 <details open>
 <summary><strong>General wishlist — not assigned to a release</strong></summary>
@@ -173,8 +173,9 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
 
 ### Current 0.2.x status
 
-- **Current tester build:** `0.2.1-alpha.5`, focused on warning-heavy
-  runtime-family range/NID validation and opt-in conservative repair.
+- **Current tester build:** `0.2.1-alpha.6`, hardening runtime-family source
+  overlays, responsive validation, and safe opaque-record preservation after
+  the first alpha.5 tester pass.
 - **MOB hardening:** complete for the supported editing surface. Remaining work
   is validation breadth and new editing features, not another serializer
   rewrite.
@@ -187,7 +188,7 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
 - **0.2.1 hot reload:** the owned-process protocol and immutable generations are
   implemented. Main-MOB reload has worked in testing; supplemental/collection
   reload and same-position restoration remain unfinished.
-- **Next high-priority editor UX task after alpha.5 feedback:** fuzzy,
+- **Next high-priority editor UX task after alpha.6 validation:** fuzzy,
   parameter-aware outliner filtering. Unreal-style MOB ownership/locking is the
   larger workspace follow-up.
 
@@ -224,10 +225,24 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
     and deterministic Autozone suggestions `1000321`-`1000328`.
   - [ ] Freeze the complete 162-MOB JMV family manifest and add synthetic
     intra-file, incomplete-family, undo/redo, and reference-refusal fixtures.
+  - [x] Resolve copied workspaces as logical-filename overlays over installed
+    Maps sources. One logical MOB contributes objects and ranges once; the
+    active/in-memory, collection, workspace, installed-fallback, and
+    profile-wide precedence is visible with full paths and shadowed sources.
+  - [x] Run family parsing, script/reference indexing, and collision analysis
+    asynchronously with debouncing, stale-generation rejection, and bounded
+    validation-panel rendering. Save and Test Current Map remain available.
+  - [x] Preserve structurally bounded unknown root records as opaque bytes and
+    warn once instead of rejecting the editable known projection. Failed or
+    unsafe MOB projections are discarded before they can become active or
+    dirty. The JMV `Autozone7chest.mob` `0xACCEECCC` fixture is covered by a
+    byte-preservation regression test.
   - Implementation and focused corpus harness: local commit `9ddc802`;
     [alpha.5 validation](docs/releases/0.2.1-alpha.5-validation.md). The commit
     is not yet on GitHub because the push was denied until the private remote is
     explicitly re-authorized.
+  - Source/projection hardening and focused tests:
+    [alpha.6 validation](docs/releases/0.2.1-alpha.6-validation-hardening.md).
   - Detailed design: [structural MOB NID validation plan](docs/research/structural-mob-nid-validation-plan.md).
 
 ### P0: direct-launch stabilization

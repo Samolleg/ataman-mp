@@ -372,9 +372,17 @@ bool CMob::deserialize(QByteArray data)
             const QString tag = parser.nextTag();
             if(tag == "ROOT")
                 break;
-            ei::log(eLogFatal, QString("Unsupported top-level MOB record while projecting tag:%1 bytes:%2")
-                .arg(tag).arg(readByte));
-            return false;
+            // Strict structural parsing has already proved this record is
+            // bounded. Keep it in the raw document and omit it only from the
+            // editable legacy projection; transaction saves patch the source
+            // tree and therefore retain these bytes exactly.
+            const uint skipped = parser.skipTag();
+            if(skipped < 8)
+                return false;
+            readByte += skipped;
+            ei::log(eLogWarning, QString("Editable projection retained an opaque top-level MOB record tag:%1 bytes:%2 length:%3")
+                .arg(tag.isEmpty() ? QString("unknown") : tag)
+                .arg(readByte - skipped).arg(skipped));
         }
     }
     m_pProgress->update(step);
@@ -1845,8 +1853,11 @@ bool CMob::buildValidatedCandidate(QByteArray* data,
     if(saveClass)
         saveClass->clear();
 
-    refreshDirtyFromProjection();
-    if(!m_bDirty && !m_originalData.isEmpty())
+    QByteArray currentProjection;
+    serializeMob(currentProjection, false);
+    const bool projectionDirty = m_cleanProjection.isEmpty()
+        || currentProjection != m_cleanProjection;
+    if(!projectionDirty && !m_originalData.isEmpty())
     {
         *data = m_originalData;
         if(saveClass)
@@ -1855,8 +1866,6 @@ bool CMob::buildValidatedCandidate(QByteArray* data,
     }
     else
     {
-        QByteArray currentProjection;
-        serializeMob(currentProjection, false);
         CValidationReport transactionReport;
         CMobEditTransaction transaction;
         QByteArray transactionCandidate;

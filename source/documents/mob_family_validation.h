@@ -21,8 +21,11 @@ struct SMobFamilyMember
 {
     QString path;
     QString fileName;
+    QString logicalName;
+    QString sourceRole;
     QString inclusionReason;
     QString requestedBy;
+    QStringList shadowedPaths;
     bool missing = false;
     bool inMemory = false;
     QByteArray sourceSha256;
@@ -64,6 +67,8 @@ struct SMobFamilyValidationRequest
     QString profileId;
     QStringList seedMobPaths;
     QString mappedPrimaryMobPath;
+    QString preferredMobPath;
+    QStringList workspaceRoots;
     bool explicitComposition = false;
     bool includeProfileWideMobs = true;
     QStringList mapRoots;

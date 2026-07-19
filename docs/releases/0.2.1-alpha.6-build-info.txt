@@ -1,0 +1,7 @@
+EI Mapper: Endurance Edition 0.2.1-alpha.6
+Branch: feature/viewport-test-controls-base-probe
+Editor: Qt 5.12.12 / MinGW 7.3 x64 release build
+Purpose: copied-workspace validation source overlays, asynchronous validation, and opaque-record-safe MOB projection
+Evidence: 33 Endurance document tests passed; workspace overlay tests passed; supplied Zone 7 fixture resolved seven logical MOBs and exactly eight genuine incompatible collisions in approximately 0.4 seconds; full application build passed
+Policy: unknown but structurally bounded records are preserved byte-for-byte and warned once; findings never block editing, saving, Test Current Map, or hot reload
+Known limits: full 162-MOB golden manifest, per-reference repair assignment, and coordinated multi-MOB repair save cohorts remain follow-up work

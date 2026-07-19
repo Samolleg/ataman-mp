@@ -72,7 +72,7 @@ public:
     void unloadLand();
     void saveLand();
     void saveLandAs();
-    void loadMob(QFileInfo& filePath);
+    bool loadMob(QFileInfo& filePath);
     void saveMobAs();
     void saveActiveMob();
     void saveAllMob();
