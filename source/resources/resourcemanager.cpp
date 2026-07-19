@@ -991,10 +991,14 @@ QOpenGLTexture* CTextureList::layeredTexture(const QStringList& layerNames,
         ei::log(eLogWarning, "Cannot compose humanoid body atlas: " + diagnostic);
         return textureDefault();
     }
-    QOpenGLTexture* texture = new QOpenGLTexture(composite);
+    // Match the established QImage upload path used by ordinary PNT3 MMPs.
+    // The QOpenGLTexture(QImage) convenience constructor may select different
+    // storage/orientation behavior even though the FIG UVs are unchanged.
+    QOpenGLTexture* texture = new QOpenGLTexture(QOpenGLTexture::Target2D);
     texture->setMinificationFilter(QOpenGLTexture::Nearest);
     texture->setMagnificationFilter(QOpenGLTexture::Nearest);
     texture->setWrapMode(QOpenGLTexture::Repeat);
+    texture->setData(composite);
     m_aTexture.insert(cacheKey, texture);
     return texture;
 }

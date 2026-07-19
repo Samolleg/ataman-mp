@@ -552,7 +552,7 @@ SRuntimeProviderResult resolveEquipmentLayout(
             else
                 bodyTextureLayers.append(texture);
         }
-        if(item->textureType1 > 0 && item->type.compare("helm", Qt::CaseInsensitive) != 0)
+        if(item->textureType1 > 0)
             for(const QString& component : matched)
             {
                 const int separator = component.indexOf(".armor", 0, Qt::CaseInsensitive);

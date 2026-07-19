@@ -292,10 +292,13 @@ void CUnit::refreshTransientVisual()
         QStringList texturePlan;
         for(auto it = componentTextures.constBegin(); it != componentTextures.constEnd(); ++it)
             texturePlan.append(it.key() + '=' + it.value());
-        ei::log(eLogInfo, QString("Unit visual plan id=%1 prototype=%2 model=%3 parts=%4 textures=%5 bodyLayers=%6")
+        ei::log(eLogInfo, QString("Unit visual plan id=%1 prototype=%2 model=%3 parts=%4 textures=%5 bodyLayers=%6 "
+                                 "constitution=%7,%8,%9 embeddedConstitution=%10,%11,%12")
                 .arg(m_mapID).arg(m_prototypeName).arg(model).arg(visibleParts.join(","))
                 .arg(texturePlan.join(","))
-                .arg(jsonStringList(equipment, "bodyTextureLayers").join(",")));
+                .arg(jsonStringList(equipment, "bodyTextureLayers").join(","))
+                .arg(complexion.x()).arg(complexion.y()).arg(complexion.z())
+                .arg(m_complection.x()).arg(m_complection.y()).arg(m_complection.z()));
     }
     const QStringList equipmentBodyLayers = jsonStringList(equipment, "bodyTextureLayers");
     QStringList bodyTextureLayers;
@@ -350,9 +353,20 @@ void CUnit::refreshAnimationPose()
         else
         { result.code = "animation.provider.unavailable"; result.message = diagnostic; }
         if(result.success)
+        {
             m_idleClip = parseNestedAnimationClip(
                 CObjectList::getInstance()->modelAnimation(m_resolvedAnimationModel),
                 resolved.value("actionName").toString(), resolved.value("length").toInt());
+            int morphChannels = 0;
+            for(const SAnimationChannel& channel : m_idleClip.channels)
+                if(!channel.morphations.isEmpty()) ++morphChannels;
+            ei::log(eLogInfo, QString("Unit animation plan id=%1 prototype=%2 model=%3 action=%4 length=%5 "
+                                     "morphChannels=%6")
+                    .arg(m_mapID).arg(m_prototypeName).arg(m_resolvedAnimationModel)
+                    .arg(resolved.value("actionName").toString())
+                    .arg(resolved.value("length").toInt())
+                    .arg(morphChannels));
+        }
         if(!result.success || !m_idleClip.valid())
         {
             const QString detail = !result.message.isEmpty() ? result.message : m_idleClip.diagnostics.join("; ");
