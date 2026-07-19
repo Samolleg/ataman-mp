@@ -1,0 +1,6 @@
+EI Mapper: Endurance Edition 0.2.1-alpha.2
+Branch: feature/viewport-test-controls-base-probe
+Editor: Qt 5.12.12 / MinGW 7.3 x64 release build
+Runtime bridge: MSVC 2022 x86 experimental JMV direct-launch/hot-reload provider
+Changes: consumes the complete Play from Here pointer sequence; makes the placed custom spawn authoritative; emits valid EI script statements using GetLeader() for custom placement and GodMode(0,3); stages validated collection supplemental MOBs under their original names; redirects only script-requested supplemental MOBs; refreshes the stable supplemental set during Ctrl+F5 hot reload with rollback
+Limitations: custom spawn, Godmode, supplemental redirection, and hot reload require runtime tester confirmation; same-map position/facing preservation is not implemented; Base supplemental-MOB launch remains unsupported

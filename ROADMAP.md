@@ -219,9 +219,11 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
     existing `WorldScript` body, before early returns or `KillScript` paths.
   - Current run logs prove the redirected autorun MOB is opened, but its
     commands were inserted before the MOB's own leading initialization delay.
-    Current source preserves that delay and injects `SetCPFast`/`GodMode`
-    immediately after it. Runtime confirmation is still required.
-    ([`4e62424`](https://github.com/Ilufus/ei-mapper-endurance/commit/4e62424))
+    Alpha.2 preserves that delay, uses the already initialized `GetLeader()`
+    object for placement, and removes invalid C-style semicolons from the EI
+    script statements. Runtime confirmation of both placement and Godmode is
+    still required.
+    ([`c1ea993`](https://github.com/Ilufus/ei-mapper-endurance/commit/c1ea993))
 - [x] Implement the exact-hash Base EI feasibility transport and four-level
   probe ladder. See [the static compatibility record](docs/base-runtime-probe.md).
   - Base is launched suspended by an editor-owned 32-bit helper; the run-local
@@ -327,17 +329,19 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
 - [x] Confirm that the staged edited map remains mounted for the lifetime of a
   single Ctrl+F5 run: travelling into a connected installed zone and returning
   reloads the staged edited version with its changes intact.
-- [ ] Audit scripts that depend on exact zone IDs, primary MOB names, or
+- [x] Audit scripts that depend on exact zone IDs, primary MOB names, or
   `Auto<zone>*.mob` naming/discovery.
-  - Determine whether the temporary map identity changes any script lookup or
-    supplemental-MOB behavior.
-  - Do not rewrite embedded scripts speculatively. First inventory concrete
-    zone/MOB-name references and prove which engine or addon lookup consumes
-    each one.
-  - Existing evidence is mixed but encouraging: location-first-entry scripts,
-    including the tested zone11 behavior, execute in instantiated maps.
-  - If redirection is required, prefer profile-scoped runtime lookup aliases
-    over destructive script text replacement.
+  - Corpus inspection confirms `map.txt` maps the primary MPR/MOB identity,
+    while main and supplemental MOB scripts invoke exact filenames through
+    conditional `AddMob("...")` calls. Nested supplemental loads also occur.
+  - Runtime logs independently show those filenames being opened after the
+    primary MOB and SpellAddon autorun MOB. `AddMobEx` exists in Starter's
+    addon exports but is not used by the inspected JMV MOB corpus.
+  - Endurance therefore preserves every script unchanged and redirects only a
+    requested supplemental filename that has a matching validated collection
+    MOB staged under the owned run directory. It never force-loads every
+    `Auto*.mob`, which would bypass quest conditions and risk duplicates.
+  - Research record: [JMV supplemental MOB loading](docs/research/jmv-supplemental-mob-loading.md).
 
 ### Implemented in Alpha.58, awaiting runtime confirmation
 
@@ -369,6 +373,9 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
     accept only monotonic, owned, hash-matching control requests.
   - [x] Replace only the two Endurance-created temporary live files, using
     atomic writes, post-write hashes, and pair rollback before signalling.
+  - [x] Restage the collection's supplemental MOBs under stable original
+    filenames so repeated script-driven `AddMob` calls resolve to the current
+    editor versions after hot reload. ([`c1ea993`](https://github.com/Ilufus/ei-mapper-endurance/commit/c1ea993))
   - [x] Never attach to or stop an independently launched game.
   - [x] Report readiness only after the first staged loader completed; report
     each reload completion/failure back to the editor with a 20-second timeout.
@@ -397,11 +404,17 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
   - Allow individual MOBs to be locked against selection and accidental edits.
   - Show which loaded MOB owns the selected object.
   - Save/validate all changed MOBs as a coordinated workspace action.
-- [ ] Add deterministic multi-MOB JMV test loading.
-  - Load the base MOB plus declared supplemental MOBs exactly once and in order.
-  - Resolve the JMV `Auto<map>*.mob`/`AddMobEx` convention through the profile
-    provider rather than universal assumptions.
-- [ ] Add portable Endurance `.collection` files.
+- [ ] Runtime-validate deterministic multi-MOB JMV test loading.
+  - [x] Identify the primary MOB from `map.txt` (falling back to collection
+    order), validate every loaded MOB, and inventory all source/staged hashes.
+  - [x] Preserve original supplemental filenames and let the unchanged main
+    script's `AddMob` conditions determine whether and when each is loaded.
+  - [x] Redirect only matching run-owned supplemental files; unlisted calls
+    continue to the installed JMV file. No `AddMobEx` assumption is required.
+  - [ ] Runtime-test immediate, conditional, and nested supplemental loads,
+    then repeat after Ctrl+F5 hot reload and confirm no duplicate instances.
+  - Implementation: [`c1ea993`](https://github.com/Ilufus/ei-mapper-endurance/commit/c1ea993).
+- [x] Add portable Endurance `.collection` files.
   - Store one optional MPR and one or more ordered MOB references; never embed
     or copy game data.
   - Add **Open Collection**, **Save Collection**, and **Save Collection As**.
@@ -410,8 +423,7 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
     together before opening.
   - Current source implements the UTF-8 `key=value` v1 document, ordered MOB
     list, create/edit/open/save/save-as UI, grouped missing-reference errors,
-    browser population, and explicit refresh. It is held for the next combined
-    build while deterministic multi-MOB test loading remains unfinished.
+    browser population, and explicit refresh.
     ([`4e62424`](https://github.com/Ilufus/ei-mapper-endurance/commit/4e62424))
   - Edit/reorder without loading is included in the editor dialog rather than
     deferred.
