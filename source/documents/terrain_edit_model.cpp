@@ -109,7 +109,11 @@ quint16 clampedHeight(float value, bool* wasClamped = nullptr)
 {
     if(wasClamped)
         *wasClamped = value < 0.0f || value > 65535.0f;
-    return quint16(qBound(0, int(std::lround(value)), 65535));
+    if(value <= 0.0f)
+        return 0;
+    if(value >= 65535.0f)
+        return 65535;
+    return quint16(std::lround(value));
 }
 }
 
@@ -624,6 +628,100 @@ STerrainHeightCommand CTerrainEditModel::makeRamp(
                 + (target - float(delta.before)) * weight, &delta.clamped);
             if(delta.before != delta.after)
                 command.deltas.append(delta);
+        }
+    }
+    return command;
+}
+
+STerrainHeightCommand CTerrainEditModel::makeHeightmapImport(
+    const STerrainHeightmapGrid& grid,
+    const STerrainHeightmapImportSettings& settings,
+    CValidationReport* report) const
+{
+    STerrainHeightCommand command;
+    command.description = QStringLiteral("Import heightmap");
+    const qint64 expectedSamples = qint64(grid.width) * qint64(grid.height);
+    if(grid.width <= 0 || grid.height <= 0 || expectedSamples != grid.samples.size())
+    {
+        if(report)
+            report->add("terrain.heightmap_dimensions", EValidationSeverity::Error,
+                        "Heightmap dimensions do not match its normalized sample grid");
+        return command;
+    }
+    if(!std::isfinite(settings.minimumRawHeight)
+       || !std::isfinite(settings.maximumRawHeight)
+       || !std::isfinite(settings.strength)
+       || settings.strength < 0.0f || settings.strength > 1.0f)
+    {
+        if(report)
+            report->add("terrain.heightmap_settings", EValidationSeverity::Error,
+                        "Heightmap range and strength must be finite; strength must be between zero and one");
+        return command;
+    }
+    for(float sample : grid.samples)
+    {
+        if(!std::isfinite(sample) || sample < 0.0f || sample > 1.0f)
+        {
+            if(report)
+                report->add("terrain.heightmap_sample", EValidationSeverity::Error,
+                            "Heightmap samples must be finite normalized values from zero to one");
+            return command;
+        }
+    }
+    if(settings.strength == 0.0f)
+        return command;
+
+    const auto targetHeight = [&settings](float sample) {
+        return settings.minimumRawHeight
+            + (settings.maximumRawHeight - settings.minimumRawHeight) * sample;
+    };
+    const auto appendDelta = [this, &command, &settings, &targetHeight](
+        int x, int y, float sample) {
+        if(x < 0 || x >= m_vertexCountX || y < 0 || y >= m_vertexCountY)
+            return;
+        STerrainHeightDelta delta;
+        delta.globalX = x;
+        delta.globalY = y;
+        delta.before = height(x, y);
+        const float blended = float(delta.before)
+            + (targetHeight(sample) - float(delta.before)) * settings.strength;
+        delta.after = clampedHeight(blended, &delta.clamped);
+        if(delta.before != delta.after)
+            command.deltas.append(delta);
+    };
+
+    if(settings.placement == ETerrainHeightmapPlacement::OneSamplePerVertex)
+    {
+        for(int sourceY = 0; sourceY < grid.height; ++sourceY)
+            for(int sourceX = 0; sourceX < grid.width; ++sourceX)
+                appendDelta(settings.destinationX + sourceX,
+                            settings.destinationY + sourceY,
+                            grid.samples.at(sourceY * grid.width + sourceX));
+        return command;
+    }
+
+    const auto sampleGrid = [&grid](float sourceX, float sourceY) {
+        const int x0 = qBound(0, int(std::floor(sourceX)), grid.width - 1);
+        const int y0 = qBound(0, int(std::floor(sourceY)), grid.height - 1);
+        const int x1 = qMin(x0 + 1, grid.width - 1);
+        const int y1 = qMin(y0 + 1, grid.height - 1);
+        const float fractionX = sourceX - float(x0);
+        const float fractionY = sourceY - float(y0);
+        const float bottom = grid.samples.at(y0 * grid.width + x0) * (1.0f - fractionX)
+            + grid.samples.at(y0 * grid.width + x1) * fractionX;
+        const float top = grid.samples.at(y1 * grid.width + x0) * (1.0f - fractionX)
+            + grid.samples.at(y1 * grid.width + x1) * fractionX;
+        return bottom * (1.0f - fractionY) + top * fractionY;
+    };
+    for(int y = 0; y < m_vertexCountY; ++y)
+    {
+        const float sourceY = m_vertexCountY > 1
+            ? float(y) * float(grid.height - 1) / float(m_vertexCountY - 1) : 0.0f;
+        for(int x = 0; x < m_vertexCountX; ++x)
+        {
+            const float sourceX = m_vertexCountX > 1
+                ? float(x) * float(grid.width - 1) / float(m_vertexCountX - 1) : 0.0f;
+            appendDelta(x, y, sampleGrid(sourceX, sourceY));
         }
     }
     return command;

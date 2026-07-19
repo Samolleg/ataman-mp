@@ -284,6 +284,7 @@ private slots:
     void failedStagedMprSaveLeavesNoDestination();
     void canonicalTerrainSeamsAreEditedAndUndoneTogether();
     void terrainBrushToolsAreDeterministicAndFailClosed();
+    void terrainHeightmapImportIsDeterministicAndSeamAware();
     void terrainDiagnosticsArePreApplyAndPolicyExplicit();
     void terrainTilePaintingIsUndoableLocalizedAndNamespaceSafe();
     void terrainHeightTransactionReopensAndPreservesOverlay();
@@ -1161,6 +1162,84 @@ void EnduranceDocumentTests::terrainBrushToolsAreDeterministicAndFailClosed()
     CValidationReport staleReport;
     QVERIFY(!terrain.apply(ramp, true, &staleReport));
     QVERIFY(staleReport.hasErrors());
+}
+
+void EnduranceDocumentTests::terrainHeightmapImportIsDeterministicAndSeamAware()
+{
+    CTerrainEditModel terrain;
+    QVERIFY(terrain.loadSources(2, 1, 100.0f, twoSectorTerrain(1000)));
+    STerrainHeightmapGrid grid;
+    grid.width = 2;
+    grid.height = 2;
+    grid.samples = {0.0f, 1.0f, 0.0f, 1.0f};
+    STerrainHeightmapImportSettings settings;
+    settings.minimumRawHeight = 1000.0f;
+    settings.maximumRawHeight = 5000.0f;
+    const STerrainHeightCommand stretched = terrain.makeHeightmapImport(grid, settings);
+    QVERIFY(!stretched.isEmpty());
+    int seamDeltaCount = 0;
+    for(const STerrainHeightDelta& delta : stretched.deltas)
+    {
+        if(delta.globalX == 32 && delta.globalY == 0)
+        {
+            QCOMPARE(delta.after, quint16(3000));
+            ++seamDeltaCount;
+        }
+    }
+    QCOMPARE(seamDeltaCount, 1);
+    CTerrainEditHistory history;
+    QVERIFY(history.execute(&terrain, stretched));
+    QCOMPARE(terrain.height(32, 0), quint16(3000));
+    QCOMPARE(sectorHeight(terrain.sectorPayload(0, 0), 32, 0), quint16(3000));
+    QCOMPARE(sectorHeight(terrain.sectorPayload(1, 0), 0, 0), quint16(3000));
+    QVERIFY(history.undo(&terrain));
+    QCOMPARE(terrain.height(32, 0), quint16(1000));
+    QVERIFY(history.redo(&terrain));
+    QCOMPARE(terrain.height(64, 32), quint16(5000));
+
+    CTerrainEditModel placedTerrain;
+    QVERIFY(placedTerrain.loadSources(2, 1, 100.0f, twoSectorTerrain(1000)));
+    grid.width = 3;
+    grid.height = 1;
+    grid.samples = {0.0f, 0.5f, 1.0f};
+    settings.placement = ETerrainHeightmapPlacement::OneSamplePerVertex;
+    settings.destinationX = 31;
+    settings.destinationY = 0;
+    settings.minimumRawHeight = 1000.0f;
+    settings.maximumRawHeight = 3000.0f;
+    const STerrainHeightCommand placed = placedTerrain.makeHeightmapImport(grid, settings);
+    QCOMPARE(placed.deltas.size(), 2);
+    QCOMPARE(placed.deltas.front().globalX, 32);
+    QCOMPARE(placed.deltas.front().after, quint16(2000));
+    QVERIFY(placedTerrain.apply(placed, true));
+    QCOMPARE(placedTerrain.height(33, 0), quint16(3000));
+
+    settings.destinationX = -1;
+    CTerrainEditModel croppedTerrain;
+    QVERIFY(croppedTerrain.loadSources(1, 1, 100.0f,
+                                       twoSectorTerrain(1000).mid(0, 1)));
+    const STerrainHeightCommand croppedLoaded =
+        croppedTerrain.makeHeightmapImport(grid, settings);
+    QCOMPARE(croppedLoaded.deltas.size(), 2);
+    QCOMPARE(croppedLoaded.deltas.front().globalX, 0);
+    QCOMPARE(croppedLoaded.deltas.front().after, quint16(2000));
+
+    STerrainHeightmapGrid saturatedGrid;
+    saturatedGrid.width = 1;
+    saturatedGrid.height = 1;
+    saturatedGrid.samples = {1.0f};
+    settings.destinationX = 10;
+    settings.maximumRawHeight = 70000.0f;
+    const STerrainHeightCommand saturated =
+        croppedTerrain.makeHeightmapImport(saturatedGrid, settings);
+    QVERIFY(saturated.requiresMaxZDecision());
+    QVERIFY(!croppedTerrain.apply(saturated, true));
+
+    saturatedGrid.samples = {1.1f};
+    CValidationReport invalidReport;
+    QVERIFY(croppedTerrain.makeHeightmapImport(
+        saturatedGrid, settings, &invalidReport).isEmpty());
+    QVERIFY(invalidReport.hasErrors());
 }
 
 void EnduranceDocumentTests::terrainDiagnosticsArePreApplyAndPolicyExplicit()

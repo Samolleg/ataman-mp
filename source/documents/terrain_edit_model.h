@@ -186,6 +186,31 @@ struct STerrainBrush
     ETerrainBrushFalloff falloff{ETerrainBrushFalloff::Smooth};
 };
 
+struct STerrainHeightmapGrid
+{
+    int width{0};
+    int height{0};
+    // Normalized samples in row-major order. Image decoding and orientation
+    // are UI/import-adapter concerns and must be explicit before this stage.
+    QVector<float> samples;
+};
+
+enum class ETerrainHeightmapPlacement
+{
+    StretchToTerrain,
+    OneSamplePerVertex
+};
+
+struct STerrainHeightmapImportSettings
+{
+    ETerrainHeightmapPlacement placement{ETerrainHeightmapPlacement::StretchToTerrain};
+    int destinationX{0};
+    int destinationY{0};
+    float minimumRawHeight{0.0f};
+    float maximumRawHeight{65535.0f};
+    float strength{1.0f};
+};
+
 class CTerrainEditModel
 {
 public:
@@ -218,6 +243,10 @@ public:
                                    float endX, float endY, quint16 endHeight,
                                    float radius, float strength,
                                    ETerrainBrushFalloff falloff) const;
+    STerrainHeightCommand makeHeightmapImport(
+        const STerrainHeightmapGrid& grid,
+        const STerrainHeightmapImportSettings& settings,
+        CValidationReport* report = nullptr) const;
     STerrainEditDiagnostics diagnose(
         const STerrainHeightCommand& command,
         const QVector<STerrainObjectHeightProbe>& objects = QVector<STerrainObjectHeightProbe>(),
