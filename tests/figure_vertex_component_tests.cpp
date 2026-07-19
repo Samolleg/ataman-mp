@@ -7,10 +7,11 @@ class FigureVertexComponentTests : public QObject
     Q_OBJECT
 
 private slots:
-    void decodesNormalVertexAndUvIndicesInFig8Order();
+    void decodesVertexNormalAndUvIndicesInCorpusOrder();
+    void rejectsOutOfRangeIndices();
 };
 
-void FigureVertexComponentTests::decodesNormalVertexAndUvIndicesInFig8Order()
+void FigureVertexComponentTests::decodesVertexNormalAndUvIndicesInCorpusOrder()
 {
     QVector<QVector3D> vertices = {
         QVector3D(10.0f, 0.0f, 0.0f),
@@ -26,16 +27,31 @@ void FigureVertexComponentTests::decodesNormalVertexAndUvIndicesInFig8Order()
     };
 
     US3 component;
-    component.x = 0; // normal index
-    component.y = 1; // vertex index -- deliberately differs from normal
+    component.x = 1; // vertex index -- deliberately differs from normal
+    component.y = 0; // normal index
     component.z = 1; // UV index
 
-    const SVertexData decoded = ei::decodeFigureVertexComponent(
-        component, vertices, normals, textureCoordinates);
+    SVertexData decoded;
+    QVERIFY(ei::decodeFigureVertexComponent(
+        component, vertices, normals, textureCoordinates, &decoded));
     QCOMPARE(decoded.position, vertices.at(1));
     QCOMPARE(decoded.normal, normals.at(0).toVector3D());
     QCOMPARE(decoded.texCoord, textureCoordinates.at(1));
     QCOMPARE(ei::figureSourceVertexIndex(component), 1);
+}
+
+void FigureVertexComponentTests::rejectsOutOfRangeIndices()
+{
+    QVector<QVector3D> vertices(2);
+    QVector<QVector4D> normals(4);
+    QVector<QVector2D> textureCoordinates(1);
+    US3 component;
+    component.x = 2;
+    component.y = 3;
+    component.z = 0;
+    SVertexData decoded;
+    QVERIFY(!ei::decodeFigureVertexComponent(
+        component, vertices, normals, textureCoordinates, &decoded));
 }
 
 QTEST_APPLESS_MAIN(FigureVertexComponentTests)

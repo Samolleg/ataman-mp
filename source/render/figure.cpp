@@ -169,8 +169,17 @@ void ei::CFigure::generateTriangles(QVector<SVertexData>& aVrtData, QVector<QVec
     for(auto& ind: m_aInd)
     {
         const US3& component = m_aVertComp[ind];
-        aVrtData.append(ei::decodeFigureVertexComponent(
-            component, aMorphVertex, m_aNormal, m_aUvCoord));
+        SVertexData decoded;
+        if(!ei::decodeFigureVertexComponent(
+                component, aMorphVertex, m_aNormal, m_aUvCoord, &decoded))
+        {
+            qWarning() << "Skipping invalid FIG8 vertex component in" << m_name
+                       << "indices" << component.x << component.y << component.z
+                       << "limits" << aMorphVertex.size() << m_aNormal.size()
+                       << m_aUvCoord.size();
+            continue;
+        }
+        aVrtData.append(decoded);
         if(sourceVertexIndices)
             sourceVertexIndices->append(ei::figureSourceVertexIndex(component));
     }
