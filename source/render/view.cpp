@@ -1130,7 +1130,10 @@ void CView::unloadActiveMob()
         changeCurrentMob(nullptr);
         makeCurrent();
         CTextureList::getInstance()->clearTransientVisualCache();
-        doneCurrent();
+        // Renderer resource uploads that immediately follow a map switch
+        // assume this view context remains current. Releasing it here makes
+        // the next terrain-atlas QOpenGLTexture construction dereference a
+        // null context on every switch.
     }
 
     ei::log(eLogInfo, "Mob unloaded");
@@ -1309,7 +1312,8 @@ void CView::unloadMob(QString mobName)
         changeCurrentMob(nullptr);
         makeCurrent();
         CTextureList::getInstance()->clearTransientVisualCache();
-        doneCurrent();
+        // Keep the view context current for the next map's terrain/resource
+        // uploads; this matches the renderer's existing context lifetime.
     }
 
     ei::log(eLogInfo, "Mob unloaded");
