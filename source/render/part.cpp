@@ -15,6 +15,7 @@ CPart::CPart(const CPart &part):
     m_parentName = part.m_parentName;
     m_restOffset = part.m_restOffset;
     m_textureNumber = part.m_textureNumber;
+    m_textureUvScale = part.m_textureUvScale;
     m_poseMatrix = part.m_poseMatrix;
     m_bShow = part.m_bShow;
     m_aVertData = part.m_aVertData;
@@ -81,6 +82,7 @@ void CPart::draw(QOpenGLShaderProgram* program)
 
     program->setUniformValue("u_partAnimated", true);
     program->setUniformValue("u_partMmatrix", m_poseMatrix);
+    program->setUniformValue("u_textureUvScale", m_textureUvScale);
 
     int offset(0);
     // Tell OpenGL which VBOs to use

@@ -17,6 +17,7 @@ private slots:
     void keepsModelFamiliesInSeparateCacheEntries();
     void acceptsMmpExtensionWithoutDuplicatingIt();
     void buildsCompleteTerrainAtlasNames();
+    void derivesEquipmentAtlasUvScale();
     void resolvesDatabaseHumanoidSkin();
     void ignoresNonHumanoidDatabaseSkin();
     void resolvesLiveBaseDatabaseWhenProvided();
@@ -153,6 +154,14 @@ void ResourceNameTests::resolvesLiveBaseDatabaseWhenProvided()
              QString("unormaskin_00.mmp"));
     QCOMPARE(ei::humanoidTextureResourceName(skins, "Human Gipath Brigand Boots F1", "unhuma"),
              QString("unhumaskin_04.mmp"));
+}
+
+void ResourceNameTests::derivesEquipmentAtlasUvScale()
+{
+    QCOMPARE(ei::textureUvScale("UnhumaHL_05.bl.2.x2.mmp"), 2.0f);
+    QCOMPARE(ei::textureUvScale("UnhumaPL_05.bl.0.x4.mmp"), 4.0f);
+    QCOMPARE(ei::textureUvScale("unskskin_02_x4"), 4.0f);
+    QCOMPARE(ei::textureUvScale("unhumaskin_04.mmp"), 1.0f);
 }
 
 void ResourceNameTests::decodesSparsePnt3WithTrailingTransparency()

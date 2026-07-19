@@ -433,6 +433,7 @@ SRuntimeProviderResult resolveEquipmentLayout(
     QJsonArray components, placeholders, diagnostics;
     QJsonObject componentTextures;
     QJsonArray replacedParts;
+    bool hidesHair = false;
     if(database.isNull())
         return failure("equipment.database.unavailable", "Item-name interpretation requires the active profile database.");
 
@@ -454,6 +455,8 @@ SRuntimeProviderResult resolveEquipmentLayout(
         }
         const QStringList matched = appendArmorComponents(item.value(), request, &components,
                                                           &placeholders, &diagnostics);
+        if(item->type.compare("helm", Qt::CaseInsensitive) == 0 && !matched.isEmpty())
+            hidesHair = true;
         const QString materialName = itemMaterial(reference);
         const auto material = database->materialRecords.constFind(materialName);
         if(materialName.isEmpty() || material == database->materialRecords.constEnd()
@@ -603,6 +606,7 @@ SRuntimeProviderResult resolveEquipmentLayout(
     equipmentLayout->insert("components", components);
     equipmentLayout->insert("componentTextures", componentTextures);
     equipmentLayout->insert("replacedParts", replacedParts);
+    equipmentLayout->insert("hidesHair", hidesHair);
     equipmentLayout->insert("placeholders", placeholders);
     equipmentLayout->insert("diagnostics", diagnostics);
     SRuntimeProviderResult result;

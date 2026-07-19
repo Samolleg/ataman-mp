@@ -271,6 +271,10 @@ void CUnit::refreshTransientVisual()
         for(int index = visibleParts.size() - 1; index >= 0; --index)
             if(visibleParts.at(index).compare(replaced, Qt::CaseInsensitive) == 0)
                 visibleParts.removeAt(index);
+    if(equipment.value("hidesHair").toBool(false))
+        for(int index = visibleParts.size() - 1; index >= 0; --index)
+            if(visibleParts.at(index).startsWith("hr.", Qt::CaseInsensitive))
+                visibleParts.removeAt(index);
     for(const QString& component : jsonStringList(equipment, "components"))
         if(!visibleParts.contains(component, Qt::CaseInsensitive))
             visibleParts.append(component);

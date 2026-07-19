@@ -6,6 +6,7 @@
 #include "view.h"
 #include "log.h"
 #include "resourcemanager.h"
+#include "resource_name.h"
 #include "property.h"
 
 CObjectBase::CObjectBase(): 
@@ -542,6 +543,13 @@ void CObjectBase::applyTransientVisual(const QString& modelName, const QString& 
     QVector3D renderComplexion = complexion;
     m_figureComplexion = complexion;
     m_pFigure->getVertexData(m_aPart, renderComplexion, parts);
+    for(CPart* part : m_aPart)
+    {
+        const QString partTexture = partTextureNames.value(part->name(),
+            part->textureNumber() == 2 && !secondaryTextureName.trimmed().isEmpty()
+                ? secondaryTextureName : textureName);
+        part->setTextureUvScale(ei::textureUvScale(partTexture));
+    }
     recalcMinPos();
 }
 

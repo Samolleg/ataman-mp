@@ -358,6 +358,7 @@ void ProfileVisualProviderTests::helmetAddsDatabaseGeometryAndAtlas()
     QVERIFY(resolver->resolve(request, &output).success);
     QCOMPARE(jsonStrings(output, "components"), QStringList({"hd.armor08"}));
     QVERIFY(jsonStrings(output, "replacedParts").isEmpty());
+    QVERIFY(output.value("hidesHair").toBool());
     QCOMPARE(output.value("componentTextures").toObject().value("hd.armor08").toString(),
              QString("unhumahl_08.ir.0.x2.mmp"));
 }

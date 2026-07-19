@@ -56,6 +56,16 @@ edit `database.res`, JMV/Base archives, live MOBs, maps, or the game install.
    textures from the shared `unhuma` equipment atlases. Their face/skin atlas
    remains model-specific. Validate JMV `zone1.mob` IDs 203, 221, and 224;
    ID 224 must retain its body components with the TTI 0 clothing textures.
+10. Confirm each component scales its FIG UVs according to the selected MMP
+    atlas suffix: ordinary atlases use 1x, `.x2` helmets/weapons/shields use
+    2x, and `.x4` body armor uses 4x. In particular, check that the back half
+    of helmets, weapon blades, shield faces, and all replaced limb surfaces
+    sample opaque regions of their own atlas instead of appearing striped or
+    invisible. A component using a primary or secondary `_x4` skin atlas must
+    receive the same rule.
+11. Equip a helmet on a unit with database hair. Confirm the helmet component
+    is visible and the `hr.NN` component is omitted; removing the helmet must
+    restore the selected hair.
 
 ## UI and performance sanity
 
