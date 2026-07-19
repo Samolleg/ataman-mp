@@ -39,6 +39,7 @@ class QCheckBox;
 class QToolButton;
 class QLabel;
 class QTreeWidget;
+class QTreeWidgetItem;
 class QTimer;
 class QPushButton;
 
@@ -102,6 +103,8 @@ private:
     void updateMobFamilyValidationPanel();
     void showMobFamilyValidation();
     void showValidationWarning(const QString& title, const QString& text);
+    QString validationWarningPreview(const QVector<SMobFamilyFinding>& findings) const;
+    void selectValidationObject(QTreeWidgetItem* item);
     void reviewAndRepairNidCollisions();
     void notifyFamilyPreflight(const QString& operation);
     void notifyProposedNid(quint32 nid, const QString& mobPath);

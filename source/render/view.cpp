@@ -1552,6 +1552,45 @@ void CView::restoreSelection(const QList<CNode*>& selection)
     update();
 }
 
+bool CView::selectObjectByProvenance(const QString& mobPath, quint32 nid,
+                                     const QString& sectionPath)
+{
+    const QString wantedPath = QDir::cleanPath(QFileInfo(mobPath).absoluteFilePath());
+    CMob* targetMob = nullptr;
+    for(CMob* mob : m_aMob)
+    {
+        if(mob && QDir::cleanPath(mob->filePath().absoluteFilePath()).compare(
+               wantedPath, Qt::CaseInsensitive) == 0)
+        {
+            targetMob = mob;
+            break;
+        }
+    }
+    if(!targetMob)
+        return false;
+
+    CNode* target = nullptr;
+    QList<CNode*> nidMatches;
+    for(CNode* node : targetMob->nodes())
+    {
+        if(!node || node->mapId() != nid)
+            continue;
+        nidMatches.append(node);
+        if(!sectionPath.isEmpty() && node->rawSourceObjectPath() == sectionPath)
+            target = node;
+    }
+    if(!target && nidMatches.size() == 1)
+        target = nidMatches.first();
+    if(!target)
+        return false;
+
+    const QList<CNode*> before = selectionSnapshot();
+    changeCurrentMob(targetMob);
+    restoreSelection(QList<CNode*>() << target);
+    recordSelectionChange(before, tr("Select object from validation"));
+    return true;
+}
+
 void CView::clearObjectSelection()
 {
     if(!m_activeMob)

@@ -5,7 +5,7 @@ work is ordered from the newest planned minor line to the oldest completed one.
 An item is checked only after its implementation has landed and received the
 stated validation. Completed code should carry a commit, test, or release link.
 
-Current development line: `0.2.1-alpha.6` focused closed testing.
+Current development line: `0.2.1-alpha.7` focused closed testing.
 
 <details open>
 <summary><strong>General wishlist — not assigned to a release</strong></summary>
@@ -173,9 +173,8 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
 
 ### Current 0.2.x status
 
-- **Current tester build:** `0.2.1-alpha.6`, hardening runtime-family source
-  overlays, responsive validation, and safe opaque-record preservation after
-  the first alpha.5 tester pass.
+- **Current tester build:** `0.2.1-alpha.7`, refining validation warning and
+  panel UX after the alpha.6 source/projection hardening pass.
 - **MOB hardening:** complete for the supported editing surface. Remaining work
   is validation breadth and new editing features, not another serializer
   rewrite.
@@ -243,6 +242,11 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
     explicitly re-authorized.
   - Source/projection hardening and focused tests:
     [alpha.6 validation](docs/releases/0.2.1-alpha.6-validation-hardening.md).
+  - [x] Alpha.7 shows only three concise, truncated findings in warning
+    dialogs; the complete report remains in the validation panel and log.
+  - [x] Start MOB Family Validation as a detached, dockable native window,
+    keep it reopenable after closing, and provide direct selection of loaded
+    objects from NID-backed finding rows.
   - Detailed design: [structural MOB NID validation plan](docs/research/structural-mob-nid-validation-plan.md).
 
 ### P0: direct-launch stabilization
@@ -457,6 +461,15 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
 - [ ] Keep the staged version mounted when travelling away and returning.
   - Returning to the edited map must not silently load the installed original.
   - Record every active staged map identity and hash.
+- [ ] Reject or defer hot reload while the runtime is between zones/on a map
+  loading screen. A tester observed `game.exe` crash when a reload message was
+  delivered during that state; this remains low priority until the bridge has
+  an authoritative transition-idle signal.
+- [x] Document the current staging split: complete immutable payloads and
+  reload generations live under AppData, while JMV additionally requires one
+  randomly named, hash-owned MPR/MOB alias in the active mod `Maps` directory.
+  Cleanup removes only byte-identical owned aliases and interrupted-run
+  recovery retries removal; source maps are never replaced.
 - [x] Keep Endurance's **Stop JMV Map Test** control available during hot reload
   and restore editor focus only after exit or confirmed termination. No in-game
   End Test integration is required; normal `Alt+F4` remains available.

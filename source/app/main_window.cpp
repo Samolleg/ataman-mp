@@ -65,6 +65,31 @@
 #include "collection_editor_dialog.h"
 #include "script_reference_analyzer.h"
 
+namespace
+{
+constexpr int kValidationPathRole = Qt::UserRole;
+constexpr int kValidationCopyRole = Qt::UserRole + 1;
+constexpr int kValidationNidRole = Qt::UserRole + 2;
+constexpr int kValidationSectionRole = Qt::UserRole + 3;
+
+QString conciseValidationLine(const SMobFamilyFinding& finding)
+{
+    QString severity;
+    switch(finding.severity)
+    {
+    case EMobFamilyFindingSeverity::Critical: severity = "CRITICAL"; break;
+    case EMobFamilyFindingSeverity::Warning: severity = "WARNING"; break;
+    case EMobFamilyFindingSeverity::Incomplete: severity = "INCOMPLETE"; break;
+    case EMobFamilyFindingSeverity::Info: severity = "INFO"; break;
+    }
+    QString line = QString("%1: %2").arg(severity, finding.message.simplified());
+    constexpr int kMaximumCharacters = 150;
+    if(line.size() > kMaximumCharacters)
+        line = line.left(kMaximumCharacters - 3) + "...";
+    return line;
+}
+}
+
 void testFunc()
 {
     ei::log(eLogDebug, "test func start");
@@ -149,8 +174,14 @@ MainWindow::MainWindow(QWidget* parent) :
     m_validationDock->setObjectName("mobFamilyValidationDock");
     m_validationDock->setAllowedAreas(Qt::BottomDockWidgetArea | Qt::LeftDockWidgetArea |
                                       Qt::RightDockWidgetArea);
+    m_validationDock->setFeatures(QDockWidget::DockWidgetClosable |
+                                  QDockWidget::DockWidgetMovable |
+                                  QDockWidget::DockWidgetFloatable);
     m_validationDock->setWidget(validationWidget);
     addDockWidget(Qt::BottomDockWidgetArea, m_validationDock);
+    m_validationDock->setFloating(true);
+    m_validationDock->setWindowFlag(Qt::WindowMinMaxButtonsHint, true);
+    m_validationDock->resize(1100, 650);
     m_validationDock->hide();
     m_validationTimer = new QTimer(this);
     m_validationTimer->setSingleShot(true);
@@ -169,18 +200,27 @@ MainWindow::MainWindow(QWidget* parent) :
         QMenu menu(this);
         QAction* copyPath = menu.addAction(tr("Copy source path"));
         QAction* copyFinding = menu.addAction(tr("Copy complete entry"));
-        copyPath->setEnabled(!item->data(0, Qt::UserRole).toString().isEmpty());
-        copyFinding->setEnabled(!item->data(0, Qt::UserRole + 1).toString().isEmpty());
+        menu.addSeparator();
+        QAction* selectObject = menu.addAction(tr("Select object in editor"));
+        copyPath->setEnabled(!item->data(0, kValidationPathRole).toString().isEmpty());
+        copyFinding->setEnabled(!item->data(0, kValidationCopyRole).toString().isEmpty());
+        selectObject->setEnabled(item->data(0, kValidationNidRole).isValid());
         QAction* selected = menu.exec(m_validationTree->viewport()->mapToGlobal(point));
         if(selected == copyPath)
-            QApplication::clipboard()->setText(item->data(0, Qt::UserRole).toString());
+            QApplication::clipboard()->setText(item->data(0, kValidationPathRole).toString());
         else if(selected == copyFinding)
-            QApplication::clipboard()->setText(item->data(0, Qt::UserRole + 1).toString());
+            QApplication::clipboard()->setText(item->data(0, kValidationCopyRole).toString());
+        else if(selected == selectObject)
+            selectValidationObject(item);
     });
+    connect(m_validationTree, &QTreeWidget::itemDoubleClicked,
+            this, [this](QTreeWidgetItem* item, int) { selectValidationObject(item); });
     QMenu* viewMenu = new QMenu(tr("View"), this);
     m_ui->menuBar->insertMenu(m_ui->menuSettings->menuAction(), viewMenu);
     viewMenu->addAction(m_mapsDock->toggleViewAction());
-    viewMenu->addAction(m_validationDock->toggleViewAction());
+    QAction* openValidationPanel = viewMenu->addAction(tr("MOB Family Validation"));
+    connect(openValidationPanel, &QAction::triggered,
+            this, &MainWindow::showMobFamilyValidation);
     connect(m_mapsBrowser, &CMapsBrowser::openMapRequested,
             this, &MainWindow::openMapPair);
     connect(m_mapsBrowser, &CMapsBrowser::openCollectionRequested,
@@ -228,7 +268,7 @@ MainWindow::MainWindow(QWidget* parent) :
     QAction* validateSelectedMobs = new QAction(tr("Validate Selected MOB Files..."), this);
     QAction* repairMobFamily = new QAction(tr("Review and Repair NID Collisions..."), this);
     m_mapTestAction = new QAction(tr("Test Current Map"), this);
-    m_mapTestAction->setToolTip(tr("Stages unique temporary MPR/MOB copies and launches the active validated runtime profile. No source map is overwritten."));
+    m_mapTestAction->setToolTip(tr("Stages unique temporary MPR/MOB copies and launches the active validated runtime profile. JMV uses hash-owned temporary aliases in the mod Maps directory; source maps are never overwritten."));
     m_stopMapTestAction = new QAction(tr("Stop Test"), this);
     m_stopMapTestAction->setEnabled(false);
     m_stopMapTestAction->setToolTip(tr("Stops only the game process launched by Endurance."));
@@ -1476,10 +1516,10 @@ void MainWindow::launchCurrentMapTest()
     const QString confirmation = isJmv ? tr(
         "This experimental JMV-only test stages the exact current MPR/MOB pair, including unsaved in-memory edits, under a unique temporary name. After JMV completes its normal menu load, Endurance invokes the fingerprinted single-player New Game path on the game thread and supplies the staged pair. No console/server command or fixed delay is used.\n\n"
         "JMV initializes one normal player through map-table zone %1 and hand-placed entrance %2; %3.\n\n"
-        "Source maps, JMV configuration, and live campaign saves are not changed. Every save/load path is redirected into a persistent profile-specific AppData folder shared by Endurance test runs. Intro movies are hidden only for the test process. Returning to the menu or travelling away may use original installed maps; use Stop Test when finished.\n\nStart the direct JMV map test?")
+        "Source maps, JMV configuration, and live campaign saves are not changed. Complete payloads remain under Endurance AppData; the proven JMV loader also uses one randomly named, hash-owned MPR/MOB alias in the mod Maps directory and removes it on guarded cleanup. Every save/load path is redirected into a persistent profile-specific AppData folder shared by Endurance test runs. Intro movies are hidden only for the test process. Returning to the menu or travelling away may use original installed maps; use Stop Test when finished.\n\nStart the direct JMV map test?")
         .arg(entry.zoneId).arg(spawn.exitId).arg(entranceAssessment)
         : tr("This exact-hash Base EI feasibility probe uses an editor-owned 32-bit host. It creates Base game.exe suspended, loads the run-local bridge only into that owned process, calls its explicit initializer outside DllMain, and resumes only after fingerprint and byte guards pass.\n\nRun the probe levels in order. Source maps and the Base game installation are not modified.\n\nContinue to probe-level selection?");
-    constexpr int kMapTestWarningVersion = 3;
+    constexpr int kMapTestWarningVersion = 4;
     COptInt* warningVersion = dynamic_cast<COptInt*>(
                 m_settings->opt(eOptSetGeneral, "mapTestWarningVersion"));
     if(!hotReloadRequested
@@ -1693,12 +1733,20 @@ void MainWindow::applyMobFamilyValidationReport(const CMobFamilyValidationReport
         introduced.subtract(m_previousFamilyRiskKeys);
         if(!introduced.isEmpty())
         {
+            QVector<SMobFamilyFinding> introducedFindings;
+            for(const SMobFamilyFinding& finding : m_familyValidation.findings)
+            {
+                QStringList locations = finding.locations;
+                locations.sort(Qt::CaseInsensitive);
+                const QString key = QString("%1|%2|%3")
+                    .arg(finding.code).arg(finding.nid).arg(locations.join('|'));
+                if(introduced.contains(key))
+                    introducedFindings.append(finding);
+            }
             ei::log(eLogWarning, QString("Editing introduced %1 new runtime-family NID/range risk(s)")
                 .arg(introduced.size()));
             showValidationWarning(tr("New family ID risk"),
-                tr("This edit or family-composition change introduced %1 new NID collision or range overlap. "
-                   "The operation was kept and nothing is blocked. Review the MOB Family Validation panel.")
-                    .arg(introduced.size()));
+                                  validationWarningPreview(introducedFindings));
         }
     }
     m_previousFamilyRiskKeys = currentRisks;
@@ -1732,8 +1780,8 @@ void MainWindow::updateMobFamilyValidationPanel()
         QTreeWidgetItem* item = new QTreeWidgetItem(membersRoot,
             QStringList() << status.toUpper() << member.fileName << member.path
                           << QString("%1; %2").arg(member.sourceRole, member.inclusionReason));
-        item->setData(0, Qt::UserRole, member.path);
-        item->setData(0, Qt::UserRole + 1,
+        item->setData(0, kValidationPathRole, member.path);
+        item->setData(0, kValidationCopyRole,
                       QString("%1\nSource: %2\nRole: %3\nReason: %4")
                           .arg(member.fileName, member.path, member.sourceRole,
                                member.inclusionReason));
@@ -1746,8 +1794,8 @@ void MainWindow::updateMobFamilyValidationPanel()
             QTreeWidgetItem* shadow = new QTreeWidgetItem(item,
                 QStringList() << tr("SHADOWED") << member.fileName << shadowed
                               << tr("Not collision-checked; workspace source overrides it"));
-            shadow->setData(0, Qt::UserRole, shadowed);
-            shadow->setData(0, Qt::UserRole + 1,
+            shadow->setData(0, kValidationPathRole, shadowed);
+            shadow->setData(0, kValidationCopyRole,
                             tr("Shadowed source for %1\n%2").arg(member.fileName, shadowed));
         }
     }
@@ -1775,30 +1823,45 @@ void MainWindow::updateMobFamilyValidationPanel()
                           << finding.message);
         item->setForeground(0, QBrush(color));
         item->setToolTip(2, finding.locations.join('\n'));
-        item->setData(0, Qt::UserRole,
+        item->setData(0, kValidationPathRole,
                       finding.locations.isEmpty() ? QString() : finding.locations.first());
-        item->setData(0, Qt::UserRole + 1,
+        item->setData(0, kValidationCopyRole,
                       QString("%1 %2\n%3\n%4")
                           .arg(severity, finding.category, finding.message,
                                finding.locations.join('\n')));
         for(const QString& location : finding.locations)
             new QTreeWidgetItem(item, QStringList() << QString() << tr("Location")
                                                     << location << QString());
-        if(finding.hasNid && finding.code == "nid.collision")
+        if(finding.hasNid)
         {
             const QVector<SMobNidOwner> owners = m_familyValidation.nidOwners.value(finding.nid);
             for(const SMobNidOwner& owner : owners)
             {
-                quint32 suggestion = 0;
-                bool shared = false;
-                const QString detail = m_familyValidation.suggestReplacementNid(
-                    owner.mobPath, &suggestion, &shared)
-                    ? tr("Suggested for %1: %2%3")
-                        .arg(owner.mobName).arg(suggestion)
-                        .arg(shared ? tr(" (unused, but inside a shared range)") : QString())
-                    : tr("No free ID remains in %1's effective range").arg(owner.mobName);
-                new QTreeWidgetItem(item, QStringList() << QString() << tr("Repair option")
-                                                        << owner.mobPath << detail);
+                QString detail = tr("NID %1 — %2")
+                    .arg(owner.nid)
+                    .arg(owner.objectName.isEmpty() ? owner.sectionPath : owner.objectName);
+                if(finding.code == "nid.collision")
+                {
+                    quint32 suggestion = 0;
+                    bool shared = false;
+                    detail += m_familyValidation.suggestReplacementNid(
+                        owner.mobPath, &suggestion, &shared)
+                        ? tr("; suggested replacement %1%2")
+                            .arg(suggestion)
+                            .arg(shared ? tr(" (inside a shared range)") : QString())
+                        : tr("; no free ID remains in this MOB's effective range");
+                }
+                QTreeWidgetItem* ownerItem = new QTreeWidgetItem(item,
+                    QStringList() << QString() << tr("Object") << owner.mobPath << detail);
+                ownerItem->setData(0, kValidationPathRole, owner.mobPath);
+                ownerItem->setData(0, kValidationCopyRole,
+                    QString("NID %1\nMOB: %2\nObject: %3\nSection: %4")
+                        .arg(owner.nid).arg(owner.mobPath,
+                            owner.objectName.isEmpty() ? owner.sectionPath : owner.objectName,
+                            owner.sectionPath));
+                ownerItem->setData(0, kValidationNidRole, owner.nid);
+                ownerItem->setData(0, kValidationSectionRole, owner.sectionPath);
+                ownerItem->setToolTip(1, tr("Double-click to select this object if its MOB is loaded."));
             }
         }
     }
@@ -1820,6 +1883,7 @@ void MainWindow::showMobFamilyValidation()
     {
         m_validationDock->show();
         m_validationDock->raise();
+        m_validationDock->activateWindow();
         m_validationDock->setFocus();
     }
 }
@@ -1827,12 +1891,46 @@ void MainWindow::showMobFamilyValidation()
 void MainWindow::showValidationWarning(const QString& title, const QString& text)
 {
     QMessageBox message(QMessageBox::Warning, title, text, QMessageBox::NoButton, this);
+    message.setTextFormat(Qt::PlainText);
+    message.setStyleSheet("QLabel{min-width:820px;}");
     QPushButton* openPanel = message.addButton(tr("Open Validation Panel"),
                                                QMessageBox::ActionRole);
     message.addButton(QMessageBox::Ok);
     message.exec();
     if(message.clickedButton() == openPanel)
         showMobFamilyValidation();
+}
+
+QString MainWindow::validationWarningPreview(
+    const QVector<SMobFamilyFinding>& findings) const
+{
+    QStringList lines;
+    const int shown = qMin(3, findings.size());
+    for(int index = 0; index < shown; ++index)
+        lines.append(conciseValidationLine(findings.at(index)));
+    if(findings.size() > shown)
+        lines.append("...");
+    return lines.isEmpty() ? tr("Validation found a possible MOB-family problem.")
+                           : lines.join('\n');
+}
+
+void MainWindow::selectValidationObject(QTreeWidgetItem* item)
+{
+    if(!item || !m_pView || !item->data(0, kValidationNidRole).isValid())
+        return;
+    const QString mobPath = item->data(0, kValidationPathRole).toString();
+    const quint32 nid = item->data(0, kValidationNidRole).toUInt();
+    const QString sectionPath = item->data(0, kValidationSectionRole).toString();
+    if(!m_pView->selectObjectByProvenance(mobPath, nid, sectionPath))
+    {
+        statusBar()->showMessage(
+            tr("Object NID %1 is not selectable: load its MOB or resolve its ambiguous provenance.")
+                .arg(nid), 7000);
+        return;
+    }
+    activateWindow();
+    raise();
+    statusBar()->showMessage(tr("Selected NID %1 from MOB validation.").arg(nid), 4000);
 }
 
 void MainWindow::reviewAndRepairNidCollisions()
@@ -2019,11 +2117,12 @@ void MainWindow::notifyFamilyPreflight(const QString& operation)
     m_acknowledgedFindingDigest = digest;
     ei::log(eLogWarning, QString("User continued with %1 after non-blocking MOB family validation findings:\n%2")
         .arg(operation, m_familyValidation.toText()));
+    QVector<SMobFamilyFinding> actionable;
+    for(const SMobFamilyFinding& finding : m_familyValidation.findings)
+        if(finding.severity != EMobFamilyFindingSeverity::Info)
+            actionable.append(finding);
     showValidationWarning(tr("MOB family validation"),
-        tr("%1 found possible runtime-family ID problems. Endurance will not block %2.\n\n%3\n\n"
-           "Review the MOB Family Validation panel for the complete report.")
-            .arg(m_familyValidation.summary(), operation,
-                 m_familyValidation.toText(8)));
+                          validationWarningPreview(actionable));
 }
 
 void MainWindow::notifyProposedNid(quint32 nid, const QString& mobPath)
@@ -2034,10 +2133,16 @@ void MainWindow::notifyProposedNid(quint32 nid, const QString& mobPath)
         return;
     ei::log(eLogWarning, QString("Proposed NID %1 overlaps the active family:\n%2")
         .arg(nid).arg(details));
-    showValidationWarning(tr("NID overlap"),
-        tr("NID %1 overlaps an object or declared range in the active runtime family. "
-           "The edit will still be applied.\n\n%2")
-            .arg(nid).arg(details));
+    QStringList detailLines = details.split('\n', QString::SkipEmptyParts);
+    QVector<SMobFamilyFinding> preview;
+    for(const QString& detail : detailLines)
+    {
+        SMobFamilyFinding finding;
+        finding.severity = EMobFamilyFindingSeverity::Warning;
+        finding.message = tr("NID %1: %2").arg(nid).arg(detail);
+        preview.append(finding);
+    }
+    showValidationWarning(tr("NID overlap"), validationWarningPreview(preview));
 }
 
 void MainWindow::openCollection(const QString& path)
