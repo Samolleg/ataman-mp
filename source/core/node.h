@@ -93,6 +93,11 @@ public:
         m_rawSourceObjectPath = sectionPath;
         m_rawSourceSubtreeSha256 = subtreeSha256;
         m_rawCopiedObject = copiedObject;
+        if(!copiedObject)
+        {
+            m_rawTemplateSourceSubtree.clear();
+            m_rawTemplateCleanSubtree.clear();
+        }
     }
     bool hasRawObjectProvenance() const
     {
@@ -104,6 +109,19 @@ public:
     const QString& rawSourceObjectPath() const { return m_rawSourceObjectPath; }
     const QByteArray& rawSourceSubtreeSha256() const { return m_rawSourceSubtreeSha256; }
     bool isRawCopiedObject() const { return m_rawCopiedObject; }
+    void setRawObjectTemplateBytes(const QByteArray& sourceSubtree,
+                                   const QByteArray& cleanSubtree)
+    {
+        m_rawTemplateSourceSubtree = sourceSubtree;
+        m_rawTemplateCleanSubtree = cleanSubtree;
+    }
+    bool hasRawObjectTemplateBytes() const
+    {
+        return !m_rawTemplateSourceSubtree.isEmpty()
+                && !m_rawTemplateCleanSubtree.isEmpty();
+    }
+    const QByteArray& rawTemplateSourceSubtree() const { return m_rawTemplateSourceSubtree; }
+    const QByteArray& rawTemplateCleanSubtree() const { return m_rawTemplateCleanSubtree; }
 
 private:
     void init();
@@ -124,6 +142,8 @@ protected:
     QString m_rawSourceObjectPath;
     QByteArray m_rawSourceSubtreeSha256;
     bool m_rawCopiedObject;
+    QByteArray m_rawTemplateSourceSubtree;
+    QByteArray m_rawTemplateCleanSubtree;
 
 private:
     uint m_id;

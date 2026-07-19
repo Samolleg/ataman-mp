@@ -61,6 +61,8 @@ public:
     CNode* restoreDeletedNode(CNode* pNode, int restoreIndex = -1);
     bool rebaseCopiedObjectProvenance(CNode* node, const QString& templatePath,
                                       const QByteArray& templateSubtreeSha256);
+    bool rawObjectTemplateBytes(const CNode* node, QByteArray* sourceSubtree,
+                                QByteArray* cleanSubtree) const;
     QList<CNode*>& nodes();
     void deleteNode(uint mapId);
     CNode* undo_deleteNode(uint mapId, int restoreIndex = -1);

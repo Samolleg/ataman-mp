@@ -3029,6 +3029,15 @@ void CView::selectedObjectToClipboardBuffer()
                 provenance.insert("sourceObjectPath", pNode->rawSourceObjectPath());
                 provenance.insert("sourceSubtreeSha256",
                     QString::fromLatin1(pNode->rawSourceSubtreeSha256().toHex()));
+                QByteArray sourceSubtree;
+                QByteArray cleanSubtree;
+                if(m_activeMob->rawObjectTemplateBytes(pNode, &sourceSubtree, &cleanSubtree))
+                {
+                    provenance.insert("sourceSubtreeBase64",
+                        QString::fromLatin1(sourceSubtree.toBase64()));
+                    provenance.insert("cleanSubtreeBase64",
+                        QString::fromLatin1(cleanSubtree.toBase64()));
+                }
                 nodeData.insert("_Endurance raw provenance", provenance);
             }
             arrObj.append(nodeData);

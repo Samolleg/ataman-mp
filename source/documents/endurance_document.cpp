@@ -717,7 +717,7 @@ bool emitObjectSubtreeChange(const SMobSection& section, const QString& targetPa
 }
 
 bool emitObjectSequence(const SMobSection& section,
-                        const QVector<const SMobSection*>& objects,
+                        const QVector<QByteArray>& objects,
                         bool* applied, QByteArray* output,
                         CValidationReport* report)
 {
@@ -736,8 +736,8 @@ bool emitObjectSequence(const SMobSection& section,
         QByteArray childBytes;
         // Every direct OBJECT_SECTION child is one object record. Different
         // profiles use more than one numeric root type, so do not assume B001.
-        for(const SMobSection* object : objects)
-            childBytes.append(object->rawBytes);
+        for(const QByteArray& object : objects)
+            childBytes.append(object);
         const quint64 newLength = quint64(childBytes.size()) + 8;
         if(newLength > quint64(UINT_MAX))
         {
@@ -1641,9 +1641,56 @@ bool CMobDocument::rebuildObjectSequence(
         requested.append(object);
     }
 
+    QVector<QByteArray> rawObjects;
+    rawObjects.reserve(requested.size());
+    for(const SMobSection* object : requested)
+        rawObjects.append(object->rawBytes);
+    return rebuildObjectSequenceFromRaw(rawObjects, expectedSubtreeSha256,
+                                        output, report);
+}
+
+bool CMobDocument::rebuildObjectSequenceFromRaw(
+    const QVector<QByteArray>& objectSubtrees,
+    const QVector<QByteArray>& expectedSubtreeSha256,
+    QByteArray* output, CValidationReport* report) const
+{
+    if(!output)
+        return false;
+    output->clear();
+    if(objectSubtrees.size() != expectedSubtreeSha256.size())
+    {
+        if(report)
+            report->add("mob.object_sequence.raw_input", EValidationSeverity::Error,
+                        "Object subtree and provenance hash counts differ");
+        return false;
+    }
+    for(int index = 0; index < objectSubtrees.size(); ++index)
+    {
+        const QByteArray& raw = objectSubtrees.at(index);
+        if(raw.size() < 8 || expectedSubtreeSha256.at(index).size() != 32
+           || QCryptographicHash::hash(raw, QCryptographicHash::Sha256)
+                != expectedSubtreeSha256.at(index))
+        {
+            if(report)
+                report->add("mob.object_sequence.raw_provenance", EValidationSeverity::Error,
+                            "A raw object subtree is malformed or has a stale hash",
+                            QString::number(index));
+            return false;
+        }
+        const quint32 declaredLength = readU32(raw, 4);
+        if(declaredLength != quint32(raw.size()))
+        {
+            if(report)
+                report->add("mob.object_sequence.raw_length", EValidationSeverity::Error,
+                            "A raw object subtree length does not match its section header",
+                            QString::number(index));
+            return false;
+        }
+    }
+
     bool applied = false;
     for(const SMobSection& section : m_sections)
-        if(!emitObjectSequence(section, requested, &applied, output, report))
+        if(!emitObjectSequence(section, objectSubtrees, &applied, output, report))
         {
             output->clear();
             return false;
@@ -1659,7 +1706,7 @@ bool CMobDocument::rebuildObjectSequence(
 
     CMobDocument reparsed;
     if(!reparsed.loadBytes(*output, "object-sequence-output.mob", report) ||
-       reparsed.objects().size() != requested.size())
+       reparsed.objects().size() != objectSubtrees.size())
     {
         if(report && !report->hasErrors())
             report->add("mob.object_sequence.count", EValidationSeverity::Error,
@@ -1667,20 +1714,35 @@ bool CMobDocument::rebuildObjectSequence(
         output->clear();
         return false;
     }
-    for(int index = 0; index < requested.size(); ++index)
-        if(reparsed.objects().at(index).subtreeSha256 != requested.at(index)->sha256)
+    for(int index = 0; index < objectSubtrees.size(); ++index)
+        if(reparsed.objects().at(index).subtreeSha256 != expectedSubtreeSha256.at(index))
         {
             if(report)
                 report->add("mob.object_sequence.bytes", EValidationSeverity::Error,
                             "A rebuilt object subtree was not emitted byte-for-byte",
-                            objectPaths.at(index));
+                            QString::number(index));
             output->clear();
             return false;
         }
     if(report)
         report->add("mob.object_sequence.authorized", EValidationSeverity::Info,
                     QString("Rebuilt %1 object entries from exact source subtrees")
-                        .arg(requested.size()));
+                        .arg(objectSubtrees.size()));
+    return true;
+}
+
+bool CMobDocument::objectSubtreeBytes(const QString& objectPath,
+                                      const QByteArray& expectedSubtreeSha256,
+                                      QByteArray* output) const
+{
+    if(!output)
+        return false;
+    output->clear();
+    const SMobSection* object = findObjectChild(m_sections, objectPath);
+    if(!object || expectedSubtreeSha256.size() != 32
+       || object->sha256 != expectedSubtreeSha256)
+        return false;
+    *output = object->rawBytes;
     return true;
 }
 

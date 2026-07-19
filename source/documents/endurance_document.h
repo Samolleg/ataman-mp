@@ -198,6 +198,13 @@ public:
                                const QVector<QByteArray>& expectedSubtreeSha256,
                                QByteArray* output,
                                CValidationReport* report = nullptr) const;
+    bool rebuildObjectSequenceFromRaw(const QVector<QByteArray>& objectSubtrees,
+                                      const QVector<QByteArray>& expectedSubtreeSha256,
+                                      QByteArray* output,
+                                      CValidationReport* report = nullptr) const;
+    bool objectSubtreeBytes(const QString& objectPath,
+                            const QByteArray& expectedSubtreeSha256,
+                            QByteArray* output) const;
     bool reconcileLogicPointStructure(const CMobDocument& cleanProjection,
                                       const CMobDocument& editedProjection,
                                       QByteArray* output,

@@ -1,0 +1,6 @@
+EI Mapper: Endurance Edition 0.2.1-alpha.4
+Channel: private focused test build
+Purpose: cross-MOB raw-template preservation for save and hot reload
+Changes: object clipboard entries now carry hash-verified donor source and clean-projection subtrees; destination MOB candidates preserve the exact donor raw subtree before applying authorized edits; same-MOB behavior is unchanged
+Validation: full application release build; Endurance document tests 32 passed, 0 failed
+Known limitation: Play From Here can still visibly move the player from the native entrance after registration; same-map position/facing preservation is not implemented

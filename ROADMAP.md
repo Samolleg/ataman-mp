@@ -399,6 +399,11 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
 
 ## 0.2.x: multi-MOB and workspace workflow
 
+- [x] Preserve exact raw object templates when copying between different MOBs.
+  Cross-MOB paste now carries the donor source and clean-projection subtrees,
+  validates their hashes, and can save or hot-reload the destination without
+  falling back to the rebuilding serializer. Runtime validation with trees
+  copied from `zone1.mob` into `Autozone1cyclopus.mob` remains pending.
 - [ ] Replace the secondary-MOB workflow with Unreal-style multi-MOB editing.
   - Show every open MOB in a **Loaded MOBs** list/tab.
   - Make the active destination MOB explicit for paste/create operations.

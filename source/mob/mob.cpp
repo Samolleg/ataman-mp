@@ -815,6 +815,14 @@ CNode* CMob::createNode(QJsonObject data)
     {
         pNode->setRawObjectProvenance(sourceDocumentSha256, sourceObjectPath,
                                       sourceSubtreeSha256, true);
+        const QByteArray sourceSubtree = QByteArray::fromBase64(
+            enduranceProvenance.value("sourceSubtreeBase64").toString().toLatin1());
+        const QByteArray cleanSubtree = QByteArray::fromBase64(
+            enduranceProvenance.value("cleanSubtreeBase64").toString().toLatin1());
+        if(!sourceSubtree.isEmpty() && !cleanSubtree.isEmpty()
+           && QCryptographicHash::hash(sourceSubtree, QCryptographicHash::Sha256)
+                == sourceSubtreeSha256)
+            pNode->setRawObjectTemplateBytes(sourceSubtree, cleanSubtree);
     }
 
 
@@ -1708,19 +1716,17 @@ bool CMob::buildRawObjectSequenceCandidate(
 
     const QByteArray sourceDocumentSha256 = QCryptographicHash::hash(
         m_originalData, QCryptographicHash::Sha256);
-    QStringList sourcePaths;
+    QVector<QByteArray> sourceSubtrees;
     QVector<QByteArray> sourceHashes;
-    QStringList cleanPaths;
+    QVector<QByteArray> cleanSubtrees;
     QVector<QByteArray> cleanHashes;
-    sourcePaths.reserve(m_aNode.size());
+    sourceSubtrees.reserve(m_aNode.size());
     sourceHashes.reserve(m_aNode.size());
-    cleanPaths.reserve(m_aNode.size());
+    cleanSubtrees.reserve(m_aNode.size());
     cleanHashes.reserve(m_aNode.size());
     for(CNode* node : m_aNode)
     {
-        if(!node || !node->hasRawObjectProvenance() ||
-           node->rawSourceDocumentSha256() != sourceDocumentSha256 ||
-           !cleanBySourcePath.contains(node->rawSourceObjectPath()))
+        if(!node || !node->hasRawObjectProvenance())
         {
             if(report)
                 report->add("mob.object_sequence.ui_provenance", EValidationSeverity::Error,
@@ -1728,20 +1734,58 @@ bool CMob::buildRawObjectSequenceCandidate(
                             node ? QString::number(node->mapId()) : QString("null"));
             return false;
         }
-        const SMobObjectSnapshot* clean = cleanBySourcePath.value(
-            node->rawSourceObjectPath());
-        sourcePaths.append(node->rawSourceObjectPath());
+        QByteArray sourceRaw;
+        QByteArray cleanRaw;
+        QByteArray cleanHash;
+        if(node->rawSourceDocumentSha256() == sourceDocumentSha256
+           && cleanBySourcePath.contains(node->rawSourceObjectPath()))
+        {
+            const SMobObjectSnapshot* clean = cleanBySourcePath.value(
+                node->rawSourceObjectPath());
+            if(!sourceDocument.objectSubtreeBytes(node->rawSourceObjectPath(),
+                                                  node->rawSourceSubtreeSha256(),
+                                                  &sourceRaw)
+               || !cleanDocument.objectSubtreeBytes(clean->sectionPath,
+                                                     clean->subtreeSha256,
+                                                     &cleanRaw))
+                return false;
+            cleanHash = clean->subtreeSha256;
+        }
+        else if(node->hasRawObjectTemplateBytes())
+        {
+            sourceRaw = node->rawTemplateSourceSubtree();
+            cleanRaw = node->rawTemplateCleanSubtree();
+            if(QCryptographicHash::hash(sourceRaw, QCryptographicHash::Sha256)
+                   != node->rawSourceSubtreeSha256())
+            {
+                if(report)
+                    report->add("mob.object_sequence.external_template", EValidationSeverity::Error,
+                                "A cross-MOB raw object template failed its provenance hash",
+                                QString::number(node->mapId()));
+                return false;
+            }
+            cleanHash = QCryptographicHash::hash(cleanRaw, QCryptographicHash::Sha256);
+        }
+        else
+        {
+            if(report)
+                report->add("mob.object_sequence.ui_provenance", EValidationSeverity::Error,
+                            "A current object has no matching local or cross-MOB raw source subtree",
+                            QString::number(node->mapId()));
+            return false;
+        }
+        sourceSubtrees.append(sourceRaw);
         sourceHashes.append(node->rawSourceSubtreeSha256());
-        cleanPaths.append(clean->sectionPath);
-        cleanHashes.append(clean->subtreeSha256);
+        cleanSubtrees.append(cleanRaw);
+        cleanHashes.append(cleanHash);
     }
 
     QByteArray structuralSource;
     QByteArray structuralClean;
-    if(!sourceDocument.rebuildObjectSequence(sourcePaths, sourceHashes,
-                                             &structuralSource, report) ||
-       !cleanDocument.rebuildObjectSequence(cleanPaths, cleanHashes,
-                                            &structuralClean, report))
+    if(!sourceDocument.rebuildObjectSequenceFromRaw(sourceSubtrees, sourceHashes,
+                                                    &structuralSource, report) ||
+       !cleanDocument.rebuildObjectSequenceFromRaw(cleanSubtrees, cleanHashes,
+                                                   &structuralClean, report))
         return false;
 
     CMobDocument structuralSourceDocument;
@@ -2063,6 +2107,16 @@ bool CMob::rebaseCopiedObjectProvenance(CNode* node, const QString& templatePath
 {
     if(!node || templateSubtreeSha256.size() != 32 || m_originalData.isEmpty())
         return false;
+    if(node->hasRawObjectTemplateBytes()
+       && QCryptographicHash::hash(node->rawTemplateSourceSubtree(),
+                                  QCryptographicHash::Sha256)
+            == templateSubtreeSha256)
+    {
+        // A cross-MOB copy deliberately keeps the donor document identity and
+        // its complete raw/clean subtrees. There is nothing to rebase into the
+        // destination document until the first successful save.
+        return true;
+    }
     CValidationReport report;
     CMobDocument document;
     if(!document.loadBytes(m_originalData, m_filePath.filePath(), &report))
@@ -2104,4 +2158,49 @@ bool CMob::rebaseCopiedObjectProvenance(CNode* node, const QString& templatePath
             .arg(node->mapId()).arg(selected->sectionPath,
                  QString::fromLatin1(documentHash.toHex())));
     return true;
+}
+
+bool CMob::rawObjectTemplateBytes(const CNode* node, QByteArray* sourceSubtree,
+                                  QByteArray* cleanSubtree) const
+{
+    if(!node || !sourceSubtree || !cleanSubtree || !node->hasRawObjectProvenance())
+        return false;
+    sourceSubtree->clear();
+    cleanSubtree->clear();
+    if(node->hasRawObjectTemplateBytes())
+    {
+        *sourceSubtree = node->rawTemplateSourceSubtree();
+        *cleanSubtree = node->rawTemplateCleanSubtree();
+        return QCryptographicHash::hash(*sourceSubtree, QCryptographicHash::Sha256)
+                == node->rawSourceSubtreeSha256();
+    }
+    const QByteArray documentHash = QCryptographicHash::hash(
+        m_originalData, QCryptographicHash::Sha256);
+    if(node->rawSourceDocumentSha256() != documentHash)
+        return false;
+
+    CValidationReport report;
+    CMobDocument sourceDocument;
+    CMobDocument cleanDocument;
+    if(!sourceDocument.loadBytes(m_originalData, m_filePath.filePath(), &report)
+       || !cleanDocument.loadBytes(m_cleanProjection, "clean-ui-projection.mob", &report)
+       || !sourceDocument.objectSubtreeBytes(node->rawSourceObjectPath(),
+                                             node->rawSourceSubtreeSha256(),
+                                             sourceSubtree))
+        return false;
+
+    const CMobSemanticDiff alignment = CMobSemanticDiff::compare(sourceDocument, cleanDocument);
+    for(const SMobDiffEntry& entry : alignment.entries())
+    {
+        if(entry.baselineIndex < 0 || entry.candidateIndex < 0)
+            continue;
+        const SMobObjectSnapshot& source = sourceDocument.objects().at(entry.baselineIndex);
+        if(source.sectionPath != node->rawSourceObjectPath())
+            continue;
+        const SMobObjectSnapshot& clean = cleanDocument.objects().at(entry.candidateIndex);
+        return cleanDocument.objectSubtreeBytes(clean.sectionPath, clean.subtreeSha256,
+                                                cleanSubtree);
+    }
+    sourceSubtree->clear();
+    return false;
 }
