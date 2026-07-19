@@ -286,7 +286,7 @@ QStringList armorSlots(const QString& type, bool jmv)
 {
     static const QMap<QString, QStringList> armorPartMap = {
         {"helm", {"hd"}}, {"plate", {"bd"}}, {"leggings", {"hp"}},
-        {"shirt", {"lh1", "rh1"}}, {"pants", {"ll1", "rl1"}},
+        {"shirt", {"bd", "lh1", "rh1"}}, {"pants", {"hp", "ll1", "rl1"}},
         {"boots", {"ll2", "ll3", "rl2", "rl3"}},
         {"gloves", {"lh2", "lh3", "rh2", "rh3"}}
     };
@@ -317,6 +317,12 @@ bool optionalJmvTopArmorComponent(const QString& type)
     // part.armorNN member is optional: when the ANHUM assembly has it, it
     // replaces that anatomical/lower-armor part; when absent, the lower part
     // remains. Do not synthesize a placeholder merely from the database slot.
+    return normalized == "helm" || normalized == "plate" || normalized == "leggings";
+}
+
+bool isUpperArmor(const QString& type)
+{
+    const QString normalized = type.trimmed().toLower();
     return normalized == "helm" || normalized == "plate" || normalized == "leggings";
 }
 
@@ -378,12 +384,16 @@ QStringList appendArmorComponents(const ei::SItemDatabaseRecord& item,
         return matched;
     }
     const QString suffix = componentSuffix("armor", item.textureType1);
+    const bool upperArmor = isUpperArmor(item.type);
     for(const QString& slot : armorParts)
     {
-        // TTI zero is the textured anatomical/base component. Assemblies do
-        // not contain .armor00 members, so replacing the base part here makes
-        // lightly clothed units (notably JMV females) appear naked.
-        const QString expected = item.textureType1 == 0 ? slot : slot + suffix;
+        // Shirt, gloves, pants, and boots are the lower armor texture layer;
+        // their TTI selects an atlas but never selects .armorNN geometry.
+        // Helm, plate, and leggings are upper armor: their exact .armorNN
+        // members replace base anatomy only where the selected ANHUM actually
+        // contains that member. TTI zero still means base anatomy.
+        const QString expected = !upperArmor || item.textureType1 == 0
+            ? slot : slot + suffix;
         if(request.assemblyParts.isEmpty())
         {
             components->append(expected);
