@@ -9,11 +9,13 @@ SOURCES += \
     jmv_map_test_launcher_tests.cpp \
     ../source/documents/endurance_document.cpp \
     ../source/runtime/current_session_backup.cpp \
+    ../source/runtime/hot_reload_protocol.cpp \
     ../source/runtime/jmv_map_test_launcher.cpp \
     ../source/runtime/runtime_providers.cpp
 
 HEADERS += \
     ../source/documents/endurance_document.h \
     ../source/runtime/current_session_backup.h \
+    ../source/runtime/hot_reload_protocol.h \
     ../source/runtime/jmv_map_test_launcher.h \
     ../source/runtime/runtime_providers.h

@@ -271,6 +271,18 @@ MainWindow::MainWindow(QWidget* parent) :
             QTimer::singleShot(0, this, &MainWindow::close);
         }
     });
+    connect(m_mapTestLauncher, &CJmvMapTestLauncher::hotReloadReady, this, [this]()
+    {
+        statusBar()->showMessage(tr("JMV map test is ready for Ctrl+F5 hot reload."), 6000);
+        updateMapTestAction();
+    });
+    connect(m_mapTestLauncher, &CJmvMapTestLauncher::hotReloadFinished, this,
+            [this](quint64, bool success, const QString& message)
+    {
+        ei::log(success ? eLogInfo : eLogWarning, message);
+        statusBar()->showMessage(message, 10000);
+        updateMapTestAction();
+    });
     connect(m_mapTestLauncher, &CJmvMapTestLauncher::testError, this,
             [this](const QString& message)
     {
@@ -1071,31 +1083,46 @@ void MainWindow::updateMapTestAction()
 {
     if(!m_mapTestAction || !m_stopMapTestAction)
         return;
-    if(m_mapTestLauncher && m_mapTestLauncher->isRunning())
-    {
-        m_mapTestAction->setEnabled(false);
-        m_stopMapTestAction->setEnabled(true);
-        if(m_entranceCombo) m_entranceCombo->setEnabled(false);
-        if(m_gotoEntranceButton) m_gotoEntranceButton->setEnabled(false);
-        if(m_playFromHereButton) m_playFromHereButton->setEnabled(false);
-        if(m_godmodeCheckBox) m_godmodeCheckBox->setEnabled(false);
-        return;
-    }
-    m_stopMapTestAction->setEnabled(false);
     const SResourceProfileEvaluation profile = activeResourceProfile();
     const bool isJmv = profile.profileId.compare("jamais-vu", Qt::CaseInsensitive) == 0;
     const bool isBaseProbe = profile.profileId.compare("base-game", Qt::CaseInsensitive) == 0;
     const bool hasPair = m_pView && m_pView->hasActiveMob()
             && m_pView->mobs().size() == 1 && CLandscape::getInstance()->isMprLoad();
     const bool hasEntrance = selectedTravelZone() != nullptr;
-    // JMV applies a placed custom entrance through its process-owned autorun
-    // provider. Base keeps the picker unavailable until it has an equivalent
-    // exact-hash runtime position provider.
     const bool customRequested = m_playFromHereButton && m_playFromHereButton->isChecked();
     const bool customReady = !customRequested
         || (isJmv && m_customSpawn.valid && !m_pickSpawnPending);
     const bool profileReady = (isJmv || isBaseProbe) && profile.valid
         && profile.runtimeStackValidated;
+    if(m_mapTestLauncher && m_mapTestLauncher->isRunning())
+    {
+        const bool canConfigureReload = isJmv && profileReady && hasPair && hasEntrance;
+        const bool runtimeReady = m_mapTestLauncher->isHotReloadReady();
+        const bool pendingReload = m_mapTestLauncher->isHotReloadPending();
+        const bool canHotReload = canConfigureReload && customReady
+            && runtimeReady && !pendingReload;
+        m_mapTestAction->setText(tr("Hot Reload Map"));
+        m_mapTestAction->setEnabled(canHotReload);
+        m_stopMapTestAction->setEnabled(true);
+        if(m_entranceCombo)
+            m_entranceCombo->setEnabled(canConfigureReload && !customRequested);
+        if(m_gotoEntranceButton) m_gotoEntranceButton->setEnabled(canConfigureReload);
+        if(m_playFromHereButton) m_playFromHereButton->setEnabled(canConfigureReload);
+        if(m_godmodeCheckBox) m_godmodeCheckBox->setEnabled(canConfigureReload);
+        m_mapTestAction->setToolTip(canHotReload
+            ? tr("Restage the exact editor pair and reload it in the Endurance-owned JMV process (Ctrl+F5).")
+            : (pendingReload
+                ? tr("Waiting for the current hot reload to complete.")
+                : (!runtimeReady
+                ? tr("Waiting for the initial staged map to report hot-reload readiness.")
+                : tr("Hot reload requires a validated JMV profile, one MPR/MOB pair, and a valid entrance."))));
+        return;
+    }
+    m_mapTestAction->setText(tr("Test Current Map"));
+    m_stopMapTestAction->setEnabled(false);
+    // JMV applies a placed custom entrance through its process-owned autorun
+    // provider. Base keeps the picker unavailable until it has an equivalent
+    // exact-hash runtime position provider.
     m_mapTestAction->setEnabled(profileReady && hasPair && hasEntrance && customReady);
     if(m_entranceCombo)
         m_entranceCombo->setEnabled(hasPair && !customRequested &&
@@ -1124,6 +1151,7 @@ void MainWindow::launchCurrentMapTest()
 {
     activateWindow();
     raise();
+    const bool hotReloadRequested = m_mapTestLauncher && m_mapTestLauncher->isRunning();
     if(!m_pView || !m_pView->hasActiveMob() || m_pView->mobs().size() != 1
        || !CLandscape::getInstance()->isMprLoad())
     {
@@ -1131,8 +1159,11 @@ void MainWindow::launchCurrentMapTest()
             tr("Load one MPR and exactly one MOB before starting a test."));
         return;
     }
-    QProgressDialog progress(tr("Preparing map test..."), QString(), 0, 6, this);
-    progress.setWindowTitle(tr("Map test launch"));
+    QProgressDialog progress(hotReloadRequested ? tr("Preparing hot reload...")
+                                               : tr("Preparing map test..."),
+                             QString(), 0, 6, this);
+    progress.setWindowTitle(hotReloadRequested ? tr("JMV hot reload")
+                                               : tr("Map test launch"));
     progress.setWindowModality(Qt::WindowModal);
     progress.setCancelButton(nullptr);
     progress.setMinimumDuration(0);
@@ -1156,6 +1187,12 @@ void MainWindow::launchCurrentMapTest()
     const SResourceProfileEvaluation profile = activeResourceProfile();
     const bool isJmv = profile.profileId.compare("jamais-vu", Qt::CaseInsensitive) == 0;
     const bool isBase = profile.profileId.compare("base-game", Qt::CaseInsensitive) == 0;
+    if(hotReloadRequested && !isJmv)
+    {
+        QMessageBox::warning(this, tr("Hot reload"),
+            tr("Hot reload is currently available only for an Endurance-owned JMV test process."));
+        return;
+    }
     if((!isJmv && !isBase) || !profile.valid || !profile.runtimeStackValidated)
     {
         QMessageBox::warning(this, tr("Map test launch"),
@@ -1221,7 +1258,8 @@ void MainWindow::launchCurrentMapTest()
     constexpr int kMapTestWarningVersion = 3;
     COptInt* warningVersion = dynamic_cast<COptInt*>(
                 m_settings->opt(eOptSetGeneral, "mapTestWarningVersion"));
-    if(!warningVersion || warningVersion->value() < kMapTestWarningVersion)
+    if(!hotReloadRequested
+       && (!warningVersion || warningVersion->value() < kMapTestWarningVersion))
     {
         progress.hide();
         QMessageBox confirmationBox(QMessageBox::Question,
@@ -1262,7 +1300,7 @@ void MainWindow::launchCurrentMapTest()
     input.spawnZ = runtimeSpawn.z();
     input.godmode = isJmv && m_godmodeCheckBox && m_godmodeCheckBox->isChecked();
     input.borrowedMapIdentity = m_borrowedMapIdentity;
-    if(isBase)
+    if(isBase && !hotReloadRequested)
     {
         const QStringList levels = {
             tr("1 - Observation only (menu and normal exit)"),
@@ -1280,11 +1318,18 @@ void MainWindow::launchCurrentMapTest()
         input.baseProbeLevel = levels.indexOf(selected) + 1;
     }
     QString error;
-    if(!m_mapTestLauncher->launch(input, &error))
+    const bool accepted = hotReloadRequested
+        ? m_mapTestLauncher->hotReload(input, &error)
+        : m_mapTestLauncher->launch(input, &error);
+    if(!accepted)
     {
-        ei::log(eLogWarning, "Map test launch refused: " + error);
-        QMessageBox::critical(this, tr("Map test launch"), error);
+        ei::log(eLogWarning, QString("Map test %1 refused: %2")
+            .arg(hotReloadRequested ? "hot reload" : "launch", error));
+        QMessageBox::critical(this,
+            hotReloadRequested ? tr("Hot reload") : tr("Map test launch"), error);
     }
+    else if(hotReloadRequested)
+        statusBar()->showMessage(tr("Hot reload queued on the verified JMV game thread."), 6000);
     progress.setValue(6);
     updateMapTestAction();
 }

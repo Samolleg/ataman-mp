@@ -359,15 +359,22 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
 ## 0.2.1: JMV hot reload and test-session continuity
 
 - [x] Define a versioned, hash-carrying hot-reload request schema that rejects
-  payloads outside the Endurance-owned test-run directory. Runtime consumption
-  remains disabled until game-thread teardown/reload is proven.
+  payloads outside the Endurance-owned test-run directory.
   ([`4e62424`](https://github.com/Ilufus/ei-mapper-endurance/commit/4e62424))
 
 - [ ] Make repeated Ctrl+F5 hot-reload the Endurance-owned game process.
-  - Validate and restage the exact current in-memory pair.
-  - Request teardown/reload on the verified game thread without restarting JMV.
-  - Never attach to or stop an independently launched game.
-  - Never replace a staged file while the runtime loader still owns it.
+  - [x] Validate and restage the exact current in-memory pair under the current
+    run, with fresh hashes and a losslessly patched autorun bootstrap.
+  - [x] Keep a process-private message hook on the captured game thread and
+    accept only monotonic, owned, hash-matching control requests.
+  - [x] Replace only the two Endurance-created temporary live files, using
+    atomic writes, post-write hashes, and pair rollback before signalling.
+  - [x] Never attach to or stop an independently launched game.
+  - [x] Report readiness only after the first staged loader completed; report
+    each reload completion/failure back to the editor with a 20-second timeout.
+  - [ ] Runtime-prove that the verified normal zone-transition controller safely
+    unloads and reloads the same staged pair without restarting JMV. Current
+    source is an experimental probe and is not yet considered validated.
 - [ ] Preserve position on same-map reload.
   - Capture player position and facing before teardown.
   - Restore them only after ground, bounds, and collision validation.
@@ -377,7 +384,7 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
 - [ ] Keep the staged version mounted when travelling away and returning.
   - Returning to the edited map must not silently load the installed original.
   - Record every active staged map identity and hash.
-- [ ] Keep Endurance's **Stop JMV Map Test** control available during hot reload
+- [x] Keep Endurance's **Stop JMV Map Test** control available during hot reload
   and restore editor focus only after exit or confirmed termination. No in-game
   End Test integration is required; normal `Alt+F4` remains available.
 

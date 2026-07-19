@@ -17,6 +17,8 @@ struct SMapHotReloadRequest
     QString mobPath;
     QString mprSha256;
     QString mobSha256;
+    QString bootstrapMobPath;
+    QString bootstrapMobSha256;
     bool preservePosition{false};
 };
 
@@ -27,5 +29,9 @@ bool mapHotReloadRequestFromJson(const QJsonObject& object,
 bool validateMapHotReloadRequest(const SMapHotReloadRequest& request,
                                  const QString& ownedRunRoot,
                                  QStringList* errors = nullptr);
+QByteArray mapHotReloadRequestToControlBytes(const SMapHotReloadRequest& request);
+bool mapHotReloadRequestFromControlBytes(const QByteArray& bytes,
+                                         SMapHotReloadRequest* request,
+                                         QStringList* errors = nullptr);
 
 #endif

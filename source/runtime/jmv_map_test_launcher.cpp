@@ -17,6 +17,7 @@
 
 #include "endurance_document.h"
 #include "current_session_backup.h"
+#include "hot_reload_protocol.h"
 #include "runtime_providers.h"
 
 #ifdef Q_OS_WIN
@@ -93,6 +94,38 @@ bool processExists(qint64 pid)
     return exists;
 #else
     Q_UNUSED(pid);
+    return false;
+#endif
+}
+
+bool threadBelongsToProcess(quint32 threadId, quint32 processId)
+{
+#ifdef Q_OS_WIN
+    HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+    if(snapshot == INVALID_HANDLE_VALUE)
+        return false;
+    THREADENTRY32 entry;
+    ZeroMemory(&entry, sizeof(entry));
+    entry.dwSize = sizeof(entry);
+    bool found = false;
+    if(Thread32First(snapshot, &entry))
+    {
+        do
+        {
+            if(entry.th32ThreadID == DWORD(threadId)
+               && entry.th32OwnerProcessID == DWORD(processId))
+            {
+                found = true;
+                break;
+            }
+        }
+        while(Thread32Next(snapshot, &entry));
+    }
+    CloseHandle(snapshot);
+    return found;
+#else
+    Q_UNUSED(threadId);
+    Q_UNUSED(processId);
     return false;
 #endif
 }
@@ -274,8 +307,60 @@ BOOL CALLBACK findWindowForProcess(HWND window, LPARAM parameter)
 
 CJmvMapTestLauncher::CJmvMapTestLauncher(QObject* parent)
     : QObject(parent), m_process(new QProcess(this)),
+      m_hotReloadReadyTimer(new QTimer(this)),
+      m_hotReloadResultTimer(new QTimer(this)),
       m_cleanupComplete(true), m_baseProbe(false)
 {
+    m_hotReloadReadyTimer->setInterval(500);
+    connect(m_hotReloadReadyTimer, &QTimer::timeout, this, [this]()
+    {
+        if(isHotReloadReady())
+        {
+            m_hotReloadReadyTimer->stop();
+            appendRunLog("JMV hot-reload transport is ready on the verified game thread");
+            emit hotReloadReady();
+        }
+    });
+    m_hotReloadResultTimer->setInterval(250);
+    connect(m_hotReloadResultTimer, &QTimer::timeout, this, [this]()
+    {
+        if(m_pendingHotReloadSequence == 0)
+        {
+            m_hotReloadResultTimer->stop();
+            return;
+        }
+        QFile result(m_bridgeResultPath);
+        const QString text = result.open(QIODevice::ReadOnly | QIODevice::Text)
+            ? QString::fromUtf8(result.readAll()) : QString();
+        const QString completed = QString("HOT_RELOAD completed sequence=%1")
+            .arg(m_pendingHotReloadSequence);
+        const QString failed = QString("HOT_RELOAD failed sequence=%1")
+            .arg(m_pendingHotReloadSequence);
+        if(text.contains(completed) || text.contains(failed))
+        {
+            const quint64 sequence = m_pendingHotReloadSequence;
+            const bool success = text.contains(completed);
+            m_pendingHotReloadSequence = 0;
+            m_hotReloadResultTimer->stop();
+            const QString message = success
+                ? QString("JMV hot reload %1 completed through the staged map loader.").arg(sequence)
+                : QString("JMV hot reload %1 failed; inspect bridge-result.log.").arg(sequence);
+            appendRunLog(message);
+            emit hotReloadFinished(sequence, success, message);
+            return;
+        }
+        if(++m_hotReloadResultPolls >= 80)
+        {
+            const quint64 sequence = m_pendingHotReloadSequence;
+            m_pendingHotReloadSequence = 0;
+            m_hotReloadResultTimer->stop();
+            const QString message = QString(
+                "JMV hot reload %1 did not report completion within 20 seconds; inspect bridge-result.log.")
+                .arg(sequence);
+            appendRunLog(message);
+            emit hotReloadFinished(sequence, false, message);
+        }
+    });
     connect(m_process, &QProcess::started, this, [this]()
     {
         appendRunLog(QString("%1 started pid=%2")
@@ -284,12 +369,17 @@ CJmvMapTestLauncher::CJmvMapTestLauncher(QObject* parent)
         m_manifest.insert("pid", double(m_process->processId()));
         writeManifest("running");
         emit testStarted(m_runId, m_temporaryMapName);
+        if(!m_baseProbe)
+            m_hotReloadReadyTimer->start();
         QTimer::singleShot(1500, this, &CJmvMapTestLauncher::focusGameWindow);
         QTimer::singleShot(5000, this, &CJmvMapTestLauncher::focusGameWindow);
     });
     connect(m_process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
             this, [this](int exitCode, QProcess::ExitStatus status)
     {
+        m_hotReloadReadyTimer->stop();
+        m_hotReloadResultTimer->stop();
+        m_pendingHotReloadSequence = 0;
         appendRunLog(QString("game.exe finished exitCode=%1 status=%2")
                      .arg(exitCode).arg(int(status)));
         const QString bridgeResult = bridgeResultSummary();
@@ -332,6 +422,19 @@ QString CJmvMapTestLauncher::testSavesPathForProfile(const SResourceProfileEvalu
 bool CJmvMapTestLauncher::isRunning() const
 {
     return m_process->state() != QProcess::NotRunning;
+}
+
+bool CJmvMapTestLauncher::isHotReloadReady() const
+{
+    if(!isRunning() || m_baseProbe || m_hotReloadThreadPath.isEmpty())
+        return false;
+    QFile file(m_hotReloadThreadPath);
+    bool ok = false;
+    quint32 threadId = 0;
+    if(file.open(QIODevice::ReadOnly | QIODevice::Text))
+        threadId = file.readAll().trimmed().toULong(&ok);
+    return ok && threadId != 0
+        && threadBelongsToProcess(threadId, quint32(m_process->processId()));
 }
 
 bool CJmvMapTestLauncher::injectWorldScriptBootstrap(const QString& script,
@@ -584,6 +687,13 @@ bool CJmvMapTestLauncher::launch(const SJmvMapTestLaunchInput& input, QString* e
     m_runtimeHostPath.clear();
     m_gamePidPath.clear();
     m_liveSavesPath.clear();
+    m_hotReloadRequestPath.clear();
+    m_hotReloadThreadPath.clear();
+    m_profileId.clear();
+    m_currentZoneId.clear();
+    m_hotReloadSequence = 0;
+    m_pendingHotReloadSequence = 0;
+    m_hotReloadResultPolls = 0;
     m_baseProbe = false;
     m_manifest = QJsonObject();
     m_cleanupComplete = false;
@@ -629,6 +739,8 @@ bool CJmvMapTestLauncher::launch(const SJmvMapTestLaunchInput& input, QString* e
     environment.insert("EI_MAPPER_ENDURANCE_LIVE_SAVES", m_liveSavesPath);
     environment.insert("EI_MAPPER_ENDURANCE_TEST_SAVES", m_testSavesPath);
     environment.insert("EI_MAPPER_ENDURANCE_SKIP_INTROS", "1");
+    environment.insert("EI_MAPPER_ENDURANCE_HOT_RELOAD_REQUEST", m_hotReloadRequestPath);
+    environment.insert("EI_MAPPER_ENDURANCE_HOT_RELOAD_THREAD", m_hotReloadThreadPath);
     const QString godmodeBootstrapPath = m_manifest.value("godmodeBootstrapPath").toString();
     if(!godmodeBootstrapPath.isEmpty())
         environment.insert("EI_MAPPER_ENDURANCE_GODMODE_MOB", godmodeBootstrapPath);
@@ -728,6 +840,10 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
     m_testSavesPath = testSavesPathForProfile(input.profile);
     m_liveSavesPath = isJmv ? QDir(input.profile.modRoot).filePath("saves")
                             : QDir(input.profile.gameRoot).filePath("saves");
+    m_hotReloadRequestPath = QDir(m_runRoot).filePath("hot-reload.request");
+    m_hotReloadThreadPath = QDir(m_runRoot).filePath("game-thread.id");
+    m_profileId = input.profile.profileId;
+    m_currentZoneId = input.mapEntry.zoneId;
     if(isBase)
     {
         const QString liveDirectory = QDir(m_runRoot).filePath("live");
@@ -892,6 +1008,181 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
                  .arg(m_temporaryMapName).arg(input.spawn.exitId)
                  .arg(x, y).arg(input.spawn.clearance, 0, 'f', 3));
     return writeManifest("staged", error);
+}
+
+bool CJmvMapTestLauncher::hotReload(const SJmvMapTestLaunchInput& input,
+                                    QString* error)
+{
+    if(!isRunning() || m_baseProbe)
+    {
+        if(error) *error = "Hot reload requires an active Endurance-owned JMV test process.";
+        return false;
+    }
+    if(!isHotReloadReady())
+    {
+        if(error) *error = "The initial staged map has not reported hot-reload readiness yet.";
+        return false;
+    }
+    if(isHotReloadPending())
+    {
+        if(error) *error = "Wait for the current hot reload to complete or time out.";
+        return false;
+    }
+    if(input.profile.profileId.compare(m_profileId, Qt::CaseInsensitive) != 0)
+    {
+        if(error) *error = "The active editor profile differs from the running test profile.";
+        return false;
+    }
+    if(!input.profile.valid || !input.profile.runtimeStackValidated
+       || input.mprData.isEmpty() || input.mobData.isEmpty() || !input.spawn.valid)
+    {
+        if(error) *error = "The hot-reload profile, map pair, or selected entrance is incomplete.";
+        return false;
+    }
+
+    const quint64 sequence = m_hotReloadSequence + 1;
+    const QString reloadRoot = QDir(m_runRoot).filePath(
+        QString("reloads/%1").arg(sequence, 6, 10, QLatin1Char('0')));
+    const QString payloadMpr = QDir(reloadRoot).filePath("map.mpr");
+    const QString payloadMob = QDir(reloadRoot).filePath("map.mob");
+    if(!QDir().mkpath(reloadRoot)
+       || !atomicWrite(payloadMpr, input.mprData, error)
+       || !atomicWrite(payloadMob, input.mobData, error))
+        return false;
+
+    CValidationReport report;
+    CMprDocument mprDocument;
+    CMobDocument mobDocument;
+    if(!mprDocument.load(QFileInfo(payloadMpr), &report)
+       || !mobDocument.load(QFileInfo(payloadMob), &report))
+    {
+        if(error) *error = "The staged hot-reload pair failed validation:\n" + report.toText();
+        return false;
+    }
+
+    QJsonObject reloadManifest;
+    QString bootstrapPath;
+    if(!prepareGodmodeBootstrap(input.profile.mapDirectories, reloadRoot,
+                                input.spawn, input.spawnZ, input.godmode,
+                                &reloadManifest, &bootstrapPath, error))
+        return false;
+
+    SMapHotReloadRequest request;
+    request.sequence = sequence;
+    request.runId = m_runId;
+    request.profileId = input.profile.profileId;
+    request.zoneId = input.mapEntry.zoneId;
+    request.entranceId = input.spawn.exitId;
+    request.mprPath = payloadMpr;
+    request.mobPath = payloadMob;
+    request.mprSha256 = sha256(input.mprData);
+    request.mobSha256 = sha256(input.mobData);
+    request.bootstrapMobPath = bootstrapPath;
+    request.bootstrapMobSha256 = bootstrapPath.isEmpty()
+        ? QString() : fileSha256(bootstrapPath);
+    // Position preservation requires a verified runtime position provider.
+    // Until that provider exists, use normal entrance/custom-spawn bootstrap.
+    request.preservePosition = false;
+    QStringList validationErrors;
+    if(!validateMapHotReloadRequest(request, m_runRoot, &validationErrors))
+    {
+        if(error) *error = validationErrors.join('\n');
+        return false;
+    }
+
+    QByteArray previousMpr;
+    QByteArray previousMob;
+    if(!readFile(m_liveMprPath, &previousMpr, error)
+       || !readFile(m_liveMobPath, &previousMob, error))
+        return false;
+    const auto restoreLivePair = [this, &previousMpr, &previousMob]()
+    {
+        QString ignored;
+        atomicWrite(m_liveMprPath, previousMpr, &ignored);
+        atomicWrite(m_liveMobPath, previousMob, &ignored);
+        m_liveMprSha256 = sha256(previousMpr);
+        m_liveMobSha256 = sha256(previousMob);
+        QJsonObject live = m_manifest.value("liveFiles").toObject();
+        live.insert("mprSha256", m_liveMprSha256);
+        live.insert("mobSha256", m_liveMobSha256);
+        m_manifest.insert("liveFiles", live);
+        writeManifest("running");
+    };
+    if(!atomicWrite(m_liveMprPath, input.mprData, error)
+       || !atomicWrite(m_liveMobPath, input.mobData, error)
+       || fileSha256(m_liveMprPath).compare(request.mprSha256, Qt::CaseInsensitive) != 0
+       || fileSha256(m_liveMobPath).compare(request.mobSha256, Qt::CaseInsensitive) != 0)
+    {
+        restoreLivePair();
+        if(error && error->isEmpty())
+            *error = "The Endurance-owned live map pair could not be replaced and was restored.";
+        return false;
+    }
+
+    const QString auditPath = QDir(reloadRoot).filePath("request.json");
+    if(!atomicWrite(auditPath,
+                    QJsonDocument(mapHotReloadRequestToJson(request)).toJson(QJsonDocument::Indented),
+                    error)
+       || !atomicWrite(m_hotReloadRequestPath,
+                       mapHotReloadRequestToControlBytes(request), error))
+    {
+        restoreLivePair();
+        return false;
+    }
+
+    // Publish the replacement hashes before the game-thread signal. If the
+    // game exits immediately during reload, interrupted-run cleanup must still
+    // recognize and remove the exact current Endurance-owned live files.
+    m_liveMprSha256 = request.mprSha256;
+    m_liveMobSha256 = request.mobSha256;
+    QJsonObject live = m_manifest.value("liveFiles").toObject();
+    live.insert("mprSha256", m_liveMprSha256);
+    live.insert("mobSha256", m_liveMobSha256);
+    m_manifest.insert("liveFiles", live);
+    if(!writeManifest("running", error))
+    {
+        restoreLivePair();
+        return false;
+    }
+
+    QFile threadFile(m_hotReloadThreadPath);
+    bool threadOk = false;
+    quint32 threadId = 0;
+    if(threadFile.open(QIODevice::ReadOnly | QIODevice::Text))
+        threadId = threadFile.readAll().trimmed().toULong(&threadOk);
+#ifdef Q_OS_WIN
+    const bool ownsThread = threadOk && threadId != 0
+        && threadBelongsToProcess(threadId, quint32(m_process->processId()));
+    constexpr UINT kHotReloadMessage = WM_APP + 0x45E;
+    if(!ownsThread || !PostThreadMessageW(DWORD(threadId), kHotReloadMessage, 0, 0))
+    {
+        restoreLivePair();
+        if(error) *error = "The verified JMV game thread is unavailable for hot reload.";
+        return false;
+    }
+#else
+    Q_UNUSED(threadId);
+    restoreLivePair();
+    if(error) *error = "JMV hot reload is currently available only on Windows.";
+    return false;
+#endif
+
+    m_hotReloadSequence = sequence;
+    m_pendingHotReloadSequence = sequence;
+    m_hotReloadResultPolls = 0;
+    m_hotReloadResultTimer->start();
+    m_currentZoneId = input.mapEntry.zoneId;
+    QJsonArray reloads = m_manifest.value("hotReloads").toArray();
+    QJsonObject audit = mapHotReloadRequestToJson(request);
+    audit.insert("auditPath", auditPath);
+    audit.insert("queuedUtc", QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
+    reloads.append(audit);
+    m_manifest.insert("hotReloads", reloads);
+    writeManifest("running");
+    appendRunLog(QString("Queued JMV hot reload sequence=%1 zone=%2 exit=%3")
+                 .arg(sequence).arg(request.zoneId).arg(request.entranceId));
+    emit hotReloadQueued(sequence, request.zoneId);
+    return true;
 }
 
 bool CJmvMapTestLauncher::installBridge(QString* error)

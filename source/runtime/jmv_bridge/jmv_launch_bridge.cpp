@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include <cwchar>
 #include <cstring>
+#include <cctype>
 #include <intrin.h>
 
 #pragma intrinsic(_ReturnAddress)
@@ -88,6 +89,7 @@ constexpr DWORD kPlayerDefaultsResetRva = 0x000A5BD0;
 constexpr DWORD kPlayerDefaultsManagerRva = 0x003AA5C4;
 constexpr DWORD kGameStringAssignRva = 0x00300AF9;
 constexpr UINT kDirectLaunchMessage = WM_APP + 0x45D;
+constexpr UINT kHotReloadMessage = WM_APP + 0x45E;
 constexpr unsigned char kMapLoadEntryBytes[6] = {
     0x64, 0xA1, 0x00, 0x00, 0x00, 0x00
 };
@@ -118,6 +120,10 @@ int g_targetExitId = 0;
 wchar_t g_liveSaves[MAX_PATH * 4] = {};
 wchar_t g_testSaves[MAX_PATH * 4] = {};
 wchar_t g_godmodeMob[MAX_PATH * 4] = {};
+wchar_t g_hotReloadRequestPath[MAX_PATH * 4] = {};
+wchar_t g_hotReloadThreadPath[MAX_PATH * 4] = {};
+wchar_t g_hotReloadRoot[MAX_PATH * 4] = {};
+ULONGLONG g_hotReloadSequence = 0;
 volatile LONG g_saveRedirectLogCount = 0;
 volatile LONG g_godmodeRedirectLogged = 0;
 volatile LONG g_introSkipMask = 0;
@@ -129,6 +135,21 @@ int __fastcall ZoneTransitionDetour(void* self, void*, const char* zoneName,
                                     int requestedMode);
 void __fastcall PlayerDefaultsResetDetour(void* self, void*);
 LRESULT CALLBACK DirectLaunchMessageHook(int code, WPARAM wParam, LPARAM lParam);
+
+struct HotReloadControl
+{
+    int protocol = 0;
+    ULONGLONG sequence = 0;
+    int entranceId = 0;
+    wchar_t mprPath[MAX_PATH * 4] = {};
+    wchar_t mobPath[MAX_PATH * 4] = {};
+    wchar_t bootstrapMobPath[MAX_PATH * 4] = {};
+    unsigned char mprSha256[32] = {};
+    unsigned char mobSha256[32] = {};
+    unsigned char bootstrapMobSha256[32] = {};
+    bool hasBootstrap = false;
+    char zone[128] = {};
+};
 
 const wchar_t* FileNamePart(const wchar_t* path)
 {
@@ -213,6 +234,171 @@ bool HashFileSha256(const wchar_t* path, unsigned char output[32])
         CryptReleaseContext(provider, 0);
     CloseHandle(file);
     return success;
+}
+
+bool ParseSha256(const char* text, unsigned char output[32])
+{
+    if(!text || std::strlen(text) != 64)
+        return false;
+    for(int index = 0; index < 32; ++index)
+    {
+        const auto nibble = [](char value) -> int
+        {
+            if(value >= '0' && value <= '9') return value - '0';
+            value = char(std::tolower(static_cast<unsigned char>(value)));
+            return value >= 'a' && value <= 'f' ? value - 'a' + 10 : -1;
+        };
+        const int high = nibble(text[index * 2]);
+        const int low = nibble(text[index * 2 + 1]);
+        if(high < 0 || low < 0)
+            return false;
+        output[index] = static_cast<unsigned char>((high << 4) | low);
+    }
+    return true;
+}
+
+bool HashMatches(const wchar_t* path, const unsigned char expected[32])
+{
+    unsigned char actual[32]{};
+    return HashFileSha256(path, actual)
+        && std::memcmp(actual, expected, sizeof(actual)) == 0;
+}
+
+bool Utf8ToWide(const char* source, wchar_t* output, int outputCount)
+{
+    return source && output && outputCount > 0
+        && MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, source, -1,
+                               output, outputCount) > 0;
+}
+
+bool IsPathInsideHotReloadRoot(const wchar_t* path)
+{
+    if(!path || !path[0] || !g_hotReloadRoot[0])
+        return false;
+    wchar_t fullPath[MAX_PATH * 4]{};
+    wchar_t fullRoot[MAX_PATH * 4]{};
+    if(!GetFullPathNameW(path, DWORD(sizeof(fullPath) / sizeof(fullPath[0])), fullPath, nullptr)
+       || !GetFullPathNameW(g_hotReloadRoot,
+                           DWORD(sizeof(fullRoot) / sizeof(fullRoot[0])), fullRoot, nullptr))
+        return false;
+    size_t rootLength = std::wcslen(fullRoot);
+    while(rootLength > 3 && (fullRoot[rootLength - 1] == L'\\'
+                            || fullRoot[rootLength - 1] == L'/'))
+        fullRoot[--rootLength] = L'\0';
+    return _wcsnicmp(fullPath, fullRoot, rootLength) == 0
+        && (fullPath[rootLength] == L'\\' || fullPath[rootLength] == L'/');
+}
+
+bool ReadHotReloadControl(HotReloadControl* output)
+{
+    if(!output || !g_hotReloadRequestPath[0]
+       || !IsPathInsideHotReloadRoot(g_hotReloadRequestPath))
+        return false;
+    HANDLE file = CreateFileW(g_hotReloadRequestPath, GENERIC_READ,
+                              FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                              nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if(file == INVALID_HANDLE_VALUE)
+        return false;
+    LARGE_INTEGER size{};
+    bool success = GetFileSizeEx(file, &size) && size.QuadPart > 0
+        && size.QuadPart < 64 * 1024;
+    char bytes[64 * 1024]{};
+    DWORD read = 0;
+    if(success)
+        success = ReadFile(file, bytes, DWORD(size.QuadPart), &read, nullptr)
+            && read == DWORD(size.QuadPart);
+    CloseHandle(file);
+    if(!success)
+        return false;
+    bytes[read] = '\0';
+
+    HotReloadControl parsed;
+    bool haveMprHash = false;
+    bool haveMobHash = false;
+    bool haveProfile = false;
+    bool haveRunId = false;
+    char* context = nullptr;
+    for(char* line = strtok_s(bytes, "\r\n", &context); line;
+        line = strtok_s(nullptr, "\r\n", &context))
+    {
+        char* separator = std::strchr(line, '=');
+        if(!separator) continue;
+        *separator = '\0';
+        const char* value = separator + 1;
+        if(std::strcmp(line, "protocol") == 0) parsed.protocol = std::atoi(value);
+        else if(std::strcmp(line, "sequence") == 0) parsed.sequence = _strtoui64(value, nullptr, 10);
+        else if(std::strcmp(line, "runId") == 0) haveRunId = value[0] != '\0';
+        else if(std::strcmp(line, "profile") == 0)
+        {
+            haveProfile = _stricmp(value, "jamais-vu") == 0;
+            if(!haveProfile) return false;
+        }
+        else if(std::strcmp(line, "zone") == 0)
+        {
+            if(strcpy_s(parsed.zone, value) != 0) return false;
+        }
+        else if(std::strcmp(line, "entrance") == 0) parsed.entranceId = std::atoi(value);
+        else if(std::strcmp(line, "mpr") == 0)
+        {
+            if(!Utf8ToWide(value, parsed.mprPath,
+                           int(sizeof(parsed.mprPath) / sizeof(parsed.mprPath[0])))) return false;
+        }
+        else if(std::strcmp(line, "mob") == 0)
+        {
+            if(!Utf8ToWide(value, parsed.mobPath,
+                           int(sizeof(parsed.mobPath) / sizeof(parsed.mobPath[0])))) return false;
+        }
+        else if(std::strcmp(line, "bootstrapMob") == 0 && value[0])
+        {
+            parsed.hasBootstrap = Utf8ToWide(value, parsed.bootstrapMobPath,
+                int(sizeof(parsed.bootstrapMobPath) / sizeof(parsed.bootstrapMobPath[0])));
+            if(!parsed.hasBootstrap) return false;
+        }
+        else if(std::strcmp(line, "mprSha256") == 0)
+            haveMprHash = ParseSha256(value, parsed.mprSha256);
+        else if(std::strcmp(line, "mobSha256") == 0)
+            haveMobHash = ParseSha256(value, parsed.mobSha256);
+        else if(std::strcmp(line, "bootstrapMobSha256") == 0 && value[0])
+        {
+            if(!ParseSha256(value, parsed.bootstrapMobSha256)) return false;
+        }
+    }
+    for(const char* cursor = parsed.zone; *cursor; ++cursor)
+        if(!std::isalnum(static_cast<unsigned char>(*cursor))
+           && *cursor != '_' && *cursor != '-')
+            return false;
+    if(parsed.protocol != 1 || parsed.sequence == 0 || !haveProfile || !haveRunId
+       || parsed.sequence <= g_hotReloadSequence || parsed.entranceId <= 0
+       || parsed.entranceId > 1024
+       || !parsed.zone[0] || !parsed.mprPath[0] || !parsed.mobPath[0]
+       || !haveMprHash || !haveMobHash
+       || !IsPathInsideHotReloadRoot(parsed.mprPath)
+       || !IsPathInsideHotReloadRoot(parsed.mobPath)
+       || !HashMatches(parsed.mprPath, parsed.mprSha256)
+       || !HashMatches(parsed.mobPath, parsed.mobSha256))
+        return false;
+    if(parsed.hasBootstrap
+       && (!IsPathInsideHotReloadRoot(parsed.bootstrapMobPath)
+           || !HashMatches(parsed.bootstrapMobPath, parsed.bootstrapMobSha256)))
+        return false;
+    *output = parsed;
+    return true;
+}
+
+void PublishHotReloadThreadId()
+{
+    if(!g_hotReloadThreadPath[0] || !IsPathInsideHotReloadRoot(g_hotReloadThreadPath))
+        return;
+    HANDLE file = CreateFileW(g_hotReloadThreadPath, GENERIC_WRITE, FILE_SHARE_READ,
+                              nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if(file == INVALID_HANDLE_VALUE)
+        return;
+    char value[32]{};
+    const int length = sprintf_s(value, "%lu\r\n", g_gameThreadId);
+    DWORD written = 0;
+    if(length > 0)
+        WriteFile(file, value, DWORD(length), &written, nullptr);
+    CloseHandle(file);
 }
 
 enum class RuntimeBuild { Unsupported, JmvStarter, BaseEi };
@@ -1005,19 +1191,89 @@ int __fastcall MapLoadDetour(void* self, void*, const char* mprPath,
     return result;
 }
 
+bool ProcessHotReloadOnGameThread()
+{
+    if(InterlockedCompareExchange(&g_directLaunchState, 0, 0) != 6
+       || !g_originalZoneTransition || !g_zoneTransitionController)
+    {
+        Log(L"HOT_RELOAD refused: initial staged map is not in a reloadable state");
+        return false;
+    }
+    HotReloadControl request;
+    if(!ReadHotReloadControl(&request))
+    {
+        Log(L"HOT_RELOAD refused: request, ownership, sequence, or payload hash validation failed");
+        return false;
+    }
+    wchar_t liveMpr[MAX_PATH * 4]{};
+    wchar_t liveMob[MAX_PATH * 4]{};
+    if(!MultiByteToWideChar(CP_ACP, MB_ERR_INVALID_CHARS, g_temporaryMpr, -1,
+                            liveMpr, int(sizeof(liveMpr) / sizeof(liveMpr[0])))
+       || !MultiByteToWideChar(CP_ACP, MB_ERR_INVALID_CHARS, g_temporaryMob, -1,
+                               liveMob, int(sizeof(liveMob) / sizeof(liveMob[0])))
+       || !HashMatches(liveMpr, request.mprSha256)
+       || !HashMatches(liveMob, request.mobSha256))
+    {
+        Log(L"HOT_RELOAD refused: Endurance-owned live map pair does not match the staged request hashes");
+        return false;
+    }
+    if(strcpy_s(g_sourceZone, request.zone) != 0)
+    {
+        Log(L"HOT_RELOAD refused: map-table zone identity is too long");
+        return false;
+    }
+    g_targetExitId = request.entranceId;
+    g_targetExit = request.entranceId - 1;
+    if(request.hasBootstrap)
+        wcscpy_s(g_godmodeMob, request.bootstrapMobPath);
+
+    wchar_t queued[512]{};
+    wchar_t zone[128]{};
+    MultiByteToWideChar(CP_ACP, 0, g_sourceZone, -1, zone,
+                        int(sizeof(zone) / sizeof(zone[0])));
+    _snwprintf_s(queued, sizeof(queued) / sizeof(queued[0]), _TRUNCATE,
+                 L"HOT_RELOAD invoking verified zone transition sequence=%llu zone=\"%s\" entrance_id=%d thread=%lu",
+                 request.sequence, zone, request.entranceId, GetCurrentThreadId());
+    Log(queued);
+
+    InterlockedExchange(&g_pendingMapLoadProbeCount, 0);
+    InterlockedExchange(&g_directLaunchState, 3);
+    const int transitionResult = g_originalZoneTransition(
+        g_zoneTransitionController, g_sourceZone, 0);
+    const bool redirected = InterlockedCompareExchange(&g_directLaunchState, 6, 4) == 4;
+    if(!redirected)
+    {
+        InterlockedExchange(&g_directLaunchState, -1);
+        if(g_hotReloadThreadPath[0])
+            DeleteFileW(g_hotReloadThreadPath);
+    }
+    else
+        g_hotReloadSequence = request.sequence;
+    wchar_t completed[384]{};
+    _snwprintf_s(completed, sizeof(completed) / sizeof(completed[0]), _TRUNCATE,
+                 L"HOT_RELOAD %s sequence=%llu transition_result=%d staged_loader=%s",
+                 redirected ? L"completed" : L"failed", request.sequence,
+                 transitionResult, redirected ? L"observed" : L"missing");
+    Log(completed);
+    return redirected;
+}
+
 LRESULT CALLBACK DirectLaunchMessageHook(int code, WPARAM wParam, LPARAM lParam)
 {
     MSG* message = reinterpret_cast<MSG*>(lParam);
-    if(code < 0 || wParam != PM_REMOVE || !message ||
-       message->message != kDirectLaunchMessage)
+    if(code < 0 || wParam != PM_REMOVE || !message
+       || (message->message != kDirectLaunchMessage
+           && message->message != kHotReloadMessage))
         return CallNextHookEx(g_directLaunchHook, code, wParam, lParam);
 
+    const UINT requestedMessage = message->message;
     message->message = WM_NULL;
     const LRESULT next = CallNextHookEx(g_directLaunchHook, code, wParam, lParam);
-    HHOOK hook = g_directLaunchHook;
-    g_directLaunchHook = nullptr;
-    if(hook)
-        UnhookWindowsHookEx(hook);
+    if(requestedMessage == kHotReloadMessage)
+    {
+        ProcessHotReloadOnGameThread();
+        return next;
+    }
     if(InterlockedCompareExchange(&g_directLaunchState, 3, 2) != 2)
         return next;
 
@@ -1035,6 +1291,8 @@ LRESULT CALLBACK DirectLaunchMessageHook(int code, WPARAM wParam, LPARAM lParam)
     const bool redirected = InterlockedCompareExchange(&g_directLaunchState, 6, 4) == 4;
     if(!redirected)
         InterlockedExchange(&g_directLaunchState, -1);
+    else
+        PublishHotReloadThreadId();
     Log(redirected
         ? L"DIRECT_LAUNCH complete New Game bootstrap returned staged_loader=observed"
         : L"DIRECT_LAUNCH failed: complete New Game bootstrap returned without the verified staged loader call");
@@ -1211,6 +1469,27 @@ bool InitializeDirectLaunch()
                             DWORD(sizeof(g_resultPath) / sizeof(g_resultPath[0])));
     if(!g_resultPath[0])
         return false;
+    GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_HOT_RELOAD_REQUEST",
+                            g_hotReloadRequestPath,
+                            DWORD(sizeof(g_hotReloadRequestPath)
+                                  / sizeof(g_hotReloadRequestPath[0])));
+    GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_HOT_RELOAD_THREAD",
+                            g_hotReloadThreadPath,
+                            DWORD(sizeof(g_hotReloadThreadPath)
+                                  / sizeof(g_hotReloadThreadPath[0])));
+    if(g_hotReloadRequestPath[0] && g_hotReloadThreadPath[0])
+    {
+        if(GetFullPathNameW(g_hotReloadRequestPath,
+                            DWORD(sizeof(g_hotReloadRoot) / sizeof(g_hotReloadRoot[0])),
+                            g_hotReloadRoot, nullptr))
+        {
+            wchar_t* slash = std::wcsrchr(g_hotReloadRoot, L'\\');
+            wchar_t* forward = std::wcsrchr(g_hotReloadRoot, L'/');
+            if(!slash || (forward && forward > slash)) slash = forward;
+            if(slash) *slash = L'\0';
+        }
+        Log(L"HOT_RELOAD transport configured; runtime requests remain game-thread and hash guarded");
+    }
     const RuntimeBuild runtime = VerifyRuntime();
     Log(runtime == RuntimeBuild::BaseEi
         ? L"EI Mapper Endurance Base EI direct-map feasibility bridge initializing"

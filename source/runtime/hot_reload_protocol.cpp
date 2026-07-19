@@ -2,7 +2,9 @@
 
 #include <QDir>
 #include <QFileInfo>
+#include <QHash>
 #include <QRegularExpression>
+#include <QTextStream>
 
 namespace {
 bool isOwnedPath(const QString& path, const QString& root)
@@ -29,6 +31,8 @@ QJsonObject mapHotReloadRequestToJson(const SMapHotReloadRequest& request)
     object.insert("mobPath", request.mobPath);
     object.insert("mprSha256", request.mprSha256);
     object.insert("mobSha256", request.mobSha256);
+    object.insert("bootstrapMobPath", request.bootstrapMobPath);
+    object.insert("bootstrapMobSha256", request.bootstrapMobSha256);
     object.insert("preservePosition", request.preservePosition);
     return object;
 }
@@ -50,6 +54,8 @@ bool mapHotReloadRequestFromJson(const QJsonObject& object,
     parsed.mobPath = object.value("mobPath").toString();
     parsed.mprSha256 = object.value("mprSha256").toString();
     parsed.mobSha256 = object.value("mobSha256").toString();
+    parsed.bootstrapMobPath = object.value("bootstrapMobPath").toString();
+    parsed.bootstrapMobSha256 = object.value("bootstrapMobSha256").toString();
     parsed.preservePosition = object.value("preservePosition").toBool();
     if(!sequenceValid && errors) errors->append("Hot-reload sequence is invalid.");
     *request = parsed;
@@ -69,12 +75,93 @@ bool validateMapHotReloadRequest(const SMapHotReloadRequest& request,
     if(!isOwnedPath(request.mprPath, ownedRunRoot)
        || !isOwnedPath(request.mobPath, ownedRunRoot))
         local.append("Hot-reload payloads must remain inside the owned test-run directory.");
+    if(!request.bootstrapMobPath.isEmpty()
+       && !isOwnedPath(request.bootstrapMobPath, ownedRunRoot))
+        local.append("The hot-reload bootstrap MOB must remain inside the owned test-run directory.");
     if(!QFileInfo::exists(request.mprPath) || !QFileInfo::exists(request.mobPath))
         local.append("Hot-reload payload files are missing.");
+    if(!request.bootstrapMobPath.isEmpty() && !QFileInfo::exists(request.bootstrapMobPath))
+        local.append("The hot-reload bootstrap MOB is missing.");
     const QRegularExpression hash("^[0-9a-f]{64}$", QRegularExpression::CaseInsensitiveOption);
     if(!hash.match(request.mprSha256).hasMatch()
        || !hash.match(request.mobSha256).hasMatch())
         local.append("Hot-reload payload hashes are invalid.");
+    if(!request.bootstrapMobPath.isEmpty()
+       && !hash.match(request.bootstrapMobSha256).hasMatch())
+        local.append("The hot-reload bootstrap MOB hash is invalid.");
     if(errors) errors->append(local);
     return local.isEmpty();
+}
+
+QByteArray mapHotReloadRequestToControlBytes(const SMapHotReloadRequest& request)
+{
+    QByteArray bytes;
+    QTextStream stream(&bytes, QIODevice::WriteOnly);
+    stream.setCodec("UTF-8");
+    const auto line = [&stream](const QString& key, QString value)
+    {
+        value.replace('\r', ' ');
+        value.replace('\n', ' ');
+        stream << key << '=' << value << '\n';
+    };
+    line("protocol", QString::number(request.protocolVersion));
+    line("sequence", QString::number(request.sequence));
+    line("runId", request.runId);
+    line("profile", request.profileId);
+    line("zone", request.zoneId);
+    line("entrance", QString::number(request.entranceId));
+    line("mpr", QDir::toNativeSeparators(request.mprPath));
+    line("mob", QDir::toNativeSeparators(request.mobPath));
+    line("mprSha256", request.mprSha256.toLower());
+    line("mobSha256", request.mobSha256.toLower());
+    line("bootstrapMob", QDir::toNativeSeparators(request.bootstrapMobPath));
+    line("bootstrapMobSha256", request.bootstrapMobSha256.toLower());
+    line("preservePosition", request.preservePosition ? "1" : "0");
+    stream.flush();
+    return bytes;
+}
+
+bool mapHotReloadRequestFromControlBytes(const QByteArray& bytes,
+                                         SMapHotReloadRequest* request,
+                                         QStringList* errors)
+{
+    if(!request) return false;
+    QHash<QString, QString> values;
+    const QString text = QString::fromUtf8(bytes);
+    for(const QString& rawLine : text.split('\n'))
+    {
+        const QString line = rawLine.trimmed();
+        if(line.isEmpty() || line.startsWith('#')) continue;
+        const int separator = line.indexOf('=');
+        if(separator <= 0)
+        {
+            if(errors) errors->append("Hot-reload control line is not key=value.");
+            return false;
+        }
+        values.insert(line.left(separator).trimmed(), line.mid(separator + 1).trimmed());
+    }
+    SMapHotReloadRequest parsed;
+    bool protocolOk = false;
+    bool sequenceOk = false;
+    bool entranceOk = false;
+    parsed.protocolVersion = values.value("protocol").toInt(&protocolOk);
+    parsed.sequence = values.value("sequence").toULongLong(&sequenceOk);
+    parsed.runId = values.value("runId");
+    parsed.profileId = values.value("profile");
+    parsed.zoneId = values.value("zone");
+    parsed.entranceId = values.value("entrance").toInt(&entranceOk);
+    parsed.mprPath = QDir::fromNativeSeparators(values.value("mpr"));
+    parsed.mobPath = QDir::fromNativeSeparators(values.value("mob"));
+    parsed.mprSha256 = values.value("mprSha256");
+    parsed.mobSha256 = values.value("mobSha256");
+    parsed.bootstrapMobPath = QDir::fromNativeSeparators(values.value("bootstrapMob"));
+    parsed.bootstrapMobSha256 = values.value("bootstrapMobSha256");
+    parsed.preservePosition = values.value("preservePosition") == "1";
+    if(!protocolOk || !sequenceOk || !entranceOk)
+    {
+        if(errors) errors->append("Hot-reload control numeric fields are invalid.");
+        return false;
+    }
+    *request = parsed;
+    return true;
 }
