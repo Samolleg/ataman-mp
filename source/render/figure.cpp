@@ -1,6 +1,7 @@
 #include <QDebug>
 #include <QVector4D>
 #include "figure.h"
+#include "figure_vertex_component.h"
 
 void calcComplection(QVector3D& complexPoint, QVector<QVector3D>& data,
                      QVector3D& constitute);
@@ -167,10 +168,11 @@ void ei::CFigure::generateTriangles(QVector<SVertexData>& aVrtData, QVector<QVec
 {
     for(auto& ind: m_aInd)
     {
-        aVrtData.append(SVertexData(aMorphVertex[m_aVertComp[ind].x]
-                          ,m_aNormal[m_aVertComp[ind].y]
-                          ,m_aUvCoord[m_aVertComp[ind].z]));
-        if(sourceVertexIndices) sourceVertexIndices->append(int(m_aVertComp[ind].x));
+        const US3& component = m_aVertComp[ind];
+        aVrtData.append(ei::decodeFigureVertexComponent(
+            component, aMorphVertex, m_aNormal, m_aUvCoord));
+        if(sourceVertexIndices)
+            sourceVertexIndices->append(ei::figureSourceVertexIndex(component));
     }
 }
 
