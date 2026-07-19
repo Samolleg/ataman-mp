@@ -2,10 +2,35 @@
 
 #include <QCryptographicHash>
 #include <QDir>
+#include <QFile>
 #include <QTemporaryFile>
 
 #include "endurance_document.h"
 #include "mpr_document.h"
+
+SExistingFileComparison compareExistingFile(const QFileInfo& file,
+                                             const QByteArray& expectedBytes)
+{
+    SExistingFileComparison result;
+    result.exists = file.exists();
+    if(!result.exists)
+        return result;
+    QFile input(file.absoluteFilePath());
+    if(!input.open(QIODevice::ReadOnly))
+    {
+        result.error = input.errorString();
+        return result;
+    }
+    const QByteArray bytes = input.readAll();
+    if(input.error() != QFileDevice::NoError)
+    {
+        result.error = input.errorString();
+        return result;
+    }
+    result.readable = true;
+    result.equal = bytes == expectedBytes;
+    return result;
+}
 
 SStagedSaveValidation validateStagedSave(const QByteArray& data,
                                          const QFileInfo& destination)

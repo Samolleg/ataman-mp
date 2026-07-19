@@ -16,12 +16,14 @@ CSector::~CSector()
 {
     m_vertexBuf.destroy();
     m_indexBuf.destroy();
+    m_gridIndexBuf.destroy();
     m_waterVertexBuf.destroy();
     m_waterIndexBuf.destroy();
 }
 
 CSector::CSector(QDataStream& stream, float maxZ, int texCount)
     :m_indexBuf(QOpenGLBuffer::IndexBuffer)
+    ,m_gridIndexBuf(QOpenGLBuffer::IndexBuffer)
     ,m_waterIndexBuf(QOpenGLBuffer::IndexBuffer)
 {
     uint signature;
@@ -34,6 +36,7 @@ CSector::CSector(QDataStream& stream, float maxZ, int texCount)
     //init opengl buffers
     m_vertexBuf.create();
     m_indexBuf.create();
+    m_gridIndexBuf.create();
     m_waterVertexBuf.create();
     m_waterIndexBuf.create();
     m_modelMatrix.setToIdentity();
@@ -507,6 +510,20 @@ void CSector::updatePosition()
     m_indexBuf.allocate(aInd.data(), aInd.count() * int(sizeof(ushort)));
     m_indexBuf.release();
 
+    QVector<ushort> gridIndices;
+    gridIndices.reserve(256 * 8);
+    indOffset = 0;
+    const QVector<ushort> tileBorder{0, 2, 2, 8, 8, 6, 6, 0};
+    for(int i = 0; i < 256; ++i)
+    {
+        for(ushort index : tileBorder)
+            gridIndices.append(index + indOffset);
+        indOffset += 9;
+    }
+    m_gridIndexBuf.bind();
+    m_gridIndexBuf.allocate(gridIndices.data(), gridIndices.count() * int(sizeof(ushort)));
+    m_gridIndexBuf.release();
+
     //water section
     if(!m_arrWaterVrtData.isEmpty())
     {
@@ -615,6 +632,28 @@ void CSector::drawWater(QOpenGLShaderProgram *program)
 
     m_waterIndexBuf.bind();
     glDrawElements(GL_QUADS, m_arrWaterVrtData.count(), GL_UNSIGNED_SHORT, nullptr);
+}
+
+void CSector::drawTileGrid(QOpenGLShaderProgram* program)
+{
+    if(m_arrLandVrtData.isEmpty())
+        return;
+    program->setUniformValue("u_modelMmatrix", m_modelMatrix);
+    m_vertexBuf.bind();
+    int offset = 0;
+    const int position = program->attributeLocation("a_position");
+    program->enableAttributeArray(position);
+    program->setAttributeBuffer(position, GL_FLOAT, offset, 3, int(sizeof(SVertexData)));
+    offset += int(sizeof(QVector3D));
+    const int normal = program->attributeLocation("a_normal");
+    program->enableAttributeArray(normal);
+    program->setAttributeBuffer(normal, GL_FLOAT, offset, 3, int(sizeof(SVertexData)));
+    offset += int(sizeof(QVector3D));
+    const int texture = program->attributeLocation("a_texture");
+    program->enableAttributeArray(texture);
+    program->setAttributeBuffer(texture, GL_FLOAT, offset, 2, int(sizeof(SVertexData)));
+    m_gridIndexBuf.bind();
+    glDrawElements(GL_LINES, 256 * 8, GL_UNSIGNED_SHORT, nullptr);
 }
 
 bool CSector::projectPt(QVector3D& point)

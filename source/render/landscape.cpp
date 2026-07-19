@@ -1,4 +1,5 @@
 #include <QFileInfo>
+#include <QDir>
 #include <QRandomGenerator>
 #include <QSaveFile>
 #include <QMessageBox>
@@ -266,6 +267,30 @@ bool CLandscape::saveMapAs(const QFileInfo& path)
         return false;
     }
 
+    const QString sourcePath = QDir::cleanPath(m_filePath.absoluteFilePath());
+    const QString destinationPath = QDir::cleanPath(path.absoluteFilePath());
+    if(QString::compare(sourcePath, destinationPath, Qt::CaseInsensitive) == 0)
+    {
+        const SExistingFileComparison comparison = compareExistingFile(path, data);
+        if(comparison.exists && comparison.readable && comparison.equal)
+        {
+            ei::log(eLogInfo, QString("Unchanged MPR save is a no-op; source bytes and timestamp preserved:%1")
+                .arg(destinationPath));
+            return true;
+        }
+        if(comparison.exists)
+        {
+            const QString detail = comparison.readable
+                ? QString("The loaded MPR changed on disk after it was opened.")
+                : QString("The loaded MPR could not be read: %1").arg(comparison.error);
+            ei::log(eLogFatal, QString("Refusing unchanged MPR overwrite:%1 error:%2")
+                .arg(destinationPath, detail));
+            QMessageBox::critical(nullptr, "Endurance safe save",
+                detail + "\n\nEndurance did not overwrite the file. Reopen it before saving.");
+            return false;
+        }
+    }
+
     const SStagedSaveValidation validation = validateStagedSave(data, path);
     if(!validation.success)
     {
@@ -433,6 +458,13 @@ void CLandscape::setTile(const QMap<STileLocation, STileInfo>& arrTileInfo)
 void CLandscape::updateSectorDrawData(int xSec, int ySec)
 {
     m_aSector[ySec][xSec]->updateDrawData();
+}
+
+void CLandscape::drawTileGrid(QOpenGLShaderProgram* program)
+{
+    for(auto& row : m_aSector)
+        for(CSector* sector : row)
+            sector->drawTileGrid(program);
 }
 
 bool CLandscape::previewCanonicalSector(int xSec, int ySec, const QByteArray& payload)

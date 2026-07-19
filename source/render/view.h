@@ -82,6 +82,10 @@ public:
     void unloadMob(QString mobName);
     void attach(CSettings* pSettings, QTableWidget* pParam, QUndoStack* pStack, CProgressView* pProgress, QLineEdit* pMouseCoord, CTreeView* pTree, CTileForm* pTileForm);
     void attachLandscapeTools(CLandscapeTools* tools);
+    void activateLandscapeTilePainting();
+    void prepareLandscapeTilePainting();
+    void setLandscapeEditingEnabled(bool enabled);
+    void setTileGridVisible(bool visible) { m_tileGridVisible = visible; update(); }
     CSettings* settings() {Q_ASSERT(m_pSettings); return m_pSettings;}
     int select(const SSelect& selectParam, bool bAddToSelect = false);
     CMob* mob(QString mobName);
@@ -179,6 +183,8 @@ private:
     bool confirmScriptReferencedObjectIds(const QVector<uint>& objectIds,
                                           const QString& operation);
     void sculptTerrainAt(const QVector3D& position);
+    void finishSculptStroke();
+    void syncLandscapeToolState();
 
 
 public slots:
@@ -208,6 +214,7 @@ signals:
     void unloadMob(CMob*);
     void updateMainWindowTitle(eTitleTypeData, QString);
     void showOutlinerSignal(bool bShow);
+    void showLandscapeToolsSignal();
     void mobScriptChanged(CMob* mob, const QString& displayScript);
     void externalMobScriptImported(CMob* mob, const QString& displayScript);
 
@@ -259,6 +266,9 @@ private:
     bool m_terrainEditAvailable;
     bool m_sculptStrokeActive;
     QVector3D m_lastSculptPoint;
+    QVector3D m_lastSculptStampPoint;
+    QTimer* m_sculptRepeatTimer;
+    bool m_tileGridVisible;
 };
 
 #endif // MYGLWIDGET_H

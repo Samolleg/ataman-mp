@@ -76,6 +76,7 @@ void CSelect::keyPress(COperation *pOp, EKeyCode key)
     }
     case eKey_B:
     {
+        m_pView->prepareLandscapeTilePainting();
         pOp->setCurrent(new CTileBrush(m_pView));
         delete this;
         break;
@@ -1037,7 +1038,7 @@ CSelect::CSelect(CView *pView):
     if(CScene::getInstance()->getMode()==eEditModeLogic)
         CStatusConnector::getInstance()->updateStatus("select.ico", "LMB-Select object, Shift+LMB-Add to select, MMB-camera rotation, G-Move, P-Add Patrol(trap zone), L-Add look(cast point), CTLR+Tab-change mode");
     else
-        CStatusConnector::getInstance()->updateStatus("select.ico", "LMB-Select object, Shift+LMB-Add to select, MMB-camera rotation, G-Move, T-Scale, R-Rotate, B-Tile brush, CTLR+Tab-change mode, CTRL+T-switch active Mob");
+        CStatusConnector::getInstance()->updateStatus("select.ico", "LMB-Select object, Shift+LMB-Add to select, MMB-camera rotation, G-Move, T-Scale, R-Rotate, B-Landscape tile painting, CTRL+Tab-change mode, CTRL+T-switch active Mob");
     CButtonConnector::getInstance()->pressButton(EButtonOpSelect);
 }
 
@@ -1047,7 +1048,7 @@ CTileBrush::CTileBrush(CView* pView)
     ,m_bDrawLand(true)
 {
     qDebug()<< "CTileBrush init ";
-    CStatusConnector::getInstance()->updateStatus("brush.ico", "Esc - Cancel, LMB - draw selected tile. RMB - pick tile under cursor, Wheel - rotate tile, T - change land/water tyle type, M/J - draw land/water");
+    CStatusConnector::getInstance()->updateStatus("brush.ico", "Esc-Cancel, LMB-paint selected tile, RMB-pick tile, Wheel-rotate. Choose Land/Overlay in Landscape Tools; M/J toggle land/overlay visibility.");
     CButtonConnector::getInstance()->pressButton(EButtonOpTilebrush);
     m_pView->setDrawLand(m_bDrawLand);
     m_pView->setDrawWater(m_bDrawWater);
@@ -1066,13 +1067,9 @@ void CTileBrush::keyPress(COperation* pOp, EKeyCode key)
         m_pView->showOutliner(true);
         m_pView->setDrawLand(true);
         m_pView->setDrawWater(true);
+        m_pView->setLandscapeEditingEnabled(false);
         pOp->setCurrent(new CSelect(m_pView));
         delete this;
-        break;
-    }
-    case eKey_T:
-    { // change tile type editing (land/water)
-        CScene::getInstance()->switchTileEditMode();
         break;
     }
     case eKey_J:

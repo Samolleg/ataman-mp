@@ -86,6 +86,8 @@ CView::CView(QWidget *parent, const QGLWidget *pShareWidget) : QGLWidget(parent,
   ,m_landscapeTools(nullptr)
   ,m_terrainEditAvailable(false)
   ,m_sculptStrokeActive(false)
+  ,m_sculptRepeatTimer(new QTimer(this))
+  ,m_tileGridVisible(false)
 {
     setFocusPolicy(Qt::ClickFocus);
 
@@ -109,14 +111,79 @@ CView::CView(QWidget *parent, const QGLWidget *pShareWidget) : QGLWidget(parent,
     m_scriptWorkspaces.reset(new CExternalScriptWorkspaceManager(this, this));
     connect(m_scriptWorkspaces.get(), &CExternalScriptWorkspaceManager::scriptImportAccepted,
             this, &CView::importExternalMobScript);
+    m_sculptRepeatTimer->setInterval(100);
+    connect(m_sculptRepeatTimer, &QTimer::timeout, this, [this]()
+    {
+        if(m_sculptStrokeActive)
+            sculptTerrainAt(m_lastSculptPoint);
+    });
 }
 
 void CView::attachLandscapeTools(CLandscapeTools* tools)
 {
     m_landscapeTools = tools;
     if(m_landscapeTools)
+    {
         connect(m_landscapeTools, &CLandscapeTools::importHeightmapRequested,
                 this, &CView::importTerrainHeightmap);
+        connect(m_landscapeTools, &CLandscapeTools::tilePickerRequested,
+                this, &CView::openMapParameters);
+        connect(m_landscapeTools, &CLandscapeTools::editingStateChanged,
+                this, &CView::syncLandscapeToolState);
+    }
+}
+
+void CView::activateLandscapeTilePainting()
+{
+    prepareLandscapeTilePainting();
+    changeOperation(EButtonOpTilebrush);
+}
+
+void CView::prepareLandscapeTilePainting()
+{
+    if(!m_landscapeTools)
+        return;
+    emit showLandscapeToolsSignal();
+    m_landscapeTools->activateMode(ELandscapeEditMode::TilePaint, false);
+    CScene::getInstance()->setLandTileEditMode(true);
+    emit updateMsg(tr("Land tile painting enabled. Choose an atlas tile in Landscape Tools."));
+}
+
+void CView::setLandscapeEditingEnabled(bool enabled)
+{
+    if(m_landscapeTools)
+        m_landscapeTools->setEditingEnabled(enabled, false);
+}
+
+void CView::syncLandscapeToolState()
+{
+    finishSculptStroke();
+    if(!m_landscapeTools || !m_landscapeTools->editingEnabled())
+    {
+        if(m_pOp && m_pOp->operationMethod() == eOperationMethodTileBrush)
+            changeOperation(EButtonOpSelect);
+        setPreviewTile(false);
+        return;
+    }
+    switch(m_landscapeTools->editMode())
+    {
+    case ELandscapeEditMode::Sculpt:
+        if(m_pOp && m_pOp->operationMethod() == eOperationMethodTileBrush)
+            changeOperation(EButtonOpSelect);
+        setPreviewTile(false);
+        emit updateMsg(tr("Landscape sculpt mode enabled."));
+        break;
+    case ELandscapeEditMode::TilePaint:
+        CScene::getInstance()->setLandTileEditMode(true);
+        changeOperation(EButtonOpTilebrush);
+        emit updateMsg(tr("Land tile painting enabled. Choose an atlas tile in Landscape Tools."));
+        break;
+    case ELandscapeEditMode::OverlayPaint:
+        CScene::getInstance()->setLandTileEditMode(false);
+        changeOperation(EButtonOpTilebrush);
+        emit updateMsg(tr("Overlay painting enabled for existing overlay cells only."));
+        break;
+    }
 }
 
 void CView::updateReadState(EReadState state)
@@ -220,6 +287,7 @@ void CView::initShaders()
     m_landProgram.setUniformValue("u_lightPower", 5.0f);
     m_landProgram.setUniformValue("u_lightColor", QVector4D(1.0, 1.0, 1.0, 1.0));
     m_landProgram.setUniformValue("u_highlight", false);
+    m_landProgram.setUniformValue("u_solidColorEnabled", false);
 
 
     // Compile select shader
@@ -317,6 +385,21 @@ void CView::draw()
 
     if (m_pLand && m_pLand->isMprLoad() && m_bDrawLand)
         m_pLand->draw(&m_landProgram);
+
+    if(m_pLand && m_pLand->isMprLoad() && m_bDrawLand && m_tileGridVisible)
+    {
+        m_landProgram.setUniformValue("u_solidColorEnabled", true);
+        m_landProgram.setUniformValue("u_solidColor", QVector4D(0.05f, 0.9f, 1.0f, 1.0f));
+        glDepthFunc(GL_LEQUAL);
+        glEnable(GL_POLYGON_OFFSET_LINE);
+        glPolygonOffset(-1.0f, -1.0f);
+        glLineWidth(1.25f);
+        m_pLand->drawTileGrid(&m_landProgram);
+        glLineWidth(1.0f);
+        glDisable(GL_POLYGON_OFFSET_LINE);
+        glDepthFunc(GL_LESS);
+        m_landProgram.setUniformValue("u_solidColorEnabled", false);
+    }
 
     // Bind shader pipeline for use
     if (!m_program.bind())
@@ -457,7 +540,7 @@ void CView::unloadLand()
 
     m_mprModifyTimer->stop();
     m_terrainEditAvailable = false;
-    m_sculptStrokeActive = false;
+    finishSculptStroke();
     m_terrainEdit = CTerrainEditModel();
     m_mprDocument = CMprDocument();
     m_pLand->unloadMpr();
@@ -2093,8 +2176,10 @@ void CView::mousePressEvent(QMouseEvent* event)
     {
         m_sculptStrokeActive = true;
         m_lastSculptPoint = getTerrainPos(event->x(), event->y(), true);
+        m_lastSculptStampPoint = m_lastSculptPoint;
         m_pUndoStack->beginMacro(tr("Sculpt terrain"));
         sculptTerrainAt(m_lastSculptPoint);
+        m_sculptRepeatTimer->start();
         event->accept();
         return;
     }
@@ -2267,11 +2352,12 @@ void CView::mouseMoveEvent(QMouseEvent* event)
         && m_landscapeTools && m_terrainEditAvailable)
     {
         const QVector3D position = getTerrainPos(event->x(), event->y(), true);
+        m_lastSculptPoint = position;
         const float spacing = qMax(0.5f, m_landscapeTools->radius() * 0.25f);
-        if(position.distanceToPoint(m_lastSculptPoint) >= spacing)
+        if(position.distanceToPoint(m_lastSculptStampPoint) >= spacing)
         {
             sculptTerrainAt(position);
-            m_lastSculptPoint = position;
+            m_lastSculptStampPoint = position;
         }
         event->accept();
         return;
@@ -2283,8 +2369,7 @@ void CView::mouseReleaseEvent(QMouseEvent *event)
 {
     if(m_sculptStrokeActive && event->button() == Qt::LeftButton)
     {
-        m_sculptStrokeActive = false;
-        m_pUndoStack->endMacro();
+        finishSculptStroke();
         event->accept();
         return;
     }
@@ -2299,6 +2384,7 @@ void CView::wheelEvent(QWheelEvent* event)
 void CView::focusOutEvent(QFocusEvent *event)
 {
     Q_UNUSED(event);
+    finishSculptStroke();
     auto keySet = m_pOp->keyManager()->keys();
     for(auto& key : keySet)
     {
@@ -2397,6 +2483,10 @@ QVector3D CView::getTerrainPos(const int cursorPosX, const int cursorPosY, bool 
 void CView::changeOperation(EButtonOp type)
 {
     cancelPendingOperation();
+    if(type != EButtonOpTilebrush && m_landscapeTools
+        && (m_landscapeTools->editMode() == ELandscapeEditMode::TilePaint
+            || m_landscapeTools->editMode() == ELandscapeEditMode::OverlayPaint))
+        m_landscapeTools->setEditingEnabled(false, false);
     switch (type) {
     case EButtonOpSelect:
         m_pOp->changeState(new CSelect(this)); break;
@@ -3067,6 +3157,16 @@ void CView::setDirtyMpr()
     const bool dirty = m_terrainEditAvailable ? m_terrainEdit.isDirty() : true;
     m_pLand->setDirty(dirty);
     emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMprDirtyFlag, dirty ? "*" : "");
+}
+
+void CView::finishSculptStroke()
+{
+    if(!m_sculptStrokeActive)
+        return;
+    m_sculptRepeatTimer->stop();
+    m_sculptStrokeActive = false;
+    if(m_pUndoStack)
+        m_pUndoStack->endMacro();
 }
 
 void CView::setDurty(CMob* pMob)

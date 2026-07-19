@@ -282,6 +282,7 @@ private slots:
     void mprSectorPatchIsProvenanceCheckedAndLocal();
     void mprLengthChangingAndStaleTransactionsFailClosed();
     void failedStagedMprSaveLeavesNoDestination();
+    void unchangedExistingFileComparisonIsReadOnly();
     void canonicalTerrainSeamsAreEditedAndUndoneTogether();
     void terrainBrushToolsAreDeterministicAndFailClosed();
     void terrainHeightmapImportIsDeterministicAndSeamAware();
@@ -1072,6 +1073,28 @@ void EnduranceDocumentTests::failedStagedMprSaveLeavesNoDestination()
     const SStagedSaveValidation result = validateStagedSave(syntheticMpr(), destination);
     QVERIFY(!result.success);
     QVERIFY(!destination.exists());
+}
+
+void EnduranceDocumentTests::unchangedExistingFileComparisonIsReadOnly()
+{
+    QTemporaryFile file;
+    QVERIFY(file.open());
+    const QByteArray bytes("mpr-no-op-probe");
+    QCOMPARE(file.write(bytes), qint64(bytes.size()));
+    file.flush();
+    const QFileInfo before(file.fileName());
+
+    const SExistingFileComparison equal = compareExistingFile(before, bytes);
+    QVERIFY(equal.exists);
+    QVERIFY(equal.readable);
+    QVERIFY(equal.equal);
+    QCOMPARE(QFileInfo(file.fileName()).lastModified(), before.lastModified());
+
+    const SExistingFileComparison different = compareExistingFile(before, "other");
+    QVERIFY(different.exists);
+    QVERIFY(different.readable);
+    QVERIFY(!different.equal);
+    QCOMPARE(QFileInfo(file.fileName()).lastModified(), before.lastModified());
 }
 
 void EnduranceDocumentTests::canonicalTerrainSeamsAreEditedAndUndoneTogether()

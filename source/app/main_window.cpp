@@ -109,6 +109,13 @@ MainWindow::MainWindow(QWidget* parent) :
     addDockWidget(Qt::RightDockWidgetArea, m_landscapeToolsDock);
     m_landscapeToolsDock->hide();
     viewMenu->addAction(m_landscapeToolsDock->toggleViewAction());
+    QAction* tileGridAction = viewMenu->addAction(tr("Show Terrain Tile Grid"));
+    tileGridAction->setCheckable(true);
+    tileGridAction->setToolTip(tr("Draw the 2 x 2 terrain-tile boundaries over the landscape."));
+    connect(tileGridAction, &QAction::toggled, this, [this](bool visible)
+    {
+        m_pView->setTileGridVisible(visible);
+    });
     connect(m_mapsBrowser, &CMapsBrowser::openMapRequested,
             this, &MainWindow::openMapPair);
     m_externalScriptAction = new QAction(tr("Open MOB Script in External Editor"), this);
@@ -296,14 +303,24 @@ MainWindow::MainWindow(QWidget* parent) :
     m_pView->attach(m_settings.get(), m_ui->tableWidget, m_undoStack, m_ui->progressBar, m_ui->mousePosText, m_ui->treeWidget, m_pTileForm.get());
     m_pView->attachLandscapeTools(m_landscapeTools);
     m_ui->actionMap_parameters->setText(tr("MPR Atlas Tiles..."));
+    m_ui->tileBrushButton->setText(tr("Paint"));
+    m_ui->tileBrushButton->setToolTip(tr("Landscape tile painting (B)"));
     initShortcuts();
     connect(m_settings.get(), &CSettings::shortcutsChanged, this, &MainWindow::initShortcuts);
     m_ui->action_Mob_parameters->setEnabled(false);
     m_ui->actionOpen_MOB_Script->setEnabled(false);
     m_externalScriptAction->setEnabled(false);
+    m_ui->actionSave->setEnabled(false);
+    m_ui->actionSave_as->setEnabled(false);
+    m_ui->actionSave_all_MOB_s->setEnabled(false);
     QObject::connect(m_pView, SIGNAL(updateMainWindowTitle(eTitleTypeData,QString)), this, SLOT(updateWindowTitle(eTitleTypeData,QString)));
     QObject::connect(CScene::getInstance(), SIGNAL(modeChanged()), m_pView, SLOT(viewParameters()));
     QObject::connect(m_pView, SIGNAL(showOutlinerSignal(bool)), this, SLOT(showOutliner(bool)));
+    connect(m_pView, &CView::showLandscapeToolsSignal, this, [this]()
+    {
+        m_landscapeToolsDock->show();
+        m_landscapeToolsDock->raise();
+    });
 
 
 //    m_ui->progressBar->setValue(0);
@@ -1055,6 +1072,9 @@ void MainWindow::updateWindowTitle(eTitleTypeData type, QString data)
         m_ui->actionOpen_MOB_Script->setEnabled(!data.isEmpty());
         m_externalScriptAction->setEnabled(!data.isEmpty());
         m_ui->actionCreate_new_object->setEnabled(!data.isEmpty());
+        m_ui->actionSave->setEnabled(!data.isEmpty());
+        m_ui->actionSave_as->setEnabled(!data.isEmpty());
+        m_ui->actionSave_all_MOB_s->setEnabled(!data.isEmpty());
         break;
     }
     case eTitleTypeData::eTitleTypeDataMpr:
@@ -1216,7 +1236,9 @@ void MainWindow::on_actionMap_parameters_triggered()
 
 void MainWindow::on_tileBrushButton_clicked()
 {
-    CButtonConnector::getInstance()->clickButton(EButtonOpTilebrush);
+    m_landscapeToolsDock->show();
+    m_landscapeToolsDock->raise();
+    m_pView->activateLandscapeTilePainting();
 }
 
 

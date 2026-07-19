@@ -63,6 +63,7 @@ public:
     bool save();
     bool saveMapAs(const QFileInfo& path);
     void draw(QOpenGLShaderProgram* program);
+    void drawTileGrid(QOpenGLShaderProgram* program);
     void drawWater(QOpenGLShaderProgram* program);
     void drawTilePreview(QOpenGLShaderProgram* program);
     bool projectPt(QVector3D& point);

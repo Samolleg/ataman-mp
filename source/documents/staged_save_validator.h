@@ -13,6 +13,17 @@ struct SStagedSaveValidation
     qint64 size{0};
 };
 
+struct SExistingFileComparison
+{
+    bool exists{false};
+    bool readable{false};
+    bool equal{false};
+    QString error;
+};
+
+SExistingFileComparison compareExistingFile(const QFileInfo& file,
+                                             const QByteArray& expectedBytes);
+
 SStagedSaveValidation validateStagedSave(const QByteArray& data,
                                          const QFileInfo& destination);
 

@@ -20,6 +20,7 @@ public:
     const EEditMode& getMode() {return m_editMode;}
     void changeMode(EEditMode mode);
     void switchTileEditMode() {m_bLandEditMode = !m_bLandEditMode;};
+    void setLandTileEditMode(bool land) { m_bLandEditMode = land; }
     bool isLandTileEditMode() {return m_bLandEditMode;}
 
 signals:

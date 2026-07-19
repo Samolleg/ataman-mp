@@ -7,6 +7,8 @@ uniform highp vec3 u_watcherPos;
 uniform highp vec4 u_lightColor;
 uniform bool u_highlight;
 uniform float transparency;
+uniform bool u_solidColorEnabled;
+uniform highp vec4 u_solidColor;
 
 varying highp vec4 v_position;
 varying highp vec3 v_normal;
@@ -31,6 +33,6 @@ void main(void)
   resColor.a -= transparency;
 
 
-  gl_FragColor = resColor;
+  gl_FragColor = u_solidColorEnabled ? u_solidColor : resColor;
 
 }
