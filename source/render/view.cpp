@@ -826,6 +826,7 @@ int CView::select(const SSelect &selectParam, bool bAddToSelect)
     }
     recordSelectionChange(selectionBefore);
     viewParameters();
+    emit loadedMapStateChanged();
     return nSelectedNodes();
 }
 
@@ -1003,6 +1004,46 @@ void CView::setMobVisible(CMob* mob, bool visible)
         viewParameters();
     }
     collectObjectTreeData();
+    update();
+    emit loadedMapStateChanged();
+}
+
+void CView::setWorkspaceVisibility(const QList<CMob*>& mobs,
+                                   bool includeLandscape, bool visible)
+{
+    bool changed = false;
+    bool selectionChanged = false;
+    if(includeLandscape && m_landscapeVisible != visible)
+    {
+        m_landscapeVisible = visible;
+        changed = true;
+        if(!visible)
+        {
+            m_bPreviewTile = false;
+            changeOperation(EButtonOpSelect);
+        }
+    }
+    for(CMob* mob : mobs)
+    {
+        if(!mob || !m_aMob.contains(mob) || isMobVisible(mob) == visible)
+            continue;
+        changed = true;
+        if(visible)
+            m_hiddenMobs.remove(mob);
+        else
+        {
+            m_hiddenMobs.insert(mob);
+            for(CNode* node : selectionSnapshot())
+                if(ownerMob(node) == mob) selectionChanged = true;
+            mob->clearSelect(true);
+        }
+    }
+    if(!changed)
+        return;
+    if(selectionChanged && m_pTree)
+        m_pTree->clearViewportSelectionMarker();
+    collectObjectTreeData();
+    viewParameters();
     update();
     emit loadedMapStateChanged();
 }
@@ -2870,6 +2911,11 @@ bool CView::cancelPendingOperation()
     ei::log(eLogInfo, QString("Cancelled pending viewport operation method:%1 trackedObjects:%2")
             .arg(methodName).arg(trackedObjects));
     return true;
+}
+
+bool CView::hasPendingOperation() const
+{
+    return m_pOp && m_pOp->operationMethod() != eOperationMethodSelect;
 }
 
 bool CView::prepareUndo()

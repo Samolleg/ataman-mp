@@ -96,6 +96,8 @@ public:
     CMob* ownerMob(CNode* node) const;
     bool isMobVisible(CMob* mob) const;
     void setMobVisible(CMob* mob, bool visible);
+    void setWorkspaceVisibility(const QList<CMob*>& mobs,
+                                bool includeLandscape, bool visible);
     bool isLandscapeVisible() const { return m_landscapeVisible; }
     void setLandscapeVisible(bool visible);
     bool unloadMobDocument(CMob* mob, bool promptForSave = true);
@@ -119,6 +121,7 @@ public:
     void operationRevert(EOperationAxisType operationType);
     void operationApply(EOperationAxisType operationType);
     bool cancelPendingOperation();
+    bool hasPendingOperation() const;
     bool prepareUndo();
     void moveTo(QVector3D& dir);
     void rotateTo(QVector3D& rot);

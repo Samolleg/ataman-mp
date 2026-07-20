@@ -99,6 +99,8 @@ private:
     void updateDocumentActionAvailability();
     void updateLoadedMapPanel();
     void updateOutlinerSelectionPath();
+    void previewLoadedMapVisibility(QTreeWidgetItem* item);
+    void commitLoadedMapVisibilityDrag();
     void saveUiState();
     void closeHotReloadProgress();
     QVector<SMapSpawnObstacle> mapTestObstacles() const;
@@ -203,6 +205,9 @@ private:
     QLineEdit* m_outlinerFilterEdit{nullptr};
     QLabel* m_outlinerFilterStatus{nullptr};
     QLabel* m_outlinerSelectionPath{nullptr};
+    bool m_loadedMapVisibilityDragging{false};
+    Qt::CheckState m_loadedMapVisibilityTarget{Qt::Unchecked};
+    QSet<QString> m_loadedMapVisibilityKeys;
     QFrame* m_mapTestResultNotification{nullptr};
     QLabel* m_mapTestResultIcon{nullptr};
     QLabel* m_mapTestResultLabel{nullptr};

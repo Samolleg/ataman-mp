@@ -270,13 +270,14 @@ MainWindow::MainWindow(QWidget* parent) :
     addDockWidget(Qt::LeftDockWidgetArea, m_mapsDock);
     m_loadedMapTree = new QTreeWidget(this);
     m_loadedMapTree->setColumnCount(3);
-    m_loadedMapTree->setHeaderLabels(QStringList() << tr("Visible")
-                                      << tr("Loaded document") << tr("State"));
-    m_loadedMapTree->header()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
-    m_loadedMapTree->header()->setSectionResizeMode(1, QHeaderView::Stretch);
+    m_loadedMapTree->setHeaderLabels(QStringList() << tr("Loaded document")
+                                      << tr("Visible") << tr("State"));
+    m_loadedMapTree->header()->setSectionResizeMode(0, QHeaderView::Stretch);
+    m_loadedMapTree->header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
     m_loadedMapTree->header()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
     m_loadedMapTree->setContextMenuPolicy(Qt::CustomContextMenu);
     m_loadedMapTree->setSelectionMode(QAbstractItemView::ExtendedSelection);
+    m_loadedMapTree->viewport()->installEventFilter(this);
     m_loadedMapDock = new QDockWidget(tr("Loaded Map"), this);
     m_loadedMapDock->setObjectName("loadedMapDock");
     m_loadedMapDock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
@@ -289,9 +290,9 @@ MainWindow::MainWindow(QWidget* parent) :
     connect(m_loadedMapTree, &QTreeWidget::itemChanged, this,
             [this](QTreeWidgetItem* item, int column)
     {
-        if(!item || column != 0 || !m_pView)
+        if(!item || column != 1 || !m_pView || m_loadedMapVisibilityDragging)
             return;
-        const bool visible = item->checkState(0) == Qt::Checked;
+        const bool visible = item->checkState(1) == Qt::Checked;
         const int kind = item->data(0, kLoadedMapKindRole).toInt();
         if(kind == kLoadedMapMpr)
             m_pView->setLandscapeVisible(visible);
@@ -319,7 +320,7 @@ MainWindow::MainWindow(QWidget* parent) :
         if(!item || item->data(0, kLoadedMapKindRole).toInt() != kLoadedMapMob)
             return;
         if(!item->isSelected())
-            m_loadedMapTree->setCurrentItem(item, 1,
+            m_loadedMapTree->setCurrentItem(item, 0,
                 QItemSelectionModel::ClearAndSelect);
         QList<CMob*> selectedMobs;
         for(QTreeWidgetItem* selectedItem : m_loadedMapTree->selectedItems())
@@ -809,7 +810,7 @@ MainWindow::MainWindow(QWidget* parent) :
     connect(m_pView, &CView::mobStateChanged, this, [this]()
     {
         updateLoadedMapPanel();
-        scheduleMobFamilyValidation();
+        scheduleMobFamilyValidation(2500);
     });
     connect(m_pView, &CView::loadedMapStateChanged,
             this, &MainWindow::updateLoadedMapPanel);
@@ -848,7 +849,8 @@ MainWindow::MainWindow(QWidget* parent) :
             }
         }
     }, Qt::DirectConnection);
-    connect(m_undoStack, &QUndoStack::indexChanged, this, [this](int) { scheduleMobFamilyValidation(500); });
+    connect(m_undoStack, &QUndoStack::indexChanged, this,
+            [this](int) { scheduleMobFamilyValidation(2500); });
     initShortcuts();
     connect(m_settings.get(), &CSettings::shortcutsChanged, this, &MainWindow::initShortcuts);
     m_ui->action_Mob_parameters->setEnabled(false);
@@ -1040,6 +1042,44 @@ void MainWindow::runUndoToIndex(int targetIndex)
 
 bool MainWindow::eventFilter(QObject* watched, QEvent* event)
 {
+    if(m_loadedMapTree && watched == m_loadedMapTree->viewport())
+    {
+        if(event->type() == QEvent::MouseButtonPress)
+        {
+            QMouseEvent* mouse = static_cast<QMouseEvent*>(event);
+            QTreeWidgetItem* item = m_loadedMapTree->itemAt(mouse->pos());
+            if(mouse->button() == Qt::LeftButton && item
+               && m_loadedMapTree->columnAt(mouse->pos().x()) == 1
+               && item->flags().testFlag(Qt::ItemIsUserCheckable))
+            {
+                m_loadedMapVisibilityDragging = true;
+                m_loadedMapVisibilityTarget = item->checkState(1) == Qt::Checked
+                    ? Qt::Unchecked : Qt::Checked;
+                m_loadedMapVisibilityKeys.clear();
+                previewLoadedMapVisibility(item);
+                m_loadedMapTree->viewport()->grabMouse();
+                return true;
+            }
+        }
+        if(m_loadedMapVisibilityDragging && event->type() == QEvent::MouseMove)
+        {
+            QMouseEvent* mouse = static_cast<QMouseEvent*>(event);
+            if(mouse->buttons().testFlag(Qt::LeftButton)
+               && m_loadedMapTree->columnAt(mouse->pos().x()) == 1)
+                previewLoadedMapVisibility(m_loadedMapTree->itemAt(mouse->pos()));
+            return true;
+        }
+        if(m_loadedMapVisibilityDragging && event->type() == QEvent::MouseButtonRelease)
+        {
+            QMouseEvent* mouse = static_cast<QMouseEvent*>(event);
+            if(mouse->button() == Qt::LeftButton)
+            {
+                m_loadedMapTree->viewport()->releaseMouse();
+                commitLoadedMapVisibilityDrag();
+                return true;
+            }
+        }
+    }
     if(m_pView && watched == m_pView && m_suppressSpawnRelease)
     {
         // Placement/marker selection owns the complete pointer sequence. If
@@ -1191,6 +1231,41 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event)
         }
     }
     return QMainWindow::eventFilter(watched, event);
+}
+
+void MainWindow::previewLoadedMapVisibility(QTreeWidgetItem* item)
+{
+    if(!item || !m_loadedMapTree || !item->flags().testFlag(Qt::ItemIsUserCheckable))
+        return;
+    const int kind = item->data(0, kLoadedMapKindRole).toInt();
+    const QString key = kind == kLoadedMapMpr ? QString("__mpr__")
+        : (kind == kLoadedMapMob ? item->data(0, kLoadedMapPathRole).toString()
+                                : QString());
+    if(key.isEmpty())
+        return;
+    m_loadedMapVisibilityKeys.insert(key);
+    const QSignalBlocker blocker(m_loadedMapTree);
+    item->setCheckState(1, m_loadedMapVisibilityTarget);
+}
+
+void MainWindow::commitLoadedMapVisibilityDrag()
+{
+    const QSet<QString> keys = m_loadedMapVisibilityKeys;
+    const bool visible = m_loadedMapVisibilityTarget == Qt::Checked;
+    m_loadedMapVisibilityDragging = false;
+    m_loadedMapVisibilityKeys.clear();
+    if(!m_pView || keys.isEmpty())
+        return;
+    QList<CMob*> mobs;
+    bool includeLandscape = keys.contains("__mpr__");
+    for(const QString& path : keys)
+    {
+        if(path == "__mpr__")
+            continue;
+        if(CMob* mob = m_pView->mob(path))
+            mobs.append(mob);
+    }
+    m_pView->setWorkspaceVisibility(mobs, includeLandscape, visible);
 }
 
 SResourceProfileEvaluation MainWindow::activeResourceProfile() const
@@ -2070,14 +2145,21 @@ SMobFamilyValidationRequest MainWindow::mobFamilyValidationRequest()
         const QString workspaceRoot = QFileInfo(path).absolutePath();
         if(!request.workspaceRoots.contains(workspaceRoot, Qt::CaseInsensitive))
             request.workspaceRoots.prepend(workspaceRoot);
-        QByteArray data;
-        CValidationReport candidateReport;
-        QString saveClass;
-        if(mob->buildValidatedCandidate(&data, &candidateReport, &saveClass))
-            request.inMemoryMobData.insert(QDir::cleanPath(path).toLower(), data);
-        else
-            ei::log(eLogWarning, QString("Family validation used the on-disk MOB because the current in-memory candidate could not be mapped safely: %1\n%2")
-                .arg(path, candidateReport.toText()));
+        // Clean documents are already represented exactly by their source
+        // files. Re-serializing every loaded MOB here used to stall the GUI
+        // on every selection/undo gesture. Only dirty documents need an
+        // in-memory candidate override; the worker reads clean sources.
+        if(mob->isDirty())
+        {
+            QByteArray data;
+            CValidationReport candidateReport;
+            QString saveClass;
+            if(mob->buildValidatedCandidate(&data, &candidateReport, &saveClass))
+                request.inMemoryMobData.insert(QDir::cleanPath(path).toLower(), data);
+            else
+                ei::log(eLogWarning, QString("Family validation used the on-disk MOB because the current in-memory candidate could not be mapped safely: %1\n%2")
+                    .arg(path, candidateReport.toText()));
+        }
     }
     request.seedMobPaths.removeDuplicates();
     return request;
@@ -2091,6 +2173,13 @@ void MainWindow::scheduleMobFamilyValidation(int delayMs)
 
 void MainWindow::refreshMobFamilyValidation()
 {
+    if(m_pView && m_pView->hasPendingOperation())
+    {
+        // Never snapshot/serialize MOB state while the user is positioning a
+        // paste or transform preview. Validate once the gesture settles.
+        scheduleMobFamilyValidation(1000);
+        return;
+    }
     if(!m_pView || m_pView->mobs().isEmpty())
     {
         ++m_validationGeneration;
@@ -3006,17 +3095,17 @@ void MainWindow::updateLoadedMapPanel()
     const bool hasMpr = CLandscape::getInstance()->isMprLoad();
     if(hasMpr)
     {
-        root->setText(1, CLandscape::getInstance()->filePath().fileName());
+        root->setText(0, CLandscape::getInstance()->filePath().fileName());
         root->setText(2, tr("MPR"));
-        root->setToolTip(1, CLandscape::getInstance()->filePath().absoluteFilePath());
+        root->setToolTip(0, CLandscape::getInstance()->filePath().absoluteFilePath());
         root->setFlags(root->flags() | Qt::ItemIsUserCheckable);
-        root->setCheckState(0, m_pView->isLandscapeVisible()
+        root->setCheckState(1, m_pView->isLandscapeVisible()
                             ? Qt::Checked : Qt::Unchecked);
         root->setData(0, kLoadedMapKindRole, kLoadedMapMpr);
     }
     else
     {
-        root->setText(1, m_pView->mobs().isEmpty()
+        root->setText(0, m_pView->mobs().isEmpty()
                       ? tr("No map loaded") : tr("No MPR (neutral grid)"));
         root->setText(2, tr("Workspace"));
     }
@@ -3029,9 +3118,9 @@ void MainWindow::updateLoadedMapPanel()
             continue;
         QTreeWidgetItem* item = new QTreeWidgetItem(root);
         item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
-        item->setCheckState(0, m_pView->isMobVisible(mob)
+        item->setCheckState(1, m_pView->isMobVisible(mob)
                             ? Qt::Checked : Qt::Unchecked);
-        item->setText(1, mob->filePath().fileName() + (mob->isDirty() ? " *" : ""));
+        item->setText(0, mob->filePath().fileName() + (mob->isDirty() ? " *" : ""));
         QSet<CNode*> selectedNodes;
         for(CNode* node : mob->nodes())
             if(node && node->nodeState() == ENodeState::eSelect) selectedNodes.insert(node);
@@ -3044,7 +3133,7 @@ void MainWindow::updateLoadedMapPanel()
         if(!m_pView->isMobVisible(mob))
             states.append(tr("Hidden"));
         item->setText(2, states.join(", "));
-        item->setToolTip(1, mob->filePath().absoluteFilePath()
+        item->setToolTip(0, mob->filePath().absoluteFilePath()
             + (selectedNodes.isEmpty() ? QString()
                : tr("\n%1 selected object(s)").arg(selectedNodes.size())));
         item->setData(0, kLoadedMapKindRole, kLoadedMapMob);
@@ -3052,15 +3141,15 @@ void MainWindow::updateLoadedMapPanel()
         if(mob == m_pView->currentMob())
         {
             activeItem = item;
-            QFont font = item->font(1);
+            QFont font = item->font(0);
             font.setBold(true);
-            item->setFont(1, font);
+            item->setFont(0, font);
         }
         if(!selectedNodes.isEmpty())
         {
             const QColor background = mob == m_pView->currentMob()
                 ? QColor(20, 75, 88) : QColor(92, 64, 12);
-            for(int column = 1; column < 3; ++column)
+            for(int column = 0; column < 3; ++column)
             {
                 item->setBackground(column, background);
                 item->setForeground(column, QColor(Qt::white));
@@ -3068,9 +3157,9 @@ void MainWindow::updateLoadedMapPanel()
         }
     }
     if(activeItem)
-        m_loadedMapTree->setCurrentItem(activeItem, 1,
+        m_loadedMapTree->setCurrentItem(activeItem, 0,
             QItemSelectionModel::ClearAndSelect);
-    m_loadedMapTree->resizeColumnToContents(0);
+    m_loadedMapTree->resizeColumnToContents(1);
     updateOperationAvailability();
 }
 
@@ -3101,6 +3190,13 @@ void MainWindow::updateOutlinerSelectionPath()
     }
 
     const QString hierarchy = path.join(QString::fromUtf8(" \u203a "));
+    bool locked = false;
+    if(CTreeObject* objectItem = dynamic_cast<CTreeObject*>(item))
+        if(CMob* owner = m_pView ? m_pView->ownerMob(objectItem->node()) : nullptr)
+            locked = owner != m_pView->currentMob();
+    m_outlinerSelectionPath->setStyleSheet(locked
+        ? "QLabel { background: #5c400c; color: white; padding: 5px 7px; border-left: 3px solid #ff8c1a; }"
+        : "QLabel { background: #29424a; color: white; padding: 5px 7px; border-left: 3px solid #32c8e6; }");
     m_outlinerSelectionPath->setText(hierarchy);
     m_outlinerSelectionPath->setToolTip(tr("Selected object hierarchy: %1").arg(hierarchy));
     m_outlinerSelectionPath->show();
