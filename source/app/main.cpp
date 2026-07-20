@@ -441,12 +441,18 @@ int runHeadlessCommand(QApplication& app)
         }
         QWidget ownedWindow(&primaryWindow, Qt::Window);
         QWidget orphanWindow(nullptr, Qt::Window);
+        QPointer<QWidget> deletingWindow = new QWidget(nullptr, Qt::Window);
         ownedWindow.setAttribute(Qt::WA_DontShowOnScreen);
         orphanWindow.setAttribute(Qt::WA_DontShowOnScreen);
+        deletingWindow->setAttribute(Qt::WA_DontShowOnScreen);
+        deletingWindow->setAttribute(Qt::WA_DeleteOnClose);
         ownedWindow.show();
         orphanWindow.show();
+        deletingWindow->show();
         ei::closeSecondaryWindows(&primaryWindow);
         const bool secondaryWindowsClosed = !ownedWindow.isVisible() && !orphanWindow.isVisible();
+        QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+        const bool deletingSecondaryWindowClosedSafely = deletingWindow.isNull();
 
         // Paste creation and its automatic placement transform must be one
         // top-level history item. This mirrors CView::operationApply().
@@ -482,7 +488,7 @@ int runHeadlessCommand(QApplication& app)
 
         const bool passed = prefixesOnly && valueStable && focusCancel && escapeCancel
                 && enterCommit && clickCommit && settingsTabsUsable && settingsShortcutsPersist
-                && secondaryWindowsClosed
+                && secondaryWindowsClosed && deletingSecondaryWindowClosedSafely
                 && pasteSingleAction && pasteUndoAtomic && pasteRedoAtomic
                 && incompatiblePasteBlocked && compatiblePasteImmediate
                 && multiPropertyPaste && mismatchedPropertyPasteBlocked
@@ -500,6 +506,7 @@ int runHeadlessCommand(QApplication& app)
                << " settingsTabsUsable=" << settingsTabsUsable
                << " settingsShortcutsPersist=" << settingsShortcutsPersist
                << " secondaryWindowsClosed=" << secondaryWindowsClosed
+               << " deletingSecondaryWindowClosedSafely=" << deletingSecondaryWindowClosedSafely
                << " pasteSingleAction=" << pasteSingleAction
                << " pasteUndoAtomic=" << pasteUndoAtomic
                << " pasteRedoAtomic=" << pasteRedoAtomic
