@@ -39,6 +39,7 @@ CMakeLists.txt.user*
 /bin/
 /nvtt/
 /logs/
+/diagnostics/
 /validation-*/
 /source/runtime/jmv_bridge/bin/
 /source/runtime/jmv_bridge/bin-*/

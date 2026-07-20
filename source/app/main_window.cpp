@@ -36,6 +36,8 @@
 #include <QLineEdit>
 #include <QFontMetrics>
 #include <QSplitter>
+#include <QCryptographicHash>
+#include <QElapsedTimer>
 #include <QtConcurrent/QtConcurrentRun>
 
 #include <limits>
@@ -693,6 +695,35 @@ void MainWindow::createUndoView()
 }
 
 namespace {
+QByteArray mobFamilyRequestDigest(const SMobFamilyValidationRequest& request)
+{
+    QCryptographicHash hash(QCryptographicHash::Sha256);
+    const auto addString = [&hash](const QString& value)
+    {
+        const QByteArray encoded = value.toUtf8();
+        hash.addData(encoded);
+        hash.addData("\0", 1);
+    };
+    addString(request.familyLabel);
+    addString(request.profileId);
+    addString(request.mappedPrimaryMobPath);
+    addString(request.preferredMobPath);
+    hash.addData(request.explicitComposition ? "1" : "0", 1);
+    hash.addData(request.includeProfileWideMobs ? "1" : "0", 1);
+    QStringList paths = request.seedMobPaths;
+    paths.append(request.workspaceRoots);
+    paths.append(request.mapRoots);
+    for(const QString& path : paths)
+        addString(QDir::cleanPath(path).toCaseFolded());
+    for(auto it = request.inMemoryMobData.constBegin();
+        it != request.inMemoryMobData.constEnd(); ++it)
+    {
+        addString(it.key());
+        hash.addData(QCryptographicHash::hash(it.value(), QCryptographicHash::Sha256));
+    }
+    return hash.result();
+}
+
 int undoWorkUnits(const QUndoCommand* command)
 {
     if(!command)
@@ -1766,12 +1797,18 @@ void MainWindow::refreshMobFamilyValidation()
         m_sessionAllocatedNids.clear();
         m_warnedSharedAllocationMobs.clear();
         m_familyRiskBaselineReady = false;
+        m_lastValidationRequestDigest.clear();
         if(m_ui && m_ui->treeWidget)
             m_ui->treeWidget->setValidationNids(QSet<uint>(), QSet<uint>());
         updateMobFamilyValidationPanel();
         return;
     }
-    m_pendingValidationRequest = mobFamilyValidationRequest();
+    SMobFamilyValidationRequest request = mobFamilyValidationRequest();
+    const QByteArray requestDigest = mobFamilyRequestDigest(request);
+    if(requestDigest == m_lastValidationRequestDigest)
+        return;
+    m_lastValidationRequestDigest = requestDigest;
+    m_pendingValidationRequest = request;
     m_hasPendingValidation = true;
     ++m_validationGeneration;
     m_validationSummary->setText(tr("Validating runtime MOB family…"));
@@ -1786,7 +1823,13 @@ void MainWindow::startPendingMobFamilyValidation()
     m_hasPendingValidation = false;
     m_runningValidationGeneration = m_validationGeneration;
     m_validationWatcher->setFuture(QtConcurrent::run([request]() {
-        return CMobFamilyValidator::validate(request);
+        QElapsedTimer elapsed;
+        elapsed.start();
+        CMobFamilyValidationReport report = CMobFamilyValidator::validate(request);
+        ei::log(eLogInfo, QString("MOB family validation worker finished family:%1 elapsedMs:%2 members:%3 findings:%4")
+                .arg(request.familyLabel).arg(elapsed.elapsed())
+                .arg(report.members.size()).arg(report.findings.size()));
+        return report;
     }));
 }
 
@@ -1800,6 +1843,8 @@ void MainWindow::finishMobFamilyValidation()
 
 void MainWindow::applyMobFamilyValidationReport(const CMobFamilyValidationReport& report)
 {
+    QElapsedTimer elapsed;
+    elapsed.start();
     const QByteArray previousDigest = m_familyValidation.findingDigest();
     m_familyValidation = report;
     m_validationFindingLimit = 250;
@@ -1854,6 +1899,9 @@ void MainWindow::applyMobFamilyValidationReport(const CMobFamilyValidationReport
     }
     m_ui->treeWidget->setValidationNids(criticalNids, warningNids);
     updateMobFamilyValidationPanel();
+    ei::log(eLogInfo, QString("MOB family validation UI applied family:%1 elapsedMs:%2 members:%3 findings:%4")
+            .arg(m_familyValidation.familyLabel).arg(elapsed.elapsed())
+            .arg(m_familyValidation.members.size()).arg(m_familyValidation.findings.size()));
     ei::log(m_familyValidation.criticalCount() > 0 ? eLogWarning : eLogInfo,
             m_familyValidation.toText());
 }
@@ -1943,16 +1991,7 @@ void MainWindow::updateMobFamilyValidationPanel()
                     .arg(owner.nid)
                     .arg(owner.objectName.isEmpty() ? owner.sectionPath : owner.objectName);
                 if(finding.code == "nid.collision")
-                {
-                    quint32 suggestion = 0;
-                    bool shared = false;
-                    detail += m_familyValidation.suggestReplacementNid(
-                        owner.mobPath, &suggestion, &shared)
-                        ? tr("; suggested replacement %1%2")
-                            .arg(suggestion)
-                            .arg(shared ? tr(" (inside a shared range)") : QString())
-                        : tr("; no free ID remains in this MOB's effective range");
-                }
+                    detail += tr("; use Review and Repair to calculate a replacement");
                 QTreeWidgetItem* ownerItem = new QTreeWidgetItem(item,
                     QStringList() << QString() << tr("Object") << owner.mobPath << detail);
                 ownerItem->setData(0, kValidationPathRole, owner.mobPath);
@@ -2284,20 +2323,39 @@ void MainWindow::openCollection(const QString& path)
         return;
     if(!isExitAllowed())
         return;
+    QProgressDialog progress(tr("Loading collection..."), QString(), 0,
+                             resolved.mobPaths.size() + 3, this);
+    progress.setWindowTitle(tr("Loading map workspace"));
+    progress.setWindowModality(Qt::ApplicationModal);
+    progress.setCancelButton(nullptr);
+    progress.setMinimumDuration(0);
+    progress.setAutoClose(false);
+    progress.setValue(0);
+    progress.show();
+    QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
     m_undoStack->clear();
     m_pView->unloadMob("");
     m_pView->unloadLand();
+    progress.setLabelText(tr("Loading landscape..."));
+    progress.setValue(1);
+    QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
     m_openedMapZoneId = document.mapZoneId;
     m_currentCollectionPath = QFileInfo(path).absoluteFilePath();
     m_pView->loadLandscape(QFileInfo(resolved.mprPath));
+    int progressValue = 2;
     for(const QString& mobPath : resolved.mobPaths)
     {
+        progress.setLabelText(tr("Loading %1...").arg(QFileInfo(mobPath).fileName()));
+        progress.setValue(progressValue++);
+        QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
         QFileInfo mob(mobPath);
         m_pView->loadMob(mob);
         rememberRecentFile(mob);
     }
     rememberRecentFile(QFileInfo(resolved.mprPath));
     refreshMapTestContext();
+    progress.setValue(resolved.mobPaths.size() + 3);
+    progress.close();
     ei::log(eLogInfo, QString("Opened collection path:%1 map:%2 mpr:%3 mobs:%4")
         .arg(path, document.mapZoneId, resolved.mprPath)
         .arg(resolved.mobPaths.size()));
@@ -2425,18 +2483,35 @@ void MainWindow::openMapPair(const QString& mprPath, const QString& mobPath,
     }
     if(!isExitAllowed())
         return;
+    QProgressDialog progress(tr("Loading map..."), QString(), 0, 3, this);
+    progress.setWindowTitle(tr("Loading map workspace"));
+    progress.setWindowModality(Qt::ApplicationModal);
+    progress.setCancelButton(nullptr);
+    progress.setMinimumDuration(0);
+    progress.setAutoClose(false);
+    progress.setValue(0);
+    progress.show();
+    QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
     m_undoStack->clear();
     m_pView->unloadMob("");
     m_pView->unloadLand();
+    progress.setLabelText(tr("Loading landscape..."));
+    progress.setValue(1);
+    QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
     m_openedMapZoneId = zoneId;
     m_currentCollectionPath.clear();
     m_pView->loadLandscape(QFileInfo(mprPath));
+    progress.setLabelText(tr("Loading %1...").arg(QFileInfo(mobPath).fileName()));
+    progress.setValue(2);
+    QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
     QFileInfo mobFile(mobPath);
     m_pView->loadMob(mobFile);
     rememberRecentFile(QFileInfo(mprPath));
     rememberRecentFile(QFileInfo(mobPath));
     ei::log(eLogInfo, QString("Opened profile map zone:%1 mpr:%2 mob:%3")
         .arg(zoneId, mprPath, mobPath));
+    progress.setValue(3);
+    progress.close();
     QTimer::singleShot(0, this, [this]()
     {
         if(!m_validEntrances.isEmpty())
@@ -2489,7 +2564,21 @@ void MainWindow::updateOperationAvailability(bool hasSelection)
 
 bool MainWindow::isExitAllowed()
 {
-    m_pView->cancelPendingOperation();
+    QStringList dirtyMobs;
+    if(m_pView)
+        for(CMob* mob : m_pView->mobs())
+            if(mob && mob->isDirty())
+                dirtyMobs.append(mob->filePath().absoluteFilePath());
+    const bool dirtyLandscape = CLandscape::getInstance()->isMprLoad()
+        && CLandscape::getInstance()->isDirty();
+    if(!dirtyMobs.isEmpty() || dirtyLandscape)
+        ei::log(eLogWarning, QString("Document-close preflight detected dirty state mobs:%1 landscape:%2 pendingOperation:%3")
+                .arg(dirtyMobs.join('|'))
+                .arg(dirtyLandscape ? CLandscape::getInstance()->filePath().absoluteFilePath()
+                                    : QString("none"))
+                .arg(m_pView && m_pView->cancelPendingOperation() ? "cancelled" : "none"));
+    else if(m_pView)
+        m_pView->cancelPendingOperation();
     return m_pView->onExit();
 }
 

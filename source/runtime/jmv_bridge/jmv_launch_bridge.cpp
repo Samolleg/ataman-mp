@@ -1439,8 +1439,13 @@ bool ProcessHotReloadOnGameThread()
     }
     g_targetExitId = request.entranceId;
     g_targetExit = request.entranceId - 1;
+    // The bootstrap is generation-scoped. An entrance-only reload deliberately
+    // has no bootstrap MOB, so retaining the previous generation's path would
+    // replay its custom spawn (and any other bootstrap actions) on the new map.
+    g_godmodeMob[0] = L'\0';
     if(request.hasBootstrap)
         wcscpy_s(g_godmodeMob, request.bootstrapMobPath);
+    InterlockedExchange(&g_godmodeRedirectLogged, 0);
 
     RuntimeState runtimeState = CurrentRuntimeState();
     if(runtimeState == RuntimeState::Transitioning)

@@ -178,6 +178,7 @@ private:
     quint64 m_validationGeneration{0};
     quint64 m_runningValidationGeneration{0};
     bool m_hasPendingValidation{false};
+    QByteArray m_lastValidationRequestDigest;
     int m_validationFindingLimit{250};
     QPushButton* m_validationShowMore{nullptr};
     QLineEdit* m_outlinerFilterEdit{nullptr};
