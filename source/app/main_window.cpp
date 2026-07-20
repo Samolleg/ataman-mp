@@ -857,6 +857,11 @@ MainWindow::MainWindow(QWidget* parent) :
             [this](int) { scheduleMobFamilyValidation(2500); });
     initShortcuts();
     connect(m_settings.get(), &CSettings::shortcutsChanged, this, &MainWindow::initShortcuts);
+    connect(m_settings.get(), &CSettings::shortcutsChanged,
+            this, &MainWindow::configureAutosaveTimer);
+    m_autosaveTimer = new QTimer(this);
+    connect(m_autosaveTimer, &QTimer::timeout, this, &MainWindow::performAutosave);
+    configureAutosaveTimer();
     m_ui->action_Mob_parameters->setEnabled(false);
     m_ui->actionOpen_MOB_Script->setEnabled(false);
     m_externalScriptAction->setEnabled(false);
@@ -879,6 +884,7 @@ MainWindow::MainWindow(QWidget* parent) :
     updateMapTestAction();
     updateWindowTitle(eTitleTypeData::eTitleTypeDataMpr, QString());
     updateLoadedMapPanel();
+    QTimer::singleShot(0, this, &MainWindow::showRecoverableAutosaves);
     bool hasStartupDocument = false;
     for(int index = 1; index < QCoreApplication::arguments().size(); ++index)
     {
@@ -3311,8 +3317,8 @@ void MainWindow::on_actionOpen_triggered()
     else if(fileName.fileName().toLower().endsWith(".mob"))
     {
         m_pView->cancelPendingOperation();
-        m_pView->loadMob(fileName);
-        rememberRecentFile(fileName);
+        if(loadMobWithProgress(fileName))
+            rememberRecentFile(fileName);
     }
 }
 
@@ -3445,7 +3451,8 @@ bool MainWindow::openDocument(const QFileInfo& fileName)
     else
     {
         QFileInfo mobFile(fileName);
-        m_pView->loadMob(mobFile);
+        if(!loadMobWithProgress(mobFile))
+            return false;
     }
     rememberRecentFile(fileName);
     return true;
@@ -3479,9 +3486,141 @@ bool MainWindow::replaceLoadedLandscape(const QFileInfo& fileName)
     m_openedMapZoneId.clear();
     m_pView->cancelPendingOperation();
     m_undoStack->clear();
-    m_pView->loadLandscape(fileName);
+    if(!loadLandscapeWithProgress(fileName))
+        return false;
     updateDocumentActionAvailability();
-    return landscape->isMprLoad();
+    return true;
+}
+
+bool MainWindow::loadMobWithProgress(QFileInfo fileName)
+{
+    QProgressDialog progress(tr("Loading MOB: %1").arg(fileName.fileName()),
+                             QString(), 0, 0, this);
+    progress.setWindowTitle(tr("Loading MOB"));
+    configureBlockingProgress(&progress);
+    progress.setMinimumDuration(250);
+    progress.show();
+    QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+    const bool loaded = m_pView->loadMob(fileName);
+    progress.close();
+    updateDocumentActionAvailability();
+    return loaded;
+}
+
+bool MainWindow::loadLandscapeWithProgress(const QFileInfo& fileName)
+{
+    QProgressDialog progress(tr("Loading MPR: %1").arg(fileName.fileName()),
+                             QString(), 0, 0, this);
+    progress.setWindowTitle(tr("Loading MPR"));
+    configureBlockingProgress(&progress);
+    progress.setMinimumDuration(250);
+    progress.show();
+    QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+    m_pView->loadLandscape(fileName);
+    progress.close();
+    return CLandscape::getInstance()->isMprLoad();
+}
+
+void MainWindow::configureAutosaveTimer()
+{
+    if(!m_autosaveTimer || !m_settings)
+        return;
+    const COptBool* enabled = dynamic_cast<const COptBool*>(m_settings->opt("autosaveEnabled"));
+    const COptInt* interval = dynamic_cast<const COptInt*>(m_settings->opt("autosaveIntervalMinutes"));
+    if(!enabled || !enabled->value())
+    {
+        m_autosaveTimer->stop();
+        return;
+    }
+    const int minutes = interval ? qBound(1, interval->value(), 120) : 5;
+    m_autosaveTimer->start(minutes * 60 * 1000);
+    ei::log(eLogInfo, QString("Periodic recovery autosave enabled intervalMinutes:%1").arg(minutes));
+}
+
+void MainWindow::performAutosave()
+{
+    if(!m_pView || m_pView->hasPendingOperation())
+    {
+        ei::log(eLogInfo, "Recovery autosave deferred while an edit operation is pending");
+        return;
+    }
+    int written = 0;
+    int failed = 0;
+    CBackupManager manager;
+    for(CMob* mob : m_pView->mobs())
+    {
+        if(!mob || !mob->isDirty())
+            continue;
+        QByteArray candidate;
+        CValidationReport report;
+        QString saveClass;
+        if(!mob->buildValidatedCandidate(&candidate, &report, &saveClass))
+        {
+            ++failed;
+            ei::log(eLogWarning, QString("Recovery autosave skipped unsafe MOB path:%1 findings:%2")
+                .arg(mob->filePath().absoluteFilePath(), report.toText().trimmed()));
+            continue;
+        }
+        const SBackupResult result = manager.snapshotAutosave(mob->filePath(), candidate);
+        if(result.success)
+            written += result.skipped ? 0 : 1;
+        else
+        {
+            ++failed;
+            ei::log(eLogWarning, QString("Recovery autosave failed path:%1 error:%2")
+                .arg(mob->filePath().absoluteFilePath(), result.error));
+        }
+    }
+    CLandscape* landscape = CLandscape::getInstance();
+    if(landscape->isMprLoad() && landscape->isDirty())
+    {
+        QByteArray candidate;
+        QString error;
+        if(landscape->buildValidatedCandidate(landscape->filePath(), &candidate, &error))
+        {
+            const SBackupResult result = manager.snapshotAutosave(landscape->filePath(), candidate);
+            if(result.success)
+                written += result.skipped ? 0 : 1;
+            else
+            {
+                ++failed;
+                ei::log(eLogWarning, QString("Recovery autosave failed path:%1 error:%2")
+                    .arg(landscape->filePath().absoluteFilePath(), result.error));
+            }
+        }
+        else
+        {
+            ++failed;
+            ei::log(eLogWarning, QString("Recovery autosave skipped unsafe MPR path:%1 error:%2")
+                .arg(landscape->filePath().absoluteFilePath(), error));
+        }
+    }
+    if(written > 0)
+        statusBar()->showMessage(tr("Recovery autosave created %1 new generation(s).").arg(written), 4000);
+    ei::log(failed > 0 ? eLogWarning : eLogInfo,
+            QString("Recovery autosave pass complete written:%1 failed:%2").arg(written).arg(failed));
+}
+
+void MainWindow::showRecoverableAutosaves()
+{
+    const QVector<SRecoverableAutosave> recoveries = CBackupManager::recoverableAutosaves();
+    if(recoveries.isEmpty())
+        return;
+    QMessageBox prompt(QMessageBox::Warning, tr("Recoverable editor autosaves"),
+        tr("Endurance found %1 validated autosave generation(s) whose source files have not "
+           "changed since the recovery copy was made.").arg(recoveries.size()),
+        QMessageBox::NoButton, this);
+    prompt.setInformativeText(tr("Open the Endurance backup folder to inspect or copy them. "
+                                 "The original map files have not been modified."));
+    QPushButton* openFolder = prompt.addButton(tr("Open Backup Folder"), QMessageBox::AcceptRole);
+    prompt.addButton(tr("Later"), QMessageBox::RejectRole);
+    prompt.exec();
+    if(prompt.clickedButton() == openFolder)
+    {
+        QString error;
+        if(!CBackupManager::openBackupFolder(&error))
+            QMessageBox::warning(this, tr("Endurance backups"), error);
+    }
 }
 
 void MainWindow::on_actionOpen_MPR_triggered()
@@ -3506,8 +3645,8 @@ void MainWindow::on_actionOpen_MOB_triggered()
     {
         QFileInfo fileName(path);
         opt->setValue(fileName.dir().path());
-        m_pView->loadMob(fileName);
-        rememberRecentFile(fileName);
+        if(loadMobWithProgress(fileName))
+            rememberRecentFile(fileName);
     }
 }
 

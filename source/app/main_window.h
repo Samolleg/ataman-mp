@@ -65,6 +65,11 @@ public:
     ~MainWindow();
     bool openDocument(const QFileInfo& fileName);
     bool replaceLoadedLandscape(const QFileInfo& fileName);
+    bool loadMobWithProgress(QFileInfo fileName);
+    bool loadLandscapeWithProgress(const QFileInfo& fileName);
+    void configureAutosaveTimer();
+    void performAutosave();
+    void showRecoverableAutosaves();
 
     void testFunc1();
 
@@ -214,6 +219,7 @@ private:
     QLabel* m_mapTestResultLabel{nullptr};
     QTimer* m_mapTestResultTimer{nullptr};
     QProgressDialog* m_hotReloadProgress{nullptr};
+    QTimer* m_autosaveTimer{nullptr};
     bool m_uiStateSaved{false};
     QString m_mapTestResultLogPath;
     CMobFamilyValidationReport m_familyValidation;

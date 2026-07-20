@@ -4,6 +4,7 @@
 #include <QDateTime>
 #include <QDesktopServices>
 #include <QDir>
+#include <QDirIterator>
 #include <QFile>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -74,6 +75,136 @@ SBackupResult CBackupManager::snapshotOnOpen(const QFileInfo& source) const
 SBackupResult CBackupManager::snapshotBeforeSave(const QFileInfo& source) const
 {
     return createSnapshot(source, "pre-save", false);
+}
+
+SBackupResult CBackupManager::snapshotAutosave(const QFileInfo& source,
+                                               const QByteArray& candidate) const
+{
+    SBackupResult result;
+    if(!source.exists() || !source.isFile() || candidate.isEmpty())
+    {
+        result.error = QString("Cannot autosave an unavailable or empty document: %1")
+            .arg(source.absoluteFilePath());
+        return result;
+    }
+    QFile current(source.absoluteFilePath());
+    if(!current.open(QIODevice::ReadOnly))
+    {
+        result.error = QString("Cannot read autosave source: %1").arg(current.errorString());
+        return result;
+    }
+    const QByteArray sourceData = current.readAll();
+    const QString sourceHash = QCryptographicHash::hash(sourceData,
+        QCryptographicHash::Sha256).toHex();
+    result.sha256 = QCryptographicHash::hash(candidate,
+        QCryptographicHash::Sha256).toHex();
+    if(result.sha256 == sourceHash)
+    {
+        result.success = true;
+        result.skipped = true;
+        return result;
+    }
+
+    const QString directoryPath = sourceDirectory(source);
+    if(!QDir().mkpath(directoryPath))
+    {
+        result.error = QString("Cannot create autosave directory: %1").arg(directoryPath);
+        return result;
+    }
+    QDir directory(directoryPath);
+    const QFileInfoList existing = directory.entryInfoList(
+        QStringList() << "*-autosave-*.json", QDir::Files, QDir::Time);
+    if(!existing.isEmpty())
+    {
+        QFile metadataFile(existing.first().absoluteFilePath());
+        if(metadataFile.open(QIODevice::ReadOnly))
+        {
+            const QJsonObject metadata = QJsonDocument::fromJson(metadataFile.readAll()).object();
+            if(metadata.value("candidateSha256").toString() == result.sha256)
+            {
+                result.success = true;
+                result.skipped = true;
+                result.backupPath = metadata.value("backupPath").toString();
+                return result;
+            }
+        }
+    }
+
+    const QString stamp = QDateTime::currentDateTimeUtc().toString("yyyyMMdd-HHmmss-zzz");
+    const QString baseName = QString("%1-autosave-%2-%3")
+        .arg(stamp, result.sha256.left(16), sanitizedName(source.fileName()));
+    const QString autosavePath = directory.filePath(baseName);
+    QString error;
+    if(!writeAtomically(autosavePath, candidate, error))
+    {
+        result.error = QString("Cannot write autosave: %1").arg(error);
+        return result;
+    }
+    QJsonObject metadata;
+    metadata.insert("schema", 1);
+    metadata.insert("event", "autosave");
+    metadata.insert("createdUtc", QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
+    metadata.insert("sourcePath", source.absoluteFilePath());
+    metadata.insert("sourceSha256", sourceHash);
+    metadata.insert("candidateSha256", result.sha256);
+    metadata.insert("backupPath", autosavePath);
+    if(!writeAtomically(autosavePath + ".json",
+                        QJsonDocument(metadata).toJson(QJsonDocument::Indented), error))
+    {
+        QFile::remove(autosavePath);
+        result.error = QString("Cannot write autosave metadata: %1").arg(error);
+        return result;
+    }
+    result.success = true;
+    result.backupPath = autosavePath;
+    const QFileInfoList generations = directory.entryInfoList(
+        QStringList() << "*-autosave-*", QDir::Files, QDir::Time);
+    int retainedPayloads = 0;
+    for(const QFileInfo& generation : generations)
+    {
+        if(generation.fileName().endsWith(".json", Qt::CaseInsensitive))
+            continue;
+        if(++retainedPayloads > m_maxAutosaves)
+        {
+            QFile::remove(generation.absoluteFilePath());
+            QFile::remove(generation.absoluteFilePath() + ".json");
+        }
+    }
+    ei::log(eLogInfo, QString("Autosave generation created source:%1 candidateSha256:%2 path:%3")
+        .arg(source.absoluteFilePath(), result.sha256, autosavePath));
+    return result;
+}
+
+QVector<SRecoverableAutosave> CBackupManager::recoverableAutosaves()
+{
+    QVector<SRecoverableAutosave> result;
+    QDirIterator iterator(defaultRootPath(), QStringList() << "*-autosave-*.json",
+                          QDir::Files, QDirIterator::Subdirectories);
+    while(iterator.hasNext())
+    {
+        QFile metadataFile(iterator.next());
+        if(!metadataFile.open(QIODevice::ReadOnly))
+            continue;
+        const QJsonObject metadata = QJsonDocument::fromJson(metadataFile.readAll()).object();
+        const QString sourcePath = metadata.value("sourcePath").toString();
+        const QString autosavePath = metadata.value("backupPath").toString();
+        if(sourcePath.isEmpty() || autosavePath.isEmpty() || !QFileInfo::exists(autosavePath))
+            continue;
+        QFile source(sourcePath);
+        if(!source.open(QIODevice::ReadOnly))
+            continue;
+        const QString currentHash = QCryptographicHash::hash(source.readAll(),
+            QCryptographicHash::Sha256).toHex();
+        if(currentHash != metadata.value("sourceSha256").toString())
+            continue;
+        SRecoverableAutosave recovery;
+        recovery.sourcePath = sourcePath;
+        recovery.autosavePath = autosavePath;
+        recovery.createdUtc = metadata.value("createdUtc").toString();
+        recovery.candidateSha256 = metadata.value("candidateSha256").toString();
+        result.append(recovery);
+    }
+    return result;
 }
 
 SBackupResult CBackupManager::createSnapshot(const QFileInfo& source, const QString& event, bool deduplicate) const

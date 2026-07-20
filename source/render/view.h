@@ -198,6 +198,8 @@ protected:
     void focusOutEvent(QFocusEvent* event) override;
 
 private:
+    bool saveMobDocument(CMob* mob, const QFileInfo& destination);
+    bool saveLandscapeDocument(const QFileInfo& destination);
     void refreshMobDirtyStates();
     void initShaders();
     void draw();

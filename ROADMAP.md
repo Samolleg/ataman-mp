@@ -5,7 +5,7 @@ work is ordered from the newest planned minor line to the oldest completed one.
 An item is checked only after its implementation has landed and received the
 stated validation. Completed code should carry a commit, test, or release link.
 
-Current development line: `0.2.1-alpha.20` focused closed testing.
+Current development line: `0.2.1-alpha.21` focused closed testing.
 
 <details open>
 <summary><strong>General wishlist — not assigned to a release</strong></summary>
@@ -273,7 +273,11 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
 
 ### Current 0.2.x status
 
-- **Current tester build:** `0.2.1-alpha.20`, hardening the dockable Loaded Map
+- **Current tester build:** `0.2.1-alpha.21`, completing the remaining
+  release-facing editor priorities: exact duplicate-MOB detection, guarded
+  workspace replacement for manual MPR opens, named save/load progress,
+  versioned recoverable autosaves, and the optimized profile-correct humanoid
+  rendering merge. Alpha.20 hardened the dockable Loaded Map
   tree, explicit active/locked MOB ownership, independent MPR/MOB visibility,
   safe targeted MOB unload, all-loaded-MOB outliner grouping, locked-source
   inspection/copying, Ctrl+T owner activation, and validated numeric component
@@ -290,6 +294,8 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
   confirmed. Current source also mutes the complete outliner hierarchy of a
   hidden MOB while retaining expansion and visibility controls
   ([`807518c`](https://github.com/Ilufus/ei-mapper-endurance/commit/807518c)).
+  Alpha.21 activates an already loaded MOB instead of loading the same canonical
+  file twice; paths are canonicalized and compared case-insensitively.
 - **Alpha.13 validation/UI changes:** validation no longer performs expensive automatic
   replacement-ID scans for fully shared ranges, map switches refresh their
   runtime-family identity, missing `AddMob(...)` dependencies identify the
@@ -775,13 +781,14 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
     `db:`/`prototype:`, `mob:`, and `validation:` fields.
   - Initial implementation: local commit `1685bdd`; alpha.9 carries the strict
     matching correction and awaits focused tester validation.
-- [ ] Make manual **Open MPR**, drag/drop, recent-file, and command-line MPR
+- [x] Make manual **Open MPR**, drag/drop, recent-file, and command-line MPR
   opening reuse the guarded replacement already used by the Maps browser:
   run the existing dirty-state Save/Discard/Cancel check, then unload every MOB
   and the old MPR, clear document-bound undo state, and load the requested
-  terrain. Currently
-  these manual paths only say "Landscape already loaded; close first." Opening
-  additional MOBs remains independent and is not affected.
+  terrain. Opening additional MOBs remains independent and is not affected.
+- [x] Prevent the same canonical MOB file from being loaded more than once.
+  Reopening it activates its existing document and reports that fact without
+  duplicating objects, validation candidates, or undo state.
 - [x] Persist the expanded/collapsed state of the **Maps** and **Collections**
   roots in the browser across refreshes and editor restarts.
 - [x] Add an opt-in **Open last session on startup** General setting that invokes
@@ -795,19 +802,20 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
 - [ ] Add opt-in Windows file associations for `.mpr`, `.mob`, and
   `.collection`, with correct single-instance/open-argument behavior and an
   explicit removal path.
-- [ ] **High priority:** add periodic autosave with versioned, recoverable
+- [x] **High priority:** add periodic autosave with versioned, recoverable
   backup states soon after the RC gate. Autosaves must never overwrite live
   source maps directly and recovery must identify the source hash/generation.
 - [ ] Add a resizable bottom workflow-log panel with filtering, copy/export, and
   quick access to the full rotated log.
-- [ ] Show named, blocking save phases—serialize, validate, create backup,
+- [x] Show named, blocking save phases—serialize, validate, create backup,
   re-open staged output, and atomically replace—so a large safe save cannot look
-  like a frozen editor. Cancellation is allowed only before atomic commit.
-- [ ] Move remaining long MPR/MOB/resource-loading phases behind the existing
-  blocking modal loading UI and expose real phase progress. Loading is not
+  like a frozen editor. Save progress is deliberately non-cancellable.
+- [x] Move manual MPR/MOB loading phases behind the existing
+  blocking modal loading UI and expose a visible busy state. Loading is not
   cancellable; the purpose is to prove the editor is working and prevent a
   healthy long operation from looking frozen. This is responsiveness UX, not a
-  parser or serializer redesign.
+  parser or serializer redesign. Deeper asynchronous resource indexing remains
+  tracked separately under resources and performance.
 - [ ] Stress large-map edit/undo/redo/save/open/close cycles with scripts,
   model parts, multi-selection, copy/delete, and patrol/look structures.
 - [ ] Finish closed-group coverage proving scripts and all CP1251 text edits
@@ -834,10 +842,9 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
 
 ## 0.2.x: resources, appearance, and performance
 
-Isolated implementation status: database-driven humanoid appearance, equipment,
-and standing animation are feature-complete on the profile-correct visuals
-branch. The remaining work is optimization, final branch validation, and merge;
-nothing is merged into the active 0.2.x line yet.
+Database-driven humanoid appearance, equipment, standing animation, spatial
+candidate queries, and bounded render queues are merged into the active 0.2.x
+line. Profile/runtime validation remains part of the RC matrix.
 
 - [ ] Complete cancellable asynchronous RES indexing, MOB parsing, and CPU
   decoding while keeping OpenGL creation in bounded GUI-thread batches.
@@ -855,14 +862,14 @@ nothing is merged into the active 0.2.x line yet.
 - [ ] Re-run cold/warm performance acceptance on representative JMV maps and
   keep the post-index target at least 10x faster than original v0.3 where the
   current machine permits it.
-- [ ] Merge the optimized profile-correct visuals branch, including applicable
+- [x] Merge the optimized profile-correct visuals branch, including applicable
   humanoid appearance from active-profile database/template data.
-- [ ] Merge database-equipped armor and weapon rendering.
+- [x] Merge database-equipped armor and weapon rendering.
   - Base scope: one one-handed or one ranged weapon.
   - JMV profile scope: armor and ordinary equipped visuals.
   - JMV stretch: 1H+shield, dual 1H, 2H, dual 2H with perk, and 2H+shield with
     the applicable perk.
-- [ ] Merge profile-correct standing idle animation selection and its
+- [x] Merge profile-correct standing idle animation selection and its
   diagnostic fallback instead of leaving characters in the null/T pose.
 - [ ] Populate prototype/model/texture fields from the active database with
   prefix filtering and manual entry where valid. Warn on missing entries rather

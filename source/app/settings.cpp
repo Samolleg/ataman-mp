@@ -47,6 +47,23 @@ CSettings::CSettings(QWidget *parent) :
     // Row 7 belongs to the inactive external-MPR polling control declared in
     // settings.ui. Keep startup/session behavior on its own row.
     ui->gridLayout->addWidget(openLastSession, 8, 0, 1, 2);
+    QCheckBox* autosaveEnabled = new QCheckBox(tr("Periodic recovery autosave"),
+                                               ui->tabGeneral);
+    autosaveEnabled->setObjectName("autosaveEnabled");
+    autosaveEnabled->setToolTip(tr(
+        "Writes validated, versioned recovery copies under the Endurance backup folder. "
+        "It never replaces the open MOB/MPR or marks it saved."));
+    ui->gridLayout->addWidget(autosaveEnabled, 9, 0, 1, 2);
+    QLabel* autosaveIntervalLabel = new QLabel(tr("Autosave interval (minutes)"),
+                                                ui->tabGeneral);
+    autosaveIntervalLabel->setToolTip(tr(
+        "How often Endurance snapshots dirty documents. Identical document states are deduplicated."));
+    QLineEdit* autosaveInterval = new QLineEdit(ui->tabGeneral);
+    autosaveInterval->setObjectName("autosaveIntervalMinutes");
+    autosaveInterval->setValidator(new QIntValidator(1, 120, autosaveInterval));
+    autosaveInterval->setToolTip(autosaveIntervalLabel->toolTip());
+    ui->gridLayout->addWidget(autosaveIntervalLabel, 10, 0);
+    ui->gridLayout->addWidget(autosaveInterval, 10, 1);
     connect(browseEditor, &QPushButton::clicked, this, [this, editorPath]()
     {
         const QString selected = QFileDialog::getOpenFileName(this,
@@ -396,6 +413,7 @@ void CSettings::initOptions()
     aOpt.append(QSharedPointer<COpt>(new COptBool("frustumCulling", true)));
     aOpt.append(QSharedPointer<COpt>(new COptBool("mapTestGodmode", false)));
     aOpt.append(QSharedPointer<COpt>(new COptBool("openLastSessionOnStartup", false)));
+    aOpt.append(QSharedPointer<COpt>(new COptBool("autosaveEnabled", true)));
     aOpt.append(QSharedPointer<COpt>(new COptBool("animateUnits", true)));
     aOpt.append(QSharedPointer<COpt>(new COptBool("renderPerformanceCounters", false)));
 
@@ -408,6 +426,7 @@ void CSettings::initOptions()
     aOpt.append(QSharedPointer<COpt>(new COptInt("landCheckTime", 0)));
     aOpt.append(QSharedPointer<COpt>(new COptInt("undoHistoryLimit", 512)));
     aOpt.append(QSharedPointer<COpt>(new COptInt("mapTestWarningVersion", 0)));
+    aOpt.append(QSharedPointer<COpt>(new COptInt("autosaveIntervalMinutes", 5)));
 
     const QMap<QString, QString> shortcutDefaults = {
         {"shortcutOpen", "Ctrl+O"},

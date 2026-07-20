@@ -865,7 +865,7 @@ void CView::unloadLand(bool promptForSave)
         reply = QMessageBox::question(this, "Unload MPR", m_pLand->filePath().baseName() + " has unsaved changes.\nDo you want to save changes?", QMessageBox::Save|QMessageBox::No|QMessageBox::Cancel);
         if(reply == QMessageBox::Save)
         {
-            if(!m_pLand->save())
+            if(!saveLandscapeDocument(m_pLand->filePath()))
                 return;
         }
         else if(reply == QMessageBox::Cancel)
@@ -890,7 +890,7 @@ void CView::saveLand()
 {
     if(m_pLand->isMprLoad())
     {
-        if(m_pLand->save())
+        if(saveLandscapeDocument(m_pLand->filePath()))
             emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMprDirtyFlag, "");
     }
 }
@@ -905,11 +905,32 @@ void CView::saveLandAs()
         return;
     //QFileInfo fileName("c:\\konst\\Проклятые Земли (Дополнение)\\Mods\\ferneo_mod\\Maps\\zone1gTest.mpr");
 
-    if(m_pLand->saveMapAs(fileName))
+    if(saveLandscapeDocument(fileName))
     {
         emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMpr, fileName.baseName());
         emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMprDirtyFlag, "");
     }
+}
+
+bool CView::saveLandscapeDocument(const QFileInfo& destination)
+{
+    QProgressDialog progress(tr("Preparing safe MPR save..."), QString(), 0, 4, this);
+    progress.setWindowTitle(tr("Saving MPR"));
+    progress.setWindowModality(Qt::ApplicationModal);
+    progress.setCancelButton(nullptr);
+    progress.setMinimumDuration(250);
+    progress.setWindowFlags(progress.windowFlags() & ~Qt::WindowContextHelpButtonHint
+                             & ~Qt::WindowCloseButtonHint);
+    const auto updateProgress = [&progress](const QString& label, int value, int maximum)
+    {
+        progress.setMaximum(maximum);
+        progress.setLabelText(label);
+        progress.setValue(value);
+        QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+    };
+    const bool saved = m_pLand->saveMapAs(destination, updateProgress);
+    progress.setValue(progress.maximum());
+    return saved;
 }
 
 int CView::select(const SSelect &selectParam, bool bAddToSelect)
@@ -1722,7 +1743,7 @@ void CView::saveMobAs()
         m_activeMob->serializeJson(fileName);
     else if (fileName.fileName().endsWith(".mob"))
     {
-        if(!m_activeMob->saveAs(fileName))
+        if(!saveMobDocument(m_activeMob, fileName))
             return;
         m_activeMob->setFileName(fileName);
         emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataActiveMob, fileName.baseName());
@@ -1735,19 +1756,67 @@ void CView::saveActiveMob()
     if(nullptr == m_activeMob)
         return;
 
-    if(m_activeMob->save())
+    if(saveMobDocument(m_activeMob, m_activeMob->filePath()))
         emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataDirtyFlag, "");
 }
 
 void CView::saveAllMob()
 {
-    CMob* pMob = nullptr;
-    foreach(pMob, m_aMob)
+    QList<CMob*> dirtyMobs;
+    for(CMob* mob : m_aMob)
+        if(mob && mob->isDirty())
+            dirtyMobs.append(mob);
+    if(dirtyMobs.isEmpty())
+        return;
+
+    QProgressDialog progress(tr("Preparing safe MOB saves..."), QString(),
+                             0, dirtyMobs.size() * 5, this);
+    progress.setWindowTitle(tr("Saving all MOBs"));
+    progress.setWindowModality(Qt::ApplicationModal);
+    progress.setCancelButton(nullptr);
+    progress.setMinimumDuration(250);
+    progress.setWindowFlags(progress.windowFlags() & ~Qt::WindowContextHelpButtonHint
+                             & ~Qt::WindowCloseButtonHint);
+    for(int index = 0; index < dirtyMobs.size(); ++index)
     {
-        pMob->save();
+        CMob* mob = dirtyMobs.at(index);
+        const auto updateProgress = [&progress, index, mob](const QString& label,
+                                                            int value, int maximum)
+        {
+            Q_UNUSED(maximum);
+            progress.setLabelText(QString("%1: %2").arg(mob->mobName(), label));
+            progress.setValue(index * 5 + value);
+            QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+        };
+        if(!mob->save(updateProgress))
+            break;
     }
+    progress.setValue(progress.maximum());
     if(m_activeMob && !m_activeMob->isDirty())
         emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataDirtyFlag, "");
+}
+
+bool CView::saveMobDocument(CMob* mob, const QFileInfo& destination)
+{
+    if(!mob)
+        return false;
+    QProgressDialog progress(tr("Preparing safe MOB save..."), QString(), 0, 5, this);
+    progress.setWindowTitle(tr("Saving %1").arg(mob->mobName()));
+    progress.setWindowModality(Qt::ApplicationModal);
+    progress.setCancelButton(nullptr);
+    progress.setMinimumDuration(250);
+    progress.setWindowFlags(progress.windowFlags() & ~Qt::WindowContextHelpButtonHint
+                             & ~Qt::WindowCloseButtonHint);
+    const auto updateProgress = [&progress](const QString& label, int value, int maximum)
+    {
+        progress.setMaximum(maximum);
+        progress.setLabelText(label);
+        progress.setValue(value);
+        QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+    };
+    const bool saved = mob->saveAs(destination, updateProgress);
+    progress.setValue(progress.maximum());
+    return saved;
 }
 
 void CView::unloadActiveMob()
@@ -1770,7 +1839,7 @@ bool CView::unloadMobDocument(CMob* mob, bool promptForSave)
             tr("Unload MOB"),
             tr("%1 has unsaved changes.\nDo you want to save changes?").arg(mob->mobName()),
             QMessageBox::Save | QMessageBox::No | QMessageBox::Cancel);
-        if(reply == QMessageBox::Save && !mob->save())
+        if(reply == QMessageBox::Save && !saveMobDocument(mob, mob->filePath()))
             return false;
         if(reply == QMessageBox::Cancel)
             return false;
@@ -2467,7 +2536,7 @@ bool CView::onExit()
         reply = QMessageBox::question(this, "Exit", pMob->mobName() + " has unsaved changes.\nDo you want to save changes?", QMessageBox::Save|QMessageBox::No|QMessageBox::Cancel);
         if(reply == QMessageBox::Save)
         {
-            if(!pMob->save())
+            if(!saveMobDocument(pMob, pMob->filePath()))
             {
                 bCloseAllowed = false;
                 break;
@@ -2488,7 +2557,7 @@ bool CView::onExit()
         reply = QMessageBox::question(this, "Exit", m_pLand->filePath().baseName() + " has unsaved changes.\nDo you want to save changes?", QMessageBox::Save|QMessageBox::No|QMessageBox::Cancel);
         if(reply == QMessageBox::Save)
         {
-            if(!m_pLand->save())
+            if(!saveLandscapeDocument(m_pLand->filePath()))
                 bCloseAllowed = false;
         }
         else if(reply == QMessageBox::Cancel)

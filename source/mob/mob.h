@@ -7,6 +7,7 @@
 #include <QVector>
 #include <QVector3D>
 #include <QOpenGLShader>
+#include <functional>
 
 #include "types.h"
 #include "node.h"
@@ -41,13 +42,14 @@ struct SMobParameterState
 class CMob
 {
 public:
+    using SaveProgress = std::function<void(const QString&, int, int)>;
     CMob();
     ~CMob();
     void attach(CView* view, CProgressView* pProgress);
     int readMob(QFileInfo& path);
     QVector<uint> checkUniqueId(QSet<uint>& aId);
-    bool saveAs(const QFileInfo& path);
-    bool save();
+    bool saveAs(const QFileInfo& path, const SaveProgress& progress = SaveProgress());
+    bool save(const SaveProgress& progress = SaveProgress());
     bool buildValidatedCandidate(QByteArray* data,
                                  CValidationReport* report = nullptr,
                                  QString* saveClass = nullptr);

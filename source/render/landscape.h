@@ -10,6 +10,7 @@
 #include <QFile>
 #include <QDataStream>
 #include <QVector>
+#include <functional>
 
 //#include "sector.h"
 #include "res_file.h"
@@ -56,12 +57,15 @@ class CLandscape
 {
     //TODO: change singletone to simple class to provide several landscape loading (in different tabs)
 public:
+    using SaveProgress = std::function<void(const QString&, int, int)>;
     static CLandscape* getInstance();
     bool isMprLoad() {return !m_aSector.isEmpty();}
     void unloadMpr();
     void readMap(const QFileInfo& path);
-    bool save();
-    bool saveMapAs(const QFileInfo& path);
+    bool save(const SaveProgress& progress = SaveProgress());
+    bool saveMapAs(const QFileInfo& path, const SaveProgress& progress = SaveProgress());
+    bool buildValidatedCandidate(const QFileInfo& validationTarget, QByteArray* data,
+                                 QString* error = nullptr);
     void draw(QOpenGLShaderProgram* program, const class CViewFrustum* frustum = nullptr);
     void drawWater(QOpenGLShaderProgram* program, const class CViewFrustum* frustum = nullptr);
     void drawTilePreview(QOpenGLShaderProgram* program);
