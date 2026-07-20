@@ -2,6 +2,7 @@
 
 #include <QtEndian>
 #include <QPainter>
+#include <limits>
 
 namespace ei {
 
@@ -60,6 +61,35 @@ bool decodePnt3(const QByteArray& compressed, int decodedSize,
     }
     decoded->append(compressed.constData() + literalStart, cursor - literalStart);
     decoded->append(QByteArray(decodedSize - decoded->size(), '\0'));
+    return true;
+}
+
+bool decodePnt3Image(const QByteArray& compressed, int width, int height,
+                     QImage* image, QString* diagnostic)
+{
+    const qint64 decodedSize = qint64(width) * qint64(height) * 4;
+    if(!image || width <= 0 || height <= 0 || decodedSize > std::numeric_limits<int>::max())
+    {
+        if(diagnostic) *diagnostic = "Invalid PNT3 image dimensions.";
+        return false;
+    }
+
+    QByteArray decoded;
+    if(!decodePnt3(compressed, int(decodedSize), &decoded, diagnostic))
+        return false;
+
+    QImage result(width, height, QImage::Format_RGBA8888);
+    int cursor = 0;
+    for(int y = 0; y < height; ++y)
+        for(int x = 0; x < width; ++x)
+        {
+            result.setPixelColor(x, y, QColor(uchar(decoded[cursor + 2]),
+                                               uchar(decoded[cursor + 1]),
+                                               uchar(decoded[cursor]),
+                                               uchar(decoded[cursor + 3])));
+            cursor += 4;
+        }
+    *image = result;
     return true;
 }
 

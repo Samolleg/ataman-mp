@@ -641,28 +641,11 @@ bool decompressPnt3(QImage& image, const QByteArray& data, uint compressedSize,
         if(diagnostic) *diagnostic = "PNT3 compressed size exceeds its MMP payload.";
         return false;
     }
-    QByteArray destination;
-    if(!ei::decodePnt3(data.mid(offset, int(compressedSize)),
-                       image.width() * image.height() * 4, &destination, diagnostic))
-        return false;
-
-    int n = 0;
-    for(int h(0); h < image.height(); ++h)
-    {
-        for(int w(0); w < image.width(); ++w)
-        {
-            image.setPixelColor(h, w, QColor(uchar(destination[n + 2]), uchar(destination[n + 1]), uchar(destination[n]), uchar(destination[n + 3])));
-            n += 4;
-        }
-    }
-
-    //rotate image by 270 degree
-    QPoint center = image.rect().center();
-    QMatrix matrix;
-    matrix.translate(center.x(), center.y());
-    matrix.rotate(270);
-    image = image.transformed(matrix).mirrored();
-    return true;
+    // PNT3 is already row-major. The former transpose/rotate/mirror sequence
+    // happened to preserve some symmetric atlases, but vertically inverted
+    // asymmetric JMV armor such as UnhumaPL_05.bl.0.x4.
+    return ei::decodePnt3Image(data.mid(offset, int(compressedSize)),
+                              image.width(), image.height(), &image, diagnostic);
 }
 
 

@@ -123,6 +123,10 @@ edit `database.res`, JMV/Base archives, live MOBs, maps, or the game install.
    and TTI-0 anatomical components must not show stripes, random alpha, or
    pixels from outside the decoded buffer. PNT3 transparent runs are byte
    counts from 1 through 1,000,000 and are not restricted to 16-byte alignment.
+   Decoded pixels remain in row-major EIrepack/Direct3D orientation: do not
+   transpose, rotate, or mirror individual layers. In `zone1` ID 203,
+   `UnhumaPL_05.bl.0.x4` must occupy the lower `bd.armor05` UV region and
+   `UnhumaLG_07.bl.0.x4` must align with the hip/leg replacement UVs.
 6. Validate `zone1` ID 221 with its six bow members (`bwparta`, `bwpartb`, both
    `bwtetiva` members, `quiver`, and `arrows`), `zon3obr` IDs 233/234 with
    `UnhumaSD` shield textures, and `zon3obr` ID 198 with its `hd.armorNN`
@@ -148,16 +152,18 @@ edit `database.res`, JMV/Base archives, live MOBs, maps, or the game install.
     Confirm map-local composed `layers|...` atlases are released when the last
     MOB unloads, ordinary archive textures remain cached, and switching does not
     crash or accumulate one full decoded body atlas per prior unit.
-12. Select exactly one unit and choose `Unit > Show Selected Unit Final
-    Texture...`. Confirm the popup shows the same bottom-to-top layer list used
+12. Select exactly one unit and choose `View > Final Character Texture`.
+    Confirm the popup shows the same bottom-to-top layer list used
     by rendering and the composed RGBA atlas over a checkerboard. Use this view
     when comparing `zone1` ID 203, `bz8k` ID 919536, and ID 1001621802; the
     lower-layer order must be shirt, pants, boots, gloves before upper armor.
 
-## Known unresolved validation probes
+## Post-orientation-fix validation probes
 
-- `bz8k` ID 919536 and `zone3obr` ID 253 still need a corpus-proven explanation
-  for skin showing through or being sampled by lower clothing/shoulder meshes.
+- Recheck `bz8k` ID 919536, IDs 1001621802/1000304365, and `zone3obr` ID 253.
+  Their earlier skin-through/clothing sampling was captured while asymmetric
+  PNT3 layers were vertically inverted; retain them as regression probes until
+  runtime testing confirms the row-major decoder fixes each family.
   Do not apply a global UV flip: faces and many humanoids already validate with
   the stored `.x4` UV convention.
 - JMV `UndeadF16`/`UndeadF17` currently resolve the database-declared

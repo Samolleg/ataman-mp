@@ -25,6 +25,7 @@ private slots:
     void decodesNonAlignedPnt3Run();
     void rejectsOutOfBoundsPnt3Run();
     void rejectsUnalignedPnt3Payload();
+    void preservesPnt3RowMajorOrientation();
     void compositesTransparentArmorOverBodyAtlas();
     void keepsFaceAndHairOnSkinAtlas();
 };
@@ -213,6 +214,23 @@ void ResourceNameTests::rejectsUnalignedPnt3Payload()
     QVERIFY(!ei::decodePnt3(QByteArray("abc", 3), 16, &decoded, &diagnostic));
     QVERIFY(!diagnostic.isEmpty());
     QVERIFY(decoded.isEmpty());
+}
+
+void ResourceNameTests::preservesPnt3RowMajorOrientation()
+{
+    QByteArray compressed;
+    compressed.append("\x1e\x14\x0a\xff", 4);
+    compressed.append("\x3c\x32\x28\xff", 4);
+    compressed.append("\x5a\x50\x46\xff", 4);
+    compressed.append("\x78\x6e\x64\xff", 4);
+    QImage image;
+    QString diagnostic;
+    QVERIFY2(ei::decodePnt3Image(compressed, 2, 2, &image, &diagnostic),
+             qPrintable(diagnostic));
+    QCOMPARE(image.pixelColor(0, 0), QColor(10, 20, 30, 255));
+    QCOMPARE(image.pixelColor(1, 0), QColor(40, 50, 60, 255));
+    QCOMPARE(image.pixelColor(0, 1), QColor(70, 80, 90, 255));
+    QCOMPARE(image.pixelColor(1, 1), QColor(100, 110, 120, 255));
 }
 
 void ResourceNameTests::compositesTransparentArmorOverBodyAtlas()
