@@ -296,6 +296,9 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
   ([`807518c`](https://github.com/Ilufus/ei-mapper-endurance/commit/807518c)).
   Alpha.21 activates an already loaded MOB instead of loading the same canonical
   file twice; paths are canonicalized and compared case-insensitively.
+  Implementations: [`87c36b1`](https://github.com/Ilufus/ei-mapper-endurance/commit/87c36b1),
+  [`23cd7c4`](https://github.com/Ilufus/ei-mapper-endurance/commit/23cd7c4),
+  [`8200aaa`](https://github.com/Ilufus/ei-mapper-endurance/commit/8200aaa).
 - **Alpha.13 validation/UI changes:** validation no longer performs expensive automatic
   replacement-ID scans for fully shared ranges, map switches refresh their
   runtime-family identity, missing `AddMob(...)` dependencies identify the
