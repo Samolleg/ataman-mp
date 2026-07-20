@@ -1066,6 +1066,7 @@ CValueItem::CValueItem(const QSharedPointer<IPropertyBase>& prop):
 CComboDynItem::CComboDynItem(const QSharedPointer<IPropertyBase> &prop)
     : m_pCompleter(nullptr)
     , m_optionsLoaded(false)
+    , m_popupActive(false)
 {
     setFocusPolicy(Qt::FocusPolicy::StrongFocus);
     setStyleSheet("combobox-popup: 0;");
@@ -1165,7 +1166,14 @@ void CComboDynItem::showPopup()
     const QSignalBlocker blocker(this);
     ensureOptionsLoaded();
     setEditText(current);
+    m_popupActive = true;
     QComboBox::showPopup();
+}
+
+void CComboDynItem::hidePopup()
+{
+    m_popupActive = false;
+    QComboBox::hidePopup();
 }
 
 void CComboDynItem::_onChange(QString str)
@@ -1292,7 +1300,7 @@ void CComboDynItem::focusOutEvent(QFocusEvent* event)
     // suggestion activation commits it. Opening the combo transfers focus to
     // its popup; that is not an abandoned edit and must not close the popup.
     QComboBox::focusOutEvent(event);
-    if(event->reason() != Qt::PopupFocusReason)
+    if(!m_popupActive && event->reason() != Qt::PopupFocusReason)
         cancelPendingEdit();
 }
 
@@ -1301,7 +1309,7 @@ bool CComboDynItem::eventFilter(QObject* watched, QEvent* event)
     if(watched == lineEdit() && event->type() == QEvent::FocusOut)
     {
         const QFocusEvent* focusEvent = static_cast<QFocusEvent*>(event);
-        if(focusEvent->reason() != Qt::PopupFocusReason)
+        if(!m_popupActive && focusEvent->reason() != Qt::PopupFocusReason)
             cancelPendingEdit();
     }
     if(watched == lineEdit() && event->type() == QEvent::KeyPress)

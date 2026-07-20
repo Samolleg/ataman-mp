@@ -260,7 +260,7 @@ int runHeadlessCommand(QApplication& app)
         QFocusEvent popupFocusOut(QEvent::FocusOut, Qt::PopupFocusReason);
         QApplication::sendEvent(combo.lineEdit(), &popupFocusOut);
         QApplication::processEvents();
-        const bool popupStaysOpen = combo.view()->isVisible()
+        const bool popupStaysOpen = combo.popupActive() && combo.currentText() == "h"
                 && combo.value()->toString() == "original_model" && appliedChanges == 0;
         combo.hidePopup();
         QFocusEvent focusOut(QEvent::FocusOut, Qt::OtherFocusReason);
