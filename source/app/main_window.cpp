@@ -550,7 +550,7 @@ void MainWindow::renderUnitTexturePreview()
         const double wrappedU = uv.x() - std::floor(double(uv.x()));
         const double wrappedV = uv.y() - std::floor(double(uv.y()));
         return QPointF(wrappedU * preview.width(),
-                       (1.0 - wrappedV) * preview.height());
+                       wrappedV * preview.height());
     };
     for(auto it = projections.constBegin(); it != projections.constEnd(); ++it)
     {
@@ -594,7 +594,7 @@ void MainWindow::renderUnitTexturePreview()
 
     m_unitTextureDetails->setText(
         tr("Model: %1\nSize: %2 × %3\nVisible layers: %4 / %5\n"
-           "UV projection: OpenGL bottom-left origin, Repeat wrapping")
+           "UV projection: renderer-effective QImage upload, Repeat wrapping")
             .arg(unit->renderedModelName()).arg(texture.width()).arg(texture.height())
             .arg(visibleLayers.size()).arg(allLayers.size()));
     m_unitTextureImage->setPixmap(QPixmap::fromImage(preview));
