@@ -485,9 +485,26 @@ MainWindow::MainWindow(QWidget* parent) :
         QMessageBox::critical(this, tr("JMV test launch"), message);
         updateMapTestAction();
     });
+    connect(m_mapTestLauncher, &CJmvMapTestLauncher::recoveryStatusChanged, this,
+            [this](const QString& message, bool pending)
+    {
+        if(message.isEmpty())
+            return;
+        if(pending)
+        {
+            statusBar()->showMessage(tr("Waiting for an interrupted Endurance test game to exit; cleanup will run automatically."));
+            ei::log(eLogWarning, message);
+        }
+        else
+        {
+            statusBar()->showMessage(tr("Interrupted test-run cleanup completed."), 8000);
+            ei::log(eLogInfo, message);
+            updateMapTestAction();
+        }
+    });
     const QString recovery = CJmvMapTestLauncher::recoverInterruptedRuns();
     if(!recovery.isEmpty())
-        ei::log(eLogWarning, "Recovered interrupted JMV test run(s):\n" + recovery);
+        ei::log(eLogInfo, "Recovered interrupted JMV test run(s):\n" + recovery);
     m_createDialog->viewWidget()->attachView(m_pView);
     m_createDialog->viewWidget()->attachSettings(m_settings.get());
 
@@ -1350,8 +1367,13 @@ void MainWindow::updateMapTestAction()
         const bool canConfigureReload = isJmv && profileReady && hasPair && hasEntrance;
         const bool runtimeReady = m_mapTestLauncher->isHotReloadReady();
         const bool pendingReload = m_mapTestLauncher->isHotReloadPending();
+        const QString runtimeState = m_mapTestLauncher->runtimeState();
+        const quint64 saveGeneration = m_mapTestLauncher->saveGeneration();
+        const bool canReplaceDeferred = pendingReload
+            && (runtimeState == "Transitioning" || runtimeState == "Initializing"
+                || runtimeState == "Unknown");
         const bool canHotReload = canConfigureReload && customReady
-            && runtimeReady && !pendingReload;
+            && runtimeReady && (!pendingReload || canReplaceDeferred);
         m_mapTestAction->setText(tr("Hot Reload Map"));
         m_mapTestAction->setEnabled(canHotReload);
         m_stopMapTestAction->setEnabled(true);
@@ -1361,8 +1383,9 @@ void MainWindow::updateMapTestAction()
         if(m_playFromHereButton) m_playFromHereButton->setEnabled(canConfigureReload);
         if(m_godmodeCheckBox) m_godmodeCheckBox->setEnabled(canConfigureReload);
         m_mapTestAction->setToolTip(canHotReload
-            ? tr("Restage the exact editor pair and reload it in the Endurance-owned JMV process (Ctrl+F5).")
-            : (pendingReload
+            ? tr("Restage the exact editor pair and reload it in the Endurance-owned JMV process (Ctrl+F5).\nRuntime state: %1\nSave generation: %2")
+                .arg(runtimeState).arg(saveGeneration)
+            : (pendingReload && !canReplaceDeferred
                 ? tr("Waiting for the current hot reload to complete.")
                 : (!runtimeReady
                 ? tr("Waiting for the initial staged map to report hot-reload readiness.")
@@ -1371,10 +1394,13 @@ void MainWindow::updateMapTestAction()
     }
     m_mapTestAction->setText(tr("Test Current Map"));
     m_stopMapTestAction->setEnabled(false);
+    QString interruptedRun;
+    const bool recoveryPending = CJmvMapTestLauncher::hasActiveInterruptedRun(&interruptedRun);
     // JMV applies a placed custom entrance through its process-owned autorun
     // provider. Base keeps the picker unavailable until it has an equivalent
     // exact-hash runtime position provider.
-    m_mapTestAction->setEnabled(profileReady && hasPair && hasEntrance && customReady);
+    m_mapTestAction->setEnabled(!recoveryPending && profileReady && hasPair
+                                && hasEntrance && customReady);
     if(m_entranceCombo)
         m_entranceCombo->setEnabled(hasPair && !customRequested &&
             (!m_validEntrances.isEmpty() || m_entranceCombo->findData(-1) >= 0));
@@ -1382,7 +1408,10 @@ void MainWindow::updateMapTestAction()
         m_gotoEntranceButton->setEnabled(hasPair && hasEntrance);
     if(m_playFromHereButton) m_playFromHereButton->setEnabled(isJmv && hasPair && hasEntrance);
     if(m_godmodeCheckBox) m_godmodeCheckBox->setEnabled(isJmv && hasPair);
-    if(!isJmv && !isBaseProbe)
+    if(recoveryPending)
+        m_mapTestAction->setToolTip(tr("An orphaned Endurance test game is still running. Exit it normally; cleanup will run automatically before another test.\n%1")
+                                    .arg(interruptedRun));
+    else if(!isJmv && !isBaseProbe)
         m_mapTestAction->setToolTip(tr("The active profile has no Endurance direct-map-test provider."));
     else if(!profileReady)
         m_mapTestAction->setToolTip(tr("The active runtime does not match an exact experimental manifest."));

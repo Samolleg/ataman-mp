@@ -5,7 +5,7 @@ work is ordered from the newest planned minor line to the oldest completed one.
 An item is checked only after its implementation has landed and received the
 stated validation. Completed code should carry a commit, test, or release link.
 
-Current development line: `0.2.1-alpha.9` focused closed testing.
+Current development line: `0.2.1-alpha.10` focused closed testing.
 
 <details open>
 <summary><strong>General wishlist — not assigned to a release</strong></summary>
@@ -243,29 +243,33 @@ next gate, and changed landscape saving remains disabled.
 `0.2.0-alpha.1` moves the selected zone and entrance into the engine's New
 Game player record before transition, permits authored entrances when the
 editor's conservative clearance check cannot prove them clear, and introduced
-profile-isolated test saves. Runtime testing subsequently rejected persistent
-Save/Load for temporary map instances; active Ctrl+F5 sessions will disable
-those commands instead.
+profile-isolated test saves. Test Save/Load/Main Menu remain available through
+run-local generation namespaces: every initial launch and hot reload starts a
+new empty save generation, so saves remain useful within one exact staged-map
+state and can never reach live campaign saves or a later map generation.
 Publish the first immutable `0.2.0` package after the following runtime contract
 is demonstrated on normal gameplay, dungeon, and briefing maps.
 
 ### Current 0.2.x status
 
-- **Current tester build:** `0.2.1-alpha.9`, making parameter-aware object
-  filtering strict by default and correcting the compact validation-warning
-  layout on top of the alpha.8 outliner-filter pass.
+- **Current tester build:** `0.2.1-alpha.10`, adding generation-scoped test
+  saves, protocol-v2 state-aware JMV reload dispatch, and startup recovery for
+  an editor crash or forced termination. Runtime state providers still require
+  the focused JMV matrix below before stable release.
 - **MOB hardening:** complete for the supported editing surface. Remaining work
   is validation breadth and new editing features, not another serializer
   rewrite.
 - **Direct JMV gameplay:** working on tested normal, dungeon, and briefing maps,
   including selected entrances, zone metadata, startup-movie suppression,
   Godmode, supplemental `AddMob` loading, and temporary-map staging.
-- **0.2.0 runtime release blockers:** disable in-game Main Menu/Save/Load during
-  a staged session, add authoritative readiness/results, finish the promoted
-  outliner filter, then run the final focused gameplay matrix.
-- **0.2.1 hot reload:** the owned-process protocol and immutable generations are
-  implemented. Main-MOB reload has worked in testing; supplemental/collection
-  reload and same-position restoration remain unfinished.
+- **0.2.x runtime release blockers:** runtime-validate generation Save/Load,
+  authoritative state handling from gameplay/Main Menu/inventory/store/world
+  map/transition, and interrupted-run recovery; then run the final focused
+  gameplay matrix.
+- **0.2.1 hot reload:** protocol v2, immutable map/save generations, guarded
+  gameplay/Main Menu/inventory/store dispatch, and orphan monitoring are
+  implemented. World-map classification, supplemental/collection runtime
+  validation, and same-position restoration remain unfinished.
 - **Stable 0.2.0 editor gate:** parameter-aware outliner filtering with strict
   contiguous matching by default and explicit `~` subsequence fuzziness.
   Unreal-style MOB ownership/locking remains the larger workspace follow-up.
@@ -411,16 +415,16 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
   - Switching Base/JMV profiles closes loaded documents first so resource-backed
     scene state cannot survive into the new profile.
 
-- [ ] Block **Main Menu** after the staged map becomes active.
-  - The initial main menu remains part of bootstrap, so arm the restriction only
-    after the staged loader succeeds.
-  - Disable the existing pause-menu button using the engine's normal disabled
-    action state; no replacement in-game command is needed.
-  - Endurance **Stop Test** and normal process exit must remain functional.
+- [x] Keep **Main Menu**, **Save**, and **Load** available without exposing live
+  campaign saves.
+  - Redirect the exact owned game process to generation `000000` on initial
+    launch and a new empty immutable namespace on every committed hot reload.
+  - Retire older generations immediately from the game namespace, retain them
+    until process exit, and remove them during normal or recovered cleanup.
 - [x] Expose **Stop JMV Map Test** in Endurance while its owned game process is
   active, with customizable `Shift+Esc` as the default shortcut
   ([implementation](https://github.com/Ilufus/ei-mapper-endurance/commit/5f693b2)).
-- [ ] Replace loader-return timing with a reliable runtime-readiness gate.
+- [ ] Runtime-validate the guarded runtime-readiness/state gate.
   - A completed main-menu map load does not prove UI/session initialization is
     finished on all hardware.
   - Observe a fingerprinted engine state; do not add another fixed delay.
@@ -445,13 +449,8 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
   - Read zone type from `map.txt` rather than assuming every staged pair is an
     ordinary gameplay zone.
   - Add explicit metadata for new maps that do not yet have a map-table entry.
-- [ ] Disable **Save** and **Load** after the staged map becomes active.
-  - The temporary map instance and its staged identity are valid only for one
-    Ctrl+F5 run; saves from an earlier run are deliberately unsupported.
-  - Disable the existing in-game actions using their normal disabled state,
-    alongside **Main Menu**. No replacement save namespace is required.
-  - Runtime evidence: loading a save associated with an earlier Ctrl+F5 run
-    crashed after the temporary map instance had been replaced.
+- [ ] Runtime-prove Save/Load inside one generation and the empty Load list after
+  hot reload. Saves from an older staged-map generation must remain invisible.
 - [x] Verify startup-movie suppression for root and active-mod movie paths.
   - Alpha.58 hides `1c.bik` and `nival.bik` in-process without renaming them.
   - Preserve map-specific cutscenes; only startup movies are skipped by default.
@@ -464,8 +463,8 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
   - Normal JMV gameplay map.
   - Zone17/zone18 or another map that previously refused script injection.
   - Dungeon map and `bz` briefing map.
-  - `drawall`, traversal, disabled Save/Load/Main Menu, return/stop, and graceful
-    exit.
+  - `drawall`, traversal, generation-local Save/Load/Main Menu, return/stop, and
+    graceful exit.
 
 ### Confirmed runtime behavior and research risks
 
@@ -493,8 +492,8 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
 - [x] Substitute the selected `map.txt` zone during the normal New Game
   bootstrap. ([`1810546`](https://github.com/Ilufus/ei-mapper-endurance/commit/18105469f0b0f5cd46189824ca65dbdde3f3ce23))
 - [x] Prototype redirecting recognized runtime save filesystem operations to a
-  retained AppData tree. Runtime testing rejected cross-run persistence for
-  temporary map identities; this is superseded by disabling Save/Load.
+  retained AppData tree. Cross-run persistence was rejected; protocol v2 now
+  uses disposable per-run/per-reload generation namespaces instead.
   ([`1810546`](https://github.com/Ilufus/ei-mapper-endurance/commit/18105469f0b0f5cd46189824ca65dbdde3f3ce23))
 - [x] Suppress the two known startup movies without renaming live files.
   ([`1810546`](https://github.com/Ilufus/ei-mapper-endurance/commit/18105469f0b0f5cd46189824ca65dbdde3f3ce23))
@@ -504,6 +503,27 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
   earlier manifest. ([`1810546`](https://github.com/Ilufus/ei-mapper-endurance/commit/18105469f0b0f5cd46189824ca65dbdde3f3ce23))
 
 ## 0.2.1: JMV hot reload and test-session continuity
+
+- [x] Upgrade the hot-reload transport to protocol v2 with map generation,
+  save namespace, observed runtime-state sequence, source/target zone identity,
+  and bootstrap mode.
+- [x] Create generation `000000` for initial launch and atomically commit a new
+  empty save namespace only when a reload transition begins. Failed staging
+  keeps the active generation; uncertain post-transition failures keep the new
+  namespace.
+- [x] Add guarded runtime states for Initializing, MainMenuReady,
+  GameplayReady, InventoryOpen, StoreOpen, Transitioning, and Unknown.
+  - Gameplay uses the verified transition path.
+  - Main Menu uses the complete New Game bootstrap.
+  - Inventory/store route through the engine's normal Main Menu transition and
+    rebootstrap after readiness.
+  - Transitioning/Unknown requests defer without calling unsafe engine paths.
+  - WorldMapReady exists in the protocol, but its fingerprinted observation
+    provider remains a runtime-research/test item rather than a guessed hook.
+- [x] Journal process ownership by PID, executable path, creation time, runtime
+  hash, and run ID. On restart, clean dead runs immediately; monitor a verified
+  surviving orphan without attaching to or killing it, then clean after exit.
+  Cleanup is hash-guarded and keeps externally modified artifacts for review.
 
 - [x] Define a versioned, hash-carrying hot-reload request schema that rejects
   payloads outside the Endurance-owned test-run directory.

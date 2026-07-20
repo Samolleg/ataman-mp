@@ -51,13 +51,16 @@ public:
     bool isRunning() const;
     bool isHotReloadReady() const;
     bool isHotReloadPending() const { return m_pendingHotReloadSequence != 0; }
+    QString runtimeState() const;
+    quint64 saveGeneration() const { return m_saveGeneration; }
     QString runId() const { return m_runId; }
     QString temporaryMapName() const { return m_temporaryMapName; }
     void stop();
 
     static QString testRunsRootPath();
-    static QString testSavesPathForProfile(const SResourceProfileEvaluation& profile);
+    static QString generationSavesPath(const QString& runRoot, quint64 generation);
     static QString recoverInterruptedRuns();
+    static bool hasActiveInterruptedRun(QString* description = nullptr);
     static bool injectWorldScriptBootstrap(const QString& script,
                                            const QString& commands,
                                            QString* output,
@@ -86,6 +89,7 @@ signals:
     void hotReloadQueued(quint64 sequence, const QString& zoneId);
     void hotReloadReady();
     void hotReloadFinished(quint64 sequence, bool success, const QString& message);
+    void recoveryStatusChanged(const QString& message, bool pending);
 
 private:
     bool stage(const SJmvMapTestLaunchInput& input, QString* error);
@@ -94,11 +98,13 @@ private:
     bool writeManifest(const QString& state, QString* error = nullptr);
     void appendRunLog(const QString& message);
     QString bridgeResultSummary() const;
+    quint64 latestRuntimeStateSequence() const;
     void focusGameWindow();
 
     QProcess* m_process;
     QTimer* m_hotReloadReadyTimer;
     QTimer* m_hotReloadResultTimer;
+    QTimer* m_recoveryTimer;
     QString m_runId;
     QString m_temporaryMapName;
     QString m_runRoot;
@@ -125,7 +131,9 @@ private:
     QString m_currentZoneId;
     QJsonObject m_manifest;
     quint64 m_hotReloadSequence{0};
+    quint64 m_saveGeneration{0};
     quint64 m_pendingHotReloadSequence{0};
+    quint64 m_pendingSaveGeneration{0};
     int m_hotReloadResultPolls{0};
     bool m_cleanupComplete;
     bool m_baseProbe;

@@ -88,6 +88,7 @@ constexpr DWORD kNewGameBootstrapRva = 0x0017BD10;
 constexpr DWORD kPlayerDefaultsResetRva = 0x000A5BD0;
 constexpr DWORD kPlayerDefaultsManagerRva = 0x003AA5C4;
 constexpr DWORD kGameStringAssignRva = 0x00300AF9;
+constexpr DWORD kInventoryVisibilityRva = 0x002002A0;
 constexpr UINT kDirectLaunchMessage = WM_APP + 0x45D;
 constexpr UINT kHotReloadMessage = WM_APP + 0x45E;
 constexpr unsigned char kMapLoadEntryBytes[6] = {
@@ -101,6 +102,21 @@ constexpr unsigned char kNewGameBootstrapBytes[7] = {
 };
 constexpr unsigned char kPlayerDefaultsResetBytes[6] = {
     0x64, 0xA1, 0x00, 0x00, 0x00, 0x00
+};
+constexpr unsigned char kInventoryVisibilityBytes[8] = {
+    0x8B, 0x54, 0x24, 0x08, 0x8B, 0x44, 0x24, 0x04
+};
+
+enum class RuntimeState : LONG
+{
+    Unknown = 0,
+    Initializing = 1,
+    MainMenuReady = 2,
+    GameplayReady = 3,
+    InventoryOpen = 4,
+    StoreOpen = 5,
+    WorldMapReady = 6,
+    Transitioning = 7
 };
 
 MapLoadFn g_originalMapLoad = nullptr;
@@ -119,12 +135,19 @@ int g_targetExit = -1;
 int g_targetExitId = 0;
 wchar_t g_liveSaves[MAX_PATH * 4] = {};
 wchar_t g_testSaves[MAX_PATH * 4] = {};
+CRITICAL_SECTION g_savePathLock{};
+volatile LONG g_savePathLockReady = 0;
 wchar_t g_godmodeMob[MAX_PATH * 4] = {};
 wchar_t g_supplementalMobDirectory[MAX_PATH * 4] = {};
 wchar_t g_hotReloadRequestPath[MAX_PATH * 4] = {};
 wchar_t g_hotReloadThreadPath[MAX_PATH * 4] = {};
 wchar_t g_hotReloadRoot[MAX_PATH * 4] = {};
 ULONGLONG g_hotReloadSequence = 0;
+ULONGLONG g_saveGeneration = 0;
+volatile LONG g_runtimeState = LONG(RuntimeState::Initializing);
+volatile LONG g_runtimeStateSequence = 0;
+volatile LONG g_pendingStateAwareReload = 0;
+void* g_inventoryVisibilityTrampoline = nullptr;
 volatile LONG g_saveRedirectLogCount = 0;
 volatile LONG g_godmodeRedirectLogged = 0;
 volatile LONG g_introSkipMask = 0;
@@ -141,15 +164,20 @@ struct HotReloadControl
 {
     int protocol = 0;
     ULONGLONG sequence = 0;
+    ULONGLONG generation = 0;
+    ULONGLONG runtimeStateSequence = 0;
     int entranceId = 0;
     wchar_t mprPath[MAX_PATH * 4] = {};
     wchar_t mobPath[MAX_PATH * 4] = {};
     wchar_t bootstrapMobPath[MAX_PATH * 4] = {};
+    wchar_t savePath[MAX_PATH * 4] = {};
     unsigned char mprSha256[32] = {};
     unsigned char mobSha256[32] = {};
     unsigned char bootstrapMobSha256[32] = {};
     bool hasBootstrap = false;
+    char sourceZone[128] = {};
     char zone[128] = {};
+    char bootstrapMode[32] = {};
 };
 
 const wchar_t* FileNamePart(const wchar_t* path)
@@ -198,6 +226,40 @@ void Log(const wchar_t* message)
             WriteFile(file, utf8, DWORD(bytes), &written, nullptr);
     }
     CloseHandle(file);
+}
+
+const wchar_t* RuntimeStateName(RuntimeState state)
+{
+    switch(state)
+    {
+    case RuntimeState::Initializing: return L"Initializing";
+    case RuntimeState::MainMenuReady: return L"MainMenuReady";
+    case RuntimeState::GameplayReady: return L"GameplayReady";
+    case RuntimeState::InventoryOpen: return L"InventoryOpen";
+    case RuntimeState::StoreOpen: return L"StoreOpen";
+    case RuntimeState::WorldMapReady: return L"WorldMapReady";
+    case RuntimeState::Transitioning: return L"Transitioning";
+    default: return L"Unknown";
+    }
+}
+
+void SetRuntimeState(RuntimeState state, const wchar_t* evidence)
+{
+    const LONG previous = InterlockedExchange(&g_runtimeState, LONG(state));
+    if(previous == LONG(state))
+        return;
+    const LONG sequence = InterlockedIncrement(&g_runtimeStateSequence);
+    wchar_t message[512]{};
+    _snwprintf_s(message, sizeof(message) / sizeof(message[0]), _TRUNCATE,
+                 L"RUNTIME_STATE sequence=%ld from=%s to=%s evidence=%s",
+                 sequence, RuntimeStateName(RuntimeState(previous)),
+                 RuntimeStateName(state), evidence ? evidence : L"<none>");
+    Log(message);
+}
+
+RuntimeState CurrentRuntimeState()
+{
+    return RuntimeState(InterlockedCompareExchange(&g_runtimeState, 0, 0));
 }
 
 bool HashFileSha256(const wchar_t* path, unsigned char output[32])
@@ -328,6 +390,9 @@ bool ReadHotReloadControl(HotReloadControl* output)
         const char* value = separator + 1;
         if(std::strcmp(line, "protocol") == 0) parsed.protocol = std::atoi(value);
         else if(std::strcmp(line, "sequence") == 0) parsed.sequence = _strtoui64(value, nullptr, 10);
+        else if(std::strcmp(line, "generation") == 0) parsed.generation = _strtoui64(value, nullptr, 10);
+        else if(std::strcmp(line, "runtimeStateSequence") == 0)
+            parsed.runtimeStateSequence = _strtoui64(value, nullptr, 10);
         else if(std::strcmp(line, "runId") == 0) haveRunId = value[0] != '\0';
         else if(std::strcmp(line, "profile") == 0)
         {
@@ -337,6 +402,14 @@ bool ReadHotReloadControl(HotReloadControl* output)
         else if(std::strcmp(line, "zone") == 0)
         {
             if(strcpy_s(parsed.zone, value) != 0) return false;
+        }
+        else if(std::strcmp(line, "sourceZone") == 0)
+        {
+            if(strcpy_s(parsed.sourceZone, value) != 0) return false;
+        }
+        else if(std::strcmp(line, "bootstrapMode") == 0)
+        {
+            if(strcpy_s(parsed.bootstrapMode, value) != 0) return false;
         }
         else if(std::strcmp(line, "entrance") == 0) parsed.entranceId = std::atoi(value);
         else if(std::strcmp(line, "mpr") == 0)
@@ -348,6 +421,11 @@ bool ReadHotReloadControl(HotReloadControl* output)
         {
             if(!Utf8ToWide(value, parsed.mobPath,
                            int(sizeof(parsed.mobPath) / sizeof(parsed.mobPath[0])))) return false;
+        }
+        else if(std::strcmp(line, "savePath") == 0)
+        {
+            if(!Utf8ToWide(value, parsed.savePath,
+                           int(sizeof(parsed.savePath) / sizeof(parsed.savePath[0])))) return false;
         }
         else if(std::strcmp(line, "bootstrapMob") == 0 && value[0])
         {
@@ -368,15 +446,31 @@ bool ReadHotReloadControl(HotReloadControl* output)
         if(!std::isalnum(static_cast<unsigned char>(*cursor))
            && *cursor != '_' && *cursor != '-')
             return false;
-    if(parsed.protocol != 1 || parsed.sequence == 0 || !haveProfile || !haveRunId
+    for(const char* cursor = parsed.sourceZone; *cursor; ++cursor)
+        if(!std::isalnum(static_cast<unsigned char>(*cursor))
+           && *cursor != '_' && *cursor != '-')
+            return false;
+    if(parsed.bootstrapMode[0]
+       && _stricmp(parsed.bootstrapMode, "automatic") != 0
+       && _stricmp(parsed.bootstrapMode, "transition") != 0
+       && _stricmp(parsed.bootstrapMode, "new-game") != 0)
+        return false;
+    if(parsed.protocol != 2 || parsed.sequence == 0 || parsed.generation == 0
+       || !haveProfile || !haveRunId
        || parsed.sequence <= g_hotReloadSequence || parsed.entranceId <= 0
        || parsed.entranceId > 1024
        || !parsed.zone[0] || !parsed.mprPath[0] || !parsed.mobPath[0]
+       || !parsed.savePath[0]
        || !haveMprHash || !haveMobHash
        || !IsPathInsideHotReloadRoot(parsed.mprPath)
        || !IsPathInsideHotReloadRoot(parsed.mobPath)
+       || !IsPathInsideHotReloadRoot(parsed.savePath)
        || !HashMatches(parsed.mprPath, parsed.mprSha256)
        || !HashMatches(parsed.mobPath, parsed.mobSha256))
+        return false;
+    const DWORD saveAttributes = GetFileAttributesW(parsed.savePath);
+    if(saveAttributes == INVALID_FILE_ATTRIBUTES || !(saveAttributes & FILE_ATTRIBUTE_DIRECTORY)
+       || (saveAttributes & FILE_ATTRIBUTE_REPARSE_POINT))
         return false;
     if(parsed.hasBootstrap
        && (!IsPathInsideHotReloadRoot(parsed.bootstrapMobPath)
@@ -527,6 +621,15 @@ bool RewriteSavePathW(LPCWSTR path, wchar_t* output, size_t capacity)
 {
     if(!path || !output || !capacity || !g_liveSaves[0] || !g_testSaves[0])
         return false;
+    wchar_t activeSaves[MAX_PATH * 4]{};
+    if(InterlockedCompareExchange(&g_savePathLockReady, 0, 0))
+    {
+        EnterCriticalSection(&g_savePathLock);
+        wcscpy_s(activeSaves, g_testSaves);
+        LeaveCriticalSection(&g_savePathLock);
+    }
+    else
+        wcscpy_s(activeSaves, g_testSaves);
     wchar_t full[MAX_PATH * 4]{};
     const DWORD length = GetFullPathNameW(path, DWORD(sizeof(full) / sizeof(full[0])), full, nullptr);
     if(!length || length >= sizeof(full) / sizeof(full[0]))
@@ -536,7 +639,7 @@ bool RewriteSavePathW(LPCWSTR path, wchar_t* output, size_t capacity)
     if(_wcsnicmp(full, g_liveSaves, liveLength) != 0 || !IsPathBoundary(full[liveLength]))
         return false;
     const wchar_t* suffix = full + liveLength;
-    if(_snwprintf_s(output, capacity, _TRUNCATE, L"%s%s", g_testSaves, suffix) < 0)
+    if(_snwprintf_s(output, capacity, _TRUNCATE, L"%s%s", activeSaves, suffix) < 0)
         return false;
     const LONG sequence = InterlockedIncrement(&g_saveRedirectLogCount);
     if(sequence <= 64)
@@ -562,6 +665,48 @@ bool RewriteSavePathA(LPCSTR path, char* output, size_t capacity)
     BOOL substituted = FALSE;
     return WideCharToMultiByte(CP_ACP, WC_NO_BEST_FIT_CHARS, rewritten, -1,
                                output, int(capacity), nullptr, &substituted) != 0 && !substituted;
+}
+
+bool CommitSaveGeneration(const HotReloadControl& request)
+{
+    if(request.generation == g_saveGeneration)
+        return _wcsicmp(g_testSaves, request.savePath) == 0;
+    if(request.generation < g_saveGeneration || !IsPathInsideHotReloadRoot(request.savePath))
+        return false;
+    wchar_t pattern[MAX_PATH * 4]{};
+    if(_snwprintf_s(pattern, sizeof(pattern) / sizeof(pattern[0]), _TRUNCATE,
+                    L"%s\\*", request.savePath) < 0)
+        return false;
+    WIN32_FIND_DATAW data{};
+    HANDLE find = FindFirstFileW(pattern, &data);
+    if(find != INVALID_HANDLE_VALUE)
+    {
+        bool nonEmpty = false;
+        do
+        {
+            if(wcscmp(data.cFileName, L".") != 0 && wcscmp(data.cFileName, L"..") != 0)
+            {
+                nonEmpty = true;
+                break;
+            }
+        } while(FindNextFileW(find, &data));
+        FindClose(find);
+        if(nonEmpty)
+            return false;
+    }
+    EnterCriticalSection(&g_savePathLock);
+    const bool copied = wcscpy_s(g_testSaves, request.savePath) == 0;
+    if(copied)
+        g_saveGeneration = request.generation;
+    LeaveCriticalSection(&g_savePathLock);
+    if(!copied)
+        return false;
+    wchar_t message[1800]{};
+    _snwprintf_s(message, sizeof(message) / sizeof(message[0]), _TRUNCATE,
+                 L"SAVE_GENERATION committed generation=%llu path=\"%s\"",
+                 request.generation, request.savePath);
+    Log(message);
+    return true;
 }
 
 bool ShouldSkipIntroW(LPCWSTR path)
@@ -1078,6 +1223,102 @@ bool ReadDirectLaunchPaths()
     return true;
 }
 
+extern "C" void __cdecl RecordRuntimeOverlayVisibility(void* object,
+                                                        DWORD visible,
+                                                        DWORD)
+{
+    DWORD vtable = 0;
+    DWORD mode = 0;
+    __try
+    {
+        if(object)
+        {
+            vtable = *reinterpret_cast<DWORD*>(object);
+            mode = *reinterpret_cast<DWORD*>(static_cast<unsigned char*>(object) + 0x148);
+        }
+    }
+    __except(EXCEPTION_EXECUTE_HANDLER)
+    {
+        return;
+    }
+    if(vtable != 0x0074197C)
+        return;
+    if(visible == 1)
+        SetRuntimeState(mode == 3 ? RuntimeState::StoreOpen
+                                  : RuntimeState::InventoryOpen,
+                        mode == 3 ? L"store visibility hook"
+                                  : L"inventory visibility hook");
+    else if(CurrentRuntimeState() == RuntimeState::StoreOpen
+            || CurrentRuntimeState() == RuntimeState::InventoryOpen)
+    {
+        SetRuntimeState(RuntimeState::GameplayReady, L"runtime overlay closed");
+        if(InterlockedCompareExchange(&g_pendingStateAwareReload, 0, 0)
+           && g_gameThreadId)
+            PostThreadMessageW(g_gameThreadId, kHotReloadMessage, 0, 0);
+    }
+}
+
+#if defined(_M_IX86)
+extern "C" __declspec(naked) void InventoryVisibilityDetour()
+{
+    __asm
+    {
+        mov eax, dword ptr [esp+8]
+        mov edx, dword ptr [esp+4]
+        pushad
+        push eax
+        push edx
+        push ecx
+        call RecordRuntimeOverlayVisibility
+        add esp, 12
+        popad
+        jmp dword ptr [g_inventoryVisibilityTrampoline]
+    }
+}
+#endif
+
+bool InstallRuntimeOverlayProbe()
+{
+#if !defined(_M_IX86)
+    return false;
+#else
+    auto* game = reinterpret_cast<unsigned char*>(g_gameModule);
+    auto* target = game + kInventoryVisibilityRva;
+    if(std::memcmp(target, kInventoryVisibilityBytes,
+                   sizeof(kInventoryVisibilityBytes)) != 0)
+    {
+        Log(L"RUNTIME_STATE inventory/store provider disabled: guarded bytes do not match");
+        return false;
+    }
+    auto* trampoline = static_cast<unsigned char*>(VirtualAlloc(nullptr, 24,
+        MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE));
+    if(!trampoline)
+        return false;
+    std::memcpy(trampoline, target, sizeof(kInventoryVisibilityBytes));
+    trampoline[8] = 0xE9;
+    *reinterpret_cast<LONG*>(trampoline + 9) =
+        LONG((target + sizeof(kInventoryVisibilityBytes)) - (trampoline + 13));
+    g_inventoryVisibilityTrampoline = trampoline;
+    DWORD oldProtect = 0;
+    if(!VirtualProtect(target, sizeof(kInventoryVisibilityBytes),
+                       PAGE_EXECUTE_READWRITE, &oldProtect))
+    {
+        VirtualFree(trampoline, 0, MEM_RELEASE);
+        g_inventoryVisibilityTrampoline = nullptr;
+        return false;
+    }
+    target[0] = 0xE9;
+    *reinterpret_cast<LONG*>(target + 1) =
+        LONG(reinterpret_cast<unsigned char*>(&InventoryVisibilityDetour) - (target + 5));
+    target[5] = target[6] = target[7] = 0x90;
+    FlushInstructionCache(GetCurrentProcess(), target, sizeof(kInventoryVisibilityBytes));
+    DWORD ignored = 0;
+    VirtualProtect(target, sizeof(kInventoryVisibilityBytes), oldProtect, &ignored);
+    Log(L"RUNTIME_STATE inventory/store visibility provider installed with exact byte guard");
+    return true;
+#endif
+}
+
 bool QueueDirectLaunchOnCurrentThread()
 {
     if(!g_zoneTransitionController)
@@ -1153,6 +1394,7 @@ void __fastcall PlayerDefaultsResetDetour(void* self, void*)
 int __fastcall ZoneTransitionDetour(void* self, void*, const char* zoneName,
                                     int requestedMode)
 {
+    SetRuntimeState(RuntimeState::Transitioning, L"zone transition entered");
     const LONG state = InterlockedCompareExchange(&g_directLaunchState, 0, 0);
     if(state == 3 && requestedMode == 0 && g_sourceZone[0])
     {
@@ -1189,6 +1431,7 @@ int __fastcall ZoneTransitionDetour(void* self, void*, const char* zoneName,
 int __fastcall MapLoadDetour(void* self, void*, const char* mprPath,
                              const char* mobPath, void* context)
 {
+    SetRuntimeState(RuntimeState::Transitioning, L"map loader entered");
     void* caller = _ReturnAddress();
     const auto* expectedTransitionReturn = reinterpret_cast<unsigned char*>(g_gameModule)
         + kStartZoneMapLoadReturnRva;
@@ -1236,6 +1479,13 @@ int __fastcall MapLoadDetour(void* self, void*, const char* mprPath,
     }
 
     const int result = g_originalMapLoad(self, selectedMpr, selectedMob, context);
+    if(result)
+        SetRuntimeState(IsMainMenuMpr(selectedMpr) ? RuntimeState::MainMenuReady
+                                                   : RuntimeState::GameplayReady,
+                        IsMainMenuMpr(selectedMpr) ? L"main-menu map loader returned"
+                                                   : L"gameplay map loader returned");
+    else
+        SetRuntimeState(RuntimeState::Unknown, L"map loader failed");
     if(redirect)
     {
         wchar_t message[256]{};
@@ -1245,6 +1495,9 @@ int __fastcall MapLoadDetour(void* self, void*, const char* mprPath,
     }
     else if(g_directLaunchState == 1 && IsMainMenuMpr(mprPath))
         QueueDirectLaunchOnCurrentThread();
+    if(result && InterlockedCompareExchange(&g_pendingStateAwareReload, 0, 0)
+       && g_gameThreadId)
+        PostThreadMessageW(g_gameThreadId, kHotReloadMessage, 0, 0);
     return result;
 }
 
@@ -1289,19 +1542,64 @@ bool ProcessHotReloadOnGameThread()
     if(request.hasBootstrap)
         wcscpy_s(g_godmodeMob, request.bootstrapMobPath);
 
+    const RuntimeState runtimeState = CurrentRuntimeState();
+    if(runtimeState == RuntimeState::Transitioning || runtimeState == RuntimeState::Unknown
+       || runtimeState == RuntimeState::Initializing)
+    {
+        InterlockedExchange(&g_pendingStateAwareReload, 1);
+        wchar_t deferred[512]{};
+        _snwprintf_s(deferred, sizeof(deferred) / sizeof(deferred[0]), _TRUNCATE,
+                     L"HOT_RELOAD deferred sequence=%llu runtime_state=%s state_sequence=%ld",
+                     request.sequence, RuntimeStateName(runtimeState),
+                     InterlockedCompareExchange(&g_runtimeStateSequence, 0, 0));
+        Log(deferred);
+        return true;
+    }
+
+    if(!CommitSaveGeneration(request))
+    {
+        Log(L"HOT_RELOAD refused: generation save namespace is not empty, owned, or monotonic");
+        return false;
+    }
+
     wchar_t queued[512]{};
     wchar_t zone[128]{};
     MultiByteToWideChar(CP_ACP, 0, g_sourceZone, -1, zone,
                         int(sizeof(zone) / sizeof(zone[0])));
     _snwprintf_s(queued, sizeof(queued) / sizeof(queued[0]), _TRUNCATE,
-                 L"HOT_RELOAD invoking verified zone transition sequence=%llu zone=\"%s\" entrance_id=%d thread=%lu",
-                 request.sequence, zone, request.entranceId, GetCurrentThreadId());
+                 L"HOT_RELOAD dispatch sequence=%llu generation=%llu runtime_state=%s zone=\"%s\" entrance_id=%d thread=%lu",
+                 request.sequence, request.generation, RuntimeStateName(runtimeState),
+                 zone, request.entranceId, GetCurrentThreadId());
     Log(queued);
 
     InterlockedExchange(&g_pendingMapLoadProbeCount, 0);
+    if(runtimeState == RuntimeState::InventoryOpen
+       || runtimeState == RuntimeState::StoreOpen
+       || runtimeState == RuntimeState::WorldMapReady)
+    {
+        InterlockedExchange(&g_pendingStateAwareReload, 1);
+        const int menuResult = g_originalZoneTransition(
+            g_zoneTransitionController, "MainMenu", 2);
+        wchar_t result[384]{};
+        _snwprintf_s(result, sizeof(result) / sizeof(result[0]), _TRUNCATE,
+                     L"HOT_RELOAD rebootstrap-to-main-menu sequence=%llu state=%s transition_result=%d",
+                     request.sequence, RuntimeStateName(runtimeState), menuResult);
+        Log(result);
+        return true;
+    }
+
+    InterlockedExchange(&g_pendingStateAwareReload, 0);
     InterlockedExchange(&g_directLaunchState, 3);
-    const int transitionResult = g_originalZoneTransition(
-        g_zoneTransitionController, g_sourceZone, 0);
+    int transitionResult = 1;
+    if(runtimeState == RuntimeState::MainMenuReady)
+    {
+        auto* game = reinterpret_cast<unsigned char*>(g_gameModule);
+        const auto newGame = reinterpret_cast<NewGameBootstrapFn>(game + kNewGameBootstrapRva);
+        Log(L"HOT_RELOAD invoking complete New Game bootstrap from MainMenuReady");
+        newGame(g_zoneTransitionController);
+    }
+    else
+        transitionResult = g_originalZoneTransition(g_zoneTransitionController, g_sourceZone, 0);
     const bool redirected = InterlockedCompareExchange(&g_directLaunchState, 6, 4) == 4;
     if(!redirected)
     {
@@ -1310,7 +1608,10 @@ bool ProcessHotReloadOnGameThread()
             DeleteFileW(g_hotReloadThreadPath);
     }
     else
+    {
         g_hotReloadSequence = request.sequence;
+        SetRuntimeState(RuntimeState::GameplayReady, L"state-aware reload completed");
+    }
     wchar_t completed[384]{};
     _snwprintf_s(completed, sizeof(completed) / sizeof(completed[0]), _TRUNCATE,
                  L"HOT_RELOAD %s sequence=%llu transition_result=%d staged_loader=%s",
@@ -1531,6 +1832,9 @@ bool InitializeDirectLaunch()
                             DWORD(sizeof(g_resultPath) / sizeof(g_resultPath[0])));
     if(!g_resultPath[0])
         return false;
+    InitializeCriticalSection(&g_savePathLock);
+    InterlockedExchange(&g_savePathLockReady, 1);
+    SetRuntimeState(RuntimeState::Initializing, L"bridge initialization");
     GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_HOT_RELOAD_REQUEST",
                             g_hotReloadRequestPath,
                             DWORD(sizeof(g_hotReloadRequestPath)
@@ -1582,6 +1886,8 @@ bool InitializeDirectLaunch()
         return patched > 0;
     }
     const bool directLaunch = InstallMapLoadDetour();
+    const bool overlayProvider = runtime == RuntimeBuild::JmvStarter && directLaunch
+        ? InstallRuntimeOverlayProbe() : false;
     if(runtime == RuntimeBuild::BaseEi && g_baseProbeLevel == 2 && directLaunch)
     {
         // Keep the byte-guarded detours installed, but use a state which can
@@ -1591,9 +1897,10 @@ bool InitializeDirectLaunch()
     }
     wchar_t message[256]{};
     _snwprintf_s(message, sizeof(message) / sizeof(message[0]), _TRUNCATE,
-                 L"DIRECT_LAUNCH active imports=%d stack_capture=%s map_loader=%s trigger=complete-new-game-bootstrap",
+                 L"DIRECT_LAUNCH active imports=%d stack_capture=%s map_loader=%s overlay_state=%s trigger=complete-new-game-bootstrap",
                  patched, g_captureStack ? L"available" : L"unavailable",
-                 directLaunch ? L"available" : L"unavailable");
+                 directLaunch ? L"available" : L"unavailable",
+                 overlayProvider ? L"available" : L"unavailable");
     Log(message);
     return patched > 0 && directLaunch;
 }

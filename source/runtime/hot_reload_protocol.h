@@ -7,11 +7,15 @@
 
 struct SMapHotReloadRequest
 {
-    int protocolVersion{1};
+    int protocolVersion{2};
     quint64 sequence{0};
+    quint64 generation{0};
+    quint64 runtimeStateSequence{0};
     QString runId;
     QString profileId;
+    QString sourceZoneId;
     QString zoneId;
+    QString bootstrapMode{"automatic"};
     int entranceId{0};
     QString mprPath;
     QString mobPath;
@@ -19,6 +23,7 @@ struct SMapHotReloadRequest
     QString mobSha256;
     QString bootstrapMobPath;
     QString bootstrapMobSha256;
+    QString savePath;
     bool preservePosition{false};
 };
 

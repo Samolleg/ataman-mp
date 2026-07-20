@@ -34,9 +34,18 @@ The provider remains deliberately narrow:
 - it uses generic mode `0`; mode `2` is reserved by this runtime for the main
   menu and is never used for the requested editor map;
 - it redirects only the expected loader call made by that transition;
-- it does not modify Starter, JMV configuration, maps, saves, or movie files;
+- it does not modify Starter, JMV configuration, campaign saves, or movie
+  files; temporary map aliases are hash-owned and removed after exit;
 - it does not infer readiness from a fixed delay; the normal main-menu loader
   return and game-thread message loop provide the lifecycle boundary.
+
+Hot reload protocol v2 gives each initial launch/reload an immutable map and
+save generation beneath the owned run directory. Save path switching occurs on
+the game thread immediately before a committed transition. The bridge records
+guarded runtime-state changes and defers reload while state is initializing,
+transitioning, or unknown; exact-hash gameplay, Main Menu, inventory, and store
+paths are implemented, while world-map classification remains an observation
+probe until its provider is proven.
 
 The user launches with Ctrl+F5 and waits for the normal intro/menu lifecycle.
 The provider should automatically enter the staged map without a manual New
