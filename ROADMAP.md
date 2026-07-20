@@ -330,6 +330,13 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
   - [x] Start MOB Family Validation as a detached, dockable native window,
     keep it reopenable after closing, and provide direct selection of loaded
     objects from NID-backed finding rows.
+  - [x] Remove eager replacement-ID searches from automatic panel rendering.
+    Fully shared million-ID ranges in the Zone 19 briefing/gameplay family
+    previously made the GUI thread consume a full CPU core for minutes. The
+    structural family pass itself measures about 0.20 seconds; replacement
+    allocation now runs only from the explicit repair workflow. Identical
+    queued validations are coalesced, map/collection loading has a blocking
+    progress dialog, and worker/UI timings are logged. ([`6286325`](https://github.com/Ilufus/ei-mapper-endurance/commit/6286325))
   - Detailed design: [structural MOB NID validation plan](docs/research/structural-mob-nid-validation-plan.md).
 
 ### P0: direct-launch stabilization
@@ -563,6 +570,11 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
   - Fall back to the selected map-table entrance when unsafe.
 - [ ] Use normal entrance deployment when the editor switches to a different
   map set before Ctrl+F5.
+  - [x] Clear the previous generation's optional bootstrap MOB when the new
+    reload request contains no Play from Here/Godmode/supplemental bootstrap.
+    This prevents map A's cleared custom spawn from being replayed after map B
+    selects a normal entrance. Runtime confirmation is pending the next tester
+    build. ([`6286325`](https://github.com/Ilufus/ei-mapper-endurance/commit/6286325))
 - [ ] Keep the staged version mounted when travelling away and returning.
   - Returning to the edited map must not silently load the installed original.
   - Record every active staged map identity and hash.
