@@ -95,6 +95,7 @@ private slots:
     void anchorsRootTranslationToBindPose();
     void interpolatesMorphClosingSample();
     void propagatesPoseToNumberedEquipment();
+    void inheritsAttachmentRotationOnlyOnce();
     void preservesChildBindOffsetAndIgnoresChildTranslation();
     void preMultipliesChildRotationInEiOrder();
     void appliesDistanceTiers();
@@ -193,6 +194,25 @@ void UnitAnimationTests::propagatesPoseToNumberedEquipment()
     pose.transforms.insert("rh3.sword00", animated);
     const auto transforms = propagateAnimationHierarchy(pose, skeleton);
     QCOMPARE(transforms.value("rh3.sword12").column(3).x(), 3.0f);
+}
+
+void UnitAnimationTests::inheritsAttachmentRotationOnlyOnce()
+{
+    SAnimationSkeleton skeleton;
+    skeleton.restOffsets.insert("lh2", QVector3D());
+    skeleton.restOffsets.insert("lh2.shield00", QVector3D());
+    skeleton.restOffsets.insert("lh2.shield04", QVector3D());
+    skeleton.parents.insert("lh2.shield00", "lh2");
+    skeleton.parents.insert("lh2.shield04", "lh2.shield00");
+    SAnimationLocalPose pose;
+    QMatrix4x4 attachment;
+    attachment.rotate(90, 0, 0, 1);
+    pose.transforms.insert("lh2.shield00", attachment);
+
+    const auto transforms = propagateAnimationHierarchy(pose, skeleton);
+    const QVector3D rotated = transforms.value("lh2.shield04") * QVector3D(1, 0, 0);
+    QVERIFY(qAbs(rotated.x()) < 0.0001f);
+    QVERIFY(qAbs(rotated.y() - 1.0f) < 0.0001f);
 }
 
 void UnitAnimationTests::preservesChildBindOffsetAndIgnoresChildTranslation()

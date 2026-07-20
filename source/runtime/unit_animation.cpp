@@ -135,6 +135,21 @@ QString canonicalChannel(QString component)
     return component;
 }
 
+bool inheritsCanonicalChannel(const QString& component, const QString& canonical,
+                              const SAnimationSkeleton& skeleton)
+{
+    QString ancestor = skeleton.parents.value(component);
+    QSet<QString> visited;
+    while(!ancestor.isEmpty() && !visited.contains(ancestor))
+    {
+        if(ancestor == canonical)
+            return true;
+        visited.insert(ancestor);
+        ancestor = skeleton.parents.value(ancestor);
+    }
+    return false;
+}
+
 QMatrix4x4 localAt(const SAnimationClip& clip, const QString& component, double frame)
 {
     auto found = clip.channels.constFind(component.toLower());
@@ -400,7 +415,16 @@ QMap<QString, QMatrix4x4> propagateAnimationHierarchy(
         const QVector3D rest = skeleton.restOffsets.value(component);
         auto channel = pose.transforms.constFind(component);
         if(channel == pose.transforms.constEnd())
-            channel = pose.transforms.constFind(canonicalChannel(component));
+        {
+            const QString canonical = canonicalChannel(component);
+            // Numbered equipment is linked beneath its animated *00 attachment
+            // node in the shipped assemblies (for example
+            // lh2.shield04 -> lh2.shield00 -> lh2). The child inherits that
+            // node's transform through hierarchy propagation; applying the
+            // canonical channel again rotates the visible item twice.
+            if(!inheritsCanonicalChannel(component, canonical, skeleton))
+                channel = pose.transforms.constFind(canonical);
+        }
         const bool animated = channel != pose.transforms.constEnd();
         const QQuaternion localRotation = animated
             ? QQuaternion::fromRotationMatrix(channel.value().normalMatrix()).normalized()

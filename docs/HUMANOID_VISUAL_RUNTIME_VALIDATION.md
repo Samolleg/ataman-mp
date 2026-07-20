@@ -174,8 +174,12 @@ edit `database.res`, JMV/Base archives, live MOBs, maps, or the game install.
   Keep this diagnostic/fail-closed until the intended race/model/skin mapping is
   established from the database, addon code, or developer documentation.
 - Shield placement follows the assembly's `lh2.shieldNN -> lh2.shield00 -> lh2`
-  link hierarchy. Any offset correction must be derived from the FIG/LNK rest
-  transforms or animation channels, not a per-character coordinate adjustment.
+  link hierarchy. The `lh2.shield00` animation channel belongs to the attachment
+  node; numbered shield geometry inherits it and must not receive the canonical
+  channel a second time. The same rule applies to numbered sword, axe, pike,
+  and other equipment beneath their `*00` attachment nodes. Validate
+  `zon3obr` IDs 233/234 at several idle frames: the shield should remain on the
+  forearm without clipping caused by a doubled attachment rotation.
 
 ## Corpus-established JMV equipment atlas mapping
 
