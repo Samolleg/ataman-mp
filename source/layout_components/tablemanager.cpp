@@ -1289,15 +1289,21 @@ void CComboDynItem::keyPressEvent(QKeyEvent* event)
 void CComboDynItem::focusOutEvent(QFocusEvent* event)
 {
     // Typed text is only a filter preview until Enter or an explicit
-    // suggestion activation commits it.
+    // suggestion activation commits it. Opening the combo transfers focus to
+    // its popup; that is not an abandoned edit and must not close the popup.
     QComboBox::focusOutEvent(event);
-    cancelPendingEdit();
+    if(event->reason() != Qt::PopupFocusReason)
+        cancelPendingEdit();
 }
 
 bool CComboDynItem::eventFilter(QObject* watched, QEvent* event)
 {
     if(watched == lineEdit() && event->type() == QEvent::FocusOut)
-        cancelPendingEdit();
+    {
+        const QFocusEvent* focusEvent = static_cast<QFocusEvent*>(event);
+        if(focusEvent->reason() != Qt::PopupFocusReason)
+            cancelPendingEdit();
+    }
     if(watched == lineEdit() && event->type() == QEvent::KeyPress)
     {
         QKeyEvent* keyEvent = static_cast<QKeyEvent*>(event);

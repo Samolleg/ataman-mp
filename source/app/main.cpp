@@ -254,6 +254,15 @@ int runHeadlessCommand(QApplication& app)
             prefixesOnly = prefixesOnly && completion.startsWith("h", Qt::CaseInsensitive);
         const bool valueStable = combo.currentText() == "h"
                 && combo.value()->toString() == "original_model" && appliedChanges == 0;
+        combo.show();
+        combo.showPopup();
+        QApplication::processEvents();
+        QFocusEvent popupFocusOut(QEvent::FocusOut, Qt::PopupFocusReason);
+        QApplication::sendEvent(combo.lineEdit(), &popupFocusOut);
+        QApplication::processEvents();
+        const bool popupStaysOpen = combo.view()->isVisible()
+                && combo.value()->toString() == "original_model" && appliedChanges == 0;
+        combo.hidePopup();
         QFocusEvent focusOut(QEvent::FocusOut, Qt::OtherFocusReason);
         QApplication::sendEvent(combo.lineEdit(), &focusOut);
         const bool focusCancel = combo.currentText() == "original_model"
@@ -480,7 +489,8 @@ int runHeadlessCommand(QApplication& app)
         const bool logicPointRedoAtomic = logicPointHistory.index() == 1
                 && logicPoints == 1 && logicPlacementChanges == 1;
 
-        const bool passed = prefixesOnly && valueStable && focusCancel && escapeCancel
+        const bool passed = prefixesOnly && valueStable && popupStaysOpen
+                && focusCancel && escapeCancel
                 && enterCommit && clickCommit && settingsTabsUsable && settingsShortcutsPersist
                 && secondaryWindowsClosed
                 && pasteSingleAction && pasteUndoAtomic && pasteRedoAtomic
@@ -493,6 +503,7 @@ int runHeadlessCommand(QApplication& app)
         output << "asset-picker prefixes=" << completions.join(",") << "\n"
                << "prefixesOnly=" << prefixesOnly
                << " valueStable=" << valueStable
+               << " popupStaysOpen=" << popupStaysOpen
                << " focusCancel=" << focusCancel
                << " escapeCancel=" << escapeCancel
                << " enterCommit=" << enterCommit
