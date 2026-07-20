@@ -24,8 +24,12 @@ Current development line: `0.2.1-alpha.12` focused closed testing.
 - [ ] Add configurable UI font-size scaling for 4K displays and accessibility.
 - [ ] Add a Russian translation and an in-app language switch.
 - [ ] Correct the remaining spacing/alignment offsets for disabled menu items.
-- [ ] Make all major workspace panels dockable, detachable, tab-compatible, and
-  persistently rearrangeable within Qt5's supported docking model.
+- [x] Make the major workspace panels dockable, detachable, recoverable from
+  **View**, and persistently rearrangeable within Qt5's supported docking
+  model. Object Outliner and Object Properties start as a right-edge vertical
+  dock column; History and MOB Family Validation retain floating-window use
+  with native minimize/maximize controls while also supporting docking.
+  ([`a06e5fd`](https://github.com/Ilufus/ei-mapper-endurance/commit/a06e5fd))
 
 ## General validation backlog
 
@@ -256,6 +260,13 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
   full-state map switching while repairing orphan-process cleanup in the same
   editor session, offering an explicit close prompt, and focusing/maximizing the
   game after a completed hot reload.
+- **Source after alpha.12:** validation no longer performs expensive automatic
+  replacement-ID scans for fully shared ranges, map switches refresh their
+  runtime-family identity, missing `AddMob(...)` dependencies identify the
+  exact source MOB/script line and explicitly state that the file was not
+  found, and the main Outliner/Properties/History/Validation panels share a
+  dockable View-menu lifecycle. These changes await the next combined tester
+  package.
 - **MOB hardening:** complete for the supported editing surface. Remaining work
   is validation breadth and new editing features, not another serializer
   rewrite.
@@ -319,10 +330,8 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
     unsafe MOB projections are discarded before they can become active or
     dirty. The JMV `Autozone7chest.mob` `0xACCEECCC` fixture is covered by a
     byte-preservation regression test.
-  - Implementation and focused corpus harness: local commit `9ddc802`;
-    [alpha.5 validation](docs/releases/0.2.1-alpha.5-validation.md). The commit
-    is not yet on GitHub because the push was denied until the private remote is
-    explicitly re-authorized.
+  - Implementation and focused corpus harness: commit `9ddc802`;
+    [alpha.5 validation](docs/releases/0.2.1-alpha.5-validation.md).
   - Source/projection hardening and focused tests:
     [alpha.6 validation](docs/releases/0.2.1-alpha.6-validation-hardening.md).
   - [x] Alpha.7 shows only three concise, truncated findings in warning
@@ -341,6 +350,11 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
     Alpha.12 could retain the previous map's primary MOB during a quick switch
     (observed `bz19g` metadata with active `gz19g.mob`), combining two mutually
     exclusive families and reporting false collisions. ([`4c833d9`](https://github.com/Ilufus/ei-mapper-endurance/commit/4c833d9))
+  - [x] Make incomplete-family diagnostics name the missing MOB file and retain
+    parser-derived dependency provenance: referring MOB path, script line, and
+    exact `AddMob(...)` expression. The real missing Zone 14 dependency is
+    covered by a focused synthetic test and corpus probe.
+    ([`263dea8`](https://github.com/Ilufus/ei-mapper-endurance/commit/263dea8))
   - Detailed design: [structural MOB NID validation plan](docs/research/structural-mob-nid-validation-plan.md).
 
 ### P0: direct-launch stabilization
