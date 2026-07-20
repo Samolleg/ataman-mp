@@ -666,7 +666,17 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
   validates their hashes, and can save or hot-reload the destination without
   falling back to the rebuilding serializer. Runtime testing with cross-MOB
   copied objects through hot reload is confirmed.
-- [ ] Replace the secondary-MOB chooser with a dockable **Loaded MOBs** panel.
+- [ ] Replace the secondary-MOB chooser with a dockable **Loaded Map** panel.
+  - Present the workspace as a tree. The loaded MPR is the root and the loaded
+    primary/supplemental MOBs are its children. A MOB-only workspace uses an
+    explicit `No MPR (neutral grid)` root rather than implying that a terrain
+    document is loaded.
+  - The MPR root has its own visibility toggle. Hiding it suppresses terrain
+    rendering and normal terrain picking only: the MPR remains attached and
+    continues to supply projection, height, entrance, validation, collection,
+    and Test Current Map data. Object coordinates and heights never change when
+    terrain visibility changes. Terrain-dependent interactive tools that would
+    be ambiguous against an invisible surface are disabled until it is shown.
   - Endurance does not support simultaneous editing of multiple MOBs. Exactly
     one MOB is active/unlocked; every other loaded MOB is visible but locked
     against selection and editing.
@@ -689,6 +699,18 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
     that owner before applying the command rather than mutating a locked MOB
     invisibly. Map/MOB open, close, visibility, and active-MOB switching remain
     workspace UI state, not document undo commands.
+  - Provide **Unload MOB** on MOB rows. It runs the normal dirty-document
+    Save/Discard/Cancel check, closes or resolves document-owned parameter and
+    script windows, cancels pending transforms, clears selection, and prevents
+    stale undo/redo commands from referencing the unloaded document. A
+    successfully unloaded MOB is removed from the tree and from the workspace,
+    validation, Save All, collection snapshot, and Test Current Map document
+    sets. If the active MOB is unloaded, choose the next loaded MOB
+    deterministically; if no MOB remains, enter terrain-only mode and disable
+    MOB editing actions.
+  - Do not add drag reordering in the first version. Preserve collection/runtime
+    load order, show the primary/supplemental role, and keep unloading distinct
+    from hiding so a visibility click can never change the test-run document set.
 - [ ] Runtime-validate deterministic multi-MOB JMV test loading.
   - [x] Identify the primary MOB from `map.txt` (falling back to collection
     order), validate every loaded MOB, and inventory all source/staged hashes.
