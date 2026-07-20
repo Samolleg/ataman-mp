@@ -110,11 +110,39 @@ CView::~CView()
 //        delete param;
 //    }
 
+    // QOpenGLBuffer/QOpenGLShaderProgram/QOpenGLTimerQuery destruction requires
+    // this widget's context. MainWindow deletes CView explicitly, and without
+    // reacquiring it Qt can reach QOpenGLContext::surface() through a null
+    // currentContext after the window has already disappeared.
+    if(m_timer)
+        m_timer->stop();
+    if(m_mprModifyTimer)
+        m_mprModifyTimer->stop();
+    ei::setCrashContext("shutdown/view-opengl-resources");
+    if(isValid())
+        makeCurrent();
+    if(m_gpuTimer)
+    {
+        delete m_gpuTimer;
+        m_gpuTimer = nullptr;
+        m_gpuTimerPending = false;
+    }
+
     for(auto& mob: m_aMob)
     {
         m_scriptWorkspaces->unregisterMob(mob);
         delete mob;
     }
+    m_aMob.clear();
+
+    delete m_timer;
+    m_timer = nullptr;
+    delete m_mprModifyTimer;
+    m_mprModifyTimer = nullptr;
+    // Deliberately leave the context current: shader-program members are
+    // destroyed after this destructor body and before QGLWidget tears down the
+    // context itself.
+    ei::setCrashContext("shutdown/view-members");
 }
 
 

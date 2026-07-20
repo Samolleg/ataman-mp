@@ -2,6 +2,11 @@
 
 #include "log.h"
 
+#include <QDateTime>
+#include <QDir>
+#include <QFile>
+#include <QTextStream>
+
 namespace {
 void addCounters(SRenderFrameCounters& target, const SRenderFrameCounters& value)
 {
@@ -65,7 +70,7 @@ void RenderPerformanceContext::endFrame()
     const double maxCpuMs = double(m_maxCpuNanoseconds) / 1000000.0;
     const QString gpu = m_gpuSamples == 0 ? QString("unsupported/pending")
         : QString::number(double(m_gpuNanoseconds) / double(m_gpuSamples) / 1000000.0, 'f', 2) + " ms";
-    ei::log(eLogInfo, QString(
+    const QString report = QString(
         "Render stats fps:%1 cpu-submit:%2 ms max:%3 ms gpu:%4 "
         "nodes:%5 culled:%6 submitted:%7 logic:%8 draws:%9 terrain:%10 triangles:%11 texture-binds:%12")
         .arg(fps, 0, 'f', 1).arg(cpuMs, 0, 'f', 2).arg(maxCpuMs, 0, 'f', 2).arg(gpu)
@@ -76,7 +81,20 @@ void RenderPerformanceContext::endFrame()
         .arg(double(m_total.drawCalls) / frames, 0, 'f', 1)
         .arg(double(m_total.terrainDrawCalls) / frames, 0, 'f', 1)
         .arg(double(m_total.triangles) / frames, 0, 'f', 0)
-        .arg(double(m_total.textureBinds) / frames, 0, 'f', 1));
+        .arg(double(m_total.textureBinds) / frames, 0, 'f', 1);
+    ei::log(eLogInfo, report);
+
+    // Performance captures need to survive ordinary workflow-log filtering so
+    // users can attach one small, unambiguous file after a benchmark run.
+    QDir current = QDir::current();
+    current.mkpath("logs");
+    QFile performanceLog(current.filePath("logs/render-performance.log"));
+    if(performanceLog.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text))
+    {
+        QTextStream stream(&performanceLog);
+        stream << QDateTime::currentDateTime().toString(Qt::ISODateWithMs)
+               << ' ' << report << '\n';
+    }
     resetWindow();
 }
 
