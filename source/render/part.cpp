@@ -1,15 +1,14 @@
 #include "part.h"
+#include "render_performance.h"
 
 CPart::CPart():
-   m_indexBuf(QOpenGLBuffer::IndexBuffer)
-  ,m_bShow(true)
+   m_bShow(true)
 {
     m_aVertData.clear();
     m_poseMatrix.setToIdentity();
 }
 
-CPart::CPart(const CPart &part):
-    m_indexBuf(QOpenGLBuffer::IndexBuffer)
+CPart::CPart(const CPart &part)
 {
     m_name = part.m_name;
     m_parentName = part.m_parentName;
@@ -22,13 +21,12 @@ CPart::CPart(const CPart &part):
     m_baseVertData = part.m_baseVertData;
     m_sourceVertexIndices = part.m_sourceVertexIndices;
     m_morphApplied = part.m_morphApplied;
-    update(); //create new index and vertex buffers
+    update(); // create a new vertex buffer owned by this instance
 }
 
 CPart::~CPart()
 {
     m_vertexBuf.destroy();
-    m_indexBuf.destroy();
 }
 
 void CPart::update()
@@ -40,15 +38,6 @@ void CPart::update()
     m_vertexBuf.bind();
     m_vertexBuf.allocate(m_aVertData.data(), m_aVertData.count() * int(sizeof(SVertexData)));
     m_vertexBuf.release();
-
-    QVector<ushort> aInd;
-    for (ushort i(0); i<m_aVertData.size(); ++i)
-        aInd.append(i);
-
-    m_indexBuf.create();
-    m_indexBuf.bind();
-    m_indexBuf.allocate(aInd.data(), aInd.count() * int(sizeof(ushort)));
-    m_indexBuf.release();
 }
 
 void CPart::setMorphDeltas(const QVector<QVector3D>& deltas)
@@ -102,9 +91,15 @@ void CPart::draw(QOpenGLShaderProgram* program)
     program->enableAttributeArray(textureLocation);
     program->setAttributeBuffer(textureLocation, GL_FLOAT, offset, 2, int(sizeof(SVertexData)));
 
-    // Draw cube geometry using indices from VBO 1
-    m_indexBuf.bind();
-    glDrawElements(GL_TRIANGLES, m_aVertData.count(), GL_UNSIGNED_SHORT, nullptr);
+    // FIG triangles are already expanded sequentially. The old identity index
+    // buffer duplicated every vertex and added a second bind to every part.
+    glDrawArrays(GL_TRIANGLES, 0, m_aVertData.count());
+    RenderPerformanceContext& performance = RenderPerformanceContext::instance();
+    if(performance.collecting())
+    {
+        ++performance.counters().drawCalls;
+        performance.counters().triangles += quint64(m_aVertData.count() / 3);
+    }
 }
 
 
@@ -124,7 +119,5 @@ void CPart::drawSelect(QOpenGLShaderProgram *program)
     program->enableAttributeArray(vertexLocation);
     program->setAttributeBuffer(vertexLocation, GL_FLOAT, offset, 3, int(sizeof(SVertexData)));
 
-    // Draw cube geometry using indices from VBO 1
-    m_indexBuf.bind();
-    glDrawElements(GL_TRIANGLES, m_aVertData.count(), GL_UNSIGNED_SHORT, nullptr);
+    glDrawArrays(GL_TRIANGLES, 0, m_aVertData.count());
 }

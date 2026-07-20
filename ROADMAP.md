@@ -334,6 +334,13 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
 
 ## 0.2.x: resources, appearance, and performance
 
+- [ ] Meet the documented steady-state 60 FPS contract on every representative
+  Base/JMV scene on a modern supported machine, with CPU submission and
+  asynchronous GPU timings recorded separately. See
+  [rendering pipeline audit](docs/RENDERING_PIPELINE_AUDIT.md).
+- [ ] Replace per-instance static VBO ownership and full-scene submission with
+  shared immutable meshes, spatial visibility, render queues, and static
+  batching/instancing before adding shadow and particle passes.
 - [ ] Complete cancellable asynchronous RES indexing, MOB parsing, and CPU
   decoding while keeping OpenGL creation in bounded GUI-thread batches.
 - [ ] Persist resource indexes by archive path, size, modification time, and

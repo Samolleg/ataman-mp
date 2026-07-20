@@ -38,7 +38,6 @@ public:
 
 private:
     QOpenGLBuffer m_vertexBuf;
-    QOpenGLBuffer m_indexBuf;
 
     QString m_name;
     QString m_parentName;

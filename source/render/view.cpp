@@ -37,6 +37,7 @@
 #include "tile.h"
 #include "duplicate_id_report.h"
 #include "view_frustum.h"
+#include "render_performance.h"
 #include "external_script_workspace.h"
 #include "mob_script_window.h"
 #include "script_reference_analyzer.h"
@@ -53,6 +54,8 @@ void showDuplicateIdWarning(QWidget* parent, const QVector<uint>& duplicates)
 }
 
 CView::CView(QWidget *parent, const QGLWidget *pShareWidget) : QGLWidget(parent, pShareWidget)
+  ,m_gpuTimer(nullptr)
+  ,m_gpuTimerPending(false)
   ,m_pSettings(nullptr)
   ,m_pUndoStack(nullptr)
   ,m_pProgress(nullptr)
@@ -224,6 +227,13 @@ void CView::initializeGL()
 
     CTextureList::getInstance()->initResource();
     CObjectList::getInstance()->initResource();
+    m_gpuTimer = new QOpenGLTimerQuery(this);
+    if(!m_gpuTimer->create())
+    {
+        delete m_gpuTimer;
+        m_gpuTimer = nullptr;
+        ei::log(eLogWarning, "GPU timer queries are unavailable; render counters will report CPU submission only");
+    }
     ei::setCrashContext("idle");
     //doneCurrent();
 }
@@ -248,8 +258,27 @@ void CView::resizeGL(int width, int height)
 void CView::paintGL()
 {
     makeCurrent();
+    const COptBool* statsOption = m_pSettings
+        ? dynamic_cast<const COptBool*>(m_pSettings->opt("renderPerformanceCounters")) : nullptr;
+    const bool collectStats = statsOption && statsOption->value();
+    RenderPerformanceContext& performance = RenderPerformanceContext::instance();
+    performance.beginFrame(collectStats);
+    if(collectStats && m_gpuTimer && m_gpuTimerPending && m_gpuTimer->isResultAvailable())
+    {
+        performance.recordGpuTime(m_gpuTimer->waitForResult());
+        m_gpuTimerPending = false;
+    }
+    const bool timeGpu = collectStats && m_gpuTimer && !m_gpuTimerPending;
+    if(timeGpu)
+        m_gpuTimer->begin();
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     draw();
+    if(timeGpu)
+    {
+        m_gpuTimer->end();
+        m_gpuTimerPending = true;
+    }
+    performance.endFrame();
     //doneCurrent();
 }
 
@@ -269,6 +298,9 @@ void CView::draw()
     const CViewFrustum frustum(m_projection * camMatrix);
     const auto visible = [&frustum, cullingEnabled](CNode* node)
     {
+        RenderPerformanceContext& performance = RenderPerformanceContext::instance();
+        if(performance.collecting())
+            ++performance.counters().nodesVisited;
         if(!node || !cullingEnabled || node->nodeState() == ENodeState::eSelect)
             return true;
         CBox bounds = node->getBBox();
@@ -278,6 +310,8 @@ void CView::draw()
                                                          bounds.radius());
         if(!isVisible && node->nodeType() == ENodeType::eUnit)
             AnimationFrameContext::instance().counters().skippedOffscreen++;
+        if(!isVisible && performance.collecting())
+            ++performance.counters().nodesCulled;
         return isVisible;
     };
     // Set modelview-projection matrix
@@ -318,8 +352,14 @@ void CView::draw()
             for (auto& node: mob->nodes())
             {
                 if(visible(node))
+                {
                     node->drawObjectVisual(false, &m_program);
+                    if(RenderPerformanceContext::instance().collecting())
+                        ++RenderPerformanceContext::instance().counters().nodesSubmitted;
+                }
                 node->drawLogicVisual(false, &m_program);
+                if(RenderPerformanceContext::instance().collecting())
+                    ++RenderPerformanceContext::instance().counters().logicSubmissions;
             }
         }
 
@@ -330,8 +370,14 @@ void CView::draw()
             if(node->nodeState() != ENodeState::eSelect)
             {
                 if(visible(node))
+                {
                     node->drawObjectVisual(true, &m_program);
+                    if(RenderPerformanceContext::instance().collecting())
+                        ++RenderPerformanceContext::instance().counters().nodesSubmitted;
+                }
                 node->drawLogicVisual(true, &m_program);
+                if(RenderPerformanceContext::instance().collecting())
+                    ++RenderPerformanceContext::instance().counters().logicSubmissions;
             }
         }
         glDepthFunc(GL_LEQUAL);
@@ -341,6 +387,12 @@ void CView::draw()
             {
                 node->drawObjectVisual(true, &m_program);
                 node->drawLogicVisual(true, &m_program);
+                if(RenderPerformanceContext::instance().collecting())
+                {
+                    ++RenderPerformanceContext::instance().counters().nodesVisited;
+                    ++RenderPerformanceContext::instance().counters().nodesSubmitted;
+                    ++RenderPerformanceContext::instance().counters().logicSubmissions;
+                }
             }
         }
         glDepthFunc(GL_LESS);

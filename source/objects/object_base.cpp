@@ -7,6 +7,7 @@
 #include "log.h"
 #include "resourcemanager.h"
 #include "resource_name.h"
+#include "render_performance.h"
 #include "property.h"
 
 CObjectBase::CObjectBase(): 
@@ -153,13 +154,21 @@ void CObjectBase::draw(bool isActive, QOpenGLShaderProgram* program)
         program->setUniformValue("u_highlight", true);
 
     program->setUniformValue("qt_Texture0", 0);
+    QOpenGLTexture* boundTexture = nullptr;
     for(auto& part: m_aPart)
     {
         QOpenGLTexture* texture = m_partTextures.value(part->name().toLower(), nullptr);
         if(!texture)
             texture = part->textureNumber() == 2 && m_secondaryTexture
                 ? m_secondaryTexture : m_texture;
-        texture->bind(0);
+        if(texture != boundTexture)
+        {
+            texture->bind(0);
+            boundTexture = texture;
+            RenderPerformanceContext& performance = RenderPerformanceContext::instance();
+            if(performance.collecting())
+                ++performance.counters().textureBinds;
+        }
         part->draw(program);
     }
     program->setUniformValue("u_partAnimated", false);

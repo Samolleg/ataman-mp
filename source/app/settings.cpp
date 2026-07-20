@@ -386,6 +386,7 @@ void CSettings::initOptions()
     aOpt.append(QSharedPointer<COpt>(new COptBool("drawHelp", false)));
     aOpt.append(QSharedPointer<COpt>(new COptBool("frustumCulling", true)));
     aOpt.append(QSharedPointer<COpt>(new COptBool("animateUnits", true)));
+    aOpt.append(QSharedPointer<COpt>(new COptBool("renderPerformanceCounters", false)));
 
 
     //init default options for digits

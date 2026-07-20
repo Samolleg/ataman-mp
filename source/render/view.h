@@ -3,6 +3,7 @@
 
 #include <QGLWidget>
 #include <QOpenGLShader>
+#include <QOpenGLTimerQuery>
 #include <QFileInfo>
 #include <QTimer>
 #include <QSharedPointer>
@@ -212,6 +213,8 @@ private:
     QOpenGLShaderProgram m_program;
     QOpenGLShaderProgram m_landProgram;
     QOpenGLShaderProgram m_selectProgram;
+    QOpenGLTimerQuery* m_gpuTimer;
+    bool m_gpuTimerPending;
     QMatrix4x4 m_projection;
     QVector<CMob*> m_aMob;
     QTimer* m_timer;

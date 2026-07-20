@@ -1,6 +1,7 @@
 #include <QtGlobal>
 
 #include "sector.h"
+#include "render_performance.h"
 #include "landscape.h"
 #include "math_utils.h"
 #include "log.h"
@@ -544,6 +545,13 @@ void CSector::draw(QOpenGLShaderProgram* program)
     m_indexBuf.bind();
     constexpr int indexNum = 256*16; // numTiles * index per tile
     glDrawElements(GL_QUADS, indexNum, GL_UNSIGNED_SHORT, nullptr);
+    RenderPerformanceContext& performance = RenderPerformanceContext::instance();
+    if(performance.collecting())
+    {
+        ++performance.counters().drawCalls;
+        ++performance.counters().terrainDrawCalls;
+        performance.counters().triangles += quint64(indexNum / 2);
+    }
 
 }
 
@@ -572,6 +580,13 @@ void CSector::drawWater(QOpenGLShaderProgram *program)
 
     m_waterIndexBuf.bind();
     glDrawElements(GL_QUADS, m_arrWaterVrtData.count(), GL_UNSIGNED_SHORT, nullptr);
+    RenderPerformanceContext& performance = RenderPerformanceContext::instance();
+    if(performance.collecting())
+    {
+        ++performance.counters().drawCalls;
+        ++performance.counters().terrainDrawCalls;
+        performance.counters().triangles += quint64(m_arrWaterVrtData.count() / 2);
+    }
 }
 
 bool CSector::projectPt(QVector3D& point)
