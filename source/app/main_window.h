@@ -98,6 +98,7 @@ private:
     void updateOperationAvailability(bool hasSelection = false);
     void updateDocumentActionAvailability();
     void updateLoadedMapPanel();
+    void updateOutlinerSelectionPath();
     void saveUiState();
     void closeHotReloadProgress();
     QVector<SMapSpawnObstacle> mapTestObstacles() const;
@@ -201,6 +202,7 @@ private:
     QPushButton* m_validationShowMore{nullptr};
     QLineEdit* m_outlinerFilterEdit{nullptr};
     QLabel* m_outlinerFilterStatus{nullptr};
+    QLabel* m_outlinerSelectionPath{nullptr};
     QFrame* m_mapTestResultNotification{nullptr};
     QLabel* m_mapTestResultIcon{nullptr};
     QLabel* m_mapTestResultLabel{nullptr};

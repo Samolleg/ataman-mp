@@ -437,6 +437,11 @@ void CTreeView::itemDoubleClickedOver(QTreeWidgetItem* pItem, int column)
 
 void CTreeView::revealNode(CNode* pNode)
 {
+    markNode(pNode, true);
+}
+
+void CTreeView::markNode(CNode* pNode, bool scrollToNode)
+{
     if(!pNode)
         return;
     QTreeWidgetItemIterator it(this);
@@ -448,7 +453,8 @@ void CTreeView::revealNode(CNode* pNode)
             for(QTreeWidgetItem* parent = item->parent(); parent; parent = parent->parent())
                 parent->setExpanded(true);
             setCurrentItem(item, 0, QItemSelectionModel::ClearAndSelect);
-            scrollToItem(item, QAbstractItemView::PositionAtCenter);
+            if(scrollToNode)
+                scrollToItem(item, QAbstractItemView::PositionAtCenter);
             return;
         }
         ++it;

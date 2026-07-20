@@ -487,6 +487,9 @@ void CView::draw()
 
     m_program.setUniformValue("u_projMmatrix", m_projection);
     m_program.setUniformValue("u_viewMmatrix", camMatrix);
+    const QVector4D activeHighlight(0.05f, 0.78f, 0.93f, 0.0f);
+    const QVector4D lockedHighlight(1.0f, 0.55f, 0.05f, 0.0f);
+    m_program.setUniformValue("u_highlightColor", activeHighlight);
 
     if(m_activeMob != nullptr)
     {
@@ -526,9 +529,12 @@ void CView::draw()
                 for(CNode* node : mob->nodes())
                     if(node->nodeState() == ENodeState::eSelect)
                     {
+                        m_program.setUniformValue("u_highlightColor",
+                            mob == m_activeMob ? activeHighlight : lockedHighlight);
                         node->drawObjectVisual(mob == m_activeMob, &m_program);
                         node->drawLogicVisual(mob == m_activeMob, &m_program);
                     }
+        m_program.setUniformValue("u_highlightColor", activeHighlight);
         glDepthFunc(GL_LESS);
     }
 
@@ -825,17 +831,18 @@ int CView::select(const SSelect &selectParam, bool bAddToSelect)
 
 CMob *CView::mob(QString mobName)
 {
-    CMob* pMob = nullptr;
-    foreach(pMob, m_aMob)
+    const QString wanted = QDir::cleanPath(mobName).toLower();
+    for(CMob* pMob : m_aMob)
     {
-        if(pMob->filePath().absoluteFilePath().toLower() == mobName) //try to find fullpath name first
-            break;
+        if(!pMob)
+            continue;
+        if(QDir::cleanPath(pMob->filePath().absoluteFilePath()).toLower() == wanted)
+            return pMob;
 
-        if (pMob->mobName().toLower() == mobName.toLower())
-            break;
+        if(pMob->mobName().toLower() == mobName.toLower())
+            return pMob;
     }
-
-    return pMob;
+    return nullptr;
 }
 
 void CView::pickObject(QPoint mousePos, bool bAddToSelect)
@@ -883,11 +890,7 @@ void CView::getColorFromRect(const QRect& rect, QVector<SColor>& aColor)
 void CView::changeCurrentMob(CMob *pMob)
 {
     if(pMob != m_activeMob)
-    {
         cancelPendingOperation();
-        for(CMob* mob : m_aMob)
-            if(mob) mob->clearSelect(true);
-    }
     m_activeMob = pMob;
     emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataActiveMob, nullptr == pMob ? "" : pMob->mobName());
     emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataDirtyFlag, (nullptr == pMob || !pMob->isDirty()) ? "" : "*");
@@ -898,9 +901,6 @@ void CView::changeCurrentMob(CMob *pMob)
 
 void CView::changeCurrentMob(QString mobName)
 {
-    if(nullptr != m_activeMob)
-        m_activeMob->clearSelect();
-
     for(auto& mob : m_aMob)
     {
         if(mob->mobName() == mobName)
@@ -1325,6 +1325,7 @@ void CView::pickObject(const QRect &rect, bool bAddToSelect)
                 m_pTree->revealNode(selected.back());
         }
     }
+    emit loadedMapStateChanged();
 }
 
 QVector3D CView::getTerrainPos(bool bLand)
@@ -1403,7 +1404,7 @@ void CView::unloadActiveMob()
     unloadMobDocument(m_activeMob);
 }
 
-bool CView::unloadMobDocument(CMob* mob)
+bool CView::unloadMobDocument(CMob* mob, bool promptForSave)
 {
     if(!mob || !m_aMob.contains(mob))
         return false;
@@ -1412,7 +1413,7 @@ bool CView::unloadMobDocument(CMob* mob)
         return false;
     if(!closeMobScriptWindow(mob))
         return false;
-    if(mob->isDirty())
+    if(promptForSave && mob->isDirty())
     {
         const QMessageBox::StandardButton reply = QMessageBox::question(this,
             tr("Unload MOB"),
@@ -1745,6 +1746,7 @@ void CView::restoreSelection(const QList<CNode*>& selection)
     }
     viewParameters();
     update();
+    emit loadedMapStateChanged();
 }
 
 bool CView::selectObjectByProvenance(const QString& mobPath, quint32 nid,
@@ -1804,6 +1806,7 @@ void CView::clearObjectSelection()
         m_pTree->clearViewportSelectionMarker();
     viewParameters();
     update();
+    emit loadedMapStateChanged();
 }
 
 void CView::recordSelectionChange(const QList<CNode*>& before, const QString& text)
@@ -2414,9 +2417,11 @@ void CView::collectObjectTreeData()
             continue;
         const bool visible = isMobVisible(mob);
         auto mobItem = new CTreeObject(m_pTree);
-        QString mobLabel = mob->mobName();
+        QString mobLabel = mob->mobName() + (mob->isDirty() ? " *" : "");
         if(mob == m_activeMob)
             mobLabel += tr(" [Active]");
+        else
+            mobLabel += tr(" [Locked]");
         if(!visible)
             mobLabel += tr(" [Hidden]");
         mobItem->setText(0, mobLabel);
@@ -2453,12 +2458,22 @@ void CView::collectObjectTreeData()
                 groupItem->setText(0, groupIt.key());
                 groupItem->setText(1, QString::number(groupIt.value().size()));
                 if(groupIt.value().size() == 1)
+                {
                     groupItem->setNode(groupIt.value().front());
+                    groupItem->setToolTip(0, mob == m_activeMob
+                        ? tr("Belongs to active MOB %1").arg(mob->mobName())
+                        : tr("Belongs to locked MOB %1. Double-click to make it active.")
+                            .arg(mob->mobName()));
+                }
                 else
                     for(CNode* node : groupIt.value())
                     {
                         auto objectItem = new CTreeObject(groupItem, node);
                         objectItem->setText(0, QString::number(node->mapId()));
+                        objectItem->setToolTip(0, mob == m_activeMob
+                            ? tr("Belongs to active MOB %1").arg(mob->mobName())
+                            : tr("Belongs to locked MOB %1. Double-click to make it active.")
+                                .arg(mob->mobName()));
                         if(!visible)
                             objectItem->setFlags(objectItem->flags() & ~Qt::ItemIsSelectable);
                     }
@@ -2468,6 +2483,9 @@ void CView::collectObjectTreeData()
         }
     }
     m_pTree->applyFilter();
+    const QList<CNode*> selected = selectionSnapshot();
+    if(!selected.isEmpty())
+        m_pTree->markNode(selected.back(), false);
 }
 
 void CView::onRestoreCursor()
@@ -3384,7 +3402,8 @@ void CView::clipboradObjectsToScene()
 
     const QList<CNode*> originalSelection = selectionSnapshot();
     QList<CNode*> previewNodes;
-    m_activeMob->clearSelect();
+    for(CMob* mob : m_aMob)
+        if(mob) mob->clearSelect(true);
     for(auto it = array.begin(); it < array.end(); ++it)
     {
         CNode* node = m_activeMob->createNode(it->toObject());
@@ -3416,6 +3435,7 @@ void CView::clipboradObjectsToScene()
     moveTo(mouseDif);
 
     viewParameters();
+    emit loadedMapStateChanged();
 }
 
 void CView::hideSelectedNodes()

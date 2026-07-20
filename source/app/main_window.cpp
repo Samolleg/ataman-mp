@@ -31,6 +31,7 @@
 #include <QInputDialog>
 #include <QTreeWidget>
 #include <QHeaderView>
+#include <QScrollBar>
 #include <QDialogButtonBox>
 #include <QClipboard>
 #include <QLineEdit>
@@ -81,7 +82,7 @@ constexpr int kValidationCopyRole = Qt::UserRole + 1;
 constexpr int kValidationNidRole = Qt::UserRole + 2;
 constexpr int kValidationSectionRole = Qt::UserRole + 3;
 constexpr int kLoadedMapKindRole = Qt::UserRole + 20;
-constexpr int kLoadedMapPointerRole = Qt::UserRole + 21;
+constexpr int kLoadedMapPathRole = Qt::UserRole + 21;
 constexpr int kLoadedMapMpr = 1;
 constexpr int kLoadedMapMob = 2;
 
@@ -216,6 +217,14 @@ MainWindow::MainWindow(QWidget* parent) :
     filterLayout->addWidget(m_outlinerFilterEdit, 1);
     filterLayout->addWidget(m_outlinerFilterStatus);
     outlinerLayout->addLayout(filterLayout);
+    m_outlinerSelectionPath = new QLabel(outlinerContainer);
+    m_outlinerSelectionPath->setTextFormat(Qt::PlainText);
+    m_outlinerSelectionPath->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    m_outlinerSelectionPath->setStyleSheet(
+        "QLabel { background: #29424a; color: white; padding: 5px 7px; "
+        "border-left: 3px solid #32c8e6; }");
+    m_outlinerSelectionPath->hide();
+    outlinerLayout->addWidget(m_outlinerSelectionPath);
     m_ui->treeWidget->setParent(outlinerContainer);
     outlinerLayout->addWidget(m_ui->treeWidget, 1);
     m_outlinerDock = new QDockWidget(tr("Object Outliner"), this);
@@ -243,7 +252,16 @@ MainWindow::MainWindow(QWidget* parent) :
     {
         m_outlinerFilterStatus->setText(tr("%1 / %2").arg(visible).arg(total));
         m_outlinerFilterStatus->setToolTip(tr("%1 matching objects out of %2").arg(visible).arg(total));
+        updateOutlinerSelectionPath();
     });
+    connect(m_ui->treeWidget, &QTreeWidget::currentItemChanged,
+            this, [this](QTreeWidgetItem*, QTreeWidgetItem*) { updateOutlinerSelectionPath(); });
+    connect(m_ui->treeWidget->verticalScrollBar(), &QScrollBar::valueChanged,
+            this, [this](int) { updateOutlinerSelectionPath(); });
+    connect(m_ui->treeWidget, &QTreeWidget::itemExpanded,
+            this, [this](QTreeWidgetItem*) { updateOutlinerSelectionPath(); });
+    connect(m_ui->treeWidget, &QTreeWidget::itemCollapsed,
+            this, [this](QTreeWidgetItem*) { updateOutlinerSelectionPath(); });
     m_mapsBrowser = new CMapsBrowser(this);
     m_mapsDock = new QDockWidget(tr("Maps and Collections"), this);
     m_mapsDock->setObjectName("mapsAndCollectionsDock");
@@ -258,6 +276,7 @@ MainWindow::MainWindow(QWidget* parent) :
     m_loadedMapTree->header()->setSectionResizeMode(1, QHeaderView::Stretch);
     m_loadedMapTree->header()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
     m_loadedMapTree->setContextMenuPolicy(Qt::CustomContextMenu);
+    m_loadedMapTree->setSelectionMode(QAbstractItemView::ExtendedSelection);
     m_loadedMapDock = new QDockWidget(tr("Loaded Map"), this);
     m_loadedMapDock->setObjectName("loadedMapDock");
     m_loadedMapDock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
@@ -278,8 +297,7 @@ MainWindow::MainWindow(QWidget* parent) :
             m_pView->setLandscapeVisible(visible);
         else if(kind == kLoadedMapMob)
         {
-            CMob* mob = reinterpret_cast<CMob*>(
-                item->data(0, kLoadedMapPointerRole).toULongLong());
+            CMob* mob = m_pView->mob(item->data(0, kLoadedMapPathRole).toString());
             m_pView->setMobVisible(mob, visible);
         }
     });
@@ -290,8 +308,7 @@ MainWindow::MainWindow(QWidget* parent) :
         if(!item || !m_pView
            || item->data(0, kLoadedMapKindRole).toInt() != kLoadedMapMob)
             return;
-        CMob* mob = reinterpret_cast<CMob*>(
-            item->data(0, kLoadedMapPointerRole).toULongLong());
+        CMob* mob = m_pView->mob(item->data(0, kLoadedMapPathRole).toString());
         if(mob && mob != m_pView->currentMob())
             m_pView->changeCurrentMob(mob);
     });
@@ -301,19 +318,58 @@ MainWindow::MainWindow(QWidget* parent) :
         QTreeWidgetItem* item = m_loadedMapTree->itemAt(point);
         if(!item || item->data(0, kLoadedMapKindRole).toInt() != kLoadedMapMob)
             return;
-        CMob* mob = reinterpret_cast<CMob*>(
-            item->data(0, kLoadedMapPointerRole).toULongLong());
+        if(!item->isSelected())
+            m_loadedMapTree->setCurrentItem(item, 1,
+                QItemSelectionModel::ClearAndSelect);
+        QList<CMob*> selectedMobs;
+        for(QTreeWidgetItem* selectedItem : m_loadedMapTree->selectedItems())
+        {
+            if(!selectedItem || selectedItem->data(0, kLoadedMapKindRole).toInt() != kLoadedMapMob)
+                continue;
+            CMob* selectedMob = m_pView->mob(
+                selectedItem->data(0, kLoadedMapPathRole).toString());
+            if(selectedMob && !selectedMobs.contains(selectedMob))
+                selectedMobs.append(selectedMob);
+        }
+        CMob* mob = m_pView->mob(item->data(0, kLoadedMapPathRole).toString());
         if(!mob)
             return;
         QMenu menu(this);
         QAction* activate = menu.addAction(tr("Make Active"));
         activate->setEnabled(mob != m_pView->currentMob());
-        QAction* unload = menu.addAction(tr("Unload MOB"));
+        QAction* unload = menu.addAction(selectedMobs.size() > 1
+            ? tr("Unload %1 MOBs").arg(selectedMobs.size()) : tr("Unload MOB"));
         QAction* selected = menu.exec(m_loadedMapTree->viewport()->mapToGlobal(point));
         if(selected == activate)
             m_pView->changeCurrentMob(mob);
         else if(selected == unload)
-            m_pView->unloadMobDocument(mob);
+        {
+            QList<CMob*> dirty;
+            for(CMob* selectedMob : selectedMobs)
+                if(selectedMob && selectedMob->isDirty()) dirty.append(selectedMob);
+            bool proceed = true;
+            bool saveDirty = false;
+            if(!dirty.isEmpty())
+            {
+                QMessageBox prompt(QMessageBox::Question, tr("Unload MOBs"),
+                    tr("%1 selected MOB(s) have unsaved changes.").arg(dirty.size()),
+                    QMessageBox::NoButton, this);
+                QPushButton* saveAll = prompt.addButton(tr("Save All"), QMessageBox::AcceptRole);
+                QPushButton* discard = prompt.addButton(tr("Discard"), QMessageBox::DestructiveRole);
+                prompt.addButton(QMessageBox::Cancel);
+                prompt.exec();
+                proceed = prompt.clickedButton() != prompt.button(QMessageBox::Cancel);
+                saveDirty = prompt.clickedButton() == saveAll;
+                Q_UNUSED(discard);
+            }
+            if(proceed && saveDirty)
+                for(CMob* dirtyMob : dirty)
+                    if(!dirtyMob->save()) { proceed = false; break; }
+            if(proceed)
+                for(CMob* selectedMob : selectedMobs)
+                    if(selectedMob && m_pView->mobs().contains(selectedMob))
+                        if(!m_pView->unloadMobDocument(selectedMob, false)) break;
+        }
     });
     QWidget* validationWidget = new QWidget(this);
     QVBoxLayout* validationLayout = new QVBoxLayout(validationWidget);
@@ -2966,19 +3022,7 @@ void MainWindow::updateLoadedMapPanel()
     }
     root->setExpanded(true);
 
-    CMob* primaryMob = nullptr;
-    const QString mappedPrimaryName = QFileInfo(m_mapTestEntry.mobPath).fileName();
-    if(!mappedPrimaryName.isEmpty())
-        for(CMob* mob : m_pView->mobs())
-            if(mob && mob->filePath().fileName().compare(mappedPrimaryName,
-                    Qt::CaseInsensitive) == 0)
-            {
-                primaryMob = mob;
-                break;
-            }
-    if(!primaryMob && !m_pView->mobs().isEmpty())
-        primaryMob = m_pView->mobs().first();
-
+    QTreeWidgetItem* activeItem = nullptr;
     for(CMob* mob : m_pView->mobs())
     {
         if(!mob)
@@ -2987,28 +3031,79 @@ void MainWindow::updateLoadedMapPanel()
         item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
         item->setCheckState(0, m_pView->isMobVisible(mob)
                             ? Qt::Checked : Qt::Unchecked);
-        item->setText(1, mob->filePath().fileName());
+        item->setText(1, mob->filePath().fileName() + (mob->isDirty() ? " *" : ""));
+        QSet<CNode*> selectedNodes;
+        for(CNode* node : mob->nodes())
+            if(node && node->nodeState() == ENodeState::eSelect) selectedNodes.insert(node);
+        for(CNode* node : mob->logicNodes())
+            if(node && node->nodeState() == ENodeState::eSelect) selectedNodes.insert(node);
         QStringList states;
-        states.append(mob == primaryMob ? tr("Primary") : tr("Supplemental"));
         states.append(mob == m_pView->currentMob() ? tr("Active") : tr("Locked"));
-        if(mob->isDirty())
-            states.append(tr("Modified"));
+        if(!selectedNodes.isEmpty())
+            states.append(tr("Selected: %1").arg(selectedNodes.size()));
         if(!m_pView->isMobVisible(mob))
             states.append(tr("Hidden"));
         item->setText(2, states.join(", "));
-        item->setToolTip(1, mob->filePath().absoluteFilePath());
+        item->setToolTip(1, mob->filePath().absoluteFilePath()
+            + (selectedNodes.isEmpty() ? QString()
+               : tr("\n%1 selected object(s)").arg(selectedNodes.size())));
         item->setData(0, kLoadedMapKindRole, kLoadedMapMob);
-        item->setData(0, kLoadedMapPointerRole,
-                      QVariant::fromValue<qulonglong>(reinterpret_cast<qulonglong>(mob)));
+        item->setData(0, kLoadedMapPathRole, mob->filePath().absoluteFilePath());
         if(mob == m_pView->currentMob())
         {
+            activeItem = item;
             QFont font = item->font(1);
             font.setBold(true);
             item->setFont(1, font);
         }
+        if(!selectedNodes.isEmpty())
+        {
+            const QColor background = mob == m_pView->currentMob()
+                ? QColor(20, 75, 88) : QColor(92, 64, 12);
+            for(int column = 1; column < 3; ++column)
+            {
+                item->setBackground(column, background);
+                item->setForeground(column, QColor(Qt::white));
+            }
+        }
     }
+    if(activeItem)
+        m_loadedMapTree->setCurrentItem(activeItem, 1,
+            QItemSelectionModel::ClearAndSelect);
     m_loadedMapTree->resizeColumnToContents(0);
     updateOperationAvailability();
+}
+
+void MainWindow::updateOutlinerSelectionPath()
+{
+    if(!m_outlinerSelectionPath || !m_ui || !m_ui->treeWidget)
+        return;
+    QTreeWidgetItem* item = m_ui->treeWidget->currentItem();
+    if(!item || !item->parent())
+    {
+        m_outlinerSelectionPath->hide();
+        return;
+    }
+
+    QStringList path;
+    QTreeWidgetItem* root = item;
+    for(QTreeWidgetItem* part = item; part; part = part->parent())
+    {
+        path.prepend(part->text(0));
+        root = part;
+    }
+    const QRect rootRect = m_ui->treeWidget->visualItemRect(root);
+    if(!root->isHidden() && rootRect.isValid()
+       && rootRect.intersects(m_ui->treeWidget->viewport()->rect()))
+    {
+        m_outlinerSelectionPath->hide();
+        return;
+    }
+
+    const QString hierarchy = path.join(QString::fromUtf8(" \u203a "));
+    m_outlinerSelectionPath->setText(hierarchy);
+    m_outlinerSelectionPath->setToolTip(tr("Selected object hierarchy: %1").arg(hierarchy));
+    m_outlinerSelectionPath->show();
 }
 
 void MainWindow::updateDocumentActionAvailability()

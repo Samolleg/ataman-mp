@@ -5,7 +5,7 @@ work is ordered from the newest planned minor line to the oldest completed one.
 An item is checked only after its implementation has landed and received the
 stated validation. Completed code should carry a commit, test, or release link.
 
-Current development line: `0.2.1-alpha.18` focused closed testing.
+Current development line: `0.2.1-alpha.19` focused closed testing.
 
 <details open>
 <summary><strong>General wishlist — not assigned to a release</strong></summary>
@@ -273,7 +273,7 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
 
 ### Current 0.2.x status
 
-- **Current tester build:** `0.2.1-alpha.18`, adding the dockable Loaded Map
+- **Current tester build:** `0.2.1-alpha.19`, hardening the dockable Loaded Map
   tree, explicit active/locked MOB ownership, independent MPR/MOB visibility,
   safe targeted MOB unload, all-loaded-MOB outliner grouping, locked-source
   inspection/copying, Ctrl+T owner activation, and validated numeric component
@@ -281,7 +281,9 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
   Implementations: [`517cc1f`](https://github.com/Ilufus/ei-mapper-endurance/commit/517cc1f),
   [`90eb899`](https://github.com/Ilufus/ei-mapper-endurance/commit/90eb899),
   [`8a0badd`](https://github.com/Ilufus/ei-mapper-endurance/commit/8a0badd).
-  Alpha.17's UI/lifecycle fixes remain tester-confirmed; alpha.18 needs the
+  Alpha.19 fixes the unload-time stale-MOB lookup found in alpha.18 and adds
+  explicit selection ownership, persistent cross-MOB selection, locked-MOB
+  viewport colouring, outliner ancestry, and multi-row unload. It needs the
   focused Loaded Map interaction pass before the consolidated RC runtime matrix.
 - **Alpha.13 validation/UI changes:** validation no longer performs expensive automatic
   replacement-ID scans for fully shared ranges, map switches refresh their

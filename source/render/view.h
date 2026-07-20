@@ -98,7 +98,7 @@ public:
     void setMobVisible(CMob* mob, bool visible);
     bool isLandscapeVisible() const { return m_landscapeVisible; }
     void setLandscapeVisible(bool visible);
-    bool unloadMobDocument(CMob* mob);
+    bool unloadMobDocument(CMob* mob, bool promptForSave = true);
     void drawSelectFrame(QRect& rect);
     void pickObject(QPoint mousePos, bool bAddToSelect);
     void pickObject(const QRect& rect, bool bAddToSelect);
