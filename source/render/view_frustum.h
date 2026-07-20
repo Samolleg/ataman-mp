@@ -33,6 +33,21 @@ public:
         return true;
     }
 
+    bool intersectsAabb(const QVector3D& minimum, const QVector3D& maximum) const
+    {
+        for(const QVector4D& p : m_planes)
+        {
+            const QVector3D positive(
+                p.x() >= 0.0f ? maximum.x() : minimum.x(),
+                p.y() >= 0.0f ? maximum.y() : minimum.y(),
+                p.z() >= 0.0f ? maximum.z() : minimum.z());
+            if(p.x() * positive.x() + p.y() * positive.y()
+                    + p.z() * positive.z() + p.w() < 0.0f)
+                return false;
+        }
+        return true;
+    }
+
 private:
     static QVector4D plane(const QMatrix4x4& matrix, int baseRow,
                            int axisRow, float axisSign)

@@ -15,6 +15,7 @@
 
 #include "types.h"
 #include "select_window.h"
+#include "spatial_grid.h"
 
 class QLineEdit;
 class CKeyManager;
@@ -174,6 +175,10 @@ private:
     bool closeAllMobScriptWindows();
     bool confirmScriptReferencedObjectIds(const QVector<uint>& objectIds,
                                           const QString& operation);
+    void rebuildSpatialIndices();
+    QVector<CNode*> spatiallyVisibleNodes(CMob* mob, const CViewFrustum* frustum,
+                                          SSpatialQueryStats* stats);
+    QString sceneSourceFingerprint();
 
 
 public slots:
@@ -250,6 +255,11 @@ private:
     QSharedPointer<CPreviewTile> m_pPreviewTile;
     CLandscape* m_pLand;
     short m_tileBrushCommandId;
+    QHash<CMob*, QSharedPointer<CSpatialGrid<CNode*>>> m_spatialIndices;
+    QHash<CMob*, QVector<CNode*>> m_spatialOverflowNodes;
+    bool m_spatialIndexDirty;
+    bool m_sceneFingerprintDirty;
+    QString m_sceneFingerprint;
 };
 
 #endif // MYGLWIDGET_H

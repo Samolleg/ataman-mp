@@ -6,6 +6,7 @@
 #include "math_utils.h"
 #include "log.h"
 #include "utils.h"
+#include "view_frustum.h"
 
 static const uint secSignature = 0xcf4bf774;
 static const int nVertex = 33; // vertices count by 1 side of sector
@@ -445,6 +446,42 @@ void CSector::generateVertexDataFromTile()
 void CSector::updatePosition()
 {
     m_modelMatrix.translate(QVector3D(m_index.x*32.0f, m_index.y*32.0f, .0f));
+    QVector3D minimum;
+    QVector3D maximum;
+    bool initialized = false;
+    const auto includeVertices = [&minimum, &maximum, &initialized](const QVector<SVertexData>& vertices)
+    {
+        for(const SVertexData& vertex : vertices)
+        {
+            if(!initialized)
+            {
+                minimum = maximum = vertex.position;
+                initialized = true;
+            }
+            else
+            {
+                minimum.setX(qMin(minimum.x(), vertex.position.x()));
+                minimum.setY(qMin(minimum.y(), vertex.position.y()));
+                minimum.setZ(qMin(minimum.z(), vertex.position.z()));
+                maximum.setX(qMax(maximum.x(), vertex.position.x()));
+                maximum.setY(qMax(maximum.y(), vertex.position.y()));
+                maximum.setZ(qMax(maximum.z(), vertex.position.z()));
+            }
+        }
+    };
+    includeVertices(m_arrLandVrtData);
+    includeVertices(m_arrWaterVrtData);
+    const QVector3D sectorOffset(float(m_index.x) * 32.0f, float(m_index.y) * 32.0f, 0.0f);
+    if(initialized)
+    {
+        m_boundsCenter = (minimum + maximum) * 0.5f + sectorOffset;
+        m_boundsRadius = (maximum - minimum).length() * 0.5f;
+    }
+    else
+    {
+        m_boundsCenter = sectorOffset + QVector3D(16.0f, 16.0f, 0.0f);
+        m_boundsRadius = 23.0f;
+    }
     m_vertexBuf.bind();
     m_vertexBuf.allocate(m_arrLandVrtData.data(), m_arrLandVrtData.count()*int(sizeof(SVertexData)));
     m_vertexBuf.release();
@@ -587,6 +624,11 @@ void CSector::drawWater(QOpenGLShaderProgram *program)
         ++performance.counters().terrainDrawCalls;
         performance.counters().triangles += quint64(m_arrWaterVrtData.count() / 2);
     }
+}
+
+bool CSector::intersectsFrustum(const CViewFrustum& frustum) const
+{
+    return frustum.intersectsSphere(m_boundsCenter, m_boundsRadius);
 }
 
 bool CSector::projectPt(QVector3D& point)

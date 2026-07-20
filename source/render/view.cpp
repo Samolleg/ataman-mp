@@ -8,6 +8,7 @@
 #include <QPair>
 #include <QRandomGenerator>
 #include <QMessageBox>
+#include <QCryptographicHash>
 
 #include "view.h"
 #include "camera.h"
@@ -71,6 +72,8 @@ CView::CView(QWidget *parent, const QGLWidget *pShareWidget) : QGLWidget(parent,
   ,m_bDrawWater(true)
   ,m_bPreviewTile(false)
   ,m_tileBrushCommandId(0)
+  ,m_spatialIndexDirty(true)
+  ,m_sceneFingerprintDirty(true)
 {
     setFocusPolicy(Qt::ClickFocus);
 
@@ -161,6 +164,11 @@ void CView::attach(CSettings* pSettings, QTableWidget* pParam, QUndoStack* pStac
     connect(m_pUndoStack, &QUndoStack::indexChanged, this, [this](int)
     {
         refreshMobDirtyStates();
+        m_spatialIndexDirty = true;
+    });
+    connect(this, &CView::selectionChanged, this, [this]()
+    {
+        m_spatialIndexDirty = true;
     });
 
     m_pProgress = pProgress;
@@ -176,7 +184,11 @@ void CView::attach(CSettings* pSettings, QTableWidget* pParam, QUndoStack* pStac
 
     // MOB-only workspaces need the same responsive viewport as terrain-backed
     // workspaces. Previously this timer was started only by loadLandscape().
-    m_timer->setInterval(15);
+    // Swap interval controls normal display pacing. A zero-interval precise
+    // timer removes the former artificial ~67 FPS ceiling and lets benchmark
+    // mode measure uncapped throughput.
+    m_timer->setTimerType(Qt::PreciseTimer);
+    m_timer->setInterval(0);
     m_timer->start();
 }
 
@@ -184,6 +196,7 @@ void CView::refreshAfterResourceSetup()
 {
     CObjectList::getInstance()->refreshConfiguredSources();
     CTextureList::getInstance()->refreshConfiguredSources();
+    m_spatialIndexDirty = true;
     updateGeometry();
     if(width() > 0 && height() > 0)
         resizeGL(width(), height());
@@ -194,6 +207,90 @@ void CView::refreshAfterResourceSetup()
 void CView::updateWindow()
 {
     updateGL();
+}
+
+void CView::rebuildSpatialIndices()
+{
+    m_spatialIndices.clear();
+    m_spatialOverflowNodes.clear();
+    for(CMob* mob : m_aMob)
+    {
+        QSharedPointer<CSpatialGrid<CNode*>> grid(new CSpatialGrid<CNode*>(32.0f));
+        QVector<CNode*> overflow;
+        for(CNode* node : mob->nodes())
+        {
+            if(!node || node->isMarkDeleted() || node->nodeState() == ENodeState::eHidden)
+                continue;
+            const bool selected = node->nodeState() == ENodeState::eSelect;
+            CBox bounds = node->getBBox();
+            const QVector3D center = bounds.center() + node->drawPosition();
+            const float radius = bounds.radius();
+            const bool invalid = !bounds.isInit() || !qIsFinite(center.x())
+                || !qIsFinite(center.y()) || !qIsFinite(center.z()) || !qIsFinite(radius);
+            bool oversized = false;
+            if(!invalid)
+            {
+                const int minX = qFloor((center.x() - radius) / 32.0f);
+                const int maxX = qFloor((center.x() + radius) / 32.0f);
+                const int minY = qFloor((center.y() - radius) / 32.0f);
+                const int maxY = qFloor((center.y() + radius) / 32.0f);
+                oversized = qint64(maxX - minX + 1) * qint64(maxY - minY + 1) > 64;
+            }
+            if(invalid || oversized)
+                overflow.append(node);
+            if(selected || invalid)
+                grid->insert(node, node->drawPosition(), 0.0f, true);
+            else
+                grid->insert(node, center, radius);
+        }
+        m_spatialIndices.insert(mob, grid);
+        m_spatialOverflowNodes.insert(mob, overflow);
+        if(!overflow.isEmpty())
+            ei::log(eLogWarning, QString("Spatial grid retained %1 diagnostic overflow nodes for %2")
+                    .arg(overflow.size()).arg(mob->mobName()));
+    }
+    m_spatialIndexDirty = false;
+}
+
+QVector<CNode*> CView::spatiallyVisibleNodes(CMob* mob, const CViewFrustum* frustum,
+                                             SSpatialQueryStats* stats)
+{
+    if(m_spatialIndexDirty)
+        rebuildSpatialIndices();
+    const QSharedPointer<CSpatialGrid<CNode*>> grid = m_spatialIndices.value(mob);
+    if(!grid)
+    {
+        QVector<CNode*> nodes;
+        if(mob)
+            for(CNode* node : mob->nodes())
+                nodes.append(node);
+        return nodes;
+    }
+    return grid->query(frustum, stats);
+}
+
+QString CView::sceneSourceFingerprint()
+{
+    if(!m_sceneFingerprintDirty)
+        return m_sceneFingerprint;
+    QCryptographicHash sceneHash(QCryptographicHash::Sha256);
+    const auto addFile = [&sceneHash](const QFileInfo& info)
+    {
+        sceneHash.addData(info.fileName().toLower().toUtf8());
+        QFile file(info.absoluteFilePath());
+        QCryptographicHash fileHash(QCryptographicHash::Sha256);
+        if(file.open(QIODevice::ReadOnly))
+            while(!file.atEnd())
+                fileHash.addData(file.read(1024 * 1024));
+        sceneHash.addData(fileHash.result());
+    };
+    if(m_pLand && m_pLand->isMprLoad())
+        addFile(m_pLand->filePath());
+    for(CMob* mob : m_aMob)
+        addFile(mob->filePath());
+    m_sceneFingerprint = QString::fromLatin1(sceneHash.result().toHex());
+    m_sceneFingerprintDirty = false;
+    return m_sceneFingerprint;
 }
 
 void CView::initShaders()
@@ -290,7 +387,8 @@ void CView::paintGL()
     makeCurrent();
     const COptBool* statsOption = m_pSettings
         ? dynamic_cast<const COptBool*>(m_pSettings->opt("renderPerformanceCounters")) : nullptr;
-    const bool collectStats = statsOption && statsOption->value();
+    const bool collectStats = (statsOption && statsOption->value())
+        || qApp->property("renderBenchmark").toBool();
     RenderPerformanceContext& performance = RenderPerformanceContext::instance();
     performance.beginFrame(collectStats);
     if(collectStats && m_gpuTimer && m_gpuTimerPending && m_gpuTimer->isResultAvailable())
@@ -320,29 +418,65 @@ void CView::draw()
     m_cam->getLocation(cameraPosition, cameraPivot, cameraRotation);
     const COptBool* animationOption = m_pSettings
         ? dynamic_cast<const COptBool*>(m_pSettings->opt("animateUnits")) : nullptr;
+    const bool animationEnabled = !animationOption || animationOption->value();
     AnimationFrameContext::instance().beginFrame(cameraPosition,
-        QDateTime::currentMSecsSinceEpoch(), !animationOption || animationOption->value());
+        QDateTime::currentMSecsSinceEpoch(), animationEnabled);
     const COptBool* cullingOption = m_pSettings
         ? dynamic_cast<const COptBool*>(m_pSettings->opt("frustumCulling")) : nullptr;
     const bool cullingEnabled = !cullingOption || cullingOption->value();
     const CViewFrustum frustum(m_projection * camMatrix);
-    const auto visible = [&frustum, cullingEnabled](CNode* node)
+    const COptBool* drawLogicOption = m_pSettings
+        ? dynamic_cast<const COptBool*>(m_pSettings->opt("drawLogic")) : nullptr;
+    const COptBool* drawHelpOption = m_pSettings
+        ? dynamic_cast<const COptBool*>(m_pSettings->opt("drawHelp")) : nullptr;
+    const bool drawLogic = drawLogicOption && drawLogicOption->value();
+    const bool drawHelp = drawHelpOption && drawHelpOption->value();
+    const bool logicMode = CScene::getInstance()->getMode() == eEditModeLogic;
+    const bool traverseHelpers = drawLogic || drawHelp || logicMode;
+
+    RenderPerformanceContext& performance = RenderPerformanceContext::instance();
+    if(performance.collecting())
     {
-        RenderPerformanceContext& performance = RenderPerformanceContext::instance();
+        const COptString* profileOption = m_pSettings
+            ? dynamic_cast<const COptString*>(m_pSettings->opt("resourceProfile")) : nullptr;
+        SRenderFrameMetadata metadata;
+        metadata.viewportWidth = m_width;
+        metadata.viewportHeight = m_height;
+        metadata.cameraPosition = cameraPosition;
+        metadata.cameraPivot = cameraPivot;
+        metadata.cameraRotation = cameraRotation;
+        metadata.profileId = profileOption ? profileOption->value() : QString();
+        metadata.mapName = m_pLand && m_pLand->isMprLoad()
+            ? m_pLand->filePath().baseName()
+            : (m_activeMob ? m_activeMob->filePath().baseName() : QString());
+        metadata.contentFingerprint = sceneSourceFingerprint();
+        metadata.benchmarkMode = qApp->property("renderBenchmark").toBool();
+        metadata.animationEnabled = animationEnabled;
+        metadata.landEnabled = m_bDrawLand;
+        metadata.waterEnabled = m_bDrawWater;
+        metadata.logicEnabled = drawLogic;
+        metadata.helpEnabled = drawHelp;
+        metadata.frustumCullingEnabled = cullingEnabled;
+        performance.setFrameMetadata(metadata);
+    }
+
+    const auto visibleNodes = [this, &frustum, cullingEnabled, &performance](CMob* mob)
+    {
+        SSpatialQueryStats stats;
+        const QVector<CNode*> result = spatiallyVisibleNodes(
+            mob, cullingEnabled ? &frustum : nullptr, &stats);
         if(performance.collecting())
-            ++performance.counters().nodesVisited;
-        if(!node || !cullingEnabled || node->nodeState() == ENodeState::eSelect)
-            return true;
-        CBox bounds = node->getBBox();
-        if(!bounds.isInit())
-            return true;
-        const bool isVisible = frustum.intersectsSphere(bounds.center() + node->drawPosition(),
-                                                         bounds.radius());
-        if(!isVisible && node->nodeType() == ENodeType::eUnit)
-            AnimationFrameContext::instance().counters().skippedOffscreen++;
-        if(!isVisible && performance.collecting())
-            ++performance.counters().nodesCulled;
-        return isVisible;
+        {
+            performance.counters().nodesVisited += stats.entriesTested;
+            const QSharedPointer<CSpatialGrid<CNode*>> grid = m_spatialIndices.value(mob);
+            if(grid)
+                performance.counters().nodesCulled += qMax(0, grid->entryCount() - result.size());
+            performance.counters().spatialCellsTested += stats.cellsTested;
+            performance.counters().spatialCellsVisible += stats.cellsVisible;
+            performance.counters().spatialCandidates += stats.candidates;
+            performance.counters().spatialOverflowEntries += m_spatialOverflowNodes.value(mob).size();
+        }
+        return result;
     };
     // Set modelview-projection matrix
 
@@ -363,7 +497,7 @@ void CView::draw()
         drawTilePreview(&m_landProgram);
 
     if (m_pLand && m_pLand->isMprLoad() && m_bDrawLand)
-        m_pLand->draw(&m_landProgram);
+        m_pLand->draw(&m_landProgram, cullingEnabled ? &frustum : nullptr);
 
     // Bind shader pipeline for use
     if (!m_program.bind())
@@ -379,49 +513,59 @@ void CView::draw()
             if(mob->mobName() == m_activeMob->mobName())
                 continue; //skip drawing active mob
 
-            for (auto& node: mob->nodes())
+            const QVector<CNode*> candidates = visibleNodes(mob);
+            for(CNode* node : candidates)
             {
-                if(visible(node))
+                node->drawObjectVisual(false, &m_program);
+                if(performance.collecting())
+                    ++performance.counters().nodesSubmitted;
+                if(!traverseHelpers && node->nodeState() == ENodeState::eSelect)
                 {
-                    node->drawObjectVisual(false, &m_program);
-                    if(RenderPerformanceContext::instance().collecting())
-                        ++RenderPerformanceContext::instance().counters().nodesSubmitted;
+                    node->drawLogicVisual(false, &m_program);
+                    if(performance.collecting())
+                        ++performance.counters().logicSubmissions;
                 }
-                node->drawLogicVisual(false, &m_program);
-                if(RenderPerformanceContext::instance().collecting())
-                    ++RenderPerformanceContext::instance().counters().logicSubmissions;
             }
+            if(traverseHelpers)
+                for(CNode* node : mob->nodes())
+                {
+                    node->drawLogicVisual(false, &m_program);
+                    if(performance.collecting())
+                        ++performance.counters().logicSubmissions;
+                }
         }
 
         // Draw the active MOB in two passes so a selected duplicate remains
         // visible when it occupies exactly the same depth as its source.
-        for(auto& node : m_activeMob->nodes())
+        const QVector<CNode*> activeCandidates = visibleNodes(m_activeMob);
+        for(CNode* node : activeCandidates)
         {
             if(node->nodeState() != ENodeState::eSelect)
             {
-                if(visible(node))
-                {
-                    node->drawObjectVisual(true, &m_program);
-                    if(RenderPerformanceContext::instance().collecting())
-                        ++RenderPerformanceContext::instance().counters().nodesSubmitted;
-                }
-                node->drawLogicVisual(true, &m_program);
-                if(RenderPerformanceContext::instance().collecting())
-                    ++RenderPerformanceContext::instance().counters().logicSubmissions;
+                node->drawObjectVisual(true, &m_program);
+                if(performance.collecting())
+                    ++performance.counters().nodesSubmitted;
             }
         }
+        if(traverseHelpers)
+            for(CNode* node : m_activeMob->nodes())
+                if(node->nodeState() != ENodeState::eSelect)
+                {
+                    node->drawLogicVisual(true, &m_program);
+                    if(performance.collecting())
+                        ++performance.counters().logicSubmissions;
+                }
         glDepthFunc(GL_LEQUAL);
-        for(auto& node : m_activeMob->nodes())
+        for(CNode* node : activeCandidates)
         {
             if(node->nodeState() == ENodeState::eSelect)
             {
                 node->drawObjectVisual(true, &m_program);
                 node->drawLogicVisual(true, &m_program);
-                if(RenderPerformanceContext::instance().collecting())
+                if(performance.collecting())
                 {
-                    ++RenderPerformanceContext::instance().counters().nodesVisited;
-                    ++RenderPerformanceContext::instance().counters().nodesSubmitted;
-                    ++RenderPerformanceContext::instance().counters().logicSubmissions;
+                    ++performance.counters().nodesSubmitted;
+                    ++performance.counters().logicSubmissions;
                 }
             }
         }
@@ -435,7 +579,7 @@ void CView::draw()
             close();
 
         m_landProgram.setUniformValue("transparency", 0.3f);
-        m_pLand->drawWater(&m_landProgram);
+        m_pLand->drawWater(&m_landProgram, cullingEnabled ? &frustum : nullptr);
         m_landProgram.setUniformValue("transparency", 0.0f);
     }
 
@@ -472,6 +616,8 @@ void CView::loadLandscape(const QFileInfo& filePath)
     }
     for(CMob* mob : m_aMob)
         mob->reprojectForCurrentTerrain();
+    m_spatialIndexDirty = true;
+    m_sceneFingerprintDirty = true;
     emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMpr, filePath.baseName());
     emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMprDirtyFlag, m_pLand->isDirty() ? "*" : "");
     m_lastModifiedLand = filePath.lastModified();
@@ -509,6 +655,8 @@ void CView::unloadLand()
     m_pLand->unloadMpr();
     for(CMob* mob : m_aMob)
         mob->reprojectForCurrentTerrain();
+    m_spatialIndexDirty = true;
+    m_sceneFingerprintDirty = true;
     emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMpr, "");
     m_pPreviewTile.clear();
     ei::log(eLogInfo, "Landscape unloaded");
@@ -846,11 +994,12 @@ void CView::logOpenGlData()
     const GLubyte * version = glGetString(GL_VERSION);
     const GLubyte * vendor = glGetString(GL_VENDOR);
     const GLubyte * renderer = glGetString(GL_RENDERER);
-    ei::log(eLogInfo, QString("OpenGL module:%1 version:%2 vendor:%3 renderer:%4")
+    ei::log(eLogInfo, QString("OpenGL module:%1 version:%2 vendor:%3 renderer:%4 swap-interval-request:%5")
             .arg(QOpenGLContext::openGLModuleType() == QOpenGLContext::LibGLES ? "GLES/ANGLE" : "Desktop")
             .arg(version ? reinterpret_cast<const char*>(version) : "unavailable")
             .arg(vendor ? reinterpret_cast<const char*>(vendor) : "unavailable")
-            .arg(renderer ? reinterpret_cast<const char*>(renderer) : "unavailable"));
+            .arg(renderer ? reinterpret_cast<const char*>(renderer) : "unavailable")
+            .arg(format().swapInterval()));
 }
 
 void CView::checkOpenGlError()
@@ -1002,18 +1151,23 @@ void CView::pickObject(const QRect &rect, bool bAddToSelect)
     //if(m_operationType == EOperationTypeObjects)
     //for(const auto& mob : m_aMob)
     //foreach(const auto& mob, m_aMob)
-    foreach (auto& node, CScene::getInstance()->getMode() == eEditModeLogic ? m_activeMob->logicNodes() : m_activeMob->nodes())
+    const bool logicPicking = CScene::getInstance()->getMode() == eEditModeLogic;
+    const QVector<CNode*> spatialCandidates = logicPicking
+        ? QVector<CNode*>()
+        : spatiallyVisibleNodes(m_activeMob, cullingEnabled ? &frustum : nullptr, nullptr);
+    const QList<CNode*>& legacyCandidates = logicPicking
+        ? m_activeMob->logicNodes() : m_activeMob->nodes();
+    const auto drawCandidate = [this](CNode* node)
     {
-        bool drawNode = true;
-        if(cullingEnabled && node && node->nodeState() != ENodeState::eSelect)
-        {
-            CBox bounds = node->getBBox();
-            drawNode = !bounds.isInit() || frustum.intersectsSphere(
-                bounds.center() + node->drawPosition(), bounds.radius());
-        }
-        if(drawNode)
+        if(node)
             node->drawSelect(&m_selectProgram);
-    }
+    };
+    if(logicPicking)
+        for(CNode* node : legacyCandidates)
+            drawCandidate(node);
+    else
+        for(CNode* node : spatialCandidates)
+            drawCandidate(node);
 
     QVector<SColor> aColor;
     getColorFromRect(rect, aColor);
@@ -1124,6 +1278,8 @@ void CView::loadMob(QFileInfo &filePath)
     ei::log(eLogInfo, QString("Preloaded visual resources for %1 units during MOB load in %2 ms")
             .arg(preloadedUnits).arg(preloadTimer.elapsed()));
     m_aMob.append(pMob);
+    m_spatialIndexDirty = true;
+    m_sceneFingerprintDirty = true;
     m_scriptWorkspaces->registerMob(pMob);
     changeCurrentMob(pMob);
 }
@@ -1218,6 +1374,8 @@ void CView::unloadActiveMob()
         delete pMob;
         break;
     }
+    m_spatialIndexDirty = true;
+    m_sceneFingerprintDirty = true;
 
     if(!m_aMob.isEmpty())
         changeCurrentMob(m_aMob.back());
@@ -1401,6 +1559,8 @@ void CView::unloadMob(QString mobName)
             }
         }
     }
+    m_spatialIndexDirty = true;
+    m_sceneFingerprintDirty = true;
 
     if(!m_aMob.isEmpty())
         changeCurrentMob(m_aMob.back());

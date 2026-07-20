@@ -1,4 +1,4 @@
-# Rendering pipeline audit and 60 FPS contract
+# Rendering pipeline audit and performance contract
 
 ## Outcome
 
@@ -8,23 +8,25 @@ main performance risk in a large scene is therefore not the polygon count of an
 Evil Islands asset. It is the number of objects and parts visited, draw calls,
 texture and buffer state changes, and duplicated GPU resources.
 
-The first audit increment adds opt-in rolling CPU/GPU counters and removes two
-provably redundant costs: sequential FIG triangles no longer allocate and bind
-identity index buffers, and adjacent parts of an object no longer rebind the
-same texture. This is measurement and low-risk cleanup, not a claim that the
-60 FPS target has already been reached.
+The audit increment added rolling CPU/GPU counters and removed two provably
+redundant costs: sequential FIG triangles no longer allocate and bind identity
+index buffers, and adjacent parts of an object no longer rebind the same
+texture. The visibility increment now removes the fixed 15 ms scheduler cap,
+culls terrain sectors, and submits MOB objects through a deterministic 32-unit
+spatial grid. This remains the first stage of the renderer replacement, not a
+claim that the final performance target has been reached.
 
 ## Current frame
 
 | Stage | Current implementation | Existing optimization | Remaining cost |
 | --- | --- | --- | --- |
-| Scheduling | A viewport timer requests a frame every 15 ms | Unit poses have distance and visibility tiers | The viewport redraws even when a static scene has not changed |
-| Scene traversal | Every MOB node is visited on the CPU | Object bounding spheres can be frustum culled | No spatial index; off-screen objects still incur traversal and bounds work |
-| Terrain | Every loaded sector is submitted | Terrain is split into sectors | No sector-frustum rejection and one draw per land/water sector |
+| Scheduling | A precise zero-interval request loop renders continuously | Normal mode requests display VSync; `--render-benchmark` requests swap interval 0 | Driver presentation behavior must be confirmed in runtime logs |
+| Scene traversal | Each MOB has a deterministic 32-unit spatial grid | Visible cells and object bounds are frustum tested; selected objects stay conservative | Render-item queues and batching are not implemented yet |
+| Terrain | Land and water sectors are frustum rejected | Terrain is already split into 32-unit sectors | Visible sectors still issue one draw each |
 | Mesh storage | Each object owns copied `CPart` vertex buffers | Parsed figures and textures are cached | Identical static instances do not share immutable GPU meshes |
 | Object submission | Each visible part sets attributes and draws | Repeated textures within one object are now coalesced | No VAO reuse, render queue, material sorting, batching, or instancing |
 | Rasterization | OpenGL shaders, VBOs, textures, depth test | GPU executes vertex/fragment work | Blending and alpha testing are globally enabled; back-face culling is disabled |
-| Selection/helpers | Separate selection and logic-helper passes | Object geometry is culled in normal visual passes | Logic helpers are traversed independently and state changes are immediate |
+| Selection/helpers | Separate selection and logic-helper passes | Picking reuses spatial visibility; selected/moving nodes remain conservative | Enabled logic mode intentionally retains full helper traversal |
 | Resources | Figure, texture, archive-index, and miss caches exist | Unit visual preload avoids many first-view loads | CPU decode and GUI-thread GL upload are not yet bounded asynchronous phases |
 
 ## Instrumentation
@@ -33,11 +35,20 @@ Enable **Settings > Render > Log render performance counters**. Every two
 seconds the log reports:
 
 - observed FPS;
-- average and maximum CPU frame submission time;
+- average, 95th-percentile, and maximum CPU frame submission time;
 - asynchronous GPU elapsed time when timer queries are supported;
-- visited, culled, and submitted nodes;
+- viewport, camera pose, profile/map identity, and source-content hash;
+- visited, culled, submitted, spatial-cell, candidate, and overflow counts;
 - logic traversal calls;
-- draw calls, terrain draws, triangles, and texture binds.
+- visible/culled/tested terrain sectors;
+- draw calls, triangles, texture binds, and reserved queue/instance/shared-mesh
+  counters used by later stages.
+
+`--render-benchmark` enables counters automatically, requests VSync off before
+the first OpenGL widget is created, and writes `logs/render-benchmark.json`.
+That JSON is a reproducible benchmark definition: profile, map, combined input
+hash, viewport, camera position/pivot/rotation, render toggles, timings, and
+submission averages. It embeds no game resources.
 
 GPU timing is polled without blocking the render thread. Unsupported timer
 queries produce a warning and leave the CPU counters usable. Measurements must
@@ -46,10 +57,14 @@ before and after an optimization.
 
 ## Acceptance contract
 
-The target is at least 60 FPS after warm-up on a modern supported machine in
-every shipped Base and JMV scene. A frame has 16.67 ms at 60 Hz; implementation
-work should target at most 12 ms typical frame time and at most 16.67 ms at the
-95th percentile so editor UI and driver variance have headroom.
+The high-end target is at least 200 FPS after warm-up at 3840 x 2160 on the
+Ryzen 7 9800X3D + RTX 5080 control machine in the densest useful `gz18h` view,
+with unit animation enabled. CPU and GPU averages must be at most 5 ms and
+95th percentiles at most 6 ms. This is measured in uncapped benchmark mode;
+normal editing is display-synchronized (currently 143 Hz).
+
+The low-spec target is at least 60 FPS at 1920 x 1080 on a named modern
+low-spec machine. It cannot be claimed until such a device is tested.
 
 Acceptance runs cover the largest known scenes with a static camera and while
 moving the camera, with units animated and with representative editor helpers.
@@ -59,30 +74,53 @@ which side is limiting the frame.
 
 ## Optimization sequence
 
-1. **Measure and remove redundant work.** Keep the counters, remove identity
-   index buffers, coalesce safe texture/state changes, and add terrain-sector
-   visibility counts. Establish reproducible heavy-map baselines.
-2. **Share immutable meshes.** Cache one GPU mesh/VAO for equivalent FIG
-   geometry and let object instances carry only transforms, appearance choices,
-   and animation pose data. Do not duplicate VBOs per static instance.
-3. **Index the scene spatially.** Build a map-owned grid or BVH so the renderer
-   visits visible cells instead of every MOB node. Cull terrain sectors using
-   the same camera frustum.
-4. **Build explicit render queues.** Separate opaque, cutout, transparent,
+1. **Visibility (implemented; runtime validation pending).** Use continuous
+   VSync/benchmark scheduling, reproducible counters, terrain-sector culling,
+   the MOB spatial grid, conservative selection handling, and helper gating.
+2. **Build explicit render queues and shared meshes.** Separate opaque, cutout, transparent,
    helper, and selection work. Sort opaque/cutout draws by pipeline, material,
-   and shared mesh; sort genuine transparency back-to-front. Stop enabling
-   blending for opaque work.
-5. **Batch and instance static objects.** Issue instanced draws for matching
+   and shared mesh; sort genuine transparency back-to-front. Cache one GPU
+   mesh/VAO for equivalent immutable FIG geometry and stop enabling blending
+   for verified opaque work.
+3. **Batch and instance static objects.** Issue instanced draws for matching
    mesh/material entries inside visible spatial cells. Keep a non-instanced
    compatibility path and a separate dynamic queue for animated units.
-6. **Bound resource work.** Perform archive lookup and CPU decode off the GUI
+4. **Bound resource work.** Perform archive lookup and CPU decode off the GUI
    thread; upload to OpenGL in bounded batches during map load. Retain explicit
    placeholders and diagnostics for failures.
-7. **Redraw on demand where possible.** Static, inactive views need not render
-   continuously. Animated or interactive views continue at the target cadence.
 
 Each phase must retain selection-pass equivalence, diagnostics, profile
 isolation, and visual regression cases before the next phase begins.
+
+## Visibility-build runtime validation
+
+Use the packaged launchers for normal VSync operation and the uncapped
+benchmark launcher. Do not modify any map or resource merely to run a test.
+
+1. Open JMV `gz18h` at 3840 x 2160, enable unit animation and performance
+   counters, disable logic/help overlays, and move to the established densest
+   useful camera. Let resources warm up, then hold the camera stationary for at
+   least ten seconds and orbit/move for at least ten seconds.
+2. In normal mode confirm the log says `presentation:display-vsync`, reports
+   `swap-interval-request:1`, and frame pacing follows the display. In benchmark
+   mode confirm `presentation:uncapped-benchmark`, `swap-interval-request:0`,
+   and `logs/render-benchmark.json` updates with the correct resolution,
+   camera, profile/map, content hash, and toggles.
+3. Compare land and water at the same fixed camera with frustum culling on and
+   off. Visible output must match; tested/visible/culled sector counts must
+   change coherently.
+4. Select objects near every screen edge, rectangle-select a mixed group, then
+   move, rotate, and scale them. Exercise copy/paste, delete, hide/unhide,
+   undo/redo, body-part/texture edits, and MOB switching. A selected or actively
+   moved object must never disappear because the grid has stale bounds.
+5. Toggle logic helpers and logic edit mode. Ordinary rendering must report
+   zero helper submissions while helpers are off; enabled helpers and logic
+   picking must remain complete.
+6. Check Base and JMV static objects, humanoids, animated monsters, morph wings,
+   equipment, layered atlases, transparent objects, water, and highlighted
+   selection. Close normally after several map switches and confirm no crash.
+
+Only after these cases pass should the queue/shared-mesh stage begin.
 
 ## Lighting, shadows, sky, fog, and particles
 

@@ -17,6 +17,7 @@
 #include <QUndoStack>
 #include <QClipboard>
 #include <QMimeData>
+#include <QGLFormat>
 #include <cstdio>
 #include <cstring>
 
@@ -56,6 +57,14 @@ const char* requestedOpenGlBackend(int argc, char* argv[])
             return "desktop";
     }
     return "automatic";
+}
+
+bool renderBenchmarkRequested(int argc, char* argv[])
+{
+    for(int i = 1; i < argc; ++i)
+        if(std::strcmp(argv[i], "--render-benchmark") == 0)
+            return true;
+    return false;
 }
 
 #ifdef Q_OS_WIN
@@ -197,6 +206,8 @@ int runHeadlessCommand(QApplication& app)
     QCommandLineOption againstOption("against", "Candidate MOB used with --mob-diff.", "candidate");
     QCommandLineOption angleOpenGlOption("angle-opengl", "Use Qt's ANGLE/OpenGL ES implementation (diagnostic GUI mode).");
     QCommandLineOption desktopOpenGlOption("desktop-opengl", "Use the system desktop OpenGL implementation (diagnostic GUI mode).");
+    QCommandLineOption renderBenchmarkOption("render-benchmark",
+        "Disable VSync and run the viewport continuously for renderer throughput capture.");
     parser.addOption(validateOption);
     parser.addOption(roundtripOption);
     parser.addOption(jsonOption);
@@ -206,6 +217,7 @@ int runHeadlessCommand(QApplication& app)
     parser.addOption(againstOption);
     parser.addOption(angleOpenGlOption);
     parser.addOption(desktopOpenGlOption);
+    parser.addOption(renderBenchmarkOption);
     parser.addPositionalArgument("documents", "MPR and MOB documents to open in order.", "[documents...]");
     parser.process(app);
 
@@ -689,12 +701,21 @@ int runHeadlessCommand(QApplication& app)
 int main(int argc, char *argv[])
 {
     const char* openGlBackend = requestedOpenGlBackend(argc, argv);
+    const bool renderBenchmark = renderBenchmarkRequested(argc, argv);
     if(std::strcmp(openGlBackend, "angle") == 0)
         QCoreApplication::setAttribute(Qt::AA_UseOpenGLES);
     else if(std::strcmp(openGlBackend, "desktop") == 0)
         QCoreApplication::setAttribute(Qt::AA_UseDesktopOpenGL);
 
     QApplication app(argc, argv);
+
+    // QGLWidget reads the default format when the first preview/view widget is
+    // constructed. Normal editing follows display VSync; benchmark mode is an
+    // explicit restart-time mode so uncapped throughput is measurable.
+    QGLFormat glFormat = QGLFormat::defaultFormat();
+    glFormat.setSwapInterval(renderBenchmark ? 0 : 1);
+    QGLFormat::setDefaultFormat(glFormat);
+    app.setProperty("renderBenchmark", renderBenchmark);
 
 #ifdef Q_OS_WIN
     SetUnhandledExceptionFilter(enduranceUnhandledException);
@@ -705,9 +726,10 @@ int main(int argc, char *argv[])
     QCoreApplication::setApplicationName("EI Mapper Endurance Edition");
     // Version is independent from upstream EI Mapper releases.
     QCoreApplication::setApplicationVersion(ENDURANCE_VERSION);
-    ei::log(eLogInfo, QString("Runtime version:%1 qt:%2 architecture:%3 OpenGL-request:%4")
+    ei::log(eLogInfo, QString("Runtime version:%1 qt:%2 architecture:%3 OpenGL-request:%4 presentation:%5")
             .arg(QCoreApplication::applicationVersion(), QT_VERSION_STR,
-                 QString::number(sizeof(void*) * 8), QString::fromLatin1(openGlBackend)));
+                 QString::number(sizeof(void*) * 8), QString::fromLatin1(openGlBackend),
+                 renderBenchmark ? "uncapped-benchmark" : "display-vsync"));
 
     const int commandResult = runHeadlessCommand(app);
     if(commandResult >= 0)

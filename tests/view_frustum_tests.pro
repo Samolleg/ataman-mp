@@ -5,4 +5,5 @@ TARGET = view_frustum_tests
 
 INCLUDEPATH += ../source/render
 SOURCES += view_frustum_tests.cpp
-HEADERS += ../source/render/view_frustum.h
+HEADERS += ../source/render/view_frustum.h \
+    ../source/render/spatial_grid.h
