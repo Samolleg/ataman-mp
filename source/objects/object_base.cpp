@@ -236,6 +236,14 @@ void CObjectBase::drawSelect(QOpenGLShaderProgram* program)
         rtMatrix.setToIdentity();
         rtMatrix.rotate(m_rotation);
         matrix = matrix * rtMatrix;
+        RenderQueueContext& queue = RenderQueueContext::instance();
+        if(queue.collectingSelection())
+        {
+            const QVector4D pickingColor = m_pickingColor.toVec4();
+            for(CPart* part : m_aPart)
+                queue.submitSelection(part, matrix, pickingColor);
+            return;
+        }
         program->setUniformValue("u_modelMmatrix", matrix);
         program->setUniformValue("u_color", m_pickingColor.toVec4());
     }

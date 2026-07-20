@@ -133,6 +133,7 @@ CView::~CView()
         m_gpuTimer = nullptr;
         m_gpuTimerPending = false;
     }
+    RenderQueueContext::instance().releaseGpuResources();
     ei::setCrashContext("shutdown/view-mobs");
 
     for(auto& mob: m_aMob)
@@ -311,6 +312,7 @@ void CView::initShaders()
 
     m_program.bind();
     m_program.setUniformValue("customColor", QVector4D(0.0, 0.0, 0.0, 0.0));
+    m_program.setUniformValue("u_instanced", false);
     //release shader program?
 
     // Compile land shader
@@ -322,6 +324,7 @@ void CView::initShaders()
         close();
 
     m_landProgram.bind();
+    m_landProgram.setUniformValue("u_instanced", false);
     m_landProgram.setUniformValue("u_lightPosition", QVector4D(0.0, 0.0, 2.0, 1.0));
     m_landProgram.setUniformValue("u_lightPower", 5.0f);
     m_landProgram.setUniformValue("u_lightColor", QVector4D(1.0, 1.0, 1.0, 1.0));
@@ -335,6 +338,8 @@ void CView::initShaders()
         close();
     if (!m_selectProgram.link())
         close();
+    m_selectProgram.bind();
+    m_selectProgram.setUniformValue("u_instanced", false);
 
 }
 
@@ -1174,6 +1179,8 @@ void CView::pickObject(const QRect &rect, bool bAddToSelect)
         : spatiallyVisibleNodes(m_activeMob, cullingEnabled ? &frustum : nullptr, nullptr);
     const QList<CNode*>& legacyCandidates = logicPicking
         ? m_activeMob->logicNodes() : m_activeMob->nodes();
+    if(!logicPicking)
+        RenderQueueContext::instance().beginSelection(&m_selectProgram);
     const auto drawCandidate = [this](CNode* node)
     {
         if(node)
@@ -1185,6 +1192,8 @@ void CView::pickObject(const QRect &rect, bool bAddToSelect)
     else
         for(CNode* node : spatialCandidates)
             drawCandidate(node);
+    if(!logicPicking)
+        RenderQueueContext::instance().end();
 
     QVector<SColor> aColor;
     getColorFromRect(rect, aColor);

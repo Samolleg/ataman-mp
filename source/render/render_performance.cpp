@@ -37,6 +37,7 @@ void addCounters(SRenderFrameCounters& target, const SRenderFrameCounters& value
     target.transparentQueueSize += value.transparentQueueSize;
     target.batches += value.batches;
     target.instances += value.instances;
+    target.instancedDrawCalls += value.instancedDrawCalls;
     target.sharedMeshes += value.sharedMeshes;
     target.gpuMemoryEstimateBytes += value.gpuMemoryEstimateBytes;
     target.animationPoseEvaluations += value.animationPoseEvaluations;
@@ -115,8 +116,8 @@ void RenderPerformanceContext::endFrame()
         "fps:%10 cpu-submit:%11 ms p95:%12 ms max:%13 ms gpu:%14 "
         "nodes:%15 culled:%16 submitted:%17 logic:%18 cells:%19/%20 candidates:%21 overflow:%22 "
         "draws:%23 terrain:%24 sectors:%25/%26/%27 triangles:%28 texture-binds:%29 "
-        "queues:%30/%31/%32 batches:%33 instances:%34 shared-meshes:%35 gpu-memory:%36 "
-        "animation-eval/cache/components:%37/%38/%39")
+        "queues:%30/%31/%32 batches:%33 instances:%34 instanced-draws:%35 "
+        "shared-meshes:%36 gpu-memory:%37 animation-eval/cache/components:%38/%39/%40")
         .arg(m_metadata.benchmarkMode ? "benchmark" : "vsync")
         .arg(m_metadata.viewportWidth).arg(m_metadata.viewportHeight)
         .arg(m_metadata.cameraPosition.x(), 0, 'f', 2)
@@ -145,6 +146,7 @@ void RenderPerformanceContext::endFrame()
         .arg(double(m_total.transparentQueueSize) / frames, 0, 'f', 1)
         .arg(double(m_total.batches) / frames, 0, 'f', 1)
         .arg(double(m_total.instances) / frames, 0, 'f', 1)
+        .arg(double(m_total.instancedDrawCalls) / frames, 0, 'f', 1)
         .arg(double(m_total.sharedMeshes) / frames, 0, 'f', 1)
         .arg(double(m_total.gpuMemoryEstimateBytes) / frames, 0, 'f', 0)
         .arg(double(m_total.animationPoseEvaluations) / frames, 0, 'f', 1)
@@ -187,6 +189,7 @@ void RenderPerformanceContext::endFrame()
         averages.insert("transparentQueueSize", double(m_total.transparentQueueSize) / frames);
         averages.insert("batches", double(m_total.batches) / frames);
         averages.insert("instances", double(m_total.instances) / frames);
+        averages.insert("instancedDrawCalls", double(m_total.instancedDrawCalls) / frames);
         averages.insert("sharedMeshes", double(m_total.sharedMeshes) / frames);
         averages.insert("gpuMemoryEstimateBytes", double(m_total.gpuMemoryEstimateBytes) / frames);
         averages.insert("animationPoseEvaluations", double(m_total.animationPoseEvaluations) / frames);

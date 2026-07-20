@@ -10,6 +10,8 @@ class RenderQueueTests : public QObject
 private slots:
     void alphaClassification();
     void deterministicQueueOrder();
+    void groupsOnlyCompatibleInstanceRuns();
+    void selectsModernAndFallbackCapabilities();
 };
 
 void RenderQueueTests::alphaClassification()
@@ -66,6 +68,38 @@ void RenderQueueTests::deterministicQueueOrder()
     QCOMPARE(items.at(3).sequence, quint64(3));
     QCOMPARE(items.at(4).sequence, quint64(4));
     QCOMPARE(items.at(5).sequence, quint64(5));
+}
+
+void RenderQueueTests::groupsOnlyCompatibleInstanceRuns()
+{
+    SRenderItem first;
+    first.materialClass = ERenderMaterialClass::Opaque;
+    first.texture = reinterpret_cast<QOpenGLTexture*>(quintptr(1));
+    first.meshIdentity = 7;
+    first.textureUvScale = 1.0f;
+    first.instanceEligible = true;
+    SRenderItem second = first;
+    second.sequence = 1;
+    SRenderItem differentUv = first;
+    differentUv.textureUvScale = 2.0f;
+    SRenderItem transparent = first;
+    transparent.materialClass = ERenderMaterialClass::Transparent;
+    SRenderItem highlighted = first;
+    highlighted.highlighted = true;
+
+    QVector<SRenderItem> compatible({first, second, differentUv});
+    QCOMPARE(instanceBatchLength(compatible, 0), 2);
+    QVERIFY(!shareInstanceBatch(first, differentUv));
+    QVERIFY(!shareInstanceBatch(first, transparent));
+    QVERIFY(!shareInstanceBatch(first, highlighted));
+}
+
+void RenderQueueTests::selectsModernAndFallbackCapabilities()
+{
+    QVERIFY(supportsInstancedRenderPath(false, 3, 3));
+    QVERIFY(supportsInstancedRenderPath(false, 4, 6));
+    QVERIFY(!supportsInstancedRenderPath(false, 3, 2));
+    QVERIFY(!supportsInstancedRenderPath(true, 4, 6));
 }
 
 QTEST_APPLESS_MAIN(RenderQueueTests)

@@ -3,7 +3,11 @@
 
 #include <QCryptographicHash>
 #include <QHash>
+#include <QOpenGLContext>
+#include <QOpenGLExtraFunctions>
 #include <QWeakPointer>
+
+#include <cstddef>
 
 namespace {
 int& liveMeshCount() { static int value = 0; return value; }
@@ -194,6 +198,77 @@ void CPart::drawImmediate(QOpenGLShaderProgram* program)
     }
 }
 
+bool CPart::drawInstanced(QOpenGLShaderProgram* program, QOpenGLBuffer* instanceBuffer,
+                          int instanceBufferOffset, const QVector<QMatrix4x4>& matrices)
+{
+    if(!isDrawable() || !m_mesh || !program || !instanceBuffer || matrices.size() < 2)
+        return false;
+    QOpenGLContext* context = QOpenGLContext::currentContext();
+    if(!context || !context->extraFunctions())
+        return false;
+    QOpenGLExtraFunctions* functions = context->extraFunctions();
+    const int instanceLocations[] = {
+        program->attributeLocation("a_instanceMatrix0"),
+        program->attributeLocation("a_instanceMatrix1"),
+        program->attributeLocation("a_instanceMatrix2"),
+        program->attributeLocation("a_instanceMatrix3")
+    };
+    for(int location : instanceLocations)
+        if(location < 0)
+            return false;
+
+    program->setUniformValue("u_instanced", true);
+    program->setUniformValue("u_partAnimated", false);
+    program->setUniformValue("u_textureUvScale", m_textureUvScale);
+
+    m_mesh->buffer.bind();
+    int offset = 0;
+    const int vertexLocation = program->attributeLocation("a_position");
+    program->enableAttributeArray(vertexLocation);
+    program->setAttributeBuffer(vertexLocation, GL_FLOAT, offset, 3, int(sizeof(SVertexData)));
+    offset += int(sizeof(QVector3D));
+    const int normalLocation = program->attributeLocation("a_normal");
+    program->enableAttributeArray(normalLocation);
+    program->setAttributeBuffer(normalLocation, GL_FLOAT, offset, 3, int(sizeof(SVertexData)));
+    offset += int(sizeof(QVector3D));
+    const int textureLocation = program->attributeLocation("a_texture");
+    program->enableAttributeArray(textureLocation);
+    program->setAttributeBuffer(textureLocation, GL_FLOAT, offset, 2, int(sizeof(SVertexData)));
+
+    instanceBuffer->bind();
+    instanceBuffer->write(instanceBufferOffset, matrices.constData(),
+                          matrices.size() * int(sizeof(QMatrix4x4)));
+    for(int column = 0; column < 4; ++column)
+    {
+        const int location = instanceLocations[column];
+        program->enableAttributeArray(location);
+        program->setAttributeBuffer(location, GL_FLOAT,
+                                    instanceBufferOffset + column * 4 * int(sizeof(float)),
+                                    4, int(sizeof(QMatrix4x4)));
+        functions->glVertexAttribDivisor(GLuint(location), 1);
+    }
+    functions->glDrawArraysInstanced(GL_TRIANGLES, 0, m_aVertData.count(), matrices.size());
+    for(int location : instanceLocations)
+    {
+        functions->glVertexAttribDivisor(GLuint(location), 0);
+        program->disableAttributeArray(location);
+    }
+    instanceBuffer->release();
+    m_mesh->buffer.release();
+    program->setUniformValue("u_instanced", false);
+
+    RenderPerformanceContext& performance = RenderPerformanceContext::instance();
+    if(performance.collecting())
+    {
+        ++performance.counters().drawCalls;
+        ++performance.counters().instancedDrawCalls;
+        performance.counters().instances += quint64(matrices.size());
+        performance.counters().triangles += quint64(m_aVertData.count() / 3)
+            * quint64(matrices.size());
+    }
+    return true;
+}
+
 
 void CPart::drawSelect(QOpenGLShaderProgram *program)
 {
@@ -212,4 +287,65 @@ void CPart::drawSelect(QOpenGLShaderProgram *program)
     program->setAttributeBuffer(vertexLocation, GL_FLOAT, offset, 3, int(sizeof(SVertexData)));
 
     glDrawArrays(GL_TRIANGLES, 0, m_aVertData.count());
+}
+
+bool CPart::drawSelectInstanced(QOpenGLShaderProgram* program, QOpenGLBuffer* instanceBuffer,
+                                int instanceBufferOffset,
+                                const QVector<SPartPickingInstance>& instances)
+{
+    if(!isDrawable() || !m_mesh || !program || !instanceBuffer || instances.size() < 2)
+        return false;
+    QOpenGLContext* context = QOpenGLContext::currentContext();
+    if(!context || !context->extraFunctions())
+        return false;
+    QOpenGLExtraFunctions* functions = context->extraFunctions();
+    const int matrixLocations[] = {
+        program->attributeLocation("a_instanceMatrix0"),
+        program->attributeLocation("a_instanceMatrix1"),
+        program->attributeLocation("a_instanceMatrix2"),
+        program->attributeLocation("a_instanceMatrix3")
+    };
+    const int colorLocation = program->attributeLocation("a_instanceColor");
+    for(int location : matrixLocations)
+        if(location < 0)
+            return false;
+    if(colorLocation < 0)
+        return false;
+
+    program->setUniformValue("u_instanced", true);
+    program->setUniformValue("u_partAnimated", false);
+    m_mesh->buffer.bind();
+    const int vertexLocation = program->attributeLocation("a_position");
+    program->enableAttributeArray(vertexLocation);
+    program->setAttributeBuffer(vertexLocation, GL_FLOAT, 0, 3, int(sizeof(SVertexData)));
+
+    instanceBuffer->bind();
+    instanceBuffer->write(instanceBufferOffset, instances.constData(),
+                          instances.size() * int(sizeof(SPartPickingInstance)));
+    for(int column = 0; column < 4; ++column)
+    {
+        const int location = matrixLocations[column];
+        program->enableAttributeArray(location);
+        program->setAttributeBuffer(location, GL_FLOAT,
+                                    instanceBufferOffset + column * 4 * int(sizeof(float)),
+                                    4, int(sizeof(SPartPickingInstance)));
+        functions->glVertexAttribDivisor(GLuint(location), 1);
+    }
+    program->enableAttributeArray(colorLocation);
+    program->setAttributeBuffer(colorLocation, GL_FLOAT,
+                                instanceBufferOffset + int(offsetof(SPartPickingInstance, color)),
+                                4, int(sizeof(SPartPickingInstance)));
+    functions->glVertexAttribDivisor(GLuint(colorLocation), 1);
+    functions->glDrawArraysInstanced(GL_TRIANGLES, 0, m_aVertData.count(), instances.size());
+    for(int location : matrixLocations)
+    {
+        functions->glVertexAttribDivisor(GLuint(location), 0);
+        program->disableAttributeArray(location);
+    }
+    functions->glVertexAttribDivisor(GLuint(colorLocation), 0);
+    program->disableAttributeArray(colorLocation);
+    instanceBuffer->release();
+    m_mesh->buffer.release();
+    program->setUniformValue("u_instanced", false);
+    return true;
 }
