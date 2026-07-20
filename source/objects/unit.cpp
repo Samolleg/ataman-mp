@@ -306,6 +306,10 @@ void CUnit::refreshTransientVisual()
         bodyTextureLayers.append(texture);
         bodyTextureLayers.append(equipmentBodyLayers);
     }
+    m_renderedModelName = model;
+    m_renderedPrimaryTextureName = texture;
+    m_renderedSecondaryTextureName = secondaryTexture;
+    m_renderedBodyTextureLayers = bodyTextureLayers;
     applyTransientVisual(model, texture, visibleParts, complexion, componentTextures,
                          secondaryTexture, bodyTextureLayers);
     m_resolvedAnimationModel = model;

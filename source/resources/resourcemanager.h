@@ -117,6 +117,11 @@ public:
     QOpenGLTexture* texture(const QString& name);
     QOpenGLTexture* texture(const QString& name, const QString& modelName);
     QOpenGLTexture* layeredTexture(const QStringList& layerNames, const QString& modelName);
+    // Read-only CPU images used by diagnostics. These use the same resource
+    // lookup and layer composition path as the OpenGL texture above.
+    QImage textureImage(const QString& name, const QString& modelName);
+    QImage layeredTextureImage(const QStringList& layerNames, const QString& modelName,
+                               QString* diagnostic = nullptr);
     QOpenGLTexture* buildLandTex(const QString& name, int expectedTexCount, int& texCount);
     QOpenGLTexture* textureDefault();
     void attachSettings(CSettings* pSettings) {m_pSettings = pSettings;};

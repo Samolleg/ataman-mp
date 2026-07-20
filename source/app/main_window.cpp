@@ -23,6 +23,12 @@
 #include <QTimer>
 #include <QCheckBox>
 #include <QToolButton>
+#include <QDialog>
+#include <QDialogButtonBox>
+#include <QLabel>
+#include <QScrollArea>
+#include <QVBoxLayout>
+#include <QPainter>
 
 #include "resourcemanager.h"
 #include "landscape.h"
@@ -48,6 +54,7 @@
 #include "jmv_map_test_launcher.h"
 #include "resource_profile.h"
 #include "endurance_document.h"
+#include "unit.h"
 
 void testFunc()
 {
@@ -117,6 +124,7 @@ MainWindow::MainWindow(QWidget* parent) :
     QAction* openBugReportingGuide = new QAction(tr("Open Bug Reporting Guide"), this);
     QAction* gameAndModSetup = new QAction(tr("Game and Mod Setup..."), this);
     QAction* compareMobFiles = new QAction(tr("Compare MOB Files..."), this);
+    QAction* showUnitTexture = new QAction(tr("Show Selected Unit Final Texture..."), this);
     m_mapTestAction = new QAction(tr("Test Current Map in JMV"), this);
     m_mapTestAction->setToolTip(tr("Stages unique temporary MPR/MOB copies and launches the validated JMV runtime. No source map is overwritten."));
     m_stopMapTestAction = new QAction(tr("Stop JMV Map Test"), this);
@@ -130,6 +138,7 @@ MainWindow::MainWindow(QWidget* parent) :
     m_ui->menuSettings->insertSeparator(m_ui->actionOpen_2);
     m_ui->menuTools->addSeparator();
     m_ui->menuTools->addAction(compareMobFiles);
+    m_ui->menuUnit->addAction(showUnitTexture);
     m_ui->menuTools->addAction(m_mapTestAction);
     m_ui->menuTools->addAction(m_stopMapTestAction);
     m_ui->menuTools->addAction(openBackupFolder);
@@ -188,6 +197,76 @@ MainWindow::MainWindow(QWidget* parent) :
         dialog->show();
         dialog->raise();
         dialog->activateWindow();
+    });
+    connect(showUnitTexture, &QAction::triggered, this, [this]()
+    {
+        CUnit* unit = nullptr;
+        int unitCount = 0;
+        if(m_pView)
+            for(CNode* node : m_pView->selectedNodes())
+                if(CUnit* selectedUnit = dynamic_cast<CUnit*>(node))
+                {
+                    unit = selectedUnit;
+                    ++unitCount;
+                }
+        if(unitCount != 1 || !unit)
+        {
+            QMessageBox::information(this, tr("Final character texture"),
+                tr("Select exactly one unit first."));
+            return;
+        }
+
+        QStringList layers = unit->renderedBodyTextureLayers();
+        QImage texture;
+        QString diagnostic;
+        if(layers.isEmpty())
+        {
+            layers.append(unit->renderedPrimaryTextureName());
+            texture = CTextureList::getInstance()->textureImage(
+                unit->renderedPrimaryTextureName(), unit->renderedModelName());
+            if(texture.isNull())
+                diagnostic = tr("The resolved primary texture could not be decoded as a CPU image.");
+        }
+        else
+            texture = CTextureList::getInstance()->layeredTextureImage(
+                layers, unit->renderedModelName(), &diagnostic);
+        if(texture.isNull())
+        {
+            QMessageBox::warning(this, tr("Final character texture"), diagnostic);
+            return;
+        }
+
+        QImage preview(texture.size(), QImage::Format_RGB32);
+        QPainter painter(&preview);
+        const int cell = 16;
+        for(int y = 0; y < preview.height(); y += cell)
+            for(int x = 0; x < preview.width(); x += cell)
+                painter.fillRect(x, y, cell, cell,
+                    ((x / cell) + (y / cell)) % 2 ? QColor(190, 190, 190) : QColor(235, 235, 235));
+        painter.drawImage(0, 0, texture);
+        painter.end();
+
+        QDialog* dialog = new QDialog(this);
+        dialog->setAttribute(Qt::WA_DeleteOnClose);
+        dialog->setWindowTitle(tr("Final character texture — %1").arg(unit->databaseName()));
+        QVBoxLayout* layout = new QVBoxLayout(dialog);
+        QLabel* details = new QLabel(tr("Model: %1\nSize: %2 × %3\nLayers (bottom to top):\n%4")
+            .arg(unit->renderedModelName()).arg(texture.width()).arg(texture.height())
+            .arg(layers.join("\n")), dialog);
+        details->setTextInteractionFlags(Qt::TextSelectableByMouse);
+        layout->addWidget(details);
+        QLabel* image = new QLabel;
+        image->setPixmap(QPixmap::fromImage(preview));
+        image->setAlignment(Qt::AlignLeft | Qt::AlignTop);
+        QScrollArea* scroll = new QScrollArea(dialog);
+        scroll->setWidget(image);
+        scroll->setWidgetResizable(false);
+        layout->addWidget(scroll, 1);
+        QDialogButtonBox* buttons = new QDialogButtonBox(QDialogButtonBox::Close, dialog);
+        connect(buttons, &QDialogButtonBox::rejected, dialog, &QDialog::close);
+        layout->addWidget(buttons);
+        dialog->resize(qMin(texture.width() + 80, 1100), qMin(texture.height() + 220, 900));
+        dialog->show();
     });
     connect(m_mapTestAction, &QAction::triggered, this, [this]()
     {

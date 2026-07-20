@@ -195,6 +195,10 @@ public:
     bool usesEmbeddedMobData() const { return m_bImport; }
     const QStringList& embeddedWeapons() const { return m_aWeapon; }
     const QStringList& embeddedArmor() const { return m_aArmor; }
+    const QString& renderedModelName() const { return m_renderedModelName; }
+    const QString& renderedPrimaryTextureName() const { return m_renderedPrimaryTextureName; }
+    const QString& renderedSecondaryTextureName() const { return m_renderedSecondaryTextureName; }
+    const QStringList& renderedBodyTextureLayers() const { return m_renderedBodyTextureLayers; }
     void preloadVisualResources();
     bool updatePos(QVector3D& pos) override;
     QJsonObject toJson() override;
@@ -240,6 +244,10 @@ private:
     QStringList m_resolvedAnimationWeapons;
     QString m_animationFingerprint;
     SAnimationClip m_idleClip;
+    QString m_renderedModelName;
+    QString m_renderedPrimaryTextureName;
+    QString m_renderedSecondaryTextureName;
+    QStringList m_renderedBodyTextureLayers;
 };
 
 #endif // UNIT_H

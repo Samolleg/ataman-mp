@@ -960,6 +960,45 @@ QImage CTextureList::loadTextureImageResource(const QString& name, const QString
     return QImage();
 }
 
+QImage CTextureList::textureImage(const QString& name, const QString& modelName)
+{
+    return loadTextureImageResource(name, modelName);
+}
+
+QImage CTextureList::layeredTextureImage(const QStringList& layerNames,
+                                         const QString& modelName,
+                                         QString* diagnostic)
+{
+    QVector<QImage> layers;
+    for(const QString& name : layerNames)
+    {
+        const QImage image = loadTextureImageResource(name, modelName);
+        if(image.isNull())
+        {
+            if(layers.isEmpty())
+            {
+                if(diagnostic)
+                    *diagnostic = "Base body-atlas layer is unavailable: " + name;
+                return QImage();
+            }
+            ei::log(eLogWarning, "Skipping unavailable humanoid body-atlas overlay: " + name);
+            continue;
+        }
+        layers.append(image);
+    }
+    QImage composite;
+    QString localDiagnostic;
+    if(!ei::compositeTextureLayers(layers, &composite, &localDiagnostic))
+    {
+        if(diagnostic)
+            *diagnostic = localDiagnostic;
+        return QImage();
+    }
+    if(diagnostic)
+        diagnostic->clear();
+    return composite;
+}
+
 QOpenGLTexture* CTextureList::layeredTexture(const QStringList& layerNames,
                                              const QString& modelName)
 {
@@ -969,24 +1008,9 @@ QOpenGLTexture* CTextureList::layeredTexture(const QStringList& layerNames,
         + layerNames.join(';').toLower();
     if(m_aTexture.contains(cacheKey))
         return m_aTexture.value(cacheKey);
-    QVector<QImage> layers;
-    for(const QString& name : layerNames)
-    {
-        const QImage image = loadTextureImageResource(name, modelName);
-        if(image.isNull())
-        {
-            // A missing base atlas cannot produce a valid actor. A missing
-            // overlay, however, must not erase an otherwise renderable body.
-            if(layers.isEmpty())
-                return textureDefault();
-            ei::log(eLogWarning, "Skipping unavailable humanoid body-atlas overlay: " + name);
-            continue;
-        }
-        layers.append(image);
-    }
-    QImage composite;
     QString diagnostic;
-    if(!ei::compositeTextureLayers(layers, &composite, &diagnostic))
+    const QImage composite = layeredTextureImage(layerNames, modelName, &diagnostic);
+    if(composite.isNull())
     {
         ei::log(eLogWarning, "Cannot compose humanoid body atlas: " + diagnostic);
         return textureDefault();

@@ -121,7 +121,8 @@ edit `database.res`, JMV/Base archives, live MOBs, maps, or the game install.
    `UnhumaPL.res`, `UnhumaSW.res`, `UnhumaSD.res`, and `UnhumaMT.res` read-only.
 5. Validate PNT3 equipment atlases with large transparent tails. Armor, weapon,
    and TTI-0 anatomical components must not show stripes, random alpha, or
-   pixels from outside the decoded buffer.
+   pixels from outside the decoded buffer. PNT3 transparent runs are byte
+   counts from 1 through 1,000,000 and are not restricted to 16-byte alignment.
 6. Validate `zone1` ID 221 with its six bow members (`bwparta`, `bwpartb`, both
    `bwtetiva` members, `quiver`, and `arrows`), `zon3obr` IDs 233/234 with
    `UnhumaSD` shield textures, and `zon3obr` ID 198 with its `hd.armorNN`
@@ -147,6 +148,11 @@ edit `database.res`, JMV/Base archives, live MOBs, maps, or the game install.
     Confirm map-local composed `layers|...` atlases are released when the last
     MOB unloads, ordinary archive textures remain cached, and switching does not
     crash or accumulate one full decoded body atlas per prior unit.
+12. Select exactly one unit and choose `Unit > Show Selected Unit Final
+    Texture...`. Confirm the popup shows the same bottom-to-top layer list used
+    by rendering and the composed RGBA atlas over a checkerboard. Use this view
+    when comparing `zone1` ID 203, `bz8k` ID 919536, and ID 1001621802; the
+    lower-layer order must be shirt, pants, boots, gloves before upper armor.
 
 ## Known unresolved validation probes
 
