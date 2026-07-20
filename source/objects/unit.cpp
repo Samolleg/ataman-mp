@@ -736,8 +736,16 @@ void CLogic::draw(bool isActive, QOpenGLShaderProgram* program)
     program->setUniformValue("customColor", QVector4D(0.0, 0.0, 0.0, 0.0));
 
     if(m_behaviour == EBehaviourType::ePath)
+    {
+        // Logic markers are drawn without depth testing. Draw selected patrol
+        // groups last so a nearby later point cannot paint over the highlight.
         for(auto& pp : m_aPatrolPt)
-            pp->draw(isActive, program);
+            if(pp->nodeState() != ENodeState::eSelect && !pp->hasSelectedLookPoint())
+                pp->draw(isActive, program);
+        for(auto& pp : m_aPatrolPt)
+            if(pp->nodeState() == ENodeState::eSelect || pp->hasSelectedLookPoint())
+                pp->draw(isActive, program);
+    }
 
     glEnable(GL_DEPTH_TEST);
 }
@@ -1580,9 +1588,24 @@ void CPatrolPoint::draw(bool isActive, QOpenGLShaderProgram* program)
     glDrawElements(GL_LINES, (m_aDrawingLine.count()-1)*2, GL_UNSIGNED_SHORT, nullptr);
     program->setUniformValue("customColor", QVector4D(0.0, 0.0, 0.0, 0.0));
     for(auto& look: m_aLookPt)
-    {
-        look->draw(isActive, program);
-    }
+        if(look->nodeState() != ENodeState::eSelect)
+            look->draw(isActive, program);
+    for(auto& look: m_aLookPt)
+        if(look->nodeState() == ENodeState::eSelect)
+            look->draw(isActive, program);
+
+    // The point itself may overlap a look point or another large point marker.
+    // Repaint a selected point last so its highlight is always visible.
+    if(nodeState() == ENodeState::eSelect)
+        CObjectBase::draw(isActive, program);
+}
+
+bool CPatrolPoint::hasSelectedLookPoint() const
+{
+    for(const CLookPoint* look : m_aLookPt)
+        if(look && look->nodeState() == ENodeState::eSelect)
+            return true;
+    return false;
 }
 
 void CPatrolPoint::drawSelect(QOpenGLShaderProgram* program)
@@ -1909,7 +1932,9 @@ int CPatrolPoint::getViewId(CLookPoint *pPoint)
 
 void CPatrolPoint::createViewByIndex(int index)
 {
-    CLookPoint* pPoint = new CLookPoint();
+    CLookPoint* pPoint = index >= 0
+            ? new CLookPoint(*m_aLookPt.at(index))
+            : new CLookPoint();
     if(index >= 0)
     {
         QVector3D pos = m_aLookPt[index]->position();
@@ -2170,7 +2195,7 @@ bool CLookPoint::isOperationAxisAllow(EOperationAxisType type)
 
 CLookPoint *CLookPoint::createLookPoint()
 {
-    CLookPoint* pPoint = new CLookPoint();
+    CLookPoint* pPoint = new CLookPoint(*this);
     pPoint->updatePos(m_position);
     emit addNewLookPoint(this, pPoint);
     return pPoint;

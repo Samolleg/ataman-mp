@@ -108,3 +108,68 @@ SMapSpawnPlan CMapSpawnPlanner::choose(const QVector<SMapTravelZone>& travelZone
     }
     return bestEffort.valid ? bestEffort : failure;
 }
+
+SMapSpawnPlan CMapSpawnPlanner::chooseEntrance(const SMapTravelZone& travelZone,
+                                               const QVector<SMapSpawnObstacle>& obstacles,
+                                               double playerRadius,
+                                               int gridResolution)
+{
+    return choose(QVector<SMapTravelZone>() << travelZone, obstacles,
+                  playerRadius, gridResolution);
+}
+
+SMapSpawnPlan CMapSpawnPlanner::chooseCustom(const QPointF& requested,
+                                             int bootstrapExitId,
+                                             const QVector<SMapSpawnObstacle>& obstacles,
+                                             double playerRadius,
+                                             double searchRadius,
+                                             int radialSteps)
+{
+    SMapSpawnPlan result;
+    result.custom = true;
+    result.exitId = bootstrapExitId;
+    result.requestedPosition = requested;
+    playerRadius = qMax(0.1, playerRadius);
+    searchRadius = qMax(playerRadius, searchRadius);
+    radialSteps = qBound(4, radialSteps, 64);
+
+    const auto accept = [&](const QPointF& point, SMapSpawnPlan* output)
+    {
+        const double clearance = obstacleClearance(point, obstacles);
+        if(clearance + 0.0001 < playerRadius)
+            return false;
+        output->valid = true;
+        output->unobstructed = true;
+        output->position = point;
+        output->clearance = clearance;
+        output->adjusted = point != requested;
+        output->reason = output->adjusted
+            ? "The requested point is blocked; using the nearest clear point."
+            : "Using the requested clear terrain point.";
+        return true;
+    };
+
+    if(bootstrapExitId <= 0)
+    {
+        result.reason = "A custom spawn still requires a valid bootstrap entrance.";
+        return result;
+    }
+    if(accept(requested, &result))
+        return result;
+
+    const double radialIncrement = qMax(0.5, playerRadius * 0.5);
+    for(double radius = radialIncrement; radius <= searchRadius + 0.0001;
+        radius += radialIncrement)
+    {
+        for(int step = 0; step < radialSteps; ++step)
+        {
+            const double angle = (2.0 * M_PI * double(step)) / double(radialSteps);
+            const QPointF candidate(requested.x() + qCos(angle) * radius,
+                                    requested.y() + qSin(angle) * radius);
+            if(accept(candidate, &result))
+                return result;
+        }
+    }
+    result.reason = "No clear point was found near the requested terrain position.";
+    return result;
+}

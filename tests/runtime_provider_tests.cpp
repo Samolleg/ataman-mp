@@ -9,7 +9,7 @@ class RuntimeProviderTests : public QObject
 
 private slots:
     void validJmvManifestStaysInsideRunRoot();
-    void livePathsAndBaseProfileAreRejected();
+    void livePathsAreRejectedForExperimentalBaseProfile();
 };
 
 void RuntimeProviderTests::validJmvManifestStaysInsideRunRoot()
@@ -36,7 +36,7 @@ void RuntimeProviderTests::validJmvManifestStaysInsideRunRoot()
     QCOMPARE(mapTestLaunchRequestToJson(request).value("protocolVersion").toInt(), 1);
 }
 
-void RuntimeProviderTests::livePathsAndBaseProfileAreRejected()
+void RuntimeProviderTests::livePathsAreRejectedForExperimentalBaseProfile()
 {
     QTemporaryDir root;
     QVERIFY(root.isValid());
@@ -56,7 +56,6 @@ void RuntimeProviderTests::livePathsAndBaseProfileAreRejected()
 
     QStringList errors;
     QVERIFY(!validateMapTestLaunchRequest(request, root.path(), &errors));
-    QVERIFY(errors.join(" ").contains("JMV"));
     QVERIFY(errors.join(" ").contains("disposable"));
 }
 

@@ -1,0 +1,7 @@
+EI Mapper: Endurance Edition 0.2.0-alpha.9
+Branch: feature/viewport-test-controls-base-probe
+Editor: Qt 5.12.12 / MinGW 7.3 x64 release build
+Runtime bridge: rebuilt MSVC 2022 x86 release with one-based map.txt ID to zero-based runtime-index translation
+Base runtime host: rebuilt MSVC 2022 x86 release
+Changes: restores established P semantics; corrects entrance indexing; makes the custom entrance marker selectable/movable/deletable; delays spawn/Godmode bootstrap until after autorun initialization; preserves the selected setup profile; adds portable collection create/edit/open/save and browser refresh; adds the guarded 0.2.1 hot-reload request schema without enabling runtime reload yet
+Validation: clean MinGW and x86 runtime builds; collection 5/5; hot-reload protocol 4/4; JMV launcher 20/20; UI widget check; distribution inventory check; installed Base/JMV maps and runtime files remain untouched

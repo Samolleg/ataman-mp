@@ -6,6 +6,7 @@
 
 #include "jmv_map_test_launcher.h"
 #include "current_session_backup.h"
+#include "endurance_document.h"
 
 class JmvMapTestLauncherTests : public QObject
 {
@@ -14,15 +15,22 @@ class JmvMapTestLauncherTests : public QObject
 private slots:
     void initTestCase();
     void injectsIntoExistingWorldScript();
+    void injectsAfterLeadingWorldScriptDelay();
     void ignoresWorldScriptInStringsAndComments();
     void rejectsMalformedExistingWorldScript();
+    void injectsActualAutorunRuntimeBootstrap();
     void recognizesConfiguredJmvPluginSlot();
     void exposesTestRunsQuickAccessPath();
-    void isolatesPersistentSavesByProfileInstallation();
+    void createsGenerationScopedSavePaths();
+    void preparesOwnedGodmodeAutoexec();
+    void preservesExistingAutoexecForRecovery();
     void recoveryRemovesAutoexecCreatedByEndurance();
     void recoveryRestoresPreexistingAutoexec();
     void recoveryRemovesOwnedBridge();
     void recoveryRetainsChangedBridge();
+    void recoveryRemovesDisposableSaveGenerations();
+    void recoveryDoesNotTrustOrCleanLivePidOnlyJournal();
+    void recoveryMonitorClearsAfterRecordedProcessExits();
     void currentSessionSnapshotRestoresExistingTree();
     void currentSessionSnapshotRemovesDisposableTreeWhenOriginallyAbsent();
     void currentSessionRestoreRejectsTamperedBackupWithoutTouchingLiveTree();
@@ -101,20 +109,54 @@ void JmvMapTestLauncherTests::exposesTestRunsQuickAccessPath()
              QDir::cleanPath(expected));
 }
 
-void JmvMapTestLauncherTests::isolatesPersistentSavesByProfileInstallation()
+void JmvMapTestLauncherTests::createsGenerationScopedSavePaths()
 {
-    SResourceProfileEvaluation first;
-    first.profileId = "jamais-vu";
-    first.modRoot = "C:/Games/Evil Islands/Starter/MODS/JamaisVu135";
-    SResourceProfileEvaluation same = first;
-    SResourceProfileEvaluation other = first;
-    other.modRoot = "D:/Games/Evil Islands/Starter/MODS/JamaisVu135";
+    const QString run = "C:/Endurance/test-runs/run-1";
+    const QString initial = CJmvMapTestLauncher::generationSavesPath(run, 0);
+    const QString reload = CJmvMapTestLauncher::generationSavesPath(run, 17);
+    QVERIFY(QDir::fromNativeSeparators(initial).endsWith("generations/000000/saves"));
+    QVERIFY(QDir::fromNativeSeparators(reload).endsWith("generations/000017/saves"));
+    QVERIFY(initial != reload);
+}
 
-    const QString firstPath = CJmvMapTestLauncher::testSavesPathForProfile(first);
-    QCOMPARE(CJmvMapTestLauncher::testSavesPathForProfile(same), firstPath);
-    QVERIFY(CJmvMapTestLauncher::testSavesPathForProfile(other) != firstPath);
-    QVERIFY(firstPath.contains("runtime-profiles"));
-    QVERIFY(firstPath.endsWith("saves"));
+void JmvMapTestLauncherTests::preparesOwnedGodmodeAutoexec()
+{
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+    const QString engine = QDir(temp.path()).filePath("Engine");
+    const QString run = QDir(temp.path()).filePath("run");
+    QVERIFY(QDir().mkpath(engine));
+    QVERIFY(QDir().mkpath(run));
+    QJsonObject manifest;
+    QString error;
+    QVERIFY2(CJmvMapTestLauncher::prepareTemporaryAutoexec(
+        engine, run, true, &manifest, &error), qPrintable(error));
+    QFile generated(QDir(engine).filePath("autoexec.cfg"));
+    QVERIFY(generated.open(QIODevice::ReadOnly));
+    const QByteArray contents = generated.readAll();
+    QCOMPARE(contents.count("@godmode(0,3)"), 1);
+    QCOMPARE(manifest.value("autoexec").toObject().value("originalExisted").toBool(), false);
+}
+
+void JmvMapTestLauncherTests::preservesExistingAutoexecForRecovery()
+{
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+    const QString engine = QDir(temp.path()).filePath("Engine");
+    const QString run = QDir(temp.path()).filePath("run");
+    QVERIFY(QDir().mkpath(engine));
+    QVERIFY(QDir().mkpath(run));
+    const QByteArray original("fps 1\r\n");
+    writeFile(QDir(engine).filePath("autoexec.cfg"), original);
+    QJsonObject manifest;
+    QString error;
+    QVERIFY2(CJmvMapTestLauncher::prepareTemporaryAutoexec(
+        engine, run, true, &manifest, &error), qPrintable(error));
+    QFile backup(QDir(run).filePath("autoexec.original.cfg"));
+    QVERIFY(backup.open(QIODevice::ReadOnly));
+    QCOMPARE(backup.readAll(), original);
+    QCOMPARE(manifest.value("autoexec").toObject().value("originalSha256").toString(),
+             hash(original));
 }
 
 void JmvMapTestLauncherTests::injectsIntoExistingWorldScript()
@@ -125,6 +167,21 @@ void JmvMapTestLauncherTests::injectsIntoExistingWorldScript()
     QVERIFY2(CJmvMapTestLauncher::injectWorldScriptBootstrap(
                  source, "ConsoleString(\"test\")", &output, &error), qPrintable(error));
     QVERIFY(output.contains("WorldScript(\nConsoleString(\"test\")\n\nConsoleString(\"original\")"));
+}
+
+void JmvMapTestLauncherTests::injectsAfterLeadingWorldScriptDelay()
+{
+    const QString source = "WorldScript(\n  Sleep( 2 )\n  ConsoleString(\"original\")\n)\n";
+    QString output;
+    QString error;
+    QVERIFY2(CJmvMapTestLauncher::injectWorldScriptBootstrap(
+        source, "GodMode(0,3)", &output, &error), qPrintable(error));
+    const int delay = output.indexOf("Sleep( 2 )");
+    const int command = output.indexOf("GodMode(0,3)");
+    const int original = output.indexOf("ConsoleString(\"original\")");
+    QVERIFY(delay >= 0);
+    QVERIFY(command > delay);
+    QVERIFY(original > command);
 }
 
 void JmvMapTestLauncherTests::ignoresWorldScriptInStringsAndComments()
@@ -144,6 +201,71 @@ void JmvMapTestLauncherTests::rejectsMalformedExistingWorldScript()
     QVERIFY(!CJmvMapTestLauncher::injectWorldScriptBootstrap(
                 "WorldScript broken", "ConsoleString(\"test\")", &output, &error));
     QVERIFY(!error.isEmpty());
+}
+
+void JmvMapTestLauncherTests::injectsActualAutorunRuntimeBootstrap()
+{
+    const QString maps = QString::fromLocal8Bit(qgetenv("EI_TEST_JMV_MAPS"));
+    if(maps.isEmpty())
+        QSKIP("Set EI_TEST_JMV_MAPS to run the private-corpus autorun check.");
+    const QString source = QDir(maps).filePath("AutoRunSpellAddon123.mob");
+    QVERIFY(QFileInfo::exists(source));
+    QFile original(source);
+    QVERIFY(original.open(QIODevice::ReadOnly));
+    const QByteArray originalBytes = original.readAll();
+
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+    SMapSpawnPlan spawn;
+    spawn.valid = true;
+    spawn.custom = true;
+    spawn.exitId = 5;
+    spawn.position = QPointF(290.5, 219.2);
+    QJsonObject manifest;
+    QString outputPath;
+    QString error;
+    QVERIFY2(CJmvMapTestLauncher::prepareGodmodeBootstrap(
+        QStringList() << maps, temp.path(), spawn, 12.75, true,
+        QStringList() << "Autozone1cyclopus.mob",
+        &manifest, &outputPath, &error), qPrintable(error));
+
+    CMobDocument output;
+    CValidationReport report;
+    QVERIFY2(output.load(QFileInfo(outputPath), &report), qPrintable(report.toText()));
+    QString script;
+    QVERIFY2(output.embeddedScript(&script, &report), qPrintable(report.toText()));
+    const int worldScript = script.indexOf("WorldScript", 0, Qt::CaseInsensitive);
+    const int marker = script.indexOf("// EI Mapper Endurance owned runtime bootstrap");
+    QVERIFY(worldScript >= 0);
+    QVERIFY(marker > worldScript);
+    QVERIFY(script.contains("SetCPFast(GetLeader(), 290.500000, 219.200000, 0)"));
+    QCOMPARE(script.count("SetCPFast(GetLeader(), 290.500000, 219.200000, 0)"), 2);
+    QVERIFY(script.contains("AddMob(\"Autozone1cyclopus.mob\")"));
+    QVERIFY(script.contains("GodMode(0,3)"));
+    QVERIFY(!script.contains("GodMode(0,3);"));
+
+    QFile unchanged(source);
+    QVERIFY(unchanged.open(QIODevice::ReadOnly));
+    QCOMPARE(unchanged.readAll(), originalBytes);
+
+    QTemporaryDir entranceTemp;
+    QVERIFY(entranceTemp.isValid());
+    SMapSpawnPlan entrance = spawn;
+    entrance.custom = false;
+    QJsonObject entranceManifest;
+    QString entranceOutputPath;
+    QVERIFY2(CJmvMapTestLauncher::prepareGodmodeBootstrap(
+        QStringList() << maps, entranceTemp.path(), entrance, 12.75, true,
+        QStringList(), &entranceManifest, &entranceOutputPath, &error),
+        qPrintable(error));
+    CMobDocument entranceOutput;
+    QVERIFY2(entranceOutput.load(QFileInfo(entranceOutputPath), &report),
+             qPrintable(report.toText()));
+    QString entranceScript;
+    QVERIFY2(entranceOutput.embeddedScript(&entranceScript, &report),
+             qPrintable(report.toText()));
+    QVERIFY(!entranceScript.contains("SetCPFast(GetLeader()"));
+    QVERIFY(entranceScript.contains("GodMode(0,3)"));
 }
 
 void JmvMapTestLauncherTests::recoveryRemovesAutoexecCreatedByEndurance()
@@ -211,6 +333,96 @@ void JmvMapTestLauncherTests::recoveryRetainsChangedBridge()
     const QString summary = CJmvMapTestLauncher::recoverInterruptedRuns();
     QVERIFY(QFileInfo::exists(bridge));
     QVERIFY(summary.contains("Retained changed temporary file"));
+    QDir(run).removeRecursively();
+}
+
+void JmvMapTestLauncherTests::recoveryRemovesDisposableSaveGenerations()
+{
+    const QString root = QDir(QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation))
+        .filePath("test-runs");
+    const QString run = QDir(root).filePath(QUuid::createUuid().toString(QUuid::WithoutBraces));
+    const QString saves = CJmvMapTestLauncher::generationSavesPath(run, 3);
+    QVERIFY(QDir().mkpath(saves));
+    writeFile(QDir(saves).filePath("slot.sav"), QByteArray("disposable generation"));
+
+    QJsonObject manifest;
+    manifest.insert("state", "running");
+    manifest.insert("pid", 0);
+    manifest.insert("runRoot", run);
+    writeFile(QDir(run).filePath("manifest.json"),
+              QJsonDocument(manifest).toJson(QJsonDocument::Indented));
+
+    const QString summary = CJmvMapTestLauncher::recoverInterruptedRuns();
+    QVERIFY2(!QFileInfo::exists(QDir(run).filePath("generations")), qPrintable(summary));
+    QVERIFY(summary.contains("Removed disposable save generations"));
+    QVERIFY(QFileInfo::exists(QDir(run).filePath("manifest.json")));
+    QDir(run).removeRecursively();
+}
+
+void JmvMapTestLauncherTests::recoveryDoesNotTrustOrCleanLivePidOnlyJournal()
+{
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+    const QString bridge = QDir(temp.path()).filePath("plugin.dll");
+    const QByteArray owned("legacy pid-only bridge");
+    writeFile(bridge, owned);
+    const QString run = createRecoveryManifest(QString(), QString(), false,
+        QByteArray(), QByteArray(), bridge, owned);
+    QVERIFY(!run.isEmpty());
+
+    const QString manifestPath = QDir(run).filePath("manifest.json");
+    QFile manifestFile(manifestPath);
+    QVERIFY(manifestFile.open(QIODevice::ReadOnly));
+    QJsonObject manifest = QJsonDocument::fromJson(manifestFile.readAll()).object();
+    manifestFile.close();
+    manifest.insert("pid", double(QCoreApplication::applicationPid()));
+    writeFile(manifestPath, QJsonDocument(manifest).toJson(QJsonDocument::Indented));
+
+    const QString deferred = CJmvMapTestLauncher::recoverInterruptedRuns();
+    QVERIFY(deferred.isEmpty());
+    QVERIFY(QFileInfo::exists(bridge));
+    QString description;
+    QVERIFY(CJmvMapTestLauncher::hasActiveInterruptedRun(&description));
+    QVERIFY(description.contains("incomplete legacy process identity"));
+
+    manifest.insert("pid", 0);
+    writeFile(manifestPath, QJsonDocument(manifest).toJson(QJsonDocument::Indented));
+    const QString cleaned = CJmvMapTestLauncher::recoverInterruptedRuns();
+    QVERIFY2(!QFileInfo::exists(bridge), qPrintable(cleaned));
+    QDir(run).removeRecursively();
+}
+
+void JmvMapTestLauncherTests::recoveryMonitorClearsAfterRecordedProcessExits()
+{
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+    const QString bridge = QDir(temp.path()).filePath("plugin.dll");
+    const QByteArray owned("owned interrupted bridge");
+    writeFile(bridge, owned);
+    const QString run = createRecoveryManifest(QString(), QString(), false,
+        QByteArray(), QByteArray(), bridge, owned);
+    QVERIFY(!run.isEmpty());
+
+    const QString manifestPath = QDir(run).filePath("manifest.json");
+    QFile manifestFile(manifestPath);
+    QVERIFY(manifestFile.open(QIODevice::ReadOnly));
+    QJsonObject manifest = QJsonDocument::fromJson(manifestFile.readAll()).object();
+    manifestFile.close();
+    manifest.insert("pid", double(QCoreApplication::applicationPid()));
+    writeFile(manifestPath, QJsonDocument(manifest).toJson(QJsonDocument::Indented));
+
+    CJmvMapTestLauncher launcher;
+    QVERIFY(launcher.isRecoveryPending());
+    QSignalSpy statusSpy(&launcher, &CJmvMapTestLauncher::recoveryStatusChanged);
+
+    manifest.insert("pid", 0);
+    writeFile(manifestPath, QJsonDocument(manifest).toJson(QJsonDocument::Indented));
+    launcher.refreshInterruptedRecovery();
+
+    QVERIFY(!launcher.isRecoveryPending());
+    QVERIFY(!QFileInfo::exists(bridge));
+    QCOMPARE(statusSpy.count(), 1);
+    QCOMPARE(statusSpy.takeFirst().at(1).toBool(), false);
     QDir(run).removeRecursively();
 }
 

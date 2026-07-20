@@ -1,6 +1,8 @@
 #include "maps_browser.h"
 
 #include <algorithm>
+#include <QDir>
+#include <QFileInfo>
 #include <QHeaderView>
 #include <QLabel>
 #include <QLineEdit>
@@ -13,7 +15,8 @@ enum EMapItemData
 {
     eMprPath = Qt::UserRole,
     eMobPath,
-    eZoneId
+    eZoneId,
+    eCollectionPath
 };
 }
 
@@ -22,6 +25,7 @@ CMapsBrowser::CMapsBrowser(QWidget* parent)
     , m_filter(new QLineEdit(this))
     , m_tree(new QTreeWidget(this))
     , m_status(new QLabel(this))
+    , m_refresh(new QPushButton(tr("Refresh maps and collections"), this))
 {
     m_filter->setPlaceholderText(tr("Filter maps..."));
     m_filter->setClearButtonEnabled(true);
@@ -38,17 +42,25 @@ CMapsBrowser::CMapsBrowser(QWidget* parent)
     layout->setContentsMargins(4, 4, 4, 4);
     layout->addWidget(m_filter);
     layout->addWidget(m_tree, 1);
+    layout->addWidget(m_refresh);
     layout->addWidget(m_status);
 
     connect(m_filter, &QLineEdit::textChanged, this, &CMapsBrowser::applyFilter);
     connect(m_tree, &QTreeWidget::itemDoubleClicked, this, &CMapsBrowser::activateItem);
+    connect(m_refresh, &QPushButton::clicked, this, &CMapsBrowser::refreshRequested);
 }
 
 void CMapsBrowser::refresh(const QVector<QString>& resourceRoots,
-                           const QVector<QString>& mapRoots)
+                           const QVector<QString>& mapRoots,
+                           const QString& collectionsRoot)
 {
     const SMapCatalogResult result = CMapCatalog::load(resourceRoots, mapRoots);
     m_entries = result.entries;
+    m_collectionPaths.clear();
+    QDir collectionDirectory(collectionsRoot);
+    for(const QFileInfo& file : collectionDirectory.entryInfoList(
+            QStringList() << "*.collection", QDir::Files | QDir::Readable, QDir::Name))
+        m_collectionPaths.append(file.absoluteFilePath());
     rebuildTree();
     if(result.sourceArchive.isEmpty())
         m_status->setText(result.messages.join('\n'));
@@ -87,7 +99,16 @@ void CMapsBrowser::rebuildTree()
     QTreeWidgetItem* collections = new QTreeWidgetItem(m_tree, {tr("Collections")});
     collections->setFirstColumnSpanned(true);
     collections->setExpanded(true);
-    collections->setToolTip(0, tr("Portable collections will appear here when collection-file support is added."));
+    for(const QString& path : m_collectionPaths)
+    {
+        const QFileInfo file(path);
+        QTreeWidgetItem* item = new QTreeWidgetItem(collections,
+            {file.completeBaseName(), tr("Portable map set")});
+        item->setData(0, eCollectionPath, path);
+        item->setToolTip(0, QDir::toNativeSeparators(path));
+    }
+    if(m_collectionPaths.isEmpty())
+        collections->setToolTip(0, tr("No .collection files were found. Create one from File > Collections."));
     applyFilter(m_filter->text());
 }
 
@@ -104,11 +125,29 @@ void CMapsBrowser::applyFilter(const QString& text)
             || item->text(1).contains(needle, Qt::CaseInsensitive);
         item->setHidden(!match);
     }
+    if(m_tree->topLevelItemCount() > 1)
+    {
+        QTreeWidgetItem* collections = m_tree->topLevelItem(1);
+        for(int index = 0; index < collections->childCount(); ++index)
+        {
+            QTreeWidgetItem* item = collections->child(index);
+            item->setHidden(!needle.isEmpty()
+                && !item->text(0).startsWith(needle, Qt::CaseInsensitive));
+        }
+    }
 }
 
 void CMapsBrowser::activateItem(QTreeWidgetItem* item, int)
 {
-    if(!item || item->isDisabled() || item->data(0, eZoneId).toString().isEmpty())
+    if(!item || item->isDisabled())
+        return;
+    const QString collection = item->data(0, eCollectionPath).toString();
+    if(!collection.isEmpty())
+    {
+        emit openCollectionRequested(collection);
+        return;
+    }
+    if(item->data(0, eZoneId).toString().isEmpty())
         return;
     emit openMapRequested(item->data(0, eMprPath).toString(),
                           item->data(0, eMobPath).toString(),

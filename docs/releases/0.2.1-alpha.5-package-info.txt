@@ -1,0 +1,7 @@
+EI Mapper: Endurance Edition 0.2.1-alpha.5
+Branch: feature/viewport-test-controls-base-probe
+Editor: Qt 5.12.12 / MinGW 7.3 x64 release build
+Purpose: parser-backed runtime-family ID/range validation and conservative guided repair
+Evidence: supplied Zone 7 fixture resolved six MOBs, six legacy range overlaps, eight incompatible collisions, and deterministic 1000321-1000328 repair suggestions; Endurance document tests passed; full application build passed
+Policy: findings never block editing, Save/Save As/Save All, Test Current Map, or hot reload; no repair occurs without explicit Apply
+Known limits: script/ParentID evidence disables automatic repair pending per-reference assignment; coordinated multi-MOB save cohorts, cancellation/cache, and the frozen 162-MOB golden manifest remain follow-up work

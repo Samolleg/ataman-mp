@@ -1,0 +1,8 @@
+EI Mapper: Endurance Edition 0.2.1-alpha.10
+Tester purpose: generation-scoped Save/Load, runtime-state-aware JMV hot reload, and interrupted-run recovery
+Profile scope: JMV exact-hash runtime only for state-aware hot reload; Base hot reload remains out of scope
+Protocol: hot reload v2
+Build: clean Qt 5.12.12 / MinGW x64 editor; clean MSVC 2022 x86 runtime bridge
+Automated validation: hot-reload protocol tests passed; launcher/generation/recovery tests passed; clean editor and bridge builds
+Runtime validation still required: generation Save/Load, Main Menu, inventory, store, transition deferral, world-map observation, and orphan recovery
+Safety: live campaign saves are redirected; live source maps remain untouched; temporary JMV map/plugin aliases are hash-owned and recovery-journaled

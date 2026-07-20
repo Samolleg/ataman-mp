@@ -9,7 +9,14 @@
 #include <QPlainTextEdit>
 #include <QTableWidget>
 #include <QFileInfo>
+#include <QMap>
+#include <QSet>
+#include <QVector3D>
+#include <QFutureWatcher>
 #include "types.h"
+#include "map_catalog.h"
+#include "map_spawn_planner.h"
+#include "mob_family_validation.h"
 
 namespace Ui {
 class MainWindow;
@@ -27,6 +34,16 @@ class QDockWidget;
 class CMapsBrowser;
 class CJmvMapTestLauncher;
 class CLandscapeTools;
+struct SResourceProfileEvaluation;
+class QComboBox;
+class QCheckBox;
+class QToolButton;
+class QLabel;
+class QTreeWidget;
+class QTreeWidgetItem;
+class QTimer;
+class QPushButton;
+class QLineEdit;
 
 struct SWindowTitle
 {
@@ -59,8 +76,40 @@ private:
     void runUndoToIndex(int targetIndex);
     void refreshMapsBrowser();
     void openMapPair(const QString& mprPath, const QString& mobPath, const QString& zoneId);
+    void openCollection(const QString& path);
+    void newCollection();
+    void editCollection();
+    void saveCollection(bool saveAs);
+    QVector<QString> activeMapRoots() const;
     void updateMapTestAction();
     void launchCurrentMapTest();
+    void createViewportToolbars();
+    void refreshMapTestContext();
+    void populateEntranceCombo();
+    void chooseBorrowedMapIdentity();
+    void setCustomSpawnPicking(bool enabled);
+    void updateCustomSpawnControls();
+    void moveCameraToActiveSpawn();
+    void updateEntranceOverlays();
+    void updateOperationAvailability(bool hasSelection = false);
+    QVector<SMapSpawnObstacle> mapTestObstacles() const;
+    const SMapTravelZone* selectedTravelZone() const;
+    SResourceProfileEvaluation activeResourceProfile() const;
+    QString activeProfileDisplayName() const;
+    SMobFamilyValidationRequest mobFamilyValidationRequest();
+    void scheduleMobFamilyValidation(int delayMs = 300);
+    void refreshMobFamilyValidation();
+    void startPendingMobFamilyValidation();
+    void finishMobFamilyValidation();
+    void applyMobFamilyValidationReport(const CMobFamilyValidationReport& report);
+    void updateMobFamilyValidationPanel();
+    void showMobFamilyValidation();
+    void showValidationWarning(const QString& title, const QString& text);
+    QString validationWarningPreview(const QVector<SMobFamilyFinding>& findings) const;
+    void selectValidationObject(QTreeWidgetItem* item);
+    void reviewAndRepairNidCollisions();
+    void notifyFamilyPreflight(const QString& operation);
+    void notifyProposedNid(quint32 nid, const QString& mobPath);
 
 private slots:
     void showOutliner(bool bShow);
@@ -123,11 +172,52 @@ private:
     QDockWidget* m_mapsDock;
     QDockWidget* m_landscapeToolsDock;
     CLandscapeTools* m_landscapeTools;
+    QDockWidget* m_historyDock;
+    QDockWidget* m_validationDock;
+    QDockWidget* m_outlinerDock;
+    QDockWidget* m_propertiesDock;
+    QTreeWidget* m_validationTree;
+    QLabel* m_validationSummary;
+    QTimer* m_validationTimer;
+    QFutureWatcher<CMobFamilyValidationReport>* m_validationWatcher{nullptr};
+    SMobFamilyValidationRequest m_pendingValidationRequest;
+    quint64 m_validationGeneration{0};
+    quint64 m_runningValidationGeneration{0};
+    bool m_hasPendingValidation{false};
+    QByteArray m_lastValidationRequestDigest;
+    int m_validationFindingLimit{250};
+    QPushButton* m_validationShowMore{nullptr};
+    QLineEdit* m_outlinerFilterEdit{nullptr};
+    QLabel* m_outlinerFilterStatus{nullptr};
+    CMobFamilyValidationReport m_familyValidation;
+    QByteArray m_acknowledgedFindingDigest;
+    QSet<QString> m_previousFamilyRiskKeys;
+    QSet<quint32> m_sessionAllocatedNids;
+    QSet<QString> m_warnedSharedAllocationMobs;
+    bool m_familyRiskBaselineReady{false};
     CMapsBrowser* m_mapsBrowser;
     QAction* m_mapTestAction;
     QAction* m_stopMapTestAction;
     CJmvMapTestLauncher* m_mapTestLauncher;
     bool m_closeAfterTestStop;
+    QMap<EButtonOp, QAction*> m_operationActions;
+    QComboBox* m_entranceCombo;
+    QToolButton* m_playFromHereButton;
+    QToolButton* m_gotoEntranceButton;
+    QCheckBox* m_godmodeCheckBox;
+    QLabel* m_spawnPositionLabel;
+    SMapCatalogResult m_mapCatalog;
+    SMapCatalogEntry m_mapTestEntry;
+    QVector<SMapTravelZone> m_validEntrances;
+    QString m_openedMapZoneId;
+    QString m_currentCollectionPath;
+    bool m_borrowedMapIdentity;
+    bool m_pickSpawnPending;
+    bool m_movingCustomSpawn{false};
+    bool m_customSpawnSelected{false};
+    bool m_suppressSpawnRelease{false};
+    SMapSpawnPlan m_customSpawn;
+    QVector3D m_customSpawnPosition;
 };
 
 #endif // MAIN_WINDOW_H

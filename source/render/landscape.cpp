@@ -363,8 +363,7 @@ bool CLandscape::projectPt(QVector3D& point)
         return false;
     }
     //Q_ASSERT(yIndex < m_aSector.size() && xIndex < m_aSector.first().size());
-    m_aSector[yIndex][xIndex]->projectPt(point);
-    return true;
+    return m_aSector[yIndex][xIndex]->projectPt(point);
 }
 
 bool CLandscape::projectPt(QVector<QVector3D>& aPoint)

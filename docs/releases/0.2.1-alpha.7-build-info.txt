@@ -1,0 +1,7 @@
+EI Mapper: Endurance Edition 0.2.1-alpha.7
+Branch: feature/viewport-test-controls-base-probe
+Editor: Qt 5.12.12 / MinGW 7.3 x64 release build
+Purpose: concise validation warnings, durable detached validation window, and exact loaded-object navigation from findings
+Evidence: Endurance document and family-overlay suites passed; full application build passed; embedded version verified
+Runtime staging: AppData retains immutable payloads; JMV uses temporary hash-owned ed*.mpr/ed*.mob aliases in the mod Maps directory and removes them through guarded cleanup/recovery
+Known limit: hot reload while the engine is between zones may crash game.exe; an authoritative transition-idle guard remains a low-priority bridge task

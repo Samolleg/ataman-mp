@@ -10,7 +10,10 @@
 #include <QTreeWidgetItem>
 #include <QDateTime>
 #include <QHash>
+#include <QImage>
 #include <QPointer>
+#include <QRectF>
+#include <QStringList>
 
 #include "types.h"
 #include "select_window.h"
@@ -56,6 +59,13 @@ class CView : public QGLWidget
     Q_OBJECT
 
 public:
+    struct SNidRepair
+    {
+        QString mobPath;
+        QString sectionPath;
+        quint32 oldNid = 0;
+        quint32 newNid = 0;
+    };
     explicit CView(QWidget* parent=nullptr) = delete;
     explicit CView(QWidget* parent=nullptr, const QGLWidget* pShareWidget=nullptr);
     ~CView();
@@ -65,7 +75,7 @@ public:
     void unloadLand();
     void saveLand();
     void saveLandAs();
-    void loadMob(QFileInfo& filePath);
+    bool loadMob(QFileInfo& filePath);
     void saveMobAs();
     void saveActiveMob();
     void saveAllMob();
@@ -95,6 +105,16 @@ public:
     void pickObject(const QRect& rect, bool bAddToSelect);
     QVector3D getTerrainPos(bool bLand = true);
     QVector3D getTerrainPos(const int cursorPosX, const int cursorPosY, bool bLand = true);
+    bool terrainPositionAt(const QPoint& viewportPosition, QVector3D* position);
+    QPoint operationAnchor() const;
+    void setTestSpawnMarker(const QVector3D& position, bool adjusted = false);
+    void setTestSpawnMarkerSelected(bool selected);
+    bool testSpawnMarkerAt(const QPoint& viewportPosition, int tolerance = 18) const;
+    void clearTestSpawnMarker();
+    void setTestEntranceOverlays(const QVector<QRectF>& rectangles,
+                                 const QStringList& labels,
+                                 int selectedIndex);
+    void moveCameraToPoint(const QVector3D& position);
     void changeOperation(EButtonOp type);
     void operationSetBackup(EOperationAxisType operationType);
     void operationRevert(EOperationAxisType operationType);
@@ -133,10 +153,14 @@ public:
     QList<CNode*> selectedNodes();
     QList<CNode*> selectionSnapshot();
     void restoreSelection(const QList<CNode*>& selection);
+    bool selectObjectByProvenance(const QString& mobPath, quint32 nid,
+                                  const QString& sectionPath);
     void clearObjectSelection();
     void recordSelectionChange(const QList<CNode*>& before, const QString& text = QString("Select objects"));
     void setRandomComplection(const EObjParam param, const float min, const float max);
     void resetSelectedId();
+    bool applyFamilyNidRepairs(const QVector<SNidRepair>& repairs, QString* error = nullptr);
+    quint32 suggestFamilyNid(CMob* mob, quint32 localSuggestion);
     void openMapParameters();
     void pickTile(QVector3D posOnLand, bool bLand = true);
     void setTile(QVector3D posOnLand, bool bLand = true);
@@ -169,6 +193,7 @@ private:
     void refreshMobDirtyStates();
     void initShaders();
     void draw();
+    void drawTestOverlaysOpenGl();
     CNode* pickObject(QList<CNode*>& aNode, int x, int y);
     void applyParam(SParam& param);
     void getColorFromRect(const QRect& rect, QVector<SColor>& aColor);
@@ -218,6 +243,10 @@ signals:
     void showLandscapeToolsSignal();
     void mobScriptChanged(CMob* mob, const QString& displayScript);
     void externalMobScriptImported(CMob* mob, const QString& displayScript);
+    void selectionStateChanged(bool hasSelection);
+    void mobStateChanged();
+    void nidChangeProposed(quint32 nid, const QString& mobPath);
+    void nidAllocationRequested(const QString& mobPath, quint32* suggestion);
 
 private:
     int m_height; //for redraw window
@@ -271,6 +300,18 @@ private:
     QTimer* m_sculptRepeatTimer;
     bool m_tileGridVisible;
     int m_lastLandscapeEditMode;
+    QPoint m_lastViewportMousePos;
+    bool m_hasViewportMousePos;
+    QVector3D m_testSpawnMarker;
+    bool m_testSpawnMarkerValid;
+    bool m_testSpawnMarkerAdjusted;
+    bool m_testSpawnMarkerSelected{false};
+    QVector<QRectF> m_testEntranceRectangles;
+    QStringList m_testEntranceLabels;
+    QVector<QImage> m_testEntranceLabelImages;
+    QVector<GLuint> m_testEntranceLabelTextures;
+    bool m_testEntranceLabelTexturesDirty{false};
+    int m_selectedTestEntrance{-1};
 };
 
 #endif // MYGLWIDGET_H

@@ -16,6 +16,7 @@ class CResourceSetupDialog : public QDialog
 
 public:
     explicit CResourceSetupDialog(const QString& initialGameRoot = QString(),
+                                  const QString& initialProfileId = QString(),
                                   QWidget* parent = nullptr);
     SResourceProfileEvaluation evaluation() const { return m_evaluation; }
 

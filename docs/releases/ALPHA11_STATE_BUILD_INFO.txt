@@ -1,0 +1,10 @@
+EI Mapper: Endurance Edition 0.2.1-alpha.11
+Tester purpose: different-map metadata reinitialization and safe inventory/store/world-map hot reload
+Profile scope: exact-hash JMV runtime only
+Protocol: hot reload v2 with generation-scoped saves
+Runtime strategy: normal Main Menu transition followed by complete New Game bootstrap for every reload
+Removed: alpha.10 generic inventory/store visibility detour that crashed before emitting state
+Safety retained: live campaign saves redirected; temporary map/plugin aliases hash-owned; startup orphan recovery enabled
+Editor SHA-256: 8c8a820ef8995c59ef6364a5e6847cab08f01d5b986865b17790ba63296c2be9
+Bridge SHA-256: a9a044f85a8f2e2cca01b77faeaa121de39a198f29dae24e2544cadf57223379
+Automated checks: hot-reload protocol 5/5; launcher/recovery 21/21 (private-corpus autorun check skipped unless EI_TEST_JMV_MAPS is supplied); widget smoke PASS

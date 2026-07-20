@@ -33,7 +33,6 @@
 #include "layout_components/tree_view.h"
 #include "property.h"
 #include "tile.h"
-#include "duplicate_id_report.h"
 #include "view_frustum.h"
 #include "external_script_workspace.h"
 #include "mob_script_window.h"
@@ -59,12 +58,6 @@ private:
     STerrainHeightCommand m_command;
 };
 
-void showDuplicateIdWarning(QWidget* parent, const QVector<uint>& duplicates)
-{
-    if(!duplicates.isEmpty())
-        QMessageBox::warning(parent, "Duplicate object IDs",
-            ei::duplicateIdWarningText(duplicates));
-}
 }
 
 CView::CView(QWidget *parent, const QGLWidget *pShareWidget) : QGLWidget(parent, pShareWidget)
@@ -89,6 +82,9 @@ CView::CView(QWidget *parent, const QGLWidget *pShareWidget) : QGLWidget(parent,
   ,m_sculptRepeatTimer(new QTimer(this))
   ,m_tileGridVisible(false)
   ,m_lastLandscapeEditMode(-1)
+  ,m_hasViewportMousePos(false)
+  ,m_testSpawnMarkerValid(false)
+  ,m_testSpawnMarkerAdjusted(false)
 {
     setFocusPolicy(Qt::ClickFocus);
 
@@ -227,6 +223,15 @@ CView::~CView()
         m_scriptWorkspaces->unregisterMob(mob);
         delete mob;
     }
+
+    if(isValid() && !m_testEntranceLabelTextures.isEmpty())
+    {
+        makeCurrent();
+        glDeleteTextures(m_testEntranceLabelTextures.size(),
+                         m_testEntranceLabelTextures.constData());
+        m_testEntranceLabelTextures.clear();
+        doneCurrent();
+    }
 }
 
 
@@ -364,9 +369,198 @@ void CView::resizeGL(int width, int height)
 void CView::paintGL()
 {
     makeCurrent();
+    glViewport(0, 0, width(), height());
+    glEnable(GL_DEPTH_TEST);
+    glDepthMask(GL_TRUE);
+    glEnable(GL_ALPHA_TEST);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     draw();
+    drawTestOverlaysOpenGl();
     //doneCurrent();
+}
+
+void CView::drawTestOverlaysOpenGl()
+{
+    if((m_testEntranceRectangles.isEmpty() && !m_testSpawnMarkerValid)
+       || width() <= 0 || height() <= 0)
+        return;
+
+    // QPainter and QGLWidget do not compose reliably on every double-buffered
+    // driver. In particular, painting the entrance labels on the QGLWidget's
+    // back buffer caused alternating dark frames on current NVIDIA drivers.
+    // Keep the entire per-frame overlay in the native OpenGL pass.
+    if(!m_program.bind())
+        return;
+
+    QOpenGLBuffer::release(QOpenGLBuffer::VertexBuffer);
+    QOpenGLBuffer::release(QOpenGLBuffer::IndexBuffer);
+    const int position = m_program.attributeLocation("a_position");
+    if(position < 0)
+        return;
+
+    m_program.enableAttributeArray(position);
+    QMatrix4x4 identity;
+    identity.setToIdentity();
+    m_program.setUniformValue("u_modelMmatrix", identity);
+    m_program.setUniformValue("u_viewMmatrix", m_cam->viewMatrix());
+    m_program.setUniformValue("u_projMmatrix", m_projection);
+    m_program.setUniformValue("u_highlight", false);
+
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glEnable(GL_DEPTH_TEST);
+    glDepthMask(GL_FALSE);
+
+    for(int index = 0; index < m_testEntranceRectangles.size(); ++index)
+    {
+        const QRectF area = m_testEntranceRectangles.at(index).normalized();
+        const QPointF corners[] = {
+            area.topLeft(), area.topRight(), area.bottomRight(), area.bottomLeft()
+        };
+        QVector<QVector3D> vertices;
+        vertices.reserve(4);
+        for(const QPointF& corner : corners)
+        {
+            QVector3D world(corner.x(), corner.y(), 0.0f);
+            if(!CLandscape::getInstance()->projectPt(world))
+            {
+                vertices.clear();
+                break;
+            }
+            world.setZ(world.z() + 0.15f);
+            vertices.append(world);
+        }
+        if(vertices.size() != 4)
+            continue;
+
+        const bool selected = index == m_selectedTestEntrance;
+        m_program.setUniformValue("customColor",
+            selected ? QVector4D(0.20f, 1.0f, 0.38f, 0.37f)
+                     : QVector4D(0.92f, 0.70f, 0.12f, 0.20f));
+        m_program.setAttributeArray(position, vertices.constData());
+        glDrawArrays(GL_TRIANGLE_FAN, 0, vertices.size());
+
+        m_program.setUniformValue("customColor",
+            selected ? QVector4D(0.38f, 1.0f, 0.50f, 0.95f)
+                     : QVector4D(0.92f, 0.75f, 0.18f, 0.80f));
+        glLineWidth(selected ? 3.0f : 1.0f);
+        glDrawArrays(GL_LINE_LOOP, 0, vertices.size());
+    }
+
+    if(m_testEntranceLabelTexturesDirty)
+    {
+        if(!m_testEntranceLabelTextures.isEmpty())
+            glDeleteTextures(m_testEntranceLabelTextures.size(),
+                             m_testEntranceLabelTextures.constData());
+        m_testEntranceLabelTextures.clear();
+        for(const QImage& image : m_testEntranceLabelImages)
+            m_testEntranceLabelTextures.append(bindTexture(image, GL_TEXTURE_2D, GL_RGBA));
+        m_testEntranceLabelTexturesDirty = false;
+    }
+
+    // Labels are painted once into off-screen images and then composited as
+    // ordinary OpenGL textures. QPainter never touches QGLWidget's framebuffer.
+    const int texture = m_program.attributeLocation("a_texture");
+    if(texture >= 0 && !m_testEntranceLabelTextures.isEmpty())
+    {
+        m_program.enableAttributeArray(texture);
+        m_program.setUniformValue("u_viewMmatrix", identity);
+        m_program.setUniformValue("u_projMmatrix", identity);
+        m_program.setUniformValue("customColor", QVector4D(0.0f, 0.0f, 0.0f, 0.0f));
+        m_program.setUniformValue("qt_Texture0", 0);
+        glDisable(GL_DEPTH_TEST);
+        const QRect viewport(0, 0, width(), height());
+        const QVector<QVector2D> textureCoordinates = {
+            QVector2D(0.0f, 0.0f), QVector2D(1.0f, 0.0f),
+            QVector2D(1.0f, 1.0f), QVector2D(0.0f, 1.0f)
+        };
+
+        const int count = qMin(m_testEntranceRectangles.size(),
+                               m_testEntranceLabelTextures.size());
+        for(int index = 0; index < count; ++index)
+        {
+            const QRectF area = m_testEntranceRectangles.at(index).normalized();
+            QVector3D center(area.center().x(), area.center().y(), 0.0f);
+            if(!CLandscape::getInstance()->projectPt(center))
+                continue;
+            center.setZ(center.z() + 0.25f);
+            const QVector3D projected = center.project(
+                m_cam->viewMatrix(), m_projection, viewport);
+            if(projected.z() < 0.0f || projected.z() > 1.0f)
+                continue;
+
+            const QImage& image = m_testEntranceLabelImages.at(index);
+            const float centerX = (2.0f * projected.x() / float(width())) - 1.0f;
+            const float centerY = (2.0f * projected.y() / float(height())) - 1.0f;
+            const float halfWidth = float(image.width()) / float(width());
+            const float halfHeight = float(image.height()) / float(height());
+            const QVector<QVector3D> quad = {
+                QVector3D(centerX - halfWidth, centerY - halfHeight, 0.0f),
+                QVector3D(centerX + halfWidth, centerY - halfHeight, 0.0f),
+                QVector3D(centerX + halfWidth, centerY + halfHeight, 0.0f),
+                QVector3D(centerX - halfWidth, centerY + halfHeight, 0.0f)
+            };
+            glBindTexture(GL_TEXTURE_2D, m_testEntranceLabelTextures.at(index));
+            m_program.setAttributeArray(position, quad.constData());
+            m_program.setAttributeArray(texture, textureCoordinates.constData());
+            glDrawArrays(GL_TRIANGLE_FAN, 0, quad.size());
+        }
+        glBindTexture(GL_TEXTURE_2D, 0);
+        m_program.disableAttributeArray(texture);
+    }
+
+    if(m_testSpawnMarkerValid)
+    {
+        m_program.setUniformValue("u_viewMmatrix", m_cam->viewMatrix());
+        m_program.setUniformValue("u_projMmatrix", m_projection);
+        m_program.setUniformValue("customColor",
+            m_testSpawnMarkerSelected ? QVector4D(0.92f, 1.0f, 0.32f, 1.0f)
+            : m_testSpawnMarkerAdjusted ? QVector4D(1.0f, 0.67f, 0.18f, 0.82f)
+                                        : QVector4D(0.31f, 1.0f, 0.47f, 0.72f));
+        glEnable(GL_DEPTH_TEST);
+        glLineWidth(3.0f);
+        QVector<QVector3D> figure;
+        const float z = m_testSpawnMarker.z() + 0.08f;
+        const int segments = 24;
+        for(int i = 0; i < segments; ++i)
+        {
+            const float angle = float(i) * 2.0f * float(M_PI) / float(segments);
+            figure.append(QVector3D(m_testSpawnMarker.x() + qCos(angle) * 0.55f,
+                                    m_testSpawnMarker.y() + qSin(angle) * 0.55f, z));
+        }
+        m_program.setAttributeArray(position, figure.constData());
+        glDrawArrays(GL_LINE_LOOP, 0, figure.size());
+        const QVector<QVector3D> body = {
+            QVector3D(m_testSpawnMarker.x(), m_testSpawnMarker.y(), z + 1.72f),
+            QVector3D(m_testSpawnMarker.x(), m_testSpawnMarker.y(), z + 0.72f),
+            QVector3D(m_testSpawnMarker.x() - 0.42f, m_testSpawnMarker.y(), z + 1.25f),
+            QVector3D(m_testSpawnMarker.x() + 0.42f, m_testSpawnMarker.y(), z + 1.25f),
+            QVector3D(m_testSpawnMarker.x(), m_testSpawnMarker.y(), z + 0.72f),
+            QVector3D(m_testSpawnMarker.x() - 0.34f, m_testSpawnMarker.y(), z),
+            QVector3D(m_testSpawnMarker.x(), m_testSpawnMarker.y(), z + 0.72f),
+            QVector3D(m_testSpawnMarker.x() + 0.34f, m_testSpawnMarker.y(), z)
+        };
+        m_program.setAttributeArray(position, body.constData());
+        glDrawArrays(GL_LINES, 0, body.size());
+        QVector<QVector3D> head;
+        for(int i = 0; i < segments; ++i)
+        {
+            const float angle = float(i) * 2.0f * float(M_PI) / float(segments);
+            head.append(QVector3D(m_testSpawnMarker.x() + qCos(angle) * 0.24f,
+                                  m_testSpawnMarker.y(), z + 1.93f + qSin(angle) * 0.24f));
+        }
+        m_program.setAttributeArray(position, head.constData());
+        glDrawArrays(GL_LINE_LOOP, 0, head.size());
+    }
+
+    m_program.disableAttributeArray(position);
+    m_program.setUniformValue("customColor", QVector4D(0.0f, 0.0f, 0.0f, 0.0f));
+    glLineWidth(1.0f);
+    glDepthMask(GL_TRUE);
+    glEnable(GL_DEPTH_TEST);
 }
 
 void CView::draw()
@@ -1134,15 +1328,24 @@ QVector3D CView::getTerrainPos(bool bLand)
     return getTerrainPos(localCursorPos.x(), localCursorPos.y(), bLand);
 }
 
-void CView::loadMob(QFileInfo &filePath)
+bool CView::loadMob(QFileInfo &filePath)
 {
     m_pProgress->reset();
     CMob* pMob = new CMob;
     pMob->attach(this, m_pProgress);
-    pMob->readMob(filePath);
+    const int result = pMob->readMob(filePath);
+    if(result != 0)
+    {
+        ei::log(eLogWarning, QString("MOB load was rejected without registering a partial document path:%1 result:%2")
+            .arg(filePath.absoluteFilePath()).arg(result));
+        delete pMob;
+        return false;
+    }
     m_aMob.append(pMob);
     m_scriptWorkspaces->registerMob(pMob);
     changeCurrentMob(pMob);
+    emit mobStateChanged();
+    return true;
 }
 
 void CView::saveMobAs()
@@ -1157,8 +1360,6 @@ void CView::saveMobAs()
     if(fileName.filePath().isEmpty())
         return;
 
-    QSet<uint> aId;
-    showDuplicateIdWarning(this, m_activeMob->checkUniqueId(aId));
     if (fileName.fileName().endsWith(".json"))
         m_activeMob->serializeJson(fileName);
     else if (fileName.fileName().endsWith(".mob"))
@@ -1176,8 +1377,6 @@ void CView::saveActiveMob()
     if(nullptr == m_activeMob)
         return;
 
-    QSet<uint> aId;
-    showDuplicateIdWarning(this, m_activeMob->checkUniqueId(aId));
     if(m_activeMob->save())
         emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataDirtyFlag, "");
 }
@@ -1185,12 +1384,6 @@ void CView::saveActiveMob()
 void CView::saveAllMob()
 {
     CMob* pMob = nullptr;
-    QSet<uint> aId;
-    QVector<uint> duplicates;
-    foreach(pMob, m_aMob)
-        duplicates += pMob->checkUniqueId(aId);
-    showDuplicateIdWarning(this, duplicates);
-
     foreach(pMob, m_aMob)
     {
         pMob->save();
@@ -1243,6 +1436,7 @@ void CView::unloadActiveMob()
 
     ei::log(eLogInfo, "Mob unloaded");
     viewParameters();
+    emit mobStateChanged();
 }
 
 void CView::openActiveMobEditParams()
@@ -1417,6 +1611,7 @@ void CView::unloadMob(QString mobName)
 
     ei::log(eLogInfo, "Mob unloaded");
     viewParameters();
+    emit mobStateChanged();
 }
 
 int CView::nSelectedNodes()
@@ -1424,9 +1619,19 @@ int CView::nSelectedNodes()
     int n = 0;
     for(const auto& mob: m_aMob)
     {
+        QList<CNode*> counted;
         for(const auto& node: mob->nodes())
-            if(node->nodeState() == ENodeState::eSelect)
+            if(node->nodeState() == ENodeState::eSelect && !counted.contains(node))
+            {
+                counted.append(node);
                 ++n;
+            }
+        for(const auto& node: mob->logicNodes())
+            if(node->nodeState() == ENodeState::eSelect && !counted.contains(node))
+            {
+                counted.append(node);
+                ++n;
+            }
     }
     return n;
 }
@@ -1498,6 +1703,45 @@ void CView::restoreSelection(const QList<CNode*>& selection)
     }
     viewParameters();
     update();
+}
+
+bool CView::selectObjectByProvenance(const QString& mobPath, quint32 nid,
+                                     const QString& sectionPath)
+{
+    const QString wantedPath = QDir::cleanPath(QFileInfo(mobPath).absoluteFilePath());
+    CMob* targetMob = nullptr;
+    for(CMob* mob : m_aMob)
+    {
+        if(mob && QDir::cleanPath(mob->filePath().absoluteFilePath()).compare(
+               wantedPath, Qt::CaseInsensitive) == 0)
+        {
+            targetMob = mob;
+            break;
+        }
+    }
+    if(!targetMob)
+        return false;
+
+    CNode* target = nullptr;
+    QList<CNode*> nidMatches;
+    for(CNode* node : targetMob->nodes())
+    {
+        if(!node || node->mapId() != nid)
+            continue;
+        nidMatches.append(node);
+        if(!sectionPath.isEmpty() && node->rawSourceObjectPath() == sectionPath)
+            target = node;
+    }
+    if(!target && nidMatches.size() == 1)
+        target = nidMatches.first();
+    if(!target)
+        return false;
+
+    const QList<CNode*> before = selectionSnapshot();
+    changeCurrentMob(targetMob);
+    restoreSelection(QList<CNode*>() << target);
+    recordSelectionChange(before, tr("Select object from validation"));
+    return true;
 }
 
 void CView::clearObjectSelection()
@@ -1930,6 +2174,7 @@ void CView::viewParameters()
     if(nullptr == m_activeMob)
     {
         m_tableManager->reset(); //clear table data if empty current mob
+        emit selectionStateChanged(false);
         return;
     }
 
@@ -1949,6 +2194,7 @@ void CView::viewParameters()
     if (aType.isEmpty())
     {//reset parameters if not selected objects
         m_tableManager->reset();
+        emit selectionStateChanged(false);
         return;
     }
 
@@ -1971,6 +2217,7 @@ void CView::viewParameters()
     }
 
     m_tableManager->setNewData(aProp);
+    emit selectionStateChanged(true);
 }
 
 void CView::onParamChange(const QSharedPointer<IPropertyBase>& prop)
@@ -2008,6 +2255,7 @@ void CView::onParamChange(const QSharedPointer<IPropertyBase>& prop)
         {
             CChangeProp* pChanger = new CChangeProp(this, pNode, prop);
             QObject::connect(pChanger, SIGNAL(updateParam()), this, SLOT(viewParameters()));
+            QObject::connect(pChanger, SIGNAL(updateParam()), m_pTree, SLOT(applyFilter()));
             //QObject::connect(pChanger, SIGNAL(updatePosOnLand(CNode*)), this, SLOT(landPositionUpdate(CNode*)));
             m_pUndoStack->push(pChanger);
             break;
@@ -2016,6 +2264,7 @@ void CView::onParamChange(const QSharedPointer<IPropertyBase>& prop)
         {
             CChangeProp* pChanger = new CChangeProp(this, pNode, prop); // #todo: update node pos after undo-redo
             QObject::connect(pChanger, SIGNAL(updateParam()), this, SLOT(viewParameters()));
+            QObject::connect(pChanger, SIGNAL(updateParam()), m_pTree, SLOT(applyFilter()));
             //QObject::connect(pChanger, SIGNAL(updatePosOnLand(CNode*)), this, SLOT(landPositionUpdate(CNode*)));
             m_pUndoStack->push(pChanger);
             break;
@@ -2025,17 +2274,13 @@ void CView::onParamChange(const QSharedPointer<IPropertyBase>& prop)
             auto pId = dynamic_cast<propUint*>(prop.get());
             if(!pId || pId->value() == pNode->mapId())
                 break;
-            if(!m_activeMob->isFreeId(pId->value()))
-            {
-                ei::log(eLogWarning, "incorrect operation. Duplicate id");
-                QMessageBox::warning(nullptr, "Operation Error", "incorrect operation. Duplicate id");
-                return;
-            }
+            emit nidChangeProposed(pId->value(), m_activeMob->filePath().absoluteFilePath());
             if(!confirmScriptReferencedObjectIds({pNode->mapId()},
                                                  tr("change this object ID")))
                 return;
             CChangeProp* pChanger = new CChangeProp(this, pNode, prop);
             QObject::connect(pChanger, SIGNAL(updateParam()), this, SLOT(viewParameters()));
+            QObject::connect(pChanger, SIGNAL(updateParam()), m_pTree, SLOT(applyFilter()));
             QObject::connect(pChanger, SIGNAL(changeIdSignal(uint,uint)), m_pTree, SLOT(onChangeNodeId(uint,uint)));
             QObject::connect(pChanger, SIGNAL(changeTreeName(CNode*)), m_pTree, SLOT(onChangeObjectName(CNode*)));
             m_pUndoStack->push(pChanger);
@@ -2051,6 +2296,7 @@ void CView::onParamChange(const QSharedPointer<IPropertyBase>& prop)
             {
                 CChangeProp* pChanger = new CChangeProp(this, pNode, prop);
                 QObject::connect(pChanger, SIGNAL(updateParam()), this, SLOT(viewParameters()));
+                QObject::connect(pChanger, SIGNAL(updateParam()), m_pTree, SLOT(applyFilter()));
                 QObject::connect(pChanger, SIGNAL(changeIdSignal(uint,uint)), m_pTree, SLOT(onChangeNodeId(uint,uint)));
                 QObject::connect(pChanger, SIGNAL(changeTreeName(CNode*)), m_pTree, SLOT(onChangeObjectName(CNode*)));
                 m_pUndoStack->push(pChanger);
@@ -2062,6 +2308,77 @@ void CView::onParamChange(const QSharedPointer<IPropertyBase>& prop)
 
     if(grouped)
         m_pUndoStack->endMacro();
+}
+
+bool CView::applyFamilyNidRepairs(const QVector<SNidRepair>& repairs, QString* error)
+{
+    struct ResolvedRepair { CMob* mob; CNode* node; SNidRepair repair; };
+    QVector<ResolvedRepair> resolved;
+    QSet<quint32> replacements;
+    for(const SNidRepair& repair : repairs)
+    {
+        if(repair.oldNid == repair.newNid || replacements.contains(repair.newNid))
+        {
+            if(error) *error = tr("The repair contains a duplicate or unchanged replacement ID.");
+            return false;
+        }
+        CMob* targetMob = nullptr;
+        const QString wanted = QDir::cleanPath(QFileInfo(repair.mobPath).absoluteFilePath());
+        for(CMob* mob : m_aMob)
+            if(mob && QDir::cleanPath(mob->filePath().absoluteFilePath()).compare(
+                   wanted, Qt::CaseInsensitive) == 0)
+            {
+                targetMob = mob;
+                break;
+            }
+        if(!targetMob)
+        {
+            if(error) *error = tr("Repair target is not loaded: %1").arg(repair.mobPath);
+            return false;
+        }
+        CNode* targetNode = nullptr;
+        for(CNode* node : targetMob->nodes())
+            if(node && node->mapId() == repair.oldNid
+               && node->rawSourceObjectPath() == repair.sectionPath)
+            {
+                targetNode = node;
+                break;
+            }
+        if(!targetNode)
+        {
+            if(error) *error = tr("Could not map NID %1 at %2 onto a loaded raw object.")
+                .arg(repair.oldNid).arg(repair.sectionPath);
+            return false;
+        }
+        replacements.insert(repair.newNid);
+        resolved.append({targetMob, targetNode, repair});
+    }
+    if(resolved.isEmpty())
+    {
+        if(error) *error = tr("No repair rows were selected.");
+        return false;
+    }
+
+    m_pUndoStack->beginMacro(tr("Repair %1 family NID collision(s)").arg(resolved.size()));
+    for(const ResolvedRepair& item : resolved)
+    {
+        QSharedPointer<IPropertyBase> value(new propUint(eObjParam_NID, item.repair.newNid));
+        CChangeProp* command = new CChangeProp(this, item.mob, item.node, value);
+        connect(command, SIGNAL(updateParam()), this, SLOT(viewParameters()));
+        connect(command, SIGNAL(changeIdSignal(uint,uint)), m_pTree, SLOT(onChangeNodeId(uint,uint)));
+        m_pUndoStack->push(command);
+    }
+    m_pUndoStack->endMacro();
+    emit mobStateChanged();
+    return true;
+}
+
+quint32 CView::suggestFamilyNid(CMob* mob, quint32 localSuggestion)
+{
+    quint32 suggestion = localSuggestion;
+    if(mob)
+        emit nidAllocationRequested(mob->filePath().absoluteFilePath(), &suggestion);
+    return suggestion;
 }
 
 void CView::onPropertiesChange(const QList<QSharedPointer<IPropertyBase>>& properties)
@@ -2080,9 +2397,13 @@ void CView::onPropertiesChange(const QList<QSharedPointer<IPropertyBase>>& prope
 
 void CView::collectObjectTreeData()
 {
+    m_pTree->prepareForRebuild();
     m_pTree->clear();
     if(nullptr == m_activeMob)
+    {
+        m_pTree->applyFilter();
         return;
+    }
 
     m_pTree->setColumnCount(2);
     QStringList labels;
@@ -2171,6 +2492,7 @@ void CView::collectObjectTreeData()
         }
     }
     m_pTree->sortItems(0, Qt::SortOrder::AscendingOrder);
+    m_pTree->applyFilter();
 }
 
 void CView::onRestoreCursor()
@@ -2201,6 +2523,8 @@ void CView::moveCamToSelectedObjects()
 
 void CView::mousePressEvent(QMouseEvent* event)
 {
+    m_lastViewportMousePos = event->pos();
+    m_hasViewportMousePos = rect().contains(event->pos());
     if(m_landscapeTools && m_landscapeTools->sculptEnabled()
         && m_terrainEditAvailable && event->button() == Qt::LeftButton)
     {
@@ -2378,6 +2702,8 @@ void CView::importTerrainHeightmap()
 
 void CView::mouseMoveEvent(QMouseEvent* event)
 {
+    m_lastViewportMousePos = event->pos();
+    m_hasViewportMousePos = rect().contains(event->pos());
     if(m_sculptStrokeActive && (event->buttons() & Qt::LeftButton)
         && m_landscapeTools && m_terrainEditAvailable)
     {
@@ -2397,6 +2723,8 @@ void CView::mouseMoveEvent(QMouseEvent* event)
 
 void CView::mouseReleaseEvent(QMouseEvent *event)
 {
+    m_lastViewportMousePos = event->pos();
+    m_hasViewportMousePos = rect().contains(event->pos());
     if(m_sculptStrokeActive && event->button() == Qt::LeftButton)
     {
         finishSculptStroke();
@@ -2404,6 +2732,155 @@ void CView::mouseReleaseEvent(QMouseEvent *event)
         return;
     }
     m_pOp->mouseReleaseEvent(event);
+}
+
+QPoint CView::operationAnchor() const
+{
+    if(m_hasViewportMousePos && rect().contains(m_lastViewportMousePos))
+        return m_lastViewportMousePos;
+    return rect().center();
+}
+
+void CView::setTestSpawnMarker(const QVector3D& position, bool adjusted)
+{
+    m_testSpawnMarker = position;
+    m_testSpawnMarkerValid = true;
+    m_testSpawnMarkerAdjusted = adjusted;
+    update();
+}
+
+void CView::setTestSpawnMarkerSelected(bool selected)
+{
+    m_testSpawnMarkerSelected = m_testSpawnMarkerValid && selected;
+    update();
+}
+
+bool CView::testSpawnMarkerAt(const QPoint& viewportPosition, int tolerance) const
+{
+    if(!m_testSpawnMarkerValid || !m_cam || width() <= 0 || height() <= 0)
+        return false;
+    const QVector3D marker = QVector3D(m_testSpawnMarker.x(), m_testSpawnMarker.y(),
+                                       m_testSpawnMarker.z() + 1.0f).project(
+        m_cam->viewMatrix(), m_projection, QRect(0, 0, width(), height()));
+    if(marker.z() < 0.0f || marker.z() > 1.0f)
+        return false;
+    // QVector3D::project uses the OpenGL bottom-left viewport origin, while
+    // QMouseEvent positions use Qt's top-left widget origin.
+    const QPointF markerInWidget(marker.x(), height() - marker.y());
+    const QPointF delta = markerInWidget - viewportPosition;
+    return delta.x() * delta.x() + delta.y() * delta.y()
+        <= double(tolerance * tolerance);
+}
+
+void CView::clearTestSpawnMarker()
+{
+    m_testSpawnMarkerValid = false;
+    m_testSpawnMarkerSelected = false;
+    update();
+}
+
+void CView::setTestEntranceOverlays(const QVector<QRectF>& rectangles,
+                                    const QStringList& labels,
+                                    int selectedIndex)
+{
+    m_testEntranceRectangles = rectangles;
+    m_testEntranceLabels = labels;
+    m_testEntranceLabelImages.clear();
+    const QFont labelFont = font();
+    const QFontMetrics metrics(labelFont);
+    for(const QString& label : labels)
+    {
+        QRect bounds = metrics.boundingRect(QRect(0, 0, 240, 96),
+                                            Qt::AlignCenter | Qt::TextWordWrap,
+                                            label);
+        bounds.setSize(bounds.size().expandedTo(QSize(36, metrics.height())));
+        QImage image(bounds.width() + 12, bounds.height() + 8,
+                     QImage::Format_ARGB32_Premultiplied);
+        image.fill(Qt::transparent);
+        QPainter painter(&image);
+        painter.setRenderHint(QPainter::Antialiasing);
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(QColor(20, 20, 20, 180));
+        painter.drawRoundedRect(image.rect().adjusted(0, 0, -1, -1), 4, 4);
+        painter.setFont(labelFont);
+        painter.setPen(QColor(255, 245, 180));
+        painter.drawText(image.rect().adjusted(6, 4, -6, -4),
+                         Qt::AlignCenter | Qt::TextWordWrap, label);
+        m_testEntranceLabelImages.append(image);
+    }
+    m_testEntranceLabelTexturesDirty = true;
+    m_selectedTestEntrance = selectedIndex;
+    update();
+}
+
+void CView::moveCameraToPoint(const QVector3D& position)
+{
+    QVector3D terrainPosition(position.x(), position.y(), 0.0f);
+    if(CLandscape::getInstance()->projectPt(terrainPosition))
+    {
+        m_cam->moveTo(terrainPosition);
+        update();
+    }
+}
+
+bool CView::terrainPositionAt(const QPoint& viewportPosition, QVector3D* position)
+{
+    if(!position || !m_pLand || !m_pLand->isMprLoad()
+       || !rect().contains(viewportPosition) || width() <= 0 || height() <= 0)
+        return false;
+
+    const QRect viewport(0, 0, width(), height());
+    const float screenY = float(height() - viewportPosition.y());
+    const QMatrix4x4 view = m_cam->viewMatrix();
+    const QVector3D rayStart = QVector3D(float(viewportPosition.x()), screenY, 0.0f)
+        .unproject(view, m_projection, viewport);
+    const QVector3D rayEnd = QVector3D(float(viewportPosition.x()), screenY, 1.0f)
+        .unproject(view, m_projection, viewport);
+
+    bool havePrevious = false;
+    float previousT = 0.0f;
+    float previousDelta = 0.0f;
+    constexpr int steps = 512;
+    for(int step = 0; step <= steps; ++step)
+    {
+        const float t = float(step) / float(steps);
+        const QVector3D rayPoint = rayStart + (rayEnd - rayStart) * t;
+        QVector3D terrain(rayPoint.x(), rayPoint.y(), 0.0f);
+        if(!CLandscape::getInstance()->projectPt(terrain))
+        {
+            havePrevious = false;
+            continue;
+        }
+        const float delta = rayPoint.z() - terrain.z();
+        if(havePrevious && previousDelta >= 0.0f && delta <= 0.0f)
+        {
+            float low = previousT;
+            float high = t;
+            QVector3D resolved = terrain;
+            for(int iteration = 0; iteration < 14; ++iteration)
+            {
+                const float middle = (low + high) * 0.5f;
+                const QVector3D sample = rayStart + (rayEnd - rayStart) * middle;
+                QVector3D ground(sample.x(), sample.y(), 0.0f);
+                if(!CLandscape::getInstance()->projectPt(ground))
+                {
+                    low = middle;
+                    continue;
+                }
+                resolved = ground;
+                if(sample.z() - ground.z() > 0.0f)
+                    low = middle;
+                else
+                    high = middle;
+            }
+            *position = resolved;
+            return true;
+        }
+        havePrevious = true;
+        previousT = t;
+        previousDelta = delta;
+    }
+    return false;
 }
 
 void CView::wheelEvent(QWheelEvent* event)
@@ -3065,6 +3542,15 @@ void CView::selectedObjectToClipboardBuffer()
                 provenance.insert("sourceObjectPath", pNode->rawSourceObjectPath());
                 provenance.insert("sourceSubtreeSha256",
                     QString::fromLatin1(pNode->rawSourceSubtreeSha256().toHex()));
+                QByteArray sourceSubtree;
+                QByteArray cleanSubtree;
+                if(m_activeMob->rawObjectTemplateBytes(pNode, &sourceSubtree, &cleanSubtree))
+                {
+                    provenance.insert("sourceSubtreeBase64",
+                        QString::fromLatin1(sourceSubtree.toBase64()));
+                    provenance.insert("cleanSubtreeBase64",
+                        QString::fromLatin1(cleanSubtree.toBase64()));
+                }
                 nodeData.insert("_Endurance raw provenance", provenance);
             }
             arrObj.append(nodeData);
@@ -3215,6 +3701,7 @@ void CView::setDurty(CMob* pMob)
     changedMob->refreshDirtyFromProjection();
     if(changedMob == m_activeMob)
         emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataDirtyFlag, changedMob->isDirty() ? "*" : "");
+    emit mobStateChanged();
 }
 
 bool CView::confirmScriptReferencedObjectIds(const QVector<uint>& objectIds,
@@ -3256,7 +3743,9 @@ bool CView::confirmScriptReferencedObjectIds(const QVector<uint>& objectIds,
 
 void CView::duplicateSelectedObjects()
 {
-    if(!m_activeMob || nSelectedNodes() == 0)
+    // Logic points have their own P/L creation workflow and must not cause
+    // Ctrl+D to replay a stale normal-object clipboard.
+    if(!m_activeMob || selectedNodes().isEmpty())
         return;
     selectedObjectToClipboardBuffer();
     clipboradObjectsToScene();

@@ -18,6 +18,9 @@ struct SMapSpawnPlan
     bool unobstructed{false};
     int exitId{0};
     QPointF position;
+    QPointF requestedPosition;
+    bool custom{false};
+    bool adjusted{false};
     double viewAngle{0.0};
     bool hasViewAngle{false};
     double clearance{0.0};
@@ -31,6 +34,16 @@ public:
                                 const QVector<SMapSpawnObstacle>& obstacles,
                                 double playerRadius = 1.0,
                                 int gridResolution = 7);
+    static SMapSpawnPlan chooseEntrance(const SMapTravelZone& travelZone,
+                                        const QVector<SMapSpawnObstacle>& obstacles,
+                                        double playerRadius = 1.0,
+                                        int gridResolution = 7);
+    static SMapSpawnPlan chooseCustom(const QPointF& requested,
+                                      int bootstrapExitId,
+                                      const QVector<SMapSpawnObstacle>& obstacles,
+                                      double playerRadius = 1.0,
+                                      double searchRadius = 8.0,
+                                      int radialSteps = 8);
 };
 
 #endif // MAP_SPAWN_PLANNER_H

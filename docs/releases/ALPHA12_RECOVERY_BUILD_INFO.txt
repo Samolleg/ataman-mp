@@ -1,0 +1,9 @@
+EI Mapper: Endurance Edition 0.2.1-alpha.12
+Tester purpose: same-session orphan cleanup, verified close prompt, and hot-reload focus
+Profile scope: exact-hash JMV runtime only
+Safety: only the exact PID/image/creation-time/hash identity in an unfinished journal may receive WM_CLOSE
+Recovery: retries process-exit and locked-plugin races; no editor restart should be required
+Window behavior: successful hot reload maximizes and focuses the verified Endurance-owned game window
+Editor SHA-256: 7f6203499ab6a10858b02ff8c34287c663cef3b1e492ca992c146c849fa416f2
+Bridge SHA-256: a9a044f85a8f2e2cca01b77faeaa121de39a198f29dae24e2544cadf57223379
+Automated checks: hot-reload protocol 5/5; launcher/recovery 22/22; packaged widget/lifecycle smoke PASS (private-corpus autorun check skipped unless EI_TEST_JMV_MAPS is supplied)
