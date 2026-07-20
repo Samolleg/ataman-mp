@@ -248,11 +248,8 @@ quint16 CTerrainTransitionCatalog::selectForPaint(
     if(selected && m_swapPaintHalfTurns && (horizontalHalf || verticalHalf))
     {
         SMprPackedTile tile = SMprPackedTile::decode(packed);
-        if(tile.rotation == 1 || tile.rotation == 3)
-        {
-            tile.rotation = quint8(4 - tile.rotation);
-            packed = tile.encode();
-        }
+        tile.rotation = quint8((tile.rotation + 2) & 3);
+        packed = tile.encode();
     }
     if(found)
         *found = selected;

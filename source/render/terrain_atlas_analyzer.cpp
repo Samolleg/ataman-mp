@@ -94,9 +94,9 @@ STerrainAtlasAnalysis CTerrainAtlasAnalyzer::analyze(
     }
 
     result.templateName = QStringLiteral("Zone1 stock slot layout");
-    // Zone1's authored half-edge entries use the opposite 90/270-degree paint
-    // turn from its corner entries. Correct only newly selected half edges;
-    // corner variants and untouched MPR decoding remain unchanged.
+    // Zone1's authored half-edge entries face away from a newly painted area.
+    // Turn every newly selected half edge by 180 degrees; corner variants and
+    // untouched MPR decoding remain unchanged.
     result.landCatalog.setSwapPaintHalfTurns(true);
     result.overlayCatalog.setSwapPaintHalfTurns(true);
     result.expectedSlots = 512;

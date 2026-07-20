@@ -1895,8 +1895,8 @@ void EnduranceDocumentTests::zone1NamespaceTemplateSeparatesLandOverlayAndVarian
             QVERIFY(paintedFound);
             QCOMPARE(painted.atlasSlot(), authored.atlasSlot());
             const bool side = (dx == 0) != (dy == 0);
-            if(side && (authored.rotation == 1 || authored.rotation == 3))
-                QCOMPARE(painted.rotation, quint8(4 - authored.rotation));
+            if(side)
+                QCOMPARE(painted.rotation, quint8((authored.rotation + 2) & 3));
             else
                 QCOMPARE(painted.rotation, authored.rotation);
         }
