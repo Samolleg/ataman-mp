@@ -418,6 +418,7 @@ int runHeadlessCommand(QApplication& app)
         QWidget primaryWindow;
         bool settingsTabsUsable = false;
         bool settingsShortcutsPersist = false;
+        bool renderOptionsRegistered = false;
         {
             const QString previousDirectory = QDir::currentPath();
             QTemporaryDir settingsDirectory;
@@ -435,6 +436,12 @@ int runHeadlessCommand(QApplication& app)
                 QKeySequenceEdit* historyShortcut = settingsWindow.findChild<QKeySequenceEdit*>("shortcutHistory");
                 QKeySequenceEdit* duplicateShortcut = settingsWindow.findChild<QKeySequenceEdit*>("shortcutDuplicateObjects");
                 QKeySequenceEdit* stopTestShortcut = settingsWindow.findChild<QKeySequenceEdit*>("shortcutStopMapTest");
+                COptBool* animateUnits = dynamic_cast<COptBool*>(
+                    settingsWindow.opt(eOptSetRender, "animateUnits"));
+                COptBool* performanceCounters = dynamic_cast<COptBool*>(
+                    settingsWindow.opt(eOptSetRender, "renderPerformanceCounters"));
+                renderOptionsRegistered = animateUnits && animateUnits->value()
+                        && performanceCounters && !performanceCounters->value();
                 if(historyShortcut && duplicateShortcut && stopTestShortcut)
                 {
                     historyShortcut->setKeySequence(QKeySequence("Alt+L"));
@@ -492,6 +499,7 @@ int runHeadlessCommand(QApplication& app)
         const bool passed = prefixesOnly && valueStable && popupStaysOpen
                 && focusCancel && escapeCancel
                 && enterCommit && clickCommit && settingsTabsUsable && settingsShortcutsPersist
+                && renderOptionsRegistered
                 && secondaryWindowsClosed
                 && pasteSingleAction && pasteUndoAtomic && pasteRedoAtomic
                 && incompatiblePasteBlocked && compatiblePasteImmediate
@@ -510,6 +518,7 @@ int runHeadlessCommand(QApplication& app)
                << " clickCommit=" << clickCommit
                << " settingsTabsUsable=" << settingsTabsUsable
                << " settingsShortcutsPersist=" << settingsShortcutsPersist
+               << " renderOptionsRegistered=" << renderOptionsRegistered
                << " secondaryWindowsClosed=" << secondaryWindowsClosed
                << " pasteSingleAction=" << pasteSingleAction
                << " pasteUndoAtomic=" << pasteUndoAtomic
