@@ -481,7 +481,7 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
 - [x] Verify startup-movie suppression for root and active-mod movie paths.
   - Alpha.58 hides `1c.bik` and `nival.bik` in-process without renaming them.
   - Preserve map-specific cutscenes; only startup movies are skipped by default.
-- [ ] Add authoritative bridge results.
+- [x] Add authoritative bridge results.
   - Report actual loaded zone, MPR/MOB hashes, player count, selected entrance,
     save namespace, readiness, and cleanup outcome.
   - Distinguish a genuine crash from the game's known abnormal-looking but
@@ -490,6 +490,15 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
     that auto-dismisses after a few seconds when untouched, with **Dismiss**
     and **Open Log** actions. Keep the complete text in the workflow log now
     and the future message-log panel later.
+  - Alpha.15 writes a structured `result.json` after every owned test process,
+    correlates observed loader paths with the hash-verified staged payload,
+    distinguishes user Stop Test from a crash exit, and records source-file and
+    hash-owned cleanup results.
+  - The editor validates deterministic evidence automatically and logs the
+    complete report. Warnings/errors use the non-modal notification above;
+    successful runs remain log-only.
+  - `EIMapperEndurance.exe --test-run-report <run-root> [--json]` provides the
+    same deterministic check for closed-test collection and automation.
 - [ ] Complete the focused 0.2.x release matrix and publish `0.2.0`.
   - Normal JMV gameplay map.
   - Zone17/zone18 or another map that previously refused script injection.
@@ -500,6 +509,12 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
     reported map/player/entrance/generation identity, same/different-map reload,
     stop, and cleanup. Retain manual checks only for rendering, traversal,
     `drawall`, and in-game Save/Load interaction.
+  - [x] Implement the automatic per-run evidence collector and offline report
+    validator. It evaluates every completed user-driven launch/reload without
+    adding extra runtime actions or touching game state.
+  - [ ] Exercise the matrix scenarios and archive their passing `result.json`
+    reports; rendering, traversal, `drawall`, and Save/Load behavior remain the
+    intentionally manual observations.
 
 ### Confirmed runtime behavior and research risks
 

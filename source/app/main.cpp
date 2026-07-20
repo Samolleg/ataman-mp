@@ -27,6 +27,7 @@
 #include "layout_components/tablemanager.h"
 #include "window_lifecycle.h"
 #include "settings.h"
+#include "jmv_map_test_launcher.h"
 
 #ifdef Q_OS_WIN
 #include <windows.h>
@@ -194,6 +195,9 @@ int runHeadlessCommand(QApplication& app)
     QCommandLineOption profileLoadOption("profile-load", "Discover the recommended resource profile for a game installation.", "game-root");
     QCommandLineOption mobDiffOption("mob-diff", "Compare a baseline MOB with another MOB.", "baseline");
     QCommandLineOption uiWidgetCheckOption("ui-widget-check", "Run non-interactive asset-picker regression checks.");
+    QCommandLineOption testRunReportOption("test-run-report",
+        "Validate the authoritative result of a completed Endurance map-test run.",
+        "run-root");
     QCommandLineOption againstOption("against", "Candidate MOB used with --mob-diff.", "candidate");
     QCommandLineOption angleOpenGlOption("angle-opengl", "Use Qt's ANGLE/OpenGL ES implementation (diagnostic GUI mode).");
     QCommandLineOption desktopOpenGlOption("desktop-opengl", "Use the system desktop OpenGL implementation (diagnostic GUI mode).");
@@ -203,6 +207,7 @@ int runHeadlessCommand(QApplication& app)
     parser.addOption(profileLoadOption);
     parser.addOption(mobDiffOption);
     parser.addOption(uiWidgetCheckOption);
+    parser.addOption(testRunReportOption);
     parser.addOption(againstOption);
     parser.addOption(angleOpenGlOption);
     parser.addOption(desktopOpenGlOption);
@@ -223,13 +228,51 @@ int runHeadlessCommand(QApplication& app)
     const bool profileLoad = parser.isSet(profileLoadOption);
     const bool mobDiff = parser.isSet(mobDiffOption);
     const bool uiWidgetCheck = parser.isSet(uiWidgetCheckOption);
-    if(!validate && !roundtrip && !profileLoad && !mobDiff && !uiWidgetCheck)
+    const bool testRunReport = parser.isSet(testRunReportOption);
+    if(!validate && !roundtrip && !profileLoad && !mobDiff && !uiWidgetCheck
+       && !testRunReport)
         return -1;
     if((validate ? 1 : 0) + (roundtrip ? 1 : 0) + (profileLoad ? 1 : 0)
-            + (mobDiff ? 1 : 0) + (uiWidgetCheck ? 1 : 0) > 1)
+            + (mobDiff ? 1 : 0) + (uiWidgetCheck ? 1 : 0)
+            + (testRunReport ? 1 : 0) > 1)
     {
         QTextStream(stderr) << "Choose one headless command.\n";
         return 2;
+    }
+
+    if(testRunReport)
+    {
+        QJsonObject report;
+        QStringList findings;
+        const bool passed = CJmvMapTestLauncher::analyzeCompletedRun(
+            parser.value(testRunReportOption), &report, &findings);
+        QTextStream output(passed ? stdout : stderr);
+        if(parser.isSet(jsonOption))
+        {
+            QJsonObject result = report;
+            QJsonArray findingArray;
+            for(const QString& finding : findings)
+                findingArray.append(finding);
+            result.insert("automatedFindings", findingArray);
+            result.insert("automatedPassed", passed);
+            output << QJsonDocument(result).toJson(QJsonDocument::Indented);
+        }
+        else
+        {
+            output << (passed ? "PASS" : "FAIL")
+                   << ": completed map-test run "
+                   << report.value("runId").toString() << "\n";
+            output << "requested=" << report.value("requestedZone").toString()
+                   << " entrance=" << report.value("requestedEntrance").toInt()
+                   << " actual=" << report.value("actualZone").toString()
+                   << " entrance=" << report.value("actualEntrance").toInt()
+                   << " generation=" << report.value("actualGeneration").toString()
+                   << "\n";
+            for(const QString& finding : findings)
+                output << "- " << finding << "\n";
+        }
+        output.flush();
+        return passed ? 0 : 1;
     }
 
     if(uiWidgetCheck)

@@ -43,6 +43,9 @@ class QTreeWidgetItem;
 class QTimer;
 class QPushButton;
 class QLineEdit;
+class QFrame;
+class QResizeEvent;
+class QJsonObject;
 
 struct SWindowTitle
 {
@@ -110,6 +113,8 @@ private:
     void reviewAndRepairNidCollisions();
     void notifyFamilyPreflight(const QString& operation);
     void notifyProposedNid(quint32 nid, const QString& mobPath);
+    void showMapTestResultNotification(const QJsonObject& report);
+    void positionMapTestResultNotification();
 
 private slots:
     void showOutliner(bool bShow);
@@ -153,6 +158,7 @@ private slots:
 
 protected:
     void closeEvent(QCloseEvent* e);
+    void resizeEvent(QResizeEvent* e) override;
     bool eventFilter(QObject* watched, QEvent* event) override;
 
 private:
@@ -187,6 +193,10 @@ private:
     QPushButton* m_validationShowMore{nullptr};
     QLineEdit* m_outlinerFilterEdit{nullptr};
     QLabel* m_outlinerFilterStatus{nullptr};
+    QFrame* m_mapTestResultNotification{nullptr};
+    QLabel* m_mapTestResultLabel{nullptr};
+    QTimer* m_mapTestResultTimer{nullptr};
+    QString m_mapTestResultLogPath;
     CMobFamilyValidationReport m_familyValidation;
     QByteArray m_acknowledgedFindingDigest;
     QSet<QString> m_previousFamilyRiskKeys;

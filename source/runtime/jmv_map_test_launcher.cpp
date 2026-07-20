@@ -500,7 +500,28 @@ CJmvMapTestLauncher::CJmvMapTestLauncher(QObject* parent)
                      .arg(exitCode).arg(int(status)));
         const QString bridgeResult = bridgeResultSummary();
         appendRunLog(bridgeResult);
-        QString cleanupMessage = cleanup();
+        const QString cleanupOnly = cleanup();
+        QJsonObject report = buildAuthoritativeResult(
+            m_manifest,
+            bridgeResult.startsWith("Runtime bridge result:\n")
+                ? bridgeResult.mid(QString("Runtime bridge result:\n").size())
+                : QString(),
+            exitCode, int(status), m_stopRequested, cleanupOnly);
+        const QString resultPath = QDir(m_runRoot).filePath("result.json");
+        QString resultError;
+        if(!atomicWrite(resultPath,
+                        QJsonDocument(report).toJson(QJsonDocument::Indented),
+                        &resultError))
+            appendRunLog("Could not persist authoritative result: " + resultError);
+        m_manifest.insert("finalResultPath", resultPath);
+        m_manifest.insert("finalResultPassed", report.value("passed").toBool());
+        writeManifest(m_cleanupComplete ? "cleaned" : "cleanup-needed");
+        appendRunLog(QString("Authoritative test result passed=%1 errors=%2 warnings=%3 path=%4")
+                     .arg(report.value("passed").toBool())
+                     .arg(report.value("errorCount").toInt())
+                     .arg(report.value("warningCount").toInt()).arg(resultPath));
+        emit testReportReady(report);
+        QString cleanupMessage = cleanupOnly;
         if(!cleanupMessage.isEmpty())
             cleanupMessage += "\n";
         cleanupMessage += bridgeResult;
@@ -534,6 +555,284 @@ QString CJmvMapTestLauncher::generationSavesPath(const QString& runRoot,
                                                  quint64 generation)
 {
     return saveGenerationPath(runRoot, generation);
+}
+
+QJsonObject CJmvMapTestLauncher::buildAuthoritativeResult(
+    const QJsonObject& manifest, const QString& bridgeResult, int exitCode,
+    int exitStatus, bool stopRequested, const QString& cleanupMessage)
+{
+    QJsonObject report;
+    report.insert("schemaVersion", 1);
+    report.insert("runId", manifest.value("runId").toString());
+    report.insert("profileId", manifest.value("profileId").toString());
+    report.insert("runRoot", manifest.value("runRoot").toString());
+    report.insert("runLogPath", manifest.value("logPath").toString());
+    report.insert("bridgeResultPath",
+                  manifest.value("bridge").toObject().value("resultPath").toString());
+    report.insert("exitCode", exitCode);
+    report.insert("exitStatus", exitStatus);
+    report.insert("exitReason", stopRequested ? "user-stop"
+                                                : (exitStatus == int(QProcess::CrashExit)
+                                                   ? "crash" : "process-exit"));
+    report.insert("cleanupMessage", cleanupMessage);
+
+    QString requestedZone = manifest.value("sessionSettings").toObject()
+        .value("sourceZone").toString();
+    int requestedEntrance = manifest.value("sessionSettings").toObject()
+        .value("travelExit").toInt();
+    quint64 requestedGeneration = manifest.value("isolatedSaves").toObject()
+        .value("activeGeneration").toString().toULongLong();
+    QString requestedMprHash;
+    QString requestedMobHash;
+    const QString saveNamespace = manifest.value("isolatedSaves").toObject()
+        .value("testPath").toString();
+    const QJsonArray reloads = manifest.value("hotReloads").toArray();
+    if(!reloads.isEmpty())
+    {
+        const QJsonObject latest = reloads.last().toObject();
+        requestedZone = latest.value("zoneId").toString(requestedZone);
+        requestedEntrance = latest.value("entranceId").toInt(requestedEntrance);
+        requestedGeneration = latest.value("generation").toString()
+            .toULongLong();
+        requestedMprHash = latest.value("mprSha256").toString();
+        requestedMobHash = latest.value("mobSha256").toString();
+    }
+    if(requestedMprHash.isEmpty() || requestedMobHash.isEmpty())
+    {
+        const QJsonObject live = manifest.value("liveFiles").toObject();
+        requestedMprHash = live.value("mprSha256").toString();
+        requestedMobHash = live.value("mobSha256").toString();
+    }
+
+    QString actualZone;
+    int actualEntrance = 0;
+    quint64 actualGeneration = 0;
+    quint64 completedReloadSequence = 0;
+    const QRegularExpression reloadExpression(
+        "HOT_RELOAD dispatch sequence=(\\d+) generation=(\\d+).*zone=\\\"([^\\\"]+)\\\" entrance_id=(\\d+)");
+    QRegularExpressionMatchIterator reloadMatches = reloadExpression.globalMatch(bridgeResult);
+    while(reloadMatches.hasNext())
+    {
+        const QRegularExpressionMatch match = reloadMatches.next();
+        const quint64 sequence = match.captured(1).toULongLong();
+        if(bridgeResult.contains(QString("HOT_RELOAD completed sequence=%1").arg(sequence)))
+        {
+            completedReloadSequence = sequence;
+            actualGeneration = match.captured(2).toULongLong();
+            actualZone = match.captured(3);
+            actualEntrance = match.captured(4).toInt();
+        }
+    }
+    if(actualZone.isEmpty())
+    {
+        const QRegularExpression initialExpression(
+            "DIRECT_LAUNCH initialized New Game player zone=\\\"([^\\\"]+)\\\" entrance_id=(\\d+)");
+        QRegularExpressionMatchIterator initialMatches = initialExpression.globalMatch(bridgeResult);
+        while(initialMatches.hasNext())
+        {
+            const QRegularExpressionMatch match = initialMatches.next();
+            actualZone = match.captured(1);
+            actualEntrance = match.captured(2).toInt();
+        }
+    }
+
+    QString actualMprPath;
+    QString actualMobPath;
+    const QRegularExpression loaderExpression(
+        "redirecting normal single-player transition loader mpr=\\\"([^\\\"]+)\\\" mob=\\\"([^\\\"]+)\\\"");
+    QRegularExpressionMatchIterator loaderMatches = loaderExpression.globalMatch(bridgeResult);
+    while(loaderMatches.hasNext())
+    {
+        const QRegularExpressionMatch match = loaderMatches.next();
+        actualMprPath = match.captured(1);
+        actualMobPath = match.captured(2);
+    }
+
+    const bool gameplayReady = bridgeResult.contains(
+        QRegularExpression("RUNTIME_STATE.*to=GameplayReady"));
+    const bool stagedLoaderObserved = bridgeResult.contains(
+        "DIRECT_LAUNCH staged map loader returned result=1")
+        || completedReloadSequence != 0;
+    const QJsonObject liveFiles = manifest.value("liveFiles").toObject();
+    const bool actualMprMatchesOwnedPayload = !actualMprPath.isEmpty()
+        && QFileInfo(actualMprPath).absoluteFilePath().compare(
+            QFileInfo(liveFiles.value("mprPath").toString()).absoluteFilePath(),
+            Qt::CaseInsensitive) == 0;
+    const bool actualMobMatchesOwnedPayload = !actualMobPath.isEmpty()
+        && QFileInfo(actualMobPath).absoluteFilePath().compare(
+            QFileInfo(liveFiles.value("mobPath").toString()).absoluteFilePath(),
+            Qt::CaseInsensitive) == 0;
+    const bool payloadHashesValidated = stagedLoaderObserved
+        && actualMprMatchesOwnedPayload && actualMobMatchesOwnedPayload
+        && !requestedMprHash.isEmpty() && !requestedMobHash.isEmpty();
+    const int playerInitializations = bridgeResult.count(
+        "DIRECT_LAUNCH initialized New Game player");
+
+    bool sourceFilesUnchanged = true;
+    QJsonArray changedSources;
+    const QJsonObject sources = manifest.value("sourceSha256").toObject();
+    for(auto it = sources.begin(); it != sources.end(); ++it)
+    {
+        if(fileSha256(it.key()).compare(it.value().toString(), Qt::CaseInsensitive) != 0)
+        {
+            sourceFilesUnchanged = false;
+            changedSources.append(it.key());
+        }
+    }
+
+    bool cleanupComplete = true;
+    QJsonArray retainedArtifacts;
+    const auto checkRemoved = [&cleanupComplete, &retainedArtifacts](const QString& path)
+    {
+        if(!path.isEmpty() && QFileInfo::exists(path))
+        {
+            cleanupComplete = false;
+            retainedArtifacts.append(path);
+        }
+    };
+    const QJsonObject live = manifest.value("liveFiles").toObject();
+    checkRemoved(live.value("mprPath").toString());
+    checkRemoved(live.value("mobPath").toString());
+    checkRemoved(manifest.value("bridge").toObject().value("path").toString());
+    checkRemoved(QDir(manifest.value("runRoot").toString()).filePath("generations"));
+    if(cleanupMessage.contains("Could not", Qt::CaseInsensitive)
+       || cleanupMessage.contains("Refused", Qt::CaseInsensitive)
+       || cleanupMessage.contains("Retained changed", Qt::CaseInsensitive))
+        cleanupComplete = false;
+
+    QJsonArray errors;
+    QJsonArray warnings;
+    const auto addUnique = [](QJsonArray* array, const QString& text)
+    {
+        if(!array || text.isEmpty()) return;
+        for(const QJsonValue& existing : *array)
+            if(existing.toString() == text) return;
+        array->append(text);
+    };
+    if(bridgeResult.trimmed().isEmpty())
+        addUnique(&errors, "The runtime bridge produced no result evidence.");
+    if(!gameplayReady || !stagedLoaderObserved)
+        addUnique(&errors, "The runtime did not prove a completed staged gameplay load.");
+    if(stagedLoaderObserved && !payloadHashesValidated)
+        addUnique(&errors, "The runtime loader paths could not be matched to the hash-verified staged payloads.");
+    if(actualZone.isEmpty())
+        addUnique(&errors, "The runtime did not report the actually initialized zone.");
+    else if(!requestedZone.isEmpty()
+            && actualZone.compare(requestedZone, Qt::CaseInsensitive) != 0)
+        addUnique(&errors, QString("Requested zone %1 but runtime reported %2.")
+                  .arg(requestedZone, actualZone));
+    if(requestedEntrance > 0 && actualEntrance != requestedEntrance)
+        addUnique(&errors, QString("Requested entrance %1 but runtime reported %2.")
+                  .arg(requestedEntrance).arg(actualEntrance));
+    if(requestedGeneration > 0 && actualGeneration > 0
+       && requestedGeneration != actualGeneration)
+        addUnique(&errors, QString("Requested save generation %1 but runtime committed %2.")
+                  .arg(requestedGeneration).arg(actualGeneration));
+    if(!sourceFilesUnchanged)
+        addUnique(&errors, "One or more source map files changed during the test.");
+    if(!cleanupComplete)
+        addUnique(&errors, "One or more owned runtime artifacts could not be cleaned up safely.");
+    if(exitStatus == int(QProcess::CrashExit) && !stopRequested)
+        addUnique(&errors, "The owned game process ended with a crash status.");
+    else if(exitCode != 0 && !stopRequested)
+        addUnique(&warnings, QString("The game returned non-zero exit code %1.").arg(exitCode));
+
+    const QStringList bridgeLines = bridgeResult.split('\n', QString::SkipEmptyParts);
+    for(const QString& line : bridgeLines)
+    {
+        if(line.contains(" failed", Qt::CaseInsensitive)
+           || line.contains(" refused", Qt::CaseInsensitive)
+           || line.contains(" disabled", Qt::CaseInsensitive))
+        {
+            const int marker = line.indexOf(QRegularExpression(
+                "(DIRECT_LAUNCH|HOT_RELOAD|BASE_PROBE)"));
+            addUnique(&errors, marker >= 0 ? line.mid(marker).trimmed() : line.trimmed());
+        }
+    }
+
+    report.insert("requestedZone", requestedZone);
+    report.insert("actualZone", actualZone);
+    report.insert("requestedEntrance", requestedEntrance);
+    report.insert("actualEntrance", actualEntrance);
+    report.insert("requestedGeneration", QString::number(requestedGeneration));
+    report.insert("actualGeneration", QString::number(actualGeneration));
+    report.insert("saveNamespace", saveNamespace);
+    report.insert("completedReloadSequence", QString::number(completedReloadSequence));
+    report.insert("mprSha256", requestedMprHash);
+    report.insert("mobSha256", requestedMobHash);
+    report.insert("actualMprSha256", actualMprMatchesOwnedPayload ? requestedMprHash : QString());
+    report.insert("actualMobSha256", actualMobMatchesOwnedPayload ? requestedMobHash : QString());
+    report.insert("actualMprPath", actualMprPath);
+    report.insert("actualMobPath", actualMobPath);
+    report.insert("gameplayReady", gameplayReady);
+    report.insert("stagedLoaderObserved", stagedLoaderObserved);
+    report.insert("payloadHashesValidated", payloadHashesValidated);
+    report.insert("playerInitializationCount", playerInitializations);
+    report.insert("reportedPlayerCount", playerInitializations > 0 ? 1 : -1);
+    report.insert("playerCountEvidence", playerInitializations > 0
+                  ? "New Game player-record initialization observed"
+                  : "not observed");
+    report.insert("sourceFilesUnchanged", sourceFilesUnchanged);
+    report.insert("changedSources", changedSources);
+    report.insert("cleanupComplete", cleanupComplete);
+    report.insert("retainedArtifacts", retainedArtifacts);
+    report.insert("errors", errors);
+    report.insert("warnings", warnings);
+    report.insert("errorCount", errors.size());
+    report.insert("warningCount", warnings.size());
+    report.insert("passed", errors.isEmpty());
+    report.insert("completedUtc", QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
+    return report;
+}
+
+bool CJmvMapTestLauncher::validateAutomatedResult(const QJsonObject& report,
+                                                  QStringList* findings)
+{
+    QStringList local;
+    if(report.value("schemaVersion").toInt() != 1)
+        local.append("Unsupported or missing test-result schema version.");
+    if(report.value("runId").toString().isEmpty())
+        local.append("The test result has no run ID.");
+    if(!report.value("gameplayReady").toBool())
+        local.append("Gameplay readiness was not proven.");
+    if(!report.value("stagedLoaderObserved").toBool())
+        local.append("The staged loader was not observed.");
+    if(!report.value("payloadHashesValidated").toBool())
+        local.append("The loaded payload hashes were not validated.");
+    if(report.value("actualZone").toString().isEmpty())
+        local.append("The actually loaded zone is missing.");
+    if(!report.value("sourceFilesUnchanged").toBool())
+        local.append("Source-file preservation failed.");
+    if(!report.value("cleanupComplete").toBool())
+        local.append("Runtime cleanup is incomplete.");
+    for(const QJsonValue& error : report.value("errors").toArray())
+        local.append(error.toString());
+    local.removeDuplicates();
+    if(findings) *findings = local;
+    return local.isEmpty();
+}
+
+bool CJmvMapTestLauncher::analyzeCompletedRun(const QString& runRoot,
+                                              QJsonObject* report,
+                                              QStringList* findings)
+{
+    if(!report)
+        return false;
+    QFile resultFile(QDir(runRoot).filePath("result.json"));
+    if(!resultFile.open(QIODevice::ReadOnly | QIODevice::Text))
+    {
+        if(findings) findings->append("The completed run has no readable result.json.");
+        return false;
+    }
+    QJsonParseError error{};
+    const QJsonDocument document = QJsonDocument::fromJson(resultFile.readAll(), &error);
+    if(error.error != QJsonParseError::NoError || !document.isObject())
+    {
+        if(findings) findings->append("The completed run result is not valid JSON.");
+        return false;
+    }
+    *report = document.object();
+    return validateAutomatedResult(*report, findings);
 }
 
 bool CJmvMapTestLauncher::isRunning() const
@@ -894,6 +1193,7 @@ bool CJmvMapTestLauncher::launch(const SJmvMapTestLaunchInput& input, QString* e
     m_baseProbe = false;
     m_manifest = QJsonObject();
     m_cleanupComplete = false;
+    m_stopRequested = false;
     if(!stage(input, error))
     {
         if(error && !error->isEmpty())
@@ -1656,6 +1956,7 @@ void CJmvMapTestLauncher::stop()
 {
     if(!isRunning())
         return;
+    m_stopRequested = true;
     appendRunLog("Stop Test requested by user");
     m_process->terminate();
     QTimer::singleShot(5000, this, [this]()

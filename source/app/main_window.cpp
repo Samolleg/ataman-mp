@@ -38,6 +38,10 @@
 #include <QSplitter>
 #include <QCryptographicHash>
 #include <QElapsedTimer>
+#include <QFrame>
+#include <QResizeEvent>
+#include <QJsonArray>
+#include <QJsonDocument>
 #include <QtConcurrent/QtConcurrentRun>
 
 #include <limits>
@@ -552,6 +556,8 @@ MainWindow::MainWindow(QWidget* parent) :
             QTimer::singleShot(0, this, &MainWindow::close);
         }
     });
+    connect(m_mapTestLauncher, &CJmvMapTestLauncher::testReportReady,
+            this, &MainWindow::showMapTestResultNotification);
     connect(m_mapTestLauncher, &CJmvMapTestLauncher::hotReloadReady, this, [this]()
     {
         statusBar()->showMessage(tr("JMV map test is ready for Ctrl+F5 hot reload."), 6000);
@@ -2182,6 +2188,94 @@ void MainWindow::showValidationWarning(const QString& title, const QString& text
         showMobFamilyValidation();
 }
 
+void MainWindow::showMapTestResultNotification(const QJsonObject& report)
+{
+    const int errors = report.value("errorCount").toInt();
+    const int warnings = report.value("warningCount").toInt();
+    const QString reportText = QString::fromUtf8(
+        QJsonDocument(report).toJson(QJsonDocument::Compact));
+    ei::log(errors > 0 ? eLogFatal : (warnings > 0 ? eLogWarning : eLogInfo),
+            "JMV authoritative test result: " + reportText);
+    if(errors == 0 && warnings == 0)
+        return;
+
+    if(!m_mapTestResultNotification)
+    {
+        m_mapTestResultNotification = new QFrame(this);
+        m_mapTestResultNotification->setObjectName("mapTestResultNotification");
+        m_mapTestResultNotification->setFrameShape(QFrame::StyledPanel);
+        m_mapTestResultNotification->setAttribute(Qt::WA_ShowWithoutActivating);
+        m_mapTestResultNotification->setFocusPolicy(Qt::NoFocus);
+        m_mapTestResultNotification->setStyleSheet(
+            "QFrame#mapTestResultNotification { background: #292929; border: 1px solid #808080; border-radius: 4px; }"
+            "QLabel { color: #eeeeee; } QPushButton { min-width: 88px; }");
+        QVBoxLayout* layout = new QVBoxLayout(m_mapTestResultNotification);
+        layout->setContentsMargins(12, 10, 12, 10);
+        m_mapTestResultLabel = new QLabel(m_mapTestResultNotification);
+        m_mapTestResultLabel->setWordWrap(true);
+        m_mapTestResultLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
+        m_mapTestResultLabel->setMaximumWidth(520);
+        layout->addWidget(m_mapTestResultLabel);
+        QHBoxLayout* buttons = new QHBoxLayout;
+        buttons->addStretch(1);
+        QPushButton* openLog = new QPushButton(tr("Open Log"), m_mapTestResultNotification);
+        QPushButton* dismiss = new QPushButton(tr("Dismiss"), m_mapTestResultNotification);
+        buttons->addWidget(openLog);
+        buttons->addWidget(dismiss);
+        layout->addLayout(buttons);
+        m_mapTestResultTimer = new QTimer(m_mapTestResultNotification);
+        m_mapTestResultTimer->setSingleShot(true);
+        connect(m_mapTestResultTimer, &QTimer::timeout,
+                m_mapTestResultNotification, &QWidget::hide);
+        connect(dismiss, &QPushButton::clicked,
+                m_mapTestResultNotification, &QWidget::hide);
+        connect(openLog, &QPushButton::clicked, this, [this]()
+        {
+            m_mapTestResultTimer->stop();
+            if(m_mapTestResultLogPath.isEmpty()
+               || !QDesktopServices::openUrl(QUrl::fromLocalFile(m_mapTestResultLogPath)))
+                statusBar()->showMessage(tr("The test-run log could not be opened."), 6000);
+            m_mapTestResultNotification->hide();
+        });
+    }
+
+    QString detail;
+    const QJsonArray problems = errors > 0 ? report.value("errors").toArray()
+                                           : report.value("warnings").toArray();
+    if(!problems.isEmpty())
+        detail = problems.first().toString().simplified();
+    if(detail.size() > 180)
+        detail = detail.left(177) + "...";
+    m_mapTestResultLabel->setText(
+        tr("Map test finished with %1 error(s) and %2 warning(s).\n"
+           "Requested: %3 / entrance %4   Runtime: %5 / entrance %6\n%7")
+            .arg(errors).arg(warnings)
+            .arg(report.value("requestedZone").toString())
+            .arg(report.value("requestedEntrance").toInt())
+            .arg(report.value("actualZone").toString())
+            .arg(report.value("actualEntrance").toInt())
+            .arg(detail));
+    m_mapTestResultLogPath = report.value("runLogPath").toString();
+    if(m_mapTestResultLogPath.isEmpty())
+        m_mapTestResultLogPath = report.value("bridgeResultPath").toString();
+    m_mapTestResultNotification->adjustSize();
+    positionMapTestResultNotification();
+    m_mapTestResultNotification->show();
+    m_mapTestResultNotification->raise();
+    m_mapTestResultTimer->start(9000);
+}
+
+void MainWindow::positionMapTestResultNotification()
+{
+    if(!m_mapTestResultNotification)
+        return;
+    const int right = 18;
+    const int bottom = (statusBar() ? statusBar()->height() : 0) + 18;
+    m_mapTestResultNotification->move(
+        qMax(0, width() - m_mapTestResultNotification->width() - right),
+        qMax(0, height() - m_mapTestResultNotification->height() - bottom));
+}
+
 QString MainWindow::validationWarningPreview(
     const QVector<SMobFamilyFinding>& findings) const
 {
@@ -3127,6 +3221,12 @@ void MainWindow::on_actionCopy_IDs_to_clipboard_triggered()
 void MainWindow::on_actionOpen_2_triggered()
 {
     m_settings->onShow(eOptSetGeneral);
+}
+
+void MainWindow::resizeEvent(QResizeEvent* e)
+{
+    QMainWindow::resizeEvent(e);
+    positionMapTestResultNotification();
 }
 
 void MainWindow::closeEvent(QCloseEvent *e)

@@ -60,6 +60,17 @@ public:
 
     static QString testRunsRootPath();
     static QString generationSavesPath(const QString& runRoot, quint64 generation);
+    static QJsonObject buildAuthoritativeResult(const QJsonObject& manifest,
+                                                const QString& bridgeResult,
+                                                int exitCode,
+                                                int exitStatus,
+                                                bool stopRequested,
+                                                const QString& cleanupMessage);
+    static bool validateAutomatedResult(const QJsonObject& report,
+                                        QStringList* findings = nullptr);
+    static bool analyzeCompletedRun(const QString& runRoot,
+                                    QJsonObject* report,
+                                    QStringList* findings = nullptr);
     static QString recoverInterruptedRuns(bool* pending = nullptr);
     static bool hasActiveInterruptedRun(QString* description = nullptr);
     static bool requestCloseActiveInterruptedRun(QString* error = nullptr);
@@ -88,6 +99,7 @@ public:
 signals:
     void testStarted(const QString& runId, const QString& temporaryMapName);
     void testFinished(const QString& runId, int exitCode, const QString& cleanupMessage);
+    void testReportReady(const QJsonObject& report);
     void testError(const QString& message);
     void hotReloadQueued(quint64 sequence, const QString& zoneId);
     void hotReloadReady();
@@ -139,6 +151,7 @@ private:
     quint64 m_pendingSaveGeneration{0};
     int m_hotReloadResultPolls{0};
     bool m_cleanupComplete;
+    bool m_stopRequested{false};
     bool m_baseProbe;
     bool m_recoveryPending{false};
     bool m_lastPublishedRecoveryPending{false};
