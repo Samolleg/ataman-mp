@@ -43,7 +43,9 @@ public:
     float paintRadius() const;
     ETerrainTileBrushShape paintShape() const;
     qint32 paintTerrainType(bool* selected = nullptr) const;
-    void setPaintTerrainTypes(const QVector<QPair<qint32, QString>>& terrainTypes);
+    void setPaintTerrainTypes(const QVector<QPair<qint32, QString>>& landTypes,
+                              const QVector<QPair<qint32, QString>>& overlayTypes,
+                              const QString& status = QString());
     void selectPaintTerrainType(qint32 terrainType);
 
 signals:
@@ -68,7 +70,11 @@ private:
     QLabel* m_tilesetStatus;
     QWidget* m_sculptControls;
     QWidget* m_paintControls;
+    QVector<QPair<qint32, QString>> m_landPaintTypes;
+    QVector<QPair<qint32, QString>> m_overlayPaintTypes;
+    QString m_paintCatalogStatus;
     void updateModeVisibility();
+    void refreshPaintTerrainTypes();
 };
 
 #endif

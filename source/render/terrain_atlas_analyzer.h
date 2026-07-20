@@ -1,41 +1,54 @@
 #ifndef TERRAIN_ATLAS_ANALYZER_H
 #define TERRAIN_ATLAS_ANALYZER_H
 
-#include <QImage>
+#include <QString>
 #include <QVector>
 
 #include "terrain_edit_model.h"
 
 class CValidationReport;
 
+enum class ETerrainAtlasLayer
+{
+    Land,
+    Overlay
+};
+
 struct STerrainAtlasMaterial
 {
     qint32 id{0};
-    qint32 surfaceType{0};
+    QString name;
+    ETerrainAtlasLayer layer{ETerrainAtlasLayer::Land};
     int representativeSlot{-1};
     int pureVariantCount{0};
 };
 
 struct STerrainAtlasAnalysis
 {
-    CTerrainTransitionCatalog catalog;
+    CTerrainTransitionCatalog landCatalog;
+    CTerrainTransitionCatalog overlayCatalog;
     QVector<STerrainAtlasMaterial> materials;
-    int analyzedSlots{0};
+    QString templateName;
+    int expectedSlots{0};
     int describedSlots{0};
-    int ambiguousSlots{0};
     bool usable{false};
+
+    const CTerrainTransitionCatalog& catalog(ETerrainTileLayer layer) const
+    {
+        return layer == ETerrainTileLayer::Land ? landCatalog : overlayCatalog;
+    }
 };
 
-// Conservative, read-only analysis of already-authored atlas pixels. It finds
-// visually uniform source tiles, groups natural variants, then describes other
-// tiles by their four nearest source-material corners. Ambiguous slots are
-// excluded rather than guessed.
+// Resolves an MPR namespace to an authored slot-semantic contract. Atlas pixels
+// remain user supplied and are never edited; the contract only describes which
+// material family occupies each authored slot corner. Unknown layouts fail
+// closed instead of being guessed from colors or gameplay surface categories.
 class CTerrainAtlasAnalyzer
 {
 public:
-    static STerrainAtlasAnalysis analyze(
-        const QVector<QImage>& images, const QVector<qint32>& surfaceTypes,
-        CValidationReport* report = nullptr);
+    static STerrainAtlasAnalysis analyze(const QString& mprNamespace,
+                                         int atlasSlotCount,
+                                         CValidationReport* report = nullptr);
 };
 
 #endif

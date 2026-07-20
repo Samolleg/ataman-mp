@@ -23,7 +23,7 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     , m_paintTerrainType(new QComboBox(this))
     , m_paintRadius(new QDoubleSpinBox(this))
     , m_paintShape(new QComboBox(this))
-    , m_tilesetStatus(new QLabel(tr("Visual atlas materials are analyzed automatically when an MPR loads."), this))
+    , m_tilesetStatus(new QLabel(tr("Terrain materials are loaded from the MPR namespace template."), this))
     , m_sculptControls(new QWidget(this))
     , m_paintControls(new QWidget(this))
 {
@@ -74,7 +74,7 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     QVBoxLayout* paintLayout = new QVBoxLayout(m_paintControls);
     paintLayout->setContentsMargins(0, 0, 0, 0);
     QLabel* paintHelp = new QLabel(tr(
-        "Left-drag paints an automatically identified visual atlas material. "
+        "Left-drag paints a material defined by the MPR namespace template. "
         "Endurance resolves compatible corner transitions and rotations in a one-cell seam halo. Right-click samples the material from the map. "
         "Overlay painting changes only already-active overlay cells and never creates liquid implicitly."), this);
     paintHelp->setWordWrap(true);
@@ -117,6 +117,7 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     connect(m_mode, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int)
     {
         updateModeVisibility();
+        refreshPaintTerrainTypes();
         emit editingStateChanged();
     });
     updateModeVisibility();
@@ -190,15 +191,32 @@ qint32 CLandscapeTools::paintTerrainType(bool* selected) const
     return value.isValid() ? value.toInt() : 0;
 }
 void CLandscapeTools::setPaintTerrainTypes(
-    const QVector<QPair<qint32, QString>>& terrainTypes)
+    const QVector<QPair<qint32, QString>>& landTypes,
+    const QVector<QPair<qint32, QString>>& overlayTypes,
+    const QString& status)
 {
+    m_landPaintTypes = landTypes;
+    m_overlayPaintTypes = overlayTypes;
+    m_paintCatalogStatus = status;
+    refreshPaintTerrainTypes();
+}
+void CLandscapeTools::refreshPaintTerrainTypes()
+{
+    const QVector<QPair<qint32, QString>>& terrainTypes =
+        editMode() == ELandscapeEditMode::OverlayPaint
+            ? m_overlayPaintTypes : m_landPaintTypes;
+    const QSignalBlocker blocker(m_paintTerrainType);
     m_paintTerrainType->clear();
     m_paintTerrainType->addItem(tr("Choose a material..."), QVariant());
     for(const auto& terrainType : terrainTypes)
         m_paintTerrainType->addItem(terrainType.second, terrainType.first);
-    m_tilesetStatus->setText(terrainTypes.isEmpty()
-        ? tr("No safe visual materials were identified. Painting is disabled for this atlas.")
-        : tr("Atlas analysis ready: %1 visual material(s).").arg(terrainTypes.size()));
+    if(!m_paintCatalogStatus.isEmpty())
+        m_tilesetStatus->setText(m_paintCatalogStatus);
+    else
+        m_tilesetStatus->setText(terrainTypes.isEmpty()
+            ? tr("No registered materials are available for this layer.")
+            : tr("Namespace template ready: %1 material(s) for this layer.")
+                  .arg(terrainTypes.size()));
 }
 void CLandscapeTools::selectPaintTerrainType(qint32 terrainType)
 {

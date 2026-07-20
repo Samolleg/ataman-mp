@@ -307,7 +307,8 @@ private slots:
     void terrainHeightmapImportIsDeterministicAndSeamAware();
     void terrainDiagnosticsArePreApplyAndPolicyExplicit();
     void terrainTilePaintingIsUndoableLocalizedAndNamespaceSafe();
-    void terrainAtlasAnalysisSeparatesVisualMaterialsAndTransitions();
+    void zone1NamespaceTemplateSeparatesLandOverlayAndVariants();
+    void zone1NamespaceTemplateMatchesPrivateFixture();
     void terrainHeightTransactionReopensAndPreservesOverlay();
     void conflictingTerrainSeamIsPreservedAndNotEditable();
     void malformedMprTableIsRejected();
@@ -1764,39 +1765,121 @@ void EnduranceDocumentTests::terrainTilePaintingIsUndoableLocalizedAndNamespaceS
              overlay.deltas.front().after);
 }
 
-void EnduranceDocumentTests::terrainAtlasAnalysisSeparatesVisualMaterialsAndTransitions()
+void EnduranceDocumentTests::zone1NamespaceTemplateSeparatesLandOverlayAndVariants()
 {
-    const QColor grass(35, 125, 42);
-    const QColor ground(125, 78, 34);
-    QImage grassTile(128, 128, QImage::Format_RGB32);
-    QImage groundTile(128, 128, QImage::Format_RGB32);
-    QImage transition(128, 128, QImage::Format_RGB32);
-    grassTile.fill(grass);
-    groundTile.fill(ground);
-    for(int y = 0; y < transition.height(); ++y)
-        for(int x = 0; x < transition.width(); ++x)
-            transition.setPixelColor(x, y, y < transition.height() / 2 ? grass : ground);
-
     CValidationReport report;
-    const STerrainAtlasAnalysis analysis = CTerrainAtlasAnalyzer::analyze(
-        QVector<QImage>({grassTile, groundTile, transition}),
-        QVector<qint32>({1, 1, 1}), &report);
+    const STerrainAtlasAnalysis analysis =
+        CTerrainAtlasAnalyzer::analyze("zone1", 512, &report);
     QVERIFY2(analysis.usable, qPrintable(report.toText()));
-    QCOMPARE(analysis.materials.size(), 2);
-    QCOMPARE(analysis.analyzedSlots, 3);
-    QCOMPARE(analysis.describedSlots, 3);
-    QCOMPARE(analysis.ambiguousSlots, 0);
+    QCOMPARE(analysis.templateName, QString("Zone1 stock slot layout"));
+    QCOMPARE(analysis.materials.size(), 9);
+    QCOMPARE(analysis.describedSlots, 512);
+    int landMaterials = 0;
+    int overlayMaterials = 0;
+    for(const STerrainAtlasMaterial& material : analysis.materials)
+    {
+        if(material.layer == ETerrainAtlasLayer::Land)
+            ++landMaterials;
+        else
+            ++overlayMaterials;
+    }
+    QCOMPARE(landMaterials, 7);
+    QCOMPARE(overlayMaterials, 2);
+    QCOMPARE(analysis.materials.at(2).name, QString("Grass / dark"));
+    QCOMPARE(analysis.materials.at(3).name, QString("Grass / common"));
+    QCOMPARE(analysis.materials.at(4).name, QString("Swamp"));
 
     SMprPackedTile packed;
-    packed.tileIndex = 2;
+    packed.tileIndex = 50;
     bool found = false;
     const STerrainTransitionSignature signature =
-        analysis.catalog.signatureForPacked(packed.encode(), &found);
+        analysis.landCatalog.signatureForPacked(packed.encode(), &found);
     QVERIFY(found);
-    QCOMPARE(signature.northWest, signature.northEast);
-    QCOMPARE(signature.southWest, signature.southEast);
-    QVERIFY(signature.northWest != signature.southWest);
-    QCOMPARE(analysis.catalog.size(), 12);
+    QCOMPARE(signature.northWest, 4);
+    QCOMPARE(signature.northEast, 3);
+    QCOMPARE(signature.southEast, 4);
+    QCOMPARE(signature.southWest, 4);
+    packed.tileIndex = 16;
+    analysis.landCatalog.signatureForPacked(packed.encode(), &found);
+    QVERIFY(!found);
+    analysis.overlayCatalog.signatureForPacked(packed.encode(), &found);
+    QVERIFY(found);
+    QCOMPARE(analysis.materials.at(5).representativeSlot, 16);
+
+    CValidationReport unknownReport;
+    QVERIFY(!CTerrainAtlasAnalyzer::analyze("custom", 512, &unknownReport).usable);
+    QVERIFY(unknownReport.hasErrors());
+    CValidationReport countReport;
+    QVERIFY(!CTerrainAtlasAnalyzer::analyze("zone1", 448, &countReport).usable);
+    QVERIFY(countReport.hasErrors());
+}
+
+void EnduranceDocumentTests::zone1NamespaceTemplateMatchesPrivateFixture()
+{
+    const QString fixture = qEnvironmentVariable("ENDURANCE_ZONE1_MPR_FIXTURE");
+    if(fixture.isEmpty())
+        QSKIP("Set ENDURANCE_ZONE1_MPR_FIXTURE to a copied private Zone1 MPR.");
+    CMprDocument document;
+    CValidationReport openReport;
+    QVERIFY2(document.load(QFileInfo(fixture), &openReport), qPrintable(openReport.toText()));
+    QCOMPARE(document.mapInfo().innerNamespace.toLower(), QString("zone1"));
+    CTerrainEditModel terrain;
+    CValidationReport terrainReport;
+    QVERIFY2(terrain.load(document, &terrainReport), qPrintable(terrainReport.toText()));
+    CValidationReport templateReport;
+    const STerrainAtlasAnalysis analysis = CTerrainAtlasAnalyzer::analyze(
+        document.mapInfo().innerNamespace, document.mapInfo().tileTypes.size(), &templateReport);
+    QVERIFY2(analysis.usable, qPrintable(templateReport.toText()));
+
+    int decoded = 0;
+    for(const ETerrainTileLayer layer : {ETerrainTileLayer::Land, ETerrainTileLayer::Overlay})
+    {
+        const CTerrainTransitionCatalog& catalog = analysis.catalog(layer);
+        for(int y = 0; y < terrain.tileCountY(); ++y)
+        {
+            for(int x = 0; x < terrain.tileCountX(); ++x)
+            {
+                bool available = false;
+                const quint16 packed = terrain.packedTile(x, y, layer, &available);
+                if(!available)
+                    continue;
+                bool found = false;
+                catalog.signatureForPacked(packed, &found);
+                QVERIFY2(found, qPrintable(QString("Undescribed %1 tile at %2,%3: 0x%4")
+                    .arg(layer == ETerrainTileLayer::Land ? "land" : "overlay")
+                    .arg(x).arg(y).arg(packed, 4, 16, QLatin1Char('0'))));
+                ++decoded;
+            }
+        }
+    }
+    QVERIFY(decoded > 0);
+
+    QSet<qint32> paintableMaterials;
+    STerrainTileBrush brush;
+    brush.radius = 0.0f;
+    brush.shape = ETerrainTileBrushShape::Square;
+    for(const STerrainAtlasMaterial& material : analysis.materials)
+    {
+        const ETerrainTileLayer layer = material.layer == ETerrainAtlasLayer::Land
+            ? ETerrainTileLayer::Land : ETerrainTileLayer::Overlay;
+        for(int y = 0; y < terrain.tileCountY() && !paintableMaterials.contains(material.id); ++y)
+        {
+            for(int x = 0; x < terrain.tileCountX(); ++x)
+            {
+                brush.centerX = float(x);
+                brush.centerY = float(y);
+                CValidationReport paintReport;
+                const STerrainTileCommand command = terrain.makeSemanticTilePaint(
+                    brush, layer, material.id, analysis.catalog(layer), 12345u, &paintReport);
+                if(!command.isEmpty())
+                {
+                    paintableMaterials.insert(material.id);
+                    break;
+                }
+            }
+        }
+    }
+    QCOMPARE(paintableMaterials.size(), analysis.materials.size());
 }
 
 void EnduranceDocumentTests::terrainHeightTransactionReopensAndPreservesOverlay()

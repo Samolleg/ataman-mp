@@ -326,11 +326,26 @@ void CView::attach(CSettings* pSettings, QTableWidget* pParam, QUndoStack* pStac
         int index = -1;
         int rotation = 0;
         m_pTileForm->getSelectedTile(index, rotation);
-        Q_UNUSED(rotation);
-        if(m_landscapeTools && index >= 0
-           && index < m_mprDocument.mapInfo().tileTypes.size())
-            m_landscapeTools->selectPaintTerrainType(
-                m_mprDocument.mapInfo().tileTypes.at(index));
+        if(m_landscapeTools && index >= 0 && m_terrainAtlasAnalysis.usable)
+        {
+            SMprPackedTile packed;
+            packed.atlasIndex = quint8(index / 64);
+            packed.tileIndex = quint8(index % 64);
+            packed.rotation = quint8(rotation & 3);
+            const ETerrainTileLayer layer = m_landscapeTools->editMode()
+                    == ELandscapeEditMode::OverlayPaint
+                ? ETerrainTileLayer::Overlay : ETerrainTileLayer::Land;
+            bool found = false;
+            const STerrainTransitionSignature signature =
+                m_terrainAtlasAnalysis.catalog(layer).signatureForPacked(
+                    packed.encode(), &found);
+            if(found && signature.northWest == signature.northEast
+               && signature.northWest == signature.southEast
+               && signature.northWest == signature.southWest)
+                m_landscapeTools->selectPaintTerrainType(signature.northWest);
+            else
+                m_landscapeTools->selectPaintTerrainType(-1);
+        }
     });
 
     // MOB-only workspaces need the same responsive viewport as terrain-backed
@@ -1214,11 +1229,10 @@ void CView::updateTileForm(bool bGenerateNewTable)
 void CView::rebuildTerrainAutoCatalog()
 {
     m_terrainAtlasAnalysis = STerrainAtlasAnalysis();
-    m_terrainTransitionCatalog = CTerrainTransitionCatalog();
     m_terrainMaterialRepresentatives.clear();
     m_terrainPaintAudit.clear();
     if(m_landscapeTools)
-        m_landscapeTools->setPaintTerrainTypes({});
+        m_landscapeTools->setPaintTerrainTypes({}, {});
     QByteArray seedText = m_mprDocument.mapInfo().innerNamespace.toUtf8();
     quint32 seed = 2166136261u;
     for(char byte : seedText)
@@ -1231,27 +1245,35 @@ void CView::rebuildTerrainAutoCatalog()
         return;
     CValidationReport report;
     m_terrainAtlasAnalysis = CTerrainAtlasAnalyzer::analyze(
-        m_pTileForm->tileImages(), m_mprDocument.mapInfo().tileTypes, &report);
-    m_terrainTransitionCatalog = m_terrainAtlasAnalysis.catalog;
-    QVector<QPair<qint32, QString>> choices;
-    const QMap<ETileType, QString>& knownTypes = CResourceStringList::getInstance()->tileTypes();
+        m_mprDocument.mapInfo().innerNamespace,
+        m_pTileForm->tileImages().size(), &report);
+    QVector<QPair<qint32, QString>> landChoices;
+    QVector<QPair<qint32, QString>> overlayChoices;
     for(const STerrainAtlasMaterial& material : m_terrainAtlasAnalysis.materials)
     {
-        const QString surfaceHint = knownTypes.value(ETileType(material.surfaceType), tr("surface %1").arg(material.surfaceType));
+        QVector<QPair<qint32, QString>>& choices =
+            material.layer == ETerrainAtlasLayer::Land ? landChoices : overlayChoices;
         choices.append(qMakePair(material.id,
-            tr("Material %1 — slot %2 (%3)").arg(material.id)
-                .arg(material.representativeSlot).arg(surfaceHint)));
+            tr("%1 (%2 natural variant(s))")
+                .arg(material.name).arg(material.pureVariantCount)));
         m_terrainMaterialRepresentatives.insert(material.id, material.representativeSlot);
     }
-    m_landscapeTools->setPaintTerrainTypes(choices);
+    const QString status = m_terrainAtlasAnalysis.usable
+        ? tr("%1 loaded: %2 land and %3 overlay materials.")
+              .arg(m_terrainAtlasAnalysis.templateName)
+              .arg(landChoices.size()).arg(overlayChoices.size())
+        : tr("No authored slot template is registered for namespace '%1'. Semantic painting is disabled.")
+              .arg(m_mprDocument.mapInfo().innerNamespace);
+    m_landscapeTools->setPaintTerrainTypes(landChoices, overlayChoices, status);
     ei::log(report.hasErrors() ? eLogWarning : eLogInfo,
-        QString("Automatic terrain atlas analysis: %1 visual materials, %2/%3 described slots, %4 ambiguous%5")
-            .arg(choices.size()).arg(m_terrainAtlasAnalysis.describedSlots)
-            .arg(m_terrainAtlasAnalysis.analyzedSlots).arg(m_terrainAtlasAnalysis.ambiguousSlots)
+        QString("Terrain namespace template: %1, %2 land materials, %3 overlay materials, %4/%5 described slots%6")
+            .arg(m_terrainAtlasAnalysis.templateName)
+            .arg(landChoices.size()).arg(overlayChoices.size())
+            .arg(m_terrainAtlasAnalysis.describedSlots).arg(m_terrainAtlasAnalysis.expectedSlots)
             .arg(report.findings().isEmpty() ? QString() : "\n" + report.toText()));
     emit updateMsg(m_terrainAtlasAnalysis.usable
-        ? tr("Automatic atlas analysis ready: %1 visual materials.").arg(choices.size())
-        : tr("This atlas could not be analyzed safely; terrain painting is disabled."));
+        ? status
+        : tr("This atlas layout is not registered; semantic terrain painting is disabled."));
 }
 
 void CView::exportTerrainPaintDiagnostic()
@@ -1277,10 +1299,10 @@ void CView::exportTerrainPaintDiagnostic()
     root.insert("atlasSlotCount", m_pTileForm ? m_pTileForm->tileImages().size() : 0);
     root.insert("atlasPixelSha256", m_pTileForm
         ? QString::fromLatin1(terrainAtlasPixelSha256(m_pTileForm->tileImages())) : QString());
-    root.insert("analysisMode", "automatic-visual-corners-v1");
-    root.insert("inferredMaterialCount", m_terrainAtlasAnalysis.materials.size());
+    root.insert("analysisMode", "authored-namespace-template-v1");
+    root.insert("templateName", m_terrainAtlasAnalysis.templateName);
+    root.insert("registeredMaterialCount", m_terrainAtlasAnalysis.materials.size());
     root.insert("describedAtlasSlots", m_terrainAtlasAnalysis.describedSlots);
-    root.insert("ambiguousAtlasSlots", m_terrainAtlasAnalysis.ambiguousSlots);
     root.insert("changedMprSavingEnabled", false);
     QJsonArray operations;
     for(const STerrainTileDelta& delta : m_terrainPaintAudit)
@@ -2126,7 +2148,9 @@ void CView::pickTile(QVector3D posOnLand, bool bLand)
         const quint16 packed = m_terrainEdit.packedTile(globalX, globalY,
             bLand ? ETerrainTileLayer::Land : ETerrainTileLayer::Overlay, &found);
         const STerrainTransitionSignature signature = found
-            ? m_terrainTransitionCatalog.signatureForPacked(packed, &found)
+            ? m_terrainAtlasAnalysis.catalog(
+                  bLand ? ETerrainTileLayer::Land : ETerrainTileLayer::Overlay)
+                  .signatureForPacked(packed, &found)
             : STerrainTransitionSignature();
         if(found && signature.northWest == signature.northEast
            && signature.northWest == signature.southEast
@@ -2159,8 +2183,8 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
     if(!materialSelected)
     {
         emit updateMsg(m_terrainAtlasAnalysis.usable
-            ? tr("Choose a visual terrain material before painting.")
-            : tr("Automatic atlas analysis found no safe visual materials for painting."));
+            ? tr("Choose a terrain material before painting.")
+            : tr("No authored slot template is registered for this atlas namespace."));
         return;
     }
     STerrainTileBrush brush;
@@ -2171,7 +2195,9 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
     CValidationReport report;
     const STerrainTileCommand command = m_terrainEdit.makeSemanticTilePaint(
         brush, bLand ? ETerrainTileLayer::Land : ETerrainTileLayer::Overlay,
-        terrainType, m_terrainTransitionCatalog, m_terrainSemanticSeed, &report);
+        terrainType, m_terrainAtlasAnalysis.catalog(
+            bLand ? ETerrainTileLayer::Land : ETerrainTileLayer::Overlay),
+        m_terrainSemanticSeed, &report);
     if(command.isEmpty())
     {
         if(report.hasErrors())

@@ -299,7 +299,6 @@ private:
     CMprDocument m_mprDocument;
     CTerrainEditModel m_terrainEdit;
     STerrainAtlasAnalysis m_terrainAtlasAnalysis;
-    CTerrainTransitionCatalog m_terrainTransitionCatalog;
     QMap<qint32, int> m_terrainMaterialRepresentatives;
     QVector<STerrainTileDelta> m_terrainPaintAudit;
     quint32 m_terrainSemanticSeed{0};

@@ -1172,7 +1172,7 @@ STerrainTileCommand CTerrainEditModel::makeSemanticTilePaint(
     {
         if(report)
             report->add("terrain.semantic_type", EValidationSeverity::Error,
-                        "The selected visual material is absent from the automatic atlas analysis");
+                        "The selected material is absent from the registered namespace template");
         return command;
     }
 
@@ -1230,19 +1230,11 @@ STerrainTileCommand CTerrainEditModel::makeSemanticTilePaint(
         return command;
     }
 
-    // Decode only the footprint and its one-tile halo into a shared corner
-    // lattice. This makes seams explicit and keeps stamp cost proportional to
-    // brush area instead of total map size.
-    QMap<int, qint32> corners;
-    const auto setCorner = [&](int cornerX, int cornerY, qint32 value) -> bool
-    {
-        const int key = cornerY * (width + 1) + cornerX;
-        const auto existing = corners.constFind(key);
-        if(existing != corners.constEnd() && existing.value() != value)
-            return false;
-        corners.insert(key, value);
-        return true;
-    };
+    // Decode only the footprint and its one-tile halo. Shipped maps are not a
+    // globally consistent Wang lattice: adjacent hand-authored tiles can carry
+    // different abstract corner labels while looking intentional. Preserve
+    // every existing halo signature independently and impose the painted
+    // material only at vertices touched by the stroke.
     QMap<int, STerrainTransitionSignature> existingSignatures;
     QMap<int, quint16> existingTiles;
     for(int index : affected)
@@ -1253,17 +1245,11 @@ STerrainTileCommand CTerrainEditModel::makeSemanticTilePaint(
         const quint16 current = packedTile(x, y, layer, &available);
         bool found = false;
         const STerrainTransitionSignature signature = catalog.signatureForPacked(current, &found);
-        if(!available || !found
-           || !setCorner(x, y, signature.northWest)
-           || !setCorner(x + 1, y, signature.northEast)
-           || !setCorner(x + 1, y + 1, signature.southEast)
-           || !setCorner(x, y + 1, signature.southWest))
+        if(!available || !found)
         {
             if(report)
                 report->add("terrain.semantic_catalog", EValidationSeverity::Error,
-                            found
-                                ? "Existing tiles disagree at a shared semantic corner"
-                                : "An existing tile was not safely described by automatic atlas analysis",
+                            "An existing tile is absent from the registered namespace template",
                             QString("%1,%2 packed:0x%3").arg(x).arg(y)
                                 .arg(current, 4, 16, QLatin1Char('0')));
             return STerrainTileCommand();
@@ -1272,25 +1258,36 @@ STerrainTileCommand CTerrainEditModel::makeSemanticTilePaint(
         existingTiles.insert(index, current);
     }
 
-    for(int index : painted)
+    const auto touchedByPaint = [&](int cornerX, int cornerY) -> bool
     {
-        const int x = index % width;
-        const int y = index / width;
-        corners[y * (width + 1) + x] = materialId;
-        corners[y * (width + 1) + x + 1] = materialId;
-        corners[(y + 1) * (width + 1) + x + 1] = materialId;
-        corners[(y + 1) * (width + 1) + x] = materialId;
-    }
+        const int candidates[4][2] = {
+            {cornerX, cornerY}, {cornerX - 1, cornerY},
+            {cornerX - 1, cornerY - 1}, {cornerX, cornerY - 1}
+        };
+        for(const auto& candidate : candidates)
+        {
+            const int tileX = candidate[0];
+            const int tileY = candidate[1];
+            if(tileX >= 0 && tileX < width && tileY >= 0 && tileY < height
+               && painted.contains(tileY * width + tileX))
+                return true;
+        }
+        return false;
+    };
 
     for(int index : affected)
     {
         const int x = index % width;
         const int y = index / width;
-        STerrainTransitionSignature desired;
-        desired.northWest = corners.value(y * (width + 1) + x);
-        desired.northEast = corners.value(y * (width + 1) + x + 1);
-        desired.southEast = corners.value((y + 1) * (width + 1) + x + 1);
-        desired.southWest = corners.value((y + 1) * (width + 1) + x);
+        STerrainTransitionSignature desired = existingSignatures.value(index);
+        if(touchedByPaint(x, y))
+            desired.northWest = materialId;
+        if(touchedByPaint(x + 1, y))
+            desired.northEast = materialId;
+        if(touchedByPaint(x + 1, y + 1))
+            desired.southEast = materialId;
+        if(touchedByPaint(x, y + 1))
+            desired.southWest = materialId;
         const quint16 before = existingTiles.value(index);
         if(desired == existingSignatures.value(index))
             continue;
@@ -1300,7 +1297,7 @@ STerrainTileCommand CTerrainEditModel::makeSemanticTilePaint(
         {
             if(report)
                 report->add("terrain.semantic_transition", EValidationSeverity::Error,
-                            "The analyzed atlas has no safe tile for a required corner transition",
+                            "The namespace template has no tile for a required local corner transition",
                             QString("%1,%2 corners:%3,%4,%5,%6")
                                 .arg(x).arg(y).arg(desired.northWest).arg(desired.northEast)
                                 .arg(desired.southEast).arg(desired.southWest));
