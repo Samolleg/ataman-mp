@@ -36,6 +36,7 @@ private slots:
     void currentSessionRestoreRejectsTamperedBackupWithoutTouchingLiveTree();
     void currentSessionSnapshotRejectsUnsafePath();
     void authoritativeResultAcceptsVerifiedRun();
+    void authoritativeResultAcceptsLatestHotReloadGeneration();
     void authoritativeResultRejectsWrongZone();
     void analyzesPersistedAuthoritativeResult();
 };
@@ -183,6 +184,46 @@ void JmvMapTestLauncherTests::authoritativeResultAcceptsVerifiedRun()
     QVERIFY(report.value("payloadHashesValidated").toBool());
     QCOMPARE(report.value("actualMprSha256").toString(), QString("mpr-hash"));
     QCOMPARE(report.value("actualMobSha256").toString(), QString("mob-hash"));
+    QStringList findings;
+    QVERIFY2(CJmvMapTestLauncher::validateAutomatedResult(report, &findings),
+             qPrintable(findings.join('\n')));
+}
+
+void JmvMapTestLauncherTests::authoritativeResultAcceptsLatestHotReloadGeneration()
+{
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+    const QString source = QDir(temp.path()).filePath("source.mob");
+    writeFile(source, QByteArray("source map"));
+    QJsonObject manifest = resultManifest(temp.path(), source);
+    const QString generationRoot = QDir(temp.path()).filePath("generations/000002");
+    QJsonObject reload;
+    reload.insert("sequence", "2");
+    reload.insert("generation", "2");
+    reload.insert("zoneId", "zone2");
+    reload.insert("entranceId", 1);
+    reload.insert("mprPath", QDir(generationRoot).filePath("map.mpr"));
+    reload.insert("mobPath", QDir(generationRoot).filePath("map.mob"));
+    reload.insert("mprSha256", "reload-mpr-hash");
+    reload.insert("mobSha256", "reload-mob-hash");
+    reload.insert("savePath", QDir(generationRoot).filePath("saves"));
+    manifest.insert("hotReloads", QJsonArray{reload});
+    const QString evidence = successfulBridgeEvidence(temp.path()) + QString(
+        "HOT_RELOAD dispatch sequence=2 generation=2 runtime_state=GameplayReady zone=\"zone2\" entrance_id=1 thread=1\n"
+        "DIRECT_LAUNCH initialized New Game player zone=\"zone2\" entrance_id=1 entrance_index=0 before transition\n"
+        "DIRECT_LAUNCH redirecting normal single-player transition loader mpr=\"%1\" mob=\"%2\" context=0x2\n"
+        "DIRECT_LAUNCH staged map loader returned result=1\n"
+        "RUNTIME_STATE sequence=9 from=Transitioning to=GameplayReady evidence=gameplay\n"
+        "HOT_RELOAD completed sequence=2 transition_result=1 staged_loader=observed\n")
+        .arg(reload.value("mprPath").toString(), reload.value("mobPath").toString());
+    const QJsonObject report = CJmvMapTestLauncher::buildAuthoritativeResult(
+        manifest, evidence, 0, int(QProcess::NormalExit), false,
+        "Removed all owned runtime artifacts");
+    QCOMPARE(report.value("actualZone").toString(), QString("zone2"));
+    QCOMPARE(report.value("actualGeneration").toString(), QString("2"));
+    QCOMPARE(report.value("actualMprSha256").toString(), QString("reload-mpr-hash"));
+    QCOMPARE(report.value("actualMobSha256").toString(), QString("reload-mob-hash"));
+    QCOMPARE(report.value("saveNamespace").toString(), reload.value("savePath").toString());
     QStringList findings;
     QVERIFY2(CJmvMapTestLauncher::validateAutomatedResult(report, &findings),
              qPrintable(findings.join('\n')));

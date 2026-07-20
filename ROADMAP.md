@@ -5,7 +5,7 @@ work is ordered from the newest planned minor line to the oldest completed one.
 An item is checked only after its implementation has landed and received the
 stated validation. Completed code should carry a commit, test, or release link.
 
-Current development line: `0.2.1-alpha.14` focused closed testing.
+Current development line: `0.2.1-alpha.16` focused closed testing.
 
 <details open>
 <summary><strong>General wishlist — not assigned to a release</strong></summary>
@@ -256,10 +256,10 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
 
 ### Current 0.2.x status
 
-- **Current tester build:** `0.2.1-alpha.14`, retaining alpha.13's validation
-  and modular-panel fixes while invalidating Play-from-Here state on map-context
-  changes and using title-only blocking progress dialogs for map loading,
-  staging, hot reload, collections, and long history operations.
+- **Current tester build:** `0.2.1-alpha.16`, retaining alpha.14's spawn/progress
+  fixes and alpha.15's authoritative results while correcting final-generation
+  path/hash validation, mirroring test runtime logs into the normal editor logs
+  folder, and repairing document-action/settings/menu state UX.
 - **Alpha.13 validation/UI changes:** validation no longer performs expensive automatic
   replacement-ID scans for fully shared ranges, map switches refresh their
   runtime-family identity, missing `AddMob(...)` dependencies identify the
@@ -275,9 +275,9 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
 - **0.2.x runtime release blockers:** generation-isolated Save/Load,
   authoritative gameplay/Main Menu/inventory/store/world-map/transition state
   handling, unsafe-transition deferral, same-map position/facing restoration,
-  and cross-MOB hot reload are runtime-confirmed. Confirm different-map
-  entrance/anchor reset and authoritative result reporting, then run the final
-  focused gameplay matrix.
+  and cross-MOB hot reload are runtime-confirmed. Different-map anchor reset
+  and authoritative result reporting are implemented; run the final focused
+  gameplay matrix.
 - **0.2.1 hot reload:** protocol v2, immutable map/save generations, normal
   Main Menu/New Game rebootstrap, responsive stale-transition world-map
   classification, orphan monitoring, and same-position restoration are

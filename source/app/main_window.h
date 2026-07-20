@@ -95,6 +95,7 @@ private:
     void moveCameraToActiveSpawn();
     void updateEntranceOverlays();
     void updateOperationAvailability(bool hasSelection = false);
+    void updateDocumentActionAvailability();
     QVector<SMapSpawnObstacle> mapTestObstacles() const;
     const SMapTravelZone* selectedTravelZone() const;
     SResourceProfileEvaluation activeResourceProfile() const;
@@ -194,6 +195,7 @@ private:
     QLineEdit* m_outlinerFilterEdit{nullptr};
     QLabel* m_outlinerFilterStatus{nullptr};
     QFrame* m_mapTestResultNotification{nullptr};
+    QLabel* m_mapTestResultIcon{nullptr};
     QLabel* m_mapTestResultLabel{nullptr};
     QTimer* m_mapTestResultTimer{nullptr};
     QString m_mapTestResultLogPath;

@@ -766,8 +766,7 @@ int main(int argc, char *argv[])
     qApp->setStyleSheet(
         "QToolTip { color: #ffffff; background-color: #07be07; border: 1px solid white; }"
         "QToolButton:pressed { background-color: #3c583d; }"
-        "QWidget:disabled { color: #808080; }"
-        "QMenu::item:disabled { color: #808080; }");
+        "QWidget:disabled { color: #808080; }");
 
 
     MainWindow window;

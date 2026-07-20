@@ -566,7 +566,9 @@ QJsonObject CJmvMapTestLauncher::buildAuthoritativeResult(
     report.insert("runId", manifest.value("runId").toString());
     report.insert("profileId", manifest.value("profileId").toString());
     report.insert("runRoot", manifest.value("runRoot").toString());
-    report.insert("runLogPath", manifest.value("logPath").toString());
+    report.insert("runLogPath", manifest.value("sharedLogPath").toString(
+                      manifest.value("logPath").toString()));
+    report.insert("internalRunLogPath", manifest.value("logPath").toString());
     report.insert("bridgeResultPath",
                   manifest.value("bridge").toObject().value("resultPath").toString());
     report.insert("exitCode", exitCode);
@@ -584,7 +586,11 @@ QJsonObject CJmvMapTestLauncher::buildAuthoritativeResult(
         .value("activeGeneration").toString().toULongLong();
     QString requestedMprHash;
     QString requestedMobHash;
-    const QString saveNamespace = manifest.value("isolatedSaves").toObject()
+    QString expectedMprPath = manifest.value("liveFiles").toObject()
+        .value("mprPath").toString();
+    QString expectedMobPath = manifest.value("liveFiles").toObject()
+        .value("mobPath").toString();
+    QString saveNamespace = manifest.value("isolatedSaves").toObject()
         .value("testPath").toString();
     const QJsonArray reloads = manifest.value("hotReloads").toArray();
     if(!reloads.isEmpty())
@@ -596,6 +602,9 @@ QJsonObject CJmvMapTestLauncher::buildAuthoritativeResult(
             .toULongLong();
         requestedMprHash = latest.value("mprSha256").toString();
         requestedMobHash = latest.value("mobSha256").toString();
+        expectedMprPath = latest.value("mprPath").toString();
+        expectedMobPath = latest.value("mobPath").toString();
+        saveNamespace = latest.value("savePath").toString(saveNamespace);
     }
     if(requestedMprHash.isEmpty() || requestedMobHash.isEmpty())
     {
@@ -653,14 +662,13 @@ QJsonObject CJmvMapTestLauncher::buildAuthoritativeResult(
     const bool stagedLoaderObserved = bridgeResult.contains(
         "DIRECT_LAUNCH staged map loader returned result=1")
         || completedReloadSequence != 0;
-    const QJsonObject liveFiles = manifest.value("liveFiles").toObject();
     const bool actualMprMatchesOwnedPayload = !actualMprPath.isEmpty()
         && QFileInfo(actualMprPath).absoluteFilePath().compare(
-            QFileInfo(liveFiles.value("mprPath").toString()).absoluteFilePath(),
+            QFileInfo(expectedMprPath).absoluteFilePath(),
             Qt::CaseInsensitive) == 0;
     const bool actualMobMatchesOwnedPayload = !actualMobPath.isEmpty()
         && QFileInfo(actualMobPath).absoluteFilePath().compare(
-            QFileInfo(liveFiles.value("mobPath").toString()).absoluteFilePath(),
+            QFileInfo(expectedMobPath).absoluteFilePath(),
             Qt::CaseInsensitive) == 0;
     const bool payloadHashesValidated = stagedLoaderObserved
         && actualMprMatchesOwnedPayload && actualMobMatchesOwnedPayload
@@ -1171,6 +1179,7 @@ bool CJmvMapTestLauncher::launch(const SJmvMapTestLaunchInput& input, QString* e
     m_runRoot.clear();
     m_manifestPath.clear();
     m_runLogPath.clear();
+    m_sharedRunLogPath.clear();
     m_liveMprPath.clear();
     m_liveMobPath.clear();
     m_bridgeResultPath.clear();
@@ -1336,6 +1345,14 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
     m_runRoot = QDir(testRunsRoot()).filePath(m_runId);
     m_manifestPath = QDir(m_runRoot).filePath("manifest.json");
     m_runLogPath = QDir(m_runRoot).filePath("runtime.log");
+    const QString sharedLogsDirectory = QDir::current().filePath("logs");
+    if(!QDir().mkpath(sharedLogsDirectory))
+    {
+        if(error) *error = "Could not create the editor logs directory for the test runtime log.";
+        return false;
+    }
+    m_sharedRunLogPath = QDir(sharedLogsDirectory).filePath(
+        QString("test-runtime-%1.log").arg(m_runId));
     m_bridgeResultPath = QDir(m_runRoot).filePath("bridge-result.log");
     m_testSavesPath = saveGenerationPath(m_runRoot, 0);
     m_liveSavesPath = isJmv ? QDir(input.profile.modRoot).filePath("saves")
@@ -1405,6 +1422,7 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
     m_manifest.insert("journalVersion", 1);
     m_manifest.insert("runId", m_runId);
     m_manifest.insert("runRoot", m_runRoot);
+    m_manifest.insert("sharedLogPath", m_sharedRunLogPath);
     m_manifest.insert("createdUtc", QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
     m_manifest.insert("temporaryMapName", m_temporaryMapName);
     m_manifest.insert("gameExePath", m_gameExePath);
@@ -1920,13 +1938,18 @@ void CJmvMapTestLauncher::appendRunLog(const QString& message)
 {
     if(m_runLogPath.isEmpty())
         return;
-    QFile log(m_runLogPath);
-    if(log.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text))
+    const QString line = QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs)
+        + " " + message + "\n";
+    const auto append = [&line](const QString& path)
     {
-        QTextStream stream(&log);
-        stream << QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs)
-               << " " << message << "\n";
-    }
+        if(path.isEmpty()) return;
+        QFile log(path);
+        if(log.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text))
+            log.write(line.toUtf8());
+    };
+    append(m_runLogPath);
+    if(m_sharedRunLogPath.compare(m_runLogPath, Qt::CaseInsensitive) != 0)
+        append(m_sharedRunLogPath);
 }
 
 QString CJmvMapTestLauncher::bridgeResultSummary() const

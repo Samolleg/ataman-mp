@@ -1099,21 +1099,22 @@ int InstallFileObservationHooks()
     MODULEENTRY32W entry{};
     entry.dwSize = sizeof(entry);
     int patched = 0;
+    int modulesVisited = 0;
     if(Module32FirstW(snapshot, &entry))
     {
         do
         {
-            wchar_t message[900]{};
-            _snwprintf_s(message, sizeof(message) / sizeof(message[0]), _TRUNCATE,
-                         L"TRANSITION_PROBE module=%s base=0x%08lX size=0x%08lX",
-                         entry.szExePath, DWORD(reinterpret_cast<uintptr_t>(entry.modBaseAddr)),
-                         entry.modBaseSize);
-            Log(message);
+            ++modulesVisited;
             patched += PatchModuleImports(entry.hModule);
         }
         while(Module32NextW(snapshot, &entry));
     }
     CloseHandle(snapshot);
+    wchar_t summary[256]{};
+    _snwprintf_s(summary, sizeof(summary) / sizeof(summary[0]), _TRUNCATE,
+                 L"TRANSITION_PROBE inspected loaded modules in owned game process modules=%d patched_imports=%d",
+                 modulesVisited, patched);
+    Log(summary);
     return patched;
 }
 

@@ -43,7 +43,9 @@ CSettings::CSettings(QWidget *parent) :
     openLastSession->setToolTip(tr(
         "Automatically invokes File > Open Last Session after startup. "
         "Disabled by default; missing files are reported and skipped by the existing session loader."));
-    ui->gridLayout->addWidget(openLastSession, 7, 0, 1, 2);
+    // Row 7 belongs to the inactive external-MPR polling control declared in
+    // settings.ui. Keep startup/session behavior on its own row.
+    ui->gridLayout->addWidget(openLastSession, 8, 0, 1, 2);
     connect(browseEditor, &QPushButton::clicked, this, [this, editorPath]()
     {
         const QString selected = QFileDialog::getOpenFileName(this,

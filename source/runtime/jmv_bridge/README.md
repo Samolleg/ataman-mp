@@ -22,8 +22,9 @@ message hook resolves the requested `map.txt` zone record and invokes the
 engine's normal transition as `(captured controller, zone ID, mode 0)`. The
 loader detour substitutes only that transition's verified MPR/MOB arguments
 with the staged Endurance paths. The engine retains its normal session, zone,
-and player initialization. Module bases and each relevant file open remain
-recorded for runtime verification.
+and player initialization. Relevant file operations retain module-relative
+call stacks for verification; initialization records only an aggregate count
+of already loaded modules rather than dumping every Windows DLL path.
 
 The provider remains deliberately narrow:
 

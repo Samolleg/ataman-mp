@@ -125,6 +125,7 @@ private:
     QString m_runRoot;
     QString m_manifestPath;
     QString m_runLogPath;
+    QString m_sharedRunLogPath;
     QString m_liveMprPath;
     QString m_liveMobPath;
     QString m_bridgeSourcePath;

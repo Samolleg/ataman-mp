@@ -2196,9 +2196,6 @@ void MainWindow::showMapTestResultNotification(const QJsonObject& report)
         QJsonDocument(report).toJson(QJsonDocument::Compact));
     ei::log(errors > 0 ? eLogFatal : (warnings > 0 ? eLogWarning : eLogInfo),
             "JMV authoritative test result: " + reportText);
-    if(errors == 0 && warnings == 0)
-        return;
-
     if(!m_mapTestResultNotification)
     {
         m_mapTestResultNotification = new QFrame(this);
@@ -2211,11 +2208,21 @@ void MainWindow::showMapTestResultNotification(const QJsonObject& report)
             "QLabel { color: #eeeeee; } QPushButton { min-width: 88px; }");
         QVBoxLayout* layout = new QVBoxLayout(m_mapTestResultNotification);
         layout->setContentsMargins(12, 10, 12, 10);
+        QHBoxLayout* summary = new QHBoxLayout;
+        m_mapTestResultIcon = new QLabel(m_mapTestResultNotification);
+        QFont iconFont = m_mapTestResultIcon->font();
+        iconFont.setPointSize(24);
+        iconFont.setBold(true);
+        m_mapTestResultIcon->setFont(iconFont);
+        m_mapTestResultIcon->setAlignment(Qt::AlignTop | Qt::AlignHCenter);
+        m_mapTestResultIcon->setFixedWidth(38);
         m_mapTestResultLabel = new QLabel(m_mapTestResultNotification);
         m_mapTestResultLabel->setWordWrap(true);
         m_mapTestResultLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
         m_mapTestResultLabel->setMaximumWidth(520);
-        layout->addWidget(m_mapTestResultLabel);
+        summary->addWidget(m_mapTestResultIcon);
+        summary->addWidget(m_mapTestResultLabel, 1);
+        layout->addLayout(summary);
         QHBoxLayout* buttons = new QHBoxLayout;
         buttons->addStretch(1);
         QPushButton* openLog = new QPushButton(tr("Open Log"), m_mapTestResultNotification);
@@ -2239,22 +2246,31 @@ void MainWindow::showMapTestResultNotification(const QJsonObject& report)
         });
     }
 
+    const bool failed = errors > 0;
+    const bool warned = !failed && warnings > 0;
+    m_mapTestResultIcon->setText(failed ? QString::fromUtf8("\xE2\x9C\x95")
+                                       : (warned ? "!" : QString::fromUtf8("\xE2\x9C\x93")));
+    m_mapTestResultIcon->setStyleSheet(QString("color: %1;")
+        .arg(failed ? "#ff5c5c" : (warned ? "#ffc547" : "#4bd66f")));
     QString detail;
-    const QJsonArray problems = errors > 0 ? report.value("errors").toArray()
-                                           : report.value("warnings").toArray();
+    const QJsonArray problems = failed ? report.value("errors").toArray()
+                                       : report.value("warnings").toArray();
     if(!problems.isEmpty())
         detail = problems.first().toString().simplified();
     if(detail.size() > 180)
         detail = detail.left(177) + "...";
-    m_mapTestResultLabel->setText(
-        tr("Map test finished with %1 error(s) and %2 warning(s).\n"
-           "Requested: %3 / entrance %4   Runtime: %5 / entrance %6\n%7")
-            .arg(errors).arg(warnings)
-            .arg(report.value("requestedZone").toString())
-            .arg(report.value("requestedEntrance").toInt())
-            .arg(report.value("actualZone").toString())
-            .arg(report.value("actualEntrance").toInt())
-            .arg(detail));
+    const QString status = failed
+        ? tr("Map test finished with %1 error(s).").arg(errors)
+        : (warned ? tr("Map test finished with %1 warning(s).").arg(warnings)
+                  : tr("Map test completed successfully."));
+    QString text = status + tr("\nRequested: %1 / entrance %2   Runtime: %3 / entrance %4")
+        .arg(report.value("requestedZone").toString())
+        .arg(report.value("requestedEntrance").toInt())
+        .arg(report.value("actualZone").toString())
+        .arg(report.value("actualEntrance").toInt());
+    if(!detail.isEmpty())
+        text += "\n" + detail;
+    m_mapTestResultLabel->setText(text);
     m_mapTestResultLogPath = report.value("runLogPath").toString();
     if(m_mapTestResultLogPath.isEmpty())
         m_mapTestResultLogPath = report.value("bridgeResultPath").toString();
@@ -2262,7 +2278,7 @@ void MainWindow::showMapTestResultNotification(const QJsonObject& report)
     positionMapTestResultNotification();
     m_mapTestResultNotification->show();
     m_mapTestResultNotification->raise();
-    m_mapTestResultTimer->start(9000);
+    m_mapTestResultTimer->start(failed ? 9000 : (warned ? 7000 : 5000));
 }
 
 void MainWindow::positionMapTestResultNotification()
@@ -2787,6 +2803,19 @@ void MainWindow::updateOperationAvailability(bool hasSelection)
     }
 }
 
+void MainWindow::updateDocumentActionAvailability()
+{
+    const bool hasActiveMob = m_pView && m_pView->hasActiveMob();
+    const bool hasAnyMob = m_pView && !m_pView->mobs().isEmpty();
+    const bool hasMpr = CLandscape::getInstance()->isMprLoad();
+    m_ui->actionSave->setEnabled(hasActiveMob);
+    m_ui->actionSave_as->setEnabled(hasActiveMob);
+    m_ui->actionSave_all_MOB_s->setEnabled(hasAnyMob);
+    m_ui->actionSave_landscape_MPR->setEnabled(hasMpr);
+    m_ui->actionSave_landscape_MPR_as->setEnabled(hasMpr);
+    m_ui->actionMap_parameters->setEnabled(hasMpr);
+}
+
 bool MainWindow::isExitAllowed()
 {
     QStringList dirtyMobs;
@@ -2814,6 +2843,7 @@ void MainWindow::closeAll()
         m_undoStack->clear();
         m_pView->unloadMob("");
         m_pView->unloadLand();
+        updateDocumentActionAvailability();
     }
 }
 
@@ -3175,6 +3205,7 @@ void MainWindow::updateWindowTitle(eTitleTypeData type, QString data)
 
 
     setWindowTitle(title);
+    updateDocumentActionAvailability();
     updateMapTestAction();
     if(type == eTitleTypeData::eTitleTypeDataMpr)
         refreshMapTestContext();
