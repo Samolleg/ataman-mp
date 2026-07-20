@@ -46,6 +46,7 @@ class QLineEdit;
 class QFrame;
 class QResizeEvent;
 class QJsonObject;
+class QProgressDialog;
 
 struct SWindowTitle
 {
@@ -96,6 +97,8 @@ private:
     void updateEntranceOverlays();
     void updateOperationAvailability(bool hasSelection = false);
     void updateDocumentActionAvailability();
+    void saveUiState();
+    void closeHotReloadProgress();
     QVector<SMapSpawnObstacle> mapTestObstacles() const;
     const SMapTravelZone* selectedTravelZone() const;
     SResourceProfileEvaluation activeResourceProfile() const;
@@ -198,6 +201,8 @@ private:
     QLabel* m_mapTestResultIcon{nullptr};
     QLabel* m_mapTestResultLabel{nullptr};
     QTimer* m_mapTestResultTimer{nullptr};
+    QProgressDialog* m_hotReloadProgress{nullptr};
+    bool m_uiStateSaved{false};
     QString m_mapTestResultLogPath;
     CMobFamilyValidationReport m_familyValidation;
     QByteArray m_acknowledgedFindingDigest;

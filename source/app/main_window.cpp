@@ -546,6 +546,7 @@ MainWindow::MainWindow(QWidget* parent) :
     connect(m_mapTestLauncher, &CJmvMapTestLauncher::testFinished, this,
             [this](const QString& runId, int exitCode, const QString& cleanupMessage)
     {
+        closeHotReloadProgress();
         ei::log(eLogInfo, QString("JMV test launch finished run:%1 exit:%2 cleanup:%3")
                 .arg(runId).arg(exitCode).arg(cleanupMessage));
         statusBar()->showMessage(tr("JMV direct map test finished (exit code %1). Temporary files were cleaned up.").arg(exitCode), 8000);
@@ -557,7 +558,15 @@ MainWindow::MainWindow(QWidget* parent) :
         }
     });
     connect(m_mapTestLauncher, &CJmvMapTestLauncher::testReportReady,
-            this, &MainWindow::showMapTestResultNotification);
+            this, [this](const QJsonObject& report)
+    {
+        // The report is emitted immediately before the final lifecycle signal.
+        // Let that sequence settle before showing the non-intrusive toast.
+        QTimer::singleShot(100, this, [this, report]()
+        {
+            showMapTestResultNotification(report);
+        });
+    });
     connect(m_mapTestLauncher, &CJmvMapTestLauncher::hotReloadReady, this, [this]()
     {
         statusBar()->showMessage(tr("JMV map test is ready for Ctrl+F5 hot reload."), 6000);
@@ -566,6 +575,7 @@ MainWindow::MainWindow(QWidget* parent) :
     connect(m_mapTestLauncher, &CJmvMapTestLauncher::hotReloadFinished, this,
             [this](quint64, bool success, const QString& message)
     {
+        closeHotReloadProgress();
         ei::log(success ? eLogInfo : eLogWarning, message);
         statusBar()->showMessage(message, 10000);
         updateMapTestAction();
@@ -573,6 +583,7 @@ MainWindow::MainWindow(QWidget* parent) :
     connect(m_mapTestLauncher, &CJmvMapTestLauncher::testError, this,
             [this](const QString& message)
     {
+        closeHotReloadProgress();
         ei::log(eLogFatal, message);
         QMessageBox::critical(this, tr("JMV test launch"), message);
         updateMapTestAction();
@@ -745,11 +756,7 @@ MainWindow::MainWindow(QWidget* parent) :
 
 MainWindow::~MainWindow()
 {
-    QSettings uiSettings;
-    uiSettings.setValue("ui/mainWindowGeometry", saveGeometry());
-    uiSettings.setValue("ui/mainWindowState", saveState());
-    uiSettings.setValue("ui/workspaceSplitter", m_ui->workspaceSplitter->saveState());
-    uiSettings.setValue("ui/outlinerSplitter", m_ui->outlinerSplitter->saveState());
+    saveUiState();
     delete m_pView;
     delete m_ui;
     CIconManager::getInstance()->~CIconManager();
@@ -1635,14 +1642,14 @@ void MainWindow::launchCurrentMapTest()
         return;
     }
     notifyFamilyPreflight(hotReloadRequested ? tr("Hot Reload Map") : tr("Test Current Map"));
-    QProgressDialog progress(hotReloadRequested ? tr("Preparing hot reload...")
-                                               : tr("Preparing map test..."),
-                             QString(), 0, 6, this);
-    progress.setWindowTitle(hotReloadRequested ? tr("JMV hot reload")
-                                               : tr("Map test launch"));
-    configureBlockingProgress(&progress);
-    progress.setValue(0);
-    progress.show();
+    QScopedPointer<QProgressDialog> progress(new QProgressDialog(
+        hotReloadRequested ? tr("Preparing hot reload...") : tr("Preparing map test..."),
+        QString(), 0, 6, this));
+    progress->setWindowTitle(hotReloadRequested ? tr("JMV hot reload")
+                                                : tr("Map test launch"));
+    configureBlockingProgress(progress.data());
+    progress->setValue(0);
+    progress->show();
     QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
     if(m_pView->cancelPendingOperation())
         statusBar()->showMessage(tr("Pending object movement was cancelled before staging the test."), 4000);
@@ -1653,8 +1660,8 @@ void MainWindow::launchCurrentMapTest()
             tr("Unsaved MPR edits cannot yet be staged losslessly. Save or revert the landscape first."));
         return;
     }
-    progress.setLabelText(tr("Validating the active runtime profile..."));
-    progress.setValue(1);
+    progress->setLabelText(tr("Validating the active runtime profile..."));
+    progress->setValue(1);
     QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
 
     const SResourceProfileEvaluation profile = activeResourceProfile();
@@ -1672,8 +1679,8 @@ void MainWindow::launchCurrentMapTest()
             tr("The active installation does not match an exact supported or experimental runtime manifest. Run Game and Mod Setup again and review its diagnostics."));
         return;
     }
-    progress.setLabelText(tr("Reading map-table metadata..."));
-    progress.setValue(2);
+    progress->setLabelText(tr("Reading map-table metadata..."));
+    progress->setValue(2);
     QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
 
     const SMapCatalogEntry entry = m_mapTestEntry;
@@ -1684,8 +1691,8 @@ void MainWindow::launchCurrentMapTest()
             tr("No travel/deploy zone was found for the loaded MPR in the active map table. Endurance will not guess a player spawn."));
         return;
     }
-    progress.setLabelText(tr("Choosing a safe map-table entrance..."));
-    progress.setValue(3);
+    progress->setLabelText(tr("Choosing a safe map-table entrance..."));
+    progress->setValue(3);
     QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
 
     CMob* mob = nullptr;
@@ -1723,8 +1730,8 @@ void MainWindow::launchCurrentMapTest()
             tr("No deploy rectangle was found in the selected zone's map-table entrances. Endurance will not invent a player entrance.\n\n%1").arg(spawn.reason));
         return;
     }
-    progress.setLabelText(tr("Validating the current in-memory map pair..."));
-    progress.setValue(4);
+    progress->setLabelText(tr("Validating the current in-memory map pair..."));
+    progress->setValue(4);
     QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
 
     QFile mprFile(landscape->filePath().absoluteFilePath());
@@ -1780,7 +1787,7 @@ void MainWindow::launchCurrentMapTest()
     if(!hotReloadRequested
        && (!warningVersion || warningVersion->value() < kMapTestWarningVersion))
     {
-        progress.hide();
+        progress->hide();
         QMessageBox confirmationBox(QMessageBox::Question,
             isJmv ? tr("Direct JMV map test (experimental)")
                   : tr("Base EI feasibility probe (experimental)"), confirmation,
@@ -1794,10 +1801,12 @@ void MainWindow::launchCurrentMapTest()
             warningVersion->setValue(kMapTestWarningVersion);
             m_settings->persistOptions();
         }
-        progress.show();
+        progress->show();
     }
-    progress.setLabelText(tr("Staging temporary maps and isolated test state..."));
-    progress.setValue(5);
+    progress->setLabelText(hotReloadRequested
+        ? tr("Staging the next hot-reload generation...")
+        : tr("Staging temporary maps and isolated test state..."));
+    progress->setValue(5);
     QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
 
     SJmvMapTestLaunchInput input;
@@ -1849,8 +1858,17 @@ void MainWindow::launchCurrentMapTest()
             hotReloadRequested ? tr("Hot reload") : tr("Map test launch"), error);
     }
     else if(hotReloadRequested)
+    {
+        // Keep this application-modal progress window alive until the bridge
+        // commits or rejects the staged generation. The launcher focuses the
+        // game only after hotReloadFinished, so editor input stays blocked.
+        progress->setRange(0, 0);
+        progress->setLabelText(tr("Applying the staged map generation in the game..."));
+        m_hotReloadProgress = progress.take();
         statusBar()->showMessage(tr("Hot reload queued on the verified JMV game thread."), 6000);
-    progress.setValue(6);
+    }
+    if(progress)
+        progress->setValue(6);
     updateMapTestAction();
 }
 
@@ -2190,6 +2208,8 @@ void MainWindow::showValidationWarning(const QString& title, const QString& text
 
 void MainWindow::showMapTestResultNotification(const QJsonObject& report)
 {
+    if(m_mapTestResultTimer)
+        m_mapTestResultTimer->stop();
     const int errors = report.value("errorCount").toInt();
     const int warnings = report.value("warningCount").toInt();
     const QString reportText = QString::fromUtf8(
@@ -2814,6 +2834,29 @@ void MainWindow::updateDocumentActionAvailability()
     m_ui->actionSave_landscape_MPR->setEnabled(hasMpr);
     m_ui->actionSave_landscape_MPR_as->setEnabled(hasMpr);
     m_ui->actionMap_parameters->setEnabled(hasMpr);
+    m_ui->actionClose_all->setEnabled(hasAnyMob || hasMpr);
+}
+
+void MainWindow::saveUiState()
+{
+    if(m_uiStateSaved || !m_ui)
+        return;
+    QSettings uiSettings;
+    uiSettings.setValue("ui/mainWindowGeometry", saveGeometry());
+    uiSettings.setValue("ui/mainWindowState", saveState());
+    uiSettings.setValue("ui/workspaceSplitter", m_ui->workspaceSplitter->saveState());
+    uiSettings.setValue("ui/outlinerSplitter", m_ui->outlinerSplitter->saveState());
+    uiSettings.sync();
+    m_uiStateSaved = true;
+}
+
+void MainWindow::closeHotReloadProgress()
+{
+    if(!m_hotReloadProgress)
+        return;
+    m_hotReloadProgress->close();
+    m_hotReloadProgress->deleteLater();
+    m_hotReloadProgress = nullptr;
 }
 
 bool MainWindow::isExitAllowed()
@@ -3284,6 +3327,9 @@ void MainWindow::closeEvent(QCloseEvent *e)
         return;
     }
 
+    // Persist dock visibility before secondary-window cleanup closes docks.
+    // Saving only from the destructor recorded every View panel as hidden.
+    saveUiState();
     ei::closeSecondaryWindows(this);
     e->accept();
 }

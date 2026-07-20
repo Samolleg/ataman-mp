@@ -755,7 +755,7 @@ int main(int argc, char *argv[])
     darkPalette.setColor(QPalette::HighlightedText, Qt::black);
 
     darkPalette.setColor(QPalette::Disabled, QPalette::Base, QColor(65, 65, 65));
-    const QColor disabledText(128, 128, 128);
+    const QColor disabledText(92, 92, 92);
     darkPalette.setColor(QPalette::Disabled, QPalette::WindowText, disabledText);
     darkPalette.setColor(QPalette::Disabled, QPalette::Text, disabledText);
     darkPalette.setColor(QPalette::Disabled, QPalette::ButtonText, disabledText);
@@ -766,7 +766,8 @@ int main(int argc, char *argv[])
     qApp->setStyleSheet(
         "QToolTip { color: #ffffff; background-color: #07be07; border: 1px solid white; }"
         "QToolButton:pressed { background-color: #3c583d; }"
-        "QWidget:disabled { color: #808080; }");
+        "QWidget:disabled { color: #5c5c5c; }"
+        "QMenu::item:disabled { color: #5c5c5c; }");
 
 
     MainWindow window;
