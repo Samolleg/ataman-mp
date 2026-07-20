@@ -97,6 +97,8 @@ public:
         quint16 packedTile, bool* found = nullptr) const;
     bool hasMaterial(qint32 materialId) const;
     QVector<qint32> materialIds() const;
+    QVector<qint32> shortestMaterialPath(qint32 fromMaterial,
+                                         qint32 toMaterial) const;
     int size() const { return m_variants.size(); }
 
 private:

@@ -1582,7 +1582,8 @@ void EnduranceDocumentTests::terrainTilePaintingIsUndoableLocalizedAndNamespaceS
                                    0, 1, 0).deltas.size(), 9);
 
     CTerrainTransitionCatalog semanticCatalog;
-    const QVector<int> semanticMasks({0, 15, 12, 9, 3, 6, 1, 2, 4, 8});
+    const QVector<int> semanticMasks({0, 15, 12, 9, 3, 6, 1, 2, 4, 8,
+                                      7, 11, 13, 14});
     for(int variantIndex = 0; variantIndex < semanticMasks.size(); ++variantIndex)
     {
         const int mask = semanticMasks.at(variantIndex);
@@ -1597,8 +1598,10 @@ void EnduranceDocumentTests::terrainTilePaintingIsUndoableLocalizedAndNamespaceS
             visualVariant.packedTile = quint16(1 << 14);
         else if(variantIndex < 6)
             visualVariant.packedTile = quint16(1 | ((variantIndex - 2) << 14));
-        else
+        else if(variantIndex < 10)
             visualVariant.packedTile = quint16(2 | ((variantIndex - 6) << 14));
+        else
+            visualVariant.packedTile = quint16(3 | ((variantIndex - 10) << 14));
         QVERIFY(semanticCatalog.addVariant(visualVariant));
     }
     QVERIFY(semanticCatalog.hasMaterial(1));
@@ -1795,7 +1798,7 @@ void EnduranceDocumentTests::zone1NamespaceTemplateSeparatesLandOverlayAndVarian
     const STerrainTransitionSignature signature =
         analysis.landCatalog.signatureForPacked(packed.encode(), &found);
     QVERIFY(found);
-    QCOMPARE(signature.northWest, 4);
+    QCOMPARE(signature.northWest, 3);
     QCOMPARE(signature.northEast, 3);
     QCOMPARE(signature.southEast, 4);
     QCOMPARE(signature.southWest, 4);
@@ -1805,6 +1808,41 @@ void EnduranceDocumentTests::zone1NamespaceTemplateSeparatesLandOverlayAndVarian
     analysis.overlayCatalog.signatureForPacked(packed.encode(), &found);
     QVERIFY(found);
     QCOMPARE(analysis.materials.at(5).representativeSlot, 16);
+
+    const QVector<qint32> selectableLand({1, 2, 3, 4, 7, 8, 9});
+    for(qint32 target : selectableLand)
+    {
+        for(qint32 background : selectableLand)
+        {
+            const QVector<qint32> path =
+                analysis.landCatalog.shortestMaterialPath(target, background);
+            QVERIFY2(!path.isEmpty(), qPrintable(QString("No route %1 -> %2")
+                .arg(target).arg(background)));
+            QCOMPARE(path.front(), target);
+            QCOMPARE(path.back(), background);
+            for(int edge = 1; edge < path.size(); ++edge)
+            {
+                for(int mask = 0; mask < 16; ++mask)
+                {
+                    if(mask == 5 || mask == 10)
+                        continue;
+                    STerrainTransitionSignature routed;
+                    routed.northWest = (mask & 1) ? path.at(edge - 1) : path.at(edge);
+                    routed.northEast = (mask & 2) ? path.at(edge - 1) : path.at(edge);
+                    routed.southEast = (mask & 4) ? path.at(edge - 1) : path.at(edge);
+                    routed.southWest = (mask & 8) ? path.at(edge - 1) : path.at(edge);
+                    bool routedFound = false;
+                    analysis.landCatalog.select(routed, 0, 0, 0, &routedFound);
+                    QVERIFY2(routedFound, qPrintable(QString("Missing routed mask %1 on %2 -> %3")
+                        .arg(mask).arg(path.at(edge - 1)).arg(path.at(edge))));
+                }
+            }
+        }
+    }
+    QCOMPARE(analysis.overlayCatalog.shortestMaterialPath(5, 6),
+             QVector<qint32>({5, 6}));
+    QCOMPARE(analysis.overlayCatalog.shortestMaterialPath(6, 5),
+             QVector<qint32>({6, 5}));
 
     CValidationReport unknownReport;
     QVERIFY(!CTerrainAtlasAnalyzer::analyze("custom", 512, &unknownReport).usable);
@@ -1880,6 +1918,36 @@ void EnduranceDocumentTests::zone1NamespaceTemplateMatchesPrivateFixture()
         }
     }
     QCOMPARE(paintableMaterials.size(), analysis.materials.size());
+
+    // Coordinates captured from the R9 manual refusal log. Every selectable
+    // land family must now either produce a routed stamp or be an exact no-op;
+    // none may fail because a direct pair is absent from the atlas.
+    const QVector<QPoint> refusalProbes({QPoint(97, 76), QPoint(95, 74),
+                                         QPoint(102, 97)});
+    brush.radius = 1.0f;
+    QSet<qint32> changedMaterials;
+    for(const STerrainAtlasMaterial& material : analysis.materials)
+    {
+        if(material.layer != ETerrainAtlasLayer::Land)
+            continue;
+        for(const QPoint& probe : refusalProbes)
+        {
+            brush.centerX = float(probe.x());
+            brush.centerY = float(probe.y());
+            CValidationReport paintReport;
+            const STerrainTileCommand paint = terrain.makeSemanticTilePaint(
+                brush, ETerrainTileLayer::Land, material.id,
+                analysis.landCatalog, 12345u, &paintReport);
+            QVERIFY2(!paintReport.hasErrors(), qPrintable(QString("Material %1 at %2,%3:\n%4")
+                .arg(material.id).arg(probe.x()).arg(probe.y())
+                .arg(paintReport.toText())));
+            if(!paint.deltas.isEmpty())
+                changedMaterials.insert(material.id);
+        }
+    }
+    // At most the family already covering all probes may legitimately be a
+    // no-op. This catches the R9 failure mode where only one family painted.
+    QVERIFY(changedMaterials.size() >= 6);
 }
 
 void EnduranceDocumentTests::terrainHeightTransactionReopensAndPreservesOverlay()
