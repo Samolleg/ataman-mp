@@ -589,6 +589,10 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
     restoration is unsafe.
 - [ ] Use normal entrance deployment when the editor switches to a different
   map set before Ctrl+F5.
+  - [x] Bind Play-from-Here state to the exact loaded MPR/map-table context and
+    invalidate every picking/movement/selection remnant when that context
+    changes. Stale anchors are ignored at launch even if retained accidentally.
+    ([`3f658af`](https://github.com/Ilufus/ei-mapper-endurance/commit/3f658af))
   - [x] Clear the previous generation's optional bootstrap MOB when the new
     reload request contains no Play from Here/Godmode/supplemental bootstrap.
     This prevents map A's cleared custom spawn from being replayed after map B
