@@ -42,10 +42,12 @@ The provider remains deliberately narrow:
 Hot reload protocol v2 gives each initial launch/reload an immutable map and
 save generation beneath the owned run directory. Save path switching occurs on
 the game thread immediately before a committed transition. The bridge records
-guarded runtime-state changes and defers reload while state is initializing,
-transitioning, or unknown; exact-hash gameplay, Main Menu, inventory, and store
-paths are implemented, while world-map classification remains an observation
-probe until its provider is proven.
+guarded runtime-state changes and defers reload while state is initializing or
+in a recent transition. Every reload uses the engine's normal Main Menu
+transition followed by the complete New Game bootstrap so map metadata and UI
+state are rebuilt together. A responsive loader-less stale transition is the
+observed world-map/map-screen case and follows that same rebootstrap path. No
+generic inventory/store UI function is detoured.
 
 The user launches with Ctrl+F5 and waits for the normal intro/menu lifecycle.
 The provider should automatically enter the staged map without a manual New

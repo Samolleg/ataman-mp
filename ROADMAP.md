@@ -5,7 +5,7 @@ work is ordered from the newest planned minor line to the oldest completed one.
 An item is checked only after its implementation has landed and received the
 stated validation. Completed code should carry a commit, test, or release link.
 
-Current development line: `0.2.1-alpha.10` focused closed testing.
+Current development line: `0.2.1-alpha.11` focused closed testing.
 
 <details open>
 <summary><strong>General wishlist — not assigned to a release</strong></summary>
@@ -252,10 +252,10 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
 
 ### Current 0.2.x status
 
-- **Current tester build:** `0.2.1-alpha.10`, adding generation-scoped test
-  saves, protocol-v2 state-aware JMV reload dispatch, and startup recovery for
-  an editor crash or forced termination. Runtime state providers still require
-  the focused JMV matrix below before stable release.
+- **Current tester build:** `0.2.1-alpha.11`, retaining alpha.10's validated
+  generation saves and crash recovery while replacing its unsafe UI visibility
+  detour and partial gameplay transition with one normal Main Menu plus complete
+  New Game rebootstrap for every hot reload.
 - **MOB hardening:** complete for the supported editing surface. Remaining work
   is validation breadth and new editing features, not another serializer
   rewrite.
@@ -266,10 +266,10 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
   authoritative state handling from gameplay/Main Menu/inventory/store/world
   map/transition, and interrupted-run recovery; then run the final focused
   gameplay matrix.
-- **0.2.1 hot reload:** protocol v2, immutable map/save generations, guarded
-  gameplay/Main Menu/inventory/store dispatch, and orphan monitoring are
-  implemented. World-map classification, supplemental/collection runtime
-  validation, and same-position restoration remain unfinished.
+- **0.2.1 hot reload:** protocol v2, immutable map/save generations, normal
+  Main Menu/New Game rebootstrap, responsive stale-transition world-map
+  classification, and orphan monitoring are implemented. Supplemental/
+  collection runtime validation and same-position restoration remain unfinished.
 - **Stable 0.2.0 editor gate:** parameter-aware outliner filtering with strict
   contiguous matching by default and explicit `~` subsequence fuzziness.
   Unreal-style MOB ownership/locking remains the larger workspace follow-up.
@@ -511,15 +511,16 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
   empty save namespace only when a reload transition begins. Failed staging
   keeps the active generation; uncertain post-transition failures keep the new
   namespace.
-- [x] Add guarded runtime states for Initializing, MainMenuReady,
-  GameplayReady, InventoryOpen, StoreOpen, Transitioning, and Unknown.
-  - Gameplay uses the verified transition path.
-  - Main Menu uses the complete New Game bootstrap.
-  - Inventory/store route through the engine's normal Main Menu transition and
-    rebootstrap after readiness.
-  - Transitioning/Unknown requests defer without calling unsafe engine paths.
-  - WorldMapReady exists in the protocol, but its fingerprinted observation
-    provider remains a runtime-research/test item rather than a guessed hook.
+- [x] Use a state-aware normal Main Menu/New Game rebootstrap for every reload.
+  - Alpha.10 proved direct gameplay loader substitution changes terrain/objects
+    but retains the previous map's minimap, quest state, and entrances.
+  - Alpha.10's generic UI-control detour crashed when inventory/store opened
+    before it could publish a state event; alpha.11 removes that hook entirely.
+  - Gameplay, inventory, store, and other responsive states now use the same
+    normal Main Menu transition, then the proven complete New Game bootstrap.
+  - A short-lived Transitioning state defers. If the game thread is responsive
+    after the transition state has remained unchanged, classify the observed
+    loader-less map-screen path as WorldMapReady and rebootstrap safely.
 - [x] Journal process ownership by PID, executable path, creation time, runtime
   hash, and run ID. On restart, clean dead runs immediately; monitor a verified
   surviving orphan without attaching to or killing it, then clean after exit.

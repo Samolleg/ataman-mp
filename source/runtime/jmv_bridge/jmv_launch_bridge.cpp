@@ -88,7 +88,6 @@ constexpr DWORD kNewGameBootstrapRva = 0x0017BD10;
 constexpr DWORD kPlayerDefaultsResetRva = 0x000A5BD0;
 constexpr DWORD kPlayerDefaultsManagerRva = 0x003AA5C4;
 constexpr DWORD kGameStringAssignRva = 0x00300AF9;
-constexpr DWORD kInventoryVisibilityRva = 0x002002A0;
 constexpr UINT kDirectLaunchMessage = WM_APP + 0x45D;
 constexpr UINT kHotReloadMessage = WM_APP + 0x45E;
 constexpr unsigned char kMapLoadEntryBytes[6] = {
@@ -103,10 +102,6 @@ constexpr unsigned char kNewGameBootstrapBytes[7] = {
 constexpr unsigned char kPlayerDefaultsResetBytes[6] = {
     0x64, 0xA1, 0x00, 0x00, 0x00, 0x00
 };
-constexpr unsigned char kInventoryVisibilityBytes[8] = {
-    0x8B, 0x54, 0x24, 0x08, 0x8B, 0x44, 0x24, 0x04
-};
-
 enum class RuntimeState : LONG
 {
     Unknown = 0,
@@ -146,8 +141,8 @@ ULONGLONG g_hotReloadSequence = 0;
 ULONGLONG g_saveGeneration = 0;
 volatile LONG g_runtimeState = LONG(RuntimeState::Initializing);
 volatile LONG g_runtimeStateSequence = 0;
+volatile LONG g_runtimeStateTick = 0;
 volatile LONG g_pendingStateAwareReload = 0;
-void* g_inventoryVisibilityTrampoline = nullptr;
 volatile LONG g_saveRedirectLogCount = 0;
 volatile LONG g_godmodeRedirectLogged = 0;
 volatile LONG g_introSkipMask = 0;
@@ -245,6 +240,7 @@ const wchar_t* RuntimeStateName(RuntimeState state)
 
 void SetRuntimeState(RuntimeState state, const wchar_t* evidence)
 {
+    InterlockedExchange(&g_runtimeStateTick, LONG(GetTickCount()));
     const LONG previous = InterlockedExchange(&g_runtimeState, LONG(state));
     if(previous == LONG(state))
         return;
@@ -1223,102 +1219,6 @@ bool ReadDirectLaunchPaths()
     return true;
 }
 
-extern "C" void __cdecl RecordRuntimeOverlayVisibility(void* object,
-                                                        DWORD visible,
-                                                        DWORD)
-{
-    DWORD vtable = 0;
-    DWORD mode = 0;
-    __try
-    {
-        if(object)
-        {
-            vtable = *reinterpret_cast<DWORD*>(object);
-            mode = *reinterpret_cast<DWORD*>(static_cast<unsigned char*>(object) + 0x148);
-        }
-    }
-    __except(EXCEPTION_EXECUTE_HANDLER)
-    {
-        return;
-    }
-    if(vtable != 0x0074197C)
-        return;
-    if(visible == 1)
-        SetRuntimeState(mode == 3 ? RuntimeState::StoreOpen
-                                  : RuntimeState::InventoryOpen,
-                        mode == 3 ? L"store visibility hook"
-                                  : L"inventory visibility hook");
-    else if(CurrentRuntimeState() == RuntimeState::StoreOpen
-            || CurrentRuntimeState() == RuntimeState::InventoryOpen)
-    {
-        SetRuntimeState(RuntimeState::GameplayReady, L"runtime overlay closed");
-        if(InterlockedCompareExchange(&g_pendingStateAwareReload, 0, 0)
-           && g_gameThreadId)
-            PostThreadMessageW(g_gameThreadId, kHotReloadMessage, 0, 0);
-    }
-}
-
-#if defined(_M_IX86)
-extern "C" __declspec(naked) void InventoryVisibilityDetour()
-{
-    __asm
-    {
-        mov eax, dword ptr [esp+8]
-        mov edx, dword ptr [esp+4]
-        pushad
-        push eax
-        push edx
-        push ecx
-        call RecordRuntimeOverlayVisibility
-        add esp, 12
-        popad
-        jmp dword ptr [g_inventoryVisibilityTrampoline]
-    }
-}
-#endif
-
-bool InstallRuntimeOverlayProbe()
-{
-#if !defined(_M_IX86)
-    return false;
-#else
-    auto* game = reinterpret_cast<unsigned char*>(g_gameModule);
-    auto* target = game + kInventoryVisibilityRva;
-    if(std::memcmp(target, kInventoryVisibilityBytes,
-                   sizeof(kInventoryVisibilityBytes)) != 0)
-    {
-        Log(L"RUNTIME_STATE inventory/store provider disabled: guarded bytes do not match");
-        return false;
-    }
-    auto* trampoline = static_cast<unsigned char*>(VirtualAlloc(nullptr, 24,
-        MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE));
-    if(!trampoline)
-        return false;
-    std::memcpy(trampoline, target, sizeof(kInventoryVisibilityBytes));
-    trampoline[8] = 0xE9;
-    *reinterpret_cast<LONG*>(trampoline + 9) =
-        LONG((target + sizeof(kInventoryVisibilityBytes)) - (trampoline + 13));
-    g_inventoryVisibilityTrampoline = trampoline;
-    DWORD oldProtect = 0;
-    if(!VirtualProtect(target, sizeof(kInventoryVisibilityBytes),
-                       PAGE_EXECUTE_READWRITE, &oldProtect))
-    {
-        VirtualFree(trampoline, 0, MEM_RELEASE);
-        g_inventoryVisibilityTrampoline = nullptr;
-        return false;
-    }
-    target[0] = 0xE9;
-    *reinterpret_cast<LONG*>(target + 1) =
-        LONG(reinterpret_cast<unsigned char*>(&InventoryVisibilityDetour) - (target + 5));
-    target[5] = target[6] = target[7] = 0x90;
-    FlushInstructionCache(GetCurrentProcess(), target, sizeof(kInventoryVisibilityBytes));
-    DWORD ignored = 0;
-    VirtualProtect(target, sizeof(kInventoryVisibilityBytes), oldProtect, &ignored);
-    Log(L"RUNTIME_STATE inventory/store visibility provider installed with exact byte guard");
-    return true;
-#endif
-}
-
 bool QueueDirectLaunchOnCurrentThread()
 {
     if(!g_zoneTransitionController)
@@ -1542,7 +1442,22 @@ bool ProcessHotReloadOnGameThread()
     if(request.hasBootstrap)
         wcscpy_s(g_godmodeMob, request.bootstrapMobPath);
 
-    const RuntimeState runtimeState = CurrentRuntimeState();
+    RuntimeState runtimeState = CurrentRuntimeState();
+    if(runtimeState == RuntimeState::Transitioning)
+    {
+        const DWORD stateTick = DWORD(InterlockedCompareExchange(&g_runtimeStateTick, 0, 0));
+        const DWORD elapsed = GetTickCount() - stateTick;
+        // A real synchronous map load owns the game thread, so this message
+        // cannot run until MapLoadDetour publishes a stable state. A stale
+        // Transitioning state while the message loop is responsive is the
+        // observed world-map/map-screen path, which has no loader return.
+        if(elapsed >= 1500)
+        {
+            SetRuntimeState(RuntimeState::WorldMapReady,
+                            L"responsive stale transition classified as world map");
+            runtimeState = RuntimeState::WorldMapReady;
+        }
+    }
     if(runtimeState == RuntimeState::Transitioning || runtimeState == RuntimeState::Unknown
        || runtimeState == RuntimeState::Initializing)
     {
@@ -1573,16 +1488,16 @@ bool ProcessHotReloadOnGameThread()
     Log(queued);
 
     InterlockedExchange(&g_pendingMapLoadProbeCount, 0);
-    if(runtimeState == RuntimeState::InventoryOpen
-       || runtimeState == RuntimeState::StoreOpen
-       || runtimeState == RuntimeState::WorldMapReady)
+    if(runtimeState != RuntimeState::MainMenuReady)
     {
         InterlockedExchange(&g_pendingStateAwareReload, 1);
+        SetRuntimeState(RuntimeState::Transitioning,
+                        L"hot reload normal Main Menu rebootstrap started");
         const int menuResult = g_originalZoneTransition(
             g_zoneTransitionController, "MainMenu", 2);
         wchar_t result[384]{};
         _snwprintf_s(result, sizeof(result) / sizeof(result[0]), _TRUNCATE,
-                     L"HOT_RELOAD rebootstrap-to-main-menu sequence=%llu state=%s transition_result=%d",
+                     L"HOT_RELOAD rebootstrap-to-main-menu sequence=%llu prior_state=%s transition_result=%d",
                      request.sequence, RuntimeStateName(runtimeState), menuResult);
         Log(result);
         return true;
@@ -1590,16 +1505,11 @@ bool ProcessHotReloadOnGameThread()
 
     InterlockedExchange(&g_pendingStateAwareReload, 0);
     InterlockedExchange(&g_directLaunchState, 3);
-    int transitionResult = 1;
-    if(runtimeState == RuntimeState::MainMenuReady)
-    {
-        auto* game = reinterpret_cast<unsigned char*>(g_gameModule);
-        const auto newGame = reinterpret_cast<NewGameBootstrapFn>(game + kNewGameBootstrapRva);
-        Log(L"HOT_RELOAD invoking complete New Game bootstrap from MainMenuReady");
-        newGame(g_zoneTransitionController);
-    }
-    else
-        transitionResult = g_originalZoneTransition(g_zoneTransitionController, g_sourceZone, 0);
+    const int transitionResult = 1;
+    auto* game = reinterpret_cast<unsigned char*>(g_gameModule);
+    const auto newGame = reinterpret_cast<NewGameBootstrapFn>(game + kNewGameBootstrapRva);
+    Log(L"HOT_RELOAD invoking complete New Game bootstrap from MainMenuReady");
+    newGame(g_zoneTransitionController);
     const bool redirected = InterlockedCompareExchange(&g_directLaunchState, 6, 4) == 4;
     if(!redirected)
     {
@@ -1886,8 +1796,6 @@ bool InitializeDirectLaunch()
         return patched > 0;
     }
     const bool directLaunch = InstallMapLoadDetour();
-    const bool overlayProvider = runtime == RuntimeBuild::JmvStarter && directLaunch
-        ? InstallRuntimeOverlayProbe() : false;
     if(runtime == RuntimeBuild::BaseEi && g_baseProbeLevel == 2 && directLaunch)
     {
         // Keep the byte-guarded detours installed, but use a state which can
@@ -1897,10 +1805,9 @@ bool InitializeDirectLaunch()
     }
     wchar_t message[256]{};
     _snwprintf_s(message, sizeof(message) / sizeof(message[0]), _TRUNCATE,
-                 L"DIRECT_LAUNCH active imports=%d stack_capture=%s map_loader=%s overlay_state=%s trigger=complete-new-game-bootstrap",
+                 L"DIRECT_LAUNCH active imports=%d stack_capture=%s map_loader=%s hot_reload=main-menu-rebootstrap trigger=complete-new-game-bootstrap",
                  patched, g_captureStack ? L"available" : L"unavailable",
-                 directLaunch ? L"available" : L"unavailable",
-                 overlayProvider ? L"available" : L"unavailable");
+                 directLaunch ? L"available" : L"unavailable");
     Log(message);
     return patched > 0 && directLaunch;
 }

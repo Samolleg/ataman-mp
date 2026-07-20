@@ -469,14 +469,14 @@ CJmvMapTestLauncher::CJmvMapTestLauncher(QObject* parent)
             emit hotReloadFinished(sequence, success, message);
             return;
         }
-        if(++m_hotReloadResultPolls >= 80)
+        if(++m_hotReloadResultPolls >= 160)
         {
             const quint64 sequence = m_pendingHotReloadSequence;
             m_pendingHotReloadSequence = 0;
             m_pendingSaveGeneration = 0;
             m_hotReloadResultTimer->stop();
             const QString message = QString(
-                "JMV hot reload %1 did not report completion within 20 seconds; inspect bridge-result.log.")
+                "JMV hot reload %1 did not report completion within 40 seconds; inspect bridge-result.log.")
                 .arg(sequence);
             appendRunLog(message);
             emit hotReloadFinished(sequence, false, message);
