@@ -583,7 +583,23 @@ void CObjectBase::applyTransientVisual(const QString& modelName, const QString& 
                 && !bodyTextureLayers.isEmpty() ? textureName : partTextureNames.value(part->name(),
             part->textureNumber() == 2 && !secondaryTextureName.trimmed().isEmpty()
                 ? secondaryTextureName : textureName);
-        part->setTextureUvScale(ei::textureUvScale(partTexture));
+        float uvScale = ei::textureUvScale(partTexture);
+        if(!part->vertData().isEmpty())
+        {
+            float minU = part->vertData().first().texCoord.x();
+            float maxU = minU;
+            float minV = part->vertData().first().texCoord.y();
+            float maxV = minV;
+            for(const SVertexData& vertex : part->vertData())
+            {
+                minU = qMin(minU, vertex.texCoord.x());
+                maxU = qMax(maxU, vertex.texCoord.x());
+                minV = qMin(minV, vertex.texCoord.y());
+                maxV = qMax(maxV, vertex.texCoord.y());
+            }
+            uvScale = ei::textureUvScaleForBounds(partTexture, minU, maxU, minV, maxV);
+        }
+        part->setTextureUvScale(uvScale);
     }
     recalcMinPos();
 }

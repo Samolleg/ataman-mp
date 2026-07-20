@@ -270,6 +270,7 @@ SParsedDatabaseMembers parseProfileDatabaseMembers(const QMap<QString, QByteArra
             record.complexionX = fieldFloat(fields, 5);
             record.complexionY = fieldFloat(fields, 6);
             record.complexionZ = fieldFloat(fields, 7);
+            record.items = stringListField(fields, 29);
             record.wears = stringListField(fields, 32);
             const QStringList weapons = stringListField(fields, 33);
             record.weapon = weapons.value(0);

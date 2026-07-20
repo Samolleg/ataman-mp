@@ -140,7 +140,11 @@ edit `database.res`, JMV/Base archives, live MOBs, maps, or the game install.
 7. Validate spear goblins with only the explicit pike visible and ogres with
    their club using OBJ secondary texture. This follows the FIG header texture
    selector (`1` primary, `2` secondary); body texture must not propagate to
-   a texture-2 integral weapon.
+   a texture-2 integral weapon. Also check `zone17` ID 763: its full-atlas
+   `rh3.club02` FIG must use the Monster Items weapon `2h slander.meteoric`,
+   resolved as `UnhumaTH_02.mr.0.x2`, rather than the incompatible MOB
+   `club7` atlas. Ordinary `rh3.club00` ogres must remain on their MOB club
+   textures.
 8. Normal database-backed humans, orcs, and skeletons rebuild their anatomical
    base from the database-selected assembly. Their embedded MOB part mask is
    not reused after a race/model substitution. Imported units continue to use
@@ -212,7 +216,9 @@ test build:
    weapon resolver. JMV Lua contains no goblin/sling special case. Reverse
    engineer how the engine combines Monster `Items`, MOB `OBJ_BODYPARTS`, FIG
    component/group metadata, and the active creature weapon before changing
-   behavior.
+   behavior. The narrow `dclub02` database-family to integral `club02` alias is
+   already corpus-backed for `zone17` ID 763; it is not evidence for guessing
+   equivalent aliases in other families.
 4. Cover goblin sling/spear, ogre club, and lizardman trident controls. Select
    one mutually exclusive integral weapon group, retain its primary/secondary
    texture selector, and pass its semantic weapon family to ADB idle selection.

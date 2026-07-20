@@ -389,6 +389,43 @@ QString equipmentTextureName(const QString& model, const QString& itemType, int 
                                                ? "x4" : "x2");
 }
 
+QString jmvIntegralCreatureWeaponTexture(
+    const QSharedPointer<const ei::SProfileDatabaseSnapshot>& database,
+    const ei::SMonsterDatabaseRecord& monster, const SCharacterAppearanceRequest& request)
+{
+    // JMV's OgreHadaganF21 uses the standard two-hand club TTI 2 atlas, but
+    // its integral animation assembly names the full-atlas component club02
+    // instead of the humanoid dclub02. Ordinary club00 ogres retain their
+    // dedicated MOB club textures. This family/TTI link is established by the
+    // database row and matching FIG geometry, not by a map or object ID.
+    static const QMap<int, QString> integralAliases = {{14, "club"}};
+    QStringList references = monster.items;
+    if(!monster.weapon.trimmed().isEmpty())
+        references.prepend(monster.weapon);
+    for(const QString& reference : references)
+    {
+        const QString prototype = itemPrototype(reference);
+        const QString materialName = itemMaterial(reference);
+        const auto item = database->items.constFind(prototype);
+        const auto material = database->materialRecords.constFind(materialName);
+        if(item == database->items.constEnd() || material == database->materialRecords.constEnd()
+                || item->category.compare("weapons", Qt::CaseInsensitive) != 0)
+            continue;
+        const QString alias = integralAliases.value(item->typeId);
+        if(alias.isEmpty() || item->textureType1 < 0)
+            continue;
+        const QString suffix = QString(".%1%2").arg(alias)
+            .arg(item->textureType1, 2, 10, QChar('0'));
+        const bool hasMatchingComponent = std::any_of(
+            request.bodyParts.constBegin(), request.bodyParts.constEnd(),
+            [&](const QString& part) { return part.endsWith(suffix, Qt::CaseInsensitive); });
+        if(hasMatchingComponent)
+            return equipmentTextureName("unhuma", item->type, item->typeId,
+                item->textureType1, item->textureType2, material->code, true);
+    }
+    return QString();
+}
+
 QStringList appendArmorComponents(const ei::SItemDatabaseRecord& item,
                                   bool jmv,
                                   const SEquipmentLayoutRequest& request,
@@ -489,7 +526,12 @@ SRuntimeProviderResult resolveDatabaseAppearance(
         appearance->insert("source", "embeddedMobCreature");
         appearance->insert("model", request.model);
         appearance->insert("primaryTexture", request.primaryTexture);
-        appearance->insert("secondaryTexture", request.secondaryTexture);
+        const QString integralWeaponTexture = jmv
+            ? jmvIntegralCreatureWeaponTexture(database, *monster, request) : QString();
+        appearance->insert("secondaryTexture", integralWeaponTexture.isEmpty()
+            ? request.secondaryTexture : integralWeaponTexture);
+        appearance->insert("secondaryTextureSource", integralWeaponTexture.isEmpty()
+            ? "embeddedMob" : "profileDatabaseIntegralWeapon");
         appearance->insert("bodyParts", QJsonArray::fromStringList(
             jmv ? jmvEmbeddedCreatureParts(request.model, request.bodyParts) : request.bodyParts));
         appearance->insert("armor", QJsonArray());

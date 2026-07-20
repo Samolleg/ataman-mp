@@ -91,6 +91,7 @@ private slots:
     void resolvesHumanoidSkinNumberBeyondRaceModelExamples();
     void jmvKeepsEmbeddedWearableAssemblyForDatabaseAppearance();
     void jmvPreservesEmbeddedNonHumanoidAppearance();
+    void jmvResolvesIntegralOgreWeaponAtlasFromPrototype();
     void jmvHidesGoblinSlingWhenExplicitWeaponIsEnabled();
     void jmvResolvesZombieX4Textures();
     void jmvResolvesSkeletonX4Textures();
@@ -312,6 +313,44 @@ void ProfileVisualProviderTests::jmvLayoutsAreIndependentlyGated()
                     .contains("rendering the first two-handed weapon"));
         }
     }
+}
+
+void ProfileVisualProviderTests::jmvResolvesIntegralOgreWeaponAtlasFromPrototype()
+{
+    auto db = database();
+    ei::SRaceModelDatabaseRecord creature;
+    creature.name = "Ogre Boss"; creature.model = "unmoog2";
+    creature.primaryTextures << "Ogre03";
+    db->raceModels.insert(creature.name.toLower(), creature);
+    ei::SMonsterDatabaseRecord ogre;
+    ogre.name = "Ogre Hadagan F21"; ogre.baseRace = creature.name;
+    ogre.items << "2h slander.meteoric" << "material.ogre black leather [18]";
+    db->monsters.insert(ogre.name.toLower(), ogre);
+    ei::SItemDatabaseRecord weapon = item("2h slander", "weapons", 14, 2);
+    weapon.type = "hammer";
+    db->items.insert(weapon.name.toLower(), weapon);
+    ei::SMaterialDatabaseRecord meteoric;
+    meteoric.name = "meteoric"; meteoric.type = "Metal"; meteoric.code = "mr";
+    db->materialRecords.insert(meteoric.name, meteoric);
+
+    ProfileVisualProviderService service;
+    const auto resolver = service.appearanceResolver("jmv.v1", db);
+    SCharacterAppearanceRequest request;
+    request.prototype = ogre.name; request.model = "unmoog2";
+    request.primaryTexture = "ogrezombie01"; request.secondaryTexture = "club7";
+    request.bodyParts << "bd" << "rh3" << "rh3.club02";
+    QJsonObject output;
+    QVERIFY(resolver->resolve(request, &output).success);
+    QCOMPARE(output.value("secondaryTexture").toString(),
+             QString("unhumath_02.mr.0.x2.mmp"));
+    QCOMPARE(output.value("secondaryTextureSource").toString(),
+             QString("profileDatabaseIntegralWeapon"));
+
+    request.bodyParts = QStringList() << "bd" << "rh3" << "rh3.club00";
+    request.secondaryTexture = "club6";
+    QVERIFY(resolver->resolve(request, &output).success);
+    QCOMPARE(output.value("secondaryTexture").toString(), QString("club6"));
+    QCOMPARE(output.value("secondaryTextureSource").toString(), QString("embeddedMob"));
 }
 
 void ProfileVisualProviderTests::validatesAssemblyPartsWithPlaceholders()

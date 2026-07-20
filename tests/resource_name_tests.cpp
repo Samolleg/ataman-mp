@@ -170,6 +170,12 @@ void ResourceNameTests::derivesEquipmentAtlasUvScale()
     QCOMPARE(ei::textureUvScale("UnhumaPL_05.bl.0.x4.mmp"), 1.0f);
     QCOMPARE(ei::textureUvScale("unskskin_02_x4"), 1.0f);
     QCOMPARE(ei::textureUvScale("unhumaskin_04.mmp"), 1.0f);
+    // Packed humanoid dclub02 occupies one atlas quadrant; the otherwise
+    // identical integral ogre club02 has already-expanded full-atlas UVs.
+    QCOMPARE(ei::textureUvScaleForBounds("UnhumaTH_02.mr.0.x2.mmp",
+        0.009657f, 0.492210f, 0.509374f, 0.993647f), 2.0f);
+    QCOMPARE(ei::textureUvScaleForBounds("UnhumaTH_02.mr.0.x2.mmp",
+        0.019314f, 0.984419f, 0.018749f, 0.987295f), 1.0f);
 }
 
 void ResourceNameTests::decodesSparsePnt3WithTrailingTransparency()

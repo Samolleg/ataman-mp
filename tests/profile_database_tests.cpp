@@ -44,7 +44,8 @@ QMap<QString, QByteArray> relationalMembers()
     QByteArray race = stringField(0, "Human Male") + stringField(30, "unhuma")
         + tag(31, stringField(0, "unhumaskin_00"));
     QByteArray monster = stringField(0, "Human Test") + stringField(1, "Human Male")
-        + intField(3, 2) + tag(32, stringField(0, "armor_leather.iron"))
+        + intField(3, 2) + tag(29, stringField(0, "gold [3]"))
+        + tag(32, stringField(0, "armor_leather.iron"))
         + tag(33, stringField(0, "2h sword.iron[effect{a,b}],shield.iron"));
     const QByteArray units = database({QByteArray(), record(race), record(monster), QByteArray()});
 
@@ -120,6 +121,7 @@ void ProfileDatabaseTests::parsesStableLinksAndCurrentNames()
     const ei::SParsedDatabaseMembers parsed = ei::parseProfileDatabaseMembers(relationalMembers(), "memory");
     QCOMPARE(parsed.monsters.value("human test").baseRace, QString("Human Male"));
     QCOMPARE(parsed.monsters.value("human test").weapon, QString("2h sword.iron[effect{a,b}]"));
+    QCOMPARE(parsed.monsters.value("human test").items, QStringList({"gold [3]"}));
     QCOMPARE(parsed.raceModels.value("human male").model, QString("unhuma"));
     QCOMPARE(parsed.items.value("2h sword").typeId, 1);
     QCOMPARE(parsed.materialRecords.value("iron").code, QString("ir"));

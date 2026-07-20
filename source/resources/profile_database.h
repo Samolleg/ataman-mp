@@ -46,6 +46,7 @@ struct SMonsterDatabaseRecord
     float complexionX{1.0f};
     float complexionY{1.0f};
     float complexionZ{1.0f};
+    QStringList items;
     QStringList wears;
     QString weapon;
     QString secondWeapon;
