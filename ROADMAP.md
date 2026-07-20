@@ -261,6 +261,7 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
   View-panel visibility across shutdown, restoring clearly grey disabled menu
   entries without an alignment offset, disabling Close All for an empty
   workspace, and blocking editor input throughout hot-reload staging/commit.
+  Implementation: [`465175d`](https://github.com/Ilufus/ei-mapper-endurance/commit/465175d).
 - **Alpha.13 validation/UI changes:** validation no longer performs expensive automatic
   replacement-ID scans for fully shared ranges, map switches refresh their
   runtime-family identity, missing `AddMob(...)` dependencies identify the
