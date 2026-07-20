@@ -5,7 +5,7 @@ work is ordered from the newest planned minor line to the oldest completed one.
 An item is checked only after its implementation has landed and received the
 stated validation. Completed code should carry a commit, test, or release link.
 
-Current development line: `0.2.1-alpha.21` focused closed testing.
+Current development line: `0.2.1-alpha.22` focused closed testing.
 
 <details open>
 <summary><strong>General wishlist — not assigned to a release</strong></summary>
@@ -273,7 +273,9 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
 
 ### Current 0.2.x status
 
-- **Current tester build:** `0.2.1-alpha.21`, completing the remaining
+- **Current tester build:** `0.2.1-alpha.22`, fixing the General-settings
+  registration that left alpha.21's visible autosave controls disconnected
+  from persistence and prevented its timer from starting. Alpha.21 completed the remaining
   release-facing editor priorities: exact duplicate-MOB detection, guarded
   workspace replacement for manual MPR opens, named save/load progress,
   versioned recoverable autosaves, and the optimized profile-correct humanoid

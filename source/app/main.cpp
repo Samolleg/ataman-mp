@@ -12,6 +12,7 @@
 #include <QTimer>
 #include <QDir>
 #include <QTabWidget>
+#include <QCheckBox>
 #include <QKeySequenceEdit>
 #include <QTemporaryDir>
 #include <QUndoCommand>
@@ -525,6 +526,7 @@ int runHeadlessCommand(QApplication& app)
         QWidget primaryWindow;
         bool settingsTabsUsable = false;
         bool settingsShortcutsPersist = false;
+        bool autosaveSettingsPersist = false;
         {
             const QString previousDirectory = QDir::currentPath();
             QTemporaryDir settingsDirectory;
@@ -543,9 +545,15 @@ int runHeadlessCommand(QApplication& app)
                 QKeySequenceEdit* duplicateShortcut = settingsWindow.findChild<QKeySequenceEdit*>("shortcutDuplicateObjects");
                 QKeySequenceEdit* stopTestShortcut = settingsWindow.findChild<QKeySequenceEdit*>("shortcutStopMapTest");
                 QKeySequenceEdit* activateOwnerShortcut = settingsWindow.findChild<QKeySequenceEdit*>("shortcutActivateOwnerMob");
+                QCheckBox* autosaveEnabled = settingsWindow.findChild<QCheckBox*>("autosaveEnabled");
+                QLineEdit* autosaveInterval = settingsWindow.findChild<QLineEdit*>("autosaveIntervalMinutes");
                 if(historyShortcut && duplicateShortcut && stopTestShortcut && activateOwnerShortcut)
                 {
                     historyShortcut->setKeySequence(QKeySequence("Alt+L"));
+                    if(autosaveEnabled)
+                        autosaveEnabled->setChecked(true);
+                    if(autosaveInterval)
+                        autosaveInterval->setText("1");
                     QMetaObject::invokeMethod(&settingsWindow, "on_buttonApply_clicked", Qt::DirectConnection);
                     COptString* saved = dynamic_cast<COptString*>(
                         settingsWindow.opt(eOptSetKeyBinding, "shortcutHistory"));
@@ -553,6 +561,12 @@ int runHeadlessCommand(QApplication& app)
                             && duplicateShortcut->keySequence() == QKeySequence("Ctrl+D")
                             && stopTestShortcut->keySequence() == QKeySequence("Shift+Esc")
                             && activateOwnerShortcut->keySequence() == QKeySequence("Ctrl+T");
+                    COptBool* savedAutosaveEnabled = dynamic_cast<COptBool*>(
+                        settingsWindow.opt(eOptSetGeneral, "autosaveEnabled"));
+                    COptInt* savedAutosaveInterval = dynamic_cast<COptInt*>(
+                        settingsWindow.opt(eOptSetGeneral, "autosaveIntervalMinutes"));
+                    autosaveSettingsPersist = savedAutosaveEnabled && savedAutosaveEnabled->value()
+                            && savedAutosaveInterval && savedAutosaveInterval->value() == 1;
                 }
             }
             QDir::setCurrent(previousDirectory);
@@ -600,6 +614,7 @@ int runHeadlessCommand(QApplication& app)
 
         const bool passed = prefixesOnly && valueStable && focusCancel && escapeCancel
                 && enterCommit && clickCommit && settingsTabsUsable && settingsShortcutsPersist
+                && autosaveSettingsPersist
                 && secondaryWindowsClosed
                 && pasteSingleAction && pasteUndoAtomic && pasteRedoAtomic
                 && incompatiblePasteBlocked && compatiblePasteImmediate
@@ -619,6 +634,7 @@ int runHeadlessCommand(QApplication& app)
                << " clickCommit=" << clickCommit
                << " settingsTabsUsable=" << settingsTabsUsable
                << " settingsShortcutsPersist=" << settingsShortcutsPersist
+               << " autosaveSettingsPersist=" << autosaveSettingsPersist
                << " secondaryWindowsClosed=" << secondaryWindowsClosed
                << " pasteSingleAction=" << pasteSingleAction
                << " pasteUndoAtomic=" << pasteUndoAtomic
