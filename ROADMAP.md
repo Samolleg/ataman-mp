@@ -674,12 +674,21 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
     locks the previous MOB and unlocks the selected MOB. Existing Ctrl+T should
     show/focus this panel instead of opening the awkward transient chooser.
   - Each row can independently hide/show its MOB without unloading it.
+    Visibility is editor-rendering/picking state only: hidden MOBs remain loaded
+    and continue to participate in validation, Save All, collections, and Test
+    Current Map. The active MOB stays visible.
   - Hovering or single-clicking an object from a locked MOB explains that it
     belongs to locked MOB `<name>`. Double-clicking that object switches its MOB
     active and selects it.
   - Show the owning MOB for the selected object. Reuse the already working
     cross-MOB copy/paste path; no coordinated simultaneous-edit transaction or
     multi-document Save All redesign is required for this feature.
+  - Switching MOBs cancels any uncommitted placement/transform and clears the
+    old selection without dirtying either document. Undo/redo remains global;
+    when its next command belongs to another loaded MOB, Endurance activates
+    that owner before applying the command rather than mutating a locked MOB
+    invisibly. Map/MOB open, close, visibility, and active-MOB switching remain
+    workspace UI state, not document undo commands.
 - [ ] Runtime-validate deterministic multi-MOB JMV test loading.
   - [x] Identify the primary MOB from `map.txt` (falling back to collection
     order), validate every loaded MOB, and inventory all source/staged hashes.
@@ -724,8 +733,9 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
     matching correction and awaits focused tester validation.
 - [ ] Make manual **Open MPR**, drag/drop, recent-file, and command-line MPR
   opening reuse the guarded replacement already used by the Maps browser:
-  prompt for dirty documents, allow Cancel, then unload the old MPR/MOB set,
-  clear document-bound undo state, and load the requested terrain. Currently
+  run the existing dirty-state Save/Discard/Cancel check, then unload every MOB
+  and the old MPR, clear document-bound undo state, and load the requested
+  terrain. Currently
   these manual paths only say "Landscape already loaded; close first." Opening
   additional MOBs remains independent and is not affected.
 - [x] Persist the expanded/collapsed state of the **Maps** and **Collections**
@@ -750,9 +760,10 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
   re-open staged output, and atomically replace—so a large safe save cannot look
   like a frozen editor. Cancellation is allowed only before atomic commit.
 - [ ] Move remaining long MPR/MOB/resource-loading phases behind the existing
-  modal loading UI, expose real phase progress, and permit cancellation at safe
-  boundaries before the document is registered. This is responsiveness UX, not
-  a parser or serializer redesign.
+  blocking modal loading UI and expose real phase progress. Loading is not
+  cancellable; the purpose is to prove the editor is working and prevent a
+  healthy long operation from looking frozen. This is responsiveness UX, not a
+  parser or serializer redesign.
 - [ ] Stress large-map edit/undo/redo/save/open/close cycles with scripts,
   model parts, multi-selection, copy/delete, and patrol/look structures.
 - [ ] Finish closed-group coverage proving scripts and all CP1251 text edits
@@ -764,8 +775,10 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
 - [x] Support typed multi-field property copy/paste, including model parts and
   Create Object, with destination compatibility checks.
 - [ ] **0.2.x release task:** allow copying/pasting one selected component of a
-  compound property value—initially individual X/Y/Z vector components, with
-  the same scalar/type compatibility checks used by whole-field paste.
+  compound property value—initially individual X/Y/Z vector components. A
+  copied component is an ordinary numeric scalar (for Vector3, a float), so it
+  may be pasted into any numeric destination that can represent it safely; it
+  is not restricted to the same component name or compound-property type.
 - [x] Provide independent internal/external MOB script editing with document-
   owned workspaces, undoable imports, recovery, and configurable editor path.
 - [x] Warn before changing/resetting/deleting object IDs referenced by the
