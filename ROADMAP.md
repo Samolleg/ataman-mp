@@ -499,6 +499,7 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
     successful runs remain log-only.
   - `EIMapperEndurance.exe --test-run-report <run-root> [--json]` provides the
     same deterministic check for closed-test collection and automation.
+    Implementation: [`7677c60`](https://github.com/Ilufus/ei-mapper-endurance/commit/7677c60).
 - [ ] Complete the focused 0.2.x release matrix and publish `0.2.0`.
   - Normal JMV gameplay map.
   - Zone17/zone18 or another map that previously refused script injection.
