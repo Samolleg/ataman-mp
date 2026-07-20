@@ -2508,6 +2508,11 @@ void MainWindow::openMapPair(const QString& mprPath, const QString& mobPath,
     m_pView->loadMob(mobFile);
     rememberRecentFile(QFileInfo(mprPath));
     rememberRecentFile(QFileInfo(mobPath));
+    // The landscape title update can run before the matching MOB has finished
+    // loading. Re-resolve the map identity from the completed pair so family
+    // validation and hot reload cannot retain the previous map's primary MOB,
+    // entrances, or custom-spawn context.
+    refreshMapTestContext();
     ei::log(eLogInfo, QString("Opened profile map zone:%1 mpr:%2 mob:%3")
         .arg(zoneId, mprPath, mobPath));
     progress.setValue(3);
