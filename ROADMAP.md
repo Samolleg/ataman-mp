@@ -5,7 +5,7 @@ work is ordered from the newest planned minor line to the oldest completed one.
 An item is checked only after its implementation has landed and received the
 stated validation. Completed code should carry a commit, test, or release link.
 
-Current development line: `0.2.1-alpha.13` focused closed testing.
+Current development line: `0.2.1-alpha.14` focused closed testing.
 
 <details open>
 <summary><strong>General wishlist — not assigned to a release</strong></summary>
@@ -256,9 +256,10 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
 
 ### Current 0.2.x status
 
-- **Current tester build:** `0.2.1-alpha.13`, retaining alpha.12's same-session
-  orphan cleanup and adding the accumulated validation-stall, stale-family,
-  missing-dependency-provenance, and modular-panel fixes.
+- **Current tester build:** `0.2.1-alpha.14`, retaining alpha.13's validation
+  and modular-panel fixes while invalidating Play-from-Here state on map-context
+  changes and using title-only blocking progress dialogs for map loading,
+  staging, hot reload, collections, and long history operations.
 - **Alpha.13 validation/UI changes:** validation no longer performs expensive automatic
   replacement-ID scans for fully shared ranges, map switches refresh their
   runtime-family identity, missing `AddMob(...)` dependencies identify the
@@ -271,14 +272,17 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
 - **Direct JMV gameplay:** working on tested normal, dungeon, and briefing maps,
   including selected entrances, zone metadata, startup-movie suppression,
   Godmode, supplemental `AddMob` loading, and temporary-map staging.
-- **0.2.x runtime release blockers:** runtime-validate generation Save/Load,
-  authoritative state handling from gameplay/Main Menu/inventory/store/world
-  map/transition, and interrupted-run recovery; then run the final focused
-  gameplay matrix.
+- **0.2.x runtime release blockers:** generation-isolated Save/Load,
+  authoritative gameplay/Main Menu/inventory/store/world-map/transition state
+  handling, unsafe-transition deferral, same-map position/facing restoration,
+  and cross-MOB hot reload are runtime-confirmed. Confirm different-map
+  entrance/anchor reset and authoritative result reporting, then run the final
+  focused gameplay matrix.
 - **0.2.1 hot reload:** protocol v2, immutable map/save generations, normal
   Main Menu/New Game rebootstrap, responsive stale-transition world-map
-  classification, and orphan monitoring are implemented. Supplemental/
-  collection runtime validation and same-position restoration remain unfinished.
+  classification, orphan monitoring, and same-position restoration are
+  implemented and runtime-confirmed. Nested/conditional supplemental loading
+  remains an explicit confirmation item because no controlled fixture exists.
 - **Stable 0.2.0 editor gate:** parameter-aware outliner filtering with strict
   contiguous matching by default and explicit `~` subsequence fuzziness.
   Unreal-style MOB ownership/locking remains the larger workspace follow-up.
@@ -447,7 +451,7 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
 - [x] Expose **Stop JMV Map Test** in Endurance while its owned game process is
   active, with customizable `Shift+Esc` as the default shortcut
   ([implementation](https://github.com/Ilufus/ei-mapper-endurance/commit/5f693b2)).
-- [ ] Runtime-validate the guarded runtime-readiness/state gate.
+- [x] Runtime-validate the guarded runtime-readiness/state gate.
   - A completed main-menu map load does not prove UI/session initialization is
     finished on all hardware.
   - Observe a fingerprinted engine state; do not add another fixed delay.
@@ -472,7 +476,7 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
   - Read zone type from `map.txt` rather than assuming every staged pair is an
     ordinary gameplay zone.
   - Add explicit metadata for new maps that do not yet have a map-table entry.
-- [ ] Runtime-prove Save/Load inside one generation and the empty Load list after
+- [x] Runtime-prove Save/Load inside one generation and the empty Load list after
   hot reload. Saves from an older staged-map generation must remain invisible.
 - [x] Verify startup-movie suppression for root and active-mod movie paths.
   - Alpha.58 hides `1c.bik` and `nival.bik` in-process without renaming them.
@@ -572,18 +576,17 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
   - [x] Never attach to or stop an independently launched game.
   - [x] Report readiness only after the first staged loader completed; report
     each reload completion/failure back to the editor with a 20-second timeout.
-  - [ ] Runtime-prove that the verified normal zone-transition controller safely
-    unloads and reloads the same staged pair without restarting JMV. Current
-    source has reloaded the primary MOB in testing, but is not considered fully
-    validated until supplemental/collection MOBs also reload exactly once.
-  - [ ] Re-test cross-MOB copied objects during hot reload with alpha.4 or later;
+  - [x] Runtime-prove that the verified normal zone-transition controller safely
+    unloads and reloads the same staged pair without restarting JMV. Exact-once
+    supplemental/collection confirmation remains the only unchecked child.
+  - [x] Re-test cross-MOB copied objects during hot reload with alpha.4 or later;
     alpha.4 fixed the provenance rejection that previously stopped trees copied
     from `zone1.mob` into `Autozone1cyclopus.mob` from staging.
   - Implementation: [`5011954`](https://github.com/Ilufus/ei-mapper-endurance/commit/5011954).
-- [ ] Preserve position on same-map reload.
-  - Capture player position and facing before teardown.
-  - Restore them only after ground, bounds, and collision validation.
-  - Fall back to the selected map-table entrance when unsafe.
+- [x] Preserve position on same-map reload.
+  - Runtime testing confirms position and facing are captured before teardown,
+    restored after safety checks, and fall back to the selected entrance when
+    restoration is unsafe.
 - [ ] Use normal entrance deployment when the editor switches to a different
   map set before Ctrl+F5.
   - [x] Clear the previous generation's optional bootstrap MOB when the new
@@ -591,13 +594,12 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
     This prevents map A's cleared custom spawn from being replayed after map B
     selects a normal entrance. Runtime confirmation is pending the next tester
     build. ([`6286325`](https://github.com/Ilufus/ei-mapper-endurance/commit/6286325))
-- [ ] Keep the staged version mounted when travelling away and returning.
+- [x] Keep the staged version mounted when travelling away and returning.
   - Returning to the edited map must not silently load the installed original.
   - Record every active staged map identity and hash.
-- [ ] Reject or defer hot reload while the runtime is between zones/on a map
-  loading screen. A tester observed `game.exe` crash when a reload message was
-  delivered during that state; this remains low priority until the bridge has
-  an authoritative transition-idle signal.
+- [x] Reject or defer hot reload while the runtime is between zones/on a map
+  loading screen. Runtime testing confirms the bridge now defers until a stable
+  state instead of delivering into the unsafe transition window.
 - [x] Document the current staging split: complete immutable payloads and
   reload generations live under AppData, while JMV additionally requires one
   randomly named, hash-owned MPR/MOB alias in the active mod `Maps` directory.
@@ -612,8 +614,8 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
 - [x] Preserve exact raw object templates when copying between different MOBs.
   Cross-MOB paste now carries the donor source and clean-projection subtrees,
   validates their hashes, and can save or hot-reload the destination without
-  falling back to the rebuilding serializer. Runtime validation with trees
-  copied from `zone1.mob` into `Autozone1cyclopus.mob` remains pending.
+  falling back to the rebuilding serializer. Runtime testing with cross-MOB
+  copied objects through hot reload is confirmed.
 - [ ] Replace the secondary-MOB workflow with Unreal-style multi-MOB editing.
   - Show every open MOB in a **Loaded MOBs** list/tab.
   - Make the active destination MOB explicit for paste/create operations.
@@ -629,6 +631,8 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
     continue to the installed JMV file. No `AddMobEx` assumption is required.
   - [ ] Runtime-test immediate, conditional, and nested supplemental loads,
     then repeat after Ctrl+F5 hot reload and confirm no duplicate instances.
+    There is no current deterministic nested/conditional fixture; retain this
+    as a confirmation task and do not hold unrelated 0.2.x work on it.
   - Implementation: [`c1ea993`](https://github.com/Ilufus/ei-mapper-endurance/commit/c1ea993).
 - [x] Add portable Endurance `.collection` files.
   - Store one optional MPR and one or more ordered MOB references; never embed

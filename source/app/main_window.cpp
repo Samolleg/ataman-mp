@@ -113,6 +113,19 @@ void enableNativeFloatingControls(QDockWidget* dock)
     QObject::connect(dock, &QDockWidget::topLevelChanged, dock, apply);
     apply(dock->isFloating());
 }
+
+void configureBlockingProgress(QProgressDialog* progress)
+{
+    if(!progress)
+        return;
+    progress->setCancelButton(nullptr);
+    progress->setWindowModality(Qt::ApplicationModal);
+    progress->setWindowFlags(Qt::Dialog | Qt::CustomizeWindowHint |
+                             Qt::WindowTitleHint);
+    progress->setMinimumDuration(0);
+    progress->setAutoClose(false);
+    progress->setAutoReset(false);
+}
 }
 
 void testFunc()
@@ -814,11 +827,7 @@ void MainWindow::runUndoToIndex(int targetIndex)
                                        : tr("Applying redo history..."),
             QString(), 0, 0, this));
         progress->setWindowTitle(tr("Updating map"));
-        progress->setCancelButton(nullptr);
-        progress->setWindowModality(Qt::ApplicationModal);
-        progress->setMinimumDuration(0);
-        progress->setAutoClose(false);
-        progress->setAutoReset(false);
+        configureBlockingProgress(progress.data());
         progress->show();
         QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
     }
@@ -940,6 +949,7 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event)
                 }
                 m_customSpawn = plan;
                 m_customSpawnPosition = resolved;
+                m_customSpawnContextKey = currentMapContextKey();
                 m_pickSpawnPending = false;
                 m_movingCustomSpawn = false;
                 m_customSpawnSelected = true;
@@ -1095,7 +1105,8 @@ void MainWindow::updateEntranceOverlays()
                 .arg(entrance.destinationZoneId)
                 .arg(entrance.destinationExitId));
     }
-    const int selected = (m_customSpawn.valid && m_customSpawn.custom) ? -1
+    const int selected = (m_customSpawn.valid && m_customSpawn.custom
+                          && m_customSpawnContextKey == currentMapContextKey()) ? -1
         : (m_entranceCombo ? m_entranceCombo->currentData().toInt() : -1);
     m_pView->setTestEntranceOverlays(rectangles, labels, selected);
     updateCustomSpawnControls();
@@ -1106,8 +1117,12 @@ void MainWindow::refreshMapTestContext()
     m_mapTestEntry = SMapCatalogEntry();
     m_borrowedMapIdentity = false;
     m_customSpawn = SMapSpawnPlan();
+    m_customSpawnPosition = QVector3D();
+    m_customSpawnContextKey.clear();
+    m_pickSpawnPending = false;
     m_movingCustomSpawn = false;
     m_customSpawnSelected = false;
+    m_suppressSpawnRelease = false;
     if(m_pView)
         m_pView->clearTestSpawnMarker();
     if(m_playFromHereButton)
@@ -1198,6 +1213,8 @@ void MainWindow::setCustomSpawnPicking(bool enabled)
         m_movingCustomSpawn = false;
         m_customSpawnSelected = false;
         m_customSpawn = SMapSpawnPlan();
+        m_customSpawnPosition = QVector3D();
+        m_customSpawnContextKey.clear();
         if(m_pView)
         {
             m_pView->unsetCursor();
@@ -1223,6 +1240,7 @@ void MainWindow::setCustomSpawnPicking(bool enabled)
     m_movingCustomSpawn = false;
     m_customSpawnSelected = false;
     m_customSpawn = SMapSpawnPlan();
+    m_customSpawnContextKey.clear();
     m_pView->setCursor(Qt::CrossCursor);
     m_pView->setFocus();
     m_spawnPositionLabel->setText(tr("Click terrain (Esc cancels)"));
@@ -1234,7 +1252,8 @@ void MainWindow::setCustomSpawnPicking(bool enabled)
 
 void MainWindow::updateCustomSpawnControls()
 {
-    const bool customActive = m_customSpawn.valid && m_customSpawn.custom;
+    const bool customActive = m_customSpawn.valid && m_customSpawn.custom
+        && m_customSpawnContextKey == currentMapContextKey();
     if(m_playFromHereButton)
         m_playFromHereButton->setText(customActive && !m_pickSpawnPending ? tr("Clear entrance")
                                                    : (m_pickSpawnPending ? (m_movingCustomSpawn
@@ -1248,11 +1267,21 @@ void MainWindow::updateCustomSpawnControls()
         m_gotoEntranceButton->setEnabled(customActive || selectedTravelZone());
 }
 
+QString MainWindow::currentMapContextKey() const
+{
+    const QString mprPath = CLandscape::getInstance()->isMprLoad()
+        ? QFileInfo(CLandscape::getInstance()->filePath()).absoluteFilePath()
+        : QString();
+    return QString("%1|%2").arg(QDir::cleanPath(mprPath), m_mapTestEntry.zoneId)
+        .toCaseFolded();
+}
+
 void MainWindow::moveCameraToActiveSpawn()
 {
     if(!m_pView)
         return;
-    if(m_customSpawn.valid && m_customSpawn.custom)
+    if(m_customSpawn.valid && m_customSpawn.custom
+       && m_customSpawnContextKey == currentMapContextKey())
     {
         m_pView->moveCameraToPoint(m_customSpawnPosition);
         return;
@@ -1394,7 +1423,8 @@ void MainWindow::createViewportToolbars()
             if(!m_pView)
                 return;
             if(operation.type == EButtonOpMove && m_customSpawnSelected
-               && m_customSpawn.valid && m_customSpawn.custom)
+               && m_customSpawn.valid && m_customSpawn.custom
+               && m_customSpawnContextKey == currentMapContextKey())
             {
                 m_pView->cancelPendingOperation();
                 m_pickSpawnPending = true;
@@ -1468,7 +1498,9 @@ void MainWindow::updateMapTestAction()
             && !m_pView->mobs().isEmpty() && CLandscape::getInstance()->isMprLoad();
     const bool hasPair = hasMobs && (isJmv || m_pView->mobs().size() == 1);
     const bool hasEntrance = selectedTravelZone() != nullptr;
-    const bool customRequested = (m_customSpawn.valid && m_customSpawn.custom)
+    const bool customForCurrentMap = m_customSpawn.valid && m_customSpawn.custom
+        && m_customSpawnContextKey == currentMapContextKey();
+    const bool customRequested = customForCurrentMap
         || (m_playFromHereButton && m_playFromHereButton->isChecked());
     const bool customReady = !customRequested
         || (isJmv && m_customSpawn.valid && !m_pickSpawnPending);
@@ -1562,13 +1594,10 @@ void MainWindow::launchCurrentMapTest()
                              QString(), 0, 6, this);
     progress.setWindowTitle(hotReloadRequested ? tr("JMV hot reload")
                                                : tr("Map test launch"));
-    progress.setWindowModality(Qt::WindowModal);
-    progress.setCancelButton(nullptr);
-    progress.setMinimumDuration(0);
-    progress.setAutoClose(false);
+    configureBlockingProgress(&progress);
     progress.setValue(0);
     progress.show();
-    QApplication::processEvents();
+    QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
     if(m_pView->cancelPendingOperation())
         statusBar()->showMessage(tr("Pending object movement was cancelled before staging the test."), 4000);
     CLandscape* landscape = CLandscape::getInstance();
@@ -1580,7 +1609,7 @@ void MainWindow::launchCurrentMapTest()
     }
     progress.setLabelText(tr("Validating the active runtime profile..."));
     progress.setValue(1);
-    QApplication::processEvents();
+    QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
 
     const SResourceProfileEvaluation profile = activeResourceProfile();
     const bool isJmv = profile.profileId.compare("jamais-vu", Qt::CaseInsensitive) == 0;
@@ -1599,7 +1628,7 @@ void MainWindow::launchCurrentMapTest()
     }
     progress.setLabelText(tr("Reading map-table metadata..."));
     progress.setValue(2);
-    QApplication::processEvents();
+    QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
 
     const SMapCatalogEntry entry = m_mapTestEntry;
     const SMapTravelZone* entrance = selectedTravelZone();
@@ -1611,7 +1640,7 @@ void MainWindow::launchCurrentMapTest()
     }
     progress.setLabelText(tr("Choosing a safe map-table entrance..."));
     progress.setValue(3);
-    QApplication::processEvents();
+    QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
 
     CMob* mob = nullptr;
     const QString expectedMain = entry.mobName;
@@ -1634,7 +1663,12 @@ void MainWindow::launchCurrentMapTest()
             tr("The Base probe currently accepts exactly one MOB. Supplemental MOB redirection is JMV-only."));
         return;
     }
-    const SMapSpawnPlan spawn = m_customSpawn.valid && m_customSpawn.custom
+    const bool customForCurrentMap = m_customSpawn.valid && m_customSpawn.custom
+        && m_customSpawnContextKey == currentMapContextKey();
+    if(m_customSpawn.valid && m_customSpawn.custom && !customForCurrentMap)
+        ei::log(eLogWarning, QString("Ignored stale Play from Here spawn context:%1 active:%2")
+            .arg(m_customSpawnContextKey, currentMapContextKey()));
+    const SMapSpawnPlan spawn = customForCurrentMap
         ? m_customSpawn
         : CMapSpawnPlanner::chooseEntrance(*entrance, mapTestObstacles());
     if(!spawn.valid)
@@ -1645,7 +1679,7 @@ void MainWindow::launchCurrentMapTest()
     }
     progress.setLabelText(tr("Validating the current in-memory map pair..."));
     progress.setValue(4);
-    QApplication::processEvents();
+    QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
 
     QFile mprFile(landscape->filePath().absoluteFilePath());
     if(!mprFile.open(QIODevice::ReadOnly))
@@ -1718,7 +1752,7 @@ void MainWindow::launchCurrentMapTest()
     }
     progress.setLabelText(tr("Staging temporary maps and isolated test state..."));
     progress.setValue(5);
-    QApplication::processEvents();
+    QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
 
     SJmvMapTestLaunchInput input;
     input.profile = profile;
@@ -2383,10 +2417,7 @@ void MainWindow::openCollection(const QString& path)
     QProgressDialog progress(tr("Loading collection..."), QString(), 0,
                              resolved.mobPaths.size() + 3, this);
     progress.setWindowTitle(tr("Loading map workspace"));
-    progress.setWindowModality(Qt::ApplicationModal);
-    progress.setCancelButton(nullptr);
-    progress.setMinimumDuration(0);
-    progress.setAutoClose(false);
+    configureBlockingProgress(&progress);
     progress.setValue(0);
     progress.show();
     QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
@@ -2542,10 +2573,7 @@ void MainWindow::openMapPair(const QString& mprPath, const QString& mobPath,
         return;
     QProgressDialog progress(tr("Loading map..."), QString(), 0, 3, this);
     progress.setWindowTitle(tr("Loading map workspace"));
-    progress.setWindowModality(Qt::ApplicationModal);
-    progress.setCancelButton(nullptr);
-    progress.setMinimumDuration(0);
-    progress.setAutoClose(false);
+    configureBlockingProgress(&progress);
     progress.setValue(0);
     progress.show();
     QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
@@ -2608,7 +2636,8 @@ void MainWindow::updateOperationAvailability(bool hasSelection)
     hasSelection = hasMob && m_pView->nSelectedNodes() > 0;
     const bool hasMpr = CLandscape::getInstance()->isMprLoad();
     const bool hasMovableSelection = (hasMob && hasSelection)
-        || (m_customSpawnSelected && m_customSpawn.valid && m_customSpawn.custom);
+        || (m_customSpawnSelected && m_customSpawn.valid && m_customSpawn.custom
+            && m_customSpawnContextKey == currentMapContextKey());
     const struct { EButtonOp type; QToolButton* button; bool enabled; } states[] = {
         {EButtonOpSelect, m_ui->selectButton, hasMob},
         {EButtonOpMove, m_ui->moveButton, hasMovableSelection},

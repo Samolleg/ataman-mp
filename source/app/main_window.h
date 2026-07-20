@@ -88,6 +88,7 @@ private:
     void chooseBorrowedMapIdentity();
     void setCustomSpawnPicking(bool enabled);
     void updateCustomSpawnControls();
+    QString currentMapContextKey() const;
     void moveCameraToActiveSpawn();
     void updateEntranceOverlays();
     void updateOperationAvailability(bool hasSelection = false);
@@ -215,6 +216,7 @@ private:
     bool m_suppressSpawnRelease{false};
     SMapSpawnPlan m_customSpawn;
     QVector3D m_customSpawnPosition;
+    QString m_customSpawnContextKey;
 };
 
 #endif // MAIN_WINDOW_H
