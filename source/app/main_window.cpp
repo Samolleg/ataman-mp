@@ -2965,6 +2965,19 @@ void MainWindow::updateLoadedMapPanel()
     }
     root->setExpanded(true);
 
+    CMob* primaryMob = nullptr;
+    const QString mappedPrimaryName = QFileInfo(m_mapTestEntry.mobPath).fileName();
+    if(!mappedPrimaryName.isEmpty())
+        for(CMob* mob : m_pView->mobs())
+            if(mob && mob->filePath().fileName().compare(mappedPrimaryName,
+                    Qt::CaseInsensitive) == 0)
+            {
+                primaryMob = mob;
+                break;
+            }
+    if(!primaryMob && !m_pView->mobs().isEmpty())
+        primaryMob = m_pView->mobs().first();
+
     for(CMob* mob : m_pView->mobs())
     {
         if(!mob)
@@ -2975,6 +2988,7 @@ void MainWindow::updateLoadedMapPanel()
                             ? Qt::Checked : Qt::Unchecked);
         item->setText(1, mob->filePath().fileName());
         QStringList states;
+        states.append(mob == primaryMob ? tr("Primary") : tr("Supplemental"));
         states.append(mob == m_pView->currentMob() ? tr("Active") : tr("Locked"));
         if(mob->isDirty())
             states.append(tr("Modified"));
