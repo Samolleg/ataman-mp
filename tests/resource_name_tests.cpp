@@ -22,11 +22,13 @@ private slots:
     void ignoresNonHumanoidDatabaseSkin();
     void resolvesLiveBaseDatabaseWhenProvided();
     void decodesSparsePnt3WithTrailingTransparency();
-    void decodesNonAlignedPnt3Run();
+    void decodesLargePnt3Run();
+    void rejectsNonAlignedPnt3Run();
     void rejectsOutOfBoundsPnt3Run();
     void rejectsUnalignedPnt3Payload();
     void preservesPnt3RowMajorOrientation();
     void compositesTransparentArmorOverBodyAtlas();
+    void compositesPremultipliedPnt3LikeTheGame();
     void keepsFaceAndHairOnSkinAtlas();
 };
 
@@ -195,16 +197,27 @@ void ResourceNameTests::rejectsOutOfBoundsPnt3Run()
     QVERIFY(decoded.isEmpty());
 }
 
-void ResourceNameTests::decodesNonAlignedPnt3Run()
+void ResourceNameTests::decodesLargePnt3Run()
 {
     QByteArray compressed;
-    appendDword(compressed, 20); // valid byte run; not 16-byte aligned
+    appendDword(compressed, 3245872); // real ID 203 plate run, above old heuristic
     compressed.append("\x11\x22\x33\xff", 4);
     QByteArray decoded;
     QString diagnostic;
-    QVERIFY(ei::decodePnt3(compressed, 24, &decoded, &diagnostic));
-    QCOMPARE(decoded.left(20), QByteArray(20, '\0'));
+    QVERIFY2(ei::decodePnt3(compressed, 3245876, &decoded, &diagnostic),
+             qPrintable(diagnostic));
+    QCOMPARE(decoded.left(3245872), QByteArray(3245872, '\0'));
     QCOMPARE(decoded.right(4), QByteArray("\x11\x22\x33\xff", 4));
+}
+
+void ResourceNameTests::rejectsNonAlignedPnt3Run()
+{
+    QByteArray compressed;
+    appendDword(compressed, 20);
+    QByteArray decoded;
+    QString diagnostic;
+    QVERIFY(!ei::decodePnt3(compressed, 24, &decoded, &diagnostic));
+    QVERIFY(diagnostic.contains("four-pixel aligned"));
 }
 
 void ResourceNameTests::rejectsUnalignedPnt3Payload()
@@ -244,8 +257,36 @@ void ResourceNameTests::compositesTransparentArmorOverBodyAtlas()
     QString diagnostic;
     QVERIFY2(ei::compositeTextureLayers({body, armor}, &composite, &diagnostic),
              qPrintable(diagnostic));
-    QCOMPARE(composite.pixelColor(0, 0), body.pixelColor(0, 0));
+    // The original MMX blend uses (destination * (255 - alpha)) >> 8,
+    // including for a literal transparent pixel.
+    const uchar* untouched = composite.constScanLine(0);
+    QCOMPARE(untouched[0], uchar(49));
+    QCOMPARE(untouched[1], uchar(99));
+    QCOMPARE(untouched[2], uchar(199));
+    QCOMPARE(untouched[3], uchar(254));
     QCOMPARE(composite.pixelColor(1, 0), armor.pixelColor(1, 0));
+}
+
+void ResourceNameTests::compositesPremultipliedPnt3LikeTheGame()
+{
+    QImage body(1, 1, QImage::Format_ARGB32_Premultiplied);
+    body.fill(QColor(80, 40, 20, 255));
+    QImage armor(1, 1, QImage::Format_ARGB32_Premultiplied);
+    // A=128, premultiplied BGRA=(25, 50, 100, 128).
+    uchar* pixel = armor.scanLine(0);
+    pixel[0] = 25;
+    pixel[1] = 50;
+    pixel[2] = 100;
+    pixel[3] = 128;
+    QImage composite;
+    QString diagnostic;
+    QVERIFY2(ei::compositeTextureLayers({body, armor}, &composite, &diagnostic),
+             qPrintable(diagnostic));
+    const uchar* result = composite.constScanLine(0);
+    QCOMPARE(result[0], uchar(34));  // 25 + ((20 * 127) >> 8)
+    QCOMPARE(result[1], uchar(69));  // 50 + ((40 * 127) >> 8)
+    QCOMPARE(result[2], uchar(139)); // 100 + ((80 * 127) >> 8)
+    QCOMPARE(result[3], uchar(254)); // 128 + ((255 * 127) >> 8)
 }
 
 void ResourceNameTests::keepsFaceAndHairOnSkinAtlas()

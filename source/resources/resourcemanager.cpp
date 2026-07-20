@@ -641,9 +641,9 @@ bool decompressPnt3(QImage& image, const QByteArray& data, uint compressedSize,
         if(diagnostic) *diagnostic = "PNT3 compressed size exceeds its MMP payload.";
         return false;
     }
-    // PNT3 is already row-major. The former transpose/rotate/mirror sequence
-    // happened to preserve some symmetric atlases, but vertically inverted
-    // asymmetric JMV armor such as UnhumaPL_05.bl.0.x4.
+    // The original surface unpacker writes PNT3 pixels sequentially into the
+    // destination atlas. Preserve that row-major order; atlas placement comes
+    // from transparent run markers, not an image-space rotation or UV fixup.
     return ei::decodePnt3Image(data.mid(offset, int(compressedSize)),
                               image.width(), image.height(), &image, diagnostic);
 }

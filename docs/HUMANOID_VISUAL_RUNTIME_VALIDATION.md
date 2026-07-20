@@ -119,12 +119,15 @@ edit `database.res`, JMV/Base archives, live MOBs, maps, or the game install.
    hand-picked figures/textures subset. The catalog must discover JMV face,
    armor, weapon, and material atlases such as `faces.res`, `UnhumaBT.res`,
    `UnhumaPL.res`, `UnhumaSW.res`, `UnhumaSD.res`, and `UnhumaMT.res` read-only.
-5. Validate PNT3 equipment atlases with large transparent tails. Armor, weapon,
+5. Validate PNT3 equipment atlases with large transparent runs. Armor, weapon,
    and TTI-0 anatomical components must not show stripes, random alpha, or
-   pixels from outside the decoded buffer. PNT3 transparent runs are byte
-   counts from 1 through 1,000,000 and are not restricted to 16-byte alignment.
-   Decoded pixels remain in row-major EIrepack/Direct3D orientation: do not
-   transpose, rotate, or mirror individual layers. In `zone1` ID 203,
+   pixels from outside the decoded buffer. The original `2dintmmx.dll`
+   `UnpackToSurface` backend identifies a run as a non-zero dword whose alpha
+   byte is zero; its value is a 16-byte-aligned transparent-byte count. Do not
+   use EIrepack's one-million cutoff: `UnhumaPL_05.bl.0.x4` contains a valid
+   3,245,872-byte run. Literal PNT3 pixels are premultiplied BGRA and composition
+   uses the engine formula `src + ((dst * (255 - alpha)) >> 8)`. Decoded pixels
+   remain row-major: do not transpose, rotate, or mirror individual layers. In `zone1` ID 203,
    `UnhumaPL_05.bl.0.x4` must occupy the lower `bd.armor05` UV region and
    `UnhumaLG_07.bl.0.x4` must align with the hip/leg replacement UVs.
 6. Validate `zone1` ID 221 with its six bow members (`bwparta`, `bwpartb`, both
@@ -158,14 +161,12 @@ edit `database.res`, JMV/Base archives, live MOBs, maps, or the game install.
     when comparing `zone1` ID 203, `bz8k` ID 919536, and ID 1001621802; the
     lower-layer order must be shirt, pants, boots, gloves before upper armor.
 
-## Post-orientation-fix validation probes
+## Post-PNT3-unpack validation probes
 
 - Recheck `bz8k` ID 919536, IDs 1001621802/1000304365, and `zone3obr` ID 253.
-  Their earlier skin-through/clothing sampling was captured while asymmetric
-  PNT3 layers were vertically inverted; retain them as regression probes until
-  runtime testing confirms the row-major decoder fixes each family.
-  Do not apply a global UV flip: faces and many humanoids already validate with
-  the stored `.x4` UV convention.
+  Retain them as regression probes until runtime testing confirms exact PNT3
+  run expansion fixes each family. Do not apply a global UV flip: faces and
+  many humanoids already validate with the stored `.x4` UV convention.
 - JMV `UndeadF16`/`UndeadF17` currently resolve the database-declared
   `UndeadMale -> unmozo0` model, but the available RaceModels texture list only
   establishes `vurdalak_00` through `_03`, not a synthetic `vurdalak_29`, and

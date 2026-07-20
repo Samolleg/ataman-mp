@@ -1,7 +1,7 @@
 #include "mmp_codec.h"
 
 #include <QtEndian>
-#include <QPainter>
+#include <cstring>
 #include <limits>
 
 namespace ei {
@@ -17,35 +17,41 @@ bool decodePnt3(const QByteArray& compressed, int decodedSize,
     decoded->clear();
     decoded->reserve(decodedSize);
     int cursor = 0;
-    int literalStart = 0;
     while(cursor + int(sizeof(quint32)) <= compressed.size())
     {
         const quint32 value = qFromLittleEndian<quint32>(
             reinterpret_cast<const uchar*>(compressed.constData() + cursor));
         cursor += int(sizeof(quint32));
-        // PNT3's original decoder treats zero and values above one million as
-        // literal BGRA dwords. Every other value is a transparent-byte run;
-        // run lengths are not required to be 16-byte aligned.
-        if(value > 1000000u || value == 0u)
+        // 2dintmmx.dll's PNT3 surface unpacker identifies a transparent run
+        // by a zero alpha byte and a non-zero dword. The value is a byte
+        // count. Literal pixels are premultiplied BGRA, including zero. Runs
+        // are consumed in four-pixel groups by the original MMX routine.
+        const bool transparentRun = value != 0u && (value & 0xff000000u) == 0u;
+        if(transparentRun)
+        {
+            if((value & 0x0fu) != 0u)
+            {
+                if(diagnostic) *diagnostic = "PNT3 transparent run is not four-pixel aligned.";
+                decoded->clear();
+                return false;
+            }
+            if(value > quint32(decodedSize - decoded->size()))
+            {
+                if(diagnostic) *diagnostic = "PNT3 transparent run exceeds the decoded image bounds.";
+                decoded->clear();
+                return false;
+            }
+            decoded->append(QByteArray(int(value), '\0'));
             continue;
-
-        const int literalEnd = cursor - int(sizeof(quint32));
-        const int literalSize = literalEnd - literalStart;
-        if(literalEnd < literalStart || decoded->size() > decodedSize - literalSize)
+        }
+        if(decoded->size() > decodedSize - int(sizeof(quint32)))
         {
             if(diagnostic) *diagnostic = "PNT3 literal data exceeds the decoded image bounds.";
             decoded->clear();
             return false;
         }
-        if(value > quint32(decodedSize - decoded->size() - literalSize))
-        {
-            if(diagnostic) *diagnostic = "PNT3 transparent run exceeds the decoded image bounds.";
-            decoded->clear();
-            return false;
-        }
-        decoded->append(compressed.constData() + literalStart, literalSize);
-        decoded->append(QByteArray(int(value), '\0'));
-        literalStart = cursor;
+        decoded->append(compressed.constData() + cursor - int(sizeof(quint32)),
+                        int(sizeof(quint32)));
     }
     if(cursor != compressed.size())
     {
@@ -53,13 +59,12 @@ bool decodePnt3(const QByteArray& compressed, int decodedSize,
         decoded->clear();
         return false;
     }
-    if(decoded->size() > decodedSize - (cursor - literalStart))
+    if(decoded->size() > decodedSize)
     {
-        if(diagnostic) *diagnostic = "PNT3 literal data exceeds the decoded image bounds.";
+        if(diagnostic) *diagnostic = "PNT3 data exceeds the decoded image bounds.";
         decoded->clear();
         return false;
     }
-    decoded->append(compressed.constData() + literalStart, cursor - literalStart);
     decoded->append(QByteArray(decodedSize - decoded->size(), '\0'));
     return true;
 }
@@ -78,17 +83,12 @@ bool decodePnt3Image(const QByteArray& compressed, int width, int height,
     if(!decodePnt3(compressed, int(decodedSize), &decoded, diagnostic))
         return false;
 
-    QImage result(width, height, QImage::Format_RGBA8888);
-    int cursor = 0;
+    // On little-endian platforms ARGB32_Premultiplied is stored as BGRA,
+    // exactly matching the bytes consumed by the game's MMX compositor.
+    QImage result(width, height, QImage::Format_ARGB32_Premultiplied);
     for(int y = 0; y < height; ++y)
-        for(int x = 0; x < width; ++x)
-        {
-            result.setPixelColor(x, y, QColor(uchar(decoded[cursor + 2]),
-                                               uchar(decoded[cursor + 1]),
-                                               uchar(decoded[cursor]),
-                                               uchar(decoded[cursor + 3])));
-            cursor += 4;
-        }
+        memcpy(result.scanLine(y), decoded.constData() + y * width * 4,
+               size_t(width) * 4u);
     *image = result;
     return true;
 }
@@ -102,22 +102,34 @@ bool compositeTextureLayers(const QVector<QImage>& layers, QImage* composite,
         return false;
     }
     const QSize size = layers.first().size();
-    *composite = QImage(size, QImage::Format_ARGB32_Premultiplied);
-    composite->fill(Qt::transparent);
-    QPainter painter(composite);
-    painter.setCompositionMode(QPainter::CompositionMode_SourceOver);
+    QImage result(size, QImage::Format_ARGB32_Premultiplied);
+    result.fill(Qt::transparent);
     for(const QImage& layer : layers)
     {
         if(layer.isNull() || layer.size() != size)
         {
-            painter.end();
             composite->fill(Qt::transparent);
             if(diagnostic) *diagnostic = "Texture layers have inconsistent dimensions.";
             return false;
         }
-        painter.drawImage(0, 0, layer);
+        const QImage source = layer.convertToFormat(QImage::Format_ARGB32_Premultiplied);
+        for(int y = 0; y < size.height(); ++y)
+        {
+            const uchar* src = source.constScanLine(y);
+            uchar* dst = result.scanLine(y);
+            for(int byte = 0; byte < size.width() * 4; byte += 4)
+            {
+                const uint inverseAlpha = 255u - src[byte + 3];
+                for(int channel = 0; channel < 4; ++channel)
+                {
+                    const uint blended = uint(src[byte + channel])
+                        + ((uint(dst[byte + channel]) * inverseAlpha) >> 8);
+                    dst[byte + channel] = uchar(qMin(255u, blended));
+                }
+            }
+        }
     }
-    painter.end();
+    *composite = result;
     return true;
 }
 
