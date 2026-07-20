@@ -814,6 +814,10 @@ MainWindow::MainWindow(QWidget* parent) :
     });
     connect(m_pView, &CView::loadedMapStateChanged,
             this, &MainWindow::updateLoadedMapPanel);
+    connect(m_pView, &CView::updateMsg, this, [this](const QString& message)
+    {
+        statusBar()->showMessage(message, 5000);
+    });
     connect(m_pView, &CView::nidChangeProposed, this, &MainWindow::notifyProposedNid);
     connect(m_pView, &CView::nidAllocationRequested, this,
             [this](const QString& mobPath, quint32* suggestion)
@@ -3301,11 +3305,8 @@ void MainWindow::on_actionOpen_triggered()
 
     if(fileName.fileName().toLower().endsWith(".mpr"))
     {
-        m_openedMapZoneId.clear();
-        m_pView->cancelPendingOperation();
-        m_undoStack->clear();
-        m_pView->loadLandscape(fileName);
-        rememberRecentFile(fileName);
+        if(replaceLoadedLandscape(fileName))
+            rememberRecentFile(fileName);
     }
     else if(fileName.fileName().toLower().endsWith(".mob"))
     {
@@ -3438,9 +3439,8 @@ bool MainWindow::openDocument(const QFileInfo& fileName)
     m_pView->cancelPendingOperation();
     if(suffix == "mpr")
     {
-        m_openedMapZoneId.clear();
-        m_undoStack->clear();
-        m_pView->loadLandscape(fileName);
+        if(!replaceLoadedLandscape(fileName))
+            return false;
     }
     else
     {
@@ -3451,6 +3451,39 @@ bool MainWindow::openDocument(const QFileInfo& fileName)
     return true;
 }
 
+bool MainWindow::replaceLoadedLandscape(const QFileInfo& fileName)
+{
+    CLandscape* landscape = CLandscape::getInstance();
+    if(landscape->isMprLoad())
+    {
+        const QFileInfo current = landscape->filePath();
+        const QString currentCanonical = current.canonicalFilePath().isEmpty()
+            ? current.absoluteFilePath() : current.canonicalFilePath();
+        const QString requestedCanonical = fileName.canonicalFilePath().isEmpty()
+            ? fileName.absoluteFilePath() : fileName.canonicalFilePath();
+        if(QDir::cleanPath(currentCanonical).compare(QDir::cleanPath(requestedCanonical),
+                                                     Qt::CaseInsensitive) == 0)
+        {
+            statusBar()->showMessage(tr("%1 is already loaded.").arg(fileName.fileName()), 4000);
+            return true;
+        }
+
+        if(!isExitAllowed())
+            return false;
+        m_undoStack->clear();
+        m_pView->unloadMob("");
+        m_pView->unloadLand(false);
+        m_currentCollectionPath.clear();
+    }
+
+    m_openedMapZoneId.clear();
+    m_pView->cancelPendingOperation();
+    m_undoStack->clear();
+    m_pView->loadLandscape(fileName);
+    updateDocumentActionAvailability();
+    return landscape->isMprLoad();
+}
+
 void MainWindow::on_actionOpen_MPR_triggered()
 {
     COptString* opt = dynamic_cast<COptString*>(m_settings->opt(eOptSetGeneral, "lastVisitedFolder"));
@@ -3459,11 +3492,8 @@ void MainWindow::on_actionOpen_MPR_triggered()
     if(fileName.fileName().isEmpty())
         return;
     opt->setValue(fileName.dir().path());
-    m_pView->cancelPendingOperation();
-    m_undoStack->clear();
-    m_openedMapZoneId.clear();
-    m_pView->loadLandscape(fileName);
-    rememberRecentFile(fileName);
+    if(replaceLoadedLandscape(fileName))
+        rememberRecentFile(fileName);
 }
 
 void MainWindow::on_actionOpen_MOB_triggered()

@@ -598,12 +598,12 @@ void CView::loadLandscape(const QFileInfo& filePath)
     emit loadedMapStateChanged();
 }
 
-void CView::unloadLand()
+void CView::unloadLand(bool promptForSave)
 {
     if(!m_pLand->isMprLoad())
         return;
 
-    if(m_pLand->isDirty())
+    if(promptForSave && m_pLand->isDirty())
     {
         QMessageBox::StandardButton reply;
         reply = QMessageBox::question(this, "Unload MPR", m_pLand->filePath().baseName() + " has unsaved changes.\nDo you want to save changes?", QMessageBox::Save|QMessageBox::No|QMessageBox::Cancel);
@@ -1378,6 +1378,26 @@ QVector3D CView::getTerrainPos(bool bLand)
 
 bool CView::loadMob(QFileInfo &filePath)
 {
+    const auto normalizedPath = [](const QFileInfo& info)
+    {
+        const QString canonical = info.canonicalFilePath();
+        return QDir::cleanPath(canonical.isEmpty() ? info.absoluteFilePath() : canonical)
+            .toCaseFolded();
+    };
+    const QString requestedPath = normalizedPath(filePath);
+    for(CMob* loaded : m_aMob)
+    {
+        if(loaded && normalizedPath(loaded->filePath()) == requestedPath)
+        {
+            changeCurrentMob(loaded);
+            ei::log(eLogInfo, QString("MOB open reused the already loaded document path:%1")
+                .arg(filePath.absoluteFilePath()));
+            emit updateMsg(tr("%1 is already loaded; its existing document was activated.")
+                .arg(filePath.fileName()));
+            return true;
+        }
+    }
+
     m_pProgress->reset();
     CMob* pMob = new CMob;
     pMob->attach(this, m_pProgress);

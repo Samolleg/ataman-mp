@@ -70,7 +70,7 @@ public:
 
     void loadLandscape(const QFileInfo& filePath);
     void refreshAfterResourceSetup();
-    void unloadLand();
+    void unloadLand(bool promptForSave = true);
     void saveLand();
     void saveLandAs();
     bool loadMob(QFileInfo& filePath);

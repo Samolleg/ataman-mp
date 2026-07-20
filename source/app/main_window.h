@@ -64,6 +64,7 @@ public:
     explicit MainWindow(QWidget* parent = nullptr);
     ~MainWindow();
     bool openDocument(const QFileInfo& fileName);
+    bool replaceLoadedLandscape(const QFileInfo& fileName);
 
     void testFunc1();
 
