@@ -12,11 +12,13 @@ struct SMaterialDefinition
     qint32 id;
     const char* name;
     ETerrainAtlasLayer layer;
+    bool paintable;
 };
 
-// Slot topology for the stock Zone1 namespace. This is compatibility metadata,
-// not atlas imagery. The four bytes per slot are NW, NE, SE, SW material ids.
-// Research attribution is recorded in NOTICE.md.
+// Source-image slot topology for the stock Zone1 namespace. This is
+// compatibility metadata, not atlas imagery. The four bytes per slot are
+// image NW, NE, SE, SW material ids before the generator's final vertical
+// atlas flip. Research attribution is recorded in NOTICE.md.
 const char kZone1Signatures[] =
     "AQEBAQICAgIDAwMDBAQEBAQEBAQEBAQEBAQEBAQEBAQFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQYGBgYGBgYGBgYG"
     "BgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYG"
@@ -48,18 +50,18 @@ const char kZone1Signatures[] =
     "AwcEBwQHAgMCBAIJBAICBwQEAgcCAgQ=";
 
 const SMaterialDefinition kZone1Materials[] = {
-    {1, "Ground / dark water", ETerrainAtlasLayer::Land},
-    {2, "Ground / common", ETerrainAtlasLayer::Land},
-    {3, "Grass / dark", ETerrainAtlasLayer::Land},
-    {4, "Grass / common", ETerrainAtlasLayer::Land},
-    {5, "Swamp", ETerrainAtlasLayer::Overlay},
-    {6, "Water / still", ETerrainAtlasLayer::Overlay},
-    {7, "Stone / lime", ETerrainAtlasLayer::Land},
-    {8, "Ground / wet", ETerrainAtlasLayer::Land},
-    {9, "Grass / irregular", ETerrainAtlasLayer::Land},
-    {10, "Stone / greenish", ETerrainAtlasLayer::Land},
-    {11, "Rock / watered", ETerrainAtlasLayer::Land},
-    {12, "Grass / winter normal", ETerrainAtlasLayer::Land}
+    {1, "Underwater ground / dark", ETerrainAtlasLayer::Land, false},
+    {2, "Ground / common", ETerrainAtlasLayer::Land, true},
+    {3, "Grass / dark", ETerrainAtlasLayer::Land, true},
+    {4, "Grass / common", ETerrainAtlasLayer::Land, true},
+    {5, "Swamp", ETerrainAtlasLayer::Overlay, true},
+    {6, "Water / still", ETerrainAtlasLayer::Overlay, true},
+    {7, "Stone / lime", ETerrainAtlasLayer::Land, true},
+    {8, "Underwater ground / common", ETerrainAtlasLayer::Land, false},
+    {9, "Grass / irregular", ETerrainAtlasLayer::Land, true},
+    {10, "Stone / greenish", ETerrainAtlasLayer::Land, false},
+    {11, "Rock / watered", ETerrainAtlasLayer::Land, false},
+    {12, "Grass / winter normal", ETerrainAtlasLayer::Land, false}
 };
 
 ETerrainAtlasLayer materialLayer(qint32 id)
@@ -116,11 +118,13 @@ STerrainAtlasAnalysis CTerrainAtlasAnalyzer::analyze(
     QMap<qint32, int> representatives;
     for(int slot = 0; slot < result.expectedSlots; ++slot)
     {
+        // The atlas builder flips the completed 8x8 atlas vertically. Undo
+        // that image-space transform before reasoning about map-space edges.
         STerrainTransitionSignature signature;
-        signature.northWest = quint8(signatures.at(slot * 4));
-        signature.northEast = quint8(signatures.at(slot * 4 + 1));
-        signature.southEast = quint8(signatures.at(slot * 4 + 2));
-        signature.southWest = quint8(signatures.at(slot * 4 + 3));
+        signature.northWest = quint8(signatures.at(slot * 4 + 3));
+        signature.northEast = quint8(signatures.at(slot * 4 + 2));
+        signature.southEast = quint8(signatures.at(slot * 4 + 1));
+        signature.southWest = quint8(signatures.at(slot * 4));
         const ETerrainAtlasLayer layer = materialLayer(signature.northWest);
         const bool sameLayer = materialLayer(signature.northEast) == layer
             && materialLayer(signature.southEast) == layer
@@ -143,6 +147,9 @@ STerrainAtlasAnalysis CTerrainAtlasAnalyzer::analyze(
             packed.tileIndex = quint8(slot % 64);
             packed.rotation = quint8(rotation);
             STerrainTransitionVariant variant;
+            // The vertical atlas flip conjugates the apparent image-space
+            // rotation. After converting the base signature to map space,
+            // packed quarter-turns use the catalog's clockwise convention.
             variant.signature = CTerrainTransitionCatalog::rotated(signature, rotation);
             variant.packedTile = packed.encode();
             if(!catalog->addVariant(variant, report))
@@ -160,8 +167,8 @@ STerrainAtlasAnalysis CTerrainAtlasAnalyzer::analyze(
 
     for(const SMaterialDefinition& definition : kZone1Materials)
     {
-        if(!pureSeen.contains(definition.id))
-            continue; // Transition-only ingredients are decoded but are not paint choices.
+        if(!definition.paintable || !pureSeen.contains(definition.id))
+            continue; // Internal atlas families are decoded but are not paint choices.
         STerrainAtlasMaterial material;
         material.id = definition.id;
         material.name = QString::fromUtf8(definition.name);

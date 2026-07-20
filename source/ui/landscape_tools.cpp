@@ -75,21 +75,22 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     paintLayout->setContentsMargins(0, 0, 0, 0);
     QLabel* paintHelp = new QLabel(tr(
         "Left-drag paints a material defined by the MPR namespace template. "
-        "Endurance resolves compatible corner transitions and rotations in a one-cell seam halo. Right-click samples the material from the map. "
+        "Size 1 paints one core tile; Endurance adds only the atlas-authored seam cells required around it. Right-click samples the material from the map. "
         "Overlay painting changes only already-active overlay cells and never creates liquid implicitly."), this);
     paintHelp->setWordWrap(true);
     paintLayout->addWidget(paintHelp);
     m_tilesetStatus->setWordWrap(true);
     paintLayout->addWidget(m_tilesetStatus);
     m_paintTerrainType->addItem(tr("Choose a material..."), QVariant());
-    m_paintRadius->setRange(0.0, 32.0);
+    m_paintRadius->setRange(1.0, 33.0);
     m_paintRadius->setValue(1.0);
-    m_paintRadius->setSingleStep(0.5);
+    m_paintRadius->setSingleStep(1.0);
+    m_paintRadius->setDecimals(0);
     m_paintShape->addItem(tr("Circle"));
     m_paintShape->addItem(tr("Square"));
     QFormLayout* paintForm = new QFormLayout();
     paintForm->addRow(tr("Terrain material"), m_paintTerrainType);
-    paintForm->addRow(tr("Radius (tiles)"), m_paintRadius);
+    paintForm->addRow(tr("Brush size (tiles)"), m_paintRadius);
     paintForm->addRow(tr("Brush shape"), m_paintShape);
     paintLayout->addLayout(paintForm);
     QPushButton* tilePicker = new QPushButton(tr("Inspect atlas / choose representative..."), this);
@@ -177,7 +178,12 @@ float CLandscapeTools::strength() const { return float(m_strength->value()); }
 float CLandscapeTools::rawDelta() const { return float(m_delta->value()); }
 quint16 CLandscapeTools::flattenHeight() const { return quint16(m_flatten->value()); }
 bool CLandscapeTools::flipHeightmapVertically() const { return m_flipVertical->isChecked(); }
-float CLandscapeTools::paintRadius() const { return float(m_paintRadius->value()); }
+float CLandscapeTools::paintRadius() const
+{
+    // UI size 1 is the discrete single-tile core. The terrain model uses a
+    // zero-based radius so subsequent integer sizes grow symmetrically.
+    return float(m_paintRadius->value() - 1.0);
+}
 ETerrainTileBrushShape CLandscapeTools::paintShape() const
 {
     return m_paintShape->currentIndex() == 1
@@ -218,8 +224,9 @@ void CLandscapeTools::refreshPaintTerrainTypes()
             : tr("Namespace template ready: %1 material(s) for this layer.")
                   .arg(terrainTypes.size()));
 }
-void CLandscapeTools::selectPaintTerrainType(qint32 terrainType)
+bool CLandscapeTools::selectPaintTerrainType(qint32 terrainType)
 {
     const int index = m_paintTerrainType->findData(terrainType);
     m_paintTerrainType->setCurrentIndex(index >= 0 ? index : 0);
+    return index >= 0;
 }

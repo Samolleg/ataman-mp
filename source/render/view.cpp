@@ -2156,8 +2156,10 @@ void CView::pickTile(QVector3D posOnLand, bool bLand)
            && signature.northWest == signature.southEast
            && signature.northWest == signature.southWest)
         {
-            m_landscapeTools->selectPaintTerrainType(signature.northWest);
-            emit updateMsg(tr("Sampled visual terrain material %1.").arg(signature.northWest));
+            if(m_landscapeTools->selectPaintTerrainType(signature.northWest))
+                emit updateMsg(tr("Sampled visual terrain material %1.").arg(signature.northWest));
+            else
+                emit updateMsg(tr("This atlas family is reserved for underwater or internal transitions and is not a land brush."));
         }
         else if(found)
             emit updateMsg(tr("This is a transition tile; sample a uniform tile to choose one material."));

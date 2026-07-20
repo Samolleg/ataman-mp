@@ -46,7 +46,7 @@ public:
     void setPaintTerrainTypes(const QVector<QPair<qint32, QString>>& landTypes,
                               const QVector<QPair<qint32, QString>>& overlayTypes,
                               const QString& status = QString());
-    void selectPaintTerrainType(qint32 terrainType);
+    bool selectPaintTerrainType(qint32 terrainType);
 
 signals:
     void importHeightmapRequested();

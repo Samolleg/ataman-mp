@@ -1775,7 +1775,7 @@ void EnduranceDocumentTests::zone1NamespaceTemplateSeparatesLandOverlayAndVarian
         CTerrainAtlasAnalyzer::analyze("zone1", 512, &report);
     QVERIFY2(analysis.usable, qPrintable(report.toText()));
     QCOMPARE(analysis.templateName, QString("Zone1 stock slot layout"));
-    QCOMPARE(analysis.materials.size(), 9);
+    QCOMPARE(analysis.materials.size(), 7);
     QCOMPARE(analysis.describedSlots, 512);
     int landMaterials = 0;
     int overlayMaterials = 0;
@@ -1786,11 +1786,15 @@ void EnduranceDocumentTests::zone1NamespaceTemplateSeparatesLandOverlayAndVarian
         else
             ++overlayMaterials;
     }
-    QCOMPARE(landMaterials, 7);
+    QCOMPARE(landMaterials, 5);
     QCOMPARE(overlayMaterials, 2);
-    QCOMPARE(analysis.materials.at(2).name, QString("Grass / dark"));
-    QCOMPARE(analysis.materials.at(3).name, QString("Grass / common"));
-    QCOMPARE(analysis.materials.at(4).name, QString("Swamp"));
+    QCOMPARE(analysis.materials.at(1).name, QString("Grass / dark"));
+    QCOMPARE(analysis.materials.at(2).name, QString("Grass / common"));
+    QCOMPARE(analysis.materials.at(3).name, QString("Swamp"));
+    QVERIFY(std::none_of(analysis.materials.constBegin(), analysis.materials.constEnd(),
+                         [](const STerrainAtlasMaterial& material) {
+        return material.id == 1 || material.id == 8;
+    }));
 
     SMprPackedTile packed;
     packed.tileIndex = 50;
@@ -1798,18 +1802,18 @@ void EnduranceDocumentTests::zone1NamespaceTemplateSeparatesLandOverlayAndVarian
     const STerrainTransitionSignature signature =
         analysis.landCatalog.signatureForPacked(packed.encode(), &found);
     QVERIFY(found);
-    QCOMPARE(signature.northWest, 3);
-    QCOMPARE(signature.northEast, 3);
-    QCOMPARE(signature.southEast, 4);
-    QCOMPARE(signature.southWest, 4);
+    QCOMPARE(signature.northWest, 4);
+    QCOMPARE(signature.northEast, 4);
+    QCOMPARE(signature.southEast, 3);
+    QCOMPARE(signature.southWest, 3);
     packed.tileIndex = 16;
     analysis.landCatalog.signatureForPacked(packed.encode(), &found);
     QVERIFY(!found);
     analysis.overlayCatalog.signatureForPacked(packed.encode(), &found);
     QVERIFY(found);
-    QCOMPARE(analysis.materials.at(5).representativeSlot, 16);
+    QCOMPARE(analysis.materials.at(4).representativeSlot, 16);
 
-    const QVector<qint32> selectableLand({1, 2, 3, 4, 7, 8, 9});
+    const QVector<qint32> selectableLand({2, 3, 4, 7, 9});
     for(qint32 target : selectableLand)
     {
         for(qint32 background : selectableLand)
@@ -1820,6 +1824,8 @@ void EnduranceDocumentTests::zone1NamespaceTemplateSeparatesLandOverlayAndVarian
                 .arg(target).arg(background)));
             QCOMPARE(path.front(), target);
             QCOMPARE(path.back(), background);
+            for(qint32 routedMaterial : path)
+                QVERIFY(selectableLand.contains(routedMaterial));
             for(int edge = 1; edge < path.size(); ++edge)
             {
                 for(int mask = 0; mask < 16; ++mask)
@@ -1892,6 +1898,78 @@ void EnduranceDocumentTests::zone1NamespaceTemplateMatchesPrivateFixture()
     }
     QVERIFY(decoded > 0);
 
+    QMap<qint32, qint64> uniformLandCounts;
+    QMap<qint32, qint64> uniformLandWithOverlayCounts;
+    for(int y = 0; y < terrain.tileCountY(); ++y)
+    {
+        for(int x = 0; x < terrain.tileCountX(); ++x)
+        {
+            bool available = false;
+            const quint16 landPacked = terrain.packedTile(
+                x, y, ETerrainTileLayer::Land, &available);
+            if(!available)
+                continue;
+            bool found = false;
+            const STerrainTransitionSignature signature =
+                analysis.landCatalog.signatureForPacked(landPacked, &found);
+            if(!found || signature.northWest != signature.northEast
+               || signature.northWest != signature.southEast
+               || signature.northWest != signature.southWest)
+                continue;
+            ++uniformLandCounts[signature.northWest];
+            terrain.packedTile(x, y, ETerrainTileLayer::Overlay, &available);
+            if(available)
+                ++uniformLandWithOverlayCounts[signature.northWest];
+        }
+    }
+    // The two source families named ground/darkwater and ground/water are
+    // underwater bases in the copied Zone1 fixture, not ordinary land paint:
+    // every uniform occurrence sits beneath an active overlay.
+    QVERIFY(uniformLandCounts.value(1) > 0);
+    QCOMPARE(uniformLandWithOverlayCounts.value(1), uniformLandCounts.value(1));
+    QVERIFY(uniformLandCounts.value(8) > 0);
+    QCOMPARE(uniformLandWithOverlayCounts.value(8), uniformLandCounts.value(8));
+
+    // Correct atlas flip and packed-rotation interpretation makes the shipped
+    // map an almost perfectly coherent corner lattice. Preserve the few
+    // authored exceptions, but reject the thousands of disagreements produced
+    // by the former image-space interpretation.
+    qint64 disagreements = 0;
+    qint64 comparisons = 0;
+    for(int y = 0; y < terrain.tileCountY(); ++y)
+    {
+        for(int x = 0; x < terrain.tileCountX(); ++x)
+        {
+            bool found = false;
+            const STerrainTransitionSignature here =
+                analysis.landCatalog.signatureForPacked(terrain.packedTile(
+                    x, y, ETerrainTileLayer::Land), &found);
+            QVERIFY(found);
+            if(x + 1 < terrain.tileCountX())
+            {
+                const STerrainTransitionSignature east =
+                    analysis.landCatalog.signatureForPacked(terrain.packedTile(
+                        x + 1, y, ETerrainTileLayer::Land), &found);
+                QVERIFY(found);
+                disagreements += here.northEast != east.northWest;
+                disagreements += here.southEast != east.southWest;
+                comparisons += 2;
+            }
+            if(y + 1 < terrain.tileCountY())
+            {
+                const STerrainTransitionSignature north =
+                    analysis.landCatalog.signatureForPacked(terrain.packedTile(
+                        x, y + 1, ETerrainTileLayer::Land), &found);
+                QVERIFY(found);
+                disagreements += here.northWest != north.southWest;
+                disagreements += here.northEast != north.southEast;
+                comparisons += 2;
+            }
+        }
+    }
+    QVERIFY(comparisons > 100000);
+    QVERIFY(disagreements <= 100);
+
     QSet<qint32> paintableMaterials;
     STerrainTileBrush brush;
     brush.radius = 0.0f;
@@ -1924,7 +2002,7 @@ void EnduranceDocumentTests::zone1NamespaceTemplateMatchesPrivateFixture()
     // none may fail because a direct pair is absent from the atlas.
     const QVector<QPoint> refusalProbes({QPoint(97, 76), QPoint(95, 74),
                                          QPoint(102, 97)});
-    brush.radius = 1.0f;
+    brush.radius = 0.0f; // UI brush size 1: one painted core tile.
     QSet<qint32> changedMaterials;
     for(const STerrainAtlasMaterial& material : analysis.materials)
     {
@@ -1942,12 +2020,19 @@ void EnduranceDocumentTests::zone1NamespaceTemplateMatchesPrivateFixture()
                 .arg(material.id).arg(probe.x()).arg(probe.y())
                 .arg(paintReport.toText())));
             if(!paint.deltas.isEmpty())
+            {
                 changedMaterials.insert(material.id);
+                for(const STerrainTileDelta& delta : paint.deltas)
+                {
+                    QVERIFY(qAbs(delta.globalX - probe.x()) <= 2);
+                    QVERIFY(qAbs(delta.globalY - probe.y()) <= 2);
+                }
+            }
         }
     }
     // At most the family already covering all probes may legitimately be a
     // no-op. This catches the R9 failure mode where only one family painted.
-    QVERIFY(changedMaterials.size() >= 6);
+    QVERIFY(changedMaterials.size() >= 4);
 }
 
 void EnduranceDocumentTests::terrainHeightTransactionReopensAndPreservesOverlay()

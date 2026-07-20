@@ -25,6 +25,7 @@
 #include "resource_profile.h"
 #include "resourcemanager.h"
 #include "layout_components/tablemanager.h"
+#include "ui/landscape_tools.h"
 #include "window_lifecycle.h"
 #include "settings.h"
 
@@ -406,6 +407,10 @@ int runHeadlessCommand(QApplication& app)
         const bool mixedModelPartsVisible = rowForType(mixedModelTable,
                                                        eObjParam_BODYPARTS) >= 0;
 
+        CLandscapeTools landscapeTools;
+        const bool minimumPaintBrushIsSingleTile = qFuzzyIsNull(
+            landscapeTools.paintRadius());
+
         QWidget primaryWindow;
         bool settingsTabsUsable = false;
         bool settingsShortcutsPersist = false;
@@ -494,6 +499,7 @@ int runHeadlessCommand(QApplication& app)
                 && multiPropertyPaste && mismatchedPropertyPasteBlocked
                 && fieldPasteImmediate && fieldCopyAvailable && nonTextPropertyPaste
                 && mixedModelPartsVisible
+                && minimumPaintBrushIsSingleTile
                 && logicPointUndoAtomic && logicPointRedoAtomic;
         QTextStream output(stdout);
         output << "asset-picker prefixes=" << completions.join(",") << "\n"
@@ -518,6 +524,7 @@ int runHeadlessCommand(QApplication& app)
                << " fieldCopyAvailable=" << fieldCopyAvailable
                << " nonTextPropertyPaste=" << nonTextPropertyPaste << "\n"
                << " mixedModelPartsVisible=" << mixedModelPartsVisible
+               << " minimumPaintBrushIsSingleTile=" << minimumPaintBrushIsSingleTile
                << " logicPointUndoAtomic=" << logicPointUndoAtomic
                << " logicPointRedoAtomic=" << logicPointRedoAtomic << "\n"
                << (passed ? "PASS" : "FAIL")
