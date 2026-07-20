@@ -499,19 +499,26 @@ CMobFamilyValidationReport CMobFamilyValidator::validate(
     report.familyLabel = request.familyLabel;
     report.profileId = request.profileId;
 
-    struct Pending { QString path; QString reason; QString requestedBy; };
+    struct Pending
+    {
+        QString path;
+        QString reason;
+        QString requestedBy;
+        int scriptLine;
+        QString referenceExpression;
+    };
     QQueue<Pending> pending;
     for(const QString& seed : request.seedMobPaths)
-        pending.enqueue({seed, "explicit seed", QString()});
+        pending.enqueue({seed, "explicit seed", QString(), 0, QString()});
     if(!request.explicitComposition && !request.mappedPrimaryMobPath.isEmpty())
-        pending.enqueue({request.mappedPrimaryMobPath, "map.txt primary", QString()});
+        pending.enqueue({request.mappedPrimaryMobPath, "map.txt primary", QString(), 0, QString()});
     if(request.includeProfileWideMobs &&
        (request.profileId.contains("jamais", Qt::CaseInsensitive) ||
         request.profileId.compare("jmv", Qt::CaseInsensitive) == 0))
     {
         const QString autorun = resolveOverlayMob("AutoRunSpellAddon123.mob", QString(), request);
         if(!autorun.isEmpty())
-            pending.enqueue({autorun, "profile-wide autorun", QString()});
+            pending.enqueue({autorun, "profile-wide autorun", QString(), 0, QString()});
     }
 
     QSet<QString> visited;
@@ -564,14 +571,36 @@ CMobFamilyValidationReport CMobFamilyValidator::validate(
         if(path.isEmpty())
         {
             member.missing = true;
-            member.error = "Referenced MOB was not found";
-            report.members.append(member);
             SMobFamilyFinding finding;
             finding.severity = EMobFamilyFindingSeverity::Incomplete;
             finding.code = "family.missing_mob";
             finding.category = "Incomplete family";
-            finding.message = QString("%1 could not be resolved").arg(member.fileName);
-            finding.locations << item.requestedBy;
+            const QString missingFile = member.fileName.isEmpty() ? item.path : member.fileName;
+            if(item.scriptLine > 0 && !item.requestedBy.isEmpty())
+            {
+                const QString sourceName = QFileInfo(item.requestedBy).fileName();
+                const QString expression = QString("AddMob(%1)").arg(item.referenceExpression);
+                finding.message = QString(
+                    "MOB file \"%1\" was not found. Referenced by %2 script line %3: %4")
+                    .arg(missingFile, sourceName)
+                    .arg(item.scriptLine)
+                    .arg(expression);
+                finding.locations << QString("Reference source: %1").arg(item.requestedBy)
+                                  << QString("Script line %1: %2")
+                                         .arg(item.scriptLine)
+                                         .arg(expression);
+            }
+            else
+            {
+                finding.message = QString(
+                    "MOB file \"%1\" was not found. Requested as %2")
+                    .arg(missingFile, item.reason);
+                if(!item.requestedBy.isEmpty())
+                    finding.locations << QString("Reference source: %1").arg(item.requestedBy);
+            }
+            finding.locations << "Searched the active workspace and configured profile Maps sources";
+            member.error = finding.message;
+            report.members.append(member);
             report.findings.append(finding);
             continue;
         }
@@ -622,7 +651,8 @@ CMobFamilyValidationReport CMobFamilyValidator::validate(
             }
             const QString target = resolveOverlayMob(reference.fileName, path, request);
             pending.enqueue({target.isEmpty() ? reference.fileName : target,
-                             QString("AddMob at line %1").arg(reference.line), path});
+                             QString("AddMob at line %1").arg(reference.line), path,
+                             reference.line, reference.expression});
         }
 
         if(report.members.at(memberIndex).ranges.isEmpty())

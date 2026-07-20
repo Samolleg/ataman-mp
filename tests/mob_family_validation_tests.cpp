@@ -3,6 +3,8 @@
 #include <QFile>
 #include <QDataStream>
 
+#include <algorithm>
+
 #include "mob_family_validation.h"
 
 namespace {
@@ -33,6 +35,24 @@ QByteArray mobWithObject(quint32 nid)
     return section(0xA000, section(0xC000) + section(0xB000, object));
 }
 
+QByteArray encryptedScript(const QByteArray& script, quint32 key = 0x12345678)
+{
+    QByteArray encrypted = u32(key);
+    for(char character : script)
+    {
+        quint32 temporaryKey = ((((key * 13) << 4) + key) << 8) - key;
+        key += (temporaryKey << 2) + 2531011;
+        temporaryKey = key >> 16;
+        encrypted.append(char(character ^ char(temporaryKey)));
+    }
+    return section(0xACCEECCB, encrypted);
+}
+
+QByteArray mobWithScript(const QByteArray& script)
+{
+    return section(0xA000, encryptedScript(script));
+}
+
 QString writeMob(const QString& directory, const QString& name, const QByteArray& bytes)
 {
     const QString path = QDir(directory).filePath(name);
@@ -49,6 +69,7 @@ class MobFamilyValidationTests : public QObject
 private slots:
     void workspaceCopyShadowsInstalledLogicalMob();
     void differentLogicalNamesRemainIndependent();
+    void missingScriptDependencyReportsExactReferenceSource();
 };
 
 void MobFamilyValidationTests::workspaceCopyShadowsInstalledLogicalMob()
@@ -106,6 +127,33 @@ void MobFamilyValidationTests::differentLogicalNamesRemainIndependent()
     const CMobFamilyValidationReport report = CMobFamilyValidator::validate(request);
     QCOMPARE(report.members.size(), 2);
     QCOMPARE(report.nidOwners.value(88).size(), 2);
+}
+
+void MobFamilyValidationTests::missingScriptDependencyReportsExactReferenceSource()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString primary = writeMob(directory.path(), "zone14.mob",
+        mobWithScript("first()\nAddMob(\"Autozone14dm4.mob\")\nlast()"));
+    QVERIFY(!primary.isEmpty());
+
+    SMobFamilyValidationRequest request;
+    request.familyLabel = "zone14";
+    request.profileId = "test";
+    request.seedMobPaths << primary;
+    request.workspaceRoots << directory.path();
+    request.includeProfileWideMobs = false;
+    const CMobFamilyValidationReport report = CMobFamilyValidator::validate(request);
+
+    const auto finding = std::find_if(report.findings.cbegin(), report.findings.cend(),
+        [](const SMobFamilyFinding& item) { return item.code == "family.missing_mob"; });
+    QVERIFY(finding != report.findings.cend());
+    QVERIFY(finding->message.contains("MOB file \"Autozone14dm4.mob\" was not found"));
+    QVERIFY(finding->message.contains("zone14.mob script line 2"));
+    QVERIFY(finding->message.contains("AddMob(\"Autozone14dm4.mob\")"));
+    QVERIFY(finding->locations.contains(QString("Reference source: %1").arg(primary)));
+    QVERIFY(finding->locations.contains(
+        "Searched the active workspace and configured profile Maps sources"));
 }
 
 QTEST_APPLESS_MAIN(MobFamilyValidationTests)
