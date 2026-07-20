@@ -84,15 +84,20 @@ Current development line: `0.2.1-alpha.13` focused closed testing.
 </details>
 
 <details open>
-<summary><strong>0.4.x — AI navigation graph visualization and regeneration</strong></summary>
+<summary><strong>0.3.x — lossless MPR/SEC, landscape editing, and AI navigation</strong></summary>
 
-## 0.4.0 release goal
+## 0.3.0 release goal
 
-Deliver profile-aware visualization, validation, and safe regeneration of the
-AI navigation graph stored in a primary MOB or an external `.grp`. This work is
-deliberately separated from the `0.3.x` landscape serializer: terrain editing
-may warn that navigation is stale, but production graph replacement remains a
-`0.4.0` capability.
+Deliver the first supported landscape-editing release together with
+profile-aware visualization, validation, and safe regeneration of the AI
+navigation graph stored in a primary MOB or an external `.grp`. Geometry,
+liquid, and collision changes must mark navigation dirty, and `0.3.0` cannot be
+declared production-stable while the corresponding graph remains stale.
+
+MPR/SEC and AI-graph persistence remain separate lossless document
+transactions because the graph is not owned by the MPR. Graph regeneration is
+an explicit reviewed operation, never an automatic side effect of every brush
+stroke or ordinary MPR Save.
 
 ## Confirmed format foundation
 
@@ -123,8 +128,10 @@ may warn that navigation is stale, but production graph replacement remains a
 - [ ] Add deterministic graph-to-graph diff, initially using Base Zone 6's
   unfrozen/frozen landscape pair as the controlled fixture.
 - [ ] Validate dimensions, complete byte coverage, boundary links, unexpected
-  asymmetry, isolated regions/entrances, and opaque-plane changes without
-  blocking Save or Test Current Map.
+  asymmetry, isolated regions/entrances, and opaque-plane changes. Existing
+  graph defects remain diagnostic; navigation-dirty edits require explicit
+  acknowledgement for Test Current Map and cannot satisfy the `0.3.0` release
+  gate until regenerated and validated.
 - [ ] Track terrain/object edits as navigation-dirty regions and retain the
   oversized-door runtime-regeneration convention as an explicit diagnostic.
 
@@ -159,12 +166,7 @@ may warn that navigation is stale, but production graph replacement remains a
   probes, entrances, NPC traversal, water/ice state changes, dynamic doors,
   unload/reload, save/load, and separate fingerprinted Base/JMV runtime tests.
 
-</details>
-
-<details open>
-<summary><strong>0.3.x — lossless MPR/SEC and landscape editing</strong></summary>
-
-## 0.3.0 release goal
+## Lossless landscape save contract
 
 Deliver the first supported landscape-editing release. Merely displaying an MPR
 does not qualify: changed terrain must use a lossless archive/sector document
@@ -228,8 +230,14 @@ next gate, and changed landscape saving remains disabled.
   including zone identity/type, entrances, destinations, minimap, music, and
   profile-specific metadata validation.
 
-- [ ] Warn when terrain edits can invalidate MOB object heights or the AI
-  navigation graph.
+- [ ] Classify edits as visual-only or navigation-affecting. Height, liquid,
+  collision, bridge, door, and multi-level changes mark explicit navigation-
+  dirty regions; uncertain material/type changes fail conservatively to dirty.
+- [ ] Keep MPR saving independent from graph regeneration while presenting the
+  complete MPR + primary MOB/external GRP state as one map-validation result.
+- [ ] Prevent navigation-dirty maps from being reported as release-ready, and
+  require explicit acknowledgement before staging a stale graph for a
+  development-only Test Current Map run.
 - [ ] Detect and preserve the known oversized-door runtime graph-regeneration
   convention.
 - [ ] Provide placement/navigation findings before save and test launch.
