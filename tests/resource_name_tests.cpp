@@ -22,8 +22,8 @@ private slots:
     void ignoresNonHumanoidDatabaseSkin();
     void resolvesLiveBaseDatabaseWhenProvided();
     void decodesSparsePnt3WithTrailingTransparency();
-    void preservesLowAlphaPnt3Literal();
-    void treatsOutOfBoundsPnt3MarkerAsLiteral();
+    void decodesNonAlignedPnt3Run();
+    void rejectsOutOfBoundsPnt3Run();
     void rejectsUnalignedPnt3Payload();
     void compositesTransparentArmorOverBodyAtlas();
     void keepsFaceAndHairOnSkinAtlas();
@@ -183,26 +183,27 @@ void ResourceNameTests::decodesSparsePnt3WithTrailingTransparency()
     QCOMPARE(decoded.right(4), QByteArray(4, '\0'));
 }
 
-void ResourceNameTests::treatsOutOfBoundsPnt3MarkerAsLiteral()
+void ResourceNameTests::rejectsOutOfBoundsPnt3Run()
 {
     QByteArray compressed;
     appendDword(compressed, 32);
     QByteArray decoded;
     QString diagnostic;
-    QVERIFY(ei::decodePnt3(compressed, 16, &decoded, &diagnostic));
-    QCOMPARE(decoded.left(4), compressed);
-    QCOMPARE(decoded.right(12), QByteArray(12, '\0'));
+    QVERIFY(!ei::decodePnt3(compressed, 16, &decoded, &diagnostic));
+    QVERIFY(!diagnostic.isEmpty());
+    QVERIFY(decoded.isEmpty());
 }
 
-void ResourceNameTests::preservesLowAlphaPnt3Literal()
+void ResourceNameTests::decodesNonAlignedPnt3Run()
 {
     QByteArray compressed;
-    appendDword(compressed, 20); // plausible low-alpha BGRA, not a 16-byte run
+    appendDword(compressed, 20); // valid byte run; not 16-byte aligned
+    compressed.append("\x11\x22\x33\xff", 4);
     QByteArray decoded;
     QString diagnostic;
-    QVERIFY(ei::decodePnt3(compressed, 64, &decoded, &diagnostic));
-    QCOMPARE(decoded.left(4), compressed);
-    QCOMPARE(decoded.right(60), QByteArray(60, '\0'));
+    QVERIFY(ei::decodePnt3(compressed, 24, &decoded, &diagnostic));
+    QCOMPARE(decoded.left(20), QByteArray(20, '\0'));
+    QCOMPARE(decoded.right(4), QByteArray("\x11\x22\x33\xff", 4));
 }
 
 void ResourceNameTests::rejectsUnalignedPnt3Payload()

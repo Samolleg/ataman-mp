@@ -461,8 +461,8 @@ void ProfileVisualProviderTests::jmvTopArmorWinsAvailableLowerLayerOverlaps()
     QVERIFY(components.contains("ll2.armor09"));
     QVERIFY(components.contains("rl2.armor09"));
     QCOMPARE(jsonStrings(output, "bodyTextureLayers"), QStringList({
-        "unhumash_04.le.0.x4.mmp", "unhumagl_05.le.0.x4.mmp",
-        "unhumapt_07.le.0.x4.mmp", "unhumabt_06.le.0.x4.mmp",
+        "unhumash_04.le.0.x4.mmp", "unhumapt_07.le.0.x4.mmp",
+        "unhumabt_06.le.0.x4.mmp", "unhumagl_05.le.0.x4.mmp",
         "unhumapl_08.le.0.x4.mmp", "unhumalg_09.le.0.x4.mmp"}));
 }
 

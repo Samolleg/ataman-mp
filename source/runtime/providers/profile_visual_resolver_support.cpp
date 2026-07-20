@@ -313,7 +313,11 @@ int armorLayerPriority(const QString& type)
 int armorSlotPriority(const QString& type)
 {
     static const QMap<QString, int> priorities = {
-        {"shirt", 0}, {"gloves", 1}, {"pants", 2}, {"boots", 3},
+        // Lower armor follows the database's stable slot/TypeID order, not
+        // the order of the Monster Wears array: shirt(3), pants(4), boots(5),
+        // gloves(6). These sparse atlases overlap outside their nominal slot,
+        // so changing this order changes the final character texture.
+        {"shirt", 0}, {"pants", 1}, {"boots", 2}, {"gloves", 3},
         {"helm", 4}, {"plate", 5}, {"leggings", 6}
     };
     return priorities.value(type.trimmed().toLower(), 100);

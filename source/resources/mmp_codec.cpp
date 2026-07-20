@@ -22,10 +22,10 @@ bool decodePnt3(const QByteArray& compressed, int decodedSize,
         const quint32 value = qFromLittleEndian<quint32>(
             reinterpret_cast<const uchar*>(compressed.constData() + cursor));
         cursor += int(sizeof(quint32));
-        // Corpus run sizes are 16-byte aligned (the FIG/MMP pipeline works in
-        // four-pixel blocks). Low-alpha BGRA literals can otherwise look like
-        // small run counts; keep non-aligned values as literal image data.
-        if(value > 1000000u || value == 0u || (value & 0x0fu) != 0u)
+        // PNT3's original decoder treats zero and values above one million as
+        // literal BGRA dwords. Every other value is a transparent-byte run;
+        // run lengths are not required to be 16-byte aligned.
+        if(value > 1000000u || value == 0u)
             continue;
 
         const int literalEnd = cursor - int(sizeof(quint32));
@@ -36,10 +36,12 @@ bool decodePnt3(const QByteArray& compressed, int decodedSize,
             decoded->clear();
             return false;
         }
-        // A BGRA literal dword can numerically resemble a run marker. It is a
-        // marker only when the resulting run fits the remaining image.
         if(value > quint32(decodedSize - decoded->size() - literalSize))
-            continue;
+        {
+            if(diagnostic) *diagnostic = "PNT3 transparent run exceeds the decoded image bounds.";
+            decoded->clear();
+            return false;
+        }
         decoded->append(compressed.constData() + literalStart, literalSize);
         decoded->append(QByteArray(int(value), '\0'));
         literalStart = cursor;
