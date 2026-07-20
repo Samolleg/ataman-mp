@@ -9,6 +9,7 @@
 #include <QJsonObject>
 #include "figure.h"
 #include "types.h"
+#include "render_material.h"
 
 //forward declarations
 class CSettings;
@@ -124,6 +125,7 @@ public:
                                QString* diagnostic = nullptr);
     QOpenGLTexture* buildLandTex(const QString& name, int expectedTexCount, int& texCount);
     QOpenGLTexture* textureDefault();
+    ERenderMaterialClass materialClass(QOpenGLTexture* texture) const;
     void attachSettings(CSettings* pSettings) {m_pSettings = pSettings;};
     void initResource();
     void refreshConfiguredSources();
@@ -146,6 +148,7 @@ private:
     static CTextureList* m_pTextureContainer;
     QMap<QString, QOpenGLTexture*> m_aTexture;
     QMap<QString, QImage> m_aTextureImages;
+    QMap<QOpenGLTexture*, ERenderMaterialClass> m_textureMaterialClasses;
     QSet<QString> m_missingTextureNames;
     CSettings* m_pSettings;
     QList<QString> m_arrCellComboBox; //optimization for cell widget

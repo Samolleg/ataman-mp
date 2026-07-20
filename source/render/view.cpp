@@ -39,6 +39,8 @@
 #include "duplicate_id_report.h"
 #include "view_frustum.h"
 #include "render_performance.h"
+#include "render_queue.h"
+#include "part.h"
 #include "external_script_workspace.h"
 #include "mob_script_window.h"
 #include "script_reference_analyzer.h"
@@ -505,6 +507,8 @@ void CView::draw()
 
     m_program.setUniformValue("u_projMmatrix", m_projection);
     m_program.setUniformValue("u_viewMmatrix", camMatrix);
+    RenderQueueContext& renderQueue = RenderQueueContext::instance();
+    renderQueue.begin(&m_program, cameraPosition);
 
     if(m_activeMob != nullptr)
     {
@@ -555,6 +559,7 @@ void CView::draw()
                     if(performance.collecting())
                         ++performance.counters().logicSubmissions;
                 }
+        renderQueue.flush();
         glDepthFunc(GL_LEQUAL);
         for(CNode* node : activeCandidates)
         {
@@ -569,7 +574,15 @@ void CView::draw()
                 }
             }
         }
+        renderQueue.flush();
         glDepthFunc(GL_LESS);
+    }
+
+    renderQueue.end();
+    if(performance.collecting())
+    {
+        performance.counters().sharedMeshes = quint64(CPart::sharedMeshCount());
+        performance.counters().gpuMemoryEstimateBytes = CPart::sharedMeshBytes();
     }
 
     if (m_pLand && m_pLand->isMprLoad() && m_bDrawWater)

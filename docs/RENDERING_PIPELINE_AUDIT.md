@@ -13,19 +13,21 @@ redundant costs: sequential FIG triangles no longer allocate and bind identity
 index buffers, and adjacent parts of an object no longer rebind the same
 texture. The visibility increment now removes the fixed 15 ms scheduler cap,
 culls terrain sectors, and submits MOB objects through a deterministic 32-unit
-spatial grid. This remains the first stage of the renderer replacement, not a
-claim that the final performance target has been reached.
+spatial grid. The queue increment now shares equivalent immutable FIG VBOs,
+classifies decoded texture alpha, and submits sorted opaque, cutout, transparent,
+and highlighted render items. This remains an intermediate renderer stage, not
+a claim that the final performance target has been reached.
 
 ## Current frame
 
 | Stage | Current implementation | Existing optimization | Remaining cost |
 | --- | --- | --- | --- |
 | Scheduling | A precise zero-interval request loop renders continuously | Normal mode requests display VSync; `--render-benchmark` requests swap interval 0 | Driver presentation behavior must be confirmed in runtime logs |
-| Scene traversal | Each MOB has a deterministic 32-unit spatial grid | Visible cells and object bounds are frustum tested; selected objects stay conservative | Render-item queues and batching are not implemented yet |
+| Scene traversal | Each MOB has a deterministic 32-unit spatial grid | Visible cells and object bounds are frustum tested; selected objects stay conservative | Static instance submission is not implemented yet |
 | Terrain | Land and water sectors are frustum rejected | Terrain is already split into 32-unit sectors | Visible sectors still issue one draw each |
-| Mesh storage | Each object owns copied `CPart` vertex buffers | Parsed figures and textures are cached | Identical static instances do not share immutable GPU meshes |
-| Object submission | Each visible part sets attributes and draws | Repeated textures within one object are now coalesced | No VAO reuse, render queue, material sorting, batching, or instancing |
-| Rasterization | OpenGL shaders, VBOs, textures, depth test | GPU executes vertex/fragment work | Blending and alpha testing are globally enabled; back-face culling is disabled |
+| Mesh storage | Immutable FIG geometry shares profile/resource-scoped VBOs | Morph-deformed parts detach to private updatable buffers | CPU vertex arrays and attribute setup remain per part |
+| Object submission | Visible parts produce explicit render items | Opaque/cutout items sort by material, texture, and mesh; genuine transparency sorts back-to-front | Draws are not instanced yet |
+| Rasterization | OpenGL shaders, VBOs, textures, depth test | Verified opaque work disables blend/alpha test; cutouts retain alpha test | Back-face culling remains disabled and conservative materials retain legacy blending |
 | Selection/helpers | Separate selection and logic-helper passes | Picking reuses spatial visibility; selected/moving nodes remain conservative | Enabled logic mode intentionally retains full helper traversal |
 | Resources | Figure, texture, archive-index, and miss caches exist | Unit visual preload avoids many first-view loads | CPU decode and GUI-thread GL upload are not yet bounded asynchronous phases |
 
@@ -74,10 +76,10 @@ which side is limiting the frame.
 
 ## Optimization sequence
 
-1. **Visibility (implemented; runtime validation pending).** Use continuous
+1. **Visibility (implemented; partially runtime validated).** Use continuous
    VSync/benchmark scheduling, reproducible counters, terrain-sector culling,
    the MOB spatial grid, conservative selection handling, and helper gating.
-2. **Build explicit render queues and shared meshes.** Separate opaque, cutout, transparent,
+2. **Build explicit render queues and shared meshes (implemented; runtime validation pending).** Separate opaque, cutout, transparent,
    helper, and selection work. Sort opaque/cutout draws by pipeline, material,
    and shared mesh; sort genuine transparency back-to-front. Cache one GPU
    mesh/VAO for equivalent immutable FIG geometry and stop enabling blending
@@ -121,6 +123,24 @@ benchmark launcher. Do not modify any map or resource merely to run a test.
    selection. Close normally after several map switches and confirm no crash.
 
 Only after these cases pass should the queue/shared-mesh stage begin.
+
+The 2026-07-21 VSync capture ended cleanly and verified spatial rejection and
+helper gating in `zone18` and `zone3obr`. It was captured at 2430 x 1960 with
+VSync, so it is behavior evidence rather than the required uncapped 4K result.
+Dense `zone3obr` still produced about 8,900 draws and 2,842 texture binds at
+roughly 250 ms CPU submission; this is the direct baseline for queue validation.
+
+## Queue-build runtime validation
+
+Repeat the visibility cases with this build, then inspect the queue counters at
+the same fixed cameras. Opaque/cutout/transparent counts must be non-zero where
+the scene contains those materials; shared-mesh and GPU-memory estimates must
+stabilize after warm-up. Texture binds should fall substantially while draw
+count remains comparable until instancing is added. Specifically verify water,
+foliage/cutouts, translucent effects, highlighted selections, humanoid layered
+atlases, morph wings, rectangle picking, and several map switches. Attach both
+`workflow.log` and `render-performance.log`; use the benchmark launcher for the
+separate uncapped 4K measurement.
 
 ## Lighting, shadows, sky, fog, and particles
 

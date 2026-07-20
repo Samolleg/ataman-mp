@@ -1,5 +1,6 @@
 #include "objects\object_base.h"
 #include <QJsonArray>
+#include <QFileInfo>
 #include <QString>
 #include "mob\mob.h"
 #include "landscape.h"
@@ -8,7 +9,35 @@
 #include "resourcemanager.h"
 #include "resource_name.h"
 #include "render_performance.h"
+#include "render_queue.h"
+#include "settings.h"
 #include "property.h"
+
+namespace {
+QString meshCacheScope(const QString& modelName)
+{
+    CSettings* settings = CObjectList::getInstance()->settings();
+    const COptString* profile = settings
+        ? dynamic_cast<const COptString*>(settings->opt("resourceProfile")) : nullptr;
+    const COptStringList* roots = settings
+        ? dynamic_cast<const COptStringList*>(settings->opt(eOptSetResource, "resourceRoots")) : nullptr;
+    QString scope = (profile ? profile->value() : QString()) + '|';
+    QVector<QString> sourcePaths = roots ? roots->value() : QVector<QString>();
+    if(sourcePaths.isEmpty() && settings)
+    {
+        for(const char* optionName : {"figPaths", "texPaths"})
+        {
+            const COptStringList* paths = dynamic_cast<const COptStringList*>(
+                settings->opt(eOptSetResource, optionName));
+            if(paths)
+                sourcePaths += paths->value();
+        }
+    }
+    for(const QString& root : sourcePaths)
+            scope += QFileInfo(root).absoluteFilePath().toLower() + ';';
+    return scope + '|' + modelName.toLower();
+}
+}
 
 CObjectBase::CObjectBase(): 
   m_modelName("")
@@ -138,17 +167,17 @@ void CObjectBase::draw(bool isActive, QOpenGLShaderProgram* program)
         return;
     }
 
-    //if (!m_parent)
-    {
-        QMatrix4x4 matrix;
-        matrix.setToIdentity();
-        matrix.translate(m_drawPosition);
-        QMatrix4x4 rtMatrix;
-        rtMatrix.setToIdentity();
-        rtMatrix.rotate(m_rotation);
-        matrix = matrix * rtMatrix;
+    QMatrix4x4 matrix;
+    matrix.setToIdentity();
+    matrix.translate(m_drawPosition);
+    QMatrix4x4 rtMatrix;
+    rtMatrix.setToIdentity();
+    rtMatrix.rotate(m_rotation);
+    matrix = matrix * rtMatrix;
+
+    RenderQueueContext& queue = RenderQueueContext::instance();
+    if(!queue.collecting())
         program->setUniformValue("u_modelMmatrix", matrix);
-    }
 
     if (m_state == ENodeState::eSelect)
         program->setUniformValue("u_highlight", true);
@@ -161,6 +190,13 @@ void CObjectBase::draw(bool isActive, QOpenGLShaderProgram* program)
         if(!texture)
             texture = part->textureNumber() == 2 && m_secondaryTexture
                 ? m_secondaryTexture : m_texture;
+        if(queue.collecting())
+        {
+            queue.submit(part, texture, matrix,
+                         CTextureList::getInstance()->materialClass(texture),
+                         m_state == ENodeState::eSelect);
+            continue;
+        }
         if(texture != boundTexture)
         {
             texture->bind(0);
@@ -535,6 +571,7 @@ void CObjectBase::recalcFigure()
         delete part;
     m_aPart.clear();
     m_figureComplexion = m_complection;
+    CPart::setCacheScope(meshCacheScope(m_modelName));
     m_pFigure->getVertexData(m_aPart, m_complection, m_bodyParts);
     recalcMinPos();
 }
@@ -585,6 +622,7 @@ void CObjectBase::applyTransientVisual(const QString& modelName, const QString& 
     QStringList parts = visibleParts;
     QVector3D renderComplexion = complexion;
     m_figureComplexion = complexion;
+    CPart::setCacheScope(meshCacheScope(modelName));
     m_pFigure->getVertexData(m_aPart, renderComplexion, parts);
     for(CPart* part : m_aPart)
     {

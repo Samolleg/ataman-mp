@@ -4,7 +4,11 @@
 #include <QOpenGLBuffer>
 #include <QOpenGLShaderProgram>
 #include <QMatrix4x4>
+#include <QSharedPointer>
 #include "types.h"
+
+class CSharedPartMesh;
+class RenderQueueContext;
 
 ///
 /// \brief The CPart class provides a display of each part(figure) of the object in the scene.
@@ -23,6 +27,7 @@ public:
     void setVisible(bool bShow = true) {m_bShow = bShow;}
     void update(); //update shader buffers
     void draw(QOpenGLShaderProgram* program);
+    void drawImmediate(QOpenGLShaderProgram* program);
     void drawSelect(QOpenGLShaderProgram* program);
     void setParentName(const QString& name) { m_parentName = name.toLower(); }
     const QString& parentName() const { return m_parentName; }
@@ -35,9 +40,17 @@ public:
     void setPoseMatrix(const QMatrix4x4& matrix) { m_poseMatrix = matrix; }
     void setSourceVertexIndices(const QVector<int>& indices) { m_sourceVertexIndices = indices; }
     void setMorphDeltas(const QVector<QVector3D>& deltas);
+    bool isDrawable() const { return m_bShow && !m_aVertData.isEmpty(); }
+    quintptr meshIdentity() const { return quintptr(m_mesh.data()); }
+    static void setCacheScope(const QString& scope);
+    static int sharedMeshCount();
+    static quint64 sharedMeshBytes();
 
 private:
-    QOpenGLBuffer m_vertexBuf;
+    void attachSharedMesh(const QVector<SVertexData>& vertices);
+    void attachPrivateMesh(const QVector<SVertexData>& vertices);
+
+    QSharedPointer<CSharedPartMesh> m_mesh;
 
     QString m_name;
     QString m_parentName;
