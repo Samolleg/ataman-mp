@@ -34,9 +34,10 @@ edit `database.res`, JMV/Base archives, live MOBs, maps, or the game install.
    models that contain the requested TTI components.
 3. JMV: request dual 2H and confirm the first weapon renders through the
    single-2H path while the second is suppressed with a diagnostic. Request
-   2H+shield and confirm it remains diagnostic-only. A paired TypeID 15 row
-   such as `zone17` ID 47533 does not establish the required `TitanGrip` perk;
-   no inferred Lua/perk authorization is accepted.
+   2H+shield and confirm it remains diagnostic-only. This is the current safe
+   fallback until the JMV provider parses prototype perk ownership from
+   `lua/tables.lua`; `zone17` ID 47533 is the control for the later
+   TitanGrip-authorized dual-2H path.
 4. Use an item whose TTI component is absent from the selected assembly and an
    unbalanced modifier string. Confirm the original field remains unchanged and
    a structured diagnostic/placeholder is shown.
@@ -183,11 +184,42 @@ edit `database.res`, JMV/Base archives, live MOBs, maps, or the game install.
   and other equipment beneath their `*00` attachment nodes. Validate
   `zon3obr` IDs 233/234 at several idle frames: the shield should remain on the
   forearm without clipping caused by a doubled attachment rotation.
-- A JMV dual-two-hand request does not imply TitanGrip authorization. Until the
-  perk source is available, render only the first two-handed weapon through the
-  established `singleTwoHand` path and report the suppressed second weapon.
-  Use `zone17` ID 47533 as the runtime control. True dual-two-hand rendering and
-  two-hand-plus-shield remain deferred.
+- A JMV dual-two-hand request does not by itself imply TitanGrip authorization.
+  Until the provider reads JMV `UnitPerk`, render only the first two-handed
+  weapon through the established `singleTwoHand` path and report the suppressed
+  second weapon. `UnitPerkType.StrongMan` is column 42; JMV applies it to perk
+  branch 29, and its special `strong1` handling promotes the otherwise dummy
+  branch records to the sole TitanGrip behavior. A nonzero StrongMan value is
+  therefore the ownership signal; it is not an ordinary three-tier value.
+  `zone17` ID 47533 (`Human Hadagan EliteL A20`, StrongMan=1) is the runtime
+  control. True dual-two-hand rendering and two-hand-plus-shield remain
+  deferred until that Lua source is profile-scoped and parsed.
+
+## Deferred classification and integral-weapon refactors
+
+These are recorded follow-up actions, not prerequisites for the current visual
+test build:
+
+1. Thread the MOB `Unit subtype` through appearance, equipment, and animation
+   resolver requests. Audit the Base/JMV corpus, then use `50 = Human` as the
+   primary database-equipped actor discriminator and `51 = Animal` / `52 =
+   Monstr` as embedded creature discriminators. Unknown or inconsistent values
+   must diagnose and fail closed.
+2. Remove the wearable-model-name allowlist as a classification source. Model
+   families may remain as bounded format/texture capabilities after corpus
+   validation, but must not decide whether an actor is human or monster.
+3. Replace the `unmogo` sling suppression with a general integral-creature
+   weapon resolver. JMV Lua contains no goblin/sling special case. Reverse
+   engineer how the engine combines Monster `Items`, MOB `OBJ_BODYPARTS`, FIG
+   component/group metadata, and the active creature weapon before changing
+   behavior.
+4. Cover goblin sling/spear, ogre club, and lizardman trident controls. Select
+   one mutually exclusive integral weapon group, retain its primary/secondary
+   texture selector, and pass its semantic weapon family to ADB idle selection.
+5. Add a profile-scoped, bounded JMV `lua/tables.lua` reader for `UnitPerk` and
+   `UnitPerkType`. Enable TitanGrip layouts only from the resolved prototype's
+   nonzero StrongMan branch; malformed/missing Lua remains diagnostic and
+   closed. Do not execute arbitrary profile Lua in the editor.
 
 ## Corpus-established JMV equipment atlas mapping
 

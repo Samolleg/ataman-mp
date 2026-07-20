@@ -57,6 +57,16 @@ Equipment textures are derived from item slot/type, TTI/TTI2, and material
 code, then bound per assembly part. Base and future providers do not inherit
 these rules implicitly.
 
+The current wearable-model allowlist and `unmogo` sling suppression are
+temporary compatibility mechanisms, not provider-extension examples. A
+deferred refactor will pass MOB subtype into provider requests, classify
+database-equipped humans from subtype 50 after a corpus audit, and resolve
+monster integral weapons from authoritative Monster/MOB/FIG data. JMV perk
+capabilities will likewise come from a bounded parser for `lua/tables.lua`, not
+from equipment inference or arbitrary Lua execution. The detailed evidence,
+controls, and fail-closed requirements are recorded in
+`HUMANOID_VISUAL_RUNTIME_VALIDATION.md`.
+
 ## Adding a mod provider
 
 1. Choose a stable, namespaced, versioned provider ID.
