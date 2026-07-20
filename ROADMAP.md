@@ -678,18 +678,26 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
     terrain visibility changes. Terrain-dependent interactive tools that would
     be ambiguous against an invisible surface are disabled until it is shown.
   - Endurance does not support simultaneous editing of multiple MOBs. Exactly
-    one MOB is active/unlocked; every other loaded MOB is visible but locked
-    against selection and editing.
+    one MOB is active/unlocked; every other loaded MOB is locked against edits
+    but its visible objects remain selectable for inspection and copying.
   - Clicking a MOB in the panel switches the active destination. Switching
-    locks the previous MOB and unlocks the selected MOB. Existing Ctrl+T should
-    show/focus this panel instead of opening the awkward transient chooser.
+    locks the previous MOB and unlocks the selected MOB. Repurpose Ctrl+T as
+    **Activate Selected Object's MOB**; disable it when there is no selected MOB
+    object or its owner is already active.
   - Each row can independently hide/show its MOB without unloading it.
     Visibility is editor-rendering/picking state only: hidden MOBs remain loaded
     and continue to participate in validation, Save All, collections, and Test
-    Current Map. The active MOB stays visible.
-  - Hovering or single-clicking an object from a locked MOB explains that it
-    belongs to locked MOB `<name>`. Double-clicking that object switches its MOB
-    active and selects it.
+    Current Map. The active MOB may also be hidden; doing so clears its current
+    selection and prevents its objects from being selected in either the
+    viewport or outliner until shown again.
+  - Show objects from every loaded MOB in the outliner, grouped under top-level
+    MOB nodes. Objects from visible locked MOBs may be selected and inspected,
+    but property edits, transforms, deletion, patrol/look editing, and other
+    mutations remain disabled. The UI identifies their owning locked MOB.
+  - Copy is allowed from a selected locked-MOB object. Paste and Ctrl+D
+    duplicate always create the new object in the active MOB, never in the
+    selected source object's locked owner. Double-clicking a locked-MOB object
+    activates its owner and keeps that object selected.
   - Show the owning MOB for the selected object. Reuse the already working
     cross-MOB copy/paste path; no coordinated simultaneous-edit transaction or
     multi-document Save All redesign is required for this feature.
@@ -801,6 +809,9 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
   copied component is an ordinary numeric scalar (for Vector3, a float), so it
   may be pasted into any numeric destination that can represent it safely; it
   is not restricted to the same component name or compound-property type.
+  Integer destinations round the numeric value to the nearest integer and then
+  apply the destination's normal range/validity checks; they do not require an
+  already-integral source value.
 - [x] Provide independent internal/external MOB script editing with document-
   owned workspaces, undoable imports, recovery, and configurable editor path.
 - [x] Warn before changing/resetting/deleting object IDs referenced by the
