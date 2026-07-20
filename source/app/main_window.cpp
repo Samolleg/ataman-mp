@@ -592,6 +592,10 @@ void MainWindow::renderUnitTexturePreview()
     }
     painter.end();
 
+    // Present the atlas in character-authoring orientation while rotating its
+    // UV overlay with it. The decoded resource and renderer UVs stay unchanged.
+    preview = preview.mirrored(true, true);
+
     m_unitTextureDetails->setText(
         tr("Model: %1\nSize: %2 × %3\nVisible layers: %4 / %5\n"
            "UV projection: renderer-effective QImage upload, Repeat wrapping")
