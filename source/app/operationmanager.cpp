@@ -1,5 +1,7 @@
 #include <QLineEdit>
 
+#include <cmath>
+
 #include "operationmanager.h"
 #include "node.h"
 #include "view.h"
@@ -1116,6 +1118,7 @@ void CTileBrush::mousePressEvent(COperation* pOp, QMouseEvent* pEvent)
     switch (pEvent->buttons()) {
     case Qt::LeftButton:
     {
+        m_pView->beginTileBrushGroup();
         m_pView->setTile(m_pView->getTerrainPos(pEvent->pos().x(), pEvent->pos().y(), bLand), bLand);
         break;
     }
@@ -1161,10 +1164,19 @@ void CTileBrush::mouseMoveEvent(COperation* pOp, QMouseEvent* pEvent)
             m_pView->setPreviewTile(false);
 
         bool bLand = CScene::getInstance()->isLandTileEditMode();
-        QVector3D landPos(m_pView->getTerrainPos(pEvent->x(), pEvent->y()));
-        if(landPos.distanceToPoint(m_lastLandPos) > 1.0f) // avoid re-brushing single tile of each movement.
+        const QVector3D landPos(m_pView->getTerrainPos(pEvent->x(), pEvent->y(), bLand));
+        const float distance = landPos.distanceToPoint(m_lastLandPos);
+        if(distance > 1.0f)
         {
-            m_pView->setTile(m_pView->getTerrainPos(pEvent->pos().x(), pEvent->pos().y(), bLand), bLand);
+            // Interpolate fast pointer movement so a small brush cannot leave
+            // unpainted tile gaps between mouse events. All stamps remain in
+            // the press/release undo macro.
+            const int steps = qMax(1, int(std::ceil(distance)));
+            for(int step = 1; step <= steps; ++step)
+            {
+                const float ratio = float(step) / float(steps);
+                m_pView->setTile(m_lastLandPos * (1.0f - ratio) + landPos * ratio, bLand);
+            }
             m_lastLandPos = landPos;
         }
 
@@ -1189,7 +1201,7 @@ void CTileBrush::mouseMoveEvent(COperation* pOp, QMouseEvent* pEvent)
 void CTileBrush::wheelEvent(COperation* pOp, QWheelEvent* pEvent)
 {
     Q_UNUSED(pOp);
-    m_pView->addTileRotation(pEvent->delta() > 0 ? 1 : -1);
-    bool bLand = CScene::getInstance()->isLandTileEditMode();
-    m_pView->updatePreviewTile(m_pView->getTerrainPos(pEvent->pos().x(), pEvent->pos().y(), bLand), bLand);
+    Q_UNUSED(pEvent);
+    CStatusConnector::getInstance()->updateStatus(
+        "brush.ico", "Rotation is automatic in semantic terrain painting.");
 }

@@ -172,8 +172,10 @@ public:
     void setPreviewTile(bool bDraw = true) {m_bPreviewTile = bDraw;}
     void showOutliner(bool bShow = true);
     void pickQuickAccessTile(int index);
+    void beginTileBrushGroup();
     void endTileBrushGroup();
     bool applyTerrainHeightPreview(const STerrainHeightCommand& command, bool forward);
+    bool applyTerrainTilePreview(const STerrainTileCommand& command, bool forward);
     void loadSession();
     bool onExit();
 
@@ -211,6 +213,7 @@ private:
     void finishSculptStroke();
     void syncLandscapeToolState();
     void clearLandscapeBrushSelection();
+    void rebuildTerrainSemanticCatalog();
 
 
 public slots:
@@ -293,7 +296,10 @@ private:
     CLandscapeTools* m_landscapeTools;
     CMprDocument m_mprDocument;
     CTerrainEditModel m_terrainEdit;
+    CTerrainSemanticCatalog m_terrainSemanticCatalog;
+    quint32 m_terrainSemanticSeed{0};
     bool m_terrainEditAvailable;
+    bool m_tilePaintStrokeActive{false};
     bool m_sculptStrokeActive;
     QVector3D m_lastSculptPoint;
     QVector3D m_lastSculptStampPoint;

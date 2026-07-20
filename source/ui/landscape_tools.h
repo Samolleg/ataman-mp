@@ -2,8 +2,10 @@
 #define LANDSCAPE_TOOLS_H
 
 #include <QWidget>
+#include <QVector>
 
 #include "landscape_edit_policy.h"
+#include "terrain_edit_model.h"
 
 class QCheckBox;
 class QComboBox;
@@ -37,11 +39,17 @@ public:
     float rawDelta() const;
     quint16 flattenHeight() const;
     bool flipHeightmapVertically() const;
+    float paintRadius() const;
+    ETerrainTileBrushShape paintShape() const;
+    qint32 paintTerrainType(bool* selected = nullptr) const;
+    void setPaintTerrainTypes(const QVector<QPair<qint32, QString>>& terrainTypes);
+    void selectPaintTerrainType(qint32 terrainType);
 
 signals:
     void importHeightmapRequested();
     void tilePickerRequested();
     void editingStateChanged();
+    void paintTerrainTypeChanged(qint32 terrainType);
 
 private:
     QCheckBox* m_enable;
@@ -52,6 +60,9 @@ private:
     QDoubleSpinBox* m_delta;
     QSpinBox* m_flatten;
     QCheckBox* m_flipVertical;
+    QComboBox* m_paintTerrainType;
+    QDoubleSpinBox* m_paintRadius;
+    QComboBox* m_paintShape;
     QWidget* m_sculptControls;
     QWidget* m_paintControls;
     void updateModeVisibility();

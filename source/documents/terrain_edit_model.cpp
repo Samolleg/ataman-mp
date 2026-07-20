@@ -5,6 +5,7 @@
 #include <QtEndian>
 
 #include <cmath>
+#include <limits>
 
 #include "endurance_document.h"
 #include "mpr_document.h"
@@ -209,6 +210,138 @@ quint16 CTerrainTransitionCatalog::select(
             return variant.packedTile;
         }
         selection -= quint64(variant.distributionWeight);
+    }
+    if(found)
+        *found = false;
+    return 0;
+}
+
+bool CTerrainSemanticCatalog::addVariant(const STerrainSemanticVariant& variant,
+                                         CValidationReport* report)
+{
+    const int edgeSize = variant.northEdge.size();
+    if(variant.distributionWeight <= 0 || edgeSize <= 0
+       || variant.eastEdge.size() != edgeSize
+       || variant.southEdge.size() != edgeSize
+       || variant.westEdge.size() != edgeSize)
+    {
+        if(report)
+            report->add("terrain.semantic_variant", EValidationSeverity::Error,
+                        "Semantic atlas variants require equally sized edges and a positive weight");
+        return false;
+    }
+    for(const STerrainSemanticVariant& existing : m_variants)
+    {
+        if(existing.packedTile == variant.packedTile)
+        {
+            if(report)
+                report->add("terrain.semantic_duplicate", EValidationSeverity::Error,
+                            "Semantic atlas catalog contains the same packed tile twice");
+            return false;
+        }
+    }
+    m_variants.append(variant);
+    return true;
+}
+
+bool CTerrainSemanticCatalog::hasTerrainType(qint32 terrainType) const
+{
+    for(const STerrainSemanticVariant& variant : m_variants)
+        if(variant.terrainType == terrainType)
+            return true;
+    return false;
+}
+
+const STerrainSemanticVariant* CTerrainSemanticCatalog::findPacked(quint16 packed) const
+{
+    for(const STerrainSemanticVariant& variant : m_variants)
+        if(variant.packedTile == packed)
+            return &variant;
+    return nullptr;
+}
+
+quint64 CTerrainSemanticCatalog::edgeDifference(const QByteArray& left,
+                                                 const QByteArray& right)
+{
+    if(left.size() != right.size() || left.isEmpty())
+        return std::numeric_limits<quint64>::max() / 8;
+    quint64 difference = 0;
+    for(int index = 0; index < left.size(); ++index)
+    {
+        const int delta = int(quint8(left.at(index))) - int(quint8(right.at(index)));
+        difference += quint64(delta * delta);
+    }
+    return difference;
+}
+
+quint16 CTerrainSemanticCatalog::select(
+    qint32 terrainType, const STerrainSemanticNeighbors& neighbors,
+    int globalX, int globalY, quint32 distributionSeed, bool* found) const
+{
+    quint64 bestScore = std::numeric_limits<quint64>::max();
+    QVector<QPair<const STerrainSemanticVariant*, quint64>> candidates;
+    for(const STerrainSemanticVariant& variant : m_variants)
+    {
+        if(variant.terrainType != terrainType)
+            continue;
+        quint64 score = 0;
+        const STerrainSemanticVariant* neighbor = nullptr;
+        if(neighbors.north >= 0 && (neighbor = findPacked(quint16(neighbors.north))))
+            score += edgeDifference(variant.northEdge, neighbor->southEdge);
+        if(neighbors.east >= 0 && (neighbor = findPacked(quint16(neighbors.east))))
+            score += edgeDifference(variant.eastEdge, neighbor->westEdge);
+        if(neighbors.south >= 0 && (neighbor = findPacked(quint16(neighbors.south))))
+            score += edgeDifference(variant.southEdge, neighbor->northEdge);
+        if(neighbors.west >= 0 && (neighbor = findPacked(quint16(neighbors.west))))
+            score += edgeDifference(variant.westEdge, neighbor->eastEdge);
+        bestScore = qMin(bestScore, score);
+        candidates.append(qMakePair(&variant, score));
+    }
+    if(candidates.isEmpty())
+    {
+        if(found)
+            *found = false;
+        return 0;
+    }
+
+    // DXT compression and authored edge padding introduce small pixel noise.
+    // Keep near-equal candidates in the natural-variation pool without letting
+    // visibly worse seams win. The allowance is one RGB intensity step squared
+    // per compared sample, plus five percent of the best score.
+    const int edgeBytes = candidates.front().first->northEdge.size();
+    const int neighborCount = (neighbors.north >= 0) + (neighbors.east >= 0)
+        + (neighbors.south >= 0) + (neighbors.west >= 0);
+    const quint64 allowance = quint64(edgeBytes * qMax(1, neighborCount))
+        + bestScore / 20;
+    quint64 totalWeight = 0;
+    for(const auto& candidate : candidates)
+        if(candidate.second <= bestScore + allowance)
+            totalWeight += quint64(candidate.first->distributionWeight);
+
+    quint32 hash = 2166136261u;
+    const auto mix = [&hash](quint32 value) {
+        for(int byte = 0; byte < 4; ++byte)
+        {
+            hash ^= (value >> (byte * 8)) & 0xFFu;
+            hash *= 16777619u;
+        }
+    };
+    mix(distributionSeed);
+    mix(quint32(globalX));
+    mix(quint32(globalY));
+    mix(quint32(terrainType));
+    quint64 selection = quint64(hash) % totalWeight;
+    for(const auto& candidate : candidates)
+    {
+        if(candidate.second > bestScore + allowance)
+            continue;
+        if(selection < quint64(candidate.first->distributionWeight))
+        {
+            if(found)
+                *found = true;
+            return candidate.first->packedTile;
+        }
+        selection -= quint64(candidate.first->distributionWeight);
     }
     if(found)
         *found = false;
@@ -1110,6 +1243,174 @@ STerrainTileCommand CTerrainEditModel::makeTilePaint(
             delta.after = after;
             command.deltas.append(delta);
         }
+    }
+    return command;
+}
+
+STerrainTileCommand CTerrainEditModel::makeSemanticTilePaint(
+    const STerrainTileBrush& brush, ETerrainTileLayer layer,
+    qint32 terrainType, const CTerrainSemanticCatalog& catalog,
+    quint32 distributionSeed, CValidationReport* report) const
+{
+    STerrainTileCommand command;
+    command.description = layer == ETerrainTileLayer::Land
+        ? QStringLiteral("Paint terrain material")
+        : QStringLiteral("Paint overlay material");
+    if(brush.radius < 0.0f || !catalog.hasTerrainType(terrainType))
+    {
+        if(report)
+            report->add("terrain.semantic_type", EValidationSeverity::Error,
+                        "The selected terrain category has no usable atlas variants");
+        return command;
+    }
+
+    const int width = tileCountX();
+    const int height = tileCountY();
+    QVector<quint16> working(width * height, 0);
+    QVector<qint32> desiredTypes(width * height, 0);
+    QVector<bool> available(width * height, false);
+    for(int y = 0; y < height; ++y)
+    {
+        for(int x = 0; x < width; ++x)
+        {
+            const int index = y * width + x;
+            working[index] = packedTile(x, y, layer, &available[index]);
+            if(available.at(index))
+            {
+                bool typeFound = false;
+                desiredTypes[index] = tileType(working.at(index), &typeFound);
+                available[index] = typeFound;
+            }
+        }
+    }
+
+    QVector<bool> painted(width * height, false);
+    QVector<bool> affected(width * height, false);
+    const int minimumX = qMax(0, int(std::ceil(brush.centerX - brush.radius)));
+    const int maximumX = qMin(width - 1, int(std::floor(brush.centerX + brush.radius)));
+    const int minimumY = qMax(0, int(std::ceil(brush.centerY - brush.radius)));
+    const int maximumY = qMin(height - 1, int(std::floor(brush.centerY + brush.radius)));
+    for(int y = minimumY; y <= maximumY; ++y)
+    {
+        for(int x = minimumX; x <= maximumX; ++x)
+        {
+            const float dx = std::fabs(float(x) - brush.centerX);
+            const float dy = std::fabs(float(y) - brush.centerY);
+            const bool inside = brush.shape == ETerrainTileBrushShape::Square
+                ? qMax(dx, dy) <= brush.radius
+                : std::sqrt(dx * dx + dy * dy) <= brush.radius;
+            const int index = y * width + x;
+            if(!inside || !available.at(index))
+                continue;
+            painted[index] = true;
+            desiredTypes[index] = terrainType;
+        }
+    }
+
+    int paintedCount = 0;
+    for(int index = 0; index < painted.size(); ++index)
+    {
+        if(!painted.at(index))
+            continue;
+        ++paintedCount;
+        const int centerX = index % width;
+        const int centerY = index / width;
+        for(int offsetY = -1; offsetY <= 1; ++offsetY)
+        {
+            for(int offsetX = -1; offsetX <= 1; ++offsetX)
+            {
+                const int x = centerX + offsetX;
+                const int y = centerY + offsetY;
+                if(x >= 0 && x < width && y >= 0 && y < height
+                   && available.at(y * width + x))
+                    affected[y * width + x] = true;
+            }
+        }
+    }
+    if(paintedCount == 0)
+    {
+        if(report)
+            report->add(layer == ETerrainTileLayer::Overlay
+                            ? "terrain.overlay_inactive" : "terrain.semantic_empty",
+                        EValidationSeverity::Warning,
+                        layer == ETerrainTileLayer::Overlay
+                            ? "The brush did not cover an active overlay cell"
+                            : "The brush did not cover an editable terrain tile");
+        return command;
+    }
+
+    // Canonicalize the editable region before relaxation. This makes the
+    // result depend on the semantic field, coordinates, seed, and fixed outer
+    // boundary - never on whichever visual variants happened to be present in
+    // the brush footprint. Repainting the same material is therefore a no-op.
+    for(int index = 0; index < affected.size(); ++index)
+    {
+        if(!affected.at(index))
+            continue;
+        const int x = index % width;
+        const int y = index / width;
+        bool found = false;
+        working[index] = catalog.select(desiredTypes.at(index),
+            STerrainSemanticNeighbors(), x, y, distributionSeed, &found);
+        if(!found)
+        {
+            if(report)
+                report->add("terrain.semantic_catalog", EValidationSeverity::Error,
+                            "Automatic painting could not seed an atlas tile for a terrain category",
+                            QString("%1,%2 type:%3").arg(x).arg(y).arg(desiredTypes.at(index)));
+            return STerrainTileCommand();
+        }
+    }
+
+    // Relax the footprint and its one-cell halo together. Alternating traversal
+    // removes directional bias while keeping selection deterministic.
+    for(int pass = 0; pass < 4; ++pass)
+    {
+        const bool reverse = (pass & 1) != 0;
+        for(int step = 0; step < width * height; ++step)
+        {
+            const int index = reverse ? (width * height - 1 - step) : step;
+            if(!affected.at(index))
+                continue;
+            const int x = index % width;
+            const int y = index / width;
+            STerrainSemanticNeighbors neighbors;
+            if(y > 0 && available.at(index - width)) neighbors.north = working.at(index - width);
+            if(x + 1 < width && available.at(index + 1)) neighbors.east = working.at(index + 1);
+            if(y + 1 < height && available.at(index + width)) neighbors.south = working.at(index + width);
+            if(x > 0 && available.at(index - 1)) neighbors.west = working.at(index - 1);
+            bool found = false;
+            const quint16 selected = catalog.select(desiredTypes.at(index), neighbors,
+                                                     x, y, distributionSeed, &found);
+            if(!found)
+            {
+                if(report)
+                    report->add("terrain.semantic_catalog", EValidationSeverity::Error,
+                                "Automatic painting could not resolve an atlas tile for a retained terrain category",
+                                QString("%1,%2 type:%3").arg(x).arg(y).arg(desiredTypes.at(index)));
+                return STerrainTileCommand();
+            }
+            working[index] = selected;
+        }
+    }
+
+    for(int index = 0; index < affected.size(); ++index)
+    {
+        if(!affected.at(index))
+            continue;
+        const int x = index % width;
+        const int y = index / width;
+        bool beforeAvailable = false;
+        const quint16 before = packedTile(x, y, layer, &beforeAvailable);
+        if(!beforeAvailable || before == working.at(index))
+            continue;
+        STerrainTileDelta delta;
+        delta.globalX = x;
+        delta.globalY = y;
+        delta.layer = layer;
+        delta.before = before;
+        delta.after = working.at(index);
+        command.deltas.append(delta);
     }
     return command;
 }

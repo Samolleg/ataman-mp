@@ -80,6 +80,53 @@ struct STerrainTransitionVariant
     int distributionWeight{1};
 };
 
+enum class ETerrainTileEdge
+{
+    North,
+    East,
+    South,
+    West
+};
+
+struct STerrainSemanticVariant
+{
+    qint32 terrainType{0};
+    quint16 packedTile{0};
+    QByteArray northEdge;
+    QByteArray eastEdge;
+    QByteArray southEdge;
+    QByteArray westEdge;
+    int distributionWeight{1};
+};
+
+struct STerrainSemanticNeighbors
+{
+    qint32 north{-1};
+    qint32 east{-1};
+    qint32 south{-1};
+    qint32 west{-1};
+};
+
+// Read-only runtime catalog derived from the MPR atlas pixels and MP category
+// array. It never changes atlas images or category metadata.
+class CTerrainSemanticCatalog
+{
+public:
+    bool addVariant(const STerrainSemanticVariant& variant,
+                    CValidationReport* report = nullptr);
+    bool hasTerrainType(qint32 terrainType) const;
+    quint16 select(qint32 terrainType,
+                   const STerrainSemanticNeighbors& neighbors,
+                   int globalX, int globalY, quint32 distributionSeed,
+                   bool* found = nullptr) const;
+    int size() const { return m_variants.size(); }
+
+private:
+    const STerrainSemanticVariant* findPacked(quint16 packed) const;
+    static quint64 edgeDifference(const QByteArray& left, const QByteArray& right);
+    QVector<STerrainSemanticVariant> m_variants;
+};
+
 class CTerrainTransitionCatalog
 {
 public:
@@ -259,6 +306,11 @@ public:
                                      ETerrainTileLayer layer,
                                      quint8 atlasIndex, quint8 tileIndex,
                                      quint8 rotation) const;
+    STerrainTileCommand makeSemanticTilePaint(
+        const STerrainTileBrush& brush, ETerrainTileLayer layer,
+        qint32 terrainType, const CTerrainSemanticCatalog& catalog,
+        quint32 distributionSeed,
+        CValidationReport* report = nullptr) const;
     bool apply(const STerrainTileCommand& command, bool forward,
                CValidationReport* report = nullptr);
     bool appendSectorEdits(CMprEditTransaction* transaction,

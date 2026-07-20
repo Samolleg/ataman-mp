@@ -20,6 +20,9 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     , m_delta(new QDoubleSpinBox(this))
     , m_flatten(new QSpinBox(this))
     , m_flipVertical(new QCheckBox(tr("Flip image vertically"), this))
+    , m_paintTerrainType(new QComboBox(this))
+    , m_paintRadius(new QDoubleSpinBox(this))
+    , m_paintShape(new QComboBox(this))
     , m_sculptControls(new QWidget(this))
     , m_paintControls(new QWidget(this))
 {
@@ -70,11 +73,23 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     QVBoxLayout* paintLayout = new QVBoxLayout(m_paintControls);
     paintLayout->setContentsMargins(0, 0, 0, 0);
     QLabel* paintHelp = new QLabel(tr(
-        "Left-drag paints the selected atlas tile. Right-click picks from the map; the wheel rotates. "
+        "Left-drag paints a terrain material. Endurance chooses atlas variants and rotations from visual edge compatibility, "
+        "and retiles a one-cell seam halo automatically. Right-click samples the material from the map. "
         "Overlay painting changes only already-active overlay cells and never creates liquid implicitly."), this);
     paintHelp->setWordWrap(true);
     paintLayout->addWidget(paintHelp);
-    QPushButton* tilePicker = new QPushButton(tr("Choose atlas tile..."), this);
+    m_paintTerrainType->addItem(tr("Choose a material..."), QVariant());
+    m_paintRadius->setRange(0.0, 32.0);
+    m_paintRadius->setValue(1.0);
+    m_paintRadius->setSingleStep(0.5);
+    m_paintShape->addItem(tr("Circle"));
+    m_paintShape->addItem(tr("Square"));
+    QFormLayout* paintForm = new QFormLayout();
+    paintForm->addRow(tr("Terrain material"), m_paintTerrainType);
+    paintForm->addRow(tr("Radius (tiles)"), m_paintRadius);
+    paintForm->addRow(tr("Brush shape"), m_paintShape);
+    paintLayout->addLayout(paintForm);
+    QPushButton* tilePicker = new QPushButton(tr("Inspect atlas / choose representative..."), this);
     paintLayout->addWidget(tilePicker);
     layout->addWidget(m_paintControls);
     layout->addSpacing(8);
@@ -85,6 +100,13 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     layout->addStretch(1);
     connect(importButton, &QPushButton::clicked, this, &CLandscapeTools::importHeightmapRequested);
     connect(tilePicker, &QPushButton::clicked, this, &CLandscapeTools::tilePickerRequested);
+    connect(m_paintTerrainType, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, [this](int)
+    {
+        bool selected = false;
+        const qint32 terrainType = paintTerrainType(&selected);
+        emit paintTerrainTypeChanged(selected ? terrainType : -1);
+    });
     connect(m_enable, &QCheckBox::toggled, this, &CLandscapeTools::editingStateChanged);
     connect(m_mode, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int)
     {
@@ -148,3 +170,29 @@ float CLandscapeTools::strength() const { return float(m_strength->value()); }
 float CLandscapeTools::rawDelta() const { return float(m_delta->value()); }
 quint16 CLandscapeTools::flattenHeight() const { return quint16(m_flatten->value()); }
 bool CLandscapeTools::flipHeightmapVertically() const { return m_flipVertical->isChecked(); }
+float CLandscapeTools::paintRadius() const { return float(m_paintRadius->value()); }
+ETerrainTileBrushShape CLandscapeTools::paintShape() const
+{
+    return m_paintShape->currentIndex() == 1
+        ? ETerrainTileBrushShape::Square : ETerrainTileBrushShape::Circle;
+}
+qint32 CLandscapeTools::paintTerrainType(bool* selected) const
+{
+    const QVariant value = m_paintTerrainType->currentData();
+    if(selected)
+        *selected = value.isValid();
+    return value.isValid() ? value.toInt() : 0;
+}
+void CLandscapeTools::setPaintTerrainTypes(
+    const QVector<QPair<qint32, QString>>& terrainTypes)
+{
+    m_paintTerrainType->clear();
+    m_paintTerrainType->addItem(tr("Choose a material..."), QVariant());
+    for(const auto& terrainType : terrainTypes)
+        m_paintTerrainType->addItem(terrainType.second, terrainType.first);
+}
+void CLandscapeTools::selectPaintTerrainType(qint32 terrainType)
+{
+    const int index = m_paintTerrainType->findData(terrainType);
+    m_paintTerrainType->setCurrentIndex(index >= 0 ? index : 0);
+}

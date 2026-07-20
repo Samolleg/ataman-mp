@@ -19,11 +19,12 @@ later brush and live-preview work. Changed-MPR saving remains disabled.
 
 ## Automatic transition contract
 
-MPR tile categories alone do not encode edge and corner composition. Automatic
-blending therefore consumes an explicit transition catalog whose entries carry
-an oriented four-corner signature, packed atlas tile/rotation, and positive
-distribution weight. Atlas analysis will populate this catalog in a later
-increment.
+MPR tile categories alone do not encode edge and corner composition. The
+transaction model therefore supports an explicit four-corner transition
+catalog, while the R6 UI builds a read-only compatibility catalog by sampling
+the supplied atlas' authored edge padding in all four rotations. Both paths
+select only packed tiles inside the MPR namespace. See
+`LANDSCAPE_SEMANTIC_PAINT_R6.md` for the production brush contract.
 
 When several entries match exactly, selection uses a stable hash of map-local
 tile coordinates, signature, and a saved distribution seed. This provides the

@@ -1578,6 +1578,110 @@ void EnduranceDocumentTests::terrainTilePaintingIsUndoableLocalizedAndNamespaceS
     QCOMPARE(terrain.makeTilePaint(area, ETerrainTileLayer::Land,
                                    0, 1, 0).deltas.size(), 9);
 
+    CTerrainSemanticCatalog semanticCatalog;
+    const auto edge = [](int red, int green, int blue) {
+        QByteArray value;
+        for(int sample = 0; sample < 8; ++sample)
+        {
+            value.append(char(red));
+            value.append(char(green));
+            value.append(char(blue));
+        }
+        return value;
+    };
+    for(int rotation = 0; rotation < 4; ++rotation)
+    {
+        SMprPackedTile grassPacked;
+        grassPacked.tileIndex = 0;
+        grassPacked.rotation = quint8(rotation);
+        STerrainSemanticVariant grass;
+        grass.terrainType = 1;
+        grass.packedTile = grassPacked.encode();
+        grass.northEdge = grass.eastEdge = grass.southEdge = grass.westEdge
+            = edge(20, 120, 20);
+        QVERIFY(semanticCatalog.addVariant(grass));
+
+        SMprPackedTile groundPacked;
+        groundPacked.tileIndex = 1;
+        groundPacked.rotation = quint8(rotation);
+        STerrainSemanticVariant ground;
+        ground.terrainType = 2;
+        ground.packedTile = groundPacked.encode();
+        ground.northEdge = ground.eastEdge = ground.southEdge = ground.westEdge
+            = edge(110, 70, 25);
+        QVERIFY(semanticCatalog.addVariant(ground));
+    }
+    QVERIFY(semanticCatalog.hasTerrainType(1));
+    QVERIFY(semanticCatalog.hasTerrainType(2));
+    QVERIFY(!semanticCatalog.hasTerrainType(99));
+    CTerrainSemanticCatalog edgeCatalog;
+    STerrainSemanticVariant northNeighbor;
+    northNeighbor.terrainType = 1;
+    northNeighbor.packedTile = 10;
+    northNeighbor.northEdge = northNeighbor.eastEdge
+        = northNeighbor.southEdge = northNeighbor.westEdge = edge(200, 30, 20);
+    QVERIFY(edgeCatalog.addVariant(northNeighbor));
+    STerrainSemanticVariant compatible = northNeighbor;
+    compatible.terrainType = 2;
+    compatible.packedTile = 11;
+    QVERIFY(edgeCatalog.addVariant(compatible));
+    STerrainSemanticVariant incompatible = compatible;
+    incompatible.packedTile = 12;
+    incompatible.northEdge = edge(10, 20, 210);
+    QVERIFY(edgeCatalog.addVariant(incompatible));
+    STerrainSemanticNeighbors semanticNeighbors;
+    semanticNeighbors.north = northNeighbor.packedTile;
+    bool semanticFound = false;
+    QCOMPARE(edgeCatalog.select(2, semanticNeighbors, 4, 9, 17, &semanticFound),
+             compatible.packedTile);
+    QVERIFY(semanticFound);
+    QVERIFY(!edgeCatalog.addVariant(compatible));
+    STerrainSemanticVariant malformed = compatible;
+    malformed.packedTile = 13;
+    malformed.westEdge.clear();
+    QVERIFY(!edgeCatalog.addVariant(malformed));
+    STerrainTileBrush semanticPoint;
+    semanticPoint.centerX = 8.0f;
+    semanticPoint.centerY = 8.0f;
+    semanticPoint.radius = 0.0f;
+    CValidationReport semanticReport;
+    const STerrainTileCommand semantic = terrain.makeSemanticTilePaint(
+        semanticPoint, ETerrainTileLayer::Land, 2, semanticCatalog,
+        0x53454D41u, &semanticReport);
+    QVERIFY2(!semantic.isEmpty(), qPrintable(semanticReport.toText()));
+    QVERIFY(semantic.deltas.size() <= 9);
+    bool changedCenter = false;
+    for(const STerrainTileDelta& delta : semantic.deltas)
+    {
+        QVERIFY(qAbs(delta.globalX - 8) <= 1);
+        QVERIFY(qAbs(delta.globalY - 8) <= 1);
+        if(delta.globalX == 8 && delta.globalY == 8)
+        {
+            QCOMPARE(terrain.tileType(delta.after), qint32(2));
+            changedCenter = true;
+        }
+    }
+    QVERIFY(changedCenter);
+    const STerrainTileCommand repeatedSemantic = terrain.makeSemanticTilePaint(
+        semanticPoint, ETerrainTileLayer::Land, 2, semanticCatalog,
+        0x53454D41u);
+    QCOMPARE(repeatedSemantic.deltas.size(), semantic.deltas.size());
+    for(int index = 0; index < semantic.deltas.size(); ++index)
+    {
+        QCOMPARE(repeatedSemantic.deltas.at(index).globalX, semantic.deltas.at(index).globalX);
+        QCOMPARE(repeatedSemantic.deltas.at(index).globalY, semantic.deltas.at(index).globalY);
+        QCOMPARE(repeatedSemantic.deltas.at(index).before, semantic.deltas.at(index).before);
+        QCOMPARE(repeatedSemantic.deltas.at(index).after, semantic.deltas.at(index).after);
+    }
+    QVERIFY(terrain.makeSemanticTilePaint(
+        semanticPoint, ETerrainTileLayer::Land, 99, semanticCatalog,
+        0x53454D41u).isEmpty());
+    QVERIFY(terrain.apply(semantic, true));
+    QVERIFY(terrain.makeSemanticTilePaint(
+        semanticPoint, ETerrainTileLayer::Land, 2, semanticCatalog,
+        0x53454D41u).isEmpty());
+    QVERIFY(terrain.apply(semantic, false));
+
     STerrainTileBrush point;
     point.centerX = 0.0f;
     point.centerY = 0.0f;

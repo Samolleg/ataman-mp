@@ -273,7 +273,7 @@ public:
 // tile number per atlas -> calc tile size
 void CTileForm::fillTable(QString mapName, int textureAtlasNumber)
 {
-
+    m_tileImages.clear();
     const QStringList arrTexName = ei::terrainTextureResourceNames(mapName, textureAtlasNumber);
     QVector<QImage> arrImage;
     if(!CTextureList::getInstance()->extractMmpToDxt1(arrImage, arrTexName) || arrImage.isEmpty())
@@ -308,6 +308,7 @@ void CTileForm::fillTable(QString mapName, int textureAtlasNumber)
             {
                 QImage croppedImage = arrImage[i].copy(row*m_originalTilesize, col*m_originalTilesize, m_originalTilesize, m_originalTilesize);
                 croppedImage = croppedImage.mirrored(false, true);
+                m_tileImages.append(croppedImage.convertToFormat(QImage::Format_RGBA8888));
                 QPixmap croppedPixmap = QPixmap::fromImage(croppedImage);
                 m_icoList.append(QIcon(croppedPixmap));
             }

@@ -58,6 +58,68 @@ private:
     STerrainHeightCommand m_command;
 };
 
+class CTerrainTilePreviewCommand : public QUndoCommand
+{
+public:
+    CTerrainTilePreviewCommand(CView* view, const STerrainTileCommand& command)
+        : m_view(view), m_command(command)
+    {
+        setText(command.description);
+    }
+    void undo() override { m_view->applyTerrainTilePreview(m_command, false); }
+    void redo() override { m_view->applyTerrainTilePreview(m_command, true); }
+private:
+    CView* m_view;
+    STerrainTileCommand m_command;
+};
+
+QByteArray sampledEdge(const QImage& image, ETerrainTileEdge edge)
+{
+    QByteArray result;
+    if(image.isNull() || image.width() < 8 || image.height() < 8)
+        return result;
+    const int samples = 16;
+    // CTile trims 4/512 of an original atlas on each side of a slot. In slot
+    // pixels this is one sixteenth of the tile width at every supported atlas
+    // resolution.
+    const int marginX = qMax(1, image.width() / 16);
+    const int marginY = qMax(1, image.height() / 16);
+    const int minimumX = marginX;
+    const int maximumX = image.width() - marginX - 1;
+    const int minimumY = marginY;
+    const int maximumY = image.height() - marginY - 1;
+    for(int sample = 0; sample < samples; ++sample)
+    {
+        const float ratio = samples == 1 ? 0.0f : float(sample) / float(samples - 1);
+        int x = qRound(minimumX + ratio * (maximumX - minimumX));
+        int y = qRound(minimumY + ratio * (maximumY - minimumY));
+        if(edge == ETerrainTileEdge::North) y = minimumY;
+        if(edge == ETerrainTileEdge::South) y = maximumY;
+        if(edge == ETerrainTileEdge::West) x = minimumX;
+        if(edge == ETerrainTileEdge::East) x = maximumX;
+        int red = 0;
+        int green = 0;
+        int blue = 0;
+        int count = 0;
+        for(int inset = -1; inset <= 1; ++inset)
+        {
+            const int sampleX = qBound(0, x + ((edge == ETerrainTileEdge::North
+                || edge == ETerrainTileEdge::South) ? 0 : inset), image.width() - 1);
+            const int sampleY = qBound(0, y + ((edge == ETerrainTileEdge::North
+                || edge == ETerrainTileEdge::South) ? inset : 0), image.height() - 1);
+            const QColor color = image.pixelColor(sampleX, sampleY);
+            red += color.red();
+            green += color.green();
+            blue += color.blue();
+            ++count;
+        }
+        result.append(char(red / count));
+        result.append(char(green / count));
+        result.append(char(blue / count));
+    }
+    return result;
+}
+
 }
 
 CView::CView(QWidget *parent, const QGLWidget *pShareWidget) : QGLWidget(parent, pShareWidget)
@@ -128,6 +190,27 @@ void CView::attachLandscapeTools(CLandscapeTools* tools)
                 this, &CView::openMapParameters);
         connect(m_landscapeTools, &CLandscapeTools::editingStateChanged,
                 this, &CView::syncLandscapeToolState);
+        connect(m_landscapeTools, &CLandscapeTools::paintTerrainTypeChanged,
+                this, [this](qint32 terrainType)
+        {
+            if(!m_pTileForm || terrainType < 0)
+                return;
+            const QVector<qint32>& types = m_mprDocument.mapInfo().tileTypes;
+            for(int slot = 0; slot < types.size(); ++slot)
+            {
+                if(types.at(slot) != terrainType)
+                    continue;
+                m_pTileForm->selectTile(slot);
+                onChangeCursorTile(m_pTileForm->tileWithRot(slot));
+                if(m_hasViewportMousePos)
+                {
+                    const bool land = CScene::getInstance()->isLandTileEditMode();
+                    updatePreviewTile(getTerrainPos(m_lastViewportMousePos.x(),
+                                                     m_lastViewportMousePos.y(), land), land);
+                }
+                break;
+            }
+        });
     }
 }
 
@@ -200,6 +283,8 @@ void CView::clearLandscapeBrushSelection()
 {
     if(m_pTileForm)
         m_pTileForm->clearTileSelection();
+    if(m_landscapeTools)
+        m_landscapeTools->selectPaintTerrainType(-1);
     setPreviewTile(false);
     unsetCursor();
 }
@@ -260,6 +345,18 @@ void CView::attach(CSettings* pSettings, QTableWidget* pParam, QUndoStack* pStac
     m_pTree = pTree;
     m_pTree->attachView(this);
     m_pTileForm = pTileForm;
+    connect(m_pTileForm, &CTileForm::onSelect, this, [this](const QPixmap& pixmap)
+    {
+        onChangeCursorTile(pixmap);
+        int index = -1;
+        int rotation = 0;
+        m_pTileForm->getSelectedTile(index, rotation);
+        Q_UNUSED(rotation);
+        if(m_landscapeTools && index >= 0
+           && index < m_mprDocument.mapInfo().tileTypes.size())
+            m_landscapeTools->selectPaintTerrainType(
+                m_mprDocument.mapInfo().tileTypes.at(index));
+    });
 
     // MOB-only workspaces need the same responsive viewport as terrain-backed
     // workspaces. Previously this timer was started only by loadLandscape().
@@ -733,6 +830,7 @@ void CView::loadLandscape(const QFileInfo& filePath)
     }
     m_pPreviewTile.reset(new CPreviewTile());
     updateTileForm(true);
+    rebuildTerrainSemanticCatalog();
 }
 
 void CView::unloadLand()
@@ -758,6 +856,8 @@ void CView::unloadLand()
     m_terrainEditAvailable = false;
     finishSculptStroke();
     m_terrainEdit = CTerrainEditModel();
+    m_terrainSemanticCatalog = CTerrainSemanticCatalog();
+    m_terrainSemanticSeed = 0;
     m_mprDocument = CMprDocument();
     m_pLand->unloadMpr();
     for(CMob* mob : m_aMob)
@@ -1134,6 +1234,70 @@ void CView::updateTileForm(bool bGenerateNewTable)
     m_pTileForm->setTileTypes(m_pLand->tileTypes());
     m_pTileForm->setMaterial(m_pLand->materials());
     m_pTileForm->setAnimTile(m_pLand->animTiles());
+}
+
+void CView::rebuildTerrainSemanticCatalog()
+{
+    m_terrainSemanticCatalog = CTerrainSemanticCatalog();
+    if(!m_terrainEditAvailable || !m_pTileForm)
+        return;
+    const QVector<QImage>& images = m_pTileForm->tileImages();
+    const QVector<qint32>& types = m_mprDocument.mapInfo().tileTypes;
+    const int slotCount = qMin(images.size(), types.size());
+    CValidationReport report;
+    for(int slot = 0; slot < slotCount; ++slot)
+    {
+        if(images.at(slot).isNull())
+            continue;
+        for(int rotation = 0; rotation < 4; ++rotation)
+        {
+            QTransform transform;
+            transform.rotate(rotation * 90);
+            const QImage oriented = rotation == 0
+                ? images.at(slot) : images.at(slot).transformed(transform);
+            SMprPackedTile packed;
+            packed.atlasIndex = quint8(slot / 64);
+            packed.tileIndex = quint8(slot % 64);
+            packed.rotation = quint8(rotation);
+            STerrainSemanticVariant variant;
+            variant.terrainType = types.at(slot);
+            variant.packedTile = packed.encode();
+            variant.northEdge = sampledEdge(oriented, ETerrainTileEdge::North);
+            variant.eastEdge = sampledEdge(oriented, ETerrainTileEdge::East);
+            variant.southEdge = sampledEdge(oriented, ETerrainTileEdge::South);
+            variant.westEdge = sampledEdge(oriented, ETerrainTileEdge::West);
+            if(!m_terrainSemanticCatalog.addVariant(variant, &report))
+                break;
+        }
+    }
+    QByteArray seedText = m_mprDocument.mapInfo().innerNamespace.toUtf8();
+    quint32 seed = 2166136261u;
+    for(char byte : seedText)
+    {
+        seed ^= quint8(byte);
+        seed *= 16777619u;
+    }
+    m_terrainSemanticSeed = seed;
+
+    QSet<qint32> uniqueTypes;
+    for(qint32 type : types)
+        if(m_terrainSemanticCatalog.hasTerrainType(type))
+            uniqueTypes.insert(type);
+    QVector<qint32> sortedTypes = uniqueTypes.values().toVector();
+    std::sort(sortedTypes.begin(), sortedTypes.end());
+    QVector<QPair<qint32, QString>> choices;
+    const QMap<ETileType, QString>& knownTypes = CResourceStringList::getInstance()->tileTypes();
+    for(qint32 type : sortedTypes)
+    {
+        const QString name = knownTypes.value(ETileType(type), tr("Unknown"));
+        choices.append(qMakePair(type, QString("%1 (%2)").arg(name).arg(type)));
+    }
+    if(m_landscapeTools)
+        m_landscapeTools->setPaintTerrainTypes(choices);
+    ei::log(report.hasErrors() ? eLogWarning : eLogInfo,
+            QString("Semantic terrain atlas analysis: %1 oriented variants across %2 material categories%3")
+                .arg(m_terrainSemanticCatalog.size()).arg(choices.size())
+                .arg(report.hasErrors() ? "\n" + report.toText() : QString()));
 }
 
 void CView::onChangeCursorTile(QPixmap ico)
@@ -1948,6 +2112,20 @@ void CView::pickTile(QVector3D posOnLand, bool bLand)
 
     m_pTileForm->selectTile(pTile->tileIndex());
     m_pTileForm->setTileRotation(pTile->tileRotation());
+    if(m_landscapeTools && m_terrainEditAvailable)
+    {
+        const int globalX = tileLoc.xSec * 16 + tileLoc.col;
+        const int globalY = tileLoc.ySec * 16 + tileLoc.row;
+        bool found = false;
+        const qint32 type = m_terrainEdit.tileType(
+            m_terrainEdit.packedTile(globalX, globalY,
+                bLand ? ETerrainTileLayer::Land : ETerrainTileLayer::Overlay), &found);
+        if(found)
+        {
+            m_landscapeTools->selectPaintTerrainType(type);
+            emit updateMsg(tr("Sampled terrain material %1.").arg(type));
+        }
+    }
     if(!bLand)
         m_pTileForm->setActiveMatIndex(pTile->materialIndex());
 
@@ -1956,7 +2134,7 @@ void CView::pickTile(QVector3D posOnLand, bool bLand)
 
 void CView::setTile(QVector3D posOnLand, bool bLand)
 {
-    if(!m_pLand->isMprLoad())
+    if(!m_pLand->isMprLoad() || !m_terrainEditAvailable || !m_landscapeTools)
         return;
 
     CTile* pTile = nullptr;
@@ -1964,23 +2142,44 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
     if(!m_pLand->pickTile(posOnLand, pTile, tileLoc, bLand))
         return;
 
-    int index, rotNum, matIndex;
-    m_pTileForm->getSelectedTile(index, rotNum);
-    if(index < 0)
+    bool materialSelected = false;
+    qint32 terrainType = m_landscapeTools->paintTerrainType(&materialSelected);
+    if(!materialSelected)
+    {
+        int representative = -1;
+        int ignoredRotation = 0;
+        m_pTileForm->getSelectedTile(representative, ignoredRotation);
+        if(representative >= 0 && representative < m_mprDocument.mapInfo().tileTypes.size())
+        {
+            terrainType = m_mprDocument.mapInfo().tileTypes.at(representative);
+            materialSelected = true;
+            m_landscapeTools->selectPaintTerrainType(terrainType);
+        }
+    }
+    if(!materialSelected)
+    {
+        emit updateMsg(tr("Choose a terrain material before painting."));
         return;
-
-    matIndex = m_pTileForm->activeMaterialindex();
-
-    STileInfo tileInfoNew{index, rotNum, matIndex};
-    STileInfo tileInfoOld{pTile->tileIndex(), pTile->tileRotation(), pTile->materialIndex()};
-    CBrushTileCommand* pReset = new CBrushTileCommand(this, tileInfoNew, tileLoc, tileInfoOld, m_tileBrushCommandId);
-    m_pUndoStack->push(pReset);
-
-//    pTile->setTile(index, rotNum);
-//    if(!bLand)
-//        pTile->setMaterialIndex(matIndex);
-
-//    m_pLand->updateSectorDrawData(tileLoc.xSec, tileLoc.ySec);
+    }
+    STerrainTileBrush brush;
+    brush.centerX = tileLoc.xSec * 16 + tileLoc.col;
+    brush.centerY = tileLoc.ySec * 16 + tileLoc.row;
+    brush.radius = m_landscapeTools->paintRadius();
+    brush.shape = m_landscapeTools->paintShape();
+    CValidationReport report;
+    const STerrainTileCommand command = m_terrainEdit.makeSemanticTilePaint(
+        brush, bLand ? ETerrainTileLayer::Land : ETerrainTileLayer::Overlay,
+        terrainType, m_terrainSemanticCatalog, m_terrainSemanticSeed, &report);
+    if(command.isEmpty())
+    {
+        if(report.hasErrors())
+            ei::log(eLogWarning, "Semantic terrain paint refused:\n" + report.toText());
+        emit updateMsg(report.findings().isEmpty()
+            ? tr("The terrain material is already resolved at this brush position.")
+            : report.toText());
+        return;
+    }
+    m_pUndoStack->push(new CTerrainTilePreviewCommand(this, command));
 }
 
 void CView::setTile(QMap<STileLocation, STileInfo>& arrTileData)
@@ -2085,7 +2284,45 @@ void CView::pickQuickAccessTile(int index)
 
 void CView::endTileBrushGroup()
 {
+    if(m_tilePaintStrokeActive)
+    {
+        m_pUndoStack->endMacro();
+        m_tilePaintStrokeActive = false;
+    }
     m_tileBrushCommandId = (m_tileBrushCommandId+1)%9;
+}
+
+void CView::beginTileBrushGroup()
+{
+    if(m_tilePaintStrokeActive || !m_pUndoStack)
+        return;
+    m_pUndoStack->beginMacro(tr("Paint terrain material"));
+    m_tilePaintStrokeActive = true;
+}
+
+bool CView::applyTerrainTilePreview(const STerrainTileCommand& command, bool forward)
+{
+    if(!m_terrainEditAvailable)
+        return false;
+    CValidationReport report;
+    if(!m_terrainEdit.apply(command, forward, &report))
+    {
+        ei::log(eLogWarning, "Semantic terrain preview command refused:\n" + report.toText());
+        return false;
+    }
+    for(const STerrainTileDelta& delta : command.deltas)
+    {
+        m_pLand->previewCanonicalTile(delta.globalX, delta.globalY,
+            delta.layer == ETerrainTileLayer::Land,
+            forward ? delta.after : delta.before);
+    }
+    m_pLand->setDirty(m_terrainEdit.isDirty());
+    emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMprDirtyFlag,
+                              m_terrainEdit.isDirty() ? "*" : "");
+    emit updateMsg(tr("Painted %1 atlas tile(s), including automatic seam updates.")
+        .arg(command.deltas.size()));
+    update();
+    return true;
 }
 
 bool CView::onExit()
