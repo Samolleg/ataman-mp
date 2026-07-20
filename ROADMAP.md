@@ -5,7 +5,7 @@ work is ordered from the newest planned minor line to the oldest completed one.
 An item is checked only after its implementation has landed and received the
 stated validation. Completed code should carry a commit, test, or release link.
 
-Current development line: `0.2.1-alpha.11` focused closed testing.
+Current development line: `0.2.1-alpha.12` focused closed testing.
 
 <details open>
 <summary><strong>General wishlist — not assigned to a release</strong></summary>
@@ -252,10 +252,10 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
 
 ### Current 0.2.x status
 
-- **Current tester build:** `0.2.1-alpha.11`, retaining alpha.10's validated
-  generation saves and crash recovery while replacing its unsafe UI visibility
-  detour and partial gameplay transition with one normal Main Menu plus complete
-  New Game rebootstrap for every hot reload.
+- **Current tester build:** `0.2.1-alpha.12`, retaining alpha.11's successful
+  full-state map switching while repairing orphan-process cleanup in the same
+  editor session, offering an explicit close prompt, and focusing/maximizing the
+  game after a completed hot reload.
 - **MOB hardening:** complete for the supported editing surface. Remaining work
   is validation breadth and new editing features, not another serializer
   rewrite.
@@ -524,6 +524,11 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
 - [x] Journal process ownership by PID, executable path, creation time, runtime
   hash, and run ID. On restart, clean dead runs immediately; monitor a verified
   surviving orphan without attaching to or killing it, then clean after exit.
+- [x] Keep monitoring across the short Windows process-exit/locked-plugin race,
+  refresh Test Current Map immediately after cleanup, and offer an explicit
+  close request for a verified orphan with an unsaved-progress warning.
+- [x] Maximize and focus the verified Endurance-owned game window after a
+  successful hot reload so the completed state switch is immediately visible.
   Cleanup is hash-guarded and keeps externally modified artifacts for review.
 
 - [x] Define a versioned, hash-carrying hot-reload request schema that rejects

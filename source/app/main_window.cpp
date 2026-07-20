@@ -488,23 +488,47 @@ MainWindow::MainWindow(QWidget* parent) :
     connect(m_mapTestLauncher, &CJmvMapTestLauncher::recoveryStatusChanged, this,
             [this](const QString& message, bool pending)
     {
-        if(message.isEmpty())
-            return;
         if(pending)
         {
             statusBar()->showMessage(tr("Waiting for an interrupted Endurance test game to exit; cleanup will run automatically."));
-            ei::log(eLogWarning, message);
+            if(!message.isEmpty())
+                ei::log(eLogWarning, message);
         }
         else
         {
-            statusBar()->showMessage(tr("Interrupted test-run cleanup completed."), 8000);
-            ei::log(eLogInfo, message);
-            updateMapTestAction();
+            if(!message.isEmpty())
+            {
+                statusBar()->showMessage(tr("Interrupted test-run cleanup completed."), 8000);
+                ei::log(eLogInfo, message);
+            }
         }
+        updateMapTestAction();
     });
-    const QString recovery = CJmvMapTestLauncher::recoverInterruptedRuns();
-    if(!recovery.isEmpty())
-        ei::log(eLogInfo, "Recovered interrupted JMV test run(s):\n" + recovery);
+    m_mapTestLauncher->refreshInterruptedRecovery();
+    QString interruptedTest;
+    if(CJmvMapTestLauncher::hasActiveInterruptedRun(&interruptedTest))
+    {
+        QTimer::singleShot(0, this, [this, interruptedTest]()
+        {
+            QMessageBox prompt(QMessageBox::Warning,
+                tr("Interrupted map test is still running"),
+                tr("Endurance found a verified game process left by an interrupted map-test session.\n\n%1\n\n"
+                   "Close it now? Any unsaved progress in that game process will be lost. "
+                   "If you leave it running, Endurance will monitor it and clean up automatically after it exits.")
+                    .arg(interruptedTest),
+                QMessageBox::NoButton, this);
+            QPushButton* closeGame = prompt.addButton(tr("Close Game"), QMessageBox::AcceptRole);
+            prompt.addButton(tr("Leave Running"), QMessageBox::RejectRole);
+            prompt.exec();
+            if(prompt.clickedButton() != closeGame)
+                return;
+            QString error;
+            if(!CJmvMapTestLauncher::requestCloseActiveInterruptedRun(&error))
+                QMessageBox::warning(this, tr("Interrupted map test"), error);
+            else
+                statusBar()->showMessage(tr("Close requested. Waiting for game exit and automatic cleanup."));
+        });
+    }
     m_createDialog->viewWidget()->attachView(m_pView);
     m_createDialog->viewWidget()->attachSettings(m_settings.get());
 
@@ -1395,7 +1419,8 @@ void MainWindow::updateMapTestAction()
     m_mapTestAction->setText(tr("Test Current Map"));
     m_stopMapTestAction->setEnabled(false);
     QString interruptedRun;
-    const bool recoveryPending = CJmvMapTestLauncher::hasActiveInterruptedRun(&interruptedRun);
+    const bool recoveryPending = (m_mapTestLauncher && m_mapTestLauncher->isRecoveryPending())
+        || CJmvMapTestLauncher::hasActiveInterruptedRun(&interruptedRun);
     // JMV applies a placed custom entrance through its process-owned autorun
     // provider. Base keeps the picker unavailable until it has an equivalent
     // exact-hash runtime position provider.
@@ -1409,8 +1434,10 @@ void MainWindow::updateMapTestAction()
     if(m_playFromHereButton) m_playFromHereButton->setEnabled(isJmv && hasPair && hasEntrance);
     if(m_godmodeCheckBox) m_godmodeCheckBox->setEnabled(isJmv && hasPair);
     if(recoveryPending)
-        m_mapTestAction->setToolTip(tr("An orphaned Endurance test game is still running. Exit it normally; cleanup will run automatically before another test.\n%1")
-                                    .arg(interruptedRun));
+        m_mapTestAction->setToolTip(interruptedRun.isEmpty()
+            ? tr("Endurance is waiting for an interrupted test game to finish exiting and for hash-owned cleanup to complete.")
+            : tr("An orphaned Endurance test game is still running. Exit it normally; cleanup will run automatically before another test.\n%1")
+                .arg(interruptedRun));
     else if(!isJmv && !isBaseProbe)
         m_mapTestAction->setToolTip(tr("The active profile has no Endurance direct-map-test provider."));
     else if(!profileReady)

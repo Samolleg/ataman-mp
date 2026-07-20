@@ -51,6 +51,7 @@ public:
     bool isRunning() const;
     bool isHotReloadReady() const;
     bool isHotReloadPending() const { return m_pendingHotReloadSequence != 0; }
+    bool isRecoveryPending() const { return m_recoveryPending; }
     QString runtimeState() const;
     quint64 saveGeneration() const { return m_saveGeneration; }
     QString runId() const { return m_runId; }
@@ -59,8 +60,10 @@ public:
 
     static QString testRunsRootPath();
     static QString generationSavesPath(const QString& runRoot, quint64 generation);
-    static QString recoverInterruptedRuns();
+    static QString recoverInterruptedRuns(bool* pending = nullptr);
     static bool hasActiveInterruptedRun(QString* description = nullptr);
+    static bool requestCloseActiveInterruptedRun(QString* error = nullptr);
+    void refreshInterruptedRecovery();
     static bool injectWorldScriptBootstrap(const QString& script,
                                            const QString& commands,
                                            QString* output,
@@ -99,7 +102,7 @@ private:
     void appendRunLog(const QString& message);
     QString bridgeResultSummary() const;
     quint64 latestRuntimeStateSequence() const;
-    void focusGameWindow();
+    void focusGameWindow(bool maximize);
 
     QProcess* m_process;
     QTimer* m_hotReloadReadyTimer;
@@ -137,6 +140,9 @@ private:
     int m_hotReloadResultPolls{0};
     bool m_cleanupComplete;
     bool m_baseProbe;
+    bool m_recoveryPending{false};
+    bool m_lastPublishedRecoveryPending{false};
+    QString m_lastPublishedRecoveryStatus;
 };
 
 #endif // JMV_MAP_TEST_LAUNCHER_H

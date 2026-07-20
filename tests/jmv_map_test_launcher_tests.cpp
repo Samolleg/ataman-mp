@@ -30,6 +30,7 @@ private slots:
     void recoveryRetainsChangedBridge();
     void recoveryRemovesDisposableSaveGenerations();
     void recoveryDoesNotTrustOrCleanLivePidOnlyJournal();
+    void recoveryMonitorClearsAfterRecordedProcessExits();
     void currentSessionSnapshotRestoresExistingTree();
     void currentSessionSnapshotRemovesDisposableTreeWhenOriginallyAbsent();
     void currentSessionRestoreRejectsTamperedBackupWithoutTouchingLiveTree();
@@ -388,6 +389,40 @@ void JmvMapTestLauncherTests::recoveryDoesNotTrustOrCleanLivePidOnlyJournal()
     writeFile(manifestPath, QJsonDocument(manifest).toJson(QJsonDocument::Indented));
     const QString cleaned = CJmvMapTestLauncher::recoverInterruptedRuns();
     QVERIFY2(!QFileInfo::exists(bridge), qPrintable(cleaned));
+    QDir(run).removeRecursively();
+}
+
+void JmvMapTestLauncherTests::recoveryMonitorClearsAfterRecordedProcessExits()
+{
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+    const QString bridge = QDir(temp.path()).filePath("plugin.dll");
+    const QByteArray owned("owned interrupted bridge");
+    writeFile(bridge, owned);
+    const QString run = createRecoveryManifest(QString(), QString(), false,
+        QByteArray(), QByteArray(), bridge, owned);
+    QVERIFY(!run.isEmpty());
+
+    const QString manifestPath = QDir(run).filePath("manifest.json");
+    QFile manifestFile(manifestPath);
+    QVERIFY(manifestFile.open(QIODevice::ReadOnly));
+    QJsonObject manifest = QJsonDocument::fromJson(manifestFile.readAll()).object();
+    manifestFile.close();
+    manifest.insert("pid", double(QCoreApplication::applicationPid()));
+    writeFile(manifestPath, QJsonDocument(manifest).toJson(QJsonDocument::Indented));
+
+    CJmvMapTestLauncher launcher;
+    QVERIFY(launcher.isRecoveryPending());
+    QSignalSpy statusSpy(&launcher, &CJmvMapTestLauncher::recoveryStatusChanged);
+
+    manifest.insert("pid", 0);
+    writeFile(manifestPath, QJsonDocument(manifest).toJson(QJsonDocument::Indented));
+    launcher.refreshInterruptedRecovery();
+
+    QVERIFY(!launcher.isRecoveryPending());
+    QVERIFY(!QFileInfo::exists(bridge));
+    QCOMPARE(statusSpy.count(), 1);
+    QCOMPARE(statusSpy.takeFirst().at(1).toBool(), false);
     QDir(run).removeRecursively();
 }
 

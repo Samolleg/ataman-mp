@@ -394,21 +394,11 @@ CJmvMapTestLauncher::CJmvMapTestLauncher(QObject* parent)
       m_cleanupComplete(true), m_baseProbe(false)
 {
     m_recoveryTimer->setInterval(2000);
-    connect(m_recoveryTimer, &QTimer::timeout, this, [this]()
-    {
-        QString active;
-        if(hasActiveInterruptedRun(&active))
-        {
-            emit recoveryStatusChanged(active, true);
-            return;
-        }
-        const QString recovered = recoverInterruptedRuns();
-        m_recoveryTimer->stop();
-        emit recoveryStatusChanged(recovered, false);
-    });
+    connect(m_recoveryTimer, &QTimer::timeout,
+            this, &CJmvMapTestLauncher::refreshInterruptedRecovery);
     QString interrupted;
     if(hasActiveInterruptedRun(&interrupted))
-        m_recoveryTimer->start();
+        m_recoveryPending = true;
     m_hotReloadReadyTimer->setInterval(500);
     connect(m_hotReloadReadyTimer, &QTimer::timeout, this, [this]()
     {
@@ -466,6 +456,8 @@ CJmvMapTestLauncher::CJmvMapTestLauncher(QObject* parent)
                 : QString("JMV hot reload %1 failed; inspect bridge-result.log.").arg(sequence);
             appendRunLog(message);
             writeManifest("running");
+            if(success)
+                QTimer::singleShot(0, this, [this]() { focusGameWindow(true); });
             emit hotReloadFinished(sequence, success, message);
             return;
         }
@@ -494,8 +486,8 @@ CJmvMapTestLauncher::CJmvMapTestLauncher(QObject* parent)
         emit testStarted(m_runId, m_temporaryMapName);
         if(!m_baseProbe)
             m_hotReloadReadyTimer->start();
-        QTimer::singleShot(1500, this, &CJmvMapTestLauncher::focusGameWindow);
-        QTimer::singleShot(5000, this, &CJmvMapTestLauncher::focusGameWindow);
+        QTimer::singleShot(1500, this, [this]() { focusGameWindow(false); });
+        QTimer::singleShot(5000, this, [this]() { focusGameWindow(false); });
     });
     connect(m_process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
             this, [this](int exitCode, QProcess::ExitStatus status)
@@ -1676,7 +1668,7 @@ void CJmvMapTestLauncher::stop()
     });
 }
 
-void CJmvMapTestLauncher::focusGameWindow()
+void CJmvMapTestLauncher::focusGameWindow(bool maximize)
 {
 #ifdef Q_OS_WIN
     if(!isRunning())
@@ -1692,23 +1684,66 @@ void CJmvMapTestLauncher::focusGameWindow()
     EnumWindows(findWindowForProcess, LPARAM(&context));
     if(context.window)
     {
-        ShowWindow(context.window, SW_RESTORE);
+        ShowWindow(context.window, maximize ? SW_MAXIMIZE : SW_RESTORE);
+        BringWindowToTop(context.window);
         const bool focused = SetForegroundWindow(context.window) != FALSE;
-        appendRunLog(QString("Game window focus requested hwnd=0x%1 result=%2")
-                     .arg(quintptr(context.window), 0, 16).arg(focused));
+        appendRunLog(QString("Game window focus requested hwnd=0x%1 result=%2 maximize=%3")
+                     .arg(quintptr(context.window), 0, 16).arg(focused).arg(maximize));
     }
     else
         appendRunLog("Game window not ready for focus yet");
 #endif
 }
 
-QString CJmvMapTestLauncher::recoverInterruptedRuns()
+void CJmvMapTestLauncher::refreshInterruptedRecovery()
+{
+    QString message;
+    QString active;
+    bool pending = false;
+    if(hasActiveInterruptedRun(&active))
+    {
+        message = active;
+        pending = true;
+    }
+    else
+        message = recoverInterruptedRuns(&pending);
+
+    m_recoveryPending = pending;
+    if(pending)
+    {
+        if(!m_recoveryTimer->isActive())
+            m_recoveryTimer->start();
+        if(message.isEmpty())
+            message = "Waiting for the interrupted game process to finish exiting before cleanup.";
+    }
+    else
+        m_recoveryTimer->stop();
+
+    if(message != m_lastPublishedRecoveryStatus
+       || pending != m_lastPublishedRecoveryPending)
+    {
+        m_lastPublishedRecoveryStatus = message;
+        m_lastPublishedRecoveryPending = pending;
+        emit recoveryStatusChanged(message, pending);
+    }
+}
+
+QString CJmvMapTestLauncher::recoverInterruptedRuns(bool* pending)
 {
     QStringList summary;
+    bool deferred = false;
     const QDir root(testRunsRoot());
     if(!root.exists())
+    {
+        if(pending)
+            *pending = false;
         return QString();
-    for(const QFileInfo& runDirectory : root.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name))
+    }
+    // The newest unfinished run normally owns the currently installed shared
+    // plugin slot. Clean it first so older journals see an already-absent file
+    // instead of reporting the newer bridge as an external modification.
+    for(const QFileInfo& runDirectory : root.entryInfoList(
+            QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name | QDir::Reversed))
     {
         const QString manifestPath = QDir(runDirectory.absoluteFilePath()).filePath("manifest.json");
         QFile manifestFile(manifestPath);
@@ -1726,13 +1761,19 @@ QString CJmvMapTestLauncher::recoverInterruptedRuns()
         if(expectedProcess.isEmpty() && manifest.value("pid").toDouble() > 0)
             expectedProcess.insert("pid", manifest.value("pid"));
         if(processIdentityMatches(expectedProcess))
+        {
+            deferred = true;
             continue;
+        }
         const qint64 recordedPid = qint64(expectedProcess.value("pid").toDouble());
         const bool incompleteIdentity = expectedProcess.value("imagePath").toString().isEmpty()
             || expectedProcess.value("creationTime100ns").toString().isEmpty();
         if((incompleteIdentity && recordedPid > 0 && processExists(recordedPid))
            || anotherGameIsRunning())
+        {
+            deferred = true;
             continue;
+        }
         QStringList messages;
         const bool success = cleanupManifest(manifest, &messages);
         manifest.insert("state", success ? "cleaned" : "cleanup-needed");
@@ -1741,7 +1782,55 @@ QString CJmvMapTestLauncher::recoverInterruptedRuns()
         atomicWrite(manifestPath, QJsonDocument(manifest).toJson(QJsonDocument::Indented), &writeError);
         summary.append(QString("%1: %2").arg(runDirectory.fileName(), messages.join("; ")));
     }
+    if(pending)
+        *pending = deferred;
     return summary.join("\n");
+}
+
+bool CJmvMapTestLauncher::requestCloseActiveInterruptedRun(QString* error)
+{
+#ifdef Q_OS_WIN
+    const QDir root(testRunsRoot());
+    for(const QFileInfo& runDirectory : root.entryInfoList(
+            QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name))
+    {
+        QFile file(QDir(runDirectory.absoluteFilePath()).filePath("manifest.json"));
+        if(!file.open(QIODevice::ReadOnly))
+            continue;
+        const QJsonDocument document = QJsonDocument::fromJson(file.readAll());
+        if(!document.isObject())
+            continue;
+        const QJsonObject manifest = document.object();
+        if(manifest.value("state").toString() == "cleaned")
+            continue;
+        QJsonObject expectedProcess = manifest.value("process").toObject();
+        if(!processIdentityMatches(expectedProcess))
+            continue;
+        const qint64 pid = qint64(expectedProcess.value("pid").toDouble());
+        FocusContext context{DWORD(pid), nullptr};
+        EnumWindows(findWindowForProcess, LPARAM(&context));
+        if(!context.window)
+        {
+            if(error)
+                *error = QString("The verified test game (PID %1) has no closable top-level window. Close it manually; Endurance will keep monitoring it.").arg(pid);
+            return false;
+        }
+        if(!PostMessageW(context.window, WM_CLOSE, 0, 0))
+        {
+            if(error)
+                *error = QString("Windows refused the close request for the verified test game (PID %1). Close it manually; Endurance will keep monitoring it.").arg(pid);
+            return false;
+        }
+        return true;
+    }
+    if(error)
+        *error = "No still-running Endurance-owned test game could be verified.";
+    return false;
+#else
+    if(error)
+        *error = "Closing an interrupted test game is currently supported only on Windows.";
+    return false;
+#endif
 }
 
 bool CJmvMapTestLauncher::hasActiveInterruptedRun(QString* description)
