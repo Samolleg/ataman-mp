@@ -498,19 +498,30 @@ SRuntimeProviderResult resolveDatabaseAppearance(
         result.code = "appearance.creature.resolved";
         return result;
     }
+    // RaceModels.FLD30 is the graphical mask name, not an instruction to
+    // replace the assembly stored by an existing MOB instance. JMV maps use a
+    // compatible embedded humanoid assembly deliberately: UndeadF16/F17, for
+    // example, link to the unmozo0 mask row but embed unhuma so their database
+    // armor and skin 29 can be assembled. Keep that instance assembly when it
+    // is independently established as wearable; the database remains
+    // authoritative for skin, complexion, armor, and weapons.
+    const QString resolvedModel = jmv && databaseEquippedHumanoid(request.model)
+        ? request.model.trimmed() : race->model;
     const QStringList primary = expandedList(race->primaryTextures);
     const QString primaryTexture = jmv
-        ? jmvMonsterTextureName(request, race->model, primary, monster->skinIndex)
-        : monsterTextureName(race->model, primary, monster->skinIndex);
+        ? jmvMonsterTextureName(request, resolvedModel, primary, monster->skinIndex)
+        : monsterTextureName(resolvedModel, primary, monster->skinIndex);
     if(primaryTexture.isEmpty())
         return failure("appearance.skin.invalid", jmv
             ? "JMV database model and embedded resolved texture are inconsistent."
             : "Monster skin index is outside the RaceModels primary texture list.");
     const QStringList secondary = expandedList(race->secondaryTextures);
     appearance->insert("source", "profileDatabase");
-    appearance->insert("model", race->model);
+    appearance->insert("model", resolvedModel);
+    appearance->insert("modelSource", resolvedModel.compare(race->model, Qt::CaseInsensitive) == 0
+        ? "raceModelsMask" : "embeddedMobAssembly");
     appearance->insert("primaryTexture", primaryTexture);
-    appearance->insert("secondaryTexture", secondary.isEmpty() ? QString() : textureName(race->model, secondary.first()));
+    appearance->insert("secondaryTexture", secondary.isEmpty() ? QString() : textureName(resolvedModel, secondary.first()));
     appearance->insert("armor", QJsonArray::fromStringList(monster->wears));
     appearance->insert("hairIndex", monster->hairIndex);
     QJsonArray complexion;
@@ -682,6 +693,7 @@ SRuntimeProviderResult resolveEquipmentLayout(
 
     QString layout = "ordinary";
     bool renderWeapons = true;
+    bool suppressSecondTwoHand = false;
     if(!jmv && !weapons.isEmpty()
             && weapons.first().kind != EWeaponClass::OneHand && weapons.first().kind != EWeaponClass::Ranged)
     {
@@ -702,7 +714,18 @@ SRuntimeProviderResult resolveEquipmentLayout(
             else if(a == EWeaponClass::OneHand && b == EWeaponClass::OneHand)
                 layout = "dualOneHand", renderWeapons = gates.dualOneHand;
             else if(a == EWeaponClass::TwoHand && b == EWeaponClass::TwoHand)
-                layout = "dualTwoHand", renderWeapons = gates.dualTwoHand;
+            {
+                layout = "dualTwoHand";
+                renderWeapons = gates.singleTwoHand;
+                suppressSecondTwoHand = !gates.dualTwoHand;
+                if(suppressSecondTwoHand)
+                {
+                    placeholders.append(weapons[1].reference);
+                    diagnostics.append("dualTwoHand authorization is unavailable; rendering the first "
+                                       "two-handed weapon through the established singleTwoHand layout "
+                                       "and suppressing the second weapon.");
+                }
+            }
             else if((a == EWeaponClass::TwoHand && b == EWeaponClass::Shield)
                     || (b == EWeaponClass::TwoHand && a == EWeaponClass::Shield))
                 layout = "twoHandShield", renderWeapons = gates.twoHandShield;
@@ -721,7 +744,9 @@ SRuntimeProviderResult resolveEquipmentLayout(
         }
     }
     if(renderWeapons)
-        for(int weaponIndex = 0; weaponIndex < weapons.size(); ++weaponIndex)
+        for(int weaponIndex = 0;
+            weaponIndex < weapons.size() && !(suppressSecondTwoHand && weaponIndex > 0);
+            ++weaponIndex)
         {
             const Weapon& weapon = weapons.at(weaponIndex);
             const QString family = weaponFamily(weapon.item.typeId);

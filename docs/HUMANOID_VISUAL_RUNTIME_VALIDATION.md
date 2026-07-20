@@ -11,9 +11,10 @@ edit `database.res`, JMV/Base archives, live MOBs, maps, or the game install.
 2. Select JMV for the same MOB and confirm the rows and ADB provenance change
    atomically to JMV. Switch back to Base and confirm no JMV model, item, or ADB
    remains cached.
-3. Give a normal (Import=false) unit deliberately conflicting embedded model,
-   texture, armor, and weapons. Confirm the database plan wins without changing
-   the MOB fields.
+3. Give a normal (Import=false) JMV humanoid deliberately conflicting embedded
+   texture, armor, and weapons. Confirm the database plan wins those fields
+   without changing the MOB. Confirm a compatible embedded wearable assembly
+   remains selected instead of being replaced by `RaceModels.FLD30`.
 4. Give an imported (Import=true) unit conflicting database values. Confirm its
    embedded model, texture, body mask, and equipment win. Remove an embedded
    model/item and confirm a placeholder/diagnostic appears, with no database
@@ -31,10 +32,11 @@ edit `database.res`, JMV/Base archives, live MOBs, maps, or the game install.
    second weapon and confirm it is ignored with a diagnostic.
 2. JMV: independently validate ordinary, 1H+shield, dual 1H, and single 2H on
    models that contain the requested TTI components.
-3. JMV: request dual 2H and 2H+shield. Confirm both remain diagnostic-only and
-   display placeholders. A paired TypeID 15 database row (for example `zone18`
-   ID 47533) does not prove that the placed unit has the required `TitanGrip`
-   perk; no inferred Lua/perk authorization is accepted.
+3. JMV: request dual 2H and confirm the first weapon renders through the
+   single-2H path while the second is suppressed with a diagnostic. Request
+   2H+shield and confirm it remains diagnostic-only. A paired TypeID 15 row
+   such as `zone17` ID 47533 does not establish the required `TitanGrip` perk;
+   no inferred Lua/perk authorization is accepted.
 4. Use an item whose TTI component is absent from the selected assembly and an
    unbalanced modifier string. Confirm the original field remains unchanged and
    a structured diagnostic/placeholder is shown.
@@ -167,12 +169,13 @@ edit `database.res`, JMV/Base archives, live MOBs, maps, or the game install.
   Retain them as regression probes until runtime testing confirms exact PNT3
   run expansion fixes each family. Do not apply a global UV flip: faces and
   many humanoids already validate with the stored `.x4` UV convention.
-- JMV `UndeadF16`/`UndeadF17` currently resolve the database-declared
-  `UndeadMale -> unmozo0` model, but the available RaceModels texture list only
-  establishes `vurdalak_00` through `_03`, not a synthetic `vurdalak_29`, and
-  that creature assembly lacks the requested humanoid equipment components.
-  Keep this diagnostic/fail-closed until the intended race/model/skin mapping is
-  established from the database, addon code, or developer documentation.
+- JMV `UndeadF16`/`UndeadF17` are the control for the distinction between an
+  existing MOB assembly and `RaceModels.FLD30` (labelled `Graphic data Mask
+  Name` in the exported database). Their database row links `UndeadMale` and
+  skin 29, while zone17 instances embed the wearable `unhuma` assembly. Keep
+  that compatible instance assembly, resolve `unhumaskin_29_x4.mmp`, then apply
+  database armor and weapons. Do not replace it with the `unmozo0` mask name or
+  synthesize `vurdalak_29`.
 - Shield placement follows the assembly's `lh2.shieldNN -> lh2.shield00 -> lh2`
   link hierarchy. The `lh2.shield00` animation channel belongs to the attachment
   node; numbered shield geometry inherits it and must not receive the canonical
@@ -180,6 +183,11 @@ edit `database.res`, JMV/Base archives, live MOBs, maps, or the game install.
   and other equipment beneath their `*00` attachment nodes. Validate
   `zon3obr` IDs 233/234 at several idle frames: the shield should remain on the
   forearm without clipping caused by a doubled attachment rotation.
+- A JMV dual-two-hand request does not imply TitanGrip authorization. Until the
+  perk source is available, render only the first two-handed weapon through the
+  established `singleTwoHand` path and report the suppressed second weapon.
+  Use `zone17` ID 47533 as the runtime control. True dual-two-hand rendering and
+  two-hand-plus-shield remain deferred.
 
 ## Corpus-established JMV equipment atlas mapping
 

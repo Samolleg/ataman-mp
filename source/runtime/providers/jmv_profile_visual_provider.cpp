@@ -30,8 +30,9 @@ public:
         SJmvEquipmentGates gates;
         // Database rows can list paired TypeID 15 staffs, but the corresponding
         // dual-two-hand layout requires the TitanGrip perk. The authoritative
-        // per-unit Lua/perk source is not resolved here, so dual-two-hand and
-        // two-hand+shield remain diagnostic-only instead of bypassing gameplay.
+        // per-unit Lua/perk source is not resolved here. The equipment resolver
+        // previews only the first weapon for dual-two-hand requests; true dual
+        // rendering and two-hand+shield remain gated.
         return resolveEquipmentLayout(providerId(), true, gates, m_database, request, equipment);
     }
 private:

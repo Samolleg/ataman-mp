@@ -89,7 +89,7 @@ class ProfileVisualProviderTests : public QObject
 private slots:
     void resolvesDatabaseHumanoidsAcrossFamilies();
     void resolvesHumanoidSkinNumberBeyondRaceModelExamples();
-    void jmvDerivesProvenNumberedTextureFamily();
+    void jmvKeepsEmbeddedWearableAssemblyForDatabaseAppearance();
     void jmvPreservesEmbeddedNonHumanoidAppearance();
     void jmvHidesGoblinSlingWhenExplicitWeaponIsEnabled();
     void jmvResolvesZombieX4Textures();
@@ -150,7 +150,7 @@ void ProfileVisualProviderTests::resolvesHumanoidSkinNumberBeyondRaceModelExampl
     QCOMPARE(output.value("primaryTexture").toString(), QString("unhumaskin_39_x4.mmp"));
 }
 
-void ProfileVisualProviderTests::jmvDerivesProvenNumberedTextureFamily()
+void ProfileVisualProviderTests::jmvKeepsEmbeddedWearableAssemblyForDatabaseAppearance()
 {
     auto db = database();
     ei::SRaceModelDatabaseRecord race;
@@ -162,10 +162,15 @@ void ProfileVisualProviderTests::jmvDerivesProvenNumberedTextureFamily()
     db->monsters.insert(monster.name.toLower(), monster);
     ProfileVisualProviderService service;
     const auto resolver = service.appearanceResolver("jmv.v1", db);
-    SCharacterAppearanceRequest request; request.prototype = monster.name;
+    SCharacterAppearanceRequest request;
+    request.prototype = monster.name;
+    request.model = "unhuma";
+    request.primaryTexture = "unhumaskin_00";
     QJsonObject output;
     QVERIFY(resolver->resolve(request, &output).success);
-    QCOMPARE(output.value("primaryTexture").toString(), QString("vurdalak_29.x4.mmp"));
+    QCOMPARE(output.value("model").toString(), QString("unhuma"));
+    QCOMPARE(output.value("modelSource").toString(), QString("embeddedMobAssembly"));
+    QCOMPARE(output.value("primaryTexture").toString(), QString("unhumaskin_29_x4.mmp"));
 }
 
 void ProfileVisualProviderTests::jmvPreservesEmbeddedNonHumanoidAppearance()
@@ -299,6 +304,13 @@ void ProfileVisualProviderTests::jmvLayoutsAreIndependentlyGated()
         QJsonObject output; resolver->resolve(request, &output);
         QCOMPARE(output.value("layout").toString(), test.layout);
         QCOMPARE(!output.value("placeholders").toArray().isEmpty(), test.gated);
+        if(test.layout == "dualTwoHand")
+        {
+            QCOMPARE(jsonStrings(output, "components"), QStringList({"rh3.dsword01"}));
+            QCOMPARE(jsonStrings(output, "placeholders"), QStringList({"great axe.iron"}));
+            QVERIFY(output.value("diagnostics").toArray().first().toString()
+                    .contains("rendering the first two-handed weapon"));
+        }
     }
 }
 
