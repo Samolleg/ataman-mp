@@ -310,6 +310,22 @@ int armorLayerPriority(const QString& type)
     return normalized == "helm" || normalized == "plate" || normalized == "leggings" ? 1 : 0;
 }
 
+int armorSlotPriority(const QString& type)
+{
+    static const QMap<QString, int> priorities = {
+        {"shirt", 0}, {"gloves", 1}, {"pants", 2}, {"boots", 3},
+        {"helm", 4}, {"plate", 5}, {"leggings", 6}
+    };
+    return priorities.value(type.trimmed().toLower(), 100);
+}
+
+int armorWearOrder(const ei::SItemDatabaseRecord& item)
+{
+    // FLD24-0 is absent from some synthetic/legacy snapshots. The shipped
+    // databases use zero as the default, so a negative sentinel is equivalent.
+    return qMax(0, item.wearOrder);
+}
+
 bool optionalJmvTopArmorComponent(const QString& type)
 {
     const QString normalized = type.trimmed().toLower();
@@ -532,7 +548,23 @@ SRuntimeProviderResult resolveEquipmentLayout(
             ? 0 : armorLayerPriority(leftItem->type);
         const int rightPriority = rightItem == database->items.constEnd()
             ? 0 : armorLayerPriority(rightItem->type);
-        return leftPriority < rightPriority;
+        if(leftPriority != rightPriority)
+            return leftPriority < rightPriority;
+        if(leftItem == database->items.constEnd() || rightItem == database->items.constEnd())
+            return false;
+
+        // DB equipment-list order is not rendering order. Lower armor is
+        // canonicalized first. Within upper armor FLD24-0 (Wear Order) is the
+        // descending precedence key; equal values use plate before leggings.
+        // Thus observed 1/0 and 0/0 plate/leggings pairs both put plate first.
+        if(leftPriority > 0)
+        {
+            const int leftWearOrder = armorWearOrder(leftItem.value());
+            const int rightWearOrder = armorWearOrder(rightItem.value());
+            if(leftWearOrder != rightWearOrder)
+                return leftWearOrder > rightWearOrder;
+        }
+        return armorSlotPriority(leftItem->type) < armorSlotPriority(rightItem->type);
     });
     for(const QString& reference : armorReferences)
     {

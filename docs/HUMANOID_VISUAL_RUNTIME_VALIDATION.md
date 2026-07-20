@@ -70,7 +70,11 @@ edit `database.res`, JMV/Base archives, live MOBs, maps, or the game install.
    `rh3.armor01` member replaces `rh3` only when that exact member exists in
    the selected ANHUM assembly. If it is absent, retain the lower `rh3` mesh;
    do not synthesize geometry or a placeholder. Apply the same rule to every
-   exact helmet, plate, and leggings member.
+   exact helmet, plate, and leggings member. Ignore Monster/MOB equipment-array
+   order: resolve shirt, gloves, pants, and boots first, then order upper armor
+   by `FLD24-0` (`Wear Order`) descending. Equal upper values use helm, plate,
+   then leggings, so observed plate/leggings `1/0` and `0/0` pairs both compose
+   plate before leggings.
 10. Confirm female humans, male/female orcs, and skeletons resolve equipment
    textures from the shared `unhuma` equipment atlases. Their face/skin atlas
    remains model-specific. Validate JMV `zone1.mob` IDs 203, 221, and 224;

@@ -100,6 +100,7 @@ private slots:
     void validatesAssemblyPartsWithPlaceholders();
     void armorUsesSlotsAndMaterialTextureResources();
     void jmvExplicitMaterialSuffixCanCrossGameplayMaterialFamilies();
+    void jmvWearOrderControlsUpperArmorComposition();
     void jmvTopArmorWinsAvailableLowerLayerOverlaps();
     void jmvMissingTopOverlapRetainsLowerArmor();
     void jmvMissingExactTopPartsAreNotSynthesized();
@@ -350,6 +351,53 @@ void ProfileVisualProviderTests::jmvExplicitMaterialSuffixCanCrossGameplayMateri
              QStringList({"unhumash_14.dr.0.x4.mmp"}));
     QVERIFY(jsonStrings(output, "placeholders").isEmpty());
     QVERIFY(jsonStrings(output, "diagnostics").first().contains("explicit database"));
+}
+
+void ProfileVisualProviderTests::jmvWearOrderControlsUpperArmorComposition()
+{
+    auto db = database();
+    ei::SItemDatabaseRecord shirt = item("shirt order", "armor", 3, 4);
+    shirt.type = "shirt";
+    ei::SItemDatabaseRecord pants = item("pants order", "armor", 4, 7);
+    pants.type = "pants";
+    ei::SItemDatabaseRecord plate = item("plate order", "armor", 1, 8);
+    plate.type = "plate";
+    plate.wearOrder = 1;
+    ei::SItemDatabaseRecord leggings = item("leggings order", "armor", 2, 9);
+    leggings.type = "leggings";
+    leggings.wearOrder = 0;
+    db->items.insert("shirt order", shirt);
+    db->items.insert("pants order", pants);
+    db->items.insert("plate order", plate);
+    db->items.insert("leggings order", leggings);
+
+    ProfileVisualProviderService service;
+    SEquipmentLayoutRequest request;
+    request.model = "unhuma";
+    // Reverse every relevant list ordering: resolution must still be lower
+    // armor first, followed by Wear Order and the canonical upper-slot tie.
+    request.armor << "leggings order.leather" << "plate order.leather"
+                  << "pants order.leather" << "shirt order.leather";
+    request.assemblyParts << "bd" << "lh1" << "rh1"
+                          << "hp" << "ll1" << "rl1"
+                          << "bd.armor08" << "hp.armor09";
+
+    auto resolver = service.equipmentResolver("jmv.v1", db);
+    QJsonObject output;
+    QVERIFY(resolver->resolve(request, &output).success);
+    QCOMPARE(jsonStrings(output, "bodyTextureLayers"), QStringList({
+        "unhumash_04.le.0.x4.mmp", "unhumapt_07.le.0.x4.mmp",
+        "unhumapl_08.le.0.x4.mmp", "unhumalg_09.le.0.x4.mmp"}));
+
+    // The corpus also uses 0/0: the canonical tie is plate then leggings.
+    plate.wearOrder = 0;
+    db->items.insert("plate order", plate);
+    resolver = service.equipmentResolver("jmv.v1", db);
+    output = QJsonObject();
+    QVERIFY(resolver->resolve(request, &output).success);
+    QCOMPARE(jsonStrings(output, "bodyTextureLayers"), QStringList({
+        "unhumash_04.le.0.x4.mmp", "unhumapt_07.le.0.x4.mmp",
+        "unhumapl_08.le.0.x4.mmp", "unhumalg_09.le.0.x4.mmp"}));
 }
 
 void ProfileVisualProviderTests::jmvTopArmorWinsAvailableLowerLayerOverlaps()
