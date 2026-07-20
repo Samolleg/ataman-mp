@@ -52,6 +52,7 @@ public:
     void markAsDeleted(bool bDeleted = true) override {m_bDeleted = bDeleted;}
     bool isMarkDeleted() override {return m_bDeleted;}
     bool isOperationAxisAllow(EOperationAxisType type) override {Q_UNUSED(type); return true;};
+    QMap<QString, QVector<QVector2D>> renderedBodyPartUvTriangles() const;
 
 protected:
     void recalcFigure();

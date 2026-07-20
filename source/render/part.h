@@ -16,6 +16,7 @@ public:
     CPart(const CPart& part);
     ~CPart();
     QVector<SVertexData>& vertData() {return m_aVertData; }
+    const QVector<SVertexData>& vertData() const {return m_aVertData; }
     QString& name() {return m_name; }
     const QString& name() const {return m_name; }
     void setName(QString& name) {m_name = name; }

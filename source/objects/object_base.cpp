@@ -198,6 +198,30 @@ void CObjectBase::drawSelect(QOpenGLShaderProgram* program)
     program->setUniformValue("u_partAnimated", false);
 }
 
+QMap<QString, QVector<QVector2D>> CObjectBase::renderedBodyPartUvTriangles() const
+{
+    QMap<QString, QVector<QVector2D>> result;
+    for(const CPart* part : m_aPart)
+    {
+        if(!part)
+            continue;
+        const QString key = part->name().toLower();
+        // The final-character atlas is the primary body texture. Heads/hair,
+        // helmets, weapons, shields, and texture-number-2 members use another
+        // texture and would be misleading if projected over this image.
+        if(m_partTextures.contains(key)
+                || (part->textureNumber() == 2 && m_secondaryTexture))
+            continue;
+        QVector<QVector2D> coordinates;
+        coordinates.reserve(part->vertData().size());
+        for(const SVertexData& vertex : part->vertData())
+            coordinates.append(vertex.texCoord * part->textureUvScale());
+        if(coordinates.size() >= 3)
+            result.insert(part->name(), coordinates);
+    }
+    return result;
+}
+
 SAnimationSkeleton CObjectBase::transientAnimationSkeleton() const
 {
     SAnimationSkeleton skeleton;

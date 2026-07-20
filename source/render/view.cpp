@@ -1138,6 +1138,7 @@ void CView::unloadActiveMob()
 
     ei::log(eLogInfo, "Mob unloaded");
     viewParameters();
+    emit selectionChanged();
 }
 
 void CView::openActiveMobEditParams()
@@ -1318,6 +1319,7 @@ void CView::unloadMob(QString mobName)
 
     ei::log(eLogInfo, "Mob unloaded");
     viewParameters();
+    emit selectionChanged();
 }
 
 int CView::nSelectedNodes()
@@ -1399,6 +1401,7 @@ void CView::restoreSelection(const QList<CNode*>& selection)
     }
     viewParameters();
     update();
+    emit selectionChanged();
 }
 
 void CView::clearObjectSelection()
@@ -1433,6 +1436,7 @@ void CView::recordSelectionChange(const QList<CNode*>& before, const QString& te
         return;
 
     m_pUndoStack->push(new CSelectionCommand(this, before, after, text));
+    emit selectionChanged();
 }
 
 void CView::setRandomComplection(const EObjParam param, const float min, const float max)

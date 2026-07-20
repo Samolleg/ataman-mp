@@ -199,6 +199,7 @@ public slots:
 signals:
     void updateMsg(QString msg);
     void unloadMob(CMob*);
+    void selectionChanged();
     void updateMainWindowTitle(eTitleTypeData, QString);
     void showOutlinerSignal(bool bShow);
     void mobScriptChanged(CMob* mob, const QString& displayScript);

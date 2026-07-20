@@ -24,6 +24,10 @@ class CTileForm;
 class QMenu;
 class QAction;
 class QDockWidget;
+class QDialog;
+class QLabel;
+class QScrollArea;
+class QListWidget;
 class CMapsBrowser;
 class CJmvMapTestLauncher;
 
@@ -60,6 +64,9 @@ private:
     void openMapPair(const QString& mprPath, const QString& mobPath, const QString& zoneId);
     void updateMapTestAction();
     void launchCurrentMapTest();
+    void showUnitTexturePreview();
+    void updateUnitTexturePreview();
+    void renderUnitTexturePreview();
 
 private slots:
     void showOutliner(bool bShow);
@@ -124,6 +131,13 @@ private:
     QAction* m_mapTestAction;
     QAction* m_stopMapTestAction;
     CJmvMapTestLauncher* m_mapTestLauncher;
+    QDialog* m_unitTextureDialog;
+    QLabel* m_unitTextureDetails;
+    QLabel* m_unitTextureImage;
+    QScrollArea* m_unitTextureScroll;
+    QListWidget* m_unitTextureLayers;
+    QListWidget* m_unitTextureParts;
+    bool m_unitTextureUpdating;
     bool m_closeAfterTestStop;
 };
 
