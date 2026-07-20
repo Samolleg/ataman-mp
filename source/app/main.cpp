@@ -455,6 +455,60 @@ int runHeadlessCommand(QApplication& app)
                 && qFuzzyCompare(colorValue->value().y(), 0.2f)
                 && qFuzzyCompare(colorValue->value().z(), 0.3f);
 
+        // A single component of a compound vector is ordinary numeric data:
+        // it can be copied into another numeric field, with range validation
+        // and nearest-integer rounding when the destination is integral.
+        QList<QSharedPointer<IPropertyBase>> vectorComponents;
+        vectorComponents << QSharedPointer<IPropertyBase>(new propFloat(eObjParam_POSITION_X, 1.25f))
+                         << QSharedPointer<IPropertyBase>(new propFloat(eObjParam_POSITION_Y, 2.5f))
+                         << QSharedPointer<IPropertyBase>(new propFloat(eObjParam_POSITION_Z, 3.6f));
+        QTableWidget vectorComponentTable;
+        CTableManager vectorComponentManager(&vectorComponentTable);
+        vectorComponentManager.setNewData(vectorComponents);
+        CValueItem* zComponent = nullptr;
+        const QList<CValueItem*> componentEditors = vectorComponentTable.findChildren<CValueItem*>();
+        for(CValueItem* component : componentEditors)
+        {
+            if(component->param() == eObjParam_POSITION_Z)
+            {
+                zComponent = component;
+                break;
+            }
+        }
+        if(zComponent)
+        {
+            QKeyEvent copyZComponent(QEvent::KeyPress, Qt::Key_C, Qt::ControlModifier);
+            QApplication::sendEvent(zComponent, &copyZComponent);
+        }
+        QList<QSharedPointer<IPropertyBase>> integerDestination;
+        integerDestination << QSharedPointer<IPropertyBase>(new propUint(eObjParam_RANGE, 0));
+        QTableWidget integerDestinationTable;
+        CTableManager integerDestinationManager(&integerDestinationTable);
+        integerDestinationManager.setNewData(integerDestination);
+        QSharedPointer<IPropertyBase> roundedComponentPaste;
+        QObject::connect(&integerDestinationManager, &CTableManager::onUpdateProperty,
+                         [&roundedComponentPaste](const QSharedPointer<IPropertyBase>& value)
+        {
+            roundedComponentPaste.reset(value->clone());
+        });
+        CValueItem* integerEditor = integerDestinationTable.findChild<CValueItem*>();
+        if(integerEditor)
+        {
+            QKeyEvent pasteZComponent(QEvent::KeyPress, Qt::Key_V, Qt::ControlModifier);
+            QApplication::sendEvent(integerEditor, &pasteZComponent);
+        }
+        const propUint* roundedInteger = dynamic_cast<propUint*>(roundedComponentPaste.get());
+        const bool numericComponentPaste = zComponent && roundedInteger
+                && roundedInteger->value() == 4u;
+        roundedComponentPaste.clear();
+        integerDestinationManager.setReadOnly(true);
+        if(integerEditor)
+        {
+            QKeyEvent pasteLockedComponent(QEvent::KeyPress, Qt::Key_V, Qt::ControlModifier);
+            QApplication::sendEvent(integerEditor, &pasteLockedComponent);
+        }
+        const bool lockedNumericPasteBlocked = roundedComponentPaste.isNull();
+
         QMap<QString, QSharedPointer<propBool>> mixedParts;
         mixedParts.insert("head", QSharedPointer<propBool>(new propBool(eObjParam_BODYPARTS)));
         mixedParts.insert("body", QSharedPointer<propBool>(new propBool(eObjParam_BODYPARTS, true)));
@@ -488,7 +542,8 @@ int runHeadlessCommand(QApplication& app)
                 QKeySequenceEdit* historyShortcut = settingsWindow.findChild<QKeySequenceEdit*>("shortcutHistory");
                 QKeySequenceEdit* duplicateShortcut = settingsWindow.findChild<QKeySequenceEdit*>("shortcutDuplicateObjects");
                 QKeySequenceEdit* stopTestShortcut = settingsWindow.findChild<QKeySequenceEdit*>("shortcutStopMapTest");
-                if(historyShortcut && duplicateShortcut && stopTestShortcut)
+                QKeySequenceEdit* activateOwnerShortcut = settingsWindow.findChild<QKeySequenceEdit*>("shortcutActivateOwnerMob");
+                if(historyShortcut && duplicateShortcut && stopTestShortcut && activateOwnerShortcut)
                 {
                     historyShortcut->setKeySequence(QKeySequence("Alt+L"));
                     QMetaObject::invokeMethod(&settingsWindow, "on_buttonApply_clicked", Qt::DirectConnection);
@@ -496,7 +551,8 @@ int runHeadlessCommand(QApplication& app)
                         settingsWindow.opt(eOptSetKeyBinding, "shortcutHistory"));
                     settingsShortcutsPersist = saved && saved->value() == "Alt+L"
                             && duplicateShortcut->keySequence() == QKeySequence("Ctrl+D")
-                            && stopTestShortcut->keySequence() == QKeySequence("Shift+Esc");
+                            && stopTestShortcut->keySequence() == QKeySequence("Shift+Esc")
+                            && activateOwnerShortcut->keySequence() == QKeySequence("Ctrl+T");
                 }
             }
             QDir::setCurrent(previousDirectory);
@@ -549,6 +605,8 @@ int runHeadlessCommand(QApplication& app)
                 && incompatiblePasteBlocked && compatiblePasteImmediate
                 && multiPropertyPaste && mismatchedPropertyPasteBlocked
                 && fieldPasteImmediate && fieldCopyAvailable && nonTextPropertyPaste
+                && numericComponentPaste
+                && lockedNumericPasteBlocked
                 && mixedModelPartsVisible
                 && logicPointUndoAtomic && logicPointRedoAtomic;
         QTextStream output(stdout);
@@ -572,6 +630,8 @@ int runHeadlessCommand(QApplication& app)
                << " fieldPasteImmediate=" << fieldPasteImmediate
                << " fieldCopyAvailable=" << fieldCopyAvailable
                << " nonTextPropertyPaste=" << nonTextPropertyPaste << "\n"
+               << " numericComponentPaste=" << numericComponentPaste << "\n"
+               << " lockedNumericPasteBlocked=" << lockedNumericPasteBlocked << "\n"
                << " mixedModelPartsVisible=" << mixedModelPartsVisible
                << " logicPointUndoAtomic=" << logicPointUndoAtomic
                << " logicPointRedoAtomic=" << logicPointRedoAtomic << "\n"

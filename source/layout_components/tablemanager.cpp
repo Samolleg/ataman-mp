@@ -15,6 +15,9 @@
 #include <QContextMenuEvent>
 #include <QMenu>
 #include <QSet>
+#include <QtMath>
+#include <cmath>
+#include <limits>
 
 #include "tablemanager.h"
 #include "resourcemanager.h"
@@ -26,6 +29,75 @@
 namespace {
 const char* kPropertyMimeType = "application/x-ei-mapper-property-type";
 QList<QSharedPointer<IPropertyBase>> g_propertyClipboard;
+
+bool numericValue(const IPropertyBase* property, double* value)
+{
+    if(!property || !property->isInit() || !value || dynamic_cast<const propBool*>(property))
+        return false;
+    if(const propFloat* number = dynamic_cast<const propFloat*>(property))
+        *value = number->value();
+    else if(const propUint* number = dynamic_cast<const propUint*>(property))
+        *value = number->value();
+    else if(const propInt* number = dynamic_cast<const propInt*>(property))
+        *value = number->value();
+    else if(const propChar* number = dynamic_cast<const propChar*>(property))
+        *value = number->value();
+    else
+        return false;
+    return std::isfinite(*value);
+}
+
+QSharedPointer<IPropertyBase> convertedNumericValue(
+        const IPropertyBase* source, const IPropertyBase* destination, QString* error = nullptr)
+{
+    double value = 0.0;
+    if(!numericValue(source, &value) || !destination || dynamic_cast<const propBool*>(destination))
+        return QSharedPointer<IPropertyBase>();
+    if(dynamic_cast<const propFloat*>(destination))
+    {
+        if(value < -std::numeric_limits<float>::max() || value > std::numeric_limits<float>::max())
+        {
+            if(error) *error = QObject::tr("The numeric value is outside this field's range.");
+            return QSharedPointer<IPropertyBase>();
+        }
+        return QSharedPointer<IPropertyBase>(new propFloat(destination->type(), float(value)));
+    }
+    if(value < double(std::numeric_limits<qint64>::min())
+       || value > double(std::numeric_limits<qint64>::max()))
+    {
+        if(error) *error = QObject::tr("The rounded value is outside this field's range.");
+        return QSharedPointer<IPropertyBase>();
+    }
+    const qint64 rounded = qRound64(value);
+    if(dynamic_cast<const propUint*>(destination))
+    {
+        if(rounded < 0 || quint64(rounded) > std::numeric_limits<uint>::max())
+        {
+            if(error) *error = QObject::tr("The rounded value is outside this unsigned field's range.");
+            return QSharedPointer<IPropertyBase>();
+        }
+        return QSharedPointer<IPropertyBase>(new propUint(destination->type(), uint(rounded)));
+    }
+    if(dynamic_cast<const propInt*>(destination))
+    {
+        if(rounded < std::numeric_limits<int>::min() || rounded > std::numeric_limits<int>::max())
+        {
+            if(error) *error = QObject::tr("The rounded value is outside this integer field's range.");
+            return QSharedPointer<IPropertyBase>();
+        }
+        return QSharedPointer<IPropertyBase>(new propInt(destination->type(), int(rounded)));
+    }
+    if(dynamic_cast<const propChar*>(destination))
+    {
+        if(rounded < std::numeric_limits<char>::min() || rounded > std::numeric_limits<char>::max())
+        {
+            if(error) *error = QObject::tr("The rounded value is outside this byte field's range.");
+            return QSharedPointer<IPropertyBase>();
+        }
+        return QSharedPointer<IPropertyBase>(new propChar(destination->type(), char(rounded)));
+    }
+    return QSharedPointer<IPropertyBase>();
+}
 
 QSharedPointer<IPropertyBase> clonePropertyValue(const QSharedPointer<IPropertyBase>& property)
 {
@@ -145,13 +217,43 @@ void CTableManager::reset()
     //m_pTable->setSizeAdjustPolicy(QAbstractScrollArea::AdjustToContents); //adjust whole table. now both columns fill qtablewidget but it occurs blink and offset for main window
 }
 
+void CTableManager::setReadOnly(bool readOnly)
+{
+    m_readOnly = readOnly;
+    for(int row = 0; row < m_pTable->rowCount(); ++row)
+    {
+        QWidget* widget = m_pTable->cellWidget(row, 1);
+        if(!widget)
+            continue;
+        const bool compoundEditor = qobject_cast<C3DItem*>(widget) != nullptr;
+        widget->setProperty("enduranceReadOnly", readOnly);
+        if(QLineEdit* line = qobject_cast<QLineEdit*>(widget))
+            line->setReadOnly(readOnly);
+        const QList<QLineEdit*> lines = widget->findChildren<QLineEdit*>();
+        for(QLineEdit* line : lines)
+            line->setReadOnly(readOnly);
+        // Editable combo boxes contain a QLineEdit, but leaving the combo
+        // enabled would still allow a locked MOB property to change through
+        // its popup.  Compound numeric editors remain enabled so their
+        // read-only components can still be focused and copied.
+        if(qobject_cast<QComboBox*>(widget))
+            widget->setEnabled(!readOnly);
+        else if(!qobject_cast<QLineEdit*>(widget) && !compoundEditor)
+            widget->setEnabled(!readOnly);
+        widget->setToolTip(readOnly
+            ? tr("This object belongs to a locked MOB. Activate its owner to edit it.")
+            : QString());
+    }
+}
+
 void CTableManager::installClipboardFilter(QWidget* widget, int row)
 {
     if(!widget)
         return;
     widget->setProperty("propertyRow", row);
     widget->installEventFilter(this);
-    const QList<QLineEdit*> editors = widget->findChildren<QLineEdit*>();
+    const QList<QLineEdit*> editors = qobject_cast<C3DItem*>(widget)
+        ? QList<QLineEdit*>() : widget->findChildren<QLineEdit*>();
     for(QLineEdit* child : editors)
     {
         child->setProperty("propertyRow", row);
@@ -253,6 +355,11 @@ bool CTableManager::buildPasteValues(const QList<int>& rows,
         if(error) *error = tr("Select one or more property labels first.");
         return false;
     }
+    if(m_readOnly)
+    {
+        if(error) *error = tr("Activate the selected object's MOB before editing its properties.");
+        return false;
+    }
     const QMimeData* mime = QGuiApplication::clipboard()->mimeData();
     if(mime && mime->hasFormat(kPropertyMimeType))
     {
@@ -268,11 +375,25 @@ bool CTableManager::buildPasteValues(const QList<int>& rows,
             const int encodedType = encodedTypes.at(i).toInt(&ok);
             const QSharedPointer<IPropertyBase> destination = m_rowValues.value(rows.at(i));
             const QSharedPointer<IPropertyBase> source = g_propertyClipboard.at(i);
-            if(!ok || destination.isNull() || source.isNull()
-               || encodedType != int(destination->type()) || source->type() != destination->type())
+            if(!ok || destination.isNull() || source.isNull())
             {
                 if(error) *error = tr("Copied property types do not match every selected field.");
                 return false;
+            }
+            if(encodedType != int(destination->type()) || source->type() != destination->type())
+            {
+                QString conversionError;
+                const QSharedPointer<IPropertyBase> converted = convertedNumericValue(
+                    source.get(), destination.get(), &conversionError);
+                if(converted.isNull())
+                {
+                    if(error) *error = conversionError.isEmpty()
+                        ? tr("Copied property types do not match every selected field.")
+                        : conversionError;
+                    return false;
+                }
+                if(values) values->append(converted);
+                continue;
             }
             if(values)
                 values->append(clonePropertyValue(source));
@@ -295,6 +416,25 @@ bool CTableManager::buildPasteValues(const QList<int>& rows,
         return false;
     }
     QSharedPointer<IPropertyBase> parsed(destination->clone());
+    bool numericText = false;
+    const double plainNumber = text.trimmed().toDouble(&numericText);
+    if(numericText)
+    {
+        propFloat sourceNumber(destination->type(), float(plainNumber));
+        QString conversionError;
+        const QSharedPointer<IPropertyBase> converted = convertedNumericValue(
+            &sourceNumber, destination.get(), &conversionError);
+        if(!converted.isNull())
+        {
+            if(values) values->append(converted);
+            return true;
+        }
+        if(!conversionError.isEmpty())
+        {
+            if(error) *error = conversionError;
+            return false;
+        }
+    }
     if(CComboStItem* combo = qobject_cast<CComboStItem*>(m_pTable->cellWidget(row, 1)))
     {
         QMap<uint, QString> choices;
@@ -558,6 +698,8 @@ bool CTableManager::isValidValue(const EObjParam param, const QString &value)
 
 void CTableManager::onParamChange(const QSharedPointer<IPropertyBase>& pProp)
 {
+    if(m_readOnly)
+        return;
     for(auto it = m_rowValues.begin(); it != m_rowValues.end(); ++it)
     {
         if(it.value()->type() == pProp->type())
@@ -1201,7 +1343,46 @@ void CValueItem::keyPressEvent(QKeyEvent* event)
     }
     if(event->matches(QKeySequence::Paste))
     {
+        if(isReadOnly())
+        {
+            QApplication::beep();
+            event->accept();
+            return;
+        }
+        const QMimeData* mime = QGuiApplication::clipboard()->mimeData();
+        if(mime && mime->hasFormat(kPropertyMimeType) && g_propertyClipboard.size() == 1)
+        {
+            QString error;
+            const QSharedPointer<IPropertyBase> converted = convertedNumericValue(
+                g_propertyClipboard.first().get(), m_pValue.get(), &error);
+            if(!converted.isNull())
+            {
+                m_pValue = converted;
+                setText(m_pValue->toString());
+                if(m_filter) m_filter->updateValue(text());
+                emit onParamChange(m_pValue);
+                event->accept();
+                return;
+            }
+        }
         const QString value = QGuiApplication::clipboard()->text();
+        bool numericText = false;
+        const double plainNumber = value.trimmed().toDouble(&numericText);
+        if(numericText)
+        {
+            propFloat sourceNumber(m_pValue->type(), float(plainNumber));
+            const QSharedPointer<IPropertyBase> converted = convertedNumericValue(
+                &sourceNumber, m_pValue.get());
+            if(!converted.isNull())
+            {
+                m_pValue = converted;
+                setText(m_pValue->toString());
+                if(m_filter) m_filter->updateValue(text());
+                emit onParamChange(m_pValue);
+                event->accept();
+                return;
+            }
+        }
         if(rejectIncompatiblePaste(this, m_pValue->type(), value))
         {
             event->accept();
@@ -1209,6 +1390,24 @@ void CValueItem::keyPressEvent(QKeyEvent* event)
         }
     }
     QLineEdit::keyPressEvent(event);
+}
+
+void CValueItem::contextMenuEvent(QContextMenuEvent* event)
+{
+    QMenu menu(this);
+    QAction* copy = menu.addAction(tr("Copy value"));
+    QAction* paste = menu.addAction(tr("Paste value"));
+    copy->setShortcut(QKeySequence::Copy);
+    paste->setShortcut(QKeySequence::Paste);
+    paste->setEnabled(!isReadOnly());
+    QAction* selected = menu.exec(event->globalPos());
+    if(selected == copy)
+        copyProperty(m_pValue, hasSelectedText() ? selectedText() : text());
+    else if(selected == paste)
+    {
+        QKeyEvent pasteEvent(QEvent::KeyPress, Qt::Key_V, Qt::ControlModifier);
+        keyPressEvent(&pasteEvent);
+    }
 }
 
 void CComboDynItem::_onEditingFinished()
@@ -1344,6 +1543,12 @@ void C3DItem::keyPressEvent(QKeyEvent *event)
     }
     if((event->matches(QKeySequence::Paste)))
     {
+        if(property("enduranceReadOnly").toBool())
+        {
+            QApplication::beep();
+            event->accept();
+            return;
+        }
         QClipboard *pClipboard = QGuiApplication::clipboard();
         QString val = pClipboard->text();
         if(rejectIncompatiblePaste(this, EObjParam(m_xValue->type() + 3), val))

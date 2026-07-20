@@ -80,6 +80,10 @@ constexpr int kValidationPathRole = Qt::UserRole;
 constexpr int kValidationCopyRole = Qt::UserRole + 1;
 constexpr int kValidationNidRole = Qt::UserRole + 2;
 constexpr int kValidationSectionRole = Qt::UserRole + 3;
+constexpr int kLoadedMapKindRole = Qt::UserRole + 20;
+constexpr int kLoadedMapPointerRole = Qt::UserRole + 21;
+constexpr int kLoadedMapMpr = 1;
+constexpr int kLoadedMapMob = 2;
 
 QString conciseValidationLine(const SMobFamilyFinding& finding)
 {
@@ -156,11 +160,14 @@ MainWindow::MainWindow(QWidget* parent) :
     m_testTable(nullptr),
     m_recentFilesMenu(nullptr),
     m_externalScriptAction(nullptr),
+    m_activateOwnerMobAction(nullptr),
     m_mapsDock(nullptr),
     m_historyDock(nullptr),
     m_validationDock(nullptr),
     m_outlinerDock(nullptr),
     m_propertiesDock(nullptr),
+    m_loadedMapDock(nullptr),
+    m_loadedMapTree(nullptr),
     m_validationTree(nullptr),
     m_validationSummary(nullptr),
     m_validationTimer(nullptr),
@@ -243,6 +250,70 @@ MainWindow::MainWindow(QWidget* parent) :
     m_mapsDock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
     m_mapsDock->setWidget(m_mapsBrowser);
     addDockWidget(Qt::LeftDockWidgetArea, m_mapsDock);
+    m_loadedMapTree = new QTreeWidget(this);
+    m_loadedMapTree->setColumnCount(3);
+    m_loadedMapTree->setHeaderLabels(QStringList() << tr("Visible")
+                                      << tr("Loaded document") << tr("State"));
+    m_loadedMapTree->header()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
+    m_loadedMapTree->header()->setSectionResizeMode(1, QHeaderView::Stretch);
+    m_loadedMapTree->header()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
+    m_loadedMapTree->setContextMenuPolicy(Qt::CustomContextMenu);
+    m_loadedMapDock = new QDockWidget(tr("Loaded Map"), this);
+    m_loadedMapDock->setObjectName("loadedMapDock");
+    m_loadedMapDock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
+    m_loadedMapDock->setFeatures(QDockWidget::DockWidgetClosable |
+                                 QDockWidget::DockWidgetMovable |
+                                 QDockWidget::DockWidgetFloatable);
+    m_loadedMapDock->setWidget(m_loadedMapTree);
+    addDockWidget(Qt::RightDockWidgetArea, m_loadedMapDock);
+    splitDockWidget(m_loadedMapDock, m_outlinerDock, Qt::Vertical);
+    connect(m_loadedMapTree, &QTreeWidget::itemChanged, this,
+            [this](QTreeWidgetItem* item, int column)
+    {
+        if(!item || column != 0 || !m_pView)
+            return;
+        const bool visible = item->checkState(0) == Qt::Checked;
+        const int kind = item->data(0, kLoadedMapKindRole).toInt();
+        if(kind == kLoadedMapMpr)
+            m_pView->setLandscapeVisible(visible);
+        else if(kind == kLoadedMapMob)
+        {
+            CMob* mob = reinterpret_cast<CMob*>(
+                item->data(0, kLoadedMapPointerRole).toULongLong());
+            m_pView->setMobVisible(mob, visible);
+        }
+    });
+    connect(m_loadedMapTree, &QTreeWidget::itemClicked, this,
+            [this](QTreeWidgetItem* item, int column)
+    {
+        if(!item || column != 1 || !m_pView
+           || item->data(0, kLoadedMapKindRole).toInt() != kLoadedMapMob)
+            return;
+        CMob* mob = reinterpret_cast<CMob*>(
+            item->data(0, kLoadedMapPointerRole).toULongLong());
+        if(mob && mob != m_pView->currentMob())
+            m_pView->changeCurrentMob(mob);
+    });
+    connect(m_loadedMapTree, &QTreeWidget::customContextMenuRequested, this,
+            [this](const QPoint& point)
+    {
+        QTreeWidgetItem* item = m_loadedMapTree->itemAt(point);
+        if(!item || item->data(0, kLoadedMapKindRole).toInt() != kLoadedMapMob)
+            return;
+        CMob* mob = reinterpret_cast<CMob*>(
+            item->data(0, kLoadedMapPointerRole).toULongLong());
+        if(!mob)
+            return;
+        QMenu menu(this);
+        QAction* activate = menu.addAction(tr("Make Active"));
+        activate->setEnabled(mob != m_pView->currentMob());
+        QAction* unload = menu.addAction(tr("Unload MOB"));
+        QAction* selected = menu.exec(m_loadedMapTree->viewport()->mapToGlobal(point));
+        if(selected == activate)
+            m_pView->changeCurrentMob(mob);
+        else if(selected == unload)
+            m_pView->unloadMobDocument(mob);
+    });
     QWidget* validationWidget = new QWidget(this);
     QVBoxLayout* validationLayout = new QVBoxLayout(validationWidget);
     validationLayout->setContentsMargins(4, 4, 4, 4);
@@ -311,6 +382,7 @@ MainWindow::MainWindow(QWidget* parent) :
     QMenu* viewMenu = new QMenu(tr("View"), this);
     m_ui->menuBar->insertMenu(m_ui->menuSettings->menuAction(), viewMenu);
     viewMenu->addAction(m_mapsDock->toggleViewAction());
+    viewMenu->addAction(m_loadedMapDock->toggleViewAction());
     viewMenu->addAction(m_outlinerDock->toggleViewAction());
     viewMenu->addAction(m_propertiesDock->toggleViewAction());
     m_ui->menuTools->removeAction(m_ui->actionShow_undo_redo);
@@ -329,6 +401,13 @@ MainWindow::MainWindow(QWidget* parent) :
     {
         if(m_pView && m_pView->hasActiveMob())
             m_pView->openExternalMobScript(m_pView->currentMob());
+    });
+    m_activateOwnerMobAction = new QAction(tr("Activate Selected Object's MOB"), this);
+    viewMenu->addAction(m_activateOwnerMobAction);
+    connect(m_activateOwnerMobAction, &QAction::triggered, this, [this]()
+    {
+        if(m_pView)
+            m_pView->activateSelectedObjectMob();
     });
     m_recentFilesMenu = new QMenu(tr("Open Recent"), this);
     m_ui->menuFile->insertMenu(m_ui->actionOpen_recent, m_recentFilesMenu);
@@ -522,12 +601,16 @@ MainWindow::MainWindow(QWidget* parent) :
         // A new profile must start from the documented usable workspace even
         // if Windows still contains dock state from an older/test install.
         m_mapsDock->setFloating(false);
+        m_loadedMapDock->setFloating(false);
         m_outlinerDock->setFloating(false);
         m_propertiesDock->setFloating(false);
         addDockWidget(Qt::LeftDockWidgetArea, m_mapsDock);
+        addDockWidget(Qt::RightDockWidgetArea, m_loadedMapDock);
         addDockWidget(Qt::RightDockWidgetArea, m_outlinerDock);
+        splitDockWidget(m_loadedMapDock, m_outlinerDock, Qt::Vertical);
         splitDockWidget(m_outlinerDock, m_propertiesDock, Qt::Vertical);
         m_mapsDock->show();
+        m_loadedMapDock->show();
         m_outlinerDock->show();
         m_propertiesDock->show();
         uiSettings.setValue("ui/mapsBrowser/mapsExpanded", true);
@@ -666,7 +749,13 @@ MainWindow::MainWindow(QWidget* parent) :
     CStatusConnector::getInstance()->attach(m_ui->statusIco, m_ui->statusBar);
     connectUiButtons();
     m_pView->attach(m_settings.get(), m_ui->tableWidget, m_undoStack, m_ui->progressBar, m_ui->mousePosText, m_ui->treeWidget, m_pTileForm.get());
-    connect(m_pView, &CView::mobStateChanged, this, [this]() { scheduleMobFamilyValidation(); });
+    connect(m_pView, &CView::mobStateChanged, this, [this]()
+    {
+        updateLoadedMapPanel();
+        scheduleMobFamilyValidation();
+    });
+    connect(m_pView, &CView::loadedMapStateChanged,
+            this, &MainWindow::updateLoadedMapPanel);
     connect(m_pView, &CView::nidChangeProposed, this, &MainWindow::notifyProposedNid);
     connect(m_pView, &CView::nidAllocationRequested, this,
             [this](const QString& mobPath, quint32* suggestion)
@@ -726,6 +815,7 @@ MainWindow::MainWindow(QWidget* parent) :
     refreshMapTestContext();
     updateMapTestAction();
     updateWindowTitle(eTitleTypeData::eTitleTypeDataMpr, QString());
+    updateLoadedMapPanel();
     bool hasStartupDocument = false;
     for(int index = 1; index < QCoreApplication::arguments().size(); ++index)
     {
@@ -1373,7 +1463,9 @@ void MainWindow::initShortcuts()
     m_ui->actionDuplicate_selected_objects->setShortcut(shortcut("shortcutDuplicateObjects", "Ctrl+D"));
     m_ui->actionReset_cam_position->setShortcut(shortcut("shortcutResetCamera", "Ctrl+R"));
     m_ui->actionChange_mod_e->setShortcut(shortcut("shortcutSwitchMode", "Ctrl+Tab"));
-    //m_ui->actionSwitch_active_MOB->setShortcut(QKeySequence(Qt::CTRL + Qt::Key_T));
+    m_activateOwnerMobAction->setShortcut(
+        shortcut("shortcutActivateOwnerMob", "Ctrl+T"));
+    m_activateOwnerMobAction->setShortcutContext(Qt::ApplicationShortcut);
     m_ui->action_Mob_parameters->setShortcut(shortcut("shortcutMobParameters", "Ctrl+M"));
     m_ui->actionOpen_MOB_Script->setShortcut(shortcut("shortcutMobScript", "Ctrl+Shift+M"));
     m_externalScriptAction->setShortcut(shortcut("shortcutExternalMobScript", "Ctrl+Alt+M"));
@@ -2803,7 +2895,7 @@ void MainWindow::updateOperationAvailability(bool hasSelection)
     // still settling.  The view is the source of truth for toolbar and shortcut
     // availability, so never leave the controls disabled because of a stale
     // notification argument.
-    hasSelection = hasMob && m_pView->nSelectedNodes() > 0;
+    hasSelection = hasMob && m_pView->hasEditableSelection();
     const bool hasMpr = CLandscape::getInstance()->isMprLoad();
     const bool hasMovableSelection = (hasMob && hasSelection)
         || (m_customSpawnSelected && m_customSpawn.valid && m_customSpawn.custom
@@ -2813,7 +2905,8 @@ void MainWindow::updateOperationAvailability(bool hasSelection)
         {EButtonOpMove, m_ui->moveButton, hasMovableSelection},
         {EButtonOpRotate, m_ui->rotateButton, hasMob && hasSelection},
         {EButtonOpScale, m_ui->scaleButton, hasMob && hasSelection},
-        {EButtonOpTilebrush, m_ui->tileBrushButton, hasMpr}
+        {EButtonOpTilebrush, m_ui->tileBrushButton,
+            hasMpr && m_pView->isLandscapeVisible()}
     };
     for(const auto& state : states)
     {
@@ -2821,6 +2914,86 @@ void MainWindow::updateOperationAvailability(bool hasSelection)
         if(QAction* action = m_operationActions.value(state.type, nullptr))
             action->setEnabled(state.enabled);
     }
+    if(m_activateOwnerMobAction)
+    {
+        bool canActivateOwner = false;
+        if(m_pView)
+            for(CMob* mob : m_pView->mobs())
+            {
+                if(!mob || mob == m_pView->currentMob() || !m_pView->isMobVisible(mob))
+                    continue;
+                const QList<CNode*> candidates = mob->nodes() + mob->logicNodes();
+                for(CNode* node : candidates)
+                {
+                    if(node && node->nodeState() == ENodeState::eSelect)
+                    {
+                        canActivateOwner = true;
+                        break;
+                    }
+                }
+                if(canActivateOwner)
+                    break;
+            }
+        m_activateOwnerMobAction->setEnabled(canActivateOwner);
+    }
+}
+
+void MainWindow::updateLoadedMapPanel()
+{
+    if(!m_loadedMapTree || !m_pView)
+        return;
+    const QSignalBlocker blocker(m_loadedMapTree);
+    m_loadedMapTree->clear();
+
+    QTreeWidgetItem* root = new QTreeWidgetItem(m_loadedMapTree);
+    const bool hasMpr = CLandscape::getInstance()->isMprLoad();
+    if(hasMpr)
+    {
+        root->setText(1, CLandscape::getInstance()->filePath().fileName());
+        root->setText(2, tr("MPR"));
+        root->setToolTip(1, CLandscape::getInstance()->filePath().absoluteFilePath());
+        root->setFlags(root->flags() | Qt::ItemIsUserCheckable);
+        root->setCheckState(0, m_pView->isLandscapeVisible()
+                            ? Qt::Checked : Qt::Unchecked);
+        root->setData(0, kLoadedMapKindRole, kLoadedMapMpr);
+    }
+    else
+    {
+        root->setText(1, m_pView->mobs().isEmpty()
+                      ? tr("No map loaded") : tr("No MPR (neutral grid)"));
+        root->setText(2, tr("Workspace"));
+    }
+    root->setExpanded(true);
+
+    for(CMob* mob : m_pView->mobs())
+    {
+        if(!mob)
+            continue;
+        QTreeWidgetItem* item = new QTreeWidgetItem(root);
+        item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
+        item->setCheckState(0, m_pView->isMobVisible(mob)
+                            ? Qt::Checked : Qt::Unchecked);
+        item->setText(1, mob->filePath().fileName());
+        QStringList states;
+        states.append(mob == m_pView->currentMob() ? tr("Active") : tr("Locked"));
+        if(mob->isDirty())
+            states.append(tr("Modified"));
+        if(!m_pView->isMobVisible(mob))
+            states.append(tr("Hidden"));
+        item->setText(2, states.join(", "));
+        item->setToolTip(1, mob->filePath().absoluteFilePath());
+        item->setData(0, kLoadedMapKindRole, kLoadedMapMob);
+        item->setData(0, kLoadedMapPointerRole,
+                      QVariant::fromValue<qulonglong>(reinterpret_cast<qulonglong>(mob)));
+        if(mob == m_pView->currentMob())
+        {
+            QFont font = item->font(1);
+            font.setBold(true);
+            item->setFont(1, font);
+        }
+    }
+    m_loadedMapTree->resizeColumnToContents(0);
+    updateOperationAvailability();
 }
 
 void MainWindow::updateDocumentActionAvailability()

@@ -393,6 +393,7 @@ void CSettings::initOptions()
         {"shortcutResetCamera", "Ctrl+R"},
         {"shortcutResetLogicPaths", "Ctrl+P"},
         {"shortcutSwitchMode", "Ctrl+Tab"},
+        {"shortcutActivateOwnerMob", "Ctrl+T"},
         {"shortcutSelectTool", "Esc"},
         {"shortcutMoveTool", "G"},
         {"shortcutRotateTool", "R"},

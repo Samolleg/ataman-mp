@@ -475,10 +475,10 @@ void CView::draw()
 //    m_landProgram.setUniformValue("u_lightPower", 5.0f);
 //    m_landProgram.setUniformValue("u_lightColor", QVector4D(1.0, 1.0, 1.0, 1.0));
 //    m_landProgram.setUniformValue("u_highlight", false);
-    if (m_pLand && m_pLand->isMprLoad() && m_bPreviewTile) // draw preview tile on top
+    if (m_landscapeVisible && m_pLand && m_pLand->isMprLoad() && m_bPreviewTile) // draw preview tile on top
         drawTilePreview(&m_landProgram);
 
-    if (m_pLand && m_pLand->isMprLoad() && m_bDrawLand)
+    if (m_landscapeVisible && m_pLand && m_pLand->isMprLoad() && m_bDrawLand)
         m_pLand->draw(&m_landProgram);
 
     // Bind shader pipeline for use
@@ -492,11 +492,17 @@ void CView::draw()
     {
         for(auto& mob: m_aMob) //TODO: draw inactive mobs with custom color|alfa or something
         {
+            if(!isMobVisible(mob))
+                continue;
             if(mob->mobName() == m_activeMob->mobName())
                 continue; //skip drawing active mob
 
             for (auto& node: mob->nodes())
             {
+                // Selected nodes from every visible MOB are rendered in the
+                // final depth pass below, including locked MOBs.
+                if(node->nodeState() == ENodeState::eSelect)
+                    continue;
                 if(visible(node))
                     node->drawObjectVisual(false, &m_program);
                 node->drawLogicVisual(false, &m_program);
@@ -507,7 +513,7 @@ void CView::draw()
         // visible when it occupies exactly the same depth as its source.
         for(auto& node : m_activeMob->nodes())
         {
-            if(node->nodeState() != ENodeState::eSelect)
+            if(isMobVisible(m_activeMob) && node->nodeState() != ENodeState::eSelect)
             {
                 if(visible(node))
                     node->drawObjectVisual(true, &m_program);
@@ -515,18 +521,18 @@ void CView::draw()
             }
         }
         glDepthFunc(GL_LEQUAL);
-        for(auto& node : m_activeMob->nodes())
-        {
-            if(node->nodeState() == ENodeState::eSelect)
-            {
-                node->drawObjectVisual(true, &m_program);
-                node->drawLogicVisual(true, &m_program);
-            }
-        }
+        for(CMob* mob : m_aMob)
+            if(isMobVisible(mob))
+                for(CNode* node : mob->nodes())
+                    if(node->nodeState() == ENodeState::eSelect)
+                    {
+                        node->drawObjectVisual(mob == m_activeMob, &m_program);
+                        node->drawLogicVisual(mob == m_activeMob, &m_program);
+                    }
         glDepthFunc(GL_LESS);
     }
 
-    if (m_pLand && m_pLand->isMprLoad() && m_bDrawWater)
+    if (m_landscapeVisible && m_pLand && m_pLand->isMprLoad() && m_bDrawWater)
     {
         //turn to landshader again
         if (!m_landProgram.bind())
@@ -570,6 +576,7 @@ void CView::loadLandscape(const QFileInfo& filePath)
     }
     for(CMob* mob : m_aMob)
         mob->reprojectForCurrentTerrain();
+    m_landscapeVisible = true;
     emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMpr, filePath.baseName());
     emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMprDirtyFlag, m_pLand->isDirty() ? "*" : "");
     m_lastModifiedLand = filePath.lastModified();
@@ -582,6 +589,7 @@ void CView::loadLandscape(const QFileInfo& filePath)
     }
     m_pPreviewTile.reset(new CPreviewTile());
     updateTileForm(true);
+    emit loadedMapStateChanged();
 }
 
 void CView::unloadLand()
@@ -610,6 +618,8 @@ void CView::unloadLand()
     emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMpr, "");
     m_pPreviewTile.clear();
     ei::log(eLogInfo, "Landscape unloaded");
+    m_landscapeVisible = true;
+    emit loadedMapStateChanged();
 }
 
 void CView::saveLand()
@@ -640,7 +650,7 @@ void CView::saveLandAs()
 
 int CView::select(const SSelect &selectParam, bool bAddToSelect)
 {
-    if(nullptr == m_activeMob)
+    if(m_aMob.isEmpty())
         return 0;
 
     const QList<CNode*> selectionBefore = selectionSnapshot();
@@ -872,10 +882,18 @@ void CView::getColorFromRect(const QRect& rect, QVector<SColor>& aColor)
 
 void CView::changeCurrentMob(CMob *pMob)
 {
+    if(pMob != m_activeMob)
+    {
+        cancelPendingOperation();
+        for(CMob* mob : m_aMob)
+            if(mob) mob->clearSelect(true);
+    }
     m_activeMob = pMob;
     emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataActiveMob, nullptr == pMob ? "" : pMob->mobName());
     emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataDirtyFlag, (nullptr == pMob || !pMob->isDirty()) ? "" : "*");
     collectObjectTreeData();
+    viewParameters();
+    emit loadedMapStateChanged();
 }
 
 void CView::changeCurrentMob(QString mobName)
@@ -949,6 +967,142 @@ void CView::logOpenGlData()
             .arg(version ? reinterpret_cast<const char*>(version) : "unavailable")
             .arg(vendor ? reinterpret_cast<const char*>(vendor) : "unavailable")
             .arg(renderer ? reinterpret_cast<const char*>(renderer) : "unavailable"));
+}
+
+CMob* CView::ownerMob(CNode* node) const
+{
+    if(!node)
+        return nullptr;
+    for(CMob* mob : m_aMob)
+    {
+        if(!mob)
+            continue;
+        if(mob->nodes().contains(node) || mob->logicNodes().contains(node))
+            return mob;
+    }
+    return nullptr;
+}
+
+bool CView::isMobVisible(CMob* mob) const
+{
+    return mob && !m_hiddenMobs.contains(mob);
+}
+
+void CView::setMobVisible(CMob* mob, bool visible)
+{
+    if(!mob || !m_aMob.contains(mob) || isMobVisible(mob) == visible)
+        return;
+    if(visible)
+        m_hiddenMobs.remove(mob);
+    else
+    {
+        m_hiddenMobs.insert(mob);
+        mob->clearSelect(true);
+        if(m_pTree)
+            m_pTree->clearViewportSelectionMarker();
+        viewParameters();
+    }
+    collectObjectTreeData();
+    update();
+    emit loadedMapStateChanged();
+}
+
+void CView::setLandscapeVisible(bool visible)
+{
+    if(m_landscapeVisible == visible)
+        return;
+    m_landscapeVisible = visible;
+    if(!visible)
+    {
+        m_bPreviewTile = false;
+        changeOperation(EButtonOpSelect);
+    }
+    update();
+    emit loadedMapStateChanged();
+}
+
+bool CView::hasEditableSelection() const
+{
+    if(!m_activeMob || !isMobVisible(m_activeMob))
+        return false;
+    bool found = false;
+    for(CMob* mob : m_aMob)
+    {
+        if(!mob)
+            continue;
+        for(CNode* node : mob->nodes())
+            if(node && node->nodeState() == ENodeState::eSelect)
+            {
+                if(mob != m_activeMob)
+                    return false;
+                found = true;
+            }
+        for(CNode* node : mob->logicNodes())
+            if(node && node->nodeState() == ENodeState::eSelect)
+            {
+                if(mob != m_activeMob)
+                    return false;
+                found = true;
+            }
+    }
+    return found;
+}
+
+bool CView::selectNode(CNode* node, bool addToSelection, bool activateOwner)
+{
+    CMob* owner = ownerMob(node);
+    if(!owner || !isMobVisible(owner))
+        return false;
+    if(activateOwner && owner != m_activeMob)
+        changeCurrentMob(owner);
+    return selectNodes(QList<CNode*>() << node, addToSelection);
+}
+
+bool CView::selectNodes(const QList<CNode*>& nodes, bool addToSelection)
+{
+    QList<CNode*> selectable;
+    for(CNode* node : nodes)
+    {
+        CMob* owner = ownerMob(node);
+        if(node && owner && isMobVisible(owner) && !selectable.contains(node))
+            selectable.append(node);
+    }
+    if(selectable.isEmpty())
+        return false;
+    const QList<CNode*> before = selectionSnapshot();
+    if(!addToSelection)
+        for(CMob* mob : m_aMob)
+            if(mob) mob->clearSelect(true);
+    for(CNode* node : selectable)
+    {
+        if(addToSelection && node->nodeState() == ENodeState::eSelect)
+            node->setState(ENodeState::eDraw);
+        else
+            node->setState(ENodeState::eSelect);
+    }
+    recordSelectionChange(before);
+    viewParameters();
+    update();
+    emit loadedMapStateChanged();
+    return true;
+}
+
+bool CView::activateSelectedObjectMob()
+{
+    const QList<CNode*> selected = selectionSnapshot();
+    if(selected.isEmpty())
+        return false;
+    CMob* owner = ownerMob(selected.back());
+    if(!owner || owner == m_activeMob)
+        return false;
+    CNode* selectedNode = selected.back();
+    changeCurrentMob(owner);
+    selectedNode->setState(ENodeState::eSelect);
+    viewParameters();
+    update();
+    if(m_pTree)
+        m_pTree->revealNode(selectedNode);
+    return true;
 }
 
 void CView::checkOpenGlError()
@@ -1097,10 +1251,14 @@ void CView::pickObject(const QRect &rect, bool bAddToSelect)
         && CScene::getInstance()->getMode() != eEditModeLogic;
     const CViewFrustum frustum(m_projection * viewMatrix);
 
-    //if(m_operationType == EOperationTypeObjects)
-    //for(const auto& mob : m_aMob)
-    //foreach(const auto& mob, m_aMob)
-    foreach (auto& node, CScene::getInstance()->getMode() == eEditModeLogic ? m_activeMob->logicNodes() : m_activeMob->nodes())
+    QList<CNode*> pickableNodes;
+    for(CMob* mob : m_aMob)
+        if(isMobVisible(mob))
+            for(CNode* node : CScene::getInstance()->getMode() == eEditModeLogic
+                    ? mob->logicNodes() : mob->nodes())
+                if(node && !pickableNodes.contains(node))
+                    pickableNodes.append(node);
+    foreach (CNode* node, pickableNodes)
     {
         bool drawNode = true;
         if(cullingEnabled && node && node->nodeState() != ENodeState::eSelect)
@@ -1119,11 +1277,12 @@ void CView::pickObject(const QRect &rect, bool bAddToSelect)
     //if(m_operationType == EOperationTypeObjects)
 
     if (!bAddToSelect) // clear selection buffer if we click out of objects in single selection mode
-        m_activeMob->clearSelect(true);
+        for(CMob* mob : m_aMob)
+            if(mob) mob->clearSelect(true);
 
     CNode* lastPickedNode = nullptr;
     if (!aColor.isEmpty())
-        foreach (auto& node, CScene::getInstance()->getMode() == eEditModeLogic ? m_activeMob->logicNodes() : m_activeMob->nodes())
+        foreach (CNode* node, pickableNodes)
             foreach (const auto& color, aColor)
             {
                 if (node->isColorSuitable(color))
@@ -1241,49 +1400,57 @@ void CView::saveAllMob()
 
 void CView::unloadActiveMob()
 {
-    if(nullptr == m_activeMob)
-        return;
+    unloadMobDocument(m_activeMob);
+}
 
+bool CView::unloadMobDocument(CMob* mob)
+{
+    if(!mob || !m_aMob.contains(mob))
+        return false;
     cancelPendingOperation();
-    if(!closeMobScriptWindow(m_activeMob))
-        return;
-    ei::log(eLogInfo, "unloading mob " + m_activeMob->mobName());
-    CMob* pMob = nullptr;
-    foreach(pMob, m_aMob)
+    if(!closeMobParameterWindow(mob))
+        return false;
+    if(!closeMobScriptWindow(mob))
+        return false;
+    if(mob->isDirty())
     {
-        if(m_activeMob != pMob)
-            continue;
-
-        if(pMob->isDirty())
-        {
-            QMessageBox::StandardButton reply;
-            reply = QMessageBox::question(this, "Unload MOB", pMob->mobName() + " has unsaved changes.\nDo you want to save changes?", QMessageBox::Save|QMessageBox::No|QMessageBox::Cancel);
-            if(reply == QMessageBox::Save)
-            {
-                if(!pMob->save())
-                    return;
-            }
-            else if(reply == QMessageBox::Cancel)
-                return;
-
-        }
-        if(m_pUndoStack)
-            m_pUndoStack->clear();
-        m_aMob.removeOne(pMob);
-        m_scriptWorkspaces->unregisterMob(pMob);
-        emit unloadMob(pMob);
-        delete pMob;
-        break;
+        const QMessageBox::StandardButton reply = QMessageBox::question(this,
+            tr("Unload MOB"),
+            tr("%1 has unsaved changes.\nDo you want to save changes?").arg(mob->mobName()),
+            QMessageBox::Save | QMessageBox::No | QMessageBox::Cancel);
+        if(reply == QMessageBox::Save && !mob->save())
+            return false;
+        if(reply == QMessageBox::Cancel)
+            return false;
     }
 
-    if(!m_aMob.isEmpty())
-        changeCurrentMob(m_aMob.back());
-    else
-        changeCurrentMob(nullptr);
+    const int removedIndex = m_aMob.indexOf(mob);
+    const bool removedActive = mob == m_activeMob;
+    ei::log(eLogInfo, "unloading mob " + mob->mobName());
+    if(m_pUndoStack)
+        m_pUndoStack->clear();
+    m_hiddenMobs.remove(mob);
+    m_aMob.removeAt(removedIndex);
+    m_scriptWorkspaces->unregisterMob(mob);
+    emit unloadMob(mob);
+    delete mob;
 
+    if(removedActive)
+    {
+        CMob* next = nullptr;
+        if(!m_aMob.isEmpty())
+            next = m_aMob.at(qMin(removedIndex, m_aMob.size() - 1));
+        changeCurrentMob(next);
+    }
+    else
+    {
+        collectObjectTreeData();
+        viewParameters();
+        emit loadedMapStateChanged();
+    }
     ei::log(eLogInfo, "Mob unloaded");
-    viewParameters();
     emit mobStateChanged();
+    return true;
 }
 
 void CView::openActiveMobEditParams()
@@ -1393,6 +1560,28 @@ bool CView::closeMobScriptWindow(CMob* mob)
     return !window || window->requestClose();
 }
 
+bool CView::closeMobParameterWindow(CMob* mob)
+{
+    const QList<CMobParameters*> windows = m_arrParamWindow;
+    for(CMobParameters* window : windows)
+    {
+        if(window && window->mob() == mob && !window->close())
+            return false;
+    }
+    return true;
+}
+
+bool CView::closeAllMobParameterWindows()
+{
+    const QList<CMobParameters*> windows = m_arrParamWindow;
+    for(CMobParameters* window : windows)
+    {
+        if(window && !window->close())
+            return false;
+    }
+    return true;
+}
+
 bool CView::closeAllMobScriptWindows()
 {
     const QList<QPointer<CMobScriptWindow>> windows = m_scriptWindows.values();
@@ -1412,12 +1601,16 @@ void CView::unloadMob(QString mobName)
     cancelPendingOperation();
     if(mobName.isEmpty())
     {
+        if(!closeAllMobParameterWindows())
+            return;
         if(!closeAllMobScriptWindows())
             return;
     }
     else
     {
         CMob* closingMob = mob(mobName);
+        if(closingMob && !closeMobParameterWindow(closingMob))
+            return;
         if(closingMob && !closeMobScriptWindow(closingMob))
             return;
     }
@@ -1429,6 +1622,7 @@ void CView::unloadMob(QString mobName)
     {
         foreach(pMob, m_aMob)
         {
+            m_hiddenMobs.remove(pMob);
             m_scriptWorkspaces->unregisterMob(pMob);
             emit unloadMob(pMob);
             delete pMob;
@@ -1443,6 +1637,7 @@ void CView::unloadMob(QString mobName)
             if (pMob->mobName().toLower() == mobName.toLower())
             {
                 m_scriptWorkspaces->unregisterMob(pMob);
+                m_hiddenMobs.remove(pMob);
                 emit unloadMob(pMob);
                 delete pMob;
                 m_aMob.removeOne(pMob);
@@ -1538,7 +1733,7 @@ void CView::restoreSelection(const QList<CNode*>& selection)
 
     for(CNode* node : selection)
     {
-        if(node && available.contains(node))
+        if(node && available.contains(node) && isMobVisible(ownerMob(node)))
             node->setState(ENodeState::eSelect);
     }
     if(m_pTree)
@@ -1593,7 +1788,7 @@ bool CView::selectObjectByProvenance(const QString& mobPath, quint32 nid,
 
 void CView::clearObjectSelection()
 {
-    if(!m_activeMob)
+    if(m_aMob.isEmpty())
         return;
     const QList<CNode*> before = selectionSnapshot();
     if(before.isEmpty())
@@ -1602,7 +1797,8 @@ void CView::clearObjectSelection()
             m_pTree->clearViewportSelectionMarker();
         return;
     }
-    m_activeMob->clearSelect(true);
+    for(CMob* mob : m_aMob)
+        if(mob) mob->clearSelect(true);
     recordSelectionChange(before, "Clear selection");
     if(m_pTree)
         m_pTree->clearViewportSelectionMarker();
@@ -1967,29 +2163,35 @@ void CView::updateParameter(EObjParam propType)
 
 void CView::viewParameters()
 {
-    if(nullptr == m_activeMob)
+    if(m_aMob.isEmpty())
     {
         m_tableManager->reset(); //clear table data if empty current mob
+        m_tableManager->setReadOnly(false);
         emit selectionStateChanged(false);
         return;
     }
+
+    QList<CNode*> selected;
+    for(CMob* mob : m_aMob)
+        if(mob && isMobVisible(mob))
+            for(CNode* node : CScene::getInstance()->getMode() == eEditModeLogic
+                    ? mob->logicNodes() : mob->nodes())
+                if(node && node->nodeState() == ENodeState::eSelect
+                   && !selected.contains(node))
+                    selected.append(node);
 
     QSet<ENodeType> aType;
     //find unique selected node types
     //CMob* pMob = nullptr;
     //foreach(pMob, m_aMob)
     CNode* pNode = nullptr;
-    foreach(pNode, CScene::getInstance()->getMode() == eEditModeLogic ? m_activeMob->logicNodes() : m_activeMob->nodes())
-    {
-        if (pNode->nodeState() != ENodeState::eSelect)
-            continue;
-
+    foreach(pNode, selected)
         aType.insert(pNode->nodeType());
-    }
 
     if (aType.isEmpty())
     {//reset parameters if not selected objects
         m_tableManager->reset();
+        m_tableManager->setReadOnly(false);
         emit selectionStateChanged(false);
         return;
     }
@@ -2001,11 +2203,8 @@ void CView::viewParameters()
     const ENodeType commonType = ENodeType(ttt);
 
     QList<QSharedPointer<IPropertyBase>> aProp;
-    foreach(pNode, CScene::getInstance()->getMode() == eEditModeLogic ? m_activeMob->logicNodes() : m_activeMob->nodes())
+    foreach(pNode, selected)
     {
-        if (pNode->nodeState() != ENodeState::eSelect)
-            continue;
-
         if(CScene::getInstance()->getMode() == eEditModeLogic)
             pNode->collectlogicParams(aProp, commonType);
         else
@@ -2013,6 +2212,7 @@ void CView::viewParameters()
     }
 
     m_tableManager->setNewData(aProp);
+    m_tableManager->setReadOnly(!hasEditableSelection());
     emit selectionStateChanged(true);
 }
 
@@ -2195,7 +2395,7 @@ void CView::collectObjectTreeData()
 {
     m_pTree->prepareForRebuild();
     m_pTree->clear();
-    if(nullptr == m_activeMob)
+    if(m_aMob.isEmpty())
     {
         m_pTree->applyFilter();
         return;
@@ -2208,86 +2408,65 @@ void CView::collectObjectTreeData()
     m_pTree->header()->setStretchLastSection(false);
     m_pTree->header()->setSectionResizeMode(0, QHeaderView::Stretch);
     m_pTree->resizeColumnToContents(1);
-    //generate common object types
-    QMap<QString, QMap<QString, QList<CNode*>>> aObjList;
-    CNode* pNode = nullptr;
-    ENodeType type = ENodeType::eBaseType;
-    QString groupName;
-    auto fillObjectByType=[&aObjList, &type, &groupName, this](CNode* object) -> void
+    for(CMob* mob : m_aMob)
     {
-        QString typeString = m_pTree->objectNameByType(type);
-        if(aObjList.contains(typeString))
-        {
-            auto& group = aObjList[typeString];
-            group[groupName].append(object);
+        if(!mob)
+            continue;
+        const bool visible = isMobVisible(mob);
+        auto mobItem = new CTreeObject(m_pTree);
+        QString mobLabel = mob->mobName();
+        if(mob == m_activeMob)
+            mobLabel += tr(" [Active]");
+        if(!visible)
+            mobLabel += tr(" [Hidden]");
+        mobItem->setText(0, mobLabel);
+        mobItem->setText(1, QString::number(mob->nodes().size()));
+        mobItem->setData(0, Qt::UserRole + 1,
+                         QVariant::fromValue<qulonglong>(reinterpret_cast<qulonglong>(mob)));
+        mobItem->setExpanded(true);
+        m_pTree->addTopLevelItem(mobItem);
 
-        }
-        else
+        QMap<QString, QMap<QString, QList<CNode*>>> objects;
+        for(CNode* node : mob->nodes())
         {
-            QMap<QString, QList<CNode*>> map;
-            map[groupName].append(object);
-            aObjList[typeString] = map;
-        }
-    };
-    foreach(pNode, m_activeMob->nodes())
-    {
-        type = pNode->nodeType();
-        //can be optimized via class overriding
-        switch (type)
-        {
-        case ENodeType::eTorch:
-        case ENodeType::eLever:
-        case ENodeType::eMagicTrap:
-        case ENodeType::eLight:
-        case ENodeType::eSound:
-        case ENodeType::eParticle:
-        case ENodeType::eWorldObject:
-        {
-            groupName = pNode->mapName();
-            fillObjectByType(pNode);
-            break;
-        }
-        case ENodeType::eUnit:
-        {
-            auto pUnitItem = dynamic_cast<CUnit*>(pNode);
-            groupName = pUnitItem->databaseName();
-            fillObjectByType(pNode);
-            break;
-        }
-        default:
-        {
-            //do not collect nothing for Tree View
-            break;
-        }
-
-        }
-    }
-
-    for(auto& item : aObjList.toStdMap())
-    {
-        auto pTopItem = new CTreeObject(m_pTree);
-        pTopItem->setText(0, item.first);
-        m_pTree->addTopLevelItem(pTopItem);
-        for(auto& group : item.second.toStdMap())
-        {
-            auto pGroupItem = new CTreeObject(pTopItem, nullptr);
-            pGroupItem->setText(1, QString::number(group.second.size()));
-            if(group.second.size() == 1)
-            {
-                // +"(id:"+QString::number(group.second.first())+")"
-                pGroupItem->setText(0, group.first);
-                pGroupItem->setNode(group.second.front());
+            if(!node)
                 continue;
-            }
-            pGroupItem->setText(0, group.first);
-            for(CNode* object : group.second)
+            const QString typeName = m_pTree->objectNameByType(node->nodeType());
+            if(typeName.isEmpty())
+                continue;
+            CUnit* unit = dynamic_cast<CUnit*>(node);
+            const QString group = unit ? unit->databaseName() : node->mapName();
+            objects[typeName][group].append(node);
+        }
+
+        for(auto typeIt = objects.constBegin(); typeIt != objects.constEnd(); ++typeIt)
+        {
+            auto typeItem = new CTreeObject(mobItem, nullptr);
+            typeItem->setText(0, typeIt.key());
+            int typeCount = 0;
+            for(const QList<CNode*>& nodes : typeIt.value())
+                typeCount += nodes.size();
+            typeItem->setText(1, QString::number(typeCount));
+            for(auto groupIt = typeIt.value().constBegin(); groupIt != typeIt.value().constEnd(); ++groupIt)
             {
-                auto pObjectItem = new CTreeObject(pGroupItem, object);
-                pObjectItem->setText(0, QString::number(object->mapId()));
+                auto groupItem = new CTreeObject(typeItem, nullptr);
+                groupItem->setText(0, groupIt.key());
+                groupItem->setText(1, QString::number(groupIt.value().size()));
+                if(groupIt.value().size() == 1)
+                    groupItem->setNode(groupIt.value().front());
+                else
+                    for(CNode* node : groupIt.value())
+                    {
+                        auto objectItem = new CTreeObject(groupItem, node);
+                        objectItem->setText(0, QString::number(node->mapId()));
+                        if(!visible)
+                            objectItem->setFlags(objectItem->flags() & ~Qt::ItemIsSelectable);
+                    }
+                if(!visible)
+                    groupItem->setFlags(groupItem->flags() & ~Qt::ItemIsSelectable);
             }
         }
     }
-    m_pTree->sortItems(0, Qt::SortOrder::AscendingOrder);
     m_pTree->applyFilter();
 }
 
@@ -3118,11 +3297,8 @@ void CView::selectedObjectToClipboardBuffer()
     if(nullptr == m_activeMob)
         return;
 
-    CNode* pNode;
-
     QJsonArray arrObj;
-    //for(auto& mob: m_aMob)
-    foreach(pNode, m_activeMob->nodes())
+    for(CNode* pNode : selectedNodes())
         if (pNode->nodeState() & ENodeState::eSelect)
         {
             QJsonObject nodeData = pNode->toJson();
@@ -3136,7 +3312,8 @@ void CView::selectedObjectToClipboardBuffer()
                     QString::fromLatin1(pNode->rawSourceSubtreeSha256().toHex()));
                 QByteArray sourceSubtree;
                 QByteArray cleanSubtree;
-                if(m_activeMob->rawObjectTemplateBytes(pNode, &sourceSubtree, &cleanSubtree))
+                CMob* sourceMob = ownerMob(pNode);
+                if(sourceMob && sourceMob->rawObjectTemplateBytes(pNode, &sourceSubtree, &cleanSubtree))
                 {
                     provenance.insert("sourceSubtreeBase64",
                         QString::fromLatin1(sourceSubtree.toBase64()));

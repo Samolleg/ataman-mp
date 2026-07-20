@@ -13,6 +13,7 @@
 #include <QImage>
 #include <QPointer>
 #include <QRectF>
+#include <QSet>
 #include <QStringList>
 
 #include "types.h"
@@ -91,7 +92,13 @@ public:
     CSettings* settings() {Q_ASSERT(m_pSettings); return m_pSettings;}
     int select(const SSelect& selectParam, bool bAddToSelect = false);
     CMob* mob(QString mobName);
-    const QVector<CMob*> mobs() {return m_aMob;}
+    const QVector<CMob*> mobs() const {return m_aMob;}
+    CMob* ownerMob(CNode* node) const;
+    bool isMobVisible(CMob* mob) const;
+    void setMobVisible(CMob* mob, bool visible);
+    bool isLandscapeVisible() const { return m_landscapeVisible; }
+    void setLandscapeVisible(bool visible);
+    bool unloadMobDocument(CMob* mob);
     void drawSelectFrame(QRect& rect);
     void pickObject(QPoint mousePos, bool bAddToSelect);
     void pickObject(const QRect& rect, bool bAddToSelect);
@@ -124,6 +131,7 @@ public:
     void hideSelectedNodes();
     void unHideAll();
     CMob* currentMob() {return m_activeMob;}
+    bool hasEditableSelection() const;
     QOpenGLShaderProgram& shaderObject() {return m_program;}
     void setDirtyMpr();
     void setDurty(CMob* pMob = nullptr);
@@ -132,6 +140,10 @@ public:
     void copySelectedIDsToClipboard();
     void changeCurrentMob(CMob* pMob);
     void changeCurrentMob(QString mobName);
+    bool activateSelectedObjectMob();
+    bool selectNode(CNode* node, bool addToSelection = false,
+                    bool activateOwner = false);
+    bool selectNodes(const QList<CNode*>& nodes, bool addToSelection = false);
     void roundActiveMob();
     void undo_roundActiveMob();
     void execUnloadCommand();
@@ -194,6 +206,8 @@ private:
     void drawTilePreview(QOpenGLShaderProgram* program);
     void updateTileForm(bool bGenerateNewTable = false);
     void saveSession();
+    bool closeMobParameterWindow(CMob* mob);
+    bool closeAllMobParameterWindows();
     bool closeMobScriptWindow(CMob* mob);
     bool closeAllMobScriptWindows();
     bool confirmScriptReferencedObjectIds(const QVector<uint>& objectIds,
@@ -230,6 +244,7 @@ signals:
     void externalMobScriptImported(CMob* mob, const QString& displayScript);
     void selectionStateChanged(bool hasSelection);
     void mobStateChanged();
+    void loadedMapStateChanged();
     void nidChangeProposed(quint32 nid, const QString& mobPath);
     void nidAllocationRequested(const QString& mobPath, quint32* suggestion);
 
@@ -242,6 +257,7 @@ private:
     QOpenGLShaderProgram m_selectProgram;
     QMatrix4x4 m_projection;
     QVector<CMob*> m_aMob;
+    QSet<CMob*> m_hiddenMobs;
     QTimer* m_timer;
     CSettings* m_pSettings;
     QVector<bool> m_aReadState;
@@ -270,6 +286,7 @@ private:
     QDateTime m_lastModifiedLand;
     bool m_bDrawLand;
     bool m_bDrawWater;
+    bool m_landscapeVisible{true};
     bool m_bPreviewTile;
     CTileForm* m_pTileForm;
     QSharedPointer<CPreviewTile> m_pPreviewTile;

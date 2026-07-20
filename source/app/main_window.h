@@ -97,6 +97,7 @@ private:
     void updateEntranceOverlays();
     void updateOperationAvailability(bool hasSelection = false);
     void updateDocumentActionAvailability();
+    void updateLoadedMapPanel();
     void saveUiState();
     void closeHotReloadProgress();
     QVector<SMapSpawnObstacle> mapTestObstacles() const;
@@ -179,11 +180,14 @@ private:
     QTableWidget* m_testTable;
     QMenu* m_recentFilesMenu;
     QAction* m_externalScriptAction;
+    QAction* m_activateOwnerMobAction;
     QDockWidget* m_mapsDock;
     QDockWidget* m_historyDock;
     QDockWidget* m_validationDock;
     QDockWidget* m_outlinerDock;
     QDockWidget* m_propertiesDock;
+    QDockWidget* m_loadedMapDock;
+    QTreeWidget* m_loadedMapTree;
     QTreeWidget* m_validationTree;
     QLabel* m_validationSummary;
     QTimer* m_validationTimer;

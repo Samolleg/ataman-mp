@@ -62,14 +62,6 @@ void CSelect::keyPress(COperation *pOp, EKeyCode key)
         m_pView->clearObjectSelection();
         break;
     }
-    case eKey_T:
-    {
-        if (pOp->keyManager()->isPressed(eKey_Ctrl))
-        {
-            m_pView->iterateRoundMob();
-        }
-        break;
-    }
     case eKey_Delete:
     {
         m_pView->deleteSelectedNodes();
@@ -138,11 +130,6 @@ void CSelect::keyRelease(COperation *pOp, EKeyCode key)
 {
     pOp->keyManager()->release(key);
     switch (key) {
-    case eKey_Ctrl:
-    { //todo: optimize logic for applying active mob selection
-        m_pView->applyRoundMob();
-        break;
-    }
     default:
         break;
     }
