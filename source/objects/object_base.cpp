@@ -510,11 +510,15 @@ void CObjectBase::applyTransientVisual(const QString& modelName, const QString& 
                                        const QStringList& visibleParts, const QVector3D& complexion,
                                        const QMap<QString, QString>& partTextureNames,
                                        const QString& secondaryTextureName,
-                                       const QStringList& bodyTextureLayers)
+                                       const QStringList& bodyTextureLayers,
+                                       const QMap<QString, QStringList>& componentBodyTextureLayers)
 {
     QString textureFingerprint;
     for(auto it = partTextureNames.constBegin(); it != partTextureNames.constEnd(); ++it)
         textureFingerprint += it.key().toLower() + '=' + it.value().toLower() + ';';
+    for(auto it = componentBodyTextureLayers.constBegin();
+            it != componentBodyTextureLayers.constEnd(); ++it)
+        textureFingerprint += it.key().toLower() + "=[" + it.value().join(',').toLower() + "];";
     const QString fingerprint = modelName.toLower() + '|' + textureName.toLower() + '|'
         + secondaryTextureName.toLower() + '|'
         + bodyTextureLayers.join(';').toLower() + '|'
@@ -537,6 +541,18 @@ void CObjectBase::applyTransientVisual(const QString& modelName, const QString& 
     for(auto it = partTextureNames.constBegin(); it != partTextureNames.constEnd(); ++it)
         m_partTextures.insert(it.key().toLower(),
             CTextureList::getInstance()->texture(it.value(), modelName));
+    for(auto it = componentBodyTextureLayers.constBegin();
+            it != componentBodyTextureLayers.constEnd(); ++it)
+    {
+        const QString key = it.key().toLower();
+        if(m_partTextures.contains(key))
+            continue;
+        QStringList layers;
+        layers.append(textureName);
+        layers.append(it.value());
+        m_partTextures.insert(key,
+            CTextureList::getInstance()->layeredTexture(layers, modelName));
+    }
     if(!bodyTextureLayers.isEmpty())
         for(const QString& partName : visibleParts)
             if(ei::usesUnlayeredHumanoidTexture(partName)

@@ -301,6 +301,7 @@ QStringList armorSlots(const QString& type, bool jmv)
         parts << armorPartMap.value("shirt") << armorPartMap.value("gloves");
     else if(jmv && normalized == "leggings")
         parts << armorPartMap.value("pants") << armorPartMap.value("boots");
+    parts.removeDuplicates();
     return parts;
 }
 
@@ -534,6 +535,7 @@ SRuntimeProviderResult resolveEquipmentLayout(
     QJsonArray components, placeholders, diagnostics;
     QJsonObject componentTextures;
     QJsonArray bodyTextureLayers;
+    QMap<QString, QStringList> bodyTextureLayersBySlot;
     QJsonArray replacedParts;
     bool hidesHair = false;
     if(database.isNull())
@@ -638,7 +640,15 @@ SRuntimeProviderResult resolveEquipmentLayout(
                 for(const QString& component : matched)
                     componentTextures.insert(component, texture);
             else
+            {
                 bodyTextureLayers.append(texture);
+                // Equipment atlases share UV space, but unrelated lower slots
+                // are not one universal draw texture. Retain the provider's
+                // anatomical mapping so each final component receives only
+                // its own lower layer and any exact upper replacement layers.
+                for(const QString& component : matched)
+                    bodyTextureLayersBySlot[armorComponentSlot(component)].append(texture);
+            }
         }
         if(item->textureType1 > 0 && item->type.compare("helm", Qt::CaseInsensitive) != 0)
             for(const QString& component : matched)
@@ -651,6 +661,17 @@ SRuntimeProviderResult resolveEquipmentLayout(
                         replacedParts.append(slot);
                 }
             }
+    }
+
+    QJsonObject componentBodyTextureLayers;
+    // Capture the final armor component for each slot before weapon members
+    // are appended; rh3/lh3 weapon names must never inherit glove atlases.
+    for(const QJsonValue& value : components)
+    {
+        const QString component = value.toString();
+        const QStringList layers = bodyTextureLayersBySlot.value(armorComponentSlot(component));
+        if(!layers.isEmpty())
+            componentBodyTextureLayers.insert(component, QJsonArray::fromStringList(layers));
     }
 
     struct Weapon { QString reference; ei::SItemDatabaseRecord item; EWeaponClass kind; };
@@ -771,6 +792,7 @@ SRuntimeProviderResult resolveEquipmentLayout(
     equipmentLayout->insert("components", components);
     equipmentLayout->insert("componentTextures", componentTextures);
     equipmentLayout->insert("bodyTextureLayers", bodyTextureLayers);
+    equipmentLayout->insert("componentBodyTextureLayers", componentBodyTextureLayers);
     equipmentLayout->insert("replacedParts", replacedParts);
     equipmentLayout->insert("hidesHair", hidesHair);
     equipmentLayout->insert("placeholders", placeholders);

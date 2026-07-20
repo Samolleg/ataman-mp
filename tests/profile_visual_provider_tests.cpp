@@ -81,6 +81,15 @@ QStringList jsonStrings(const QJsonObject& value, const char* key)
     return result;
 }
 
+QStringList jsonComponentLayers(const QJsonObject& value, const QString& component)
+{
+    QStringList result;
+    const QJsonArray layers = value.value("componentBodyTextureLayers")
+        .toObject().value(component).toArray();
+    for(const QJsonValue& layer : layers) result.append(layer.toString());
+    return result;
+}
+
 }
 
 class ProfileVisualProviderTests : public QObject
@@ -464,6 +473,14 @@ void ProfileVisualProviderTests::jmvTopArmorWinsAvailableLowerLayerOverlaps()
         "unhumash_04.le.0.x4.mmp", "unhumagl_05.le.0.x4.mmp",
         "unhumapt_07.le.0.x4.mmp", "unhumabt_06.le.0.x4.mmp",
         "unhumapl_08.le.0.x4.mmp", "unhumalg_09.le.0.x4.mmp"}));
+    QCOMPARE(jsonComponentLayers(output, "bd.armor08"), QStringList({
+        "unhumash_04.le.0.x4.mmp", "unhumapl_08.le.0.x4.mmp"}));
+    QCOMPARE(jsonComponentLayers(output, "lh2.armor08"), QStringList({
+        "unhumagl_05.le.0.x4.mmp", "unhumapl_08.le.0.x4.mmp"}));
+    QCOMPARE(jsonComponentLayers(output, "hp.armor09"), QStringList({
+        "unhumapt_07.le.0.x4.mmp", "unhumalg_09.le.0.x4.mmp"}));
+    QCOMPARE(jsonComponentLayers(output, "ll2.armor09"), QStringList({
+        "unhumabt_06.le.0.x4.mmp", "unhumalg_09.le.0.x4.mmp"}));
 }
 
 void ProfileVisualProviderTests::jmvMissingTopOverlapRetainsLowerArmor()
