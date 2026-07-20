@@ -283,10 +283,11 @@ MainWindow::MainWindow(QWidget* parent) :
             m_pView->setMobVisible(mob, visible);
         }
     });
-    connect(m_loadedMapTree, &QTreeWidget::itemClicked, this,
+    connect(m_loadedMapTree, &QTreeWidget::itemDoubleClicked, this,
             [this](QTreeWidgetItem* item, int column)
     {
-        if(!item || column != 1 || !m_pView
+        Q_UNUSED(column);
+        if(!item || !m_pView
            || item->data(0, kLoadedMapKindRole).toInt() != kLoadedMapMob)
             return;
         CMob* mob = reinterpret_cast<CMob*>(
