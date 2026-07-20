@@ -1628,6 +1628,18 @@ void EnduranceDocumentTests::terrainTilePaintingIsUndoableLocalizedAndNamespaceS
     {
         QVERIFY(qAbs(delta.globalX - 8) <= 1);
         QVERIFY(qAbs(delta.globalY - 8) <= 1);
+        QVERIFY(delta.hasSemanticRequest);
+        QCOMPARE(delta.brushCenterX, 8);
+        QCOMPARE(delta.brushCenterY, 8);
+        QCOMPARE(delta.requestedMaterialId, qint32(2));
+        bool requestedFound = false;
+        const STerrainTransitionSignature selectedSignature =
+            semanticCatalog.signatureForPacked(delta.after, &requestedFound);
+        QVERIFY(requestedFound);
+        QCOMPARE(delta.requestedSignature.northWest, selectedSignature.northWest);
+        QCOMPARE(delta.requestedSignature.northEast, selectedSignature.northEast);
+        QCOMPARE(delta.requestedSignature.southEast, selectedSignature.southEast);
+        QCOMPARE(delta.requestedSignature.southWest, selectedSignature.southWest);
         if(delta.globalX == 8 && delta.globalY == 8)
         {
             bool centerFound = false;

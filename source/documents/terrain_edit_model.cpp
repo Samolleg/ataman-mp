@@ -1470,6 +1470,11 @@ STerrainTileCommand CTerrainEditModel::makeSemanticTilePaint(
         delta.layer = layer;
         delta.before = before;
         delta.after = after;
+        delta.hasSemanticRequest = true;
+        delta.brushCenterX = qRound(brush.centerX);
+        delta.brushCenterY = qRound(brush.centerY);
+        delta.requestedMaterialId = materialId;
+        delta.requestedSignature = desired;
         command.deltas.append(delta);
     }
     return command;

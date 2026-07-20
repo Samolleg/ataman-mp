@@ -46,22 +46,6 @@ struct STerrainTileBrush
     ETerrainTileBrushShape shape{ETerrainTileBrushShape::Circle};
 };
 
-struct STerrainTileDelta
-{
-    int globalX{0};
-    int globalY{0};
-    ETerrainTileLayer layer{ETerrainTileLayer::Land};
-    quint16 before{0};
-    quint16 after{0};
-};
-
-struct STerrainTileCommand
-{
-    QString description;
-    QVector<STerrainTileDelta> deltas;
-    bool isEmpty() const { return deltas.isEmpty(); }
-};
-
 struct STerrainTransitionSignature
 {
     qint32 northWest{0};
@@ -74,6 +58,27 @@ struct STerrainTransitionSignature
         return northWest == other.northWest && northEast == other.northEast
             && southEast == other.southEast && southWest == other.southWest;
     }
+};
+
+struct STerrainTileDelta
+{
+    int globalX{0};
+    int globalY{0};
+    ETerrainTileLayer layer{ETerrainTileLayer::Land};
+    quint16 before{0};
+    quint16 after{0};
+    bool hasSemanticRequest{false};
+    int brushCenterX{0};
+    int brushCenterY{0};
+    qint32 requestedMaterialId{0};
+    STerrainTransitionSignature requestedSignature;
+};
+
+struct STerrainTileCommand
+{
+    QString description;
+    QVector<STerrainTileDelta> deltas;
+    bool isEmpty() const { return deltas.isEmpty(); }
 };
 
 struct STerrainTransitionVariant

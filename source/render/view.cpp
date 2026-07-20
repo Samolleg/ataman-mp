@@ -66,6 +66,29 @@ QByteArray terrainAtlasPixelSha256(const QVector<QImage>& images)
     return hash.result().toHex();
 }
 
+QJsonObject terrainGridSignatureJson(const STerrainTransitionSignature& signature)
+{
+    QJsonObject result;
+    result.insert("x0y0", signature.northWest);
+    result.insert("x1y0", signature.northEast);
+    result.insert("x1y1", signature.southEast);
+    result.insert("x0y1", signature.southWest);
+    return result;
+}
+
+QJsonObject packedTerrainTileJson(quint16 packed)
+{
+    const SMprPackedTile tile = SMprPackedTile::decode(packed);
+    QJsonObject result;
+    result.insert("decimal", int(packed));
+    result.insert("hex", QString("0x%1").arg(packed, 4, 16, QLatin1Char('0')));
+    result.insert("atlasIndex", int(tile.atlasIndex));
+    result.insert("tileIndex", int(tile.tileIndex));
+    result.insert("atlasSlot", tile.atlasSlot());
+    result.insert("rotation", int(tile.rotation));
+    return result;
+}
+
 class CTerrainHeightPreviewCommand : public QUndoCommand
 {
 public:
@@ -1320,7 +1343,7 @@ void CView::exportTerrainPaintDiagnostic()
         return;
     QJsonObject root;
     root.insert("schema", "ei-mapper-endurance-paint-diagnostic");
-    root.insert("version", 1);
+    root.insert("version", 2);
     root.insert("mprFileName", m_pLand->filePath().fileName());
     root.insert("mprNamespace", m_mprDocument.mapInfo().innerNamespace);
     root.insert("sourceMprSha256", QString::fromLatin1(QCryptographicHash::hash(
@@ -1339,9 +1362,60 @@ void CView::exportTerrainPaintDiagnostic()
         QJsonObject operation;
         operation.insert("x", delta.globalX);
         operation.insert("y", delta.globalY);
+        QJsonObject globalGrid;
+        globalGrid.insert("x", delta.globalX);
+        globalGrid.insert("y", delta.globalY);
+        operation.insert("globalGrid", globalGrid);
+        QJsonObject sectorGrid;
+        sectorGrid.insert("sectorX", delta.globalX / 16);
+        sectorGrid.insert("sectorY", delta.globalY / 16);
+        sectorGrid.insert("localColumn", delta.globalX % 16);
+        sectorGrid.insert("localRow", delta.globalY % 16);
+        operation.insert("sectorGrid", sectorGrid);
         operation.insert("layer", delta.layer == ETerrainTileLayer::Land ? "land" : "overlay");
         operation.insert("beforePacked", int(delta.before));
         operation.insert("afterPacked", int(delta.after));
+        operation.insert("before", packedTerrainTileJson(delta.before));
+        operation.insert("after", packedTerrainTileJson(delta.after));
+        operation.insert("hasSemanticRequest", delta.hasSemanticRequest);
+        if(delta.hasSemanticRequest)
+        {
+            QJsonObject brushCenter;
+            brushCenter.insert("x", delta.brushCenterX);
+            brushCenter.insert("y", delta.brushCenterY);
+            operation.insert("brushCenterGrid", brushCenter);
+            QJsonObject brushOffset;
+            brushOffset.insert("x", delta.globalX - delta.brushCenterX);
+            brushOffset.insert("y", delta.globalY - delta.brushCenterY);
+            operation.insert("brushGridOffset", brushOffset);
+            operation.insert("requestedMaterialId", delta.requestedMaterialId);
+            operation.insert("requestedGridCorners",
+                             terrainGridSignatureJson(delta.requestedSignature));
+        }
+        const CTerrainTransitionCatalog& catalog = m_terrainAtlasAnalysis.catalog(delta.layer);
+        bool beforeFound = false;
+        bool afterFound = false;
+        bool baseFound = false;
+        const STerrainTransitionSignature beforeSignature =
+            catalog.signatureForPacked(delta.before, &beforeFound);
+        const STerrainTransitionSignature afterSignature =
+            catalog.signatureForPacked(delta.after, &afterFound);
+        SMprPackedTile baseTile = SMprPackedTile::decode(delta.after);
+        baseTile.rotation = 0;
+        const STerrainTransitionSignature baseSignature =
+            catalog.signatureForPacked(baseTile.encode(), &baseFound);
+        operation.insert("beforeCatalogRecognized", beforeFound);
+        operation.insert("afterCatalogRecognized", afterFound);
+        operation.insert("slotRotationZeroCatalogRecognized", baseFound);
+        if(beforeFound)
+            operation.insert("beforeCatalogGridCorners",
+                             terrainGridSignatureJson(beforeSignature));
+        if(afterFound)
+            operation.insert("afterCatalogGridCorners",
+                             terrainGridSignatureJson(afterSignature));
+        if(baseFound)
+            operation.insert("slotRotationZeroCatalogGridCorners",
+                             terrainGridSignatureJson(baseSignature));
         operations.append(operation);
     }
     root.insert("paintDeltas", operations);
