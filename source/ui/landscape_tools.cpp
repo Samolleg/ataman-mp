@@ -23,6 +23,9 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     , m_paintTerrainType(new QComboBox(this))
     , m_paintRadius(new QDoubleSpinBox(this))
     , m_paintShape(new QComboBox(this))
+    , m_showUnderwaterFamilies(new QCheckBox(tr("Show underwater material families"), this))
+    , m_showMainTerrain(new QCheckBox(tr("Show main terrain (M)"), this))
+    , m_showOverlays(new QCheckBox(tr("Show overlays (J)"), this))
     , m_tilesetStatus(new QLabel(tr("Terrain materials are loaded from the MPR namespace template."), this))
     , m_sculptControls(new QWidget(this))
     , m_paintControls(new QWidget(this))
@@ -34,6 +37,10 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     warning->setStyleSheet("QLabel { color: #b06000; font-weight: bold; }");
     layout->addWidget(warning);
     layout->addWidget(m_enable);
+    m_showMainTerrain->setChecked(true);
+    m_showOverlays->setChecked(true);
+    layout->addWidget(m_showMainTerrain);
+    layout->addWidget(m_showOverlays);
 
     m_mode->addItem(tr("Sculpt terrain"));
     m_mode->addItem(tr("Paint land tiles"));
@@ -92,6 +99,7 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     paintForm->addRow(tr("Terrain material"), m_paintTerrainType);
     paintForm->addRow(tr("Brush size (tiles)"), m_paintRadius);
     paintForm->addRow(tr("Brush shape"), m_paintShape);
+    paintForm->addRow(m_showUnderwaterFamilies);
     paintLayout->addLayout(paintForm);
     QPushButton* tilePicker = new QPushButton(tr("Inspect atlas / choose representative..."), this);
     paintLayout->addWidget(tilePicker);
@@ -115,6 +123,15 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
         emit paintTerrainTypeChanged(selected ? terrainType : -1);
     });
     connect(m_enable, &QCheckBox::toggled, this, &CLandscapeTools::editingStateChanged);
+    connect(m_showUnderwaterFamilies, &QCheckBox::toggled, this,
+            [this](bool) { refreshPaintTerrainTypes(); });
+    const auto visibilityChanged = [this](bool)
+    {
+        emit terrainVisibilityChanged(m_showMainTerrain->isChecked(),
+                                      m_showOverlays->isChecked());
+    };
+    connect(m_showMainTerrain, &QCheckBox::toggled, this, visibilityChanged);
+    connect(m_showOverlays, &QCheckBox::toggled, this, visibilityChanged);
     connect(m_mode, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int)
     {
         updateModeVisibility();
@@ -168,6 +185,8 @@ void CLandscapeTools::updateModeVisibility()
     const bool sculpt = editMode() == ELandscapeEditMode::Sculpt;
     m_sculptControls->setVisible(sculpt);
     m_paintControls->setVisible(!sculpt);
+    m_showUnderwaterFamilies->setVisible(
+        editMode() == ELandscapeEditMode::TilePaint);
 }
 ELandscapeSculptTool CLandscapeTools::sculptTool() const
 {
@@ -198,19 +217,24 @@ qint32 CLandscapeTools::paintTerrainType(bool* selected) const
 }
 void CLandscapeTools::setPaintTerrainTypes(
     const QVector<QPair<qint32, QString>>& landTypes,
+    const QVector<QPair<qint32, QString>>& underwaterTypes,
     const QVector<QPair<qint32, QString>>& overlayTypes,
     const QString& status)
 {
     m_landPaintTypes = landTypes;
+    m_underwaterPaintTypes = underwaterTypes;
     m_overlayPaintTypes = overlayTypes;
     m_paintCatalogStatus = status;
     refreshPaintTerrainTypes();
 }
 void CLandscapeTools::refreshPaintTerrainTypes()
 {
-    const QVector<QPair<qint32, QString>>& terrainTypes =
+    QVector<QPair<qint32, QString>> terrainTypes =
         editMode() == ELandscapeEditMode::OverlayPaint
             ? m_overlayPaintTypes : m_landPaintTypes;
+    if(editMode() == ELandscapeEditMode::TilePaint
+       && m_showUnderwaterFamilies->isChecked())
+        terrainTypes += m_underwaterPaintTypes;
     const QSignalBlocker blocker(m_paintTerrainType);
     m_paintTerrainType->clear();
     m_paintTerrainType->addItem(tr("Choose a material..."), QVariant());
@@ -229,4 +253,32 @@ bool CLandscapeTools::selectPaintTerrainType(qint32 terrainType)
     const int index = m_paintTerrainType->findData(terrainType);
     m_paintTerrainType->setCurrentIndex(index >= 0 ? index : 0);
     return index >= 0;
+}
+bool CLandscapeTools::underwaterFamiliesVisible() const
+{
+    return m_showUnderwaterFamilies->isChecked();
+}
+void CLandscapeTools::setUnderwaterFamiliesVisible(bool visible)
+{
+    m_showUnderwaterFamilies->setChecked(visible);
+}
+bool CLandscapeTools::mainTerrainVisible() const
+{
+    return m_showMainTerrain->isChecked();
+}
+bool CLandscapeTools::overlaysVisible() const
+{
+    return m_showOverlays->isChecked();
+}
+void CLandscapeTools::setTerrainVisibility(bool mainTerrainVisible,
+                                           bool overlaysVisible, bool notify)
+{
+    {
+        const QSignalBlocker landBlocker(m_showMainTerrain);
+        const QSignalBlocker overlayBlocker(m_showOverlays);
+        m_showMainTerrain->setChecked(mainTerrainVisible);
+        m_showOverlays->setChecked(overlaysVisible);
+    }
+    if(notify)
+        emit terrainVisibilityChanged(mainTerrainVisible, overlaysVisible);
 }

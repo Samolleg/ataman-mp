@@ -1041,14 +1041,10 @@ CSelect::CSelect(CView *pView):
 
 CTileBrush::CTileBrush(CView* pView)
     :CState(pView)
-    ,m_bDrawWater(true)
-    ,m_bDrawLand(true)
 {
     qDebug()<< "CTileBrush init ";
     CStatusConnector::getInstance()->updateStatus("brush.ico", "Esc-Cancel, LMB-paint selected tile, RMB-pick tile, Wheel-rotate. Choose Land/Overlay in Landscape Tools; M/J toggle land/overlay visibility.");
     CButtonConnector::getInstance()->pressButton(EButtonOpTilebrush);
-    m_pView->setDrawLand(m_bDrawLand);
-    m_pView->setDrawWater(m_bDrawWater);
     m_pView->showOutliner(false);
 }
 
@@ -1061,8 +1057,6 @@ void CTileBrush::keyPress(COperation* pOp, EKeyCode key)
         m_pView->onRestoreCursor();
         m_pView->setPreviewTile(false);
         m_pView->showOutliner(true);
-        m_pView->setDrawLand(true);
-        m_pView->setDrawWater(true);
         m_pView->setLandscapeEditingEnabled(false);
         pOp->setCurrent(new CSelect(m_pView));
         delete this;
@@ -1070,14 +1064,12 @@ void CTileBrush::keyPress(COperation* pOp, EKeyCode key)
     }
     case eKey_J:
     {
-        m_bDrawWater = !m_bDrawWater;
-        m_pView->setDrawWater(m_bDrawWater);
+        m_pView->setDrawWater(!m_pView->drawWater());
         break;
     }
     case eKey_M:
     {
-        m_bDrawLand = !m_bDrawLand;
-        m_pView->setDrawLand(m_bDrawLand);
+        m_pView->setDrawLand(!m_pView->drawLand());
         break;
     }
     case eKey_1 ... eKey_8:

@@ -94,6 +94,12 @@ STerrainAtlasAnalysis CTerrainAtlasAnalyzer::analyze(
     }
 
     result.templateName = QStringLiteral("Zone1 stock slot layout");
+    // The inherited renderer displays packed 90/270-degree tile turns in the
+    // opposite direction from the atlas-authoring convention used by the
+    // semantic corner template. Correct only newly selected paint variants;
+    // decoding untouched MPR tiles remains byte/meaning preserving.
+    result.landCatalog.setSwapPaintQuarterTurns(true);
+    result.overlayCatalog.setSwapPaintQuarterTurns(true);
     result.expectedSlots = 512;
     if(atlasSlotCount != result.expectedSlots)
     {
@@ -167,12 +173,14 @@ STerrainAtlasAnalysis CTerrainAtlasAnalyzer::analyze(
 
     for(const SMaterialDefinition& definition : kZone1Materials)
     {
-        if(!definition.paintable || !pureSeen.contains(definition.id))
-            continue; // Internal atlas families are decoded but are not paint choices.
+        const bool underwater = definition.id == 1 || definition.id == 8;
+        if((!definition.paintable && !underwater) || !pureSeen.contains(definition.id))
+            continue; // Transition-only internal families remain unavailable.
         STerrainAtlasMaterial material;
         material.id = definition.id;
         material.name = QString::fromUtf8(definition.name);
         material.layer = definition.layer;
+        material.underwater = underwater;
         material.representativeSlot = representatives.value(definition.id, -1);
         material.pureVariantCount = pureCounts.value(definition.id);
         result.materials.append(material);

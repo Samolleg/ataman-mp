@@ -93,6 +93,10 @@ public:
     quint16 select(const STerrainTransitionSignature& signature,
                    int globalX, int globalY, quint32 distributionSeed,
                    bool* found = nullptr) const;
+    quint16 selectForPaint(const STerrainTransitionSignature& signature,
+                           int globalX, int globalY, quint32 distributionSeed,
+                           bool* found = nullptr) const;
+    void setSwapPaintQuarterTurns(bool enabled) { m_swapPaintQuarterTurns = enabled; }
     STerrainTransitionSignature signatureForPacked(
         quint16 packedTile, bool* found = nullptr) const;
     bool hasMaterial(qint32 materialId) const;
@@ -107,6 +111,7 @@ private:
     QHash<quint16, int> m_packedLookup;
     QHash<QByteArray, QVector<int>> m_signatureLookup;
     QSet<qint32> m_materialIds;
+    bool m_swapPaintQuarterTurns{false};
 };
 
 struct STerrainHeightDelta

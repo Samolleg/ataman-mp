@@ -172,8 +172,6 @@ public:
     void wheelEvent(COperation *pOp, QWheelEvent* pEvent) override final;
 private:
     QVector3D m_lastLandPos;
-    bool m_bDrawWater;
-    bool m_bDrawLand;
 };
 
 #endif // COPERATIONMANAGER_H

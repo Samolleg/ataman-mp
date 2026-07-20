@@ -44,9 +44,16 @@ public:
     ETerrainTileBrushShape paintShape() const;
     qint32 paintTerrainType(bool* selected = nullptr) const;
     void setPaintTerrainTypes(const QVector<QPair<qint32, QString>>& landTypes,
+                              const QVector<QPair<qint32, QString>>& underwaterTypes,
                               const QVector<QPair<qint32, QString>>& overlayTypes,
                               const QString& status = QString());
     bool selectPaintTerrainType(qint32 terrainType);
+    bool underwaterFamiliesVisible() const;
+    void setUnderwaterFamiliesVisible(bool visible);
+    bool mainTerrainVisible() const;
+    bool overlaysVisible() const;
+    void setTerrainVisibility(bool mainTerrainVisible, bool overlaysVisible,
+                              bool notify = false);
 
 signals:
     void importHeightmapRequested();
@@ -54,6 +61,7 @@ signals:
     void exportPaintDiagnosticRequested();
     void editingStateChanged();
     void paintTerrainTypeChanged(qint32 terrainType);
+    void terrainVisibilityChanged(bool mainTerrainVisible, bool overlaysVisible);
 
 private:
     QCheckBox* m_enable;
@@ -67,10 +75,14 @@ private:
     QComboBox* m_paintTerrainType;
     QDoubleSpinBox* m_paintRadius;
     QComboBox* m_paintShape;
+    QCheckBox* m_showUnderwaterFamilies;
+    QCheckBox* m_showMainTerrain;
+    QCheckBox* m_showOverlays;
     QLabel* m_tilesetStatus;
     QWidget* m_sculptControls;
     QWidget* m_paintControls;
     QVector<QPair<qint32, QString>> m_landPaintTypes;
+    QVector<QPair<qint32, QString>> m_underwaterPaintTypes;
     QVector<QPair<qint32, QString>> m_overlayPaintTypes;
     QString m_paintCatalogStatus;
     void updateModeVisibility();

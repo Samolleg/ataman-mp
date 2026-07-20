@@ -186,7 +186,34 @@ void CView::attachLandscapeTools(CLandscapeTools* tools)
                 }
             }
         });
+        connect(m_landscapeTools, &CLandscapeTools::terrainVisibilityChanged,
+                this, [this](bool drawLand, bool drawWater)
+        {
+            setDrawLand(drawLand);
+            setDrawWater(drawWater);
+        });
+        m_landscapeTools->setTerrainVisibility(m_bDrawLand, m_bDrawWater);
     }
+}
+
+void CView::setDrawWater(bool bDraw)
+{
+    if(m_bDrawWater == bDraw)
+        return;
+    m_bDrawWater = bDraw;
+    if(m_landscapeTools)
+        m_landscapeTools->setTerrainVisibility(m_bDrawLand, m_bDrawWater);
+    update();
+}
+
+void CView::setDrawLand(bool bDraw)
+{
+    if(m_bDrawLand == bDraw)
+        return;
+    m_bDrawLand = bDraw;
+    if(m_landscapeTools)
+        m_landscapeTools->setTerrainVisibility(m_bDrawLand, m_bDrawWater);
+    update();
 }
 
 void CView::activateLandscapeTilePainting()
@@ -1232,7 +1259,7 @@ void CView::rebuildTerrainAutoCatalog()
     m_terrainMaterialRepresentatives.clear();
     m_terrainPaintAudit.clear();
     if(m_landscapeTools)
-        m_landscapeTools->setPaintTerrainTypes({}, {});
+        m_landscapeTools->setPaintTerrainTypes({}, {}, {});
     QByteArray seedText = m_mprDocument.mapInfo().innerNamespace.toUtf8();
     quint32 seed = 2166136261u;
     for(char byte : seedText)
@@ -1248,11 +1275,12 @@ void CView::rebuildTerrainAutoCatalog()
         m_mprDocument.mapInfo().innerNamespace,
         m_pTileForm->tileImages().size(), &report);
     QVector<QPair<qint32, QString>> landChoices;
+    QVector<QPair<qint32, QString>> underwaterChoices;
     QVector<QPair<qint32, QString>> overlayChoices;
     for(const STerrainAtlasMaterial& material : m_terrainAtlasAnalysis.materials)
     {
-        QVector<QPair<qint32, QString>>& choices =
-            material.layer == ETerrainAtlasLayer::Land ? landChoices : overlayChoices;
+        QVector<QPair<qint32, QString>>& choices = material.layer == ETerrainAtlasLayer::Overlay
+            ? overlayChoices : (material.underwater ? underwaterChoices : landChoices);
         choices.append(qMakePair(material.id,
             tr("%1 (%2 natural variant(s))")
                 .arg(material.name).arg(material.pureVariantCount)));
@@ -1264,7 +1292,8 @@ void CView::rebuildTerrainAutoCatalog()
               .arg(landChoices.size()).arg(overlayChoices.size())
         : tr("No authored slot template is registered for namespace '%1'. Semantic painting is disabled.")
               .arg(m_mprDocument.mapInfo().innerNamespace);
-    m_landscapeTools->setPaintTerrainTypes(landChoices, overlayChoices, status);
+    m_landscapeTools->setPaintTerrainTypes(
+        landChoices, underwaterChoices, overlayChoices, status);
     ei::log(report.hasErrors() ? eLogWarning : eLogInfo,
         QString("Terrain namespace template: %1, %2 land materials, %3 overlay materials, %4/%5 described slots%6")
             .arg(m_terrainAtlasAnalysis.templateName)
@@ -3308,8 +3337,6 @@ bool CView::cancelPendingOperation()
         setPreviewTile(false);
         unsetCursor();
         showOutliner(true);
-        setDrawLand(true);
-        setDrawWater(true);
         break;
     case eOperationMethodSelect:
         return false;

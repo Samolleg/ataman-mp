@@ -19,6 +19,7 @@ struct STerrainAtlasMaterial
     qint32 id{0};
     QString name;
     ETerrainAtlasLayer layer{ETerrainAtlasLayer::Land};
+    bool underwater{false};
     int representativeSlot{-1};
     int pureVariantCount{0};
 };

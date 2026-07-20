@@ -1775,7 +1775,7 @@ void EnduranceDocumentTests::zone1NamespaceTemplateSeparatesLandOverlayAndVarian
         CTerrainAtlasAnalyzer::analyze("zone1", 512, &report);
     QVERIFY2(analysis.usable, qPrintable(report.toText()));
     QCOMPARE(analysis.templateName, QString("Zone1 stock slot layout"));
-    QCOMPARE(analysis.materials.size(), 7);
+    QCOMPARE(analysis.materials.size(), 9);
     QCOMPARE(analysis.describedSlots, 512);
     int landMaterials = 0;
     int overlayMaterials = 0;
@@ -1786,15 +1786,15 @@ void EnduranceDocumentTests::zone1NamespaceTemplateSeparatesLandOverlayAndVarian
         else
             ++overlayMaterials;
     }
-    QCOMPARE(landMaterials, 5);
+    QCOMPARE(landMaterials, 7);
     QCOMPARE(overlayMaterials, 2);
-    QCOMPARE(analysis.materials.at(1).name, QString("Grass / dark"));
-    QCOMPARE(analysis.materials.at(2).name, QString("Grass / common"));
-    QCOMPARE(analysis.materials.at(3).name, QString("Swamp"));
-    QVERIFY(std::none_of(analysis.materials.constBegin(), analysis.materials.constEnd(),
-                         [](const STerrainAtlasMaterial& material) {
-        return material.id == 1 || material.id == 8;
-    }));
+    QCOMPARE(analysis.materials.at(1).name, QString("Ground / common"));
+    QCOMPARE(analysis.materials.at(2).name, QString("Grass / dark"));
+    QCOMPARE(analysis.materials.at(3).name, QString("Grass / common"));
+    QCOMPARE(std::count_if(analysis.materials.constBegin(), analysis.materials.constEnd(),
+                           [](const STerrainAtlasMaterial& material) {
+        return material.underwater;
+    }), 2);
 
     SMprPackedTile packed;
     packed.tileIndex = 50;
@@ -1811,7 +1811,11 @@ void EnduranceDocumentTests::zone1NamespaceTemplateSeparatesLandOverlayAndVarian
     QVERIFY(!found);
     analysis.overlayCatalog.signatureForPacked(packed.encode(), &found);
     QVERIFY(found);
-    QCOMPARE(analysis.materials.at(4).representativeSlot, 16);
+    const auto stillWater = std::find_if(
+        analysis.materials.constBegin(), analysis.materials.constEnd(),
+        [](const STerrainAtlasMaterial& material) { return material.id == 6; });
+    QVERIFY(stillWater != analysis.materials.constEnd());
+    QCOMPARE(stillWater->representativeSlot, 16);
 
     const QVector<qint32> selectableLand({2, 3, 4, 7, 9});
     for(qint32 target : selectableLand)
@@ -1849,6 +1853,23 @@ void EnduranceDocumentTests::zone1NamespaceTemplateSeparatesLandOverlayAndVarian
              QVector<qint32>({5, 6}));
     QCOMPARE(analysis.overlayCatalog.shortestMaterialPath(6, 5),
              QVector<qint32>({6, 5}));
+
+    STerrainTransitionSignature sideEdge;
+    sideEdge.northWest = 4;
+    sideEdge.northEast = 2;
+    sideEdge.southEast = 2;
+    sideEdge.southWest = 4;
+    bool normalFound = false;
+    bool paintFound = false;
+    const SMprPackedTile normalSide = SMprPackedTile::decode(
+        analysis.landCatalog.select(sideEdge, 100, 100, 12345u, &normalFound));
+    const SMprPackedTile paintedSide = SMprPackedTile::decode(
+        analysis.landCatalog.selectForPaint(sideEdge, 100, 100, 12345u, &paintFound));
+    QVERIFY(normalFound);
+    QVERIFY(paintFound);
+    QCOMPARE(paintedSide.atlasSlot(), normalSide.atlasSlot());
+    QVERIFY(normalSide.rotation == 1 || normalSide.rotation == 3);
+    QCOMPARE(paintedSide.rotation, quint8(4 - normalSide.rotation));
 
     CValidationReport unknownReport;
     QVERIFY(!CTerrainAtlasAnalyzer::analyze("custom", 512, &unknownReport).usable);
@@ -2006,7 +2027,7 @@ void EnduranceDocumentTests::zone1NamespaceTemplateMatchesPrivateFixture()
     QSet<qint32> changedMaterials;
     for(const STerrainAtlasMaterial& material : analysis.materials)
     {
-        if(material.layer != ETerrainAtlasLayer::Land)
+        if(material.layer != ETerrainAtlasLayer::Land || material.underwater)
             continue;
         for(const QPoint& probe : refusalProbes)
         {

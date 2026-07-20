@@ -167,8 +167,10 @@ public:
     void setTile(QVector3D posOnLand, bool bLand = true);
     void updatePreviewTile(QVector3D posOnLand, bool bLand = true);
     void addTileRotation(int step);
-    void setDrawWater(bool bDraw = true) {m_bDrawWater = bDraw;}
-    void setDrawLand(bool bDraw = true) {m_bDrawLand = bDraw;}
+    void setDrawWater(bool bDraw = true);
+    void setDrawLand(bool bDraw = true);
+    bool drawWater() const { return m_bDrawWater; }
+    bool drawLand() const { return m_bDrawLand; }
     bool isPreviewTile() const {return m_bPreviewTile;}
     void setPreviewTile(bool bDraw = true) {m_bPreviewTile = bDraw;}
     void showOutliner(bool bShow = true);

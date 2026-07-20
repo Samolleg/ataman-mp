@@ -410,6 +410,21 @@ int runHeadlessCommand(QApplication& app)
         CLandscapeTools landscapeTools;
         const bool minimumPaintBrushIsSingleTile = qFuzzyIsNull(
             landscapeTools.paintRadius());
+        landscapeTools.setPaintTerrainTypes(
+            {{2, "Ground"}}, {{1, "Underwater ground"}}, {{5, "Swamp"}});
+        landscapeTools.activateMode(ELandscapeEditMode::TilePaint, false);
+        const bool underwaterFamiliesHiddenByDefault =
+            !landscapeTools.underwaterFamiliesVisible()
+            && !landscapeTools.selectPaintTerrainType(1);
+        landscapeTools.setUnderwaterFamiliesVisible(true);
+        const bool underwaterFamiliesCanBeShown =
+            landscapeTools.underwaterFamiliesVisible()
+            && landscapeTools.selectPaintTerrainType(1);
+        const bool landscapeLayersVisibleByDefault =
+            landscapeTools.mainTerrainVisible() && landscapeTools.overlaysVisible();
+        landscapeTools.setTerrainVisibility(false, true);
+        const bool landscapeVisibilityControlsWork =
+            !landscapeTools.mainTerrainVisible() && landscapeTools.overlaysVisible();
 
         QWidget primaryWindow;
         bool settingsTabsUsable = false;
@@ -500,6 +515,10 @@ int runHeadlessCommand(QApplication& app)
                 && fieldPasteImmediate && fieldCopyAvailable && nonTextPropertyPaste
                 && mixedModelPartsVisible
                 && minimumPaintBrushIsSingleTile
+                && underwaterFamiliesHiddenByDefault
+                && underwaterFamiliesCanBeShown
+                && landscapeLayersVisibleByDefault
+                && landscapeVisibilityControlsWork
                 && logicPointUndoAtomic && logicPointRedoAtomic;
         QTextStream output(stdout);
         output << "asset-picker prefixes=" << completions.join(",") << "\n"
@@ -525,6 +544,10 @@ int runHeadlessCommand(QApplication& app)
                << " nonTextPropertyPaste=" << nonTextPropertyPaste << "\n"
                << " mixedModelPartsVisible=" << mixedModelPartsVisible
                << " minimumPaintBrushIsSingleTile=" << minimumPaintBrushIsSingleTile
+               << " underwaterFamiliesHiddenByDefault=" << underwaterFamiliesHiddenByDefault
+               << " underwaterFamiliesCanBeShown=" << underwaterFamiliesCanBeShown
+               << " landscapeLayersVisibleByDefault=" << landscapeLayersVisibleByDefault
+               << " landscapeVisibilityControlsWork=" << landscapeVisibilityControlsWork
                << " logicPointUndoAtomic=" << logicPointUndoAtomic
                << " logicPointRedoAtomic=" << logicPointRedoAtomic << "\n"
                << (passed ? "PASS" : "FAIL")

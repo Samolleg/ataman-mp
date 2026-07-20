@@ -233,6 +233,26 @@ quint16 CTerrainTransitionCatalog::select(
     return 0;
 }
 
+quint16 CTerrainTransitionCatalog::selectForPaint(
+    const STerrainTransitionSignature& signature, int globalX, int globalY,
+    quint32 distributionSeed, bool* found) const
+{
+    bool selected = false;
+    quint16 packed = select(signature, globalX, globalY, distributionSeed, &selected);
+    if(selected && m_swapPaintQuarterTurns)
+    {
+        SMprPackedTile tile = SMprPackedTile::decode(packed);
+        if(tile.rotation == 1 || tile.rotation == 3)
+        {
+            tile.rotation = quint8(4 - tile.rotation);
+            packed = tile.encode();
+        }
+    }
+    if(found)
+        *found = selected;
+    return packed;
+}
+
 STerrainTransitionSignature CTerrainTransitionCatalog::signatureForPacked(
     quint16 packedTile, bool* found) const
 {
@@ -1429,7 +1449,8 @@ STerrainTileCommand CTerrainEditModel::makeSemanticTilePaint(
         if(desired == existingSignatures.value(index))
             continue;
         bool found = false;
-        const quint16 after = catalog.select(desired, x, y, distributionSeed, &found);
+        const quint16 after = catalog.selectForPaint(
+            desired, x, y, distributionSeed, &found);
         if(!found)
         {
             if(report)
