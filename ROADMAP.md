@@ -587,11 +587,12 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
   - Runtime testing confirms position and facing are captured before teardown,
     restored after safety checks, and fall back to the selected entrance when
     restoration is unsafe.
-- [ ] Use normal entrance deployment when the editor switches to a different
+- [x] Use normal entrance deployment when the editor switches to a different
   map set before Ctrl+F5.
   - [x] Bind Play-from-Here state to the exact loaded MPR/map-table context and
     invalidate every picking/movement/selection remnant when that context
-    changes. Stale anchors are ignored at launch even if retained accidentally.
+    changes. Stale anchors are ignored at launch even if retained accidentally;
+    alpha.14 runtime testing confirms map B no longer inherits map A's anchor.
     ([`3f658af`](https://github.com/Ilufus/ei-mapper-endurance/commit/3f658af))
   - [x] Clear the previous generation's optional bootstrap MOB when the new
     reload request contains no Play from Here/Godmode/supplemental bootstrap.
@@ -671,6 +672,11 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
 - [ ] When opening an MPR while another workspace is loaded, offer to save
   changed MOB/MPR documents and replace the current workspace in one guarded
   action instead of only displaying a close-first warning.
+- [ ] Restore the previous editor workspace on startup, including its open MPR,
+  loaded MOBs or collection, active MOB, per-document open/closed state, and
+  collection identity. Missing or moved files must be reported together and
+  skipped without blocking the rest of the workspace; never restore unsaved
+  object edits implicitly.
 - [ ] Add opt-in Windows file associations for `.mpr`, `.mob`, and
   `.collection`, with correct single-instance/open-argument behavior and an
   explicit removal path.
