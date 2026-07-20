@@ -54,13 +54,21 @@ protected:
     void keyPressEvent(QKeyEvent* event) override;
 
 private:
+    enum class ETextMatchMode
+    {
+        Contains,
+        Exact,
+        Fuzzy
+    };
+
     int parentDeepCount(QTreeWidgetItem* pItem);
     void recalcParent(QTreeWidgetItem* pItem);
     QTreeWidgetItem* category(QString& categoryName);
     bool filterItem(QTreeWidgetItem* item, const QStringList& terms,
                     bool ancestorMatched, int* visible, int* total);
     bool nodeMatches(CNode* node, const QStringList& terms) const;
-    bool textMatches(const QString& candidate, const QString& query) const;
+    bool textMatches(const QString& candidate, const QString& query,
+                     ETextMatchMode mode = ETextMatchMode::Contains) const;
     QString validationState(CNode* node) const;
 
 public slots:

@@ -5,7 +5,7 @@ work is ordered from the newest planned minor line to the oldest completed one.
 An item is checked only after its implementation has landed and received the
 stated validation. Completed code should carry a commit, test, or release link.
 
-Current development line: `0.2.1-alpha.8` focused closed testing.
+Current development line: `0.2.1-alpha.9` focused closed testing.
 
 <details open>
 <summary><strong>General wishlist — not assigned to a release</strong></summary>
@@ -251,8 +251,9 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
 
 ### Current 0.2.x status
 
-- **Current tester build:** `0.2.1-alpha.8`, adding fuzzy parameter-aware
-  object filtering on top of the alpha.7 validation UX pass.
+- **Current tester build:** `0.2.1-alpha.9`, making parameter-aware object
+  filtering strict by default and correcting the compact validation-warning
+  layout on top of the alpha.8 outliner-filter pass.
 - **MOB hardening:** complete for the supported editing surface. Remaining work
   is validation breadth and new editing features, not another serializer
   rewrite.
@@ -265,7 +266,8 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
 - **0.2.1 hot reload:** the owned-process protocol and immutable generations are
   implemented. Main-MOB reload has worked in testing; supplemental/collection
   reload and same-position restoration remain unfinished.
-- **Stable 0.2.0 editor gate:** fuzzy, parameter-aware outliner filtering.
+- **Stable 0.2.0 editor gate:** parameter-aware outliner filtering with strict
+  contiguous matching by default and explicit `~` subsequence fuzziness.
   Unreal-style MOB ownership/locking remains the larger workspace follow-up.
 
 ### Critical: structural zone-family NID validation
@@ -592,17 +594,18 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
 
 ## 0.2.x: MOB editing workflow and recovery
 
-- [x] **Stable 0.2.0 gate:** add a fuzzy, parameter-aware outliner filter.
+- [x] **Stable 0.2.0 gate:** add a parameter-aware outliner filter.
   - Search object name, NID, type, model, texture, database/prototype name,
     MOB ownership, and validation state rather than only visible tree labels.
   - A query such as `unhufe` must return objects whose model is `unhufe`.
   - Preserve selection and hierarchy context, show match counts, debounce large
     maps, and keep filtering independent from viewport selection/scrolling.
-  - Current source adds 150 ms debouncing, fuzzy bare terms, quoted phrases,
-    AND-combined terms, and explicit `name:`, `id:`, `type:`, `model:`,
-    `texture:`, `db:`/`prototype:`, `mob:`, and `validation:` fields.
-  - Implementation: local commit `1685bdd`; alpha.8 tester validation remains
-    required before this stable editor gate is considered runtime-confirmed.
+  - Current source adds 150 ms debouncing, strict contiguous bare terms, quoted
+    phrases, AND-combined terms, exact `field=value`, explicit `~` subsequence
+    fuzziness, and `name:`, `id:`, `type:`, `model:`, `texture:`,
+    `db:`/`prototype:`, `mob:`, and `validation:` fields.
+  - Initial implementation: local commit `1685bdd`; alpha.9 carries the strict
+    matching correction and awaits focused tester validation.
 - [ ] When opening an MPR while another workspace is loaded, offer to save
   changed MOB/MPR documents and replace the current workspace in one guarded
   action instead of only displaying a close-first warning.

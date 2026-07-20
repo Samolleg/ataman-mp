@@ -50,12 +50,17 @@ void CTreeView::setFilterText(const QString& text)
     m_filterTimer->start();
 }
 
-bool CTreeView::textMatches(const QString& candidate, const QString& query) const
+bool CTreeView::textMatches(const QString& candidate, const QString& query,
+                            ETextMatchMode mode) const
 {
     const QString haystack = candidate.toCaseFolded();
     const QString needle = query.toCaseFolded();
-    if(needle.isEmpty() || haystack.contains(needle))
+    if(needle.isEmpty())
         return true;
+    if(mode == ETextMatchMode::Exact)
+        return haystack == needle;
+    if(mode == ETextMatchMode::Contains)
+        return haystack.contains(needle);
     int at = 0;
     for(const QChar ch : haystack)
         if(at < needle.size() && ch == needle.at(at))
@@ -101,15 +106,29 @@ bool CTreeView::nodeMatches(CNode* node, const QStringList& terms) const
         if(separator > 0)
         {
             const QString key = rawTerm.left(separator).toCaseFolded();
-            const QString value = rawTerm.mid(separator + 1);
+            QString value = rawTerm.mid(separator + 1);
             if(fields.contains(key))
             {
-                if(!textMatches(fields.value(key), value))
+                ETextMatchMode mode = rawTerm.at(separator) == '='
+                    ? ETextMatchMode::Exact : ETextMatchMode::Contains;
+                if(mode != ETextMatchMode::Exact && value.startsWith('~'))
+                {
+                    value.remove(0, 1);
+                    mode = ETextMatchMode::Fuzzy;
+                }
+                if(!textMatches(fields.value(key), value, mode))
                     return false;
                 continue;
             }
         }
-        if(!textMatches(everything, rawTerm))
+        QString value = rawTerm;
+        ETextMatchMode mode = ETextMatchMode::Contains;
+        if(value.startsWith('~'))
+        {
+            value.remove(0, 1);
+            mode = ETextMatchMode::Fuzzy;
+        }
+        if(!textMatches(everything, value, mode))
             return false;
     }
     return true;
@@ -124,8 +143,17 @@ bool CTreeView::filterItem(QTreeWidgetItem* item, const QStringList& terms,
         ++(*total);
     const bool textualGroupMatch = !node && !terms.isEmpty()
         && std::all_of(terms.begin(), terms.end(), [this, item](const QString& term)
-           { return !term.contains(':') && !term.contains('=')
-               && textMatches(item->text(0), term); });
+           {
+               QString value = term;
+               ETextMatchMode mode = ETextMatchMode::Contains;
+               if(value.startsWith('~'))
+               {
+                   value.remove(0, 1);
+                   mode = ETextMatchMode::Fuzzy;
+               }
+               return !term.contains(':') && !term.contains('=')
+                   && textMatches(item->text(0), value, mode);
+           });
     const bool selfMatches = terms.isEmpty() || (node && nodeMatches(node, terms))
         || textualGroupMatch;
     bool childMatches = false;

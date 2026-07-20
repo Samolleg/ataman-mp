@@ -34,6 +34,7 @@
 #include <QDialogButtonBox>
 #include <QClipboard>
 #include <QLineEdit>
+#include <QFontMetrics>
 #include <QSplitter>
 #include <QtConcurrent/QtConcurrentRun>
 
@@ -84,11 +85,8 @@ QString conciseValidationLine(const SMobFamilyFinding& finding)
     case EMobFamilyFindingSeverity::Incomplete: severity = "INCOMPLETE"; break;
     case EMobFamilyFindingSeverity::Info: severity = "INFO"; break;
     }
-    QString line = QString("%1: %2").arg(severity, finding.message.simplified());
-    constexpr int kMaximumCharacters = 150;
-    if(line.size() > kMaximumCharacters)
-        line = line.left(kMaximumCharacters - 3) + "...";
-    return line;
+    const QString line = QString("%1: %2").arg(severity, finding.message.simplified());
+    return QFontMetrics(QApplication::font()).elidedText(line, Qt::ElideRight, 960);
 }
 }
 
@@ -156,7 +154,9 @@ MainWindow::MainWindow(QWidget* parent) :
     m_outlinerFilterEdit->setClearButtonEnabled(true);
     m_outlinerFilterEdit->setPlaceholderText(tr("Filter objects (name, ID, model, texture, database...)") );
     m_outlinerFilterEdit->setToolTip(tr(
-        "Fuzzy-searches object fields. Combine terms with spaces. Optional fields: "
+        "Searches for contiguous text by default. Combine terms with spaces. "
+        "Use field=value for an exact match or prefix a value with ~ for fuzzy subsequence matching "
+        "(for example id:123, id=123, or id:~123). Optional fields: "
         "name:, id:, type:, model:, texture:, db:, prototype:, mob:, validation:."));
     m_outlinerFilterStatus = new QLabel(tr("0 / 0"), outlinerContainer);
     m_outlinerFilterStatus->setMinimumWidth(72);
@@ -1938,7 +1938,16 @@ void MainWindow::showValidationWarning(const QString& title, const QString& text
 {
     QMessageBox message(QMessageBox::Warning, title, text, QMessageBox::NoButton, this);
     message.setTextFormat(Qt::PlainText);
-    message.setStyleSheet("QLabel{min-width:820px;}");
+    // Target only the text label. Applying a minimum width to every QLabel also
+    // expands QMessageBox's icon label and pushes the useful text offscreen.
+    message.setStyleSheet("QLabel#qt_msgbox_label { min-width: 980px; }");
+    message.setMinimumWidth(1100);
+    if(QLabel* textLabel = message.findChild<QLabel*>("qt_msgbox_label"))
+    {
+        textLabel->setAlignment(Qt::AlignLeft | Qt::AlignTop);
+        textLabel->setWordWrap(false);
+        textLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    }
     QPushButton* openPanel = message.addButton(tr("Open Validation Panel"),
                                                QMessageBox::ActionRole);
     message.addButton(QMessageBox::Ok);
