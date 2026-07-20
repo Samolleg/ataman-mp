@@ -286,27 +286,11 @@ void CUnit::refreshTransientVisual()
     const QJsonObject textureObject = equipment.value("componentTextures").toObject();
     for(auto it = textureObject.constBegin(); it != textureObject.constEnd(); ++it)
         componentTextures.insert(it.key(), it.value().toString());
-    QMap<QString, QStringList> componentBodyTextureLayers;
-    if(databaseEquipmentPlan)
-    {
-        const QJsonObject layersObject = equipment.value("componentBodyTextureLayers").toObject();
-        for(auto it = layersObject.constBegin(); it != layersObject.constEnd(); ++it)
-        {
-            QStringList layers;
-            for(const QJsonValue& layer : it.value().toArray())
-                layers.append(layer.toString());
-            if(!layers.isEmpty())
-                componentBodyTextureLayers.insert(it.key(), layers);
-        }
-    }
     if(databaseEquipmentPlan)
     {
         QStringList texturePlan;
         for(auto it = componentTextures.constBegin(); it != componentTextures.constEnd(); ++it)
             texturePlan.append(it.key() + '=' + it.value());
-        for(auto it = componentBodyTextureLayers.constBegin();
-                it != componentBodyTextureLayers.constEnd(); ++it)
-            texturePlan.append(it.key() + "=[" + it.value().join(',') + ']');
         ei::log(eLogInfo, QString("Unit visual plan id=%1 prototype=%2 model=%3 parts=%4 textures=%5 bodyLayers=%6 "
                                  "constitution=%7,%8,%9 embeddedConstitution=%10,%11,%12")
                 .arg(m_mapID).arg(m_prototypeName).arg(model).arg(visibleParts.join(","))
@@ -315,8 +299,15 @@ void CUnit::refreshTransientVisual()
                 .arg(complexion.x()).arg(complexion.y()).arg(complexion.z())
                 .arg(m_complection.x()).arg(m_complection.y()).arg(m_complection.z()));
     }
+    const QStringList equipmentBodyLayers = jsonStringList(equipment, "bodyTextureLayers");
+    QStringList bodyTextureLayers;
+    if(databaseEquipmentPlan && !equipmentBodyLayers.isEmpty())
+    {
+        bodyTextureLayers.append(texture);
+        bodyTextureLayers.append(equipmentBodyLayers);
+    }
     applyTransientVisual(model, texture, visibleParts, complexion, componentTextures,
-                         secondaryTexture, {}, componentBodyTextureLayers);
+                         secondaryTexture, bodyTextureLayers);
     m_resolvedAnimationModel = model;
     m_resolvedAnimationWeapons = equipmentRequest.weapons;
 }

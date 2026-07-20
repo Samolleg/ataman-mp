@@ -55,14 +55,11 @@ edit `database.res`, JMV/Base archives, live MOBs, maps, or the game install.
    placeholder.
 8. Confirm armor and weapons use the per-item texture resource derived from the
    model, slot/type, TTI, TTI2, and material code. Humanoid skin and non-helmet
-   armor use a shared whole-body UV coordinate system, but the sparse item
-   layers are composed per final anatomical component rather than into one
-   universal draw texture. Each stack begins with base skin, then its relevant
-   lower slot, then an exact plate/leggings replacement: shirt for torso/upper
-   arms, gloves for forearms/hands, pants for hips/thighs, and boots for lower
-   legs/feet. This prevents unrelated sparse atlas regions from leaking across
-   mixed equipment sets while still letting transparent upper pixels reveal
-   the appropriate lower layer. For example, a human boot
+   armor are one shared, non-overlapping whole-body UV atlas (except the `hp`
+   region): compose the base skin, shirt/gloves/pants/boots, then plate/leggings
+   with source-over alpha. Do not bind an isolated armor layer as the final
+   texture of only its replacement mesh; transparent pixels must reveal the
+   lower atlas rather than make limbs disappear. For example, a human boot
    with TTI 1 and `ogre leather` (`lo`) resolves the shipped
    `unhumabt_01.lo.0.x4.mmp` family rather than the face/skin texture. TTI and
    TTI2 use the database values directly. Weapon FIG components and MMP
@@ -104,13 +101,6 @@ edit `database.res`, JMV/Base archives, live MOBs, maps, or the game install.
 15. Compare actor body proportions before and after database visual resolution.
     The placed MOB instance's complexion/constitution is authoritative; the
     Monster row is a prototype default and must not thicken every instance.
-
-### Post-merge validation integration
-
-- Once this branch is integrated with main's validation window, promote the
-  existing structured material/prototype incompatibility diagnostic into a
-  visible validation string. Keep the resolver fail-closed, preserve the
-  database value, and do not mutate the MOB or resource archives.
 
 ## UI and performance sanity
 
