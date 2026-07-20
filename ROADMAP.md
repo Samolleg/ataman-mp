@@ -260,6 +260,7 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
   fixes and alpha.15's authoritative results while correcting final-generation
   path/hash validation, mirroring test runtime logs into the normal editor logs
   folder, and repairing document-action/settings/menu state UX.
+  Implementation: [`09d3d9a`](https://github.com/Ilufus/ei-mapper-endurance/commit/09d3d9a).
 - **Alpha.13 validation/UI changes:** validation no longer performs expensive automatic
   replacement-ID scans for fully shared ranges, map switches refresh their
   runtime-family identity, missing `AddMob(...)` dependencies identify the
