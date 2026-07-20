@@ -93,6 +93,8 @@ class CTerrainTransitionCatalog
 public:
     static STerrainTransitionSignature rotated(
         const STerrainTransitionSignature& signature, int clockwiseQuarterTurns);
+    static STerrainTransitionSignature mirroredGridY(
+        const STerrainTransitionSignature& signature);
     bool addVariant(const STerrainTransitionVariant& variant,
                     CValidationReport* report = nullptr);
     quint16 select(const STerrainTransitionSignature& signature,
@@ -101,7 +103,7 @@ public:
     quint16 selectForPaint(const STerrainTransitionSignature& signature,
                            int globalX, int globalY, quint32 distributionSeed,
                            bool* found = nullptr) const;
-    void setSwapPaintHalfTurns(bool enabled) { m_swapPaintHalfTurns = enabled; }
+    void setMirrorPaintGridY(bool enabled) { m_mirrorPaintGridY = enabled; }
     STerrainTransitionSignature signatureForPacked(
         quint16 packedTile, bool* found = nullptr) const;
     bool hasMaterial(qint32 materialId) const;
@@ -116,7 +118,7 @@ private:
     QHash<quint16, int> m_packedLookup;
     QHash<QByteArray, QVector<int>> m_signatureLookup;
     QSet<qint32> m_materialIds;
-    bool m_swapPaintHalfTurns{false};
+    bool m_mirrorPaintGridY{false};
 };
 
 struct STerrainHeightDelta

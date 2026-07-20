@@ -143,6 +143,17 @@ STerrainTransitionSignature CTerrainTransitionCatalog::rotated(
     return result;
 }
 
+STerrainTransitionSignature CTerrainTransitionCatalog::mirroredGridY(
+    const STerrainTransitionSignature& signature)
+{
+    STerrainTransitionSignature result;
+    result.northWest = signature.southWest;
+    result.northEast = signature.southEast;
+    result.southEast = signature.northEast;
+    result.southWest = signature.northWest;
+    return result;
+}
+
 bool CTerrainTransitionCatalog::addVariant(const STerrainTransitionVariant& variant,
                                            CValidationReport* report)
 {
@@ -237,23 +248,9 @@ quint16 CTerrainTransitionCatalog::selectForPaint(
     const STerrainTransitionSignature& signature, int globalX, int globalY,
     quint32 distributionSeed, bool* found) const
 {
-    bool selected = false;
-    quint16 packed = select(signature, globalX, globalY, distributionSeed, &selected);
-    const bool horizontalHalf = signature.northWest == signature.southWest
-        && signature.northEast == signature.southEast
-        && signature.northWest != signature.northEast;
-    const bool verticalHalf = signature.northWest == signature.northEast
-        && signature.southWest == signature.southEast
-        && signature.northWest != signature.southWest;
-    if(selected && m_swapPaintHalfTurns && (horizontalHalf || verticalHalf))
-    {
-        SMprPackedTile tile = SMprPackedTile::decode(packed);
-        tile.rotation = quint8((tile.rotation + 2) & 3);
-        packed = tile.encode();
-    }
-    if(found)
-        *found = selected;
-    return packed;
+    const STerrainTransitionSignature lookup = m_mirrorPaintGridY
+        ? mirroredGridY(signature) : signature;
+    return select(lookup, globalX, globalY, distributionSeed, found);
 }
 
 STerrainTransitionSignature CTerrainTransitionCatalog::signatureForPacked(

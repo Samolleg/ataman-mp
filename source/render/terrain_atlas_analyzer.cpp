@@ -94,11 +94,12 @@ STerrainAtlasAnalysis CTerrainAtlasAnalyzer::analyze(
     }
 
     result.templateName = QStringLiteral("Zone1 stock slot layout");
-    // Zone1's authored half-edge entries face away from a newly painted area.
-    // Turn every newly selected half edge by 180 degrees; corner variants and
-    // untouched MPR decoding remain unchanged.
-    result.landCatalog.setSwapPaintHalfTurns(true);
-    result.overlayCatalog.setSwapPaintHalfTurns(true);
+    // The catalog describes decoded atlas-image rows, while the terrain
+    // renderer's grid row zero is the opposite vertical side. Convert only
+    // requested paint signatures at lookup; untouched packed MPR decoding is
+    // not reinterpreted.
+    result.landCatalog.setMirrorPaintGridY(true);
+    result.overlayCatalog.setMirrorPaintGridY(true);
     result.expectedSlots = 512;
     if(atlasSlotCount != result.expectedSlots)
     {

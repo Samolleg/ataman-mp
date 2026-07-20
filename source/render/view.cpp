@@ -1352,6 +1352,7 @@ void CView::exportTerrainPaintDiagnostic()
     root.insert("atlasPixelSha256", m_pTileForm
         ? QString::fromLatin1(terrainAtlasPixelSha256(m_pTileForm->tileImages())) : QString());
     root.insert("analysisMode", "authored-namespace-template-v1");
+    root.insert("paintLookupTransform", "mirror-grid-y-v1");
     root.insert("templateName", m_terrainAtlasAnalysis.templateName);
     root.insert("registeredMaterialCount", m_terrainAtlasAnalysis.materials.size());
     root.insert("describedAtlasSlots", m_terrainAtlasAnalysis.describedSlots);

@@ -1880,12 +1880,12 @@ void EnduranceDocumentTests::zone1NamespaceTemplateSeparatesLandOverlayAndVarian
     QVERIFY(normalFound);
     QVERIFY(paintFound);
     QCOMPARE(paintedSide.atlasSlot(), normalSide.atlasSlot());
-    QVERIFY(normalSide.rotation == 1 || normalSide.rotation == 3);
-    QCOMPARE(paintedSide.rotation, quint8(4 - normalSide.rotation));
+    QCOMPARE(paintedSide.rotation, normalSide.rotation);
 
-    // A one-cell semantic stamp is a fixed nine-cell contract: four half
-    // edges use the Zone1 paint-turn correction, while all four inward corner
-    // variants and the pure center retain their authored packed values.
+    // Manual R14 evidence plus the renderer's row-zero geometry establish one
+    // conversion for every shape: catalog image Y is the reverse of terrain
+    // grid Y. This fixture-independent nine-cell contract fails under every
+    // rejected half-edge-only rotation workaround.
     for(int dy = -1; dy <= 1; ++dy)
     {
         for(int dx = -1; dx <= 1; ++dx)
@@ -1897,20 +1897,32 @@ void EnduranceDocumentTests::zone1NamespaceTemplateSeparatesLandOverlayAndVarian
             stamp.southWest = (dx >= 0 && dy <= 0) ? 2 : 4;
             bool authoredFound = false;
             bool paintedFound = false;
-            const SMprPackedTile authored = SMprPackedTile::decode(
-                analysis.landCatalog.select(stamp, 100 + dx, 100 + dy,
-                                            12345u, &authoredFound));
-            const SMprPackedTile painted = SMprPackedTile::decode(
-                analysis.landCatalog.selectForPaint(stamp, 100 + dx, 100 + dy,
-                                                    12345u, &paintedFound));
+            analysis.landCatalog.select(stamp, 100 + dx, 100 + dy,
+                                        12345u, &authoredFound);
+            const quint16 paintedPacked = analysis.landCatalog.selectForPaint(
+                stamp, 100 + dx, 100 + dy, 12345u, &paintedFound);
             QVERIFY(authoredFound);
             QVERIFY(paintedFound);
-            QCOMPARE(painted.atlasSlot(), authored.atlasSlot());
-            const bool side = (dx == 0) != (dy == 0);
-            if(side)
-                QCOMPARE(painted.rotation, quint8((authored.rotation + 2) & 3));
-            else
-                QCOMPARE(painted.rotation, authored.rotation);
+            bool decodedFound = false;
+            const STerrainTransitionSignature decoded =
+                analysis.landCatalog.signatureForPacked(paintedPacked, &decodedFound);
+            QVERIFY(decodedFound);
+            QCOMPARE(decoded.northWest, stamp.southWest);
+            QCOMPARE(decoded.northEast, stamp.southEast);
+            QCOMPARE(decoded.southEast, stamp.northEast);
+            QCOMPARE(decoded.southWest, stamp.northWest);
+
+            // Apply the independently specified renderer grid-Y conversion:
+            // the visible result must equal the solver request at all corners.
+            STerrainTransitionSignature visible;
+            visible.northWest = decoded.southWest;
+            visible.northEast = decoded.southEast;
+            visible.southEast = decoded.northEast;
+            visible.southWest = decoded.northWest;
+            QCOMPARE(visible.northWest, stamp.northWest);
+            QCOMPARE(visible.northEast, stamp.northEast);
+            QCOMPARE(visible.southEast, stamp.southEast);
+            QCOMPARE(visible.southWest, stamp.southWest);
         }
     }
 
