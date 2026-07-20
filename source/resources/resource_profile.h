@@ -40,6 +40,15 @@ struct SRuntimeComponentEvaluation
     QString sha256;
 };
 
+struct SProfileProviderBinding
+{
+    SProfileProviderBinding() = default;
+    SProfileProviderBinding(const QString& providerId, int version)
+        : id(providerId), interfaceVersion(version) {}
+    QString id;
+    int interfaceVersion{1};
+};
+
 struct SResourceProfile
 {
     int schemaVersion{1};
@@ -57,6 +66,7 @@ struct SResourceProfile
     QString runtimeManifestId;
     QVector<SRuntimeComponent> runtimeComponents;
     QMap<QString, SProfileCapability> capabilities;
+    QMap<QString, SProfileProviderBinding> providers;
 };
 
 struct SResourceProfileEvaluation
@@ -75,6 +85,7 @@ struct SResourceProfileEvaluation
     bool runtimeStackValidated{false};
     QVector<SRuntimeComponentEvaluation> runtimeComponents;
     QMap<QString, SProfileCapability> capabilities;
+    QMap<QString, SProfileProviderBinding> providers;
 };
 
 QVector<SResourceProfile> builtInResourceProfiles();

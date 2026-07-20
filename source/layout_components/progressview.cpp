@@ -15,6 +15,14 @@ void CProgressView::reset()
     setVisible(false);
 }
 
+void CProgressView::finish()
+{
+    m_value = 100.0;
+    setValue(100);
+    setVisible(false);
+    QCoreApplication::processEvents();
+}
+
 void CProgressView::update(double val)
 {
     m_value += val;

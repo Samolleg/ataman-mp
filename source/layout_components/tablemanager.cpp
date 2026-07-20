@@ -25,6 +25,7 @@
 #include "multiline_edit_form.h"
 #include "unitstat_form.h"
 #include "bodypartedit_form.h"
+#include "profile_database.h"
 
 namespace {
 const char* kPropertyMimeType = "application/x-ei-mapper-property-type";
@@ -818,6 +819,7 @@ void CTableManager::setNewData(const QList<QSharedPointer<IPropertyBase>>& aProp
             break;
         }
         case eObjParam_PRIM_TXTR:
+        case eObjParam_UNIT_PROTOTYPE:
         {
             m_pTable->insertRow(i);
             m_pTable->setItem(i, 0, new QTableWidgetItem(m_aRowName[type]));
@@ -1206,6 +1208,7 @@ CValueItem::CValueItem(const QSharedPointer<IPropertyBase>& prop):
 CComboDynItem::CComboDynItem(const QSharedPointer<IPropertyBase> &prop)
     : m_pCompleter(nullptr)
     , m_optionsLoaded(false)
+    , m_popupActive(false)
 {
     setFocusPolicy(Qt::FocusPolicy::StrongFocus);
     setStyleSheet("combobox-popup: 0;");
@@ -1239,6 +1242,7 @@ CComboDynItem::CComboDynItem(const QSharedPointer<IPropertyBase> &prop)
     QObject::connect(lineEdit(), SIGNAL(returnPressed()), this, SLOT(_onEditingFinished()));
     QObject::connect(lineEdit(), SIGNAL(textEdited(QString)), this, SLOT(_onFilterTextChanged(QString)));
     lineEdit()->installEventFilter(this);
+    updateDatabaseDiagnostic(m_committedText);
 }
 
 void CColorButtonItem::keyPressEvent(QKeyEvent* event)
@@ -1278,6 +1282,16 @@ void CComboDynItem::ensureOptionsLoaded()
         m_pListModel->setStringList(CTextureList::getInstance()->textureList());
     else if(m_pValue->type() == eObjParam_TEMPLATE)
         m_pListModel->setStringList(CObjectList::getInstance()->figureList());
+    else if(m_pValue->type() == eObjParam_UNIT_PROTOTYPE)
+    {
+        QStringList names;
+        const auto database = ei::ProfileDatabaseContext::instance().current();
+        if(!database.isNull())
+            for(const ei::SMonsterDatabaseRecord& monster : database->monsters)
+                names.append(monster.name);
+        names.sort(Qt::CaseInsensitive);
+        m_pListModel->setStringList(names);
+    }
     else
     {
         Q_ASSERT(false && "not defined");
@@ -1294,17 +1308,40 @@ void CComboDynItem::showPopup()
     const QSignalBlocker blocker(this);
     ensureOptionsLoaded();
     setEditText(current);
+    m_popupActive = true;
     QComboBox::showPopup();
+}
+
+void CComboDynItem::hidePopup()
+{
+    m_popupActive = false;
+    QComboBox::hidePopup();
 }
 
 void CComboDynItem::_onChange(QString str)
 {
     m_committedText = str;
+    updateDatabaseDiagnostic(str);
     if(m_pValue->isEqual(str))
         return;
 
     m_pValue->resetFromString(str);
     emit onParamChange(m_pValue);
+}
+
+void CComboDynItem::updateDatabaseDiagnostic(const QString& value)
+{
+    if(m_pValue->type() != eObjParam_UNIT_PROTOTYPE)
+        return;
+    const auto database = ei::ProfileDatabaseContext::instance().current();
+    QString diagnostic;
+    if(database.isNull() || !database->usable())
+        diagnostic = tr("The active profile database is unavailable; this value is preserved but cannot be validated.");
+    else if(!database->monsters.contains(value.trimmed().toLower()))
+        diagnostic = tr("Prototype is not present in the active profile database. The value is preserved.");
+    setToolTip(diagnostic);
+    lineEdit()->setToolTip(diagnostic);
+    lineEdit()->setStyleSheet(diagnostic.isEmpty() ? QString() : QString("QLineEdit { border: 1px solid #c88b2a; }"));
 }
 
 void CComboStItem::keyPressEvent(QKeyEvent* event)
@@ -1459,15 +1496,21 @@ void CComboDynItem::keyPressEvent(QKeyEvent* event)
 void CComboDynItem::focusOutEvent(QFocusEvent* event)
 {
     // Typed text is only a filter preview until Enter or an explicit
-    // suggestion activation commits it.
+    // suggestion activation commits it. Opening the combo transfers focus to
+    // its popup; that is not an abandoned edit and must not close the popup.
     QComboBox::focusOutEvent(event);
-    cancelPendingEdit();
+    if(!m_popupActive && event->reason() != Qt::PopupFocusReason)
+        cancelPendingEdit();
 }
 
 bool CComboDynItem::eventFilter(QObject* watched, QEvent* event)
 {
     if(watched == lineEdit() && event->type() == QEvent::FocusOut)
-        cancelPendingEdit();
+    {
+        const QFocusEvent* focusEvent = static_cast<QFocusEvent*>(event);
+        if(!m_popupActive && focusEvent->reason() != Qt::PopupFocusReason)
+            cancelPendingEdit();
+    }
     if(watched == lineEdit() && event->type() == QEvent::KeyPress)
     {
         QKeyEvent* keyEvent = static_cast<QKeyEvent*>(event);
@@ -1641,6 +1684,24 @@ void CMultiLineButtonItem::onTextEditOpen()
         m_pTextForm.reset(new CMultiLineEditForm());
         QObject::connect(m_pTextForm.get(), SIGNAL(onTextApplySignal(QString)), this, SLOT(onTextEdit(QString)));
     }
+
+    QStringList suggestions;
+    const auto database = ei::ProfileDatabaseContext::instance().current();
+    if(!database.isNull())
+    {
+        switch(m_pValue->type())
+        {
+        case eObjParam_UNIT_WEAPONS: suggestions = database->weapons; break;
+        case eObjParam_UNIT_ARMORS: suggestions = database->armor; break;
+        case eObjParam_UNIT_SPELLS: suggestions = database->spells; break;
+        case eObjParam_UNIT_QUICK_ITEMS: suggestions = database->quickItems; break;
+        case eObjParam_UNIT_QUEST_ITEMS: suggestions = database->questItems; break;
+        default: break;
+        }
+    }
+    m_pTextForm->setSuggestions(suggestions,
+        m_pValue->type() == eObjParam_UNIT_WEAPONS || m_pValue->type() == eObjParam_UNIT_ARMORS
+        || m_pValue->type() == eObjParam_UNIT_QUICK_ITEMS || m_pValue->type() == eObjParam_UNIT_QUEST_ITEMS);
 
     if(m_pValue->isInit())
     {

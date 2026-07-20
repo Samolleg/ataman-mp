@@ -8,6 +8,11 @@
 #include "log.h"
 #include "scene.h"
 #include "property.h"
+#include "profile_database.h"
+#include "profile_visual_provider.h"
+
+#include <QJsonArray>
+#include <QRegularExpression>
 
 CUnit::CUnit():
     m_prototypeName("")
@@ -89,6 +94,13 @@ void CUnit::draw(bool isActive, QOpenGLShaderProgram* program)
 
 void CUnit::drawObjectVisual(bool isActive, QOpenGLShaderProgram* program)
 {
+    if(m_state == ENodeState::eHidden)
+    {
+        AnimationFrameContext::instance().counters().skippedOffscreen++;
+        return;
+    }
+    refreshTransientVisual();
+    refreshAnimationPose();
     CObjectBase::draw(isActive, program);
 }
 
@@ -102,11 +114,313 @@ void CUnit::drawLogicVisual(bool isActive, QOpenGLShaderProgram* program)
 
 void CUnit::drawSelect(QOpenGLShaderProgram* program)
 {
+    if(m_state == ENodeState::eHidden)
+        return;
+    refreshTransientVisual();
+    refreshAnimationPose();
     CObjectBase::drawSelect(program);
     for(auto& logic: m_aLogic)
     {
         logic->drawSelect(program);
     }
+}
+
+void CUnit::preloadVisualResources()
+{
+    // Called with the viewport GL context current immediately after MOB
+    // projection. This resolves figure and texture resources before the unit
+    // first enters the camera frustum; it does not alter serialized MOB data.
+    refreshTransientVisual();
+}
+
+namespace {
+
+QStringList jsonStringList(const QJsonObject& object, const char* key)
+{
+    QStringList result;
+    for(const QJsonValue& value : object.value(key).toArray())
+        result.append(value.toString());
+    return result;
+}
+
+bool optionalEquipmentPart(const QString& part)
+{
+    // base*/l.base* members are mutually-exclusive assembly variants, not the
+    // avatar's equipped hand slot. Keep the ordinary lh3/rh3 anatomy (or its
+    // glove replacement) and add only the resolver-selected weapon geometry.
+    static const QRegularExpression optional(
+        "(?:^(?:sling|quiver|arrows|basearrow\\d+|rh3\\.arrow\\d+|"
+        "bwparta\\d+|lh3\\.bwpartb\\d+|bwtetiva[ab]\\d+|"
+        "rh3\\.crbow\\d+main|crbow\\d+(?:part|tetiva)\\d+|"
+        "baserh3|(?:l\\.)?base(?:sword|pike|club|axe|dagger|staff|"
+        "dsword|dpike|dclub|daxe|dstaff)\\d+)$|"
+        "\\.(?:armor|sword|axe|dagger|pike|club|bow|crossbow|shield|dsword|daxe|dpike|dclub|staff|dstaff)\\d+|hr\\.\\d+)$",
+        QRegularExpression::CaseInsensitiveOption);
+    return optional.match(part).hasMatch();
+}
+
+}
+
+void CUnit::refreshTransientVisual()
+{
+    ei::ProfileDatabaseContext& context = ei::ProfileDatabaseContext::instance();
+    const quint64 generation = context.generation();
+    if(m_resolvedDatabaseGeneration == generation && m_resolvedVisualRevision == m_visualRevision)
+        return;
+    m_resolvedDatabaseGeneration = generation;
+    m_resolvedVisualRevision = m_visualRevision;
+    const auto database = context.current();
+    static ProfileVisualProviderService providers;
+    QString diagnostic;
+    const auto appearanceResolver = providers.appearanceResolver(
+        context.providerForRole("characterAppearance"), database, &diagnostic);
+    const auto equipmentResolver = providers.equipmentResolver(
+        context.providerForRole("equipmentLayout"), database, &diagnostic);
+    if(appearanceResolver.isNull() || equipmentResolver.isNull())
+    {
+        ei::log(eLogWarning, "Unit visual provider unavailable: " + diagnostic);
+        applyTransientVisual("cannotdisplay", "default", {}, QVector3D(1, 1, 1));
+        m_resolvedAnimationModel.clear(); m_resolvedAnimationWeapons.clear();
+        return;
+    }
+
+    SCharacterAppearanceRequest appearanceRequest;
+    appearanceRequest.profileId = database.isNull() ? QString() : database->profileId;
+    appearanceRequest.runtimeManifestId = database.isNull() ? QString() : database->runtimeManifestId;
+    appearanceRequest.prototype = m_prototypeName;
+    appearanceRequest.model = m_modelName;
+    appearanceRequest.primaryTexture = m_primaryTexture;
+    appearanceRequest.secondaryTexture = m_secondaryTexture;
+    appearanceRequest.bodyParts = m_bodyParts;
+    appearanceRequest.dataSource = m_bImport ? EUnitVisualDataSource::EmbeddedMob
+                                             : EUnitVisualDataSource::ProfileDatabase;
+    QJsonObject appearance;
+    const SRuntimeProviderResult appearanceResult = appearanceResolver->resolve(appearanceRequest, &appearance);
+    if(!appearanceResult.success)
+    {
+        ei::log(eLogWarning, QString("Unit %1 appearance placeholder [%2]: %3")
+                .arg(m_prototypeName, appearanceResult.code, appearanceResult.message));
+        applyTransientVisual("cannotdisplay", "default", {}, QVector3D(1, 1, 1));
+        m_resolvedAnimationModel.clear(); m_resolvedAnimationWeapons.clear();
+        return;
+    }
+
+    const QString model = appearance.value("model").toString();
+    const QString texture = appearance.value("primaryTexture").toString();
+    const QString secondaryTexture = appearance.value("secondaryTexture").toString();
+    const bool databaseEquipmentPlan = appearance.value("source").toString() == "profileDatabase";
+    const QStringList assemblyParts = CObjectList::getInstance()->figurePartNames(model);
+    const QStringList resolvedBodyParts = appearance.contains("bodyParts")
+        ? jsonStringList(appearance, "bodyParts") : m_bodyParts;
+    QStringList visibleParts;
+    // A normal unit's database-selected race can differ from its embedded MOB
+    // assembly. Reusing that instance mask drops anatomical components (most
+    // visibly limbs on humans, orcs, and skeletons). Build the database body
+    // from the selected assembly's non-optional base members, then add exactly
+    // the resolved hair/equipment components below. Imported units remain
+    // strictly controlled by their embedded mask.
+    if(databaseEquipmentPlan)
+    {
+        for(const QString& part : assemblyParts)
+            if(!optionalEquipmentPart(part))
+                visibleParts.append(part);
+    }
+    else if(!resolvedBodyParts.isEmpty())
+    {
+        for(const QString& part : resolvedBodyParts)
+            visibleParts.append(part);
+    }
+    else
+    {
+        for(const QString& part : assemblyParts)
+            visibleParts.append(part);
+    }
+
+    QVector3D complexion = m_complection;
+    if(databaseEquipmentPlan)
+    {
+        // Constitution/complection is serialized per MOB instance and is the
+        // actor's actual body shape. Monster database values are prototype
+        // defaults, not a reason to overwrite an already placed unit.
+        const int hair = appearance.value("hairIndex").toInt(-1);
+        if(hair >= 0)
+        {
+            const QString hairPart = QString("hr.%1").arg(hair, 2, 10, QChar('0'));
+            if(assemblyParts.contains(hairPart, Qt::CaseInsensitive))
+                visibleParts.append(hairPart);
+        }
+    }
+
+    SEquipmentLayoutRequest equipmentRequest;
+    equipmentRequest.profileId = appearanceRequest.profileId;
+    equipmentRequest.runtimeManifestId = appearanceRequest.runtimeManifestId;
+    equipmentRequest.prototype = m_prototypeName;
+    equipmentRequest.model = model;
+    equipmentRequest.assemblyParts = assemblyParts;
+    equipmentRequest.dataSource = appearanceRequest.dataSource;
+    equipmentRequest.armor = m_bImport ? m_aArmor
+        : (databaseEquipmentPlan ? jsonStringList(appearance, "armor") : QStringList());
+    equipmentRequest.weapons = m_bImport ? m_aWeapon
+        : (databaseEquipmentPlan ? jsonStringList(appearance, "weapons") : QStringList());
+    // Quick/quest/loot inventory is intentionally absent: inventory slots are
+    // valid database references but never form part of an avatar render plan.
+    QJsonObject equipment;
+    const SRuntimeProviderResult equipmentResult = equipmentResolver->resolve(equipmentRequest, &equipment);
+    for(const QString& replaced : jsonStringList(equipment, "replacedParts"))
+        for(int index = visibleParts.size() - 1; index >= 0; --index)
+            if(visibleParts.at(index).compare(replaced, Qt::CaseInsensitive) == 0)
+                visibleParts.removeAt(index);
+    if(equipment.value("hidesHair").toBool(false))
+        for(int index = visibleParts.size() - 1; index >= 0; --index)
+            if(visibleParts.at(index).startsWith("hr.", Qt::CaseInsensitive))
+                visibleParts.removeAt(index);
+    for(const QString& component : jsonStringList(equipment, "components"))
+        if(!visibleParts.contains(component, Qt::CaseInsensitive))
+            visibleParts.append(component);
+    for(const QJsonValue& finding : equipment.value("diagnostics").toArray())
+        ei::log(eLogWarning, QString("Unit %1 equipment: %2").arg(m_prototypeName, finding.toString()));
+    if(!equipmentResult.success && equipment.value("placeholders").toArray().isEmpty())
+        ei::log(eLogWarning, QString("Unit %1 equipment [%2]: %3")
+                .arg(m_prototypeName, equipmentResult.code, equipmentResult.message));
+    QMap<QString, QString> componentTextures;
+    const QJsonObject textureObject = equipment.value("componentTextures").toObject();
+    for(auto it = textureObject.constBegin(); it != textureObject.constEnd(); ++it)
+        componentTextures.insert(it.key(), it.value().toString());
+    if(databaseEquipmentPlan)
+    {
+        QStringList texturePlan;
+        for(auto it = componentTextures.constBegin(); it != componentTextures.constEnd(); ++it)
+            texturePlan.append(it.key() + '=' + it.value());
+        ei::log(eLogInfo, QString("Unit visual plan id=%1 prototype=%2 model=%3 parts=%4 textures=%5 bodyLayers=%6 "
+                                 "constitution=%7,%8,%9 embeddedConstitution=%10,%11,%12")
+                .arg(m_mapID).arg(m_prototypeName).arg(model).arg(visibleParts.join(","))
+                .arg(texturePlan.join(","))
+                .arg(jsonStringList(equipment, "bodyTextureLayers").join(","))
+                .arg(complexion.x()).arg(complexion.y()).arg(complexion.z())
+                .arg(m_complection.x()).arg(m_complection.y()).arg(m_complection.z()));
+    }
+    const QStringList equipmentBodyLayers = jsonStringList(equipment, "bodyTextureLayers");
+    QStringList bodyTextureLayers;
+    if(databaseEquipmentPlan && !equipmentBodyLayers.isEmpty())
+    {
+        bodyTextureLayers.append(texture);
+        bodyTextureLayers.append(equipmentBodyLayers);
+    }
+    m_renderedModelName = model;
+    m_renderedPrimaryTextureName = texture;
+    m_renderedSecondaryTextureName = secondaryTexture;
+    m_renderedBodyTextureLayers = bodyTextureLayers;
+    applyTransientVisual(model, texture, visibleParts, complexion, componentTextures,
+                         secondaryTexture, bodyTextureLayers);
+    m_resolvedAnimationModel = model;
+    m_resolvedAnimationWeapons = equipmentRequest.weapons;
+}
+
+void CUnit::refreshAnimationPose()
+{
+    AnimationFrameContext& frame = AnimationFrameContext::instance();
+    QMap<QString, QMatrix4x4> staticPose;
+    if(!frame.enabled() || m_resolvedAnimationModel.isEmpty())
+    {
+        if(!m_animationPoseIsStatic)
+        {
+            applyTransientPartPoses(staticPose);
+            applyTransientPartMorphs({});
+            m_animationPoseIsStatic = true;
+            m_lastAppliedAnimationFrame = -1.0;
+        }
+        return;
+    }
+
+    const float distanceSquared = (m_drawPosition - frame.cameraPosition()).lengthSquared();
+    const float distance = distanceSquared <= 10000.0f ? 100.0f
+        : (distanceSquared <= 90000.0f ? 300.0f : 301.0f);
+    const EAnimationDistanceTier tier = animationDistanceTier(true,
+        m_state == ENodeState::eSelect, distance);
+    const auto database = ei::ProfileDatabaseContext::instance().current();
+    const QString providerId = ei::ProfileDatabaseContext::instance().providerForRole("unitAnimation");
+    const QString fingerprint = providerId + '|' + QString::number(
+        ei::ProfileDatabaseContext::instance().generation()) + '|' + m_resolvedAnimationModel.toLower()
+        + '|' + m_resolvedAnimationWeapons.join(';').toLower();
+    if(fingerprint != m_animationFingerprint)
+    {
+        m_animationFingerprint = fingerprint;
+        m_idleClip = SAnimationClip();
+        m_lastAppliedAnimationFrame = -1.0;
+        m_animationPoseIsStatic = true;
+        static ProfileVisualProviderService providers;
+        QString diagnostic;
+        const auto resolver = providers.animationResolver(providerId, database, &diagnostic);
+        QJsonObject resolved;
+        SRuntimeProviderResult result;
+        if(!resolver.isNull())
+        {
+            SUnitAnimationRequest request;
+            request.profileId = database.isNull() ? QString() : database->profileId;
+            request.runtimeManifestId = database.isNull() ? QString() : database->runtimeManifestId;
+            request.model = m_resolvedAnimationModel;
+            request.weapons = m_resolvedAnimationWeapons;
+            result = resolver->resolve(request, &resolved);
+        }
+        else
+        { result.code = "animation.provider.unavailable"; result.message = diagnostic; }
+        if(result.success)
+        {
+            m_idleClip = parseNestedAnimationClip(
+                CObjectList::getInstance()->modelAnimation(m_resolvedAnimationModel),
+                resolved.value("actionName").toString(), resolved.value("length").toInt());
+            int morphChannels = 0;
+            for(const SAnimationChannel& channel : m_idleClip.channels)
+                if(!channel.morphations.isEmpty()) ++morphChannels;
+            ei::log(eLogInfo, QString("Unit animation plan id=%1 prototype=%2 model=%3 action=%4 length=%5 "
+                                     "morphChannels=%6")
+                    .arg(m_mapID).arg(m_prototypeName).arg(m_resolvedAnimationModel)
+                    .arg(resolved.value("actionName").toString())
+                    .arg(resolved.value("length").toInt())
+                    .arg(morphChannels));
+        }
+        if(!result.success || !m_idleClip.valid())
+        {
+            const QString detail = !result.message.isEmpty() ? result.message : m_idleClip.diagnostics.join("; ");
+            ei::log(eLogWarning, QString("Unit %1 static animation fallback [%2]: %3")
+                    .arg(m_prototypeName, result.code, detail));
+        }
+    }
+    if(!m_idleClip.valid())
+    {
+        frame.counters().staticFallbacks++;
+        if(!m_animationPoseIsStatic)
+        {
+            applyTransientPartPoses(staticPose);
+            applyTransientPartMorphs({});
+            m_animationPoseIsStatic = true;
+            m_lastAppliedAnimationFrame = -1.0;
+        }
+        return;
+    }
+
+    switch(tier)
+    {
+    case EAnimationDistanceTier::Full: frame.counters().fullEvaluations++; break;
+    case EAnimationDistanceTier::HalfRate: frame.counters().halfRateEvaluations++; break;
+    case EAnimationDistanceTier::FirstPose: frame.counters().firstPoseEvaluations++; break;
+    case EAnimationDistanceTier::Skip: frame.counters().skippedOffscreen++; return;
+    }
+    const double logicalFrame = quantizedAnimationFrame(tier, frame.elapsedMilliseconds(),
+                                                         m_idleClip.logicalLength, m_mapID);
+    if(qAbs(logicalFrame - m_lastAppliedAnimationFrame) < 0.000001)
+    {
+        frame.counters().poseCacheHits++;
+        return;
+    }
+    const SAnimationSkeleton& skeleton = transientAnimationSkeleton();
+    frame.counters().poseEvaluations++;
+    frame.counters().componentsEvaluated += quint64(skeleton.restOffsets.size());
+    const SAnimationLocalPose local = interpolateAnimationPose(m_idleClip, logicalFrame, &skeleton);
+    applyTransientPartPoses(propagateAnimationHierarchy(local, skeleton));
+    applyTransientPartMorphs(local.morphDeltas);
+    m_lastAppliedAnimationFrame = logicalFrame;
+    m_animationPoseIsStatic = false;
 }
 
 uint CUnit::deserialize(util::CMobParser& parser)
@@ -378,6 +692,8 @@ void CUnit::getParam(QSharedPointer<IPropertyBase>& prop, EObjParam propType)
 
 void CUnit::applyParam(const QSharedPointer<IPropertyBase>& prop)
 {
+    ++m_visualRevision;
+    invalidateTransientVisual();
     switch (prop->type())
     {
     case eObjParam_UNIT_NEED_IMPORT:

@@ -25,3 +25,5 @@ freeCamera
 drawWater
 drawHelp
 frustumCulling
+animateUnits
+renderPerformanceCounters

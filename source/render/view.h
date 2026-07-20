@@ -3,6 +3,7 @@
 
 #include <QGLWidget>
 #include <QOpenGLShader>
+#include <QOpenGLTimerQuery>
 #include <QFileInfo>
 #include <QTimer>
 #include <QSharedPointer>
@@ -18,6 +19,7 @@
 
 #include "types.h"
 #include "select_window.h"
+#include "spatial_grid.h"
 
 class QLineEdit;
 class CKeyManager;
@@ -215,6 +217,10 @@ private:
     bool closeAllMobScriptWindows();
     bool confirmScriptReferencedObjectIds(const QVector<uint>& objectIds,
                                           const QString& operation);
+    void rebuildSpatialIndices();
+    QVector<CNode*> spatiallyVisibleNodes(CMob* mob, const CViewFrustum* frustum,
+                                          SSpatialQueryStats* stats);
+    QString sceneSourceFingerprint();
 
 
 public slots:
@@ -241,6 +247,7 @@ public slots:
 signals:
     void updateMsg(QString msg);
     void unloadMob(CMob*);
+    void selectionChanged();
     void updateMainWindowTitle(eTitleTypeData, QString);
     void showOutlinerSignal(bool bShow);
     void mobScriptChanged(CMob* mob, const QString& displayScript);
@@ -258,6 +265,8 @@ private:
     QOpenGLShaderProgram m_program;
     QOpenGLShaderProgram m_landProgram;
     QOpenGLShaderProgram m_selectProgram;
+    QOpenGLTimerQuery* m_gpuTimer;
+    bool m_gpuTimerPending;
     QMatrix4x4 m_projection;
     QVector<CMob*> m_aMob;
     QSet<CMob*> m_hiddenMobs;
@@ -307,6 +316,11 @@ private:
     QVector<GLuint> m_testEntranceLabelTextures;
     bool m_testEntranceLabelTexturesDirty{false};
     int m_selectedTestEntrance{-1};
+    QHash<CMob*, QSharedPointer<CSpatialGrid<CNode*>>> m_spatialIndices;
+    QHash<CMob*, QVector<CNode*>> m_spatialOverflowNodes;
+    bool m_spatialIndexDirty;
+    bool m_sceneFingerprintDirty;
+    QString m_sceneFingerprint;
 };
 
 #endif // MYGLWIDGET_H

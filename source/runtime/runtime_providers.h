@@ -5,6 +5,59 @@
 #include <QString>
 #include <QStringList>
 #include <QVector>
+#include <QMap>
+#include <QSet>
+
+enum class EProfileProviderRole
+{
+    Database,
+    CharacterAppearance,
+    EquipmentLayout,
+    UnitAnimation,
+    SemanticValidation
+};
+
+inline uint qHash(EProfileProviderRole role, uint seed = 0)
+{
+    return ::qHash(static_cast<int>(role), seed);
+}
+
+QString profileProviderRoleName(EProfileProviderRole role);
+
+struct SProfileProviderDescriptor
+{
+    SProfileProviderDescriptor() = default;
+    SProfileProviderDescriptor(const QString& providerId, int version,
+                               const QSet<EProfileProviderRole>& providerRoles,
+                               const QString& providerDescription)
+        : id(providerId), interfaceVersion(version), roles(providerRoles),
+          description(providerDescription) {}
+    QString id;
+    int interfaceVersion{1};
+    QSet<EProfileProviderRole> roles;
+    QString description;
+};
+
+struct SProfileProviderSelection
+{
+    bool valid{false};
+    QString providerId;
+    EProfileProviderRole role{EProfileProviderRole::Database};
+    QString diagnostic;
+};
+
+class ProfileProviderRegistry
+{
+public:
+    bool registerProvider(const SProfileProviderDescriptor& descriptor, QString* diagnostic = nullptr);
+    SProfileProviderSelection select(EProfileProviderRole role, const QString& providerId,
+                                     int requestedInterfaceVersion = 1) const;
+    QVector<SProfileProviderDescriptor> providers() const;
+    static ProfileProviderRegistry builtIns();
+
+private:
+    QMap<QString, SProfileProviderDescriptor> m_providers;
+};
 
 struct SRuntimeProviderResult
 {
@@ -12,6 +65,12 @@ struct SRuntimeProviderResult
     QString code;
     QString message;
     QJsonObject evidence;
+};
+
+enum class EUnitVisualDataSource
+{
+    ProfileDatabase,
+    EmbeddedMob
 };
 
 struct SCharacterAppearanceRequest
@@ -22,6 +81,8 @@ struct SCharacterAppearanceRequest
     QString model;
     QString primaryTexture;
     QString secondaryTexture;
+    QStringList bodyParts;
+    EUnitVisualDataSource dataSource{EUnitVisualDataSource::ProfileDatabase};
 };
 
 class ICharacterAppearanceResolver
@@ -41,6 +102,9 @@ struct SEquipmentLayoutRequest
     QStringList weapons;
     QStringList armor;
     QStringList perks;
+    QString model;
+    QStringList assemblyParts;
+    EUnitVisualDataSource dataSource{EUnitVisualDataSource::ProfileDatabase};
 };
 
 class IEquipmentLayoutResolver
@@ -50,6 +114,23 @@ public:
     virtual QString providerId() const = 0;
     virtual SRuntimeProviderResult resolve(const SEquipmentLayoutRequest& request,
                                            QJsonObject* equipmentLayout) const = 0;
+};
+
+struct SUnitAnimationRequest
+{
+    QString profileId;
+    QString runtimeManifestId;
+    QString model;
+    QStringList weapons;
+};
+
+class IUnitAnimationResolver
+{
+public:
+    virtual ~IUnitAnimationResolver() = default;
+    virtual QString providerId() const = 0;
+    virtual SRuntimeProviderResult resolve(const SUnitAnimationRequest& request,
+                                           QJsonObject* animation) const = 0;
 };
 
 class IPrototypeResolver

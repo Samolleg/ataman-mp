@@ -30,6 +30,43 @@ void appendUnique(QStringList& values, const QString& value)
 
 namespace ei {
 
+float textureUvScale(const QString& textureName)
+{
+    const QString normalized = textureName.trimmed().toLower();
+    if(normalized.endsWith(".x2") || normalized.endsWith(".x2.mmp")
+            || normalized.endsWith("_x2") || normalized.endsWith("_x2.mmp"))
+        return 2.0f;
+    return 1.0f;
+}
+
+float textureUvScaleForBounds(const QString& textureName, float minU, float maxU,
+                              float minV, float maxV)
+{
+    const float namedScale = textureUvScale(textureName);
+    if(namedScale <= 1.0f)
+        return namedScale;
+
+    // Ordinary x2 equipment FIGs store their UVs in one 0.5 x 0.5 atlas
+    // quadrant and rely on the renderer's repeat transform. Some integral
+    // creature weapons reuse the same equipment MMP after their FIG UVs have
+    // already been expanded to the full atlas. Scaling those a second time
+    // selects unrelated islands. Determine which representation the asset
+    // contains from its measured UV extent rather than its model family.
+    constexpr float packedQuadrantLimit = 0.5001f;
+    if(maxU - minU > packedQuadrantLimit || maxV - minV > packedQuadrantLimit)
+        return 1.0f;
+    return namedScale;
+}
+
+bool usesUnlayeredHumanoidTexture(const QString& partName)
+{
+    const QString normalized = partName.trimmed().toLower();
+    // Clothing/armor atlases share body UV space, but the face and selected
+    // hair remain sourced from the profile skin atlas. Applying the composed
+    // clothing atlas to these components can paint pants/armor over a face.
+    return normalized == "hd" || normalized.startsWith("hr.");
+}
+
 QString textureCacheKey(const QString& textureName, const QString& modelName)
 {
     const QString texture = normalizedTextureName(textureName);

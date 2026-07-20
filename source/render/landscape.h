@@ -62,8 +62,8 @@ public:
     void readMap(const QFileInfo& path);
     bool save();
     bool saveMapAs(const QFileInfo& path);
-    void draw(QOpenGLShaderProgram* program);
-    void drawWater(QOpenGLShaderProgram* program);
+    void draw(QOpenGLShaderProgram* program, const class CViewFrustum* frustum = nullptr);
+    void drawWater(QOpenGLShaderProgram* program, const class CViewFrustum* frustum = nullptr);
     void drawTilePreview(QOpenGLShaderProgram* program);
     bool projectPt(QVector3D& point);
     bool projectPt(QVector<QVector3D>& aPoint);

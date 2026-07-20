@@ -139,6 +139,8 @@ public:
             QComboBox::wheelEvent(e);
     }
     void showPopup() override;
+    void hidePopup() override;
+    bool popupActive() const { return m_popupActive; }
     void keyPressEvent(QKeyEvent* event) override;
     void focusOutEvent(QFocusEvent* event) override;
     bool eventFilter(QObject* watched, QEvent* event) override;
@@ -153,12 +155,14 @@ signals:
 
 private:
     void ensureOptionsLoaded();
+    void updateDatabaseDiagnostic(const QString& value);
 
     QSharedPointer<IPropertyBase> m_pValue; //stored value;
     QStringList m_valueList;
     QSharedPointer<QStringListModel> m_pListModel;
     QCompleter* m_pCompleter;
     bool m_optionsLoaded;
+    bool m_popupActive;
     QString m_committedText;
 
     void cancelPendingEdit();

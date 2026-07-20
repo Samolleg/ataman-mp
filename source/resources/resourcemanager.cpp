@@ -1,4 +1,5 @@
 #include "resourcemanager.h"
+#include "mmp_codec.h"
 #include <QDebug>
 #include <QMessageBox>
 #include <QtMath>
@@ -25,6 +26,75 @@ CTextureList* CTextureList::m_pTextureContainer = nullptr;
 CSessionDataManager* CSessionDataManager::m_pSessionDataManger = nullptr;
 
 namespace {
+ERenderMaterialClass classifyDxt1Alpha(const QByteArray& data, int offset, int width, int height)
+{
+    const int blocks = qMax(1, (width + 3) / 4) * qMax(1, (height + 3) / 4);
+    for(int block = 0; block < blocks && offset + 8 <= data.size(); ++block, offset += 8)
+    {
+        const uchar* bytes = reinterpret_cast<const uchar*>(data.constData() + offset);
+        const quint16 color0 = quint16(bytes[0]) | (quint16(bytes[1]) << 8);
+        const quint16 color1 = quint16(bytes[2]) | (quint16(bytes[3]) << 8);
+        if(color0 > color1)
+            continue;
+        const quint32 indices = quint32(bytes[4]) | (quint32(bytes[5]) << 8)
+            | (quint32(bytes[6]) << 16) | (quint32(bytes[7]) << 24);
+        for(int pixel = 0; pixel < 16; ++pixel)
+            if(((indices >> (pixel * 2)) & 3u) == 3u)
+                return ERenderMaterialClass::Cutout;
+    }
+    return ERenderMaterialClass::Opaque;
+}
+
+ERenderMaterialClass classifyDxt3Alpha(const QByteArray& data, int offset, int width, int height)
+{
+    bool hasZero = false;
+    const int blocks = qMax(1, (width + 3) / 4) * qMax(1, (height + 3) / 4);
+    for(int block = 0; block < blocks && offset + 16 <= data.size(); ++block, offset += 16)
+    {
+        for(int nibble = 0; nibble < 16; ++nibble)
+        {
+            const uchar byte = uchar(data.at(offset + nibble / 2));
+            const int alpha = nibble & 1 ? byte >> 4 : byte & 15;
+            if(alpha > 0 && alpha < 15)
+                return ERenderMaterialClass::Transparent;
+            hasZero = hasZero || alpha == 0;
+        }
+    }
+    return hasZero ? ERenderMaterialClass::Cutout : ERenderMaterialClass::Opaque;
+}
+
+ERenderMaterialClass classifyDxt5Alpha(const QByteArray& data, int offset, int width, int height)
+{
+    bool hasZero = false;
+    const int blocks = qMax(1, (width + 3) / 4) * qMax(1, (height + 3) / 4);
+    for(int block = 0; block < blocks && offset + 16 <= data.size(); ++block, offset += 16)
+    {
+        const uchar* bytes = reinterpret_cast<const uchar*>(data.constData() + offset);
+        int palette[8] = {bytes[0], bytes[1], 0, 0, 0, 0, 0, 0};
+        if(palette[0] > palette[1])
+            for(int i = 2; i < 8; ++i)
+                palette[i] = ((8 - i) * palette[0] + (i - 1) * palette[1]) / 7;
+        else
+        {
+            for(int i = 2; i < 6; ++i)
+                palette[i] = ((6 - i) * palette[0] + (i - 1) * palette[1]) / 5;
+            palette[6] = 0;
+            palette[7] = 255;
+        }
+        quint64 indices = 0;
+        for(int byte = 0; byte < 6; ++byte)
+            indices |= quint64(bytes[2 + byte]) << (byte * 8);
+        for(int pixel = 0; pixel < 16; ++pixel)
+        {
+            const int alpha = palette[(indices >> (pixel * 3)) & 7u];
+            if(alpha > 0 && alpha < 255)
+                return ERenderMaterialClass::Transparent;
+            hasZero = hasZero || alpha == 0;
+        }
+    }
+    return hasZero ? ERenderMaterialClass::Cutout : ERenderMaterialClass::Opaque;
+}
+
 struct SCachedArchiveIndex
 {
     qint64 size{-1};
@@ -523,6 +593,31 @@ ei::CFigure* CObjectList::getFigure(const QString& name)
     return m_aFigure.contains(figureName) ? m_aFigure[figureName] : figureDefault();
 }
 
+QStringList CObjectList::figurePartNames(const QString& name)
+{
+    QStringList result;
+    ei::CFigure* figure = getFigure(name);
+    if(figure)
+        figure->getPartNames(result);
+    return result;
+}
+
+QByteArray CObjectList::modelAnimation(const QString& name)
+{
+    const QString member = name.toLower() + ".anm";
+    if(m_animationArchives.contains(member)) return m_animationArchives.value(member);
+    if(m_missingAnimationNames.contains(member)) return {};
+    QByteArray bytes;
+    if(!readIndexedResource(configuredResourceSources(m_pSettings), member, bytes))
+    {
+        m_missingAnimationNames.insert(member);
+        ei::log(eLogWarning, "Missing model animation archive: " + member);
+        return {};
+    }
+    m_animationArchives.insert(member, bytes);
+    return bytes;
+}
+
 void CObjectList::initResource()
 {
     QSet<QString> empty;
@@ -532,6 +627,8 @@ void CObjectList::initResource()
 void CObjectList::refreshConfiguredSources()
 {
     m_missingFigureNames.clear();
+    m_animationArchives.clear();
+    m_missingAnimationNames.clear();
     QSet<QString> empty;
     loadFigures(empty);
 }
@@ -604,53 +701,20 @@ SColor getPixelData(QDataStream &stream, uint pixelSize, SMmpColor& color)
     return colPix;
 }
 
-void decompressPnt3(QImage& image, QDataStream& data, uint mipCount)
+bool decompressPnt3(QImage& image, const QByteArray& data, uint compressedSize,
+                    QString* diagnostic)
 {
-    const uint offset = 76;
-    QByteArray destination;
-
-    uint src = 0;
-    uint n = 0;
-    uint v;
-    while(src < mipCount)
+    const int offset = 76;
+    if(compressedSize > uint(qMax(0, data.size() - offset)))
     {
-        data.device()->seek(offset + src);
-        data >> v;
-        src += 4;
-
-        if(v > 1000000 || v == 0)
-        {
-            n += 1;
-        }
-        else
-        {
-            data.device()->seek(offset + (src - (1 + n) * 4));
-            destination.append(data.device()->read(src-4));
-            for(uint i(0); i< v; i++)
-                destination.append('\x00');
-            n = 0;
-        }
+        if(diagnostic) *diagnostic = "PNT3 compressed size exceeds its MMP payload.";
+        return false;
     }
-
-    data.device()->seek(offset + (src - n * 4));
-    destination.append(data.device()->read(src));
-
-    n = 0;
-    for(int h(0); h < image.height(); ++h)
-    {
-        for(int w(0); w < image.width(); ++w)
-        {
-            image.setPixelColor(h, w, QColor(uchar(destination[n + 2]), uchar(destination[n + 1]), uchar(destination[n]), uchar(destination[n + 3])));
-            n += 4;
-        }
-    }
-
-    //rotate image by 270 degree
-    QPoint center = image.rect().center();
-    QMatrix matrix;
-    matrix.translate(center.x(), center.y());
-    matrix.rotate(270);
-    image = image.transformed(matrix).mirrored();
+    // The original surface unpacker writes PNT3 pixels sequentially into the
+    // destination atlas. Preserve that row-major order; atlas placement comes
+    // from transparent run markers, not an image-space rotation or UV fixup.
+    return ei::decodePnt3Image(data.mid(offset, int(compressedSize)),
+                              image.width(), image.height(), &image, diagnostic);
 }
 
 
@@ -685,10 +749,17 @@ void CTextureList::parse(QByteArray& data, const QString& name)
         return;
     }
 
+    // SMmpHeader serializes a fixed 76-byte header.  The uncompressed and
+    // PNT3 decoders consume QDataStream directly, so leave it at the payload
+    // boundary rather than immediately after the fields read by operator>>.
+    // Compressed DXT uploads below use explicit byte offsets and are unchanged.
+    stream.device()->seek(header.size());
+
     QOpenGLTexture* texture = new QOpenGLTexture(QOpenGLTexture::Target2D);
     texture->setMinificationFilter(QOpenGLTexture::NearestMipMapNearest);
     texture->setMagnificationFilter(QOpenGLTexture::NearestMipMapNearest);
     texture->setWrapMode(QOpenGLTexture::Repeat);
+    ERenderMaterialClass materialClass = ERenderMaterialClass::Conservative;
     switch (header.m_format)
     {
     case ETextureFormat::eMMP_DXT1:
@@ -704,6 +775,7 @@ void CTextureList::parse(QByteArray& data, const QString& name)
             texture->setCompressedData(i, 0, size, data.data() + offset);
             offset += size;
         }
+        materialClass = classifyDxt1Alpha(data, header.size(), header.m_width, header.m_height);
         break;
     }
     case ETextureFormat::eMMP_DXT2:
@@ -720,6 +792,7 @@ void CTextureList::parse(QByteArray& data, const QString& name)
             texture->setCompressedData(i, 0, size, data.data() + offset);
             offset += size;
         }
+        materialClass = classifyDxt3Alpha(data, header.size(), header.m_width, header.m_height);
         break;
     }
     case ETextureFormat::eMMP_DXT4:
@@ -736,6 +809,7 @@ void CTextureList::parse(QByteArray& data, const QString& name)
             texture->setCompressedData(i, 0, size, data.data() + offset);
             offset += size;
         }
+        materialClass = classifyDxt5Alpha(data, header.size(), header.m_width, header.m_height);
         break;
     }
     case ETextureFormat::eMMP_5650    : // use the same direct draw reading algorithm
@@ -746,14 +820,24 @@ void CTextureList::parse(QByteArray& data, const QString& name)
         QImage img(header.m_width, header.m_height, QImage::Format_RGBA64);
         readDirecDrawImage(img, stream);
         texture->setData(img);
+        materialClass = classifyTextureAlpha(img);
         break;
     }
     case ETextureFormat::eMMP_PNT3    :
     {
-        // very slow. 50-100ms
+        // JMV equipment/face atlases predominantly use sparse PNT3. Shipped
+        // payloads omit trailing transparent pixels; decode into an exact,
+        // zero-filled image instead of reading beyond the RLE output.
         QImage img(header.m_width, header.m_height, QImage::Format_RGBA64);
-        decompressPnt3(img, stream, uint(header.m_mipcount));
+        QString diagnostic;
+        if(!decompressPnt3(img, data, uint(header.m_mipcount), &diagnostic))
+        {
+            ei::log(eLogWarning, "Invalid PNT3 texture " + name + ": " + diagnostic);
+            delete texture;
+            return;
+        }
         texture->setData(img);
+        materialClass = classifyTextureAlpha(img);
         break;
     }
     case ETextureFormat::eMMP_5550    :qDebug() << "eMMP_5550"  << name; delete texture; return;
@@ -768,6 +852,7 @@ void CTextureList::parse(QByteArray& data, const QString& name)
     }
     }
     m_aTexture.insert(name.toLower(), texture);
+    m_textureMaterialClasses.insert(texture, materialClass);
 }
 
 void CTextureList::initAuxTexture()
@@ -899,10 +984,121 @@ QOpenGLTexture* CTextureList::texture(const QString& name, const QString& modelN
     return loadTextureResource(name.toLower(), modelName.toLower());
 }
 
+QImage CTextureList::loadTextureImageResource(const QString& name, const QString& modelName)
+{
+    const QVector<QString> sources = configuredResourceSources(m_pSettings);
+    const QString key = resourceSourceFingerprint(sources) + '|'
+        + ei::textureCacheKey(name, modelName);
+    if(m_aTextureImages.contains(key))
+        return m_aTextureImages.value(key);
+    for(const QString& candidate : ei::textureResourceCandidates(name, modelName))
+    {
+        QByteArray data;
+        if(!readIndexedResource(sources, candidate, data))
+            continue;
+        QDataStream stream(data);
+        util::formatStream(stream);
+        SMmpHeader header;
+        stream >> header;
+        if(header.m_signature != 0x00504D4D || header.m_format != ETextureFormat::eMMP_PNT3)
+        {
+            ei::log(eLogWarning, "Shared body-atlas composition currently requires PNT3: " + candidate);
+            m_aTextureImages.insert(key, QImage());
+            return QImage();
+        }
+        QImage image(header.m_width, header.m_height, QImage::Format_RGBA64);
+        QString diagnostic;
+        if(!decompressPnt3(image, data, uint(header.m_mipcount), &diagnostic))
+        {
+            ei::log(eLogWarning, "Invalid body-atlas layer " + candidate + ": " + diagnostic);
+            m_aTextureImages.insert(key, QImage());
+            return QImage();
+        }
+        m_aTextureImages.insert(key, image);
+        return image;
+    }
+    ei::log(eLogWarning, QString("Missing body-atlas layer: %1 model:%2").arg(name, modelName));
+    m_aTextureImages.insert(key, QImage());
+    return QImage();
+}
+
+QImage CTextureList::textureImage(const QString& name, const QString& modelName)
+{
+    return loadTextureImageResource(name, modelName);
+}
+
+QImage CTextureList::layeredTextureImage(const QStringList& layerNames,
+                                         const QString& modelName,
+                                         QString* diagnostic)
+{
+    QVector<QImage> layers;
+    for(const QString& name : layerNames)
+    {
+        const QImage image = loadTextureImageResource(name, modelName);
+        if(image.isNull())
+        {
+            if(layers.isEmpty())
+            {
+                if(diagnostic)
+                    *diagnostic = "Base body-atlas layer is unavailable: " + name;
+                return QImage();
+            }
+            ei::log(eLogWarning, "Skipping unavailable humanoid body-atlas overlay: " + name);
+            continue;
+        }
+        layers.append(image);
+    }
+    QImage composite;
+    QString localDiagnostic;
+    if(!ei::compositeTextureLayers(layers, &composite, &localDiagnostic))
+    {
+        if(diagnostic)
+            *diagnostic = localDiagnostic;
+        return QImage();
+    }
+    if(diagnostic)
+        diagnostic->clear();
+    return composite;
+}
+
+QOpenGLTexture* CTextureList::layeredTexture(const QStringList& layerNames,
+                                             const QString& modelName)
+{
+    const QString cacheKey = "layers|"
+        + resourceSourceFingerprint(configuredResourceSources(m_pSettings)) + '|'
+        + modelName.toLower() + '|'
+        + layerNames.join(';').toLower();
+    if(m_aTexture.contains(cacheKey))
+        return m_aTexture.value(cacheKey);
+    QString diagnostic;
+    const QImage composite = layeredTextureImage(layerNames, modelName, &diagnostic);
+    if(composite.isNull())
+    {
+        ei::log(eLogWarning, "Cannot compose humanoid body atlas: " + diagnostic);
+        return textureDefault();
+    }
+    // Match the established QImage upload path used by ordinary PNT3 MMPs.
+    // The QOpenGLTexture(QImage) convenience constructor may select different
+    // storage/orientation behavior even though the FIG UVs are unchanged.
+    QOpenGLTexture* texture = new QOpenGLTexture(QOpenGLTexture::Target2D);
+    texture->setMinificationFilter(QOpenGLTexture::Nearest);
+    texture->setMagnificationFilter(QOpenGLTexture::Nearest);
+    texture->setWrapMode(QOpenGLTexture::Repeat);
+    texture->setData(composite);
+    m_aTexture.insert(cacheKey, texture);
+    m_textureMaterialClasses.insert(texture, classifyTextureAlpha(composite));
+    return texture;
+}
+
 QOpenGLTexture* CTextureList::textureDefault()
 {
     Q_ASSERT(m_aTexture.contains("default"));
     return m_aTexture[QString("default")];
+}
+
+ERenderMaterialClass CTextureList::materialClass(QOpenGLTexture* texture) const
+{
+    return m_textureMaterialClasses.value(texture, ERenderMaterialClass::Conservative);
 }
 
 void CTextureList::initResource()
@@ -917,6 +1113,7 @@ void CTextureList::initResource()
     texture->setFormat(QOpenGLTexture::TextureFormat::RGBA8_UNorm);
     texture->setData(img.mirrored());
     m_aTexture.insert(QString("default"), texture);
+    m_textureMaterialClasses.insert(texture, classifyTextureAlpha(img));
 
     initAuxTexture();
 
@@ -1178,8 +1375,38 @@ QOpenGLTexture* CTextureList::buildLandTex(const QString& name, int expectedTexC
 void CTextureList::refreshConfiguredSources()
 {
     m_missingTextureNames.clear();
+    m_aTextureImages.clear();
+    for(auto it = m_aTexture.begin(); it != m_aTexture.end();)
+    {
+        if(it.key().startsWith("layers|"))
+            it = m_aTexture.erase(it);
+        else
+            ++it;
+    }
     QSet<QString> empty;
     loadTexture(empty);
+}
+
+void CTextureList::clearTransientVisualCache()
+{
+    m_aTextureImages.clear();
+    for(auto it = m_aTexture.begin(); it != m_aTexture.end();)
+    {
+        if(!it.key().startsWith("layers|"))
+        {
+            ++it;
+            continue;
+        }
+        QOpenGLTexture* texture = it.value();
+        it = m_aTexture.erase(it);
+        if(texture)
+        {
+            m_textureMaterialClasses.remove(texture);
+            if(texture->isCreated())
+                texture->destroy();
+            delete texture;
+        }
+    }
 }
 
 

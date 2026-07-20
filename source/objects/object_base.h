@@ -2,6 +2,7 @@
 #define OBJECT_H
 
 #include <QVector>
+#include <QMap>
 #include <QGLWidget>
 #include <QOpenGLFunctions>
 //#include <QOpenGLShaderProgram>
@@ -9,6 +10,7 @@
 //#include <QOpenGLTexture>
 #include "node.h"
 #include "part.h"
+#include "unit_animation.h"
 
 class CMob;
 
@@ -50,10 +52,21 @@ public:
     void markAsDeleted(bool bDeleted = true) override {m_bDeleted = bDeleted;}
     bool isMarkDeleted() override {return m_bDeleted;}
     bool isOperationAxisAllow(EOperationAxisType type) override {Q_UNUSED(type); return true;};
+    QMap<QString, QVector<QVector2D>> renderedBodyPartUvTriangles() const;
 
 protected:
     void recalcFigure();
     void recalcMinPos();
+    void applyTransientVisual(const QString& modelName, const QString& textureName,
+                              const QStringList& visibleParts, const QVector3D& complexion,
+                              const QMap<QString, QString>& partTextureNames = {},
+                              const QString& secondaryTextureName = QString(),
+                              const QStringList& bodyTextureLayers = {});
+    void invalidateTransientVisual() { m_transientVisualFingerprint.clear(); }
+    const SAnimationSkeleton& transientAnimationSkeleton() const;
+    void applyTransientPartPoses(const QMap<QString, QMatrix4x4>& poses);
+    void applyTransientPartMorphs(const QMap<QString, QVector<QVector3D>>& morphs);
+    void rebuildTransientAnimationSkeleton();
     //void updateVisibility(QVector<QString>& aPart);
 
 protected:
@@ -65,10 +78,15 @@ private:
     QVector<CPart*> m_aPart;
     QVector3D m_minPoint;   // min position of model bound boxes(units half body under ground)
     QOpenGLTexture* m_texture;
+    QOpenGLTexture* m_secondaryTexture{nullptr};
+    QMap<QString, QOpenGLTexture*> m_partTextures;
     ei::CFigure* m_pFigure;
     bool m_bDeleted;
     CBox m_cachedBBox;
     bool m_bboxDirty;
+    QString m_transientVisualFingerprint;
+    QVector3D m_figureComplexion{1.0f, 1.0f, 1.0f};
+    SAnimationSkeleton m_transientSkeleton;
 };
 
 #endif // OBJECT_H

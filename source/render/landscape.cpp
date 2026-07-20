@@ -4,6 +4,8 @@
 #include <QMessageBox>
 
 #include "landscape.h"
+#include "render_performance.h"
+#include "view_frustum.h"
 #include "res_file.h"
 #include "utils.h"
 #include "resourcemanager.h"
@@ -302,22 +304,48 @@ bool CLandscape::saveMapAs(const QFileInfo& path)
     return true;
 }
 
-void CLandscape::draw(QOpenGLShaderProgram* program)
+void CLandscape::draw(QOpenGLShaderProgram* program, const CViewFrustum* frustum)
 {
     m_texture->bind(0);
     program->setUniformValue("qt_Texture0", 0);
     for (auto& xSec: m_aSector)
         for(auto& ySec: xSec)
+        {
+            RenderPerformanceContext& performance = RenderPerformanceContext::instance();
+            if(performance.collecting())
+                ++performance.counters().terrainSectorsTested;
+            if(frustum && !ySec->intersectsFrustum(*frustum))
+            {
+                if(performance.collecting())
+                    ++performance.counters().terrainSectorsCulled;
+                continue;
+            }
+            if(performance.collecting())
+                ++performance.counters().terrainSectorsVisible;
             ySec->draw(program);
+        }
 }
 
-void CLandscape::drawWater(QOpenGLShaderProgram *program)
+void CLandscape::drawWater(QOpenGLShaderProgram *program, const CViewFrustum* frustum)
 {
     m_texture->bind(0);
     program->setUniformValue("qt_Texture0", 0);
     for (auto& xSec: m_aSector)
         for(auto& ySec: xSec)
+        {
+            RenderPerformanceContext& performance = RenderPerformanceContext::instance();
+            if(performance.collecting())
+                ++performance.counters().terrainSectorsTested;
+            if(frustum && !ySec->intersectsFrustum(*frustum))
+            {
+                if(performance.collecting())
+                    ++performance.counters().terrainSectorsCulled;
+                continue;
+            }
+            if(performance.collecting())
+                ++performance.counters().terrainSectorsVisible;
             ySec->drawWater(program);
+        }
 }
 
 bool CLandscape::projectPt(QVector3D& point)

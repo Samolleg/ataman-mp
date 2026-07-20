@@ -1,53 +1,173 @@
 #include "part.h"
+#include "render_performance.h"
 
-CPart::CPart():
-   m_indexBuf(QOpenGLBuffer::IndexBuffer)
-  ,m_bShow(true)
-{
-    m_aVertData.clear();
+#include <QCryptographicHash>
+#include <QHash>
+#include <QWeakPointer>
+
+namespace {
+int& liveMeshCount() { static int value = 0; return value; }
+quint64& liveMeshBytes() { static quint64 value = 0; return value; }
 }
 
-CPart::CPart(const CPart &part):
-    m_indexBuf(QOpenGLBuffer::IndexBuffer)
+class CSharedPartMesh
+{
+public:
+    ~CSharedPartMesh()
+    {
+        buffer.destroy();
+        --liveMeshCount();
+        liveMeshBytes() -= bytes;
+    }
+    QOpenGLBuffer buffer;
+    int vertexCount{0};
+    quint64 bytes{0};
+};
+
+namespace {
+QHash<QByteArray, QWeakPointer<CSharedPartMesh>> s_meshCache;
+QString s_meshCacheScope;
+
+QByteArray meshKey(const QVector<SVertexData>& vertices)
+{
+    QCryptographicHash hash(QCryptographicHash::Sha256);
+    hash.addData(s_meshCacheScope.toUtf8());
+    hash.addData(reinterpret_cast<const char*>(vertices.constData()),
+                 vertices.size() * int(sizeof(SVertexData)));
+    return hash.result();
+}
+
+QSharedPointer<CSharedPartMesh> createMesh(const QVector<SVertexData>& vertices)
+{
+    QSharedPointer<CSharedPartMesh> mesh(new CSharedPartMesh);
+    mesh->vertexCount = vertices.size();
+    mesh->bytes = quint64(vertices.size()) * sizeof(SVertexData);
+    mesh->buffer.create();
+    mesh->buffer.bind();
+    mesh->buffer.allocate(vertices.constData(), int(mesh->bytes));
+    mesh->buffer.release();
+    ++liveMeshCount();
+    liveMeshBytes() += mesh->bytes;
+    return mesh;
+}
+}
+
+CPart::CPart():
+   m_bShow(true)
+{
+    m_aVertData.clear();
+    m_poseMatrix.setToIdentity();
+}
+
+CPart::CPart(const CPart &part)
 {
     m_name = part.m_name;
+    m_parentName = part.m_parentName;
+    m_restOffset = part.m_restOffset;
+    m_textureNumber = part.m_textureNumber;
+    m_textureUvScale = part.m_textureUvScale;
+    m_poseMatrix = part.m_poseMatrix;
     m_bShow = part.m_bShow;
     m_aVertData = part.m_aVertData;
-    update(); //create new index and vertex buffers
+    m_baseVertData = part.m_baseVertData;
+    m_sourceVertexIndices = part.m_sourceVertexIndices;
+    m_morphApplied = part.m_morphApplied;
+    if(m_morphApplied)
+        attachPrivateMesh(m_aVertData);
+    else
+        m_mesh = part.m_mesh;
 }
 
 CPart::~CPart()
 {
-    m_vertexBuf.destroy();
-    m_indexBuf.destroy();
+}
+
+void CPart::setCacheScope(const QString& scope)
+{
+    s_meshCacheScope = scope.toLower();
+}
+
+int CPart::sharedMeshCount()
+{
+    return liveMeshCount();
+}
+
+quint64 CPart::sharedMeshBytes()
+{
+    return liveMeshBytes();
+}
+
+void CPart::attachSharedMesh(const QVector<SVertexData>& vertices)
+{
+    const QByteArray key = meshKey(vertices);
+    m_mesh = s_meshCache.value(key).toStrongRef();
+    if(!m_mesh)
+    {
+        m_mesh = createMesh(vertices);
+        s_meshCache.insert(key, m_mesh.toWeakRef());
+    }
+}
+
+void CPart::attachPrivateMesh(const QVector<SVertexData>& vertices)
+{
+    m_mesh = createMesh(vertices);
 }
 
 void CPart::update()
 {
-    // Generate VBOs and transfer data
-    m_vertexBuf.create();
-    m_vertexBuf.bind();
-    m_vertexBuf.allocate(m_aVertData.data(), m_aVertData.count() * int(sizeof(SVertexData)));
-    m_vertexBuf.release();
+    if(m_baseVertData.size() != m_aVertData.size())
+        m_baseVertData = m_aVertData;
+    attachSharedMesh(m_aVertData);
+}
 
-    QVector<ushort> aInd;
-    for (ushort i(0); i<m_aVertData.size(); ++i)
-        aInd.append(i);
-
-    m_indexBuf.create();
-    m_indexBuf.bind();
-    m_indexBuf.allocate(aInd.data(), aInd.count() * int(sizeof(ushort)));
-    m_indexBuf.release();
+void CPart::setMorphDeltas(const QVector<QVector3D>& deltas)
+{
+    const bool canApply = !deltas.isEmpty()
+        && m_sourceVertexIndices.size() == m_baseVertData.size();
+    if(!canApply && !m_morphApplied)
+        return;
+    if(m_aVertData.size() != m_baseVertData.size())
+        m_aVertData = m_baseVertData;
+    for(int vertex = 0; vertex < m_aVertData.size(); ++vertex)
+    {
+        m_aVertData[vertex].position = m_baseVertData[vertex].position;
+        if(canApply)
+        {
+            const int source = m_sourceVertexIndices.at(vertex);
+            if(source >= 0 && source < deltas.size())
+                m_aVertData[vertex].position += deltas.at(source);
+        }
+    }
+    if(canApply && m_morphApplied && m_mesh)
+    {
+        m_mesh->buffer.bind();
+        m_mesh->buffer.write(0, m_aVertData.constData(), m_aVertData.size() * int(sizeof(SVertexData)));
+        m_mesh->buffer.release();
+    }
+    else if(canApply)
+        attachPrivateMesh(m_aVertData);
+    else
+        attachSharedMesh(m_baseVertData);
+    m_morphApplied = canApply;
 }
 
 void CPart::draw(QOpenGLShaderProgram* program)
 {
-    if (!m_bShow || m_aVertData.count() == 0)
+    drawImmediate(program);
+}
+
+void CPart::drawImmediate(QOpenGLShaderProgram* program)
+{
+    if (!isDrawable() || !m_mesh)
         return;
+
+    program->setUniformValue("u_partAnimated", true);
+    program->setUniformValue("u_partMmatrix", m_poseMatrix);
+    program->setUniformValue("u_textureUvScale", m_textureUvScale);
 
     int offset(0);
     // Tell OpenGL which VBOs to use
-    m_vertexBuf.bind();
+    m_mesh->buffer.bind();
     // Tell OpenGL programmable pipeline how to locate vertex position data
     int vertexLocation = program->attributeLocation("a_position");
     program->enableAttributeArray(vertexLocation);
@@ -63,26 +183,33 @@ void CPart::draw(QOpenGLShaderProgram* program)
     program->enableAttributeArray(textureLocation);
     program->setAttributeBuffer(textureLocation, GL_FLOAT, offset, 2, int(sizeof(SVertexData)));
 
-    // Draw cube geometry using indices from VBO 1
-    m_indexBuf.bind();
-    glDrawElements(GL_TRIANGLES, m_aVertData.count(), GL_UNSIGNED_SHORT, nullptr);
+    // FIG triangles are already expanded sequentially. The old identity index
+    // buffer duplicated every vertex and added a second bind to every part.
+    glDrawArrays(GL_TRIANGLES, 0, m_aVertData.count());
+    RenderPerformanceContext& performance = RenderPerformanceContext::instance();
+    if(performance.collecting())
+    {
+        ++performance.counters().drawCalls;
+        performance.counters().triangles += quint64(m_aVertData.count() / 3);
+    }
 }
 
 
 void CPart::drawSelect(QOpenGLShaderProgram *program)
 {
-    if (!m_bShow || m_aVertData.count() == 0)
+    if (!isDrawable() || !m_mesh)
         return;
+
+    program->setUniformValue("u_partAnimated", true);
+    program->setUniformValue("u_partMmatrix", m_poseMatrix);
 
     int offset(0);
     // Tell OpenGL which VBOs to use
-    m_vertexBuf.bind();
+    m_mesh->buffer.bind();
     // Tell OpenGL programmable pipeline how to locate vertex position data
     int vertexLocation = program->attributeLocation("a_position");
     program->enableAttributeArray(vertexLocation);
     program->setAttributeBuffer(vertexLocation, GL_FLOAT, offset, 3, int(sizeof(SVertexData)));
 
-    // Draw cube geometry using indices from VBO 1
-    m_indexBuf.bind();
-    glDrawElements(GL_TRIANGLES, m_aVertData.count(), GL_UNSIGNED_SHORT, nullptr);
+    glDrawArrays(GL_TRIANGLES, 0, m_aVertData.count());
 }
