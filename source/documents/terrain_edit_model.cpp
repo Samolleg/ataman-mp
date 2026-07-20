@@ -239,7 +239,13 @@ quint16 CTerrainTransitionCatalog::selectForPaint(
 {
     bool selected = false;
     quint16 packed = select(signature, globalX, globalY, distributionSeed, &selected);
-    if(selected && m_swapPaintQuarterTurns)
+    const bool horizontalHalf = signature.northWest == signature.southWest
+        && signature.northEast == signature.southEast
+        && signature.northWest != signature.northEast;
+    const bool verticalHalf = signature.northWest == signature.northEast
+        && signature.southWest == signature.southEast
+        && signature.northWest != signature.southWest;
+    if(selected && m_swapPaintHalfTurns && (horizontalHalf || verticalHalf))
     {
         SMprPackedTile tile = SMprPackedTile::decode(packed);
         if(tile.rotation == 1 || tile.rotation == 3)

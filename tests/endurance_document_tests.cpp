@@ -1871,6 +1871,37 @@ void EnduranceDocumentTests::zone1NamespaceTemplateSeparatesLandOverlayAndVarian
     QVERIFY(normalSide.rotation == 1 || normalSide.rotation == 3);
     QCOMPARE(paintedSide.rotation, quint8(4 - normalSide.rotation));
 
+    // A one-cell semantic stamp is a fixed nine-cell contract: four half
+    // edges use the Zone1 paint-turn correction, while all four inward corner
+    // variants and the pure center retain their authored packed values.
+    for(int dy = -1; dy <= 1; ++dy)
+    {
+        for(int dx = -1; dx <= 1; ++dx)
+        {
+            STerrainTransitionSignature stamp;
+            stamp.northWest = (dx >= 0 && dy >= 0) ? 2 : 4;
+            stamp.northEast = (dx <= 0 && dy >= 0) ? 2 : 4;
+            stamp.southEast = (dx <= 0 && dy <= 0) ? 2 : 4;
+            stamp.southWest = (dx >= 0 && dy <= 0) ? 2 : 4;
+            bool authoredFound = false;
+            bool paintedFound = false;
+            const SMprPackedTile authored = SMprPackedTile::decode(
+                analysis.landCatalog.select(stamp, 100 + dx, 100 + dy,
+                                            12345u, &authoredFound));
+            const SMprPackedTile painted = SMprPackedTile::decode(
+                analysis.landCatalog.selectForPaint(stamp, 100 + dx, 100 + dy,
+                                                    12345u, &paintedFound));
+            QVERIFY(authoredFound);
+            QVERIFY(paintedFound);
+            QCOMPARE(painted.atlasSlot(), authored.atlasSlot());
+            const bool side = (dx == 0) != (dy == 0);
+            if(side && (authored.rotation == 1 || authored.rotation == 3))
+                QCOMPARE(painted.rotation, quint8(4 - authored.rotation));
+            else
+                QCOMPARE(painted.rotation, authored.rotation);
+        }
+    }
+
     CValidationReport unknownReport;
     QVERIFY(!CTerrainAtlasAnalyzer::analyze("custom", 512, &unknownReport).usable);
     QVERIFY(unknownReport.hasErrors());

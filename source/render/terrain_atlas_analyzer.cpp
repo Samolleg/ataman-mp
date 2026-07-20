@@ -94,12 +94,11 @@ STerrainAtlasAnalysis CTerrainAtlasAnalyzer::analyze(
     }
 
     result.templateName = QStringLiteral("Zone1 stock slot layout");
-    // The inherited renderer displays packed 90/270-degree tile turns in the
-    // opposite direction from the atlas-authoring convention used by the
-    // semantic corner template. Correct only newly selected paint variants;
-    // decoding untouched MPR tiles remains byte/meaning preserving.
-    result.landCatalog.setSwapPaintQuarterTurns(true);
-    result.overlayCatalog.setSwapPaintQuarterTurns(true);
+    // Zone1's authored half-edge entries use the opposite 90/270-degree paint
+    // turn from its corner entries. Correct only newly selected half edges;
+    // corner variants and untouched MPR decoding remain unchanged.
+    result.landCatalog.setSwapPaintHalfTurns(true);
+    result.overlayCatalog.setSwapPaintHalfTurns(true);
     result.expectedSlots = 512;
     if(atlasSlotCount != result.expectedSlots)
     {
