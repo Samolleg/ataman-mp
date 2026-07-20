@@ -53,6 +53,7 @@ public Q_SLOTS:
 
 signals:
     void shortcutsChanged();
+    void renderSettingsChanged();
 
 private slots:
     void on_buttonApply_clicked();

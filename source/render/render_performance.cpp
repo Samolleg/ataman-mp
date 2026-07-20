@@ -118,7 +118,11 @@ void RenderPerformanceContext::endFrame()
         "draws:%23 terrain:%24 sectors:%25/%26/%27 triangles:%28 texture-binds:%29 "
         "queues:%30/%31/%32 batches:%33 instances:%34 instanced-draws:%35 "
         "shared-meshes:%36 gpu-memory:%37 animation-eval/cache/components:%38/%39/%40")
-        .arg(m_metadata.benchmarkMode ? "benchmark" : "vsync")
+        .arg(QString("%1 fps-cap:%2")
+             .arg(m_metadata.benchmarkMode ? "benchmark"
+                                           : (m_metadata.vsyncEnabled ? "vsync" : "vsync-off"))
+             .arg(m_metadata.frameRateCap == 0
+                      ? QString("unlimited") : QString::number(m_metadata.frameRateCap)))
         .arg(m_metadata.viewportWidth).arg(m_metadata.viewportHeight)
         .arg(m_metadata.cameraPosition.x(), 0, 'f', 2)
         .arg(m_metadata.cameraPosition.y(), 0, 'f', 2)
@@ -203,6 +207,8 @@ void RenderPerformanceContext::endFrame()
         toggles.insert("logic", m_metadata.logicEnabled);
         toggles.insert("help", m_metadata.helpEnabled);
         toggles.insert("frustumCulling", m_metadata.frustumCullingEnabled);
+        toggles.insert("vsync", m_metadata.vsyncEnabled);
+        toggles.insert("frameRateCap", m_metadata.frameRateCap);
         definition.insert("renderToggles", toggles);
         definition.insert("fps", fps);
         definition.insert("cpuAverageMs", cpuMs);

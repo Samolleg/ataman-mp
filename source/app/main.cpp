@@ -12,6 +12,8 @@
 #include <QDir>
 #include <QTabWidget>
 #include <QKeySequenceEdit>
+#include <QCheckBox>
+#include <QLineEdit>
 #include <QTemporaryDir>
 #include <QUndoCommand>
 #include <QUndoStack>
@@ -28,6 +30,7 @@
 #include "layout_components/tablemanager.h"
 #include "window_lifecycle.h"
 #include "settings.h"
+#include "render_scheduling.h"
 
 #ifdef Q_OS_WIN
 #include <windows.h>
@@ -65,6 +68,14 @@ bool renderBenchmarkRequested(int argc, char* argv[])
         if(std::strcmp(argv[i], "--render-benchmark") == 0)
             return true;
     return false;
+}
+
+bool persistedRenderVsync()
+{
+    QFile options("endurance-options.json");
+    if(!options.open(QIODevice::ReadOnly | QIODevice::Text))
+        return true;
+    return ei::renderVsyncFromOptions(options.readAll(), true);
 }
 
 #ifdef Q_OS_WIN
@@ -452,8 +463,16 @@ int runHeadlessCommand(QApplication& app)
                     settingsWindow.opt(eOptSetRender, "animateUnits"));
                 COptBool* performanceCounters = dynamic_cast<COptBool*>(
                     settingsWindow.opt(eOptSetRender, "renderPerformanceCounters"));
+                COptBool* renderVsync = dynamic_cast<COptBool*>(
+                    settingsWindow.opt(eOptSetRender, "renderVSync"));
+                COptInt* renderFpsCap = dynamic_cast<COptInt*>(
+                    settingsWindow.opt(eOptSetRender, "renderFpsCap"));
                 renderOptionsRegistered = animateUnits && animateUnits->value()
-                        && performanceCounters && !performanceCounters->value();
+                        && performanceCounters && !performanceCounters->value()
+                        && renderVsync && renderVsync->value()
+                        && renderFpsCap && renderFpsCap->value() == 0
+                        && settingsWindow.findChild<QCheckBox*>("renderVSync")
+                        && settingsWindow.findChild<QLineEdit*>("renderFpsCap");
                 if(historyShortcut && duplicateShortcut && stopTestShortcut)
                 {
                     historyShortcut->setKeySequence(QKeySequence("Alt+L"));
@@ -712,10 +731,13 @@ int main(int argc, char *argv[])
     // QGLWidget reads the default format when the first preview/view widget is
     // constructed. Normal editing follows display VSync; benchmark mode is an
     // explicit restart-time mode so uncapped throughput is measurable.
+    const bool configuredVsync = persistedRenderVsync();
+    const int swapInterval = ei::renderSwapInterval(configuredVsync, renderBenchmark);
     QGLFormat glFormat = QGLFormat::defaultFormat();
-    glFormat.setSwapInterval(renderBenchmark ? 0 : 1);
+    glFormat.setSwapInterval(swapInterval);
     QGLFormat::setDefaultFormat(glFormat);
     app.setProperty("renderBenchmark", renderBenchmark);
+    app.setProperty("renderConfiguredVSync", configuredVsync);
 
 #ifdef Q_OS_WIN
     SetUnhandledExceptionFilter(enduranceUnhandledException);
@@ -729,7 +751,8 @@ int main(int argc, char *argv[])
     ei::log(eLogInfo, QString("Runtime version:%1 qt:%2 architecture:%3 OpenGL-request:%4 presentation:%5")
             .arg(QCoreApplication::applicationVersion(), QT_VERSION_STR,
                  QString::number(sizeof(void*) * 8), QString::fromLatin1(openGlBackend),
-                 renderBenchmark ? "uncapped-benchmark" : "display-vsync"));
+                 renderBenchmark ? "uncapped-benchmark"
+                                 : (configuredVsync ? "display-vsync" : "vsync-off")));
 
     const int commandResult = runHeadlessCommand(app);
     if(commandResult >= 0)

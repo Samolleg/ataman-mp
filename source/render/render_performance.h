@@ -48,6 +48,8 @@ struct SRenderFrameMetadata
     QString mapName;
     QString contentFingerprint;
     bool benchmarkMode{false};
+    bool vsyncEnabled{true};
+    int frameRateCap{0};
     bool animationEnabled{true};
     bool landEnabled{true};
     bool waterEnabled{true};

@@ -9,4 +9,5 @@ SOURCES += render_queue_tests.cpp \
     ../source/render/render_material.cpp
 
 HEADERS += ../source/render/render_material.h \
-    ../source/render/render_queue.h
+    ../source/render/render_queue.h \
+    ../source/render/render_scheduling.h

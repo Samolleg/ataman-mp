@@ -11,6 +11,7 @@
 #include <QCryptographicHash>
 
 #include "view.h"
+#include "render_scheduling.h"
 #include "camera.h"
 #include "unit_animation.h"
 #include <QDateTime>
@@ -157,6 +158,8 @@ CView::~CView()
 void CView::attach(CSettings* pSettings, QTableWidget* pParam, QUndoStack* pStack, CProgressView* pProgress, QLineEdit* pMouseCoord, CTreeView *pTree, CTileForm* pTileForm) //todo: use signal\slots
 {
     m_pSettings = pSettings;
+    connect(m_pSettings, &CSettings::renderSettingsChanged,
+            this, &CView::applyRenderScheduling);
     m_cam->attachSettings(pSettings);
     m_cam->reset();
     m_tableManager.reset(new CTableManager(pParam));
@@ -191,8 +194,22 @@ void CView::attach(CSettings* pSettings, QTableWidget* pParam, QUndoStack* pStac
     // timer removes the former artificial ~67 FPS ceiling and lets benchmark
     // mode measure uncapped throughput.
     m_timer->setTimerType(Qt::PreciseTimer);
-    m_timer->setInterval(0);
+    applyRenderScheduling();
     m_timer->start();
+}
+
+void CView::applyRenderScheduling()
+{
+    const COptInt* capOption = m_pSettings
+        ? dynamic_cast<const COptInt*>(m_pSettings->opt("renderFpsCap")) : nullptr;
+    const bool benchmarkMode = qApp->property("renderBenchmark").toBool();
+    const int configuredCap = capOption ? qBound(0, capOption->value(), 1000) : 0;
+    const int effectiveCap = benchmarkMode ? 0 : configuredCap;
+    m_timer->setInterval(ei::renderTimerIntervalMs(effectiveCap));
+    ei::log(eLogInfo, QString("Render scheduler fps-cap:%1 timer-ms:%2 benchmark-override:%3")
+            .arg(effectiveCap == 0 ? QString("unlimited") : QString::number(effectiveCap))
+            .arg(m_timer->interval())
+            .arg(benchmarkMode ? "yes" : "no"));
 }
 
 void CView::refreshAfterResourceSetup()
@@ -458,6 +475,12 @@ void CView::draw()
             : (m_activeMob ? m_activeMob->filePath().baseName() : QString());
         metadata.contentFingerprint = sceneSourceFingerprint();
         metadata.benchmarkMode = qApp->property("renderBenchmark").toBool();
+        metadata.vsyncEnabled = metadata.benchmarkMode
+            ? false : qApp->property("renderConfiguredVSync").toBool();
+        const COptInt* fpsCapOption = m_pSettings
+            ? dynamic_cast<const COptInt*>(m_pSettings->opt("renderFpsCap")) : nullptr;
+        metadata.frameRateCap = metadata.benchmarkMode
+            ? 0 : (fpsCapOption ? qBound(0, fpsCapOption->value(), 1000) : 0);
         metadata.animationEnabled = animationEnabled;
         metadata.landEnabled = m_bDrawLand;
         metadata.waterEnabled = m_bDrawWater;

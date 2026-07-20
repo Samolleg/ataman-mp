@@ -2,6 +2,7 @@
 
 #include "render_material.h"
 #include "render_queue.h"
+#include "render_scheduling.h"
 
 class RenderQueueTests : public QObject
 {
@@ -12,6 +13,7 @@ private slots:
     void deterministicQueueOrder();
     void groupsOnlyCompatibleInstanceRuns();
     void selectsModernAndFallbackCapabilities();
+    void appliesRenderSchedulingOptions();
 };
 
 void RenderQueueTests::alphaClassification()
@@ -100,6 +102,21 @@ void RenderQueueTests::selectsModernAndFallbackCapabilities()
     QVERIFY(supportsInstancedRenderPath(false, 4, 6));
     QVERIFY(!supportsInstancedRenderPath(false, 3, 2));
     QVERIFY(!supportsInstancedRenderPath(true, 4, 6));
+}
+
+void RenderQueueTests::appliesRenderSchedulingOptions()
+{
+    QCOMPARE(ei::renderTimerIntervalMs(0), 0);
+    QCOMPARE(ei::renderTimerIntervalMs(-1), 0);
+    QCOMPARE(ei::renderTimerIntervalMs(60), 17);
+    QCOMPARE(ei::renderTimerIntervalMs(144), 7);
+    QCOMPARE(ei::renderTimerIntervalMs(200), 5);
+    QCOMPARE(ei::renderSwapInterval(true, false), 1);
+    QCOMPARE(ei::renderSwapInterval(false, false), 0);
+    QCOMPARE(ei::renderSwapInterval(true, true), 0);
+    QVERIFY(ei::renderVsyncFromOptions("{\"Render\":{\"renderVSync\":true}}"));
+    QVERIFY(!ei::renderVsyncFromOptions("{\"Render\":{\"renderVSync\":false}}"));
+    QVERIFY(ei::renderVsyncFromOptions("invalid", true));
 }
 
 QTEST_APPLESS_MAIN(RenderQueueTests)
