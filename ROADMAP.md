@@ -5,7 +5,7 @@ work is ordered from the newest planned minor line to the oldest completed one.
 An item is checked only after its implementation has landed and received the
 stated validation. Completed code should carry a commit, test, or release link.
 
-Current development line: `0.2.1-alpha.16` focused closed testing.
+Current development line: `0.2.1-alpha.17` focused closed testing.
 
 <details open>
 <summary><strong>General wishlist — not assigned to a release</strong></summary>
@@ -23,7 +23,17 @@ Current development line: `0.2.1-alpha.16` focused closed testing.
   built-in deterministic diff or exposing private/unsaved data silently.
 - [ ] Add configurable UI font-size scaling for 4K displays and accessibility.
 - [ ] Add a Russian translation and an in-app language switch.
-- [ ] Correct the remaining spacing/alignment offsets for disabled menu items.
+- [x] Render disabled menu items as a single ordinary grey label without
+  Fusion's bright etched underlay or an alignment offset.
+  ([`c38aaa7`](https://github.com/Ilufus/ei-mapper-endurance/commit/c38aaa7))
+
+## MOB diff enhancements
+
+- [ ] Add baseline/candidate swapping, original-versus-current entry points,
+  persisted column widths, a read-only 3D perspective overlay, deterministic
+  JSON export, and explicit unresolved handling for ambiguous duplicate-NID
+  matches. These are useful extensions to the working file-to-file semantic
+  diff, but are postponed beyond the 0.2.x stabilization line.
 - [x] Make the major workspace panels dockable, detachable, recoverable from
   **View**, and persistently rearrangeable within Qt5's supported docking
   model. Object Outliner and Object Properties start as a right-edge vertical
@@ -65,7 +75,14 @@ Current development line: `0.2.1-alpha.16` focused closed testing.
 </details>
 
 <details>
-<summary><strong>1.0.x or later — optional legacy-platform compatibility</strong></summary>
+<summary><strong>1.0.x or later — distribution and legacy-platform compatibility</strong></summary>
+
+## Distribution security and reputation
+
+- [ ] Separate the experimental Base runtime injector from ordinary JMV tester
+  packages, add stable Windows version metadata, evaluate code signing, and
+  establish a vendor false-positive submission workflow for immutable release
+  hashes. This is 1.0-era distribution hardening, not a 0.2.x feature gate.
 
 ## Windows 7 renderer compatibility
 
@@ -262,6 +279,8 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
   entries without an alignment offset, disabling Close All for an empty
   workspace, and blocking editor input throughout hot-reload staging/commit.
   Implementation: [`465175d`](https://github.com/Ilufus/ei-mapper-endurance/commit/465175d).
+  The reported alpha.17 UI/lifecycle fixes are tester-confirmed; remaining
+  release work is the consolidated RC runtime matrix and packaging/tagging.
 - **Alpha.13 validation/UI changes:** validation no longer performs expensive automatic
   replacement-ID scans for fully shared ranges, map switches refresh their
   runtime-family identity, missing `AddMob(...)` dependencies identify the
@@ -647,12 +666,20 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
   validates their hashes, and can save or hot-reload the destination without
   falling back to the rebuilding serializer. Runtime testing with cross-MOB
   copied objects through hot reload is confirmed.
-- [ ] Replace the secondary-MOB workflow with Unreal-style multi-MOB editing.
-  - Show every open MOB in a **Loaded MOBs** list/tab.
-  - Make the active destination MOB explicit for paste/create operations.
-  - Allow individual MOBs to be locked against selection and accidental edits.
-  - Show which loaded MOB owns the selected object.
-  - Save/validate all changed MOBs as a coordinated workspace action.
+- [ ] Replace the secondary-MOB chooser with a dockable **Loaded MOBs** panel.
+  - Endurance does not support simultaneous editing of multiple MOBs. Exactly
+    one MOB is active/unlocked; every other loaded MOB is visible but locked
+    against selection and editing.
+  - Clicking a MOB in the panel switches the active destination. Switching
+    locks the previous MOB and unlocks the selected MOB. Existing Ctrl+T should
+    show/focus this panel instead of opening the awkward transient chooser.
+  - Each row can independently hide/show its MOB without unloading it.
+  - Hovering or single-clicking an object from a locked MOB explains that it
+    belongs to locked MOB `<name>`. Double-clicking that object switches its MOB
+    active and selects it.
+  - Show the owning MOB for the selected object. Reuse the already working
+    cross-MOB copy/paste path; no coordinated simultaneous-edit transaction or
+    multi-document Save All redesign is required for this feature.
 - [ ] Runtime-validate deterministic multi-MOB JMV test loading.
   - [x] Identify the primary MOB from `map.txt` (falling back to collection
     order), validate every loaded MOB, and inventory all source/staged hashes.
@@ -695,9 +722,12 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
     `db:`/`prototype:`, `mob:`, and `validation:` fields.
   - Initial implementation: local commit `1685bdd`; alpha.9 carries the strict
     matching correction and awaits focused tester validation.
-- [ ] When opening an MPR while another workspace is loaded, offer to save
-  changed MOB/MPR documents and replace the current workspace in one guarded
-  action instead of only displaying a close-first warning.
+- [ ] Make manual **Open MPR**, drag/drop, recent-file, and command-line MPR
+  opening reuse the guarded replacement already used by the Maps browser:
+  prompt for dirty documents, allow Cancel, then unload the old MPR/MOB set,
+  clear document-bound undo state, and load the requested terrain. Currently
+  these manual paths only say "Landscape already loaded; close first." Opening
+  additional MOBs remains independent and is not affected.
 - [x] Persist the expanded/collapsed state of the **Maps** and **Collections**
   roots in the browser across refreshes and editor restarts.
 - [x] Add an opt-in **Open last session on startup** General setting that invokes
@@ -711,13 +741,18 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
 - [ ] Add opt-in Windows file associations for `.mpr`, `.mob`, and
   `.collection`, with correct single-instance/open-argument behavior and an
   explicit removal path.
-- [ ] Add periodic autosave with versioned, recoverable backup states.
+- [ ] **High priority:** add periodic autosave with versioned, recoverable
+  backup states soon after the RC gate. Autosaves must never overwrite live
+  source maps directly and recovery must identify the source hash/generation.
 - [ ] Add a resizable bottom workflow-log panel with filtering, copy/export, and
   quick access to the full rotated log.
-- [ ] Add phase-aware blocking progress for MOB/MPR save, including
-  serialization, validation, backup, and atomic replacement.
-- [ ] Move any remaining blocking MPR/MOB open phases into a cancellable modal
-  progress workflow so large maps never appear to freeze the editor.
+- [ ] Show named, blocking save phases—serialize, validate, create backup,
+  re-open staged output, and atomically replace—so a large safe save cannot look
+  like a frozen editor. Cancellation is allowed only before atomic commit.
+- [ ] Move remaining long MPR/MOB/resource-loading phases behind the existing
+  modal loading UI, expose real phase progress, and permit cancellation at safe
+  boundaries before the document is registered. This is responsiveness UX, not
+  a parser or serializer redesign.
 - [ ] Stress large-map edit/undo/redo/save/open/close cycles with scripts,
   model parts, multi-selection, copy/delete, and patrol/look structures.
 - [ ] Finish closed-group coverage proving scripts and all CP1251 text edits
@@ -728,9 +763,9 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
   history when documents unload.
 - [x] Support typed multi-field property copy/paste, including model parts and
   Create Object, with destination compatibility checks.
-- [ ] Allow copying/pasting one selected component of compound property values,
-  especially individual X/Y/Z vector components, while retaining the existing
-  type-compatibility checks.
+- [ ] **0.2.x release task:** allow copying/pasting one selected component of a
+  compound property value—initially individual X/Y/Z vector components, with
+  the same scalar/type compatibility checks used by whole-field paste.
 - [x] Provide independent internal/external MOB script editing with document-
   owned workspaces, undoable imports, recovery, and configurable editor path.
 - [x] Warn before changing/resetting/deleting object IDs referenced by the
@@ -738,13 +773,10 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
 
 ## 0.2.x: resources, appearance, and performance
 
-Isolated implementation status: profile-correct visuals are under active
-runtime correction. `feature/humanoid-equipment` is clean at `7dcdfac`; the
-cumulative equipment/idle-animation line reached `b38d7b4` with 13/13 visual
-provider tests and 12/12 animation tests before the current corpus correction
-pass. Nothing is merged. Known remaining classes include striped equipment
-materials, non-humanoid empty-mask handling, weapon duplication, missing model
-parts/textures, standing-idle selection, dragon wings, and large-map progress.
+Isolated implementation status: database-driven humanoid appearance, equipment,
+and standing animation are feature-complete on the profile-correct visuals
+branch. The remaining work is optimization, final branch validation, and merge;
+nothing is merged into the active 0.2.x line yet.
 
 - [ ] Complete cancellable asynchronous RES indexing, MOB parsing, and CPU
   decoding while keeping OpenGL creation in bounded GUI-thread batches.
@@ -762,17 +794,15 @@ parts/textures, standing-idle selection, dragon wings, and large-map progress.
 - [ ] Re-run cold/warm performance acceptance on representative JMV maps and
   keep the post-index target at least 10x faster than original v0.3 where the
   current machine permits it.
-- [ ] Resolve applicable humanoid appearance from active-profile database and
-  template data, including humans, skeletons, orcs, undead, and other equipped
-  humanoids.
-- [ ] Render database-equipped armor and weapons.
+- [ ] Merge the optimized profile-correct visuals branch, including applicable
+  humanoid appearance from active-profile database/template data.
+- [ ] Merge database-equipped armor and weapon rendering.
   - Base scope: one one-handed or one ranged weapon.
   - JMV profile scope: armor and ordinary equipped visuals.
   - JMV stretch: 1H+shield, dual 1H, 2H, dual 2H with perk, and 2H+shield with
     the applicable perk.
-- [ ] Select and render a profile-correct standing idle animation for units
-  instead of leaving characters in the null/T pose. Keep corpus correction and
-  missing-animation fallback diagnostic rather than inventing an animation.
+- [ ] Merge profile-correct standing idle animation selection and its
+  diagnostic fallback instead of leaving characters in the null/T pose.
 - [ ] Populate prototype/model/texture fields from the active database with
   prefix filtering and manual entry where valid. Warn on missing entries rather
   than silently clearing stored values.
@@ -785,18 +815,6 @@ parts/textures, standing-idle selection, dragon wings, and large-map progress.
 
 ## 0.2.x: MOB diff and validation tools
 
-- [ ] Add a **Swap baseline/candidate** action without reopening the dialog and
-  make all diff-table columns manually resizable with persisted widths.
-- [ ] Add original-versus-current and candidate-save-versus-transaction entry
-  points to the existing MOB diff.
-- [ ] Add the read-only 3D perspective overlay.
-  - Removed: translucent red baseline ghost.
-  - Added: green candidate.
-  - Modified: amber overlaid versions.
-  - Moved: old/new markers and a movement vector.
-  - Filter unchanged objects, logic paths, and opaque structural changes.
-- [ ] Export deterministic JSON in addition to the readable text/details view.
-- [ ] Keep ambiguous duplicate-NID matches unresolved rather than guessing.
 - [x] Add deterministic file-to-file MOB semantic diff, including embedded
   script and document-section differences. ([`fd30be0`](https://github.com/Ilufus/ei-mapper-endurance/commit/fd30be0), [`0a4624f`](https://github.com/Ilufus/ei-mapper-endurance/commit/0a4624f))
 
