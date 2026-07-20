@@ -1,6 +1,7 @@
 #include "main_window.h"
 #include <QApplication>
 #include <QStyleFactory>
+#include <QProxyStyle>
 #include <QIcon>
 #include <QCommandLineParser>
 #include <QFileInfo>
@@ -35,6 +36,24 @@
 #endif
 
 namespace {
+class CEnduranceStyle final: public QProxyStyle
+{
+public:
+    explicit CEnduranceStyle(QStyle* baseStyle): QProxyStyle(baseStyle) {}
+
+    int styleHint(StyleHint hint, const QStyleOption* option = nullptr,
+                  const QWidget* widget = nullptr,
+                  QStyleHintReturn* returnData = nullptr) const override
+    {
+        // Fusion's etched disabled text paints a bright offset copy beneath
+        // the glyph. On a dark menu that looks like black text with a white
+        // shadow instead of a disabled item. Draw the palette's grey once.
+        if(hint == QStyle::SH_EtchDisabledText)
+            return 0;
+        return QProxyStyle::styleHint(hint, option, widget, returnData);
+    }
+};
+
 class CCounterUndoCommand final: public QUndoCommand
 {
 public:
@@ -736,7 +755,7 @@ int main(int argc, char *argv[])
     if(commandResult >= 0)
         return commandResult;
 
-    qApp->setStyle(QStyleFactory::create("Fusion"));
+    qApp->setStyle(new CEnduranceStyle(QStyleFactory::create("Fusion")));
 
     QPalette darkPalette;
     darkPalette.setColor(QPalette::Window, QColor(53,53,53));
@@ -755,7 +774,7 @@ int main(int argc, char *argv[])
     darkPalette.setColor(QPalette::HighlightedText, Qt::black);
 
     darkPalette.setColor(QPalette::Disabled, QPalette::Base, QColor(65, 65, 65));
-    const QColor disabledText(92, 92, 92);
+    const QColor disabledText(128, 128, 128);
     darkPalette.setColor(QPalette::Disabled, QPalette::WindowText, disabledText);
     darkPalette.setColor(QPalette::Disabled, QPalette::Text, disabledText);
     darkPalette.setColor(QPalette::Disabled, QPalette::ButtonText, disabledText);
@@ -766,8 +785,8 @@ int main(int argc, char *argv[])
     qApp->setStyleSheet(
         "QToolTip { color: #ffffff; background-color: #07be07; border: 1px solid white; }"
         "QToolButton:pressed { background-color: #3c583d; }"
-        "QWidget:disabled { color: #5c5c5c; }"
-        "QMenu::item:disabled { color: #5c5c5c; }");
+        "QWidget:disabled { color: #808080; }"
+        "QMenu::item:disabled { color: #808080; }");
 
 
     MainWindow window;
