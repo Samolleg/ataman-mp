@@ -535,6 +535,7 @@ void CView::draw()
 
     m_program.setUniformValue("u_projMmatrix", m_projection);
     m_program.setUniformValue("u_viewMmatrix", camMatrix);
+    m_program.setUniformValue("qt_Texture0", 0);
     RenderQueueContext& renderQueue = RenderQueueContext::instance();
     renderQueue.begin(&m_program, cameraPosition);
 

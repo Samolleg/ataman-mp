@@ -178,13 +178,15 @@ void CObjectBase::draw(bool isActive, QOpenGLShaderProgram* program)
     matrix = matrix * rtMatrix;
 
     RenderQueueContext& queue = RenderQueueContext::instance();
-    if(!queue.collecting())
+    const bool queued = queue.collecting();
+    if(!queued)
         program->setUniformValue("u_modelMmatrix", matrix);
 
-    if (m_state == ENodeState::eSelect)
+    if (!queued && m_state == ENodeState::eSelect)
         program->setUniformValue("u_highlight", true);
 
-    program->setUniformValue("qt_Texture0", 0);
+    if(!queued)
+        program->setUniformValue("qt_Texture0", 0);
     QOpenGLTexture* boundTexture = nullptr;
     for(auto& part: m_aPart)
     {
@@ -192,7 +194,7 @@ void CObjectBase::draw(bool isActive, QOpenGLShaderProgram* program)
         if(!texture)
             texture = part->textureNumber() == 2 && m_secondaryTexture
                 ? m_secondaryTexture : m_texture;
-        if(queue.collecting())
+        if(queued)
         {
             queue.submit(part, texture, matrix,
                          CTextureList::getInstance()->materialClass(texture),
@@ -209,9 +211,11 @@ void CObjectBase::draw(bool isActive, QOpenGLShaderProgram* program)
         }
         part->draw(program);
     }
-    program->setUniformValue("u_partAnimated", false);
-
-    program->setUniformValue("u_highlight", false);
+    if(!queued)
+    {
+        program->setUniformValue("u_partAnimated", false);
+        program->setUniformValue("u_highlight", false);
+    }
 }
 
 void CObjectBase::drawSelect(QOpenGLShaderProgram* program)

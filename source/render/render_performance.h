@@ -35,6 +35,9 @@ struct SRenderFrameCounters
     quint64 animationPoseEvaluations{0};
     quint64 animationPoseCacheHits{0};
     quint64 animationComponentsEvaluated{0};
+    quint64 queueCollectNanoseconds{0};
+    quint64 queueSortNanoseconds{0};
+    quint64 queueDrawNanoseconds{0};
 };
 
 struct SRenderFrameMetadata

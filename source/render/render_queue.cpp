@@ -19,6 +19,8 @@ void RenderQueueContext::begin(QOpenGLShaderProgram* program, const QVector3D& c
     m_program = program;
     m_cameraPosition = cameraPosition;
     m_items.clear();
+    if(m_items.capacity() < 8192)
+        m_items.reserve(8192);
     m_sequence = 0;
     m_instanceBufferWriteOffset = 0;
     m_instanceBufferPrepared = false;
@@ -44,6 +46,7 @@ void RenderQueueContext::begin(QOpenGLShaderProgram* program, const QVector3D& c
     }
     if(m_program)
         m_program->setUniformValue("u_instanced", false);
+    m_phaseTimer.restart();
 }
 
 void RenderQueueContext::beginSelection(QOpenGLShaderProgram* program)
@@ -137,7 +140,15 @@ void RenderQueueContext::flush()
     if(!m_program || m_items.isEmpty())
         return;
 
+    RenderPerformanceContext& performance = RenderPerformanceContext::instance();
+    const bool collectPerformance = performance.collecting();
+    if(collectPerformance)
+        performance.counters().queueCollectNanoseconds += quint64(m_phaseTimer.nsecsElapsed());
+    m_phaseTimer.restart();
     sortRenderItems(m_items);
+    if(collectPerformance)
+        performance.counters().queueSortNanoseconds += quint64(m_phaseTimer.nsecsElapsed());
+    m_phaseTimer.restart();
 
     if(m_selectionPass)
     {
@@ -176,11 +187,11 @@ void RenderQueueContext::flush()
         m_program->setUniformValue("u_instanced", false);
         m_program->setUniformValue("u_partAnimated", false);
         m_items.clear();
+        m_phaseTimer.restart();
         return;
     }
 
-    RenderPerformanceContext& performance = RenderPerformanceContext::instance();
-    if(performance.collecting())
+    if(collectPerformance)
     {
         for(const SRenderItem& item : m_items)
         {
@@ -201,6 +212,8 @@ void RenderQueueContext::flush()
     bool previousHighlight = false;
     float previousUvScale = 0.0f;
     bool haveBatch = false;
+    bool activeHighlight = false;
+    m_program->setUniformValue("u_highlight", false);
     for(int itemIndex = 0; itemIndex < m_items.size(); )
     {
         const SRenderItem& item = m_items.at(itemIndex);
@@ -247,23 +260,25 @@ void RenderQueueContext::flush()
         const int runLength = m_instancingEnabled
             ? instanceBatchLength(m_items, itemIndex) : 1;
         bool instanced = false;
+        if(item.highlighted != activeHighlight)
+        {
+            activeHighlight = item.highlighted;
+            m_program->setUniformValue("u_highlight", activeHighlight);
+        }
         if(runLength >= 2)
         {
-            QVector<QMatrix4x4> matrices;
-            matrices.reserve(runLength);
+            m_matrixScratch.clear();
+            m_matrixScratch.reserve(runLength);
             for(int offset = 0; offset < runLength; ++offset)
-                matrices.append(m_items.at(itemIndex + offset).instanceMatrix);
-            m_program->setUniformValue("u_highlight", false);
+                m_matrixScratch.append(m_items.at(itemIndex + offset).instanceMatrix);
             const int bufferOffset = reserveInstanceBytes(
-                matrices.size() * int(sizeof(QMatrix4x4)));
+                m_matrixScratch.size() * int(sizeof(QMatrix4x4)));
             instanced = bufferOffset >= 0 && item.part->drawInstanced(
-                m_program, &m_instanceBuffer, bufferOffset, matrices);
+                m_program, &m_instanceBuffer, bufferOffset, m_matrixScratch);
         }
         if(!instanced)
         {
-            m_program->setUniformValue("u_instanced", false);
             m_program->setUniformValue("u_modelMmatrix", item.modelMatrix);
-            m_program->setUniformValue("u_highlight", item.highlighted);
             item.part->drawImmediate(m_program);
         }
         itemIndex += instanced ? runLength : 1;
@@ -273,5 +288,8 @@ void RenderQueueContext::flush()
     m_program->setUniformValue("u_highlight", false);
     glEnable(GL_ALPHA_TEST);
     glEnable(GL_BLEND);
+    if(collectPerformance)
+        performance.counters().queueDrawNanoseconds += quint64(m_phaseTimer.nsecsElapsed());
     m_items.clear();
+    m_phaseTimer.restart();
 }

@@ -4,6 +4,7 @@
 #include "render_material.h"
 
 #include <QMatrix4x4>
+#include <QElapsedTimer>
 #include <QOpenGLBuffer>
 #include <QOpenGLShaderProgram>
 #include <QOpenGLTexture>
@@ -114,6 +115,8 @@ private:
     QOpenGLShaderProgram* m_program{nullptr};
     QVector3D m_cameraPosition;
     QVector<SRenderItem> m_items;
+    QVector<QMatrix4x4> m_matrixScratch;
+    QElapsedTimer m_phaseTimer;
     quint64 m_sequence{0};
     QOpenGLBuffer m_instanceBuffer{QOpenGLBuffer::VertexBuffer};
     bool m_instancingEnabled{false};
