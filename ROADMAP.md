@@ -80,6 +80,84 @@ Current development line: `0.2.1-alpha.8` focused closed testing.
 </details>
 
 <details open>
+<summary><strong>0.4.x — AI navigation graph visualization and regeneration</strong></summary>
+
+## 0.4.0 release goal
+
+Deliver profile-aware visualization, validation, and safe regeneration of the
+AI navigation graph stored in a primary MOB or an external `.grp`. This work is
+deliberately separated from the `0.3.x` landscape serializer: terrain editing
+may warn that navigation is stale, but production graph replacement remains a
+`0.4.0` capability.
+
+## Confirmed format foundation
+
+- [ ] Add `AiGraphDocument` with exact raw-byte retention for embedded
+  `AI_GRAPH` records and external `.grp` files.
+- [ ] Parse and validate the confirmed envelope: width, height, and
+  `width * height * 152` bytes of graph data.
+- [ ] Model the article-derived `8 * 19` subdivision conservatively:
+  - eight neutral slots/layers per graph coordinate;
+  - eight little-endian 16-bit directional values in each slot;
+  - `0xFFFF` as an unavailable connection;
+  - the remaining one-byte and two-byte planes retained as opaque until their
+    engine or builder meaning is proven.
+- [ ] Confirm graph-to-world orientation and the observed eight graph
+  coordinates per terrain SEC across Base and JMV maps.
+- [ ] Treat the published BMP converters as research evidence only. Their
+  reverse conversion drops high bytes from finite 16-bit values, ignores the
+  auxiliary planes, and is not a safe serializer or graph builder.
+  ([Habr research article](https://habr.com/ru/articles/769050/))
+
+## Visualization and validation
+
+- [ ] Add a Navigation viewport mode with per-slot and combined overlays,
+  directional edges, full 16-bit cost colouring, blocked connections, and a
+  hover inspector exposing coordinates, source offsets, raw values, and hashes.
+- [ ] Compare embedded MOB and external GRP sources without silently choosing
+  precedence when both exist and differ.
+- [ ] Add deterministic graph-to-graph diff, initially using Base Zone 6's
+  unfrozen/frozen landscape pair as the controlled fixture.
+- [ ] Validate dimensions, complete byte coverage, boundary links, unexpected
+  asymmetry, isolated regions/entrances, and opaque-plane changes without
+  blocking Save or Test Current Map.
+- [ ] Track terrain/object edits as navigation-dirty regions and retain the
+  oversized-door runtime-regeneration convention as an explicit diagnostic.
+
+## Zone 6 source and state research
+
+- [ ] Resolve runtime precedence between embedded `AI_GRAPH` and external
+  `.grp` data for every profile before enabling writes.
+- [ ] Base: correlate `zone6.mpr` + `zone6.grp` (unfrozen lake) with
+  `zone6_2.mpr` + `zone6_2.grp` (frozen lake). Both graphs are `56x96`; they
+  differ in 55,208 bytes across 2,642 graph coordinates.
+- [ ] Base: explain the relationship between the graphless `zone6.mob`, the
+  embedded graph in `zone6-lmp.mob`, and both external graph states.
+- [ ] JMV: explain why `zone6.grp` and `zone6_2.grp` are byte-identical
+  `64x96` graphs while `zone6.mob` also contains a differing embedded graph.
+- [ ] Keep static MOB/GRP graphs distinct from the runtime navigation-grid
+  representation serialized into saves until a controlled comparison proves
+  their relationship.
+
+## Regeneration
+
+- [ ] Characterize the separate map editor's `AiGraphBaker` on disposable
+  copies as a behavioral oracle, recording exact executable and output hashes.
+- [ ] Derive terrain slope, height, liquid/ice, collision object, bridge,
+  multi-level, door, and profile-specific graph-building rules through
+  one-variable controlled fixtures.
+- [ ] Implement full-map regeneration first. Partial dirty-region rebuilding is
+  deferred until it is proven byte/semantic-equivalent to a full rebuild.
+- [ ] Make regeneration explicit, previewed, staged, freshly reparsed,
+  undoable, backed up, and atomic. Never invoke it as an ordinary Save side
+  effect and never fall back to the legacy MOB rebuilding serializer.
+- [ ] Validate generated graphs through deterministic rebuilds, graph/path
+  probes, entrances, NPC traversal, water/ice state changes, dynamic doors,
+  unload/reload, save/load, and separate fingerprinted Base/JMV runtime tests.
+
+</details>
+
+<details open>
 <summary><strong>0.3.x — lossless MPR/SEC and landscape editing</strong></summary>
 
 ## 0.3.0 release goal
