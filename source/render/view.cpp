@@ -121,12 +121,14 @@ CView::~CView()
     ei::setCrashContext("shutdown/view-opengl-resources");
     if(isValid())
         makeCurrent();
+    ei::setCrashContext("shutdown/view-gpu-timer");
     if(m_gpuTimer)
     {
         delete m_gpuTimer;
         m_gpuTimer = nullptr;
         m_gpuTimerPending = false;
     }
+    ei::setCrashContext("shutdown/view-mobs");
 
     for(auto& mob: m_aMob)
     {

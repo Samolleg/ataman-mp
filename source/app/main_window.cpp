@@ -342,7 +342,8 @@ MainWindow::~MainWindow()
     uiSettings.setValue("ui/mainWindowState", saveState());
     uiSettings.setValue("ui/workspaceSplitter", m_ui->workspaceSplitter->saveState());
     uiSettings.setValue("ui/outlinerSplitter", m_ui->outlinerSplitter->saveState());
-    delete m_pView;
+    if(m_pView)
+        delete m_pView;
     delete m_ui;
     CIconManager::getInstance()->~CIconManager();
 }
@@ -1435,6 +1436,15 @@ void MainWindow::closeEvent(QCloseEvent *e)
     }
 
     ei::closeSecondaryWindows(this);
+    // Destroy the QGLWidget while the main window and its native child surface
+    // are still alive. Waiting for MainWindow::~MainWindow() is too late on
+    // Windows: Qt has already released the surface even though CView::isValid()
+    // may still report true, and GPU-resource cleanup then dereferences a null
+    // QOpenGLContext surface.
+    ei::setCrashContext("shutdown/delete-live-view");
+    delete m_pView;
+    m_pView = nullptr;
+    ei::setCrashContext("shutdown/view-deleted");
     e->accept();
 }
 
