@@ -90,6 +90,29 @@ QString conciseValidationLine(const SMobFamilyFinding& finding)
     const QString line = QString("%1: %2").arg(severity, finding.message.simplified());
     return QFontMetrics(QApplication::font()).elidedText(line, Qt::ElideRight, 960);
 }
+
+void enableNativeFloatingControls(QDockWidget* dock)
+{
+    if(!dock)
+        return;
+    const auto apply = [dock](bool floating)
+    {
+        if(!floating)
+            return;
+        const bool visible = dock->isVisible();
+        const Qt::WindowFlags required = Qt::Window | Qt::WindowTitleHint |
+            Qt::WindowSystemMenuHint | Qt::WindowMinimizeButtonHint |
+            Qt::WindowMaximizeButtonHint | Qt::WindowCloseButtonHint;
+        if((dock->windowFlags() & required) != required)
+        {
+            dock->setWindowFlags(dock->windowFlags() | required);
+            if(visible)
+                dock->show();
+        }
+    };
+    QObject::connect(dock, &QDockWidget::topLevelChanged, dock, apply);
+    apply(dock->isFloating());
+}
 }
 
 void testFunc()
@@ -117,7 +140,10 @@ MainWindow::MainWindow(QWidget* parent) :
     m_recentFilesMenu(nullptr),
     m_externalScriptAction(nullptr),
     m_mapsDock(nullptr),
+    m_historyDock(nullptr),
     m_validationDock(nullptr),
+    m_outlinerDock(nullptr),
+    m_propertiesDock(nullptr),
     m_validationTree(nullptr),
     m_validationSummary(nullptr),
     m_validationTimer(nullptr),
@@ -146,7 +172,7 @@ MainWindow::MainWindow(QWidget* parent) :
     m_pTileForm.reset(new CTileForm(this));
     m_settings->attachMainWindow(this);
     m_ui->setupUi(this); //init CView core also
-    QWidget* outlinerContainer = new QWidget(m_ui->outlinerSplitter);
+    QWidget* outlinerContainer = new QWidget(this);
     QVBoxLayout* outlinerLayout = new QVBoxLayout(outlinerContainer);
     outlinerLayout->setContentsMargins(0, 0, 0, 0);
     outlinerLayout->setSpacing(3);
@@ -168,7 +194,24 @@ MainWindow::MainWindow(QWidget* parent) :
     outlinerLayout->addLayout(filterLayout);
     m_ui->treeWidget->setParent(outlinerContainer);
     outlinerLayout->addWidget(m_ui->treeWidget, 1);
-    m_ui->outlinerSplitter->insertWidget(0, outlinerContainer);
+    m_outlinerDock = new QDockWidget(tr("Object Outliner"), this);
+    m_outlinerDock->setObjectName("objectOutlinerDock");
+    m_outlinerDock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
+    m_outlinerDock->setFeatures(QDockWidget::DockWidgetClosable |
+                               QDockWidget::DockWidgetMovable |
+                               QDockWidget::DockWidgetFloatable);
+    m_outlinerDock->setWidget(outlinerContainer);
+
+    m_propertiesDock = new QDockWidget(tr("Object Properties"), this);
+    m_propertiesDock->setObjectName("objectPropertiesDock");
+    m_propertiesDock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
+    m_propertiesDock->setFeatures(QDockWidget::DockWidgetClosable |
+                                 QDockWidget::DockWidgetMovable |
+                                 QDockWidget::DockWidgetFloatable);
+    m_propertiesDock->setWidget(m_ui->tableWidget);
+    addDockWidget(Qt::RightDockWidgetArea, m_outlinerDock);
+    splitDockWidget(m_outlinerDock, m_propertiesDock, Qt::Vertical);
+    m_ui->outlinerSplitter->hide();
     connect(m_outlinerFilterEdit, &QLineEdit::textChanged,
             m_ui->treeWidget, &CTreeView::setFilterText);
     connect(m_ui->treeWidget, &CTreeView::filterMatchCountChanged,
@@ -212,8 +255,8 @@ MainWindow::MainWindow(QWidget* parent) :
                                   QDockWidget::DockWidgetFloatable);
     m_validationDock->setWidget(validationWidget);
     addDockWidget(Qt::BottomDockWidgetArea, m_validationDock);
+    enableNativeFloatingControls(m_validationDock);
     m_validationDock->setFloating(true);
-    m_validationDock->setWindowFlag(Qt::WindowMinMaxButtonsHint, true);
     m_validationDock->resize(1100, 650);
     m_validationDock->hide();
     m_validationTimer = new QTimer(this);
@@ -251,6 +294,9 @@ MainWindow::MainWindow(QWidget* parent) :
     QMenu* viewMenu = new QMenu(tr("View"), this);
     m_ui->menuBar->insertMenu(m_ui->menuSettings->menuAction(), viewMenu);
     viewMenu->addAction(m_mapsDock->toggleViewAction());
+    viewMenu->addAction(m_outlinerDock->toggleViewAction());
+    viewMenu->addAction(m_propertiesDock->toggleViewAction());
+    m_ui->menuTools->removeAction(m_ui->actionShow_undo_redo);
     QAction* openValidationPanel = viewMenu->addAction(tr("MOB Family Validation"));
     connect(openValidationPanel, &QAction::triggered,
             this, &MainWindow::showMobFamilyValidation);
@@ -440,6 +486,15 @@ MainWindow::MainWindow(QWidget* parent) :
     if(firstRunSetup)
         showGameAndModSetup();
 
+    m_undoStack = new QUndoStack(this);
+    int undoHistoryLimit = 512;
+    if(COptInt* configuredLimit = dynamic_cast<COptInt*>(m_settings->opt(eOptSetGeneral, "undoHistoryLimit")))
+        undoHistoryLimit = qBound(1, configuredLimit->value(), 1000000);
+    m_undoStack->setUndoLimit(undoHistoryLimit);
+    ei::log(eLogInfo, QString("Undo history limit:%1").arg(undoHistoryLimit));
+    createUndoView();
+    viewMenu->insertAction(openValidationPanel, m_historyDock->toggleViewAction());
+
     QSettings uiSettings;
     restoreGeometry(uiSettings.value("ui/mainWindowGeometry").toByteArray());
     restoreState(uiSettings.value("ui/mainWindowState").toByteArray());
@@ -543,14 +598,13 @@ MainWindow::MainWindow(QWidget* parent) :
     m_pView->setMinimumSize(QSize(200, 200));
     m_pView->setMouseTracking(true);
     createViewportToolbars();
-    m_ui->workspaceSplitter->setStretchFactor(0, 4);
-    m_ui->workspaceSplitter->setStretchFactor(1, 1);
+    m_ui->workspaceSplitter->setStretchFactor(0, 1);
     if(firstRunSetup)
     {
         // Do not carry a cramped, partially initialized splitter state into the
         // first usable session after setup.
-        m_ui->workspaceSplitter->setSizes(QList<int>() << 960 << 320);
-        m_ui->outlinerSplitter->setSizes(QList<int>() << 420 << 300);
+        resizeDocks(QList<QDockWidget*>() << m_outlinerDock << m_propertiesDock,
+                    QList<int>() << 420 << 300, Qt::Vertical);
     }
 
 #ifndef QT_DEBUG
@@ -559,13 +613,6 @@ MainWindow::MainWindow(QWidget* parent) :
 
     m_selector->attachParents(m_pView);
     m_randomizeForm->attachView(m_pView);
-    m_undoStack = new QUndoStack(this);
-    int undoHistoryLimit = 512;
-    if(COptInt* configuredLimit = dynamic_cast<COptInt*>(m_settings->opt(eOptSetGeneral, "undoHistoryLimit")))
-        undoHistoryLimit = qBound(1, configuredLimit->value(), 1000000);
-    m_undoStack->setUndoLimit(undoHistoryLimit);
-    ei::log(eLogInfo, QString("Undo history limit:%1").arg(undoHistoryLimit));
-    createUndoView();
     // View construction and reparenting can dispatch events immediately. Do
     // not let eventFilter() inspect constructor-owned widgets until every
     // pointer it uses (notably m_undoView) has been initialized.
@@ -687,10 +734,20 @@ void MainWindow::testFunc1()
 
 void MainWindow::createUndoView()
 {
-    m_undoView = new QUndoView(m_undoStack, this);
-    m_undoView->setWindowFlag(Qt::Window, true);
-    m_undoView->setWindowTitle(tr("History"));
-    m_undoView->setAttribute(Qt::WA_QuitOnClose, false);
+    m_undoView = new QUndoView(m_undoStack);
+    m_historyDock = new QDockWidget(tr("History"), this);
+    m_historyDock->setObjectName("undoHistoryDock");
+    m_historyDock->setAllowedAreas(Qt::BottomDockWidgetArea | Qt::LeftDockWidgetArea |
+                                   Qt::RightDockWidgetArea);
+    m_historyDock->setFeatures(QDockWidget::DockWidgetClosable |
+                               QDockWidget::DockWidgetMovable |
+                               QDockWidget::DockWidgetFloatable);
+    m_historyDock->setWidget(m_undoView);
+    addDockWidget(Qt::BottomDockWidgetArea, m_historyDock);
+    enableNativeFloatingControls(m_historyDock);
+    m_historyDock->setFloating(true);
+    m_historyDock->resize(520, 560);
+    m_historyDock->hide();
     m_undoView->viewport()->installEventFilter(this);
 }
 
@@ -1229,7 +1286,7 @@ void MainWindow::initShortcuts()
     m_ui->actionClose_all->setShortcut(QKeySequence(Qt::CTRL + eKey_Q));
     m_ui->actionUndo->setShortcut(shortcut("shortcutUndo", "Ctrl+Z"));
     m_ui->actionRedo->setShortcut(shortcut("shortcutRedo", "Ctrl+Y"));
-    m_ui->actionShow_undo_redo->setShortcut(shortcut("shortcutHistory", "Ctrl+L"));
+    m_historyDock->toggleViewAction()->setShortcut(shortcut("shortcutHistory", "Ctrl+L"));
     m_ui->actionCreate_new_object->setShortcut(shortcut("shortcutCreateObject", "Ctrl+N"));
     m_ui->actionDuplicate_selected_objects->setShortcut(shortcut("shortcutDuplicateObjects", "Ctrl+D"));
     m_ui->actionReset_cam_position->setShortcut(shortcut("shortcutResetCamera", "Ctrl+R"));
@@ -2601,13 +2658,13 @@ void MainWindow::showOutliner(bool bShow)
 {
     if(bShow)
     {
-        m_ui->treeWidget->show();
-        m_ui->tableWidget->show();
+        m_outlinerDock->show();
+        m_propertiesDock->show();
     }
     else
     {
-        m_ui->treeWidget->hide();
-        m_ui->tableWidget->hide();
+        m_outlinerDock->hide();
+        m_propertiesDock->hide();
     }
 }
 
@@ -2833,8 +2890,9 @@ void MainWindow::on_actionSelect_by_triggered()
 
 void MainWindow::on_actionShow_undo_redo_triggered()
 {
-    m_undoView->show();
-    m_undoView->activateWindow();
+    m_historyDock->show();
+    m_historyDock->raise();
+    m_historyDock->activateWindow();
 }
 
 void MainWindow::on_actionClose_all_triggered()

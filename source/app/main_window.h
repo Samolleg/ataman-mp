@@ -169,7 +169,10 @@ private:
     QMenu* m_recentFilesMenu;
     QAction* m_externalScriptAction;
     QDockWidget* m_mapsDock;
+    QDockWidget* m_historyDock;
     QDockWidget* m_validationDock;
+    QDockWidget* m_outlinerDock;
+    QDockWidget* m_propertiesDock;
     QTreeWidget* m_validationTree;
     QLabel* m_validationSummary;
     QTimer* m_validationTimer;
