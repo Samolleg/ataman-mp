@@ -2522,6 +2522,21 @@ void CView::collectObjectTreeData()
                     groupItem->setFlags(groupItem->flags() & ~Qt::ItemIsSelectable);
             }
         }
+
+        if(!visible)
+        {
+            const QBrush hiddenTextBrush(QColor(128, 128, 128));
+            QList<QTreeWidgetItem*> pendingItems;
+            pendingItems.append(mobItem);
+            while(!pendingItems.isEmpty())
+            {
+                QTreeWidgetItem* item = pendingItems.takeLast();
+                for(int column = 0; column < item->columnCount(); ++column)
+                    item->setForeground(column, hiddenTextBrush);
+                for(int childIndex = 0; childIndex < item->childCount(); ++childIndex)
+                    pendingItems.append(item->child(childIndex));
+            }
+        }
     }
     m_pTree->applyFilter();
     const QList<CNode*> selected = selectionSnapshot();
