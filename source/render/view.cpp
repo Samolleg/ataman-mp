@@ -1066,15 +1066,29 @@ void CView::loadMob(QFileInfo &filePath)
             ++unitCount;
     if(unitCount > 0)
         m_pProgress->reset();
-    makeCurrent();
     for(CNode* node : pMob->nodes())
         if(CUnit* unit = dynamic_cast<CUnit*>(node))
         {
+            // Progress updates process the Qt event queue. A paint or window
+            // event may change/release the thread's current GL context, so a
+            // single makeCurrent() before the loop is not a valid guarantee
+            // for the following unit's buffer/texture uploads.
+            ei::setCrashContext(QString("mob/unit-preload:%1").arg(unit->mapId()));
+            makeCurrent();
+            if(!QOpenGLContext::currentContext())
+            {
+                ei::log(eLogFatal, QString(
+                    "Unit visual preload stopped because no OpenGL context could be made current; unit:%1")
+                    .arg(unit->mapId()));
+                break;
+            }
             unit->preloadVisualResources();
             ++preloadedUnits;
             m_pProgress->update(100.0 / unitCount);
         }
+    makeCurrent();
     doneCurrent();
+    ei::setCrashContext("idle after MOB preload");
     if(unitCount > 0)
         m_pProgress->finish();
     ei::log(eLogInfo, QString("Preloaded visual resources for %1 units during MOB load in %2 ms")
