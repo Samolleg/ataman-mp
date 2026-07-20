@@ -23,6 +23,7 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     , m_paintTerrainType(new QComboBox(this))
     , m_paintRadius(new QDoubleSpinBox(this))
     , m_paintShape(new QComboBox(this))
+    , m_tilesetStatus(new QLabel(tr("No semantic tileset definition loaded."), this))
     , m_sculptControls(new QWidget(this))
     , m_paintControls(new QWidget(this))
 {
@@ -73,11 +74,13 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     QVBoxLayout* paintLayout = new QVBoxLayout(m_paintControls);
     paintLayout->setContentsMargins(0, 0, 0, 0);
     QLabel* paintHelp = new QLabel(tr(
-        "Left-drag paints a terrain material. Endurance chooses atlas variants and rotations from visual edge compatibility, "
-        "and retiles a one-cell seam halo automatically. Right-click samples the material from the map. "
+        "Left-drag paints a visual material using an explicit definition supplied with the atlas. "
+        "Endurance resolves authored corner transitions and rotations in a one-cell seam halo. Right-click samples the material from the map. "
         "Overlay painting changes only already-active overlay cells and never creates liquid implicitly."), this);
     paintHelp->setWordWrap(true);
     paintLayout->addWidget(paintHelp);
+    m_tilesetStatus->setWordWrap(true);
+    paintLayout->addWidget(m_tilesetStatus);
     m_paintTerrainType->addItem(tr("Choose a material..."), QVariant());
     m_paintRadius->setRange(0.0, 32.0);
     m_paintRadius->setValue(1.0);
@@ -91,6 +94,10 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     paintLayout->addLayout(paintForm);
     QPushButton* tilePicker = new QPushButton(tr("Inspect atlas / choose representative..."), this);
     paintLayout->addWidget(tilePicker);
+    QPushButton* loadTileset = new QPushButton(tr("Load terrain tileset definition..."), this);
+    QPushButton* exportDiagnostic = new QPushButton(tr("Export paint diagnostic..."), this);
+    paintLayout->addWidget(loadTileset);
+    paintLayout->addWidget(exportDiagnostic);
     layout->addWidget(m_paintControls);
     layout->addSpacing(8);
     layout->addWidget(new QLabel(tr("Heightmap import"), this));
@@ -100,6 +107,8 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     layout->addStretch(1);
     connect(importButton, &QPushButton::clicked, this, &CLandscapeTools::importHeightmapRequested);
     connect(tilePicker, &QPushButton::clicked, this, &CLandscapeTools::tilePickerRequested);
+    connect(loadTileset, &QPushButton::clicked, this, &CLandscapeTools::loadTilesetRequested);
+    connect(exportDiagnostic, &QPushButton::clicked, this, &CLandscapeTools::exportPaintDiagnosticRequested);
     connect(m_paintTerrainType, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, [this](int)
     {
@@ -190,6 +199,9 @@ void CLandscapeTools::setPaintTerrainTypes(
     m_paintTerrainType->addItem(tr("Choose a material..."), QVariant());
     for(const auto& terrainType : terrainTypes)
         m_paintTerrainType->addItem(terrainType.second, terrainType.first);
+    m_tilesetStatus->setText(terrainTypes.isEmpty()
+        ? tr("No semantic tileset definition loaded. Painting is disabled.")
+        : tr("Semantic tileset loaded: %1 visual material(s).").arg(terrainTypes.size()));
 }
 void CLandscapeTools::selectPaintTerrainType(qint32 terrainType)
 {

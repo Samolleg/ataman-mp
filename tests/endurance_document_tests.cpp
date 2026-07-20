@@ -120,7 +120,7 @@ QByteArray syntheticMp()
     stream << quint32(0xCE4AF672) << float(100.0f)
            << quint32(1) << quint32(1)
            << quint32(2) << quint32(512)
-           << quint32(2) << quint32(64)
+           << quint32(3) << quint32(64)
            << quint16(2) << quint32(0);
     for(int material = 0; material < 2; ++material)
     {
@@ -129,7 +129,7 @@ QByteArray syntheticMp()
                << float(0.7f) << float(0.0f) << float(0.5f)
                << float(0.0f) << float(0.0f) << float(0.0f) << float(0.0f);
     }
-    stream << qint32(1) << qint32(2);
+    stream << qint32(1) << qint32(2) << qint32(2);
     return bytes;
 }
 
@@ -1121,7 +1121,7 @@ void EnduranceDocumentTests::syntheticMprPreservesArchiveNamespaceAndInactiveSen
     QCOMPARE(document.members().at(0).lastWriteTime, quint32(0x10203040));
     QCOMPARE(document.mapInfo().innerNamespace, QString("CaveSet"));
     QCOMPARE(document.mapInfo().textureCount, quint32(2));
-    QCOMPARE(document.mapInfo().tileTypes, QVector<qint32>({1, 2}));
+    QCOMPARE(document.mapInfo().tileTypes, QVector<qint32>({1, 2, 2}));
     bool foundTileType = false;
     QCOMPARE(document.mapInfo().tileType(1, &foundTileType), qint32(2));
     QVERIFY(foundTileType);
@@ -1578,68 +1578,53 @@ void EnduranceDocumentTests::terrainTilePaintingIsUndoableLocalizedAndNamespaceS
     QCOMPARE(terrain.makeTilePaint(area, ETerrainTileLayer::Land,
                                    0, 1, 0).deltas.size(), 9);
 
-    CTerrainSemanticCatalog semanticCatalog;
-    const auto edge = [](int red, int green, int blue) {
-        QByteArray value;
-        for(int sample = 0; sample < 8; ++sample)
-        {
-            value.append(char(red));
-            value.append(char(green));
-            value.append(char(blue));
-        }
-        return value;
-    };
-    for(int rotation = 0; rotation < 4; ++rotation)
+    CTerrainTransitionCatalog semanticCatalog;
+    const QVector<int> semanticMasks({0, 15, 12, 9, 3, 6, 1, 2, 4, 8});
+    for(int variantIndex = 0; variantIndex < semanticMasks.size(); ++variantIndex)
     {
-        SMprPackedTile grassPacked;
-        grassPacked.tileIndex = 0;
-        grassPacked.rotation = quint8(rotation);
-        STerrainSemanticVariant grass;
-        grass.terrainType = 1;
-        grass.packedTile = grassPacked.encode();
-        grass.northEdge = grass.eastEdge = grass.southEdge = grass.westEdge
-            = edge(20, 120, 20);
-        QVERIFY(semanticCatalog.addVariant(grass));
-
-        SMprPackedTile groundPacked;
-        groundPacked.tileIndex = 1;
-        groundPacked.rotation = quint8(rotation);
-        STerrainSemanticVariant ground;
-        ground.terrainType = 2;
-        ground.packedTile = groundPacked.encode();
-        ground.northEdge = ground.eastEdge = ground.southEdge = ground.westEdge
-            = edge(110, 70, 25);
-        QVERIFY(semanticCatalog.addVariant(ground));
+        const int mask = semanticMasks.at(variantIndex);
+        STerrainTransitionVariant visualVariant;
+        visualVariant.signature.northWest = (mask & 1) ? 2 : 1;
+        visualVariant.signature.northEast = (mask & 2) ? 2 : 1;
+        visualVariant.signature.southEast = (mask & 4) ? 2 : 1;
+        visualVariant.signature.southWest = (mask & 8) ? 2 : 1;
+        if(variantIndex == 0)
+            visualVariant.packedTile = 0;
+        else if(variantIndex == 1)
+            visualVariant.packedTile = quint16(1 << 14);
+        else if(variantIndex < 6)
+            visualVariant.packedTile = quint16(1 | ((variantIndex - 2) << 14));
+        else
+            visualVariant.packedTile = quint16(2 | ((variantIndex - 6) << 14));
+        QVERIFY(semanticCatalog.addVariant(visualVariant));
     }
-    QVERIFY(semanticCatalog.hasTerrainType(1));
-    QVERIFY(semanticCatalog.hasTerrainType(2));
-    QVERIFY(!semanticCatalog.hasTerrainType(99));
-    CTerrainSemanticCatalog edgeCatalog;
-    STerrainSemanticVariant northNeighbor;
-    northNeighbor.terrainType = 1;
-    northNeighbor.packedTile = 10;
-    northNeighbor.northEdge = northNeighbor.eastEdge
-        = northNeighbor.southEdge = northNeighbor.westEdge = edge(200, 30, 20);
-    QVERIFY(edgeCatalog.addVariant(northNeighbor));
-    STerrainSemanticVariant compatible = northNeighbor;
-    compatible.terrainType = 2;
-    compatible.packedTile = 11;
-    QVERIFY(edgeCatalog.addVariant(compatible));
-    STerrainSemanticVariant incompatible = compatible;
-    incompatible.packedTile = 12;
-    incompatible.northEdge = edge(10, 20, 210);
-    QVERIFY(edgeCatalog.addVariant(incompatible));
-    STerrainSemanticNeighbors semanticNeighbors;
-    semanticNeighbors.north = northNeighbor.packedTile;
+    QVERIFY(semanticCatalog.hasMaterial(1));
+    QVERIFY(semanticCatalog.hasMaterial(2));
+    QVERIFY(!semanticCatalog.hasMaterial(99));
     bool semanticFound = false;
-    QCOMPARE(edgeCatalog.select(2, semanticNeighbors, 4, 9, 17, &semanticFound),
-             compatible.packedTile);
+    const STerrainTransitionSignature decoded =
+        semanticCatalog.signatureForPacked(quint16(1 << 14), &semanticFound);
     QVERIFY(semanticFound);
-    QVERIFY(!edgeCatalog.addVariant(compatible));
-    STerrainSemanticVariant malformed = compatible;
-    malformed.packedTile = 13;
-    malformed.westEdge.clear();
-    QVERIFY(!edgeCatalog.addVariant(malformed));
+    QCOMPARE(decoded.northWest, qint32(2));
+
+    const QByteArray definitionJson = R"JSON({
+      "schema": "ei-mapper-endurance-terrain-tileset",
+      "version": 1,
+      "mprNamespace": "tile-paint-baseline",
+      "atlasSlotCount": 1,
+      "atlasPixelSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "materials": [{"id": 1, "name": "Grass"}, {"id": 2, "name": "Ground"}],
+      "variants": [{"atlasSlot": 0, "corners": [1, 1, 1, 1], "rotations": [0]}]
+    })JSON";
+    CTerrainTilesetDefinition definition;
+    CValidationReport definitionReport;
+    QVERIFY2(definition.loadJson(definitionJson, "tile-paint-baseline", &definitionReport),
+             qPrintable(definitionReport.toText()));
+    QCOMPARE(definition.materials().size(), 2);
+    QCOMPARE(definition.catalog().size(), 1);
+    CValidationReport tilesetNamespaceReport;
+    QVERIFY(!definition.loadJson(definitionJson, "other-map", &tilesetNamespaceReport));
+    QVERIFY(tilesetNamespaceReport.hasErrors());
     STerrainTileBrush semanticPoint;
     semanticPoint.centerX = 8.0f;
     semanticPoint.centerY = 8.0f;
@@ -1657,7 +1642,14 @@ void EnduranceDocumentTests::terrainTilePaintingIsUndoableLocalizedAndNamespaceS
         QVERIFY(qAbs(delta.globalY - 8) <= 1);
         if(delta.globalX == 8 && delta.globalY == 8)
         {
-            QCOMPARE(terrain.tileType(delta.after), qint32(2));
+            bool centerFound = false;
+            const STerrainTransitionSignature centerSignature =
+                semanticCatalog.signatureForPacked(delta.after, &centerFound);
+            QVERIFY(centerFound);
+            QCOMPARE(centerSignature.northWest, qint32(2));
+            QCOMPARE(centerSignature.northEast, qint32(2));
+            QCOMPARE(centerSignature.southEast, qint32(2));
+            QCOMPARE(centerSignature.southWest, qint32(2));
             changedCenter = true;
         }
     }

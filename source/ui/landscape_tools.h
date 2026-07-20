@@ -10,6 +10,7 @@
 class QCheckBox;
 class QComboBox;
 class QDoubleSpinBox;
+class QLabel;
 class QSpinBox;
 
 enum class ELandscapeSculptTool
@@ -48,6 +49,8 @@ public:
 signals:
     void importHeightmapRequested();
     void tilePickerRequested();
+    void loadTilesetRequested();
+    void exportPaintDiagnosticRequested();
     void editingStateChanged();
     void paintTerrainTypeChanged(qint32 terrainType);
 
@@ -63,6 +66,7 @@ private:
     QComboBox* m_paintTerrainType;
     QDoubleSpinBox* m_paintRadius;
     QComboBox* m_paintShape;
+    QLabel* m_tilesetStatus;
     QWidget* m_sculptControls;
     QWidget* m_paintControls;
     void updateModeVisibility();

@@ -2,7 +2,10 @@
 #define TERRAIN_EDIT_MODEL_H
 
 #include <QByteArray>
+#include <QHash>
 #include <QMap>
+#include <QPair>
+#include <QSet>
 #include <QString>
 #include <QVector>
 
@@ -80,53 +83,6 @@ struct STerrainTransitionVariant
     int distributionWeight{1};
 };
 
-enum class ETerrainTileEdge
-{
-    North,
-    East,
-    South,
-    West
-};
-
-struct STerrainSemanticVariant
-{
-    qint32 terrainType{0};
-    quint16 packedTile{0};
-    QByteArray northEdge;
-    QByteArray eastEdge;
-    QByteArray southEdge;
-    QByteArray westEdge;
-    int distributionWeight{1};
-};
-
-struct STerrainSemanticNeighbors
-{
-    qint32 north{-1};
-    qint32 east{-1};
-    qint32 south{-1};
-    qint32 west{-1};
-};
-
-// Read-only runtime catalog derived from the MPR atlas pixels and MP category
-// array. It never changes atlas images or category metadata.
-class CTerrainSemanticCatalog
-{
-public:
-    bool addVariant(const STerrainSemanticVariant& variant,
-                    CValidationReport* report = nullptr);
-    bool hasTerrainType(qint32 terrainType) const;
-    quint16 select(qint32 terrainType,
-                   const STerrainSemanticNeighbors& neighbors,
-                   int globalX, int globalY, quint32 distributionSeed,
-                   bool* found = nullptr) const;
-    int size() const { return m_variants.size(); }
-
-private:
-    const STerrainSemanticVariant* findPacked(quint16 packed) const;
-    static quint64 edgeDifference(const QByteArray& left, const QByteArray& right);
-    QVector<STerrainSemanticVariant> m_variants;
-};
-
 class CTerrainTransitionCatalog
 {
 public:
@@ -137,10 +93,47 @@ public:
     quint16 select(const STerrainTransitionSignature& signature,
                    int globalX, int globalY, quint32 distributionSeed,
                    bool* found = nullptr) const;
+    STerrainTransitionSignature signatureForPacked(
+        quint16 packedTile, bool* found = nullptr) const;
+    bool hasMaterial(qint32 materialId) const;
+    QVector<qint32> materialIds() const;
     int size() const { return m_variants.size(); }
 
 private:
+    static QByteArray signatureKey(const STerrainTransitionSignature& signature);
     QVector<STerrainTransitionVariant> m_variants;
+    QHash<quint16, int> m_packedLookup;
+    QHash<QByteArray, QVector<int>> m_signatureLookup;
+    QSet<qint32> m_materialIds;
+};
+
+struct STerrainTilesetMaterial
+{
+    qint32 id{0};
+    QString name;
+};
+
+// Explicit editor-side knowledge for an already-authored atlas. The MPR's MP
+// tile category array is deliberately not used as visual material metadata.
+class CTerrainTilesetDefinition
+{
+public:
+    bool loadJson(const QByteArray& bytes, const QString& expectedNamespace,
+                  CValidationReport* report = nullptr);
+    QString mprNamespace() const { return m_mprNamespace; }
+    int atlasSlotCount() const { return m_atlasSlotCount; }
+    QByteArray atlasPixelSha256() const { return m_atlasPixelSha256; }
+    QVector<STerrainTilesetMaterial> materials() const { return m_materials; }
+    const CTerrainTransitionCatalog& catalog() const { return m_catalog; }
+    bool isValid() const { return m_valid; }
+
+private:
+    QString m_mprNamespace;
+    int m_atlasSlotCount{0};
+    QByteArray m_atlasPixelSha256;
+    QVector<STerrainTilesetMaterial> m_materials;
+    CTerrainTransitionCatalog m_catalog;
+    bool m_valid{false};
 };
 
 struct STerrainHeightDelta
@@ -308,7 +301,7 @@ public:
                                      quint8 rotation) const;
     STerrainTileCommand makeSemanticTilePaint(
         const STerrainTileBrush& brush, ETerrainTileLayer layer,
-        qint32 terrainType, const CTerrainSemanticCatalog& catalog,
+        qint32 materialId, const CTerrainTransitionCatalog& catalog,
         quint32 distributionSeed,
         CValidationReport* report = nullptr) const;
     bool apply(const STerrainTileCommand& command, bool forward,

@@ -8,6 +8,10 @@
 #include <QPair>
 #include <QRandomGenerator>
 #include <QMessageBox>
+#include <QCryptographicHash>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 
 #include "view.h"
 #include "camera.h"
@@ -43,6 +47,24 @@
 class CLogic;
 
 namespace {
+QByteArray terrainAtlasPixelSha256(const QVector<QImage>& images)
+{
+    QCryptographicHash hash(QCryptographicHash::Sha256);
+    hash.addData(QByteArray::number(images.size()));
+    hash.addData("\n", 1);
+    for(const QImage& source : images)
+    {
+        const QImage image = source.convertToFormat(QImage::Format_RGBA8888);
+        hash.addData(QByteArray::number(image.width()));
+        hash.addData("x", 1);
+        hash.addData(QByteArray::number(image.height()));
+        hash.addData("\n", 1);
+        for(int y = 0; y < image.height(); ++y)
+            hash.addData(reinterpret_cast<const char*>(image.constScanLine(y)), image.width() * 4);
+    }
+    return hash.result().toHex();
+}
+
 class CTerrainHeightPreviewCommand : public QUndoCommand
 {
 public:
@@ -72,53 +94,6 @@ private:
     CView* m_view;
     STerrainTileCommand m_command;
 };
-
-QByteArray sampledEdge(const QImage& image, ETerrainTileEdge edge)
-{
-    QByteArray result;
-    if(image.isNull() || image.width() < 8 || image.height() < 8)
-        return result;
-    const int samples = 16;
-    // CTile trims 4/512 of an original atlas on each side of a slot. In slot
-    // pixels this is one sixteenth of the tile width at every supported atlas
-    // resolution.
-    const int marginX = qMax(1, image.width() / 16);
-    const int marginY = qMax(1, image.height() / 16);
-    const int minimumX = marginX;
-    const int maximumX = image.width() - marginX - 1;
-    const int minimumY = marginY;
-    const int maximumY = image.height() - marginY - 1;
-    for(int sample = 0; sample < samples; ++sample)
-    {
-        const float ratio = samples == 1 ? 0.0f : float(sample) / float(samples - 1);
-        int x = qRound(minimumX + ratio * (maximumX - minimumX));
-        int y = qRound(minimumY + ratio * (maximumY - minimumY));
-        if(edge == ETerrainTileEdge::North) y = minimumY;
-        if(edge == ETerrainTileEdge::South) y = maximumY;
-        if(edge == ETerrainTileEdge::West) x = minimumX;
-        if(edge == ETerrainTileEdge::East) x = maximumX;
-        int red = 0;
-        int green = 0;
-        int blue = 0;
-        int count = 0;
-        for(int inset = -1; inset <= 1; ++inset)
-        {
-            const int sampleX = qBound(0, x + ((edge == ETerrainTileEdge::North
-                || edge == ETerrainTileEdge::South) ? 0 : inset), image.width() - 1);
-            const int sampleY = qBound(0, y + ((edge == ETerrainTileEdge::North
-                || edge == ETerrainTileEdge::South) ? inset : 0), image.height() - 1);
-            const QColor color = image.pixelColor(sampleX, sampleY);
-            red += color.red();
-            green += color.green();
-            blue += color.blue();
-            ++count;
-        }
-        result.append(char(red / count));
-        result.append(char(green / count));
-        result.append(char(blue / count));
-    }
-    return result;
-}
 
 }
 
@@ -188,6 +163,10 @@ void CView::attachLandscapeTools(CLandscapeTools* tools)
                 this, &CView::importTerrainHeightmap);
         connect(m_landscapeTools, &CLandscapeTools::tilePickerRequested,
                 this, &CView::openMapParameters);
+        connect(m_landscapeTools, &CLandscapeTools::loadTilesetRequested,
+                this, &CView::loadTerrainTilesetDefinition);
+        connect(m_landscapeTools, &CLandscapeTools::exportPaintDiagnosticRequested,
+                this, &CView::exportTerrainPaintDiagnostic);
         connect(m_landscapeTools, &CLandscapeTools::editingStateChanged,
                 this, &CView::syncLandscapeToolState);
         connect(m_landscapeTools, &CLandscapeTools::paintTerrainTypeChanged,
@@ -830,7 +809,7 @@ void CView::loadLandscape(const QFileInfo& filePath)
     }
     m_pPreviewTile.reset(new CPreviewTile());
     updateTileForm(true);
-    rebuildTerrainSemanticCatalog();
+    resetTerrainTilesetDefinition();
 }
 
 void CView::unloadLand()
@@ -856,7 +835,7 @@ void CView::unloadLand()
     m_terrainEditAvailable = false;
     finishSculptStroke();
     m_terrainEdit = CTerrainEditModel();
-    m_terrainSemanticCatalog = CTerrainSemanticCatalog();
+    resetTerrainTilesetDefinition();
     m_terrainSemanticSeed = 0;
     m_mprDocument = CMprDocument();
     m_pLand->unloadMpr();
@@ -1236,40 +1215,14 @@ void CView::updateTileForm(bool bGenerateNewTable)
     m_pTileForm->setAnimTile(m_pLand->animTiles());
 }
 
-void CView::rebuildTerrainSemanticCatalog()
+void CView::resetTerrainTilesetDefinition()
 {
-    m_terrainSemanticCatalog = CTerrainSemanticCatalog();
-    if(!m_terrainEditAvailable || !m_pTileForm)
-        return;
-    const QVector<QImage>& images = m_pTileForm->tileImages();
-    const QVector<qint32>& types = m_mprDocument.mapInfo().tileTypes;
-    const int slotCount = qMin(images.size(), types.size());
-    CValidationReport report;
-    for(int slot = 0; slot < slotCount; ++slot)
-    {
-        if(images.at(slot).isNull())
-            continue;
-        for(int rotation = 0; rotation < 4; ++rotation)
-        {
-            QTransform transform;
-            transform.rotate(rotation * 90);
-            const QImage oriented = rotation == 0
-                ? images.at(slot) : images.at(slot).transformed(transform);
-            SMprPackedTile packed;
-            packed.atlasIndex = quint8(slot / 64);
-            packed.tileIndex = quint8(slot % 64);
-            packed.rotation = quint8(rotation);
-            STerrainSemanticVariant variant;
-            variant.terrainType = types.at(slot);
-            variant.packedTile = packed.encode();
-            variant.northEdge = sampledEdge(oriented, ETerrainTileEdge::North);
-            variant.eastEdge = sampledEdge(oriented, ETerrainTileEdge::East);
-            variant.southEdge = sampledEdge(oriented, ETerrainTileEdge::South);
-            variant.westEdge = sampledEdge(oriented, ETerrainTileEdge::West);
-            if(!m_terrainSemanticCatalog.addVariant(variant, &report))
-                break;
-        }
-    }
+    m_terrainTilesetDefinition = CTerrainTilesetDefinition();
+    m_terrainTransitionCatalog = CTerrainTransitionCatalog();
+    m_terrainTilesetPath.clear();
+    m_terrainPaintAudit.clear();
+    if(m_landscapeTools)
+        m_landscapeTools->setPaintTerrainTypes({});
     QByteArray seedText = m_mprDocument.mapInfo().innerNamespace.toUtf8();
     quint32 seed = 2166136261u;
     for(char byte : seedText)
@@ -1278,26 +1231,106 @@ void CView::rebuildTerrainSemanticCatalog()
         seed *= 16777619u;
     }
     m_terrainSemanticSeed = seed;
+}
 
-    QSet<qint32> uniqueTypes;
-    for(qint32 type : types)
-        if(m_terrainSemanticCatalog.hasTerrainType(type))
-            uniqueTypes.insert(type);
-    QVector<qint32> sortedTypes = uniqueTypes.values().toVector();
-    std::sort(sortedTypes.begin(), sortedTypes.end());
-    QVector<QPair<qint32, QString>> choices;
-    const QMap<ETileType, QString>& knownTypes = CResourceStringList::getInstance()->tileTypes();
-    for(qint32 type : sortedTypes)
+void CView::loadTerrainTilesetDefinition()
+{
+    if(!m_terrainEditAvailable)
     {
-        const QString name = knownTypes.value(ETileType(type), tr("Unknown"));
-        choices.append(qMakePair(type, QString("%1 (%2)").arg(name).arg(type)));
+        emit updateMsg(tr("Load an MPR before loading its terrain tileset definition."));
+        return;
     }
-    if(m_landscapeTools)
-        m_landscapeTools->setPaintTerrainTypes(choices);
-    ei::log(report.hasErrors() ? eLogWarning : eLogInfo,
-            QString("Semantic terrain atlas analysis: %1 oriented variants across %2 material categories%3")
-                .arg(m_terrainSemanticCatalog.size()).arg(choices.size())
-                .arg(report.hasErrors() ? "\n" + report.toText() : QString()));
+    const QString path = QFileDialog::getOpenFileName(
+        this, tr("Load terrain tileset definition"), m_pLand->filePath().absolutePath(),
+        tr("Endurance terrain tilesets (*.eitileset.json);;JSON files (*.json)"));
+    if(path.isEmpty())
+        return;
+    QFile file(path);
+    if(!file.open(QIODevice::ReadOnly))
+    {
+        QMessageBox::warning(this, tr("Terrain tileset"),
+                             tr("Could not read %1: %2").arg(path, file.errorString()));
+        return;
+    }
+    CTerrainTilesetDefinition definition;
+    CValidationReport report;
+    if(!definition.loadJson(file.readAll(), m_mprDocument.mapInfo().innerNamespace, &report))
+    {
+        QMessageBox::warning(this, tr("Terrain tileset definition refused"), report.toText());
+        return;
+    }
+    const QVector<QImage>& atlasImages = m_pTileForm->tileImages();
+    const QByteArray atlasHash = terrainAtlasPixelSha256(atlasImages);
+    if(definition.atlasSlotCount() != atlasImages.size()
+       || definition.atlasPixelSha256() != atlasHash)
+    {
+        QMessageBox::warning(this, tr("Terrain tileset definition refused"),
+            tr("The definition's atlas identity does not match the atlas loaded for this MPR.\n"
+               "Expected slots/hash: %1 / %2\nLoaded slots/hash: %3 / %4")
+                .arg(definition.atlasSlotCount())
+                .arg(QString::fromLatin1(definition.atlasPixelSha256()))
+                .arg(atlasImages.size()).arg(QString::fromLatin1(atlasHash)));
+        return;
+    }
+    m_terrainTilesetDefinition = definition;
+    m_terrainTransitionCatalog = definition.catalog();
+    m_terrainTilesetPath = path;
+    QVector<QPair<qint32, QString>> choices;
+    for(const STerrainTilesetMaterial& material : definition.materials())
+        choices.append(qMakePair(material.id, material.name));
+    m_landscapeTools->setPaintTerrainTypes(choices);
+    emit updateMsg(tr("Loaded explicit terrain tileset definition: %1 materials, %2 oriented variants.")
+        .arg(choices.size()).arg(m_terrainTransitionCatalog.size()));
+}
+
+void CView::exportTerrainPaintDiagnostic()
+{
+    if(!m_pLand->isMprLoad())
+    {
+        emit updateMsg(tr("Load an MPR before exporting a paint diagnostic."));
+        return;
+    }
+    const QString suggested = m_pLand->filePath().absolutePath() + QDir::separator()
+        + m_pLand->filePath().completeBaseName() + "-paint-diagnostic.json";
+    const QString path = QFileDialog::getSaveFileName(
+        this, tr("Export terrain paint diagnostic"), suggested, tr("JSON files (*.json)"));
+    if(path.isEmpty())
+        return;
+    QJsonObject root;
+    root.insert("schema", "ei-mapper-endurance-paint-diagnostic");
+    root.insert("version", 1);
+    root.insert("mprFileName", m_pLand->filePath().fileName());
+    root.insert("mprNamespace", m_mprDocument.mapInfo().innerNamespace);
+    root.insert("sourceMprSha256", QString::fromLatin1(QCryptographicHash::hash(
+        m_mprDocument.originalBytes(), QCryptographicHash::Sha256).toHex()));
+    root.insert("atlasSlotCount", m_pTileForm ? m_pTileForm->tileImages().size() : 0);
+    root.insert("atlasPixelSha256", m_pTileForm
+        ? QString::fromLatin1(terrainAtlasPixelSha256(m_pTileForm->tileImages())) : QString());
+    root.insert("tilesetDefinition", m_terrainTilesetPath.isEmpty()
+        ? QJsonValue() : QJsonValue(QFileInfo(m_terrainTilesetPath).fileName()));
+    root.insert("changedMprSavingEnabled", false);
+    QJsonArray operations;
+    for(const STerrainTileDelta& delta : m_terrainPaintAudit)
+    {
+        QJsonObject operation;
+        operation.insert("x", delta.globalX);
+        operation.insert("y", delta.globalY);
+        operation.insert("layer", delta.layer == ETerrainTileLayer::Land ? "land" : "overlay");
+        operation.insert("beforePacked", int(delta.before));
+        operation.insert("afterPacked", int(delta.after));
+        operations.append(operation);
+    }
+    root.insert("paintDeltas", operations);
+    QFile output(path);
+    if(!output.open(QIODevice::WriteOnly | QIODevice::Truncate)
+       || output.write(QJsonDocument(root).toJson(QJsonDocument::Indented)) < 0)
+    {
+        QMessageBox::warning(this, tr("Paint diagnostic"),
+                             tr("Could not write %1: %2").arg(path, output.errorString()));
+        return;
+    }
+    output.close();
+    emit updateMsg(tr("Paint diagnostic exported without writing an MPR: %1").arg(path));
 }
 
 void CView::onChangeCursorTile(QPixmap ico)
@@ -2117,14 +2150,20 @@ void CView::pickTile(QVector3D posOnLand, bool bLand)
         const int globalX = tileLoc.xSec * 16 + tileLoc.col;
         const int globalY = tileLoc.ySec * 16 + tileLoc.row;
         bool found = false;
-        const qint32 type = m_terrainEdit.tileType(
-            m_terrainEdit.packedTile(globalX, globalY,
-                bLand ? ETerrainTileLayer::Land : ETerrainTileLayer::Overlay), &found);
-        if(found)
+        const quint16 packed = m_terrainEdit.packedTile(globalX, globalY,
+            bLand ? ETerrainTileLayer::Land : ETerrainTileLayer::Overlay, &found);
+        const STerrainTransitionSignature signature = found
+            ? m_terrainTransitionCatalog.signatureForPacked(packed, &found)
+            : STerrainTransitionSignature();
+        if(found && signature.northWest == signature.northEast
+           && signature.northWest == signature.southEast
+           && signature.northWest == signature.southWest)
         {
-            m_landscapeTools->selectPaintTerrainType(type);
-            emit updateMsg(tr("Sampled terrain material %1.").arg(type));
+            m_landscapeTools->selectPaintTerrainType(signature.northWest);
+            emit updateMsg(tr("Sampled visual terrain material %1.").arg(signature.northWest));
         }
+        else if(found)
+            emit updateMsg(tr("This is a transition tile; sample a uniform tile to choose one material."));
     }
     if(!bLand)
         m_pTileForm->setActiveMatIndex(pTile->materialIndex());
@@ -2143,22 +2182,12 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
         return;
 
     bool materialSelected = false;
-    qint32 terrainType = m_landscapeTools->paintTerrainType(&materialSelected);
+    const qint32 terrainType = m_landscapeTools->paintTerrainType(&materialSelected);
     if(!materialSelected)
     {
-        int representative = -1;
-        int ignoredRotation = 0;
-        m_pTileForm->getSelectedTile(representative, ignoredRotation);
-        if(representative >= 0 && representative < m_mprDocument.mapInfo().tileTypes.size())
-        {
-            terrainType = m_mprDocument.mapInfo().tileTypes.at(representative);
-            materialSelected = true;
-            m_landscapeTools->selectPaintTerrainType(terrainType);
-        }
-    }
-    if(!materialSelected)
-    {
-        emit updateMsg(tr("Choose a terrain material before painting."));
+        emit updateMsg(m_terrainTilesetDefinition.isValid()
+            ? tr("Choose a visual terrain material before painting.")
+            : tr("Load an explicit terrain tileset definition before painting."));
         return;
     }
     STerrainTileBrush brush;
@@ -2169,7 +2198,7 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
     CValidationReport report;
     const STerrainTileCommand command = m_terrainEdit.makeSemanticTilePaint(
         brush, bLand ? ETerrainTileLayer::Land : ETerrainTileLayer::Overlay,
-        terrainType, m_terrainSemanticCatalog, m_terrainSemanticSeed, &report);
+        terrainType, m_terrainTransitionCatalog, m_terrainSemanticSeed, &report);
     if(command.isEmpty())
     {
         if(report.hasErrors())
@@ -2179,6 +2208,7 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
             : report.toText());
         return;
     }
+    m_terrainPaintAudit += command.deltas;
     m_pUndoStack->push(new CTerrainTilePreviewCommand(this, command));
 }
 

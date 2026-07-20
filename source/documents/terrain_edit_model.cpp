@@ -1,6 +1,10 @@
 #include "terrain_edit_model.h"
 
 #include <QCryptographicHash>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonParseError>
 #include <QSet>
 #include <QtEndian>
 
@@ -153,29 +157,47 @@ bool CTerrainTransitionCatalog::addVariant(const STerrainTransitionVariant& vari
                         "Transition variants require a positive distribution weight");
         return false;
     }
-    for(const STerrainTransitionVariant& existing : m_variants)
+    if(m_packedLookup.contains(variant.packedTile))
     {
-        if(existing.signature == variant.signature
-           && existing.packedTile == variant.packedTile)
-        {
-            if(report)
-                report->add("terrain.transition_duplicate", EValidationSeverity::Error,
-                            "Transition catalog contains the same oriented tile twice");
-            return false;
-        }
+        if(report)
+            report->add("terrain.transition_duplicate", EValidationSeverity::Error,
+                        "Transition catalog assigns the same packed tile more than once");
+        return false;
     }
+    const int index = m_variants.size();
     m_variants.append(variant);
+    m_packedLookup.insert(variant.packedTile, index);
+    m_signatureLookup[signatureKey(variant.signature)].append(index);
+    m_materialIds.insert(variant.signature.northWest);
+    m_materialIds.insert(variant.signature.northEast);
+    m_materialIds.insert(variant.signature.southEast);
+    m_materialIds.insert(variant.signature.southWest);
     return true;
+}
+
+QByteArray CTerrainTransitionCatalog::signatureKey(
+    const STerrainTransitionSignature& signature)
+{
+    QByteArray key(16, '\0');
+    qToLittleEndian<qint32>(signature.northWest,
+        reinterpret_cast<uchar*>(key.data()));
+    qToLittleEndian<qint32>(signature.northEast,
+        reinterpret_cast<uchar*>(key.data() + 4));
+    qToLittleEndian<qint32>(signature.southEast,
+        reinterpret_cast<uchar*>(key.data() + 8));
+    qToLittleEndian<qint32>(signature.southWest,
+        reinterpret_cast<uchar*>(key.data() + 12));
+    return key;
 }
 
 quint16 CTerrainTransitionCatalog::select(
     const STerrainTransitionSignature& signature, int globalX, int globalY,
     quint32 distributionSeed, bool* found) const
 {
+    const QVector<int> candidates = m_signatureLookup.value(signatureKey(signature));
     quint64 totalWeight = 0;
-    for(const STerrainTransitionVariant& variant : m_variants)
-        if(variant.signature == signature)
-            totalWeight += quint64(variant.distributionWeight);
+    for(int index : candidates)
+        totalWeight += quint64(m_variants.at(index).distributionWeight);
     if(totalWeight == 0)
     {
         if(found)
@@ -199,10 +221,9 @@ quint16 CTerrainTransitionCatalog::select(
     mix(quint32(signature.southEast));
     mix(quint32(signature.southWest));
     quint64 selection = quint64(hash) % totalWeight;
-    for(const STerrainTransitionVariant& variant : m_variants)
+    for(int index : candidates)
     {
-        if(!(variant.signature == signature))
-            continue;
+        const STerrainTransitionVariant& variant = m_variants.at(index);
         if(selection < quint64(variant.distributionWeight))
         {
             if(found)
@@ -216,136 +237,171 @@ quint16 CTerrainTransitionCatalog::select(
     return 0;
 }
 
-bool CTerrainSemanticCatalog::addVariant(const STerrainSemanticVariant& variant,
-                                         CValidationReport* report)
+STerrainTransitionSignature CTerrainTransitionCatalog::signatureForPacked(
+    quint16 packedTile, bool* found) const
 {
-    const int edgeSize = variant.northEdge.size();
-    if(variant.distributionWeight <= 0 || edgeSize <= 0
-       || variant.eastEdge.size() != edgeSize
-       || variant.southEdge.size() != edgeSize
-       || variant.westEdge.size() != edgeSize)
-    {
-        if(report)
-            report->add("terrain.semantic_variant", EValidationSeverity::Error,
-                        "Semantic atlas variants require equally sized edges and a positive weight");
-        return false;
-    }
-    for(const STerrainSemanticVariant& existing : m_variants)
-    {
-        if(existing.packedTile == variant.packedTile)
-        {
-            if(report)
-                report->add("terrain.semantic_duplicate", EValidationSeverity::Error,
-                            "Semantic atlas catalog contains the same packed tile twice");
-            return false;
-        }
-    }
-    m_variants.append(variant);
-    return true;
-}
-
-bool CTerrainSemanticCatalog::hasTerrainType(qint32 terrainType) const
-{
-    for(const STerrainSemanticVariant& variant : m_variants)
-        if(variant.terrainType == terrainType)
-            return true;
-    return false;
-}
-
-const STerrainSemanticVariant* CTerrainSemanticCatalog::findPacked(quint16 packed) const
-{
-    for(const STerrainSemanticVariant& variant : m_variants)
-        if(variant.packedTile == packed)
-            return &variant;
-    return nullptr;
-}
-
-quint64 CTerrainSemanticCatalog::edgeDifference(const QByteArray& left,
-                                                 const QByteArray& right)
-{
-    if(left.size() != right.size() || left.isEmpty())
-        return std::numeric_limits<quint64>::max() / 8;
-    quint64 difference = 0;
-    for(int index = 0; index < left.size(); ++index)
-    {
-        const int delta = int(quint8(left.at(index))) - int(quint8(right.at(index)));
-        difference += quint64(delta * delta);
-    }
-    return difference;
-}
-
-quint16 CTerrainSemanticCatalog::select(
-    qint32 terrainType, const STerrainSemanticNeighbors& neighbors,
-    int globalX, int globalY, quint32 distributionSeed, bool* found) const
-{
-    quint64 bestScore = std::numeric_limits<quint64>::max();
-    QVector<QPair<const STerrainSemanticVariant*, quint64>> candidates;
-    for(const STerrainSemanticVariant& variant : m_variants)
-    {
-        if(variant.terrainType != terrainType)
-            continue;
-        quint64 score = 0;
-        const STerrainSemanticVariant* neighbor = nullptr;
-        if(neighbors.north >= 0 && (neighbor = findPacked(quint16(neighbors.north))))
-            score += edgeDifference(variant.northEdge, neighbor->southEdge);
-        if(neighbors.east >= 0 && (neighbor = findPacked(quint16(neighbors.east))))
-            score += edgeDifference(variant.eastEdge, neighbor->westEdge);
-        if(neighbors.south >= 0 && (neighbor = findPacked(quint16(neighbors.south))))
-            score += edgeDifference(variant.southEdge, neighbor->northEdge);
-        if(neighbors.west >= 0 && (neighbor = findPacked(quint16(neighbors.west))))
-            score += edgeDifference(variant.westEdge, neighbor->eastEdge);
-        bestScore = qMin(bestScore, score);
-        candidates.append(qMakePair(&variant, score));
-    }
-    if(candidates.isEmpty())
+    const auto existing = m_packedLookup.constFind(packedTile);
+    if(existing != m_packedLookup.constEnd())
     {
         if(found)
-            *found = false;
-        return 0;
-    }
-
-    // DXT compression and authored edge padding introduce small pixel noise.
-    // Keep near-equal candidates in the natural-variation pool without letting
-    // visibly worse seams win. The allowance is one RGB intensity step squared
-    // per compared sample, plus five percent of the best score.
-    const int edgeBytes = candidates.front().first->northEdge.size();
-    const int neighborCount = (neighbors.north >= 0) + (neighbors.east >= 0)
-        + (neighbors.south >= 0) + (neighbors.west >= 0);
-    const quint64 allowance = quint64(edgeBytes * qMax(1, neighborCount))
-        + bestScore / 20;
-    quint64 totalWeight = 0;
-    for(const auto& candidate : candidates)
-        if(candidate.second <= bestScore + allowance)
-            totalWeight += quint64(candidate.first->distributionWeight);
-
-    quint32 hash = 2166136261u;
-    const auto mix = [&hash](quint32 value) {
-        for(int byte = 0; byte < 4; ++byte)
-        {
-            hash ^= (value >> (byte * 8)) & 0xFFu;
-            hash *= 16777619u;
-        }
-    };
-    mix(distributionSeed);
-    mix(quint32(globalX));
-    mix(quint32(globalY));
-    mix(quint32(terrainType));
-    quint64 selection = quint64(hash) % totalWeight;
-    for(const auto& candidate : candidates)
-    {
-        if(candidate.second > bestScore + allowance)
-            continue;
-        if(selection < quint64(candidate.first->distributionWeight))
-        {
-            if(found)
-                *found = true;
-            return candidate.first->packedTile;
-        }
-        selection -= quint64(candidate.first->distributionWeight);
+            *found = true;
+        return m_variants.at(existing.value()).signature;
     }
     if(found)
         *found = false;
-    return 0;
+    return STerrainTransitionSignature();
+}
+
+bool CTerrainTransitionCatalog::hasMaterial(qint32 materialId) const
+{
+    return m_materialIds.contains(materialId);
+}
+
+QVector<qint32> CTerrainTransitionCatalog::materialIds() const
+{
+    QVector<qint32> result = m_materialIds.values().toVector();
+    std::sort(result.begin(), result.end());
+    return result;
+}
+
+bool CTerrainTilesetDefinition::loadJson(const QByteArray& bytes,
+                                         const QString& expectedNamespace,
+                                         CValidationReport* report)
+{
+    m_valid = false;
+    m_mprNamespace.clear();
+    m_atlasSlotCount = 0;
+    m_atlasPixelSha256.clear();
+    m_materials.clear();
+    m_catalog = CTerrainTransitionCatalog();
+    QJsonParseError parseError;
+    const QJsonDocument document = QJsonDocument::fromJson(bytes, &parseError);
+    if(parseError.error != QJsonParseError::NoError || !document.isObject())
+    {
+        if(report)
+            report->add("terrain.tileset_json", EValidationSeverity::Error,
+                        "The terrain tileset definition is not valid JSON",
+                        parseError.errorString());
+        return false;
+    }
+    const QJsonObject root = document.object();
+    if(root.value("schema").toString() != "ei-mapper-endurance-terrain-tileset"
+       || root.value("version").toInt() != 1)
+    {
+        if(report)
+            report->add("terrain.tileset_schema", EValidationSeverity::Error,
+                        "Unsupported terrain tileset schema or version");
+        return false;
+    }
+    m_mprNamespace = root.value("mprNamespace").toString();
+    if(m_mprNamespace.isEmpty()
+       || m_mprNamespace.compare(expectedNamespace, Qt::CaseInsensitive) != 0)
+    {
+        if(report)
+            report->add("terrain.tileset_namespace", EValidationSeverity::Error,
+                        "The terrain tileset definition does not match this MPR namespace",
+                        QString("expected:%1 actual:%2").arg(expectedNamespace, m_mprNamespace));
+        return false;
+    }
+    m_atlasSlotCount = root.value("atlasSlotCount").toInt(0);
+    m_atlasPixelSha256 = root.value("atlasPixelSha256").toString().toLatin1().toLower();
+    bool validAtlasHash = m_atlasPixelSha256.size() == 64;
+    for(char character : m_atlasPixelSha256)
+        validAtlasHash = validAtlasHash
+            && ((character >= '0' && character <= '9')
+                || (character >= 'a' && character <= 'f'));
+    if(m_atlasSlotCount <= 0 || !validAtlasHash)
+    {
+        if(report)
+            report->add("terrain.tileset_atlas_identity", EValidationSeverity::Error,
+                        "The tileset definition requires atlasSlotCount and a SHA-256 atlasPixelSha256");
+        return false;
+    }
+    QSet<qint32> materialIds;
+    for(const QJsonValue& value : root.value("materials").toArray())
+    {
+        const QJsonObject materialObject = value.toObject();
+        STerrainTilesetMaterial material;
+        material.id = materialObject.value("id").toInt(std::numeric_limits<int>::min());
+        material.name = materialObject.value("name").toString().trimmed();
+        if(material.id == std::numeric_limits<int>::min() || material.name.isEmpty()
+           || materialIds.contains(material.id))
+        {
+            if(report)
+                report->add("terrain.tileset_material", EValidationSeverity::Error,
+                            "Tileset materials require unique integer IDs and non-empty names");
+            return false;
+        }
+        materialIds.insert(material.id);
+        m_materials.append(material);
+    }
+    if(m_materials.isEmpty())
+    {
+        if(report)
+            report->add("terrain.tileset_material", EValidationSeverity::Error,
+                        "The tileset definition contains no materials");
+        return false;
+    }
+    for(const QJsonValue& value : root.value("variants").toArray())
+    {
+        const QJsonObject variantObject = value.toObject();
+        const int atlasSlot = variantObject.value("atlasSlot").toInt(-1);
+        const QJsonArray corners = variantObject.value("corners").toArray();
+        const QJsonArray rotations = variantObject.contains("rotations")
+            ? variantObject.value("rotations").toArray()
+            : QJsonArray({0, 1, 2, 3});
+        if(atlasSlot < 0 || atlasSlot >= m_atlasSlotCount || atlasSlot > 16383
+           || corners.size() != 4
+           || rotations.isEmpty())
+        {
+            if(report)
+                report->add("terrain.tileset_variant", EValidationSeverity::Error,
+                            "Each variant requires an atlasSlot, four corners, and rotations");
+            return false;
+        }
+        STerrainTransitionSignature base;
+        base.northWest = corners.at(0).toInt(std::numeric_limits<int>::min());
+        base.northEast = corners.at(1).toInt(std::numeric_limits<int>::min());
+        base.southEast = corners.at(2).toInt(std::numeric_limits<int>::min());
+        base.southWest = corners.at(3).toInt(std::numeric_limits<int>::min());
+        if(!materialIds.contains(base.northWest) || !materialIds.contains(base.northEast)
+           || !materialIds.contains(base.southEast) || !materialIds.contains(base.southWest))
+        {
+            if(report)
+                report->add("terrain.tileset_corner", EValidationSeverity::Error,
+                            "A variant corner references an undeclared material",
+                            QString("atlasSlot:%1").arg(atlasSlot));
+            return false;
+        }
+        const int weight = variantObject.value("weight").toInt(1);
+        for(const QJsonValue& rotationValue : rotations)
+        {
+            const int rotation = rotationValue.toInt(-1);
+            if(rotation < 0 || rotation > 3)
+            {
+                if(report)
+                    report->add("terrain.tileset_rotation", EValidationSeverity::Error,
+                                "Variant rotations must be integers from 0 through 3");
+                return false;
+            }
+            STerrainTransitionVariant variant;
+            variant.signature = CTerrainTransitionCatalog::rotated(base, rotation);
+            variant.packedTile = quint16((atlasSlot % 64) | ((atlasSlot / 64) << 6)
+                                         | (rotation << 14));
+            variant.distributionWeight = weight;
+            if(!m_catalog.addVariant(variant, report))
+                return false;
+        }
+    }
+    if(m_catalog.size() == 0)
+    {
+        if(report)
+            report->add("terrain.tileset_variant", EValidationSeverity::Error,
+                        "The tileset definition contains no atlas variants");
+        return false;
+    }
+    m_valid = true;
+    return true;
 }
 
 bool CTerrainEditModel::load(const CMprDocument& document, CValidationReport* report)
@@ -1249,47 +1305,29 @@ STerrainTileCommand CTerrainEditModel::makeTilePaint(
 
 STerrainTileCommand CTerrainEditModel::makeSemanticTilePaint(
     const STerrainTileBrush& brush, ETerrainTileLayer layer,
-    qint32 terrainType, const CTerrainSemanticCatalog& catalog,
+    qint32 materialId, const CTerrainTransitionCatalog& catalog,
     quint32 distributionSeed, CValidationReport* report) const
 {
     STerrainTileCommand command;
     command.description = layer == ETerrainTileLayer::Land
         ? QStringLiteral("Paint terrain material")
         : QStringLiteral("Paint overlay material");
-    if(brush.radius < 0.0f || !catalog.hasTerrainType(terrainType))
+    if(brush.radius < 0.0f || !catalog.hasMaterial(materialId))
     {
         if(report)
             report->add("terrain.semantic_type", EValidationSeverity::Error,
-                        "The selected terrain category has no usable atlas variants");
+                        "The selected visual material is absent from the loaded tileset definition");
         return command;
     }
 
     const int width = tileCountX();
     const int height = tileCountY();
-    QVector<quint16> working(width * height, 0);
-    QVector<qint32> desiredTypes(width * height, 0);
-    QVector<bool> available(width * height, false);
-    for(int y = 0; y < height; ++y)
-    {
-        for(int x = 0; x < width; ++x)
-        {
-            const int index = y * width + x;
-            working[index] = packedTile(x, y, layer, &available[index]);
-            if(available.at(index))
-            {
-                bool typeFound = false;
-                desiredTypes[index] = tileType(working.at(index), &typeFound);
-                available[index] = typeFound;
-            }
-        }
-    }
-
-    QVector<bool> painted(width * height, false);
-    QVector<bool> affected(width * height, false);
     const int minimumX = qMax(0, int(std::ceil(brush.centerX - brush.radius)));
     const int maximumX = qMin(width - 1, int(std::floor(brush.centerX + brush.radius)));
     const int minimumY = qMax(0, int(std::ceil(brush.centerY - brush.radius)));
     const int maximumY = qMin(height - 1, int(std::floor(brush.centerY + brush.radius)));
+    QSet<int> painted;
+    QSet<int> affected;
     for(int y = minimumY; y <= maximumY; ++y)
     {
         for(int x = minimumX; x <= maximumX; ++x)
@@ -1299,35 +1337,32 @@ STerrainTileCommand CTerrainEditModel::makeSemanticTilePaint(
             const bool inside = brush.shape == ETerrainTileBrushShape::Square
                 ? qMax(dx, dy) <= brush.radius
                 : std::sqrt(dx * dx + dy * dy) <= brush.radius;
-            const int index = y * width + x;
-            if(!inside || !available.at(index))
+            if(!inside)
                 continue;
-            painted[index] = true;
-            desiredTypes[index] = terrainType;
-        }
-    }
-
-    int paintedCount = 0;
-    for(int index = 0; index < painted.size(); ++index)
-    {
-        if(!painted.at(index))
-            continue;
-        ++paintedCount;
-        const int centerX = index % width;
-        const int centerY = index / width;
-        for(int offsetY = -1; offsetY <= 1; ++offsetY)
-        {
-            for(int offsetX = -1; offsetX <= 1; ++offsetX)
+            bool available = false;
+            packedTile(x, y, layer, &available);
+            if(!available)
+                continue;
+            painted.insert(y * width + x);
+            for(int offsetY = -1; offsetY <= 1; ++offsetY)
             {
-                const int x = centerX + offsetX;
-                const int y = centerY + offsetY;
-                if(x >= 0 && x < width && y >= 0 && y < height
-                   && available.at(y * width + x))
-                    affected[y * width + x] = true;
+                for(int offsetX = -1; offsetX <= 1; ++offsetX)
+                {
+                    const int affectedX = x + offsetX;
+                    const int affectedY = y + offsetY;
+                    bool affectedAvailable = false;
+                    if(affectedX >= 0 && affectedX < width
+                       && affectedY >= 0 && affectedY < height)
+                    {
+                        packedTile(affectedX, affectedY, layer, &affectedAvailable);
+                        if(affectedAvailable)
+                            affected.insert(affectedY * width + affectedX);
+                    }
+                }
             }
         }
     }
-    if(paintedCount == 0)
+    if(painted.isEmpty())
     {
         if(report)
             report->add(layer == ETerrainTileLayer::Overlay
@@ -1339,77 +1374,88 @@ STerrainTileCommand CTerrainEditModel::makeSemanticTilePaint(
         return command;
     }
 
-    // Canonicalize the editable region before relaxation. This makes the
-    // result depend on the semantic field, coordinates, seed, and fixed outer
-    // boundary - never on whichever visual variants happened to be present in
-    // the brush footprint. Repainting the same material is therefore a no-op.
-    for(int index = 0; index < affected.size(); ++index)
+    // Decode only the footprint and its one-tile halo into a shared corner
+    // lattice. This makes seams explicit and keeps stamp cost proportional to
+    // brush area instead of total map size.
+    QMap<int, qint32> corners;
+    const auto setCorner = [&](int cornerX, int cornerY, qint32 value) -> bool
     {
-        if(!affected.at(index))
-            continue;
+        const int key = cornerY * (width + 1) + cornerX;
+        const auto existing = corners.constFind(key);
+        if(existing != corners.constEnd() && existing.value() != value)
+            return false;
+        corners.insert(key, value);
+        return true;
+    };
+    QMap<int, STerrainTransitionSignature> existingSignatures;
+    QMap<int, quint16> existingTiles;
+    for(int index : affected)
+    {
         const int x = index % width;
         const int y = index / width;
+        bool available = false;
+        const quint16 current = packedTile(x, y, layer, &available);
         bool found = false;
-        working[index] = catalog.select(desiredTypes.at(index),
-            STerrainSemanticNeighbors(), x, y, distributionSeed, &found);
-        if(!found)
+        const STerrainTransitionSignature signature = catalog.signatureForPacked(current, &found);
+        if(!available || !found
+           || !setCorner(x, y, signature.northWest)
+           || !setCorner(x + 1, y, signature.northEast)
+           || !setCorner(x + 1, y + 1, signature.southEast)
+           || !setCorner(x, y + 1, signature.southWest))
         {
             if(report)
                 report->add("terrain.semantic_catalog", EValidationSeverity::Error,
-                            "Automatic painting could not seed an atlas tile for a terrain category",
-                            QString("%1,%2 type:%3").arg(x).arg(y).arg(desiredTypes.at(index)));
+                            found
+                                ? "Existing tiles disagree at a shared semantic corner"
+                                : "An existing tile is not described by the loaded tileset definition",
+                            QString("%1,%2 packed:0x%3").arg(x).arg(y)
+                                .arg(current, 4, 16, QLatin1Char('0')));
             return STerrainTileCommand();
         }
+        existingSignatures.insert(index, signature);
+        existingTiles.insert(index, current);
     }
 
-    // Relax the footprint and its one-cell halo together. Alternating traversal
-    // removes directional bias while keeping selection deterministic.
-    for(int pass = 0; pass < 4; ++pass)
+    for(int index : painted)
     {
-        const bool reverse = (pass & 1) != 0;
-        for(int step = 0; step < width * height; ++step)
-        {
-            const int index = reverse ? (width * height - 1 - step) : step;
-            if(!affected.at(index))
-                continue;
-            const int x = index % width;
-            const int y = index / width;
-            STerrainSemanticNeighbors neighbors;
-            if(y > 0 && available.at(index - width)) neighbors.north = working.at(index - width);
-            if(x + 1 < width && available.at(index + 1)) neighbors.east = working.at(index + 1);
-            if(y + 1 < height && available.at(index + width)) neighbors.south = working.at(index + width);
-            if(x > 0 && available.at(index - 1)) neighbors.west = working.at(index - 1);
-            bool found = false;
-            const quint16 selected = catalog.select(desiredTypes.at(index), neighbors,
-                                                     x, y, distributionSeed, &found);
-            if(!found)
-            {
-                if(report)
-                    report->add("terrain.semantic_catalog", EValidationSeverity::Error,
-                                "Automatic painting could not resolve an atlas tile for a retained terrain category",
-                                QString("%1,%2 type:%3").arg(x).arg(y).arg(desiredTypes.at(index)));
-                return STerrainTileCommand();
-            }
-            working[index] = selected;
-        }
-    }
-
-    for(int index = 0; index < affected.size(); ++index)
-    {
-        if(!affected.at(index))
-            continue;
         const int x = index % width;
         const int y = index / width;
-        bool beforeAvailable = false;
-        const quint16 before = packedTile(x, y, layer, &beforeAvailable);
-        if(!beforeAvailable || before == working.at(index))
+        corners[y * (width + 1) + x] = materialId;
+        corners[y * (width + 1) + x + 1] = materialId;
+        corners[(y + 1) * (width + 1) + x + 1] = materialId;
+        corners[(y + 1) * (width + 1) + x] = materialId;
+    }
+
+    for(int index : affected)
+    {
+        const int x = index % width;
+        const int y = index / width;
+        STerrainTransitionSignature desired;
+        desired.northWest = corners.value(y * (width + 1) + x);
+        desired.northEast = corners.value(y * (width + 1) + x + 1);
+        desired.southEast = corners.value((y + 1) * (width + 1) + x + 1);
+        desired.southWest = corners.value((y + 1) * (width + 1) + x);
+        const quint16 before = existingTiles.value(index);
+        if(desired == existingSignatures.value(index))
             continue;
+        bool found = false;
+        const quint16 after = catalog.select(desired, x, y, distributionSeed, &found);
+        if(!found)
+        {
+            if(report)
+                report->add("terrain.semantic_transition", EValidationSeverity::Error,
+                            "The tileset definition has no atlas tile for a required corner transition",
+                            QString("%1,%2 corners:%3,%4,%5,%6")
+                                .arg(x).arg(y).arg(desired.northWest).arg(desired.northEast)
+                                .arg(desired.southEast).arg(desired.southWest));
+            return STerrainTileCommand();
+        }
         STerrainTileDelta delta;
         delta.globalX = x;
         delta.globalY = y;
         delta.layer = layer;
         delta.before = before;
-        delta.after = working.at(index);
+        delta.after = after;
         command.deltas.append(delta);
     }
     return command;

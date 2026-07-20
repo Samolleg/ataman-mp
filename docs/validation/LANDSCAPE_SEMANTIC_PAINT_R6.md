@@ -1,5 +1,9 @@
 # Landscape semantic painting R6
 
+> Superseded by R7. Runtime testing showed that MP tile categories describe
+> gameplay surfaces, not visual paint materials. The R6 pixel-edge inference
+> therefore mixed visually unrelated atlas entries and must not be used.
+
 ## Scope
 
 This increment replaces direct atlas-slot painting in the Landscape Tools flow

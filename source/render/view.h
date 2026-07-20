@@ -213,7 +213,7 @@ private:
     void finishSculptStroke();
     void syncLandscapeToolState();
     void clearLandscapeBrushSelection();
-    void rebuildTerrainSemanticCatalog();
+    void resetTerrainTilesetDefinition();
 
 
 public slots:
@@ -237,6 +237,8 @@ public slots:
     void importExternalMobScript(CMob* mob, const QString& storedScript,
                                  const QString& displayScript);
     void importTerrainHeightmap();
+    void loadTerrainTilesetDefinition();
+    void exportTerrainPaintDiagnostic();
 
 signals:
     void updateMsg(QString msg);
@@ -296,7 +298,10 @@ private:
     CLandscapeTools* m_landscapeTools;
     CMprDocument m_mprDocument;
     CTerrainEditModel m_terrainEdit;
-    CTerrainSemanticCatalog m_terrainSemanticCatalog;
+    CTerrainTilesetDefinition m_terrainTilesetDefinition;
+    CTerrainTransitionCatalog m_terrainTransitionCatalog;
+    QString m_terrainTilesetPath;
+    QVector<STerrainTileDelta> m_terrainPaintAudit;
     quint32 m_terrainSemanticSeed{0};
     bool m_terrainEditAvailable;
     bool m_tilePaintStrokeActive{false};
