@@ -555,15 +555,11 @@ void CObjectBase::applyTransientVisual(const QString& modelName, const QString& 
     m_pFigure->getVertexData(m_aPart, renderComplexion, parts);
     for(CPart* part : m_aPart)
     {
-        const bool unlayeredHumanoidPart = ei::usesUnlayeredHumanoidTexture(part->name())
-                && !bodyTextureLayers.isEmpty();
-        const QString partTexture = unlayeredHumanoidPart ? textureName : partTextureNames.value(part->name(),
+        const QString partTexture = ei::usesUnlayeredHumanoidTexture(part->name())
+                && !bodyTextureLayers.isEmpty() ? textureName : partTextureNames.value(part->name(),
             part->textureNumber() == 2 && !secondaryTextureName.trimmed().isEmpty()
                 ? secondaryTextureName : textureName);
-        part->setTextureUvScale(!bodyTextureLayers.isEmpty() && !unlayeredHumanoidPart
-            && !partTextureNames.contains(part->name())
-                ? ei::humanoidBodyAtlasUvScale(modelName)
-                : ei::textureUvScale(partTexture));
+        part->setTextureUvScale(ei::textureUvScale(partTexture));
     }
     recalcMinPos();
 }
