@@ -244,6 +244,8 @@ private:
     QStringList m_resolvedAnimationWeapons;
     QString m_animationFingerprint;
     SAnimationClip m_idleClip;
+    double m_lastAppliedAnimationFrame{-1.0};
+    bool m_animationPoseIsStatic{true};
     QString m_renderedModelName;
     QString m_renderedPrimaryTextureName;
     QString m_renderedSecondaryTextureName;

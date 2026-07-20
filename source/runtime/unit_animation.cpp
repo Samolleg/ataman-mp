@@ -379,11 +379,14 @@ SAnimationClip parseNestedAnimationClip(const QByteArray& modelAnimationArchive,
     return result;
 }
 
-SAnimationLocalPose interpolateAnimationPose(const SAnimationClip& clip, double logicalFrame)
+SAnimationLocalPose interpolateAnimationPose(const SAnimationClip& clip, double logicalFrame,
+                                             const SAnimationSkeleton* skeleton)
 {
     SAnimationLocalPose result;
     for(auto it = clip.channels.constBegin(); it != clip.channels.constEnd(); ++it)
     {
+        if(skeleton && !skeleton->restOffsets.contains(it.key()))
+            continue;
         result.transforms.insert(it.key(), localAt(clip, it.key(), logicalFrame));
         const QVector<QVector3D> morph = morphAt(clip, it.value(), logicalFrame);
         if(!morph.isEmpty()) result.morphDeltas.insert(it.key(), morph);

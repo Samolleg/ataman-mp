@@ -63,6 +63,7 @@ CObjectBase::CObjectBase(const CObjectBase &base):
     m_minPoint = base.m_minPoint;
     m_bodyParts = base.m_bodyParts;
     m_figureComplexion = base.m_figureComplexion;
+    m_transientSkeleton = base.m_transientSkeleton;
 
     m_aPart.clear();
     for(auto& part:base.m_aPart)
@@ -127,6 +128,7 @@ void CObjectBase::updateFigure(ei::CFigure* fig)
             delete part;
         m_aPart.clear();
         m_pFigure = nullptr;
+        m_transientSkeleton = SAnimationSkeleton();
         return;
     }
     m_pFigure = fig;
@@ -267,15 +269,38 @@ QMap<QString, QVector<QVector2D>> CObjectBase::renderedBodyPartUvTriangles() con
     return result;
 }
 
-SAnimationSkeleton CObjectBase::transientAnimationSkeleton() const
+const SAnimationSkeleton& CObjectBase::transientAnimationSkeleton() const
 {
-    SAnimationSkeleton skeleton;
-    if(m_pFigure)
+    return m_transientSkeleton;
+}
+
+void CObjectBase::rebuildTransientAnimationSkeleton()
+{
+    m_transientSkeleton = SAnimationSkeleton();
+    if(!m_pFigure)
+        return;
+    SAnimationSkeleton full;
+    QVector3D complexion = m_figureComplexion;
+    m_pFigure->getAssemblyHierarchy(full.parents, full.restOffsets, complexion);
+    QSet<QString> required;
+    for(const CPart* part : m_aPart)
     {
-        QVector3D complexion = m_figureComplexion;
-        m_pFigure->getAssemblyHierarchy(skeleton.parents, skeleton.restOffsets, complexion);
+        QString component = part->name().toLower();
+        QSet<QString> chain;
+        while(!component.isEmpty() && !chain.contains(component))
+        {
+            chain.insert(component);
+            required.insert(component);
+            component = full.parents.value(component);
+        }
     }
-    return skeleton;
+    for(const QString& component : required)
+    {
+        if(full.parents.contains(component))
+            m_transientSkeleton.parents.insert(component, full.parents.value(component));
+        if(full.restOffsets.contains(component))
+            m_transientSkeleton.restOffsets.insert(component, full.restOffsets.value(component));
+    }
 }
 
 void CObjectBase::applyTransientPartPoses(const QMap<QString, QMatrix4x4>& poses)
@@ -573,6 +598,7 @@ void CObjectBase::recalcFigure()
     m_figureComplexion = m_complection;
     CPart::setCacheScope(meshCacheScope(m_modelName));
     m_pFigure->getVertexData(m_aPart, m_complection, m_bodyParts);
+    rebuildTransientAnimationSkeleton();
     recalcMinPos();
 }
 
@@ -648,6 +674,7 @@ void CObjectBase::applyTransientVisual(const QString& modelName, const QString& 
         }
         part->setTextureUvScale(uvScale);
     }
+    rebuildTransientAnimationSkeleton();
     recalcMinPos();
 }
 

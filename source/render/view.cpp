@@ -583,6 +583,10 @@ void CView::draw()
     {
         performance.counters().sharedMeshes = quint64(CPart::sharedMeshCount());
         performance.counters().gpuMemoryEstimateBytes = CPart::sharedMeshBytes();
+        const SAnimationPerformanceCounters& animation = AnimationFrameContext::instance().counters();
+        performance.counters().animationPoseEvaluations = animation.poseEvaluations;
+        performance.counters().animationPoseCacheHits = animation.poseCacheHits;
+        performance.counters().animationComponentsEvaluated = animation.componentsEvaluated;
     }
 
     if (m_pLand && m_pLand->isMprLoad() && m_bDrawWater)

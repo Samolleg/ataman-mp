@@ -39,6 +39,9 @@ void addCounters(SRenderFrameCounters& target, const SRenderFrameCounters& value
     target.instances += value.instances;
     target.sharedMeshes += value.sharedMeshes;
     target.gpuMemoryEstimateBytes += value.gpuMemoryEstimateBytes;
+    target.animationPoseEvaluations += value.animationPoseEvaluations;
+    target.animationPoseCacheHits += value.animationPoseCacheHits;
+    target.animationComponentsEvaluated += value.animationComponentsEvaluated;
 }
 
 double percentileMilliseconds(QVector<quint64> samples, double percentile)
@@ -112,7 +115,8 @@ void RenderPerformanceContext::endFrame()
         "fps:%10 cpu-submit:%11 ms p95:%12 ms max:%13 ms gpu:%14 "
         "nodes:%15 culled:%16 submitted:%17 logic:%18 cells:%19/%20 candidates:%21 overflow:%22 "
         "draws:%23 terrain:%24 sectors:%25/%26/%27 triangles:%28 texture-binds:%29 "
-        "queues:%30/%31/%32 batches:%33 instances:%34 shared-meshes:%35 gpu-memory:%36")
+        "queues:%30/%31/%32 batches:%33 instances:%34 shared-meshes:%35 gpu-memory:%36 "
+        "animation-eval/cache/components:%37/%38/%39")
         .arg(m_metadata.benchmarkMode ? "benchmark" : "vsync")
         .arg(m_metadata.viewportWidth).arg(m_metadata.viewportHeight)
         .arg(m_metadata.cameraPosition.x(), 0, 'f', 2)
@@ -142,7 +146,10 @@ void RenderPerformanceContext::endFrame()
         .arg(double(m_total.batches) / frames, 0, 'f', 1)
         .arg(double(m_total.instances) / frames, 0, 'f', 1)
         .arg(double(m_total.sharedMeshes) / frames, 0, 'f', 1)
-        .arg(double(m_total.gpuMemoryEstimateBytes) / frames, 0, 'f', 0);
+        .arg(double(m_total.gpuMemoryEstimateBytes) / frames, 0, 'f', 0)
+        .arg(double(m_total.animationPoseEvaluations) / frames, 0, 'f', 1)
+        .arg(double(m_total.animationPoseCacheHits) / frames, 0, 'f', 1)
+        .arg(double(m_total.animationComponentsEvaluated) / frames, 0, 'f', 1);
     ei::log(eLogInfo, report);
 
     // Performance captures need to survive ordinary workflow-log filtering so
@@ -182,6 +189,9 @@ void RenderPerformanceContext::endFrame()
         averages.insert("instances", double(m_total.instances) / frames);
         averages.insert("sharedMeshes", double(m_total.sharedMeshes) / frames);
         averages.insert("gpuMemoryEstimateBytes", double(m_total.gpuMemoryEstimateBytes) / frames);
+        averages.insert("animationPoseEvaluations", double(m_total.animationPoseEvaluations) / frames);
+        averages.insert("animationPoseCacheHits", double(m_total.animationPoseCacheHits) / frames);
+        averages.insert("animationComponentsEvaluated", double(m_total.animationComponentsEvaluated) / frames);
         definition.insert("averages", averages);
         QJsonObject toggles;
         toggles.insert("animation", m_metadata.animationEnabled);

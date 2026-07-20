@@ -58,6 +58,9 @@ struct SAnimationPerformanceCounters
     quint64 firstPoseEvaluations{0};
     quint64 skippedOffscreen{0};
     quint64 staticFallbacks{0};
+    quint64 poseEvaluations{0};
+    quint64 poseCacheHits{0};
+    quint64 componentsEvaluated{0};
 };
 
 enum class EAnimationDistanceTier { Skip, Full, HalfRate, FirstPose };
@@ -71,7 +74,8 @@ bool selectJmvDefaultIdleAction(const QVector<SAdbAction>& actions, const QStrin
                                 QString* diagnostic = nullptr);
 SAnimationClip parseNestedAnimationClip(const QByteArray& modelAnimationArchive,
                                         const QString& actionName, int logicalLength);
-SAnimationLocalPose interpolateAnimationPose(const SAnimationClip& clip, double logicalFrame);
+SAnimationLocalPose interpolateAnimationPose(const SAnimationClip& clip, double logicalFrame,
+                                             const SAnimationSkeleton* skeleton = nullptr);
 QMap<QString, QMatrix4x4> propagateAnimationHierarchy(
     const SAnimationLocalPose& pose, const SAnimationSkeleton& skeleton);
 EAnimationDistanceTier animationDistanceTier(bool visible, bool selected, float distance);

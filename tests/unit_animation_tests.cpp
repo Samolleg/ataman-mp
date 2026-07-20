@@ -94,6 +94,7 @@ private slots:
     void parsesNestedClipAndClosingSample();
     void anchorsRootTranslationToBindPose();
     void interpolatesMorphClosingSample();
+    void filtersPoseToRenderedSkeleton();
     void propagatesPoseToNumberedEquipment();
     void inheritsAttachmentRotationOnlyOnce();
     void preservesChildBindOffsetAndIgnoresChildTranslation();
@@ -175,6 +176,26 @@ void UnitAnimationTests::interpolatesMorphClosingSample()
     const SAnimationLocalPose pose = interpolateAnimationPose(clip, 1.5);
     QCOMPARE(pose.morphDeltas.value("wing").size(), 1);
     QCOMPARE(pose.morphDeltas.value("wing").first().x(), 1.0f);
+}
+
+void UnitAnimationTests::filtersPoseToRenderedSkeleton()
+{
+    SAnimationClip clip;
+    clip.logicalLength = 2;
+    SAnimationChannel visible;
+    visible.component = "bd";
+    visible.rotations << QQuaternion() << QQuaternion();
+    visible.translations << QVector3D() << QVector3D(1, 0, 0);
+    clip.channels.insert(visible.component, visible);
+    SAnimationChannel hidden = visible;
+    hidden.component = "unused.armor99";
+    clip.channels.insert(hidden.component, hidden);
+    SAnimationSkeleton skeleton;
+    skeleton.restOffsets.insert("bd", QVector3D());
+
+    const SAnimationLocalPose pose = interpolateAnimationPose(clip, 0.5, &skeleton);
+    QVERIFY(pose.transforms.contains("bd"));
+    QVERIFY(!pose.transforms.contains("unused.armor99"));
 }
 
 void UnitAnimationTests::parsesNestedClipAndClosingSample()

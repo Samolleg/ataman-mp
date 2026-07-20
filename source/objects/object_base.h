@@ -63,9 +63,10 @@ protected:
                               const QString& secondaryTextureName = QString(),
                               const QStringList& bodyTextureLayers = {});
     void invalidateTransientVisual() { m_transientVisualFingerprint.clear(); }
-    SAnimationSkeleton transientAnimationSkeleton() const;
+    const SAnimationSkeleton& transientAnimationSkeleton() const;
     void applyTransientPartPoses(const QMap<QString, QMatrix4x4>& poses);
     void applyTransientPartMorphs(const QMap<QString, QVector<QVector3D>>& morphs);
+    void rebuildTransientAnimationSkeleton();
     //void updateVisibility(QVector<QString>& aPart);
 
 protected:
@@ -85,6 +86,7 @@ private:
     bool m_bboxDirty;
     QString m_transientVisualFingerprint;
     QVector3D m_figureComplexion{1.0f, 1.0f, 1.0f};
+    SAnimationSkeleton m_transientSkeleton;
 };
 
 #endif // OBJECT_H

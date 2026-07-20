@@ -31,6 +31,9 @@ struct SRenderFrameCounters
     quint64 instances{0};
     quint64 sharedMeshes{0};
     quint64 gpuMemoryEstimateBytes{0};
+    quint64 animationPoseEvaluations{0};
+    quint64 animationPoseCacheHits{0};
+    quint64 animationComponentsEvaluated{0};
 };
 
 struct SRenderFrameMetadata

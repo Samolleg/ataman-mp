@@ -322,12 +322,19 @@ void CUnit::refreshAnimationPose()
     QMap<QString, QMatrix4x4> staticPose;
     if(!frame.enabled() || m_resolvedAnimationModel.isEmpty())
     {
-        applyTransientPartPoses(staticPose);
-        applyTransientPartMorphs({});
+        if(!m_animationPoseIsStatic)
+        {
+            applyTransientPartPoses(staticPose);
+            applyTransientPartMorphs({});
+            m_animationPoseIsStatic = true;
+            m_lastAppliedAnimationFrame = -1.0;
+        }
         return;
     }
 
-    const float distance = (m_drawPosition - frame.cameraPosition()).length();
+    const float distanceSquared = (m_drawPosition - frame.cameraPosition()).lengthSquared();
+    const float distance = distanceSquared <= 10000.0f ? 100.0f
+        : (distanceSquared <= 90000.0f ? 300.0f : 301.0f);
     const EAnimationDistanceTier tier = animationDistanceTier(true,
         m_state == ENodeState::eSelect, distance);
     const auto database = ei::ProfileDatabaseContext::instance().current();
@@ -339,6 +346,8 @@ void CUnit::refreshAnimationPose()
     {
         m_animationFingerprint = fingerprint;
         m_idleClip = SAnimationClip();
+        m_lastAppliedAnimationFrame = -1.0;
+        m_animationPoseIsStatic = true;
         static ProfileVisualProviderService providers;
         QString diagnostic;
         const auto resolver = providers.animationResolver(providerId, database, &diagnostic);
@@ -380,8 +389,13 @@ void CUnit::refreshAnimationPose()
     if(!m_idleClip.valid())
     {
         frame.counters().staticFallbacks++;
-        applyTransientPartPoses(staticPose);
-        applyTransientPartMorphs({});
+        if(!m_animationPoseIsStatic)
+        {
+            applyTransientPartPoses(staticPose);
+            applyTransientPartMorphs({});
+            m_animationPoseIsStatic = true;
+            m_lastAppliedAnimationFrame = -1.0;
+        }
         return;
     }
 
@@ -394,9 +408,19 @@ void CUnit::refreshAnimationPose()
     }
     const double logicalFrame = quantizedAnimationFrame(tier, frame.elapsedMilliseconds(),
                                                          m_idleClip.logicalLength, m_mapID);
-    const SAnimationLocalPose local = interpolateAnimationPose(m_idleClip, logicalFrame);
-    applyTransientPartPoses(propagateAnimationHierarchy(local, transientAnimationSkeleton()));
+    if(qAbs(logicalFrame - m_lastAppliedAnimationFrame) < 0.000001)
+    {
+        frame.counters().poseCacheHits++;
+        return;
+    }
+    const SAnimationSkeleton& skeleton = transientAnimationSkeleton();
+    frame.counters().poseEvaluations++;
+    frame.counters().componentsEvaluated += quint64(skeleton.restOffsets.size());
+    const SAnimationLocalPose local = interpolateAnimationPose(m_idleClip, logicalFrame, &skeleton);
+    applyTransientPartPoses(propagateAnimationHierarchy(local, skeleton));
     applyTransientPartMorphs(local.morphDeltas);
+    m_lastAppliedAnimationFrame = logicalFrame;
+    m_animationPoseIsStatic = false;
 }
 
 uint CUnit::deserialize(util::CMobParser& parser)
