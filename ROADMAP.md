@@ -337,6 +337,10 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
     allocation now runs only from the explicit repair workflow. Identical
     queued validations are coalesced, map/collection loading has a blocking
     progress dialog, and worker/UI timings are logged. ([`6286325`](https://github.com/Ilufus/ei-mapper-endurance/commit/6286325))
+  - [x] Refresh the map/test identity after a complete map pair has loaded.
+    Alpha.12 could retain the previous map's primary MOB during a quick switch
+    (observed `bz19g` metadata with active `gz19g.mob`), combining two mutually
+    exclusive families and reporting false collisions. ([`4c833d9`](https://github.com/Ilufus/ei-mapper-endurance/commit/4c833d9))
   - Detailed design: [structural MOB NID validation plan](docs/research/structural-mob-nid-validation-plan.md).
 
 ### P0: direct-launch stabilization
