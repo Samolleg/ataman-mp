@@ -5,7 +5,7 @@ work is ordered from the newest planned minor line to the oldest completed one.
 An item is checked only after its implementation has landed and received the
 stated validation. Completed code should carry a commit, test, or release link.
 
-Current development line: `0.2.1-alpha.17` focused closed testing.
+Current development line: `0.2.1-alpha.18` focused closed testing.
 
 <details open>
 <summary><strong>General wishlist — not assigned to a release</strong></summary>
@@ -273,14 +273,16 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
 
 ### Current 0.2.x status
 
-- **Current tester build:** `0.2.1-alpha.17`, retaining alpha.16's authoritative
-  result fixes while making post-test notification delivery reliable, preserving
-  View-panel visibility across shutdown, restoring clearly grey disabled menu
-  entries without an alignment offset, disabling Close All for an empty
-  workspace, and blocking editor input throughout hot-reload staging/commit.
-  Implementation: [`465175d`](https://github.com/Ilufus/ei-mapper-endurance/commit/465175d).
-  The reported alpha.17 UI/lifecycle fixes are tester-confirmed; remaining
-  release work is the consolidated RC runtime matrix and packaging/tagging.
+- **Current tester build:** `0.2.1-alpha.18`, adding the dockable Loaded Map
+  tree, explicit active/locked MOB ownership, independent MPR/MOB visibility,
+  safe targeted MOB unload, all-loaded-MOB outliner grouping, locked-source
+  inspection/copying, Ctrl+T owner activation, and validated numeric component
+  copying. Undo/redo now reveals the MOB owning the applied document change.
+  Implementations: [`517cc1f`](https://github.com/Ilufus/ei-mapper-endurance/commit/517cc1f),
+  [`90eb899`](https://github.com/Ilufus/ei-mapper-endurance/commit/90eb899),
+  [`8a0badd`](https://github.com/Ilufus/ei-mapper-endurance/commit/8a0badd).
+  Alpha.17's UI/lifecycle fixes remain tester-confirmed; alpha.18 needs the
+  focused Loaded Map interaction pass before the consolidated RC runtime matrix.
 - **Alpha.13 validation/UI changes:** validation no longer performs expensive automatic
   replacement-ID scans for fully shared ranges, map switches refresh their
   runtime-family identity, missing `AddMob(...)` dependencies identify the
@@ -666,7 +668,7 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
   validates their hashes, and can save or hot-reload the destination without
   falling back to the rebuilding serializer. Runtime testing with cross-MOB
   copied objects through hot reload is confirmed.
-- [ ] Replace the secondary-MOB chooser with a dockable **Loaded Map** panel.
+- [x] Replace the secondary-MOB chooser with a dockable **Loaded Map** panel.
   - Present the workspace as a tree. The loaded MPR is the root and the loaded
     primary/supplemental MOBs are its children. A MOB-only workspace uses an
     explicit `No MPR (neutral grid)` root rather than implying that a terrain
@@ -719,6 +721,9 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
   - Do not add drag reordering in the first version. Preserve collection/runtime
     load order, show the primary/supplemental role, and keep unloading distinct
     from hiding so a visibility click can never change the test-run document set.
+  - Implementations: [`517cc1f`](https://github.com/Ilufus/ei-mapper-endurance/commit/517cc1f),
+    [`90eb899`](https://github.com/Ilufus/ei-mapper-endurance/commit/90eb899),
+    [`8a0badd`](https://github.com/Ilufus/ei-mapper-endurance/commit/8a0badd).
 - [ ] Runtime-validate deterministic multi-MOB JMV test loading.
   - [x] Identify the primary MOB from `map.txt` (falling back to collection
     order), validate every loaded MOB, and inventory all source/staged hashes.
@@ -804,7 +809,7 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
   history when documents unload.
 - [x] Support typed multi-field property copy/paste, including model parts and
   Create Object, with destination compatibility checks.
-- [ ] **0.2.x release task:** allow copying/pasting one selected component of a
+- [x] **0.2.x release task:** allow copying/pasting one selected component of a
   compound property value—initially individual X/Y/Z vector components. A
   copied component is an ordinary numeric scalar (for Vector3, a float), so it
   may be pasted into any numeric destination that can represent it safely; it
@@ -812,6 +817,7 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
   Integer destinations round the numeric value to the nearest integer and then
   apply the destination's normal range/validity checks; they do not require an
   already-integral source value.
+  ([`517cc1f`](https://github.com/Ilufus/ei-mapper-endurance/commit/517cc1f))
 - [x] Provide independent internal/external MOB script editing with document-
   owned workspaces, undoable imports, recovery, and configurable editor path.
 - [x] Warn before changing/resetting/deleting object IDs referenced by the
