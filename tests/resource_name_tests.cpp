@@ -18,6 +18,7 @@ private slots:
     void acceptsMmpExtensionWithoutDuplicatingIt();
     void buildsCompleteTerrainAtlasNames();
     void derivesEquipmentAtlasUvScale();
+    void derivesPackedHumanoidBodyAtlasUvScale();
     void resolvesDatabaseHumanoidSkin();
     void ignoresNonHumanoidDatabaseSkin();
     void resolvesLiveBaseDatabaseWhenProvided();
@@ -167,6 +168,15 @@ void ResourceNameTests::derivesEquipmentAtlasUvScale()
     QCOMPARE(ei::textureUvScale("UnhumaPL_05.bl.0.x4.mmp"), 1.0f);
     QCOMPARE(ei::textureUvScale("unskskin_02_x4"), 1.0f);
     QCOMPARE(ei::textureUvScale("unhumaskin_04.mmp"), 1.0f);
+}
+
+void ResourceNameTests::derivesPackedHumanoidBodyAtlasUvScale()
+{
+    QCOMPARE(ei::humanoidBodyAtlasUvScale("unhuma"), 2.0f);
+    QCOMPARE(ei::humanoidBodyAtlasUvScale("unhufe"), 2.0f);
+    QCOMPARE(ei::humanoidBodyAtlasUvScale("unhusk"), 2.0f);
+    QCOMPARE(ei::humanoidBodyAtlasUvScale("unorma"), 2.0f);
+    QCOMPARE(ei::humanoidBodyAtlasUvScale("unmogo"), 1.0f);
 }
 
 void ResourceNameTests::decodesSparsePnt3WithTrailingTransparency()

@@ -39,6 +39,16 @@ float textureUvScale(const QString& textureName)
     return 1.0f;
 }
 
+float humanoidBodyAtlasUvScale(const QString& modelName)
+{
+    const QString normalized = modelName.trimmed().toLower();
+    // EI humanoid/unit FIG UVs are stored in the packed half-scale convention.
+    // The modelling pipeline expands them once (u*2, v*2-1); repeat wrapping
+    // makes the vertical offset equivalent to a uniform 2x shader transform.
+    return normalized.startsWith("unhu") || normalized.startsWith("unor")
+        ? 2.0f : 1.0f;
+}
+
 bool usesUnlayeredHumanoidTexture(const QString& partName)
 {
     const QString normalized = partName.trimmed().toLower();

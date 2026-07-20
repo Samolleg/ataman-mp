@@ -80,11 +80,15 @@ edit `database.res`, JMV/Base archives, live MOBs, maps, or the game install.
    remains model-specific. Validate JMV `zone1.mob` IDs 203, 221, and 224;
    ID 224 must retain its body components with the TTI 0 clothing textures.
 11. Confirm packed `.x2` helmets, weapons, and shields use the established 2x
-    FIG UV transform. Body armor and skin `.x4` atlases must keep their stored
-    FIG UVs unchanged: `.x4` identifies that atlas family but is not a general
-    4x coordinate multiplier. In particular, check the back half of helmets,
-    weapon blades, and shield faces without reintroducing stripes on torsos or
-    limbs.
+    FIG UV transform. Shared humanoid body/armor atlases also use one 2x unit
+    FIG conversion pass, independent of their `.x4` filename suffix; this is
+    the `u*2, v*2-1` import rule documented by `konstvest/ei_figer`, with the
+    vertical integer offset supplied by repeat wrapping in the renderer. Face
+    and hair parts remain on their unlayered 1x skin atlas. In particular,
+    compare mixed lower-armor sets `1001621802`, `1000304365`, and `919536`
+    against gameplay, then recheck the back half of helmets, weapon blades,
+    shields, torsos, and limbs.
+
 12. Equip a helmet on a unit with database hair. Confirm the helmet component
     is visible and the `hr.NN` component is omitted; removing the helmet must
     restore the selected hair.
@@ -101,6 +105,14 @@ edit `database.res`, JMV/Base archives, live MOBs, maps, or the game install.
 15. Compare actor body proportions before and after database visual resolution.
     The placed MOB instance's complexion/constitution is authoritative; the
     Monster row is a prototype default and must not thicken every instance.
+
+### Post-merge validation integration
+
+- Once this branch is integrated with main's validation window, promote the
+  existing structured material/prototype incompatibility diagnostic into a
+  visible validation string. Keep the resolver fail-closed (the invalid visual
+  piece remains absent), preserve the database value, and do not mutate the
+  MOB or resource archives.
 
 ## UI and performance sanity
 
