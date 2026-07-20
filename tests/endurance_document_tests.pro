@@ -13,6 +13,7 @@ SOURCES += \
     ../source/documents/staged_save_validator.cpp
 
 HEADERS += \
+    ../source/core/landscape_edit_policy.h \
     ../source/core/operation_history_policy.h \
     ../source/documents/endurance_document.h \
     ../source/documents/mpr_document.h \

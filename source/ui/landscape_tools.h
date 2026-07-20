@@ -3,6 +3,8 @@
 
 #include <QWidget>
 
+#include "landscape_edit_policy.h"
+
 class QCheckBox;
 class QComboBox;
 class QDoubleSpinBox;
@@ -14,13 +16,6 @@ enum class ELandscapeSculptTool
     Lower,
     Flatten,
     Smooth
-};
-
-enum class ELandscapeEditMode
-{
-    Sculpt,
-    TilePaint,
-    OverlayPaint
 };
 
 class CLandscapeTools : public QWidget

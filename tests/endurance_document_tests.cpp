@@ -5,6 +5,7 @@
 #include <QTemporaryDir>
 
 #include "endurance_document.h"
+#include "landscape_edit_policy.h"
 #include "operation_history_policy.h"
 #include "terrain_edit_model.h"
 #include "staged_save_validator.h"
@@ -253,6 +254,7 @@ class EnduranceDocumentTests : public QObject
 
 private slots:
     void persistentPaintOperationSurvivesHistoryNavigation();
+    void landscapeLayerChangesResetBrushSelection();
     void unchangedMobIsByteIdentical();
     void duplicateMobIdsAreWarningsOnly();
     void unknownLeafIsPreservedAsOpaque();
@@ -303,6 +305,24 @@ void EnduranceDocumentTests::persistentPaintOperationSurvivesHistoryNavigation()
     QVERIFY(!operationAllowsHistoryNavigation(eOperationMethodMoveAxis));
     QVERIFY(!operationAllowsHistoryNavigation(eOperationMethodRotateAxis));
     QVERIFY(!operationAllowsHistoryNavigation(eOperationMethodScaleAxis));
+}
+
+void EnduranceDocumentTests::landscapeLayerChangesResetBrushSelection()
+{
+    QVERIFY(!landscapeModeChangeRequiresBrushReset(
+        ELandscapeEditMode::Sculpt, ELandscapeEditMode::Sculpt));
+    QVERIFY(!landscapeModeChangeRequiresBrushReset(
+        ELandscapeEditMode::TilePaint, ELandscapeEditMode::TilePaint));
+    QVERIFY(!landscapeModeChangeRequiresBrushReset(
+        ELandscapeEditMode::OverlayPaint, ELandscapeEditMode::OverlayPaint));
+    QVERIFY(landscapeModeChangeRequiresBrushReset(
+        ELandscapeEditMode::Sculpt, ELandscapeEditMode::TilePaint));
+    QVERIFY(landscapeModeChangeRequiresBrushReset(
+        ELandscapeEditMode::Sculpt, ELandscapeEditMode::OverlayPaint));
+    QVERIFY(landscapeModeChangeRequiresBrushReset(
+        ELandscapeEditMode::TilePaint, ELandscapeEditMode::OverlayPaint));
+    QVERIFY(landscapeModeChangeRequiresBrushReset(
+        ELandscapeEditMode::OverlayPaint, ELandscapeEditMode::TilePaint));
 }
 
 void EnduranceDocumentTests::unchangedMobIsByteIdentical()

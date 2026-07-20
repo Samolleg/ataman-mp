@@ -185,6 +185,7 @@ private:
     void sculptTerrainAt(const QVector3D& position);
     void finishSculptStroke();
     void syncLandscapeToolState();
+    void clearLandscapeBrushSelection();
 
 
 public slots:
@@ -269,6 +270,7 @@ private:
     QVector3D m_lastSculptStampPoint;
     QTimer* m_sculptRepeatTimer;
     bool m_tileGridVisible;
+    int m_lastLandscapeEditMode;
 };
 
 #endif // MYGLWIDGET_H

@@ -363,6 +363,15 @@ void CTileForm::selectQuickAccessTile(int index)
     onQuickCellClicked(0, index);
 }
 
+void CTileForm::clearTileSelection()
+{
+    ui->tableTile->clearSelection();
+    ui->tableTile->setCurrentCell(-1, -1);
+    ui->tableQuick->clearSelection();
+    ui->tableQuick->setCurrentCell(-1, -1);
+    m_tileRot = 0;
+}
+
 int CTileForm::activeMaterialindex()
 {
     QString index = ui->comboActiveLiquidMaterial->currentText();

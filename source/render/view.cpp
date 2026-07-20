@@ -88,6 +88,7 @@ CView::CView(QWidget *parent, const QGLWidget *pShareWidget) : QGLWidget(parent,
   ,m_sculptStrokeActive(false)
   ,m_sculptRepeatTimer(new QTimer(this))
   ,m_tileGridVisible(false)
+  ,m_lastLandscapeEditMode(-1)
 {
     setFocusPolicy(Qt::ClickFocus);
 
@@ -124,6 +125,7 @@ void CView::attachLandscapeTools(CLandscapeTools* tools)
     m_landscapeTools = tools;
     if(m_landscapeTools)
     {
+        m_lastLandscapeEditMode = int(m_landscapeTools->editMode());
         connect(m_landscapeTools, &CLandscapeTools::importHeightmapRequested,
                 this, &CView::importTerrainHeightmap);
         connect(m_landscapeTools, &CLandscapeTools::tilePickerRequested,
@@ -144,7 +146,10 @@ void CView::prepareLandscapeTilePainting()
     if(!m_landscapeTools)
         return;
     emit showLandscapeToolsSignal();
+    if(m_landscapeTools->editMode() != ELandscapeEditMode::TilePaint)
+        clearLandscapeBrushSelection();
     m_landscapeTools->activateMode(ELandscapeEditMode::TilePaint, false);
+    m_lastLandscapeEditMode = int(ELandscapeEditMode::TilePaint);
     CScene::getInstance()->setLandTileEditMode(true);
     emit updateMsg(tr("Land tile painting enabled. Choose an atlas tile in Landscape Tools."));
 }
@@ -158,6 +163,15 @@ void CView::setLandscapeEditingEnabled(bool enabled)
 void CView::syncLandscapeToolState()
 {
     finishSculptStroke();
+    if(m_landscapeTools)
+    {
+        const ELandscapeEditMode current = m_landscapeTools->editMode();
+        if(m_lastLandscapeEditMode >= 0
+           && landscapeModeChangeRequiresBrushReset(
+               ELandscapeEditMode(m_lastLandscapeEditMode), current))
+            clearLandscapeBrushSelection();
+        m_lastLandscapeEditMode = int(current);
+    }
     if(!m_landscapeTools || !m_landscapeTools->editingEnabled())
     {
         if(m_pOp && m_pOp->operationMethod() == eOperationMethodTileBrush)
@@ -184,6 +198,14 @@ void CView::syncLandscapeToolState()
         emit updateMsg(tr("Overlay painting enabled for existing overlay cells only."));
         break;
     }
+}
+
+void CView::clearLandscapeBrushSelection()
+{
+    if(m_pTileForm)
+        m_pTileForm->clearTileSelection();
+    setPreviewTile(false);
+    unsetCursor();
 }
 
 void CView::updateReadState(EReadState state)
@@ -1773,19 +1795,27 @@ void CView::updatePreviewTile(QVector3D posOnLand, bool bLand)
     if(!m_pLand->isMprLoad())
         return;
 
+    int index = -1;
+    int rotNum = 0;
+    m_pTileForm->getSelectedTile(index, rotNum);
+    if(index < 0)
+    {
+        setPreviewTile(false);
+        unsetCursor();
+        return;
+    }
+
     CTile* pTile = nullptr;
     STileLocation tileLoc;
     if(!m_pLand->pickTile(posOnLand, pTile, tileLoc, bLand))
         return;
 
-    onChangeCursorTile(m_pTileForm->tileWithRot(pTile->tileIndex()));
-    int index, rotNum, matIndex;
-    m_pTileForm->getSelectedTile(index, rotNum);
-    if(index < 0)
-        return;
+    onChangeCursorTile(m_pTileForm->tileWithRot(index));
+    int matIndex;
 
     matIndex = m_pTileForm->activeMaterialindex();
     m_pPreviewTile->updateTile(*pTile, index, rotNum, matIndex, tileLoc.xSec, tileLoc.ySec);
+    setPreviewTile(true);
 }
 
 void CView::addTileRotation(int step)

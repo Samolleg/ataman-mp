@@ -1052,7 +1052,6 @@ CTileBrush::CTileBrush(CView* pView)
     CButtonConnector::getInstance()->pressButton(EButtonOpTilebrush);
     m_pView->setDrawLand(m_bDrawLand);
     m_pView->setDrawWater(m_bDrawWater);
-    m_pView->setPreviewTile(true);
     m_pView->showOutliner(false);
 }
 
@@ -1146,7 +1145,6 @@ void CTileBrush::mouseReleaseEvent(COperation* pOp, QMouseEvent* pEvent)
         QVector3D landPos(m_pView->getTerrainPos(pEvent->x(), pEvent->y()));
         m_pView->updatePreviewTile(m_pView->getTerrainPos(pEvent->pos().x(), pEvent->pos().y(), bLand), bLand);
         m_lastLandPos = landPos;
-        m_pView->setPreviewTile();
     }
 }
 

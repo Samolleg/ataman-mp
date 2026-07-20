@@ -455,7 +455,7 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event)
             const QModelIndex item = m_undoView->indexAt(mouse->pos());
             if(item.isValid())
             {
-                if(m_pView->cancelPendingOperation())
+                if(!m_pView->prepareHistoryNavigation())
                     return true;
                 runUndoToIndex(item.row());
                 return true;

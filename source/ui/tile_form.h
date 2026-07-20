@@ -44,6 +44,7 @@ public:
     void setTileTypes(const QVector<ETileType>& arrTileType) {m_tileTypes = arrTileType;}
     void selectTile(int index);
     void selectQuickAccessTile(int index);
+    void clearTileSelection();
     int activeMaterialindex();
     void setActiveMatIndex(int index);
     void getSelectedTile(int& index, int& rotNum);
