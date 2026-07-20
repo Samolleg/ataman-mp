@@ -513,6 +513,22 @@ MainWindow::MainWindow(QWidget* parent) :
     restoreState(uiSettings.value("ui/mainWindowState").toByteArray());
     m_ui->workspaceSplitter->restoreState(uiSettings.value("ui/workspaceSplitter").toByteArray());
     m_ui->outlinerSplitter->restoreState(uiSettings.value("ui/outlinerSplitter").toByteArray());
+    if(firstRunSetup)
+    {
+        // A new profile must start from the documented usable workspace even
+        // if Windows still contains dock state from an older/test install.
+        m_mapsDock->setFloating(false);
+        m_outlinerDock->setFloating(false);
+        m_propertiesDock->setFloating(false);
+        addDockWidget(Qt::LeftDockWidgetArea, m_mapsDock);
+        addDockWidget(Qt::RightDockWidgetArea, m_outlinerDock);
+        splitDockWidget(m_outlinerDock, m_propertiesDock, Qt::Vertical);
+        m_mapsDock->show();
+        m_outlinerDock->show();
+        m_propertiesDock->show();
+        uiSettings.setValue("ui/mapsBrowser/mapsExpanded", true);
+        uiSettings.setValue("ui/mapsBrowser/collectionsExpanded", true);
+    }
 
     m_pView = new CView(m_ui->centralWidget, m_createDialog.get()->viewWidget());
     m_mapTestLauncher = new CJmvMapTestLauncher(this);
@@ -693,6 +709,30 @@ MainWindow::MainWindow(QWidget* parent) :
     refreshMapTestContext();
     updateMapTestAction();
     updateWindowTitle(eTitleTypeData::eTitleTypeDataMpr, QString());
+    bool hasStartupDocument = false;
+    for(int index = 1; index < QCoreApplication::arguments().size(); ++index)
+    {
+        const QFileInfo candidate(QCoreApplication::arguments().at(index));
+        const QString suffix = candidate.suffix().toLower();
+        if(candidate.exists() && (suffix == "mpr" || suffix == "mob"))
+        {
+            hasStartupDocument = true;
+            break;
+        }
+    }
+    if(!firstRunSetup && !hasStartupDocument)
+    {
+        COptBool* openLastSession = dynamic_cast<COptBool*>(
+            m_settings->opt(eOptSetGeneral, "openLastSessionOnStartup"));
+        if(openLastSession && openLastSession->value())
+        {
+            QTimer::singleShot(0, this, [this]()
+            {
+                ei::log(eLogInfo, "Opening the previous editor session by user preference.");
+                m_pView->loadSession();
+            });
+        }
+    }
 //    if(m_pView->isRecentAvailable())
 //        m_ui->actionOpen_recent->setEnabled(true);
 }

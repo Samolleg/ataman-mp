@@ -486,12 +486,20 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
     save namespace, readiness, and cleanup outcome.
   - Distinguish a genuine crash from the game's known abnormal-looking but
     user-initiated exit path.
-- [ ] Complete the focused Alpha.58 matrix and publish `0.2.0`.
+  - Present post-test warnings/errors in a non-modal PIE-style notification
+    that auto-dismisses after a few seconds when untouched, with **Dismiss**
+    and **Open Log** actions. Keep the complete text in the workflow log now
+    and the future message-log panel later.
+- [ ] Complete the focused 0.2.x release matrix and publish `0.2.0`.
   - Normal JMV gameplay map.
   - Zone17/zone18 or another map that previously refused script injection.
   - Dungeon map and `bz` briefing map.
   - `drawall`, traversal, generation-local Save/Load/Main Menu, return/stop, and
     graceful exit.
+  - Automate staging/hash/source-preservation checks, launch readiness,
+    reported map/player/entrance/generation identity, same/different-map reload,
+    stop, and cleanup. Retain manual checks only for rendering, traversal,
+    `drawall`, and in-game Save/Load interaction.
 
 ### Confirmed runtime behavior and research risks
 
@@ -672,11 +680,16 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
 - [ ] When opening an MPR while another workspace is loaded, offer to save
   changed MOB/MPR documents and replace the current workspace in one guarded
   action instead of only displaying a close-first warning.
-- [ ] Restore the previous editor workspace on startup, including its open MPR,
-  loaded MOBs or collection, active MOB, per-document open/closed state, and
-  collection identity. Missing or moved files must be reported together and
-  skipped without blocking the rest of the workspace; never restore unsaved
-  object edits implicitly.
+- [x] Persist the expanded/collapsed state of the **Maps** and **Collections**
+  roots in the browser across refreshes and editor restarts.
+- [x] Add an opt-in **Open last session on startup** General setting that invokes
+  the existing File-menu session loader. It defaults off and never restores
+  unsaved edits.
+- [x] On first-run setup, explicitly show Maps and Collections docked left and
+  Object Outliner above Object Properties on the right. Subsequent launches
+  respect the user's saved dock layout.
+- [x] Keep disabled menu entries aligned with enabled entries by using the same
+  font metrics; disabled state changes color only.
 - [ ] Add opt-in Windows file associations for `.mpr`, `.mob`, and
   `.collection`, with correct single-instance/open-argument behavior and an
   explicit removal path.

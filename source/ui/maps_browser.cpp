@@ -7,6 +7,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QPushButton>
+#include <QSettings>
 #include <QTreeWidget>
 #include <QVBoxLayout>
 
@@ -48,6 +49,20 @@ CMapsBrowser::CMapsBrowser(QWidget* parent)
     connect(m_filter, &QLineEdit::textChanged, this, &CMapsBrowser::applyFilter);
     connect(m_tree, &QTreeWidget::itemDoubleClicked, this, &CMapsBrowser::activateItem);
     connect(m_refresh, &QPushButton::clicked, this, &CMapsBrowser::refreshRequested);
+    connect(m_tree, &QTreeWidget::itemExpanded, this, [this](QTreeWidgetItem* item)
+    {
+        if(item == m_tree->topLevelItem(0))
+            QSettings().setValue("ui/mapsBrowser/mapsExpanded", true);
+        else if(item == m_tree->topLevelItem(1))
+            QSettings().setValue("ui/mapsBrowser/collectionsExpanded", true);
+    });
+    connect(m_tree, &QTreeWidget::itemCollapsed, this, [this](QTreeWidgetItem* item)
+    {
+        if(item == m_tree->topLevelItem(0))
+            QSettings().setValue("ui/mapsBrowser/mapsExpanded", false);
+        else if(item == m_tree->topLevelItem(1))
+            QSettings().setValue("ui/mapsBrowser/collectionsExpanded", false);
+    });
 }
 
 void CMapsBrowser::refresh(const QVector<QString>& resourceRoots,
@@ -76,10 +91,14 @@ void CMapsBrowser::refresh(const QVector<QString>& resourceRoots,
 
 void CMapsBrowser::rebuildTree()
 {
+    QSettings settings;
+    const bool mapsExpanded = settings.value("ui/mapsBrowser/mapsExpanded", true).toBool();
+    const bool collectionsExpanded = settings.value(
+        "ui/mapsBrowser/collectionsExpanded", true).toBool();
     m_tree->clear();
     QTreeWidgetItem* maps = new QTreeWidgetItem(m_tree, {tr("Maps")});
     maps->setFirstColumnSpanned(true);
-    maps->setExpanded(true);
+    maps->setExpanded(mapsExpanded);
     for(const SMapCatalogEntry& entry : m_entries)
     {
         QTreeWidgetItem* item = new QTreeWidgetItem(maps);
@@ -98,7 +117,7 @@ void CMapsBrowser::rebuildTree()
     }
     QTreeWidgetItem* collections = new QTreeWidgetItem(m_tree, {tr("Collections")});
     collections->setFirstColumnSpanned(true);
-    collections->setExpanded(true);
+    collections->setExpanded(collectionsExpanded);
     for(const QString& path : m_collectionPaths)
     {
         const QFileInfo file(path);

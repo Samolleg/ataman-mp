@@ -12,6 +12,7 @@ logLevel
 landCheckTime
 undoHistoryLimit
 mapTestWarningVersion
+openLastSessionOnStartup
 Option set name:Resource
 resourceProfile
 resourceRoots

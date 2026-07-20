@@ -37,6 +37,13 @@ CSettings::CSettings(QWidget *parent) :
     editorControls->addWidget(clearEditor);
     ui->gridLayout->addWidget(editorLabel, 6, 0);
     ui->gridLayout->addLayout(editorControls, 6, 1);
+    QCheckBox* openLastSession = new QCheckBox(tr("Open last session on startup"),
+                                               ui->tabGeneral);
+    openLastSession->setObjectName("openLastSessionOnStartup");
+    openLastSession->setToolTip(tr(
+        "Automatically invokes File > Open Last Session after startup. "
+        "Disabled by default; missing files are reported and skipped by the existing session loader."));
+    ui->gridLayout->addWidget(openLastSession, 7, 0, 1, 2);
     connect(browseEditor, &QPushButton::clicked, this, [this, editorPath]()
     {
         const QString selected = QFileDialog::getOpenFileName(this,
@@ -352,6 +359,7 @@ void CSettings::initOptions()
     aOpt.append(QSharedPointer<COpt>(new COptBool("drawHelp", false)));
     aOpt.append(QSharedPointer<COpt>(new COptBool("frustumCulling", true)));
     aOpt.append(QSharedPointer<COpt>(new COptBool("mapTestGodmode", false)));
+    aOpt.append(QSharedPointer<COpt>(new COptBool("openLastSessionOnStartup", false)));
 
 
     //init default options for digits
