@@ -19,6 +19,7 @@
 #include "select_window.h"
 #include "mpr_document.h"
 #include "terrain_edit_model.h"
+#include "terrain_atlas_analyzer.h"
 
 class QLineEdit;
 class CKeyManager;
@@ -213,7 +214,7 @@ private:
     void finishSculptStroke();
     void syncLandscapeToolState();
     void clearLandscapeBrushSelection();
-    void resetTerrainTilesetDefinition();
+    void rebuildTerrainAutoCatalog();
 
 
 public slots:
@@ -237,7 +238,6 @@ public slots:
     void importExternalMobScript(CMob* mob, const QString& storedScript,
                                  const QString& displayScript);
     void importTerrainHeightmap();
-    void loadTerrainTilesetDefinition();
     void exportTerrainPaintDiagnostic();
 
 signals:
@@ -298,9 +298,9 @@ private:
     CLandscapeTools* m_landscapeTools;
     CMprDocument m_mprDocument;
     CTerrainEditModel m_terrainEdit;
-    CTerrainTilesetDefinition m_terrainTilesetDefinition;
+    STerrainAtlasAnalysis m_terrainAtlasAnalysis;
     CTerrainTransitionCatalog m_terrainTransitionCatalog;
-    QString m_terrainTilesetPath;
+    QMap<qint32, int> m_terrainMaterialRepresentatives;
     QVector<STerrainTileDelta> m_terrainPaintAudit;
     quint32 m_terrainSemanticSeed{0};
     bool m_terrainEditAvailable;

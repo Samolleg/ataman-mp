@@ -8,6 +8,7 @@
 #include "landscape_edit_policy.h"
 #include "operation_history_policy.h"
 #include "terrain_edit_model.h"
+#include "terrain_atlas_analyzer.h"
 #include "staged_save_validator.h"
 
 namespace {
@@ -306,6 +307,7 @@ private slots:
     void terrainHeightmapImportIsDeterministicAndSeamAware();
     void terrainDiagnosticsArePreApplyAndPolicyExplicit();
     void terrainTilePaintingIsUndoableLocalizedAndNamespaceSafe();
+    void terrainAtlasAnalysisSeparatesVisualMaterialsAndTransitions();
     void terrainHeightTransactionReopensAndPreservesOverlay();
     void conflictingTerrainSeamIsPreservedAndNotEditable();
     void malformedMprTableIsRejected();
@@ -1607,24 +1609,6 @@ void EnduranceDocumentTests::terrainTilePaintingIsUndoableLocalizedAndNamespaceS
     QVERIFY(semanticFound);
     QCOMPARE(decoded.northWest, qint32(2));
 
-    const QByteArray definitionJson = R"JSON({
-      "schema": "ei-mapper-endurance-terrain-tileset",
-      "version": 1,
-      "mprNamespace": "tile-paint-baseline",
-      "atlasSlotCount": 1,
-      "atlasPixelSha256": "0000000000000000000000000000000000000000000000000000000000000000",
-      "materials": [{"id": 1, "name": "Grass"}, {"id": 2, "name": "Ground"}],
-      "variants": [{"atlasSlot": 0, "corners": [1, 1, 1, 1], "rotations": [0]}]
-    })JSON";
-    CTerrainTilesetDefinition definition;
-    CValidationReport definitionReport;
-    QVERIFY2(definition.loadJson(definitionJson, "tile-paint-baseline", &definitionReport),
-             qPrintable(definitionReport.toText()));
-    QCOMPARE(definition.materials().size(), 2);
-    QCOMPARE(definition.catalog().size(), 1);
-    CValidationReport tilesetNamespaceReport;
-    QVERIFY(!definition.loadJson(definitionJson, "other-map", &tilesetNamespaceReport));
-    QVERIFY(tilesetNamespaceReport.hasErrors());
     STerrainTileBrush semanticPoint;
     semanticPoint.centerX = 8.0f;
     semanticPoint.centerY = 8.0f;
@@ -1778,6 +1762,41 @@ void EnduranceDocumentTests::terrainTilePaintingIsUndoableLocalizedAndNamespaceS
              land.deltas.front().after);
     QCOMPARE(combinedReopened.packedTile(1, 0, ETerrainTileLayer::Overlay),
              overlay.deltas.front().after);
+}
+
+void EnduranceDocumentTests::terrainAtlasAnalysisSeparatesVisualMaterialsAndTransitions()
+{
+    const QColor grass(35, 125, 42);
+    const QColor ground(125, 78, 34);
+    QImage grassTile(128, 128, QImage::Format_RGB32);
+    QImage groundTile(128, 128, QImage::Format_RGB32);
+    QImage transition(128, 128, QImage::Format_RGB32);
+    grassTile.fill(grass);
+    groundTile.fill(ground);
+    for(int y = 0; y < transition.height(); ++y)
+        for(int x = 0; x < transition.width(); ++x)
+            transition.setPixelColor(x, y, y < transition.height() / 2 ? grass : ground);
+
+    CValidationReport report;
+    const STerrainAtlasAnalysis analysis = CTerrainAtlasAnalyzer::analyze(
+        QVector<QImage>({grassTile, groundTile, transition}),
+        QVector<qint32>({1, 1, 1}), &report);
+    QVERIFY2(analysis.usable, qPrintable(report.toText()));
+    QCOMPARE(analysis.materials.size(), 2);
+    QCOMPARE(analysis.analyzedSlots, 3);
+    QCOMPARE(analysis.describedSlots, 3);
+    QCOMPARE(analysis.ambiguousSlots, 0);
+
+    SMprPackedTile packed;
+    packed.tileIndex = 2;
+    bool found = false;
+    const STerrainTransitionSignature signature =
+        analysis.catalog.signatureForPacked(packed.encode(), &found);
+    QVERIFY(found);
+    QCOMPARE(signature.northWest, signature.northEast);
+    QCOMPARE(signature.southWest, signature.southEast);
+    QVERIFY(signature.northWest != signature.southWest);
+    QCOMPARE(analysis.catalog.size(), 12);
 }
 
 void EnduranceDocumentTests::terrainHeightTransactionReopensAndPreservesOverlay()

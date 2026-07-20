@@ -49,7 +49,6 @@ public:
 signals:
     void importHeightmapRequested();
     void tilePickerRequested();
-    void loadTilesetRequested();
     void exportPaintDiagnosticRequested();
     void editingStateChanged();
     void paintTerrainTypeChanged(qint32 terrainType);

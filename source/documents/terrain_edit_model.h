@@ -107,35 +107,6 @@ private:
     QSet<qint32> m_materialIds;
 };
 
-struct STerrainTilesetMaterial
-{
-    qint32 id{0};
-    QString name;
-};
-
-// Explicit editor-side knowledge for an already-authored atlas. The MPR's MP
-// tile category array is deliberately not used as visual material metadata.
-class CTerrainTilesetDefinition
-{
-public:
-    bool loadJson(const QByteArray& bytes, const QString& expectedNamespace,
-                  CValidationReport* report = nullptr);
-    QString mprNamespace() const { return m_mprNamespace; }
-    int atlasSlotCount() const { return m_atlasSlotCount; }
-    QByteArray atlasPixelSha256() const { return m_atlasPixelSha256; }
-    QVector<STerrainTilesetMaterial> materials() const { return m_materials; }
-    const CTerrainTransitionCatalog& catalog() const { return m_catalog; }
-    bool isValid() const { return m_valid; }
-
-private:
-    QString m_mprNamespace;
-    int m_atlasSlotCount{0};
-    QByteArray m_atlasPixelSha256;
-    QVector<STerrainTilesetMaterial> m_materials;
-    CTerrainTransitionCatalog m_catalog;
-    bool m_valid{false};
-};
-
 struct STerrainHeightDelta
 {
     int globalX{0};

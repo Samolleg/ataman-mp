@@ -1,10 +1,6 @@
 #include "terrain_edit_model.h"
 
 #include <QCryptographicHash>
-#include <QJsonArray>
-#include <QJsonDocument>
-#include <QJsonObject>
-#include <QJsonParseError>
 #include <QSet>
 #include <QtEndian>
 
@@ -262,146 +258,6 @@ QVector<qint32> CTerrainTransitionCatalog::materialIds() const
     QVector<qint32> result = m_materialIds.values().toVector();
     std::sort(result.begin(), result.end());
     return result;
-}
-
-bool CTerrainTilesetDefinition::loadJson(const QByteArray& bytes,
-                                         const QString& expectedNamespace,
-                                         CValidationReport* report)
-{
-    m_valid = false;
-    m_mprNamespace.clear();
-    m_atlasSlotCount = 0;
-    m_atlasPixelSha256.clear();
-    m_materials.clear();
-    m_catalog = CTerrainTransitionCatalog();
-    QJsonParseError parseError;
-    const QJsonDocument document = QJsonDocument::fromJson(bytes, &parseError);
-    if(parseError.error != QJsonParseError::NoError || !document.isObject())
-    {
-        if(report)
-            report->add("terrain.tileset_json", EValidationSeverity::Error,
-                        "The terrain tileset definition is not valid JSON",
-                        parseError.errorString());
-        return false;
-    }
-    const QJsonObject root = document.object();
-    if(root.value("schema").toString() != "ei-mapper-endurance-terrain-tileset"
-       || root.value("version").toInt() != 1)
-    {
-        if(report)
-            report->add("terrain.tileset_schema", EValidationSeverity::Error,
-                        "Unsupported terrain tileset schema or version");
-        return false;
-    }
-    m_mprNamespace = root.value("mprNamespace").toString();
-    if(m_mprNamespace.isEmpty()
-       || m_mprNamespace.compare(expectedNamespace, Qt::CaseInsensitive) != 0)
-    {
-        if(report)
-            report->add("terrain.tileset_namespace", EValidationSeverity::Error,
-                        "The terrain tileset definition does not match this MPR namespace",
-                        QString("expected:%1 actual:%2").arg(expectedNamespace, m_mprNamespace));
-        return false;
-    }
-    m_atlasSlotCount = root.value("atlasSlotCount").toInt(0);
-    m_atlasPixelSha256 = root.value("atlasPixelSha256").toString().toLatin1().toLower();
-    bool validAtlasHash = m_atlasPixelSha256.size() == 64;
-    for(char character : m_atlasPixelSha256)
-        validAtlasHash = validAtlasHash
-            && ((character >= '0' && character <= '9')
-                || (character >= 'a' && character <= 'f'));
-    if(m_atlasSlotCount <= 0 || !validAtlasHash)
-    {
-        if(report)
-            report->add("terrain.tileset_atlas_identity", EValidationSeverity::Error,
-                        "The tileset definition requires atlasSlotCount and a SHA-256 atlasPixelSha256");
-        return false;
-    }
-    QSet<qint32> materialIds;
-    for(const QJsonValue& value : root.value("materials").toArray())
-    {
-        const QJsonObject materialObject = value.toObject();
-        STerrainTilesetMaterial material;
-        material.id = materialObject.value("id").toInt(std::numeric_limits<int>::min());
-        material.name = materialObject.value("name").toString().trimmed();
-        if(material.id == std::numeric_limits<int>::min() || material.name.isEmpty()
-           || materialIds.contains(material.id))
-        {
-            if(report)
-                report->add("terrain.tileset_material", EValidationSeverity::Error,
-                            "Tileset materials require unique integer IDs and non-empty names");
-            return false;
-        }
-        materialIds.insert(material.id);
-        m_materials.append(material);
-    }
-    if(m_materials.isEmpty())
-    {
-        if(report)
-            report->add("terrain.tileset_material", EValidationSeverity::Error,
-                        "The tileset definition contains no materials");
-        return false;
-    }
-    for(const QJsonValue& value : root.value("variants").toArray())
-    {
-        const QJsonObject variantObject = value.toObject();
-        const int atlasSlot = variantObject.value("atlasSlot").toInt(-1);
-        const QJsonArray corners = variantObject.value("corners").toArray();
-        const QJsonArray rotations = variantObject.contains("rotations")
-            ? variantObject.value("rotations").toArray()
-            : QJsonArray({0, 1, 2, 3});
-        if(atlasSlot < 0 || atlasSlot >= m_atlasSlotCount || atlasSlot > 16383
-           || corners.size() != 4
-           || rotations.isEmpty())
-        {
-            if(report)
-                report->add("terrain.tileset_variant", EValidationSeverity::Error,
-                            "Each variant requires an atlasSlot, four corners, and rotations");
-            return false;
-        }
-        STerrainTransitionSignature base;
-        base.northWest = corners.at(0).toInt(std::numeric_limits<int>::min());
-        base.northEast = corners.at(1).toInt(std::numeric_limits<int>::min());
-        base.southEast = corners.at(2).toInt(std::numeric_limits<int>::min());
-        base.southWest = corners.at(3).toInt(std::numeric_limits<int>::min());
-        if(!materialIds.contains(base.northWest) || !materialIds.contains(base.northEast)
-           || !materialIds.contains(base.southEast) || !materialIds.contains(base.southWest))
-        {
-            if(report)
-                report->add("terrain.tileset_corner", EValidationSeverity::Error,
-                            "A variant corner references an undeclared material",
-                            QString("atlasSlot:%1").arg(atlasSlot));
-            return false;
-        }
-        const int weight = variantObject.value("weight").toInt(1);
-        for(const QJsonValue& rotationValue : rotations)
-        {
-            const int rotation = rotationValue.toInt(-1);
-            if(rotation < 0 || rotation > 3)
-            {
-                if(report)
-                    report->add("terrain.tileset_rotation", EValidationSeverity::Error,
-                                "Variant rotations must be integers from 0 through 3");
-                return false;
-            }
-            STerrainTransitionVariant variant;
-            variant.signature = CTerrainTransitionCatalog::rotated(base, rotation);
-            variant.packedTile = quint16((atlasSlot % 64) | ((atlasSlot / 64) << 6)
-                                         | (rotation << 14));
-            variant.distributionWeight = weight;
-            if(!m_catalog.addVariant(variant, report))
-                return false;
-        }
-    }
-    if(m_catalog.size() == 0)
-    {
-        if(report)
-            report->add("terrain.tileset_variant", EValidationSeverity::Error,
-                        "The tileset definition contains no atlas variants");
-        return false;
-    }
-    m_valid = true;
-    return true;
 }
 
 bool CTerrainEditModel::load(const CMprDocument& document, CValidationReport* report)
@@ -1316,7 +1172,7 @@ STerrainTileCommand CTerrainEditModel::makeSemanticTilePaint(
     {
         if(report)
             report->add("terrain.semantic_type", EValidationSeverity::Error,
-                        "The selected visual material is absent from the loaded tileset definition");
+                        "The selected visual material is absent from the automatic atlas analysis");
         return command;
     }
 
@@ -1407,7 +1263,7 @@ STerrainTileCommand CTerrainEditModel::makeSemanticTilePaint(
                 report->add("terrain.semantic_catalog", EValidationSeverity::Error,
                             found
                                 ? "Existing tiles disagree at a shared semantic corner"
-                                : "An existing tile is not described by the loaded tileset definition",
+                                : "An existing tile was not safely described by automatic atlas analysis",
                             QString("%1,%2 packed:0x%3").arg(x).arg(y)
                                 .arg(current, 4, 16, QLatin1Char('0')));
             return STerrainTileCommand();
@@ -1444,7 +1300,7 @@ STerrainTileCommand CTerrainEditModel::makeSemanticTilePaint(
         {
             if(report)
                 report->add("terrain.semantic_transition", EValidationSeverity::Error,
-                            "The tileset definition has no atlas tile for a required corner transition",
+                            "The analyzed atlas has no safe tile for a required corner transition",
                             QString("%1,%2 corners:%3,%4,%5,%6")
                                 .arg(x).arg(y).arg(desired.northWest).arg(desired.northEast)
                                 .arg(desired.southEast).arg(desired.southWest));

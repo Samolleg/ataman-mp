@@ -23,7 +23,7 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     , m_paintTerrainType(new QComboBox(this))
     , m_paintRadius(new QDoubleSpinBox(this))
     , m_paintShape(new QComboBox(this))
-    , m_tilesetStatus(new QLabel(tr("No semantic tileset definition loaded."), this))
+    , m_tilesetStatus(new QLabel(tr("Visual atlas materials are analyzed automatically when an MPR loads."), this))
     , m_sculptControls(new QWidget(this))
     , m_paintControls(new QWidget(this))
 {
@@ -74,8 +74,8 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     QVBoxLayout* paintLayout = new QVBoxLayout(m_paintControls);
     paintLayout->setContentsMargins(0, 0, 0, 0);
     QLabel* paintHelp = new QLabel(tr(
-        "Left-drag paints a visual material using an explicit definition supplied with the atlas. "
-        "Endurance resolves authored corner transitions and rotations in a one-cell seam halo. Right-click samples the material from the map. "
+        "Left-drag paints an automatically identified visual atlas material. "
+        "Endurance resolves compatible corner transitions and rotations in a one-cell seam halo. Right-click samples the material from the map. "
         "Overlay painting changes only already-active overlay cells and never creates liquid implicitly."), this);
     paintHelp->setWordWrap(true);
     paintLayout->addWidget(paintHelp);
@@ -94,9 +94,7 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     paintLayout->addLayout(paintForm);
     QPushButton* tilePicker = new QPushButton(tr("Inspect atlas / choose representative..."), this);
     paintLayout->addWidget(tilePicker);
-    QPushButton* loadTileset = new QPushButton(tr("Load terrain tileset definition..."), this);
     QPushButton* exportDiagnostic = new QPushButton(tr("Export paint diagnostic..."), this);
-    paintLayout->addWidget(loadTileset);
     paintLayout->addWidget(exportDiagnostic);
     layout->addWidget(m_paintControls);
     layout->addSpacing(8);
@@ -107,7 +105,6 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     layout->addStretch(1);
     connect(importButton, &QPushButton::clicked, this, &CLandscapeTools::importHeightmapRequested);
     connect(tilePicker, &QPushButton::clicked, this, &CLandscapeTools::tilePickerRequested);
-    connect(loadTileset, &QPushButton::clicked, this, &CLandscapeTools::loadTilesetRequested);
     connect(exportDiagnostic, &QPushButton::clicked, this, &CLandscapeTools::exportPaintDiagnosticRequested);
     connect(m_paintTerrainType, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, [this](int)
@@ -200,8 +197,8 @@ void CLandscapeTools::setPaintTerrainTypes(
     for(const auto& terrainType : terrainTypes)
         m_paintTerrainType->addItem(terrainType.second, terrainType.first);
     m_tilesetStatus->setText(terrainTypes.isEmpty()
-        ? tr("No semantic tileset definition loaded. Painting is disabled.")
-        : tr("Semantic tileset loaded: %1 visual material(s).").arg(terrainTypes.size()));
+        ? tr("No safe visual materials were identified. Painting is disabled for this atlas.")
+        : tr("Atlas analysis ready: %1 visual material(s).").arg(terrainTypes.size()));
 }
 void CLandscapeTools::selectPaintTerrainType(qint32 terrainType)
 {

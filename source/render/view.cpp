@@ -43,6 +43,7 @@
 #include "script_reference_analyzer.h"
 #include "landscape_tools.h"
 #include "endurance_document.h"
+#include "terrain_atlas_analyzer.h"
 
 class CLogic;
 
@@ -163,8 +164,6 @@ void CView::attachLandscapeTools(CLandscapeTools* tools)
                 this, &CView::importTerrainHeightmap);
         connect(m_landscapeTools, &CLandscapeTools::tilePickerRequested,
                 this, &CView::openMapParameters);
-        connect(m_landscapeTools, &CLandscapeTools::loadTilesetRequested,
-                this, &CView::loadTerrainTilesetDefinition);
         connect(m_landscapeTools, &CLandscapeTools::exportPaintDiagnosticRequested,
                 this, &CView::exportTerrainPaintDiagnostic);
         connect(m_landscapeTools, &CLandscapeTools::editingStateChanged,
@@ -174,11 +173,9 @@ void CView::attachLandscapeTools(CLandscapeTools* tools)
         {
             if(!m_pTileForm || terrainType < 0)
                 return;
-            const QVector<qint32>& types = m_mprDocument.mapInfo().tileTypes;
-            for(int slot = 0; slot < types.size(); ++slot)
+            const int slot = m_terrainMaterialRepresentatives.value(terrainType, -1);
+            if(slot >= 0)
             {
-                if(types.at(slot) != terrainType)
-                    continue;
                 m_pTileForm->selectTile(slot);
                 onChangeCursorTile(m_pTileForm->tileWithRot(slot));
                 if(m_hasViewportMousePos)
@@ -187,7 +184,6 @@ void CView::attachLandscapeTools(CLandscapeTools* tools)
                     updatePreviewTile(getTerrainPos(m_lastViewportMousePos.x(),
                                                      m_lastViewportMousePos.y(), land), land);
                 }
-                break;
             }
         });
     }
@@ -809,7 +805,7 @@ void CView::loadLandscape(const QFileInfo& filePath)
     }
     m_pPreviewTile.reset(new CPreviewTile());
     updateTileForm(true);
-    resetTerrainTilesetDefinition();
+    rebuildTerrainAutoCatalog();
 }
 
 void CView::unloadLand()
@@ -835,7 +831,7 @@ void CView::unloadLand()
     m_terrainEditAvailable = false;
     finishSculptStroke();
     m_terrainEdit = CTerrainEditModel();
-    resetTerrainTilesetDefinition();
+    rebuildTerrainAutoCatalog();
     m_terrainSemanticSeed = 0;
     m_mprDocument = CMprDocument();
     m_pLand->unloadMpr();
@@ -1215,11 +1211,11 @@ void CView::updateTileForm(bool bGenerateNewTable)
     m_pTileForm->setAnimTile(m_pLand->animTiles());
 }
 
-void CView::resetTerrainTilesetDefinition()
+void CView::rebuildTerrainAutoCatalog()
 {
-    m_terrainTilesetDefinition = CTerrainTilesetDefinition();
+    m_terrainAtlasAnalysis = STerrainAtlasAnalysis();
     m_terrainTransitionCatalog = CTerrainTransitionCatalog();
-    m_terrainTilesetPath.clear();
+    m_terrainMaterialRepresentatives.clear();
     m_terrainPaintAudit.clear();
     if(m_landscapeTools)
         m_landscapeTools->setPaintTerrainTypes({});
@@ -1231,56 +1227,31 @@ void CView::resetTerrainTilesetDefinition()
         seed *= 16777619u;
     }
     m_terrainSemanticSeed = seed;
-}
-
-void CView::loadTerrainTilesetDefinition()
-{
-    if(!m_terrainEditAvailable)
-    {
-        emit updateMsg(tr("Load an MPR before loading its terrain tileset definition."));
+    if(!m_terrainEditAvailable || !m_pTileForm)
         return;
-    }
-    const QString path = QFileDialog::getOpenFileName(
-        this, tr("Load terrain tileset definition"), m_pLand->filePath().absolutePath(),
-        tr("Endurance terrain tilesets (*.eitileset.json);;JSON files (*.json)"));
-    if(path.isEmpty())
-        return;
-    QFile file(path);
-    if(!file.open(QIODevice::ReadOnly))
-    {
-        QMessageBox::warning(this, tr("Terrain tileset"),
-                             tr("Could not read %1: %2").arg(path, file.errorString()));
-        return;
-    }
-    CTerrainTilesetDefinition definition;
     CValidationReport report;
-    if(!definition.loadJson(file.readAll(), m_mprDocument.mapInfo().innerNamespace, &report))
-    {
-        QMessageBox::warning(this, tr("Terrain tileset definition refused"), report.toText());
-        return;
-    }
-    const QVector<QImage>& atlasImages = m_pTileForm->tileImages();
-    const QByteArray atlasHash = terrainAtlasPixelSha256(atlasImages);
-    if(definition.atlasSlotCount() != atlasImages.size()
-       || definition.atlasPixelSha256() != atlasHash)
-    {
-        QMessageBox::warning(this, tr("Terrain tileset definition refused"),
-            tr("The definition's atlas identity does not match the atlas loaded for this MPR.\n"
-               "Expected slots/hash: %1 / %2\nLoaded slots/hash: %3 / %4")
-                .arg(definition.atlasSlotCount())
-                .arg(QString::fromLatin1(definition.atlasPixelSha256()))
-                .arg(atlasImages.size()).arg(QString::fromLatin1(atlasHash)));
-        return;
-    }
-    m_terrainTilesetDefinition = definition;
-    m_terrainTransitionCatalog = definition.catalog();
-    m_terrainTilesetPath = path;
+    m_terrainAtlasAnalysis = CTerrainAtlasAnalyzer::analyze(
+        m_pTileForm->tileImages(), m_mprDocument.mapInfo().tileTypes, &report);
+    m_terrainTransitionCatalog = m_terrainAtlasAnalysis.catalog;
     QVector<QPair<qint32, QString>> choices;
-    for(const STerrainTilesetMaterial& material : definition.materials())
-        choices.append(qMakePair(material.id, material.name));
+    const QMap<ETileType, QString>& knownTypes = CResourceStringList::getInstance()->tileTypes();
+    for(const STerrainAtlasMaterial& material : m_terrainAtlasAnalysis.materials)
+    {
+        const QString surfaceHint = knownTypes.value(ETileType(material.surfaceType), tr("surface %1").arg(material.surfaceType));
+        choices.append(qMakePair(material.id,
+            tr("Material %1 — slot %2 (%3)").arg(material.id)
+                .arg(material.representativeSlot).arg(surfaceHint)));
+        m_terrainMaterialRepresentatives.insert(material.id, material.representativeSlot);
+    }
     m_landscapeTools->setPaintTerrainTypes(choices);
-    emit updateMsg(tr("Loaded explicit terrain tileset definition: %1 materials, %2 oriented variants.")
-        .arg(choices.size()).arg(m_terrainTransitionCatalog.size()));
+    ei::log(report.hasErrors() ? eLogWarning : eLogInfo,
+        QString("Automatic terrain atlas analysis: %1 visual materials, %2/%3 described slots, %4 ambiguous%5")
+            .arg(choices.size()).arg(m_terrainAtlasAnalysis.describedSlots)
+            .arg(m_terrainAtlasAnalysis.analyzedSlots).arg(m_terrainAtlasAnalysis.ambiguousSlots)
+            .arg(report.findings().isEmpty() ? QString() : "\n" + report.toText()));
+    emit updateMsg(m_terrainAtlasAnalysis.usable
+        ? tr("Automatic atlas analysis ready: %1 visual materials.").arg(choices.size())
+        : tr("This atlas could not be analyzed safely; terrain painting is disabled."));
 }
 
 void CView::exportTerrainPaintDiagnostic()
@@ -1306,8 +1277,10 @@ void CView::exportTerrainPaintDiagnostic()
     root.insert("atlasSlotCount", m_pTileForm ? m_pTileForm->tileImages().size() : 0);
     root.insert("atlasPixelSha256", m_pTileForm
         ? QString::fromLatin1(terrainAtlasPixelSha256(m_pTileForm->tileImages())) : QString());
-    root.insert("tilesetDefinition", m_terrainTilesetPath.isEmpty()
-        ? QJsonValue() : QJsonValue(QFileInfo(m_terrainTilesetPath).fileName()));
+    root.insert("analysisMode", "automatic-visual-corners-v1");
+    root.insert("inferredMaterialCount", m_terrainAtlasAnalysis.materials.size());
+    root.insert("describedAtlasSlots", m_terrainAtlasAnalysis.describedSlots);
+    root.insert("ambiguousAtlasSlots", m_terrainAtlasAnalysis.ambiguousSlots);
     root.insert("changedMprSavingEnabled", false);
     QJsonArray operations;
     for(const STerrainTileDelta& delta : m_terrainPaintAudit)
@@ -2185,9 +2158,9 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
     const qint32 terrainType = m_landscapeTools->paintTerrainType(&materialSelected);
     if(!materialSelected)
     {
-        emit updateMsg(m_terrainTilesetDefinition.isValid()
+        emit updateMsg(m_terrainAtlasAnalysis.usable
             ? tr("Choose a visual terrain material before painting.")
-            : tr("Load an explicit terrain tileset definition before painting."));
+            : tr("Automatic atlas analysis found no safe visual materials for painting."));
         return;
     }
     STerrainTileBrush brush;

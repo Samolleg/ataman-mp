@@ -1,5 +1,9 @@
 # Landscape semantic painting R7
 
+> Superseded by R8. R7 proved the exact corner-transition solver and its
+> fail-closed contract, but exposed a developer descriptor in the normal user
+> workflow. R8 builds the same catalog automatically from the loaded atlas.
+
 R7 removes the unsafe R6 inference path. An MPR's MP tile-category array remains
 read-only gameplay metadata and is never presented as a visual paint-material
 list.
