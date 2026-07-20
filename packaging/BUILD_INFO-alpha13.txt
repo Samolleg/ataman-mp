@@ -1,0 +1,8 @@
+EI Mapper: Endurance Edition 0.2.1-alpha.13
+Tester purpose: validation responsiveness, stale-family correction, missing-MOB provenance, and modular panel lifecycle
+Profile scope: Base EI and JMV editor profiles; runtime bridge behavior is unchanged from alpha.12
+UI focus: dock/undock, close/reopen from View, native floating minimize/maximize, and persisted layout
+Validation focus: Zone 14 missing AddMob provenance and repeated Zone 19 map-family switching
+Editor SHA-256: 8e9a6012316e162a11f5bfa78830bb054488a005f0fd8614153c6f4b32f50b4c
+Bridge SHA-256: a9a044f85a8f2e2cca01b77faeaa121de39a198f29dae24e2544cadf57223379
+Automated checks: fresh MinGW release build PASS; MOB family validation tests PASS; real Zone 14 corpus probe PASS

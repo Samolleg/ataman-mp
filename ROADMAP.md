@@ -5,7 +5,7 @@ work is ordered from the newest planned minor line to the oldest completed one.
 An item is checked only after its implementation has landed and received the
 stated validation. Completed code should carry a commit, test, or release link.
 
-Current development line: `0.2.1-alpha.12` focused closed testing.
+Current development line: `0.2.1-alpha.13` focused closed testing.
 
 <details open>
 <summary><strong>General wishlist — not assigned to a release</strong></summary>
@@ -256,17 +256,15 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
 
 ### Current 0.2.x status
 
-- **Current tester build:** `0.2.1-alpha.12`, retaining alpha.11's successful
-  full-state map switching while repairing orphan-process cleanup in the same
-  editor session, offering an explicit close prompt, and focusing/maximizing the
-  game after a completed hot reload.
-- **Source after alpha.12:** validation no longer performs expensive automatic
+- **Current tester build:** `0.2.1-alpha.13`, retaining alpha.12's same-session
+  orphan cleanup and adding the accumulated validation-stall, stale-family,
+  missing-dependency-provenance, and modular-panel fixes.
+- **Alpha.13 validation/UI changes:** validation no longer performs expensive automatic
   replacement-ID scans for fully shared ranges, map switches refresh their
   runtime-family identity, missing `AddMob(...)` dependencies identify the
   exact source MOB/script line and explicitly state that the file was not
   found, and the main Outliner/Properties/History/Validation panels share a
-  dockable View-menu lifecycle. These changes await the next combined tester
-  package.
+  dockable View-menu lifecycle.
 - **MOB hardening:** complete for the supported editing surface. Remaining work
   is validation breadth and new editing features, not another serializer
   rewrite.
