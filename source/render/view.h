@@ -100,7 +100,7 @@ public:
     void operationRevert(EOperationAxisType operationType);
     void operationApply(EOperationAxisType operationType);
     bool cancelPendingOperation();
-    bool prepareUndo();
+    bool prepareHistoryNavigation();
     void moveTo(QVector3D& dir);
     void rotateTo(QVector3D& rot);
     void scaleTo(QVector3D& scale);

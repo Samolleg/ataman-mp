@@ -5,6 +5,7 @@
 #include <QKeyEvent>
 
 #include "node.h" //todo: move to cpp
+#include "operation_history_policy.h"
 #include "types.h"
 
 class CView;
@@ -17,15 +18,6 @@ class CKeyManager;
 class CCamera;
 class QLineEdit;
 
-
-enum EOperationMethod
-{
-    eOperationMethodSelect = 0
-    ,eOperationMethodMoveAxis
-    ,eOperationMethodRotateAxis
-    ,eOperationMethodScaleAxis
-    ,eOperationMethodTileBrush
-};
 
 ///
 /// \brief The CState class represents the base class for the keystroke response operation.

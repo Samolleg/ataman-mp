@@ -1015,7 +1015,7 @@ void MainWindow::on_action_Mob_parameters_triggered()
 
 void MainWindow::on_actionUndo_triggered()
 {
-    if(m_pView->prepareUndo())
+    if(m_pView->prepareHistoryNavigation())
         runUndoToIndex(m_undoStack->index() - 1);
 }
 
@@ -1033,9 +1033,8 @@ void MainWindow::on_moveButton_clicked()
 
 void MainWindow::on_actionRedo_triggered()
 {
-    if(m_pView->cancelPendingOperation())
-        return;
-    runUndoToIndex(m_undoStack->index() + 1);
+    if(m_pView->prepareHistoryNavigation())
+        runUndoToIndex(m_undoStack->index() + 1);
 }
 
 void MainWindow::on_actionOpen_MOB_Script_triggered()

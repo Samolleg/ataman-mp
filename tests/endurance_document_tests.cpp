@@ -5,6 +5,7 @@
 #include <QTemporaryDir>
 
 #include "endurance_document.h"
+#include "operation_history_policy.h"
 #include "terrain_edit_model.h"
 #include "staged_save_validator.h"
 
@@ -251,6 +252,7 @@ class EnduranceDocumentTests : public QObject
     Q_OBJECT
 
 private slots:
+    void persistentPaintOperationSurvivesHistoryNavigation();
     void unchangedMobIsByteIdentical();
     void duplicateMobIdsAreWarningsOnly();
     void unknownLeafIsPreservedAsOpaque();
@@ -293,6 +295,15 @@ private slots:
     void malformedMprTableIsRejected();
     void stagedMobIsReopenedWithoutCreatingDestination();
 };
+
+void EnduranceDocumentTests::persistentPaintOperationSurvivesHistoryNavigation()
+{
+    QVERIFY(operationAllowsHistoryNavigation(eOperationMethodSelect));
+    QVERIFY(operationAllowsHistoryNavigation(eOperationMethodTileBrush));
+    QVERIFY(!operationAllowsHistoryNavigation(eOperationMethodMoveAxis));
+    QVERIFY(!operationAllowsHistoryNavigation(eOperationMethodRotateAxis));
+    QVERIFY(!operationAllowsHistoryNavigation(eOperationMethodScaleAxis));
+}
 
 void EnduranceDocumentTests::unchangedMobIsByteIdentical()
 {

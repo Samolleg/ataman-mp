@@ -4,7 +4,7 @@ CONFIG += testcase c++11 console
 TEMPLATE = app
 TARGET = endurance_document_tests
 
-INCLUDEPATH += ../source/documents
+INCLUDEPATH += ../source/documents ../source/core
 SOURCES += \
     endurance_document_tests.cpp \
     ../source/documents/endurance_document.cpp \
@@ -13,6 +13,7 @@ SOURCES += \
     ../source/documents/staged_save_validator.cpp
 
 HEADERS += \
+    ../source/core/operation_history_policy.h \
     ../source/documents/endurance_document.h \
     ../source/documents/mpr_document.h \
     ../source/documents/terrain_edit_model.h \
