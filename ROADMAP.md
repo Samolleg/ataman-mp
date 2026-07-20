@@ -286,8 +286,10 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
   viewport colouring, outliner ancestry, and multi-row unload. Alpha.20 fixes
   Ctrl+A ownership counters, aligns and drag-batches MPR/MOB visibility,
   colours locked ancestry amber, and coalesces expensive family validation
-  outside active edit gestures. It needs the
-  focused Loaded Map interaction pass before the consolidated RC runtime matrix.
+  outside active edit gestures. The focused Loaded Map interaction pass is
+  confirmed. Current source also mutes the complete outliner hierarchy of a
+  hidden MOB while retaining expansion and visibility controls
+  ([`807518c`](https://github.com/Ilufus/ei-mapper-endurance/commit/807518c)).
 - **Alpha.13 validation/UI changes:** validation no longer performs expensive automatic
   replacement-ID scans for fully shared ranges, map switches refresh their
   runtime-family identity, missing `AddMob(...)` dependencies identify the
@@ -687,8 +689,9 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
   - Endurance does not support simultaneous editing of multiple MOBs. Exactly
     one MOB is active/unlocked; every other loaded MOB is locked against edits
     but its visible objects remain selectable for inspection and copying.
-  - Clicking a MOB in the panel switches the active destination. Switching
-    locks the previous MOB and unlocks the selected MOB. Repurpose Ctrl+T as
+  - Double-clicking a MOB row in the panel switches the active destination;
+    single-click remains ordinary row selection for multi-row operations.
+    Switching locks the previous MOB and unlocks the selected MOB. Repurpose Ctrl+T as
     **Activate Selected Object's MOB**; disable it when there is no selected MOB
     object or its owner is already active.
   - Each row can independently hide/show its MOB without unloading it.
@@ -696,7 +699,8 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
     and continue to participate in validation, Save All, collections, and Test
     Current Map. The active MOB may also be hidden; doing so clears its current
     selection and prevents its objects from being selected in either the
-    viewport or outliner until shown again.
+    viewport or outliner until shown again. Its complete outliner hierarchy is
+    visually muted but remains expandable.
   - Show objects from every loaded MOB in the outliner, grouped under top-level
     MOB nodes. Objects from visible locked MOBs may be selected and inspected,
     but property edits, transforms, deletion, patrol/look editing, and other
