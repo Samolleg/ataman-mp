@@ -25,15 +25,20 @@ For unattended build verification, use `--ui-widget-check`, the headless MOB/MPR
 commands below, or the non-dialog `--version` option. Validation must not launch
 the editor without an explicit file or leave About/version windows open.
 
-Before creating a distribution archive, run:
+Before handing over any tester folder or creating a distribution archive, run:
 
 ```powershell
-.\packaging\validate_distribution.ps1 <staged-package-directory>
+.\packaging\finalize_package.ps1 <staged-package-directory>
 ```
 
-The staged package must not contain `endurance-options.json`, upstream
-`options.json`, workflow logs, or crash dumps. A fresh extracted package must
-therefore enter first-run game/mod setup.
+This is mandatory for direct tester folders as well as ZIP releases. It removes
+`endurance-options.json`, upstream `options.json`, logs, saves, and crash dumps;
+regenerates `SHA256SUMS.txt`; and then runs the strict distribution validator.
+Never use a folder that has already been launched as an unsanitized package
+source. A fresh package must enter first-run game/mod setup.
+
+`validate_distribution.ps1` remains the non-mutating CI check. It must pass
+after finalization; do not bypass either step for convenience builds.
 
 ## Unit tests
 

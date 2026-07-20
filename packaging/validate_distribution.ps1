@@ -32,9 +32,23 @@ if (Test-Path -LiteralPath $logsRoot) {
 }
 
 foreach ($dump in Get-ChildItem -LiteralPath $root -Recurse -File | Where-Object {
-    $_.Extension -in @('.dmp', '.mdmp')
+    $_.Extension -in @('.dmp', '.mdmp', '.sav')
 }) {
-    $failures.Add("crash dump included: $($dump.FullName.Substring($root.Length + 1))")
+    $failures.Add("private runtime artifact included: $($dump.FullName.Substring($root.Length + 1))")
+}
+
+$checksums = Join-Path $root 'SHA256SUMS.txt'
+if(Test-Path -LiteralPath $checksums)
+{
+    $forbiddenManifestEntries = Select-String -LiteralPath $checksums -Pattern '(endurance-options\.json|options\.json)$|(\*|/)logs/.+|\.(dmp|mdmp|sav)$'
+    foreach($entry in $forbiddenManifestEntries)
+    {
+        $failures.Add("checksum manifest references a private/runtime artifact: $($entry.Line)")
+    }
+}
+else
+{
+    $failures.Add('SHA256SUMS.txt is missing; the package was not finalized')
 }
 
 if ($failures.Count -ne 0) {
@@ -42,4 +56,4 @@ if ($failures.Count -ne 0) {
     exit 1
 }
 
-Write-Output "PASS: distribution contains no user settings, logs, or crash dumps"
+Write-Output "PASS: package contains no user settings, logs, saves, or crash dumps"
