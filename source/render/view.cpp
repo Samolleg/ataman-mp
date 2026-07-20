@@ -3457,7 +3457,13 @@ void CView::setDurty(CMob* pMob)
         return;
 
     changedMob->refreshDirtyFromProjection();
-    if(changedMob == m_activeMob)
+    // Undo/redo commands retain their owning MOB. If the user switched the
+    // active destination after creating a command, reveal and unlock that
+    // owner as soon as the command applies instead of changing a locked MOB
+    // invisibly in the background.
+    if(changedMob != m_activeMob && m_aMob.contains(changedMob))
+        changeCurrentMob(changedMob);
+    else
         emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataDirtyFlag, changedMob->isDirty() ? "*" : "");
     emit mobStateChanged();
 }
