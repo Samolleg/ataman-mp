@@ -1281,6 +1281,8 @@ void CView::rebuildTerrainAutoCatalog()
     m_terrainAtlasAnalysis = STerrainAtlasAnalysis();
     m_terrainMaterialRepresentatives.clear();
     m_terrainPaintAudit.clear();
+    m_terrainPaintActions.clear();
+    m_terrainPaintActionId = 0;
     if(m_landscapeTools)
         m_landscapeTools->setPaintTerrainTypes({}, {}, {});
     QByteArray seedText = m_mprDocument.mapInfo().innerNamespace.toUtf8();
@@ -1343,7 +1345,7 @@ void CView::exportTerrainPaintDiagnostic()
         return;
     QJsonObject root;
     root.insert("schema", "ei-mapper-endurance-paint-diagnostic");
-    root.insert("version", 3);
+    root.insert("version", 4);
     root.insert("mprFileName", m_pLand->filePath().fileName());
     root.insert("mprNamespace", m_mprDocument.mapInfo().innerNamespace);
     root.insert("sourceMprSha256", QString::fromLatin1(QCryptographicHash::hash(
@@ -1357,6 +1359,58 @@ void CView::exportTerrainPaintDiagnostic()
     root.insert("registeredMaterialCount", m_terrainAtlasAnalysis.materials.size());
     root.insert("describedAtlasSlots", m_terrainAtlasAnalysis.describedSlots);
     root.insert("changedMprSavingEnabled", false);
+    QJsonArray paintActions;
+    for(const STerrainPaintAuditAction& action : m_terrainPaintActions)
+    {
+        QJsonObject object;
+        object.insert("actionId", action.actionId);
+        object.insert("strokeId", action.strokeId);
+        object.insert("outcome", action.outcome);
+        object.insert("validation", action.validation);
+        object.insert("layer", action.semantic.layer == ETerrainTileLayer::Land
+            ? "land" : "overlay");
+        object.insert("requestedMaterialId", action.semantic.requestedMaterialId);
+        object.insert("backgroundMaterialId", action.semantic.backgroundMaterialId);
+        QJsonObject brush;
+        brush.insert("centerX", action.semantic.brush.centerX);
+        brush.insert("centerY", action.semantic.brush.centerY);
+        brush.insert("radius", action.semantic.brush.radius);
+        brush.insert("shape", action.semantic.brush.shape == ETerrainTileBrushShape::Circle
+            ? "circle" : "square");
+        object.insert("brush", brush);
+        QJsonArray path;
+        for(qint32 material : action.semantic.materialPath)
+            path.append(material);
+        object.insert("materialPath", path);
+        const auto cellsJson = [](const QVector<QPoint>& cells) {
+            QJsonArray result;
+            for(const QPoint& cell : cells)
+            {
+                QJsonObject point;
+                point.insert("x", cell.x());
+                point.insert("y", cell.y());
+                result.append(point);
+            }
+            return result;
+        };
+        object.insert("paintedCoreCells", cellsJson(action.semantic.paintedCoreCells));
+        object.insert("affectedCells", cellsJson(action.semantic.affectedCells));
+        QJsonArray changedCells;
+        for(const STerrainTileDelta& delta : action.deltas)
+        {
+            QJsonObject point;
+            point.insert("x", delta.globalX);
+            point.insert("y", delta.globalY);
+            changedCells.append(point);
+        }
+        object.insert("changedCells", changedCells);
+        object.insert("solverMode", action.semantic.solverMode);
+        object.insert("junctionPadding", action.semantic.junctionPadding);
+        object.insert("solverNodes", action.semantic.solverNodes);
+        object.insert("solverLimit", action.semantic.solverLimit);
+        paintActions.append(object);
+    }
+    root.insert("paintActions", paintActions);
     QJsonArray operations;
     for(const STerrainTileDelta& delta : m_terrainPaintAudit)
     {
@@ -1422,6 +1476,26 @@ void CView::exportTerrainPaintDiagnostic()
     }
     root.insert("paintDeltas", operations);
     QMap<QString, STerrainTileDelta> snapshotCells;
+    for(const STerrainPaintAuditAction& action : m_terrainPaintActions)
+    {
+        for(const QPoint& affected : action.semantic.affectedCells)
+        {
+            for(int offsetY = -1; offsetY <= 1; ++offsetY)
+            {
+                for(int offsetX = -1; offsetX <= 1; ++offsetX)
+                {
+                    STerrainTileDelta cell;
+                    cell.globalX = affected.x() + offsetX;
+                    cell.globalY = affected.y() + offsetY;
+                    cell.layer = action.semantic.layer;
+                    const QString key = QString("%1:%2:%3")
+                        .arg(cell.layer == ETerrainTileLayer::Land ? "land" : "overlay")
+                        .arg(cell.globalX).arg(cell.globalY);
+                    snapshotCells.insert(key, cell);
+                }
+            }
+        }
+    }
     for(const STerrainTileDelta& delta : m_terrainPaintAudit)
     {
         for(int offsetY = -1; offsetY <= 1; ++offsetY)
@@ -2355,6 +2429,24 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
         terrainType, m_terrainAtlasAnalysis.catalog(
             bLand ? ETerrainTileLayer::Land : ETerrainTileLayer::Overlay),
         m_terrainSemanticSeed, &report);
+    STerrainPaintAuditAction audit;
+    audit.actionId = m_terrainPaintActionId++;
+    audit.strokeId = m_tileBrushCommandId;
+    audit.outcome = command.isEmpty()
+        ? (report.hasErrors() ? QStringLiteral("refused") : QStringLiteral("no-op"))
+        : QStringLiteral("applied");
+    audit.validation = report.toText();
+    audit.semantic = command.semanticAudit;
+    audit.deltas = command.deltas;
+    m_terrainPaintActions.append(audit);
+    ei::log(report.hasErrors() ? eLogWarning : eLogInfo,
+        QString("Terrain paint action %1 stroke %2: %3, layer=%4 material=%5 center=%6,%7 radius=%8 core=%9 affected=%10 changed=%11 solver=%12 nodes=%13")
+            .arg(audit.actionId).arg(audit.strokeId).arg(audit.outcome)
+            .arg(bLand ? "land" : "overlay").arg(terrainType)
+            .arg(brush.centerX).arg(brush.centerY).arg(brush.radius)
+            .arg(audit.semantic.paintedCoreCells.size())
+            .arg(audit.semantic.affectedCells.size()).arg(audit.deltas.size())
+            .arg(audit.semantic.solverMode).arg(audit.semantic.solverNodes));
     if(command.isEmpty())
     {
         if(report.hasErrors())

@@ -37,6 +37,16 @@ class CProgressView;
 class CTableManager;
 class COperation;
 struct SColor;
+
+struct STerrainPaintAuditAction
+{
+    int actionId{-1};
+    int strokeId{-1};
+    QString outcome;
+    QString validation;
+    STerrainSemanticPaintAudit semantic;
+    QVector<STerrainTileDelta> deltas;
+};
 class CSelectFrame;
 class QTreeWidget;
 class CMobParameters;
@@ -303,6 +313,8 @@ private:
     STerrainAtlasAnalysis m_terrainAtlasAnalysis;
     QMap<qint32, int> m_terrainMaterialRepresentatives;
     QVector<STerrainTileDelta> m_terrainPaintAudit;
+    QVector<STerrainPaintAuditAction> m_terrainPaintActions;
+    int m_terrainPaintActionId{0};
     quint32 m_terrainSemanticSeed{0};
     bool m_terrainEditAvailable;
     bool m_tilePaintStrokeActive{false};

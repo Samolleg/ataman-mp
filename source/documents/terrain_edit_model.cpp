@@ -1282,6 +1282,10 @@ STerrainTileCommand CTerrainEditModel::makeSemanticTilePaint(
     command.description = layer == ETerrainTileLayer::Land
         ? QStringLiteral("Paint terrain material")
         : QStringLiteral("Paint overlay material");
+    command.semanticAudit.valid = true;
+    command.semanticAudit.brush = brush;
+    command.semanticAudit.layer = layer;
+    command.semanticAudit.requestedMaterialId = materialId;
     if(brush.radius < 0.0f || !catalog.hasMaterial(materialId))
     {
         if(report)
@@ -1326,6 +1330,8 @@ STerrainTileCommand CTerrainEditModel::makeSemanticTilePaint(
                             : "The brush did not cover an editable terrain tile");
         return command;
     }
+    for(int index : painted)
+        command.semanticAudit.paintedCoreCells.append(QPoint(index % width, index / width));
 
     // Choose the dominant uniform family immediately around the stroke. Stock
     // atlases do not contain every direct family pairing, so route through the
@@ -1394,6 +1400,8 @@ STerrainTileCommand CTerrainEditModel::makeSemanticTilePaint(
     }
     const QVector<qint32> materialPath =
         catalog.shortestMaterialPath(materialId, backgroundMaterial);
+    command.semanticAudit.backgroundMaterialId = backgroundMaterial;
+    command.semanticAudit.materialPath = materialPath;
     if(materialPath.isEmpty())
     {
         if(report)
@@ -1411,6 +1419,7 @@ STerrainTileCommand CTerrainEditModel::makeSemanticTilePaint(
     // the untouched terrain lattice. Pairwise strokes retain their established
     // footprint.
     const int junctionPadding = surroundingFamilies > 1 ? 1 : 0;
+    command.semanticAudit.junctionPadding = junctionPadding;
     const int transitionRadius = qMax(0, materialPath.size() - 1) + junctionPadding;
     QSet<int> affected;
     QMap<int, int> cornerDistances;
@@ -1447,6 +1456,8 @@ STerrainTileCommand CTerrainEditModel::makeSemanticTilePaint(
             }
         }
     }
+    for(int index : affected)
+        command.semanticAudit.affectedCells.append(QPoint(index % width, index / width));
 
     // Decode only the routed footprint. Existing shipped maps may contain
     // abstract corner mismatches, so the generated patch is canonicalized
@@ -1503,7 +1514,7 @@ STerrainTileCommand CTerrainEditModel::makeSemanticTilePaint(
                             QString("%1,%2 packed:0x%3").arg(x).arg(y)
                                 .arg(current, 4, 16, QLatin1Char('0')));
             if(affected.contains(index))
-                return STerrainTileCommand();
+                return command;
             continue;
         }
         contextSignatures.insert(index, signature);
@@ -1512,6 +1523,45 @@ STerrainTileCommand CTerrainEditModel::makeSemanticTilePaint(
             existingSignatures.insert(index, signature);
             existingTiles.insert(index, current);
         }
+    }
+
+    // Preserve the semantic identity already visible inside the mutable
+    // footprint. A merely edge-valid first solution can otherwise replace a
+    // nearby minority family with the dominant background even when the atlas
+    // contains an authored three-family junction.
+    QMap<int, QMap<qint32, int>> existingCornerCounts;
+    for(auto entry = existingSignatures.constBegin();
+        entry != existingSignatures.constEnd(); ++entry)
+    {
+        const int x = entry.key() % width;
+        const int y = entry.key() / width;
+        const STerrainTransitionSignature& signature = entry.value();
+        const qint32 values[4] = {signature.northWest, signature.northEast,
+                                  signature.southEast, signature.southWest};
+        const int keys[4] = {y * (width + 1) + x,
+                             y * (width + 1) + x + 1,
+                             (y + 1) * (width + 1) + x + 1,
+                             (y + 1) * (width + 1) + x};
+        for(int corner = 0; corner < 4; ++corner)
+            existingCornerCounts[keys[corner]][values[corner]] += 1;
+    }
+    QMap<int, qint32> existingCornerMaterials;
+    for(auto corner = existingCornerCounts.constBegin();
+        corner != existingCornerCounts.constEnd(); ++corner)
+    {
+        qint32 selected = 0;
+        int selectedCount = -1;
+        for(auto candidate = corner.value().constBegin();
+            candidate != corner.value().constEnd(); ++candidate)
+        {
+            if(candidate.value() > selectedCount)
+            {
+                selected = candidate.key();
+                selectedCount = candidate.value();
+            }
+        }
+        if(selectedCount >= 0)
+            existingCornerMaterials.insert(corner.key(), selected);
     }
 
     // Corners shared with an untouched halo cell are hard boundary
@@ -1605,6 +1655,45 @@ STerrainTileCommand CTerrainEditModel::makeSemanticTilePaint(
     QMap<int, qint32> fixedCorners = boundaryMaterials;
     for(int key : paintedCorners)
         fixedCorners.insert(key, materialId);
+    if(junctionPadding > 0)
+    {
+        QMap<qint32, int> anchorKeys;
+        QMap<qint32, int> anchorDistances;
+        for(auto existing = existingSignatures.constBegin();
+            existing != existingSignatures.constEnd(); ++existing)
+        {
+            const int x = existing.key() % width;
+            const int y = existing.key() / width;
+            const qint32 materials[4] = {existing.value().northWest,
+                                         existing.value().northEast,
+                                         existing.value().southEast,
+                                         existing.value().southWest};
+            const int keys[4] = {y * (width + 1) + x,
+                                 y * (width + 1) + x + 1,
+                                 (y + 1) * (width + 1) + x + 1,
+                                 (y + 1) * (width + 1) + x};
+            for(int corner = 0; corner < 4; ++corner)
+            {
+                if(materials[corner] == materialId || paintedCorners.contains(keys[corner]))
+                    continue;
+                const int cornerX = keys[corner] % (width + 1);
+                const int cornerY = keys[corner] / (width + 1);
+                const int distance = qAbs(cornerX - qRound(brush.centerX))
+                    + qAbs(cornerY - qRound(brush.centerY));
+                if(!anchorDistances.contains(materials[corner])
+                   || distance > anchorDistances.value(materials[corner]))
+                {
+                    anchorDistances.insert(materials[corner], distance);
+                    anchorKeys.insert(materials[corner], keys[corner]);
+                }
+            }
+        }
+        // Keep one lattice anchor for every already-present surrounding
+        // family. The solver remains free to rearrange transition corners,
+        // but may not satisfy a new stroke by deleting a whole material.
+        for(auto anchor = anchorKeys.constBegin(); anchor != anchorKeys.constEnd(); ++anchor)
+            fixedCorners.insert(anchor.value(), anchor.key());
+    }
 
     const auto signatureAt = [&](const QMap<int, qint32>& corners,
                                  int x, int y) {
@@ -1632,8 +1721,9 @@ STerrainTileCommand CTerrainEditModel::makeSemanticTilePaint(
         }
     }
 
-    if(!preferredAvailable)
+    if(!preferredAvailable || junctionPadding > 0)
     {
+        command.semanticAudit.solverMode = QStringLiteral("junction-csp");
         QSet<qint32> allowedMaterials;
         for(qint32 pathMaterial : materialPath)
             allowedMaterials.insert(pathMaterial);
@@ -1699,6 +1789,20 @@ STerrainTileCommand CTerrainEditModel::makeSemanticTilePaint(
                     {
                         leftDifference += leftValues.at(corner) != preferredValues.at(corner);
                         rightDifference += rightValues.at(corner) != preferredValues.at(corner);
+                        const int key = keys.at(corner);
+                        if(!fixedCorners.contains(key)
+                           && existingCornerMaterials.contains(key))
+                        {
+                            const qint32 existing = existingCornerMaterials.value(key);
+                            // Minority authored families carry substantially
+                            // more semantic weight than dominant background.
+                            const int preservationWeight =
+                                existing != materialId ? 8 : 2;
+                            leftDifference += preservationWeight
+                                * (leftValues.at(corner) != existing);
+                            rightDifference += preservationWeight
+                                * (rightValues.at(corner) != existing);
+                        }
                     }
                     if(leftDifference != rightDifference)
                         return leftDifference < rightDifference;
@@ -1721,6 +1825,7 @@ STerrainTileCommand CTerrainEditModel::makeSemanticTilePaint(
         QSet<int> remaining = affected;
         int searchNodes = 0;
         const int searchLimit = 100000;
+        command.semanticAudit.solverLimit = searchLimit;
         std::function<bool()> solve = [&]() -> bool {
             if(remaining.isEmpty())
                 return true;
@@ -1787,14 +1892,18 @@ STerrainTileCommand CTerrainEditModel::makeSemanticTilePaint(
             return false;
         };
 
-        if(constraintCandidateMissing || !solve())
+        const bool solved = !constraintCandidateMissing && solve();
+        if(!solved)
         {
+            command.semanticAudit.solverNodes = searchNodes;
             if(contradictoryBoundary)
             {
                 // Preserve established behavior only for rare authored legacy
                 // neighborhoods whose outer boundary already disagrees with
                 // itself. Never describe this as a solved junction.
                 solvedCorners = pairwiseCorners;
+                command.semanticAudit.solverMode =
+                    QStringLiteral("legacy-contradictory-boundary-fallback");
             }
             else
             {
@@ -1805,12 +1914,17 @@ STerrainTileCommand CTerrainEditModel::makeSemanticTilePaint(
                                     : "The atlas cannot satisfy the complete local terrain-junction boundary",
                                 QString("%1 affected cells, %2 search nodes")
                                     .arg(affected.size()).arg(searchNodes));
-                return STerrainTileCommand();
+                return command;
             }
         }
         else
+        {
             solvedCorners = assignments;
+            command.semanticAudit.solverNodes = searchNodes;
+        }
     }
+    else
+        command.semanticAudit.solverMode = QStringLiteral("preferred-direct");
 
     const auto routedMaterial = [&](int cornerX, int cornerY) -> qint32
     {
@@ -1841,7 +1955,7 @@ STerrainTileCommand CTerrainEditModel::makeSemanticTilePaint(
                             QString("%1,%2 corners:%3,%4,%5,%6")
                                 .arg(x).arg(y).arg(desired.northWest).arg(desired.northEast)
                                 .arg(desired.southEast).arg(desired.southWest));
-            return STerrainTileCommand();
+            return command;
         }
         STerrainTileDelta delta;
         delta.globalX = x;

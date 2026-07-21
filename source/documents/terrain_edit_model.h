@@ -5,6 +5,7 @@
 #include <QHash>
 #include <QMap>
 #include <QPair>
+#include <QPoint>
 #include <QSet>
 #include <QString>
 #include <QVector>
@@ -75,10 +76,27 @@ struct STerrainTileDelta
     STerrainTransitionSignature requestedSignature;
 };
 
+struct STerrainSemanticPaintAudit
+{
+    bool valid{false};
+    STerrainTileBrush brush;
+    ETerrainTileLayer layer{ETerrainTileLayer::Land};
+    qint32 requestedMaterialId{0};
+    qint32 backgroundMaterialId{0};
+    QVector<qint32> materialPath;
+    QVector<QPoint> paintedCoreCells;
+    QVector<QPoint> affectedCells;
+    QString solverMode{"not-run"};
+    int junctionPadding{0};
+    int solverNodes{0};
+    int solverLimit{0};
+};
+
 struct STerrainTileCommand
 {
     QString description;
     QVector<STerrainTileDelta> deltas;
+    STerrainSemanticPaintAudit semanticAudit;
     bool isEmpty() const { return deltas.isEmpty(); }
 };
 

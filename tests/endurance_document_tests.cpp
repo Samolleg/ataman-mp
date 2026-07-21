@@ -2374,6 +2374,12 @@ void EnduranceDocumentTests::zone1NamespaceTemplateMatchesPrivateFixture()
             sampleBrush, ETerrainTileLayer::Land, material,
             analysis.landCatalog, 12345u, &sampleReport);
         QVERIFY2(!sampleReport.hasErrors(), qPrintable(sampleReport.toText()));
+        QVERIFY(sample.semanticAudit.valid);
+        QCOMPARE(sample.semanticAudit.requestedMaterialId, material);
+        QCOMPARE(sample.semanticAudit.paintedCoreCells,
+                 QVector<QPoint>({center}));
+        QVERIFY(!sample.semanticAudit.affectedCells.isEmpty());
+        QVERIFY(sample.semanticAudit.solverMode != QStringLiteral("not-run"));
         for(const STerrainTileDelta& delta : sample.deltas)
             changed.insert(delta.globalY * model.tileCountX() + delta.globalX);
         QVERIFY2(model.apply(sample, true, &sampleReport),
@@ -2410,6 +2416,55 @@ void EnduranceDocumentTests::zone1NamespaceTemplateMatchesPrivateFixture()
             }
         }
     };
+
+    // A dark patch followed by adjacent irregular grass, both surrounded by
+    // common grass, must select an authored 3/4/9 junction instead of erasing
+    // either minority family merely because the resulting edges are valid.
+    CTerrainEditModel preservedMinorityJunction;
+    QVERIFY(preservedMinorityJunction.load(document));
+    QSet<int> preservedMinorityChanged;
+    applyJunctionSample(preservedMinorityJunction, preservedMinorityChanged,
+                        QPoint(101, 38), 3);
+    bool darkPresentBeforeIrregular = false;
+    for(int index : preservedMinorityChanged)
+    {
+        bool found = false;
+        const STerrainTransitionSignature signature =
+            analysis.landCatalog.gridSignatureForPacked(
+                preservedMinorityJunction.packedTile(
+                    index % preservedMinorityJunction.tileCountX(),
+                    index / preservedMinorityJunction.tileCountX(),
+                    ETerrainTileLayer::Land), &found);
+        QVERIFY(found);
+        darkPresentBeforeIrregular |= signature.northWest == 3 || signature.northEast == 3
+            || signature.southEast == 3 || signature.southWest == 3;
+    }
+    QVERIFY(darkPresentBeforeIrregular);
+    applyJunctionSample(preservedMinorityJunction, preservedMinorityChanged,
+                        QPoint(102, 38), 9);
+    verifyJunctionSeams(preservedMinorityJunction, preservedMinorityChanged);
+    bool foundDarkIrregularCommonJunction = false;
+    QStringList observedMinoritySignatures;
+    for(int index : preservedMinorityChanged)
+    {
+        bool found = false;
+        const STerrainTransitionSignature signature =
+            analysis.landCatalog.gridSignatureForPacked(
+                preservedMinorityJunction.packedTile(
+                    index % preservedMinorityJunction.tileCountX(),
+                    index / preservedMinorityJunction.tileCountX(),
+                    ETerrainTileLayer::Land), &found);
+        QVERIFY(found);
+        const QSet<qint32> families({signature.northWest, signature.northEast,
+                                     signature.southEast, signature.southWest});
+        observedMinoritySignatures.append(QString("%1,%2,%3,%4")
+            .arg(signature.northWest).arg(signature.northEast)
+            .arg(signature.southEast).arg(signature.southWest));
+        if(families.contains(3) && families.contains(4) && families.contains(9))
+            foundDarkIrregularCommonJunction = true;
+    }
+    QVERIFY2(foundDarkIrregularCommonJunction,
+             qPrintable(observedMinoritySignatures.join(" | ")));
 
     // R18 follow-up diagnostic cases: irregular grass must coexist with
     // Ground/common and Grass/dark through Grass/common, then Stone/lime must
