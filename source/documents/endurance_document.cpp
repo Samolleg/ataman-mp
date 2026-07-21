@@ -88,6 +88,10 @@ QString sectionTypeName(quint32 type)
         {0xA000, "OBJECT_DB_FILE"}, {0xB000, "OBJECT_SECTION"}, {0xB001, "OBJECT"},
         {0xB002, "NID"}, {0xB003, "OBJ_TYPE"}, {0xB004, "OBJ_NAME"},
         {0xB006, "OBJ_TEMPLATE"}, {0xB009, "OBJ_POSITION"}, {0xB00D, "OBJ_BODYPARTS"},
+        {0xB012, "OBJ_PARENT_ID"}, {0xB013, "OBJ_USE_IN_SCRIPT"},
+        {0xC000, "SC_OBJECT_DB_FILE"}, {0xD000, "PR_OBJECT_DB_FILE"},
+        {0xFF00, "SEC_RANGE"}, {0xFF01, "MAIN_RANGE"}, {0xFF02, "RANGE"},
+        {0xFF05, "MIN_ID"}, {0xFF06, "MAX_ID"},
         {0xBBBB0000, "UNIT"}, {0xBBBB0002, "UNIT_PROTOTYPE"},
         {0xBBAB0000, "MAGIC_TRAP"}, {0xBBAB0003, "MT_AREAS"},
         {0xBBAB0004, "MT_TARGETS"},
@@ -248,6 +252,21 @@ SMobObjectSnapshot snapshotObject(const SMobSection& section)
             object.objectType = readU32(data, 0);
         }
     }
+    if(const SMobSection* parent = findSection(section, 0xB012))
+    {
+        const QByteArray data = payload(*parent);
+        if(data.size() == 4)
+        {
+            object.hasParentId = true;
+            object.parentId = readU32(data, 0);
+        }
+    }
+    if(const SMobSection* used = findSection(section, 0xB013))
+    {
+        const QByteArray data = payload(*used);
+        if(data.size() == 1)
+            object.useInScript = data.at(0) != 0;
+    }
     if(const SMobSection* name = findSection(section, 0xB004))
         object.name = decodeCp1251(payload(*name));
     const SMobSection* prototype = findSection(section, 0xBBBB0002);
@@ -267,6 +286,42 @@ SMobObjectSnapshot snapshotObject(const SMobSection& section)
         }
     }
     return object;
+}
+
+void collectIdRanges(const QVector<SMobSection>& sections, bool questMob,
+                     QVector<SMobIdRangeSnapshot>& ranges)
+{
+    for(const SMobSection& section : sections)
+    {
+        if(section.type == 0xFF00 || section.type == 0xFF01)
+        {
+            const bool mainRange = section.type == 0xFF01;
+            int occurrence = 0;
+            for(const SMobSection& child : section.children)
+            {
+                if(child.type != 0xFF02)
+                    continue;
+                const SMobSection* minimum = findSection(child, 0xFF05);
+                const SMobSection* maximum = findSection(child, 0xFF06);
+                if(!minimum || !maximum)
+                    continue;
+                const QByteArray minData = payload(*minimum);
+                const QByteArray maxData = payload(*maximum);
+                if(minData.size() != 4 || maxData.size() != 4)
+                    continue;
+                SMobIdRangeSnapshot range;
+                range.sectionPath = child.path;
+                range.mainRange = mainRange;
+                range.effective = questMob ? !mainRange : mainRange;
+                range.minimum = readU32(minData, 0);
+                range.maximum = readU32(maxData, 0);
+                range.occurrence = occurrence++;
+                ranges.append(range);
+            }
+        }
+        else
+            collectIdRanges(section.children, questMob, ranges);
+    }
 }
 
 void collectObjects(const QVector<SMobSection>& sections, QVector<SMobObjectSnapshot>& objects)
@@ -353,6 +408,30 @@ void addMobSemanticWarnings(const QVector<SMobSection>& sections,
 {
     if(!report)
         return;
+
+    // These are the documented/confirmed direct children of OBJECT_DB_FILE.
+    // A bounded leaf outside this set is still structurally safe to retain,
+    // but its meaning is not known and must not be silently normalized.
+    static const QSet<quint32> knownRootChildren = {
+        0xC000, 0xD000, 0xACCEECCA, 0xACCEECCB,
+        0xFF00, 0xFF01, 0xDDDDDDD1, 0xABD0, 0x1E00,
+        0xE000, 0xF000, 0xB000, 0xAA00, 0xCC00, 0xDD00,
+        0x31415926
+    };
+    if(!sections.isEmpty() && sections.front().type == 0xA000)
+    {
+        for(const SMobSection& child : sections.front().children)
+        {
+            if(knownRootChildren.contains(child.type))
+                continue;
+            report->add("mob.opaque_unknown", EValidationSeverity::Warning,
+                        QString("Preserving unknown opaque MOB record type 0x%1 at byte offset %2; length %3, SHA-256 %4")
+                            .arg(child.type, 8, 16, QLatin1Char('0'))
+                            .arg(child.offset).arg(child.declaredLength)
+                            .arg(QString::fromLatin1(child.sha256.toHex())),
+                        sourcePath + ":" + child.path);
+        }
+    }
 
     QVector<const SMobSection*> targets;
     collectSections(sections, 0xBBAB0004, targets);
@@ -717,7 +796,7 @@ bool emitObjectSubtreeChange(const SMobSection& section, const QString& targetPa
 }
 
 bool emitObjectSequence(const SMobSection& section,
-                        const QVector<const SMobSection*>& objects,
+                        const QVector<QByteArray>& objects,
                         bool* applied, QByteArray* output,
                         CValidationReport* report)
 {
@@ -736,8 +815,8 @@ bool emitObjectSequence(const SMobSection& section,
         QByteArray childBytes;
         // Every direct OBJECT_SECTION child is one object record. Different
         // profiles use more than one numeric root type, so do not assume B001.
-        for(const SMobSection* object : objects)
-            childBytes.append(object->rawBytes);
+        for(const QByteArray& object : objects)
+            childBytes.append(object);
         const quint64 newLength = quint64(childBytes.size()) + 8;
         if(newLength > quint64(UINT_MAX))
         {
@@ -1100,6 +1179,9 @@ QJsonObject SMobObjectSnapshot::toJson() const
         result.insert("nid", double(nid));
     if(hasObjectType)
         result.insert("objectType", double(objectType));
+    if(hasParentId)
+        result.insert("parentId", double(parentId));
+    result.insert("useInScript", useInScript);
     if(!name.isEmpty())
         result.insert("name", name);
     if(!prototype.isEmpty())
@@ -1470,6 +1552,54 @@ bool CMobDocument::replaceEmbeddedScript(const QString& script, QByteArray* outp
     return applyTransaction(transaction, output, report);
 }
 
+bool CMobDocument::embeddedScript(QString* script, CValidationReport* report) const
+{
+    if(!script)
+        return false;
+    script->clear();
+    QMap<QString, const SMobSection*> leaves;
+    collectLeafSections(m_sections, &leaves);
+    const SMobSection* scriptSection = nullptr;
+    for(auto it = leaves.constBegin(); it != leaves.constEnd(); ++it)
+    {
+        if(it.value()->type != MobScriptSection)
+            continue;
+        if(scriptSection)
+        {
+            if(report)
+                report->add("mob.script.multiple", EValidationSeverity::Error,
+                            "The MOB contains more than one encrypted script section");
+            return false;
+        }
+        scriptSection = it.value();
+    }
+    if(!scriptSection)
+    {
+        if(report)
+            report->add("mob.script.missing", EValidationSeverity::Error,
+                        "The MOB has no encrypted script section");
+        return false;
+    }
+    const QByteArray originalPayload = payload(*scriptSection);
+    if(originalPayload.size() < 4)
+        return false;
+    quint32 key = readU32(originalPayload, 0);
+    QByteArray decoded;
+    decoded.reserve(originalPayload.size() - 4);
+    for(int index = 4; index < originalPayload.size(); ++index)
+    {
+        quint32 temporaryKey = ((((key * 13) << 4) + key) << 8) - key;
+        key += (temporaryKey << 2) + 2531011;
+        temporaryKey = key >> 16;
+        decoded.append(char(originalPayload.at(index) ^ char(temporaryKey)));
+    }
+    QTextCodec* codec = QTextCodec::codecForName("Windows-1251");
+    if(!codec)
+        return false;
+    *script = codec->toUnicode(decoded);
+    return true;
+}
+
 static bool applyObjectSubtreeChange(const CMobDocument& document,
                                      const QString& objectPath,
                                      const QByteArray& expectedSubtreeSha256,
@@ -1593,9 +1723,56 @@ bool CMobDocument::rebuildObjectSequence(
         requested.append(object);
     }
 
+    QVector<QByteArray> rawObjects;
+    rawObjects.reserve(requested.size());
+    for(const SMobSection* object : requested)
+        rawObjects.append(object->rawBytes);
+    return rebuildObjectSequenceFromRaw(rawObjects, expectedSubtreeSha256,
+                                        output, report);
+}
+
+bool CMobDocument::rebuildObjectSequenceFromRaw(
+    const QVector<QByteArray>& objectSubtrees,
+    const QVector<QByteArray>& expectedSubtreeSha256,
+    QByteArray* output, CValidationReport* report) const
+{
+    if(!output)
+        return false;
+    output->clear();
+    if(objectSubtrees.size() != expectedSubtreeSha256.size())
+    {
+        if(report)
+            report->add("mob.object_sequence.raw_input", EValidationSeverity::Error,
+                        "Object subtree and provenance hash counts differ");
+        return false;
+    }
+    for(int index = 0; index < objectSubtrees.size(); ++index)
+    {
+        const QByteArray& raw = objectSubtrees.at(index);
+        if(raw.size() < 8 || expectedSubtreeSha256.at(index).size() != 32
+           || QCryptographicHash::hash(raw, QCryptographicHash::Sha256)
+                != expectedSubtreeSha256.at(index))
+        {
+            if(report)
+                report->add("mob.object_sequence.raw_provenance", EValidationSeverity::Error,
+                            "A raw object subtree is malformed or has a stale hash",
+                            QString::number(index));
+            return false;
+        }
+        const quint32 declaredLength = readU32(raw, 4);
+        if(declaredLength != quint32(raw.size()))
+        {
+            if(report)
+                report->add("mob.object_sequence.raw_length", EValidationSeverity::Error,
+                            "A raw object subtree length does not match its section header",
+                            QString::number(index));
+            return false;
+        }
+    }
+
     bool applied = false;
     for(const SMobSection& section : m_sections)
-        if(!emitObjectSequence(section, requested, &applied, output, report))
+        if(!emitObjectSequence(section, objectSubtrees, &applied, output, report))
         {
             output->clear();
             return false;
@@ -1611,7 +1788,7 @@ bool CMobDocument::rebuildObjectSequence(
 
     CMobDocument reparsed;
     if(!reparsed.loadBytes(*output, "object-sequence-output.mob", report) ||
-       reparsed.objects().size() != requested.size())
+       reparsed.objects().size() != objectSubtrees.size())
     {
         if(report && !report->hasErrors())
             report->add("mob.object_sequence.count", EValidationSeverity::Error,
@@ -1619,20 +1796,35 @@ bool CMobDocument::rebuildObjectSequence(
         output->clear();
         return false;
     }
-    for(int index = 0; index < requested.size(); ++index)
-        if(reparsed.objects().at(index).subtreeSha256 != requested.at(index)->sha256)
+    for(int index = 0; index < objectSubtrees.size(); ++index)
+        if(reparsed.objects().at(index).subtreeSha256 != expectedSubtreeSha256.at(index))
         {
             if(report)
                 report->add("mob.object_sequence.bytes", EValidationSeverity::Error,
                             "A rebuilt object subtree was not emitted byte-for-byte",
-                            objectPaths.at(index));
+                            QString::number(index));
             output->clear();
             return false;
         }
     if(report)
         report->add("mob.object_sequence.authorized", EValidationSeverity::Info,
                     QString("Rebuilt %1 object entries from exact source subtrees")
-                        .arg(requested.size()));
+                        .arg(objectSubtrees.size()));
+    return true;
+}
+
+bool CMobDocument::objectSubtreeBytes(const QString& objectPath,
+                                      const QByteArray& expectedSubtreeSha256,
+                                      QByteArray* output) const
+{
+    if(!output)
+        return false;
+    output->clear();
+    const SMobSection* object = findObjectChild(m_sections, objectPath);
+    if(!object || expectedSubtreeSha256.size() != 32
+       || object->sha256 != expectedSubtreeSha256)
+        return false;
+    *output = object->rawBytes;
     return true;
 }
 
@@ -1882,7 +2074,9 @@ bool CMobDocument::loadBytes(const QByteArray& bytes, const QString& sourceName,
     m_originalBytes.clear();
     m_sections.clear();
     m_objects.clear();
+    m_idRanges.clear();
     m_duplicateIds.clear();
+    m_questMob = false;
     m_originalBytes = bytes;
     const QFileInfo sourceInfo(sourceName);
     const QString sourcePath = sourceName.isEmpty() ? QString("memory.mob") : sourceName;
@@ -1919,7 +2113,9 @@ bool CMobDocument::loadBytes(const QByteArray& bytes, const QString& sourceName,
         }
     }
 
+    m_questMob = findSection(m_sections.front(), 0xD000) != nullptr;
     collectObjects(m_sections, m_objects);
+    collectIdRanges(m_sections, m_questMob, m_idRanges);
     addMobSemanticWarnings(m_sections, sourcePath, report);
     QMap<quint32, int> counts;
     for(const SMobObjectSnapshot& object : m_objects)

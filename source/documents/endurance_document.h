@@ -99,6 +99,9 @@ struct SMobObjectSnapshot
     quint32 nid = 0;
     bool hasObjectType = false;
     quint32 objectType = 0;
+    bool hasParentId = false;
+    quint32 parentId = 0;
+    bool useInScript = false;
     QString name;
     QString prototype;
     bool hasPosition = false;
@@ -108,6 +111,16 @@ struct SMobObjectSnapshot
     QByteArray subtreeSha256;
 
     QJsonObject toJson() const;
+};
+
+struct SMobIdRangeSnapshot
+{
+    QString sectionPath;
+    bool mainRange = false;
+    bool effective = false;
+    quint32 minimum = 0;
+    quint32 maximum = 0;
+    int occurrence = 0;
 };
 
 enum class EMobDiffKind
@@ -179,11 +192,15 @@ public:
     const QByteArray& originalBytes() const { return m_originalBytes; }
     const QVector<SMobSection>& sections() const { return m_sections; }
     const QVector<SMobObjectSnapshot>& objects() const { return m_objects; }
+    const QVector<SMobIdRangeSnapshot>& idRanges() const { return m_idRanges; }
+    bool isQuestMob() const { return m_questMob; }
     const QVector<quint32>& duplicateIds() const { return m_duplicateIds; }
     bool applyTransaction(const CMobEditTransaction& transaction,
                           QByteArray* output, CValidationReport* report = nullptr) const;
     bool replaceEmbeddedScript(const QString& script, QByteArray* output,
                                CValidationReport* report = nullptr) const;
+    bool embeddedScript(QString* script,
+                        CValidationReport* report = nullptr) const;
     bool duplicateObjectSubtree(const QString& objectPath,
                                 const QByteArray& expectedSubtreeSha256,
                                 QByteArray* output,
@@ -196,6 +213,13 @@ public:
                                const QVector<QByteArray>& expectedSubtreeSha256,
                                QByteArray* output,
                                CValidationReport* report = nullptr) const;
+    bool rebuildObjectSequenceFromRaw(const QVector<QByteArray>& objectSubtrees,
+                                      const QVector<QByteArray>& expectedSubtreeSha256,
+                                      QByteArray* output,
+                                      CValidationReport* report = nullptr) const;
+    bool objectSubtreeBytes(const QString& objectPath,
+                            const QByteArray& expectedSubtreeSha256,
+                            QByteArray* output) const;
     bool reconcileLogicPointStructure(const CMobDocument& cleanProjection,
                                       const CMobDocument& editedProjection,
                                       QByteArray* output,
@@ -218,7 +242,9 @@ private:
     QByteArray m_originalBytes;
     QVector<SMobSection> m_sections;
     QVector<SMobObjectSnapshot> m_objects;
+    QVector<SMobIdRangeSnapshot> m_idRanges;
     QVector<quint32> m_duplicateIds;
+    bool m_questMob = false;
 };
 
 class CMprDocument

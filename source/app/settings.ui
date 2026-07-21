@@ -734,12 +734,12 @@
              <item row="8" column="0">
               <widget class="QLabel" name="label_22">
                <property name="text">
-                <string>Switch active MOB</string>
+                <string>Activate selected object's MOB</string>
                </property>
               </widget>
              </item>
              <item row="8" column="1">
-              <widget class="QKeySequenceEdit" name="keySequenceEdit_13">
+              <widget class="QKeySequenceEdit" name="shortcutActivateOwnerMob">
                <property name="keySequence">
                 <string>Ctrl+T</string>
                </property>
@@ -986,6 +986,16 @@
                <property name="keySequence"><string>Shift+Esc</string></property>
               </widget>
              </item>
+             <item row="29" column="0"><widget class="QLabel" name="labelSelectToolShortcut"><property name="text"><string>Select / cancel tool</string></property></widget></item>
+             <item row="29" column="1"><widget class="QKeySequenceEdit" name="shortcutSelectTool"><property name="keySequence"><string>Esc</string></property></widget></item>
+             <item row="30" column="0"><widget class="QLabel" name="labelMoveToolShortcut"><property name="text"><string>Move selected objects</string></property></widget></item>
+             <item row="30" column="1"><widget class="QKeySequenceEdit" name="shortcutMoveTool"><property name="keySequence"><string>G</string></property></widget></item>
+             <item row="31" column="0"><widget class="QLabel" name="labelRotateToolShortcut"><property name="text"><string>Rotate selected objects</string></property></widget></item>
+             <item row="31" column="1"><widget class="QKeySequenceEdit" name="shortcutRotateTool"><property name="keySequence"><string>R</string></property></widget></item>
+             <item row="32" column="0"><widget class="QLabel" name="labelScaleToolShortcut"><property name="text"><string>Scale selected objects</string></property></widget></item>
+             <item row="32" column="1"><widget class="QKeySequenceEdit" name="shortcutScaleTool"><property name="keySequence"><string>T</string></property></widget></item>
+             <item row="33" column="0"><widget class="QLabel" name="labelTileBrushToolShortcut"><property name="text"><string>Terrain tile brush</string></property></widget></item>
+             <item row="33" column="1"><widget class="QKeySequenceEdit" name="shortcutTileBrushTool"><property name="keySequence"><string>B</string></property></widget></item>
              <item row="19" column="1">
               <widget class="QKeySequenceEdit" name="shortcutMobScript">
                <property name="keySequence"><string>Ctrl+Shift+M</string></property>

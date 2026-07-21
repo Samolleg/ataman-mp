@@ -1,0 +1,8 @@
+EI Mapper: Endurance Edition 0.2.1-alpha.9
+Build purpose: strict outliner filtering and compact validation warnings
+Toolchain: Qt 5.12.12 / MinGW 7.3.0 x64
+Build mode: release
+GUI launched during build: no
+
+Default search is contiguous. Prefix a term or field value with ~ to opt into
+subsequence-fuzzy matching. Use field=value for an exact match.

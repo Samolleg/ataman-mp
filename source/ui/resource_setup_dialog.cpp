@@ -12,7 +12,9 @@
 #include <QPushButton>
 #include <QVBoxLayout>
 
-CResourceSetupDialog::CResourceSetupDialog(const QString& initialGameRoot, QWidget* parent)
+CResourceSetupDialog::CResourceSetupDialog(const QString& initialGameRoot,
+                                           const QString& initialProfileId,
+                                           QWidget* parent)
     : QDialog(parent)
     , m_gameRoot(new QLineEdit(this))
     , m_profile(new QComboBox(this))
@@ -50,6 +52,10 @@ CResourceSetupDialog::CResourceSetupDialog(const QString& initialGameRoot, QWidg
     for(const SResourceProfile& profile : m_profiles)
         m_profile->addItem(profile.displayName, profile.id);
 
+    const int configuredProfile = m_profile->findData(initialProfileId);
+    if(configuredProfile >= 0)
+        m_profile->setCurrentIndex(configuredProfile);
+
     QString root = initialGameRoot;
     if(root.isEmpty())
     {
@@ -60,12 +66,17 @@ CResourceSetupDialog::CResourceSetupDialog(const QString& initialGameRoot, QWidg
     m_gameRoot->setText(root);
 
     connect(browse, &QPushButton::clicked, this, &CResourceSetupDialog::chooseGameRoot);
-    connect(m_gameRoot, &QLineEdit::editingFinished, this, [this]() { refresh(true); });
+    // Opening the dialog can move focus away from this field and emit
+    // editingFinished even when the path was not edited.  Recommending a
+    // profile there made the configured profile jump back to the first valid
+    // preset (normally JMV). Preserve the explicit current selection; the
+    // Browse path still refreshes and the user can choose another preset.
+    connect(m_gameRoot, &QLineEdit::editingFinished, this, [this]() { refresh(false); });
     connect(m_profile, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, [this](int) { refresh(false); });
     connect(m_buttons, &QDialogButtonBox::accepted, this, &CResourceSetupDialog::accept);
     connect(m_buttons, &QDialogButtonBox::rejected, this, &CResourceSetupDialog::reject);
-    refresh(true);
+    refresh(configuredProfile < 0);
 }
 
 void CResourceSetupDialog::chooseGameRoot()
@@ -76,7 +87,7 @@ void CResourceSetupDialog::chooseGameRoot()
     if(directory.isEmpty())
         return;
     m_gameRoot->setText(directory);
-    refresh(true);
+    refresh(false);
 }
 
 void CResourceSetupDialog::refresh(bool chooseRecommendedProfile)

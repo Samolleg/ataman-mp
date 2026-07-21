@@ -38,6 +38,43 @@ CSettings::CSettings(QWidget *parent) :
     editorControls->addWidget(clearEditor);
     ui->gridLayout->addWidget(editorLabel, 6, 0);
     ui->gridLayout->addLayout(editorControls, 6, 1);
+    QCheckBox* openLastSession = new QCheckBox(tr("Open last session on startup"),
+                                               ui->tabGeneral);
+    openLastSession->setObjectName("openLastSessionOnStartup");
+    openLastSession->setToolTip(tr(
+        "Automatically invokes File > Open Last Session after startup. "
+        "Disabled by default; missing files are reported and skipped by the existing session loader."));
+    // Row 7 belongs to the inactive external-MPR polling control declared in
+    // settings.ui. Keep startup/session behavior on its own row.
+    ui->gridLayout->addWidget(openLastSession, 8, 0, 1, 2);
+    QCheckBox* autosaveEnabled = new QCheckBox(tr("Periodic recovery autosave"),
+                                               ui->tabGeneral);
+    autosaveEnabled->setObjectName("autosaveEnabled");
+    autosaveEnabled->setToolTip(tr(
+        "Writes validated, versioned recovery copies under the Endurance backup folder. "
+        "It never replaces the open MOB/MPR or marks it saved."));
+    ui->gridLayout->addWidget(autosaveEnabled, 9, 0, 1, 2);
+    QLabel* autosaveIntervalLabel = new QLabel(tr("Autosave interval (minutes)"),
+                                                ui->tabGeneral);
+    autosaveIntervalLabel->setToolTip(tr(
+        "How often Endurance snapshots dirty documents. Identical document states are deduplicated."));
+    QLineEdit* autosaveInterval = new QLineEdit(ui->tabGeneral);
+    autosaveInterval->setObjectName("autosaveIntervalMinutes");
+    autosaveInterval->setValidator(new QIntValidator(1, 120, autosaveInterval));
+    autosaveInterval->setToolTip(autosaveIntervalLabel->toolTip());
+    ui->gridLayout->addWidget(autosaveIntervalLabel, 10, 0);
+    ui->gridLayout->addWidget(autosaveInterval, 10, 1);
+    QPushButton* autosaveNow = new QPushButton(tr("Autosave Now"), ui->tabGeneral);
+    autosaveNow->setToolTip(tr("Immediately create recovery generations for all dirty documents."));
+    QPushButton* openBackupFolder = new QPushButton(tr("Open Backup Folder"), ui->tabGeneral);
+    openBackupFolder->setToolTip(tr("Open the Endurance folder containing automatic and pre-save backups."));
+    QHBoxLayout* autosaveActions = new QHBoxLayout;
+    autosaveActions->addWidget(autosaveNow);
+    autosaveActions->addWidget(openBackupFolder);
+    autosaveActions->addStretch(1);
+    ui->gridLayout->addLayout(autosaveActions, 11, 0, 1, 2);
+    connect(autosaveNow, &QPushButton::clicked, this, &CSettings::autosaveRequested);
+    connect(openBackupFolder, &QPushButton::clicked, this, &CSettings::backupFolderRequested);
     connect(browseEditor, &QPushButton::clicked, this, [this, editorPath]()
     {
         const QString selected = QFileDialog::getOpenFileName(this,
@@ -241,6 +278,14 @@ void CSettings::applyResourceProfile(const SResourceProfileEvaluation& profile)
     ei::log(eLogInfo, QString("Applied resource profile id:%1 gameRoot:%2 resourceDirectories:%3 archives:%4")
             .arg(profile.profileId, profile.gameRoot)
             .arg(profile.resourceDirectories.size()).arg(profile.archiveCount));
+    for(const SRuntimeComponentEvaluation& component : profile.runtimeComponents)
+    {
+        const ELogMessageType level = component.exists
+            && (!component.enforceHash || component.hashAccepted) ? eLogInfo : eLogWarning;
+        ei::log(level, QString("Runtime component id:%1 strict:%2 exists:%3 accepted:%4 sha256:%5 path:%6")
+            .arg(component.id).arg(component.enforceHash).arg(component.exists)
+            .arg(component.hashAccepted).arg(component.sha256, component.path));
+    }
     for(const ei::SDatabaseDiagnostic& diagnostic : database->diagnostics)
         ei::log(eLogWarning,
                 QString("Profile database [%1] %2").arg(diagnostic.code, diagnostic.message));
@@ -386,6 +431,9 @@ void CSettings::initOptions()
     aOpt.append(QSharedPointer<COpt>(new COptInt("logLevel", 2)));
     aOpt.append(QSharedPointer<COpt>(new COptBool("drawHelp", false)));
     aOpt.append(QSharedPointer<COpt>(new COptBool("frustumCulling", true)));
+    aOpt.append(QSharedPointer<COpt>(new COptBool("mapTestGodmode", false)));
+    aOpt.append(QSharedPointer<COpt>(new COptBool("openLastSessionOnStartup", false)));
+    aOpt.append(QSharedPointer<COpt>(new COptBool("autosaveEnabled", true)));
     aOpt.append(QSharedPointer<COpt>(new COptBool("animateUnits", true)));
     aOpt.append(QSharedPointer<COpt>(new COptBool("renderPerformanceCounters", false)));
     aOpt.append(QSharedPointer<COpt>(new COptBool("renderVSync", true)));
@@ -405,6 +453,7 @@ void CSettings::initOptions()
     aOpt.append(QSharedPointer<COpt>(new COptInt("landCheckTime", 0)));
     aOpt.append(QSharedPointer<COpt>(new COptInt("undoHistoryLimit", 512)));
     aOpt.append(QSharedPointer<COpt>(new COptInt("mapTestWarningVersion", 0)));
+    aOpt.append(QSharedPointer<COpt>(new COptInt("autosaveIntervalMinutes", 5)));
     aOpt.append(QSharedPointer<COpt>(new COptInt("renderFpsCap", 0)));
     aOpt.append(QSharedPointer<COpt>(new COptInt("renderTimeOfDay", 1200)));
 
@@ -427,7 +476,13 @@ void CSettings::initOptions()
         {"shortcutStopMapTest", "Shift+Esc"},
         {"shortcutResetCamera", "Ctrl+R"},
         {"shortcutResetLogicPaths", "Ctrl+P"},
-        {"shortcutSwitchMode", "Ctrl+Tab"}
+        {"shortcutSwitchMode", "Ctrl+Tab"},
+        {"shortcutActivateOwnerMob", "Ctrl+T"},
+        {"shortcutSelectTool", "Esc"},
+        {"shortcutMoveTool", "G"},
+        {"shortcutRotateTool", "R"},
+        {"shortcutScaleTool", "T"},
+        {"shortcutTileBrushTool", "B"}
     };
     for(auto it = shortcutDefaults.constBegin(); it != shortcutDefaults.constEnd(); ++it)
         m_aOptCategory[eOptSetKeyBinding].append(
@@ -631,7 +686,14 @@ void CSettings::saveOptions()
 void CSettings::on_buttonApply_clicked()
 {
     updateOptFromUi();
+    const COptBool* autosaveEnabled = dynamic_cast<const COptBool*>(
+        opt(eOptSetGeneral, "autosaveEnabled"));
+    const COptInt* autosaveInterval = dynamic_cast<const COptInt*>(
+        opt(eOptSetGeneral, "autosaveIntervalMinutes"));
+    emit autosaveSettingsApplied(autosaveEnabled && autosaveEnabled->value(),
+                                 qBound(1, autosaveInterval ? autosaveInterval->value() : 5, 120));
     emit shortcutsChanged();
+    emit settingsApplied();
     emit renderSettingsChanged();
     onClose();
 }

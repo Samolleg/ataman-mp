@@ -48,6 +48,7 @@ public:
     ENodeType nodeType() override {return ENodeType::ePatrolPoint;}
     void draw(bool isActive, QOpenGLShaderProgram* program) override final;
     void drawSelect(QOpenGLShaderProgram* program = nullptr) override final;
+    bool hasSelectedLookPoint() const;
     uint deserialize(util::CMobParser& parser) override final;
     void getLogicParam(QSharedPointer<IPropertyBase>& prop, EObjParam propType) override final;
     void applyLogicParam(const QSharedPointer<IPropertyBase>& prop) override final;
@@ -199,6 +200,7 @@ public:
     const QString& renderedPrimaryTextureName() const { return m_renderedPrimaryTextureName; }
     const QString& renderedSecondaryTextureName() const { return m_renderedSecondaryTextureName; }
     const QStringList& renderedBodyTextureLayers() const { return m_renderedBodyTextureLayers; }
+    const QStringList& visualDiagnostics() const { return m_visualDiagnostics; }
     void preloadVisualResources();
     bool updatePos(QVector3D& pos) override;
     QJsonObject toJson() override;
@@ -250,6 +252,7 @@ private:
     QString m_renderedPrimaryTextureName;
     QString m_renderedSecondaryTextureName;
     QStringList m_renderedBodyTextureLayers;
+    QStringList m_visualDiagnostics;
 };
 
 #endif // UNIT_H

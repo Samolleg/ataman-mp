@@ -16,7 +16,48 @@ private slots:
     void preSaveSnapshotsAreTimestampedAndExact();
     void retentionKeepsNewestFiftyPreSaveRevisions();
     void failureIsReportedWithoutChangingSource();
+    void autosavesAreVersionedAndDeduplicated();
 };
+
+void BackupManagerTests::autosavesAreVersionedAndDeduplicated()
+{
+    QTemporaryDir temporary;
+    QVERIFY(temporary.isValid());
+    const QString sourcePath = temporary.filePath("zone.mob");
+    QFile source(sourcePath);
+    QVERIFY(source.open(QIODevice::WriteOnly));
+    QCOMPARE(source.write("baseline"), qint64(8));
+    source.close();
+
+    CBackupManager manager(temporary.filePath("backups"));
+    const SBackupResult first = manager.snapshotAutosave(
+        QFileInfo(sourcePath), QByteArray("candidate-one"));
+    QVERIFY2(first.success, qPrintable(first.error));
+    QVERIFY(!first.skipped);
+    QVERIFY(QFileInfo::exists(first.backupPath));
+    QVERIFY(QFileInfo::exists(first.backupPath + ".json"));
+    QFile autosave(first.backupPath);
+    QVERIFY(autosave.open(QIODevice::ReadOnly));
+    QCOMPARE(autosave.readAll(), QByteArray("candidate-one"));
+
+    const SBackupResult duplicate = manager.snapshotAutosave(
+        QFileInfo(sourcePath), QByteArray("candidate-one"));
+    QVERIFY(duplicate.success);
+    QVERIFY(duplicate.skipped);
+    QCOMPARE(duplicate.backupPath, first.backupPath);
+
+    const SBackupResult second = manager.snapshotAutosave(
+        QFileInfo(sourcePath), QByteArray("candidate-two"));
+    QVERIFY2(second.success, qPrintable(second.error));
+    QVERIFY(!second.skipped);
+    QVERIFY(second.backupPath != first.backupPath);
+
+    const SBackupResult clean = manager.snapshotAutosave(
+        QFileInfo(sourcePath), QByteArray("baseline"));
+    QVERIFY(clean.success);
+    QVERIFY(clean.skipped);
+    QVERIFY(clean.backupPath.isEmpty());
+}
 
 void BackupManagerTests::openSnapshotIsHashAddressedAndDeduplicated()
 {

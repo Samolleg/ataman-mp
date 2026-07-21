@@ -3,6 +3,15 @@
 
 #include <QFileInfo>
 #include <QString>
+#include <QVector>
+
+struct SRecoverableAutosave
+{
+    QString sourcePath;
+    QString autosavePath;
+    QString createdUtc;
+    QString candidateSha256;
+};
 
 struct SBackupResult
 {
@@ -20,10 +29,12 @@ public:
 
     SBackupResult snapshotOnOpen(const QFileInfo& source) const;
     SBackupResult snapshotBeforeSave(const QFileInfo& source) const;
+    SBackupResult snapshotAutosave(const QFileInfo& source, const QByteArray& candidate) const;
 
     QString rootPath() const { return m_rootPath; }
     static QString defaultRootPath();
     static bool openBackupFolder(QString* error = nullptr);
+    static QVector<SRecoverableAutosave> recoverableAutosaves();
 
 private:
     SBackupResult createSnapshot(const QFileInfo& source, const QString& event, bool deduplicate) const;
@@ -33,6 +44,7 @@ private:
 private:
     QString m_rootPath;
     int m_maxTimestampedBackups{50};
+    int m_maxAutosaves{20};
 };
 
 #endif // BACKUP_MANAGER_H

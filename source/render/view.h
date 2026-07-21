@@ -11,9 +11,13 @@
 #include <QTreeWidgetItem>
 #include <QDateTime>
 #include <QHash>
+#include <QImage>
 #include <QPointer>
 #include <QOpenGLBuffer>
 #include <QElapsedTimer>
+#include <QRectF>
+#include <QSet>
+#include <QStringList>
 
 #include "types.h"
 #include "select_window.h"
@@ -62,16 +66,24 @@ class CView : public QGLWidget
     Q_OBJECT
 
 public:
+    struct SNidRepair
+    {
+        QString mobPath;
+        QString sectionPath;
+        quint32 oldNid = 0;
+        quint32 newNid = 0;
+    };
     explicit CView(QWidget* parent=nullptr) = delete;
     explicit CView(QWidget* parent=nullptr, const QGLWidget* pShareWidget=nullptr);
     ~CView();
+    bool prepareForApplicationShutdown();
 
     void loadLandscape(const QFileInfo& filePath);
     void refreshAfterResourceSetup();
-    void unloadLand();
+    void unloadLand(bool promptForSave = true);
     void saveLand();
     void saveLandAs();
-    void loadMob(QFileInfo& filePath);
+    bool loadMob(QFileInfo& filePath);
     void saveMobAs();
     void saveActiveMob();
     void saveAllMob();
@@ -90,17 +102,38 @@ public:
     CSettings* settings() {Q_ASSERT(m_pSettings); return m_pSettings;}
     int select(const SSelect& selectParam, bool bAddToSelect = false);
     CMob* mob(QString mobName);
-    const QVector<CMob*> mobs() {return m_aMob;}
+    const QVector<CMob*> mobs() const {return m_aMob;}
+    CMob* ownerMob(CNode* node) const;
+    bool isMobVisible(CMob* mob) const;
+    void setMobVisible(CMob* mob, bool visible);
+    void setWorkspaceVisibility(const QList<CMob*>& mobs,
+                                bool includeLandscape, bool visible);
+    bool isLandscapeVisible() const { return m_landscapeVisible; }
+    void setLandscapeVisible(bool visible);
+    bool unloadMobDocument(CMob* mob, bool promptForSave = true);
     void drawSelectFrame(QRect& rect);
     void pickObject(QPoint mousePos, bool bAddToSelect);
     void pickObject(const QRect& rect, bool bAddToSelect);
     QVector3D getTerrainPos(bool bLand = true);
-    QVector3D getTerrainPos(const int cursorPosX, const int cursorPosY, bool bLand = true);
+    QVector3D getTerrainPos(const int cursorPosX, const int cursorPosY,
+                            bool bLand = true, bool* hit = nullptr);
+    bool terrainPositionAt(const QPoint& viewportPosition, QVector3D* position);
+    QPoint operationAnchor() const;
+    void setTestSpawnMarker(const QVector3D& position, bool adjusted = false);
+    void setTestSpawnMarkerSelected(bool selected);
+    bool testSpawnMarkerAt(const QPoint& viewportPosition, int tolerance = 18) const;
+    void clearTestSpawnMarker();
+    void setTestEntranceOverlays(const QVector<QRectF>& rectangles,
+                                 const QStringList& labels,
+                                 int selectedIndex);
+    void moveCameraToPoint(const QVector3D& position);
+    void anchorCameraRotationToViewportCenter();
     void changeOperation(EButtonOp type);
     void operationSetBackup(EOperationAxisType operationType);
     void operationRevert(EOperationAxisType operationType);
     void operationApply(EOperationAxisType operationType);
     bool cancelPendingOperation();
+    bool hasPendingOperation() const;
     bool prepareUndo();
     void moveTo(QVector3D& dir);
     void rotateTo(QVector3D& rot);
@@ -113,6 +146,7 @@ public:
     void hideSelectedNodes();
     void unHideAll();
     CMob* currentMob() {return m_activeMob;}
+    bool hasEditableSelection() const;
     QOpenGLShaderProgram& shaderObject() {return m_program;}
     void setDirtyMpr();
     void setDurty(CMob* pMob = nullptr);
@@ -121,6 +155,10 @@ public:
     void copySelectedIDsToClipboard();
     void changeCurrentMob(CMob* pMob);
     void changeCurrentMob(QString mobName);
+    bool activateSelectedObjectMob();
+    bool selectNode(CNode* node, bool addToSelection = false,
+                    bool activateOwner = false);
+    bool selectNodes(const QList<CNode*>& nodes, bool addToSelection = false);
     void roundActiveMob();
     void undo_roundActiveMob();
     void execUnloadCommand();
@@ -134,10 +172,14 @@ public:
     QList<CNode*> selectedNodes();
     QList<CNode*> selectionSnapshot();
     void restoreSelection(const QList<CNode*>& selection);
+    bool selectObjectByProvenance(const QString& mobPath, quint32 nid,
+                                  const QString& sectionPath);
     void clearObjectSelection();
     void recordSelectionChange(const QList<CNode*>& before, const QString& text = QString("Select objects"));
     void setRandomComplection(const EObjParam param, const float min, const float max);
     void resetSelectedId();
+    bool applyFamilyNidRepairs(const QVector<SNidRepair>& repairs, QString* error = nullptr);
+    quint32 suggestFamilyNid(CMob* mob, quint32 localSuggestion);
     void openMapParameters();
     void pickTile(QVector3D posOnLand, bool bLand = true);
     void setTile(QVector3D posOnLand, bool bLand = true);
@@ -166,9 +208,12 @@ protected:
     void focusOutEvent(QFocusEvent* event) override;
 
 private:
+    bool saveMobDocument(CMob* mob, const QFileInfo& destination);
+    bool saveLandscapeDocument(const QFileInfo& destination);
     void refreshMobDirtyStates();
     void initShaders();
     void draw();
+    void drawTestOverlaysOpenGl();
     CNode* pickObject(QList<CNode*>& aNode, int x, int y);
     void applyParam(SParam& param);
     void getColorFromRect(const QRect& rect, QVector<SColor>& aColor);
@@ -178,6 +223,8 @@ private:
     void drawTilePreview(QOpenGLShaderProgram* program);
     void updateTileForm(bool bGenerateNewTable = false);
     void saveSession();
+    bool closeMobParameterWindow(CMob* mob);
+    bool closeAllMobParameterWindows();
     bool closeMobScriptWindow(CMob* mob);
     bool closeAllMobScriptWindows();
     bool confirmScriptReferencedObjectIds(const QVector<uint>& objectIds,
@@ -229,6 +276,11 @@ signals:
     void showOutlinerSignal(bool bShow);
     void mobScriptChanged(CMob* mob, const QString& displayScript);
     void externalMobScriptImported(CMob* mob, const QString& displayScript);
+    void selectionStateChanged(bool hasSelection);
+    void mobStateChanged();
+    void loadedMapStateChanged();
+    void nidChangeProposed(quint32 nid, const QString& mobPath);
+    void nidAllocationRequested(const QString& mobPath, quint32* suggestion);
 
 private:
     int m_height; //for redraw window
@@ -252,6 +304,7 @@ private:
     bool m_gpuTimerPending;
     QMatrix4x4 m_projection;
     QVector<CMob*> m_aMob;
+    QSet<CMob*> m_hiddenMobs;
     QTimer* m_timer;
     CSettings* m_pSettings;
     QVector<bool> m_aReadState;
@@ -280,11 +333,24 @@ private:
     QDateTime m_lastModifiedLand;
     bool m_bDrawLand;
     bool m_bDrawWater;
+    bool m_landscapeVisible{true};
     bool m_bPreviewTile;
     CTileForm* m_pTileForm;
     QSharedPointer<CPreviewTile> m_pPreviewTile;
     CLandscape* m_pLand;
     short m_tileBrushCommandId;
+    QPoint m_lastViewportMousePos;
+    bool m_hasViewportMousePos;
+    QVector3D m_testSpawnMarker;
+    bool m_testSpawnMarkerValid;
+    bool m_testSpawnMarkerAdjusted;
+    bool m_testSpawnMarkerSelected{false};
+    QVector<QRectF> m_testEntranceRectangles;
+    QStringList m_testEntranceLabels;
+    QVector<QImage> m_testEntranceLabelImages;
+    QVector<GLuint> m_testEntranceLabelTextures;
+    bool m_testEntranceLabelTexturesDirty{false};
+    int m_selectedTestEntrance{-1};
     QHash<CMob*, QSharedPointer<CSpatialGrid<CNode*>>> m_spatialIndices;
     QHash<CMob*, QVector<CNode*>> m_spatialOverflowNodes;
     bool m_spatialIndexDirty;

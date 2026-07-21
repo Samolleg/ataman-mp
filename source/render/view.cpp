@@ -39,7 +39,6 @@
 #include "layout_components/tree_view.h"
 #include "property.h"
 #include "tile.h"
-#include "duplicate_id_report.h"
 #include "view_frustum.h"
 #include "render_performance.h"
 #include "render_queue.h"
@@ -75,7 +74,6 @@ void showDuplicateIdWarning(QWidget* parent, const QVector<uint>& duplicates)
             ei::duplicateIdWarningText(duplicates));
 }
 }
-
 CView::CView(QWidget *parent, const QGLWidget *pShareWidget) : QGLWidget(parent, pShareWidget)
   ,m_gpuTimer(nullptr)
   ,m_gpuTimerPending(false)
@@ -94,6 +92,9 @@ CView::CView(QWidget *parent, const QGLWidget *pShareWidget) : QGLWidget(parent,
   ,m_bDrawWater(true)
   ,m_bPreviewTile(false)
   ,m_tileBrushCommandId(0)
+  ,m_hasViewportMousePos(false)
+  ,m_testSpawnMarkerValid(false)
+  ,m_testSpawnMarkerAdjusted(false)
   ,m_spatialIndexDirty(true)
   ,m_sceneFingerprintDirty(true)
 {
@@ -129,6 +130,8 @@ void CView::updateReadState(EReadState state)
 
 CView::~CView()
 {
+    QElapsedTimer shutdownTimer;
+    shutdownTimer.start();
 //    for(auto& param : m_arrParamWindow)
 //    {
 //        param->close();
@@ -149,7 +152,23 @@ CView::~CView()
     ei::setCrashContext("shutdown/view-gpu-timer");
     if(m_gpuTimer)
     {
-        delete m_gpuTimer;
+        QOpenGLContext* current = QOpenGLContext::currentContext();
+        if(current && current->surface())
+        {
+            m_gpuTimer->destroy();
+            delete m_gpuTimer;
+        }
+        else
+        {
+            // Some window-system shutdown paths destroy the QGLWidget surface
+            // before MainWindow explicitly deletes the view. Qt's timer-query
+            // destructor dereferences the absent current surface in that state.
+            // Detach this one process-lifetime diagnostic object rather than
+            // crashing while the application is already terminating.
+            ei::log(eLogWarning,
+                    "GPU timer query retained at shutdown because its OpenGL surface is unavailable");
+            m_gpuTimer->setParent(nullptr);
+        }
         m_gpuTimer = nullptr;
         m_gpuTimerPending = false;
     }
@@ -162,10 +181,30 @@ CView::~CView()
     m_dynamicShadowFbo = nullptr;
     ei::setCrashContext("shutdown/view-mobs");
 
+    const int meshCount = CPart::sharedMeshCount();
+    const quint64 meshBytes = CPart::sharedMeshBytes();
+    CPart::deferGpuCleanupToContextDestruction();
+    ei::log(eLogInfo, QString("Shutdown scene teardown started mobs:%1 sharedMeshes:%2 sharedMeshBytes:%3")
+            .arg(m_aMob.size()).arg(meshCount).arg(meshBytes));
+
     for(auto& mob: m_aMob)
     {
+        QElapsedTimer mobTimer;
+        mobTimer.start();
+        const QString mobName = mob ? mob->mobName() : QStringLiteral("<null>");
+        const int nodeCount = mob ? mob->nodes().size() : 0;
         m_scriptWorkspaces->unregisterMob(mob);
         delete mob;
+        ei::log(eLogInfo, QString("Shutdown MOB teardown name:%1 nodes:%2 elapsedMs:%3")
+                .arg(mobName).arg(nodeCount).arg(mobTimer.elapsed()));
+    }
+    if(isValid() && !m_testEntranceLabelTextures.isEmpty())
+    {
+        makeCurrent();
+        glDeleteTextures(m_testEntranceLabelTextures.size(),
+                         m_testEntranceLabelTextures.constData());
+        m_testEntranceLabelTextures.clear();
+        // Keep the context current for renderer member destruction below.
     }
     m_aMob.clear();
 
@@ -177,6 +216,8 @@ CView::~CView()
     // destroyed after this destructor body and before QGLWidget tears down the
     // context itself.
     ei::setCrashContext("shutdown/view-members");
+    ei::log(eLogInfo, QString("Shutdown view teardown body complete elapsedMs:%1")
+            .arg(shutdownTimer.elapsed()));
 }
 
 
@@ -663,6 +704,13 @@ void CView::applyShadowUniforms(QOpenGLShaderProgram& program, bool enabled)
 void CView::paintGL()
 {
     makeCurrent();
+    glViewport(0, 0, width(), height());
+    glEnable(GL_DEPTH_TEST);
+    glDepthMask(GL_TRUE);
+    glEnable(GL_ALPHA_TEST);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
     const COptBool* statsOption = m_pSettings
         ? dynamic_cast<const COptBool*>(m_pSettings->opt("renderPerformanceCounters")) : nullptr;
     const bool collectStats = (statsOption && statsOption->value())
@@ -685,7 +733,220 @@ void CView::paintGL()
         m_gpuTimerPending = true;
     }
     performance.endFrame();
+    drawTestOverlaysOpenGl();
     //doneCurrent();
+}
+
+bool CView::prepareForApplicationShutdown()
+{
+    if(m_timer)
+        m_timer->stop();
+    if(m_mprModifyTimer)
+        m_mprModifyTimer->stop();
+    if(!isValid())
+        return false;
+    makeCurrent();
+    QOpenGLContext* current = QOpenGLContext::currentContext();
+    return current && current->surface();
+}
+
+void CView::drawTestOverlaysOpenGl()
+{
+    if((m_testEntranceRectangles.isEmpty() && !m_testSpawnMarkerValid)
+       || width() <= 0 || height() <= 0)
+        return;
+
+    // QPainter and QGLWidget do not compose reliably on every double-buffered
+    // driver. In particular, painting the entrance labels on the QGLWidget's
+    // back buffer caused alternating dark frames on current NVIDIA drivers.
+    // Keep the entire per-frame overlay in the native OpenGL pass.
+    if(!m_program.bind())
+        return;
+
+    // Mesh rendering may leave a VAO with normal/UV/instance attributes
+    // enabled. The overlay below uses client-side arrays. If those stale
+    // attributes remain enabled after their VBO is released, NVIDIA's driver
+    // attempts to fetch offsets such as 0x0c as host pointers and can access-
+    // violate in glDrawArrays. Always start the overlay on the default VAO and
+    // with a clean attribute set.
+    QOpenGLContext* context = QOpenGLContext::currentContext();
+    QOpenGLExtraFunctions* functions = context ? context->extraFunctions() : nullptr;
+    if(functions)
+    {
+        functions->glBindVertexArray(0);
+        functions->glBindBuffer(GL_ARRAY_BUFFER, 0);
+        functions->glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+        GLint attributeCount = 0;
+        functions->glGetIntegerv(GL_MAX_VERTEX_ATTRIBS, &attributeCount);
+        for(GLint attribute = 0; attribute < attributeCount; ++attribute)
+            functions->glDisableVertexAttribArray(GLuint(attribute));
+    }
+    QOpenGLBuffer::release(QOpenGLBuffer::VertexBuffer);
+    QOpenGLBuffer::release(QOpenGLBuffer::IndexBuffer);
+    const int position = m_program.attributeLocation("a_position");
+    if(position < 0)
+        return;
+
+    m_program.enableAttributeArray(position);
+    QMatrix4x4 identity;
+    identity.setToIdentity();
+    m_program.setUniformValue("u_modelMmatrix", identity);
+    m_program.setUniformValue("u_viewMmatrix", m_cam->viewMatrix());
+    m_program.setUniformValue("u_projMmatrix", m_projection);
+    m_program.setUniformValue("u_highlight", false);
+
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glEnable(GL_DEPTH_TEST);
+    glDepthMask(GL_FALSE);
+
+    for(int index = 0; index < m_testEntranceRectangles.size(); ++index)
+    {
+        const QRectF area = m_testEntranceRectangles.at(index).normalized();
+        const QPointF corners[] = {
+            area.topLeft(), area.topRight(), area.bottomRight(), area.bottomLeft()
+        };
+        QVector<QVector3D> vertices;
+        vertices.reserve(4);
+        for(const QPointF& corner : corners)
+        {
+            QVector3D world(corner.x(), corner.y(), 0.0f);
+            if(!CLandscape::getInstance()->projectPt(world))
+            {
+                vertices.clear();
+                break;
+            }
+            world.setZ(world.z() + 0.15f);
+            vertices.append(world);
+        }
+        if(vertices.size() != 4)
+            continue;
+
+        const bool selected = index == m_selectedTestEntrance;
+        m_program.setUniformValue("customColor",
+            selected ? QVector4D(0.20f, 1.0f, 0.38f, 0.37f)
+                     : QVector4D(0.92f, 0.70f, 0.12f, 0.20f));
+        m_program.setAttributeArray(position, vertices.constData());
+        glDrawArrays(GL_TRIANGLE_FAN, 0, vertices.size());
+
+        m_program.setUniformValue("customColor",
+            selected ? QVector4D(0.38f, 1.0f, 0.50f, 0.95f)
+                     : QVector4D(0.92f, 0.75f, 0.18f, 0.80f));
+        glLineWidth(selected ? 3.0f : 1.0f);
+        glDrawArrays(GL_LINE_LOOP, 0, vertices.size());
+    }
+
+    if(m_testEntranceLabelTexturesDirty)
+    {
+        if(!m_testEntranceLabelTextures.isEmpty())
+            glDeleteTextures(m_testEntranceLabelTextures.size(),
+                             m_testEntranceLabelTextures.constData());
+        m_testEntranceLabelTextures.clear();
+        for(const QImage& image : m_testEntranceLabelImages)
+            m_testEntranceLabelTextures.append(bindTexture(image, GL_TEXTURE_2D, GL_RGBA));
+        m_testEntranceLabelTexturesDirty = false;
+    }
+
+    // Labels are painted once into off-screen images and then composited as
+    // ordinary OpenGL textures. QPainter never touches QGLWidget's framebuffer.
+    const int texture = m_program.attributeLocation("a_texture");
+    if(texture >= 0 && !m_testEntranceLabelTextures.isEmpty())
+    {
+        m_program.enableAttributeArray(texture);
+        m_program.setUniformValue("u_viewMmatrix", identity);
+        m_program.setUniformValue("u_projMmatrix", identity);
+        m_program.setUniformValue("customColor", QVector4D(0.0f, 0.0f, 0.0f, 0.0f));
+        m_program.setUniformValue("qt_Texture0", 0);
+        glDisable(GL_DEPTH_TEST);
+        const QRect viewport(0, 0, width(), height());
+        const QVector<QVector2D> textureCoordinates = {
+            QVector2D(0.0f, 0.0f), QVector2D(1.0f, 0.0f),
+            QVector2D(1.0f, 1.0f), QVector2D(0.0f, 1.0f)
+        };
+
+        const int count = qMin(m_testEntranceRectangles.size(),
+                               m_testEntranceLabelTextures.size());
+        for(int index = 0; index < count; ++index)
+        {
+            const QRectF area = m_testEntranceRectangles.at(index).normalized();
+            QVector3D center(area.center().x(), area.center().y(), 0.0f);
+            if(!CLandscape::getInstance()->projectPt(center))
+                continue;
+            center.setZ(center.z() + 0.25f);
+            const QVector3D projected = center.project(
+                m_cam->viewMatrix(), m_projection, viewport);
+            if(projected.z() < 0.0f || projected.z() > 1.0f)
+                continue;
+
+            const QImage& image = m_testEntranceLabelImages.at(index);
+            const float centerX = (2.0f * projected.x() / float(width())) - 1.0f;
+            const float centerY = (2.0f * projected.y() / float(height())) - 1.0f;
+            const float halfWidth = float(image.width()) / float(width());
+            const float halfHeight = float(image.height()) / float(height());
+            const QVector<QVector3D> quad = {
+                QVector3D(centerX - halfWidth, centerY - halfHeight, 0.0f),
+                QVector3D(centerX + halfWidth, centerY - halfHeight, 0.0f),
+                QVector3D(centerX + halfWidth, centerY + halfHeight, 0.0f),
+                QVector3D(centerX - halfWidth, centerY + halfHeight, 0.0f)
+            };
+            glBindTexture(GL_TEXTURE_2D, m_testEntranceLabelTextures.at(index));
+            m_program.setAttributeArray(position, quad.constData());
+            m_program.setAttributeArray(texture, textureCoordinates.constData());
+            glDrawArrays(GL_TRIANGLE_FAN, 0, quad.size());
+        }
+        glBindTexture(GL_TEXTURE_2D, 0);
+        m_program.disableAttributeArray(texture);
+    }
+
+    if(m_testSpawnMarkerValid)
+    {
+        m_program.setUniformValue("u_viewMmatrix", m_cam->viewMatrix());
+        m_program.setUniformValue("u_projMmatrix", m_projection);
+        m_program.setUniformValue("customColor",
+            m_testSpawnMarkerSelected ? QVector4D(0.92f, 1.0f, 0.32f, 1.0f)
+            : m_testSpawnMarkerAdjusted ? QVector4D(1.0f, 0.67f, 0.18f, 0.82f)
+                                        : QVector4D(0.31f, 1.0f, 0.47f, 0.72f));
+        glEnable(GL_DEPTH_TEST);
+        glLineWidth(3.0f);
+        QVector<QVector3D> figure;
+        const float z = m_testSpawnMarker.z() + 0.08f;
+        const int segments = 24;
+        for(int i = 0; i < segments; ++i)
+        {
+            const float angle = float(i) * 2.0f * float(M_PI) / float(segments);
+            figure.append(QVector3D(m_testSpawnMarker.x() + qCos(angle) * 0.55f,
+                                    m_testSpawnMarker.y() + qSin(angle) * 0.55f, z));
+        }
+        m_program.setAttributeArray(position, figure.constData());
+        glDrawArrays(GL_LINE_LOOP, 0, figure.size());
+        const QVector<QVector3D> body = {
+            QVector3D(m_testSpawnMarker.x(), m_testSpawnMarker.y(), z + 1.72f),
+            QVector3D(m_testSpawnMarker.x(), m_testSpawnMarker.y(), z + 0.72f),
+            QVector3D(m_testSpawnMarker.x() - 0.42f, m_testSpawnMarker.y(), z + 1.25f),
+            QVector3D(m_testSpawnMarker.x() + 0.42f, m_testSpawnMarker.y(), z + 1.25f),
+            QVector3D(m_testSpawnMarker.x(), m_testSpawnMarker.y(), z + 0.72f),
+            QVector3D(m_testSpawnMarker.x() - 0.34f, m_testSpawnMarker.y(), z),
+            QVector3D(m_testSpawnMarker.x(), m_testSpawnMarker.y(), z + 0.72f),
+            QVector3D(m_testSpawnMarker.x() + 0.34f, m_testSpawnMarker.y(), z)
+        };
+        m_program.setAttributeArray(position, body.constData());
+        glDrawArrays(GL_LINES, 0, body.size());
+        QVector<QVector3D> head;
+        for(int i = 0; i < segments; ++i)
+        {
+            const float angle = float(i) * 2.0f * float(M_PI) / float(segments);
+            head.append(QVector3D(m_testSpawnMarker.x() + qCos(angle) * 0.24f,
+                                  m_testSpawnMarker.y(), z + 1.93f + qSin(angle) * 0.24f));
+        }
+        m_program.setAttributeArray(position, head.constData());
+        glDrawArrays(GL_LINE_LOOP, 0, head.size());
+    }
+
+    m_program.disableAttributeArray(position);
+    m_program.setUniformValue("customColor", QVector4D(0.0f, 0.0f, 0.0f, 0.0f));
+    glLineWidth(1.0f);
+    glDepthMask(GL_TRUE);
+    glEnable(GL_DEPTH_TEST);
 }
 
 void CView::draw()
@@ -823,6 +1084,9 @@ void CView::draw()
 
     m_program.setUniformValue("u_projMmatrix", m_projection);
     m_program.setUniformValue("u_viewMmatrix", camMatrix);
+    const QVector4D activeHighlight(0.05f, 0.78f, 0.93f, 0.0f);
+    const QVector4D lockedHighlight(1.0f, 0.55f, 0.05f, 0.0f);
+    m_program.setUniformValue("u_highlightColor", activeHighlight);
     m_program.setUniformValue("qt_Texture0", 0);
     applyEnvironmentUniforms(m_program, environment, sceneLights,
                              environmentEnabled, fogEnabled);
@@ -857,12 +1121,18 @@ void CView::draw()
     {
         for(auto& mob: m_aMob) //TODO: draw inactive mobs with custom color|alfa or something
         {
+            if(!isMobVisible(mob))
+                continue;
             if(mob->mobName() == m_activeMob->mobName())
                 continue; //skip drawing active mob
 
             const QVector<CNode*> candidates = visibleNodes(mob);
             for(CNode* node : candidates)
             {
+                // Selected nodes from every visible MOB are rendered in the
+                // final depth pass below, including locked MOBs.
+                if(node->nodeState() == ENodeState::eSelect)
+                    continue;
                 node->drawObjectVisual(false, &m_program);
                 if(performance.collecting())
                     ++performance.counters().nodesSubmitted;
@@ -887,7 +1157,7 @@ void CView::draw()
         const QVector<CNode*> activeCandidates = visibleNodes(m_activeMob);
         for(CNode* node : activeCandidates)
         {
-            if(node->nodeState() != ENodeState::eSelect)
+            if(isMobVisible(m_activeMob) && node->nodeState() != ENodeState::eSelect)
             {
                 node->drawObjectVisual(true, &m_program);
                 if(performance.collecting())
@@ -908,19 +1178,23 @@ void CView::draw()
         drawTerrainColor(shadowReady);
         renderQueue.flush();
         glDepthFunc(GL_LEQUAL);
-        for(CNode* node : activeCandidates)
-        {
-            if(node->nodeState() == ENodeState::eSelect)
-            {
-                node->drawObjectVisual(true, &m_program);
-                node->drawLogicVisual(true, &m_program);
-                if(performance.collecting())
-                {
-                    ++performance.counters().nodesSubmitted;
-                    ++performance.counters().logicSubmissions;
-                }
-            }
-        }
+        for(CMob* mob : m_aMob)
+            if(isMobVisible(mob))
+                for(CNode* node : mob->nodes())
+                    if(node->nodeState() == ENodeState::eSelect)
+                    {
+                        m_program.setUniformValue("u_highlightColor",
+                            mob == m_activeMob ? activeHighlight : lockedHighlight);
+                        node->drawObjectVisual(mob == m_activeMob, &m_program);
+                        renderQueue.flush();
+                        node->drawLogicVisual(mob == m_activeMob, &m_program);
+                        if(performance.collecting())
+                        {
+                            ++performance.counters().nodesSubmitted;
+                            ++performance.counters().logicSubmissions;
+                        }
+                    }
+        m_program.setUniformValue("u_highlightColor", activeHighlight);
         renderQueue.flush();
         glDepthFunc(GL_LESS);
     }
@@ -939,7 +1213,7 @@ void CView::draw()
         performance.counters().animationComponentsEvaluated = animation.componentsEvaluated;
     }
 
-    if (m_pLand && m_pLand->isMprLoad() && m_bDrawWater)
+    if (m_landscapeVisible && m_pLand && m_pLand->isMprLoad() && m_bDrawWater)
     {
         //turn to landshader again
         if (!m_landProgram.bind())
@@ -986,6 +1260,7 @@ void CView::loadLandscape(const QFileInfo& filePath)
     }
     for(CMob* mob : m_aMob)
         mob->reprojectForCurrentTerrain();
+    m_landscapeVisible = true;
     m_spatialIndexDirty = true;
     m_sceneFingerprintDirty = true;
     emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMpr, filePath.baseName());
@@ -1000,20 +1275,21 @@ void CView::loadLandscape(const QFileInfo& filePath)
     }
     m_pPreviewTile.reset(new CPreviewTile());
     updateTileForm(true);
+    emit loadedMapStateChanged();
 }
 
-void CView::unloadLand()
+void CView::unloadLand(bool promptForSave)
 {
     if(!m_pLand->isMprLoad())
         return;
 
-    if(m_pLand->isDirty())
+    if(promptForSave && m_pLand->isDirty())
     {
         QMessageBox::StandardButton reply;
         reply = QMessageBox::question(this, "Unload MPR", m_pLand->filePath().baseName() + " has unsaved changes.\nDo you want to save changes?", QMessageBox::Save|QMessageBox::No|QMessageBox::Cancel);
         if(reply == QMessageBox::Save)
         {
-            if(!m_pLand->save())
+            if(!saveLandscapeDocument(m_pLand->filePath()))
                 return;
         }
         else if(reply == QMessageBox::Cancel)
@@ -1030,13 +1306,15 @@ void CView::unloadLand()
     emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMpr, "");
     m_pPreviewTile.clear();
     ei::log(eLogInfo, "Landscape unloaded");
+    m_landscapeVisible = true;
+    emit loadedMapStateChanged();
 }
 
 void CView::saveLand()
 {
     if(m_pLand->isMprLoad())
     {
-        if(m_pLand->save())
+        if(saveLandscapeDocument(m_pLand->filePath()))
             emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMprDirtyFlag, "");
     }
 }
@@ -1051,16 +1329,37 @@ void CView::saveLandAs()
         return;
     //QFileInfo fileName("c:\\konst\\Проклятые Земли (Дополнение)\\Mods\\ferneo_mod\\Maps\\zone1gTest.mpr");
 
-    if(m_pLand->saveMapAs(fileName))
+    if(saveLandscapeDocument(fileName))
     {
         emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMpr, fileName.baseName());
         emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMprDirtyFlag, "");
     }
 }
 
+bool CView::saveLandscapeDocument(const QFileInfo& destination)
+{
+    QProgressDialog progress(tr("Preparing safe MPR save..."), QString(), 0, 4, this);
+    progress.setWindowTitle(tr("Saving MPR"));
+    progress.setWindowModality(Qt::ApplicationModal);
+    progress.setCancelButton(nullptr);
+    progress.setMinimumDuration(250);
+    progress.setWindowFlags(progress.windowFlags() & ~Qt::WindowContextHelpButtonHint
+                             & ~Qt::WindowCloseButtonHint);
+    const auto updateProgress = [&progress](const QString& label, int value, int maximum)
+    {
+        progress.setMaximum(maximum);
+        progress.setLabelText(label);
+        progress.setValue(value);
+        QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+    };
+    const bool saved = m_pLand->saveMapAs(destination, updateProgress);
+    progress.setValue(progress.maximum());
+    return saved;
+}
+
 int CView::select(const SSelect &selectParam, bool bAddToSelect)
 {
-    if(nullptr == m_activeMob)
+    if(m_aMob.isEmpty())
         return 0;
 
     const QList<CNode*> selectionBefore = selectionSnapshot();
@@ -1230,22 +1529,24 @@ int CView::select(const SSelect &selectParam, bool bAddToSelect)
     }
     recordSelectionChange(selectionBefore);
     viewParameters();
+    emit loadedMapStateChanged();
     return nSelectedNodes();
 }
 
 CMob *CView::mob(QString mobName)
 {
-    CMob* pMob = nullptr;
-    foreach(pMob, m_aMob)
+    const QString wanted = QDir::cleanPath(mobName).toLower();
+    for(CMob* pMob : m_aMob)
     {
-        if(pMob->filePath().absoluteFilePath().toLower() == mobName) //try to find fullpath name first
-            break;
+        if(!pMob)
+            continue;
+        if(QDir::cleanPath(pMob->filePath().absoluteFilePath()).toLower() == wanted)
+            return pMob;
 
-        if (pMob->mobName().toLower() == mobName.toLower())
-            break;
+        if(pMob->mobName().toLower() == mobName.toLower())
+            return pMob;
     }
-
-    return pMob;
+    return nullptr;
 }
 
 void CView::pickObject(QPoint mousePos, bool bAddToSelect)
@@ -1292,17 +1593,18 @@ void CView::getColorFromRect(const QRect& rect, QVector<SColor>& aColor)
 
 void CView::changeCurrentMob(CMob *pMob)
 {
+    if(pMob != m_activeMob)
+        cancelPendingOperation();
     m_activeMob = pMob;
     emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataActiveMob, nullptr == pMob ? "" : pMob->mobName());
     emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataDirtyFlag, (nullptr == pMob || !pMob->isDirty()) ? "" : "*");
     collectObjectTreeData();
+    viewParameters();
+    emit loadedMapStateChanged();
 }
 
 void CView::changeCurrentMob(QString mobName)
 {
-    if(nullptr != m_activeMob)
-        m_activeMob->clearSelect();
-
     for(auto& mob : m_aMob)
     {
         if(mob->mobName() == mobName)
@@ -1370,6 +1672,182 @@ void CView::logOpenGlData()
             .arg(vendor ? reinterpret_cast<const char*>(vendor) : "unavailable")
             .arg(renderer ? reinterpret_cast<const char*>(renderer) : "unavailable")
             .arg(format().swapInterval()));
+}
+
+CMob* CView::ownerMob(CNode* node) const
+{
+    if(!node)
+        return nullptr;
+    for(CMob* mob : m_aMob)
+    {
+        if(!mob)
+            continue;
+        if(mob->nodes().contains(node) || mob->logicNodes().contains(node))
+            return mob;
+    }
+    return nullptr;
+}
+
+bool CView::isMobVisible(CMob* mob) const
+{
+    return mob && !m_hiddenMobs.contains(mob);
+}
+
+void CView::setMobVisible(CMob* mob, bool visible)
+{
+    if(!mob || !m_aMob.contains(mob) || isMobVisible(mob) == visible)
+        return;
+    if(visible)
+        m_hiddenMobs.remove(mob);
+    else
+    {
+        m_hiddenMobs.insert(mob);
+        mob->clearSelect(true);
+        if(m_pTree)
+            m_pTree->clearViewportSelectionMarker();
+        viewParameters();
+    }
+    collectObjectTreeData();
+    update();
+    emit loadedMapStateChanged();
+}
+
+void CView::setWorkspaceVisibility(const QList<CMob*>& mobs,
+                                   bool includeLandscape, bool visible)
+{
+    bool changed = false;
+    bool selectionChanged = false;
+    if(includeLandscape && m_landscapeVisible != visible)
+    {
+        m_landscapeVisible = visible;
+        changed = true;
+        if(!visible)
+        {
+            m_bPreviewTile = false;
+            changeOperation(EButtonOpSelect);
+        }
+    }
+    for(CMob* mob : mobs)
+    {
+        if(!mob || !m_aMob.contains(mob) || isMobVisible(mob) == visible)
+            continue;
+        changed = true;
+        if(visible)
+            m_hiddenMobs.remove(mob);
+        else
+        {
+            m_hiddenMobs.insert(mob);
+            for(CNode* node : selectionSnapshot())
+                if(ownerMob(node) == mob) selectionChanged = true;
+            mob->clearSelect(true);
+        }
+    }
+    if(!changed)
+        return;
+    if(selectionChanged && m_pTree)
+        m_pTree->clearViewportSelectionMarker();
+    collectObjectTreeData();
+    viewParameters();
+    update();
+    emit loadedMapStateChanged();
+}
+
+void CView::setLandscapeVisible(bool visible)
+{
+    if(m_landscapeVisible == visible)
+        return;
+    m_landscapeVisible = visible;
+    if(!visible)
+    {
+        m_bPreviewTile = false;
+        changeOperation(EButtonOpSelect);
+    }
+    update();
+    emit loadedMapStateChanged();
+}
+
+bool CView::hasEditableSelection() const
+{
+    if(!m_activeMob || !isMobVisible(m_activeMob))
+        return false;
+    bool found = false;
+    for(CMob* mob : m_aMob)
+    {
+        if(!mob)
+            continue;
+        for(CNode* node : mob->nodes())
+            if(node && node->nodeState() == ENodeState::eSelect)
+            {
+                if(mob != m_activeMob)
+                    return false;
+                found = true;
+            }
+        for(CNode* node : mob->logicNodes())
+            if(node && node->nodeState() == ENodeState::eSelect)
+            {
+                if(mob != m_activeMob)
+                    return false;
+                found = true;
+            }
+    }
+    return found;
+}
+
+bool CView::selectNode(CNode* node, bool addToSelection, bool activateOwner)
+{
+    CMob* owner = ownerMob(node);
+    if(!owner || !isMobVisible(owner))
+        return false;
+    if(activateOwner && owner != m_activeMob)
+        changeCurrentMob(owner);
+    return selectNodes(QList<CNode*>() << node, addToSelection);
+}
+
+bool CView::selectNodes(const QList<CNode*>& nodes, bool addToSelection)
+{
+    QList<CNode*> selectable;
+    for(CNode* node : nodes)
+    {
+        CMob* owner = ownerMob(node);
+        if(node && owner && isMobVisible(owner) && !selectable.contains(node))
+            selectable.append(node);
+    }
+    if(selectable.isEmpty())
+        return false;
+    const QList<CNode*> before = selectionSnapshot();
+    if(!addToSelection)
+        for(CMob* mob : m_aMob)
+            if(mob) mob->clearSelect(true);
+    for(CNode* node : selectable)
+    {
+        if(addToSelection && node->nodeState() == ENodeState::eSelect)
+            node->setState(ENodeState::eDraw);
+        else
+            node->setState(ENodeState::eSelect);
+    }
+    recordSelectionChange(before);
+    viewParameters();
+    update();
+    emit loadedMapStateChanged();
+    return true;
+}
+
+bool CView::activateSelectedObjectMob()
+{
+    const QList<CNode*> selected = selectionSnapshot();
+    if(selected.isEmpty())
+        return false;
+    CMob* owner = ownerMob(selected.back());
+    if(!owner || owner == m_activeMob)
+        return false;
+    CNode* selectedNode = selected.back();
+    changeCurrentMob(owner);
+    selectedNode->setState(ENodeState::eSelect);
+    viewParameters();
+    update();
+    if(m_pTree)
+        m_pTree->revealNode(selectedNode);
+    return true;
 }
 
 void CView::checkOpenGlError()
@@ -1518,28 +1996,37 @@ void CView::pickObject(const QRect &rect, bool bAddToSelect)
         && CScene::getInstance()->getMode() != eEditModeLogic;
     const CViewFrustum frustum(m_projection * viewMatrix);
 
-    //if(m_operationType == EOperationTypeObjects)
-    //for(const auto& mob : m_aMob)
-    //foreach(const auto& mob, m_aMob)
+    QList<CNode*> pickableNodes;
     const bool logicPicking = CScene::getInstance()->getMode() == eEditModeLogic;
-    const QVector<CNode*> spatialCandidates = logicPicking
-        ? QVector<CNode*>()
-        : spatiallyVisibleNodes(m_activeMob, cullingEnabled ? &frustum : nullptr, nullptr);
-    const QList<CNode*>& legacyCandidates = logicPicking
-        ? m_activeMob->logicNodes() : m_activeMob->nodes();
     if(!logicPicking)
         RenderQueueContext::instance().beginSelection(&m_selectProgram);
-    const auto drawCandidate = [this](CNode* node)
-    {
-        if(node)
-            node->drawSelect(&m_selectProgram);
-    };
-    if(logicPicking)
-        for(CNode* node : legacyCandidates)
-            drawCandidate(node);
-    else
-        for(CNode* node : spatialCandidates)
-            drawCandidate(node);
+    for(CMob* mob : m_aMob)
+        if(isMobVisible(mob))
+        {
+            const QVector<CNode*> spatialCandidates = logicPicking
+                ? QVector<CNode*>()
+                : spatiallyVisibleNodes(mob, cullingEnabled ? &frustum : nullptr, nullptr);
+            const QList<CNode*>& legacyCandidates = logicPicking
+                ? mob->logicNodes() : mob->nodes();
+            if(logicPicking)
+                for(CNode* node : legacyCandidates)
+                {
+                    if(node && !pickableNodes.contains(node))
+                    {
+                        pickableNodes.append(node);
+                        node->drawSelect(&m_selectProgram);
+                    }
+                }
+            else
+                for(CNode* node : spatialCandidates)
+                {
+                    if(node && !pickableNodes.contains(node))
+                    {
+                        pickableNodes.append(node);
+                        node->drawSelect(&m_selectProgram);
+                    }
+                }
+        }
     if(!logicPicking)
         RenderQueueContext::instance().end();
 
@@ -1549,11 +2036,12 @@ void CView::pickObject(const QRect &rect, bool bAddToSelect)
     //if(m_operationType == EOperationTypeObjects)
 
     if (!bAddToSelect) // clear selection buffer if we click out of objects in single selection mode
-        m_activeMob->clearSelect(true);
+        for(CMob* mob : m_aMob)
+            if(mob) mob->clearSelect(true);
 
     CNode* lastPickedNode = nullptr;
     if (!aColor.isEmpty())
-        foreach (auto& node, CScene::getInstance()->getMode() == eEditModeLogic ? m_activeMob->logicNodes() : m_activeMob->nodes())
+        foreach (CNode* node, pickableNodes)
             foreach (const auto& color, aColor)
             {
                 if (node->isColorSuitable(color))
@@ -1596,6 +2084,7 @@ void CView::pickObject(const QRect &rect, bool bAddToSelect)
                 m_pTree->revealNode(selected.back());
         }
     }
+    emit loadedMapStateChanged();
 }
 
 QVector3D CView::getTerrainPos(bool bLand)
@@ -1605,15 +2094,38 @@ QVector3D CView::getTerrainPos(bool bLand)
     return getTerrainPos(localCursorPos.x(), localCursorPos.y(), bLand);
 }
 
-void CView::loadMob(QFileInfo &filePath)
+bool CView::loadMob(QFileInfo &filePath)
 {
+    const auto normalizedPath = [](const QFileInfo& info)
+    {
+        const QString canonical = info.canonicalFilePath();
+        return QDir::cleanPath(canonical.isEmpty() ? info.absoluteFilePath() : canonical)
+            .toCaseFolded();
+    };
+    const QString requestedPath = normalizedPath(filePath);
+    for(CMob* loaded : m_aMob)
+    {
+        if(loaded && normalizedPath(loaded->filePath()) == requestedPath)
+        {
+            changeCurrentMob(loaded);
+            ei::log(eLogInfo, QString("MOB open reused the already loaded document path:%1")
+                .arg(filePath.absoluteFilePath()));
+            emit updateMsg(tr("%1 is already loaded; its existing document was activated.")
+                .arg(filePath.fileName()));
+            return true;
+        }
+    }
+
     m_pProgress->reset();
     CMob* pMob = new CMob;
     pMob->attach(this, m_pProgress);
-    if(pMob->readMob(filePath) != 0)
+    const int result = pMob->readMob(filePath);
+    if(result != 0)
     {
+        ei::log(eLogWarning, QString("MOB load was rejected without registering a partial document path:%1 result:%2")
+            .arg(filePath.absoluteFilePath()).arg(result));
         delete pMob;
-        return;
+        return false;
     }
     QElapsedTimer preloadTimer;
     preloadTimer.start();
@@ -1670,6 +2182,8 @@ void CView::loadMob(QFileInfo &filePath)
     m_sceneFingerprintDirty = true;
     m_scriptWorkspaces->registerMob(pMob);
     changeCurrentMob(pMob);
+    emit mobStateChanged();
+    return true;
 }
 
 void CView::saveMobAs()
@@ -1684,13 +2198,11 @@ void CView::saveMobAs()
     if(fileName.filePath().isEmpty())
         return;
 
-    QSet<uint> aId;
-    showDuplicateIdWarning(this, m_activeMob->checkUniqueId(aId));
     if (fileName.fileName().endsWith(".json"))
         m_activeMob->serializeJson(fileName);
     else if (fileName.fileName().endsWith(".mob"))
     {
-        if(!m_activeMob->saveAs(fileName))
+        if(!saveMobDocument(m_activeMob, fileName))
             return;
         m_activeMob->setFileName(fileName);
         emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataActiveMob, fileName.baseName());
@@ -1703,84 +2215,129 @@ void CView::saveActiveMob()
     if(nullptr == m_activeMob)
         return;
 
-    QSet<uint> aId;
-    showDuplicateIdWarning(this, m_activeMob->checkUniqueId(aId));
-    if(m_activeMob->save())
+    if(saveMobDocument(m_activeMob, m_activeMob->filePath()))
         emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataDirtyFlag, "");
 }
 
 void CView::saveAllMob()
 {
-    CMob* pMob = nullptr;
-    QSet<uint> aId;
-    QVector<uint> duplicates;
-    foreach(pMob, m_aMob)
-        duplicates += pMob->checkUniqueId(aId);
-    showDuplicateIdWarning(this, duplicates);
+    QList<CMob*> dirtyMobs;
+    for(CMob* mob : m_aMob)
+        if(mob && mob->isDirty())
+            dirtyMobs.append(mob);
+    if(dirtyMobs.isEmpty())
+        return;
 
-    foreach(pMob, m_aMob)
+    QProgressDialog progress(tr("Preparing safe MOB saves..."), QString(),
+                             0, dirtyMobs.size() * 5, this);
+    progress.setWindowTitle(tr("Saving all MOBs"));
+    progress.setWindowModality(Qt::ApplicationModal);
+    progress.setCancelButton(nullptr);
+    progress.setMinimumDuration(250);
+    progress.setWindowFlags(progress.windowFlags() & ~Qt::WindowContextHelpButtonHint
+                             & ~Qt::WindowCloseButtonHint);
+    for(int index = 0; index < dirtyMobs.size(); ++index)
     {
-        pMob->save();
+        CMob* mob = dirtyMobs.at(index);
+        const auto updateProgress = [&progress, index, mob](const QString& label,
+                                                            int value, int maximum)
+        {
+            Q_UNUSED(maximum);
+            progress.setLabelText(QString("%1: %2").arg(mob->mobName(), label));
+            progress.setValue(index * 5 + value);
+            QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+        };
+        if(!mob->save(updateProgress))
+            break;
     }
+    progress.setValue(progress.maximum());
     if(m_activeMob && !m_activeMob->isDirty())
         emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataDirtyFlag, "");
 }
 
+bool CView::saveMobDocument(CMob* mob, const QFileInfo& destination)
+{
+    if(!mob)
+        return false;
+    QProgressDialog progress(tr("Preparing safe MOB save..."), QString(), 0, 5, this);
+    progress.setWindowTitle(tr("Saving %1").arg(mob->mobName()));
+    progress.setWindowModality(Qt::ApplicationModal);
+    progress.setCancelButton(nullptr);
+    progress.setMinimumDuration(250);
+    progress.setWindowFlags(progress.windowFlags() & ~Qt::WindowContextHelpButtonHint
+                             & ~Qt::WindowCloseButtonHint);
+    const auto updateProgress = [&progress](const QString& label, int value, int maximum)
+    {
+        progress.setMaximum(maximum);
+        progress.setLabelText(label);
+        progress.setValue(value);
+        QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+    };
+    const bool saved = mob->saveAs(destination, updateProgress);
+    progress.setValue(progress.maximum());
+    return saved;
+}
+
 void CView::unloadActiveMob()
 {
-    if(nullptr == m_activeMob)
-        return;
+    unloadMobDocument(m_activeMob);
+}
 
+bool CView::unloadMobDocument(CMob* mob, bool promptForSave)
+{
+    if(!mob || !m_aMob.contains(mob))
+        return false;
     cancelPendingOperation();
-    if(!closeMobScriptWindow(m_activeMob))
-        return;
-    ei::log(eLogInfo, "unloading mob " + m_activeMob->mobName());
-    CMob* pMob = nullptr;
-    foreach(pMob, m_aMob)
+    if(!closeMobParameterWindow(mob))
+        return false;
+    if(!closeMobScriptWindow(mob))
+        return false;
+    if(promptForSave && mob->isDirty())
     {
-        if(m_activeMob != pMob)
-            continue;
-
-        if(pMob->isDirty())
-        {
-            QMessageBox::StandardButton reply;
-            reply = QMessageBox::question(this, "Unload MOB", pMob->mobName() + " has unsaved changes.\nDo you want to save changes?", QMessageBox::Save|QMessageBox::No|QMessageBox::Cancel);
-            if(reply == QMessageBox::Save)
-            {
-                if(!pMob->save())
-                    return;
-            }
-            else if(reply == QMessageBox::Cancel)
-                return;
-
-        }
-        if(m_pUndoStack)
-            m_pUndoStack->clear();
-        m_aMob.removeOne(pMob);
-        m_scriptWorkspaces->unregisterMob(pMob);
-        emit unloadMob(pMob);
-        delete pMob;
-        break;
+        const QMessageBox::StandardButton reply = QMessageBox::question(this,
+            tr("Unload MOB"),
+            tr("%1 has unsaved changes.\nDo you want to save changes?").arg(mob->mobName()),
+            QMessageBox::Save | QMessageBox::No | QMessageBox::Cancel);
+        if(reply == QMessageBox::Save && !saveMobDocument(mob, mob->filePath()))
+            return false;
+        if(reply == QMessageBox::Cancel)
+            return false;
     }
     m_spatialIndexDirty = true;
     m_sceneFingerprintDirty = true;
 
-    if(!m_aMob.isEmpty())
-        changeCurrentMob(m_aMob.back());
+    const int removedIndex = m_aMob.indexOf(mob);
+    const bool removedActive = mob == m_activeMob;
+    ei::log(eLogInfo, "unloading mob " + mob->mobName());
+    if(m_pUndoStack)
+        m_pUndoStack->clear();
+    m_hiddenMobs.remove(mob);
+    m_aMob.removeAt(removedIndex);
+    m_scriptWorkspaces->unregisterMob(mob);
+    emit unloadMob(mob);
+    delete mob;
+
+    if(removedActive)
+    {
+        CMob* next = nullptr;
+        if(!m_aMob.isEmpty())
+            next = m_aMob.at(qMin(removedIndex, m_aMob.size() - 1));
+        changeCurrentMob(next);
+    }
     else
     {
-        changeCurrentMob(nullptr);
+        collectObjectTreeData();
+        viewParameters();
+        emit loadedMapStateChanged();
+    }
+    if(m_aMob.isEmpty())
+    {
         makeCurrent();
         CTextureList::getInstance()->clearTransientVisualCache();
-        // Renderer resource uploads that immediately follow a map switch
-        // assume this view context remains current. Releasing it here makes
-        // the next terrain-atlas QOpenGLTexture construction dereference a
-        // null context on every switch.
     }
-
     ei::log(eLogInfo, "Mob unloaded");
-    viewParameters();
-    emit selectionChanged();
+    emit mobStateChanged();
+    return true;
 }
 
 void CView::openActiveMobEditParams()
@@ -1890,6 +2447,28 @@ bool CView::closeMobScriptWindow(CMob* mob)
     return !window || window->requestClose();
 }
 
+bool CView::closeMobParameterWindow(CMob* mob)
+{
+    const QList<CMobParameters*> windows = m_arrParamWindow;
+    for(CMobParameters* window : windows)
+    {
+        if(window && window->mob() == mob && !window->close())
+            return false;
+    }
+    return true;
+}
+
+bool CView::closeAllMobParameterWindows()
+{
+    const QList<CMobParameters*> windows = m_arrParamWindow;
+    for(CMobParameters* window : windows)
+    {
+        if(window && !window->close())
+            return false;
+    }
+    return true;
+}
+
 bool CView::closeAllMobScriptWindows()
 {
     const QList<QPointer<CMobScriptWindow>> windows = m_scriptWindows.values();
@@ -1909,12 +2488,16 @@ void CView::unloadMob(QString mobName)
     cancelPendingOperation();
     if(mobName.isEmpty())
     {
+        if(!closeAllMobParameterWindows())
+            return;
         if(!closeAllMobScriptWindows())
             return;
     }
     else
     {
         CMob* closingMob = mob(mobName);
+        if(closingMob && !closeMobParameterWindow(closingMob))
+            return;
         if(closingMob && !closeMobScriptWindow(closingMob))
             return;
     }
@@ -1926,6 +2509,7 @@ void CView::unloadMob(QString mobName)
     {
         foreach(pMob, m_aMob)
         {
+            m_hiddenMobs.remove(pMob);
             m_scriptWorkspaces->unregisterMob(pMob);
             emit unloadMob(pMob);
             delete pMob;
@@ -1940,6 +2524,7 @@ void CView::unloadMob(QString mobName)
             if (pMob->mobName().toLower() == mobName.toLower())
             {
                 m_scriptWorkspaces->unregisterMob(pMob);
+                m_hiddenMobs.remove(pMob);
                 emit unloadMob(pMob);
                 delete pMob;
                 m_aMob.removeOne(pMob);
@@ -1963,6 +2548,7 @@ void CView::unloadMob(QString mobName)
 
     ei::log(eLogInfo, "Mob unloaded");
     viewParameters();
+    emit mobStateChanged();
     emit selectionChanged();
 }
 
@@ -1971,9 +2557,19 @@ int CView::nSelectedNodes()
     int n = 0;
     for(const auto& mob: m_aMob)
     {
+        QList<CNode*> counted;
         for(const auto& node: mob->nodes())
-            if(node->nodeState() == ENodeState::eSelect)
+            if(node->nodeState() == ENodeState::eSelect && !counted.contains(node))
+            {
+                counted.append(node);
                 ++n;
+            }
+        for(const auto& node: mob->logicNodes())
+            if(node->nodeState() == ENodeState::eSelect && !counted.contains(node))
+            {
+                counted.append(node);
+                ++n;
+            }
     }
     return n;
 }
@@ -2033,7 +2629,7 @@ void CView::restoreSelection(const QList<CNode*>& selection)
 
     for(CNode* node : selection)
     {
-        if(node && available.contains(node))
+        if(node && available.contains(node) && isMobVisible(ownerMob(node)))
             node->setState(ENodeState::eSelect);
     }
     if(m_pTree)
@@ -2045,12 +2641,52 @@ void CView::restoreSelection(const QList<CNode*>& selection)
     }
     viewParameters();
     update();
+    emit loadedMapStateChanged();
     emit selectionChanged();
+}
+
+bool CView::selectObjectByProvenance(const QString& mobPath, quint32 nid,
+                                     const QString& sectionPath)
+{
+    const QString wantedPath = QDir::cleanPath(QFileInfo(mobPath).absoluteFilePath());
+    CMob* targetMob = nullptr;
+    for(CMob* mob : m_aMob)
+    {
+        if(mob && QDir::cleanPath(mob->filePath().absoluteFilePath()).compare(
+               wantedPath, Qt::CaseInsensitive) == 0)
+        {
+            targetMob = mob;
+            break;
+        }
+    }
+    if(!targetMob)
+        return false;
+
+    CNode* target = nullptr;
+    QList<CNode*> nidMatches;
+    for(CNode* node : targetMob->nodes())
+    {
+        if(!node || node->mapId() != nid)
+            continue;
+        nidMatches.append(node);
+        if(!sectionPath.isEmpty() && node->rawSourceObjectPath() == sectionPath)
+            target = node;
+    }
+    if(!target && nidMatches.size() == 1)
+        target = nidMatches.first();
+    if(!target)
+        return false;
+
+    const QList<CNode*> before = selectionSnapshot();
+    changeCurrentMob(targetMob);
+    restoreSelection(QList<CNode*>() << target);
+    recordSelectionChange(before, tr("Select object from validation"));
+    return true;
 }
 
 void CView::clearObjectSelection()
 {
-    if(!m_activeMob)
+    if(m_aMob.isEmpty())
         return;
     const QList<CNode*> before = selectionSnapshot();
     if(before.isEmpty())
@@ -2059,12 +2695,14 @@ void CView::clearObjectSelection()
             m_pTree->clearViewportSelectionMarker();
         return;
     }
-    m_activeMob->clearSelect(true);
+    for(CMob* mob : m_aMob)
+        if(mob) mob->clearSelect(true);
     recordSelectionChange(before, "Clear selection");
     if(m_pTree)
         m_pTree->clearViewportSelectionMarker();
     viewParameters();
     update();
+    emit loadedMapStateChanged();
 }
 
 void CView::recordSelectionChange(const QList<CNode*>& before, const QString& text)
@@ -2357,7 +2995,7 @@ bool CView::onExit()
         reply = QMessageBox::question(this, "Exit", pMob->mobName() + " has unsaved changes.\nDo you want to save changes?", QMessageBox::Save|QMessageBox::No|QMessageBox::Cancel);
         if(reply == QMessageBox::Save)
         {
-            if(!pMob->save())
+            if(!saveMobDocument(pMob, pMob->filePath()))
             {
                 bCloseAllowed = false;
                 break;
@@ -2378,7 +3016,7 @@ bool CView::onExit()
         reply = QMessageBox::question(this, "Exit", m_pLand->filePath().baseName() + " has unsaved changes.\nDo you want to save changes?", QMessageBox::Save|QMessageBox::No|QMessageBox::Cancel);
         if(reply == QMessageBox::Save)
         {
-            if(!m_pLand->save())
+            if(!saveLandscapeDocument(m_pLand->filePath()))
                 bCloseAllowed = false;
         }
         else if(reply == QMessageBox::Cancel)
@@ -2425,28 +3063,36 @@ void CView::updateParameter(EObjParam propType)
 
 void CView::viewParameters()
 {
-    if(nullptr == m_activeMob)
+    if(m_aMob.isEmpty())
     {
         m_tableManager->reset(); //clear table data if empty current mob
+        m_tableManager->setReadOnly(false);
+        emit selectionStateChanged(false);
         return;
     }
+
+    QList<CNode*> selected;
+    for(CMob* mob : m_aMob)
+        if(mob && isMobVisible(mob))
+            for(CNode* node : CScene::getInstance()->getMode() == eEditModeLogic
+                    ? mob->logicNodes() : mob->nodes())
+                if(node && node->nodeState() == ENodeState::eSelect
+                   && !selected.contains(node))
+                    selected.append(node);
 
     QSet<ENodeType> aType;
     //find unique selected node types
     //CMob* pMob = nullptr;
     //foreach(pMob, m_aMob)
     CNode* pNode = nullptr;
-    foreach(pNode, CScene::getInstance()->getMode() == eEditModeLogic ? m_activeMob->logicNodes() : m_activeMob->nodes())
-    {
-        if (pNode->nodeState() != ENodeState::eSelect)
-            continue;
-
+    foreach(pNode, selected)
         aType.insert(pNode->nodeType());
-    }
 
     if (aType.isEmpty())
     {//reset parameters if not selected objects
         m_tableManager->reset();
+        m_tableManager->setReadOnly(false);
+        emit selectionStateChanged(false);
         return;
     }
 
@@ -2457,11 +3103,8 @@ void CView::viewParameters()
     const ENodeType commonType = ENodeType(ttt);
 
     QList<QSharedPointer<IPropertyBase>> aProp;
-    foreach(pNode, CScene::getInstance()->getMode() == eEditModeLogic ? m_activeMob->logicNodes() : m_activeMob->nodes())
+    foreach(pNode, selected)
     {
-        if (pNode->nodeState() != ENodeState::eSelect)
-            continue;
-
         if(CScene::getInstance()->getMode() == eEditModeLogic)
             pNode->collectlogicParams(aProp, commonType);
         else
@@ -2469,6 +3112,8 @@ void CView::viewParameters()
     }
 
     m_tableManager->setNewData(aProp);
+    m_tableManager->setReadOnly(!hasEditableSelection());
+    emit selectionStateChanged(true);
 }
 
 void CView::onParamChange(const QSharedPointer<IPropertyBase>& prop)
@@ -2506,6 +3151,7 @@ void CView::onParamChange(const QSharedPointer<IPropertyBase>& prop)
         {
             CChangeProp* pChanger = new CChangeProp(this, pNode, prop);
             QObject::connect(pChanger, SIGNAL(updateParam()), this, SLOT(viewParameters()));
+            QObject::connect(pChanger, SIGNAL(updateParam()), m_pTree, SLOT(applyFilter()));
             //QObject::connect(pChanger, SIGNAL(updatePosOnLand(CNode*)), this, SLOT(landPositionUpdate(CNode*)));
             m_pUndoStack->push(pChanger);
             break;
@@ -2514,6 +3160,7 @@ void CView::onParamChange(const QSharedPointer<IPropertyBase>& prop)
         {
             CChangeProp* pChanger = new CChangeProp(this, pNode, prop); // #todo: update node pos after undo-redo
             QObject::connect(pChanger, SIGNAL(updateParam()), this, SLOT(viewParameters()));
+            QObject::connect(pChanger, SIGNAL(updateParam()), m_pTree, SLOT(applyFilter()));
             //QObject::connect(pChanger, SIGNAL(updatePosOnLand(CNode*)), this, SLOT(landPositionUpdate(CNode*)));
             m_pUndoStack->push(pChanger);
             break;
@@ -2523,17 +3170,13 @@ void CView::onParamChange(const QSharedPointer<IPropertyBase>& prop)
             auto pId = dynamic_cast<propUint*>(prop.get());
             if(!pId || pId->value() == pNode->mapId())
                 break;
-            if(!m_activeMob->isFreeId(pId->value()))
-            {
-                ei::log(eLogWarning, "incorrect operation. Duplicate id");
-                QMessageBox::warning(nullptr, "Operation Error", "incorrect operation. Duplicate id");
-                return;
-            }
+            emit nidChangeProposed(pId->value(), m_activeMob->filePath().absoluteFilePath());
             if(!confirmScriptReferencedObjectIds({pNode->mapId()},
                                                  tr("change this object ID")))
                 return;
             CChangeProp* pChanger = new CChangeProp(this, pNode, prop);
             QObject::connect(pChanger, SIGNAL(updateParam()), this, SLOT(viewParameters()));
+            QObject::connect(pChanger, SIGNAL(updateParam()), m_pTree, SLOT(applyFilter()));
             QObject::connect(pChanger, SIGNAL(changeIdSignal(uint,uint)), m_pTree, SLOT(onChangeNodeId(uint,uint)));
             QObject::connect(pChanger, SIGNAL(changeTreeName(CNode*)), m_pTree, SLOT(onChangeObjectName(CNode*)));
             m_pUndoStack->push(pChanger);
@@ -2549,6 +3192,7 @@ void CView::onParamChange(const QSharedPointer<IPropertyBase>& prop)
             {
                 CChangeProp* pChanger = new CChangeProp(this, pNode, prop);
                 QObject::connect(pChanger, SIGNAL(updateParam()), this, SLOT(viewParameters()));
+                QObject::connect(pChanger, SIGNAL(updateParam()), m_pTree, SLOT(applyFilter()));
                 QObject::connect(pChanger, SIGNAL(changeIdSignal(uint,uint)), m_pTree, SLOT(onChangeNodeId(uint,uint)));
                 QObject::connect(pChanger, SIGNAL(changeTreeName(CNode*)), m_pTree, SLOT(onChangeObjectName(CNode*)));
                 m_pUndoStack->push(pChanger);
@@ -2560,6 +3204,77 @@ void CView::onParamChange(const QSharedPointer<IPropertyBase>& prop)
 
     if(grouped)
         m_pUndoStack->endMacro();
+}
+
+bool CView::applyFamilyNidRepairs(const QVector<SNidRepair>& repairs, QString* error)
+{
+    struct ResolvedRepair { CMob* mob; CNode* node; SNidRepair repair; };
+    QVector<ResolvedRepair> resolved;
+    QSet<quint32> replacements;
+    for(const SNidRepair& repair : repairs)
+    {
+        if(repair.oldNid == repair.newNid || replacements.contains(repair.newNid))
+        {
+            if(error) *error = tr("The repair contains a duplicate or unchanged replacement ID.");
+            return false;
+        }
+        CMob* targetMob = nullptr;
+        const QString wanted = QDir::cleanPath(QFileInfo(repair.mobPath).absoluteFilePath());
+        for(CMob* mob : m_aMob)
+            if(mob && QDir::cleanPath(mob->filePath().absoluteFilePath()).compare(
+                   wanted, Qt::CaseInsensitive) == 0)
+            {
+                targetMob = mob;
+                break;
+            }
+        if(!targetMob)
+        {
+            if(error) *error = tr("Repair target is not loaded: %1").arg(repair.mobPath);
+            return false;
+        }
+        CNode* targetNode = nullptr;
+        for(CNode* node : targetMob->nodes())
+            if(node && node->mapId() == repair.oldNid
+               && node->rawSourceObjectPath() == repair.sectionPath)
+            {
+                targetNode = node;
+                break;
+            }
+        if(!targetNode)
+        {
+            if(error) *error = tr("Could not map NID %1 at %2 onto a loaded raw object.")
+                .arg(repair.oldNid).arg(repair.sectionPath);
+            return false;
+        }
+        replacements.insert(repair.newNid);
+        resolved.append({targetMob, targetNode, repair});
+    }
+    if(resolved.isEmpty())
+    {
+        if(error) *error = tr("No repair rows were selected.");
+        return false;
+    }
+
+    m_pUndoStack->beginMacro(tr("Repair %1 family NID collision(s)").arg(resolved.size()));
+    for(const ResolvedRepair& item : resolved)
+    {
+        QSharedPointer<IPropertyBase> value(new propUint(eObjParam_NID, item.repair.newNid));
+        CChangeProp* command = new CChangeProp(this, item.mob, item.node, value);
+        connect(command, SIGNAL(updateParam()), this, SLOT(viewParameters()));
+        connect(command, SIGNAL(changeIdSignal(uint,uint)), m_pTree, SLOT(onChangeNodeId(uint,uint)));
+        m_pUndoStack->push(command);
+    }
+    m_pUndoStack->endMacro();
+    emit mobStateChanged();
+    return true;
+}
+
+quint32 CView::suggestFamilyNid(CMob* mob, quint32 localSuggestion)
+{
+    quint32 suggestion = localSuggestion;
+    if(mob)
+        emit nidAllocationRequested(mob->filePath().absoluteFilePath(), &suggestion);
+    return suggestion;
 }
 
 void CView::onPropertiesChange(const QList<QSharedPointer<IPropertyBase>>& properties)
@@ -2578,9 +3293,13 @@ void CView::onPropertiesChange(const QList<QSharedPointer<IPropertyBase>>& prope
 
 void CView::collectObjectTreeData()
 {
+    m_pTree->prepareForRebuild();
     m_pTree->clear();
-    if(nullptr == m_activeMob)
+    if(m_aMob.isEmpty())
+    {
+        m_pTree->applyFilter();
         return;
+    }
 
     m_pTree->setColumnCount(2);
     QStringList labels;
@@ -2589,86 +3308,96 @@ void CView::collectObjectTreeData()
     m_pTree->header()->setStretchLastSection(false);
     m_pTree->header()->setSectionResizeMode(0, QHeaderView::Stretch);
     m_pTree->resizeColumnToContents(1);
-    //generate common object types
-    QMap<QString, QMap<QString, QList<CNode*>>> aObjList;
-    CNode* pNode = nullptr;
-    ENodeType type = ENodeType::eBaseType;
-    QString groupName;
-    auto fillObjectByType=[&aObjList, &type, &groupName, this](CNode* object) -> void
+    for(CMob* mob : m_aMob)
     {
-        QString typeString = m_pTree->objectNameByType(type);
-        if(aObjList.contains(typeString))
-        {
-            auto& group = aObjList[typeString];
-            group[groupName].append(object);
-
-        }
+        if(!mob)
+            continue;
+        const bool visible = isMobVisible(mob);
+        auto mobItem = new CTreeObject(m_pTree);
+        QString mobLabel = mob->mobName() + (mob->isDirty() ? " *" : "");
+        if(mob == m_activeMob)
+            mobLabel += tr(" [Active]");
         else
-        {
-            QMap<QString, QList<CNode*>> map;
-            map[groupName].append(object);
-            aObjList[typeString] = map;
-        }
-    };
-    foreach(pNode, m_activeMob->nodes())
-    {
-        type = pNode->nodeType();
-        //can be optimized via class overriding
-        switch (type)
-        {
-        case ENodeType::eTorch:
-        case ENodeType::eLever:
-        case ENodeType::eMagicTrap:
-        case ENodeType::eLight:
-        case ENodeType::eSound:
-        case ENodeType::eParticle:
-        case ENodeType::eWorldObject:
-        {
-            groupName = pNode->mapName();
-            fillObjectByType(pNode);
-            break;
-        }
-        case ENodeType::eUnit:
-        {
-            auto pUnitItem = dynamic_cast<CUnit*>(pNode);
-            groupName = pUnitItem->databaseName();
-            fillObjectByType(pNode);
-            break;
-        }
-        default:
-        {
-            //do not collect nothing for Tree View
-            break;
-        }
+            mobLabel += tr(" [Locked]");
+        if(!visible)
+            mobLabel += tr(" [Hidden]");
+        mobItem->setText(0, mobLabel);
+        mobItem->setText(1, QString::number(mob->nodes().size()));
+        mobItem->setData(0, Qt::UserRole + 1,
+                         QVariant::fromValue<qulonglong>(reinterpret_cast<qulonglong>(mob)));
+        mobItem->setExpanded(true);
+        m_pTree->addTopLevelItem(mobItem);
 
-        }
-    }
-
-    for(auto& item : aObjList.toStdMap())
-    {
-        auto pTopItem = new CTreeObject(m_pTree);
-        pTopItem->setText(0, item.first);
-        m_pTree->addTopLevelItem(pTopItem);
-        for(auto& group : item.second.toStdMap())
+        QMap<QString, QMap<QString, QList<CNode*>>> objects;
+        for(CNode* node : mob->nodes())
         {
-            auto pGroupItem = new CTreeObject(pTopItem, nullptr);
-            pGroupItem->setText(1, QString::number(group.second.size()));
-            if(group.second.size() == 1)
-            {
-                // +"(id:"+QString::number(group.second.first())+")"
-                pGroupItem->setText(0, group.first);
-                pGroupItem->setNode(group.second.front());
+            if(!node)
                 continue;
-            }
-            pGroupItem->setText(0, group.first);
-            for(CNode* object : group.second)
+            const QString typeName = m_pTree->objectNameByType(node->nodeType());
+            if(typeName.isEmpty())
+                continue;
+            CUnit* unit = dynamic_cast<CUnit*>(node);
+            const QString group = unit ? unit->databaseName() : node->mapName();
+            objects[typeName][group].append(node);
+        }
+
+        for(auto typeIt = objects.constBegin(); typeIt != objects.constEnd(); ++typeIt)
+        {
+            auto typeItem = new CTreeObject(mobItem, nullptr);
+            typeItem->setText(0, typeIt.key());
+            int typeCount = 0;
+            for(const QList<CNode*>& nodes : typeIt.value())
+                typeCount += nodes.size();
+            typeItem->setText(1, QString::number(typeCount));
+            for(auto groupIt = typeIt.value().constBegin(); groupIt != typeIt.value().constEnd(); ++groupIt)
             {
-                auto pObjectItem = new CTreeObject(pGroupItem, object);
-                pObjectItem->setText(0, QString::number(object->mapId()));
+                auto groupItem = new CTreeObject(typeItem, nullptr);
+                groupItem->setText(0, groupIt.key());
+                groupItem->setText(1, QString::number(groupIt.value().size()));
+                if(groupIt.value().size() == 1)
+                {
+                    groupItem->setNode(groupIt.value().front());
+                    groupItem->setToolTip(0, mob == m_activeMob
+                        ? tr("Belongs to active MOB %1").arg(mob->mobName())
+                        : tr("Belongs to locked MOB %1. Double-click to make it active.")
+                            .arg(mob->mobName()));
+                }
+                else
+                    for(CNode* node : groupIt.value())
+                    {
+                        auto objectItem = new CTreeObject(groupItem, node);
+                        objectItem->setText(0, QString::number(node->mapId()));
+                        objectItem->setToolTip(0, mob == m_activeMob
+                            ? tr("Belongs to active MOB %1").arg(mob->mobName())
+                            : tr("Belongs to locked MOB %1. Double-click to make it active.")
+                                .arg(mob->mobName()));
+                        if(!visible)
+                            objectItem->setFlags(objectItem->flags() & ~Qt::ItemIsSelectable);
+                    }
+                if(!visible)
+                    groupItem->setFlags(groupItem->flags() & ~Qt::ItemIsSelectable);
+            }
+        }
+
+        if(!visible)
+        {
+            const QBrush hiddenTextBrush(QColor(128, 128, 128));
+            QList<QTreeWidgetItem*> pendingItems;
+            pendingItems.append(mobItem);
+            while(!pendingItems.isEmpty())
+            {
+                QTreeWidgetItem* item = pendingItems.takeLast();
+                for(int column = 0; column < item->columnCount(); ++column)
+                    item->setForeground(column, hiddenTextBrush);
+                for(int childIndex = 0; childIndex < item->childCount(); ++childIndex)
+                    pendingItems.append(item->child(childIndex));
             }
         }
     }
-    m_pTree->sortItems(0, Qt::SortOrder::AscendingOrder);
+    m_pTree->applyFilter();
+    const QList<CNode*> selected = selectionSnapshot();
+    if(!selected.isEmpty())
+        m_pTree->markNode(selected.back(), false);
 }
 
 void CView::onRestoreCursor()
@@ -2699,17 +3428,182 @@ void CView::moveCamToSelectedObjects()
 
 void CView::mousePressEvent(QMouseEvent* event)
 {
+    m_lastViewportMousePos = event->pos();
+    m_hasViewportMousePos = rect().contains(event->pos());
     m_pOp->mousePressEvent(event);
 }
 
 void CView::mouseMoveEvent(QMouseEvent* event)
 {
+    m_lastViewportMousePos = event->pos();
+    m_hasViewportMousePos = rect().contains(event->pos());
     m_pOp->mouseMoveEvent(event);
 }
 
 void CView::mouseReleaseEvent(QMouseEvent *event)
 {
+    m_lastViewportMousePos = event->pos();
+    m_hasViewportMousePos = rect().contains(event->pos());
     m_pOp->mouseReleaseEvent(event);
+}
+
+QPoint CView::operationAnchor() const
+{
+    if(m_hasViewportMousePos && rect().contains(m_lastViewportMousePos))
+        return m_lastViewportMousePos;
+    return rect().center();
+}
+
+void CView::setTestSpawnMarker(const QVector3D& position, bool adjusted)
+{
+    m_testSpawnMarker = position;
+    m_testSpawnMarkerValid = true;
+    m_testSpawnMarkerAdjusted = adjusted;
+    update();
+}
+
+void CView::setTestSpawnMarkerSelected(bool selected)
+{
+    m_testSpawnMarkerSelected = m_testSpawnMarkerValid && selected;
+    update();
+}
+
+bool CView::testSpawnMarkerAt(const QPoint& viewportPosition, int tolerance) const
+{
+    if(!m_testSpawnMarkerValid || !m_cam || width() <= 0 || height() <= 0)
+        return false;
+    const QVector3D marker = QVector3D(m_testSpawnMarker.x(), m_testSpawnMarker.y(),
+                                       m_testSpawnMarker.z() + 1.0f).project(
+        m_cam->viewMatrix(), m_projection, QRect(0, 0, width(), height()));
+    if(marker.z() < 0.0f || marker.z() > 1.0f)
+        return false;
+    // QVector3D::project uses the OpenGL bottom-left viewport origin, while
+    // QMouseEvent positions use Qt's top-left widget origin.
+    const QPointF markerInWidget(marker.x(), height() - marker.y());
+    const QPointF delta = markerInWidget - viewportPosition;
+    return delta.x() * delta.x() + delta.y() * delta.y()
+        <= double(tolerance * tolerance);
+}
+
+void CView::clearTestSpawnMarker()
+{
+    m_testSpawnMarkerValid = false;
+    m_testSpawnMarkerSelected = false;
+    update();
+}
+
+void CView::setTestEntranceOverlays(const QVector<QRectF>& rectangles,
+                                    const QStringList& labels,
+                                    int selectedIndex)
+{
+    m_testEntranceRectangles = rectangles;
+    m_testEntranceLabels = labels;
+    m_testEntranceLabelImages.clear();
+    const QFont labelFont = font();
+    const QFontMetrics metrics(labelFont);
+    for(const QString& label : labels)
+    {
+        QRect bounds = metrics.boundingRect(QRect(0, 0, 240, 96),
+                                            Qt::AlignCenter | Qt::TextWordWrap,
+                                            label);
+        bounds.setSize(bounds.size().expandedTo(QSize(36, metrics.height())));
+        QImage image(bounds.width() + 12, bounds.height() + 8,
+                     QImage::Format_ARGB32_Premultiplied);
+        image.fill(Qt::transparent);
+        QPainter painter(&image);
+        painter.setRenderHint(QPainter::Antialiasing);
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(QColor(20, 20, 20, 180));
+        painter.drawRoundedRect(image.rect().adjusted(0, 0, -1, -1), 4, 4);
+        painter.setFont(labelFont);
+        painter.setPen(QColor(255, 245, 180));
+        painter.drawText(image.rect().adjusted(6, 4, -6, -4),
+                         Qt::AlignCenter | Qt::TextWordWrap, label);
+        m_testEntranceLabelImages.append(image);
+    }
+    m_testEntranceLabelTexturesDirty = true;
+    m_selectedTestEntrance = selectedIndex;
+    update();
+}
+
+void CView::moveCameraToPoint(const QVector3D& position)
+{
+    QVector3D terrainPosition(position.x(), position.y(), 0.0f);
+    if(CLandscape::getInstance()->projectPt(terrainPosition))
+    {
+        m_cam->moveTo(terrainPosition);
+        update();
+    }
+}
+
+bool CView::terrainPositionAt(const QPoint& viewportPosition, QVector3D* position)
+{
+    if(!position || !m_pLand || !m_pLand->isMprLoad()
+       || !rect().contains(viewportPosition) || width() <= 0 || height() <= 0)
+        return false;
+
+    const QRect viewport(0, 0, width(), height());
+    const float screenY = float(height() - viewportPosition.y());
+    const QMatrix4x4 view = m_cam->viewMatrix();
+    const QVector3D rayStart = QVector3D(float(viewportPosition.x()), screenY, 0.0f)
+        .unproject(view, m_projection, viewport);
+    const QVector3D rayEnd = QVector3D(float(viewportPosition.x()), screenY, 1.0f)
+        .unproject(view, m_projection, viewport);
+
+    bool havePrevious = false;
+    float previousT = 0.0f;
+    float previousDelta = 0.0f;
+    constexpr int steps = 512;
+    for(int step = 0; step <= steps; ++step)
+    {
+        const float t = float(step) / float(steps);
+        const QVector3D rayPoint = rayStart + (rayEnd - rayStart) * t;
+        QVector3D terrain(rayPoint.x(), rayPoint.y(), 0.0f);
+        if(!CLandscape::getInstance()->projectPt(terrain))
+        {
+            havePrevious = false;
+            continue;
+        }
+        const float delta = rayPoint.z() - terrain.z();
+        if(havePrevious && previousDelta >= 0.0f && delta <= 0.0f)
+        {
+            float low = previousT;
+            float high = t;
+            QVector3D resolved = terrain;
+            for(int iteration = 0; iteration < 14; ++iteration)
+            {
+                const float middle = (low + high) * 0.5f;
+                const QVector3D sample = rayStart + (rayEnd - rayStart) * middle;
+                QVector3D ground(sample.x(), sample.y(), 0.0f);
+                if(!CLandscape::getInstance()->projectPt(ground))
+                {
+                    low = middle;
+                    continue;
+                }
+                resolved = ground;
+                if(sample.z() - ground.z() > 0.0f)
+                    low = middle;
+                else
+                    high = middle;
+            }
+            *position = resolved;
+            return true;
+        }
+        havePrevious = true;
+        previousT = t;
+        previousDelta = delta;
+    }
+    return false;
+}
+
+void CView::anchorCameraRotationToViewportCenter()
+{
+    if(!m_cam || width() <= 0 || height() <= 0)
+        return;
+    bool hit = false;
+    const QVector3D center = getTerrainPos(width() / 2, height() / 2, true, &hit);
+    if(hit)
+        m_cam->setOrbitPivotPreservingView(center);
 }
 
 void CView::wheelEvent(QWheelEvent* event)
@@ -2776,9 +3670,12 @@ CNode* CView::pickObject(QList<CNode*>& aNode, int x, int y)
 }
 
 //clear buffer, draw only landscape, project point and return vector3D
-QVector3D CView::getTerrainPos(const int cursorPosX, const int cursorPosY, bool bLand)
+QVector3D CView::getTerrainPos(const int cursorPosX, const int cursorPosY,
+                              bool bLand, bool* hit)
 {
     QVector3D point(0,0,0);
+    if(hit)
+        *hit = false;
     if(!m_pLand || !m_pLand->isMprLoad())
         return point;
 
@@ -2803,6 +3700,8 @@ QVector3D CView::getTerrainPos(const int cursorPosX, const int cursorPosY, bool 
     const int posY (height() - cursorPosY);
     float z;
     glReadPixels(cursorPosX, posY, 1, 1, GL_DEPTH_COMPONENT, GL_FLOAT, &z );
+    if(hit)
+        *hit = qIsFinite(z) && z >= 0.0f && z < 1.0f;
     //QVector3D point (cursorPosX, posY, z);
     point.setX(cursorPosX);
     point.setY(posY);
@@ -2898,6 +3797,11 @@ bool CView::cancelPendingOperation()
     ei::log(eLogInfo, QString("Cancelled pending viewport operation method:%1 trackedObjects:%2")
             .arg(methodName).arg(trackedObjects));
     return true;
+}
+
+bool CView::hasPendingOperation() const
+{
+    return m_pOp && m_pOp->operationMethod() != eOperationMethodSelect;
 }
 
 bool CView::prepareUndo()
@@ -3343,11 +4247,8 @@ void CView::selectedObjectToClipboardBuffer()
     if(nullptr == m_activeMob)
         return;
 
-    CNode* pNode;
-
     QJsonArray arrObj;
-    //for(auto& mob: m_aMob)
-    foreach(pNode, m_activeMob->nodes())
+    for(CNode* pNode : selectedNodes())
         if (pNode->nodeState() & ENodeState::eSelect)
         {
             QJsonObject nodeData = pNode->toJson();
@@ -3359,6 +4260,16 @@ void CView::selectedObjectToClipboardBuffer()
                 provenance.insert("sourceObjectPath", pNode->rawSourceObjectPath());
                 provenance.insert("sourceSubtreeSha256",
                     QString::fromLatin1(pNode->rawSourceSubtreeSha256().toHex()));
+                QByteArray sourceSubtree;
+                QByteArray cleanSubtree;
+                CMob* sourceMob = ownerMob(pNode);
+                if(sourceMob && sourceMob->rawObjectTemplateBytes(pNode, &sourceSubtree, &cleanSubtree))
+                {
+                    provenance.insert("sourceSubtreeBase64",
+                        QString::fromLatin1(sourceSubtree.toBase64()));
+                    provenance.insert("cleanSubtreeBase64",
+                        QString::fromLatin1(cleanSubtree.toBase64()));
+                }
                 nodeData.insert("_Endurance raw provenance", provenance);
             }
             arrObj.append(nodeData);
@@ -3423,7 +4334,8 @@ void CView::clipboradObjectsToScene()
 
     const QList<CNode*> originalSelection = selectionSnapshot();
     QList<CNode*> previewNodes;
-    m_activeMob->clearSelect();
+    for(CMob* mob : m_aMob)
+        if(mob) mob->clearSelect(true);
     for(auto it = array.begin(); it < array.end(); ++it)
     {
         CNode* node = m_activeMob->createNode(it->toObject());
@@ -3455,6 +4367,7 @@ void CView::clipboradObjectsToScene()
     moveTo(mouseDif);
 
     viewParameters();
+    emit loadedMapStateChanged();
 }
 
 void CView::hideSelectedNodes()
@@ -3497,8 +4410,15 @@ void CView::setDurty(CMob* pMob)
         return;
 
     changedMob->refreshDirtyFromProjection();
-    if(changedMob == m_activeMob)
+    // Undo/redo commands retain their owning MOB. If the user switched the
+    // active destination after creating a command, reveal and unlock that
+    // owner as soon as the command applies instead of changing a locked MOB
+    // invisibly in the background.
+    if(changedMob != m_activeMob && m_aMob.contains(changedMob))
+        changeCurrentMob(changedMob);
+    else
         emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataDirtyFlag, changedMob->isDirty() ? "*" : "");
+    emit mobStateChanged();
 }
 
 bool CView::confirmScriptReferencedObjectIds(const QVector<uint>& objectIds,
@@ -3540,7 +4460,9 @@ bool CView::confirmScriptReferencedObjectIds(const QVector<uint>& objectIds,
 
 void CView::duplicateSelectedObjects()
 {
-    if(!m_activeMob || nSelectedNodes() == 0)
+    // Logic points have their own P/L creation workflow and must not cause
+    // Ctrl+D to replay a stale normal-object clipboard.
+    if(!m_activeMob || selectedNodes().isEmpty())
         return;
     selectedObjectToClipboardBuffer();
     clipboradObjectsToScene();

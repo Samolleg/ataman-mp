@@ -23,6 +23,7 @@ private slots:
     void resolvesLiveBaseDatabaseWhenProvided();
     void decodesSparsePnt3WithTrailingTransparency();
     void decodesLargePnt3Run();
+    void preservesZeroAlphaPnt3PixelsInsideLiteralBlock();
     void rejectsNonAlignedPnt3Run();
     void rejectsOutOfBoundsPnt3Run();
     void rejectsUnalignedPnt3Payload();
@@ -183,14 +184,17 @@ void ResourceNameTests::decodesSparsePnt3WithTrailingTransparency()
 {
     QByteArray compressed;
     appendDword(compressed, 16); // leading transparent bytes
-    compressed.append("\x11\x22\x33\x44", 4); // final literal BGRA pixel
+    compressed.append("\x11\x22\x33\x44", 4);
+    compressed.append("\x21\x32\x43\x54", 4);
+    compressed.append("\x31\x42\x53\x64", 4);
+    compressed.append("\x41\x52\x63\x74", 4); // one four-pixel literal block
     QByteArray decoded;
     QString diagnostic;
-    QVERIFY2(ei::decodePnt3(compressed, 24, &decoded, &diagnostic), qPrintable(diagnostic));
-    QCOMPARE(decoded.size(), 24);
+    QVERIFY2(ei::decodePnt3(compressed, 48, &decoded, &diagnostic), qPrintable(diagnostic));
+    QCOMPARE(decoded.size(), 48);
     QCOMPARE(decoded.mid(16, 4), QByteArray("\x11\x22\x33\x44", 4));
     QCOMPARE(decoded.left(16), QByteArray(16, '\0'));
-    QCOMPARE(decoded.right(4), QByteArray(4, '\0'));
+    QCOMPARE(decoded.right(16), QByteArray(16, '\0'));
 }
 
 void ResourceNameTests::rejectsOutOfBoundsPnt3Run()
@@ -207,14 +211,28 @@ void ResourceNameTests::rejectsOutOfBoundsPnt3Run()
 void ResourceNameTests::decodesLargePnt3Run()
 {
     QByteArray compressed;
-    appendDword(compressed, 3245872); // real ID 203 plate run, above old heuristic
-    compressed.append("\x11\x22\x33\xff", 4);
+    appendDword(compressed, 3245872);
+    compressed.append(QByteArray(16, '\xff'));
     QByteArray decoded;
     QString diagnostic;
-    QVERIFY2(ei::decodePnt3(compressed, 3245876, &decoded, &diagnostic),
+    QVERIFY2(ei::decodePnt3(compressed, 3245888, &decoded, &diagnostic),
              qPrintable(diagnostic));
     QCOMPARE(decoded.left(3245872), QByteArray(3245872, '\0'));
-    QCOMPARE(decoded.right(4), QByteArray("\x11\x22\x33\xff", 4));
+    QCOMPARE(decoded.right(16), QByteArray(16, '\xff'));
+}
+
+void ResourceNameTests::preservesZeroAlphaPnt3PixelsInsideLiteralBlock()
+{
+    QByteArray compressed;
+    compressed.append("\x11\x22\x33\xff", 4); // block control: literal
+    appendDword(compressed, 3947840);             // alpha zero, block pixel 2
+    compressed.append("\x44\x55\x66\x80", 4);
+    appendDword(compressed, 5461080);             // alpha zero, block pixel 4
+    QByteArray decoded;
+    QString diagnostic;
+    QVERIFY2(ei::decodePnt3(compressed, 16, &decoded, &diagnostic),
+             qPrintable(diagnostic));
+    QCOMPARE(decoded, compressed);
 }
 
 void ResourceNameTests::rejectsNonAlignedPnt3Run()

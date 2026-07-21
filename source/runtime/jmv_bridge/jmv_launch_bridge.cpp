@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include <cwchar>
 #include <cstring>
+#include <cctype>
 #include <intrin.h>
 
 #pragma intrinsic(_ReturnAddress)
@@ -17,6 +18,18 @@ constexpr unsigned char kExpectedGameSha256[32] = {
     0x3C, 0xCE, 0x59, 0x00, 0x38, 0xCC, 0x7F, 0x88,
     0x1F, 0x1F, 0x5D, 0x1B, 0xCF, 0x08, 0x27, 0x17,
     0xF3, 0x17, 0x76, 0xDD, 0x4D, 0xEE, 0x94, 0xE2
+};
+constexpr unsigned char kExpectedBaseGameSha256[32] = {
+    0xB8, 0x71, 0xD7, 0x0D, 0x38, 0x76, 0xB2, 0xA5,
+    0x63, 0x4F, 0x09, 0x20, 0xC9, 0x21, 0x18, 0xBC,
+    0x49, 0x05, 0x8B, 0x50, 0xC7, 0xD8, 0xCB, 0xE6,
+    0x83, 0x76, 0x34, 0x9F, 0x51, 0xC2, 0xE5, 0x70
+};
+constexpr unsigned char kExpectedBaseVkGameSha256[32] = {
+    0x8E, 0xD3, 0xF9, 0xA5, 0x00, 0xD8, 0x4D, 0x82,
+    0x2B, 0xD3, 0x11, 0xB7, 0x4B, 0x1B, 0x49, 0xD5,
+    0xCD, 0x16, 0xDD, 0x12, 0xD3, 0x50, 0x2C, 0x27,
+    0xD7, 0x66, 0x79, 0x57, 0x31, 0x10, 0x36, 0xC1
 };
 
 using CreateFileAFn = HANDLE (WINAPI*)(LPCSTR, DWORD, DWORD, LPSECURITY_ATTRIBUTES,
@@ -42,6 +55,14 @@ using MoveFileExWFn = BOOL (WINAPI*)(LPCWSTR, LPCWSTR, DWORD);
 using CopyFileAFn = BOOL (WINAPI*)(LPCSTR, LPCSTR, BOOL);
 using CopyFileWFn = BOOL (WINAPI*)(LPCWSTR, LPCWSTR, BOOL);
 using CaptureStackFn = USHORT (WINAPI*)(ULONG, ULONG, PVOID*, PULONG);
+using RegOpenKeyAFn = LSTATUS (WINAPI*)(HKEY, LPCSTR, PHKEY);
+using RegOpenKeyExAFn = LSTATUS (WINAPI*)(HKEY, LPCSTR, DWORD, REGSAM, PHKEY);
+using RegCreateKeyExAFn = LSTATUS (WINAPI*)(HKEY, LPCSTR, DWORD, LPSTR, DWORD,
+                                            REGSAM, const LPSECURITY_ATTRIBUTES,
+                                            PHKEY, LPDWORD);
+using RegQueryValueExAFn = LSTATUS (WINAPI*)(HKEY, LPCSTR, LPDWORD, LPDWORD,
+                                             LPBYTE, LPDWORD);
+using RegCloseKeyFn = LSTATUS (WINAPI*)(HKEY);
 using MapLoadFn = int (__thiscall*)(void*, const char*, const char*, void*);
 using ZoneTransitionFn = int (__thiscall*)(void*, const char*, int);
 using NewGameBootstrapFn = void (__thiscall*)(void*);
@@ -73,6 +94,19 @@ MoveFileExWFn g_originalMoveFileExW = nullptr;
 CopyFileAFn g_originalCopyFileA = nullptr;
 CopyFileWFn g_originalCopyFileW = nullptr;
 CaptureStackFn g_captureStack = nullptr;
+RegOpenKeyAFn g_originalRegOpenKeyA = nullptr;
+RegOpenKeyExAFn g_originalRegOpenKeyExA = nullptr;
+RegCreateKeyExAFn g_originalRegCreateKeyExA = nullptr;
+RegQueryValueExAFn g_originalRegQueryValueExA = nullptr;
+RegCloseKeyFn g_originalRegCloseKey = nullptr;
+wchar_t g_selectedGameRoot[MAX_PATH * 4] = {};
+wchar_t g_selectedModRoot[MAX_PATH * 4] = {};
+HKEY g_pathSettingsKeys[16] = {};
+HKEY g_starterSettingsKeys[16] = {};
+CRITICAL_SECTION g_registryPathLock{};
+volatile LONG g_registryPathLockReady = 0;
+volatile LONG g_registryOverrideLogCount = 0;
+volatile LONG g_modRootRedirectLogCount = 0;
 
 constexpr DWORD kMapLoadEntryRva = 0x00195480;
 constexpr DWORD kStartZoneTransitionRva = 0x0017C460;
@@ -82,6 +116,7 @@ constexpr DWORD kPlayerDefaultsResetRva = 0x000A5BD0;
 constexpr DWORD kPlayerDefaultsManagerRva = 0x003AA5C4;
 constexpr DWORD kGameStringAssignRva = 0x00300AF9;
 constexpr UINT kDirectLaunchMessage = WM_APP + 0x45D;
+constexpr UINT kHotReloadMessage = WM_APP + 0x45E;
 constexpr unsigned char kMapLoadEntryBytes[6] = {
     0x64, 0xA1, 0x00, 0x00, 0x00, 0x00
 };
@@ -93,6 +128,17 @@ constexpr unsigned char kNewGameBootstrapBytes[7] = {
 };
 constexpr unsigned char kPlayerDefaultsResetBytes[6] = {
     0x64, 0xA1, 0x00, 0x00, 0x00, 0x00
+};
+enum class RuntimeState : LONG
+{
+    Unknown = 0,
+    Initializing = 1,
+    MainMenuReady = 2,
+    GameplayReady = 3,
+    InventoryOpen = 4,
+    StoreOpen = 5,
+    WorldMapReady = 6,
+    Transitioning = 7
 };
 
 MapLoadFn g_originalMapLoad = nullptr;
@@ -107,11 +153,27 @@ void* g_zoneTransitionController = nullptr;
 char g_temporaryMpr[MAX_PATH * 4] = {};
 char g_temporaryMob[MAX_PATH * 4] = {};
 char g_sourceZone[128] = {};
-int g_targetExit = 0;
+int g_targetExit = -1;
+int g_targetExitId = 0;
 wchar_t g_liveSaves[MAX_PATH * 4] = {};
 wchar_t g_testSaves[MAX_PATH * 4] = {};
+CRITICAL_SECTION g_savePathLock{};
+volatile LONG g_savePathLockReady = 0;
+wchar_t g_godmodeMob[MAX_PATH * 4] = {};
+wchar_t g_supplementalMobDirectory[MAX_PATH * 4] = {};
+wchar_t g_hotReloadRequestPath[MAX_PATH * 4] = {};
+wchar_t g_hotReloadThreadPath[MAX_PATH * 4] = {};
+wchar_t g_hotReloadRoot[MAX_PATH * 4] = {};
+ULONGLONG g_hotReloadSequence = 0;
+ULONGLONG g_saveGeneration = 0;
+volatile LONG g_runtimeState = LONG(RuntimeState::Initializing);
+volatile LONG g_runtimeStateSequence = 0;
+volatile LONG g_runtimeStateTick = 0;
+volatile LONG g_pendingStateAwareReload = 0;
 volatile LONG g_saveRedirectLogCount = 0;
+volatile LONG g_godmodeRedirectLogged = 0;
 volatile LONG g_introSkipMask = 0;
+int g_baseProbeLevel = 0;
 
 int __fastcall MapLoadDetour(void* self, void*, const char* mprPath,
                              const char* mobPath, void* context);
@@ -119,6 +181,26 @@ int __fastcall ZoneTransitionDetour(void* self, void*, const char* zoneName,
                                     int requestedMode);
 void __fastcall PlayerDefaultsResetDetour(void* self, void*);
 LRESULT CALLBACK DirectLaunchMessageHook(int code, WPARAM wParam, LPARAM lParam);
+
+struct HotReloadControl
+{
+    int protocol = 0;
+    ULONGLONG sequence = 0;
+    ULONGLONG generation = 0;
+    ULONGLONG runtimeStateSequence = 0;
+    int entranceId = 0;
+    wchar_t mprPath[MAX_PATH * 4] = {};
+    wchar_t mobPath[MAX_PATH * 4] = {};
+    wchar_t bootstrapMobPath[MAX_PATH * 4] = {};
+    wchar_t savePath[MAX_PATH * 4] = {};
+    unsigned char mprSha256[32] = {};
+    unsigned char mobSha256[32] = {};
+    unsigned char bootstrapMobSha256[32] = {};
+    bool hasBootstrap = false;
+    char sourceZone[128] = {};
+    char zone[128] = {};
+    char bootstrapMode[32] = {};
+};
 
 const wchar_t* FileNamePart(const wchar_t* path)
 {
@@ -168,6 +250,41 @@ void Log(const wchar_t* message)
     CloseHandle(file);
 }
 
+const wchar_t* RuntimeStateName(RuntimeState state)
+{
+    switch(state)
+    {
+    case RuntimeState::Initializing: return L"Initializing";
+    case RuntimeState::MainMenuReady: return L"MainMenuReady";
+    case RuntimeState::GameplayReady: return L"GameplayReady";
+    case RuntimeState::InventoryOpen: return L"InventoryOpen";
+    case RuntimeState::StoreOpen: return L"StoreOpen";
+    case RuntimeState::WorldMapReady: return L"WorldMapReady";
+    case RuntimeState::Transitioning: return L"Transitioning";
+    default: return L"Unknown";
+    }
+}
+
+void SetRuntimeState(RuntimeState state, const wchar_t* evidence)
+{
+    InterlockedExchange(&g_runtimeStateTick, LONG(GetTickCount()));
+    const LONG previous = InterlockedExchange(&g_runtimeState, LONG(state));
+    if(previous == LONG(state))
+        return;
+    const LONG sequence = InterlockedIncrement(&g_runtimeStateSequence);
+    wchar_t message[512]{};
+    _snwprintf_s(message, sizeof(message) / sizeof(message[0]), _TRUNCATE,
+                 L"RUNTIME_STATE sequence=%ld from=%s to=%s evidence=%s",
+                 sequence, RuntimeStateName(RuntimeState(previous)),
+                 RuntimeStateName(state), evidence ? evidence : L"<none>");
+    Log(message);
+}
+
+RuntimeState CurrentRuntimeState()
+{
+    return RuntimeState(InterlockedCompareExchange(&g_runtimeState, 0, 0));
+}
+
 bool HashFileSha256(const wchar_t* path, unsigned char output[32])
 {
     HANDLE file = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
@@ -205,14 +322,219 @@ bool HashFileSha256(const wchar_t* path, unsigned char output[32])
     return success;
 }
 
-bool VerifyRuntime()
+bool ParseSha256(const char* text, unsigned char output[32])
+{
+    if(!text || std::strlen(text) != 64)
+        return false;
+    for(int index = 0; index < 32; ++index)
+    {
+        const auto nibble = [](char value) -> int
+        {
+            if(value >= '0' && value <= '9') return value - '0';
+            value = char(std::tolower(static_cast<unsigned char>(value)));
+            return value >= 'a' && value <= 'f' ? value - 'a' + 10 : -1;
+        };
+        const int high = nibble(text[index * 2]);
+        const int low = nibble(text[index * 2 + 1]);
+        if(high < 0 || low < 0)
+            return false;
+        output[index] = static_cast<unsigned char>((high << 4) | low);
+    }
+    return true;
+}
+
+bool HashMatches(const wchar_t* path, const unsigned char expected[32])
+{
+    unsigned char actual[32]{};
+    return HashFileSha256(path, actual)
+        && std::memcmp(actual, expected, sizeof(actual)) == 0;
+}
+
+bool Utf8ToWide(const char* source, wchar_t* output, int outputCount)
+{
+    return source && output && outputCount > 0
+        && MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, source, -1,
+                               output, outputCount) > 0;
+}
+
+bool IsPathInsideHotReloadRoot(const wchar_t* path)
+{
+    if(!path || !path[0] || !g_hotReloadRoot[0])
+        return false;
+    wchar_t fullPath[MAX_PATH * 4]{};
+    wchar_t fullRoot[MAX_PATH * 4]{};
+    if(!GetFullPathNameW(path, DWORD(sizeof(fullPath) / sizeof(fullPath[0])), fullPath, nullptr)
+       || !GetFullPathNameW(g_hotReloadRoot,
+                           DWORD(sizeof(fullRoot) / sizeof(fullRoot[0])), fullRoot, nullptr))
+        return false;
+    size_t rootLength = std::wcslen(fullRoot);
+    while(rootLength > 3 && (fullRoot[rootLength - 1] == L'\\'
+                            || fullRoot[rootLength - 1] == L'/'))
+        fullRoot[--rootLength] = L'\0';
+    return _wcsnicmp(fullPath, fullRoot, rootLength) == 0
+        && (fullPath[rootLength] == L'\\' || fullPath[rootLength] == L'/');
+}
+
+bool ReadHotReloadControl(HotReloadControl* output)
+{
+    if(!output || !g_hotReloadRequestPath[0]
+       || !IsPathInsideHotReloadRoot(g_hotReloadRequestPath))
+        return false;
+    HANDLE file = CreateFileW(g_hotReloadRequestPath, GENERIC_READ,
+                              FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                              nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if(file == INVALID_HANDLE_VALUE)
+        return false;
+    LARGE_INTEGER size{};
+    bool success = GetFileSizeEx(file, &size) && size.QuadPart > 0
+        && size.QuadPart < 64 * 1024;
+    char bytes[64 * 1024]{};
+    DWORD read = 0;
+    if(success)
+        success = ReadFile(file, bytes, DWORD(size.QuadPart), &read, nullptr)
+            && read == DWORD(size.QuadPart);
+    CloseHandle(file);
+    if(!success)
+        return false;
+    bytes[read] = '\0';
+
+    HotReloadControl parsed;
+    bool haveMprHash = false;
+    bool haveMobHash = false;
+    bool haveProfile = false;
+    bool haveRunId = false;
+    char* context = nullptr;
+    for(char* line = strtok_s(bytes, "\r\n", &context); line;
+        line = strtok_s(nullptr, "\r\n", &context))
+    {
+        char* separator = std::strchr(line, '=');
+        if(!separator) continue;
+        *separator = '\0';
+        const char* value = separator + 1;
+        if(std::strcmp(line, "protocol") == 0) parsed.protocol = std::atoi(value);
+        else if(std::strcmp(line, "sequence") == 0) parsed.sequence = _strtoui64(value, nullptr, 10);
+        else if(std::strcmp(line, "generation") == 0) parsed.generation = _strtoui64(value, nullptr, 10);
+        else if(std::strcmp(line, "runtimeStateSequence") == 0)
+            parsed.runtimeStateSequence = _strtoui64(value, nullptr, 10);
+        else if(std::strcmp(line, "runId") == 0) haveRunId = value[0] != '\0';
+        else if(std::strcmp(line, "profile") == 0)
+        {
+            haveProfile = _stricmp(value, "jamais-vu") == 0;
+            if(!haveProfile) return false;
+        }
+        else if(std::strcmp(line, "zone") == 0)
+        {
+            if(strcpy_s(parsed.zone, value) != 0) return false;
+        }
+        else if(std::strcmp(line, "sourceZone") == 0)
+        {
+            if(strcpy_s(parsed.sourceZone, value) != 0) return false;
+        }
+        else if(std::strcmp(line, "bootstrapMode") == 0)
+        {
+            if(strcpy_s(parsed.bootstrapMode, value) != 0) return false;
+        }
+        else if(std::strcmp(line, "entrance") == 0) parsed.entranceId = std::atoi(value);
+        else if(std::strcmp(line, "mpr") == 0)
+        {
+            if(!Utf8ToWide(value, parsed.mprPath,
+                           int(sizeof(parsed.mprPath) / sizeof(parsed.mprPath[0])))) return false;
+        }
+        else if(std::strcmp(line, "mob") == 0)
+        {
+            if(!Utf8ToWide(value, parsed.mobPath,
+                           int(sizeof(parsed.mobPath) / sizeof(parsed.mobPath[0])))) return false;
+        }
+        else if(std::strcmp(line, "savePath") == 0)
+        {
+            if(!Utf8ToWide(value, parsed.savePath,
+                           int(sizeof(parsed.savePath) / sizeof(parsed.savePath[0])))) return false;
+        }
+        else if(std::strcmp(line, "bootstrapMob") == 0 && value[0])
+        {
+            parsed.hasBootstrap = Utf8ToWide(value, parsed.bootstrapMobPath,
+                int(sizeof(parsed.bootstrapMobPath) / sizeof(parsed.bootstrapMobPath[0])));
+            if(!parsed.hasBootstrap) return false;
+        }
+        else if(std::strcmp(line, "mprSha256") == 0)
+            haveMprHash = ParseSha256(value, parsed.mprSha256);
+        else if(std::strcmp(line, "mobSha256") == 0)
+            haveMobHash = ParseSha256(value, parsed.mobSha256);
+        else if(std::strcmp(line, "bootstrapMobSha256") == 0 && value[0])
+        {
+            if(!ParseSha256(value, parsed.bootstrapMobSha256)) return false;
+        }
+    }
+    for(const char* cursor = parsed.zone; *cursor; ++cursor)
+        if(!std::isalnum(static_cast<unsigned char>(*cursor))
+           && *cursor != '_' && *cursor != '-')
+            return false;
+    for(const char* cursor = parsed.sourceZone; *cursor; ++cursor)
+        if(!std::isalnum(static_cast<unsigned char>(*cursor))
+           && *cursor != '_' && *cursor != '-')
+            return false;
+    if(parsed.bootstrapMode[0]
+       && _stricmp(parsed.bootstrapMode, "automatic") != 0
+       && _stricmp(parsed.bootstrapMode, "transition") != 0
+       && _stricmp(parsed.bootstrapMode, "new-game") != 0)
+        return false;
+    if(parsed.protocol != 2 || parsed.sequence == 0 || parsed.generation == 0
+       || !haveProfile || !haveRunId
+       || parsed.sequence <= g_hotReloadSequence || parsed.entranceId <= 0
+       || parsed.entranceId > 1024
+       || !parsed.zone[0] || !parsed.mprPath[0] || !parsed.mobPath[0]
+       || !parsed.savePath[0]
+       || !haveMprHash || !haveMobHash
+       || !IsPathInsideHotReloadRoot(parsed.mprPath)
+       || !IsPathInsideHotReloadRoot(parsed.mobPath)
+       || !IsPathInsideHotReloadRoot(parsed.savePath)
+       || !HashMatches(parsed.mprPath, parsed.mprSha256)
+       || !HashMatches(parsed.mobPath, parsed.mobSha256))
+        return false;
+    const DWORD saveAttributes = GetFileAttributesW(parsed.savePath);
+    if(saveAttributes == INVALID_FILE_ATTRIBUTES || !(saveAttributes & FILE_ATTRIBUTE_DIRECTORY)
+       || (saveAttributes & FILE_ATTRIBUTE_REPARSE_POINT))
+        return false;
+    if(parsed.hasBootstrap
+       && (!IsPathInsideHotReloadRoot(parsed.bootstrapMobPath)
+           || !HashMatches(parsed.bootstrapMobPath, parsed.bootstrapMobSha256)))
+        return false;
+    *output = parsed;
+    return true;
+}
+
+void PublishHotReloadThreadId()
+{
+    if(!g_hotReloadThreadPath[0] || !IsPathInsideHotReloadRoot(g_hotReloadThreadPath))
+        return;
+    HANDLE file = CreateFileW(g_hotReloadThreadPath, GENERIC_WRITE, FILE_SHARE_READ,
+                              nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if(file == INVALID_HANDLE_VALUE)
+        return;
+    char value[32]{};
+    const int length = sprintf_s(value, "%lu\r\n", g_gameThreadId);
+    DWORD written = 0;
+    if(length > 0)
+        WriteFile(file, value, DWORD(length), &written, nullptr);
+    CloseHandle(file);
+}
+
+enum class RuntimeBuild { Unsupported, JmvStarter, BaseEi };
+
+RuntimeBuild VerifyRuntime()
 {
     wchar_t gamePath[MAX_PATH * 4]{};
     if(!GetModuleFileNameW(nullptr, gamePath, DWORD(sizeof(gamePath) / sizeof(gamePath[0]))))
-        return false;
+        return RuntimeBuild::Unsupported;
     unsigned char hash[32]{};
-    return HashFileSha256(gamePath, hash) &&
-           std::memcmp(hash, kExpectedGameSha256, sizeof(hash)) == 0;
+    if(!HashFileSha256(gamePath, hash))
+        return RuntimeBuild::Unsupported;
+    if(std::memcmp(hash, kExpectedGameSha256, sizeof(hash)) == 0)
+        return RuntimeBuild::JmvStarter;
+    if(std::memcmp(hash, kExpectedBaseGameSha256, sizeof(hash)) == 0
+       || std::memcmp(hash, kExpectedBaseVkGameSha256, sizeof(hash)) == 0)
+        return RuntimeBuild::BaseEi;
+    return RuntimeBuild::Unsupported;
 }
 
 void AppendText(wchar_t* destination, size_t capacity, const wchar_t* text)
@@ -323,6 +645,15 @@ bool RewriteSavePathW(LPCWSTR path, wchar_t* output, size_t capacity)
 {
     if(!path || !output || !capacity || !g_liveSaves[0] || !g_testSaves[0])
         return false;
+    wchar_t activeSaves[MAX_PATH * 4]{};
+    if(InterlockedCompareExchange(&g_savePathLockReady, 0, 0))
+    {
+        EnterCriticalSection(&g_savePathLock);
+        wcscpy_s(activeSaves, g_testSaves);
+        LeaveCriticalSection(&g_savePathLock);
+    }
+    else
+        wcscpy_s(activeSaves, g_testSaves);
     wchar_t full[MAX_PATH * 4]{};
     const DWORD length = GetFullPathNameW(path, DWORD(sizeof(full) / sizeof(full[0])), full, nullptr);
     if(!length || length >= sizeof(full) / sizeof(full[0]))
@@ -332,7 +663,7 @@ bool RewriteSavePathW(LPCWSTR path, wchar_t* output, size_t capacity)
     if(_wcsnicmp(full, g_liveSaves, liveLength) != 0 || !IsPathBoundary(full[liveLength]))
         return false;
     const wchar_t* suffix = full + liveLength;
-    if(_snwprintf_s(output, capacity, _TRUNCATE, L"%s%s", g_testSaves, suffix) < 0)
+    if(_snwprintf_s(output, capacity, _TRUNCATE, L"%s%s", activeSaves, suffix) < 0)
         return false;
     const LONG sequence = InterlockedIncrement(&g_saveRedirectLogCount);
     if(sequence <= 64)
@@ -358,6 +689,151 @@ bool RewriteSavePathA(LPCSTR path, char* output, size_t capacity)
     BOOL substituted = FALSE;
     return WideCharToMultiByte(CP_ACP, WC_NO_BEST_FIT_CHARS, rewritten, -1,
                                output, int(capacity), nullptr, &substituted) != 0 && !substituted;
+}
+
+bool RewriteSelectedModRootW(LPCWSTR path, wchar_t* output, size_t capacity)
+{
+    if(!path || !output || !capacity || !g_selectedModRoot[0])
+        return false;
+    wchar_t full[MAX_PATH * 4]{};
+    const DWORD length = GetFullPathNameW(path,
+        DWORD(sizeof(full) / sizeof(full[0])), full, nullptr);
+    if(!length || length >= sizeof(full) / sizeof(full[0]))
+        return false;
+    NormalizeSlashes(full);
+
+    wchar_t selected[MAX_PATH * 4]{};
+    if(wcscpy_s(selected, g_selectedModRoot) != 0)
+        return false;
+    NormalizeSlashes(selected);
+    const size_t selectedLength = std::wcslen(selected);
+    if(_wcsnicmp(full, selected, selectedLength) == 0
+       && IsPathBoundary(full[selectedLength]))
+        return false;
+
+    const wchar_t marker[] = L"\\Starter\\Mods\\";
+    const size_t markerLength = (sizeof(marker) / sizeof(marker[0])) - 1;
+    const wchar_t* markerAt = nullptr;
+    for(const wchar_t* cursor = full; *cursor; ++cursor)
+        if(_wcsnicmp(cursor, marker, markerLength) == 0)
+        {
+            markerAt = cursor;
+            break;
+        }
+    if(!markerAt)
+        return false;
+
+    const wchar_t* requestedMod = markerAt + markerLength;
+    const wchar_t* requestedSuffix = requestedMod;
+    while(*requestedSuffix && *requestedSuffix != L'\\' && *requestedSuffix != L'/')
+        ++requestedSuffix;
+    const wchar_t* selectedName = FileNamePart(selected);
+    const size_t requestedNameLength = size_t(requestedSuffix - requestedMod);
+    if(!selectedName || std::wcslen(selectedName) != requestedNameLength
+       || _wcsnicmp(requestedMod, selectedName, requestedNameLength) != 0)
+        return false;
+
+    if(_snwprintf_s(output, capacity, _TRUNCATE, L"%s%s",
+                    selected, requestedSuffix) < 0)
+        return false;
+    const LONG sequence = InterlockedIncrement(&g_modRootRedirectLogCount);
+    if(sequence <= 64)
+    {
+        wchar_t message[1900]{};
+        _snwprintf_s(message, sizeof(message) / sizeof(message[0]), _TRUNCATE,
+                     L"JMV_ROOT_REDIRECT seq=%ld from=\"%s\" to=\"%s\"",
+                     sequence, full, output);
+        Log(message);
+    }
+    return true;
+}
+
+bool RewriteSelectedModRootA(LPCSTR path, char* output, size_t capacity)
+{
+    if(!path || !output || !capacity)
+        return false;
+    wchar_t wide[MAX_PATH * 4]{};
+    wchar_t rewritten[MAX_PATH * 4]{};
+    if(!MultiByteToWideChar(CP_ACP, 0, path, -1, wide,
+                            int(sizeof(wide) / sizeof(wide[0])))
+       || !RewriteSelectedModRootW(wide, rewritten,
+                                   sizeof(rewritten) / sizeof(rewritten[0])))
+        return false;
+    BOOL substituted = FALSE;
+    return WideCharToMultiByte(CP_ACP, WC_NO_BEST_FIT_CHARS, rewritten, -1,
+                               output, int(capacity), nullptr, &substituted) != 0
+        && !substituted;
+}
+
+bool RewriteOwnedPathW(LPCWSTR path, wchar_t* output, size_t capacity)
+{
+    if(!path || !output || !capacity)
+        return false;
+    wchar_t modPath[MAX_PATH * 4]{};
+    const wchar_t* selected = path;
+    const bool modRedirected = RewriteSelectedModRootW(
+        path, modPath, sizeof(modPath) / sizeof(modPath[0]));
+    if(modRedirected)
+        selected = modPath;
+    if(RewriteSavePathW(selected, output, capacity))
+        return true;
+    return modRedirected && wcscpy_s(output, capacity, selected) == 0;
+}
+
+bool RewriteOwnedPathA(LPCSTR path, char* output, size_t capacity)
+{
+    if(!path || !output || !capacity)
+        return false;
+    char modPath[MAX_PATH * 4]{};
+    const char* selected = path;
+    const bool modRedirected = RewriteSelectedModRootA(path, modPath, sizeof(modPath));
+    if(modRedirected)
+        selected = modPath;
+    if(RewriteSavePathA(selected, output, capacity))
+        return true;
+    return modRedirected && strcpy_s(output, capacity, selected) == 0;
+}
+
+bool CommitSaveGeneration(const HotReloadControl& request)
+{
+    if(request.generation == g_saveGeneration)
+        return _wcsicmp(g_testSaves, request.savePath) == 0;
+    if(request.generation < g_saveGeneration || !IsPathInsideHotReloadRoot(request.savePath))
+        return false;
+    wchar_t pattern[MAX_PATH * 4]{};
+    if(_snwprintf_s(pattern, sizeof(pattern) / sizeof(pattern[0]), _TRUNCATE,
+                    L"%s\\*", request.savePath) < 0)
+        return false;
+    WIN32_FIND_DATAW data{};
+    HANDLE find = FindFirstFileW(pattern, &data);
+    if(find != INVALID_HANDLE_VALUE)
+    {
+        bool nonEmpty = false;
+        do
+        {
+            if(wcscmp(data.cFileName, L".") != 0 && wcscmp(data.cFileName, L"..") != 0)
+            {
+                nonEmpty = true;
+                break;
+            }
+        } while(FindNextFileW(find, &data));
+        FindClose(find);
+        if(nonEmpty)
+            return false;
+    }
+    EnterCriticalSection(&g_savePathLock);
+    const bool copied = wcscpy_s(g_testSaves, request.savePath) == 0;
+    if(copied)
+        g_saveGeneration = request.generation;
+    LeaveCriticalSection(&g_savePathLock);
+    if(!copied)
+        return false;
+    wchar_t message[1800]{};
+    _snwprintf_s(message, sizeof(message) / sizeof(message[0]), _TRUNCATE,
+                 L"SAVE_GENERATION committed generation=%llu path=\"%s\"",
+                 request.generation, request.savePath);
+    Log(message);
+    return true;
 }
 
 bool ShouldSkipIntroW(LPCWSTR path)
@@ -395,6 +871,81 @@ bool ShouldSkipIntroA(LPCSTR path)
                                int(sizeof(wide) / sizeof(wide[0]))) && ShouldSkipIntroW(wide);
 }
 
+bool RewriteGodmodeMobW(LPCWSTR path, wchar_t* output, size_t capacity)
+{
+    if(!path || !output || !capacity || !g_godmodeMob[0])
+        return false;
+    const wchar_t* name = FileNamePart(path);
+    if(!name || _wcsicmp(name, L"AutoRunSpellAddon123.mob") != 0)
+        return false;
+    if(wcsncpy_s(output, capacity, g_godmodeMob, _TRUNCATE) != 0)
+        return false;
+    if(InterlockedCompareExchange(&g_godmodeRedirectLogged, 1, 0) == 0)
+    {
+        wchar_t message[1800]{};
+        _snwprintf_s(message, sizeof(message) / sizeof(message[0]), _TRUNCATE,
+                     L"RUNTIME_BOOTSTRAP redirect from=\"%s\" to=\"%s\"",
+                     path, output);
+        Log(message);
+    }
+    return true;
+}
+
+bool RewriteGodmodeMobA(LPCSTR path, char* output, size_t capacity)
+{
+    if(!path || !output || !capacity)
+        return false;
+    wchar_t wide[MAX_PATH * 4]{};
+    wchar_t rewritten[MAX_PATH * 4]{};
+    if(!MultiByteToWideChar(CP_ACP, 0, path, -1, wide,
+                            int(sizeof(wide) / sizeof(wide[0]))) ||
+       !RewriteGodmodeMobW(wide, rewritten,
+                           sizeof(rewritten) / sizeof(rewritten[0])))
+        return false;
+    BOOL substituted = FALSE;
+    return WideCharToMultiByte(CP_ACP, WC_NO_BEST_FIT_CHARS, rewritten, -1,
+                               output, int(capacity), nullptr, &substituted) != 0 && !substituted;
+}
+
+bool RewriteSupplementalMobW(LPCWSTR path, wchar_t* output, size_t capacity)
+{
+    if(!path || !output || !capacity || !g_supplementalMobDirectory[0])
+        return false;
+    const wchar_t* name = FileNamePart(path);
+    const wchar_t* extension = name ? std::wcsrchr(name, L'.') : nullptr;
+    if(!name || !extension || _wcsicmp(extension, L".mob") != 0
+       || _wcsicmp(name, L"AutoRunSpellAddon123.mob") == 0)
+        return false;
+    if(_snwprintf_s(output, capacity, _TRUNCATE, L"%s\\%s",
+                    g_supplementalMobDirectory, name) < 0)
+        return false;
+    const DWORD attributes = g_originalGetFileAttributesW
+        ? g_originalGetFileAttributesW(output) : GetFileAttributesW(output);
+    if(attributes == INVALID_FILE_ATTRIBUTES || (attributes & FILE_ATTRIBUTE_DIRECTORY))
+        return false;
+    wchar_t message[1800]{};
+    _snwprintf_s(message, sizeof(message) / sizeof(message[0]), _TRUNCATE,
+                 L"SUPPLEMENTAL_MOB redirect from=\"%s\" to=\"%s\"", path, output);
+    Log(message);
+    return true;
+}
+
+bool RewriteSupplementalMobA(LPCSTR path, char* output, size_t capacity)
+{
+    if(!path || !output || !capacity)
+        return false;
+    wchar_t wide[MAX_PATH * 4]{};
+    wchar_t rewritten[MAX_PATH * 4]{};
+    if(!MultiByteToWideChar(CP_ACP, 0, path, -1, wide,
+                            int(sizeof(wide) / sizeof(wide[0])))
+       || !RewriteSupplementalMobW(wide, rewritten,
+                                   sizeof(rewritten) / sizeof(rewritten[0])))
+        return false;
+    BOOL substituted = FALSE;
+    return WideCharToMultiByte(CP_ACP, WC_NO_BEST_FIT_CHARS, rewritten, -1,
+                               output, int(capacity), nullptr, &substituted) != 0 && !substituted;
+}
+
 HANDLE WINAPI HookCreateFileW(LPCWSTR path, DWORD access, DWORD share,
                               LPSECURITY_ATTRIBUTES security, DWORD creation,
                               DWORD flags, HANDLE templateFile)
@@ -403,8 +954,9 @@ HANDLE WINAPI HookCreateFileW(LPCWSTR path, DWORD access, DWORD share,
     if(ShouldSkipIntroW(path))
         return INVALID_HANDLE_VALUE;
     wchar_t redirected[MAX_PATH * 4]{};
-    LPCWSTR selected = RewriteSavePathW(path, redirected, sizeof(redirected) / sizeof(redirected[0]))
-        ? redirected : path;
+    LPCWSTR selected = (RewriteGodmodeMobW(path, redirected, sizeof(redirected) / sizeof(redirected[0]))
+        || RewriteSupplementalMobW(path, redirected, sizeof(redirected) / sizeof(redirected[0]))
+        || RewriteOwnedPathW(path, redirected, sizeof(redirected) / sizeof(redirected[0]))) ? redirected : path;
     HANDLE result = g_originalCreateFileW(selected, access, share, security, creation, flags, templateFile);
     const DWORD error = GetLastError();
     Observe(L"CreateFileW", path, reinterpret_cast<ULONG_PTR>(result), error, caller, access, creation);
@@ -420,7 +972,9 @@ HANDLE WINAPI HookCreateFileA(LPCSTR path, DWORD access, DWORD share,
     if(ShouldSkipIntroA(path))
         return INVALID_HANDLE_VALUE;
     char redirected[MAX_PATH * 4]{};
-    LPCSTR selected = RewriteSavePathA(path, redirected, sizeof(redirected)) ? redirected : path;
+    LPCSTR selected = (RewriteGodmodeMobA(path, redirected, sizeof(redirected))
+        || RewriteSupplementalMobA(path, redirected, sizeof(redirected))
+        || RewriteOwnedPathA(path, redirected, sizeof(redirected))) ? redirected : path;
     HANDLE result = g_originalCreateFileA(selected, access, share, security, creation, flags, templateFile);
     const DWORD error = GetLastError();
     if(path)
@@ -440,8 +994,9 @@ DWORD WINAPI HookGetFileAttributesW(LPCWSTR path)
     if(ShouldSkipIntroW(path))
         return INVALID_FILE_ATTRIBUTES;
     wchar_t redirected[MAX_PATH * 4]{};
-    LPCWSTR selected = RewriteSavePathW(path, redirected, sizeof(redirected) / sizeof(redirected[0]))
-        ? redirected : path;
+    LPCWSTR selected = (RewriteGodmodeMobW(path, redirected, sizeof(redirected) / sizeof(redirected[0]))
+        || RewriteSupplementalMobW(path, redirected, sizeof(redirected) / sizeof(redirected[0]))
+        || RewriteOwnedPathW(path, redirected, sizeof(redirected) / sizeof(redirected[0]))) ? redirected : path;
     const DWORD result = g_originalGetFileAttributesW(selected);
     const DWORD error = GetLastError();
     Observe(L"GetFileAttributesW", path, result, error, caller);
@@ -455,7 +1010,9 @@ DWORD WINAPI HookGetFileAttributesA(LPCSTR path)
     if(ShouldSkipIntroA(path))
         return INVALID_FILE_ATTRIBUTES;
     char redirected[MAX_PATH * 4]{};
-    LPCSTR selected = RewriteSavePathA(path, redirected, sizeof(redirected)) ? redirected : path;
+    LPCSTR selected = (RewriteGodmodeMobA(path, redirected, sizeof(redirected))
+        || RewriteSupplementalMobA(path, redirected, sizeof(redirected))
+        || RewriteOwnedPathA(path, redirected, sizeof(redirected))) ? redirected : path;
     const DWORD result = g_originalGetFileAttributesA(selected);
     const DWORD error = GetLastError();
     if(path)
@@ -471,11 +1028,11 @@ DWORD WINAPI HookGetFileAttributesA(LPCSTR path)
 
 #define REDIRECT_ONE_W(name, original, resultType, failure, parameters, arguments) \
 resultType WINAPI name parameters { wchar_t redirected[MAX_PATH * 4]{}; \
-LPCWSTR selected = RewriteSavePathW(path, redirected, sizeof(redirected) / sizeof(redirected[0])) ? redirected : path; \
+LPCWSTR selected = RewriteOwnedPathW(path, redirected, sizeof(redirected) / sizeof(redirected[0])) ? redirected : path; \
 return original arguments; }
 #define REDIRECT_ONE_A(name, original, resultType, failure, parameters, arguments) \
 resultType WINAPI name parameters { char redirected[MAX_PATH * 4]{}; \
-LPCSTR selected = RewriteSavePathA(path, redirected, sizeof(redirected)) ? redirected : path; \
+LPCSTR selected = RewriteOwnedPathA(path, redirected, sizeof(redirected)) ? redirected : path; \
 return original arguments; }
 
 REDIRECT_ONE_W(HookSetFileAttributesW, g_originalSetFileAttributesW, BOOL, FALSE,
@@ -502,44 +1059,276 @@ REDIRECT_ONE_A(HookFindFirstFileA, g_originalFindFirstFileA, HANDLE, INVALID_HAN
 BOOL WINAPI HookMoveFileW(LPCWSTR from, LPCWSTR to)
 {
     wchar_t redirectedFrom[MAX_PATH * 4]{}, redirectedTo[MAX_PATH * 4]{};
-    LPCWSTR selectedFrom = RewriteSavePathW(from, redirectedFrom, sizeof(redirectedFrom) / sizeof(redirectedFrom[0])) ? redirectedFrom : from;
-    LPCWSTR selectedTo = RewriteSavePathW(to, redirectedTo, sizeof(redirectedTo) / sizeof(redirectedTo[0])) ? redirectedTo : to;
+    LPCWSTR selectedFrom = RewriteOwnedPathW(from, redirectedFrom, sizeof(redirectedFrom) / sizeof(redirectedFrom[0])) ? redirectedFrom : from;
+    LPCWSTR selectedTo = RewriteOwnedPathW(to, redirectedTo, sizeof(redirectedTo) / sizeof(redirectedTo[0])) ? redirectedTo : to;
     return g_originalMoveFileW(selectedFrom, selectedTo);
 }
 BOOL WINAPI HookMoveFileA(LPCSTR from, LPCSTR to)
 {
     char redirectedFrom[MAX_PATH * 4]{}, redirectedTo[MAX_PATH * 4]{};
-    LPCSTR selectedFrom = RewriteSavePathA(from, redirectedFrom, sizeof(redirectedFrom)) ? redirectedFrom : from;
-    LPCSTR selectedTo = RewriteSavePathA(to, redirectedTo, sizeof(redirectedTo)) ? redirectedTo : to;
+    LPCSTR selectedFrom = RewriteOwnedPathA(from, redirectedFrom, sizeof(redirectedFrom)) ? redirectedFrom : from;
+    LPCSTR selectedTo = RewriteOwnedPathA(to, redirectedTo, sizeof(redirectedTo)) ? redirectedTo : to;
     return g_originalMoveFileA(selectedFrom, selectedTo);
 }
 BOOL WINAPI HookMoveFileExW(LPCWSTR from, LPCWSTR to, DWORD flags)
 {
     wchar_t redirectedFrom[MAX_PATH * 4]{}, redirectedTo[MAX_PATH * 4]{};
-    LPCWSTR selectedFrom = RewriteSavePathW(from, redirectedFrom, sizeof(redirectedFrom) / sizeof(redirectedFrom[0])) ? redirectedFrom : from;
-    LPCWSTR selectedTo = RewriteSavePathW(to, redirectedTo, sizeof(redirectedTo) / sizeof(redirectedTo[0])) ? redirectedTo : to;
+    LPCWSTR selectedFrom = RewriteOwnedPathW(from, redirectedFrom, sizeof(redirectedFrom) / sizeof(redirectedFrom[0])) ? redirectedFrom : from;
+    LPCWSTR selectedTo = RewriteOwnedPathW(to, redirectedTo, sizeof(redirectedTo) / sizeof(redirectedTo[0])) ? redirectedTo : to;
     return g_originalMoveFileExW(selectedFrom, selectedTo, flags);
 }
 BOOL WINAPI HookMoveFileExA(LPCSTR from, LPCSTR to, DWORD flags)
 {
     char redirectedFrom[MAX_PATH * 4]{}, redirectedTo[MAX_PATH * 4]{};
-    LPCSTR selectedFrom = RewriteSavePathA(from, redirectedFrom, sizeof(redirectedFrom)) ? redirectedFrom : from;
-    LPCSTR selectedTo = RewriteSavePathA(to, redirectedTo, sizeof(redirectedTo)) ? redirectedTo : to;
+    LPCSTR selectedFrom = RewriteOwnedPathA(from, redirectedFrom, sizeof(redirectedFrom)) ? redirectedFrom : from;
+    LPCSTR selectedTo = RewriteOwnedPathA(to, redirectedTo, sizeof(redirectedTo)) ? redirectedTo : to;
     return g_originalMoveFileExA(selectedFrom, selectedTo, flags);
 }
 BOOL WINAPI HookCopyFileW(LPCWSTR from, LPCWSTR to, BOOL failIfExists)
 {
     wchar_t redirectedFrom[MAX_PATH * 4]{}, redirectedTo[MAX_PATH * 4]{};
-    LPCWSTR selectedFrom = RewriteSavePathW(from, redirectedFrom, sizeof(redirectedFrom) / sizeof(redirectedFrom[0])) ? redirectedFrom : from;
-    LPCWSTR selectedTo = RewriteSavePathW(to, redirectedTo, sizeof(redirectedTo) / sizeof(redirectedTo[0])) ? redirectedTo : to;
+    LPCWSTR selectedFrom = RewriteOwnedPathW(from, redirectedFrom, sizeof(redirectedFrom) / sizeof(redirectedFrom[0])) ? redirectedFrom : from;
+    LPCWSTR selectedTo = RewriteOwnedPathW(to, redirectedTo, sizeof(redirectedTo) / sizeof(redirectedTo[0])) ? redirectedTo : to;
     return g_originalCopyFileW(selectedFrom, selectedTo, failIfExists);
 }
 BOOL WINAPI HookCopyFileA(LPCSTR from, LPCSTR to, BOOL failIfExists)
 {
     char redirectedFrom[MAX_PATH * 4]{}, redirectedTo[MAX_PATH * 4]{};
-    LPCSTR selectedFrom = RewriteSavePathA(from, redirectedFrom, sizeof(redirectedFrom)) ? redirectedFrom : from;
-    LPCSTR selectedTo = RewriteSavePathA(to, redirectedTo, sizeof(redirectedTo)) ? redirectedTo : to;
+    LPCSTR selectedFrom = RewriteOwnedPathA(from, redirectedFrom, sizeof(redirectedFrom)) ? redirectedFrom : from;
+    LPCSTR selectedTo = RewriteOwnedPathA(to, redirectedTo, sizeof(redirectedTo)) ? redirectedTo : to;
     return g_originalCopyFileA(selectedFrom, selectedTo, failIfExists);
+}
+
+bool IsPathSettingsSubkey(LPCSTR subkey)
+{
+    if(!subkey || !subkey[0])
+        return false;
+    const char* suffix = "Nival Interactive\\EvilIslands\\Path Settings";
+    const size_t length = std::strlen(subkey);
+    const size_t suffixLength = std::strlen(suffix);
+    if(length >= suffixLength && _stricmp(subkey + length - suffixLength, suffix) == 0)
+        return true;
+    return _stricmp(subkey, "Path Settings") == 0;
+}
+
+bool IsStarterSettingsSubkey(LPCSTR subkey)
+{
+    if(!subkey || !subkey[0])
+        return false;
+    const char* root = "Gipat.Ru\\EI_Starter";
+    const size_t length = std::strlen(subkey);
+    const size_t rootLength = std::strlen(root);
+    if(length >= rootLength && _strnicmp(subkey + length - rootLength,
+                                        root, rootLength) == 0)
+        return true;
+    const char* settings = "Gipat.Ru\\EI_Starter\\Settings";
+    const size_t settingsLength = std::strlen(settings);
+    return length >= settingsLength
+        && _stricmp(subkey + length - settingsLength, settings) == 0;
+}
+
+void MarkTrackedKey(HKEY key, HKEY* keys, size_t count)
+{
+    if(!key || !keys || !InterlockedCompareExchange(&g_registryPathLockReady, 0, 0))
+        return;
+    EnterCriticalSection(&g_registryPathLock);
+    for(size_t index = 0; index < count; ++index)
+        if(keys[index] == key)
+        {
+            LeaveCriticalSection(&g_registryPathLock);
+            return;
+        }
+    for(size_t index = 0; index < count; ++index)
+        if(!keys[index])
+        {
+            keys[index] = key;
+            break;
+        }
+    LeaveCriticalSection(&g_registryPathLock);
+}
+
+bool IsTrackedKey(HKEY key, HKEY* keys, size_t count)
+{
+    if(!key || !keys || !InterlockedCompareExchange(&g_registryPathLockReady, 0, 0))
+        return false;
+    bool found = false;
+    EnterCriticalSection(&g_registryPathLock);
+    for(size_t index = 0; index < count; ++index)
+        if(keys[index] == key)
+        {
+            found = true;
+            break;
+        }
+    LeaveCriticalSection(&g_registryPathLock);
+    return found;
+}
+
+void UnmarkTrackedKey(HKEY key, HKEY* keys, size_t count)
+{
+    if(!key || !keys || !InterlockedCompareExchange(&g_registryPathLockReady, 0, 0))
+        return;
+    EnterCriticalSection(&g_registryPathLock);
+    for(size_t index = 0; index < count; ++index)
+        if(keys[index] == key)
+            keys[index] = nullptr;
+    LeaveCriticalSection(&g_registryPathLock);
+}
+
+void MarkPathSettingsKey(HKEY key)
+{
+    MarkTrackedKey(key, g_pathSettingsKeys,
+                   sizeof(g_pathSettingsKeys) / sizeof(g_pathSettingsKeys[0]));
+}
+
+bool IsPathSettingsKey(HKEY key)
+{
+    return IsTrackedKey(key, g_pathSettingsKeys,
+                        sizeof(g_pathSettingsKeys) / sizeof(g_pathSettingsKeys[0]));
+}
+
+void UnmarkPathSettingsKey(HKEY key)
+{
+    UnmarkTrackedKey(key, g_pathSettingsKeys,
+                     sizeof(g_pathSettingsKeys) / sizeof(g_pathSettingsKeys[0]));
+}
+
+LSTATUS WINAPI HookRegOpenKeyA(HKEY key, LPCSTR subkey, PHKEY result)
+{
+    const LSTATUS status = g_originalRegOpenKeyA(key, subkey, result);
+    if(status == ERROR_SUCCESS && result && IsPathSettingsSubkey(subkey))
+        MarkPathSettingsKey(*result);
+    if(status == ERROR_SUCCESS && result
+       && (IsStarterSettingsSubkey(subkey)
+           || (IsTrackedKey(key, g_starterSettingsKeys,
+                            sizeof(g_starterSettingsKeys) / sizeof(g_starterSettingsKeys[0]))
+               && subkey && _stricmp(subkey, "Settings") == 0)))
+        MarkTrackedKey(*result, g_starterSettingsKeys,
+                       sizeof(g_starterSettingsKeys) / sizeof(g_starterSettingsKeys[0]));
+    return status;
+}
+
+LSTATUS WINAPI HookRegOpenKeyExA(HKEY key, LPCSTR subkey, DWORD options,
+                                 REGSAM access, PHKEY result)
+{
+    const LSTATUS status = g_originalRegOpenKeyExA(key, subkey, options, access, result);
+    if(status == ERROR_SUCCESS && result && IsPathSettingsSubkey(subkey))
+        MarkPathSettingsKey(*result);
+    if(status == ERROR_SUCCESS && result
+       && (IsStarterSettingsSubkey(subkey)
+           || (IsTrackedKey(key, g_starterSettingsKeys,
+                            sizeof(g_starterSettingsKeys) / sizeof(g_starterSettingsKeys[0]))
+               && subkey && _stricmp(subkey, "Settings") == 0)))
+        MarkTrackedKey(*result, g_starterSettingsKeys,
+                       sizeof(g_starterSettingsKeys) / sizeof(g_starterSettingsKeys[0]));
+    return status;
+}
+
+LSTATUS WINAPI HookRegCreateKeyExA(HKEY key, LPCSTR subkey, DWORD reserved,
+                                   LPSTR className, DWORD options, REGSAM access,
+                                   const LPSECURITY_ATTRIBUTES security,
+                                   PHKEY result, LPDWORD disposition)
+{
+    const LSTATUS status = g_originalRegCreateKeyExA(key, subkey, reserved, className,
+        options, access, security, result, disposition);
+    if(status == ERROR_SUCCESS && result && IsPathSettingsSubkey(subkey))
+        MarkPathSettingsKey(*result);
+    if(status == ERROR_SUCCESS && result
+       && (IsStarterSettingsSubkey(subkey)
+           || (IsTrackedKey(key, g_starterSettingsKeys,
+                            sizeof(g_starterSettingsKeys) / sizeof(g_starterSettingsKeys[0]))
+               && subkey && _stricmp(subkey, "Settings") == 0)))
+        MarkTrackedKey(*result, g_starterSettingsKeys,
+                       sizeof(g_starterSettingsKeys) / sizeof(g_starterSettingsKeys[0]));
+    return status;
+}
+
+bool SelectedRegistryPath(LPCSTR valueName, char* output, size_t capacity)
+{
+    if(!valueName || !output || !capacity || !g_selectedGameRoot[0])
+        return false;
+    wchar_t selected[MAX_PATH * 4]{};
+    if(_stricmp(valueName, "RESOURCES PATH") == 0)
+        _snwprintf_s(selected, sizeof(selected) / sizeof(selected[0]), _TRUNCATE,
+                     L"%s\\Res\\", g_selectedGameRoot);
+    else if(_stricmp(valueName, "WORK PATH") == 0
+            || _stricmp(valueName, "CD-ROM PATH") == 0)
+        _snwprintf_s(selected, sizeof(selected) / sizeof(selected[0]), _TRUNCATE,
+                     L"%s\\", g_selectedGameRoot);
+    else
+        return false;
+    BOOL substituted = FALSE;
+    return WideCharToMultiByte(CP_ACP, WC_NO_BEST_FIT_CHARS, selected, -1,
+                               output, int(capacity), nullptr, &substituted) > 0
+        && !substituted;
+}
+
+bool SelectedStarterPath(LPCSTR valueName, char* output, size_t capacity)
+{
+    if(!valueName || !output || !capacity || !g_selectedGameRoot[0])
+        return false;
+    wchar_t selected[MAX_PATH * 4]{};
+    if(_stricmp(valueName, "AddonPath") == 0 && g_selectedModRoot[0])
+        wcscpy_s(selected, g_selectedModRoot);
+    else if(_stricmp(valueName, "path") == 0)
+        _snwprintf_s(selected, sizeof(selected) / sizeof(selected[0]), _TRUNCATE,
+                     L"%s\\Starter", g_selectedGameRoot);
+    else
+        return false;
+    BOOL substituted = FALSE;
+    return WideCharToMultiByte(CP_ACP, WC_NO_BEST_FIT_CHARS, selected, -1,
+                               output, int(capacity), nullptr, &substituted) > 0
+        && !substituted;
+}
+
+LSTATUS WINAPI HookRegQueryValueExA(HKEY key, LPCSTR valueName, LPDWORD reserved,
+                                    LPDWORD type, LPBYTE data, LPDWORD dataSize)
+{
+    char selected[MAX_PATH * 4]{};
+    const bool nivalOverride = IsPathSettingsKey(key)
+        && SelectedRegistryPath(valueName, selected, sizeof(selected));
+    const bool starterOverride = IsTrackedKey(
+        key, g_starterSettingsKeys,
+        sizeof(g_starterSettingsKeys) / sizeof(g_starterSettingsKeys[0]))
+        && SelectedStarterPath(valueName, selected, sizeof(selected));
+    if(!nivalOverride && !starterOverride)
+        return g_originalRegQueryValueExA(key, valueName, reserved, type, data, dataSize);
+    if(!dataSize)
+        return ERROR_INVALID_PARAMETER;
+    const DWORD required = DWORD(std::strlen(selected) + 1);
+    if(type)
+        *type = REG_SZ;
+    if(!data || *dataSize < required)
+    {
+        *dataSize = required;
+        return data ? ERROR_MORE_DATA : ERROR_SUCCESS;
+    }
+    std::memcpy(data, selected, required);
+    *dataSize = required;
+    if(InterlockedIncrement(&g_registryOverrideLogCount) <= 8)
+    {
+        wchar_t valueWide[64]{};
+        wchar_t selectedWide[MAX_PATH * 4]{};
+        MultiByteToWideChar(CP_ACP, 0, valueName, -1, valueWide,
+                            int(sizeof(valueWide) / sizeof(valueWide[0])));
+        MultiByteToWideChar(CP_ACP, 0, selected, -1, selectedWide,
+                            int(sizeof(selectedWide) / sizeof(selectedWide[0])));
+        wchar_t message[1800]{};
+        _snwprintf_s(message, sizeof(message) / sizeof(message[0]), _TRUNCATE,
+                     starterOverride
+                         ? L"STARTER_ROOT_OVERRIDE value=\"%s\" selected=\"%s\" scope=owned-process"
+                         : L"GAME_ROOT_OVERRIDE value=\"%s\" selected=\"%s\" scope=owned-process",
+                     valueWide, selectedWide);
+        Log(message);
+    }
+    return ERROR_SUCCESS;
+}
+
+LSTATUS WINAPI HookRegCloseKey(HKEY key)
+{
+    UnmarkPathSettingsKey(key);
+    UnmarkTrackedKey(key, g_starterSettingsKeys,
+                     sizeof(g_starterSettingsKeys) / sizeof(g_starterSettingsKeys[0]));
+    return g_originalRegCloseKey(key);
 }
 
 void* ReplacementFor(const char* name)
@@ -570,6 +1359,16 @@ void* ReplacementFor(const char* name)
     REPLACE(CopyFileA);
     REPLACE(CopyFileW);
 #undef REPLACE
+    if(std::strcmp(name, "RegOpenKeyA") == 0)
+        return reinterpret_cast<void*>(&HookRegOpenKeyA);
+    if(std::strcmp(name, "RegOpenKeyExA") == 0)
+        return reinterpret_cast<void*>(&HookRegOpenKeyExA);
+    if(std::strcmp(name, "RegCreateKeyExA") == 0)
+        return reinterpret_cast<void*>(&HookRegCreateKeyExA);
+    if(std::strcmp(name, "RegQueryValueExA") == 0)
+        return reinterpret_cast<void*>(&HookRegQueryValueExA);
+    if(std::strcmp(name, "RegCloseKey") == 0)
+        return reinterpret_cast<void*>(&HookRegCloseKey);
     return nullptr;
 }
 
@@ -594,7 +1393,8 @@ int PatchModuleImports(HMODULE module)
     {
         const char* library = reinterpret_cast<const char*>(base + descriptor->Name);
         if(_stricmp(library, "KERNEL32.dll") != 0 &&
-           _stricmp(library, "KERNELBASE.dll") != 0)
+           _stricmp(library, "KERNELBASE.dll") != 0 &&
+           _stricmp(library, "ADVAPI32.dll") != 0)
             continue;
         if(!descriptor->OriginalFirstThunk)
             continue;
@@ -626,7 +1426,8 @@ int InstallFileObservationHooks()
 {
     HMODULE kernel = GetModuleHandleW(L"KERNEL32.dll");
     HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
-    if(!kernel)
+    HMODULE advapi = GetModuleHandleW(L"ADVAPI32.dll");
+    if(!kernel || !advapi)
         return 0;
     g_originalCreateFileA = reinterpret_cast<CreateFileAFn>(GetProcAddress(kernel, "CreateFileA"));
     g_originalCreateFileW = reinterpret_cast<CreateFileWFn>(GetProcAddress(kernel, "CreateFileW"));
@@ -652,6 +1453,16 @@ int InstallFileObservationHooks()
     LOAD_ORIGINAL(CopyFileA);
     LOAD_ORIGINAL(CopyFileW);
 #undef LOAD_ORIGINAL
+    g_originalRegOpenKeyA = reinterpret_cast<RegOpenKeyAFn>(
+        GetProcAddress(advapi, "RegOpenKeyA"));
+    g_originalRegOpenKeyExA = reinterpret_cast<RegOpenKeyExAFn>(
+        GetProcAddress(advapi, "RegOpenKeyExA"));
+    g_originalRegCreateKeyExA = reinterpret_cast<RegCreateKeyExAFn>(
+        GetProcAddress(advapi, "RegCreateKeyExA"));
+    g_originalRegQueryValueExA = reinterpret_cast<RegQueryValueExAFn>(
+        GetProcAddress(advapi, "RegQueryValueExA"));
+    g_originalRegCloseKey = reinterpret_cast<RegCloseKeyFn>(
+        GetProcAddress(advapi, "RegCloseKey"));
     g_captureStack = ntdll ? reinterpret_cast<CaptureStackFn>(
         GetProcAddress(ntdll, "RtlCaptureStackBackTrace")) : nullptr;
     if(!g_originalCreateFileA || !g_originalCreateFileW ||
@@ -663,7 +1474,10 @@ int InstallFileObservationHooks()
        !g_originalFindFirstFileA || !g_originalFindFirstFileW ||
        !g_originalMoveFileA || !g_originalMoveFileW ||
        !g_originalMoveFileExA || !g_originalMoveFileExW ||
-       !g_originalCopyFileA || !g_originalCopyFileW)
+       !g_originalCopyFileA || !g_originalCopyFileW ||
+       !g_originalRegOpenKeyA || !g_originalRegOpenKeyExA ||
+       !g_originalRegCreateKeyExA || !g_originalRegQueryValueExA ||
+       !g_originalRegCloseKey)
         return 0;
 
     HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32,
@@ -673,21 +1487,22 @@ int InstallFileObservationHooks()
     MODULEENTRY32W entry{};
     entry.dwSize = sizeof(entry);
     int patched = 0;
+    int modulesVisited = 0;
     if(Module32FirstW(snapshot, &entry))
     {
         do
         {
-            wchar_t message[900]{};
-            _snwprintf_s(message, sizeof(message) / sizeof(message[0]), _TRUNCATE,
-                         L"TRANSITION_PROBE module=%s base=0x%08lX size=0x%08lX",
-                         entry.szExePath, DWORD(reinterpret_cast<uintptr_t>(entry.modBaseAddr)),
-                         entry.modBaseSize);
-            Log(message);
+            ++modulesVisited;
             patched += PatchModuleImports(entry.hModule);
         }
         while(Module32NextW(snapshot, &entry));
     }
     CloseHandle(snapshot);
+    wchar_t summary[256]{};
+    _snwprintf_s(summary, sizeof(summary) / sizeof(summary[0]), _TRUNCATE,
+                 L"TRANSITION_PROBE inspected loaded modules in owned game process modules=%d patched_imports=%d",
+                 modulesVisited, patched);
+    Log(summary);
     return patched;
 }
 
@@ -714,6 +1529,23 @@ bool ReadDirectLaunchPaths()
     wchar_t mob[MAX_PATH * 4]{};
     wchar_t sourceZone[128]{};
     wchar_t targetExit[16]{};
+    GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_GODMODE_MOB", g_godmodeMob,
+                            DWORD(sizeof(g_godmodeMob) / sizeof(g_godmodeMob[0])));
+    if(g_godmodeMob[0])
+        NormalizeSlashes(g_godmodeMob);
+    GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_SUPPLEMENTAL_MOB_DIR",
+                            g_supplementalMobDirectory,
+                            DWORD(sizeof(g_supplementalMobDirectory)
+                                  / sizeof(g_supplementalMobDirectory[0])));
+    if(g_supplementalMobDirectory[0])
+    {
+        NormalizeSlashes(g_supplementalMobDirectory);
+        while(std::wcslen(g_supplementalMobDirectory) > 3
+              && IsPathBoundary(g_supplementalMobDirectory[
+                     std::wcslen(g_supplementalMobDirectory) - 1]))
+            g_supplementalMobDirectory[
+                std::wcslen(g_supplementalMobDirectory) - 1] = L'\0';
+    }
     if(!GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_TEMP_MPR", mpr,
                                 DWORD(sizeof(mpr) / sizeof(mpr[0]))) ||
        !GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_TEMP_MOB", mob,
@@ -739,7 +1571,12 @@ bool ReadDirectLaunchPaths()
         Log(L"DIRECT_LAUNCH disabled: selected map-table entrance is invalid");
         return false;
     }
-    g_targetExit = int(parsedExit);
+    // map.txt exposes human-facing #exit IDs beginning at one, while the
+    // player-default record stores the zero-based entrance array index. Passing
+    // the ID unchanged selected the following entrance and made the final one
+    // fall out of range (observed in both zone1 and zone2).
+    g_targetExitId = int(parsedExit);
+    g_targetExit = g_targetExitId - 1;
     NormalizeSlashes(g_liveSaves);
     NormalizeSlashes(g_testSaves);
     while(std::wcslen(g_liveSaves) > 3 &&
@@ -765,8 +1602,8 @@ bool ReadDirectLaunchPaths()
     }
     wchar_t message[1800]{};
     _snwprintf_s(message, sizeof(message) / sizeof(message[0]), _TRUNCATE,
-                 L"DIRECT_LAUNCH profile zone=\"%s\" entrance=%d isolated_saves=\"%s\" live_saves_protected=\"%s\"",
-                 sourceZone, g_targetExit, g_testSaves, g_liveSaves);
+                 L"DIRECT_LAUNCH profile zone=\"%s\" entrance_id=%d entrance_index=%d isolated_saves=\"%s\" live_saves_protected=\"%s\"",
+                 sourceZone, g_targetExitId, g_targetExit, g_testSaves, g_liveSaves);
     Log(message);
     return true;
 }
@@ -809,7 +1646,7 @@ void __fastcall PlayerDefaultsResetDetour(void* self, void*)
 {
     g_originalPlayerDefaultsReset(self);
     if(InterlockedCompareExchange(&g_directLaunchState, 0, 0) != 3 ||
-       !g_gameModule || !g_sourceZone[0] || g_targetExit <= 0)
+       !g_gameModule || !g_sourceZone[0] || g_targetExit < 0)
         return;
 
     auto* game = reinterpret_cast<unsigned char*>(g_gameModule);
@@ -838,14 +1675,15 @@ void __fastcall PlayerDefaultsResetDetour(void* self, void*)
                         int(sizeof(selected) / sizeof(selected[0])));
     wchar_t message[512]{};
     _snwprintf_s(message, sizeof(message) / sizeof(message[0]), _TRUNCATE,
-                 L"DIRECT_LAUNCH initialized New Game player zone=\"%s\" entrance=%d before transition",
-                 selected, g_targetExit);
+                 L"DIRECT_LAUNCH initialized New Game player zone=\"%s\" entrance_id=%d entrance_index=%d before transition",
+                 selected, g_targetExitId, g_targetExit);
     Log(message);
 }
 
 int __fastcall ZoneTransitionDetour(void* self, void*, const char* zoneName,
                                     int requestedMode)
 {
+    SetRuntimeState(RuntimeState::Transitioning, L"zone transition entered");
     const LONG state = InterlockedCompareExchange(&g_directLaunchState, 0, 0);
     if(state == 3 && requestedMode == 0 && g_sourceZone[0])
     {
@@ -882,6 +1720,7 @@ int __fastcall ZoneTransitionDetour(void* self, void*, const char* zoneName,
 int __fastcall MapLoadDetour(void* self, void*, const char* mprPath,
                              const char* mobPath, void* context)
 {
+    SetRuntimeState(RuntimeState::Transitioning, L"map loader entered");
     void* caller = _ReturnAddress();
     const auto* expectedTransitionReturn = reinterpret_cast<unsigned char*>(g_gameModule)
         + kStartZoneMapLoadReturnRva;
@@ -929,6 +1768,13 @@ int __fastcall MapLoadDetour(void* self, void*, const char* mprPath,
     }
 
     const int result = g_originalMapLoad(self, selectedMpr, selectedMob, context);
+    if(result)
+        SetRuntimeState(IsMainMenuMpr(selectedMpr) ? RuntimeState::MainMenuReady
+                                                   : RuntimeState::GameplayReady,
+                        IsMainMenuMpr(selectedMpr) ? L"main-menu map loader returned"
+                                                   : L"gameplay map loader returned");
+    else
+        SetRuntimeState(RuntimeState::Unknown, L"map loader failed");
     if(redirect)
     {
         wchar_t message[256]{};
@@ -938,22 +1784,163 @@ int __fastcall MapLoadDetour(void* self, void*, const char* mprPath,
     }
     else if(g_directLaunchState == 1 && IsMainMenuMpr(mprPath))
         QueueDirectLaunchOnCurrentThread();
+    if(result && InterlockedCompareExchange(&g_pendingStateAwareReload, 0, 0)
+       && g_gameThreadId)
+        PostThreadMessageW(g_gameThreadId, kHotReloadMessage, 0, 0);
     return result;
+}
+
+bool ProcessHotReloadOnGameThread()
+{
+    if(InterlockedCompareExchange(&g_directLaunchState, 0, 0) != 6
+       || !g_originalZoneTransition || !g_zoneTransitionController)
+    {
+        Log(L"HOT_RELOAD refused: initial staged map is not in a reloadable state");
+        return false;
+    }
+    HotReloadControl request;
+    if(!ReadHotReloadControl(&request))
+    {
+        Log(L"HOT_RELOAD refused: request, ownership, sequence, or payload hash validation failed");
+        return false;
+    }
+    if(!HashMatches(request.mprPath, request.mprSha256)
+       || !HashMatches(request.mobPath, request.mobSha256))
+    {
+        Log(L"HOT_RELOAD refused: owned generation payload does not match the staged request hashes");
+        return false;
+    }
+    BOOL usedDefault = FALSE;
+    if(!WideCharToMultiByte(CP_ACP, WC_NO_BEST_FIT_CHARS, request.mprPath, -1,
+                            g_temporaryMpr, int(sizeof(g_temporaryMpr)),
+                            nullptr, &usedDefault) || usedDefault
+       || !WideCharToMultiByte(CP_ACP, WC_NO_BEST_FIT_CHARS, request.mobPath, -1,
+                               g_temporaryMob, int(sizeof(g_temporaryMob)),
+                               nullptr, &usedDefault) || usedDefault)
+    {
+        Log(L"HOT_RELOAD refused: owned generation paths cannot round-trip through the game code page");
+        return false;
+    }
+    if(strcpy_s(g_sourceZone, request.zone) != 0)
+    {
+        Log(L"HOT_RELOAD refused: map-table zone identity is too long");
+        return false;
+    }
+    g_targetExitId = request.entranceId;
+    g_targetExit = request.entranceId - 1;
+    // The bootstrap is generation-scoped. An entrance-only reload deliberately
+    // has no bootstrap MOB, so retaining the previous generation's path would
+    // replay its custom spawn (and any other bootstrap actions) on the new map.
+    g_godmodeMob[0] = L'\0';
+    if(request.hasBootstrap)
+        wcscpy_s(g_godmodeMob, request.bootstrapMobPath);
+    InterlockedExchange(&g_godmodeRedirectLogged, 0);
+
+    RuntimeState runtimeState = CurrentRuntimeState();
+    if(runtimeState == RuntimeState::Transitioning)
+    {
+        const DWORD stateTick = DWORD(InterlockedCompareExchange(&g_runtimeStateTick, 0, 0));
+        const DWORD elapsed = GetTickCount() - stateTick;
+        // A real synchronous map load owns the game thread, so this message
+        // cannot run until MapLoadDetour publishes a stable state. A stale
+        // Transitioning state while the message loop is responsive is the
+        // observed world-map/map-screen path, which has no loader return.
+        if(elapsed >= 1500)
+        {
+            SetRuntimeState(RuntimeState::WorldMapReady,
+                            L"responsive stale transition classified as world map");
+            runtimeState = RuntimeState::WorldMapReady;
+        }
+    }
+    if(runtimeState == RuntimeState::Transitioning || runtimeState == RuntimeState::Unknown
+       || runtimeState == RuntimeState::Initializing)
+    {
+        InterlockedExchange(&g_pendingStateAwareReload, 1);
+        wchar_t deferred[512]{};
+        _snwprintf_s(deferred, sizeof(deferred) / sizeof(deferred[0]), _TRUNCATE,
+                     L"HOT_RELOAD deferred sequence=%llu runtime_state=%s state_sequence=%ld",
+                     request.sequence, RuntimeStateName(runtimeState),
+                     InterlockedCompareExchange(&g_runtimeStateSequence, 0, 0));
+        Log(deferred);
+        return true;
+    }
+
+    if(!CommitSaveGeneration(request))
+    {
+        Log(L"HOT_RELOAD refused: generation save namespace is not empty, owned, or monotonic");
+        return false;
+    }
+
+    wchar_t queued[512]{};
+    wchar_t zone[128]{};
+    MultiByteToWideChar(CP_ACP, 0, g_sourceZone, -1, zone,
+                        int(sizeof(zone) / sizeof(zone[0])));
+    _snwprintf_s(queued, sizeof(queued) / sizeof(queued[0]), _TRUNCATE,
+                 L"HOT_RELOAD dispatch sequence=%llu generation=%llu runtime_state=%s zone=\"%s\" entrance_id=%d thread=%lu",
+                 request.sequence, request.generation, RuntimeStateName(runtimeState),
+                 zone, request.entranceId, GetCurrentThreadId());
+    Log(queued);
+
+    InterlockedExchange(&g_pendingMapLoadProbeCount, 0);
+    if(runtimeState != RuntimeState::MainMenuReady)
+    {
+        InterlockedExchange(&g_pendingStateAwareReload, 1);
+        SetRuntimeState(RuntimeState::Transitioning,
+                        L"hot reload normal Main Menu rebootstrap started");
+        const int menuResult = g_originalZoneTransition(
+            g_zoneTransitionController, "MainMenu", 2);
+        wchar_t result[384]{};
+        _snwprintf_s(result, sizeof(result) / sizeof(result[0]), _TRUNCATE,
+                     L"HOT_RELOAD rebootstrap-to-main-menu sequence=%llu prior_state=%s transition_result=%d",
+                     request.sequence, RuntimeStateName(runtimeState), menuResult);
+        Log(result);
+        return true;
+    }
+
+    InterlockedExchange(&g_pendingStateAwareReload, 0);
+    InterlockedExchange(&g_directLaunchState, 3);
+    const int transitionResult = 1;
+    auto* game = reinterpret_cast<unsigned char*>(g_gameModule);
+    const auto newGame = reinterpret_cast<NewGameBootstrapFn>(game + kNewGameBootstrapRva);
+    Log(L"HOT_RELOAD invoking complete New Game bootstrap from MainMenuReady");
+    newGame(g_zoneTransitionController);
+    const bool redirected = InterlockedCompareExchange(&g_directLaunchState, 6, 4) == 4;
+    if(!redirected)
+    {
+        InterlockedExchange(&g_directLaunchState, -1);
+        if(g_hotReloadThreadPath[0])
+            DeleteFileW(g_hotReloadThreadPath);
+    }
+    else
+    {
+        g_hotReloadSequence = request.sequence;
+        SetRuntimeState(RuntimeState::GameplayReady, L"state-aware reload completed");
+    }
+    wchar_t completed[384]{};
+    _snwprintf_s(completed, sizeof(completed) / sizeof(completed[0]), _TRUNCATE,
+                 L"HOT_RELOAD %s sequence=%llu transition_result=%d staged_loader=%s",
+                 redirected ? L"completed" : L"failed", request.sequence,
+                 transitionResult, redirected ? L"observed" : L"missing");
+    Log(completed);
+    return redirected;
 }
 
 LRESULT CALLBACK DirectLaunchMessageHook(int code, WPARAM wParam, LPARAM lParam)
 {
     MSG* message = reinterpret_cast<MSG*>(lParam);
-    if(code < 0 || wParam != PM_REMOVE || !message ||
-       message->message != kDirectLaunchMessage)
+    if(code < 0 || wParam != PM_REMOVE || !message
+       || (message->message != kDirectLaunchMessage
+           && message->message != kHotReloadMessage))
         return CallNextHookEx(g_directLaunchHook, code, wParam, lParam);
 
+    const UINT requestedMessage = message->message;
     message->message = WM_NULL;
     const LRESULT next = CallNextHookEx(g_directLaunchHook, code, wParam, lParam);
-    HHOOK hook = g_directLaunchHook;
-    g_directLaunchHook = nullptr;
-    if(hook)
-        UnhookWindowsHookEx(hook);
+    if(requestedMessage == kHotReloadMessage)
+    {
+        ProcessHotReloadOnGameThread();
+        return next;
+    }
     if(InterlockedCompareExchange(&g_directLaunchState, 3, 2) != 2)
         return next;
 
@@ -971,6 +1958,8 @@ LRESULT CALLBACK DirectLaunchMessageHook(int code, WPARAM wParam, LPARAM lParam)
     const bool redirected = InterlockedCompareExchange(&g_directLaunchState, 6, 4) == 4;
     if(!redirected)
         InterlockedExchange(&g_directLaunchState, -1);
+    else
+        PublishHotReloadThreadId();
     Log(redirected
         ? L"DIRECT_LAUNCH complete New Game bootstrap returned staged_loader=observed"
         : L"DIRECT_LAUNCH failed: complete New Game bootstrap returned without the verified staged loader call");
@@ -1147,17 +2136,93 @@ bool InitializeDirectLaunch()
                             DWORD(sizeof(g_resultPath) / sizeof(g_resultPath[0])));
     if(!g_resultPath[0])
         return false;
-    Log(L"EI Mapper Endurance JMV direct single-player map launch initializing");
-    if(!VerifyRuntime())
+    InitializeCriticalSection(&g_savePathLock);
+    InterlockedExchange(&g_savePathLockReady, 1);
+    InitializeCriticalSection(&g_registryPathLock);
+    InterlockedExchange(&g_registryPathLockReady, 1);
+    GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_GAME_ROOT", g_selectedGameRoot,
+                            DWORD(sizeof(g_selectedGameRoot)
+                                  / sizeof(g_selectedGameRoot[0])));
+    size_t gameRootLength = std::wcslen(g_selectedGameRoot);
+    while(gameRootLength > 3
+          && (g_selectedGameRoot[gameRootLength - 1] == L'\\'
+              || g_selectedGameRoot[gameRootLength - 1] == L'/'))
+        g_selectedGameRoot[--gameRootLength] = L'\0';
+    if(!g_selectedGameRoot[0])
     {
-        Log(L"DIRECT_LAUNCH disabled: game.exe SHA-256 does not match the validated JMV runtime");
+        Log(L"DIRECT_LAUNCH disabled: selected game root is missing");
         return false;
     }
+    GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_MOD_ROOT", g_selectedModRoot,
+                            DWORD(sizeof(g_selectedModRoot)
+                                  / sizeof(g_selectedModRoot[0])));
+    size_t modRootLength = std::wcslen(g_selectedModRoot);
+    while(modRootLength > 3
+          && (g_selectedModRoot[modRootLength - 1] == L'\\'
+              || g_selectedModRoot[modRootLength - 1] == L'/'))
+        g_selectedModRoot[--modRootLength] = L'\0';
+    SetRuntimeState(RuntimeState::Initializing, L"bridge initialization");
+    GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_HOT_RELOAD_REQUEST",
+                            g_hotReloadRequestPath,
+                            DWORD(sizeof(g_hotReloadRequestPath)
+                                  / sizeof(g_hotReloadRequestPath[0])));
+    GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_HOT_RELOAD_THREAD",
+                            g_hotReloadThreadPath,
+                            DWORD(sizeof(g_hotReloadThreadPath)
+                                  / sizeof(g_hotReloadThreadPath[0])));
+    if(g_hotReloadRequestPath[0] && g_hotReloadThreadPath[0])
+    {
+        if(GetFullPathNameW(g_hotReloadRequestPath,
+                            DWORD(sizeof(g_hotReloadRoot) / sizeof(g_hotReloadRoot[0])),
+                            g_hotReloadRoot, nullptr))
+        {
+            wchar_t* slash = std::wcsrchr(g_hotReloadRoot, L'\\');
+            wchar_t* forward = std::wcsrchr(g_hotReloadRoot, L'/');
+            if(!slash || (forward && forward > slash)) slash = forward;
+            if(slash) *slash = L'\0';
+        }
+        Log(L"HOT_RELOAD transport configured; runtime requests remain game-thread and hash guarded");
+    }
+    const RuntimeBuild runtime = VerifyRuntime();
+    Log(runtime == RuntimeBuild::BaseEi
+        ? L"EI Mapper Endurance Base EI direct-map feasibility bridge initializing"
+        : L"EI Mapper Endurance JMV direct single-player map launch initializing");
+    if(runtime == RuntimeBuild::Unsupported)
+    {
+        Log(L"DIRECT_LAUNCH disabled: game.exe SHA-256 does not match an exact validated runtime manifest");
+        return false;
+    }
+    if(runtime == RuntimeBuild::BaseEi)
+    {
+        wchar_t level[8]{};
+        GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_BASE_PROBE_LEVEL", level,
+                                DWORD(sizeof(level) / sizeof(level[0])));
+        g_baseProbeLevel = _wtoi(level);
+        if(g_baseProbeLevel < 1 || g_baseProbeLevel > 4)
+        {
+            Log(L"BASE_PROBE disabled: invalid or missing probe level");
+            return false;
+        }
+    }
     const int patched = InstallFileObservationHooks();
+    if(runtime == RuntimeBuild::BaseEi && g_baseProbeLevel == 1)
+    {
+        Log(patched > 0
+            ? L"BASE_PROBE level=1 injection=ready observation_hooks=ready redirect=disabled"
+            : L"BASE_PROBE level=1 injection=ready observation_hooks=failed redirect=disabled");
+        return patched > 0;
+    }
     const bool directLaunch = InstallMapLoadDetour();
+    if(runtime == RuntimeBuild::BaseEi && g_baseProbeLevel == 2 && directLaunch)
+    {
+        // Keep the byte-guarded detours installed, but use a state which can
+        // never queue or redirect a transition. Calls retain their arguments.
+        InterlockedExchange(&g_directLaunchState, 10);
+        Log(L"BASE_PROBE level=2 hook_signatures=ready mode=pass-through redirect=disabled; start a normal Base New Game manually");
+    }
     wchar_t message[256]{};
     _snwprintf_s(message, sizeof(message) / sizeof(message[0]), _TRUNCATE,
-                 L"DIRECT_LAUNCH active imports=%d stack_capture=%s map_loader=%s trigger=complete-new-game-bootstrap",
+                 L"DIRECT_LAUNCH active imports=%d stack_capture=%s map_loader=%s hot_reload=main-menu-rebootstrap trigger=complete-new-game-bootstrap",
                  patched, g_captureStack ? L"available" : L"unavailable",
                  directLaunch ? L"available" : L"unavailable");
     Log(message);
@@ -1177,6 +2242,19 @@ extern "C" __declspec(dllexport) int __cdecl EntryAfterPatch(const char*)
     InitializeDirectLaunch();
     return 0;
 }
+
+extern "C" __declspec(dllexport) DWORD WINAPI EnduranceInitialize(void*)
+{
+    return InitializeDirectLaunch() ? 1u : 0u;
+}
+
+// The Base owned-process injector resolves this export by its stable protocol
+// name. MSVC decorates x86 __stdcall exports unless an explicit alias is
+// supplied; Starter's plugin loader does not exercise this path, which is why
+// a stale/missing alias only surfaced in the Base probe.
+#if defined(_M_IX86)
+#pragma comment(linker, "/EXPORT:EnduranceInitialize=_EnduranceInitialize@4")
+#endif
 
 BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, void*)
 {

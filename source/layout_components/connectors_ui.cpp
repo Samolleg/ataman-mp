@@ -79,7 +79,7 @@ void CButtonConnector::pressButton(EButtonOp btnType)
 {
     for(auto& pair : m_aButton.toStdMap())
     {
-        pair.second->setDown(pair.first == btnType);
+        pair.second->setChecked(pair.first == btnType);
     }
 }
 
@@ -87,7 +87,7 @@ void CButtonConnector::clickButton(EButtonOp btnType)
 {
     for(auto& pair : m_aButton.toStdMap())
     {
-        pair.second->setDown(pair.first == btnType);
+        pair.second->setChecked(pair.first == btnType);
     }
     m_pView->changeOperation(btnType);
     //todo: insert GIZMO for operation

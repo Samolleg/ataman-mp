@@ -1,0 +1,6 @@
+EI Mapper: Endurance Edition 0.2.1-alpha.3
+Branch: feature/viewport-test-controls-base-probe
+Editor: Qt 5.12.12 / MinGW 7.3 x64 release build
+Runtime bridge: MSVC 2022 x86 experimental JMV direct-launch/hot-reload provider
+Changes: ordinary entrances use native map-table placement without a scripted Z move; custom placement uses zero terrain-height offset with an immediate attempt and guarded post-registration retry; collection supplemental MOBs are explicitly requested in declared order; hot reload loads a new immutable run-owned generation instead of replacing the map pair held open by JMV
+Limitations: direct pre-render custom placement, explicit supplemental duplicate behavior, and immutable-generation hot reload require runtime tester confirmation; same-map position/facing preservation is not implemented; Base supplemental-MOB launch remains unsupported

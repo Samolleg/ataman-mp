@@ -27,6 +27,11 @@ struct SRuntimeComponent
     QString id;
     QString path;
     bool required{true};
+    // Exact hashes are mandatory only for components whose machine code or
+    // binary layout is part of the runtime bridge contract. Mutable scripts
+    // and configuration are still fingerprinted, but do not invalidate the
+    // bridge manifest merely because a mod author edited them.
+    bool enforceHash{true};
     QStringList acceptedSha256;
 };
 
@@ -36,6 +41,7 @@ struct SRuntimeComponentEvaluation
     QString path;
     bool exists{false};
     bool hashAccepted{false};
+    bool enforceHash{true};
     qint64 size{0};
     QString sha256;
 };

@@ -72,6 +72,14 @@ bool databaseEquippedHumanoid(const QString& model)
     return models.contains(model.trimmed().toLower());
 }
 
+bool standardWearableAssembly(const QString& model)
+{
+    static const QSet<QString> models = {
+        "unhuma", "unhufe", "unorma", "unorfe", "unhusk", "unhuzm", "unhuzf"
+    };
+    return models.contains(model.trimmed().toLower());
+}
+
 QString jmvMonsterTextureName(const SCharacterAppearanceRequest& request, const QString& model,
                               const QStringList& primary, int skinIndex)
 {
@@ -478,6 +486,36 @@ QStringList appendArmorComponents(const ei::SItemDatabaseRecord& item,
             diagnostics->append("Selected model assembly has no component " + expected);
         }
     }
+    // Some authored armor components have additional geometry linked beneath
+    // them. For unhufe TTI 24, l_shell.armor24 and r_shell.armor24 are children
+    // of ll1.armor24 and rl1.armor24 and form the visible shorts panels. Follow
+    // only the actual ANHUM parent chain and only for the same armor suffix;
+    // this cannot pull in unrelated head/arm components sharing TTI 24.
+    if(jmv && upperArmor && item.textureType1 > 0
+            && !request.assemblyParents.isEmpty() && !matched.isEmpty())
+    {
+        QSet<QString> selected;
+        for(const QString& component : matched)
+            selected.insert(component.toLower());
+        bool added = true;
+        while(added)
+        {
+            added = false;
+            for(auto link = request.assemblyParents.constBegin();
+                link != request.assemblyParents.constEnd(); ++link)
+            {
+                const QString child = link.key().toLower();
+                const QString parent = link.value().toLower();
+                if(selected.contains(child) || !child.endsWith(suffix, Qt::CaseInsensitive)
+                        || !selected.contains(parent))
+                    continue;
+                components->append(child);
+                matched.append(child);
+                selected.insert(child);
+                added = true;
+            }
+        }
+    }
     return matched;
 }
 
@@ -499,10 +537,39 @@ SRuntimeProviderResult resolveDatabaseAppearance(
             return failure("appearance.import.incomplete",
                 "Imported unit has incomplete embedded appearance; database fallback is forbidden.");
         }
+        QString embeddedTexture = request.primaryTexture;
+        QString embeddedSource = "embeddedMob";
+        if(jmv && request.primaryTexture.compare("default0", Qt::CaseInsensitive) == 0
+                && !request.parentTemplate.trimmed().isEmpty() && !database.isNull())
+        {
+            const auto parent = database->monsters.constFind(
+                request.parentTemplate.trimmed().toLower());
+            if(parent != database->monsters.constEnd())
+            {
+                const auto parentRace = database->raceModels.constFind(
+                    parent->baseRace.trimmed().toLower());
+                if(parentRace != database->raceModels.constEnd()
+                        && standardWearableAssembly(request.model))
+                {
+                    embeddedTexture = jmvMonsterTextureName(request, request.model,
+                        expandedList(parentRace->primaryTextures), parent->skinIndex);
+                    if(!embeddedTexture.isEmpty())
+                        embeddedSource = "embeddedMobParentTemplate";
+                }
+            }
+        }
+        if(embeddedTexture.isEmpty()
+                || embeddedTexture.compare("default0", Qt::CaseInsensitive) == 0)
+            return failure("appearance.import.texture.unresolved",
+                "Imported MOB texture token cannot be resolved from its embedded parent template.");
         appearance->insert("source", "embeddedMob");
+        appearance->insert("textureSource", embeddedSource);
         appearance->insert("model", request.model);
-        appearance->insert("primaryTexture", request.primaryTexture);
-        appearance->insert("secondaryTexture", request.secondaryTexture);
+        appearance->insert("primaryTexture", embeddedTexture);
+        appearance->insert("secondaryTexture",
+            standardWearableAssembly(request.model)
+                    && request.secondaryTexture.compare("default0", Qt::CaseInsensitive) == 0
+                ? QString() : request.secondaryTexture);
         appearance->insert("bodyParts", QJsonArray::fromStringList(request.bodyParts));
         SRuntimeProviderResult result; result.success = true; result.code = "appearance.import.resolved";
         return result;
@@ -547,7 +614,9 @@ SRuntimeProviderResult resolveDatabaseAppearance(
     // armor and skin 29 can be assembled. Keep that instance assembly when it
     // is independently established as wearable; the database remains
     // authoritative for skin, complexion, armor, and weapons.
+    const bool databaseHasStandardAssembly = standardWearableAssembly(race->model);
     const QString resolvedModel = jmv && databaseEquippedHumanoid(request.model)
+            && !databaseHasStandardAssembly
         ? request.model.trimmed() : race->model;
     const QStringList primary = expandedList(race->primaryTextures);
     const QString primaryTexture = jmv

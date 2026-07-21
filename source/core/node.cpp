@@ -57,6 +57,8 @@ CNode::CNode(const CNode &node):
   ,m_rawSourceObjectPath(node.m_rawSourceObjectPath)
   ,m_rawSourceSubtreeSha256(node.m_rawSourceSubtreeSha256)
   ,m_rawCopiedObject(node.m_rawCopiedObject)
+  ,m_rawTemplateSourceSubtree(node.m_rawTemplateSourceSubtree)
+  ,m_rawTemplateCleanSubtree(node.m_rawTemplateCleanSubtree)
 {
     init();
     //children?

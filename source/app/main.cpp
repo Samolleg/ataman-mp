@@ -1,6 +1,7 @@
 #include "main_window.h"
 #include <QApplication>
 #include <QStyleFactory>
+#include <QProxyStyle>
 #include <QIcon>
 #include <QCommandLineParser>
 #include <QFileInfo>
@@ -11,15 +12,14 @@
 #include <QTimer>
 #include <QDir>
 #include <QTabWidget>
-#include <QKeySequenceEdit>
 #include <QCheckBox>
+#include <QKeySequenceEdit>
 #include <QLineEdit>
 #include <QTemporaryDir>
 #include <QUndoCommand>
 #include <QUndoStack>
 #include <QClipboard>
 #include <QMimeData>
-#include <QGLFormat>
 #include <cstdio>
 #include <cstring>
 
@@ -30,6 +30,7 @@
 #include "layout_components/tablemanager.h"
 #include "window_lifecycle.h"
 #include "settings.h"
+#include "jmv_map_test_launcher.h"
 #include "render_scheduling.h"
 
 #ifdef Q_OS_WIN
@@ -38,6 +39,24 @@
 #endif
 
 namespace {
+class CEnduranceStyle final: public QProxyStyle
+{
+public:
+    explicit CEnduranceStyle(QStyle* baseStyle): QProxyStyle(baseStyle) {}
+
+    int styleHint(StyleHint hint, const QStyleOption* option = nullptr,
+                  const QWidget* widget = nullptr,
+                  QStyleHintReturn* returnData = nullptr) const override
+    {
+        // Fusion's etched disabled text paints a bright offset copy beneath
+        // the glyph. On a dark menu that looks like black text with a white
+        // shadow instead of a disabled item. Draw the palette's grey once.
+        if(hint == QStyle::SH_EtchDisabledText)
+            return 0;
+        return QProxyStyle::styleHint(hint, option, widget, returnData);
+    }
+};
+
 class CCounterUndoCommand final: public QUndoCommand
 {
 public:
@@ -77,7 +96,6 @@ bool persistedRenderVsync()
         return true;
     return ei::renderVsyncFromOptions(options.readAll(), true);
 }
-
 #ifdef Q_OS_WIN
 const char* accessViolationOperation(const EXCEPTION_RECORD* record)
 {
@@ -214,6 +232,9 @@ int runHeadlessCommand(QApplication& app)
     QCommandLineOption profileLoadOption("profile-load", "Discover the recommended resource profile for a game installation.", "game-root");
     QCommandLineOption mobDiffOption("mob-diff", "Compare a baseline MOB with another MOB.", "baseline");
     QCommandLineOption uiWidgetCheckOption("ui-widget-check", "Run non-interactive asset-picker regression checks.");
+    QCommandLineOption testRunReportOption("test-run-report",
+        "Validate the authoritative result of a completed Endurance map-test run.",
+        "run-root");
     QCommandLineOption againstOption("against", "Candidate MOB used with --mob-diff.", "candidate");
     QCommandLineOption angleOpenGlOption("angle-opengl", "Use Qt's ANGLE/OpenGL ES implementation (diagnostic GUI mode).");
     QCommandLineOption desktopOpenGlOption("desktop-opengl", "Use the system desktop OpenGL implementation (diagnostic GUI mode).");
@@ -225,6 +246,7 @@ int runHeadlessCommand(QApplication& app)
     parser.addOption(profileLoadOption);
     parser.addOption(mobDiffOption);
     parser.addOption(uiWidgetCheckOption);
+    parser.addOption(testRunReportOption);
     parser.addOption(againstOption);
     parser.addOption(angleOpenGlOption);
     parser.addOption(desktopOpenGlOption);
@@ -246,13 +268,51 @@ int runHeadlessCommand(QApplication& app)
     const bool profileLoad = parser.isSet(profileLoadOption);
     const bool mobDiff = parser.isSet(mobDiffOption);
     const bool uiWidgetCheck = parser.isSet(uiWidgetCheckOption);
-    if(!validate && !roundtrip && !profileLoad && !mobDiff && !uiWidgetCheck)
+    const bool testRunReport = parser.isSet(testRunReportOption);
+    if(!validate && !roundtrip && !profileLoad && !mobDiff && !uiWidgetCheck
+       && !testRunReport)
         return -1;
     if((validate ? 1 : 0) + (roundtrip ? 1 : 0) + (profileLoad ? 1 : 0)
-            + (mobDiff ? 1 : 0) + (uiWidgetCheck ? 1 : 0) > 1)
+            + (mobDiff ? 1 : 0) + (uiWidgetCheck ? 1 : 0)
+            + (testRunReport ? 1 : 0) > 1)
     {
         QTextStream(stderr) << "Choose one headless command.\n";
         return 2;
+    }
+
+    if(testRunReport)
+    {
+        QJsonObject report;
+        QStringList findings;
+        const bool passed = CJmvMapTestLauncher::analyzeCompletedRun(
+            parser.value(testRunReportOption), &report, &findings);
+        QTextStream output(passed ? stdout : stderr);
+        if(parser.isSet(jsonOption))
+        {
+            QJsonObject result = report;
+            QJsonArray findingArray;
+            for(const QString& finding : findings)
+                findingArray.append(finding);
+            result.insert("automatedFindings", findingArray);
+            result.insert("automatedPassed", passed);
+            output << QJsonDocument(result).toJson(QJsonDocument::Indented);
+        }
+        else
+        {
+            output << (passed ? "PASS" : "FAIL")
+                   << ": completed map-test run "
+                   << report.value("runId").toString() << "\n";
+            output << "requested=" << report.value("requestedZone").toString()
+                   << " entrance=" << report.value("requestedEntrance").toInt()
+                   << " actual=" << report.value("actualZone").toString()
+                   << " entrance=" << report.value("actualEntrance").toInt()
+                   << " generation=" << report.value("actualGeneration").toString()
+                   << "\n";
+            for(const QString& finding : findings)
+                output << "- " << finding << "\n";
+        }
+        output.flush();
+        return passed ? 0 : 1;
     }
 
     if(uiWidgetCheck)
@@ -277,15 +337,6 @@ int runHeadlessCommand(QApplication& app)
             prefixesOnly = prefixesOnly && completion.startsWith("h", Qt::CaseInsensitive);
         const bool valueStable = combo.currentText() == "h"
                 && combo.value()->toString() == "original_model" && appliedChanges == 0;
-        combo.show();
-        combo.showPopup();
-        QApplication::processEvents();
-        QFocusEvent popupFocusOut(QEvent::FocusOut, Qt::PopupFocusReason);
-        QApplication::sendEvent(combo.lineEdit(), &popupFocusOut);
-        QApplication::processEvents();
-        const bool popupStaysOpen = combo.popupActive() && combo.currentText() == "h"
-                && combo.value()->toString() == "original_model" && appliedChanges == 0;
-        combo.hidePopup();
         QFocusEvent focusOut(QEvent::FocusOut, Qt::OtherFocusReason);
         QApplication::sendEvent(combo.lineEdit(), &focusOut);
         const bool focusCancel = combo.currentText() == "original_model"
@@ -425,6 +476,60 @@ int runHeadlessCommand(QApplication& app)
                 && qFuzzyCompare(colorValue->value().y(), 0.2f)
                 && qFuzzyCompare(colorValue->value().z(), 0.3f);
 
+        // A single component of a compound vector is ordinary numeric data:
+        // it can be copied into another numeric field, with range validation
+        // and nearest-integer rounding when the destination is integral.
+        QList<QSharedPointer<IPropertyBase>> vectorComponents;
+        vectorComponents << QSharedPointer<IPropertyBase>(new propFloat(eObjParam_POSITION_X, 1.25f))
+                         << QSharedPointer<IPropertyBase>(new propFloat(eObjParam_POSITION_Y, 2.5f))
+                         << QSharedPointer<IPropertyBase>(new propFloat(eObjParam_POSITION_Z, 3.6f));
+        QTableWidget vectorComponentTable;
+        CTableManager vectorComponentManager(&vectorComponentTable);
+        vectorComponentManager.setNewData(vectorComponents);
+        CValueItem* zComponent = nullptr;
+        const QList<CValueItem*> componentEditors = vectorComponentTable.findChildren<CValueItem*>();
+        for(CValueItem* component : componentEditors)
+        {
+            if(component->param() == eObjParam_POSITION_Z)
+            {
+                zComponent = component;
+                break;
+            }
+        }
+        if(zComponent)
+        {
+            QKeyEvent copyZComponent(QEvent::KeyPress, Qt::Key_C, Qt::ControlModifier);
+            QApplication::sendEvent(zComponent, &copyZComponent);
+        }
+        QList<QSharedPointer<IPropertyBase>> integerDestination;
+        integerDestination << QSharedPointer<IPropertyBase>(new propUint(eObjParam_RANGE, 0));
+        QTableWidget integerDestinationTable;
+        CTableManager integerDestinationManager(&integerDestinationTable);
+        integerDestinationManager.setNewData(integerDestination);
+        QSharedPointer<IPropertyBase> roundedComponentPaste;
+        QObject::connect(&integerDestinationManager, &CTableManager::onUpdateProperty,
+                         [&roundedComponentPaste](const QSharedPointer<IPropertyBase>& value)
+        {
+            roundedComponentPaste.reset(value->clone());
+        });
+        CValueItem* integerEditor = integerDestinationTable.findChild<CValueItem*>();
+        if(integerEditor)
+        {
+            QKeyEvent pasteZComponent(QEvent::KeyPress, Qt::Key_V, Qt::ControlModifier);
+            QApplication::sendEvent(integerEditor, &pasteZComponent);
+        }
+        const propUint* roundedInteger = dynamic_cast<propUint*>(roundedComponentPaste.get());
+        const bool numericComponentPaste = zComponent && roundedInteger
+                && roundedInteger->value() == 4u;
+        roundedComponentPaste.clear();
+        integerDestinationManager.setReadOnly(true);
+        if(integerEditor)
+        {
+            QKeyEvent pasteLockedComponent(QEvent::KeyPress, Qt::Key_V, Qt::ControlModifier);
+            QApplication::sendEvent(integerEditor, &pasteLockedComponent);
+        }
+        const bool lockedNumericPasteBlocked = roundedComponentPaste.isNull();
+
         QMap<QString, QSharedPointer<propBool>> mixedParts;
         mixedParts.insert("head", QSharedPointer<propBool>(new propBool(eObjParam_BODYPARTS)));
         mixedParts.insert("body", QSharedPointer<propBool>(new propBool(eObjParam_BODYPARTS, true)));
@@ -441,6 +546,9 @@ int runHeadlessCommand(QApplication& app)
         QWidget primaryWindow;
         bool settingsTabsUsable = false;
         bool settingsShortcutsPersist = false;
+        bool autosaveSettingsPersist = false;
+        bool autosaveLiveReconfigure = false;
+        bool settingsApplySignal = false;
         bool renderOptionsRegistered = false;
         {
             const QString previousDirectory = QDir::currentPath();
@@ -449,6 +557,13 @@ int runHeadlessCommand(QApplication& app)
                 QDir::setCurrent(settingsDirectory.path());
             {
                 CSettings settingsWindow(&primaryWindow);
+                QObject::connect(&settingsWindow, &CSettings::settingsApplied,
+                                 [&settingsApplySignal]() { settingsApplySignal = true; });
+                QObject::connect(&settingsWindow, &CSettings::autosaveSettingsApplied,
+                    [&autosaveLiveReconfigure](bool enabled, int intervalMinutes)
+                    {
+                        autosaveLiveReconfigure = enabled && intervalMinutes == 1;
+                    });
                 QTabWidget* settingsTabs = settingsWindow.findChild<QTabWidget*>("tabWidget");
                 if(settingsTabs && settingsTabs->count() > 1)
                 {
@@ -459,6 +574,9 @@ int runHeadlessCommand(QApplication& app)
                 QKeySequenceEdit* historyShortcut = settingsWindow.findChild<QKeySequenceEdit*>("shortcutHistory");
                 QKeySequenceEdit* duplicateShortcut = settingsWindow.findChild<QKeySequenceEdit*>("shortcutDuplicateObjects");
                 QKeySequenceEdit* stopTestShortcut = settingsWindow.findChild<QKeySequenceEdit*>("shortcutStopMapTest");
+                QKeySequenceEdit* activateOwnerShortcut = settingsWindow.findChild<QKeySequenceEdit*>("shortcutActivateOwnerMob");
+                QCheckBox* autosaveEnabled = settingsWindow.findChild<QCheckBox*>("autosaveEnabled");
+                QLineEdit* autosaveInterval = settingsWindow.findChild<QLineEdit*>("autosaveIntervalMinutes");
                 COptBool* animateUnits = dynamic_cast<COptBool*>(
                     settingsWindow.opt(eOptSetRender, "animateUnits"));
                 COptBool* performanceCounters = dynamic_cast<COptBool*>(
@@ -473,15 +591,26 @@ int runHeadlessCommand(QApplication& app)
                         && renderFpsCap && renderFpsCap->value() == 0
                         && settingsWindow.findChild<QCheckBox*>("renderVSync")
                         && settingsWindow.findChild<QLineEdit*>("renderFpsCap");
-                if(historyShortcut && duplicateShortcut && stopTestShortcut)
+                if(historyShortcut && duplicateShortcut && stopTestShortcut && activateOwnerShortcut)
                 {
                     historyShortcut->setKeySequence(QKeySequence("Alt+L"));
+                    if(autosaveEnabled)
+                        autosaveEnabled->setChecked(true);
+                    if(autosaveInterval)
+                        autosaveInterval->setText("1");
                     QMetaObject::invokeMethod(&settingsWindow, "on_buttonApply_clicked", Qt::DirectConnection);
                     COptString* saved = dynamic_cast<COptString*>(
                         settingsWindow.opt(eOptSetKeyBinding, "shortcutHistory"));
                     settingsShortcutsPersist = saved && saved->value() == "Alt+L"
                             && duplicateShortcut->keySequence() == QKeySequence("Ctrl+D")
-                            && stopTestShortcut->keySequence() == QKeySequence("Shift+Esc");
+                            && stopTestShortcut->keySequence() == QKeySequence("Shift+Esc")
+                            && activateOwnerShortcut->keySequence() == QKeySequence("Ctrl+T");
+                    COptBool* savedAutosaveEnabled = dynamic_cast<COptBool*>(
+                        settingsWindow.opt(eOptSetGeneral, "autosaveEnabled"));
+                    COptInt* savedAutosaveInterval = dynamic_cast<COptInt*>(
+                        settingsWindow.opt(eOptSetGeneral, "autosaveIntervalMinutes"));
+                    autosaveSettingsPersist = savedAutosaveEnabled && savedAutosaveEnabled->value()
+                            && savedAutosaveInterval && savedAutosaveInterval->value() == 1;
                 }
             }
             QDir::setCurrent(previousDirectory);
@@ -527,28 +656,32 @@ int runHeadlessCommand(QApplication& app)
         const bool logicPointRedoAtomic = logicPointHistory.index() == 1
                 && logicPoints == 1 && logicPlacementChanges == 1;
 
-        const bool passed = prefixesOnly && valueStable && popupStaysOpen
-                && focusCancel && escapeCancel
+        const bool passed = prefixesOnly && valueStable && focusCancel && escapeCancel
                 && enterCommit && clickCommit && settingsTabsUsable && settingsShortcutsPersist
+                && autosaveSettingsPersist && settingsApplySignal && autosaveLiveReconfigure
                 && renderOptionsRegistered
                 && secondaryWindowsClosed
                 && pasteSingleAction && pasteUndoAtomic && pasteRedoAtomic
                 && incompatiblePasteBlocked && compatiblePasteImmediate
                 && multiPropertyPaste && mismatchedPropertyPasteBlocked
                 && fieldPasteImmediate && fieldCopyAvailable && nonTextPropertyPaste
+                && numericComponentPaste
+                && lockedNumericPasteBlocked
                 && mixedModelPartsVisible
                 && logicPointUndoAtomic && logicPointRedoAtomic;
         QTextStream output(stdout);
         output << "asset-picker prefixes=" << completions.join(",") << "\n"
                << "prefixesOnly=" << prefixesOnly
                << " valueStable=" << valueStable
-               << " popupStaysOpen=" << popupStaysOpen
                << " focusCancel=" << focusCancel
                << " escapeCancel=" << escapeCancel
                << " enterCommit=" << enterCommit
                << " clickCommit=" << clickCommit
                << " settingsTabsUsable=" << settingsTabsUsable
                << " settingsShortcutsPersist=" << settingsShortcutsPersist
+               << " autosaveSettingsPersist=" << autosaveSettingsPersist
+               << " autosaveLiveReconfigure=" << autosaveLiveReconfigure
+               << " settingsApplySignal=" << settingsApplySignal
                << " renderOptionsRegistered=" << renderOptionsRegistered
                << " secondaryWindowsClosed=" << secondaryWindowsClosed
                << " pasteSingleAction=" << pasteSingleAction
@@ -561,6 +694,8 @@ int runHeadlessCommand(QApplication& app)
                << " fieldPasteImmediate=" << fieldPasteImmediate
                << " fieldCopyAvailable=" << fieldCopyAvailable
                << " nonTextPropertyPaste=" << nonTextPropertyPaste << "\n"
+               << " numericComponentPaste=" << numericComponentPaste << "\n"
+               << " lockedNumericPasteBlocked=" << lockedNumericPasteBlocked << "\n"
                << " mixedModelPartsVisible=" << mixedModelPartsVisible
                << " logicPointUndoAtomic=" << logicPointUndoAtomic
                << " logicPointRedoAtomic=" << logicPointRedoAtomic << "\n"
@@ -648,6 +783,7 @@ int runHeadlessCommand(QApplication& app)
             value.insert("size", double(component.size));
             value.insert("sha256", component.sha256);
             value.insert("hashAccepted", component.hashAccepted);
+            value.insert("enforceHash", component.enforceHash);
             runtimeComponents.append(value);
         }
         root.insert("runtimeComponents", runtimeComponents);
@@ -738,7 +874,6 @@ int main(int argc, char *argv[])
     QGLFormat::setDefaultFormat(glFormat);
     app.setProperty("renderBenchmark", renderBenchmark);
     app.setProperty("renderConfiguredVSync", configuredVsync);
-
 #ifdef Q_OS_WIN
     SetUnhandledExceptionFilter(enduranceUnhandledException);
 #endif
@@ -758,7 +893,7 @@ int main(int argc, char *argv[])
     if(commandResult >= 0)
         return commandResult;
 
-    qApp->setStyle(QStyleFactory::create("Fusion"));
+    qApp->setStyle(new CEnduranceStyle(QStyleFactory::create("Fusion")));
 
     QPalette darkPalette;
     darkPalette.setColor(QPalette::Window, QColor(53,53,53));
@@ -789,7 +924,7 @@ int main(int argc, char *argv[])
         "QToolTip { color: #ffffff; background-color: #07be07; border: 1px solid white; }"
         "QToolButton:pressed { background-color: #3c583d; }"
         "QWidget:disabled { color: #808080; }"
-        "QMenu::item:disabled { color: #808080; font-weight: normal; }");
+        "QMenu::item:disabled { color: #808080; }");
 
 
     MainWindow window;

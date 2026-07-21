@@ -33,15 +33,18 @@ bool decodePnt3(const QByteArray& compressed, int decodedSize,
     decoded->clear();
     decoded->reserve(decodedSize);
     int cursor = 0;
+    constexpr int literalBlockBytes = 4 * int(sizeof(quint32));
     while(cursor + int(sizeof(quint32)) <= compressed.size())
     {
         const quint32 value = qFromLittleEndian<quint32>(
             reinterpret_cast<const uchar*>(compressed.constData() + cursor));
-        cursor += int(sizeof(quint32));
-        // 2dintmmx.dll's PNT3 surface unpacker identifies a transparent run
-        // by a zero alpha byte and a non-zero dword. The value is a byte
-        // count. Literal pixels are premultiplied BGRA, including zero. Runs
-        // are consumed in four-pixel groups by the original MMX routine.
+        // 2dintmmx.dll (SHA-256 7FBBF945...8423B7A) processes PNT3 at
+        // 0x100018AF in four-pixel blocks. Only the first dword of a block is
+        // tested: non-zero with alpha zero is a byte-counted transparent run;
+        // otherwise all 16 bytes are literal premultiplied BGRA pixels. Thus
+        // zero-alpha color dwords in positions 1..3 are data, not markers.
+        // UnhumaPL_05 controls the large-run case; UnhumaPL_24 controls the
+        // literal-block case that a per-dword parser corrupts.
         const bool transparentRun = value != 0u && (value & 0xff000000u) == 0u;
         if(transparentRun)
         {
@@ -58,16 +61,23 @@ bool decodePnt3(const QByteArray& compressed, int decodedSize,
                 return false;
             }
             decoded->append(QByteArray(int(value), '\0'));
+            cursor += int(sizeof(quint32));
             continue;
         }
-        if(decoded->size() > decodedSize - int(sizeof(quint32)))
+        if(cursor > compressed.size() - literalBlockBytes)
+        {
+            if(diagnostic) *diagnostic = "PNT3 literal block is truncated.";
+            decoded->clear();
+            return false;
+        }
+        if(decoded->size() > decodedSize - literalBlockBytes)
         {
             if(diagnostic) *diagnostic = "PNT3 literal data exceeds the decoded image bounds.";
             decoded->clear();
             return false;
         }
-        decoded->append(compressed.constData() + cursor - int(sizeof(quint32)),
-                        int(sizeof(quint32)));
+        decoded->append(compressed.constData() + cursor, literalBlockBytes);
+        cursor += literalBlockBytes;
     }
     if(cursor != compressed.size())
     {

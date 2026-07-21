@@ -1,0 +1,100 @@
+# Character pipeline evidence and regression matrix
+
+This matrix separates established behavior from probes that still need engine
+or broader corpus evidence. Input assets remain private/read-only; fixture reports
+may record hashes and structural summaries but not redistribute game data.
+
+## Evidence ledger
+
+| Claim | Provider | Decisive evidence | Regression fixture/control | Status |
+|---|---|---|---|---|
+| Normal/imported resolution split | Base/JMV | provider code + appearance tests | conflicting normal/imported unit; `bz18h` 1000054752 | Verified renderer/provider rule; runtime control retained |
+| Provider isolation/no profile-ID branching | Base/JMV | provider registry/context tests | unknown ID and Base↔JMV switch | Verified |
+| Lower before upper; Wear Order descending | JMV | resolver + focused tests | plate/leggings `1,0` and `0,0` | Verified renderer; successful corpus controls documented |
+| Exact armor replacement plus linked descendants | JMV | `35f2ce9` + tests + ANHUM links | `unhufe` TTI24; autozone4hadagans 1000017; bz14h 1000295968 | Verified JMV corpus/renderer |
+| `.x2` equipment transform, stored `.x4` body UV | JMV | viewer commits + UV tests/probes | zone1 203/205/221 | Verified JMV controls |
+| Exact PNT3 block grammar | JMV | fingerprinted `2dintmmx.dll` SHA-256 `7FBBF9452520CC1A8F11E4C955B6DC1988AA24A624298B130E291C4368423B7A`, routine `0x100018AF`; 1,068-member audit | `UnhumaPL_05.bl.0.x4`, `UnhumaPL_24.bl.0.x4` | Verified binary/corpus/renderer |
+| Material suffix exact; incompatibility fails closed | JMV | resolver tests and corpus | bz8k 1000292348; bz16h 382 | Verified provider; visible runtime diagnostic control |
+| Hair hidden by helmet; quick items invisible | Base/JMV | focused provider tests | helmet toggle; quick→equipped move | Verified renderer/provider |
+| Base one weapon; JMV first pair/layouts | Base/JMV | provider tests | ordinary, 1H+shield, dual 1H, 2H | Verified renderer/provider |
+| TitanGrip requires StrongMan ownership | JMV | JMV Lua branch analysis + safe fallback | zone17 47533 | Ownership interpretation supported; parser/render layouts deferred |
+| Attachment channel inherited once | Base/JMV | hierarchy tests + viewer | zon3obr 233/234 shield across frames | Verified renderer; runtime control retained |
+| ADB standing IDLE and provider masks | Base/JMV | animation parser/provider tests | unarmed/1H/ranged, JMV 2H | Verified renderer/provider |
+| 15 Hz, closing sample, child*parent, root-relative translation | Base/JMV | unit animation tests + ei_figer behavior | synthetic nested ANM | Verified renderer/ei_figer triangulation |
+| Synchronized bone + vertex morph | Base/JMV | animation tests | JMV `unmodg` wing membrane | Verified renderer; runtime control retained |
+| Complexion uses placed geometry values | Base/JMV | unit/provider flow + visual comparison | same prototype, varied MOB constitution | Verified renderer rule; per-family engine comparison incomplete |
+
+## Tool and copied-fixture provenance (2026-07-22)
+
+- `C:\Users\ilufu\Downloads\ПЗ Жамевю\ei_figer_v5.2.zip`:
+  SHA-256 `DC15EA7DCD2E3703DFDE021051DF077F52F99E83124053445B2FDFB74E3649B6`.
+  Audited research clone commit: `384f7b13da423d84d7f3e78f78ef0bf1a14d3714`.
+- Portable Blender 3.6.23 `blender.exe`:
+  SHA-256 `FC104BCAE000C8EDAD75BBC7B55EE6137929F6FD1BE4501EF3E28C6E3BC8986C`.
+- Copied `zone1-203-textures/unhuma.res`:
+  SHA-256 `E8430155D0AA96558B75BEDA8B66F7360C4BEAD7685D9D855FFBCEDCA88800CE`.
+  Its copied `unhuma.mod` and `unhuma.anm` members hash to
+  `A36DEB816DC607D8BC2C5B0165EE209D1D84DB69753228325C0FFD5A90372DBC`
+  and `60DEE65FD9C6860CCB6D87DEC00B1B248FF92A5320E4BC2A2C1F11B4D98D9E0E`.
+- Copied `bd.armor05` and `unhumapl_05.bl.0.x4.mmp` hash to
+  `EF1AD153DACAF206A9602E30FF2653FD43188D8D5369604811E28BB0D1EA08D9`
+  and `344B29256BB070B71EB72D342AE8186F550A141B1247160EE353E7F809891B4E`.
+
+These hashes identify research copies, not proof of their original archive or
+runtime provenance. Preserve that distinction in every report.
+
+## Family controls
+
+| Family | Representative controls | What must be checked | Open question |
+|---|---|---|---|
+| Human male/female | zone1 203/205/221/224; bz8k 919536 | DB assembly, full atlas, armor overlap, bow/quiver | Broaden Base material/TTI corpus |
+| Orc male/female | zone3obr; `unorma`/`unorfe` | shared equipment atlas, model-specific skin, weapons | Complete Base/JMV gender matrix |
+| Skeleton | `unhusk`, zone3obr | x4 skin and shared equipment families | Confirm every shipped skeleton subtype |
+| UndeadF16/F17 | zone17 | keep embedded wearable assembly, DB skin 29/items | Why RaceModels mask differs remains data semantics, not replacement rule |
+| Goblin | `unmogo` spear/sling | one integral group, primary/secondary texture, compatible idle | General Monster Items/MOB/FIG selection routine |
+| Lizardman | `unmoli` | trident attachment/contact and two-hand ready idle | General integral-weapon resolver |
+| Ogre | `unmoog*`; zone17 763 | ordinary OBJ-secondary club vs corpus-backed `club02` atlas | General alias/group selection rule |
+| Dragon | `unmodr`, `unmodg` | standing idle, wing hierarchy + morph synchronization | Complexion/root-height behavior |
+| Bat | corpus inventory required | embedded assembly, intrinsic parts, animation/morph channels | No complete fingerprinted matrix yet |
+| Harpy | corpus inventory required | same, plus flying root/height | No complete fingerprinted matrix yet |
+| Banshee | corpus inventory required | embedded texture/assembly, floating root | No complete fingerprinted matrix yet |
+| Beholder | corpus inventory required | embedded parts/animation | No complete fingerprinted matrix yet |
+| Shadow | corpus inventory required | transparency/material and hierarchy | No complete fingerprinted matrix yet |
+| Spider | corpus inventory required | multi-limb hierarchy and idle | No complete fingerprinted matrix yet |
+| Octopus | corpus inventory required | tentacle hierarchy/morphs | No complete fingerprinted matrix yet |
+
+“Corpus inventory required” is a deliberate fail-closed finding. Until exact
+profile archives and model/action names are fingerprinted, the supported rule is
+to preserve embedded creature data and diagnose missing/incompatible members.
+
+## Rejected interpretations
+
+- A normalized full-image UV assumption: rejected by stored FIG domains, viewer
+  alignment, and `.x2`/`.x4` controls.
+- Global same-suffix armor scans: rejected by authored `l_shell/r_shell` parent
+  links and negative same-suffix controls.
+- Loot array order controls armor: rejected by lower/upper and Wear Order tests.
+- Every armor region has replacement geometry: rejected by atlas-only lower
+  equipment and TTI0 controls.
+- Equipment implies TitanGrip: rejected by JMV StrongMan Lua ownership logic.
+- Database may repair missing imported items: rejected by Import semantics.
+- Renderer behavior alone proves engine truth: rejected as methodology; keep
+  renderer, corpus, ei_figer, binary routine, and controlled game comparisons
+  distinct in reports.
+
+## Round-trip plan
+
+1. Generate a SHA-256/member/structure baseline with
+   `scripts/character_asset_report.py`.
+2. No-op import/export one FIG+LNK model and one ANM action into a fresh RES.
+3. Re-open with ei_figer and report both archives. Require semantic equality;
+   document unavoidable container-table/timestamp differences.
+4. Move one vertex without topology change, one UV within the existing domain,
+   one attachment transform, and one animation quaternion in separate fixtures.
+5. For each fixture, require only the intended semantic delta, preserved unknown
+   fields/member hashes, correct Final Character Texture/UV display, and matching
+   visible/picking pose.
+6. Run family controls with `drawall`, several idle frames, orbit/distance,
+   save/load, unload/reload, and graceful exit in disposable Base and JMV copies.
+7. Archive successful and rejected reports separately. Never promote a failed
+   round trip by manually normalizing unexplained bytes.

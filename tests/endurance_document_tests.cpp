@@ -105,6 +105,18 @@ QByteArray emptyMpr()
     stream << quint32(0x019CE23C) << quint32(0) << quint32(16) << quint32(0);
     return bytes;
 }
+
+const SMobSection* firstSectionOfType(const QVector<SMobSection>& sections, quint32 type)
+{
+    for(const SMobSection& candidate : sections)
+    {
+        if(candidate.type == type)
+            return &candidate;
+        if(const SMobSection* nested = firstSectionOfType(candidate.children, type))
+            return nested;
+    }
+    return nullptr;
+}
 }
 
 class EnduranceDocumentTests : public QObject
@@ -115,6 +127,7 @@ private slots:
     void unchangedMobIsByteIdentical();
     void duplicateMobIdsAreWarningsOnly();
     void unknownLeafIsPreservedAsOpaque();
+    void suppliedOpaqueChestCanPatchKnownLeafSafely();
     void malformedMobRootIsRejected();
     void legacyMapEdTrapArrayLengthsArePreserved();
     void semanticAnomaliesAreWarningsOnly();
@@ -127,6 +140,7 @@ private slots:
     void objectSubtreeDuplicateAndDeleteAreExact();
     void objectSubtreeRejectsStaleProvenance();
     void objectSequenceRebuildIsExactAndOrdered();
+    void crossMobObjectSequencePreservesDonorRawSubtree();
     void copiedObjectSequenceAcceptsOnlyIntendedLeafEdits();
     void patrolAndLookPointStructureIsReconciledExactly();
     void projectionDeltaPreservesRawSourceStructure();
@@ -193,6 +207,55 @@ void EnduranceDocumentTests::unknownLeafIsPreservedAsOpaque()
     QVERIFY(leaf.opaque);
     QCOMPARE(leaf.rawBytes, unknown);
     QCOMPARE(document.serialize(), bytes);
+    int opaqueWarnings = 0;
+    for(const SValidationFinding& finding : report.findings())
+    {
+        if(finding.code != "mob.opaque_unknown")
+            continue;
+        ++opaqueWarnings;
+        QVERIFY(finding.message.contains("0xdeadbeef", Qt::CaseInsensitive));
+        QVERIFY(finding.message.contains("offset 8"));
+    }
+    QCOMPARE(opaqueWarnings, 1);
+    QVERIFY(!report.hasErrors());
+}
+
+void EnduranceDocumentTests::suppliedOpaqueChestCanPatchKnownLeafSafely()
+{
+    const QString fixture = qEnvironmentVariable("ENDURANCE_CHEST_FIXTURE");
+    if(fixture.isEmpty())
+        QSKIP("ENDURANCE_CHEST_FIXTURE was not provided");
+    CMobDocument source;
+    CValidationReport openReport;
+    QVERIFY(source.load(QFileInfo(fixture), &openReport));
+    const QByteArray original = source.serialize();
+    QCOMPARE(original.size(), 1532);
+    const SMobSection* opaque = firstSectionOfType(source.sections(), 0xACCEECCC);
+    QVERIFY(opaque);
+    QCOMPARE(opaque->offset, quint64(1166));
+    QCOMPARE(opaque->declaredLength, quint32(12));
+    QCOMPARE(opaque->rawBytes.mid(8), QByteArray(4, '\0'));
+    const QByteArray opaqueBytes = opaque->rawBytes;
+
+    const SMobSection* nid = firstSectionOfType(source.sections(), 0xB002);
+    QVERIFY(nid);
+    quint32 oldNid = 0;
+    QDataStream nidStream(nid->rawBytes.mid(8));
+    nidStream.setByteOrder(QDataStream::LittleEndian);
+    nidStream >> oldNid;
+    CMobEditTransaction transaction("opaque fixture known-leaf edit");
+    transaction.replaceLeafPayload(nid->path, nid->sha256, u32(oldNid + 1), nid->type,
+                                   nid->rawBytes.mid(8));
+    QByteArray candidate;
+    CValidationReport transactionReport;
+    QVERIFY(source.applyTransaction(transaction, &candidate, &transactionReport));
+    QVERIFY(candidate != original);
+    CMobDocument reopened;
+    QVERIFY(reopened.loadBytes(candidate, "opaque-chest-candidate.mob", &transactionReport));
+    const SMobSection* candidateOpaque = firstSectionOfType(reopened.sections(), 0xACCEECCC);
+    QVERIFY(candidateOpaque);
+    QCOMPARE(candidateOpaque->rawBytes, opaqueBytes);
+    QCOMPARE(source.serialize(), original);
 }
 
 void EnduranceDocumentTests::malformedMobRootIsRejected()
@@ -489,6 +552,59 @@ void EnduranceDocumentTests::objectSequenceRebuildIsExactAndOrdered()
                 QVector<QByteArray>() << QByteArray(32, '\x7f'),
                 &rebuiltBytes, &report));
     QVERIFY(rebuiltBytes.isEmpty());
+}
+
+void EnduranceDocumentTests::crossMobObjectSequencePreservesDonorRawSubtree()
+{
+    const QByteArray targetObject = object(10, "target", 1.0f);
+    const QByteArray donorOpaque = section(0xDEADBEEF, "donor-opaque-data");
+    const QByteArray donorClean = object(20, "tree", 2.0f);
+    const QByteArray donorRaw = section(0xB001, donorClean.mid(8) + donorOpaque);
+
+    CMobDocument target;
+    CMobDocument donor;
+    CMobDocument donorProjection;
+    CValidationReport report;
+    QVERIFY(target.loadBytes(validMob(section(0xB000, targetObject)),
+                             "target.mob", &report));
+    QVERIFY(donor.loadBytes(validMob(section(0xB000, donorRaw)),
+                            "donor.mob", &report));
+    QVERIFY(donorProjection.loadBytes(validMob(section(0xB000, donorClean)),
+                                      "donor-clean.mob", &report));
+
+    QByteArray targetRaw;
+    QByteArray donorSourceRaw;
+    QByteArray donorCleanRaw;
+    const SMobObjectSnapshot targetSnapshot = target.objects().front();
+    const SMobObjectSnapshot donorSnapshot = donor.objects().front();
+    const SMobObjectSnapshot donorCleanSnapshot = donorProjection.objects().front();
+    QVERIFY(target.objectSubtreeBytes(targetSnapshot.sectionPath,
+                                      targetSnapshot.subtreeSha256, &targetRaw));
+    QVERIFY(donor.objectSubtreeBytes(donorSnapshot.sectionPath,
+                                     donorSnapshot.subtreeSha256, &donorSourceRaw));
+    QVERIFY(donorProjection.objectSubtreeBytes(donorCleanSnapshot.sectionPath,
+                                               donorCleanSnapshot.subtreeSha256,
+                                               &donorCleanRaw));
+
+    QByteArray structuralSource;
+    QVERIFY2(target.rebuildObjectSequenceFromRaw(
+        QVector<QByteArray>() << targetRaw << donorSourceRaw,
+        QVector<QByteArray>() << targetSnapshot.subtreeSha256
+                              << donorSnapshot.subtreeSha256,
+        &structuralSource, &report), qPrintable(report.toText()));
+    CMobDocument rebuilt;
+    QVERIFY(rebuilt.loadBytes(structuralSource, "cross-mob-output.mob", &report));
+    QCOMPARE(rebuilt.objects().size(), 2);
+    QCOMPARE(rebuilt.objects().at(1).subtreeSha256, donorSnapshot.subtreeSha256);
+    QVERIFY(structuralSource.contains("donor-opaque-data"));
+
+    QByteArray rejected;
+    QVERIFY(!target.rebuildObjectSequenceFromRaw(
+        QVector<QByteArray>() << targetRaw << donorCleanRaw,
+        QVector<QByteArray>() << targetSnapshot.subtreeSha256
+                              << donorSnapshot.subtreeSha256,
+        &rejected, &report));
+    QVERIFY(rejected.isEmpty());
 }
 
 void EnduranceDocumentTests::copiedObjectSequenceAcceptsOnlyIntendedLeafEdits()

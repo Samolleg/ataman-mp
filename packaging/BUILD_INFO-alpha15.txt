@@ -1,0 +1,9 @@
+EI Mapper: Endurance Edition 0.2.1-alpha.15
+Tester purpose: authoritative test-run results, automatic deterministic evidence checks, and non-modal post-test notification
+Profile scope: Base EI and JMV editor profiles; runtime-result evidence is currently validated for JMV direct launch
+UI focus: auto-dismissing post-test warning/error notification with Dismiss and Open Log
+Runtime focus: observed loader-path correlation to hash-verified payloads, zone/entrance/generation/save identity, source preservation, exit classification, and cleanup
+Editor SHA-256: 68436f8e35b3be9a2c785dc418279a570f593f17b4c6f091d27c2cc0016228b9
+Bridge SHA-256: 77bae22c9f714858b64a5541ecbf84de5d8e9ffa417e792930885a1f161e9985
+Automated checks: fresh MinGW release build PASS; JMV launcher/result suite PASS; observed real bridge-log grammar checked; git diff check PASS
+Runtime check required: complete representative JMV map-test matrix and retain each run's result.json

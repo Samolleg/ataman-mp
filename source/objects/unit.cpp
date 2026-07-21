@@ -185,6 +185,7 @@ void CUnit::refreshTransientVisual()
         return;
     m_resolvedDatabaseGeneration = generation;
     m_resolvedVisualRevision = m_visualRevision;
+    m_visualDiagnostics.clear();
     const auto database = context.current();
     static ProfileVisualProviderService providers;
     QString diagnostic;
@@ -194,6 +195,7 @@ void CUnit::refreshTransientVisual()
         context.providerForRole("equipmentLayout"), database, &diagnostic);
     if(appearanceResolver.isNull() || equipmentResolver.isNull())
     {
+        m_visualDiagnostics.append("provider.unavailable: " + diagnostic);
         ei::log(eLogWarning, "Unit visual provider unavailable: " + diagnostic);
         applyTransientVisual("cannotdisplay", "default", {}, QVector3D(1, 1, 1));
         m_resolvedAnimationModel.clear(); m_resolvedAnimationWeapons.clear();
@@ -204,6 +206,7 @@ void CUnit::refreshTransientVisual()
     appearanceRequest.profileId = database.isNull() ? QString() : database->profileId;
     appearanceRequest.runtimeManifestId = database.isNull() ? QString() : database->runtimeManifestId;
     appearanceRequest.prototype = m_prototypeName;
+    appearanceRequest.parentTemplate = m_parentTemplate;
     appearanceRequest.model = m_modelName;
     appearanceRequest.primaryTexture = m_primaryTexture;
     appearanceRequest.secondaryTexture = m_secondaryTexture;
@@ -214,6 +217,7 @@ void CUnit::refreshTransientVisual()
     const SRuntimeProviderResult appearanceResult = appearanceResolver->resolve(appearanceRequest, &appearance);
     if(!appearanceResult.success)
     {
+        m_visualDiagnostics.append(appearanceResult.code + ": " + appearanceResult.message);
         ei::log(eLogWarning, QString("Unit %1 appearance placeholder [%2]: %3")
                 .arg(m_prototypeName, appearanceResult.code, appearanceResult.message));
         applyTransientVisual("cannotdisplay", "default", {}, QVector3D(1, 1, 1));
@@ -273,6 +277,13 @@ void CUnit::refreshTransientVisual()
     equipmentRequest.prototype = m_prototypeName;
     equipmentRequest.model = model;
     equipmentRequest.assemblyParts = assemblyParts;
+    if(ei::CFigure* assemblyFigure = CObjectList::getInstance()->getFigure(model))
+    {
+        QMap<QString, QVector3D> ignoredRestOffsets;
+        QVector3D hierarchyComplexion = m_complection;
+        assemblyFigure->getAssemblyHierarchy(equipmentRequest.assemblyParents,
+                                              ignoredRestOffsets, hierarchyComplexion);
+    }
     equipmentRequest.dataSource = appearanceRequest.dataSource;
     equipmentRequest.armor = m_bImport ? m_aArmor
         : (databaseEquipmentPlan ? jsonStringList(appearance, "armor") : QStringList());
@@ -294,10 +305,17 @@ void CUnit::refreshTransientVisual()
         if(!visibleParts.contains(component, Qt::CaseInsensitive))
             visibleParts.append(component);
     for(const QJsonValue& finding : equipment.value("diagnostics").toArray())
-        ei::log(eLogWarning, QString("Unit %1 equipment: %2").arg(m_prototypeName, finding.toString()));
+    {
+        const QString text = finding.toString();
+        m_visualDiagnostics.append("equipment: " + text);
+        ei::log(eLogWarning, QString("Unit %1 equipment: %2").arg(m_prototypeName, text));
+    }
     if(!equipmentResult.success && equipment.value("placeholders").toArray().isEmpty())
+    {
+        m_visualDiagnostics.append(equipmentResult.code + ": " + equipmentResult.message);
         ei::log(eLogWarning, QString("Unit %1 equipment [%2]: %3")
                 .arg(m_prototypeName, equipmentResult.code, equipmentResult.message));
+    }
     QMap<QString, QString> componentTextures;
     const QJsonObject textureObject = equipment.value("componentTextures").toObject();
     for(auto it = textureObject.constBegin(); it != textureObject.constEnd(); ++it)
@@ -323,7 +341,11 @@ void CUnit::refreshTransientVisual()
     }
     const QStringList equipmentBodyLayers = jsonStringList(equipment, "bodyTextureLayers");
     QStringList bodyTextureLayers;
-    if(databaseEquipmentPlan && !equipmentBodyLayers.isEmpty())
+    // Imported units keep their local armor list, but the active provider may
+    // interpret those explicit item names into the same read-only atlas
+    // layers. Do not discard those layers merely because the list came from
+    // the MOB rather than the Monster database row.
+    if(!equipmentBodyLayers.isEmpty())
     {
         bodyTextureLayers.append(texture);
         bodyTextureLayers.append(equipmentBodyLayers);
@@ -1085,8 +1107,16 @@ void CLogic::draw(bool isActive, QOpenGLShaderProgram* program)
     program->setUniformValue("customColor", QVector4D(0.0, 0.0, 0.0, 0.0));
 
     if(m_behaviour == EBehaviourType::ePath)
+    {
+        // Logic markers are drawn without depth testing. Draw selected patrol
+        // groups last so a nearby later point cannot paint over the highlight.
         for(auto& pp : m_aPatrolPt)
-            pp->draw(isActive, program);
+            if(pp->nodeState() != ENodeState::eSelect && !pp->hasSelectedLookPoint())
+                pp->draw(isActive, program);
+        for(auto& pp : m_aPatrolPt)
+            if(pp->nodeState() == ENodeState::eSelect || pp->hasSelectedLookPoint())
+                pp->draw(isActive, program);
+    }
 
     glEnable(GL_DEPTH_TEST);
 }
@@ -1929,9 +1959,24 @@ void CPatrolPoint::draw(bool isActive, QOpenGLShaderProgram* program)
     glDrawElements(GL_LINES, (m_aDrawingLine.count()-1)*2, GL_UNSIGNED_SHORT, nullptr);
     program->setUniformValue("customColor", QVector4D(0.0, 0.0, 0.0, 0.0));
     for(auto& look: m_aLookPt)
-    {
-        look->draw(isActive, program);
-    }
+        if(look->nodeState() != ENodeState::eSelect)
+            look->draw(isActive, program);
+    for(auto& look: m_aLookPt)
+        if(look->nodeState() == ENodeState::eSelect)
+            look->draw(isActive, program);
+
+    // The point itself may overlap a look point or another large point marker.
+    // Repaint a selected point last so its highlight is always visible.
+    if(nodeState() == ENodeState::eSelect)
+        CObjectBase::draw(isActive, program);
+}
+
+bool CPatrolPoint::hasSelectedLookPoint() const
+{
+    for(const CLookPoint* look : m_aLookPt)
+        if(look && look->nodeState() == ENodeState::eSelect)
+            return true;
+    return false;
 }
 
 void CPatrolPoint::drawSelect(QOpenGLShaderProgram* program)
@@ -2258,7 +2303,9 @@ int CPatrolPoint::getViewId(CLookPoint *pPoint)
 
 void CPatrolPoint::createViewByIndex(int index)
 {
-    CLookPoint* pPoint = new CLookPoint();
+    CLookPoint* pPoint = index >= 0
+            ? new CLookPoint(*m_aLookPt.at(index))
+            : new CLookPoint();
     if(index >= 0)
     {
         QVector3D pos = m_aLookPt[index]->position();
@@ -2519,7 +2566,7 @@ bool CLookPoint::isOperationAxisAllow(EOperationAxisType type)
 
 CLookPoint *CLookPoint::createLookPoint()
 {
-    CLookPoint* pPoint = new CLookPoint();
+    CLookPoint* pPoint = new CLookPoint(*this);
     pPoint->updatePos(m_position);
     emit addNewLookPoint(this, pPoint);
     return pPoint;

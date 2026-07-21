@@ -20,6 +20,7 @@ class CLineEditEventFilter;
 class CMultiLineEditForm;
 class CUnitStatForm;
 class CBodyPartEditForm;
+class QContextMenuEvent;
 
 ///
 /// \brief The CValueItem class supports any type of property that can be displayed with a single line.
@@ -38,6 +39,7 @@ public:
     void skipNextCheck() {bSkip = true;} //skip checking value for reverting (on lost focus)
     void renewValue(QString value);
     void keyPressEvent(QKeyEvent* event) override;
+    void contextMenuEvent(QContextMenuEvent* event) override;
 
 private:
     //void setValue()
@@ -306,6 +308,7 @@ public:
 
     void reset();
     void setNewData(const QList<QSharedPointer<IPropertyBase>>& aProp);
+    void setReadOnly(bool readOnly);
 
     bool eventFilter(QObject* watched, QEvent* event) override;
 
@@ -336,6 +339,7 @@ private:
     QMap<EObjParam, QString> m_aRowName;
     QMap<EObjParam, QMap<uint, QString>> m_comboMap;
     QMap<int, QSharedPointer<IPropertyBase>> m_rowValues;
+    bool m_readOnly{false};
 };
 
 #endif // CTABLEMANAGER_H

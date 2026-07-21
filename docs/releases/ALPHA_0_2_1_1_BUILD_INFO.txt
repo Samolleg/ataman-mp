@@ -1,0 +1,7 @@
+EI Mapper: Endurance Edition 0.2.1-alpha.1
+Branch: feature/viewport-test-controls-base-probe
+Editor: Qt 5.12.12 / MinGW 7.3 x64 release build
+Runtime bridge: MSVC 2022 x86 experimental persistent game-thread hot-reload transport
+Base runtime host: MSVC 2022 x86 release; Base hot reload remains disabled
+Changes: repeated Ctrl+F5 safely restages the exact active JMV pair; atomic temporary-pair replacement with rollback; monotonic owned request protocol; persistent verified game-thread message hook; readiness/completion/timeout reporting; normal entrance/custom-spawn bootstrap per reload
+Limitations: runtime transition requires tester validation; same-map position/facing preservation is not implemented; no multi-MOB hot reload

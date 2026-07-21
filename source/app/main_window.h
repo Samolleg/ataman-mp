@@ -9,7 +9,14 @@
 #include <QPlainTextEdit>
 #include <QTableWidget>
 #include <QFileInfo>
+#include <QMap>
+#include <QSet>
+#include <QVector3D>
+#include <QFutureWatcher>
 #include "types.h"
+#include "map_catalog.h"
+#include "map_spawn_planner.h"
+#include "mob_family_validation.h"
 
 namespace Ui {
 class MainWindow;
@@ -24,12 +31,25 @@ class CTileForm;
 class QMenu;
 class QAction;
 class QDockWidget;
-class QDialog;
-class QLabel;
-class QScrollArea;
-class QListWidget;
 class CMapsBrowser;
 class CJmvMapTestLauncher;
+struct SResourceProfileEvaluation;
+class QComboBox;
+class QCheckBox;
+class QToolButton;
+class QLabel;
+class QTreeWidget;
+class QTreeWidgetItem;
+class QTimer;
+class QPushButton;
+class QLineEdit;
+class QFrame;
+class QResizeEvent;
+class QJsonObject;
+class QProgressDialog;
+class QDialog;
+class QScrollArea;
+class QListWidget;
 
 struct SWindowTitle
 {
@@ -47,6 +67,13 @@ public:
     explicit MainWindow(QWidget* parent = nullptr);
     ~MainWindow();
     bool openDocument(const QFileInfo& fileName);
+    bool replaceLoadedLandscape(const QFileInfo& fileName);
+    bool loadMobWithProgress(QFileInfo fileName);
+    bool loadLandscapeWithProgress(const QFileInfo& fileName);
+    void configureAutosaveTimer();
+    void configureAutosaveTimer(bool enabled, int intervalMinutes);
+    void performAutosave();
+    void showRecoverableAutosaves();
 
     void testFunc1();
 
@@ -62,8 +89,52 @@ private:
     void runUndoToIndex(int targetIndex);
     void refreshMapsBrowser();
     void openMapPair(const QString& mprPath, const QString& mobPath, const QString& zoneId);
+    void openCollection(const QString& path);
+    void newCollection();
+    void editCollection();
+    void saveCollection(bool saveAs);
+    QVector<QString> activeMapRoots() const;
     void updateMapTestAction();
     void launchCurrentMapTest();
+    void createViewportToolbars();
+    void refreshMapTestContext();
+    void populateEntranceCombo();
+    void chooseBorrowedMapIdentity();
+    void setCustomSpawnPicking(bool enabled);
+    void updateCustomSpawnControls();
+    QString currentMapContextKey() const;
+    void moveCameraToActiveSpawn();
+    void updateEntranceOverlays();
+    void updateOperationAvailability(bool hasSelection = false);
+    void updateDocumentActionAvailability();
+    bool beginWorkspaceLoad(const QString& description);
+    void endWorkspaceLoad();
+    void updateLoadedMapPanel();
+    void updateOutlinerSelectionPath();
+    void previewLoadedMapVisibility(QTreeWidgetItem* item);
+    void commitLoadedMapVisibilityDrag();
+    void saveUiState();
+    void closeHotReloadProgress();
+    QVector<SMapSpawnObstacle> mapTestObstacles() const;
+    const SMapTravelZone* selectedTravelZone() const;
+    SResourceProfileEvaluation activeResourceProfile() const;
+    QString activeProfileDisplayName() const;
+    SMobFamilyValidationRequest mobFamilyValidationRequest();
+    void scheduleMobFamilyValidation(int delayMs = 300);
+    void refreshMobFamilyValidation();
+    void startPendingMobFamilyValidation();
+    void finishMobFamilyValidation();
+    void applyMobFamilyValidationReport(const CMobFamilyValidationReport& report);
+    void updateMobFamilyValidationPanel();
+    void showMobFamilyValidation();
+    void showValidationWarning(const QString& title, const QString& text);
+    QString validationWarningPreview(const QVector<SMobFamilyFinding>& findings) const;
+    void selectValidationObject(QTreeWidgetItem* item);
+    void reviewAndRepairNidCollisions();
+    void notifyFamilyPreflight(const QString& operation);
+    void notifyProposedNid(quint32 nid, const QString& mobPath);
+    void showMapTestResultNotification(const QJsonObject& report);
+    void positionMapTestResultNotification();
     void showUnitTexturePreview();
     void updateUnitTexturePreview();
     void renderUnitTexturePreview();
@@ -110,6 +181,7 @@ private slots:
 
 protected:
     void closeEvent(QCloseEvent* e);
+    void resizeEvent(QResizeEvent* e) override;
     bool eventFilter(QObject* watched, QEvent* event) override;
 
 private:
@@ -126,19 +198,77 @@ private:
     QTableWidget* m_testTable;
     QMenu* m_recentFilesMenu;
     QAction* m_externalScriptAction;
+    QAction* m_activateOwnerMobAction;
     QDockWidget* m_mapsDock;
+    QDockWidget* m_historyDock;
+    QDockWidget* m_validationDock;
+    QDockWidget* m_outlinerDock;
+    QDockWidget* m_propertiesDock;
+    QDockWidget* m_loadedMapDock;
+    QTreeWidget* m_loadedMapTree;
+    QTreeWidget* m_validationTree;
+    QLabel* m_validationSummary;
+    QTimer* m_validationTimer;
+    QFutureWatcher<CMobFamilyValidationReport>* m_validationWatcher{nullptr};
+    SMobFamilyValidationRequest m_pendingValidationRequest;
+    quint64 m_validationGeneration{0};
+    quint64 m_runningValidationGeneration{0};
+    bool m_hasPendingValidation{false};
+    QByteArray m_lastValidationRequestDigest;
+    int m_validationFindingLimit{250};
+    QPushButton* m_validationShowMore{nullptr};
+    QLineEdit* m_outlinerFilterEdit{nullptr};
+    QLabel* m_outlinerFilterStatus{nullptr};
+    QLabel* m_outlinerSelectionPath{nullptr};
+    bool m_loadedMapVisibilityDragging{false};
+    Qt::CheckState m_loadedMapVisibilityTarget{Qt::Unchecked};
+    QSet<QString> m_loadedMapVisibilityKeys;
+    QFrame* m_mapTestResultNotification{nullptr};
+    QLabel* m_mapTestResultIcon{nullptr};
+    QLabel* m_mapTestResultLabel{nullptr};
+    QTimer* m_mapTestResultTimer{nullptr};
+    QProgressDialog* m_hotReloadProgress{nullptr};
+    QTimer* m_autosaveTimer{nullptr};
+    bool m_uiStateSaved{false};
+    bool m_workspaceLoadInProgress{false};
+    QString m_mapTestResultLogPath;
+    CMobFamilyValidationReport m_familyValidation;
+    QByteArray m_acknowledgedFindingDigest;
+    QSet<QString> m_previousFamilyRiskKeys;
+    QSet<quint32> m_sessionAllocatedNids;
+    QSet<QString> m_warnedSharedAllocationMobs;
+    bool m_familyRiskBaselineReady{false};
     CMapsBrowser* m_mapsBrowser;
     QAction* m_mapTestAction;
     QAction* m_stopMapTestAction;
     CJmvMapTestLauncher* m_mapTestLauncher;
-    QDialog* m_unitTextureDialog;
-    QLabel* m_unitTextureDetails;
-    QLabel* m_unitTextureImage;
-    QScrollArea* m_unitTextureScroll;
-    QListWidget* m_unitTextureLayers;
-    QListWidget* m_unitTextureParts;
-    bool m_unitTextureUpdating;
+    QDialog* m_unitTextureDialog{nullptr};
+    QLabel* m_unitTextureDetails{nullptr};
+    QLabel* m_unitTextureImage{nullptr};
+    QScrollArea* m_unitTextureScroll{nullptr};
+    QListWidget* m_unitTextureLayers{nullptr};
+    QListWidget* m_unitTextureParts{nullptr};
+    bool m_unitTextureUpdating{false};
     bool m_closeAfterTestStop;
+    QMap<EButtonOp, QAction*> m_operationActions;
+    QComboBox* m_entranceCombo;
+    QToolButton* m_playFromHereButton;
+    QToolButton* m_gotoEntranceButton;
+    QCheckBox* m_godmodeCheckBox;
+    QLabel* m_spawnPositionLabel;
+    SMapCatalogResult m_mapCatalog;
+    SMapCatalogEntry m_mapTestEntry;
+    QVector<SMapTravelZone> m_validEntrances;
+    QString m_openedMapZoneId;
+    QString m_currentCollectionPath;
+    bool m_borrowedMapIdentity;
+    bool m_pickSpawnPending;
+    bool m_movingCustomSpawn{false};
+    bool m_customSpawnSelected{false};
+    bool m_suppressSpawnRelease{false};
+    SMapSpawnPlan m_customSpawn;
+    QVector3D m_customSpawnPosition;
+    QString m_customSpawnContextKey;
 };
 
 #endif // MAIN_WINDOW_H

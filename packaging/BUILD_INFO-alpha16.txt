@@ -1,0 +1,9 @@
+EI Mapper: Endurance Edition 0.2.1-alpha.16
+Tester purpose: authoritative hot-reload result correction and result/settings/action-state UX fixes
+Profile scope: Base EI and JMV editor profiles; JMV runtime bridge rebuilt with concise module telemetry
+UI focus: green/yellow/red post-test status, non-overlapping startup setting, correct save availability, native grey disabled menus
+Runtime focus: latest-generation path/hash evidence and test runtime logs mirrored beside workflow logs
+Editor SHA-256: dabe1d13e5b09deb9b6bca10107cecb61d451c78b4137663cdcd5beae0e733c1
+Bridge SHA-256: 270832557243fe68867c1dfa881184b42a749b585a21ec578f6e9639d3ab254a
+Automated checks: fresh MinGW release build PASS; fresh x86 bridge build PASS; JMV launcher/result suite PASS; git diff check PASS
+Runtime check required: launch then hot reload to a different map, exit normally, and confirm a green result plus matching test-runtime log in the editor logs folder

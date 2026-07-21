@@ -1,0 +1,6 @@
+EI Mapper: Endurance Edition 0.2.1-alpha.17
+Tester purpose: result-toast reliability, persistent View panels, disabled-menu clarity, and modal hot-reload staging
+Profile scope: Base EI editor UI and JMV editor/runtime workflow; hot reload remains JMV-only
+Runtime bridge: unchanged from alpha.16
+Package policy: finalized clean first-run folder; no options JSON, logs, saves, dumps, or stale checksum entries
+Runtime checks: finish two consecutive map-test processes; restart with chosen View panels enabled; exercise successful and failed hot reload

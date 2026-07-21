@@ -1,4 +1,5 @@
 #include <QCoreApplication>
+#include <QEventLoop>
 #include "progressview.h"
 
 CProgressView::CProgressView(QWidget* parent):
@@ -20,7 +21,7 @@ void CProgressView::finish()
     m_value = 100.0;
     setValue(100);
     setVisible(false);
-    QCoreApplication::processEvents();
+    QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
 }
 
 void CProgressView::update(double val)
@@ -32,7 +33,7 @@ void CProgressView::update(double val)
         setVisible(false);
     if(m_value - value() > 1)
     {
-        QCoreApplication::processEvents();
+        QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
     }
     setValue(m_value);
 }

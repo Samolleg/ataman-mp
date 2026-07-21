@@ -8,10 +8,12 @@
 
 namespace ei {
 
-// PNT3 stores premultiplied BGRA dwords separated by byte-counted transparent
-// runs. A non-zero dword with a zero alpha byte is a run marker. Shipped files
-// may omit the final transparent run, so callers provide the exact decoded
-// image size and this function pads it without reading past the payload.
+// PNT3 stores four-pixel (16-byte) literal blocks separated by byte-counted
+// transparent runs. Only the first dword of each block is a control candidate:
+// non-zero with alpha zero is a run; otherwise the whole block is literal.
+// Shipped files may omit the final transparent run, so callers provide the
+// exact decoded image size and this function pads it without reading past the
+// payload.
 bool decodePnt3(const QByteArray& compressed, int decodedSize,
                 QByteArray* decoded, QString* diagnostic = nullptr);
 
