@@ -1147,7 +1147,10 @@ void MainWindow::renderUnitTexturePreview()
             painter.fillRect(x, y, cell, cell,
                 ((x / cell) + (y / cell)) % 2
                     ? QColor(190, 190, 190) : QColor(235, 235, 235));
-    painter.drawImage(0, 0, texture);
+    // Display the authoring atlas rotated 180 degrees, but keep UI labels in
+    // normal reading orientation. Rotate the texture and UV coordinates here
+    // instead of mirroring the finished image after labels have been painted.
+    painter.drawImage(0, 0, texture.mirrored(true, true));
 
     QSet<QString> visibleParts;
     for(int row = 0; row < m_unitTextureParts->count(); ++row)
@@ -1160,8 +1163,10 @@ void MainWindow::renderUnitTexturePreview()
     {
         const double wrappedU = uv.x() - std::floor(double(uv.x()));
         const double wrappedV = uv.y() - std::floor(double(uv.y()));
-        return QPointF(wrappedU * preview.width(),
-                       wrappedV * preview.height());
+        return QPointF(qBound(0.0, (1.0 - wrappedU) * preview.width() - 1.0,
+                              double(preview.width() - 1)),
+                       qBound(0.0, (1.0 - wrappedV) * preview.height() - 1.0,
+                              double(preview.height() - 1)));
     };
     for(auto it = projections.constBegin(); it != projections.constEnd(); ++it)
     {
@@ -1202,10 +1207,6 @@ void MainWindow::renderUnitTexturePreview()
         }
     }
     painter.end();
-
-    // Preserve the retained viewer's authoring orientation. The follow-up
-    // regression branch owns the pending label/PNT3 plate corrections.
-    preview = preview.mirrored(true, true);
 
     m_unitTextureDetails->setText(
         tr("Model: %1\nSize: %2 × %3\nVisible layers: %4 / %5\n"
