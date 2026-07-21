@@ -13,16 +13,18 @@ uniform float u_ambientStrength;
 uniform float u_sunStrength;
 uniform vec3 u_sunDirection;
 uniform vec3 u_sunColor;
+uniform vec3 u_ambientColor;
 uniform vec3 u_fogColor;
 uniform float u_fogStart;
 uniform float u_fogEnd;
 uniform int u_pointLightCount;
-uniform vec4 u_pointLightPositionRange[4];
-uniform vec3 u_pointLightColor[4];
+uniform vec4 u_pointLightPositionRange[8];
+uniform vec3 u_pointLightColor[8];
 uniform bool u_shadowsEnabled;
 uniform sampler2D u_staticShadowMap;
 uniform sampler2D u_dynamicShadowMap;
 uniform mat4 u_lightSpaceMatrix;
+uniform vec2 u_shadowTexelSize;
 
 varying highp vec4 v_position;
 varying highp vec3 v_normal;
@@ -46,15 +48,23 @@ void main(void)
       if (projected.x >= 0.0 && projected.x <= 1.0 &&
           projected.y >= 0.0 && projected.y <= 1.0 && projected.z <= 1.0)
       {
-        float storedDepth = min(texture2D(u_staticShadowMap, projected.xy).r,
-                                texture2D(u_dynamicShadowMap, projected.xy).r);
         float bias = max(0.0015 * (1.0 - sunDiffuse), 0.00035);
-        shadow = projected.z - bias > storedDepth ? 0.42 : 1.0;
+        float visibility = 0.0;
+        for (int y = -1; y <= 1; ++y)
+          for (int x = -1; x <= 1; ++x)
+          {
+            vec2 sampleUv = projected.xy + vec2(float(x), float(y)) * u_shadowTexelSize;
+            float storedDepth = min(texture2D(u_staticShadowMap, sampleUv).r,
+                                    texture2D(u_dynamicShadowMap, sampleUv).r);
+            visibility += projected.z - bias > storedDepth ? 0.42 : 1.0;
+          }
+        shadow = visibility / 9.0;
       }
     }
-    light = vec3(u_ambientStrength)
+    float skyExposure = 0.65 + 0.35 * max(norm.z, 0.0);
+    light = u_ambientColor * (u_ambientStrength * skyExposure)
           + u_sunColor * (u_sunStrength * sunDiffuse * shadow);
-    for (int i = 0; i < 4; ++i)
+    for (int i = 0; i < 8; ++i)
     {
       if (i >= u_pointLightCount)
         break;

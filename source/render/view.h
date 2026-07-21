@@ -241,8 +241,7 @@ private:
                                   bool enabled, bool fogEnabled);
     bool renderShadowMap(const QVector3D& cameraPosition,
                          const ei::SRenderEnvironment& environment,
-                         RenderQueueContext& queue,
-                         const CViewFrustum* frustum);
+                         RenderQueueContext& queue);
     void applyShadowUniforms(QOpenGLShaderProgram& program, bool enabled);
 
 

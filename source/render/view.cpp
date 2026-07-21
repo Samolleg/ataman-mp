@@ -67,12 +67,6 @@ const SSkyVertex kSkyVertices[] = {
     {{-1, 1,-1},{0,0}},{{ 1, 1,-1},{1,0}},{{ 1,-1,-1},{1,1}},{{-1, 1,-1},{0,0}},{{ 1,-1,-1},{1,1}},{{-1,-1,-1},{0,1}}
 };
 
-void showDuplicateIdWarning(QWidget* parent, const QVector<uint>& duplicates)
-{
-    if(!duplicates.isEmpty())
-        QMessageBox::warning(parent, "Duplicate object IDs",
-            ei::duplicateIdWarningText(duplicates));
-}
 }
 CView::CView(QWidget *parent, const QGLWidget *pShareWidget) : QGLWidget(parent, pShareWidget)
   ,m_gpuTimer(nullptr)
@@ -583,13 +577,14 @@ void CView::applyEnvironmentUniforms(QOpenGLShaderProgram& program,
     program.setUniformValue("u_sunStrength", environment.sunStrength);
     program.setUniformValue("u_sunDirection", environment.sunDirection);
     program.setUniformValue("u_sunColor", environment.sunColor);
+    program.setUniformValue("u_ambientColor", environment.ambientColor);
     program.setUniformValue("u_fogColor", environment.fogColor);
     program.setUniformValue("u_fogStart", environment.fogStart);
     program.setUniformValue("u_fogEnd", environment.fogEnd);
 
-    QVector4D positionRange[4];
-    QVector3D colors[4];
-    const int count = qMin(4, lights.size());
+    QVector4D positionRange[8];
+    QVector3D colors[8];
+    const int count = qMin(8, lights.size());
     for(int index = 0; index < count; ++index)
     {
         CLight* light = lights.at(index);
@@ -612,8 +607,7 @@ void CView::applyEnvironmentUniforms(QOpenGLShaderProgram& program,
 
 bool CView::renderShadowMap(const QVector3D& cameraPosition,
                             const ei::SRenderEnvironment& environment,
-                            RenderQueueContext& queue,
-                            const CViewFrustum* frustum)
+                            RenderQueueContext& queue)
 {
     if(!m_shadowFbo || !m_dynamicShadowFbo
             || !m_shadowFbo->isValid() || !m_dynamicShadowFbo->isValid())
@@ -661,7 +655,7 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
     {
         beginTarget(m_shadowFbo);
         if(m_pLand && m_pLand->isMprLoad() && m_bDrawLand)
-            m_pLand->draw(&m_shadowProgram, frustum);
+            m_pLand->draw(&m_shadowProgram, nullptr);
         queue.flushShadow(&m_shadowProgram, false, true);
         m_shadowFbo->release();
         m_staticShadowFingerprint = staticFingerprint;
@@ -690,6 +684,8 @@ void CView::applyShadowUniforms(QOpenGLShaderProgram& program, bool enabled)
     program.setUniformValue("u_lightSpaceMatrix", m_lightSpaceMatrix);
     program.setUniformValue("u_staticShadowMap", 1);
     program.setUniformValue("u_dynamicShadowMap", 2);
+    const float texel = m_shadowFbo ? 1.0f / float(m_shadowFbo->width()) : 0.0f;
+    program.setUniformValue("u_shadowTexelSize", QVector2D(texel, texel));
     if(available)
     {
         QOpenGLFunctions* functions = QOpenGLContext::currentContext()->functions();
@@ -987,7 +983,7 @@ void CView::draw()
     const COptInt* timeOption = m_pSettings
         ? dynamic_cast<const COptInt*>(m_pSettings->opt("renderTimeOfDay")) : nullptr;
     const float previewTime = timeOption
-        ? qBound(0, timeOption->value(), 2400) / 100.0f : 12.0f;
+        ? ei::clockValueToHours(timeOption->value()) : 12.0f;
     const CWorldSet* worldSet = m_activeMob ? &m_activeMob->worldSet() : nullptr;
     const ei::SRenderEnvironment environment = ei::renderEnvironment(
         worldSet, overrideWorldTime, previewTime);
@@ -998,15 +994,17 @@ void CView::draw()
         for(CMob* mob : m_aMob)
             for(CNode* node : mob->nodes())
                 if(CLight* light = dynamic_cast<CLight*>(node))
-                    if(light->nodeState() != ENodeState::eHidden && light->range() > 0.0f)
+                    if(light->nodeState() != ENodeState::eHidden && light->range() > 0.0f
+                            && (!cullingEnabled || frustum.intersectsSphere(
+                                    light->position(), light->range())))
                         sceneLights.append(light);
         std::sort(sceneLights.begin(), sceneLights.end(), [&cameraPosition](CLight* left, CLight* right)
         {
             return (left->position() - cameraPosition).lengthSquared()
                  < (right->position() - cameraPosition).lengthSquared();
         });
-        if(sceneLights.size() > 4)
-            sceneLights.resize(4);
+        if(sceneLights.size() > 8)
+            sceneLights.resize(8);
     }
 
     RenderPerformanceContext& performance = RenderPerformanceContext::instance();
@@ -1173,8 +1171,7 @@ void CView::draw()
                         ++performance.counters().logicSubmissions;
                 }
         const bool shadowReady = environmentEnabled && shadowsEnabled
-            && renderShadowMap(cameraPosition, environment, renderQueue,
-                               cullingEnabled ? &frustum : nullptr);
+            && renderShadowMap(cameraPosition, environment, renderQueue);
         drawTerrainColor(shadowReady);
         renderQueue.flush();
         glDepthFunc(GL_LEQUAL);

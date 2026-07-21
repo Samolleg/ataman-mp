@@ -134,8 +134,13 @@ void RenderQueueTests::derivesEnvironmentFromWorldValues()
         ei::renderEnvironmentForValues(24.0f, -1.0f, 9.0f);
     QCOMPARE(midnight.timeHours, 0.0f);
     QCOMPARE(midnight.ambientStrength, 0.0f);
-    QCOMPARE(midnight.sunStrength, 4.0f);
+    QCOMPARE(midnight.sunStrength, 0.0f);
     QVERIFY(midnight.sunColor.z() > midnight.sunColor.x());
+
+    QCOMPARE(ei::clockValueToHours(0), 0.0f);
+    QCOMPARE(ei::clockValueToHours(1230), 12.5f);
+    QCOMPARE(ei::clockValueToHours(2360), 23.0f + 59.0f / 60.0f);
+    QCOMPARE(ei::clockValueToHours(2400), 23.0f + 59.0f / 60.0f);
 }
 
 QTEST_APPLESS_MAIN(RenderQueueTests)
