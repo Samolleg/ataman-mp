@@ -209,16 +209,6 @@ shows resource I/O/decode still dominates.
 These features must consume the optimized render queues rather than introduce
 another unconditional full-scene traversal.
 
-The first environment slice is implemented in `0.2.1-alpha.27`. It resolves
-`sky00` through `sky05` from the active profile, derives ambient/sun direction
-and color from the active MOB world settings (with a non-destructive preview
-time override), applies distance fog and the four nearest visible MOB point
-lights, and renders directional shadows from the already collected render
-queue. Static caster data is fingerprinted and reused; animated units use a
-separate throttled layer. This is a tester-facing calibration slice rather
-than a claim that every runtime weather or point-light shadow behavior has
-been reverse engineered.
-
 - Reverse engineer Base/JMV environment, light, particle, and runtime sun data
   before assigning semantics. Conflicting or absent data remains diagnostic.
 - Implement skybox, fog, ambient/skylight, directional sun, and the time-of-day

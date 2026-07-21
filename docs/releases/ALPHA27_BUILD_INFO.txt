@@ -1,6 +1,0 @@
-EI Mapper: Endurance Edition 0.2.1-alpha.27
-Focused closed test build: integrated unit visuals and first environment/shadow slice
-Application SHA-256: 9F454A1F94D1BEB5639E6B9C2EC1EBA7F0472F59589B49AF3966A561CFA63BDF
-Automated checks: profile visual providers PASS; resource names/PNT3 PASS; camera PASS; render queue/environment PASS; full release build PASS
-Package validation: no endurance-options.json, options.json, logs, saves, or crash dumps
-See ALPHA27_ENVIRONMENT_RENDERING.md for focused test coverage and scope boundaries.
