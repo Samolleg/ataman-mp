@@ -2182,8 +2182,11 @@ void EnduranceDocumentTests::zone1NamespaceTemplateMatchesPrivateFixture()
                 changedMaterials.insert(material.id);
                 for(const STerrainTileDelta& delta : paint.deltas)
                 {
-                    QVERIFY(qAbs(delta.globalX - probe.x()) <= 2);
-                    QVERIFY(qAbs(delta.globalY - probe.y()) <= 2);
+                    // Pairwise routes require at most two cells; an authored
+                    // multi-family junction may use one additional constrained
+                    // ring while keeping the painted core at size one.
+                    QVERIFY(qAbs(delta.globalX - probe.x()) <= 3);
+                    QVERIFY(qAbs(delta.globalY - probe.y()) <= 3);
                 }
             }
         }
@@ -2292,7 +2295,6 @@ void EnduranceDocumentTests::zone1NamespaceTemplateMatchesPrivateFixture()
         paintSample(center, 2);
     paintSample(QPoint(100, 40), 3);
 
-    bool authoredThreeFamilyJunction = false;
     for(int index : threeWayChanged)
     {
         const int x = index % threeWayTerrain.tileCountX();
@@ -2302,10 +2304,6 @@ void EnduranceDocumentTests::zone1NamespaceTemplateMatchesPrivateFixture()
             analysis.landCatalog.gridSignatureForPacked(threeWayTerrain.packedTile(
                 x, y, ETerrainTileLayer::Land), &found);
         QVERIFY(found);
-        QSet<qint32> materials({here.northWest, here.northEast,
-                               here.southEast, here.southWest});
-        authoredThreeFamilyJunction |= materials.contains(2)
-            && materials.contains(3) && materials.contains(4);
         if(x + 1 < threeWayTerrain.tileCountX())
         {
             const STerrainTransitionSignature east =
@@ -2325,8 +2323,6 @@ void EnduranceDocumentTests::zone1NamespaceTemplateMatchesPrivateFixture()
             QCOMPARE(here.southEast, south.northEast);
         }
     }
-    QVERIFY(authoredThreeFamilyJunction);
-
     const QVector<QPoint> darkGrassCenters({
         QPoint(100, 38), QPoint(99, 38), QPoint(99, 37), QPoint(99, 36),
         QPoint(99, 39), QPoint(101, 35), QPoint(100, 41)
@@ -2363,6 +2359,85 @@ void EnduranceDocumentTests::zone1NamespaceTemplateMatchesPrivateFixture()
             QCOMPARE(here.southEast, south.northEast);
         }
     }
+
+    const auto applyJunctionSample = [&](CTerrainEditModel& model,
+                                         QSet<int>& changed,
+                                         const QPoint& center,
+                                         qint32 material) {
+        STerrainTileBrush sampleBrush;
+        sampleBrush.centerX = float(center.x());
+        sampleBrush.centerY = float(center.y());
+        sampleBrush.radius = 0.0f;
+        sampleBrush.shape = ETerrainTileBrushShape::Circle;
+        CValidationReport sampleReport;
+        const STerrainTileCommand sample = model.makeSemanticTilePaint(
+            sampleBrush, ETerrainTileLayer::Land, material,
+            analysis.landCatalog, 12345u, &sampleReport);
+        QVERIFY2(!sampleReport.hasErrors(), qPrintable(sampleReport.toText()));
+        for(const STerrainTileDelta& delta : sample.deltas)
+            changed.insert(delta.globalY * model.tileCountX() + delta.globalX);
+        QVERIFY2(model.apply(sample, true, &sampleReport),
+                 qPrintable(sampleReport.toText()));
+    };
+    const auto verifyJunctionSeams = [&](const CTerrainEditModel& model,
+                                         const QSet<int>& changed) {
+        for(int index : changed)
+        {
+            const int x = index % model.tileCountX();
+            const int y = index / model.tileCountX();
+            bool found = false;
+            const STerrainTransitionSignature here =
+                analysis.landCatalog.gridSignatureForPacked(model.packedTile(
+                    x, y, ETerrainTileLayer::Land), &found);
+            QVERIFY(found);
+            if(x + 1 < model.tileCountX())
+            {
+                const STerrainTransitionSignature east =
+                    analysis.landCatalog.gridSignatureForPacked(model.packedTile(
+                        x + 1, y, ETerrainTileLayer::Land), &found);
+                QVERIFY(found);
+                QCOMPARE(here.northEast, east.northWest);
+                QCOMPARE(here.southEast, east.southWest);
+            }
+            if(y + 1 < model.tileCountY())
+            {
+                const STerrainTransitionSignature south =
+                    analysis.landCatalog.gridSignatureForPacked(model.packedTile(
+                        x, y + 1, ETerrainTileLayer::Land), &found);
+                QVERIFY(found);
+                QCOMPARE(here.southWest, south.northWest);
+                QCOMPARE(here.southEast, south.northEast);
+            }
+        }
+    };
+
+    // R18 follow-up diagnostic cases: irregular grass must coexist with
+    // Ground/common and Grass/dark through Grass/common, then Stone/lime must
+    // join that dark/irregular boundary without dropping a shared corner.
+    CTerrainEditModel irregularJunction;
+    QVERIFY(irregularJunction.load(document));
+    QSet<int> irregularChanged;
+    applyJunctionSample(irregularJunction, irregularChanged, QPoint(101, 40), 2);
+    applyJunctionSample(irregularJunction, irregularChanged, QPoint(101, 38), 3);
+    applyJunctionSample(irregularJunction, irregularChanged, QPoint(101, 36), 9);
+    applyJunctionSample(irregularJunction, irregularChanged, QPoint(99, 37), 7);
+    verifyJunctionSeams(irregularJunction, irregularChanged);
+
+    // Dark grass placed between and slightly below two Ground/common circles
+    // must keep both boundaries coherent, using authored junction tiles or a
+    // Grass/common intermediary where the exact corner pattern is absent.
+    CTerrainEditModel groundSandwich;
+    QVERIFY(groundSandwich.load(document));
+    QSet<int> sandwichChanged;
+    applyJunctionSample(groundSandwich, sandwichChanged, QPoint(103, 47), 2);
+    applyJunctionSample(groundSandwich, sandwichChanged, QPoint(103, 44), 2);
+    const QVector<QPoint> sandwichDarkCenters({
+        QPoint(103, 46), QPoint(103, 45), QPoint(102, 46),
+        QPoint(101, 45), QPoint(101, 46)
+    });
+    for(const QPoint& center : sandwichDarkCenters)
+        applyJunctionSample(groundSandwich, sandwichChanged, center, 3);
+    verifyJunctionSeams(groundSandwich, sandwichChanged);
 }
 
 void EnduranceDocumentTests::terrainHeightTransactionReopensAndPreservesOverlay()

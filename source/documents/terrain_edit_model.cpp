@@ -5,6 +5,7 @@
 #include <QtEndian>
 
 #include <cmath>
+#include <functional>
 #include <limits>
 
 #include "endurance_document.h"
@@ -290,6 +291,23 @@ QVector<qint32> CTerrainTransitionCatalog::materialIds() const
 {
     QVector<qint32> result = m_materialIds.values().toVector();
     std::sort(result.begin(), result.end());
+    return result;
+}
+
+QVector<STerrainTransitionSignature> CTerrainTransitionCatalog::gridSignatures() const
+{
+    QVector<STerrainTransitionSignature> result;
+    QSet<QByteArray> seen;
+    for(const STerrainTransitionVariant& variant : m_variants)
+    {
+        const STerrainTransitionSignature signature = m_mirrorPaintGridY
+            ? mirroredGridY(variant.signature) : variant.signature;
+        const QByteArray key = signatureKey(signature);
+        if(seen.contains(key))
+            continue;
+        seen.insert(key);
+        result.append(signature);
+    }
     return result;
 }
 
@@ -1385,7 +1403,15 @@ STerrainTileCommand CTerrainEditModel::makeSemanticTilePaint(
         return command;
     }
 
-    const int transitionRadius = qMax(0, materialPath.size() - 1);
+    int surroundingFamilies = 0;
+    for(auto entry = backgroundCounts.constBegin(); entry != backgroundCounts.constEnd(); ++entry)
+        surroundingFamilies += entry.key() != materialId && entry.value() > 0;
+    // A true junction needs one extra editable ring: the inner ring arranges
+    // authored pair/triple tiles while the outer ring remains constrained to
+    // the untouched terrain lattice. Pairwise strokes retain their established
+    // footprint.
+    const int junctionPadding = surroundingFamilies > 1 ? 1 : 0;
+    const int transitionRadius = qMax(0, materialPath.size() - 1) + junctionPadding;
     QSet<int> affected;
     QMap<int, int> cornerDistances;
     for(int index : painted)
@@ -1516,8 +1542,10 @@ STerrainTileCommand CTerrainEditModel::makeSemanticTilePaint(
         }
     }
     QMap<int, qint32> boundaryMaterials;
+    bool contradictoryBoundary = false;
     for(auto corner = boundaryCounts.constBegin(); corner != boundaryCounts.constEnd(); ++corner)
     {
+        contradictoryBoundary |= corner.value().size() > 1;
         qint32 selectedMaterial = 0;
         int selectedCount = -1;
         for(auto candidate = corner.value().constBegin();
@@ -1557,40 +1585,238 @@ STerrainTileCommand CTerrainEditModel::makeSemanticTilePaint(
         }
     }
 
-    const auto routedMaterial = [&](int cornerX, int cornerY) -> qint32
+    const auto pairwiseMaterial = [&](int key) -> qint32
     {
-        const int key = cornerY * (width + 1) + cornerX;
-        if(boundaryMaterials.contains(key))
-            return boundaryMaterials.value(key);
         const int distance = cornerDistances.value(key, transitionRadius);
         return materialPath.at(qMin(distance, materialPath.size() - 1));
     };
+    QMap<int, qint32> pairwiseCorners;
+    QMap<int, qint32> preferredCorners;
+    for(int key : affectedCorners)
+    {
+        pairwiseCorners.insert(key, pairwiseMaterial(key));
+        preferredCorners.insert(key, boundaryMaterials.contains(key)
+            ? boundaryMaterials.value(key) : pairwiseCorners.value(key));
+    }
 
-    // Some legacy atlas neighborhoods do not author the exact multi-family
-    // corner pattern implied by every hard boundary pin. Preflight the whole
-    // patch atomically: use all preserved halo corners only when every cell is
-    // representable, otherwise retain the proven two-family route rather than
-    // emitting a partial command.
-    bool boundaryRouteAvailable = true;
+    // Painted core ownership and untouched halo edges are fixed. All other
+    // local corners may move between authored materials so the complete patch
+    // can use valid atlas signatures without breaking a shared edge.
+    QMap<int, qint32> fixedCorners = boundaryMaterials;
+    for(int key : paintedCorners)
+        fixedCorners.insert(key, materialId);
+
+    const auto signatureAt = [&](const QMap<int, qint32>& corners,
+                                 int x, int y) {
+        STerrainTransitionSignature signature;
+        signature.northWest = corners.value(y * (width + 1) + x);
+        signature.northEast = corners.value(y * (width + 1) + x + 1);
+        signature.southEast = corners.value((y + 1) * (width + 1) + x + 1);
+        signature.southWest = corners.value((y + 1) * (width + 1) + x);
+        return signature;
+    };
+
+    QMap<int, qint32> solvedCorners = preferredCorners;
+    bool preferredAvailable = true;
     for(int index : affected)
     {
         const int x = index % width;
         const int y = index / width;
-        STerrainTransitionSignature desired;
-        desired.northWest = routedMaterial(x, y);
-        desired.northEast = routedMaterial(x + 1, y);
-        desired.southEast = routedMaterial(x + 1, y + 1);
-        desired.southWest = routedMaterial(x, y + 1);
         bool found = false;
-        catalog.selectForPaint(desired, x, y, distributionSeed, &found);
+        catalog.selectForPaint(signatureAt(preferredCorners, x, y),
+                               x, y, distributionSeed, &found);
         if(!found)
         {
-            boundaryRouteAvailable = false;
+            preferredAvailable = false;
             break;
         }
     }
-    if(!boundaryRouteAvailable)
-        boundaryMaterials.clear();
+
+    if(!preferredAvailable)
+    {
+        QSet<qint32> allowedMaterials;
+        for(qint32 pathMaterial : materialPath)
+            allowedMaterials.insert(pathMaterial);
+        for(auto boundary = boundaryMaterials.constBegin();
+            boundary != boundaryMaterials.constEnd(); ++boundary)
+            allowedMaterials.insert(boundary.value());
+        for(auto existing = contextSignatures.constBegin();
+            existing != contextSignatures.constEnd(); ++existing)
+        {
+            allowedMaterials.insert(existing.value().northWest);
+            allowedMaterials.insert(existing.value().northEast);
+            allowedMaterials.insert(existing.value().southEast);
+            allowedMaterials.insert(existing.value().southWest);
+        }
+
+        const QVector<STerrainTransitionSignature> authored = catalog.gridSignatures();
+        QMap<int, QVector<STerrainTransitionSignature>> candidates;
+        const auto cornerValues = [&](const STerrainTransitionSignature& signature) {
+            return QVector<qint32>({signature.northWest, signature.northEast,
+                                    signature.southEast, signature.southWest});
+        };
+        const auto cornerKeys = [&](int x, int y) {
+            return QVector<int>({y * (width + 1) + x,
+                                 y * (width + 1) + x + 1,
+                                 (y + 1) * (width + 1) + x + 1,
+                                 (y + 1) * (width + 1) + x});
+        };
+        bool constraintCandidateMissing = false;
+        for(int index : affected)
+        {
+            const int x = index % width;
+            const int y = index / width;
+            const QVector<int> keys = cornerKeys(x, y);
+            const STerrainTransitionSignature preferred =
+                signatureAt(preferredCorners, x, y);
+            QVector<STerrainTransitionSignature>& cellCandidates = candidates[index];
+            for(const STerrainTransitionSignature& signature : authored)
+            {
+                const QVector<qint32> values = cornerValues(signature);
+                bool compatible = true;
+                for(int corner = 0; corner < 4; ++corner)
+                {
+                    if(!allowedMaterials.contains(values.at(corner))
+                       || (fixedCorners.contains(keys.at(corner))
+                           && fixedCorners.value(keys.at(corner)) != values.at(corner)))
+                    {
+                        compatible = false;
+                        break;
+                    }
+                }
+                if(compatible)
+                    cellCandidates.append(signature);
+            }
+            std::sort(cellCandidates.begin(), cellCandidates.end(),
+                [&](const STerrainTransitionSignature& left,
+                    const STerrainTransitionSignature& right) {
+                    const QVector<qint32> preferredValues = cornerValues(preferred);
+                    const QVector<qint32> leftValues = cornerValues(left);
+                    const QVector<qint32> rightValues = cornerValues(right);
+                    int leftDifference = 0;
+                    int rightDifference = 0;
+                    for(int corner = 0; corner < 4; ++corner)
+                    {
+                        leftDifference += leftValues.at(corner) != preferredValues.at(corner);
+                        rightDifference += rightValues.at(corner) != preferredValues.at(corner);
+                    }
+                    if(leftDifference != rightDifference)
+                        return leftDifference < rightDifference;
+                    if(left.northWest != right.northWest)
+                        return left.northWest < right.northWest;
+                    if(left.northEast != right.northEast)
+                        return left.northEast < right.northEast;
+                    if(left.southEast != right.southEast)
+                        return left.southEast < right.southEast;
+                    return left.southWest < right.southWest;
+                });
+            if(cellCandidates.isEmpty())
+            {
+                constraintCandidateMissing = true;
+                break;
+            }
+        }
+
+        QMap<int, qint32> assignments = fixedCorners;
+        QSet<int> remaining = affected;
+        int searchNodes = 0;
+        const int searchLimit = 100000;
+        std::function<bool()> solve = [&]() -> bool {
+            if(remaining.isEmpty())
+                return true;
+            if(++searchNodes > searchLimit)
+                return false;
+
+            int selectedCell = -1;
+            QVector<STerrainTransitionSignature> selectedCandidates;
+            for(int index : remaining)
+            {
+                const int x = index % width;
+                const int y = index / width;
+                const QVector<int> keys = cornerKeys(x, y);
+                QVector<STerrainTransitionSignature> compatible;
+                for(const STerrainTransitionSignature& signature : candidates.value(index))
+                {
+                    const QVector<qint32> values = cornerValues(signature);
+                    bool matches = true;
+                    for(int corner = 0; corner < 4; ++corner)
+                    {
+                        if(assignments.contains(keys.at(corner))
+                           && assignments.value(keys.at(corner)) != values.at(corner))
+                        {
+                            matches = false;
+                            break;
+                        }
+                    }
+                    if(matches)
+                        compatible.append(signature);
+                }
+                if(compatible.isEmpty())
+                    return false;
+                if(selectedCell < 0 || compatible.size() < selectedCandidates.size())
+                {
+                    selectedCell = index;
+                    selectedCandidates = compatible;
+                    if(selectedCandidates.size() == 1)
+                        break;
+                }
+            }
+
+            remaining.remove(selectedCell);
+            const int selectedX = selectedCell % width;
+            const int selectedY = selectedCell / width;
+            const QVector<int> keys = cornerKeys(selectedX, selectedY);
+            for(const STerrainTransitionSignature& signature : selectedCandidates)
+            {
+                const QVector<qint32> values = cornerValues(signature);
+                QVector<int> inserted;
+                for(int corner = 0; corner < 4; ++corner)
+                {
+                    if(!assignments.contains(keys.at(corner)))
+                    {
+                        assignments.insert(keys.at(corner), values.at(corner));
+                        inserted.append(keys.at(corner));
+                    }
+                }
+                if(solve())
+                    return true;
+                for(int key : inserted)
+                    assignments.remove(key);
+            }
+            remaining.insert(selectedCell);
+            return false;
+        };
+
+        if(constraintCandidateMissing || !solve())
+        {
+            if(contradictoryBoundary)
+            {
+                // Preserve established behavior only for rare authored legacy
+                // neighborhoods whose outer boundary already disagrees with
+                // itself. Never describe this as a solved junction.
+                solvedCorners = pairwiseCorners;
+            }
+            else
+            {
+                if(report)
+                    report->add("terrain.semantic_multifamily", EValidationSeverity::Error,
+                                searchNodes > searchLimit
+                                    ? "The bounded local terrain-junction search exceeded its safety limit"
+                                    : "The atlas cannot satisfy the complete local terrain-junction boundary",
+                                QString("%1 affected cells, %2 search nodes")
+                                    .arg(affected.size()).arg(searchNodes));
+                return STerrainTileCommand();
+            }
+        }
+        else
+            solvedCorners = assignments;
+    }
+
+    const auto routedMaterial = [&](int cornerX, int cornerY) -> qint32
+    {
+        return solvedCorners.value(cornerY * (width + 1) + cornerX,
+                                   materialId);
+    };
 
     for(int index : affected)
     {
