@@ -1345,7 +1345,7 @@ void CView::exportTerrainPaintDiagnostic()
         return;
     QJsonObject root;
     root.insert("schema", "ei-mapper-endurance-paint-diagnostic");
-    root.insert("version", 4);
+    root.insert("version", 5);
     root.insert("mprFileName", m_pLand->filePath().fileName());
     root.insert("mprNamespace", m_mprDocument.mapInfo().innerNamespace);
     root.insert("sourceMprSha256", QString::fromLatin1(QCryptographicHash::hash(
@@ -1396,14 +1396,38 @@ void CView::exportTerrainPaintDiagnostic()
         object.insert("paintedCoreCells", cellsJson(action.semantic.paintedCoreCells));
         object.insert("affectedCells", cellsJson(action.semantic.affectedCells));
         QJsonArray changedCells;
+        QJsonArray changedTiles;
+        const CTerrainTransitionCatalog& actionCatalog =
+            m_terrainAtlasAnalysis.catalog(action.semantic.layer);
         for(const STerrainTileDelta& delta : action.deltas)
         {
             QJsonObject point;
             point.insert("x", delta.globalX);
             point.insert("y", delta.globalY);
             changedCells.append(point);
+            QJsonObject tile;
+            tile.insert("x", delta.globalX);
+            tile.insert("y", delta.globalY);
+            tile.insert("before", packedTerrainTileJson(delta.before));
+            tile.insert("after", packedTerrainTileJson(delta.after));
+            bool beforeFound = false;
+            bool afterFound = false;
+            const STerrainTransitionSignature beforeSignature =
+                actionCatalog.gridSignatureForPacked(delta.before, &beforeFound);
+            const STerrainTransitionSignature afterSignature =
+                actionCatalog.gridSignatureForPacked(delta.after, &afterFound);
+            tile.insert("beforeCatalogRecognized", beforeFound);
+            tile.insert("afterCatalogRecognized", afterFound);
+            if(beforeFound)
+                tile.insert("beforeGridCorners",
+                            terrainGridSignatureJson(beforeSignature));
+            if(afterFound)
+                tile.insert("afterGridCorners",
+                            terrainGridSignatureJson(afterSignature));
+            changedTiles.append(tile);
         }
         object.insert("changedCells", changedCells);
+        object.insert("changedTiles", changedTiles);
         object.insert("solverMode", action.semantic.solverMode);
         object.insert("junctionPadding", action.semantic.junctionPadding);
         object.insert("solverNodes", action.semantic.solverNodes);

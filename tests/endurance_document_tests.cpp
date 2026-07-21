@@ -1919,6 +1919,10 @@ void EnduranceDocumentTests::zone1NamespaceTemplateSeparatesLandOverlayAndVarian
              QVector<qint32>({5, 6}));
     QCOMPARE(analysis.overlayCatalog.shortestMaterialPath(6, 5),
              QVector<qint32>({6, 5}));
+    QMap<qint32, int> existingFamilyPreference;
+    existingFamilyPreference.insert(4, 20);
+    QCOMPARE(analysis.landCatalog.shortestMaterialPath(7, 3, existingFamilyPreference),
+             QVector<qint32>({7, 4, 3}));
 
     // The stock namespace authors real three-family junction tiles. Keep
     // these public metadata checks separate from the private map replay so a
@@ -2465,6 +2469,77 @@ void EnduranceDocumentTests::zone1NamespaceTemplateMatchesPrivateFixture()
     }
     QVERIFY2(foundDarkIrregularCommonJunction,
              qPrintable(observedMinoritySignatures.join(" | ")));
+
+    const auto applyRadiusSample = [&](CTerrainEditModel& model,
+                                        const QPoint& center,
+                                        float radius,
+                                        qint32 material) -> STerrainTileCommand {
+        STerrainTileBrush sampleBrush;
+        sampleBrush.centerX = float(center.x());
+        sampleBrush.centerY = float(center.y());
+        sampleBrush.radius = radius;
+        sampleBrush.shape = ETerrainTileBrushShape::Circle;
+        CValidationReport sampleReport;
+        const STerrainTileCommand sample = model.makeSemanticTilePaint(
+            sampleBrush, ETerrainTileLayer::Land, material,
+            analysis.landCatalog, 12345u, &sampleReport);
+        if(sampleReport.hasErrors() || sample.isEmpty()
+           || !model.apply(sample, true, &sampleReport))
+            return STerrainTileCommand();
+        return sample;
+    };
+    const auto materialCornerCount = [&](const CTerrainEditModel& model,
+                                          const QRect& area,
+                                          qint32 material) {
+        int count = 0;
+        for(int y = area.top(); y <= area.bottom(); ++y)
+        {
+            for(int x = area.left(); x <= area.right(); ++x)
+            {
+                bool found = false;
+                const STerrainTransitionSignature signature =
+                    analysis.landCatalog.gridSignatureForPacked(model.packedTile(
+                        x, y, ETerrainTileLayer::Land), &found);
+                if(!found)
+                    continue;
+                count += signature.northWest == material;
+                count += signature.northEast == material;
+                count += signature.southEast == material;
+                count += signature.southWest == material;
+            }
+        }
+        return count;
+    };
+
+    // Lime inside a Dark-grass patch surrounded by Common grass has two
+    // equally short authored routes. Reuse Common (7/4/3), never introduce
+    // absent Ground (7/2/3) merely because material 2 sorts first.
+    CTerrainEditModel limeInsideDark;
+    QVERIFY(limeInsideDark.load(document));
+    QSet<int> limeInsideDarkChanged;
+    for(int y = 45; y <= 47; ++y)
+        for(int x = 114; x <= 116; ++x)
+            applyJunctionSample(limeInsideDark, limeInsideDarkChanged, QPoint(x, y), 3);
+    const QRect limeDarkArea(110, 41, 11, 11);
+    const int groundBeforeLime = materialCornerCount(limeInsideDark, limeDarkArea, 2);
+    const STerrainTileCommand limeCommand =
+        applyRadiusSample(limeInsideDark, QPoint(115, 46), 1.0f, 7);
+    QVERIFY(!limeCommand.isEmpty());
+    QCOMPARE(limeCommand.semanticAudit.materialPath,
+             QVector<qint32>({7, 4, 3}));
+    QCOMPARE(materialCornerCount(limeInsideDark, limeDarkArea, 2), groundBeforeLime);
+    QVERIFY(materialCornerCount(limeInsideDark, limeDarkArea, 3) > 0);
+
+    // The former preservation anchors could reject this ordinary nested edit
+    // before search began. Ground must be paintable inside Irregular grass
+    // surrounded by Lime without deleting the command as an impossible CSP.
+    CTerrainEditModel nestedGround;
+    QVERIFY(nestedGround.load(document));
+    QVERIFY(!applyRadiusSample(nestedGround, QPoint(109, 40), 2.0f, 7).isEmpty());
+    QVERIFY(!applyRadiusSample(nestedGround, QPoint(109, 40), 1.0f, 9).isEmpty());
+    const STerrainTileCommand nestedGroundCommand =
+        applyRadiusSample(nestedGround, QPoint(109, 40), 0.0f, 2);
+    QVERIFY(!nestedGroundCommand.isEmpty());
 
     // R18 follow-up diagnostic cases: irregular grass must coexist with
     // Ground/common and Grass/dark through Grass/common, then Stone/lime must

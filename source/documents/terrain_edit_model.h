@@ -130,7 +130,8 @@ public:
     bool hasMaterial(qint32 materialId) const;
     QVector<qint32> materialIds() const;
     QVector<qint32> shortestMaterialPath(qint32 fromMaterial,
-                                         qint32 toMaterial) const;
+                                         qint32 toMaterial,
+                                         const QMap<qint32, int>& preferredMaterials = {}) const;
     QVector<STerrainTransitionSignature> gridSignatures() const;
     int size() const { return m_variants.size(); }
 

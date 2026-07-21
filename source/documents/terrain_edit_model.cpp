@@ -312,7 +312,8 @@ QVector<STerrainTransitionSignature> CTerrainTransitionCatalog::gridSignatures()
 }
 
 QVector<qint32> CTerrainTransitionCatalog::shortestMaterialPath(
-    qint32 fromMaterial, qint32 toMaterial) const
+    qint32 fromMaterial, qint32 toMaterial,
+    const QMap<qint32, int>& preferredMaterials) const
 {
     if(!hasMaterial(fromMaterial) || !hasMaterial(toMaterial))
         return {};
@@ -358,7 +359,13 @@ QVector<qint32> CTerrainTransitionCatalog::shortestMaterialPath(
     {
         const QVector<qint32> path = queue.at(head);
         const qint32 tail = path.back();
-        const QVector<qint32> next = neighbors.value(tail);
+        QVector<qint32> next = neighbors.value(tail);
+        std::sort(next.begin(), next.end(), [&](qint32 left, qint32 right) {
+            const int leftPreference = preferredMaterials.value(left);
+            const int rightPreference = preferredMaterials.value(right);
+            return leftPreference != rightPreference
+                ? leftPreference > rightPreference : left < right;
+        });
         for(qint32 candidate : next)
         {
             if(visited.contains(candidate))
@@ -1399,7 +1406,7 @@ STerrainTileCommand CTerrainEditModel::makeSemanticTilePaint(
         }
     }
     const QVector<qint32> materialPath =
-        catalog.shortestMaterialPath(materialId, backgroundMaterial);
+        catalog.shortestMaterialPath(materialId, backgroundMaterial, backgroundCounts);
     command.semanticAudit.backgroundMaterialId = backgroundMaterial;
     command.semanticAudit.materialPath = materialPath;
     if(materialPath.isEmpty())
@@ -1645,8 +1652,10 @@ STerrainTileCommand CTerrainEditModel::makeSemanticTilePaint(
     for(int key : affectedCorners)
     {
         pairwiseCorners.insert(key, pairwiseMaterial(key));
-        preferredCorners.insert(key, boundaryMaterials.contains(key)
-            ? boundaryMaterials.value(key) : pairwiseCorners.value(key));
+        preferredCorners.insert(key,
+            paintedCorners.contains(key) ? materialId
+            : boundaryMaterials.contains(key) ? boundaryMaterials.value(key)
+            : existingCornerMaterials.value(key, pairwiseCorners.value(key)));
     }
 
     // Painted core ownership and untouched halo edges are fixed. All other
@@ -1655,45 +1664,6 @@ STerrainTileCommand CTerrainEditModel::makeSemanticTilePaint(
     QMap<int, qint32> fixedCorners = boundaryMaterials;
     for(int key : paintedCorners)
         fixedCorners.insert(key, materialId);
-    if(junctionPadding > 0)
-    {
-        QMap<qint32, int> anchorKeys;
-        QMap<qint32, int> anchorDistances;
-        for(auto existing = existingSignatures.constBegin();
-            existing != existingSignatures.constEnd(); ++existing)
-        {
-            const int x = existing.key() % width;
-            const int y = existing.key() / width;
-            const qint32 materials[4] = {existing.value().northWest,
-                                         existing.value().northEast,
-                                         existing.value().southEast,
-                                         existing.value().southWest};
-            const int keys[4] = {y * (width + 1) + x,
-                                 y * (width + 1) + x + 1,
-                                 (y + 1) * (width + 1) + x + 1,
-                                 (y + 1) * (width + 1) + x};
-            for(int corner = 0; corner < 4; ++corner)
-            {
-                if(materials[corner] == materialId || paintedCorners.contains(keys[corner]))
-                    continue;
-                const int cornerX = keys[corner] % (width + 1);
-                const int cornerY = keys[corner] / (width + 1);
-                const int distance = qAbs(cornerX - qRound(brush.centerX))
-                    + qAbs(cornerY - qRound(brush.centerY));
-                if(!anchorDistances.contains(materials[corner])
-                   || distance > anchorDistances.value(materials[corner]))
-                {
-                    anchorDistances.insert(materials[corner], distance);
-                    anchorKeys.insert(materials[corner], keys[corner]);
-                }
-            }
-        }
-        // Keep one lattice anchor for every already-present surrounding
-        // family. The solver remains free to rearrange transition corners,
-        // but may not satisfy a new stroke by deleting a whole material.
-        for(auto anchor = anchorKeys.constBegin(); anchor != anchorKeys.constEnd(); ++anchor)
-            fixedCorners.insert(anchor.value(), anchor.key());
-    }
 
     const auto signatureAt = [&](const QMap<int, qint32>& corners,
                                  int x, int y) {
@@ -1721,23 +1691,41 @@ STerrainTileCommand CTerrainEditModel::makeSemanticTilePaint(
         }
     }
 
-    if(!preferredAvailable || junctionPadding > 0)
+    if(!preferredAvailable)
     {
         command.semanticAudit.solverMode = QStringLiteral("junction-csp");
-        QSet<qint32> allowedMaterials;
-        for(qint32 pathMaterial : materialPath)
-            allowedMaterials.insert(pathMaterial);
-        for(auto boundary = boundaryMaterials.constBegin();
-            boundary != boundaryMaterials.constEnd(); ++boundary)
-            allowedMaterials.insert(boundary.value());
-        for(auto existing = contextSignatures.constBegin();
-            existing != contextSignatures.constEnd(); ++existing)
-        {
-            allowedMaterials.insert(existing.value().northWest);
-            allowedMaterials.insert(existing.value().northEast);
-            allowedMaterials.insert(existing.value().southEast);
-            allowedMaterials.insert(existing.value().southWest);
-        }
+        const auto materialAllowedAtCorner = [&](qint32 candidate, int key) {
+            if(fixedCorners.contains(key))
+                return fixedCorners.value(key) == candidate;
+            const int pathIndex = materialPath.indexOf(candidate);
+            if(pathIndex >= 0)
+            {
+                const int expectedDistance = qMin(
+                    cornerDistances.value(key, transitionRadius), materialPath.size() - 1);
+                if(qAbs(pathIndex - expectedDistance) <= 1)
+                    return true;
+            }
+
+            // A third/fourth family may participate only beside a corner where
+            // it already exists. Context membership alone must never permit a
+            // material to teleport across the whole solver footprint.
+            const int cornerX = key % (width + 1);
+            const int cornerY = key / (width + 1);
+            for(int offsetY = -1; offsetY <= 1; ++offsetY)
+            {
+                for(int offsetX = -1; offsetX <= 1; ++offsetX)
+                {
+                    const int sampleX = cornerX + offsetX;
+                    const int sampleY = cornerY + offsetY;
+                    if(sampleX < 0 || sampleX > width || sampleY < 0 || sampleY > height)
+                        continue;
+                    const int sampleKey = sampleY * (width + 1) + sampleX;
+                    if(existingCornerCounts.value(sampleKey).contains(candidate))
+                        return true;
+                }
+            }
+            return false;
+        };
 
         const QVector<STerrainTransitionSignature> authored = catalog.gridSignatures();
         QMap<int, QVector<STerrainTransitionSignature>> candidates;
@@ -1766,9 +1754,7 @@ STerrainTileCommand CTerrainEditModel::makeSemanticTilePaint(
                 bool compatible = true;
                 for(int corner = 0; corner < 4; ++corner)
                 {
-                    if(!allowedMaterials.contains(values.at(corner))
-                       || (fixedCorners.contains(keys.at(corner))
-                           && fixedCorners.value(keys.at(corner)) != values.at(corner)))
+                    if(!materialAllowedAtCorner(values.at(corner), keys.at(corner)))
                     {
                         compatible = false;
                         break;
