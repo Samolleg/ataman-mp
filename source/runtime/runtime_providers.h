@@ -78,6 +78,7 @@ struct SCharacterAppearanceRequest
     QString profileId;
     QString runtimeManifestId;
     QString prototype;
+    QString parentTemplate;
     QString model;
     QString primaryTexture;
     QString secondaryTexture;

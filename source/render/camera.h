@@ -36,6 +36,7 @@ public:
     float step() const {return m_step;}
     void getLocation(QVector3D& pos, QVector3D& pivot, QVector3D& rot);
     void setLocation(const QVector3D& pos, const QVector3D& pivot, const QVector3D& rot);
+    void setOrbitPivotPreservingView(const QVector3D& pivot);
     void move();
     void moveTo(QVector3D posTarget);
     void moveAwayOn(float distance);

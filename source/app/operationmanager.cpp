@@ -149,6 +149,14 @@ void CSelect::mousePressEvent(COperation *pOp, QMouseEvent *pEvent)
     {
         break;
     }
+    case Qt::MiddleButton:
+    {
+        // Orbit the scene point currently under the viewport center. The
+        // inherited camera otherwise retains an old world-space pivot until
+        // another command explicitly recenters it.
+        m_pView->anchorCameraRotationToViewportCenter();
+        break;
+    }
     }
     m_lastPos = pEvent->pos();
 }

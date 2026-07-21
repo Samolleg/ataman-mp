@@ -108,7 +108,8 @@ public:
     void pickObject(QPoint mousePos, bool bAddToSelect);
     void pickObject(const QRect& rect, bool bAddToSelect);
     QVector3D getTerrainPos(bool bLand = true);
-    QVector3D getTerrainPos(const int cursorPosX, const int cursorPosY, bool bLand = true);
+    QVector3D getTerrainPos(const int cursorPosX, const int cursorPosY,
+                            bool bLand = true, bool* hit = nullptr);
     bool terrainPositionAt(const QPoint& viewportPosition, QVector3D* position);
     QPoint operationAnchor() const;
     void setTestSpawnMarker(const QVector3D& position, bool adjusted = false);
@@ -119,6 +120,7 @@ public:
                                  const QStringList& labels,
                                  int selectedIndex);
     void moveCameraToPoint(const QVector3D& position);
+    void anchorCameraRotationToViewportCenter();
     void changeOperation(EButtonOp type);
     void operationSetBackup(EOperationAxisType operationType);
     void operationRevert(EOperationAxisType operationType);

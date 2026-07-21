@@ -3248,6 +3248,16 @@ bool CView::terrainPositionAt(const QPoint& viewportPosition, QVector3D* positio
     return false;
 }
 
+void CView::anchorCameraRotationToViewportCenter()
+{
+    if(!m_cam || width() <= 0 || height() <= 0)
+        return;
+    bool hit = false;
+    const QVector3D center = getTerrainPos(width() / 2, height() / 2, true, &hit);
+    if(hit)
+        m_cam->setOrbitPivotPreservingView(center);
+}
+
 void CView::wheelEvent(QWheelEvent* event)
 {
     m_pOp->wheelEvent(event);
@@ -3312,9 +3322,12 @@ CNode* CView::pickObject(QList<CNode*>& aNode, int x, int y)
 }
 
 //clear buffer, draw only landscape, project point and return vector3D
-QVector3D CView::getTerrainPos(const int cursorPosX, const int cursorPosY, bool bLand)
+QVector3D CView::getTerrainPos(const int cursorPosX, const int cursorPosY,
+                              bool bLand, bool* hit)
 {
     QVector3D point(0,0,0);
+    if(hit)
+        *hit = false;
     if(!m_pLand || !m_pLand->isMprLoad())
         return point;
 
@@ -3339,6 +3352,8 @@ QVector3D CView::getTerrainPos(const int cursorPosX, const int cursorPosY, bool 
     const int posY (height() - cursorPosY);
     float z;
     glReadPixels(cursorPosX, posY, 1, 1, GL_DEPTH_COMPONENT, GL_FLOAT, &z );
+    if(hit)
+        *hit = qIsFinite(z) && z >= 0.0f && z < 1.0f;
     //QVector3D point (cursorPosX, posY, z);
     point.setX(cursorPosX);
     point.setY(posY);

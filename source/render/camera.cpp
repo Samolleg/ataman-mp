@@ -1,6 +1,7 @@
 #include <QGLWidget>
 #include <QtMath>
 #include "camera.h"
+#include "camera_orbit.h"
 #include "key_manager.h"
 #include "settings.h"
 #include "log.h"
@@ -63,6 +64,17 @@ void CCamera::setLocation(const QVector3D& pos, const QVector3D& pivot, const QV
     m_pivot = pivot;
     m_xRot = rot.x();
     m_zRot = rot.z();
+}
+
+void CCamera::setOrbitPivotPreservingView(const QVector3D& pivot)
+{
+    // The legacy view matrix is T(pivot) * T(-position) * R * T(-pivot).
+    // Replacing only the pivot changes the current view before the user has
+    // moved the mouse. Compensate the stored position so the matrix remains
+    // identical, then subsequent rotations orbit the newly selected point.
+    m_pos = ei::reanchoredCameraPosition(
+        m_pos, m_pivot, pivot, m_xRot, m_zRot);
+    m_pivot = pivot;
 }
 
 void CCamera::xRotate(float& angle)

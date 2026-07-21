@@ -125,10 +125,17 @@ edit `database.res`, JMV/Base archives, live MOBs, maps, or the game install.
 5. Validate PNT3 equipment atlases with large transparent runs. Armor, weapon,
    and TTI-0 anatomical components must not show stripes, random alpha, or
    pixels from outside the decoded buffer. The original `2dintmmx.dll`
-   `UnpackToSurface` backend identifies a run as a non-zero dword whose alpha
-   byte is zero; its value is a 16-byte-aligned transparent-byte count. Do not
-   use EIrepack's one-million cutoff: `UnhumaPL_05.bl.0.x4` contains a valid
-   3,245,872-byte run. Literal PNT3 pixels are premultiplied BGRA and composition
+   (`SHA-256 7FBBF9452520CC1A8F11E4C955B6DC1988AA24A624298B130E291C4368423B7A`)
+   `UnpackToSurface` loop at `0x100018AF` consumes literal data in four-pixel
+   (16-byte) blocks. Only the first dword of each block is tested: a non-zero
+   value whose alpha byte is zero is a 16-byte-aligned transparent-byte count;
+   otherwise all four dwords are literal pixels. Do not test every pixel as a
+   possible marker and do not use EIrepack's one-million cutoff:
+   `UnhumaPL_05.bl.0.x4` contains a valid 3,245,872-byte run, while
+   `UnhumaPL_24.bl.0.x4` contains zero-alpha values in literal-block positions
+   1 and 3. The exact block grammar decodes all 1,068 PNT3 members in the six
+   active JMV humanoid armor archives (`UnhumaSH/PT/BT/GL/PL/LG.res`) without
+   overflow or truncation. Literal PNT3 pixels are premultiplied BGRA and composition
    uses the engine formula `src + ((dst * (255 - alpha)) >> 8)`. Decoded pixels
    remain row-major: do not transpose, rotate, or mirror individual layers. In `zone1` ID 203,
    `UnhumaPL_05.bl.0.x4` must occupy the lower `bd.armor05` UV region and
@@ -240,6 +247,38 @@ test build:
   than an alias to another material. The audited JMV corpus currently contains
   no equipped `sv`/`gd` examples or matching equipment atlases. Quick items are
   never rendered on gameplay avatars regardless of material.
+
+## Unit visual regression controls (2026-07-22)
+
+1. Recheck `zone1` IDs 203, 205, and 221 first. Their plate and leggings atlas
+   placement is the locked control for the exact PNT3 decoder; no later model
+   selection or upper-armor fix may change those results.
+2. Recheck `autozone4hadagans` ID 1000017 and `bz14h` ID 1000295968. JMV upper
+   armor replacement is assembly-driven: an equipped TTI 24 item contributes
+   every exact `.armor24` member present in the selected ANHUM, including
+   `bd.armor24`. The resolver must not omit that shorts/skirt geometry merely
+   because its component prefix normally belongs to the body slot.
+3. Recheck `autozone18dun1` ID 1000009 and `bz13h` IDs 4 and 14. These ordinary
+   non-imported Monster rows select the standard male `unhuma` assembly and
+   shipped `unhumaskin_47/48` atlases. A stale embedded `unhufe` MOB assembly
+   must not override the database-selected standard wearable assembly.
+4. Recheck imported `bz18h` ID 1000054752. Its embedded `default0` appearance is
+   a symbolic reference to the embedded parent template, not a texture name.
+   Resolve that parent only to obtain the base skin, then retain the imported
+   unit's local model, mask, armor, weapons, and parts. Do not fill missing
+   imported equipment from an unrelated Monster row.
+5. Orbit and vary distance around `bz14h` ID 110. Helmet and weapon islands must
+   remain visible whenever the owning unit is visible. PNT3 body/equipment
+   atlases use nearest minification without generated mip sampling, because
+   mip averaging with neighboring transparent atlas regions erases small
+   opaque islands. Spatial/frustum visibility remains unit-scoped, not
+   equipment-part scoped.
+6. `bz16h` ID 382 is an intentional fail-closed diagnostic control. Its Leather
+   shield prototype requests Steel (`st`) while the shipped TTI 13 `UnhumaSD`
+   archive supplies only leather-family material codes. Do not invent an alias
+   or borrow another atlas. After integration with main's validation UI, show
+   the missing prototype/material atlas incompatibility as a visible validation
+   message.
 
 Default-idle animation validation is specified with the animation follow-up and
 is not a prerequisite for this equipment integration.

@@ -204,6 +204,7 @@ void CUnit::refreshTransientVisual()
     appearanceRequest.profileId = database.isNull() ? QString() : database->profileId;
     appearanceRequest.runtimeManifestId = database.isNull() ? QString() : database->runtimeManifestId;
     appearanceRequest.prototype = m_prototypeName;
+    appearanceRequest.parentTemplate = m_parentTemplate;
     appearanceRequest.model = m_modelName;
     appearanceRequest.primaryTexture = m_primaryTexture;
     appearanceRequest.secondaryTexture = m_secondaryTexture;
@@ -323,7 +324,11 @@ void CUnit::refreshTransientVisual()
     }
     const QStringList equipmentBodyLayers = jsonStringList(equipment, "bodyTextureLayers");
     QStringList bodyTextureLayers;
-    if(databaseEquipmentPlan && !equipmentBodyLayers.isEmpty())
+    // Imported units keep their local armor list, but the active provider may
+    // interpret those explicit item names into the same read-only atlas
+    // layers. Do not discard those layers merely because the list came from
+    // the MOB rather than the Monster database row.
+    if(!equipmentBodyLayers.isEmpty())
     {
         bodyTextureLayers.append(texture);
         bodyTextureLayers.append(equipmentBodyLayers);

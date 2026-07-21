@@ -90,6 +90,8 @@ private slots:
     void resolvesDatabaseHumanoidsAcrossFamilies();
     void resolvesHumanoidSkinNumberBeyondRaceModelExamples();
     void jmvKeepsEmbeddedWearableAssemblyForDatabaseAppearance();
+    void jmvDatabaseStandardAssemblyOverridesConflictingEmbeddedAssembly();
+    void importedDefaultTextureResolvesOnlyThroughEmbeddedParentTemplate();
     void jmvPreservesEmbeddedNonHumanoidAppearance();
     void jmvResolvesIntegralOgreWeaponAtlasFromPrototype();
     void jmvHidesGoblinSlingWhenExplicitWeaponIsEnabled();
@@ -103,6 +105,7 @@ private slots:
     void jmvExplicitMaterialSuffixCanCrossGameplayMaterialFamilies();
     void jmvWearOrderControlsUpperArmorComposition();
     void jmvTopArmorWinsAvailableLowerLayerOverlaps();
+    void jmvTopArmorUsesEveryExactAssemblySuffix();
     void jmvMissingTopOverlapRetainsLowerArmor();
     void jmvMissingExactTopPartsAreNotSynthesized();
     void baseArmorKeepsDisjointSlots();
@@ -172,6 +175,58 @@ void ProfileVisualProviderTests::jmvKeepsEmbeddedWearableAssemblyForDatabaseAppe
     QCOMPARE(output.value("model").toString(), QString("unhuma"));
     QCOMPARE(output.value("modelSource").toString(), QString("embeddedMobAssembly"));
     QCOMPARE(output.value("primaryTexture").toString(), QString("unhumaskin_29_x4.mmp"));
+}
+
+void ProfileVisualProviderTests::jmvDatabaseStandardAssemblyOverridesConflictingEmbeddedAssembly()
+{
+    auto db = database();
+    ei::SMonsterDatabaseRecord monster;
+    monster.name = "Male With Stale Female MOB";
+    monster.baseRace = "Human Male";
+    monster.skinIndex = 39;
+    db->monsters.insert(monster.name.toLower(), monster);
+    ProfileVisualProviderService service;
+    const auto resolver = service.appearanceResolver("jmv.v1", db);
+    SCharacterAppearanceRequest request;
+    request.prototype = monster.name;
+    request.model = "unhufe";
+    request.primaryTexture = "unhufeskin_00";
+    QJsonObject output;
+    QVERIFY(resolver->resolve(request, &output).success);
+    QCOMPARE(output.value("model").toString(), QString("unhuma"));
+    QCOMPARE(output.value("modelSource").toString(), QString("raceModelsMask"));
+    QCOMPARE(output.value("primaryTexture").toString(), QString("unhumaskin_39_x4.mmp"));
+}
+
+void ProfileVisualProviderTests::importedDefaultTextureResolvesOnlyThroughEmbeddedParentTemplate()
+{
+    auto db = database();
+    ei::SMonsterDatabaseRecord parent;
+    parent.name = "Embedded Parent";
+    parent.baseRace = "Human Male";
+    parent.skinIndex = 1;
+    db->monsters.insert(parent.name.toLower(), parent);
+    ProfileVisualProviderService service;
+    const auto resolver = service.appearanceResolver("jmv.v1", db);
+    SCharacterAppearanceRequest request;
+    request.dataSource = EUnitVisualDataSource::EmbeddedMob;
+    request.prototype = "Unrelated Database Prototype";
+    request.parentTemplate = parent.name;
+    request.model = "unhuma";
+    request.primaryTexture = "default0";
+    request.secondaryTexture = "default0";
+    request.bodyParts << "bd" << "hd";
+    QJsonObject output;
+    QVERIFY(resolver->resolve(request, &output).success);
+    QCOMPARE(output.value("source").toString(), QString("embeddedMob"));
+    QCOMPARE(output.value("textureSource").toString(), QString("embeddedMobParentTemplate"));
+    QCOMPARE(output.value("primaryTexture").toString(), QString("unhumaskin_01_x4.mmp"));
+
+    request.parentTemplate = "Missing Parent";
+    output = QJsonObject();
+    const SRuntimeProviderResult missing = resolver->resolve(request, &output);
+    QVERIFY(!missing.success);
+    QCOMPARE(missing.code, QString("appearance.import.texture.unresolved"));
 }
 
 void ProfileVisualProviderTests::jmvPreservesEmbeddedNonHumanoidAppearance()
@@ -515,6 +570,31 @@ void ProfileVisualProviderTests::jmvTopArmorWinsAvailableLowerLayerOverlaps()
         "unhumash_04.le.0.x4.mmp", "unhumapt_07.le.0.x4.mmp",
         "unhumabt_06.le.0.x4.mmp", "unhumagl_05.le.0.x4.mmp",
         "unhumapl_08.le.0.x4.mmp", "unhumalg_09.le.0.x4.mmp"}));
+}
+
+void ProfileVisualProviderTests::jmvTopArmorUsesEveryExactAssemblySuffix()
+{
+    auto db = database();
+    ei::SItemDatabaseRecord leggings = item("female suite leggings", "armor", 2, 24);
+    leggings.type = "leggings";
+    db->items.insert(leggings.name, leggings);
+    ProfileVisualProviderService service;
+    const auto resolver = service.equipmentResolver("jmv.v1", db);
+    SEquipmentLayoutRequest request;
+    request.model = "unhufe";
+    request.armor << "female suite leggings.leather";
+    request.assemblyParts << "bd" << "hp" << "ll1" << "rl1"
+                          << "bd.armor24" << "ll1.armor24" << "rl1.armor24";
+    QJsonObject output;
+    QVERIFY(resolver->resolve(request, &output).success);
+    const QStringList components = jsonStrings(output, "components");
+    QVERIFY(components.contains("bd.armor24"));
+    QVERIFY(components.contains("ll1.armor24"));
+    QVERIFY(components.contains("rl1.armor24"));
+    const QStringList replaced = jsonStrings(output, "replacedParts");
+    QVERIFY(replaced.contains("bd"));
+    QVERIFY(replaced.contains("ll1"));
+    QVERIFY(replaced.contains("rl1"));
 }
 
 void ProfileVisualProviderTests::jmvMissingTopOverlapRetainsLowerArmor()

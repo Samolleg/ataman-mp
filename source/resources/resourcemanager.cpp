@@ -804,6 +804,11 @@ void CTextureList::parse(QByteArray& data, const QString& name)
             delete texture;
             return;
         }
+        // PNT3 carries one sparse compressed base image; this header field is
+        // its compressed byte count, not an authored mip count. Generated
+        // mipmaps average small helmet/weapon/shield islands into transparent
+        // atlas space and make them vanish with distance or oblique views.
+        texture->setMinificationFilter(QOpenGLTexture::Nearest);
         texture->setData(img);
         materialClass = classifyTextureAlpha(img);
         break;
