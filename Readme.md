@@ -60,6 +60,10 @@ hardening and are blocked rather than falling back to the rebuilding serializer.
 
 See [BUILDING_ENDURANCE.md](docs/BUILDING_ENDURANCE.md) for build and test commands,
 and [NOTICE.md](NOTICE.md) for attribution and licensing information.
+Character construction, provider differences, and safe Blender/ei_figer
+authoring are documented in [CHARACTER_PIPELINE.md](docs/CHARACTER_PIPELINE.md),
+[CHARACTER_AUTHORING.md](docs/CHARACTER_AUTHORING.md), and the
+[character evidence matrix](docs/CHARACTER_EVIDENCE_MATRIX.md).
 
 ## Safety
 
