@@ -55,7 +55,7 @@ struct SAnimationPerformanceCounters
 {
     quint64 fullEvaluations{0};
     quint64 halfRateEvaluations{0};
-    quint64 firstPoseEvaluations{0};
+    quint64 lowRateEvaluations{0};
     quint64 skippedOffscreen{0};
     quint64 staticFallbacks{0};
     quint64 poseEvaluations{0};
@@ -63,7 +63,7 @@ struct SAnimationPerformanceCounters
     quint64 componentsEvaluated{0};
 };
 
-enum class EAnimationDistanceTier { Skip, Full, HalfRate, FirstPose };
+enum class EAnimationDistanceTier { Skip, Full, HalfRate, LowRate };
 
 QVector<SAdbAction> parseAdbActions(const QByteArray& bytes, QStringList* diagnostics = nullptr);
 bool selectDefaultIdleAction(const QVector<SAdbAction>& actions, int weaponTypeId,

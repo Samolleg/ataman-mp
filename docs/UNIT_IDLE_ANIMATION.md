@@ -39,10 +39,10 @@ The Render settings page contains **Animate unit idle cycles**. When enabled:
 - hidden or frustum-culled units perform no animation evaluation;
 - selected units and units at most 100 world units away interpolate at 15 Hz;
 - units from 100 to 300 units update poses at 7.5 Hz;
-- units beyond 300 units retain the first idle pose.
+- visible units beyond 300 units continue advancing at 3.75 Hz.
 
 `AnimationFrameContext::counters()` exposes per-frame full, half-rate,
-first-pose, off-screen-skip, and static-fallback counts for profiling and
+low-rate, off-screen-skip, and static-fallback counts for profiling and
 future viewport instrumentation.
 
 ## Runtime validation cases
@@ -58,7 +58,8 @@ Validate each case in both a Base profile and the JMV reference profile:
 4. Select a near and a distant unit; selection color geometry must match its
    visible pose exactly.
 5. Move the camera through the 100 and 300 unit boundaries and inspect the
-   counters for full, 7.5 Hz, and first-pose tiers.
+   counters for full, 7.5 Hz, and 3.75 Hz tiers. Every visible unit must keep
+   advancing; only hidden or frustum-culled units may skip evaluation.
 6. Disable the Render toggle and confirm all units return to their static bind
    pose without changing their MOB data.
 7. Use a profile with an unknown animation provider and a test copy missing an

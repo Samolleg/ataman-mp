@@ -403,7 +403,7 @@ void CUnit::refreshAnimationPose()
     {
     case EAnimationDistanceTier::Full: frame.counters().fullEvaluations++; break;
     case EAnimationDistanceTier::HalfRate: frame.counters().halfRateEvaluations++; break;
-    case EAnimationDistanceTier::FirstPose: frame.counters().firstPoseEvaluations++; break;
+    case EAnimationDistanceTier::LowRate: frame.counters().lowRateEvaluations++; break;
     case EAnimationDistanceTier::Skip: frame.counters().skippedOffscreen++; return;
     }
     const double logicalFrame = quantizedAnimationFrame(tier, frame.elapsedMilliseconds(),

@@ -278,8 +278,10 @@ void UnitAnimationTests::appliesDistanceTiers()
     QCOMPARE(animationDistanceTier(true, true, 999), EAnimationDistanceTier::Full);
     QCOMPARE(animationDistanceTier(true, false, 100), EAnimationDistanceTier::Full);
     QCOMPARE(animationDistanceTier(true, false, 101), EAnimationDistanceTier::HalfRate);
-    QCOMPARE(animationDistanceTier(true, false, 301), EAnimationDistanceTier::FirstPose);
+    QCOMPARE(animationDistanceTier(true, false, 301), EAnimationDistanceTier::LowRate);
     QCOMPARE(quantizedAnimationFrame(EAnimationDistanceTier::HalfRate, 100, 10, 0), 0.0);
+    QCOMPARE(quantizedAnimationFrame(EAnimationDistanceTier::LowRate, 100, 10, 0), 0.0);
+    QCOMPARE(quantizedAnimationFrame(EAnimationDistanceTier::LowRate, 300, 10, 0), 4.0);
 }
 
 void UnitAnimationTests::malformedAndUnknownInputsFailStatic()
