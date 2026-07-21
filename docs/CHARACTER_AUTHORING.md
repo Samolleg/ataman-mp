@@ -136,6 +136,39 @@ Use `character_model_blender_fixture.py` for isolated import/export controls,
 `character_blend_scene_audit.py` for a read-only fresh-reopen scene audit, and
 `character_fig_semantic_diff.py` for expanded-corner FIG comparison.
 
+### Correct character atlases in Blender
+
+Do not assign a raw decoded MMP PNG directly and do not normalize/move the FIG
+UVs to compensate. `scripts/character_mmp_atlas.py` reproduces the fingerprinted
+PNT3 four-pixel decoder and the editor's premultiplied-BGRA layer compositor.
+For Blender PNG assignment, use `--orientation mirror-y`: a four-way controlled
+render showed that raw, `mirror-x`, and `rotate-180` place the face/body regions
+incorrectly, while `mirror-y` aligns the face, torso, limbs, cuffs, and linked
+armor geometry. This is an image-coordinate adapter; the report retains hashes
+for the raw decoded/composed pixels and the oriented straight-alpha PNG.
+
+Choose the overlay family from the equipment slot, not merely the shared numeric
+TTI suffix: `SH` shirt, `GL` gloves, `PT` pants, `BT` boots, `PL` plate, and `LG`
+leggings. The accepted leggings24 control uses `unhumalg_24.lo.0.x4.mmp`; the
+rejected `unhumapl_24` control correctly textures plate regions and therefore
+looks broken when paired with leggings-only geometry.
+
+The current replacement demo is staged at
+`work/character-blender-pipeline/humanoid-lane/examples/unhuma-jmv-leggings24-editor-pipeline.blend`.
+It was imported from the copied `unhuma.res` using `JABAIS_VOUX`, includes only
+the verified `ll1.armor24`/`rl1.armor24` replacements and their linked shell
+descendants, packs the composed and skin-only atlases, and keeps `hd`/`hr.NN` on
+the unlayered skin material. Its fresh-reopen audit has 160 meshes, two materials,
+zero position/topology/normal/UV hash differences, and scene SHA-256
+`F8E78D5EFA56008AB77650364A25FE9C33E73418835158E32D568DE8A32C6381`.
+The deterministic preview is
+`work/character-blender-pipeline/humanoid-lane/examples/unhuma-jmv-leggings24-editor-pipeline-preview.png`
+(SHA-256 `3D62901FB1A85EBFC913EE11FFAF2A8C69D483DA4BDF0017D4C521164B842D79`).
+
+Use `character_blend_assign_atlas.py` to create a new packed, textured scene and
+`character_blend_render_preview.py` for visual QA. Neither script overwrites the
+source `.blend`; the atlas tool rejects outputs in an input-layer directory.
+
 ## Manual edit procedure
 
 1. Copy the exact source archive/member into an immutable `inputs/` tree. Record
