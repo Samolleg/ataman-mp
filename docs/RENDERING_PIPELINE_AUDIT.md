@@ -27,7 +27,7 @@ stage, not a claim that the final performance target has been reached.
 | Scheduling | A precise request loop supports an immediate 0-1000 FPS cap | Normal mode uses the persisted VSync choice; `--render-benchmark` forces VSync off and no cap | Integer-millisecond Qt timers make non-divisor caps approximate |
 | Scene traversal | Each MOB has a deterministic 32-unit spatial grid | Visible cells and object bounds are frustum tested; selected objects stay conservative | Dense views still submit thousands of visible parts |
 | Terrain | Land and water sectors are frustum rejected | Terrain is already split into 32-unit sectors | Visible sectors still issue one draw each |
-| Mesh storage | Immutable FIG geometry shares profile/resource-scoped VBOs | Morph-deformed parts detach to private updatable buffers | CPU vertex arrays and attribute setup remain per part |
+| Mesh storage | Immutable FIG geometry shares profile/resource-scoped VBOs | Morph-deformed parts detach to private updatable buffers; desktop OpenGL 3.3+ caches VAO layouts per shared mesh, shader, and pass | CPU vertex arrays remain per part and thousands of unique meshes still limit instancing |
 | Object submission | Visible parts produce explicit render items | Matching immutable opaque/cutout parts instance on desktop OpenGL 3.3+; genuine transparency sorts back-to-front | Unique meshes and ordered transparency still produce individual draws |
 | Rasterization | OpenGL shaders, VBOs, textures, depth test | Verified opaque work disables blend/alpha test; cutouts retain alpha test | Back-face culling remains disabled and conservative materials retain legacy blending |
 | Selection/helpers | Separate selection and logic-helper passes | Picking reuses spatial visibility; selected/moving nodes remain conservative | Enabled logic mode intentionally retains full helper traversal |
@@ -155,6 +155,17 @@ about 34 FPS and 29 ms CPU submission. The following state-reduction increment
 removes per-object uniforms that were still executed while merely collecting
 queues, avoids per-batch matrix-vector allocations, and records collect/sort/
 draw phase timings for the next fixed-camera comparison.
+
+The subsequent submission capture localizes that cost. A stationary heavy
+`zone18` view at 2430 x 1960 averaged about 34.5 FPS and 28.1 ms CPU submission,
+while queue collection plus sorting consumed only about 1.6 ms and the queue
+draw phase consumed about 23.3 ms. It submitted 3,984 draws in 3,839 batches;
+GPU average time was 6-7 ms. The workflow contained no crash/fatal record and
+reported desktop OpenGL 4.6 with instancing enabled. This evidence selects
+vertex-input and uniform submission as the next measured target. The following
+increment caches shader locations and separate ordinary, instanced, selection,
+and instanced-selection VAO layouts per immutable mesh. The legacy/ANGLE path
+continues to configure vertex attributes explicitly.
 
 ## Lighting, shadows, sky, fog, and particles
 

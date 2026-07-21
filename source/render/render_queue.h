@@ -124,6 +124,11 @@ private:
     int m_instanceBufferCapacity{0};
     int m_instanceBufferWriteOffset{0};
     bool m_instanceBufferPrepared{false};
+    int m_modelMatrixLocation{-1};
+    int m_colorLocation{-1};
+    int m_instancedLocation{-1};
+    int m_partAnimatedLocation{-1};
+    int m_highlightLocation{-1};
 };
 
 #endif // RENDER_QUEUE_H

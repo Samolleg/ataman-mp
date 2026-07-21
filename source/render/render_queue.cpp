@@ -26,6 +26,11 @@ void RenderQueueContext::begin(QOpenGLShaderProgram* program, const QVector3D& c
     m_instanceBufferPrepared = false;
     m_collecting = program != nullptr;
     m_selectionPass = false;
+    m_modelMatrixLocation = program ? program->uniformLocation("u_modelMmatrix") : -1;
+    m_colorLocation = program ? program->uniformLocation("u_color") : -1;
+    m_instancedLocation = program ? program->uniformLocation("u_instanced") : -1;
+    m_partAnimatedLocation = program ? program->uniformLocation("u_partAnimated") : -1;
+    m_highlightLocation = program ? program->uniformLocation("u_highlight") : -1;
     QOpenGLContext* context = QOpenGLContext::currentContext();
     const QSurfaceFormat format = context ? context->format() : QSurfaceFormat();
     m_instancingEnabled = context && supportsInstancedRenderPath(
@@ -39,13 +44,14 @@ void RenderQueueContext::begin(QOpenGLShaderProgram* program, const QVector3D& c
     m_instancingEnabled = m_instancingEnabled && m_instanceBuffer.isCreated();
     if(!m_instancingLogged)
     {
-        ei::log(eLogInfo, QString("Render instancing path:%1 OpenGL:%2.%3")
+        ei::log(eLogInfo, QString("Render instancing path:%1 vertex-arrays:%2 OpenGL:%3.%4")
+                .arg(m_instancingEnabled ? "enabled" : "legacy-fallback")
                 .arg(m_instancingEnabled ? "enabled" : "legacy-fallback")
                 .arg(format.majorVersion()).arg(format.minorVersion()));
         m_instancingLogged = true;
     }
     if(m_program)
-        m_program->setUniformValue("u_instanced", false);
+        m_program->setUniformValue(m_instancedLocation, false);
     m_phaseTimer.restart();
 }
 
@@ -177,15 +183,15 @@ void RenderQueueContext::flush()
             }
             if(!instanced)
             {
-                m_program->setUniformValue("u_instanced", false);
-                m_program->setUniformValue("u_modelMmatrix", item.modelMatrix);
-                m_program->setUniformValue("u_color", item.pickingColor);
+                m_program->setUniformValue(m_instancedLocation, false);
+                m_program->setUniformValue(m_modelMatrixLocation, item.modelMatrix);
+                m_program->setUniformValue(m_colorLocation, item.pickingColor);
                 item.part->drawSelect(m_program);
             }
             itemIndex += instanced ? runLength : 1;
         }
-        m_program->setUniformValue("u_instanced", false);
-        m_program->setUniformValue("u_partAnimated", false);
+        m_program->setUniformValue(m_instancedLocation, false);
+        m_program->setUniformValue(m_partAnimatedLocation, false);
         m_items.clear();
         m_phaseTimer.restart();
         return;
@@ -213,7 +219,7 @@ void RenderQueueContext::flush()
     float previousUvScale = 0.0f;
     bool haveBatch = false;
     bool activeHighlight = false;
-    m_program->setUniformValue("u_highlight", false);
+    m_program->setUniformValue(m_highlightLocation, false);
     for(int itemIndex = 0; itemIndex < m_items.size(); )
     {
         const SRenderItem& item = m_items.at(itemIndex);
@@ -263,7 +269,7 @@ void RenderQueueContext::flush()
         if(item.highlighted != activeHighlight)
         {
             activeHighlight = item.highlighted;
-            m_program->setUniformValue("u_highlight", activeHighlight);
+            m_program->setUniformValue(m_highlightLocation, activeHighlight);
         }
         if(runLength >= 2)
         {
@@ -278,14 +284,14 @@ void RenderQueueContext::flush()
         }
         if(!instanced)
         {
-            m_program->setUniformValue("u_modelMmatrix", item.modelMatrix);
+            m_program->setUniformValue(m_modelMatrixLocation, item.modelMatrix);
             item.part->drawImmediate(m_program);
         }
         itemIndex += instanced ? runLength : 1;
     }
-    m_program->setUniformValue("u_instanced", false);
-    m_program->setUniformValue("u_partAnimated", false);
-    m_program->setUniformValue("u_highlight", false);
+    m_program->setUniformValue(m_instancedLocation, false);
+    m_program->setUniformValue(m_partAnimatedLocation, false);
+    m_program->setUniformValue(m_highlightLocation, false);
     glEnable(GL_ALPHA_TEST);
     glEnable(GL_BLEND);
     if(collectPerformance)
