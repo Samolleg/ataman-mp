@@ -1920,6 +1920,34 @@ void EnduranceDocumentTests::zone1NamespaceTemplateSeparatesLandOverlayAndVarian
     QCOMPARE(analysis.overlayCatalog.shortestMaterialPath(6, 5),
              QVector<qint32>({6, 5}));
 
+    // The stock namespace authors real three-family junction tiles. Keep
+    // these public metadata checks separate from the private map replay so a
+    // regression cannot silently reduce semantic painting to pairwise bands.
+    QVector<STerrainTransitionSignature> threeFamilyJunctions;
+    STerrainTransitionSignature groundDarkCommon;
+    groundDarkCommon.northWest = 3;
+    groundDarkCommon.northEast = 2;
+    groundDarkCommon.southEast = 4;
+    groundDarkCommon.southWest = 4;
+    threeFamilyJunctions.append(groundDarkCommon);
+    STerrainTransitionSignature stoneDarkCommon;
+    stoneDarkCommon.northWest = 7;
+    stoneDarkCommon.northEast = 3;
+    stoneDarkCommon.southEast = 4;
+    stoneDarkCommon.southWest = 4;
+    threeFamilyJunctions.append(stoneDarkCommon);
+    for(const STerrainTransitionSignature& junction : threeFamilyJunctions)
+    {
+        bool junctionFound = false;
+        const quint16 packedJunction = analysis.landCatalog.selectForPaint(
+            junction, 100, 100, 12345u, &junctionFound);
+        QVERIFY(junctionFound);
+        bool decodedJunction = false;
+        QCOMPARE(analysis.landCatalog.gridSignatureForPacked(
+                     packedJunction, &decodedJunction), junction);
+        QVERIFY(decodedJunction);
+    }
+
     STerrainTransitionSignature sideEdge;
     sideEdge.northWest = 4;
     sideEdge.northEast = 2;
@@ -2221,6 +2249,115 @@ void EnduranceDocumentTests::zone1NamespaceTemplateMatchesPrivateFixture()
         if(y + 1 < mergedTerrain.tileCountY())
         {
             const STerrainTransitionSignature south = gridSignature(x, y + 1, &found);
+            QVERIFY(found);
+            QCOMPARE(here.southWest, south.northWest);
+            QCOMPARE(here.southEast, south.northEast);
+        }
+    }
+
+    // R17 version-3 evidence: lay down the captured Ground/common region,
+    // then introduce Grass/dark at its boundary with untouched Grass/common.
+    // The atlas contains authored 2+3+4 junctions; a two-family-only solve
+    // must not erase family 4 or leave a shared-edge disagreement.
+    CTerrainEditModel threeWayTerrain;
+    CValidationReport threeWayLoadReport;
+    QVERIFY2(threeWayTerrain.load(document, &threeWayLoadReport),
+             qPrintable(threeWayLoadReport.toText()));
+    const QVector<QPoint> groundCenters({
+        QPoint(102, 40), QPoint(103, 40), QPoint(105, 40), QPoint(108, 40),
+        QPoint(106, 40), QPoint(103, 39), QPoint(103, 38), QPoint(102, 38),
+        QPoint(101, 38), QPoint(101, 37), QPoint(100, 38), QPoint(99, 38),
+        QPoint(99, 39), QPoint(100, 40), QPoint(102, 41), QPoint(102, 42),
+        QPoint(101, 42), QPoint(100, 42), QPoint(98, 39), QPoint(98, 40)
+    });
+    QSet<int> threeWayChanged;
+    const auto paintSample = [&](const QPoint& center, qint32 material) {
+        STerrainTileBrush sampleBrush;
+        sampleBrush.centerX = float(center.x());
+        sampleBrush.centerY = float(center.y());
+        sampleBrush.radius = 0.0f;
+        sampleBrush.shape = ETerrainTileBrushShape::Circle;
+        CValidationReport sampleReport;
+        const STerrainTileCommand command = threeWayTerrain.makeSemanticTilePaint(
+            sampleBrush, ETerrainTileLayer::Land, material,
+            analysis.landCatalog, 12345u, &sampleReport);
+        QVERIFY2(!sampleReport.hasErrors(), qPrintable(sampleReport.toText()));
+        for(const STerrainTileDelta& delta : command.deltas)
+            threeWayChanged.insert(delta.globalY * threeWayTerrain.tileCountX()
+                                   + delta.globalX);
+        QVERIFY2(threeWayTerrain.apply(command, true, &sampleReport),
+                 qPrintable(sampleReport.toText()));
+    };
+    for(const QPoint& center : groundCenters)
+        paintSample(center, 2);
+    paintSample(QPoint(100, 40), 3);
+
+    bool authoredThreeFamilyJunction = false;
+    for(int index : threeWayChanged)
+    {
+        const int x = index % threeWayTerrain.tileCountX();
+        const int y = index / threeWayTerrain.tileCountX();
+        bool found = false;
+        const STerrainTransitionSignature here =
+            analysis.landCatalog.gridSignatureForPacked(threeWayTerrain.packedTile(
+                x, y, ETerrainTileLayer::Land), &found);
+        QVERIFY(found);
+        QSet<qint32> materials({here.northWest, here.northEast,
+                               here.southEast, here.southWest});
+        authoredThreeFamilyJunction |= materials.contains(2)
+            && materials.contains(3) && materials.contains(4);
+        if(x + 1 < threeWayTerrain.tileCountX())
+        {
+            const STerrainTransitionSignature east =
+                analysis.landCatalog.gridSignatureForPacked(threeWayTerrain.packedTile(
+                    x + 1, y, ETerrainTileLayer::Land), &found);
+            QVERIFY(found);
+            QCOMPARE(here.northEast, east.northWest);
+            QCOMPARE(here.southEast, east.southWest);
+        }
+        if(y + 1 < threeWayTerrain.tileCountY())
+        {
+            const STerrainTransitionSignature south =
+                analysis.landCatalog.gridSignatureForPacked(threeWayTerrain.packedTile(
+                    x, y + 1, ETerrainTileLayer::Land), &found);
+            QVERIFY(found);
+            QCOMPARE(here.southWest, south.northWest);
+            QCOMPARE(here.southEast, south.northEast);
+        }
+    }
+    QVERIFY(authoredThreeFamilyJunction);
+
+    const QVector<QPoint> darkGrassCenters({
+        QPoint(100, 38), QPoint(99, 38), QPoint(99, 37), QPoint(99, 36),
+        QPoint(99, 39), QPoint(101, 35), QPoint(100, 41)
+    });
+    for(const QPoint& center : darkGrassCenters)
+        paintSample(center, 3);
+    paintSample(QPoint(100, 39), 7);
+
+    for(int index : threeWayChanged)
+    {
+        const int x = index % threeWayTerrain.tileCountX();
+        const int y = index / threeWayTerrain.tileCountX();
+        bool found = false;
+        const STerrainTransitionSignature here =
+            analysis.landCatalog.gridSignatureForPacked(threeWayTerrain.packedTile(
+                x, y, ETerrainTileLayer::Land), &found);
+        QVERIFY(found);
+        if(x + 1 < threeWayTerrain.tileCountX())
+        {
+            const STerrainTransitionSignature east =
+                analysis.landCatalog.gridSignatureForPacked(threeWayTerrain.packedTile(
+                    x + 1, y, ETerrainTileLayer::Land), &found);
+            QVERIFY(found);
+            QCOMPARE(here.northEast, east.northWest);
+            QCOMPARE(here.southEast, east.southWest);
+        }
+        if(y + 1 < threeWayTerrain.tileCountY())
+        {
+            const STerrainTransitionSignature south =
+                analysis.landCatalog.gridSignatureForPacked(threeWayTerrain.packedTile(
+                    x, y + 1, ETerrainTileLayer::Land), &found);
             QVERIFY(found);
             QCOMPARE(here.southWest, south.northWest);
             QCOMPARE(here.southEast, south.northEast);

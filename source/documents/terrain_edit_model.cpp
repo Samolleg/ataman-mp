@@ -1428,10 +1428,16 @@ STerrainTileCommand CTerrainEditModel::makeSemanticTilePaint(
     QMap<int, STerrainTransitionSignature> existingSignatures;
     QMap<int, quint16> existingTiles;
     QSet<int> context = affected;
+    QSet<int> affectedCorners;
+    QSet<int> paintedCorners;
     for(int index : affected)
     {
         const int x = index % width;
         const int y = index / width;
+        affectedCorners.insert(y * (width + 1) + x);
+        affectedCorners.insert(y * (width + 1) + x + 1);
+        affectedCorners.insert((y + 1) * (width + 1) + x);
+        affectedCorners.insert((y + 1) * (width + 1) + x + 1);
         for(int offsetY = -1; offsetY <= 1; ++offsetY)
         {
             for(int offsetX = -1; offsetX <= 1; ++offsetX)
@@ -1443,6 +1449,15 @@ STerrainTileCommand CTerrainEditModel::makeSemanticTilePaint(
                     context.insert(contextY * width + contextX);
             }
         }
+    }
+    for(int index : painted)
+    {
+        const int x = index % width;
+        const int y = index / width;
+        paintedCorners.insert(y * (width + 1) + x);
+        paintedCorners.insert(y * (width + 1) + x + 1);
+        paintedCorners.insert((y + 1) * (width + 1) + x);
+        paintedCorners.insert((y + 1) * (width + 1) + x + 1);
     }
     QMap<int, STerrainTransitionSignature> contextSignatures;
     for(int index : context)
@@ -1473,6 +1488,51 @@ STerrainTileCommand CTerrainEditModel::makeSemanticTilePaint(
         }
     }
 
+    // Corners shared with an untouched halo cell are hard boundary
+    // constraints. Preserving that cell's authored corner allows the new
+    // route to form an atlas-authored three-or-more-family junction instead
+    // of finishing the selected/background route with a third-family seam.
+    QMap<int, QMap<qint32, int>> boundaryCounts;
+    for(auto entry = contextSignatures.constBegin(); entry != contextSignatures.constEnd(); ++entry)
+    {
+        if(affected.contains(entry.key()))
+            continue;
+        const int x = entry.key() % width;
+        const int y = entry.key() / width;
+        const STerrainTransitionSignature& signature = entry.value();
+        const qint32 materials[4] = {signature.northWest, signature.northEast,
+                                     signature.southEast, signature.southWest};
+        const int cornerKeys[4] = {
+            y * (width + 1) + x,
+            y * (width + 1) + x + 1,
+            (y + 1) * (width + 1) + x + 1,
+            (y + 1) * (width + 1) + x
+        };
+        for(int corner = 0; corner < 4; ++corner)
+        {
+            if(affectedCorners.contains(cornerKeys[corner])
+               && !paintedCorners.contains(cornerKeys[corner]))
+                boundaryCounts[cornerKeys[corner]][materials[corner]] += 1;
+        }
+    }
+    QMap<int, qint32> boundaryMaterials;
+    for(auto corner = boundaryCounts.constBegin(); corner != boundaryCounts.constEnd(); ++corner)
+    {
+        qint32 selectedMaterial = 0;
+        int selectedCount = -1;
+        for(auto candidate = corner.value().constBegin();
+            candidate != corner.value().constEnd(); ++candidate)
+        {
+            if(candidate.value() > selectedCount)
+            {
+                selectedMaterial = candidate.key();
+                selectedCount = candidate.value();
+            }
+        }
+        if(selectedCount >= 0)
+            boundaryMaterials.insert(corner.key(), selectedMaterial);
+    }
+
     // Merge with nearby strokes by seeding the route distance from the current
     // decoded corner lattice. Minimum distance deliberately favors the selected
     // material where shipped neighboring tiles disagree at a shared corner.
@@ -1499,10 +1559,38 @@ STerrainTileCommand CTerrainEditModel::makeSemanticTilePaint(
 
     const auto routedMaterial = [&](int cornerX, int cornerY) -> qint32
     {
-        const int distance = cornerDistances.value(
-            cornerY * (width + 1) + cornerX, transitionRadius);
+        const int key = cornerY * (width + 1) + cornerX;
+        if(boundaryMaterials.contains(key))
+            return boundaryMaterials.value(key);
+        const int distance = cornerDistances.value(key, transitionRadius);
         return materialPath.at(qMin(distance, materialPath.size() - 1));
     };
+
+    // Some legacy atlas neighborhoods do not author the exact multi-family
+    // corner pattern implied by every hard boundary pin. Preflight the whole
+    // patch atomically: use all preserved halo corners only when every cell is
+    // representable, otherwise retain the proven two-family route rather than
+    // emitting a partial command.
+    bool boundaryRouteAvailable = true;
+    for(int index : affected)
+    {
+        const int x = index % width;
+        const int y = index / width;
+        STerrainTransitionSignature desired;
+        desired.northWest = routedMaterial(x, y);
+        desired.northEast = routedMaterial(x + 1, y);
+        desired.southEast = routedMaterial(x + 1, y + 1);
+        desired.southWest = routedMaterial(x, y + 1);
+        bool found = false;
+        catalog.selectForPaint(desired, x, y, distributionSeed, &found);
+        if(!found)
+        {
+            boundaryRouteAvailable = false;
+            break;
+        }
+    }
+    if(!boundaryRouteAvailable)
+        boundaryMaterials.clear();
 
     for(int index : affected)
     {
