@@ -1343,7 +1343,7 @@ void CView::exportTerrainPaintDiagnostic()
         return;
     QJsonObject root;
     root.insert("schema", "ei-mapper-endurance-paint-diagnostic");
-    root.insert("version", 2);
+    root.insert("version", 3);
     root.insert("mprFileName", m_pLand->filePath().fileName());
     root.insert("mprNamespace", m_mprDocument.mapInfo().innerNamespace);
     root.insert("sourceMprSha256", QString::fromLatin1(QCryptographicHash::hash(
@@ -1379,6 +1379,7 @@ void CView::exportTerrainPaintDiagnostic()
         operation.insert("before", packedTerrainTileJson(delta.before));
         operation.insert("after", packedTerrainTileJson(delta.after));
         operation.insert("hasSemanticRequest", delta.hasSemanticRequest);
+        operation.insert("strokeId", delta.diagnosticStrokeId);
         if(delta.hasSemanticRequest)
         {
             QJsonObject brushCenter;
@@ -1420,6 +1421,56 @@ void CView::exportTerrainPaintDiagnostic()
         operations.append(operation);
     }
     root.insert("paintDeltas", operations);
+    QMap<QString, STerrainTileDelta> snapshotCells;
+    for(const STerrainTileDelta& delta : m_terrainPaintAudit)
+    {
+        for(int offsetY = -1; offsetY <= 1; ++offsetY)
+        {
+            for(int offsetX = -1; offsetX <= 1; ++offsetX)
+            {
+                STerrainTileDelta cell;
+                cell.globalX = delta.globalX + offsetX;
+                cell.globalY = delta.globalY + offsetY;
+                cell.layer = delta.layer;
+                const QString key = QString("%1:%2:%3")
+                    .arg(cell.layer == ETerrainTileLayer::Land ? "land" : "overlay")
+                    .arg(cell.globalX).arg(cell.globalY);
+                snapshotCells.insert(key, cell);
+            }
+        }
+    }
+    QJsonArray currentTiles;
+    for(const STerrainTileDelta& cell : snapshotCells)
+    {
+        bool available = false;
+        const quint16 packed = m_terrainEdit.packedTile(
+            cell.globalX, cell.globalY, cell.layer, &available);
+        if(!available)
+            continue;
+        QJsonObject current;
+        current.insert("x", cell.globalX);
+        current.insert("y", cell.globalY);
+        current.insert("layer", cell.layer == ETerrainTileLayer::Land ? "land" : "overlay");
+        current.insert("packed", packedTerrainTileJson(packed));
+        const CTerrainTransitionCatalog& catalog = m_terrainAtlasAnalysis.catalog(cell.layer);
+        bool found = false;
+        const STerrainTransitionSignature catalogSignature =
+            catalog.signatureForPacked(packed, &found);
+        current.insert("catalogRecognized", found);
+        if(found)
+        {
+            current.insert("catalogGridCorners",
+                           terrainGridSignatureJson(catalogSignature));
+            bool gridFound = false;
+            const STerrainTransitionSignature gridSignature =
+                catalog.gridSignatureForPacked(packed, &gridFound);
+            if(gridFound)
+                current.insert("visibleGridCorners",
+                               terrainGridSignatureJson(gridSignature));
+        }
+        currentTiles.append(current);
+    }
+    root.insert("currentTileSnapshot", currentTiles);
     QFile output(path);
     if(!output.open(QIODevice::WriteOnly | QIODevice::Truncate)
        || output.write(QJsonDocument(root).toJson(QJsonDocument::Indented)) < 0)
@@ -2299,7 +2350,7 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
     brush.radius = m_landscapeTools->paintRadius();
     brush.shape = m_landscapeTools->paintShape();
     CValidationReport report;
-    const STerrainTileCommand command = m_terrainEdit.makeSemanticTilePaint(
+    STerrainTileCommand command = m_terrainEdit.makeSemanticTilePaint(
         brush, bLand ? ETerrainTileLayer::Land : ETerrainTileLayer::Overlay,
         terrainType, m_terrainAtlasAnalysis.catalog(
             bLand ? ETerrainTileLayer::Land : ETerrainTileLayer::Overlay),
@@ -2313,6 +2364,8 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
             : report.toText());
         return;
     }
+    for(STerrainTileDelta& delta : command.deltas)
+        delta.diagnosticStrokeId = m_tileBrushCommandId;
     m_terrainPaintAudit += command.deltas;
     m_pUndoStack->push(new CTerrainTilePreviewCommand(this, command));
 }
@@ -2424,7 +2477,7 @@ void CView::endTileBrushGroup()
         m_pUndoStack->endMacro();
         m_tilePaintStrokeActive = false;
     }
-    m_tileBrushCommandId = (m_tileBrushCommandId+1)%9;
+    ++m_tileBrushCommandId;
 }
 
 void CView::beginTileBrushGroup()

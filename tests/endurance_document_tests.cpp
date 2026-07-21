@@ -1674,6 +1674,60 @@ void EnduranceDocumentTests::terrainTilePaintingIsUndoableLocalizedAndNamespaceS
         0x53454D41u).isEmpty());
     QVERIFY(terrain.apply(semantic, false));
 
+    // Adjacent stamps of the same material must merge into one shared-corner
+    // field. The selected material on the second perimeter is continuation,
+    // not a zero-radius background family.
+    STerrainTileBrush firstAdjacent = semanticPoint;
+    firstAdjacent.centerX = 6.0f;
+    STerrainTileBrush secondAdjacent = semanticPoint;
+    secondAdjacent.centerX = 8.0f;
+    const STerrainTileCommand firstMerge = terrain.makeSemanticTilePaint(
+        firstAdjacent, ETerrainTileLayer::Land, 2, semanticCatalog,
+        0x53454D41u);
+    QVERIFY(!firstMerge.isEmpty());
+    QVERIFY(terrain.apply(firstMerge, true));
+    const STerrainTileCommand secondMerge = terrain.makeSemanticTilePaint(
+        secondAdjacent, ETerrainTileLayer::Land, 2, semanticCatalog,
+        0x53454D41u);
+    QVERIFY(secondMerge.deltas.size() > 1);
+    QVERIFY(terrain.apply(secondMerge, true));
+    for(int y = 0; y < terrain.tileCountY(); ++y)
+    {
+        for(int x = 0; x < terrain.tileCountX(); ++x)
+        {
+            bool hereFound = false;
+            const STerrainTransitionSignature here =
+                semanticCatalog.gridSignatureForPacked(
+                    terrain.packedTile(x, y, ETerrainTileLayer::Land),
+                    &hereFound);
+            QVERIFY(hereFound);
+            if(x + 1 < terrain.tileCountX())
+            {
+                bool eastFound = false;
+                const STerrainTransitionSignature east =
+                    semanticCatalog.gridSignatureForPacked(
+                        terrain.packedTile(x + 1, y, ETerrainTileLayer::Land),
+                        &eastFound);
+                QVERIFY(eastFound);
+                QCOMPARE(here.northEast, east.northWest);
+                QCOMPARE(here.southEast, east.southWest);
+            }
+            if(y + 1 < terrain.tileCountY())
+            {
+                bool nextRowFound = false;
+                const STerrainTransitionSignature nextRow =
+                    semanticCatalog.gridSignatureForPacked(
+                        terrain.packedTile(x, y + 1, ETerrainTileLayer::Land),
+                        &nextRowFound);
+                QVERIFY(nextRowFound);
+                QCOMPARE(here.southWest, nextRow.northWest);
+                QCOMPARE(here.southEast, nextRow.northEast);
+            }
+        }
+    }
+    QVERIFY(terrain.apply(secondMerge, false));
+    QVERIFY(terrain.apply(firstMerge, false));
+
     STerrainTileBrush point;
     point.centerX = 0.0f;
     point.centerY = 0.0f;
@@ -2109,6 +2163,69 @@ void EnduranceDocumentTests::zone1NamespaceTemplateMatchesPrivateFixture()
     // At most the family already covering all probes may legitimately be a
     // no-op. This catches the R9 failure mode where only one family painted.
     QVERIFY(changedMaterials.size() >= 4);
+
+    // Replay the Ground/common path captured by the user's R16 diagnostic on
+    // this exact copied Zone1 fixture. Consecutive samples belong to nearby
+    // strokes and must merge into one corner-consistent region instead of
+    // treating already-painted Ground/common as the new background family.
+    CTerrainEditModel mergedTerrain;
+    CValidationReport mergedLoadReport;
+    QVERIFY2(mergedTerrain.load(document, &mergedLoadReport),
+             qPrintable(mergedLoadReport.toText()));
+    const QVector<QPoint> capturedCenters({
+        QPoint(103, 40), QPoint(107, 41), QPoint(106, 40), QPoint(105, 40),
+        QPoint(104, 40), QPoint(104, 39), QPoint(103, 41), QPoint(104, 41),
+        QPoint(105, 41), QPoint(105, 40), QPoint(106, 40), QPoint(106, 39),
+        QPoint(107, 39), QPoint(108, 38), QPoint(107, 40), QPoint(105, 40),
+        QPoint(113, 46), QPoint(113, 42)
+    });
+    QSet<int> changedCells;
+    for(int sample = 0; sample < capturedCenters.size(); ++sample)
+    {
+        const QPoint center = capturedCenters.at(sample);
+        brush.centerX = float(center.x());
+        brush.centerY = float(center.y());
+        brush.radius = sample >= 16 ? 1.0f : 0.0f;
+        brush.shape = ETerrainTileBrushShape::Circle;
+        CValidationReport mergeReport;
+        const STerrainTileCommand paint = mergedTerrain.makeSemanticTilePaint(
+            brush, ETerrainTileLayer::Land, 2, analysis.landCatalog,
+            12345u, &mergeReport);
+        QVERIFY2(!mergeReport.hasErrors(), qPrintable(QString("Captured sample %1 at %2,%3:\n%4")
+            .arg(sample).arg(center.x()).arg(center.y()).arg(mergeReport.toText())));
+        for(const STerrainTileDelta& delta : paint.deltas)
+            changedCells.insert(delta.globalY * mergedTerrain.tileCountX() + delta.globalX);
+        QVERIFY2(mergedTerrain.apply(paint, true, &mergeReport),
+                 qPrintable(mergeReport.toText()));
+    }
+    QVERIFY(changedCells.size() > 20);
+
+    const auto gridSignature = [&](int x, int y, bool* found) {
+        return analysis.landCatalog.gridSignatureForPacked(mergedTerrain.packedTile(
+            x, y, ETerrainTileLayer::Land), found);
+    };
+    for(int index : changedCells)
+    {
+        const int x = index % mergedTerrain.tileCountX();
+        const int y = index / mergedTerrain.tileCountX();
+        bool found = false;
+        const STerrainTransitionSignature here = gridSignature(x, y, &found);
+        QVERIFY(found);
+        if(x + 1 < mergedTerrain.tileCountX())
+        {
+            const STerrainTransitionSignature east = gridSignature(x + 1, y, &found);
+            QVERIFY(found);
+            QCOMPARE(here.northEast, east.northWest);
+            QCOMPARE(here.southEast, east.southWest);
+        }
+        if(y + 1 < mergedTerrain.tileCountY())
+        {
+            const STerrainTransitionSignature south = gridSignature(x, y + 1, &found);
+            QVERIFY(found);
+            QCOMPARE(here.southWest, south.northWest);
+            QCOMPARE(here.southEast, south.northEast);
+        }
+    }
 }
 
 void EnduranceDocumentTests::terrainHeightTransactionReopensAndPreservesOverlay()

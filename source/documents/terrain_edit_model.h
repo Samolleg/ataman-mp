@@ -70,6 +70,7 @@ struct STerrainTileDelta
     bool hasSemanticRequest{false};
     int brushCenterX{0};
     int brushCenterY{0};
+    int diagnosticStrokeId{-1};
     qint32 requestedMaterialId{0};
     STerrainTransitionSignature requestedSignature;
 };
@@ -105,6 +106,8 @@ public:
                            bool* found = nullptr) const;
     void setMirrorPaintGridY(bool enabled) { m_mirrorPaintGridY = enabled; }
     STerrainTransitionSignature signatureForPacked(
+        quint16 packedTile, bool* found = nullptr) const;
+    STerrainTransitionSignature gridSignatureForPacked(
         quint16 packedTile, bool* found = nullptr) const;
     bool hasMaterial(qint32 materialId) const;
     QVector<qint32> materialIds() const;

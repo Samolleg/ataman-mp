@@ -296,7 +296,7 @@ private:
     CTileForm* m_pTileForm;
     QSharedPointer<CPreviewTile> m_pPreviewTile;
     CLandscape* m_pLand;
-    short m_tileBrushCommandId;
+    int m_tileBrushCommandId;
     CLandscapeTools* m_landscapeTools;
     CMprDocument m_mprDocument;
     CTerrainEditModel m_terrainEdit;

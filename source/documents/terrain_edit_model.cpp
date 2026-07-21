@@ -268,6 +268,19 @@ STerrainTransitionSignature CTerrainTransitionCatalog::signatureForPacked(
     return STerrainTransitionSignature();
 }
 
+STerrainTransitionSignature CTerrainTransitionCatalog::gridSignatureForPacked(
+    quint16 packedTile, bool* found) const
+{
+    bool selected = false;
+    const STerrainTransitionSignature catalog =
+        signatureForPacked(packedTile, &selected);
+    if(found)
+        *found = selected;
+    if(!selected)
+        return STerrainTransitionSignature();
+    return m_mirrorPaintGridY ? mirroredGridY(catalog) : catalog;
+}
+
 bool CTerrainTransitionCatalog::hasMaterial(qint32 materialId) const
 {
     return m_materialIds.contains(materialId);
@@ -1329,7 +1342,7 @@ STerrainTileCommand CTerrainEditModel::makeSemanticTilePaint(
         const quint16 current = packedTile(x, y, layer, &available);
         bool found = false;
         const STerrainTransitionSignature signature = available
-            ? catalog.signatureForPacked(current, &found)
+            ? catalog.gridSignatureForPacked(current, &found)
             : STerrainTransitionSignature();
         if(!found)
             continue;
@@ -1347,8 +1360,14 @@ STerrainTileCommand CTerrainEditModel::makeSemanticTilePaint(
     }
     qint32 backgroundMaterial = materialId;
     int bestCount = -1;
+    // Existing selected material at the perimeter means this stroke is
+    // continuing an earlier painted region; it is not the family into which
+    // the new boundary must blend. Prefer any authored non-target family and
+    // fall back to the target only when the entire perimeter is already target.
     for(auto entry = backgroundCounts.constBegin(); entry != backgroundCounts.constEnd(); ++entry)
     {
+        if(entry.key() == materialId)
+            continue;
         if(entry.value() > bestCount)
         {
             backgroundMaterial = entry.key();
@@ -1408,25 +1427,74 @@ STerrainTileCommand CTerrainEditModel::makeSemanticTilePaint(
     // locally while all cells outside this bounded route remain untouched.
     QMap<int, STerrainTransitionSignature> existingSignatures;
     QMap<int, quint16> existingTiles;
+    QSet<int> context = affected;
     for(int index : affected)
+    {
+        const int x = index % width;
+        const int y = index / width;
+        for(int offsetY = -1; offsetY <= 1; ++offsetY)
+        {
+            for(int offsetX = -1; offsetX <= 1; ++offsetX)
+            {
+                const int contextX = x + offsetX;
+                const int contextY = y + offsetY;
+                if(contextX >= 0 && contextX < width
+                   && contextY >= 0 && contextY < height)
+                    context.insert(contextY * width + contextX);
+            }
+        }
+    }
+    QMap<int, STerrainTransitionSignature> contextSignatures;
+    for(int index : context)
     {
         const int x = index % width;
         const int y = index / width;
         bool available = false;
         const quint16 current = packedTile(x, y, layer, &available);
         bool found = false;
-        const STerrainTransitionSignature signature = catalog.signatureForPacked(current, &found);
+        const STerrainTransitionSignature signature =
+            catalog.gridSignatureForPacked(current, &found);
         if(!available || !found)
         {
-            if(report)
+            if(affected.contains(index) && report)
                 report->add("terrain.semantic_catalog", EValidationSeverity::Error,
                             "An existing tile is absent from the registered namespace template",
                             QString("%1,%2 packed:0x%3").arg(x).arg(y)
                                 .arg(current, 4, 16, QLatin1Char('0')));
-            return STerrainTileCommand();
+            if(affected.contains(index))
+                return STerrainTileCommand();
+            continue;
         }
-        existingSignatures.insert(index, signature);
-        existingTiles.insert(index, current);
+        contextSignatures.insert(index, signature);
+        if(affected.contains(index))
+        {
+            existingSignatures.insert(index, signature);
+            existingTiles.insert(index, current);
+        }
+    }
+
+    // Merge with nearby strokes by seeding the route distance from the current
+    // decoded corner lattice. Minimum distance deliberately favors the selected
+    // material where shipped neighboring tiles disagree at a shared corner.
+    for(auto entry = contextSignatures.constBegin(); entry != contextSignatures.constEnd(); ++entry)
+    {
+        const int x = entry.key() % width;
+        const int y = entry.key() / width;
+        const STerrainTransitionSignature& signature = entry.value();
+        const qint32 materials[4] = {signature.northWest, signature.northEast,
+                                     signature.southEast, signature.southWest};
+        const int cornerX[4] = {x, x + 1, x + 1, x};
+        const int cornerY[4] = {y, y, y + 1, y + 1};
+        for(int corner = 0; corner < 4; ++corner)
+        {
+            const int pathDistance = materialPath.indexOf(materials[corner]);
+            if(pathDistance < 0)
+                continue;
+            const int key = cornerY[corner] * (width + 1) + cornerX[corner];
+            if(!cornerDistances.contains(key)
+               || pathDistance < cornerDistances.value(key))
+                cornerDistances.insert(key, pathDistance);
+        }
     }
 
     const auto routedMaterial = [&](int cornerX, int cornerY) -> qint32
