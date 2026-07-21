@@ -38,14 +38,11 @@ bool decodePnt3(const QByteArray& compressed, int decodedSize,
         const quint32 value = qFromLittleEndian<quint32>(
             reinterpret_cast<const uchar*>(compressed.constData() + cursor));
         cursor += int(sizeof(quint32));
-        // The shipped decoder uses values 1..1,000,000 as byte-counted
-        // transparent runs. Zero and values above that threshold are literal
-        // premultiplied BGRA pixels. In particular, large color dwords may
-        // have a zero alpha byte without being run markers (UnhumaPL_24 is a
-        // corpus control); treating every zero-alpha dword as a run corrupts
-        // the destination position and drops the entire armor layer.
-        constexpr quint32 maximumRunBytes = 1000000u;
-        const bool transparentRun = value != 0u && value <= maximumRunBytes;
+        // 2dintmmx.dll's PNT3 surface unpacker identifies a transparent run
+        // by a zero alpha byte and a non-zero dword. The value is a byte
+        // count. Literal pixels are premultiplied BGRA, including zero. Runs
+        // are consumed in four-pixel groups by the original MMX routine.
+        const bool transparentRun = value != 0u && (value & 0xff000000u) == 0u;
         if(transparentRun)
         {
             if((value & 0x0fu) != 0u)
