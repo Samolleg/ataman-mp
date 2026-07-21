@@ -89,8 +89,9 @@ and semantically correct standalone-item bounds. The patch makes
 UI context optional in background mode, restores Euclidean bounding radius,
 and applies the part-name bounds convention independently of model-level
 header/UV classification and maps archive-prefixed standalone BON members back
-to local Blender part names. Its validated research commit is `5a5084f`. It does
-not claim general modern item-export support.
+to local Blender part names. It also assigns authored per-corner FIG normals as
+Blender split normals. Its validated research commit is `4d03453`. It does not
+claim general modern item-export support.
 
 Current controls prove:
 
@@ -98,6 +99,14 @@ Current controls prove:
   by at most `1.82e-5`, while geometry, UV mapping, hierarchy and bounds agree;
 - patched Blender 4.5.12 + 6.10 imports the complete JMV `unhuma` tree in
   `JABAIS_VOUX` mode (6,232 base/morph mesh objects in the control);
+- the compact `unhuma`/armor24 inspection scene imports copied JMV data with a
+  part mask, preserves authored atlas UVs and split normals across a fresh
+  re-open, and records `JMV` -> `JABAIS_VOUX` plus the source RES hash in the
+  scene. It has no composed material/atlas yet and is therefore a geometry/UV
+  inspection fixture, not a corrected textured demo. A full 6,232-object import
+  with the new custom-normal assignment crashed Blender 4.5.12 late in import;
+  that unresolved scalability/control failure must pass before the new normal
+  path is declared safe for complete-family imports;
 - patched 6.10 no-op exports of `initwedg8` and `initarhl21` preserve expanded
   per-corner position, normal and UV semantics and bounding volumes, while
   legally reindexing UV/component tables and appending replacement RES data.
@@ -123,8 +132,9 @@ as part of an explicit normal-authoring operation, then validate lighting in a
 disposable game profile. Automatic normal regeneration is not yet an acceptance
 gate.
 
-Use `character_model_blender_fixture.py` for isolated import/export/re-open
-controls and `character_fig_semantic_diff.py` for expanded-corner FIG comparison.
+Use `character_model_blender_fixture.py` for isolated import/export controls,
+`character_blend_scene_audit.py` for a read-only fresh-reopen scene audit, and
+`character_fig_semantic_diff.py` for expanded-corner FIG comparison.
 
 ## Manual edit procedure
 

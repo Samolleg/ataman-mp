@@ -8,6 +8,9 @@ Required environment variables:
 Optional:
   EI_FIXTURE_PROFILE   BASE or JMV; deterministically selects the import mode
   EI_FIXTURE_MODE      explicit VANILLA or JABAIS_VOUX override/provenance
+  EI_FIXTURE_MESH_MASK comma-separated modern-addon mesh include list
+  EI_FIXTURE_VISIBLE_COLLECTION isolate one morph collection in saved scenes
+  EI_FIXTURE_HIDE_OBJECTS comma-separated local object names to hide
   EI_FIXTURE_BLEND     save the imported inspection scene
   EI_FIXTURE_EXPORT    pre-created candidate RES; never the input path
 
@@ -207,7 +210,26 @@ try:
     if hasattr(scene, "item_container_set"):
         scene.item_container_set = mode
 
-    result = bpy.ops.object.model_import()
+    mesh_mask = os.environ.get("EI_FIXTURE_MESH_MASK")
+    import_args = {"mesh_mask": mesh_mask} if mesh_mask else {}
+    result = bpy.ops.object.model_import(**import_args)
+    visible_collection = os.environ.get("EI_FIXTURE_VISIBLE_COLLECTION")
+    if visible_collection:
+        if bpy.data.collections.get(visible_collection) is None:
+            raise RuntimeError(f"Visible collection was not imported: {visible_collection}")
+        for collection in bpy.data.collections:
+            collection.hide_viewport = collection.name != visible_collection
+            collection.hide_render = collection.name != visible_collection
+    hidden_names = {
+        name.strip() for name in os.environ.get("EI_FIXTURE_HIDE_OBJECTS", "").split(",")
+        if name.strip()
+    }
+    for name in hidden_names:
+        obj = bpy.data.objects.get(name)
+        if obj is None:
+            raise RuntimeError(f"Requested hidden object was not imported: {name}")
+        obj.hide_set(True)
+        obj.hide_render = True
     meshes = sorted(
         (mesh_record(obj) for obj in bpy.data.objects if obj.type == "MESH"),
         key=lambda item: item["name"],
@@ -218,9 +240,27 @@ try:
         "mesh_count": len(meshes),
         "collections": sorted(collection.name for collection in bpy.data.collections),
         "scene_mode": getattr(scene, "item_container_set", None),
+        "mesh_mask": mesh_mask,
+        "visible_collection": visible_collection,
+        "hidden_objects": sorted(hidden_names),
     }
     if "FINISHED" not in result or not meshes:
         raise RuntimeError(f"Model import did not produce meshes: {sorted(result)}")
+
+    scene_provenance = {
+        "schema": 1,
+        "source_res": str(source_res),
+        "source_res_sha256": report["input"]["sha256"],
+        "source_profile": source_profile,
+        "import_mode": mode,
+        "model": model_name,
+        "blender": bpy.app.version_string,
+        "warning": "Staged copied resources only; never export into a live game directory.",
+    }
+    scene["ei_pipeline_provenance_json"] = json.dumps(scene_provenance, sort_keys=True)
+    readme = bpy.data.texts.get("EI_PIPELINE_README") or bpy.data.texts.new("EI_PIPELINE_README")
+    readme.clear()
+    readme.write(json.dumps(scene_provenance, indent=2, sort_keys=True))
 
     edit_value = os.environ.get("EI_FIXTURE_EDIT")
     if edit_value:
