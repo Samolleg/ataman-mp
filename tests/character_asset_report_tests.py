@@ -26,7 +26,15 @@ class CharacterAssetReportTests(unittest.TestCase):
         self.assertEqual(parsed["triangle_count"], 1)
         self.assertEqual(parsed["dangling_indices"], [1])
         self.assertEqual(parsed["dangling_components"], [[1, 1, 0]])
+        self.assertEqual(parsed["repeated_vertex_triangle_count"], 1)
+        self.assertEqual(parsed["zero_area_base_triangle_count"], 1)
+        self.assertEqual(parsed["normal_stats"]["zero_count"], 4)
+        self.assertEqual(parsed["normal_stats"]["referenced_zero_count"], 3)
         self.assertEqual(parsed["diagnostics"][0]["code"], "FIG_INDEX_TAIL_NOT_A_TRIANGLE")
+        self.assertEqual(
+            [repair["operation"] for repair in parsed["safe_repairs"]],
+            ["drop_trailing_non_triangle_indices", "drop_repeated_vertex_triangles"],
+        )
 
     def test_lnk_tree_and_missing_parent(self):
         def text(value):

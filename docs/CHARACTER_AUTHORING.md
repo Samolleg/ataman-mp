@@ -11,7 +11,7 @@ installed add-ons, startup files, or candidate archives between them.
 | Lane | Blender/add-on | Primary assets | Export status |
 |---|---|---|---|
 | Item | Blender 3.5.1 + konstvest/ei_figer 5.2 plus the audited repository patch | Standalone inventory weapons, shields, armor and item/world figures | Primary item writer; require fresh re-open and semantic diff |
-| Humanoid/JMV | Blender 4.5.12 LTS (supported family 4.2-4.9) + alex-khod/ei_figer 6.10 at `a7eb929` | Humans, wearable assemblies, JMV hierarchy/UV rules; animations are secondary | Humanoid writer; experimental item writer only with the audited patch and fixtures |
+| Humanoid/JMV | Blender 4.5.12 LTS (supported family 4.2-4.9) + alex-khod/ei_figer 6.10 at `a7eb929` | Humans, wearable assemblies, JMV hierarchy/UV rules; animations are secondary | Humanoid writer; fixed-topology item edits validated only for the audited weapon/shield/armor fixtures |
 
 For **every import from copied JMV game resources**, select the add-on's literal
 `JABAIS_VOUX` option **before import**. This is the import setting, not merely an
@@ -85,34 +85,46 @@ isolates Blender config/scripts/datafiles under that lane.
 The modern add-on at upstream `a7eb929` needs
 `patches/alex-khod-ei_figer-6.10-character-pipeline.patch` for deterministic
 headless import, correct FIG normal decoding, incomplete-triangle tolerance,
-and semantically correct standalone-item bounds. The patch makes
+repeated-vertex degenerate-triangle filtering, and semantically correct
+standalone-item bounds. The patch makes
 UI context optional in background mode, restores Euclidean bounding radius,
 and applies the part-name bounds convention independently of model-level
 header/UV classification and maps archive-prefixed standalone BON members back
-to local Blender part names. It also assigns authored per-corner FIG normals as
-Blender split normals. Its validated research commit is `4d03453`. It does not
-claim general modern item-export support.
+to local Blender part names. It finalizes mesh topology before assigning Blender
+split normals, stores exact authored per-corner normals in the
+`ei_fig_authored_normal` corner attribute, and writes FIG normal indices from
+corner normals rather than averaged vertex normals. Its validated research
+commit is `2e068cf`. It does not claim general modern item-export support or
+topology-changing item edits.
 
 Current controls prove:
 
 - Blender 3.5.1 + 5.2 imports and exports `initwedg8`; its no-op changes normals
   by at most `1.82e-5`, while geometry, UV mapping, hierarchy and bounds agree;
 - patched Blender 4.5.12 + 6.10 imports the complete JMV `unhuma` tree in
-  `JABAIS_VOUX` mode (6,232 base/morph mesh objects in the control);
+  `JABAIS_VOUX` mode (6,232 base/morph mesh objects in the control). Finalizing
+  each mesh before the custom-normal setter removes the prior Blender-native
+  crash; the accepted stress report is
+  `unhuma-modern-full-import-split-normal-fix.json`;
 - the compact `unhuma`/armor24 inspection scene imports copied JMV data with a
   part mask, preserves authored atlas UVs and split normals across a fresh
   re-open, and records `JMV` -> `JABAIS_VOUX` plus the source RES hash in the
   scene. It has no composed material/atlas yet and is therefore a geometry/UV
-  inspection fixture, not a corrected textured demo. A full 6,232-object import
-  with the new custom-normal assignment crashed Blender 4.5.12 late in import;
-  that unresolved scalability/control failure must pass before the new normal
-  path is declared safe for complete-family imports;
+  inspection fixture, not the corrected textured demo described below;
 - patched 6.10 no-op exports of `initwedg8` and `initarhl21` preserve expanded
   per-corner position, normal and UV semantics and bounding volumes, while
   legally reindexing UV/component tables and appending replacement RES data.
+- patched 6.10 changed controls also pass fresh-process re-open: `initwedg8`
+  changes the selected vertex by `+0.01` X across its eight FIG extremes and no
+  corner normals/UVs; `initarhl21` changes exactly eight BON Z values by `+0.01`
+  and leaves the FIG semantically identical; `initwesd14` changes the selected
+  U by `0.0009765625`, preserves every remaining authored corner normal exactly,
+  and changes no remaining position;
 - JMV shield `initwesd14weapon.fig` contains 2,944 indices: 2,943 make 981
-  complete triangles and tail component index `877` is undrawable. The patched
-  5.2 no-op drops only that tail; all drawable corner positions, normal values,
+  complete triangle records, 39 of which repeat a vertex and have zero area;
+  tail component index `877` is also undrawable. Both patched importers omit
+  these renderer-undrawable records before Blender mesh construction. The
+  patched 5.2 no-op drops only that tail; all drawable corner positions, normal values,
   vertex references, and bounds remain exact. Sixty-four UV components round by
   at most `2.98e-8`. Against that repaired no-op, the controlled edit changes
   exactly one corner U by `0.0009765625`, changes no drawable position, normal,
@@ -131,6 +143,14 @@ the authored source normals deliberately; delete or replace that provenance only
 as part of an explicit normal-authoring operation, then validate lighting in a
 disposable game profile. Automatic normal regeneration is not yet an acceptance
 gate.
+
+The patched modern importer applies the same preservation policy through the
+`ei_fig_authored_normal` corner attribute. Same-corner-topology edits retain it.
+If topology editing introduces corners without authored normals, export fails
+closed; deliberately remove the attribute only to opt into Blender-generated
+corner normals, then perform a semantic diff and disposable-profile lighting
+test. Modern item export is therefore a verified secondary path for these three
+bounded controls, while Blender 3.5.1 + 5.2 remains the primary inventory lane.
 
 Use `character_model_blender_fixture.py` for isolated import/export controls,
 `character_blend_scene_audit.py` for a read-only fresh-reopen scene audit, and

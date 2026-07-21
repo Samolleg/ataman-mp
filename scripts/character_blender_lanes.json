@@ -32,7 +32,7 @@
         "source_url": "https://github.com/alex-khod/ei_figer",
         "version": "6.10",
         "upstream_commit": "a7eb929fe1d869f9d7c85249349335c1b399ff4b",
-        "validated_local_commit": "4d03453191466d02755af1eef219970ccb9ec89c",
+        "validated_local_commit": "2e068cf16eccfe3d3841306787aca8b970eaa979",
         "required_patch": "patches/alex-khod-ei_figer-6.10-character-pipeline.patch"
       },
       "import_modes": {
