@@ -56,6 +56,11 @@ public:
     bool canInstance() const { return !m_morphApplied; }
     quintptr meshIdentity() const { return quintptr(m_mesh.data()); }
     static void setCacheScope(const QString& scope);
+    // Final application shutdown can let the OpenGL context release all GPU
+    // objects in one operation. This avoids thousands of serialized driver
+    // deletes while the UI thread is closing. Normal map unloads must not use
+    // this path because their resources need to be reclaimed immediately.
+    static void deferGpuCleanupToContextDestruction();
     static int sharedMeshCount();
     static quint64 sharedMeshBytes();
 

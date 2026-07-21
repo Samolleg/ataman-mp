@@ -44,6 +44,16 @@ public:
 namespace {
 QHash<QByteArray, QWeakPointer<CSharedPartMesh>> s_meshCache;
 QString s_meshCacheScope;
+bool s_deferGpuCleanupToContextDestruction = false;
+
+// Intentionally process-lifetime storage. During final shutdown the context
+// releases the GPU objects in bulk; destroying wrappers individually first is
+// slower and has historically exercised fragile driver cleanup paths.
+QHash<quintptr, QSharedPointer<CSharedPartMesh>>& shutdownRetainedMeshes()
+{
+    static auto* meshes = new QHash<quintptr, QSharedPointer<CSharedPartMesh>>;
+    return *meshes;
+}
 
 struct ProgramLocations
 {
@@ -199,11 +209,18 @@ CPart::CPart(const CPart &part)
 
 CPart::~CPart()
 {
+    if(s_deferGpuCleanupToContextDestruction && m_mesh)
+        shutdownRetainedMeshes().insert(quintptr(m_mesh.data()), m_mesh);
 }
 
 void CPart::setCacheScope(const QString& scope)
 {
     s_meshCacheScope = scope.toLower();
+}
+
+void CPart::deferGpuCleanupToContextDestruction()
+{
+    s_deferGpuCleanupToContextDestruction = true;
 }
 
 int CPart::sharedMeshCount()

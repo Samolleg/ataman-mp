@@ -21,6 +21,7 @@
 #include <QDockWidget>
 #include <QFile>
 #include <QTimer>
+#include <QEventLoop>
 #include <QCheckBox>
 #include <QToolButton>
 #include <QComboBox>
@@ -4297,6 +4298,24 @@ void MainWindow::closeEvent(QCloseEvent *e)
     // Saving only from the destructor recorded every View panel as hidden.
     saveUiState();
     ei::closeSecondaryWindows(this);
+    // Remove the editor from the desktop before synchronous scene teardown.
+    // Windows otherwise presents a still-visible window as unresponsive.
+    hide();
+    QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+    // Destroy the QGLWidget while the main window and its native child surface
+    // are still alive. Waiting for MainWindow::~MainWindow() is too late on
+    // Windows: Qt has already released the surface even though CView::isValid()
+    // may still report true, and GPU-resource cleanup then dereferences a null
+    // QOpenGLContext surface.
+    ei::setCrashContext("shutdown/delete-live-view");
+    QElapsedTimer shutdownTimer;
+    shutdownTimer.start();
+    ei::log(eLogInfo, "Shutdown live view deletion started");
+    delete m_pView;
+    m_pView = nullptr;
+    ei::log(eLogInfo, QString("Shutdown live view deletion complete elapsedMs:%1")
+            .arg(shutdownTimer.elapsed()));
+    ei::setCrashContext("shutdown/view-deleted");
     e->accept();
 }
 

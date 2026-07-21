@@ -103,6 +103,8 @@ void CView::updateReadState(EReadState state)
 
 CView::~CView()
 {
+    QElapsedTimer shutdownTimer;
+    shutdownTimer.start();
 //    for(auto& param : m_arrParamWindow)
 //    {
 //        param->close();
@@ -146,10 +148,22 @@ CView::~CView()
     RenderQueueContext::instance().releaseGpuResources();
     ei::setCrashContext("shutdown/view-mobs");
 
+    const int meshCount = CPart::sharedMeshCount();
+    const quint64 meshBytes = CPart::sharedMeshBytes();
+    CPart::deferGpuCleanupToContextDestruction();
+    ei::log(eLogInfo, QString("Shutdown scene teardown started mobs:%1 sharedMeshes:%2 sharedMeshBytes:%3")
+            .arg(m_aMob.size()).arg(meshCount).arg(meshBytes));
+
     for(auto& mob: m_aMob)
     {
+        QElapsedTimer mobTimer;
+        mobTimer.start();
+        const QString mobName = mob ? mob->mobName() : QStringLiteral("<null>");
+        const int nodeCount = mob ? mob->nodes().size() : 0;
         m_scriptWorkspaces->unregisterMob(mob);
         delete mob;
+        ei::log(eLogInfo, QString("Shutdown MOB teardown name:%1 nodes:%2 elapsedMs:%3")
+                .arg(mobName).arg(nodeCount).arg(mobTimer.elapsed()));
     }
     if(isValid() && !m_testEntranceLabelTextures.isEmpty())
     {
@@ -169,6 +183,8 @@ CView::~CView()
     // destroyed after this destructor body and before QGLWidget tears down the
     // context itself.
     ei::setCrashContext("shutdown/view-members");
+    ei::log(eLogInfo, QString("Shutdown view teardown body complete elapsedMs:%1")
+            .arg(shutdownTimer.elapsed()));
 }
 
 
