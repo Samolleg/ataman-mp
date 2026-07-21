@@ -2572,6 +2572,41 @@ void MainWindow::applyMobFamilyValidationReport(const CMobFamilyValidationReport
     elapsed.start();
     const QByteArray previousDigest = m_familyValidation.findingDigest();
     m_familyValidation = report;
+    // Visual providers resolve against live profile/database/resource state on
+    // the GUI-owned unit projection. Surface their fail-closed diagnostics in
+    // the same navigable validation report without repeating that work in the
+    // background structural validator.
+    if(m_pView)
+    {
+        for(CMob* mob : m_pView->mobs())
+        {
+            if(!mob)
+                continue;
+            const QString mobPath = mob->filePath().absoluteFilePath();
+            for(CNode* node : mob->nodes())
+            {
+                CUnit* unit = dynamic_cast<CUnit*>(node);
+                if(!unit)
+                    continue;
+                for(const QString& diagnostic : unit->visualDiagnostics())
+                {
+                    SMobFamilyFinding finding;
+                    finding.severity = EMobFamilyFindingSeverity::Warning;
+                    finding.code = "visual.profile_incompatible";
+                    finding.category = tr("Unit visual");
+                    finding.message = tr("NID %1 (%2): %3")
+                        .arg(unit->mapId())
+                        .arg(unit->databaseName().isEmpty() ? tr("unnamed prototype")
+                                                            : unit->databaseName(),
+                             diagnostic);
+                    finding.locations.append(mobPath);
+                    finding.nid = unit->mapId();
+                    finding.hasNid = true;
+                    m_familyValidation.findings.append(finding);
+                }
+            }
+        }
+    }
     m_validationFindingLimit = 250;
     const QByteArray currentDigest = m_familyValidation.findingDigest();
     if(previousDigest != currentDigest)

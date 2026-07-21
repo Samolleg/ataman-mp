@@ -185,6 +185,7 @@ void CUnit::refreshTransientVisual()
         return;
     m_resolvedDatabaseGeneration = generation;
     m_resolvedVisualRevision = m_visualRevision;
+    m_visualDiagnostics.clear();
     const auto database = context.current();
     static ProfileVisualProviderService providers;
     QString diagnostic;
@@ -194,6 +195,7 @@ void CUnit::refreshTransientVisual()
         context.providerForRole("equipmentLayout"), database, &diagnostic);
     if(appearanceResolver.isNull() || equipmentResolver.isNull())
     {
+        m_visualDiagnostics.append("provider.unavailable: " + diagnostic);
         ei::log(eLogWarning, "Unit visual provider unavailable: " + diagnostic);
         applyTransientVisual("cannotdisplay", "default", {}, QVector3D(1, 1, 1));
         m_resolvedAnimationModel.clear(); m_resolvedAnimationWeapons.clear();
@@ -215,6 +217,7 @@ void CUnit::refreshTransientVisual()
     const SRuntimeProviderResult appearanceResult = appearanceResolver->resolve(appearanceRequest, &appearance);
     if(!appearanceResult.success)
     {
+        m_visualDiagnostics.append(appearanceResult.code + ": " + appearanceResult.message);
         ei::log(eLogWarning, QString("Unit %1 appearance placeholder [%2]: %3")
                 .arg(m_prototypeName, appearanceResult.code, appearanceResult.message));
         applyTransientVisual("cannotdisplay", "default", {}, QVector3D(1, 1, 1));
@@ -302,10 +305,17 @@ void CUnit::refreshTransientVisual()
         if(!visibleParts.contains(component, Qt::CaseInsensitive))
             visibleParts.append(component);
     for(const QJsonValue& finding : equipment.value("diagnostics").toArray())
-        ei::log(eLogWarning, QString("Unit %1 equipment: %2").arg(m_prototypeName, finding.toString()));
+    {
+        const QString text = finding.toString();
+        m_visualDiagnostics.append("equipment: " + text);
+        ei::log(eLogWarning, QString("Unit %1 equipment: %2").arg(m_prototypeName, text));
+    }
     if(!equipmentResult.success && equipment.value("placeholders").toArray().isEmpty())
+    {
+        m_visualDiagnostics.append(equipmentResult.code + ": " + equipmentResult.message);
         ei::log(eLogWarning, QString("Unit %1 equipment [%2]: %3")
                 .arg(m_prototypeName, equipmentResult.code, equipmentResult.message));
+    }
     QMap<QString, QString> componentTextures;
     const QJsonObject textureObject = equipment.value("componentTextures").toObject();
     for(auto it = textureObject.constBegin(); it != textureObject.constEnd(); ++it)

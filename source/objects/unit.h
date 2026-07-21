@@ -200,6 +200,7 @@ public:
     const QString& renderedPrimaryTextureName() const { return m_renderedPrimaryTextureName; }
     const QString& renderedSecondaryTextureName() const { return m_renderedSecondaryTextureName; }
     const QStringList& renderedBodyTextureLayers() const { return m_renderedBodyTextureLayers; }
+    const QStringList& visualDiagnostics() const { return m_visualDiagnostics; }
     void preloadVisualResources();
     bool updatePos(QVector3D& pos) override;
     QJsonObject toJson() override;
@@ -251,6 +252,7 @@ private:
     QString m_renderedPrimaryTextureName;
     QString m_renderedSecondaryTextureName;
     QStringList m_renderedBodyTextureLayers;
+    QStringList m_visualDiagnostics;
 };
 
 #endif // UNIT_H
