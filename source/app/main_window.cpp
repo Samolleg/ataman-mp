@@ -857,10 +857,19 @@ MainWindow::MainWindow(QWidget* parent) :
             [this](int) { scheduleMobFamilyValidation(2500); });
     initShortcuts();
     connect(m_settings.get(), &CSettings::shortcutsChanged, this, &MainWindow::initShortcuts);
-    connect(m_settings.get(), &CSettings::shortcutsChanged,
-            this, &MainWindow::configureAutosaveTimer);
     m_autosaveTimer = new QTimer(this);
+    m_autosaveTimer->setTimerType(Qt::PreciseTimer);
     connect(m_autosaveTimer, &QTimer::timeout, this, &MainWindow::performAutosave);
+    connect(m_settings.get(), &CSettings::settingsApplied,
+            this, &MainWindow::configureAutosaveTimer);
+    connect(m_settings.get(), &CSettings::autosaveRequested,
+            this, &MainWindow::performAutosave);
+    connect(m_settings.get(), &CSettings::backupFolderRequested, this, [this]()
+    {
+        QString error;
+        if(!CBackupManager::openBackupFolder(&error))
+            QMessageBox::warning(this, tr("Endurance backups"), error);
+    });
     configureAutosaveTimer();
     m_ui->action_Mob_parameters->setEnabled(false);
     m_ui->actionOpen_MOB_Script->setEnabled(false);
@@ -3534,11 +3543,15 @@ void MainWindow::configureAutosaveTimer()
     }
     const int minutes = interval ? qBound(1, interval->value(), 120) : 5;
     m_autosaveTimer->start(minutes * 60 * 1000);
-    ei::log(eLogInfo, QString("Periodic recovery autosave enabled intervalMinutes:%1").arg(minutes));
+    ei::log(eLogInfo, QString("Periodic recovery autosave scheduled intervalMinutes:%1 active:%2 remainingMs:%3")
+            .arg(minutes).arg(m_autosaveTimer->isActive()).arg(m_autosaveTimer->remainingTime()));
 }
 
 void MainWindow::performAutosave()
 {
+    ei::log(eLogInfo, QString("Recovery autosave tick active:%1 intervalMs:%2")
+            .arg(m_autosaveTimer && m_autosaveTimer->isActive())
+            .arg(m_autosaveTimer ? m_autosaveTimer->interval() : -1));
     if(!m_pView || m_pView->hasPendingOperation())
     {
         ei::log(eLogInfo, "Recovery autosave deferred while an edit operation is pending");

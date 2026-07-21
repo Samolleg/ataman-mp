@@ -64,6 +64,17 @@ CSettings::CSettings(QWidget *parent) :
     autosaveInterval->setToolTip(autosaveIntervalLabel->toolTip());
     ui->gridLayout->addWidget(autosaveIntervalLabel, 10, 0);
     ui->gridLayout->addWidget(autosaveInterval, 10, 1);
+    QPushButton* autosaveNow = new QPushButton(tr("Autosave Now"), ui->tabGeneral);
+    autosaveNow->setToolTip(tr("Immediately create recovery generations for all dirty documents."));
+    QPushButton* openBackupFolder = new QPushButton(tr("Open Backup Folder"), ui->tabGeneral);
+    openBackupFolder->setToolTip(tr("Open the Endurance folder containing automatic and pre-save backups."));
+    QHBoxLayout* autosaveActions = new QHBoxLayout;
+    autosaveActions->addWidget(autosaveNow);
+    autosaveActions->addWidget(openBackupFolder);
+    autosaveActions->addStretch(1);
+    ui->gridLayout->addLayout(autosaveActions, 11, 0, 1, 2);
+    connect(autosaveNow, &QPushButton::clicked, this, &CSettings::autosaveRequested);
+    connect(openBackupFolder, &QPushButton::clicked, this, &CSettings::backupFolderRequested);
     connect(browseEditor, &QPushButton::clicked, this, [this, editorPath]()
     {
         const QString selected = QFileDialog::getOpenFileName(this,
@@ -658,6 +669,7 @@ void CSettings::on_buttonApply_clicked()
 {
     updateOptFromUi();
     emit shortcutsChanged();
+    emit settingsApplied();
     onClose();
 }
 

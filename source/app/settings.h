@@ -53,6 +53,9 @@ public Q_SLOTS:
 
 signals:
     void shortcutsChanged();
+    void settingsApplied();
+    void autosaveRequested();
+    void backupFolderRequested();
 
 private slots:
     void on_buttonApply_clicked();

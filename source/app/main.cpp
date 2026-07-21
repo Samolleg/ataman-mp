@@ -527,6 +527,7 @@ int runHeadlessCommand(QApplication& app)
         bool settingsTabsUsable = false;
         bool settingsShortcutsPersist = false;
         bool autosaveSettingsPersist = false;
+        bool settingsApplySignal = false;
         {
             const QString previousDirectory = QDir::currentPath();
             QTemporaryDir settingsDirectory;
@@ -534,6 +535,8 @@ int runHeadlessCommand(QApplication& app)
                 QDir::setCurrent(settingsDirectory.path());
             {
                 CSettings settingsWindow(&primaryWindow);
+                QObject::connect(&settingsWindow, &CSettings::settingsApplied,
+                                 [&settingsApplySignal]() { settingsApplySignal = true; });
                 QTabWidget* settingsTabs = settingsWindow.findChild<QTabWidget*>("tabWidget");
                 if(settingsTabs && settingsTabs->count() > 1)
                 {
@@ -614,7 +617,7 @@ int runHeadlessCommand(QApplication& app)
 
         const bool passed = prefixesOnly && valueStable && focusCancel && escapeCancel
                 && enterCommit && clickCommit && settingsTabsUsable && settingsShortcutsPersist
-                && autosaveSettingsPersist
+                && autosaveSettingsPersist && settingsApplySignal
                 && secondaryWindowsClosed
                 && pasteSingleAction && pasteUndoAtomic && pasteRedoAtomic
                 && incompatiblePasteBlocked && compatiblePasteImmediate
@@ -635,6 +638,7 @@ int runHeadlessCommand(QApplication& app)
                << " settingsTabsUsable=" << settingsTabsUsable
                << " settingsShortcutsPersist=" << settingsShortcutsPersist
                << " autosaveSettingsPersist=" << autosaveSettingsPersist
+               << " settingsApplySignal=" << settingsApplySignal
                << " secondaryWindowsClosed=" << secondaryWindowsClosed
                << " pasteSingleAction=" << pasteSingleAction
                << " pasteUndoAtomic=" << pasteUndoAtomic
