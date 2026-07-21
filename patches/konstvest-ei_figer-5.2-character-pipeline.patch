@@ -86,6 +86,18 @@ index a8b7bdf..41be3ea 100644
 -            self.m_c.append(tuple([i, i]))
 \ No newline at end of file
 +            self.m_c.append(tuple([i, i]))
+diff --git a/operators.py b/operators.py
+--- a/operators.py
++++ b/operators.py
+@@ -280,4 +280,8 @@ class CImport_OP_operator(bpy.types.Operator):
+                     if (part + '.bon') in resFile.get_filename_list():
+                         read_bone(resFile, part + '.bon')
++                        # Standalone LNK members are archive-prefixed, while
++                        # their Blender objects use the local part name.
++                        local_part = part[len(model_name):] if part.startswith(model_name) else part
++                        active_model.pos_list[-1].name = local_part
+                     else:
+                         print(part + '.bon not found')
 diff --git a/scene_utils.py b/scene_utils.py
 index a4391b4..9bc6822 100644
 --- a/scene_utils.py
@@ -257,4 +269,3 @@ index a4391b4..9bc6822 100644
 -    pass
 \ No newline at end of file
 +    pass
-

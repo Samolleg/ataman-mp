@@ -16,7 +16,7 @@ index cfdecb2..dbd9e1c 100644
 +        ).transpose(0, 2, 1).reshape(n_normals, 4)
          # TEXTURE COORDS
 diff --git a/scene_utils.py b/scene_utils.py
-index d1e502e..2d8836e 100644
+index d1e502e..a893e47 100644
 --- a/scene_utils.py
 +++ b/scene_utils.py
 @@ -49,6 +49,14 @@ class TemporaryContext:
@@ -42,23 +42,28 @@ index d1e502e..2d8836e 100644
 +        if self.area is not None and self.prev_ui is not None:
 +            self.area.ui_type = self.prev_ui
  
-@@ -511,2 +520,5 @@ def create_mesh_2(figure: CFigure, model_group: CItemGroup):
+@@ -226,2 +235,4 @@ def import_lnk_fig_bon_files(res_file, model_name, include_meshes=None):
+             read_bone(res_file, part + '.bon')
++            local_part = part[len(model_name):] if part.startswith(model_name) else part
++            active_model.pos_list[-1].name = local_part
+         else:
+@@ -511,2 +522,5 @@ def create_mesh_2(figure: CFigure, model_group: CItemGroup):
      n_indices = figure.header[3] - figure.header[3] % 3
 +    if n_indices != figure.header[3]:
 +        print('ignoring %d trailing non-triangle FIG indices in %s' %
 +              (figure.header[3] - n_indices, figure.name))
  
-@@ -531,3 +543,3 @@ def create_mesh_2(figure: CFigure, model_group: CItemGroup):
+@@ -531,3 +545,3 @@ def create_mesh_2(figure: CFigure, model_group: CItemGroup):
      uvs = mesh_uvs[uv_indices]
 -    assert len(uvs) == figure.header[3]
 +    assert len(uvs) == n_indices
      uvs_flat = uvs.flatten()
-@@ -897,3 +909,3 @@ class ModelExporter:
+@@ -897,3 +911,3 @@ class ModelExporter:
          # RADIUS
 -        figure.radius.append((((max_m - min_m) ** 2).sum() ** 1 / 2) / 2)
 +        figure.radius.append(np.sqrt(((max_m - min_m) ** 2).sum()) / 2)
          # CENTER
-@@ -945,3 +957,7 @@ class ModelExporter:
+@@ -945,3 +959,7 @@ class ModelExporter:
                  morph_components = len(vertices)
 -                ModelExporter.calculate_figure_bounds_np(figure, vertices, export_group)
 +                # Bounds historically follow the mesh-name group, independently
@@ -67,7 +72,7 @@ index d1e502e..2d8836e 100644
 +                # "weapon" and therefore uses centered world-object bounds.
 +                ModelExporter.calculate_figure_bounds_np(figure, vertices, mesh_group)
                  vertices_aligned_4 = ModelExporter.align_length_by_4_np(vertices)
-@@ -1854,2 +1870,2 @@ def animation_from_res(collection_dst: str, res_file: ResFile, model_name: str,
+@@ -1854,2 +1872,2 @@ def animation_from_res(collection_dst: str, res_file: ResFile, model_name: str,
      insert_animation(collection_dst, animations)
 -    bpy.context.scene.frame_set(0)
 \ No newline at end of file

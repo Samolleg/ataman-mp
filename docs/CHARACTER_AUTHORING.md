@@ -88,7 +88,8 @@ headless import, correct FIG normal decoding, incomplete-triangle tolerance,
 and semantically correct standalone-item bounds. The patch makes
 UI context optional in background mode, restores Euclidean bounding radius,
 and applies the part-name bounds convention independently of model-level
-header/UV classification. Its validated research commit is `3efbe9a`. It does
+header/UV classification and maps archive-prefixed standalone BON members back
+to local Blender part names. Its validated research commit is `5a5084f`. It does
 not claim general modern item-export support.
 
 Current controls prove:
@@ -107,6 +108,12 @@ Current controls prove:
   at most `2.98e-8`. Against that repaired no-op, the controlled edit changes
   exactly one corner U by `0.0009765625`, changes no drawable position, normal,
   topology, or bound, and survives a fresh Blender re-open with matching hashes.
+- JMV armor `initarhl21` attachment control moves local part `armor` by `0.01`
+  on Z. Export changes exactly the Z coordinate in all eight 96-byte BON morph
+  positions; FIG mesh hashes remain unchanged, and a fresh patched 5.2 import
+  restores `0.009999999776482582`. Stock 5.2 silently left the object at zero
+  because it tried to apply archive name `initarhl21armor` to local object
+  `armor`; both repository patches correct that standalone-name mapping.
 
 The patched 5.2 importer stores the original normal table and per-corner normal
 indices in `ei_fig_normal_table_json` and `ei_fig_normal_index`. Keep those for
