@@ -9,6 +9,8 @@
 #include <QRandomGenerator>
 #include <QMessageBox>
 #include <QCryptographicHash>
+#include <QOpenGLFramebufferObject>
+#include <cstddef>
 
 #include "view.h"
 #include "render_scheduling.h"
@@ -40,12 +42,38 @@
 #include "view_frustum.h"
 #include "render_performance.h"
 #include "render_queue.h"
+#include "render_environment.h"
 #include "part.h"
+#include "objects/light.h"
 #include "external_script_workspace.h"
 #include "mob_script_window.h"
 #include "script_reference_analyzer.h"
 
 class CLogic;
+
+namespace {
+struct SSkyVertex
+{
+    QVector3D position;
+    QVector2D texture;
+};
+
+const SSkyVertex kSkyVertices[] = {
+    {{ 1,-1,-1},{0,0}},{{ 1, 1,-1},{1,0}},{{ 1, 1, 1},{1,1}},{{ 1,-1,-1},{0,0}},{{ 1, 1, 1},{1,1}},{{ 1,-1, 1},{0,1}},
+    {{-1, 1,-1},{0,0}},{{-1,-1,-1},{1,0}},{{-1,-1, 1},{1,1}},{{-1, 1,-1},{0,0}},{{-1,-1, 1},{1,1}},{{-1, 1, 1},{0,1}},
+    {{ 1, 1,-1},{0,0}},{{-1, 1,-1},{1,0}},{{-1, 1, 1},{1,1}},{{ 1, 1,-1},{0,0}},{{-1, 1, 1},{1,1}},{{ 1, 1, 1},{0,1}},
+    {{-1,-1,-1},{0,0}},{{ 1,-1,-1},{1,0}},{{ 1,-1, 1},{1,1}},{{-1,-1,-1},{0,0}},{{ 1,-1, 1},{1,1}},{{-1,-1, 1},{0,1}},
+    {{-1,-1, 1},{0,0}},{{ 1,-1, 1},{1,0}},{{ 1, 1, 1},{1,1}},{{-1,-1, 1},{0,0}},{{ 1, 1, 1},{1,1}},{{-1, 1, 1},{0,1}},
+    {{-1, 1,-1},{0,0}},{{ 1, 1,-1},{1,0}},{{ 1,-1,-1},{1,1}},{{-1, 1,-1},{0,0}},{{ 1,-1,-1},{1,1}},{{-1,-1,-1},{0,1}}
+};
+
+void showDuplicateIdWarning(QWidget* parent, const QVector<uint>& duplicates)
+{
+    if(!duplicates.isEmpty())
+        QMessageBox::warning(parent, "Duplicate object IDs",
+            ei::duplicateIdWarningText(duplicates));
+}
+}
 
 CView::CView(QWidget *parent, const QGLWidget *pShareWidget) : QGLWidget(parent, pShareWidget)
   ,m_gpuTimer(nullptr)
@@ -146,6 +174,12 @@ CView::~CView()
         m_gpuTimerPending = false;
     }
     RenderQueueContext::instance().releaseGpuResources();
+    if(m_skyBuffer.isCreated())
+        m_skyBuffer.destroy();
+    delete m_shadowFbo;
+    m_shadowFbo = nullptr;
+    delete m_dynamicShadowFbo;
+    m_dynamicShadowFbo = nullptr;
     ei::setCrashContext("shutdown/view-mobs");
 
     const int meshCount = CPart::sharedMeshCount();
@@ -250,6 +284,8 @@ void CView::refreshAfterResourceSetup()
     CObjectList::getInstance()->refreshConfiguredSources();
     CTextureList::getInstance()->refreshConfiguredSources();
     m_spatialIndexDirty = true;
+    m_skyResourcesChecked = false;
+    m_staticShadowFingerprint.clear();
     updateGeometry();
     if(width() > 0 && height() > 0)
         resizeGL(width(), height());
@@ -380,6 +416,22 @@ void CView::initShaders()
     m_landProgram.setUniformValue("u_lightColor", QVector4D(1.0, 1.0, 1.0, 1.0));
     m_landProgram.setUniformValue("u_highlight", false);
 
+    if(!m_skyProgram.addShaderFromSourceFile(QOpenGLShader::Vertex, ":/skybox.vsh"))
+        close();
+    if(!m_skyProgram.addShaderFromSourceFile(QOpenGLShader::Fragment, ":/skybox.fsh"))
+        close();
+    if(!m_skyProgram.link())
+        close();
+    m_skyProgram.bind();
+    m_skyProgram.setUniformValue("qt_Texture0", 0);
+
+    if(!m_shadowProgram.addShaderFromSourceFile(QOpenGLShader::Vertex, ":/vshader.vsh"))
+        close();
+    if(!m_shadowProgram.addShaderFromSourceFile(QOpenGLShader::Fragment, ":/shadow.fsh"))
+        close();
+    if(!m_shadowProgram.link())
+        close();
+
 
     // Compile select shader
     if (!m_selectProgram.addShaderFromSourceFile(QOpenGLShader::Vertex, ":/vshader.vsh"))
@@ -407,6 +459,25 @@ void CView::initializeGL()
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     initShaders();
+    m_skyBuffer.create();
+    m_skyBuffer.setUsagePattern(QOpenGLBuffer::StaticDraw);
+    m_skyBuffer.bind();
+    m_skyBuffer.allocate(kSkyVertices, int(sizeof(kSkyVertices)));
+    m_skyBuffer.release();
+    QOpenGLFramebufferObjectFormat shadowFormat;
+    shadowFormat.setAttachment(QOpenGLFramebufferObject::Depth);
+    shadowFormat.setInternalTextureFormat(GL_RGBA8);
+    m_shadowFbo = new QOpenGLFramebufferObject(2048, 2048, shadowFormat);
+    m_dynamicShadowFbo = new QOpenGLFramebufferObject(2048, 2048, shadowFormat);
+    if(!m_shadowFbo->isValid() || !m_dynamicShadowFbo->isValid())
+    {
+        ei::log(eLogWarning, "Shadow framebuffer is unavailable; shadow rendering disabled");
+        delete m_shadowFbo;
+        m_shadowFbo = nullptr;
+        delete m_dynamicShadowFbo;
+        m_dynamicShadowFbo = nullptr;
+    }
+    m_shadowUpdateTimer.start();
     checkOpenGlError();
 
     CTextureList::getInstance()->initResource();
@@ -437,6 +508,198 @@ void CView::resizeGL(int width, int height)
     //glOrtho(-2, +2, -2, +2, -2.0, 2.0);   // draw objects in orthogaphic view
     //glFrustum (-2.0, 2.0, -2.0, 2.0, 1.5, 20.0); //convert project matrix to perpective view
     //doneCurrent();
+}
+
+void CView::drawSkybox(const QMatrix4x4& cameraMatrix,
+                       const ei::SRenderEnvironment& environment)
+{
+    if(!m_skyBuffer.isCreated() || !m_skyProgram.bind())
+        return;
+    static const char* textureNames[6] = {
+        "sky00", "sky02", "sky03", "sky05", "sky04", "sky01"
+    };
+    QOpenGLTexture* textures[6] = {};
+    QOpenGLTexture* fallback = CTextureList::getInstance()->textureDefault();
+    bool complete = true;
+    for(int face = 0; face < 6; ++face)
+    {
+        textures[face] = CTextureList::getInstance()->texture(textureNames[face]);
+        complete = complete && textures[face] && textures[face] != fallback;
+    }
+    if(!m_skyResourcesChecked || complete != m_skyResourcesAvailable)
+    {
+        m_skyResourcesChecked = true;
+        m_skyResourcesAvailable = complete;
+        ei::log(complete ? eLogInfo : eLogWarning,
+                complete
+                    ? "Profile skybox resources resolved: sky00-sky05"
+                    : "Profile skybox is incomplete; disabling the sky pass");
+    }
+    if(!complete)
+        return;
+
+    QMatrix4x4 skyView = cameraMatrix;
+    skyView(0, 3) = 0.0f;
+    skyView(1, 3) = 0.0f;
+    skyView(2, 3) = 0.0f;
+    m_skyProgram.setUniformValue("u_viewMmatrix", skyView);
+    m_skyProgram.setUniformValue("u_projMmatrix", m_projection);
+    const float tintStrength = qBound(0.3f,
+        environment.ambientStrength + environment.sunStrength, 1.0f);
+    m_skyProgram.setUniformValue("u_tint", environment.sunColor * tintStrength);
+
+    glDepthMask(GL_FALSE);
+    glDepthFunc(GL_LEQUAL);
+    glDisable(GL_BLEND);
+    glDisable(GL_ALPHA_TEST);
+    m_skyBuffer.bind();
+    const int position = m_skyProgram.attributeLocation("a_position");
+    const int texture = m_skyProgram.attributeLocation("a_texture");
+    m_skyProgram.enableAttributeArray(position);
+    m_skyProgram.setAttributeBuffer(position, GL_FLOAT,
+        int(offsetof(SSkyVertex, position)), 3, int(sizeof(SSkyVertex)));
+    m_skyProgram.enableAttributeArray(texture);
+    m_skyProgram.setAttributeBuffer(texture, GL_FLOAT,
+        int(offsetof(SSkyVertex, texture)), 2, int(sizeof(SSkyVertex)));
+    for(int face = 0; face < 6; ++face)
+    {
+        textures[face]->bind(0);
+        glDrawArrays(GL_TRIANGLES, face * 6, 6);
+    }
+    m_skyBuffer.release();
+    glDepthMask(GL_TRUE);
+    glDepthFunc(GL_LESS);
+    glEnable(GL_ALPHA_TEST);
+    glEnable(GL_BLEND);
+}
+
+void CView::applyEnvironmentUniforms(QOpenGLShaderProgram& program,
+                                     const ei::SRenderEnvironment& environment,
+                                     const QVector<CLight*>& lights,
+                                     bool enabled, bool fogEnabled)
+{
+    program.setUniformValue("u_environmentEnabled", enabled);
+    program.setUniformValue("u_fogEnabled", enabled && fogEnabled);
+    program.setUniformValue("u_ambientStrength", environment.ambientStrength);
+    program.setUniformValue("u_sunStrength", environment.sunStrength);
+    program.setUniformValue("u_sunDirection", environment.sunDirection);
+    program.setUniformValue("u_sunColor", environment.sunColor);
+    program.setUniformValue("u_fogColor", environment.fogColor);
+    program.setUniformValue("u_fogStart", environment.fogStart);
+    program.setUniformValue("u_fogEnd", environment.fogEnd);
+
+    QVector4D positionRange[4];
+    QVector3D colors[4];
+    const int count = qMin(4, lights.size());
+    for(int index = 0; index < count; ++index)
+    {
+        CLight* light = lights.at(index);
+        const QVector3D position = light->drawPosition().isNull()
+            ? light->position() : light->drawPosition();
+        positionRange[index] = QVector4D(position, qMax(0.001f, light->range()));
+        QVector3D color = light->lightColor();
+        const float maximum = qMax(color.x(), qMax(color.y(), color.z()));
+        if(maximum > 1.01f)
+            color /= 255.0f;
+        colors[index] = color;
+    }
+    program.setUniformValue("u_pointLightCount", enabled ? count : 0);
+    if(count > 0)
+    {
+        program.setUniformValueArray("u_pointLightPositionRange", positionRange, count);
+        program.setUniformValueArray("u_pointLightColor", colors, count);
+    }
+}
+
+bool CView::renderShadowMap(const QVector3D& cameraPosition,
+                            const ei::SRenderEnvironment& environment,
+                            RenderQueueContext& queue,
+                            const CViewFrustum* frustum)
+{
+    if(!m_shadowFbo || !m_dynamicShadowFbo
+            || !m_shadowFbo->isValid() || !m_dynamicShadowFbo->isValid())
+        return false;
+
+    // Keep the coverage stable while the camera moves inside one map sector;
+    // otherwise an otherwise reusable static map would be invalidated every frame.
+    const QVector3D focus(qFloor(cameraPosition.x() / 32.0f) * 32.0f,
+                          qFloor(cameraPosition.y() / 32.0f) * 32.0f, 20.0f);
+    QVector3D up(0.0f, 0.0f, 1.0f);
+    if(qAbs(QVector3D::dotProduct(environment.sunDirection.normalized(), up)) > 0.96f)
+        up = QVector3D(0.0f, 1.0f, 0.0f);
+    QMatrix4x4 lightView;
+    lightView.lookAt(focus - environment.sunDirection.normalized() * 420.0f,
+                     focus, up);
+    QMatrix4x4 lightProjection;
+    lightProjection.ortho(-360.0f, 360.0f, -360.0f, 360.0f, 1.0f, 900.0f);
+    m_lightSpaceMatrix = lightProjection * lightView;
+
+    QCryptographicHash staticHash(QCryptographicHash::Sha256);
+    staticHash.addData(queue.staticShadowFingerprint());
+    staticHash.addData(sceneSourceFingerprint().toUtf8());
+    staticHash.addData(reinterpret_cast<const char*>(m_lightSpaceMatrix.constData()),
+                       16 * int(sizeof(float)));
+    const QByteArray staticFingerprint = staticHash.result();
+    const bool rebuildStatic = staticFingerprint != m_staticShadowFingerprint;
+    const bool rebuildDynamic = !m_shadowInitialized || m_shadowUpdateTimer.elapsed() >= 66;
+    if(!rebuildStatic && !rebuildDynamic)
+        return true;
+
+    glDisable(GL_BLEND);
+    glDisable(GL_ALPHA_TEST);
+    const auto beginTarget = [&](QOpenGLFramebufferObject* target)
+    {
+        target->bind();
+        glViewport(0, 0, target->width(), target->height());
+        glClearColor(1.0f, 1.0f, 1.0f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        m_shadowProgram.bind();
+        m_shadowProgram.setUniformValue("u_projMmatrix", lightProjection);
+        m_shadowProgram.setUniformValue("u_viewMmatrix", lightView);
+        m_shadowProgram.setUniformValue("u_instanced", false);
+    };
+    if(rebuildStatic)
+    {
+        beginTarget(m_shadowFbo);
+        if(m_pLand && m_pLand->isMprLoad() && m_bDrawLand)
+            m_pLand->draw(&m_shadowProgram, frustum);
+        queue.flushShadow(&m_shadowProgram, false, true);
+        m_shadowFbo->release();
+        m_staticShadowFingerprint = staticFingerprint;
+    }
+    if(rebuildDynamic)
+    {
+        beginTarget(m_dynamicShadowFbo);
+        queue.flushShadow(&m_shadowProgram, true, false);
+        m_dynamicShadowFbo->release();
+        m_shadowUpdateTimer.restart();
+    }
+    m_shadowInitialized = true;
+    glViewport(0, 0, m_width, m_height);
+    qglClearColor(Qt::black);
+    glEnable(GL_ALPHA_TEST);
+    glEnable(GL_BLEND);
+    return true;
+}
+
+void CView::applyShadowUniforms(QOpenGLShaderProgram& program, bool enabled)
+{
+    const bool available = enabled && m_shadowFbo && m_dynamicShadowFbo
+        && m_shadowFbo->isValid() && m_dynamicShadowFbo->isValid()
+        && m_shadowInitialized;
+    program.setUniformValue("u_shadowsEnabled", available);
+    program.setUniformValue("u_lightSpaceMatrix", m_lightSpaceMatrix);
+    program.setUniformValue("u_staticShadowMap", 1);
+    program.setUniformValue("u_dynamicShadowMap", 2);
+    if(available)
+    {
+        QOpenGLFunctions* functions = QOpenGLContext::currentContext()->functions();
+        functions->glActiveTexture(GL_TEXTURE1);
+        glBindTexture(GL_TEXTURE_2D, m_shadowFbo->texture());
+        functions->glActiveTexture(GL_TEXTURE2);
+        glBindTexture(GL_TEXTURE_2D, m_dynamicShadowFbo->texture());
+        functions->glActiveTexture(GL_TEXTURE0);
+    }
 }
 
 void CView::paintGL()
@@ -710,6 +973,42 @@ void CView::draw()
     const bool drawHelp = drawHelpOption && drawHelpOption->value();
     const bool logicMode = CScene::getInstance()->getMode() == eEditModeLogic;
     const bool traverseHelpers = drawLogic || drawHelp || logicMode;
+    const auto renderBool = [this](const char* name, bool fallback)
+    {
+        const COptBool* option = m_pSettings
+            ? dynamic_cast<const COptBool*>(m_pSettings->opt(name)) : nullptr;
+        return option ? option->value() : fallback;
+    };
+    const bool environmentEnabled = renderBool("environmentLighting", true);
+    const bool skyEnabled = renderBool("drawSkybox", true);
+    const bool fogEnabled = renderBool("renderFog", true);
+    const bool sceneLightsEnabled = renderBool("renderSceneLights", true);
+    const bool shadowsEnabled = renderBool("renderShadows", true);
+    const bool overrideWorldTime = renderBool("overrideWorldTime", false);
+    const COptInt* timeOption = m_pSettings
+        ? dynamic_cast<const COptInt*>(m_pSettings->opt("renderTimeOfDay")) : nullptr;
+    const float previewTime = timeOption
+        ? qBound(0, timeOption->value(), 2400) / 100.0f : 12.0f;
+    const CWorldSet* worldSet = m_activeMob ? &m_activeMob->worldSet() : nullptr;
+    const ei::SRenderEnvironment environment = ei::renderEnvironment(
+        worldSet, overrideWorldTime, previewTime);
+
+    QVector<CLight*> sceneLights;
+    if(environmentEnabled && sceneLightsEnabled)
+    {
+        for(CMob* mob : m_aMob)
+            for(CNode* node : mob->nodes())
+                if(CLight* light = dynamic_cast<CLight*>(node))
+                    if(light->nodeState() != ENodeState::eHidden && light->range() > 0.0f)
+                        sceneLights.append(light);
+        std::sort(sceneLights.begin(), sceneLights.end(), [&cameraPosition](CLight* left, CLight* right)
+        {
+            return (left->position() - cameraPosition).lengthSquared()
+                 < (right->position() - cameraPosition).lengthSquared();
+        });
+        if(sceneLights.size() > 4)
+            sceneLights.resize(4);
+    }
 
     RenderPerformanceContext& performance = RenderPerformanceContext::instance();
     if(performance.collecting())
@@ -761,6 +1060,8 @@ void CView::draw()
         }
         return result;
     };
+    if(environmentEnabled && skyEnabled)
+        drawSkybox(camMatrix, environment);
     // Set modelview-projection matrix
 
     // Bind shader pipeline for use
@@ -771,17 +1072,13 @@ void CView::draw()
     //m_landProgram.setUniformValue("u_watcherPos", m_cam->pos());
     m_landProgram.setUniformValue("u_projMmatrix", m_projection);
     m_landProgram.setUniformValue("u_viewMmatrix", camMatrix);
+    applyEnvironmentUniforms(m_landProgram, environment, sceneLights,
+                             environmentEnabled, fogEnabled);
 //    m_landProgram.setUniformValue("u_color", QVector4D(0.0, 1.0, 0.0, 1.0));
 //    m_landProgram.setUniformValue("u_lightPosition", QVector4D(0.0, 0.0, 2.0, 1.0));
 //    m_landProgram.setUniformValue("u_lightPower", 5.0f);
 //    m_landProgram.setUniformValue("u_lightColor", QVector4D(1.0, 1.0, 1.0, 1.0));
 //    m_landProgram.setUniformValue("u_highlight", false);
-    if (m_landscapeVisible && m_pLand && m_pLand->isMprLoad() && m_bPreviewTile) // draw preview tile on top
-        drawTilePreview(&m_landProgram);
-
-    if (m_landscapeVisible && m_pLand && m_pLand->isMprLoad() && m_bDrawLand)
-        m_pLand->draw(&m_landProgram, cullingEnabled ? &frustum : nullptr);
-
     // Bind shader pipeline for use
     if (!m_program.bind())
         close();
@@ -792,8 +1089,34 @@ void CView::draw()
     const QVector4D lockedHighlight(1.0f, 0.55f, 0.05f, 0.0f);
     m_program.setUniformValue("u_highlightColor", activeHighlight);
     m_program.setUniformValue("qt_Texture0", 0);
+    applyEnvironmentUniforms(m_program, environment, sceneLights,
+                             environmentEnabled, fogEnabled);
+    applyShadowUniforms(m_program, false);
     RenderQueueContext& renderQueue = RenderQueueContext::instance();
     renderQueue.begin(&m_program, cameraPosition);
+    bool terrainDrawn = false;
+    const auto drawTerrainColor = [&](bool withShadows)
+    {
+        if(!m_landProgram.bind())
+            close();
+        m_landProgram.setUniformValue("u_projMmatrix", m_projection);
+        m_landProgram.setUniformValue("u_viewMmatrix", camMatrix);
+        applyEnvironmentUniforms(m_landProgram, environment, sceneLights,
+                                 environmentEnabled, fogEnabled);
+        applyShadowUniforms(m_landProgram, withShadows);
+        if(m_landscapeVisible && m_pLand && m_pLand->isMprLoad() && m_bDrawLand)
+            m_pLand->draw(&m_landProgram, cullingEnabled ? &frustum : nullptr);
+        if(m_landscapeVisible && m_pLand && m_pLand->isMprLoad() && m_bPreviewTile)
+            drawTilePreview(&m_landProgram);
+        terrainDrawn = true;
+        m_program.bind();
+        m_program.setUniformValue("u_projMmatrix", m_projection);
+        m_program.setUniformValue("u_viewMmatrix", camMatrix);
+        m_program.setUniformValue("qt_Texture0", 0);
+        applyEnvironmentUniforms(m_program, environment, sceneLights,
+                                 environmentEnabled, fogEnabled);
+        applyShadowUniforms(m_program, withShadows);
+    };
 
     if(m_activeMob != nullptr)
     {
@@ -850,6 +1173,10 @@ void CView::draw()
                     if(performance.collecting())
                         ++performance.counters().logicSubmissions;
                 }
+        const bool shadowReady = environmentEnabled && shadowsEnabled
+            && renderShadowMap(cameraPosition, environment, renderQueue,
+                               cullingEnabled ? &frustum : nullptr);
+        drawTerrainColor(shadowReady);
         renderQueue.flush();
         glDepthFunc(GL_LEQUAL);
         for(CMob* mob : m_aMob)
@@ -873,6 +1200,9 @@ void CView::draw()
         glDepthFunc(GL_LESS);
     }
 
+    if(!terrainDrawn)
+        drawTerrainColor(false);
+
     renderQueue.end();
     if(performance.collecting())
     {
@@ -891,6 +1221,9 @@ void CView::draw()
             close();
 
         m_landProgram.setUniformValue("transparency", 0.3f);
+        applyEnvironmentUniforms(m_landProgram, environment, sceneLights,
+                                 environmentEnabled, fogEnabled);
+        applyShadowUniforms(m_landProgram, environmentEnabled && shadowsEnabled);
         m_pLand->drawWater(&m_landProgram, cullingEnabled ? &frustum : nullptr);
         m_landProgram.setUniformValue("transparency", 0.0f);
     }
@@ -4067,6 +4400,7 @@ void CView::unHideAll()
 void CView::setDirtyMpr()
 {
     m_pLand->setDirty(true);
+    m_staticShadowFingerprint.clear();
     emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMprDirtyFlag, "*");
 }
 

@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <QOpenGLContext>
 #include <QSurfaceFormat>
+#include <QCryptographicHash>
 
 RenderQueueContext& RenderQueueContext::instance()
 {
@@ -121,7 +122,8 @@ int RenderQueueContext::reserveInstanceBytes(int bytes)
 
 void RenderQueueContext::submit(CPart* part, QOpenGLTexture* texture,
                                 const QMatrix4x4& modelMatrix,
-                                ERenderMaterialClass materialClass, bool highlighted)
+                                ERenderMaterialClass materialClass, bool highlighted,
+                                bool castsShadow, bool dynamicShadow)
 {
     if(!m_collecting || !part || !texture || !part->isDrawable())
         return;
@@ -136,9 +138,76 @@ void RenderQueueContext::submit(CPart* part, QOpenGLTexture* texture,
     item.textureUvScale = part->textureUvScale();
     item.instanceEligible = part->canInstance();
     item.sequence = m_sequence++;
+    item.castsShadow = castsShadow;
+    item.dynamicShadow = dynamicShadow;
     const QVector3D position(modelMatrix(0, 3), modelMatrix(1, 3), modelMatrix(2, 3));
     item.cameraDistanceSquared = (position - m_cameraPosition).lengthSquared();
     m_items.append(item);
+}
+
+QByteArray RenderQueueContext::staticShadowFingerprint() const
+{
+    QCryptographicHash hash(QCryptographicHash::Sha256);
+    for(const SRenderItem& item : m_items)
+    {
+        if(!item.castsShadow || item.dynamicShadow)
+            continue;
+        hash.addData(reinterpret_cast<const char*>(&item.meshIdentity), sizeof(item.meshIdentity));
+        hash.addData(reinterpret_cast<const char*>(item.instanceMatrix.constData()),
+                     16 * int(sizeof(float)));
+    }
+    return hash.result();
+}
+
+void RenderQueueContext::flushShadow(QOpenGLShaderProgram* shadowProgram,
+                                     bool dynamicOnly, bool staticOnly)
+{
+    if(!shadowProgram || m_items.isEmpty())
+        return;
+    QVector<SRenderItem> shadowItems;
+    shadowItems.reserve(m_items.size());
+    for(const SRenderItem& source : m_items)
+    {
+        if(!source.castsShadow || (dynamicOnly && !source.dynamicShadow)
+                || (staticOnly && source.dynamicShadow))
+            continue;
+        SRenderItem item = source;
+        item.texture = nullptr;
+        item.materialClass = ERenderMaterialClass::Opaque;
+        item.highlighted = false;
+        shadowItems.append(item);
+    }
+    sortRenderItems(shadowItems);
+    const int modelLocation = shadowProgram->uniformLocation("u_modelMmatrix");
+    const int instancedLocation = shadowProgram->uniformLocation("u_instanced");
+    const int partAnimatedLocation = shadowProgram->uniformLocation("u_partAnimated");
+    for(int itemIndex = 0; itemIndex < shadowItems.size(); )
+    {
+        const SRenderItem& item = shadowItems.at(itemIndex);
+        const int runLength = m_instancingEnabled
+            ? instanceBatchLength(shadowItems, itemIndex) : 1;
+        bool instanced = false;
+        if(runLength >= 2)
+        {
+            m_matrixScratch.clear();
+            m_matrixScratch.reserve(runLength);
+            for(int offset = 0; offset < runLength; ++offset)
+                m_matrixScratch.append(shadowItems.at(itemIndex + offset).instanceMatrix);
+            const int bufferOffset = reserveInstanceBytes(
+                m_matrixScratch.size() * int(sizeof(QMatrix4x4)));
+            instanced = bufferOffset >= 0 && item.part->drawInstanced(
+                shadowProgram, &m_instanceBuffer, bufferOffset, m_matrixScratch);
+        }
+        if(!instanced)
+        {
+            shadowProgram->setUniformValue(instancedLocation, false);
+            shadowProgram->setUniformValue(modelLocation, item.modelMatrix);
+            item.part->drawImmediate(shadowProgram);
+        }
+        itemIndex += instanced ? runLength : 1;
+    }
+    shadowProgram->setUniformValue(instancedLocation, false);
+    shadowProgram->setUniformValue(partAnimatedLocation, false);
 }
 
 void RenderQueueContext::flush()

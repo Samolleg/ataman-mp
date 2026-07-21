@@ -263,7 +263,8 @@ void CObjectBase::draw(bool isActive, QOpenGLShaderProgram* program)
         {
             queue.submit(part, texture, matrix,
                          CTextureList::getInstance()->materialClass(texture),
-                         m_state == ENodeState::eSelect);
+                         m_state == ENodeState::eSelect,
+                         castsRenderShadow(), nodeType() == ENodeType::eUnit);
             continue;
         }
         if(texture != boundTexture)

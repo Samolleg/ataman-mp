@@ -63,6 +63,7 @@ public:
     virtual void markAsDeleted(bool bDeleted = true) = 0;
     virtual bool isMarkDeleted() = 0;
     virtual bool isOperationAxisAllow(EOperationAxisType type) = 0;
+    virtual bool castsRenderShadow() const { return false; }
 
     virtual void setRot(const QQuaternion& quat) {m_rotation = quat;}
     virtual void setDrawPosition(QVector3D pos) {m_drawPosition = pos;}

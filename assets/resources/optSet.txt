@@ -31,3 +31,10 @@ animateUnits
 renderPerformanceCounters
 renderVSync
 renderFpsCap
+environmentLighting
+drawSkybox
+renderFog
+renderSceneLights
+renderShadows
+overrideWorldTime
+renderTimeOfDay
