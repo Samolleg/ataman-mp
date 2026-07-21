@@ -57,10 +57,13 @@ using CopyFileWFn = BOOL (WINAPI*)(LPCWSTR, LPCWSTR, BOOL);
 using CaptureStackFn = USHORT (WINAPI*)(ULONG, ULONG, PVOID*, PULONG);
 using RegOpenKeyAFn = LSTATUS (WINAPI*)(HKEY, LPCSTR, PHKEY);
 using RegOpenKeyExAFn = LSTATUS (WINAPI*)(HKEY, LPCSTR, DWORD, REGSAM, PHKEY);
+using RegOpenKeyExWFn = LSTATUS (WINAPI*)(HKEY, LPCWSTR, DWORD, REGSAM, PHKEY);
 using RegCreateKeyExAFn = LSTATUS (WINAPI*)(HKEY, LPCSTR, DWORD, LPSTR, DWORD,
                                             REGSAM, const LPSECURITY_ATTRIBUTES,
                                             PHKEY, LPDWORD);
 using RegQueryValueExAFn = LSTATUS (WINAPI*)(HKEY, LPCSTR, LPDWORD, LPDWORD,
+                                             LPBYTE, LPDWORD);
+using RegQueryValueExWFn = LSTATUS (WINAPI*)(HKEY, LPCWSTR, LPDWORD, LPDWORD,
                                              LPBYTE, LPDWORD);
 using RegCloseKeyFn = LSTATUS (WINAPI*)(HKEY);
 using MapLoadFn = int (__thiscall*)(void*, const char*, const char*, void*);
@@ -68,9 +71,13 @@ using ZoneTransitionFn = int (__thiscall*)(void*, const char*, int);
 using NewGameBootstrapFn = void (__thiscall*)(void*);
 using PlayerDefaultsResetFn = void (__thiscall*)(void*);
 using GameStringAssignFn = void (__thiscall*)(void*, const char*);
+enum class RuntimeBuild { Unsupported, JmvStarter, BaseEi };
 
 HMODULE g_instance = nullptr;
-volatile LONG g_initialized = 0;
+volatile LONG g_prepared = 0;
+volatile LONG g_activated = 0;
+RuntimeBuild g_runtimeBuild = RuntimeBuild::Unsupported;
+int g_patchedImports = 0;
 volatile LONG g_observationCount = 0;
 wchar_t g_resultPath[MAX_PATH * 4] = {};
 CreateFileAFn g_originalCreateFileA = nullptr;
@@ -96,8 +103,10 @@ CopyFileWFn g_originalCopyFileW = nullptr;
 CaptureStackFn g_captureStack = nullptr;
 RegOpenKeyAFn g_originalRegOpenKeyA = nullptr;
 RegOpenKeyExAFn g_originalRegOpenKeyExA = nullptr;
+RegOpenKeyExWFn g_originalRegOpenKeyExW = nullptr;
 RegCreateKeyExAFn g_originalRegCreateKeyExA = nullptr;
 RegQueryValueExAFn g_originalRegQueryValueExA = nullptr;
+RegQueryValueExWFn g_originalRegQueryValueExW = nullptr;
 RegCloseKeyFn g_originalRegCloseKey = nullptr;
 wchar_t g_selectedGameRoot[MAX_PATH * 4] = {};
 wchar_t g_selectedModRoot[MAX_PATH * 4] = {};
@@ -518,8 +527,6 @@ void PublishHotReloadThreadId()
         WriteFile(file, value, DWORD(length), &written, nullptr);
     CloseHandle(file);
 }
-
-enum class RuntimeBuild { Unsupported, JmvStarter, BaseEi };
 
 RuntimeBuild VerifyRuntime()
 {
@@ -1111,6 +1118,18 @@ bool IsPathSettingsSubkey(LPCSTR subkey)
     return _stricmp(subkey, "Path Settings") == 0;
 }
 
+bool IsPathSettingsSubkey(LPCWSTR subkey)
+{
+    if(!subkey || !subkey[0])
+        return false;
+    const wchar_t* suffix = L"Nival Interactive\\EvilIslands\\Path Settings";
+    const size_t length = std::wcslen(subkey);
+    const size_t suffixLength = std::wcslen(suffix);
+    if(length >= suffixLength && _wcsicmp(subkey + length - suffixLength, suffix) == 0)
+        return true;
+    return _wcsicmp(subkey, L"Path Settings") == 0;
+}
+
 bool IsStarterSettingsSubkey(LPCSTR subkey)
 {
     if(!subkey || !subkey[0])
@@ -1125,6 +1144,22 @@ bool IsStarterSettingsSubkey(LPCSTR subkey)
     const size_t settingsLength = std::strlen(settings);
     return length >= settingsLength
         && _stricmp(subkey + length - settingsLength, settings) == 0;
+}
+
+bool IsStarterSettingsSubkey(LPCWSTR subkey)
+{
+    if(!subkey || !subkey[0])
+        return false;
+    const wchar_t* root = L"Gipat.Ru\\EI_Starter";
+    const size_t length = std::wcslen(subkey);
+    const size_t rootLength = std::wcslen(root);
+    if(length >= rootLength && _wcsnicmp(subkey + length - rootLength,
+                                        root, rootLength) == 0)
+        return true;
+    const wchar_t* settings = L"Gipat.Ru\\EI_Starter\\Settings";
+    const size_t settingsLength = std::wcslen(settings);
+    return length >= settingsLength
+        && _wcsicmp(subkey + length - settingsLength, settings) == 0;
 }
 
 void MarkTrackedKey(HKEY key, HKEY* keys, size_t count)
@@ -1223,6 +1258,22 @@ LSTATUS WINAPI HookRegOpenKeyExA(HKEY key, LPCSTR subkey, DWORD options,
     return status;
 }
 
+LSTATUS WINAPI HookRegOpenKeyExW(HKEY key, LPCWSTR subkey, DWORD options,
+                                 REGSAM access, PHKEY result)
+{
+    const LSTATUS status = g_originalRegOpenKeyExW(key, subkey, options, access, result);
+    if(status == ERROR_SUCCESS && result && IsPathSettingsSubkey(subkey))
+        MarkPathSettingsKey(*result);
+    if(status == ERROR_SUCCESS && result
+       && (IsStarterSettingsSubkey(subkey)
+           || (IsTrackedKey(key, g_starterSettingsKeys,
+                            sizeof(g_starterSettingsKeys) / sizeof(g_starterSettingsKeys[0]))
+               && subkey && _wcsicmp(subkey, L"Settings") == 0)))
+        MarkTrackedKey(*result, g_starterSettingsKeys,
+                       sizeof(g_starterSettingsKeys) / sizeof(g_starterSettingsKeys[0]));
+    return status;
+}
+
 LSTATUS WINAPI HookRegCreateKeyExA(HKEY key, LPCSTR subkey, DWORD reserved,
                                    LPSTR className, DWORD options, REGSAM access,
                                    const LPSECURITY_ATTRIBUTES security,
@@ -1280,6 +1331,32 @@ bool SelectedStarterPath(LPCSTR valueName, char* output, size_t capacity)
         && !substituted;
 }
 
+bool SelectedRegistryPath(LPCWSTR valueName, wchar_t* output, size_t capacity)
+{
+    if(!valueName || !output || !capacity || !g_selectedGameRoot[0])
+        return false;
+    if(_wcsicmp(valueName, L"RESOURCES PATH") == 0)
+        return _snwprintf_s(output, capacity, _TRUNCATE,
+                            L"%s\\Res\\", g_selectedGameRoot) >= 0;
+    if(_wcsicmp(valueName, L"WORK PATH") == 0
+       || _wcsicmp(valueName, L"CD-ROM PATH") == 0)
+        return _snwprintf_s(output, capacity, _TRUNCATE,
+                            L"%s\\", g_selectedGameRoot) >= 0;
+    return false;
+}
+
+bool SelectedStarterPath(LPCWSTR valueName, wchar_t* output, size_t capacity)
+{
+    if(!valueName || !output || !capacity || !g_selectedGameRoot[0])
+        return false;
+    if(_wcsicmp(valueName, L"AddonPath") == 0 && g_selectedModRoot[0])
+        return wcscpy_s(output, capacity, g_selectedModRoot) == 0;
+    if(_wcsicmp(valueName, L"path") == 0)
+        return _snwprintf_s(output, capacity, _TRUNCATE,
+                            L"%s\\Starter", g_selectedGameRoot) >= 0;
+    return false;
+}
+
 LSTATUS WINAPI HookRegQueryValueExA(HKEY key, LPCSTR valueName, LPDWORD reserved,
                                     LPDWORD type, LPBYTE data, LPDWORD dataSize)
 {
@@ -1318,6 +1395,45 @@ LSTATUS WINAPI HookRegQueryValueExA(HKEY key, LPCSTR valueName, LPDWORD reserved
                          ? L"STARTER_ROOT_OVERRIDE value=\"%s\" selected=\"%s\" scope=owned-process"
                          : L"GAME_ROOT_OVERRIDE value=\"%s\" selected=\"%s\" scope=owned-process",
                      valueWide, selectedWide);
+        Log(message);
+    }
+    return ERROR_SUCCESS;
+}
+
+LSTATUS WINAPI HookRegQueryValueExW(HKEY key, LPCWSTR valueName, LPDWORD reserved,
+                                    LPDWORD type, LPBYTE data, LPDWORD dataSize)
+{
+    wchar_t selected[MAX_PATH * 4]{};
+    const bool nivalOverride = IsPathSettingsKey(key)
+        && SelectedRegistryPath(valueName, selected,
+                                sizeof(selected) / sizeof(selected[0]));
+    const bool starterOverride = IsTrackedKey(
+        key, g_starterSettingsKeys,
+        sizeof(g_starterSettingsKeys) / sizeof(g_starterSettingsKeys[0]))
+        && SelectedStarterPath(valueName, selected,
+                               sizeof(selected) / sizeof(selected[0]));
+    if(!nivalOverride && !starterOverride)
+        return g_originalRegQueryValueExW(key, valueName, reserved, type, data, dataSize);
+    if(!dataSize)
+        return ERROR_INVALID_PARAMETER;
+    const DWORD required = DWORD((std::wcslen(selected) + 1) * sizeof(wchar_t));
+    if(type)
+        *type = REG_SZ;
+    if(!data || *dataSize < required)
+    {
+        *dataSize = required;
+        return data ? ERROR_MORE_DATA : ERROR_SUCCESS;
+    }
+    std::memcpy(data, selected, required);
+    *dataSize = required;
+    if(InterlockedIncrement(&g_registryOverrideLogCount) <= 8)
+    {
+        wchar_t message[1800]{};
+        _snwprintf_s(message, sizeof(message) / sizeof(message[0]), _TRUNCATE,
+                     starterOverride
+                         ? L"STARTER_ROOT_OVERRIDE value=\"%s\" selected=\"%s\" scope=owned-process api=wide"
+                         : L"GAME_ROOT_OVERRIDE value=\"%s\" selected=\"%s\" scope=owned-process api=wide",
+                     valueName, selected);
         Log(message);
     }
     return ERROR_SUCCESS;
@@ -1363,10 +1479,14 @@ void* ReplacementFor(const char* name)
         return reinterpret_cast<void*>(&HookRegOpenKeyA);
     if(std::strcmp(name, "RegOpenKeyExA") == 0)
         return reinterpret_cast<void*>(&HookRegOpenKeyExA);
+    if(std::strcmp(name, "RegOpenKeyExW") == 0)
+        return reinterpret_cast<void*>(&HookRegOpenKeyExW);
     if(std::strcmp(name, "RegCreateKeyExA") == 0)
         return reinterpret_cast<void*>(&HookRegCreateKeyExA);
     if(std::strcmp(name, "RegQueryValueExA") == 0)
         return reinterpret_cast<void*>(&HookRegQueryValueExA);
+    if(std::strcmp(name, "RegQueryValueExW") == 0)
+        return reinterpret_cast<void*>(&HookRegQueryValueExW);
     if(std::strcmp(name, "RegCloseKey") == 0)
         return reinterpret_cast<void*>(&HookRegCloseKey);
     return nullptr;
@@ -1457,10 +1577,14 @@ int InstallFileObservationHooks()
         GetProcAddress(advapi, "RegOpenKeyA"));
     g_originalRegOpenKeyExA = reinterpret_cast<RegOpenKeyExAFn>(
         GetProcAddress(advapi, "RegOpenKeyExA"));
+    g_originalRegOpenKeyExW = reinterpret_cast<RegOpenKeyExWFn>(
+        GetProcAddress(advapi, "RegOpenKeyExW"));
     g_originalRegCreateKeyExA = reinterpret_cast<RegCreateKeyExAFn>(
         GetProcAddress(advapi, "RegCreateKeyExA"));
     g_originalRegQueryValueExA = reinterpret_cast<RegQueryValueExAFn>(
         GetProcAddress(advapi, "RegQueryValueExA"));
+    g_originalRegQueryValueExW = reinterpret_cast<RegQueryValueExWFn>(
+        GetProcAddress(advapi, "RegQueryValueExW"));
     g_originalRegCloseKey = reinterpret_cast<RegCloseKeyFn>(
         GetProcAddress(advapi, "RegCloseKey"));
     g_captureStack = ntdll ? reinterpret_cast<CaptureStackFn>(
@@ -1475,8 +1599,9 @@ int InstallFileObservationHooks()
        !g_originalMoveFileA || !g_originalMoveFileW ||
        !g_originalMoveFileExA || !g_originalMoveFileExW ||
        !g_originalCopyFileA || !g_originalCopyFileW ||
-       !g_originalRegOpenKeyA || !g_originalRegOpenKeyExA ||
+       !g_originalRegOpenKeyA || !g_originalRegOpenKeyExA || !g_originalRegOpenKeyExW ||
        !g_originalRegCreateKeyExA || !g_originalRegQueryValueExA ||
+       !g_originalRegQueryValueExW ||
        !g_originalRegCloseKey)
         return 0;
 
@@ -2128,9 +2253,9 @@ bool InstallMapLoadDetour()
     return true;
 }
 
-bool InitializeDirectLaunch()
+bool PrepareRuntime()
 {
-    if(InterlockedCompareExchange(&g_initialized, 1, 0) != 0)
+    if(InterlockedCompareExchange(&g_prepared, 1, 0) != 0)
         return true;
     GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_BRIDGE_RESULT", g_resultPath,
                             DWORD(sizeof(g_resultPath) / sizeof(g_resultPath[0])));
@@ -2148,6 +2273,7 @@ bool InitializeDirectLaunch()
           && (g_selectedGameRoot[gameRootLength - 1] == L'\\'
               || g_selectedGameRoot[gameRootLength - 1] == L'/'))
         g_selectedGameRoot[--gameRootLength] = L'\0';
+    NormalizeSlashes(g_selectedGameRoot);
     if(!g_selectedGameRoot[0])
     {
         Log(L"DIRECT_LAUNCH disabled: selected game root is missing");
@@ -2161,6 +2287,7 @@ bool InitializeDirectLaunch()
           && (g_selectedModRoot[modRootLength - 1] == L'\\'
               || g_selectedModRoot[modRootLength - 1] == L'/'))
         g_selectedModRoot[--modRootLength] = L'\0';
+    NormalizeSlashes(g_selectedModRoot);
     SetRuntimeState(RuntimeState::Initializing, L"bridge initialization");
     GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_HOT_RELOAD_REQUEST",
                             g_hotReloadRequestPath,
@@ -2183,16 +2310,16 @@ bool InitializeDirectLaunch()
         }
         Log(L"HOT_RELOAD transport configured; runtime requests remain game-thread and hash guarded");
     }
-    const RuntimeBuild runtime = VerifyRuntime();
-    Log(runtime == RuntimeBuild::BaseEi
+    g_runtimeBuild = VerifyRuntime();
+    Log(g_runtimeBuild == RuntimeBuild::BaseEi
         ? L"EI Mapper Endurance Base EI direct-map feasibility bridge initializing"
         : L"EI Mapper Endurance JMV direct single-player map launch initializing");
-    if(runtime == RuntimeBuild::Unsupported)
+    if(g_runtimeBuild == RuntimeBuild::Unsupported)
     {
         Log(L"DIRECT_LAUNCH disabled: game.exe SHA-256 does not match an exact validated runtime manifest");
         return false;
     }
-    if(runtime == RuntimeBuild::BaseEi)
+    if(g_runtimeBuild == RuntimeBuild::BaseEi)
     {
         wchar_t level[8]{};
         GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_BASE_PROBE_LEVEL", level,
@@ -2204,16 +2331,28 @@ bool InitializeDirectLaunch()
             return false;
         }
     }
-    const int patched = InstallFileObservationHooks();
-    if(runtime == RuntimeBuild::BaseEi && g_baseProbeLevel == 1)
+    g_patchedImports = InstallFileObservationHooks();
+    if(g_runtimeBuild == RuntimeBuild::BaseEi && g_baseProbeLevel == 1)
     {
-        Log(patched > 0
+        Log(g_patchedImports > 0
             ? L"BASE_PROBE level=1 injection=ready observation_hooks=ready redirect=disabled"
             : L"BASE_PROBE level=1 injection=ready observation_hooks=failed redirect=disabled");
-        return patched > 0;
+        return g_patchedImports > 0;
     }
+    Log(L"DIRECT_LAUNCH path and file isolation prepared; engine detours are not active yet");
+    return g_patchedImports > 0;
+}
+
+bool ActivateRuntime()
+{
+    if(!PrepareRuntime())
+        return false;
+    if(InterlockedCompareExchange(&g_activated, 1, 0) != 0)
+        return true;
+    if(g_runtimeBuild == RuntimeBuild::BaseEi && g_baseProbeLevel == 1)
+        return true;
     const bool directLaunch = InstallMapLoadDetour();
-    if(runtime == RuntimeBuild::BaseEi && g_baseProbeLevel == 2 && directLaunch)
+    if(g_runtimeBuild == RuntimeBuild::BaseEi && g_baseProbeLevel == 2 && directLaunch)
     {
         // Keep the byte-guarded detours installed, but use a state which can
         // never queue or redirect a transition. Calls retain their arguments.
@@ -2223,10 +2362,15 @@ bool InitializeDirectLaunch()
     wchar_t message[256]{};
     _snwprintf_s(message, sizeof(message) / sizeof(message[0]), _TRUNCATE,
                  L"DIRECT_LAUNCH active imports=%d stack_capture=%s map_loader=%s hot_reload=main-menu-rebootstrap trigger=complete-new-game-bootstrap",
-                 patched, g_captureStack ? L"available" : L"unavailable",
+                 g_patchedImports, g_captureStack ? L"available" : L"unavailable",
                  directLaunch ? L"available" : L"unavailable");
     Log(message);
-    return patched > 0 && directLaunch;
+    return g_patchedImports > 0 && directLaunch;
+}
+
+bool InitializeDirectLaunch()
+{
+    return PrepareRuntime() && ActivateRuntime();
 }
 }
 
@@ -2248,12 +2392,24 @@ extern "C" __declspec(dllexport) DWORD WINAPI EnduranceInitialize(void*)
     return InitializeDirectLaunch() ? 1u : 0u;
 }
 
+extern "C" __declspec(dllexport) DWORD WINAPI EndurancePrepareRuntime(void*)
+{
+    return PrepareRuntime() ? 1u : 0u;
+}
+
+extern "C" __declspec(dllexport) DWORD WINAPI EnduranceActivateRuntime(void*)
+{
+    return ActivateRuntime() ? 1u : 0u;
+}
+
 // The Base owned-process injector resolves this export by its stable protocol
 // name. MSVC decorates x86 __stdcall exports unless an explicit alias is
 // supplied; Starter's plugin loader does not exercise this path, which is why
 // a stale/missing alias only surfaced in the Base probe.
 #if defined(_M_IX86)
 #pragma comment(linker, "/EXPORT:EnduranceInitialize=_EnduranceInitialize@4")
+#pragma comment(linker, "/EXPORT:EndurancePrepareRuntime=_EndurancePrepareRuntime@4")
+#pragma comment(linker, "/EXPORT:EnduranceActivateRuntime=_EnduranceActivateRuntime@4")
 #endif
 
 BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, void*)

@@ -12,14 +12,41 @@ its `options.json` are not build inputs and are never overwritten.
 
 ## Application
 
-From a Qt 5.15 MinGW command prompt:
+Use the checked build wrapper from any PowerShell prompt:
 
 ```powershell
-qmake ei_maper.pro CONFIG+=release
-mingw32-make -j4
+.\scripts\build_release.cmd `
+  -QtBin C:\Qt\5.15.2\mingw81_64\bin `
+  -MinGwBin C:\Qt\Tools\mingw810_64\bin `
+  -BuildDirectory build-release
 ```
 
-Build into a separate shadow-build directory for normal development.
+The paths can instead be stored in `EI_MAPPER_QT_BIN` and
+`EI_MAPPER_MINGW_BIN`. The wrapper validates `qmake`, `uic`, and
+`mingw32-make`, prepends both runtime directories to `PATH`, reruns qmake, and
+builds into a separate shadow directory.
+
+Qt 5.12 also cannot reliably generate Makefiles below a non-ASCII Windows path.
+When necessary, the wrapper temporarily maps the repository to a free drive
+letter with `subst`, builds through that ASCII path, and removes the mapping on
+completion. This does not require elevation and does not persist across the
+build.
+
+This `PATH` setup is required even when `qmake.exe` is invoked by its absolute
+path. Qt's `uic`, `moc`, and `rcc` tools are dynamically linked executables and
+must find the Qt and MinGW runtime DLLs when make starts them. A failure such as
+`uic` exit code `-1073741515` (`0xC0000135`) means that runtime setup was
+skipped; it is a build-environment failure, not a source compile error.
+
+The `.cmd` entry point uses a process-scoped execution-policy bypass only for
+the checked-in PowerShell wrapper. It does not change the user's Windows or
+PowerShell policy.
+
+If using a preconfigured Qt MinGW command prompt, the arguments may be omitted:
+
+```powershell
+.\scripts\build_release.cmd -BuildDirectory build-release
+```
 
 For unattended build verification, use `--ui-widget-check`, the headless MOB/MPR
 commands below, or the non-dialog `--version` option. Validation must not launch
@@ -39,6 +66,22 @@ source. A fresh package must enter first-run game/mod setup.
 
 `validate_distribution.ps1` remains the non-mutating CI check. It must pass
 after finalization; do not bypass either step for convenience builds.
+
+## Known build failures
+
+| Symptom | Meaning | Resolution |
+|---|---|---|
+| `uic`, `moc`, or `rcc` exits with `-1073741515` / `0xC0000135` | A Qt or MinGW runtime DLL is missing from the child-process `PATH`; this is not a source error. | Use `build_release.cmd` with the correct `-QtBin` and `-MinGwBin`, or set `EI_MAPPER_QT_BIN` and `EI_MAPPER_MINGW_BIN`. |
+| PowerShell says that running scripts is disabled | The machine's execution policy blocks direct `.ps1` invocation. | Use `build_release.cmd`. Its bypass applies only to that child process and does not change system policy. |
+| qmake displays the repository path as `??`, mojibake, or cannot write `Makefile.Release` | Qt 5.12 cannot reliably process the non-ASCII repository/build path. | Keep the shadow directory inside the repository and use the wrapper; it reuses or creates a temporary ASCII `subst` path and removes mappings it owns. |
+| qmake cannot rewrite a generated `.rc`, Makefile, or object file | A compiler process from an interrupted/timed-out build may still own the file. | Let `qmake`, `mingw32-make`, `uic`, and `moc` finish or exit, then rerun the wrapper. Do not delete a live shadow tree. |
+| qmake reports an unknown module or a compiler header/library is missing | The selected Qt kit and MinGW kit do not belong to a compatible installation. | Select the matching 64-bit Qt/MinGW pair; do not mix MSVC Qt libraries with MinGW. |
+| `mingw32-make` prints a C++ filename, line number, and compiler diagnostic | This is a source compile failure rather than tool discovery. | Fix the first compiler error and rerun the same wrapper; qmake is regenerated automatically. |
+| The editor builds but the package validator rejects the folder | Runtime bridge/host, notices, hashes, or required deployment files are missing, or private settings/logs leaked into the folder. | Stage a fresh folder, deploy the runtime components, then run `finalize_package.ps1`; never distribute a previously launched folder. |
+
+Do not validate a build by launching `EIMapperEndurance.exe` without arguments:
+that opens the GUI and may leave version/setup windows behind. Use `--version`,
+`--ui-widget-check`, the focused tests, and the package validator.
 
 ## Unit tests
 

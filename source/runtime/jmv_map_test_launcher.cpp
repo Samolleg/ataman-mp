@@ -1224,7 +1224,8 @@ bool CJmvMapTestLauncher::launch(const SJmvMapTestLaunchInput& input, QString* e
     if(m_usesRuntimeHost)
         m_process->setArguments(QStringList() << m_gameExePath << m_bridgeLivePath
             << m_engineDirectory << m_gamePidPath
-            << QDir(m_runRoot).filePath("runtime-host.log"));
+            << QDir(m_runRoot).filePath("runtime-host.log")
+            << (m_baseProbe ? "base" : "jmv"));
     else
         m_process->setArguments(QStringList());
     m_process->setWorkingDirectory(m_engineDirectory);

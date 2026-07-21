@@ -296,7 +296,23 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
 
 ### Current 0.2.x status
 
-- **Current tester build:** `0.2.1-alpha.26`, retaining the alpha.24 render and
+- **Current tester build:** `0.2.1-alpha.27`; its JMV owned-injector startup
+  regression is under investigation and it is not a release candidate.
+- **Current test candidate:** `0.2.1-alpha.28`, retaining the approved
+  alpha.24 character/render pipeline while reverting the unfinished environment,
+  weather, sky, and shadow prototype. Game & Mod Setup treats any effective
+  resource-root change like a profile switch: dirty documents are offered for
+  saving, the workspace is unloaded, resources are reinitialized, and Maps &
+  Collections is refreshed. Owned JMV tests virtualize both Nival and Starter
+  registry roots and guard stale same-mod absolute paths, so two installations
+  cannot silently mix the selected `game.exe` with another installation's JMV
+  maps or database. ([`b76fc3e`](https://github.com/Ilufus/ei-mapper-endurance/commit/b76fc3e))
+  Alpha.27 evidence also proved that the owned injector activated Endurance's
+  engine detours before JMV `AddonMain` began its own patch phase. Alpha.28
+  prepares path isolation before resume but defers engine detours until observed
+  executable patch activity becomes quiescent; no addon/ASI hash becomes a
+  manifest dependency.
+  Alpha.26 retained the alpha.24 render and
   autosave baseline while hardening validation navigation and the NVIDIA test
   overlay. JMV direct-launch compatibility now depends only on the exact
   fingerprinted Starter `game.exe`; Starter addon.dll, SpellAddonX.asi, JMV
