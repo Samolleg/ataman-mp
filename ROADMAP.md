@@ -952,6 +952,12 @@ line. Profile/runtime validation remains part of the RC matrix.
     the applicable perk.
 - [x] Merge profile-correct standing idle animation selection and its
   diagnostic fallback instead of leaving characters in the null/T pose.
+- [x] Add the first profile/world environment-rendering slice: game-resource
+  skybox, MOB time/ambient/sun preview, fog, nearest visible MOB point lights,
+  and cached batched directional shadows that honor each world object's
+  `Is shadow` value. Animated units update through a separate throttled shadow
+  layer without another scene traversal. All effects have explicit Render-tab
+  compatibility toggles; further visual calibration remains tester-driven.
 - [ ] Populate prototype/model/texture fields from the active database with
   prefix filtering and manual entry where valid. Warn on missing entries rather
   than silently clearing stored values.

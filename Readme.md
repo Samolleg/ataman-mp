@@ -4,7 +4,7 @@ EI Mapper: Endurance Edition is an independently versioned derivative of
 [`konstvest/ei_maper`](https://github.com/konstvest/ei_maper), focused on safe,
 fast Evil Islands and Jamais Vu map editing.
 
-Current development version: `0.2.1-alpha.26`.
+Current development version: `0.2.1-alpha.27`.
 
 Project status and upcoming work are tracked in the living
 [Endurance roadmap](ROADMAP.md).

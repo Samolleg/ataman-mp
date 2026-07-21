@@ -66,13 +66,6 @@ const SSkyVertex kSkyVertices[] = {
     {{-1,-1, 1},{0,0}},{{ 1,-1, 1},{1,0}},{{ 1, 1, 1},{1,1}},{{-1,-1, 1},{0,0}},{{ 1, 1, 1},{1,1}},{{-1, 1, 1},{0,1}},
     {{-1, 1,-1},{0,0}},{{ 1, 1,-1},{1,0}},{{ 1,-1,-1},{1,1}},{{-1, 1,-1},{0,0}},{{ 1,-1,-1},{1,1}},{{-1,-1,-1},{0,1}}
 };
-
-void showDuplicateIdWarning(QWidget* parent, const QVector<uint>& duplicates)
-{
-    if(!duplicates.isEmpty())
-        QMessageBox::warning(parent, "Duplicate object IDs",
-            ei::duplicateIdWarningText(duplicates));
-}
 }
 
 CView::CView(QWidget *parent, const QGLWidget *pShareWidget) : QGLWidget(parent, pShareWidget)
@@ -661,7 +654,7 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
     if(rebuildStatic)
     {
         beginTarget(m_shadowFbo);
-        if(m_pLand && m_pLand->isMprLoad() && m_bDrawLand)
+        if(m_landscapeVisible && m_pLand && m_pLand->isMprLoad() && m_bDrawLand)
             m_pLand->draw(&m_shadowProgram, frustum);
         queue.flushShadow(&m_shadowProgram, false, true);
         m_shadowFbo->release();
@@ -989,7 +982,11 @@ void CView::draw()
         ? dynamic_cast<const COptInt*>(m_pSettings->opt("renderTimeOfDay")) : nullptr;
     const float previewTime = timeOption
         ? qBound(0, timeOption->value(), 2400) / 100.0f : 12.0f;
-    const CWorldSet* worldSet = m_activeMob ? &m_activeMob->worldSet() : nullptr;
+    // Editing a supplemental MOB must not replace the map's environment with
+    // that document's usually empty/default world settings. Collections and
+    // map loads keep the primary MOB first in load order.
+    CMob* environmentMob = m_aMob.isEmpty() ? nullptr : m_aMob.front();
+    const CWorldSet* worldSet = environmentMob ? &environmentMob->worldSet() : nullptr;
     const ei::SRenderEnvironment environment = ei::renderEnvironment(
         worldSet, overrideWorldTime, previewTime);
 
@@ -997,10 +994,14 @@ void CView::draw()
     if(environmentEnabled && sceneLightsEnabled)
     {
         for(CMob* mob : m_aMob)
+        {
+            if(!isMobVisible(mob))
+                continue;
             for(CNode* node : mob->nodes())
                 if(CLight* light = dynamic_cast<CLight*>(node))
                     if(light->nodeState() != ENodeState::eHidden && light->range() > 0.0f)
                         sceneLights.append(light);
+        }
         std::sort(sceneLights.begin(), sceneLights.end(), [&cameraPosition](CLight* left, CLight* right)
         {
             return (left->position() - cameraPosition).lengthSquared()
