@@ -860,8 +860,9 @@ MainWindow::MainWindow(QWidget* parent) :
     m_autosaveTimer = new QTimer(this);
     m_autosaveTimer->setTimerType(Qt::PreciseTimer);
     connect(m_autosaveTimer, &QTimer::timeout, this, &MainWindow::performAutosave);
-    connect(m_settings.get(), &CSettings::settingsApplied,
-            this, &MainWindow::configureAutosaveTimer);
+    connect(m_settings.get(), &CSettings::autosaveSettingsApplied,
+            this, static_cast<void (MainWindow::*)(bool, int)>(
+                &MainWindow::configureAutosaveTimer));
     connect(m_settings.get(), &CSettings::autosaveRequested,
             this, &MainWindow::performAutosave);
     connect(m_settings.get(), &CSettings::backupFolderRequested, this, [this]()
@@ -3549,15 +3550,24 @@ void MainWindow::configureAutosaveTimer()
         return;
     const COptBool* enabled = dynamic_cast<const COptBool*>(m_settings->opt("autosaveEnabled"));
     const COptInt* interval = dynamic_cast<const COptInt*>(m_settings->opt("autosaveIntervalMinutes"));
-    if(!enabled || !enabled->value())
+    configureAutosaveTimer(enabled && enabled->value(), interval ? interval->value() : 5);
+}
+
+void MainWindow::configureAutosaveTimer(bool enabled, int intervalMinutes)
+{
+    if(!m_autosaveTimer)
+        return;
+    if(!enabled)
     {
         m_autosaveTimer->stop();
+        ei::log(eLogInfo, "Periodic recovery autosave disabled from applied settings");
         return;
     }
-    const int minutes = interval ? qBound(1, interval->value(), 120) : 5;
+    const int minutes = qBound(1, intervalMinutes, 120);
     m_autosaveTimer->start(minutes * 60 * 1000);
-    ei::log(eLogInfo, QString("Periodic recovery autosave scheduled intervalMinutes:%1 active:%2 remainingMs:%3")
-            .arg(minutes).arg(m_autosaveTimer->isActive()).arg(m_autosaveTimer->remainingTime()));
+    ei::log(eLogInfo, QString("Periodic recovery autosave scheduled intervalMinutes:%1 active:%2 remainingMs:%3 timerIntervalMs:%4")
+            .arg(minutes).arg(m_autosaveTimer->isActive()).arg(m_autosaveTimer->remainingTime())
+            .arg(m_autosaveTimer->interval()));
 }
 
 void MainWindow::performAutosave()

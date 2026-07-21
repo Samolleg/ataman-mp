@@ -671,6 +671,12 @@ void CSettings::saveOptions()
 void CSettings::on_buttonApply_clicked()
 {
     updateOptFromUi();
+    const COptBool* autosaveEnabled = dynamic_cast<const COptBool*>(
+        opt(eOptSetGeneral, "autosaveEnabled"));
+    const COptInt* autosaveInterval = dynamic_cast<const COptInt*>(
+        opt(eOptSetGeneral, "autosaveIntervalMinutes"));
+    emit autosaveSettingsApplied(autosaveEnabled && autosaveEnabled->value(),
+                                 qBound(1, autosaveInterval ? autosaveInterval->value() : 5, 120));
     emit shortcutsChanged();
     emit settingsApplied();
     emit renderSettingsChanged();

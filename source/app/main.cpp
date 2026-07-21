@@ -547,6 +547,7 @@ int runHeadlessCommand(QApplication& app)
         bool settingsTabsUsable = false;
         bool settingsShortcutsPersist = false;
         bool autosaveSettingsPersist = false;
+        bool autosaveLiveReconfigure = false;
         bool settingsApplySignal = false;
         bool renderOptionsRegistered = false;
         {
@@ -558,6 +559,11 @@ int runHeadlessCommand(QApplication& app)
                 CSettings settingsWindow(&primaryWindow);
                 QObject::connect(&settingsWindow, &CSettings::settingsApplied,
                                  [&settingsApplySignal]() { settingsApplySignal = true; });
+                QObject::connect(&settingsWindow, &CSettings::autosaveSettingsApplied,
+                    [&autosaveLiveReconfigure](bool enabled, int intervalMinutes)
+                    {
+                        autosaveLiveReconfigure = enabled && intervalMinutes == 1;
+                    });
                 QTabWidget* settingsTabs = settingsWindow.findChild<QTabWidget*>("tabWidget");
                 if(settingsTabs && settingsTabs->count() > 1)
                 {
@@ -652,7 +658,7 @@ int runHeadlessCommand(QApplication& app)
 
         const bool passed = prefixesOnly && valueStable && focusCancel && escapeCancel
                 && enterCommit && clickCommit && settingsTabsUsable && settingsShortcutsPersist
-                && autosaveSettingsPersist && settingsApplySignal
+                && autosaveSettingsPersist && settingsApplySignal && autosaveLiveReconfigure
                 && renderOptionsRegistered
                 && secondaryWindowsClosed
                 && pasteSingleAction && pasteUndoAtomic && pasteRedoAtomic
@@ -674,6 +680,7 @@ int runHeadlessCommand(QApplication& app)
                << " settingsTabsUsable=" << settingsTabsUsable
                << " settingsShortcutsPersist=" << settingsShortcutsPersist
                << " autosaveSettingsPersist=" << autosaveSettingsPersist
+               << " autosaveLiveReconfigure=" << autosaveLiveReconfigure
                << " settingsApplySignal=" << settingsApplySignal
                << " renderOptionsRegistered=" << renderOptionsRegistered
                << " secondaryWindowsClosed=" << secondaryWindowsClosed

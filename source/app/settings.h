@@ -54,6 +54,7 @@ public Q_SLOTS:
 signals:
     void shortcutsChanged();
     void settingsApplied();
+    void autosaveSettingsApplied(bool enabled, int intervalMinutes);
     void autosaveRequested();
     void backupFolderRequested();
     void renderSettingsChanged();

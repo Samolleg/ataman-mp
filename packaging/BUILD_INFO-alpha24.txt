@@ -1,0 +1,6 @@
+EI Mapper: Endurance Edition 0.2.1-alpha.24
+Tester purpose: render-pipeline integration, live autosave cadence changes, and the existing JMV hot-reload matrix
+Profile scope: Base EI editor visuals and JMV editor/runtime workflow; state-aware hot reload remains JMV-only
+Render boundary: feature/render-pipeline through 191ac85e1990d9f7eddfef7d7cdef1a29aa67930
+Package policy: finalized clean first-run folder; no options JSON, logs, saves, dumps, or stale checksum entries
+Focused checks: change a dirty document's autosave cadence in one running session, inspect timer telemetry, verify equipped/animated humanoids and affected uncompressed textures, then run the JMV hot-reload matrix

@@ -68,6 +68,7 @@ public:
     bool loadMobWithProgress(QFileInfo fileName);
     bool loadLandscapeWithProgress(const QFileInfo& fileName);
     void configureAutosaveTimer();
+    void configureAutosaveTimer(bool enabled, int intervalMinutes);
     void performAutosave();
     void showRecoverableAutosaves();
 
