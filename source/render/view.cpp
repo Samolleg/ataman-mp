@@ -509,7 +509,10 @@ void CView::drawSkybox(const QMatrix4x4& cameraMatrix,
     if(!m_skyBuffer.isCreated() || !m_skyProgram.bind())
         return;
     static const char* textureNames[6] = {
-        "sky00", "sky02", "sky03", "sky05", "sky04", "sky01"
+        // Cube faces are +X, -X, +Y, -Y, +Z, -Z. Archive edge matching
+        // establishes the side cycle as 00 -> 02 -> 03 -> 05; 04 is the
+        // cloud ceiling and 01 is the dark ground face.
+        "sky00", "sky03", "sky02", "sky05", "sky04", "sky01"
     };
     QOpenGLTexture* textures[6] = {};
     QOpenGLTexture* fallback = CTextureList::getInstance()->textureDefault();
