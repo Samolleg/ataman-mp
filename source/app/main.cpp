@@ -783,6 +783,7 @@ int runHeadlessCommand(QApplication& app)
             value.insert("size", double(component.size));
             value.insert("sha256", component.sha256);
             value.insert("hashAccepted", component.hashAccepted);
+            value.insert("enforceHash", component.enforceHash);
             runtimeComponents.append(value);
         }
         root.insert("runtimeComponents", runtimeComponents);

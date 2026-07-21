@@ -44,12 +44,14 @@ SProfileCapability capability(const QString& id, EProfileCapabilityStatus status
 }
 
 SRuntimeComponent runtimeComponent(const QString& id, const QString& path,
-                                   const QStringList& acceptedSha256 = QStringList())
+                                   const QStringList& acceptedSha256 = QStringList(),
+                                   bool enforceHash = true)
 {
     SRuntimeComponent value;
     value.id = id;
     value.path = path;
     value.acceptedSha256 = acceptedSha256;
+    value.enforceHash = enforceHash;
     return value;
 }
 
@@ -108,6 +110,8 @@ bool profileFromJson(const QByteArray& bytes, const QString& source,
             component.id = componentObject.value("id").toString().trimmed();
             component.path = componentObject.value("path").toString().trimmed();
             component.required = !componentObject.contains("required") || componentObject.value("required").toBool();
+            component.enforceHash = !componentObject.contains("enforceHash")
+                || componentObject.value("enforceHash").toBool();
             component.acceptedSha256 = jsonStrings(componentObject, "acceptedSha256");
             if(!component.id.isEmpty() && !component.path.isEmpty())
                 value.runtimeComponents.append(component);
@@ -233,11 +237,12 @@ QVector<SResourceProfile> builtInResourceProfiles()
         << runtimeComponent("spell-addon", "{gameRoot}/Starter/Engine/SpellAddonX.asi",
                             {"E6E0C8773CB8A2B064532D2E5AC5AD6D521129F8330FB30884D569E5CA52D151"})
         << runtimeComponent("jmv-addon", "{modRoot}/addon.dll",
-                            {"9339552E199966A48ABD92808EA29674A0217FEC4DDBFCBCE27FECD7D85CA4A2"})
+                            {"9339552E199966A48ABD92808EA29674A0217FEC4DDBFCBCE27FECD7D85CA4A2",
+                             "1B3AEFA65D097D48D3CCC7D970FAB30182CC31A4B0B1ECC33B6BD97270126C84"})
         << runtimeComponent("jmv-lua", "{modRoot}/main.lua",
-                            {"23BC21E8A28126ACE5233413B75C51B21C1CFA97461E2BFC8EBAEE60F9C19318"})
+                            {"23BC21E8A28126ACE5233413B75C51B21C1CFA97461E2BFC8EBAEE60F9C19318"}, false)
         << runtimeComponent("spell-addon-config", "{modRoot}/SPELLADDON.INI",
-                            {"7A096E354B02B82141DBE7E6E85917ED330BB374825F902FC1D6CB98718DF605"});
+                            {"7A096E354B02B82141DBE7E6E85917ED330BB374825F902FC1D6CB98718DF605"}, false);
     jmv.capabilities.insert("mob.losslessEditing", capability("mob.losslessEditing", EProfileCapabilityStatus::Unsupported,
         "Copy-only hardening is active until UI edits are migrated to provenance transactions."));
     jmv.capabilities.insert("mob.perspectiveDiff", capability("mob.perspectiveDiff", EProfileCapabilityStatus::Experimental,
@@ -395,6 +400,7 @@ SResourceProfileEvaluation evaluateResourceProfile(const QString& gameRoot,
         SRuntimeComponentEvaluation evaluation;
         evaluation.id = component.id;
         evaluation.path = expandPath(component.path, result.gameRoot, result.modRoot);
+        evaluation.enforceHash = component.enforceHash;
         const QFileInfo componentInfo(evaluation.path);
         evaluation.exists = componentInfo.isFile();
         if(evaluation.exists)
@@ -411,8 +417,14 @@ SResourceProfileEvaluation evaluateResourceProfile(const QString& gameRoot,
             runtimeComplete = false;
             result.messages.append("Missing runtime component: " + evaluation.path);
         }
-        if(component.required && (!evaluation.exists || !evaluation.hashAccepted || component.acceptedSha256.isEmpty()))
+        if(component.required && component.enforceHash
+           && (!evaluation.exists || !evaluation.hashAccepted || component.acceptedSha256.isEmpty()))
+        {
             runtimeValidated = false;
+            if(evaluation.exists)
+                result.messages.append(QString("Runtime hash mismatch [%1]: %2 (SHA-256 %3)")
+                    .arg(component.id, evaluation.path, evaluation.sha256));
+        }
         result.runtimeComponents.append(evaluation);
     }
     result.runtimeStackComplete = runtimeComplete;

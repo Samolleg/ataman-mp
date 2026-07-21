@@ -41,6 +41,7 @@ private slots:
     void basePresetDoesNotRequireJmv();
     void invalidGameRootIsRejected();
     void externalProfileCanBeAdded();
+    void informationalRuntimeHashDoesNotInvalidateManifest();
 };
 
 void ResourceProfileTests::jmvPresetFindsModAndBaseResources()
@@ -117,6 +118,47 @@ void ResourceProfileTests::externalProfileCanBeAdded()
     for(const SResourceProfile& profile : profiles)
         if(profile.id == "test-mod")
             QCOMPARE(profile.providers.value("database").id, QString("base.standard.v1"));
+}
+
+void ResourceProfileTests::informationalRuntimeHashDoesNotInvalidateManifest()
+{
+    QTemporaryDir temporary;
+    QVERIFY(temporary.isValid());
+    const QByteArray json = R"JSON({
+        "schemaVersion": 2,
+        "id": "mutable-runtime-test",
+        "displayName": "Mutable runtime test",
+        "resourceDirectories": ["{gameRoot}/TestRes"],
+        "mapDirectories": ["{gameRoot}/TestMaps"],
+        "runtime": {
+            "manifestId": "mutable-v1",
+            "components": [
+                {"id":"engine", "path":"{gameRoot}/game.exe",
+                 "acceptedSha256":["9F86D081884C7D659A2FEAA0C55AD015A3BF4F1B2B0B822CD15D6C15B0F00A08"]},
+                {"id":"script", "path":"{gameRoot}/main.lua", "enforceHash":false,
+                 "acceptedSha256":["0000000000000000000000000000000000000000000000000000000000000000"]}
+            ]
+        }
+    })JSON";
+    createFile(QDir(temporary.path()).filePath("profiles/mutable.json"), json);
+    createFile(QDir(temporary.path()).filePath("game.exe"));
+    createFile(QDir(temporary.path()).filePath("main.lua"), "locally edited");
+    createFile(QDir(temporary.path()).filePath("TestRes/data.res"));
+    QDir().mkpath(QDir(temporary.path()).filePath("TestMaps"));
+
+    const QVector<SResourceProfile> profiles = loadResourceProfiles(
+        QDir(temporary.path()).filePath("profiles"));
+    SResourceProfile profile;
+    for(const SResourceProfile& candidate : profiles)
+        if(candidate.id == "mutable-runtime-test")
+            profile = candidate;
+    QVERIFY(!profile.id.isEmpty());
+    const SResourceProfileEvaluation result = evaluateResourceProfile(temporary.path(), profile);
+    QVERIFY2(result.valid, qPrintable(result.messages.join('\n')));
+    QVERIFY(result.runtimeStackValidated);
+    QCOMPARE(result.runtimeComponents.size(), 2);
+    QVERIFY(!result.runtimeComponents.at(1).hashAccepted);
+    QVERIFY(!result.runtimeComponents.at(1).enforceHash);
 }
 
 QTEST_APPLESS_MAIN(ResourceProfileTests)

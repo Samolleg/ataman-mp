@@ -108,6 +108,20 @@ QString conciseValidationLine(const SMobFamilyFinding& finding)
     return QFontMetrics(QApplication::font()).elidedText(line, Qt::ElideRight, 960);
 }
 
+QString runtimeManifestProblem(const SResourceProfileEvaluation& profile)
+{
+    QStringList problems;
+    for(const SRuntimeComponentEvaluation& component : profile.runtimeComponents)
+    {
+        if(!component.exists)
+            problems.append(QObject::tr("Missing %1: %2").arg(component.id, component.path));
+        else if(component.enforceHash && !component.hashAccepted)
+            problems.append(QObject::tr("Unsupported %1: %2 (SHA-256 %3)")
+                .arg(component.id, component.path, component.sha256));
+    }
+    return problems.join('\n');
+}
+
 void enableNativeFloatingControls(QDockWidget* dock)
 {
     if(!dock)
@@ -2144,7 +2158,13 @@ void MainWindow::updateMapTestAction()
     else if(!isJmv && !isBaseProbe)
         m_mapTestAction->setToolTip(tr("The active profile has no Endurance direct-map-test provider."));
     else if(!profileReady)
-        m_mapTestAction->setToolTip(tr("The active runtime does not match an exact experimental manifest."));
+    {
+        const QString detail = runtimeManifestProblem(profile);
+        m_mapTestAction->setToolTip(detail.isEmpty()
+            ? tr("The active runtime does not match an exact experimental manifest.")
+            : tr("The active runtime does not match an exact experimental manifest.\n%1")
+                .arg(detail));
+    }
     else if(!hasPair)
         m_mapTestAction->setToolTip(isJmv
             ? tr("Load one MPR and at least one MOB before launching a map test.")
@@ -2205,8 +2225,12 @@ void MainWindow::launchCurrentMapTest()
     }
     if((!isJmv && !isBase) || !profile.valid || !profile.runtimeStackValidated)
     {
+        const QString detail = runtimeManifestProblem(profile);
         QMessageBox::warning(this, tr("Map test launch"),
-            tr("The active installation does not match an exact supported or experimental runtime manifest. Run Game and Mod Setup again and review its diagnostics."));
+            detail.isEmpty()
+                ? tr("The active installation does not match an exact supported or experimental runtime manifest. Run Game and Mod Setup again and review its diagnostics.")
+                : tr("The active installation does not match an exact supported or experimental runtime manifest.\n\n%1\n\nRun Game and Mod Setup again if this is not the intended installation.")
+                    .arg(detail));
         return;
     }
     progress->setLabelText(tr("Reading map-table metadata..."));
@@ -2701,7 +2725,7 @@ void MainWindow::updateMobFamilyValidationPanel()
                             owner.sectionPath));
                 ownerItem->setData(0, kValidationNidRole, owner.nid);
                 ownerItem->setData(0, kValidationSectionRole, owner.sectionPath);
-                ownerItem->setToolTip(1, tr("Double-click to select this object if its MOB is loaded."));
+                ownerItem->setToolTip(1, tr("Double-click to load its MOB if needed, then select this object."));
             }
         }
     }
@@ -2876,10 +2900,41 @@ void MainWindow::selectValidationObject(QTreeWidgetItem* item)
     const QString mobPath = item->data(0, kValidationPathRole).toString();
     const quint32 nid = item->data(0, kValidationNidRole).toUInt();
     const QString sectionPath = item->data(0, kValidationSectionRole).toString();
+    bool mobLoaded = false;
+    const QString wantedPath = QDir::cleanPath(QFileInfo(mobPath).absoluteFilePath());
+    for(CMob* mob : m_pView->mobs())
+    {
+        if(mob && QDir::cleanPath(mob->filePath().absoluteFilePath()).compare(
+               wantedPath, Qt::CaseInsensitive) == 0)
+        {
+            mobLoaded = true;
+            break;
+        }
+    }
+    if(!mobLoaded)
+    {
+        const QFileInfo source(mobPath);
+        if(!source.isFile())
+        {
+            statusBar()->showMessage(
+                tr("Cannot select NID %1 because its source MOB was not found: %2")
+                    .arg(nid).arg(mobPath), 9000);
+            return;
+        }
+        statusBar()->showMessage(tr("Loading %1 to select NID %2...")
+            .arg(source.fileName()).arg(nid));
+        if(!loadMobWithProgress(source))
+        {
+            statusBar()->showMessage(
+                tr("Could not load %1 to select NID %2.").arg(source.fileName()).arg(nid),
+                8000);
+            return;
+        }
+    }
     if(!m_pView->selectObjectByProvenance(mobPath, nid, sectionPath))
     {
         statusBar()->showMessage(
-            tr("Object NID %1 is not selectable: load its MOB or resolve its ambiguous provenance.")
+            tr("Object NID %1 is not selectable: its provenance is ambiguous or no longer present.")
                 .arg(nid), 7000);
         return;
     }

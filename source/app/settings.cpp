@@ -278,6 +278,14 @@ void CSettings::applyResourceProfile(const SResourceProfileEvaluation& profile)
     ei::log(eLogInfo, QString("Applied resource profile id:%1 gameRoot:%2 resourceDirectories:%3 archives:%4")
             .arg(profile.profileId, profile.gameRoot)
             .arg(profile.resourceDirectories.size()).arg(profile.archiveCount));
+    for(const SRuntimeComponentEvaluation& component : profile.runtimeComponents)
+    {
+        const ELogMessageType level = component.exists
+            && (!component.enforceHash || component.hashAccepted) ? eLogInfo : eLogWarning;
+        ei::log(level, QString("Runtime component id:%1 strict:%2 exists:%3 accepted:%4 sha256:%5 path:%6")
+            .arg(component.id).arg(component.enforceHash).arg(component.exists)
+            .arg(component.hashAccepted).arg(component.sha256, component.path));
+    }
     for(const ei::SDatabaseDiagnostic& diagnostic : database->diagnostics)
         ei::log(eLogWarning,
                 QString("Profile database [%1] %2").arg(diagnostic.code, diagnostic.message));

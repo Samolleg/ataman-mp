@@ -485,6 +485,24 @@ void CView::drawTestOverlaysOpenGl()
     if(!m_program.bind())
         return;
 
+    // Mesh rendering may leave a VAO with normal/UV/instance attributes
+    // enabled. The overlay below uses client-side arrays. If those stale
+    // attributes remain enabled after their VBO is released, NVIDIA's driver
+    // attempts to fetch offsets such as 0x0c as host pointers and can access-
+    // violate in glDrawArrays. Always start the overlay on the default VAO and
+    // with a clean attribute set.
+    QOpenGLContext* context = QOpenGLContext::currentContext();
+    QOpenGLExtraFunctions* functions = context ? context->extraFunctions() : nullptr;
+    if(functions)
+    {
+        functions->glBindVertexArray(0);
+        functions->glBindBuffer(GL_ARRAY_BUFFER, 0);
+        functions->glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+        GLint attributeCount = 0;
+        functions->glGetIntegerv(GL_MAX_VERTEX_ATTRIBS, &attributeCount);
+        for(GLint attribute = 0; attribute < attributeCount; ++attribute)
+            functions->glDisableVertexAttribArray(GLuint(attribute));
+    }
     QOpenGLBuffer::release(QOpenGLBuffer::VertexBuffer);
     QOpenGLBuffer::release(QOpenGLBuffer::IndexBuffer);
     const int position = m_program.attributeLocation("a_position");
