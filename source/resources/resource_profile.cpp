@@ -219,7 +219,7 @@ QVector<SResourceProfile> builtInResourceProfiles()
     jmv.fixedModRoots = QStringList() << "Starter/MODS/JamaisVu135";
     jmv.searchParent = "Starter/MODS";
     jmv.directoryNameContains = QStringList() << "JamaisVu";
-    jmv.requiredFiles = QStringList() << "main.lua" << "addon.dll";
+    jmv.requiredFiles = QStringList() << "main.lua";
     jmv.requiredDirectories = QStringList() << "res" << "Maps";
     jmv.signatureFiles = QStringList() << "res/databaseJmv.res";
     jmv.resourceDirectories = QStringList() << "{modRoot}/res" << "{gameRoot}/Res";
@@ -231,18 +231,7 @@ QVector<SResourceProfile> builtInResourceProfiles()
         jmv.providers.insert(role, {"jmv.v1", 1});
     jmv.runtimeComponents
         << runtimeComponent("starter-engine", "{gameRoot}/Starter/Engine/game.exe",
-                            {"BE0FC330035E03983CCE590038CC7F881F1F5D1BCF082717F31776DD4DEE94E2"})
-        << runtimeComponent("starter-addon", "{gameRoot}/Starter/addon.dll",
-                            {"C02F6766B23F549A17455491B4EBC3B339F31AC153918D43B0183FD506ED11A9"})
-        << runtimeComponent("spell-addon", "{gameRoot}/Starter/Engine/SpellAddonX.asi",
-                            {"E6E0C8773CB8A2B064532D2E5AC5AD6D521129F8330FB30884D569E5CA52D151"})
-        << runtimeComponent("jmv-addon", "{modRoot}/addon.dll",
-                            {"9339552E199966A48ABD92808EA29674A0217FEC4DDBFCBCE27FECD7D85CA4A2",
-                             "1B3AEFA65D097D48D3CCC7D970FAB30182CC31A4B0B1ECC33B6BD97270126C84"})
-        << runtimeComponent("jmv-lua", "{modRoot}/main.lua",
-                            {"23BC21E8A28126ACE5233413B75C51B21C1CFA97461E2BFC8EBAEE60F9C19318"}, false)
-        << runtimeComponent("spell-addon-config", "{modRoot}/SPELLADDON.INI",
-                            {"7A096E354B02B82141DBE7E6E85917ED330BB374825F902FC1D6CB98718DF605"}, false);
+                            {"BE0FC330035E03983CCE590038CC7F881F1F5D1BCF082717F31776DD4DEE94E2"});
     jmv.capabilities.insert("mob.losslessEditing", capability("mob.losslessEditing", EProfileCapabilityStatus::Unsupported,
         "Copy-only hardening is active until UI edits are migrated to provenance transactions."));
     jmv.capabilities.insert("mob.perspectiveDiff", capability("mob.perspectiveDiff", EProfileCapabilityStatus::Experimental,

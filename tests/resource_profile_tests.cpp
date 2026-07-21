@@ -18,14 +18,11 @@ QString createJmvInstall(QTemporaryDir* temporary)
     const QString root = temporary->path();
     createFile(QDir(root).filePath("game.exe"));
     createFile(QDir(root).filePath("Starter/Engine/game.exe"));
-    createFile(QDir(root).filePath("Starter/addon.dll"));
-    createFile(QDir(root).filePath("Starter/Engine/SpellAddonX.asi"));
     createFile(QDir(root).filePath("Res/textures.res"));
     QDir().mkpath(QDir(root).filePath("Maps"));
     const QString mod = QDir(root).filePath("Starter/MODS/JamaisVu135");
     createFile(QDir(mod).filePath("main.lua"));
     createFile(QDir(mod).filePath("addon.dll"));
-    createFile(QDir(mod).filePath("SPELLADDON.INI"));
     createFile(QDir(mod).filePath("res/databaseJmv.res"));
     QDir().mkpath(QDir(mod).filePath("Maps"));
     return root;
@@ -61,11 +58,17 @@ void ResourceProfileTests::jmvPresetFindsModAndBaseResources()
     QVERIFY(result.mapDirectories[1].endsWith("Maps"));
     QVERIFY(result.runtimeStackComplete);
     QVERIFY(!result.runtimeStackValidated);
-    QCOMPARE(result.runtimeComponents.size(), 6);
+    QCOMPARE(result.runtimeComponents.size(), 1);
+    QCOMPARE(result.runtimeComponents.first().id, QString("starter-engine"));
     QCOMPARE(profileCapabilityStatusName(result.capabilities.value("runtime.directMapLaunch").status),
              QString("experimental"));
     QCOMPARE(result.providers.value("database").id, QString("jmv.v1"));
     QCOMPARE(result.providers.value("equipmentLayout").id, QString("jmv.v1"));
+
+    QVERIFY(QFile::remove(QDir(result.modRoot).filePath("addon.dll")));
+    const SResourceProfileEvaluation withoutJmvAddon =
+        evaluateResourceProfile(root, builtInResourceProfiles()[0]);
+    QVERIFY2(withoutJmvAddon.valid, qPrintable(withoutJmvAddon.messages.join('\n')));
 }
 
 void ResourceProfileTests::basePresetDoesNotRequireJmv()

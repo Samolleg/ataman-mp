@@ -1,7 +1,10 @@
 # JMV direct single-player map launcher
 
 This x86 `.plg` is a temporary, profile-specific provider for the fingerprinted
-JMV runtime stack. It is not loaded into EI Mapper itself. During a test run
+Starter `game.exe`. Its engine hooks depend only on that executable's guarded
+code layout. Starter addon.dll, SpellAddonX.asi, and the frequently updated JMV
+addon.dll are not Endurance bridge dependencies or compatibility gates. It is
+not loaded into EI Mapper itself. During a test run
 the editor copies it into JMV's configured `DEV/Plugin=plugin.dll` slot, where
 Starter calls `EntryBeforePatch` and `EntryAfterPatch`. The slot must be absent;
 Endurance never replaces an installed mod plugin. The provider and other
