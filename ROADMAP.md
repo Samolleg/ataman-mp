@@ -375,6 +375,29 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
 
 ### Critical: structural zone-family NID validation
 
+- [ ] **HIGH — alpha.25 load re-entrancy:** prevent a second map load from
+  starting while the first MOB is still finalising.
+  - The supplied log shows Zone 4 starting at 04:01:21 while Zone 17 visual
+    preloading continued until 04:01:30. Only the Zone 17 landscape was
+    unloaded because its MOB had not yet been registered, leaving both map
+    sets loaded together.
+  - Block map/collection activation throughout every load-finalisation phase;
+    replace unrestricted event pumping with input-excluding progress updates.
+  - Validation must still report real overlaps in this state, but label them as
+    cross-family workspace findings rather than claiming Zone 4 and Zone 17
+    are one runtime family.
+
+- [ ] **RELEASE BLOCKER — alpha.25 JMV launch transport regression:** diagnose
+  runs where staging and `game.exe` launch succeed but the temporary bridge
+  entry point is never invoked.
+  - Run `20260721-190712-5a815226` reached the normal main menu and exited
+    cleanly, but produced neither `runtime.log` nor `bridge-result.log`.
+  - The staged files, JMV DEV `plugin.dll` slot, bridge exports, and exact
+    supported `game.exe` hash were all present; this is not an entrance, map,
+    or relaxed-manifest rejection.
+  - Add explicit module-load/entry-point evidence so this failure identifies
+    whether Starter skipped the plugin, Windows rejected the DLL, or the DEV
+    loader did not call `EntryAfterPatch`.
 - [x] Detect intra-file duplicates and cross-file NID collisions across the
   complete active zone family before more multi-MOB editing is released.
   This is critical because the confirmed `zone7.mob` / `Autozone7altar.mob`

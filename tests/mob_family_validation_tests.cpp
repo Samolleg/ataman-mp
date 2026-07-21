@@ -70,6 +70,7 @@ private slots:
     void workspaceCopyShadowsInstalledLogicalMob();
     void differentLogicalNamesRemainIndependent();
     void missingScriptDependencyReportsExactReferenceSource();
+    void separatelyLoadedMapSetsAreNotReportedAsOneFamily();
 };
 
 void MobFamilyValidationTests::workspaceCopyShadowsInstalledLogicalMob()
@@ -154,6 +155,34 @@ void MobFamilyValidationTests::missingScriptDependencyReportsExactReferenceSourc
     QVERIFY(finding->locations.contains(QString("Reference source: %1").arg(primary)));
     QVERIFY(finding->locations.contains(
         "Searched the active workspace and configured profile Maps sources"));
+}
+
+void MobFamilyValidationTests::separatelyLoadedMapSetsAreNotReportedAsOneFamily()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString zone4 = writeMob(directory.path(), "zone4.mob", mobWithObject(777));
+    const QString zone17 = writeMob(directory.path(), "zone17.mob", mobWithObject(777));
+
+    SMobFamilyValidationRequest request;
+    request.familyLabel = "gz4g";
+    request.profileId = "test";
+    request.seedMobPaths << zone4 << zone17;
+    request.mappedPrimaryMobPath = zone4;
+    request.workspaceRoots << directory.path();
+    request.includeProfileWideMobs = false;
+    const CMobFamilyValidationReport report = CMobFamilyValidator::validate(request);
+
+    const auto mixed = std::find_if(report.findings.cbegin(), report.findings.cend(),
+        [](const SMobFamilyFinding& item) { return item.code == "workspace.unrelated_loaded_mobs"; });
+    QVERIFY(mixed != report.findings.cend());
+    QVERIFY(mixed->locations.contains(zone17));
+
+    const auto collision = std::find_if(report.findings.cbegin(), report.findings.cend(),
+        [](const SMobFamilyFinding& item) { return item.code == "nid.workspace_collision"; });
+    QVERIFY(collision != report.findings.cend());
+    QVERIFY(collision->message.contains("separately loaded map sets"));
+    QVERIFY(collision->message.contains("not one gz4g runtime family"));
 }
 
 QTEST_APPLESS_MAIN(MobFamilyValidationTests)

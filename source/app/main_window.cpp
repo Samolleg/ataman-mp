@@ -2549,7 +2549,7 @@ void MainWindow::startPendingMobFamilyValidation()
         QElapsedTimer elapsed;
         elapsed.start();
         CMobFamilyValidationReport report = CMobFamilyValidator::validate(request);
-        ei::log(eLogInfo, QString("MOB family validation worker finished family:%1 elapsedMs:%2 members:%3 findings:%4")
+        ei::log(eLogInfo, QString("MOB validation worker finished context:%1 elapsedMs:%2 members:%3 findings:%4")
                 .arg(request.familyLabel).arg(elapsed.elapsed())
                 .arg(report.members.size()).arg(report.findings.size()));
         return report;
@@ -2577,7 +2577,8 @@ void MainWindow::applyMobFamilyValidationReport(const CMobFamilyValidationReport
     QSet<QString> currentRisks;
     for(const SMobFamilyFinding& finding : m_familyValidation.findings)
     {
-        if(finding.code != "nid.collision" && finding.code != "range.legacy_overlap")
+        if(finding.code != "nid.collision" && finding.code != "nid.workspace_collision"
+           && finding.code != "range.legacy_overlap" && finding.code != "range.workspace_overlap")
             continue;
         QStringList locations = finding.locations;
         locations.sort(Qt::CaseInsensitive);
@@ -2622,7 +2623,7 @@ void MainWindow::applyMobFamilyValidationReport(const CMobFamilyValidationReport
     }
     m_ui->treeWidget->setValidationNids(criticalNids, warningNids);
     updateMobFamilyValidationPanel();
-    ei::log(eLogInfo, QString("MOB family validation UI applied family:%1 elapsedMs:%2 members:%3 findings:%4")
+    ei::log(eLogInfo, QString("MOB validation UI applied context:%1 elapsedMs:%2 members:%3 findings:%4")
             .arg(m_familyValidation.familyLabel).arg(elapsed.elapsed())
             .arg(m_familyValidation.members.size()).arg(m_familyValidation.findings.size()));
     ei::log(m_familyValidation.criticalCount() > 0 ? eLogWarning : eLogInfo,

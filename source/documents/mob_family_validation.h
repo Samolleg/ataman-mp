@@ -33,6 +33,7 @@ struct SMobFamilyMember
     QVector<SMobObjectSnapshot> objects;
     QVector<SMobIdRangeSnapshot> ranges;
     QString script;
+    bool activeRuntimeFamily = true;
 };
 
 struct SMobNidOwner
@@ -46,6 +47,7 @@ struct SMobNidOwner
     quint32 objectType = 0;
     bool hasObjectType = false;
     bool useInScript = false;
+    bool activeRuntimeFamily = true;
     bool hasParentId = false;
     quint32 parentId = 0;
 };
