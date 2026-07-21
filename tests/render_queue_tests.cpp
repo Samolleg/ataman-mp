@@ -3,6 +3,7 @@
 #include "render_material.h"
 #include "render_queue.h"
 #include "render_scheduling.h"
+#include "render_environment.h"
 
 class RenderQueueTests : public QObject
 {
@@ -14,6 +15,7 @@ private slots:
     void groupsOnlyCompatibleInstanceRuns();
     void selectsModernAndFallbackCapabilities();
     void appliesRenderSchedulingOptions();
+    void derivesEnvironmentFromWorldValues();
 };
 
 void RenderQueueTests::alphaClassification()
@@ -117,6 +119,23 @@ void RenderQueueTests::appliesRenderSchedulingOptions()
     QVERIFY(ei::renderVsyncFromOptions("{\"Render\":{\"renderVSync\":true}}"));
     QVERIFY(!ei::renderVsyncFromOptions("{\"Render\":{\"renderVSync\":false}}"));
     QVERIFY(ei::renderVsyncFromOptions("invalid", true));
+}
+
+void RenderQueueTests::derivesEnvironmentFromWorldValues()
+{
+    const ei::SRenderEnvironment noon =
+        ei::renderEnvironmentForValues(12.0f, 0.25f, 0.75f);
+    QCOMPARE(noon.timeHours, 12.0f);
+    QCOMPARE(noon.ambientStrength, 0.25f);
+    QCOMPARE(noon.sunStrength, 0.75f);
+    QVERIFY(noon.sunDirection.z() < -0.99f);
+
+    const ei::SRenderEnvironment midnight =
+        ei::renderEnvironmentForValues(24.0f, -1.0f, 9.0f);
+    QCOMPARE(midnight.timeHours, 0.0f);
+    QCOMPARE(midnight.ambientStrength, 0.0f);
+    QCOMPARE(midnight.sunStrength, 4.0f);
+    QVERIFY(midnight.sunColor.z() > midnight.sunColor.x());
 }
 
 QTEST_APPLESS_MAIN(RenderQueueTests)

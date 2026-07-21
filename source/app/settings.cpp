@@ -389,6 +389,12 @@ void CSettings::initOptions()
     aOpt.append(QSharedPointer<COpt>(new COptBool("animateUnits", true)));
     aOpt.append(QSharedPointer<COpt>(new COptBool("renderPerformanceCounters", false)));
     aOpt.append(QSharedPointer<COpt>(new COptBool("renderVSync", true)));
+    aOpt.append(QSharedPointer<COpt>(new COptBool("environmentLighting", true)));
+    aOpt.append(QSharedPointer<COpt>(new COptBool("drawSkybox", true)));
+    aOpt.append(QSharedPointer<COpt>(new COptBool("renderFog", true)));
+    aOpt.append(QSharedPointer<COpt>(new COptBool("renderSceneLights", true)));
+    aOpt.append(QSharedPointer<COpt>(new COptBool("renderShadows", true)));
+    aOpt.append(QSharedPointer<COpt>(new COptBool("overrideWorldTime", false)));
 
 
     //init default options for digits
@@ -400,6 +406,7 @@ void CSettings::initOptions()
     aOpt.append(QSharedPointer<COpt>(new COptInt("undoHistoryLimit", 512)));
     aOpt.append(QSharedPointer<COpt>(new COptInt("mapTestWarningVersion", 0)));
     aOpt.append(QSharedPointer<COpt>(new COptInt("renderFpsCap", 0)));
+    aOpt.append(QSharedPointer<COpt>(new COptInt("renderTimeOfDay", 1200)));
 
     const QMap<QString, QString> shortcutDefaults = {
         {"shortcutOpen", "Ctrl+O"},

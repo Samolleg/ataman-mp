@@ -11,6 +11,7 @@
 #include <QVector>
 #include <QVector3D>
 #include <QVector4D>
+#include <QByteArray>
 
 #include <algorithm>
 
@@ -30,6 +31,8 @@ struct SRenderItem
     bool instanceEligible{false};
     QVector4D pickingColor;
     quint64 sequence{0};
+    bool castsShadow{false};
+    bool dynamicShadow{false};
 };
 
 inline void sortRenderItems(QVector<SRenderItem>& items)
@@ -103,10 +106,14 @@ public:
     bool collecting() const { return m_collecting; }
     bool collectingSelection() const { return m_collecting && m_selectionPass; }
     void submit(CPart* part, QOpenGLTexture* texture, const QMatrix4x4& modelMatrix,
-                ERenderMaterialClass materialClass, bool highlighted);
+                ERenderMaterialClass materialClass, bool highlighted,
+                bool castsShadow = false, bool dynamicShadow = false);
     void submitSelection(CPart* part, const QMatrix4x4& modelMatrix,
                          const QVector4D& pickingColor);
     void flush();
+    void flushShadow(QOpenGLShaderProgram* shadowProgram,
+                     bool dynamicOnly = false, bool staticOnly = false);
+    QByteArray staticShadowFingerprint() const;
 
 private:
     int reserveInstanceBytes(int bytes);

@@ -12,6 +12,8 @@
 #include <QDateTime>
 #include <QHash>
 #include <QPointer>
+#include <QOpenGLBuffer>
+#include <QElapsedTimer>
 
 #include "types.h"
 #include "select_window.h"
@@ -40,11 +42,16 @@ class CRoundMobForm;
 class CTreeView;
 class IPropertyBase;
 class CTileForm;
+class CLight;
+class QOpenGLFramebufferObject;
+class RenderQueueContext;
+class CViewFrustum;
 class CPreviewTile;
 class CLandscape;
 class CExternalScriptWorkspaceManager;
 class CMobScriptWindow;
 struct SMobParameterState;
+namespace ei { struct SRenderEnvironment; }
 
 ///
 /// \brief The CView class is the main class for managing and editing 3D scene contents. It is also a link between read out *.mob files and their editing. It also controls the camera and current operations.
@@ -179,6 +186,17 @@ private:
     QVector<CNode*> spatiallyVisibleNodes(CMob* mob, const CViewFrustum* frustum,
                                           SSpatialQueryStats* stats);
     QString sceneSourceFingerprint();
+    void drawSkybox(const QMatrix4x4& cameraMatrix,
+                    const ei::SRenderEnvironment& environment);
+    void applyEnvironmentUniforms(QOpenGLShaderProgram& program,
+                                  const ei::SRenderEnvironment& environment,
+                                  const QVector<CLight*>& lights,
+                                  bool enabled, bool fogEnabled);
+    bool renderShadowMap(const QVector3D& cameraPosition,
+                         const ei::SRenderEnvironment& environment,
+                         RenderQueueContext& queue,
+                         const CViewFrustum* frustum);
+    void applyShadowUniforms(QOpenGLShaderProgram& program, bool enabled);
 
 
 public slots:
@@ -219,6 +237,17 @@ private:
     QOpenGLShaderProgram m_program;
     QOpenGLShaderProgram m_landProgram;
     QOpenGLShaderProgram m_selectProgram;
+    QOpenGLShaderProgram m_skyProgram;
+    QOpenGLBuffer m_skyBuffer{QOpenGLBuffer::VertexBuffer};
+    bool m_skyResourcesChecked{false};
+    bool m_skyResourcesAvailable{false};
+    QOpenGLShaderProgram m_shadowProgram;
+    QOpenGLFramebufferObject* m_shadowFbo{nullptr};
+    QOpenGLFramebufferObject* m_dynamicShadowFbo{nullptr};
+    QMatrix4x4 m_lightSpaceMatrix;
+    QElapsedTimer m_shadowUpdateTimer;
+    bool m_shadowInitialized{false};
+    QByteArray m_staticShadowFingerprint;
     QOpenGLTimerQuery* m_gpuTimer;
     bool m_gpuTimerPending;
     QMatrix4x4 m_projection;
