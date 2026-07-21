@@ -1,6 +1,6 @@
 EI Mapper: Endurance Edition 0.2.1 environment preview
 Branch: feature/render-pipeline
-Commit: 82e7ded
+Graphics commits: 82e7ded, 962542a
 
 This is an isolated graphics test build. It is not merged into main.
 
