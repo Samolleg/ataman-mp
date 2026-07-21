@@ -1,0 +1,17 @@
+EI Mapper: Endurance Edition 0.2.1 environment preview
+Branch: feature/render-pipeline
+Commit: 82e7ded
+
+This is an isolated graphics test build. It is not merged into main.
+
+Environment preview includes:
+- selected-profile sky00-sky05 resource skybox
+- MOB WORLD_SET ambient, sunlight, and time inputs
+- transient 00:00-23:59 time override
+- colored skylight and continuous dawn/dusk transitions
+- time-coherent atmospheric fog
+- range/frustum culled omnidirectional MOB lights
+- cached static and regularly refreshed animated directional shadows
+- 3x3 filtered directional shadow edges
+
+Validation guide: ENVIRONMENT_RENDERING_VALIDATION.md
