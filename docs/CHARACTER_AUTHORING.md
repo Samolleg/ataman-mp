@@ -226,6 +226,27 @@ python scripts\character_asset_report.py EXTRACTED_COPY `
   --output STAGE\character-assets.json
 ```
 
+For a copied standalone FIG or an exact FIG member inside a copied RES, run the
+safe repair tool in diagnose-only mode first:
+
+```powershell
+python scripts\character_fig_repair.py COPIED.res `
+  --member initwesd14weapon.fig `
+  --report STAGE\reports\shield-diagnose.json
+```
+
+Add `--apply-safe-repairs --output STAGE\candidate\shield.repaired.fig` only
+after reviewing the plan. The tool refuses in-place/pre-existing outputs and
+repairs exactly two proven renderer-undrawable structures: a one/two-index tail
+that cannot form a triangle, and triangles whose three component records repeat
+a position index. It preserves every byte before the index array and after the
+original index array, changing only the header index count and retained index
+values. Invalid component/vertex references fail closed. The audited
+`initwesd14weapon.fig` control changes from 2,944 to 2,826 indices, then reports
+zero dangling indices, zero repeated-vertex triangles, and no structural error;
+the repaired FIG SHA-256 is
+`5FC8F292E62CB35C5C0688405A7789D411733622D1D1535AADA584D9DF9727BF`.
+
 For a deterministic build, create `inputs/`, `candidate/`, `reports/`, and
 `rollback/` siblings. The build manifest must include tool hashes, command line,
 provider/profile, ordered inputs, output SHA-256, semantic comparison result,
