@@ -47,6 +47,9 @@ class QFrame;
 class QResizeEvent;
 class QJsonObject;
 class QProgressDialog;
+class QDialog;
+class QScrollArea;
+class QListWidget;
 
 struct SWindowTitle
 {
@@ -130,6 +133,9 @@ private:
     void notifyProposedNid(quint32 nid, const QString& mobPath);
     void showMapTestResultNotification(const QJsonObject& report);
     void positionMapTestResultNotification();
+    void showUnitTexturePreview();
+    void updateUnitTexturePreview();
+    void renderUnitTexturePreview();
 
 private slots:
     void showOutliner(bool bShow);
@@ -233,6 +239,13 @@ private:
     QAction* m_mapTestAction;
     QAction* m_stopMapTestAction;
     CJmvMapTestLauncher* m_mapTestLauncher;
+    QDialog* m_unitTextureDialog{nullptr};
+    QLabel* m_unitTextureDetails{nullptr};
+    QLabel* m_unitTextureImage{nullptr};
+    QScrollArea* m_unitTextureScroll{nullptr};
+    QListWidget* m_unitTextureLayers{nullptr};
+    QListWidget* m_unitTextureParts{nullptr};
+    bool m_unitTextureUpdating{false};
     bool m_closeAfterTestStop;
     QMap<EButtonOp, QAction*> m_operationActions;
     QComboBox* m_entranceCombo;

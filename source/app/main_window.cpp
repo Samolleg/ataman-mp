@@ -43,8 +43,15 @@
 #include <QResizeEvent>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QDialog>
+#include <QScrollArea>
+#include <QListWidget>
+#include <QGroupBox>
+#include <QPainter>
+#include <QPolygonF>
 #include <QtConcurrent/QtConcurrentRun>
 
+#include <cmath>
 #include <limits>
 
 #include "resourcemanager.h"
@@ -74,6 +81,7 @@
 #include "collection_document.h"
 #include "collection_editor_dialog.h"
 #include "script_reference_analyzer.h"
+#include "unit.h"
 
 namespace
 {
@@ -496,6 +504,7 @@ MainWindow::MainWindow(QWidget* parent) :
     QAction* openBugReportingGuide = new QAction(tr("Open Bug Reporting Guide"), this);
     QAction* gameAndModSetup = new QAction(tr("Game and Mod Setup..."), this);
     QAction* compareMobFiles = new QAction(tr("Compare MOB Files..."), this);
+    QAction* showUnitTexture = new QAction(tr("Show Selected Unit Final Texture..."), this);
     QAction* validateMobFamily = new QAction(tr("Validate Active MOB Family"), this);
     QAction* validateCurrentMob = new QAction(tr("Validate Current MOB Only"), this);
     QAction* validateSelectedMobs = new QAction(tr("Validate Selected MOB Files..."), this);
@@ -519,6 +528,7 @@ MainWindow::MainWindow(QWidget* parent) :
     m_ui->menuTools->addAction(openLogsFolder);
     m_ui->menuTools->addAction(openTestRunsFolder);
     m_ui->menuTools->addAction(openBugReportingGuide);
+    viewMenu->addAction(showUnitTexture);
     connect(openBackupFolder, &QAction::triggered, this, [this]()
     {
         QString error;
@@ -572,6 +582,8 @@ MainWindow::MainWindow(QWidget* parent) :
         dialog->raise();
         dialog->activateWindow();
     });
+    connect(showUnitTexture, &QAction::triggered,
+            this, &MainWindow::showUnitTexturePreview);
     connect(validateMobFamily, &QAction::triggered, this, &MainWindow::showMobFamilyValidation);
     connect(validateCurrentMob, &QAction::triggered, this, [this]()
     {
@@ -878,6 +890,8 @@ MainWindow::MainWindow(QWidget* parent) :
     QObject::connect(m_pView, SIGNAL(updateMainWindowTitle(eTitleTypeData,QString)), this, SLOT(updateWindowTitle(eTitleTypeData,QString)));
     QObject::connect(CScene::getInstance(), SIGNAL(modeChanged()), m_pView, SLOT(viewParameters()));
     QObject::connect(m_pView, SIGNAL(showOutlinerSignal(bool)), this, SLOT(showOutliner(bool)));
+    connect(m_pView, &CView::selectionChanged,
+            this, &MainWindow::updateUnitTexturePreview);
 
 
 //    m_ui->progressBar->setValue(0);
@@ -942,6 +956,264 @@ MainWindow::~MainWindow()
     m_pView = nullptr;
     delete m_ui;
     CIconManager::getInstance()->~CIconManager();
+}
+
+void MainWindow::showUnitTexturePreview()
+{
+    if(!m_unitTextureDialog)
+    {
+        m_unitTextureDialog = new QDialog(this);
+        m_unitTextureDialog->setAttribute(Qt::WA_QuitOnClose, false);
+        m_unitTextureDialog->setWindowTitle(tr("Final character texture"));
+        QVBoxLayout* layout = new QVBoxLayout(m_unitTextureDialog);
+        m_unitTextureDetails = new QLabel(m_unitTextureDialog);
+        m_unitTextureDetails->setTextInteractionFlags(Qt::TextSelectableByMouse);
+        layout->addWidget(m_unitTextureDetails);
+
+        QHBoxLayout* controls = new QHBoxLayout;
+        QGroupBox* layerGroup = new QGroupBox(tr("Texture layers"), m_unitTextureDialog);
+        QVBoxLayout* layerLayout = new QVBoxLayout(layerGroup);
+        m_unitTextureLayers = new QListWidget(layerGroup);
+        m_unitTextureLayers->setMaximumHeight(180);
+        layerLayout->addWidget(m_unitTextureLayers);
+        QHBoxLayout* layerButtons = new QHBoxLayout;
+        QPushButton* showLayers = new QPushButton(tr("Show all"), layerGroup);
+        QPushButton* hideLayers = new QPushButton(tr("Hide all"), layerGroup);
+        layerButtons->addWidget(showLayers);
+        layerButtons->addWidget(hideLayers);
+        layerLayout->addLayout(layerButtons);
+        controls->addWidget(layerGroup);
+
+        QGroupBox* partGroup = new QGroupBox(tr("Part UV projections"), m_unitTextureDialog);
+        QVBoxLayout* partLayout = new QVBoxLayout(partGroup);
+        m_unitTextureParts = new QListWidget(partGroup);
+        m_unitTextureParts->setMaximumHeight(180);
+        partLayout->addWidget(m_unitTextureParts);
+        QHBoxLayout* partButtons = new QHBoxLayout;
+        QPushButton* showParts = new QPushButton(tr("Show all"), partGroup);
+        QPushButton* hideParts = new QPushButton(tr("Hide all"), partGroup);
+        partButtons->addWidget(showParts);
+        partButtons->addWidget(hideParts);
+        partLayout->addLayout(partButtons);
+        controls->addWidget(partGroup);
+        layout->addLayout(controls);
+
+        auto setAllChecked = [this](QListWidget* list, bool checked)
+        {
+            if(!list)
+                return;
+            m_unitTextureUpdating = true;
+            for(int row = 0; row < list->count(); ++row)
+                list->item(row)->setCheckState(checked ? Qt::Checked : Qt::Unchecked);
+            m_unitTextureUpdating = false;
+            renderUnitTexturePreview();
+        };
+        connect(showLayers, &QPushButton::clicked, this,
+                [setAllChecked, this]() { setAllChecked(m_unitTextureLayers, true); });
+        connect(hideLayers, &QPushButton::clicked, this,
+                [setAllChecked, this]() { setAllChecked(m_unitTextureLayers, false); });
+        connect(showParts, &QPushButton::clicked, this,
+                [setAllChecked, this]() { setAllChecked(m_unitTextureParts, true); });
+        connect(hideParts, &QPushButton::clicked, this,
+                [setAllChecked, this]() { setAllChecked(m_unitTextureParts, false); });
+        connect(m_unitTextureLayers, &QListWidget::itemChanged, this,
+                [this](QListWidgetItem*)
+        {
+            if(!m_unitTextureUpdating)
+                renderUnitTexturePreview();
+        });
+        connect(m_unitTextureParts, &QListWidget::itemChanged, this,
+                [this](QListWidgetItem*)
+        {
+            if(!m_unitTextureUpdating)
+                renderUnitTexturePreview();
+        });
+
+        m_unitTextureImage = new QLabel;
+        m_unitTextureImage->setAlignment(Qt::AlignLeft | Qt::AlignTop);
+        m_unitTextureScroll = new QScrollArea(m_unitTextureDialog);
+        m_unitTextureScroll->setWidget(m_unitTextureImage);
+        m_unitTextureScroll->setWidgetResizable(false);
+        layout->addWidget(m_unitTextureScroll, 1);
+        QDialogButtonBox* buttons = new QDialogButtonBox(
+            QDialogButtonBox::Close, m_unitTextureDialog);
+        connect(buttons, &QDialogButtonBox::rejected,
+                m_unitTextureDialog, &QDialog::close);
+        layout->addWidget(buttons);
+        m_unitTextureDialog->resize(1100, 900);
+    }
+    m_unitTextureDialog->show();
+    updateUnitTexturePreview();
+    m_unitTextureDialog->raise();
+    m_unitTextureDialog->activateWindow();
+}
+
+void MainWindow::updateUnitTexturePreview()
+{
+    if(!m_unitTextureDialog || !m_unitTextureDialog->isVisible())
+        return;
+
+    const QList<CNode*> selected = m_pView ? m_pView->selectedNodes() : QList<CNode*>();
+    CUnit* unit = selected.size() == 1 ? dynamic_cast<CUnit*>(selected.first()) : nullptr;
+    if(!unit)
+    {
+        m_unitTextureDialog->setWindowTitle(tr("Final character texture"));
+        m_unitTextureDetails->setText(tr("Select a single unit to preview its texture and UVs."));
+        m_unitTextureImage->clear();
+        m_unitTextureImage->resize(0, 0);
+        m_unitTextureUpdating = true;
+        m_unitTextureLayers->clear();
+        m_unitTextureParts->clear();
+        m_unitTextureUpdating = false;
+        return;
+    }
+
+    QStringList layers = unit->renderedBodyTextureLayers();
+    if(layers.isEmpty())
+        layers.append(unit->renderedPrimaryTextureName());
+    const QStringList partNames = unit->renderedBodyPartUvTriangles().keys();
+    m_unitTextureUpdating = true;
+    m_unitTextureLayers->clear();
+    for(const QString& layer : layers)
+    {
+        QListWidgetItem* item = new QListWidgetItem(layer, m_unitTextureLayers);
+        item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
+        item->setCheckState(Qt::Checked);
+    }
+    m_unitTextureParts->clear();
+    for(const QString& part : partNames)
+    {
+        QListWidgetItem* item = new QListWidgetItem(part, m_unitTextureParts);
+        item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
+        item->setCheckState(Qt::Checked);
+    }
+    m_unitTextureUpdating = false;
+    renderUnitTexturePreview();
+}
+
+void MainWindow::renderUnitTexturePreview()
+{
+    if(!m_unitTextureDialog || !m_unitTextureDialog->isVisible() || m_unitTextureUpdating)
+        return;
+    const QList<CNode*> selected = m_pView ? m_pView->selectedNodes() : QList<CNode*>();
+    CUnit* unit = selected.size() == 1 ? dynamic_cast<CUnit*>(selected.first()) : nullptr;
+    if(!unit)
+    {
+        updateUnitTexturePreview();
+        return;
+    }
+
+    QStringList allLayers = unit->renderedBodyTextureLayers();
+    if(allLayers.isEmpty())
+        allLayers.append(unit->renderedPrimaryTextureName());
+    QStringList visibleLayers;
+    for(int row = 0; row < m_unitTextureLayers->count(); ++row)
+        if(m_unitTextureLayers->item(row)->checkState() == Qt::Checked)
+            visibleLayers.append(m_unitTextureLayers->item(row)->text());
+
+    QString diagnostic;
+    QImage texture;
+    if(!visibleLayers.isEmpty())
+        texture = CTextureList::getInstance()->layeredTextureImage(
+            visibleLayers, unit->renderedModelName(), &diagnostic);
+    else if(!allLayers.isEmpty())
+    {
+        const QImage sizeReference = CTextureList::getInstance()->textureImage(
+            allLayers.first(), unit->renderedModelName());
+        if(!sizeReference.isNull())
+        {
+            texture = QImage(sizeReference.size(), QImage::Format_ARGB32_Premultiplied);
+            texture.fill(Qt::transparent);
+        }
+    }
+
+    m_unitTextureDialog->setWindowTitle(
+        tr("Final character texture — %1").arg(unit->databaseName()));
+    if(texture.isNull())
+    {
+        if(diagnostic.isEmpty())
+            diagnostic = tr("The selected texture layers could not be decoded as a CPU image.");
+        m_unitTextureDetails->setText(diagnostic);
+        m_unitTextureImage->clear();
+        m_unitTextureImage->resize(0, 0);
+        return;
+    }
+
+    QImage preview(texture.size(), QImage::Format_RGB32);
+    QPainter painter(&preview);
+    const int cell = 16;
+    for(int y = 0; y < preview.height(); y += cell)
+        for(int x = 0; x < preview.width(); x += cell)
+            painter.fillRect(x, y, cell, cell,
+                ((x / cell) + (y / cell)) % 2
+                    ? QColor(190, 190, 190) : QColor(235, 235, 235));
+    painter.drawImage(0, 0, texture);
+
+    QSet<QString> visibleParts;
+    for(int row = 0; row < m_unitTextureParts->count(); ++row)
+        if(m_unitTextureParts->item(row)->checkState() == Qt::Checked)
+            visibleParts.insert(m_unitTextureParts->item(row)->text());
+    const QMap<QString, QVector<QVector2D>> projections =
+        unit->renderedBodyPartUvTriangles();
+    painter.setRenderHint(QPainter::Antialiasing, false);
+    auto texturePoint = [&preview](const QVector2D& uv)
+    {
+        const double wrappedU = uv.x() - std::floor(double(uv.x()));
+        const double wrappedV = uv.y() - std::floor(double(uv.y()));
+        return QPointF(wrappedU * preview.width(),
+                       wrappedV * preview.height());
+    };
+    for(auto it = projections.constBegin(); it != projections.constEnd(); ++it)
+    {
+        if(!visibleParts.contains(it.key()))
+            continue;
+        const QColor color = QColor::fromHsv(int(qHash(it.key()) % 360), 230, 255, 220);
+        painter.setPen(QPen(color, 1.0));
+        QRectF bounds;
+        bool boundsInitialized = false;
+        const QVector<QVector2D>& coordinates = it.value();
+        for(int vertex = 0; vertex + 2 < coordinates.size(); vertex += 3)
+        {
+            QPolygonF triangle;
+            for(int corner = 0; corner < 3; ++corner)
+            {
+                const QPointF point = texturePoint(coordinates.at(vertex + corner));
+                triangle.append(point);
+                if(!boundsInitialized)
+                {
+                    bounds = QRectF(point, QSizeF(0, 0));
+                    boundsInitialized = true;
+                }
+                else
+                    bounds |= QRectF(point, QSizeF(0, 0));
+            }
+            painter.drawPolygon(triangle);
+        }
+        if(boundsInitialized)
+        {
+            const QString label = it.key();
+            const QFontMetrics metrics(painter.font());
+            QRectF labelRect = metrics.boundingRect(label);
+            labelRect.moveCenter(bounds.center());
+            labelRect.adjust(-3, -1, 3, 1);
+            painter.fillRect(labelRect, QColor(0, 0, 0, 190));
+            painter.setPen(color);
+            painter.drawText(labelRect, Qt::AlignCenter, label);
+        }
+    }
+    painter.end();
+
+    // Preserve the retained viewer's authoring orientation. The follow-up
+    // regression branch owns the pending label/PNT3 plate corrections.
+    preview = preview.mirrored(true, true);
+
+    m_unitTextureDetails->setText(
+        tr("Model: %1\nSize: %2 × %3\nVisible layers: %4 / %5\n"
+           "UV projection: renderer-effective QImage upload, Repeat wrapping")
+            .arg(unit->renderedModelName()).arg(texture.width()).arg(texture.height())
+            .arg(visibleLayers.size()).arg(allLayers.size()));
+    m_unitTextureImage->setPixmap(QPixmap::fromImage(preview));
+    m_unitTextureImage->adjustSize();
 }
 
 void MainWindow::testFunc1()
