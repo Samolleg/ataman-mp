@@ -16,10 +16,29 @@ float worldFloat(const CWorldSet* worldSet, EWsType type, float fallback)
     return ok && qIsFinite(value) ? value : fallback;
 }
 
-float smoothStep(float edge0, float edge1, float value)
+QVector3D lerp(const QVector3D& from, const QVector3D& to, float amount)
 {
-    const float t = qBound(0.0f, (value - edge0) / (edge1 - edge0), 1.0f);
-    return t * t * (3.0f - 2.0f * t);
+    return from * (1.0f - amount) + to * amount;
+}
+
+QVector3D cyclicHue(float hours)
+{
+    // The stock weather fields change continuously over the full clock cycle;
+    // they do not gate the directional light at a horizon. These four keys are
+    // a bounded editor approximation until provider weather-RGB curves are
+    // exposed by the immutable database/resource service.
+    static const QVector3D keys[] = {
+        QVector3D(0.48f, 0.56f, 0.76f),
+        QVector3D(0.92f, 0.70f, 0.48f),
+        QVector3D(1.00f, 0.96f, 0.86f),
+        QVector3D(0.92f, 0.64f, 0.43f),
+        QVector3D(0.48f, 0.56f, 0.76f)
+    };
+    const float phase = hours / 6.0f;
+    const int index = qBound(0, int(qFloor(phase)), 3);
+    const float local = phase - float(index);
+    const float smooth = local * local * (3.0f - 2.0f * local);
+    return lerp(keys[index], keys[index + 1], smooth);
 }
 }
 
@@ -41,31 +60,24 @@ SRenderEnvironment renderEnvironmentForValues(float timeHours,
     result.ambientStrength = qBound(0.0f, ambientStrength, 2.0f);
     result.sunStrength = qBound(0.0f, sunStrength, 4.0f);
 
-    // MOB time is stored in hours. The preview follows the conventional EI
-    // day arc: sunrise at 06:00, zenith at 12:00, sunset at 18:00. The MOB's
-    // independent ambient/sun fields remain the authoritative intensities.
-    const float dayAngle = qDegreesToRadians((result.timeHours - 6.0f) * 15.0f);
-    const float elevation = qSin(dayAngle);
-    const float azimuth = qDegreesToRadians(result.timeHours * 15.0f + 35.0f);
-    const float horizontal = qSqrt(qMax(0.0f, 1.0f - elevation * elevation));
+    // EI rotates a slanted light vector around the map. It neither crosses a
+    // horizon nor reaches a vertical zenith, so light strength never vanishes
+    // merely because the clock advances.
+    result.skyRotationDegrees = result.timeHours * 15.0f;
+    const float azimuth = qDegreesToRadians(result.skyRotationDegrees + 35.0f);
+    const float vertical = 0.62f;
+    const float horizontal = qSqrt(1.0f - vertical * vertical);
     const QVector3D fromSurface(horizontal * qCos(azimuth),
-                                horizontal * qSin(azimuth), elevation);
+                                horizontal * qSin(azimuth), vertical);
     result.sunDirection = -fromSurface.normalized();
 
-    const float daylight = smoothStep(-0.12f, 0.28f, elevation);
-    const QVector3D nightColor(0.22f, 0.29f, 0.48f);
-    const QVector3D dayColor(1.0f, 0.96f, 0.86f);
-    result.sunColor = nightColor * (1.0f - daylight) + dayColor * daylight;
-    result.sunStrength *= daylight;
-    const QVector3D nightAmbient(0.20f, 0.25f, 0.38f);
-    const QVector3D dayAmbient(0.72f, 0.78f, 0.84f);
-    result.ambientColor = nightAmbient * (1.0f - daylight)
-                        + dayAmbient * daylight;
-    const QVector3D nightFog(0.055f, 0.075f, 0.13f);
-    const QVector3D dayFog(0.58f, 0.66f, 0.72f);
-    result.fogColor = nightFog * (1.0f - daylight) + dayFog * daylight;
-    result.fogStart = 180.0f + 70.0f * daylight;
-    result.fogEnd = 650.0f + 250.0f * daylight;
+    result.sunColor = cyclicHue(result.timeHours);
+    result.ambientColor = lerp(QVector3D(0.52f, 0.58f, 0.68f),
+                               result.sunColor, 0.35f);
+    result.fogColor = lerp(QVector3D(0.46f, 0.52f, 0.60f),
+                           result.sunColor, 0.28f);
+    result.fogStart = 250.0f;
+    result.fogEnd = 900.0f;
     return result;
 }
 

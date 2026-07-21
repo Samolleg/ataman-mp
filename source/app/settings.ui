@@ -452,8 +452,8 @@
            </item>
            <item>
             <widget class="QCheckBox" name="drawSkybox">
-             <property name="text"><string>Game-resource skybox</string></property>
-             <property name="toolTip"><string>Draws sky00 through sky05 from the selected resource profile.</string></property>
+             <property name="text"><string>Game-resource sky</string></property>
+             <property name="toolTip"><string>Draws the rotating nask0sky geometry with Sky00 from the selected resource profile.</string></property>
              <property name="checked"><bool>true</bool></property>
             </widget>
            </item>

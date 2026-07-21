@@ -33,6 +33,7 @@ public:
     QList<QString>& figureList() {return m_arrFigureForComboBox;}
     QStringList figurePartNames(const QString& name);
     QByteArray modelAnimation(const QString& name);
+    QByteArray resourceData(const QString& name, QString* sourcePath = nullptr) const;
 
     void initResource();
     void refreshConfiguredSources();

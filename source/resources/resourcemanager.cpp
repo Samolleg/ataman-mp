@@ -618,6 +618,13 @@ QByteArray CObjectList::modelAnimation(const QString& name)
     return bytes;
 }
 
+QByteArray CObjectList::resourceData(const QString& name, QString* sourcePath) const
+{
+    QByteArray bytes;
+    readIndexedResource(configuredResourceSources(m_pSettings), name, bytes, sourcePath);
+    return bytes;
+}
+
 void CObjectList::initResource()
 {
     QSet<QString> empty;

@@ -10,6 +10,7 @@ namespace ei {
 struct SRenderEnvironment
 {
     float timeHours{12.0f};
+    float skyRotationDegrees{0.0f};
     float ambientStrength{0.2f};
     float sunStrength{0.6f};
     QVector3D sunDirection{0.0f, -0.7f, -0.7f};

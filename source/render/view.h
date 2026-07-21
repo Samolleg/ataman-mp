@@ -290,6 +290,7 @@ private:
     QOpenGLShaderProgram m_selectProgram;
     QOpenGLShaderProgram m_skyProgram;
     QOpenGLBuffer m_skyBuffer{QOpenGLBuffer::VertexBuffer};
+    int m_skyVertexCount{0};
     bool m_skyResourcesChecked{false};
     bool m_skyResourcesAvailable{false};
     QOpenGLShaderProgram m_shadowProgram;

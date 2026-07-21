@@ -10,7 +10,9 @@
 #include <QMessageBox>
 #include <QCryptographicHash>
 #include <QOpenGLFramebufferObject>
+#include <QtEndian>
 #include <cstddef>
+#include <cstring>
 
 #include "view.h"
 #include "render_scheduling.h"
@@ -58,14 +60,171 @@ struct SSkyVertex
     QVector2D texture;
 };
 
-const SSkyVertex kSkyVertices[] = {
-    {{ 1,-1,-1},{0,0}},{{ 1, 1,-1},{1,0}},{{ 1, 1, 1},{1,1}},{{ 1,-1,-1},{0,0}},{{ 1, 1, 1},{1,1}},{{ 1,-1, 1},{0,1}},
-    {{-1, 1,-1},{0,0}},{{-1,-1,-1},{1,0}},{{-1,-1, 1},{1,1}},{{-1, 1,-1},{0,0}},{{-1,-1, 1},{1,1}},{{-1, 1, 1},{0,1}},
-    {{ 1, 1,-1},{0,0}},{{-1, 1,-1},{1,0}},{{-1, 1, 1},{1,1}},{{ 1, 1,-1},{0,0}},{{-1, 1, 1},{1,1}},{{ 1, 1, 1},{0,1}},
-    {{-1,-1,-1},{0,0}},{{ 1,-1,-1},{1,0}},{{ 1,-1, 1},{1,1}},{{-1,-1,-1},{0,0}},{{ 1,-1, 1},{1,1}},{{-1,-1, 1},{0,1}},
-    {{-1,-1, 1},{0,0}},{{ 1,-1, 1},{1,0}},{{ 1, 1, 1},{1,1}},{{-1,-1, 1},{0,0}},{{ 1, 1, 1},{1,1}},{{-1, 1, 1},{0,1}},
-    {{-1, 1,-1},{0,0}},{{ 1, 1,-1},{1,0}},{{ 1,-1,-1},{1,1}},{{-1, 1,-1},{0,0}},{{ 1,-1,-1},{1,1}},{{-1,-1,-1},{0,1}}
+class SkyFigureReader
+{
+public:
+    explicit SkyFigureReader(const QByteArray& bytes) : m_bytes(bytes) {}
+
+    bool skip(qint64 count)
+    {
+        if(count < 0 || m_offset + count > m_bytes.size()) return false;
+        m_offset += int(count);
+        return true;
+    }
+
+    bool u16(quint16* value)
+    {
+        if(!value || m_offset + 2 > m_bytes.size()) return false;
+        *value = qFromLittleEndian<quint16>(
+            reinterpret_cast<const uchar*>(m_bytes.constData() + m_offset));
+        m_offset += 2;
+        return true;
+    }
+
+    bool u32(quint32* value)
+    {
+        if(!value || m_offset + 4 > m_bytes.size()) return false;
+        *value = qFromLittleEndian<quint32>(
+            reinterpret_cast<const uchar*>(m_bytes.constData() + m_offset));
+        m_offset += 4;
+        return true;
+    }
+
+    bool f32(float* value)
+    {
+        quint32 bits = 0;
+        if(!u32(&bits) || !value) return false;
+        static_assert(sizeof(float) == sizeof(quint32), "32-bit float required");
+        std::memcpy(value, &bits, sizeof(float));
+        return qIsFinite(*value);
+    }
+
+    int offset() const { return m_offset; }
+    int size() const { return m_bytes.size(); }
+
+private:
+    const QByteArray& m_bytes;
+    int m_offset{0};
 };
+
+QVector<SSkyVertex> decodeLegacySkyFigure(const QByteArray& bytes, QString* diagnostic)
+{
+    // nask0sky is the stock pre-signature, six-morph FIG variant. Keep this
+    // bounded parser local to the sky path instead of relaxing the FIG8 model
+    // parser used by ordinary map objects.
+    SkyFigureReader reader(bytes);
+    quint32 group = 0, textureNumber = 0, vertexBlocks = 0;
+    if(!reader.u32(&group) || !reader.u32(&textureNumber)
+            || !reader.skip(6 * (3 * 3 + 1) * qint64(sizeof(float)))
+            || !reader.u32(&vertexBlocks)
+            || vertexBlocks == 0 || vertexBlocks > 65536)
+    {
+        if(diagnostic) *diagnostic = "invalid legacy sky header";
+        return {};
+    }
+
+    const int sourceVertexCount = int(vertexBlocks) * 4;
+    QVector<QVector3D> sourceVertices(sourceVertexCount);
+    for(quint32 block = 0; block < vertexBlocks; ++block)
+    {
+        for(int axis = 0; axis < 3; ++axis)
+        {
+            for(int morph = 0; morph < 6; ++morph)
+            {
+                for(int lane = 0; lane < 4; ++lane)
+                {
+                    float value = 0.0f;
+                    if(!reader.f32(&value))
+                    {
+                        if(diagnostic) *diagnostic = "truncated legacy sky vertices";
+                        return {};
+                    }
+                    if(morph == 0)
+                        sourceVertices[int(block) * 4 + lane][axis] = value;
+                }
+            }
+        }
+    }
+
+    quint32 normalBlocks = 0, uvCount = 0;
+    if(!reader.u32(&normalBlocks) || normalBlocks > 65536
+            || !reader.skip(qint64(normalBlocks) * 4 * 4 * sizeof(float))
+            || !reader.u32(&uvCount) || uvCount == 0 || uvCount > 1048576)
+    {
+        if(diagnostic) *diagnostic = "invalid legacy sky normals/UV header";
+        return {};
+    }
+    QVector<QVector2D> uvs;
+    uvs.resize(int(uvCount));
+    for(QVector2D& uv : uvs)
+    {
+        float u = 0.0f, v = 0.0f;
+        if(!reader.f32(&u) || !reader.f32(&v))
+        {
+            if(diagnostic) *diagnostic = "truncated legacy sky UVs";
+            return {};
+        }
+        uv = QVector2D(u, v);
+    }
+
+    quint32 faceCount = 0, componentCount = 0;
+    if(!reader.u32(&faceCount) || faceCount > 1048576
+            || !reader.skip(qint64(faceCount) * 52)
+            || !reader.u32(&componentCount) || componentCount == 0
+            || componentCount > 1048576)
+    {
+        if(diagnostic) *diagnostic = "invalid legacy sky face/component header";
+        return {};
+    }
+    struct Component { quint16 vertex{0}; quint16 normal{0}; quint16 uv{0}; };
+    QVector<Component> components;
+    components.resize(int(componentCount));
+    for(Component& component : components)
+    {
+        if(!reader.u16(&component.vertex) || !reader.u16(&component.normal)
+                || !reader.u16(&component.uv))
+        {
+            if(diagnostic) *diagnostic = "truncated legacy sky components";
+            return {};
+        }
+    }
+
+    quint32 morphComponentCount = 0, indexCount = 0;
+    if(!reader.u32(&morphComponentCount) || morphComponentCount > 1048576
+            || !reader.skip(qint64(morphComponentCount) * 2 * sizeof(quint16))
+            || !reader.u32(&indexCount) || indexCount == 0
+            || indexCount > 4194304)
+    {
+        if(diagnostic) *diagnostic = "invalid legacy sky morph/index header";
+        return {};
+    }
+
+    QVector<SSkyVertex> result;
+    result.reserve(int(indexCount));
+    for(quint32 index = 0; index < indexCount; ++index)
+    {
+        quint16 componentIndex = 0;
+        if(!reader.u16(&componentIndex) || componentIndex >= components.size())
+        {
+            if(diagnostic) *diagnostic = "invalid legacy sky index";
+            return {};
+        }
+        const Component& component = components.at(componentIndex);
+        if(component.vertex >= sourceVertices.size() || component.uv >= uvs.size())
+        {
+            if(diagnostic) *diagnostic = "legacy sky component is out of bounds";
+            return {};
+        }
+        result.append(SSkyVertex{sourceVertices.at(component.vertex),
+                                 uvs.at(component.uv)});
+    }
+    if(reader.offset() != reader.size())
+    {
+        if(diagnostic) *diagnostic = "legacy sky contains trailing data";
+        return {};
+    }
+    return result;
+}
 
 }
 CView::CView(QWidget *parent, const QGLWidget *pShareWidget) : QGLWidget(parent, pShareWidget)
@@ -455,8 +614,21 @@ void CView::initializeGL()
     m_skyBuffer.create();
     m_skyBuffer.setUsagePattern(QOpenGLBuffer::StaticDraw);
     m_skyBuffer.bind();
-    m_skyBuffer.allocate(kSkyVertices, int(sizeof(kSkyVertices)));
+    QString skySource;
+    const QByteArray skyFigure = CObjectList::getInstance()->resourceData(
+        "nask0sky.fig", &skySource);
+    QString skyDiagnostic;
+    const QVector<SSkyVertex> skyVertices = decodeLegacySkyFigure(
+        skyFigure, &skyDiagnostic);
+    m_skyVertexCount = skyVertices.size();
+    m_skyBuffer.allocate(skyVertices.constData(),
+                         skyVertices.size() * int(sizeof(SSkyVertex)));
     m_skyBuffer.release();
+    if(m_skyVertexCount > 0)
+        ei::log(eLogInfo, QString("Profile sky geometry resolved: nask0sky.fig (%1 vertices) from %2")
+                .arg(m_skyVertexCount).arg(skySource));
+    else
+        ei::log(eLogWarning, "Profile sky geometry unavailable: " + skyDiagnostic);
     QOpenGLFramebufferObjectFormat shadowFormat;
     shadowFormat.setAttachment(QOpenGLFramebufferObject::Depth);
     shadowFormat.setInternalTextureFormat(GL_RGBA8);
@@ -506,30 +678,22 @@ void CView::resizeGL(int width, int height)
 void CView::drawSkybox(const QMatrix4x4& cameraMatrix,
                        const ei::SRenderEnvironment& environment)
 {
-    if(!m_skyBuffer.isCreated() || !m_skyProgram.bind())
+    if(!m_skyBuffer.isCreated() || m_skyVertexCount <= 0 || !m_skyProgram.bind())
         return;
-    static const char* textureNames[6] = {
-        // Cube faces are +X, -X, +Y, -Y, +Z, -Z. Archive edge matching
-        // establishes the side cycle as 00 -> 02 -> 03 -> 05; 04 is the
-        // cloud ceiling and 01 is the dark ground face.
-        "sky00", "sky03", "sky02", "sky05", "sky04", "sky01"
-    };
-    QOpenGLTexture* textures[6] = {};
+    // game.exe constructs one sky object and assigns Sky00 to the outdoor
+    // state (Sky01 is the alternate/cave state). It never binds sky00-sky05
+    // as simultaneous faces.
     QOpenGLTexture* fallback = CTextureList::getInstance()->textureDefault();
-    bool complete = true;
-    for(int face = 0; face < 6; ++face)
-    {
-        textures[face] = CTextureList::getInstance()->texture(textureNames[face]);
-        complete = complete && textures[face] && textures[face] != fallback;
-    }
+    QOpenGLTexture* skyTexture = CTextureList::getInstance()->texture("sky00");
+    const bool complete = skyTexture && skyTexture != fallback;
     if(!m_skyResourcesChecked || complete != m_skyResourcesAvailable)
     {
         m_skyResourcesChecked = true;
         m_skyResourcesAvailable = complete;
         ei::log(complete ? eLogInfo : eLogWarning,
                 complete
-                    ? "Profile skybox resources resolved: sky00-sky05"
-                    : "Profile skybox is incomplete; disabling the sky pass");
+                    ? "Profile outdoor sky resource resolved: sky00"
+                    : "Profile outdoor sky is unavailable; disabling the sky pass");
     }
     if(!complete)
         return;
@@ -538,6 +702,7 @@ void CView::drawSkybox(const QMatrix4x4& cameraMatrix,
     skyView(0, 3) = 0.0f;
     skyView(1, 3) = 0.0f;
     skyView(2, 3) = 0.0f;
+    skyView.rotate(environment.skyRotationDegrees, 0.0f, 0.0f, 1.0f);
     m_skyProgram.setUniformValue("u_viewMmatrix", skyView);
     m_skyProgram.setUniformValue("u_projMmatrix", m_projection);
     const float tintStrength = qBound(0.3f,
@@ -557,11 +722,8 @@ void CView::drawSkybox(const QMatrix4x4& cameraMatrix,
     m_skyProgram.enableAttributeArray(texture);
     m_skyProgram.setAttributeBuffer(texture, GL_FLOAT,
         int(offsetof(SSkyVertex, texture)), 2, int(sizeof(SSkyVertex)));
-    for(int face = 0; face < 6; ++face)
-    {
-        textures[face]->bind(0);
-        glDrawArrays(GL_TRIANGLES, face * 6, 6);
-    }
+    skyTexture->bind(0);
+    glDrawArrays(GL_TRIANGLES, 0, m_skyVertexCount);
     m_skyBuffer.release();
     glDepthMask(GL_TRUE);
     glDepthFunc(GL_LESS);
@@ -657,8 +819,8 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
     if(rebuildStatic)
     {
         beginTarget(m_shadowFbo);
-        if(m_pLand && m_pLand->isMprLoad() && m_bDrawLand)
-            m_pLand->draw(&m_shadowProgram, nullptr);
+        // Stock EI terrain receives projected shadows but does not cast them.
+        // Keep it out of both shadow maps; it remains in the color/receiver pass.
         queue.flushShadow(&m_shadowProgram, false, true);
         m_shadowFbo->release();
         m_staticShadowFingerprint = staticFingerprint;

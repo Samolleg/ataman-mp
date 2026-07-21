@@ -128,14 +128,17 @@ void RenderQueueTests::derivesEnvironmentFromWorldValues()
     QCOMPARE(noon.timeHours, 12.0f);
     QCOMPARE(noon.ambientStrength, 0.25f);
     QCOMPARE(noon.sunStrength, 0.75f);
-    QVERIFY(noon.sunDirection.z() < -0.99f);
+    QVERIFY(noon.sunDirection.z() < -0.60f);
+    QVERIFY(noon.sunDirection.z() > -0.64f);
 
     const ei::SRenderEnvironment midnight =
         ei::renderEnvironmentForValues(24.0f, -1.0f, 9.0f);
     QCOMPARE(midnight.timeHours, 0.0f);
     QCOMPARE(midnight.ambientStrength, 0.0f);
-    QCOMPARE(midnight.sunStrength, 0.0f);
+    QCOMPARE(midnight.sunStrength, 4.0f);
     QVERIFY(midnight.sunColor.z() > midnight.sunColor.x());
+    QVERIFY(qAbs(midnight.sunDirection.z() - noon.sunDirection.z()) < 0.001f);
+    QVERIFY((midnight.sunDirection - noon.sunDirection).length() > 1.0f);
 
     QCOMPARE(ei::clockValueToHours(0), 0.0f);
     QCOMPARE(ei::clockValueToHours(1230), 12.5f);
