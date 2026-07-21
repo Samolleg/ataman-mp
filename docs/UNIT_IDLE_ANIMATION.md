@@ -25,6 +25,13 @@ selected TTI variant. Color and selection passes use the same cached frame
 context, part matrices, and morph-updated buffers. Morph buffers are updated in
 place; figure topology and buffer objects are not rebuilt per frame.
 
+Resolved clips are cached by animation-provider ID, immutable database
+generation, model, and exact equipped-weapon list. Units with the same request
+share the parsed, implicitly shared clip data, while their playback time and
+applied pose remain instance-local. Changing profiles or refreshing the active
+database generation clears this cache, so Base/JMV and source revisions cannot
+cross-contaminate one another.
+
 The JMV provider selects only standing-state (`allowedState == 2`) defaults.
 It prefers `cidle01` for ordinary actors and the matching JMV 2H action family
 for equipped humanoids.

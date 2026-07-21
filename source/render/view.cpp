@@ -1300,6 +1300,12 @@ void CView::loadMob(QFileInfo &filePath)
             ++unitCount;
     if(unitCount > 0)
         m_pProgress->reset();
+    // Keep the UI responsive during large MOB loads without forcing an event
+    // pump and GL-context reacquisition for every unit. Twenty evenly spaced
+    // updates keeps the longest zone18 preload interval below a second.
+    const int progressStride = qMax(1, unitCount / 20);
+    int unitsSinceProgress = 0;
+    makeCurrent();
     for(CNode* node : pMob->nodes())
         if(CUnit* unit = dynamic_cast<CUnit*>(node))
         {
@@ -1308,7 +1314,6 @@ void CView::loadMob(QFileInfo &filePath)
             // single makeCurrent() before the loop is not a valid guarantee
             // for the following unit's buffer/texture uploads.
             ei::setCrashContext(QString("mob/unit-preload:%1").arg(unit->mapId()));
-            makeCurrent();
             if(!QOpenGLContext::currentContext())
             {
                 ei::log(eLogFatal, QString(
@@ -1318,7 +1323,16 @@ void CView::loadMob(QFileInfo &filePath)
             }
             unit->preloadVisualResources();
             ++preloadedUnits;
-            m_pProgress->update(100.0 / unitCount);
+            ++unitsSinceProgress;
+            if(unitsSinceProgress >= progressStride || preloadedUnits == unitCount)
+            {
+                m_pProgress->update(100.0 * unitsSinceProgress / unitCount);
+                unitsSinceProgress = 0;
+                // Progress processing may allow another widget to change the
+                // current context. Reacquire only after that event boundary,
+                // rather than once for every unit.
+                makeCurrent();
+            }
         }
     makeCurrent();
     doneCurrent();

@@ -31,7 +31,7 @@ stage, not a claim that the final performance target has been reached.
 | Object submission | Visible parts produce explicit render items | Matching immutable opaque/cutout parts instance on desktop OpenGL 3.3+; genuine transparency sorts back-to-front | Unique meshes and ordered transparency still produce individual draws |
 | Rasterization | OpenGL shaders, VBOs, textures, depth test | Verified opaque work disables blend/alpha test; cutouts retain alpha test | Back-face culling remains disabled and conservative materials retain legacy blending |
 | Selection/helpers | Separate selection and logic-helper passes | Picking reuses spatial visibility; selected/moving nodes remain conservative | Enabled logic mode intentionally retains full helper traversal |
-| Resources | Figure, texture, archive-index, and miss caches exist | Unit visual preload avoids many first-view loads | CPU decode and GUI-thread GL upload are not yet bounded asynchronous phases |
+| Resources | Figure, texture, archive-index, and miss caches exist | Unit visual preload now reuses exact profile-scoped figure assemblies, parses each shared idle clip once per database generation, and batches progress/context boundaries | CPU decode and GUI-thread GL upload are not yet bounded asynchronous phases |
 
 ## Instrumentation
 
@@ -166,6 +166,43 @@ vertex-input and uniform submission as the next measured target. The following
 increment caches shader locations and separate ordinary, instanced, selection,
 and instanced-selection VAO layouts per immutable mesh. The legacy/ANGLE path
 continues to configure vertex attributes explicitly.
+
+The VAO validation capture improved the wide `zone18` view to roughly 80-100
+FPS. Its densest stationary sample at 2430 x 1960 still averaged about 74.9
+FPS, 12.56 ms CPU submission, and 5.12 ms GPU time while issuing about 4,116
+draws. Queue collection and sorting were only about 2.92 ms combined; drawing
+the roughly 3,952 batches remained about 7.02 ms. This keeps compatible
+geometry consolidation and terrain multi-draw as the next steady-state target.
+
+## Map-load resource preparation
+
+The animation-LOD capture separates `zone18` loading into three observable
+phases. Terrain and MOB parsing completed in about two seconds, projection of
+4,463 objects took about three seconds, and synchronous visual preload for 402
+units then took 9,492 ms. Unit preparation is therefore the dominant measured
+load stage, rather than map parsing.
+
+The load-preparation increment addresses three repeated costs without changing
+resource precedence or serialized data:
+
+- completed figure assemblies are cached by provider/resource scope, model,
+  exact visible-part list, and exact complexion; the bounded 128 MiB CPU cache
+  clones per-unit pose state while sharing immutable mesh storage;
+- progress/event processing and OpenGL-context reacquisition occur at about
+  twenty evenly spaced boundaries instead of once per unit;
+- identical provider/model/weapon animation requests share a parsed idle clip
+  for the current immutable database generation, removing repeated ADB/ANM
+  work as matching units first become visible;
+- identical resolved visual-plan information is logged once per generation,
+  while warnings and inconsistent-data diagnostics remain per unit.
+
+Runtime validation must compare the existing
+`Preloaded visual resources for 402 units during MOB load in 9492 ms` baseline
+against the same profile and map after a fresh launch. Also verify profile
+switching, imported units with distinct part lists or complexion, first entry
+into a dense unit group, and several map switches. Asynchronous archive decode
+and bounded render-thread upload remain a later phase if the new measurement
+shows resource I/O/decode still dominates.
 
 ## Lighting, shadows, sky, fog, and particles
 

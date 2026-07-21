@@ -14,6 +14,8 @@
 #include <QJsonArray>
 #include <QRegularExpression>
 
+#include <limits>
+
 CUnit::CUnit():
     m_prototypeName("")
     ,m_bImport(false)
@@ -135,6 +137,19 @@ void CUnit::preloadVisualResources()
 
 namespace {
 
+quint64 s_unitCacheGeneration = std::numeric_limits<quint64>::max();
+QHash<QString, SAnimationClip> s_idleClipCache;
+QSet<QString> s_loggedVisualPlans;
+
+void prepareUnitGenerationCaches(quint64 generation)
+{
+    if(s_unitCacheGeneration == generation)
+        return;
+    s_unitCacheGeneration = generation;
+    s_idleClipCache.clear();
+    s_loggedVisualPlans.clear();
+}
+
 QStringList jsonStringList(const QJsonObject& object, const char* key)
 {
     QStringList result;
@@ -165,6 +180,7 @@ void CUnit::refreshTransientVisual()
 {
     ei::ProfileDatabaseContext& context = ei::ProfileDatabaseContext::instance();
     const quint64 generation = context.generation();
+    prepareUnitGenerationCaches(generation);
     if(m_resolvedDatabaseGeneration == generation && m_resolvedVisualRevision == m_visualRevision)
         return;
     m_resolvedDatabaseGeneration = generation;
@@ -291,13 +307,19 @@ void CUnit::refreshTransientVisual()
         QStringList texturePlan;
         for(auto it = componentTextures.constBegin(); it != componentTextures.constEnd(); ++it)
             texturePlan.append(it.key() + '=' + it.value());
-        ei::log(eLogInfo, QString("Unit visual plan id=%1 prototype=%2 model=%3 parts=%4 textures=%5 bodyLayers=%6 "
-                                 "constitution=%7,%8,%9 embeddedConstitution=%10,%11,%12")
-                .arg(m_mapID).arg(m_prototypeName).arg(model).arg(visibleParts.join(","))
-                .arg(texturePlan.join(","))
-                .arg(jsonStringList(equipment, "bodyTextureLayers").join(","))
-                .arg(complexion.x()).arg(complexion.y()).arg(complexion.z())
-                .arg(m_complection.x()).arg(m_complection.y()).arg(m_complection.z()));
+        const QString bodyLayers = jsonStringList(equipment, "bodyTextureLayers").join(",");
+        const QString planKey = m_prototypeName.toLower() + '|' + model.toLower() + '|'
+            + visibleParts.join(",").toLower() + '|' + texturePlan.join(",").toLower()
+            + '|' + bodyLayers.toLower();
+        if(!s_loggedVisualPlans.contains(planKey))
+        {
+            s_loggedVisualPlans.insert(planKey);
+            ei::log(eLogInfo, QString("Unit visual plan representative id=%1 prototype=%2 model=%3 parts=%4 "
+                                     "textures=%5 bodyLayers=%6 constitution=%7,%8,%9")
+                    .arg(m_mapID).arg(m_prototypeName).arg(model).arg(visibleParts.join(","))
+                    .arg(texturePlan.join(",")).arg(bodyLayers)
+                    .arg(complexion.x()).arg(complexion.y()).arg(complexion.z()));
+        }
     }
     const QStringList equipmentBodyLayers = jsonStringList(equipment, "bodyTextureLayers");
     QStringList bodyTextureLayers;
@@ -339,8 +361,10 @@ void CUnit::refreshAnimationPose()
         m_state == ENodeState::eSelect, distance);
     const auto database = ei::ProfileDatabaseContext::instance().current();
     const QString providerId = ei::ProfileDatabaseContext::instance().providerForRole("unitAnimation");
-    const QString fingerprint = providerId + '|' + QString::number(
-        ei::ProfileDatabaseContext::instance().generation()) + '|' + m_resolvedAnimationModel.toLower()
+    const quint64 databaseGeneration = ei::ProfileDatabaseContext::instance().generation();
+    prepareUnitGenerationCaches(databaseGeneration);
+    const QString fingerprint = providerId + '|' + QString::number(databaseGeneration)
+        + '|' + m_resolvedAnimationModel.toLower()
         + '|' + m_resolvedAnimationWeapons.join(';').toLower();
     if(fingerprint != m_animationFingerprint)
     {
@@ -348,42 +372,51 @@ void CUnit::refreshAnimationPose()
         m_idleClip = SAnimationClip();
         m_lastAppliedAnimationFrame = -1.0;
         m_animationPoseIsStatic = true;
-        static ProfileVisualProviderService providers;
-        QString diagnostic;
-        const auto resolver = providers.animationResolver(providerId, database, &diagnostic);
-        QJsonObject resolved;
-        SRuntimeProviderResult result;
-        if(!resolver.isNull())
-        {
-            SUnitAnimationRequest request;
-            request.profileId = database.isNull() ? QString() : database->profileId;
-            request.runtimeManifestId = database.isNull() ? QString() : database->runtimeManifestId;
-            request.model = m_resolvedAnimationModel;
-            request.weapons = m_resolvedAnimationWeapons;
-            result = resolver->resolve(request, &resolved);
-        }
+        const auto cachedClip = s_idleClipCache.constFind(fingerprint);
+        if(cachedClip != s_idleClipCache.constEnd())
+            m_idleClip = cachedClip.value();
         else
-        { result.code = "animation.provider.unavailable"; result.message = diagnostic; }
-        if(result.success)
         {
-            m_idleClip = parseNestedAnimationClip(
-                CObjectList::getInstance()->modelAnimation(m_resolvedAnimationModel),
-                resolved.value("actionName").toString(), resolved.value("length").toInt());
-            int morphChannels = 0;
-            for(const SAnimationChannel& channel : m_idleClip.channels)
-                if(!channel.morphations.isEmpty()) ++morphChannels;
-            ei::log(eLogInfo, QString("Unit animation plan id=%1 prototype=%2 model=%3 action=%4 length=%5 "
-                                     "morphChannels=%6")
-                    .arg(m_mapID).arg(m_prototypeName).arg(m_resolvedAnimationModel)
-                    .arg(resolved.value("actionName").toString())
-                    .arg(resolved.value("length").toInt())
-                    .arg(morphChannels));
-        }
-        if(!result.success || !m_idleClip.valid())
-        {
-            const QString detail = !result.message.isEmpty() ? result.message : m_idleClip.diagnostics.join("; ");
-            ei::log(eLogWarning, QString("Unit %1 static animation fallback [%2]: %3")
-                    .arg(m_prototypeName, result.code, detail));
+            static ProfileVisualProviderService providers;
+            QString diagnostic;
+            const auto resolver = providers.animationResolver(providerId, database, &diagnostic);
+            QJsonObject resolved;
+            SRuntimeProviderResult result;
+            if(!resolver.isNull())
+            {
+                SUnitAnimationRequest request;
+                request.profileId = database.isNull() ? QString() : database->profileId;
+                request.runtimeManifestId = database.isNull() ? QString() : database->runtimeManifestId;
+                request.model = m_resolvedAnimationModel;
+                request.weapons = m_resolvedAnimationWeapons;
+                result = resolver->resolve(request, &resolved);
+            }
+            else
+            { result.code = "animation.provider.unavailable"; result.message = diagnostic; }
+            if(result.success)
+            {
+                m_idleClip = parseNestedAnimationClip(
+                    CObjectList::getInstance()->modelAnimation(m_resolvedAnimationModel),
+                    resolved.value("actionName").toString(), resolved.value("length").toInt());
+                int morphChannels = 0;
+                for(const SAnimationChannel& channel : m_idleClip.channels)
+                    if(!channel.morphations.isEmpty()) ++morphChannels;
+                ei::log(eLogInfo, QString("Unit animation plan prototype=%1 model=%2 action=%3 length=%4 "
+                                         "morphChannels=%5")
+                        .arg(m_prototypeName).arg(m_resolvedAnimationModel)
+                        .arg(resolved.value("actionName").toString())
+                        .arg(resolved.value("length").toInt())
+                        .arg(morphChannels));
+                if(m_idleClip.valid())
+                    s_idleClipCache.insert(fingerprint, m_idleClip);
+            }
+            if(!result.success || !m_idleClip.valid())
+            {
+                const QString detail = !result.message.isEmpty()
+                    ? result.message : m_idleClip.diagnostics.join("; ");
+                ei::log(eLogWarning, QString("Unit %1 static animation fallback [%2]: %3")
+                        .arg(m_prototypeName, result.code, detail));
+            }
         }
     }
     if(!m_idleClip.valid())
