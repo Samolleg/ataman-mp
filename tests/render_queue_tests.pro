@@ -6,10 +6,8 @@ TARGET = render_queue_tests
 INCLUDEPATH += ../source ../source/core ../source/render
 
 SOURCES += render_queue_tests.cpp \
-    ../source/render/render_material.cpp \
-    ../source/render/render_environment.cpp
+    ../source/render/render_material.cpp
 
 HEADERS += ../source/render/render_material.h \
     ../source/render/render_queue.h \
-    ../source/render/render_scheduling.h \
-    ../source/render/render_environment.h
+    ../source/render/render_scheduling.h

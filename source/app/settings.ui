@@ -444,61 +444,6 @@
             </widget>
            </item>
            <item>
-            <widget class="QCheckBox" name="environmentLighting">
-             <property name="text"><string>Environment lighting</string></property>
-             <property name="toolTip"><string>Uses the active MOB ambient, sunlight, and time values for terrain and objects.</string></property>
-             <property name="checked"><bool>true</bool></property>
-            </widget>
-           </item>
-           <item>
-            <widget class="QCheckBox" name="drawSkybox">
-             <property name="text"><string>Game-resource skybox</string></property>
-             <property name="toolTip"><string>Draws sky00 through sky05 from the selected resource profile.</string></property>
-             <property name="checked"><bool>true</bool></property>
-            </widget>
-           </item>
-           <item>
-            <widget class="QCheckBox" name="renderFog">
-             <property name="text"><string>Atmospheric fog</string></property>
-             <property name="checked"><bool>true</bool></property>
-            </widget>
-           </item>
-           <item>
-            <widget class="QCheckBox" name="renderSceneLights">
-             <property name="text"><string>Scene point lights</string></property>
-             <property name="toolTip"><string>Uses visible MOB light position, range, and color values.</string></property>
-             <property name="checked"><bool>true</bool></property>
-            </widget>
-           </item>
-           <item>
-            <widget class="QCheckBox" name="renderShadows">
-             <property name="text"><string>Sun and object shadows</string></property>
-             <property name="toolTip"><string>Uses a batched shadow map and respects the MOB Is shadow field. Disable for compatibility or performance.</string></property>
-             <property name="checked"><bool>true</bool></property>
-            </widget>
-           </item>
-           <item>
-            <widget class="QCheckBox" name="overrideWorldTime">
-             <property name="text"><string>Preview time override</string></property>
-             <property name="toolTip"><string>Overrides the active MOB time for viewport preview only; it does not edit the map.</string></property>
-            </widget>
-           </item>
-           <item>
-            <layout class="QHBoxLayout" name="renderTimeOfDayLayout">
-             <item><widget class="QLabel" name="renderTimeOfDayLabel"><property name="text"><string>Time of day (00:00–24:00)</string></property></widget></item>
-             <item>
-              <widget class="QSlider" name="renderTimeOfDay">
-               <property name="minimum"><number>0</number></property>
-               <property name="maximum"><number>2400</number></property>
-               <property name="singleStep"><number>10</number></property>
-               <property name="pageStep"><number>100</number></property>
-               <property name="value"><number>1200</number></property>
-               <property name="orientation"><enum>Qt::Horizontal</enum></property>
-              </widget>
-             </item>
-            </layout>
-           </item>
-           <item>
             <spacer name="verticalSpacer">
              <property name="orientation">
               <enum>Qt::Vertical</enum>

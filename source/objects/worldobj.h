@@ -21,7 +21,6 @@ public:
     void applyParam(const QSharedPointer<IPropertyBase>& prop) override;
     const char& dipGroup(){return m_player;}
     QJsonObject toJson() override;
-    bool castsRenderShadow() const override { return m_bShadow; }
 
 protected:
     //uint m_NID;

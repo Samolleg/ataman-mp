@@ -309,7 +309,7 @@ public:
     CWorldSet(const CWorldSet& ws);
     void serializeJson(QJsonObject& obj);
     void setData(EWsType type, QString data) {m_arrData[type] = data;}
-    QString data(EWsType type) const {return m_arrData.value(type);}
+    const QString& data(EWsType type) {return m_arrData[type];}
 
 private:
     void reset();

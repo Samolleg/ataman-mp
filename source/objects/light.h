@@ -18,9 +18,6 @@ public:
     QJsonObject toJson() override;
     void loadFigure() override {}
     bool isOperationAxisAllow(EOperationAxisType type) override final;
-    float range() const { return m_range; }
-    bool shadowEnabled() const { return m_bShadow; }
-    const QVector3D& lightColor() const { return m_color; }
 
 private:
     float m_range;
