@@ -925,7 +925,20 @@ MainWindow::MainWindow(QWidget* parent) :
 MainWindow::~MainWindow()
 {
     saveUiState();
-    delete m_pView;
+    if(m_pView && m_pView->prepareForApplicationShutdown())
+        delete m_pView;
+    else if(m_pView)
+    {
+        // A closed native window can lose its OpenGL surface before this
+        // destructor runs. Destroying QOpenGL* members then crashes inside Qt.
+        // This is application shutdown, so detach the stopped view and allow
+        // process teardown to reclaim it instead of invoking unsafe GL cleanup.
+        ei::log(eLogWarning,
+                "Viewport retained for process teardown because its OpenGL surface is unavailable");
+        m_pView->hide();
+        m_pView->setParent(nullptr);
+    }
+    m_pView = nullptr;
     delete m_ui;
     CIconManager::getInstance()->~CIconManager();
 }

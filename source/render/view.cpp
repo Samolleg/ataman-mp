@@ -437,6 +437,19 @@ void CView::paintGL()
     //doneCurrent();
 }
 
+bool CView::prepareForApplicationShutdown()
+{
+    if(m_timer)
+        m_timer->stop();
+    if(m_mprModifyTimer)
+        m_mprModifyTimer->stop();
+    if(!isValid())
+        return false;
+    makeCurrent();
+    QOpenGLContext* current = QOpenGLContext::currentContext();
+    return current && current->surface();
+}
+
 void CView::drawTestOverlaysOpenGl()
 {
     if((m_testEntranceRectangles.isEmpty() && !m_testSpawnMarkerValid)

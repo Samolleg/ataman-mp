@@ -69,6 +69,7 @@ public:
     explicit CView(QWidget* parent=nullptr) = delete;
     explicit CView(QWidget* parent=nullptr, const QGLWidget* pShareWidget=nullptr);
     ~CView();
+    bool prepareForApplicationShutdown();
 
     void loadLandscape(const QFileInfo& filePath);
     void refreshAfterResourceSetup();
