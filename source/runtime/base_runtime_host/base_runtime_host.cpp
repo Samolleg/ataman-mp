@@ -35,7 +35,7 @@ bool injectAndInitialize(HANDLE process, const wchar_t* bridgePath,
     if(!remotePath || !WriteProcessMemory(process, remotePath, bridgePath,
                                            pathBytes, nullptr))
     {
-        writeText(logPath, L"BASE_PROBE injection failed while staging bridge path");
+        writeText(logPath, L"RUNTIME_HOST injection failed while staging bridge path");
         return false;
     }
     const auto loadLibrary = reinterpret_cast<LPTHREAD_START_ROUTINE>(
@@ -44,7 +44,7 @@ bool injectAndInitialize(HANDLE process, const wchar_t* bridgePath,
                                             remotePath, 0, nullptr);
     if(!loadThread || WaitForSingleObject(loadThread, 15000) != WAIT_OBJECT_0)
     {
-        writeText(logPath, L"BASE_PROBE injection failed in remote LoadLibraryW");
+        writeText(logPath, L"RUNTIME_HOST injection failed in remote LoadLibraryW");
         if(loadThread) CloseHandle(loadThread);
         VirtualFreeEx(process, remotePath, 0, MEM_RELEASE);
         return false;
@@ -55,7 +55,7 @@ bool injectAndInitialize(HANDLE process, const wchar_t* bridgePath,
     VirtualFreeEx(process, remotePath, 0, MEM_RELEASE);
     if(!remoteModule)
     {
-        writeText(logPath, L"BASE_PROBE bridge LoadLibraryW returned null");
+        writeText(logPath, L"RUNTIME_HOST bridge LoadLibraryW returned null");
         return false;
     }
 
@@ -64,7 +64,7 @@ bool injectAndInitialize(HANDLE process, const wchar_t* bridgePath,
     FARPROC localExport = localModule ? GetProcAddress(localModule, exportName) : nullptr;
     if(!localModule || !localExport)
     {
-        writeText(logPath, L"BASE_PROBE bridge initialization export is missing");
+        writeText(logPath, L"RUNTIME_HOST bridge initialization export is missing");
         if(localModule) FreeLibrary(localModule);
         return false;
     }
@@ -77,7 +77,7 @@ bool injectAndInitialize(HANDLE process, const wchar_t* bridgePath,
                                            nullptr, 0, nullptr);
     if(!initThread || WaitForSingleObject(initThread, 15000) != WAIT_OBJECT_0)
     {
-        writeText(logPath, L"BASE_PROBE bridge initialization call failed");
+        writeText(logPath, L"RUNTIME_HOST bridge initialization call failed");
         if(initThread) CloseHandle(initThread);
         return false;
     }
@@ -86,10 +86,10 @@ bool injectAndInitialize(HANDLE process, const wchar_t* bridgePath,
     CloseHandle(initThread);
     if(initialized != 1)
     {
-        writeText(logPath, L"BASE_PROBE bridge rejected the runtime fingerprint or hook signatures");
+        writeText(logPath, L"RUNTIME_HOST bridge rejected the runtime fingerprint or hook signatures");
         return false;
     }
-    writeText(logPath, L"BASE_PROBE bridge injected and initialized before process resume");
+    writeText(logPath, L"RUNTIME_HOST bridge injected and initialized before process resume");
     return true;
 }
 }

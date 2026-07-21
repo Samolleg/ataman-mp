@@ -2101,7 +2101,8 @@ void MainWindow::updateMapTestAction()
         || (m_playFromHereButton && m_playFromHereButton->isChecked());
     const bool customReady = !customRequested
         || (isJmv && m_customSpawn.valid && !m_pickSpawnPending);
-    const bool profileReady = (isJmv || isBaseProbe) && profile.valid
+    const bool profileReady = !m_workspaceLoadInProgress
+        && (isJmv || isBaseProbe) && profile.valid
         && profile.runtimeStackValidated;
     if(m_mapTestLauncher && m_mapTestLauncher->isRunning())
     {
@@ -3158,6 +3159,11 @@ void MainWindow::notifyProposedNid(quint32 nid, const QString& mobPath)
 
 void MainWindow::openCollection(const QString& path)
 {
+    if(m_workspaceLoadInProgress)
+    {
+        statusBar()->showMessage(tr("Finish loading the current workspace first."), 4000);
+        return;
+    }
     SEnduranceCollection document;
     QString error;
     if(!CCollectionDocument::load(path, &document, &error))
@@ -3183,6 +3189,8 @@ void MainWindow::openCollection(const QString& path)
             QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes)
         return;
     if(!isExitAllowed())
+        return;
+    if(!beginWorkspaceLoad(tr("collection %1").arg(QFileInfo(path).fileName())))
         return;
     QProgressDialog progress(tr("Loading collection..."), QString(), 0,
                              resolved.mobPaths.size() + 3, this);
@@ -3214,6 +3222,7 @@ void MainWindow::openCollection(const QString& path)
     refreshMapTestContext();
     progress.setValue(resolved.mobPaths.size() + 3);
     progress.close();
+    endWorkspaceLoad();
     ei::log(eLogInfo, QString("Opened collection path:%1 map:%2 mpr:%3 mobs:%4")
         .arg(path, document.mapZoneId, resolved.mprPath)
         .arg(resolved.mobPaths.size()));
@@ -3332,6 +3341,11 @@ void MainWindow::saveCollection(bool saveAs)
 void MainWindow::openMapPair(const QString& mprPath, const QString& mobPath,
                              const QString& zoneId)
 {
+    if(m_workspaceLoadInProgress)
+    {
+        statusBar()->showMessage(tr("Finish loading the current workspace first."), 4000);
+        return;
+    }
     if(!QFileInfo::exists(mprPath) || !QFileInfo::exists(mobPath))
     {
         QMessageBox::warning(this, tr("Open map"),
@@ -3340,6 +3354,8 @@ void MainWindow::openMapPair(const QString& mprPath, const QString& mobPath,
         return;
     }
     if(!isExitAllowed())
+        return;
+    if(!beginWorkspaceLoad(tr("map %1").arg(zoneId)))
         return;
     QProgressDialog progress(tr("Loading map..."), QString(), 0, 3, this);
     progress.setWindowTitle(tr("Loading map workspace"));
@@ -3372,6 +3388,7 @@ void MainWindow::openMapPair(const QString& mprPath, const QString& mobPath,
         .arg(zoneId, mprPath, mobPath));
     progress.setValue(3);
     progress.close();
+    endWorkspaceLoad();
     QTimer::singleShot(0, this, [this]()
     {
         if(!m_validEntrances.isEmpty())
@@ -3566,16 +3583,44 @@ void MainWindow::updateOutlinerSelectionPath()
 
 void MainWindow::updateDocumentActionAvailability()
 {
+    const bool idle = !m_workspaceLoadInProgress;
     const bool hasActiveMob = m_pView && m_pView->hasActiveMob();
     const bool hasAnyMob = m_pView && !m_pView->mobs().isEmpty();
     const bool hasMpr = CLandscape::getInstance()->isMprLoad();
-    m_ui->actionSave->setEnabled(hasActiveMob);
-    m_ui->actionSave_as->setEnabled(hasActiveMob);
-    m_ui->actionSave_all_MOB_s->setEnabled(hasAnyMob);
-    m_ui->actionSave_landscape_MPR->setEnabled(hasMpr);
-    m_ui->actionSave_landscape_MPR_as->setEnabled(hasMpr);
-    m_ui->actionMap_parameters->setEnabled(hasMpr);
-    m_ui->actionClose_all->setEnabled(hasAnyMob || hasMpr);
+    m_ui->actionOpen->setEnabled(idle);
+    m_ui->actionOpen_MPR->setEnabled(idle);
+    m_ui->actionOpen_MOB->setEnabled(idle);
+    m_ui->actionOpen_recent->setEnabled(idle);
+    if(m_recentFilesMenu) m_recentFilesMenu->setEnabled(idle);
+    if(m_mapsBrowser) m_mapsBrowser->setEnabled(idle);
+    m_ui->actionSave->setEnabled(idle && hasActiveMob);
+    m_ui->actionSave_as->setEnabled(idle && hasActiveMob);
+    m_ui->actionSave_all_MOB_s->setEnabled(idle && hasAnyMob);
+    m_ui->actionSave_landscape_MPR->setEnabled(idle && hasMpr);
+    m_ui->actionSave_landscape_MPR_as->setEnabled(idle && hasMpr);
+    m_ui->actionMap_parameters->setEnabled(idle && hasMpr);
+    m_ui->actionClose_all->setEnabled(idle && (hasAnyMob || hasMpr));
+}
+
+bool MainWindow::beginWorkspaceLoad(const QString& description)
+{
+    if(m_workspaceLoadInProgress)
+        return false;
+    m_workspaceLoadInProgress = true;
+    ei::log(eLogInfo, QString("Workspace load started: %1").arg(description));
+    updateDocumentActionAvailability();
+    updateMapTestAction();
+    return true;
+}
+
+void MainWindow::endWorkspaceLoad()
+{
+    if(!m_workspaceLoadInProgress)
+        return;
+    m_workspaceLoadInProgress = false;
+    ei::log(eLogInfo, "Workspace load finished");
+    updateDocumentActionAvailability();
+    updateMapTestAction();
 }
 
 void MainWindow::saveUiState()
@@ -3784,6 +3829,8 @@ void MainWindow::rebuildRecentFilesMenu()
 
 bool MainWindow::openDocument(const QFileInfo& fileName)
 {
+    if(m_workspaceLoadInProgress)
+        return false;
     const QString suffix = fileName.suffix().toLower();
     if(!fileName.exists() || (suffix != "mpr" && suffix != "mob"))
     {
@@ -3846,6 +3893,8 @@ bool MainWindow::replaceLoadedLandscape(const QFileInfo& fileName)
 
 bool MainWindow::loadMobWithProgress(QFileInfo fileName)
 {
+    if(!beginWorkspaceLoad(tr("MOB %1").arg(fileName.fileName())))
+        return false;
     QProgressDialog progress(tr("Loading MOB: %1").arg(fileName.fileName()),
                              QString(), 0, 0, this);
     progress.setWindowTitle(tr("Loading MOB"));
@@ -3855,12 +3904,15 @@ bool MainWindow::loadMobWithProgress(QFileInfo fileName)
     QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
     const bool loaded = m_pView->loadMob(fileName);
     progress.close();
+    endWorkspaceLoad();
     updateDocumentActionAvailability();
     return loaded;
 }
 
 bool MainWindow::loadLandscapeWithProgress(const QFileInfo& fileName)
 {
+    if(!beginWorkspaceLoad(tr("MPR %1").arg(fileName.fileName())))
+        return false;
     QProgressDialog progress(tr("Loading MPR: %1").arg(fileName.fileName()),
                              QString(), 0, 0, this);
     progress.setWindowTitle(tr("Loading MPR"));
@@ -3870,6 +3922,7 @@ bool MainWindow::loadLandscapeWithProgress(const QFileInfo& fileName)
     QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
     m_pView->loadLandscape(fileName);
     progress.close();
+    endWorkspaceLoad();
     return CLandscape::getInstance()->isMprLoad();
 }
 

@@ -477,7 +477,7 @@ CJmvMapTestLauncher::CJmvMapTestLauncher(QObject* parent)
     connect(m_process, &QProcess::started, this, [this]()
     {
         appendRunLog(QString("%1 started pid=%2")
-                     .arg(m_baseProbe ? "Base runtime host" : "game.exe")
+                     .arg(m_usesRuntimeHost ? "Endurance runtime host" : "game.exe")
                      .arg(m_process->processId()));
         const qint64 pid = m_process->processId();
         m_manifest.insert("pid", double(pid));
@@ -857,8 +857,10 @@ bool CJmvMapTestLauncher::isHotReloadReady() const
     quint32 threadId = 0;
     if(file.open(QIODevice::ReadOnly | QIODevice::Text))
         threadId = file.readAll().trimmed().toULong(&ok);
-    return ok && threadId != 0
-        && threadBelongsToProcess(threadId, quint32(m_process->processId()));
+    const qint64 gamePid = m_usesRuntimeHost ? readOwnedGamePid(m_gamePidPath)
+                                             : m_process->processId();
+    return ok && threadId != 0 && gamePid > 0
+        && threadBelongsToProcess(threadId, quint32(gamePid));
 }
 
 QString CJmvMapTestLauncher::runtimeState() const
@@ -988,12 +990,6 @@ bool CJmvMapTestLauncher::injectWorldScriptBootstrap(const QString& script,
         generatedBody.append(commands.trimmed());
     output->append("WorldScript(\n" + generatedBody.join("\n") + "\n)\n");
     return true;
-}
-
-bool CJmvMapTestLauncher::hasConfiguredJmvPluginSlot(const QByteArray& configReg)
-{
-    static const QByteArray record("\x02\x06\x00Plugin\x0a\x00plugin.dll", 21);
-    return configReg.contains(record);
 }
 
 bool CJmvMapTestLauncher::prepareTemporaryAutoexec(const QString& engineDirectory,
@@ -1200,6 +1196,7 @@ bool CJmvMapTestLauncher::launch(const SJmvMapTestLaunchInput& input, QString* e
     m_pendingSaveGeneration = 0;
     m_hotReloadResultPolls = 0;
     m_baseProbe = false;
+    m_usesRuntimeHost = false;
     m_manifest = QJsonObject();
     m_cleanupComplete = false;
     m_stopRequested = false;
@@ -1222,9 +1219,9 @@ bool CJmvMapTestLauncher::launch(const SJmvMapTestLaunchInput& input, QString* e
     }
     appendRunLog(QString("Launching %1 workingDirectory=%2 map=%3 transport=%4")
                  .arg(m_gameExePath, m_engineDirectory, m_temporaryMapName,
-                      m_baseProbe ? "owned-x86-injector" : "starter-plugin-slot"));
-    m_process->setProgram(m_baseProbe ? m_runtimeHostPath : m_gameExePath);
-    if(m_baseProbe)
+                      m_usesRuntimeHost ? "owned-x86-injector" : "direct-process"));
+    m_process->setProgram(m_usesRuntimeHost ? m_runtimeHostPath : m_gameExePath);
+    if(m_usesRuntimeHost)
         m_process->setArguments(QStringList() << m_gameExePath << m_bridgeLivePath
             << m_engineDirectory << m_gamePidPath
             << QDir(m_runRoot).filePath("runtime-host.log"));
@@ -1232,6 +1229,8 @@ bool CJmvMapTestLauncher::launch(const SJmvMapTestLaunchInput& input, QString* e
         m_process->setArguments(QStringList());
     m_process->setWorkingDirectory(m_engineDirectory);
     QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
+    environment.insert("EI_MAPPER_ENDURANCE_GAME_ROOT",
+                       QDir::cleanPath(input.profile.gameRoot));
     environment.insert("EI_MAPPER_ENDURANCE_MAP", m_temporaryMapName);
     environment.insert("EI_MAPPER_ENDURANCE_SOURCE_ZONE", input.mapEntry.zoneId);
     environment.insert("EI_MAPPER_ENDURANCE_TARGET_EXIT", QString::number(input.spawn.exitId));
@@ -1266,6 +1265,7 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
     const bool isJmv = input.profile.profileId.compare("jamais-vu", Qt::CaseInsensitive) == 0;
     const bool isBase = input.profile.profileId.compare("base-game", Qt::CaseInsensitive) == 0;
     m_baseProbe = isBase;
+    m_usesRuntimeHost = isJmv || isBase;
     if((!isJmv && !isBase) || !input.profile.valid || !input.profile.runtimeStackValidated)
     {
         if(error) *error = "The active runtime stack is incomplete or does not match an exact manifest.";
@@ -1307,36 +1307,14 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
     m_engineDirectory = QFileInfo(m_gameExePath).absolutePath();
     m_bridgeSourcePath = QDir(QCoreApplication::applicationDirPath())
             .filePath("runtime/EIMapperEnduranceJmvBridge.plg");
-    if(isJmv)
-    {
-        const QString modConfigPath = QDir(input.profile.modRoot).filePath("config.reg");
-        QByteArray modConfig;
-        if(!readFile(modConfigPath, &modConfig, error) ||
-           !hasConfiguredJmvPluginSlot(modConfig))
-        {
-            if(error && error->isEmpty())
-                *error = "The active JMV config.reg does not declare the supported DEV Plugin=plugin.dll slot.";
-            return false;
-        }
-        m_bridgeLivePath = QDir(input.profile.modRoot).filePath("plugin.dll");
-        if(QFileInfo::exists(m_bridgeLivePath))
-        {
-            if(error) *error = "The JMV DEV Plugin path already exists. Endurance will not replace an installed mod plugin; run recovery or inspect plugin.dll first.";
-            return false;
-        }
-    }
-    // JMV's config.reg declares DEV/Plugin as plugin.dll. Starter loads that
-    // exact configured file; its *.plg scan is used only when the configured
-    // value names a directory. Keep the packaged provider descriptively named,
-    // but install it temporarily into the already-declared, currently empty slot.
     if(!QFileInfo(m_gameExePath).isFile())
     {
-        if(error) *error = "The validated Starter game.exe is missing.";
+        if(error) *error = "The validated profile game.exe is missing.";
         return false;
     }
     if(!QFileInfo(m_bridgeSourcePath).isFile())
     {
-        if(error) *error = "The packaged JMV launch bridge is missing. Reinstall this Endurance build.";
+        if(error) *error = "The packaged Endurance launch bridge is missing. Reinstall this Endurance build.";
         return false;
     }
     m_runId = QDateTime::currentDateTimeUtc().toString("yyyyMMdd-HHmmss-") +
@@ -1362,21 +1340,21 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
     m_supplementalMobDirectory = QDir(m_runRoot).filePath("supplemental-mobs");
     m_profileId = input.profile.profileId;
     m_currentZoneId = input.mapEntry.zoneId;
+    m_bridgeLivePath = QDir(m_runRoot).filePath("EIMapperEnduranceRuntimeBridge.dll");
+    m_runtimeHostPath = QDir(QCoreApplication::applicationDirPath())
+        .filePath("runtime/EIMapperEnduranceRuntimeHost.exe");
+    m_gamePidPath = QDir(m_runRoot).filePath("game.pid");
+    if(!QFileInfo(m_runtimeHostPath).isFile())
+    {
+        if(error) *error = "The packaged x86 Endurance runtime host is missing.";
+        return false;
+    }
     if(isBase)
     {
         const QString liveDirectory = QDir(m_runRoot).filePath("live");
         if(!QDir().mkpath(liveDirectory))
         {
             if(error) *error = "Could not create the Base EI run-local map directory.";
-            return false;
-        }
-        m_bridgeLivePath = QDir(m_runRoot).filePath("EIMapperEnduranceRuntimeBridge.dll");
-        m_runtimeHostPath = QDir(QCoreApplication::applicationDirPath())
-            .filePath("runtime/EIMapperEnduranceRuntimeHost.exe");
-        m_gamePidPath = QDir(m_runRoot).filePath("game.pid");
-        if(!QFileInfo(m_runtimeHostPath).isFile())
-        {
-            if(error) *error = "The packaged x86 Base EI runtime host is missing.";
             return false;
         }
         m_liveMprPath = QDir(liveDirectory).filePath(m_temporaryMapName + ".mpr");
@@ -1910,6 +1888,7 @@ bool CJmvMapTestLauncher::installBridge(QString* error)
     bridgeManifest.insert("path", m_bridgeLivePath);
     bridgeManifest.insert("sha256", m_bridgeSha256);
     bridgeManifest.insert("resultPath", m_bridgeResultPath);
+    bridgeManifest.insert("transport", "owned-x86-injector");
     m_manifest.insert("bridge", bridgeManifest);
     if(!writeManifest("bridge-planned", error))
         return false;
@@ -1917,10 +1896,10 @@ bool CJmvMapTestLauncher::installBridge(QString* error)
        fileSha256(m_bridgeLivePath).compare(m_bridgeSha256, Qt::CaseInsensitive) != 0)
     {
         if(error && error->isEmpty())
-            *error = "The temporary JMV launch bridge failed its SHA-256 check.";
+            *error = "The run-local Endurance launch bridge failed its SHA-256 check.";
         return false;
     }
-    appendRunLog(QString("Installed temporary JMV launch bridge sha256=%1 path=%2")
+    appendRunLog(QString("Staged run-local Endurance launch bridge sha256=%1 path=%2 transport=owned-x86-injector")
                  .arg(m_bridgeSha256, m_bridgeLivePath));
     return writeManifest("bridge-installed", error);
 }
@@ -1997,8 +1976,8 @@ void CJmvMapTestLauncher::focusGameWindow(bool maximize)
 #ifdef Q_OS_WIN
     if(!isRunning())
         return;
-    const qint64 ownedPid = m_baseProbe ? readOwnedGamePid(m_gamePidPath)
-                                       : m_process->processId();
+    const qint64 ownedPid = m_usesRuntimeHost ? readOwnedGamePid(m_gamePidPath)
+                                             : m_process->processId();
     if(ownedPid <= 0)
     {
         appendRunLog("Owned game PID is not available for focus yet");

@@ -14,7 +14,7 @@ if (-not (Test-Path -LiteralPath $bridge -PathType Leaf)) {
 $runtimeHost = Join-Path $root 'runtime\EIMapperEnduranceRuntimeHost.exe'
 if(-not (Test-Path -LiteralPath $runtimeHost -PathType Leaf))
 {
-    $failures.Add('packaged Base runtime host is missing: runtime\EIMapperEnduranceRuntimeHost.exe')
+    $failures.Add('packaged Endurance runtime host is missing: runtime\EIMapperEnduranceRuntimeHost.exe')
 }
 
 foreach ($name in @('endurance-options.json', 'options.json')) {

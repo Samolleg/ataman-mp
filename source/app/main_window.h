@@ -107,6 +107,8 @@ private:
     void updateEntranceOverlays();
     void updateOperationAvailability(bool hasSelection = false);
     void updateDocumentActionAvailability();
+    bool beginWorkspaceLoad(const QString& description);
+    void endWorkspaceLoad();
     void updateLoadedMapPanel();
     void updateOutlinerSelectionPath();
     void previewLoadedMapVisibility(QTreeWidgetItem* item);
@@ -228,6 +230,7 @@ private:
     QProgressDialog* m_hotReloadProgress{nullptr};
     QTimer* m_autosaveTimer{nullptr};
     bool m_uiStateSaved{false};
+    bool m_workspaceLoadInProgress{false};
     QString m_mapTestResultLogPath;
     CMobFamilyValidationReport m_familyValidation;
     QByteArray m_acknowledgedFindingDigest;

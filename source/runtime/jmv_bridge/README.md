@@ -1,15 +1,20 @@
 # JMV direct single-player map launcher
 
-This x86 `.plg` is a temporary, profile-specific provider for the fingerprinted
-Starter `game.exe`. Its engine hooks depend only on that executable's guarded
-code layout. Starter addon.dll, SpellAddonX.asi, and the frequently updated JMV
-addon.dll are not Endurance bridge dependencies or compatibility gates. It is
-not loaded into EI Mapper itself. During a test run
-the editor copies it into JMV's configured `DEV/Plugin=plugin.dll` slot, where
-Starter calls `EntryBeforePatch` and `EntryAfterPatch`. The slot must be absent;
-Endurance never replaces an installed mod plugin. The provider and other
-temporary files are removed after exit only when their SHA-256 values still
-match the run manifest.
+This x86 `.plg` is the run-local provider for the fingerprinted Base or Starter
+`game.exe`. Its engine hooks depend only on the executable's guarded code
+layout. Starter addon.dll, SpellAddonX.asi, and the frequently updated JMV
+addon.dll are not Endurance bridge-delivery dependencies or compatibility
+gates. They remain profile gameplay components and JMV features may naturally
+depend on them after the game starts.
+
+Endurance uses the same owned-process transport for Base and JMV. Its packaged
+32-bit runtime host creates the selected `game.exe` suspended, loads a copy of
+this bridge from the run directory, calls `EnduranceInitialize` explicitly,
+and resumes the game only after the bridge accepts the fingerprint and guarded
+hook sites. Endurance never places `plugin.dll` in the mod, uses the JMV
+`DEV/Plugin` loader, injects into an independently started process, or requests
+elevation. The run-local provider is removed after exit only when its SHA-256
+still matches the recovery journal.
 
 The provider verifies the exact approved `game.exe` hash and patches the
 already loaded modules' imports of `CreateFileA/W` and
@@ -59,9 +64,10 @@ Game click. The previously tested internal `server` handler remains absent
 because runtime evidence showed it enters an incomplete multiplayer/server
 transition instead.
 
-Starter treats a non-zero callback return as an assertion condition, so both
-exports always return zero. Initialization failures are reported in the run
-log and otherwise leave the runtime untouched.
+The legacy Starter callback exports remain for binary compatibility, but the
+owned runtime host calls `EnduranceInitialize` directly. Initialization
+failures are written to `runtime-host.log`; the suspended game is terminated
+without being resumed.
 
 Build with `build-x86.cmd` from an x86 Visual Studio 2022 environment. Generated
 binary/PDB files under `bin/` are local build artifacts.

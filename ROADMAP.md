@@ -5,7 +5,7 @@ work is ordered from the newest planned minor line to the oldest completed one.
 An item is checked only after its implementation has landed and received the
 stated validation. Completed code should carry a commit, test, or release link.
 
-Current development line: `0.2.1-alpha.25` focused closed testing.
+Current development line: `0.2.1-alpha.26` focused closed testing.
 
 <details open>
 <summary><strong>General wishlist — not assigned to a release</strong></summary>
@@ -296,7 +296,7 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
 
 ### Current 0.2.x status
 
-- **Current tester build:** `0.2.1-alpha.25`, retaining the alpha.24 render and
+- **Current tester build:** `0.2.1-alpha.26`, retaining the alpha.24 render and
   autosave baseline while hardening validation navigation and the NVIDIA test
   overlay. JMV direct-launch compatibility now depends only on the exact
   fingerprinted Starter `game.exe`; Starter addon.dll, SpellAddonX.asi, JMV
@@ -375,7 +375,7 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
 
 ### Critical: structural zone-family NID validation
 
-- [ ] **HIGH — alpha.25 load re-entrancy:** prevent a second map load from
+- [x] **HIGH — alpha.25 load re-entrancy:** prevent a second map load from
   starting while the first MOB is still finalising.
   - The supplied log shows Zone 4 starting at 04:01:21 while Zone 17 visual
     preloading continued until 04:01:30. Only the Zone 17 landscape was
@@ -386,8 +386,11 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
   - Validation must still report real overlaps in this state, but label them as
     cross-family workspace findings rather than claiming Zone 4 and Zone 17
     are one runtime family.
+  - Alpha.26 makes load progress input-blocking, excludes user input from all
+    explicit progress event pumping, rejects nested map/collection/document
+    activation, and disables open/save/test actions until finalisation ends.
 
-- [ ] **RELEASE BLOCKER — alpha.25 JMV launch transport regression:** diagnose
+- [x] **RELEASE BLOCKER — alpha.25 JMV launch transport regression:** diagnose
   runs where staging and `game.exe` launch succeed but the temporary bridge
   entry point is never invoked.
   - Run `20260721-190712-5a815226` reached the normal main menu and exited
@@ -395,9 +398,14 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
   - The staged files, JMV DEV `plugin.dll` slot, bridge exports, and exact
     supported `game.exe` hash were all present; this is not an entrance, map,
     or relaxed-manifest rejection.
-  - Add explicit module-load/entry-point evidence so this failure identifies
-    whether Starter skipped the plugin, Windows rejected the DLL, or the DEV
-    loader did not call `EntryAfterPatch`.
+  - Alpha.26 removes the DEV plugin slot from Endurance delivery. Both JMV and
+    Base now use the editor-owned suspended-process host, run-local bridge DLL,
+    and explicit `EnduranceInitialize` export. JMV addon/ASI/Lua remain ordinary
+    mod gameplay components rather than bridge-delivery dependencies.
+  - The selected game root is virtualized inside the owned process so Evil
+    Islands' shared registry paths cannot redirect one Base installation into
+    another. Two exact Base executable hashes are admitted; all detour bytes
+    remain independently guarded.
 - [x] Detect intra-file duplicates and cross-file NID collisions across the
   complete active zone family before more multi-MOB editing is released.
   This is critical because the confirmed `zone7.mob` / `Autozone7altar.mob`

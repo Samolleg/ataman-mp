@@ -19,7 +19,6 @@ private slots:
     void ignoresWorldScriptInStringsAndComments();
     void rejectsMalformedExistingWorldScript();
     void injectsActualAutorunRuntimeBootstrap();
-    void recognizesConfiguredJmvPluginSlot();
     void exposesTestRunsQuickAccessPath();
     void createsGenerationScopedSavePaths();
     void preparesOwnedGodmodeAutoexec();
@@ -94,15 +93,6 @@ void JmvMapTestLauncherTests::initTestCase()
     const QString root = QDir(QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation))
             .filePath("test-runs");
     QDir(root).removeRecursively();
-}
-
-void JmvMapTestLauncherTests::recognizesConfiguredJmvPluginSlot()
-{
-    const QByteArray expected = QByteArray::fromHex(
-        "01000300444556ffff0d000000020600506c7567696e0a00706c7567696e2e646c6c");
-    QVERIFY(CJmvMapTestLauncher::hasConfiguredJmvPluginSlot(expected));
-    QVERIFY(!CJmvMapTestLauncher::hasConfiguredJmvPluginSlot(
-                QByteArray("Plugin=EIMapperEnduranceJmvBridge.plg")));
 }
 
 void JmvMapTestLauncherTests::exposesTestRunsQuickAccessPath()

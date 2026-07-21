@@ -80,7 +80,6 @@ public:
                                            QString* output,
                                            QString* error = nullptr,
                                            const QString& immediateCommands = QString());
-    static bool hasConfiguredJmvPluginSlot(const QByteArray& configReg);
     static bool prepareTemporaryAutoexec(const QString& engineDirectory,
                                          const QString& runRoot,
                                          bool godmode,
@@ -154,6 +153,7 @@ private:
     bool m_cleanupComplete;
     bool m_stopRequested{false};
     bool m_baseProbe;
+    bool m_usesRuntimeHost{false};
     bool m_recoveryPending{false};
     bool m_lastPublishedRecoveryPending{false};
     QString m_lastPublishedRecoveryStatus;

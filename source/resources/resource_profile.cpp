@@ -260,7 +260,8 @@ QVector<SResourceProfile> builtInResourceProfiles()
                                QString("semanticValidation")})
         base.providers.insert(role, {"base.standard.v1", 1});
     base.runtimeComponents << runtimeComponent("base-game", "{gameRoot}/game.exe",
-        {"B871D70D3876B2A5634F0920C92118BC49058B50C7D8CBE68376349F51C2E570"});
+        {"B871D70D3876B2A5634F0920C92118BC49058B50C7D8CBE68376349F51C2E570",
+         "8ED3F9A500D84D822BD311B74B1B49D5CD16DD12D3502C27D7667957311036C1"});
     base.capabilities.insert("mob.losslessEditing", capability("mob.losslessEditing", EProfileCapabilityStatus::Unsupported,
         "Copy-only hardening is active until UI edits are migrated to provenance transactions."));
     base.capabilities.insert("mob.perspectiveDiff", capability("mob.perspectiveDiff", EProfileCapabilityStatus::Experimental,

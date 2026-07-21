@@ -86,6 +86,13 @@ void ResourceProfileTests::basePresetDoesNotRequireJmv()
     QVERIFY(result.mapDirectories[0].endsWith("Maps"));
     QVERIFY(result.runtimeStackComplete);
     QCOMPARE(result.providers.value("database").id, QString("base.standard.v1"));
+    const SResourceProfile baseProfile = builtInResourceProfiles()[1];
+    QCOMPARE(baseProfile.runtimeComponents.size(), 1);
+    QCOMPARE(baseProfile.runtimeComponents.first().acceptedSha256.size(), 2);
+    QVERIFY(baseProfile.runtimeComponents.first().acceptedSha256.contains(
+        "B871D70D3876B2A5634F0920C92118BC49058B50C7D8CBE68376349F51C2E570"));
+    QVERIFY(baseProfile.runtimeComponents.first().acceptedSha256.contains(
+        "8ED3F9A500D84D822BD311B74B1B49D5CD16DD12D3502C27D7667957311036C1"));
 }
 
 void ResourceProfileTests::invalidGameRootIsRejected()
