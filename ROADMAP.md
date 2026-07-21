@@ -72,6 +72,24 @@ Current development line: `0.2.1-alpha.24` focused closed testing.
 - [ ] Convert concrete regressions into minimized synthetic fixtures whenever
   the format permits this without distributing game or JMV assets.
 
+## Object authoring conveniences
+
+- [ ] Add an explicit **Convert World Object to Lever...** transaction.
+  - Preserve the original NID, transform, model, textures, body parts, common
+    object fields, directory membership, ordering position, and script-facing
+    identity.
+  - Source the lever envelope and lever-only records from a verified same-profile
+    raw lever template; never send the converted object through the legacy
+    rebuilding serializer.
+  - Show editable lever defaults before conversion (open mode/key/skill, current
+    and total states, cycling, door, and graph-recalculation flags), scan the NID
+    for script references, and apply the subtree replacement as one undoable
+    transaction.
+  - Refuse conversion when no compatible raw template/provenance mapping can be
+    proven. ZoneView offering a similar command is useful workflow evidence, but
+    is not proof that its serialized output preserves Endurance's lossless-save
+    guarantees.
+
 </details>
 
 <details>
@@ -277,6 +295,14 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
   through [`191ac85`](https://github.com/Ilufus/ei-mapper-endurance/commit/191ac85e1990d9f7eddfef7d7cdef1a29aa67930)
   and delivering the verified live autosave-cadence signal
   ([`269c807`](https://github.com/Ilufus/ei-mapper-endurance/commit/269c80759a334174eca26eec7022524ffff4ea64)).
+  Post-alpha.24 stabilization distinguishes exact-hash code components from
+  fingerprinted mutable JMV scripts/configuration, accepts the known patched
+  JMV addon variant, and identifies a mismatched component/path/hash instead of
+  issuing only a generic manifest rejection. Validation object actions now load
+  an unloaded source MOB before selecting its proven object. Two supplied
+  NVIDIA crashes were traced to entrance-overlay draws inheriting stale mesh
+  vertex attributes; the overlay now resets VAO/VBO attribute state first.
+  ([`0b206e5`](https://github.com/Ilufus/ei-mapper-endurance/commit/0b206e5))
   Alpha.23 added explicit autosave scheduling telemetry, Autosave Now, and Open
   Backup Folder, but tester logs proved that changing the cadence still required
   a restart. Alpha.22 fixed the General-settings
