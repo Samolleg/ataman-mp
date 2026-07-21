@@ -29,11 +29,15 @@ struct SRenderFrameCounters
     quint64 transparentQueueSize{0};
     quint64 batches{0};
     quint64 instances{0};
+    quint64 instancedDrawCalls{0};
     quint64 sharedMeshes{0};
     quint64 gpuMemoryEstimateBytes{0};
     quint64 animationPoseEvaluations{0};
     quint64 animationPoseCacheHits{0};
     quint64 animationComponentsEvaluated{0};
+    quint64 queueCollectNanoseconds{0};
+    quint64 queueSortNanoseconds{0};
+    quint64 queueDrawNanoseconds{0};
 };
 
 struct SRenderFrameMetadata
@@ -47,6 +51,8 @@ struct SRenderFrameMetadata
     QString mapName;
     QString contentFingerprint;
     bool benchmarkMode{false};
+    bool vsyncEnabled{true};
+    int frameRateCap{0};
     bool animationEnabled{true};
     bool landEnabled{true};
     bool waterEnabled{true};

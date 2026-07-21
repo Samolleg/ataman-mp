@@ -228,6 +228,7 @@ private:
 
 public slots:
     void updateWindow();
+    void applyRenderScheduling();
     void updateParameter(EObjParam param);
     void viewParameters();
     void updateReadState(EReadState state); //get signal from reading texture/objects/map/mob

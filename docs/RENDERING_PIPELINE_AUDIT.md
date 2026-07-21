@@ -15,21 +15,23 @@ texture. The visibility increment now removes the fixed 15 ms scheduler cap,
 culls terrain sectors, and submits MOB objects through a deterministic 32-unit
 spatial grid. The queue increment now shares equivalent immutable FIG VBOs,
 classifies decoded texture alpha, and submits sorted opaque, cutout, transparent,
-and highlighted render items. This remains an intermediate renderer stage, not
-a claim that the final performance target has been reached.
+and highlighted render items. The first modern path instances matching static
+and hierarchy-animated opaque/cutout parts; morph and ordered transparency stay
+on the individual correctness path. This remains an intermediate renderer
+stage, not a claim that the final performance target has been reached.
 
 ## Current frame
 
 | Stage | Current implementation | Existing optimization | Remaining cost |
 | --- | --- | --- | --- |
-| Scheduling | A precise zero-interval request loop renders continuously | Normal mode requests display VSync; `--render-benchmark` requests swap interval 0 | Driver presentation behavior must be confirmed in runtime logs |
-| Scene traversal | Each MOB has a deterministic 32-unit spatial grid | Visible cells and object bounds are frustum tested; selected objects stay conservative | Static instance submission is not implemented yet |
+| Scheduling | A precise request loop supports an immediate 0-1000 FPS cap | Normal mode uses the persisted VSync choice; `--render-benchmark` forces VSync off and no cap | Integer-millisecond Qt timers make non-divisor caps approximate |
+| Scene traversal | Each MOB has a deterministic 32-unit spatial grid | Visible cells and object bounds are frustum tested; selected objects stay conservative | Dense views still submit thousands of visible parts |
 | Terrain | Land and water sectors are frustum rejected | Terrain is already split into 32-unit sectors | Visible sectors still issue one draw each |
-| Mesh storage | Immutable FIG geometry shares profile/resource-scoped VBOs | Morph-deformed parts detach to private updatable buffers | CPU vertex arrays and attribute setup remain per part |
-| Object submission | Visible parts produce explicit render items | Opaque/cutout items sort by material, texture, and mesh; genuine transparency sorts back-to-front | Draws are not instanced yet |
+| Mesh storage | Immutable FIG geometry shares profile/resource-scoped VBOs | Morph-deformed parts detach to private updatable buffers; desktop OpenGL 3.3+ caches VAO layouts per shared mesh, shader, and pass | CPU vertex arrays remain per part and thousands of unique meshes still limit instancing |
+| Object submission | Visible parts produce explicit render items | Matching immutable opaque/cutout parts instance on desktop OpenGL 3.3+; genuine transparency sorts back-to-front | Unique meshes and ordered transparency still produce individual draws |
 | Rasterization | OpenGL shaders, VBOs, textures, depth test | Verified opaque work disables blend/alpha test; cutouts retain alpha test | Back-face culling remains disabled and conservative materials retain legacy blending |
 | Selection/helpers | Separate selection and logic-helper passes | Picking reuses spatial visibility; selected/moving nodes remain conservative | Enabled logic mode intentionally retains full helper traversal |
-| Resources | Figure, texture, archive-index, and miss caches exist | Unit visual preload avoids many first-view loads | CPU decode and GUI-thread GL upload are not yet bounded asynchronous phases |
+| Resources | Figure, texture, archive-index, and miss caches exist | Unit visual preload now reuses exact profile-scoped figure assemblies, parses each shared idle clip once per database generation, and batches progress/context boundaries | CPU decode and GUI-thread GL upload are not yet bounded asynchronous phases |
 
 ## Instrumentation
 
@@ -43,8 +45,8 @@ seconds the log reports:
 - visited, culled, submitted, spatial-cell, candidate, and overflow counts;
 - logic traversal calls;
 - visible/culled/tested terrain sectors;
-- draw calls, triangles, texture binds, and reserved queue/instance/shared-mesh
-  counters used by later stages.
+- draw calls, triangles, texture binds, queue/instance/shared-mesh counters,
+  and separate queue collection, sorting, and OpenGL draw-phase milliseconds.
 
 `--render-benchmark` enables counters automatically, requests VSync off before
 the first OpenGL widget is created, and writes `logs/render-benchmark.json`.
@@ -84,10 +86,13 @@ which side is limiting the frame.
    and shared mesh; sort genuine transparency back-to-front. Cache one GPU
    mesh/VAO for equivalent immutable FIG geometry and stop enabling blending
    for verified opaque work.
-3. **Batch and instance static objects.** Issue instanced draws for matching
+3. **Batch and instance static objects (initial modern path implemented).** Issue instanced draws for matching
    mesh/material entries inside visible spatial cells. Keep a non-instanced
    compatibility path and a separate dynamic queue for animated units.
-4. **Bound resource work.** Perform archive lookup and CPU decode off the GUI
+4. **Reduce remaining submission overhead.** Cache immutable vertex input
+   state, combine compatible geometry where instancing cannot reduce unique
+   draws, and submit visible terrain sectors through a multi-draw path.
+5. **Bound resource work.** Perform archive lookup and CPU decode off the GUI
    thread; upload to OpenGL in bounded batches during map load. Retain explicit
    placeholders and diagnostics for failures.
 
@@ -141,6 +146,63 @@ foliage/cutouts, translucent effects, highlighted selections, humanoid layered
 atlases, morph wings, rectangle picking, and several map switches. Attach both
 `workflow.log` and `render-performance.log`; use the benchmark launcher for the
 separate uncapped 4K measurement.
+
+The 2026-07-21 pacing/instancing capture proves the remaining dense-view limit
+is CPU submission, not the FPS cap. At 2430 x 1960 with VSync off, the heaviest
+`zone18` view averaged about 25 FPS, 39 ms CPU submission, 7.7 ms GPU time,
+4,082 draws, and 3,935 batches. The comparable `zone3obr` camp view averaged
+about 34 FPS and 29 ms CPU submission. The following state-reduction increment
+removes per-object uniforms that were still executed while merely collecting
+queues, avoids per-batch matrix-vector allocations, and records collect/sort/
+draw phase timings for the next fixed-camera comparison.
+
+The subsequent submission capture localizes that cost. A stationary heavy
+`zone18` view at 2430 x 1960 averaged about 34.5 FPS and 28.1 ms CPU submission,
+while queue collection plus sorting consumed only about 1.6 ms and the queue
+draw phase consumed about 23.3 ms. It submitted 3,984 draws in 3,839 batches;
+GPU average time was 6-7 ms. The workflow contained no crash/fatal record and
+reported desktop OpenGL 4.6 with instancing enabled. This evidence selects
+vertex-input and uniform submission as the next measured target. The following
+increment caches shader locations and separate ordinary, instanced, selection,
+and instanced-selection VAO layouts per immutable mesh. The legacy/ANGLE path
+continues to configure vertex attributes explicitly.
+
+The VAO validation capture improved the wide `zone18` view to roughly 80-100
+FPS. Its densest stationary sample at 2430 x 1960 still averaged about 74.9
+FPS, 12.56 ms CPU submission, and 5.12 ms GPU time while issuing about 4,116
+draws. Queue collection and sorting were only about 2.92 ms combined; drawing
+the roughly 3,952 batches remained about 7.02 ms. This keeps compatible
+geometry consolidation and terrain multi-draw as the next steady-state target.
+
+## Map-load resource preparation
+
+The animation-LOD capture separates `zone18` loading into three observable
+phases. Terrain and MOB parsing completed in about two seconds, projection of
+4,463 objects took about three seconds, and synchronous visual preload for 402
+units then took 9,492 ms. Unit preparation is therefore the dominant measured
+load stage, rather than map parsing.
+
+The load-preparation increment addresses three repeated costs without changing
+resource precedence or serialized data:
+
+- completed figure assemblies are cached by provider/resource scope, model,
+  exact visible-part list, and exact complexion; the bounded 128 MiB CPU cache
+  clones per-unit pose state while sharing immutable mesh storage;
+- progress/event processing and OpenGL-context reacquisition occur at about
+  twenty evenly spaced boundaries instead of once per unit;
+- identical provider/model/weapon animation requests share a parsed idle clip
+  for the current immutable database generation, removing repeated ADB/ANM
+  work as matching units first become visible;
+- identical resolved visual-plan information is logged once per generation,
+  while warnings and inconsistent-data diagnostics remain per unit.
+
+Runtime validation must compare the existing
+`Preloaded visual resources for 402 units during MOB load in 9492 ms` baseline
+against the same profile and map after a fresh launch. Also verify profile
+switching, imported units with distinct part lists or complexion, first entry
+into a dense unit group, and several map switches. Asynchronous archive decode
+and bounded render-thread upload remain a later phase if the new measurement
+shows resource I/O/decode still dominates.
 
 ## Lighting, shadows, sky, fog, and particles
 

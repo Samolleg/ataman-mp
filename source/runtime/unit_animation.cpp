@@ -468,18 +468,20 @@ EAnimationDistanceTier animationDistanceTier(bool visible, bool selected, float 
     if(!visible) return EAnimationDistanceTier::Skip;
     if(selected || distance <= 100.0f) return EAnimationDistanceTier::Full;
     if(distance <= 300.0f) return EAnimationDistanceTier::HalfRate;
-    return EAnimationDistanceTier::FirstPose;
+    return EAnimationDistanceTier::LowRate;
 }
 
 double quantizedAnimationFrame(EAnimationDistanceTier tier, qint64 elapsedMilliseconds,
                                int logicalLength, quint32 phaseSeed)
 {
-    if(logicalLength <= 0 || tier == EAnimationDistanceTier::Skip || tier == EAnimationDistanceTier::FirstPose)
+    if(logicalLength <= 0 || tier == EAnimationDistanceTier::Skip)
         return 0.0;
     double frame = (double(elapsedMilliseconds) * 15.0 / 1000.0) + double(phaseSeed % quint32(logicalLength));
     frame = std::fmod(frame, double(logicalLength));
     if(tier == EAnimationDistanceTier::HalfRate)
         frame = qFloor(frame * 0.5) * 2.0;
+    else if(tier == EAnimationDistanceTier::LowRate)
+        frame = qFloor(frame * 0.25) * 4.0;
     return frame;
 }
 

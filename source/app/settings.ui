@@ -381,6 +381,59 @@
             </widget>
            </item>
            <item>
+            <widget class="QCheckBox" name="renderVSync">
+             <property name="toolTip">
+              <string>Synchronizes presentation to the display refresh rate. Changing this option takes effect after restarting the editor.</string>
+             </property>
+             <property name="text">
+              <string>Vertical synchronization (restart required)</string>
+             </property>
+             <property name="checked">
+              <bool>true</bool>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <layout class="QHBoxLayout" name="renderFpsCapLayout">
+             <item>
+              <widget class="QLabel" name="renderFpsCapLabel">
+               <property name="text">
+                <string>Frame rate cap (0 = unlimited)</string>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QLineEdit" name="renderFpsCap">
+               <property name="toolTip">
+                <string>Limits viewport updates per second. Zero is unlimited; VSync may still limit presentation.</string>
+               </property>
+               <property name="maximumSize">
+                <size>
+                 <width>100</width>
+                 <height>16777215</height>
+                </size>
+               </property>
+               <property name="text">
+                <string>0</string>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <spacer name="renderFpsCapSpacer">
+               <property name="orientation">
+                <enum>Qt::Horizontal</enum>
+               </property>
+               <property name="sizeHint" stdset="0">
+                <size>
+                 <width>40</width>
+                 <height>20</height>
+                </size>
+               </property>
+              </spacer>
+             </item>
+            </layout>
+           </item>
+           <item>
             <widget class="QCheckBox" name="renderPerformanceCounters">
              <property name="toolTip">
               <string>Logs rolling FPS, CPU submission time, asynchronous GPU time when supported, visibility counts, draw calls, triangles, and texture binds.</string>

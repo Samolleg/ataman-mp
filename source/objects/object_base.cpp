@@ -1,5 +1,6 @@
 #include "objects\object_base.h"
 #include <QJsonArray>
+#include <QCache>
 #include <QFileInfo>
 #include <QString>
 #include "mob\mob.h"
@@ -13,7 +14,33 @@
 #include "settings.h"
 #include "property.h"
 
+#include <climits>
+
 namespace {
+struct CachedFigureAssembly
+{
+    ~CachedFigureAssembly()
+    {
+        qDeleteAll(parts);
+    }
+    QVector<CPart*> parts;
+};
+
+QCache<QString, CachedFigureAssembly>& transientAssemblyCache()
+{
+    static QCache<QString, CachedFigureAssembly> cache;
+    static bool initialized = false;
+    if(!initialized)
+    {
+        // Costs are KiB of retained CPU vertex data. This keeps the cache
+        // useful for dense humanoid maps without allowing old profiles/maps
+        // to retain an unbounded amount of assembly geometry.
+        cache.setMaxCost(128 * 1024);
+        initialized = true;
+    }
+    return cache;
+}
+
 QString meshCacheScope(const QString& modelName)
 {
     CSettings* settings = CObjectList::getInstance()->settings();
@@ -36,6 +63,42 @@ QString meshCacheScope(const QString& modelName)
     for(const QString& root : sourcePaths)
             scope += QFileInfo(root).absoluteFilePath().toLower() + ';';
     return scope + '|' + modelName.toLower();
+}
+
+void cloneAssembly(QVector<CPart*>& destination, const QVector<CPart*>& source)
+{
+    destination.reserve(source.size());
+    for(CPart* part : source)
+        destination.append(new CPart(*part));
+}
+
+void buildCachedAssembly(ei::CFigure* figure, const QString& scope,
+                         const QString& modelName, const QStringList& visibleParts,
+                         const QVector3D& complexion, QVector<CPart*>& destination)
+{
+    const QString key = scope + '|' + modelName.toLower() + '|'
+        + visibleParts.join(';').toLower() + '|'
+        + QString::number(complexion.x(), 'g', 8) + ','
+        + QString::number(complexion.y(), 'g', 8) + ','
+        + QString::number(complexion.z(), 'g', 8);
+    QCache<QString, CachedFigureAssembly>& cache = transientAssemblyCache();
+    CachedFigureAssembly* cached = cache.object(key);
+    if(!cached)
+    {
+        cached = new CachedFigureAssembly;
+        QStringList parts = visibleParts;
+        QVector3D renderComplexion = complexion;
+        figure->getVertexData(cached->parts, renderComplexion, parts);
+        quint64 retainedBytes = 0;
+        for(CPart* part : cached->parts)
+            retainedBytes += quint64(part->vertData().size()) * sizeof(SVertexData);
+        const int costKiB = qMax(1, int(qMin<quint64>(retainedBytes / 1024,
+                                                      quint64(INT_MAX))));
+        cloneAssembly(destination, cached->parts);
+        cache.insert(key, cached, costKiB);
+        return;
+    }
+    cloneAssembly(destination, cached->parts);
 }
 }
 
@@ -180,13 +243,15 @@ void CObjectBase::draw(bool isActive, QOpenGLShaderProgram* program)
     matrix = matrix * rtMatrix;
 
     RenderQueueContext& queue = RenderQueueContext::instance();
-    if(!queue.collecting())
+    const bool queued = queue.collecting();
+    if(!queued)
         program->setUniformValue("u_modelMmatrix", matrix);
 
-    if (m_state == ENodeState::eSelect)
+    if (!queued && m_state == ENodeState::eSelect)
         program->setUniformValue("u_highlight", true);
 
-    program->setUniformValue("qt_Texture0", 0);
+    if(!queued)
+        program->setUniformValue("qt_Texture0", 0);
     QOpenGLTexture* boundTexture = nullptr;
     for(auto& part: m_aPart)
     {
@@ -194,7 +259,7 @@ void CObjectBase::draw(bool isActive, QOpenGLShaderProgram* program)
         if(!texture)
             texture = part->textureNumber() == 2 && m_secondaryTexture
                 ? m_secondaryTexture : m_texture;
-        if(queue.collecting())
+        if(queued)
         {
             queue.submit(part, texture, matrix,
                          CTextureList::getInstance()->materialClass(texture),
@@ -211,9 +276,11 @@ void CObjectBase::draw(bool isActive, QOpenGLShaderProgram* program)
         }
         part->draw(program);
     }
-    program->setUniformValue("u_partAnimated", false);
-
-    program->setUniformValue("u_highlight", false);
+    if(!queued)
+    {
+        program->setUniformValue("u_partAnimated", false);
+        program->setUniformValue("u_highlight", false);
+    }
 }
 
 void CObjectBase::drawSelect(QOpenGLShaderProgram* program)
@@ -238,6 +305,14 @@ void CObjectBase::drawSelect(QOpenGLShaderProgram* program)
         rtMatrix.setToIdentity();
         rtMatrix.rotate(m_rotation);
         matrix = matrix * rtMatrix;
+        RenderQueueContext& queue = RenderQueueContext::instance();
+        if(queue.collectingSelection())
+        {
+            const QVector4D pickingColor = m_pickingColor.toVec4();
+            for(CPart* part : m_aPart)
+                queue.submitSelection(part, matrix, pickingColor);
+            return;
+        }
         program->setUniformValue("u_modelMmatrix", matrix);
         program->setUniformValue("u_color", m_pickingColor.toVec4());
     }
@@ -647,11 +722,11 @@ void CObjectBase::applyTransientVisual(const QString& modelName, const QString& 
     m_aPart.clear();
     if(!m_pFigure)
         return;
-    QStringList parts = visibleParts;
-    QVector3D renderComplexion = complexion;
     m_figureComplexion = complexion;
-    CPart::setCacheScope(meshCacheScope(modelName));
-    m_pFigure->getVertexData(m_aPart, renderComplexion, parts);
+    const QString cacheScope = meshCacheScope(modelName);
+    CPart::setCacheScope(cacheScope);
+    buildCachedAssembly(m_pFigure, cacheScope, modelName, visibleParts,
+                        complexion, m_aPart);
     for(CPart* part : m_aPart)
     {
         const QString partTexture = ei::usesUnlayeredHumanoidTexture(part->name())
@@ -682,7 +757,8 @@ void CObjectBase::applyTransientVisual(const QString& modelName, const QString& 
 
 void CObjectBase::recalcMinPos()
 {
-    float min(1000.0f); // 0.0f?
+    float min(0.0f);
+    bool hasVertex = false;
     QVector3D rotatedPos;
     QMatrix4x4 rtMatrix;
     rtMatrix.setToIdentity();
@@ -691,10 +767,16 @@ void CObjectBase::recalcMinPos()
         for(auto& vert : part->vertData())
         {
             rotatedPos = rtMatrix*vert.position; //get vector, rotated with matrix
-            if (rotatedPos.z() < min)
+            if(!hasVertex || rotatedPos.z() < min)
                 min = rotatedPos.z();
+            hasVertex = true;
         }
 
+    // Empty or rejected assemblies must not acquire the historical +1000 Z
+    // projection sentinel. Keep their serialized position stable so the
+    // resolver diagnostic/placeholder remains selectable and inspectable.
+    if(!hasVertex)
+        min = 0.0f;
     m_minPoint = QVector3D(0.0f, 0.0f, min);
     CLandscape::getInstance()->projectPosition(this);
 }

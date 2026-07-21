@@ -21,6 +21,11 @@ bool decodePnt3(const QByteArray& compressed, int decodedSize,
 bool decodePnt3Image(const QByteArray& compressed, int width, int height,
                      QImage* image, QString* diagnostic = nullptr);
 
+// Decode the uncompressed DirectDraw MMP variants (5650/5551/4444/8888).
+// Data begins at the 56-byte pixel descriptor after the common MMP dwords.
+bool decodeDirectDrawImage(const QByteArray& descriptorAndPixels, int width, int height,
+                           QImage* image, QString* diagnostic = nullptr);
+
 // Compose the shared humanoid atlas with the original 2dintmmx.dll formula.
 // PNT3 pixels are already premultiplied, so routing them through a generic
 // source-over painter would premultiply translucent armor edges twice.

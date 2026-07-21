@@ -672,35 +672,6 @@ uchar extractColor(uint pixel, uint mask, uint shift)
     return uchar(0.5 + 255 * ((pixel & mask) >> shift) / (mask >> shift));
 }
 
-SColor getColor(uint pixel, SMmpColor& color)
-{
-    uchar a = color.alpha.m_shift ? extractColor(pixel, color.alpha.m_value, color.alpha.m_mask) : 255;
-    uchar r = extractColor(pixel, color.red.m_value, color.red.m_mask);
-    uchar g = extractColor(pixel, color.green.m_value, color.green.m_mask);
-    uchar b = extractColor(pixel, color.blue.m_value, color.blue.m_mask);
-
-    return SColor(r,g,b,a);
-}
-
-SColor getPixelData(QDataStream &stream, uint pixelSize, SMmpColor& color)
-{
-    SColor colPix;
-    if(pixelSize == 2)
-    {
-        ushort pixel;
-        stream >> pixel;
-        colPix = getColor(pixel, color);
-
-    }
-    else if(pixelSize == 4)
-    {
-        uint pixel;
-        stream >> pixel;
-        colPix = getColor(pixel, color);
-    }
-    return colPix;
-}
-
 bool decompressPnt3(QImage& image, const QByteArray& data, uint compressedSize,
                     QString* diagnostic)
 {
@@ -717,22 +688,6 @@ bool decompressPnt3(QImage& image, const QByteArray& data, uint compressedSize,
                               image.width(), image.height(), &image, diagnostic);
 }
 
-
-void readDirecDrawImage(QImage& image, QDataStream& stream)
-{
-    uint pixelSize;
-    SColor col;
-    SMmpColor color;
-    stream >> pixelSize >> color;
-    pixelSize /= 8;
-
-    for(int h(0); h < image.height(); ++h)
-        for(int w(0); w < image.width(); ++w)
-        {
-            col = getPixelData(stream, pixelSize, color);
-            image.setPixelColor(w,h, QColor(col.red(), col.green(), col.blue(), col.alpha()));
-        }
-}
 
 //in. data - texture byte data
 //in. name - texture name
@@ -817,8 +772,21 @@ void CTextureList::parse(QByteArray& data, const QString& name)
     case ETextureFormat::eMMP_4444    : // use the same direct draw reading algorithm
     case ETextureFormat::eMMP_8888    : // use the same direct draw reading algorithm
     {
-        QImage img(header.m_width, header.m_height, QImage::Format_RGBA64);
-        readDirecDrawImage(img, stream);
+        // Unlike DXT and PNT3, the DirectDraw formats keep a 56-byte pixel
+        // descriptor between the five common MMP header dwords and the pixel
+        // payload. Seeking
+        // to byte 76 here made the first pixels masquerade as format masks and
+        // could decode an otherwise valid 5551 texture as fully transparent
+        // (JMV bat02 is a shipped example).
+        QImage img;
+        QString diagnostic;
+        if(!ei::decodeDirectDrawImage(data.mid(5 * int(sizeof(quint32))),
+                                      header.m_width, header.m_height, &img, &diagnostic))
+        {
+            ei::log(eLogWarning, "Invalid DirectDraw texture " + name + ": " + diagnostic);
+            delete texture;
+            return;
+        }
         texture->setData(img);
         materialClass = classifyTextureAlpha(img);
         break;

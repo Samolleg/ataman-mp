@@ -14,6 +14,7 @@
 #include <QTabWidget>
 #include <QCheckBox>
 #include <QKeySequenceEdit>
+#include <QLineEdit>
 #include <QTemporaryDir>
 #include <QUndoCommand>
 #include <QUndoStack>
@@ -30,6 +31,7 @@
 #include "window_lifecycle.h"
 #include "settings.h"
 #include "jmv_map_test_launcher.h"
+#include "render_scheduling.h"
 
 #ifdef Q_OS_WIN
 #include <windows.h>
@@ -79,6 +81,21 @@ const char* requestedOpenGlBackend(int argc, char* argv[])
     return "automatic";
 }
 
+bool renderBenchmarkRequested(int argc, char* argv[])
+{
+    for(int i = 1; i < argc; ++i)
+        if(std::strcmp(argv[i], "--render-benchmark") == 0)
+            return true;
+    return false;
+}
+
+bool persistedRenderVsync()
+{
+    QFile options("endurance-options.json");
+    if(!options.open(QIODevice::ReadOnly | QIODevice::Text))
+        return true;
+    return ei::renderVsyncFromOptions(options.readAll(), true);
+}
 #ifdef Q_OS_WIN
 const char* accessViolationOperation(const EXCEPTION_RECORD* record)
 {
@@ -221,6 +238,8 @@ int runHeadlessCommand(QApplication& app)
     QCommandLineOption againstOption("against", "Candidate MOB used with --mob-diff.", "candidate");
     QCommandLineOption angleOpenGlOption("angle-opengl", "Use Qt's ANGLE/OpenGL ES implementation (diagnostic GUI mode).");
     QCommandLineOption desktopOpenGlOption("desktop-opengl", "Use the system desktop OpenGL implementation (diagnostic GUI mode).");
+    QCommandLineOption renderBenchmarkOption("render-benchmark",
+        "Disable VSync and run the viewport continuously for renderer throughput capture.");
     parser.addOption(validateOption);
     parser.addOption(roundtripOption);
     parser.addOption(jsonOption);
@@ -231,6 +250,7 @@ int runHeadlessCommand(QApplication& app)
     parser.addOption(againstOption);
     parser.addOption(angleOpenGlOption);
     parser.addOption(desktopOpenGlOption);
+    parser.addOption(renderBenchmarkOption);
     parser.addPositionalArgument("documents", "MPR and MOB documents to open in order.", "[documents...]");
     parser.process(app);
 
@@ -528,6 +548,7 @@ int runHeadlessCommand(QApplication& app)
         bool settingsShortcutsPersist = false;
         bool autosaveSettingsPersist = false;
         bool settingsApplySignal = false;
+        bool renderOptionsRegistered = false;
         {
             const QString previousDirectory = QDir::currentPath();
             QTemporaryDir settingsDirectory;
@@ -550,6 +571,20 @@ int runHeadlessCommand(QApplication& app)
                 QKeySequenceEdit* activateOwnerShortcut = settingsWindow.findChild<QKeySequenceEdit*>("shortcutActivateOwnerMob");
                 QCheckBox* autosaveEnabled = settingsWindow.findChild<QCheckBox*>("autosaveEnabled");
                 QLineEdit* autosaveInterval = settingsWindow.findChild<QLineEdit*>("autosaveIntervalMinutes");
+                COptBool* animateUnits = dynamic_cast<COptBool*>(
+                    settingsWindow.opt(eOptSetRender, "animateUnits"));
+                COptBool* performanceCounters = dynamic_cast<COptBool*>(
+                    settingsWindow.opt(eOptSetRender, "renderPerformanceCounters"));
+                COptBool* renderVsync = dynamic_cast<COptBool*>(
+                    settingsWindow.opt(eOptSetRender, "renderVSync"));
+                COptInt* renderFpsCap = dynamic_cast<COptInt*>(
+                    settingsWindow.opt(eOptSetRender, "renderFpsCap"));
+                renderOptionsRegistered = animateUnits && animateUnits->value()
+                        && performanceCounters && !performanceCounters->value()
+                        && renderVsync && renderVsync->value()
+                        && renderFpsCap && renderFpsCap->value() == 0
+                        && settingsWindow.findChild<QCheckBox*>("renderVSync")
+                        && settingsWindow.findChild<QLineEdit*>("renderFpsCap");
                 if(historyShortcut && duplicateShortcut && stopTestShortcut && activateOwnerShortcut)
                 {
                     historyShortcut->setKeySequence(QKeySequence("Alt+L"));
@@ -618,6 +653,7 @@ int runHeadlessCommand(QApplication& app)
         const bool passed = prefixesOnly && valueStable && focusCancel && escapeCancel
                 && enterCommit && clickCommit && settingsTabsUsable && settingsShortcutsPersist
                 && autosaveSettingsPersist && settingsApplySignal
+                && renderOptionsRegistered
                 && secondaryWindowsClosed
                 && pasteSingleAction && pasteUndoAtomic && pasteRedoAtomic
                 && incompatiblePasteBlocked && compatiblePasteImmediate
@@ -639,6 +675,7 @@ int runHeadlessCommand(QApplication& app)
                << " settingsShortcutsPersist=" << settingsShortcutsPersist
                << " autosaveSettingsPersist=" << autosaveSettingsPersist
                << " settingsApplySignal=" << settingsApplySignal
+               << " renderOptionsRegistered=" << renderOptionsRegistered
                << " secondaryWindowsClosed=" << secondaryWindowsClosed
                << " pasteSingleAction=" << pasteSingleAction
                << " pasteUndoAtomic=" << pasteUndoAtomic
@@ -811,6 +848,7 @@ int runHeadlessCommand(QApplication& app)
 int main(int argc, char *argv[])
 {
     const char* openGlBackend = requestedOpenGlBackend(argc, argv);
+    const bool renderBenchmark = renderBenchmarkRequested(argc, argv);
     if(std::strcmp(openGlBackend, "angle") == 0)
         QCoreApplication::setAttribute(Qt::AA_UseOpenGLES);
     else if(std::strcmp(openGlBackend, "desktop") == 0)
@@ -818,6 +856,16 @@ int main(int argc, char *argv[])
 
     QApplication app(argc, argv);
 
+    // QGLWidget reads the default format when the first preview/view widget is
+    // constructed. Normal editing follows display VSync; benchmark mode is an
+    // explicit restart-time mode so uncapped throughput is measurable.
+    const bool configuredVsync = persistedRenderVsync();
+    const int swapInterval = ei::renderSwapInterval(configuredVsync, renderBenchmark);
+    QGLFormat glFormat = QGLFormat::defaultFormat();
+    glFormat.setSwapInterval(swapInterval);
+    QGLFormat::setDefaultFormat(glFormat);
+    app.setProperty("renderBenchmark", renderBenchmark);
+    app.setProperty("renderConfiguredVSync", configuredVsync);
 #ifdef Q_OS_WIN
     SetUnhandledExceptionFilter(enduranceUnhandledException);
 #endif
@@ -827,9 +875,11 @@ int main(int argc, char *argv[])
     QCoreApplication::setApplicationName("EI Mapper Endurance Edition");
     // Version is independent from upstream EI Mapper releases.
     QCoreApplication::setApplicationVersion(ENDURANCE_VERSION);
-    ei::log(eLogInfo, QString("Runtime version:%1 qt:%2 architecture:%3 OpenGL-request:%4")
+    ei::log(eLogInfo, QString("Runtime version:%1 qt:%2 architecture:%3 OpenGL-request:%4 presentation:%5")
             .arg(QCoreApplication::applicationVersion(), QT_VERSION_STR,
-                 QString::number(sizeof(void*) * 8), QString::fromLatin1(openGlBackend)));
+                 QString::number(sizeof(void*) * 8), QString::fromLatin1(openGlBackend),
+                 renderBenchmark ? "uncapped-benchmark"
+                                 : (configuredVsync ? "display-vsync" : "vsync-off")));
 
     const int commandResult = runHeadlessCommand(app);
     if(commandResult >= 0)

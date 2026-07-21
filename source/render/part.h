@@ -10,6 +10,12 @@
 class CSharedPartMesh;
 class RenderQueueContext;
 
+struct SPartPickingInstance
+{
+    QMatrix4x4 matrix;
+    QVector4D color;
+};
+
 ///
 /// \brief The CPart class provides a display of each part(figure) of the object in the scene.
 ///
@@ -28,6 +34,11 @@ public:
     void update(); //update shader buffers
     void draw(QOpenGLShaderProgram* program);
     void drawImmediate(QOpenGLShaderProgram* program);
+    bool drawInstanced(QOpenGLShaderProgram* program, QOpenGLBuffer* instanceBuffer,
+                       int instanceBufferOffset, const QVector<QMatrix4x4>& matrices);
+    bool drawSelectInstanced(QOpenGLShaderProgram* program, QOpenGLBuffer* instanceBuffer,
+                             int instanceBufferOffset,
+                             const QVector<SPartPickingInstance>& instances);
     void drawSelect(QOpenGLShaderProgram* program);
     void setParentName(const QString& name) { m_parentName = name.toLower(); }
     const QString& parentName() const { return m_parentName; }
@@ -38,9 +49,11 @@ public:
     void setTextureUvScale(float scale) { m_textureUvScale = scale; }
     float textureUvScale() const { return m_textureUvScale; }
     void setPoseMatrix(const QMatrix4x4& matrix) { m_poseMatrix = matrix; }
+    const QMatrix4x4& poseMatrix() const { return m_poseMatrix; }
     void setSourceVertexIndices(const QVector<int>& indices) { m_sourceVertexIndices = indices; }
     void setMorphDeltas(const QVector<QVector3D>& deltas);
     bool isDrawable() const { return m_bShow && !m_aVertData.isEmpty(); }
+    bool canInstance() const { return !m_morphApplied; }
     quintptr meshIdentity() const { return quintptr(m_mesh.data()); }
     static void setCacheScope(const QString& scope);
     static int sharedMeshCount();

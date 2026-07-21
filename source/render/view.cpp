@@ -11,6 +11,7 @@
 #include <QCryptographicHash>
 
 #include "view.h"
+#include "render_scheduling.h"
 #include "camera.h"
 #include "unit_animation.h"
 #include <QDateTime>
@@ -142,6 +143,7 @@ CView::~CView()
         m_gpuTimer = nullptr;
         m_gpuTimerPending = false;
     }
+    RenderQueueContext::instance().releaseGpuResources();
     ei::setCrashContext("shutdown/view-mobs");
 
     for(auto& mob: m_aMob)
@@ -173,6 +175,8 @@ CView::~CView()
 void CView::attach(CSettings* pSettings, QTableWidget* pParam, QUndoStack* pStack, CProgressView* pProgress, QLineEdit* pMouseCoord, CTreeView *pTree, CTileForm* pTileForm) //todo: use signal\slots
 {
     m_pSettings = pSettings;
+    connect(m_pSettings, &CSettings::renderSettingsChanged,
+            this, &CView::applyRenderScheduling);
     m_cam->attachSettings(pSettings);
     m_cam->reset();
     m_tableManager.reset(new CTableManager(pParam));
@@ -207,8 +211,22 @@ void CView::attach(CSettings* pSettings, QTableWidget* pParam, QUndoStack* pStac
     // timer removes the former artificial ~67 FPS ceiling and lets benchmark
     // mode measure uncapped throughput.
     m_timer->setTimerType(Qt::PreciseTimer);
-    m_timer->setInterval(0);
+    applyRenderScheduling();
     m_timer->start();
+}
+
+void CView::applyRenderScheduling()
+{
+    const COptInt* capOption = m_pSettings
+        ? dynamic_cast<const COptInt*>(m_pSettings->opt("renderFpsCap")) : nullptr;
+    const bool benchmarkMode = qApp->property("renderBenchmark").toBool();
+    const int configuredCap = capOption ? qBound(0, capOption->value(), 1000) : 0;
+    const int effectiveCap = benchmarkMode ? 0 : configuredCap;
+    m_timer->setInterval(ei::renderTimerIntervalMs(effectiveCap));
+    ei::log(eLogInfo, QString("Render scheduler fps-cap:%1 timer-ms:%2 benchmark-override:%3")
+            .arg(effectiveCap == 0 ? QString("unlimited") : QString::number(effectiveCap))
+            .arg(m_timer->interval())
+            .arg(benchmarkMode ? "yes" : "no"));
 }
 
 void CView::refreshAfterResourceSetup()
@@ -328,6 +346,7 @@ void CView::initShaders()
 
     m_program.bind();
     m_program.setUniformValue("customColor", QVector4D(0.0, 0.0, 0.0, 0.0));
+    m_program.setUniformValue("u_instanced", false);
     //release shader program?
 
     // Compile land shader
@@ -339,6 +358,7 @@ void CView::initShaders()
         close();
 
     m_landProgram.bind();
+    m_landProgram.setUniformValue("u_instanced", false);
     m_landProgram.setUniformValue("u_lightPosition", QVector4D(0.0, 0.0, 2.0, 1.0));
     m_landProgram.setUniformValue("u_lightPower", 5.0f);
     m_landProgram.setUniformValue("u_lightColor", QVector4D(1.0, 1.0, 1.0, 1.0));
@@ -352,6 +372,8 @@ void CView::initShaders()
         close();
     if (!m_selectProgram.link())
         close();
+    m_selectProgram.bind();
+    m_selectProgram.setUniformValue("u_instanced", false);
 
 }
 
@@ -672,6 +694,12 @@ void CView::draw()
             : (m_activeMob ? m_activeMob->filePath().baseName() : QString());
         metadata.contentFingerprint = sceneSourceFingerprint();
         metadata.benchmarkMode = qApp->property("renderBenchmark").toBool();
+        metadata.vsyncEnabled = metadata.benchmarkMode
+            ? false : qApp->property("renderConfiguredVSync").toBool();
+        const COptInt* fpsCapOption = m_pSettings
+            ? dynamic_cast<const COptInt*>(m_pSettings->opt("renderFpsCap")) : nullptr;
+        metadata.frameRateCap = metadata.benchmarkMode
+            ? 0 : (fpsCapOption ? qBound(0, fpsCapOption->value(), 1000) : 0);
         metadata.animationEnabled = animationEnabled;
         metadata.landEnabled = m_bDrawLand;
         metadata.waterEnabled = m_bDrawWater;
@@ -729,6 +757,7 @@ void CView::draw()
     const QVector4D activeHighlight(0.05f, 0.78f, 0.93f, 0.0f);
     const QVector4D lockedHighlight(1.0f, 0.55f, 0.05f, 0.0f);
     m_program.setUniformValue("u_highlightColor", activeHighlight);
+    m_program.setUniformValue("qt_Texture0", 0);
     RenderQueueContext& renderQueue = RenderQueueContext::instance();
     renderQueue.begin(&m_program, cameraPosition);
 
@@ -1602,17 +1631,38 @@ void CView::pickObject(const QRect &rect, bool bAddToSelect)
     const CViewFrustum frustum(m_projection * viewMatrix);
 
     QList<CNode*> pickableNodes;
+    const bool logicPicking = CScene::getInstance()->getMode() == eEditModeLogic;
+    if(!logicPicking)
+        RenderQueueContext::instance().beginSelection(&m_selectProgram);
     for(CMob* mob : m_aMob)
         if(isMobVisible(mob))
-            for(CNode* node : CScene::getInstance()->getMode() == eEditModeLogic
-                    ? mob->logicNodes() : mob->nodes())
-                if(node && !pickableNodes.contains(node))
-                    pickableNodes.append(node);
-    foreach (CNode* node, pickableNodes)
-    {
-        if(node)
-            node->drawSelect(&m_selectProgram);
-    }
+        {
+            const QVector<CNode*> spatialCandidates = logicPicking
+                ? QVector<CNode*>()
+                : spatiallyVisibleNodes(mob, cullingEnabled ? &frustum : nullptr, nullptr);
+            const QList<CNode*>& legacyCandidates = logicPicking
+                ? mob->logicNodes() : mob->nodes();
+            if(logicPicking)
+                for(CNode* node : legacyCandidates)
+                {
+                    if(node && !pickableNodes.contains(node))
+                    {
+                        pickableNodes.append(node);
+                        node->drawSelect(&m_selectProgram);
+                    }
+                }
+            else
+                for(CNode* node : spatialCandidates)
+                {
+                    if(node && !pickableNodes.contains(node))
+                    {
+                        pickableNodes.append(node);
+                        node->drawSelect(&m_selectProgram);
+                    }
+                }
+        }
+    if(!logicPicking)
+        RenderQueueContext::instance().end();
 
     QVector<SColor> aColor;
     getColorFromRect(rect, aColor);
@@ -1720,6 +1770,12 @@ bool CView::loadMob(QFileInfo &filePath)
             ++unitCount;
     if(unitCount > 0)
         m_pProgress->reset();
+    // Keep the UI responsive during large MOB loads without forcing an event
+    // pump and GL-context reacquisition for every unit. Twenty evenly spaced
+    // updates keeps the longest zone18 preload interval below a second.
+    const int progressStride = qMax(1, unitCount / 20);
+    int unitsSinceProgress = 0;
+    makeCurrent();
     for(CNode* node : pMob->nodes())
         if(CUnit* unit = dynamic_cast<CUnit*>(node))
         {
@@ -1728,7 +1784,6 @@ bool CView::loadMob(QFileInfo &filePath)
             // single makeCurrent() before the loop is not a valid guarantee
             // for the following unit's buffer/texture uploads.
             ei::setCrashContext(QString("mob/unit-preload:%1").arg(unit->mapId()));
-            makeCurrent();
             if(!QOpenGLContext::currentContext())
             {
                 ei::log(eLogFatal, QString(
@@ -1738,7 +1793,16 @@ bool CView::loadMob(QFileInfo &filePath)
             }
             unit->preloadVisualResources();
             ++preloadedUnits;
-            m_pProgress->update(100.0 / unitCount);
+            ++unitsSinceProgress;
+            if(unitsSinceProgress >= progressStride || preloadedUnits == unitCount)
+            {
+                m_pProgress->update(100.0 * unitsSinceProgress / unitCount);
+                unitsSinceProgress = 0;
+                // Progress processing may allow another widget to change the
+                // current context. Reacquire only after that event boundary,
+                // rather than once for every unit.
+                makeCurrent();
+            }
         }
     makeCurrent();
     doneCurrent();

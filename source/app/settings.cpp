@@ -87,6 +87,7 @@ CSettings::CSettings(QWidget *parent) :
     setWindowModality(Qt::WindowModal);
     ui->rangeIncrement->setValidator(new QIntValidator(1, 1000000, this));
     ui->undoHistoryLimit->setValidator(new QIntValidator(1, 1000000, this));
+    ui->renderFpsCap->setValidator(new QIntValidator(0, 1000, this));
     initOptions();
     readOptions();
     const COptString* savedProfile = dynamic_cast<const COptString*>(opt(eOptSetResource, "resourceProfile"));
@@ -427,6 +428,7 @@ void CSettings::initOptions()
     aOpt.append(QSharedPointer<COpt>(new COptBool("autosaveEnabled", true)));
     aOpt.append(QSharedPointer<COpt>(new COptBool("animateUnits", true)));
     aOpt.append(QSharedPointer<COpt>(new COptBool("renderPerformanceCounters", false)));
+    aOpt.append(QSharedPointer<COpt>(new COptBool("renderVSync", true)));
 
 
     //init default options for digits
@@ -438,6 +440,7 @@ void CSettings::initOptions()
     aOpt.append(QSharedPointer<COpt>(new COptInt("undoHistoryLimit", 512)));
     aOpt.append(QSharedPointer<COpt>(new COptInt("mapTestWarningVersion", 0)));
     aOpt.append(QSharedPointer<COpt>(new COptInt("autosaveIntervalMinutes", 5)));
+    aOpt.append(QSharedPointer<COpt>(new COptInt("renderFpsCap", 0)));
 
     const QMap<QString, QString> shortcutDefaults = {
         {"shortcutOpen", "Ctrl+O"},
@@ -670,6 +673,7 @@ void CSettings::on_buttonApply_clicked()
     updateOptFromUi();
     emit shortcutsChanged();
     emit settingsApplied();
+    emit renderSettingsChanged();
     onClose();
 }
 

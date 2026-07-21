@@ -56,6 +56,7 @@ signals:
     void settingsApplied();
     void autosaveRequested();
     void backupFolderRequested();
+    void renderSettingsChanged();
 
 private slots:
     void on_buttonApply_clicked();

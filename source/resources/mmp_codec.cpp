@@ -6,6 +6,22 @@
 
 namespace ei {
 
+namespace {
+quint32 readDword(const QByteArray& data, int offset)
+{
+    return qFromLittleEndian<quint32>(
+        reinterpret_cast<const uchar*>(data.constData() + offset));
+}
+
+uchar expandMaskedChannel(quint32 pixel, quint32 mask, quint32 shift)
+{
+    if(mask == 0)
+        return 255;
+    const quint32 maximum = mask >> shift;
+    return maximum == 0 ? 0 : uchar((255u * ((pixel & mask) >> shift) + maximum / 2u) / maximum);
+}
+}
+
 bool decodePnt3(const QByteArray& compressed, int decodedSize,
                 QByteArray* decoded, QString* diagnostic)
 {
@@ -89,6 +105,57 @@ bool decodePnt3Image(const QByteArray& compressed, int width, int height,
     for(int y = 0; y < height; ++y)
         memcpy(result.scanLine(y), decoded.constData() + y * width * 4,
                size_t(width) * 4u);
+    *image = result;
+    return true;
+}
+
+bool decodeDirectDrawImage(const QByteArray& data, int width, int height,
+                           QImage* image, QString* diagnostic)
+{
+    constexpr int descriptorBytes = 56;
+    if(!image || width <= 0 || height <= 0 || data.size() < descriptorBytes)
+    {
+        if(diagnostic) *diagnostic = "Invalid DirectDraw MMP image request.";
+        return false;
+    }
+    const quint32 bitsPerPixel = readDword(data, 0);
+    if(bitsPerPixel != 16 && bitsPerPixel != 32)
+    {
+        if(diagnostic) *diagnostic = "Unsupported DirectDraw MMP pixel size.";
+        return false;
+    }
+    const int bytesPerPixel = int(bitsPerPixel / 8u);
+    const qint64 pixelBytes = qint64(width) * qint64(height) * bytesPerPixel;
+    if(pixelBytes > std::numeric_limits<int>::max()
+            || data.size() < descriptorBytes + int(pixelBytes))
+    {
+        if(diagnostic) *diagnostic = "DirectDraw MMP pixel payload is truncated.";
+        return false;
+    }
+    const quint32 alphaMask = readDword(data, 4);
+    const quint32 alphaShift = readDword(data, 8);
+    const quint32 redMask = readDword(data, 16);
+    const quint32 redShift = readDword(data, 20);
+    const quint32 greenMask = readDword(data, 28);
+    const quint32 greenShift = readDword(data, 32);
+    const quint32 blueMask = readDword(data, 40);
+    const quint32 blueShift = readDword(data, 44);
+
+    QImage result(width, height, QImage::Format_ARGB32);
+    int cursor = descriptorBytes;
+    for(int y = 0; y < height; ++y)
+        for(int x = 0; x < width; ++x)
+        {
+            const quint32 pixel = bytesPerPixel == 2
+                ? qFromLittleEndian<quint16>(reinterpret_cast<const uchar*>(data.constData() + cursor))
+                : readDword(data, cursor);
+            cursor += bytesPerPixel;
+            const int alpha = alphaMask ? expandMaskedChannel(pixel, alphaMask, alphaShift) : 255;
+            result.setPixelColor(x, y, QColor(
+                expandMaskedChannel(pixel, redMask, redShift),
+                expandMaskedChannel(pixel, greenMask, greenShift),
+                expandMaskedChannel(pixel, blueMask, blueShift), alpha));
+        }
     *image = result;
     return true;
 }
