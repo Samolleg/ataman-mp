@@ -105,7 +105,7 @@ private slots:
     void jmvExplicitMaterialSuffixCanCrossGameplayMaterialFamilies();
     void jmvWearOrderControlsUpperArmorComposition();
     void jmvTopArmorWinsAvailableLowerLayerOverlaps();
-    void jmvTopArmorUsesEveryExactAssemblySuffix();
+    void jmvLeggingsIncludeBodyOverlapWithoutClaimingArmsOrHead();
     void jmvMissingTopOverlapRetainsLowerArmor();
     void jmvMissingExactTopPartsAreNotSynthesized();
     void baseArmorKeepsDisjointSlots();
@@ -572,7 +572,7 @@ void ProfileVisualProviderTests::jmvTopArmorWinsAvailableLowerLayerOverlaps()
         "unhumapl_08.le.0.x4.mmp", "unhumalg_09.le.0.x4.mmp"}));
 }
 
-void ProfileVisualProviderTests::jmvTopArmorUsesEveryExactAssemblySuffix()
+void ProfileVisualProviderTests::jmvLeggingsIncludeBodyOverlapWithoutClaimingArmsOrHead()
 {
     auto db = database();
     ei::SItemDatabaseRecord leggings = item("female suite leggings", "armor", 2, 24);
@@ -583,14 +583,19 @@ void ProfileVisualProviderTests::jmvTopArmorUsesEveryExactAssemblySuffix()
     SEquipmentLayoutRequest request;
     request.model = "unhufe";
     request.armor << "female suite leggings.leather";
-    request.assemblyParts << "bd" << "hp" << "ll1" << "rl1"
-                          << "bd.armor24" << "ll1.armor24" << "rl1.armor24";
+    request.assemblyParts << "bd" << "hp" << "hd" << "lh1" << "rh1"
+                          << "ll1" << "rl1" << "bd.armor24" << "hd.armor24"
+                          << "lh1.armor24" << "rh1.armor24"
+                          << "ll1.armor24" << "rl1.armor24";
     QJsonObject output;
     QVERIFY(resolver->resolve(request, &output).success);
     const QStringList components = jsonStrings(output, "components");
     QVERIFY(components.contains("bd.armor24"));
     QVERIFY(components.contains("ll1.armor24"));
     QVERIFY(components.contains("rl1.armor24"));
+    QVERIFY(!components.contains("hd.armor24"));
+    QVERIFY(!components.contains("lh1.armor24"));
+    QVERIFY(!components.contains("rh1.armor24"));
     const QStringList replaced = jsonStrings(output, "replacedParts");
     QVERIFY(replaced.contains("bd"));
     QVERIFY(replaced.contains("ll1"));

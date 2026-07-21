@@ -308,7 +308,11 @@ QStringList armorSlots(const QString& type, bool jmv)
     if(jmv && normalized == "plate")
         parts << armorPartMap.value("shirt") << armorPartMap.value("gloves");
     else if(jmv && normalized == "leggings")
-        parts << armorPartMap.value("pants") << armorPartMap.value("boots");
+        // Some JMV leggings include a waist/shorts shell named bd.armorNN in
+        // addition to their hip and leg members. This is a deliberate overlap
+        // with the body slot; it does not authorize leggings to claim head or
+        // arm members that happen to share the same numeric armor suffix.
+        parts << "bd" << armorPartMap.value("pants") << armorPartMap.value("boots");
     return parts;
 }
 
@@ -450,21 +454,6 @@ QStringList appendArmorComponents(const ei::SItemDatabaseRecord& item,
     }
     const QString suffix = componentSuffix("armor", item.textureType1);
     const bool upperArmor = isUpperArmor(item.type);
-    // JMV's upper-armor rule is component-driven, not anatomical-slot driven:
-    // every exact part.armorNN member shipped by the selected ANHUM assembly
-    // replaces its unsuffixed part. This is important for female armor24,
-    // where leggings supply bd.armor24 (the shorts) but no hp.armor24.
-    if(jmv && upperArmor && item.type.compare("helm", Qt::CaseInsensitive) != 0
-            && item.textureType1 > 0 && !request.assemblyParts.isEmpty())
-    {
-        for(const QString& candidate : request.assemblyParts)
-            if(candidate.endsWith(suffix, Qt::CaseInsensitive))
-            {
-                components->append(candidate);
-                matched.append(candidate);
-            }
-        return matched;
-    }
     for(const QString& slot : armorParts)
     {
         // Shirt, gloves, pants, and boots are the lower armor texture layer;

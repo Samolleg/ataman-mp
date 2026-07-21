@@ -253,11 +253,11 @@ test build:
 1. Recheck `zone1` IDs 203, 205, and 221 first. Their plate and leggings atlas
    placement is the locked control for the exact PNT3 decoder; no later model
    selection or upper-armor fix may change those results.
-2. Recheck `autozone4hadagans` ID 1000017 and `bz14h` ID 1000295968. JMV upper
-   armor replacement is assembly-driven: an equipped TTI 24 item contributes
-   every exact `.armor24` member present in the selected ANHUM, including
-   `bd.armor24`. The resolver must not omit that shorts/skirt geometry merely
-   because its component prefix normally belongs to the body slot.
+2. Recheck `autozone4hadagans` ID 1000017 and `bz14h` ID 1000295968. JMV TTI 24
+   leggings can contribute the exact `bd.armor24` waist/shorts member in
+   addition to their hip and leg group. This overlap must not let leggings
+   claim `hd.armor24`, arm, forearm, or hand members that merely share the same
+   numeric suffix. Helmet, face, plate, and glove controls must remain intact.
 3. Recheck `autozone18dun1` ID 1000009 and `bz13h` IDs 4 and 14. These ordinary
    non-imported Monster rows select the standard male `unhuma` assembly and
    shipped `unhumaskin_47/48` atlases. A stale embedded `unhufe` MOB assembly
