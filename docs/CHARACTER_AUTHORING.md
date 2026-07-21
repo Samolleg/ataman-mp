@@ -5,19 +5,35 @@ automation output at a Base/JMV install, live `Res`, or live map directory.
 
 ## Capability boundary
 
+The authoring workflow has two isolated Blender lanes. Do not share preferences,
+installed add-ons, startup files, or candidate archives between them.
+
+| Lane | Blender/add-on | Primary assets | Export status |
+|---|---|---|---|
+| Item | Blender 3.5.1 + konstvest/ei_figer 5.2 or earlier | Standalone inventory weapons, shields, armor and item/world figures | Primary item writer; require fresh re-open and semantic diff |
+| Humanoid/JMV | Blender 4.5.12 LTS (supported family 4.2-4.9) + alex-khod/ei_figer 6.10 at `a7eb929` | Humans, wearable assemblies, JMV hierarchy/UV rules; animations are secondary | Humanoid writer; experimental item writer only with the audited patch and fixtures |
+
+For assets copied from JMV game resources, select the modern add-on's literal
+`JABAIS_VOUX` option **before import**. It changes part classification, UV
+unpacking, UV bases, and JMV weapon/armor families. It is fixture provenance,
+not a mode inferred from a mesh name. Base assets use `VANILLA` unless direct
+evidence says otherwise.
+
 | Asset | Inspect/import | Edit | Export status |
 |---|---|---|---|
-| FIG8 geometry/UV/morph extremes | Endurance report + ei_figer | Blender, fixed topology | ei_figer v5.2; require re-open and semantic diff |
-| `.mod`/`.lnk` assembly tree | Endurance report + ei_figer | Blender hierarchy/names | ei_figer v5.2; validate one root/no missing parent/cycles |
-| ANM channels/morph frames | Endurance report + ei_figer | Blender actions/shapes | ei_figer v5.2; validate counts, closing sample, hierarchy |
+| FIG8 geometry/UV/morph extremes | Endurance report + lane-specific ei_figer | Blender, fixed topology | Both lanes; use expanded-corner semantic comparison because legal UV/component reindexing is not byte-stable |
+| `.mod`/`.lnk` assembly tree | Endurance report + lane-specific ei_figer | Blender hierarchy/names | Validate one root/no missing parent/cycles and canonical attachments |
+| ANM channels/morph frames | Endurance report + ei_figer | Blender actions/shapes | Secondary; not a geometry/item acceptance gate yet |
 | ADB action metadata/masks | Endurance provider/parser | Do not author yet | No verified writer in this workflow |
 | MMP/PNT3 atlas | Endurance decoder/viewer | External lossless RGBA editor | No verified general encoder in this workflow |
 | RES container | Read-only report / ei_figer | Staged member replacement | ei_figer writes; clean repack needs verified eipacker round trip |
 
-An ei_figer export is a candidate, not proof of compatibility. Its FIG writer
-contains a TODO around vertex-component preservation, and its RES append/replace
-path intentionally leaves unreachable old data. For zero-morph ANM members, the
-v5.2 writer omits an explicit stored zero morph-vertex-count dword; the copied
+An ei_figer export is a candidate, not proof of compatibility. The 5.2 FIG
+reader discards the stored vertex index in each vertex-component triple, so use
+the independent report/modern reader for final comparison rather than treating
+5.2's in-memory structure as complete. Both RES append/replace paths leave
+unreachable old data. For zero-morph ANM members, the v5.2 writer omits an
+explicit stored zero morph-vertex-count dword; the copied
 `cidle01_/lh2.shield00` control would shrink from 1,864 to 1,860 bytes. Its
 Blender import sets `frame_end` but not `frame_start`, while export begins at
 `frame_start`, so Blender's usual start at 1 can also drop sample 0. Set the
@@ -26,20 +42,57 @@ until the exact asset class passes the comparisons below.
 
 ## Portable Blender quick path
 
-The audited investigation workspace is
-`work/blender-uv-investigation`, containing Blender 3.6.23, ei_figer probes,
-example scenes, UV overlays, and hash records. Launch reproducibly from the repo:
+The old `work/blender-uv-investigation` Blender 3.6.23 scenes predate the exact
+PNT3 decoder and current assembly rules. They are historical evidence, not
+authoring fixtures. Prepare the two current lanes from downloaded official ZIPs:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\prepare_character_blender.ps1 `
+  -Lane item -Workspace ..\work\character-blender-pipeline `
+  -AddonSource ..\research\ei_figer `
+  -DownloadCache ..\work\character-blender-pipeline\downloads
+
+powershell -ExecutionPolicy Bypass -File scripts\prepare_character_blender.ps1 `
+  -Lane humanoid -Workspace ..\work\character-blender-pipeline `
+  -AddonSource ..\work\alex-khod-ei_figer-pipeline `
+  -DownloadCache ..\work\character-blender-pipeline\downloads
+```
+
+Archive names, official URLs, and SHA-256 values are pinned in
+`scripts/character_blender_lanes.json`. The setup writes a per-lane tool
+provenance report and never overwrites an installed add-on unless
+`-RefreshAddon` is explicit. Launch a lane reproducibly:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\launch_character_blender.ps1 `
-  -Workspace ..\work\blender-uv-investigation `
-  -EiFigerSource ..\research\ei_figer
+  -Lane item -Workspace ..\work\character-blender-pipeline `
+  -EiFigerSource ..\work\character-blender-pipeline\item-lane\portable-config\scripts\addons\ei_figer
 ```
 
 Use `-PrepareAddon` only on a fresh/archived `portable-config`; it refuses to
 overwrite an existing addon. Use `-BackgroundScript <path>` for deterministic
 headless probes. The launcher refuses a workspace containing `game.exe` and
-isolates Blender config/scripts/datafiles under that workspace.
+isolates Blender config/scripts/datafiles under that lane.
+
+The modern add-on at `a7eb929` needs
+`patches/alex-khod-ei_figer-6.10-character-pipeline.patch` for deterministic
+headless import and semantically correct standalone-item bounds. The patch makes
+UI context optional in background mode, restores Euclidean bounding radius,
+and applies the part-name bounds convention independently of model-level
+header/UV classification. It does not claim general modern item-export support.
+
+Current controls prove:
+
+- Blender 3.5.1 + 5.2 imports and exports `initwedg8`; its no-op changes normals
+  by at most `1.82e-5`, while geometry, UV mapping, hierarchy and bounds agree;
+- patched Blender 4.5.12 + 6.10 imports the complete JMV `unhuma` tree in
+  `JABAIS_VOUX` mode (6,232 base/morph mesh objects in the control);
+- patched 6.10 no-op exports of `initwedg8` and `initarhl21` preserve expanded
+  per-corner position, normal and UV semantics and bounding volumes, while
+  legally reindexing UV/component tables and appending replacement RES data.
+
+Use `character_model_blender_fixture.py` for isolated import/export/re-open
+controls and `character_fig_semantic_diff.py` for expanded-corner FIG comparison.
 
 ## Manual edit procedure
 
