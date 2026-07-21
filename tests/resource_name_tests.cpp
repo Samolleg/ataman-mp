@@ -27,6 +27,7 @@ private slots:
     void rejectsOutOfBoundsPnt3Run();
     void rejectsUnalignedPnt3Payload();
     void preservesPnt3RowMajorOrientation();
+    void decodesDirectDraw5551DescriptorBeforePixels();
     void compositesTransparentArmorOverBodyAtlas();
     void compositesPremultipliedPnt3LikeTheGame();
     void keepsFaceAndHairOnSkinAtlas();
@@ -250,6 +251,25 @@ void ResourceNameTests::preservesPnt3RowMajorOrientation()
     QCOMPARE(image.pixelColor(1, 0), QColor(40, 50, 60, 255));
     QCOMPARE(image.pixelColor(0, 1), QColor(70, 80, 90, 255));
     QCOMPARE(image.pixelColor(1, 1), QColor(100, 110, 120, 255));
+}
+
+void ResourceNameTests::decodesDirectDraw5551DescriptorBeforePixels()
+{
+    QByteArray data;
+    appendDword(data, 16);
+    appendDword(data, 0x8000); appendDword(data, 15); appendDword(data, 1);
+    appendDword(data, 0x7c00); appendDword(data, 10); appendDword(data, 5);
+    appendDword(data, 0x03e0); appendDword(data, 5); appendDword(data, 5);
+    appendDword(data, 0x001f); appendDword(data, 0); appendDword(data, 5);
+    appendDword(data, 0); // reserved dword completing the 56-byte descriptor
+    data.append(char(0x00)); data.append(char(0xfc)); // opaque red
+    data.append(char(0x1f)); data.append(char(0x00)); // transparent blue
+    QImage image;
+    QString diagnostic;
+    QVERIFY2(ei::decodeDirectDrawImage(data, 2, 1, &image, &diagnostic),
+             qPrintable(diagnostic));
+    QCOMPARE(image.pixelColor(0, 0), QColor(255, 0, 0, 255));
+    QCOMPARE(image.pixelColor(1, 0), QColor(0, 0, 255, 0));
 }
 
 void ResourceNameTests::compositesTransparentArmorOverBodyAtlas()

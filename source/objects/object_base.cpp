@@ -755,7 +755,8 @@ void CObjectBase::applyTransientVisual(const QString& modelName, const QString& 
 
 void CObjectBase::recalcMinPos()
 {
-    float min(1000.0f); // 0.0f?
+    float min(0.0f);
+    bool hasVertex = false;
     QVector3D rotatedPos;
     QMatrix4x4 rtMatrix;
     rtMatrix.setToIdentity();
@@ -764,10 +765,16 @@ void CObjectBase::recalcMinPos()
         for(auto& vert : part->vertData())
         {
             rotatedPos = rtMatrix*vert.position; //get vector, rotated with matrix
-            if (rotatedPos.z() < min)
+            if(!hasVertex || rotatedPos.z() < min)
                 min = rotatedPos.z();
+            hasVertex = true;
         }
 
+    // Empty or rejected assemblies must not acquire the historical +1000 Z
+    // projection sentinel. Keep their serialized position stable so the
+    // resolver diagnostic/placeholder remains selectable and inspectable.
+    if(!hasVertex)
+        min = 0.0f;
     m_minPoint = QVector3D(0.0f, 0.0f, min);
     CLandscape::getInstance()->projectPosition(this);
 }
