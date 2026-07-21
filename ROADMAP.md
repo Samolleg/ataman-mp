@@ -5,16 +5,21 @@ work is ordered from the newest planned minor line to the oldest completed one.
 An item is checked only after its implementation has landed and received the
 stated validation. Completed code should carry a commit, test, or release link.
 
-Current development line: `0.2.1-alpha.24` focused closed testing.
+Current development line: `0.2.1-alpha.25` focused closed testing.
 
 <details open>
 <summary><strong>General wishlist — not assigned to a release</strong></summary>
 
 ## Compatibility and profile support
 
-- [ ] Define a documented provider/extension contract for other mods.
-  - A mod opts into only the capabilities it actually implements.
-  - Unsupported profile features remain hidden or disabled with a reason.
+- [ ] **Post-1.0:** define an optional runtime-plugin contract for other mods
+  only when their authors request direct-launch support.
+  - Core editing, validation, collections, and saving never depend on a game
+    executable or runtime plugin.
+  - Test Current Map remains an optional bonus capability. JMV and the
+    experimental Base provider do not imply support for other Starter builds.
+  - A mod opts into only the runtime capabilities it implements; unsupported
+    commands remain hidden or disabled with a reason.
 
 ## Optional editor integrations and accessibility
 
@@ -291,7 +296,15 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
 
 ### Current 0.2.x status
 
-- **Current tester build:** `0.2.1-alpha.24`, integrating the render pipeline
+- **Current tester build:** `0.2.1-alpha.25`, retaining the alpha.24 render and
+  autosave baseline while hardening validation navigation and the NVIDIA test
+  overlay. JMV direct-launch compatibility now depends only on the exact
+  fingerprinted Starter `game.exe`; Starter addon.dll, SpellAddonX.asi, JMV
+  addon.dll, mutable Lua, and SpellAddon configuration no longer gate editor
+  discovery or Test Current Map. Optional autorun-MOB conveniences report their
+  own runtime evidence instead of defining global compatibility.
+  ([`eff6f99`](https://github.com/Ilufus/ei-mapper-endurance/commit/eff6f99))
+  Alpha.24 integrated the render pipeline
   through [`191ac85`](https://github.com/Ilufus/ei-mapper-endurance/commit/191ac85e1990d9f7eddfef7d7cdef1a29aa67930)
   and delivering the verified live autosave-cadence signal
   ([`269c807`](https://github.com/Ilufus/ei-mapper-endurance/commit/269c80759a334174eca26eec7022524ffff4ea64)).
@@ -935,6 +948,13 @@ line. Profile/runtime validation remains part of the RC matrix.
   fingerprinted experimental Base provider. Local testing confirmed exact-hash
   probe levels 3 and 4; this does not claim support for arbitrary Base
   executables or other mods.
+- [x] Scope JMV bridge compatibility to the exact Starter `game.exe` code
+  layout actually hooked by Endurance. Frequently updated JMV/Starter runtime
+  extensions are mod-owned behavior, not editor dependencies or manifest
+  gates. ([`eff6f99`](https://github.com/Ilufus/ei-mapper-endurance/commit/eff6f99))
+- [ ] **Post-1.0, on request:** support other mods through optional,
+  fingerprinted runtime plugins owned by their profiles. Do not generalize
+  unsafe memory hooks merely to advertise universal Test Current Map support.
 
 </details>
 
