@@ -1285,6 +1285,64 @@ STerrainTileCommand CTerrainEditModel::makeSemanticTilePaint(
     qint32 materialId, const CTerrainTransitionCatalog& catalog,
     quint32 distributionSeed, CValidationReport* report) const
 {
+    CValidationReport compactReport;
+    STerrainTileCommand compact = makeSemanticTilePaintAttempt(
+        brush, layer, materialId, catalog, distributionSeed, 0, true,
+        &compactReport);
+    bool retryExpanded = false;
+    bool hasOtherError = false;
+    for(const SValidationFinding& finding : compactReport.findings())
+    {
+        if(finding.severity != EValidationSeverity::Error)
+            continue;
+        if(finding.code == QStringLiteral("terrain.semantic_multifamily"))
+            retryExpanded = true;
+        else
+            hasOtherError = true;
+    }
+    if(!compact.isEmpty() || !retryExpanded || hasOtherError)
+    {
+        if(report)
+            for(const SValidationFinding& finding : compactReport.findings())
+                report->add(finding.code, finding.severity,
+                            finding.message, finding.location);
+        return compact;
+    }
+
+    CValidationReport completeRouteReport;
+    STerrainTileCommand completeRoute = makeSemanticTilePaintAttempt(
+        brush, layer, materialId, catalog, distributionSeed, 0, false,
+        &completeRouteReport);
+    if(!completeRoute.isEmpty() || !completeRouteReport.hasErrors())
+    {
+        if(report)
+            for(const SValidationFinding& finding : completeRouteReport.findings())
+                report->add(finding.code, finding.severity,
+                            finding.message, finding.location);
+        return completeRoute;
+    }
+
+    // Most strokes must remain within the route's natural footprint. Only an
+    // actually unsatisfied compact CSP may borrow one additional constrained
+    // ring for an authored multi-family junction.
+    CValidationReport expandedReport;
+    STerrainTileCommand expanded = makeSemanticTilePaintAttempt(
+        brush, layer, materialId, catalog, distributionSeed, 1, false,
+        &expandedReport);
+    if(report)
+        for(const SValidationFinding& finding : expandedReport.findings())
+            report->add(finding.code, finding.severity,
+                        finding.message, finding.location);
+    return expanded;
+}
+
+STerrainTileCommand CTerrainEditModel::makeSemanticTilePaintAttempt(
+    const STerrainTileBrush& brush, ETerrainTileLayer layer,
+    qint32 materialId, const CTerrainTransitionCatalog& catalog,
+    quint32 distributionSeed, int junctionPadding,
+    bool allowObservedDirectRoute,
+    CValidationReport* report) const
+{
     STerrainTileCommand command;
     command.description = layer == ETerrainTileLayer::Land
         ? QStringLiteral("Paint terrain material")
@@ -1344,6 +1402,7 @@ STerrainTileCommand CTerrainEditModel::makeSemanticTilePaint(
     // atlases do not contain every direct family pairing, so route through the
     // shortest sequence of authored boundary-compatible families when needed.
     QMap<qint32, int> backgroundCounts;
+    QSet<QPair<qint32, qint32>> observedDirectPairs;
     QSet<int> perimeter;
     for(int index : painted)
     {
@@ -1379,14 +1438,22 @@ STerrainTileCommand CTerrainEditModel::makeSemanticTilePaint(
             continue;
         const qint32 corners[4] = {signature.northWest, signature.northEast,
                                    signature.southEast, signature.southWest};
+        QSet<qint32> present;
         for(qint32 candidate : corners)
         {
+            present.insert(candidate);
             STerrainTransitionSignature pure;
             pure.northWest = pure.northEast = pure.southEast = pure.southWest = candidate;
             bool pureFound = false;
             catalog.select(pure, 0, 0, 0, &pureFound);
             if(pureFound)
                 backgroundCounts[candidate] += 1;
+        }
+        if(present.size() == 2)
+        {
+            QVector<qint32> pair = present.values().toVector();
+            std::sort(pair.begin(), pair.end());
+            observedDirectPairs.insert(qMakePair(pair.at(0), pair.at(1)));
         }
     }
     qint32 backgroundMaterial = materialId;
@@ -1405,8 +1472,14 @@ STerrainTileCommand CTerrainEditModel::makeSemanticTilePaint(
             bestCount = entry.value();
         }
     }
-    const QVector<qint32> materialPath =
-        catalog.shortestMaterialPath(materialId, backgroundMaterial, backgroundCounts);
+    QVector<qint32> materialPath;
+    const QPair<qint32, qint32> requestedPair = qMakePair(
+        qMin(materialId, backgroundMaterial), qMax(materialId, backgroundMaterial));
+    if(allowObservedDirectRoute && observedDirectPairs.contains(requestedPair))
+        materialPath = {materialId, backgroundMaterial};
+    else
+        materialPath = catalog.shortestMaterialPath(
+            materialId, backgroundMaterial, backgroundCounts);
     command.semanticAudit.backgroundMaterialId = backgroundMaterial;
     command.semanticAudit.materialPath = materialPath;
     if(materialPath.isEmpty())
@@ -1418,14 +1491,9 @@ STerrainTileCommand CTerrainEditModel::makeSemanticTilePaint(
         return command;
     }
 
-    int surroundingFamilies = 0;
-    for(auto entry = backgroundCounts.constBegin(); entry != backgroundCounts.constEnd(); ++entry)
-        surroundingFamilies += entry.key() != materialId && entry.value() > 0;
-    // A true junction needs one extra editable ring: the inner ring arranges
-    // authored pair/triple tiles while the outer ring remains constrained to
-    // the untouched terrain lattice. Pairwise strokes retain their established
-    // footprint.
-    const int junctionPadding = surroundingFamilies > 1 ? 1 : 0;
+    // The authored material route determines the compact footprint. The public
+    // entry point retries with one additional constrained ring only after this
+    // compact attempt proves unsatisfiable.
     command.semanticAudit.junctionPadding = junctionPadding;
     const int transitionRadius = qMax(0, materialPath.size() - 1) + junctionPadding;
     QSet<int> affected;
@@ -1553,6 +1621,7 @@ STerrainTileCommand CTerrainEditModel::makeSemanticTilePaint(
             existingCornerCounts[keys[corner]][values[corner]] += 1;
     }
     QMap<int, qint32> existingCornerMaterials;
+    QMap<qint32, int> footprintMaterialSupport;
     for(auto corner = existingCornerCounts.constBegin();
         corner != existingCornerCounts.constEnd(); ++corner)
     {
@@ -1568,7 +1637,10 @@ STerrainTileCommand CTerrainEditModel::makeSemanticTilePaint(
             }
         }
         if(selectedCount >= 0)
+        {
             existingCornerMaterials.insert(corner.key(), selected);
+            footprintMaterialSupport[selected] += 1;
+        }
     }
 
     // Corners shared with an untouched halo cell are hard boundary
@@ -1648,12 +1720,19 @@ STerrainTileCommand CTerrainEditModel::makeSemanticTilePaint(
         return materialPath.at(qMin(distance, materialPath.size() - 1));
     };
     QMap<int, qint32> pairwiseCorners;
+    QMap<int, qint32> paintedDesiredCorners;
+    for(int key : paintedCorners)
+    {
+        const qint32 existing = existingCornerMaterials.value(key, materialId);
+        paintedDesiredCorners.insert(key,
+            materialPath.contains(existing) ? materialId : existing);
+    }
     QMap<int, qint32> preferredCorners;
     for(int key : affectedCorners)
     {
         pairwiseCorners.insert(key, pairwiseMaterial(key));
         preferredCorners.insert(key,
-            paintedCorners.contains(key) ? materialId
+            paintedCorners.contains(key) ? paintedDesiredCorners.value(key)
             : boundaryMaterials.contains(key) ? boundaryMaterials.value(key)
             : existingCornerMaterials.value(key, pairwiseCorners.value(key)));
     }
@@ -1663,7 +1742,7 @@ STerrainTileCommand CTerrainEditModel::makeSemanticTilePaint(
     // can use valid atlas signatures without breaking a shared edge.
     QMap<int, qint32> fixedCorners = boundaryMaterials;
     for(int key : paintedCorners)
-        fixedCorners.insert(key, materialId);
+        fixedCorners.insert(key, paintedDesiredCorners.value(key));
 
     const auto signatureAt = [&](const QMap<int, qint32>& corners,
                                  int x, int y) {
@@ -1674,6 +1753,27 @@ STerrainTileCommand CTerrainEditModel::makeSemanticTilePaint(
         signature.southWest = corners.value((y + 1) * (width + 1) + x);
         return signature;
     };
+
+    for(int index : painted)
+    {
+        const int x = index % width;
+        const int y = index / width;
+        bool coreFound = false;
+        const STerrainTransitionSignature core = signatureAt(
+            paintedDesiredCorners, x, y);
+        catalog.selectForPaint(core, x, y, distributionSeed, &coreFound);
+        if(!coreFound)
+        {
+            if(report)
+                report->add("terrain.semantic_core_unsupported",
+                            EValidationSeverity::Error,
+                            "The atlas has no authored tile for the requested core blend",
+                            QString("%1,%2 corners:%3,%4,%5,%6")
+                                .arg(x).arg(y).arg(core.northWest).arg(core.northEast)
+                                .arg(core.southEast).arg(core.southWest));
+            return command;
+        }
+    }
 
     QMap<int, qint32> solvedCorners = preferredCorners;
     bool preferredAvailable = true;
@@ -1773,6 +1873,22 @@ STerrainTileCommand CTerrainEditModel::makeSemanticTilePaint(
             cost += preservationWeight;
             cost += qMax(0, localSupportByCorner.value(key).value(existing)
                              - localSupportByCorner.value(key).value(candidate));
+            if(junctionPadding > 0
+               && materialPath.contains(existing) != materialPath.contains(candidate))
+            {
+                // Crossing between the active route and an unrelated family
+                // is a last resort, not an ordinary equal-cost tie. Preserve
+                // existing third-family islands most strongly. If the route
+                // must retreat, favor the family with greater footprint-wide
+                // support so a local island shrinks rather than squares off.
+                cost += 100000;
+                if(!materialPath.contains(existing))
+                    cost += 50000;
+                else
+                    cost += 1000 * qMax(0,
+                        footprintMaterialSupport.value(existing)
+                            - footprintMaterialSupport.value(candidate));
+            }
             return cost;
         };
         bool constraintCandidateMissing = false;
@@ -1932,8 +2048,14 @@ STerrainTileCommand CTerrainEditModel::makeSemanticTilePaint(
                                 searchNodes > searchLimit
                                     ? "The bounded local terrain-junction search exceeded its safety limit"
                                     : "The atlas cannot satisfy the complete local terrain-junction boundary",
-                                QString("%1 affected cells, %2 search nodes")
-                                    .arg(affected.size()).arg(searchNodes));
+                                QString("%1 affected cells, %2 search nodes, route %3")
+                                    .arg(affected.size()).arg(searchNodes)
+                                    .arg([&]() {
+                                        QStringList ids;
+                                        for(qint32 id : materialPath)
+                                            ids.append(QString::number(id));
+                                        return ids.join(QStringLiteral(" -> "));
+                                    }()));
                 return command;
             }
         }

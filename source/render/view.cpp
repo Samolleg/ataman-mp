@@ -107,16 +107,26 @@ private:
 class CTerrainTilePreviewCommand : public QUndoCommand
 {
 public:
-    CTerrainTilePreviewCommand(CView* view, const STerrainTileCommand& command)
-        : m_view(view), m_command(command)
+    CTerrainTilePreviewCommand(CView* view, const STerrainTileCommand& command,
+                               bool alreadyApplied)
+        : m_view(view), m_command(command), m_skipInitialRedo(alreadyApplied)
     {
         setText(command.description);
     }
     void undo() override { m_view->applyTerrainTilePreview(m_command, false); }
-    void redo() override { m_view->applyTerrainTilePreview(m_command, true); }
+    void redo() override
+    {
+        if(m_skipInitialRedo)
+        {
+            m_skipInitialRedo = false;
+            return;
+        }
+        m_view->applyTerrainTilePreview(m_command, true);
+    }
 private:
     CView* m_view;
     STerrainTileCommand m_command;
+    bool m_skipInitialRedo{false};
 };
 
 }
@@ -2456,14 +2466,42 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
     STerrainPaintAuditAction audit;
     audit.actionId = m_terrainPaintActionId++;
     audit.strokeId = m_tileBrushCommandId;
-    audit.outcome = command.isEmpty()
-        ? (report.hasErrors() ? QStringLiteral("refused") : QStringLiteral("no-op"))
-        : QStringLiteral("applied");
     audit.validation = report.toText();
     audit.semantic = command.semanticAudit;
     audit.deltas = command.deltas;
-    m_terrainPaintActions.append(audit);
-    ei::log(report.hasErrors() ? eLogWarning : eLogInfo,
+    if(command.isEmpty())
+    {
+        audit.outcome = report.hasErrors()
+            ? QStringLiteral("refused") : QStringLiteral("no-op");
+        m_terrainPaintActions.append(audit);
+        if(report.hasErrors())
+            ei::log(eLogWarning, "Semantic terrain paint refused:\n" + report.toText());
+        emit updateMsg(report.findings().isEmpty()
+            ? tr("The terrain material is already resolved at this brush position.")
+            : report.toText());
+    }
+    else
+    {
+        for(STerrainTileDelta& delta : command.deltas)
+            delta.diagnosticStrokeId = m_tileBrushCommandId;
+        audit.deltas = command.deltas;
+        if(!applyTerrainTilePreview(command, true))
+        {
+            audit.outcome = QStringLiteral("refused");
+            audit.validation += QStringLiteral(
+                "ERROR terrain.preview_apply: The canonical preview command was not applied\n");
+            m_terrainPaintActions.append(audit);
+            emit updateMsg(tr("Terrain preview was refused; no undo entry was created."));
+        }
+        else
+        {
+            audit.outcome = QStringLiteral("applied");
+            m_terrainPaintActions.append(audit);
+            m_terrainPaintAudit += command.deltas;
+            m_pUndoStack->push(new CTerrainTilePreviewCommand(this, command, true));
+        }
+    }
+    ei::log(audit.outcome == QStringLiteral("refused") ? eLogWarning : eLogInfo,
         QString("Terrain paint action %1 stroke %2: %3, layer=%4 material=%5 center=%6,%7 radius=%8 core=%9 affected=%10 changed=%11 solver=%12 nodes=%13")
             .arg(audit.actionId).arg(audit.strokeId).arg(audit.outcome)
             .arg(bLand ? "land" : "overlay").arg(terrainType)
@@ -2471,19 +2509,6 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
             .arg(audit.semantic.paintedCoreCells.size())
             .arg(audit.semantic.affectedCells.size()).arg(audit.deltas.size())
             .arg(audit.semantic.solverMode).arg(audit.semantic.solverNodes));
-    if(command.isEmpty())
-    {
-        if(report.hasErrors())
-            ei::log(eLogWarning, "Semantic terrain paint refused:\n" + report.toText());
-        emit updateMsg(report.findings().isEmpty()
-            ? tr("The terrain material is already resolved at this brush position.")
-            : report.toText());
-        return;
-    }
-    for(STerrainTileDelta& delta : command.deltas)
-        delta.diagnosticStrokeId = m_tileBrushCommandId;
-    m_terrainPaintAudit += command.deltas;
-    m_pUndoStack->push(new CTerrainTilePreviewCommand(this, command));
 }
 
 void CView::setTile(QMap<STileLocation, STileInfo>& arrTileData)

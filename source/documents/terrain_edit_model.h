@@ -343,6 +343,12 @@ private:
     bool tileLocation(int globalX, int globalY, int* sectorIndex,
                       int* localTile, CValidationReport* report = nullptr) const;
     bool overlayTileIsActive(const SSector& sector, int localTile) const;
+    STerrainTileCommand makeSemanticTilePaintAttempt(
+        const STerrainTileBrush& brush, ETerrainTileLayer layer,
+        qint32 materialId, const CTerrainTransitionCatalog& catalog,
+        quint32 distributionSeed, int junctionPadding,
+        bool allowObservedDirectRoute,
+        CValidationReport* report) const;
 
     int m_sectorCountX{0};
     int m_sectorCountY{0};

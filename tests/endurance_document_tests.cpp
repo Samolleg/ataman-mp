@@ -2199,6 +2199,120 @@ void EnduranceDocumentTests::zone1NamespaceTemplateMatchesPrivateFixture()
     // no-op. This catches the R9 failure mode where only one family painted.
     QVERIFY(changedMaterials.size() >= 4);
 
+    // R22 diagnostic 1: a direct Lime/Irregular click must not expand merely
+    // because Common grass is visible beyond the existing radius-1 island.
+    CTerrainEditModel compactIsland;
+    QVERIFY(compactIsland.load(document));
+    STerrainTileBrush compactBrush;
+    compactBrush.centerX = 101.0f;
+    compactBrush.centerY = 32.0f;
+    compactBrush.radius = 1.0f;
+    compactBrush.shape = ETerrainTileBrushShape::Circle;
+    CValidationReport compactIrregularReport;
+    const STerrainTileCommand compactIrregular = compactIsland.makeSemanticTilePaint(
+        compactBrush, ETerrainTileLayer::Land, 9,
+        analysis.landCatalog, 12345u, &compactIrregularReport);
+    QVERIFY2(!compactIrregularReport.hasErrors(),
+             qPrintable(compactIrregularReport.toText()));
+    QVERIFY(!compactIrregular.isEmpty());
+    QVERIFY(compactIsland.apply(compactIrregular, true));
+    compactBrush.radius = 0.0f;
+    CValidationReport compactLimeReport;
+    const STerrainTileCommand compactLime = compactIsland.makeSemanticTilePaint(
+        compactBrush, ETerrainTileLayer::Land, 7,
+        analysis.landCatalog, 12345u, &compactLimeReport);
+    QVERIFY2(!compactLimeReport.hasErrors(), qPrintable(compactLimeReport.toText()));
+    QVERIFY(!compactLime.isEmpty());
+    QCOMPARE(compactLime.semanticAudit.junctionPadding, 1);
+    int commonToIrregular = 0;
+    QSet<int> countedCompactCorners;
+    for(const STerrainTileDelta& delta : compactLime.deltas)
+    {
+        bool beforeFound = false;
+        bool afterFound = false;
+        const STerrainTransitionSignature before =
+            analysis.landCatalog.gridSignatureForPacked(delta.before, &beforeFound);
+        const STerrainTransitionSignature after =
+            analysis.landCatalog.gridSignatureForPacked(delta.after, &afterFound);
+        QVERIFY(beforeFound);
+        QVERIFY(afterFound);
+        const qint32 beforeValues[4] = {before.northWest, before.northEast,
+                                        before.southEast, before.southWest};
+        const qint32 afterValues[4] = {after.northWest, after.northEast,
+                                       after.southEast, after.southWest};
+        const int keys[4] = {
+            delta.globalY * (compactIsland.tileCountX() + 1) + delta.globalX,
+            delta.globalY * (compactIsland.tileCountX() + 1) + delta.globalX + 1,
+            (delta.globalY + 1) * (compactIsland.tileCountX() + 1) + delta.globalX + 1,
+            (delta.globalY + 1) * (compactIsland.tileCountX() + 1) + delta.globalX
+        };
+        for(int corner = 0; corner < 4; ++corner)
+        {
+            if(countedCompactCorners.contains(keys[corner]))
+                continue;
+            countedCompactCorners.insert(keys[corner]);
+            commonToIrregular += beforeValues[corner] == 4
+                && afterValues[corner] == 9;
+        }
+    }
+    QCOMPARE(commonToIrregular, 0);
+    QVERIFY(compactIsland.apply(compactLime, true));
+    CValidationReport repeatedLimeReport;
+    const STerrainTileCommand repeatedLime = compactIsland.makeSemanticTilePaint(
+        compactBrush, ETerrainTileLayer::Land, 7,
+        analysis.landCatalog, 12345u, &repeatedLimeReport);
+    QVERIFY2(!repeatedLimeReport.hasErrors(), qPrintable(repeatedLimeReport.toText()));
+    QVERIFY(repeatedLime.isEmpty());
+
+    // R22 diagnostic 2 minimized to the 5x5 state around the refused click.
+    // The atlas already contains direct Dark/Lime signatures in this exact
+    // neighborhood, so route discovery must not force Ground as an
+    // intermediary and break the continuous Dark patch.
+    CTerrainEditModel directObserved;
+    QVERIFY(directObserved.load(document));
+    const QVector<quint16> directObservedState({
+        32861,32877,32877,32883,32887,
+        49261,32817,16742,410,411,
+        49262,49201,16794,16386,2,
+        49268,49,33126,33178,33179,
+        49269,16433,49,16742,410
+    });
+    STerrainTileCommand directObservedSetup;
+    for(int localY = 0; localY < 5; ++localY)
+    {
+        for(int localX = 0; localX < 5; ++localX)
+        {
+            const int x = 95 + localX;
+            const int y = 31 + localY;
+            const quint16 after = directObservedState.at(localY * 5 + localX);
+            const quint16 before = directObserved.packedTile(
+                x, y, ETerrainTileLayer::Land);
+            if(before == after)
+                continue;
+            STerrainTileDelta delta;
+            delta.globalX = x;
+            delta.globalY = y;
+            delta.layer = ETerrainTileLayer::Land;
+            delta.before = before;
+            delta.after = after;
+            directObservedSetup.deltas.append(delta);
+        }
+    }
+    QVERIFY(directObserved.apply(directObservedSetup, true));
+    STerrainTileBrush directObservedBrush;
+    directObservedBrush.centerX = 97.0f;
+    directObservedBrush.centerY = 33.0f;
+    directObservedBrush.radius = 0.0f;
+    directObservedBrush.shape = ETerrainTileBrushShape::Circle;
+    CValidationReport directObservedReport;
+    const STerrainTileCommand directDark = directObserved.makeSemanticTilePaint(
+        directObservedBrush, ETerrainTileLayer::Land, 3,
+        analysis.landCatalog, 12345u, &directObservedReport);
+    QVERIFY2(!directObservedReport.hasErrors(), qPrintable(directObservedReport.toText()));
+    QVERIFY(!directDark.isEmpty());
+    QCOMPARE(directDark.semanticAudit.materialPath, QVector<qint32>({3, 7}));
+    QCOMPARE(directDark.semanticAudit.junctionPadding, 0);
+
     // Replay the Ground/common path captured by the user's R16 diagnostic on
     // this exact copied Zone1 fixture. Consecutive samples belong to nearby
     // strokes and must merge into one corner-consistent region instead of
@@ -2510,6 +2624,68 @@ void EnduranceDocumentTests::zone1NamespaceTemplateMatchesPrivateFixture()
         }
         return count;
     };
+
+    // R22 diagnostic 3: the two later strokes do not overlap the Irregular
+    // core. Lime and then Ground may retile their contacted boundaries, but
+    // neither may consume the established Irregular ownership or make the
+    // preceding Lime island retreat.
+    CTerrainEditModel preservedSequenceThree;
+    QVERIFY(preservedSequenceThree.load(document));
+    QVERIFY(!applyRadiusSample(preservedSequenceThree,
+                               QPoint(101, 34), 0.0f, 9).isEmpty());
+    const QRect sequenceThreeArea(97, 28, 9, 11);
+    const int irregularAfterPaint = materialCornerCount(
+        preservedSequenceThree, sequenceThreeArea, 9);
+    QVERIFY(!applyRadiusSample(preservedSequenceThree,
+                               QPoint(101, 32), 0.0f, 7).isEmpty());
+    const int irregularAfterLime = materialCornerCount(
+        preservedSequenceThree, sequenceThreeArea, 9);
+    QVERIFY(irregularAfterLime >= irregularAfterPaint);
+    const int limeBeforeGround = materialCornerCount(
+        preservedSequenceThree, sequenceThreeArea, 7);
+    STerrainTileBrush sequenceGroundBrush;
+    sequenceGroundBrush.centerX = 100.0f;
+    sequenceGroundBrush.centerY = 33.0f;
+    sequenceGroundBrush.radius = 0.0f;
+    sequenceGroundBrush.shape = ETerrainTileBrushShape::Circle;
+    CValidationReport sequenceGroundReport;
+    const STerrainTileCommand sequenceGround =
+        preservedSequenceThree.makeSemanticTilePaint(
+            sequenceGroundBrush, ETerrainTileLayer::Land, 2,
+            analysis.landCatalog, 12345u, &sequenceGroundReport);
+    QVERIFY(sequenceGround.isEmpty());
+    QVERIFY(sequenceGroundReport.hasErrors());
+    QCOMPARE(sequenceGroundReport.findings().front().code,
+             QStringLiteral("terrain.semantic_core_unsupported"));
+    QVERIFY(materialCornerCount(preservedSequenceThree,
+                                sequenceThreeArea, 9) >= irregularAfterLime);
+    QVERIFY(materialCornerCount(preservedSequenceThree,
+                                sequenceThreeArea, 7) >= limeBeforeGround);
+
+    // R22 diagnostics 4/5: once a Lime boundary is established, nearby Ground
+    // strokes must not consume isolated Lime half-corners outside their core.
+    CTerrainEditModel stableLimeBoundary;
+    QVERIFY(stableLimeBoundary.load(document));
+    const QVector<QPoint> limeBoundaryPoints({QPoint(101, 32), QPoint(100, 32),
+                                               QPoint(99, 32), QPoint(99, 31),
+                                               QPoint(99, 30), QPoint(100, 30),
+                                               QPoint(101, 30)});
+    for(const QPoint& point : limeBoundaryPoints)
+        QVERIFY(!applyRadiusSample(stableLimeBoundary, point, 0.0f, 7).isEmpty());
+    const QRect stableLimeArea(95, 25, 11, 14);
+    int stableLimeCount = materialCornerCount(
+        stableLimeBoundary, stableLimeArea, 7);
+    const QVector<QPoint> nearbyGroundPoints({QPoint(100, 34), QPoint(101, 34),
+                                               QPoint(99, 34), QPoint(99, 28),
+                                               QPoint(100, 28), QPoint(101, 28)});
+    for(const QPoint& point : nearbyGroundPoints)
+    {
+        QVERIFY(!applyRadiusSample(stableLimeBoundary, point, 0.0f, 2).isEmpty());
+        const int afterGround = materialCornerCount(
+            stableLimeBoundary, stableLimeArea, 7);
+        QVERIFY(afterGround >= stableLimeCount);
+        stableLimeCount = afterGround;
+    }
 
     // Lime inside a Dark-grass patch surrounded by Common grass has two
     // equally short authored routes. Reuse Common (7/4/3), never introduce
