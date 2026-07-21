@@ -3764,11 +3764,26 @@ void MainWindow::showGameAndModSetup()
     if(dialog.exec() != QDialog::Accepted)
         return;
     const SResourceProfileEvaluation profile = dialog.evaluation();
-    const QString previousProfile = configuredProfile ? configuredProfile->value() : QString();
-    const bool profileChanged = previousProfile.compare(profile.profileId,
-        Qt::CaseInsensitive) != 0;
-    if(profileChanged && m_pView
-       && (CLandscape::getInstance()->isMprLoad() || m_pView->hasActiveMob()))
+    const SResourceProfileEvaluation previous = activeResourceProfile();
+    auto samePaths = [](const QStringList& left, const QStringList& right)
+    {
+        if(left.size() != right.size()) return false;
+        for(int index = 0; index < left.size(); ++index)
+            if(QDir::cleanPath(left.at(index)).compare(QDir::cleanPath(right.at(index)),
+                                                      Qt::CaseInsensitive) != 0)
+                return false;
+        return true;
+    };
+    const bool resourceConfigurationChanged =
+        QDir::cleanPath(previous.gameRoot).compare(QDir::cleanPath(profile.gameRoot),
+                                                   Qt::CaseInsensitive) != 0
+        || QDir::cleanPath(previous.modRoot).compare(QDir::cleanPath(profile.modRoot),
+                                                   Qt::CaseInsensitive) != 0
+        || previous.profileId.compare(profile.profileId, Qt::CaseInsensitive) != 0
+        || !samePaths(previous.resourceDirectories, profile.resourceDirectories)
+        || !samePaths(previous.mapDirectories, profile.mapDirectories);
+    if(resourceConfigurationChanged && m_pView
+       && (CLandscape::getInstance()->isMprLoad() || !m_pView->mobs().isEmpty()))
     {
         if(!isExitAllowed())
             return;
@@ -3776,8 +3791,10 @@ void MainWindow::showGameAndModSetup()
         m_pView->unloadMob("");
         m_pView->unloadLand();
         m_openedMapZoneId.clear();
-        ei::log(eLogInfo, QString("Unloaded documents before resource profile switch %1 -> %2")
-            .arg(previousProfile, profile.profileId));
+        m_currentCollectionPath.clear();
+        ei::log(eLogInfo, QString("Unloaded documents before resource reinitialization profile:%1 -> %2 root:%3 -> %4")
+            .arg(previous.profileId, profile.profileId,
+                 previous.gameRoot, profile.gameRoot));
     }
     m_settings->applyResourceProfile(profile);
     if(m_pView)

@@ -100,10 +100,13 @@ RegCreateKeyExAFn g_originalRegCreateKeyExA = nullptr;
 RegQueryValueExAFn g_originalRegQueryValueExA = nullptr;
 RegCloseKeyFn g_originalRegCloseKey = nullptr;
 wchar_t g_selectedGameRoot[MAX_PATH * 4] = {};
+wchar_t g_selectedModRoot[MAX_PATH * 4] = {};
 HKEY g_pathSettingsKeys[16] = {};
+HKEY g_starterSettingsKeys[16] = {};
 CRITICAL_SECTION g_registryPathLock{};
 volatile LONG g_registryPathLockReady = 0;
 volatile LONG g_registryOverrideLogCount = 0;
+volatile LONG g_modRootRedirectLogCount = 0;
 
 constexpr DWORD kMapLoadEntryRva = 0x00195480;
 constexpr DWORD kStartZoneTransitionRva = 0x0017C460;
@@ -688,6 +691,109 @@ bool RewriteSavePathA(LPCSTR path, char* output, size_t capacity)
                                output, int(capacity), nullptr, &substituted) != 0 && !substituted;
 }
 
+bool RewriteSelectedModRootW(LPCWSTR path, wchar_t* output, size_t capacity)
+{
+    if(!path || !output || !capacity || !g_selectedModRoot[0])
+        return false;
+    wchar_t full[MAX_PATH * 4]{};
+    const DWORD length = GetFullPathNameW(path,
+        DWORD(sizeof(full) / sizeof(full[0])), full, nullptr);
+    if(!length || length >= sizeof(full) / sizeof(full[0]))
+        return false;
+    NormalizeSlashes(full);
+
+    wchar_t selected[MAX_PATH * 4]{};
+    if(wcscpy_s(selected, g_selectedModRoot) != 0)
+        return false;
+    NormalizeSlashes(selected);
+    const size_t selectedLength = std::wcslen(selected);
+    if(_wcsnicmp(full, selected, selectedLength) == 0
+       && IsPathBoundary(full[selectedLength]))
+        return false;
+
+    const wchar_t marker[] = L"\\Starter\\Mods\\";
+    const size_t markerLength = (sizeof(marker) / sizeof(marker[0])) - 1;
+    const wchar_t* markerAt = nullptr;
+    for(const wchar_t* cursor = full; *cursor; ++cursor)
+        if(_wcsnicmp(cursor, marker, markerLength) == 0)
+        {
+            markerAt = cursor;
+            break;
+        }
+    if(!markerAt)
+        return false;
+
+    const wchar_t* requestedMod = markerAt + markerLength;
+    const wchar_t* requestedSuffix = requestedMod;
+    while(*requestedSuffix && *requestedSuffix != L'\\' && *requestedSuffix != L'/')
+        ++requestedSuffix;
+    const wchar_t* selectedName = FileNamePart(selected);
+    const size_t requestedNameLength = size_t(requestedSuffix - requestedMod);
+    if(!selectedName || std::wcslen(selectedName) != requestedNameLength
+       || _wcsnicmp(requestedMod, selectedName, requestedNameLength) != 0)
+        return false;
+
+    if(_snwprintf_s(output, capacity, _TRUNCATE, L"%s%s",
+                    selected, requestedSuffix) < 0)
+        return false;
+    const LONG sequence = InterlockedIncrement(&g_modRootRedirectLogCount);
+    if(sequence <= 64)
+    {
+        wchar_t message[1900]{};
+        _snwprintf_s(message, sizeof(message) / sizeof(message[0]), _TRUNCATE,
+                     L"JMV_ROOT_REDIRECT seq=%ld from=\"%s\" to=\"%s\"",
+                     sequence, full, output);
+        Log(message);
+    }
+    return true;
+}
+
+bool RewriteSelectedModRootA(LPCSTR path, char* output, size_t capacity)
+{
+    if(!path || !output || !capacity)
+        return false;
+    wchar_t wide[MAX_PATH * 4]{};
+    wchar_t rewritten[MAX_PATH * 4]{};
+    if(!MultiByteToWideChar(CP_ACP, 0, path, -1, wide,
+                            int(sizeof(wide) / sizeof(wide[0])))
+       || !RewriteSelectedModRootW(wide, rewritten,
+                                   sizeof(rewritten) / sizeof(rewritten[0])))
+        return false;
+    BOOL substituted = FALSE;
+    return WideCharToMultiByte(CP_ACP, WC_NO_BEST_FIT_CHARS, rewritten, -1,
+                               output, int(capacity), nullptr, &substituted) != 0
+        && !substituted;
+}
+
+bool RewriteOwnedPathW(LPCWSTR path, wchar_t* output, size_t capacity)
+{
+    if(!path || !output || !capacity)
+        return false;
+    wchar_t modPath[MAX_PATH * 4]{};
+    const wchar_t* selected = path;
+    const bool modRedirected = RewriteSelectedModRootW(
+        path, modPath, sizeof(modPath) / sizeof(modPath[0]));
+    if(modRedirected)
+        selected = modPath;
+    if(RewriteSavePathW(selected, output, capacity))
+        return true;
+    return modRedirected && wcscpy_s(output, capacity, selected) == 0;
+}
+
+bool RewriteOwnedPathA(LPCSTR path, char* output, size_t capacity)
+{
+    if(!path || !output || !capacity)
+        return false;
+    char modPath[MAX_PATH * 4]{};
+    const char* selected = path;
+    const bool modRedirected = RewriteSelectedModRootA(path, modPath, sizeof(modPath));
+    if(modRedirected)
+        selected = modPath;
+    if(RewriteSavePathA(selected, output, capacity))
+        return true;
+    return modRedirected && strcpy_s(output, capacity, selected) == 0;
+}
+
 bool CommitSaveGeneration(const HotReloadControl& request)
 {
     if(request.generation == g_saveGeneration)
@@ -850,7 +956,7 @@ HANDLE WINAPI HookCreateFileW(LPCWSTR path, DWORD access, DWORD share,
     wchar_t redirected[MAX_PATH * 4]{};
     LPCWSTR selected = (RewriteGodmodeMobW(path, redirected, sizeof(redirected) / sizeof(redirected[0]))
         || RewriteSupplementalMobW(path, redirected, sizeof(redirected) / sizeof(redirected[0]))
-        || RewriteSavePathW(path, redirected, sizeof(redirected) / sizeof(redirected[0]))) ? redirected : path;
+        || RewriteOwnedPathW(path, redirected, sizeof(redirected) / sizeof(redirected[0]))) ? redirected : path;
     HANDLE result = g_originalCreateFileW(selected, access, share, security, creation, flags, templateFile);
     const DWORD error = GetLastError();
     Observe(L"CreateFileW", path, reinterpret_cast<ULONG_PTR>(result), error, caller, access, creation);
@@ -868,7 +974,7 @@ HANDLE WINAPI HookCreateFileA(LPCSTR path, DWORD access, DWORD share,
     char redirected[MAX_PATH * 4]{};
     LPCSTR selected = (RewriteGodmodeMobA(path, redirected, sizeof(redirected))
         || RewriteSupplementalMobA(path, redirected, sizeof(redirected))
-        || RewriteSavePathA(path, redirected, sizeof(redirected))) ? redirected : path;
+        || RewriteOwnedPathA(path, redirected, sizeof(redirected))) ? redirected : path;
     HANDLE result = g_originalCreateFileA(selected, access, share, security, creation, flags, templateFile);
     const DWORD error = GetLastError();
     if(path)
@@ -890,7 +996,7 @@ DWORD WINAPI HookGetFileAttributesW(LPCWSTR path)
     wchar_t redirected[MAX_PATH * 4]{};
     LPCWSTR selected = (RewriteGodmodeMobW(path, redirected, sizeof(redirected) / sizeof(redirected[0]))
         || RewriteSupplementalMobW(path, redirected, sizeof(redirected) / sizeof(redirected[0]))
-        || RewriteSavePathW(path, redirected, sizeof(redirected) / sizeof(redirected[0]))) ? redirected : path;
+        || RewriteOwnedPathW(path, redirected, sizeof(redirected) / sizeof(redirected[0]))) ? redirected : path;
     const DWORD result = g_originalGetFileAttributesW(selected);
     const DWORD error = GetLastError();
     Observe(L"GetFileAttributesW", path, result, error, caller);
@@ -906,7 +1012,7 @@ DWORD WINAPI HookGetFileAttributesA(LPCSTR path)
     char redirected[MAX_PATH * 4]{};
     LPCSTR selected = (RewriteGodmodeMobA(path, redirected, sizeof(redirected))
         || RewriteSupplementalMobA(path, redirected, sizeof(redirected))
-        || RewriteSavePathA(path, redirected, sizeof(redirected))) ? redirected : path;
+        || RewriteOwnedPathA(path, redirected, sizeof(redirected))) ? redirected : path;
     const DWORD result = g_originalGetFileAttributesA(selected);
     const DWORD error = GetLastError();
     if(path)
@@ -922,11 +1028,11 @@ DWORD WINAPI HookGetFileAttributesA(LPCSTR path)
 
 #define REDIRECT_ONE_W(name, original, resultType, failure, parameters, arguments) \
 resultType WINAPI name parameters { wchar_t redirected[MAX_PATH * 4]{}; \
-LPCWSTR selected = RewriteSavePathW(path, redirected, sizeof(redirected) / sizeof(redirected[0])) ? redirected : path; \
+LPCWSTR selected = RewriteOwnedPathW(path, redirected, sizeof(redirected) / sizeof(redirected[0])) ? redirected : path; \
 return original arguments; }
 #define REDIRECT_ONE_A(name, original, resultType, failure, parameters, arguments) \
 resultType WINAPI name parameters { char redirected[MAX_PATH * 4]{}; \
-LPCSTR selected = RewriteSavePathA(path, redirected, sizeof(redirected)) ? redirected : path; \
+LPCSTR selected = RewriteOwnedPathA(path, redirected, sizeof(redirected)) ? redirected : path; \
 return original arguments; }
 
 REDIRECT_ONE_W(HookSetFileAttributesW, g_originalSetFileAttributesW, BOOL, FALSE,
@@ -953,43 +1059,43 @@ REDIRECT_ONE_A(HookFindFirstFileA, g_originalFindFirstFileA, HANDLE, INVALID_HAN
 BOOL WINAPI HookMoveFileW(LPCWSTR from, LPCWSTR to)
 {
     wchar_t redirectedFrom[MAX_PATH * 4]{}, redirectedTo[MAX_PATH * 4]{};
-    LPCWSTR selectedFrom = RewriteSavePathW(from, redirectedFrom, sizeof(redirectedFrom) / sizeof(redirectedFrom[0])) ? redirectedFrom : from;
-    LPCWSTR selectedTo = RewriteSavePathW(to, redirectedTo, sizeof(redirectedTo) / sizeof(redirectedTo[0])) ? redirectedTo : to;
+    LPCWSTR selectedFrom = RewriteOwnedPathW(from, redirectedFrom, sizeof(redirectedFrom) / sizeof(redirectedFrom[0])) ? redirectedFrom : from;
+    LPCWSTR selectedTo = RewriteOwnedPathW(to, redirectedTo, sizeof(redirectedTo) / sizeof(redirectedTo[0])) ? redirectedTo : to;
     return g_originalMoveFileW(selectedFrom, selectedTo);
 }
 BOOL WINAPI HookMoveFileA(LPCSTR from, LPCSTR to)
 {
     char redirectedFrom[MAX_PATH * 4]{}, redirectedTo[MAX_PATH * 4]{};
-    LPCSTR selectedFrom = RewriteSavePathA(from, redirectedFrom, sizeof(redirectedFrom)) ? redirectedFrom : from;
-    LPCSTR selectedTo = RewriteSavePathA(to, redirectedTo, sizeof(redirectedTo)) ? redirectedTo : to;
+    LPCSTR selectedFrom = RewriteOwnedPathA(from, redirectedFrom, sizeof(redirectedFrom)) ? redirectedFrom : from;
+    LPCSTR selectedTo = RewriteOwnedPathA(to, redirectedTo, sizeof(redirectedTo)) ? redirectedTo : to;
     return g_originalMoveFileA(selectedFrom, selectedTo);
 }
 BOOL WINAPI HookMoveFileExW(LPCWSTR from, LPCWSTR to, DWORD flags)
 {
     wchar_t redirectedFrom[MAX_PATH * 4]{}, redirectedTo[MAX_PATH * 4]{};
-    LPCWSTR selectedFrom = RewriteSavePathW(from, redirectedFrom, sizeof(redirectedFrom) / sizeof(redirectedFrom[0])) ? redirectedFrom : from;
-    LPCWSTR selectedTo = RewriteSavePathW(to, redirectedTo, sizeof(redirectedTo) / sizeof(redirectedTo[0])) ? redirectedTo : to;
+    LPCWSTR selectedFrom = RewriteOwnedPathW(from, redirectedFrom, sizeof(redirectedFrom) / sizeof(redirectedFrom[0])) ? redirectedFrom : from;
+    LPCWSTR selectedTo = RewriteOwnedPathW(to, redirectedTo, sizeof(redirectedTo) / sizeof(redirectedTo[0])) ? redirectedTo : to;
     return g_originalMoveFileExW(selectedFrom, selectedTo, flags);
 }
 BOOL WINAPI HookMoveFileExA(LPCSTR from, LPCSTR to, DWORD flags)
 {
     char redirectedFrom[MAX_PATH * 4]{}, redirectedTo[MAX_PATH * 4]{};
-    LPCSTR selectedFrom = RewriteSavePathA(from, redirectedFrom, sizeof(redirectedFrom)) ? redirectedFrom : from;
-    LPCSTR selectedTo = RewriteSavePathA(to, redirectedTo, sizeof(redirectedTo)) ? redirectedTo : to;
+    LPCSTR selectedFrom = RewriteOwnedPathA(from, redirectedFrom, sizeof(redirectedFrom)) ? redirectedFrom : from;
+    LPCSTR selectedTo = RewriteOwnedPathA(to, redirectedTo, sizeof(redirectedTo)) ? redirectedTo : to;
     return g_originalMoveFileExA(selectedFrom, selectedTo, flags);
 }
 BOOL WINAPI HookCopyFileW(LPCWSTR from, LPCWSTR to, BOOL failIfExists)
 {
     wchar_t redirectedFrom[MAX_PATH * 4]{}, redirectedTo[MAX_PATH * 4]{};
-    LPCWSTR selectedFrom = RewriteSavePathW(from, redirectedFrom, sizeof(redirectedFrom) / sizeof(redirectedFrom[0])) ? redirectedFrom : from;
-    LPCWSTR selectedTo = RewriteSavePathW(to, redirectedTo, sizeof(redirectedTo) / sizeof(redirectedTo[0])) ? redirectedTo : to;
+    LPCWSTR selectedFrom = RewriteOwnedPathW(from, redirectedFrom, sizeof(redirectedFrom) / sizeof(redirectedFrom[0])) ? redirectedFrom : from;
+    LPCWSTR selectedTo = RewriteOwnedPathW(to, redirectedTo, sizeof(redirectedTo) / sizeof(redirectedTo[0])) ? redirectedTo : to;
     return g_originalCopyFileW(selectedFrom, selectedTo, failIfExists);
 }
 BOOL WINAPI HookCopyFileA(LPCSTR from, LPCSTR to, BOOL failIfExists)
 {
     char redirectedFrom[MAX_PATH * 4]{}, redirectedTo[MAX_PATH * 4]{};
-    LPCSTR selectedFrom = RewriteSavePathA(from, redirectedFrom, sizeof(redirectedFrom)) ? redirectedFrom : from;
-    LPCSTR selectedTo = RewriteSavePathA(to, redirectedTo, sizeof(redirectedTo)) ? redirectedTo : to;
+    LPCSTR selectedFrom = RewriteOwnedPathA(from, redirectedFrom, sizeof(redirectedFrom)) ? redirectedFrom : from;
+    LPCSTR selectedTo = RewriteOwnedPathA(to, redirectedTo, sizeof(redirectedTo)) ? redirectedTo : to;
     return g_originalCopyFileA(selectedFrom, selectedTo, failIfExists);
 }
 
@@ -1005,38 +1111,50 @@ bool IsPathSettingsSubkey(LPCSTR subkey)
     return _stricmp(subkey, "Path Settings") == 0;
 }
 
-void MarkPathSettingsKey(HKEY key)
+bool IsStarterSettingsSubkey(LPCSTR subkey)
 {
-    if(!key || !InterlockedCompareExchange(&g_registryPathLockReady, 0, 0))
+    if(!subkey || !subkey[0])
+        return false;
+    const char* root = "Gipat.Ru\\EI_Starter";
+    const size_t length = std::strlen(subkey);
+    const size_t rootLength = std::strlen(root);
+    if(length >= rootLength && _strnicmp(subkey + length - rootLength,
+                                        root, rootLength) == 0)
+        return true;
+    const char* settings = "Gipat.Ru\\EI_Starter\\Settings";
+    const size_t settingsLength = std::strlen(settings);
+    return length >= settingsLength
+        && _stricmp(subkey + length - settingsLength, settings) == 0;
+}
+
+void MarkTrackedKey(HKEY key, HKEY* keys, size_t count)
+{
+    if(!key || !keys || !InterlockedCompareExchange(&g_registryPathLockReady, 0, 0))
         return;
     EnterCriticalSection(&g_registryPathLock);
-    for(HKEY existing : g_pathSettingsKeys)
-    {
-        if(existing == key)
+    for(size_t index = 0; index < count; ++index)
+        if(keys[index] == key)
         {
             LeaveCriticalSection(&g_registryPathLock);
             return;
         }
-    }
-    for(HKEY& slot : g_pathSettingsKeys)
-    {
-        if(!slot)
+    for(size_t index = 0; index < count; ++index)
+        if(!keys[index])
         {
-            slot = key;
+            keys[index] = key;
             break;
         }
-    }
     LeaveCriticalSection(&g_registryPathLock);
 }
 
-bool IsPathSettingsKey(HKEY key)
+bool IsTrackedKey(HKEY key, HKEY* keys, size_t count)
 {
-    if(!key || !InterlockedCompareExchange(&g_registryPathLockReady, 0, 0))
+    if(!key || !keys || !InterlockedCompareExchange(&g_registryPathLockReady, 0, 0))
         return false;
     bool found = false;
     EnterCriticalSection(&g_registryPathLock);
-    for(HKEY existing : g_pathSettingsKeys)
-        if(existing == key)
+    for(size_t index = 0; index < count; ++index)
+        if(keys[index] == key)
         {
             found = true;
             break;
@@ -1045,15 +1163,33 @@ bool IsPathSettingsKey(HKEY key)
     return found;
 }
 
-void UnmarkPathSettingsKey(HKEY key)
+void UnmarkTrackedKey(HKEY key, HKEY* keys, size_t count)
 {
-    if(!key || !InterlockedCompareExchange(&g_registryPathLockReady, 0, 0))
+    if(!key || !keys || !InterlockedCompareExchange(&g_registryPathLockReady, 0, 0))
         return;
     EnterCriticalSection(&g_registryPathLock);
-    for(HKEY& slot : g_pathSettingsKeys)
-        if(slot == key)
-            slot = nullptr;
+    for(size_t index = 0; index < count; ++index)
+        if(keys[index] == key)
+            keys[index] = nullptr;
     LeaveCriticalSection(&g_registryPathLock);
+}
+
+void MarkPathSettingsKey(HKEY key)
+{
+    MarkTrackedKey(key, g_pathSettingsKeys,
+                   sizeof(g_pathSettingsKeys) / sizeof(g_pathSettingsKeys[0]));
+}
+
+bool IsPathSettingsKey(HKEY key)
+{
+    return IsTrackedKey(key, g_pathSettingsKeys,
+                        sizeof(g_pathSettingsKeys) / sizeof(g_pathSettingsKeys[0]));
+}
+
+void UnmarkPathSettingsKey(HKEY key)
+{
+    UnmarkTrackedKey(key, g_pathSettingsKeys,
+                     sizeof(g_pathSettingsKeys) / sizeof(g_pathSettingsKeys[0]));
 }
 
 LSTATUS WINAPI HookRegOpenKeyA(HKEY key, LPCSTR subkey, PHKEY result)
@@ -1061,6 +1197,13 @@ LSTATUS WINAPI HookRegOpenKeyA(HKEY key, LPCSTR subkey, PHKEY result)
     const LSTATUS status = g_originalRegOpenKeyA(key, subkey, result);
     if(status == ERROR_SUCCESS && result && IsPathSettingsSubkey(subkey))
         MarkPathSettingsKey(*result);
+    if(status == ERROR_SUCCESS && result
+       && (IsStarterSettingsSubkey(subkey)
+           || (IsTrackedKey(key, g_starterSettingsKeys,
+                            sizeof(g_starterSettingsKeys) / sizeof(g_starterSettingsKeys[0]))
+               && subkey && _stricmp(subkey, "Settings") == 0)))
+        MarkTrackedKey(*result, g_starterSettingsKeys,
+                       sizeof(g_starterSettingsKeys) / sizeof(g_starterSettingsKeys[0]));
     return status;
 }
 
@@ -1070,6 +1213,13 @@ LSTATUS WINAPI HookRegOpenKeyExA(HKEY key, LPCSTR subkey, DWORD options,
     const LSTATUS status = g_originalRegOpenKeyExA(key, subkey, options, access, result);
     if(status == ERROR_SUCCESS && result && IsPathSettingsSubkey(subkey))
         MarkPathSettingsKey(*result);
+    if(status == ERROR_SUCCESS && result
+       && (IsStarterSettingsSubkey(subkey)
+           || (IsTrackedKey(key, g_starterSettingsKeys,
+                            sizeof(g_starterSettingsKeys) / sizeof(g_starterSettingsKeys[0]))
+               && subkey && _stricmp(subkey, "Settings") == 0)))
+        MarkTrackedKey(*result, g_starterSettingsKeys,
+                       sizeof(g_starterSettingsKeys) / sizeof(g_starterSettingsKeys[0]));
     return status;
 }
 
@@ -1082,6 +1232,13 @@ LSTATUS WINAPI HookRegCreateKeyExA(HKEY key, LPCSTR subkey, DWORD reserved,
         options, access, security, result, disposition);
     if(status == ERROR_SUCCESS && result && IsPathSettingsSubkey(subkey))
         MarkPathSettingsKey(*result);
+    if(status == ERROR_SUCCESS && result
+       && (IsStarterSettingsSubkey(subkey)
+           || (IsTrackedKey(key, g_starterSettingsKeys,
+                            sizeof(g_starterSettingsKeys) / sizeof(g_starterSettingsKeys[0]))
+               && subkey && _stricmp(subkey, "Settings") == 0)))
+        MarkTrackedKey(*result, g_starterSettingsKeys,
+                       sizeof(g_starterSettingsKeys) / sizeof(g_starterSettingsKeys[0]));
     return status;
 }
 
@@ -1105,12 +1262,35 @@ bool SelectedRegistryPath(LPCSTR valueName, char* output, size_t capacity)
         && !substituted;
 }
 
+bool SelectedStarterPath(LPCSTR valueName, char* output, size_t capacity)
+{
+    if(!valueName || !output || !capacity || !g_selectedGameRoot[0])
+        return false;
+    wchar_t selected[MAX_PATH * 4]{};
+    if(_stricmp(valueName, "AddonPath") == 0 && g_selectedModRoot[0])
+        wcscpy_s(selected, g_selectedModRoot);
+    else if(_stricmp(valueName, "path") == 0)
+        _snwprintf_s(selected, sizeof(selected) / sizeof(selected[0]), _TRUNCATE,
+                     L"%s\\Starter", g_selectedGameRoot);
+    else
+        return false;
+    BOOL substituted = FALSE;
+    return WideCharToMultiByte(CP_ACP, WC_NO_BEST_FIT_CHARS, selected, -1,
+                               output, int(capacity), nullptr, &substituted) > 0
+        && !substituted;
+}
+
 LSTATUS WINAPI HookRegQueryValueExA(HKEY key, LPCSTR valueName, LPDWORD reserved,
                                     LPDWORD type, LPBYTE data, LPDWORD dataSize)
 {
     char selected[MAX_PATH * 4]{};
-    if(!IsPathSettingsKey(key)
-       || !SelectedRegistryPath(valueName, selected, sizeof(selected)))
+    const bool nivalOverride = IsPathSettingsKey(key)
+        && SelectedRegistryPath(valueName, selected, sizeof(selected));
+    const bool starterOverride = IsTrackedKey(
+        key, g_starterSettingsKeys,
+        sizeof(g_starterSettingsKeys) / sizeof(g_starterSettingsKeys[0]))
+        && SelectedStarterPath(valueName, selected, sizeof(selected));
+    if(!nivalOverride && !starterOverride)
         return g_originalRegQueryValueExA(key, valueName, reserved, type, data, dataSize);
     if(!dataSize)
         return ERROR_INVALID_PARAMETER;
@@ -1134,7 +1314,9 @@ LSTATUS WINAPI HookRegQueryValueExA(HKEY key, LPCSTR valueName, LPDWORD reserved
                             int(sizeof(selectedWide) / sizeof(selectedWide[0])));
         wchar_t message[1800]{};
         _snwprintf_s(message, sizeof(message) / sizeof(message[0]), _TRUNCATE,
-                     L"GAME_ROOT_OVERRIDE value=\"%s\" selected=\"%s\" scope=owned-process",
+                     starterOverride
+                         ? L"STARTER_ROOT_OVERRIDE value=\"%s\" selected=\"%s\" scope=owned-process"
+                         : L"GAME_ROOT_OVERRIDE value=\"%s\" selected=\"%s\" scope=owned-process",
                      valueWide, selectedWide);
         Log(message);
     }
@@ -1144,6 +1326,8 @@ LSTATUS WINAPI HookRegQueryValueExA(HKEY key, LPCSTR valueName, LPDWORD reserved
 LSTATUS WINAPI HookRegCloseKey(HKEY key)
 {
     UnmarkPathSettingsKey(key);
+    UnmarkTrackedKey(key, g_starterSettingsKeys,
+                     sizeof(g_starterSettingsKeys) / sizeof(g_starterSettingsKeys[0]));
     return g_originalRegCloseKey(key);
 }
 
@@ -1969,6 +2153,14 @@ bool InitializeDirectLaunch()
         Log(L"DIRECT_LAUNCH disabled: selected game root is missing");
         return false;
     }
+    GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_MOD_ROOT", g_selectedModRoot,
+                            DWORD(sizeof(g_selectedModRoot)
+                                  / sizeof(g_selectedModRoot[0])));
+    size_t modRootLength = std::wcslen(g_selectedModRoot);
+    while(modRootLength > 3
+          && (g_selectedModRoot[modRootLength - 1] == L'\\'
+              || g_selectedModRoot[modRootLength - 1] == L'/'))
+        g_selectedModRoot[--modRootLength] = L'\0';
     SetRuntimeState(RuntimeState::Initializing, L"bridge initialization");
     GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_HOT_RELOAD_REQUEST",
                             g_hotReloadRequestPath,

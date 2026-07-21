@@ -1231,6 +1231,9 @@ bool CJmvMapTestLauncher::launch(const SJmvMapTestLaunchInput& input, QString* e
     QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
     environment.insert("EI_MAPPER_ENDURANCE_GAME_ROOT",
                        QDir::cleanPath(input.profile.gameRoot));
+    if(!input.profile.modRoot.isEmpty())
+        environment.insert("EI_MAPPER_ENDURANCE_MOD_ROOT",
+                           QDir::cleanPath(input.profile.modRoot));
     environment.insert("EI_MAPPER_ENDURANCE_MAP", m_temporaryMapName);
     environment.insert("EI_MAPPER_ENDURANCE_SOURCE_ZONE", input.mapEntry.zoneId);
     environment.insert("EI_MAPPER_ENDURANCE_TARGET_EXIT", QString::number(input.spawn.exitId));
