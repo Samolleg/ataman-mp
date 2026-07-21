@@ -2541,6 +2541,196 @@ void EnduranceDocumentTests::zone1NamespaceTemplateMatchesPrivateFixture()
         applyRadiusSample(nestedGround, QPoint(109, 40), 0.0f, 2);
     QVERIFY(!nestedGroundCommand.isEmpty());
 
+    // R21 diagnostic 4 minimized to the exact 7x7 pre-stroke neighborhood.
+    // Painting Ground/common at 103,37 previously changed the unrelated
+    // Common-grass corner at 105,39 into Stone/lime solely because Lime was
+    // present nearby. Local support must break that otherwise valid CSP tie.
+    struct SLocalPackedTile { int x; int y; quint16 packed; };
+    const QVector<SLocalPackedTile> diagnosticFourState({
+        {100,34,5},{101,34,32775},{102,34,49155},{103,34,32772},{104,34,5},{105,34,32855},{106,34,32881},
+        {100,35,49159},{101,35,32775},{102,35,49158},{103,35,7},{104,35,16388},{105,35,49272},{106,35,16512},
+        {100,36,7},{101,36,16389},{102,36,7},{103,36,49157},{104,36,6},{105,36,49241},{106,36,84},
+        {100,37,49157},{101,37,16387},{102,37,16387},{103,37,16390},{104,37,16387},{105,37,7},{106,37,32771},
+        {100,38,16391},{101,38,4},{102,38,32853},{103,38,32882},{104,38,16467},{105,38,16390},{106,38,49155},
+        {100,39,32771},{101,39,6},{102,39,49262},{103,39,32817},{104,39,16493},{105,39,6},{106,39,49156},
+        {100,40,16508},{101,40,185},{102,40,49651},{103,40,16432},{104,40,16501},{105,40,49155},{106,40,16391}
+    });
+    CTerrainEditModel diagnosticFour;
+    QVERIFY(diagnosticFour.load(document));
+    STerrainTileCommand diagnosticFourSetup;
+    for(const SLocalPackedTile& tile : diagnosticFourState)
+    {
+        const quint16 before = diagnosticFour.packedTile(
+            tile.x, tile.y, ETerrainTileLayer::Land);
+        if(before == tile.packed)
+            continue;
+        STerrainTileDelta delta;
+        delta.globalX = tile.x;
+        delta.globalY = tile.y;
+        delta.layer = ETerrainTileLayer::Land;
+        delta.before = before;
+        delta.after = tile.packed;
+        diagnosticFourSetup.deltas.append(delta);
+    }
+    QVERIFY(diagnosticFour.apply(diagnosticFourSetup, true));
+    STerrainTileBrush diagnosticFourBrush;
+    diagnosticFourBrush.centerX = 103.0f;
+    diagnosticFourBrush.centerY = 37.0f;
+    diagnosticFourBrush.radius = 0.0f;
+    diagnosticFourBrush.shape = ETerrainTileBrushShape::Circle;
+    CValidationReport diagnosticFourReport;
+    const STerrainTileCommand diagnosticFourPaint = diagnosticFour.makeSemanticTilePaint(
+        diagnosticFourBrush, ETerrainTileLayer::Land, 2,
+        analysis.landCatalog, 12345u, &diagnosticFourReport);
+    QVERIFY2(!diagnosticFourReport.hasErrors(),
+             qPrintable(diagnosticFourReport.toText()));
+    QVERIFY(!diagnosticFourPaint.isEmpty());
+    int commonToLimeCorners = 0;
+    QSet<int> countedDiagnosticFourCorners;
+    for(const STerrainTileDelta& delta : diagnosticFourPaint.deltas)
+    {
+        bool beforeFound = false;
+        bool afterFound = false;
+        const STerrainTransitionSignature before =
+            analysis.landCatalog.gridSignatureForPacked(delta.before, &beforeFound);
+        const STerrainTransitionSignature after =
+            analysis.landCatalog.gridSignatureForPacked(delta.after, &afterFound);
+        QVERIFY(beforeFound);
+        QVERIFY(afterFound);
+        const qint32 beforeValues[4] = {before.northWest, before.northEast,
+                                        before.southEast, before.southWest};
+        const qint32 afterValues[4] = {after.northWest, after.northEast,
+                                       after.southEast, after.southWest};
+        const int cornerKeys[4] = {
+            delta.globalY * (diagnosticFour.tileCountX() + 1) + delta.globalX,
+            delta.globalY * (diagnosticFour.tileCountX() + 1) + delta.globalX + 1,
+            (delta.globalY + 1) * (diagnosticFour.tileCountX() + 1) + delta.globalX + 1,
+            (delta.globalY + 1) * (diagnosticFour.tileCountX() + 1) + delta.globalX
+        };
+        for(int corner = 0; corner < 4; ++corner)
+        {
+            if(countedDiagnosticFourCorners.contains(cornerKeys[corner]))
+                continue;
+            countedDiagnosticFourCorners.insert(cornerKeys[corner]);
+            commonToLimeCorners += beforeValues[corner] == 4 && afterValues[corner] == 7;
+        }
+    }
+    QCOMPARE(commonToLimeCorners, 0);
+
+    const auto diagnosticConversionCount = [&](const STerrainTileCommand& paint,
+                                                 qint32 fromMaterial,
+                                                 qint32 toMaterial) {
+        int count = 0;
+        QSet<int> counted;
+        for(const STerrainTileDelta& delta : paint.deltas)
+        {
+            bool beforeFound = false;
+            bool afterFound = false;
+            const STerrainTransitionSignature before =
+                analysis.landCatalog.gridSignatureForPacked(delta.before, &beforeFound);
+            const STerrainTransitionSignature after =
+                analysis.landCatalog.gridSignatureForPacked(delta.after, &afterFound);
+            if(!beforeFound || !afterFound)
+                return -1;
+            const qint32 beforeValues[4] = {before.northWest, before.northEast,
+                                            before.southEast, before.southWest};
+            const qint32 afterValues[4] = {after.northWest, after.northEast,
+                                           after.southEast, after.southWest};
+            const int cornerKeys[4] = {
+                delta.globalY * (diagnosticFour.tileCountX() + 1) + delta.globalX,
+                delta.globalY * (diagnosticFour.tileCountX() + 1) + delta.globalX + 1,
+                (delta.globalY + 1) * (diagnosticFour.tileCountX() + 1) + delta.globalX + 1,
+                (delta.globalY + 1) * (diagnosticFour.tileCountX() + 1) + delta.globalX
+            };
+            for(int corner = 0; corner < 4; ++corner)
+            {
+                if(counted.contains(cornerKeys[corner]))
+                    continue;
+                counted.insert(cornerKeys[corner]);
+                count += beforeValues[corner] == fromMaterial
+                    && afterValues[corner] == toMaterial;
+            }
+        }
+        return count;
+    };
+    const auto replayLocalDiagnostic = [&](const QVector<SLocalPackedTile>& state,
+                                            const QPoint& center,
+                                            qint32 material) {
+        CTerrainEditModel model;
+        if(!model.load(document))
+            return STerrainTileCommand();
+        STerrainTileCommand setup;
+        for(const SLocalPackedTile& tile : state)
+        {
+            const quint16 before = model.packedTile(tile.x, tile.y,
+                                                    ETerrainTileLayer::Land);
+            if(before == tile.packed)
+                continue;
+            STerrainTileDelta delta;
+            delta.globalX = tile.x;
+            delta.globalY = tile.y;
+            delta.layer = ETerrainTileLayer::Land;
+            delta.before = before;
+            delta.after = tile.packed;
+            setup.deltas.append(delta);
+        }
+        if(!model.apply(setup, true))
+            return STerrainTileCommand();
+        STerrainTileBrush sampleBrush;
+        sampleBrush.centerX = float(center.x());
+        sampleBrush.centerY = float(center.y());
+        sampleBrush.radius = 0.0f;
+        sampleBrush.shape = ETerrainTileBrushShape::Circle;
+        CValidationReport sampleReport;
+        return model.makeSemanticTilePaint(sampleBrush, ETerrainTileLayer::Land,
+                                           material, analysis.landCatalog,
+                                           12345u, &sampleReport);
+    };
+
+    const QVector<SLocalPackedTile> diagnosticOneState({
+        {95,36,32894},{96,36,49276},{97,36,49155},{98,36,7},{99,36,3},{100,36,7},{101,36,16389},
+        {95,37,4},{96,37,49156},{97,37,32945},{98,37,32999},{99,37,32992},{100,37,32998},{101,37,16834},
+        {95,38,49156},{96,38,16388},{97,38,49380},{98,38,33112},{99,38,33268},{100,38,33258},{101,38,16884},
+        {95,39,49157},{96,39,5},{97,39,49597},{98,39,49496},{99,39,49642},{100,39,16433},{101,39,16874},
+        {95,40,16389},{96,40,3},{97,40,49590},{98,40,344},{99,40,49652},{100,40,490},{101,40,500},
+        {95,41,32772},{96,41,49155},{97,41,33218},{98,41,16728},{99,41,344},{100,41,49496},{101,41,33112},
+        {95,42,32774},{96,42,32774},{97,42,49330},{98,42,438},{99,42,445},{100,42,439},{101,42,445}
+    });
+    const STerrainTileCommand diagnosticOnePaint = replayLocalDiagnostic(
+        diagnosticOneState, QPoint(98, 39), 7);
+    QVERIFY(!diagnosticOnePaint.isEmpty());
+    QCOMPARE(diagnosticConversionCount(diagnosticOnePaint, 4, 7), 0);
+
+    const QVector<SLocalPackedTile> diagnosticTwoState({
+        {96,33,5},{97,33,6},{98,33,32774},{99,33,16391},{100,33,32774},{101,33,32771},{102,33,16387},{103,33,5},{104,33,5},
+        {96,34,16390},{97,34,7},{98,34,49155},{99,34,5},{100,34,5},{101,34,32775},{102,34,49155},{103,34,32772},{104,34,5},
+        {96,35,126},{97,35,49157},{98,35,3},{99,35,32773},{100,35,49159},{101,35,32775},{102,35,49158},{103,35,7},{104,35,16388},
+        {96,36,49276},{97,36,49155},{98,36,7},{99,36,32852},{100,36,32876},{101,36,16470},{102,36,7},{103,36,49157},{104,36,6},
+        {96,37,49156},{97,37,49155},{98,37,32854},{99,37,49287},{100,37,49201},{101,37,32897},{102,37,16468},{103,37,16390},{104,37,16387},
+        {96,38,16388},{97,38,32852},{98,38,49658},{99,38,411},{100,38,410},{101,38,411},{102,38,33274},{103,38,16466},{104,38,32771},
+        {96,39,5},{97,39,49267},{98,39,16795},{99,39,32770},{100,39,16386},{101,39,2},{102,39,49563},{103,39,16500},{104,39,32775},
+        {96,40,3},{97,40,49238},{98,40,506},{99,40,33179},{100,40,33178},{101,40,33179},{102,40,16890},{103,40,88},{104,40,5},
+        {96,41,49155},{97,41,49155},{98,41,49232},{99,41,139},{100,41,49200},{101,41,16521},{102,41,90},{103,41,7},{104,41,5}
+    });
+    const STerrainTileCommand diagnosticTwoPaint = replayLocalDiagnostic(
+        diagnosticTwoState, QPoint(100, 37), 3);
+    QVERIFY(!diagnosticTwoPaint.isEmpty());
+    QCOMPARE(diagnosticConversionCount(diagnosticTwoPaint, 3, 4), 0);
+
+    const QVector<SLocalPackedTile> diagnosticThreeState({
+        {99,35,32773},{100,35,49159},{101,35,32775},{102,35,49158},{103,35,7},{104,35,16388},{105,35,49272},
+        {99,36,3},{100,36,7},{101,36,16389},{102,36,7},{103,36,49157},{104,36,6},{105,36,49241},
+        {99,37,32992},{100,37,32998},{101,37,16834},{102,37,33208},{103,37,32886},{104,37,16476},{105,37,7},
+        {99,38,49496},{100,38,470},{101,38,16854},{102,38,49642},{103,38,49201},{104,38,16497},{105,38,16390},
+        {99,39,33112},{100,39,16854},{101,39,470},{102,39,49642},{103,39,32817},{104,39,16493},{105,39,6},
+        {99,40,16728},{100,40,33112},{101,40,49496},{102,40,49642},{103,40,16432},{104,40,16501},{105,40,49155},
+        {99,41,33258},{100,41,33258},{101,41,33258},{102,41,16703},{103,41,119},{104,41,80},{105,41,16387}
+    });
+    const STerrainTileCommand diagnosticThreePaint = replayLocalDiagnostic(
+        diagnosticThreeState, QPoint(102, 38), 2);
+    QVERIFY(!diagnosticThreePaint.isEmpty());
+    QCOMPARE(diagnosticConversionCount(diagnosticThreePaint, 9, 7), 0);
+
     // R18 follow-up diagnostic cases: irregular grass must coexist with
     // Ground/common and Grass/dark through Grass/common, then Stone/lime must
     // join that dark/irregular boundary without dropping a shared corner.

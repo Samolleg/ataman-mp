@@ -1739,14 +1739,48 @@ STerrainTileCommand CTerrainEditModel::makeSemanticTilePaint(
                                  (y + 1) * (width + 1) + x + 1,
                                  (y + 1) * (width + 1) + x});
         };
+        QMap<int, QMap<qint32, int>> localSupportByCorner;
+        for(int key : affectedCorners)
+        {
+            const int cornerX = key % (width + 1);
+            const int cornerY = key / (width + 1);
+            for(int offsetY = -1; offsetY <= 1; ++offsetY)
+            {
+                for(int offsetX = -1; offsetX <= 1; ++offsetX)
+                {
+                    const int sampleX = cornerX + offsetX;
+                    const int sampleY = cornerY + offsetY;
+                    if(sampleX < 0 || sampleX > width
+                       || sampleY < 0 || sampleY > height)
+                        continue;
+                    const int sampleKey = sampleY * (width + 1) + sampleX;
+                    const QMap<qint32, int>& sample = existingCornerCounts.value(sampleKey);
+                    for(auto material = sample.constBegin(); material != sample.constEnd(); ++material)
+                        localSupportByCorner[key][material.key()] += material.value();
+                }
+            }
+        }
+        const auto cornerAssignmentCost = [&](int key, qint32 candidate) {
+            if(fixedCorners.contains(key))
+                return 0;
+            int cost = candidate != preferredCorners.value(key, candidate);
+            if(!existingCornerMaterials.contains(key))
+                return cost;
+            const qint32 existing = existingCornerMaterials.value(key);
+            if(candidate == existing)
+                return cost;
+            const int preservationWeight = existing != materialId ? 8 : 2;
+            cost += preservationWeight;
+            cost += qMax(0, localSupportByCorner.value(key).value(existing)
+                             - localSupportByCorner.value(key).value(candidate));
+            return cost;
+        };
         bool constraintCandidateMissing = false;
         for(int index : affected)
         {
             const int x = index % width;
             const int y = index / width;
             const QVector<int> keys = cornerKeys(x, y);
-            const STerrainTransitionSignature preferred =
-                signatureAt(preferredCorners, x, y);
             QVector<STerrainTransitionSignature>& cellCandidates = candidates[index];
             for(const STerrainTransitionSignature& signature : authored)
             {
@@ -1766,29 +1800,15 @@ STerrainTileCommand CTerrainEditModel::makeSemanticTilePaint(
             std::sort(cellCandidates.begin(), cellCandidates.end(),
                 [&](const STerrainTransitionSignature& left,
                     const STerrainTransitionSignature& right) {
-                    const QVector<qint32> preferredValues = cornerValues(preferred);
                     const QVector<qint32> leftValues = cornerValues(left);
                     const QVector<qint32> rightValues = cornerValues(right);
                     int leftDifference = 0;
                     int rightDifference = 0;
                     for(int corner = 0; corner < 4; ++corner)
                     {
-                        leftDifference += leftValues.at(corner) != preferredValues.at(corner);
-                        rightDifference += rightValues.at(corner) != preferredValues.at(corner);
                         const int key = keys.at(corner);
-                        if(!fixedCorners.contains(key)
-                           && existingCornerMaterials.contains(key))
-                        {
-                            const qint32 existing = existingCornerMaterials.value(key);
-                            // Minority authored families carry substantially
-                            // more semantic weight than dominant background.
-                            const int preservationWeight =
-                                existing != materialId ? 8 : 2;
-                            leftDifference += preservationWeight
-                                * (leftValues.at(corner) != existing);
-                            rightDifference += preservationWeight
-                                * (rightValues.at(corner) != existing);
-                        }
+                        leftDifference += cornerAssignmentCost(key, leftValues.at(corner));
+                        rightDifference += cornerAssignmentCost(key, rightValues.at(corner));
                     }
                     if(leftDifference != rightDifference)
                         return leftDifference < rightDifference;
@@ -1812,11 +1832,22 @@ STerrainTileCommand CTerrainEditModel::makeSemanticTilePaint(
         int searchNodes = 0;
         const int searchLimit = 100000;
         command.semanticAudit.solverLimit = searchLimit;
-        std::function<bool()> solve = [&]() -> bool {
+        int bestScore = std::numeric_limits<int>::max();
+        QMap<int, qint32> bestAssignments;
+        std::function<void(int)> solve = [&](int score) {
             if(remaining.isEmpty())
-                return true;
+            {
+                if(score < bestScore)
+                {
+                    bestScore = score;
+                    bestAssignments = assignments;
+                }
+                return;
+            }
             if(++searchNodes > searchLimit)
-                return false;
+                return;
+            if(score >= bestScore)
+                return;
 
             int selectedCell = -1;
             QVector<STerrainTransitionSignature> selectedCandidates;
@@ -1843,7 +1874,7 @@ STerrainTileCommand CTerrainEditModel::makeSemanticTilePaint(
                         compatible.append(signature);
                 }
                 if(compatible.isEmpty())
-                    return false;
+                    return;
                 if(selectedCell < 0 || compatible.size() < selectedCandidates.size())
                 {
                     selectedCell = index;
@@ -1861,24 +1892,27 @@ STerrainTileCommand CTerrainEditModel::makeSemanticTilePaint(
             {
                 const QVector<qint32> values = cornerValues(signature);
                 QVector<int> inserted;
+                int addedCost = 0;
                 for(int corner = 0; corner < 4; ++corner)
                 {
                     if(!assignments.contains(keys.at(corner)))
                     {
                         assignments.insert(keys.at(corner), values.at(corner));
                         inserted.append(keys.at(corner));
+                        addedCost += cornerAssignmentCost(keys.at(corner),
+                                                          values.at(corner));
                     }
                 }
-                if(solve())
-                    return true;
+                solve(score + addedCost);
                 for(int key : inserted)
                     assignments.remove(key);
             }
             remaining.insert(selectedCell);
-            return false;
         };
 
-        const bool solved = !constraintCandidateMissing && solve();
+        if(!constraintCandidateMissing)
+            solve(0);
+        const bool solved = !bestAssignments.isEmpty();
         if(!solved)
         {
             command.semanticAudit.solverNodes = searchNodes;
@@ -1905,7 +1939,7 @@ STerrainTileCommand CTerrainEditModel::makeSemanticTilePaint(
         }
         else
         {
-            solvedCorners = assignments;
+            solvedCorners = bestAssignments;
             command.semanticAudit.solverNodes = searchNodes;
         }
     }
