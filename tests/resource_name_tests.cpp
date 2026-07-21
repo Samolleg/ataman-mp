@@ -22,7 +22,7 @@ private slots:
     void ignoresNonHumanoidDatabaseSkin();
     void resolvesLiveBaseDatabaseWhenProvided();
     void decodesSparsePnt3WithTrailingTransparency();
-    void decodesLargePnt3Run();
+    void preservesLargeZeroAlphaPnt3Literal();
     void rejectsNonAlignedPnt3Run();
     void rejectsOutOfBoundsPnt3Run();
     void rejectsUnalignedPnt3Payload();
@@ -204,16 +204,19 @@ void ResourceNameTests::rejectsOutOfBoundsPnt3Run()
     QVERIFY(decoded.isEmpty());
 }
 
-void ResourceNameTests::decodesLargePnt3Run()
+void ResourceNameTests::preservesLargeZeroAlphaPnt3Literal()
 {
     QByteArray compressed;
-    appendDword(compressed, 3245872); // real ID 203 plate run, above rejected heuristic
+    // Values above the shipped decoder's 1,000,000 threshold are literal
+    // BGRA pixels even when their high/alpha byte is zero. UnhumaPL_24 contains
+    // this pattern; interpreting it as a run makes the atlas exceed its bounds.
+    appendDword(compressed, 3245872);
     compressed.append("\x11\x22\x33\xff", 4);
     QByteArray decoded;
     QString diagnostic;
-    QVERIFY2(ei::decodePnt3(compressed, 3245876, &decoded, &diagnostic),
+    QVERIFY2(ei::decodePnt3(compressed, 8, &decoded, &diagnostic),
              qPrintable(diagnostic));
-    QCOMPARE(decoded.left(3245872), QByteArray(3245872, '\0'));
+    QCOMPARE(decoded.left(4), QByteArray("\x30\x87\x31\x00", 4));
     QCOMPARE(decoded.right(4), QByteArray("\x11\x22\x33\xff", 4));
 }
 
