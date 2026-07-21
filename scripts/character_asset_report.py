@@ -81,13 +81,64 @@ def parse_fig(data: bytes) -> dict[str, Any]:
     if morph_component_end > len(data):
         raise ValueError("FIG8 arrays are truncated")
     uvs = [struct.unpack_from("<2f", data, offset + i * 8) for i in range(uv_count)]
+    indices = list(struct.unpack_from(f"<{index_count}H", data, uv_end)) if index_count else []
+    components = [
+        struct.unpack_from("<3H", data, index_end + i * 6)
+        for i in range(component_count)
+    ]
+    triangle_index_count = index_count - index_count % 3
+    dangling_indices = indices[triangle_index_count:]
+    invalid_component_indices = sorted({index for index in indices if index >= component_count})
+    dangling_components = [
+        list(components[index]) if index < component_count else None
+        for index in dangling_indices
+    ]
+    component_limit_violations = []
+    vertex_count = vertex_blocks * 4
+    normal_count = normal_blocks * 4
+    for index, (vertex, normal, uv) in enumerate(components):
+        if vertex >= vertex_count or normal >= normal_count or uv >= uv_count:
+            component_limit_violations.append({
+                "component": index,
+                "vertex": vertex,
+                "normal": normal,
+                "uv": uv,
+            })
+    diagnostics = []
+    if dangling_indices:
+        diagnostics.append({
+            "code": "FIG_INDEX_TAIL_NOT_A_TRIANGLE",
+            "severity": "warning",
+            "message": (
+                f"{len(dangling_indices)} trailing index value(s) cannot form a triangle; "
+                "render/import policy must be explicit"
+            ),
+        })
+    if invalid_component_indices:
+        diagnostics.append({
+            "code": "FIG_INDEX_COMPONENT_OUT_OF_RANGE",
+            "severity": "error",
+            "indices": invalid_component_indices,
+        })
+    if component_limit_violations:
+        diagnostics.append({
+            "code": "FIG_COMPONENT_VALUE_OUT_OF_RANGE",
+            "severity": "error",
+            "count": len(component_limit_violations),
+        })
     return {
         "format": "FIG8",
         "vertex_blocks": vertex_blocks,
         "normal_blocks": normal_blocks,
         "uv_count": uv_count,
         "index_count": index_count,
+        "triangle_index_count": triangle_index_count,
+        "triangle_count": triangle_index_count // 3,
+        "dangling_indices": dangling_indices,
+        "dangling_components": dangling_components,
         "component_count": component_count,
+        "invalid_component_indices": invalid_component_indices,
+        "component_limit_violations": component_limit_violations,
         "morph_component_count": morph_component_count,
         "vertex_count_per_extreme": vertex_blocks * 4,
         "morph_extreme_count": 8,
@@ -96,6 +147,7 @@ def parse_fig(data: bytes) -> dict[str, Any]:
                        min(v for _, v in uvs), max(v for _, v in uvs)] if uvs else None),
         "parsed_bytes": morph_component_end,
         "trailing_bytes": len(data) - morph_component_end,
+        "diagnostics": diagnostics,
     }
 
 

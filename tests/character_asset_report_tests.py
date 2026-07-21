@@ -12,6 +12,22 @@ SPEC.loader.exec_module(MODULE)
 
 
 class CharacterAssetReportTests(unittest.TestCase):
+    def test_fig_reports_incomplete_triangle_tail(self):
+        header = (1, 1, 1, 4, 2, 0, 0, 0, 0)
+        data = b"FIG8" + struct.pack("<9I", *header)
+        data += bytes(3 * 8 * 3 * 4 + 8 * 4)
+        data += bytes(1 * 3 * 8 * 4 * 4)
+        data += bytes(1 * 4 * 4 * 4)
+        data += struct.pack("<2f", 0.25, 0.75)
+        data += struct.pack("<4H", 0, 1, 0, 1)
+        data += struct.pack("<6H", 0, 0, 0, 1, 1, 0)
+        parsed = MODULE.parse_fig(data)
+        self.assertEqual(parsed["triangle_index_count"], 3)
+        self.assertEqual(parsed["triangle_count"], 1)
+        self.assertEqual(parsed["dangling_indices"], [1])
+        self.assertEqual(parsed["dangling_components"], [[1, 1, 0]])
+        self.assertEqual(parsed["diagnostics"][0]["code"], "FIG_INDEX_TAIL_NOT_A_TRIANGLE")
+
     def test_lnk_tree_and_missing_parent(self):
         def text(value):
             raw = value.encode("ascii") + b"\0"

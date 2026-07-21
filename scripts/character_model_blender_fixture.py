@@ -6,7 +6,8 @@ Required environment variables:
   EI_FIXTURE_REPORT    JSON output outside the input tree
 
 Optional:
-  EI_FIXTURE_MODE      VANILLA or JABAIS_VOUX (used when the add-on exposes it)
+  EI_FIXTURE_PROFILE   BASE or JMV; deterministically selects the import mode
+  EI_FIXTURE_MODE      explicit VANILLA or JABAIS_VOUX override/provenance
   EI_FIXTURE_BLEND     save the imported inspection scene
   EI_FIXTURE_EXPORT    pre-created candidate RES; never the input path
 
@@ -21,6 +22,7 @@ import importlib
 import json
 import os
 from pathlib import Path
+import struct
 import traceback
 
 import bpy
@@ -50,8 +52,19 @@ def uv_bounds(mesh: bpy.types.Mesh) -> list[float] | None:
     return [min(us), max(us), min(vs), max(vs)]
 
 
+def packed_hash(format_code: str, rows: list[tuple[object, ...]]) -> str:
+    digest = hashlib.sha256()
+    packer = struct.Struct("<" + format_code)
+    for row in rows:
+        digest.update(packer.pack(*row))
+    return digest.hexdigest()
+
+
 def mesh_record(obj: bpy.types.Object) -> dict[str, object]:
     mesh = obj.data
+    if hasattr(mesh, "calc_normals_split"):
+        mesh.calc_normals_split()
+    loop_normals = [tuple(loop.normal) for loop in mesh.loops]
     record: dict[str, object] = {
         "name": obj.name,
         "parent": obj.parent.name if obj.parent else None,
@@ -60,17 +73,81 @@ def mesh_record(obj: bpy.types.Object) -> dict[str, object]:
         "rotation_quaternion": list(obj.rotation_quaternion),
         "scale": list(obj.scale),
         "vertices": len(mesh.vertices),
+        "vertex_position_sha256": packed_hash(
+            "fff", [tuple(vertex.co) for vertex in mesh.vertices]
+        ),
         "edges": len(mesh.edges),
         "polygons": len(mesh.polygons),
         "loops": len(mesh.loops),
+        "loop_vertex_index_sha256": packed_hash(
+            "I", [(loop.vertex_index,) for loop in mesh.loops]
+        ),
+        "loop_normal_sha256": packed_hash("fff", loop_normals),
+        "loop_normal_sample": [list(value) for value in loop_normals[:8]],
         "uv_layers": [layer.name for layer in mesh.uv_layers],
         "active_uv_bounds": uv_bounds(mesh),
         "materials": [slot.name if slot else None for slot in mesh.materials],
         "collections": sorted(collection.name for collection in obj.users_collection),
     }
+    active_uv = mesh.uv_layers.active
+    record["loop_uv_sha256"] = (
+        packed_hash("ff", [tuple(loop.uv) for loop in active_uv.data]) if active_uv else None
+    )
     if hasattr(obj, "imported_item_group"):
         record["imported_item_group"] = obj.imported_item_group
     return record
+
+
+def add_vector(value: object, delta: list[float]) -> list[float]:
+    if len(delta) != len(value):
+        raise RuntimeError(f"Delta length {len(delta)} does not match target length {len(value)}")
+    before = [float(component) for component in value]
+    for index, component in enumerate(delta):
+        value[index] += float(component)
+    return before
+
+
+def apply_edit_spec(path: Path) -> dict[str, object]:
+    spec = json.loads(path.read_text(encoding="utf-8"))
+    if spec.get("schema") != 1 or not isinstance(spec.get("operations"), list):
+        raise RuntimeError("Edit spec must have schema 1 and an operations array")
+    applied: list[dict[str, object]] = []
+    for operation in spec["operations"]:
+        kind = operation.get("type")
+        object_name = operation.get("object")
+        obj = bpy.data.objects.get(object_name)
+        if obj is None or obj.type != "MESH":
+            raise RuntimeError(f"Edit target is not a mesh object: {object_name}")
+        delta = operation.get("delta")
+        if not isinstance(delta, list):
+            raise RuntimeError(f"Edit operation requires a numeric delta: {operation}")
+        result: dict[str, object] = {"type": kind, "object": object_name, "delta": delta}
+        if kind == "vertex_delta":
+            index = int(operation["index"])
+            if index < 0 or index >= len(obj.data.vertices):
+                raise RuntimeError(f"Vertex index out of range for {object_name}: {index}")
+            target = obj.data.vertices[index].co
+            result.update({"index": index, "before": add_vector(target, delta), "after": list(target)})
+            obj.data.update()
+        elif kind == "uv_delta":
+            layer = obj.data.uv_layers.active
+            index = int(operation["index"])
+            if layer is None or index < 0 or index >= len(layer.data):
+                raise RuntimeError(f"UV loop index out of range for {object_name}: {index}")
+            target = layer.data[index].uv
+            result.update({"index": index, "before": add_vector(target, delta), "after": list(target)})
+            obj.data.update()
+        elif kind == "location_delta":
+            target = obj.location
+            result.update({"before": add_vector(target, delta), "after": list(target)})
+        else:
+            raise RuntimeError(f"Unsupported edit operation: {kind}")
+        applied.append(result)
+    return {
+        "path": str(path),
+        "sha256": sha256(path),
+        "operations": applied,
+    }
 
 
 source_res = required_path("EI_FIXTURE_RES")
@@ -78,7 +155,22 @@ report_path = required_path("EI_FIXTURE_REPORT")
 model_name = os.environ.get("EI_FIXTURE_MODEL")
 if not model_name:
     raise RuntimeError("EI_FIXTURE_MODEL is required")
-mode = os.environ.get("EI_FIXTURE_MODE", "VANILLA")
+source_profile = os.environ.get("EI_FIXTURE_PROFILE")
+if source_profile is not None:
+    source_profile = source_profile.upper()
+if source_profile not in {None, "BASE", "JMV"}:
+    raise RuntimeError(f"Unsupported EI_FIXTURE_PROFILE: {source_profile}")
+explicit_mode = os.environ.get("EI_FIXTURE_MODE")
+if explicit_mode not in {None, "VANILLA", "JABAIS_VOUX"}:
+    raise RuntimeError(f"Unsupported EI_FIXTURE_MODE: {explicit_mode}")
+profile_mode = {"BASE": "VANILLA", "JMV": "JABAIS_VOUX"}.get(source_profile)
+if explicit_mode and profile_mode and explicit_mode != profile_mode:
+    raise RuntimeError(
+        f"EI_FIXTURE_PROFILE={source_profile} requires {profile_mode}, not {explicit_mode}"
+    )
+mode = explicit_mode or profile_mode
+if mode is None:
+    raise RuntimeError("Set EI_FIXTURE_PROFILE to BASE/JMV or set EI_FIXTURE_MODE explicitly")
 if mode not in {"VANILLA", "JABAIS_VOUX"}:
     raise RuntimeError(f"Unsupported EI_FIXTURE_MODE: {mode}")
 if not source_res.is_file():
@@ -93,6 +185,7 @@ report: dict[str, object] = {
         "sha256": sha256(source_res),
         "size": source_res.stat().st_size,
         "model": model_name,
+        "source_profile": source_profile,
         "mode": mode,
     },
     "blender": {"version": bpy.app.version_string, "version_tuple": list(bpy.app.version)},
@@ -128,6 +221,17 @@ try:
     }
     if "FINISHED" not in result or not meshes:
         raise RuntimeError(f"Model import did not produce meshes: {sorted(result)}")
+
+    edit_value = os.environ.get("EI_FIXTURE_EDIT")
+    if edit_value:
+        edit_path = Path(edit_value).resolve()
+        if not edit_path.is_file():
+            raise RuntimeError(f"EI_FIXTURE_EDIT does not exist: {edit_path}")
+        report["edit"] = apply_edit_spec(edit_path)
+        report["edited_meshes"] = sorted(
+            (mesh_record(obj) for obj in bpy.data.objects if obj.type == "MESH"),
+            key=lambda item: item["name"],
+        )
 
     blend_value = os.environ.get("EI_FIXTURE_BLEND")
     if blend_value:

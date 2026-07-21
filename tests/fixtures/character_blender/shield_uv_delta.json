@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "operations": [
+    {
+      "type": "uv_delta",
+      "object": "weapon",
+      "index": 0,
+      "delta": [0.0009765625, 0.0]
+    }
+  ]
+}

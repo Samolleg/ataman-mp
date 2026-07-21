@@ -36,6 +36,16 @@ def numeric_diff(left: object, right: object) -> dict[str, object]:
     equal = np.array_equal(a, b)
     mismatch = np.count_nonzero(a != b)
     result.update({"equal": bool(equal), "mismatch_count": int(mismatch)})
+    if mismatch:
+        samples = []
+        for coordinate in np.argwhere(a != b)[:8]:
+            key = tuple(int(value) for value in coordinate)
+            samples.append({
+                "index": list(key),
+                "left": a[key].item(),
+                "right": b[key].item(),
+            })
+        result["mismatch_samples"] = samples
     if a.size and np.issubdtype(a.dtype, np.number) and np.issubdtype(b.dtype, np.number):
         result["max_abs_delta"] = float(np.max(np.abs(a.astype(np.float64) - b.astype(np.float64))))
     else:
@@ -72,8 +82,11 @@ left_raw, left = read(left_path)
 right_raw, right = read(right_path)
 
 
-def expanded_corners(parsed):
-    components = np.asarray(parsed.v_c)[np.asarray(parsed.indicies)]
+def expanded_corners(parsed, complete_triangles_only=False):
+    indices = np.asarray(parsed.indicies)
+    if complete_triangles_only:
+        indices = indices[: len(indices) - len(indices) % 3]
+    components = np.asarray(parsed.v_c)[indices]
     vertex_indices = components[:, 0]
     normal_indices = components[:, 1]
     uv_indices = components[:, 2]
@@ -87,6 +100,8 @@ def expanded_corners(parsed):
 
 left_corners = expanded_corners(left)
 right_corners = expanded_corners(right)
+left_drawable = expanded_corners(left, complete_triangles_only=True)
+right_drawable = expanded_corners(right, complete_triangles_only=True)
 fields = {
     "header": numeric_diff(left.header.get_array(), right.header.get_array()),
     "center": numeric_diff(left.center, right.center),
@@ -103,6 +118,16 @@ fields = {
     "corner_positions": numeric_diff(left_corners["positions"], right_corners["positions"]),
     "corner_normals": numeric_diff(left_corners["normals"], right_corners["normals"]),
     "corner_uv": numeric_diff(left_corners["uv"], right_corners["uv"]),
+    "drawable_corner_vertex_indices": numeric_diff(
+        left_drawable["vertex_indices"], right_drawable["vertex_indices"]
+    ),
+    "drawable_corner_positions": numeric_diff(
+        left_drawable["positions"], right_drawable["positions"]
+    ),
+    "drawable_corner_normals": numeric_diff(
+        left_drawable["normals"], right_drawable["normals"]
+    ),
+    "drawable_corner_uv": numeric_diff(left_drawable["uv"], right_drawable["uv"]),
 }
 semantic_fields = (
     "header",
@@ -117,6 +142,17 @@ semantic_fields = (
     "corner_uv",
 )
 semantic_equal = all(fields[name]["equal"] for name in semantic_fields)
+drawable_semantic_fields = (
+    "center",
+    "fmin",
+    "fmax",
+    "radius",
+    "drawable_corner_vertex_indices",
+    "drawable_corner_positions",
+    "drawable_corner_normals",
+    "drawable_corner_uv",
+)
+drawable_semantic_equal = all(fields[name]["equal"] for name in drawable_semantic_fields)
 report = {
     "schema": 1,
     "status": "ok",
@@ -126,6 +162,13 @@ report = {
     "right": {"res": str(right_path), "size": len(right_raw), "sha256": digest(right_raw)},
     "byte_equal": left_raw == right_raw,
     "semantic_equal": semantic_equal,
+    "drawable_semantic_equal": drawable_semantic_equal,
+    "index_tail": {
+        "left": np.asarray(left.indicies)[len(left.indicies) - len(left.indicies) % 3:].tolist()
+        if len(left.indicies) % 3 else [],
+        "right": np.asarray(right.indicies)[len(right.indicies) - len(right.indicies) % 3:].tolist()
+        if len(right.indicies) % 3 else [],
+    },
     "fields": fields,
 }
 report_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")

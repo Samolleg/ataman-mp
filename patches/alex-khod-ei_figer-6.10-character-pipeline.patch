@@ -1,10 +1,25 @@
+diff --git a/figure.py b/figure.py
+index cfdecb2..dbd9e1c 100644
+--- a/figure.py
++++ b/figure.py
+@@ -197,6 +197,8 @@ class CFigure(object):
+         n_normal4_blocks = header.normal_count
+-        n_normals = n_normal4_blocks * 4
+-        # useless for mesh creation, but may need to be validated
+-        normal_data = parser.read('%uf' % (n_normals * 4))
+-        self.normals = np.array(normal_data).reshape(n_normals, 4)
++        n_normals = n_normal4_blocks * 4
++        normal_data = parser.read('%uf' % (n_normals * 4))
++        # Disk blocks are XXXX, YYYY, ZZZZ, WWW for four normals.
++        self.normals = np.array(normal_data).reshape(
++            n_normal4_blocks, 4, 4
++        ).transpose(0, 2, 1).reshape(n_normals, 4)
+         # TEXTURE COORDS
 diff --git a/scene_utils.py b/scene_utils.py
-index d1e502e..f559d28 100644
+index d1e502e..2d8836e 100644
 --- a/scene_utils.py
 +++ b/scene_utils.py
-@@ -47,16 +47,25 @@ class TemporaryContext:
-     def __init__(self, temp_ui):
-         self.temp_ui = temp_ui
+@@ -49,6 +49,14 @@ class TemporaryContext:
          self.prev_ui = None
 +        self.area = None
  
@@ -21,28 +36,29 @@ index d1e502e..f559d28 100644
 +            self.area.ui_type = self.temp_ui
 +        return self
  
-     def __exit__(self, exc_type, exc_value, tb):
-         if exc_type is not None:
-             import traceback
+@@ -58,3 +66,4 @@ class TemporaryContext:
              traceback.print_exception(exc_type, exc_value, tb)
 -        bpy.context.area.ui_type = self.prev_ui
 +        if self.area is not None and self.prev_ui is not None:
 +            self.area.ui_type = self.prev_ui
  
+@@ -511,2 +520,5 @@ def create_mesh_2(figure: CFigure, model_group: CItemGroup):
+     n_indices = figure.header[3] - figure.header[3] % 3
++    if n_indices != figure.header[3]:
++        print('ignoring %d trailing non-triangle FIG indices in %s' %
++              (figure.header[3] - n_indices, figure.name))
  
- def profile(func):
-@@ -895,7 +904,7 @@ class ModelExporter:
-         figure.fmin.append(tuple(min_m))
-         figure.fmax.append(tuple(max_m))
+@@ -531,3 +543,3 @@ def create_mesh_2(figure: CFigure, model_group: CItemGroup):
+     uvs = mesh_uvs[uv_indices]
+-    assert len(uvs) == figure.header[3]
++    assert len(uvs) == n_indices
+     uvs_flat = uvs.flatten()
+@@ -897,3 +909,3 @@ class ModelExporter:
          # RADIUS
 -        figure.radius.append((((max_m - min_m) ** 2).sum() ** 1 / 2) / 2)
 +        figure.radius.append(np.sqrt(((max_m - min_m) ** 2).sum()) / 2)
          # CENTER
-         figure.center.append(mulVector(sumVector(min_m, max_m), 0.5))
- 
-@@ -943,7 +952,11 @@ class ModelExporter:
-                 morph_mesh.vertices.foreach_get('co', vertices)
-                 vertices.shape = (n_vertex, 3)
+@@ -945,3 +957,7 @@ class ModelExporter:
                  morph_components = len(vertices)
 -                ModelExporter.calculate_figure_bounds_np(figure, vertices, export_group)
 +                # Bounds historically follow the mesh-name group, independently
@@ -51,5 +67,8 @@ index d1e502e..f559d28 100644
 +                # "weapon" and therefore uses centered world-object bounds.
 +                ModelExporter.calculate_figure_bounds_np(figure, vertices, mesh_group)
                  vertices_aligned_4 = ModelExporter.align_length_by_4_np(vertices)
-                 figure.verts[i] = vertices_aligned_4
-                 if i > 0:
+@@ -1854,2 +1870,2 @@ def animation_from_res(collection_dst: str, res_file: ResFile, model_name: str,
+     insert_animation(collection_dst, animations)
+-    bpy.context.scene.frame_set(0)
+\ No newline at end of file
++    bpy.context.scene.frame_set(0)

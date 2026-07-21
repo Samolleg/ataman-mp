@@ -1,0 +1,260 @@
+diff --git a/figure.py b/figure.py
+index a8b7bdf..41be3ea 100644
+--- a/figure.py
++++ b/figure.py
+@@ -98,9 +98,13 @@ class CFigure(object):
+                 for i in range(self.morph_count):
+                     self.verts[i].append(tuple(block[cur_block][i][0:3]))
+         del block
+-        # NORMALS
+-        for i in range(self.header[1]*4): #normal count * block_size(4)
+-            self.normals.append(parser.read('ffff'))
++        # NORMALS: each block stores XXXX, YYYY, ZZZZ, WWW for four normals.
++        for _ in range(self.header[1]):
++            block = [[0.0, 0.0, 0.0, 0.0] for _ in range(4)]
++            for xyzw in range(4):
++                for point in range(4):
++                    block[point][xyzw] = parser.read('f')
++            self.normals.extend(tuple(normal) for normal in block)
+         # TEXTURE COORDS
+         for _ in range(self.header[2]):
+             t_coord = parser.read('ff')
+@@ -111,8 +115,10 @@ class CFigure(object):
+             self.indicies.append(parser.read('h'))
+         # VERTICES COMPONENTS
+         for _ in range(self.header[4]):
+-            parser.read('h') #TODO: fix missing data here (vert index)
+-            self.v_c.append(parser.read('hh'))
++            # FIG8 stores independent vertex, normal and texture-coordinate
++            # indices.  Older ei_figer releases discarded the first value and
++            # later duplicated the remaining vertex/normal value on export.
++            self.v_c.append(parser.read('hhh'))
+         # MORHING COMPONENTS
+         for _ in range(self.header[5]):
+             self.m_c.append(parser.read('hh'))
+@@ -176,8 +182,7 @@ class CFigure(object):
+             raw_data += pack('h', ind)
+         # vertex components
+         for vec in self.v_c:
+-            raw_data += pack('h', vec[0]) #TODO: save real data instead copy of 0 element
+-            raw_data += pack('hh', vec[0], vec[1])
++            raw_data += pack('hhh', vec[0], vec[1], vec[2])
+         # morphing components
+         for vec in self.m_c:
+             raw_data += pack('%sh' % len(vec), *vec)
+@@ -220,9 +225,13 @@ class CFigure(object):
+                     for i in range(self.morph_count):
+                         self.verts[i].append(tuple(block[cur_block][i][0:3]))
+             del block
+-            # NORMALS
+-            for i in range(self.header[1]*4): #normal count * block_size(4)
+-                self.normals.append(read_xyzw(fig_file))
++            # NORMALS: each block stores XXXX, YYYY, ZZZZ, WWW.
++            for _ in range(self.header[1]):
++                block = [[0.0, 0.0, 0.0, 0.0] for _ in range(4)]
++                for xyzw in range(4):
++                    for point in range(4):
++                        block[point][xyzw] = unpack('f', fig_file.read(4))[0]
++                self.normals.extend(tuple(normal) for normal in block)
+             # TEXTURE COORDS
+             for _ in range(self.header[2]):
+                 t_coord = read_xy(fig_file)
+@@ -233,8 +242,7 @@ class CFigure(object):
+                 self.indicies.append(read_x(fig_file))
+             # VERTICES COMPONENTS
+             for _ in range(self.header[4]):
+-                fig_file.read(2) #TODO: fix missing data here (vert index)
+-                self.v_c.append(read_xy(fig_file, 'short'))
++                self.v_c.append(tuple(unpack('hhh', fig_file.read(6))))
+             # MORHING COMPONENTS
+             for _ in range(self.header[5]):
+                 self.m_c.append(read_xy(fig_file, 'short'))
+@@ -287,8 +295,7 @@ class CFigure(object):
+                 fig_file.write(pack('h', self.indicies[i]))
+             # vertex components
+             for i in range(self.header[4]):
+-                fig_file.write(pack('h', self.v_c[i][0])) #TODO: save real data instead copy of 0 element
+-                write_xy(fig_file, self.v_c[i], 'h')
++                fig_file.write(pack('hhh', *self.v_c[i]))
+             # morphing components
+             for i in range(self.header[5]):
+                 write_xy(fig_file, self.m_c[i], 'h')
+@@ -308,4 +315,4 @@ class CFigure(object):
+     def generate_m_c(self):
+         self.m_c = []
+         for i in range(self.header[5]):
+-            self.m_c.append(tuple([i, i]))
+\ No newline at end of file
++            self.m_c.append(tuple([i, i]))
+diff --git a/scene_utils.py b/scene_utils.py
+index a4391b4..9bc6822 100644
+--- a/scene_utils.py
++++ b/scene_utils.py
+@@ -19,6 +19,7 @@ from math import sqrt
+ from mathutils import Quaternion
+ import copy as cp
+ import collections
++import json
+ 
+ from . utils import subVector, sumVector, CItemGroupContainer, mulVector, sumVector
+ from . bone import CBone
+@@ -213,8 +214,17 @@ def create_mesh_2(figure:CFigure):
+     active_model : CModel = bpy.context.scene.model
+     faces = []
+     ftemp = [0, 0, 0]
+-    face_indices_count = figure.header[3] - 2
+-    for i in range(0, face_indices_count, 3):
++    # Some shipped EI/JMV FIG8 members contain one or two valid component
++    # indices after the last complete triangle.  They are not drawable as a
++    # GL/D3D triangle and Blender cannot create loops for them.  Preserve the
++    # source FIG in the staged input, but expose only complete triangles in the
++    # editable mesh.  Export consequently performs the explicit repair by
++    # omitting the undrawable tail.
++    triangle_index_count = figure.header[3] - figure.header[3] % 3
++    if triangle_index_count != figure.header[3]:
++        print('ignoring %d trailing non-triangle FIG indices in %s' %
++              (figure.header[3] - triangle_index_count, figure.name))
++    for i in range(0, triangle_index_count, 3):
+         for ind in range(3):
+             ftemp[ind] = figure.v_c[figure.indicies[i + ind]][0]
+         faces.append([ftemp[0], ftemp[1], ftemp[2]])
+@@ -239,10 +249,25 @@ def create_mesh_2(figure:CFigure):
+         
+         #TODO: create material
+         base_mesh.uv_layers.new(name=bpy.context.scene.model.name)
+-        for uv_ind in range(figure.header[3]):
++        for uv_ind in range(triangle_index_count):
+             for xy in range(2):
+                 base_mesh.uv_layers[0].data[uv_ind].uv[xy] = \
+-                        figure.t_coords[figure.v_c[figure.indicies[uv_ind]][1]][xy]
++                        figure.t_coords[figure.v_c[figure.indicies[uv_ind]][2]][xy]
++        loop_normals = []
++        for loop_index in range(triangle_index_count):
++            component = figure.v_c[figure.indicies[loop_index]]
++            loop_normals.append(figure.normals[component[1]][0:3])
++        for polygon in base_mesh.polygons:
++            polygon.use_smooth = True
++        if hasattr(base_mesh, 'use_auto_smooth'):
++            base_mesh.use_auto_smooth = True
++        base_mesh.normals_split_custom_set(loop_normals)
++        normal_index_attribute = base_mesh.attributes.new(
++            'ei_fig_normal_index', type='INT', domain='CORNER')
++        for loop_index in range(triangle_index_count):
++            component = figure.v_c[figure.indicies[loop_index]]
++            normal_index_attribute.data[loop_index].value = component[1]
++        base_mesh['ei_fig_normal_table_json'] = json.dumps(figure.normals)
+         base_mesh.update()
+ 
+ def set_pos_2(bone : CBone):
+@@ -516,7 +541,6 @@ def collect_mesh():
+             morph_mesh : bpy.types.Mesh = collections[i].objects[model().morph_comp[i] + obj.name].data
+ 
+             count_vert = 0
+-            count_norm = 0
+             v_restore = 0
+             ind_count = 0
+             duplicate_vert = 0
+@@ -524,7 +548,7 @@ def collect_mesh():
+             min_m = [0, 0, 0]
+             max_m = [0, 0, 0]
+ 
+-            # VERTICES & NORMALS
++            # VERTICES
+             for mvert in morph_mesh.vertices:
+                 same_flag = False
+                 #collect duplicate vertices
+@@ -538,11 +562,6 @@ def collect_mesh():
+                     # vertices
+                     figure.verts[i].append(tuple(mvert.co))
+                     count_vert += 1
+-                    # normals
+-                    if i == 0:
+-                        figure.normals.append(tuple([mvert.normal[0], mvert.normal[1],
+-                                mvert.normal[2], 1.0]))
+-                        count_norm += 1
+                     # MIN & MAX PREPARE
+                     if mvert.index == 0:
+                         min_m = copy.copy(mvert.co)
+@@ -579,12 +598,6 @@ def collect_mesh():
+             
+             if i == 0: # ONLY FOR BASE OBJECT
+                 figure.header[0] = int(count_vert / 4)
+-                if len(figure.normals) % 4 != 0:
+-                    for _ in range(4 - len(figure.normals) % 4):
+-                        figure.normals.append(
+-                            copy.copy(figure.normals[count_norm - 1]))
+-                        count_norm += 1
+-                figure.header[1] = int(len(figure.normals) / 4)
+                 ind_ar = []
+                 for mpoly in morph_mesh.polygons:
+                     # INDICES PREPARE
+@@ -612,32 +625,40 @@ def collect_mesh():
+                     for uv_ind2 in figure.t_coords:
+                         if uv_ind1 == uv_ind2:
+                             new_uv_ind.append(figure.t_coords.index(uv_ind2))
++                # FIG8 normals are indexed per corner, independently from
++                # vertices.  Preserve Blender split/custom normals rather than
++                # collapsing every normal index to its vertex index.
++                stored_normal_indices = morph_mesh.attributes.get('ei_fig_normal_index')
++                stored_normal_table = morph_mesh.get('ei_fig_normal_table_json')
++                normal_indices = []
++                if (stored_normal_indices is not None and stored_normal_table is not None and
++                        len(stored_normal_indices.data) == len(ind_ar)):
++                    figure.normals = [tuple(normal) for normal in json.loads(stored_normal_table)]
++                    normal_indices = [item.value for item in stored_normal_indices.data]
++                else:
++                    morph_mesh.calc_normals_split()
++                    for loop in morph_mesh.loops:
++                        normal = tuple([loop.normal[0], loop.normal[1], loop.normal[2], 1.0])
++                        if normal not in figure.normals:
++                            figure.normals.append(normal)
++                        normal_indices.append(figure.normals.index(normal))
++                real_normal_count = len(figure.normals)
++                if real_normal_count == 0:
++                    raise RuntimeError('mesh has no loop normals: ' + obj.name)
++                while len(figure.normals) % 4 != 0:
++                    figure.normals.append(copy.copy(figure.normals[real_normal_count - 1]))
++                figure.header[1] = int(len(figure.normals) / 4)
+                 # VERTEX COMPONENTS
+                 for n_i in range(len(ind_ar)):
+-                    uv_ind = [ind_ar[n_i], new_uv_ind[n_i]]
+-                    if uv_ind not in figure.v_c:
+-                        figure.v_c.append(copy.copy(uv_ind))
+-                #>>>>>TODO use other sort instead bubble sort
+-                for _ in range(len(figure.v_c)):
+-                    for buble in range(len(figure.v_c) - 1):
+-                        if figure.v_c[buble][0] > figure.v_c[buble + 1][0]:
+-                            swap_pts = copy.copy(figure.v_c[buble + 1])
+-                            figure.v_c[buble + 1] = copy.copy(figure.v_c[buble])
+-                            figure.v_c[buble] = copy.copy(swap_pts)
+-                        elif figure.v_c[buble][0] == figure.v_c[buble + 1][0]:
+-                            if figure.v_c[buble][1] > figure.v_c[buble + 1][1]:
+-                                swap_pts = copy.copy(figure.v_c[buble + 1])
+-                                figure.v_c[buble + 1] = copy.copy(figure.v_c[buble])
+-                                figure.v_c[buble] = copy.copy(swap_pts)
++                    component = [ind_ar[n_i], normal_indices[n_i], new_uv_ind[n_i]]
++                    if component not in figure.v_c:
++                        figure.v_c.append(copy.copy(component))
++                figure.v_c.sort()
+                 figure.header[4] = len(figure.v_c)
+                 # INDICIES
+-                #>>>>>TODO refactore?!
+                 for mix in range(len(ind_ar)):
+-                    for mix1 in range(len(figure.v_c)):
+-                        if (ind_ar[mix] == figure.v_c[mix1][0]) and\
+-                                (new_uv_ind[mix] == figure.v_c[mix1][1]):
+-                            figure.indicies.append(mix1)
+-                            break
++                    component = [ind_ar[mix], normal_indices[mix], new_uv_ind[mix]]
++                    figure.indicies.append(figure.v_c.index(component))
+ 
+                 figure.header[2] = len(figure.t_coords)
+                 figure.header[3] = ind_count
+@@ -778,4 +799,4 @@ def auto_fix_scene():
+         triangulate(obj)
+ 
+     # copy empty components
+-    pass
+\ No newline at end of file
++    pass
+
