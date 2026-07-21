@@ -60,6 +60,9 @@ public:
 
     static QString testRunsRootPath();
     static QString generationSavesPath(const QString& runRoot, quint64 generation);
+    static qint64 runtimeGameProcessId(bool usesRuntimeHost,
+                                       const QString& gamePidPath,
+                                       qint64 transportProcessId);
     static QJsonObject buildAuthoritativeResult(const QJsonObject& manifest,
                                                 const QString& bridgeResult,
                                                 int exitCode,
@@ -112,6 +115,7 @@ private:
     bool writeManifest(const QString& state, QString* error = nullptr);
     void appendRunLog(const QString& message);
     QString bridgeResultSummary() const;
+    qint64 runtimeGameProcessId() const;
     quint64 latestRuntimeStateSequence() const;
     void focusGameWindow(bool maximize);
 

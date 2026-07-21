@@ -557,6 +557,19 @@ QString CJmvMapTestLauncher::generationSavesPath(const QString& runRoot,
     return saveGenerationPath(runRoot, generation);
 }
 
+qint64 CJmvMapTestLauncher::runtimeGameProcessId(bool usesRuntimeHost,
+                                                 const QString& gamePidPath,
+                                                 qint64 transportProcessId)
+{
+    return usesRuntimeHost ? readOwnedGamePid(gamePidPath) : transportProcessId;
+}
+
+qint64 CJmvMapTestLauncher::runtimeGameProcessId() const
+{
+    return runtimeGameProcessId(m_usesRuntimeHost, m_gamePidPath,
+                                m_process->processId());
+}
+
 QJsonObject CJmvMapTestLauncher::buildAuthoritativeResult(
     const QJsonObject& manifest, const QString& bridgeResult, int exitCode,
     int exitStatus, bool stopRequested, const QString& cleanupMessage)
@@ -857,8 +870,7 @@ bool CJmvMapTestLauncher::isHotReloadReady() const
     quint32 threadId = 0;
     if(file.open(QIODevice::ReadOnly | QIODevice::Text))
         threadId = file.readAll().trimmed().toULong(&ok);
-    const qint64 gamePid = m_usesRuntimeHost ? readOwnedGamePid(m_gamePidPath)
-                                             : m_process->processId();
+    const qint64 gamePid = runtimeGameProcessId();
     return ok && threadId != 0 && gamePid > 0
         && threadBelongsToProcess(threadId, quint32(gamePid));
 }
@@ -1838,8 +1850,10 @@ bool CJmvMapTestLauncher::hotReload(const SJmvMapTestLaunchInput& input,
     if(threadFile.open(QIODevice::ReadOnly | QIODevice::Text))
         threadId = threadFile.readAll().trimmed().toULong(&threadOk);
 #ifdef Q_OS_WIN
+    const qint64 gamePid = runtimeGameProcessId();
     const bool ownsThread = threadOk && threadId != 0
-        && threadBelongsToProcess(threadId, quint32(m_process->processId()));
+        && gamePid > 0
+        && threadBelongsToProcess(threadId, quint32(gamePid));
     constexpr UINT kHotReloadMessage = WM_APP + 0x45E;
     if(!ownsThread || !PostThreadMessageW(DWORD(threadId), kHotReloadMessage, 0, 0))
     {
@@ -1980,8 +1994,7 @@ void CJmvMapTestLauncher::focusGameWindow(bool maximize)
 #ifdef Q_OS_WIN
     if(!isRunning())
         return;
-    const qint64 ownedPid = m_usesRuntimeHost ? readOwnedGamePid(m_gamePidPath)
-                                             : m_process->processId();
+    const qint64 ownedPid = runtimeGameProcessId();
     if(ownedPid <= 0)
     {
         appendRunLog("Owned game PID is not available for focus yet");

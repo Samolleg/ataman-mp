@@ -298,7 +298,11 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
 
 - **Current tester build:** `0.2.1-alpha.27`; its JMV owned-injector startup
   regression is under investigation and it is not a release candidate.
-- **Current test candidate:** `0.2.1-alpha.28`, retaining the approved
+- **Current test candidate:** `0.2.1-alpha.29`. Alpha.29 fixes hosted JMV hot
+  reload dispatch: readiness already resolved the bridge thread against the
+  owned `game.exe`, but dispatch incorrectly compared that thread with the
+  separate injector-host PID. Runtime process identity now has one shared
+  resolver and a regression test. Alpha.28 retained the approved
   alpha.24 character/render pipeline while reverting the unfinished environment,
   weather, sky, and shadow prototype. Game & Mod Setup treats any effective
   resource-root change like a profile switch: dirty documents are offered for
@@ -312,6 +316,11 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
   prepares path isolation before resume but defers engine detours until observed
   executable patch activity becomes quiescent; no addon/ASI hash becomes a
   manifest dependency.
+  Alpha.28 dual-install evidence shows the selected executable and virtualized
+  registry roots are correct, but cross-install stale-path redirection does not
+  reliably replace all Starter/JMV state. Treat multiple independent Starter
+  roots as unsupported pending a product decision; the proposed 0.2.x behavior
+  is a non-destructive preflight warning instead of broader runtime hooks.
   Alpha.26 retained the alpha.24 render and
   autosave baseline while hardening validation navigation and the NVIDIA test
   overlay. JMV direct-launch compatibility now depends only on the exact

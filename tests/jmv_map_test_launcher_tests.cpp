@@ -21,6 +21,7 @@ private slots:
     void injectsActualAutorunRuntimeBootstrap();
     void exposesTestRunsQuickAccessPath();
     void createsGenerationScopedSavePaths();
+    void resolvesHostedGamePidForHotReload();
     void preparesOwnedGodmodeAutoexec();
     void preservesExistingAutoexecForRecovery();
     void recoveryRemovesAutoexecCreatedByEndurance();
@@ -111,6 +112,21 @@ void JmvMapTestLauncherTests::createsGenerationScopedSavePaths()
     QVERIFY(QDir::fromNativeSeparators(initial).endsWith("generations/000000/saves"));
     QVERIFY(QDir::fromNativeSeparators(reload).endsWith("generations/000017/saves"));
     QVERIFY(initial != reload);
+}
+
+void JmvMapTestLauncherTests::resolvesHostedGamePidForHotReload()
+{
+    QTemporaryDir temporary;
+    QVERIFY(temporary.isValid());
+    const QString pidPath = QDir(temporary.path()).filePath("game.pid");
+    writeFile(pidPath, "424242\n");
+
+    QCOMPARE(CJmvMapTestLauncher::runtimeGameProcessId(true, pidPath, 111111),
+             qint64(424242));
+    QCOMPARE(CJmvMapTestLauncher::runtimeGameProcessId(false, pidPath, 111111),
+             qint64(111111));
+    QCOMPARE(CJmvMapTestLauncher::runtimeGameProcessId(true,
+             QDir(temporary.path()).filePath("missing.pid"), 111111), qint64(0));
 }
 
 static QJsonObject resultManifest(const QString& runRoot, const QString& sourcePath)
