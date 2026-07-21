@@ -253,11 +253,18 @@ test build:
 1. Recheck `zone1` IDs 203, 205, and 221 first. Their plate and leggings atlas
    placement is the locked control for the exact PNT3 decoder; no later model
    selection or upper-armor fix may change those results.
-2. Recheck `autozone4hadagans` ID 1000017 and `bz14h` ID 1000295968. JMV TTI 24
-   leggings can contribute the exact `bd.armor24` waist/shorts member in
-   addition to their hip and leg group. This overlap must not let leggings
-   claim `hd.armor24`, arm, forearm, or hand members that merely share the same
-   numeric suffix. Helmet, face, plate, and glove controls must remain intact.
+2. Recheck `autozone4hadagans` ID 1000017 and `bz14h` ID 1000295968. In the
+   shipped `unhufe` ANHUM link table, `l_shell.armor24` and
+   `r_shell.armor24` are children of `ll1.armor24` and `rl1.armor24`; these are
+   the additional shorts panels. Include same-suffix descendants only through
+   those authored parent links. Do not claim `hd.armor24`, arm, forearm, or
+   hand members merely because they share TTI 24. Helmet, face, plate, and
+   glove controls must remain intact.
+   The same linked shell convention is present across all audited JMV standard
+   wearable assemblies (`unhuma`, `unhufe`, `unorma`, `unorfe`, `unhusk`,
+   `unhuzm`, and `unhuzf`) for TTI 01/02/03/16/23/24, plus TTI 06 where that
+   family supplies it; descendant inclusion must therefore remain hierarchy-
+   driven rather than model- or item-specific.
 3. Recheck `autozone18dun1` ID 1000009 and `bz13h` IDs 4 and 14. These ordinary
    non-imported Monster rows select the standard male `unhuma` assembly and
    shipped `unhumaskin_47/48` atlases. A stale embedded `unhufe` MOB assembly

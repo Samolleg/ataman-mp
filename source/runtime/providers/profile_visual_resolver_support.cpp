@@ -308,11 +308,7 @@ QStringList armorSlots(const QString& type, bool jmv)
     if(jmv && normalized == "plate")
         parts << armorPartMap.value("shirt") << armorPartMap.value("gloves");
     else if(jmv && normalized == "leggings")
-        // Some JMV leggings include a waist/shorts shell named bd.armorNN in
-        // addition to their hip and leg members. This is a deliberate overlap
-        // with the body slot; it does not authorize leggings to claim head or
-        // arm members that happen to share the same numeric armor suffix.
-        parts << "bd" << armorPartMap.value("pants") << armorPartMap.value("boots");
+        parts << armorPartMap.value("pants") << armorPartMap.value("boots");
     return parts;
 }
 
@@ -488,6 +484,36 @@ QStringList appendArmorComponents(const ei::SItemDatabaseRecord& item,
                 continue;
             placeholders->append(expected);
             diagnostics->append("Selected model assembly has no component " + expected);
+        }
+    }
+    // Some authored armor components have additional geometry linked beneath
+    // them. For unhufe TTI 24, l_shell.armor24 and r_shell.armor24 are children
+    // of ll1.armor24 and rl1.armor24 and form the visible shorts panels. Follow
+    // only the actual ANHUM parent chain and only for the same armor suffix;
+    // this cannot pull in unrelated head/arm components sharing TTI 24.
+    if(jmv && upperArmor && item.textureType1 > 0
+            && !request.assemblyParents.isEmpty() && !matched.isEmpty())
+    {
+        QSet<QString> selected;
+        for(const QString& component : matched)
+            selected.insert(component.toLower());
+        bool added = true;
+        while(added)
+        {
+            added = false;
+            for(auto link = request.assemblyParents.constBegin();
+                link != request.assemblyParents.constEnd(); ++link)
+            {
+                const QString child = link.key().toLower();
+                const QString parent = link.value().toLower();
+                if(selected.contains(child) || !child.endsWith(suffix, Qt::CaseInsensitive)
+                        || !selected.contains(parent))
+                    continue;
+                components->append(child);
+                matched.append(child);
+                selected.insert(child);
+                added = true;
+            }
         }
     }
     return matched;

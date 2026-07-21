@@ -105,6 +105,10 @@ struct SEquipmentLayoutRequest
     QStringList perks;
     QString model;
     QStringList assemblyParts;
+    // Lower-case child -> parent links from the selected ANHUM assembly.
+    // Providers use these to include authored equipment sub-meshes without
+    // inferring ownership from a shared numeric armor suffix.
+    QMap<QString, QString> assemblyParents;
     EUnitVisualDataSource dataSource{EUnitVisualDataSource::ProfileDatabase};
 };
 

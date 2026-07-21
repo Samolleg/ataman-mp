@@ -105,7 +105,7 @@ private slots:
     void jmvExplicitMaterialSuffixCanCrossGameplayMaterialFamilies();
     void jmvWearOrderControlsUpperArmorComposition();
     void jmvTopArmorWinsAvailableLowerLayerOverlaps();
-    void jmvLeggingsIncludeBodyOverlapWithoutClaimingArmsOrHead();
+    void jmvLeggingsIncludeLinkedShellsWithoutClaimingArmsOrHead();
     void jmvMissingTopOverlapRetainsLowerArmor();
     void jmvMissingExactTopPartsAreNotSynthesized();
     void baseArmorKeepsDisjointSlots();
@@ -572,7 +572,7 @@ void ProfileVisualProviderTests::jmvTopArmorWinsAvailableLowerLayerOverlaps()
         "unhumapl_08.le.0.x4.mmp", "unhumalg_09.le.0.x4.mmp"}));
 }
 
-void ProfileVisualProviderTests::jmvLeggingsIncludeBodyOverlapWithoutClaimingArmsOrHead()
+void ProfileVisualProviderTests::jmvLeggingsIncludeLinkedShellsWithoutClaimingArmsOrHead()
 {
     auto db = database();
     ei::SItemDatabaseRecord leggings = item("female suite leggings", "armor", 2, 24);
@@ -584,20 +584,28 @@ void ProfileVisualProviderTests::jmvLeggingsIncludeBodyOverlapWithoutClaimingArm
     request.model = "unhufe";
     request.armor << "female suite leggings.leather";
     request.assemblyParts << "bd" << "hp" << "hd" << "lh1" << "rh1"
-                          << "ll1" << "rl1" << "bd.armor24" << "hd.armor24"
+                          << "ll1" << "rl1" << "hd.armor24"
                           << "lh1.armor24" << "rh1.armor24"
-                          << "ll1.armor24" << "rl1.armor24";
+                          << "ll1.armor24" << "rl1.armor24"
+                          << "l_shell.armor24" << "r_shell.armor24";
+    request.assemblyParents.insert("hd.armor24", "hd");
+    request.assemblyParents.insert("lh1.armor24", "lh1");
+    request.assemblyParents.insert("rh1.armor24", "rh1");
+    request.assemblyParents.insert("ll1.armor24", "ll1");
+    request.assemblyParents.insert("rl1.armor24", "rl1");
+    request.assemblyParents.insert("l_shell.armor24", "ll1.armor24");
+    request.assemblyParents.insert("r_shell.armor24", "rl1.armor24");
     QJsonObject output;
     QVERIFY(resolver->resolve(request, &output).success);
     const QStringList components = jsonStrings(output, "components");
-    QVERIFY(components.contains("bd.armor24"));
     QVERIFY(components.contains("ll1.armor24"));
     QVERIFY(components.contains("rl1.armor24"));
+    QVERIFY(components.contains("l_shell.armor24"));
+    QVERIFY(components.contains("r_shell.armor24"));
     QVERIFY(!components.contains("hd.armor24"));
     QVERIFY(!components.contains("lh1.armor24"));
     QVERIFY(!components.contains("rh1.armor24"));
     const QStringList replaced = jsonStrings(output, "replacedParts");
-    QVERIFY(replaced.contains("bd"));
     QVERIFY(replaced.contains("ll1"));
     QVERIFY(replaced.contains("rl1"));
 }

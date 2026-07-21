@@ -274,6 +274,13 @@ void CUnit::refreshTransientVisual()
     equipmentRequest.prototype = m_prototypeName;
     equipmentRequest.model = model;
     equipmentRequest.assemblyParts = assemblyParts;
+    if(ei::CFigure* assemblyFigure = CObjectList::getInstance()->getFigure(model))
+    {
+        QMap<QString, QVector3D> ignoredRestOffsets;
+        QVector3D hierarchyComplexion = m_complection;
+        assemblyFigure->getAssemblyHierarchy(equipmentRequest.assemblyParents,
+                                              ignoredRestOffsets, hierarchyComplexion);
+    }
     equipmentRequest.dataSource = appearanceRequest.dataSource;
     equipmentRequest.armor = m_bImport ? m_aArmor
         : (databaseEquipmentPlan ? jsonStringList(appearance, "armor") : QStringList());
