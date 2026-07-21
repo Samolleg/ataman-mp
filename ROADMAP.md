@@ -5,7 +5,7 @@ work is ordered from the newest planned minor line to the oldest completed one.
 An item is checked only after its implementation has landed and received the
 stated validation. Completed code should carry a commit, test, or release link.
 
-Current development line: `0.2.1-alpha.23` focused closed testing.
+Current development line: `0.2.1-alpha.24` focused closed testing.
 
 <details open>
 <summary><strong>General wishlist — not assigned to a release</strong></summary>
@@ -273,9 +273,13 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
 
 ### Current 0.2.x status
 
-- **Current tester build:** `0.2.1-alpha.23`, adding explicit autosave rescheduling,
-  timer telemetry, Autosave Now, and Open Backup Folder after alpha.22 persisted
-  the cadence but failed to reschedule the running session. Alpha.22 fixed the General-settings
+- **Current tester build:** `0.2.1-alpha.24`, integrating the render pipeline
+  through [`191ac85`](https://github.com/Ilufus/ei-mapper-endurance/commit/191ac85e1990d9f7eddfef7d7cdef1a29aa67930)
+  and delivering the verified live autosave-cadence signal
+  ([`269c807`](https://github.com/Ilufus/ei-mapper-endurance/commit/269c80759a334174eca26eec7022524ffff4ea64)).
+  Alpha.23 added explicit autosave scheduling telemetry, Autosave Now, and Open
+  Backup Folder, but tester logs proved that changing the cadence still required
+  a restart. Alpha.22 fixed the General-settings
   registration that left alpha.21's visible autosave controls disconnected
   from persistence and prevented its timer from starting. Alpha.21 completed the remaining
   release-facing editor priorities: exact duplicate-MOB detection, guarded
