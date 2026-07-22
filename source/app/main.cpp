@@ -568,6 +568,7 @@ int runHeadlessCommand(QApplication& app)
         componentText->setText("6.25");
         QGuiApplication::clipboard()->setMimeData(componentText);
         bool componentContextShowsOnlyComponent = false;
+        bool componentContextGestureKeepsTableClear = false;
         if(yComponentPlate)
         {
             QTimer::singleShot(0, [&componentContextShowsOnlyComponent,
@@ -589,6 +590,15 @@ int runHeadlessCommand(QApplication& app)
                     }
                 menu->close();
             });
+            QMouseEvent contextPress(QEvent::MouseButtonPress, QPointF(2, 2),
+                                     Qt::RightButton, Qt::RightButton, Qt::NoModifier);
+            QApplication::sendEvent(yComponentPlate, &contextPress);
+            QMouseEvent contextRelease(QEvent::MouseButtonRelease, QPointF(2, 2),
+                                       Qt::RightButton, Qt::NoButton, Qt::NoModifier);
+            QApplication::sendEvent(yComponentPlate, &contextRelease);
+            componentContextGestureKeepsTableClear = contextPress.isAccepted()
+                    && contextRelease.isAccepted()
+                    && vectorComponentTable.selectedItems().isEmpty();
             QContextMenuEvent pasteYContext(QContextMenuEvent::Mouse, QPoint(2, 2),
                                              yComponentPlate->mapToGlobal(QPoint(2, 2)));
             QApplication::sendEvent(yComponentPlate, &pasteYContext);
@@ -598,8 +608,8 @@ int runHeadlessCommand(QApplication& app)
                 && changedY->type() == eObjParam_POSITION_Y
                 && qAbs(changedY->value() - 6.25f) < 0.0001f;
         const bool componentContextPreservesSelection = xComponentPlate
-                && yComponentPlate && yComponentPlate->isChecked()
-                && !xComponentPlate->isChecked()
+                && xComponentPlate->isChecked()
+                && yComponentPlate && !yComponentPlate->isChecked()
                 && vectorComponentTable.selectedItems().isEmpty();
 
         QSharedPointer<IPropertyBase> partialValue(new propStr(eObjParam_COMMENTS, "abcdef"));
@@ -795,6 +805,7 @@ int runHeadlessCommand(QApplication& app)
                 && numericComponentPaste && individualComponentSelection
                 && selectedComponentCopy && componentPlatePaste && componentContextPaste
                 && componentContextPreservesSelection && componentContextShowsOnlyComponent
+                && componentContextGestureKeepsTableClear
                 && lockedNumericPasteBlocked
                 && partialCopyExact && partialPasteExact && partialPasteCommit
                 && propertyScrollPreserved
@@ -834,7 +845,9 @@ int runHeadlessCommand(QApplication& app)
                << " componentPlatePaste=" << componentPlatePaste
                << " componentContextPaste=" << componentContextPaste
                << " componentContextPreservesSelection=" << componentContextPreservesSelection
-               << " componentContextShowsOnlyComponent=" << componentContextShowsOnlyComponent << "\n"
+               << " componentContextShowsOnlyComponent=" << componentContextShowsOnlyComponent
+               << " componentContextGestureKeepsTableClear="
+               << componentContextGestureKeepsTableClear << "\n"
                << " lockedNumericPasteBlocked=" << lockedNumericPasteBlocked << "\n"
                << " partialCopyExact=" << partialCopyExact
                << " partialPasteExact=" << partialPasteExact

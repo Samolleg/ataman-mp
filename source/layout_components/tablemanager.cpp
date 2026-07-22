@@ -168,11 +168,24 @@ protected:
     {
         if(event->button() == Qt::RightButton)
         {
-            // Prevent QTableWidget from painting the containing Vector3 cell
-            // as selected while it routes the context-menu gesture.
-            selectComponent();
+            prepareContextSelection();
+            event->accept();
+            return;
         }
         QToolButton::mousePressEvent(event);
+    }
+
+    void mouseReleaseEvent(QMouseEvent* event) override
+    {
+        if(event->button() == Qt::RightButton)
+        {
+            // QToolButton ignores a right release and QTableWidget would then
+            // briefly select the containing Vector3 cell. Consume the whole
+            // gesture; QContextMenuEvent is delivered independently.
+            event->accept();
+            return;
+        }
+        QToolButton::mouseReleaseEvent(event);
     }
 
     void keyPressEvent(QKeyEvent* event) override
@@ -194,9 +207,7 @@ protected:
 
     void contextMenuEvent(QContextMenuEvent* event) override
     {
-        // The clicked X/Y/Z plate—not its containing Vector3 field—remains
-        // selected for as long as this component menu is open.
-        selectComponent();
+        prepareContextSelection();
         QMenu menu(this);
         QAction* copy = menu.addAction(QObject::tr("Copy value"));
         QAction* paste = menu.addAction(QObject::tr("Paste value"));
@@ -211,14 +222,21 @@ protected:
         QObject::connect(paste, &QAction::triggered, this,
                          [this]() { pasteValue(); });
         menu.exec(event->globalPos());
+        restoreContextSelection();
         event->accept();
     }
 
 private:
-    void selectComponent()
+    QList<CVectorComponentPlate*> siblingPlates() const
     {
-        setChecked(true);
-        setFocus(Qt::MouseFocusReason);
+        return parentWidget()
+                ? parentWidget()->findChildren<CVectorComponentPlate*>(
+                      QString(), Qt::FindDirectChildrenOnly)
+                : QList<CVectorComponentPlate*>();
+    }
+
+    void clearParentTableSelection()
+    {
         QWidget* ancestor = parentWidget();
         while(ancestor && !qobject_cast<QTableWidget*>(ancestor))
             ancestor = ancestor->parentWidget();
@@ -228,6 +246,46 @@ private:
             table->clearSelection();
             table->setCurrentItem(nullptr);
         }
+    }
+
+    void prepareContextSelection()
+    {
+        if(!m_contextSelectionPrepared)
+        {
+            m_previousCheckedPlate = nullptr;
+            for(CVectorComponentPlate* plate : siblingPlates())
+                if(plate->isChecked())
+                {
+                    m_previousCheckedPlate = plate;
+                    break;
+                }
+            m_contextSelectionPrepared = true;
+        }
+        setChecked(true);
+        clearParentTableSelection();
+    }
+
+    void restoreContextSelection()
+    {
+        if(!m_contextSelectionPrepared)
+            return;
+        const QList<CVectorComponentPlate*> plates = siblingPlates();
+        for(CVectorComponentPlate* plate : plates)
+            plate->setAutoExclusive(false);
+        for(CVectorComponentPlate* plate : plates)
+            plate->setChecked(plate == m_previousCheckedPlate);
+        for(CVectorComponentPlate* plate : plates)
+            plate->setAutoExclusive(true);
+        m_previousCheckedPlate = nullptr;
+        m_contextSelectionPrepared = false;
+        clearParentTableSelection();
+    }
+
+    void selectComponent()
+    {
+        setChecked(true);
+        setFocus(Qt::MouseFocusReason);
+        clearParentTableSelection();
     }
 
     bool canPaste(QSharedPointer<IPropertyBase>* value) const
@@ -283,6 +341,8 @@ private:
 
     QSharedPointer<IPropertyBase> m_property;
     ApplyValue m_applyValue;
+    CVectorComponentPlate* m_previousCheckedPlate{nullptr};
+    bool m_contextSelectionPrepared{false};
 };
 
 bool clipboardMatches(EObjParam destination)

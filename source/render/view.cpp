@@ -128,23 +128,13 @@ CView::~CView()
     ei::setCrashContext("shutdown/view-gpu-timer");
     if(m_gpuTimer)
     {
-        QOpenGLContext* current = QOpenGLContext::currentContext();
-        if(current && current->surface())
-        {
-            m_gpuTimer->destroy();
-            delete m_gpuTimer;
-        }
-        else
-        {
-            // Some window-system shutdown paths destroy the QGLWidget surface
-            // before MainWindow explicitly deletes the view. Qt's timer-query
-            // destructor dereferences the absent current surface in that state.
-            // Detach this one process-lifetime diagnostic object rather than
-            // crashing while the application is already terminating.
-            ei::log(eLogWarning,
-                    "GPU timer query retained at shutdown because its OpenGL surface is unavailable");
-            m_gpuTimer->setParent(nullptr);
-        }
+        // QOpenGLContext::surface() may still be non-null after the underlying
+        // Windows surface has become unusable. Calling destroy() or the query
+        // destructor during final widget teardown can then crash in Qt5Gui.
+        // This is one diagnostic object at process exit; detach it and let the
+        // driver release it with the context instead of racing the dead surface.
+        ei::log(eLogInfo, "GPU timer query retained for process-exit context cleanup");
+        m_gpuTimer->setParent(nullptr);
         m_gpuTimer = nullptr;
         m_gpuTimerPending = false;
     }
