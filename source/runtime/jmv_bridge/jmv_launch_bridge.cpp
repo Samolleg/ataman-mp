@@ -1742,11 +1742,30 @@ bool QueueDirectLaunchOnCurrentThread()
         return false;
     }
     g_gameThreadId = GetCurrentThreadId();
+    // This is a thread-local hook in the process that owns the target thread.
+    // Windows documents a null module handle for that case. Older builds used
+    // the bridge HMODULE and usually succeeded, but it can be rejected on an
+    // otherwise valid launch. Retain the old form only as a compatibility
+    // fallback and record both errors if neither route is accepted.
+    SetLastError(ERROR_SUCCESS);
     g_directLaunchHook = SetWindowsHookExW(WH_GETMESSAGE, &DirectLaunchMessageHook,
-                                           g_instance, g_gameThreadId);
+                                           nullptr, g_gameThreadId);
+    const DWORD localHookError = g_directLaunchHook ? ERROR_SUCCESS : GetLastError();
+    DWORD moduleHookError = ERROR_SUCCESS;
     if(!g_directLaunchHook)
     {
-        Log(L"DIRECT_LAUNCH failed: could not install the game-thread message hook");
+        SetLastError(ERROR_SUCCESS);
+        g_directLaunchHook = SetWindowsHookExW(WH_GETMESSAGE, &DirectLaunchMessageHook,
+                                               g_instance, g_gameThreadId);
+        moduleHookError = g_directLaunchHook ? ERROR_SUCCESS : GetLastError();
+    }
+    if(!g_directLaunchHook)
+    {
+        wchar_t failure[384]{};
+        _snwprintf_s(failure, sizeof(failure) / sizeof(failure[0]), _TRUNCATE,
+                     L"DIRECT_LAUNCH failed: could not install the game-thread message hook local_error=%lu module_error=%lu thread=%lu",
+                     localHookError, moduleHookError, g_gameThreadId);
+        Log(failure);
         InterlockedExchange(&g_directLaunchState, -1);
         return false;
     }
@@ -1761,8 +1780,8 @@ bool QueueDirectLaunchOnCurrentThread()
     }
     wchar_t message[256]{};
     _snwprintf_s(message, sizeof(message) / sizeof(message[0]), _TRUNCATE,
-                 L"DIRECT_LAUNCH queued thread=%lu after normal main-menu load",
-                 g_gameThreadId);
+                 L"DIRECT_LAUNCH queued thread=%lu after normal main-menu load hook_module=%s",
+                 g_gameThreadId, localHookError == ERROR_SUCCESS ? L"process-local" : L"bridge-fallback");
     Log(message);
     return true;
 }

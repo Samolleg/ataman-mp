@@ -23,13 +23,17 @@ The executable selected by the active profile is:
 - Base EI: `<game root>/game.exe`;
 - JMV: `<game root>/Starter/Engine/game.exe`.
 
-For JMV, the selected editor profile's mod root is authoritative even when the
-Starter UI was last left on another installed mod. Endurance supplies that mod
-as the owned game process's `AddonPath`, causing Starter's runtime addon to read
-the selected mod's `config.reg` and resource stack. The persisted
-`starter.config` `ModSel` value and the user's global `AddonPath` are recorded
-for diagnostics but are not modified. Runtime logs must show
-`STARTER_ROOT_OVERRIDE value="AddonPath"` for the process-scoped selection.
+For JMV, the selected Endurance profile and Starter's persisted `AddonPath`
+must identify the same mod directory. Starter loads and caches part of its mod
+configuration before the run-local Endurance bridge can reliably virtualize
+every consumer. Endurance therefore checks the persisted selection before
+staging and refuses a mismatched launch with both paths shown. Select the
+intended mod in Starter and launch it once before retrying.
+
+The run-local bridge still virtualizes later `AddonPath` reads inside the owned
+game process, but this is defence in depth rather than a replacement for
+preflight. Endurance does not modify `starter.config` or the user's global
+registry selection.
 
 The runtime host creates that executable suspended, loads a run-local copy of
 the bridge into the process it owns, calls `EnduranceInitialize` outside

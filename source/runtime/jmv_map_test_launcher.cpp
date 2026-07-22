@@ -1404,6 +1404,27 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
             QSettings::NativeFormat);
         starterRegistryAddonPath = starterRegistry.value("AddonPath").toString();
 #endif
+        const QString selectedModRoot = normalized(input.profile.modRoot);
+        const QString persistedModRoot = starterRegistryAddonPath.isEmpty()
+            ? QString() : normalized(starterRegistryAddonPath);
+        if(persistedModRoot.isEmpty()
+           || persistedModRoot.compare(selectedModRoot, Qt::CaseInsensitive) != 0)
+        {
+            if(error)
+            {
+                *error = QString(
+                    "Starter is not currently configured for the selected Endurance mod.\n\n"
+                    "Selected profile mod:\n%1\n\n"
+                    "Starter AddonPath:\n%2\n\n"
+                    "Select the intended mod in Starter and launch it once, then retry Test Current Map. "
+                    "Endurance will not start with a different cached mod because that can mix incompatible resources.")
+                    .arg(QDir::toNativeSeparators(selectedModRoot),
+                         starterRegistryAddonPath.isEmpty()
+                             ? QString("<not configured>")
+                             : QDir::toNativeSeparators(persistedModRoot));
+            }
+            return false;
+        }
     }
     if(isBase)
     {
