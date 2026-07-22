@@ -69,5 +69,10 @@ owned runtime host calls `EnduranceInitialize` directly. Initialization
 failures are written to `runtime-host.log`; the suspended game is terminated
 without being resumed.
 
+The complete user-facing dependency contract, including the conditional
+`AutoRunSpellAddon123.mob` requirement for Play from Here, Godmode, and explicit
+supplemental MOB loading, is documented in
+[`docs/TEST_CURRENT_MAP_DEPENDENCIES.md`](../../../docs/TEST_CURRENT_MAP_DEPENDENCIES.md).
+
 Build with `build-x86.cmd` from an x86 Visual Studio 2022 environment. Generated
 binary/PDB files under `bin/` are local build artifacts.
