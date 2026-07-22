@@ -919,6 +919,16 @@ MainWindow::MainWindow(QWidget* parent) :
     QObject::connect(m_pView, SIGNAL(showOutlinerSignal(bool)), this, SLOT(showOutliner(bool)));
     connect(m_pView, &CView::selectionChanged,
             this, &MainWindow::updateUnitTexturePreview);
+    connect(m_pView, &CView::selectionChanged, this, [this]()
+    {
+        if(m_customSpawnSelected && !m_pView->selectionSnapshot().isEmpty())
+        {
+            m_customSpawnSelected = false;
+            m_pView->setTestSpawnMarkerSelected(false);
+            updateOperationAvailability();
+        }
+        updateOutlinerSelectionPath();
+    });
 
 
 //    m_ui->progressBar->setValue(0);
@@ -1448,9 +1458,12 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event)
             if(mouse->button() == Qt::LeftButton)
             {
                 const bool hit = m_pView->testSpawnMarkerAt(mouse->pos());
+                if(hit)
+                    m_pView->clearObjectSelection();
                 m_customSpawnSelected = hit;
                 m_pView->setTestSpawnMarkerSelected(hit);
                 updateOperationAvailability();
+                updateOutlinerSelectionPath();
                 if(hit)
                 {
                     m_suppressSpawnRelease = true;
@@ -1525,6 +1538,7 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event)
                 m_customSpawnContextKey = currentMapContextKey();
                 m_pickSpawnPending = false;
                 m_movingCustomSpawn = false;
+                m_pView->clearObjectSelection();
                 m_customSpawnSelected = true;
                 m_suppressSpawnRelease = true;
                 if(m_playFromHereButton && !m_playFromHereButton->isChecked())
@@ -1543,6 +1557,7 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event)
                 updateEntranceOverlays();
                 updateOperationAvailability();
                 updateMapTestAction();
+                updateOutlinerSelectionPath();
                 return true;
             }
         }
@@ -1740,6 +1755,7 @@ void MainWindow::refreshMapTestContext()
     }
     if(m_spawnPositionLabel)
         m_spawnPositionLabel->setText(tr("Entrance spawn"));
+    updateOutlinerSelectionPath();
 
     QVector<QString> resources;
     QVector<QString> maps;
@@ -1834,6 +1850,7 @@ void MainWindow::setCustomSpawnPicking(bool enabled)
         updateEntranceOverlays();
         updateOperationAvailability();
         updateMapTestAction();
+        updateOutlinerSelectionPath();
         return;
     }
     if(!selectedTravelZone())
@@ -3661,6 +3678,43 @@ void MainWindow::updateOutlinerSelectionPath()
 {
     if(!m_outlinerSelectionPath || !m_ui || !m_ui->treeWidget)
         return;
+
+    const bool customSelected = m_customSpawnSelected && m_customSpawn.valid
+        && m_customSpawn.custom
+        && m_customSpawnContextKey == currentMapContextKey();
+    if(customSelected)
+    {
+        const QString coordinates = tr("Play from Here — X: %1  Y: %2  Z: %3")
+            .arg(m_customSpawnPosition.x(), 0, 'f', 2)
+            .arg(m_customSpawnPosition.y(), 0, 'f', 2)
+            .arg(m_customSpawnPosition.z(), 0, 'f', 2);
+        m_outlinerSelectionPath->setStyleSheet(
+            "QLabel { background: #29424a; color: white; padding: 5px 7px; "
+            "border-left: 3px solid #32c8e6; }");
+        m_outlinerSelectionPath->setText(coordinates);
+        m_outlinerSelectionPath->setToolTip(coordinates);
+        m_outlinerSelectionPath->show();
+        return;
+    }
+
+    const QList<CNode*> selectedNodes = m_pView
+        ? m_pView->selectionSnapshot() : QList<CNode*>();
+    if(selectedNodes.size() > 1)
+    {
+        bool includesLockedObject = false;
+        for(CNode* node : selectedNodes)
+            if(CMob* owner = m_pView->ownerMob(node))
+                includesLockedObject = includesLockedObject
+                    || owner != m_pView->currentMob();
+        const QString summary = tr("%1 objects selected").arg(selectedNodes.size());
+        m_outlinerSelectionPath->setStyleSheet(includesLockedObject
+            ? "QLabel { background: #5c400c; color: white; padding: 5px 7px; border-left: 3px solid #ff8c1a; }"
+            : "QLabel { background: #29424a; color: white; padding: 5px 7px; border-left: 3px solid #32c8e6; }");
+        m_outlinerSelectionPath->setText(summary);
+        m_outlinerSelectionPath->setToolTip(summary);
+        m_outlinerSelectionPath->show();
+        return;
+    }
     QTreeWidgetItem* item = m_ui->treeWidget->currentItem();
     if(!item || !item->parent())
     {
