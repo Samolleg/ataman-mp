@@ -104,7 +104,8 @@ public:
     void attach(CSettings* pSettings, QTableWidget* pParam, QUndoStack* pStack, CProgressView* pProgress, QLineEdit* pMouseCoord, CTreeView* pTree, CTileForm* pTileForm);
     void attachLandscapeTools(CLandscapeTools* tools);
     void activateLandscapeTilePainting();
-    void prepareLandscapeTilePainting();
+    void prepareLandscapeTilePainting(bool showTools = true);
+    void toggleLandscapeTilePainting();
     void setLandscapeEditingEnabled(bool enabled);
     void setTileGridVisible(bool visible) { m_tileGridVisible = visible; update(); }
     CSettings* settings() {Q_ASSERT(m_pSettings); return m_pSettings;}
@@ -261,6 +262,7 @@ signals:
     void updateMainWindowTitle(eTitleTypeData, QString);
     void showOutlinerSignal(bool bShow);
     void showLandscapeToolsSignal();
+    void toggleLandscapeToolsSignal();
     void mobScriptChanged(CMob* mob, const QString& displayScript);
     void externalMobScriptImported(CMob* mob, const QString& displayScript);
     void selectionStateChanged(bool hasSelection);

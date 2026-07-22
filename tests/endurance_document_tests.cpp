@@ -1911,6 +1911,20 @@ void EnduranceDocumentTests::terrainTilePaintingIsUndoableLocalizedAndNamespaceS
     QVERIFY(staleTileReport.hasErrors());
 
     point.centerX = 1.0f;
+    // Active overlay records may currently reference a land-family atlas slot.
+    // A combined authored catalog must be able to decode that pre-state and
+    // replace it with an overlay family without requiring land-family paint
+    // selection to be enabled in the UI.
+    const STerrainTileCommand semanticOverlay = terrain.makeSemanticTilePaint(
+        point, ETerrainTileLayer::Overlay, 2, semanticCatalog,
+        0x4F564552u);
+    QVERIFY(!semanticOverlay.isEmpty());
+    QVERIFY(std::any_of(semanticOverlay.deltas.constBegin(),
+                        semanticOverlay.deltas.constEnd(),
+                        [](const STerrainTileDelta& delta) {
+        return delta.globalX == 1 && delta.globalY == 0;
+    }));
+
     const STerrainTileCommand overlay = terrain.makeTilePaint(
         point, ETerrainTileLayer::Overlay, 0, 1, 1);
     QCOMPARE(overlay.deltas.size(), 1);

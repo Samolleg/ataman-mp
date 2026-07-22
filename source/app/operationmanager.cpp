@@ -78,7 +78,7 @@ void CSelect::keyPress(COperation *pOp, EKeyCode key)
     }
     case eKey_B:
     {
-        m_pView->prepareLandscapeTilePainting();
+        m_pView->toggleLandscapeTilePainting();
         pOp->setCurrent(new CTileBrush(m_pView));
         delete this;
         break;
@@ -1074,7 +1074,7 @@ void CTileBrush::keyPress(COperation* pOp, EKeyCode key)
     }
     case eKey_B:
     {
-        m_pView->prepareLandscapeTilePainting();
+        m_pView->toggleLandscapeTilePainting();
         break;
     }
     case eKey_1 ... eKey_8:

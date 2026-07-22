@@ -699,6 +699,13 @@ MainWindow::MainWindow(QWidget* parent) :
         m_landscapeToolsDock->show();
         m_landscapeToolsDock->raise();
     });
+    connect(m_pView, &CView::toggleLandscapeToolsSignal, this, [this]()
+    {
+        const bool show = !m_landscapeToolsDock->isVisible();
+        m_landscapeToolsDock->setVisible(show);
+        if(show)
+            m_landscapeToolsDock->raise();
+    });
 
 
 //    m_ui->progressBar->setValue(0);

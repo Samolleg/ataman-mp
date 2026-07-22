@@ -253,11 +253,12 @@ void CView::activateLandscapeTilePainting()
     changeOperation(EButtonOpTilebrush);
 }
 
-void CView::prepareLandscapeTilePainting()
+void CView::prepareLandscapeTilePainting(bool showTools)
 {
     if(!m_landscapeTools)
         return;
-    emit showLandscapeToolsSignal();
+    if(showTools)
+        emit showLandscapeToolsSignal();
     if(m_landscapeTools->editMode() != ELandscapeEditMode::TilePaint)
         clearLandscapeBrushSelection();
     m_landscapeTools->activateMode(ELandscapeEditMode::TilePaint, false);
@@ -270,6 +271,11 @@ void CView::setLandscapeEditingEnabled(bool enabled)
 {
     if(m_landscapeTools)
         m_landscapeTools->setEditingEnabled(enabled, false);
+    if(!enabled)
+    {
+        m_terrainPaintOutlineValid = false;
+        update();
+    }
 }
 
 void CView::syncLandscapeToolState()
@@ -321,6 +327,12 @@ void CView::clearLandscapeBrushSelection()
     setPreviewTile(false);
     m_terrainPaintOutlineValid = false;
     unsetCursor();
+}
+
+void CView::toggleLandscapeTilePainting()
+{
+    prepareLandscapeTilePainting(false);
+    emit toggleLandscapeToolsSignal();
 }
 
 void CView::updateReadState(EReadState state)
@@ -534,7 +546,8 @@ void CView::paintGL()
 
 void CView::drawTestOverlaysOpenGl()
 {
-    if((m_testEntranceRectangles.isEmpty() && !m_testSpawnMarkerValid)
+    if((m_testEntranceRectangles.isEmpty() && !m_testSpawnMarkerValid
+        && !m_terrainPaintOutlineValid)
        || width() <= 0 || height() <= 0)
         return;
 
@@ -599,6 +612,8 @@ void CView::drawTestOverlaysOpenGl()
         glLineWidth(selected ? 3.0f : 1.0f);
         glDrawArrays(GL_LINE_LOOP, 0, vertices.size());
     }
+
+    drawTerrainPaintOutline(&m_program);
 
     if(m_testEntranceLabelTexturesDirty)
     {
@@ -766,9 +781,6 @@ void CView::draw()
         glDepthFunc(GL_LESS);
         m_landProgram.setUniformValue("u_solidColorEnabled", false);
     }
-
-    if(m_pLand && m_pLand->isMprLoad())
-        drawTerrainPaintOutline(&m_landProgram);
 
     // Bind shader pipeline for use
     if (!m_program.bind())
@@ -1295,6 +1307,9 @@ void CView::updateTileForm(bool bGenerateNewTable)
 void CView::drawTerrainPaintOutline(QOpenGLShaderProgram* program)
 {
     if(!m_terrainPaintOutlineValid || !m_landscapeTools
+       || !m_pLand || !m_pLand->isMprLoad()
+       || !m_landscapeTools->editingEnabled()
+       || m_landscapeTools->editMode() == ELandscapeEditMode::Sculpt
        || m_landscapeTools->manualTileSelectionEnabled())
         return;
     const int radius = qMax(0, int(qRound(m_landscapeTools->paintRadius())));
@@ -1339,20 +1354,16 @@ void CView::drawTerrainPaintOutline(QOpenGLShaderProgram* program)
     }
     if(lines.isEmpty())
         return;
-    QMatrix4x4 identity;
-    program->setUniformValue("u_modelMmatrix", identity);
-    program->setUniformValue("u_solidColorEnabled", true);
-    program->setUniformValue("u_solidColor", QVector4D(1.0f, 0.72f, 0.08f, 1.0f));
     const int position = program->attributeLocation("a_position");
-    program->enableAttributeArray(position);
+    if(position < 0)
+        return;
+    program->setUniformValue("customColor", QVector4D(1.0f, 0.72f, 0.08f, 0.95f));
     program->setAttributeArray(position, lines.constData());
     glDepthFunc(GL_LEQUAL);
     glLineWidth(2.0f);
     glDrawArrays(GL_LINES, 0, lines.size());
     glLineWidth(1.0f);
     glDepthFunc(GL_LESS);
-    program->disableAttributeArray(position);
-    program->setUniformValue("u_solidColorEnabled", false);
 }
 
 void CView::rebuildTerrainAutoCatalog()
@@ -2482,7 +2493,6 @@ void CView::pickTile(QVector3D posOnLand, bool bLand)
         const ETerrainTileLayer layer = bLand
             ? ETerrainTileLayer::Land : ETerrainTileLayer::Overlay;
         const CTerrainTransitionCatalog& catalog = !bLand
-                && m_landscapeTools->landFamiliesAllowedInOverlay()
             ? m_terrainAtlasAnalysis.overlayCatalogWithLandFamilies()
             : m_terrainAtlasAnalysis.catalog(layer);
         const STerrainTransitionSignature signature = found
@@ -2524,8 +2534,11 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
     CValidationReport report;
     const ETerrainTileLayer layer = bLand
         ? ETerrainTileLayer::Land : ETerrainTileLayer::Overlay;
-    const CTerrainTransitionCatalog& paintCatalog = !bLand
+    const CTerrainTransitionCatalog& manualCatalog = !bLand
             && m_landscapeTools->landFamiliesAllowedInOverlay()
+        ? m_terrainAtlasAnalysis.overlayCatalogWithLandFamilies()
+        : m_terrainAtlasAnalysis.catalog(layer);
+    const CTerrainTransitionCatalog& semanticCatalog = !bLand
         ? m_terrainAtlasAnalysis.overlayCatalogWithLandFamilies()
         : m_terrainAtlasAnalysis.catalog(layer);
     const bool manual = m_landscapeTools->manualTileSelectionEnabled();
@@ -2546,7 +2559,7 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
         selected.tileIndex = quint8(selectedIndex % 64);
         selected.rotation = quint8(selectedRotation & 3);
         bool layerCompatible = false;
-        paintCatalog.signatureForPacked(selected.encode(), &layerCompatible);
+        manualCatalog.signatureForPacked(selected.encode(), &layerCompatible);
         if(!layerCompatible)
         {
             emit updateMsg(layer == ETerrainTileLayer::Land
@@ -2582,7 +2595,7 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
             return;
         }
         command = m_terrainEdit.makeSemanticTilePaint(
-            brush, layer, terrainType, paintCatalog,
+            brush, layer, terrainType, semanticCatalog,
             m_terrainSemanticSeed, &report);
     }
     STerrainPaintAuditAction audit;
