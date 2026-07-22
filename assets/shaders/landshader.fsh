@@ -47,8 +47,8 @@ varying highp float v_viewDepth;
 
 float unpackShadowDepth(vec4 packed)
 {
-  return dot(packed, vec4(1.0 / 16777216.0, 1.0 / 65536.0,
-                          1.0 / 256.0, 1.0));
+  return dot(packed, vec4(1.0, 1.0 / 255.0,
+                          1.0 / 65025.0, 1.0 / 16581375.0));
 }
 
 float borderFog(vec3 world)

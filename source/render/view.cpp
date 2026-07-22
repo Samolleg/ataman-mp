@@ -164,7 +164,8 @@ QImage visualizedPackedDepth(const QImage& source)
             const double g = packed.greenF();
             const double b = packed.blueF();
             const double a = packed.alphaF();
-            const double depth = r / 16777216.0 + g / 65536.0 + b / 256.0 + a;
+            const double depth = r + g / 255.0 + b / 65025.0
+                    + a / 16581375.0;
             const int shade = qBound(0, qRound(depth * 255.0), 255);
             result.setPixelColor(x, y, QColor(shade, shade, shade));
         }

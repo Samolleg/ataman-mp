@@ -4,10 +4,14 @@ varying highp vec2 v_texture;
 
 vec4 packDepth(const float depth)
 {
-  const vec4 shifts = vec4(16777216.0, 65536.0, 256.0, 1.0);
-  const vec4 masks = vec4(0.0, 1.0 / 256.0, 1.0 / 256.0, 1.0 / 256.0);
+  // The target is RGBA8, so the fractional base-256 encoder is not safe:
+  // UNORM rounding can carry a channel to 255 and move reconstructed depth by
+  // almost 1/256.  That is over a world unit in the current shadow volume and
+  // visibly detaches contact shadows.  Base 255 survives the RGBA8 round trip.
+  const vec4 shifts = vec4(1.0, 255.0, 65025.0, 16581375.0);
+  const vec4 masks = vec4(1.0 / 255.0, 1.0 / 255.0, 1.0 / 255.0, 0.0);
   vec4 packed = fract(min(depth, 0.99999994) * shifts);
-  packed -= packed.xxyz * masks;
+  packed -= packed.yzww * masks;
   return packed;
 }
 
