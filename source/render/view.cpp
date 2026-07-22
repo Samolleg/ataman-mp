@@ -1975,6 +1975,35 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
     if(!m_particleBuffer.isCreated())
         return;
 
+    // Keep the particle renderer completely outside terrain-only frames.
+    // In particular, do not lazily resolve particle atlases or touch the
+    // particle shader/VBO/VAO when an MPR is open without a MOB. Besides
+    // avoiding needless work, this is an important render-state boundary:
+    // the terrain renderer must not depend on a no-op particle pass restoring
+    // state correctly on the following frame.
+    bool hasVisibleEffect = false;
+    for(CMob* mob : m_aMob)
+    {
+        if(!isMobVisible(mob))
+            continue;
+        const QVector<CNode*> candidates = spatiallyVisibleNodes(mob, frustum, nullptr);
+        for(CNode* node : candidates)
+        {
+            if(!node || node->isMarkDeleted()
+                    || node->nodeState() == ENodeState::eHidden)
+                continue;
+            if(dynamic_cast<CParticle*>(node) || dynamic_cast<CTorch*>(node))
+            {
+                hasVisibleEffect = true;
+                break;
+            }
+        }
+        if(hasVisibleEffect)
+            break;
+    }
+    if(!hasVisibleEffect)
+        return;
+
     // Resolve every resource before changing shader, buffer, depth or blend
     // state. Texture creation can fail during a profile/map transition and an
     // early return must never leave the rest of the frame using particle GL
