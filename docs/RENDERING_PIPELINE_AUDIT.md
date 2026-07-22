@@ -20,6 +20,11 @@ and hierarchy-animated opaque/cutout parts; morph and ordered transparency stay
 on the individual correctness path. This remains an intermediate renderer
 stage, not a claim that the final performance target has been reached.
 
+Camera-dependent renderer work must follow the coordinate contract in
+[CAMERA_COORDINATE_CONTRACT.md](CAMERA_COORDINATE_CONTRACT.md). In particular,
+`CCamera::getLocation().pos` is legacy orbit-controller state, not the rendered
+world-space camera eye.
+
 ## Current frame
 
 | Stage | Current implementation | Existing optimization | Remaining cost |

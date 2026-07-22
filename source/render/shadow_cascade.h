@@ -12,6 +12,8 @@ namespace ei
 
 inline QVector3D cameraEyeFromView(const QMatrix4x4& view, bool* ok = nullptr)
 {
+    // Do not replace this with CCamera::getLocation().pos. That API exposes
+    // legacy orbit-controller state, not necessarily the rendered eye.
     bool inverseOk = false;
     const QMatrix4x4 inverseView = view.inverted(&inverseOk);
     if(ok)
