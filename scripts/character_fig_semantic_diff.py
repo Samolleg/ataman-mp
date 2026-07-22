@@ -34,6 +34,11 @@ def digest(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def array_value(value: object) -> object:
+    """Accept both modern wrapper fields and konstvest 5.2 plain lists."""
+    return value.get_array() if hasattr(value, "get_array") else value
+
+
 def numeric_diff(left: object, right: object) -> dict[str, object]:
     a = np.asarray(left)
     b = np.asarray(right)
@@ -136,7 +141,7 @@ right_drawable = expanded_corners(right, complete_triangles_only=True)
 left_renderable = expanded_corners(left, renderable_only=True)
 right_renderable = expanded_corners(right, renderable_only=True)
 fields = {
-    "header": numeric_diff(left.header.get_array(), right.header.get_array()),
+    "header": numeric_diff(array_value(left.header), array_value(right.header)),
     "center": numeric_diff(left.center, right.center),
     "fmin": numeric_diff(left.fmin, right.fmin),
     "fmax": numeric_diff(left.fmax, right.fmax),
