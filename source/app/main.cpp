@@ -567,13 +567,19 @@ int runHeadlessCommand(QApplication& app)
         componentText = new QMimeData;
         componentText->setText("6.25");
         QGuiApplication::clipboard()->setMimeData(componentText);
+        bool componentContextShowsOnlyComponent = false;
         if(yComponentPlate)
         {
-            QTimer::singleShot(0, []()
+            QTimer::singleShot(0, [&componentContextShowsOnlyComponent,
+                                   xComponentPlate, yComponentPlate,
+                                   &vectorComponentTable]()
             {
                 QMenu* menu = qobject_cast<QMenu*>(QApplication::activePopupWidget());
                 if(!menu)
                     return;
+                componentContextShowsOnlyComponent = yComponentPlate->isChecked()
+                        && !xComponentPlate->isChecked()
+                        && vectorComponentTable.selectedItems().isEmpty();
                 for(QAction* action : menu->actions())
                     if(action->text().contains("Paste", Qt::CaseInsensitive))
                     {
@@ -592,8 +598,8 @@ int runHeadlessCommand(QApplication& app)
                 && changedY->type() == eObjParam_POSITION_Y
                 && qAbs(changedY->value() - 6.25f) < 0.0001f;
         const bool componentContextPreservesSelection = xComponentPlate
-                && xComponentPlate->isChecked()
-                && yComponentPlate && !yComponentPlate->isChecked()
+                && yComponentPlate && yComponentPlate->isChecked()
+                && !xComponentPlate->isChecked()
                 && vectorComponentTable.selectedItems().isEmpty();
 
         QSharedPointer<IPropertyBase> partialValue(new propStr(eObjParam_COMMENTS, "abcdef"));
@@ -788,7 +794,7 @@ int runHeadlessCommand(QApplication& app)
                 && fieldPastePreview && fieldPasteCommit && fieldCopyAvailable && nonTextPropertyPaste
                 && numericComponentPaste && individualComponentSelection
                 && selectedComponentCopy && componentPlatePaste && componentContextPaste
-                && componentContextPreservesSelection
+                && componentContextPreservesSelection && componentContextShowsOnlyComponent
                 && lockedNumericPasteBlocked
                 && partialCopyExact && partialPasteExact && partialPasteCommit
                 && propertyScrollPreserved
@@ -827,7 +833,8 @@ int runHeadlessCommand(QApplication& app)
                << " selectedComponentCopy=" << selectedComponentCopy
                << " componentPlatePaste=" << componentPlatePaste
                << " componentContextPaste=" << componentContextPaste
-               << " componentContextPreservesSelection=" << componentContextPreservesSelection << "\n"
+               << " componentContextPreservesSelection=" << componentContextPreservesSelection
+               << " componentContextShowsOnlyComponent=" << componentContextShowsOnlyComponent << "\n"
                << " lockedNumericPasteBlocked=" << lockedNumericPasteBlocked << "\n"
                << " partialCopyExact=" << partialCopyExact
                << " partialPasteExact=" << partialPasteExact

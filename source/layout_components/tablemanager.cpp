@@ -9,6 +9,7 @@
 #include <QSignalBlocker>
 #include <QFocusEvent>
 #include <QKeyEvent>
+#include <QMouseEvent>
 #include <QMimeData>
 #include <QApplication>
 #include <QToolTip>
@@ -163,6 +164,17 @@ public:
     }
 
 protected:
+    void mousePressEvent(QMouseEvent* event) override
+    {
+        if(event->button() == Qt::RightButton)
+        {
+            // Prevent QTableWidget from painting the containing Vector3 cell
+            // as selected while it routes the context-menu gesture.
+            selectComponent();
+        }
+        QToolButton::mousePressEvent(event);
+    }
+
     void keyPressEvent(QKeyEvent* event) override
     {
         if(event->matches(QKeySequence::Copy) && !m_property.isNull())
@@ -182,9 +194,9 @@ protected:
 
     void contextMenuEvent(QContextMenuEvent* event) override
     {
-        // The menu already targets this exact component. Do not change table
-        // or plate selection merely because the user opened its context menu;
-        // doing so briefly painted the parent Vector3 row as selected.
+        // The clicked X/Y/Z plate—not its containing Vector3 field—remains
+        // selected for as long as this component menu is open.
+        selectComponent();
         QMenu menu(this);
         QAction* copy = menu.addAction(QObject::tr("Copy value"));
         QAction* paste = menu.addAction(QObject::tr("Paste value"));
