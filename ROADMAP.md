@@ -5,7 +5,7 @@ work is ordered from the newest planned minor line to the oldest completed one.
 An item is checked only after its implementation has landed and received the
 stated validation. Completed code should carry a commit, test, or release link.
 
-Current development line: `0.2.1-alpha.26` focused closed testing.
+Current development line: `0.2.1-alpha.30` focused closed testing.
 
 <details open>
 <summary><strong>General wishlist — not assigned to a release</strong></summary>
@@ -79,7 +79,7 @@ Current development line: `0.2.1-alpha.26` focused closed testing.
 
 ## Object authoring conveniences
 
-- [ ] Add an explicit **Convert World Object to Lever...** transaction.
+- [x] Add an explicit **Convert World Object to Lever...** transaction.
   - Preserve the original NID, transform, model, textures, body parts, common
     object fields, directory membership, ordering position, and script-facing
     identity.
@@ -97,9 +97,11 @@ Current development line: `0.2.1-alpha.26` focused closed testing.
     declares a different lever schema. A matching lever model/template is not
     required: shipped Base and JMV maps use multiple identical models as both
     ordinary objects and levers, including within the same MOB.
-  - Runtime-validate a converted already-shared model and a model never before
+  - Implementation: [`a8f9cc1`](https://github.com/Ilufus/ei-mapper-endurance/commit/a8f9cc1).
+  - [ ] Runtime-validate a converted already-shared model and a model never before
     used as a lever in disposable Base and JMV test maps before enabling the
-    command by default for those profiles.
+    command by default for stable profile releases. The alpha command remains
+    available for these disposable validation tests.
 
 </details>
 
@@ -302,9 +304,18 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
 
 ### Current 0.2.x status
 
-- **Current tester build:** `0.2.1-alpha.27`; its JMV owned-injector startup
-  regression is under investigation and it is not a release candidate.
-- **Current test candidate:** `0.2.1-alpha.29`. Alpha.29 fixes hosted JMV hot
+- **Current tester build:** `0.2.1-alpha.29`; its JMV hot-reload readiness and
+  unrelated-game recovery regressions are fixed in the next candidate.
+- **Current test candidate:** `0.2.1-alpha.30`. Alpha.30 fixes the remaining
+  runtime-process ownership boundary: an unrelated `game.exe` can no longer
+  make an empty/legacy recovery journal claim an active Endurance test, and the
+  editor accepts alpha.29's accidental UTF-16LE `game.pid` while the rebuilt
+  host writes the protocol as ASCII. This restores Hot Reload readiness against
+  the hosted child `game.exe`. ([`e18f868`](https://github.com/Ilufus/ei-mapper-endurance/commit/e18f868))
+  Alpha.30 also adds the lossless, one-step World Object to Lever transaction
+  with editable defaults and script-reference warning.
+  ([`a8f9cc1`](https://github.com/Ilufus/ei-mapper-endurance/commit/a8f9cc1))
+  Alpha.29 fixes hosted JMV hot
   reload dispatch: readiness already resolved the bridge thread against the
   owned `game.exe`, but dispatch incorrectly compared that thread with the
   separate injector-host PID. Runtime process identity now has one shared
