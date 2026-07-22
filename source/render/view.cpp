@@ -458,23 +458,15 @@ CView::~CView()
     ei::setCrashContext("shutdown/view-gpu-timer");
     if(m_gpuTimer)
     {
-        QOpenGLContext* current = QOpenGLContext::currentContext();
-        if(current && current->surface())
-        {
-            m_gpuTimer->destroy();
-            delete m_gpuTimer;
-        }
-        else
-        {
-            // Some window-system shutdown paths destroy the QGLWidget surface
-            // before MainWindow explicitly deletes the view. Qt's timer-query
-            // destructor dereferences the absent current surface in that state.
-            // Detach this one process-lifetime diagnostic object rather than
-            // crashing while the application is already terminating.
-            ei::log(eLogWarning,
-                    "GPU timer query retained at shutdown because its OpenGL surface is unavailable");
-            m_gpuTimer->setParent(nullptr);
-        }
+        // QOpenGLTimerQuery::destroy() and its destructor both enter Qt's
+        // platform OpenGL wrapper. During widget teardown the context can
+        // still report a surface while the platform query backend has already
+        // been detached (observed as a Qt5Gui null dereference on NVIDIA).
+        // This is one process-lifetime diagnostics object, so detach it and
+        // let the driver reclaim the query with the context instead of risking
+        // a shutdown crash.
+        ei::log(eLogInfo, "GPU timer query retained for OpenGL context teardown");
+        m_gpuTimer->setParent(nullptr);
         m_gpuTimer = nullptr;
         m_gpuTimerPending = false;
     }
@@ -1980,8 +1972,21 @@ void CView::drawTestOverlaysOpenGl()
 void CView::drawParticles(const QMatrix4x4& cameraMatrix,
                           const CViewFrustum* frustum)
 {
-    if(!m_particleBuffer.isCreated() || !m_particleProgram.bind())
+    if(!m_particleBuffer.isCreated())
         return;
+
+    // Resolve every resource before changing shader, buffer, depth or blend
+    // state. Texture creation can fail during a profile/map transition and an
+    // early return must never leave the rest of the frame using particle GL
+    // state.
+    CTextureList* textures = CTextureList::getInstance();
+    QOpenGLTexture* fallbackTexture = textures->textureDefault();
+    QOpenGLTexture* fireSmokeTexture = textures->texture("firesmoke");
+    if(fireSmokeTexture == fallbackTexture)
+        fireSmokeTexture = nullptr;
+    QOpenGLTexture* tendrilSmokeTexture = textures->texture("tendrismoke");
+    if(tendrilSmokeTexture == fallbackTexture)
+        tendrilSmokeTexture = fireSmokeTexture;
 
     bool inverseOk = false;
     const QMatrix4x4 inverseView = cameraMatrix.inverted(&inverseOk);
@@ -1994,18 +1999,24 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
     if(cameraRight.isNull() || cameraUp.isNull())
         return;
 
+    if(!m_particleProgram.bind())
+        return;
     m_particleProgram.setUniformValue("u_projMmatrix", m_projection);
     m_particleProgram.setUniformValue("u_viewMmatrix", cameraMatrix);
     m_particleProgram.setUniformValue("u_cameraRight", cameraRight);
     m_particleProgram.setUniformValue("u_cameraUp", cameraUp);
 
     if(!m_particleBuffer.bind())
+    {
+        m_particleProgram.release();
         return;
+    }
     const int positionLocation = m_particleProgram.attributeLocation("a_position");
     const int textureLocation = m_particleProgram.attributeLocation("a_texture");
     if(positionLocation < 0 || textureLocation < 0)
     {
         m_particleBuffer.release();
+        m_particleProgram.release();
         return;
     }
     m_particleProgram.enableAttributeArray(positionLocation);
@@ -2019,16 +2030,9 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
     glEnable(GL_DEPTH_TEST);
     glDepthMask(GL_FALSE);
     glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     bool additiveBlend = false;
     QOpenGLTexture* boundTexture = nullptr;
-    CTextureList* textures = CTextureList::getInstance();
-    QOpenGLTexture* fallbackTexture = textures->textureDefault();
-    QOpenGLTexture* fireSmokeTexture = textures->texture("firesmoke");
-    if(fireSmokeTexture == fallbackTexture)
-        fireSmokeTexture = nullptr;
-    QOpenGLTexture* tendrilSmokeTexture = textures->texture("tendrismoke");
-    if(tendrilSmokeTexture == fallbackTexture)
-        tendrilSmokeTexture = fireSmokeTexture;
     const float timeSeconds = float(QDateTime::currentMSecsSinceEpoch() % 600000) / 1000.0f;
     RenderPerformanceContext& performance = RenderPerformanceContext::instance();
 
@@ -2185,6 +2189,7 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
     m_particleProgram.disableAttributeArray(textureLocation);
     m_particleProgram.disableAttributeArray(positionLocation);
     m_particleBuffer.release();
+    m_particleProgram.release();
 }
 
 void CView::draw()
