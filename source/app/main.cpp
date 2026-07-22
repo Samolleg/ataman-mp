@@ -23,6 +23,7 @@
 #include <QMenu>
 #include <QContextMenuEvent>
 #include <QScrollBar>
+#include <QFormLayout>
 #include <cstdio>
 #include <cstring>
 
@@ -612,6 +613,46 @@ int runHeadlessCommand(QApplication& app)
                 && yComponentPlate && !yComponentPlate->isChecked()
                 && vectorComponentTable.selectedItems().isEmpty();
 
+        QList<QSharedPointer<IPropertyBase>> exclusiveComponents;
+        exclusiveComponents
+                << QSharedPointer<IPropertyBase>(new propFloat(eObjParam_POSITION_X, 1.0f))
+                << QSharedPointer<IPropertyBase>(new propFloat(eObjParam_POSITION_Y, 2.0f))
+                << QSharedPointer<IPropertyBase>(new propFloat(eObjParam_POSITION_Z, 3.0f))
+                << QSharedPointer<IPropertyBase>(new propFloat(eObjParam_ROTATION_X, 4.0f))
+                << QSharedPointer<IPropertyBase>(new propFloat(eObjParam_ROTATION_Y, 5.0f))
+                << QSharedPointer<IPropertyBase>(new propFloat(eObjParam_ROTATION_Z, 6.0f))
+                << QSharedPointer<IPropertyBase>(new propStr(eObjParam_COMMENTS, "normal row"));
+        QTableWidget exclusiveComponentTable;
+        CTableManager exclusiveComponentManager(&exclusiveComponentTable);
+        exclusiveComponentManager.setNewData(exclusiveComponents);
+        QToolButton* positionXPlate = nullptr;
+        QToolButton* rotationYPlate = nullptr;
+        bool componentHitTargetsExpanded = true;
+        bool componentLayoutHasNoDeadSpace = true;
+        const QList<QToolButton*> exclusivePlates =
+                exclusiveComponentTable.findChildren<QToolButton*>();
+        for(QToolButton* plate : exclusivePlates)
+        {
+            const int componentType = plate->property("enduranceComponentType").toInt();
+            if(componentType == int(eObjParam_POSITION_X)) positionXPlate = plate;
+            if(componentType == int(eObjParam_ROTATION_Y)) rotationYPlate = plate;
+            componentHitTargetsExpanded = componentHitTargetsExpanded
+                    && plate->minimumWidth() >= 32 && plate->minimumHeight() >= 22;
+            QFormLayout* form = qobject_cast<QFormLayout*>(plate->parentWidget()->layout());
+            componentLayoutHasNoDeadSpace = componentLayoutHasNoDeadSpace
+                    && form && form->horizontalSpacing() == 0 && form->verticalSpacing() == 0;
+        }
+        if(positionXPlate) positionXPlate->click();
+        if(rotationYPlate) rotationYPlate->click();
+        const bool componentSelectionTableExclusive = positionXPlate && rotationYPlate
+                && !positionXPlate->isChecked() && rotationYPlate->isChecked();
+        if(exclusiveComponentTable.rowCount() > 0)
+            exclusiveComponentTable.item(exclusiveComponentTable.rowCount() - 1, 0)->setSelected(true);
+        bool componentSelectionClearsForProperty = true;
+        for(QToolButton* plate : exclusivePlates)
+            componentSelectionClearsForProperty = componentSelectionClearsForProperty
+                    && !plate->isChecked();
+
         QSharedPointer<IPropertyBase> partialValue(new propStr(eObjParam_COMMENTS, "abcdef"));
         CValueItem partialEditor(partialValue);
         partialEditor.setSelection(2, 2);
@@ -806,6 +847,8 @@ int runHeadlessCommand(QApplication& app)
                 && selectedComponentCopy && componentPlatePaste && componentContextPaste
                 && componentContextPreservesSelection && componentContextShowsOnlyComponent
                 && componentContextGestureKeepsTableClear
+                && componentSelectionTableExclusive && componentSelectionClearsForProperty
+                && componentHitTargetsExpanded && componentLayoutHasNoDeadSpace
                 && lockedNumericPasteBlocked
                 && partialCopyExact && partialPasteExact && partialPasteCommit
                 && propertyScrollPreserved
@@ -847,7 +890,11 @@ int runHeadlessCommand(QApplication& app)
                << " componentContextPreservesSelection=" << componentContextPreservesSelection
                << " componentContextShowsOnlyComponent=" << componentContextShowsOnlyComponent
                << " componentContextGestureKeepsTableClear="
-               << componentContextGestureKeepsTableClear << "\n"
+               << componentContextGestureKeepsTableClear
+               << " componentSelectionTableExclusive=" << componentSelectionTableExclusive
+               << " componentSelectionClearsForProperty=" << componentSelectionClearsForProperty
+               << " componentHitTargetsExpanded=" << componentHitTargetsExpanded
+               << " componentLayoutHasNoDeadSpace=" << componentLayoutHasNoDeadSpace << "\n"
                << " lockedNumericPasteBlocked=" << lockedNumericPasteBlocked << "\n"
                << " partialCopyExact=" << partialCopyExact
                << " partialPasteExact=" << partialPasteExact

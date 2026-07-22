@@ -153,14 +153,24 @@ public:
         setText(label);
         setAutoRaise(true);
         setCheckable(true);
-        setAutoExclusive(true);
+        // Exclusivity is managed across the complete property table, not just
+        // the three buttons belonging to this one Vector3 editor.
+        setAutoExclusive(false);
         setFocusPolicy(Qt::StrongFocus);
+        setMinimumSize(32, 22);
+        setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Expanding);
+        setProperty("enduranceComponentType", int(property->type()));
         setStyleSheet("QToolButton:checked { background-color: #315f46; "
                       "border: 1px solid #55b878; }");
         setToolTip(QObject::tr(
             "Select this component only. Ctrl+C/Ctrl+V and the context menu operate on this value."));
         QObject::connect(this, &QToolButton::clicked, this,
                          [this]() { selectComponent(); });
+    }
+
+    void clearComponentSelection()
+    {
+        setChecked(false);
     }
 
 protected:
@@ -227,20 +237,30 @@ protected:
     }
 
 private:
-    QList<CVectorComponentPlate*> siblingPlates() const
-    {
-        return parentWidget()
-                ? parentWidget()->findChildren<CVectorComponentPlate*>(
-                      QString(), Qt::FindDirectChildrenOnly)
-                : QList<CVectorComponentPlate*>();
-    }
-
-    void clearParentTableSelection()
+    QTableWidget* parentTable() const
     {
         QWidget* ancestor = parentWidget();
         while(ancestor && !qobject_cast<QTableWidget*>(ancestor))
             ancestor = ancestor->parentWidget();
-        if(QTableWidget* table = qobject_cast<QTableWidget*>(ancestor))
+        return qobject_cast<QTableWidget*>(ancestor);
+    }
+
+    QList<CVectorComponentPlate*> tablePlates() const
+    {
+        QTableWidget* table = parentTable();
+        return table ? table->findChildren<CVectorComponentPlate*>()
+                     : QList<CVectorComponentPlate*>();
+    }
+
+    void selectOnly(CVectorComponentPlate* selected)
+    {
+        for(CVectorComponentPlate* plate : tablePlates())
+            plate->setChecked(plate == selected);
+    }
+
+    void clearParentTableSelection()
+    {
+        if(QTableWidget* table = parentTable())
         {
             const QSignalBlocker blocker(table);
             table->clearSelection();
@@ -253,7 +273,7 @@ private:
         if(!m_contextSelectionPrepared)
         {
             m_previousCheckedPlate = nullptr;
-            for(CVectorComponentPlate* plate : siblingPlates())
+            for(CVectorComponentPlate* plate : tablePlates())
                 if(plate->isChecked())
                 {
                     m_previousCheckedPlate = plate;
@@ -261,7 +281,7 @@ private:
                 }
             m_contextSelectionPrepared = true;
         }
-        setChecked(true);
+        selectOnly(this);
         clearParentTableSelection();
     }
 
@@ -269,13 +289,9 @@ private:
     {
         if(!m_contextSelectionPrepared)
             return;
-        const QList<CVectorComponentPlate*> plates = siblingPlates();
-        for(CVectorComponentPlate* plate : plates)
-            plate->setAutoExclusive(false);
+        const QList<CVectorComponentPlate*> plates = tablePlates();
         for(CVectorComponentPlate* plate : plates)
             plate->setChecked(plate == m_previousCheckedPlate);
-        for(CVectorComponentPlate* plate : plates)
-            plate->setAutoExclusive(true);
         m_previousCheckedPlate = nullptr;
         m_contextSelectionPrepared = false;
         clearParentTableSelection();
@@ -283,7 +299,7 @@ private:
 
     void selectComponent()
     {
-        setChecked(true);
+        selectOnly(this);
         setFocus(Qt::MouseFocusReason);
         clearParentTableSelection();
     }
@@ -409,6 +425,16 @@ CTableManager::CTableManager(QTableWidget* pTable):
     m_pTable->setSelectionBehavior(QAbstractItemView::SelectItems);
     m_pTable->installEventFilter(this);
     m_pTable->viewport()->installEventFilter(this);
+    connect(m_pTable, &QTableWidget::itemSelectionChanged, this, [this]()
+    {
+        if(m_pTable->selectedItems().isEmpty())
+            return;
+        for(CVectorComponentPlate* plate :
+            m_pTable->findChildren<CVectorComponentPlate*>())
+        {
+            plate->clearComponentSelection();
+        }
+    });
     reset();
     //QObject::connect(m_pTable, SIGNAL(itemChanged(QTableWidgetItem*)), this, SLOT(onCellEdit(QTableWidgetItem*)));
 }
@@ -1732,6 +1758,8 @@ C3DItem::C3DItem(const QSharedPointer<IPropertyBase>& propX,const QSharedPointer
     setFocusPolicy(Qt::FocusPolicy::StrongFocus);
     auto* pLayout = new QFormLayout();
     pLayout->setMargin(0);
+    pLayout->setHorizontalSpacing(0);
+    pLayout->setVerticalSpacing(0);
     const auto setProp = [this, &pLayout](const QString& rowName,
                                          const QSharedPointer<IPropertyBase>& prop)
     {
