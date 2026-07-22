@@ -965,17 +965,28 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
             || !m_shadowFbo->isValid() || !m_dynamicShadowFbo->isValid())
         return false;
 
-    // Fit the light-space footprint to the camera frustum. The former
-    // camera-distance estimate described only a square around the orbit pivot.
-    // At close range a visible caster near a screen edge could therefore sit
-    // outside the shadow map while the far end of its projected silhouette was
-    // inside it. That presented as a detached contact shadow and made shadows
-    // appear only after moving the camera farther away.
+    // Stock EI gives each caster an entire 64x64 silhouette. A fixed whole-map
+    // projection spends almost all available texels on empty space, making a
+    // nearby human or tree trunk only a handful of samples wide. Scale the
+    // editor maps with camera distance instead: close views retain caster
+    // detail and contact, while wide views retain the required coverage.
+    const float cameraDistance = (cameraPosition - shadowFocus).length();
     const auto quantizedExtent = [](float value, float minimum, float maximum)
     {
         return qBound(minimum, qCeil(value / 8.0f) * 8.0f, maximum);
     };
     const float safeMaximumDistance = qBound(1.0f, maximumDistance, 1024.0f);
+    const float staticCoverageMaximum = qMax(40.0f, safeMaximumDistance);
+    const float dynamicCoverageMaximum = qMax(28.0f, safeMaximumDistance);
+    const float staticExtent = quantizedExtent(cameraDistance * 1.25f,
+                                                40.0f, staticCoverageMaximum);
+    const float dynamicExtent = quantizedExtent(cameraDistance * 0.85f,
+                                                 28.0f, dynamicCoverageMaximum);
+    // Static coverage remains stable inside half a terrain sector so its
+    // expensive cached pass is not rebuilt for every small pan.
+    const QVector3D staticFocus(qFloor(shadowFocus.x() / 8.0f) * 8.0f,
+                                qFloor(shadowFocus.y() / 8.0f) * 8.0f,
+                                shadowFocus.z());
     QVector3D up(0.0f, 0.0f, 1.0f);
     if(qAbs(QVector3D::dotProduct(environment.sunDirection.normalized(), up)) > 0.96f)
         up = QVector3D(0.0f, 1.0f, 0.0f);
@@ -984,96 +995,27 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
     // This keeps a world point on the same shadow texel while the camera pans.
     const QVector3D lightRight = QVector3D::crossProduct(lightDirection, up).normalized();
     const QVector3D lightUp = QVector3D::crossProduct(lightRight, lightDirection).normalized();
-    float minimumRight = QVector3D::dotProduct(shadowFocus, lightRight);
-    float maximumRight = minimumRight;
-    float minimumUp = QVector3D::dotProduct(shadowFocus, lightUp);
-    float maximumUp = minimumUp;
-    bool inverseOk = false;
-    const QMatrix4x4 inverseViewProjection =
-        (m_projection * m_cam->viewMatrix()).inverted(&inverseOk);
-    if(inverseOk)
-    {
-        for(int y = -1; y <= 1; y += 2)
-            for(int x = -1; x <= 1; x += 2)
-            {
-                QVector4D nearPoint = inverseViewProjection
-                    * QVector4D(float(x), float(y), -1.0f, 1.0f);
-                QVector4D farPoint = inverseViewProjection
-                    * QVector4D(float(x), float(y), 1.0f, 1.0f);
-                if(qFuzzyIsNull(nearPoint.w()) || qFuzzyIsNull(farPoint.w()))
-                    continue;
-                const QVector3D nearWorld = nearPoint.toVector3D() / nearPoint.w();
-                const QVector3D farWorld = farPoint.toVector3D() / farPoint.w();
-                const QVector3D ray = (farWorld - nearWorld).normalized();
-                QVector3D receiverEdge = cameraPosition + ray * safeMaximumDistance;
-                // In the ordinary pitched-down editor view, fit to the visible
-                // receiver plane instead of the entire far cone. This retains
-                // close-range texel density. Horizon/upward rays keep the
-                // configured far endpoint, so distant terrain is still covered.
-                if(qAbs(ray.z()) > 0.00001f)
-                {
-                    const float receiverDistance =
-                        (shadowFocus.z() - cameraPosition.z()) / ray.z();
-                    if(receiverDistance > 0.0f && receiverDistance < safeMaximumDistance)
-                        receiverEdge = cameraPosition + ray * receiverDistance;
-                }
-                for(const QVector3D& point : {nearWorld, receiverEdge})
-                {
-                    const float right = QVector3D::dotProduct(point, lightRight);
-                    const float imageUp = QVector3D::dotProduct(point, lightUp);
-                    minimumRight = qMin(minimumRight, right);
-                    maximumRight = qMax(maximumRight, right);
-                    minimumUp = qMin(minimumUp, imageUp);
-                    maximumUp = qMax(maximumUp, imageUp);
-                }
-            }
-    }
-    const float footprintCenterRight = (minimumRight + maximumRight) * 0.5f;
-    const float footprintCenterUp = (minimumUp + maximumUp) * 0.5f;
-    const float footprintExtent = qMax((maximumRight - minimumRight) * 0.5f,
-                                       (maximumUp - minimumUp) * 0.5f);
-    // One terrain-sector guard band keeps silhouettes cast by objects just
-    // outside the colour frustum available to visible receivers.
-    const float coverageExtent = quantizedExtent(footprintExtent + 8.0f,
-                                                  8.0f, safeMaximumDistance + 8.0f);
-    QVector3D projectionFocus = lightRight * footprintCenterRight
-        + lightUp * footprintCenterUp
-        + lightDirection * QVector3D::dotProduct(shadowFocus, lightDirection);
-    // Static coverage remains stable inside half a terrain sector so its
-    // expensive cached pass is not rebuilt for every small pan.
-    QVector3D staticFocus = projectionFocus;
-    staticFocus += lightRight
-        * (qFloor(footprintCenterRight / 8.0f) * 8.0f - footprintCenterRight);
-    staticFocus += lightUp
-        * (qFloor(footprintCenterUp / 8.0f) * 8.0f - footprintCenterUp);
-    const float staticExtent = coverageExtent;
-    const float dynamicExtent = coverageExtent;
     const float dynamicWorldTexel = (2.0f * dynamicExtent)
         / float(qMax(1, m_dynamicShadowFbo->width()));
-    QVector3D dynamicFocus = projectionFocus;
+    QVector3D dynamicFocus = shadowFocus;
     const float rightCoordinate = QVector3D::dotProduct(dynamicFocus, lightRight);
     const float upCoordinate = QVector3D::dotProduct(dynamicFocus, lightUp);
     dynamicFocus += lightRight
         * (qRound(rightCoordinate / dynamicWorldTexel) * dynamicWorldTexel - rightCoordinate);
     dynamicFocus += lightUp
         * (qRound(upCoordinate / dynamicWorldTexel) * dynamicWorldTexel - upCoordinate);
-    // The old fixed 420/900 depth volume was a second, setting-independent
-    // cutoff. Scale the light volume with the user distance so values above
-    // 420 can actually retain distant casters and receivers.
-    const float lightDepthHalf = qMax(64.0f, safeMaximumDistance + 32.0f);
-    const float lightDepthRange = lightDepthHalf * 2.0f + 2.0f;
     QMatrix4x4 staticLightView;
-    staticLightView.lookAt(staticFocus - lightDirection * lightDepthHalf,
+    staticLightView.lookAt(staticFocus - lightDirection * 420.0f,
                            staticFocus, up);
     QMatrix4x4 dynamicLightView;
-    dynamicLightView.lookAt(dynamicFocus - lightDirection * lightDepthHalf,
+    dynamicLightView.lookAt(dynamicFocus - lightDirection * 420.0f,
                             dynamicFocus, up);
     QMatrix4x4 staticProjection;
     staticProjection.ortho(-staticExtent, staticExtent,
-                           -staticExtent, staticExtent, 1.0f, lightDepthRange);
+                           -staticExtent, staticExtent, 1.0f, 900.0f);
     QMatrix4x4 dynamicProjection;
     dynamicProjection.ortho(-dynamicExtent, dynamicExtent,
-                            -dynamicExtent, dynamicExtent, 1.0f, lightDepthRange);
+                            -dynamicExtent, dynamicExtent, 1.0f, 900.0f);
     const QMatrix4x4 candidateStaticMatrix = staticProjection * staticLightView;
     const QMatrix4x4 candidateDynamicMatrix = dynamicProjection * dynamicLightView;
 
