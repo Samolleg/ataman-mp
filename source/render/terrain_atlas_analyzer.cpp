@@ -100,6 +100,7 @@ STerrainAtlasAnalysis CTerrainAtlasAnalyzer::analyze(
     // not reinterpreted.
     result.landCatalog.setMirrorPaintGridY(true);
     result.overlayCatalog.setMirrorPaintGridY(true);
+    result.overlayCompatibleCatalog.setMirrorPaintGridY(true);
     result.expectedSlots = 512;
     if(atlasSlotCount != result.expectedSlots)
     {
@@ -159,6 +160,8 @@ STerrainAtlasAnalysis CTerrainAtlasAnalyzer::analyze(
             variant.signature = CTerrainTransitionCatalog::rotated(signature, rotation);
             variant.packedTile = packed.encode();
             if(!catalog->addVariant(variant, report))
+                return STerrainAtlasAnalysis();
+            if(!result.overlayCompatibleCatalog.addVariant(variant, report))
                 return STerrainAtlasAnalysis();
         }
         if(isUniform(signature))

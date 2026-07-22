@@ -2036,6 +2036,18 @@ void EnduranceDocumentTests::zone1NamespaceTemplateSeparatesLandOverlayAndVarian
     QVERIFY(!found);
     analysis.overlayCatalog.signatureForPacked(packed.encode(), &found);
     QVERIFY(found);
+    analysis.overlayCatalogWithLandFamilies().signatureForPacked(
+        packed.encode(), &found);
+    QVERIFY(found);
+    packed.tileIndex = 50;
+    analysis.overlayCatalogWithLandFamilies().signatureForPacked(
+        packed.encode(), &found);
+    QVERIFY(found);
+    QCOMPARE(analysis.overlayCatalogWithLandFamilies().size(),
+             analysis.landCatalog.size() + analysis.overlayCatalog.size());
+    QCOMPARE(analysis.overlayCatalogWithLandFamilies().materialIds().size(),
+             analysis.landCatalog.materialIds().size()
+                 + analysis.overlayCatalog.materialIds().size());
     const auto stillWater = std::find_if(
         analysis.materials.constBegin(), analysis.materials.constEnd(),
         [](const STerrainAtlasMaterial& material) { return material.id == 6; });

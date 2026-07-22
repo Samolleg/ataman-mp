@@ -28,6 +28,11 @@ struct STerrainAtlasAnalysis
 {
     CTerrainTransitionCatalog landCatalog;
     CTerrainTransitionCatalog overlayCatalog;
+    // Overlay records use the same packed atlas reference as land records.
+    // Some shipped maps intentionally place land-family slots on an active
+    // overlay surface, so the opt-in overlay compatibility mode needs a
+    // catalog that can decode either authored family without inventing slots.
+    CTerrainTransitionCatalog overlayCompatibleCatalog;
     QVector<STerrainAtlasMaterial> materials;
     QString templateName;
     int expectedSlots{0};
@@ -37,6 +42,11 @@ struct STerrainAtlasAnalysis
     const CTerrainTransitionCatalog& catalog(ETerrainTileLayer layer) const
     {
         return layer == ETerrainTileLayer::Land ? landCatalog : overlayCatalog;
+    }
+
+    const CTerrainTransitionCatalog& overlayCatalogWithLandFamilies() const
+    {
+        return overlayCompatibleCatalog;
     }
 };
 

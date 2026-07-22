@@ -25,6 +25,8 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     , m_paintShape(new QComboBox(this))
     , m_manualTileSelection(new QCheckBox(tr("Manual atlas tile mode (no blending)"), this))
     , m_showUnderwaterFamilies(new QCheckBox(tr("Show underwater material families"), this))
+    , m_allowLandFamiliesInOverlay(new QCheckBox(
+          tr("Allow land-family tiles on overlays"), this))
     , m_showMainTerrain(new QCheckBox(tr("Show main terrain (M)"), this))
     , m_showOverlays(new QCheckBox(tr("Show overlays (J)"), this))
     , m_tilesetStatus(new QLabel(tr("Terrain materials are loaded from the MPR namespace template."), this))
@@ -102,6 +104,7 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     paintForm->addRow(tr("Brush shape"), m_paintShape);
     paintForm->addRow(m_manualTileSelection);
     paintForm->addRow(m_showUnderwaterFamilies);
+    paintForm->addRow(m_allowLandFamiliesInOverlay);
     paintLayout->addLayout(paintForm);
     QPushButton* tilePicker = new QPushButton(tr("Inspect atlas / choose tile..."), this);
     paintLayout->addWidget(tilePicker);
@@ -127,6 +130,8 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     connect(m_enable, &QCheckBox::toggled, this, &CLandscapeTools::editingStateChanged);
     connect(m_showUnderwaterFamilies, &QCheckBox::toggled, this,
             [this](bool) { refreshPaintTerrainTypes(); });
+    connect(m_allowLandFamiliesInOverlay, &QCheckBox::toggled, this,
+            [this](bool) { refreshPaintTerrainTypes(); });
     connect(m_manualTileSelection, &QCheckBox::toggled, this, [this](bool manual)
     {
         m_paintTerrainType->setEnabled(!manual);
@@ -134,8 +139,9 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
         {
             const QSignalBlocker blocker(m_paintTerrainType);
             m_paintTerrainType->setCurrentIndex(0);
-            emit paintTerrainTypeChanged(-1);
         }
+        emit paintTerrainTypeChanged(-1);
+        emit editingStateChanged();
     });
     const auto visibilityChanged = [this](bool)
     {
@@ -199,6 +205,8 @@ void CLandscapeTools::updateModeVisibility()
     m_paintControls->setVisible(!sculpt);
     m_showUnderwaterFamilies->setVisible(
         editMode() == ELandscapeEditMode::TilePaint);
+    m_allowLandFamiliesInOverlay->setVisible(
+        editMode() == ELandscapeEditMode::OverlayPaint);
 }
 ELandscapeSculptTool CLandscapeTools::sculptTool() const
 {
@@ -223,6 +231,15 @@ ETerrainTileBrushShape CLandscapeTools::paintShape() const
 bool CLandscapeTools::manualTileSelectionEnabled() const
 {
     return m_manualTileSelection->isChecked();
+}
+bool CLandscapeTools::landFamiliesAllowedInOverlay() const
+{
+    return editMode() == ELandscapeEditMode::OverlayPaint
+        && m_allowLandFamiliesInOverlay->isChecked();
+}
+void CLandscapeTools::adjustPaintSize(int steps)
+{
+    m_paintRadius->setValue(m_paintRadius->value() + steps);
 }
 qint32 CLandscapeTools::paintTerrainType(bool* selected) const
 {
@@ -251,6 +268,12 @@ void CLandscapeTools::refreshPaintTerrainTypes()
     if(editMode() == ELandscapeEditMode::TilePaint
        && m_showUnderwaterFamilies->isChecked())
         terrainTypes += m_underwaterPaintTypes;
+    if(editMode() == ELandscapeEditMode::OverlayPaint
+       && m_allowLandFamiliesInOverlay->isChecked())
+    {
+        terrainTypes += m_landPaintTypes;
+        terrainTypes += m_underwaterPaintTypes;
+    }
     const QSignalBlocker blocker(m_paintTerrainType);
     m_paintTerrainType->clear();
     m_paintTerrainType->addItem(tr("Choose a material..."), QVariant());

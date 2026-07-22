@@ -1043,7 +1043,7 @@ CTileBrush::CTileBrush(CView* pView)
     :CState(pView)
 {
     qDebug()<< "CTileBrush init ";
-    CStatusConnector::getInstance()->updateStatus("brush.ico", "Esc-Cancel, LMB-paint selected tile, RMB-pick tile, Wheel-rotate. Choose Land/Overlay in Landscape Tools; M/J toggle land/overlay visibility.");
+    CStatusConnector::getInstance()->updateStatus("brush.ico", "Esc-Cancel, LMB-paint, RMB-pick tile, Alt+Wheel-size/rotate, Wheel-camera. Choose Land/Overlay in Landscape Tools; M/J toggle visibility.");
     CButtonConnector::getInstance()->pressButton(EButtonOpTilebrush);
     m_pView->showOutliner(false);
 }
@@ -1070,6 +1070,11 @@ void CTileBrush::keyPress(COperation* pOp, EKeyCode key)
     case eKey_M:
     {
         m_pView->setDrawLand(!m_pView->drawLand());
+        break;
+    }
+    case eKey_B:
+    {
+        m_pView->prepareLandscapeTilePainting();
         break;
     }
     case eKey_1 ... eKey_8:
@@ -1192,16 +1197,22 @@ void CTileBrush::mouseMoveEvent(COperation* pOp, QMouseEvent* pEvent)
 
 void CTileBrush::wheelEvent(COperation* pOp, QWheelEvent* pEvent)
 {
-    Q_UNUSED(pOp);
+    if(!(pEvent->modifiers() & Qt::AltModifier))
+    {
+        pOp->camera()->enlarge(pEvent->delta() > 0);
+        return;
+    }
+    const int step = pEvent->delta() > 0 ? 1 : -1;
     if(m_pView->manualTilePaintingEnabled())
     {
-        m_pView->addTileRotation(pEvent->delta() > 0 ? 1 : -1);
+        m_pView->addTileRotation(step);
         bool bLand = CScene::getInstance()->isLandTileEditMode();
         m_pView->updatePreviewTile(m_pView->getTerrainPos(bLand), bLand);
         CStatusConnector::getInstance()->updateStatus(
-            "brush.ico", "Manual atlas tile rotation changed. LMB-paint, RMB-pick, Wheel-rotate.");
+            "brush.ico", "Manual atlas tile rotation changed. Alt+Wheel rotates; Wheel controls the camera.");
         return;
     }
+    m_pView->adjustTerrainPaintSize(step);
     CStatusConnector::getInstance()->updateStatus(
-        "brush.ico", "Rotation is automatic in semantic terrain painting.");
+        "brush.ico", "Semantic brush size changed. Alt+Wheel resizes; Wheel controls the camera.");
 }

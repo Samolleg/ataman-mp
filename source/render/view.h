@@ -177,6 +177,7 @@ public:
     void setTile(QVector3D posOnLand, bool bLand = true);
     void updatePreviewTile(QVector3D posOnLand, bool bLand = true);
     void addTileRotation(int step);
+    void adjustTerrainPaintSize(int steps);
     bool manualTilePaintingEnabled() const;
     void setDrawWater(bool bDraw = true);
     void setDrawLand(bool bDraw = true);
@@ -217,6 +218,7 @@ private:
     void logOpenGlData();
     void checkOpenGlError();
     void drawTilePreview(QOpenGLShaderProgram* program);
+    void drawTerrainPaintOutline(QOpenGLShaderProgram* program);
     void updateTileForm(bool bGenerateNewTable = false);
     void saveSession();
     bool closeMobScriptWindow(CMob* mob);
@@ -319,6 +321,9 @@ private:
     quint32 m_terrainSemanticSeed{0};
     bool m_terrainEditAvailable;
     bool m_tilePaintStrokeActive{false};
+    bool m_terrainPaintOutlineValid{false};
+    int m_terrainPaintOutlineX{0};
+    int m_terrainPaintOutlineY{0};
     bool m_sculptStrokeActive;
     QVector3D m_lastSculptPoint;
     QVector3D m_lastSculptStampPoint;
