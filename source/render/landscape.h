@@ -66,7 +66,7 @@ public:
     void drawTileGrid(QOpenGLShaderProgram* program);
     void drawWater(QOpenGLShaderProgram* program);
     void drawTilePreview(QOpenGLShaderProgram* program);
-    bool projectPt(QVector3D& point);
+    bool projectPt(QVector3D& point, bool land = true);
     bool projectPt(QVector<QVector3D>& aPoint);
     void projectPositions(QList<CNode*>& aNode);
     void projectPosition(CNode* pNode);
@@ -83,7 +83,8 @@ public:
     void setAnimTils(const QVector<SAnimTile>& arrAnimTile) {m_aAnimTile = arrAnimTile;}
     void updateSectorDrawData(int xSec, int ySec);
     bool previewCanonicalSector(int xSec, int ySec, const QByteArray& payload);
-    bool previewCanonicalTile(int globalX, int globalY, bool land, quint16 packedTile);
+    bool previewCanonicalTile(int globalX, int globalY, bool land, quint16 packedTile,
+                              bool updateSector = true);
     void setDirty(bool bDirty) {m_bDirty = bDirty;}
     bool isDirty() const {return m_bDirty;}
     const QString& mapName() const {return m_innerMapName;}

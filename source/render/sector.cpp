@@ -656,8 +656,11 @@ void CSector::drawTileGrid(QOpenGLShaderProgram* program)
     glDrawElements(GL_LINES, 256 * 8, GL_UNSIGNED_SHORT, nullptr);
 }
 
-bool CSector::projectPt(QVector3D& point)
+bool CSector::projectPt(QVector3D& point, bool land)
 {
+    QVector<QVector<CTile>>& tiles = land ? m_arrLand : m_arrWater;
+    if(tiles.isEmpty())
+        return false;
     QVector3D origin(point.x()-m_index.x*32.0f, point.y()-m_index.y*32.0f, 0.0f); // point in sector local coords
 
     int approxDeviation = 2;
@@ -672,7 +675,7 @@ bool CSector::projectPt(QVector3D& point)
     for(int row(yMin); row<yMax; ++row)
         for(int col(xMin); col<xMax; ++col)
         {
-            if(m_arrLand[row][col].isProjectPoint(origin))
+            if(tiles[row][col].isProjectPoint(origin))
             {
                 point.setZ(point.z() + origin.z());
                 return true;

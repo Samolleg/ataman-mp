@@ -105,8 +105,8 @@ public:
     void attachLandscapeTools(CLandscapeTools* tools);
     void activateLandscapeTilePainting();
     void prepareLandscapeTilePainting(bool showTools = true);
-    void toggleLandscapeTilePainting();
     void setLandscapeEditingEnabled(bool enabled);
+    void closeLandscapeTools();
     void setTileGridVisible(bool visible) { m_tileGridVisible = visible; update(); }
     CSettings* settings() {Q_ASSERT(m_pSettings); return m_pSettings;}
     int select(const SSelect& selectParam, bool bAddToSelect = false);
@@ -230,6 +230,7 @@ private:
     void finishSculptStroke();
     void syncLandscapeToolState();
     void clearLandscapeBrushSelection();
+    void ensureManualTileSelection();
     void rebuildTerrainAutoCatalog();
 
 
@@ -262,7 +263,7 @@ signals:
     void updateMainWindowTitle(eTitleTypeData, QString);
     void showOutlinerSignal(bool bShow);
     void showLandscapeToolsSignal();
-    void toggleLandscapeToolsSignal();
+    void hideLandscapeToolsSignal();
     void mobScriptChanged(CMob* mob, const QString& displayScript);
     void externalMobScriptImported(CMob* mob, const QString& displayScript);
     void selectionStateChanged(bool hasSelection);
@@ -326,6 +327,11 @@ private:
     bool m_terrainPaintOutlineValid{false};
     int m_terrainPaintOutlineX{0};
     int m_terrainPaintOutlineY{0};
+    QPoint m_lastTerrainPaintCenter;
+    bool m_lastTerrainPaintCenterValid{false};
+    bool m_lastTerrainPaintLayerLand{true};
+    bool m_sculptOutlineValid{false};
+    QVector3D m_sculptOutlineCenter;
     bool m_sculptStrokeActive;
     QVector3D m_lastSculptPoint;
     QVector3D m_lastSculptStampPoint;

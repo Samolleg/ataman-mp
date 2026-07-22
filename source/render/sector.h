@@ -46,7 +46,7 @@ public:
     void drawWater(QOpenGLShaderProgram* program);
     void setIndex(UI2& index) {m_index = index; updatePosition(); }
     const UI2& index() {return m_index;}
-    bool projectPt(QVector3D& origin);
+    bool projectPt(QVector3D& origin, bool land = true);
     bool pickTile(int& row, int& col, QVector3D& point, bool bLand = true);
     void setTile(QVector3D& point, int index, int rotNum, bool bLand = true, int matIndex = 0);
     //void setTile(const STileLocation tileLoc, const STileInfo tileInfo);

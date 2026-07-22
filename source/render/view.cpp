@@ -257,13 +257,13 @@ void CView::prepareLandscapeTilePainting(bool showTools)
 {
     if(!m_landscapeTools)
         return;
-    if(showTools)
-        emit showLandscapeToolsSignal();
     if(m_landscapeTools->editMode() != ELandscapeEditMode::TilePaint)
         clearLandscapeBrushSelection();
     m_landscapeTools->activateMode(ELandscapeEditMode::TilePaint, false);
     m_lastLandscapeEditMode = int(ELandscapeEditMode::TilePaint);
     CScene::getInstance()->setLandTileEditMode(true);
+    if(showTools)
+        emit showLandscapeToolsSignal();
     emit updateMsg(tr("Land tile painting enabled. Choose an atlas tile in Landscape Tools."));
 }
 
@@ -274,8 +274,15 @@ void CView::setLandscapeEditingEnabled(bool enabled)
     if(!enabled)
     {
         m_terrainPaintOutlineValid = false;
+        m_sculptOutlineValid = false;
         update();
     }
+    syncLandscapeToolState();
+}
+
+void CView::closeLandscapeTools()
+{
+    emit hideLandscapeToolsSignal();
 }
 
 void CView::syncLandscapeToolState()
@@ -284,6 +291,8 @@ void CView::syncLandscapeToolState()
     if(m_landscapeTools)
     {
         const ELandscapeEditMode current = m_landscapeTools->editMode();
+        if(current != ELandscapeEditMode::Sculpt)
+            m_sculptOutlineValid = false;
         if(m_lastLandscapeEditMode >= 0
            && landscapeModeChangeRequiresBrushReset(
                ELandscapeEditMode(m_lastLandscapeEditMode), current))
@@ -316,6 +325,7 @@ void CView::syncLandscapeToolState()
         emit updateMsg(tr("Overlay painting enabled for existing overlay cells only."));
         break;
     }
+    ensureManualTileSelection();
 }
 
 void CView::clearLandscapeBrushSelection()
@@ -329,10 +339,52 @@ void CView::clearLandscapeBrushSelection()
     unsetCursor();
 }
 
-void CView::toggleLandscapeTilePainting()
+void CView::ensureManualTileSelection()
 {
-    prepareLandscapeTilePainting(false);
-    emit toggleLandscapeToolsSignal();
+    if(!m_landscapeTools || !m_pTileForm
+       || !m_landscapeTools->manualTileSelectionEnabled()
+       || !m_terrainAtlasAnalysis.usable)
+        return;
+    const ETerrainTileLayer layer = m_landscapeTools->editMode()
+            == ELandscapeEditMode::OverlayPaint
+        ? ETerrainTileLayer::Overlay : ETerrainTileLayer::Land;
+    const CTerrainTransitionCatalog& catalog = layer == ETerrainTileLayer::Overlay
+            && m_landscapeTools->landFamiliesAllowedInOverlay()
+        ? m_terrainAtlasAnalysis.overlayCatalogWithLandFamilies()
+        : m_terrainAtlasAnalysis.catalog(layer);
+    int selectedIndex = -1;
+    int selectedRotation = 0;
+    m_pTileForm->getSelectedTile(selectedIndex, selectedRotation);
+    bool selectedValid = false;
+    if(selectedIndex >= 0)
+    {
+        SMprPackedTile selected;
+        selected.atlasIndex = quint8(selectedIndex / 64);
+        selected.tileIndex = quint8(selectedIndex % 64);
+        selected.rotation = quint8(selectedRotation & 3);
+        catalog.signatureForPacked(selected.encode(), &selectedValid);
+    }
+    if(selectedValid)
+        return;
+    for(int slot = 0; slot < m_pTileForm->tileImages().size(); ++slot)
+    {
+        SMprPackedTile candidate;
+        candidate.atlasIndex = quint8(slot / 64);
+        candidate.tileIndex = quint8(slot % 64);
+        bool found = false;
+        catalog.signatureForPacked(candidate.encode(), &found);
+        if(!found)
+            continue;
+        m_pTileForm->selectTile(slot);
+        onChangeCursorTile(m_pTileForm->tileWithRot(slot));
+        if(m_hasViewportMousePos)
+        {
+            const bool land = layer == ETerrainTileLayer::Land;
+            updatePreviewTile(getTerrainPos(m_lastViewportMousePos.x(),
+                                            m_lastViewportMousePos.y(), land), land);
+        }
+        return;
+    }
 }
 
 void CView::updateReadState(EReadState state)
@@ -547,7 +599,7 @@ void CView::paintGL()
 void CView::drawTestOverlaysOpenGl()
 {
     if((m_testEntranceRectangles.isEmpty() && !m_testSpawnMarkerValid
-        && !m_terrainPaintOutlineValid)
+        && !m_terrainPaintOutlineValid && !m_sculptOutlineValid)
        || width() <= 0 || height() <= 0)
         return;
 
@@ -1306,12 +1358,42 @@ void CView::updateTileForm(bool bGenerateNewTable)
 
 void CView::drawTerrainPaintOutline(QOpenGLShaderProgram* program)
 {
-    if(!m_terrainPaintOutlineValid || !m_landscapeTools
-       || !m_pLand || !m_pLand->isMprLoad()
-       || !m_landscapeTools->editingEnabled()
-       || m_landscapeTools->editMode() == ELandscapeEditMode::Sculpt
-       || m_landscapeTools->manualTileSelectionEnabled())
+    if(!m_landscapeTools || !m_pLand || !m_pLand->isMprLoad()
+       || !m_landscapeTools->editingEnabled())
         return;
+    const int position = program->attributeLocation("a_position");
+    if(position < 0)
+        return;
+    if(m_landscapeTools->editMode() == ELandscapeEditMode::Sculpt)
+    {
+        if(!m_sculptOutlineValid)
+            return;
+        QVector<QVector3D> circle;
+        constexpr int segments = 64;
+        circle.reserve(segments);
+        const float radius = m_landscapeTools->radius();
+        for(int segment = 0; segment < segments; ++segment)
+        {
+            const float angle = float(segment) * float(2.0 * M_PI / segments);
+            QVector3D point(m_sculptOutlineCenter.x() + qCos(angle) * radius,
+                            m_sculptOutlineCenter.y() + qSin(angle) * radius, 0.0f);
+            if(!m_pLand->projectPt(point))
+                return;
+            point.setZ(point.z() + 0.12f);
+            circle.append(point);
+        }
+        program->setUniformValue("customColor", QVector4D(1.0f, 0.52f, 0.10f, 0.95f));
+        program->setAttributeArray(position, circle.constData());
+        glDepthFunc(GL_LEQUAL);
+        glLineWidth(2.0f);
+        glDrawArrays(GL_LINE_LOOP, 0, circle.size());
+        glLineWidth(1.0f);
+        glDepthFunc(GL_LESS);
+        return;
+    }
+    if(!m_terrainPaintOutlineValid || m_landscapeTools->manualTileSelectionEnabled())
+        return;
+    const bool landLayer = m_landscapeTools->editMode() == ELandscapeEditMode::TilePaint;
     const int radius = qMax(0, int(qRound(m_landscapeTools->paintRadius())));
     const ETerrainTileBrushShape shape = m_landscapeTools->paintShape();
     const auto included = [this, radius, shape](int x, int y)
@@ -1323,11 +1405,12 @@ void CView::drawTerrainPaintOutline(QOpenGLShaderProgram* program)
             : dx * dx + dy * dy <= radius * radius;
     };
     QVector<QVector3D> lines;
-    const auto appendEdge = [this, &lines](float x1, float y1, float x2, float y2)
+    const auto appendEdge = [this, &lines, landLayer](float x1, float y1, float x2, float y2)
     {
         QVector3D first(x1, y1, 0.0f);
         QVector3D second(x2, y2, 0.0f);
-        if(!m_pLand->projectPt(first) || !m_pLand->projectPt(second))
+        if(!m_pLand->projectPt(first, landLayer)
+           || !m_pLand->projectPt(second, landLayer))
             return;
         first.setZ(first.z() + 0.12f);
         second.setZ(second.z() + 0.12f);
@@ -1354,10 +1437,9 @@ void CView::drawTerrainPaintOutline(QOpenGLShaderProgram* program)
     }
     if(lines.isEmpty())
         return;
-    const int position = program->attributeLocation("a_position");
-    if(position < 0)
-        return;
-    program->setUniformValue("customColor", QVector4D(1.0f, 0.72f, 0.08f, 0.95f));
+    program->setUniformValue("customColor", landLayer
+        ? QVector4D(1.0f, 0.72f, 0.08f, 0.95f)
+        : QVector4D(0.10f, 0.82f, 1.0f, 0.95f));
     program->setAttributeArray(position, lines.constData());
     glDepthFunc(GL_LEQUAL);
     glLineWidth(2.0f);
@@ -2529,6 +2611,14 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
     STerrainTileBrush brush;
     brush.centerX = tileLoc.xSec * 16 + tileLoc.col;
     brush.centerY = tileLoc.ySec * 16 + tileLoc.row;
+    const QPoint brushCenter(brush.centerX, brush.centerY);
+    if(m_tilePaintStrokeActive && m_lastTerrainPaintCenterValid
+       && m_lastTerrainPaintCenter == brushCenter
+       && m_lastTerrainPaintLayerLand == bLand)
+        return;
+    m_lastTerrainPaintCenter = brushCenter;
+    m_lastTerrainPaintCenterValid = true;
+    m_lastTerrainPaintLayerLand = bLand;
     brush.radius = m_landscapeTools->paintRadius();
     brush.shape = m_landscapeTools->paintShape();
     CValidationReport report;
@@ -2782,6 +2872,7 @@ void CView::endTileBrushGroup()
         m_pUndoStack->endMacro();
         m_tilePaintStrokeActive = false;
     }
+    m_lastTerrainPaintCenterValid = false;
     ++m_tileBrushCommandId;
 }
 
@@ -2791,6 +2882,7 @@ void CView::beginTileBrushGroup()
         return;
     m_pUndoStack->beginMacro(tr("Paint terrain tiles"));
     m_tilePaintStrokeActive = true;
+    m_lastTerrainPaintCenterValid = false;
 }
 
 bool CView::applyTerrainTilePreview(const STerrainTileCommand& command, bool forward)
@@ -2803,12 +2895,16 @@ bool CView::applyTerrainTilePreview(const STerrainTileCommand& command, bool for
         ei::log(eLogWarning, "Semantic terrain preview command refused:\n" + report.toText());
         return false;
     }
+    QSet<QPair<int, int>> sectors;
     for(const STerrainTileDelta& delta : command.deltas)
     {
         m_pLand->previewCanonicalTile(delta.globalX, delta.globalY,
             delta.layer == ETerrainTileLayer::Land,
-            forward ? delta.after : delta.before);
+            forward ? delta.after : delta.before, false);
+        sectors.insert(qMakePair(delta.globalX / 16, delta.globalY / 16));
     }
+    for(const QPair<int, int>& sector : sectors)
+        m_pLand->updateSectorDrawData(sector.first, sector.second);
     m_pLand->setDirty(m_terrainEdit.isDirty());
     emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMprDirtyFlag,
                               m_terrainEdit.isDirty() ? "*" : "");
@@ -3262,6 +3358,8 @@ void CView::mousePressEvent(QMouseEvent* event)
     {
         m_sculptStrokeActive = true;
         m_lastSculptPoint = getTerrainPos(event->x(), event->y(), true);
+        m_sculptOutlineCenter = m_lastSculptPoint;
+        m_sculptOutlineValid = true;
         m_lastSculptStampPoint = m_lastSculptPoint;
         m_pUndoStack->beginMacro(tr("Sculpt terrain"));
         sculptTerrainAt(m_lastSculptPoint);
@@ -3436,6 +3534,13 @@ void CView::mouseMoveEvent(QMouseEvent* event)
 {
     m_lastViewportMousePos = event->pos();
     m_hasViewportMousePos = rect().contains(event->pos());
+    if(m_landscapeTools && m_landscapeTools->sculptEnabled()
+       && m_terrainEditAvailable)
+    {
+        m_sculptOutlineCenter = getTerrainPos(event->x(), event->y(), true);
+        m_sculptOutlineValid = true;
+        update();
+    }
     if(m_sculptStrokeActive && (event->buttons() & Qt::LeftButton)
         && m_landscapeTools && m_terrainEditAvailable)
     {

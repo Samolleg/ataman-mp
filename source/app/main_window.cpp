@@ -699,11 +699,12 @@ MainWindow::MainWindow(QWidget* parent) :
         m_landscapeToolsDock->show();
         m_landscapeToolsDock->raise();
     });
-    connect(m_pView, &CView::toggleLandscapeToolsSignal, this, [this]()
+    connect(m_pView, &CView::hideLandscapeToolsSignal,
+            m_landscapeToolsDock, &QDockWidget::hide);
+    connect(m_landscapeToolsDock, &QDockWidget::visibilityChanged, this, [this](bool visible)
     {
-        const bool show = !m_landscapeToolsDock->isVisible();
-        m_landscapeToolsDock->setVisible(show);
-        if(show)
+        m_pView->setLandscapeEditingEnabled(visible);
+        if(visible)
             m_landscapeToolsDock->raise();
     });
 
@@ -1434,6 +1435,19 @@ void MainWindow::createViewportToolbars()
         {
             if(!m_pView)
                 return;
+            if(operation.type == EButtonOpTilebrush)
+            {
+                if(m_landscapeToolsDock->isVisible())
+                    m_landscapeToolsDock->hide();
+                else
+                {
+                    m_pView->prepareLandscapeTilePainting(false);
+                    m_landscapeToolsDock->show();
+                    m_landscapeToolsDock->raise();
+                }
+                m_pView->setFocus();
+                return;
+            }
             if(operation.type == EButtonOpMove && m_customSpawnSelected
                && m_customSpawn.valid && m_customSpawn.custom)
             {
@@ -3181,9 +3195,14 @@ void MainWindow::on_actionMap_parameters_triggered()
 
 void MainWindow::on_tileBrushButton_clicked()
 {
-    m_landscapeToolsDock->show();
-    m_landscapeToolsDock->raise();
-    m_pView->activateLandscapeTilePainting();
+    if(m_landscapeToolsDock->isVisible())
+        m_landscapeToolsDock->hide();
+    else
+    {
+        m_pView->prepareLandscapeTilePainting(false);
+        m_landscapeToolsDock->show();
+        m_landscapeToolsDock->raise();
+    }
 }
 
 

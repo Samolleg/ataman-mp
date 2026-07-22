@@ -67,7 +67,7 @@ signals:
     void terrainVisibilityChanged(bool mainTerrainVisible, bool overlaysVisible);
 
 private:
-    QCheckBox* m_enable;
+    bool m_editingActive{false};
     QComboBox* m_mode;
     QComboBox* m_tool;
     QDoubleSpinBox* m_radius;

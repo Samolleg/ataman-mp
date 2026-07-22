@@ -349,7 +349,7 @@ void CLandscape::drawWater(QOpenGLShaderProgram *program)
             ySec->drawWater(program);
 }
 
-bool CLandscape::projectPt(QVector3D& point)
+bool CLandscape::projectPt(QVector3D& point, bool land)
 {
     int xIndex = int(point.x()/32.0f);
     int yIndex = int(point.y()/32.0f);
@@ -363,7 +363,7 @@ bool CLandscape::projectPt(QVector3D& point)
         return false;
     }
     //Q_ASSERT(yIndex < m_aSector.size() && xIndex < m_aSector.first().size());
-    return m_aSector[yIndex][xIndex]->projectPt(point);
+    return m_aSector[yIndex][xIndex]->projectPt(point, land);
 }
 
 bool CLandscape::projectPt(QVector<QVector3D>& aPoint)
@@ -474,7 +474,8 @@ bool CLandscape::previewCanonicalSector(int xSec, int ySec, const QByteArray& pa
     return m_aSector[ySec][xSec]->previewCanonicalPayload(payload);
 }
 
-bool CLandscape::previewCanonicalTile(int globalX, int globalY, bool land, quint16 packedTile)
+bool CLandscape::previewCanonicalTile(int globalX, int globalY, bool land,
+                                      quint16 packedTile, bool updateSector)
 {
     if(globalX < 0 || globalY < 0)
         return false;
@@ -492,7 +493,8 @@ bool CLandscape::previewCanonicalTile(int globalX, int globalY, bool land, quint
     const int col = globalX % 16;
     const SMprPackedTile decoded = SMprPackedTile::decode(packedTile);
     tiles[row][col].setTile(decoded.atlasSlot(), decoded.rotation);
-    m_aSector[ySec][xSec]->updateDrawData();
+    if(updateSector)
+        m_aSector[ySec][xSec]->updateDrawData();
     return true;
 }
 

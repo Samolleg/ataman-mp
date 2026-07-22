@@ -76,13 +76,6 @@ void CSelect::keyPress(COperation *pOp, EKeyCode key)
         delete this;
         break;
     }
-    case eKey_B:
-    {
-        m_pView->toggleLandscapeTilePainting();
-        pOp->setCurrent(new CTileBrush(m_pView));
-        delete this;
-        break;
-    }
     case eKey_T:
     {
         if (pOp->keyManager()->isPressed(eKey_Ctrl))
@@ -1057,9 +1050,7 @@ void CTileBrush::keyPress(COperation* pOp, EKeyCode key)
         m_pView->onRestoreCursor();
         m_pView->setPreviewTile(false);
         m_pView->showOutliner(true);
-        m_pView->setLandscapeEditingEnabled(false);
-        pOp->setCurrent(new CSelect(m_pView));
-        delete this;
+        m_pView->closeLandscapeTools();
         break;
     }
     case eKey_J:
@@ -1070,11 +1061,6 @@ void CTileBrush::keyPress(COperation* pOp, EKeyCode key)
     case eKey_M:
     {
         m_pView->setDrawLand(!m_pView->drawLand());
-        break;
-    }
-    case eKey_B:
-    {
-        m_pView->toggleLandscapeTilePainting();
         break;
     }
     case eKey_1 ... eKey_8:
@@ -1176,6 +1162,7 @@ void CTileBrush::mouseMoveEvent(COperation* pOp, QMouseEvent* pEvent)
             }
             m_lastLandPos = landPos;
         }
+        m_pView->updatePreviewTile(landPos, bLand);
 
     }
     else

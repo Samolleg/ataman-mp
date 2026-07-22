@@ -21,6 +21,28 @@ mingw32-make -j4
 
 Build into a separate shadow-build directory for normal development.
 
+### Windows paths containing Cyrillic or other non-ASCII characters
+
+The Qt 5.12 MinGW resource compiler used by the supported toolchain cannot
+reliably open the generated absolute icon path when the repository path
+contains Cyrillic characters. Build through an ASCII-only directory junction;
+do not copy or relocate the working tree just for the build:
+
+```powershell
+$source = 'C:\path\containing-Cyrillic\ei-mapper-endurance'
+$link = 'C:\build-links\ei-mapper-endurance'
+New-Item -ItemType Junction -Path $link -Target $source
+Set-Location "$link\build-release"
+qmake ..\ei_maper.pro CONFIG+=release
+mingw32-make -o Makefile.Release -f Makefile.Release release/EIMapperEndurance.exe -j4
+```
+
+The `-o Makefile.Release` option is intentional for junction builds. It keeps
+MinGW Make from repeatedly regenerating the makefile after qmake canonicalizes
+the junction target. If a build command is interrupted, verify that no orphaned
+`mingw32-make` or `qmake` processes remain before retrying. The junction and
+shadow-build directory are disposable; tracked source remains in the worktree.
+
 For unattended build verification, use `--ui-widget-check`, the headless MOB/MPR
 commands below, or the non-dialog `--version` option. Validation must not launch
 the editor without an explicit file or leave About/version windows open.

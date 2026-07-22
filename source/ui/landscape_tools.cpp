@@ -12,7 +12,6 @@
 
 CLandscapeTools::CLandscapeTools(QWidget* parent)
     : QWidget(parent)
-    , m_enable(new QCheckBox(tr("Enable landscape editing"), this))
     , m_mode(new QComboBox(this))
     , m_tool(new QComboBox(this))
     , m_radius(new QDoubleSpinBox(this))
@@ -39,7 +38,6 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     warning->setWordWrap(true);
     warning->setStyleSheet("QLabel { color: #b06000; font-weight: bold; }");
     layout->addWidget(warning);
-    layout->addWidget(m_enable);
     m_showMainTerrain->setChecked(true);
     m_showOverlays->setChecked(true);
     layout->addWidget(m_showMainTerrain);
@@ -91,7 +89,6 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     paintLayout->addWidget(paintHelp);
     m_tilesetStatus->setWordWrap(true);
     paintLayout->addWidget(m_tilesetStatus);
-    m_paintTerrainType->addItem(tr("Choose a material..."), QVariant());
     m_paintRadius->setRange(1.0, 33.0);
     m_paintRadius->setValue(1.0);
     m_paintRadius->setSingleStep(1.0);
@@ -127,7 +124,6 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
         const qint32 terrainType = paintTerrainType(&selected);
         emit paintTerrainTypeChanged(selected ? terrainType : -1);
     });
-    connect(m_enable, &QCheckBox::toggled, this, &CLandscapeTools::editingStateChanged);
     connect(m_showUnderwaterFamilies, &QCheckBox::toggled, this,
             [this](bool) { refreshPaintTerrainTypes(); });
     connect(m_allowLandFamiliesInOverlay, &QCheckBox::toggled, this,
@@ -136,10 +132,7 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     {
         m_paintTerrainType->setEnabled(!manual);
         if(manual)
-        {
-            const QSignalBlocker blocker(m_paintTerrainType);
             m_paintTerrainType->setCurrentIndex(0);
-        }
         emit paintTerrainTypeChanged(-1);
         emit editingStateChanged();
     });
@@ -159,7 +152,7 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     updateModeVisibility();
 }
 
-bool CLandscapeTools::editingEnabled() const { return m_enable->isChecked(); }
+bool CLandscapeTools::editingEnabled() const { return m_editingActive; }
 ELandscapeEditMode CLandscapeTools::editMode() const
 {
     return static_cast<ELandscapeEditMode>(m_mode->currentIndex());
@@ -180,9 +173,8 @@ void CLandscapeTools::activateMode(ELandscapeEditMode mode, bool notify)
 {
     {
         const QSignalBlocker modeBlocker(m_mode);
-        const QSignalBlocker enableBlocker(m_enable);
         m_mode->setCurrentIndex(int(mode));
-        m_enable->setChecked(true);
+        m_editingActive = true;
     }
     updateModeVisibility();
     if(notify)
@@ -190,13 +182,11 @@ void CLandscapeTools::activateMode(ELandscapeEditMode mode, bool notify)
 }
 void CLandscapeTools::setEditingEnabled(bool enabled, bool notify)
 {
+    if(m_editingActive == enabled)
+        return;
+    m_editingActive = enabled;
     if(notify)
-        m_enable->setChecked(enabled);
-    else
-    {
-        const QSignalBlocker blocker(m_enable);
-        m_enable->setChecked(enabled);
-    }
+        emit editingStateChanged();
 }
 void CLandscapeTools::updateModeVisibility()
 {
@@ -262,6 +252,7 @@ void CLandscapeTools::setPaintTerrainTypes(
 }
 void CLandscapeTools::refreshPaintTerrainTypes()
 {
+    const QVariant previous = m_paintTerrainType->currentData();
     QVector<QPair<qint32, QString>> terrainTypes =
         editMode() == ELandscapeEditMode::OverlayPaint
             ? m_overlayPaintTypes : m_landPaintTypes;
@@ -274,11 +265,15 @@ void CLandscapeTools::refreshPaintTerrainTypes()
         terrainTypes += m_landPaintTypes;
         terrainTypes += m_underwaterPaintTypes;
     }
-    const QSignalBlocker blocker(m_paintTerrainType);
-    m_paintTerrainType->clear();
-    m_paintTerrainType->addItem(tr("Choose a material..."), QVariant());
-    for(const auto& terrainType : terrainTypes)
-        m_paintTerrainType->addItem(terrainType.second, terrainType.first);
+    {
+        const QSignalBlocker blocker(m_paintTerrainType);
+        m_paintTerrainType->clear();
+        for(const auto& terrainType : terrainTypes)
+            m_paintTerrainType->addItem(terrainType.second, terrainType.first);
+        const int previousIndex = previous.isValid()
+            ? m_paintTerrainType->findData(previous) : -1;
+        m_paintTerrainType->setCurrentIndex(previousIndex >= 0 ? previousIndex : 0);
+    }
     if(!m_paintCatalogStatus.isEmpty())
         m_tilesetStatus->setText(m_paintCatalogStatus);
     else
@@ -286,11 +281,15 @@ void CLandscapeTools::refreshPaintTerrainTypes()
             ? tr("No registered materials are available for this layer.")
             : tr("Namespace template ready: %1 material(s) for this layer.")
                   .arg(terrainTypes.size()));
+    bool selected = false;
+    const qint32 terrainType = paintTerrainType(&selected);
+    emit paintTerrainTypeChanged(selected ? terrainType : -1);
 }
 bool CLandscapeTools::selectPaintTerrainType(qint32 terrainType)
 {
     const int index = m_paintTerrainType->findData(terrainType);
-    m_paintTerrainType->setCurrentIndex(index >= 0 ? index : 0);
+    if(m_paintTerrainType->count() > 0)
+        m_paintTerrainType->setCurrentIndex(index >= 0 ? index : 0);
     return index >= 0;
 }
 bool CLandscapeTools::underwaterFamiliesVisible() const
