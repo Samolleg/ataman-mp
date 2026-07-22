@@ -478,6 +478,13 @@
             </widget>
            </item>
            <item>
+            <widget class="QCheckBox" name="renderTextureMipmapping">
+             <property name="text"><string>Texture mipmapping</string></property>
+             <property name="toolTip"><string>Uses authored terrain mip levels with trilinear filtering to reduce distant landscape shimmer. Character and equipment atlases keep their compatibility sampling.</string></property>
+             <property name="checked"><bool>true</bool></property>
+            </widget>
+           </item>
+           <item>
             <widget class="QCheckBox" name="overrideWorldTime">
              <property name="text"><string>Preview time override</string></property>
              <property name="toolTip"><string>Overrides the active MOB time for viewport preview only; it does not edit the map.</string></property>

@@ -11,6 +11,7 @@
 #include <QJsonArray>
 #include <QFile>
 #include <QTextCodec>
+#include <limits>
 
 #include "res_file.h"
 #include "utils.h"
@@ -1221,11 +1222,51 @@ int CTextureList::extractMmpToDxt1(QImage& outImage, const QString textureName)
 
 struct STexSpecified
 {
-    STexSpecified(): startPos(76){}
     SMmpHeader header;
     QByteArray data;
-    int startPos;
+    int selectedMip{0};
 };
+
+namespace {
+int dxt1MipBytes(int width, int height)
+{
+    return qMax(1, (width + 3) / 4) * qMax(1, (height + 3) / 4) * 8;
+}
+
+int dxt1MipOffset(const SMmpHeader& header, int mipLevel)
+{
+    int offset = header.size();
+    int width = header.m_width;
+    int height = header.m_height;
+    for(int level = 0; level < mipLevel; ++level)
+    {
+        offset += dxt1MipBytes(width, height);
+        width = qMax(1, width / 2);
+        height = qMax(1, height / 2);
+    }
+    return offset;
+}
+
+QByteArray combineTerrainMip(const QVector<STexSpecified>& parts, int outputLevel,
+                             int tileSize)
+{
+    const int blocksWide = qMax(1, (tileSize + 3) / 4);
+    const int blocksHigh = qMax(1, (tileSize + 3) / 4);
+    const int rowBytes = blocksWide * 8;
+    QByteArray combined;
+    combined.reserve(rowBytes * blocksHigh * parts.size());
+    for(int blockRow = 0; blockRow < blocksHigh; ++blockRow)
+    {
+        for(const STexSpecified& part : parts)
+        {
+            const int offset = dxt1MipOffset(part.header,
+                part.selectedMip + outputLevel) + blockRow * rowBytes;
+            combined.append(part.data.mid(offset, rowBytes));
+        }
+    }
+    return combined;
+}
+}
 
 QOpenGLTexture* CTextureList::buildLandTex(const QString& name, int expectedTexCount, int& texCount)
 {
@@ -1303,53 +1344,70 @@ QOpenGLTexture* CTextureList::buildLandTex(const QString& name, int expectedTexC
     }
 
     texCount = aPart.size();
-    //choose mipMap
-    int curMipMap(0), texSize(0), nByte(0);
+    // Select the authored level matching the smallest source tile. Sources in
+    // one map can have different base resolutions, but all output levels must
+    // line up in one horizontal atlas.
+    int outputMipCount = std::numeric_limits<int>::max();
     for(auto& part: aPart)
     {
-        curMipMap = part.header.m_width/minTexSize/2;
-        texSize = part.header.m_width;
-        Q_ASSERT(curMipMap < part.header.m_mipcount);
-        for(int i(0); i<curMipMap; ++i)
+        int size = part.header.m_width;
+        while(size > minTexSize && part.selectedMip + 1 < part.header.m_mipcount)
         {
-            nByte = texSize*texSize/2;
-            part.startPos += nByte;
-            texSize /= 2;
+            size = qMax(1, size / 2);
+            ++part.selectedMip;
         }
-
+        Q_ASSERT(size == minTexSize);
+        outputMipCount = qMin(outputMipCount,
+            part.header.m_mipcount - part.selectedMip);
     }
-    //combine texture data;
-    QByteArray combineTextureData;
-    const int rowSizeByte = 2*minTexSize; //8 byte == 1 block, minTexSize/4 - block count in row
-    const int colSizeByte = rowSizeByte*minTexSize/4;
-    for(int curByte(0); curByte<colSizeByte; curByte+=rowSizeByte) // todo: calc row bytes for 1 mipLevel
-    {
-        for(auto& part:aPart)
-        {
-            combineTextureData.append(part.data.mid(part.startPos, rowSizeByte));
-            part.startPos += rowSizeByte;
-        }
-    }
+    int blockSafeMipCount = 0;
+    for(int size = minTexSize; size >= 4; size /= 2)
+        ++blockSafeMipCount;
+    outputMipCount = qMax(1, qMin(outputMipCount, blockSafeMipCount));
+    QVector<QByteArray> combinedMips;
+    combinedMips.reserve(outputMipCount);
+    for(int level = 0; level < outputMipCount; ++level)
+        combinedMips.append(combineTerrainMip(aPart, level,
+            qMax(1, minTexSize >> level)));
 
     ei::log(eLogInfo, QString("Uploading terrain atlas map:%1 parts:%2 dimensions:%3x%4 compressedBytes:%5")
-            .arg(name).arg(texCount).arg(minTexSize * texCount).arg(minTexSize).arg(combineTextureData.size()));
+            .arg(name).arg(texCount).arg(minTexSize * texCount).arg(minTexSize)
+            .arg(combinedMips.first().size()));
     ei::setCrashContext("mpr/terrain-atlas/opengl-create:" + name);
     QOpenGLTexture* texture = new QOpenGLTexture(QOpenGLTexture::Target2D);
-    texture->setMinificationFilter(QOpenGLTexture::NearestMipMapNearest);
-    texture->setMagnificationFilter(QOpenGLTexture::NearestMipMapNearest);
+    texture->setMinificationFilter(m_terrainMipmappingEnabled
+        ? QOpenGLTexture::NearestMipMapLinear : QOpenGLTexture::Nearest);
+    texture->setMagnificationFilter(QOpenGLTexture::Nearest);
     texture->setWrapMode(QOpenGLTexture::Repeat);
     texture->setFormat(QOpenGLTexture::TextureFormat::RGBA_DXT1); //todo: read texture format from file. EI can use both dxt3 and dxt1
-    //texture->setMipLevels(4);
+    texture->setMipLevels(outputMipCount);
     texture->setSize(minTexSize*texCount, minTexSize);
     ei::setCrashContext("mpr/terrain-atlas/opengl-allocate:" + name);
     texture->allocateStorage(QOpenGLTexture::RGBA, QOpenGLTexture::UInt8);
-    const int size = minTexSize*minTexSize*texCount/2;
     ei::setCrashContext("mpr/terrain-atlas/opengl-upload:" + name);
-    texture->setCompressedData(0, 0, size, combineTextureData.data());
+    for(int level = 0; level < combinedMips.size(); ++level)
+        texture->setCompressedData(level, 0, combinedMips[level].size(),
+                                   combinedMips[level].constData());
     m_aTexture[cacheKey] = texture;
-    ei::log(eLogInfo, QString("Terrain atlas set ready map:%1 expected:%2 loaded:%3")
-            .arg(name).arg(expectedTexCount).arg(texCount));
+    m_terrainTextures.insert(texture);
+    ei::log(eLogInfo, QString("Terrain atlas set ready map:%1 expected:%2 loaded:%3 mips:%4")
+            .arg(name).arg(expectedTexCount).arg(texCount).arg(outputMipCount));
     return texture;
+}
+
+void CTextureList::setTerrainMipmappingEnabled(bool enabled)
+{
+    if(m_terrainMipmappingEnabled == enabled)
+        return;
+    m_terrainMipmappingEnabled = enabled;
+    for(QOpenGLTexture* texture : m_terrainTextures)
+    {
+        if(!texture || !texture->isCreated())
+            continue;
+        texture->setMinificationFilter(enabled
+            ? QOpenGLTexture::NearestMipMapLinear : QOpenGLTexture::Nearest);
+        texture->setMagnificationFilter(QOpenGLTexture::Nearest);
+    }
 }
 
 void CTextureList::refreshConfiguredSources()

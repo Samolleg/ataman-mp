@@ -85,7 +85,7 @@ struct SMmpHeader
     int m_height;
     int m_mipcount;
     uint m_format;
-    int size() {return 76;}
+    int size() const {return 76;}
 
     friend QDataStream& operator >> (QDataStream& data, SMmpHeader& header)
     {
@@ -125,6 +125,11 @@ public:
     QImage layeredTextureImage(const QStringList& layerNames, const QString& modelName,
                                QString* diagnostic = nullptr);
     QOpenGLTexture* buildLandTex(const QString& name, int expectedTexCount, int& texCount);
+    // Terrain atlases have an authored DXT mip chain. This only changes the
+    // terrain sampler; character/equipment atlases deliberately remain on
+    // their conservative non-mipmapped path because their small islands can
+    // disappear when filtered.
+    void setTerrainMipmappingEnabled(bool enabled);
     QOpenGLTexture* textureDefault();
     ERenderMaterialClass materialClass(QOpenGLTexture* texture) const;
     void attachSettings(CSettings* pSettings) {m_pSettings = pSettings;};
@@ -150,6 +155,8 @@ private:
     QMap<QString, QOpenGLTexture*> m_aTexture;
     QMap<QString, QImage> m_aTextureImages;
     QMap<QOpenGLTexture*, ERenderMaterialClass> m_textureMaterialClasses;
+    QSet<QOpenGLTexture*> m_terrainTextures;
+    bool m_terrainMipmappingEnabled{true};
     QSet<QString> m_missingTextureNames;
     CSettings* m_pSettings;
     QList<QString> m_arrCellComboBox; //optimization for cell widget

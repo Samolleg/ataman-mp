@@ -775,6 +775,20 @@ void CView::initializeGL()
         delete m_dynamicShadowFbo;
         m_dynamicShadowFbo = nullptr;
     }
+    else
+    {
+        // Packed RGBA depth must never be interpolated channel-by-channel.
+        // The receiver performs its own 3x3 PCF over nearest depth samples.
+        for(QOpenGLFramebufferObject* shadowTarget : {m_shadowFbo, m_dynamicShadowFbo})
+        {
+            glBindTexture(GL_TEXTURE_2D, shadowTarget->texture());
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        }
+        glBindTexture(GL_TEXTURE_2D, 0);
+    }
     m_shadowUpdateTimer.start();
     checkOpenGlError();
 
@@ -835,12 +849,21 @@ void CView::drawSkybox(const QMatrix4x4& cameraMatrix,
     skyView(0, 3) = 0.0f;
     skyView(1, 3) = 0.0f;
     skyView(2, 3) = 0.0f;
+    // The authored cylinder starts at z=0. Keeping that ring on the eye plane
+    // exposed a sharp editor-only horizon. Lower it by one authored ring so
+    // the cloud field continues below the horizon as it does in-game; the
+    // lower two rings are blended into the map fog in skybox.fsh.
+    skyView.translate(0.0f, 0.0f, -6.95752f);
     skyView.rotate(environment.skyRotationDegrees, 0.0f, 0.0f, 1.0f);
     m_skyProgram.setUniformValue("u_viewMmatrix", skyView);
     m_skyProgram.setUniformValue("u_projMmatrix", m_projection);
     const float tintStrength = qBound(0.3f,
         environment.ambientStrength + environment.sunStrength, 1.0f);
     m_skyProgram.setUniformValue("u_tint", environment.sunColor * tintStrength);
+    m_skyProgram.setUniformValue("u_fogColor", environment.fogColor);
+    const COptBool* fogOption = m_pSettings
+        ? dynamic_cast<const COptBool*>(m_pSettings->opt("renderFog")) : nullptr;
+    m_skyProgram.setUniformValue("u_fogEnabled", !fogOption || fogOption->value());
 
     glDepthMask(GL_FALSE);
     glDepthFunc(GL_LEQUAL);
@@ -883,7 +906,7 @@ void CView::applyEnvironmentUniforms(QOpenGLShaderProgram& program,
     program.setUniformValue("u_fogEnd", environment.fogEnd);
     const QVector3D mapFog = m_pLand && m_pLand->isMprLoad()
         ? QVector3D(float(m_pLand->widthInWorldUnits()),
-                    float(m_pLand->heightInWorldUnits()), 64.0f)
+                    float(m_pLand->heightInWorldUnits()), 32.0f)
         : QVector3D();
     program.setUniformValue("u_mapFog", mapFog);
 
@@ -952,7 +975,7 @@ bool CView::renderShadowMap(const QVector3D& shadowFocus,
     glDisable(GL_BLEND);
     glDisable(GL_ALPHA_TEST);
     glEnable(GL_POLYGON_OFFSET_FILL);
-    glPolygonOffset(2.0f, 4.0f);
+    glPolygonOffset(1.0f, 1.0f);
     const auto beginTarget = [&](QOpenGLFramebufferObject* target,
                                  const QMatrix4x4& projection)
     {
@@ -1284,6 +1307,10 @@ void CView::draw()
     const COptBool* animationOption = m_pSettings
         ? dynamic_cast<const COptBool*>(m_pSettings->opt("animateUnits")) : nullptr;
     const bool animationEnabled = !animationOption || animationOption->value();
+    const COptBool* mipmappingOption = m_pSettings
+        ? dynamic_cast<const COptBool*>(m_pSettings->opt("renderTextureMipmapping")) : nullptr;
+    CTextureList::getInstance()->setTerrainMipmappingEnabled(
+        !mipmappingOption || mipmappingOption->value());
     AnimationFrameContext::instance().beginFrame(cameraPosition,
         QDateTime::currentMSecsSinceEpoch(), animationEnabled);
     const COptBool* cullingOption = m_pSettings

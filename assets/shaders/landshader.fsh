@@ -38,6 +38,12 @@ varying highp vec2 v_texture;
 varying highp vec3 v_worldPosition;
 varying highp float v_viewDepth;
 
+float unpackShadowDepth(vec4 packed)
+{
+  return dot(packed, vec4(1.0 / 16777216.0, 1.0 / 65536.0,
+                          1.0 / 256.0, 1.0));
+}
+
 float borderFog(vec3 world)
 {
   float border = u_mapFog.z;
@@ -79,16 +85,16 @@ void main(void)
           dynamicProjected.y >= 0.0 && dynamicProjected.y <= 1.0 && dynamicProjected.z <= 1.0;
       if (staticInside || dynamicInside)
       {
-        float bias = max(0.0035 * (1.0 - sunDiffuse), 0.0012);
+        float bias = max(0.00045 * (1.0 - sunDiffuse), 0.00008);
         float visibility = 0.0;
         for (int y = -1; y <= 1; ++y)
           for (int x = -1; x <= 1; ++x)
           {
             vec2 offset = vec2(float(x), float(y));
-            float staticDepth = staticInside ? texture2D(u_staticShadowMap,
-                staticProjected.xy + offset * u_staticShadowTexelSize).r : 1.0;
-            float dynamicDepth = dynamicInside ? texture2D(u_dynamicShadowMap,
-                dynamicProjected.xy + offset * u_dynamicShadowTexelSize).r : 1.0;
+            float staticDepth = staticInside ? unpackShadowDepth(texture2D(u_staticShadowMap,
+                staticProjected.xy + offset * u_staticShadowTexelSize)) : 1.0;
+            float dynamicDepth = dynamicInside ? unpackShadowDepth(texture2D(u_dynamicShadowMap,
+                dynamicProjected.xy + offset * u_dynamicShadowTexelSize)) : 1.0;
             bool staticOccluded = staticInside && staticProjected.z - bias > staticDepth;
             bool dynamicOccluded = dynamicInside && dynamicProjected.z - bias > dynamicDepth;
             visibility += (staticOccluded || dynamicOccluded) ? 0.58 : 1.0;

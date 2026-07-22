@@ -28,6 +28,15 @@ alone.
   **Simple shading**, or resource-driven **Full environment** preview. Moving
   its clock enables the existing transient time override and never edits MOB
   world settings.
+- Map-edge fog reaches full density over one 32-unit landscape tile. The
+  authored sky cylinder is lowered by one of its own vertical rings and its
+  lower two rings blend to the same fog colour, hiding the open-cylinder seam.
+- Terrain atlases upload their authored DXT mip chain. The render-setting
+  toggle changes terrain sampling only; humanoid/equipment atlases retain the
+  established compatibility path.
+- Shadow depth is packed across the RGBA8 target rather than truncated to one
+  eight-bit channel. This preserves contact silhouettes without increasing the
+  4096 static and 2048 animated map allocations.
 
 ## Focused runtime checks
 
@@ -56,6 +65,13 @@ alone.
 9. Switch Unlit, Simple shading, and Full environment in the viewport widget.
    Collapse/restore it and scrub through midnight, morning, noon, and evening.
    Entrance labels and selection overlays must remain authored-colour UI.
+10. At a map edge, confirm full fog begins no farther than one 32-unit tile
+    inward and the lower sky/cloud field blends into exactly the same colour.
+11. Inspect an idle humanoid and held weapon at 04:45, noon, and 16:00. Feet
+    and the weapon must meet their shadow without the former caster-base gap.
+12. Toggle **Texture mipmapping** while viewing distant terrain. Enabled must
+    reduce shimmer/grain without changing character faces, armor, or weapons;
+    disabled must restore nearest level-zero terrain sampling immediately.
 
 ## Known evidence boundary
 
