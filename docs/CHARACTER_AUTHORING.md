@@ -99,6 +99,20 @@ topology-changing item edits.
 
 Current controls prove:
 
+- Base `figures.res` was extracted with 7-Zip 25.01 from NSIS installer
+  `Evil_Islands_rus.exe` SHA-256
+  `143B2543A6A57517B50EB38835338D049105E69EBEC878972C0FC15DC31EB2CB`;
+  the copied archive SHA-256 is
+  `4A5CD30B3E2B0A170A41A7192C2521E45E3FF727E2395F0BDE45C1BC6C8F1E97`.
+  Patched Blender 4.5.12 imports its Base `unhuma` assembly with explicit
+  `BASE -> VANILLA` provenance and 2,752 meshes;
+- patched Blender 3.5.1 + 5.2 imports/exports Base `initwesw1` from that copied
+  archive. Its no-op preserves every renderable expanded-corner position,
+  normal, UV, vertex reference, and bound exactly. A controlled vertex edit
+  changes X by `0.01000000536441803` after float32 storage, producing the
+  expected 32 expanded-corner scalar differences across eight extremes, no
+  normal/UV/topology differences, and a fresh-reopen position hash equal to the
+  edited scene (`5AF1799F4987E8F0F739DBAF217718A01B0C81C4239332D44479B29B08855FFD`);
 - Blender 3.5.1 + 5.2 imports and exports `initwedg8`; its no-op changes normals
   by at most `1.82e-5`, while geometry, UV mapping, hierarchy and bounds agree;
 - patched Blender 4.5.12 + 6.10 imports the complete JMV `unhuma` tree in
