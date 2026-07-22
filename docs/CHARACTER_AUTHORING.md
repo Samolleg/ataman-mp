@@ -205,29 +205,41 @@ source `.blend`; the atlas tool rejects outputs in an input-layer directory.
 
 ## Manual edit procedure
 
-1. Copy the exact source archive/member into an immutable `inputs/` tree. Record
+1. Resolve the exact visible instance before opening Blender. Record the
+   presentation (`InitWeapons` standalone figure versus equipped assembly),
+   character family, hand, archive, outer assembly member, and inner FIG member.
+   Never treat a matching item name or texture as proof that two presentations,
+   families, or hands share geometry.
+2. Copy the exact source archive/member into an immutable `inputs/` tree. Record
    SHA-256, source profile, archive/member name, extraction tool/version, and
    database/MOB references.
-2. Run `scripts/character_asset_report.py INPUT --output STAGE/baseline.json`.
+3. Run `scripts/character_asset_report.py INPUT --output STAGE/baseline.json`.
    Preserve the baseline report beside the staged work.
-3. Import the copied model and, if required, its animation in portable Blender.
+4. Import the copied model and, if required, its animation in portable Blender.
    Preserve exact object/component names, one authored parent tree, texture
    selector, UV coordinates, triangle winding, and vertex ordering.
-4. Geometry edits may move vertices. Do not add/delete/reorder vertices across
-   morph extremes or ANM morph channels. Do not normalize atlas UVs.
-5. For equipment, author a numbered member under the canonical `*00` attachment
+5. Geometry edits may move vertices. Apply an intended fixed-topology edit to
+   every one of the eight FIG extremes when it must survive all complexion
+   interpolation. This propagates only within that FIG: it does not cross from
+   standalone to equipped geometry, between `unhuma`/`unhufe`, or between
+   `rh*`/`lh*`. Do not add/delete/reorder vertices across morph extremes or ANM
+   morph channels. Do not normalize atlas UVs.
+6. For equipment, author a numbered member under the canonical `*00` attachment
    node. Do not bake the attachment rotation into both node and geometry.
-6. For animation, keep 15 Hz logical timing, a closing loop sample, EI
+7. For animation, keep 15 Hz logical timing, a closing loop sample, EI
    child-before-parent rotation composition, root-relative translation, and
    morph frame/vertex counts synchronized with the FIG part.
-7. Export into a new `candidate/` archive. Never append to the immutable input.
-8. Re-open the candidate in a fresh Blender process and run the report again.
+8. Export into a new `candidate/` archive. Never append to the immutable input.
+9. Re-open the candidate in a fresh Blender process and run the report again.
    Compare tree, names, header counts, UV bounds/values, indices, selectors,
    channel counts, frame endpoints, and every untouched member hash.
-9. Inspect composed texture and per-part UVs in Endurance. Test visual and picking
-   poses. Then use a disposable profile/game package for `drawall`, idle frames,
-   distance/orbit, save/load, unload/reload, and graceful exit.
-10. Package only staged deltas, reports, attribution, and rollback instructions.
+10. Test each intended presentation/family/hand independently. For dual wield,
+    equip distinguishable controls or swap hands so a right-only result cannot
+    be mistaken for a complexion/export failure. Inspect composed texture and
+    per-part UVs in Endurance, then use a disposable profile/game package for
+    `drawall`, idle frames, distance/orbit, save/load, unload/reload, and graceful
+    exit.
+11. Package only staged deltas, reports, attribution, and rollback instructions.
 
 ## Automated procedure and report contract
 
