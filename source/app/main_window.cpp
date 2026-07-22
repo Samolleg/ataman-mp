@@ -520,6 +520,7 @@ MainWindow::MainWindow(QWidget* parent) :
     QAction* gameAndModSetup = new QAction(tr("Game and Mod Setup..."), this);
     QAction* compareMobFiles = new QAction(tr("Compare MOB Files..."), this);
     QAction* showUnitTexture = new QAction(tr("Show Selected Unit Final Texture..."), this);
+    QAction* captureShadowDiagnostics = new QAction(tr("Capture Shadow Diagnostics..."), this);
     QAction* validateMobFamily = new QAction(tr("Validate Active MOB Family"), this);
     QAction* validateCurrentMob = new QAction(tr("Validate Current MOB Only"), this);
     QAction* validateSelectedMobs = new QAction(tr("Validate Selected MOB Files..."), this);
@@ -541,6 +542,7 @@ MainWindow::MainWindow(QWidget* parent) :
     m_ui->menuTools->addAction(m_stopMapTestAction);
     m_ui->menuTools->addAction(openBackupFolder);
     m_ui->menuTools->addAction(openLogsFolder);
+    m_ui->menuTools->addAction(captureShadowDiagnostics);
     m_ui->menuTools->addAction(openTestRunsFolder);
     m_ui->menuTools->addAction(openBugReportingGuide);
     viewMenu->addAction(showUnitTexture);
@@ -557,6 +559,21 @@ MainWindow::MainWindow(QWidget* parent) :
         if(!QDesktopServices::openUrl(QUrl::fromLocalFile(path)))
             QMessageBox::warning(this, tr("Endurance logs"),
                 tr("Could not open the logs folder:\n%1").arg(path));
+    });
+    connect(captureShadowDiagnostics, &QAction::triggered, this, [this]()
+    {
+        if(!m_pView)
+            return;
+        QString error;
+        const QString path = m_pView->captureShadowDiagnostics(&error);
+        if(path.isEmpty())
+        {
+            QMessageBox::warning(this, tr("Shadow diagnostics"), error);
+            return;
+        }
+        QMessageBox::information(this, tr("Shadow diagnostics"),
+            tr("Shadow diagnostics captured. Send the entire folder:\n%1").arg(path));
+        QDesktopServices::openUrl(QUrl::fromLocalFile(path));
     });
     connect(openTestRunsFolder, &QAction::triggered, this, [this]()
     {

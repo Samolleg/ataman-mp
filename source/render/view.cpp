@@ -18,6 +18,10 @@
 #include <QHBoxLayout>
 #include <QVBoxLayout>
 #include <QResizeEvent>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QSaveFile>
 #include <QtEndian>
 #include <cstddef>
 #include <cstring>
@@ -115,6 +119,57 @@ private:
     const QByteArray& m_bytes;
     int m_offset{0};
 };
+
+QJsonArray jsonVector(const QVector3D& value)
+{
+    return QJsonArray{value.x(), value.y(), value.z()};
+}
+
+QJsonArray jsonMatrix(const QMatrix4x4& value)
+{
+    QJsonArray result;
+    const float* data = value.constData();
+    for(int index = 0; index < 16; ++index)
+        result.append(data[index]);
+    return result;
+}
+
+QJsonObject projectedPoint(const QMatrix4x4& matrix, const QVector3D& world)
+{
+    const QVector4D clip = matrix * QVector4D(world, 1.0f);
+    QJsonObject result;
+    result["clip"] = QJsonArray{clip.x(), clip.y(), clip.z(), clip.w()};
+    if(!qFuzzyIsNull(clip.w()))
+    {
+        const QVector3D ndc = clip.toVector3D() / clip.w();
+        const QVector3D atlas = ndc * 0.5f + QVector3D(0.5f, 0.5f, 0.5f);
+        result["ndc"] = jsonVector(ndc);
+        result["atlas"] = jsonVector(atlas);
+        result["inside"] = atlas.x() >= 0.0f && atlas.x() <= 1.0f
+            && atlas.y() >= 0.0f && atlas.y() <= 1.0f
+            && atlas.z() >= 0.0f && atlas.z() <= 1.0f;
+    }
+    return result;
+}
+
+QImage visualizedPackedDepth(const QImage& source)
+{
+    QImage result(source.size(), QImage::Format_ARGB32);
+    result.fill(Qt::white);
+    for(int y = 0; y < source.height(); ++y)
+        for(int x = 0; x < source.width(); ++x)
+        {
+            const QColor packed = source.pixelColor(x, y);
+            const double r = packed.redF();
+            const double g = packed.greenF();
+            const double b = packed.blueF();
+            const double a = packed.alphaF();
+            const double depth = r / 16777216.0 + g / 65536.0 + b / 256.0 + a;
+            const int shade = qBound(0, qRound(depth * 255.0), 255);
+            result.setPixelColor(x, y, QColor(shade, shade, shade));
+        }
+    return result;
+}
 
 QVector<SSkyVertex> decodeLegacySkyFigure(const QByteArray& bytes, QString* diagnostic)
 {
@@ -1030,8 +1085,7 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
         QMatrix4x4 dynamicMatrix;
     };
     const auto buildCascade = [&](float sliceNear, float sliceFar,
-                                  int dynamicResolution,
-                                  float casterDistance) -> SCascade
+                                  int dynamicResolution) -> SCascade
     {
         float minimumRight = std::numeric_limits<float>::max();
         float maximumRight = std::numeric_limits<float>::lowest();
@@ -1074,35 +1128,13 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
         }
 
         const float guardBand = 12.0f;
-        // Fit the receiver slice first, then include the complete bounds of any
-        // submitted caster whose light-space footprint can affect that slice.
-        // Receiver-only fitting clipped tall nearby trees and grounded actors;
-        // the farther map merely appeared better because its larger footprint
-        // happened to contain their missing geometry.
-        const QVector<SShadowCasterBounds> casters =
-            queue.shadowCasterBounds(casterDistance);
-        const float receiverMinimumRight = minimumRight;
-        const float receiverMaximumRight = maximumRight;
-        const float receiverMinimumUp = minimumUp;
-        const float receiverMaximumUp = maximumUp;
-        for(const SShadowCasterBounds& caster : casters)
-        {
-            const float right = QVector3D::dotProduct(caster.center, lightRight);
-            const float imageUp = QVector3D::dotProduct(caster.center, lightUp);
-            const float radius = caster.radius;
-            if(right + radius < receiverMinimumRight - guardBand
-                    || right - radius > receiverMaximumRight + guardBand
-                    || imageUp + radius < receiverMinimumUp - guardBand
-                    || imageUp - radius > receiverMaximumUp + guardBand)
-                continue;
-            minimumRight = qMin(minimumRight, right - radius);
-            maximumRight = qMax(maximumRight, right + radius);
-            minimumUp = qMin(minimumUp, imageUp - radius);
-            maximumUp = qMax(maximumUp, imageUp + radius);
-        }
-
-        // Leave a small receiver/caster filter guard. Unlike the rejected
-        // horizon fit, sliceFar and casterDistance bound this cascade locally.
+        // A shadow map covers receivers, not the union of complete caster
+        // bounds. Expanding this rectangle by every intersecting caster makes
+        // one large house or tree widen the near atlas to most of the map and
+        // reduces grounded actors to a few texels. Geometry outside this
+        // light-space receiver footprint cannot project a shadow into it; the
+        // rasterizer clips crossing triangles at the orthographic boundary.
+        // Keep only a small PCF/camera-motion guard around the receiver slice.
         const float centerRight = (minimumRight + maximumRight) * 0.5f;
         const float centerUp = (minimumUp + maximumUp) * 0.5f;
         const float rawExtent = qMax((maximumRight - minimumRight) * 0.5f,
@@ -1132,15 +1164,11 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
         return result;
     };
 
-    const float nearCasterDistance = qMin(safeMaximumDistance,
-                                          m_nearShadowSplit + 24.0f);
     const SCascade nearCascade = buildCascade(0.0f, m_nearShadowSplit,
-                                               m_dynamicShadowFbo->width(),
-                                               nearCasterDistance);
+                                               m_dynamicShadowFbo->width());
     const SCascade farCascade = buildCascade(m_nearShadowSplit * 0.8f,
                                               safeMaximumDistance,
-                                              m_farDynamicShadowFbo->width(),
-                                              safeMaximumDistance);
+                                              m_farDynamicShadowFbo->width());
 
     QCryptographicHash staticHash(QCryptographicHash::Sha256);
     staticHash.addData(queue.staticShadowFingerprint());
@@ -1164,6 +1192,21 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
 
     glDisable(GL_BLEND);
     glDisable(GL_ALPHA_TEST);
+
+    // Depth is encoded into an RGBA8 color target. OpenGL enables dithering
+    // by default, which is desirable for visible color but corrupts packed
+    // depth bytes. In particular, a one-code change in the alpha byte changes
+    // the decoded depth by 1/255; over this light-space depth range that can
+    // erase several world units of a caster at the receiver and produces the
+    // camera-dependent contact gaps seen on grounded units and trees.
+    const GLboolean restoreDithering = glIsEnabled(GL_DITHER);
+    glDisable(GL_DITHER);
+#ifdef GL_FRAMEBUFFER_SRGB
+    // Packed values are linear bytes, not colors. Keep an externally enabled
+    // sRGB framebuffer state from transforming them during the shadow pass.
+    const GLboolean restoreFramebufferSrgb = glIsEnabled(GL_FRAMEBUFFER_SRGB);
+    glDisable(GL_FRAMEBUFFER_SRGB);
+#endif
     const auto beginTarget = [&](QOpenGLFramebufferObject* target,
                                  const QMatrix4x4& projection,
                                  const QMatrix4x4& lightView)
@@ -1214,9 +1257,229 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
     }
     m_shadowInitialized = true;
     glViewport(0, 0, m_width, m_height);
+#ifdef GL_FRAMEBUFFER_SRGB
+    if(restoreFramebufferSrgb)
+        glEnable(GL_FRAMEBUFFER_SRGB);
+#endif
+    if(restoreDithering)
+        glEnable(GL_DITHER);
     glEnable(GL_ALPHA_TEST);
     glEnable(GL_BLEND);
     return true;
+}
+
+QString CView::captureShadowDiagnostics(QString* error)
+{
+    if(error)
+        error->clear();
+    if(!m_shadowInitialized || !m_shadowFbo || !m_dynamicShadowFbo
+            || !m_farShadowFbo || !m_farDynamicShadowFbo)
+    {
+        if(error)
+            *error = tr("Shadow maps are not initialized. Select Full environment, enable shadows, and render the failing view first.");
+        return QString();
+    }
+
+    const QString stamp = QDateTime::currentDateTime().toString("yyyyMMdd-HHmmss-zzz");
+    const QString root = QDir::current().absoluteFilePath("logs/shadow-diagnostics");
+    const QString directoryPath = QDir(root).absoluteFilePath("shadow-" + stamp);
+    if(!QDir().mkpath(directoryPath))
+    {
+        if(error)
+            *error = tr("Could not create shadow diagnostic folder:\n%1").arg(directoryPath);
+        return QString();
+    }
+
+    makeCurrent();
+    const QImage frame = grabFrameBuffer(true);
+    struct SShadowImage
+    {
+        const char* name;
+        QOpenGLFramebufferObject* fbo;
+        const QMatrix4x4* matrix;
+    };
+    const SShadowImage shadowImages[] = {
+        {"near-static", m_shadowFbo, &m_staticLightSpaceMatrix},
+        {"near-dynamic", m_dynamicShadowFbo, &m_dynamicLightSpaceMatrix},
+        {"far-static", m_farShadowFbo, &m_farStaticLightSpaceMatrix},
+        {"far-dynamic", m_farDynamicShadowFbo, &m_farDynamicLightSpaceMatrix}
+    };
+
+    QStringList failures;
+    if(frame.isNull() || !frame.save(QDir(directoryPath).absoluteFilePath("frame.png")))
+        failures.append("frame.png");
+
+    QJsonObject atlasMetadata;
+    for(const SShadowImage& shadow : shadowImages)
+    {
+        const QString name = QString::fromLatin1(shadow.name);
+        const QImage packed = shadow.fbo->toImage();
+        if(packed.isNull()
+                || !packed.save(QDir(directoryPath).absoluteFilePath(name + "-packed.png")))
+            failures.append(name + "-packed.png");
+        const QImage depth = visualizedPackedDepth(packed);
+        if(depth.isNull()
+                || !depth.save(QDir(directoryPath).absoluteFilePath(name + "-depth.png")))
+            failures.append(name + "-depth.png");
+        QJsonObject atlas;
+        atlas["width"] = shadow.fbo->width();
+        atlas["height"] = shadow.fbo->height();
+        atlas["matrixColumnMajor"] = jsonMatrix(*shadow.matrix);
+        atlasMetadata[name] = atlas;
+    }
+
+    QVector3D cameraPosition;
+    QVector3D cameraPivot;
+    QVector3D cameraRotation;
+    m_cam->getLocation(cameraPosition, cameraPivot, cameraRotation);
+    const QMatrix4x4 viewMatrix = m_cam->viewMatrix();
+
+    const auto boolOption = [this](const char* name, bool fallback)
+    {
+        const COptBool* option = m_pSettings
+            ? dynamic_cast<const COptBool*>(m_pSettings->opt(name)) : nullptr;
+        return option ? option->value() : fallback;
+    };
+    const auto intOption = [this](const char* name, int fallback)
+    {
+        const COptInt* option = m_pSettings
+            ? dynamic_cast<const COptInt*>(m_pSettings->opt(name)) : nullptr;
+        return option ? option->value() : fallback;
+    };
+    const bool overrideWorldTime = boolOption("overrideWorldTime", false);
+    const float previewTime = ei::clockValueToHours(intOption("renderTimeOfDay", 1200));
+    const CWorldSet* worldSet = m_environmentMob ? &m_environmentMob->worldSet() : nullptr;
+    const ei::SRenderEnvironment environment = ei::renderEnvironment(
+        worldSet, overrideWorldTime, previewTime, m_caveEnvironment);
+
+    QJsonObject rootObject;
+    rootObject["format"] = "EIMapperEndurance.shadow-diagnostics.v2";
+    rootObject["capturedAt"] = QDateTime::currentDateTime().toString(Qt::ISODateWithMs);
+    rootObject["applicationVersion"] = QCoreApplication::applicationVersion();
+    rootObject["sceneFingerprint"] = sceneSourceFingerprint();
+    rootObject["viewport"] = QJsonObject{{"width", m_width}, {"height", m_height},
+        {"devicePixelRatio", devicePixelRatioF()}};
+    rootObject["camera"] = QJsonObject{{"position", jsonVector(cameraPosition)},
+        {"pivot", jsonVector(cameraPivot)}, {"rotation", jsonVector(cameraRotation)},
+        {"viewMatrixColumnMajor", jsonMatrix(viewMatrix)},
+        {"projectionMatrixColumnMajor", jsonMatrix(m_projection)}};
+    rootObject["shadow"] = QJsonObject{{"initialized", m_shadowInitialized},
+        {"nearSplit", m_nearShadowSplit},
+        {"configuredMaximumDistance", intOption("renderShadowDistance", 320)},
+        {"enabled", boolOption("renderShadows", true)},
+        {"packedDepthDitheringDisabled", true},
+        {"packedDepthFramebufferSrgbDisabled", true},
+        {"staticFingerprint", QString::fromLatin1(m_staticShadowFingerprint.toHex())},
+        {"farStaticFingerprint", QString::fromLatin1(m_farStaticShadowFingerprint.toHex())},
+        {"atlases", atlasMetadata}};
+    rootObject["environment"] = QJsonObject{{"lightingMode", intOption("renderLightingMode", 2)},
+        {"cave", m_caveEnvironment}, {"timeHours", environment.timeHours},
+        {"overrideWorldTime", overrideWorldTime},
+        {"sunDirection", jsonVector(environment.sunDirection)},
+        {"sunColor", jsonVector(environment.sunColor)},
+        {"sunStrength", environment.sunStrength},
+        {"ambientColor", jsonVector(environment.ambientColor)},
+        {"ambientStrength", environment.ambientStrength},
+        {"fogColor", jsonVector(environment.fogColor)},
+        {"fogStart", environment.fogStart}, {"fogEnd", environment.fogEnd}};
+    rootObject["renderSettings"] = QJsonObject{
+        {"frustumCulling", boolOption("frustumCulling", true)},
+        {"animateUnits", boolOption("animateUnits", true)},
+        {"drawSkybox", boolOption("drawSkybox", true)},
+        {"renderFog", boolOption("renderFog", true)},
+        {"renderTextureMipmapping", boolOption("renderTextureMipmapping", true)}};
+
+    const GLubyte* vendor = glGetString(GL_VENDOR);
+    const GLubyte* renderer = glGetString(GL_RENDERER);
+    const GLubyte* version = glGetString(GL_VERSION);
+    rootObject["openGl"] = QJsonObject{
+        {"vendor", vendor ? QString::fromLatin1(reinterpret_cast<const char*>(vendor)) : QString()},
+        {"renderer", renderer ? QString::fromLatin1(reinterpret_cast<const char*>(renderer)) : QString()},
+        {"version", version ? QString::fromLatin1(reinterpret_cast<const char*>(version)) : QString()}};
+
+    QSet<CNode*> selected;
+    for(CNode* node : selectedNodes())
+        selected.insert(node);
+    QJsonArray mobArray;
+    QJsonArray nodeArray;
+    for(CMob* mob : m_aMob)
+    {
+        if(!mob)
+            continue;
+        QJsonObject mobObject;
+        mobObject["path"] = mob->filePath().absoluteFilePath();
+        mobObject["active"] = mob == m_activeMob;
+        mobObject["environmentOwner"] = mob == m_environmentMob;
+        mobObject["visible"] = isMobVisible(mob);
+        mobObject["nodeCount"] = mob->nodes().size();
+        mobArray.append(mobObject);
+        for(CNode* node : mob->nodes())
+        {
+            if(!node)
+                continue;
+            CBox bounds = node->getBBox();
+            // Node bounding boxes are local to the node. Diagnostic v1
+            // accidentally projected them as world coordinates, making its
+            // distance and atlas-membership fields misleading even though the
+            // render queue itself used transformed per-part bounds.
+            const QVector3D center = bounds.isInit()
+                ? bounds.center() + node->drawPosition() : node->drawPosition();
+            QJsonObject object;
+            object["mobPath"] = mob->filePath().absoluteFilePath();
+            object["mapId"] = int(node->mapId());
+            object["name"] = node->mapName();
+            object["type"] = int(node->nodeType());
+            object["model"] = node->modelName();
+            object["texture"] = node->textureName();
+            object["state"] = int(node->nodeState());
+            object["selected"] = selected.contains(node);
+            object["castsRenderShadow"] = node->castsRenderShadow();
+            object["position"] = jsonVector(node->position());
+            object["drawPosition"] = jsonVector(node->drawPosition());
+            object["boundsInitialized"] = bounds.isInit();
+            object["boundsCenter"] = jsonVector(center);
+            object["boundsRadius"] = bounds.isInit() ? bounds.radius() : 0.0f;
+            object["cameraDistance"] = (center - cameraPosition).length();
+            object["viewDepth"] = -(viewMatrix * QVector4D(center, 1.0f)).z();
+            QJsonObject projections;
+            projections["nearStatic"] = projectedPoint(m_staticLightSpaceMatrix, center);
+            projections["nearDynamic"] = projectedPoint(m_dynamicLightSpaceMatrix, center);
+            projections["farStatic"] = projectedPoint(m_farStaticLightSpaceMatrix, center);
+            projections["farDynamic"] = projectedPoint(m_farDynamicLightSpaceMatrix, center);
+            object["centerProjection"] = projections;
+            nodeArray.append(object);
+        }
+    }
+    rootObject["mobs"] = mobArray;
+    rootObject["nodes"] = nodeArray;
+
+    QSaveFile metadataFile(QDir(directoryPath).absoluteFilePath("shadow-diagnostics.json"));
+    if(!metadataFile.open(QIODevice::WriteOnly)
+            || metadataFile.write(QJsonDocument(rootObject).toJson(QJsonDocument::Indented)) < 0
+            || !metadataFile.commit())
+        failures.append("shadow-diagnostics.json");
+
+    QFile instructions(QDir(directoryPath).absoluteFilePath("README.txt"));
+    if(instructions.open(QIODevice::WriteOnly | QIODevice::Text))
+    {
+        instructions.write("EI Mapper Endurance shadow diagnostic capture\n"
+            "Send this entire folder without renaming or editing its contents.\n"
+            "frame.png is the failing viewport. *-packed.png files are exact GPU shadow targets.\n"
+            "*-depth.png files decode the packed depth for visual inspection.\n"
+            "shadow-diagnostics.json contains camera, cascade, environment, and per-node projection data.\n");
+    }
+    else
+        failures.append("README.txt");
+
+    doneCurrent();
+    if(!failures.isEmpty())
+    {
+        if(error)
+            *error = tr("Capture folder was created, but these files failed: %1")
+                .arg(failures.join(", "));
+        return QString();
+    }
+    return directoryPath;
 }
 
 void CView::applyShadowUniforms(QOpenGLShaderProgram& program, bool enabled,

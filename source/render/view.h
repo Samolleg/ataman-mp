@@ -201,6 +201,7 @@ public:
     void endTileBrushGroup();
     void loadSession();
     bool onExit();
+    QString captureShadowDiagnostics(QString* error = nullptr);
 
 protected:
     void initializeGL() override;
