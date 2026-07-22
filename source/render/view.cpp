@@ -2134,7 +2134,7 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
     const float timeSeconds = float(QDateTime::currentMSecsSinceEpoch() % 600000) / 1000.0f;
     RenderPerformanceContext& performance = RenderPerformanceContext::instance();
 
-    const auto drawSprite = [&](const QVector3D& center, float scale, float rotation,
+    const auto drawSprite = [&](const QVector3D& center, float scale, float aspect, float rotation,
                                 const QVector4D& tint, QOpenGLTexture* texture,
                                 const QVector4D& uvRect, bool additive, bool radialMask,
                                 float softness)
@@ -2155,7 +2155,9 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
             additiveBlend = additive;
         }
         m_particleProgram.setUniformValue("u_center", center);
-        m_particleProgram.setUniformValue("u_scale", qBound(0.03f, scale, 64.0f));
+        const float width = qBound(0.03f, scale, 64.0f);
+        m_particleProgram.setUniformValue("u_size",
+            QVector2D(width, width * qBound(0.25f, aspect, 4.0f)));
         m_particleProgram.setUniformValue("u_rotation", rotation);
         m_particleProgram.setUniformValue("u_tint", tint);
         m_particleProgram.setUniformValue("u_useTexture", texture != nullptr);
@@ -2198,7 +2200,7 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
             const float alpha = (1.0f - age) * (selected ? 0.82f : 0.58f);
             QOpenGLTexture* smokeTexture = smokeOnly && tendrilSmokeTexture
                 ? tendrilSmokeTexture : fireSmokeTexture;
-            drawSprite(center, baseScale * (0.42f + age * 0.72f),
+            drawSprite(center, baseScale * (0.30f + age * 0.48f), 1.18f,
                        0.0f, QVector4D(selected ? 0.55f : 0.72f,
                                       selected ? 0.85f : 0.64f,
                                       selected ? 1.0f : 0.56f, alpha),
@@ -2207,20 +2209,39 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
 
         if(smokeOnly)
             return;
-        const int frame = (int(timeSeconds * 11.0f + seedPhase * 19.0f) & 1);
-        const QVector4D flameUv(float(frame) * 0.5f, 1.0f, 0.5f, -0.5f);
         const float flicker = 0.93f + 0.09f * qSin(timeSeconds * 13.0f + seedPhase);
         const QVector4D flameTint = selected
             ? QVector4D(0.35f, 0.88f, 1.0f, 0.94f)
             : QVector4D(1.0f, 0.96f, 0.88f, 0.94f);
-        drawSprite(origin + cameraUp * (0.72f * baseScale),
-                   baseScale * 1.16f * flicker, 0.0f, flameTint,
-                   fireSmokeTexture, flameUv, true, fireSmokeTexture == nullptr, 0.2f);
-        drawSprite(origin + cameraUp * (0.48f * baseScale)
-                           + cameraRight * (0.11f * baseScale),
-                   baseScale * 0.78f / flicker, 0.0f,
-                   QVector4D(flameTint.x(), flameTint.y(), flameTint.z(), 0.72f),
-                   fireSmokeTexture, flameUv, true, fireSmokeTexture == nullptr, 0.2f);
+        // FireSmoke's lower half is one continuous procedural source field,
+        // not a pair of animation frames.  A soft central sample supplies the
+        // connected hot body while smaller rising samples reproduce the
+        // particle system's broken-up flame edge without exposing rectangular
+        // atlas regions.
+        drawSprite(origin + cameraUp * (0.48f * baseScale),
+                   baseScale * 0.72f * flicker, 1.55f, 0.0f, flameTint,
+                   fireSmokeTexture, QVector4D(0.0f, 1.0f, 1.0f, -0.5f),
+                   true, true, 0.16f);
+        for(int i = 0; i < 12; ++i)
+        {
+            const float age = std::fmod(timeSeconds * 0.82f
+                                        + float(i) / 12.0f + seedPhase, 1.0f);
+            const float wave = qSin(seedPhase * 3.1f + float(i) * 2.37f
+                                    + timeSeconds * (2.1f + float(i % 3) * 0.2f));
+            const float x = wave * (0.10f + age * 0.20f) * baseScale;
+            const float y = (0.20f + age * 1.15f) * baseScale;
+            const float size = baseScale * (0.25f + (1.0f - age) * 0.20f);
+            const int column = (i * 5 + int(seed % 7u)) & 7;
+            const int row = (i + int(seed % 3u)) & 3;
+            const QVector4D uv(float(column) * 0.125f,
+                               1.0f - float(row) * 0.125f,
+                               0.125f, -0.125f);
+            QVector4D tint = flameTint;
+            tint.setW((1.0f - age) * (selected ? 0.88f : 0.68f));
+            drawSprite(origin + cameraRight * x + cameraUp * y,
+                       size, 1.65f + age * 0.45f, wave * 0.08f, tint,
+                       fireSmokeTexture, uv, true, true, 0.14f);
+        }
     };
 
     for(CMob* mob : m_aMob)
@@ -2275,7 +2296,7 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
                 continue;
             }
             drawSprite(center, authoredScale * style.scaleMultiplier * pulse,
-                       phase * 0.18f, tint, useTexture ? texture : nullptr,
+                       1.0f, phase * 0.18f, tint, useTexture ? texture : nullptr,
                        QVector4D(0.0f, 0.0f, 1.0f, 1.0f),
                        style.additive, true, style.softness);
         }
