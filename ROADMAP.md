@@ -83,17 +83,23 @@ Current development line: `0.2.1-alpha.26` focused closed testing.
   - Preserve the original NID, transform, model, textures, body parts, common
     object fields, directory membership, ordering position, and script-facing
     identity.
-  - Source the lever envelope and lever-only records from a verified same-profile
-    raw lever template; never send the converted object through the legacy
-    rebuilding serializer.
+  - Use the corpus-proven Base/JMV lever schema directly: replace the raw
+    `OBJECT` envelope with `LEVER`, insert the six standard lever records, patch
+    `OBJTYPE` 54 to 60, and preserve every common/opaque target record. Never
+    send the converted object through the legacy rebuilding serializer. See
+    `docs/research/world-object-to-lever-audit.md`.
   - Show editable lever defaults before conversion (open mode/key/skill, current
     and total states, cycling, door, and graph-recalculation flags), scan the NID
     for script references, and apply the subtree replacement as one undoable
     transaction.
-  - Refuse conversion when no compatible raw template/provenance mapping can be
-    proven. ZoneView offering a similar command is useful workflow evidence, but
-    is not proof that its serialized output preserves Endurance's lossless-save
-    guarantees.
+  - Refuse conversion only when the source is not a structurally proven world
+    object, its raw provenance is unavailable/stale, or the active profile
+    declares a different lever schema. A matching lever model/template is not
+    required: shipped Base and JMV maps use multiple identical models as both
+    ordinary objects and levers, including within the same MOB.
+  - Runtime-validate a converted already-shared model and a model never before
+    used as a lever in disposable Base and JMV test maps before enabling the
+    command by default for those profiles.
 
 </details>
 
