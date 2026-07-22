@@ -308,6 +308,10 @@ private:
             m_contextSelectionPrepared = true;
         }
         selectOnly(this);
+        // Match the working left-click path: the component itself must own
+        // focus before QMenu starts its nested event loop. Otherwise focus can
+        // remain on C3DItem and paint the aggregate Vector3 panel behind it.
+        setFocus(Qt::MouseFocusReason);
         clearParentTableSelection();
     }
 
@@ -1782,7 +1786,10 @@ C3DItem::C3DItem(const QSharedPointer<IPropertyBase>& propX,const QSharedPointer
     m_xValue.reset(propX->clone());
     m_yValue.reset(propY->clone());
     m_zValue.reset(propZ->clone());
-    setFocusPolicy(Qt::FocusPolicy::StrongFocus);
+    // Component plates and line edits own keyboard focus. The aggregate
+    // editor remains selectable through its table row but must not acquire
+    // focus behind a child component's context menu.
+    setFocusPolicy(Qt::FocusPolicy::NoFocus);
     auto* pLayout = new QFormLayout();
     pLayout->setMargin(0);
     pLayout->setHorizontalSpacing(0);

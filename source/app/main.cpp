@@ -614,6 +614,10 @@ int runHeadlessCommand(QApplication& app)
                 && !vectorComponentTable.currentIndex().isValid();
         const bool componentContextUsesManualDispatch = yComponentPlate
                 && yComponentPlate->contextMenuPolicy() == Qt::PreventContextMenu;
+        const bool componentContextFocusIsChildOwned = yComponentPlate
+                && yComponentPlate->focusPolicy() == Qt::StrongFocus
+                && yComponentPlate->parentWidget()
+                && yComponentPlate->parentWidget()->focusPolicy() == Qt::NoFocus;
 
         QList<QSharedPointer<IPropertyBase>> exclusiveComponents;
         exclusiveComponents
@@ -849,6 +853,7 @@ int runHeadlessCommand(QApplication& app)
                 && selectedComponentCopy && componentPlatePaste && componentContextPaste
                 && componentContextPreservesSelection && componentContextShowsOnlyComponent
                 && componentContextGestureKeepsTableClear && componentContextUsesManualDispatch
+                && componentContextFocusIsChildOwned
                 && componentSelectionTableExclusive && componentSelectionClearsForProperty
                 && componentHitTargetsExpanded && componentLayoutHasNoDeadSpace
                 && lockedNumericPasteBlocked
@@ -894,6 +899,7 @@ int runHeadlessCommand(QApplication& app)
                << " componentContextGestureKeepsTableClear="
                << componentContextGestureKeepsTableClear
                << " componentContextUsesManualDispatch=" << componentContextUsesManualDispatch
+               << " componentContextFocusIsChildOwned=" << componentContextFocusIsChildOwned
                << " componentSelectionTableExclusive=" << componentSelectionTableExclusive
                << " componentSelectionClearsForProperty=" << componentSelectionClearsForProperty
                << " componentHitTargetsExpanded=" << componentHitTargetsExpanded
