@@ -13,6 +13,7 @@
 #include <QSaveFile>
 #include <QSet>
 #include <QStandardPaths>
+#include <QSettings>
 #include <QTextStream>
 #include <QTimer>
 #include <QProcessEnvironment>
@@ -1381,6 +1382,29 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
         if(error) *error = "The packaged x86 Endurance runtime host is missing.";
         return false;
     }
+    QString starterStoredSelection;
+    QString starterRegistryAddonPath;
+    QString selectedModConfig;
+    if(isJmv)
+    {
+        selectedModConfig = findCaseInsensitiveFile(
+            QStringList() << input.profile.modRoot, "config.reg");
+        if(selectedModConfig.isEmpty())
+        {
+            if(error) *error = "The selected JMV mod has no readable Starter config.reg.";
+            return false;
+        }
+        const QString starterRoot = QDir(input.profile.gameRoot).filePath("Starter");
+        QSettings starterConfig(QDir(starterRoot).filePath("starter.config"),
+                                QSettings::IniFormat);
+        starterStoredSelection = starterConfig.value("Settings/ModSel").toString();
+#ifdef Q_OS_WIN
+        QSettings starterRegistry(
+            "HKEY_CURRENT_USER\\Software\\Gipat.Ru\\EI_Starter\\Settings",
+            QSettings::NativeFormat);
+        starterRegistryAddonPath = starterRegistry.value("AddonPath").toString();
+#endif
+    }
     if(isBase)
     {
         const QString liveDirectory = QDir(m_runRoot).filePath("live");
@@ -1437,6 +1461,17 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
     m_manifest.insert("temporaryMapName", m_temporaryMapName);
     m_manifest.insert("gameExePath", m_gameExePath);
     m_manifest.insert("gameExeSha256", fileSha256(m_gameExePath));
+    if(isJmv)
+    {
+        QJsonObject starterSelection;
+        starterSelection.insert("policy", "owned-process-addon-path-override");
+        starterSelection.insert("targetModRoot", QDir::cleanPath(input.profile.modRoot));
+        starterSelection.insert("targetConfig", selectedModConfig);
+        starterSelection.insert("persistedModSelection", starterStoredSelection);
+        starterSelection.insert("persistedAddonPath", starterRegistryAddonPath);
+        starterSelection.insert("persistentConfigurationModified", false);
+        m_manifest.insert("starterModSelection", starterSelection);
+    }
     m_manifest.insert("liveFiles", liveJournal);
     m_manifest.insert("isolatedSaves", saveJournal);
     if(!writeManifest("staging", error))
@@ -1631,6 +1666,10 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
         m_manifest.insert("godmodeBootstrapPath", godmodeBootstrapPath);
     appendRunLog(QString("Prepared generation-scoped isolated saves generation=0 path=%1; live saves remain untouched")
                  .arg(m_testSavesPath));
+    if(isJmv)
+        appendRunLog(QString("Starter mod target=%1 persistedSelection=%2 persistedAddonPath=%3 policy=owned-process-override persistentModified=false")
+                     .arg(QDir::cleanPath(input.profile.modRoot), starterStoredSelection,
+                          starterRegistryAddonPath));
     appendRunLog(QString("Staged temporary map=%1 exit=%2 spawn=(%3,%4) clearance=%5")
                  .arg(m_temporaryMapName).arg(input.spawn.exitId)
                  .arg(x, y).arg(input.spawn.clearance, 0, 'f', 3));

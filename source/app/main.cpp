@@ -20,6 +20,8 @@
 #include <QUndoStack>
 #include <QClipboard>
 #include <QMimeData>
+#include <QMenu>
+#include <QContextMenuEvent>
 #include <QScrollBar>
 #include <cstdio>
 #include <cstring>
@@ -493,21 +495,31 @@ int runHeadlessCommand(QApplication& app)
         QTableWidget vectorComponentTable;
         CTableManager vectorComponentManager(&vectorComponentTable);
         vectorComponentManager.setNewData(vectorComponents);
+        QToolButton* xComponentPlate = nullptr;
+        QToolButton* yComponentPlate = nullptr;
         QToolButton* zComponentPlate = nullptr;
         const QList<QToolButton*> componentPlates = vectorComponentTable.findChildren<QToolButton*>();
         for(QToolButton* component : componentPlates)
         {
-            if(component->text() == "Z:")
-            {
-                zComponentPlate = component;
-                break;
-            }
+            if(component->text() == "X:") xComponentPlate = component;
+            if(component->text() == "Y:") yComponentPlate = component;
+            if(component->text() == "Z:") zComponentPlate = component;
         }
+        vectorComponentTable.item(0, 0)->setSelected(true);
+        if(xComponentPlate)
+            xComponentPlate->click();
+        const bool individualComponentSelection = xComponentPlate && yComponentPlate
+                && zComponentPlate && xComponentPlate->isChecked()
+                && !yComponentPlate->isChecked() && !zComponentPlate->isChecked()
+                && vectorComponentTable.selectedItems().isEmpty();
         if(zComponentPlate)
         {
+            zComponentPlate->click();
             QKeyEvent copyZComponent(QEvent::KeyPress, Qt::Key_C, Qt::ControlModifier);
             QApplication::sendEvent(zComponentPlate, &copyZComponent);
         }
+        const bool selectedComponentCopy = zComponentPlate && zComponentPlate->isChecked()
+                && QGuiApplication::clipboard()->text() == "3.6";
         QList<QSharedPointer<IPropertyBase>> integerDestination;
         integerDestination << QSharedPointer<IPropertyBase>(new propUint(eObjParam_RANGE, 0));
         QTableWidget integerDestinationTable;
@@ -530,6 +542,55 @@ int runHeadlessCommand(QApplication& app)
         QKeyEvent pasteLockedComponent(QEvent::KeyPress, Qt::Key_V, Qt::ControlModifier);
         QApplication::sendEvent(&integerDestinationTable, &pasteLockedComponent);
         const bool lockedNumericPasteBlocked = roundedComponentPaste.isNull();
+
+        QSharedPointer<IPropertyBase> componentPlateChange;
+        QObject::connect(&vectorComponentManager, &CTableManager::onUpdateProperty,
+                         [&componentPlateChange](const QSharedPointer<IPropertyBase>& value)
+        {
+            componentPlateChange = QSharedPointer<IPropertyBase>(value->clone());
+        });
+        QMimeData* componentText = new QMimeData;
+        componentText->setText("8.75");
+        QGuiApplication::clipboard()->setMimeData(componentText);
+        if(xComponentPlate)
+        {
+            xComponentPlate->click();
+            QKeyEvent pasteXComponent(QEvent::KeyPress, Qt::Key_V, Qt::ControlModifier);
+            QApplication::sendEvent(xComponentPlate, &pasteXComponent);
+        }
+        const propFloat* changedX = dynamic_cast<propFloat*>(componentPlateChange.get());
+        const bool componentPlatePaste = changedX
+                && changedX->type() == eObjParam_POSITION_X
+                && qAbs(changedX->value() - 8.75f) < 0.0001f;
+
+        componentPlateChange.clear();
+        componentText = new QMimeData;
+        componentText->setText("6.25");
+        QGuiApplication::clipboard()->setMimeData(componentText);
+        if(yComponentPlate)
+        {
+            QTimer::singleShot(0, []()
+            {
+                QMenu* menu = qobject_cast<QMenu*>(QApplication::activePopupWidget());
+                if(!menu)
+                    return;
+                for(QAction* action : menu->actions())
+                    if(action->text().contains("Paste", Qt::CaseInsensitive))
+                    {
+                        action->trigger();
+                        menu->close();
+                        return;
+                    }
+                menu->close();
+            });
+            QContextMenuEvent pasteYContext(QContextMenuEvent::Mouse, QPoint(2, 2),
+                                             yComponentPlate->mapToGlobal(QPoint(2, 2)));
+            QApplication::sendEvent(yComponentPlate, &pasteYContext);
+        }
+        const propFloat* changedY = dynamic_cast<propFloat*>(componentPlateChange.get());
+        const bool componentContextPaste = changedY
+                && changedY->type() == eObjParam_POSITION_Y
+                && qAbs(changedY->value() - 6.25f) < 0.0001f;
 
         QSharedPointer<IPropertyBase> partialValue(new propStr(eObjParam_COMMENTS, "abcdef"));
         CValueItem partialEditor(partialValue);
@@ -721,7 +782,8 @@ int runHeadlessCommand(QApplication& app)
                 && incompatiblePasteBlocked && compatiblePastePreview && compatiblePasteCommit
                 && multiPropertyPaste && mismatchedPropertyPasteBlocked
                 && fieldPastePreview && fieldPasteCommit && fieldCopyAvailable && nonTextPropertyPaste
-                && numericComponentPaste
+                && numericComponentPaste && individualComponentSelection
+                && selectedComponentCopy && componentPlatePaste && componentContextPaste
                 && lockedNumericPasteBlocked
                 && partialCopyExact && partialPasteExact && partialPasteCommit
                 && propertyScrollPreserved
@@ -756,6 +818,10 @@ int runHeadlessCommand(QApplication& app)
                << " fieldCopyAvailable=" << fieldCopyAvailable
                << " nonTextPropertyPaste=" << nonTextPropertyPaste << "\n"
                << " numericComponentPaste=" << numericComponentPaste << "\n"
+               << " individualComponentSelection=" << individualComponentSelection
+               << " selectedComponentCopy=" << selectedComponentCopy
+               << " componentPlatePaste=" << componentPlatePaste
+               << " componentContextPaste=" << componentContextPaste << "\n"
                << " lockedNumericPasteBlocked=" << lockedNumericPasteBlocked << "\n"
                << " partialCopyExact=" << partialCopyExact
                << " partialPasteExact=" << partialPasteExact

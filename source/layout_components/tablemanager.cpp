@@ -18,6 +18,7 @@
 #include <QScrollBar>
 #include <QtMath>
 #include <cmath>
+#include <functional>
 #include <limits>
 
 #include "tablemanager.h"
@@ -139,15 +140,26 @@ void copyProperty(const QSharedPointer<IPropertyBase>& property, const QString& 
 class CVectorComponentPlate final : public QToolButton
 {
 public:
+    using ApplyValue = std::function<void(const QSharedPointer<IPropertyBase>&)>;
+
     CVectorComponentPlate(const QString& label,
                           const QSharedPointer<IPropertyBase>& property,
+                          const ApplyValue& applyValue,
                           QWidget* parent)
-        : QToolButton(parent), m_property(clonePropertyValue(property))
+        : QToolButton(parent), m_property(clonePropertyValue(property)),
+          m_applyValue(applyValue)
     {
         setText(label);
         setAutoRaise(true);
+        setCheckable(true);
+        setAutoExclusive(true);
         setFocusPolicy(Qt::StrongFocus);
-        setToolTip(QObject::tr("Select this component plate, then use Ctrl+C to copy only this value."));
+        setStyleSheet("QToolButton:checked { background-color: #315f46; "
+                      "border: 1px solid #55b878; }");
+        setToolTip(QObject::tr(
+            "Select this component only. Ctrl+C/Ctrl+V and the context menu operate on this value."));
+        QObject::connect(this, &QToolButton::clicked, this,
+                         [this]() { selectComponent(); });
     }
 
 protected:
@@ -159,20 +171,104 @@ protected:
             event->accept();
             return;
         }
+        if(event->matches(QKeySequence::Paste))
+        {
+            pasteValue();
+            event->accept();
+            return;
+        }
         QToolButton::keyPressEvent(event);
     }
 
     void contextMenuEvent(QContextMenuEvent* event) override
     {
+        selectComponent();
         QMenu menu(this);
         QAction* copy = menu.addAction(QObject::tr("Copy value"));
+        QAction* paste = menu.addAction(QObject::tr("Paste value"));
         copy->setShortcut(QKeySequence::Copy);
-        if(menu.exec(event->globalPos()) == copy && !m_property.isNull())
-            copyProperty(m_property, m_property->toString());
+        paste->setShortcut(QKeySequence::Paste);
+        paste->setEnabled(canPaste(nullptr));
+        QObject::connect(copy, &QAction::triggered, this, [this]()
+        {
+            if(!m_property.isNull())
+                copyProperty(m_property, m_property->toString());
+        });
+        QObject::connect(paste, &QAction::triggered, this,
+                         [this]() { pasteValue(); });
+        menu.exec(event->globalPos());
+        event->accept();
     }
 
 private:
+    void selectComponent()
+    {
+        setChecked(true);
+        setFocus(Qt::MouseFocusReason);
+        QWidget* ancestor = parentWidget();
+        while(ancestor && !qobject_cast<QTableWidget*>(ancestor))
+            ancestor = ancestor->parentWidget();
+        if(QTableWidget* table = qobject_cast<QTableWidget*>(ancestor))
+        {
+            const QSignalBlocker blocker(table);
+            table->clearSelection();
+            table->setCurrentItem(nullptr);
+        }
+    }
+
+    bool canPaste(QSharedPointer<IPropertyBase>* value) const
+    {
+        if(m_property.isNull() || property("enduranceReadOnly").toBool()
+           || (parentWidget() && parentWidget()->property("enduranceReadOnly").toBool()))
+            return false;
+        const QMimeData* mime = QGuiApplication::clipboard()->mimeData();
+        if(!mime)
+            return false;
+        QSharedPointer<IPropertyBase> converted;
+        if(mime->hasFormat(kPropertyMimeType) && g_propertyClipboard.size() == 1)
+        {
+            const QSharedPointer<IPropertyBase> source = g_propertyClipboard.first();
+            if(!source.isNull() && source->type() == m_property->type())
+                converted = clonePropertyValue(source);
+            else
+                converted = convertedNumericValue(source.get(), m_property.get());
+        }
+        else if(mime->hasText())
+        {
+            bool ok = false;
+            const double number = mime->text().trimmed().toDouble(&ok);
+            if(ok && std::isfinite(number)
+               && number >= -std::numeric_limits<float>::max()
+               && number <= std::numeric_limits<float>::max())
+            {
+                const propFloat source(m_property->type(), float(number));
+                converted = convertedNumericValue(&source, m_property.get());
+            }
+        }
+        if(converted.isNull())
+            return false;
+        if(value)
+            *value = converted;
+        return true;
+    }
+
+    void pasteValue()
+    {
+        QSharedPointer<IPropertyBase> value;
+        if(!canPaste(&value))
+        {
+            QApplication::beep();
+            QToolTip::showText(mapToGlobal(QPoint(0, height())),
+                QObject::tr("Clipboard value is not compatible with this component."), this);
+            return;
+        }
+        m_property = clonePropertyValue(value);
+        if(m_applyValue)
+            m_applyValue(m_property);
+    }
+
     QSharedPointer<IPropertyBase> m_property;
+    ApplyValue m_applyValue;
 };
 
 bool clipboardMatches(EObjParam destination)
@@ -1566,7 +1662,12 @@ C3DItem::C3DItem(const QSharedPointer<IPropertyBase>& propX,const QSharedPointer
                                          const QSharedPointer<IPropertyBase>& prop)
     {
         auto* pLine = new CValueItem(prop);
-        auto* plate = new CVectorComponentPlate(rowName, prop, this);
+        auto* plate = new CVectorComponentPlate(rowName, prop,
+            [this, pLine](const QSharedPointer<IPropertyBase>& value)
+            {
+                pLine->renewValue(value->toString());
+                _onParamChange(value);
+            }, this);
         QObject::connect(pLine, SIGNAL(onParamChange(const QSharedPointer<IPropertyBase>&)), this, SLOT(_onParamChange(const QSharedPointer<IPropertyBase>&)));
         pLayout->addRow(plate, pLine);
     };
@@ -1627,6 +1728,14 @@ void C3DItem::keyPressEvent(QKeyEvent *event)
 
 void C3DItem::_onParamChange(const QSharedPointer<IPropertyBase> &prop)
 {
+    if(prop.isNull())
+        return;
+    if(prop->type() == m_xValue->type())
+        m_xValue = clonePropertyValue(prop);
+    else if(prop->type() == m_yValue->type())
+        m_yValue = clonePropertyValue(prop);
+    else if(prop->type() == m_zValue->type())
+        m_zValue = clonePropertyValue(prop);
     emit onParamChange(prop);
 }
 

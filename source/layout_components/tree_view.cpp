@@ -8,9 +8,12 @@
 #include <QHeaderView>
 #include <QTimer>
 #include <QRegularExpression>
+#include <QElapsedTimer>
+#include <QSignalBlocker>
 #include <algorithm>
 #include "objects/unit.h"
 #include "mob/mob.h"
+#include "log.h"
 
 CTreeView::CTreeView(QWidget *parent) : QTreeWidget(parent), m_pView(nullptr),
     m_filterTimer(new QTimer(this))
@@ -158,7 +161,11 @@ bool CTreeView::filterItem(QTreeWidgetItem* item, const QStringList& terms,
                return !term.contains(':') && !term.contains('=')
                    && textMatches(item->text(0), value, mode);
            });
-    const bool selfMatches = terms.isEmpty() || (node && nodeMatches(node, terms))
+    // If a parent category already matched (for example "unit" matching the
+    // Units group), every descendant is visible. Avoid rebuilding expensive
+    // object metadata for thousands of children that cannot change the result.
+    const bool selfMatches = terms.isEmpty() || ancestorMatched
+        || (node && nodeMatches(node, terms))
         || textualGroupMatch;
     bool childMatches = false;
     for(int index = 0; index < item->childCount(); ++index)
@@ -176,6 +183,11 @@ bool CTreeView::filterItem(QTreeWidgetItem* item, const QStringList& terms,
 
 void CTreeView::applyFilter()
 {
+    QElapsedTimer elapsed;
+    elapsed.start();
+    const bool updatesWereEnabled = updatesEnabled();
+    setUpdatesEnabled(false);
+    QSignalBlocker signalBlocker(this);
     QString normalized = m_filterText.trimmed();
     normalized.replace(QRegularExpression("\\s*([:=])\\s*"), "\\1");
     QStringList terms;
@@ -197,7 +209,15 @@ void CTreeView::applyFilter()
             if(it.key()) it.key()->setExpanded(it.value());
         m_expansionBeforeFilter.clear();
     }
+    if(updatesWereEnabled)
+        setUpdatesEnabled(true);
+    viewport()->update();
+    signalBlocker.unblock();
     emit filterMatchCountChanged(visible, total);
+    const qint64 elapsedMs = elapsed.elapsed();
+    if(elapsedMs >= 100)
+        ei::log(eLogInfo, QString("Outliner filter applied elapsedMs:%1 visible:%2 total:%3 query:%4")
+                .arg(elapsedMs).arg(visible).arg(total).arg(m_filterText));
 }
 
 void CTreeView::keyPressEvent(QKeyEvent *pEvent)
