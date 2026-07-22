@@ -583,6 +583,9 @@ void CView::initShaders()
         close();
     if(!m_shadowProgram.link())
         close();
+    m_shadowProgram.bind();
+    m_shadowProgram.setUniformValue("qt_Texture0", 0);
+    m_shadowProgram.setUniformValue("u_shadowAlphaTest", false);
 
 
     // Compile select shader
@@ -632,7 +635,10 @@ void CView::initializeGL()
     QOpenGLFramebufferObjectFormat shadowFormat;
     shadowFormat.setAttachment(QOpenGLFramebufferObject::Depth);
     shadowFormat.setInternalTextureFormat(GL_RGBA8);
-    m_shadowFbo = new QOpenGLFramebufferObject(2048, 2048, shadowFormat);
+    // Static geometry is cached, so spend resolution where large buildings
+    // and foliage benefit without making the 15 Hz animated map equally
+    // expensive. The receiver shader carries each map's texel size.
+    m_shadowFbo = new QOpenGLFramebufferObject(4096, 4096, shadowFormat);
     m_dynamicShadowFbo = new QOpenGLFramebufferObject(2048, 2048, shadowFormat);
     if(!m_shadowFbo->isValid() || !m_dynamicShadowFbo->isValid())
     {
@@ -789,7 +795,7 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
     lightView.lookAt(focus - environment.sunDirection.normalized() * 420.0f,
                      focus, up);
     QMatrix4x4 lightProjection;
-    lightProjection.ortho(-360.0f, 360.0f, -360.0f, 360.0f, 1.0f, 900.0f);
+    lightProjection.ortho(-300.0f, 300.0f, -300.0f, 300.0f, 1.0f, 900.0f);
     m_lightSpaceMatrix = lightProjection * lightView;
 
     QCryptographicHash staticHash(QCryptographicHash::Sha256);
@@ -805,6 +811,8 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
 
     glDisable(GL_BLEND);
     glDisable(GL_ALPHA_TEST);
+    glEnable(GL_POLYGON_OFFSET_FILL);
+    glPolygonOffset(2.0f, 4.0f);
     const auto beginTarget = [&](QOpenGLFramebufferObject* target)
     {
         target->bind();
@@ -833,8 +841,8 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
         m_shadowUpdateTimer.restart();
     }
     m_shadowInitialized = true;
+    glDisable(GL_POLYGON_OFFSET_FILL);
     glViewport(0, 0, m_width, m_height);
-    qglClearColor(Qt::black);
     glEnable(GL_ALPHA_TEST);
     glEnable(GL_BLEND);
     return true;
@@ -849,8 +857,14 @@ void CView::applyShadowUniforms(QOpenGLShaderProgram& program, bool enabled)
     program.setUniformValue("u_lightSpaceMatrix", m_lightSpaceMatrix);
     program.setUniformValue("u_staticShadowMap", 1);
     program.setUniformValue("u_dynamicShadowMap", 2);
-    const float texel = m_shadowFbo ? 1.0f / float(m_shadowFbo->width()) : 0.0f;
-    program.setUniformValue("u_shadowTexelSize", QVector2D(texel, texel));
+    const float staticTexel = m_shadowFbo
+        ? 1.0f / float(m_shadowFbo->width()) : 0.0f;
+    const float dynamicTexel = m_dynamicShadowFbo
+        ? 1.0f / float(m_dynamicShadowFbo->width()) : 0.0f;
+    program.setUniformValue("u_staticShadowTexelSize",
+                            QVector2D(staticTexel, staticTexel));
+    program.setUniformValue("u_dynamicShadowTexelSize",
+                            QVector2D(dynamicTexel, dynamicTexel));
     if(available)
     {
         QOpenGLFunctions* functions = QOpenGLContext::currentContext()->functions();
@@ -955,6 +969,12 @@ void CView::drawTestOverlaysOpenGl()
     m_program.setUniformValue("u_viewMmatrix", m_cam->viewMatrix());
     m_program.setUniformValue("u_projMmatrix", m_projection);
     m_program.setUniformValue("u_highlight", false);
+    // Editor overlays are authored colors/textures. They must remain readable
+    // regardless of the map clock, fog, scene lights, or shadow maps.
+    m_program.setUniformValue("u_environmentEnabled", false);
+    m_program.setUniformValue("u_fogEnabled", false);
+    m_program.setUniformValue("u_shadowsEnabled", false);
+    m_program.setUniformValue("u_pointLightCount", 0);
 
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
@@ -1149,9 +1169,19 @@ void CView::draw()
         ? dynamic_cast<const COptInt*>(m_pSettings->opt("renderTimeOfDay")) : nullptr;
     const float previewTime = timeOption
         ? ei::clockValueToHours(timeOption->value()) : 12.0f;
-    const CWorldSet* worldSet = m_activeMob ? &m_activeMob->worldSet() : nullptr;
+    const CWorldSet* worldSet = m_environmentMob
+        ? &m_environmentMob->worldSet() : nullptr;
     const ei::SRenderEnvironment environment = ei::renderEnvironment(
         worldSet, overrideWorldTime, previewTime);
+    // Fill the open lower edge of the stock sky cylinder with the same color
+    // that distant geometry converges to. This removes the editor-only black
+    // seam without modifying the profile sky asset.
+    if(environmentEnabled && fogEnabled)
+        glClearColor(environment.fogColor.x(), environment.fogColor.y(),
+                     environment.fogColor.z(), 1.0f);
+    else
+        glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
 
     QVector<CLight*> sceneLights;
     if(environmentEnabled && sceneLightsEnabled)
@@ -2340,6 +2370,8 @@ bool CView::loadMob(QFileInfo &filePath)
     ei::log(eLogInfo, QString("Preloaded visual resources for %1 units during MOB load in %2 ms")
             .arg(preloadedUnits).arg(preloadTimer.elapsed()));
     m_aMob.append(pMob);
+    if(!m_environmentMob)
+        m_environmentMob = pMob;
     m_spatialIndexDirty = true;
     m_sceneFingerprintDirty = true;
     m_scriptWorkspaces->registerMob(pMob);
@@ -2470,11 +2502,14 @@ bool CView::unloadMobDocument(CMob* mob, bool promptForSave)
 
     const int removedIndex = m_aMob.indexOf(mob);
     const bool removedActive = mob == m_activeMob;
+    const bool removedEnvironment = mob == m_environmentMob;
     ei::log(eLogInfo, "unloading mob " + mob->mobName());
     if(m_pUndoStack)
         m_pUndoStack->clear();
     m_hiddenMobs.remove(mob);
     m_aMob.removeAt(removedIndex);
+    if(removedEnvironment)
+        m_environmentMob = m_aMob.isEmpty() ? nullptr : m_aMob.first();
     m_scriptWorkspaces->unregisterMob(mob);
     emit unloadMob(mob);
     delete mob;
@@ -2678,6 +2713,7 @@ void CView::unloadMob(QString mobName)
         }
         m_aMob.clear();
         m_activeMob = nullptr;
+        m_environmentMob = nullptr;
     }
     else
     {
@@ -2685,11 +2721,14 @@ void CView::unloadMob(QString mobName)
         {
             if (pMob->mobName().toLower() == mobName.toLower())
             {
+                const bool removedEnvironment = pMob == m_environmentMob;
                 m_scriptWorkspaces->unregisterMob(pMob);
                 m_hiddenMobs.remove(pMob);
                 emit unloadMob(pMob);
-                delete pMob;
                 m_aMob.removeOne(pMob);
+                delete pMob;
+                if(removedEnvironment)
+                    m_environmentMob = m_aMob.isEmpty() ? nullptr : m_aMob.first();
                 break;
             }
         }

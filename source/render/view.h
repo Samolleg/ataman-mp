@@ -304,6 +304,10 @@ private:
     bool m_gpuTimerPending;
     QMatrix4x4 m_projection;
     QVector<CMob*> m_aMob;
+    // World lighting belongs to the loaded map, not to whichever MOB happens
+    // to be selected for editing. Keep the first loaded document as the
+    // environment owner until it is unloaded.
+    CMob* m_environmentMob{nullptr};
     QSet<CMob*> m_hiddenMobs;
     QTimer* m_timer;
     CSettings* m_pSettings;

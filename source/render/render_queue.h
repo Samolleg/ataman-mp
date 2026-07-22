@@ -56,6 +56,8 @@ inline void sortRenderItems(QVector<SRenderItem>& items)
         }
         if(left.materialClass != right.materialClass)
             return int(left.materialClass) < int(right.materialClass);
+        if(left.dynamicShadow != right.dynamicShadow)
+            return !left.dynamicShadow;
         if(left.texture != right.texture)
             return quintptr(left.texture) < quintptr(right.texture);
         if(left.meshIdentity != right.meshIdentity)
@@ -73,6 +75,7 @@ inline bool shareInstanceBatch(const SRenderItem& left, const SRenderItem& right
         && left.materialClass != ERenderMaterialClass::Transparent
         && left.materialClass != ERenderMaterialClass::Conservative
         && left.materialClass == right.materialClass
+        && left.dynamicShadow == right.dynamicShadow
         && left.texture == right.texture
         && left.meshIdentity == right.meshIdentity
         && left.textureUvScale == right.textureUvScale;

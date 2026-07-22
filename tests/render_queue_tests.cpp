@@ -90,12 +90,15 @@ void RenderQueueTests::groupsOnlyCompatibleInstanceRuns()
     transparent.materialClass = ERenderMaterialClass::Transparent;
     SRenderItem highlighted = first;
     highlighted.highlighted = true;
+    SRenderItem dynamicCaster = first;
+    dynamicCaster.dynamicShadow = true;
 
     QVector<SRenderItem> compatible({first, second, differentUv});
     QCOMPARE(instanceBatchLength(compatible, 0), 2);
     QVERIFY(!shareInstanceBatch(first, differentUv));
     QVERIFY(!shareInstanceBatch(first, transparent));
     QVERIFY(!shareInstanceBatch(first, highlighted));
+    QVERIFY(!shareInstanceBatch(first, dynamicCaster));
 }
 
 void RenderQueueTests::selectsModernAndFallbackCapabilities()
@@ -128,6 +131,8 @@ void RenderQueueTests::derivesEnvironmentFromWorldValues()
     QCOMPARE(noon.timeHours, 12.0f);
     QCOMPARE(noon.ambientStrength, 0.25f);
     QCOMPARE(noon.sunStrength, 0.75f);
+    QVERIFY(noon.fogStart < noon.fogEnd);
+    QCOMPARE(noon.fogEnd, 620.0f);
     QVERIFY(noon.sunDirection.z() < -0.60f);
     QVERIFY(noon.sunDirection.z() > -0.64f);
 

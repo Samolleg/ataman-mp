@@ -153,6 +153,10 @@ QByteArray RenderQueueContext::staticShadowFingerprint() const
         if(!item.castsShadow || item.dynamicShadow)
             continue;
         hash.addData(reinterpret_cast<const char*>(&item.meshIdentity), sizeof(item.meshIdentity));
+        const quintptr textureIdentity = quintptr(item.texture);
+        hash.addData(reinterpret_cast<const char*>(&textureIdentity), sizeof(textureIdentity));
+        const int materialClass = int(item.materialClass);
+        hash.addData(reinterpret_cast<const char*>(&materialClass), sizeof(materialClass));
         hash.addData(reinterpret_cast<const char*>(item.instanceMatrix.constData()),
                      16 * int(sizeof(float)));
     }
@@ -172,8 +176,6 @@ void RenderQueueContext::flushShadow(QOpenGLShaderProgram* shadowProgram,
                 || (staticOnly && source.dynamicShadow))
             continue;
         SRenderItem item = source;
-        item.texture = nullptr;
-        item.materialClass = ERenderMaterialClass::Opaque;
         item.highlighted = false;
         shadowItems.append(item);
     }
@@ -181,9 +183,21 @@ void RenderQueueContext::flushShadow(QOpenGLShaderProgram* shadowProgram,
     const int modelLocation = shadowProgram->uniformLocation("u_modelMmatrix");
     const int instancedLocation = shadowProgram->uniformLocation("u_instanced");
     const int partAnimatedLocation = shadowProgram->uniformLocation("u_partAnimated");
+    const int alphaTestLocation = shadowProgram->uniformLocation("u_shadowAlphaTest");
+    QOpenGLTexture* boundTexture = nullptr;
     for(int itemIndex = 0; itemIndex < shadowItems.size(); )
     {
         const SRenderItem& item = shadowItems.at(itemIndex);
+        // EI foliage and other textured silhouettes can use either binary or
+        // intermediate alpha. Shadow maps need their visible coverage, not an
+        // opaque rectangle; threshold both classes conservatively.
+        const bool alphaTest = item.materialClass != ERenderMaterialClass::Opaque;
+        shadowProgram->setUniformValue(alphaTestLocation, alphaTest);
+        if(alphaTest && item.texture && item.texture != boundTexture)
+        {
+            item.texture->bind(0);
+            boundTexture = item.texture;
+        }
         const int runLength = m_instancingEnabled
             ? instanceBatchLength(shadowItems, itemIndex) : 1;
         bool instanced = false;
@@ -208,6 +222,7 @@ void RenderQueueContext::flushShadow(QOpenGLShaderProgram* shadowProgram,
     }
     shadowProgram->setUniformValue(instancedLocation, false);
     shadowProgram->setUniformValue(partAnimatedLocation, false);
+    shadowProgram->setUniformValue(alphaTestLocation, false);
 }
 
 void RenderQueueContext::flush()
@@ -289,6 +304,7 @@ void RenderQueueContext::flush()
     bool haveBatch = false;
     bool activeHighlight = false;
     m_program->setUniformValue(m_highlightLocation, false);
+    m_program->setUniformValue("u_receiveDynamicShadow", true);
     for(int itemIndex = 0; itemIndex < m_items.size(); )
     {
         const SRenderItem& item = m_items.at(itemIndex);
@@ -335,6 +351,7 @@ void RenderQueueContext::flush()
         const int runLength = m_instancingEnabled
             ? instanceBatchLength(m_items, itemIndex) : 1;
         bool instanced = false;
+        m_program->setUniformValue("u_receiveDynamicShadow", !item.dynamicShadow);
         if(item.highlighted != activeHighlight)
         {
             activeHighlight = item.highlighted;
@@ -361,6 +378,7 @@ void RenderQueueContext::flush()
     m_program->setUniformValue(m_instancedLocation, false);
     m_program->setUniformValue(m_partAnimatedLocation, false);
     m_program->setUniformValue(m_highlightLocation, false);
+    m_program->setUniformValue("u_receiveDynamicShadow", true);
     glEnable(GL_ALPHA_TEST);
     glEnable(GL_BLEND);
     if(collectPerformance)

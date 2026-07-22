@@ -23,7 +23,9 @@ uniform bool u_shadowsEnabled;
 uniform sampler2D u_staticShadowMap;
 uniform sampler2D u_dynamicShadowMap;
 uniform mat4 u_lightSpaceMatrix;
-uniform vec2 u_shadowTexelSize;
+uniform vec2 u_staticShadowTexelSize;
+uniform vec2 u_dynamicShadowTexelSize;
+uniform bool u_receiveDynamicShadow;
 varying highp vec3 v_normal;
 varying highp vec3 v_worldPosition;
 varying highp float v_viewDepth;
@@ -44,15 +46,20 @@ void main(void)
         if (projected.x >= 0.0 && projected.x <= 1.0 &&
             projected.y >= 0.0 && projected.y <= 1.0 && projected.z <= 1.0)
         {
-          float bias = max(0.0015 * (1.0 - sunDiffuse), 0.00035);
+          float bias = max(0.0035 * (1.0 - sunDiffuse), 0.0012);
           float visibility = 0.0;
           for (int y = -1; y <= 1; ++y)
             for (int x = -1; x <= 1; ++x)
             {
-              vec2 sampleUv = projected.xy + vec2(float(x), float(y)) * u_shadowTexelSize;
-              float storedDepth = min(texture2D(u_staticShadowMap, sampleUv).r,
-                                      texture2D(u_dynamicShadowMap, sampleUv).r);
-              visibility += projected.z - bias > storedDepth ? 0.42 : 1.0;
+              vec2 offset = vec2(float(x), float(y));
+              float staticDepth = texture2D(u_staticShadowMap,
+                  projected.xy + offset * u_staticShadowTexelSize).r;
+              float dynamicDepth = u_receiveDynamicShadow
+                  ? texture2D(u_dynamicShadowMap,
+                      projected.xy + offset * u_dynamicShadowTexelSize).r
+                  : 1.0;
+              float storedDepth = min(staticDepth, dynamicDepth);
+              visibility += projected.z - bias > storedDepth ? 0.68 : 1.0;
             }
           shadow = visibility / 9.0;
         }

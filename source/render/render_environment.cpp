@@ -76,8 +76,11 @@ SRenderEnvironment renderEnvironmentForValues(float timeHours,
                                result.sunColor, 0.35f);
     result.fogColor = lerp(QVector3D(0.46f, 0.52f, 0.60f),
                            result.sunColor, 0.28f);
-    result.fogStart = 250.0f;
-    result.fogEnd = 900.0f;
+    // The stock sky cylinder is open below its horizon. Distant landscape must
+    // reach the environment color before the finite editor map edge exposes
+    // that opening.
+    result.fogStart = 180.0f;
+    result.fogEnd = 620.0f;
     return result;
 }
 
