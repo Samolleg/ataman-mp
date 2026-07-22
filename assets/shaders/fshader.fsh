@@ -127,23 +127,42 @@ void main(void)
         {
           float staticBias = max(0.000012 * (1.0 - sunDiffuse), 0.000002);
           float dynamicBias = 0.000001;
-          float nearVisibility = nearValid ? cascadeVisibility(
-              staticProjected, dynamicProjected, staticInside, dynamicInside,
-              u_staticShadowMap, u_dynamicShadowMap,
-              u_staticShadowTexelSize, u_dynamicShadowTexelSize,
-              staticBias, dynamicBias) : 1.0;
-          float farVisibility = farValid ? cascadeVisibility(
-              farStaticProjected, farDynamicProjected, farStaticInside, farDynamicInside,
-              u_farStaticShadowMap, u_farDynamicShadowMap,
-              u_farStaticShadowTexelSize, u_farDynamicShadowTexelSize,
-              staticBias, dynamicBias) : 1.0;
+          float blendStart = u_nearShadowSplit * 0.78;
           float cascadeBlend = smoothstep(u_nearShadowSplit * 0.78,
                                           u_nearShadowSplit, v_viewDepth);
           cascadeDebugColor = nearValid && farValid
               ? mix(vec3(1.0, 0.12, 0.05), vec3(0.05, 0.25, 1.0), cascadeBlend)
               : (nearValid ? vec3(1.0, 0.12, 0.05) : vec3(0.05, 0.25, 1.0));
-          shadow = nearValid && farValid ? mix(nearVisibility, farVisibility, cascadeBlend)
-                 : (nearValid ? nearVisibility : farVisibility);
+          if (nearValid && (!farValid || v_viewDepth <= blendStart))
+          {
+            shadow = cascadeVisibility(
+                staticProjected, dynamicProjected, staticInside, dynamicInside,
+                u_staticShadowMap, u_dynamicShadowMap,
+                u_staticShadowTexelSize, u_dynamicShadowTexelSize,
+                staticBias, dynamicBias);
+          }
+          else if (farValid && (!nearValid || v_viewDepth >= u_nearShadowSplit))
+          {
+            shadow = cascadeVisibility(
+                farStaticProjected, farDynamicProjected, farStaticInside, farDynamicInside,
+                u_farStaticShadowMap, u_farDynamicShadowMap,
+                u_farStaticShadowTexelSize, u_farDynamicShadowTexelSize,
+                staticBias, dynamicBias);
+          }
+          else
+          {
+            float nearVisibility = cascadeVisibility(
+                staticProjected, dynamicProjected, staticInside, dynamicInside,
+                u_staticShadowMap, u_dynamicShadowMap,
+                u_staticShadowTexelSize, u_dynamicShadowTexelSize,
+                staticBias, dynamicBias);
+            float farVisibility = cascadeVisibility(
+                farStaticProjected, farDynamicProjected, farStaticInside, farDynamicInside,
+                u_farStaticShadowMap, u_farDynamicShadowMap,
+                u_farStaticShadowTexelSize, u_farDynamicShadowTexelSize,
+                staticBias, dynamicBias);
+            shadow = mix(nearVisibility, farVisibility, cascadeBlend);
+          }
         }
       }
       float skyExposure = 0.88 + 0.12 * max(normal.z, 0.0);

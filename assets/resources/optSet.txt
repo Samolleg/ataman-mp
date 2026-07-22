@@ -36,7 +36,7 @@ renderLightingMode
 drawSkybox
 renderFog
 renderSceneLights
-renderShadows
+renderShadowQuality
 renderShadowDistance
 renderTextureMipmapping
 overrideWorldTime

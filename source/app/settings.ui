@@ -457,11 +457,23 @@
             </widget>
            </item>
            <item>
-            <widget class="QCheckBox" name="renderShadows">
-             <property name="text"><string>Sun and object shadows</string></property>
-             <property name="toolTip"><string>Uses a batched shadow map and respects the MOB Is shadow field. Disable for compatibility or performance.</string></property>
-             <property name="checked"><bool>true</bool></property>
-            </widget>
+            <layout class="QHBoxLayout" name="renderShadowQualityLayout">
+             <item><widget class="QLabel" name="renderShadowQualityLabel"><property name="text"><string>Shadow quality</string></property></widget></item>
+             <item><widget class="QLabel" name="renderShadowQualityOffLabel"><property name="text"><string>Off</string></property></widget></item>
+             <item>
+              <widget class="QSlider" name="renderShadowQuality">
+               <property name="toolTip"><string>0 disables and releases shadow atlases, 1 uses 2048 atlases, and 2 uses the verified 4096 very-high-quality path.</string></property>
+               <property name="minimum"><number>0</number></property>
+               <property name="maximum"><number>2</number></property>
+               <property name="value"><number>2</number></property>
+               <property name="pageStep"><number>1</number></property>
+               <property name="orientation"><enum>Qt::Horizontal</enum></property>
+               <property name="tickPosition"><enum>QSlider::TicksBelow</enum></property>
+               <property name="tickInterval"><number>1</number></property>
+              </widget>
+             </item>
+             <item><widget class="QLabel" name="renderShadowQualityVeryHighLabel"><property name="text"><string>Very high</string></property></widget></item>
+            </layout>
            </item>
            <item>
             <layout class="QHBoxLayout" name="renderShadowDistanceLayout">

@@ -471,14 +471,7 @@ CView::~CView()
         m_skyBuffer.destroy();
     if(m_particleBuffer.isCreated())
         m_particleBuffer.destroy();
-    delete m_shadowFbo;
-    m_shadowFbo = nullptr;
-    delete m_dynamicShadowFbo;
-    m_dynamicShadowFbo = nullptr;
-    delete m_farShadowFbo;
-    m_farShadowFbo = nullptr;
-    delete m_farDynamicShadowFbo;
-    m_farDynamicShadowFbo = nullptr;
+    releaseShadowFramebuffers();
     ei::setCrashContext("shutdown/view-mobs");
 
     const int meshCount = CPart::sharedMeshCount();
@@ -975,54 +968,10 @@ void CView::initializeGL()
                 .arg(m_skyVertexCount).arg(skySource));
     else
         ei::log(eLogWarning, "Profile sky geometry unavailable: " + skyDiagnostic);
-    QOpenGLFramebufferObjectFormat shadowFormat;
-    shadowFormat.setAttachment(QOpenGLFramebufferObject::Depth);
-    shadowFormat.setInternalTextureFormat(GL_RGBA8);
-    GLint maximumTextureSize = 0;
-    glGetIntegerv(GL_MAX_TEXTURE_SIZE, &maximumTextureSize);
-    // All cascades need the same spatial density. The earlier 2048 dynamic
-    // and far maps made animated actors visibly blockier than static objects
-    // and made the far transition look like a quality drop. Prefer 4096 on a
-    // capable GPU while retaining a capability-based 2048 fallback.
-    const int shadowResolution = maximumTextureSize >= 4096 ? 4096 : 2048;
-    m_shadowFbo = new QOpenGLFramebufferObject(
-        shadowResolution, shadowResolution, shadowFormat);
-    m_dynamicShadowFbo = new QOpenGLFramebufferObject(
-        shadowResolution, shadowResolution, shadowFormat);
-    m_farShadowFbo = new QOpenGLFramebufferObject(
-        shadowResolution, shadowResolution, shadowFormat);
-    m_farDynamicShadowFbo = new QOpenGLFramebufferObject(
-        shadowResolution, shadowResolution, shadowFormat);
-    if(!m_shadowFbo->isValid() || !m_dynamicShadowFbo->isValid()
-            || !m_farShadowFbo->isValid() || !m_farDynamicShadowFbo->isValid())
-    {
-        ei::log(eLogWarning, "Shadow framebuffer is unavailable; shadow rendering disabled");
-        delete m_shadowFbo;
-        m_shadowFbo = nullptr;
-        delete m_dynamicShadowFbo;
-        m_dynamicShadowFbo = nullptr;
-        delete m_farShadowFbo;
-        m_farShadowFbo = nullptr;
-        delete m_farDynamicShadowFbo;
-        m_farDynamicShadowFbo = nullptr;
-    }
-    else
-    {
-        ei::log(eLogInfo, QString("Shadow atlases initialized: 4 x %1x%1 (GL max %2)")
-                .arg(shadowResolution).arg(maximumTextureSize));
-        // Packed RGBA depth must never be interpolated channel-by-channel.
-        // The receiver performs its own 3x3 PCF over nearest depth samples.
-        for(QOpenGLFramebufferObject* shadowTarget : {m_shadowFbo, m_dynamicShadowFbo,
-                                                       m_farShadowFbo, m_farDynamicShadowFbo})
-        {
-            glBindTexture(GL_TEXTURE_2D, shadowTarget->texture());
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-        }
-        glBindTexture(GL_TEXTURE_2D, 0);
-    }
+    const COptInt* shadowQualityOption = m_pSettings
+        ? dynamic_cast<const COptInt*>(m_pSettings->opt("renderShadowQuality")) : nullptr;
+    ensureShadowFramebuffers(qBound(0,
+        shadowQualityOption ? shadowQualityOption->value() : 2, 2));
     m_shadowUpdateTimer.start();
     checkOpenGlError();
 
@@ -1165,6 +1114,77 @@ void CView::applyEnvironmentUniforms(QOpenGLShaderProgram& program,
         program.setUniformValueArray("u_pointLightPositionRange", positionRange, count);
         program.setUniformValueArray("u_pointLightColor", colors, count);
     }
+}
+
+void CView::releaseShadowFramebuffers()
+{
+    delete m_shadowFbo;
+    m_shadowFbo = nullptr;
+    delete m_dynamicShadowFbo;
+    m_dynamicShadowFbo = nullptr;
+    delete m_farShadowFbo;
+    m_farShadowFbo = nullptr;
+    delete m_farDynamicShadowFbo;
+    m_farDynamicShadowFbo = nullptr;
+    m_shadowResolution = 0;
+    m_shadowInitialized = false;
+    m_staticShadowFingerprint.clear();
+    m_farStaticShadowFingerprint.clear();
+}
+
+bool CView::ensureShadowFramebuffers(int quality)
+{
+    GLint maximumTextureSize = 0;
+    glGetIntegerv(GL_MAX_TEXTURE_SIZE, &maximumTextureSize);
+    const int resolution = ei::shadowAtlasResolution(
+        qBound(0, quality, 2), int(maximumTextureSize));
+    if(resolution <= 0)
+    {
+        if(m_shadowResolution != 0 || m_shadowFbo)
+        {
+            releaseShadowFramebuffers();
+            ei::log(eLogInfo, "Shadow atlases released (quality Off)");
+        }
+        return false;
+    }
+    if(m_shadowResolution == resolution && m_shadowFbo && m_dynamicShadowFbo
+            && m_farShadowFbo && m_farDynamicShadowFbo
+            && m_shadowFbo->isValid() && m_dynamicShadowFbo->isValid()
+            && m_farShadowFbo->isValid() && m_farDynamicShadowFbo->isValid())
+        return true;
+
+    releaseShadowFramebuffers();
+    QOpenGLFramebufferObjectFormat shadowFormat;
+    shadowFormat.setAttachment(QOpenGLFramebufferObject::Depth);
+    shadowFormat.setInternalTextureFormat(GL_RGBA8);
+    m_shadowFbo = new QOpenGLFramebufferObject(resolution, resolution, shadowFormat);
+    m_dynamicShadowFbo = new QOpenGLFramebufferObject(resolution, resolution, shadowFormat);
+    m_farShadowFbo = new QOpenGLFramebufferObject(resolution, resolution, shadowFormat);
+    m_farDynamicShadowFbo = new QOpenGLFramebufferObject(resolution, resolution, shadowFormat);
+    if(!m_shadowFbo->isValid() || !m_dynamicShadowFbo->isValid()
+            || !m_farShadowFbo->isValid() || !m_farDynamicShadowFbo->isValid())
+    {
+        ei::log(eLogWarning, "Shadow framebuffer is unavailable; shadow rendering disabled");
+        releaseShadowFramebuffers();
+        return false;
+    }
+
+    m_shadowResolution = resolution;
+    // Packed RGBA depth must never be interpolated channel-by-channel. The
+    // receiver performs its own 3x3 PCF over nearest depth samples.
+    for(QOpenGLFramebufferObject* target : {m_shadowFbo, m_dynamicShadowFbo,
+                                            m_farShadowFbo, m_farDynamicShadowFbo})
+    {
+        glBindTexture(GL_TEXTURE_2D, target->texture());
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    }
+    glBindTexture(GL_TEXTURE_2D, 0);
+    ei::log(eLogInfo, QString("Shadow atlases initialized: 4 x %1x%1 (quality %2, GL max %3)")
+            .arg(resolution).arg(qBound(0, quality, 2)).arg(maximumTextureSize));
+    return true;
 }
 
 bool CView::renderShadowMap(const QVector3D& cameraPosition,
@@ -1315,6 +1335,15 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
     const bool rebuildDynamic = !m_shadowInitialized || m_shadowUpdateTimer.elapsed() >= 66;
     if(!rebuildStatic && !rebuildFarStatic && !rebuildDynamic)
         return true;
+
+    RenderPerformanceContext& shadowPerformance = RenderPerformanceContext::instance();
+    if(shadowPerformance.collecting())
+    {
+        shadowPerformance.counters().shadowStaticRebuilds
+            += quint64(rebuildStatic) + quint64(rebuildFarStatic);
+        shadowPerformance.counters().shadowDynamicRebuilds
+            += rebuildDynamic ? 2 : 0;
+    }
 
     glDisable(GL_BLEND);
     glDisable(GL_ALPHA_TEST);
@@ -1510,7 +1539,9 @@ QString CView::captureShadowDiagnostics(QString* error)
     rootObject["shadow"] = QJsonObject{{"initialized", m_shadowInitialized},
         {"nearSplit", m_nearShadowSplit},
         {"configuredMaximumDistance", intOption("renderShadowDistance", 320)},
-        {"enabled", boolOption("renderShadows", true)},
+        {"quality", intOption("renderShadowQuality", 2)},
+        {"enabled", intOption("renderShadowQuality", 2) > 0},
+        {"atlasResolution", m_shadowResolution},
         {"packedDepthDitheringDisabled", true},
         {"packedDepthFramebufferSrgbDisabled", true},
         {"staticFingerprint", QString::fromLatin1(m_staticShadowFingerprint.toHex())},
@@ -2100,7 +2131,12 @@ void CView::draw()
     const bool skyEnabled = environmentEnabled;
     const bool fogEnabled = renderBool("renderFog", true);
     const bool sceneLightsEnabled = renderBool("renderSceneLights", true);
-    const bool shadowsEnabled = renderBool("renderShadows", true);
+    const COptInt* shadowQualityOption = m_pSettings
+        ? dynamic_cast<const COptInt*>(m_pSettings->opt("renderShadowQuality")) : nullptr;
+    const int shadowQuality = qBound(0,
+        shadowQualityOption ? shadowQualityOption->value() : 2, 2);
+    const bool shadowsEnabled = shadowQuality > 0
+        && ensureShadowFramebuffers(shadowQuality);
     const COptInt* shadowDistanceOption = m_pSettings
         ? dynamic_cast<const COptInt*>(m_pSettings->opt("renderShadowDistance")) : nullptr;
     // The old adaptive map stopped at 160 world units. Keep twice that reach
@@ -2175,6 +2211,8 @@ void CView::draw()
         metadata.logicEnabled = drawLogic;
         metadata.helpEnabled = drawHelp;
         metadata.frustumCullingEnabled = cullingEnabled;
+        metadata.shadowQuality = shadowQuality;
+        metadata.shadowAtlasResolution = m_shadowResolution;
         performance.setFrameMetadata(metadata);
     }
 

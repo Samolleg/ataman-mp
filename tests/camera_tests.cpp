@@ -10,6 +10,7 @@ class CameraTests : public QObject
 private slots:
     void changesOrbitPivotWithoutMovingTheCurrentView();
     void frustumSliceUsesTheRenderedCameraEye();
+    void mapsShadowQualityToCapabilityBoundResolution();
 };
 
 void CameraTests::changesOrbitPivotWithoutMovingTheCurrentView()
@@ -68,6 +69,15 @@ void CameraTests::frustumSliceUsesTheRenderedCameraEye()
         const float expectedDepth = (index % 2 == 0) ? 1.0f : 48.0f;
         QVERIFY(qAbs(-inView.z() - expectedDepth) < 0.001f);
     }
+}
+
+void CameraTests::mapsShadowQualityToCapabilityBoundResolution()
+{
+    QCOMPARE(ei::shadowAtlasResolution(0, 16384), 0);
+    QCOMPARE(ei::shadowAtlasResolution(1, 16384), 2048);
+    QCOMPARE(ei::shadowAtlasResolution(2, 16384), 4096);
+    QCOMPARE(ei::shadowAtlasResolution(2, 2048), 2048);
+    QCOMPARE(ei::shadowAtlasResolution(1, 1024), 1024);
 }
 
 QTEST_APPLESS_MAIN(CameraTests)

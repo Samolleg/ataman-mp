@@ -200,6 +200,15 @@ void RenderQueueContext::flushShadow(QOpenGLShaderProgram* shadowProgram,
 {
     if(!shadowProgram || m_items.isEmpty())
         return;
+    QElapsedTimer shadowTimer;
+    shadowTimer.start();
+    RenderPerformanceContext& performance = RenderPerformanceContext::instance();
+    const bool collectPerformance = performance.collecting();
+    if(collectPerformance)
+    {
+        ++performance.counters().shadowPasses;
+        performance.counters().shadowCandidates += quint64(m_items.size());
+    }
     QVector<SRenderItem> shadowItems;
     shadowItems.reserve(m_items.size());
     for(const SRenderItem& source : m_items)
@@ -214,6 +223,8 @@ void RenderQueueContext::flushShadow(QOpenGLShaderProgram* shadowProgram,
         shadowItems.append(item);
     }
     sortRenderItems(shadowItems);
+    if(collectPerformance)
+        performance.counters().shadowItems += quint64(shadowItems.size());
     const int modelLocation = shadowProgram->uniformLocation("u_modelMmatrix");
     const int instancedLocation = shadowProgram->uniformLocation("u_instanced");
     const int partAnimatedLocation = shadowProgram->uniformLocation("u_partAnimated");
@@ -257,6 +268,8 @@ void RenderQueueContext::flushShadow(QOpenGLShaderProgram* shadowProgram,
     shadowProgram->setUniformValue(instancedLocation, false);
     shadowProgram->setUniformValue(partAnimatedLocation, false);
     shadowProgram->setUniformValue(alphaTestLocation, false);
+    if(collectPerformance)
+        performance.counters().shadowNanoseconds += quint64(shadowTimer.nsecsElapsed());
 }
 
 void RenderQueueContext::flush()

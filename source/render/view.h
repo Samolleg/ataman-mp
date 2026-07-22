@@ -258,6 +258,8 @@ private:
                          const ei::SRenderEnvironment& environment,
                          RenderQueueContext& queue,
                          float maximumDistance);
+    bool ensureShadowFramebuffers(int quality);
+    void releaseShadowFramebuffers();
     void applyShadowUniforms(QOpenGLShaderProgram& program, bool enabled,
                              bool receiveStatic = true,
                              bool receiveDynamic = true);
@@ -318,6 +320,7 @@ private:
     QOpenGLFramebufferObject* m_dynamicShadowFbo{nullptr};
     QOpenGLFramebufferObject* m_farShadowFbo{nullptr};
     QOpenGLFramebufferObject* m_farDynamicShadowFbo{nullptr};
+    int m_shadowResolution{0};
     QMatrix4x4 m_staticLightSpaceMatrix;
     QMatrix4x4 m_dynamicLightSpaceMatrix;
     QMatrix4x4 m_farStaticLightSpaceMatrix;

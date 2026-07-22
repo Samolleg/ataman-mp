@@ -10,6 +10,14 @@
 namespace ei
 {
 
+inline int shadowAtlasResolution(int quality, int maximumTextureSize)
+{
+    if(quality <= 0 || maximumTextureSize <= 0)
+        return 0;
+    const int requested = quality >= 2 ? 4096 : 2048;
+    return qMin(requested, maximumTextureSize);
+}
+
 inline QVector3D cameraEyeFromView(const QMatrix4x4& view, bool* ok = nullptr)
 {
     // Do not replace this with CCamera::getLocation().pos. That API exposes

@@ -442,7 +442,6 @@ void CSettings::initOptions()
     aOpt.append(QSharedPointer<COpt>(new COptBool("drawSkybox", true)));
     aOpt.append(QSharedPointer<COpt>(new COptBool("renderFog", true)));
     aOpt.append(QSharedPointer<COpt>(new COptBool("renderSceneLights", true)));
-    aOpt.append(QSharedPointer<COpt>(new COptBool("renderShadows", true)));
     aOpt.append(QSharedPointer<COpt>(new COptBool("renderTextureMipmapping", true)));
     aOpt.append(QSharedPointer<COpt>(new COptBool("overrideWorldTime", false)));
 
@@ -457,6 +456,7 @@ void CSettings::initOptions()
     aOpt.append(QSharedPointer<COpt>(new COptInt("mapTestWarningVersion", 0)));
     aOpt.append(QSharedPointer<COpt>(new COptInt("autosaveIntervalMinutes", 5)));
     aOpt.append(QSharedPointer<COpt>(new COptInt("renderFpsCap", 0)));
+    aOpt.append(QSharedPointer<COpt>(new COptInt("renderShadowQuality", 2)));
     aOpt.append(QSharedPointer<COpt>(new COptInt("renderShadowDistance", 320)));
     aOpt.append(QSharedPointer<COpt>(new COptInt("renderTimeOfDay", 1200)));
     // 0 = authored texture/unlit, 1 = compatibility simple shading,
