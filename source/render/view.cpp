@@ -203,9 +203,21 @@ void CView::attach(CSettings* pSettings, QTableWidget* pParam, QUndoStack* pStac
     QObject::connect(m_tableManager.get(), SIGNAL(onUpdateProperties(const QList<QSharedPointer<IPropertyBase>>&)),
                      this, SLOT(onPropertiesChange(const QList<QSharedPointer<IPropertyBase>>&)));
     m_pUndoStack = pStack;
-    connect(m_pUndoStack, &QUndoStack::indexChanged, this, [this](int)
+    m_lastUndoStackIndex = m_pUndoStack ? m_pUndoStack->index() : -1;
+    connect(m_pUndoStack, &QUndoStack::indexChanged, this, [this](int index)
     {
-        refreshMobDirtyStates();
+        bool selectionOnly = m_lastUndoStackIndex >= 0
+            && index != m_lastUndoStackIndex && m_pUndoStack;
+        const int first = qMin(index, m_lastUndoStackIndex);
+        const int last = qMax(index, m_lastUndoStackIndex);
+        if(first < 0 || last > (m_pUndoStack ? m_pUndoStack->count() : 0))
+            selectionOnly = false;
+        for(int commandIndex = first; selectionOnly && commandIndex < last; ++commandIndex)
+            selectionOnly = dynamic_cast<const CSelectionCommand*>(
+                m_pUndoStack->command(commandIndex)) != nullptr;
+        if(!selectionOnly)
+            refreshMobDirtyStates();
+        m_lastUndoStackIndex = index;
         m_spatialIndexDirty = true;
     });
     connect(this, &CView::selectionChanged, this, [this]()
@@ -3279,6 +3291,22 @@ void CView::anchorCameraRotationToViewportCenter()
 
 void CView::wheelEvent(QWheelEvent* event)
 {
+    QString gesture = "Ctrl+Wheel";
+    if(m_pSettings)
+        if(const COptString* option = dynamic_cast<const COptString*>(
+               m_pSettings->opt(eOptSetKeyBinding, "cameraSpeedWheelGesture")))
+            gesture = option->value();
+    Qt::KeyboardModifier modifier = Qt::ControlModifier;
+    if(gesture.startsWith("Alt", Qt::CaseInsensitive)) modifier = Qt::AltModifier;
+    else if(gesture.startsWith("Shift", Qt::CaseInsensitive)) modifier = Qt::ShiftModifier;
+    else if(gesture.startsWith("Meta", Qt::CaseInsensitive)) modifier = Qt::MetaModifier;
+    if(event->modifiers() & modifier)
+    {
+        const double direction = event->angleDelta().y() >= 0 ? 0.1 : -0.1;
+        setCameraSpeedMultiplier(cameraSpeedMultiplier() + direction);
+        event->accept();
+        return;
+    }
     m_pOp->wheelEvent(event);
 }
 
@@ -4289,6 +4317,24 @@ void CView::refreshMobDirtyStates()
 void CView::resetCamPosition()
 {
     m_cam->reset();
+}
+
+double CView::cameraSpeedMultiplier() const
+{
+    return m_cam ? double(m_cam->speedMultiplier()) : 1.0;
+}
+
+void CView::setCameraSpeedMultiplier(double multiplier)
+{
+    if(!m_cam)
+        return;
+    const double bounded = qBound(0.1, multiplier, 10.0);
+    const double rounded = qRound(bounded * 10.0) / 10.0;
+    if(qAbs(cameraSpeedMultiplier() - rounded) < 0.001)
+        return;
+    m_cam->setSpeedMultiplier(float(rounded));
+    emit cameraSpeedMultiplierChanged(rounded);
+    update();
 }
 
 void CView::addLogicPoint(bool bLookPoint)

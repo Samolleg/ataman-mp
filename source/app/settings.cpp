@@ -24,6 +24,11 @@ CSettings::CSettings(QWidget *parent) :
   ,m_version(1.0)
 {
     ui->setupUi(this);
+    const QStringList cameraWheelGestures = {
+        "Ctrl+Wheel", "Alt+Wheel", "Shift+Wheel", "Meta+Wheel"
+    };
+    for(int index = 0; index < cameraWheelGestures.size(); ++index)
+        ui->cameraSpeedWheelGesture->setItemData(index, cameraWheelGestures.at(index));
     QLabel* editorLabel = new QLabel(tr("External script editor"), ui->tabGeneral);
     editorLabel->setToolTip(tr("Executable used to edit managed MOB scripts. Clear this field to use the Windows .lua file association."));
     QLineEdit* editorPath = new QLineEdit(ui->tabGeneral);
@@ -299,6 +304,13 @@ void CSettings::updateOptUi()
         {
             if (COptString* pOpt = dynamic_cast<COptString*>(opt.get()))
             {
+                QComboBox* combo = ui->tabWidget->findChild<QComboBox*>(pOpt->name());
+                if(combo)
+                {
+                    const int index = combo->findData(pOpt->value());
+                    combo->setCurrentIndex(index >= 0 ? index : 0);
+                    continue;
+                }
                 QKeySequenceEdit* keyEdit = ui->tabWidget->findChild<QKeySequenceEdit*>(pOpt->name());
                 if(keyEdit)
                 {
@@ -356,6 +368,12 @@ void CSettings::updateOptFromUi()
         {
             if (COptString* pOpt = dynamic_cast<COptString*>(opt.get()))
             {
+                QComboBox* combo = ui->tabWidget->findChild<QComboBox*>(pOpt->name());
+                if(combo)
+                {
+                    pOpt->setValue(combo->currentData().toString());
+                    continue;
+                }
                 QKeySequenceEdit* keyEdit = ui->tabWidget->findChild<QKeySequenceEdit*>(pOpt->name());
                 if(keyEdit)
                 {
@@ -441,6 +459,7 @@ void CSettings::initOptions()
 
     //init default options for digits
     aOpt.append(QSharedPointer<COpt>(new COptDouble("version", m_version)));
+    aOpt.append(QSharedPointer<COpt>(new COptDouble("cameraSpeedMultiplier", 1.0)));
     aOpt.append(QSharedPointer<COpt>(new COptInt("mouseSenseX", 25)));
     aOpt.append(QSharedPointer<COpt>(new COptInt("mouseSenseY", 25)));
     aOpt.append(QSharedPointer<COpt>(new COptInt("rangeIncrement", 999)));
@@ -480,6 +499,8 @@ void CSettings::initOptions()
     for(auto it = shortcutDefaults.constBegin(); it != shortcutDefaults.constEnd(); ++it)
         m_aOptCategory[eOptSetKeyBinding].append(
             QSharedPointer<COpt>(new COptString(it.key(), it.value())));
+    m_aOptCategory[eOptSetKeyBinding].append(QSharedPointer<COpt>(
+        new COptString("cameraSpeedWheelGesture", "Ctrl+Wheel")));
 
     //split options into different category
     QFile inputFile(":/optSet.txt");

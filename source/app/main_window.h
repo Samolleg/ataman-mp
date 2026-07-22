@@ -50,6 +50,8 @@ class QProgressDialog;
 class QDialog;
 class QScrollArea;
 class QListWidget;
+class QSlider;
+class QDoubleSpinBox;
 
 struct SWindowTitle
 {
@@ -73,6 +75,7 @@ public:
     void configureAutosaveTimer();
     void configureAutosaveTimer(bool enabled, int intervalMinutes);
     void performAutosave();
+    void beginAutosaveCountdown();
     void showRecoverableAutosaves();
 
     void testFunc1();
@@ -135,6 +138,7 @@ private:
     void notifyProposedNid(quint32 nid, const QString& mobPath);
     void showMapTestResultNotification(const QJsonObject& report);
     void positionMapTestResultNotification();
+    void positionAutosaveNotification();
     void showUnitTexturePreview();
     void updateUnitTexturePreview();
     void renderUnitTexturePreview();
@@ -230,6 +234,13 @@ private:
     QTimer* m_mapTestResultTimer{nullptr};
     QProgressDialog* m_hotReloadProgress{nullptr};
     QTimer* m_autosaveTimer{nullptr};
+    QTimer* m_autosaveCountdownTimer{nullptr};
+    QTimer* m_cameraSpeedPersistTimer{nullptr};
+    QFrame* m_autosaveNotification{nullptr};
+    QLabel* m_autosaveCountdownLabel{nullptr};
+    int m_autosaveCountdownSeconds{0};
+    QSlider* m_cameraSpeedSlider{nullptr};
+    QDoubleSpinBox* m_cameraSpeedSpin{nullptr};
     bool m_uiStateSaved{false};
     bool m_workspaceLoadInProgress{false};
     QString m_mapTestResultLogPath;

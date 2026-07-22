@@ -548,6 +548,7 @@ int runHeadlessCommand(QApplication& app)
         bool settingsShortcutsPersist = false;
         bool autosaveSettingsPersist = false;
         bool autosaveLiveReconfigure = false;
+        bool cameraSpeedSettingsPersist = false;
         bool settingsApplySignal = false;
         bool renderOptionsRegistered = false;
         {
@@ -577,6 +578,8 @@ int runHeadlessCommand(QApplication& app)
                 QKeySequenceEdit* activateOwnerShortcut = settingsWindow.findChild<QKeySequenceEdit*>("shortcutActivateOwnerMob");
                 QCheckBox* autosaveEnabled = settingsWindow.findChild<QCheckBox*>("autosaveEnabled");
                 QLineEdit* autosaveInterval = settingsWindow.findChild<QLineEdit*>("autosaveIntervalMinutes");
+                QComboBox* cameraWheelGesture = settingsWindow.findChild<QComboBox*>(
+                    "cameraSpeedWheelGesture");
                 COptBool* animateUnits = dynamic_cast<COptBool*>(
                     settingsWindow.opt(eOptSetRender, "animateUnits"));
                 COptBool* performanceCounters = dynamic_cast<COptBool*>(
@@ -598,6 +601,8 @@ int runHeadlessCommand(QApplication& app)
                         autosaveEnabled->setChecked(true);
                     if(autosaveInterval)
                         autosaveInterval->setText("1");
+                    if(cameraWheelGesture)
+                        cameraWheelGesture->setCurrentIndex(2);
                     QMetaObject::invokeMethod(&settingsWindow, "on_buttonApply_clicked", Qt::DirectConnection);
                     COptString* saved = dynamic_cast<COptString*>(
                         settingsWindow.opt(eOptSetKeyBinding, "shortcutHistory"));
@@ -611,6 +616,14 @@ int runHeadlessCommand(QApplication& app)
                         settingsWindow.opt(eOptSetGeneral, "autosaveIntervalMinutes"));
                     autosaveSettingsPersist = savedAutosaveEnabled && savedAutosaveEnabled->value()
                             && savedAutosaveInterval && savedAutosaveInterval->value() == 1;
+                    COptString* savedCameraGesture = dynamic_cast<COptString*>(
+                        settingsWindow.opt(eOptSetKeyBinding, "cameraSpeedWheelGesture"));
+                    COptDouble* savedCameraMultiplier = dynamic_cast<COptDouble*>(
+                        settingsWindow.opt(eOptSetGeneral, "cameraSpeedMultiplier"));
+                    cameraSpeedSettingsPersist = cameraWheelGesture
+                            && savedCameraGesture && savedCameraGesture->value() == "Shift+Wheel"
+                            && savedCameraMultiplier
+                            && qAbs(savedCameraMultiplier->value() - 1.0) < 0.001;
                 }
             }
             QDir::setCurrent(previousDirectory);
@@ -659,6 +672,7 @@ int runHeadlessCommand(QApplication& app)
         const bool passed = prefixesOnly && valueStable && focusCancel && escapeCancel
                 && enterCommit && clickCommit && settingsTabsUsable && settingsShortcutsPersist
                 && autosaveSettingsPersist && settingsApplySignal && autosaveLiveReconfigure
+                && cameraSpeedSettingsPersist
                 && renderOptionsRegistered
                 && secondaryWindowsClosed
                 && pasteSingleAction && pasteUndoAtomic && pasteRedoAtomic
@@ -681,6 +695,7 @@ int runHeadlessCommand(QApplication& app)
                << " settingsShortcutsPersist=" << settingsShortcutsPersist
                << " autosaveSettingsPersist=" << autosaveSettingsPersist
                << " autosaveLiveReconfigure=" << autosaveLiveReconfigure
+               << " cameraSpeedSettingsPersist=" << cameraSpeedSettingsPersist
                << " settingsApplySignal=" << settingsApplySignal
                << " renderOptionsRegistered=" << renderOptionsRegistered
                << " secondaryWindowsClosed=" << secondaryWindowsClosed

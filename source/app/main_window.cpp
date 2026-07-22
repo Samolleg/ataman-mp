@@ -25,6 +25,9 @@
 #include <QCheckBox>
 #include <QToolButton>
 #include <QComboBox>
+#include <QSlider>
+#include <QDoubleSpinBox>
+#include <QSignalBlocker>
 #include <QLabel>
 #include <QHBoxLayout>
 #include <QVBoxLayout>
@@ -891,13 +894,11 @@ MainWindow::MainWindow(QWidget* parent) :
             }
         }
     }, Qt::DirectConnection);
-    connect(m_undoStack, &QUndoStack::indexChanged, this,
-            [this](int) { scheduleMobFamilyValidation(2500); });
     initShortcuts();
     connect(m_settings.get(), &CSettings::shortcutsChanged, this, &MainWindow::initShortcuts);
     m_autosaveTimer = new QTimer(this);
     m_autosaveTimer->setTimerType(Qt::PreciseTimer);
-    connect(m_autosaveTimer, &QTimer::timeout, this, &MainWindow::performAutosave);
+    connect(m_autosaveTimer, &QTimer::timeout, this, &MainWindow::beginAutosaveCountdown);
     connect(m_settings.get(), &CSettings::autosaveSettingsApplied,
             this, static_cast<void (MainWindow::*)(bool, int)>(
                 &MainWindow::configureAutosaveTimer));
@@ -2063,6 +2064,56 @@ void MainWindow::createViewportToolbars()
         });
     }
     operationLayout->addStretch(1);
+    operationLayout->addWidget(new QLabel(tr("Camera:"), operationBar));
+    m_cameraSpeedSlider = new QSlider(Qt::Horizontal, operationBar);
+    m_cameraSpeedSlider->setObjectName("cameraSpeedSlider");
+    m_cameraSpeedSlider->setRange(1, 100);
+    m_cameraSpeedSlider->setSingleStep(1);
+    m_cameraSpeedSlider->setPageStep(5);
+    m_cameraSpeedSlider->setFixedWidth(150);
+    m_cameraSpeedSlider->setToolTip(tr(
+        "Camera movement and zoom speed. Hold the configured modifier (Ctrl by default) "
+        "and use the mouse wheel over the viewport to adjust it."));
+    m_cameraSpeedSpin = new QDoubleSpinBox(operationBar);
+    m_cameraSpeedSpin->setObjectName("cameraSpeedMultiplier");
+    m_cameraSpeedSpin->setRange(0.1, 10.0);
+    m_cameraSpeedSpin->setSingleStep(0.1);
+    m_cameraSpeedSpin->setDecimals(1);
+    m_cameraSpeedSpin->setPrefix(QString::fromUtf8("\xC3\x97"));
+    m_cameraSpeedSpin->setFixedWidth(72);
+    m_cameraSpeedSpin->setToolTip(m_cameraSpeedSlider->toolTip());
+    double cameraSpeed = 1.0;
+    if(const COptDouble* option = dynamic_cast<const COptDouble*>(
+           m_settings->opt(eOptSetGeneral, "cameraSpeedMultiplier")))
+        cameraSpeed = qBound(0.1, option->value(), 10.0);
+    m_cameraSpeedSlider->setValue(qRound(cameraSpeed * 10.0));
+    m_cameraSpeedSpin->setValue(cameraSpeed);
+    m_pView->setCameraSpeedMultiplier(cameraSpeed);
+    operationLayout->addWidget(m_cameraSpeedSlider);
+    operationLayout->addWidget(m_cameraSpeedSpin);
+
+    m_cameraSpeedPersistTimer = new QTimer(this);
+    m_cameraSpeedPersistTimer->setSingleShot(true);
+    connect(m_cameraSpeedPersistTimer, &QTimer::timeout,
+            m_settings.get(), &CSettings::persistOptions);
+    connect(m_cameraSpeedSlider, &QSlider::valueChanged, this, [this](int value)
+    {
+        m_pView->setCameraSpeedMultiplier(value / 10.0);
+    });
+    connect(m_cameraSpeedSpin, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+            m_pView, &CView::setCameraSpeedMultiplier);
+    connect(m_pView, &CView::cameraSpeedMultiplierChanged, this, [this](double value)
+    {
+        const QSignalBlocker sliderBlocker(m_cameraSpeedSlider);
+        const QSignalBlocker spinBlocker(m_cameraSpeedSpin);
+        m_cameraSpeedSlider->setValue(qRound(value * 10.0));
+        m_cameraSpeedSpin->setValue(value);
+        if(COptDouble* option = dynamic_cast<COptDouble*>(
+               m_settings->opt(eOptSetGeneral, "cameraSpeedMultiplier")))
+            option->setValue(value);
+        m_cameraSpeedPersistTimer->start(250);
+        statusBar()->showMessage(tr("Camera speed: %1x").arg(value, 0, 'f', 1), 1500);
+    });
     m_ui->toolsLayout->setContentsMargins(0, 0, 0, 0);
     m_ui->toolsLayout->setSpacing(0);
 
@@ -2916,6 +2967,7 @@ void MainWindow::showMapTestResultNotification(const QJsonObject& report)
     m_mapTestResultNotification->show();
     m_mapTestResultNotification->raise();
     m_mapTestResultTimer->start(failed ? 9000 : (warned ? 7000 : 5000));
+    positionAutosaveNotification();
 }
 
 void MainWindow::positionMapTestResultNotification()
@@ -2927,6 +2979,19 @@ void MainWindow::positionMapTestResultNotification()
     m_mapTestResultNotification->move(
         qMax(0, width() - m_mapTestResultNotification->width() - right),
         qMax(0, height() - m_mapTestResultNotification->height() - bottom));
+}
+
+void MainWindow::positionAutosaveNotification()
+{
+    if(!m_autosaveNotification)
+        return;
+    const int right = 18;
+    int bottom = (statusBar() ? statusBar()->height() : 0) + 18;
+    if(m_mapTestResultNotification && m_mapTestResultNotification->isVisible())
+        bottom += m_mapTestResultNotification->height() + 10;
+    m_autosaveNotification->move(
+        qMax(0, width() - m_autosaveNotification->width() - right),
+        qMax(0, height() - m_autosaveNotification->height() - bottom));
 }
 
 QString MainWindow::validationWarningPreview(
@@ -4009,6 +4074,8 @@ void MainWindow::configureAutosaveTimer(bool enabled, int intervalMinutes)
     if(!enabled)
     {
         m_autosaveTimer->stop();
+        if(m_autosaveCountdownTimer) m_autosaveCountdownTimer->stop();
+        if(m_autosaveNotification) m_autosaveNotification->hide();
         ei::log(eLogInfo, "Periodic recovery autosave disabled from applied settings");
         return;
     }
@@ -4017,6 +4084,75 @@ void MainWindow::configureAutosaveTimer(bool enabled, int intervalMinutes)
     ei::log(eLogInfo, QString("Periodic recovery autosave scheduled intervalMinutes:%1 active:%2 remainingMs:%3 timerIntervalMs:%4")
             .arg(minutes).arg(m_autosaveTimer->isActive()).arg(m_autosaveTimer->remainingTime())
             .arg(m_autosaveTimer->interval()));
+}
+
+void MainWindow::beginAutosaveCountdown()
+{
+    if(!m_pView || m_pView->hasPendingOperation())
+    {
+        ei::log(eLogInfo, "Recovery autosave countdown deferred while an edit operation is pending");
+        return;
+    }
+    bool dirty = false;
+    for(CMob* mob : m_pView->mobs())
+        dirty = dirty || (mob && mob->isDirty());
+    dirty = dirty || (CLandscape::getInstance()->isMprLoad()
+                      && CLandscape::getInstance()->isDirty());
+    if(!dirty)
+    {
+        ei::log(eLogInfo, "Recovery autosave tick skipped because no document is dirty");
+        return;
+    }
+    if(m_autosaveCountdownTimer && m_autosaveCountdownTimer->isActive())
+        return;
+
+    if(!m_autosaveNotification)
+    {
+        m_autosaveNotification = new QFrame(this);
+        m_autosaveNotification->setObjectName("autosaveNotification");
+        m_autosaveNotification->setFrameShape(QFrame::StyledPanel);
+        m_autosaveNotification->setAttribute(Qt::WA_ShowWithoutActivating);
+        m_autosaveNotification->setStyleSheet(
+            "QFrame#autosaveNotification { background: #292929; border: 1px solid #808080; border-radius: 4px; }"
+            "QLabel { color: #eeeeee; } QPushButton { min-width: 88px; }");
+        QHBoxLayout* layout = new QHBoxLayout(m_autosaveNotification);
+        layout->setContentsMargins(12, 10, 12, 10);
+        m_autosaveCountdownLabel = new QLabel(m_autosaveNotification);
+        QPushButton* cancel = new QPushButton(tr("Cancel Autosave"), m_autosaveNotification);
+        layout->addWidget(m_autosaveCountdownLabel, 1);
+        layout->addWidget(cancel);
+        m_autosaveCountdownTimer = new QTimer(m_autosaveNotification);
+        m_autosaveCountdownTimer->setInterval(1000);
+        connect(m_autosaveCountdownTimer, &QTimer::timeout, this, [this]()
+        {
+            --m_autosaveCountdownSeconds;
+            if(m_autosaveCountdownSeconds <= 0)
+            {
+                m_autosaveCountdownTimer->stop();
+                m_autosaveNotification->hide();
+                performAutosave();
+                return;
+            }
+            m_autosaveCountdownLabel->setText(
+                tr("Recovery autosave in %1 seconds...").arg(m_autosaveCountdownSeconds));
+        });
+        connect(cancel, &QPushButton::clicked, this, [this]()
+        {
+            m_autosaveCountdownTimer->stop();
+            m_autosaveNotification->hide();
+            ei::log(eLogInfo, "Recovery autosave occurrence skipped by user");
+            statusBar()->showMessage(tr("This recovery autosave was skipped."), 3000);
+        });
+    }
+    m_autosaveCountdownSeconds = 15;
+    m_autosaveCountdownLabel->setText(
+        tr("Recovery autosave in %1 seconds...").arg(m_autosaveCountdownSeconds));
+    m_autosaveNotification->adjustSize();
+    positionAutosaveNotification();
+    m_autosaveNotification->show();
+    m_autosaveNotification->raise();
+    m_autosaveCountdownTimer->start();
+    ei::log(eLogInfo, "Recovery autosave countdown started seconds:15");
 }
 
 void MainWindow::performAutosave()
@@ -4334,6 +4470,7 @@ void MainWindow::resizeEvent(QResizeEvent* e)
 {
     QMainWindow::resizeEvent(e);
     positionMapTestResultNotification();
+    positionAutosaveNotification();
 }
 
 void MainWindow::closeEvent(QCloseEvent *e)

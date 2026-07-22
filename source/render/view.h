@@ -146,6 +146,8 @@ public:
     void setDirtyMpr();
     void setDurty(CMob* pMob = nullptr);
     void resetCamPosition();
+    double cameraSpeedMultiplier() const;
+    void setCameraSpeedMultiplier(double multiplier);
     void addLogicPoint(bool bLookPoint = false);
     void copySelectedIDsToClipboard();
     void changeCurrentMob(CMob* pMob);
@@ -265,6 +267,7 @@ signals:
     void loadedMapStateChanged();
     void nidChangeProposed(quint32 nid, const QString& mobPath);
     void nidAllocationRequested(const QString& mobPath, quint32* suggestion);
+    void cameraSpeedMultiplierChanged(double multiplier);
 
 private:
     int m_height; //for redraw window
@@ -283,6 +286,7 @@ private:
     QVector<bool> m_aReadState;
     QSharedPointer<CTableManager> m_tableManager;
     QUndoStack* m_pUndoStack;
+    int m_lastUndoStackIndex{-1};
     CProgressView* m_pProgress;
     QSharedPointer<COperation> m_pOp;
     QMap<CNode*, QVector3D> m_operationBackup;
