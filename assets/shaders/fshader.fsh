@@ -81,6 +81,7 @@ void main(void)
           float staticBias = max(0.000012 * (1.0 - sunDiffuse), 0.000002);
           float dynamicBias = 0.000001;
           float visibility = 0.0;
+          bool centerOccluded = false;
           for (int y = -1; y <= 1; ++y)
             for (int x = -1; x <= 1; ++x)
             {
@@ -95,9 +96,13 @@ void main(void)
                   : 1.0;
               bool staticOccluded = staticInside && staticProjected.z - staticBias > staticDepth;
               bool dynamicOccluded = dynamicInside && dynamicProjected.z - dynamicBias > dynamicDepth;
+              if (x == 0 && y == 0)
+                centerOccluded = staticOccluded || dynamicOccluded;
               visibility += (staticOccluded || dynamicOccluded) ? 0.58 : 1.0;
             }
           shadow = visibility / 9.0;
+          if (centerOccluded)
+            shadow = min(shadow, 0.58);
         }
       }
       float skyExposure = 0.88 + 0.12 * max(normal.z, 0.0);

@@ -167,6 +167,7 @@ QByteArray RenderQueueContext::staticShadowFingerprint() const
 }
 
 void RenderQueueContext::flushShadow(QOpenGLShaderProgram* shadowProgram,
+                                     float maximumDistance,
                                      bool dynamicOnly, bool staticOnly)
 {
     if(!shadowProgram || m_items.isEmpty())
@@ -175,7 +176,8 @@ void RenderQueueContext::flushShadow(QOpenGLShaderProgram* shadowProgram,
     shadowItems.reserve(m_items.size());
     for(const SRenderItem& source : m_items)
     {
-        if(!source.castsShadow || (dynamicOnly && !source.dynamicShadow)
+        if(!source.castsShadow || !shadowItemWithinDistance(source, maximumDistance)
+                || (dynamicOnly && !source.dynamicShadow)
                 || (staticOnly && source.dynamicShadow))
             continue;
         SRenderItem item = source;

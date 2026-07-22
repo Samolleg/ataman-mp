@@ -482,7 +482,7 @@
              <item><widget class="QLabel" name="renderShadowDistanceLabel"><property name="text"><string>Maximum shadow distance</string></property></widget></item>
              <item>
               <widget class="QLineEdit" name="renderShadowDistance">
-               <property name="toolTip"><string>Maximum caster and shadow-map reach in world units (64-1024). The default 320 is twice the former maximum.</string></property>
+               <property name="toolTip"><string>Maximum caster distance in world units (1-1024). Raising it expands shadow-map reach; 1 is useful for verifying the cutoff.</string></property>
                <property name="text"><string>320</string></property>
                <property name="maximumWidth"><number>90</number></property>
               </widget>

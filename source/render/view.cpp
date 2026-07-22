@@ -975,11 +975,13 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
     {
         return qBound(minimum, qCeil(value / 8.0f) * 8.0f, maximum);
     };
-    const float safeMaximumDistance = qBound(64.0f, maximumDistance, 1024.0f);
+    const float safeMaximumDistance = qBound(1.0f, maximumDistance, 1024.0f);
+    const float staticCoverageMaximum = qMax(40.0f, safeMaximumDistance);
+    const float dynamicCoverageMaximum = qMax(28.0f, safeMaximumDistance);
     const float staticExtent = quantizedExtent(cameraDistance * 1.25f,
-                                                40.0f, safeMaximumDistance);
+                                                40.0f, staticCoverageMaximum);
     const float dynamicExtent = quantizedExtent(cameraDistance * 0.85f,
-                                                 28.0f, safeMaximumDistance);
+                                                 28.0f, dynamicCoverageMaximum);
     // Static coverage remains stable inside half a terrain sector so its
     // expensive cached pass is not rebuilt for every small pan.
     const QVector3D staticFocus(qFloor(shadowFocus.x() / 8.0f) * 8.0f,
@@ -1022,6 +1024,8 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
     staticHash.addData(sceneSourceFingerprint().toUtf8());
     staticHash.addData(reinterpret_cast<const char*>(candidateStaticMatrix.constData()),
                        16 * int(sizeof(float)));
+    staticHash.addData(reinterpret_cast<const char*>(&safeMaximumDistance),
+                       int(sizeof(safeMaximumDistance)));
     const QByteArray staticFingerprint = staticHash.result();
     const bool rebuildStatic = staticFingerprint != m_staticShadowFingerprint;
     const bool rebuildDynamic = !m_shadowInitialized || m_shadowUpdateTimer.elapsed() >= 66;
@@ -1049,7 +1053,7 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
         beginTarget(m_shadowFbo, staticProjection, staticLightView);
         // Stock EI terrain receives projected shadows but does not cast them.
         // Keep it out of both shadow maps; it remains in the color/receiver pass.
-        queue.flushShadow(&m_shadowProgram, false, true);
+        queue.flushShadow(&m_shadowProgram, safeMaximumDistance, false, true);
         m_shadowFbo->release();
         m_staticShadowFingerprint = staticFingerprint;
     }
@@ -1060,7 +1064,7 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
         // at 15 Hz made unit shadows jump and flicker during camera pans.
         m_dynamicLightSpaceMatrix = candidateDynamicMatrix;
         beginTarget(m_dynamicShadowFbo, dynamicProjection, dynamicLightView);
-        queue.flushShadow(&m_shadowProgram, true, false);
+        queue.flushShadow(&m_shadowProgram, safeMaximumDistance, true, false);
         m_dynamicShadowFbo->release();
         m_shadowUpdateTimer.restart();
     }
@@ -1402,7 +1406,7 @@ void CView::draw()
         ? dynamic_cast<const COptInt*>(m_pSettings->opt("renderShadowDistance")) : nullptr;
     // The old adaptive map stopped at 160 world units. Keep twice that reach
     // by default while allowing large-scene authors to tune the preview.
-    const float maximumShadowDistance = float(qBound(64,
+    const float maximumShadowDistance = float(qBound(1,
         shadowDistanceOption ? shadowDistanceOption->value() : 320, 1024));
     const bool overrideWorldTime = renderBool("overrideWorldTime", false);
     const COptInt* timeOption = m_pSettings

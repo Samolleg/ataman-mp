@@ -88,7 +88,7 @@ CSettings::CSettings(QWidget *parent) :
     ui->rangeIncrement->setValidator(new QIntValidator(1, 1000000, this));
     ui->undoHistoryLimit->setValidator(new QIntValidator(1, 1000000, this));
     ui->renderFpsCap->setValidator(new QIntValidator(0, 1000, this));
-    ui->renderShadowDistance->setValidator(new QIntValidator(64, 1024, this));
+    ui->renderShadowDistance->setValidator(new QIntValidator(1, 1024, this));
     initOptions();
     readOptions();
     const COptString* savedProfile = dynamic_cast<const COptString*>(opt(eOptSetResource, "resourceProfile"));

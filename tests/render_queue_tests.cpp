@@ -13,6 +13,7 @@ private slots:
     void alphaClassification();
     void deterministicQueueOrder();
     void groupsOnlyCompatibleInstanceRuns();
+    void filtersShadowCastersByDistance();
     void selectsModernAndFallbackCapabilities();
     void appliesRenderSchedulingOptions();
     void derivesEnvironmentFromWorldValues();
@@ -99,6 +100,15 @@ void RenderQueueTests::groupsOnlyCompatibleInstanceRuns()
     QVERIFY(!shareInstanceBatch(first, transparent));
     QVERIFY(!shareInstanceBatch(first, highlighted));
     QVERIFY(!shareInstanceBatch(first, dynamicCaster));
+}
+
+void RenderQueueTests::filtersShadowCastersByDistance()
+{
+    SRenderItem item;
+    item.cameraDistanceSquared = 16.0f;
+    QVERIFY(!shadowItemWithinDistance(item, 1.0f));
+    QVERIFY(shadowItemWithinDistance(item, 4.0f));
+    QVERIFY(shadowItemWithinDistance(item, 8.0f));
 }
 
 void RenderQueueTests::selectsModernAndFallbackCapabilities()

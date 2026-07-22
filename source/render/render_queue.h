@@ -98,6 +98,12 @@ inline bool supportsInstancedRenderPath(bool isGles, int majorVersion, int minor
         || (majorVersion == 3 && minorVersion >= 3));
 }
 
+inline bool shadowItemWithinDistance(const SRenderItem& item, float maximumDistance)
+{
+    const float safeDistance = qMax(0.0f, maximumDistance);
+    return item.cameraDistanceSquared <= safeDistance * safeDistance;
+}
+
 class RenderQueueContext
 {
 public:
@@ -117,6 +123,7 @@ public:
                          const QVector4D& pickingColor);
     void flush();
     void flushShadow(QOpenGLShaderProgram* shadowProgram,
+                     float maximumDistance,
                      bool dynamicOnly = false, bool staticOnly = false);
     QByteArray staticShadowFingerprint() const;
 
