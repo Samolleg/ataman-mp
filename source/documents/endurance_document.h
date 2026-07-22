@@ -185,6 +185,18 @@ private:
 class CMobDocument
 {
 public:
+    struct SLeverConversionValues
+    {
+        quint32 openType = 1;
+        quint32 keyId = 0;
+        quint32 handsSkill = 0;
+        quint8 currentState = 0;
+        quint8 totalStates = 2;
+        bool cycled = false;
+        bool door = false;
+        bool recalculateGraph = false;
+    };
+
     bool load(const QFileInfo& file, CValidationReport* report = nullptr);
     bool loadBytes(const QByteArray& bytes, const QString& sourceName,
                    CValidationReport* report = nullptr);
@@ -220,6 +232,11 @@ public:
     bool objectSubtreeBytes(const QString& objectPath,
                             const QByteArray& expectedSubtreeSha256,
                             QByteArray* output) const;
+    static bool convertWorldObjectSubtreeToLever(
+        const QByteArray& worldObjectSubtree,
+        const SLeverConversionValues& values,
+        QByteArray* leverSubtree,
+        CValidationReport* report = nullptr);
     bool reconcileLogicPointStructure(const CMobDocument& cleanProjection,
                                       const CMobDocument& editedProjection,
                                       QByteArray* output,

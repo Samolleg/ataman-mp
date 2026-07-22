@@ -136,6 +136,8 @@ public:
     void selectedObjectToClipboardBuffer();
     void clipboradObjectsToScene();
     void duplicateSelectedObjects();
+    bool canConvertSelectedWorldObjectToLever() const;
+    void convertSelectedWorldObjectToLever();
     void hideSelectedNodes();
     void unHideAll();
     CMob* currentMob() {return m_activeMob;}

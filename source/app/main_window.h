@@ -199,6 +199,7 @@ private:
     QMenu* m_recentFilesMenu;
     QAction* m_externalScriptAction;
     QAction* m_activateOwnerMobAction;
+    QAction* m_convertWorldObjectToLeverAction;
     QDockWidget* m_mapsDock;
     QDockWidget* m_historyDock;
     QDockWidget* m_validationDock;

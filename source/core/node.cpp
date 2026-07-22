@@ -30,6 +30,7 @@ CNode::CNode():
     ,m_parent(nullptr)
     ,m_state(eDraw)
     ,m_rawCopiedObject(false)
+    ,m_rawStructuralReplacement(false)
 {
     init();
 }
@@ -37,6 +38,7 @@ CNode::CNode():
 CNode::CNode(CNode* parent):
     m_position(0.0, 0.0, 0.0)
     ,m_rawCopiedObject(false)
+    ,m_rawStructuralReplacement(false)
 {
     if (m_parent)
         m_parent = parent;
@@ -59,6 +61,7 @@ CNode::CNode(const CNode &node):
   ,m_rawCopiedObject(node.m_rawCopiedObject)
   ,m_rawTemplateSourceSubtree(node.m_rawTemplateSourceSubtree)
   ,m_rawTemplateCleanSubtree(node.m_rawTemplateCleanSubtree)
+  ,m_rawStructuralReplacement(node.m_rawStructuralReplacement)
 {
     init();
     //children?

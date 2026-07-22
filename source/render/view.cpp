@@ -9,6 +9,7 @@
 #include <QRandomGenerator>
 #include <QMessageBox>
 #include <QCryptographicHash>
+#include <limits>
 
 #include "view.h"
 #include "render_scheduling.h"
@@ -25,6 +26,7 @@
 #include "undo.h"
 #include "objects/object_base.h"
 #include "objects/worldobj.h"
+#include "objects/lever.h"
 #include "objects/unit.h"
 #include "objects/magictrap.h"
 #include "mob\mob_parameters.h"
@@ -44,6 +46,7 @@
 #include "external_script_workspace.h"
 #include "mob_script_window.h"
 #include "script_reference_analyzer.h"
+#include "endurance_document.h"
 
 class CLogic;
 
@@ -4133,6 +4136,143 @@ void CView::duplicateSelectedObjects()
         return;
     selectedObjectToClipboardBuffer();
     clipboradObjectsToScene();
+}
+
+bool CView::canConvertSelectedWorldObjectToLever() const
+{
+    if(!m_activeMob || CScene::getInstance()->getMode() != eEditModeObjects)
+        return false;
+    CNode* candidate = nullptr;
+    for(CMob* mob : m_aMob)
+        if(mob)
+            for(CNode* node : mob->nodes())
+                if(node && node->nodeState() == ENodeState::eSelect)
+                {
+                    if(candidate || mob != m_activeMob || node->nodeType() != eWorldObject)
+                        return false;
+                    candidate = node;
+                }
+    return candidate && !hasPendingOperation();
+}
+
+void CView::convertSelectedWorldObjectToLever()
+{
+    if(!canConvertSelectedWorldObjectToLever() || !m_pUndoStack)
+        return;
+    CWorldObj* worldObject = nullptr;
+    for(CNode* node : m_activeMob->nodes())
+        if(node && node->nodeState() == ENodeState::eSelect)
+        {
+            worldObject = dynamic_cast<CWorldObj*>(node);
+            break;
+        }
+    if(!worldObject || !worldObject->hasRawObjectProvenance())
+        return;
+    if(!confirmScriptReferencedObjectIds({worldObject->mapId()},
+                                         tr("convert this world object to a lever")))
+        return;
+
+    QDialog conversion(this);
+    conversion.setWindowTitle(tr("Convert World Object to Lever"));
+    QVBoxLayout* layout = new QVBoxLayout(&conversion);
+    QLabel* explanation = new QLabel(tr(
+        "Convert object ID %1 (%2) using the proven Base/JMV lever layout. "
+        "The original common and opaque object records remain byte-identical. "
+        "The conversion is one undoable edit.")
+        .arg(worldObject->mapId()).arg(worldObject->mapName()), &conversion);
+    explanation->setWordWrap(true);
+    layout->addWidget(explanation);
+    QFormLayout* form = new QFormLayout;
+    QComboBox* openMode = new QComboBox(&conversion);
+    openMode->addItem(tr("Enabled (free open)"), 1);
+    openMode->addItem(tr("Disabled"), 0);
+    openMode->addItem(tr("Hands skill required"), 5);
+    openMode->addItem(tr("Key required"), 8);
+    QSpinBox* keyId = new QSpinBox(&conversion);
+    keyId->setRange(0, std::numeric_limits<int>::max());
+    QSpinBox* handsSkill = new QSpinBox(&conversion);
+    handsSkill->setRange(0, std::numeric_limits<int>::max());
+    QSpinBox* currentState = new QSpinBox(&conversion);
+    currentState->setRange(0, 255);
+    QSpinBox* totalStates = new QSpinBox(&conversion);
+    totalStates->setRange(1, 255);
+    totalStates->setValue(2);
+    QCheckBox* cycled = new QCheckBox(tr("Cycle through states"), &conversion);
+    QCheckBox* door = new QCheckBox(tr("Treat as door"), &conversion);
+    QCheckBox* recalculateGraph = new QCheckBox(tr("Recalculate AI graph"), &conversion);
+    form->addRow(tr("Open mode"), openMode);
+    form->addRow(tr("Key ID"), keyId);
+    form->addRow(tr("Hands skill"), handsSkill);
+    form->addRow(tr("Current state"), currentState);
+    form->addRow(tr("State count"), totalStates);
+    form->addRow(QString(), cycled);
+    form->addRow(QString(), door);
+    form->addRow(QString(), recalculateGraph);
+    layout->addLayout(form);
+    QDialogButtonBox* buttons = new QDialogButtonBox(
+        QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &conversion);
+    buttons->button(QDialogButtonBox::Ok)->setText(tr("Convert"));
+    connect(buttons, &QDialogButtonBox::accepted, &conversion, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &conversion, &QDialog::reject);
+    layout->addWidget(buttons);
+    if(conversion.exec() != QDialog::Accepted)
+        return;
+
+    QByteArray sourceObject;
+    QByteArray cleanObject;
+    if(!m_activeMob->rawObjectTemplateBytes(worldObject, &sourceObject, &cleanObject))
+    {
+        QMessageBox::warning(this, tr("Conversion unavailable"),
+            tr("Endurance could not verify the selected object's lossless raw provenance."));
+        return;
+    }
+    CMobDocument::SLeverConversionValues defaults;
+    defaults.openType = openMode->currentData().toUInt();
+    defaults.keyId = quint32(keyId->value());
+    defaults.handsSkill = quint32(handsSkill->value());
+    defaults.currentState = quint8(currentState->value());
+    defaults.totalStates = quint8(totalStates->value());
+    defaults.cycled = cycled->isChecked();
+    defaults.door = door->isChecked();
+    defaults.recalculateGraph = recalculateGraph->isChecked();
+    QByteArray sourceLever;
+    QByteArray cleanLever;
+    CValidationReport report;
+    if(!CMobDocument::convertWorldObjectSubtreeToLever(sourceObject, defaults,
+                                                       &sourceLever, &report) ||
+       !CMobDocument::convertWorldObjectSubtreeToLever(cleanObject, defaults,
+                                                       &cleanLever, &report))
+    {
+        ei::log(eLogWarning, QString("World object to lever conversion rejected: %1")
+                .arg(report.toText()));
+        QMessageBox::warning(this, tr("Conversion unavailable"),
+            tr("The selected object's raw structure could not be converted safely. See the workflow log."));
+        return;
+    }
+
+    QJsonObject leverData;
+    leverData.insert("World object", worldObject->toJson());
+    leverData.insert("State", int(defaults.currentState));
+    leverData.insert("State numbers", int(defaults.totalStates));
+    leverData.insert("Is cycled?", defaults.cycled);
+    leverData.insert("Is cast once?", false);
+    QJsonArray scienceStats;
+    scienceStats.append(int(defaults.openType));
+    scienceStats.append(int(defaults.keyId));
+    scienceStats.append(int(defaults.handsSkill));
+    leverData.insert("Science stats", scienceStats);
+    leverData.insert("Is door?", defaults.door);
+    leverData.insert("Is recalculate graph?", defaults.recalculateGraph);
+    CLever* lever = new CLever(leverData);
+    lever->loadFigure();
+    lever->loadTexture();
+    lever->setRawObjectProvenance(worldObject->rawSourceDocumentSha256(),
+                                  worldObject->rawSourceObjectPath(),
+                                  QCryptographicHash::hash(sourceLever, QCryptographicHash::Sha256));
+    lever->setRawStructuralReplacementBytes(sourceLever, cleanLever);
+    lever->setState(worldObject->nodeState());
+    m_pUndoStack->push(new CConvertWorldObjectToLeverCommand(
+        this, m_activeMob, worldObject, lever));
 }
 
 void CView::refreshMobDirtyStates()

@@ -1828,6 +1828,94 @@ bool CMobDocument::objectSubtreeBytes(const QString& objectPath,
     return true;
 }
 
+bool CMobDocument::convertWorldObjectSubtreeToLever(
+    const QByteArray& worldObjectSubtree,
+    const SLeverConversionValues& values,
+    QByteArray* leverSubtree,
+    CValidationReport* report)
+{
+    if(!leverSubtree)
+        return false;
+    leverSubtree->clear();
+
+    const auto read32 = [](const QByteArray& bytes, int offset, quint32* value) {
+        if(!value || offset < 0 || offset + 4 > bytes.size()) return false;
+        const uchar* p = reinterpret_cast<const uchar*>(bytes.constData() + offset);
+        *value = quint32(p[0]) | (quint32(p[1]) << 8) |
+                 (quint32(p[2]) << 16) | (quint32(p[3]) << 24);
+        return true;
+    };
+    const auto put32 = [](QByteArray* bytes, quint32 value) {
+        bytes->append(char(value & 0xff));
+        bytes->append(char((value >> 8) & 0xff));
+        bytes->append(char((value >> 16) & 0xff));
+        bytes->append(char((value >> 24) & 0xff));
+    };
+    const auto makeSection = [&put32](quint32 type, const QByteArray& payload) {
+        QByteArray bytes;
+        put32(&bytes, type);
+        put32(&bytes, quint32(8 + payload.size()));
+        bytes += payload;
+        return bytes;
+    };
+    const auto fail = [report](const QString& message) {
+        if(report)
+            report->add("mob.convert.lever", EValidationSeverity::Error,
+                        message, "world-object subtree");
+        return false;
+    };
+
+    quint32 outerType = 0;
+    quint32 outerLength = 0;
+    if(!read32(worldObjectSubtree, 0, &outerType) ||
+       !read32(worldObjectSubtree, 4, &outerLength) ||
+       outerType != 0xB001 || outerLength != quint32(worldObjectSubtree.size()))
+        return fail("The selected raw subtree is not a complete basic OBJECT record");
+
+    QByteArray originalChildren = worldObjectSubtree.mid(8);
+    bool patchedObjectType = false;
+    int cursor = 0;
+    while(cursor < originalChildren.size())
+    {
+        quint32 childType = 0;
+        quint32 childLength = 0;
+        if(!read32(originalChildren, cursor, &childType) ||
+           !read32(originalChildren, cursor + 4, &childLength) ||
+           childLength < 8 || quint64(cursor) + childLength > quint64(originalChildren.size()))
+            return fail("The selected OBJECT contains malformed child bounds");
+        if(childType == 0xB003)
+        {
+            quint32 objectType = 0;
+            if(patchedObjectType || childLength != 12 ||
+               !read32(originalChildren, cursor + 8, &objectType) || objectType != 54)
+                return fail("The selected OBJECT has an ambiguous OBJTYPE record");
+            originalChildren[cursor + 8] = char(60);
+            originalChildren[cursor + 9] = 0;
+            originalChildren[cursor + 10] = 0;
+            originalChildren[cursor + 11] = 0;
+            patchedObjectType = true;
+        }
+        cursor += int(childLength);
+    }
+    if(!patchedObjectType)
+        return fail("The selected OBJECT has no verified OBJTYPE record");
+
+    QByteArray stats;
+    put32(&stats, values.openType);
+    put32(&stats, values.keyId);
+    put32(&stats, values.handsSkill);
+    QByteArray leverChildren;
+    leverChildren += makeSection(0xBBAC0006, stats);
+    leverChildren += makeSection(0xBBAC0002, QByteArray(1, char(values.currentState)));
+    leverChildren += makeSection(0xBBAC0003, QByteArray(1, char(values.totalStates)));
+    leverChildren += makeSection(0xBBAC0004, QByteArray(1, char(values.cycled ? 1 : 0)));
+    leverChildren += makeSection(0xBBAC0007, QByteArray(1, char(values.door ? 1 : 0)));
+    leverChildren += makeSection(0xBBAC0008, QByteArray(1, char(values.recalculateGraph ? 1 : 0)));
+    leverChildren += originalChildren;
+    *leverSubtree = makeSection(0xBBAC0000, leverChildren);
+    return true;
+}
+
 bool CMobDocument::reconcileLogicPointStructure(
     const CMobDocument& cleanProjection,
     const CMobDocument& editedProjection,

@@ -185,6 +185,7 @@ MainWindow::MainWindow(QWidget* parent) :
     m_recentFilesMenu(nullptr),
     m_externalScriptAction(nullptr),
     m_activateOwnerMobAction(nullptr),
+    m_convertWorldObjectToLeverAction(nullptr),
     m_mapsDock(nullptr),
     m_historyDock(nullptr),
     m_validationDock(nullptr),
@@ -482,6 +483,16 @@ MainWindow::MainWindow(QWidget* parent) :
     {
         if(m_pView && m_pView->hasActiveMob())
             m_pView->openExternalMobScript(m_pView->currentMob());
+    });
+    QMenu* objectEditMenu = m_ui->menuEdit->addMenu(tr("Object"));
+    m_convertWorldObjectToLeverAction = objectEditMenu->addAction(
+        tr("Convert World Object to Lever..."));
+    m_convertWorldObjectToLeverAction->setEnabled(false);
+    m_convertWorldObjectToLeverAction->setToolTip(
+        tr("Converts one selected basic world object into an interactable lever as one undoable edit."));
+    connect(m_convertWorldObjectToLeverAction, &QAction::triggered, this, [this]() {
+        if(m_pView)
+            m_pView->convertSelectedWorldObjectToLever();
     });
     m_activateOwnerMobAction = new QAction(tr("Activate Selected Object's MOB"), this);
     viewMenu->addAction(m_activateOwnerMobAction);
@@ -3497,6 +3508,9 @@ void MainWindow::updateOperationAvailability(bool hasSelection)
             }
         m_activateOwnerMobAction->setEnabled(canActivateOwner);
     }
+    if(m_convertWorldObjectToLeverAction)
+        m_convertWorldObjectToLeverAction->setEnabled(
+            m_pView && m_pView->canConvertSelectedWorldObjectToLever());
 }
 
 void MainWindow::updateLoadedMapPanel()

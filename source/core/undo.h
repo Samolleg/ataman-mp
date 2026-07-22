@@ -110,6 +110,27 @@ private:
     bool m_firstRedo;
 };
 
+class CConvertWorldObjectToLeverCommand : public QUndoCommand
+{
+public:
+    enum { Id = 120 };
+    CConvertWorldObjectToLeverCommand(CView* view, CMob* mob,
+                                      CNode* worldObject, CNode* lever,
+                                      QUndoCommand* parent = nullptr);
+    void undo() override;
+    void redo() override;
+    int id() const override { return Id; }
+
+private:
+    void apply(CNode* from, CNode* to);
+    CView* m_view;
+    CMob* m_mob;
+    CNode* m_worldObject;
+    CNode* m_lever;
+    int m_index;
+    bool m_selected;
+};
+
 class CChangeLogicParam : public QObject, public QUndoCommand
 {
     Q_OBJECT
