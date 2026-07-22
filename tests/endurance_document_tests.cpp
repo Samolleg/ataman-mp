@@ -551,6 +551,33 @@ void EnduranceDocumentTests::worldObjectToLeverPreservesRawChildren()
     QByteArray rejected;
     QVERIFY(!CMobDocument::convertWorldObjectSubtreeToLever(
         object(1234), defaults, &rejected, nullptr));
+
+    for(const quint32 sourceType : {quint32(53), quint32(55)})
+    {
+        const QByteArray scenery = section(0xB001,
+            section(0xB002, u32(2000 + sourceType)) +
+            section(0xB003, u32(sourceType)) +
+            section(0xB004, "scenery"));
+        QByteArray sceneryLever;
+        CValidationReport sceneryReport;
+        QVERIFY2(CMobDocument::convertWorldObjectSubtreeToLever(
+                     scenery, defaults, &sceneryLever, &sceneryReport),
+                 qPrintable(sceneryReport.toText()));
+
+        CMobDocument sceneryDocument;
+        QVERIFY(sceneryDocument.loadBytes(
+            validMob(section(0xB000, sceneryLever)), "converted-scenery.mob"));
+        QCOMPARE(sceneryDocument.objects().size(), 1);
+        QCOMPARE(sceneryDocument.objects().front().objectType, quint32(60));
+    }
+
+    const QByteArray unsupported = section(0xB001,
+        section(0xB002, u32(9999)) + section(0xB003, u32(51)) +
+        section(0xB004, "unsupported"));
+    CValidationReport unsupportedReport;
+    QVERIFY(!CMobDocument::convertWorldObjectSubtreeToLever(
+        unsupported, defaults, &rejected, &unsupportedReport));
+    QVERIFY(unsupportedReport.toText().contains("OBJTYPE 51"));
 }
 
 void EnduranceDocumentTests::objectSequenceRebuildIsExactAndOrdered()

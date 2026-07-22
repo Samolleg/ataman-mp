@@ -5,7 +5,7 @@ work is ordered from the newest planned minor line to the oldest completed one.
 An item is checked only after its implementation has landed and received the
 stated validation. Completed code should carry a commit, test, or release link.
 
-Current development line: `0.2.1-alpha.30` focused closed testing.
+Current development line: `0.2.1-alpha.31` focused closed testing.
 
 <details open>
 <summary><strong>General wishlist — not assigned to a release</strong></summary>
@@ -304,9 +304,14 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
 
 ### Current 0.2.x status
 
-- **Current tester build:** `0.2.1-alpha.29`; its JMV hot-reload readiness and
-  unrelated-game recovery regressions are fixed in the next candidate.
-- **Current test candidate:** `0.2.1-alpha.30`. Alpha.30 fixes the remaining
+- **Current tester build:** `0.2.1-alpha.30`; runtime ownership and Hot Reload
+  are tester-confirmed, while conversion of type-53/type-55 world objects is
+  incorrectly rejected before mutation.
+- **Current test candidate:** `0.2.1-alpha.31`. Alpha.31 corrects the lever
+  eligibility rule using the complete Base/JMV corpus: basic `OBJECT` records
+  with proven subtypes 53 (flora), 54 (ordinary scenery), and 55
+  (stone/scenery) can be converted; malformed, duplicate, and unproven subtype
+  records still fail closed. Alpha.30 fixes the remaining
   runtime-process ownership boundary: an unrelated `game.exe` can no longer
   make an empty/legacy recovery journal claim an active Endurance test, and the
   editor accepts alpha.29's accidental UTF-16LE `game.pid` while the rebuilt

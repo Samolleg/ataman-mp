@@ -1886,9 +1886,22 @@ bool CMobDocument::convertWorldObjectSubtreeToLever(
         if(childType == 0xB003)
         {
             quint32 objectType = 0;
-            if(patchedObjectType || childLength != 12 ||
-               !read32(originalChildren, cursor + 8, &objectType) || objectType != 54)
-                return fail("The selected OBJECT has an ambiguous OBJTYPE record");
+            if(patchedObjectType)
+                return fail("The selected OBJECT contains more than one OBJTYPE record");
+            if(childLength != 12 ||
+               !read32(originalChildren, cursor + 8, &objectType))
+                return fail(QString("The selected OBJECT has a malformed OBJTYPE record (length %1)")
+                            .arg(childLength));
+            // The complete installed Base/JMV corpus uses 53 (flora),
+            // 54 (ordinary scenery), and 55 (stone/scenery) inside the basic
+            // OBJECT envelope. The envelope establishes the editable world-
+            // object projection; conversion deliberately replaces that
+            // subtype with the lever subtype 60. Keep unknown values guarded
+            // until a profile/corpus proves them.
+            if(objectType != 53 && objectType != 54 && objectType != 55)
+                return fail(QString("The selected OBJECT uses unsupported OBJTYPE %1; "
+                                    "the proven convertible values are 53, 54, and 55")
+                            .arg(objectType));
             originalChildren[cursor + 8] = char(60);
             originalChildren[cursor + 9] = 0;
             originalChildren[cursor + 10] = 0;
@@ -1898,7 +1911,7 @@ bool CMobDocument::convertWorldObjectSubtreeToLever(
         cursor += int(childLength);
     }
     if(!patchedObjectType)
-        return fail("The selected OBJECT has no verified OBJTYPE record");
+        return fail("The selected OBJECT has no OBJTYPE record");
 
     QByteArray stats;
     put32(&stats, values.openType);

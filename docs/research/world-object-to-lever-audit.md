@@ -49,8 +49,17 @@ All 1,518 levers use the same ordered layout:
 | 7 onward | ordinary world-object records | unchanged | unchanged |
 
 The outer record is `LEVER` (`0xBBAC0000`) and its common `OBJTYPE` leaf is 60.
-An ordinary world object uses the `OBJECT` envelope (`0x0000B001`) and
-`OBJTYPE` 54.
+A basic world object uses the `OBJECT` envelope (`0x0000B001`). A follow-up
+audit prompted by the alpha.30 runtime test found that the complete installed
+Base/JMV corpora use three normal subtypes inside that envelope:
+
+- `OBJTYPE` 53: flora;
+- `OBJTYPE` 54: ordinary scenery/world objects;
+- `OBJTYPE` 55: stone/scenery.
+
+There is also one anomalous `OBJECT`/`OBJTYPE 51` record in each corpus copy of
+the main-menu MOB (`Column-1`). Because 51 normally denotes an orc unit, it is
+not included in the proven conversion set without further runtime evidence.
 
 No scanned lever contains the old `LEVER_SCIENCE_STATS` record or
 `LEVER_CAST_ONCE`. Those tags remain readable compatibility cases, but there is
@@ -92,15 +101,15 @@ was previously used as a lever.
 Conversion should be a dedicated raw-subtree transaction, not construction
 through the legacy serializer and not cloning an unrelated lever:
 
-1. Require a structurally parsed `OBJECT` subtree with `OBJTYPE` 54 and valid
-   source provenance.
+1. Require a structurally parsed `OBJECT` subtree with corpus-proven `OBJTYPE`
+   53, 54, or 55 and valid source provenance.
 2. Preserve the target's NID, common record order, raw payloads, model,
    textures, body parts, transform, directory membership, script identity, and
    any bounded opaque common records.
 3. Change only the outer record ID from `OBJECT` to `LEVER`.
 4. Insert the six corpus-proven lever records above immediately before the
    preserved common world-object records.
-5. Change only the existing `OBJTYPE` payload from 54 to 60.
+5. Change only the existing `OBJTYPE` payload from 53, 54, or 55 to 60.
 6. Recalculate the changed envelope/ancestor lengths.
 7. Reparse the candidate, verify that the resulting subtree is a lever, and
    semantic-diff it against the source. The only authorized structural changes
