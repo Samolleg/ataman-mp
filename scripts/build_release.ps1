@@ -77,8 +77,17 @@ if (($repositoryRoot -match '[^\x00-\x7F]') -or ($buildPath -match '[^\x00-\x7F]
         foreach ($drive in (Get-PSDrive -PSProvider FileSystem)) {
             $candidateProject = Join-Path $drive.Root 'ei_maper.pro'
             $candidateHead = Join-Path $drive.Root '.git\HEAD'
-            if ((Test-Path -LiteralPath $candidateProject -PathType Leaf) -and
-                (Test-Path -LiteralPath $candidateHead -PathType Leaf) -and
+            # Disconnected network shares and sandbox/virtual drives may still
+            # be enumerated by Get-PSDrive while rejecting even Test-Path.
+            # They are not candidate repository mappings and must not abort an
+            # otherwise local release build.
+            try {
+                $hasProject = Test-Path -LiteralPath $candidateProject -PathType Leaf -ErrorAction Stop
+                $hasHead = Test-Path -LiteralPath $candidateHead -PathType Leaf -ErrorAction Stop
+            } catch {
+                continue
+            }
+            if ($hasProject -and $hasHead -and
                 ((Get-FileHash -LiteralPath $candidateProject -Algorithm SHA256).Hash -eq $projectHash) -and
                 ((Get-Content -Raw -LiteralPath $candidateHead).Trim() -eq $gitHead)) {
                 $existingDrive = "$($drive.Name):"

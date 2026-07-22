@@ -4618,12 +4618,15 @@ void MainWindow::on_actionReset_selected_IDs_triggered()
 
 void MainWindow::on_action_About_triggered()
 {
-    QMessageBox::information(this, "About",
-        QString("EI Mapper: Endurance Edition %1\n\n"
-                "A private, independently versioned derivative of EI Mapper by konstvest.\n"
-                "Upstream: https://github.com/konstvest/ei_maper\n"
-                "License: GNU GPL-3.0")
-            .arg(QCoreApplication::applicationVersion()));
+    QMessageBox about(this);
+    about.setWindowTitle(tr("About"));
+    about.setIconPixmap(qApp->windowIcon().pixmap(96, 96));
+    about.setText(QString("EI Mapper: Endurance Edition %1\n\n"
+                          "A private, independently versioned derivative of EI Mapper by konstvest.\n"
+                          "Upstream: https://github.com/konstvest/ei_maper\n"
+                          "License: GNU GPL-3.0")
+                      .arg(QCoreApplication::applicationVersion()));
+    about.exec();
 }
 
 

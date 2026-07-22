@@ -878,6 +878,7 @@ int main(int argc, char *argv[])
         QCoreApplication::setAttribute(Qt::AA_UseDesktopOpenGL);
 
     QApplication app(argc, argv);
+    app.setWindowIcon(QIcon(":/endurance_gate.png"));
 
     // QGLWidget reads the default format when the first preview/view widget is
     // constructed. Normal editing follows display VSync; benchmark mode is an
