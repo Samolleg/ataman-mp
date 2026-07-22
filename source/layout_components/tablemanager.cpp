@@ -158,6 +158,10 @@ public:
         // the three buttons belonging to this one Vector3 editor.
         setAutoExclusive(false);
         setFocusPolicy(Qt::StrongFocus);
+        // Qt may propagate a ContextMenu event from a child through C3DItem,
+        // whose table-level filter opens the aggregate property menu. Open the
+        // component menu explicitly from the consumed right-button release.
+        setContextMenuPolicy(Qt::PreventContextMenu);
         setMinimumSize(32, 22);
         setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Expanding);
         setProperty("enduranceComponentType", int(property->type()));
@@ -180,6 +184,7 @@ protected:
         if(event->button() == Qt::RightButton)
         {
             prepareContextSelection();
+            m_rightPressArmed = true;
             event->accept();
             return;
         }
@@ -190,10 +195,13 @@ protected:
     {
         if(event->button() == Qt::RightButton)
         {
-            // QToolButton ignores a right release and QTableWidget would then
-            // briefly select the containing Vector3 cell. Consume the whole
-            // gesture; QContextMenuEvent is delivered independently.
+            const bool openMenu = m_rightPressArmed && rect().contains(event->pos());
+            m_rightPressArmed = false;
             event->accept();
+            if(openMenu)
+                showComponentMenu(event->globalPos());
+            else
+                restoreContextSelection();
             return;
         }
         QToolButton::mouseReleaseEvent(event);
@@ -213,12 +221,28 @@ protected:
             event->accept();
             return;
         }
+        if(event->key() == Qt::Key_Menu
+           || (event->key() == Qt::Key_F10
+               && event->modifiers().testFlag(Qt::ShiftModifier)))
+        {
+            prepareContextSelection();
+            showComponentMenu(mapToGlobal(QPoint(0, height())));
+            event->accept();
+            return;
+        }
         QToolButton::keyPressEvent(event);
     }
 
     void contextMenuEvent(QContextMenuEvent* event) override
     {
-        prepareContextSelection();
+        // PreventContextMenu normally suppresses this. Accept defensively so
+        // an OS-generated event can never bubble into the aggregate C3DItem.
+        event->accept();
+    }
+
+private:
+    void showComponentMenu(const QPoint& globalPos)
+    {
         QMenu menu(this);
         QAction* copy = menu.addAction(QObject::tr("Copy value"));
         QAction* paste = menu.addAction(QObject::tr("Paste value"));
@@ -232,12 +256,9 @@ protected:
         });
         QObject::connect(paste, &QAction::triggered, this,
                          [this]() { pasteValue(); });
-        menu.exec(event->globalPos());
+        menu.exec(globalPos);
         restoreContextSelection();
-        event->accept();
     }
-
-private:
     QTableWidget* parentTable() const
     {
         QWidget* ancestor = parentWidget();
@@ -364,6 +385,7 @@ private:
     ApplyValue m_applyValue;
     CVectorComponentPlate* m_previousCheckedPlate{nullptr};
     bool m_contextSelectionPrepared{false};
+    bool m_rightPressArmed{false};
 };
 
 bool clipboardMatches(EObjParam destination)

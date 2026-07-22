@@ -602,9 +602,6 @@ int runHeadlessCommand(QApplication& app)
                     && contextRelease.isAccepted()
                     && vectorComponentTable.selectedItems().isEmpty()
                     && !vectorComponentTable.currentIndex().isValid();
-            QContextMenuEvent pasteYContext(QContextMenuEvent::Mouse, QPoint(2, 2),
-                                             yComponentPlate->mapToGlobal(QPoint(2, 2)));
-            QApplication::sendEvent(yComponentPlate, &pasteYContext);
         }
         const propFloat* changedY = dynamic_cast<propFloat*>(componentPlateChange.get());
         const bool componentContextPaste = changedY
@@ -615,6 +612,8 @@ int runHeadlessCommand(QApplication& app)
                 && yComponentPlate && !yComponentPlate->isChecked()
                 && vectorComponentTable.selectedItems().isEmpty()
                 && !vectorComponentTable.currentIndex().isValid();
+        const bool componentContextUsesManualDispatch = yComponentPlate
+                && yComponentPlate->contextMenuPolicy() == Qt::PreventContextMenu;
 
         QList<QSharedPointer<IPropertyBase>> exclusiveComponents;
         exclusiveComponents
@@ -849,7 +848,7 @@ int runHeadlessCommand(QApplication& app)
                 && numericComponentPaste && individualComponentSelection
                 && selectedComponentCopy && componentPlatePaste && componentContextPaste
                 && componentContextPreservesSelection && componentContextShowsOnlyComponent
-                && componentContextGestureKeepsTableClear
+                && componentContextGestureKeepsTableClear && componentContextUsesManualDispatch
                 && componentSelectionTableExclusive && componentSelectionClearsForProperty
                 && componentHitTargetsExpanded && componentLayoutHasNoDeadSpace
                 && lockedNumericPasteBlocked
@@ -894,6 +893,7 @@ int runHeadlessCommand(QApplication& app)
                << " componentContextShowsOnlyComponent=" << componentContextShowsOnlyComponent
                << " componentContextGestureKeepsTableClear="
                << componentContextGestureKeepsTableClear
+               << " componentContextUsesManualDispatch=" << componentContextUsesManualDispatch
                << " componentSelectionTableExclusive=" << componentSelectionTableExclusive
                << " componentSelectionClearsForProperty=" << componentSelectionClearsForProperty
                << " componentHitTargetsExpanded=" << componentHitTargetsExpanded
