@@ -34,6 +34,14 @@ struct SRenderItem
     bool castsShadow{false};
     bool dynamicShadow{false};
     bool colorVisible{true};
+    QVector3D shadowBoundsCenter;
+    float shadowBoundsRadius{0.0f};
+};
+
+struct SShadowCasterBounds
+{
+    QVector3D center;
+    float radius{0.0f};
 };
 
 inline void sortRenderItems(QVector<SRenderItem>& items)
@@ -126,6 +134,7 @@ public:
                      float maximumDistance,
                      bool dynamicOnly = false, bool staticOnly = false);
     QByteArray staticShadowFingerprint() const;
+    QVector<SShadowCasterBounds> shadowCasterBounds(float maximumDistance) const;
 
 private:
     int reserveInstanceBytes(int bytes);

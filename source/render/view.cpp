@@ -1030,7 +1030,8 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
         QMatrix4x4 dynamicMatrix;
     };
     const auto buildCascade = [&](float sliceNear, float sliceFar,
-                                  int dynamicResolution) -> SCascade
+                                  int dynamicResolution,
+                                  float casterDistance) -> SCascade
     {
         float minimumRight = std::numeric_limits<float>::max();
         float maximumRight = std::numeric_limits<float>::lowest();
@@ -1072,10 +1073,36 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
             maximumUp = imageUp + sliceFar;
         }
 
-        // Leave room for caster geometry just outside the receiver slice. Unlike
-        // the rejected single-frustum fit, this guard cannot pull the near map
-        // out to the horizon because sliceFar is already bounded.
         const float guardBand = 12.0f;
+        // Fit the receiver slice first, then include the complete bounds of any
+        // submitted caster whose light-space footprint can affect that slice.
+        // Receiver-only fitting clipped tall nearby trees and grounded actors;
+        // the farther map merely appeared better because its larger footprint
+        // happened to contain their missing geometry.
+        const QVector<SShadowCasterBounds> casters =
+            queue.shadowCasterBounds(casterDistance);
+        const float receiverMinimumRight = minimumRight;
+        const float receiverMaximumRight = maximumRight;
+        const float receiverMinimumUp = minimumUp;
+        const float receiverMaximumUp = maximumUp;
+        for(const SShadowCasterBounds& caster : casters)
+        {
+            const float right = QVector3D::dotProduct(caster.center, lightRight);
+            const float imageUp = QVector3D::dotProduct(caster.center, lightUp);
+            const float radius = caster.radius;
+            if(right + radius < receiverMinimumRight - guardBand
+                    || right - radius > receiverMaximumRight + guardBand
+                    || imageUp + radius < receiverMinimumUp - guardBand
+                    || imageUp - radius > receiverMaximumUp + guardBand)
+                continue;
+            minimumRight = qMin(minimumRight, right - radius);
+            maximumRight = qMax(maximumRight, right + radius);
+            minimumUp = qMin(minimumUp, imageUp - radius);
+            maximumUp = qMax(maximumUp, imageUp + radius);
+        }
+
+        // Leave a small receiver/caster filter guard. Unlike the rejected
+        // horizon fit, sliceFar and casterDistance bound this cascade locally.
         const float centerRight = (minimumRight + maximumRight) * 0.5f;
         const float centerUp = (minimumUp + maximumUp) * 0.5f;
         const float rawExtent = qMax((maximumRight - minimumRight) * 0.5f,
@@ -1105,11 +1132,15 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
         return result;
     };
 
+    const float nearCasterDistance = qMin(safeMaximumDistance,
+                                          m_nearShadowSplit + 24.0f);
     const SCascade nearCascade = buildCascade(0.0f, m_nearShadowSplit,
-                                               m_dynamicShadowFbo->width());
+                                               m_dynamicShadowFbo->width(),
+                                               nearCasterDistance);
     const SCascade farCascade = buildCascade(m_nearShadowSplit * 0.8f,
                                               safeMaximumDistance,
-                                              m_farDynamicShadowFbo->width());
+                                              m_farDynamicShadowFbo->width(),
+                                              safeMaximumDistance);
 
     QCryptographicHash staticHash(QCryptographicHash::Sha256);
     staticHash.addData(queue.staticShadowFingerprint());

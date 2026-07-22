@@ -143,9 +143,36 @@ void RenderQueueContext::submit(CPart* part, QOpenGLTexture* texture,
     item.castsShadow = castsShadow;
     item.dynamicShadow = dynamicShadow;
     item.colorVisible = !m_shadowOnlyCollection;
+    item.shadowBoundsCenter = item.instanceMatrix.map(part->localBoundsCenter());
+    const QVector3D scaleX(item.instanceMatrix(0, 0), item.instanceMatrix(1, 0),
+                           item.instanceMatrix(2, 0));
+    const QVector3D scaleY(item.instanceMatrix(0, 1), item.instanceMatrix(1, 1),
+                           item.instanceMatrix(2, 1));
+    const QVector3D scaleZ(item.instanceMatrix(0, 2), item.instanceMatrix(1, 2),
+                           item.instanceMatrix(2, 2));
+    item.shadowBoundsRadius = part->localBoundsRadius()
+        * qMax(scaleX.length(), qMax(scaleY.length(), scaleZ.length()));
     const QVector3D position(modelMatrix(0, 3), modelMatrix(1, 3), modelMatrix(2, 3));
     item.cameraDistanceSquared = (position - m_cameraPosition).lengthSquared();
     m_items.append(item);
+}
+
+QVector<SShadowCasterBounds> RenderQueueContext::shadowCasterBounds(
+        float maximumDistance) const
+{
+    QVector<SShadowCasterBounds> result;
+    result.reserve(m_items.size());
+    for(const SRenderItem& item : m_items)
+    {
+        if(!item.castsShadow || !shadowItemWithinDistance(item, maximumDistance)
+                || item.shadowBoundsRadius <= 0.0f)
+            continue;
+        SShadowCasterBounds bounds;
+        bounds.center = item.shadowBoundsCenter;
+        bounds.radius = item.shadowBoundsRadius;
+        result.append(bounds);
+    }
+    return result;
 }
 
 QByteArray RenderQueueContext::staticShadowFingerprint() const

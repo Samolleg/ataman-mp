@@ -7,6 +7,7 @@
 #include <QOpenGLExtraFunctions>
 #include <QOpenGLVertexArrayObject>
 #include <QSurfaceFormat>
+#include <QtMath>
 #include <QWeakPointer>
 
 #include <cstddef>
@@ -200,6 +201,8 @@ CPart::CPart(const CPart &part)
     m_aVertData = part.m_aVertData;
     m_baseVertData = part.m_baseVertData;
     m_sourceVertexIndices = part.m_sourceVertexIndices;
+    m_localBoundsCenter = part.m_localBoundsCenter;
+    m_localBoundsRadius = part.m_localBoundsRadius;
     m_morphApplied = part.m_morphApplied;
     if(m_morphApplied)
         attachPrivateMesh(m_aVertData);
@@ -235,6 +238,7 @@ quint64 CPart::sharedMeshBytes()
 
 void CPart::attachSharedMesh(const QVector<SVertexData>& vertices)
 {
+    updateLocalBounds(vertices);
     const QByteArray key = meshKey(vertices);
     m_mesh = s_meshCache.value(key).toStrongRef();
     if(!m_mesh)
@@ -246,7 +250,36 @@ void CPart::attachSharedMesh(const QVector<SVertexData>& vertices)
 
 void CPart::attachPrivateMesh(const QVector<SVertexData>& vertices)
 {
+    updateLocalBounds(vertices);
     m_mesh = createMesh(vertices);
+}
+
+void CPart::updateLocalBounds(const QVector<SVertexData>& vertices)
+{
+    if(vertices.isEmpty())
+    {
+        m_localBoundsCenter = QVector3D();
+        m_localBoundsRadius = 0.0f;
+        return;
+    }
+    QVector3D minimum = vertices.first().position;
+    QVector3D maximum = minimum;
+    for(const SVertexData& vertex : vertices)
+    {
+        const QVector3D& point = vertex.position;
+        minimum.setX(qMin(minimum.x(), point.x()));
+        minimum.setY(qMin(minimum.y(), point.y()));
+        minimum.setZ(qMin(minimum.z(), point.z()));
+        maximum.setX(qMax(maximum.x(), point.x()));
+        maximum.setY(qMax(maximum.y(), point.y()));
+        maximum.setZ(qMax(maximum.z(), point.z()));
+    }
+    m_localBoundsCenter = (minimum + maximum) * 0.5f;
+    float radiusSquared = 0.0f;
+    for(const SVertexData& vertex : vertices)
+        radiusSquared = qMax(radiusSquared,
+            (vertex.position - m_localBoundsCenter).lengthSquared());
+    m_localBoundsRadius = qSqrt(radiusSquared);
 }
 
 void CPart::update()
@@ -276,6 +309,7 @@ void CPart::setMorphDeltas(const QVector<QVector3D>& deltas)
     }
     if(canApply && m_morphApplied && m_mesh)
     {
+        updateLocalBounds(m_aVertData);
         m_mesh->buffer.bind();
         m_mesh->buffer.write(0, m_aVertData.constData(), m_aVertData.size() * int(sizeof(SVertexData)));
         m_mesh->buffer.release();
