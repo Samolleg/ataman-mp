@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib
+import io
 import json
 import os
 from pathlib import Path
@@ -85,11 +86,18 @@ figure = importlib.import_module("ei_figer.figure")
 
 
 def read(path: Path):
+    segments = [segment for segment in member.replace("\\", "/").split("/") if segment]
+    if not segments:
+        raise RuntimeError("EI_FIG_MEMBER must name a FIG or nested RES/FIG member")
     archive = resfile.ResFile(str(path))
-    with archive.open(member, "r") as stream:
-        raw = stream.read()
+    raw = b""
+    for index, segment in enumerate(segments):
+        with archive.open(segment, "r") as stream:
+            raw = stream.read()
+        if index + 1 < len(segments):
+            archive = resfile.ResFile(io.BytesIO(raw))
     parsed = figure.CFigure()
-    parsed.read_fig(member, raw)
+    parsed.read_fig(segments[-1], raw)
     return raw, parsed
 
 

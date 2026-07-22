@@ -123,7 +123,7 @@ def apply_edit_spec(path: Path) -> dict[str, object]:
         if obj is None or obj.type != "MESH":
             raise RuntimeError(f"Edit target is not a mesh object: {object_name}")
         delta = operation.get("delta")
-        if kind in {"vertex_delta", "uv_delta", "location_delta"} and not isinstance(delta, list):
+        if kind in {"vertex_delta", "vertex_group_delta", "uv_delta", "location_delta"} and not isinstance(delta, list):
             raise RuntimeError(f"Edit operation requires a numeric delta: {operation}")
         result: dict[str, object] = {"type": kind, "object": object_name}
         if delta is not None:
@@ -134,6 +134,24 @@ def apply_edit_spec(path: Path) -> dict[str, object]:
                 raise RuntimeError(f"Vertex index out of range for {object_name}: {index}")
             target = obj.data.vertices[index].co
             result.update({"index": index, "before": add_vector(target, delta), "after": list(target)})
+            obj.data.update()
+        elif kind == "vertex_group_delta":
+            indices = operation.get("indices")
+            if (not isinstance(indices, list) or not indices
+                    or any(not isinstance(index, int) for index in indices)
+                    or len(indices) != len(set(indices))):
+                raise RuntimeError("vertex_group_delta requires unique integer indices")
+            changes = []
+            for index in indices:
+                if index < 0 or index >= len(obj.data.vertices):
+                    raise RuntimeError(f"Vertex index out of range for {object_name}: {index}")
+                target = obj.data.vertices[index].co
+                changes.append({
+                    "index": index,
+                    "before": add_vector(target, delta),
+                    "after": list(target),
+                })
+            result.update({"indices": indices, "changes": changes})
             obj.data.update()
         elif kind == "uv_delta":
             layer = obj.data.uv_layers.active
