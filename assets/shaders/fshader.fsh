@@ -1,3 +1,8 @@
+#ifdef GL_ES
+precision mediump float;
+precision mediump int;
+#endif
+
 uniform sampler2D qt_Texture0;
 varying highp vec2 qt_TexCoord0;
 uniform bool u_highlight;

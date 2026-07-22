@@ -895,14 +895,9 @@ void CView::initShaders()
     m_skyProgram.bind();
     m_skyProgram.setUniformValue("qt_Texture0", 0);
 
-    if(!m_particleProgram.addShaderFromSourceFile(QOpenGLShader::Vertex, ":/particle.vsh"))
-        close();
-    if(!m_particleProgram.addShaderFromSourceFile(QOpenGLShader::Fragment, ":/particle.fsh"))
-        close();
-    if(!m_particleProgram.link())
-        close();
-    m_particleProgram.bind();
-    m_particleProgram.setUniformValue("qt_Texture0", 0);
+    // Keep the particle subsystem out of this isolation build. A failed or
+    // incomplete auxiliary program must not poison an otherwise valid
+    // terrain-only GL context (notably the ANGLE fallback).
 
     if(!m_shadowProgram.addShaderFromSourceFile(QOpenGLShader::Vertex, ":/vshader.vsh"))
         close();
@@ -943,19 +938,7 @@ void CView::initializeGL()
     initShaders();
     m_skyBuffer.create();
     m_skyBuffer.setUsagePattern(QOpenGLBuffer::StaticDraw);
-    m_particleBuffer.create();
-    m_particleBuffer.setUsagePattern(QOpenGLBuffer::StaticDraw);
-    const float particleQuad[] = {
-        -0.5f, -0.5f, 0.0f, 1.0f,
-         0.5f, -0.5f, 1.0f, 1.0f,
-         0.5f,  0.5f, 1.0f, 0.0f,
-        -0.5f, -0.5f, 0.0f, 1.0f,
-         0.5f,  0.5f, 1.0f, 0.0f,
-        -0.5f,  0.5f, 0.0f, 0.0f
-    };
-    m_particleBuffer.bind();
-    m_particleBuffer.allocate(particleQuad, int(sizeof(particleQuad)));
-    m_particleBuffer.release();
+    ei::log(eLogInfo, "Particle GL subsystem disabled for initialization isolation");
     m_skyBuffer.bind();
     QString skySource;
     const QByteArray skyFigure = CObjectList::getInstance()->resourceData(

@@ -1,3 +1,8 @@
+#ifdef GL_ES
+precision mediump float;
+precision mediump int;
+#endif
+
 uniform sampler2D qt_Texture0;
 uniform vec3 u_tint;
 uniform vec3 u_fogColor;
