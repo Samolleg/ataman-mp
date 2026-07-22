@@ -27,6 +27,7 @@ void RenderQueueContext::begin(QOpenGLShaderProgram* program, const QVector3D& c
     m_instanceBufferPrepared = false;
     m_collecting = program != nullptr;
     m_selectionPass = false;
+    m_shadowOnlyCollection = false;
     m_modelMatrixLocation = program ? program->uniformLocation("u_modelMmatrix") : -1;
     m_colorLocation = program ? program->uniformLocation("u_color") : -1;
     m_instancedLocation = program ? program->uniformLocation("u_instanced") : -1;
@@ -67,6 +68,7 @@ void RenderQueueContext::end()
     flush();
     m_collecting = false;
     m_selectionPass = false;
+    m_shadowOnlyCollection = false;
     m_program = nullptr;
 }
 
@@ -140,6 +142,7 @@ void RenderQueueContext::submit(CPart* part, QOpenGLTexture* texture,
     item.sequence = m_sequence++;
     item.castsShadow = castsShadow;
     item.dynamicShadow = dynamicShadow;
+    item.colorVisible = !m_shadowOnlyCollection;
     const QVector3D position(modelMatrix(0, 3), modelMatrix(1, 3), modelMatrix(2, 3));
     item.cameraDistanceSquared = (position - m_cameraPosition).lengthSquared();
     m_items.append(item);
@@ -230,23 +233,35 @@ void RenderQueueContext::flush()
     if(!m_program || m_items.isEmpty())
         return;
 
+    QVector<SRenderItem> colorItems;
+    colorItems.reserve(m_items.size());
+    for(const SRenderItem& item : m_items)
+        if(item.colorVisible)
+            colorItems.append(item);
+    if(colorItems.isEmpty())
+    {
+        m_items.clear();
+        m_phaseTimer.restart();
+        return;
+    }
+
     RenderPerformanceContext& performance = RenderPerformanceContext::instance();
     const bool collectPerformance = performance.collecting();
     if(collectPerformance)
         performance.counters().queueCollectNanoseconds += quint64(m_phaseTimer.nsecsElapsed());
     m_phaseTimer.restart();
-    sortRenderItems(m_items);
+    sortRenderItems(colorItems);
     if(collectPerformance)
         performance.counters().queueSortNanoseconds += quint64(m_phaseTimer.nsecsElapsed());
     m_phaseTimer.restart();
 
     if(m_selectionPass)
     {
-        for(int itemIndex = 0; itemIndex < m_items.size(); )
+        for(int itemIndex = 0; itemIndex < colorItems.size(); )
         {
-            const SRenderItem& item = m_items.at(itemIndex);
+            const SRenderItem& item = colorItems.at(itemIndex);
             const int runLength = m_instancingEnabled
-                ? instanceBatchLength(m_items, itemIndex) : 1;
+                ? instanceBatchLength(colorItems, itemIndex) : 1;
             bool instanced = false;
             if(runLength >= 2)
             {
@@ -254,7 +269,7 @@ void RenderQueueContext::flush()
                 instances.reserve(runLength);
                 for(int offset = 0; offset < runLength; ++offset)
                 {
-                    const SRenderItem& source = m_items.at(itemIndex + offset);
+                    const SRenderItem& source = colorItems.at(itemIndex + offset);
                     SPartPickingInstance instance;
                     instance.matrix = source.instanceMatrix;
                     instance.color = source.pickingColor;
@@ -283,7 +298,7 @@ void RenderQueueContext::flush()
 
     if(collectPerformance)
     {
-        for(const SRenderItem& item : m_items)
+        for(const SRenderItem& item : colorItems)
         {
             if(item.materialClass == ERenderMaterialClass::Opaque)
                 ++performance.counters().opaqueQueueSize;
@@ -305,9 +320,9 @@ void RenderQueueContext::flush()
     bool activeHighlight = false;
     m_program->setUniformValue(m_highlightLocation, false);
     m_program->setUniformValue("u_receiveDynamicShadow", true);
-    for(int itemIndex = 0; itemIndex < m_items.size(); )
+    for(int itemIndex = 0; itemIndex < colorItems.size(); )
     {
-        const SRenderItem& item = m_items.at(itemIndex);
+        const SRenderItem& item = colorItems.at(itemIndex);
         if(item.materialClass != activeClass || !haveBatch)
         {
             activeClass = item.materialClass;
@@ -349,7 +364,7 @@ void RenderQueueContext::flush()
             previousUvScale = item.textureUvScale;
         }
         const int runLength = m_instancingEnabled
-            ? instanceBatchLength(m_items, itemIndex) : 1;
+            ? instanceBatchLength(colorItems, itemIndex) : 1;
         bool instanced = false;
         m_program->setUniformValue("u_receiveDynamicShadow", !item.dynamicShadow);
         if(item.highlighted != activeHighlight)
@@ -362,7 +377,7 @@ void RenderQueueContext::flush()
             m_matrixScratch.clear();
             m_matrixScratch.reserve(runLength);
             for(int offset = 0; offset < runLength; ++offset)
-                m_matrixScratch.append(m_items.at(itemIndex + offset).instanceMatrix);
+                m_matrixScratch.append(colorItems.at(itemIndex + offset).instanceMatrix);
             const int bufferOffset = reserveInstanceBytes(
                 m_matrixScratch.size() * int(sizeof(QMatrix4x4)));
             instanced = bufferOffset >= 0 && item.part->drawInstanced(

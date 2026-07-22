@@ -33,6 +33,7 @@ struct SRenderItem
     quint64 sequence{0};
     bool castsShadow{false};
     bool dynamicShadow{false};
+    bool colorVisible{true};
 };
 
 inline void sortRenderItems(QVector<SRenderItem>& items)
@@ -108,6 +109,7 @@ public:
     void releaseGpuResources();
     bool collecting() const { return m_collecting; }
     bool collectingSelection() const { return m_collecting && m_selectionPass; }
+    void setShadowOnlyCollection(bool enabled) { m_shadowOnlyCollection = enabled; }
     void submit(CPart* part, QOpenGLTexture* texture, const QMatrix4x4& modelMatrix,
                 ERenderMaterialClass materialClass, bool highlighted,
                 bool castsShadow = false, bool dynamicShadow = false);
@@ -122,6 +124,7 @@ private:
     int reserveInstanceBytes(int bytes);
     bool m_collecting{false};
     bool m_selectionPass{false};
+    bool m_shadowOnlyCollection{false};
     QOpenGLShaderProgram* m_program{nullptr};
     QVector3D m_cameraPosition;
     QVector<SRenderItem> m_items;

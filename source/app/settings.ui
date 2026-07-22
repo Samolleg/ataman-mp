@@ -478,6 +478,18 @@
             </widget>
            </item>
            <item>
+            <layout class="QHBoxLayout" name="renderShadowDistanceLayout">
+             <item><widget class="QLabel" name="renderShadowDistanceLabel"><property name="text"><string>Maximum shadow distance</string></property></widget></item>
+             <item>
+              <widget class="QLineEdit" name="renderShadowDistance">
+               <property name="toolTip"><string>Maximum caster and shadow-map reach in world units (64-1024). The default 320 is twice the former maximum.</string></property>
+               <property name="text"><string>320</string></property>
+               <property name="maximumWidth"><number>90</number></property>
+              </widget>
+             </item>
+            </layout>
+           </item>
+           <item>
             <widget class="QCheckBox" name="renderTextureMipmapping">
              <property name="text"><string>Texture mipmapping</string></property>
              <property name="toolTip"><string>Uses authored terrain mip levels with trilinear filtering to reduce distant landscape shimmer. Character and equipment atlases keep their compatibility sampling.</string></property>

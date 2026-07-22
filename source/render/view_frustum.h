@@ -48,6 +48,17 @@ public:
         return true;
     }
 
+    // Conservative swept-sphere test used by directional-shadow culling.
+    // A caster can be outside the color frustum while its projection along
+    // the light ray still reaches a visible receiver.
+    bool intersectsSweptSphere(const QVector3D& center, float radius,
+                               const QVector3D& sweep) const
+    {
+        const QVector3D sweptCenter = center + sweep * 0.5f;
+        const float sweptRadius = qMax(0.0f, radius) + sweep.length() * 0.5f;
+        return intersectsSphere(sweptCenter, sweptRadius);
+    }
+
 private:
     static QVector4D plane(const QMatrix4x4& matrix, int baseRow,
                            int axisRow, float axisSign)

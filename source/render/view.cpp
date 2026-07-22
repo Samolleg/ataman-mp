@@ -467,6 +467,11 @@ void CView::initEnvironmentPreviewWidget()
     m_environmentPreviewTime->setRange(0, 1439);
     m_environmentPreviewTime->setSingleStep(10);
     m_environmentPreviewTime->setPageStep(60);
+    m_environmentPreviewTime->setStyleSheet(QStringLiteral(
+        "QSlider::groove:horizontal:disabled { background: #505050; height: 4px; }"
+        "QSlider::sub-page:horizontal:disabled { background: #666666; }"
+        "QSlider::add-page:horizontal:disabled { background: #404040; }"
+        "QSlider::handle:horizontal:disabled { background: #707070; border: 1px solid #555555; }"));
     timeRow->addWidget(m_environmentPreviewTimeLabel);
     timeRow->addWidget(m_environmentPreviewTime, 1);
     body->addLayout(timeRow);
@@ -953,7 +958,8 @@ void CView::applyEnvironmentUniforms(QOpenGLShaderProgram& program,
 bool CView::renderShadowMap(const QVector3D& cameraPosition,
                             const QVector3D& shadowFocus,
                             const ei::SRenderEnvironment& environment,
-                            RenderQueueContext& queue)
+                            RenderQueueContext& queue,
+                            float maximumDistance)
 {
     if(!m_shadowFbo || !m_dynamicShadowFbo
             || !m_shadowFbo->isValid() || !m_dynamicShadowFbo->isValid())
@@ -969,10 +975,11 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
     {
         return qBound(minimum, qCeil(value / 8.0f) * 8.0f, maximum);
     };
+    const float safeMaximumDistance = qBound(64.0f, maximumDistance, 1024.0f);
     const float staticExtent = quantizedExtent(cameraDistance * 1.25f,
-                                                40.0f, 160.0f);
+                                                40.0f, safeMaximumDistance);
     const float dynamicExtent = quantizedExtent(cameraDistance * 0.85f,
-                                                 28.0f, 120.0f);
+                                                 28.0f, safeMaximumDistance);
     // Static coverage remains stable inside half a terrain sector so its
     // expensive cached pass is not rebuilt for every small pan.
     const QVector3D staticFocus(qFloor(shadowFocus.x() / 8.0f) * 8.0f,
@@ -1391,6 +1398,12 @@ void CView::draw()
     const bool fogEnabled = renderBool("renderFog", true);
     const bool sceneLightsEnabled = renderBool("renderSceneLights", true);
     const bool shadowsEnabled = renderBool("renderShadows", true);
+    const COptInt* shadowDistanceOption = m_pSettings
+        ? dynamic_cast<const COptInt*>(m_pSettings->opt("renderShadowDistance")) : nullptr;
+    // The old adaptive map stopped at 160 world units. Keep twice that reach
+    // by default while allowing large-scene authors to tune the preview.
+    const float maximumShadowDistance = float(qBound(64,
+        shadowDistanceOption ? shadowDistanceOption->value() : 320, 1024));
     const bool overrideWorldTime = renderBool("overrideWorldTime", false);
     const COptInt* timeOption = m_pSettings
         ? dynamic_cast<const COptInt*>(m_pSettings->opt("renderTimeOfDay")) : nullptr;
@@ -1524,9 +1537,9 @@ void CView::draw()
         applyEnvironmentUniforms(m_landProgram, environment, sceneLights,
                                  lightingMode, fogEnabled);
         applyShadowUniforms(m_landProgram, withShadows, true, true);
-        if(m_pLand && m_pLand->isMprLoad() && m_bDrawLand)
+        if(m_landscapeVisible && m_pLand && m_pLand->isMprLoad() && m_bDrawLand)
             m_pLand->draw(&m_landProgram, cullingEnabled ? &frustum : nullptr);
-        if(m_pLand && m_pLand->isMprLoad() && m_bPreviewTile)
+        if(m_landscapeVisible && m_pLand && m_pLand->isMprLoad() && m_bPreviewTile)
             drawTilePreview(&m_landProgram);
         terrainDrawn = true;
         m_program.bind();
@@ -1543,6 +1556,7 @@ void CView::draw()
 
     if(m_activeMob != nullptr)
     {
+        QSet<CNode*> colorSubmittedNodes;
         for(auto& mob: m_aMob) //TODO: draw inactive mobs with custom color|alfa or something
         {
             if(!isMobVisible(mob))
@@ -1558,6 +1572,7 @@ void CView::draw()
                 if(node->nodeState() == ENodeState::eSelect)
                     continue;
                 node->drawObjectVisual(false, &m_program);
+                colorSubmittedNodes.insert(node);
                 if(performance.collecting())
                     ++performance.counters().nodesSubmitted;
                 if(!traverseHelpers && node->nodeState() == ENodeState::eSelect)
@@ -1584,6 +1599,7 @@ void CView::draw()
             if(isMobVisible(m_activeMob) && node->nodeState() != ENodeState::eSelect)
             {
                 node->drawObjectVisual(true, &m_program);
+                colorSubmittedNodes.insert(node);
                 if(performance.collecting())
                     ++performance.counters().nodesSubmitted;
             }
@@ -1596,8 +1612,45 @@ void CView::draw()
                     if(performance.collecting())
                         ++performance.counters().logicSubmissions;
                 }
+        if(environmentEnabled && shadowsEnabled)
+        {
+            // A caster outside the color frustum can still project a visible
+            // shadow. Collect that geometry for the shadow pass only.
+            renderQueue.setShadowOnlyCollection(true);
+            const QVector3D shadowSweep = environment.sunDirection.normalized()
+                * maximumShadowDistance;
+            for(CMob* mob : m_aMob)
+            {
+                if(!isMobVisible(mob))
+                    continue;
+                for(CNode* node : mob->nodes())
+                {
+                    if(!node || colorSubmittedNodes.contains(node)
+                            || node->isMarkDeleted()
+                            || node->nodeState() == ENodeState::eHidden
+                            || !node->castsRenderShadow())
+                        continue;
+                    CBox bounds = node->getBBox();
+                    if(!bounds.isInit())
+                        continue;
+                    const QVector3D center = bounds.center() + node->drawPosition();
+                    const float radius = bounds.radius();
+                    if(!qIsFinite(center.x()) || !qIsFinite(center.y())
+                            || !qIsFinite(center.z()) || !qIsFinite(radius)
+                            || (center - cameraPosition).length()
+                                > maximumShadowDistance + radius)
+                        continue;
+                    if(cullingEnabled && !frustum.intersectsSweptSphere(
+                            center, radius, shadowSweep))
+                        continue;
+                    node->drawObjectVisual(mob == m_activeMob, &m_program);
+                }
+            }
+            renderQueue.setShadowOnlyCollection(false);
+        }
         const bool shadowReady = environmentEnabled && shadowsEnabled
-            && renderShadowMap(cameraPosition, cameraPivot, environment, renderQueue);
+            && renderShadowMap(cameraPosition, cameraPivot, environment,
+                               renderQueue, maximumShadowDistance);
         drawTerrainColor(shadowReady);
         renderQueue.flush();
         glDepthFunc(GL_LEQUAL);

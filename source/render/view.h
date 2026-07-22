@@ -253,7 +253,8 @@ private:
     bool renderShadowMap(const QVector3D& cameraPosition,
                          const QVector3D& shadowFocus,
                          const ei::SRenderEnvironment& environment,
-                         RenderQueueContext& queue);
+                         RenderQueueContext& queue,
+                         float maximumDistance);
     void applyShadowUniforms(QOpenGLShaderProgram& program, bool enabled,
                              bool receiveStatic = true,
                              bool receiveDynamic = true);

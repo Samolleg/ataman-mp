@@ -37,6 +37,7 @@ drawSkybox
 renderFog
 renderSceneLights
 renderShadows
+renderShadowDistance
 renderTextureMipmapping
 overrideWorldTime
 renderTimeOfDay

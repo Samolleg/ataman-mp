@@ -11,6 +11,7 @@ private slots:
     void identityClipRejectsOutsideSpheres();
     void perspectiveClipHandlesNearAndFarObjects();
     void aabbIntersectionUsesPositiveVertex();
+    void sweptSphereRetainsOffscreenShadowCasters();
     void spatialGridReturnsVisibleEntriesInSourceOrder();
     void spatialGridInsertsBoundarySpanningEntriesIntoEachCell();
     void spatialGridPreservesOverflowEntries();
@@ -37,6 +38,18 @@ void ViewFrustumTests::aabbIntersectionUsesPositiveVertex()
                                    QVector3D(0.5f, 0.5f, 0.5f)));
     QVERIFY(!frustum.intersectsAabb(QVector3D(2.0f, 2.0f, 2.0f),
                                     QVector3D(3.0f, 3.0f, 3.0f)));
+}
+
+void ViewFrustumTests::sweptSphereRetainsOffscreenShadowCasters()
+{
+    QMatrix4x4 identity;
+    identity.setToIdentity();
+    const CViewFrustum frustum(identity);
+    QVERIFY(!frustum.intersectsSphere(QVector3D(2.0f, 0.0f, 0.0f), 0.1f));
+    QVERIFY(frustum.intersectsSweptSphere(QVector3D(2.0f, 0.0f, 0.0f),
+                                          0.1f, QVector3D(-2.0f, 0.0f, 0.0f)));
+    QVERIFY(!frustum.intersectsSweptSphere(QVector3D(3.0f, 0.0f, 0.0f),
+                                           0.1f, QVector3D(1.0f, 0.0f, 0.0f)));
 }
 
 void ViewFrustumTests::spatialGridReturnsVisibleEntriesInSourceOrder()

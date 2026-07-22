@@ -78,8 +78,8 @@ void main(void)
             dynamicProjected.y >= 0.0 && dynamicProjected.y <= 1.0 && dynamicProjected.z <= 1.0;
         if (staticInside || dynamicInside)
         {
-          float staticBias = max(0.00004 * (1.0 - sunDiffuse), 0.00001);
-          float dynamicBias = 0.000006;
+          float staticBias = max(0.000012 * (1.0 - sunDiffuse), 0.000002);
+          float dynamicBias = 0.000001;
           float visibility = 0.0;
           for (int y = -1; y <= 1; ++y)
             for (int x = -1; x <= 1; ++x)
