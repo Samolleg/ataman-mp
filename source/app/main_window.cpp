@@ -3669,15 +3669,22 @@ void MainWindow::updateOutlinerSelectionPath()
     }
 
     QStringList path;
-    QTreeWidgetItem* root = item;
     for(QTreeWidgetItem* part = item; part; part = part->parent())
-    {
         path.prepend(part->text(0));
-        root = part;
+
+    bool ancestorOutsideViewport = false;
+    for(QTreeWidgetItem* ancestor = item->parent(); ancestor;
+        ancestor = ancestor->parent())
+    {
+        const QRect ancestorRect = m_ui->treeWidget->visualItemRect(ancestor);
+        if(ancestor->isHidden() || !ancestorRect.isValid()
+           || !m_ui->treeWidget->viewport()->rect().contains(ancestorRect))
+        {
+            ancestorOutsideViewport = true;
+            break;
+        }
     }
-    const QRect rootRect = m_ui->treeWidget->visualItemRect(root);
-    if(!root->isHidden() && rootRect.isValid()
-       && rootRect.intersects(m_ui->treeWidget->viewport()->rect()))
+    if(!ancestorOutsideViewport)
     {
         m_outlinerSelectionPath->hide();
         return;

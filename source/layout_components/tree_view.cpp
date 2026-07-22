@@ -15,6 +15,7 @@
 CTreeView::CTreeView(QWidget *parent) : QTreeWidget(parent), m_pView(nullptr),
     m_filterTimer(new QTimer(this))
 {
+    setSelectionMode(QAbstractItemView::ExtendedSelection);
     m_filterTimer->setSingleShot(true);
     m_filterTimer->setInterval(150);
     connect(m_filterTimer, &QTimer::timeout, this, &CTreeView::applyFilter);
@@ -345,8 +346,10 @@ void CTreeView::itemClickedOver(QTreeWidgetItem *pItem, int column)
                 pending.append(next->child(index));
         }
     }
+    const Qt::KeyboardModifiers modifiers = QApplication::keyboardModifiers();
     m_pView->selectNodes(nodes,
-        QApplication::keyboardModifiers() & Qt::ShiftModifier);
+        modifiers.testFlag(Qt::ShiftModifier)
+        || modifiers.testFlag(Qt::ControlModifier));
 }
 
 void CTreeView::onNodeDelete(uint nodeId)
@@ -444,20 +447,47 @@ void CTreeView::markNode(CNode* pNode, bool scrollToNode)
 {
     if(!pNode)
         return;
+    QList<CNode*> nodes;
+    if(m_pView)
+        nodes = m_pView->selectionSnapshot();
+    if(!nodes.contains(pNode))
+        nodes.append(pNode);
+    markNodes(nodes, pNode, scrollToNode);
+}
+
+void CTreeView::markNodes(const QList<CNode*>& nodes, CNode* primaryNode,
+                          bool scrollToPrimary)
+{
+    QSet<CNode*> wanted;
+    for(CNode* node : nodes)
+        if(node) wanted.insert(node);
+    if(wanted.isEmpty())
+    {
+        clearViewportSelectionMarker();
+        return;
+    }
+
+    clearSelection();
+    CTreeObject* primaryItem = nullptr;
     QTreeWidgetItemIterator it(this);
     while(*it)
     {
         CTreeObject* item = dynamic_cast<CTreeObject*>(*it);
-        if(item && item->node() == pNode)
+        if(item && wanted.contains(item->node()))
         {
+            item->setSelected(true);
             for(QTreeWidgetItem* parent = item->parent(); parent; parent = parent->parent())
                 parent->setExpanded(true);
-            setCurrentItem(item, 0, QItemSelectionModel::ClearAndSelect);
-            if(scrollToNode)
-                scrollToItem(item, QAbstractItemView::PositionAtCenter);
-            return;
+            if(item->node() == primaryNode)
+                primaryItem = item;
         }
         ++it;
+    }
+    if(primaryItem)
+    {
+        setCurrentItem(primaryItem, 0, QItemSelectionModel::NoUpdate);
+        if(scrollToPrimary)
+            scrollToItem(primaryItem, QAbstractItemView::PositionAtCenter);
     }
     applyFilter();
 }

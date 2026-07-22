@@ -1509,6 +1509,14 @@ bool CView::selectNodes(const QList<CNode*>& nodes, bool addToSelection)
             node->setState(ENodeState::eSelect);
     }
     recordSelectionChange(before);
+    if(m_pTree)
+    {
+        const QList<CNode*> selected = selectionSnapshot();
+        if(selected.isEmpty())
+            m_pTree->clearViewportSelectionMarker();
+        else
+            m_pTree->markNode(selected.back(), false);
+    }
     viewParameters();
     update();
     emit loadedMapStateChanged();
