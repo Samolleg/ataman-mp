@@ -4,6 +4,11 @@
 #include <QStandardPaths>
 #include <QTemporaryDir>
 
+#ifdef Q_OS_WIN
+#include <windows.h>
+#include <thread>
+#endif
+
 #include "jmv_map_test_launcher.h"
 #include "current_session_backup.h"
 #include "endurance_document.h"
@@ -27,6 +32,7 @@ private slots:
     void recoveryRemovesAutoexecCreatedByEndurance();
     void recoveryRestoresPreexistingAutoexec();
     void recoveryRemovesOwnedBridge();
+    void recoveryRetriesTransientBridgeLock();
     void recoveryRetainsChangedBridge();
     void recoveryRemovesDisposableSaveGenerations();
     void recoveryDoesNotTrustOrCleanLivePidOnlyJournal();
@@ -475,6 +481,37 @@ void JmvMapTestLauncherTests::recoveryRemovesOwnedBridge()
     QVERIFY2(!QFileInfo::exists(bridge), qPrintable(summary));
     QVERIFY(summary.contains("Removed temporary file"));
     QDir(run).removeRecursively();
+}
+
+void JmvMapTestLauncherTests::recoveryRetriesTransientBridgeLock()
+{
+#ifndef Q_OS_WIN
+    QSKIP("The transient image-section lock regression is Windows-specific.");
+#else
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+    const QString bridge = QDir(temp.path()).filePath("plugin.dll");
+    const QByteArray owned("transiently locked bridge");
+    writeFile(bridge, owned);
+    const QString run = createRecoveryManifest(QString(), QString(), false,
+        QByteArray(), QByteArray(), bridge, owned);
+    QVERIFY(!run.isEmpty());
+
+    HANDLE lock = CreateFileW(reinterpret_cast<LPCWSTR>(bridge.utf16()),
+                              GENERIC_READ, FILE_SHARE_READ, nullptr,
+                              OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    QVERIFY(lock != INVALID_HANDLE_VALUE);
+    std::thread releaseLock([lock]()
+    {
+        Sleep(250);
+        CloseHandle(lock);
+    });
+    const QString summary = CJmvMapTestLauncher::recoverInterruptedRuns();
+    releaseLock.join();
+    QVERIFY2(!QFileInfo::exists(bridge), qPrintable(summary));
+    QVERIFY(summary.contains("cleanup retries"));
+    QDir(run).removeRecursively();
+#endif
 }
 
 void JmvMapTestLauncherTests::recoveryRetainsChangedBridge()

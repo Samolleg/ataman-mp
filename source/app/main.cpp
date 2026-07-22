@@ -591,6 +591,10 @@ int runHeadlessCommand(QApplication& app)
         const bool componentContextPaste = changedY
                 && changedY->type() == eObjParam_POSITION_Y
                 && qAbs(changedY->value() - 6.25f) < 0.0001f;
+        const bool componentContextPreservesSelection = xComponentPlate
+                && xComponentPlate->isChecked()
+                && yComponentPlate && !yComponentPlate->isChecked()
+                && vectorComponentTable.selectedItems().isEmpty();
 
         QSharedPointer<IPropertyBase> partialValue(new propStr(eObjParam_COMMENTS, "abcdef"));
         CValueItem partialEditor(partialValue);
@@ -784,6 +788,7 @@ int runHeadlessCommand(QApplication& app)
                 && fieldPastePreview && fieldPasteCommit && fieldCopyAvailable && nonTextPropertyPaste
                 && numericComponentPaste && individualComponentSelection
                 && selectedComponentCopy && componentPlatePaste && componentContextPaste
+                && componentContextPreservesSelection
                 && lockedNumericPasteBlocked
                 && partialCopyExact && partialPasteExact && partialPasteCommit
                 && propertyScrollPreserved
@@ -821,7 +826,8 @@ int runHeadlessCommand(QApplication& app)
                << " individualComponentSelection=" << individualComponentSelection
                << " selectedComponentCopy=" << selectedComponentCopy
                << " componentPlatePaste=" << componentPlatePaste
-               << " componentContextPaste=" << componentContextPaste << "\n"
+               << " componentContextPaste=" << componentContextPaste
+               << " componentContextPreservesSelection=" << componentContextPreservesSelection << "\n"
                << " lockedNumericPasteBlocked=" << lockedNumericPasteBlocked << "\n"
                << " partialCopyExact=" << partialCopyExact
                << " partialPasteExact=" << partialPasteExact

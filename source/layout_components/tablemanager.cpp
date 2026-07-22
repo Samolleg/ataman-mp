@@ -182,7 +182,9 @@ protected:
 
     void contextMenuEvent(QContextMenuEvent* event) override
     {
-        selectComponent();
+        // The menu already targets this exact component. Do not change table
+        // or plate selection merely because the user opened its context menu;
+        // doing so briefly painted the parent Vector3 row as selected.
         QMenu menu(this);
         QAction* copy = menu.addAction(QObject::tr("Copy value"));
         QAction* paste = menu.addAction(QObject::tr("Paste value"));

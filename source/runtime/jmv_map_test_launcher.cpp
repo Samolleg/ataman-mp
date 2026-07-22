@@ -15,6 +15,7 @@
 #include <QStandardPaths>
 #include <QSettings>
 #include <QTextStream>
+#include <QThread>
 #include <QTimer>
 #include <QProcessEnvironment>
 
@@ -269,21 +270,39 @@ QString saveGenerationPath(const QString& runRoot, quint64 generation)
 
 bool removeIfOwned(const QString& path, const QString& expectedHash, QStringList* messages)
 {
-    if(!QFileInfo::exists(path))
-        return true;
-    const QString currentHash = fileSha256(path);
-    if(currentHash.compare(expectedHash, Qt::CaseInsensitive) != 0)
+    // A stopped runtime host can report completion a fraction before Windows
+    // releases the last image-section handle held by its game child. Keep the
+    // hash guard on every attempt, but tolerate that short teardown window.
+    constexpr int kRemovalAttempts = 11;
+    for(int attempt = 0; attempt < kRemovalAttempts; ++attempt)
     {
-        messages->append(QString("Retained changed temporary file: %1").arg(path));
-        return false;
+        if(!QFileInfo::exists(path))
+        {
+            if(attempt > 0)
+                messages->append(QString("Removed temporary file after %1 cleanup retries: %2")
+                                 .arg(attempt).arg(path));
+            return true;
+        }
+        const QString currentHash = fileSha256(path);
+        if(currentHash.compare(expectedHash, Qt::CaseInsensitive) != 0)
+        {
+            messages->append(QString("Retained changed temporary file: %1").arg(path));
+            return false;
+        }
+        if(QFile::remove(path))
+        {
+            messages->append(attempt == 0
+                ? QString("Removed temporary file: %1").arg(path)
+                : QString("Removed temporary file after %1 cleanup retries: %2")
+                    .arg(attempt).arg(path));
+            return true;
+        }
+        if(attempt + 1 < kRemovalAttempts)
+            QThread::msleep(100);
     }
-    if(!QFile::remove(path))
-    {
-        messages->append(QString("Could not remove temporary file: %1").arg(path));
-        return false;
-    }
-    messages->append(QString("Removed temporary file: %1").arg(path));
-    return true;
+    messages->append(QString("Could not remove temporary file after 1 second of hash-checked retries: %1")
+                     .arg(path));
+    return false;
 }
 
 bool restoreAutoexec(const QJsonObject& manifest, QStringList* messages)
