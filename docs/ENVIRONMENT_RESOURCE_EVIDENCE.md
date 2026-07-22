@@ -26,6 +26,15 @@ black cave boundary/fog path. This identifies `gz5g`, `gz10g`, `bz7g`, and
 behavior. Missing or malformed geometry/texture disables the outdoor pass with
 a diagnostic rather than substituting unrelated sky members.
 
+A read-only corpus scan of every available Base/JMV `map.txt` yields only the
+environment values `normal` and `cave` (109 normal and 121 cave entries across
+the duplicated language/reference corpora). No map record selects `sky02`
+through `sky05`, and the executable evidence above exposes no independent
+per-map outdoor-sky selector. Endurance therefore does not guess a sky from a
+map name: `normal` uses provider-scoped `sky00`, while `cave` uses the proven
+black boundary path. Additional provider sky selection remains fail-closed
+until a manifest or corpus field establishes it.
+
 The stock `lightscavegipat.ini`, `lightscaveingos.ini`, and
 `lightscavesuslanger.ini` tables are identical at every hour: sunlight is
 `161,179,170`, ambient is `75,75,89`, and sky is black. Cave MOBs nevertheless

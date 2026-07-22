@@ -95,7 +95,7 @@ void main(void)
                 dynamicProjected.xy + offset * u_dynamicShadowTexelSize)) : 1.0;
             bool staticOccluded = staticInside && staticProjected.z - staticBias > staticDepth;
             bool dynamicOccluded = dynamicInside && dynamicProjected.z - dynamicBias > dynamicDepth;
-            visibility += (staticOccluded || dynamicOccluded) ? 0.68 : 1.0;
+            visibility += (staticOccluded || dynamicOccluded) ? 0.58 : 1.0;
           }
         shadow = visibility / 9.0;
       }

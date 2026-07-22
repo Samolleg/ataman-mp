@@ -475,6 +475,16 @@ void CView::initEnvironmentPreviewWidget()
     const COptInt* mode = dynamic_cast<const COptInt*>(m_pSettings->opt("renderLightingMode"));
     m_environmentPreviewMode->setCurrentIndex(
         qBound(0, mode ? mode->value() : 2, 2));
+    const auto updateTimeControls = [this](int index)
+    {
+        const bool enabled = index == 2;
+        m_environmentPreviewTimeLabel->setEnabled(enabled);
+        m_environmentPreviewTime->setEnabled(enabled);
+        m_environmentPreviewTime->setToolTip(enabled
+            ? tr("Preview time of day")
+            : tr("Time of day is available only in Full environment mode"));
+    };
+    updateTimeControls(m_environmentPreviewMode->currentIndex());
     connect(m_environmentPreviewCollapse, &QToolButton::clicked, this, [this]()
     {
         const bool show = !m_environmentPreviewBody->isVisible();
@@ -484,8 +494,9 @@ void CView::initEnvironmentPreviewWidget()
         positionEnvironmentPreviewWidget();
     });
     connect(m_environmentPreviewMode, QOverload<int>::of(&QComboBox::currentIndexChanged),
-            this, [this](int index)
+            this, [this, updateTimeControls](int index)
     {
+        updateTimeControls(index);
         if(m_environmentPreviewSyncing || !m_pSettings)
             return;
         if(COptInt* option = dynamic_cast<COptInt*>(m_pSettings->opt("renderLightingMode")))
@@ -533,6 +544,12 @@ void CView::syncEnvironmentPreviewWidget(float mapTimeHours)
     m_environmentPreviewSyncing = true;
     m_environmentPreviewMode->setCurrentIndex(
         qBound(0, mode ? mode->value() : 2, 2));
+    const bool timeEnabled = m_environmentPreviewMode->currentIndex() == 2;
+    m_environmentPreviewTimeLabel->setEnabled(timeEnabled);
+    m_environmentPreviewTime->setEnabled(timeEnabled);
+    m_environmentPreviewTime->setToolTip(timeEnabled
+        ? tr("Preview time of day")
+        : tr("Time of day is available only in Full environment mode"));
     if(!m_environmentPreviewTime->isSliderDown())
         m_environmentPreviewTime->setValue(qBound(0, minutes, 1439));
     m_environmentPreviewSyncing = false;
@@ -933,7 +950,8 @@ void CView::applyEnvironmentUniforms(QOpenGLShaderProgram& program,
     }
 }
 
-bool CView::renderShadowMap(const QVector3D& shadowFocus,
+bool CView::renderShadowMap(const QVector3D& cameraPosition,
+                            const QVector3D& shadowFocus,
                             const ei::SRenderEnvironment& environment,
                             RenderQueueContext& queue)
 {
@@ -941,30 +959,61 @@ bool CView::renderShadowMap(const QVector3D& shadowFocus,
             || !m_shadowFbo->isValid() || !m_dynamicShadowFbo->isValid())
         return false;
 
-    // Keep the coverage stable while the camera moves inside one map sector;
-    // otherwise an otherwise reusable static map would be invalidated every frame.
-    const QVector3D focus(qFloor(shadowFocus.x() / 16.0f) * 16.0f,
-                          qFloor(shadowFocus.y() / 16.0f) * 16.0f, 20.0f);
+    // Stock EI gives each caster an entire 64x64 silhouette. A fixed whole-map
+    // projection spends almost all available texels on empty space, making a
+    // nearby human or tree trunk only a handful of samples wide. Scale the
+    // editor maps with camera distance instead: close views retain caster
+    // detail and contact, while wide views retain the required coverage.
+    const float cameraDistance = (cameraPosition - shadowFocus).length();
+    const auto quantizedExtent = [](float value, float minimum, float maximum)
+    {
+        return qBound(minimum, qCeil(value / 8.0f) * 8.0f, maximum);
+    };
+    const float staticExtent = quantizedExtent(cameraDistance * 1.25f,
+                                                40.0f, 160.0f);
+    const float dynamicExtent = quantizedExtent(cameraDistance * 0.85f,
+                                                 28.0f, 120.0f);
+    // Static coverage remains stable inside half a terrain sector so its
+    // expensive cached pass is not rebuilt for every small pan.
+    const QVector3D staticFocus(qFloor(shadowFocus.x() / 8.0f) * 8.0f,
+                                qFloor(shadowFocus.y() / 8.0f) * 8.0f,
+                                shadowFocus.z());
     QVector3D up(0.0f, 0.0f, 1.0f);
     if(qAbs(QVector3D::dotProduct(environment.sunDirection.normalized(), up)) > 0.96f)
         up = QVector3D(0.0f, 1.0f, 0.0f);
-    QMatrix4x4 lightView;
-    lightView.lookAt(focus - environment.sunDirection.normalized() * 420.0f,
-                     focus, up);
+    const QVector3D lightDirection = environment.sunDirection.normalized();
+    // Snap the animated map in the light's image plane, not in world X/Y.
+    // This keeps a world point on the same shadow texel while the camera pans.
+    const QVector3D lightRight = QVector3D::crossProduct(lightDirection, up).normalized();
+    const QVector3D lightUp = QVector3D::crossProduct(lightRight, lightDirection).normalized();
+    const float dynamicWorldTexel = (2.0f * dynamicExtent)
+        / float(qMax(1, m_dynamicShadowFbo->width()));
+    QVector3D dynamicFocus = shadowFocus;
+    const float rightCoordinate = QVector3D::dotProduct(dynamicFocus, lightRight);
+    const float upCoordinate = QVector3D::dotProduct(dynamicFocus, lightUp);
+    dynamicFocus += lightRight
+        * (qRound(rightCoordinate / dynamicWorldTexel) * dynamicWorldTexel - rightCoordinate);
+    dynamicFocus += lightUp
+        * (qRound(upCoordinate / dynamicWorldTexel) * dynamicWorldTexel - upCoordinate);
+    QMatrix4x4 staticLightView;
+    staticLightView.lookAt(staticFocus - lightDirection * 420.0f,
+                           staticFocus, up);
+    QMatrix4x4 dynamicLightView;
+    dynamicLightView.lookAt(dynamicFocus - lightDirection * 420.0f,
+                            dynamicFocus, up);
     QMatrix4x4 staticProjection;
-    staticProjection.ortho(-300.0f, 300.0f, -300.0f, 300.0f, 1.0f, 900.0f);
+    staticProjection.ortho(-staticExtent, staticExtent,
+                           -staticExtent, staticExtent, 1.0f, 900.0f);
     QMatrix4x4 dynamicProjection;
-    // Stock EI creates a small silhouette texture for each caster. A tight
-    // dynamic projection preserves comparable unit/weapon detail while the
-    // broad cached static projection continues to cover the visible scene.
-    dynamicProjection.ortho(-96.0f, 96.0f, -96.0f, 96.0f, 1.0f, 900.0f);
-    m_staticLightSpaceMatrix = staticProjection * lightView;
-    m_dynamicLightSpaceMatrix = dynamicProjection * lightView;
+    dynamicProjection.ortho(-dynamicExtent, dynamicExtent,
+                            -dynamicExtent, dynamicExtent, 1.0f, 900.0f);
+    const QMatrix4x4 candidateStaticMatrix = staticProjection * staticLightView;
+    const QMatrix4x4 candidateDynamicMatrix = dynamicProjection * dynamicLightView;
 
     QCryptographicHash staticHash(QCryptographicHash::Sha256);
     staticHash.addData(queue.staticShadowFingerprint());
     staticHash.addData(sceneSourceFingerprint().toUtf8());
-    staticHash.addData(reinterpret_cast<const char*>(m_staticLightSpaceMatrix.constData()),
+    staticHash.addData(reinterpret_cast<const char*>(candidateStaticMatrix.constData()),
                        16 * int(sizeof(float)));
     const QByteArray staticFingerprint = staticHash.result();
     const bool rebuildStatic = staticFingerprint != m_staticShadowFingerprint;
@@ -975,7 +1024,8 @@ bool CView::renderShadowMap(const QVector3D& shadowFocus,
     glDisable(GL_BLEND);
     glDisable(GL_ALPHA_TEST);
     const auto beginTarget = [&](QOpenGLFramebufferObject* target,
-                                 const QMatrix4x4& projection)
+                                 const QMatrix4x4& projection,
+                                 const QMatrix4x4& lightView)
     {
         target->bind();
         glViewport(0, 0, target->width(), target->height());
@@ -988,7 +1038,8 @@ bool CView::renderShadowMap(const QVector3D& shadowFocus,
     };
     if(rebuildStatic)
     {
-        beginTarget(m_shadowFbo, staticProjection);
+        m_staticLightSpaceMatrix = candidateStaticMatrix;
+        beginTarget(m_shadowFbo, staticProjection, staticLightView);
         // Stock EI terrain receives projected shadows but does not cast them.
         // Keep it out of both shadow maps; it remains in the color/receiver pass.
         queue.flushShadow(&m_shadowProgram, false, true);
@@ -997,7 +1048,11 @@ bool CView::renderShadowMap(const QVector3D& shadowFocus,
     }
     if(rebuildDynamic)
     {
-        beginTarget(m_dynamicShadowFbo, dynamicProjection);
+        // The sampling matrix and its depth texture are one atomic snapshot.
+        // Updating the matrix on every paint while redrawing the animated map
+        // at 15 Hz made unit shadows jump and flicker during camera pans.
+        m_dynamicLightSpaceMatrix = candidateDynamicMatrix;
+        beginTarget(m_dynamicShadowFbo, dynamicProjection, dynamicLightView);
         queue.flushShadow(&m_shadowProgram, true, false);
         m_dynamicShadowFbo->release();
         m_shadowUpdateTimer.restart();
@@ -1542,7 +1597,7 @@ void CView::draw()
                         ++performance.counters().logicSubmissions;
                 }
         const bool shadowReady = environmentEnabled && shadowsEnabled
-            && renderShadowMap(cameraPivot, environment, renderQueue);
+            && renderShadowMap(cameraPosition, cameraPivot, environment, renderQueue);
         drawTerrainColor(shadowReady);
         renderQueue.flush();
         glDepthFunc(GL_LEQUAL);
@@ -2707,6 +2762,9 @@ bool CView::unloadMobDocument(CMob* mob, bool promptForSave)
     }
     if(m_aMob.isEmpty())
     {
+        m_caveEnvironment = false;
+        m_shadowInitialized = false;
+        m_staticShadowFingerprint.clear();
         makeCurrent();
         CTextureList::getInstance()->clearTransientVisualCache();
     }
@@ -2892,6 +2950,9 @@ void CView::unloadMob(QString mobName)
         m_aMob.clear();
         m_activeMob = nullptr;
         m_environmentMob = nullptr;
+        m_caveEnvironment = false;
+        m_shadowInitialized = false;
+        m_staticShadowFingerprint.clear();
     }
     else
     {
@@ -2919,6 +2980,9 @@ void CView::unloadMob(QString mobName)
     else
     {
         changeCurrentMob(nullptr);
+        m_caveEnvironment = false;
+        m_shadowInitialized = false;
+        m_staticShadowFingerprint.clear();
         makeCurrent();
         CTextureList::getInstance()->clearTransientVisualCache();
         // Keep the view context current for the next map's terrain/resource

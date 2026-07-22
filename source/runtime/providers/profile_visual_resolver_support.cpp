@@ -4,6 +4,7 @@
 #include <QRegularExpression>
 #include <QSet>
 #include <algorithm>
+#include <functional>
 
 namespace {
 
@@ -153,6 +154,57 @@ QString itemMaterial(const QString& reference)
 {
     const QString base = reference.section('[', 0, 0);
     return base.section('.', 1, 1).trimmed().toLower();
+}
+
+QStringList recoverConcatenatedArmorReferences(
+    const QString& reference,
+    const QSharedPointer<const ei::SProfileDatabaseSnapshot>& database)
+{
+    QString syntax;
+    if(database.isNull() || ei::validateItemReferenceSyntax(reference, &syntax)
+            || reference.contains('['))
+        return {reference};
+
+    QStringList candidates;
+    for(auto item = database->items.constBegin(); item != database->items.constEnd(); ++item)
+    {
+        if(item->category.compare("armor", Qt::CaseInsensitive) != 0)
+            continue;
+        for(auto material = database->materialRecords.constBegin();
+            material != database->materialRecords.constEnd(); ++material)
+            candidates.append(item->name + "." + material->name);
+    }
+    candidates.removeDuplicates();
+    std::sort(candidates.begin(), candidates.end(), [](const QString& left, const QString& right) {
+        return left.size() > right.size();
+    });
+
+    QVector<QStringList> solutions;
+    std::function<void(int, const QStringList&)> visit = [&](int offset, const QStringList& parts)
+    {
+        if(solutions.size() > 1)
+            return;
+        if(offset == reference.size())
+        {
+            if(parts.size() > 1)
+                solutions.append(parts);
+            return;
+        }
+        for(const QString& candidate : candidates)
+        {
+            if(reference.midRef(offset, candidate.size()).compare(
+                    candidate, Qt::CaseInsensitive) != 0)
+                continue;
+            const int end = offset + candidate.size();
+            if(end < reference.size() && reference.at(end) != '.')
+                continue;
+            QStringList next = parts;
+            next.append(candidate);
+            visit(end == reference.size() ? end : end + 1, next);
+        }
+    };
+    visit(0, {});
+    return solutions.size() == 1 ? solutions.first() : QStringList{reference};
 }
 
 enum class EWeaponClass { OneHand, Ranged, Shield, TwoHand, Unknown };
@@ -665,7 +717,16 @@ SRuntimeProviderResult resolveEquipmentLayout(
     if(database.isNull())
         return failure("equipment.database.unavailable", "Item-name interpretation requires the active profile database.");
 
-    QStringList armorReferences = request.armor;
+    QStringList armorReferences;
+    for(const QString& encodedReference : request.armor)
+    {
+        const QStringList recovered = recoverConcatenatedArmorReferences(encodedReference, database);
+        armorReferences.append(recovered);
+        if(recovered.size() > 1)
+            diagnostics.append(encodedReference
+                + ": recovered an unambiguous concatenated database equipment list as "
+                + recovered.join(", "));
+    }
     std::stable_sort(armorReferences.begin(), armorReferences.end(), [&](const QString& left,
                                                                          const QString& right) {
         const auto leftItem = database->items.constFind(itemPrototype(left));

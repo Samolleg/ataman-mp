@@ -250,7 +250,8 @@ private:
                                   const ei::SRenderEnvironment& environment,
                                   const QVector<CLight*>& lights,
                                   int lightingMode, bool fogEnabled);
-    bool renderShadowMap(const QVector3D& shadowFocus,
+    bool renderShadowMap(const QVector3D& cameraPosition,
+                         const QVector3D& shadowFocus,
                          const ei::SRenderEnvironment& environment,
                          RenderQueueContext& queue);
     void applyShadowUniforms(QOpenGLShaderProgram& program, bool enabled,
