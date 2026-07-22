@@ -5,7 +5,10 @@ work is ordered from the newest planned minor line to the oldest completed one.
 An item is checked only after its implementation has landed and received the
 stated validation. Completed code should carry a commit, test, or release link.
 
-Current development line: `0.2.1-alpha.32` focused closed testing.
+Current development line: `0.2.1-alpha.42` focused closed testing. The 0.2.x
+feature set is substantially complete; the remaining release work is the final
+runtime/corpus matrix, a small number of explicit confirmation cases, and
+version/tag/package housekeeping rather than another editor architecture pass.
 
 <details open>
 <summary><strong>General wishlist — not assigned to a release</strong></summary>
@@ -308,10 +311,16 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
 
 ### Current 0.2.x status
 
-- **Current tester build:** `0.2.1-alpha.30`; runtime ownership and Hot Reload
-  are tester-confirmed, while conversion of type-53/type-55 world objects is
-  incorrectly rejected before mutation.
-- **Current test candidate:** `0.2.1-alpha.32`. Alpha.32 adds a persistent
+- **Current test candidate:** `0.2.1-alpha.42`. Alpha.42 completes native
+  clipboard behavior for individual Vector3 components without selecting or
+  flashing the parent compound property. Alpha.41/42 make component context
+  selection exclusive and route child-label context menus directly. Alpha.38
+  also fixes the shutdown crash seen in alpha.34 by retaining the diagnostic
+  OpenGL timer query until process/context destruction instead of destroying it
+  through a dead Qt surface.
+  ([`0fa4708`](https://github.com/Ilufus/ei-mapper-endurance/commit/0fa4708),
+  [`3d9c4e8`](https://github.com/Ilufus/ei-mapper-endurance/commit/3d9c4e8))
+- **Recent confirmed baseline:** Alpha.32 adds a persistent
   0.1x-10x viewport camera-speed control, a configurable Ctrl+mouse-wheel
   gesture, and a cancellable 15-second notice before each periodic recovery
   autosave. Selection-only undo steps no longer rebuild a full lossless MOB
@@ -760,7 +769,7 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
   payloads outside the Endurance-owned test-run directory.
   ([`4e62424`](https://github.com/Ilufus/ei-mapper-endurance/commit/4e62424))
 
-- [ ] Make repeated Ctrl+F5 hot-reload the Endurance-owned game process.
+- [x] Make repeated Ctrl+F5 hot-reload the Endurance-owned game process.
   - [x] Validate and restage the exact current in-memory pair under the current
     run, with fresh hashes and a losslessly patched autorun bootstrap.
   - [x] Keep a process-private message hook on the captured game thread and
