@@ -938,7 +938,7 @@ void CView::initializeGL()
     initShaders();
     m_skyBuffer.create();
     m_skyBuffer.setUsagePattern(QOpenGLBuffer::StaticDraw);
-    ei::log(eLogInfo, "Particle GL subsystem disabled for initialization isolation");
+    ei::log(eLogInfo, "Particle GL subsystem deferred until a visible effect is submitted");
     m_skyBuffer.bind();
     QString skySource;
     const QByteArray skyFigure = CObjectList::getInstance()->resourceData(
@@ -1952,12 +1952,84 @@ void CView::drawTestOverlaysOpenGl()
     glEnable(GL_DEPTH_TEST);
 }
 
+bool CView::ensureParticleRendererInitialized()
+{
+    if(m_particleRendererReady)
+        return true;
+    if(m_particleInitializationAttempted)
+        return false;
+    m_particleInitializationAttempted = true;
+
+    // Particle rendering is optional. Preserve the scene renderer's bindings
+    // while Qt compiles the auxiliary shader and initializes its quad buffer;
+    // a failure must disable only particles, never the viewport.
+    GLint previousProgram = 0;
+    GLint previousArrayBuffer = 0;
+    GLint previousVertexArray = 0;
+    glGetIntegerv(GL_CURRENT_PROGRAM, &previousProgram);
+    glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &previousArrayBuffer);
+    QOpenGLContext* context = QOpenGLContext::currentContext();
+    QOpenGLExtraFunctions* functions = context ? context->extraFunctions() : nullptr;
+    if(functions)
+    {
+        glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &previousVertexArray);
+        functions->glBindVertexArray(0);
+    }
+
+    const auto restoreBindings = [&]()
+    {
+        if(functions)
+            functions->glBindVertexArray(GLuint(previousVertexArray));
+        if(functions)
+        {
+            functions->glBindBuffer(GL_ARRAY_BUFFER, GLuint(previousArrayBuffer));
+            functions->glUseProgram(GLuint(previousProgram));
+        }
+    };
+    const auto fail = [&](const QString& stage)
+    {
+        ei::log(eLogWarning, QStringLiteral("Particle renderer disabled (%1): %2")
+            .arg(stage, m_particleProgram.log()));
+        if(m_particleBuffer.isCreated())
+            m_particleBuffer.destroy();
+        restoreBindings();
+        return false;
+    };
+
+    if(!m_particleProgram.addShaderFromSourceFile(
+            QOpenGLShader::Vertex, ":/particle.vsh"))
+        return fail(QStringLiteral("vertex shader"));
+    if(!m_particleProgram.addShaderFromSourceFile(
+            QOpenGLShader::Fragment, ":/particle.fsh"))
+        return fail(QStringLiteral("fragment shader"));
+    if(!m_particleProgram.link())
+        return fail(QStringLiteral("program link"));
+
+    static const float particleQuad[] = {
+        -0.5f, -0.5f, 0.0f, 1.0f,
+         0.5f, -0.5f, 1.0f, 1.0f,
+         0.5f,  0.5f, 1.0f, 0.0f,
+        -0.5f, -0.5f, 0.0f, 1.0f,
+         0.5f,  0.5f, 1.0f, 0.0f,
+        -0.5f,  0.5f, 0.0f, 0.0f
+    };
+    if(!m_particleBuffer.create())
+        return fail(QStringLiteral("vertex buffer creation"));
+    m_particleBuffer.setUsagePattern(QOpenGLBuffer::StaticDraw);
+    if(!m_particleBuffer.bind())
+        return fail(QStringLiteral("vertex buffer binding"));
+    m_particleBuffer.allocate(particleQuad, int(sizeof(particleQuad)));
+    m_particleBuffer.release();
+    restoreBindings();
+
+    m_particleRendererReady = true;
+    ei::log(eLogInfo, "Particle renderer initialized lazily");
+    return true;
+}
+
 void CView::drawParticles(const QMatrix4x4& cameraMatrix,
                           const CViewFrustum* frustum)
 {
-    if(!m_particleBuffer.isCreated())
-        return;
-
     // Keep the particle renderer completely outside terrain-only frames.
     // In particular, do not lazily resolve particle atlases or touch the
     // particle shader/VBO/VAO when an MPR is open without a MOB. Besides
@@ -1985,6 +2057,8 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
             break;
     }
     if(!hasVisibleEffect)
+        return;
+    if(!ensureParticleRendererInitialized())
         return;
 
     // Resolve every resource before changing shader, buffer, depth or blend

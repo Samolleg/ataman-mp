@@ -15,9 +15,9 @@ vec4 packDepth(const float depth)
   // visibly detaches contact shadows.  Base 255 survives the RGBA8 round trip.
   const vec4 shifts = vec4(1.0, 255.0, 65025.0, 16581375.0);
   const vec4 masks = vec4(1.0 / 255.0, 1.0 / 255.0, 1.0 / 255.0, 0.0);
-  vec4 packed = fract(min(depth, 0.99999994) * shifts);
-  packed -= packed.yzww * masks;
-  return packed;
+  vec4 encodedDepth = fract(min(depth, 0.99999994) * shifts);
+  encodedDepth -= encodedDepth.yzww * masks;
+  return encodedDepth;
 }
 
 void main(void)

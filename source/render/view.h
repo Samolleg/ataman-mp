@@ -246,6 +246,7 @@ private:
                     const ei::SRenderEnvironment& environment);
     void drawParticles(const QMatrix4x4& cameraMatrix,
                        const CViewFrustum* frustum);
+    bool ensureParticleRendererInitialized();
     void initEnvironmentPreviewWidget();
     void positionEnvironmentPreviewWidget();
     void syncEnvironmentPreviewWidget(float mapTimeHours);
@@ -315,6 +316,8 @@ private:
     bool m_skyResourcesAvailable{false};
     QOpenGLShaderProgram m_particleProgram;
     QOpenGLBuffer m_particleBuffer{QOpenGLBuffer::VertexBuffer};
+    bool m_particleInitializationAttempted{false};
+    bool m_particleRendererReady{false};
     QOpenGLShaderProgram m_shadowProgram;
     QOpenGLFramebufferObject* m_shadowFbo{nullptr};
     QOpenGLFramebufferObject* m_dynamicShadowFbo{nullptr};

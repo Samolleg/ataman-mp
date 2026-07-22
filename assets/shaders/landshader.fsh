@@ -53,9 +53,9 @@ varying highp vec2 v_texture;
 varying highp vec3 v_worldPosition;
 varying highp float v_viewDepth;
 
-float unpackShadowDepth(vec4 packed)
+float unpackShadowDepth(vec4 encodedDepth)
 {
-  return dot(packed, vec4(1.0, 1.0 / 255.0,
+  return dot(encodedDepth, vec4(1.0, 1.0 / 255.0,
                           1.0 / 65025.0, 1.0 / 16581375.0));
 }
 

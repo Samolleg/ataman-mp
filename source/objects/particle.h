@@ -22,7 +22,7 @@ public:
     float particleScale() const { return m_scale; }
 
 private:
-    float editorVisualScale() const override { return 1.0f / 3.0f; }
+    float editorVisualScale() const override { return 0.5f; }
     uint m_kind;
     float m_scale;
 };
