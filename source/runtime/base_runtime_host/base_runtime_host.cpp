@@ -24,7 +24,10 @@ bool writePid(const wchar_t* path, DWORD pid)
     FILE* file = nullptr;
     if(_wfopen_s(&file, path, L"wb") != 0 || !file)
         return false;
-    fwprintf(file, L"%lu\n", pid);
+    // This file is a tiny cross-process protocol consumed by the Qt editor.
+    // Keep it explicitly ASCII instead of relying on the CRT's wide-stream
+    // encoding (which produced UTF-16LE without a BOM in alpha.29).
+    fprintf(file, "%lu\n", static_cast<unsigned long>(pid));
     fclose(file);
     return true;
 }

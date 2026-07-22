@@ -199,8 +199,24 @@ qint64 readOwnedGamePid(const QString& path)
     QFile file(path);
     if(!file.open(QIODevice::ReadOnly | QIODevice::Text))
         return 0;
+    QByteArray bytes = file.readAll();
+    // alpha.29's x86 host used fwprintf on a binary stream and therefore
+    // emitted UTF-16LE without a BOM. Accept those journals during recovery as
+    // well as the ASCII protocol emitted by current hosts.
+    if(bytes.size() >= 2 && bytes.at(1) == '\0')
+    {
+        QByteArray ascii;
+        ascii.reserve((bytes.size() + 1) / 2);
+        for(int index = 0; index < bytes.size(); index += 2)
+        {
+            if(index + 1 >= bytes.size() || bytes.at(index + 1) != '\0')
+                return 0;
+            ascii.append(bytes.at(index));
+        }
+        bytes = ascii;
+    }
     bool ok = false;
-    const qint64 pid = QString::fromLatin1(file.readAll()).trimmed().toLongLong(&ok);
+    const qint64 pid = QString::fromLatin1(bytes).trimmed().toLongLong(&ok);
     return ok ? pid : 0;
 }
 
@@ -2088,8 +2104,12 @@ QString CJmvMapTestLauncher::recoverInterruptedRuns(bool* pending)
         const qint64 recordedPid = qint64(expectedProcess.value("pid").toDouble());
         const bool incompleteIdentity = expectedProcess.value("imagePath").toString().isEmpty()
             || expectedProcess.value("creationTime100ns").toString().isEmpty();
-        if((incompleteIdentity && recordedPid > 0 && processExists(recordedPid))
-           || anotherGameIsRunning())
+        // An arbitrary game.exe is not evidence that it belongs to this
+        // journal. Only the journal's still-live recorded PID may defer legacy
+        // cleanup; complete journals already require path + creation time +
+        // optional hash above. This prevents a normal unrelated game session
+        // from blocking Test Current Map with a false ownership claim.
+        if(incompleteIdentity && recordedPid > 0 && processExists(recordedPid))
         {
             deferred = true;
             continue;
@@ -2177,9 +2197,11 @@ bool CJmvMapTestLauncher::hasActiveInterruptedRun(QString* description)
         const bool completeIdentity = !expectedProcess.value("imagePath").toString().isEmpty()
             && !expectedProcess.value("creationTime100ns").toString().isEmpty();
         const bool verified = completeIdentity && processIdentityMatches(expectedProcess);
-        const bool conservativePending = (!completeIdentity && recordedPid > 0
-                                          && processExists(recordedPid))
-            || (expectedProcess.isEmpty() && anotherGameIsRunning());
+        // A process found only by the filename game.exe is not owned by this
+        // journal. Legacy recovery may wait for its recorded PID, while modern
+        // journals require the complete guarded process identity above.
+        const bool conservativePending = !completeIdentity && recordedPid > 0
+            && processExists(recordedPid);
         if(!verified && !conservativePending)
             continue;
         if(description)

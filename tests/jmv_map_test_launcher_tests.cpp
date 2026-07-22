@@ -127,6 +127,15 @@ void JmvMapTestLauncherTests::resolvesHostedGamePidForHotReload()
              qint64(111111));
     QCOMPARE(CJmvMapTestLauncher::runtimeGameProcessId(true,
              QDir(temporary.path()).filePath("missing.pid"), 111111), qint64(0));
+
+    // alpha.29's x86 host wrote UTF-16LE without a BOM. Keep existing test-run
+    // journals usable while the host protocol moves back to explicit ASCII.
+    const QString legacyValue = QStringLiteral("46232\n");
+    const QByteArray legacyUtf16(reinterpret_cast<const char*>(legacyValue.utf16()),
+                                 legacyValue.size() * int(sizeof(ushort)));
+    writeFile(pidPath, legacyUtf16);
+    QCOMPARE(CJmvMapTestLauncher::runtimeGameProcessId(true, pidPath, 111111),
+             qint64(46232));
 }
 
 static QJsonObject resultManifest(const QString& runRoot, const QString& sourcePath)
@@ -660,5 +669,5 @@ void JmvMapTestLauncherTests::currentSessionSnapshotRejectsUnsafePath()
     QVERIFY(!error.isEmpty());
 }
 
-QTEST_APPLESS_MAIN(JmvMapTestLauncherTests)
+QTEST_GUILESS_MAIN(JmvMapTestLauncherTests)
 #include "jmv_map_test_launcher_tests.moc"
