@@ -11,6 +11,7 @@
 #include <QFileInfo>
 #include <QMap>
 #include <QSet>
+#include <QStringList>
 #include <QVector3D>
 #include <QFutureWatcher>
 #include "types.h"
@@ -252,6 +253,9 @@ private:
     QLabel* m_autosaveCountdownLabel{nullptr};
     QPushButton* m_cancelAutosaveButton{nullptr};
     int m_autosaveCountdownSeconds{0};
+    int m_recoverableAutosaveNoticeCount{0};
+    QStringList m_recoverableAutosaveNoticeKeys;
+    bool m_backupSessionStarted{false};
     QSlider* m_cameraSpeedSlider{nullptr};
     QDoubleSpinBox* m_cameraSpeedSpin{nullptr};
     bool m_uiStateSaved{false};

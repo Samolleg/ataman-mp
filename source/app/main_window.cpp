@@ -945,7 +945,22 @@ MainWindow::MainWindow(QWidget* parent) :
     updateMapTestAction();
     updateWindowTitle(eTitleTypeData::eTitleTypeDataMpr, QString());
     updateLoadedMapPanel();
-    QTimer::singleShot(0, this, &MainWindow::showRecoverableAutosaves);
+    QVector<SRecoverableAutosave> recoveries;
+    QString backupSessionError;
+    CBackupManager backupManager;
+    m_backupSessionStarted = backupManager.beginEditorSession(
+        &recoveries, &backupSessionError);
+    if(!m_backupSessionStarted)
+        ei::log(eLogWarning, "Editor backup session journal unavailable: "
+                + backupSessionError);
+    else
+    {
+        m_recoverableAutosaveNoticeCount = recoveries.size();
+        for(const SRecoverableAutosave& recovery : recoveries)
+            m_recoverableAutosaveNoticeKeys.append(recovery.notificationKey);
+        if(m_recoverableAutosaveNoticeCount > 0)
+            QTimer::singleShot(0, this, &MainWindow::showRecoverableAutosaves);
+    }
     bool hasStartupDocument = false;
     for(int index = 1; index < QCoreApplication::arguments().size(); ++index)
     {
@@ -4324,17 +4339,27 @@ void MainWindow::performAutosave()
 
 void MainWindow::showRecoverableAutosaves()
 {
-    const QVector<SRecoverableAutosave> recoveries = CBackupManager::recoverableAutosaves();
-    if(recoveries.isEmpty())
+    if(m_recoverableAutosaveNoticeCount <= 0
+       || m_recoverableAutosaveNoticeKeys.isEmpty())
         return;
     ei::log(eLogInfo, QString("Recoverable editor autosaves available count:%1")
-            .arg(recoveries.size()));
+            .arg(m_recoverableAutosaveNoticeCount));
     showTransientResultNotification(
         tr("%1 recoverable editor autosave generation(s) are available.\n"
            "Their source maps are unchanged; open the backup folder to inspect or copy them.")
-            .arg(recoveries.size()),
+            .arg(m_recoverableAutosaveNoticeCount),
         false, true, tr("Open Backup Folder"),
         ETransientNotificationAction::OpenBackupFolder, 7000);
+    QString acknowledgeError;
+    if(!CBackupManager().acknowledgeRecoveries(
+           m_recoverableAutosaveNoticeKeys, &acknowledgeError))
+        ei::log(eLogWarning, "Could not acknowledge recovery notification: "
+                + acknowledgeError);
+    else
+    {
+        m_recoverableAutosaveNoticeCount = 0;
+        m_recoverableAutosaveNoticeKeys.clear();
+    }
 }
 
 void MainWindow::on_actionOpen_MPR_triggered()
@@ -4612,6 +4637,15 @@ void MainWindow::closeEvent(QCloseEvent *e)
     ei::log(eLogInfo, QString("Shutdown live view deletion complete elapsedMs:%1")
             .arg(shutdownTimer.elapsed()));
     ei::setCrashContext("shutdown/view-deleted");
+    if(m_backupSessionStarted)
+    {
+        QString backupSessionError;
+        if(!CBackupManager().finishEditorSession(&backupSessionError))
+            ei::log(eLogWarning, "Could not mark editor backup session clean: "
+                    + backupSessionError);
+        else
+            ei::log(eLogInfo, "Editor backup session marked clean");
+    }
     e->accept();
 }
 

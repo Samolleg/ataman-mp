@@ -3,6 +3,7 @@
 
 #include <QFileInfo>
 #include <QString>
+#include <QStringList>
 #include <QVector>
 
 struct SRecoverableAutosave
@@ -11,6 +12,8 @@ struct SRecoverableAutosave
     QString autosavePath;
     QString createdUtc;
     QString candidateSha256;
+    QString sessionId;
+    QString notificationKey;
 };
 
 struct SBackupResult
@@ -35,10 +38,16 @@ public:
     static QString defaultRootPath();
     static bool openBackupFolder(QString* error = nullptr);
     static QVector<SRecoverableAutosave> recoverableAutosaves();
+    bool beginEditorSession(QVector<SRecoverableAutosave>* recoveries,
+                            QString* error = nullptr) const;
+    bool acknowledgeRecoveries(const QStringList& notificationKeys,
+                               QString* error = nullptr) const;
+    bool finishEditorSession(QString* error = nullptr) const;
 
 private:
     SBackupResult createSnapshot(const QFileInfo& source, const QString& event, bool deduplicate) const;
     QString sourceDirectory(const QFileInfo& source) const;
+    QVector<SRecoverableAutosave> recoverableAutosavesForRoot() const;
     void enforceRetention(const QString& directoryPath) const;
 
 private:
