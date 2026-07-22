@@ -175,6 +175,10 @@ may warn that navigation is stale, but production graph replacement remains a
   blocking Save or Test Current Map.
 - [ ] Track terrain/object edits as navigation-dirty regions and retain the
   oversized-door runtime-regeneration convention as an explicit diagnostic.
+- [ ] Replace Play from Here's deliberately conservative geometric clearance
+  check with AI-graph-backed walkability and nearest-valid-position lookup.
+  The current check may reject legitimate standable mesh objects and platforms;
+  do not loosen it with unverified heuristics before graph support is available.
 
 ## Zone 6 source and state research
 

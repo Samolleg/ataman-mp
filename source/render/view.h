@@ -114,7 +114,7 @@ public:
     QPoint operationAnchor() const;
     void setTestSpawnMarker(const QVector3D& position, bool adjusted = false);
     void setTestSpawnMarkerSelected(bool selected);
-    bool testSpawnMarkerAt(const QPoint& viewportPosition, int tolerance = 32) const;
+    bool testSpawnMarkerAt(const QPoint& viewportPosition, int padding = 8) const;
     void clearTestSpawnMarker();
     void setTestEntranceOverlays(const QVector<QRectF>& rectangles,
                                  const QStringList& labels,

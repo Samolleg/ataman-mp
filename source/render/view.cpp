@@ -3159,21 +3159,71 @@ void CView::setTestSpawnMarkerSelected(bool selected)
     update();
 }
 
-bool CView::testSpawnMarkerAt(const QPoint& viewportPosition, int tolerance) const
+bool CView::testSpawnMarkerAt(const QPoint& viewportPosition, int padding) const
 {
     if(!m_testSpawnMarkerValid || !m_cam || width() <= 0 || height() <= 0)
         return false;
-    const QVector3D marker = QVector3D(m_testSpawnMarker.x(), m_testSpawnMarker.y(),
-                                       m_testSpawnMarker.z() + 1.0f).project(
-        m_cam->viewMatrix(), m_projection, QRect(0, 0, width(), height()));
-    if(marker.z() < 0.0f || marker.z() > 1.0f)
+
+    const QRect viewport(0, 0, width(), height());
+    const auto projectToWidget = [&](const QVector3D& world, QPointF& result) {
+        const QVector3D projected = world.project(
+            m_cam->viewMatrix(), m_projection, viewport);
+        if(projected.z() < 0.0f || projected.z() > 1.0f)
+            return false;
+        // QVector3D::project uses the OpenGL bottom-left viewport origin,
+        // while QMouseEvent positions use Qt's top-left widget origin.
+        result = QPointF(projected.x(), height() - projected.y());
+        return true;
+    };
+
+    const float baseZ = m_testSpawnMarker.z() + 0.08f;
+    QPointF capsuleBottom;
+    QPointF capsuleTop;
+    if(!projectToWidget(QVector3D(m_testSpawnMarker.x(), m_testSpawnMarker.y(), baseZ),
+                        capsuleBottom)
+       || !projectToWidget(QVector3D(m_testSpawnMarker.x(), m_testSpawnMarker.y(),
+                                     baseZ + 1.93f), capsuleTop))
         return false;
-    // QVector3D::project uses the OpenGL bottom-left viewport origin, while
-    // QMouseEvent positions use Qt's top-left widget origin.
-    const QPointF markerInWidget(marker.x(), height() - marker.y());
-    const QPointF delta = markerInWidget - viewportPosition;
-    return delta.x() * delta.x() + delta.y() * delta.y()
-        <= double(tolerance * tolerance);
+
+    const QPointF capsuleAxis = capsuleTop - capsuleBottom;
+    const double axisLengthSquared = QPointF::dotProduct(capsuleAxis, capsuleAxis);
+    const auto distanceSquaredToCapsuleAxis = [&](const QPointF& point) {
+        if(axisLengthSquared <= 0.0001)
+        {
+            const QPointF delta = point - capsuleBottom;
+            return QPointF::dotProduct(delta, delta);
+        }
+        const QPointF fromBottom = point - capsuleBottom;
+        const double fraction = qBound(
+            0.0, QPointF::dotProduct(fromBottom, capsuleAxis) / axisLengthSquared, 1.0);
+        const QPointF delta = point - (capsuleBottom + capsuleAxis * fraction);
+        return QPointF::dotProduct(delta, delta);
+    };
+
+    // Fit the clickable capsule to the same ground and head rings that are
+    // drawn for the marker. This covers the complete hero silhouette at every
+    // camera angle instead of approximating it with a small circle at its
+    // centre. A little screen-space padding keeps the outline easy to pick.
+    double radiusSquared = 0.0;
+    const int segments = 24;
+    for(int index = 0; index < segments; ++index)
+    {
+        const float angle = float(index) * 2.0f * float(M_PI) / float(segments);
+        QPointF projected;
+        if(projectToWidget(QVector3D(m_testSpawnMarker.x() + qCos(angle) * 0.55f,
+                                     m_testSpawnMarker.y() + qSin(angle) * 0.55f,
+                                     baseZ), projected))
+            radiusSquared = qMax(radiusSquared, distanceSquaredToCapsuleAxis(projected));
+        if(projectToWidget(QVector3D(m_testSpawnMarker.x() + qCos(angle) * 0.24f,
+                                     m_testSpawnMarker.y(),
+                                     baseZ + 1.93f + qSin(angle) * 0.24f), projected))
+            radiusSquared = qMax(radiusSquared, distanceSquaredToCapsuleAxis(projected));
+    }
+
+    const double capsuleRadius = qMax(12.0, qSqrt(radiusSquared))
+        + qMax(0, padding);
+    return distanceSquaredToCapsuleAxis(QPointF(viewportPosition))
+        <= capsuleRadius * capsuleRadius;
 }
 
 void CView::clearTestSpawnMarker()
