@@ -20,6 +20,7 @@
 #include <QUndoStack>
 #include <QClipboard>
 #include <QMimeData>
+#include <QScrollBar>
 #include <cstdio>
 #include <cstring>
 
@@ -369,8 +370,10 @@ int runHeadlessCommand(QApplication& app)
         textureCombo.lineEdit()->selectAll();
         QKeyEvent pastePlainText(QEvent::KeyPress, Qt::Key_V, Qt::ControlModifier);
         QApplication::sendEvent(textureCombo.lineEdit(), &pastePlainText);
-        const bool compatiblePasteImmediate = textureCombo.currentText() == "custom_texture"
-                && textureCombo.value()->toString() == "custom_texture";
+        const bool compatiblePastePreview = textureCombo.currentText() == "custom_texture"
+                && textureCombo.value()->toString() == "original_texture";
+        textureCombo._onEditingFinished();
+        const bool compatiblePasteCommit = textureCombo.value()->toString() == "custom_texture";
 
         const auto rowForType = [](QTableWidget& table, EObjParam type)
         {
@@ -438,9 +441,13 @@ int runHeadlessCommand(QApplication& app)
         });
         CComboDynItem* destinationModel = qobject_cast<CComboDynItem*>(
                     destinationPropertyTable.cellWidget(destinationModelRow, 1));
+        destinationModel->lineEdit()->selectAll();
         QKeyEvent pasteModelField(QEvent::KeyPress, Qt::Key_V, Qt::ControlModifier);
         QApplication::sendEvent(destinationModel->lineEdit(), &pasteModelField);
-        const bool fieldPasteImmediate = !immediateModelPaste.isNull()
+        const bool fieldPastePreview = immediateModelPaste.isNull()
+                && destinationModel->currentText() == "copied_model";
+        destinationModel->_onEditingFinished();
+        const bool fieldPasteCommit = !immediateModelPaste.isNull()
                 && immediateModelPaste->type() == eObjParam_TEMPLATE
                 && immediateModelPaste->toString() == "copied_model";
 
@@ -486,20 +493,20 @@ int runHeadlessCommand(QApplication& app)
         QTableWidget vectorComponentTable;
         CTableManager vectorComponentManager(&vectorComponentTable);
         vectorComponentManager.setNewData(vectorComponents);
-        CValueItem* zComponent = nullptr;
-        const QList<CValueItem*> componentEditors = vectorComponentTable.findChildren<CValueItem*>();
-        for(CValueItem* component : componentEditors)
+        QToolButton* zComponentPlate = nullptr;
+        const QList<QToolButton*> componentPlates = vectorComponentTable.findChildren<QToolButton*>();
+        for(QToolButton* component : componentPlates)
         {
-            if(component->param() == eObjParam_POSITION_Z)
+            if(component->text() == "Z:")
             {
-                zComponent = component;
+                zComponentPlate = component;
                 break;
             }
         }
-        if(zComponent)
+        if(zComponentPlate)
         {
             QKeyEvent copyZComponent(QEvent::KeyPress, Qt::Key_C, Qt::ControlModifier);
-            QApplication::sendEvent(zComponent, &copyZComponent);
+            QApplication::sendEvent(zComponentPlate, &copyZComponent);
         }
         QList<QSharedPointer<IPropertyBase>> integerDestination;
         integerDestination << QSharedPointer<IPropertyBase>(new propUint(eObjParam_RANGE, 0));
@@ -512,23 +519,58 @@ int runHeadlessCommand(QApplication& app)
         {
             roundedComponentPaste.reset(value->clone());
         });
-        CValueItem* integerEditor = integerDestinationTable.findChild<CValueItem*>();
-        if(integerEditor)
-        {
-            QKeyEvent pasteZComponent(QEvent::KeyPress, Qt::Key_V, Qt::ControlModifier);
-            QApplication::sendEvent(integerEditor, &pasteZComponent);
-        }
+        integerDestinationTable.item(0, 0)->setSelected(true);
+        QKeyEvent pasteZComponent(QEvent::KeyPress, Qt::Key_V, Qt::ControlModifier);
+        QApplication::sendEvent(&integerDestinationTable, &pasteZComponent);
         const propUint* roundedInteger = dynamic_cast<propUint*>(roundedComponentPaste.get());
-        const bool numericComponentPaste = zComponent && roundedInteger
+        const bool numericComponentPaste = zComponentPlate && roundedInteger
                 && roundedInteger->value() == 4u;
         roundedComponentPaste.clear();
         integerDestinationManager.setReadOnly(true);
-        if(integerEditor)
-        {
-            QKeyEvent pasteLockedComponent(QEvent::KeyPress, Qt::Key_V, Qt::ControlModifier);
-            QApplication::sendEvent(integerEditor, &pasteLockedComponent);
-        }
+        QKeyEvent pasteLockedComponent(QEvent::KeyPress, Qt::Key_V, Qt::ControlModifier);
+        QApplication::sendEvent(&integerDestinationTable, &pasteLockedComponent);
         const bool lockedNumericPasteBlocked = roundedComponentPaste.isNull();
+
+        QSharedPointer<IPropertyBase> partialValue(new propStr(eObjParam_COMMENTS, "abcdef"));
+        CValueItem partialEditor(partialValue);
+        partialEditor.setSelection(2, 2);
+        QKeyEvent copyPartialText(QEvent::KeyPress, Qt::Key_C, Qt::ControlModifier);
+        QApplication::sendEvent(&partialEditor, &copyPartialText);
+        const bool partialCopyExact = QGuiApplication::clipboard()->text() == "cd"
+                && !QGuiApplication::clipboard()->mimeData()->hasFormat(
+                    "application/x-ei-mapper-property-type");
+        QSharedPointer<IPropertyBase> partialDestinationValue(
+                    new propStr(eObjParam_COMMENTS, "123456"));
+        CValueItem partialDestination(partialDestinationValue);
+        int partialChanges = 0;
+        QObject::connect(&partialDestination, &CValueItem::onParamChange,
+                         [&partialChanges](const QSharedPointer<IPropertyBase>&) { ++partialChanges; });
+        partialDestination.setSelection(2, 2);
+        QKeyEvent pastePartialText(QEvent::KeyPress, Qt::Key_V, Qt::ControlModifier);
+        QApplication::sendEvent(&partialDestination, &pastePartialText);
+        const bool partialPasteExact = partialDestination.text() == "12cd56"
+                && partialChanges == 0;
+        partialDestination.onTextChangeEnd();
+        const bool partialPasteCommit = partialDestination.value()->toString() == "12cd56"
+                && partialChanges == 1;
+
+        QList<QSharedPointer<IPropertyBase>> scrollingProperties;
+        for(int index = 0; index < 40; ++index)
+            scrollingProperties << QSharedPointer<IPropertyBase>(
+                new propStr(eObjParam_COMMENTS, QString("comment-%1").arg(index)));
+        QTableWidget scrollingTable;
+        scrollingTable.resize(320, 120);
+        scrollingTable.setAttribute(Qt::WA_DontShowOnScreen);
+        scrollingTable.show();
+        CTableManager scrollingManager(&scrollingTable);
+        scrollingManager.setNewData(scrollingProperties);
+        QApplication::processEvents();
+        const int wantedScroll = qMax(1, scrollingTable.verticalScrollBar()->maximum() / 2);
+        scrollingTable.verticalScrollBar()->setValue(wantedScroll);
+        scrollingManager.setNewData(scrollingProperties);
+        QApplication::processEvents();
+        const bool propertyScrollPreserved = scrollingTable.verticalScrollBar()->value()
+                == qMin(wantedScroll, scrollingTable.verticalScrollBar()->maximum());
 
         QMap<QString, QSharedPointer<propBool>> mixedParts;
         mixedParts.insert("head", QSharedPointer<propBool>(new propBool(eObjParam_BODYPARTS)));
@@ -676,11 +718,13 @@ int runHeadlessCommand(QApplication& app)
                 && renderOptionsRegistered
                 && secondaryWindowsClosed
                 && pasteSingleAction && pasteUndoAtomic && pasteRedoAtomic
-                && incompatiblePasteBlocked && compatiblePasteImmediate
+                && incompatiblePasteBlocked && compatiblePastePreview && compatiblePasteCommit
                 && multiPropertyPaste && mismatchedPropertyPasteBlocked
-                && fieldPasteImmediate && fieldCopyAvailable && nonTextPropertyPaste
+                && fieldPastePreview && fieldPasteCommit && fieldCopyAvailable && nonTextPropertyPaste
                 && numericComponentPaste
                 && lockedNumericPasteBlocked
+                && partialCopyExact && partialPasteExact && partialPasteCommit
+                && propertyScrollPreserved
                 && mixedModelPartsVisible
                 && logicPointUndoAtomic && logicPointRedoAtomic;
         QTextStream output(stdout);
@@ -703,14 +747,20 @@ int runHeadlessCommand(QApplication& app)
                << " pasteUndoAtomic=" << pasteUndoAtomic
                << " pasteRedoAtomic=" << pasteRedoAtomic
                << " incompatiblePasteBlocked=" << incompatiblePasteBlocked
-               << " compatiblePasteImmediate=" << compatiblePasteImmediate
+               << " compatiblePastePreview=" << compatiblePastePreview
+               << " compatiblePasteCommit=" << compatiblePasteCommit
                << " multiPropertyPaste=" << multiPropertyPaste
                << " mismatchedPropertyPasteBlocked=" << mismatchedPropertyPasteBlocked
-               << " fieldPasteImmediate=" << fieldPasteImmediate
+               << " fieldPastePreview=" << fieldPastePreview
+               << " fieldPasteCommit=" << fieldPasteCommit
                << " fieldCopyAvailable=" << fieldCopyAvailable
                << " nonTextPropertyPaste=" << nonTextPropertyPaste << "\n"
                << " numericComponentPaste=" << numericComponentPaste << "\n"
                << " lockedNumericPasteBlocked=" << lockedNumericPasteBlocked << "\n"
+               << " partialCopyExact=" << partialCopyExact
+               << " partialPasteExact=" << partialPasteExact
+               << " partialPasteCommit=" << partialPasteCommit << "\n"
+               << " propertyScrollPreserved=" << propertyScrollPreserved << "\n"
                << " mixedModelPartsVisible=" << mixedModelPartsVisible
                << " logicPointUndoAtomic=" << logicPointUndoAtomic
                << " logicPointRedoAtomic=" << logicPointRedoAtomic << "\n"

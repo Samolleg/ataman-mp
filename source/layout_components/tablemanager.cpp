@@ -15,6 +15,7 @@
 #include <QContextMenuEvent>
 #include <QMenu>
 #include <QSet>
+#include <QScrollBar>
 #include <QtMath>
 #include <cmath>
 #include <limits>
@@ -135,6 +136,45 @@ void copyProperty(const QSharedPointer<IPropertyBase>& property, const QString& 
     QGuiApplication::clipboard()->setMimeData(mime);
 }
 
+class CVectorComponentPlate final : public QToolButton
+{
+public:
+    CVectorComponentPlate(const QString& label,
+                          const QSharedPointer<IPropertyBase>& property,
+                          QWidget* parent)
+        : QToolButton(parent), m_property(clonePropertyValue(property))
+    {
+        setText(label);
+        setAutoRaise(true);
+        setFocusPolicy(Qt::StrongFocus);
+        setToolTip(QObject::tr("Select this component plate, then use Ctrl+C to copy only this value."));
+    }
+
+protected:
+    void keyPressEvent(QKeyEvent* event) override
+    {
+        if(event->matches(QKeySequence::Copy) && !m_property.isNull())
+        {
+            copyProperty(m_property, m_property->toString());
+            event->accept();
+            return;
+        }
+        QToolButton::keyPressEvent(event);
+    }
+
+    void contextMenuEvent(QContextMenuEvent* event) override
+    {
+        QMenu menu(this);
+        QAction* copy = menu.addAction(QObject::tr("Copy value"));
+        copy->setShortcut(QKeySequence::Copy);
+        if(menu.exec(event->globalPos()) == copy && !m_property.isNull())
+            copyProperty(m_property, m_property->toString());
+    }
+
+private:
+    QSharedPointer<IPropertyBase> m_property;
+};
+
 bool clipboardMatches(EObjParam destination)
 {
     const QMimeData* mime = QGuiApplication::clipboard()->mimeData();
@@ -252,14 +292,11 @@ void CTableManager::installClipboardFilter(QWidget* widget, int row)
     if(!widget)
         return;
     widget->setProperty("propertyRow", row);
-    widget->installEventFilter(this);
-    const QList<QLineEdit*> editors = qobject_cast<C3DItem*>(widget)
-        ? QList<QLineEdit*>() : widget->findChildren<QLineEdit*>();
-    for(QLineEdit* child : editors)
-    {
-        child->setProperty("propertyRow", row);
-        child->installEventFilter(this);
-    }
+    // A focused text editor must retain native selection-aware clipboard
+    // behaviour. Property-level copy/paste remains available from the label,
+    // table selection, and non-text value widgets.
+    if(!qobject_cast<QLineEdit*>(widget))
+        widget->installEventFilter(this);
 }
 
 void CTableManager::registerPropertyRow(int row, const QSharedPointer<IPropertyBase>& value)
@@ -751,6 +788,8 @@ bool variantLessThan(const std::pair<QSharedPointer<IPropertyBase>, bool> &v1, c
 
 void CTableManager::setNewData(const QList<QSharedPointer<IPropertyBase>>& aProp)
 {
+    const int verticalScroll = m_pTable->verticalScrollBar()->value();
+    const int horizontalScroll = m_pTable->horizontalScrollBar()->value();
     reset();
     int i(0); // row number
     EObjParam type;
@@ -1031,6 +1070,10 @@ void CTableManager::setNewData(const QList<QSharedPointer<IPropertyBase>>& aProp
         } //switch
     }
     m_pTable->blockSignals(false);
+    m_pTable->verticalScrollBar()->setValue(
+        qMin(verticalScroll, m_pTable->verticalScrollBar()->maximum()));
+    m_pTable->horizontalScrollBar()->setValue(
+        qMin(horizontalScroll, m_pTable->horizontalScrollBar()->maximum()));
 }
 
 void CColorButtonItem::applyColor()
@@ -1372,56 +1415,30 @@ void CComboStItem::keyPressEvent(QKeyEvent* event)
 
 void CValueItem::keyPressEvent(QKeyEvent* event)
 {
-    if(event->matches(QKeySequence::Copy))
-    {
-        copyProperty(m_pValue, hasSelectedText() ? selectedText() : text());
-        event->accept();
-        return;
-    }
+    // Inside the editable text, Ctrl+C/Ctrl+V are ordinary text operations:
+    // copy the exact highlighted characters and replace only the current
+    // selection. Validation and property application still happen on commit.
+    // A typed property copied from a plate retains compatibility checks; a
+    // numeric cross-type paste inserts its safely converted display value at
+    // the current selection without committing the edit early.
     if(event->matches(QKeySequence::Paste))
     {
-        if(isReadOnly())
-        {
-            QApplication::beep();
-            event->accept();
-            return;
-        }
         const QMimeData* mime = QGuiApplication::clipboard()->mimeData();
-        if(mime && mime->hasFormat(kPropertyMimeType) && g_propertyClipboard.size() == 1)
+        if(mime && mime->hasFormat(kPropertyMimeType)
+           && !clipboardMatches(m_pValue->type()))
         {
-            QString error;
-            const QSharedPointer<IPropertyBase> converted = convertedNumericValue(
-                g_propertyClipboard.first().get(), m_pValue.get(), &error);
+            QString conversionError;
+            const QSharedPointer<IPropertyBase> converted = g_propertyClipboard.size() == 1
+                ? convertedNumericValue(g_propertyClipboard.first().get(),
+                                        m_pValue.get(), &conversionError)
+                : QSharedPointer<IPropertyBase>();
             if(!converted.isNull())
             {
-                m_pValue = converted;
-                setText(m_pValue->toString());
-                if(m_filter) m_filter->updateValue(text());
-                emit onParamChange(m_pValue);
+                insert(converted->toString());
                 event->accept();
                 return;
             }
-        }
-        const QString value = QGuiApplication::clipboard()->text();
-        bool numericText = false;
-        const double plainNumber = value.trimmed().toDouble(&numericText);
-        if(numericText)
-        {
-            propFloat sourceNumber(m_pValue->type(), float(plainNumber));
-            const QSharedPointer<IPropertyBase> converted = convertedNumericValue(
-                &sourceNumber, m_pValue.get());
-            if(!converted.isNull())
-            {
-                m_pValue = converted;
-                setText(m_pValue->toString());
-                if(m_filter) m_filter->updateValue(text());
-                emit onParamChange(m_pValue);
-                event->accept();
-                return;
-            }
-        }
-        if(rejectIncompatiblePaste(this, m_pValue->type(), value))
-        {
+            rejectIncompatiblePaste(this, m_pValue->type(), mime->text());
             event->accept();
             return;
         }
@@ -1431,20 +1448,9 @@ void CValueItem::keyPressEvent(QKeyEvent* event)
 
 void CValueItem::contextMenuEvent(QContextMenuEvent* event)
 {
-    QMenu menu(this);
-    QAction* copy = menu.addAction(tr("Copy value"));
-    QAction* paste = menu.addAction(tr("Paste value"));
-    copy->setShortcut(QKeySequence::Copy);
-    paste->setShortcut(QKeySequence::Paste);
-    paste->setEnabled(!isReadOnly());
-    QAction* selected = menu.exec(event->globalPos());
-    if(selected == copy)
-        copyProperty(m_pValue, hasSelectedText() ? selectedText() : text());
-    else if(selected == paste)
-    {
-        QKeyEvent pasteEvent(QEvent::KeyPress, Qt::Key_V, Qt::ControlModifier);
-        keyPressEvent(&pasteEvent);
-    }
+    QMenu* menu = createStandardContextMenu();
+    menu->exec(event->globalPos());
+    delete menu;
 }
 
 void CComboDynItem::_onEditingFinished()
@@ -1515,20 +1521,21 @@ bool CComboDynItem::eventFilter(QObject* watched, QEvent* event)
     {
         QKeyEvent* keyEvent = static_cast<QKeyEvent*>(event);
         if(keyEvent->matches(QKeySequence::Copy))
-        {
-            copyProperty(m_pValue, lineEdit()->hasSelectedText()
-                         ? lineEdit()->selectedText() : lineEdit()->text());
-            return true;
-        }
+            return false;
         if(keyEvent->matches(QKeySequence::Paste))
         {
-            const QString text = QGuiApplication::clipboard()->text().trimmed();
-            if(!rejectIncompatiblePaste(this, m_pValue->type(), text))
+            // Typed property bundles still cannot cross incompatible fields,
+            // but ordinary text (including a partial selection copied from
+            // another editor) is inserted natively and remains uncommitted
+            // until Enter or an explicit dropdown choice.
+            const QMimeData* mime = QGuiApplication::clipboard()->mimeData();
+            if(mime && mime->hasFormat(kPropertyMimeType)
+               && !clipboardMatches(m_pValue->type()))
             {
-                setEditText(text);
-                _onChange(text);
+                rejectIncompatiblePaste(this, m_pValue->type(), mime->text());
+                return true;
             }
-            return true;
+            return false;
         }
         if(keyEvent->key() == Qt::Key_Escape)
         {
@@ -1555,11 +1562,13 @@ C3DItem::C3DItem(const QSharedPointer<IPropertyBase>& propX,const QSharedPointer
     setFocusPolicy(Qt::FocusPolicy::StrongFocus);
     auto* pLayout = new QFormLayout();
     pLayout->setMargin(0);
-    const auto setProp = [this, &pLayout](QString rowName, const QSharedPointer<IPropertyBase>& prop)
+    const auto setProp = [this, &pLayout](const QString& rowName,
+                                         const QSharedPointer<IPropertyBase>& prop)
     {
-        auto pLine = new CValueItem(prop);
+        auto* pLine = new CValueItem(prop);
+        auto* plate = new CVectorComponentPlate(rowName, prop, this);
         QObject::connect(pLine, SIGNAL(onParamChange(const QSharedPointer<IPropertyBase>&)), this, SLOT(_onParamChange(const QSharedPointer<IPropertyBase>&)));
-        pLayout->addRow(rowName, pLine);
+        pLayout->addRow(plate, pLine);
     };
 
     setProp("X:", propX);
