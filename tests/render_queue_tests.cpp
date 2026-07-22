@@ -14,6 +14,7 @@ private slots:
     void deterministicQueueOrder();
     void groupsOnlyCompatibleInstanceRuns();
     void filtersShadowCastersByDistance();
+    void filtersShadowCastersByCascadeFootprint();
     void selectsModernAndFallbackCapabilities();
     void appliesRenderSchedulingOptions();
     void derivesEnvironmentFromWorldValues();
@@ -109,6 +110,25 @@ void RenderQueueTests::filtersShadowCastersByDistance()
     QVERIFY(!shadowItemWithinDistance(item, 1.0f));
     QVERIFY(shadowItemWithinDistance(item, 4.0f));
     QVERIFY(shadowItemWithinDistance(item, 8.0f));
+}
+
+void RenderQueueTests::filtersShadowCastersByCascadeFootprint()
+{
+    QMatrix4x4 lightSpace;
+    lightSpace.ortho(-10.0f, 10.0f, -10.0f, 10.0f, -10.0f, 10.0f);
+
+    SRenderItem inside;
+    inside.shadowBoundsCenter = QVector3D(0.0f, 0.0f, 0.0f);
+    inside.shadowBoundsRadius = 1.0f;
+    QVERIFY(shadowItemIntersectsLightSpace(inside, lightSpace));
+
+    SRenderItem crossing = inside;
+    crossing.shadowBoundsCenter = QVector3D(10.5f, 0.0f, 0.0f);
+    QVERIFY(shadowItemIntersectsLightSpace(crossing, lightSpace));
+
+    SRenderItem outside = inside;
+    outside.shadowBoundsCenter = QVector3D(12.0f, 0.0f, 0.0f);
+    QVERIFY(!shadowItemIntersectsLightSpace(outside, lightSpace));
 }
 
 void RenderQueueTests::selectsModernAndFallbackCapabilities()

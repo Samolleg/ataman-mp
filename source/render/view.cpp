@@ -1066,10 +1066,12 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
             || !m_farShadowFbo->isValid() || !m_farDynamicShadowFbo->isValid())
         return false;
 
-    const float cameraDistance = (cameraPosition - shadowFocus).length();
     const float safeMaximumDistance = qBound(1.0f, maximumDistance, 1024.0f);
-    m_nearShadowSplit = qMin(safeMaximumDistance,
-        qBound(48.0f, cameraDistance * 1.5f, 128.0f));
+    // The near cascade is the high-density contact-shadow region. Making its
+    // reach follow camera altitude expanded it to 92-128 units in overview
+    // views, reducing the closest actor and tree shadows to a handful of
+    // texels. Keep its world-space budget fixed; the far cascade owns reach.
+    m_nearShadowSplit = qMin(safeMaximumDistance, 48.0f);
     QVector3D up(0.0f, 0.0f, 1.0f);
     if(qAbs(QVector3D::dotProduct(environment.sunDirection.normalized(), up)) > 0.96f)
         up = QVector3D(0.0f, 1.0f, 0.0f);
@@ -1227,6 +1229,7 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
         beginTarget(m_shadowFbo, nearCascade.projection, nearCascade.staticView);
         queue.flushShadow(&m_shadowProgram,
                           qMin(safeMaximumDistance, m_nearShadowSplit + 24.0f),
+                          nearCascade.staticMatrix,
                           false, true);
         m_shadowFbo->release();
         m_staticShadowFingerprint = staticFingerprint;
@@ -1235,7 +1238,8 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
     {
         m_farStaticLightSpaceMatrix = farCascade.staticMatrix;
         beginTarget(m_farShadowFbo, farCascade.projection, farCascade.staticView);
-        queue.flushShadow(&m_shadowProgram, safeMaximumDistance, false, true);
+        queue.flushShadow(&m_shadowProgram, safeMaximumDistance,
+                          farCascade.staticMatrix, false, true);
         m_farShadowFbo->release();
         m_farStaticShadowFingerprint = farStaticFingerprint;
     }
@@ -1248,11 +1252,13 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
         beginTarget(m_dynamicShadowFbo, nearCascade.projection, nearCascade.dynamicView);
         queue.flushShadow(&m_shadowProgram,
                           qMin(safeMaximumDistance, m_nearShadowSplit + 24.0f),
+                          nearCascade.dynamicMatrix,
                           true, false);
         m_dynamicShadowFbo->release();
         m_farDynamicLightSpaceMatrix = farCascade.dynamicMatrix;
         beginTarget(m_farDynamicShadowFbo, farCascade.projection, farCascade.dynamicView);
-        queue.flushShadow(&m_shadowProgram, safeMaximumDistance, true, false);
+        queue.flushShadow(&m_shadowProgram, safeMaximumDistance,
+                          farCascade.dynamicMatrix, true, false);
         m_farDynamicShadowFbo->release();
         m_shadowUpdateTimer.restart();
     }
@@ -1386,7 +1392,7 @@ QString CView::captureShadowDiagnostics(QString* error)
     rootObject["renderSettings"] = QJsonObject{
         {"frustumCulling", boolOption("frustumCulling", true)},
         {"animateUnits", boolOption("animateUnits", true)},
-        {"drawSkybox", boolOption("drawSkybox", true)},
+        {"drawSkybox", intOption("renderLightingMode", 2) == 2},
         {"renderFog", boolOption("renderFog", true)},
         {"renderTextureMipmapping", boolOption("renderTextureMipmapping", true)}};
 
@@ -1825,7 +1831,10 @@ void CView::draw()
         ? dynamic_cast<const COptInt*>(m_pSettings->opt("renderLightingMode")) : nullptr;
     const int lightingMode = qBound(0, lightingModeOption ? lightingModeOption->value() : 2, 2);
     const bool environmentEnabled = lightingMode == 2;
-    const bool skyEnabled = renderBool("drawSkybox", true);
+    // The viewport lighting-model selector owns environment activation. Keep
+    // the resource sky in Full environment and out of the compatibility
+    // modes instead of exposing a contradictory second Render setting.
+    const bool skyEnabled = environmentEnabled;
     const bool fogEnabled = renderBool("renderFog", true);
     const bool sceneLightsEnabled = renderBool("renderSceneLights", true);
     const bool shadowsEnabled = renderBool("renderShadows", true);

@@ -14,6 +14,7 @@
 #include <QByteArray>
 
 #include <algorithm>
+#include <cmath>
 
 class CPart;
 
@@ -112,6 +113,35 @@ inline bool shadowItemWithinDistance(const SRenderItem& item, float maximumDista
     return item.cameraDistanceSquared <= safeDistance * safeDistance;
 }
 
+inline bool shadowItemIntersectsLightSpace(const SRenderItem& item,
+                                           const QMatrix4x4& lightSpaceMatrix)
+{
+    const QVector4D projected = lightSpaceMatrix
+        * QVector4D(item.shadowBoundsCenter, 1.0f);
+    const float absoluteW = qAbs(projected.w());
+    if(absoluteW < 0.000001f)
+        return false;
+
+    // Shadow cascades use orthographic projections. A directional-light
+    // caster cannot affect receivers outside its projected X/Y footprint, so
+    // reject it before sorting and submission. This retains off-camera trees
+    // and buildings whose shadows enter the viewport while avoiding the old
+    // all-casters-within-distance pass on large maps.
+    const float radius = qMax(0.0f, item.shadowBoundsRadius);
+    const float radiusX = radius * std::sqrt(
+        lightSpaceMatrix(0, 0) * lightSpaceMatrix(0, 0)
+        + lightSpaceMatrix(0, 1) * lightSpaceMatrix(0, 1)
+        + lightSpaceMatrix(0, 2) * lightSpaceMatrix(0, 2)) / absoluteW;
+    const float radiusY = radius * std::sqrt(
+        lightSpaceMatrix(1, 0) * lightSpaceMatrix(1, 0)
+        + lightSpaceMatrix(1, 1) * lightSpaceMatrix(1, 1)
+        + lightSpaceMatrix(1, 2) * lightSpaceMatrix(1, 2)) / absoluteW;
+    const float x = projected.x() / projected.w();
+    const float y = projected.y() / projected.w();
+    return x + radiusX >= -1.0f && x - radiusX <= 1.0f
+        && y + radiusY >= -1.0f && y - radiusY <= 1.0f;
+}
+
 class RenderQueueContext
 {
 public:
@@ -132,6 +162,7 @@ public:
     void flush();
     void flushShadow(QOpenGLShaderProgram* shadowProgram,
                      float maximumDistance,
+                     const QMatrix4x4& lightSpaceMatrix,
                      bool dynamicOnly = false, bool staticOnly = false);
     QByteArray staticShadowFingerprint() const;
     QVector<SShadowCasterBounds> shadowCasterBounds(float maximumDistance) const;
