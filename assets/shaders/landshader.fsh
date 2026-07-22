@@ -18,6 +18,7 @@ uniform vec3 u_ambientColor;
 uniform vec3 u_fogColor;
 uniform float u_fogStart;
 uniform float u_fogEnd;
+uniform vec3 u_mapFog;
 uniform int u_pointLightCount;
 uniform vec4 u_pointLightPositionRange[8];
 uniform vec3 u_pointLightColor[8];
@@ -36,6 +37,19 @@ varying highp vec3 v_normal;
 varying highp vec2 v_texture;
 varying highp vec3 v_worldPosition;
 varying highp float v_viewDepth;
+
+float borderFog(vec3 world)
+{
+  float border = u_mapFog.z;
+  if (border <= 0.0)
+    return 0.0;
+  float left = min(world.x - border - 1.0, 0.0);
+  float bottom = min(world.y - border - 1.0, 0.0);
+  float right = min(u_mapFog.x - border - world.x - 1.0, 0.0);
+  float top = min(u_mapFog.y - border - world.y - 1.0, 0.0);
+  return clamp(sqrt(left * left + bottom * bottom + right * right + top * top)
+               / border, 0.0, 1.0);
+}
 
 void main(void)
 {
@@ -104,8 +118,9 @@ void main(void)
   vec4 resColor = vec4(light, 1.0) * texColor;
   if (u_environmentEnabled && u_fogEnabled)
   {
-    float fog = clamp((v_viewDepth - u_fogStart) /
-                      max(1.0, u_fogEnd - u_fogStart), 0.0, 1.0);
+    float fog = max(clamp((v_viewDepth - u_fogStart) /
+                          max(1.0, u_fogEnd - u_fogStart), 0.0, 1.0),
+                    borderFog(v_worldPosition));
     resColor.rgb = mix(resColor.rgb, u_fogColor, fog);
   }
 

@@ -32,6 +32,7 @@ renderPerformanceCounters
 renderVSync
 renderFpsCap
 environmentLighting
+renderLightingMode
 drawSkybox
 renderFog
 renderSceneLights

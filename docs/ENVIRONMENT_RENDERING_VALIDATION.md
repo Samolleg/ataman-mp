@@ -34,7 +34,7 @@ alone.
 1. Load the same Base and JMV map with environment rendering off and verify the
    compatibility view is unchanged.
 2. Enable the profile sky and inspect the full horizon and dome. Confirm the
-   `nask0sky` UV seam remains stable while rotating and its generated fog skirt
+   `nask0sky` UV seam remains stable while rotating and map-boundary fog
    blends the authored open lower ring into the atmospheric colour. Missing
    geometry or `sky00` must produce a diagnostic and disable the whole pass.
 3. Enable time override and scrub 00:00, 05:30, 06:00, 12:00, 18:00, and 23:59.

@@ -66,7 +66,6 @@ struct SSkyVertex
 {
     QVector3D position;
     QVector2D texture;
-    float fogBlend{0.0f};
 };
 
 class SkyFigureReader
@@ -208,14 +207,6 @@ QVector<SSkyVertex> decodeLegacySkyFigure(const QByteArray& bytes, QString* diag
         return {};
     }
 
-    float minimumZ = sourceVertices.first().z();
-    float maximumZ = minimumZ;
-    for(const QVector3D& vertex : sourceVertices)
-    {
-        minimumZ = qMin(minimumZ, vertex.z());
-        maximumZ = qMax(maximumZ, vertex.z());
-    }
-    const float blendHeight = qMax(0.001f, (maximumZ - minimumZ) * 0.28f);
     QVector<SSkyVertex> result;
     result.reserve(int(indexCount));
     for(quint32 index = 0; index < indexCount; ++index)
@@ -232,20 +223,8 @@ QVector<SSkyVertex> decodeLegacySkyFigure(const QByteArray& bytes, QString* diag
             if(diagnostic) *diagnostic = "legacy sky component is out of bounds";
             return {};
         }
-        QVector3D position = sourceVertices.at(component.vertex);
-        const float height = qBound(0.0f, (position.z() - minimumZ) / blendHeight, 1.0f);
-        const float smooth = height * height * (3.0f - 2.0f * height);
-        const float fogBlend = 1.0f - smooth;
-        // The shipped dome is open. Extend only its lowest ring into a fog
-        // skirt, preserving every authored UV above it while ensuring an
-        // editor camera can never expose a flat/black gap below the asset.
-        if(qAbs(position.z() - minimumZ) < 0.001f)
-            position.setZ(minimumZ - 45.0f);
-        SSkyVertex vertex;
-        vertex.position = position;
-        vertex.texture = uvs.at(component.uv);
-        vertex.fogBlend = fogBlend;
-        result.append(vertex);
+        result.append(SSkyVertex{sourceVertices.at(component.vertex),
+                                 uvs.at(component.uv)});
     }
     if(reader.offset() != reader.size())
     {
@@ -453,6 +432,7 @@ void CView::initEnvironmentPreviewWidget()
         return;
     m_environmentPreviewWidget = new QFrame(this);
     m_environmentPreviewWidget->setObjectName("environmentPreviewWidget");
+    m_environmentPreviewWidget->setMinimumWidth(220);
     m_environmentPreviewWidget->setFrameShape(QFrame::StyledPanel);
     m_environmentPreviewWidget->setStyleSheet(
         "QFrame#environmentPreviewWidget { background: rgba(25,25,25,210); color: white; border: 1px solid #777; border-radius: 4px; }"
@@ -493,9 +473,8 @@ void CView::initEnvironmentPreviewWidget()
     outer->addWidget(m_environmentPreviewBody);
 
     const COptInt* mode = dynamic_cast<const COptInt*>(m_pSettings->opt("renderLightingMode"));
-    const COptBool* legacyEnvironment = dynamic_cast<const COptBool*>(m_pSettings->opt("environmentLighting"));
-    m_environmentPreviewMode->setCurrentIndex(legacyEnvironment && !legacyEnvironment->value()
-        ? 0 : qBound(0, mode ? mode->value() : 2, 2));
+    m_environmentPreviewMode->setCurrentIndex(
+        qBound(0, mode ? mode->value() : 2, 2));
     connect(m_environmentPreviewCollapse, &QToolButton::clicked, this, [this]()
     {
         const bool show = !m_environmentPreviewBody->isVisible();
@@ -511,8 +490,6 @@ void CView::initEnvironmentPreviewWidget()
             return;
         if(COptInt* option = dynamic_cast<COptInt*>(m_pSettings->opt("renderLightingMode")))
             option->setValue(qBound(0, index, 2));
-        if(COptBool* legacy = dynamic_cast<COptBool*>(m_pSettings->opt("environmentLighting")))
-            legacy->setValue(index != 0);
         m_pSettings->persistOptions();
         update();
     });
@@ -553,10 +530,9 @@ void CView::syncEnvironmentPreviewWidget(float mapTimeHours)
     if(overrideTime && overrideTime->value() && storedTime)
         minutes = (storedTime->value() / 100) * 60 + qMin(59, storedTime->value() % 100);
     const COptInt* mode = dynamic_cast<const COptInt*>(m_pSettings->opt("renderLightingMode"));
-    const COptBool* legacyEnvironment = dynamic_cast<const COptBool*>(m_pSettings->opt("environmentLighting"));
     m_environmentPreviewSyncing = true;
-    m_environmentPreviewMode->setCurrentIndex(legacyEnvironment && !legacyEnvironment->value()
-        ? 0 : qBound(0, mode ? mode->value() : 2, 2));
+    m_environmentPreviewMode->setCurrentIndex(
+        qBound(0, mode ? mode->value() : 2, 2));
     if(!m_environmentPreviewTime->isSliderDown())
         m_environmentPreviewTime->setValue(qBound(0, minutes, 1439));
     m_environmentPreviewSyncing = false;
@@ -873,17 +849,12 @@ void CView::drawSkybox(const QMatrix4x4& cameraMatrix,
     m_skyBuffer.bind();
     const int position = m_skyProgram.attributeLocation("a_position");
     const int texture = m_skyProgram.attributeLocation("a_texture");
-    const int fogBlend = m_skyProgram.attributeLocation("a_fogBlend");
     m_skyProgram.enableAttributeArray(position);
     m_skyProgram.setAttributeBuffer(position, GL_FLOAT,
         int(offsetof(SSkyVertex, position)), 3, int(sizeof(SSkyVertex)));
     m_skyProgram.enableAttributeArray(texture);
     m_skyProgram.setAttributeBuffer(texture, GL_FLOAT,
         int(offsetof(SSkyVertex, texture)), 2, int(sizeof(SSkyVertex)));
-    m_skyProgram.enableAttributeArray(fogBlend);
-    m_skyProgram.setAttributeBuffer(fogBlend, GL_FLOAT,
-        int(offsetof(SSkyVertex, fogBlend)), 1, int(sizeof(SSkyVertex)));
-    m_skyProgram.setUniformValue("u_fogColor", environment.fogColor);
     skyTexture->bind(0);
     glDrawArrays(GL_TRIANGLES, 0, m_skyVertexCount);
     m_skyBuffer.release();
@@ -910,6 +881,11 @@ void CView::applyEnvironmentUniforms(QOpenGLShaderProgram& program,
     program.setUniformValue("u_fogColor", environment.fogColor);
     program.setUniformValue("u_fogStart", environment.fogStart);
     program.setUniformValue("u_fogEnd", environment.fogEnd);
+    const QVector3D mapFog = m_pLand && m_pLand->isMprLoad()
+        ? QVector3D(float(m_pLand->widthInWorldUnits()),
+                    float(m_pLand->heightInWorldUnits()), 64.0f)
+        : QVector3D();
+    program.setUniformValue("u_mapFog", mapFog);
 
     QVector4D positionRange[8];
     QVector3D colors[8];
@@ -1328,11 +1304,9 @@ void CView::draw()
             ? dynamic_cast<const COptBool*>(m_pSettings->opt(name)) : nullptr;
         return option ? option->value() : fallback;
     };
-    const bool legacyEnvironmentEnabled = renderBool("environmentLighting", true);
     const COptInt* lightingModeOption = m_pSettings
         ? dynamic_cast<const COptInt*>(m_pSettings->opt("renderLightingMode")) : nullptr;
-    const int lightingMode = legacyEnvironmentEnabled
-        ? qBound(0, lightingModeOption ? lightingModeOption->value() : 2, 2) : 0;
+    const int lightingMode = qBound(0, lightingModeOption ? lightingModeOption->value() : 2, 2);
     const bool environmentEnabled = lightingMode == 2;
     const bool skyEnabled = renderBool("drawSkybox", true);
     const bool fogEnabled = renderBool("renderFog", true);

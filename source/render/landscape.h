@@ -78,6 +78,8 @@ public:
     const QFileInfo& filePath() {return m_filePath;}
     QOpenGLTexture* glTexture() const {return m_texture;}
     uint textureNum() const {return m_header.nTexture;}
+    uint widthInWorldUnits() const { return m_header.nXSector * 32u; }
+    uint heightInWorldUnits() const { return m_header.nYSector * 32u; }
     const QVector<SMaterial>& materials() const {return m_aMaterial;}
     void setMaterials(const QVector<SMaterial>& arrMat) {m_aMaterial = arrMat;}
     const QVector<ETileType>& tileTypes() const {return m_aTileTypes;}

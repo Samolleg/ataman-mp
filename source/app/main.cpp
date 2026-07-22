@@ -585,10 +585,13 @@ int runHeadlessCommand(QApplication& app)
                     settingsWindow.opt(eOptSetRender, "renderVSync"));
                 COptInt* renderFpsCap = dynamic_cast<COptInt*>(
                     settingsWindow.opt(eOptSetRender, "renderFpsCap"));
+                COptInt* renderLightingMode = dynamic_cast<COptInt*>(
+                    settingsWindow.opt(eOptSetRender, "renderLightingMode"));
                 renderOptionsRegistered = animateUnits && animateUnits->value()
                         && performanceCounters && !performanceCounters->value()
                         && renderVsync && renderVsync->value()
                         && renderFpsCap && renderFpsCap->value() == 0
+                        && renderLightingMode && renderLightingMode->value() == 2
                         && settingsWindow.findChild<QCheckBox*>("renderVSync")
                         && settingsWindow.findChild<QLineEdit*>("renderFpsCap");
                 if(historyShortcut && duplicateShortcut && stopTestShortcut && activateOwnerShortcut)
