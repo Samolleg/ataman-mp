@@ -23,6 +23,7 @@ from __future__ import annotations
 import hashlib
 import importlib
 import json
+import math
 import os
 from pathlib import Path
 import struct
@@ -122,9 +123,11 @@ def apply_edit_spec(path: Path) -> dict[str, object]:
         if obj is None or obj.type != "MESH":
             raise RuntimeError(f"Edit target is not a mesh object: {object_name}")
         delta = operation.get("delta")
-        if not isinstance(delta, list):
+        if kind in {"vertex_delta", "uv_delta", "location_delta"} and not isinstance(delta, list):
             raise RuntimeError(f"Edit operation requires a numeric delta: {operation}")
-        result: dict[str, object] = {"type": kind, "object": object_name, "delta": delta}
+        result: dict[str, object] = {"type": kind, "object": object_name}
+        if delta is not None:
+            result["delta"] = delta
         if kind == "vertex_delta":
             index = int(operation["index"])
             if index < 0 or index >= len(obj.data.vertices):
@@ -143,6 +146,40 @@ def apply_edit_spec(path: Path) -> dict[str, object]:
         elif kind == "location_delta":
             target = obj.location
             result.update({"before": add_vector(target, delta), "after": list(target)})
+        elif kind == "mesh_scale":
+            factors = operation.get("factors")
+            pivot = operation.get("pivot", [0.0, 0.0, 0.0])
+            if (not isinstance(factors, list) or len(factors) != 3 or
+                    not isinstance(pivot, list) or len(pivot) != 3):
+                raise RuntimeError("mesh_scale requires three factors and a three-value pivot")
+            factors = [float(value) for value in factors]
+            pivot = [float(value) for value in pivot]
+            if (not all(math.isfinite(value) and value > 0.0 for value in factors) or
+                    not all(math.isfinite(value) for value in pivot)):
+                raise RuntimeError("mesh_scale factors must be finite/positive and pivot finite")
+            bounds_before = [
+                [min(vertex.co[axis] for vertex in obj.data.vertices),
+                 max(vertex.co[axis] for vertex in obj.data.vertices)]
+                for axis in range(3)
+            ]
+            for vertex in obj.data.vertices:
+                for axis in range(3):
+                    vertex.co[axis] = pivot[axis] + (
+                        vertex.co[axis] - pivot[axis]
+                    ) * factors[axis]
+            obj.data.update()
+            bounds_after = [
+                [min(vertex.co[axis] for vertex in obj.data.vertices),
+                 max(vertex.co[axis] for vertex in obj.data.vertices)]
+                for axis in range(3)
+            ]
+            result.update({
+                "factors": factors,
+                "pivot": pivot,
+                "vertex_count": len(obj.data.vertices),
+                "bounds_before": bounds_before,
+                "bounds_after": bounds_after,
+            })
         else:
             raise RuntimeError(f"Unsupported edit operation: {kind}")
         applied.append(result)

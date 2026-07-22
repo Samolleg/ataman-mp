@@ -19,6 +19,16 @@ def required(name: str) -> str:
     return value
 
 
+def vector_env(name: str, default: list[float] | None = None) -> list[float] | None:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    result = [float(component.strip()) for component in value.split(",")]
+    if len(result) != 3 or not np.isfinite(result).all():
+        raise RuntimeError(f"{name} must contain three finite comma-separated values")
+    return result
+
+
 def digest(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
@@ -189,6 +199,43 @@ renderable_semantic_fields = (
     "renderable_corner_uv",
 )
 renderable_semantic_equal = all(fields[name]["equal"] for name in renderable_semantic_fields)
+expected_transform = None
+expected_scale = vector_env("EI_FIG_EXPECT_SCALE")
+if expected_scale is not None:
+    expected_pivot = vector_env("EI_FIG_EXPECT_PIVOT", [0.0, 0.0, 0.0])
+    scale = np.asarray(expected_scale, dtype=np.float64)
+    pivot = np.asarray(expected_pivot, dtype=np.float64)
+    expected_positions = pivot + (
+        np.asarray(left_renderable["positions"], dtype=np.float64) - pivot
+    ) * scale
+    actual_positions = np.asarray(right_renderable["positions"], dtype=np.float64)
+    position_shape_equal = expected_positions.shape == actual_positions.shape
+    position_error = (
+        np.abs(expected_positions - actual_positions)
+        if position_shape_equal else np.asarray([], dtype=np.float64)
+    )
+    position_max_abs_error = float(position_error.max()) if position_error.size else None
+    position_match = bool(
+        position_shape_equal and np.allclose(
+            expected_positions, actual_positions, rtol=0.0, atol=1.0e-6
+        )
+    )
+    unchanged_fields = {
+        "corner_vertex_indices": fields["renderable_corner_vertex_indices"]["equal"],
+        "corner_normals": fields["renderable_corner_normals"]["equal"],
+        "corner_uv": fields["renderable_corner_uv"]["equal"],
+    }
+    expected_transform = {
+        "type": "scale_about_pivot",
+        "scale": expected_scale,
+        "pivot": expected_pivot,
+        "position_shape_equal": position_shape_equal,
+        "position_max_abs_error": position_max_abs_error,
+        "position_tolerance": 1.0e-6,
+        "position_match": position_match,
+        "unchanged_fields": unchanged_fields,
+        "passed": position_match and all(unchanged_fields.values()),
+    }
 report = {
     "schema": 1,
     "status": "ok",
@@ -208,5 +255,9 @@ report = {
     },
     "fields": fields,
 }
+if expected_transform is not None:
+    report["expected_transform"] = expected_transform
 report_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
 print("EI_FIG_SEMANTIC_DIFF", report_path, semantic_equal)
+if expected_transform is not None and not expected_transform["passed"]:
+    raise SystemExit(2)
