@@ -49,12 +49,9 @@ float borderFog(vec3 world)
   float border = u_mapFog.z;
   if (border <= 0.0)
     return 0.0;
-  float left = min(world.x - border - 1.0, 0.0);
-  float bottom = min(world.y - border - 1.0, 0.0);
-  float right = min(u_mapFog.x - border - world.x - 1.0, 0.0);
-  float top = min(u_mapFog.y - border - world.y - 1.0, 0.0);
-  return clamp(sqrt(left * left + bottom * bottom + right * right + top * top)
-               / border, 0.0, 1.0);
+  float distanceToEdge = min(min(world.x, world.y),
+                             min(u_mapFog.x - world.x, u_mapFog.y - world.y));
+  return clamp((border - distanceToEdge) / border, 0.0, 1.0);
 }
 
 void main(void)
@@ -73,7 +70,7 @@ void main(void)
     {
     float sunDiffuse = max(dot(norm, -normalize(u_sunDirection)), 0.0);
     float shadow = 1.0;
-    if (u_shadowsEnabled && sunDiffuse > 0.0)
+    if (u_shadowsEnabled)
     {
       vec4 staticPosition = u_staticLightSpaceMatrix * vec4(v_worldPosition, 1.0);
       vec4 dynamicPosition = u_dynamicLightSpaceMatrix * vec4(v_worldPosition, 1.0);
@@ -85,7 +82,8 @@ void main(void)
           dynamicProjected.y >= 0.0 && dynamicProjected.y <= 1.0 && dynamicProjected.z <= 1.0;
       if (staticInside || dynamicInside)
       {
-        float bias = max(0.00045 * (1.0 - sunDiffuse), 0.00008);
+        float staticBias = max(0.00004 * (1.0 - sunDiffuse), 0.00001);
+        float dynamicBias = 0.000006;
         float visibility = 0.0;
         for (int y = -1; y <= 1; ++y)
           for (int x = -1; x <= 1; ++x)
@@ -95,9 +93,9 @@ void main(void)
                 staticProjected.xy + offset * u_staticShadowTexelSize)) : 1.0;
             float dynamicDepth = dynamicInside ? unpackShadowDepth(texture2D(u_dynamicShadowMap,
                 dynamicProjected.xy + offset * u_dynamicShadowTexelSize)) : 1.0;
-            bool staticOccluded = staticInside && staticProjected.z - bias > staticDepth;
-            bool dynamicOccluded = dynamicInside && dynamicProjected.z - bias > dynamicDepth;
-            visibility += (staticOccluded || dynamicOccluded) ? 0.58 : 1.0;
+            bool staticOccluded = staticInside && staticProjected.z - staticBias > staticDepth;
+            bool dynamicOccluded = dynamicInside && dynamicProjected.z - dynamicBias > dynamicDepth;
+            visibility += (staticOccluded || dynamicOccluded) ? 0.68 : 1.0;
           }
         shadow = visibility / 9.0;
       }
@@ -105,8 +103,8 @@ void main(void)
     float skyExposure = 0.88 + 0.12 * max(norm.z, 0.0);
     vec3 neutralAmbient = mix(vec3(1.0), u_ambientColor, 0.28);
     float ambientLevel = 0.32 + 0.68 * u_ambientStrength;
-    light = neutralAmbient * (ambientLevel * skyExposure)
-          + u_sunColor * (u_sunStrength * sunDiffuse * shadow);
+    light = (neutralAmbient * (ambientLevel * skyExposure)
+          + u_sunColor * (u_sunStrength * sunDiffuse)) * shadow;
     for (int i = 0; i < 8; ++i)
     {
       if (i >= u_pointLightCount)

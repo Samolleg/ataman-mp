@@ -1760,6 +1760,8 @@ void MainWindow::refreshMapTestContext()
         if(m_mapTestEntry.zoneId.isEmpty() && nameMatches.size() == 1)
             m_mapTestEntry = nameMatches.first();
     }
+    if(m_pView)
+        m_pView->setMapSkyType(m_mapTestEntry.skyType);
     populateEntranceCombo();
     updateCustomSpawnControls();
     updateMapTestAction();

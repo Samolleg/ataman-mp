@@ -22,10 +22,12 @@ struct SRenderEnvironment
 };
 
 SRenderEnvironment renderEnvironment(const CWorldSet* worldSet,
-                                     bool overrideTime, float overrideHours);
+                                     bool overrideTime, float overrideHours,
+                                     bool caveEnvironment = false);
 SRenderEnvironment renderEnvironmentForValues(float timeHours,
                                                float ambientStrength,
-                                               float sunStrength);
+                                               float sunStrength,
+                                               bool caveEnvironment = false);
 float clockValueToHours(int hourMinuteValue);
 
 }

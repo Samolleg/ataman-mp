@@ -7,9 +7,8 @@ alone.
 ## Data contract
 
 - Sky geometry is the selected profile's `nask0sky.fig`; its outdoor material
-  is `sky00.mmp`. `sky01.mmp` is the executable-proven alternate/cave material,
-  but automatic cave-state selection remains deferred until that state is
-  represented by the map loader.
+  is `sky00.mmp`. The selected profile's `map.txt` `#sky cave` value suppresses
+  this pass and selects black boundary fog.
 - The active MOB `WORLD_SET` supplies `WS_TIME`, `WS_AMBIENT`, and
   `WS_SUN_LIGHT`. Preview override is transient and never changes the MOB.
 - MOB `LIGHT` records expose position, RGB color, range, and `LIGHT_SHADOW`.
@@ -28,7 +27,8 @@ alone.
   **Simple shading**, or resource-driven **Full environment** preview. Moving
   its clock enables the existing transient time override and never edits MOB
   world settings.
-- Map-edge fog reaches full density over one 32-unit landscape tile. The
+- Map-edge fog reaches full density over four world units: two authored
+  two-unit terrain tiles. The
   authored sky cylinder is lowered by one of its own vertical rings and its
   lower two rings blend to the same fog colour, hiding the open-cylinder seam.
 - Terrain atlases upload their authored DXT mip chain. The render-setting
@@ -72,6 +72,10 @@ alone.
 12. Toggle **Texture mipmapping** while viewing distant terrain. Enabled must
     reduce shimmer/grain without changing character faces, armor, or weapons;
     disabled must restore nearest level-zero terrain sampling immediately.
+13. Load `gz5g`, `gz10g`, `bz7g`, or `gz20g` through a profile whose
+    `map.txt` marks it `#sky cave`. Confirm there is no outdoor sky, the map
+    fades into a black boundary, and moving the preview time does not rotate or
+    recolor shadows. Confirm an ordinary `#sky normal` map remains outdoor.
 
 ## Known evidence boundary
 

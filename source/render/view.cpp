@@ -906,7 +906,7 @@ void CView::applyEnvironmentUniforms(QOpenGLShaderProgram& program,
     program.setUniformValue("u_fogEnd", environment.fogEnd);
     const QVector3D mapFog = m_pLand && m_pLand->isMprLoad()
         ? QVector3D(float(m_pLand->widthInWorldUnits()),
-                    float(m_pLand->heightInWorldUnits()), 32.0f)
+                    float(m_pLand->heightInWorldUnits()), 4.0f)
         : QVector3D();
     program.setUniformValue("u_mapFog", mapFog);
 
@@ -974,8 +974,6 @@ bool CView::renderShadowMap(const QVector3D& shadowFocus,
 
     glDisable(GL_BLEND);
     glDisable(GL_ALPHA_TEST);
-    glEnable(GL_POLYGON_OFFSET_FILL);
-    glPolygonOffset(1.0f, 1.0f);
     const auto beginTarget = [&](QOpenGLFramebufferObject* target,
                                  const QMatrix4x4& projection)
     {
@@ -1005,7 +1003,6 @@ bool CView::renderShadowMap(const QVector3D& shadowFocus,
         m_shadowUpdateTimer.restart();
     }
     m_shadowInitialized = true;
-    glDisable(GL_POLYGON_OFFSET_FILL);
     glViewport(0, 0, m_width, m_height);
     glEnable(GL_ALPHA_TEST);
     glEnable(GL_BLEND);
@@ -1347,7 +1344,7 @@ void CView::draw()
     const CWorldSet* worldSet = m_environmentMob
         ? &m_environmentMob->worldSet() : nullptr;
     const ei::SRenderEnvironment environment = ei::renderEnvironment(
-        worldSet, overrideWorldTime, previewTime);
+        worldSet, overrideWorldTime, previewTime, m_caveEnvironment);
     syncEnvironmentPreviewWidget(environment.timeHours);
     // Fill the open lower edge of the stock sky cylinder with the same color
     // that distant geometry converges to. This removes the editor-only black
@@ -1428,7 +1425,7 @@ void CView::draw()
         }
         return result;
     };
-    if(environmentEnabled && skyEnabled)
+    if(environmentEnabled && skyEnabled && !m_caveEnvironment)
         drawSkybox(camMatrix, environment);
     // Set modelview-projection matrix
 
@@ -1671,6 +1668,7 @@ void CView::unloadLand(bool promptForSave)
 
     m_mprModifyTimer->stop();
     m_pLand->unloadMpr();
+    m_caveEnvironment = false;
     for(CMob* mob : m_aMob)
         mob->reprojectForCurrentTerrain();
     m_spatialIndexDirty = true;
@@ -3870,6 +3868,18 @@ void CView::clearTestSpawnMarker()
 {
     m_testSpawnMarkerValid = false;
     m_testSpawnMarkerSelected = false;
+    update();
+}
+
+void CView::setMapSkyType(const QString& skyType)
+{
+    const bool cave = skyType.compare(QStringLiteral("cave"),
+                                      Qt::CaseInsensitive) == 0;
+    if(m_caveEnvironment == cave)
+        return;
+    m_caveEnvironment = cave;
+    m_shadowInitialized = false;
+    m_staticShadowFingerprint.clear();
     update();
 }
 

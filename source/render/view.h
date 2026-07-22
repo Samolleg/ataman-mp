@@ -129,6 +129,7 @@ public:
     void setTestSpawnMarkerSelected(bool selected);
     bool testSpawnMarkerAt(const QPoint& viewportPosition, int tolerance = 18) const;
     void clearTestSpawnMarker();
+    void setMapSkyType(const QString& skyType);
     void setTestEntranceOverlays(const QVector<QRectF>& rectangles,
                                  const QStringList& labels,
                                  int selectedIndex);
@@ -321,6 +322,7 @@ private:
     // to be selected for editing. Keep the first loaded document as the
     // environment owner until it is unloaded.
     CMob* m_environmentMob{nullptr};
+    bool m_caveEnvironment{false};
     QSet<CMob*> m_hiddenMobs;
     QTimer* m_timer;
     CSettings* m_pSettings;

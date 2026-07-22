@@ -145,6 +145,12 @@ void RenderQueueTests::derivesEnvironmentFromWorldValues()
     QVERIFY(qAbs(midnight.sunDirection.z() - noon.sunDirection.z()) < 0.001f);
     QVERIFY((midnight.sunDirection - noon.sunDirection).length() > 1.0f);
 
+    const ei::SRenderEnvironment cave =
+        ei::renderEnvironmentForValues(10.34f, 0.25f, 0.75f, true);
+    QCOMPARE(cave.fogColor, QVector3D(0.0f, 0.0f, 0.0f));
+    QCOMPARE(cave.sunColor, QVector3D(161.0f, 179.0f, 170.0f) / 255.0f);
+    QCOMPARE(cave.ambientColor, QVector3D(75.0f, 75.0f, 89.0f) / 255.0f);
+
     QCOMPARE(ei::clockValueToHours(0), 0.0f);
     QCOMPARE(ei::clockValueToHours(1230), 12.5f);
     QCOMPARE(ei::clockValueToHours(2360), 23.0f + 59.0f / 60.0f);

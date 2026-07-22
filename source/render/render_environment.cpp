@@ -52,7 +52,8 @@ float clockValueToHours(int hourMinuteValue)
 
 SRenderEnvironment renderEnvironmentForValues(float timeHours,
                                                float ambientStrength,
-                                               float sunStrength)
+                                               float sunStrength,
+                                               bool caveEnvironment)
 {
     SRenderEnvironment result;
     result.timeHours = timeHours;
@@ -71,6 +72,20 @@ SRenderEnvironment renderEnvironmentForValues(float timeHours,
                                 horizontal * qSin(azimuth), vertical);
     result.sunDirection = -fromSurface.normalized();
 
+    if(caveEnvironment)
+    {
+        // texts.res/map.txt selects this path with "#sky cave". The stock
+        // cave-light files for all three allods contain these same RGB values
+        // at every hour, so only the MOB-authored WS_TIME selects the fixed
+        // shadow direction; preview time must not alter cave illumination.
+        result.sunColor = QVector3D(161.0f, 179.0f, 170.0f) / 255.0f;
+        result.ambientColor = QVector3D(75.0f, 75.0f, 89.0f) / 255.0f;
+        result.fogColor = QVector3D(0.0f, 0.0f, 0.0f);
+        result.fogStart = 180.0f;
+        result.fogEnd = 620.0f;
+        return result;
+    }
+
     result.sunColor = cyclicHue(result.timeHours);
     result.ambientColor = lerp(QVector3D(0.52f, 0.58f, 0.68f),
                                result.sunColor, 0.35f);
@@ -85,14 +100,16 @@ SRenderEnvironment renderEnvironmentForValues(float timeHours,
 }
 
 SRenderEnvironment renderEnvironment(const CWorldSet* worldSet,
-                                     bool overrideTime, float overrideHours)
+                                     bool overrideTime, float overrideHours,
+                                     bool caveEnvironment)
 {
     SRenderEnvironment defaults;
     return renderEnvironmentForValues(
-        overrideTime ? overrideHours
+        overrideTime && !caveEnvironment ? overrideHours
                      : worldFloat(worldSet, eWsTypeTime, defaults.timeHours),
         worldFloat(worldSet, eWsTypeAmbient, defaults.ambientStrength),
-        worldFloat(worldSet, eWsTypeSunLight, defaults.sunStrength));
+        worldFloat(worldSet, eWsTypeSunLight, defaults.sunStrength),
+        caveEnvironment);
 }
 
 }
