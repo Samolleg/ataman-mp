@@ -1435,7 +1435,7 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
                     "Starter is not currently configured for the selected Endurance mod.\n\n"
                     "Selected profile mod:\n%1\n\n"
                     "Starter AddonPath:\n%2\n\n"
-                    "Select the intended mod in Starter and launch it once, then retry Test Current Map. "
+                    "Select the intended mod in Starter, then retry Test Current Map. "
                     "Endurance will not start with a different cached mod because that can mix incompatible resources.")
                     .arg(QDir::toNativeSeparators(selectedModRoot),
                          starterRegistryAddonPath.isEmpty()

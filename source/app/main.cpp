@@ -581,7 +581,8 @@ int runHeadlessCommand(QApplication& app)
                     return;
                 componentContextShowsOnlyComponent = yComponentPlate->isChecked()
                         && !xComponentPlate->isChecked()
-                        && vectorComponentTable.selectedItems().isEmpty();
+                        && vectorComponentTable.selectedItems().isEmpty()
+                        && !vectorComponentTable.currentIndex().isValid();
                 for(QAction* action : menu->actions())
                     if(action->text().contains("Paste", Qt::CaseInsensitive))
                     {
@@ -599,7 +600,8 @@ int runHeadlessCommand(QApplication& app)
             QApplication::sendEvent(yComponentPlate, &contextRelease);
             componentContextGestureKeepsTableClear = contextPress.isAccepted()
                     && contextRelease.isAccepted()
-                    && vectorComponentTable.selectedItems().isEmpty();
+                    && vectorComponentTable.selectedItems().isEmpty()
+                    && !vectorComponentTable.currentIndex().isValid();
             QContextMenuEvent pasteYContext(QContextMenuEvent::Mouse, QPoint(2, 2),
                                              yComponentPlate->mapToGlobal(QPoint(2, 2)));
             QApplication::sendEvent(yComponentPlate, &pasteYContext);
@@ -611,7 +613,8 @@ int runHeadlessCommand(QApplication& app)
         const bool componentContextPreservesSelection = xComponentPlate
                 && xComponentPlate->isChecked()
                 && yComponentPlate && !yComponentPlate->isChecked()
-                && vectorComponentTable.selectedItems().isEmpty();
+                && vectorComponentTable.selectedItems().isEmpty()
+                && !vectorComponentTable.currentIndex().isValid();
 
         QList<QSharedPointer<IPropertyBase>> exclusiveComponents;
         exclusiveComponents

@@ -17,6 +17,7 @@
 #include <QMenu>
 #include <QSet>
 #include <QScrollBar>
+#include <QItemSelectionModel>
 #include <QtMath>
 #include <cmath>
 #include <functional>
@@ -263,8 +264,12 @@ private:
         if(QTableWidget* table = parentTable())
         {
             const QSignalBlocker blocker(table);
-            table->clearSelection();
-            table->setCurrentItem(nullptr);
+            // clearSelection() does not invalidate QAbstractItemView's current
+            // index. That current Vector3 cell can still paint as active when
+            // focus moves between two component context menus.
+            if(table->selectionModel())
+                table->selectionModel()->clear();
+            table->setCurrentCell(-1, -1, QItemSelectionModel::Clear);
         }
     }
 

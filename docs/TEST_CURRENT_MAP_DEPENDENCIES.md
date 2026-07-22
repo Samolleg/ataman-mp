@@ -28,7 +28,8 @@ must identify the same mod directory. Starter loads and caches part of its mod
 configuration before the run-local Endurance bridge can reliably virtualize
 every consumer. Endurance therefore checks the persisted selection before
 staging and refuses a mismatched launch with both paths shown. Select the
-intended mod in Starter and launch it once before retrying.
+intended mod in Starter before retrying; launching the game from Starter is not
+required for this selection update.
 
 The run-local bridge still virtualizes later `AddonPath` reads inside the owned
 game process, but this is defence in depth rather than a replacement for
