@@ -81,6 +81,13 @@ public:
     void testFunc1();
 
 private:
+    enum class ETransientNotificationAction
+    {
+        None,
+        OpenLog,
+        OpenBackupFolder
+    };
+
     void createUndoView();
     void initShortcuts();
     void connectUiButtons();
@@ -137,6 +144,10 @@ private:
     void notifyFamilyPreflight(const QString& operation);
     void notifyProposedNid(quint32 nid, const QString& mobPath);
     void showMapTestResultNotification(const QJsonObject& report);
+    void showTransientResultNotification(const QString& text, bool failed, bool warned,
+                                         const QString& actionText,
+                                         ETransientNotificationAction action,
+                                         int timeoutMs);
     void positionMapTestResultNotification();
     void positionAutosaveNotification();
     void showUnitTexturePreview();
@@ -231,6 +242,7 @@ private:
     QFrame* m_mapTestResultNotification{nullptr};
     QLabel* m_mapTestResultIcon{nullptr};
     QLabel* m_mapTestResultLabel{nullptr};
+    QPushButton* m_mapTestResultActionButton{nullptr};
     QTimer* m_mapTestResultTimer{nullptr};
     QProgressDialog* m_hotReloadProgress{nullptr};
     QTimer* m_autosaveTimer{nullptr};
@@ -245,6 +257,8 @@ private:
     bool m_uiStateSaved{false};
     bool m_workspaceLoadInProgress{false};
     QString m_mapTestResultLogPath;
+    ETransientNotificationAction m_transientNotificationAction{
+        ETransientNotificationAction::None};
     CMobFamilyValidationReport m_familyValidation;
     QByteArray m_acknowledgedFindingDigest;
     QSet<QString> m_previousFamilyRiskKeys;

@@ -2893,14 +2893,46 @@ void MainWindow::showValidationWarning(const QString& title, const QString& text
 
 void MainWindow::showMapTestResultNotification(const QJsonObject& report)
 {
-    if(m_mapTestResultTimer)
-        m_mapTestResultTimer->stop();
     const int errors = report.value("errorCount").toInt();
     const int warnings = report.value("warningCount").toInt();
     const QString reportText = QString::fromUtf8(
         QJsonDocument(report).toJson(QJsonDocument::Compact));
     ei::log(errors > 0 ? eLogFatal : (warnings > 0 ? eLogWarning : eLogInfo),
             "JMV authoritative test result: " + reportText);
+    const bool failed = errors > 0;
+    const bool warned = !failed && warnings > 0;
+    QString detail;
+    const QJsonArray problems = failed ? report.value("errors").toArray()
+                                       : report.value("warnings").toArray();
+    if(!problems.isEmpty())
+        detail = problems.first().toString().simplified();
+    if(detail.size() > 180)
+        detail = detail.left(177) + "...";
+    const QString status = failed
+        ? tr("Map test finished with %1 error(s).").arg(errors)
+        : (warned ? tr("Map test finished with %1 warning(s).").arg(warnings)
+                  : tr("Map test completed successfully."));
+    QString text = status + tr("\nRequested: %1 / entrance %2   Runtime: %3 / entrance %4")
+        .arg(report.value("requestedZone").toString())
+        .arg(report.value("requestedEntrance").toInt())
+        .arg(report.value("actualZone").toString())
+        .arg(report.value("actualEntrance").toInt());
+    if(!detail.isEmpty())
+        text += "\n" + detail;
+    m_mapTestResultLogPath = report.value("runLogPath").toString();
+    if(m_mapTestResultLogPath.isEmpty())
+        m_mapTestResultLogPath = report.value("bridgeResultPath").toString();
+    showTransientResultNotification(text, failed, warned, tr("Open Log"),
+        ETransientNotificationAction::OpenLog,
+        failed ? 9000 : (warned ? 7000 : 5000));
+}
+
+void MainWindow::showTransientResultNotification(
+    const QString& text, bool failed, bool warned, const QString& actionText,
+    ETransientNotificationAction action, int timeoutMs)
+{
+    if(m_mapTestResultTimer)
+        m_mapTestResultTimer->stop();
     if(!m_mapTestResultNotification)
     {
         m_mapTestResultNotification = new QFrame(this);
@@ -2930,60 +2962,59 @@ void MainWindow::showMapTestResultNotification(const QJsonObject& report)
         layout->addLayout(summary);
         QHBoxLayout* buttons = new QHBoxLayout;
         buttons->addStretch(1);
-        QPushButton* openLog = new QPushButton(tr("Open Log"), m_mapTestResultNotification);
+        m_mapTestResultActionButton = new QPushButton(m_mapTestResultNotification);
         QPushButton* dismiss = new QPushButton(tr("Dismiss"), m_mapTestResultNotification);
-        buttons->addWidget(openLog);
+        buttons->addWidget(m_mapTestResultActionButton);
         buttons->addWidget(dismiss);
         layout->addLayout(buttons);
         m_mapTestResultTimer = new QTimer(m_mapTestResultNotification);
         m_mapTestResultTimer->setSingleShot(true);
-        connect(m_mapTestResultTimer, &QTimer::timeout,
-                m_mapTestResultNotification, &QWidget::hide);
-        connect(dismiss, &QPushButton::clicked,
-                m_mapTestResultNotification, &QWidget::hide);
-        connect(openLog, &QPushButton::clicked, this, [this]()
+        connect(m_mapTestResultTimer, &QTimer::timeout, this, [this]()
+        {
+            m_mapTestResultNotification->hide();
+            positionAutosaveNotification();
+        });
+        connect(dismiss, &QPushButton::clicked, this, [this]()
         {
             m_mapTestResultTimer->stop();
-            if(m_mapTestResultLogPath.isEmpty()
-               || !QDesktopServices::openUrl(QUrl::fromLocalFile(m_mapTestResultLogPath)))
-                statusBar()->showMessage(tr("The test-run log could not be opened."), 6000);
             m_mapTestResultNotification->hide();
+            positionAutosaveNotification();
+        });
+        connect(m_mapTestResultActionButton, &QPushButton::clicked, this, [this]()
+        {
+            m_mapTestResultTimer->stop();
+            if(m_transientNotificationAction == ETransientNotificationAction::OpenLog)
+            {
+                if(m_mapTestResultLogPath.isEmpty()
+                   || !QDesktopServices::openUrl(QUrl::fromLocalFile(m_mapTestResultLogPath)))
+                    statusBar()->showMessage(tr("The test-run log could not be opened."), 6000);
+            }
+            else if(m_transientNotificationAction
+                    == ETransientNotificationAction::OpenBackupFolder)
+            {
+                QString error;
+                if(!CBackupManager::openBackupFolder(&error))
+                    QMessageBox::warning(this, tr("Endurance backups"), error);
+            }
+            m_mapTestResultNotification->hide();
+            positionAutosaveNotification();
         });
     }
 
-    const bool failed = errors > 0;
-    const bool warned = !failed && warnings > 0;
     m_mapTestResultIcon->setText(failed ? QString::fromUtf8("\xE2\x9C\x95")
                                        : (warned ? "!" : QString::fromUtf8("\xE2\x9C\x93")));
     m_mapTestResultIcon->setStyleSheet(QString("color: %1;")
         .arg(failed ? "#ff5c5c" : (warned ? "#ffc547" : "#4bd66f")));
-    QString detail;
-    const QJsonArray problems = failed ? report.value("errors").toArray()
-                                       : report.value("warnings").toArray();
-    if(!problems.isEmpty())
-        detail = problems.first().toString().simplified();
-    if(detail.size() > 180)
-        detail = detail.left(177) + "...";
-    const QString status = failed
-        ? tr("Map test finished with %1 error(s).").arg(errors)
-        : (warned ? tr("Map test finished with %1 warning(s).").arg(warnings)
-                  : tr("Map test completed successfully."));
-    QString text = status + tr("\nRequested: %1 / entrance %2   Runtime: %3 / entrance %4")
-        .arg(report.value("requestedZone").toString())
-        .arg(report.value("requestedEntrance").toInt())
-        .arg(report.value("actualZone").toString())
-        .arg(report.value("actualEntrance").toInt());
-    if(!detail.isEmpty())
-        text += "\n" + detail;
     m_mapTestResultLabel->setText(text);
-    m_mapTestResultLogPath = report.value("runLogPath").toString();
-    if(m_mapTestResultLogPath.isEmpty())
-        m_mapTestResultLogPath = report.value("bridgeResultPath").toString();
+    m_transientNotificationAction = action;
+    m_mapTestResultActionButton->setText(actionText);
+    m_mapTestResultActionButton->setVisible(
+        action != ETransientNotificationAction::None && !actionText.isEmpty());
     m_mapTestResultNotification->adjustSize();
     positionMapTestResultNotification();
     m_mapTestResultNotification->show();
     m_mapTestResultNotification->raise();
-    m_mapTestResultTimer->start(failed ? 9000 : (warned ? 7000 : 5000));
+    m_mapTestResultTimer->start(qMax(1000, timeoutMs));
     positionAutosaveNotification();
 }
 
@@ -4296,21 +4327,14 @@ void MainWindow::showRecoverableAutosaves()
     const QVector<SRecoverableAutosave> recoveries = CBackupManager::recoverableAutosaves();
     if(recoveries.isEmpty())
         return;
-    QMessageBox prompt(QMessageBox::Warning, tr("Recoverable editor autosaves"),
-        tr("Endurance found %1 validated autosave generation(s) whose source files have not "
-           "changed since the recovery copy was made.").arg(recoveries.size()),
-        QMessageBox::NoButton, this);
-    prompt.setInformativeText(tr("Open the Endurance backup folder to inspect or copy them. "
-                                 "The original map files have not been modified."));
-    QPushButton* openFolder = prompt.addButton(tr("Open Backup Folder"), QMessageBox::AcceptRole);
-    prompt.addButton(tr("Later"), QMessageBox::RejectRole);
-    prompt.exec();
-    if(prompt.clickedButton() == openFolder)
-    {
-        QString error;
-        if(!CBackupManager::openBackupFolder(&error))
-            QMessageBox::warning(this, tr("Endurance backups"), error);
-    }
+    ei::log(eLogInfo, QString("Recoverable editor autosaves available count:%1")
+            .arg(recoveries.size()));
+    showTransientResultNotification(
+        tr("%1 recoverable editor autosave generation(s) are available.\n"
+           "Their source maps are unchanged; open the backup folder to inspect or copy them.")
+            .arg(recoveries.size()),
+        false, true, tr("Open Backup Folder"),
+        ETransientNotificationAction::OpenBackupFolder, 7000);
 }
 
 void MainWindow::on_actionOpen_MPR_triggered()
