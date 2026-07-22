@@ -244,6 +244,8 @@ private:
     QString sceneSourceFingerprint();
     void drawSkybox(const QMatrix4x4& cameraMatrix,
                     const ei::SRenderEnvironment& environment);
+    void drawParticles(const QMatrix4x4& cameraMatrix,
+                       const CViewFrustum* frustum);
     void initEnvironmentPreviewWidget();
     void positionEnvironmentPreviewWidget();
     void syncEnvironmentPreviewWidget(float mapTimeHours);
@@ -309,6 +311,8 @@ private:
     int m_skyVertexCount{0};
     bool m_skyResourcesChecked{false};
     bool m_skyResourcesAvailable{false};
+    QOpenGLShaderProgram m_particleProgram;
+    QOpenGLBuffer m_particleBuffer{QOpenGLBuffer::VertexBuffer};
     QOpenGLShaderProgram m_shadowProgram;
     QOpenGLFramebufferObject* m_shadowFbo{nullptr};
     QOpenGLFramebufferObject* m_dynamicShadowFbo{nullptr};

@@ -61,6 +61,7 @@
 #include "shadow_cascade.h"
 #include "part.h"
 #include "objects/light.h"
+#include "objects/particle.h"
 #include "external_script_workspace.h"
 #include "mob_script_window.h"
 #include "script_reference_analyzer.h"
@@ -68,6 +69,80 @@
 class CLogic;
 
 namespace {
+struct SParticleVisualStyle
+{
+    SParticleVisualStyle(const char* texture = nullptr,
+                         const QVector4D& color = QVector4D(0.72f, 0.80f, 1.0f, 0.72f),
+                         float scale = 1.0f, float edgeSoftness = 0.34f,
+                         bool useAdditiveBlend = false)
+        : textureName(texture), tint(color), scaleMultiplier(scale),
+          softness(edgeSoftness), additive(useAdditiveBlend) {}
+    const char* textureName;
+    QVector4D tint;
+    float scaleMultiplier;
+    float softness;
+    bool additive;
+};
+
+SParticleVisualStyle particleVisualStyle(uint kind)
+{
+    // Particle IDs are the symbolic values exposed by the stock/JMV MOB
+    // editor tables. Texture names are limited to direct corpus matches;
+    // every other kind deliberately uses the procedural soft sprite instead
+    // of borrowing an unrelated resource.
+    switch(kind)
+    {
+    case 8192: return {nullptr, QVector4D(1.0f, 0.42f, 0.12f, 0.88f), 0.75f, 0.20f, true}; // Fireball
+    case 8193: return {"campfire00", QVector4D(1.0f, 0.58f, 0.22f, 0.92f), 1.25f, 0.18f, true};
+    case 8194:
+    case 8195:
+    case 8208:
+    case 8209:
+    case 8231:
+    case 8257:
+        return {nullptr, QVector4D(1.0f, 0.48f, 0.12f, 0.86f), 1.15f, 0.18f, true};
+    case 8196:
+    case 8197:
+        return {"tendrismoke", QVector4D(0.58f, 0.58f, 0.58f, 0.62f), 1.55f, 0.42f, false};
+    case 8198:
+    case 8263:
+        return {nullptr, QVector4D(0.28f, 1.0f, 0.42f, 0.70f), 1.1f, 0.26f, true};
+    case 8199:
+        return {"poisoncloud", QVector4D(0.42f, 0.86f, 0.22f, 0.68f), 1.8f, 0.48f, false};
+    case 8200:
+    case 8201:
+        return {nullptr, QVector4D(0.42f, 0.78f, 1.0f, 0.66f), 1.65f, 0.42f, false};
+    case 8202:
+        return {"tornado", QVector4D(0.76f, 0.80f, 0.84f, 0.70f), 2.0f, 0.36f, false};
+    case 8210:
+    case 8213:
+    case 8258:
+        return {nullptr, QVector4D(0.48f, 1.0f, 0.34f, 0.78f), 1.0f, 0.24f, true};
+    case 8214:
+    case 8240:
+    case 8259:
+        return {nullptr, QVector4D(0.38f, 0.70f, 1.0f, 0.86f), 1.0f, 0.20f, true};
+    case 8217:
+    case 8253:
+    case 8254:
+        return {"teleport00", QVector4D(0.62f, 0.46f, 1.0f, 0.82f), 1.55f, 0.22f, true};
+    case 8203:
+    case 8204:
+    case 8205:
+    case 8232:
+    case 8233:
+    case 8234:
+    case 8235:
+    case 8236:
+    case 8237:
+    case 8238:
+    case 8239:
+        return {nullptr, QVector4D(0.66f, 0.52f, 1.0f, 0.76f), 1.15f, 0.24f, true};
+    default:
+        return {};
+    }
+}
+
 struct SSkyVertex
 {
     QVector3D position;
@@ -394,6 +469,8 @@ CView::~CView()
     RenderQueueContext::instance().releaseGpuResources();
     if(m_skyBuffer.isCreated())
         m_skyBuffer.destroy();
+    if(m_particleBuffer.isCreated())
+        m_particleBuffer.destroy();
     delete m_shadowFbo;
     m_shadowFbo = nullptr;
     delete m_dynamicShadowFbo;
@@ -809,6 +886,8 @@ void CView::initShaders()
     m_landProgram.setUniformValue("u_lightPower", 5.0f);
     m_landProgram.setUniformValue("u_lightColor", QVector4D(1.0, 1.0, 1.0, 1.0));
     m_landProgram.setUniformValue("u_highlight", false);
+    m_landProgram.setUniformValue("u_animateLiquid", false);
+    m_landProgram.setUniformValue("u_liquidTime", 0.0f);
 
     if(!m_skyProgram.addShaderFromSourceFile(QOpenGLShader::Vertex, ":/skybox.vsh"))
         close();
@@ -818,6 +897,15 @@ void CView::initShaders()
         close();
     m_skyProgram.bind();
     m_skyProgram.setUniformValue("qt_Texture0", 0);
+
+    if(!m_particleProgram.addShaderFromSourceFile(QOpenGLShader::Vertex, ":/particle.vsh"))
+        close();
+    if(!m_particleProgram.addShaderFromSourceFile(QOpenGLShader::Fragment, ":/particle.fsh"))
+        close();
+    if(!m_particleProgram.link())
+        close();
+    m_particleProgram.bind();
+    m_particleProgram.setUniformValue("qt_Texture0", 0);
 
     if(!m_shadowProgram.addShaderFromSourceFile(QOpenGLShader::Vertex, ":/vshader.vsh"))
         close();
@@ -858,6 +946,19 @@ void CView::initializeGL()
     initShaders();
     m_skyBuffer.create();
     m_skyBuffer.setUsagePattern(QOpenGLBuffer::StaticDraw);
+    m_particleBuffer.create();
+    m_particleBuffer.setUsagePattern(QOpenGLBuffer::StaticDraw);
+    const float particleQuad[] = {
+        -0.5f, -0.5f, 0.0f, 1.0f,
+         0.5f, -0.5f, 1.0f, 1.0f,
+         0.5f,  0.5f, 1.0f, 0.0f,
+        -0.5f, -0.5f, 0.0f, 1.0f,
+         0.5f,  0.5f, 1.0f, 0.0f,
+        -0.5f,  0.5f, 0.0f, 0.0f
+    };
+    m_particleBuffer.bind();
+    m_particleBuffer.allocate(particleQuad, int(sizeof(particleQuad)));
+    m_particleBuffer.release();
     m_skyBuffer.bind();
     QString skySource;
     const QByteArray skyFigure = CObjectList::getInstance()->resourceData(
@@ -1833,6 +1934,126 @@ void CView::drawTestOverlaysOpenGl()
     glEnable(GL_DEPTH_TEST);
 }
 
+void CView::drawParticles(const QMatrix4x4& cameraMatrix,
+                          const CViewFrustum* frustum)
+{
+    if(!m_particleBuffer.isCreated() || !m_particleProgram.bind())
+        return;
+
+    bool inverseOk = false;
+    const QMatrix4x4 inverseView = cameraMatrix.inverted(&inverseOk);
+    if(!inverseOk)
+        return;
+    const QVector3D cameraRight = (inverseView * QVector4D(1.0f, 0.0f, 0.0f, 0.0f))
+        .toVector3D().normalized();
+    const QVector3D cameraUp = (inverseView * QVector4D(0.0f, 1.0f, 0.0f, 0.0f))
+        .toVector3D().normalized();
+    if(cameraRight.isNull() || cameraUp.isNull())
+        return;
+
+    m_particleProgram.setUniformValue("u_projMmatrix", m_projection);
+    m_particleProgram.setUniformValue("u_viewMmatrix", cameraMatrix);
+    m_particleProgram.setUniformValue("u_cameraRight", cameraRight);
+    m_particleProgram.setUniformValue("u_cameraUp", cameraUp);
+
+    if(!m_particleBuffer.bind())
+        return;
+    const int positionLocation = m_particleProgram.attributeLocation("a_position");
+    const int textureLocation = m_particleProgram.attributeLocation("a_texture");
+    if(positionLocation < 0 || textureLocation < 0)
+    {
+        m_particleBuffer.release();
+        return;
+    }
+    m_particleProgram.enableAttributeArray(positionLocation);
+    m_particleProgram.enableAttributeArray(textureLocation);
+    m_particleProgram.setAttributeBuffer(positionLocation, GL_FLOAT, 0, 2,
+                                         4 * int(sizeof(float)));
+    m_particleProgram.setAttributeBuffer(textureLocation, GL_FLOAT,
+                                         2 * int(sizeof(float)), 2,
+                                         4 * int(sizeof(float)));
+
+    glEnable(GL_DEPTH_TEST);
+    glDepthMask(GL_FALSE);
+    glEnable(GL_BLEND);
+    bool additiveBlend = false;
+    QOpenGLTexture* boundTexture = nullptr;
+    CTextureList* textures = CTextureList::getInstance();
+    QOpenGLTexture* fallbackTexture = textures->textureDefault();
+    const float timeSeconds = float(QDateTime::currentMSecsSinceEpoch() % 600000) / 1000.0f;
+    RenderPerformanceContext& performance = RenderPerformanceContext::instance();
+
+    for(CMob* mob : m_aMob)
+    {
+        if(!isMobVisible(mob))
+            continue;
+        const QVector<CNode*> candidates = spatiallyVisibleNodes(mob, frustum, nullptr);
+        for(CNode* node : candidates)
+        {
+            CParticle* particle = dynamic_cast<CParticle*>(node);
+            if(!particle || particle->isMarkDeleted()
+                    || particle->nodeState() == ENodeState::eHidden)
+                continue;
+
+            const SParticleVisualStyle style = particleVisualStyle(particle->kind());
+            QOpenGLTexture* texture = style.textureName
+                ? textures->texture(QString::fromLatin1(style.textureName)) : fallbackTexture;
+            const bool useTexture = texture && texture != fallbackTexture;
+            texture = useTexture ? texture : nullptr;
+            if(texture != boundTexture)
+            {
+                if(texture)
+                    texture->bind(0);
+                else
+                    glBindTexture(GL_TEXTURE_2D, 0);
+                boundTexture = texture;
+                if(performance.collecting())
+                    ++performance.counters().textureBinds;
+            }
+            if(style.additive != additiveBlend)
+            {
+                glBlendFunc(GL_SRC_ALPHA,
+                            style.additive ? GL_ONE : GL_ONE_MINUS_SRC_ALPHA);
+                additiveBlend = style.additive;
+            }
+
+            QVector3D center = particle->drawPosition();
+            if(center.isNull() && !particle->position().isNull())
+                center = particle->position();
+            const float authoredScale = particle->particleScale() > 0.0f
+                ? particle->particleScale() : 1.0f;
+            const float phase = timeSeconds * (0.75f + float(particle->kind() % 7) * 0.08f)
+                + float(particle->mapId() % 31) * 0.37f;
+            const float pulse = 1.0f + 0.08f * qSin(phase * 2.1f);
+            QVector4D tint = style.tint;
+            if(particle->nodeState() == ENodeState::eSelect)
+                tint = QVector4D(0.10f, 0.90f, 1.0f, qMax(0.78f, tint.w()));
+
+            m_particleProgram.setUniformValue("u_center", center);
+            m_particleProgram.setUniformValue("u_scale",
+                qBound(0.08f, authoredScale * style.scaleMultiplier * pulse, 64.0f));
+            m_particleProgram.setUniformValue("u_rotation", phase * 0.18f);
+            m_particleProgram.setUniformValue("u_tint", tint);
+            m_particleProgram.setUniformValue("u_useTexture", useTexture);
+            m_particleProgram.setUniformValue("u_softness", style.softness);
+            glDrawArrays(GL_TRIANGLES, 0, 6);
+            if(performance.collecting())
+            {
+                ++performance.counters().drawCalls;
+                performance.counters().triangles += 2;
+                ++performance.counters().nodesSubmitted;
+            }
+        }
+    }
+
+    glBindTexture(GL_TEXTURE_2D, 0);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glDepthMask(GL_TRUE);
+    m_particleProgram.disableAttributeArray(textureLocation);
+    m_particleProgram.disableAttributeArray(positionLocation);
+    m_particleBuffer.release();
+}
+
 void CView::draw()
 {
 
@@ -2192,13 +2413,19 @@ void CView::draw()
             close();
 
         m_landProgram.setUniformValue("transparency", 0.3f);
+        m_landProgram.setUniformValue("u_animateLiquid", true);
+        m_landProgram.setUniformValue("u_liquidTime",
+            float(QDateTime::currentMSecsSinceEpoch() % 600000) / 1000.0f);
         applyEnvironmentUniforms(m_landProgram, environment, sceneLights,
                                  lightingMode, fogEnabled);
         applyShadowUniforms(m_landProgram, environmentEnabled && shadowsEnabled,
                             true, true);
         m_pLand->drawWater(&m_landProgram, cullingEnabled ? &frustum : nullptr);
+        m_landProgram.setUniformValue("u_animateLiquid", false);
         m_landProgram.setUniformValue("transparency", 0.0f);
     }
+
+    drawParticles(camMatrix, cullingEnabled ? &frustum : nullptr);
 
 
     //draw selection frame using m_program shader

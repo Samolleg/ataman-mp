@@ -6,6 +6,8 @@
         <file alias="select.fsh">../shaders/select.fsh</file>
         <file alias="skybox.vsh">../shaders/skybox.vsh</file>
         <file alias="skybox.fsh">../shaders/skybox.fsh</file>
+        <file alias="particle.vsh">../shaders/particle.vsh</file>
+        <file alias="particle.fsh">../shaders/particle.fsh</file>
         <file alias="shadow.fsh">../shaders/shadow.fsh</file>
     </qresource>
 </RCC>
