@@ -16,6 +16,7 @@ private slots:
     void spatialGridInsertsBoundarySpanningEntriesIntoEachCell();
     void spatialGridPreservesOverflowEntries();
     void spatialGridTreatsInvalidBoundsAsDiagnosticOverflow();
+    void spatialGridSweptQueryRetainsOnlyRelevantShadowCasters();
 };
 
 void ViewFrustumTests::identityClipRejectsOutsideSpheres()
@@ -50,6 +51,8 @@ void ViewFrustumTests::sweptSphereRetainsOffscreenShadowCasters()
                                           0.1f, QVector3D(-2.0f, 0.0f, 0.0f)));
     QVERIFY(!frustum.intersectsSweptSphere(QVector3D(3.0f, 0.0f, 0.0f),
                                            0.1f, QVector3D(1.0f, 0.0f, 0.0f)));
+    QVERIFY(!frustum.intersectsSweptSphere(QVector3D(3.0f, 0.0f, 0.0f),
+                                           0.1f, QVector3D(0.0f, 20.0f, 0.0f)));
 }
 
 void ViewFrustumTests::spatialGridReturnsVisibleEntriesInSourceOrder()
@@ -97,6 +100,24 @@ void ViewFrustumTests::spatialGridTreatsInvalidBoundsAsDiagnosticOverflow()
     identity.setToIdentity();
     const CViewFrustum frustum(identity);
     QCOMPARE(grid.query(&frustum), QVector<int>({9}));
+}
+
+void ViewFrustumTests::spatialGridSweptQueryRetainsOnlyRelevantShadowCasters()
+{
+    QMatrix4x4 identity;
+    identity.setToIdentity();
+    const CViewFrustum frustum(identity);
+    CSpatialGrid<int> grid(1.0f);
+    grid.insert(10, QVector3D(0.0f, 0.0f, 0.0f), 0.1f);
+    grid.insert(20, QVector3D(2.0f, 0.0f, 0.0f), 0.1f);
+    grid.insert(30, QVector3D(5.0f, 5.0f, 0.0f), 0.1f);
+
+    SSpatialQueryStats stats;
+    const QVector<int> result = grid.querySwept(
+        &frustum, QVector3D(-2.0f, 0.0f, 0.0f), &stats);
+    QCOMPARE(result, QVector<int>({10, 20}));
+    QVERIFY(stats.cellsVisible < stats.cellsTested);
+    QCOMPARE(stats.entriesTested, 2);
 }
 
 void ViewFrustumTests::perspectiveClipHandlesNearAndFarObjects()

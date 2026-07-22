@@ -138,6 +138,59 @@ public:
         return visible;
     }
 
+    // Directional-shadow casters can sit outside the color frustum while
+    // their projection along the light direction reaches a visible receiver.
+    // Query cells conservatively with their bounding spheres, then apply the
+    // exact swept-sphere test to entries. This avoids walking every MOB node
+    // merely to find the comparatively small shadow-caster set.
+    QVector<T> querySwept(const CViewFrustum* frustum, const QVector3D& sweep,
+                          SSpatialQueryStats* stats = nullptr) const
+    {
+        if(!frustum)
+            return query(nullptr, stats);
+        if(stats)
+            *stats = SSpatialQueryStats();
+
+        QSet<int> candidateSet;
+        for(int entryIndex : m_overflow)
+            candidateSet.insert(entryIndex);
+        for(auto it = m_cells.constBegin(); it != m_cells.constEnd(); ++it)
+        {
+            if(stats)
+                ++stats->cellsTested;
+            const Cell& cell = it.value();
+            if(!cell.initialized)
+                continue;
+            const QVector3D center = (cell.minimum + cell.maximum) * 0.5f;
+            const float radius = (cell.maximum - center).length();
+            if(!frustum->intersectsSweptSphere(center, radius, sweep))
+                continue;
+            if(stats)
+                ++stats->cellsVisible;
+            for(int entryIndex : cell.entries)
+                candidateSet.insert(entryIndex);
+        }
+
+        QVector<int> ordered = candidateSet.values().toVector();
+        std::sort(ordered.begin(), ordered.end());
+        if(stats)
+            stats->candidates = ordered.size();
+        QVector<T> visible;
+        visible.reserve(ordered.size());
+        for(int entryIndex : ordered)
+        {
+            const Entry& entry = m_entries.at(entryIndex);
+            if(stats)
+                ++stats->entriesTested;
+            if(entry.alwaysVisible
+                    || frustum->intersectsSweptSphere(entry.center, entry.radius, sweep))
+                visible.append(entry.item);
+            else if(stats)
+                ++stats->rejected;
+        }
+        return visible;
+    }
+
     int entryCount() const { return m_entries.size(); }
     int cellCount() const { return m_cells.size(); }
     int overflowCount() const { return m_overflow.size(); }

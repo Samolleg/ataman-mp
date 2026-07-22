@@ -877,13 +877,21 @@ void CView::initializeGL()
     QOpenGLFramebufferObjectFormat shadowFormat;
     shadowFormat.setAttachment(QOpenGLFramebufferObject::Depth);
     shadowFormat.setInternalTextureFormat(GL_RGBA8);
-    // Static geometry is cached, so spend resolution where large buildings
-    // and foliage benefit without making the 15 Hz animated map equally
-    // expensive. The receiver shader carries each map's texel size.
-    m_shadowFbo = new QOpenGLFramebufferObject(4096, 4096, shadowFormat);
-    m_dynamicShadowFbo = new QOpenGLFramebufferObject(2048, 2048, shadowFormat);
-    m_farShadowFbo = new QOpenGLFramebufferObject(2048, 2048, shadowFormat);
-    m_farDynamicShadowFbo = new QOpenGLFramebufferObject(2048, 2048, shadowFormat);
+    GLint maximumTextureSize = 0;
+    glGetIntegerv(GL_MAX_TEXTURE_SIZE, &maximumTextureSize);
+    // All cascades need the same spatial density. The earlier 2048 dynamic
+    // and far maps made animated actors visibly blockier than static objects
+    // and made the far transition look like a quality drop. Prefer 4096 on a
+    // capable GPU while retaining a capability-based 2048 fallback.
+    const int shadowResolution = maximumTextureSize >= 4096 ? 4096 : 2048;
+    m_shadowFbo = new QOpenGLFramebufferObject(
+        shadowResolution, shadowResolution, shadowFormat);
+    m_dynamicShadowFbo = new QOpenGLFramebufferObject(
+        shadowResolution, shadowResolution, shadowFormat);
+    m_farShadowFbo = new QOpenGLFramebufferObject(
+        shadowResolution, shadowResolution, shadowFormat);
+    m_farDynamicShadowFbo = new QOpenGLFramebufferObject(
+        shadowResolution, shadowResolution, shadowFormat);
     if(!m_shadowFbo->isValid() || !m_dynamicShadowFbo->isValid()
             || !m_farShadowFbo->isValid() || !m_farDynamicShadowFbo->isValid())
     {
@@ -899,6 +907,8 @@ void CView::initializeGL()
     }
     else
     {
+        ei::log(eLogInfo, QString("Shadow atlases initialized: 4 x %1x%1 (GL max %2)")
+                .arg(shadowResolution).arg(maximumTextureSize));
         // Packed RGBA depth must never be interpolated channel-by-channel.
         // The receiver performs its own 3x3 PCF over nearest depth samples.
         for(QOpenGLFramebufferObject* shadowTarget : {m_shadowFbo, m_dynamicShadowFbo,
@@ -1092,7 +1102,8 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
     };
     const auto buildCascade = [&](float sliceNear, float sliceFar,
                                   int staticResolution,
-                                  int dynamicResolution) -> SCascade
+                                  int dynamicResolution,
+                                  float staticWorldSnap) -> SCascade
     {
         float minimumRight = std::numeric_limits<float>::max();
         float maximumRight = std::numeric_limits<float>::lowest();
@@ -1144,18 +1155,25 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
         const float lightCoordinate = QVector3D::dotProduct(sliceCenter, lightDirection);
         QVector3D baseFocus = lightRight * centerRight + lightUp * centerUp
             + lightDirection * lightCoordinate;
-        const auto snappedFocus = [&](float snap)
+        const auto snappedFocus = [&](float xySnap, float depthSnap)
         {
             QVector3D focus = baseFocus;
-            focus += lightRight * (qRound(centerRight / snap) * snap - centerRight);
-            focus += lightUp * (qRound(centerUp / snap) * snap - centerUp);
+            focus += lightRight * (qRound(centerRight / xySnap) * xySnap - centerRight);
+            focus += lightUp * (qRound(centerUp / xySnap) * xySnap - centerUp);
+            focus += lightDirection
+                * (qRound(lightCoordinate / depthSnap) * depthSnap - lightCoordinate);
             return focus;
         };
         const float staticTexel = (2.0f * extent)
             / float(qMax(1, staticResolution));
-        const QVector3D staticFocus = snappedFocus(qMax(staticTexel, 0.0001f));
+        // Static maps are expensive but their casters do not move. A small
+        // world-space quantization lets the 12-unit guard band absorb camera
+        // pans instead of rebuilding both static atlases almost every frame.
+        const float staticSnap = qMax(staticTexel, staticWorldSnap);
+        const QVector3D staticFocus = snappedFocus(staticSnap, staticSnap);
         const float dynamicTexel = (2.0f * extent) / float(qMax(1, dynamicResolution));
-        const QVector3D dynamicFocus = snappedFocus(qMax(dynamicTexel, 0.0001f));
+        const float dynamicSnap = qMax(dynamicTexel, 0.0001f);
+        const QVector3D dynamicFocus = snappedFocus(dynamicSnap, dynamicSnap);
         const float depthHalf = qMax(256.0f, safeMaximumDistance + 128.0f);
         SCascade result;
         result.staticView.lookAt(staticFocus - lightDirection * depthHalf, staticFocus, up);
@@ -1169,11 +1187,13 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
 
     const SCascade nearCascade = buildCascade(0.0f, m_nearShadowSplit,
                                                m_shadowFbo->width(),
-                                               m_dynamicShadowFbo->width());
+                                               m_dynamicShadowFbo->width(),
+                                               2.0f);
     const SCascade farCascade = buildCascade(m_nearShadowSplit * 0.8f,
                                               safeMaximumDistance,
                                               m_farShadowFbo->width(),
-                                              m_farDynamicShadowFbo->width());
+                                              m_farDynamicShadowFbo->width(),
+                                              4.0f);
 
     QCryptographicHash staticHash(QCryptographicHash::Sha256);
     staticHash.addData(queue.staticShadowFingerprint());
@@ -2085,7 +2105,24 @@ void CView::draw()
             {
                 if(!isMobVisible(mob))
                     continue;
-                for(CNode* node : mob->nodes())
+                if(m_spatialIndexDirty)
+                    rebuildSpatialIndices();
+                const QSharedPointer<CSpatialGrid<CNode*>> grid
+                    = m_spatialIndices.value(mob);
+                SSpatialQueryStats shadowStats;
+                const QVector<CNode*> shadowCandidates = grid
+                    ? grid->querySwept(cullingEnabled ? &frustum : nullptr,
+                                       shadowSweep, &shadowStats)
+                    : QVector<CNode*>();
+                if(performance.collecting())
+                {
+                    performance.counters().spatialCellsTested += shadowStats.cellsTested;
+                    performance.counters().spatialCellsVisible += shadowStats.cellsVisible;
+                    performance.counters().spatialCandidates += shadowStats.candidates;
+                }
+                const QList<CNode*> candidates = grid
+                    ? shadowCandidates.toList() : mob->nodes();
+                for(CNode* node : candidates)
                 {
                     if(!node || colorSubmittedNodes.contains(node)
                             || node->isMarkDeleted()
@@ -2101,9 +2138,6 @@ void CView::draw()
                             || !qIsFinite(center.z()) || !qIsFinite(radius)
                             || (center - cameraPosition).length()
                                 > maximumShadowDistance + radius)
-                        continue;
-                    if(cullingEnabled && !frustum.intersectsSweptSphere(
-                            center, radius, shadowSweep))
                         continue;
                     node->drawObjectVisual(mob == m_activeMob, &m_program);
                 }
