@@ -1516,6 +1516,43 @@ STerrainTileCommand CTerrainEditModel::makeBoundedSemanticTilePaint(
     int nearestCount = 0;
     int hardEdgeCount = 0;
     int candidateChecks = 0;
+    const auto outerVertexSupports = [&](int vertexKey, int sourceX,
+                                         int sourceY, qint32 material) {
+        const int vertexX = vertexKey % (width + 1);
+        const int vertexY = vertexKey / (width + 1);
+        const int cellX[4] = {vertexX - 1, vertexX,
+                              vertexX - 1, vertexX};
+        const int cellY[4] = {vertexY - 1, vertexY - 1,
+                              vertexY, vertexY};
+        // Corresponding corner in NW, NE, SE, SW order for the four cells.
+        const int cellCorner[4] = {2, 3, 1, 0};
+        for(int neighbor = 0; neighbor < 4; ++neighbor)
+        {
+            const int neighborX = cellX[neighbor];
+            const int neighborY = cellY[neighbor];
+            if(neighborX < 0 || neighborX >= width
+               || neighborY < 0 || neighborY >= height
+               || (neighborX == sourceX && neighborY == sourceY))
+                continue;
+            bool available = false;
+            const quint16 packed = packedTile(
+                neighborX, neighborY, layer, &available);
+            if(!available)
+                continue;
+            bool found = false;
+            const STerrainTransitionSignature signature =
+                catalog.gridSignatureForPacked(packed, &found);
+            if(!found)
+                return false;
+            const qint32 values[4] = {signature.northWest,
+                                      signature.northEast,
+                                      signature.southEast,
+                                      signature.southWest};
+            if(values[cellCorner[neighbor]] != material)
+                return false;
+        }
+        return true;
+    };
     for(int index : orderedBoundary)
     {
         const int x = index % width;
@@ -1583,6 +1620,15 @@ STerrainTileCommand CTerrainEditModel::makeBoundedSemanticTilePaint(
                         retainsBackground = true;
                     if(value != desiredValues.at(corner))
                     {
+                        // A one-corner approximation is safe only when every
+                        // existing tile sharing that outer vertex already
+                        // agrees with it. Otherwise the approximation would
+                        // manufacture a visible seam disagreement.
+                        if(!outerVertexSupports(cornerKeys[corner], x, y, value))
+                        {
+                            valid = false;
+                            break;
+                        }
                         ++mismatchCount;
                         cost += 16;
                     }

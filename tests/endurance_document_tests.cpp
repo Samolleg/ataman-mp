@@ -1783,7 +1783,8 @@ void EnduranceDocumentTests::terrainTilePaintingIsUndoableLocalizedAndNamespaceS
     QVERIFY(hardEdgeTerrain.apply(hardEdgePaint, false));
 
     // A one-corner approximation is accepted only when it remains anchored to
-    // the painted core and contains no family absent from that boundary tile.
+    // the painted core, contains no new family, and every existing tile at the
+    // changed outer vertex already supports the approximated material.
     CTerrainTransitionCatalog nearestCatalog;
     QVERIFY(nearestCatalog.addVariant(hardCommon));
     QVERIFY(nearestCatalog.addVariant(hardSelected));
@@ -1802,6 +1803,19 @@ void EnduranceDocumentTests::terrainTilePaintingIsUndoableLocalizedAndNamespaceS
     }
     CTerrainEditModel nearestTerrain;
     QVERIFY(nearestTerrain.load(baseline));
+    STerrainTileBrush setupNearest;
+    setupNearest.radius = 0.0f;
+    setupNearest.shape = ETerrainTileBrushShape::Circle;
+    setupNearest.centerX = 8.0f;
+    setupNearest.centerY = 6.0f;
+    QVERIFY(nearestTerrain.apply(nearestTerrain.makeTilePaint(
+        setupNearest, ETerrainTileLayer::Land, 0, 1, 0), true));
+    setupNearest.centerX = 9.0f;
+    QVERIFY(nearestTerrain.apply(nearestTerrain.makeTilePaint(
+        setupNearest, ETerrainTileLayer::Land, 0, 1, 0), true));
+    setupNearest.centerY = 7.0f;
+    QVERIFY(nearestTerrain.apply(nearestTerrain.makeTilePaint(
+        setupNearest, ETerrainTileLayer::Land, 0, 1, 1), true));
     boundedBrush.radius = 0.0f;
     CValidationReport nearestReport;
     const STerrainTileCommand nearestPaint = nearestTerrain.makeSemanticTilePaint(
@@ -1828,11 +1842,50 @@ void EnduranceDocumentTests::terrainTilePaintingIsUndoableLocalizedAndNamespaceS
         for(qint32 family : families)
             QVERIFY(family == 1 || family == 2);
     }
-    QCOMPARE(nearestChanged, QSet<int>({4, 3, 5, 1, 7}));
+    QCOMPARE(nearestChanged, QSet<int>({4, 1}));
     QVERIFY(nearestTerrain.apply(nearestPaint, true));
+    bool approximatedFound = false;
+    bool northWestSupportFound = false;
+    bool northEastSupportFound = false;
+    bool eastSupportFound = false;
+    const STerrainTransitionSignature approximated =
+        nearestCatalog.gridSignatureForPacked(nearestTerrain.packedTile(
+            8, 7, ETerrainTileLayer::Land), &approximatedFound);
+    const STerrainTransitionSignature northWestSupport =
+        nearestCatalog.gridSignatureForPacked(nearestTerrain.packedTile(
+            8, 6, ETerrainTileLayer::Land), &northWestSupportFound);
+    const STerrainTransitionSignature northEastSupport =
+        nearestCatalog.gridSignatureForPacked(nearestTerrain.packedTile(
+            9, 6, ETerrainTileLayer::Land), &northEastSupportFound);
+    const STerrainTransitionSignature eastSupport =
+        nearestCatalog.gridSignatureForPacked(nearestTerrain.packedTile(
+            9, 7, ETerrainTileLayer::Land), &eastSupportFound);
+    QVERIFY(approximatedFound);
+    QVERIFY(northWestSupportFound);
+    QVERIFY(northEastSupportFound);
+    QVERIFY(eastSupportFound);
+    QCOMPARE(approximated.northEast, northWestSupport.southEast);
+    QCOMPARE(approximated.northEast, northEastSupport.southWest);
+    QCOMPARE(approximated.northEast, eastSupport.northWest);
     QVERIFY(nearestTerrain.makeSemanticTilePaint(
         boundedBrush, ETerrainTileLayer::Land, 2, nearestCatalog,
         0x424F554Eu).isEmpty());
+
+    // The same approximation against a uniform neighborhood would contradict
+    // the three other tiles at its outer vertex. It must become a hard edge,
+    // not the two seam disagreements captured in the Dark/Lime diagnostic.
+    CTerrainEditModel unsupportedNearestTerrain;
+    QVERIFY(unsupportedNearestTerrain.load(baseline));
+    CValidationReport unsupportedNearestReport;
+    const STerrainTileCommand unsupportedNearest =
+        unsupportedNearestTerrain.makeSemanticTilePaint(
+            boundedBrush, ETerrainTileLayer::Land, 2, nearestCatalog,
+            0x424F554Eu, &unsupportedNearestReport);
+    QCOMPARE(unsupportedNearest.deltas.size(), 1);
+    QCOMPARE(unsupportedNearest.deltas.front().globalX, 8);
+    QCOMPARE(unsupportedNearest.deltas.front().globalY, 8);
+    QVERIFY(!unsupportedNearestReport.toText().contains("terrain.semantic_nearest"));
+    QVERIFY(unsupportedNearestReport.toText().contains("terrain.semantic_hard_edge"));
 
     STerrainTileBrush point;
     point.centerX = 0.0f;
@@ -2025,6 +2078,17 @@ void EnduranceDocumentTests::zone1NamespaceTemplateSeparatesLandOverlayAndVarian
              QVector<qint32>({5, 6}));
     QCOMPARE(analysis.overlayCatalog.shortestMaterialPath(6, 5),
              QVector<qint32>({6, 5}));
+    for(const STerrainTransitionSignature& authored :
+        analysis.landCatalog.gridSignatures())
+    {
+        QSet<qint32> families;
+        families.insert(authored.northWest);
+        families.insert(authored.northEast);
+        families.insert(authored.southEast);
+        families.insert(authored.southWest);
+        QVERIFY2(families.size() <= 3,
+                 "Zone1 unexpectedly contains a four-family land tile");
+    }
     QMap<qint32, int> existingFamilyPreference;
     existingFamilyPreference.insert(4, 20);
     QCOMPARE(analysis.landCatalog.shortestMaterialPath(7, 3, existingFamilyPreference),

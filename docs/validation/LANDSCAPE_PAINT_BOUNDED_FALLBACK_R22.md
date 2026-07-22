@@ -13,7 +13,9 @@ contract. Changed-MPR saving remains disabled.
    An exact authored transition is preferred. If it is absent, Endurance may
    use a constrained nearest transition that keeps every corner touching the
    painted core, introduces no terrain family absent from that boundary tile,
-   and differs from the requested transition by at most one corner.
+   and differs from the requested transition by at most one corner. A changed
+   outer corner is accepted only when every existing tile sharing that vertex
+   already supports the substituted material.
 3. If neither transition exists, the boundary tile is left unchanged. The
    result is a visible hard edge rather than spilled paint, an unrelated
    material, or a refused core stroke.
@@ -34,10 +36,19 @@ arrangements that cannot be inferred from a fixed atlas.
 
 ## Automated evidence
 
+- Diagnostic `zone1-paint-diagnostic.json`, SHA-256
+  `85bb01f58122a90ed84b0105717b53f1e79026790687c81de9bc793f01eb8cd6`,
+  exposed action 339 selecting an unsupported nearest Dark/Lime corner at
+  `(100,27)`. It contradicted both the north and west shared vertices. The
+  minimized regression recreates that unsupported outer-corner substitution.
 - Core coverage with an atlas containing only uniform tiles: five radius-one
   circle cells changed; no boundary spill; warning instead of refusal.
 - Constrained-nearest fixture: only the center and four cardinal boundary
-  cells changed; only the two families already present were emitted.
+  cells were eligible; a supported outer vertex was approximated without
+  creating a seam disagreement, while the same approximation against uniform
+  neighbors fell through to a hard edge.
+- The registered Zone1 table contains 54 uniform, 344 two-family, and 114
+  three-family slots. It contains no four-family slot.
 - Repeating either applied stroke produces no command and no undo entry.
 - Existing manual tile transaction checks continue to cover locality,
   namespace encoding, undo, and redo.
