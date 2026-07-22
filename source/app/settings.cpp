@@ -456,6 +456,9 @@ void CSettings::initOptions()
     aOpt.append(QSharedPointer<COpt>(new COptInt("autosaveIntervalMinutes", 5)));
     aOpt.append(QSharedPointer<COpt>(new COptInt("renderFpsCap", 0)));
     aOpt.append(QSharedPointer<COpt>(new COptInt("renderTimeOfDay", 1200)));
+    // 0 = authored texture/unlit, 1 = compatibility simple shading,
+    // 2 = resource-driven environment preview.
+    aOpt.append(QSharedPointer<COpt>(new COptInt("renderLightingMode", 2)));
 
     const QMap<QString, QString> shortcutDefaults = {
         {"shortcutOpen", "Ctrl+O"},

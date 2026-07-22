@@ -10,6 +10,14 @@
 #include <QMessageBox>
 #include <QCryptographicHash>
 #include <QOpenGLFramebufferObject>
+#include <QFrame>
+#include <QLabel>
+#include <QComboBox>
+#include <QSlider>
+#include <QToolButton>
+#include <QHBoxLayout>
+#include <QVBoxLayout>
+#include <QResizeEvent>
 #include <QtEndian>
 #include <cstddef>
 #include <cstring>
@@ -58,6 +66,7 @@ struct SSkyVertex
 {
     QVector3D position;
     QVector2D texture;
+    float fogBlend{0.0f};
 };
 
 class SkyFigureReader
@@ -199,6 +208,14 @@ QVector<SSkyVertex> decodeLegacySkyFigure(const QByteArray& bytes, QString* diag
         return {};
     }
 
+    float minimumZ = sourceVertices.first().z();
+    float maximumZ = minimumZ;
+    for(const QVector3D& vertex : sourceVertices)
+    {
+        minimumZ = qMin(minimumZ, vertex.z());
+        maximumZ = qMax(maximumZ, vertex.z());
+    }
+    const float blendHeight = qMax(0.001f, (maximumZ - minimumZ) * 0.28f);
     QVector<SSkyVertex> result;
     result.reserve(int(indexCount));
     for(quint32 index = 0; index < indexCount; ++index)
@@ -215,8 +232,20 @@ QVector<SSkyVertex> decodeLegacySkyFigure(const QByteArray& bytes, QString* diag
             if(diagnostic) *diagnostic = "legacy sky component is out of bounds";
             return {};
         }
-        result.append(SSkyVertex{sourceVertices.at(component.vertex),
-                                 uvs.at(component.uv)});
+        QVector3D position = sourceVertices.at(component.vertex);
+        const float height = qBound(0.0f, (position.z() - minimumZ) / blendHeight, 1.0f);
+        const float smooth = height * height * (3.0f - 2.0f * height);
+        const float fogBlend = 1.0f - smooth;
+        // The shipped dome is open. Extend only its lowest ring into a fog
+        // skirt, preserving every authored UV above it while ensuring an
+        // editor camera can never expose a flat/black gap below the asset.
+        if(qAbs(position.z() - minimumZ) < 0.001f)
+            position.setZ(minimumZ - 45.0f);
+        SSkyVertex vertex;
+        vertex.position = position;
+        vertex.texture = uvs.at(component.uv);
+        vertex.fogBlend = fogBlend;
+        result.append(vertex);
     }
     if(reader.offset() != reader.size())
     {
@@ -377,6 +406,7 @@ CView::~CView()
 void CView::attach(CSettings* pSettings, QTableWidget* pParam, QUndoStack* pStack, CProgressView* pProgress, QLineEdit* pMouseCoord, CTreeView *pTree, CTileForm* pTileForm) //todo: use signal\slots
 {
     m_pSettings = pSettings;
+    initEnvironmentPreviewWidget();
     connect(m_pSettings, &CSettings::renderSettingsChanged,
             this, &CView::applyRenderScheduling);
     m_cam->attachSettings(pSettings);
@@ -415,6 +445,127 @@ void CView::attach(CSettings* pSettings, QTableWidget* pParam, QUndoStack* pStac
     m_timer->setTimerType(Qt::PreciseTimer);
     applyRenderScheduling();
     m_timer->start();
+}
+
+void CView::initEnvironmentPreviewWidget()
+{
+    if(m_environmentPreviewWidget || !m_pSettings)
+        return;
+    m_environmentPreviewWidget = new QFrame(this);
+    m_environmentPreviewWidget->setObjectName("environmentPreviewWidget");
+    m_environmentPreviewWidget->setFrameShape(QFrame::StyledPanel);
+    m_environmentPreviewWidget->setStyleSheet(
+        "QFrame#environmentPreviewWidget { background: rgba(25,25,25,210); color: white; border: 1px solid #777; border-radius: 4px; }"
+        "QLabel, QComboBox, QToolButton { color: white; }");
+    QVBoxLayout* outer = new QVBoxLayout(m_environmentPreviewWidget);
+    outer->setContentsMargins(7, 5, 7, 6);
+    outer->setSpacing(4);
+    QHBoxLayout* title = new QHBoxLayout;
+    title->setContentsMargins(0, 0, 0, 0);
+    QLabel* titleLabel = new QLabel(tr("Environment preview"), m_environmentPreviewWidget);
+    m_environmentPreviewCollapse = new QToolButton(m_environmentPreviewWidget);
+    m_environmentPreviewCollapse->setText(QString::fromUtf8("\xE2\x88\x92"));
+    m_environmentPreviewCollapse->setToolTip(tr("Minimize environment preview"));
+    title->addWidget(titleLabel);
+    title->addStretch(1);
+    title->addWidget(m_environmentPreviewCollapse);
+    outer->addLayout(title);
+
+    m_environmentPreviewBody = new QWidget(m_environmentPreviewWidget);
+    QVBoxLayout* body = new QVBoxLayout(m_environmentPreviewBody);
+    body->setContentsMargins(0, 0, 0, 0);
+    body->setSpacing(4);
+    m_environmentPreviewMode = new QComboBox(m_environmentPreviewBody);
+    m_environmentPreviewMode->addItem(tr("Unlit"), 0);
+    m_environmentPreviewMode->addItem(tr("Simple shading"), 1);
+    m_environmentPreviewMode->addItem(tr("Full environment"), 2);
+    body->addWidget(m_environmentPreviewMode);
+    QHBoxLayout* timeRow = new QHBoxLayout;
+    m_environmentPreviewTimeLabel = new QLabel(tr("12:00"), m_environmentPreviewBody);
+    m_environmentPreviewTimeLabel->setMinimumWidth(42);
+    m_environmentPreviewTime = new QSlider(Qt::Horizontal, m_environmentPreviewBody);
+    m_environmentPreviewTime->setRange(0, 1439);
+    m_environmentPreviewTime->setSingleStep(10);
+    m_environmentPreviewTime->setPageStep(60);
+    timeRow->addWidget(m_environmentPreviewTimeLabel);
+    timeRow->addWidget(m_environmentPreviewTime, 1);
+    body->addLayout(timeRow);
+    outer->addWidget(m_environmentPreviewBody);
+
+    const COptInt* mode = dynamic_cast<const COptInt*>(m_pSettings->opt("renderLightingMode"));
+    const COptBool* legacyEnvironment = dynamic_cast<const COptBool*>(m_pSettings->opt("environmentLighting"));
+    m_environmentPreviewMode->setCurrentIndex(legacyEnvironment && !legacyEnvironment->value()
+        ? 0 : qBound(0, mode ? mode->value() : 2, 2));
+    connect(m_environmentPreviewCollapse, &QToolButton::clicked, this, [this]()
+    {
+        const bool show = !m_environmentPreviewBody->isVisible();
+        m_environmentPreviewBody->setVisible(show);
+        m_environmentPreviewCollapse->setText(show ? QString::fromUtf8("\xE2\x88\x92") : "+");
+        m_environmentPreviewWidget->adjustSize();
+        positionEnvironmentPreviewWidget();
+    });
+    connect(m_environmentPreviewMode, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, [this](int index)
+    {
+        if(m_environmentPreviewSyncing || !m_pSettings)
+            return;
+        if(COptInt* option = dynamic_cast<COptInt*>(m_pSettings->opt("renderLightingMode")))
+            option->setValue(qBound(0, index, 2));
+        if(COptBool* legacy = dynamic_cast<COptBool*>(m_pSettings->opt("environmentLighting")))
+            legacy->setValue(index != 0);
+        m_pSettings->persistOptions();
+        update();
+    });
+    connect(m_environmentPreviewTime, &QSlider::valueChanged, this, [this](int minutes)
+    {
+        const int hour = minutes / 60;
+        const int minute = minutes % 60;
+        m_environmentPreviewTimeLabel->setText(QString("%1:%2")
+            .arg(hour, 2, 10, QLatin1Char('0')).arg(minute, 2, 10, QLatin1Char('0')));
+        if(m_environmentPreviewSyncing || !m_pSettings)
+            return;
+        if(COptBool* overrideTime = dynamic_cast<COptBool*>(m_pSettings->opt("overrideWorldTime")))
+            overrideTime->setValue(true);
+        if(COptInt* time = dynamic_cast<COptInt*>(m_pSettings->opt("renderTimeOfDay")))
+            time->setValue(hour * 100 + minute);
+        m_pSettings->persistOptions();
+        update();
+    });
+    m_environmentPreviewWidget->adjustSize();
+    positionEnvironmentPreviewWidget();
+    m_environmentPreviewWidget->show();
+    m_environmentPreviewWidget->raise();
+}
+
+void CView::positionEnvironmentPreviewWidget()
+{
+    if(m_environmentPreviewWidget)
+        m_environmentPreviewWidget->move(12, 12);
+}
+
+void CView::syncEnvironmentPreviewWidget(float mapTimeHours)
+{
+    if(!m_environmentPreviewWidget || !m_pSettings)
+        return;
+    const COptBool* overrideTime = dynamic_cast<const COptBool*>(m_pSettings->opt("overrideWorldTime"));
+    const COptInt* storedTime = dynamic_cast<const COptInt*>(m_pSettings->opt("renderTimeOfDay"));
+    int minutes = qRound(mapTimeHours * 60.0f) % 1440;
+    if(overrideTime && overrideTime->value() && storedTime)
+        minutes = (storedTime->value() / 100) * 60 + qMin(59, storedTime->value() % 100);
+    const COptInt* mode = dynamic_cast<const COptInt*>(m_pSettings->opt("renderLightingMode"));
+    const COptBool* legacyEnvironment = dynamic_cast<const COptBool*>(m_pSettings->opt("environmentLighting"));
+    m_environmentPreviewSyncing = true;
+    m_environmentPreviewMode->setCurrentIndex(legacyEnvironment && !legacyEnvironment->value()
+        ? 0 : qBound(0, mode ? mode->value() : 2, 2));
+    if(!m_environmentPreviewTime->isSliderDown())
+        m_environmentPreviewTime->setValue(qBound(0, minutes, 1439));
+    m_environmentPreviewSyncing = false;
+}
+
+void CView::resizeEvent(QResizeEvent* event)
+{
+    QGLWidget::resizeEvent(event);
+    positionEnvironmentPreviewWidget();
 }
 
 void CView::applyRenderScheduling()
@@ -722,12 +873,17 @@ void CView::drawSkybox(const QMatrix4x4& cameraMatrix,
     m_skyBuffer.bind();
     const int position = m_skyProgram.attributeLocation("a_position");
     const int texture = m_skyProgram.attributeLocation("a_texture");
+    const int fogBlend = m_skyProgram.attributeLocation("a_fogBlend");
     m_skyProgram.enableAttributeArray(position);
     m_skyProgram.setAttributeBuffer(position, GL_FLOAT,
         int(offsetof(SSkyVertex, position)), 3, int(sizeof(SSkyVertex)));
     m_skyProgram.enableAttributeArray(texture);
     m_skyProgram.setAttributeBuffer(texture, GL_FLOAT,
         int(offsetof(SSkyVertex, texture)), 2, int(sizeof(SSkyVertex)));
+    m_skyProgram.enableAttributeArray(fogBlend);
+    m_skyProgram.setAttributeBuffer(fogBlend, GL_FLOAT,
+        int(offsetof(SSkyVertex, fogBlend)), 1, int(sizeof(SSkyVertex)));
+    m_skyProgram.setUniformValue("u_fogColor", environment.fogColor);
     skyTexture->bind(0);
     glDrawArrays(GL_TRIANGLES, 0, m_skyVertexCount);
     m_skyBuffer.release();
@@ -740,10 +896,12 @@ void CView::drawSkybox(const QMatrix4x4& cameraMatrix,
 void CView::applyEnvironmentUniforms(QOpenGLShaderProgram& program,
                                      const ei::SRenderEnvironment& environment,
                                      const QVector<CLight*>& lights,
-                                     bool enabled, bool fogEnabled)
+                                     int lightingMode, bool fogEnabled)
 {
+    const bool enabled = lightingMode != 0;
     program.setUniformValue("u_environmentEnabled", enabled);
-    program.setUniformValue("u_fogEnabled", enabled && fogEnabled);
+    program.setUniformValue("u_lightingMode", lightingMode);
+    program.setUniformValue("u_fogEnabled", lightingMode == 2 && fogEnabled);
     program.setUniformValue("u_ambientStrength", environment.ambientStrength);
     program.setUniformValue("u_sunStrength", environment.sunStrength);
     program.setUniformValue("u_sunDirection", environment.sunDirection);
@@ -768,7 +926,7 @@ void CView::applyEnvironmentUniforms(QOpenGLShaderProgram& program,
             color /= 255.0f;
         colors[index] = color;
     }
-    program.setUniformValue("u_pointLightCount", enabled ? count : 0);
+    program.setUniformValue("u_pointLightCount", lightingMode == 2 ? count : 0);
     if(count > 0)
     {
         program.setUniformValueArray("u_pointLightPositionRange", positionRange, count);
@@ -776,7 +934,7 @@ void CView::applyEnvironmentUniforms(QOpenGLShaderProgram& program,
     }
 }
 
-bool CView::renderShadowMap(const QVector3D& cameraPosition,
+bool CView::renderShadowMap(const QVector3D& shadowFocus,
                             const ei::SRenderEnvironment& environment,
                             RenderQueueContext& queue)
 {
@@ -786,22 +944,28 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
 
     // Keep the coverage stable while the camera moves inside one map sector;
     // otherwise an otherwise reusable static map would be invalidated every frame.
-    const QVector3D focus(qFloor(cameraPosition.x() / 32.0f) * 32.0f,
-                          qFloor(cameraPosition.y() / 32.0f) * 32.0f, 20.0f);
+    const QVector3D focus(qFloor(shadowFocus.x() / 16.0f) * 16.0f,
+                          qFloor(shadowFocus.y() / 16.0f) * 16.0f, 20.0f);
     QVector3D up(0.0f, 0.0f, 1.0f);
     if(qAbs(QVector3D::dotProduct(environment.sunDirection.normalized(), up)) > 0.96f)
         up = QVector3D(0.0f, 1.0f, 0.0f);
     QMatrix4x4 lightView;
     lightView.lookAt(focus - environment.sunDirection.normalized() * 420.0f,
                      focus, up);
-    QMatrix4x4 lightProjection;
-    lightProjection.ortho(-300.0f, 300.0f, -300.0f, 300.0f, 1.0f, 900.0f);
-    m_lightSpaceMatrix = lightProjection * lightView;
+    QMatrix4x4 staticProjection;
+    staticProjection.ortho(-300.0f, 300.0f, -300.0f, 300.0f, 1.0f, 900.0f);
+    QMatrix4x4 dynamicProjection;
+    // Stock EI creates a small silhouette texture for each caster. A tight
+    // dynamic projection preserves comparable unit/weapon detail while the
+    // broad cached static projection continues to cover the visible scene.
+    dynamicProjection.ortho(-96.0f, 96.0f, -96.0f, 96.0f, 1.0f, 900.0f);
+    m_staticLightSpaceMatrix = staticProjection * lightView;
+    m_dynamicLightSpaceMatrix = dynamicProjection * lightView;
 
     QCryptographicHash staticHash(QCryptographicHash::Sha256);
     staticHash.addData(queue.staticShadowFingerprint());
     staticHash.addData(sceneSourceFingerprint().toUtf8());
-    staticHash.addData(reinterpret_cast<const char*>(m_lightSpaceMatrix.constData()),
+    staticHash.addData(reinterpret_cast<const char*>(m_staticLightSpaceMatrix.constData()),
                        16 * int(sizeof(float)));
     const QByteArray staticFingerprint = staticHash.result();
     const bool rebuildStatic = staticFingerprint != m_staticShadowFingerprint;
@@ -813,20 +977,21 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
     glDisable(GL_ALPHA_TEST);
     glEnable(GL_POLYGON_OFFSET_FILL);
     glPolygonOffset(2.0f, 4.0f);
-    const auto beginTarget = [&](QOpenGLFramebufferObject* target)
+    const auto beginTarget = [&](QOpenGLFramebufferObject* target,
+                                 const QMatrix4x4& projection)
     {
         target->bind();
         glViewport(0, 0, target->width(), target->height());
         glClearColor(1.0f, 1.0f, 1.0f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         m_shadowProgram.bind();
-        m_shadowProgram.setUniformValue("u_projMmatrix", lightProjection);
+        m_shadowProgram.setUniformValue("u_projMmatrix", projection);
         m_shadowProgram.setUniformValue("u_viewMmatrix", lightView);
         m_shadowProgram.setUniformValue("u_instanced", false);
     };
     if(rebuildStatic)
     {
-        beginTarget(m_shadowFbo);
+        beginTarget(m_shadowFbo, staticProjection);
         // Stock EI terrain receives projected shadows but does not cast them.
         // Keep it out of both shadow maps; it remains in the color/receiver pass.
         queue.flushShadow(&m_shadowProgram, false, true);
@@ -835,7 +1000,7 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
     }
     if(rebuildDynamic)
     {
-        beginTarget(m_dynamicShadowFbo);
+        beginTarget(m_dynamicShadowFbo, dynamicProjection);
         queue.flushShadow(&m_shadowProgram, true, false);
         m_dynamicShadowFbo->release();
         m_shadowUpdateTimer.restart();
@@ -848,13 +1013,17 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
     return true;
 }
 
-void CView::applyShadowUniforms(QOpenGLShaderProgram& program, bool enabled)
+void CView::applyShadowUniforms(QOpenGLShaderProgram& program, bool enabled,
+                                bool receiveStatic, bool receiveDynamic)
 {
     const bool available = enabled && m_shadowFbo && m_dynamicShadowFbo
         && m_shadowFbo->isValid() && m_dynamicShadowFbo->isValid()
         && m_shadowInitialized;
     program.setUniformValue("u_shadowsEnabled", available);
-    program.setUniformValue("u_lightSpaceMatrix", m_lightSpaceMatrix);
+    program.setUniformValue("u_staticLightSpaceMatrix", m_staticLightSpaceMatrix);
+    program.setUniformValue("u_dynamicLightSpaceMatrix", m_dynamicLightSpaceMatrix);
+    program.setUniformValue("u_receiveStaticShadow", receiveStatic);
+    program.setUniformValue("u_receiveDynamicShadow", receiveDynamic);
     program.setUniformValue("u_staticShadowMap", 1);
     program.setUniformValue("u_dynamicShadowMap", 2);
     const float staticTexel = m_shadowFbo
@@ -1159,7 +1328,12 @@ void CView::draw()
             ? dynamic_cast<const COptBool*>(m_pSettings->opt(name)) : nullptr;
         return option ? option->value() : fallback;
     };
-    const bool environmentEnabled = renderBool("environmentLighting", true);
+    const bool legacyEnvironmentEnabled = renderBool("environmentLighting", true);
+    const COptInt* lightingModeOption = m_pSettings
+        ? dynamic_cast<const COptInt*>(m_pSettings->opt("renderLightingMode")) : nullptr;
+    const int lightingMode = legacyEnvironmentEnabled
+        ? qBound(0, lightingModeOption ? lightingModeOption->value() : 2, 2) : 0;
+    const bool environmentEnabled = lightingMode == 2;
     const bool skyEnabled = renderBool("drawSkybox", true);
     const bool fogEnabled = renderBool("renderFog", true);
     const bool sceneLightsEnabled = renderBool("renderSceneLights", true);
@@ -1173,6 +1347,7 @@ void CView::draw()
         ? &m_environmentMob->worldSet() : nullptr;
     const ei::SRenderEnvironment environment = ei::renderEnvironment(
         worldSet, overrideWorldTime, previewTime);
+    syncEnvironmentPreviewWidget(environment.timeHours);
     // Fill the open lower edge of the stock sky cylinder with the same color
     // that distant geometry converges to. This removes the editor-only black
     // seam without modifying the profile sky asset.
@@ -1265,7 +1440,7 @@ void CView::draw()
     m_landProgram.setUniformValue("u_projMmatrix", m_projection);
     m_landProgram.setUniformValue("u_viewMmatrix", camMatrix);
     applyEnvironmentUniforms(m_landProgram, environment, sceneLights,
-                             environmentEnabled, fogEnabled);
+                             lightingMode, fogEnabled);
 //    m_landProgram.setUniformValue("u_color", QVector4D(0.0, 1.0, 0.0, 1.0));
 //    m_landProgram.setUniformValue("u_lightPosition", QVector4D(0.0, 0.0, 2.0, 1.0));
 //    m_landProgram.setUniformValue("u_lightPower", 5.0f);
@@ -1282,7 +1457,7 @@ void CView::draw()
     m_program.setUniformValue("u_highlightColor", activeHighlight);
     m_program.setUniformValue("qt_Texture0", 0);
     applyEnvironmentUniforms(m_program, environment, sceneLights,
-                             environmentEnabled, fogEnabled);
+                             lightingMode, fogEnabled);
     applyShadowUniforms(m_program, false);
     RenderQueueContext& renderQueue = RenderQueueContext::instance();
     renderQueue.begin(&m_program, cameraPosition);
@@ -1294,8 +1469,8 @@ void CView::draw()
         m_landProgram.setUniformValue("u_projMmatrix", m_projection);
         m_landProgram.setUniformValue("u_viewMmatrix", camMatrix);
         applyEnvironmentUniforms(m_landProgram, environment, sceneLights,
-                                 environmentEnabled, fogEnabled);
-        applyShadowUniforms(m_landProgram, withShadows);
+                                 lightingMode, fogEnabled);
+        applyShadowUniforms(m_landProgram, withShadows, true, true);
         if(m_pLand && m_pLand->isMprLoad() && m_bDrawLand)
             m_pLand->draw(&m_landProgram, cullingEnabled ? &frustum : nullptr);
         if(m_pLand && m_pLand->isMprLoad() && m_bPreviewTile)
@@ -1306,8 +1481,11 @@ void CView::draw()
         m_program.setUniformValue("u_viewMmatrix", camMatrix);
         m_program.setUniformValue("qt_Texture0", 0);
         applyEnvironmentUniforms(m_program, environment, sceneLights,
-                                 environmentEnabled, fogEnabled);
-        applyShadowUniforms(m_program, withShadows);
+                                 lightingMode, fogEnabled);
+        // Stock projected shadows use selected receivers. Ordinary static
+        // meshes do not receive their own broad static map; this removes the
+        // camera-dependent fence/roof acne absent from the game.
+        applyShadowUniforms(m_program, withShadows, false, true);
     };
 
     if(m_activeMob != nullptr)
@@ -1366,7 +1544,7 @@ void CView::draw()
                         ++performance.counters().logicSubmissions;
                 }
         const bool shadowReady = environmentEnabled && shadowsEnabled
-            && renderShadowMap(cameraPosition, environment, renderQueue);
+            && renderShadowMap(cameraPivot, environment, renderQueue);
         drawTerrainColor(shadowReady);
         renderQueue.flush();
         glDepthFunc(GL_LEQUAL);
@@ -1413,8 +1591,9 @@ void CView::draw()
 
         m_landProgram.setUniformValue("transparency", 0.3f);
         applyEnvironmentUniforms(m_landProgram, environment, sceneLights,
-                                 environmentEnabled, fogEnabled);
-        applyShadowUniforms(m_landProgram, environmentEnabled && shadowsEnabled);
+                                 lightingMode, fogEnabled);
+        applyShadowUniforms(m_landProgram, environmentEnabled && shadowsEnabled,
+                            true, true);
         m_pLand->drawWater(&m_landProgram, cullingEnabled ? &frustum : nullptr);
         m_landProgram.setUniformValue("transparency", 0.0f);
     }

@@ -8,6 +8,7 @@ uniform highp vec4 u_lightColor;
 uniform bool u_highlight;
 uniform float transparency;
 uniform bool u_environmentEnabled;
+uniform int u_lightingMode;
 uniform bool u_fogEnabled;
 uniform float u_ambientStrength;
 uniform float u_sunStrength;
@@ -23,9 +24,12 @@ uniform vec3 u_pointLightColor[8];
 uniform bool u_shadowsEnabled;
 uniform sampler2D u_staticShadowMap;
 uniform sampler2D u_dynamicShadowMap;
-uniform mat4 u_lightSpaceMatrix;
+uniform mat4 u_staticLightSpaceMatrix;
+uniform mat4 u_dynamicLightSpaceMatrix;
 uniform vec2 u_staticShadowTexelSize;
 uniform vec2 u_dynamicShadowTexelSize;
+uniform bool u_receiveStaticShadow;
+uniform bool u_receiveDynamicShadow;
 
 varying highp vec4 v_position;
 varying highp vec3 v_normal;
@@ -40,14 +44,26 @@ void main(void)
   vec3 light = vec3(1.0);
   if (u_environmentEnabled)
   {
+    if (u_lightingMode == 1)
+    {
+      float simpleDiffuse = max(dot(norm, normalize(vec3(0.35, 0.45, 0.82))), 0.0);
+      light = vec3(0.62 + 0.52 * simpleDiffuse);
+    }
+    else
+    {
     float sunDiffuse = max(dot(norm, -normalize(u_sunDirection)), 0.0);
     float shadow = 1.0;
     if (u_shadowsEnabled && sunDiffuse > 0.0)
     {
-      vec4 lightPosition = u_lightSpaceMatrix * vec4(v_worldPosition, 1.0);
-      vec3 projected = lightPosition.xyz / lightPosition.w * 0.5 + 0.5;
-      if (projected.x >= 0.0 && projected.x <= 1.0 &&
-          projected.y >= 0.0 && projected.y <= 1.0 && projected.z <= 1.0)
+      vec4 staticPosition = u_staticLightSpaceMatrix * vec4(v_worldPosition, 1.0);
+      vec4 dynamicPosition = u_dynamicLightSpaceMatrix * vec4(v_worldPosition, 1.0);
+      vec3 staticProjected = staticPosition.xyz / staticPosition.w * 0.5 + 0.5;
+      vec3 dynamicProjected = dynamicPosition.xyz / dynamicPosition.w * 0.5 + 0.5;
+      bool staticInside = u_receiveStaticShadow && staticProjected.x >= 0.0 && staticProjected.x <= 1.0 &&
+          staticProjected.y >= 0.0 && staticProjected.y <= 1.0 && staticProjected.z <= 1.0;
+      bool dynamicInside = u_receiveDynamicShadow && dynamicProjected.x >= 0.0 && dynamicProjected.x <= 1.0 &&
+          dynamicProjected.y >= 0.0 && dynamicProjected.y <= 1.0 && dynamicProjected.z <= 1.0;
+      if (staticInside || dynamicInside)
       {
         float bias = max(0.0035 * (1.0 - sunDiffuse), 0.0012);
         float visibility = 0.0;
@@ -55,18 +71,21 @@ void main(void)
           for (int x = -1; x <= 1; ++x)
           {
             vec2 offset = vec2(float(x), float(y));
-            float staticDepth = texture2D(u_staticShadowMap,
-                projected.xy + offset * u_staticShadowTexelSize).r;
-            float dynamicDepth = texture2D(u_dynamicShadowMap,
-                projected.xy + offset * u_dynamicShadowTexelSize).r;
-            float storedDepth = min(staticDepth, dynamicDepth);
-            visibility += projected.z - bias > storedDepth ? 0.68 : 1.0;
+            float staticDepth = staticInside ? texture2D(u_staticShadowMap,
+                staticProjected.xy + offset * u_staticShadowTexelSize).r : 1.0;
+            float dynamicDepth = dynamicInside ? texture2D(u_dynamicShadowMap,
+                dynamicProjected.xy + offset * u_dynamicShadowTexelSize).r : 1.0;
+            bool staticOccluded = staticInside && staticProjected.z - bias > staticDepth;
+            bool dynamicOccluded = dynamicInside && dynamicProjected.z - bias > dynamicDepth;
+            visibility += (staticOccluded || dynamicOccluded) ? 0.58 : 1.0;
           }
         shadow = visibility / 9.0;
       }
     }
-    float skyExposure = 0.65 + 0.35 * max(norm.z, 0.0);
-    light = u_ambientColor * (u_ambientStrength * skyExposure)
+    float skyExposure = 0.88 + 0.12 * max(norm.z, 0.0);
+    vec3 neutralAmbient = mix(vec3(1.0), u_ambientColor, 0.28);
+    float ambientLevel = 0.32 + 0.68 * u_ambientStrength;
+    light = neutralAmbient * (ambientLevel * skyExposure)
           + u_sunColor * (u_sunStrength * sunDiffuse * shadow);
     for (int i = 0; i < 8; ++i)
     {
@@ -79,6 +98,7 @@ void main(void)
       attenuation *= attenuation;
       light += u_pointLightColor[i] * attenuation
              * max(dot(norm, normalize(offset)), 0.0);
+    }
     }
   }
   vec4 resColor = vec4(light, 1.0) * texColor;

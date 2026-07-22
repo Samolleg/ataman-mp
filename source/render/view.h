@@ -24,6 +24,12 @@
 #include "spatial_grid.h"
 
 class QLineEdit;
+class QFrame;
+class QLabel;
+class QComboBox;
+class QSlider;
+class QToolButton;
+class QResizeEvent;
 class CKeyManager;
 class CMob;
 class CCamera;
@@ -206,6 +212,7 @@ protected:
     void mouseReleaseEvent(QMouseEvent* event) override;
     void wheelEvent(QWheelEvent* event) override;
     void focusOutEvent(QFocusEvent* event) override;
+    void resizeEvent(QResizeEvent* event) override;
 
 private:
     bool saveMobDocument(CMob* mob, const QFileInfo& destination);
@@ -235,14 +242,19 @@ private:
     QString sceneSourceFingerprint();
     void drawSkybox(const QMatrix4x4& cameraMatrix,
                     const ei::SRenderEnvironment& environment);
+    void initEnvironmentPreviewWidget();
+    void positionEnvironmentPreviewWidget();
+    void syncEnvironmentPreviewWidget(float mapTimeHours);
     void applyEnvironmentUniforms(QOpenGLShaderProgram& program,
                                   const ei::SRenderEnvironment& environment,
                                   const QVector<CLight*>& lights,
-                                  bool enabled, bool fogEnabled);
-    bool renderShadowMap(const QVector3D& cameraPosition,
+                                  int lightingMode, bool fogEnabled);
+    bool renderShadowMap(const QVector3D& shadowFocus,
                          const ei::SRenderEnvironment& environment,
                          RenderQueueContext& queue);
-    void applyShadowUniforms(QOpenGLShaderProgram& program, bool enabled);
+    void applyShadowUniforms(QOpenGLShaderProgram& program, bool enabled,
+                             bool receiveStatic = true,
+                             bool receiveDynamic = true);
 
 
 public slots:
@@ -296,7 +308,8 @@ private:
     QOpenGLShaderProgram m_shadowProgram;
     QOpenGLFramebufferObject* m_shadowFbo{nullptr};
     QOpenGLFramebufferObject* m_dynamicShadowFbo{nullptr};
-    QMatrix4x4 m_lightSpaceMatrix;
+    QMatrix4x4 m_staticLightSpaceMatrix;
+    QMatrix4x4 m_dynamicLightSpaceMatrix;
     QElapsedTimer m_shadowUpdateTimer;
     bool m_shadowInitialized{false};
     QByteArray m_staticShadowFingerprint;
@@ -360,6 +373,13 @@ private:
     bool m_spatialIndexDirty;
     bool m_sceneFingerprintDirty;
     QString m_sceneFingerprint;
+    QFrame* m_environmentPreviewWidget{nullptr};
+    QWidget* m_environmentPreviewBody{nullptr};
+    QToolButton* m_environmentPreviewCollapse{nullptr};
+    QLabel* m_environmentPreviewTimeLabel{nullptr};
+    QComboBox* m_environmentPreviewMode{nullptr};
+    QSlider* m_environmentPreviewTime{nullptr};
+    bool m_environmentPreviewSyncing{false};
 };
 
 #endif // MYGLWIDGET_H
