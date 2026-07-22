@@ -176,3 +176,11 @@ QJsonObject CTorch::toJson()
     obj.insert("Sound", m_sound);
     return obj;
 }
+
+QVector3D CTorch::particleWorldPosition() const
+{
+    // TORCH_PTLINK is authored in the torch object's local coordinates.
+    // Keep the ordinary torch mesh transform untouched and rotate only this
+    // additional effect attachment into world space.
+    return m_drawPosition + m_rotation.rotatedVector(m_pointLink);
+}

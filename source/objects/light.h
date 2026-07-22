@@ -23,6 +23,7 @@ public:
     const QVector3D& lightColor() const { return m_color; }
 
 private:
+    float editorVisualScale() const override { return 1.0f / 3.0f; }
     float m_range;
     bool m_bShadow;
     QVector3D m_color;

@@ -9,8 +9,6 @@ public:
     CParticle(const CParticle& particle);
     CParticle(QJsonObject data);
     ENodeType nodeType() override {return ENodeType::eParticle; }
-    void drawObjectVisual(bool isActive, QOpenGLShaderProgram* program = nullptr) override
-        { Q_UNUSED(isActive); Q_UNUSED(program); }
     uint deserialize(util::CMobParser& parser) override;
     void serializeJson(QJsonObject& obj) override;
     uint serialize(util::CMobParser& parser) override;
@@ -24,6 +22,7 @@ public:
     float particleScale() const { return m_scale; }
 
 private:
+    float editorVisualScale() const override { return 1.0f / 3.0f; }
     uint m_kind;
     float m_scale;
 };

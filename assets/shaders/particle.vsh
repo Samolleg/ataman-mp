@@ -5,6 +5,7 @@ uniform vec3 u_cameraRight;
 uniform vec3 u_cameraUp;
 uniform float u_scale;
 uniform float u_rotation;
+uniform vec4 u_uvRect;
 attribute vec2 a_position;
 attribute vec2 a_texture;
 varying highp vec2 v_texture;
@@ -17,5 +18,5 @@ void main(void)
                     s * a_position.x + c * a_position.y) * u_scale;
   vec3 world = u_center + u_cameraRight * local.x + u_cameraUp * local.y;
   gl_Position = u_projMmatrix * u_viewMmatrix * vec4(world, 1.0);
-  v_texture = a_texture;
+  v_texture = u_uvRect.xy + a_texture * u_uvRect.zw;
 }

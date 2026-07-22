@@ -55,6 +55,10 @@ public:
     QMap<QString, QVector<QVector2D>> renderedBodyPartUvTriangles() const;
 
 protected:
+    // Editor-only helper figures (lights, particle anchors) can be presented
+    // at a useful selection size without changing their serialized transform
+    // or the authored effect they represent.
+    virtual float editorVisualScale() const { return 1.0f; }
     void recalcFigure();
     void recalcMinPos();
     void applyTransientVisual(const QString& modelName, const QString& textureName,

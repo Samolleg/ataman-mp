@@ -16,6 +16,9 @@ public:
     void getParam(QSharedPointer<IPropertyBase>& prop, EObjParam propType) override;
     void applyParam(const QSharedPointer<IPropertyBase>& prop) override;
     QJsonObject toJson() override;
+    float power() const { return m_power; }
+    const QVector3D& particleLink() const { return m_pointLink; }
+    QVector3D particleWorldPosition() const;
 
 private:
     float m_power;

@@ -24,6 +24,7 @@
 #include <QSaveFile>
 #include <QtEndian>
 #include <cstddef>
+#include <cmath>
 #include <cstring>
 #include <limits>
 
@@ -62,6 +63,7 @@
 #include "part.h"
 #include "objects/light.h"
 #include "objects/particle.h"
+#include "objects/torch.h"
 #include "external_script_workspace.h"
 #include "mob_script_window.h"
 #include "script_reference_analyzer.h"
@@ -93,7 +95,7 @@ SParticleVisualStyle particleVisualStyle(uint kind)
     switch(kind)
     {
     case 8192: return {nullptr, QVector4D(1.0f, 0.42f, 0.12f, 0.88f), 0.75f, 0.20f, true}; // Fireball
-    case 8193: return {"campfire00", QVector4D(1.0f, 0.58f, 0.22f, 0.92f), 1.25f, 0.18f, true};
+    case 8193: return {"firesmoke", QVector4D(1.0f, 0.58f, 0.22f, 0.92f), 1.25f, 0.18f, true};
     case 8194:
     case 8195:
     case 8208:
@@ -141,6 +143,16 @@ SParticleVisualStyle particleVisualStyle(uint kind)
     default:
         return {};
     }
+}
+
+bool isPersistentFireParticle(uint kind)
+{
+    return kind == 8193u || kind == 8195u;
+}
+
+bool isPersistentSmokeParticle(uint kind)
+{
+    return kind == 8196u || kind == 8197u;
 }
 
 struct SSkyVertex
@@ -2011,8 +2023,103 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
     QOpenGLTexture* boundTexture = nullptr;
     CTextureList* textures = CTextureList::getInstance();
     QOpenGLTexture* fallbackTexture = textures->textureDefault();
+    QOpenGLTexture* fireSmokeTexture = textures->texture("firesmoke");
+    if(fireSmokeTexture == fallbackTexture)
+        fireSmokeTexture = nullptr;
+    QOpenGLTexture* tendrilSmokeTexture = textures->texture("tendrismoke");
+    if(tendrilSmokeTexture == fallbackTexture)
+        tendrilSmokeTexture = fireSmokeTexture;
     const float timeSeconds = float(QDateTime::currentMSecsSinceEpoch() % 600000) / 1000.0f;
     RenderPerformanceContext& performance = RenderPerformanceContext::instance();
+
+    const auto drawSprite = [&](const QVector3D& center, float scale, float rotation,
+                                const QVector4D& tint, QOpenGLTexture* texture,
+                                const QVector4D& uvRect, bool additive, bool radialMask,
+                                float softness)
+    {
+        if(texture != boundTexture)
+        {
+            if(texture)
+                texture->bind(0);
+            else
+                glBindTexture(GL_TEXTURE_2D, 0);
+            boundTexture = texture;
+            if(performance.collecting())
+                ++performance.counters().textureBinds;
+        }
+        if(additive != additiveBlend)
+        {
+            glBlendFunc(GL_SRC_ALPHA, additive ? GL_ONE : GL_ONE_MINUS_SRC_ALPHA);
+            additiveBlend = additive;
+        }
+        m_particleProgram.setUniformValue("u_center", center);
+        m_particleProgram.setUniformValue("u_scale", qBound(0.03f, scale, 64.0f));
+        m_particleProgram.setUniformValue("u_rotation", rotation);
+        m_particleProgram.setUniformValue("u_tint", tint);
+        m_particleProgram.setUniformValue("u_useTexture", texture != nullptr);
+        m_particleProgram.setUniformValue("u_radialMask", radialMask);
+        m_particleProgram.setUniformValue("u_softness", softness);
+        m_particleProgram.setUniformValue("u_uvRect", uvRect);
+        glDrawArrays(GL_TRIANGLES, 0, 6);
+        if(performance.collecting())
+        {
+            ++performance.counters().drawCalls;
+            performance.counters().triangles += 2;
+            ++performance.counters().nodesSubmitted;
+        }
+    };
+
+    const auto drawFireSmoke = [&](const QVector3D& origin, float authoredScale,
+                                   uint seed, bool selected, bool smokeOnly)
+    {
+        const float baseScale = qBound(0.25f, authoredScale, 8.0f);
+        const float seedPhase = float(seed % 997u) * 0.017f;
+
+        // The shipped firesmoke atlas is 4x2 64px smoke cells in its top half
+        // and two 128px flame frames in its bottom half. QImage rows are
+        // uploaded directly, so the negative V extent preserves authored
+        // top-to-bottom orientation rather than displaying cells upside down.
+        for(int i = 4; i >= 0; --i)
+        {
+            const float age = std::fmod(timeSeconds * 0.19f
+                                        + float(i) * 0.2f + seedPhase, 1.0f);
+            const int cell = (int(timeSeconds * 7.0f + seedPhase * 11.0f)
+                              + i * 3) & 7;
+            const int column = cell & 3;
+            const int row = cell >> 2;
+            const QVector4D uv(float(column) * 0.25f,
+                               float(row + 1) * 0.25f, 0.25f, -0.25f);
+            const float sway = qSin(timeSeconds * 1.3f + seedPhase + float(i))
+                * (0.08f + age * 0.18f) * baseScale;
+            const QVector3D center = origin + cameraUp * ((0.85f + age * 2.7f) * baseScale)
+                + cameraRight * sway;
+            const float alpha = (1.0f - age) * (selected ? 0.82f : 0.58f);
+            QOpenGLTexture* smokeTexture = smokeOnly && tendrilSmokeTexture
+                ? tendrilSmokeTexture : fireSmokeTexture;
+            drawSprite(center, baseScale * (0.42f + age * 0.72f),
+                       0.0f, QVector4D(selected ? 0.55f : 0.72f,
+                                      selected ? 0.85f : 0.64f,
+                                      selected ? 1.0f : 0.56f, alpha),
+                       smokeTexture, uv, false, smokeTexture == nullptr, 0.2f);
+        }
+
+        if(smokeOnly)
+            return;
+        const int frame = (int(timeSeconds * 11.0f + seedPhase * 19.0f) & 1);
+        const QVector4D flameUv(float(frame) * 0.5f, 1.0f, 0.5f, -0.5f);
+        const float flicker = 0.93f + 0.09f * qSin(timeSeconds * 13.0f + seedPhase);
+        const QVector4D flameTint = selected
+            ? QVector4D(0.35f, 0.88f, 1.0f, 0.94f)
+            : QVector4D(1.0f, 0.96f, 0.88f, 0.94f);
+        drawSprite(origin + cameraUp * (0.72f * baseScale),
+                   baseScale * 1.16f * flicker, 0.0f, flameTint,
+                   fireSmokeTexture, flameUv, true, fireSmokeTexture == nullptr, 0.2f);
+        drawSprite(origin + cameraUp * (0.48f * baseScale)
+                           + cameraRight * (0.11f * baseScale),
+                   baseScale * 0.78f / flicker, 0.0f,
+                   QVector4D(flameTint.x(), flameTint.y(), flameTint.z(), 0.72f),
+                   fireSmokeTexture, flameUv, true, fireSmokeTexture == nullptr, 0.2f);
+    };
 
     for(CMob* mob : m_aMob)
     {
@@ -2021,9 +2128,22 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
         const QVector<CNode*> candidates = spatiallyVisibleNodes(mob, frustum, nullptr);
         for(CNode* node : candidates)
         {
+            if(!node || node->isMarkDeleted()
+                    || node->nodeState() == ENodeState::eHidden)
+                continue;
+
+            if(CTorch* torch = dynamic_cast<CTorch*>(node))
+            {
+                // A torch remains an ordinary textured world object. Its
+                // authored TORCH_PTLINK only adds this attached effect.
+                drawFireSmoke(torch->particleWorldPosition(), 1.0f,
+                              torch->mapId(), torch->nodeState() == ENodeState::eSelect,
+                              false);
+                continue;
+            }
+
             CParticle* particle = dynamic_cast<CParticle*>(node);
-            if(!particle || particle->isMarkDeleted()
-                    || particle->nodeState() == ENodeState::eHidden)
+            if(!particle)
                 continue;
 
             const SParticleVisualStyle style = particleVisualStyle(particle->kind());
@@ -2031,23 +2151,6 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
                 ? textures->texture(QString::fromLatin1(style.textureName)) : fallbackTexture;
             const bool useTexture = texture && texture != fallbackTexture;
             texture = useTexture ? texture : nullptr;
-            if(texture != boundTexture)
-            {
-                if(texture)
-                    texture->bind(0);
-                else
-                    glBindTexture(GL_TEXTURE_2D, 0);
-                boundTexture = texture;
-                if(performance.collecting())
-                    ++performance.counters().textureBinds;
-            }
-            if(style.additive != additiveBlend)
-            {
-                glBlendFunc(GL_SRC_ALPHA,
-                            style.additive ? GL_ONE : GL_ONE_MINUS_SRC_ALPHA);
-                additiveBlend = style.additive;
-            }
-
             QVector3D center = particle->drawPosition();
             if(center.isNull() && !particle->position().isNull())
                 center = particle->position();
@@ -2060,20 +2163,19 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
             if(particle->nodeState() == ENodeState::eSelect)
                 tint = QVector4D(0.10f, 0.90f, 1.0f, qMax(0.78f, tint.w()));
 
-            m_particleProgram.setUniformValue("u_center", center);
-            m_particleProgram.setUniformValue("u_scale",
-                qBound(0.08f, authoredScale * style.scaleMultiplier * pulse, 64.0f));
-            m_particleProgram.setUniformValue("u_rotation", phase * 0.18f);
-            m_particleProgram.setUniformValue("u_tint", tint);
-            m_particleProgram.setUniformValue("u_useTexture", useTexture);
-            m_particleProgram.setUniformValue("u_softness", style.softness);
-            glDrawArrays(GL_TRIANGLES, 0, 6);
-            if(performance.collecting())
+            if(isPersistentFireParticle(particle->kind())
+                    || isPersistentSmokeParticle(particle->kind()))
             {
-                ++performance.counters().drawCalls;
-                performance.counters().triangles += 2;
-                ++performance.counters().nodesSubmitted;
+                drawFireSmoke(center, authoredScale * style.scaleMultiplier,
+                              particle->mapId(),
+                              particle->nodeState() == ENodeState::eSelect,
+                              isPersistentSmokeParticle(particle->kind()));
+                continue;
             }
+            drawSprite(center, authoredScale * style.scaleMultiplier * pulse,
+                       phase * 0.18f, tint, useTexture ? texture : nullptr,
+                       QVector4D(0.0f, 0.0f, 1.0f, 1.0f),
+                       style.additive, true, style.softness);
         }
     }
 
