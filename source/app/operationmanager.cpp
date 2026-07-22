@@ -1193,7 +1193,15 @@ void CTileBrush::mouseMoveEvent(COperation* pOp, QMouseEvent* pEvent)
 void CTileBrush::wheelEvent(COperation* pOp, QWheelEvent* pEvent)
 {
     Q_UNUSED(pOp);
-    Q_UNUSED(pEvent);
+    if(m_pView->manualTilePaintingEnabled())
+    {
+        m_pView->addTileRotation(pEvent->delta() > 0 ? 1 : -1);
+        bool bLand = CScene::getInstance()->isLandTileEditMode();
+        m_pView->updatePreviewTile(m_pView->getTerrainPos(bLand), bLand);
+        CStatusConnector::getInstance()->updateStatus(
+            "brush.ico", "Manual atlas tile rotation changed. LMB-paint, RMB-pick, Wheel-rotate.");
+        return;
+    }
     CStatusConnector::getInstance()->updateStatus(
         "brush.ico", "Rotation is automatic in semantic terrain painting.");
 }

@@ -2443,26 +2443,72 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
     if(!m_pLand->pickTile(posOnLand, pTile, tileLoc, bLand))
         return;
 
-    bool materialSelected = false;
-    const qint32 terrainType = m_landscapeTools->paintTerrainType(&materialSelected);
-    if(!materialSelected)
-    {
-        emit updateMsg(m_terrainAtlasAnalysis.usable
-            ? tr("Choose a terrain material before painting.")
-            : tr("No authored slot template is registered for this atlas namespace."));
-        return;
-    }
     STerrainTileBrush brush;
     brush.centerX = tileLoc.xSec * 16 + tileLoc.col;
     brush.centerY = tileLoc.ySec * 16 + tileLoc.row;
     brush.radius = m_landscapeTools->paintRadius();
     brush.shape = m_landscapeTools->paintShape();
     CValidationReport report;
-    STerrainTileCommand command = m_terrainEdit.makeSemanticTilePaint(
-        brush, bLand ? ETerrainTileLayer::Land : ETerrainTileLayer::Overlay,
-        terrainType, m_terrainAtlasAnalysis.catalog(
-            bLand ? ETerrainTileLayer::Land : ETerrainTileLayer::Overlay),
-        m_terrainSemanticSeed, &report);
+    const ETerrainTileLayer layer = bLand
+        ? ETerrainTileLayer::Land : ETerrainTileLayer::Overlay;
+    const bool manual = m_landscapeTools->manualTileSelectionEnabled();
+    qint32 terrainType = -1;
+    STerrainTileCommand command;
+    if(manual)
+    {
+        int selectedIndex = -1;
+        int selectedRotation = 0;
+        m_pTileForm->getSelectedTile(selectedIndex, selectedRotation);
+        if(selectedIndex < 0)
+        {
+            emit updateMsg(tr("Choose an atlas tile before painting in manual mode."));
+            return;
+        }
+        SMprPackedTile selected;
+        selected.atlasIndex = quint8(selectedIndex / 64);
+        selected.tileIndex = quint8(selectedIndex % 64);
+        selected.rotation = quint8(selectedRotation & 3);
+        bool layerCompatible = false;
+        m_terrainAtlasAnalysis.catalog(layer).signatureForPacked(
+            selected.encode(), &layerCompatible);
+        if(!layerCompatible)
+        {
+            emit updateMsg(layer == ETerrainTileLayer::Land
+                ? tr("That atlas slot is not a land-family tile.")
+                : tr("That atlas slot is not an overlay-family tile."));
+            return;
+        }
+        command = m_terrainEdit.makeTilePaint(
+            brush, layer, selected.atlasIndex, selected.tileIndex,
+            selected.rotation);
+        command.description = tr("Paint manual atlas tiles");
+        command.semanticAudit.valid = true;
+        command.semanticAudit.brush = brush;
+        command.semanticAudit.layer = layer;
+        command.semanticAudit.requestedMaterialId = -1;
+        command.semanticAudit.solverMode = QStringLiteral("manual-atlas");
+        for(const STerrainTileDelta& delta : command.deltas)
+        {
+            const QPoint point(delta.globalX, delta.globalY);
+            command.semanticAudit.paintedCoreCells.append(point);
+            command.semanticAudit.affectedCells.append(point);
+        }
+    }
+    else
+    {
+        bool materialSelected = false;
+        terrainType = m_landscapeTools->paintTerrainType(&materialSelected);
+        if(!materialSelected)
+        {
+            emit updateMsg(m_terrainAtlasAnalysis.usable
+                ? tr("Choose a terrain material before painting.")
+                : tr("No authored slot template is registered for this atlas namespace."));
+            return;
+        }
+        command = m_terrainEdit.makeSemanticTilePaint(
+            brush, layer, terrainType, m_terrainAtlasAnalysis.catalog(layer),
+            m_terrainSemanticSeed, &report);
+    }
     STerrainPaintAuditAction audit;
     audit.actionId = m_terrainPaintActionId++;
     audit.strokeId = m_tileBrushCommandId;
@@ -2504,7 +2550,8 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
     ei::log(audit.outcome == QStringLiteral("refused") ? eLogWarning : eLogInfo,
         QString("Terrain paint action %1 stroke %2: %3, layer=%4 material=%5 center=%6,%7 radius=%8 core=%9 affected=%10 changed=%11 solver=%12 nodes=%13")
             .arg(audit.actionId).arg(audit.strokeId).arg(audit.outcome)
-            .arg(bLand ? "land" : "overlay").arg(terrainType)
+            .arg(bLand ? "land" : "overlay")
+            .arg(manual ? QStringLiteral("manual") : QString::number(terrainType))
             .arg(brush.centerX).arg(brush.centerY).arg(brush.radius)
             .arg(audit.semantic.paintedCoreCells.size())
             .arg(audit.semantic.affectedCells.size()).arg(audit.deltas.size())
@@ -2598,6 +2645,11 @@ void CView::addTileRotation(int step)
     m_pTileForm->setTileRotation(curRot);
 }
 
+bool CView::manualTilePaintingEnabled() const
+{
+    return m_landscapeTools && m_landscapeTools->manualTileSelectionEnabled();
+}
+
 void CView::showOutliner(bool bShow)
 {
     emit showOutlinerSignal(bShow);
@@ -2625,7 +2677,7 @@ void CView::beginTileBrushGroup()
 {
     if(m_tilePaintStrokeActive || !m_pUndoStack)
         return;
-    m_pUndoStack->beginMacro(tr("Paint terrain material"));
+    m_pUndoStack->beginMacro(tr("Paint terrain tiles"));
     m_tilePaintStrokeActive = true;
 }
 
@@ -2648,8 +2700,10 @@ bool CView::applyTerrainTilePreview(const STerrainTileCommand& command, bool for
     m_pLand->setDirty(m_terrainEdit.isDirty());
     emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMprDirtyFlag,
                               m_terrainEdit.isDirty() ? "*" : "");
-    emit updateMsg(tr("Painted %1 atlas tile(s), including automatic seam updates.")
-        .arg(command.deltas.size()));
+    emit updateMsg(command.semanticAudit.solverMode == QStringLiteral("manual-atlas")
+        ? tr("Painted %1 atlas tile(s) manually.").arg(command.deltas.size())
+        : tr("Painted %1 atlas tile(s), including bounded seam updates.")
+              .arg(command.deltas.size()));
     update();
     return true;
 }

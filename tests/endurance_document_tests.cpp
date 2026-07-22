@@ -1728,6 +1728,112 @@ void EnduranceDocumentTests::terrainTilePaintingIsUndoableLocalizedAndNamespaceS
     QVERIFY(terrain.apply(secondMerge, false));
     QVERIFY(terrain.apply(firstMerge, false));
 
+    // Fixed atlases cannot express every boundary. The modern brush contract
+    // is still deterministic: paint every core cell, mutate at most one ring,
+    // and leave a hard seam when no safe authored transition exists.
+    CTerrainTransitionCatalog hardEdgeCatalog;
+    STerrainTransitionVariant hardCommon;
+    hardCommon.signature.northWest = hardCommon.signature.northEast = 1;
+    hardCommon.signature.southEast = hardCommon.signature.southWest = 1;
+    hardCommon.packedTile = 0;
+    QVERIFY(hardEdgeCatalog.addVariant(hardCommon));
+    STerrainTransitionVariant hardSelected;
+    hardSelected.signature.northWest = hardSelected.signature.northEast = 2;
+    hardSelected.signature.southEast = hardSelected.signature.southWest = 2;
+    hardSelected.packedTile = 2;
+    QVERIFY(hardEdgeCatalog.addVariant(hardSelected));
+
+    CTerrainEditModel hardEdgeTerrain;
+    QVERIFY(hardEdgeTerrain.load(baseline));
+    STerrainTileBrush boundedBrush;
+    boundedBrush.centerX = 8.0f;
+    boundedBrush.centerY = 8.0f;
+    boundedBrush.radius = 1.0f;
+    boundedBrush.shape = ETerrainTileBrushShape::Circle;
+    CValidationReport hardEdgeReport;
+    const STerrainTileCommand hardEdgePaint = hardEdgeTerrain.makeSemanticTilePaint(
+        boundedBrush, ETerrainTileLayer::Land, 2, hardEdgeCatalog,
+        0x424F554Eu, &hardEdgeReport);
+    QCOMPARE(hardEdgePaint.semanticAudit.solverMode,
+             QStringLiteral("bounded-hard-edge"));
+    QCOMPARE(hardEdgePaint.semanticAudit.paintedCoreCells.size(), 5);
+    QCOMPARE(hardEdgePaint.deltas.size(), 5);
+    QVERIFY(!hardEdgeReport.hasErrors());
+    QVERIFY(hardEdgeReport.toText().contains("terrain.semantic_hard_edge"));
+    for(const STerrainTileDelta& delta : hardEdgePaint.deltas)
+    {
+        const int dx = qAbs(delta.globalX - 8);
+        const int dy = qAbs(delta.globalY - 8);
+        QVERIFY(dx + dy <= 1);
+        bool signatureFound = false;
+        const STerrainTransitionSignature after =
+            hardEdgeCatalog.gridSignatureForPacked(delta.after, &signatureFound);
+        QVERIFY(signatureFound);
+        QCOMPARE(after.northWest, qint32(2));
+        QCOMPARE(after.northEast, qint32(2));
+        QCOMPARE(after.southEast, qint32(2));
+        QCOMPARE(after.southWest, qint32(2));
+    }
+    QVERIFY(hardEdgeTerrain.apply(hardEdgePaint, true));
+    CValidationReport repeatedHardEdgeReport;
+    QVERIFY(hardEdgeTerrain.makeSemanticTilePaint(
+        boundedBrush, ETerrainTileLayer::Land, 2, hardEdgeCatalog,
+        0x424F554Eu, &repeatedHardEdgeReport).isEmpty());
+    QVERIFY(!repeatedHardEdgeReport.hasErrors());
+    QVERIFY(hardEdgeTerrain.apply(hardEdgePaint, false));
+
+    // A one-corner approximation is accepted only when it remains anchored to
+    // the painted core and contains no family absent from that boundary tile.
+    CTerrainTransitionCatalog nearestCatalog;
+    QVERIFY(nearestCatalog.addVariant(hardCommon));
+    QVERIFY(nearestCatalog.addVariant(hardSelected));
+    STerrainTransitionSignature threeSelected;
+    threeSelected.northWest = 1;
+    threeSelected.northEast = 2;
+    threeSelected.southEast = 2;
+    threeSelected.southWest = 2;
+    for(int rotation = 0; rotation < 4; ++rotation)
+    {
+        STerrainTransitionVariant transition;
+        transition.signature = CTerrainTransitionCatalog::rotated(
+            threeSelected, rotation);
+        transition.packedTile = quint16(1 | (rotation << 14));
+        QVERIFY(nearestCatalog.addVariant(transition));
+    }
+    CTerrainEditModel nearestTerrain;
+    QVERIFY(nearestTerrain.load(baseline));
+    boundedBrush.radius = 0.0f;
+    CValidationReport nearestReport;
+    const STerrainTileCommand nearestPaint = nearestTerrain.makeSemanticTilePaint(
+        boundedBrush, ETerrainTileLayer::Land, 2, nearestCatalog,
+        0x424F554Eu, &nearestReport);
+    QVERIFY(!nearestPaint.isEmpty());
+    QVERIFY(!nearestReport.hasErrors());
+    QVERIFY(nearestReport.toText().contains("terrain.semantic_nearest"));
+    QVERIFY(nearestReport.toText().contains("terrain.semantic_hard_edge"));
+    QSet<int> nearestChanged;
+    for(const STerrainTileDelta& delta : nearestPaint.deltas)
+    {
+        QVERIFY(qAbs(delta.globalX - 8) <= 1);
+        QVERIFY(qAbs(delta.globalY - 8) <= 1);
+        const int relativeX = delta.globalX - 8;
+        const int relativeY = delta.globalY - 8;
+        nearestChanged.insert((relativeY + 1) * 3 + relativeX + 1);
+        bool signatureFound = false;
+        const STerrainTransitionSignature after =
+            nearestCatalog.gridSignatureForPacked(delta.after, &signatureFound);
+        QVERIFY(signatureFound);
+        const qint32 families[4] = {after.northWest, after.northEast,
+                                    after.southEast, after.southWest};
+        for(qint32 family : families)
+            QVERIFY(family == 1 || family == 2);
+    }
+    QCOMPARE(nearestChanged, QSet<int>({4, 3, 5, 1, 7}));
+    QVERIFY(nearestTerrain.apply(nearestPaint, true));
+    QVERIFY(nearestTerrain.makeSemanticTilePaint(
+        boundedBrush, ETerrainTileLayer::Land, 2, nearestCatalog,
+        0x424F554Eu).isEmpty());
+
     STerrainTileBrush point;
     point.centerX = 0.0f;
     point.centerY = 0.0f;

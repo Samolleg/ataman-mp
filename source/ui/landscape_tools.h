@@ -42,6 +42,7 @@ public:
     bool flipHeightmapVertically() const;
     float paintRadius() const;
     ETerrainTileBrushShape paintShape() const;
+    bool manualTileSelectionEnabled() const;
     qint32 paintTerrainType(bool* selected = nullptr) const;
     void setPaintTerrainTypes(const QVector<QPair<qint32, QString>>& landTypes,
                               const QVector<QPair<qint32, QString>>& underwaterTypes,
@@ -75,6 +76,7 @@ private:
     QComboBox* m_paintTerrainType;
     QDoubleSpinBox* m_paintRadius;
     QComboBox* m_paintShape;
+    QCheckBox* m_manualTileSelection;
     QCheckBox* m_showUnderwaterFamilies;
     QCheckBox* m_showMainTerrain;
     QCheckBox* m_showOverlays;

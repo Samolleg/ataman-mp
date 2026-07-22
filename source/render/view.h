@@ -177,6 +177,7 @@ public:
     void setTile(QVector3D posOnLand, bool bLand = true);
     void updatePreviewTile(QVector3D posOnLand, bool bLand = true);
     void addTileRotation(int step);
+    bool manualTilePaintingEnabled() const;
     void setDrawWater(bool bDraw = true);
     void setDrawLand(bool bDraw = true);
     bool drawWater() const { return m_bDrawWater; }

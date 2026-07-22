@@ -23,6 +23,7 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     , m_paintTerrainType(new QComboBox(this))
     , m_paintRadius(new QDoubleSpinBox(this))
     , m_paintShape(new QComboBox(this))
+    , m_manualTileSelection(new QCheckBox(tr("Manual atlas tile mode (no blending)"), this))
     , m_showUnderwaterFamilies(new QCheckBox(tr("Show underwater material families"), this))
     , m_showMainTerrain(new QCheckBox(tr("Show main terrain (M)"), this))
     , m_showOverlays(new QCheckBox(tr("Show overlays (J)"), this))
@@ -81,8 +82,8 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     QVBoxLayout* paintLayout = new QVBoxLayout(m_paintControls);
     paintLayout->setContentsMargins(0, 0, 0, 0);
     QLabel* paintHelp = new QLabel(tr(
-        "Left-drag paints a material defined by the MPR namespace template. "
-        "Size 1 paints one core tile; Endurance adds only the atlas-authored seam cells required around it. Right-click samples the material from the map. "
+        "Automatic mode always covers the brush core, uses an exact or constrained nearest authored seam when available, and otherwise leaves a hard edge. "
+        "Manual mode paints the selected existing atlas tile and rotation without blending. Size 1 paints one core tile. Right-click samples from the map. "
         "Overlay painting changes only already-active overlay cells and never creates liquid implicitly."), this);
     paintHelp->setWordWrap(true);
     paintLayout->addWidget(paintHelp);
@@ -99,9 +100,10 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     paintForm->addRow(tr("Terrain material"), m_paintTerrainType);
     paintForm->addRow(tr("Brush size (tiles)"), m_paintRadius);
     paintForm->addRow(tr("Brush shape"), m_paintShape);
+    paintForm->addRow(m_manualTileSelection);
     paintForm->addRow(m_showUnderwaterFamilies);
     paintLayout->addLayout(paintForm);
-    QPushButton* tilePicker = new QPushButton(tr("Inspect atlas / choose representative..."), this);
+    QPushButton* tilePicker = new QPushButton(tr("Inspect atlas / choose tile..."), this);
     paintLayout->addWidget(tilePicker);
     QPushButton* exportDiagnostic = new QPushButton(tr("Export paint diagnostic..."), this);
     paintLayout->addWidget(exportDiagnostic);
@@ -125,6 +127,16 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     connect(m_enable, &QCheckBox::toggled, this, &CLandscapeTools::editingStateChanged);
     connect(m_showUnderwaterFamilies, &QCheckBox::toggled, this,
             [this](bool) { refreshPaintTerrainTypes(); });
+    connect(m_manualTileSelection, &QCheckBox::toggled, this, [this](bool manual)
+    {
+        m_paintTerrainType->setEnabled(!manual);
+        if(manual)
+        {
+            const QSignalBlocker blocker(m_paintTerrainType);
+            m_paintTerrainType->setCurrentIndex(0);
+            emit paintTerrainTypeChanged(-1);
+        }
+    });
     const auto visibilityChanged = [this](bool)
     {
         emit terrainVisibilityChanged(m_showMainTerrain->isChecked(),
@@ -207,6 +219,10 @@ ETerrainTileBrushShape CLandscapeTools::paintShape() const
 {
     return m_paintShape->currentIndex() == 1
         ? ETerrainTileBrushShape::Square : ETerrainTileBrushShape::Circle;
+}
+bool CLandscapeTools::manualTileSelectionEnabled() const
+{
+    return m_manualTileSelection->isChecked();
 }
 qint32 CLandscapeTools::paintTerrainType(bool* selected) const
 {

@@ -1280,11 +1280,378 @@ STerrainTileCommand CTerrainEditModel::makeTilePaint(
     return command;
 }
 
+STerrainTileCommand CTerrainEditModel::makeBoundedSemanticTilePaint(
+    const STerrainTileBrush& brush, ETerrainTileLayer layer,
+    qint32 materialId, const CTerrainTransitionCatalog& catalog,
+    quint32 distributionSeed, CValidationReport* report) const
+{
+    STerrainTileCommand command;
+    command.description = layer == ETerrainTileLayer::Land
+        ? QStringLiteral("Paint terrain material")
+        : QStringLiteral("Paint overlay material");
+    command.semanticAudit.valid = true;
+    command.semanticAudit.brush = brush;
+    command.semanticAudit.layer = layer;
+    command.semanticAudit.requestedMaterialId = materialId;
+    command.semanticAudit.junctionPadding = 0;
+    command.semanticAudit.solverLimit = 0;
+    if(brush.radius < 0.0f || !catalog.hasMaterial(materialId))
+    {
+        if(report)
+            report->add("terrain.semantic_type", EValidationSeverity::Error,
+                        "The selected material is absent from the registered namespace template");
+        return command;
+    }
+
+    const int width = tileCountX();
+    const int height = tileCountY();
+    QSet<int> painted;
+    const int minimumX = qMax(0, int(std::ceil(brush.centerX - brush.radius)));
+    const int maximumX = qMin(width - 1, int(std::floor(brush.centerX + brush.radius)));
+    const int minimumY = qMax(0, int(std::ceil(brush.centerY - brush.radius)));
+    const int maximumY = qMin(height - 1, int(std::floor(brush.centerY + brush.radius)));
+    for(int y = minimumY; y <= maximumY; ++y)
+    {
+        for(int x = minimumX; x <= maximumX; ++x)
+        {
+            const float dx = std::fabs(float(x) - brush.centerX);
+            const float dy = std::fabs(float(y) - brush.centerY);
+            const bool inside = brush.shape == ETerrainTileBrushShape::Square
+                ? qMax(dx, dy) <= brush.radius
+                : std::sqrt(dx * dx + dy * dy) <= brush.radius;
+            if(!inside)
+                continue;
+            bool available = false;
+            packedTile(x, y, layer, &available);
+            if(available)
+                painted.insert(y * width + x);
+        }
+    }
+    if(painted.isEmpty())
+    {
+        if(report)
+            report->add(layer == ETerrainTileLayer::Overlay
+                            ? "terrain.overlay_inactive" : "terrain.semantic_empty",
+                        EValidationSeverity::Warning,
+                        layer == ETerrainTileLayer::Overlay
+                            ? "The brush did not cover an active overlay cell"
+                            : "The brush did not cover an editable terrain tile");
+        return command;
+    }
+
+    QVector<int> orderedPainted = painted.values().toVector();
+    std::sort(orderedPainted.begin(), orderedPainted.end());
+    for(int index : orderedPainted)
+        command.semanticAudit.paintedCoreCells.append(QPoint(index % width, index / width));
+
+    STerrainTransitionSignature pure;
+    pure.northWest = pure.northEast = pure.southEast = pure.southWest = materialId;
+    bool pureAvailable = false;
+    catalog.selectForPaint(pure, 0, 0, distributionSeed, &pureAvailable);
+    if(!pureAvailable)
+    {
+        if(report)
+            report->add("terrain.semantic_core_unsupported", EValidationSeverity::Error,
+                        "The atlas has no uniform tile for the requested paint material",
+                        QString::number(materialId));
+        return command;
+    }
+
+    // The only mutable cells outside the brush are the immediate eight-neighbor
+    // ring. Missing transitions never enlarge this footprint.
+    QSet<int> boundary;
+    for(int index : painted)
+    {
+        const int x = index % width;
+        const int y = index / width;
+        for(int offsetY = -1; offsetY <= 1; ++offsetY)
+        {
+            for(int offsetX = -1; offsetX <= 1; ++offsetX)
+            {
+                const int candidateX = x + offsetX;
+                const int candidateY = y + offsetY;
+                if(candidateX < 0 || candidateX >= width
+                   || candidateY < 0 || candidateY >= height)
+                    continue;
+                const int candidate = candidateY * width + candidateX;
+                if(painted.contains(candidate))
+                    continue;
+                bool available = false;
+                packedTile(candidateX, candidateY, layer, &available);
+                if(available)
+                    boundary.insert(candidate);
+            }
+        }
+    }
+    QVector<int> orderedBoundary = boundary.values().toVector();
+    std::sort(orderedBoundary.begin(), orderedBoundary.end());
+    for(int index : orderedPainted)
+        command.semanticAudit.affectedCells.append(QPoint(index % width, index / width));
+    for(int index : orderedBoundary)
+        command.semanticAudit.affectedCells.append(QPoint(index % width, index / width));
+
+    QSet<int> coreCorners;
+    for(int index : painted)
+    {
+        const int x = index % width;
+        const int y = index / width;
+        coreCorners.insert(y * (width + 1) + x);
+        coreCorners.insert(y * (width + 1) + x + 1);
+        coreCorners.insert((y + 1) * (width + 1) + x + 1);
+        coreCorners.insert((y + 1) * (width + 1) + x);
+    }
+
+    QMap<int, STerrainTransitionSignature> existingSignatures;
+    QMap<int, quint16> existingTiles;
+    QMap<qint32, int> backgroundCounts;
+    const auto decodeCell = [&](int index) -> bool {
+        const int x = index % width;
+        const int y = index / width;
+        bool available = false;
+        const quint16 packed = packedTile(x, y, layer, &available);
+        bool found = false;
+        const STerrainTransitionSignature signature = available
+            ? catalog.gridSignatureForPacked(packed, &found)
+            : STerrainTransitionSignature();
+        if(!available || !found)
+        {
+            if(report)
+                report->add("terrain.semantic_catalog", EValidationSeverity::Error,
+                            "An editable tile is absent from the registered namespace template",
+                            QString("%1,%2 packed:0x%3").arg(x).arg(y)
+                                .arg(packed, 4, 16, QLatin1Char('0')));
+            return false;
+        }
+        existingTiles.insert(index, packed);
+        existingSignatures.insert(index, signature);
+        return true;
+    };
+    for(int index : orderedPainted)
+        if(!decodeCell(index))
+            return command;
+    for(int index : orderedBoundary)
+    {
+        if(!decodeCell(index))
+            return command;
+        const STerrainTransitionSignature signature = existingSignatures.value(index);
+        const qint32 values[4] = {signature.northWest, signature.northEast,
+                                  signature.southEast, signature.southWest};
+        for(qint32 value : values)
+            if(value != materialId)
+                backgroundCounts[value] += 1;
+    }
+    qint32 backgroundMaterial = materialId;
+    int backgroundSupport = -1;
+    for(auto entry = backgroundCounts.constBegin(); entry != backgroundCounts.constEnd(); ++entry)
+    {
+        if(entry.value() > backgroundSupport)
+        {
+            backgroundMaterial = entry.key();
+            backgroundSupport = entry.value();
+        }
+    }
+    command.semanticAudit.backgroundMaterialId = backgroundMaterial;
+    command.semanticAudit.materialPath = backgroundMaterial == materialId
+        ? QVector<qint32>({materialId})
+        : QVector<qint32>({materialId, backgroundMaterial});
+
+    const auto appendDelta = [&](int index, quint16 after,
+                                 const STerrainTransitionSignature& requested) {
+        const quint16 before = existingTiles.value(index);
+        if(before == after)
+            return;
+        STerrainTileDelta delta;
+        delta.globalX = index % width;
+        delta.globalY = index / width;
+        delta.layer = layer;
+        delta.before = before;
+        delta.after = after;
+        delta.hasSemanticRequest = true;
+        delta.brushCenterX = qRound(brush.centerX);
+        delta.brushCenterY = qRound(brush.centerY);
+        delta.requestedMaterialId = materialId;
+        delta.requestedSignature = requested;
+        command.deltas.append(delta);
+    };
+
+    // Core coverage is non-negotiable. Atlas limitations may affect only the
+    // transition ring, never whether the user's requested cells get painted.
+    for(int index : orderedPainted)
+    {
+        const STerrainTransitionSignature existing = existingSignatures.value(index);
+        if(existing == pure)
+            continue;
+        const int x = index % width;
+        const int y = index / width;
+        bool found = false;
+        const quint16 after = catalog.selectForPaint(
+            pure, x, y, distributionSeed, &found);
+        if(!found)
+        {
+            if(report)
+                report->add("terrain.semantic_core_unsupported", EValidationSeverity::Error,
+                            "The atlas stopped resolving a uniform requested paint tile",
+                            QString("%1,%2").arg(x).arg(y));
+            command.deltas.clear();
+            return command;
+        }
+        appendDelta(index, after, pure);
+    }
+
+    const QVector<STerrainTransitionSignature> authored = catalog.gridSignatures();
+    const auto valuesOf = [](const STerrainTransitionSignature& signature) {
+        return QVector<qint32>({signature.northWest, signature.northEast,
+                                signature.southEast, signature.southWest});
+    };
+    const auto lexicallyEarlier = [](const STerrainTransitionSignature& left,
+                                     const STerrainTransitionSignature& right) {
+        if(left.northWest != right.northWest)
+            return left.northWest < right.northWest;
+        if(left.northEast != right.northEast)
+            return left.northEast < right.northEast;
+        if(left.southEast != right.southEast)
+            return left.southEast < right.southEast;
+        return left.southWest < right.southWest;
+    };
+    int nearestCount = 0;
+    int hardEdgeCount = 0;
+    int candidateChecks = 0;
+    for(int index : orderedBoundary)
+    {
+        const int x = index % width;
+        const int y = index / width;
+        const int cornerKeys[4] = {y * (width + 1) + x,
+                                   y * (width + 1) + x + 1,
+                                   (y + 1) * (width + 1) + x + 1,
+                                   (y + 1) * (width + 1) + x};
+        const STerrainTransitionSignature existing = existingSignatures.value(index);
+        const QVector<qint32> existingValues = valuesOf(existing);
+        QVector<qint32> desiredValues = existingValues;
+        int targetCornerCount = 0;
+        for(int corner = 0; corner < 4; ++corner)
+        {
+            if(coreCorners.contains(cornerKeys[corner]))
+            {
+                desiredValues[corner] = materialId;
+                ++targetCornerCount;
+            }
+        }
+        if(targetCornerCount == 0)
+            continue;
+        STerrainTransitionSignature desired;
+        desired.northWest = desiredValues.at(0);
+        desired.northEast = desiredValues.at(1);
+        desired.southEast = desiredValues.at(2);
+        desired.southWest = desiredValues.at(3);
+        if(desired == existing)
+            continue;
+
+        bool exactFound = false;
+        quint16 after = catalog.selectForPaint(
+            desired, x, y, distributionSeed, &exactFound);
+        STerrainTransitionSignature selected = desired;
+        if(!exactFound)
+        {
+            // Nearest candidates remain topologically anchored to the core and
+            // may use only families already present in this exact boundary tile.
+            QSet<qint32> allowedMaterials;
+            allowedMaterials.insert(materialId);
+            for(qint32 value : existingValues)
+                allowedMaterials.insert(value);
+            int bestCost = std::numeric_limits<int>::max();
+            int bestMismatchCount = std::numeric_limits<int>::max();
+            bool nearestFound = false;
+            STerrainTransitionSignature nearest;
+            for(const STerrainTransitionSignature& candidate : authored)
+            {
+                ++candidateChecks;
+                const QVector<qint32> candidateValues = valuesOf(candidate);
+                bool valid = true;
+                bool retainsBackground = false;
+                int mismatchCount = 0;
+                int cost = 0;
+                for(int corner = 0; corner < 4; ++corner)
+                {
+                    const qint32 value = candidateValues.at(corner);
+                    if(!allowedMaterials.contains(value)
+                       || (coreCorners.contains(cornerKeys[corner]) && value != materialId))
+                    {
+                        valid = false;
+                        break;
+                    }
+                    if(!coreCorners.contains(cornerKeys[corner]) && value != materialId)
+                        retainsBackground = true;
+                    if(value != desiredValues.at(corner))
+                    {
+                        ++mismatchCount;
+                        cost += 16;
+                    }
+                    if(value != existingValues.at(corner))
+                        cost += 2;
+                }
+                // More than one wrong corner is too dissimilar: keep a hard
+                // seam instead of turning the transition ring into extra paint.
+                if(!valid || !retainsBackground || mismatchCount > 1)
+                    continue;
+                if(!nearestFound || cost < bestCost
+                   || (cost == bestCost && mismatchCount < bestMismatchCount)
+                   || (cost == bestCost && mismatchCount == bestMismatchCount
+                       && lexicallyEarlier(candidate, nearest)))
+                {
+                    bestCost = cost;
+                    bestMismatchCount = mismatchCount;
+                    nearest = candidate;
+                    nearestFound = true;
+                }
+            }
+            if(nearestFound)
+            {
+                bool packedFound = false;
+                after = catalog.selectForPaint(
+                    nearest, x, y, distributionSeed, &packedFound);
+                if(packedFound)
+                {
+                    selected = nearest;
+                    ++nearestCount;
+                }
+                else
+                    nearestFound = false;
+            }
+            if(!nearestFound)
+            {
+                ++hardEdgeCount;
+                continue;
+            }
+        }
+        if(!(selected == existing))
+            appendDelta(index, after, selected);
+    }
+
+    command.semanticAudit.solverNodes = candidateChecks;
+    command.semanticAudit.solverMode = hardEdgeCount > 0
+        ? QStringLiteral("bounded-hard-edge")
+        : nearestCount > 0
+            ? QStringLiteral("bounded-nearest")
+            : QStringLiteral("bounded-exact");
+    if(nearestCount > 0 && report)
+        report->add("terrain.semantic_nearest", EValidationSeverity::Warning,
+                    "Some boundary tiles used a constrained nearest authored transition",
+                    QString::number(nearestCount));
+    if(hardEdgeCount > 0 && report)
+        report->add("terrain.semantic_hard_edge", EValidationSeverity::Warning,
+                    "Some unsupported boundary transitions were left as hard seams",
+                    QString::number(hardEdgeCount));
+    return command;
+}
+
 STerrainTileCommand CTerrainEditModel::makeSemanticTilePaint(
     const STerrainTileBrush& brush, ETerrainTileLayer layer,
     qint32 materialId, const CTerrainTransitionCatalog& catalog,
     quint32 distributionSeed, CValidationReport* report) const
 {
+    return makeBoundedSemanticTilePaint(
+        brush, layer, materialId, catalog, distributionSeed, report);
+#if 0
     CValidationReport compactReport;
     STerrainTileCommand compact = makeSemanticTilePaintAttempt(
         brush, layer, materialId, catalog, distributionSeed, 0, true,
@@ -1334,8 +1701,10 @@ STerrainTileCommand CTerrainEditModel::makeSemanticTilePaint(
             report->add(finding.code, finding.severity,
                         finding.message, finding.location);
     return expanded;
+#endif
 }
 
+#if 0
 STerrainTileCommand CTerrainEditModel::makeSemanticTilePaintAttempt(
     const STerrainTileBrush& brush, ETerrainTileLayer layer,
     qint32 materialId, const CTerrainTransitionCatalog& catalog,
@@ -2114,6 +2483,7 @@ STerrainTileCommand CTerrainEditModel::makeSemanticTilePaintAttempt(
     }
     return command;
 }
+#endif
 
 bool CTerrainEditModel::apply(const STerrainTileCommand& command, bool forward,
                               CValidationReport* report)
