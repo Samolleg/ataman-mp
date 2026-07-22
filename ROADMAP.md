@@ -5,7 +5,7 @@ work is ordered from the newest planned minor line to the oldest completed one.
 An item is checked only after its implementation has landed and received the
 stated validation. Completed code should carry a commit, test, or release link.
 
-Current development line: `0.2.1-alpha.31` focused closed testing.
+Current development line: `0.2.1-alpha.32` focused closed testing.
 
 <details open>
 <summary><strong>General wishlist — not assigned to a release</strong></summary>
@@ -307,7 +307,13 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
 - **Current tester build:** `0.2.1-alpha.30`; runtime ownership and Hot Reload
   are tester-confirmed, while conversion of type-53/type-55 world objects is
   incorrectly rejected before mutation.
-- **Current test candidate:** `0.2.1-alpha.31`. Alpha.31 corrects the lever
+- **Current test candidate:** `0.2.1-alpha.32`. Alpha.32 adds a persistent
+  0.1x-10x viewport camera-speed control, a configurable Ctrl+mouse-wheel
+  gesture, and a cancellable 15-second notice before each periodic recovery
+  autosave. Selection-only undo steps no longer rebuild a full lossless MOB
+  candidate or schedule family validation, removing the observed selection
+  hitches. ([`c5feca5`](https://github.com/Ilufus/ei-mapper-endurance/commit/c5feca5))
+  Alpha.31 corrects the lever
   eligibility rule using the complete Base/JMV corpus: basic `OBJECT` records
   with proven subtypes 53 (flora), 54 (ordinary scenery), and 55
   (stone/scenery) can be converted; malformed, duplicate, and unproven subtype
@@ -933,6 +939,11 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
 - [x] **High priority:** add periodic autosave with versioned, recoverable
   backup states soon after the RC gate. Autosaves must never overwrite live
   source maps directly and recovery must identify the source hash/generation.
+  Each scheduled occurrence now gives a non-activating 15-second countdown and
+  can be skipped without disabling the autosave schedule.
+- [x] Add a viewport camera-speed multiplier from 0.1x to 10x, persisted in
+  Endurance settings and adjustable through a configurable Ctrl+mouse-wheel
+  gesture.
 - [ ] Add a resizable bottom workflow-log panel with filtering, copy/export, and
   quick access to the full rotated log.
 - [x] Show named, blocking save phases—serialize, validate, create backup,
