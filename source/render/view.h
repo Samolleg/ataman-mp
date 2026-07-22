@@ -311,11 +311,17 @@ private:
     QOpenGLShaderProgram m_shadowProgram;
     QOpenGLFramebufferObject* m_shadowFbo{nullptr};
     QOpenGLFramebufferObject* m_dynamicShadowFbo{nullptr};
+    QOpenGLFramebufferObject* m_farShadowFbo{nullptr};
+    QOpenGLFramebufferObject* m_farDynamicShadowFbo{nullptr};
     QMatrix4x4 m_staticLightSpaceMatrix;
     QMatrix4x4 m_dynamicLightSpaceMatrix;
+    QMatrix4x4 m_farStaticLightSpaceMatrix;
+    QMatrix4x4 m_farDynamicLightSpaceMatrix;
+    float m_nearShadowSplit{64.0f};
     QElapsedTimer m_shadowUpdateTimer;
     bool m_shadowInitialized{false};
     QByteArray m_staticShadowFingerprint;
+    QByteArray m_farStaticShadowFingerprint;
     QOpenGLTimerQuery* m_gpuTimer;
     bool m_gpuTimerPending;
     QMatrix4x4 m_projection;

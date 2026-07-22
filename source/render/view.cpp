@@ -21,6 +21,7 @@
 #include <QtEndian>
 #include <cstddef>
 #include <cstring>
+#include <limits>
 
 #include "view.h"
 #include "render_scheduling.h"
@@ -340,6 +341,10 @@ CView::~CView()
     m_shadowFbo = nullptr;
     delete m_dynamicShadowFbo;
     m_dynamicShadowFbo = nullptr;
+    delete m_farShadowFbo;
+    m_farShadowFbo = nullptr;
+    delete m_farDynamicShadowFbo;
+    m_farDynamicShadowFbo = nullptr;
     ei::setCrashContext("shutdown/view-mobs");
 
     const int meshCount = CPart::sharedMeshCount();
@@ -587,6 +592,7 @@ void CView::refreshAfterResourceSetup()
     m_spatialIndexDirty = true;
     m_skyResourcesChecked = false;
     m_staticShadowFingerprint.clear();
+    m_farStaticShadowFingerprint.clear();
     updateGeometry();
     if(width() > 0 && height() > 0)
         resizeGL(width(), height());
@@ -685,17 +691,35 @@ QString CView::sceneSourceFingerprint()
 
 void CView::initShaders()
 {
+    const auto reportShaderFailure = [](const char* stage,
+                                        const QOpenGLShaderProgram& program)
+    {
+        ei::log(eLogWarning, QStringLiteral("OpenGL shader failure (%1): %2")
+            .arg(QString::fromLatin1(stage), program.log()));
+    };
     // Compile vertex shader
     if (!m_program.addShaderFromSourceFile(QOpenGLShader::Vertex, ":/vshader.vsh"))
+    {
+        reportShaderFailure("object vertex", m_program);
         close();
+        return;
+    }
 
     // Compile fragment shader
     if (!m_program.addShaderFromSourceFile(QOpenGLShader::Fragment, ":/fshader.fsh"))
+    {
+        reportShaderFailure("object fragment", m_program);
         close();
+        return;
+    }
 
     // Link shader pipeline
     if (!m_program.link())
+    {
+        reportShaderFailure("object link", m_program);
         close();
+        return;
+    }
 
     m_program.bind();
     m_program.setUniformValue("customColor", QVector4D(0.0, 0.0, 0.0, 0.0));
@@ -704,11 +728,23 @@ void CView::initShaders()
 
     // Compile land shader
     if (!m_landProgram.addShaderFromSourceFile(QOpenGLShader::Vertex, ":/vshader.vsh"))
+    {
+        reportShaderFailure("terrain vertex", m_landProgram);
         close();
+        return;
+    }
     if (!m_landProgram.addShaderFromSourceFile(QOpenGLShader::Fragment, ":/landshader.fsh"))  //use absolute path for recompile shader every app rise
+    {
+        reportShaderFailure("terrain fragment", m_landProgram);
         close();
+        return;
+    }
     if (!m_landProgram.link())
+    {
+        reportShaderFailure("terrain link", m_landProgram);
         close();
+        return;
+    }
 
     m_landProgram.bind();
     m_landProgram.setUniformValue("u_instanced", false);
@@ -789,19 +825,27 @@ void CView::initializeGL()
     // expensive. The receiver shader carries each map's texel size.
     m_shadowFbo = new QOpenGLFramebufferObject(4096, 4096, shadowFormat);
     m_dynamicShadowFbo = new QOpenGLFramebufferObject(2048, 2048, shadowFormat);
-    if(!m_shadowFbo->isValid() || !m_dynamicShadowFbo->isValid())
+    m_farShadowFbo = new QOpenGLFramebufferObject(2048, 2048, shadowFormat);
+    m_farDynamicShadowFbo = new QOpenGLFramebufferObject(2048, 2048, shadowFormat);
+    if(!m_shadowFbo->isValid() || !m_dynamicShadowFbo->isValid()
+            || !m_farShadowFbo->isValid() || !m_farDynamicShadowFbo->isValid())
     {
         ei::log(eLogWarning, "Shadow framebuffer is unavailable; shadow rendering disabled");
         delete m_shadowFbo;
         m_shadowFbo = nullptr;
         delete m_dynamicShadowFbo;
         m_dynamicShadowFbo = nullptr;
+        delete m_farShadowFbo;
+        m_farShadowFbo = nullptr;
+        delete m_farDynamicShadowFbo;
+        m_farDynamicShadowFbo = nullptr;
     }
     else
     {
         // Packed RGBA depth must never be interpolated channel-by-channel.
         // The receiver performs its own 3x3 PCF over nearest depth samples.
-        for(QOpenGLFramebufferObject* shadowTarget : {m_shadowFbo, m_dynamicShadowFbo})
+        for(QOpenGLFramebufferObject* shadowTarget : {m_shadowFbo, m_dynamicShadowFbo,
+                                                       m_farShadowFbo, m_farDynamicShadowFbo})
         {
             glBindTexture(GL_TEXTURE_2D, shadowTarget->texture());
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
@@ -961,75 +1005,130 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
                             RenderQueueContext& queue,
                             float maximumDistance)
 {
-    if(!m_shadowFbo || !m_dynamicShadowFbo
-            || !m_shadowFbo->isValid() || !m_dynamicShadowFbo->isValid())
+    if(!m_shadowFbo || !m_dynamicShadowFbo || !m_farShadowFbo || !m_farDynamicShadowFbo
+            || !m_shadowFbo->isValid() || !m_dynamicShadowFbo->isValid()
+            || !m_farShadowFbo->isValid() || !m_farDynamicShadowFbo->isValid())
         return false;
 
-    // Stock EI gives each caster an entire 64x64 silhouette. A fixed whole-map
-    // projection spends almost all available texels on empty space, making a
-    // nearby human or tree trunk only a handful of samples wide. Scale the
-    // editor maps with camera distance instead: close views retain caster
-    // detail and contact, while wide views retain the required coverage.
     const float cameraDistance = (cameraPosition - shadowFocus).length();
-    const auto quantizedExtent = [](float value, float minimum, float maximum)
-    {
-        return qBound(minimum, qCeil(value / 8.0f) * 8.0f, maximum);
-    };
     const float safeMaximumDistance = qBound(1.0f, maximumDistance, 1024.0f);
-    const float staticCoverageMaximum = qMax(40.0f, safeMaximumDistance);
-    const float dynamicCoverageMaximum = qMax(28.0f, safeMaximumDistance);
-    const float staticExtent = quantizedExtent(cameraDistance * 1.25f,
-                                                40.0f, staticCoverageMaximum);
-    const float dynamicExtent = quantizedExtent(cameraDistance * 0.85f,
-                                                 28.0f, dynamicCoverageMaximum);
-    // Static coverage remains stable inside half a terrain sector so its
-    // expensive cached pass is not rebuilt for every small pan.
-    const QVector3D staticFocus(qFloor(shadowFocus.x() / 8.0f) * 8.0f,
-                                qFloor(shadowFocus.y() / 8.0f) * 8.0f,
-                                shadowFocus.z());
+    m_nearShadowSplit = qMin(safeMaximumDistance,
+        qBound(48.0f, cameraDistance * 1.5f, 128.0f));
     QVector3D up(0.0f, 0.0f, 1.0f);
     if(qAbs(QVector3D::dotProduct(environment.sunDirection.normalized(), up)) > 0.96f)
         up = QVector3D(0.0f, 1.0f, 0.0f);
     const QVector3D lightDirection = environment.sunDirection.normalized();
-    // Snap the animated map in the light's image plane, not in world X/Y.
-    // This keeps a world point on the same shadow texel while the camera pans.
     const QVector3D lightRight = QVector3D::crossProduct(lightDirection, up).normalized();
     const QVector3D lightUp = QVector3D::crossProduct(lightRight, lightDirection).normalized();
-    const float dynamicWorldTexel = (2.0f * dynamicExtent)
-        / float(qMax(1, m_dynamicShadowFbo->width()));
-    QVector3D dynamicFocus = shadowFocus;
-    const float rightCoordinate = QVector3D::dotProduct(dynamicFocus, lightRight);
-    const float upCoordinate = QVector3D::dotProduct(dynamicFocus, lightUp);
-    dynamicFocus += lightRight
-        * (qRound(rightCoordinate / dynamicWorldTexel) * dynamicWorldTexel - rightCoordinate);
-    dynamicFocus += lightUp
-        * (qRound(upCoordinate / dynamicWorldTexel) * dynamicWorldTexel - upCoordinate);
-    QMatrix4x4 staticLightView;
-    staticLightView.lookAt(staticFocus - lightDirection * 420.0f,
-                           staticFocus, up);
-    QMatrix4x4 dynamicLightView;
-    dynamicLightView.lookAt(dynamicFocus - lightDirection * 420.0f,
-                            dynamicFocus, up);
-    QMatrix4x4 staticProjection;
-    staticProjection.ortho(-staticExtent, staticExtent,
-                           -staticExtent, staticExtent, 1.0f, 900.0f);
-    QMatrix4x4 dynamicProjection;
-    dynamicProjection.ortho(-dynamicExtent, dynamicExtent,
-                            -dynamicExtent, dynamicExtent, 1.0f, 900.0f);
-    const QMatrix4x4 candidateStaticMatrix = staticProjection * staticLightView;
-    const QMatrix4x4 candidateDynamicMatrix = dynamicProjection * dynamicLightView;
+
+    struct SCascade
+    {
+        QMatrix4x4 staticView;
+        QMatrix4x4 dynamicView;
+        QMatrix4x4 projection;
+        QMatrix4x4 staticMatrix;
+        QMatrix4x4 dynamicMatrix;
+    };
+    const auto buildCascade = [&](float sliceNear, float sliceFar,
+                                  int dynamicResolution) -> SCascade
+    {
+        float minimumRight = std::numeric_limits<float>::max();
+        float maximumRight = std::numeric_limits<float>::lowest();
+        float minimumUp = std::numeric_limits<float>::max();
+        float maximumUp = std::numeric_limits<float>::lowest();
+        bool inverseOk = false;
+        const QMatrix4x4 inverseViewProjection =
+            (m_projection * m_cam->viewMatrix()).inverted(&inverseOk);
+        if(inverseOk)
+        {
+            for(int y = -1; y <= 1; y += 2)
+                for(int x = -1; x <= 1; x += 2)
+                {
+                    QVector4D farPoint = inverseViewProjection
+                        * QVector4D(float(x), float(y), 1.0f, 1.0f);
+                    if(qFuzzyIsNull(farPoint.w()))
+                        continue;
+                    const QVector3D farWorld = farPoint.toVector3D() / farPoint.w();
+                    const QVector3D ray = (farWorld - cameraPosition).normalized();
+                    for(const float distance : {qMax(1.0f, sliceNear), sliceFar})
+                    {
+                        const QVector3D point = cameraPosition + ray * distance;
+                        const float right = QVector3D::dotProduct(point, lightRight);
+                        const float imageUp = QVector3D::dotProduct(point, lightUp);
+                        minimumRight = qMin(minimumRight, right);
+                        maximumRight = qMax(maximumRight, right);
+                        minimumUp = qMin(minimumUp, imageUp);
+                        maximumUp = qMax(maximumUp, imageUp);
+                    }
+                }
+        }
+        if(minimumRight > maximumRight || minimumUp > maximumUp)
+        {
+            const float right = QVector3D::dotProduct(shadowFocus, lightRight);
+            const float imageUp = QVector3D::dotProduct(shadowFocus, lightUp);
+            minimumRight = right - sliceFar;
+            maximumRight = right + sliceFar;
+            minimumUp = imageUp - sliceFar;
+            maximumUp = imageUp + sliceFar;
+        }
+
+        // Leave room for caster geometry just outside the receiver slice. Unlike
+        // the rejected single-frustum fit, this guard cannot pull the near map
+        // out to the horizon because sliceFar is already bounded.
+        const float guardBand = 12.0f;
+        const float centerRight = (minimumRight + maximumRight) * 0.5f;
+        const float centerUp = (minimumUp + maximumUp) * 0.5f;
+        const float rawExtent = qMax((maximumRight - minimumRight) * 0.5f,
+                                     (maximumUp - minimumUp) * 0.5f) + guardBand;
+        const float extent = qMax(8.0f, qCeil(rawExtent / 2.0f) * 2.0f);
+        const float lightCoordinate = QVector3D::dotProduct(shadowFocus, lightDirection);
+        QVector3D baseFocus = lightRight * centerRight + lightUp * centerUp
+            + lightDirection * lightCoordinate;
+        const auto snappedFocus = [&](float snap)
+        {
+            QVector3D focus = baseFocus;
+            focus += lightRight * (qRound(centerRight / snap) * snap - centerRight);
+            focus += lightUp * (qRound(centerUp / snap) * snap - centerUp);
+            return focus;
+        };
+        const QVector3D staticFocus = snappedFocus(2.0f);
+        const float dynamicTexel = (2.0f * extent) / float(qMax(1, dynamicResolution));
+        const QVector3D dynamicFocus = snappedFocus(qMax(dynamicTexel, 0.0001f));
+        const float depthHalf = qMax(256.0f, safeMaximumDistance + 128.0f);
+        SCascade result;
+        result.staticView.lookAt(staticFocus - lightDirection * depthHalf, staticFocus, up);
+        result.dynamicView.lookAt(dynamicFocus - lightDirection * depthHalf, dynamicFocus, up);
+        result.projection.ortho(-extent, extent, -extent, extent,
+                                1.0f, depthHalf * 2.0f + 1.0f);
+        result.staticMatrix = result.projection * result.staticView;
+        result.dynamicMatrix = result.projection * result.dynamicView;
+        return result;
+    };
+
+    const SCascade nearCascade = buildCascade(0.0f, m_nearShadowSplit,
+                                               m_dynamicShadowFbo->width());
+    const SCascade farCascade = buildCascade(m_nearShadowSplit * 0.8f,
+                                              safeMaximumDistance,
+                                              m_farDynamicShadowFbo->width());
 
     QCryptographicHash staticHash(QCryptographicHash::Sha256);
     staticHash.addData(queue.staticShadowFingerprint());
     staticHash.addData(sceneSourceFingerprint().toUtf8());
-    staticHash.addData(reinterpret_cast<const char*>(candidateStaticMatrix.constData()),
+    staticHash.addData(reinterpret_cast<const char*>(nearCascade.staticMatrix.constData()),
                        16 * int(sizeof(float)));
-    staticHash.addData(reinterpret_cast<const char*>(&safeMaximumDistance),
-                       int(sizeof(safeMaximumDistance)));
     const QByteArray staticFingerprint = staticHash.result();
+    QCryptographicHash farStaticHash(QCryptographicHash::Sha256);
+    farStaticHash.addData(queue.staticShadowFingerprint());
+    farStaticHash.addData(sceneSourceFingerprint().toUtf8());
+    farStaticHash.addData(reinterpret_cast<const char*>(farCascade.staticMatrix.constData()),
+                          16 * int(sizeof(float)));
+    farStaticHash.addData(reinterpret_cast<const char*>(&safeMaximumDistance),
+                          int(sizeof(safeMaximumDistance)));
+    const QByteArray farStaticFingerprint = farStaticHash.result();
     const bool rebuildStatic = staticFingerprint != m_staticShadowFingerprint;
+    const bool rebuildFarStatic = farStaticFingerprint != m_farStaticShadowFingerprint;
     const bool rebuildDynamic = !m_shadowInitialized || m_shadowUpdateTimer.elapsed() >= 66;
-    if(!rebuildStatic && !rebuildDynamic)
+    if(!rebuildStatic && !rebuildFarStatic && !rebuildDynamic)
         return true;
 
     glDisable(GL_BLEND);
@@ -1049,23 +1148,37 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
     };
     if(rebuildStatic)
     {
-        m_staticLightSpaceMatrix = candidateStaticMatrix;
-        beginTarget(m_shadowFbo, staticProjection, staticLightView);
-        // Stock EI terrain receives projected shadows but does not cast them.
-        // Keep it out of both shadow maps; it remains in the color/receiver pass.
-        queue.flushShadow(&m_shadowProgram, safeMaximumDistance, false, true);
+        m_staticLightSpaceMatrix = nearCascade.staticMatrix;
+        beginTarget(m_shadowFbo, nearCascade.projection, nearCascade.staticView);
+        queue.flushShadow(&m_shadowProgram,
+                          qMin(safeMaximumDistance, m_nearShadowSplit + 24.0f),
+                          false, true);
         m_shadowFbo->release();
         m_staticShadowFingerprint = staticFingerprint;
+    }
+    if(rebuildFarStatic)
+    {
+        m_farStaticLightSpaceMatrix = farCascade.staticMatrix;
+        beginTarget(m_farShadowFbo, farCascade.projection, farCascade.staticView);
+        queue.flushShadow(&m_shadowProgram, safeMaximumDistance, false, true);
+        m_farShadowFbo->release();
+        m_farStaticShadowFingerprint = farStaticFingerprint;
     }
     if(rebuildDynamic)
     {
         // The sampling matrix and its depth texture are one atomic snapshot.
         // Updating the matrix on every paint while redrawing the animated map
         // at 15 Hz made unit shadows jump and flicker during camera pans.
-        m_dynamicLightSpaceMatrix = candidateDynamicMatrix;
-        beginTarget(m_dynamicShadowFbo, dynamicProjection, dynamicLightView);
-        queue.flushShadow(&m_shadowProgram, safeMaximumDistance, true, false);
+        m_dynamicLightSpaceMatrix = nearCascade.dynamicMatrix;
+        beginTarget(m_dynamicShadowFbo, nearCascade.projection, nearCascade.dynamicView);
+        queue.flushShadow(&m_shadowProgram,
+                          qMin(safeMaximumDistance, m_nearShadowSplit + 24.0f),
+                          true, false);
         m_dynamicShadowFbo->release();
+        m_farDynamicLightSpaceMatrix = farCascade.dynamicMatrix;
+        beginTarget(m_farDynamicShadowFbo, farCascade.projection, farCascade.dynamicView);
+        queue.flushShadow(&m_shadowProgram, safeMaximumDistance, true, false);
+        m_farDynamicShadowFbo->release();
         m_shadowUpdateTimer.restart();
     }
     m_shadowInitialized = true;
@@ -1079,23 +1192,38 @@ void CView::applyShadowUniforms(QOpenGLShaderProgram& program, bool enabled,
                                 bool receiveStatic, bool receiveDynamic)
 {
     const bool available = enabled && m_shadowFbo && m_dynamicShadowFbo
+        && m_farShadowFbo && m_farDynamicShadowFbo
         && m_shadowFbo->isValid() && m_dynamicShadowFbo->isValid()
+        && m_farShadowFbo->isValid() && m_farDynamicShadowFbo->isValid()
         && m_shadowInitialized;
     program.setUniformValue("u_shadowsEnabled", available);
     program.setUniformValue("u_staticLightSpaceMatrix", m_staticLightSpaceMatrix);
     program.setUniformValue("u_dynamicLightSpaceMatrix", m_dynamicLightSpaceMatrix);
+    program.setUniformValue("u_farStaticLightSpaceMatrix", m_farStaticLightSpaceMatrix);
+    program.setUniformValue("u_farDynamicLightSpaceMatrix", m_farDynamicLightSpaceMatrix);
+    program.setUniformValue("u_nearShadowSplit", m_nearShadowSplit);
     program.setUniformValue("u_receiveStaticShadow", receiveStatic);
     program.setUniformValue("u_receiveDynamicShadow", receiveDynamic);
     program.setUniformValue("u_staticShadowMap", 1);
     program.setUniformValue("u_dynamicShadowMap", 2);
+    program.setUniformValue("u_farStaticShadowMap", 3);
+    program.setUniformValue("u_farDynamicShadowMap", 4);
     const float staticTexel = m_shadowFbo
         ? 1.0f / float(m_shadowFbo->width()) : 0.0f;
     const float dynamicTexel = m_dynamicShadowFbo
         ? 1.0f / float(m_dynamicShadowFbo->width()) : 0.0f;
+    const float farStaticTexel = m_farShadowFbo
+        ? 1.0f / float(m_farShadowFbo->width()) : 0.0f;
+    const float farDynamicTexel = m_farDynamicShadowFbo
+        ? 1.0f / float(m_farDynamicShadowFbo->width()) : 0.0f;
     program.setUniformValue("u_staticShadowTexelSize",
                             QVector2D(staticTexel, staticTexel));
     program.setUniformValue("u_dynamicShadowTexelSize",
                             QVector2D(dynamicTexel, dynamicTexel));
+    program.setUniformValue("u_farStaticShadowTexelSize",
+                            QVector2D(farStaticTexel, farStaticTexel));
+    program.setUniformValue("u_farDynamicShadowTexelSize",
+                            QVector2D(farDynamicTexel, farDynamicTexel));
     if(available)
     {
         QOpenGLFunctions* functions = QOpenGLContext::currentContext()->functions();
@@ -1103,6 +1231,10 @@ void CView::applyShadowUniforms(QOpenGLShaderProgram& program, bool enabled,
         glBindTexture(GL_TEXTURE_2D, m_shadowFbo->texture());
         functions->glActiveTexture(GL_TEXTURE2);
         glBindTexture(GL_TEXTURE_2D, m_dynamicShadowFbo->texture());
+        functions->glActiveTexture(GL_TEXTURE3);
+        glBindTexture(GL_TEXTURE_2D, m_farShadowFbo->texture());
+        functions->glActiveTexture(GL_TEXTURE4);
+        glBindTexture(GL_TEXTURE_2D, m_farDynamicShadowFbo->texture());
         functions->glActiveTexture(GL_TEXTURE0);
     }
 }
@@ -2822,6 +2954,7 @@ bool CView::unloadMobDocument(CMob* mob, bool promptForSave)
         m_caveEnvironment = false;
         m_shadowInitialized = false;
         m_staticShadowFingerprint.clear();
+        m_farStaticShadowFingerprint.clear();
         makeCurrent();
         CTextureList::getInstance()->clearTransientVisualCache();
     }
@@ -3010,6 +3143,7 @@ void CView::unloadMob(QString mobName)
         m_caveEnvironment = false;
         m_shadowInitialized = false;
         m_staticShadowFingerprint.clear();
+        m_farStaticShadowFingerprint.clear();
     }
     else
     {
@@ -3040,6 +3174,7 @@ void CView::unloadMob(QString mobName)
         m_caveEnvironment = false;
         m_shadowInitialized = false;
         m_staticShadowFingerprint.clear();
+        m_farStaticShadowFingerprint.clear();
         makeCurrent();
         CTextureList::getInstance()->clearTransientVisualCache();
         // Keep the view context current for the next map's terrain/resource
@@ -4001,6 +4136,7 @@ void CView::setMapSkyType(const QString& skyType)
     m_caveEnvironment = cave;
     m_shadowInitialized = false;
     m_staticShadowFingerprint.clear();
+    m_farStaticShadowFingerprint.clear();
     update();
 }
 
@@ -4912,6 +5048,7 @@ void CView::setDirtyMpr()
 {
     m_pLand->setDirty(true);
     m_staticShadowFingerprint.clear();
+    m_farStaticShadowFingerprint.clear();
     emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMprDirtyFlag, "*");
 }
 

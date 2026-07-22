@@ -25,10 +25,17 @@ uniform vec3 u_pointLightColor[8];
 uniform bool u_shadowsEnabled;
 uniform sampler2D u_staticShadowMap;
 uniform sampler2D u_dynamicShadowMap;
+uniform sampler2D u_farStaticShadowMap;
+uniform sampler2D u_farDynamicShadowMap;
 uniform mat4 u_staticLightSpaceMatrix;
 uniform mat4 u_dynamicLightSpaceMatrix;
+uniform mat4 u_farStaticLightSpaceMatrix;
+uniform mat4 u_farDynamicLightSpaceMatrix;
 uniform vec2 u_staticShadowTexelSize;
 uniform vec2 u_dynamicShadowTexelSize;
+uniform vec2 u_farStaticShadowTexelSize;
+uniform vec2 u_farDynamicShadowTexelSize;
+uniform float u_nearShadowSplit;
 uniform bool u_receiveStaticShadow;
 uniform bool u_receiveDynamicShadow;
 
@@ -54,6 +61,34 @@ float borderFog(vec3 world)
   return clamp((border - distanceToEdge) / border, 0.0, 1.0);
 }
 
+float cascadeVisibility(vec3 staticProjected, vec3 dynamicProjected,
+                        bool staticInside, bool dynamicInside,
+                        sampler2D staticMap, sampler2D dynamicMap,
+                        vec2 staticTexel, vec2 dynamicTexel,
+                        float staticBias, float dynamicBias)
+{
+  float visibility = 0.0;
+  bool centerOccluded = false;
+  for (int y = -1; y <= 1; ++y)
+    for (int x = -1; x <= 1; ++x)
+    {
+      vec2 offset = vec2(float(x), float(y));
+      float staticDepth = staticInside
+          ? unpackShadowDepth(texture2D(staticMap, staticProjected.xy + offset * staticTexel))
+          : 1.0;
+      float dynamicDepth = dynamicInside
+          ? unpackShadowDepth(texture2D(dynamicMap, dynamicProjected.xy + offset * dynamicTexel))
+          : 1.0;
+      bool staticOccluded = staticInside && staticProjected.z - staticBias > staticDepth;
+      bool dynamicOccluded = dynamicInside && dynamicProjected.z - dynamicBias > dynamicDepth;
+      if (x == 0 && y == 0)
+        centerOccluded = staticOccluded || dynamicOccluded;
+      visibility += (staticOccluded || dynamicOccluded) ? 0.58 : 1.0;
+    }
+  visibility /= 9.0;
+  return centerOccluded ? min(visibility, 0.58) : visibility;
+}
+
 void main(void)
 {
   vec3 norm = normalize(v_normal);
@@ -74,40 +109,42 @@ void main(void)
     {
       vec4 staticPosition = u_staticLightSpaceMatrix * vec4(v_worldPosition, 1.0);
       vec4 dynamicPosition = u_dynamicLightSpaceMatrix * vec4(v_worldPosition, 1.0);
+      vec4 farStaticPosition = u_farStaticLightSpaceMatrix * vec4(v_worldPosition, 1.0);
+      vec4 farDynamicPosition = u_farDynamicLightSpaceMatrix * vec4(v_worldPosition, 1.0);
       vec3 staticProjected = staticPosition.xyz / staticPosition.w * 0.5 + 0.5;
       vec3 dynamicProjected = dynamicPosition.xyz / dynamicPosition.w * 0.5 + 0.5;
+      vec3 farStaticProjected = farStaticPosition.xyz / farStaticPosition.w * 0.5 + 0.5;
+      vec3 farDynamicProjected = farDynamicPosition.xyz / farDynamicPosition.w * 0.5 + 0.5;
       bool staticInside = u_receiveStaticShadow && staticProjected.x >= 0.0 && staticProjected.x <= 1.0 &&
           staticProjected.y >= 0.0 && staticProjected.y <= 1.0 && staticProjected.z <= 1.0;
       bool dynamicInside = u_receiveDynamicShadow && dynamicProjected.x >= 0.0 && dynamicProjected.x <= 1.0 &&
           dynamicProjected.y >= 0.0 && dynamicProjected.y <= 1.0 && dynamicProjected.z <= 1.0;
-      if (staticInside || dynamicInside)
+      bool farStaticInside = u_receiveStaticShadow && farStaticProjected.x >= 0.0 && farStaticProjected.x <= 1.0 &&
+          farStaticProjected.y >= 0.0 && farStaticProjected.y <= 1.0 && farStaticProjected.z <= 1.0;
+      bool farDynamicInside = u_receiveDynamicShadow && farDynamicProjected.x >= 0.0 && farDynamicProjected.x <= 1.0 &&
+          farDynamicProjected.y >= 0.0 && farDynamicProjected.y <= 1.0 && farDynamicProjected.z <= 1.0;
+      bool nearValid = staticInside || dynamicInside;
+      bool farValid = farStaticInside || farDynamicInside;
+      if (nearValid || farValid)
       {
         // Terrain never writes either shadow map, so receiver bias can remain
         // small without terrain self-acne. Larger values detach contact points.
         float staticBias = max(0.000012 * (1.0 - sunDiffuse), 0.000002);
         float dynamicBias = 0.000001;
-        float visibility = 0.0;
-        bool centerOccluded = false;
-        for (int y = -1; y <= 1; ++y)
-          for (int x = -1; x <= 1; ++x)
-          {
-            vec2 offset = vec2(float(x), float(y));
-            float staticDepth = staticInside ? unpackShadowDepth(texture2D(u_staticShadowMap,
-                staticProjected.xy + offset * u_staticShadowTexelSize)) : 1.0;
-            float dynamicDepth = dynamicInside ? unpackShadowDepth(texture2D(u_dynamicShadowMap,
-                dynamicProjected.xy + offset * u_dynamicShadowTexelSize)) : 1.0;
-            bool staticOccluded = staticInside && staticProjected.z - staticBias > staticDepth;
-            bool dynamicOccluded = dynamicInside && dynamicProjected.z - dynamicBias > dynamicDepth;
-            if (x == 0 && y == 0)
-              centerOccluded = staticOccluded || dynamicOccluded;
-            visibility += (staticOccluded || dynamicOccluded) ? 0.58 : 1.0;
-          }
-        shadow = visibility / 9.0;
-        // Preserve a confirmed center sample. Averaging a one-texel-wide foot,
-        // bone, or weapon with eight clear neighbours made grounded actors
-        // fade into a detached blob while broad flying silhouettes survived.
-        if (centerOccluded)
-          shadow = min(shadow, 0.58);
+        float nearVisibility = nearValid ? cascadeVisibility(
+            staticProjected, dynamicProjected, staticInside, dynamicInside,
+            u_staticShadowMap, u_dynamicShadowMap,
+            u_staticShadowTexelSize, u_dynamicShadowTexelSize,
+            staticBias, dynamicBias) : 1.0;
+        float farVisibility = farValid ? cascadeVisibility(
+            farStaticProjected, farDynamicProjected, farStaticInside, farDynamicInside,
+            u_farStaticShadowMap, u_farDynamicShadowMap,
+            u_farStaticShadowTexelSize, u_farDynamicShadowTexelSize,
+            staticBias, dynamicBias) : 1.0;
+        float cascadeBlend = smoothstep(u_nearShadowSplit * 0.78,
+                                        u_nearShadowSplit, v_viewDepth);
+        shadow = nearValid && farValid ? mix(nearVisibility, farVisibility, cascadeBlend)
+               : (nearValid ? nearVisibility : farVisibility);
       }
     }
     float skyExposure = 0.88 + 0.12 * max(norm.z, 0.0);
