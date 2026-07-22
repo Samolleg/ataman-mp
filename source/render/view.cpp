@@ -2006,6 +2006,18 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
     m_particleProgram.setUniformValue("u_cameraRight", cameraRight);
     m_particleProgram.setUniformValue("u_cameraUp", cameraUp);
 
+    // Scene parts are submitted through cached VAOs. Never configure the
+    // particle quad while the last part VAO is still bound: doing so replaces
+    // that cached VAO's position/UV layout with the particle VBO and corrupts
+    // normal scene submission on the following frame. The default VAO is
+    // sufficient for this small compatibility-profile billboard pass and
+    // keeps the particle attributes isolated from every shared mesh.
+    QOpenGLContext* particleContext = QOpenGLContext::currentContext();
+    QOpenGLExtraFunctions* particleFunctions
+        = particleContext ? particleContext->extraFunctions() : nullptr;
+    if(particleFunctions)
+        particleFunctions->glBindVertexArray(0);
+
     if(!m_particleBuffer.bind())
     {
         m_particleProgram.release();
