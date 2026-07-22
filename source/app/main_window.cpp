@@ -2064,7 +2064,7 @@ void MainWindow::createViewportToolbars()
         });
     }
     operationLayout->addStretch(1);
-    operationLayout->addWidget(new QLabel(tr("Camera:"), operationBar));
+    operationLayout->addWidget(new QLabel(tr("Camera Speed:"), operationBar));
     m_cameraSpeedSlider = new QSlider(Qt::Horizontal, operationBar);
     m_cameraSpeedSlider->setObjectName("cameraSpeedSlider");
     m_cameraSpeedSlider->setRange(1, 100);
@@ -4118,9 +4118,10 @@ void MainWindow::beginAutosaveCountdown()
         QHBoxLayout* layout = new QHBoxLayout(m_autosaveNotification);
         layout->setContentsMargins(12, 10, 12, 10);
         m_autosaveCountdownLabel = new QLabel(m_autosaveNotification);
-        QPushButton* cancel = new QPushButton(tr("Cancel Autosave"), m_autosaveNotification);
+        m_cancelAutosaveButton = new QPushButton(
+            tr("Cancel Autosave"), m_autosaveNotification);
         layout->addWidget(m_autosaveCountdownLabel, 1);
-        layout->addWidget(cancel);
+        layout->addWidget(m_cancelAutosaveButton);
         m_autosaveCountdownTimer = new QTimer(m_autosaveNotification);
         m_autosaveCountdownTimer->setInterval(1000);
         connect(m_autosaveCountdownTimer, &QTimer::timeout, this, [this]()
@@ -4129,14 +4130,20 @@ void MainWindow::beginAutosaveCountdown()
             if(m_autosaveCountdownSeconds <= 0)
             {
                 m_autosaveCountdownTimer->stop();
-                m_autosaveNotification->hide();
+                m_autosaveCountdownLabel->setText(tr("Autosaving..."));
+                m_cancelAutosaveButton->setEnabled(false);
+                m_autosaveNotification->adjustSize();
+                positionAutosaveNotification();
+                m_autosaveNotification->repaint();
                 performAutosave();
+                m_autosaveNotification->hide();
+                m_cancelAutosaveButton->setEnabled(true);
                 return;
             }
             m_autosaveCountdownLabel->setText(
                 tr("Recovery autosave in %1 seconds...").arg(m_autosaveCountdownSeconds));
         });
-        connect(cancel, &QPushButton::clicked, this, [this]()
+        connect(m_cancelAutosaveButton, &QPushButton::clicked, this, [this]()
         {
             m_autosaveCountdownTimer->stop();
             m_autosaveNotification->hide();
@@ -4145,6 +4152,7 @@ void MainWindow::beginAutosaveCountdown()
         });
     }
     m_autosaveCountdownSeconds = 15;
+    m_cancelAutosaveButton->setEnabled(true);
     m_autosaveCountdownLabel->setText(
         tr("Recovery autosave in %1 seconds...").arg(m_autosaveCountdownSeconds));
     m_autosaveNotification->adjustSize();

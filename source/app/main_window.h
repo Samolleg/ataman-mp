@@ -238,6 +238,7 @@ private:
     QTimer* m_cameraSpeedPersistTimer{nullptr};
     QFrame* m_autosaveNotification{nullptr};
     QLabel* m_autosaveCountdownLabel{nullptr};
+    QPushButton* m_cancelAutosaveButton{nullptr};
     int m_autosaveCountdownSeconds{0};
     QSlider* m_cameraSpeedSlider{nullptr};
     QDoubleSpinBox* m_cameraSpeedSpin{nullptr};
