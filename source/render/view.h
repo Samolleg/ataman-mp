@@ -319,6 +319,7 @@ private:
     QMatrix4x4 m_farStaticLightSpaceMatrix;
     QMatrix4x4 m_farDynamicLightSpaceMatrix;
     float m_nearShadowSplit{64.0f};
+    bool m_shadowCascadeDiagnostic{false};
     QElapsedTimer m_shadowUpdateTimer;
     bool m_shadowInitialized{false};
     QByteArray m_staticShadowFingerprint;

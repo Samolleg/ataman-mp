@@ -58,6 +58,7 @@
 #include "render_performance.h"
 #include "render_queue.h"
 #include "render_environment.h"
+#include "shadow_cascade.h"
 #include "part.h"
 #include "objects/light.h"
 #include "external_script_workspace.h"
@@ -1061,6 +1062,7 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
                             RenderQueueContext& queue,
                             float maximumDistance)
 {
+    Q_UNUSED(cameraPosition)
     if(!m_shadowFbo || !m_dynamicShadowFbo || !m_farShadowFbo || !m_farDynamicShadowFbo
             || !m_shadowFbo->isValid() || !m_dynamicShadowFbo->isValid()
             || !m_farShadowFbo->isValid() || !m_farDynamicShadowFbo->isValid())
@@ -1078,6 +1080,7 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
     const QVector3D lightDirection = environment.sunDirection.normalized();
     const QVector3D lightRight = QVector3D::crossProduct(lightDirection, up).normalized();
     const QVector3D lightUp = QVector3D::crossProduct(lightRight, lightDirection).normalized();
+    const QMatrix4x4 cameraView = m_cam->viewMatrix();
 
     struct SCascade
     {
@@ -1088,37 +1091,31 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
         QMatrix4x4 dynamicMatrix;
     };
     const auto buildCascade = [&](float sliceNear, float sliceFar,
+                                  int staticResolution,
                                   int dynamicResolution) -> SCascade
     {
         float minimumRight = std::numeric_limits<float>::max();
         float maximumRight = std::numeric_limits<float>::lowest();
         float minimumUp = std::numeric_limits<float>::max();
         float maximumUp = std::numeric_limits<float>::lowest();
-        bool inverseOk = false;
-        const QMatrix4x4 inverseViewProjection =
-            (m_projection * m_cam->viewMatrix()).inverted(&inverseOk);
-        if(inverseOk)
+        bool cornersOk = false;
+        const QVector<QVector3D> corners = ei::cameraFrustumSliceCorners(
+            m_projection, cameraView, qMax(1.0f, sliceNear), sliceFar,
+            &cornersOk);
+        QVector3D sliceCenter;
+        if(cornersOk)
         {
-            for(int y = -1; y <= 1; y += 2)
-                for(int x = -1; x <= 1; x += 2)
-                {
-                    QVector4D farPoint = inverseViewProjection
-                        * QVector4D(float(x), float(y), 1.0f, 1.0f);
-                    if(qFuzzyIsNull(farPoint.w()))
-                        continue;
-                    const QVector3D farWorld = farPoint.toVector3D() / farPoint.w();
-                    const QVector3D ray = (farWorld - cameraPosition).normalized();
-                    for(const float distance : {qMax(1.0f, sliceNear), sliceFar})
-                    {
-                        const QVector3D point = cameraPosition + ray * distance;
-                        const float right = QVector3D::dotProduct(point, lightRight);
-                        const float imageUp = QVector3D::dotProduct(point, lightUp);
-                        minimumRight = qMin(minimumRight, right);
-                        maximumRight = qMax(maximumRight, right);
-                        minimumUp = qMin(minimumUp, imageUp);
-                        maximumUp = qMax(maximumUp, imageUp);
-                    }
-                }
+            for(const QVector3D& point : corners)
+            {
+                const float right = QVector3D::dotProduct(point, lightRight);
+                const float imageUp = QVector3D::dotProduct(point, lightUp);
+                minimumRight = qMin(minimumRight, right);
+                maximumRight = qMax(maximumRight, right);
+                minimumUp = qMin(minimumUp, imageUp);
+                maximumUp = qMax(maximumUp, imageUp);
+                sliceCenter += point;
+            }
+            sliceCenter /= float(corners.size());
         }
         if(minimumRight > maximumRight || minimumUp > maximumUp)
         {
@@ -1128,6 +1125,7 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
             maximumRight = right + sliceFar;
             minimumUp = imageUp - sliceFar;
             maximumUp = imageUp + sliceFar;
+            sliceCenter = shadowFocus;
         }
 
         const float guardBand = 12.0f;
@@ -1143,7 +1141,7 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
         const float rawExtent = qMax((maximumRight - minimumRight) * 0.5f,
                                      (maximumUp - minimumUp) * 0.5f) + guardBand;
         const float extent = qMax(8.0f, qCeil(rawExtent / 2.0f) * 2.0f);
-        const float lightCoordinate = QVector3D::dotProduct(shadowFocus, lightDirection);
+        const float lightCoordinate = QVector3D::dotProduct(sliceCenter, lightDirection);
         QVector3D baseFocus = lightRight * centerRight + lightUp * centerUp
             + lightDirection * lightCoordinate;
         const auto snappedFocus = [&](float snap)
@@ -1153,7 +1151,9 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
             focus += lightUp * (qRound(centerUp / snap) * snap - centerUp);
             return focus;
         };
-        const QVector3D staticFocus = snappedFocus(2.0f);
+        const float staticTexel = (2.0f * extent)
+            / float(qMax(1, staticResolution));
+        const QVector3D staticFocus = snappedFocus(qMax(staticTexel, 0.0001f));
         const float dynamicTexel = (2.0f * extent) / float(qMax(1, dynamicResolution));
         const QVector3D dynamicFocus = snappedFocus(qMax(dynamicTexel, 0.0001f));
         const float depthHalf = qMax(256.0f, safeMaximumDistance + 128.0f);
@@ -1168,9 +1168,11 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
     };
 
     const SCascade nearCascade = buildCascade(0.0f, m_nearShadowSplit,
+                                               m_shadowFbo->width(),
                                                m_dynamicShadowFbo->width());
     const SCascade farCascade = buildCascade(m_nearShadowSplit * 0.8f,
                                               safeMaximumDistance,
+                                              m_farShadowFbo->width(),
                                               m_farDynamicShadowFbo->width());
 
     QCryptographicHash staticHash(QCryptographicHash::Sha256);
@@ -1299,6 +1301,14 @@ QString CView::captureShadowDiagnostics(QString* error)
 
     makeCurrent();
     const QImage frame = grabFrameBuffer(true);
+    m_shadowCascadeDiagnostic = true;
+    glViewport(0, 0, m_width, m_height);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    draw();
+    const QImage cascadeSelection = grabFrameBuffer(true);
+    m_shadowCascadeDiagnostic = false;
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    draw();
     struct SShadowImage
     {
         const char* name;
@@ -1315,6 +1325,9 @@ QString CView::captureShadowDiagnostics(QString* error)
     QStringList failures;
     if(frame.isNull() || !frame.save(QDir(directoryPath).absoluteFilePath("frame.png")))
         failures.append("frame.png");
+    if(cascadeSelection.isNull() || !cascadeSelection.save(
+            QDir(directoryPath).absoluteFilePath("cascade-selection.png")))
+        failures.append("cascade-selection.png");
 
     QJsonObject atlasMetadata;
     for(const SShadowImage& shadow : shadowImages)
@@ -1340,6 +1353,8 @@ QString CView::captureShadowDiagnostics(QString* error)
     QVector3D cameraRotation;
     m_cam->getLocation(cameraPosition, cameraPivot, cameraRotation);
     const QMatrix4x4 viewMatrix = m_cam->viewMatrix();
+    bool renderedEyeOk = false;
+    const QVector3D renderedEye = ei::cameraEyeFromView(viewMatrix, &renderedEyeOk);
 
     const auto boolOption = [this](const char* name, bool fallback)
     {
@@ -1360,13 +1375,14 @@ QString CView::captureShadowDiagnostics(QString* error)
         worldSet, overrideWorldTime, previewTime, m_caveEnvironment);
 
     QJsonObject rootObject;
-    rootObject["format"] = "EIMapperEndurance.shadow-diagnostics.v2";
+    rootObject["format"] = "EIMapperEndurance.shadow-diagnostics.v3";
     rootObject["capturedAt"] = QDateTime::currentDateTime().toString(Qt::ISODateWithMs);
     rootObject["applicationVersion"] = QCoreApplication::applicationVersion();
     rootObject["sceneFingerprint"] = sceneSourceFingerprint();
     rootObject["viewport"] = QJsonObject{{"width", m_width}, {"height", m_height},
         {"devicePixelRatio", devicePixelRatioF()}};
-    rootObject["camera"] = QJsonObject{{"position", jsonVector(cameraPosition)},
+    rootObject["camera"] = QJsonObject{{"storedOrbitAnchor", jsonVector(cameraPosition)},
+        {"renderedEye", jsonVector(renderedEye)}, {"renderedEyeValid", renderedEyeOk},
         {"pivot", jsonVector(cameraPivot)}, {"rotation", jsonVector(cameraRotation)},
         {"viewMatrixColumnMajor", jsonMatrix(viewMatrix)},
         {"projectionMatrixColumnMajor", jsonMatrix(m_projection)}};
@@ -1471,8 +1487,10 @@ QString CView::captureShadowDiagnostics(QString* error)
     {
         instructions.write("EI Mapper Endurance shadow diagnostic capture\n"
             "Send this entire folder without renaming or editing its contents.\n"
-            "frame.png is the failing viewport. *-packed.png files are exact GPU shadow targets.\n"
-            "*-depth.png files decode the packed depth for visual inspection.\n"
+            "frame.png is the failing viewport. cascade-selection.png is the same camera view:\n"
+            "red = near cascade, blue = far cascade, purple = their blend, black = no coverage.\n"
+            "*-packed.png files are exact GPU packed-depth bytes; their colors are encoding data, not shadow color.\n"
+            "*-depth.png files decode those bytes to grayscale depth for visual inspection.\n"
             "shadow-diagnostics.json contains camera, cascade, environment, and per-node projection data.\n");
     }
     else
@@ -1503,6 +1521,7 @@ void CView::applyShadowUniforms(QOpenGLShaderProgram& program, bool enabled,
     program.setUniformValue("u_farStaticLightSpaceMatrix", m_farStaticLightSpaceMatrix);
     program.setUniformValue("u_farDynamicLightSpaceMatrix", m_farDynamicLightSpaceMatrix);
     program.setUniformValue("u_nearShadowSplit", m_nearShadowSplit);
+    program.setUniformValue("u_shadowCascadeDebug", m_shadowCascadeDiagnostic);
     program.setUniformValue("u_receiveStaticShadow", receiveStatic);
     program.setUniformValue("u_receiveDynamicShadow", receiveDynamic);
     program.setUniformValue("u_staticShadowMap", 1);
@@ -1798,8 +1817,11 @@ void CView::draw()
 {
 
     QMatrix4x4 camMatrix = m_cam->update();
-    QVector3D cameraPosition, cameraPivot, cameraRotation;
-    m_cam->getLocation(cameraPosition, cameraPivot, cameraRotation);
+    QVector3D cameraAnchor, cameraPivot, cameraRotation;
+    m_cam->getLocation(cameraAnchor, cameraPivot, cameraRotation);
+    bool cameraEyeOk = false;
+    const QVector3D renderedCameraEye = ei::cameraEyeFromView(camMatrix, &cameraEyeOk);
+    const QVector3D cameraPosition = cameraEyeOk ? renderedCameraEye : cameraAnchor;
     const COptBool* animationOption = m_pSettings
         ? dynamic_cast<const COptBool*>(m_pSettings->opt("animateUnits")) : nullptr;
     const bool animationEnabled = !animationOption || animationOption->value();

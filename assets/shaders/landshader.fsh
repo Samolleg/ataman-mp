@@ -36,6 +36,7 @@ uniform vec2 u_dynamicShadowTexelSize;
 uniform vec2 u_farStaticShadowTexelSize;
 uniform vec2 u_farDynamicShadowTexelSize;
 uniform float u_nearShadowSplit;
+uniform bool u_shadowCascadeDebug;
 uniform bool u_receiveStaticShadow;
 uniform bool u_receiveDynamicShadow;
 
@@ -94,6 +95,7 @@ void main(void)
   vec3 norm = normalize(v_normal);
   vec4 texColor = texture2D(qt_Texture0, v_texture);
   vec3 light = vec3(1.0);
+  vec3 cascadeDebugColor = vec3(0.0);
   if (u_environmentEnabled)
   {
     if (u_lightingMode == 1)
@@ -143,6 +145,9 @@ void main(void)
             staticBias, dynamicBias) : 1.0;
         float cascadeBlend = smoothstep(u_nearShadowSplit * 0.78,
                                         u_nearShadowSplit, v_viewDepth);
+        cascadeDebugColor = nearValid && farValid
+            ? mix(vec3(1.0, 0.12, 0.05), vec3(0.05, 0.25, 1.0), cascadeBlend)
+            : (nearValid ? vec3(1.0, 0.12, 0.05) : vec3(0.05, 0.25, 1.0));
         shadow = nearValid && farValid ? mix(nearVisibility, farVisibility, cascadeBlend)
                : (nearValid ? nearVisibility : farVisibility);
       }
@@ -176,6 +181,9 @@ void main(void)
   }
 
   resColor.a -= transparency;
+
+  if (u_shadowCascadeDebug)
+    resColor.rgb = cascadeDebugColor;
 
 
   gl_FragColor = resColor;

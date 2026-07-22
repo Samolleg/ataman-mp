@@ -35,6 +35,7 @@ uniform vec2 u_dynamicShadowTexelSize;
 uniform vec2 u_farStaticShadowTexelSize;
 uniform vec2 u_farDynamicShadowTexelSize;
 uniform float u_nearShadowSplit;
+uniform bool u_shadowCascadeDebug;
 uniform bool u_receiveDynamicShadow;
 uniform bool u_receiveStaticShadow;
 varying highp vec3 v_normal;
@@ -88,6 +89,7 @@ float cascadeVisibility(vec3 staticProjected, vec3 dynamicProjected,
 void main(void)
 {    
     vec4 resColor = customColor.w == 0.0 ? texture2D(qt_Texture0, v_texture) : customColor;
+    vec3 cascadeDebugColor = vec3(0.0);
 
     if (u_environmentEnabled && customColor.w == 0.0)
     {
@@ -137,6 +139,9 @@ void main(void)
               staticBias, dynamicBias) : 1.0;
           float cascadeBlend = smoothstep(u_nearShadowSplit * 0.78,
                                           u_nearShadowSplit, v_viewDepth);
+          cascadeDebugColor = nearValid && farValid
+              ? mix(vec3(1.0, 0.12, 0.05), vec3(0.05, 0.25, 1.0), cascadeBlend)
+              : (nearValid ? vec3(1.0, 0.12, 0.05) : vec3(0.05, 0.25, 1.0));
           shadow = nearValid && farValid ? mix(nearVisibility, farVisibility, cascadeBlend)
                  : (nearValid ? nearVisibility : farVisibility);
         }
@@ -177,6 +182,9 @@ void main(void)
       highlightColor *= highlightIntensity;
       resColor += highlightColor;
     }
+
+    if (u_shadowCascadeDebug)
+      resColor.rgb = cascadeDebugColor;
 
     gl_FragColor = resColor;
 }
