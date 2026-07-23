@@ -179,11 +179,14 @@ CView::CView(QWidget *parent, const QGLWidget *pShareWidget) : QGLWidget(parent,
     m_scriptWorkspaces.reset(new CExternalScriptWorkspaceManager(this, this));
     connect(m_scriptWorkspaces.get(), &CExternalScriptWorkspaceManager::scriptImportAccepted,
             this, &CView::importExternalMobScript);
-    m_sculptRepeatTimer->setInterval(100);
+    // A single cadence owns sculpt stamps. Mouse events only update the latest
+    // target, preventing the timer and pointer stream from doing duplicate
+    // canonical-sector rebuilds during a drag.
+    m_sculptRepeatTimer->setInterval(50);
     connect(m_sculptRepeatTimer, &QTimer::timeout, this, [this]()
     {
         if(m_sculptStrokeActive)
-            sculptTerrainAt(m_lastSculptPoint);
+            sculptTerrainTowardLatestPoint();
     });
 }
 
@@ -951,6 +954,7 @@ void CView::loadLandscape(const QFileInfo& filePath)
     m_pPreviewTile.reset(new CPreviewTile());
     updateTileForm(true);
     rebuildTerrainAutoCatalog();
+    emit selectionStateChanged(nSelectedNodes() > 0);
 }
 
 void CView::unloadLand()
@@ -984,6 +988,7 @@ void CView::unloadLand()
         mob->reprojectForCurrentTerrain();
     emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMpr, "");
     m_pPreviewTile.clear();
+    emit selectionStateChanged(nSelectedNodes() > 0);
     ei::log(eLogInfo, "Landscape unloaded");
 }
 
@@ -2694,16 +2699,23 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
     audit.validation = report.toText();
     audit.semantic = command.semanticAudit;
     audit.deltas = command.deltas;
+    ++m_tileStrokeActions;
+    m_tileStrokeSolverNodes += audit.semantic.solverNodes;
     if(command.isEmpty())
     {
         audit.outcome = report.hasErrors()
             ? QStringLiteral("refused") : QStringLiteral("no-op");
         m_terrainPaintActions.append(audit);
+        if(audit.outcome == QStringLiteral("refused"))
+            ++m_tileStrokeRefused;
+        else
+            ++m_tileStrokeNoOps;
         if(report.hasErrors())
             ei::log(eLogWarning, "Semantic terrain paint refused:\n" + report.toText());
-        emit updateMsg(report.findings().isEmpty()
-            ? tr("The terrain material is already resolved at this brush position.")
-            : report.toText());
+        if(!m_tilePaintStrokeActive || report.hasErrors())
+            emit updateMsg(report.findings().isEmpty()
+                ? tr("The terrain material is already resolved at this brush position.")
+                : report.toText());
     }
     else
     {
@@ -2716,25 +2728,32 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
             audit.validation += QStringLiteral(
                 "ERROR terrain.preview_apply: The canonical preview command was not applied\n");
             m_terrainPaintActions.append(audit);
+            ++m_tileStrokeRefused;
             emit updateMsg(tr("Terrain preview was refused; no undo entry was created."));
         }
         else
         {
             audit.outcome = QStringLiteral("applied");
             m_terrainPaintActions.append(audit);
+            ++m_tileStrokeApplied;
+            m_tileStrokeChangedTiles += audit.deltas.size();
             m_terrainPaintAudit += command.deltas;
             m_pUndoStack->push(new CTerrainTilePreviewCommand(this, command, true));
         }
     }
-    ei::log(audit.outcome == QStringLiteral("refused") ? eLogWarning : eLogInfo,
-        QString("Terrain paint action %1 stroke %2: %3, layer=%4 material=%5 center=%6,%7 radius=%8 core=%9 affected=%10 changed=%11 solver=%12 nodes=%13")
+    const QString actionLog = QString("Terrain paint action %1 stroke %2: %3, layer=%4 material=%5 center=%6,%7 radius=%8 core=%9 affected=%10 changed=%11 solver=%12 nodes=%13")
             .arg(audit.actionId).arg(audit.strokeId).arg(audit.outcome)
             .arg(bLand ? "land" : "overlay")
             .arg(manual ? QStringLiteral("manual") : QString::number(terrainType))
             .arg(brush.centerX).arg(brush.centerY).arg(brush.radius)
             .arg(audit.semantic.paintedCoreCells.size())
             .arg(audit.semantic.affectedCells.size()).arg(audit.deltas.size())
-            .arg(audit.semantic.solverMode).arg(audit.semantic.solverNodes));
+            .arg(audit.semantic.solverMode).arg(audit.semantic.solverNodes);
+    // The exported diagnostic retains every action. Keep synchronous workflow
+    // logging off the pointer hot path and emit one summary on release.
+    if(!m_tilePaintStrokeActive || audit.outcome == QStringLiteral("refused"))
+        ei::log(audit.outcome == QStringLiteral("refused") ? eLogWarning : eLogInfo,
+                actionLog);
 }
 
 void CView::setTile(QMap<STileLocation, STileInfo>& arrTileData)
@@ -2852,6 +2871,16 @@ bool CView::manualTilePaintingEnabled() const
     return m_landscapeTools && m_landscapeTools->manualTileSelectionEnabled();
 }
 
+float CView::terrainPaintStampSpacing() const
+{
+    if(!m_landscapeTools || manualTilePaintingEnabled())
+        return 2.0f;
+    // Terrain cells are two world units wide. Larger semantic brushes overlap
+    // heavily, so proportional spacing avoids resolving the same seam network
+    // for every crossed cell while retaining continuous core coverage.
+    return qMax(2.0f, float(m_landscapeTools->paintRadius()) * 2.0f);
+}
+
 void CView::showOutliner(bool bShow)
 {
     emit showOutlinerSignal(bShow);
@@ -2871,6 +2900,18 @@ void CView::endTileBrushGroup()
     {
         m_pUndoStack->endMacro();
         m_tilePaintStrokeActive = false;
+        m_pLand->setDirty(m_terrainEdit.isDirty());
+        emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMprDirtyFlag,
+                                  m_terrainEdit.isDirty() ? "*" : "");
+        emit updateMsg(tr("Terrain stroke: %1 stamp(s), %2 changed tile(s), %3 no-op, %4 refused.")
+            .arg(m_tileStrokeActions).arg(m_tileStrokeChangedTiles)
+            .arg(m_tileStrokeNoOps).arg(m_tileStrokeRefused));
+        ei::log(m_tileStrokeRefused > 0 ? eLogWarning : eLogInfo,
+            QString("Terrain paint stroke %1 summary: actions=%2 applied=%3 no-op=%4 refused=%5 changed=%6 solverNodes=%7")
+                .arg(m_tileBrushCommandId).arg(m_tileStrokeActions)
+                .arg(m_tileStrokeApplied).arg(m_tileStrokeNoOps)
+                .arg(m_tileStrokeRefused).arg(m_tileStrokeChangedTiles)
+                .arg(m_tileStrokeSolverNodes));
     }
     m_lastTerrainPaintCenterValid = false;
     ++m_tileBrushCommandId;
@@ -2883,6 +2924,12 @@ void CView::beginTileBrushGroup()
     m_pUndoStack->beginMacro(tr("Paint terrain tiles"));
     m_tilePaintStrokeActive = true;
     m_lastTerrainPaintCenterValid = false;
+    m_tileStrokeActions = 0;
+    m_tileStrokeApplied = 0;
+    m_tileStrokeNoOps = 0;
+    m_tileStrokeRefused = 0;
+    m_tileStrokeChangedTiles = 0;
+    m_tileStrokeSolverNodes = 0;
 }
 
 bool CView::applyTerrainTilePreview(const STerrainTileCommand& command, bool forward)
@@ -2906,12 +2953,15 @@ bool CView::applyTerrainTilePreview(const STerrainTileCommand& command, bool for
     for(const QPair<int, int>& sector : sectors)
         m_pLand->updateSectorDrawData(sector.first, sector.second);
     m_pLand->setDirty(m_terrainEdit.isDirty());
-    emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMprDirtyFlag,
-                              m_terrainEdit.isDirty() ? "*" : "");
-    emit updateMsg(command.semanticAudit.solverMode == QStringLiteral("manual-atlas")
-        ? tr("Painted %1 atlas tile(s) manually.").arg(command.deltas.size())
-        : tr("Painted %1 atlas tile(s), including bounded seam updates.")
-              .arg(command.deltas.size()));
+    if(!m_tilePaintStrokeActive)
+    {
+        emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMprDirtyFlag,
+                                  m_terrainEdit.isDirty() ? "*" : "");
+        emit updateMsg(command.semanticAudit.solverMode == QStringLiteral("manual-atlas")
+            ? tr("Painted %1 atlas tile(s) manually.").arg(command.deltas.size())
+            : tr("Painted %1 atlas tile(s), including bounded seam updates.")
+                  .arg(command.deltas.size()));
+    }
     update();
     return true;
 }
@@ -3361,6 +3411,9 @@ void CView::mousePressEvent(QMouseEvent* event)
         m_sculptOutlineCenter = m_lastSculptPoint;
         m_sculptOutlineValid = true;
         m_lastSculptStampPoint = m_lastSculptPoint;
+        m_sculptStrokeChanged = false;
+        m_sculptStrokeStamps = 0;
+        m_sculptStrokeVertices = 0;
         m_pUndoStack->beginMacro(tr("Sculpt terrain"));
         sculptTerrainAt(m_lastSculptPoint);
         m_sculptRepeatTimer->start();
@@ -3410,6 +3463,25 @@ void CView::sculptTerrainAt(const QVector3D& position)
     m_pUndoStack->push(new CTerrainHeightPreviewCommand(this, command));
 }
 
+void CView::sculptTerrainTowardLatestPoint()
+{
+    if(!m_sculptStrokeActive || !m_landscapeTools)
+        return;
+    const float distance = m_lastSculptPoint.distanceToPoint(m_lastSculptStampPoint);
+    const float spacing = qMax(1.0f, m_landscapeTools->radius() * 0.5f);
+    // Preserve a continuous moving stroke without letting a burst of mouse
+    // events enqueue unbounded work. Stationary holds still receive one stamp.
+    const int steps = distance > spacing
+        ? qMin(8, qMax(1, int(std::ceil(distance / spacing)))) : 1;
+    const QVector3D start = m_lastSculptStampPoint;
+    for(int step = 1; step <= steps; ++step)
+    {
+        const float ratio = float(step) / float(steps);
+        sculptTerrainAt(start * (1.0f - ratio) + m_lastSculptPoint * ratio);
+    }
+    m_lastSculptStampPoint = m_lastSculptPoint;
+}
+
 bool CView::applyTerrainHeightPreview(const STerrainHeightCommand& command, bool forward)
 {
     if(!m_terrainEditAvailable)
@@ -3451,13 +3523,25 @@ bool CView::applyTerrainHeightPreview(const STerrainHeightCommand& command, bool
                 .arg(sector.first).arg(sector.second));
         }
     }
-    for(CMob* mob : m_aMob)
-        mob->reprojectForCurrentTerrain();
+    if(m_sculptStrokeActive)
+    {
+        m_sculptStrokeChanged = true;
+        ++m_sculptStrokeStamps;
+        m_sculptStrokeVertices += command.deltas.size();
+    }
+    else
+    {
+        for(CMob* mob : m_aMob)
+            mob->reprojectForCurrentTerrain();
+    }
     m_pLand->setDirty(m_terrainEdit.isDirty());
-    emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMprDirtyFlag,
-                              m_terrainEdit.isDirty() ? "*" : "");
-    emit updateMsg(tr("Terrain preview changed %1 vertices in %2 sector(s); navigation data may need review.")
-        .arg(command.deltas.size()).arg(sectors.size()));
+    if(!m_sculptStrokeActive)
+    {
+        emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMprDirtyFlag,
+                                  m_terrainEdit.isDirty() ? "*" : "");
+        emit updateMsg(tr("Terrain preview changed %1 vertices in %2 sector(s); navigation data may need review.")
+            .arg(command.deltas.size()).arg(sectors.size()));
+    }
     update();
     return true;
 }
@@ -3546,12 +3630,8 @@ void CView::mouseMoveEvent(QMouseEvent* event)
     {
         const QVector3D position = getTerrainPos(event->x(), event->y(), true);
         m_lastSculptPoint = position;
-        const float spacing = qMax(0.5f, m_landscapeTools->radius() * 0.25f);
-        if(position.distanceToPoint(m_lastSculptStampPoint) >= spacing)
-        {
-            sculptTerrainAt(position);
-            m_lastSculptStampPoint = position;
-        }
+        // The repeat timer applies the latest point. This keeps pointer input
+        // responsive and caps canonical preview work to one stamp per tick.
         event->accept();
         return;
     }
@@ -3564,6 +3644,8 @@ void CView::mouseReleaseEvent(QMouseEvent *event)
     m_hasViewportMousePos = rect().contains(event->pos());
     if(m_sculptStrokeActive && event->button() == Qt::LeftButton)
     {
+        if(m_lastSculptPoint.distanceToPoint(m_lastSculptStampPoint) > 0.01f)
+            sculptTerrainTowardLatestPoint();
         finishSculptStroke();
         event->accept();
         return;
@@ -4525,6 +4607,16 @@ void CView::finishSculptStroke()
     m_sculptStrokeActive = false;
     if(m_pUndoStack)
         m_pUndoStack->endMacro();
+    if(m_sculptStrokeChanged)
+    {
+        for(CMob* mob : m_aMob)
+            mob->reprojectForCurrentTerrain();
+        m_pLand->setDirty(m_terrainEdit.isDirty());
+        emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMprDirtyFlag,
+                                  m_terrainEdit.isDirty() ? "*" : "");
+        emit updateMsg(tr("Sculpt stroke: %1 stamp(s), %2 vertex updates; MOB placement and navigation may need review.")
+            .arg(m_sculptStrokeStamps).arg(m_sculptStrokeVertices));
+    }
 }
 
 void CView::setDurty(CMob* pMob)

@@ -180,6 +180,7 @@ public:
     void addTileRotation(int step);
     void adjustTerrainPaintSize(int steps);
     bool manualTilePaintingEnabled() const;
+    float terrainPaintStampSpacing() const;
     void setDrawWater(bool bDraw = true);
     void setDrawLand(bool bDraw = true);
     bool drawWater() const { return m_bDrawWater; }
@@ -227,6 +228,7 @@ private:
     bool confirmScriptReferencedObjectIds(const QVector<uint>& objectIds,
                                           const QString& operation);
     void sculptTerrainAt(const QVector3D& position);
+    void sculptTerrainTowardLatestPoint();
     void finishSculptStroke();
     void syncLandscapeToolState();
     void clearLandscapeBrushSelection();
@@ -330,11 +332,20 @@ private:
     QPoint m_lastTerrainPaintCenter;
     bool m_lastTerrainPaintCenterValid{false};
     bool m_lastTerrainPaintLayerLand{true};
+    int m_tileStrokeActions{0};
+    int m_tileStrokeApplied{0};
+    int m_tileStrokeNoOps{0};
+    int m_tileStrokeRefused{0};
+    int m_tileStrokeChangedTiles{0};
+    int m_tileStrokeSolverNodes{0};
     bool m_sculptOutlineValid{false};
     QVector3D m_sculptOutlineCenter;
     bool m_sculptStrokeActive;
     QVector3D m_lastSculptPoint;
     QVector3D m_lastSculptStampPoint;
+    bool m_sculptStrokeChanged{false};
+    int m_sculptStrokeStamps{0};
+    int m_sculptStrokeVertices{0};
     QTimer* m_sculptRepeatTimer;
     bool m_tileGridVisible;
     int m_lastLandscapeEditMode;

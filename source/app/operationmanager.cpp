@@ -1116,8 +1116,12 @@ void CTileBrush::mousePressEvent(COperation* pOp, QMouseEvent* pEvent)
 void CTileBrush::mouseReleaseEvent(COperation* pOp, QMouseEvent* pEvent)
 {
     Q_UNUSED(pOp);
-    Q_UNUSED(pEvent);
     if (pEvent->button() == Qt::LeftButton) {
+        const bool bLand = CScene::getInstance()->isLandTileEditMode();
+        // Always resolve the release position. The view de-duplicates an
+        // unchanged center, while a short/fast gesture cannot lose its tail.
+        m_pView->setTile(m_pView->getTerrainPos(
+            pEvent->pos().x(), pEvent->pos().y(), bLand), bLand);
         m_pView->endTileBrushGroup();
     }
     if(!m_pView->isPreviewTile()) // if we finished brushing, we will come here
@@ -1149,12 +1153,13 @@ void CTileBrush::mouseMoveEvent(COperation* pOp, QMouseEvent* pEvent)
         bool bLand = CScene::getInstance()->isLandTileEditMode();
         const QVector3D landPos(m_pView->getTerrainPos(pEvent->x(), pEvent->y(), bLand));
         const float distance = landPos.distanceToPoint(m_lastLandPos);
-        if(distance > 1.0f)
+        const float spacing = m_pView->terrainPaintStampSpacing();
+        if(distance >= spacing)
         {
             // Interpolate fast pointer movement so a small brush cannot leave
             // unpainted tile gaps between mouse events. All stamps remain in
             // the press/release undo macro.
-            const int steps = qMax(1, int(std::ceil(distance)));
+            const int steps = qMax(1, int(std::ceil(distance / spacing)));
             for(int step = 1; step <= steps; ++step)
             {
                 const float ratio = float(step) / float(steps);

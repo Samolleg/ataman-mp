@@ -3195,14 +3195,8 @@ void MainWindow::on_actionMap_parameters_triggered()
 
 void MainWindow::on_tileBrushButton_clicked()
 {
-    if(m_landscapeToolsDock->isVisible())
-        m_landscapeToolsDock->hide();
-    else
-    {
-        m_pView->prepareLandscapeTilePainting(false);
-        m_landscapeToolsDock->show();
-        m_landscapeToolsDock->raise();
-    }
+    // The tool button owns a QAction which performs the toggle. Qt Designer's
+    // auto-connected clicked slot must not toggle it a second time.
 }
 
 
