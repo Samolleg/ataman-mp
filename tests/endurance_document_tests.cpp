@@ -302,6 +302,10 @@ private slots:
     void mprLengthChangingAndStaleTransactionsFailClosed();
     void failedStagedMprSaveLeavesNoDestination();
     void stagedMprTransactionProvesExactSemanticScopeWithoutDestination();
+    void mprSaveCoordinatorBacksUpAndAtomicallyCommits();
+    void mprSaveCoordinatorRejectsSourceRace();
+    void mprSaveCoordinatorFailuresLeaveDestinationUntouched();
+    void privateMprSaveCoordinatorCorpusUsesCopiesOnly();
     void unchangedExistingFileComparisonIsReadOnly();
     void canonicalTerrainSeamsAreEditedAndUndoneTogether();
     void terrainBrushToolsAreDeterministicAndFailClosed();
@@ -1268,6 +1272,220 @@ void EnduranceDocumentTests::stagedMprTransactionProvesExactSemanticScopeWithout
     QVERIFY(!refused.success);
     QVERIFY(refused.candidateBytes.isEmpty());
     QVERIFY(!destination.exists());
+}
+
+void EnduranceDocumentTests::mprSaveCoordinatorBacksUpAndAtomicallyCommits()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QByteArray original = syntheticMpr();
+    const QString sourcePath = dir.filePath("source.mpr");
+    const QString destinationPath = dir.filePath("destination.mpr");
+    for(const QString& path : {sourcePath, destinationPath})
+    {
+        QFile file(path);
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        QCOMPARE(file.write(original), qint64(original.size()));
+    }
+
+    CMprDocument baseline;
+    CValidationReport loadReport;
+    QVERIFY2(baseline.load(QFileInfo(sourcePath), &loadReport),
+             qPrintable(loadReport.toText()));
+    const SMprArchiveMember sector = baseline.members().at(2);
+    QByteArray replacement = sector.payload;
+    replacement[replacement.size() - 1] = char(replacement.back() ^ 0x01);
+    CMprEditTransaction transaction("coordinated synthetic change");
+    transaction.replaceMemberPayload(sector.name, sector.sha256, replacement);
+
+    SMprSaveCommitRequest request;
+    request.source = QFileInfo(sourcePath);
+    request.destination = QFileInfo(destinationPath);
+    request.backupRootOverride = dir.filePath("backups");
+    const SMprSaveCommitResult result =
+        commitStagedMprTransaction(baseline, transaction, request);
+    QVERIFY2(result.success, qPrintable(result.phase + ": " + result.error));
+    QCOMPARE(result.phase, QString("complete"));
+    QVERIFY(!result.backupPath.isEmpty());
+
+    QFile source(sourcePath);
+    QVERIFY(source.open(QIODevice::ReadOnly));
+    QCOMPARE(source.readAll(), original);
+    QFile backup(result.backupPath);
+    QVERIFY(backup.open(QIODevice::ReadOnly));
+    QCOMPARE(backup.readAll(), original);
+    QFile destination(destinationPath);
+    QVERIFY(destination.open(QIODevice::ReadOnly));
+    const QByteArray committed = destination.readAll();
+    QVERIFY(committed != original);
+    QCOMPARE(QString::fromLatin1(QCryptographicHash::hash(
+                 committed, QCryptographicHash::Sha256).toHex()),
+             result.candidateSha256);
+}
+
+void EnduranceDocumentTests::mprSaveCoordinatorRejectsSourceRace()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QByteArray original = syntheticMpr();
+    const QString sourcePath = dir.filePath("source.mpr");
+    const QString destinationPath = dir.filePath("destination.mpr");
+    QFile source(sourcePath);
+    QVERIFY(source.open(QIODevice::WriteOnly));
+    QCOMPARE(source.write(original), qint64(original.size()));
+    source.close();
+    QFile destination(destinationPath);
+    QVERIFY(destination.open(QIODevice::WriteOnly));
+    QCOMPARE(destination.write(original), qint64(original.size()));
+    destination.close();
+
+    CMprDocument baseline;
+    CValidationReport report;
+    QVERIFY(baseline.load(QFileInfo(sourcePath), &report));
+    const SMprArchiveMember sector = baseline.members().at(2);
+    QByteArray replacement = sector.payload;
+    replacement[replacement.size() - 1] = char(replacement.back() ^ 0x01);
+    CMprEditTransaction transaction("source race");
+    transaction.replaceMemberPayload(sector.name, sector.sha256, replacement);
+
+    QVERIFY(source.open(QIODevice::Append));
+    QCOMPARE(source.write("external-change"), qint64(15));
+    source.close();
+    SMprSaveCommitRequest request;
+    request.source = QFileInfo(sourcePath);
+    request.destination = QFileInfo(destinationPath);
+    request.backupRootOverride = dir.filePath("backups");
+    const SMprSaveCommitResult result =
+        commitStagedMprTransaction(baseline, transaction, request);
+    QVERIFY(!result.success);
+    QCOMPARE(result.phase, QString("source-check"));
+    QVERIFY(destination.open(QIODevice::ReadOnly));
+    QCOMPARE(destination.readAll(), original);
+}
+
+void EnduranceDocumentTests::mprSaveCoordinatorFailuresLeaveDestinationUntouched()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QByteArray original = syntheticMpr();
+    const QString sourcePath = dir.filePath("source.mpr");
+    const QString destinationPath = dir.filePath("destination.mpr");
+    QFile source(sourcePath);
+    QVERIFY(source.open(QIODevice::WriteOnly));
+    QCOMPARE(source.write(original), qint64(original.size()));
+    source.close();
+    QFile destination(destinationPath);
+    QVERIFY(destination.open(QIODevice::WriteOnly));
+    QCOMPARE(destination.write(original), qint64(original.size()));
+    destination.close();
+
+    CMprDocument baseline;
+    CValidationReport report;
+    QVERIFY(baseline.load(QFileInfo(sourcePath), &report));
+    const SMprArchiveMember sector = baseline.members().at(2);
+    QByteArray replacement = sector.payload;
+    replacement[replacement.size() - 1] = char(replacement.back() ^ 0x01);
+    CMprEditTransaction transaction("failure preservation");
+    transaction.replaceMemberPayload(sector.name, sector.sha256, replacement);
+
+    const QString blockerPath = dir.filePath("backup-root-blocker");
+    QFile blocker(blockerPath);
+    QVERIFY(blocker.open(QIODevice::WriteOnly));
+    QCOMPARE(blocker.write("x"), qint64(1));
+    blocker.close();
+    SMprSaveCommitRequest backupFailure;
+    backupFailure.source = QFileInfo(sourcePath);
+    backupFailure.destination = QFileInfo(destinationPath);
+    backupFailure.backupRootOverride = QDir(blockerPath).filePath("impossible");
+    const SMprSaveCommitResult backupResult =
+        commitStagedMprTransaction(baseline, transaction, backupFailure);
+    QVERIFY(!backupResult.success);
+    QCOMPARE(backupResult.phase, QString("backup"));
+    QVERIFY(destination.open(QIODevice::ReadOnly));
+    QCOMPARE(destination.readAll(), original);
+    destination.close();
+
+    SMprSaveCommitRequest atomicFailure;
+    atomicFailure.source = QFileInfo(sourcePath);
+    atomicFailure.destination = QFileInfo(destinationPath);
+    atomicFailure.backupRootOverride = dir.filePath("backups");
+    atomicFailure.simulateAtomicCommitFailure = true;
+    const SMprSaveCommitResult atomicResult =
+        commitStagedMprTransaction(baseline, transaction, atomicFailure);
+    QVERIFY(!atomicResult.success);
+    QCOMPARE(atomicResult.phase, QString("atomic-replacement"));
+    QVERIFY(!atomicResult.backupPath.isEmpty());
+    QVERIFY(destination.open(QIODevice::ReadOnly));
+    QCOMPARE(destination.readAll(), original);
+}
+
+void EnduranceDocumentTests::privateMprSaveCoordinatorCorpusUsesCopiesOnly()
+{
+    const QString fixtureList =
+        qEnvironmentVariable("ENDURANCE_MPR_SAVE_FIXTURES");
+    if(fixtureList.isEmpty())
+        QSKIP("Set ENDURANCE_MPR_SAVE_FIXTURES to a path-list of copied private MPR fixtures.");
+    const QStringList fixtures = fixtureList.split(QDir::listSeparator(),
+                                                    QString::SkipEmptyParts);
+    QVERIFY(!fixtures.isEmpty());
+
+    for(const QString& fixturePath : fixtures)
+    {
+        const QFileInfo fixture(fixturePath);
+        QVERIFY2(fixture.exists(), qPrintable(fixture.absoluteFilePath()));
+        CMprDocument fixtureDocument;
+        CValidationReport fixtureReport;
+        QVERIFY2(fixtureDocument.load(fixture, &fixtureReport),
+                 qPrintable(fixture.fileName() + ": " + fixtureReport.toText()));
+        CTerrainEditModel terrain;
+        CValidationReport terrainReport;
+        QVERIFY2(terrain.load(fixtureDocument, &terrainReport),
+                 qPrintable(fixture.fileName() + ": " + terrainReport.toText()));
+
+        STerrainBrush brush;
+        brush.centerX = 1.0f;
+        brush.centerY = 1.0f;
+        brush.radius = 0.0f;
+        brush.falloff = ETerrainBrushFalloff::Constant;
+        const float delta = terrain.height(1, 1) < 65535 ? 1.0f : -1.0f;
+        const STerrainHeightCommand edit = terrain.makeRaiseLower(brush, delta);
+        QVERIFY2(!edit.isEmpty(), qPrintable(fixture.fileName()));
+        QVERIFY(terrain.apply(edit, true));
+        CMprEditTransaction transaction("private copied-fixture vertex edit");
+        CValidationReport transactionReport;
+        QVERIFY2(terrain.appendSectorEdits(&transaction, &transactionReport),
+                 qPrintable(fixture.fileName() + ": " + transactionReport.toText()));
+        QVERIFY(!transaction.isEmpty());
+
+        QTemporaryDir temp;
+        QVERIFY(temp.isValid());
+        const QString sourcePath = temp.filePath("source.mpr");
+        const QString destinationPath = temp.filePath("candidate.mpr");
+        QVERIFY(QFile::copy(fixture.absoluteFilePath(), sourcePath));
+        QVERIFY(QFile::copy(fixture.absoluteFilePath(), destinationPath));
+        CMprDocument baseline;
+        CValidationReport baselineReport;
+        QVERIFY2(baseline.load(QFileInfo(sourcePath), &baselineReport),
+                 qPrintable(fixture.fileName() + ": " + baselineReport.toText()));
+
+        SMprSaveCommitRequest request;
+        request.source = QFileInfo(sourcePath);
+        request.destination = QFileInfo(destinationPath);
+        request.backupRootOverride = temp.filePath("backups");
+        const SMprSaveCommitResult result =
+            commitStagedMprTransaction(baseline, transaction, request);
+        QVERIFY2(result.success,
+                 qPrintable(fixture.fileName() + " " + result.phase + ": " + result.error));
+        QCOMPARE(result.changedMembers.size(), transaction.edits().size());
+
+        CMprDocument reopened;
+        CValidationReport reopenReport;
+        QVERIFY2(reopened.load(QFileInfo(destinationPath), &reopenReport),
+                 qPrintable(fixture.fileName() + ": " + reopenReport.toText()));
+        const CMprSemanticDiff diff = CMprSemanticDiff::compare(baseline, reopened);
+        QCOMPARE(diff.entries().size(), transaction.edits().size());
+        QVERIFY(QFileInfo(result.backupPath).exists());
+    }
 }
 
 void EnduranceDocumentTests::unchangedExistingFileComparisonIsReadOnly()
