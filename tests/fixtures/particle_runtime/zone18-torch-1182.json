@@ -1,9 +1,10 @@
 {
   "counts": {
+    "light": 18,
     "particle": 17,
     "torch": 1
   },
-  "format": "ei-particle-mob-report-v2",
+  "format": "ei-particle-mob-report-v3",
   "records": [
     {
       "fields": [

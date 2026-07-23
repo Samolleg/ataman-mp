@@ -17,6 +17,24 @@ def node(tag, payload):
 
 
 class ParticleMobReportTests(unittest.TestCase):
+    def test_decodes_authored_light_record(self):
+        light = node(0xAA01, b"".join([
+            node(0xAA05, struct.pack("<I", 17)),
+            node(0xAA04, struct.pack("<3f", 1.0, 2.0, 3.0)),
+            node(0xAA07, struct.pack("<3f", 0.2, 0.3, 0.4)),
+            node(0xAA02, struct.pack("<f", 12.0)),
+            node(0xAA06, b"\x01"),
+            node(0xAA03, b"Light-17\0"),
+        ]))
+        records = MODULE.collect_records(node(0xA000, node(0xAA00, light)))
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]["record_type"], "light")
+        fields = MODULE.field_map(records[0])
+        self.assertEqual(fields["LIGHT_ID"], 17)
+        self.assertEqual(fields["LIGHT_POSITION"], [1.0, 2.0, 3.0])
+        self.assertAlmostEqual(fields["LIGHT_RANGE"], 12.0)
+        self.assertEqual(MODULE.record_id(records[0]), 17)
+
     def test_decodes_particle_and_torch_records(self):
         particle = node(0xDD01, b"".join([
             node(0xDD02, struct.pack("<I", 7)),
@@ -69,8 +87,8 @@ class ParticleMobReportTests(unittest.TestCase):
             fixture["source"]["sha256"],
             "FEFFDA09F7279F65562DB37BBDCDFC475D59C4EE6FF1678958E5117949FB9E5A",
         )
-        self.assertEqual(fixture["counts"], {"particle": 8, "torch": 4})
-        self.assertEqual(fixture["format"], "ei-particle-mob-report-v2")
+        self.assertEqual(fixture["counts"], {"light": 7, "particle": 8, "torch": 4})
+        self.assertEqual(fixture["format"], "ei-particle-mob-report-v3")
         self.assertEqual(fixture["selection"], [357, 1365])
         records = {MODULE.record_id(record): record for record in fixture["records"]}
         self.assertEqual(records[1365]["sha256"], "D7450142441196107260624C61A4119B55D7FB11D443E7F9DE14FC13B4EDED34")
@@ -92,7 +110,7 @@ class ParticleMobReportTests(unittest.TestCase):
             fixture["source"]["sha256"],
             "0B3E1115FEA2C892B597D969AC8AB60965F88D9083398AF09C0E84581F279A90",
         )
-        self.assertEqual(fixture["counts"], {"particle": 17, "torch": 1})
+        self.assertEqual(fixture["counts"], {"light": 18, "particle": 17, "torch": 1})
         self.assertEqual(fixture["selection"], [1182])
         torch = fixture["records"][0]
         self.assertEqual(
@@ -114,6 +132,21 @@ class ParticleMobReportTests(unittest.TestCase):
             [-0.8320502638816833, 0.5547001957893372, 0.0],
         )
         self.assertEqual(world_fields["WS_WIND_STR"], 0.800000011920929)
+
+    def test_gz1g_light_fixture_retains_all_authored_values(self):
+        fixture_path = (Path(__file__).parent / "fixtures" / "particle_runtime"
+                        / "gz1g-authored-lights.json")
+        fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+        self.assertEqual(fixture["format"], "ei-particle-mob-report-v3")
+        self.assertEqual(fixture["counts"], {"light": 7, "particle": 8, "torch": 4})
+        self.assertEqual(fixture["selection"], [334, 335, 336, 337, 347, 348, 349])
+        self.assertEqual(len(fixture["records"]), 7)
+        for record in fixture["records"]:
+            fields = {field["tag"]: field["value"] for field in record["fields"]}
+            self.assertEqual(fields["LIGHT_RANGE"], 10.0)
+            self.assertEqual(fields["LIGHT_COLOR"], [1.0, 1.0, 1.0])
+            self.assertEqual(fields["LIGHT_SHADOW"], 1)
+            self.assertIn("raw_record_hex", record)
 
 
 if __name__ == "__main__":

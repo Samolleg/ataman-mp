@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Read-only, deterministic report for authored EI MOB particle/torch records."""
+"""Read-only, deterministic report for authored EI MOB particle/torch/light records."""
 
 from __future__ import annotations
 
@@ -44,6 +44,15 @@ TAGS = {
     0xB014: "OBJ_IS_SHADOW",
     0xB015: "OBJ_R",
     0xB016: "OBJ_QUEST_INFO",
+    0xAA00: "LIGHT_SECTION",
+    0xAA01: "LIGHT",
+    0xAA02: "LIGHT_RANGE",
+    0xAA03: "LIGHT_NAME",
+    0xAA04: "LIGHT_POSITION",
+    0xAA05: "LIGHT_ID",
+    0xAA06: "LIGHT_SHADOW",
+    0xAA07: "LIGHT_COLOR",
+    0xAA08: "LIGHT_COMMENTS",
     0xDD01: "PARTICL",
     0xDD02: "PARTICL_ID",
     0xDD03: "PARTICL_POSITION",
@@ -58,16 +67,17 @@ TAGS = {
 }
 
 WORLD_SET_TAG = 0xABD0
-CONTAINERS = {0xA000, WORLD_SET_TAG, 0xB000, 0xB001, 0xDD01, 0xBBBF0000}
-RECORD_TYPES = {0xDD01: "particle", 0xBBBF0000: "torch"}
-DWORD_TAGS = {0xB002, 0xB003, 0xB012, 0xDD02, 0xDD06}
-FLOAT_TAGS = {0xABD2, 0xABD3, 0xABD4, 0xABD5, 0xDD07, 0xBBBF0001}
-PLOT_TAGS = {0xABD1, 0xB009, 0xB00C, 0xDD03, 0xBBBF0002}
+CONTAINERS = {0xA000, WORLD_SET_TAG, 0xB000, 0xB001, 0xAA00, 0xAA01,
+              0xDD01, 0xBBBF0000}
+RECORD_TYPES = {0xAA01: "light", 0xDD01: "particle", 0xBBBF0000: "torch"}
+DWORD_TAGS = {0xB002, 0xB003, 0xB012, 0xAA05, 0xDD02, 0xDD06}
+FLOAT_TAGS = {0xABD2, 0xABD3, 0xABD4, 0xABD5, 0xAA02, 0xDD07, 0xBBBF0001}
+PLOT_TAGS = {0xABD1, 0xB009, 0xB00C, 0xAA04, 0xAA07, 0xDD03, 0xBBBF0002}
 QUAT_TAGS = {0xB00A}
-BYTE_TAGS = {0xB011, 0xB013, 0xB014}
+BYTE_TAGS = {0xB011, 0xB013, 0xB014, 0xAA06}
 STRING_TAGS = {
     0xB004, 0xB006, 0xB007, 0xB008, 0xB00E, 0xB00F, 0xB016,
-    0xDD04, 0xDD05, 0xBBBF0003,
+    0xAA03, 0xAA08, 0xDD04, 0xDD05, 0xBBBF0003,
 }
 
 
@@ -221,7 +231,9 @@ def add_associations(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def record_id(record: dict[str, Any]) -> int | None:
     fields = field_map(record)
-    value = fields.get("PARTICL_ID" if record["record_type"] == "particle" else "NID")
+    id_field = {"particle": "PARTICL_ID", "light": "LIGHT_ID"}.get(
+        record["record_type"], "NID")
+    value = fields.get(id_field)
     return value if isinstance(value, int) else None
 
 
@@ -231,13 +243,14 @@ def report(path: Path, include_raw: bool = False,
     records = collect_records(data, include_raw)
     world_settings = collect_world_settings(data, include_raw)
     all_counts = {
+        "light": sum(record["record_type"] == "light" for record in records),
         "particle": sum(record["record_type"] == "particle" for record in records),
         "torch": sum(record["record_type"] == "torch" for record in records),
     }
     if selected_ids is not None:
         records = [record for record in records if record_id(record) in selected_ids]
     return {
-        "format": "ei-particle-mob-report-v2",
+        "format": "ei-particle-mob-report-v3",
         "source": {"path": str(path.resolve()), "size": len(data), "sha256": sha256(data)},
         "counts": all_counts,
         "selection": sorted(selected_ids) if selected_ids is not None else None,

@@ -1,6 +1,6 @@
 # Evil Islands particle runtime evidence
 
-Last updated: 2026-07-23
+Last updated: 2026-07-24
 
 ## Purpose and method
 
@@ -40,8 +40,16 @@ All virtual addresses below apply only to this fingerprint.
 The read-only source `D:\Evil Islands\Starter\MODS\JamaisVu135\Maps\zone1.mob`
 is 1,586,436 bytes with SHA-256
 `FEFFDA09F7279F65562DB37BBDCDFC475D59C4EE6FF1678958E5117949FB9E5A`.
-It contains four torch records and eight particle-source records. The complete
-records are reproducibly emitted by `scripts/particle_mob_report.py`.
+It contains seven standalone light records, four torch records, and eight
+particle-source records. The complete records are reproducibly emitted by
+`scripts/particle_mob_report.py`.
+
+The seven `LIGHT` records have IDs 334, 335, 336, 337, 347, 348, and 349.
+Every one stores authored Range `10.0`, Color `(1.0, 1.0, 1.0)`, and
+`LIGHT_SHADOW = 1`; their exact positions, names, comments, offsets, raw bytes,
+and record hashes are retained in the generated fixture. Thus the editor's
+bright night fields are not caused by treating byte RGB as normalized floats:
+these records really do author normalized white and radius ten.
 
 Representative torch NID 1365 is at file offset 619,105, is 310 bytes, and has
 record SHA-256
@@ -117,15 +125,37 @@ at `+0x100`, and `1 / radius^2` at `+0x104`, then registers the light. The
 particle setup at `0x52D34D..0x52D370` performs the identical component-wise
 world-position-plus-PTLINK addition.
 
-The underlying native D3D-light constructor at `0x68CEF0..0x68CF9F` fixes its
-falloff semantics. It initializes D3D `Range` at `+0xE0`, `Falloff` at
-`+0xE4`, and attenuation coefficients at `+0xE8..+0xF0` to `(1, 0, 0)`.
-Torch setup replaces Range and caches its square and reciprocal square at
-`+0x100/+0x104`, but does not replace those attenuation coefficients. Thus the
-fixed-function point light has constant attenuation inside its range (with
-range used for rejection), not the editor's previous squared
-`(1-distance/range)` fade. Surface diffuse still uses the normalized
-light-to-vertex vector and normal dot product.
+The underlying native D3D-light constructor at `0x68CEF0..0x68CF9F`
+initializes D3D `Range` at `+0xE0`, `Falloff` at `+0xE4`, and attenuation
+coefficients at `+0xE8..+0xF0` to `(1, 0, 0)`. Torch setup replaces Range and
+caches its square and reciprocal square at `+0x100/+0x104`. The earlier
+conclusion that these D3D fields prove constant final surface illumination is
+rejected: the engine's higher-level software lighting path uses the cached
+reciprocal square before vertex colors reach the backend.
+
+Point-light application at `0x68D450..0x68D590` computes the exact radial
+factor `1 - distanceSquared * light[+0x104]`, rejects a negative result, then
+multiplies that factor by the surface-normal/light-direction dot product and
+the stored RGB before adding each channel to the existing light and clamping
+that channel at `1.0`. Since `+0x104 = 1 / radiusSquared`, native falloff is
+therefore `max(0, 1 - distanceSquared / radiusSquared)`. The editor's current
+binary `step(distance, radius)` is rejected: it retains full strength up to a
+hard edge and directly causes the observed circular boundaries and excessive
+overlap fields.
+
+Registration at `0x6CA5D0` and cell insertion at `0x6CAC10` place each light
+only in the spatial cells intersected by its radius. Terrain/object vertex
+lighting traverses the cell-local light collection and saturates positive RGB
+contributions. This rejects the editor's global nearest-to-camera selection
+as a native rule; native eligibility is local to the rendered geometry, not
+to the camera.
+
+Standalone `LIGHT` construction at `0x511830..0x51194C` copies authored Range
+and Color unchanged, but adds the exact binary32 constant `2.0` at VA
+`0x73DBE8` to the authored Z position before registering the runtime light.
+This offset belongs to generic `LIGHT` records only. Torch lights use the
+unrotated world-position-plus-PTLINK position already established above and
+receive no additional two-unit offset.
 
 Neither setup multiplies PTLINK by the torch rotation. This rejects the
 editor's previous `rotation.rotatedVector(PTLINK)` attachment rule. It also
@@ -151,6 +181,25 @@ exactly 60 times, prewarming the effect before its first ordinary render. This
 class-specific evidence, rather than the rejected global lookup
 interpretation, establishes that a torch's core fire, peripheral flame, and
 smoke atlas stages are one emitter population.
+
+### Light and projected-shadow composition
+
+Stock projected shadows are composited silhouettes with union opacity
+`80 / 255`, rather than removal of only the direct-sun term. A fully covered
+receiver consequently retains visibility `175 / 255` (approximately
+`0.6862745`) regardless of the current weather RGB. Local map lights are added
+after that environment-shadow composition. The editor expression
+`ambient + sun * diffuse * shadow` is rejected because it makes visible shadow
+contrast depend on the sun/ambient ratio and can erase shadows when the
+unshadowed noon environment saturates. Faithful shader composition must first
+form and saturate the combined environment illumination, apply the bounded
+projected-shadow visibility to that result, and only then add point lights.
+The shadow-map comparison itself therefore represents geometric coverage:
+fully occluded is `0`, fully visible is `1`, and filtered edge samples average
+between them. Applying the `80 / 255` silhouette opacity happens exactly once
+after coverage filtering. The former shader value `0.58` inside each occluded
+PCF sample and then applying a second outer opacity is rejected; it double
+encoded shadow transparency and limited full occlusion to about `0.868`.
 
 ### Fingerprinted zone18 strength control
 
@@ -690,6 +739,10 @@ Superseded implementation notes:
 1. Across other factories, separately label `+0x128` and the type-`0x2010`-only
    `+0x130..+0x138` vector without applying them to ordinary Campfire.
 2. Verify native OpenGL and ANGLE blend/color behavior from identical authored records.
+3. Establish the exact native per-surface spatial-cell light-list traversal and
+   active-light limit. The editor currently exposes eight shader slots and
+   selects frustum-visible lights by camera distance; this is explicitly not
+   claimed as the native local-cell selection rule.
 
 ## Required implementation discipline
 
