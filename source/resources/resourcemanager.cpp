@@ -1,4 +1,5 @@
 #include "resourcemanager.h"
+#include <QOpenGLContext>
 #include "mmp_codec.h"
 #include <QDebug>
 #include <QMessageBox>
@@ -718,9 +719,19 @@ void CTextureList::parse(QByteArray& data, const QString& name)
     // Compressed DXT uploads below use explicit byte offsets and are unchanged.
     stream.device()->seek(header.size());
 
+    const QOpenGLContext* currentContext = QOpenGLContext::currentContext();
+    const bool openGlesCompatibility = currentContext && currentContext->isOpenGLES();
+    const int uploadedMipCount = openGlesCompatibility
+        ? 1 : qMax(1, header.m_mipcount);
     QOpenGLTexture* texture = new QOpenGLTexture(QOpenGLTexture::Target2D);
-    texture->setMinificationFilter(QOpenGLTexture::NearestMipMapNearest);
-    texture->setMagnificationFilter(QOpenGLTexture::NearestMipMapNearest);
+    // GL_TEXTURE_MAG_FILTER only accepts NEAREST or LINEAR.  The historical
+    // mipmapped value is rejected by ANGLE and poisoned all ordinary MMP
+    // texture setup, while the separately composed humanoid RGBA path stayed
+    // visible.  ES2 also requires a complete mip chain when a mip filter is
+    // selected; shipped MMPs commonly stop at their last block-safe DXT level.
+    texture->setMinificationFilter(openGlesCompatibility
+        ? QOpenGLTexture::Nearest : QOpenGLTexture::NearestMipMapNearest);
+    texture->setMagnificationFilter(QOpenGLTexture::Nearest);
     texture->setWrapMode(QOpenGLTexture::Repeat);
     ERenderMaterialClass materialClass = ERenderMaterialClass::Conservative;
     switch (header.m_format)
@@ -729,10 +740,10 @@ void CTextureList::parse(QByteArray& data, const QString& name)
     {
         texture->setFormat(QOpenGLTexture::TextureFormat::RGBA_DXT1);
         texture->setSize(int(header.m_width), int(header.m_height));
-        texture->setMipLevels(qMax(1, header.m_mipcount));
+        texture->setMipLevels(uploadedMipCount);
         texture->allocateStorage(QOpenGLTexture::RGBA, QOpenGLTexture::UInt8);
         int offset = header.size();
-        for(int i(0); i<qMax(1, header.m_mipcount); ++i)
+        for(int i(0); i<uploadedMipCount; ++i)
         {
             const int size = dxtLevelSize(qMax(1, header.m_width >> i), qMax(1, header.m_height >> i), 8);
             texture->setCompressedData(i, 0, size, data.data() + offset);
@@ -746,10 +757,10 @@ void CTextureList::parse(QByteArray& data, const QString& name)
     {
         texture->setFormat(QOpenGLTexture::TextureFormat::RGBA_DXT3);
         texture->setSize(int(header.m_width), int(header.m_height));
-        texture->setMipLevels(qMax(1, header.m_mipcount));
+        texture->setMipLevels(uploadedMipCount);
         texture->allocateStorage(QOpenGLTexture::RGBA, QOpenGLTexture::UInt8);
         int offset = header.size();
-        for(int i(0); i<qMax(1, header.m_mipcount); ++i)
+        for(int i(0); i<uploadedMipCount; ++i)
         {
             const int size = dxtLevelSize(qMax(1, header.m_width >> i), qMax(1, header.m_height >> i), 16);
             texture->setCompressedData(i, 0, size, data.data() + offset);
@@ -763,10 +774,10 @@ void CTextureList::parse(QByteArray& data, const QString& name)
     {
         texture->setFormat(QOpenGLTexture::TextureFormat::RGBA_DXT5);
         texture->setSize(int(header.m_width), int(header.m_height));
-        texture->setMipLevels(qMax(1, header.m_mipcount));
+        texture->setMipLevels(uploadedMipCount);
         texture->allocateStorage(QOpenGLTexture::RGBA, QOpenGLTexture::UInt8);
         int offset = header.size();
-        for(int i(0); i<qMax(1, header.m_mipcount); ++i)
+        for(int i(0); i<uploadedMipCount; ++i)
         {
             const int size = dxtLevelSize(qMax(1, header.m_width >> i), qMax(1, header.m_height >> i), 16);
             texture->setCompressedData(i, 0, size, data.data() + offset);
@@ -1374,24 +1385,27 @@ QOpenGLTexture* CTextureList::buildLandTex(const QString& name, int expectedTexC
             .arg(name).arg(texCount).arg(minTexSize * texCount).arg(minTexSize)
             .arg(combinedMips.first().size()));
     ei::setCrashContext("mpr/terrain-atlas/opengl-create:" + name);
+    const QOpenGLContext* currentContext = QOpenGLContext::currentContext();
+    const bool openGlesCompatibility = currentContext && currentContext->isOpenGLES();
+    const int uploadedMipCount = openGlesCompatibility ? 1 : outputMipCount;
     QOpenGLTexture* texture = new QOpenGLTexture(QOpenGLTexture::Target2D);
-    texture->setMinificationFilter(m_terrainMipmappingEnabled
+    texture->setMinificationFilter(m_terrainMipmappingEnabled && !openGlesCompatibility
         ? QOpenGLTexture::NearestMipMapLinear : QOpenGLTexture::Nearest);
     texture->setMagnificationFilter(QOpenGLTexture::Nearest);
     texture->setWrapMode(QOpenGLTexture::Repeat);
     texture->setFormat(QOpenGLTexture::TextureFormat::RGBA_DXT1); //todo: read texture format from file. EI can use both dxt3 and dxt1
-    texture->setMipLevels(outputMipCount);
+    texture->setMipLevels(uploadedMipCount);
     texture->setSize(minTexSize*texCount, minTexSize);
     ei::setCrashContext("mpr/terrain-atlas/opengl-allocate:" + name);
     texture->allocateStorage(QOpenGLTexture::RGBA, QOpenGLTexture::UInt8);
     ei::setCrashContext("mpr/terrain-atlas/opengl-upload:" + name);
-    for(int level = 0; level < combinedMips.size(); ++level)
+    for(int level = 0; level < uploadedMipCount; ++level)
         texture->setCompressedData(level, 0, combinedMips[level].size(),
                                    combinedMips[level].constData());
     m_aTexture[cacheKey] = texture;
     m_terrainTextures.insert(texture);
     ei::log(eLogInfo, QString("Terrain atlas set ready map:%1 expected:%2 loaded:%3 mips:%4")
-            .arg(name).arg(expectedTexCount).arg(texCount).arg(outputMipCount));
+            .arg(name).arg(expectedTexCount).arg(texCount).arg(uploadedMipCount));
     return texture;
 }
 
@@ -1404,7 +1418,9 @@ void CTextureList::setTerrainMipmappingEnabled(bool enabled)
     {
         if(!texture || !texture->isCreated())
             continue;
-        texture->setMinificationFilter(enabled
+        const QOpenGLContext* currentContext = QOpenGLContext::currentContext();
+        const bool openGlesCompatibility = currentContext && currentContext->isOpenGLES();
+        texture->setMinificationFilter(enabled && !openGlesCompatibility
             ? QOpenGLTexture::NearestMipMapLinear : QOpenGLTexture::Nearest);
         texture->setMagnificationFilter(QOpenGLTexture::Nearest);
     }

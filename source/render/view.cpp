@@ -1432,6 +1432,16 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
         m_shadowProgram.setUniformValue("u_viewMmatrix", lightView);
         m_shadowProgram.setUniformValue("u_instanced", false);
     };
+    const auto endTarget = [&](QOpenGLFramebufferObject* target)
+    {
+        target->release();
+        // QOpenGLFramebufferObject::release() is not a reliable presentation
+        // boundary on ANGLE: the D3D-backed ES context can retain the shadow
+        // FBO until Qt starts its own composition.  Every following scene draw
+        // would then target the RGBA shadow atlas (and the window stays white).
+        // Bind Qt's actual default target explicitly after every shadow pass.
+        QOpenGLFramebufferObject::bindDefault();
+    };
     if(rebuildStatic)
     {
         m_staticLightSpaceMatrix = nearCascade.staticMatrix;
@@ -1440,7 +1450,7 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
                           qMin(safeMaximumDistance, m_nearShadowSplit + 24.0f),
                           nearCascade.staticMatrix,
                           false, true);
-        m_shadowFbo->release();
+        endTarget(m_shadowFbo);
         m_staticShadowFingerprint = staticFingerprint;
     }
     if(rebuildFarStatic)
@@ -1449,7 +1459,7 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
         beginTarget(m_farShadowFbo, farCascade.projection, farCascade.staticView);
         queue.flushShadow(&m_shadowProgram, safeMaximumDistance,
                           farCascade.staticMatrix, false, true);
-        m_farShadowFbo->release();
+        endTarget(m_farShadowFbo);
         m_farStaticShadowFingerprint = farStaticFingerprint;
     }
     if(rebuildDynamic)
@@ -1463,12 +1473,12 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
                           qMin(safeMaximumDistance, m_nearShadowSplit + 24.0f),
                           nearCascade.dynamicMatrix,
                           true, false);
-        m_dynamicShadowFbo->release();
+        endTarget(m_dynamicShadowFbo);
         m_farDynamicLightSpaceMatrix = farCascade.dynamicMatrix;
         beginTarget(m_farDynamicShadowFbo, farCascade.projection, farCascade.dynamicView);
         queue.flushShadow(&m_shadowProgram, safeMaximumDistance,
                           farCascade.dynamicMatrix, true, false);
-        m_farDynamicShadowFbo->release();
+        endTarget(m_farDynamicShadowFbo);
         m_shadowUpdateTimer.restart();
     }
     m_shadowInitialized = true;
