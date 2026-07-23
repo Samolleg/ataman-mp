@@ -1019,7 +1019,9 @@ void CView::saveLandAs()
     if(!m_pLand->isMprLoad())
         return;
 
-    const QFileInfo fileName = QFileDialog::getSaveFileName(this, "Save " + m_pLand->filePath().fileName() + " as... ", "" , tr("Landscape (*.mpr);;)"));
+    const QFileInfo fileName = QFileDialog::getSaveFileName(
+        this, "Save " + m_pLand->filePath().fileName() + " as... ",
+        m_pLand->filePath().absoluteFilePath(), tr("Landscape (*.mpr);;)"));
     if(fileName.filePath().isEmpty())
         return;
 
