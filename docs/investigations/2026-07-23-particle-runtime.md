@@ -793,11 +793,14 @@ Superseded implementation notes:
 
 1. Across other factories, separately label `+0x128` and the type-`0x2010`-only
    `+0x130..+0x138` vector without applying them to ordinary Campfire.
-2. Verify native OpenGL and ANGLE blend/color behavior from identical authored records.
-3. Establish the exact native per-surface spatial-cell light-list traversal and
-   active-light limit. The editor currently exposes eight shader slots and
-   selects frustum-visible lights by camera distance; this is explicitly not
-   claimed as the native local-cell selection rule.
+2. Across non-Tendri factories, establish their independent scheduler,
+   callback, texture, blend, and interpolation rules before replacing their
+   current editor preview styles with native simulations.
+3. Establish the special local-light flag `+0x40` semantics and the exact
+   non-terrain object-light receiver path. Ordinary terrain candidates and
+   their channelwise-maximum composition are confirmed; the editor's 64-light
+   capacity covers the complete selected JMV MOB corpus without the rejected
+   nearest-camera truncation.
 
 ## Required implementation discipline
 
