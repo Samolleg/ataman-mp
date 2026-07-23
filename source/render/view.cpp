@@ -2526,9 +2526,14 @@ void CView::draw()
                 {
                     const QVector3D position = light->drawPosition().isNull()
                         ? light->position() : light->drawPosition();
+                    // Native generic LIGHT setup adds 2.0 to the authored Z
+                    // coordinate before the light is registered. Torch lights
+                    // use their particle pivot directly and do not get this lift.
+                    const QVector3D runtimePosition = position + QVector3D(0.0f, 0.0f, 2.0f);
                     if(light->range() > 0.0f && (!cullingEnabled
-                            || frustum.intersectsSphere(position, light->range())))
-                        sceneLights.append({position, light->lightColor(), light->range()});
+                            || frustum.intersectsSphere(runtimePosition, light->range())))
+                        sceneLights.append({runtimePosition,
+                                            light->lightColor(), light->range()});
                 }
                 else if(CTorch* torch = dynamic_cast<CTorch*>(node))
                 {

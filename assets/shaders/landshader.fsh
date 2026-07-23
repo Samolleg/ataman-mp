@@ -76,7 +76,6 @@ float cascadeVisibility(vec3 staticProjected, vec3 dynamicProjected,
                         float staticBias, float dynamicBias)
 {
   float visibility = 0.0;
-  bool centerOccluded = false;
   for (int y = -1; y <= 1; ++y)
     for (int x = -1; x <= 1; ++x)
     {
@@ -89,12 +88,10 @@ float cascadeVisibility(vec3 staticProjected, vec3 dynamicProjected,
           : 1.0;
       bool staticOccluded = staticInside && staticProjected.z - staticBias > staticDepth;
       bool dynamicOccluded = dynamicInside && dynamicProjected.z - dynamicBias > dynamicDepth;
-      if (x == 0 && y == 0)
-        centerOccluded = staticOccluded || dynamicOccluded;
-      visibility += (staticOccluded || dynamicOccluded) ? 0.58 : 1.0;
+      visibility += (staticOccluded || dynamicOccluded) ? 0.0 : 1.0;
     }
   visibility /= 9.0;
-  return centerOccluded ? min(visibility, 0.58) : visibility;
+  return visibility;
 }
 
 void main(void)
@@ -192,17 +189,23 @@ void main(void)
         }
       }
     }
-    light = u_ambientColor + u_sunColor * (sunDiffuse * shadow);
+    // Stock shadows are an 80/255-alpha projected silhouette over the
+    // saturated environment result. Point lights are accumulated afterwards.
+    vec3 environmentLight = clamp(
+        u_ambientColor + u_sunColor * sunDiffuse, 0.0, 1.0);
+    float projectedShadowVisibility = mix(1.0, shadow, 80.0 / 255.0);
+    light = environmentLight * projectedShadowVisibility;
     for (int i = 0; i < 8; ++i)
     {
       if (i >= u_pointLightCount)
         break;
       vec3 offset = u_pointLightPositionRange[i].xyz - v_worldPosition;
       float range = max(u_pointLightPositionRange[i].w, 0.001);
-      float distanceToLight = length(offset);
-      float attenuation = step(distanceToLight, range);
+      float distanceSquared = dot(offset, offset);
+      float attenuation = max(0.0,
+          1.0 - distanceSquared / (range * range));
       light += u_pointLightColor[i] * attenuation
-             * max(dot(norm, normalize(offset)), 0.0);
+             * max(dot(norm, offset * inversesqrt(max(distanceSquared, 0.000001))), 0.0);
     }
     }
   }
