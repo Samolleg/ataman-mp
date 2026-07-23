@@ -228,7 +228,12 @@ private:
     void getColorFromRect(const QRect& rect, QVector<SColor>& aColor);
     void onParamChangeLogic(CNode* pNode, const QSharedPointer<IPropertyBase>& prop);
     void logOpenGlData();
-    void checkOpenGlError();
+    void armOpenGlDiagnostics(const QString& reason, int frameCount = 4);
+    bool logOpenGlErrors(const QString& stage);
+    void logOpenGlDiagnosticState(const QString& stage, bool samplePixel = false);
+    void logShaderProgramDiagnostics(const QString& name,
+                                     const QOpenGLShaderProgram& program,
+                                     bool success);
     void drawTilePreview(QOpenGLShaderProgram* program);
     void updateTileForm(bool bGenerateNewTable = false);
     void saveSession();
@@ -402,6 +407,9 @@ private:
     QComboBox* m_environmentPreviewMode{nullptr};
     QSlider* m_environmentPreviewTime{nullptr};
     bool m_environmentPreviewSyncing{false};
+    int m_openGlDiagnosticFramesRemaining{0};
+    quint64 m_openGlDiagnosticFrame{0};
+    QString m_openGlDiagnosticReason;
 };
 
 #endif // MYGLWIDGET_H

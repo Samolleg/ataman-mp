@@ -71,6 +71,20 @@
 class CLogic;
 
 namespace {
+QString openGlErrorName(GLenum error)
+{
+    switch(error)
+    {
+    case GL_INVALID_ENUM: return QStringLiteral("GL_INVALID_ENUM");
+    case GL_INVALID_VALUE: return QStringLiteral("GL_INVALID_VALUE");
+    case GL_INVALID_OPERATION: return QStringLiteral("GL_INVALID_OPERATION");
+    case GL_OUT_OF_MEMORY: return QStringLiteral("GL_OUT_OF_MEMORY");
+    case GL_INVALID_FRAMEBUFFER_OPERATION:
+        return QStringLiteral("GL_INVALID_FRAMEBUFFER_OPERATION");
+    default: return QStringLiteral("unknown");
+    }
+}
+
 struct SParticleVisualStyle
 {
     SParticleVisualStyle(const char* texture = nullptr,
@@ -851,6 +865,7 @@ void CView::initShaders()
         close();
         return;
     }
+    logShaderProgramDiagnostics(QStringLiteral("object"), m_program, true);
 
     m_program.bind();
     m_program.setUniformValue("customColor", QVector4D(0.0, 0.0, 0.0, 0.0));
@@ -876,6 +891,7 @@ void CView::initShaders()
         close();
         return;
     }
+    logShaderProgramDiagnostics(QStringLiteral("terrain"), m_landProgram, true);
 
     m_landProgram.bind();
     m_landProgram.setUniformValue("u_instanced", false);
@@ -886,12 +902,17 @@ void CView::initShaders()
     m_landProgram.setUniformValue("u_animateLiquid", false);
     m_landProgram.setUniformValue("u_liquidTime", 0.0f);
 
-    if(!m_skyProgram.addShaderFromSourceFile(QOpenGLShader::Vertex, ":/skybox.vsh"))
+    bool skySuccess = m_skyProgram.addShaderFromSourceFile(
+        QOpenGLShader::Vertex, ":/skybox.vsh");
+    skySuccess = skySuccess && m_skyProgram.addShaderFromSourceFile(
+        QOpenGLShader::Fragment, ":/skybox.fsh");
+    skySuccess = skySuccess && m_skyProgram.link();
+    logShaderProgramDiagnostics(QStringLiteral("sky"), m_skyProgram, skySuccess);
+    if(!skySuccess)
+    {
         close();
-    if(!m_skyProgram.addShaderFromSourceFile(QOpenGLShader::Fragment, ":/skybox.fsh"))
-        close();
-    if(!m_skyProgram.link())
-        close();
+        return;
+    }
     m_skyProgram.bind();
     m_skyProgram.setUniformValue("qt_Texture0", 0);
 
@@ -899,24 +920,36 @@ void CView::initShaders()
     // incomplete auxiliary program must not poison an otherwise valid
     // terrain-only GL context (notably the ANGLE fallback).
 
-    if(!m_shadowProgram.addShaderFromSourceFile(QOpenGLShader::Vertex, ":/vshader.vsh"))
+    bool shadowSuccess = m_shadowProgram.addShaderFromSourceFile(
+        QOpenGLShader::Vertex, ":/vshader.vsh");
+    shadowSuccess = shadowSuccess && m_shadowProgram.addShaderFromSourceFile(
+        QOpenGLShader::Fragment, ":/shadow.fsh");
+    shadowSuccess = shadowSuccess && m_shadowProgram.link();
+    logShaderProgramDiagnostics(QStringLiteral("shadow"), m_shadowProgram,
+                                shadowSuccess);
+    if(!shadowSuccess)
+    {
         close();
-    if(!m_shadowProgram.addShaderFromSourceFile(QOpenGLShader::Fragment, ":/shadow.fsh"))
-        close();
-    if(!m_shadowProgram.link())
-        close();
+        return;
+    }
     m_shadowProgram.bind();
     m_shadowProgram.setUniformValue("qt_Texture0", 0);
     m_shadowProgram.setUniformValue("u_shadowAlphaTest", false);
 
 
     // Compile select shader
-    if (!m_selectProgram.addShaderFromSourceFile(QOpenGLShader::Vertex, ":/vshader.vsh"))
+    bool selectSuccess = m_selectProgram.addShaderFromSourceFile(
+        QOpenGLShader::Vertex, ":/vshader.vsh");
+    selectSuccess = selectSuccess && m_selectProgram.addShaderFromSourceFile(
+        QOpenGLShader::Fragment, ":/select.fsh");
+    selectSuccess = selectSuccess && m_selectProgram.link();
+    logShaderProgramDiagnostics(QStringLiteral("selection"), m_selectProgram,
+                                selectSuccess);
+    if(!selectSuccess)
+    {
         close();
-    if (!m_selectProgram.addShaderFromSourceFile(QOpenGLShader::Fragment, ":/select.fsh"))
-        close();
-    if (!m_selectProgram.link())
-        close();
+        return;
+    }
     m_selectProgram.bind();
     m_selectProgram.setUniformValue("u_instanced", false);
 
@@ -926,7 +959,9 @@ void CView::initializeGL()
 {
     ei::setCrashContext("opengl/initialize");
     makeCurrent();
+    armOpenGlDiagnostics(QStringLiteral("OpenGL initialization"), 2);
     logOpenGlData();
+    logOpenGlDiagnosticState(QStringLiteral("initialize/begin"));
     qglClearColor(Qt::black);
     //glEnable(GL_EXT_texture_filter_anisotropic);
     glEnable(GL_DEPTH_TEST);
@@ -940,7 +975,9 @@ void CView::initializeGL()
     }
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    logOpenGlErrors(QStringLiteral("initialize/fixed-state"));
     initShaders();
+    logOpenGlDiagnosticState(QStringLiteral("initialize/shaders"));
     m_skyBuffer.create();
     m_skyBuffer.setUsagePattern(QOpenGLBuffer::StaticDraw);
     ei::log(eLogInfo, "Particle GL subsystem deferred until a visible effect is submitted");
@@ -955,6 +992,7 @@ void CView::initializeGL()
     m_skyBuffer.allocate(skyVertices.constData(),
                          skyVertices.size() * int(sizeof(SSkyVertex)));
     m_skyBuffer.release();
+    logOpenGlErrors(QStringLiteral("initialize/sky-buffer"));
     if(m_skyVertexCount > 0)
         ei::log(eLogInfo, QString("Profile sky geometry resolved: nask0sky.fig (%1 vertices) from %2")
                 .arg(m_skyVertexCount).arg(skySource));
@@ -965,7 +1003,7 @@ void CView::initializeGL()
     ensureShadowFramebuffers(qBound(0,
         shadowQualityOption ? shadowQualityOption->value() : 2, 2));
     m_shadowUpdateTimer.start();
-    checkOpenGlError();
+    logOpenGlDiagnosticState(QStringLiteral("initialize/shadow-framebuffers"));
 
     CTextureList::getInstance()->initResource();
     CObjectList::getInstance()->initResource();
@@ -1727,6 +1765,19 @@ void CView::applyShadowUniforms(QOpenGLShaderProgram& program, bool enabled,
 void CView::paintGL()
 {
     makeCurrent();
+    const bool diagnoseFrame = m_openGlDiagnosticFramesRemaining > 0;
+    if(diagnoseFrame)
+    {
+        ++m_openGlDiagnosticFrame;
+        ei::log(eLogInfo, QStringLiteral(
+            "OpenGL diagnostic frame begin id:%1 reason:%2 landscape:%3 mobs:%4")
+            .arg(m_openGlDiagnosticFrame)
+            .arg(m_openGlDiagnosticReason)
+            .arg(m_pLand && m_pLand->isMprLoad()
+                ? m_pLand->filePath().fileName() : QStringLiteral("none"))
+            .arg(m_aMob.size()));
+        logOpenGlDiagnosticState(QStringLiteral("frame/begin"));
+    }
     glViewport(0, 0, width(), height());
     glEnable(GL_DEPTH_TEST);
     glDepthMask(GL_TRUE);
@@ -1751,7 +1802,11 @@ void CView::paintGL()
     if(timeGpu)
         m_gpuTimer->begin();
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    if(diagnoseFrame)
+        logOpenGlDiagnosticState(QStringLiteral("frame/initial-clear"), true);
     draw();
+    if(diagnoseFrame)
+        logOpenGlDiagnosticState(QStringLiteral("frame/scene-complete"), true);
     if(timeGpu)
     {
         m_gpuTimer->end();
@@ -1759,6 +1814,13 @@ void CView::paintGL()
     }
     performance.endFrame();
     drawTestOverlaysOpenGl();
+    if(diagnoseFrame)
+    {
+        logOpenGlDiagnosticState(QStringLiteral("frame/overlays-complete"), true);
+        ei::log(eLogInfo, QStringLiteral("OpenGL diagnostic frame end id:%1")
+            .arg(m_openGlDiagnosticFrame));
+        --m_openGlDiagnosticFramesRemaining;
+    }
     //doneCurrent();
 }
 
@@ -2490,6 +2552,7 @@ void CView::draw()
     };
     if(environmentEnabled && skyEnabled && !m_caveEnvironment)
         drawSkybox(camMatrix, environment);
+    logOpenGlErrors(QStringLiteral("draw/sky"));
     // Set modelview-projection matrix
 
     // Bind shader pipeline for use
@@ -2536,6 +2599,7 @@ void CView::draw()
             m_pLand->draw(&m_landProgram, cullingEnabled ? &frustum : nullptr);
         if(m_landscapeVisible && m_pLand && m_pLand->isMprLoad() && m_bPreviewTile)
             drawTilePreview(&m_landProgram);
+        logOpenGlErrors(QStringLiteral("draw/terrain"));
         terrainDrawn = true;
         m_program.bind();
         m_program.setUniformValue("u_projMmatrix", m_projection);
@@ -2662,6 +2726,7 @@ void CView::draw()
                                renderQueue, maximumShadowDistance);
         drawTerrainColor(shadowReady);
         renderQueue.flush();
+        logOpenGlErrors(QStringLiteral("draw/object-queue"));
         glDepthFunc(GL_LEQUAL);
         for(CMob* mob : m_aMob)
             if(isMobVisible(mob))
@@ -2713,11 +2778,13 @@ void CView::draw()
         applyShadowUniforms(m_landProgram, environmentEnabled && shadowsEnabled,
                             true, true);
         m_pLand->drawWater(&m_landProgram, cullingEnabled ? &frustum : nullptr);
+        logOpenGlErrors(QStringLiteral("draw/water"));
         m_landProgram.setUniformValue("u_animateLiquid", false);
         m_landProgram.setUniformValue("transparency", 0.0f);
     }
 
     drawParticles(camMatrix, cullingEnabled ? &frustum : nullptr);
+    logOpenGlErrors(QStringLiteral("draw/particles"));
 
 
     //draw selection frame using m_program shader
@@ -2753,6 +2820,8 @@ void CView::loadLandscape(const QFileInfo& filePath)
     for(CMob* mob : m_aMob)
         mob->reprojectForCurrentTerrain();
     m_landscapeVisible = true;
+    armOpenGlDiagnostics(QStringLiteral("landscape loaded: %1")
+        .arg(filePath.fileName()), 6);
     m_spatialIndexDirty = true;
     m_sceneFingerprintDirty = true;
     emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMpr, filePath.baseName());
@@ -3154,17 +3223,141 @@ QString stringFromUnsignedChar(const unsigned char *str ){
     return result;
 }
 
+void CView::armOpenGlDiagnostics(const QString& reason, int frameCount)
+{
+    m_openGlDiagnosticReason = reason;
+    m_openGlDiagnosticFramesRemaining = qMax(m_openGlDiagnosticFramesRemaining,
+                                               qMax(1, frameCount));
+    ei::log(eLogInfo, QStringLiteral(
+        "OpenGL diagnostics armed reason:%1 frames:%2")
+        .arg(reason).arg(m_openGlDiagnosticFramesRemaining));
+}
+
+bool CView::logOpenGlErrors(const QString& stage)
+{
+    if(m_openGlDiagnosticFramesRemaining <= 0
+            && !stage.startsWith(QStringLiteral("initialize/"))
+            && !stage.startsWith(QStringLiteral("shader/")))
+        return false;
+    bool found = false;
+    QStringList errors;
+    for(int index = 0; index < 32; ++index)
+    {
+        const GLenum error = glGetError();
+        if(error == GL_NO_ERROR)
+            break;
+        found = true;
+        errors.append(QStringLiteral("%1(%2)")
+            .arg(openGlErrorName(error))
+            .arg(QString::number(uint(error), 16)));
+    }
+    if(found)
+        ei::log(eLogWarning, QStringLiteral("OpenGL diagnostic error stage:%1 errors:%2")
+            .arg(stage, errors.join(QStringLiteral(","))));
+    return found;
+}
+
+void CView::logOpenGlDiagnosticState(const QString& stage, bool samplePixel)
+{
+    if(m_openGlDiagnosticFramesRemaining <= 0
+            && !stage.startsWith(QStringLiteral("initialize/")))
+        return;
+
+    // Attribute errors to the operation that preceded this checkpoint before
+    // the diagnostic queries themselves can affect the GL error register.
+    logOpenGlErrors(stage + QStringLiteral("/preceding-operation"));
+
+    GLint viewport[4] = {0, 0, 0, 0};
+    GLint framebuffer = 0;
+    GLint program = 0;
+    GLint arrayBuffer = 0;
+    GLint elementBuffer = 0;
+    GLint activeTexture = 0;
+    GLint texture = 0;
+    GLboolean colorMask[4] = {GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE};
+    GLfloat clearColor[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+    glGetIntegerv(GL_VIEWPORT, viewport);
+    glGetIntegerv(GL_FRAMEBUFFER_BINDING, &framebuffer);
+    glGetIntegerv(GL_CURRENT_PROGRAM, &program);
+    glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &arrayBuffer);
+    glGetIntegerv(GL_ELEMENT_ARRAY_BUFFER_BINDING, &elementBuffer);
+    glGetIntegerv(GL_ACTIVE_TEXTURE, &activeTexture);
+    glGetIntegerv(GL_TEXTURE_BINDING_2D, &texture);
+    glGetBooleanv(GL_COLOR_WRITEMASK, colorMask);
+    glGetFloatv(GL_COLOR_CLEAR_VALUE, clearColor);
+    GLenum framebufferStatus = 0;
+    const QGLContext* legacyContext = QGLContext::currentContext();
+    if(legacyContext)
+    {
+        typedef GLenum (APIENTRY *CheckFramebufferStatusProc)(GLenum);
+        CheckFramebufferStatusProc checkFramebufferStatus =
+            reinterpret_cast<CheckFramebufferStatusProc>(
+                legacyContext->getProcAddress(
+                    QStringLiteral("glCheckFramebufferStatus")));
+        if(checkFramebufferStatus)
+            framebufferStatus = checkFramebufferStatus(GL_FRAMEBUFFER);
+    }
+
+    QString pixelText = QStringLiteral("not-sampled");
+    if(samplePixel && width() > 0 && height() > 0)
+    {
+        GLubyte pixel[4] = {0, 0, 0, 0};
+        glReadPixels(width() / 2, height() / 2, 1, 1,
+                     GL_RGBA, GL_UNSIGNED_BYTE, pixel);
+        pixelText = QStringLiteral("%1,%2,%3,%4")
+            .arg(pixel[0]).arg(pixel[1]).arg(pixel[2]).arg(pixel[3]);
+    }
+
+    ei::log(eLogInfo, QStringLiteral(
+        "OpenGL diagnostic state stage:%1 frame:%2 viewport:%3,%4,%5,%6 "
+        "fbo:%7 fbo-status:0x%8 program:%9 array-buffer:%10 element-buffer:%11 "
+        "active-texture:%12 texture2d:%13 depth:%14 blend:%15 color-mask:%16%17%18%19 "
+        "clear:%20,%21,%22,%23 center-rgba:%24")
+        .arg(stage).arg(m_openGlDiagnosticFrame)
+        .arg(viewport[0]).arg(viewport[1]).arg(viewport[2]).arg(viewport[3])
+        .arg(framebuffer).arg(QString::number(uint(framebufferStatus), 16))
+        .arg(program).arg(arrayBuffer).arg(elementBuffer)
+        .arg(activeTexture - GL_TEXTURE0).arg(texture)
+        .arg(glIsEnabled(GL_DEPTH_TEST) ? 1 : 0)
+        .arg(glIsEnabled(GL_BLEND) ? 1 : 0)
+        .arg(colorMask[0] ? 1 : 0).arg(colorMask[1] ? 1 : 0)
+        .arg(colorMask[2] ? 1 : 0).arg(colorMask[3] ? 1 : 0)
+        .arg(clearColor[0], 0, 'f', 3).arg(clearColor[1], 0, 'f', 3)
+        .arg(clearColor[2], 0, 'f', 3).arg(clearColor[3], 0, 'f', 3)
+        .arg(pixelText));
+    logOpenGlErrors(stage + QStringLiteral("/diagnostic-query"));
+}
+
+void CView::logShaderProgramDiagnostics(const QString& name,
+                                        const QOpenGLShaderProgram& program,
+                                        bool success)
+{
+    const QString shaderLog = program.log().trimmed();
+    ei::log(success ? eLogInfo : eLogWarning, QStringLiteral(
+        "OpenGL shader program:%1 success:%2 id:%3 log:%4")
+        .arg(name).arg(success ? 1 : 0).arg(program.programId())
+        .arg(shaderLog.isEmpty() ? QStringLiteral("<empty>") : shaderLog));
+    logOpenGlErrors(QStringLiteral("shader/%1").arg(name));
+}
+
 void CView::logOpenGlData()
 {
     const GLubyte * version = glGetString(GL_VERSION);
     const GLubyte * vendor = glGetString(GL_VENDOR);
     const GLubyte * renderer = glGetString(GL_RENDERER);
-    ei::log(eLogInfo, QString("OpenGL module:%1 version:%2 vendor:%3 renderer:%4 swap-interval-request:%5")
+    const QGLContext* legacyContext = QGLContext::currentContext();
+    const QGLFormat legacyFormat = legacyContext
+        ? legacyContext->format() : QGLFormat();
+    ei::log(eLogInfo, QString("OpenGL module:%1 version:%2 vendor:%3 renderer:%4 swap-interval-request:%5 legacy-context:%6 legacy-valid:%7 legacy-format:%8.%9 profile:%10")
             .arg(QOpenGLContext::openGLModuleType() == QOpenGLContext::LibGLES ? "GLES/ANGLE" : "Desktop")
             .arg(version ? reinterpret_cast<const char*>(version) : "unavailable")
             .arg(vendor ? reinterpret_cast<const char*>(vendor) : "unavailable")
             .arg(renderer ? reinterpret_cast<const char*>(renderer) : "unavailable")
-            .arg(format().swapInterval()));
+            .arg(format().swapInterval())
+            .arg(legacyContext ? 1 : 0)
+            .arg(legacyContext && legacyContext->isValid() ? 1 : 0)
+            .arg(legacyFormat.majorVersion()).arg(legacyFormat.minorVersion())
+            .arg(int(legacyFormat.profile())));
 }
 
 CMob* CView::ownerMob(CNode* node) const
@@ -3341,17 +3534,6 @@ bool CView::activateSelectedObjectMob()
     if(m_pTree)
         m_pTree->revealNode(selectedNode);
     return true;
-}
-
-void CView::checkOpenGlError()
-{
-    GLenum errCode;
-    errCode = glGetError();
-    if (errCode != GL_NO_ERROR)
-    {
-        ei::log(eLogFatal, "OpenGL error: " + QString::number(errCode));
-
-    }
 }
 
 void CView::drawTilePreview(QOpenGLShaderProgram* program)
@@ -3671,6 +3853,8 @@ bool CView::loadMob(QFileInfo &filePath)
     ei::log(eLogInfo, QString("Preloaded visual resources for %1 units during MOB load in %2 ms")
             .arg(preloadedUnits).arg(preloadTimer.elapsed()));
     m_aMob.append(pMob);
+    armOpenGlDiagnostics(QStringLiteral("MOB loaded: %1")
+        .arg(filePath.fileName()), 6);
     if(!m_environmentMob)
         m_environmentMob = pMob;
     m_spatialIndexDirty = true;
