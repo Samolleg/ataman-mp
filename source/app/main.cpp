@@ -24,6 +24,11 @@
 #include <QContextMenuEvent>
 #include <QScrollBar>
 #include <QFormLayout>
+#include <QEventLoop>
+#include <QPainter>
+#include <QPaintEvent>
+#include <QScreen>
+#include <QWidget>
 #include <cstdio>
 #include <cstring>
 
@@ -43,6 +48,87 @@
 #endif
 
 namespace {
+class CStartupSplash final: public QWidget
+{
+public:
+    CStartupSplash():
+        QWidget(nullptr, Qt::Window | Qt::FramelessWindowHint |
+                Qt::WindowTitleHint | Qt::WindowSystemMenuHint |
+                Qt::WindowMinimizeButtonHint),
+        m_art(QStringLiteral(":/endurance_splash.png")),
+        m_status(tr("Initializing editor..."))
+    {
+        setWindowTitle(tr("EI Mapper: Endurance Edition"));
+        setWindowIcon(QIcon(QStringLiteral(":/endurance_gate.png")));
+        setFixedSize(960, 400);
+        setAttribute(Qt::WA_OpaquePaintEvent);
+    }
+
+    void showCentered()
+    {
+        if(QScreen* screen = QGuiApplication::primaryScreen())
+            move(screen->availableGeometry().center() - rect().center());
+        show();
+        raise();
+        activateWindow();
+    }
+
+    void setStatus(const QString& status)
+    {
+        m_status = status;
+        update();
+        QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+    }
+
+protected:
+    void paintEvent(QPaintEvent*) override
+    {
+        QPainter painter(this);
+        painter.setRenderHint(QPainter::Antialiasing, true);
+        if(!m_art.isNull())
+            painter.drawPixmap(rect(), m_art);
+        else
+            painter.fillRect(rect(), QColor(20, 20, 20));
+
+        painter.fillRect(QRect(0, 0, 520, 150), QColor(0, 0, 0, 168));
+        painter.fillRect(QRect(0, height() - 48, width(), 48), QColor(0, 0, 0, 190));
+
+        QFont titleFont = painter.font();
+        titleFont.setPointSize(28);
+        titleFont.setBold(true);
+        painter.setFont(titleFont);
+        painter.setPen(Qt::white);
+        painter.drawText(QRect(30, 22, 470, 48), Qt::AlignLeft | Qt::AlignVCenter,
+                         tr("EI Mapper"));
+
+        QFont subtitleFont = painter.font();
+        subtitleFont.setPointSize(17);
+        subtitleFont.setBold(false);
+        painter.setFont(subtitleFont);
+        painter.setPen(QColor(218, 190, 130));
+        painter.drawText(QRect(32, 70, 468, 34), Qt::AlignLeft | Qt::AlignVCenter,
+                         tr("Endurance Edition"));
+
+        QFont detailFont = painter.font();
+        detailFont.setPointSize(10);
+        painter.setFont(detailFont);
+        painter.setPen(QColor(220, 220, 220));
+        painter.drawText(QRect(33, 108, 465, 24), Qt::AlignLeft | Qt::AlignVCenter,
+                         tr("Version %1").arg(QCoreApplication::applicationVersion()));
+
+        QFont statusFont = painter.font();
+        statusFont.setPointSize(10);
+        painter.setFont(statusFont);
+        painter.setPen(Qt::white);
+        painter.drawText(QRect(24, height() - 48, width() - 48, 48),
+                         Qt::AlignLeft | Qt::AlignVCenter, m_status);
+    }
+
+private:
+    QPixmap m_art;
+    QString m_status;
+};
+
 class CEnduranceStyle final: public QProxyStyle
 {
 public:
@@ -1148,11 +1234,20 @@ int main(int argc, char *argv[])
         "QMenu::item:disabled { color: #808080; }");
 
 
+    CStartupSplash splash;
+    splash.showCentered();
+    QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+
     MainWindow window;
     window.setWindowTitle(QString("EI Mapper: Endurance Edition %1").arg(QCoreApplication::applicationVersion()));
     //window.resize(window.sizeHint());
 
+    splash.setStatus(QObject::tr("Opening main window..."));
     window.show();
+    QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+    splash.close();
+    window.raise();
+    window.activateWindow();
     QStringList startupDocuments;
     for(int i = 1; i < app.arguments().size(); ++i)
     {

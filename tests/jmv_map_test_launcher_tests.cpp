@@ -406,8 +406,9 @@ void JmvMapTestLauncherTests::injectsActualAutorunRuntimeBootstrap()
     QCOMPARE(script.count("SetCPFast(GetLeader(), 290.500000, 219.200000, 0)"), 2);
     QVERIFY(script.contains("AddMob(\"Autozone1cyclopus.mob\")"));
     QVERIFY(script.contains("GodMode(0,3)"));
-    QVERIFY(script.contains("FixWorldTime(21.500000)"));
-    QCOMPARE(script.count("FixWorldTime(21.500000)"), 2);
+    QVERIFY(script.contains("RunWorldTime(21.500000)"));
+    QCOMPARE(script.count("RunWorldTime(21.500000)"), 2);
+    QVERIFY(!script.contains("FixWorldTime("));
     QVERIFY(!script.contains("GodMode(0,3);"));
 
     QFile unchanged(source);

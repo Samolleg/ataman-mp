@@ -29,7 +29,9 @@ alone.
   transient time override and never edits MOB world settings.
 - A selected time override is delivered to JMV Test Current Map and every hot
   reload through the hash-owned autorun-MOB bootstrap as
-  `FixWorldTime(hours)`. The staged primary MOB and its script remain exact.
+  `RunWorldTime(hours)`. This sets the requested starting hour and lets the
+  game clock continue normally. The staged primary MOB and its script remain
+  exact.
 - Map-edge fog reaches full density over four world units: two authored
   two-unit terrain tiles. The
   authored sky cylinder is lowered by one of its own vertical rings and its
@@ -70,8 +72,9 @@ alone.
    remains enabled while scrubbing midnight, morning, noon, and evening.
    Entrance labels and selection overlays must remain authored-colour UI.
 10. With a JMV test running, set a distinctive editor time, invoke Test Current
-    Map, then change the time and hot reload. Confirm the game clock is fixed to
-    the selected value in both generations and the source MOB hash is unchanged.
+    Map, then change the time and hot reload. Confirm each generation starts at
+    the selected value, the clock continues normally, and the source MOB hash
+    is unchanged.
 11. At a map edge, confirm full fog begins no farther than one 32-unit tile
     inward and the lower sky/cloud field blends into exactly the same colour.
 12. Inspect an idle humanoid and held weapon at 04:45, noon, and 16:00. Feet

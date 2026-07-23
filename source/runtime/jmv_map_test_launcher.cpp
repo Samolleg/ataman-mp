@@ -1169,12 +1169,13 @@ bool CJmvMapTestLauncher::prepareGodmodeBootstrap(
             return false;
         }
         const double normalizedHours = std::fmod(std::fmod(worldTimeHours, 24.0) + 24.0, 24.0);
-        const QString fixTime = QString("FixWorldTime(%1)")
+        const QString runTime = QString("RunWorldTime(%1)")
             .arg(normalizedHours, 0, 'f', 6);
         // Apply before the autorun delay when the world clock is already
-        // available, then repeat after it as a deterministic fallback.
-        immediateCommands.append(fixTime);
-        commands.append(fixTime);
+        // available, then repeat after it as a deterministic fallback. Unlike
+        // FixWorldTime, RunWorldTime resumes normal clock progression.
+        immediateCommands.append(runTime);
+        commands.append(runTime);
         worldTimeHours = normalizedHours;
     }
     if(godmode)
