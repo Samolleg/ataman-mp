@@ -22,6 +22,7 @@
 #include "types.h"
 #include "select_window.h"
 #include "spatial_grid.h"
+#include "particle_animation.h"
 
 class QLineEdit;
 class QFrame;
@@ -61,7 +62,7 @@ class CLandscape;
 class CExternalScriptWorkspaceManager;
 class CMobScriptWindow;
 struct SMobParameterState;
-namespace ei { struct SRenderEnvironment; }
+namespace ei { struct SRenderEnvironment; struct SScenePointLight; }
 
 ///
 /// \brief The CView class is the main class for managing and editing 3D scene contents. It is also a link between read out *.mob files and their editing. It also controls the camera and current operations.
@@ -129,7 +130,8 @@ public:
     void setTestSpawnMarkerSelected(bool selected);
     bool testSpawnMarkerAt(const QPoint& viewportPosition, int padding = 8) const;
     void clearTestSpawnMarker();
-    void setMapSkyType(const QString& skyType);
+    void setMapSkyType(const QString& skyType,
+                       const QString& region = QStringLiteral("gipat"));
     void setTestEntranceOverlays(const QVector<QRectF>& rectangles,
                                  const QStringList& labels,
                                  int selectedIndex);
@@ -264,7 +266,7 @@ private:
     void syncEnvironmentPreviewWidget(float mapTimeHours);
     void applyEnvironmentUniforms(QOpenGLShaderProgram& program,
                                   const ei::SRenderEnvironment& environment,
-                                  const QVector<CLight*>& lights,
+                                  const QVector<ei::SScenePointLight>& lights,
                                   int lightingMode, bool fogEnabled);
     bool renderShadowMap(const QVector3D& cameraPosition,
                          const QVector3D& shadowFocus,
@@ -331,6 +333,7 @@ private:
     QOpenGLBuffer m_particleBuffer{QOpenGLBuffer::VertexBuffer};
     bool m_particleInitializationAttempted{false};
     bool m_particleRendererReady{false};
+    QHash<const CNode*, ei::particle::TendriEmitter> m_tendriEmitters;
     QOpenGLShaderProgram m_shadowProgram;
     QOpenGLFramebufferObject* m_shadowFbo{nullptr};
     QOpenGLFramebufferObject* m_dynamicShadowFbo{nullptr};
@@ -356,6 +359,7 @@ private:
     // environment owner until it is unloaded.
     CMob* m_environmentMob{nullptr};
     bool m_caveEnvironment{false};
+    QString m_weatherRegion{QStringLiteral("gipat")};
     QSet<CMob*> m_hiddenMobs;
     QTimer* m_timer;
     CSettings* m_pSettings;

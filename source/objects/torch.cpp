@@ -179,8 +179,7 @@ QJsonObject CTorch::toJson()
 
 QVector3D CTorch::particleWorldPosition() const
 {
-    // TORCH_PTLINK is authored in the torch object's local coordinates.
-    // Keep the ordinary torch mesh transform untouched and rotate only this
-    // additional effect attachment into world space.
-    return m_drawPosition + m_rotation.rotatedVector(m_pointLink);
+    // Native CTorchObjectClientSpecific adds PTLINK component-by-component to
+    // the object position for both its emitter and generated point light.
+    return m_drawPosition + m_pointLink;
 }

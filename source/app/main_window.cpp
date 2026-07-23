@@ -1913,7 +1913,7 @@ void MainWindow::refreshMapTestContext()
             m_mapTestEntry = nameMatches.first();
     }
     if(m_pView)
-        m_pView->setMapSkyType(m_mapTestEntry.skyType);
+        m_pView->setMapSkyType(m_mapTestEntry.skyType, m_mapTestEntry.zoneType);
     populateEntranceCombo();
     updateCustomSpawnControls();
     updateMapTestAction();

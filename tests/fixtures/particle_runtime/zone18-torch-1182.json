@@ -1,0 +1,244 @@
+{
+  "counts": {
+    "light": 18,
+    "particle": 17,
+    "torch": 1
+  },
+  "format": "ei-particle-mob-report-v3",
+  "records": [
+    {
+      "fields": [
+        {
+          "length": 20,
+          "offset": 2004166,
+          "tag": "TORCH_PTLINK",
+          "tag_id": "0xBBBF0002",
+          "value": [
+            0.0,
+            0.0,
+            1.0
+          ]
+        },
+        {
+          "length": 12,
+          "offset": 2004186,
+          "tag": "TORCH_STRENGHT",
+          "tag_id": "0xBBBF0001",
+          "value": 1.0
+        },
+        {
+          "length": 29,
+          "offset": 2004198,
+          "tag": "TORCH_SOUND",
+          "tag_id": "0xBBBF0003",
+          "value": "nature\\fire\\small.wav"
+        },
+        {
+          "length": 12,
+          "offset": 2004227,
+          "tag": "OBJ_BODYPARTS",
+          "tag_id": "0x0000B00D",
+          "value": {
+            "payload_hex": "00000000"
+          }
+        },
+        {
+          "length": 9,
+          "offset": 2004239,
+          "tag": "OBJ_PLAYER",
+          "tag_id": "0x0000B011",
+          "value": 0
+        },
+        {
+          "length": 12,
+          "offset": 2004248,
+          "tag": "NID",
+          "tag_id": "0x0000B002",
+          "value": 1182
+        },
+        {
+          "length": 12,
+          "offset": 2004260,
+          "tag": "OBJ_TYPE",
+          "tag_id": "0x0000B003",
+          "value": 58
+        },
+        {
+          "length": 19,
+          "offset": 2004272,
+          "tag": "OBJ_NAME",
+          "tag_id": "0x0000B004",
+          "value": "Sack00-1182"
+        },
+        {
+          "length": 13,
+          "offset": 2004291,
+          "tag": "OBJ_TEMPLATE",
+          "tag_id": "0x0000B006",
+          "value": "stto5"
+        },
+        {
+          "length": 14,
+          "offset": 2004304,
+          "tag": "PARENT_TEMPLATE",
+          "tag_id": "0x0000B00E",
+          "value": "Sack00"
+        },
+        {
+          "length": 18,
+          "offset": 2004318,
+          "tag": "OBJ_PRIM_TXTR",
+          "tag_id": "0x0000B007",
+          "value": "campfire00"
+        },
+        {
+          "length": 16,
+          "offset": 2004336,
+          "tag": "OBJ_SEC_TXTR",
+          "tag_id": "0x0000B008",
+          "value": "default0"
+        },
+        {
+          "length": 12,
+          "offset": 2004352,
+          "tag": "OBJ_COMMENTS",
+          "tag_id": "0x0000B00F",
+          "value": "none"
+        },
+        {
+          "length": 20,
+          "offset": 2004364,
+          "tag": "OBJ_POSITION",
+          "tag_id": "0x0000B009",
+          "value": [
+            131.2783660888672,
+            245.04629516601562,
+            -0.03333371877670288
+          ]
+        },
+        {
+          "length": 24,
+          "offset": 2004384,
+          "tag": "OBJ_ROTATION",
+          "tag_id": "0x0000B00A",
+          "value": [
+            0.05557357892394066,
+            0.0,
+            0.0,
+            0.9984546303749084
+          ]
+        },
+        {
+          "length": 9,
+          "offset": 2004408,
+          "tag": "OBJ_USE_IN_SCRIPT",
+          "tag_id": "0x0000B013",
+          "value": 0
+        },
+        {
+          "length": 9,
+          "offset": 2004417,
+          "tag": "OBJ_IS_SHADOW",
+          "tag_id": "0x0000B014",
+          "value": 1
+        },
+        {
+          "length": 12,
+          "offset": 2004426,
+          "tag": "OBJ_PARENT_ID",
+          "tag_id": "0x0000B012",
+          "value": 145
+        },
+        {
+          "length": 8,
+          "offset": 2004438,
+          "tag": "OBJ_QUEST_INFO",
+          "tag_id": "0x0000B016",
+          "value": ""
+        },
+        {
+          "length": 20,
+          "offset": 2004446,
+          "tag": "OBJ_COMPLECTION",
+          "tag_id": "0x0000B00C",
+          "value": [
+            0.5,
+            0.5,
+            0.5
+          ]
+        }
+      ],
+      "length": 308,
+      "offset": 2004158,
+      "raw_record_hex": "0000BFBB340100000200BFBB1400000000000000000000000000803F0100BFBB0C0000000000803F0300BFBB1D0000006E61747572655C666972655C736D616C6C2E7761760DB000000C0000000000000011B00000090000000002B000000C0000009E04000003B000000C0000003A00000004B00000130000005361636B30302D3131383206B000000D0000007374746F350EB000000E0000005361636B303007B000001200000063616D7066697265303008B000001000000064656661756C74300FB000000C0000006E6F6E6509B000001400000043470343DA0B7543F08808BD0AB00000180000001FA1633D0000000000000000B99A7F3F13B00000090000000014B00000090000000112B000000C0000009100000016B00000080000000CB00000140000000000003F0000003F0000003F",
+      "record_type": "torch",
+      "sha256": "8EB2E0F6B5E57BABD48BB57C354CE4DA7376D9DB1BBC3B00AECBBAD36F19BBD2"
+    }
+  ],
+  "selection": [
+    1182
+  ],
+  "source": {
+    "path": "D:\\Evil Islands\\Starter\\MODS\\JamaisVu135\\Maps\\zone18.mob",
+    "sha256": "0B3E1115FEA2C892B597D969AC8AB60965F88D9083398AF09C0E84581F279A90",
+    "size": 4498380
+  },
+  "torch_particle_proximity": [
+    {
+      "nearest_particles": [],
+      "torch_id": 1182,
+      "torch_name": "Sack00-1182",
+      "torch_offset": 2004158
+    }
+  ],
+  "world_settings": [
+    {
+      "fields": [
+        {
+          "length": 20,
+          "offset": 315262,
+          "tag": "WS_WIND_DIR",
+          "tag_id": "0x0000ABD1",
+          "value": [
+            -0.8320502638816833,
+            0.5547001957893372,
+            0.0
+          ]
+        },
+        {
+          "length": 12,
+          "offset": 315282,
+          "tag": "WS_WIND_STR",
+          "tag_id": "0x0000ABD2",
+          "value": 0.800000011920929
+        },
+        {
+          "length": 12,
+          "offset": 315294,
+          "tag": "WS_TIME",
+          "tag_id": "0x0000ABD3",
+          "value": 9.760001182556152
+        },
+        {
+          "length": 12,
+          "offset": 315306,
+          "tag": "WS_AMBIENT",
+          "tag_id": "0x0000ABD4",
+          "value": 0.20000000298023224
+        },
+        {
+          "length": 12,
+          "offset": 315318,
+          "tag": "WS_SUN_LIGHT",
+          "tag_id": "0x0000ABD5",
+          "value": 0.6000000238418579
+        }
+      ],
+      "length": 76,
+      "offset": 315254,
+      "raw_record_hex": "D0AB00004C000000D1AB0000140000003F0155BFD5000E3F00000000D2AB00000C000000CDCC4C3FD3AB00000C000000F7281C41D4AB00000C000000CDCC4C3ED5AB00000C0000009A99193F",
+      "record_type": "world_settings",
+      "sha256": "1101AA43304CBAAF3974E785F11A42FED6E1FB92997D488DE80816781D49D625"
+    }
+  ]
+}

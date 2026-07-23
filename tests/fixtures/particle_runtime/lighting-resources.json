@@ -1,0 +1,27 @@
+{
+  "format": "ei-lighting-resource-report-v1",
+  "members": [
+    {
+      "name": "firesmoke.mmp",
+      "sha256": "EF61A113CCB8598D37C6A5147C852C0D2A594156EB51B8092313AA62BAA312CA",
+      "size": 1398204,
+      "timestamp": 1759002784
+    },
+    {
+      "name": "tendrismoke.mmp",
+      "sha256": "D7FCA4D4FC6DDBB52F8024B57EFD56E8871A8BE5BBE22A684AF6E9FD41FED987",
+      "size": 1398204,
+      "timestamp": 1759002785
+    }
+  ],
+  "patterns": [
+    "*lights*.ini",
+    "*tendrismoke.mmp",
+    "*firesmoke.mmp"
+  ],
+  "source": {
+    "path": "D:\\Evil Islands\\Starter\\MODS\\JamaisVu135 Clean\\res\\textures.res",
+    "sha256": "2E8CA42FB75FAC12E5659C563C547FEE0F72D6C1B6E2E1C454B3072E3BE0703B",
+    "size": 763801000
+  }
+}

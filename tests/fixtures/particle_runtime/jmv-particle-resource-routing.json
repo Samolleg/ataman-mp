@@ -1,0 +1,19 @@
+{
+  "format": "ei-lighting-resource-report-v1",
+  "members": [
+    {
+      "name": "config.ini",
+      "sha256": "4F623E975DA1BEE8170B9E67EECE60604D5BF24E111FBB7486B63FF1AAC636DA",
+      "size": 2627,
+      "text_cp1251": "[MOD]\r\nTitle=JamaisVu1.35\r\nAuthor=JamaisVuTeam\r\nAuthorEmail=igles001@gmail.com\r\nDate_DMY=23.02.2026\r\nVersion=1.35.0017\r\nForceShowTutorial=0\r\nAddonVersion=0.11.0.0\r\nSingle=1\r\nMulti=0\r\nPreventZone1Animation=1\r\nUseJMV136=1\r\n[RES]\r\nsfx.res=res\\JmvSFX.res\r\nsfx.res=res\\sfx.res\r\nspeech.res=res\\speech.res\r\nspeech.res=res\\atamannala.res\r\ndatabase.res=res\\databaseJmv.res\r\ndatabase.res=res\\database.res\r\ntexts.res=res\\texts.res\r\nredress.res=res\\Zak00.res\r\nredress.res=res\\atZak25.res\r\nredress.res=res\\Hador06.res\r\nredress.res=res\\Naya12.res\r\nredress.res=res\\Eyla19.res\r\nredress.res=res\\Sakhilya11.res\r\nredress.res=res\\Nalozhnitsa10.res\r\nredress.res=res\\LightNala41.res\r\nredress.res=res\\Mayrana20.res\r\nredress.res=res\\Harad26.res\r\nredress.res=res\\His27.res\r\nredress.res=res\\Fairax28.res\r\nredress.res=res\\Rint33.res\r\nredress.res=res\\Brissen36.res\r\nredress.res=res\\faces.res\r\nredress.res=res\\redress1kwounds.res\r\nredress.res=res\\redress1kMouth.res\r\nredress.res=res\\UnhumaDG.res\r\nredress.res=res\\UnhumaSW.res\r\nredress.res=res\\UnhumaAX.res\r\nredress.res=res\\UnhumaSP.res\r\nredress.res=res\\UnhumaHM.res\r\nredress.res=res\\UnhumaBW.res\r\nredress.res=res\\UnhumaCB.res\r\nredress.res=res\\UnhumaSD.res\r\nredress.res=res\\UnhumaTS.res\r\nredress.res=res\\UnhumaTA.res\r\nredress.res=res\\UnhumaTP.res\r\nredress.res=res\\UnhumaTH.res\r\nredress.res=res\\UnhumaTF.res\r\nredress.res=res\\UnhumaSF.res\r\nredress.res=res\\UnhumaTS.res\r\nredress.res=res\\UnhumaHL.res\r\nredress.res=res\\UnhumaBT.res\r\nredress.res=res\\UnhumaGL.res\r\nredress.res=res\\UnhumaLG.res\r\nredress.res=res\\UnhumaPL.res\r\nredress.res=res\\UnhumaPT.res\r\nredress.res=res\\UnhumaMT.res\r\nredress.res=res\\UnhumaSH.res\r\noutro.res=res\\outro.res\r\nfigures.res=res\\InitArmors.res\r\nfigures.res=res\\InitWeapons.res\r\nfigures.res=res\\HDPack_Mapobjects.res\r\nfigures.res=res\\newmonsters.res\r\nfigures.res=res\\unhuma.res\r\nfigures.res=res\\unhufe.res\r\nfigures.res=res\\unhuzm.res\r\nfigures.res=res\\unhuzf.res\r\nfigures.res=res\\unhuli.res\r\nfigures.res=res\\figuresItems.res\r\nfigures.res=res\\figures.res\r\nfigures.res=res\\bottles.res\r\nfigures.res=res\\unorfe.res\r\nfigures.res=res\\unhusk.res\r\nfigures.res=res\\unanwiwo.res\r\nfigures.res=res\\unanwitu.res\r\nfigures.res=res\\unanwibo.res\r\nfigures.res=res\\unorma.res\r\nfigures.res=res\\new_quests_items.res\r\ntextures.res=res\\Spells.x2.res\r\ntextures.res=res\\Modifiers.x2.res\r\ntextures.res=res\\Prototypes.x2.res\r\ntextures.res=res\\inventory.res\r\ntextures.res=res\\bottles.x2.res\r\ntextures.res=res\\itemQU.x2.res\r\ntextures.res=res\\newmonsterstextures.res\r\ntextures.res=res\\HDPack_Terrain.res\r\ntextures.res=res\\textures.res\r\n[CONFIG]\r\nai.reg=config\\ai.reg\r\nmusic.reg=res\\music.reg\r\n[DEV]\r\nPlugin=plugin.dll\r\n",
+      "timestamp": 1784649210
+    }
+  ],
+  "patterns": [
+    "config.ini"
+  ],
+  "source": {
+    "kind": "directory",
+    "path": "D:\\Evil Islands\\Starter\\MODS\\JamaisVu135"
+  }
+}

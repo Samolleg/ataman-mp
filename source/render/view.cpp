@@ -63,6 +63,7 @@
 #include "render_environment.h"
 #include "shadow_cascade.h"
 #include "particle_animation.h"
+#include "utils.h"
 #include "part.h"
 #include "objects/light.h"
 #include "objects/particle.h"
@@ -1147,9 +1148,7 @@ void CView::drawSkybox(const QMatrix4x4& cameraMatrix,
     skyView.rotate(environment.skyRotationDegrees, 0.0f, 0.0f, 1.0f);
     m_skyProgram.setUniformValue("u_viewMmatrix", skyView);
     m_skyProgram.setUniformValue("u_projMmatrix", m_projection);
-    const float tintStrength = qBound(0.3f,
-        environment.ambientStrength + environment.sunStrength, 1.0f);
-    m_skyProgram.setUniformValue("u_tint", environment.sunColor * tintStrength);
+    m_skyProgram.setUniformValue("u_tint", environment.skyColor);
     m_skyProgram.setUniformValue("u_fogColor", environment.fogColor);
     const COptBool* fogOption = m_pSettings
         ? dynamic_cast<const COptBool*>(m_pSettings->opt("renderFog")) : nullptr;
@@ -1182,7 +1181,7 @@ void CView::drawSkybox(const QMatrix4x4& cameraMatrix,
 
 void CView::applyEnvironmentUniforms(QOpenGLShaderProgram& program,
                                      const ei::SRenderEnvironment& environment,
-                                     const QVector<CLight*>& lights,
+                                     const QVector<ei::SScenePointLight>& lights,
                                      int lightingMode, bool fogEnabled)
 {
     const bool enabled = lightingMode != 0;
@@ -1203,16 +1202,14 @@ void CView::applyEnvironmentUniforms(QOpenGLShaderProgram& program,
         : QVector3D();
     program.setUniformValue("u_mapFog", mapFog);
 
-    QVector4D positionRange[8];
-    QVector3D colors[8];
-    const int count = qMin(8, lights.size());
+    QVector4D positionRange[ei::kMaxScenePointLights];
+    QVector3D colors[ei::kMaxScenePointLights];
+    const int count = qMin(ei::kMaxScenePointLights, lights.size());
     for(int index = 0; index < count; ++index)
     {
-        CLight* light = lights.at(index);
-        const QVector3D position = light->drawPosition().isNull()
-            ? light->position() : light->drawPosition();
-        positionRange[index] = QVector4D(position, qMax(0.001f, light->range()));
-        QVector3D color = light->lightColor();
+        const ei::SScenePointLight& light = lights.at(index);
+        positionRange[index] = QVector4D(light.position, qMax(0.001f, light.range));
+        QVector3D color = light.color;
         const float maximum = qMax(color.x(), qMax(color.y(), color.z()));
         if(maximum > 1.01f)
             color /= 255.0f;
@@ -1645,7 +1642,8 @@ QString CView::captureShadowDiagnostics(QString* error)
     const float previewTime = ei::clockValueToHours(intOption("renderTimeOfDay", 1200));
     const CWorldSet* worldSet = m_environmentMob ? &m_environmentMob->worldSet() : nullptr;
     const ei::SRenderEnvironment environment = ei::renderEnvironment(
-        worldSet, overrideWorldTime, previewTime, m_caveEnvironment);
+        worldSet, overrideWorldTime, previewTime, m_caveEnvironment,
+        m_weatherRegion);
 
     QJsonObject rootObject;
     rootObject["format"] = "EIMapperEndurance.shadow-diagnostics.v3";
@@ -2300,7 +2298,19 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
     ei::gl::BlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     bool additiveBlend = false;
     QOpenGLTexture* boundTexture = nullptr;
-    const float timeSeconds = float(QDateTime::currentMSecsSinceEpoch() % 600000) / 1000.0f;
+    const qint64 particleTimeMs = QDateTime::currentMSecsSinceEpoch();
+    const float timeSeconds = float(particleTimeMs % 600000) / 1000.0f;
+    const qint64 logicalTick = particleTimeMs / ei::particle::kLogicalQuantMilliseconds;
+    const float logicalFraction = float(
+        particleTimeMs % ei::particle::kLogicalQuantMilliseconds)
+        / float(ei::particle::kLogicalQuantMilliseconds);
+    const CWorldSet* particleWorldSet = m_environmentMob
+        ? &m_environmentMob->worldSet() : nullptr;
+    const QVector3D windDirection = particleWorldSet
+        ? util::vec3FromString(particleWorldSet->data(eWsTypeWindDir))
+        : QVector3D();
+    const float windStrength = particleWorldSet
+        ? particleWorldSet->data(eWsTypeWindStr).toFloat() : 0.0f;
     RenderPerformanceContext& performance = RenderPerformanceContext::instance();
 
     const auto drawSprite = [&](const QVector3D& center, float scale, float aspect, float rotation,
@@ -2342,41 +2352,24 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
         }
     };
 
-    const auto drawFireSmoke = [&](const QVector3D& origin, float authoredScale,
-                                   uint seed, bool selected, uint kind)
+    const auto drawFireSmoke = [&](const CNode* owner, const QVector3D& origin,
+                                   float authoredScale, uint seed, uint kind,
+                                   int prewarmTicks)
     {
-        const float baseScale = qBound(0.25f, authoredScale, 8.0f);
-        const int logicalTick = int(std::floor(timeSeconds
-            * float(ei::particle::kLogicalTicksPerSecond)));
-        const ei::particle::Family family = ei::particle::familyForKind(kind);
         QOpenGLTexture* atlas = tendrilSmokeTexture
             ? tendrilSmokeTexture : fireSmokeTexture;
-
-        // game.exe's CampFire constructor creates six records with a 32-tick
-        // life. Frames 0..7 are the authored flame sequence; frames 8..14 are
-        // smoke and advance once per four logical ticks. Render the complete
-        // 4x4 cells: the texture already contains its silhouette and alpha.
-        for(int slot = ei::particle::kEmitterSlots - 1; slot >= 0; --slot)
+        ei::particle::TendriEmitter& emitter = m_tendriEmitters[owner];
+        emitter.advanceTo(logicalTick, seed, kind, origin, authoredScale,
+                          windDirection, windStrength, prewarmTicks);
+        const QVector<ei::particle::RenderSample> samples
+            = emitter.samples(logicalFraction);
+        for(const ei::particle::RenderSample& sample : samples)
         {
-            const ei::particle::FrameSample frame = ei::particle::sample(
-                family, logicalTick, slot, seed);
-            const float age = frame.normalizedAge;
-            const float lateralX = ei::particle::signedNoise(seed, slot, 0x91e10da5u);
-            const float lateralY = ei::particle::signedNoise(seed, slot, 0x6d2b79f5u);
-            const float rise = frame.smoke
-                ? (0.70f + age * 1.65f) : (0.30f + age * 0.85f);
-            const QVector3D center = origin
-                + QVector3D(lateralX * 0.20f * baseScale,
-                            lateralY * 0.20f * baseScale,
-                            rise * baseScale);
-            const float spriteScale = baseScale * (frame.smoke
-                ? (0.62f + age * 0.38f) : (0.78f + age * 0.12f));
-            QVector4D tint = selected
-                ? QVector4D(0.42f, 0.88f, 1.0f, 0.92f)
-                : QVector4D(1.0f, 1.0f, 1.0f,
-                            frame.smoke ? (0.74f * (1.0f - age * 0.35f)) : 0.96f);
-            drawSprite(center, spriteScale, 1.0f, 0.0f, tint, atlas,
-                       ei::particle::atlasUv(frame.frame), !frame.smoke,
+            drawSprite(sample.position,
+                       ei::particle::billboardDiameter(sample.scale),
+                       1.0f, 0.0f,
+                       QVector4D(1.0f, 1.0f, 1.0f, 1.0f), atlas,
+                       ei::particle::atlasUv(sample.frame), false,
                        atlas == nullptr, 0.18f);
         }
     };
@@ -2396,9 +2389,8 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
             {
                 // A torch remains an ordinary textured world object. Its
                 // authored TORCH_PTLINK only adds this attached effect.
-                drawFireSmoke(torch->particleWorldPosition(), 1.0f,
-                              torch->mapId(), torch->nodeState() == ENodeState::eSelect,
-                              8193u);
+                drawFireSmoke(torch, torch->particleWorldPosition(), torch->power(),
+                              torch->mapId(), 0x2001u, 60);
                 continue;
             }
 
@@ -2426,10 +2418,16 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
             if(isPersistentFireParticle(particle->kind())
                     || isPersistentSmokeParticle(particle->kind()))
             {
-                drawFireSmoke(center, authoredScale * style.scaleMultiplier,
-                              particle->mapId(),
-                              particle->nodeState() == ENodeState::eSelect,
-                              particle->kind());
+                drawFireSmoke(particle, center, authoredScale, particle->mapId(),
+                              particle->kind(), 0);
+                // Selection is an editor affordance, not a color mutation of
+                // the stock particle population.
+                if(particle->nodeState() == ENodeState::eSelect)
+                    drawSprite(center, qMax(0.3f, authoredScale * 0.35f),
+                               1.0f, 0.0f,
+                               QVector4D(0.10f, 0.90f, 1.0f, 0.72f), nullptr,
+                               QVector4D(0.0f, 0.0f, 1.0f, 1.0f), false,
+                               true, 0.12f);
                 continue;
             }
             drawSprite(center, authoredScale * style.scaleMultiplier * pulse,
@@ -2518,7 +2516,8 @@ void CView::draw()
     const CWorldSet* worldSet = m_environmentMob
         ? &m_environmentMob->worldSet() : nullptr;
     const ei::SRenderEnvironment environment = ei::renderEnvironment(
-        worldSet, overrideWorldTime, previewTime, m_caveEnvironment);
+        worldSet, overrideWorldTime, previewTime, m_caveEnvironment,
+        m_weatherRegion);
     syncEnvironmentPreviewWidget(environment.timeHours);
     // Fill the open lower edge of the stock sky cylinder with the same color
     // that distant geometry converges to. This removes the editor-only black
@@ -2530,23 +2529,53 @@ void CView::draw()
         ei::gl::ClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     ei::gl::Clear(GL_COLOR_BUFFER_BIT);
 
-    QVector<CLight*> sceneLights;
+    QVector<ei::SScenePointLight> sceneLights;
     if(environmentEnabled && sceneLightsEnabled)
     {
         for(CMob* mob : m_aMob)
             for(CNode* node : mob->nodes())
+            {
+                if(node->nodeState() == ENodeState::eHidden)
+                    continue;
                 if(CLight* light = dynamic_cast<CLight*>(node))
-                    if(light->nodeState() != ENodeState::eHidden && light->range() > 0.0f
-                            && (!cullingEnabled || frustum.intersectsSphere(
-                                    light->position(), light->range())))
-                        sceneLights.append(light);
-        std::sort(sceneLights.begin(), sceneLights.end(), [&cameraPosition](CLight* left, CLight* right)
-        {
-            return (left->position() - cameraPosition).lengthSquared()
-                 < (right->position() - cameraPosition).lengthSquared();
-        });
-        if(sceneLights.size() > 8)
-            sceneLights.resize(8);
+                {
+                    const QVector3D position = light->drawPosition().isNull()
+                        ? light->position() : light->drawPosition();
+                    // Native generic LIGHT setup adds 2.0 to the authored Z
+                    // coordinate before the light is registered. Torch lights
+                    // use their particle pivot directly and do not get this lift.
+                    const QVector3D runtimePosition = position + QVector3D(0.0f, 0.0f, 2.0f);
+                    if(light->range() > 0.0f && (!cullingEnabled
+                            || frustum.intersectsSphere(runtimePosition, light->range())))
+                    {
+                        ei::SScenePointLight sceneLight;
+                        sceneLight.position = runtimePosition;
+                        sceneLight.color = light->lightColor();
+                        sceneLight.range = light->range();
+                        sceneLights.append(sceneLight);
+                    }
+                }
+                else if(CTorch* torch = dynamic_cast<CTorch*>(node))
+                {
+                    const float range = torch->power() * 10.0f;
+                    const QVector3D position = torch->particleWorldPosition();
+                    if(range > 0.0f && (!cullingEnabled
+                            || frustum.intersectsSphere(position, range)))
+                    {
+                        ei::SScenePointLight sceneLight;
+                        sceneLight.position = position;
+                        sceneLight.color = QVector3D(0.8f, 0.8f, 0.8f);
+                        sceneLight.range = range;
+                        sceneLights.append(sceneLight);
+                    }
+                }
+            }
+        // Native terrain registers lights into every intersected spatial cell;
+        // it does not select the eight nearest lights to the camera. The
+        // fingerprinted JMV map corpus peaks at 34 lights in one MOB, so the
+        // fixed shader capacity contains every authored map light.
+        if(sceneLights.size() > ei::kMaxScenePointLights)
+            sceneLights.resize(ei::kMaxScenePointLights);
     }
 
     RenderPerformanceContext& performance = RenderPerformanceContext::instance();
@@ -4051,6 +4080,7 @@ bool CView::unloadMobDocument(CMob* mob, bool promptForSave)
     if(m_pUndoStack)
         m_pUndoStack->clear();
     m_hiddenMobs.remove(mob);
+    m_tendriEmitters.clear();
     m_aMob.removeAt(removedIndex);
     if(removedEnvironment)
         m_environmentMob = m_aMob.isEmpty() ? nullptr : m_aMob.first();
@@ -4248,6 +4278,7 @@ void CView::unloadMob(QString mobName)
     }
     if(m_pUndoStack)
         m_pUndoStack->clear();
+    m_tendriEmitters.clear();
     ei::log(eLogInfo, "unloading mob " + mobName);
     CMob* pMob = nullptr;
     if(mobName.isEmpty())
@@ -5299,13 +5330,16 @@ void CView::clearTestSpawnMarker()
     update();
 }
 
-void CView::setMapSkyType(const QString& skyType)
+void CView::setMapSkyType(const QString& skyType, const QString& region)
 {
     const bool cave = skyType.compare(QStringLiteral("cave"),
                                       Qt::CaseInsensitive) == 0;
-    if(m_caveEnvironment == cave)
+    const QString normalizedRegion = region.compare(QStringLiteral("ingos"),
+        Qt::CaseInsensitive) == 0 ? QStringLiteral("ingos") : QStringLiteral("gipat");
+    if(m_caveEnvironment == cave && m_weatherRegion == normalizedRegion)
         return;
     m_caveEnvironment = cave;
+    m_weatherRegion = normalizedRegion;
     m_shadowInitialized = false;
     m_staticShadowFingerprint.clear();
     m_farStaticShadowFingerprint.clear();

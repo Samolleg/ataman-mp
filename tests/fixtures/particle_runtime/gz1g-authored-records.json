@@ -1,0 +1,308 @@
+{
+  "counts": {
+    "light": 7,
+    "particle": 8,
+    "torch": 4
+  },
+  "format": "ei-particle-mob-report-v3",
+  "records": [
+    {
+      "fields": [
+        {
+          "length": 20,
+          "offset": 619113,
+          "tag": "TORCH_PTLINK",
+          "tag_id": "0xBBBF0002",
+          "value": [
+            0.10000000149011612,
+            0.0,
+            0.5
+          ]
+        },
+        {
+          "length": 12,
+          "offset": 619133,
+          "tag": "TORCH_STRENGHT",
+          "tag_id": "0xBBBF0001",
+          "value": 0.4000000059604645
+        },
+        {
+          "length": 27,
+          "offset": 619145,
+          "tag": "TORCH_SOUND",
+          "tag_id": "0xBBBF0003",
+          "value": "nature\\fire\\big.wav"
+        },
+        {
+          "length": 12,
+          "offset": 619172,
+          "tag": "OBJ_BODYPARTS",
+          "tag_id": "0x0000B00D",
+          "value": {
+            "payload_hex": "00000000"
+          }
+        },
+        {
+          "length": 9,
+          "offset": 619184,
+          "tag": "OBJ_PLAYER",
+          "tag_id": "0x0000B011",
+          "value": 0
+        },
+        {
+          "length": 12,
+          "offset": 619193,
+          "tag": "NID",
+          "tag_id": "0x0000B002",
+          "value": 1365
+        },
+        {
+          "length": 12,
+          "offset": 619205,
+          "tag": "OBJ_TYPE",
+          "tag_id": "0x0000B003",
+          "value": 58
+        },
+        {
+          "length": 25,
+          "offset": 619217,
+          "tag": "OBJ_NAME",
+          "tag_id": "0x0000B004",
+          "value": "Camp fire 00-1365"
+        },
+        {
+          "length": 13,
+          "offset": 619242,
+          "tag": "OBJ_TEMPLATE",
+          "tag_id": "0x0000B006",
+          "value": "stto5"
+        },
+        {
+          "length": 20,
+          "offset": 619255,
+          "tag": "PARENT_TEMPLATE",
+          "tag_id": "0x0000B00E",
+          "value": "Camp fire 00"
+        },
+        {
+          "length": 18,
+          "offset": 619275,
+          "tag": "OBJ_PRIM_TXTR",
+          "tag_id": "0x0000B007",
+          "value": "Campfire00"
+        },
+        {
+          "length": 8,
+          "offset": 619293,
+          "tag": "OBJ_SEC_TXTR",
+          "tag_id": "0x0000B008",
+          "value": ""
+        },
+        {
+          "length": 12,
+          "offset": 619301,
+          "tag": "OBJ_COMMENTS",
+          "tag_id": "0x0000B00F",
+          "value": "none"
+        },
+        {
+          "length": 20,
+          "offset": 619313,
+          "tag": "OBJ_POSITION",
+          "tag_id": "0x0000B009",
+          "value": [
+            133.5677947998047,
+            151.08291625976562,
+            -0.05000000074505806
+          ]
+        },
+        {
+          "length": 24,
+          "offset": 619333,
+          "tag": "OBJ_ROTATION",
+          "tag_id": "0x0000B00A",
+          "value": [
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "length": 9,
+          "offset": 619357,
+          "tag": "OBJ_USE_IN_SCRIPT",
+          "tag_id": "0x0000B013",
+          "value": 0
+        },
+        {
+          "length": 9,
+          "offset": 619366,
+          "tag": "OBJ_IS_SHADOW",
+          "tag_id": "0x0000B014",
+          "value": 1
+        },
+        {
+          "length": 12,
+          "offset": 619375,
+          "tag": "OBJ_PARENT_ID",
+          "tag_id": "0x0000B012",
+          "value": 1168
+        },
+        {
+          "length": 8,
+          "offset": 619387,
+          "tag": "OBJ_QUEST_INFO",
+          "tag_id": "0x0000B016",
+          "value": ""
+        },
+        {
+          "length": 20,
+          "offset": 619395,
+          "tag": "OBJ_COMPLECTION",
+          "tag_id": "0x0000B00C",
+          "value": [
+            0.5,
+            0.5,
+            0.5
+          ]
+        }
+      ],
+      "length": 310,
+      "offset": 619105,
+      "raw_record_hex": "0000BFBB360100000200BFBB14000000CDCCCC3D000000000000003F0100BFBB0C000000CDCCCC3E0300BFBB1B0000006E61747572655C666972655C6269672E7761760DB000000C0000000000000011B00000090000000002B000000C0000005505000003B000000C0000003A00000004B000001900000043616D7020666972652030302D3133363506B000000D0000007374746F350EB000001400000043616D70206669726520303007B000001200000043616D7066697265303008B00000080000000FB000000C0000006E6F6E6509B00000140000005B9105433A151743CDCC4CBD0AB00000180000000000803F00000000000000000000000013B00000090000000014B00000090000000112B000000C0000009004000016B00000080000000CB00000140000000000003F0000003F0000003F",
+      "record_type": "torch",
+      "sha256": "D7450142441196107260624C61A4119B55D7FB11D443E7F9DE14FC13B4EDED34"
+    },
+    {
+      "fields": [
+        {
+          "length": 12,
+          "offset": 622551,
+          "tag": "PARTICL_ID",
+          "tag_id": "0x0000DD02",
+          "value": 357
+        },
+        {
+          "length": 20,
+          "offset": 622563,
+          "tag": "PARTICL_POSITION",
+          "tag_id": "0x0000DD03",
+          "value": [
+            178.94630432128906,
+            131.87026977539062,
+            8.293479919433594
+          ]
+        },
+        {
+          "length": 28,
+          "offset": 622583,
+          "tag": "PARTICL_NAME",
+          "tag_id": "0x0000DD05",
+          "value": "Particles source-357"
+        },
+        {
+          "length": 12,
+          "offset": 622611,
+          "tag": "PARTICL_COMMENTS",
+          "tag_id": "0x0000DD04",
+          "value": "none"
+        },
+        {
+          "length": 12,
+          "offset": 622623,
+          "tag": "PARTICL_TYPE",
+          "tag_id": "0x0000DD06",
+          "value": 8193
+        },
+        {
+          "length": 12,
+          "offset": 622635,
+          "tag": "PARTICL_SCALE",
+          "tag_id": "0x0000DD07",
+          "value": 0.4000000059604645
+        }
+      ],
+      "length": 104,
+      "offset": 622543,
+      "raw_record_hex": "01DD00006800000002DD00000C0000006501000003DD00001400000041F23243CADE034318B2044105DD00001C0000005061727469636C657320736F757263652D33353704DD00000C0000006E6F6E6506DD00000C0000000120000007DD00000C000000CDCCCC3E",
+      "record_type": "particle",
+      "sha256": "E2FFEEB487E2AA3CB51EFE2C1FCBD8CBDD19D44B9A5C290AAE005348167D7FD5"
+    }
+  ],
+  "selection": [
+    357,
+    1365
+  ],
+  "source": {
+    "path": "D:\\Evil Islands\\Starter\\MODS\\JamaisVu135\\Maps\\zone1.mob",
+    "sha256": "FEFFDA09F7279F65562DB37BBDCDFC475D59C4EE6FF1678958E5117949FB9E5A",
+    "size": 1586436
+  },
+  "torch_particle_proximity": [
+    {
+      "nearest_particles": [
+        {
+          "distance": 49.97948147493569,
+          "particle_id": 357,
+          "particle_name": "Particles source-357",
+          "particle_offset": 622543,
+          "particle_type": 8193
+        }
+      ],
+      "torch_id": 1365,
+      "torch_name": "Camp fire 00-1365",
+      "torch_offset": 619105
+    }
+  ],
+  "world_settings": [
+    {
+      "fields": [
+        {
+          "length": 20,
+          "offset": 71947,
+          "tag": "WS_WIND_DIR",
+          "tag_id": "0x0000ABD1",
+          "value": [
+            -0.7281999588012695,
+            -0.6853646636009216,
+            0.0
+          ]
+        },
+        {
+          "length": 12,
+          "offset": 71967,
+          "tag": "WS_WIND_STR",
+          "tag_id": "0x0000ABD2",
+          "value": 0.20000000298023224
+        },
+        {
+          "length": 12,
+          "offset": 71979,
+          "tag": "WS_TIME",
+          "tag_id": "0x0000ABD3",
+          "value": 6.400000095367432
+        },
+        {
+          "length": 12,
+          "offset": 71991,
+          "tag": "WS_AMBIENT",
+          "tag_id": "0x0000ABD4",
+          "value": 0.20000000298023224
+        },
+        {
+          "length": 12,
+          "offset": 72003,
+          "tag": "WS_SUN_LIGHT",
+          "tag_id": "0x0000ABD5",
+          "value": 0.6000000238418579
+        }
+      ],
+      "length": 76,
+      "offset": 71939,
+      "raw_record_hex": "D0AB00004C000000D1AB000014000000506B3ABF0F742FBF00000000D2AB00000C000000CDCC4C3ED3AB00000C000000CDCCCC40D4AB00000C000000CDCC4C3ED5AB00000C0000009A99193F",
+      "record_type": "world_settings",
+      "sha256": "79349A8A729F888B9D0C937F8CA028C89553AA2399B0BC533870F9DB92D75B5C"
+    }
+  ]
+}
