@@ -17,9 +17,19 @@ MPR, MOB, or unrelated RES member.
 
 Unknown tags, comments, blank lines, casing, line endings, and authored raw
 text remain in place when an unrelated structured field changes. The Raw
-Review tab exposes the exact decoded zone block but does not pretend to
-understand profile-specific fields. New registrations warn that weather, sky,
-camera, figure, cage, LOD, music, and other profile metadata are not invented.
+Review tab exposes the exact decoded logical zone block, including separator
+and description comments authored immediately before its `#zone` line, but
+does not pretend to understand profile-specific fields. New `game`
+registrations require explicit MPR and MOB resource names. Registrations warn
+that weather, sky, camera, figure, cage, LOD, music, and other profile metadata
+are not invented.
+
+The editor can export the exact current `map.txt` bytes for established
+hand-editing workflows. Import accepts a hand-edited `.txt` only after an
+explicit risk acknowledgement and basic structural parse. It cannot prove
+profile-specific semantics, resource existence, travel-graph correctness, or
+script compatibility. Import changes only the in-memory catalog; the RES save
+contract below still applies before any archive is written.
 
 ## Save contract
 
@@ -57,9 +67,13 @@ mingw32-make -j4
 
 The resulting `EIMapTableEditor.exe` accepts an optional copied `texts.res`
 path. `--ui-widget-check` constructs the dialog and exits without showing a
-window. During development and automated validation, never point write actions
-at the live game installation or proprietary corpus; use synthetic archives or
-hash-verified copies.
+window. `--validate-archive <copied-texts.res>` performs the same read-only RES
+and `map.txt` open validation without showing the editor.
+`--validate-derived-res <baseline.res> <candidate.res>` additionally verifies
+that a saved candidate preserves member names, order, metadata, and every
+untouched payload relative to its baseline. During development and automated
+validation, never point write actions at the live game installation or
+proprietary corpus; use synthetic archives or hash-verified copies.
 
 ## Tests
 

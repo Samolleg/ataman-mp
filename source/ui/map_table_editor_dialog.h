@@ -29,6 +29,8 @@ private slots:
     void registerNewZone();
     void addExit();
     void removeExit();
+    void exportText();
+    void importText();
     void saveArchiveAs();
 
 private:
@@ -61,6 +63,8 @@ private:
     QLineEdit* m_objectivesEdit{nullptr};
     QTableWidget* m_exitTable{nullptr};
     QPlainTextEdit* m_rawReview{nullptr};
+    QPushButton* m_importButton{nullptr};
+    QPushButton* m_exportButton{nullptr};
     QPushButton* m_applyButton{nullptr};
     QPushButton* m_registerButton{nullptr};
     QPushButton* m_saveButton{nullptr};

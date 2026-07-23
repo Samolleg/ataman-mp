@@ -10,7 +10,9 @@ private slots:
     void noOpIsByteIdentical();
     void parsesMapsAndEntranceMetadata();
     void preservesUnknownZoneText();
+    void assignsLeadingCommentsToFollowingZoneReview();
     void validatesUnsafeMetadata();
+    void rejectsGameRegistrationWithoutResources();
     void editsOnlyRequestedKnownLines();
     void editsEntranceWithoutRewritingUnknownText();
     void appendsExplicitRegistrationBeforeGlobalQuests();
@@ -90,6 +92,30 @@ void MapTableDocumentTests::preservesUnknownZoneText()
     QCOMPARE(document.serialize(), bytes);
 }
 
+void MapTableDocumentTests::assignsLeadingCommentsToFollowingZoneReview()
+{
+    const QByteArray bytes =
+        "#zone bz1g gipat brief\r\n"
+        "#res\r\nbz1g bz1g\r\n"
+        "#exit 1\r\ngz1g 1\r\n"
+        "\r\n"
+        "################################################\r\n"
+        "\r\n"
+        "## WAY FROM BASE TO Ruins\r\n"
+        "#zone gz1g_bz1g gipat edge\r\n"
+        "#position\r\n-2.749 -0.277 0.235\r\n"
+        "#exit 1\r\ngz1g 2\r\n";
+    CMapTableDocument document;
+    QVERIFY(document.loadBytes(bytes));
+    QCOMPARE(document.zones().size(), 2);
+    QVERIFY(!document.zones().at(0).rawBlock.contains("WAY FROM BASE"));
+    QVERIFY(!document.zones().at(0).rawBlock.contains("########"));
+    QVERIFY(document.zones().at(1).rawBlock.startsWith("\r\n################################################"));
+    QVERIFY(document.zones().at(1).rawBlock.contains("## WAY FROM BASE TO Ruins\r\n#zone gz1g_bz1g"));
+    QCOMPARE(document.serialize(), bytes);
+    QVERIFY(!document.isDirty());
+}
+
 void MapTableDocumentTests::validatesUnsafeMetadata()
 {
     SMapTableZone zone;
@@ -110,6 +136,27 @@ void MapTableDocumentTests::validatesUnsafeMetadata()
     const SMapTableEditResult result = CMapTableDocument::validateZone(zone);
     QVERIFY(!result.success);
     QVERIFY(result.errors.size() >= 3);
+}
+
+void MapTableDocumentTests::rejectsGameRegistrationWithoutResources()
+{
+    SMapTableZone game;
+    game.zoneId = "custom";
+    game.allodId = "gipat";
+    game.zoneType = "game";
+    const SMapTableEditResult missing = CMapTableDocument::validateZone(game);
+    QVERIFY(!missing.success);
+    QVERIFY(missing.errors.contains("Game zones require both MPR and MOB resource names."));
+
+    game.mprName = "custom_land";
+    game.mobName = "custom_objects";
+    QVERIFY(CMapTableDocument::validateZone(game).success);
+
+    SMapTableZone edge;
+    edge.zoneId = "custom_edge";
+    edge.allodId = "gipat";
+    edge.zoneType = "edge";
+    QVERIFY(CMapTableDocument::validateZone(edge).success);
 }
 
 void MapTableDocumentTests::editsOnlyRequestedKnownLines()

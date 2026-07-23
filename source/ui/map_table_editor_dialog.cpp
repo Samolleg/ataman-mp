@@ -2,6 +2,7 @@
 
 #include <QCheckBox>
 #include <QCryptographicHash>
+#include <QDir>
 #include <QFile>
 #include <QFileDialog>
 #include <QFormLayout>
@@ -14,6 +15,7 @@
 #include <QMessageBox>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QSaveFile>
 #include <QSpinBox>
 #include <QSplitter>
 #include <QTabWidget>
@@ -53,9 +55,15 @@ CMapTableEditorDialog::CMapTableEditorDialog(QWidget* parent)
     m_archiveEdit->setObjectName("mapArchivePath");
     m_archiveEdit->setReadOnly(true);
     QPushButton* openButton = new QPushButton(tr("Open texts.res Copy..."));
+    m_importButton = new QPushButton(tr("Import map.txt..."));
+    m_exportButton = new QPushButton(tr("Export map.txt..."));
+    m_importButton->setObjectName("mapImportText");
+    m_exportButton->setObjectName("mapExportText");
     archiveRow->addWidget(new QLabel(tr("Archive:")));
     archiveRow->addWidget(m_archiveEdit, 1);
     archiveRow->addWidget(openButton);
+    archiveRow->addWidget(m_importButton);
+    archiveRow->addWidget(m_exportButton);
     root->addLayout(archiveRow);
 
     QLabel* safety = new QLabel(tr(
@@ -170,6 +178,8 @@ CMapTableEditorDialog::CMapTableEditorDialog(QWidget* parent)
     root->addWidget(m_statusEdit);
 
     connect(openButton, &QPushButton::clicked, this, &CMapTableEditorDialog::chooseArchive);
+    connect(m_importButton, &QPushButton::clicked, this, &CMapTableEditorDialog::importText);
+    connect(m_exportButton, &QPushButton::clicked, this, &CMapTableEditorDialog::exportText);
     connect(newButton, &QPushButton::clicked, this, &CMapTableEditorDialog::beginNewZone);
     connect(m_zoneList, &QListWidget::currentRowChanged, this, &CMapTableEditorDialog::selectZone);
     connect(m_applyButton, &QPushButton::clicked, this, &CMapTableEditorDialog::applySelectedZone);
@@ -188,6 +198,8 @@ CMapTableEditorDialog::CMapTableEditorDialog(QWidget* parent)
 void CMapTableEditorDialog::setArchiveUiEnabled(bool enabled)
 {
     m_zoneList->setEnabled(enabled);
+    m_importButton->setEnabled(enabled);
+    m_exportButton->setEnabled(enabled);
     m_applyButton->setEnabled(enabled && !m_newZoneMode);
     m_saveButton->setEnabled(enabled);
     m_zoneIdEdit->setEnabled(enabled);
@@ -508,6 +520,89 @@ void CMapTableEditorDialog::removeExit()
     const int row = m_exitTable->currentRow();
     if(row >= 0)
         m_exitTable->removeRow(row);
+}
+
+void CMapTableEditorDialog::exportText()
+{
+    if(m_archivePath.isEmpty())
+        return;
+    if(m_newZoneMode)
+    {
+        setStatus(tr("Register or cancel the new zone before exporting."), true);
+        return;
+    }
+    if(!applyCurrentZone())
+        return;
+
+    const QString suggested = QFileInfo(m_archivePath).dir().filePath("map.txt");
+    const QString destination = QFileDialog::getSaveFileName(
+        this, tr("Export exact map.txt bytes"), suggested, tr("Text files (*.txt);;All files (*)"));
+    if(destination.isEmpty())
+        return;
+
+    QSaveFile file(destination);
+    if(!file.open(QIODevice::WriteOnly))
+    {
+        setStatus(file.errorString(), true);
+        return;
+    }
+    const QByteArray bytes = m_table.serialize();
+    if(file.write(bytes) != bytes.size() || !file.commit())
+    {
+        setStatus(file.errorString(), true);
+        return;
+    }
+    setStatus(tr("Exported the exact current map.txt bytes; the RES archive was not changed."));
+}
+
+void CMapTableEditorDialog::importText()
+{
+    if(m_archivePath.isEmpty())
+        return;
+    if(m_newZoneMode)
+    {
+        setStatus(tr("Register or cancel the new zone before importing."), true);
+        return;
+    }
+
+    const QMessageBox::StandardButton answer = QMessageBox::warning(
+        this, tr("Import hand-edited map.txt"),
+        tr("Endurance can verify basic map.txt structure and preserve the imported bytes, but it "
+           "cannot prove that zone types, profile-specific tags, resource names, travel links, or "
+           "script references are correct for the game. Import replaces the current in-memory "
+           "catalog; no RES file is changed until you use Save Verified RES As.\n\n"
+           "Continue and accept responsibility for the hand-edited catalog?"),
+        QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel);
+    if(answer != QMessageBox::Yes)
+        return;
+
+    const QString source = QFileDialog::getOpenFileName(
+        this, tr("Import map.txt"), QFileInfo(m_archivePath).absolutePath(),
+        tr("Text files (*.txt);;All files (*)"));
+    if(source.isEmpty())
+        return;
+    QFile file(source);
+    if(!file.open(QIODevice::ReadOnly))
+    {
+        setStatus(file.errorString(), true);
+        return;
+    }
+    const QByteArray bytes = file.readAll();
+    QStringList errors;
+    CMapTableDocument imported;
+    if(!imported.loadBytes(bytes, &errors) || imported.zones().isEmpty())
+    {
+        if(errors.isEmpty())
+            errors.append(tr("The imported file contains no valid #zone records."));
+        setStatus(tr("Import rejected: %1").arg(errors.join(" | ")), true);
+        return;
+    }
+
+    m_table = imported;
+    m_newZoneMode = false;
+    refreshZoneList(0);
+    setStatus(tr("Imported %1 zones into memory; the RES archive is unchanged until verified save.")
+              .arg(m_table.zones().size()));
 }
 
 void CMapTableEditorDialog::saveArchiveAs()

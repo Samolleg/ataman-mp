@@ -198,6 +198,19 @@ bool CMapTableDocument::reparse(QStringList* errors)
     }
 
     const auto decoded = [this](int index) { return decodeLine(m_lines.at(index).content); };
+    QVector<int> reviewStarts = starts;
+    for(int spanIndex = 0; spanIndex < reviewStarts.size(); ++spanIndex)
+    {
+        int reviewStart = reviewStarts.at(spanIndex);
+        while(reviewStart > 0)
+        {
+            const QString preceding = decoded(reviewStart - 1).trimmed();
+            if(!preceding.isEmpty() && !preceding.startsWith("##"))
+                break;
+            --reviewStart;
+        }
+        reviewStarts[spanIndex] = reviewStart;
+    }
     const auto nextValueLine = [this](int tagIndex, int limit) {
         for(int index = tagIndex + 1; index < limit; ++index)
         {
@@ -345,8 +358,16 @@ bool CMapTableDocument::reparse(QStringList* errors)
             exitStart = exitEnd;
         }
 
+        // Human-authored separators and descriptions conventionally precede
+        // the #zone they describe. Keep serialization spans unchanged, but
+        // present those comment-only preambles with the following zone in Raw
+        // Review instead of misleadingly attaching them to the previous one.
+        const int reviewStart = reviewStarts.at(spanIndex);
+        int reviewEnd = span.end;
+        if(spanIndex + 1 < reviewStarts.size())
+            reviewEnd = qMin(reviewEnd, reviewStarts.at(spanIndex + 1));
         QByteArray raw;
-        for(int index = span.start; index < span.end; ++index)
+        for(int index = reviewStart; index < reviewEnd; ++index)
         {
             raw.append(m_lines.at(index).content);
             raw.append(m_lines.at(index).ending);
@@ -371,6 +392,9 @@ SMapTableEditResult CMapTableDocument::validateZone(
         result.errors.append("Zone type is required and cannot contain whitespace.");
     if(zone.mprName.isEmpty() != zone.mobName.isEmpty())
         result.errors.append("MPR and MOB resource names must either both be present or both be absent.");
+    if(zone.zoneType.compare("game", Qt::CaseInsensitive) == 0 &&
+       (zone.mprName.isEmpty() || zone.mobName.isEmpty()))
+        result.errors.append("Game zones require both MPR and MOB resource names.");
     if(!zone.mprName.isEmpty() && (!tokenIsSafe(zone.mprName) || !tokenIsSafe(zone.mobName)))
         result.errors.append("MPR and MOB resource names cannot contain whitespace.");
     if(zone.maps.present)
