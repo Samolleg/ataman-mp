@@ -64,6 +64,9 @@ Character construction, provider differences, and safe Blender/ei_figer
 authoring are documented in [CHARACTER_PIPELINE.md](docs/CHARACTER_PIPELINE.md),
 [CHARACTER_AUTHORING.md](docs/CHARACTER_AUTHORING.md), and the
 [character evidence matrix](docs/CHARACTER_EVIDENCE_MATRIX.md).
+Particle reconstruction coverage, preview-only effects, the complete remaining
+family list, and the torch corpus audit are maintained in
+[PARTICLE_RENDERING_STATUS.md](docs/PARTICLE_RENDERING_STATUS.md).
 
 ## Safety
 
