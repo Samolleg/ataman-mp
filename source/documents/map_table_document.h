@@ -76,6 +76,8 @@ public:
 
     SMapTableEditResult replaceZone(const QString& originalZoneId,
                                     const SMapTableZone& replacement);
+    SMapTableEditResult replaceRawZoneSpan(const QString& originalZoneId,
+                                           const QString& rawText);
     SMapTableEditResult appendZone(const SMapTableZone& zone);
 
     static SMapTableEditResult validateZone(const SMapTableZone& zone,
@@ -92,6 +94,8 @@ private:
     {
         int start{-1};
         int end{-1};
+        int reviewStart{-1};
+        int reviewEnd{-1};
         SMapTableZone value;
     };
 

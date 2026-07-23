@@ -10,7 +10,8 @@ private slots:
     void noOpIsByteIdentical();
     void parsesMapsAndEntranceMetadata();
     void preservesUnknownZoneText();
-    void keepsAmbiguousInterZoneTextInExactSourceSpan();
+    void assignsSeparatorHeadingToFollowingZone();
+    void editsRawZoneSpanWithoutTouchingNeighbours();
     void validatesUnsafeMetadata();
     void rejectsUnknownZoneTypeAcrossDocument();
     void rejectsGameRegistrationWithoutResources();
@@ -93,12 +94,17 @@ void MapTableDocumentTests::preservesUnknownZoneText()
     QCOMPARE(document.serialize(), bytes);
 }
 
-void MapTableDocumentTests::keepsAmbiguousInterZoneTextInExactSourceSpan()
+void MapTableDocumentTests::assignsSeparatorHeadingToFollowingZone()
 {
     const QByteArray bytes =
+        "################################################\r\n"
+        "\r\n"
+        "## Base on Gipat\r\n"
         "#zone bz1g gipat brief\r\n"
         "#res\r\nbz1g bz1g\r\n"
         "#exit 1\r\ngz1g 1\r\n"
+        "## #remove\r\n"
+        "## 322 0 469 139\r\n"
         "\r\n"
         "################################################\r\n"
         "\r\n"
@@ -109,12 +115,45 @@ void MapTableDocumentTests::keepsAmbiguousInterZoneTextInExactSourceSpan()
     CMapTableDocument document;
     QVERIFY(document.loadBytes(bytes));
     QCOMPARE(document.zones().size(), 2);
-    QVERIFY(document.zones().at(0).rawBlock.contains("################################################"));
-    QVERIFY(document.zones().at(0).rawBlock.contains("## WAY FROM BASE TO Ruins"));
-    QVERIFY(!document.zones().at(1).rawBlock.contains("WAY FROM BASE"));
-    QVERIFY(document.zones().at(1).rawBlock.startsWith("#zone gz1g_bz1g"));
+    QVERIFY(document.zones().at(0).rawBlock.startsWith("################################################\r\n\r\n## Base on Gipat"));
+    QVERIFY(document.zones().at(0).rawBlock.contains("## #remove\r\n## 322 0 469 139"));
+    QVERIFY(!document.zones().at(0).rawBlock.contains("WAY FROM BASE"));
+    QVERIFY(document.zones().at(1).rawBlock.startsWith(
+        "################################################\r\n\r\n## WAY FROM BASE TO Ruins"));
+    QVERIFY(!document.zones().at(1).rawBlock.contains("## #remove"));
     QCOMPARE(document.serialize(), bytes);
     QVERIFY(!document.isDirty());
+}
+
+void MapTableDocumentTests::editsRawZoneSpanWithoutTouchingNeighbours()
+{
+    const QByteArray bytes =
+        "################################################\r\n"
+        "## First heading\r\n"
+        "#zone first island brief\r\n"
+        "#res\r\nfirst first\r\n"
+        "################################################\r\n"
+        "## Second heading\r\n"
+        "#zone second island edge\r\n"
+        "#position\r\n1 2 3\r\n";
+    CMapTableDocument document;
+    QVERIFY(document.loadBytes(bytes));
+    const QByteArray secondBefore = document.zones().at(1).rawBlock.toLocal8Bit();
+    QString edited = document.zones().at(0).rawBlock;
+    edited.replace("## First heading", "## First heading\n## Authored note");
+    const SMapTableEditResult result = document.replaceRawZoneSpan("first", edited);
+    QVERIFY2(result.success, qPrintable(result.toText()));
+    QVERIFY(document.zones().at(0).rawBlock.contains("## Authored note\r\n#zone first"));
+    QCOMPARE(document.zones().at(1).rawBlock.toLocal8Bit(), secondBefore);
+    QVERIFY(document.serialize().contains(
+        "## First heading\r\n## Authored note\r\n#zone first"));
+
+    const QByteArray afterEdit = document.serialize();
+    const SMapTableEditResult noOp = document.replaceRawZoneSpan(
+        "first", document.zones().at(0).rawBlock);
+    QVERIFY(noOp.success);
+    QVERIFY(noOp.changedFields.isEmpty());
+    QCOMPARE(document.serialize(), afterEdit);
 }
 
 void MapTableDocumentTests::rejectsUnknownZoneTypeAcrossDocument()

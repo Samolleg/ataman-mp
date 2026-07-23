@@ -30,6 +30,8 @@ private slots:
     void beginNewZone();
     void beginDuplicateZone();
     void registerNewZone();
+    void applyRawSource();
+    void revertRawSource();
     void addExit();
     void removeExit();
     void exportText();
@@ -44,6 +46,9 @@ private:
     void refreshZoneList(int selectedRow);
     QString cellText(int row, int column) const;
     void setStatus(const QString& text, bool error = false);
+    void setRawSourceText(const QString& text, bool editable);
+    void updateRawEditState();
+    bool rawSourceHasPendingChanges() const;
 
     QString m_archivePath;
     QString m_mapMemberName;
@@ -66,11 +71,14 @@ private:
     QLineEdit* m_objectivesEdit{nullptr};
     QTableWidget* m_exitTable{nullptr};
     QPlainTextEdit* m_rawReview{nullptr};
+    QString m_loadedRawText;
     QPushButton* m_importButton{nullptr};
     QPushButton* m_exportButton{nullptr};
     QPushButton* m_applyButton{nullptr};
     QPushButton* m_duplicateButton{nullptr};
     QPushButton* m_registerButton{nullptr};
+    QPushButton* m_applyRawButton{nullptr};
+    QPushButton* m_revertRawButton{nullptr};
     QPushButton* m_saveButton{nullptr};
     QLineEdit* m_statusEdit{nullptr};
     QTabWidget* m_tabs{nullptr};

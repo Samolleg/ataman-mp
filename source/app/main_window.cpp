@@ -86,6 +86,7 @@
 #include "landscape_tools.h"
 #include "collection_document.h"
 #include "collection_editor_dialog.h"
+#include "map_table_editor_dialog.h"
 #include "script_reference_analyzer.h"
 #include "unit.h"
 
@@ -562,6 +563,7 @@ MainWindow::MainWindow(QWidget* parent) :
     QAction* validateCurrentMob = new QAction(tr("Validate Current MOB Only"), this);
     QAction* validateSelectedMobs = new QAction(tr("Validate Selected MOB Files..."), this);
     QAction* repairMobFamily = new QAction(tr("Review and Repair NID Collisions..."), this);
+    QAction* openMapCatalog = new QAction(tr("Map Catalog Editor..."), this);
     m_mapTestAction = new QAction(tr("Test Current Map"), this);
     m_mapTestAction->setToolTip(tr("Stages unique temporary MPR/MOB copies and launches the active validated runtime profile. JMV uses hash-owned temporary aliases in the mod Maps directory; source maps are never overwritten."));
     m_stopMapTestAction = new QAction(tr("Stop Test"), this);
@@ -575,6 +577,7 @@ MainWindow::MainWindow(QWidget* parent) :
     m_ui->menuTools->addAction(validateCurrentMob);
     m_ui->menuTools->addAction(validateSelectedMobs);
     m_ui->menuTools->addAction(repairMobFamily);
+    m_ui->menuTools->addAction(openMapCatalog);
     m_ui->menuTools->addAction(m_mapTestAction);
     m_ui->menuTools->addAction(m_stopMapTestAction);
     m_ui->menuTools->addAction(openBackupFolder);
@@ -583,6 +586,11 @@ MainWindow::MainWindow(QWidget* parent) :
     m_ui->menuTools->addAction(openTestRunsFolder);
     m_ui->menuTools->addAction(openBugReportingGuide);
     viewMenu->addAction(showUnitTexture);
+    connect(openMapCatalog, &QAction::triggered, this, [this]()
+    {
+        CMapTableEditorDialog dialog(this);
+        dialog.exec();
+    });
     connect(openBackupFolder, &QAction::triggered, this, [this]()
     {
         QString error;

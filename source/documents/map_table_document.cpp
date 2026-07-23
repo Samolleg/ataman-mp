@@ -30,6 +30,19 @@ bool tokenIsSafe(const QString& value)
     return !value.trimmed().isEmpty() && !value.contains(kWhitespace);
 }
 
+bool isSectionSeparator(const QString& value)
+{
+    const QString trimmed = value.trimmed();
+    if(trimmed.size() < 16)
+        return false;
+    for(const QChar character : trimmed)
+    {
+        if(character != QLatin1Char('#'))
+            return false;
+    }
+    return true;
+}
+
 QString number(double value)
 {
     return QString::number(value, 'g', 15);
@@ -198,6 +211,24 @@ bool CMapTableDocument::reparse(QStringList* errors)
     }
 
     const auto decoded = [this](int index) { return decodeLine(m_lines.at(index).content); };
+    QVector<int> reviewStarts;
+    reviewStarts.reserve(starts.size());
+    for(const int start : starts)
+    {
+        int reviewStart = start;
+        for(int index = start - 1; index >= 0; --index)
+        {
+            const QString preceding = decoded(index).trimmed();
+            if(isSectionSeparator(preceding))
+            {
+                reviewStart = index;
+                break;
+            }
+            if(!preceding.isEmpty() && !preceding.startsWith("##"))
+                break;
+        }
+        reviewStarts.append(reviewStart);
+    }
     const auto nextValueLine = [this](int tagIndex, int limit) {
         for(int index = tagIndex + 1; index < limit; ++index)
         {
@@ -214,6 +245,7 @@ bool CMapTableDocument::reparse(QStringList* errors)
         SZoneSpan span;
         span.start = starts.at(spanIndex);
         span.end = spanIndex + 1 < starts.size() ? starts.at(spanIndex + 1) : m_lines.size();
+        span.reviewStart = reviewStarts.at(spanIndex);
         // Global quest records following the last zone are not part of it.
         // #allod is also authored inside zone definitions and must not be used
         // as a boundary marker.
@@ -226,6 +258,8 @@ bool CMapTableDocument::reparse(QStringList* errors)
                 break;
             }
         }
+        span.reviewEnd = spanIndex + 1 < reviewStarts.size()
+            ? reviewStarts.at(spanIndex + 1) : span.end;
 
         const QStringList header = tokens(decoded(span.start));
         if(header.size() < 4)
@@ -345,12 +379,12 @@ bool CMapTableDocument::reparse(QStringList* errors)
             exitStart = exitEnd;
         }
 
-        // Show the exact serialization span without guessing whether human-
-        // authored inter-zone comments describe the preceding or following
-        // zone. Separator length and comment placement are conventions, not
-        // part of the map.txt grammar.
-        const int reviewStart = span.start;
-        const int reviewEnd = span.end;
+        // A long # separator followed only by blank/comment lines is the
+        // corpus convention for the heading of the following zone. #zone is
+        // still the parser boundary; this rule only defines the human-facing
+        // editable source span.
+        const int reviewStart = span.reviewStart;
+        const int reviewEnd = span.reviewEnd;
         QByteArray raw;
         for(int index = reviewStart; index < reviewEnd; ++index)
         {
@@ -363,6 +397,112 @@ bool CMapTableDocument::reparse(QStringList* errors)
         m_zones.append(span.value);
     }
     return errors ? errors->isEmpty() : true;
+}
+
+SMapTableEditResult CMapTableDocument::replaceRawZoneSpan(
+    const QString& originalZoneId, const QString& rawText)
+{
+    SMapTableEditResult result;
+    int spanIndex = -1;
+    for(int index = 0; index < m_spans.size(); ++index)
+    {
+        if(m_spans.at(index).value.zoneId.compare(originalZoneId, Qt::CaseInsensitive) == 0)
+        {
+            if(spanIndex >= 0)
+            {
+                result.errors.append(QString("Zone ID %1 is ambiguous.").arg(originalZoneId));
+                return result;
+            }
+            spanIndex = index;
+        }
+    }
+    if(spanIndex < 0)
+    {
+        result.errors.append(QString("Zone ID %1 was not found.").arg(originalZoneId));
+        return result;
+    }
+
+    QString normalized = rawText;
+    normalized.replace(QStringLiteral("\r\n"), QStringLiteral("\n"));
+    normalized.replace(QLatin1Char('\r'), QLatin1Char('\n'));
+    QTextCodec* codec = QTextCodec::codecForName("CP1251");
+    QByteArray encoded = codec ? codec->fromUnicode(normalized) : normalized.toLatin1();
+    if(codec && codec->toUnicode(encoded) != normalized)
+    {
+        result.errors.append("Raw source contains text that cannot be represented in CP1251.");
+        return result;
+    }
+    encoded.replace(QByteArrayLiteral("\n"), preferredEnding());
+
+    CMapTableDocument candidate;
+    QStringList parseErrors;
+    if(!candidate.loadBytes(encoded, &parseErrors) || candidate.zones().size() != 1)
+    {
+        result.errors.append(parseErrors);
+        result.errors.append("Raw source must contain exactly one #zone record.");
+        return result;
+    }
+    if(candidate.zones().first().zoneId != originalZoneId)
+    {
+        result.errors.append("Raw source cannot rename the zone; use the General tab instead.");
+        return result;
+    }
+    for(const SLine& line : candidate.m_lines)
+    {
+        if(trimmedTag(line.content) == QStringLiteral("#quest"))
+        {
+            result.errors.append("Global #quest records cannot be inserted through a zone source span.");
+            return result;
+        }
+    }
+
+    const SZoneSpan sourceSpan = m_spans.at(spanIndex);
+    QVector<SLine> replacement = candidate.m_lines;
+    if(!replacement.isEmpty() && replacement.last().ending.isEmpty() &&
+       sourceSpan.reviewEnd < m_lines.size())
+        replacement.last().ending = preferredEnding();
+
+    QVector<SLine> current;
+    for(int index = sourceSpan.reviewStart; index < sourceSpan.reviewEnd; ++index)
+        current.append(m_lines.at(index));
+    if(current.size() == replacement.size())
+    {
+        bool identical = true;
+        for(int index = 0; index < current.size(); ++index)
+        {
+            if(current.at(index).content != replacement.at(index).content ||
+               current.at(index).ending != replacement.at(index).ending)
+            {
+                identical = false;
+                break;
+            }
+        }
+        if(identical)
+        {
+            result.success = true;
+            return result;
+        }
+    }
+
+    const QVector<SLine> previousLines = m_lines;
+    const bool previousDirty = m_dirty;
+    for(int index = sourceSpan.reviewEnd - 1; index >= sourceSpan.reviewStart; --index)
+        m_lines.removeAt(index);
+    for(int index = 0; index < replacement.size(); ++index)
+        m_lines.insert(sourceSpan.reviewStart + index, replacement.at(index));
+    m_dirty = true;
+    parseErrors.clear();
+    if(!reparse(&parseErrors))
+    {
+        m_lines = previousLines;
+        m_dirty = previousDirty;
+        reparse(nullptr);
+        result.errors.append(parseErrors);
+        return result;
+    }
+    result.changedFields.append("raw source span");
+    result.success = true;
+    return result;
 }
 
 SMapTableEditResult CMapTableDocument::validateZone(

@@ -167,8 +167,8 @@ CMapTableEditorDialog::CMapTableEditorDialog(QWidget* parent)
     QWidget* rawTab = new QWidget;
     QVBoxLayout* rawLayout = new QVBoxLayout(rawTab);
     QLabel* rawNote = new QLabel(tr(
-        "Exact source span from the selected #zone header to immediately before the next #zone header. "
-        "Hand-authored separators and comments between zones may describe either side; Endurance preserves them but does not guess ownership."));
+        "Editable source span for this zone. A long # separator and the comment heading after it belong to the following #zone. "
+        "Apply Raw Source validates one unchanged zone identity and CP1251 encoding before staging the edit."));
     rawNote->setWordWrap(true);
     m_rawReview = new QPlainTextEdit;
     m_rawReview->setObjectName("mapRawReview");
@@ -176,6 +176,13 @@ CMapTableEditorDialog::CMapTableEditorDialog(QWidget* parent)
     m_rawReview->setLineWrapMode(QPlainTextEdit::NoWrap);
     rawLayout->addWidget(rawNote);
     rawLayout->addWidget(m_rawReview, 1);
+    QHBoxLayout* rawActions = new QHBoxLayout;
+    m_applyRawButton = new QPushButton(tr("Apply Raw Source"));
+    m_revertRawButton = new QPushButton(tr("Revert Raw Edits"));
+    rawActions->addWidget(m_applyRawButton);
+    rawActions->addWidget(m_revertRawButton);
+    rawActions->addStretch();
+    rawLayout->addLayout(rawActions);
     m_tabs->addTab(rawTab, tr("Raw Source Span"));
     splitter->addWidget(m_tabs);
     splitter->setStretchFactor(0, 0);
@@ -202,6 +209,9 @@ CMapTableEditorDialog::CMapTableEditorDialog(QWidget* parent)
     connect(m_zoneList, &QListWidget::currentRowChanged, this, &CMapTableEditorDialog::selectZone);
     connect(m_applyButton, &QPushButton::clicked, this, &CMapTableEditorDialog::applySelectedZone);
     connect(m_registerButton, &QPushButton::clicked, this, &CMapTableEditorDialog::registerNewZone);
+    connect(m_applyRawButton, &QPushButton::clicked, this, &CMapTableEditorDialog::applyRawSource);
+    connect(m_revertRawButton, &QPushButton::clicked, this, &CMapTableEditorDialog::revertRawSource);
+    connect(m_rawReview, &QPlainTextEdit::textChanged, this, &CMapTableEditorDialog::updateRawEditState);
     connect(addExitButton, &QPushButton::clicked, this, &CMapTableEditorDialog::addExit);
     connect(removeExitButton, &QPushButton::clicked, this, &CMapTableEditorDialog::removeExit);
     connect(m_saveButton, &QPushButton::clicked, this, &CMapTableEditorDialog::saveArchiveAs);
@@ -232,6 +242,11 @@ void CMapTableEditorDialog::setArchiveUiEnabled(bool enabled)
 
 void CMapTableEditorDialog::chooseArchive()
 {
+    if(rawSourceHasPendingChanges())
+    {
+        setStatus(tr("Apply or revert the current raw source edit before opening another archive."), true);
+        return;
+    }
     const QString path = QFileDialog::getOpenFileName(
         this, tr("Open a copied or mod-profile texts.res"), QString(), tr("RES archives (*.res)"));
     if(!path.isEmpty())
@@ -368,7 +383,7 @@ void CMapTableEditorDialog::loadZone(const SMapTableZone& zone)
         if(exit.hasViewAngle) m_exitTable->setItem(row, ViewAngle, item(number(exit.viewAngle)));
         if(exit.hasDeployAngle) m_exitTable->setItem(row, DeployAngle, item(number(exit.deployAngle)));
     }
-    m_rawReview->setPlainText(zone.rawBlock);
+    setRawSourceText(zone.rawBlock, true);
 }
 
 QString CMapTableEditorDialog::cellText(int row, int column) const
@@ -479,14 +494,20 @@ bool CMapTableEditorDialog::applyCurrentZone()
     QString error;
     if(!collectZone(&zone, &error))
     {
-        setStatus(error, true);
+        setStatus(tr("%1: %2").arg(m_table.zones().at(m_selectedZone).zoneId, error), true);
+        return false;
+    }
+    if(rawSourceHasPendingChanges())
+    {
+        setStatus(tr("%1: apply or revert the pending raw source edit first.")
+                  .arg(m_table.zones().at(m_selectedZone).zoneId), true);
         return false;
     }
     const QString originalId = m_table.zones().at(m_selectedZone).zoneId;
     const SMapTableEditResult result = m_table.replaceZone(originalId, zone);
     if(!result.success)
     {
-        setStatus(result.toText(), true);
+        setStatus(tr("%1: %2").arg(originalId, result.toText()), true);
         return false;
     }
     refreshZoneList(m_selectedZone);
@@ -499,6 +520,11 @@ void CMapTableEditorDialog::beginNewZone()
 {
     if(m_archivePath.isEmpty())
         return;
+    if(rawSourceHasPendingChanges())
+    {
+        setStatus(tr("Apply or revert the current raw source edit before starting a registration."), true);
+        return;
+    }
     m_newZoneMode = true;
     m_selectedZone = -1;
     m_zoneList->clearSelection();
@@ -508,9 +534,9 @@ void CMapTableEditorDialog::beginNewZone()
     blank.maps.sectorWidth = 1;
     blank.maps.sectorHeight = 1;
     loadZone(blank);
-    m_rawReview->setPlainText(tr(
+    setRawSourceText(tr(
         "New registration preview is created only after every required value is supplied. "
-        "No weather, sky, camera, figure, cage, or LOD metadata will be invented."));
+        "No weather, sky, camera, figure, cage, or LOD metadata will be invented."), false);
     m_applyButton->setVisible(false);
     m_registerButton->setVisible(true);
     setStatus(tr("Enter explicit registration values, then choose Register New Zone."));
@@ -520,6 +546,11 @@ void CMapTableEditorDialog::beginDuplicateZone()
 {
     if(m_archivePath.isEmpty() || m_selectedZone < 0 || m_selectedZone >= m_table.zones().size())
         return;
+    if(rawSourceHasPendingChanges())
+    {
+        setStatus(tr("Apply or revert the current raw source edit before duplicating a zone."), true);
+        return;
+    }
     const SMapTableZone source = m_table.zones().at(m_selectedZone);
     m_newZoneMode = true;
     m_selectedZone = -1;
@@ -530,10 +561,10 @@ void CMapTableEditorDialog::beginDuplicateZone()
     duplicate.zoneId.clear();
     duplicate.rawBlock.clear();
     loadZone(duplicate);
-    m_rawReview->setPlainText(tr(
+    setRawSourceText(tr(
         "Structured metadata was copied from %1. The new Zone ID is intentionally blank. "
         "Unknown tags, comments, and raw source ownership were not copied; review every resource and entrance before registering.")
-        .arg(source.zoneId));
+        .arg(source.zoneId), false);
     m_applyButton->setVisible(false);
     m_registerButton->setVisible(true);
     setStatus(tr("Duplicating %1: enter a unique Zone ID and review all copied metadata.").arg(source.zoneId));
@@ -545,13 +576,15 @@ void CMapTableEditorDialog::registerNewZone()
     QString error;
     if(!collectZone(&zone, &error))
     {
-        setStatus(error, true);
+        setStatus(tr("%1: %2").arg(zone.zoneId.isEmpty() ? tr("New zone") : zone.zoneId,
+                                    error), true);
         return;
     }
     const SMapTableEditResult result = m_table.appendZone(zone);
     if(!result.success)
     {
-        setStatus(result.toText(), true);
+        setStatus(tr("%1: %2").arg(zone.zoneId.isEmpty() ? tr("New zone") : zone.zoneId,
+                                    result.toText()), true);
         return;
     }
     m_newZoneMode = false;
@@ -576,6 +609,61 @@ void CMapTableEditorDialog::removeExit()
     const int row = m_exitTable->currentRow();
     if(row >= 0)
         m_exitTable->removeRow(row);
+}
+
+void CMapTableEditorDialog::setRawSourceText(const QString& text, bool editable)
+{
+    m_rawReview->blockSignals(true);
+    m_rawReview->setPlainText(text);
+    m_rawReview->blockSignals(false);
+    m_loadedRawText = m_rawReview->toPlainText();
+    m_rawReview->setReadOnly(!editable);
+    updateRawEditState();
+}
+
+void CMapTableEditorDialog::updateRawEditState()
+{
+    const bool changed = !m_rawReview->isReadOnly() &&
+        m_rawReview->toPlainText() != m_loadedRawText;
+    m_applyRawButton->setEnabled(changed);
+    m_revertRawButton->setEnabled(changed);
+    m_zoneList->setEnabled(!m_archivePath.isEmpty() && !changed);
+}
+
+bool CMapTableEditorDialog::rawSourceHasPendingChanges() const
+{
+    return !m_rawReview->isReadOnly() && m_rawReview->toPlainText() != m_loadedRawText;
+}
+
+void CMapTableEditorDialog::revertRawSource()
+{
+    setRawSourceText(m_loadedRawText, true);
+}
+
+void CMapTableEditorDialog::applyRawSource()
+{
+    if(m_selectedZone < 0 || m_selectedZone >= m_table.zones().size())
+        return;
+    const QString zoneId = m_table.zones().at(m_selectedZone).zoneId;
+    const SMapTableEditResult result = m_table.replaceRawZoneSpan(
+        zoneId, m_rawReview->toPlainText());
+    if(!result.success)
+    {
+        setStatus(tr("%1: %2").arg(zoneId, result.toText()), true);
+        return;
+    }
+    int row = -1;
+    for(int index = 0; index < m_table.zones().size(); ++index)
+    {
+        if(m_table.zones().at(index).zoneId.compare(zoneId, Qt::CaseInsensitive) == 0)
+        {
+            row = index;
+            break;
+        }
+    }
+    refreshZoneList(row);
+    setStatus(result.changedFields.isEmpty() ? tr("No raw source changed.")
+                                             : result.toText());
 }
 
 void CMapTableEditorDialog::exportText()
@@ -615,6 +703,11 @@ void CMapTableEditorDialog::importText()
 {
     if(m_archivePath.isEmpty())
         return;
+    if(rawSourceHasPendingChanges())
+    {
+        setStatus(tr("Apply or revert the current raw source edit before importing."), true);
+        return;
+    }
     if(m_newZoneMode)
     {
         setStatus(tr("Register or cancel the new zone before importing."), true);
@@ -624,10 +717,9 @@ void CMapTableEditorDialog::importText()
     const QMessageBox::StandardButton answer = QMessageBox::warning(
         this, tr("Import hand-edited map.txt"),
         tr("Endurance can verify basic map.txt structure and preserve the imported bytes, but it "
-           "cannot prove that zone types, profile-specific tags, resource names, travel links, or "
-           "script references are correct for the game. Import replaces the current in-memory "
-           "catalog; no RES file is changed until you use Save Verified RES As.\n\n"
-           "Continue and accept responsibility for the hand-edited catalog?"),
+           "cannot prove that profile-specific tags, resource names, travel links, or script "
+           "references are correct for the game. Import replaces the current in-memory catalog; "
+           "no RES file is changed until you use Save Verified RES As.\n\nContinue?"),
         QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel);
     if(answer != QMessageBox::Yes)
         return;
