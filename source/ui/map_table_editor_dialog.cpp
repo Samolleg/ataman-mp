@@ -1,6 +1,7 @@
 #include "map_table_editor_dialog.h"
 
 #include <QCheckBox>
+#include <QCoreApplication>
 #include <QComboBox>
 #include <QCryptographicHash>
 #include <QDir>
@@ -16,7 +17,9 @@
 #include <QMessageBox>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QRegularExpression>
 #include <QSaveFile>
+#include <QSettings>
 #include <QSpinBox>
 #include <QSplitter>
 #include <QTabWidget>
@@ -49,6 +52,10 @@ CMapTableEditorDialog::CMapTableEditorDialog(QWidget* parent)
     : QDialog(parent)
 {
     setWindowTitle(tr("Map Catalog Editor (map.txt in texts.res)"));
+    const QStringList arguments = QCoreApplication::arguments();
+    m_persistUiState = !arguments.contains("--ui-widget-check") &&
+        !arguments.contains("--validate-archive") &&
+        !arguments.contains("--validate-derived-res");
     resize(1180, 720);
     QVBoxLayout* root = new QVBoxLayout(this);
     QHBoxLayout* archiveRow = new QHBoxLayout;
@@ -73,18 +80,28 @@ CMapTableEditorDialog::CMapTableEditorDialog(QWidget* parent)
     safety->setWordWrap(true);
     root->addWidget(safety);
 
-    QSplitter* splitter = new QSplitter;
+    m_splitter = new QSplitter;
     QWidget* left = new QWidget;
     QVBoxLayout* leftLayout = new QVBoxLayout(left);
     m_zoneList = new QListWidget;
     m_zoneList->setObjectName("mapZoneList");
+    m_zoneFilter = new QLineEdit;
+    m_zoneFilter->setObjectName("mapZoneFilter");
+    m_zoneFilter->setClearButtonEnabled(true);
+    m_zoneFilter->setPlaceholderText(tr("Filter zones, types, islands, resources, comments..."));
+    m_zoneFilterStatus = new QLabel(tr("0 / 0"));
+    m_zoneFilterStatus->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+    QHBoxLayout* zoneFilterLayout = new QHBoxLayout;
+    zoneFilterLayout->addWidget(m_zoneFilter, 1);
+    zoneFilterLayout->addWidget(m_zoneFilterStatus);
     QPushButton* newButton = new QPushButton(tr("New Registration"));
     m_duplicateButton = new QPushButton(tr("Duplicate Selected Zone"));
     leftLayout->addWidget(new QLabel(tr("Zones")));
+    leftLayout->addLayout(zoneFilterLayout);
     leftLayout->addWidget(m_zoneList, 1);
     leftLayout->addWidget(newButton);
     leftLayout->addWidget(m_duplicateButton);
-    splitter->addWidget(left);
+    m_splitter->addWidget(left);
 
     m_tabs = new QTabWidget;
     QWidget* general = new QWidget;
@@ -184,10 +201,10 @@ CMapTableEditorDialog::CMapTableEditorDialog(QWidget* parent)
     rawActions->addStretch();
     rawLayout->addLayout(rawActions);
     m_tabs->addTab(rawTab, tr("Raw Source Span"));
-    splitter->addWidget(m_tabs);
-    splitter->setStretchFactor(0, 0);
-    splitter->setStretchFactor(1, 1);
-    root->addWidget(splitter, 1);
+    m_splitter->addWidget(m_tabs);
+    m_splitter->setStretchFactor(0, 0);
+    m_splitter->setStretchFactor(1, 1);
+    root->addWidget(m_splitter, 1);
 
     QHBoxLayout* actions = new QHBoxLayout;
     m_saveButton = new QPushButton(tr("Save Verified RES As..."));
@@ -207,6 +224,7 @@ CMapTableEditorDialog::CMapTableEditorDialog(QWidget* parent)
     connect(newButton, &QPushButton::clicked, this, &CMapTableEditorDialog::beginNewZone);
     connect(m_duplicateButton, &QPushButton::clicked, this, &CMapTableEditorDialog::beginDuplicateZone);
     connect(m_zoneList, &QListWidget::currentRowChanged, this, &CMapTableEditorDialog::selectZone);
+    connect(m_zoneFilter, &QLineEdit::textChanged, this, &CMapTableEditorDialog::applyZoneFilter);
     connect(m_applyButton, &QPushButton::clicked, this, &CMapTableEditorDialog::applySelectedZone);
     connect(m_registerButton, &QPushButton::clicked, this, &CMapTableEditorDialog::registerNewZone);
     connect(m_applyRawButton, &QPushButton::clicked, this, &CMapTableEditorDialog::applyRawSource);
@@ -221,11 +239,31 @@ CMapTableEditorDialog::CMapTableEditorDialog(QWidget* parent)
     connect(m_mapsEnabled, &QCheckBox::toggled, m_minimapEdit, &QWidget::setEnabled);
     connect(m_mapsEnabled, &QCheckBox::toggled, m_objectivesEdit, &QWidget::setEnabled);
     setArchiveUiEnabled(false);
+    if(m_persistUiState)
+    {
+        QSettings settings("EI Mapper Endurance", "Map Catalog Editor");
+        restoreGeometry(settings.value("windowGeometry").toByteArray());
+        m_splitter->restoreState(settings.value("mainSplitter").toByteArray());
+        const int tabIndex = settings.value("currentTab", 0).toInt();
+        if(tabIndex >= 0 && tabIndex < m_tabs->count())
+            m_tabs->setCurrentIndex(tabIndex);
+    }
+}
+
+CMapTableEditorDialog::~CMapTableEditorDialog()
+{
+    if(!m_persistUiState)
+        return;
+    QSettings settings("EI Mapper Endurance", "Map Catalog Editor");
+    settings.setValue("windowGeometry", saveGeometry());
+    settings.setValue("mainSplitter", m_splitter->saveState());
+    settings.setValue("currentTab", m_tabs->currentIndex());
 }
 
 void CMapTableEditorDialog::setArchiveUiEnabled(bool enabled)
 {
     m_zoneList->setEnabled(enabled);
+    m_zoneFilter->setEnabled(enabled);
     m_importButton->setEnabled(enabled);
     m_exportButton->setEnabled(enabled);
     m_applyButton->setEnabled(enabled && !m_newZoneMode);
@@ -305,33 +343,75 @@ bool CMapTableEditorDialog::openArchive(const QString& path)
     return true;
 }
 
-void CMapTableEditorDialog::refreshZoneList(int selectedRow)
+void CMapTableEditorDialog::refreshZoneList(int selectedZoneIndex)
 {
     m_zoneList->blockSignals(true);
     m_zoneList->clear();
-    for(const SMapTableZone& zone : m_table.zones())
+    int selectedListRow = -1;
+    for(int zoneIndex = 0; zoneIndex < m_table.zones().size(); ++zoneIndex)
     {
+        const SMapTableZone& zone = m_table.zones().at(zoneIndex);
         QListWidgetItem* listItem = new QListWidgetItem(
             QStringLiteral("%1  [%2 / %3]").arg(zone.zoneId, zone.allodId, zone.zoneType));
-        listItem->setData(Qt::UserRole, zone.zoneId);
+        listItem->setData(Qt::UserRole, zoneIndex);
         m_zoneList->addItem(listItem);
+        if(zoneIndex == selectedZoneIndex)
+            selectedListRow = m_zoneList->count() - 1;
     }
-    m_zoneList->setCurrentRow(selectedRow);
+    applyZoneFilter(m_zoneFilter->text());
+    m_zoneList->setCurrentRow(selectedListRow);
     m_zoneList->blockSignals(false);
-    selectZone(selectedRow);
+    selectZone(selectedListRow);
 }
 
-void CMapTableEditorDialog::selectZone(int row)
+void CMapTableEditorDialog::applyZoneFilter(const QString& text)
 {
-    if(row < 0 || row >= m_table.zones().size())
+    const QStringList terms = text.toLower().split(QRegularExpression("\\s+"),
+                                                   QString::SkipEmptyParts);
+    int visible = 0;
+    for(int row = 0; row < m_zoneList->count(); ++row)
+    {
+        QListWidgetItem* listItem = m_zoneList->item(row);
+        const int zoneIndex = listItem->data(Qt::UserRole).toInt();
+        bool matches = zoneIndex >= 0 && zoneIndex < m_table.zones().size();
+        if(matches)
+        {
+            const SMapTableZone& zone = m_table.zones().at(zoneIndex);
+            const QString searchable = QStringLiteral("%1 %2 %3 %4 %5 %6")
+                .arg(zone.zoneId, zone.allodId, zone.zoneType, zone.mprName,
+                     zone.mobName, zone.rawBlock).toLower();
+            for(const QString& term : terms)
+            {
+                if(!searchable.contains(term))
+                {
+                    matches = false;
+                    break;
+                }
+            }
+        }
+        listItem->setHidden(!matches);
+        if(matches)
+            ++visible;
+    }
+    m_zoneFilterStatus->setText(tr("%1 / %2").arg(visible).arg(m_zoneList->count()));
+    m_zoneFilterStatus->setToolTip(tr("%1 matching zones out of %2")
+                                   .arg(visible).arg(m_zoneList->count()));
+}
+
+void CMapTableEditorDialog::selectZone(int listRow)
+{
+    if(listRow < 0 || listRow >= m_zoneList->count())
+        return;
+    const int zoneIndex = m_zoneList->item(listRow)->data(Qt::UserRole).toInt();
+    if(zoneIndex < 0 || zoneIndex >= m_table.zones().size())
         return;
     m_newZoneMode = false;
-    m_selectedZone = row;
+    m_selectedZone = zoneIndex;
     m_applyButton->setVisible(true);
     m_applyButton->setEnabled(true);
     m_registerButton->setVisible(false);
     m_duplicateButton->setEnabled(true);
-    loadZone(m_table.zones().at(row));
+    loadZone(m_table.zones().at(zoneIndex));
 }
 
 void CMapTableEditorDialog::loadZone(const SMapTableZone& zone)
@@ -504,7 +584,7 @@ bool CMapTableEditorDialog::applyCurrentZone()
         return false;
     }
     const QString originalId = m_table.zones().at(m_selectedZone).zoneId;
-    const SMapTableEditResult result = m_table.replaceZone(originalId, zone);
+    const SMapTableEditResult result = m_table.replaceZoneAt(m_selectedZone, zone);
     if(!result.success)
     {
         setStatus(tr("%1: %2").arg(originalId, result.toText()), true);
@@ -628,6 +708,7 @@ void CMapTableEditorDialog::updateRawEditState()
     m_applyRawButton->setEnabled(changed);
     m_revertRawButton->setEnabled(changed);
     m_zoneList->setEnabled(!m_archivePath.isEmpty() && !changed);
+    m_zoneFilter->setEnabled(!m_archivePath.isEmpty() && !changed);
 }
 
 bool CMapTableEditorDialog::rawSourceHasPendingChanges() const
@@ -645,23 +726,14 @@ void CMapTableEditorDialog::applyRawSource()
     if(m_selectedZone < 0 || m_selectedZone >= m_table.zones().size())
         return;
     const QString zoneId = m_table.zones().at(m_selectedZone).zoneId;
-    const SMapTableEditResult result = m_table.replaceRawZoneSpan(
-        zoneId, m_rawReview->toPlainText());
+    const SMapTableEditResult result = m_table.replaceRawZoneSpanAt(
+        m_selectedZone, m_rawReview->toPlainText());
     if(!result.success)
     {
         setStatus(tr("%1: %2").arg(zoneId, result.toText()), true);
         return;
     }
-    int row = -1;
-    for(int index = 0; index < m_table.zones().size(); ++index)
-    {
-        if(m_table.zones().at(index).zoneId.compare(zoneId, Qt::CaseInsensitive) == 0)
-        {
-            row = index;
-            break;
-        }
-    }
-    refreshZoneList(row);
+    refreshZoneList(m_selectedZone);
     setStatus(result.changedFields.isEmpty() ? tr("No raw source changed.")
                                              : result.toText());
 }

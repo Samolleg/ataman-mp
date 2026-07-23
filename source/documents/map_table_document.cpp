@@ -35,9 +35,17 @@ bool isSectionSeparator(const QString& value)
     const QString trimmed = value.trimmed();
     if(trimmed.size() < 16)
         return false;
-    for(const QChar character : trimmed)
+    int hashes = 0;
+    while(hashes < trimmed.size() && trimmed.at(hashes) == QLatin1Char('#'))
+        ++hashes;
+    if(hashes < 16)
+        return false;
+    // Hand-authored catalogs contain occasional trailing digits on separator
+    // lines (for example, "#####3"). Treat only that narrow legacy typo as a
+    // separator so arbitrary comments beginning with hashes remain untouched.
+    for(int index = hashes; index < trimmed.size(); ++index)
     {
-        if(character != QLatin1Char('#'))
+        if(!trimmed.at(index).isDigit())
             return false;
     }
     return true;
@@ -421,6 +429,19 @@ SMapTableEditResult CMapTableDocument::replaceRawZoneSpan(
         result.errors.append(QString("Zone ID %1 was not found.").arg(originalZoneId));
         return result;
     }
+    return replaceRawZoneSpanAt(spanIndex, rawText);
+}
+
+SMapTableEditResult CMapTableDocument::replaceRawZoneSpanAt(
+    int spanIndex, const QString& rawText)
+{
+    SMapTableEditResult result;
+    if(spanIndex < 0 || spanIndex >= m_spans.size())
+    {
+        result.errors.append(QString("Zone index %1 is out of range.").arg(spanIndex));
+        return result;
+    }
+    const QString originalZoneId = m_spans.at(spanIndex).value.zoneId;
 
     QString normalized = rawText;
     normalized.replace(QStringLiteral("\r\n"), QStringLiteral("\n"));
@@ -547,7 +568,12 @@ SMapTableEditResult CMapTableDocument::validateZone(
     for(const SMapTableZone& candidate : existing)
     {
         if(candidate.zoneId.compare(zone.zoneId, Qt::CaseInsensitive) == 0)
-            result.errors.append(QString("Zone ID %1 already exists.").arg(zone.zoneId));
+        {
+            const bool duplicateEdge = zone.zoneType.compare("edge", Qt::CaseInsensitive) == 0 &&
+                candidate.zoneType.compare("edge", Qt::CaseInsensitive) == 0;
+            if(!duplicateEdge)
+                result.errors.append(QString("Zone ID %1 already exists.").arg(zone.zoneId));
+        }
     }
     QTextCodec* codec = QTextCodec::codecForName("CP1251");
     QStringList values = {zone.zoneId, zone.allodId, zone.zoneType, zone.mprName,
@@ -593,7 +619,6 @@ SMapTableEditResult CMapTableDocument::replaceZone(
 {
     SMapTableEditResult result;
     int spanIndex = -1;
-    QVector<SMapTableZone> otherZones;
     for(int index = 0; index < m_spans.size(); ++index)
     {
         if(m_spans.at(index).value.zoneId.compare(originalZoneId, Qt::CaseInsensitive) == 0)
@@ -605,13 +630,29 @@ SMapTableEditResult CMapTableDocument::replaceZone(
             }
             spanIndex = index;
         }
-        else
-            otherZones.append(m_spans.at(index).value);
     }
     if(spanIndex < 0)
     {
         result.errors.append(QString("Zone ID %1 was not found.").arg(originalZoneId));
         return result;
+    }
+    return replaceZoneAt(spanIndex, replacement);
+}
+
+SMapTableEditResult CMapTableDocument::replaceZoneAt(
+    int spanIndex, const SMapTableZone& replacement)
+{
+    SMapTableEditResult result;
+    if(spanIndex < 0 || spanIndex >= m_spans.size())
+    {
+        result.errors.append(QString("Zone index %1 is out of range.").arg(spanIndex));
+        return result;
+    }
+    QVector<SMapTableZone> otherZones;
+    for(int index = 0; index < m_spans.size(); ++index)
+    {
+        if(index != spanIndex)
+            otherZones.append(m_spans.at(index).value);
     }
     result = validateZone(replacement, otherZones);
     if(!result.success)

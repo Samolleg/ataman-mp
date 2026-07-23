@@ -43,6 +43,7 @@ int main(int argc, char* argv[])
     if(argc >= 2 && QString::fromLocal8Bit(argv[1]) == "--ui-widget-check")
     {
         return editor.findChild<QListWidget*>("mapZoneList") &&
+               editor.findChild<QLineEdit*>("mapZoneFilter") &&
                editor.findChild<QLineEdit*>("mapMinimapTexture") &&
                editor.findChild<QTableWidget*>("mapEntranceTable") &&
                editor.findChild<QPlainTextEdit*>("mapRawReview") &&

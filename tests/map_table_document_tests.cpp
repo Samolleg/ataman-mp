@@ -14,6 +14,8 @@ private slots:
     void editsRawZoneSpanWithoutTouchingNeighbours();
     void validatesUnsafeMetadata();
     void rejectsUnknownZoneTypeAcrossDocument();
+    void allowsDuplicateEdgeIdsAndEditsByIndex();
+    void rejectsDuplicateNonEdgeIds();
     void rejectsGameRegistrationWithoutResources();
     void editsOnlyRequestedKnownLines();
     void editsEntranceWithoutRewritingUnknownText();
@@ -97,7 +99,7 @@ void MapTableDocumentTests::preservesUnknownZoneText()
 void MapTableDocumentTests::assignsSeparatorHeadingToFollowingZone()
 {
     const QByteArray bytes =
-        "################################################\r\n"
+        "########################################################3\r\n"
         "\r\n"
         "## Base on Gipat\r\n"
         "#zone bz1g gipat brief\r\n"
@@ -115,7 +117,7 @@ void MapTableDocumentTests::assignsSeparatorHeadingToFollowingZone()
     CMapTableDocument document;
     QVERIFY(document.loadBytes(bytes));
     QCOMPARE(document.zones().size(), 2);
-    QVERIFY(document.zones().at(0).rawBlock.startsWith("################################################\r\n\r\n## Base on Gipat"));
+    QVERIFY(document.zones().at(0).rawBlock.startsWith("########################################################3\r\n\r\n## Base on Gipat"));
     QVERIFY(document.zones().at(0).rawBlock.contains("## #remove\r\n## 322 0 469 139"));
     QVERIFY(!document.zones().at(0).rawBlock.contains("WAY FROM BASE"));
     QVERIFY(document.zones().at(1).rawBlock.startsWith(
@@ -168,6 +170,39 @@ void MapTableDocumentTests::rejectsUnknownZoneTypeAcrossDocument()
     QVERIFY(!result.success);
     QVERIFY(result.toText().contains("invalid: Zone type must be game, brief, or edge."));
     QCOMPARE(document.serialize(), bytes);
+}
+
+void MapTableDocumentTests::allowsDuplicateEdgeIdsAndEditsByIndex()
+{
+    const QByteArray bytes =
+        "#zone shared island edge\r\n"
+        "#position\r\n1 2 3\r\n"
+        "#zone shared island edge\r\n"
+        "#position\r\n4 5 6\r\n";
+    CMapTableDocument document;
+    QVERIFY(document.loadBytes(bytes));
+    QVERIFY2(document.validateAllZones().success,
+             qPrintable(document.validateAllZones().toText()));
+    SMapTableZone second = document.zones().at(1);
+    second.allodId = "other_island";
+    const SMapTableEditResult result = document.replaceZoneAt(1, second);
+    QVERIFY2(result.success, qPrintable(result.toText()));
+    QVERIFY(document.serialize().startsWith(
+        "#zone shared island edge\r\n#position\r\n1 2 3\r\n"));
+    QVERIFY(document.serialize().contains(
+        "#zone shared other_island edge\r\n#position\r\n4 5 6\r\n"));
+}
+
+void MapTableDocumentTests::rejectsDuplicateNonEdgeIds()
+{
+    const QByteArray bytes =
+        "#zone duplicate island game\r\n#res\r\none one\r\n"
+        "#zone duplicate island brief\r\n#res\r\ntwo two\r\n";
+    CMapTableDocument document;
+    QVERIFY(document.loadBytes(bytes));
+    const SMapTableEditResult result = document.validateAllZones();
+    QVERIFY(!result.success);
+    QVERIFY(result.toText().contains("duplicate: Zone ID duplicate already exists."));
 }
 
 void MapTableDocumentTests::validatesUnsafeMetadata()

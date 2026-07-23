@@ -15,12 +15,15 @@ class QPushButton;
 class QSpinBox;
 class QTableWidget;
 class QTabWidget;
+class QSplitter;
+class QLabel;
 
 class CMapTableEditorDialog : public QDialog
 {
     Q_OBJECT
 public:
     explicit CMapTableEditorDialog(QWidget* parent = nullptr);
+    ~CMapTableEditorDialog() override;
     bool openArchive(const QString& path);
 
 private slots:
@@ -37,6 +40,7 @@ private slots:
     void exportText();
     void importText();
     void saveArchiveAs();
+    void applyZoneFilter(const QString& text);
 
 private:
     void setArchiveUiEnabled(bool enabled);
@@ -56,8 +60,11 @@ private:
     CMapTableDocument m_table;
     int m_selectedZone{-1};
     bool m_newZoneMode{false};
+    bool m_persistUiState{true};
 
     QLineEdit* m_archiveEdit{nullptr};
+    QLineEdit* m_zoneFilter{nullptr};
+    QLabel* m_zoneFilterStatus{nullptr};
     QListWidget* m_zoneList{nullptr};
     QLineEdit* m_zoneIdEdit{nullptr};
     QLineEdit* m_allodIdEdit{nullptr};
@@ -82,6 +89,7 @@ private:
     QPushButton* m_saveButton{nullptr};
     QLineEdit* m_statusEdit{nullptr};
     QTabWidget* m_tabs{nullptr};
+    QSplitter* m_splitter{nullptr};
 };
 
 #endif // MAP_TABLE_EDITOR_DIALOG_H
