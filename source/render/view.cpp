@@ -679,12 +679,44 @@ void CView::initEnvironmentPreviewWidget()
     positionEnvironmentPreviewWidget();
     m_environmentPreviewWidget->show();
     m_environmentPreviewWidget->raise();
+    applyEnvironmentCompatibilityMode();
 }
 
 void CView::positionEnvironmentPreviewWidget()
 {
     if(m_environmentPreviewWidget)
         m_environmentPreviewWidget->move(12, 12);
+}
+
+void CView::applyEnvironmentCompatibilityMode()
+{
+    if(!m_openGlesCompatibility || !m_environmentPreviewMode || !m_pSettings)
+        return;
+
+    // Qt 5's ANGLE fallback exposes only OpenGL ES 2.0. The desktop Full
+    // environment path relies on shadow-map framebuffer formats and sky-pass
+    // state that ES2 rejects (GL_INVALID_OPERATION/GL_INVALID_ENUM). Keep
+    // ANGLE useful as an explicit compatibility renderer instead of silently
+    // presenting a broken Full option.
+    if(QStandardItemModel* model = qobject_cast<QStandardItemModel*>(
+            m_environmentPreviewMode->model()))
+    {
+        if(QStandardItem* fullEnvironment = model->item(2))
+        {
+            fullEnvironment->setEnabled(false);
+            fullEnvironment->setText(tr("Full environment (unavailable in ANGLE)"));
+            fullEnvironment->setToolTip(tr(
+                "ANGLE uses OpenGL ES 2.0; resource sky and shadow maps require the desktop renderer."));
+        }
+    }
+
+    const COptInt* option = dynamic_cast<const COptInt*>(m_pSettings->opt("renderLightingMode"));
+    m_environmentPreviewSyncing = true;
+    m_environmentPreviewMode->setCurrentIndex(option
+        ? qBound(0, option->value(), 1) : 1);
+    m_environmentPreviewSyncing = false;
+    m_environmentPreviewMode->setToolTip(tr(
+        "ANGLE compatibility renderer: Unlit and Simple shading are available."));
 }
 
 void CView::syncEnvironmentPreviewWidget(float mapTimeHours)
@@ -698,8 +730,9 @@ void CView::syncEnvironmentPreviewWidget(float mapTimeHours)
         minutes = (storedTime->value() / 100) * 60 + qMin(59, storedTime->value() % 100);
     const COptInt* mode = dynamic_cast<const COptInt*>(m_pSettings->opt("renderLightingMode"));
     m_environmentPreviewSyncing = true;
+    const int maximumMode = m_openGlesCompatibility ? 1 : 2;
     m_environmentPreviewMode->setCurrentIndex(
-        qBound(0, mode ? mode->value() : 2, 2));
+        qBound(0, mode ? mode->value() : maximumMode, maximumMode));
     const bool timeEnabled = m_environmentPreviewMode->currentIndex() == 2;
     m_environmentPreviewTimeLabel->setEnabled(timeEnabled);
     m_environmentPreviewTime->setEnabled(timeEnabled);
@@ -968,6 +1001,8 @@ void CView::initializeGL()
     ei::gl::Enable(GL_DEPTH_TEST);
     //ei::gl::Enable(GL_CULL_FACE); //draw only front faces (disable if need draw both sides)
     const QOpenGLContext* initialContext = QOpenGLContext::currentContext();
+    m_openGlesCompatibility = initialContext && initialContext->isOpenGLES();
+    applyEnvironmentCompatibilityMode();
     const bool fixedAlphaTest = initialContext && !initialContext->isOpenGLES();
     if(fixedAlphaTest)
     {
@@ -1001,8 +1036,12 @@ void CView::initializeGL()
         ei::log(eLogWarning, "Profile sky geometry unavailable: " + skyDiagnostic);
     const COptInt* shadowQualityOption = m_pSettings
         ? dynamic_cast<const COptInt*>(m_pSettings->opt("renderShadowQuality")) : nullptr;
-    ensureShadowFramebuffers(qBound(0,
-        shadowQualityOption ? shadowQualityOption->value() : 2, 2));
+    if(!m_openGlesCompatibility)
+        ensureShadowFramebuffers(qBound(0,
+            shadowQualityOption ? shadowQualityOption->value() : 2, 2));
+    else
+        ei::log(eLogInfo,
+            "Full environment disabled on ANGLE/OpenGL ES 2.0; shadow atlases were not created");
     // QOpenGLFramebufferObject construction may leave its newly-created FBO
     // bound. Desktop QGLWidget drivers commonly repair this before paintGL,
     // while ANGLE preserves the binding; the first scene frame would then be
@@ -2463,7 +2502,10 @@ void CView::draw()
     };
     const COptInt* lightingModeOption = m_pSettings
         ? dynamic_cast<const COptInt*>(m_pSettings->opt("renderLightingMode")) : nullptr;
-    const int lightingMode = qBound(0, lightingModeOption ? lightingModeOption->value() : 2, 2);
+    const int requestedLightingMode = qBound(0,
+        lightingModeOption ? lightingModeOption->value() : 2, 2);
+    const int lightingMode = m_openGlesCompatibility
+        ? qMin(requestedLightingMode, 1) : requestedLightingMode;
     const bool environmentEnabled = lightingMode == 2;
     // The viewport lighting-model selector owns environment activation. Keep
     // the resource sky in Full environment and out of the compatibility
@@ -2475,7 +2517,8 @@ void CView::draw()
         ? dynamic_cast<const COptInt*>(m_pSettings->opt("renderShadowQuality")) : nullptr;
     const int shadowQuality = qBound(0,
         shadowQualityOption ? shadowQualityOption->value() : 2, 2);
-    const bool shadowsEnabled = shadowQuality > 0
+    const bool shadowsEnabled = environmentEnabled && !m_openGlesCompatibility
+        && shadowQuality > 0
         && ensureShadowFramebuffers(shadowQuality);
     const COptInt* shadowDistanceOption = m_pSettings
         ? dynamic_cast<const COptInt*>(m_pSettings->opt("renderShadowDistance")) : nullptr;

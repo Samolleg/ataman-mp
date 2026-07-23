@@ -253,6 +253,7 @@ private:
                        const CViewFrustum* frustum);
     bool ensureParticleRendererInitialized();
     void initEnvironmentPreviewWidget();
+    void applyEnvironmentCompatibilityMode();
     void positionEnvironmentPreviewWidget();
     void syncEnvironmentPreviewWidget(float mapTimeHours);
     void applyEnvironmentUniforms(QOpenGLShaderProgram& program,
@@ -407,6 +408,7 @@ private:
     QComboBox* m_environmentPreviewMode{nullptr};
     QSlider* m_environmentPreviewTime{nullptr};
     bool m_environmentPreviewSyncing{false};
+    bool m_openGlesCompatibility{false};
     int m_openGlDiagnosticFramesRemaining{0};
     quint64 m_openGlDiagnosticFrame{0};
     QString m_openGlDiagnosticReason;
