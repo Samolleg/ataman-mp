@@ -61,6 +61,7 @@
 #include "render_queue.h"
 #include "render_environment.h"
 #include "shadow_cascade.h"
+#include "particle_animation.h"
 #include "part.h"
 #include "objects/light.h"
 #include "objects/particle.h"
@@ -110,7 +111,7 @@ SParticleVisualStyle particleVisualStyle(uint kind)
     switch(kind)
     {
     case 8192: return {nullptr, QVector4D(1.0f, 0.42f, 0.12f, 0.88f), 0.75f, 0.20f, true}; // Fireball
-    case 8193: return {"firesmoke", QVector4D(1.0f, 0.58f, 0.22f, 0.92f), 1.25f, 0.18f, true};
+    case 8193: return {"tendrismoke", QVector4D(1.0f, 1.0f, 1.0f, 0.92f), 1.25f, 0.18f, true};
     case 8194:
     case 8195:
     case 8208:
@@ -120,7 +121,7 @@ SParticleVisualStyle particleVisualStyle(uint kind)
         return {nullptr, QVector4D(1.0f, 0.48f, 0.12f, 0.86f), 1.15f, 0.18f, true};
     case 8196:
     case 8197:
-        return {"tendrismoke", QVector4D(0.58f, 0.58f, 0.58f, 0.62f), 1.55f, 0.42f, false};
+        return {"tendrismoke", QVector4D(1.0f, 1.0f, 1.0f, 0.72f), 1.55f, 0.42f, false};
     case 8198:
     case 8263:
         return {nullptr, QVector4D(0.28f, 1.0f, 0.42f, 0.70f), 1.1f, 0.26f, true};
@@ -2327,73 +2328,41 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
     };
 
     const auto drawFireSmoke = [&](const QVector3D& origin, float authoredScale,
-                                   uint seed, bool selected, bool smokeOnly)
+                                   uint seed, bool selected, uint kind)
     {
         const float baseScale = qBound(0.25f, authoredScale, 8.0f);
-        const float seedPhase = float(seed % 997u) * 0.017f;
+        const int logicalTick = int(std::floor(timeSeconds
+            * float(ei::particle::kLogicalTicksPerSecond)));
+        const ei::particle::Family family = ei::particle::familyForKind(kind);
+        QOpenGLTexture* atlas = tendrilSmokeTexture
+            ? tendrilSmokeTexture : fireSmokeTexture;
 
-        // The shipped firesmoke atlas is 4x2 64px smoke cells in its top half
-        // and two 128px flame frames in its bottom half. QImage rows are
-        // uploaded directly, so the negative V extent preserves authored
-        // top-to-bottom orientation rather than displaying cells upside down.
-        for(int i = 4; i >= 0; --i)
+        // game.exe's CampFire constructor creates six records with a 32-tick
+        // life. Frames 0..7 are the authored flame sequence; frames 8..14 are
+        // smoke and advance once per four logical ticks. Render the complete
+        // 4x4 cells: the texture already contains its silhouette and alpha.
+        for(int slot = ei::particle::kEmitterSlots - 1; slot >= 0; --slot)
         {
-            const float age = std::fmod(timeSeconds * 0.19f
-                                        + float(i) * 0.2f + seedPhase, 1.0f);
-            const int cell = (int(timeSeconds * 7.0f + seedPhase * 11.0f)
-                              + i * 3) & 7;
-            const int column = cell & 3;
-            const int row = cell >> 2;
-            const QVector4D uv(float(column) * 0.25f,
-                               float(row + 1) * 0.25f, 0.25f, -0.25f);
-            const float sway = qSin(timeSeconds * 1.3f + seedPhase + float(i))
-                * (0.08f + age * 0.18f) * baseScale;
-            const QVector3D center = origin + cameraUp * ((0.85f + age * 2.7f) * baseScale)
-                + cameraRight * sway;
-            const float alpha = (1.0f - age) * (selected ? 0.82f : 0.58f);
-            QOpenGLTexture* smokeTexture = smokeOnly && tendrilSmokeTexture
-                ? tendrilSmokeTexture : fireSmokeTexture;
-            drawSprite(center, baseScale * (0.30f + age * 0.48f), 1.18f,
-                       0.0f, QVector4D(selected ? 0.55f : 0.72f,
-                                      selected ? 0.85f : 0.64f,
-                                      selected ? 1.0f : 0.56f, alpha),
-                       smokeTexture, uv, false, smokeTexture == nullptr, 0.2f);
-        }
-
-        if(smokeOnly)
-            return;
-        const float flicker = 0.93f + 0.09f * qSin(timeSeconds * 13.0f + seedPhase);
-        const QVector4D flameTint = selected
-            ? QVector4D(0.35f, 0.88f, 1.0f, 0.94f)
-            : QVector4D(1.0f, 0.96f, 0.88f, 0.94f);
-        // FireSmoke's lower half is one continuous procedural source field,
-        // not a pair of animation frames.  A soft central sample supplies the
-        // connected hot body while smaller rising samples reproduce the
-        // particle system's broken-up flame edge without exposing rectangular
-        // atlas regions.
-        drawSprite(origin + cameraUp * (0.48f * baseScale),
-                   baseScale * 0.72f * flicker, 1.55f, 0.0f, flameTint,
-                   fireSmokeTexture, QVector4D(0.0f, 1.0f, 1.0f, -0.5f),
-                   true, true, 0.16f);
-        for(int i = 0; i < 12; ++i)
-        {
-            const float age = std::fmod(timeSeconds * 0.82f
-                                        + float(i) / 12.0f + seedPhase, 1.0f);
-            const float wave = qSin(seedPhase * 3.1f + float(i) * 2.37f
-                                    + timeSeconds * (2.1f + float(i % 3) * 0.2f));
-            const float x = wave * (0.10f + age * 0.20f) * baseScale;
-            const float y = (0.20f + age * 1.15f) * baseScale;
-            const float size = baseScale * (0.25f + (1.0f - age) * 0.20f);
-            const int column = (i * 5 + int(seed % 7u)) & 7;
-            const int row = (i + int(seed % 3u)) & 3;
-            const QVector4D uv(float(column) * 0.125f,
-                               1.0f - float(row) * 0.125f,
-                               0.125f, -0.125f);
-            QVector4D tint = flameTint;
-            tint.setW((1.0f - age) * (selected ? 0.88f : 0.68f));
-            drawSprite(origin + cameraRight * x + cameraUp * y,
-                       size, 1.65f + age * 0.45f, wave * 0.08f, tint,
-                       fireSmokeTexture, uv, true, true, 0.14f);
+            const ei::particle::FrameSample frame = ei::particle::sample(
+                family, logicalTick, slot, seed);
+            const float age = frame.normalizedAge;
+            const float lateralX = ei::particle::signedNoise(seed, slot, 0x91e10da5u);
+            const float lateralY = ei::particle::signedNoise(seed, slot, 0x6d2b79f5u);
+            const float rise = frame.smoke
+                ? (0.70f + age * 1.65f) : (0.30f + age * 0.85f);
+            const QVector3D center = origin
+                + QVector3D(lateralX * 0.20f * baseScale,
+                            lateralY * 0.20f * baseScale,
+                            rise * baseScale);
+            const float spriteScale = baseScale * (frame.smoke
+                ? (0.62f + age * 0.38f) : (0.78f + age * 0.12f));
+            QVector4D tint = selected
+                ? QVector4D(0.42f, 0.88f, 1.0f, 0.92f)
+                : QVector4D(1.0f, 1.0f, 1.0f,
+                            frame.smoke ? (0.74f * (1.0f - age * 0.35f)) : 0.96f);
+            drawSprite(center, spriteScale, 1.0f, 0.0f, tint, atlas,
+                       ei::particle::atlasUv(frame.frame), !frame.smoke,
+                       atlas == nullptr, 0.18f);
         }
     };
 
@@ -2414,7 +2383,7 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
                 // authored TORCH_PTLINK only adds this attached effect.
                 drawFireSmoke(torch->particleWorldPosition(), 1.0f,
                               torch->mapId(), torch->nodeState() == ENodeState::eSelect,
-                              false);
+                              8193u);
                 continue;
             }
 
@@ -2445,7 +2414,7 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
                 drawFireSmoke(center, authoredScale * style.scaleMultiplier,
                               particle->mapId(),
                               particle->nodeState() == ENodeState::eSelect,
-                              isPersistentSmokeParticle(particle->kind()));
+                              particle->kind());
                 continue;
             }
             drawSprite(center, authoredScale * style.scaleMultiplier * pulse,
