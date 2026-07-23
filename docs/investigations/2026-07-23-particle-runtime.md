@@ -17,8 +17,9 @@ The investigation follows the Evil Islands modding rule: when documentation is m
 - Latest temporary disassembly report at time of writing: `particle-disassembly-10.txt`
 - Repository-local byte evidence report: `scripts/particle_binary_report.py`.
   Its stable fixture rejects executable fingerprint drift and pins the
-  scheduler vtable slot, callback sites, blend switch, torch attachment,
-  callback ranges, and exact constants without modifying the executable.
+  scheduler vtable slot, callback sites, blend setup and switch, logical-quant
+  loop, global render-time particle lookup, callback ranges, and exact
+  constants without modifying the executable.
 
 All virtual addresses below apply only to this fingerprint.
 
@@ -68,13 +69,26 @@ nearest source to torch 1365 is about 49.98 world units away; the nearest to
 torch 331 is about 13.33 units away. Therefore the torch's attached visual
 cannot be attributed to an overlapping authored `PARTICL` record.
 
-The native torch attachment path at `0x40EB60..0x40ECA5` checks its active
-flag, performs one lookup for particle type `0x2001`, and applies one object
-transform to the returned effect. There are no additional particle-type
-lookups in that path. Combined with the authored proximity result and the
-single TendriSmoke frame state machine, this establishes that a torch's fire
-core, peripheral particles, and smoke are different ages/frames of one emitter
-population, not multiple co-located authored or attached emitters.
+The routine at `0x40EB60..0x40ECA5` performs one lookup for particle type
+`0x2001`, but its confirmed caller at `0x4575C1` invokes it on the global
+object at `0x79B2A8` under a render flag. It is therefore a global render-time
+path, not a proven `CTorch` construction or attachment path. It cannot
+establish the number of emitters used by a torch. The earlier single-emitter
+interpretation of this routine is rejected.
+
+The actual client-side torch class is fingerprinted by
+`CTorchObjectClientSpecific` at `0x78F7BC`, returned by vtable method
+`0x52D190`. Its effect setup method at `0x52D330` first clears the prior
+effect held in the single pointer at object `+0x5C`, calls the particle factory
+`0x498400` exactly once with the client record's kind field `+0x20`, places the
+result at the torch attachment position, scales it by client field `+0x28`
+(the exact server/authored source of that field remains to be traced), and
+attaches it to the torch object. The class contains no second particle-effect
+pointer or second factory call in this path. Method `0x52D3F0` then invokes
+that emitter's vtable slot `+0x18` exactly 60 times, prewarming the effect
+before its first ordinary render. This new class-specific evidence, rather
+than the rejected global lookup interpretation, establishes that a torch's
+fire and smoke atlas stages are one emitter population.
 
 ### Fingerprinted `gz10g` lava records
 
@@ -135,8 +149,13 @@ For ordinary TendriSmoke the base constructor initializes `+0x128 = 1`,
 `0x485480` multiplies `+0x128` along with the spawn bounds, initial scale,
 vertical velocity, and displacement threshold. Field `+0x150 = 0` makes the
 Campfire family select render state 5/value 6, not the value-2 path used when
-`+0x150 = 1`. The Direct3D meaning of the engine's state selector still needs
-to be traced before naming those paths source/destination blend factors.
+`+0x150 = 1`. Direct surrounding device calls at `0x56A1CD..0x56A1F1` set
+Direct3D render state 19/source blend to 5/`SRCALPHA` and state 20/destination
+blend to 6/`INVSRCALPHA`. The internal state-5 switch changes that destination
+factor to 2/`ONE` for `+0x150 = 1` and restores 6/`INVSRCALPHA` for
+`+0x150 = 0`. Thus ordinary TendriSmoke uses standard alpha blending
+`SRCALPHA, INVSRCALPHA`; the alternate value-1 family uses additive blending
+`SRCALPHA, ONE`.
 
 ## Spawn callback (`0x48E9E0`)
 
@@ -209,6 +228,27 @@ six particles, subject to allocator failure and the 500-active cap. The
 previous six-slot editor model is therefore rejected: six is an emission-rate
 floor, not a total record count.
 
+The main logical-quant loop at `0x4572FC..0x45759A` uses the integer at
+`0x78FF34`, which is exactly 55 milliseconds. At `0x457368` it calls world
+quant `0x5641F0`; that function calls particle batch scheduler `0x498480` once
+at `0x564485`. The batch iterates registered effects and invokes each eligible
+emitter's vtable slot `+0x18` at `0x4984E6`, which resolves to this scheduler
+for the particle vtable. After the world quant, the main loop subtracts 55
+milliseconds, multiplies the interval by the float at `0x73C348`, exactly
+`0.0181818176060915`, and calls `0x40FB30`. It loops back and repeats the
+entire world-quant chain for every accumulated 55 ms interval. Ordinary
+steady-state particle scheduling is therefore once per 55 ms logical quant,
+approximately 18.1818 Hz.
+
+Batch eligibility is exact but its flag names remain unknown. When the byte
+argument passed from world field `+0x6C` is zero, the batch invokes every
+registered emitter. When it is nonzero, it invokes only emitters whose object
+flags at `+0x08` include bit `0x08`. A scheduler return of zero causes the
+batch to queue and then remove/release that effect; nonzero retains it. The
+main loop reaches world quant when predicate `0x566E20` is true or predicate
+`0x566EC0` is false. These conditions must remain structural labels until
+their gameplay meanings are independently established.
+
 Particle retirement is two-stage. The update callback returning zero causes
 the scheduler to set `record +0x60 = 1` after restoring the previous
 position/frame/color snapshot. On the next scheduler traversal, the flagged
@@ -238,7 +278,16 @@ Render preparation around `0x4976B0` and submission around `0x498940/0x498A5D` e
 - `particle +0x48` selects a 16-byte atlas rectangle from emitter array `+0x1D0`.
 - `particle +0x58` and `+0x5C` contain packed colors interpolated using the global frame fraction.
 - Particles are camera-facing billboards before submission.
-- Emitter `+0x150` selects blend state: value 1 drives state 5/value 2; value 0 returns state 5/value 6 after that path.
+- Emitter `+0x150` selects destination blend: value 1 drives additive
+  `SRCALPHA, ONE`; value 0 restores standard alpha
+  `SRCALPHA, INVSRCALPHA`.
+
+The TendriSmoke spawn callback at `0x48E9F4` initializes `particle +0x58` to
+`0xFFFFFFFF`. On successful attachment, `0x496A4A..0x496A53` copies `+0x58`
+to interpolation endpoint `+0x5C`. Both color endpoints are therefore opaque
+white for this family. Its packed-color interpolation adds no tint or alpha
+fade: visible color and transparency come from the sampled texture and the
+standard-alpha blend state, not invented per-age color curves.
 
 The exact scale-growth constant at `0x73CE38` is the IEEE-754 single
 `0x3F87AE14`, or `1.059999942779541`. It replaces the earlier approximate
@@ -254,6 +303,8 @@ Other exact constants used by these callbacks are now fingerprinted:
   vertical velocity;
 - `0x73CD18`: float `0x3E19999A` = `0.15000000596046448`, applied with
   emitter orientation after multiplying current scale and `+0x14C`.
+- `0x73C348`: float `0x3C94F209` = `0.0181818176060915`, the logical-quant
+  normalization multiplied by the 55 ms interval.
 
 ### Atlas rectangles and orientation
 
@@ -278,6 +329,9 @@ orientation is incorrect; it is not a subjective screenshot adjustment.
 - A prior label of these functions as the scheduler was incorrect and must not be propagated.
 - The editor interpretation of `+0xD0 = 6` as six persistent/staggered emitter
   slots is rejected by the scheduler at `0x496EB0`.
+- `0x40EB60..0x40ECA5` is not established as a `CTorch` attachment path. Its
+  confirmed call at `0x4575C1` is a global render-time type-`0x2001` lookup, so
+  it cannot prove that core flame, peripheral flame, and smoke use one emitter.
 - Visual descriptions and captured GIFs are validation targets and search pointers only. They do not establish density, lifetime, blend, color, or movement rules.
 
 ## Current editor mismatch
@@ -291,9 +345,11 @@ The current implementation is still partly inferred:
 
 ## Open questions, in priority order
 
-1. Establish exact meanings of emitter fields `+0x128`, `+0x130`, `+0x134`, `+0x140..+0x14C`, and `+0x150` across multiple factories.
-2. Establish the source and destination blend mapping behind engine render
-   state 5 values 2 and 6, and the initialization of particle color `+0x5C`.
+1. Trace the server/authored sources of torch client fields `+0x20` and
+   `+0x28`; confirm their exact kind and scale values for the fingerprinted
+   `gz1g` torch family.
+2. Establish exact meanings of emitter fields `+0x128`, `+0x130`, `+0x134`,
+   and `+0x140..+0x14C` across multiple factories.
 3. Verify native OpenGL and ANGLE blend/color behavior from identical authored records.
 
 ## Required implementation discipline

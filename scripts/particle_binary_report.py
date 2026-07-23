@@ -14,20 +14,37 @@ from typing import Any
 
 REFERENCE_SHA256 = "BE0FC330035E03983CCE590038CC7F881F1F5D1BCF082717F31776DD4DEE94E2"
 RANGES = {
-    "torch_particle_attachment": (0x40EB60, 0x40ECA5),
+    "global_render_particle_lookup": (0x40EB60, 0x40ECA5),
     "atlas_rectangle_builder": (0x4885B4, 0x488790),
     "spawn_callback": (0x48E9E0, 0x48EC20),
     "update_callback": (0x48EC20, 0x48ED60),
+    "particle_attach_snapshot": (0x496A20, 0x496A60),
     "scheduler": (0x496EB0, 0x4975B0),
+    "particle_batch_scheduler": (0x498480, 0x498620),
     "blend_switch": (0x498A8A, 0x498AC3),
+    "logical_quant_loop": (0x4572FC, 0x45759A),
+    "torch_client_particle_setup": (0x52D330, 0x52D40E),
+    "world_quant_particle_dispatch": (0x5641F0, 0x56448A),
+    "direct3d_particle_blend_setup": (0x56A1CD, 0x56A1F1),
 }
 SITES = {
-    "torch_lookup_type_0x2001": (0x40EBD8, 18),
+    "global_render_lookup_type_0x2001": (0x40EBD8, 18),
+    "global_render_lookup_call": (0x4575AC, 26),
+    "spawn_initial_color_white": (0x48E9EC, 21),
+    "attach_copies_color_endpoint": (0x496A4A, 12),
     "scheduler_update_call": (0x4972F5, 24),
     "scheduler_spawn_call": (0x497514, 24),
     "scheduler_fallback_spawn_call": (0x497575, 24),
+    "main_world_quant_call": (0x457338, 59),
+    "world_particle_batch_call": (0x564471, 25),
+    "batch_emitter_scheduler_call": (0x4984D4, 31),
+    "torch_client_class_name": (0x52D190, 6),
+    "torch_particle_factory_call": (0x52D38E, 18),
+    "torch_particle_prewarm_loop": (0x52D3F0, 30),
     "blend_additive_value_2": (0x498A8A, 29),
     "blend_alpha_value_6": (0x498AA7, 28),
+    "direct3d_source_blend_srcalpha": (0x56A1CD, 18),
+    "direct3d_destination_blend_invsrcalpha": (0x56A1DF, 18),
 }
 CONSTANTS = {
     "half_float": (0x73B86C, "f"),
@@ -36,6 +53,8 @@ CONSTANTS = {
     "half_double": (0x73CC88, "d"),
     "late_motion_float": (0x73CD18, "f"),
     "late_scale_growth_float": (0x73CE38, "f"),
+    "logical_quant_normalization_float": (0x73C348, "f"),
+    "logical_quant_milliseconds": (0x78FF34, "I"),
 }
 
 
