@@ -964,12 +964,27 @@ void CView::initializeGL()
 
     CTextureList::getInstance()->initResource();
     CObjectList::getInstance()->initResource();
-    m_gpuTimer = new QOpenGLTimerQuery(this);
-    if(!m_gpuTimer->create())
+    // Qt 5.12's ANGLE backend does not implement QOpenGLTimerQuery. Calling
+    // create() there emits "Not supported on OpenGL ES" and corrupts the
+    // platform query object's teardown state (observed as c0000374 in
+    // ntdll immediately after initializeGL). Do not construct the wrapper at
+    // all on GLES; CPU submission counters remain available.
+    const QOpenGLContext* currentContext = QOpenGLContext::currentContext();
+    if(currentContext && currentContext->isOpenGLES())
     {
-        delete m_gpuTimer;
         m_gpuTimer = nullptr;
-        ei::log(eLogWarning, "GPU timer queries are unavailable; render counters will report CPU submission only");
+        ei::log(eLogInfo,
+                "GPU timer queries disabled on OpenGL ES/ANGLE");
+    }
+    else
+    {
+        m_gpuTimer = new QOpenGLTimerQuery(this);
+        if(!m_gpuTimer->create())
+        {
+            delete m_gpuTimer;
+            m_gpuTimer = nullptr;
+            ei::log(eLogWarning, "GPU timer queries are unavailable; render counters will report CPU submission only");
+        }
     }
     ei::setCrashContext("idle");
     //doneCurrent();
