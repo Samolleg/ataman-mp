@@ -3,7 +3,7 @@
     "particle": 8,
     "torch": 4
   },
-  "format": "ei-particle-mob-report-v1",
+  "format": "ei-particle-mob-report-v2",
   "records": [
     {
       "fields": [
@@ -252,6 +252,56 @@
       "torch_id": 1365,
       "torch_name": "Camp fire 00-1365",
       "torch_offset": 619105
+    }
+  ],
+  "world_settings": [
+    {
+      "fields": [
+        {
+          "length": 20,
+          "offset": 71947,
+          "tag": "WS_WIND_DIR",
+          "tag_id": "0x0000ABD1",
+          "value": [
+            -0.7281999588012695,
+            -0.6853646636009216,
+            0.0
+          ]
+        },
+        {
+          "length": 12,
+          "offset": 71967,
+          "tag": "WS_WIND_STR",
+          "tag_id": "0x0000ABD2",
+          "value": 0.20000000298023224
+        },
+        {
+          "length": 12,
+          "offset": 71979,
+          "tag": "WS_TIME",
+          "tag_id": "0x0000ABD3",
+          "value": 6.400000095367432
+        },
+        {
+          "length": 12,
+          "offset": 71991,
+          "tag": "WS_AMBIENT",
+          "tag_id": "0x0000ABD4",
+          "value": 0.20000000298023224
+        },
+        {
+          "length": 12,
+          "offset": 72003,
+          "tag": "WS_SUN_LIGHT",
+          "tag_id": "0x0000ABD5",
+          "value": 0.6000000238418579
+        }
+      ],
+      "length": 76,
+      "offset": 71939,
+      "raw_record_hex": "D0AB00004C000000D1AB000014000000506B3ABF0F742FBF00000000D2AB00000C000000CDCC4C3ED3AB00000C000000CDCCCC40D4AB00000C000000CDCC4C3ED5AB00000C0000009A99193F",
+      "record_type": "world_settings",
+      "sha256": "79349A8A729F888B9D0C937F8CA028C89553AA2399B0BC533870F9DB92D75B5C"
     }
   ]
 }

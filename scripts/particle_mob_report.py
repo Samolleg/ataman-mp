@@ -15,6 +15,12 @@ from typing import Any, Iterator
 
 TAGS = {
     0xA000: "OBJECT_DB_FILE",
+    0xABD0: "WORLD_SET",
+    0xABD1: "WS_WIND_DIR",
+    0xABD2: "WS_WIND_STR",
+    0xABD3: "WS_TIME",
+    0xABD4: "WS_AMBIENT",
+    0xABD5: "WS_SUN_LIGHT",
     0xB000: "OBJECT_SECTION",
     0xB001: "OBJECT",
     0xB002: "NID",
@@ -51,11 +57,12 @@ TAGS = {
     0xBBBF0003: "TORCH_SOUND",
 }
 
-CONTAINERS = {0xA000, 0xB000, 0xB001, 0xDD01, 0xBBBF0000}
+WORLD_SET_TAG = 0xABD0
+CONTAINERS = {0xA000, WORLD_SET_TAG, 0xB000, 0xB001, 0xDD01, 0xBBBF0000}
 RECORD_TYPES = {0xDD01: "particle", 0xBBBF0000: "torch"}
 DWORD_TAGS = {0xB002, 0xB003, 0xB012, 0xDD02, 0xDD06}
-FLOAT_TAGS = {0xDD07, 0xBBBF0001}
-PLOT_TAGS = {0xB009, 0xB00C, 0xDD03, 0xBBBF0002}
+FLOAT_TAGS = {0xABD2, 0xABD3, 0xABD4, 0xABD5, 0xDD07, 0xBBBF0001}
+PLOT_TAGS = {0xABD1, 0xB009, 0xB00C, 0xDD03, 0xBBBF0002}
 QUAT_TAGS = {0xB00A}
 BYTE_TAGS = {0xB011, 0xB013, 0xB014}
 STRING_TAGS = {
@@ -143,6 +150,40 @@ def collect_records(data: bytes, include_raw: bool = False) -> list[dict[str, An
     return records
 
 
+def collect_world_settings(data: bytes, include_raw: bool = False) -> list[dict[str, Any]]:
+    settings: list[dict[str, Any]] = []
+
+    def walk(start: int, end: int) -> None:
+        for tag, offset, payload_start, node_end in iter_nodes(data, start, end):
+            if tag == WORLD_SET_TAG:
+                fields = []
+                for child_tag, child_offset, child_payload, child_end in iter_nodes(
+                        data, payload_start, node_end):
+                    fields.append({
+                        "tag": TAGS.get(child_tag, f"UNKNOWN_0x{child_tag:08X}"),
+                        "tag_id": f"0x{child_tag:08X}",
+                        "offset": child_offset,
+                        "length": child_end - child_offset,
+                        "value": decode_leaf(child_tag, data[child_payload:child_end]),
+                    })
+                record_bytes = data[offset:node_end]
+                result: dict[str, Any] = {
+                    "record_type": "world_settings",
+                    "offset": offset,
+                    "length": node_end - offset,
+                    "sha256": sha256(record_bytes),
+                    "fields": fields,
+                }
+                if include_raw:
+                    result["raw_record_hex"] = record_bytes.hex().upper()
+                settings.append(result)
+            elif tag in CONTAINERS:
+                walk(payload_start, node_end)
+
+    walk(0, len(data))
+    return settings
+
+
 def field_map(record: dict[str, Any]) -> dict[str, Any]:
     return {field["tag"]: field["value"] for field in record["fields"]}
 
@@ -188,6 +229,7 @@ def report(path: Path, include_raw: bool = False,
            selected_ids: set[int] | None = None) -> dict[str, Any]:
     data = path.read_bytes()
     records = collect_records(data, include_raw)
+    world_settings = collect_world_settings(data, include_raw)
     all_counts = {
         "particle": sum(record["record_type"] == "particle" for record in records),
         "torch": sum(record["record_type"] == "torch" for record in records),
@@ -195,11 +237,12 @@ def report(path: Path, include_raw: bool = False,
     if selected_ids is not None:
         records = [record for record in records if record_id(record) in selected_ids]
     return {
-        "format": "ei-particle-mob-report-v1",
+        "format": "ei-particle-mob-report-v2",
         "source": {"path": str(path.resolve()), "size": len(data), "sha256": sha256(data)},
         "counts": all_counts,
         "selection": sorted(selected_ids) if selected_ids is not None else None,
         "records": records,
+        "world_settings": world_settings,
         "torch_particle_proximity": add_associations(records),
     }
 

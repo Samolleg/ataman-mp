@@ -88,6 +88,22 @@ class ParticleBinaryReportTests(unittest.TestCase):
             "8B0DDCF57A00",
             fixture["sites"]["scheduler_refreshes_motion_fields"]["bytes"],
         )
+        self.assertEqual(
+            fixture["sites"]["setwind_metadata_record"]["bytes"],
+            "B8CF78001E0000000000000088D67800",
+        )
+        self.assertIn(
+            "8D41248B3289308B7204897004",
+            fixture["sites"]["world_wind_setter_fields"]["bytes"],
+        )
+        self.assertIn(
+            "B9B8F57A00E858A9EFFF",
+            fixture["sites"]["world_wind_script_stream_and_call"]["bytes"],
+        )
+        self.assertIn(
+            "C781C801000000986600",
+            fixture["sites"]["world_wind_handler_registration"]["bytes"],
+        )
         self.assertIn(
             "8B15E8F57A00",
             fixture["sites"]["scheduler_refreshes_motion_fields"]["bytes"],

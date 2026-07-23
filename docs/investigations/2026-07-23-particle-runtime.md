@@ -170,7 +170,31 @@ For ordinary TendriSmoke the base constructor initializes `+0x128 = 1`,
 `+0x150 = 0`; this factory branch does not override them. The scheduler later
 refreshes `+0x140..+0x14C` from globals `0x7AF5DC..0x7AF5E8` at
 `0x496ECC..0x496F17` on every emitter quant, so their constructor zeros are not
-the runtime late-life motion values. The scale mutator at
+the runtime late-life motion values. These four globals are now established as
+the world wind direction and strength, rather than an unnamed orientation
+vector. The native common setter at `0x55FCB0..0x55FCD0` copies a three-float
+vector into object `+0x24..+0x2C` and the following float into `+0x30`. The
+world wrapper at `0x564190` applies that setter to the world object and forwards
+the same values to its client and `CWeather` member. A VM handler at
+`0x669800..0x669841` reads exactly 12 bytes plus 4 bytes from the script stream,
+sets `ECX = 0x7AF5B8`, and calls that wrapper. Its function pointer is installed
+at `0x6673FE..0x66740B`; the script metadata record at `0x78C460` independently
+names `SetWind`, assigns ID 30, and gives signature `ffff`.
+
+The authored-data path independently fixes the same field semantics. Native
+MOB dispatch recognizes `WORLD_SET` tag `0xABD0` at `0x481F6C`; its branch at
+`0x4821DC..0x48230D` reads `WS_WIND_DIR` (`0xABD1`) as three floats and
+`WS_WIND_STR` (`0xABD2`) as the next float before calling the same common setter
+through `0x58EE20`. The strength path is clamped to `[0,1]`; immediately before
+that call the authored value is also limited against global `0x79BE58`, whose
+higher-level configuration provenance is not needed to identify these fields.
+The fingerprinted `gz1g` `zone1.mob` record contains direction
+`(-0.7281999588012695, -0.6853646636009216, 0)` and authored strength
+`0.20000000298023224`. Therefore ordinary TendriSmoke late frames receive the
+current world wind direction in `+0x140..+0x148` and current wind strength in
+`+0x14C` every logical quant.
+
+The scale mutator at
 `0x485480` multiplies `+0x128` along with the spawn bounds, initial scale,
 vertical velocity, and displacement threshold. Field `+0x150 = 0` makes the
 Campfire family select render state 5/value 6, not the value-2 path used when
@@ -227,8 +251,7 @@ Confirmed behavior:
     `newScale * emitter[+0x14C] * 0.15000000596046448 *
     emitter[+0x140..+0x148]`, component by component. The motion constant is
     binary32 `9A 99 19 3E` at `0x73CD18`. The emitter vector/scalar are the
-    four scheduler-refreshed globals described above; their higher-level engine
-    semantics remain unlabelled.
+    four scheduler-refreshed world-wind globals described above.
 
 This is multiplicative scale evolution, not endpoint interpolation inside the
 update callback. Because ordinary TendriSmoke has frame delay one, the atlas
@@ -409,10 +432,7 @@ The current implementation is still partly inferred:
 
 ## Open questions, in priority order
 
-1. Label the higher-level engine meaning and update provenance of globals
-   `0x7AF5DC..0x7AF5E8`, which the scheduler copies into ordinary TendriSmoke
-   `+0x140..+0x14C`; the exact consumers/formula are now established. Across
-   other factories, separately label `+0x128` and the type-`0x2010`-only
+1. Across other factories, separately label `+0x128` and the type-`0x2010`-only
    `+0x130..+0x138` vector without applying them to ordinary Campfire.
 2. Verify native OpenGL and ANGLE blend/color behavior from identical authored records.
 
