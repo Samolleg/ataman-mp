@@ -38,6 +38,12 @@ struct SRenderFrameCounters
     quint64 queueCollectNanoseconds{0};
     quint64 queueSortNanoseconds{0};
     quint64 queueDrawNanoseconds{0};
+    quint64 shadowCandidates{0};
+    quint64 shadowItems{0};
+    quint64 shadowPasses{0};
+    quint64 shadowStaticRebuilds{0};
+    quint64 shadowDynamicRebuilds{0};
+    quint64 shadowNanoseconds{0};
 };
 
 struct SRenderFrameMetadata
@@ -59,6 +65,8 @@ struct SRenderFrameMetadata
     bool logicEnabled{false};
     bool helpEnabled{false};
     bool frustumCullingEnabled{true};
+    int shadowQuality{0};
+    int shadowAtlasResolution{0};
 };
 
 class RenderPerformanceContext

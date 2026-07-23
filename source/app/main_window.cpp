@@ -19,6 +19,7 @@
 #include <QProgressDialog>
 #include <QMouseEvent>
 #include <QDockWidget>
+#include <QToolBar>
 #include <QFile>
 #include <QTimer>
 #include <QEventLoop>
@@ -534,6 +535,7 @@ MainWindow::MainWindow(QWidget* parent) :
     QAction* gameAndModSetup = new QAction(tr("Game and Mod Setup..."), this);
     QAction* compareMobFiles = new QAction(tr("Compare MOB Files..."), this);
     QAction* showUnitTexture = new QAction(tr("Show Selected Unit Final Texture..."), this);
+    QAction* captureShadowDiagnostics = new QAction(tr("Capture Shadow Diagnostics..."), this);
     QAction* validateMobFamily = new QAction(tr("Validate Active MOB Family"), this);
     QAction* validateCurrentMob = new QAction(tr("Validate Current MOB Only"), this);
     QAction* validateSelectedMobs = new QAction(tr("Validate Selected MOB Files..."), this);
@@ -555,6 +557,7 @@ MainWindow::MainWindow(QWidget* parent) :
     m_ui->menuTools->addAction(m_stopMapTestAction);
     m_ui->menuTools->addAction(openBackupFolder);
     m_ui->menuTools->addAction(openLogsFolder);
+    m_ui->menuTools->addAction(captureShadowDiagnostics);
     m_ui->menuTools->addAction(openTestRunsFolder);
     m_ui->menuTools->addAction(openBugReportingGuide);
     viewMenu->addAction(showUnitTexture);
@@ -571,6 +574,21 @@ MainWindow::MainWindow(QWidget* parent) :
         if(!QDesktopServices::openUrl(QUrl::fromLocalFile(path)))
             QMessageBox::warning(this, tr("Endurance logs"),
                 tr("Could not open the logs folder:\n%1").arg(path));
+    });
+    connect(captureShadowDiagnostics, &QAction::triggered, this, [this]()
+    {
+        if(!m_pView)
+            return;
+        QString error;
+        const QString path = m_pView->captureShadowDiagnostics(&error);
+        if(path.isEmpty())
+        {
+            QMessageBox::warning(this, tr("Shadow diagnostics"), error);
+            return;
+        }
+        QMessageBox::information(this, tr("Shadow diagnostics"),
+            tr("Shadow diagnostics captured. Send the entire folder:\n%1").arg(path));
+        QDesktopServices::openUrl(QUrl::fromLocalFile(path));
     });
     connect(openTestRunsFolder, &QAction::triggered, this, [this]()
     {
@@ -895,6 +913,97 @@ MainWindow::MainWindow(QWidget* parent) :
         }
     }, Qt::DirectConnection);
     initShortcuts();
+    QAction* viewportOnlyAction = new QAction(tr("Maximize viewport"), this);
+    viewportOnlyAction->setObjectName("actionViewportOnly");
+    viewportOnlyAction->setShortcut(QKeySequence(Qt::Key_F11));
+    viewportOnlyAction->setShortcutContext(Qt::ApplicationShortcut);
+    addAction(viewportOnlyAction);
+    connect(viewportOnlyAction, &QAction::triggered, this, [this, viewportOnlyAction]()
+    {
+        const bool entering = !property("enduranceViewportOnly").toBool();
+        setProperty("enduranceViewportOnly", entering);
+        viewportOnlyAction->setText(entering
+            ? tr("Restore editor UI")
+            : tr("Maximize viewport"));
+        if(entering)
+        {
+            setProperty("enduranceViewportSplitterState",
+                        m_ui->workspaceSplitter->saveState());
+            setProperty("enduranceMenuVisible", menuBar()->isVisible());
+            setProperty("enduranceStatusVisible", statusBar()->isVisible());
+            for(QDockWidget* dock : findChildren<QDockWidget*>())
+            {
+                dock->setProperty("enduranceWasVisible", dock->isVisible());
+                dock->hide();
+            }
+            for(QToolBar* toolbar : findChildren<QToolBar*>())
+            {
+                toolbar->setProperty("enduranceWasVisible", toolbar->isVisible());
+                toolbar->hide();
+            }
+            menuBar()->hide();
+            statusBar()->hide();
+            m_ui->workspaceSplitter->setSizes({1, 0});
+            if(QWidget* toolbar = m_ui->workspaceContainer->findChild<QWidget*>(
+                    "mapTestToolbar", Qt::FindDirectChildrenOnly))
+            {
+                toolbar->setProperty("enduranceWasVisible", toolbar->isVisible());
+                toolbar->hide();
+            }
+            if(QWidget* toolbar = m_ui->workspaceContainer->findChild<QWidget*>(
+                    "viewportOperationToolbar", Qt::FindDirectChildrenOnly))
+            {
+                toolbar->setProperty("enduranceWasVisible", toolbar->isVisible());
+                toolbar->hide();
+            }
+        }
+        else
+        {
+            const QByteArray splitterState = property(
+                "enduranceViewportSplitterState").toByteArray();
+            if(!splitterState.isEmpty())
+                m_ui->workspaceSplitter->restoreState(splitterState);
+            for(QDockWidget* dock : findChildren<QDockWidget*>())
+                if(dock->property("enduranceWasVisible").toBool())
+                    dock->show();
+            for(QToolBar* toolbar : findChildren<QToolBar*>())
+                if(toolbar->property("enduranceWasVisible").toBool())
+                    toolbar->show();
+            menuBar()->setVisible(property("enduranceMenuVisible").toBool());
+            statusBar()->setVisible(property("enduranceStatusVisible").toBool());
+            if(QWidget* toolbar = m_ui->workspaceContainer->findChild<QWidget*>(
+                    "mapTestToolbar", Qt::FindDirectChildrenOnly))
+                toolbar->setVisible(toolbar->property("enduranceWasVisible").toBool());
+            if(QWidget* toolbar = m_ui->workspaceContainer->findChild<QWidget*>(
+                    "viewportOperationToolbar", Qt::FindDirectChildrenOnly))
+                toolbar->setVisible(toolbar->property("enduranceWasVisible").toBool());
+        }
+        if(m_pView)
+            m_pView->setFocus();
+    });
+    QAction* fullScreenAction = new QAction(tr("Toggle fullscreen"), this);
+    fullScreenAction->setObjectName("actionToggleFullscreen");
+    fullScreenAction->setShortcut(QKeySequence(Qt::Key_F12));
+    fullScreenAction->setShortcutContext(Qt::ApplicationShortcut);
+    addAction(fullScreenAction);
+    connect(fullScreenAction, &QAction::triggered, this, [this]()
+    {
+        if(isFullScreen())
+        {
+            const Qt::WindowStates previous = Qt::WindowStates(
+                property("endurancePreviousWindowState").toInt());
+            showNormal();
+            if(previous.testFlag(Qt::WindowMaximized))
+                showMaximized();
+        }
+        else
+        {
+            setProperty("endurancePreviousWindowState", int(windowState()));
+            showFullScreen();
+        }
+        if(m_pView)
+            m_pView->setFocus();
+    });
     connect(m_settings.get(), &CSettings::shortcutsChanged, this, &MainWindow::initShortcuts);
     m_autosaveTimer = new QTimer(this);
     m_autosaveTimer->setTimerType(Qt::PreciseTimer);
@@ -1803,6 +1912,8 @@ void MainWindow::refreshMapTestContext()
         if(m_mapTestEntry.zoneId.isEmpty() && nameMatches.size() == 1)
             m_mapTestEntry = nameMatches.first();
     }
+    if(m_pView)
+        m_pView->setMapSkyType(m_mapTestEntry.skyType);
     populateEntranceCombo();
     updateCustomSpawnControls();
     updateMapTestAction();

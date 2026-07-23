@@ -1,4 +1,5 @@
 #include "render_queue.h"
+#include "gl_dispatch.h"
 
 #include "part.h"
 #include "render_performance.h"
@@ -7,6 +8,16 @@
 #include <algorithm>
 #include <QOpenGLContext>
 #include <QSurfaceFormat>
+#include <QCryptographicHash>
+
+namespace
+{
+bool supportsFixedFunctionAlphaTest()
+{
+    QOpenGLContext* context = QOpenGLContext::currentContext();
+    return context && !context->isOpenGLES();
+}
+}
 
 RenderQueueContext& RenderQueueContext::instance()
 {
@@ -26,6 +37,7 @@ void RenderQueueContext::begin(QOpenGLShaderProgram* program, const QVector3D& c
     m_instanceBufferPrepared = false;
     m_collecting = program != nullptr;
     m_selectionPass = false;
+    m_shadowOnlyCollection = false;
     m_modelMatrixLocation = program ? program->uniformLocation("u_modelMmatrix") : -1;
     m_colorLocation = program ? program->uniformLocation("u_color") : -1;
     m_instancedLocation = program ? program->uniformLocation("u_instanced") : -1;
@@ -66,6 +78,7 @@ void RenderQueueContext::end()
     flush();
     m_collecting = false;
     m_selectionPass = false;
+    m_shadowOnlyCollection = false;
     m_program = nullptr;
 }
 
@@ -121,7 +134,8 @@ int RenderQueueContext::reserveInstanceBytes(int bytes)
 
 void RenderQueueContext::submit(CPart* part, QOpenGLTexture* texture,
                                 const QMatrix4x4& modelMatrix,
-                                ERenderMaterialClass materialClass, bool highlighted)
+                                ERenderMaterialClass materialClass, bool highlighted,
+                                bool castsShadow, bool dynamicShadow)
 {
     if(!m_collecting || !part || !texture || !part->isDrawable())
         return;
@@ -136,9 +150,136 @@ void RenderQueueContext::submit(CPart* part, QOpenGLTexture* texture,
     item.textureUvScale = part->textureUvScale();
     item.instanceEligible = part->canInstance();
     item.sequence = m_sequence++;
+    item.castsShadow = castsShadow;
+    item.dynamicShadow = dynamicShadow;
+    item.colorVisible = !m_shadowOnlyCollection;
+    item.shadowBoundsCenter = item.instanceMatrix.map(part->localBoundsCenter());
+    const QVector3D scaleX(item.instanceMatrix(0, 0), item.instanceMatrix(1, 0),
+                           item.instanceMatrix(2, 0));
+    const QVector3D scaleY(item.instanceMatrix(0, 1), item.instanceMatrix(1, 1),
+                           item.instanceMatrix(2, 1));
+    const QVector3D scaleZ(item.instanceMatrix(0, 2), item.instanceMatrix(1, 2),
+                           item.instanceMatrix(2, 2));
+    item.shadowBoundsRadius = part->localBoundsRadius()
+        * qMax(scaleX.length(), qMax(scaleY.length(), scaleZ.length()));
     const QVector3D position(modelMatrix(0, 3), modelMatrix(1, 3), modelMatrix(2, 3));
     item.cameraDistanceSquared = (position - m_cameraPosition).lengthSquared();
     m_items.append(item);
+}
+
+QVector<SShadowCasterBounds> RenderQueueContext::shadowCasterBounds(
+        float maximumDistance) const
+{
+    QVector<SShadowCasterBounds> result;
+    result.reserve(m_items.size());
+    for(const SRenderItem& item : m_items)
+    {
+        if(!item.castsShadow || !shadowItemWithinDistance(item, maximumDistance)
+                || item.shadowBoundsRadius <= 0.0f)
+            continue;
+        SShadowCasterBounds bounds;
+        bounds.center = item.shadowBoundsCenter;
+        bounds.radius = item.shadowBoundsRadius;
+        result.append(bounds);
+    }
+    return result;
+}
+
+QByteArray RenderQueueContext::staticShadowFingerprint() const
+{
+    QCryptographicHash hash(QCryptographicHash::Sha256);
+    for(const SRenderItem& item : m_items)
+    {
+        if(!item.castsShadow || item.dynamicShadow)
+            continue;
+        hash.addData(reinterpret_cast<const char*>(&item.meshIdentity), sizeof(item.meshIdentity));
+        const quintptr textureIdentity = quintptr(item.texture);
+        hash.addData(reinterpret_cast<const char*>(&textureIdentity), sizeof(textureIdentity));
+        const int materialClass = int(item.materialClass);
+        hash.addData(reinterpret_cast<const char*>(&materialClass), sizeof(materialClass));
+        hash.addData(reinterpret_cast<const char*>(item.instanceMatrix.constData()),
+                     16 * int(sizeof(float)));
+    }
+    return hash.result();
+}
+
+void RenderQueueContext::flushShadow(QOpenGLShaderProgram* shadowProgram,
+                                     float maximumDistance,
+                                     const QMatrix4x4& lightSpaceMatrix,
+                                     bool dynamicOnly, bool staticOnly)
+{
+    if(!shadowProgram || m_items.isEmpty())
+        return;
+    QElapsedTimer shadowTimer;
+    shadowTimer.start();
+    RenderPerformanceContext& performance = RenderPerformanceContext::instance();
+    const bool collectPerformance = performance.collecting();
+    if(collectPerformance)
+    {
+        ++performance.counters().shadowPasses;
+        performance.counters().shadowCandidates += quint64(m_items.size());
+    }
+    QVector<SRenderItem> shadowItems;
+    shadowItems.reserve(m_items.size());
+    for(const SRenderItem& source : m_items)
+    {
+        if(!source.castsShadow || !shadowItemWithinDistance(source, maximumDistance)
+                || !shadowItemIntersectsLightSpace(source, lightSpaceMatrix)
+                || (dynamicOnly && !source.dynamicShadow)
+                || (staticOnly && source.dynamicShadow))
+            continue;
+        SRenderItem item = source;
+        item.highlighted = false;
+        shadowItems.append(item);
+    }
+    sortRenderItems(shadowItems);
+    if(collectPerformance)
+        performance.counters().shadowItems += quint64(shadowItems.size());
+    const int modelLocation = shadowProgram->uniformLocation("u_modelMmatrix");
+    const int instancedLocation = shadowProgram->uniformLocation("u_instanced");
+    const int partAnimatedLocation = shadowProgram->uniformLocation("u_partAnimated");
+    const int alphaTestLocation = shadowProgram->uniformLocation("u_shadowAlphaTest");
+    QOpenGLTexture* boundTexture = nullptr;
+    for(int itemIndex = 0; itemIndex < shadowItems.size(); )
+    {
+        const SRenderItem& item = shadowItems.at(itemIndex);
+        // EI foliage and other textured silhouettes can use either binary or
+        // intermediate alpha. Shadow maps need their visible coverage, not an
+        // opaque rectangle; threshold both classes conservatively.
+        const bool alphaTest = item.materialClass != ERenderMaterialClass::Opaque;
+        shadowProgram->setUniformValue(alphaTestLocation, alphaTest);
+        if(alphaTest && item.texture && item.texture != boundTexture)
+        {
+            item.texture->bind(0);
+            boundTexture = item.texture;
+        }
+        const int runLength = m_instancingEnabled
+            ? instanceBatchLength(shadowItems, itemIndex) : 1;
+        bool instanced = false;
+        if(runLength >= 2)
+        {
+            m_matrixScratch.clear();
+            m_matrixScratch.reserve(runLength);
+            for(int offset = 0; offset < runLength; ++offset)
+                m_matrixScratch.append(shadowItems.at(itemIndex + offset).instanceMatrix);
+            const int bufferOffset = reserveInstanceBytes(
+                m_matrixScratch.size() * int(sizeof(QMatrix4x4)));
+            instanced = bufferOffset >= 0 && item.part->drawInstanced(
+                shadowProgram, &m_instanceBuffer, bufferOffset, m_matrixScratch);
+        }
+        if(!instanced)
+        {
+            shadowProgram->setUniformValue(instancedLocation, false);
+            shadowProgram->setUniformValue(modelLocation, item.modelMatrix);
+            item.part->drawImmediate(shadowProgram);
+        }
+        itemIndex += instanced ? runLength : 1;
+    }
+    shadowProgram->setUniformValue(instancedLocation, false);
+    shadowProgram->setUniformValue(partAnimatedLocation, false);
+    shadowProgram->setUniformValue(alphaTestLocation, false);
+    if(collectPerformance)
+        performance.counters().shadowNanoseconds += quint64(shadowTimer.nsecsElapsed());
 }
 
 void RenderQueueContext::flush()
@@ -146,23 +287,35 @@ void RenderQueueContext::flush()
     if(!m_program || m_items.isEmpty())
         return;
 
+    QVector<SRenderItem> colorItems;
+    colorItems.reserve(m_items.size());
+    for(const SRenderItem& item : m_items)
+        if(item.colorVisible)
+            colorItems.append(item);
+    if(colorItems.isEmpty())
+    {
+        m_items.clear();
+        m_phaseTimer.restart();
+        return;
+    }
+
     RenderPerformanceContext& performance = RenderPerformanceContext::instance();
     const bool collectPerformance = performance.collecting();
     if(collectPerformance)
         performance.counters().queueCollectNanoseconds += quint64(m_phaseTimer.nsecsElapsed());
     m_phaseTimer.restart();
-    sortRenderItems(m_items);
+    sortRenderItems(colorItems);
     if(collectPerformance)
         performance.counters().queueSortNanoseconds += quint64(m_phaseTimer.nsecsElapsed());
     m_phaseTimer.restart();
 
     if(m_selectionPass)
     {
-        for(int itemIndex = 0; itemIndex < m_items.size(); )
+        for(int itemIndex = 0; itemIndex < colorItems.size(); )
         {
-            const SRenderItem& item = m_items.at(itemIndex);
+            const SRenderItem& item = colorItems.at(itemIndex);
             const int runLength = m_instancingEnabled
-                ? instanceBatchLength(m_items, itemIndex) : 1;
+                ? instanceBatchLength(colorItems, itemIndex) : 1;
             bool instanced = false;
             if(runLength >= 2)
             {
@@ -170,7 +323,7 @@ void RenderQueueContext::flush()
                 instances.reserve(runLength);
                 for(int offset = 0; offset < runLength; ++offset)
                 {
-                    const SRenderItem& source = m_items.at(itemIndex + offset);
+                    const SRenderItem& source = colorItems.at(itemIndex + offset);
                     SPartPickingInstance instance;
                     instance.matrix = source.instanceMatrix;
                     instance.color = source.pickingColor;
@@ -199,7 +352,7 @@ void RenderQueueContext::flush()
 
     if(collectPerformance)
     {
-        for(const SRenderItem& item : m_items)
+        for(const SRenderItem& item : colorItems)
         {
             if(item.materialClass == ERenderMaterialClass::Opaque)
                 ++performance.counters().opaqueQueueSize;
@@ -220,26 +373,30 @@ void RenderQueueContext::flush()
     bool haveBatch = false;
     bool activeHighlight = false;
     m_program->setUniformValue(m_highlightLocation, false);
-    for(int itemIndex = 0; itemIndex < m_items.size(); )
+    m_program->setUniformValue("u_receiveDynamicShadow", true);
+    for(int itemIndex = 0; itemIndex < colorItems.size(); )
     {
-        const SRenderItem& item = m_items.at(itemIndex);
+        const SRenderItem& item = colorItems.at(itemIndex);
         if(item.materialClass != activeClass || !haveBatch)
         {
             activeClass = item.materialClass;
             if(activeClass == ERenderMaterialClass::Opaque)
             {
-                glDisable(GL_BLEND);
-                glDisable(GL_ALPHA_TEST);
+                ei::gl::Disable(GL_BLEND);
+                if(supportsFixedFunctionAlphaTest())
+                    ei::gl::Disable(GL_ALPHA_TEST);
             }
             else if(activeClass == ERenderMaterialClass::Cutout)
             {
-                glDisable(GL_BLEND);
-                glEnable(GL_ALPHA_TEST);
+                ei::gl::Disable(GL_BLEND);
+                if(supportsFixedFunctionAlphaTest())
+                    ei::gl::Enable(GL_ALPHA_TEST);
             }
             else
             {
-                glEnable(GL_ALPHA_TEST);
-                glEnable(GL_BLEND);
+                if(supportsFixedFunctionAlphaTest())
+                    ei::gl::Enable(GL_ALPHA_TEST);
+                ei::gl::Enable(GL_BLEND);
             }
         }
         if(item.texture != boundTexture)
@@ -264,8 +421,9 @@ void RenderQueueContext::flush()
             previousUvScale = item.textureUvScale;
         }
         const int runLength = m_instancingEnabled
-            ? instanceBatchLength(m_items, itemIndex) : 1;
+            ? instanceBatchLength(colorItems, itemIndex) : 1;
         bool instanced = false;
+        m_program->setUniformValue("u_receiveDynamicShadow", !item.dynamicShadow);
         if(item.highlighted != activeHighlight)
         {
             activeHighlight = item.highlighted;
@@ -276,7 +434,7 @@ void RenderQueueContext::flush()
             m_matrixScratch.clear();
             m_matrixScratch.reserve(runLength);
             for(int offset = 0; offset < runLength; ++offset)
-                m_matrixScratch.append(m_items.at(itemIndex + offset).instanceMatrix);
+                m_matrixScratch.append(colorItems.at(itemIndex + offset).instanceMatrix);
             const int bufferOffset = reserveInstanceBytes(
                 m_matrixScratch.size() * int(sizeof(QMatrix4x4)));
             instanced = bufferOffset >= 0 && item.part->drawInstanced(
@@ -292,8 +450,10 @@ void RenderQueueContext::flush()
     m_program->setUniformValue(m_instancedLocation, false);
     m_program->setUniformValue(m_partAnimatedLocation, false);
     m_program->setUniformValue(m_highlightLocation, false);
-    glEnable(GL_ALPHA_TEST);
-    glEnable(GL_BLEND);
+    m_program->setUniformValue("u_receiveDynamicShadow", true);
+    if(supportsFixedFunctionAlphaTest())
+        ei::gl::Enable(GL_ALPHA_TEST);
+    ei::gl::Enable(GL_BLEND);
     if(collectPerformance)
         performance.counters().queueDrawNanoseconds += quint64(m_phaseTimer.nsecsElapsed());
     m_items.clear();

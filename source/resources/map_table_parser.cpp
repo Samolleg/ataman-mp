@@ -7,7 +7,7 @@ QVector<SMapCatalogEntry> CMapCatalog::parseMapTable(const QString& text,
 {
     QVector<SMapCatalogEntry> entries;
     SMapCatalogEntry current;
-    enum class PendingValue { None, Resources, ExitTarget, Deploy, View };
+    enum class PendingValue { None, Resources, Sky, ExitTarget, Deploy, View };
     PendingValue pending = PendingValue::None;
     int currentExitIndex = -1;
     const QStringList lines = text.split(QRegularExpression("\\r?\\n"));
@@ -43,6 +43,11 @@ QVector<SMapCatalogEntry> CMapCatalog::parseMapTable(const QString& text,
         if(line.compare("#res", Qt::CaseInsensitive) == 0)
         {
             pending = current.zoneId.isEmpty() ? PendingValue::None : PendingValue::Resources;
+            continue;
+        }
+        if(line.compare("#sky", Qt::CaseInsensitive) == 0)
+        {
+            pending = current.zoneId.isEmpty() ? PendingValue::None : PendingValue::Sky;
             continue;
         }
         if(line.startsWith("#exit", Qt::CaseInsensitive))
@@ -88,6 +93,10 @@ QVector<SMapCatalogEntry> CMapCatalog::parseMapTable(const QString& text,
                 current.mprName = parts.at(0);
                 current.mobName = parts.at(1);
             }
+        }
+        else if(pending == PendingValue::Sky && !parts.isEmpty())
+        {
+            current.skyType = parts.first().toLower();
         }
         else if(pending == PendingValue::ExitTarget && currentExitIndex >= 0)
         {

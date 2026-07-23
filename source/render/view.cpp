@@ -9,9 +9,27 @@
 #include <QRandomGenerator>
 #include <QMessageBox>
 #include <QCryptographicHash>
+#include <QOpenGLFramebufferObject>
+#include <QFrame>
+#include <QLabel>
+#include <QComboBox>
+#include <QSlider>
+#include <QToolButton>
+#include <QHBoxLayout>
+#include <QVBoxLayout>
+#include <QResizeEvent>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QSaveFile>
+#include <QtEndian>
+#include <cstddef>
+#include <cmath>
+#include <cstring>
 #include <limits>
 
 #include "view.h"
+#include "gl_dispatch.h"
 #include "render_scheduling.h"
 #include "camera.h"
 #include "unit_animation.h"
@@ -42,7 +60,13 @@
 #include "view_frustum.h"
 #include "render_performance.h"
 #include "render_queue.h"
+#include "render_environment.h"
+#include "shadow_cascade.h"
+#include "particle_animation.h"
 #include "part.h"
+#include "objects/light.h"
+#include "objects/particle.h"
+#include "objects/torch.h"
 #include "external_script_workspace.h"
 #include "mob_script_window.h"
 #include "script_reference_analyzer.h"
@@ -50,6 +74,330 @@
 
 class CLogic;
 
+namespace {
+QString openGlErrorName(GLenum error)
+{
+    switch(error)
+    {
+    case GL_INVALID_ENUM: return QStringLiteral("GL_INVALID_ENUM");
+    case GL_INVALID_VALUE: return QStringLiteral("GL_INVALID_VALUE");
+    case GL_INVALID_OPERATION: return QStringLiteral("GL_INVALID_OPERATION");
+    case GL_OUT_OF_MEMORY: return QStringLiteral("GL_OUT_OF_MEMORY");
+    case GL_INVALID_FRAMEBUFFER_OPERATION:
+        return QStringLiteral("GL_INVALID_FRAMEBUFFER_OPERATION");
+    default: return QStringLiteral("unknown");
+    }
+}
+
+struct SParticleVisualStyle
+{
+    SParticleVisualStyle(const char* texture = nullptr,
+                         const QVector4D& color = QVector4D(0.72f, 0.80f, 1.0f, 0.72f),
+                         float scale = 1.0f, float edgeSoftness = 0.34f,
+                         bool useAdditiveBlend = false)
+        : textureName(texture), tint(color), scaleMultiplier(scale),
+          softness(edgeSoftness), additive(useAdditiveBlend) {}
+    const char* textureName;
+    QVector4D tint;
+    float scaleMultiplier;
+    float softness;
+    bool additive;
+};
+
+SParticleVisualStyle particleVisualStyle(uint kind)
+{
+    // Particle IDs are the symbolic values exposed by the stock/JMV MOB
+    // editor tables. Texture names are limited to direct corpus matches;
+    // every other kind deliberately uses the procedural soft sprite instead
+    // of borrowing an unrelated resource.
+    switch(kind)
+    {
+    case 8192: return {nullptr, QVector4D(1.0f, 0.42f, 0.12f, 0.88f), 0.75f, 0.20f, true}; // Fireball
+    case 8193: return {"tendrismoke", QVector4D(1.0f, 1.0f, 1.0f, 0.92f), 1.25f, 0.18f, true};
+    case 8194:
+    case 8195:
+    case 8208:
+    case 8209:
+    case 8231:
+    case 8257:
+        return {nullptr, QVector4D(1.0f, 0.48f, 0.12f, 0.86f), 1.15f, 0.18f, true};
+    case 8196:
+    case 8197:
+        return {"tendrismoke", QVector4D(1.0f, 1.0f, 1.0f, 0.72f), 1.55f, 0.42f, false};
+    case 8198:
+    case 8263:
+        return {nullptr, QVector4D(0.28f, 1.0f, 0.42f, 0.70f), 1.1f, 0.26f, true};
+    case 8199:
+        return {"poisoncloud", QVector4D(0.42f, 0.86f, 0.22f, 0.68f), 1.8f, 0.48f, false};
+    case 8200:
+    case 8201:
+        return {nullptr, QVector4D(0.42f, 0.78f, 1.0f, 0.66f), 1.65f, 0.42f, false};
+    case 8202:
+        return {"tornado", QVector4D(0.76f, 0.80f, 0.84f, 0.70f), 2.0f, 0.36f, false};
+    case 8210:
+    case 8213:
+    case 8258:
+        return {nullptr, QVector4D(0.48f, 1.0f, 0.34f, 0.78f), 1.0f, 0.24f, true};
+    case 8214:
+    case 8240:
+    case 8259:
+        return {nullptr, QVector4D(0.38f, 0.70f, 1.0f, 0.86f), 1.0f, 0.20f, true};
+    case 8217:
+    case 8253:
+    case 8254:
+        return {"teleport00", QVector4D(0.62f, 0.46f, 1.0f, 0.82f), 1.55f, 0.22f, true};
+    case 8203:
+    case 8204:
+    case 8205:
+    case 8232:
+    case 8233:
+    case 8234:
+    case 8235:
+    case 8236:
+    case 8237:
+    case 8238:
+    case 8239:
+        return {nullptr, QVector4D(0.66f, 0.52f, 1.0f, 0.76f), 1.15f, 0.24f, true};
+    default:
+        return {};
+    }
+}
+
+bool isPersistentFireParticle(uint kind)
+{
+    return kind == 8193u || kind == 8195u;
+}
+
+bool isPersistentSmokeParticle(uint kind)
+{
+    return kind == 8196u || kind == 8197u;
+}
+
+struct SSkyVertex
+{
+    QVector3D position;
+    QVector2D texture;
+};
+
+class SkyFigureReader
+{
+public:
+    explicit SkyFigureReader(const QByteArray& bytes) : m_bytes(bytes) {}
+
+    bool skip(qint64 count)
+    {
+        if(count < 0 || m_offset + count > m_bytes.size()) return false;
+        m_offset += int(count);
+        return true;
+    }
+
+    bool u16(quint16* value)
+    {
+        if(!value || m_offset + 2 > m_bytes.size()) return false;
+        *value = qFromLittleEndian<quint16>(
+            reinterpret_cast<const uchar*>(m_bytes.constData() + m_offset));
+        m_offset += 2;
+        return true;
+    }
+
+    bool u32(quint32* value)
+    {
+        if(!value || m_offset + 4 > m_bytes.size()) return false;
+        *value = qFromLittleEndian<quint32>(
+            reinterpret_cast<const uchar*>(m_bytes.constData() + m_offset));
+        m_offset += 4;
+        return true;
+    }
+
+    bool f32(float* value)
+    {
+        quint32 bits = 0;
+        if(!u32(&bits) || !value) return false;
+        static_assert(sizeof(float) == sizeof(quint32), "32-bit float required");
+        std::memcpy(value, &bits, sizeof(float));
+        return qIsFinite(*value);
+    }
+
+    int offset() const { return m_offset; }
+    int size() const { return m_bytes.size(); }
+
+private:
+    const QByteArray& m_bytes;
+    int m_offset{0};
+};
+
+QJsonArray jsonVector(const QVector3D& value)
+{
+    return QJsonArray{value.x(), value.y(), value.z()};
+}
+
+QJsonArray jsonMatrix(const QMatrix4x4& value)
+{
+    QJsonArray result;
+    const float* data = value.constData();
+    for(int index = 0; index < 16; ++index)
+        result.append(data[index]);
+    return result;
+}
+
+QJsonObject projectedPoint(const QMatrix4x4& matrix, const QVector3D& world)
+{
+    const QVector4D clip = matrix * QVector4D(world, 1.0f);
+    QJsonObject result;
+    result["clip"] = QJsonArray{clip.x(), clip.y(), clip.z(), clip.w()};
+    if(!qFuzzyIsNull(clip.w()))
+    {
+        const QVector3D ndc = clip.toVector3D() / clip.w();
+        const QVector3D atlas = ndc * 0.5f + QVector3D(0.5f, 0.5f, 0.5f);
+        result["ndc"] = jsonVector(ndc);
+        result["atlas"] = jsonVector(atlas);
+        result["inside"] = atlas.x() >= 0.0f && atlas.x() <= 1.0f
+            && atlas.y() >= 0.0f && atlas.y() <= 1.0f
+            && atlas.z() >= 0.0f && atlas.z() <= 1.0f;
+    }
+    return result;
+}
+
+QImage visualizedPackedDepth(const QImage& source)
+{
+    QImage result(source.size(), QImage::Format_ARGB32);
+    result.fill(Qt::white);
+    for(int y = 0; y < source.height(); ++y)
+        for(int x = 0; x < source.width(); ++x)
+        {
+            const QColor packed = source.pixelColor(x, y);
+            const double r = packed.redF();
+            const double g = packed.greenF();
+            const double b = packed.blueF();
+            const double a = packed.alphaF();
+            const double depth = r + g / 255.0 + b / 65025.0
+                    + a / 16581375.0;
+            const int shade = qBound(0, qRound(depth * 255.0), 255);
+            result.setPixelColor(x, y, QColor(shade, shade, shade));
+        }
+    return result;
+}
+
+QVector<SSkyVertex> decodeLegacySkyFigure(const QByteArray& bytes, QString* diagnostic)
+{
+    // nask0sky is the stock pre-signature, six-morph FIG variant. Keep this
+    // bounded parser local to the sky path instead of relaxing the FIG8 model
+    // parser used by ordinary map objects.
+    SkyFigureReader reader(bytes);
+    quint32 group = 0, textureNumber = 0, vertexBlocks = 0;
+    if(!reader.u32(&group) || !reader.u32(&textureNumber)
+            || !reader.skip(6 * (3 * 3 + 1) * qint64(sizeof(float)))
+            || !reader.u32(&vertexBlocks)
+            || vertexBlocks == 0 || vertexBlocks > 65536)
+    {
+        if(diagnostic) *diagnostic = "invalid legacy sky header";
+        return {};
+    }
+
+    const int sourceVertexCount = int(vertexBlocks) * 4;
+    QVector<QVector3D> sourceVertices(sourceVertexCount);
+    for(quint32 block = 0; block < vertexBlocks; ++block)
+    {
+        for(int axis = 0; axis < 3; ++axis)
+        {
+            for(int morph = 0; morph < 6; ++morph)
+            {
+                for(int lane = 0; lane < 4; ++lane)
+                {
+                    float value = 0.0f;
+                    if(!reader.f32(&value))
+                    {
+                        if(diagnostic) *diagnostic = "truncated legacy sky vertices";
+                        return {};
+                    }
+                    if(morph == 0)
+                        sourceVertices[int(block) * 4 + lane][axis] = value;
+                }
+            }
+        }
+    }
+
+    quint32 normalBlocks = 0, uvCount = 0;
+    if(!reader.u32(&normalBlocks) || normalBlocks > 65536
+            || !reader.skip(qint64(normalBlocks) * 4 * 4 * sizeof(float))
+            || !reader.u32(&uvCount) || uvCount == 0 || uvCount > 1048576)
+    {
+        if(diagnostic) *diagnostic = "invalid legacy sky normals/UV header";
+        return {};
+    }
+    QVector<QVector2D> uvs;
+    uvs.resize(int(uvCount));
+    for(QVector2D& uv : uvs)
+    {
+        float u = 0.0f, v = 0.0f;
+        if(!reader.f32(&u) || !reader.f32(&v))
+        {
+            if(diagnostic) *diagnostic = "truncated legacy sky UVs";
+            return {};
+        }
+        uv = QVector2D(u, v);
+    }
+
+    quint32 faceCount = 0, componentCount = 0;
+    if(!reader.u32(&faceCount) || faceCount > 1048576
+            || !reader.skip(qint64(faceCount) * 52)
+            || !reader.u32(&componentCount) || componentCount == 0
+            || componentCount > 1048576)
+    {
+        if(diagnostic) *diagnostic = "invalid legacy sky face/component header";
+        return {};
+    }
+    struct Component { quint16 vertex{0}; quint16 normal{0}; quint16 uv{0}; };
+    QVector<Component> components;
+    components.resize(int(componentCount));
+    for(Component& component : components)
+    {
+        if(!reader.u16(&component.vertex) || !reader.u16(&component.normal)
+                || !reader.u16(&component.uv))
+        {
+            if(diagnostic) *diagnostic = "truncated legacy sky components";
+            return {};
+        }
+    }
+
+    quint32 morphComponentCount = 0, indexCount = 0;
+    if(!reader.u32(&morphComponentCount) || morphComponentCount > 1048576
+            || !reader.skip(qint64(morphComponentCount) * 2 * sizeof(quint16))
+            || !reader.u32(&indexCount) || indexCount == 0
+            || indexCount > 4194304)
+    {
+        if(diagnostic) *diagnostic = "invalid legacy sky morph/index header";
+        return {};
+    }
+
+    QVector<SSkyVertex> result;
+    result.reserve(int(indexCount));
+    for(quint32 index = 0; index < indexCount; ++index)
+    {
+        quint16 componentIndex = 0;
+        if(!reader.u16(&componentIndex) || componentIndex >= components.size())
+        {
+            if(diagnostic) *diagnostic = "invalid legacy sky index";
+            return {};
+        }
+        const Component& component = components.at(componentIndex);
+        if(component.vertex >= sourceVertices.size() || component.uv >= uvs.size())
+        {
+            if(diagnostic) *diagnostic = "legacy sky component is out of bounds";
+            return {};
+        }
+        result.append(SSkyVertex{sourceVertices.at(component.vertex),
+                                 uvs.at(component.uv)});
+    }
+    if(reader.offset() != reader.size())
+    {
+        if(diagnostic) *diagnostic = "legacy sky contains trailing data";
+        return {};
+    }
+    return result;
+}
+
+}
 CView::CView(QWidget *parent, const QGLWidget *pShareWidget) : QGLWidget(parent, pShareWidget)
   ,m_gpuTimer(nullptr)
   ,m_gpuTimerPending(false)
@@ -139,6 +487,11 @@ CView::~CView()
         m_gpuTimerPending = false;
     }
     RenderQueueContext::instance().releaseGpuResources();
+    if(m_skyBuffer.isCreated())
+        m_skyBuffer.destroy();
+    if(m_particleBuffer.isCreated())
+        m_particleBuffer.destroy();
+    releaseShadowFramebuffers();
     ei::setCrashContext("shutdown/view-mobs");
 
     const int meshCount = CPart::sharedMeshCount();
@@ -161,7 +514,7 @@ CView::~CView()
     if(isValid() && !m_testEntranceLabelTextures.isEmpty())
     {
         makeCurrent();
-        glDeleteTextures(m_testEntranceLabelTextures.size(),
+        ei::gl::DeleteTextures(m_testEntranceLabelTextures.size(),
                          m_testEntranceLabelTextures.constData());
         m_testEntranceLabelTextures.clear();
         // Keep the context current for renderer member destruction below.
@@ -184,6 +537,7 @@ CView::~CView()
 void CView::attach(CSettings* pSettings, QTableWidget* pParam, QUndoStack* pStack, CProgressView* pProgress, QLineEdit* pMouseCoord, CTreeView *pTree, CTileForm* pTileForm) //todo: use signal\slots
 {
     m_pSettings = pSettings;
+    initEnvironmentPreviewWidget();
     connect(m_pSettings, &CSettings::renderSettingsChanged,
             this, &CView::applyRenderScheduling);
     m_cam->attachSettings(pSettings);
@@ -236,6 +590,179 @@ void CView::attach(CSettings* pSettings, QTableWidget* pParam, QUndoStack* pStac
     m_timer->start();
 }
 
+void CView::initEnvironmentPreviewWidget()
+{
+    if(m_environmentPreviewWidget || !m_pSettings)
+        return;
+    m_environmentPreviewWidget = new QFrame(this);
+    m_environmentPreviewWidget->setObjectName("environmentPreviewWidget");
+    m_environmentPreviewWidget->setMinimumWidth(220);
+    m_environmentPreviewWidget->setFrameShape(QFrame::StyledPanel);
+    m_environmentPreviewWidget->setStyleSheet(
+        "QFrame#environmentPreviewWidget { background: rgba(25,25,25,210); color: white; border: 1px solid #777; border-radius: 4px; }"
+        "QLabel, QComboBox, QToolButton { color: white; }");
+    QVBoxLayout* outer = new QVBoxLayout(m_environmentPreviewWidget);
+    outer->setContentsMargins(7, 5, 7, 6);
+    outer->setSpacing(4);
+    QHBoxLayout* title = new QHBoxLayout;
+    title->setContentsMargins(0, 0, 0, 0);
+    QLabel* titleLabel = new QLabel(tr("Environment preview"), m_environmentPreviewWidget);
+    m_environmentPreviewCollapse = new QToolButton(m_environmentPreviewWidget);
+    m_environmentPreviewCollapse->setText(QString::fromUtf8("\xE2\x88\x92"));
+    m_environmentPreviewCollapse->setToolTip(tr("Minimize environment preview"));
+    title->addWidget(titleLabel);
+    title->addStretch(1);
+    title->addWidget(m_environmentPreviewCollapse);
+    outer->addLayout(title);
+
+    m_environmentPreviewBody = new QWidget(m_environmentPreviewWidget);
+    QVBoxLayout* body = new QVBoxLayout(m_environmentPreviewBody);
+    body->setContentsMargins(0, 0, 0, 0);
+    body->setSpacing(4);
+    m_environmentPreviewMode = new QComboBox(m_environmentPreviewBody);
+    m_environmentPreviewMode->addItem(tr("Unlit"), 0);
+    m_environmentPreviewMode->addItem(tr("Simple shading"), 1);
+    m_environmentPreviewMode->addItem(tr("Full environment"), 2);
+    body->addWidget(m_environmentPreviewMode);
+    QHBoxLayout* timeRow = new QHBoxLayout;
+    m_environmentPreviewTimeLabel = new QLabel(tr("12:00"), m_environmentPreviewBody);
+    m_environmentPreviewTimeLabel->setMinimumWidth(42);
+    m_environmentPreviewTime = new QSlider(Qt::Horizontal, m_environmentPreviewBody);
+    m_environmentPreviewTime->setRange(0, 1439);
+    m_environmentPreviewTime->setSingleStep(10);
+    m_environmentPreviewTime->setPageStep(60);
+    m_environmentPreviewTime->setStyleSheet(QStringLiteral(
+        "QSlider::groove:horizontal:disabled { background: #505050; height: 4px; }"
+        "QSlider::sub-page:horizontal:disabled { background: #666666; }"
+        "QSlider::add-page:horizontal:disabled { background: #404040; }"
+        "QSlider::handle:horizontal:disabled { background: #707070; border: 1px solid #555555; }"));
+    timeRow->addWidget(m_environmentPreviewTimeLabel);
+    timeRow->addWidget(m_environmentPreviewTime, 1);
+    body->addLayout(timeRow);
+    outer->addWidget(m_environmentPreviewBody);
+
+    const COptInt* mode = dynamic_cast<const COptInt*>(m_pSettings->opt("renderLightingMode"));
+    m_environmentPreviewMode->setCurrentIndex(
+        qBound(0, mode ? mode->value() : 2, 2));
+    const auto updateTimeControls = [this](int index)
+    {
+        const bool enabled = index == 2;
+        m_environmentPreviewTimeLabel->setEnabled(enabled);
+        m_environmentPreviewTime->setEnabled(enabled);
+        m_environmentPreviewTime->setToolTip(enabled
+            ? tr("Preview time of day")
+            : tr("Time of day is available only in Full environment mode"));
+    };
+    updateTimeControls(m_environmentPreviewMode->currentIndex());
+    connect(m_environmentPreviewCollapse, &QToolButton::clicked, this, [this]()
+    {
+        const bool show = !m_environmentPreviewBody->isVisible();
+        m_environmentPreviewBody->setVisible(show);
+        m_environmentPreviewCollapse->setText(show ? QString::fromUtf8("\xE2\x88\x92") : "+");
+        m_environmentPreviewWidget->adjustSize();
+        positionEnvironmentPreviewWidget();
+    });
+    connect(m_environmentPreviewMode, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, [this, updateTimeControls](int index)
+    {
+        updateTimeControls(index);
+        if(m_environmentPreviewSyncing || !m_pSettings)
+            return;
+        if(COptInt* option = dynamic_cast<COptInt*>(m_pSettings->opt("renderLightingMode")))
+            option->setValue(qBound(0, index, 2));
+        m_pSettings->persistOptions();
+        update();
+    });
+    connect(m_environmentPreviewTime, &QSlider::valueChanged, this, [this](int minutes)
+    {
+        const int hour = minutes / 60;
+        const int minute = minutes % 60;
+        m_environmentPreviewTimeLabel->setText(QString("%1:%2")
+            .arg(hour, 2, 10, QLatin1Char('0')).arg(minute, 2, 10, QLatin1Char('0')));
+        if(m_environmentPreviewSyncing || !m_pSettings)
+            return;
+        if(COptBool* overrideTime = dynamic_cast<COptBool*>(m_pSettings->opt("overrideWorldTime")))
+            overrideTime->setValue(true);
+        if(COptInt* time = dynamic_cast<COptInt*>(m_pSettings->opt("renderTimeOfDay")))
+            time->setValue(hour * 100 + minute);
+        m_pSettings->persistOptions();
+        update();
+    });
+    m_environmentPreviewWidget->adjustSize();
+    positionEnvironmentPreviewWidget();
+    m_environmentPreviewWidget->show();
+    m_environmentPreviewWidget->raise();
+    applyEnvironmentCompatibilityMode();
+}
+
+void CView::positionEnvironmentPreviewWidget()
+{
+    if(m_environmentPreviewWidget)
+        m_environmentPreviewWidget->move(12, 12);
+}
+
+void CView::applyEnvironmentCompatibilityMode()
+{
+    if(!m_openGlesCompatibility || !m_environmentPreviewMode || !m_pSettings)
+        return;
+
+    // Qt 5's ANGLE fallback exposes only OpenGL ES 2.0. The desktop Full
+    // environment path relies on shadow-map framebuffer formats and sky-pass
+    // state that ES2 rejects (GL_INVALID_OPERATION/GL_INVALID_ENUM). Keep
+    // ANGLE useful as an explicit compatibility renderer instead of silently
+    // presenting a broken Full option.
+    if(QStandardItemModel* model = qobject_cast<QStandardItemModel*>(
+            m_environmentPreviewMode->model()))
+    {
+        if(QStandardItem* fullEnvironment = model->item(2))
+        {
+            fullEnvironment->setEnabled(false);
+            fullEnvironment->setText(tr("Full environment (unavailable in ANGLE)"));
+            fullEnvironment->setToolTip(tr(
+                "ANGLE uses OpenGL ES 2.0; resource sky and shadow maps require the desktop renderer."));
+        }
+    }
+
+    const COptInt* option = dynamic_cast<const COptInt*>(m_pSettings->opt("renderLightingMode"));
+    m_environmentPreviewSyncing = true;
+    m_environmentPreviewMode->setCurrentIndex(option
+        ? qBound(0, option->value(), 1) : 1);
+    m_environmentPreviewSyncing = false;
+    m_environmentPreviewMode->setToolTip(tr(
+        "ANGLE compatibility renderer: Unlit and Simple shading are available."));
+}
+
+void CView::syncEnvironmentPreviewWidget(float mapTimeHours)
+{
+    if(!m_environmentPreviewWidget || !m_pSettings)
+        return;
+    const COptBool* overrideTime = dynamic_cast<const COptBool*>(m_pSettings->opt("overrideWorldTime"));
+    const COptInt* storedTime = dynamic_cast<const COptInt*>(m_pSettings->opt("renderTimeOfDay"));
+    int minutes = qRound(mapTimeHours * 60.0f) % 1440;
+    if(overrideTime && overrideTime->value() && storedTime)
+        minutes = (storedTime->value() / 100) * 60 + qMin(59, storedTime->value() % 100);
+    const COptInt* mode = dynamic_cast<const COptInt*>(m_pSettings->opt("renderLightingMode"));
+    m_environmentPreviewSyncing = true;
+    const int maximumMode = m_openGlesCompatibility ? 1 : 2;
+    m_environmentPreviewMode->setCurrentIndex(
+        qBound(0, mode ? mode->value() : maximumMode, maximumMode));
+    const bool timeEnabled = m_environmentPreviewMode->currentIndex() == 2;
+    m_environmentPreviewTimeLabel->setEnabled(timeEnabled);
+    m_environmentPreviewTime->setEnabled(timeEnabled);
+    m_environmentPreviewTime->setToolTip(timeEnabled
+        ? tr("Preview time of day")
+        : tr("Time of day is available only in Full environment mode"));
+    if(!m_environmentPreviewTime->isSliderDown())
+        m_environmentPreviewTime->setValue(qBound(0, minutes, 1439));
+    m_environmentPreviewSyncing = false;
+}
+
+void CView::resizeEvent(QResizeEvent* event)
+{
+    QGLWidget::resizeEvent(event);
+    positionEnvironmentPreviewWidget();
+}
+
 void CView::applyRenderScheduling()
 {
     const COptInt* capOption = m_pSettings
@@ -255,6 +782,9 @@ void CView::refreshAfterResourceSetup()
     CObjectList::getInstance()->refreshConfiguredSources();
     CTextureList::getInstance()->refreshConfiguredSources();
     m_spatialIndexDirty = true;
+    m_skyResourcesChecked = false;
+    m_staticShadowFingerprint.clear();
+    m_farStaticShadowFingerprint.clear();
     updateGeometry();
     if(width() > 0 && height() > 0)
         resizeGL(width(), height());
@@ -353,17 +883,36 @@ QString CView::sceneSourceFingerprint()
 
 void CView::initShaders()
 {
+    const auto reportShaderFailure = [](const char* stage,
+                                        const QOpenGLShaderProgram& program)
+    {
+        ei::log(eLogWarning, QStringLiteral("OpenGL shader failure (%1): %2")
+            .arg(QString::fromLatin1(stage), program.log()));
+    };
     // Compile vertex shader
     if (!m_program.addShaderFromSourceFile(QOpenGLShader::Vertex, ":/vshader.vsh"))
+    {
+        reportShaderFailure("object vertex", m_program);
         close();
+        return;
+    }
 
     // Compile fragment shader
     if (!m_program.addShaderFromSourceFile(QOpenGLShader::Fragment, ":/fshader.fsh"))
+    {
+        reportShaderFailure("object fragment", m_program);
         close();
+        return;
+    }
 
     // Link shader pipeline
     if (!m_program.link())
+    {
+        reportShaderFailure("object link", m_program);
         close();
+        return;
+    }
+    logShaderProgramDiagnostics(QStringLiteral("object"), m_program, true);
 
     m_program.bind();
     m_program.setUniformValue("customColor", QVector4D(0.0, 0.0, 0.0, 0.0));
@@ -372,11 +921,24 @@ void CView::initShaders()
 
     // Compile land shader
     if (!m_landProgram.addShaderFromSourceFile(QOpenGLShader::Vertex, ":/vshader.vsh"))
+    {
+        reportShaderFailure("terrain vertex", m_landProgram);
         close();
+        return;
+    }
     if (!m_landProgram.addShaderFromSourceFile(QOpenGLShader::Fragment, ":/landshader.fsh"))  //use absolute path for recompile shader every app rise
+    {
+        reportShaderFailure("terrain fragment", m_landProgram);
         close();
+        return;
+    }
     if (!m_landProgram.link())
+    {
+        reportShaderFailure("terrain link", m_landProgram);
         close();
+        return;
+    }
+    logShaderProgramDiagnostics(QStringLiteral("terrain"), m_landProgram, true);
 
     m_landProgram.bind();
     m_landProgram.setUniformValue("u_instanced", false);
@@ -384,15 +946,57 @@ void CView::initShaders()
     m_landProgram.setUniformValue("u_lightPower", 5.0f);
     m_landProgram.setUniformValue("u_lightColor", QVector4D(1.0, 1.0, 1.0, 1.0));
     m_landProgram.setUniformValue("u_highlight", false);
+    m_landProgram.setUniformValue("u_animateLiquid", false);
+    m_landProgram.setUniformValue("u_liquidTime", 0.0f);
+
+    bool skySuccess = m_skyProgram.addShaderFromSourceFile(
+        QOpenGLShader::Vertex, ":/skybox.vsh");
+    skySuccess = skySuccess && m_skyProgram.addShaderFromSourceFile(
+        QOpenGLShader::Fragment, ":/skybox.fsh");
+    skySuccess = skySuccess && m_skyProgram.link();
+    logShaderProgramDiagnostics(QStringLiteral("sky"), m_skyProgram, skySuccess);
+    if(!skySuccess)
+    {
+        close();
+        return;
+    }
+    m_skyProgram.bind();
+    m_skyProgram.setUniformValue("qt_Texture0", 0);
+
+    // Keep the particle subsystem out of this isolation build. A failed or
+    // incomplete auxiliary program must not poison an otherwise valid
+    // terrain-only GL context (notably the ANGLE fallback).
+
+    bool shadowSuccess = m_shadowProgram.addShaderFromSourceFile(
+        QOpenGLShader::Vertex, ":/vshader.vsh");
+    shadowSuccess = shadowSuccess && m_shadowProgram.addShaderFromSourceFile(
+        QOpenGLShader::Fragment, ":/shadow.fsh");
+    shadowSuccess = shadowSuccess && m_shadowProgram.link();
+    logShaderProgramDiagnostics(QStringLiteral("shadow"), m_shadowProgram,
+                                shadowSuccess);
+    if(!shadowSuccess)
+    {
+        close();
+        return;
+    }
+    m_shadowProgram.bind();
+    m_shadowProgram.setUniformValue("qt_Texture0", 0);
+    m_shadowProgram.setUniformValue("u_shadowAlphaTest", false);
 
 
     // Compile select shader
-    if (!m_selectProgram.addShaderFromSourceFile(QOpenGLShader::Vertex, ":/vshader.vsh"))
+    bool selectSuccess = m_selectProgram.addShaderFromSourceFile(
+        QOpenGLShader::Vertex, ":/vshader.vsh");
+    selectSuccess = selectSuccess && m_selectProgram.addShaderFromSourceFile(
+        QOpenGLShader::Fragment, ":/select.fsh");
+    selectSuccess = selectSuccess && m_selectProgram.link();
+    logShaderProgramDiagnostics(QStringLiteral("selection"), m_selectProgram,
+                                selectSuccess);
+    if(!selectSuccess)
+    {
         close();
-    if (!m_selectProgram.addShaderFromSourceFile(QOpenGLShader::Fragment, ":/select.fsh"))
-        close();
-    if (!m_selectProgram.link())
-        close();
+        return;
+    }
     m_selectProgram.bind();
     m_selectProgram.setUniformValue("u_instanced", false);
 
@@ -402,26 +1006,87 @@ void CView::initializeGL()
 {
     ei::setCrashContext("opengl/initialize");
     makeCurrent();
+    armOpenGlDiagnostics(QStringLiteral("OpenGL initialization"), 2);
     logOpenGlData();
+    logOpenGlDiagnosticState(QStringLiteral("initialize/begin"));
     qglClearColor(Qt::black);
-    //glEnable(GL_EXT_texture_filter_anisotropic);
-    glEnable(GL_DEPTH_TEST);
-    //glEnable(GL_CULL_FACE); //draw only front faces (disable if need draw both sides)
-    glAlphaFunc(GL_GREATER, 0.1f);
-    glEnable(GL_ALPHA_TEST);
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    //ei::gl::Enable(GL_EXT_texture_filter_anisotropic);
+    ei::gl::Enable(GL_DEPTH_TEST);
+    //ei::gl::Enable(GL_CULL_FACE); //draw only front faces (disable if need draw both sides)
+    const QOpenGLContext* initialContext = QOpenGLContext::currentContext();
+    m_openGlesCompatibility = initialContext && initialContext->isOpenGLES();
+    applyEnvironmentCompatibilityMode();
+    const bool fixedAlphaTest = initialContext && !initialContext->isOpenGLES();
+    if(fixedAlphaTest)
+    {
+        ei::gl::AlphaFunc(GL_GREATER, 0.1f);
+        ei::gl::Enable(GL_ALPHA_TEST);
+    }
+    ei::gl::Enable(GL_BLEND);
+    ei::gl::BlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    logOpenGlErrors(QStringLiteral("initialize/fixed-state"));
     initShaders();
-    checkOpenGlError();
+    logOpenGlDiagnosticState(QStringLiteral("initialize/shaders"));
+    m_skyBuffer.create();
+    m_skyBuffer.setUsagePattern(QOpenGLBuffer::StaticDraw);
+    ei::log(eLogInfo, "Particle GL subsystem deferred until a visible effect is submitted");
+    m_skyBuffer.bind();
+    QString skySource;
+    const QByteArray skyFigure = CObjectList::getInstance()->resourceData(
+        "nask0sky.fig", &skySource);
+    QString skyDiagnostic;
+    const QVector<SSkyVertex> skyVertices = decodeLegacySkyFigure(
+        skyFigure, &skyDiagnostic);
+    m_skyVertexCount = skyVertices.size();
+    m_skyBuffer.allocate(skyVertices.constData(),
+                         skyVertices.size() * int(sizeof(SSkyVertex)));
+    m_skyBuffer.release();
+    logOpenGlErrors(QStringLiteral("initialize/sky-buffer"));
+    if(m_skyVertexCount > 0)
+        ei::log(eLogInfo, QString("Profile sky geometry resolved: nask0sky.fig (%1 vertices) from %2")
+                .arg(m_skyVertexCount).arg(skySource));
+    else
+        ei::log(eLogWarning, "Profile sky geometry unavailable: " + skyDiagnostic);
+    const COptInt* shadowQualityOption = m_pSettings
+        ? dynamic_cast<const COptInt*>(m_pSettings->opt("renderShadowQuality")) : nullptr;
+    if(!m_openGlesCompatibility)
+        ensureShadowFramebuffers(qBound(0,
+            shadowQualityOption ? shadowQualityOption->value() : 2, 2));
+    else
+        ei::log(eLogInfo,
+            "Full environment disabled on ANGLE/OpenGL ES 2.0; shadow atlases were not created");
+    // QOpenGLFramebufferObject construction may leave its newly-created FBO
+    // bound. Desktop QGLWidget drivers commonly repair this before paintGL,
+    // while ANGLE preserves the binding; the first scene frame would then be
+    // cleared and rendered into the last shadow atlas, leaving the viewport
+    // black. Explicitly restore Qt's context-owned presentation target.
+    QOpenGLFramebufferObject::bindDefault();
+    m_shadowUpdateTimer.start();
+    logOpenGlDiagnosticState(QStringLiteral("initialize/shadow-framebuffers"));
 
     CTextureList::getInstance()->initResource();
     CObjectList::getInstance()->initResource();
-    m_gpuTimer = new QOpenGLTimerQuery(this);
-    if(!m_gpuTimer->create())
+    // Qt 5.12's ANGLE backend does not implement QOpenGLTimerQuery. Calling
+    // create() there emits "Not supported on OpenGL ES" and corrupts the
+    // platform query object's teardown state (observed as c0000374 in
+    // ntdll immediately after initializeGL). Do not construct the wrapper at
+    // all on GLES; CPU submission counters remain available.
+    const QOpenGLContext* currentContext = QOpenGLContext::currentContext();
+    if(currentContext && currentContext->isOpenGLES())
     {
-        delete m_gpuTimer;
         m_gpuTimer = nullptr;
-        ei::log(eLogWarning, "GPU timer queries are unavailable; render counters will report CPU submission only");
+        ei::log(eLogInfo,
+                "GPU timer queries disabled on OpenGL ES/ANGLE");
+    }
+    else
+    {
+        m_gpuTimer = new QOpenGLTimerQuery(this);
+        if(!m_gpuTimer->create())
+        {
+            delete m_gpuTimer;
+            m_gpuTimer = nullptr;
+            ei::log(eLogWarning, "GPU timer queries are unavailable; render counters will report CPU submission only");
+        }
     }
     ei::setCrashContext("idle");
     //doneCurrent();
@@ -433,27 +1098,771 @@ void CView::resizeGL(int width, int height)
     m_height = height;
     m_width = width;
     //const int side = qMin(width, height);
-    //glViewport((width - side) / 2, (height - side) / 2, side, side);
+    //ei::gl::Viewport((width - side) / 2, (height - side) / 2, side, side);
     const float ratio = float(width)/height;
-    glViewport(0, 0, width, height);
+    ei::gl::Viewport(0, 0, width, height);
 
     m_projection.setToIdentity();
     m_projection.perspective(45, ratio, 1, 1000);
-    //glOrtho(-2, +2, -2, +2, -2.0, 2.0);   // draw objects in orthogaphic view
-    //glFrustum (-2.0, 2.0, -2.0, 2.0, 1.5, 20.0); //convert project matrix to perpective view
+    //ei::gl::Ortho(-2, +2, -2, +2, -2.0, 2.0);   // draw objects in orthogaphic view
+    //ei::gl::Frustum(-2.0, 2.0, -2.0, 2.0, 1.5, 20.0); //convert project matrix to perpective view
     //doneCurrent();
+}
+
+void CView::drawSkybox(const QMatrix4x4& cameraMatrix,
+                       const ei::SRenderEnvironment& environment)
+{
+    if(!m_skyBuffer.isCreated() || m_skyVertexCount <= 0 || !m_skyProgram.bind())
+        return;
+    // game.exe constructs one sky object and assigns Sky00 to the outdoor
+    // state (Sky01 is the alternate/cave state). It never binds sky00-sky05
+    // as simultaneous faces.
+    QOpenGLTexture* fallback = CTextureList::getInstance()->textureDefault();
+    QOpenGLTexture* skyTexture = CTextureList::getInstance()->texture("sky00");
+    const bool complete = skyTexture && skyTexture != fallback;
+    if(!m_skyResourcesChecked || complete != m_skyResourcesAvailable)
+    {
+        m_skyResourcesChecked = true;
+        m_skyResourcesAvailable = complete;
+        ei::log(complete ? eLogInfo : eLogWarning,
+                complete
+                    ? "Profile outdoor sky resource resolved: sky00"
+                    : "Profile outdoor sky is unavailable; disabling the sky pass");
+    }
+    if(!complete)
+        return;
+
+    QMatrix4x4 skyView = cameraMatrix;
+    skyView(0, 3) = 0.0f;
+    skyView(1, 3) = 0.0f;
+    skyView(2, 3) = 0.0f;
+    // The authored cylinder starts at z=0. Keeping that ring on the eye plane
+    // exposed a sharp editor-only horizon. Lower it by one authored ring so
+    // the cloud field continues below the horizon as it does in-game; the
+    // lower two rings are blended into the map fog in skybox.fsh.
+    skyView.translate(0.0f, 0.0f, -6.95752f);
+    skyView.rotate(environment.skyRotationDegrees, 0.0f, 0.0f, 1.0f);
+    m_skyProgram.setUniformValue("u_viewMmatrix", skyView);
+    m_skyProgram.setUniformValue("u_projMmatrix", m_projection);
+    const float tintStrength = qBound(0.3f,
+        environment.ambientStrength + environment.sunStrength, 1.0f);
+    m_skyProgram.setUniformValue("u_tint", environment.sunColor * tintStrength);
+    m_skyProgram.setUniformValue("u_fogColor", environment.fogColor);
+    const COptBool* fogOption = m_pSettings
+        ? dynamic_cast<const COptBool*>(m_pSettings->opt("renderFog")) : nullptr;
+    m_skyProgram.setUniformValue("u_fogEnabled", !fogOption || fogOption->value());
+
+    ei::gl::DepthMask(GL_FALSE);
+    ei::gl::DepthFunc(GL_LEQUAL);
+    ei::gl::Disable(GL_BLEND);
+    const QOpenGLContext* skyContext = QOpenGLContext::currentContext();
+    if(skyContext && !skyContext->isOpenGLES())
+        ei::gl::Disable(GL_ALPHA_TEST);
+    m_skyBuffer.bind();
+    const int position = m_skyProgram.attributeLocation("a_position");
+    const int texture = m_skyProgram.attributeLocation("a_texture");
+    m_skyProgram.enableAttributeArray(position);
+    m_skyProgram.setAttributeBuffer(position, GL_FLOAT,
+        int(offsetof(SSkyVertex, position)), 3, int(sizeof(SSkyVertex)));
+    m_skyProgram.enableAttributeArray(texture);
+    m_skyProgram.setAttributeBuffer(texture, GL_FLOAT,
+        int(offsetof(SSkyVertex, texture)), 2, int(sizeof(SSkyVertex)));
+    skyTexture->bind(0);
+    ei::gl::DrawArrays(GL_TRIANGLES, 0, m_skyVertexCount);
+    m_skyBuffer.release();
+    ei::gl::DepthMask(GL_TRUE);
+    ei::gl::DepthFunc(GL_LESS);
+    if(skyContext && !skyContext->isOpenGLES())
+        ei::gl::Enable(GL_ALPHA_TEST);
+    ei::gl::Enable(GL_BLEND);
+}
+
+void CView::applyEnvironmentUniforms(QOpenGLShaderProgram& program,
+                                     const ei::SRenderEnvironment& environment,
+                                     const QVector<CLight*>& lights,
+                                     int lightingMode, bool fogEnabled)
+{
+    const bool enabled = lightingMode != 0;
+    program.setUniformValue("u_environmentEnabled", enabled);
+    program.setUniformValue("u_lightingMode", lightingMode);
+    program.setUniformValue("u_fogEnabled", lightingMode == 2 && fogEnabled);
+    program.setUniformValue("u_ambientStrength", environment.ambientStrength);
+    program.setUniformValue("u_sunStrength", environment.sunStrength);
+    program.setUniformValue("u_sunDirection", environment.sunDirection);
+    program.setUniformValue("u_sunColor", environment.sunColor);
+    program.setUniformValue("u_ambientColor", environment.ambientColor);
+    program.setUniformValue("u_fogColor", environment.fogColor);
+    program.setUniformValue("u_fogStart", environment.fogStart);
+    program.setUniformValue("u_fogEnd", environment.fogEnd);
+    const QVector3D mapFog = m_pLand && m_pLand->isMprLoad()
+        ? QVector3D(float(m_pLand->widthInWorldUnits()),
+                    float(m_pLand->heightInWorldUnits()), 4.0f)
+        : QVector3D();
+    program.setUniformValue("u_mapFog", mapFog);
+
+    QVector4D positionRange[8];
+    QVector3D colors[8];
+    const int count = qMin(8, lights.size());
+    for(int index = 0; index < count; ++index)
+    {
+        CLight* light = lights.at(index);
+        const QVector3D position = light->drawPosition().isNull()
+            ? light->position() : light->drawPosition();
+        positionRange[index] = QVector4D(position, qMax(0.001f, light->range()));
+        QVector3D color = light->lightColor();
+        const float maximum = qMax(color.x(), qMax(color.y(), color.z()));
+        if(maximum > 1.01f)
+            color /= 255.0f;
+        colors[index] = color;
+    }
+    program.setUniformValue("u_pointLightCount", lightingMode == 2 ? count : 0);
+    if(count > 0)
+    {
+        program.setUniformValueArray("u_pointLightPositionRange", positionRange, count);
+        program.setUniformValueArray("u_pointLightColor", colors, count);
+    }
+}
+
+void CView::releaseShadowFramebuffers()
+{
+    delete m_shadowFbo;
+    m_shadowFbo = nullptr;
+    delete m_dynamicShadowFbo;
+    m_dynamicShadowFbo = nullptr;
+    delete m_farShadowFbo;
+    m_farShadowFbo = nullptr;
+    delete m_farDynamicShadowFbo;
+    m_farDynamicShadowFbo = nullptr;
+    m_shadowResolution = 0;
+    m_shadowInitialized = false;
+    m_staticShadowFingerprint.clear();
+    m_farStaticShadowFingerprint.clear();
+}
+
+bool CView::ensureShadowFramebuffers(int quality)
+{
+    GLint maximumTextureSize = 0;
+    ei::gl::GetIntegerv(GL_MAX_TEXTURE_SIZE, &maximumTextureSize);
+    const int resolution = ei::shadowAtlasResolution(
+        qBound(0, quality, 2), int(maximumTextureSize));
+    if(resolution <= 0)
+    {
+        if(m_shadowResolution != 0 || m_shadowFbo)
+        {
+            releaseShadowFramebuffers();
+            ei::log(eLogInfo, "Shadow atlases released (quality Off)");
+        }
+        return false;
+    }
+    if(m_shadowResolution == resolution && m_shadowFbo && m_dynamicShadowFbo
+            && m_farShadowFbo && m_farDynamicShadowFbo
+            && m_shadowFbo->isValid() && m_dynamicShadowFbo->isValid()
+            && m_farShadowFbo->isValid() && m_farDynamicShadowFbo->isValid())
+        return true;
+
+    releaseShadowFramebuffers();
+    QOpenGLFramebufferObjectFormat shadowFormat;
+    shadowFormat.setAttachment(QOpenGLFramebufferObject::Depth);
+    shadowFormat.setInternalTextureFormat(GL_RGBA8);
+    m_shadowFbo = new QOpenGLFramebufferObject(resolution, resolution, shadowFormat);
+    m_dynamicShadowFbo = new QOpenGLFramebufferObject(resolution, resolution, shadowFormat);
+    m_farShadowFbo = new QOpenGLFramebufferObject(resolution, resolution, shadowFormat);
+    m_farDynamicShadowFbo = new QOpenGLFramebufferObject(resolution, resolution, shadowFormat);
+    if(!m_shadowFbo->isValid() || !m_dynamicShadowFbo->isValid()
+            || !m_farShadowFbo->isValid() || !m_farDynamicShadowFbo->isValid())
+    {
+        ei::log(eLogWarning, "Shadow framebuffer is unavailable; shadow rendering disabled");
+        releaseShadowFramebuffers();
+        return false;
+    }
+
+    m_shadowResolution = resolution;
+    // Packed RGBA depth must never be interpolated channel-by-channel. The
+    // receiver performs its own 3x3 PCF over nearest depth samples.
+    for(QOpenGLFramebufferObject* target : {m_shadowFbo, m_dynamicShadowFbo,
+                                            m_farShadowFbo, m_farDynamicShadowFbo})
+    {
+        ei::gl::BindTexture(GL_TEXTURE_2D, target->texture());
+        ei::gl::TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        ei::gl::TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        ei::gl::TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        ei::gl::TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    }
+    ei::gl::BindTexture(GL_TEXTURE_2D, 0);
+    ei::log(eLogInfo, QString("Shadow atlases initialized: 4 x %1x%1 (quality %2, GL max %3)")
+            .arg(resolution).arg(qBound(0, quality, 2)).arg(maximumTextureSize));
+    return true;
+}
+
+bool CView::renderShadowMap(const QVector3D& cameraPosition,
+                            const QVector3D& shadowFocus,
+                            const ei::SRenderEnvironment& environment,
+                            RenderQueueContext& queue,
+                            float maximumDistance)
+{
+    Q_UNUSED(cameraPosition)
+    if(!m_shadowFbo || !m_dynamicShadowFbo || !m_farShadowFbo || !m_farDynamicShadowFbo
+            || !m_shadowFbo->isValid() || !m_dynamicShadowFbo->isValid()
+            || !m_farShadowFbo->isValid() || !m_farDynamicShadowFbo->isValid())
+        return false;
+
+    const float safeMaximumDistance = qBound(1.0f, maximumDistance, 1024.0f);
+    // The near cascade is the high-density contact-shadow region. Making its
+    // reach follow camera altitude expanded it to 92-128 units in overview
+    // views, reducing the closest actor and tree shadows to a handful of
+    // texels. Keep its world-space budget fixed; the far cascade owns reach.
+    m_nearShadowSplit = qMin(safeMaximumDistance, 48.0f);
+    QVector3D up(0.0f, 0.0f, 1.0f);
+    if(qAbs(QVector3D::dotProduct(environment.sunDirection.normalized(), up)) > 0.96f)
+        up = QVector3D(0.0f, 1.0f, 0.0f);
+    const QVector3D lightDirection = environment.sunDirection.normalized();
+    const QVector3D lightRight = QVector3D::crossProduct(lightDirection, up).normalized();
+    const QVector3D lightUp = QVector3D::crossProduct(lightRight, lightDirection).normalized();
+    const QMatrix4x4 cameraView = m_cam->viewMatrix();
+
+    struct SCascade
+    {
+        QMatrix4x4 staticView;
+        QMatrix4x4 dynamicView;
+        QMatrix4x4 projection;
+        QMatrix4x4 staticMatrix;
+        QMatrix4x4 dynamicMatrix;
+    };
+    const auto buildCascade = [&](float sliceNear, float sliceFar,
+                                  int staticResolution,
+                                  int dynamicResolution,
+                                  float staticWorldSnap) -> SCascade
+    {
+        float minimumRight = std::numeric_limits<float>::max();
+        float maximumRight = std::numeric_limits<float>::lowest();
+        float minimumUp = std::numeric_limits<float>::max();
+        float maximumUp = std::numeric_limits<float>::lowest();
+        bool cornersOk = false;
+        const QVector<QVector3D> corners = ei::cameraFrustumSliceCorners(
+            m_projection, cameraView, qMax(1.0f, sliceNear), sliceFar,
+            &cornersOk);
+        QVector3D sliceCenter;
+        if(cornersOk)
+        {
+            for(const QVector3D& point : corners)
+            {
+                const float right = QVector3D::dotProduct(point, lightRight);
+                const float imageUp = QVector3D::dotProduct(point, lightUp);
+                minimumRight = qMin(minimumRight, right);
+                maximumRight = qMax(maximumRight, right);
+                minimumUp = qMin(minimumUp, imageUp);
+                maximumUp = qMax(maximumUp, imageUp);
+                sliceCenter += point;
+            }
+            sliceCenter /= float(corners.size());
+        }
+        if(minimumRight > maximumRight || minimumUp > maximumUp)
+        {
+            const float right = QVector3D::dotProduct(shadowFocus, lightRight);
+            const float imageUp = QVector3D::dotProduct(shadowFocus, lightUp);
+            minimumRight = right - sliceFar;
+            maximumRight = right + sliceFar;
+            minimumUp = imageUp - sliceFar;
+            maximumUp = imageUp + sliceFar;
+            sliceCenter = shadowFocus;
+        }
+
+        const float guardBand = 12.0f;
+        // A shadow map covers receivers, not the union of complete caster
+        // bounds. Expanding this rectangle by every intersecting caster makes
+        // one large house or tree widen the near atlas to most of the map and
+        // reduces grounded actors to a few texels. Geometry outside this
+        // light-space receiver footprint cannot project a shadow into it; the
+        // rasterizer clips crossing triangles at the orthographic boundary.
+        // Keep only a small PCF/camera-motion guard around the receiver slice.
+        const float centerRight = (minimumRight + maximumRight) * 0.5f;
+        const float centerUp = (minimumUp + maximumUp) * 0.5f;
+        const float rawExtent = qMax((maximumRight - minimumRight) * 0.5f,
+                                     (maximumUp - minimumUp) * 0.5f) + guardBand;
+        const float extent = qMax(8.0f, qCeil(rawExtent / 2.0f) * 2.0f);
+        const float lightCoordinate = QVector3D::dotProduct(sliceCenter, lightDirection);
+        QVector3D baseFocus = lightRight * centerRight + lightUp * centerUp
+            + lightDirection * lightCoordinate;
+        const auto snappedFocus = [&](float xySnap, float depthSnap)
+        {
+            QVector3D focus = baseFocus;
+            focus += lightRight * (qRound(centerRight / xySnap) * xySnap - centerRight);
+            focus += lightUp * (qRound(centerUp / xySnap) * xySnap - centerUp);
+            focus += lightDirection
+                * (qRound(lightCoordinate / depthSnap) * depthSnap - lightCoordinate);
+            return focus;
+        };
+        const float staticTexel = (2.0f * extent)
+            / float(qMax(1, staticResolution));
+        // Static maps are expensive but their casters do not move. A small
+        // world-space quantization lets the 12-unit guard band absorb camera
+        // pans instead of rebuilding both static atlases almost every frame.
+        const float staticSnap = qMax(staticTexel, staticWorldSnap);
+        const QVector3D staticFocus = snappedFocus(staticSnap, staticSnap);
+        const float dynamicTexel = (2.0f * extent) / float(qMax(1, dynamicResolution));
+        const float dynamicSnap = qMax(dynamicTexel, 0.0001f);
+        const QVector3D dynamicFocus = snappedFocus(dynamicSnap, dynamicSnap);
+        const float depthHalf = qMax(256.0f, safeMaximumDistance + 128.0f);
+        SCascade result;
+        result.staticView.lookAt(staticFocus - lightDirection * depthHalf, staticFocus, up);
+        result.dynamicView.lookAt(dynamicFocus - lightDirection * depthHalf, dynamicFocus, up);
+        result.projection.ortho(-extent, extent, -extent, extent,
+                                1.0f, depthHalf * 2.0f + 1.0f);
+        result.staticMatrix = result.projection * result.staticView;
+        result.dynamicMatrix = result.projection * result.dynamicView;
+        return result;
+    };
+
+    const SCascade nearCascade = buildCascade(0.0f, m_nearShadowSplit,
+                                               m_shadowFbo->width(),
+                                               m_dynamicShadowFbo->width(),
+                                               2.0f);
+    const SCascade farCascade = buildCascade(m_nearShadowSplit * 0.8f,
+                                              safeMaximumDistance,
+                                              m_farShadowFbo->width(),
+                                              m_farDynamicShadowFbo->width(),
+                                              4.0f);
+
+    QCryptographicHash staticHash(QCryptographicHash::Sha256);
+    staticHash.addData(queue.staticShadowFingerprint());
+    staticHash.addData(sceneSourceFingerprint().toUtf8());
+    staticHash.addData(reinterpret_cast<const char*>(nearCascade.staticMatrix.constData()),
+                       16 * int(sizeof(float)));
+    const QByteArray staticFingerprint = staticHash.result();
+    QCryptographicHash farStaticHash(QCryptographicHash::Sha256);
+    farStaticHash.addData(queue.staticShadowFingerprint());
+    farStaticHash.addData(sceneSourceFingerprint().toUtf8());
+    farStaticHash.addData(reinterpret_cast<const char*>(farCascade.staticMatrix.constData()),
+                          16 * int(sizeof(float)));
+    farStaticHash.addData(reinterpret_cast<const char*>(&safeMaximumDistance),
+                          int(sizeof(safeMaximumDistance)));
+    const QByteArray farStaticFingerprint = farStaticHash.result();
+    const bool rebuildStatic = staticFingerprint != m_staticShadowFingerprint;
+    const bool rebuildFarStatic = farStaticFingerprint != m_farStaticShadowFingerprint;
+    const bool rebuildDynamic = !m_shadowInitialized || m_shadowUpdateTimer.elapsed() >= 66;
+    if(!rebuildStatic && !rebuildFarStatic && !rebuildDynamic)
+        return true;
+
+    RenderPerformanceContext& shadowPerformance = RenderPerformanceContext::instance();
+    if(shadowPerformance.collecting())
+    {
+        shadowPerformance.counters().shadowStaticRebuilds
+            += quint64(rebuildStatic) + quint64(rebuildFarStatic);
+        shadowPerformance.counters().shadowDynamicRebuilds
+            += rebuildDynamic ? 2 : 0;
+    }
+
+    ei::gl::Disable(GL_BLEND);
+    const QOpenGLContext* shadowContext = QOpenGLContext::currentContext();
+    if(shadowContext && !shadowContext->isOpenGLES())
+        ei::gl::Disable(GL_ALPHA_TEST);
+
+    // Depth is encoded into an RGBA8 color target. OpenGL enables dithering
+    // by default, which is desirable for visible color but corrupts packed
+    // depth bytes. In particular, a one-code change in the alpha byte changes
+    // the decoded depth by 1/255; over this light-space depth range that can
+    // erase several world units of a caster at the receiver and produces the
+    // camera-dependent contact gaps seen on grounded units and trees.
+    const GLboolean restoreDithering = ei::gl::IsEnabled(GL_DITHER);
+    ei::gl::Disable(GL_DITHER);
+#ifdef GL_FRAMEBUFFER_SRGB
+    // Packed values are linear bytes, not colors. Keep an externally enabled
+    // sRGB framebuffer state from transforming them during the shadow pass.
+    const GLboolean restoreFramebufferSrgb = ei::gl::IsEnabled(GL_FRAMEBUFFER_SRGB);
+    ei::gl::Disable(GL_FRAMEBUFFER_SRGB);
+#endif
+    const auto beginTarget = [&](QOpenGLFramebufferObject* target,
+                                 const QMatrix4x4& projection,
+                                 const QMatrix4x4& lightView)
+    {
+        target->bind();
+        ei::gl::Viewport(0, 0, target->width(), target->height());
+        ei::gl::ClearColor(1.0f, 1.0f, 1.0f, 1.0f);
+        ei::gl::Clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        m_shadowProgram.bind();
+        m_shadowProgram.setUniformValue("u_projMmatrix", projection);
+        m_shadowProgram.setUniformValue("u_viewMmatrix", lightView);
+        m_shadowProgram.setUniformValue("u_instanced", false);
+    };
+    const auto endTarget = [&](QOpenGLFramebufferObject* target)
+    {
+        target->release();
+        // QOpenGLFramebufferObject::release() is not a reliable presentation
+        // boundary on ANGLE: the D3D-backed ES context can retain the shadow
+        // FBO until Qt starts its own composition.  Every following scene draw
+        // would then target the RGBA shadow atlas (and the window stays white).
+        // Bind Qt's actual default target explicitly after every shadow pass.
+        QOpenGLFramebufferObject::bindDefault();
+    };
+    if(rebuildStatic)
+    {
+        m_staticLightSpaceMatrix = nearCascade.staticMatrix;
+        beginTarget(m_shadowFbo, nearCascade.projection, nearCascade.staticView);
+        queue.flushShadow(&m_shadowProgram,
+                          qMin(safeMaximumDistance, m_nearShadowSplit + 24.0f),
+                          nearCascade.staticMatrix,
+                          false, true);
+        endTarget(m_shadowFbo);
+        m_staticShadowFingerprint = staticFingerprint;
+    }
+    if(rebuildFarStatic)
+    {
+        m_farStaticLightSpaceMatrix = farCascade.staticMatrix;
+        beginTarget(m_farShadowFbo, farCascade.projection, farCascade.staticView);
+        queue.flushShadow(&m_shadowProgram, safeMaximumDistance,
+                          farCascade.staticMatrix, false, true);
+        endTarget(m_farShadowFbo);
+        m_farStaticShadowFingerprint = farStaticFingerprint;
+    }
+    if(rebuildDynamic)
+    {
+        // The sampling matrix and its depth texture are one atomic snapshot.
+        // Updating the matrix on every paint while redrawing the animated map
+        // at 15 Hz made unit shadows jump and flicker during camera pans.
+        m_dynamicLightSpaceMatrix = nearCascade.dynamicMatrix;
+        beginTarget(m_dynamicShadowFbo, nearCascade.projection, nearCascade.dynamicView);
+        queue.flushShadow(&m_shadowProgram,
+                          qMin(safeMaximumDistance, m_nearShadowSplit + 24.0f),
+                          nearCascade.dynamicMatrix,
+                          true, false);
+        endTarget(m_dynamicShadowFbo);
+        m_farDynamicLightSpaceMatrix = farCascade.dynamicMatrix;
+        beginTarget(m_farDynamicShadowFbo, farCascade.projection, farCascade.dynamicView);
+        queue.flushShadow(&m_shadowProgram, safeMaximumDistance,
+                          farCascade.dynamicMatrix, true, false);
+        endTarget(m_farDynamicShadowFbo);
+        m_shadowUpdateTimer.restart();
+    }
+    m_shadowInitialized = true;
+    ei::gl::Viewport(0, 0, m_width, m_height);
+#ifdef GL_FRAMEBUFFER_SRGB
+    if(restoreFramebufferSrgb)
+        ei::gl::Enable(GL_FRAMEBUFFER_SRGB);
+#endif
+    if(restoreDithering)
+        ei::gl::Enable(GL_DITHER);
+    if(shadowContext && !shadowContext->isOpenGLES())
+        ei::gl::Enable(GL_ALPHA_TEST);
+    ei::gl::Enable(GL_BLEND);
+    return true;
+}
+
+QString CView::captureShadowDiagnostics(QString* error)
+{
+    if(error)
+        error->clear();
+    if(!m_shadowInitialized || !m_shadowFbo || !m_dynamicShadowFbo
+            || !m_farShadowFbo || !m_farDynamicShadowFbo)
+    {
+        if(error)
+            *error = tr("Shadow maps are not initialized. Select Full environment, enable shadows, and render the failing view first.");
+        return QString();
+    }
+
+    const QString stamp = QDateTime::currentDateTime().toString("yyyyMMdd-HHmmss-zzz");
+    const QString root = QDir::current().absoluteFilePath("logs/shadow-diagnostics");
+    const QString directoryPath = QDir(root).absoluteFilePath("shadow-" + stamp);
+    if(!QDir().mkpath(directoryPath))
+    {
+        if(error)
+            *error = tr("Could not create shadow diagnostic folder:\n%1").arg(directoryPath);
+        return QString();
+    }
+
+    makeCurrent();
+    const QImage frame = grabFrameBuffer(true);
+    m_shadowCascadeDiagnostic = true;
+    ei::gl::Viewport(0, 0, m_width, m_height);
+    ei::gl::Clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    draw();
+    const QImage cascadeSelection = grabFrameBuffer(true);
+    m_shadowCascadeDiagnostic = false;
+    ei::gl::Clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    draw();
+    struct SShadowImage
+    {
+        const char* name;
+        QOpenGLFramebufferObject* fbo;
+        const QMatrix4x4* matrix;
+    };
+    const SShadowImage shadowImages[] = {
+        {"near-static", m_shadowFbo, &m_staticLightSpaceMatrix},
+        {"near-dynamic", m_dynamicShadowFbo, &m_dynamicLightSpaceMatrix},
+        {"far-static", m_farShadowFbo, &m_farStaticLightSpaceMatrix},
+        {"far-dynamic", m_farDynamicShadowFbo, &m_farDynamicLightSpaceMatrix}
+    };
+
+    QStringList failures;
+    if(frame.isNull() || !frame.save(QDir(directoryPath).absoluteFilePath("frame.png")))
+        failures.append("frame.png");
+    if(cascadeSelection.isNull() || !cascadeSelection.save(
+            QDir(directoryPath).absoluteFilePath("cascade-selection.png")))
+        failures.append("cascade-selection.png");
+
+    QJsonObject atlasMetadata;
+    for(const SShadowImage& shadow : shadowImages)
+    {
+        const QString name = QString::fromLatin1(shadow.name);
+        const QImage packed = shadow.fbo->toImage();
+        if(packed.isNull()
+                || !packed.save(QDir(directoryPath).absoluteFilePath(name + "-packed.png")))
+            failures.append(name + "-packed.png");
+        const QImage depth = visualizedPackedDepth(packed);
+        if(depth.isNull()
+                || !depth.save(QDir(directoryPath).absoluteFilePath(name + "-depth.png")))
+            failures.append(name + "-depth.png");
+        QJsonObject atlas;
+        atlas["width"] = shadow.fbo->width();
+        atlas["height"] = shadow.fbo->height();
+        atlas["matrixColumnMajor"] = jsonMatrix(*shadow.matrix);
+        atlasMetadata[name] = atlas;
+    }
+
+    QVector3D cameraPosition;
+    QVector3D cameraPivot;
+    QVector3D cameraRotation;
+    m_cam->getLocation(cameraPosition, cameraPivot, cameraRotation);
+    const QMatrix4x4 viewMatrix = m_cam->viewMatrix();
+    bool renderedEyeOk = false;
+    const QVector3D renderedEye = ei::cameraEyeFromView(viewMatrix, &renderedEyeOk);
+
+    const auto boolOption = [this](const char* name, bool fallback)
+    {
+        const COptBool* option = m_pSettings
+            ? dynamic_cast<const COptBool*>(m_pSettings->opt(name)) : nullptr;
+        return option ? option->value() : fallback;
+    };
+    const auto intOption = [this](const char* name, int fallback)
+    {
+        const COptInt* option = m_pSettings
+            ? dynamic_cast<const COptInt*>(m_pSettings->opt(name)) : nullptr;
+        return option ? option->value() : fallback;
+    };
+    const bool overrideWorldTime = boolOption("overrideWorldTime", false);
+    const float previewTime = ei::clockValueToHours(intOption("renderTimeOfDay", 1200));
+    const CWorldSet* worldSet = m_environmentMob ? &m_environmentMob->worldSet() : nullptr;
+    const ei::SRenderEnvironment environment = ei::renderEnvironment(
+        worldSet, overrideWorldTime, previewTime, m_caveEnvironment);
+
+    QJsonObject rootObject;
+    rootObject["format"] = "EIMapperEndurance.shadow-diagnostics.v3";
+    rootObject["capturedAt"] = QDateTime::currentDateTime().toString(Qt::ISODateWithMs);
+    rootObject["applicationVersion"] = QCoreApplication::applicationVersion();
+    rootObject["sceneFingerprint"] = sceneSourceFingerprint();
+    rootObject["viewport"] = QJsonObject{{"width", m_width}, {"height", m_height},
+        {"devicePixelRatio", devicePixelRatioF()}};
+    rootObject["camera"] = QJsonObject{{"storedOrbitAnchor", jsonVector(cameraPosition)},
+        {"renderedEye", jsonVector(renderedEye)}, {"renderedEyeValid", renderedEyeOk},
+        {"pivot", jsonVector(cameraPivot)}, {"rotation", jsonVector(cameraRotation)},
+        {"viewMatrixColumnMajor", jsonMatrix(viewMatrix)},
+        {"projectionMatrixColumnMajor", jsonMatrix(m_projection)}};
+    rootObject["shadow"] = QJsonObject{{"initialized", m_shadowInitialized},
+        {"nearSplit", m_nearShadowSplit},
+        {"configuredMaximumDistance", intOption("renderShadowDistance", 320)},
+        {"quality", intOption("renderShadowQuality", 2)},
+        {"enabled", intOption("renderShadowQuality", 2) > 0},
+        {"atlasResolution", m_shadowResolution},
+        {"packedDepthDitheringDisabled", true},
+        {"packedDepthFramebufferSrgbDisabled", true},
+        {"staticFingerprint", QString::fromLatin1(m_staticShadowFingerprint.toHex())},
+        {"farStaticFingerprint", QString::fromLatin1(m_farStaticShadowFingerprint.toHex())},
+        {"atlases", atlasMetadata}};
+    rootObject["environment"] = QJsonObject{{"lightingMode", intOption("renderLightingMode", 2)},
+        {"cave", m_caveEnvironment}, {"timeHours", environment.timeHours},
+        {"overrideWorldTime", overrideWorldTime},
+        {"sunDirection", jsonVector(environment.sunDirection)},
+        {"sunColor", jsonVector(environment.sunColor)},
+        {"sunStrength", environment.sunStrength},
+        {"ambientColor", jsonVector(environment.ambientColor)},
+        {"ambientStrength", environment.ambientStrength},
+        {"fogColor", jsonVector(environment.fogColor)},
+        {"fogStart", environment.fogStart}, {"fogEnd", environment.fogEnd}};
+    rootObject["renderSettings"] = QJsonObject{
+        {"frustumCulling", boolOption("frustumCulling", true)},
+        {"animateUnits", boolOption("animateUnits", true)},
+        {"drawSkybox", intOption("renderLightingMode", 2) == 2},
+        {"renderFog", boolOption("renderFog", true)},
+        {"renderTextureMipmapping", boolOption("renderTextureMipmapping", true)}};
+
+    const GLubyte* vendor = ei::gl::GetString(GL_VENDOR);
+    const GLubyte* renderer = ei::gl::GetString(GL_RENDERER);
+    const GLubyte* version = ei::gl::GetString(GL_VERSION);
+    rootObject["openGl"] = QJsonObject{
+        {"vendor", vendor ? QString::fromLatin1(reinterpret_cast<const char*>(vendor)) : QString()},
+        {"renderer", renderer ? QString::fromLatin1(reinterpret_cast<const char*>(renderer)) : QString()},
+        {"version", version ? QString::fromLatin1(reinterpret_cast<const char*>(version)) : QString()}};
+
+    QSet<CNode*> selected;
+    for(CNode* node : selectedNodes())
+        selected.insert(node);
+    QJsonArray mobArray;
+    QJsonArray nodeArray;
+    for(CMob* mob : m_aMob)
+    {
+        if(!mob)
+            continue;
+        QJsonObject mobObject;
+        mobObject["path"] = mob->filePath().absoluteFilePath();
+        mobObject["active"] = mob == m_activeMob;
+        mobObject["environmentOwner"] = mob == m_environmentMob;
+        mobObject["visible"] = isMobVisible(mob);
+        mobObject["nodeCount"] = mob->nodes().size();
+        mobArray.append(mobObject);
+        for(CNode* node : mob->nodes())
+        {
+            if(!node)
+                continue;
+            CBox bounds = node->getBBox();
+            // Node bounding boxes are local to the node. Diagnostic v1
+            // accidentally projected them as world coordinates, making its
+            // distance and atlas-membership fields misleading even though the
+            // render queue itself used transformed per-part bounds.
+            const QVector3D center = bounds.isInit()
+                ? bounds.center() + node->drawPosition() : node->drawPosition();
+            QJsonObject object;
+            object["mobPath"] = mob->filePath().absoluteFilePath();
+            object["mapId"] = int(node->mapId());
+            object["name"] = node->mapName();
+            object["type"] = int(node->nodeType());
+            object["model"] = node->modelName();
+            object["texture"] = node->textureName();
+            object["state"] = int(node->nodeState());
+            object["selected"] = selected.contains(node);
+            object["castsRenderShadow"] = node->castsRenderShadow();
+            object["position"] = jsonVector(node->position());
+            object["drawPosition"] = jsonVector(node->drawPosition());
+            object["boundsInitialized"] = bounds.isInit();
+            object["boundsCenter"] = jsonVector(center);
+            object["boundsRadius"] = bounds.isInit() ? bounds.radius() : 0.0f;
+            object["cameraDistance"] = (center - cameraPosition).length();
+            object["viewDepth"] = -(viewMatrix * QVector4D(center, 1.0f)).z();
+            QJsonObject projections;
+            projections["nearStatic"] = projectedPoint(m_staticLightSpaceMatrix, center);
+            projections["nearDynamic"] = projectedPoint(m_dynamicLightSpaceMatrix, center);
+            projections["farStatic"] = projectedPoint(m_farStaticLightSpaceMatrix, center);
+            projections["farDynamic"] = projectedPoint(m_farDynamicLightSpaceMatrix, center);
+            object["centerProjection"] = projections;
+            nodeArray.append(object);
+        }
+    }
+    rootObject["mobs"] = mobArray;
+    rootObject["nodes"] = nodeArray;
+
+    QSaveFile metadataFile(QDir(directoryPath).absoluteFilePath("shadow-diagnostics.json"));
+    if(!metadataFile.open(QIODevice::WriteOnly)
+            || metadataFile.write(QJsonDocument(rootObject).toJson(QJsonDocument::Indented)) < 0
+            || !metadataFile.commit())
+        failures.append("shadow-diagnostics.json");
+
+    QFile instructions(QDir(directoryPath).absoluteFilePath("README.txt"));
+    if(instructions.open(QIODevice::WriteOnly | QIODevice::Text))
+    {
+        instructions.write("EI Mapper Endurance shadow diagnostic capture\n"
+            "Send this entire folder without renaming or editing its contents.\n"
+            "frame.png is the failing viewport. cascade-selection.png is the same camera view:\n"
+            "red = near cascade, blue = far cascade, purple = their blend, black = no coverage.\n"
+            "*-packed.png files are exact GPU packed-depth bytes; their colors are encoding data, not shadow color.\n"
+            "*-depth.png files decode those bytes to grayscale depth for visual inspection.\n"
+            "shadow-diagnostics.json contains camera, cascade, environment, and per-node projection data.\n");
+    }
+    else
+        failures.append("README.txt");
+
+    doneCurrent();
+    if(!failures.isEmpty())
+    {
+        if(error)
+            *error = tr("Capture folder was created, but these files failed: %1")
+                .arg(failures.join(", "));
+        return QString();
+    }
+    return directoryPath;
+}
+
+void CView::applyShadowUniforms(QOpenGLShaderProgram& program, bool enabled,
+                                bool receiveStatic, bool receiveDynamic)
+{
+    const bool available = enabled && m_shadowFbo && m_dynamicShadowFbo
+        && m_farShadowFbo && m_farDynamicShadowFbo
+        && m_shadowFbo->isValid() && m_dynamicShadowFbo->isValid()
+        && m_farShadowFbo->isValid() && m_farDynamicShadowFbo->isValid()
+        && m_shadowInitialized;
+    program.setUniformValue("u_shadowsEnabled", available);
+    program.setUniformValue("u_staticLightSpaceMatrix", m_staticLightSpaceMatrix);
+    program.setUniformValue("u_dynamicLightSpaceMatrix", m_dynamicLightSpaceMatrix);
+    program.setUniformValue("u_farStaticLightSpaceMatrix", m_farStaticLightSpaceMatrix);
+    program.setUniformValue("u_farDynamicLightSpaceMatrix", m_farDynamicLightSpaceMatrix);
+    program.setUniformValue("u_nearShadowSplit", m_nearShadowSplit);
+    program.setUniformValue("u_shadowCascadeDebug", m_shadowCascadeDiagnostic);
+    program.setUniformValue("u_receiveStaticShadow", receiveStatic);
+    program.setUniformValue("u_receiveDynamicShadow", receiveDynamic);
+    program.setUniformValue("u_staticShadowMap", 1);
+    program.setUniformValue("u_dynamicShadowMap", 2);
+    program.setUniformValue("u_farStaticShadowMap", 3);
+    program.setUniformValue("u_farDynamicShadowMap", 4);
+    const float staticTexel = m_shadowFbo
+        ? 1.0f / float(m_shadowFbo->width()) : 0.0f;
+    const float dynamicTexel = m_dynamicShadowFbo
+        ? 1.0f / float(m_dynamicShadowFbo->width()) : 0.0f;
+    const float farStaticTexel = m_farShadowFbo
+        ? 1.0f / float(m_farShadowFbo->width()) : 0.0f;
+    const float farDynamicTexel = m_farDynamicShadowFbo
+        ? 1.0f / float(m_farDynamicShadowFbo->width()) : 0.0f;
+    program.setUniformValue("u_staticShadowTexelSize",
+                            QVector2D(staticTexel, staticTexel));
+    program.setUniformValue("u_dynamicShadowTexelSize",
+                            QVector2D(dynamicTexel, dynamicTexel));
+    program.setUniformValue("u_farStaticShadowTexelSize",
+                            QVector2D(farStaticTexel, farStaticTexel));
+    program.setUniformValue("u_farDynamicShadowTexelSize",
+                            QVector2D(farDynamicTexel, farDynamicTexel));
+    if(available)
+    {
+        QOpenGLFunctions* functions = QOpenGLContext::currentContext()->functions();
+        functions->glActiveTexture(GL_TEXTURE1);
+        ei::gl::BindTexture(GL_TEXTURE_2D, m_shadowFbo->texture());
+        functions->glActiveTexture(GL_TEXTURE2);
+        ei::gl::BindTexture(GL_TEXTURE_2D, m_dynamicShadowFbo->texture());
+        functions->glActiveTexture(GL_TEXTURE3);
+        ei::gl::BindTexture(GL_TEXTURE_2D, m_farShadowFbo->texture());
+        functions->glActiveTexture(GL_TEXTURE4);
+        ei::gl::BindTexture(GL_TEXTURE_2D, m_farDynamicShadowFbo->texture());
+        functions->glActiveTexture(GL_TEXTURE0);
+    }
 }
 
 void CView::paintGL()
 {
     makeCurrent();
-    glViewport(0, 0, width(), height());
-    glEnable(GL_DEPTH_TEST);
-    glDepthMask(GL_TRUE);
-    glEnable(GL_ALPHA_TEST);
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    // Treat framebuffer ownership as a frame-entry invariant. Shadow-map and
+    // diagnostic passes are allowed to bind private FBOs, but the visible
+    // scene must always begin on the widget/context default target.
+    const bool defaultFramebufferBound = QOpenGLFramebufferObject::bindDefault();
+    const bool diagnoseFrame = m_openGlDiagnosticFramesRemaining > 0;
+    if(diagnoseFrame)
+    {
+        ++m_openGlDiagnosticFrame;
+        ei::log(eLogInfo, QStringLiteral(
+            "OpenGL diagnostic frame begin id:%1 reason:%2 landscape:%3 mobs:%4")
+            .arg(m_openGlDiagnosticFrame)
+            .arg(m_openGlDiagnosticReason)
+            .arg(m_pLand && m_pLand->isMprLoad()
+                ? m_pLand->filePath().fileName() : QStringLiteral("none"))
+            .arg(m_aMob.size()));
+        ei::log(defaultFramebufferBound ? eLogInfo : eLogWarning,
+            QStringLiteral("OpenGL diagnostic presentation target rebound:%1")
+                .arg(defaultFramebufferBound ? 1 : 0));
+        logOpenGlDiagnosticState(QStringLiteral("frame/begin"));
+    }
+    ei::gl::Viewport(0, 0, width(), height());
+    ei::gl::Enable(GL_DEPTH_TEST);
+    ei::gl::DepthMask(GL_TRUE);
+    QOpenGLContext* paintContext = QOpenGLContext::currentContext();
+    if(paintContext && !paintContext->isOpenGLES())
+        ei::gl::Enable(GL_ALPHA_TEST);
+    ei::gl::Enable(GL_BLEND);
+    ei::gl::BlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    ei::gl::ColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
     const COptBool* statsOption = m_pSettings
         ? dynamic_cast<const COptBool*>(m_pSettings->opt("renderPerformanceCounters")) : nullptr;
     const bool collectStats = (statsOption && statsOption->value())
@@ -468,8 +1877,12 @@ void CView::paintGL()
     const bool timeGpu = collectStats && m_gpuTimer && !m_gpuTimerPending;
     if(timeGpu)
         m_gpuTimer->begin();
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    ei::gl::Clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    if(diagnoseFrame)
+        logOpenGlDiagnosticState(QStringLiteral("frame/initial-clear"), true);
     draw();
+    if(diagnoseFrame)
+        logOpenGlDiagnosticState(QStringLiteral("frame/scene-complete"), true);
     if(timeGpu)
     {
         m_gpuTimer->end();
@@ -477,6 +1890,13 @@ void CView::paintGL()
     }
     performance.endFrame();
     drawTestOverlaysOpenGl();
+    if(diagnoseFrame)
+    {
+        logOpenGlDiagnosticState(QStringLiteral("frame/overlays-complete"), true);
+        ei::log(eLogInfo, QStringLiteral("OpenGL diagnostic frame end id:%1")
+            .arg(m_openGlDiagnosticFrame));
+        --m_openGlDiagnosticFramesRemaining;
+    }
     //doneCurrent();
 }
 
@@ -537,11 +1957,17 @@ void CView::drawTestOverlaysOpenGl()
     m_program.setUniformValue("u_viewMmatrix", m_cam->viewMatrix());
     m_program.setUniformValue("u_projMmatrix", m_projection);
     m_program.setUniformValue("u_highlight", false);
+    // Editor overlays are authored colors/textures. They must remain readable
+    // regardless of the map clock, fog, scene lights, or shadow maps.
+    m_program.setUniformValue("u_environmentEnabled", false);
+    m_program.setUniformValue("u_fogEnabled", false);
+    m_program.setUniformValue("u_shadowsEnabled", false);
+    m_program.setUniformValue("u_pointLightCount", 0);
 
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    glEnable(GL_DEPTH_TEST);
-    glDepthMask(GL_FALSE);
+    ei::gl::Enable(GL_BLEND);
+    ei::gl::BlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    ei::gl::Enable(GL_DEPTH_TEST);
+    ei::gl::DepthMask(GL_FALSE);
 
     for(int index = 0; index < m_testEntranceRectangles.size(); ++index)
     {
@@ -570,19 +1996,19 @@ void CView::drawTestOverlaysOpenGl()
             selected ? QVector4D(0.20f, 1.0f, 0.38f, 0.37f)
                      : QVector4D(0.92f, 0.70f, 0.12f, 0.20f));
         m_program.setAttributeArray(position, vertices.constData());
-        glDrawArrays(GL_TRIANGLE_FAN, 0, vertices.size());
+        ei::gl::DrawArrays(GL_TRIANGLE_FAN, 0, vertices.size());
 
         m_program.setUniformValue("customColor",
             selected ? QVector4D(0.38f, 1.0f, 0.50f, 0.95f)
                      : QVector4D(0.92f, 0.75f, 0.18f, 0.80f));
-        glLineWidth(selected ? 3.0f : 1.0f);
-        glDrawArrays(GL_LINE_LOOP, 0, vertices.size());
+        ei::gl::LineWidth(selected ? 3.0f : 1.0f);
+        ei::gl::DrawArrays(GL_LINE_LOOP, 0, vertices.size());
     }
 
     if(m_testEntranceLabelTexturesDirty)
     {
         if(!m_testEntranceLabelTextures.isEmpty())
-            glDeleteTextures(m_testEntranceLabelTextures.size(),
+            ei::gl::DeleteTextures(m_testEntranceLabelTextures.size(),
                              m_testEntranceLabelTextures.constData());
         m_testEntranceLabelTextures.clear();
         for(const QImage& image : m_testEntranceLabelImages)
@@ -600,7 +2026,7 @@ void CView::drawTestOverlaysOpenGl()
         m_program.setUniformValue("u_projMmatrix", identity);
         m_program.setUniformValue("customColor", QVector4D(0.0f, 0.0f, 0.0f, 0.0f));
         m_program.setUniformValue("qt_Texture0", 0);
-        glDisable(GL_DEPTH_TEST);
+        ei::gl::Disable(GL_DEPTH_TEST);
         const QRect viewport(0, 0, width(), height());
         const QVector<QVector2D> textureCoordinates = {
             QVector2D(0.0f, 0.0f), QVector2D(1.0f, 0.0f),
@@ -632,12 +2058,12 @@ void CView::drawTestOverlaysOpenGl()
                 QVector3D(centerX + halfWidth, centerY + halfHeight, 0.0f),
                 QVector3D(centerX - halfWidth, centerY + halfHeight, 0.0f)
             };
-            glBindTexture(GL_TEXTURE_2D, m_testEntranceLabelTextures.at(index));
+            ei::gl::BindTexture(GL_TEXTURE_2D, m_testEntranceLabelTextures.at(index));
             m_program.setAttributeArray(position, quad.constData());
             m_program.setAttributeArray(texture, textureCoordinates.constData());
-            glDrawArrays(GL_TRIANGLE_FAN, 0, quad.size());
+            ei::gl::DrawArrays(GL_TRIANGLE_FAN, 0, quad.size());
         }
-        glBindTexture(GL_TEXTURE_2D, 0);
+        ei::gl::BindTexture(GL_TEXTURE_2D, 0);
         m_program.disableAttributeArray(texture);
     }
 
@@ -649,8 +2075,8 @@ void CView::drawTestOverlaysOpenGl()
             m_testSpawnMarkerSelected ? QVector4D(0.92f, 1.0f, 0.32f, 1.0f)
             : m_testSpawnMarkerAdjusted ? QVector4D(1.0f, 0.67f, 0.18f, 0.82f)
                                         : QVector4D(0.31f, 1.0f, 0.47f, 0.72f));
-        glEnable(GL_DEPTH_TEST);
-        glLineWidth(3.0f);
+        ei::gl::Enable(GL_DEPTH_TEST);
+        ei::gl::LineWidth(3.0f);
         QVector<QVector3D> figure;
         const float z = m_testSpawnMarker.z() + 0.08f;
         const int segments = 24;
@@ -661,7 +2087,7 @@ void CView::drawTestOverlaysOpenGl()
                                     m_testSpawnMarker.y() + qSin(angle) * 0.55f, z));
         }
         m_program.setAttributeArray(position, figure.constData());
-        glDrawArrays(GL_LINE_LOOP, 0, figure.size());
+        ei::gl::DrawArrays(GL_LINE_LOOP, 0, figure.size());
         const QVector<QVector3D> body = {
             QVector3D(m_testSpawnMarker.x(), m_testSpawnMarker.y(), z + 1.72f),
             QVector3D(m_testSpawnMarker.x(), m_testSpawnMarker.y(), z + 0.72f),
@@ -673,7 +2099,7 @@ void CView::drawTestOverlaysOpenGl()
             QVector3D(m_testSpawnMarker.x() + 0.34f, m_testSpawnMarker.y(), z)
         };
         m_program.setAttributeArray(position, body.constData());
-        glDrawArrays(GL_LINES, 0, body.size());
+        ei::gl::DrawArrays(GL_LINES, 0, body.size());
         QVector<QVector3D> head;
         for(int i = 0; i < segments; ++i)
         {
@@ -682,25 +2108,359 @@ void CView::drawTestOverlaysOpenGl()
                                   m_testSpawnMarker.y(), z + 1.93f + qSin(angle) * 0.24f));
         }
         m_program.setAttributeArray(position, head.constData());
-        glDrawArrays(GL_LINE_LOOP, 0, head.size());
+        ei::gl::DrawArrays(GL_LINE_LOOP, 0, head.size());
     }
 
     m_program.disableAttributeArray(position);
     m_program.setUniformValue("customColor", QVector4D(0.0f, 0.0f, 0.0f, 0.0f));
-    glLineWidth(1.0f);
-    glDepthMask(GL_TRUE);
-    glEnable(GL_DEPTH_TEST);
+    ei::gl::LineWidth(1.0f);
+    ei::gl::DepthMask(GL_TRUE);
+    ei::gl::Enable(GL_DEPTH_TEST);
+}
+
+bool CView::ensureParticleRendererInitialized()
+{
+    if(m_particleRendererReady)
+        return true;
+    if(m_particleInitializationAttempted)
+        return false;
+    m_particleInitializationAttempted = true;
+
+    // Particle rendering is optional. Preserve the scene renderer's bindings
+    // while Qt compiles the auxiliary shader and initializes its quad buffer;
+    // a failure must disable only particles, never the viewport.
+    GLint previousProgram = 0;
+    GLint previousArrayBuffer = 0;
+    GLint previousVertexArray = 0;
+    ei::gl::GetIntegerv(GL_CURRENT_PROGRAM, &previousProgram);
+    ei::gl::GetIntegerv(GL_ARRAY_BUFFER_BINDING, &previousArrayBuffer);
+    QOpenGLContext* context = QOpenGLContext::currentContext();
+    QOpenGLExtraFunctions* functions = context ? context->extraFunctions() : nullptr;
+    if(functions)
+    {
+        ei::gl::GetIntegerv(GL_VERTEX_ARRAY_BINDING, &previousVertexArray);
+        functions->glBindVertexArray(0);
+    }
+
+    const auto restoreBindings = [&]()
+    {
+        if(functions)
+            functions->glBindVertexArray(GLuint(previousVertexArray));
+        if(functions)
+        {
+            functions->glBindBuffer(GL_ARRAY_BUFFER, GLuint(previousArrayBuffer));
+            functions->glUseProgram(GLuint(previousProgram));
+        }
+    };
+    const auto fail = [&](const QString& stage)
+    {
+        ei::log(eLogWarning, QStringLiteral("Particle renderer disabled (%1): %2")
+            .arg(stage, m_particleProgram.log()));
+        if(m_particleBuffer.isCreated())
+            m_particleBuffer.destroy();
+        restoreBindings();
+        return false;
+    };
+
+    if(!m_particleProgram.addShaderFromSourceFile(
+            QOpenGLShader::Vertex, ":/particle.vsh"))
+        return fail(QStringLiteral("vertex shader"));
+    if(!m_particleProgram.addShaderFromSourceFile(
+            QOpenGLShader::Fragment, ":/particle.fsh"))
+        return fail(QStringLiteral("fragment shader"));
+    if(!m_particleProgram.link())
+        return fail(QStringLiteral("program link"));
+
+    static const float particleQuad[] = {
+        -0.5f, -0.5f, 0.0f, 1.0f,
+         0.5f, -0.5f, 1.0f, 1.0f,
+         0.5f,  0.5f, 1.0f, 0.0f,
+        -0.5f, -0.5f, 0.0f, 1.0f,
+         0.5f,  0.5f, 1.0f, 0.0f,
+        -0.5f,  0.5f, 0.0f, 0.0f
+    };
+    if(!m_particleBuffer.create())
+        return fail(QStringLiteral("vertex buffer creation"));
+    m_particleBuffer.setUsagePattern(QOpenGLBuffer::StaticDraw);
+    if(!m_particleBuffer.bind())
+        return fail(QStringLiteral("vertex buffer binding"));
+    m_particleBuffer.allocate(particleQuad, int(sizeof(particleQuad)));
+    m_particleBuffer.release();
+    restoreBindings();
+
+    m_particleRendererReady = true;
+    ei::log(eLogInfo, "Particle renderer initialized lazily");
+    return true;
+}
+
+void CView::drawParticles(const QMatrix4x4& cameraMatrix,
+                          const CViewFrustum* frustum)
+{
+    // Keep the particle renderer completely outside terrain-only frames.
+    // In particular, do not lazily resolve particle atlases or touch the
+    // particle shader/VBO/VAO when an MPR is open without a MOB. Besides
+    // avoiding needless work, this is an important render-state boundary:
+    // the terrain renderer must not depend on a no-op particle pass restoring
+    // state correctly on the following frame.
+    bool hasVisibleEffect = false;
+    for(CMob* mob : m_aMob)
+    {
+        if(!isMobVisible(mob))
+            continue;
+        const QVector<CNode*> candidates = spatiallyVisibleNodes(mob, frustum, nullptr);
+        for(CNode* node : candidates)
+        {
+            if(!node || node->isMarkDeleted()
+                    || node->nodeState() == ENodeState::eHidden)
+                continue;
+            if(dynamic_cast<CParticle*>(node) || dynamic_cast<CTorch*>(node))
+            {
+                hasVisibleEffect = true;
+                break;
+            }
+        }
+        if(hasVisibleEffect)
+            break;
+    }
+    if(!hasVisibleEffect)
+        return;
+    if(!ensureParticleRendererInitialized())
+        return;
+
+    // Resolve every resource before changing shader, buffer, depth or blend
+    // state. Texture creation can fail during a profile/map transition and an
+    // early return must never leave the rest of the frame using particle GL
+    // state.
+    CTextureList* textures = CTextureList::getInstance();
+    QOpenGLTexture* fallbackTexture = textures->textureDefault();
+    QOpenGLTexture* fireSmokeTexture = textures->texture("firesmoke");
+    if(fireSmokeTexture == fallbackTexture)
+        fireSmokeTexture = nullptr;
+    QOpenGLTexture* tendrilSmokeTexture = textures->texture("tendrismoke");
+    if(tendrilSmokeTexture == fallbackTexture)
+        tendrilSmokeTexture = fireSmokeTexture;
+
+    bool inverseOk = false;
+    const QMatrix4x4 inverseView = cameraMatrix.inverted(&inverseOk);
+    if(!inverseOk)
+        return;
+    const QVector3D cameraRight = (inverseView * QVector4D(1.0f, 0.0f, 0.0f, 0.0f))
+        .toVector3D().normalized();
+    const QVector3D cameraUp = (inverseView * QVector4D(0.0f, 1.0f, 0.0f, 0.0f))
+        .toVector3D().normalized();
+    if(cameraRight.isNull() || cameraUp.isNull())
+        return;
+
+    if(!m_particleProgram.bind())
+        return;
+    m_particleProgram.setUniformValue("u_projMmatrix", m_projection);
+    m_particleProgram.setUniformValue("u_viewMmatrix", cameraMatrix);
+    m_particleProgram.setUniformValue("u_cameraRight", cameraRight);
+    m_particleProgram.setUniformValue("u_cameraUp", cameraUp);
+
+    // Scene parts are submitted through cached VAOs. Never configure the
+    // particle quad while the last part VAO is still bound: doing so replaces
+    // that cached VAO's position/UV layout with the particle VBO and corrupts
+    // normal scene submission on the following frame. The default VAO is
+    // sufficient for this small compatibility-profile billboard pass and
+    // keeps the particle attributes isolated from every shared mesh.
+    QOpenGLContext* particleContext = QOpenGLContext::currentContext();
+    QOpenGLExtraFunctions* particleFunctions
+        = particleContext ? particleContext->extraFunctions() : nullptr;
+    if(particleFunctions)
+        particleFunctions->glBindVertexArray(0);
+
+    if(!m_particleBuffer.bind())
+    {
+        m_particleProgram.release();
+        return;
+    }
+    const int positionLocation = m_particleProgram.attributeLocation("a_position");
+    const int textureLocation = m_particleProgram.attributeLocation("a_texture");
+    if(positionLocation < 0 || textureLocation < 0)
+    {
+        m_particleBuffer.release();
+        m_particleProgram.release();
+        return;
+    }
+    m_particleProgram.enableAttributeArray(positionLocation);
+    m_particleProgram.enableAttributeArray(textureLocation);
+    m_particleProgram.setAttributeBuffer(positionLocation, GL_FLOAT, 0, 2,
+                                         4 * int(sizeof(float)));
+    m_particleProgram.setAttributeBuffer(textureLocation, GL_FLOAT,
+                                         2 * int(sizeof(float)), 2,
+                                         4 * int(sizeof(float)));
+
+    ei::gl::Enable(GL_DEPTH_TEST);
+    ei::gl::DepthMask(GL_FALSE);
+    ei::gl::Enable(GL_BLEND);
+    ei::gl::BlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    bool additiveBlend = false;
+    QOpenGLTexture* boundTexture = nullptr;
+    const float timeSeconds = float(QDateTime::currentMSecsSinceEpoch() % 600000) / 1000.0f;
+    RenderPerformanceContext& performance = RenderPerformanceContext::instance();
+
+    const auto drawSprite = [&](const QVector3D& center, float scale, float aspect, float rotation,
+                                const QVector4D& tint, QOpenGLTexture* texture,
+                                const QVector4D& uvRect, bool additive, bool radialMask,
+                                float softness)
+    {
+        if(texture != boundTexture)
+        {
+            if(texture)
+                texture->bind(0);
+            else
+                ei::gl::BindTexture(GL_TEXTURE_2D, 0);
+            boundTexture = texture;
+            if(performance.collecting())
+                ++performance.counters().textureBinds;
+        }
+        if(additive != additiveBlend)
+        {
+            ei::gl::BlendFunc(GL_SRC_ALPHA, additive ? GL_ONE : GL_ONE_MINUS_SRC_ALPHA);
+            additiveBlend = additive;
+        }
+        m_particleProgram.setUniformValue("u_center", center);
+        const float width = qBound(0.03f, scale, 64.0f);
+        m_particleProgram.setUniformValue("u_size",
+            QVector2D(width, width * qBound(0.25f, aspect, 4.0f)));
+        m_particleProgram.setUniformValue("u_rotation", rotation);
+        m_particleProgram.setUniformValue("u_tint", tint);
+        m_particleProgram.setUniformValue("u_useTexture", texture != nullptr);
+        m_particleProgram.setUniformValue("u_radialMask", radialMask);
+        m_particleProgram.setUniformValue("u_softness", softness);
+        m_particleProgram.setUniformValue("u_uvRect", uvRect);
+        ei::gl::DrawArrays(GL_TRIANGLES, 0, 6);
+        if(performance.collecting())
+        {
+            ++performance.counters().drawCalls;
+            performance.counters().triangles += 2;
+            ++performance.counters().nodesSubmitted;
+        }
+    };
+
+    const auto drawFireSmoke = [&](const QVector3D& origin, float authoredScale,
+                                   uint seed, bool selected, uint kind)
+    {
+        const float baseScale = qBound(0.25f, authoredScale, 8.0f);
+        const int logicalTick = int(std::floor(timeSeconds
+            * float(ei::particle::kLogicalTicksPerSecond)));
+        const ei::particle::Family family = ei::particle::familyForKind(kind);
+        QOpenGLTexture* atlas = tendrilSmokeTexture
+            ? tendrilSmokeTexture : fireSmokeTexture;
+
+        // game.exe's CampFire constructor creates six records with a 32-tick
+        // life. Frames 0..7 are the authored flame sequence; frames 8..14 are
+        // smoke and advance once per four logical ticks. Render the complete
+        // 4x4 cells: the texture already contains its silhouette and alpha.
+        for(int slot = ei::particle::kEmitterSlots - 1; slot >= 0; --slot)
+        {
+            const ei::particle::FrameSample frame = ei::particle::sample(
+                family, logicalTick, slot, seed);
+            const float age = frame.normalizedAge;
+            const float lateralX = ei::particle::signedNoise(seed, slot, 0x91e10da5u);
+            const float lateralY = ei::particle::signedNoise(seed, slot, 0x6d2b79f5u);
+            const float rise = frame.smoke
+                ? (0.70f + age * 1.65f) : (0.30f + age * 0.85f);
+            const QVector3D center = origin
+                + QVector3D(lateralX * 0.20f * baseScale,
+                            lateralY * 0.20f * baseScale,
+                            rise * baseScale);
+            const float spriteScale = baseScale * (frame.smoke
+                ? (0.62f + age * 0.38f) : (0.78f + age * 0.12f));
+            QVector4D tint = selected
+                ? QVector4D(0.42f, 0.88f, 1.0f, 0.92f)
+                : QVector4D(1.0f, 1.0f, 1.0f,
+                            frame.smoke ? (0.74f * (1.0f - age * 0.35f)) : 0.96f);
+            drawSprite(center, spriteScale, 1.0f, 0.0f, tint, atlas,
+                       ei::particle::atlasUv(frame.frame), !frame.smoke,
+                       atlas == nullptr, 0.18f);
+        }
+    };
+
+    for(CMob* mob : m_aMob)
+    {
+        if(!isMobVisible(mob))
+            continue;
+        const QVector<CNode*> candidates = spatiallyVisibleNodes(mob, frustum, nullptr);
+        for(CNode* node : candidates)
+        {
+            if(!node || node->isMarkDeleted()
+                    || node->nodeState() == ENodeState::eHidden)
+                continue;
+
+            if(CTorch* torch = dynamic_cast<CTorch*>(node))
+            {
+                // A torch remains an ordinary textured world object. Its
+                // authored TORCH_PTLINK only adds this attached effect.
+                drawFireSmoke(torch->particleWorldPosition(), 1.0f,
+                              torch->mapId(), torch->nodeState() == ENodeState::eSelect,
+                              8193u);
+                continue;
+            }
+
+            CParticle* particle = dynamic_cast<CParticle*>(node);
+            if(!particle)
+                continue;
+
+            const SParticleVisualStyle style = particleVisualStyle(particle->kind());
+            QOpenGLTexture* texture = style.textureName
+                ? textures->texture(QString::fromLatin1(style.textureName)) : fallbackTexture;
+            const bool useTexture = texture && texture != fallbackTexture;
+            texture = useTexture ? texture : nullptr;
+            QVector3D center = particle->drawPosition();
+            if(center.isNull() && !particle->position().isNull())
+                center = particle->position();
+            const float authoredScale = particle->particleScale() > 0.0f
+                ? particle->particleScale() : 1.0f;
+            const float phase = timeSeconds * (0.75f + float(particle->kind() % 7) * 0.08f)
+                + float(particle->mapId() % 31) * 0.37f;
+            const float pulse = 1.0f + 0.08f * qSin(phase * 2.1f);
+            QVector4D tint = style.tint;
+            if(particle->nodeState() == ENodeState::eSelect)
+                tint = QVector4D(0.10f, 0.90f, 1.0f, qMax(0.78f, tint.w()));
+
+            if(isPersistentFireParticle(particle->kind())
+                    || isPersistentSmokeParticle(particle->kind()))
+            {
+                drawFireSmoke(center, authoredScale * style.scaleMultiplier,
+                              particle->mapId(),
+                              particle->nodeState() == ENodeState::eSelect,
+                              particle->kind());
+                continue;
+            }
+            drawSprite(center, authoredScale * style.scaleMultiplier * pulse,
+                       1.0f, phase * 0.18f, tint, useTexture ? texture : nullptr,
+                       QVector4D(0.0f, 0.0f, 1.0f, 1.0f),
+                       style.additive, true, style.softness);
+        }
+    }
+
+    ei::gl::BindTexture(GL_TEXTURE_2D, 0);
+    ei::gl::BlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    ei::gl::DepthMask(GL_TRUE);
+    m_particleProgram.disableAttributeArray(textureLocation);
+    m_particleProgram.disableAttributeArray(positionLocation);
+    m_particleBuffer.release();
+    m_particleProgram.release();
 }
 
 void CView::draw()
 {
 
     QMatrix4x4 camMatrix = m_cam->update();
-    QVector3D cameraPosition, cameraPivot, cameraRotation;
-    m_cam->getLocation(cameraPosition, cameraPivot, cameraRotation);
+    QVector3D cameraAnchor, cameraPivot, cameraRotation;
+    m_cam->getLocation(cameraAnchor, cameraPivot, cameraRotation);
+    bool cameraEyeOk = false;
+    const QVector3D renderedCameraEye = ei::cameraEyeFromView(camMatrix, &cameraEyeOk);
+    const QVector3D cameraPosition = cameraEyeOk ? renderedCameraEye : cameraAnchor;
     const COptBool* animationOption = m_pSettings
         ? dynamic_cast<const COptBool*>(m_pSettings->opt("animateUnits")) : nullptr;
     const bool animationEnabled = !animationOption || animationOption->value();
+    const COptBool* mipmappingOption = m_pSettings
+        ? dynamic_cast<const COptBool*>(m_pSettings->opt("renderTextureMipmapping")) : nullptr;
+    CTextureList::getInstance()->setTerrainMipmappingEnabled(
+        !mipmappingOption || mipmappingOption->value());
     AnimationFrameContext::instance().beginFrame(cameraPosition,
         QDateTime::currentMSecsSinceEpoch(), animationEnabled);
     const COptBool* cullingOption = m_pSettings
@@ -715,6 +2475,76 @@ void CView::draw()
     const bool drawHelp = drawHelpOption && drawHelpOption->value();
     const bool logicMode = CScene::getInstance()->getMode() == eEditModeLogic;
     const bool traverseHelpers = drawLogic || drawHelp || logicMode;
+    const auto renderBool = [this](const char* name, bool fallback)
+    {
+        const COptBool* option = m_pSettings
+            ? dynamic_cast<const COptBool*>(m_pSettings->opt(name)) : nullptr;
+        return option ? option->value() : fallback;
+    };
+    const COptInt* lightingModeOption = m_pSettings
+        ? dynamic_cast<const COptInt*>(m_pSettings->opt("renderLightingMode")) : nullptr;
+    const int requestedLightingMode = qBound(0,
+        lightingModeOption ? lightingModeOption->value() : 2, 2);
+    const int lightingMode = m_openGlesCompatibility
+        ? qMin(requestedLightingMode, 1) : requestedLightingMode;
+    const bool environmentEnabled = lightingMode == 2;
+    // The viewport lighting-model selector owns environment activation. Keep
+    // the resource sky in Full environment and out of the compatibility
+    // modes instead of exposing a contradictory second Render setting.
+    const bool skyEnabled = environmentEnabled;
+    const bool fogEnabled = renderBool("renderFog", true);
+    const bool sceneLightsEnabled = renderBool("renderSceneLights", true);
+    const COptInt* shadowQualityOption = m_pSettings
+        ? dynamic_cast<const COptInt*>(m_pSettings->opt("renderShadowQuality")) : nullptr;
+    const int shadowQuality = qBound(0,
+        shadowQualityOption ? shadowQualityOption->value() : 2, 2);
+    const bool shadowsEnabled = environmentEnabled && !m_openGlesCompatibility
+        && shadowQuality > 0
+        && ensureShadowFramebuffers(shadowQuality);
+    const COptInt* shadowDistanceOption = m_pSettings
+        ? dynamic_cast<const COptInt*>(m_pSettings->opt("renderShadowDistance")) : nullptr;
+    // The old adaptive map stopped at 160 world units. Keep twice that reach
+    // by default while allowing large-scene authors to tune the preview.
+    const float maximumShadowDistance = float(qBound(1,
+        shadowDistanceOption ? shadowDistanceOption->value() : 320, 1024));
+    const bool overrideWorldTime = renderBool("overrideWorldTime", false);
+    const COptInt* timeOption = m_pSettings
+        ? dynamic_cast<const COptInt*>(m_pSettings->opt("renderTimeOfDay")) : nullptr;
+    const float previewTime = timeOption
+        ? ei::clockValueToHours(timeOption->value()) : 12.0f;
+    const CWorldSet* worldSet = m_environmentMob
+        ? &m_environmentMob->worldSet() : nullptr;
+    const ei::SRenderEnvironment environment = ei::renderEnvironment(
+        worldSet, overrideWorldTime, previewTime, m_caveEnvironment);
+    syncEnvironmentPreviewWidget(environment.timeHours);
+    // Fill the open lower edge of the stock sky cylinder with the same color
+    // that distant geometry converges to. This removes the editor-only black
+    // seam without modifying the profile sky asset.
+    if(environmentEnabled && fogEnabled)
+        ei::gl::ClearColor(environment.fogColor.x(), environment.fogColor.y(),
+                     environment.fogColor.z(), 1.0f);
+    else
+        ei::gl::ClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    ei::gl::Clear(GL_COLOR_BUFFER_BIT);
+
+    QVector<CLight*> sceneLights;
+    if(environmentEnabled && sceneLightsEnabled)
+    {
+        for(CMob* mob : m_aMob)
+            for(CNode* node : mob->nodes())
+                if(CLight* light = dynamic_cast<CLight*>(node))
+                    if(light->nodeState() != ENodeState::eHidden && light->range() > 0.0f
+                            && (!cullingEnabled || frustum.intersectsSphere(
+                                    light->position(), light->range())))
+                        sceneLights.append(light);
+        std::sort(sceneLights.begin(), sceneLights.end(), [&cameraPosition](CLight* left, CLight* right)
+        {
+            return (left->position() - cameraPosition).lengthSquared()
+                 < (right->position() - cameraPosition).lengthSquared();
+        });
+        if(sceneLights.size() > 8)
+            sceneLights.resize(8);
+    }
 
     RenderPerformanceContext& performance = RenderPerformanceContext::instance();
     if(performance.collecting())
@@ -745,6 +2575,8 @@ void CView::draw()
         metadata.logicEnabled = drawLogic;
         metadata.helpEnabled = drawHelp;
         metadata.frustumCullingEnabled = cullingEnabled;
+        metadata.shadowQuality = shadowQuality;
+        metadata.shadowAtlasResolution = m_shadowResolution;
         performance.setFrameMetadata(metadata);
     }
 
@@ -766,6 +2598,9 @@ void CView::draw()
         }
         return result;
     };
+    if(environmentEnabled && skyEnabled && !m_caveEnvironment)
+        drawSkybox(camMatrix, environment);
+    logOpenGlErrors(QStringLiteral("draw/sky"));
     // Set modelview-projection matrix
 
     // Bind shader pipeline for use
@@ -776,17 +2611,13 @@ void CView::draw()
     //m_landProgram.setUniformValue("u_watcherPos", m_cam->pos());
     m_landProgram.setUniformValue("u_projMmatrix", m_projection);
     m_landProgram.setUniformValue("u_viewMmatrix", camMatrix);
+    applyEnvironmentUniforms(m_landProgram, environment, sceneLights,
+                             lightingMode, fogEnabled);
 //    m_landProgram.setUniformValue("u_color", QVector4D(0.0, 1.0, 0.0, 1.0));
 //    m_landProgram.setUniformValue("u_lightPosition", QVector4D(0.0, 0.0, 2.0, 1.0));
 //    m_landProgram.setUniformValue("u_lightPower", 5.0f);
 //    m_landProgram.setUniformValue("u_lightColor", QVector4D(1.0, 1.0, 1.0, 1.0));
 //    m_landProgram.setUniformValue("u_highlight", false);
-    if (m_landscapeVisible && m_pLand && m_pLand->isMprLoad() && m_bPreviewTile) // draw preview tile on top
-        drawTilePreview(&m_landProgram);
-
-    if (m_landscapeVisible && m_pLand && m_pLand->isMprLoad() && m_bDrawLand)
-        m_pLand->draw(&m_landProgram, cullingEnabled ? &frustum : nullptr);
-
     // Bind shader pipeline for use
     if (!m_program.bind())
         close();
@@ -797,11 +2628,42 @@ void CView::draw()
     const QVector4D lockedHighlight(1.0f, 0.55f, 0.05f, 0.0f);
     m_program.setUniformValue("u_highlightColor", activeHighlight);
     m_program.setUniformValue("qt_Texture0", 0);
+    applyEnvironmentUniforms(m_program, environment, sceneLights,
+                             lightingMode, fogEnabled);
+    applyShadowUniforms(m_program, false);
     RenderQueueContext& renderQueue = RenderQueueContext::instance();
     renderQueue.begin(&m_program, cameraPosition);
+    bool terrainDrawn = false;
+    const auto drawTerrainColor = [&](bool withShadows)
+    {
+        if(!m_landProgram.bind())
+            close();
+        m_landProgram.setUniformValue("u_projMmatrix", m_projection);
+        m_landProgram.setUniformValue("u_viewMmatrix", camMatrix);
+        applyEnvironmentUniforms(m_landProgram, environment, sceneLights,
+                                 lightingMode, fogEnabled);
+        applyShadowUniforms(m_landProgram, withShadows, true, true);
+        if(m_landscapeVisible && m_pLand && m_pLand->isMprLoad() && m_bDrawLand)
+            m_pLand->draw(&m_landProgram, cullingEnabled ? &frustum : nullptr);
+        if(m_landscapeVisible && m_pLand && m_pLand->isMprLoad() && m_bPreviewTile)
+            drawTilePreview(&m_landProgram);
+        logOpenGlErrors(QStringLiteral("draw/terrain"));
+        terrainDrawn = true;
+        m_program.bind();
+        m_program.setUniformValue("u_projMmatrix", m_projection);
+        m_program.setUniformValue("u_viewMmatrix", camMatrix);
+        m_program.setUniformValue("qt_Texture0", 0);
+        applyEnvironmentUniforms(m_program, environment, sceneLights,
+                                 lightingMode, fogEnabled);
+        // Stock projected shadows use selected receivers. Ordinary static
+        // meshes do not receive their own broad static map; this removes the
+        // camera-dependent fence/roof acne absent from the game.
+        applyShadowUniforms(m_program, withShadows, false, true);
+    };
 
     if(m_activeMob != nullptr)
     {
+        QSet<CNode*> colorSubmittedNodes;
         for(auto& mob: m_aMob) //TODO: draw inactive mobs with custom color|alfa or something
         {
             if(!isMobVisible(mob))
@@ -817,6 +2679,7 @@ void CView::draw()
                 if(node->nodeState() == ENodeState::eSelect)
                     continue;
                 node->drawObjectVisual(false, &m_program);
+                colorSubmittedNodes.insert(node);
                 if(performance.collecting())
                     ++performance.counters().nodesSubmitted;
                 if(!traverseHelpers && node->nodeState() == ENodeState::eSelect)
@@ -843,6 +2706,7 @@ void CView::draw()
             if(isMobVisible(m_activeMob) && node->nodeState() != ENodeState::eSelect)
             {
                 node->drawObjectVisual(true, &m_program);
+                colorSubmittedNodes.insert(node);
                 if(performance.collecting())
                     ++performance.counters().nodesSubmitted;
             }
@@ -855,8 +2719,63 @@ void CView::draw()
                     if(performance.collecting())
                         ++performance.counters().logicSubmissions;
                 }
+        if(environmentEnabled && shadowsEnabled)
+        {
+            // A caster outside the color frustum can still project a visible
+            // shadow. Collect that geometry for the shadow pass only.
+            renderQueue.setShadowOnlyCollection(true);
+            const QVector3D shadowSweep = environment.sunDirection.normalized()
+                * maximumShadowDistance;
+            for(CMob* mob : m_aMob)
+            {
+                if(!isMobVisible(mob))
+                    continue;
+                if(m_spatialIndexDirty)
+                    rebuildSpatialIndices();
+                const QSharedPointer<CSpatialGrid<CNode*>> grid
+                    = m_spatialIndices.value(mob);
+                SSpatialQueryStats shadowStats;
+                const QVector<CNode*> shadowCandidates = grid
+                    ? grid->querySwept(cullingEnabled ? &frustum : nullptr,
+                                       shadowSweep, &shadowStats)
+                    : QVector<CNode*>();
+                if(performance.collecting())
+                {
+                    performance.counters().spatialCellsTested += shadowStats.cellsTested;
+                    performance.counters().spatialCellsVisible += shadowStats.cellsVisible;
+                    performance.counters().spatialCandidates += shadowStats.candidates;
+                }
+                const QList<CNode*> candidates = grid
+                    ? shadowCandidates.toList() : mob->nodes();
+                for(CNode* node : candidates)
+                {
+                    if(!node || colorSubmittedNodes.contains(node)
+                            || node->isMarkDeleted()
+                            || node->nodeState() == ENodeState::eHidden
+                            || !node->castsRenderShadow())
+                        continue;
+                    CBox bounds = node->getBBox();
+                    if(!bounds.isInit())
+                        continue;
+                    const QVector3D center = bounds.center() + node->drawPosition();
+                    const float radius = bounds.radius();
+                    if(!qIsFinite(center.x()) || !qIsFinite(center.y())
+                            || !qIsFinite(center.z()) || !qIsFinite(radius)
+                            || (center - cameraPosition).length()
+                                > maximumShadowDistance + radius)
+                        continue;
+                    node->drawObjectVisual(mob == m_activeMob, &m_program);
+                }
+            }
+            renderQueue.setShadowOnlyCollection(false);
+        }
+        const bool shadowReady = environmentEnabled && shadowsEnabled
+            && renderShadowMap(cameraPosition, cameraPivot, environment,
+                               renderQueue, maximumShadowDistance);
+        drawTerrainColor(shadowReady);
         renderQueue.flush();
-        glDepthFunc(GL_LEQUAL);
+        logOpenGlErrors(QStringLiteral("draw/object-queue"));
+        ei::gl::DepthFunc(GL_LEQUAL);
         for(CMob* mob : m_aMob)
             if(isMobVisible(mob))
                 for(CNode* node : mob->nodes())
@@ -875,8 +2794,11 @@ void CView::draw()
                     }
         m_program.setUniformValue("u_highlightColor", activeHighlight);
         renderQueue.flush();
-        glDepthFunc(GL_LESS);
+        ei::gl::DepthFunc(GL_LESS);
     }
+
+    if(!terrainDrawn)
+        drawTerrainColor(false);
 
     renderQueue.end();
     if(performance.collecting())
@@ -896,9 +2818,21 @@ void CView::draw()
             close();
 
         m_landProgram.setUniformValue("transparency", 0.3f);
+        m_landProgram.setUniformValue("u_animateLiquid", true);
+        m_landProgram.setUniformValue("u_liquidTime",
+            float(QDateTime::currentMSecsSinceEpoch() % 600000) / 1000.0f);
+        applyEnvironmentUniforms(m_landProgram, environment, sceneLights,
+                                 lightingMode, fogEnabled);
+        applyShadowUniforms(m_landProgram, environmentEnabled && shadowsEnabled,
+                            true, true);
         m_pLand->drawWater(&m_landProgram, cullingEnabled ? &frustum : nullptr);
+        logOpenGlErrors(QStringLiteral("draw/water"));
+        m_landProgram.setUniformValue("u_animateLiquid", false);
         m_landProgram.setUniformValue("transparency", 0.0f);
     }
+
+    drawParticles(camMatrix, cullingEnabled ? &frustum : nullptr);
+    logOpenGlErrors(QStringLiteral("draw/particles"));
 
 
     //draw selection frame using m_program shader
@@ -934,6 +2868,8 @@ void CView::loadLandscape(const QFileInfo& filePath)
     for(CMob* mob : m_aMob)
         mob->reprojectForCurrentTerrain();
     m_landscapeVisible = true;
+    armOpenGlDiagnostics(QStringLiteral("landscape loaded: %1")
+        .arg(filePath.fileName()), 6);
     m_spatialIndexDirty = true;
     m_sceneFingerprintDirty = true;
     emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMpr, filePath.baseName());
@@ -972,6 +2908,7 @@ void CView::unloadLand(bool promptForSave)
 
     m_mprModifyTimer->stop();
     m_pLand->unloadMpr();
+    m_caveEnvironment = false;
     for(CMob* mob : m_aMob)
         mob->reprojectForCurrentTerrain();
     m_spatialIndexDirty = true;
@@ -1252,8 +3189,8 @@ void CView::getColorFromRect(const QRect& rect, QVector<SColor>& aColor)
     uint size = component * w * h;
     QByteArray* pixel = new QByteArray();
     pixel->resize(size);
-    glPixelStorei(GL_PACK_ALIGNMENT, 1); // glReadPixels use 4 component by default. for RGB must define pack alignment
-    glReadPixels(inversedRect.left(), inversedRect.bottom(), w, h, GL_RGB, GL_UNSIGNED_BYTE, pixel->data());
+    ei::gl::PixelStorei(GL_PACK_ALIGNMENT, 1); // glReadPixels use 4 component by default. for RGB must define pack alignment
+    ei::gl::ReadPixels(inversedRect.left(), inversedRect.bottom(), w, h, GL_RGB, GL_UNSIGNED_BYTE, pixel->data());
     SColor color;
     for(int i(0); i<component * w * h; i+=3)
     {
@@ -1334,17 +3271,141 @@ QString stringFromUnsignedChar(const unsigned char *str ){
     return result;
 }
 
+void CView::armOpenGlDiagnostics(const QString& reason, int frameCount)
+{
+    m_openGlDiagnosticReason = reason;
+    m_openGlDiagnosticFramesRemaining = qMax(m_openGlDiagnosticFramesRemaining,
+                                               qMax(1, frameCount));
+    ei::log(eLogInfo, QStringLiteral(
+        "OpenGL diagnostics armed reason:%1 frames:%2")
+        .arg(reason).arg(m_openGlDiagnosticFramesRemaining));
+}
+
+bool CView::logOpenGlErrors(const QString& stage)
+{
+    if(m_openGlDiagnosticFramesRemaining <= 0
+            && !stage.startsWith(QStringLiteral("initialize/"))
+            && !stage.startsWith(QStringLiteral("shader/")))
+        return false;
+    bool found = false;
+    QStringList errors;
+    for(int index = 0; index < 32; ++index)
+    {
+        const GLenum error = ei::gl::GetError();
+        if(error == GL_NO_ERROR)
+            break;
+        found = true;
+        errors.append(QStringLiteral("%1(%2)")
+            .arg(openGlErrorName(error))
+            .arg(QString::number(uint(error), 16)));
+    }
+    if(found)
+        ei::log(eLogWarning, QStringLiteral("OpenGL diagnostic error stage:%1 errors:%2")
+            .arg(stage, errors.join(QStringLiteral(","))));
+    return found;
+}
+
+void CView::logOpenGlDiagnosticState(const QString& stage, bool samplePixel)
+{
+    if(m_openGlDiagnosticFramesRemaining <= 0
+            && !stage.startsWith(QStringLiteral("initialize/")))
+        return;
+
+    // Attribute errors to the operation that preceded this checkpoint before
+    // the diagnostic queries themselves can affect the GL error register.
+    logOpenGlErrors(stage + QStringLiteral("/preceding-operation"));
+
+    GLint viewport[4] = {0, 0, 0, 0};
+    GLint framebuffer = 0;
+    GLint program = 0;
+    GLint arrayBuffer = 0;
+    GLint elementBuffer = 0;
+    GLint activeTexture = 0;
+    GLint texture = 0;
+    GLboolean colorMask[4] = {GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE};
+    GLfloat clearColor[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+    ei::gl::GetIntegerv(GL_VIEWPORT, viewport);
+    ei::gl::GetIntegerv(GL_FRAMEBUFFER_BINDING, &framebuffer);
+    ei::gl::GetIntegerv(GL_CURRENT_PROGRAM, &program);
+    ei::gl::GetIntegerv(GL_ARRAY_BUFFER_BINDING, &arrayBuffer);
+    ei::gl::GetIntegerv(GL_ELEMENT_ARRAY_BUFFER_BINDING, &elementBuffer);
+    ei::gl::GetIntegerv(GL_ACTIVE_TEXTURE, &activeTexture);
+    ei::gl::GetIntegerv(GL_TEXTURE_BINDING_2D, &texture);
+    ei::gl::GetBooleanv(GL_COLOR_WRITEMASK, colorMask);
+    ei::gl::GetFloatv(GL_COLOR_CLEAR_VALUE, clearColor);
+    GLenum framebufferStatus = 0;
+    const QGLContext* legacyContext = QGLContext::currentContext();
+    if(legacyContext)
+    {
+        typedef GLenum (APIENTRY *CheckFramebufferStatusProc)(GLenum);
+        CheckFramebufferStatusProc checkFramebufferStatus =
+            reinterpret_cast<CheckFramebufferStatusProc>(
+                legacyContext->getProcAddress(
+                    QStringLiteral("glCheckFramebufferStatus")));
+        if(checkFramebufferStatus)
+            framebufferStatus = checkFramebufferStatus(GL_FRAMEBUFFER);
+    }
+
+    QString pixelText = QStringLiteral("not-sampled");
+    if(samplePixel && width() > 0 && height() > 0)
+    {
+        GLubyte pixel[4] = {0, 0, 0, 0};
+        ei::gl::ReadPixels(width() / 2, height() / 2, 1, 1,
+                     GL_RGBA, GL_UNSIGNED_BYTE, pixel);
+        pixelText = QStringLiteral("%1,%2,%3,%4")
+            .arg(pixel[0]).arg(pixel[1]).arg(pixel[2]).arg(pixel[3]);
+    }
+
+    ei::log(eLogInfo, QStringLiteral(
+        "OpenGL diagnostic state stage:%1 frame:%2 viewport:%3,%4,%5,%6 "
+        "fbo:%7 fbo-status:0x%8 program:%9 array-buffer:%10 element-buffer:%11 "
+        "active-texture:%12 texture2d:%13 depth:%14 blend:%15 color-mask:%16%17%18%19 "
+        "clear:%20,%21,%22,%23 center-rgba:%24")
+        .arg(stage).arg(m_openGlDiagnosticFrame)
+        .arg(viewport[0]).arg(viewport[1]).arg(viewport[2]).arg(viewport[3])
+        .arg(framebuffer).arg(QString::number(uint(framebufferStatus), 16))
+        .arg(program).arg(arrayBuffer).arg(elementBuffer)
+        .arg(activeTexture - GL_TEXTURE0).arg(texture)
+        .arg(ei::gl::IsEnabled(GL_DEPTH_TEST) ? 1 : 0)
+        .arg(ei::gl::IsEnabled(GL_BLEND) ? 1 : 0)
+        .arg(colorMask[0] ? 1 : 0).arg(colorMask[1] ? 1 : 0)
+        .arg(colorMask[2] ? 1 : 0).arg(colorMask[3] ? 1 : 0)
+        .arg(clearColor[0], 0, 'f', 3).arg(clearColor[1], 0, 'f', 3)
+        .arg(clearColor[2], 0, 'f', 3).arg(clearColor[3], 0, 'f', 3)
+        .arg(pixelText));
+    logOpenGlErrors(stage + QStringLiteral("/diagnostic-query"));
+}
+
+void CView::logShaderProgramDiagnostics(const QString& name,
+                                        const QOpenGLShaderProgram& program,
+                                        bool success)
+{
+    const QString shaderLog = program.log().trimmed();
+    ei::log(success ? eLogInfo : eLogWarning, QStringLiteral(
+        "OpenGL shader program:%1 success:%2 id:%3 log:%4")
+        .arg(name).arg(success ? 1 : 0).arg(program.programId())
+        .arg(shaderLog.isEmpty() ? QStringLiteral("<empty>") : shaderLog));
+    logOpenGlErrors(QStringLiteral("shader/%1").arg(name));
+}
+
 void CView::logOpenGlData()
 {
-    const GLubyte * version = glGetString(GL_VERSION);
-    const GLubyte * vendor = glGetString(GL_VENDOR);
-    const GLubyte * renderer = glGetString(GL_RENDERER);
-    ei::log(eLogInfo, QString("OpenGL module:%1 version:%2 vendor:%3 renderer:%4 swap-interval-request:%5")
+    const GLubyte * version = ei::gl::GetString(GL_VERSION);
+    const GLubyte * vendor = ei::gl::GetString(GL_VENDOR);
+    const GLubyte * renderer = ei::gl::GetString(GL_RENDERER);
+    const QGLContext* legacyContext = QGLContext::currentContext();
+    const QGLFormat legacyFormat = legacyContext
+        ? legacyContext->format() : QGLFormat();
+    ei::log(eLogInfo, QString("OpenGL module:%1 version:%2 vendor:%3 renderer:%4 swap-interval-request:%5 legacy-context:%6 legacy-valid:%7 legacy-format:%8.%9 profile:%10")
             .arg(QOpenGLContext::openGLModuleType() == QOpenGLContext::LibGLES ? "GLES/ANGLE" : "Desktop")
             .arg(version ? reinterpret_cast<const char*>(version) : "unavailable")
             .arg(vendor ? reinterpret_cast<const char*>(vendor) : "unavailable")
             .arg(renderer ? reinterpret_cast<const char*>(renderer) : "unavailable")
-            .arg(format().swapInterval()));
+            .arg(format().swapInterval())
+            .arg(legacyContext ? 1 : 0)
+            .arg(legacyContext && legacyContext->isValid() ? 1 : 0)
+            .arg(legacyFormat.majorVersion()).arg(legacyFormat.minorVersion())
+            .arg(int(legacyFormat.profile())));
 }
 
 CMob* CView::ownerMob(CNode* node) const
@@ -1531,17 +3592,6 @@ bool CView::activateSelectedObjectMob()
     return true;
 }
 
-void CView::checkOpenGlError()
-{
-    GLenum errCode;
-    errCode = glGetError();
-    if (errCode != GL_NO_ERROR)
-    {
-        ei::log(eLogFatal, "OpenGL error: " + QString::number(errCode));
-
-    }
-}
-
 void CView::drawTilePreview(QOpenGLShaderProgram* program)
 {
     if(m_pPreviewTile.isNull())
@@ -1666,7 +3716,7 @@ void CView::pickObject(const QRect &rect, bool bAddToSelect)
     const QMatrix4x4 viewMatrix = m_cam->update();
     m_selectProgram.setUniformValue("u_projMmatrix", m_projection);
     m_selectProgram.setUniformValue("u_viewMmatrix", viewMatrix);
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    ei::gl::Clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
     const COptBool* cullingOption = m_pSettings
         ? dynamic_cast<const COptBool*>(m_pSettings->opt("frustumCulling")) : nullptr;
@@ -1859,6 +3909,10 @@ bool CView::loadMob(QFileInfo &filePath)
     ei::log(eLogInfo, QString("Preloaded visual resources for %1 units during MOB load in %2 ms")
             .arg(preloadedUnits).arg(preloadTimer.elapsed()));
     m_aMob.append(pMob);
+    armOpenGlDiagnostics(QStringLiteral("MOB loaded: %1")
+        .arg(filePath.fileName()), 6);
+    if(!m_environmentMob)
+        m_environmentMob = pMob;
     m_spatialIndexDirty = true;
     m_sceneFingerprintDirty = true;
     m_scriptWorkspaces->registerMob(pMob);
@@ -1989,11 +4043,14 @@ bool CView::unloadMobDocument(CMob* mob, bool promptForSave)
 
     const int removedIndex = m_aMob.indexOf(mob);
     const bool removedActive = mob == m_activeMob;
+    const bool removedEnvironment = mob == m_environmentMob;
     ei::log(eLogInfo, "unloading mob " + mob->mobName());
     if(m_pUndoStack)
         m_pUndoStack->clear();
     m_hiddenMobs.remove(mob);
     m_aMob.removeAt(removedIndex);
+    if(removedEnvironment)
+        m_environmentMob = m_aMob.isEmpty() ? nullptr : m_aMob.first();
     m_scriptWorkspaces->unregisterMob(mob);
     emit unloadMob(mob);
     delete mob;
@@ -2013,6 +4070,10 @@ bool CView::unloadMobDocument(CMob* mob, bool promptForSave)
     }
     if(m_aMob.isEmpty())
     {
+        m_caveEnvironment = false;
+        m_shadowInitialized = false;
+        m_staticShadowFingerprint.clear();
+        m_farStaticShadowFingerprint.clear();
         makeCurrent();
         CTextureList::getInstance()->clearTransientVisualCache();
     }
@@ -2197,6 +4258,11 @@ void CView::unloadMob(QString mobName)
         }
         m_aMob.clear();
         m_activeMob = nullptr;
+        m_environmentMob = nullptr;
+        m_caveEnvironment = false;
+        m_shadowInitialized = false;
+        m_staticShadowFingerprint.clear();
+        m_farStaticShadowFingerprint.clear();
     }
     else
     {
@@ -2204,11 +4270,14 @@ void CView::unloadMob(QString mobName)
         {
             if (pMob->mobName().toLower() == mobName.toLower())
             {
+                const bool removedEnvironment = pMob == m_environmentMob;
                 m_scriptWorkspaces->unregisterMob(pMob);
                 m_hiddenMobs.remove(pMob);
                 emit unloadMob(pMob);
-                delete pMob;
                 m_aMob.removeOne(pMob);
+                delete pMob;
+                if(removedEnvironment)
+                    m_environmentMob = m_aMob.isEmpty() ? nullptr : m_aMob.first();
                 break;
             }
         }
@@ -2221,6 +4290,10 @@ void CView::unloadMob(QString mobName)
     else
     {
         changeCurrentMob(nullptr);
+        m_caveEnvironment = false;
+        m_shadowInitialized = false;
+        m_staticShadowFingerprint.clear();
+        m_farStaticShadowFingerprint.clear();
         makeCurrent();
         CTextureList::getInstance()->clearTransientVisualCache();
         // Keep the view context current for the next map's terrain/resource
@@ -3223,6 +5296,19 @@ void CView::clearTestSpawnMarker()
     update();
 }
 
+void CView::setMapSkyType(const QString& skyType)
+{
+    const bool cave = skyType.compare(QStringLiteral("cave"),
+                                      Qt::CaseInsensitive) == 0;
+    if(m_caveEnvironment == cave)
+        return;
+    m_caveEnvironment = cave;
+    m_shadowInitialized = false;
+    m_staticShadowFingerprint.clear();
+    m_farStaticShadowFingerprint.clear();
+    update();
+}
+
 void CView::setTestEntranceOverlays(const QVector<QRectF>& rectangles,
                                     const QStringList& labels,
                                     int selectedIndex)
@@ -3379,7 +5465,7 @@ CNode* CView::pickObject(QList<CNode*>& aNode, int x, int y)
     const QMatrix4x4 viewMatrix = m_cam->update();
     m_selectProgram.setUniformValue("u_projMmatrix", m_projection);
     m_selectProgram.setUniformValue("u_viewMmatrix", viewMatrix);
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    ei::gl::Clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
     const COptBool* cullingOption = m_pSettings
         ? dynamic_cast<const COptBool*>(m_pSettings->opt("frustumCulling")) : nullptr;
@@ -3404,7 +5490,7 @@ CNode* CView::pickObject(QList<CNode*>& aNode, int x, int y)
     }
 
     GLubyte pixel[3];
-    glReadPixels(x, m_height-y, 1, 1, GL_RGB, GL_UNSIGNED_BYTE, pixel);
+    ei::gl::ReadPixels(x, m_height-y, 1, 1, GL_RGB, GL_UNSIGNED_BYTE, pixel);
     SColor pickedColor(pixel[0], pixel[1], pixel[2]);
 
     for (auto& node: aNode)
@@ -3436,7 +5522,7 @@ QVector3D CView::getTerrainPos(const int cursorPosX, const int cursorPosY,
     // Set modelview-projection matrix
     m_landProgram.setUniformValue("u_projMmatrix", m_projection);
     m_landProgram.setUniformValue("u_viewMmatrix", camMatrix);
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    ei::gl::Clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
     if(bLand)
         m_pLand->draw(&m_landProgram);
@@ -3446,7 +5532,7 @@ QVector3D CView::getTerrainPos(const int cursorPosX, const int cursorPosY,
     }
     const int posY (height() - cursorPosY);
     float z;
-    glReadPixels(cursorPosX, posY, 1, 1, GL_DEPTH_COMPONENT, GL_FLOAT, &z );
+    ei::gl::ReadPixels(cursorPosX, posY, 1, 1, GL_DEPTH_COMPONENT, GL_FLOAT, &z );
     if(hit)
         *hit = qIsFinite(z) && z >= 0.0f && z < 1.0f;
     //QVector3D point (cursorPosX, posY, z);
@@ -3456,7 +5542,7 @@ QVector3D CView::getTerrainPos(const int cursorPosX, const int cursorPosY,
 
     QMatrix4x4 view = m_cam->viewMatrix();
     GLint viewPort[4];
-    glGetIntegerv(GL_VIEWPORT, viewPort);
+    ei::gl::GetIntegerv(GL_VIEWPORT, viewPort);
     QRect viewPortRect(viewPort[0], viewPort[1], viewPort[2], viewPort[3]);
     return point.unproject(view, m_projection, viewPortRect); //return Vector3D here
 }
@@ -4146,6 +6232,8 @@ void CView::unHideAll()
 void CView::setDirtyMpr()
 {
     m_pLand->setDirty(true);
+    m_staticShadowFingerprint.clear();
+    m_farStaticShadowFingerprint.clear();
     emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMprDirtyFlag, "*");
 }
 

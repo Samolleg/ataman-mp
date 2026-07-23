@@ -93,6 +93,7 @@ CSettings::CSettings(QWidget *parent) :
     ui->rangeIncrement->setValidator(new QIntValidator(1, 1000000, this));
     ui->undoHistoryLimit->setValidator(new QIntValidator(1, 1000000, this));
     ui->renderFpsCap->setValidator(new QIntValidator(0, 1000, this));
+    ui->renderShadowDistance->setValidator(new QIntValidator(1, 1024, this));
     initOptions();
     readOptions();
     const COptString* savedProfile = dynamic_cast<const COptString*>(opt(eOptSetResource, "resourceProfile"));
@@ -455,6 +456,12 @@ void CSettings::initOptions()
     aOpt.append(QSharedPointer<COpt>(new COptBool("animateUnits", true)));
     aOpt.append(QSharedPointer<COpt>(new COptBool("renderPerformanceCounters", false)));
     aOpt.append(QSharedPointer<COpt>(new COptBool("renderVSync", true)));
+    aOpt.append(QSharedPointer<COpt>(new COptBool("environmentLighting", true)));
+    aOpt.append(QSharedPointer<COpt>(new COptBool("drawSkybox", true)));
+    aOpt.append(QSharedPointer<COpt>(new COptBool("renderFog", true)));
+    aOpt.append(QSharedPointer<COpt>(new COptBool("renderSceneLights", true)));
+    aOpt.append(QSharedPointer<COpt>(new COptBool("renderTextureMipmapping", true)));
+    aOpt.append(QSharedPointer<COpt>(new COptBool("overrideWorldTime", false)));
 
 
     //init default options for digits
@@ -468,6 +475,12 @@ void CSettings::initOptions()
     aOpt.append(QSharedPointer<COpt>(new COptInt("mapTestWarningVersion", 0)));
     aOpt.append(QSharedPointer<COpt>(new COptInt("autosaveIntervalMinutes", 5)));
     aOpt.append(QSharedPointer<COpt>(new COptInt("renderFpsCap", 0)));
+    aOpt.append(QSharedPointer<COpt>(new COptInt("renderShadowQuality", 2)));
+    aOpt.append(QSharedPointer<COpt>(new COptInt("renderShadowDistance", 320)));
+    aOpt.append(QSharedPointer<COpt>(new COptInt("renderTimeOfDay", 1200)));
+    // 0 = authored texture/unlit, 1 = compatibility simple shading,
+    // 2 = resource-driven environment preview.
+    aOpt.append(QSharedPointer<COpt>(new COptInt("renderLightingMode", 2)));
 
     const QMap<QString, QString> shortcutDefaults = {
         {"shortcutOpen", "Ctrl+O"},

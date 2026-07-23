@@ -29,6 +29,10 @@ private slots:
     void rejectsUnalignedPnt3Payload();
     void preservesPnt3RowMajorOrientation();
     void decodesDirectDraw5551DescriptorBeforePixels();
+    void decodesDxt1Transparency();
+    void decodesDxt3ExplicitAlpha();
+    void decodesDxt5InterpolatedAlpha();
+    void rejectsTruncatedDxtMip();
     void compositesTransparentArmorOverBodyAtlas();
     void compositesPremultipliedPnt3LikeTheGame();
     void keepsFaceAndHairOnSkinAtlas();
@@ -288,6 +292,60 @@ void ResourceNameTests::decodesDirectDraw5551DescriptorBeforePixels()
              qPrintable(diagnostic));
     QCOMPARE(image.pixelColor(0, 0), QColor(255, 0, 0, 255));
     QCOMPARE(image.pixelColor(1, 0), QColor(0, 0, 255, 0));
+}
+
+void ResourceNameTests::decodesDxt1Transparency()
+{
+    QByteArray block;
+    block.append(char(0x00)); block.append(char(0x00)); // black 565
+    block.append(char(0x00)); block.append(char(0xf8)); // red 565; color0 <= color1
+    appendDword(block, 3u); // first pixel uses transparent entry
+    QImage image;
+    QString diagnostic;
+    QVERIFY2(ei::decodeDxtImage(block, 4, 4, ei::DxtFormat::Dxt1,
+                               &image, &diagnostic), qPrintable(diagnostic));
+    QCOMPARE(image.pixelColor(0, 0).alpha(), 0);
+    QCOMPARE(image.pixelColor(1, 0), QColor(0, 0, 0, 255));
+}
+
+void ResourceNameTests::decodesDxt3ExplicitAlpha()
+{
+    QByteArray block(8, '\0');
+    block[0] = char(0x0f); // alpha 255, then alpha 0
+    block.append(char(0x00)); block.append(char(0xf8));
+    block.append(char(0x00)); block.append(char(0xf8));
+    appendDword(block, 0u);
+    QImage image;
+    QString diagnostic;
+    QVERIFY2(ei::decodeDxtImage(block, 4, 4, ei::DxtFormat::Dxt3,
+                               &image, &diagnostic), qPrintable(diagnostic));
+    QCOMPARE(image.pixelColor(0, 0), QColor(255, 0, 0, 255));
+    QCOMPARE(image.pixelColor(1, 0).alpha(), 0);
+}
+
+void ResourceNameTests::decodesDxt5InterpolatedAlpha()
+{
+    QByteArray block;
+    block.append(char(255)); block.append(char(0));
+    block.append(char(2)); block.append(QByteArray(5, '\0')); // first alpha index = 2
+    block.append(char(0x00)); block.append(char(0xf8));
+    block.append(char(0x00)); block.append(char(0xf8));
+    appendDword(block, 0u);
+    QImage image;
+    QString diagnostic;
+    QVERIFY2(ei::decodeDxtImage(block, 4, 4, ei::DxtFormat::Dxt5,
+                               &image, &diagnostic), qPrintable(diagnostic));
+    QCOMPARE(image.pixelColor(0, 0).alpha(), 218);
+    QCOMPARE(image.pixelColor(1, 0).alpha(), 255);
+}
+
+void ResourceNameTests::rejectsTruncatedDxtMip()
+{
+    QImage image;
+    QString diagnostic;
+    QVERIFY(!ei::decodeDxtImage(QByteArray(7, '\0'), 4, 4,
+                                ei::DxtFormat::Dxt1, &image, &diagnostic));
+    QVERIFY(!diagnostic.isEmpty());
 }
 
 void ResourceNameTests::compositesTransparentArmorOverBodyAtlas()

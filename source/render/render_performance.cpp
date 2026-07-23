@@ -46,6 +46,12 @@ void addCounters(SRenderFrameCounters& target, const SRenderFrameCounters& value
     target.queueCollectNanoseconds += value.queueCollectNanoseconds;
     target.queueSortNanoseconds += value.queueSortNanoseconds;
     target.queueDrawNanoseconds += value.queueDrawNanoseconds;
+    target.shadowCandidates += value.shadowCandidates;
+    target.shadowItems += value.shadowItems;
+    target.shadowPasses += value.shadowPasses;
+    target.shadowStaticRebuilds += value.shadowStaticRebuilds;
+    target.shadowDynamicRebuilds += value.shadowDynamicRebuilds;
+    target.shadowNanoseconds += value.shadowNanoseconds;
 }
 
 double percentileMilliseconds(QVector<quint64> samples, double percentile)
@@ -162,7 +168,15 @@ void RenderPerformanceContext::endFrame()
         .arg(double(m_total.animationComponentsEvaluated) / frames, 0, 'f', 1)
         .arg(double(m_total.queueCollectNanoseconds) / frames / 1000000.0, 0, 'f', 2)
         .arg(double(m_total.queueSortNanoseconds) / frames / 1000000.0, 0, 'f', 2)
-        .arg(double(m_total.queueDrawNanoseconds) / frames / 1000000.0, 0, 'f', 2);
+        .arg(double(m_total.queueDrawNanoseconds) / frames / 1000000.0, 0, 'f', 2)
+        + QString(" shadows:q%1/%2 candidates/items:%3/%4 passes:%5 rebuilds-static/dynamic:%6/%7 shadow-submit:%8 ms")
+          .arg(m_metadata.shadowQuality).arg(m_metadata.shadowAtlasResolution)
+          .arg(double(m_total.shadowCandidates) / frames, 0, 'f', 1)
+          .arg(double(m_total.shadowItems) / frames, 0, 'f', 1)
+          .arg(double(m_total.shadowPasses) / frames, 0, 'f', 2)
+          .arg(double(m_total.shadowStaticRebuilds) / frames, 0, 'f', 2)
+          .arg(double(m_total.shadowDynamicRebuilds) / frames, 0, 'f', 2)
+          .arg(double(m_total.shadowNanoseconds) / frames / 1000000.0, 0, 'f', 2);
     ei::log(eLogInfo, report);
 
     // Performance captures need to survive ordinary workflow-log filtering so
@@ -209,6 +223,12 @@ void RenderPerformanceContext::endFrame()
         averages.insert("queueCollectMs", double(m_total.queueCollectNanoseconds) / frames / 1000000.0);
         averages.insert("queueSortMs", double(m_total.queueSortNanoseconds) / frames / 1000000.0);
         averages.insert("queueDrawMs", double(m_total.queueDrawNanoseconds) / frames / 1000000.0);
+        averages.insert("shadowCandidates", double(m_total.shadowCandidates) / frames);
+        averages.insert("shadowItems", double(m_total.shadowItems) / frames);
+        averages.insert("shadowPasses", double(m_total.shadowPasses) / frames);
+        averages.insert("shadowStaticRebuilds", double(m_total.shadowStaticRebuilds) / frames);
+        averages.insert("shadowDynamicRebuilds", double(m_total.shadowDynamicRebuilds) / frames);
+        averages.insert("shadowSubmitMs", double(m_total.shadowNanoseconds) / frames / 1000000.0);
         definition.insert("averages", averages);
         QJsonObject toggles;
         toggles.insert("animation", m_metadata.animationEnabled);
@@ -219,6 +239,8 @@ void RenderPerformanceContext::endFrame()
         toggles.insert("frustumCulling", m_metadata.frustumCullingEnabled);
         toggles.insert("vsync", m_metadata.vsyncEnabled);
         toggles.insert("frameRateCap", m_metadata.frameRateCap);
+        toggles.insert("shadowQuality", m_metadata.shadowQuality);
+        toggles.insert("shadowAtlasResolution", m_metadata.shadowAtlasResolution);
         definition.insert("renderToggles", toggles);
         definition.insert("fps", fps);
         definition.insert("cpuAverageMs", cpuMs);

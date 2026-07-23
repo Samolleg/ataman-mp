@@ -444,6 +444,57 @@
             </widget>
            </item>
            <item>
+            <widget class="QCheckBox" name="renderFog">
+             <property name="text"><string>Atmospheric fog</string></property>
+             <property name="checked"><bool>true</bool></property>
+            </widget>
+           </item>
+           <item>
+            <widget class="QCheckBox" name="renderSceneLights">
+             <property name="text"><string>Scene point lights</string></property>
+             <property name="toolTip"><string>Uses visible MOB light position, range, and color values.</string></property>
+             <property name="checked"><bool>true</bool></property>
+            </widget>
+           </item>
+           <item>
+            <layout class="QHBoxLayout" name="renderShadowQualityLayout">
+             <item><widget class="QLabel" name="renderShadowQualityLabel"><property name="text"><string>Shadow quality</string></property></widget></item>
+             <item><widget class="QLabel" name="renderShadowQualityOffLabel"><property name="text"><string>Off</string></property></widget></item>
+             <item>
+              <widget class="QSlider" name="renderShadowQuality">
+               <property name="toolTip"><string>0 disables and releases shadow atlases, 1 uses 2048 atlases, and 2 uses the verified 4096 very-high-quality path.</string></property>
+               <property name="minimum"><number>0</number></property>
+               <property name="maximum"><number>2</number></property>
+               <property name="value"><number>2</number></property>
+               <property name="pageStep"><number>1</number></property>
+               <property name="orientation"><enum>Qt::Horizontal</enum></property>
+               <property name="tickPosition"><enum>QSlider::TicksBelow</enum></property>
+               <property name="tickInterval"><number>1</number></property>
+              </widget>
+             </item>
+             <item><widget class="QLabel" name="renderShadowQualityVeryHighLabel"><property name="text"><string>Very high</string></property></widget></item>
+            </layout>
+           </item>
+           <item>
+            <layout class="QHBoxLayout" name="renderShadowDistanceLayout">
+             <item><widget class="QLabel" name="renderShadowDistanceLabel"><property name="text"><string>Maximum shadow distance</string></property></widget></item>
+             <item>
+              <widget class="QLineEdit" name="renderShadowDistance">
+               <property name="toolTip"><string>Maximum caster distance in world units (1-1024). Raising it expands shadow-map reach; 1 is useful for verifying the cutoff.</string></property>
+               <property name="text"><string>320</string></property>
+               <property name="maximumWidth"><number>90</number></property>
+              </widget>
+             </item>
+            </layout>
+           </item>
+           <item>
+            <widget class="QCheckBox" name="renderTextureMipmapping">
+             <property name="text"><string>Texture mipmapping</string></property>
+             <property name="toolTip"><string>Uses authored terrain mip levels with trilinear filtering to reduce distant landscape shimmer. Character and equipment atlases keep their compatibility sampling.</string></property>
+             <property name="checked"><bool>true</bool></property>
+            </widget>
+           </item>
+           <item>
             <spacer name="verticalSpacer">
              <property name="orientation">
               <enum>Qt::Vertical</enum>

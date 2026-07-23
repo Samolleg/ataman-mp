@@ -1,6 +1,7 @@
 #include <QtGlobal>
 
 #include "sector.h"
+#include "gl_dispatch.h"
 #include "render_performance.h"
 #include "landscape.h"
 #include "math_utils.h"
@@ -427,7 +428,12 @@ TODO: use 9 vertex, make quad via index array
 
 void CSector::generateVertexDataFromTile()
 {
-    uint vertSize = m_arrLand.size() * m_arrLand.front().size()*16; // 9 vertices, 16 indices per tile
+    // CTile::generateDrawVertexData emits the 3x3 vertex grid once per tile.
+    // The previous allocation retained the old GL_QUADS-era value of 16 and
+    // drawWater() consequently derived an index count beyond its index buffer.
+    // Desktop drivers happened to tolerate that invalid draw, while ANGLE
+    // correctly rejects it with GL_INVALID_OPERATION.
+    const int vertSize = m_arrLand.size() * m_arrLand.front().size() * 9;
     //m_aVertexData.clear(); // to recalc textures ?
     bool bWater = !m_arrWater.isEmpty();
     m_arrLandVrtData.resize(vertSize); // todo: check size. vrt size == tile count * 9 (verts per tile)
@@ -441,6 +447,9 @@ void CSector::generateVertexDataFromTile()
             if(bWater)
                 m_arrWater[row][col].generateDrawVertexData(m_arrWaterVrtData, waterIndex);
         }
+
+    Q_ASSERT(curIndex == m_arrLandVrtData.size());
+    Q_ASSERT(!bWater || waterIndex == m_arrWaterVrtData.size());
 }
 
 void CSector::updatePosition()
@@ -488,7 +497,15 @@ void CSector::updatePosition()
 
     QVector<ushort> aInd;
     ushort indOffset = 0;
-    QVector<ushort> arrTileInd{0,1,4,3, 1,2,5,4, 3,4,7,6, 4,5,8,7}; // indices of quad vertices
+    // OpenGL ES 2.0 (the Qt 5 ANGLE path) does not support GL_QUADS. Store
+    // the same four terrain cells as ordinary triangles so desktop and GLES
+    // consume one portable index buffer.
+    const QVector<ushort> arrTileInd{
+        0,1,4, 0,4,3,
+        1,2,5, 1,5,4,
+        3,4,7, 3,7,6,
+        4,5,8, 4,8,7
+    };
     for(int i(0); i<256; ++i) // 256 - tile number per sector
     {
         for(auto ind: arrTileInd)
@@ -580,14 +597,14 @@ void CSector::draw(QOpenGLShaderProgram* program)
     program->setAttributeBuffer(textureLocation, GL_FLOAT, offset, 2, int(sizeof(SVertexData)));
 
     m_indexBuf.bind();
-    constexpr int indexNum = 256*16; // numTiles * index per tile
-    glDrawElements(GL_QUADS, indexNum, GL_UNSIGNED_SHORT, nullptr);
+    constexpr int indexNum = 256*24; // 256 tiles * 4 cells * 2 triangles * 3 indices
+    ei::gl::DrawElements(GL_TRIANGLES, indexNum, GL_UNSIGNED_SHORT, nullptr);
     RenderPerformanceContext& performance = RenderPerformanceContext::instance();
     if(performance.collecting())
     {
         ++performance.counters().drawCalls;
         ++performance.counters().terrainDrawCalls;
-        performance.counters().triangles += quint64(indexNum / 2);
+        performance.counters().triangles += quint64(indexNum / 3);
     }
 
 }
@@ -616,13 +633,14 @@ void CSector::drawWater(QOpenGLShaderProgram *program)
     program->setAttributeBuffer(textureLocation, GL_FLOAT, offset, 2, int(sizeof(SVertexData)));
 
     m_waterIndexBuf.bind();
-    glDrawElements(GL_QUADS, m_arrWaterVrtData.count(), GL_UNSIGNED_SHORT, nullptr);
+    const int indexCount = (m_arrWaterVrtData.count() / 9) * 24;
+    ei::gl::DrawElements(GL_TRIANGLES, indexCount, GL_UNSIGNED_SHORT, nullptr);
     RenderPerformanceContext& performance = RenderPerformanceContext::instance();
     if(performance.collecting())
     {
         ++performance.counters().drawCalls;
         ++performance.counters().terrainDrawCalls;
-        performance.counters().triangles += quint64(m_arrWaterVrtData.count() / 2);
+        performance.counters().triangles += quint64(indexCount / 3);
     }
 }
 

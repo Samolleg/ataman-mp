@@ -241,6 +241,7 @@ void CObjectBase::draw(bool isActive, QOpenGLShaderProgram* program)
     rtMatrix.setToIdentity();
     rtMatrix.rotate(m_rotation);
     matrix = matrix * rtMatrix;
+    matrix.scale(editorVisualScale());
 
     RenderQueueContext& queue = RenderQueueContext::instance();
     const bool queued = queue.collecting();
@@ -263,7 +264,8 @@ void CObjectBase::draw(bool isActive, QOpenGLShaderProgram* program)
         {
             queue.submit(part, texture, matrix,
                          CTextureList::getInstance()->materialClass(texture),
-                         m_state == ENodeState::eSelect);
+                         m_state == ENodeState::eSelect,
+                         castsRenderShadow(), nodeType() == ENodeType::eUnit);
             continue;
         }
         if(texture != boundTexture)
@@ -305,6 +307,7 @@ void CObjectBase::drawSelect(QOpenGLShaderProgram* program)
         rtMatrix.setToIdentity();
         rtMatrix.rotate(m_rotation);
         matrix = matrix * rtMatrix;
+        matrix.scale(editorVisualScale());
         RenderQueueContext& queue = RenderQueueContext::instance();
         if(queue.collectingSelection())
         {
@@ -484,6 +487,7 @@ CBox CObjectBase::getBBox()
     QMatrix4x4 rtMatrix;
     rtMatrix.setToIdentity();
     rtMatrix.rotate(m_rotation);
+    const float visualScale = editorVisualScale();
     const auto fillPoint = [&min, &max](const QVector3D& vec)
     {
         //x
@@ -508,7 +512,7 @@ CBox CObjectBase::getBBox()
         auto& arrVert = part->vertData();
         for(int i(0); i < arrVert.size(); ++i)
         {
-            const QVector3D rotatedPos = rtMatrix*arrVert[i].position;
+            const QVector3D rotatedPos = rtMatrix*(arrVert[i].position * visualScale);
             if(!bInit)
             {
                 min = rotatedPos;
@@ -763,10 +767,11 @@ void CObjectBase::recalcMinPos()
     QMatrix4x4 rtMatrix;
     rtMatrix.setToIdentity();
     rtMatrix.rotate(m_rotation);
+    const float visualScale = editorVisualScale();
     for(auto& part: m_aPart)
         for(auto& vert : part->vertData())
         {
-            rotatedPos = rtMatrix*vert.position; //get vector, rotated with matrix
+            rotatedPos = rtMatrix*(vert.position * visualScale); //get vector, rotated with matrix
             if(!hasVertex || rotatedPos.z() < min)
                 min = rotatedPos.z();
             hasVertex = true;

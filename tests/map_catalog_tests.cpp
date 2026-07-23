@@ -10,6 +10,7 @@ private slots:
     void parsesResourcePairsOnly();
     void acceptsWhitespaceAndCase();
     void parsesTravelZoneSpawnData();
+    void parsesSkyEnvironment();
 };
 
 void MapCatalogTests::parsesResourcePairsOnly()
@@ -67,6 +68,21 @@ void MapCatalogTests::parsesTravelZoneSpawnData()
     QVERIFY(spawn.hasViewAngle);
     QCOMPARE(spawn.viewAngle, 135.2);
     QVERIFY(!entries.first().travelZones.at(1).hasDeployRectangle);
+}
+
+void MapCatalogTests::parsesSkyEnvironment()
+{
+    const QVector<SMapCatalogEntry> entries = CMapCatalog::parseMapTable(
+        "#zone gz5g gipat game\n"
+        "#res\nzone5_1 zone5_1\n"
+        "#sky\ncave\n"
+        "#zone gz1g gipat game\n"
+        "#res\nzone1 zone1\n"
+        "#sky\nnormal\n");
+
+    QCOMPARE(entries.size(), 2);
+    QCOMPARE(entries.at(0).skyType, QString("cave"));
+    QCOMPARE(entries.at(1).skyType, QString("normal"));
 }
 
 QTEST_APPLESS_MAIN(MapCatalogTests)

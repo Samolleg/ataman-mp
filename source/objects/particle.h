@@ -18,8 +18,11 @@ public:
     QJsonObject toJson() override;
     void loadFigure() override {}
     bool isOperationAxisAllow(EOperationAxisType type) override final;
+    uint kind() const { return m_kind; }
+    float particleScale() const { return m_scale; }
 
 private:
+    float editorVisualScale() const override { return 0.5f; }
     uint m_kind;
     float m_scale;
 };

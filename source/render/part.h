@@ -55,6 +55,8 @@ public:
     bool isDrawable() const { return m_bShow && !m_aVertData.isEmpty(); }
     bool canInstance() const { return !m_morphApplied; }
     quintptr meshIdentity() const { return quintptr(m_mesh.data()); }
+    const QVector3D& localBoundsCenter() const { return m_localBoundsCenter; }
+    float localBoundsRadius() const { return m_localBoundsRadius; }
     static void setCacheScope(const QString& scope);
     // Final application shutdown can let the OpenGL context release all GPU
     // objects in one operation. This avoids thousands of serialized driver
@@ -65,6 +67,7 @@ public:
     static quint64 sharedMeshBytes();
 
 private:
+    void updateLocalBounds(const QVector<SVertexData>& vertices);
     void attachSharedMesh(const QVector<SVertexData>& vertices);
     void attachPrivateMesh(const QVector<SVertexData>& vertices);
 
@@ -79,6 +82,8 @@ private:
     QVector<SVertexData> m_aVertData;
     QVector<SVertexData> m_baseVertData;
     QVector<int> m_sourceVertexIndices;
+    QVector3D m_localBoundsCenter;
+    float m_localBoundsRadius{0.0f};
     bool m_morphApplied{false};
     bool m_bShow;
 };

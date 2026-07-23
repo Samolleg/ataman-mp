@@ -1,3 +1,8 @@
+#ifdef GL_ES
+precision mediump float;
+precision mediump int;
+#endif
+
 uniform highp vec4 u_color;
 uniform bool u_instanced;
 varying highp vec4 v_instanceColor;

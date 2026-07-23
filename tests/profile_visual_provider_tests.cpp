@@ -113,6 +113,7 @@ private slots:
     void missingArmorGeometryPreservesBaseParts();
     void zombieEquipmentUsesSharedHumanoidAtlas();
     void helmetAddsDatabaseGeometryAndAtlas();
+    void jmvRecoversUnambiguousConcatenatedHelmetAndPlate();
     void weaponAtlasesUseLiteralTtiAndEstablishedFamilies();
     void weaponGeometryDoesNotReplaceHandsOrGloves();
     void equippedMaterialsRemainProfileExtensible();
@@ -768,6 +769,38 @@ void ProfileVisualProviderTests::helmetAddsDatabaseGeometryAndAtlas()
     QVERIFY(output.value("hidesHair").toBool());
     QCOMPARE(output.value("componentTextures").toObject().value("hd.armor08").toString(),
              QString("unhumahl_08.ir.0.x2.mmp"));
+}
+
+void ProfileVisualProviderTests::jmvRecoversUnambiguousConcatenatedHelmetAndPlate()
+{
+    auto db = database();
+    ei::SItemDatabaseRecord helmet = item("mlh", "armor", 0, 26);
+    helmet.type = "helm";
+    helmet.materialType = "Leather";
+    ei::SItemDatabaseRecord plate = item("mlp", "armor", 1, 26);
+    plate.type = "plate";
+    db->items.insert(helmet.name, helmet);
+    db->items.insert(plate.name, plate);
+    ei::SMaterialDatabaseRecord thin;
+    thin.name = "tanned thin";
+    thin.type = "Leather";
+    thin.code = "bl";
+    db->materialRecords.insert(thin.name, thin);
+
+    ProfileVisualProviderService service;
+    const auto resolver = service.equipmentResolver("jmv.v1", db);
+    SEquipmentLayoutRequest request;
+    request.model = "unhuma";
+    request.armor << "mlh.tanned thin.mlp.tanned thin";
+    request.assemblyParts << "hd" << "bd" << "hd.armor26" << "bd.armor26";
+    QJsonObject output;
+    QVERIFY(resolver->resolve(request, &output).success);
+    const QStringList components = jsonStrings(output, "components");
+    QVERIFY(components.contains("hd.armor26"));
+    QVERIFY(components.contains("bd.armor26"));
+    QCOMPARE(output.value("componentTextures").toObject().value("hd.armor26").toString(),
+             QString("unhumahl_26.bl.0.x2.mmp"));
+    QVERIFY(jsonStrings(output, "diagnostics").join(' ').contains("concatenated"));
 }
 
 void ProfileVisualProviderTests::weaponAtlasesUseLiteralTtiAndEstablishedFamilies()

@@ -13,6 +13,8 @@
 #include <QHash>
 #include <QImage>
 #include <QPointer>
+#include <QOpenGLBuffer>
+#include <QElapsedTimer>
 #include <QRectF>
 #include <QSet>
 #include <QStringList>
@@ -22,6 +24,12 @@
 #include "spatial_grid.h"
 
 class QLineEdit;
+class QFrame;
+class QLabel;
+class QComboBox;
+class QSlider;
+class QToolButton;
+class QResizeEvent;
 class CKeyManager;
 class CMob;
 class CCamera;
@@ -44,11 +52,16 @@ class CRoundMobForm;
 class CTreeView;
 class IPropertyBase;
 class CTileForm;
+class CLight;
+class QOpenGLFramebufferObject;
+class RenderQueueContext;
+class CViewFrustum;
 class CPreviewTile;
 class CLandscape;
 class CExternalScriptWorkspaceManager;
 class CMobScriptWindow;
 struct SMobParameterState;
+namespace ei { struct SRenderEnvironment; }
 
 ///
 /// \brief The CView class is the main class for managing and editing 3D scene contents. It is also a link between read out *.mob files and their editing. It also controls the camera and current operations.
@@ -116,6 +129,7 @@ public:
     void setTestSpawnMarkerSelected(bool selected);
     bool testSpawnMarkerAt(const QPoint& viewportPosition, int padding = 8) const;
     void clearTestSpawnMarker();
+    void setMapSkyType(const QString& skyType);
     void setTestEntranceOverlays(const QVector<QRectF>& rectangles,
                                  const QStringList& labels,
                                  int selectedIndex);
@@ -191,6 +205,7 @@ public:
     void endTileBrushGroup();
     void loadSession();
     bool onExit();
+    QString captureShadowDiagnostics(QString* error = nullptr);
 
 protected:
     void initializeGL() override;
@@ -203,6 +218,7 @@ protected:
     void mouseReleaseEvent(QMouseEvent* event) override;
     void wheelEvent(QWheelEvent* event) override;
     void focusOutEvent(QFocusEvent* event) override;
+    void resizeEvent(QResizeEvent* event) override;
 
 private:
     bool saveMobDocument(CMob* mob, const QFileInfo& destination);
@@ -216,7 +232,12 @@ private:
     void getColorFromRect(const QRect& rect, QVector<SColor>& aColor);
     void onParamChangeLogic(CNode* pNode, const QSharedPointer<IPropertyBase>& prop);
     void logOpenGlData();
-    void checkOpenGlError();
+    void armOpenGlDiagnostics(const QString& reason, int frameCount = 4);
+    bool logOpenGlErrors(const QString& stage);
+    void logOpenGlDiagnosticState(const QString& stage, bool samplePixel = false);
+    void logShaderProgramDiagnostics(const QString& name,
+                                     const QOpenGLShaderProgram& program,
+                                     bool success);
     void drawTilePreview(QOpenGLShaderProgram* program);
     void updateTileForm(bool bGenerateNewTable = false);
     void saveSession();
@@ -230,6 +251,29 @@ private:
     QVector<CNode*> spatiallyVisibleNodes(CMob* mob, const CViewFrustum* frustum,
                                           SSpatialQueryStats* stats);
     QString sceneSourceFingerprint();
+    void drawSkybox(const QMatrix4x4& cameraMatrix,
+                    const ei::SRenderEnvironment& environment);
+    void drawParticles(const QMatrix4x4& cameraMatrix,
+                       const CViewFrustum* frustum);
+    bool ensureParticleRendererInitialized();
+    void initEnvironmentPreviewWidget();
+    void applyEnvironmentCompatibilityMode();
+    void positionEnvironmentPreviewWidget();
+    void syncEnvironmentPreviewWidget(float mapTimeHours);
+    void applyEnvironmentUniforms(QOpenGLShaderProgram& program,
+                                  const ei::SRenderEnvironment& environment,
+                                  const QVector<CLight*>& lights,
+                                  int lightingMode, bool fogEnabled);
+    bool renderShadowMap(const QVector3D& cameraPosition,
+                         const QVector3D& shadowFocus,
+                         const ei::SRenderEnvironment& environment,
+                         RenderQueueContext& queue,
+                         float maximumDistance);
+    bool ensureShadowFramebuffers(int quality);
+    void releaseShadowFramebuffers();
+    void applyShadowUniforms(QOpenGLShaderProgram& program, bool enabled,
+                             bool receiveStatic = true,
+                             bool receiveDynamic = true);
 
 
 public slots:
@@ -276,10 +320,40 @@ private:
     QOpenGLShaderProgram m_program;
     QOpenGLShaderProgram m_landProgram;
     QOpenGLShaderProgram m_selectProgram;
+    QOpenGLShaderProgram m_skyProgram;
+    QOpenGLBuffer m_skyBuffer{QOpenGLBuffer::VertexBuffer};
+    int m_skyVertexCount{0};
+    bool m_skyResourcesChecked{false};
+    bool m_skyResourcesAvailable{false};
+    QOpenGLShaderProgram m_particleProgram;
+    QOpenGLBuffer m_particleBuffer{QOpenGLBuffer::VertexBuffer};
+    bool m_particleInitializationAttempted{false};
+    bool m_particleRendererReady{false};
+    QOpenGLShaderProgram m_shadowProgram;
+    QOpenGLFramebufferObject* m_shadowFbo{nullptr};
+    QOpenGLFramebufferObject* m_dynamicShadowFbo{nullptr};
+    QOpenGLFramebufferObject* m_farShadowFbo{nullptr};
+    QOpenGLFramebufferObject* m_farDynamicShadowFbo{nullptr};
+    int m_shadowResolution{0};
+    QMatrix4x4 m_staticLightSpaceMatrix;
+    QMatrix4x4 m_dynamicLightSpaceMatrix;
+    QMatrix4x4 m_farStaticLightSpaceMatrix;
+    QMatrix4x4 m_farDynamicLightSpaceMatrix;
+    float m_nearShadowSplit{64.0f};
+    bool m_shadowCascadeDiagnostic{false};
+    QElapsedTimer m_shadowUpdateTimer;
+    bool m_shadowInitialized{false};
+    QByteArray m_staticShadowFingerprint;
+    QByteArray m_farStaticShadowFingerprint;
     QOpenGLTimerQuery* m_gpuTimer;
     bool m_gpuTimerPending;
     QMatrix4x4 m_projection;
     QVector<CMob*> m_aMob;
+    // World lighting belongs to the loaded map, not to whichever MOB happens
+    // to be selected for editing. Keep the first loaded document as the
+    // environment owner until it is unloaded.
+    CMob* m_environmentMob{nullptr};
+    bool m_caveEnvironment{false};
     QSet<CMob*> m_hiddenMobs;
     QTimer* m_timer;
     CSettings* m_pSettings;
@@ -333,6 +407,17 @@ private:
     bool m_spatialIndexDirty;
     bool m_sceneFingerprintDirty;
     QString m_sceneFingerprint;
+    QFrame* m_environmentPreviewWidget{nullptr};
+    QWidget* m_environmentPreviewBody{nullptr};
+    QToolButton* m_environmentPreviewCollapse{nullptr};
+    QLabel* m_environmentPreviewTimeLabel{nullptr};
+    QComboBox* m_environmentPreviewMode{nullptr};
+    QSlider* m_environmentPreviewTime{nullptr};
+    bool m_environmentPreviewSyncing{false};
+    bool m_openGlesCompatibility{false};
+    int m_openGlDiagnosticFramesRemaining{0};
+    quint64 m_openGlDiagnosticFrame{0};
+    QString m_openGlDiagnosticReason;
 };
 
 #endif // MYGLWIDGET_H

@@ -17,6 +17,8 @@ varying highp vec4 v_position;
 varying highp vec3 v_normal;
 varying highp vec2 v_texture;
 varying highp vec4 v_instanceColor;
+varying highp vec3 v_worldPosition;
+varying highp float v_viewDepth;
 
 void main(void)
 {
@@ -26,11 +28,15 @@ void main(void)
   mat4 instanceMatrix = mat4(a_instanceMatrix0, a_instanceMatrix1,
                              a_instanceMatrix2, a_instanceMatrix3);
   mat4 modelMatrix = u_instanced ? instanceMatrix : u_modelMmatrix;
-  mat4 mvMatrix = u_viewMmatrix * modelMatrix * partMatrix;
+  mat4 worldMatrix = modelMatrix * partMatrix;
+  mat4 mvMatrix = u_viewMmatrix * worldMatrix;
   gl_Position = u_projMmatrix * mvMatrix * a_position;
 
   v_position = mvMatrix * a_position;
-  v_normal = normalize(vec3(mvMatrix * vec4(a_normal, 0.0)));
+  vec4 worldPosition = worldMatrix * a_position;
+  v_worldPosition = worldPosition.xyz;
+  v_viewDepth = max(0.0, -v_position.z);
+  v_normal = normalize(vec3(worldMatrix * vec4(a_normal, 0.0)));
   v_texture = a_texture * (u_partAnimated ? u_textureUvScale : 1.0);
   v_instanceColor = a_instanceColor;
 }
