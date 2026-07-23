@@ -80,6 +80,7 @@ public:
 
     static SMapTableEditResult validateZone(const SMapTableZone& zone,
                                             const QVector<SMapTableZone>& existing = {});
+    SMapTableEditResult validateAllZones() const;
 
 private:
     struct SLine

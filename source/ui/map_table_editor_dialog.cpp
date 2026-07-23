@@ -1,6 +1,7 @@
 #include "map_table_editor_dialog.h"
 
 #include <QCheckBox>
+#include <QComboBox>
 #include <QCryptographicHash>
 #include <QDir>
 #include <QFile>
@@ -78,23 +79,26 @@ CMapTableEditorDialog::CMapTableEditorDialog(QWidget* parent)
     m_zoneList = new QListWidget;
     m_zoneList->setObjectName("mapZoneList");
     QPushButton* newButton = new QPushButton(tr("New Registration"));
+    m_duplicateButton = new QPushButton(tr("Duplicate Selected Zone"));
     leftLayout->addWidget(new QLabel(tr("Zones")));
     leftLayout->addWidget(m_zoneList, 1);
     leftLayout->addWidget(newButton);
+    leftLayout->addWidget(m_duplicateButton);
     splitter->addWidget(left);
 
-    QTabWidget* tabs = new QTabWidget;
+    m_tabs = new QTabWidget;
     QWidget* general = new QWidget;
     QFormLayout* generalForm = new QFormLayout(general);
     m_zoneIdEdit = new QLineEdit;
     m_zoneIdEdit->setObjectName("mapZoneId");
     m_allodIdEdit = new QLineEdit;
-    m_zoneTypeEdit = new QLineEdit;
+    m_zoneTypeCombo = new QComboBox;
+    m_zoneTypeCombo->addItems(QStringList() << "game" << "brief" << "edge");
     m_mprEdit = new QLineEdit;
     m_mobEdit = new QLineEdit;
     generalForm->addRow(tr("Zone ID"), m_zoneIdEdit);
     generalForm->addRow(tr("Allod / island ID"), m_allodIdEdit);
-    generalForm->addRow(tr("Zone type"), m_zoneTypeEdit);
+    generalForm->addRow(tr("Zone type"), m_zoneTypeCombo);
     generalForm->addRow(tr("Landscape MPR resource"), m_mprEdit);
     generalForm->addRow(tr("Objects MOB resource"), m_mobEdit);
     QLabel* generalNote = new QLabel(tr(
@@ -102,7 +106,17 @@ CMapTableEditorDialog::CMapTableEditorDialog(QWidget* parent)
         "Values are never generated automatically."));
     generalNote->setWordWrap(true);
     generalForm->addRow(generalNote);
-    tabs->addTab(general, tr("General"));
+    m_applyButton = new QPushButton(tr("Apply Selected Zone"));
+    m_registerButton = new QPushButton(tr("Register New Zone"));
+    m_registerButton->setVisible(false);
+    QWidget* generalActions = new QWidget;
+    QHBoxLayout* generalActionLayout = new QHBoxLayout(generalActions);
+    generalActionLayout->setContentsMargins(0, 0, 0, 0);
+    generalActionLayout->addWidget(m_applyButton);
+    generalActionLayout->addWidget(m_registerButton);
+    generalActionLayout->addStretch();
+    generalForm->addRow(generalActions);
+    m_tabs->addTab(general, tr("General"));
 
     QWidget* maps = new QWidget;
     QFormLayout* mapsForm = new QFormLayout(maps);
@@ -125,7 +139,7 @@ CMapTableEditorDialog::CMapTableEditorDialog(QWidget* parent)
         "This editor changes registration only; it does not silently create or install textures."));
     mapsNote->setWordWrap(true);
     mapsForm->addRow(mapsNote);
-    tabs->addTab(maps, tr("Minimap"));
+    m_tabs->addTab(maps, tr("Minimap"));
 
     QWidget* entrances = new QWidget;
     QVBoxLayout* entranceLayout = new QVBoxLayout(entrances);
@@ -148,27 +162,30 @@ CMapTableEditorDialog::CMapTableEditorDialog(QWidget* parent)
         "Empty optional cells mean the corresponding #deploy, #remove, #passtime, #view, or #deployangle tag is absent.")));
     entranceLayout->addWidget(m_exitTable, 1);
     entranceLayout->addLayout(exitButtons);
-    tabs->addTab(entrances, tr("Entrances"));
+    m_tabs->addTab(entrances, tr("Entrances"));
 
+    QWidget* rawTab = new QWidget;
+    QVBoxLayout* rawLayout = new QVBoxLayout(rawTab);
+    QLabel* rawNote = new QLabel(tr(
+        "Exact source span from the selected #zone header to immediately before the next #zone header. "
+        "Hand-authored separators and comments between zones may describe either side; Endurance preserves them but does not guess ownership."));
+    rawNote->setWordWrap(true);
     m_rawReview = new QPlainTextEdit;
     m_rawReview->setObjectName("mapRawReview");
     m_rawReview->setReadOnly(true);
     m_rawReview->setLineWrapMode(QPlainTextEdit::NoWrap);
-    tabs->addTab(m_rawReview, tr("Raw Review"));
-    splitter->addWidget(tabs);
+    rawLayout->addWidget(rawNote);
+    rawLayout->addWidget(m_rawReview, 1);
+    m_tabs->addTab(rawTab, tr("Raw Source Span"));
+    splitter->addWidget(m_tabs);
     splitter->setStretchFactor(0, 0);
     splitter->setStretchFactor(1, 1);
     root->addWidget(splitter, 1);
 
     QHBoxLayout* actions = new QHBoxLayout;
-    m_applyButton = new QPushButton(tr("Apply Selected Zone"));
-    m_registerButton = new QPushButton(tr("Register New Zone"));
-    m_registerButton->setVisible(false);
     m_saveButton = new QPushButton(tr("Save Verified RES As..."));
     m_saveButton->setObjectName("mapSaveVerifiedRes");
     QPushButton* closeButton = new QPushButton(tr("Close"));
-    actions->addWidget(m_applyButton);
-    actions->addWidget(m_registerButton);
     actions->addStretch();
     actions->addWidget(m_saveButton);
     actions->addWidget(closeButton);
@@ -181,6 +198,7 @@ CMapTableEditorDialog::CMapTableEditorDialog(QWidget* parent)
     connect(m_importButton, &QPushButton::clicked, this, &CMapTableEditorDialog::importText);
     connect(m_exportButton, &QPushButton::clicked, this, &CMapTableEditorDialog::exportText);
     connect(newButton, &QPushButton::clicked, this, &CMapTableEditorDialog::beginNewZone);
+    connect(m_duplicateButton, &QPushButton::clicked, this, &CMapTableEditorDialog::beginDuplicateZone);
     connect(m_zoneList, &QListWidget::currentRowChanged, this, &CMapTableEditorDialog::selectZone);
     connect(m_applyButton, &QPushButton::clicked, this, &CMapTableEditorDialog::applySelectedZone);
     connect(m_registerButton, &QPushButton::clicked, this, &CMapTableEditorDialog::registerNewZone);
@@ -201,10 +219,11 @@ void CMapTableEditorDialog::setArchiveUiEnabled(bool enabled)
     m_importButton->setEnabled(enabled);
     m_exportButton->setEnabled(enabled);
     m_applyButton->setEnabled(enabled && !m_newZoneMode);
+    m_duplicateButton->setEnabled(enabled && m_selectedZone >= 0 && !m_newZoneMode);
     m_saveButton->setEnabled(enabled);
     m_zoneIdEdit->setEnabled(enabled);
     m_allodIdEdit->setEnabled(enabled);
-    m_zoneTypeEdit->setEnabled(enabled);
+    m_zoneTypeCombo->setEnabled(enabled);
     m_mprEdit->setEnabled(enabled);
     m_mobEdit->setEnabled(enabled);
     m_mapsEnabled->setEnabled(enabled);
@@ -296,6 +315,7 @@ void CMapTableEditorDialog::selectZone(int row)
     m_applyButton->setVisible(true);
     m_applyButton->setEnabled(true);
     m_registerButton->setVisible(false);
+    m_duplicateButton->setEnabled(true);
     loadZone(m_table.zones().at(row));
 }
 
@@ -303,7 +323,18 @@ void CMapTableEditorDialog::loadZone(const SMapTableZone& zone)
 {
     m_zoneIdEdit->setText(zone.zoneId);
     m_allodIdEdit->setText(zone.allodId);
-    m_zoneTypeEdit->setText(zone.zoneType);
+    while(m_zoneTypeCombo->count() > 3)
+        m_zoneTypeCombo->removeItem(m_zoneTypeCombo->count() - 1);
+    int zoneTypeIndex = m_zoneTypeCombo->findText(zone.zoneType, Qt::MatchFixedString);
+    if(zoneTypeIndex < 0 && !zone.zoneType.isEmpty())
+    {
+        m_zoneTypeCombo->addItem(zone.zoneType);
+        zoneTypeIndex = m_zoneTypeCombo->count() - 1;
+        m_zoneTypeCombo->setItemData(zoneTypeIndex,
+            tr("Unsupported source value; choose game, brief, or edge before verified RES save."),
+            Qt::ToolTipRole);
+    }
+    m_zoneTypeCombo->setCurrentIndex(zoneTypeIndex >= 0 ? zoneTypeIndex : 0);
     m_mprEdit->setText(zone.mprName);
     m_mobEdit->setText(zone.mobName);
     m_mapsEnabled->setChecked(zone.maps.present);
@@ -352,7 +383,7 @@ bool CMapTableEditorDialog::collectZone(SMapTableZone* zone, QString* error) con
         return false;
     zone->zoneId = m_zoneIdEdit->text().trimmed();
     zone->allodId = m_allodIdEdit->text().trimmed();
-    zone->zoneType = m_zoneTypeEdit->text().trimmed();
+    zone->zoneType = m_zoneTypeCombo->currentText();
     zone->mprName = m_mprEdit->text().trimmed();
     zone->mobName = m_mobEdit->text().trimmed();
     zone->maps.present = m_mapsEnabled->isChecked();
@@ -471,6 +502,8 @@ void CMapTableEditorDialog::beginNewZone()
     m_newZoneMode = true;
     m_selectedZone = -1;
     m_zoneList->clearSelection();
+    m_duplicateButton->setEnabled(false);
+    m_tabs->setCurrentIndex(0);
     SMapTableZone blank;
     blank.maps.sectorWidth = 1;
     blank.maps.sectorHeight = 1;
@@ -481,6 +514,29 @@ void CMapTableEditorDialog::beginNewZone()
     m_applyButton->setVisible(false);
     m_registerButton->setVisible(true);
     setStatus(tr("Enter explicit registration values, then choose Register New Zone."));
+}
+
+void CMapTableEditorDialog::beginDuplicateZone()
+{
+    if(m_archivePath.isEmpty() || m_selectedZone < 0 || m_selectedZone >= m_table.zones().size())
+        return;
+    const SMapTableZone source = m_table.zones().at(m_selectedZone);
+    m_newZoneMode = true;
+    m_selectedZone = -1;
+    m_zoneList->clearSelection();
+    m_duplicateButton->setEnabled(false);
+    m_tabs->setCurrentIndex(0);
+    SMapTableZone duplicate = source;
+    duplicate.zoneId.clear();
+    duplicate.rawBlock.clear();
+    loadZone(duplicate);
+    m_rawReview->setPlainText(tr(
+        "Structured metadata was copied from %1. The new Zone ID is intentionally blank. "
+        "Unknown tags, comments, and raw source ownership were not copied; review every resource and entrance before registering.")
+        .arg(source.zoneId));
+    m_applyButton->setVisible(false);
+    m_registerButton->setVisible(true);
+    setStatus(tr("Duplicating %1: enter a unique Zone ID and review all copied metadata.").arg(source.zoneId));
 }
 
 void CMapTableEditorDialog::registerNewZone()
@@ -616,6 +672,12 @@ void CMapTableEditorDialog::saveArchiveAs()
     }
     if(!applyCurrentZone())
         return;
+    const SMapTableEditResult validation = m_table.validateAllZones();
+    if(!validation.success)
+    {
+        setStatus(tr("Verified save rejected: %1").arg(validation.toText()), true);
+        return;
+    }
     const QString destination = QFileDialog::getSaveFileName(
         this, tr("Save verified texts.res"), m_archivePath, tr("RES archives (*.res)"));
     if(destination.isEmpty())

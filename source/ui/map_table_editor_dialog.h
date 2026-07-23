@@ -7,12 +7,14 @@
 #include "res_archive_document.h"
 
 class QCheckBox;
+class QComboBox;
 class QLineEdit;
 class QListWidget;
 class QPlainTextEdit;
 class QPushButton;
 class QSpinBox;
 class QTableWidget;
+class QTabWidget;
 
 class CMapTableEditorDialog : public QDialog
 {
@@ -26,6 +28,7 @@ private slots:
     void selectZone(int row);
     void applySelectedZone();
     void beginNewZone();
+    void beginDuplicateZone();
     void registerNewZone();
     void addExit();
     void removeExit();
@@ -53,7 +56,7 @@ private:
     QListWidget* m_zoneList{nullptr};
     QLineEdit* m_zoneIdEdit{nullptr};
     QLineEdit* m_allodIdEdit{nullptr};
-    QLineEdit* m_zoneTypeEdit{nullptr};
+    QComboBox* m_zoneTypeCombo{nullptr};
     QLineEdit* m_mprEdit{nullptr};
     QLineEdit* m_mobEdit{nullptr};
     QCheckBox* m_mapsEnabled{nullptr};
@@ -66,9 +69,11 @@ private:
     QPushButton* m_importButton{nullptr};
     QPushButton* m_exportButton{nullptr};
     QPushButton* m_applyButton{nullptr};
+    QPushButton* m_duplicateButton{nullptr};
     QPushButton* m_registerButton{nullptr};
     QPushButton* m_saveButton{nullptr};
     QLineEdit* m_statusEdit{nullptr};
+    QTabWidget* m_tabs{nullptr};
 };
 
 #endif // MAP_TABLE_EDITOR_DIALOG_H

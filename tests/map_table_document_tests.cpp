@@ -10,8 +10,9 @@ private slots:
     void noOpIsByteIdentical();
     void parsesMapsAndEntranceMetadata();
     void preservesUnknownZoneText();
-    void assignsLeadingCommentsToFollowingZoneReview();
+    void keepsAmbiguousInterZoneTextInExactSourceSpan();
     void validatesUnsafeMetadata();
+    void rejectsUnknownZoneTypeAcrossDocument();
     void rejectsGameRegistrationWithoutResources();
     void editsOnlyRequestedKnownLines();
     void editsEntranceWithoutRewritingUnknownText();
@@ -92,7 +93,7 @@ void MapTableDocumentTests::preservesUnknownZoneText()
     QCOMPARE(document.serialize(), bytes);
 }
 
-void MapTableDocumentTests::assignsLeadingCommentsToFollowingZoneReview()
+void MapTableDocumentTests::keepsAmbiguousInterZoneTextInExactSourceSpan()
 {
     const QByteArray bytes =
         "#zone bz1g gipat brief\r\n"
@@ -108,12 +109,26 @@ void MapTableDocumentTests::assignsLeadingCommentsToFollowingZoneReview()
     CMapTableDocument document;
     QVERIFY(document.loadBytes(bytes));
     QCOMPARE(document.zones().size(), 2);
-    QVERIFY(!document.zones().at(0).rawBlock.contains("WAY FROM BASE"));
-    QVERIFY(!document.zones().at(0).rawBlock.contains("########"));
-    QVERIFY(document.zones().at(1).rawBlock.startsWith("\r\n################################################"));
-    QVERIFY(document.zones().at(1).rawBlock.contains("## WAY FROM BASE TO Ruins\r\n#zone gz1g_bz1g"));
+    QVERIFY(document.zones().at(0).rawBlock.contains("################################################"));
+    QVERIFY(document.zones().at(0).rawBlock.contains("## WAY FROM BASE TO Ruins"));
+    QVERIFY(!document.zones().at(1).rawBlock.contains("WAY FROM BASE"));
+    QVERIFY(document.zones().at(1).rawBlock.startsWith("#zone gz1g_bz1g"));
     QCOMPARE(document.serialize(), bytes);
     QVERIFY(!document.isDirty());
+}
+
+void MapTableDocumentTests::rejectsUnknownZoneTypeAcrossDocument()
+{
+    const QByteArray bytes =
+        "#zone valid island game\r\n"
+        "#res\r\nvalid valid\r\n"
+        "#zone invalid island arbitrary\r\n";
+    CMapTableDocument document;
+    QVERIFY(document.loadBytes(bytes));
+    const SMapTableEditResult result = document.validateAllZones();
+    QVERIFY(!result.success);
+    QVERIFY(result.toText().contains("invalid: Zone type must be game, brief, or edge."));
+    QCOMPARE(document.serialize(), bytes);
 }
 
 void MapTableDocumentTests::validatesUnsafeMetadata()

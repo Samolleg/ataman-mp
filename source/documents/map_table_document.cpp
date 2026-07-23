@@ -198,19 +198,6 @@ bool CMapTableDocument::reparse(QStringList* errors)
     }
 
     const auto decoded = [this](int index) { return decodeLine(m_lines.at(index).content); };
-    QVector<int> reviewStarts = starts;
-    for(int spanIndex = 0; spanIndex < reviewStarts.size(); ++spanIndex)
-    {
-        int reviewStart = reviewStarts.at(spanIndex);
-        while(reviewStart > 0)
-        {
-            const QString preceding = decoded(reviewStart - 1).trimmed();
-            if(!preceding.isEmpty() && !preceding.startsWith("##"))
-                break;
-            --reviewStart;
-        }
-        reviewStarts[spanIndex] = reviewStart;
-    }
     const auto nextValueLine = [this](int tagIndex, int limit) {
         for(int index = tagIndex + 1; index < limit; ++index)
         {
@@ -358,14 +345,12 @@ bool CMapTableDocument::reparse(QStringList* errors)
             exitStart = exitEnd;
         }
 
-        // Human-authored separators and descriptions conventionally precede
-        // the #zone they describe. Keep serialization spans unchanged, but
-        // present those comment-only preambles with the following zone in Raw
-        // Review instead of misleadingly attaching them to the previous one.
-        const int reviewStart = reviewStarts.at(spanIndex);
-        int reviewEnd = span.end;
-        if(spanIndex + 1 < reviewStarts.size())
-            reviewEnd = qMin(reviewEnd, reviewStarts.at(spanIndex + 1));
+        // Show the exact serialization span without guessing whether human-
+        // authored inter-zone comments describe the preceding or following
+        // zone. Separator length and comment placement are conventions, not
+        // part of the map.txt grammar.
+        const int reviewStart = span.start;
+        const int reviewEnd = span.end;
         QByteArray raw;
         for(int index = reviewStart; index < reviewEnd; ++index)
         {
@@ -390,6 +375,10 @@ SMapTableEditResult CMapTableDocument::validateZone(
         result.errors.append("Allod ID is required and cannot contain whitespace.");
     if(!tokenIsSafe(zone.zoneType))
         result.errors.append("Zone type is required and cannot contain whitespace.");
+    else if(zone.zoneType.compare("game", Qt::CaseInsensitive) != 0 &&
+            zone.zoneType.compare("brief", Qt::CaseInsensitive) != 0 &&
+            zone.zoneType.compare("edge", Qt::CaseInsensitive) != 0)
+        result.errors.append("Zone type must be game, brief, or edge.");
     if(zone.mprName.isEmpty() != zone.mobName.isEmpty())
         result.errors.append("MPR and MOB resource names must either both be present or both be absent.");
     if(zone.zoneType.compare("game", Qt::CaseInsensitive) == 0 &&
@@ -436,6 +425,27 @@ SMapTableEditResult CMapTableDocument::validateZone(
     }
     result.success = result.errors.isEmpty();
     return result;
+}
+
+SMapTableEditResult CMapTableDocument::validateAllZones() const
+{
+    SMapTableEditResult combined;
+    for(int index = 0; index < m_zones.size(); ++index)
+    {
+        QVector<SMapTableZone> others;
+        others.reserve(m_zones.size() - 1);
+        for(int candidate = 0; candidate < m_zones.size(); ++candidate)
+        {
+            if(candidate != index)
+                others.append(m_zones.at(candidate));
+        }
+        const SMapTableEditResult zoneResult = validateZone(m_zones.at(index), others);
+        for(const QString& error : zoneResult.errors)
+            combined.errors.append(QString("%1: %2").arg(m_zones.at(index).zoneId, error));
+        combined.warnings.append(zoneResult.warnings);
+    }
+    combined.success = combined.errors.isEmpty();
+    return combined;
 }
 
 SMapTableEditResult CMapTableDocument::replaceZone(
