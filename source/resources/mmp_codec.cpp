@@ -20,6 +20,120 @@ uchar expandMaskedChannel(quint32 pixel, quint32 mask, quint32 shift)
     const quint32 maximum = mask >> shift;
     return maximum == 0 ? 0 : uchar((255u * ((pixel & mask) >> shift) + maximum / 2u) / maximum);
 }
+
+QRgb decodeRgb565(quint16 value)
+{
+    const int red = ((value >> 11) & 31) * 255 / 31;
+    const int green = ((value >> 5) & 63) * 255 / 63;
+    const int blue = (value & 31) * 255 / 31;
+    return qRgba(red, green, blue, 255);
+}
+
+QRgb interpolate(QRgb first, QRgb second, int firstWeight, int secondWeight,
+                  int divisor, int alpha = 255)
+{
+    return qRgba((qRed(first) * firstWeight + qRed(second) * secondWeight) / divisor,
+                 (qGreen(first) * firstWeight + qGreen(second) * secondWeight) / divisor,
+                 (qBlue(first) * firstWeight + qBlue(second) * secondWeight) / divisor,
+                 alpha);
+}
+
+void decodeColorBlock(const uchar* block, bool allowDxt1Transparency,
+                      QRgb colors[4], quint32* indices)
+{
+    const quint16 color0 = qFromLittleEndian<quint16>(block);
+    const quint16 color1 = qFromLittleEndian<quint16>(block + 2);
+    colors[0] = decodeRgb565(color0);
+    colors[1] = decodeRgb565(color1);
+    if(!allowDxt1Transparency || color0 > color1)
+    {
+        colors[2] = interpolate(colors[0], colors[1], 2, 1, 3);
+        colors[3] = interpolate(colors[0], colors[1], 1, 2, 3);
+    }
+    else
+    {
+        colors[2] = interpolate(colors[0], colors[1], 1, 1, 2);
+        colors[3] = qRgba(0, 0, 0, 0);
+    }
+    *indices = qFromLittleEndian<quint32>(block + 4);
+}
+}
+
+bool decodeDxtImage(const QByteArray& compressed, int width, int height,
+                    DxtFormat format, QImage* image, QString* diagnostic)
+{
+    if(!image || width <= 0 || height <= 0)
+    {
+        if(diagnostic) *diagnostic = "Invalid DXT image dimensions.";
+        return false;
+    }
+    const int blockBytes = format == DxtFormat::Dxt1 ? 8 : 16;
+    const qint64 blocksWide = (qint64(width) + 3) / 4;
+    const qint64 blocksHigh = (qint64(height) + 3) / 4;
+    const qint64 required = blocksWide * blocksHigh * blockBytes;
+    if(required > std::numeric_limits<int>::max() || compressed.size() < required)
+    {
+        if(diagnostic) *diagnostic = "DXT mip payload is truncated.";
+        return false;
+    }
+
+    QImage result(width, height, QImage::Format_ARGB32);
+    const uchar* source = reinterpret_cast<const uchar*>(compressed.constData());
+    for(int blockY = 0; blockY < blocksHigh; ++blockY)
+        for(int blockX = 0; blockX < blocksWide; ++blockX)
+        {
+            const uchar* block = source + (blockY * blocksWide + blockX) * blockBytes;
+            uchar alphaValues[8] = {255, 255, 255, 255, 255, 255, 255, 255};
+            quint64 alphaIndices = 0;
+            const uchar* colorBlock = block;
+            if(format == DxtFormat::Dxt3)
+            {
+                alphaIndices = qFromLittleEndian<quint64>(block);
+                colorBlock += 8;
+            }
+            else if(format == DxtFormat::Dxt5)
+            {
+                alphaValues[0] = block[0];
+                alphaValues[1] = block[1];
+                if(alphaValues[0] > alphaValues[1])
+                    for(int i = 1; i <= 6; ++i)
+                        alphaValues[i + 1] = uchar(((7 - i) * int(alphaValues[0])
+                                                   + i * int(alphaValues[1])) / 7);
+                else
+                {
+                    for(int i = 1; i <= 4; ++i)
+                        alphaValues[i + 1] = uchar(((5 - i) * int(alphaValues[0])
+                                                   + i * int(alphaValues[1])) / 5);
+                    alphaValues[6] = 0;
+                    alphaValues[7] = 255;
+                }
+                for(int byte = 0; byte < 6; ++byte)
+                    alphaIndices |= quint64(block[2 + byte]) << (8 * byte);
+                colorBlock += 8;
+            }
+
+            QRgb colors[4];
+            quint32 colorIndices = 0;
+            decodeColorBlock(colorBlock, format == DxtFormat::Dxt1,
+                             colors, &colorIndices);
+            for(int pixel = 0; pixel < 16; ++pixel)
+            {
+                const int x = blockX * 4 + pixel % 4;
+                const int y = blockY * 4 + pixel / 4;
+                if(x >= width || y >= height)
+                    continue;
+                const QRgb color = colors[(colorIndices >> (2 * pixel)) & 3u];
+                int alpha = qAlpha(color);
+                if(format == DxtFormat::Dxt3)
+                    alpha = int((alphaIndices >> (4 * pixel)) & 0xfu) * 17;
+                else if(format == DxtFormat::Dxt5)
+                    alpha = alphaValues[(alphaIndices >> (3 * pixel)) & 7u];
+                result.setPixel(x, y, qRgba(qRed(color), qGreen(color),
+                                            qBlue(color), alpha));
+            }
+        }
+    *image = result;
+    return true;
 }
 
 bool decodePnt3(const QByteArray& compressed, int decodedSize,

@@ -8,6 +8,20 @@
 
 namespace ei {
 
+enum class DxtFormat
+{
+    Dxt1,
+    Dxt3,
+    Dxt5
+};
+
+// Decode one authored DXT mip level. This is used only when the active GL
+// implementation cannot accept EI's compressed MMP payloads (notably the
+// bundled ANGLE/GLES2 renderer); native desktop GL keeps the original upload.
+bool decodeDxtImage(const QByteArray& compressed, int width, int height,
+                    DxtFormat format, QImage* image,
+                    QString* diagnostic = nullptr);
+
 // PNT3 stores four-pixel (16-byte) literal blocks separated by byte-counted
 // transparent runs. Only the first dword of each block is a control candidate:
 // non-zero with alpha zero is a run; otherwise the whole block is literal.

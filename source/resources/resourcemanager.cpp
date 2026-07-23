@@ -731,13 +731,33 @@ void CTextureList::parse(QByteArray& data, const QString& name)
     // selected; shipped MMPs commonly stop at their last block-safe DXT level.
     texture->setMinificationFilter(openGlesCompatibility
         ? QOpenGLTexture::Nearest : QOpenGLTexture::NearestMipMapNearest);
-    texture->setMagnificationFilter(QOpenGLTexture::Nearest);
+    // Preserve the native renderer's smooth sky/model sampling. Only the
+    // mipmapped MAG value was invalid; replacing it globally with NEAREST
+    // made the cylindrical sky visibly pixelated on desktop GL.
+    texture->setMagnificationFilter(QOpenGLTexture::Linear);
     texture->setWrapMode(QOpenGLTexture::Repeat);
     ERenderMaterialClass materialClass = ERenderMaterialClass::Conservative;
     switch (header.m_format)
     {
     case ETextureFormat::eMMP_DXT1:
     {
+        materialClass = classifyDxt1Alpha(data, header.size(), header.m_width, header.m_height);
+        if(openGlesCompatibility)
+        {
+            QImage image;
+            QString diagnostic;
+            const int size = dxtLevelSize(header.m_width, header.m_height, 8);
+            if(!ei::decodeDxtImage(data.mid(header.size(), size), header.m_width,
+                                   header.m_height, ei::DxtFormat::Dxt1,
+                                   &image, &diagnostic))
+            {
+                ei::log(eLogWarning, "Invalid ANGLE DXT1 texture " + name + ": " + diagnostic);
+                delete texture;
+                return;
+            }
+            texture->setData(image);
+            break;
+        }
         texture->setFormat(QOpenGLTexture::TextureFormat::RGBA_DXT1);
         texture->setSize(int(header.m_width), int(header.m_height));
         texture->setMipLevels(uploadedMipCount);
@@ -749,12 +769,28 @@ void CTextureList::parse(QByteArray& data, const QString& name)
             texture->setCompressedData(i, 0, size, data.data() + offset);
             offset += size;
         }
-        materialClass = classifyDxt1Alpha(data, header.size(), header.m_width, header.m_height);
         break;
     }
     case ETextureFormat::eMMP_DXT2:
     case ETextureFormat::eMMP_DXT3:
     {
+        materialClass = classifyDxt3Alpha(data, header.size(), header.m_width, header.m_height);
+        if(openGlesCompatibility)
+        {
+            QImage image;
+            QString diagnostic;
+            const int size = dxtLevelSize(header.m_width, header.m_height, 16);
+            if(!ei::decodeDxtImage(data.mid(header.size(), size), header.m_width,
+                                   header.m_height, ei::DxtFormat::Dxt3,
+                                   &image, &diagnostic))
+            {
+                ei::log(eLogWarning, "Invalid ANGLE DXT3 texture " + name + ": " + diagnostic);
+                delete texture;
+                return;
+            }
+            texture->setData(image);
+            break;
+        }
         texture->setFormat(QOpenGLTexture::TextureFormat::RGBA_DXT3);
         texture->setSize(int(header.m_width), int(header.m_height));
         texture->setMipLevels(uploadedMipCount);
@@ -766,12 +802,28 @@ void CTextureList::parse(QByteArray& data, const QString& name)
             texture->setCompressedData(i, 0, size, data.data() + offset);
             offset += size;
         }
-        materialClass = classifyDxt3Alpha(data, header.size(), header.m_width, header.m_height);
         break;
     }
     case ETextureFormat::eMMP_DXT4:
     case ETextureFormat::eMMP_DXT5:
     {
+        materialClass = classifyDxt5Alpha(data, header.size(), header.m_width, header.m_height);
+        if(openGlesCompatibility)
+        {
+            QImage image;
+            QString diagnostic;
+            const int size = dxtLevelSize(header.m_width, header.m_height, 16);
+            if(!ei::decodeDxtImage(data.mid(header.size(), size), header.m_width,
+                                   header.m_height, ei::DxtFormat::Dxt5,
+                                   &image, &diagnostic))
+            {
+                ei::log(eLogWarning, "Invalid ANGLE DXT5 texture " + name + ": " + diagnostic);
+                delete texture;
+                return;
+            }
+            texture->setData(image);
+            break;
+        }
         texture->setFormat(QOpenGLTexture::TextureFormat::RGBA_DXT5);
         texture->setSize(int(header.m_width), int(header.m_height));
         texture->setMipLevels(uploadedMipCount);
@@ -783,7 +835,6 @@ void CTextureList::parse(QByteArray& data, const QString& name)
             texture->setCompressedData(i, 0, size, data.data() + offset);
             offset += size;
         }
-        materialClass = classifyDxt5Alpha(data, header.size(), header.m_width, header.m_height);
         break;
     }
     case ETextureFormat::eMMP_5650    : // use the same direct draw reading algorithm
@@ -1393,6 +1444,43 @@ QOpenGLTexture* CTextureList::buildLandTex(const QString& name, int expectedTexC
         ? QOpenGLTexture::NearestMipMapLinear : QOpenGLTexture::Nearest);
     texture->setMagnificationFilter(QOpenGLTexture::Nearest);
     texture->setWrapMode(QOpenGLTexture::Repeat);
+    if(openGlesCompatibility)
+    {
+        // ANGLE's ES2 compressed upload accepts neither the shipped DXT MMPs
+        // nor the horizontally block-packed terrain atlas reliably. Decode
+        // the selected authored mip for each tile, then compose the exact
+        // atlas in ordinary RGBA memory. Desktop GL retains the zero-copy DXT
+        // path below.
+        QImage atlas(minTexSize * texCount, minTexSize, QImage::Format_ARGB32);
+        atlas.fill(Qt::transparent);
+        for(int partIndex = 0; partIndex < aPart.size(); ++partIndex)
+        {
+            const STexSpecified& part = aPart[partIndex];
+            const int offset = dxt1MipOffset(part.header, part.selectedMip);
+            const int bytes = dxt1MipBytes(minTexSize, minTexSize);
+            QImage tile;
+            QString diagnostic;
+            if(!ei::decodeDxtImage(part.data.mid(offset, bytes), minTexSize,
+                                   minTexSize, ei::DxtFormat::Dxt1,
+                                   &tile, &diagnostic))
+            {
+                ei::log(eLogWarning, QString("Invalid ANGLE terrain tile %1 part:%2: %3")
+                        .arg(name).arg(partIndex).arg(diagnostic));
+                delete texture;
+                return nullptr;
+            }
+            for(int y = 0; y < minTexSize; ++y)
+                memcpy(atlas.scanLine(y) + partIndex * minTexSize * 4,
+                       tile.constScanLine(y), size_t(minTexSize) * 4u);
+        }
+        ei::setCrashContext("mpr/terrain-atlas/opengl-upload-rgba:" + name);
+        texture->setData(atlas);
+        m_aTexture[cacheKey] = texture;
+        m_terrainTextures.insert(texture);
+        ei::log(eLogInfo, QString("Terrain atlas set ready map:%1 expected:%2 loaded:%3 ANGLE-RGBA")
+                .arg(name).arg(expectedTexCount).arg(texCount));
+        return texture;
+    }
     texture->setFormat(QOpenGLTexture::TextureFormat::RGBA_DXT1); //todo: read texture format from file. EI can use both dxt3 and dxt1
     texture->setMipLevels(uploadedMipCount);
     texture->setSize(minTexSize*texCount, minTexSize);
