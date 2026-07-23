@@ -43,6 +43,9 @@ public:
     QString objectNameByType(ENodeType type) const;
     ENodeType objectTypeByString(QString str) const;
     void revealNode(CNode* pNode);
+    void markNode(CNode* pNode, bool scrollToNode = false);
+    void markNodes(const QList<CNode*>& nodes, CNode* primaryNode,
+                   bool scrollToPrimary = false);
     void clearViewportSelectionMarker();
     void prepareForRebuild();
     void setValidationNids(const QSet<uint>& critical, const QSet<uint>& warning);

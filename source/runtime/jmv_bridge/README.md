@@ -1,12 +1,20 @@
 # JMV direct single-player map launcher
 
-This x86 `.plg` is a temporary, profile-specific provider for the fingerprinted
-JMV runtime stack. It is not loaded into EI Mapper itself. During a test run
-the editor copies it into JMV's configured `DEV/Plugin=plugin.dll` slot, where
-Starter calls `EntryBeforePatch` and `EntryAfterPatch`. The slot must be absent;
-Endurance never replaces an installed mod plugin. The provider and other
-temporary files are removed after exit only when their SHA-256 values still
-match the run manifest.
+This x86 `.plg` is the run-local provider for the fingerprinted Base or Starter
+`game.exe`. Its engine hooks depend only on the executable's guarded code
+layout. Starter addon.dll, SpellAddonX.asi, and the frequently updated JMV
+addon.dll are not Endurance bridge-delivery dependencies or compatibility
+gates. They remain profile gameplay components and JMV features may naturally
+depend on them after the game starts.
+
+Endurance uses the same owned-process transport for Base and JMV. Its packaged
+32-bit runtime host creates the selected `game.exe` suspended, loads a copy of
+this bridge from the run directory, calls `EnduranceInitialize` explicitly,
+and resumes the game only after the bridge accepts the fingerprint and guarded
+hook sites. Endurance never places `plugin.dll` in the mod, uses the JMV
+`DEV/Plugin` loader, injects into an independently started process, or requests
+elevation. The run-local provider is removed after exit only when its SHA-256
+still matches the recovery journal.
 
 The provider verifies the exact approved `game.exe` hash and patches the
 already loaded modules' imports of `CreateFileA/W` and
@@ -22,8 +30,9 @@ message hook resolves the requested `map.txt` zone record and invokes the
 engine's normal transition as `(captured controller, zone ID, mode 0)`. The
 loader detour substitutes only that transition's verified MPR/MOB arguments
 with the staged Endurance paths. The engine retains its normal session, zone,
-and player initialization. Module bases and each relevant file open remain
-recorded for runtime verification.
+and player initialization. Relevant file operations retain module-relative
+call stacks for verification; initialization records only an aggregate count
+of already loaded modules rather than dumping every Windows DLL path.
 
 The provider remains deliberately narrow:
 
@@ -55,9 +64,19 @@ Game click. The previously tested internal `server` handler remains absent
 because runtime evidence showed it enters an incomplete multiplayer/server
 transition instead.
 
-Starter treats a non-zero callback return as an assertion condition, so both
-exports always return zero. Initialization failures are reported in the run
-log and otherwise leave the runtime untouched.
+The legacy Starter callback exports remain for binary compatibility. The owned
+runtime host prepares the bridge before process resume, caches the main module
+at that loader-safe point, then activates byte-guarded map detours only after
+the JMV executable patch phase becomes quiescent. Post-patch activation must
+not call module-loader APIs while the main thread is suspended: that thread may
+still own the Windows loader lock even after executable bytes stop changing.
+Each bridge-export phase and timeout is written to `runtime-host.log`; a failed
+activation terminates only the Endurance-owned game process.
+
+The complete user-facing dependency contract, including the conditional
+`AutoRunSpellAddon123.mob` requirement for Play from Here, Godmode, and explicit
+supplemental MOB loading, is documented in
+[`docs/TEST_CURRENT_MAP_DEPENDENCIES.md`](../../../docs/TEST_CURRENT_MAP_DEPENDENCIES.md).
 
 Build with `build-x86.cmd` from an x86 Visual Studio 2022 environment. Generated
 binary/PDB files under `bin/` are local build artifacts.

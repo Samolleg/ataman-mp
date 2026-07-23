@@ -16,7 +16,14 @@ Paths use `/` in the JSON and support these variables:
 indexes every `.res` archive directly inside each directory. A profile never
 needs to list individual archive filenames.
 
-Profile schema version 1 fields:
+Profile schema version 2 adds manifest-selected providers. A profile may reuse
+the built-in `base.standard.v1` or `jmv.v1` provider with different resource
+roots; selection is independent of the profile ID. The required provider roles
+are `database`, `characterAppearance`, `equipmentLayout`, `unitAnimation`, and
+`semanticValidation`. Unknown IDs and incompatible interface versions fail
+closed with diagnostics rather than silently using Base or JMV behavior.
+
+Profile fields:
 
 - `id`, `displayName`, `resourceDirectories`: required.
 - `mapDirectories`: optional map locations retained by the workspace profile.
@@ -26,6 +33,8 @@ Profile schema version 1 fields:
 - `directoryNameContains`: terms used to prefer a matching directory.
 - `requiredFiles`, `requiredDirectories`: candidate validation rules.
 - `signatureFiles`: strong preference signals when several candidates match.
+- `providers`: role-to-provider bindings (schema version 2). A value may be a
+  provider ID string or `{ "id": "...", "interfaceVersion": 1 }`.
 
 Invalid JSON profiles are ignored. The selected configuration is previewed and
 must validate before it can be applied.

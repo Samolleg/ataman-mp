@@ -4,7 +4,7 @@ EI Mapper: Endurance Edition is an independently versioned derivative of
 [`konstvest/ei_maper`](https://github.com/konstvest/ei_maper), focused on safe,
 fast Evil Islands and Jamais Vu map editing.
 
-Current development version: `0.2.0`.
+Current development version: `0.2.1-alpha.32`.
 
 Project status and upcoming work are tracked in the living
 [Endurance roadmap](ROADMAP.md).
@@ -47,10 +47,14 @@ commit `1cebe83d` tagged as `upstream-1cebe83d`.
   object view. It can be disabled under **Settings > Render** for A/B testing;
   selected objects remain conservative. Logic helpers are rendered separately,
   allowing their owning off-screen object geometry to remain culled.
-- Experimental JMV map testing stages the exact current map pair, initializes
+- Experimental Base/JMV map testing stages the exact current map pair, initializes
   the selected `map.txt` zone through the validated New Game path, skips intro
   movies without renaming them, and redirects save/load operations into the
-  retained per-run AppData folder. Base EI does not advertise this capability.
+  retained per-run AppData folder. Both profiles use the same editor-owned
+  injection transport, gated by exact `game.exe` fingerprints and guarded hook
+  bytes. See [Test Current Map dependencies](docs/TEST_CURRENT_MAP_DEPENDENCIES.md)
+  for the precise separation between Endurance requirements and JMV gameplay
+  components.
 
 The alpha is not yet a production replacement for the original editor. Existing
 MOB fields can be edited and saved through the provenance-checked raw transaction
@@ -60,6 +64,10 @@ hardening and are blocked rather than falling back to the rebuilding serializer.
 
 See [BUILDING_ENDURANCE.md](docs/BUILDING_ENDURANCE.md) for build and test commands,
 and [NOTICE.md](NOTICE.md) for attribution and licensing information.
+Character construction, provider differences, and safe Blender/ei_figer
+authoring are documented in [CHARACTER_PIPELINE.md](docs/CHARACTER_PIPELINE.md),
+[CHARACTER_AUTHORING.md](docs/CHARACTER_AUTHORING.md), and the
+[character evidence matrix](docs/CHARACTER_EVIDENCE_MATRIX.md).
 
 ## Safety
 

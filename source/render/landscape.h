@@ -10,6 +10,7 @@
 #include <QFile>
 #include <QDataStream>
 #include <QVector>
+#include <functional>
 
 //#include "sector.h"
 #include "res_file.h"
@@ -56,15 +57,16 @@ class CLandscape
 {
     //TODO: change singletone to simple class to provide several landscape loading (in different tabs)
 public:
+    using SaveProgress = std::function<void(const QString&, int, int)>;
     static CLandscape* getInstance();
     bool isMprLoad() {return !m_aSector.isEmpty();}
     void unloadMpr();
     void readMap(const QFileInfo& path);
-    bool save();
-    bool saveMapAs(const QFileInfo& path);
-    void draw(QOpenGLShaderProgram* program);
+    bool save(const SaveProgress& progress = SaveProgress());
+    bool saveMapAs(const QFileInfo& path, const SaveProgress& progress = SaveProgress());
+    void draw(QOpenGLShaderProgram* program, const class CViewFrustum* frustum = nullptr);
     void drawTileGrid(QOpenGLShaderProgram* program);
-    void drawWater(QOpenGLShaderProgram* program);
+    void drawWater(QOpenGLShaderProgram* program, const class CViewFrustum* frustum = nullptr);
     void drawTilePreview(QOpenGLShaderProgram* program);
     bool projectPt(QVector3D& point, bool land = true);
     bool projectPt(QVector<QVector3D>& aPoint);
@@ -75,6 +77,8 @@ public:
     const QFileInfo& filePath() {return m_filePath;}
     QOpenGLTexture* glTexture() const {return m_texture;}
     uint textureNum() const {return m_header.nTexture;}
+    uint widthInWorldUnits() const { return m_header.nXSector * 32u; }
+    uint heightInWorldUnits() const { return m_header.nYSector * 32u; }
     const QVector<SMaterial>& materials() const {return m_aMaterial;}
     void setMaterials(const QVector<SMaterial>& arrMat) {m_aMaterial = arrMat;}
     const QVector<ETileType>& tileTypes() const {return m_aTileTypes;}

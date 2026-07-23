@@ -1,0 +1,9 @@
+EI Mapper: Endurance Edition 0.2.1-alpha.14
+Tester purpose: different-map Play-from-Here reset and blocking progress-dialog lifecycle
+Profile scope: Base EI and JMV editor profiles; JMV hot reload uses the current stale-bootstrap-clearing bridge
+UI focus: title-only blocking progress for map/collection loading, staging, hot reload, and long undo/redo
+Runtime focus: map-context-bound custom spawn plus bridge-side clearing of the prior generation bootstrap
+Editor SHA-256: 41bd496f45d9617e5292c82aa12d00bd6d44620a42f0f728cd4ed7c4d70684a8
+Bridge SHA-256: 77bae22c9f714858b64a5541ecbf84de5d8e9ffa417e792930885a1f161e9985
+Automated checks: fresh MinGW release build PASS; embedded alpha.14 version PASS; hot-reload protocol PASS; JMV launcher PASS; spawn planner PASS; git diff check PASS
+Runtime check required: map A custom spawn -> load map B -> hot reload at map B selected entrance

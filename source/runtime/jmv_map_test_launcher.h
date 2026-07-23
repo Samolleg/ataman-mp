@@ -60,6 +60,20 @@ public:
 
     static QString testRunsRootPath();
     static QString generationSavesPath(const QString& runRoot, quint64 generation);
+    static qint64 runtimeGameProcessId(bool usesRuntimeHost,
+                                       const QString& gamePidPath,
+                                       qint64 transportProcessId);
+    static QJsonObject buildAuthoritativeResult(const QJsonObject& manifest,
+                                                const QString& bridgeResult,
+                                                int exitCode,
+                                                int exitStatus,
+                                                bool stopRequested,
+                                                const QString& cleanupMessage);
+    static bool validateAutomatedResult(const QJsonObject& report,
+                                        QStringList* findings = nullptr);
+    static bool analyzeCompletedRun(const QString& runRoot,
+                                    QJsonObject* report,
+                                    QStringList* findings = nullptr);
     static QString recoverInterruptedRuns(bool* pending = nullptr);
     static bool hasActiveInterruptedRun(QString* description = nullptr);
     static bool requestCloseActiveInterruptedRun(QString* error = nullptr);
@@ -69,7 +83,6 @@ public:
                                            QString* output,
                                            QString* error = nullptr,
                                            const QString& immediateCommands = QString());
-    static bool hasConfiguredJmvPluginSlot(const QByteArray& configReg);
     static bool prepareTemporaryAutoexec(const QString& engineDirectory,
                                          const QString& runRoot,
                                          bool godmode,
@@ -88,6 +101,7 @@ public:
 signals:
     void testStarted(const QString& runId, const QString& temporaryMapName);
     void testFinished(const QString& runId, int exitCode, const QString& cleanupMessage);
+    void testReportReady(const QJsonObject& report);
     void testError(const QString& message);
     void hotReloadQueued(quint64 sequence, const QString& zoneId);
     void hotReloadReady();
@@ -101,6 +115,7 @@ private:
     bool writeManifest(const QString& state, QString* error = nullptr);
     void appendRunLog(const QString& message);
     QString bridgeResultSummary() const;
+    qint64 runtimeGameProcessId() const;
     quint64 latestRuntimeStateSequence() const;
     void focusGameWindow(bool maximize);
 
@@ -113,6 +128,7 @@ private:
     QString m_runRoot;
     QString m_manifestPath;
     QString m_runLogPath;
+    QString m_sharedRunLogPath;
     QString m_liveMprPath;
     QString m_liveMobPath;
     QString m_bridgeSourcePath;
@@ -139,7 +155,9 @@ private:
     quint64 m_pendingSaveGeneration{0};
     int m_hotReloadResultPolls{0};
     bool m_cleanupComplete;
+    bool m_stopRequested{false};
     bool m_baseProbe;
+    bool m_usesRuntimeHost{false};
     bool m_recoveryPending{false};
     bool m_lastPublishedRecoveryPending{false};
     QString m_lastPublishedRecoveryStatus;

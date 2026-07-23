@@ -5,6 +5,8 @@
 #include <QMessageBox>
 
 #include "landscape.h"
+#include "render_performance.h"
+#include "view_frustum.h"
 #include "res_file.h"
 #include "utils.h"
 #include "resourcemanager.h"
@@ -240,12 +242,12 @@ void CLandscape::readMap(const QFileInfo& path)
     ei::setCrashContext("idle");
 }
 
-bool CLandscape::save()
+bool CLandscape::save(const SaveProgress& progress)
 {
-    return saveMapAs(m_filePath);
+    return saveMapAs(m_filePath, progress);
 }
 
-bool CLandscape::saveMapAs(const QFileInfo& path)
+bool CLandscape::saveMapAs(const QFileInfo& path, const SaveProgress& progress)
 {
     // TODO: check if source texture has correct textureSize and tileSize with map header
 
@@ -291,6 +293,7 @@ bool CLandscape::saveMapAs(const QFileInfo& path)
         }
     }
 
+    if(progress) progress("Freshly validating the staged MPR...", 1, 4);
     const SStagedSaveValidation validation = validateStagedSave(data, path);
     if(!validation.success)
     {
@@ -304,6 +307,7 @@ bool CLandscape::saveMapAs(const QFileInfo& path)
     ei::log(eLogInfo, QString("Staged MPR validation passed path:%1 size:%2 sha256:%3")
         .arg(path.absoluteFilePath()).arg(validation.size).arg(validation.sha256));
 
+    if(progress) progress("Creating the pre-save backup...", 2, 4);
     if(path.exists())
     {
         const SBackupResult saveBackup = CBackupManager().snapshotBeforeSave(path);
@@ -318,6 +322,7 @@ bool CLandscape::saveMapAs(const QFileInfo& path)
         }
     }
 
+    if(progress) progress("Atomically replacing the destination...", 3, 4);
     QSaveFile out(path.filePath());
     if(!out.open(QIODevice::WriteOnly) || out.write(data) != data.size() || !out.commit())
     {
@@ -328,25 +333,52 @@ bool CLandscape::saveMapAs(const QFileInfo& path)
     }
     m_originalMprData = data;
     m_bDirty = false;
+    if(progress) progress("MPR save complete.", 4, 4);
     return true;
 }
 
-void CLandscape::draw(QOpenGLShaderProgram* program)
+void CLandscape::draw(QOpenGLShaderProgram* program, const CViewFrustum* frustum)
 {
     m_texture->bind(0);
     program->setUniformValue("qt_Texture0", 0);
     for (auto& xSec: m_aSector)
         for(auto& ySec: xSec)
+        {
+            RenderPerformanceContext& performance = RenderPerformanceContext::instance();
+            if(performance.collecting())
+                ++performance.counters().terrainSectorsTested;
+            if(frustum && !ySec->intersectsFrustum(*frustum))
+            {
+                if(performance.collecting())
+                    ++performance.counters().terrainSectorsCulled;
+                continue;
+            }
+            if(performance.collecting())
+                ++performance.counters().terrainSectorsVisible;
             ySec->draw(program);
+        }
 }
 
-void CLandscape::drawWater(QOpenGLShaderProgram *program)
+void CLandscape::drawWater(QOpenGLShaderProgram *program, const CViewFrustum* frustum)
 {
     m_texture->bind(0);
     program->setUniformValue("qt_Texture0", 0);
     for (auto& xSec: m_aSector)
         for(auto& ySec: xSec)
+        {
+            RenderPerformanceContext& performance = RenderPerformanceContext::instance();
+            if(performance.collecting())
+                ++performance.counters().terrainSectorsTested;
+            if(frustum && !ySec->intersectsFrustum(*frustum))
+            {
+                if(performance.collecting())
+                    ++performance.counters().terrainSectorsCulled;
+                continue;
+            }
+            if(performance.collecting())
+                ++performance.counters().terrainSectorsVisible;
             ySec->drawWater(program);
+        }
 }
 
 bool CLandscape::projectPt(QVector3D& point, bool land)

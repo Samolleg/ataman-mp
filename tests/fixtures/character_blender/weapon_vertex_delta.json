@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "operations": [
+    {
+      "type": "vertex_delta",
+      "object": "weapon",
+      "index": 0,
+      "delta": [0.01, 0.0, 0.0]
+    }
+  ]
+}

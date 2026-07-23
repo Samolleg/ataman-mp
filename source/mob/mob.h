@@ -7,6 +7,7 @@
 #include <QVector>
 #include <QVector3D>
 #include <QOpenGLShader>
+#include <functional>
 
 #include "types.h"
 #include "node.h"
@@ -41,13 +42,14 @@ struct SMobParameterState
 class CMob
 {
 public:
+    using SaveProgress = std::function<void(const QString&, int, int)>;
     CMob();
     ~CMob();
     void attach(CView* view, CProgressView* pProgress);
     int readMob(QFileInfo& path);
     QVector<uint> checkUniqueId(QSet<uint>& aId);
-    bool saveAs(const QFileInfo& path);
-    bool save();
+    bool saveAs(const QFileInfo& path, const SaveProgress& progress = SaveProgress());
+    bool save(const SaveProgress& progress = SaveProgress());
     bool buildValidatedCandidate(QByteArray* data,
                                  CValidationReport* report = nullptr,
                                  QString* saveClass = nullptr);
@@ -59,6 +61,7 @@ public:
     CNode* createNode(QJsonObject data);
     void undo_createNode(uint mapId);
     CNode* restoreDeletedNode(CNode* pNode, int restoreIndex = -1);
+    bool replaceNode(CNode* current, CNode* replacement, int index = -1);
     bool rebaseCopiedObjectProvenance(CNode* node, const QString& templatePath,
                                       const QByteArray& templateSubtreeSha256);
     bool rawObjectTemplateBytes(const CNode* node, QByteArray* sourceSubtree,

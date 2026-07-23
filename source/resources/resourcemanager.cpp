@@ -1,4 +1,6 @@
 #include "resourcemanager.h"
+#include <QOpenGLContext>
+#include "mmp_codec.h"
 #include <QDebug>
 #include <QMessageBox>
 #include <QtMath>
@@ -10,6 +12,7 @@
 #include <QJsonArray>
 #include <QFile>
 #include <QTextCodec>
+#include <limits>
 
 #include "res_file.h"
 #include "utils.h"
@@ -25,6 +28,75 @@ CTextureList* CTextureList::m_pTextureContainer = nullptr;
 CSessionDataManager* CSessionDataManager::m_pSessionDataManger = nullptr;
 
 namespace {
+ERenderMaterialClass classifyDxt1Alpha(const QByteArray& data, int offset, int width, int height)
+{
+    const int blocks = qMax(1, (width + 3) / 4) * qMax(1, (height + 3) / 4);
+    for(int block = 0; block < blocks && offset + 8 <= data.size(); ++block, offset += 8)
+    {
+        const uchar* bytes = reinterpret_cast<const uchar*>(data.constData() + offset);
+        const quint16 color0 = quint16(bytes[0]) | (quint16(bytes[1]) << 8);
+        const quint16 color1 = quint16(bytes[2]) | (quint16(bytes[3]) << 8);
+        if(color0 > color1)
+            continue;
+        const quint32 indices = quint32(bytes[4]) | (quint32(bytes[5]) << 8)
+            | (quint32(bytes[6]) << 16) | (quint32(bytes[7]) << 24);
+        for(int pixel = 0; pixel < 16; ++pixel)
+            if(((indices >> (pixel * 2)) & 3u) == 3u)
+                return ERenderMaterialClass::Cutout;
+    }
+    return ERenderMaterialClass::Opaque;
+}
+
+ERenderMaterialClass classifyDxt3Alpha(const QByteArray& data, int offset, int width, int height)
+{
+    bool hasZero = false;
+    const int blocks = qMax(1, (width + 3) / 4) * qMax(1, (height + 3) / 4);
+    for(int block = 0; block < blocks && offset + 16 <= data.size(); ++block, offset += 16)
+    {
+        for(int nibble = 0; nibble < 16; ++nibble)
+        {
+            const uchar byte = uchar(data.at(offset + nibble / 2));
+            const int alpha = nibble & 1 ? byte >> 4 : byte & 15;
+            if(alpha > 0 && alpha < 15)
+                return ERenderMaterialClass::Transparent;
+            hasZero = hasZero || alpha == 0;
+        }
+    }
+    return hasZero ? ERenderMaterialClass::Cutout : ERenderMaterialClass::Opaque;
+}
+
+ERenderMaterialClass classifyDxt5Alpha(const QByteArray& data, int offset, int width, int height)
+{
+    bool hasZero = false;
+    const int blocks = qMax(1, (width + 3) / 4) * qMax(1, (height + 3) / 4);
+    for(int block = 0; block < blocks && offset + 16 <= data.size(); ++block, offset += 16)
+    {
+        const uchar* bytes = reinterpret_cast<const uchar*>(data.constData() + offset);
+        int palette[8] = {bytes[0], bytes[1], 0, 0, 0, 0, 0, 0};
+        if(palette[0] > palette[1])
+            for(int i = 2; i < 8; ++i)
+                palette[i] = ((8 - i) * palette[0] + (i - 1) * palette[1]) / 7;
+        else
+        {
+            for(int i = 2; i < 6; ++i)
+                palette[i] = ((6 - i) * palette[0] + (i - 1) * palette[1]) / 5;
+            palette[6] = 0;
+            palette[7] = 255;
+        }
+        quint64 indices = 0;
+        for(int byte = 0; byte < 6; ++byte)
+            indices |= quint64(bytes[2 + byte]) << (byte * 8);
+        for(int pixel = 0; pixel < 16; ++pixel)
+        {
+            const int alpha = palette[(indices >> (pixel * 3)) & 7u];
+            if(alpha > 0 && alpha < 255)
+                return ERenderMaterialClass::Transparent;
+            hasZero = hasZero || alpha == 0;
+        }
+    }
+    return hasZero ? ERenderMaterialClass::Cutout : ERenderMaterialClass::Opaque;
+}
+
 struct SCachedArchiveIndex
 {
     qint64 size{-1};
@@ -523,6 +595,38 @@ ei::CFigure* CObjectList::getFigure(const QString& name)
     return m_aFigure.contains(figureName) ? m_aFigure[figureName] : figureDefault();
 }
 
+QStringList CObjectList::figurePartNames(const QString& name)
+{
+    QStringList result;
+    ei::CFigure* figure = getFigure(name);
+    if(figure)
+        figure->getPartNames(result);
+    return result;
+}
+
+QByteArray CObjectList::modelAnimation(const QString& name)
+{
+    const QString member = name.toLower() + ".anm";
+    if(m_animationArchives.contains(member)) return m_animationArchives.value(member);
+    if(m_missingAnimationNames.contains(member)) return {};
+    QByteArray bytes;
+    if(!readIndexedResource(configuredResourceSources(m_pSettings), member, bytes))
+    {
+        m_missingAnimationNames.insert(member);
+        ei::log(eLogWarning, "Missing model animation archive: " + member);
+        return {};
+    }
+    m_animationArchives.insert(member, bytes);
+    return bytes;
+}
+
+QByteArray CObjectList::resourceData(const QString& name, QString* sourcePath) const
+{
+    QByteArray bytes;
+    readIndexedResource(configuredResourceSources(m_pSettings), name, bytes, sourcePath);
+    return bytes;
+}
+
 void CObjectList::initResource()
 {
     QSet<QString> empty;
@@ -532,6 +636,8 @@ void CObjectList::initResource()
 void CObjectList::refreshConfiguredSources()
 {
     m_missingFigureNames.clear();
+    m_animationArchives.clear();
+    m_missingAnimationNames.clear();
     QSet<QString> empty;
     loadFigures(empty);
 }
@@ -575,100 +681,22 @@ uchar extractColor(uint pixel, uint mask, uint shift)
     return uchar(0.5 + 255 * ((pixel & mask) >> shift) / (mask >> shift));
 }
 
-SColor getColor(uint pixel, SMmpColor& color)
+bool decompressPnt3(QImage& image, const QByteArray& data, uint compressedSize,
+                    QString* diagnostic)
 {
-    uchar a = color.alpha.m_shift ? extractColor(pixel, color.alpha.m_value, color.alpha.m_mask) : 255;
-    uchar r = extractColor(pixel, color.red.m_value, color.red.m_mask);
-    uchar g = extractColor(pixel, color.green.m_value, color.green.m_mask);
-    uchar b = extractColor(pixel, color.blue.m_value, color.blue.m_mask);
-
-    return SColor(r,g,b,a);
+    const int offset = 76;
+    if(compressedSize > uint(qMax(0, data.size() - offset)))
+    {
+        if(diagnostic) *diagnostic = "PNT3 compressed size exceeds its MMP payload.";
+        return false;
+    }
+    // The original surface unpacker writes PNT3 pixels sequentially into the
+    // destination atlas. Preserve that row-major order; atlas placement comes
+    // from transparent run markers, not an image-space rotation or UV fixup.
+    return ei::decodePnt3Image(data.mid(offset, int(compressedSize)),
+                              image.width(), image.height(), &image, diagnostic);
 }
 
-SColor getPixelData(QDataStream &stream, uint pixelSize, SMmpColor& color)
-{
-    SColor colPix;
-    if(pixelSize == 2)
-    {
-        ushort pixel;
-        stream >> pixel;
-        colPix = getColor(pixel, color);
-
-    }
-    else if(pixelSize == 4)
-    {
-        uint pixel;
-        stream >> pixel;
-        colPix = getColor(pixel, color);
-    }
-    return colPix;
-}
-
-void decompressPnt3(QImage& image, QDataStream& data, uint mipCount)
-{
-    const uint offset = 76;
-    QByteArray destination;
-
-    uint src = 0;
-    uint n = 0;
-    uint v;
-    while(src < mipCount)
-    {
-        data.device()->seek(offset + src);
-        data >> v;
-        src += 4;
-
-        if(v > 1000000 || v == 0)
-        {
-            n += 1;
-        }
-        else
-        {
-            data.device()->seek(offset + (src - (1 + n) * 4));
-            destination.append(data.device()->read(src-4));
-            for(uint i(0); i< v; i++)
-                destination.append('\x00');
-            n = 0;
-        }
-    }
-
-    data.device()->seek(offset + (src - n * 4));
-    destination.append(data.device()->read(src));
-
-    n = 0;
-    for(int h(0); h < image.height(); ++h)
-    {
-        for(int w(0); w < image.width(); ++w)
-        {
-            image.setPixelColor(h, w, QColor(uchar(destination[n + 2]), uchar(destination[n + 1]), uchar(destination[n]), uchar(destination[n + 3])));
-            n += 4;
-        }
-    }
-
-    //rotate image by 270 degree
-    QPoint center = image.rect().center();
-    QMatrix matrix;
-    matrix.translate(center.x(), center.y());
-    matrix.rotate(270);
-    image = image.transformed(matrix).mirrored();
-}
-
-
-void readDirecDrawImage(QImage& image, QDataStream& stream)
-{
-    uint pixelSize;
-    SColor col;
-    SMmpColor color;
-    stream >> pixelSize >> color;
-    pixelSize /= 8;
-
-    for(int h(0); h < image.height(); ++h)
-        for(int w(0); w < image.width(); ++w)
-        {
-            col = getPixelData(stream, pixelSize, color);
-            image.setPixelColor(w,h, QColor(col.red(), col.green(), col.blue(), col.alpha()));
-        }
-}
 
 //in. data - texture byte data
 //in. name - texture name
@@ -685,20 +713,57 @@ void CTextureList::parse(QByteArray& data, const QString& name)
         return;
     }
 
+    // SMmpHeader serializes a fixed 76-byte header.  The uncompressed and
+    // PNT3 decoders consume QDataStream directly, so leave it at the payload
+    // boundary rather than immediately after the fields read by operator>>.
+    // Compressed DXT uploads below use explicit byte offsets and are unchanged.
+    stream.device()->seek(header.size());
+
+    const QOpenGLContext* currentContext = QOpenGLContext::currentContext();
+    const bool openGlesCompatibility = currentContext && currentContext->isOpenGLES();
+    const int uploadedMipCount = openGlesCompatibility
+        ? 1 : qMax(1, header.m_mipcount);
     QOpenGLTexture* texture = new QOpenGLTexture(QOpenGLTexture::Target2D);
-    texture->setMinificationFilter(QOpenGLTexture::NearestMipMapNearest);
-    texture->setMagnificationFilter(QOpenGLTexture::NearestMipMapNearest);
+    // GL_TEXTURE_MAG_FILTER only accepts NEAREST or LINEAR.  The historical
+    // mipmapped value is rejected by ANGLE and poisoned all ordinary MMP
+    // texture setup, while the separately composed humanoid RGBA path stayed
+    // visible.  ES2 also requires a complete mip chain when a mip filter is
+    // selected; shipped MMPs commonly stop at their last block-safe DXT level.
+    texture->setMinificationFilter(openGlesCompatibility
+        ? QOpenGLTexture::Nearest : QOpenGLTexture::NearestMipMapNearest);
+    // Preserve the native renderer's smooth sky/model sampling. Only the
+    // mipmapped MAG value was invalid; replacing it globally with NEAREST
+    // made the cylindrical sky visibly pixelated on desktop GL.
+    texture->setMagnificationFilter(QOpenGLTexture::Linear);
     texture->setWrapMode(QOpenGLTexture::Repeat);
+    ERenderMaterialClass materialClass = ERenderMaterialClass::Conservative;
     switch (header.m_format)
     {
     case ETextureFormat::eMMP_DXT1:
     {
+        materialClass = classifyDxt1Alpha(data, header.size(), header.m_width, header.m_height);
+        if(openGlesCompatibility)
+        {
+            QImage image;
+            QString diagnostic;
+            const int size = dxtLevelSize(header.m_width, header.m_height, 8);
+            if(!ei::decodeDxtImage(data.mid(header.size(), size), header.m_width,
+                                   header.m_height, ei::DxtFormat::Dxt1,
+                                   &image, &diagnostic))
+            {
+                ei::log(eLogWarning, "Invalid ANGLE DXT1 texture " + name + ": " + diagnostic);
+                delete texture;
+                return;
+            }
+            texture->setData(image);
+            break;
+        }
         texture->setFormat(QOpenGLTexture::TextureFormat::RGBA_DXT1);
         texture->setSize(int(header.m_width), int(header.m_height));
-        texture->setMipLevels(qMax(1, header.m_mipcount));
+        texture->setMipLevels(uploadedMipCount);
         texture->allocateStorage(QOpenGLTexture::RGBA, QOpenGLTexture::UInt8);
         int offset = header.size();
-        for(int i(0); i<qMax(1, header.m_mipcount); ++i)
+        for(int i(0); i<uploadedMipCount; ++i)
         {
             const int size = dxtLevelSize(qMax(1, header.m_width >> i), qMax(1, header.m_height >> i), 8);
             texture->setCompressedData(i, 0, size, data.data() + offset);
@@ -709,12 +774,29 @@ void CTextureList::parse(QByteArray& data, const QString& name)
     case ETextureFormat::eMMP_DXT2:
     case ETextureFormat::eMMP_DXT3:
     {
+        materialClass = classifyDxt3Alpha(data, header.size(), header.m_width, header.m_height);
+        if(openGlesCompatibility)
+        {
+            QImage image;
+            QString diagnostic;
+            const int size = dxtLevelSize(header.m_width, header.m_height, 16);
+            if(!ei::decodeDxtImage(data.mid(header.size(), size), header.m_width,
+                                   header.m_height, ei::DxtFormat::Dxt3,
+                                   &image, &diagnostic))
+            {
+                ei::log(eLogWarning, "Invalid ANGLE DXT3 texture " + name + ": " + diagnostic);
+                delete texture;
+                return;
+            }
+            texture->setData(image);
+            break;
+        }
         texture->setFormat(QOpenGLTexture::TextureFormat::RGBA_DXT3);
         texture->setSize(int(header.m_width), int(header.m_height));
-        texture->setMipLevels(qMax(1, header.m_mipcount));
+        texture->setMipLevels(uploadedMipCount);
         texture->allocateStorage(QOpenGLTexture::RGBA, QOpenGLTexture::UInt8);
         int offset = header.size();
-        for(int i(0); i<qMax(1, header.m_mipcount); ++i)
+        for(int i(0); i<uploadedMipCount; ++i)
         {
             const int size = dxtLevelSize(qMax(1, header.m_width >> i), qMax(1, header.m_height >> i), 16);
             texture->setCompressedData(i, 0, size, data.data() + offset);
@@ -725,12 +807,29 @@ void CTextureList::parse(QByteArray& data, const QString& name)
     case ETextureFormat::eMMP_DXT4:
     case ETextureFormat::eMMP_DXT5:
     {
+        materialClass = classifyDxt5Alpha(data, header.size(), header.m_width, header.m_height);
+        if(openGlesCompatibility)
+        {
+            QImage image;
+            QString diagnostic;
+            const int size = dxtLevelSize(header.m_width, header.m_height, 16);
+            if(!ei::decodeDxtImage(data.mid(header.size(), size), header.m_width,
+                                   header.m_height, ei::DxtFormat::Dxt5,
+                                   &image, &diagnostic))
+            {
+                ei::log(eLogWarning, "Invalid ANGLE DXT5 texture " + name + ": " + diagnostic);
+                delete texture;
+                return;
+            }
+            texture->setData(image);
+            break;
+        }
         texture->setFormat(QOpenGLTexture::TextureFormat::RGBA_DXT5);
         texture->setSize(int(header.m_width), int(header.m_height));
-        texture->setMipLevels(qMax(1, header.m_mipcount));
+        texture->setMipLevels(uploadedMipCount);
         texture->allocateStorage(QOpenGLTexture::RGBA, QOpenGLTexture::UInt8);
         int offset = header.size();
-        for(int i(0); i<qMax(1, header.m_mipcount); ++i)
+        for(int i(0); i<uploadedMipCount; ++i)
         {
             const int size = dxtLevelSize(qMax(1, header.m_width >> i), qMax(1, header.m_height >> i), 16);
             texture->setCompressedData(i, 0, size, data.data() + offset);
@@ -743,17 +842,45 @@ void CTextureList::parse(QByteArray& data, const QString& name)
     case ETextureFormat::eMMP_4444    : // use the same direct draw reading algorithm
     case ETextureFormat::eMMP_8888    : // use the same direct draw reading algorithm
     {
-        QImage img(header.m_width, header.m_height, QImage::Format_RGBA64);
-        readDirecDrawImage(img, stream);
+        // Unlike DXT and PNT3, the DirectDraw formats keep a 56-byte pixel
+        // descriptor between the five common MMP header dwords and the pixel
+        // payload. Seeking
+        // to byte 76 here made the first pixels masquerade as format masks and
+        // could decode an otherwise valid 5551 texture as fully transparent
+        // (JMV bat02 is a shipped example).
+        QImage img;
+        QString diagnostic;
+        if(!ei::decodeDirectDrawImage(data.mid(5 * int(sizeof(quint32))),
+                                      header.m_width, header.m_height, &img, &diagnostic))
+        {
+            ei::log(eLogWarning, "Invalid DirectDraw texture " + name + ": " + diagnostic);
+            delete texture;
+            return;
+        }
         texture->setData(img);
+        materialClass = classifyTextureAlpha(img);
         break;
     }
     case ETextureFormat::eMMP_PNT3    :
     {
-        // very slow. 50-100ms
+        // JMV equipment/face atlases predominantly use sparse PNT3. Shipped
+        // payloads omit trailing transparent pixels; decode into an exact,
+        // zero-filled image instead of reading beyond the RLE output.
         QImage img(header.m_width, header.m_height, QImage::Format_RGBA64);
-        decompressPnt3(img, stream, uint(header.m_mipcount));
+        QString diagnostic;
+        if(!decompressPnt3(img, data, uint(header.m_mipcount), &diagnostic))
+        {
+            ei::log(eLogWarning, "Invalid PNT3 texture " + name + ": " + diagnostic);
+            delete texture;
+            return;
+        }
+        // PNT3 carries one sparse compressed base image; this header field is
+        // its compressed byte count, not an authored mip count. Generated
+        // mipmaps average small helmet/weapon/shield islands into transparent
+        // atlas space and make them vanish with distance or oblique views.
+        texture->setMinificationFilter(QOpenGLTexture::Nearest);
         texture->setData(img);
+        materialClass = classifyTextureAlpha(img);
         break;
     }
     case ETextureFormat::eMMP_5550    :qDebug() << "eMMP_5550"  << name; delete texture; return;
@@ -768,6 +895,7 @@ void CTextureList::parse(QByteArray& data, const QString& name)
     }
     }
     m_aTexture.insert(name.toLower(), texture);
+    m_textureMaterialClasses.insert(texture, materialClass);
 }
 
 void CTextureList::initAuxTexture()
@@ -899,10 +1027,121 @@ QOpenGLTexture* CTextureList::texture(const QString& name, const QString& modelN
     return loadTextureResource(name.toLower(), modelName.toLower());
 }
 
+QImage CTextureList::loadTextureImageResource(const QString& name, const QString& modelName)
+{
+    const QVector<QString> sources = configuredResourceSources(m_pSettings);
+    const QString key = resourceSourceFingerprint(sources) + '|'
+        + ei::textureCacheKey(name, modelName);
+    if(m_aTextureImages.contains(key))
+        return m_aTextureImages.value(key);
+    for(const QString& candidate : ei::textureResourceCandidates(name, modelName))
+    {
+        QByteArray data;
+        if(!readIndexedResource(sources, candidate, data))
+            continue;
+        QDataStream stream(data);
+        util::formatStream(stream);
+        SMmpHeader header;
+        stream >> header;
+        if(header.m_signature != 0x00504D4D || header.m_format != ETextureFormat::eMMP_PNT3)
+        {
+            ei::log(eLogWarning, "Shared body-atlas composition currently requires PNT3: " + candidate);
+            m_aTextureImages.insert(key, QImage());
+            return QImage();
+        }
+        QImage image(header.m_width, header.m_height, QImage::Format_RGBA64);
+        QString diagnostic;
+        if(!decompressPnt3(image, data, uint(header.m_mipcount), &diagnostic))
+        {
+            ei::log(eLogWarning, "Invalid body-atlas layer " + candidate + ": " + diagnostic);
+            m_aTextureImages.insert(key, QImage());
+            return QImage();
+        }
+        m_aTextureImages.insert(key, image);
+        return image;
+    }
+    ei::log(eLogWarning, QString("Missing body-atlas layer: %1 model:%2").arg(name, modelName));
+    m_aTextureImages.insert(key, QImage());
+    return QImage();
+}
+
+QImage CTextureList::textureImage(const QString& name, const QString& modelName)
+{
+    return loadTextureImageResource(name, modelName);
+}
+
+QImage CTextureList::layeredTextureImage(const QStringList& layerNames,
+                                         const QString& modelName,
+                                         QString* diagnostic)
+{
+    QVector<QImage> layers;
+    for(const QString& name : layerNames)
+    {
+        const QImage image = loadTextureImageResource(name, modelName);
+        if(image.isNull())
+        {
+            if(layers.isEmpty())
+            {
+                if(diagnostic)
+                    *diagnostic = "Base body-atlas layer is unavailable: " + name;
+                return QImage();
+            }
+            ei::log(eLogWarning, "Skipping unavailable humanoid body-atlas overlay: " + name);
+            continue;
+        }
+        layers.append(image);
+    }
+    QImage composite;
+    QString localDiagnostic;
+    if(!ei::compositeTextureLayers(layers, &composite, &localDiagnostic))
+    {
+        if(diagnostic)
+            *diagnostic = localDiagnostic;
+        return QImage();
+    }
+    if(diagnostic)
+        diagnostic->clear();
+    return composite;
+}
+
+QOpenGLTexture* CTextureList::layeredTexture(const QStringList& layerNames,
+                                             const QString& modelName)
+{
+    const QString cacheKey = "layers|"
+        + resourceSourceFingerprint(configuredResourceSources(m_pSettings)) + '|'
+        + modelName.toLower() + '|'
+        + layerNames.join(';').toLower();
+    if(m_aTexture.contains(cacheKey))
+        return m_aTexture.value(cacheKey);
+    QString diagnostic;
+    const QImage composite = layeredTextureImage(layerNames, modelName, &diagnostic);
+    if(composite.isNull())
+    {
+        ei::log(eLogWarning, "Cannot compose humanoid body atlas: " + diagnostic);
+        return textureDefault();
+    }
+    // Match the established QImage upload path used by ordinary PNT3 MMPs.
+    // The QOpenGLTexture(QImage) convenience constructor may select different
+    // storage/orientation behavior even though the FIG UVs are unchanged.
+    QOpenGLTexture* texture = new QOpenGLTexture(QOpenGLTexture::Target2D);
+    texture->setMinificationFilter(QOpenGLTexture::Nearest);
+    texture->setMagnificationFilter(QOpenGLTexture::Nearest);
+    texture->setWrapMode(QOpenGLTexture::Repeat);
+    texture->setData(composite);
+    m_aTexture.insert(cacheKey, texture);
+    m_textureMaterialClasses.insert(texture, classifyTextureAlpha(composite));
+    return texture;
+}
+
 QOpenGLTexture* CTextureList::textureDefault()
 {
     Q_ASSERT(m_aTexture.contains("default"));
     return m_aTexture[QString("default")];
+}
+
+ERenderMaterialClass CTextureList::materialClass(QOpenGLTexture* texture) const
+{
+    return m_textureMaterialClasses.value(texture, ERenderMaterialClass::Conservative);
 }
 
 void CTextureList::initResource()
@@ -917,6 +1156,7 @@ void CTextureList::initResource()
     texture->setFormat(QOpenGLTexture::TextureFormat::RGBA8_UNorm);
     texture->setData(img.mirrored());
     m_aTexture.insert(QString("default"), texture);
+    m_textureMaterialClasses.insert(texture, classifyTextureAlpha(img));
 
     initAuxTexture();
 
@@ -1044,11 +1284,51 @@ int CTextureList::extractMmpToDxt1(QImage& outImage, const QString textureName)
 
 struct STexSpecified
 {
-    STexSpecified(): startPos(76){}
     SMmpHeader header;
     QByteArray data;
-    int startPos;
+    int selectedMip{0};
 };
+
+namespace {
+int dxt1MipBytes(int width, int height)
+{
+    return qMax(1, (width + 3) / 4) * qMax(1, (height + 3) / 4) * 8;
+}
+
+int dxt1MipOffset(const SMmpHeader& header, int mipLevel)
+{
+    int offset = header.size();
+    int width = header.m_width;
+    int height = header.m_height;
+    for(int level = 0; level < mipLevel; ++level)
+    {
+        offset += dxt1MipBytes(width, height);
+        width = qMax(1, width / 2);
+        height = qMax(1, height / 2);
+    }
+    return offset;
+}
+
+QByteArray combineTerrainMip(const QVector<STexSpecified>& parts, int outputLevel,
+                             int tileSize)
+{
+    const int blocksWide = qMax(1, (tileSize + 3) / 4);
+    const int blocksHigh = qMax(1, (tileSize + 3) / 4);
+    const int rowBytes = blocksWide * 8;
+    QByteArray combined;
+    combined.reserve(rowBytes * blocksHigh * parts.size());
+    for(int blockRow = 0; blockRow < blocksHigh; ++blockRow)
+    {
+        for(const STexSpecified& part : parts)
+        {
+            const int offset = dxt1MipOffset(part.header,
+                part.selectedMip + outputLevel) + blockRow * rowBytes;
+            combined.append(part.data.mid(offset, rowBytes));
+        }
+    }
+    return combined;
+}
+}
 
 QOpenGLTexture* CTextureList::buildLandTex(const QString& name, int expectedTexCount, int& texCount)
 {
@@ -1126,60 +1406,149 @@ QOpenGLTexture* CTextureList::buildLandTex(const QString& name, int expectedTexC
     }
 
     texCount = aPart.size();
-    //choose mipMap
-    int curMipMap(0), texSize(0), nByte(0);
+    // Select the authored level matching the smallest source tile. Sources in
+    // one map can have different base resolutions, but all output levels must
+    // line up in one horizontal atlas.
+    int outputMipCount = std::numeric_limits<int>::max();
     for(auto& part: aPart)
     {
-        curMipMap = part.header.m_width/minTexSize/2;
-        texSize = part.header.m_width;
-        Q_ASSERT(curMipMap < part.header.m_mipcount);
-        for(int i(0); i<curMipMap; ++i)
+        int size = part.header.m_width;
+        while(size > minTexSize && part.selectedMip + 1 < part.header.m_mipcount)
         {
-            nByte = texSize*texSize/2;
-            part.startPos += nByte;
-            texSize /= 2;
+            size = qMax(1, size / 2);
+            ++part.selectedMip;
         }
-
+        Q_ASSERT(size == minTexSize);
+        outputMipCount = qMin(outputMipCount,
+            part.header.m_mipcount - part.selectedMip);
     }
-    //combine texture data;
-    QByteArray combineTextureData;
-    const int rowSizeByte = 2*minTexSize; //8 byte == 1 block, minTexSize/4 - block count in row
-    const int colSizeByte = rowSizeByte*minTexSize/4;
-    for(int curByte(0); curByte<colSizeByte; curByte+=rowSizeByte) // todo: calc row bytes for 1 mipLevel
-    {
-        for(auto& part:aPart)
-        {
-            combineTextureData.append(part.data.mid(part.startPos, rowSizeByte));
-            part.startPos += rowSizeByte;
-        }
-    }
+    int blockSafeMipCount = 0;
+    for(int size = minTexSize; size >= 4; size /= 2)
+        ++blockSafeMipCount;
+    outputMipCount = qMax(1, qMin(outputMipCount, blockSafeMipCount));
+    QVector<QByteArray> combinedMips;
+    combinedMips.reserve(outputMipCount);
+    for(int level = 0; level < outputMipCount; ++level)
+        combinedMips.append(combineTerrainMip(aPart, level,
+            qMax(1, minTexSize >> level)));
 
     ei::log(eLogInfo, QString("Uploading terrain atlas map:%1 parts:%2 dimensions:%3x%4 compressedBytes:%5")
-            .arg(name).arg(texCount).arg(minTexSize * texCount).arg(minTexSize).arg(combineTextureData.size()));
+            .arg(name).arg(texCount).arg(minTexSize * texCount).arg(minTexSize)
+            .arg(combinedMips.first().size()));
     ei::setCrashContext("mpr/terrain-atlas/opengl-create:" + name);
+    const QOpenGLContext* currentContext = QOpenGLContext::currentContext();
+    const bool openGlesCompatibility = currentContext && currentContext->isOpenGLES();
+    const int uploadedMipCount = openGlesCompatibility ? 1 : outputMipCount;
     QOpenGLTexture* texture = new QOpenGLTexture(QOpenGLTexture::Target2D);
-    texture->setMinificationFilter(QOpenGLTexture::NearestMipMapNearest);
-    texture->setMagnificationFilter(QOpenGLTexture::NearestMipMapNearest);
+    texture->setMinificationFilter(m_terrainMipmappingEnabled && !openGlesCompatibility
+        ? QOpenGLTexture::NearestMipMapLinear : QOpenGLTexture::Nearest);
+    texture->setMagnificationFilter(QOpenGLTexture::Nearest);
     texture->setWrapMode(QOpenGLTexture::Repeat);
+    if(openGlesCompatibility)
+    {
+        // ANGLE's ES2 compressed upload accepts neither the shipped DXT MMPs
+        // nor the horizontally block-packed terrain atlas reliably. Decode
+        // the selected authored mip for each tile, then compose the exact
+        // atlas in ordinary RGBA memory. Desktop GL retains the zero-copy DXT
+        // path below.
+        QImage atlas(minTexSize * texCount, minTexSize, QImage::Format_ARGB32);
+        atlas.fill(Qt::transparent);
+        for(int partIndex = 0; partIndex < aPart.size(); ++partIndex)
+        {
+            const STexSpecified& part = aPart[partIndex];
+            const int offset = dxt1MipOffset(part.header, part.selectedMip);
+            const int bytes = dxt1MipBytes(minTexSize, minTexSize);
+            QImage tile;
+            QString diagnostic;
+            if(!ei::decodeDxtImage(part.data.mid(offset, bytes), minTexSize,
+                                   minTexSize, ei::DxtFormat::Dxt1,
+                                   &tile, &diagnostic))
+            {
+                ei::log(eLogWarning, QString("Invalid ANGLE terrain tile %1 part:%2: %3")
+                        .arg(name).arg(partIndex).arg(diagnostic));
+                delete texture;
+                return nullptr;
+            }
+            for(int y = 0; y < minTexSize; ++y)
+                memcpy(atlas.scanLine(y) + partIndex * minTexSize * 4,
+                       tile.constScanLine(y), size_t(minTexSize) * 4u);
+        }
+        ei::setCrashContext("mpr/terrain-atlas/opengl-upload-rgba:" + name);
+        texture->setData(atlas);
+        m_aTexture[cacheKey] = texture;
+        m_terrainTextures.insert(texture);
+        ei::log(eLogInfo, QString("Terrain atlas set ready map:%1 expected:%2 loaded:%3 ANGLE-RGBA")
+                .arg(name).arg(expectedTexCount).arg(texCount));
+        return texture;
+    }
     texture->setFormat(QOpenGLTexture::TextureFormat::RGBA_DXT1); //todo: read texture format from file. EI can use both dxt3 and dxt1
-    //texture->setMipLevels(4);
+    texture->setMipLevels(uploadedMipCount);
     texture->setSize(minTexSize*texCount, minTexSize);
     ei::setCrashContext("mpr/terrain-atlas/opengl-allocate:" + name);
     texture->allocateStorage(QOpenGLTexture::RGBA, QOpenGLTexture::UInt8);
-    const int size = minTexSize*minTexSize*texCount/2;
     ei::setCrashContext("mpr/terrain-atlas/opengl-upload:" + name);
-    texture->setCompressedData(0, 0, size, combineTextureData.data());
+    for(int level = 0; level < uploadedMipCount; ++level)
+        texture->setCompressedData(level, 0, combinedMips[level].size(),
+                                   combinedMips[level].constData());
     m_aTexture[cacheKey] = texture;
-    ei::log(eLogInfo, QString("Terrain atlas set ready map:%1 expected:%2 loaded:%3")
-            .arg(name).arg(expectedTexCount).arg(texCount));
+    m_terrainTextures.insert(texture);
+    ei::log(eLogInfo, QString("Terrain atlas set ready map:%1 expected:%2 loaded:%3 mips:%4")
+            .arg(name).arg(expectedTexCount).arg(texCount).arg(uploadedMipCount));
     return texture;
+}
+
+void CTextureList::setTerrainMipmappingEnabled(bool enabled)
+{
+    if(m_terrainMipmappingEnabled == enabled)
+        return;
+    m_terrainMipmappingEnabled = enabled;
+    for(QOpenGLTexture* texture : m_terrainTextures)
+    {
+        if(!texture || !texture->isCreated())
+            continue;
+        const QOpenGLContext* currentContext = QOpenGLContext::currentContext();
+        const bool openGlesCompatibility = currentContext && currentContext->isOpenGLES();
+        texture->setMinificationFilter(enabled && !openGlesCompatibility
+            ? QOpenGLTexture::NearestMipMapLinear : QOpenGLTexture::Nearest);
+        texture->setMagnificationFilter(QOpenGLTexture::Nearest);
+    }
 }
 
 void CTextureList::refreshConfiguredSources()
 {
     m_missingTextureNames.clear();
+    m_aTextureImages.clear();
+    for(auto it = m_aTexture.begin(); it != m_aTexture.end();)
+    {
+        if(it.key().startsWith("layers|"))
+            it = m_aTexture.erase(it);
+        else
+            ++it;
+    }
     QSet<QString> empty;
     loadTexture(empty);
+}
+
+void CTextureList::clearTransientVisualCache()
+{
+    m_aTextureImages.clear();
+    for(auto it = m_aTexture.begin(); it != m_aTexture.end();)
+    {
+        if(!it.key().startsWith("layers|"))
+        {
+            ++it;
+            continue;
+        }
+        QOpenGLTexture* texture = it.value();
+        it = m_aTexture.erase(it);
+        if(texture)
+        {
+            m_textureMaterialClasses.remove(texture);
+            if(texture->isCreated())
+                texture->destroy();
+            delete texture;
+        }
+    }
 }
 
 

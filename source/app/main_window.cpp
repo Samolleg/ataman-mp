@@ -19,11 +19,16 @@
 #include <QProgressDialog>
 #include <QMouseEvent>
 #include <QDockWidget>
+#include <QToolBar>
 #include <QFile>
 #include <QTimer>
+#include <QEventLoop>
 #include <QCheckBox>
 #include <QToolButton>
 #include <QComboBox>
+#include <QSlider>
+#include <QDoubleSpinBox>
+#include <QSignalBlocker>
 #include <QLabel>
 #include <QHBoxLayout>
 #include <QVBoxLayout>
@@ -31,6 +36,7 @@
 #include <QInputDialog>
 #include <QTreeWidget>
 #include <QHeaderView>
+#include <QScrollBar>
 #include <QDialogButtonBox>
 #include <QClipboard>
 #include <QLineEdit>
@@ -38,8 +44,19 @@
 #include <QSplitter>
 #include <QCryptographicHash>
 #include <QElapsedTimer>
+#include <QFrame>
+#include <QResizeEvent>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QDialog>
+#include <QScrollArea>
+#include <QListWidget>
+#include <QGroupBox>
+#include <QPainter>
+#include <QPolygonF>
 #include <QtConcurrent/QtConcurrentRun>
 
+#include <cmath>
 #include <limits>
 
 #include "resourcemanager.h"
@@ -70,6 +87,7 @@
 #include "collection_document.h"
 #include "collection_editor_dialog.h"
 #include "script_reference_analyzer.h"
+#include "unit.h"
 
 namespace
 {
@@ -77,6 +95,10 @@ constexpr int kValidationPathRole = Qt::UserRole;
 constexpr int kValidationCopyRole = Qt::UserRole + 1;
 constexpr int kValidationNidRole = Qt::UserRole + 2;
 constexpr int kValidationSectionRole = Qt::UserRole + 3;
+constexpr int kLoadedMapKindRole = Qt::UserRole + 20;
+constexpr int kLoadedMapPathRole = Qt::UserRole + 21;
+constexpr int kLoadedMapMpr = 1;
+constexpr int kLoadedMapMob = 2;
 
 QString conciseValidationLine(const SMobFamilyFinding& finding)
 {
@@ -90,6 +112,20 @@ QString conciseValidationLine(const SMobFamilyFinding& finding)
     }
     const QString line = QString("%1: %2").arg(severity, finding.message.simplified());
     return QFontMetrics(QApplication::font()).elidedText(line, Qt::ElideRight, 960);
+}
+
+QString runtimeManifestProblem(const SResourceProfileEvaluation& profile)
+{
+    QStringList problems;
+    for(const SRuntimeComponentEvaluation& component : profile.runtimeComponents)
+    {
+        if(!component.exists)
+            problems.append(QObject::tr("Missing %1: %2").arg(component.id, component.path));
+        else if(component.enforceHash && !component.hashAccepted)
+            problems.append(QObject::tr("Unsupported %1: %2 (SHA-256 %3)")
+                .arg(component.id, component.path, component.sha256));
+    }
+    return problems.join('\n');
 }
 
 void enableNativeFloatingControls(QDockWidget* dock)
@@ -113,6 +149,19 @@ void enableNativeFloatingControls(QDockWidget* dock)
     };
     QObject::connect(dock, &QDockWidget::topLevelChanged, dock, apply);
     apply(dock->isFloating());
+}
+
+void configureBlockingProgress(QProgressDialog* progress)
+{
+    if(!progress)
+        return;
+    progress->setCancelButton(nullptr);
+    progress->setWindowModality(Qt::ApplicationModal);
+    progress->setWindowFlags(Qt::Dialog | Qt::CustomizeWindowHint |
+                             Qt::WindowTitleHint);
+    progress->setMinimumDuration(0);
+    progress->setAutoClose(false);
+    progress->setAutoReset(false);
 }
 }
 
@@ -140,11 +189,15 @@ MainWindow::MainWindow(QWidget* parent) :
     m_testTable(nullptr),
     m_recentFilesMenu(nullptr),
     m_externalScriptAction(nullptr),
+    m_activateOwnerMobAction(nullptr),
+    m_convertWorldObjectToLeverAction(nullptr),
     m_mapsDock(nullptr),
     m_historyDock(nullptr),
     m_validationDock(nullptr),
     m_outlinerDock(nullptr),
     m_propertiesDock(nullptr),
+    m_loadedMapDock(nullptr),
+    m_loadedMapTree(nullptr),
     m_validationTree(nullptr),
     m_validationSummary(nullptr),
     m_validationTimer(nullptr),
@@ -195,6 +248,14 @@ MainWindow::MainWindow(QWidget* parent) :
     filterLayout->addWidget(m_outlinerFilterEdit, 1);
     filterLayout->addWidget(m_outlinerFilterStatus);
     outlinerLayout->addLayout(filterLayout);
+    m_outlinerSelectionPath = new QLabel(outlinerContainer);
+    m_outlinerSelectionPath->setTextFormat(Qt::PlainText);
+    m_outlinerSelectionPath->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    m_outlinerSelectionPath->setStyleSheet(
+        "QLabel { background: #29424a; color: white; padding: 5px 7px; "
+        "border-left: 3px solid #32c8e6; }");
+    m_outlinerSelectionPath->hide();
+    outlinerLayout->addWidget(m_outlinerSelectionPath);
     m_ui->treeWidget->setParent(outlinerContainer);
     outlinerLayout->addWidget(m_ui->treeWidget, 1);
     m_outlinerDock = new QDockWidget(tr("Object Outliner"), this);
@@ -222,13 +283,126 @@ MainWindow::MainWindow(QWidget* parent) :
     {
         m_outlinerFilterStatus->setText(tr("%1 / %2").arg(visible).arg(total));
         m_outlinerFilterStatus->setToolTip(tr("%1 matching objects out of %2").arg(visible).arg(total));
+        updateOutlinerSelectionPath();
     });
+    connect(m_ui->treeWidget, &QTreeWidget::currentItemChanged,
+            this, [this](QTreeWidgetItem*, QTreeWidgetItem*) { updateOutlinerSelectionPath(); });
+    connect(m_ui->treeWidget->verticalScrollBar(), &QScrollBar::valueChanged,
+            this, [this](int) { updateOutlinerSelectionPath(); });
+    connect(m_ui->treeWidget, &QTreeWidget::itemExpanded,
+            this, [this](QTreeWidgetItem*) { updateOutlinerSelectionPath(); });
+    connect(m_ui->treeWidget, &QTreeWidget::itemCollapsed,
+            this, [this](QTreeWidgetItem*) { updateOutlinerSelectionPath(); });
     m_mapsBrowser = new CMapsBrowser(this);
     m_mapsDock = new QDockWidget(tr("Maps and Collections"), this);
     m_mapsDock->setObjectName("mapsAndCollectionsDock");
     m_mapsDock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
     m_mapsDock->setWidget(m_mapsBrowser);
     addDockWidget(Qt::LeftDockWidgetArea, m_mapsDock);
+    m_loadedMapTree = new QTreeWidget(this);
+    m_loadedMapTree->setColumnCount(3);
+    m_loadedMapTree->setHeaderLabels(QStringList() << tr("Loaded document")
+                                      << tr("Visible") << tr("State"));
+    m_loadedMapTree->header()->setSectionResizeMode(0, QHeaderView::Stretch);
+    m_loadedMapTree->header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
+    m_loadedMapTree->header()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
+    m_loadedMapTree->setContextMenuPolicy(Qt::CustomContextMenu);
+    m_loadedMapTree->setSelectionMode(QAbstractItemView::ExtendedSelection);
+    m_loadedMapTree->viewport()->installEventFilter(this);
+    m_loadedMapDock = new QDockWidget(tr("Loaded Map"), this);
+    m_loadedMapDock->setObjectName("loadedMapDock");
+    m_loadedMapDock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
+    m_loadedMapDock->setFeatures(QDockWidget::DockWidgetClosable |
+                                 QDockWidget::DockWidgetMovable |
+                                 QDockWidget::DockWidgetFloatable);
+    m_loadedMapDock->setWidget(m_loadedMapTree);
+    addDockWidget(Qt::RightDockWidgetArea, m_loadedMapDock);
+    splitDockWidget(m_loadedMapDock, m_outlinerDock, Qt::Vertical);
+    connect(m_loadedMapTree, &QTreeWidget::itemChanged, this,
+            [this](QTreeWidgetItem* item, int column)
+    {
+        if(!item || column != 1 || !m_pView || m_loadedMapVisibilityDragging)
+            return;
+        const bool visible = item->checkState(1) == Qt::Checked;
+        const int kind = item->data(0, kLoadedMapKindRole).toInt();
+        if(kind == kLoadedMapMpr)
+            m_pView->setLandscapeVisible(visible);
+        else if(kind == kLoadedMapMob)
+        {
+            CMob* mob = m_pView->mob(item->data(0, kLoadedMapPathRole).toString());
+            m_pView->setMobVisible(mob, visible);
+        }
+    });
+    connect(m_loadedMapTree, &QTreeWidget::itemDoubleClicked, this,
+            [this](QTreeWidgetItem* item, int column)
+    {
+        Q_UNUSED(column);
+        if(!item || !m_pView
+           || item->data(0, kLoadedMapKindRole).toInt() != kLoadedMapMob)
+            return;
+        CMob* mob = m_pView->mob(item->data(0, kLoadedMapPathRole).toString());
+        if(mob && mob != m_pView->currentMob())
+            m_pView->changeCurrentMob(mob);
+    });
+    connect(m_loadedMapTree, &QTreeWidget::customContextMenuRequested, this,
+            [this](const QPoint& point)
+    {
+        QTreeWidgetItem* item = m_loadedMapTree->itemAt(point);
+        if(!item || item->data(0, kLoadedMapKindRole).toInt() != kLoadedMapMob)
+            return;
+        if(!item->isSelected())
+            m_loadedMapTree->setCurrentItem(item, 0,
+                QItemSelectionModel::ClearAndSelect);
+        QList<CMob*> selectedMobs;
+        for(QTreeWidgetItem* selectedItem : m_loadedMapTree->selectedItems())
+        {
+            if(!selectedItem || selectedItem->data(0, kLoadedMapKindRole).toInt() != kLoadedMapMob)
+                continue;
+            CMob* selectedMob = m_pView->mob(
+                selectedItem->data(0, kLoadedMapPathRole).toString());
+            if(selectedMob && !selectedMobs.contains(selectedMob))
+                selectedMobs.append(selectedMob);
+        }
+        CMob* mob = m_pView->mob(item->data(0, kLoadedMapPathRole).toString());
+        if(!mob)
+            return;
+        QMenu menu(this);
+        QAction* activate = menu.addAction(tr("Make Active"));
+        activate->setEnabled(mob != m_pView->currentMob());
+        QAction* unload = menu.addAction(selectedMobs.size() > 1
+            ? tr("Unload %1 MOBs").arg(selectedMobs.size()) : tr("Unload MOB"));
+        QAction* selected = menu.exec(m_loadedMapTree->viewport()->mapToGlobal(point));
+        if(selected == activate)
+            m_pView->changeCurrentMob(mob);
+        else if(selected == unload)
+        {
+            QList<CMob*> dirty;
+            for(CMob* selectedMob : selectedMobs)
+                if(selectedMob && selectedMob->isDirty()) dirty.append(selectedMob);
+            bool proceed = true;
+            bool saveDirty = false;
+            if(!dirty.isEmpty())
+            {
+                QMessageBox prompt(QMessageBox::Question, tr("Unload MOBs"),
+                    tr("%1 selected MOB(s) have unsaved changes.").arg(dirty.size()),
+                    QMessageBox::NoButton, this);
+                QPushButton* saveAll = prompt.addButton(tr("Save All"), QMessageBox::AcceptRole);
+                QPushButton* discard = prompt.addButton(tr("Discard"), QMessageBox::DestructiveRole);
+                prompt.addButton(QMessageBox::Cancel);
+                prompt.exec();
+                proceed = prompt.clickedButton() != prompt.button(QMessageBox::Cancel);
+                saveDirty = prompt.clickedButton() == saveAll;
+                Q_UNUSED(discard);
+            }
+            if(proceed && saveDirty)
+                for(CMob* dirtyMob : dirty)
+                    if(!dirtyMob->save()) { proceed = false; break; }
+            if(proceed)
+                for(CMob* selectedMob : selectedMobs)
+                    if(selectedMob && m_pView->mobs().contains(selectedMob))
+                        if(!m_pView->unloadMobDocument(selectedMob, false)) break;
+        }
+    });
     QWidget* validationWidget = new QWidget(this);
     QVBoxLayout* validationLayout = new QVBoxLayout(validationWidget);
     validationLayout->setContentsMargins(4, 4, 4, 4);
@@ -316,6 +490,7 @@ MainWindow::MainWindow(QWidget* parent) :
     {
         m_pView->setTileGridVisible(visible);
     });
+    viewMenu->addAction(m_loadedMapDock->toggleViewAction());
     viewMenu->addAction(m_outlinerDock->toggleViewAction());
     viewMenu->addAction(m_propertiesDock->toggleViewAction());
     m_ui->menuTools->removeAction(m_ui->actionShow_undo_redo);
@@ -334,6 +509,23 @@ MainWindow::MainWindow(QWidget* parent) :
     {
         if(m_pView && m_pView->hasActiveMob())
             m_pView->openExternalMobScript(m_pView->currentMob());
+    });
+    QMenu* objectEditMenu = m_ui->menuEdit->addMenu(tr("Object"));
+    m_convertWorldObjectToLeverAction = objectEditMenu->addAction(
+        tr("Convert World Object to Lever..."));
+    m_convertWorldObjectToLeverAction->setEnabled(false);
+    m_convertWorldObjectToLeverAction->setToolTip(
+        tr("Converts one selected basic world object into an interactable lever as one undoable edit."));
+    connect(m_convertWorldObjectToLeverAction, &QAction::triggered, this, [this]() {
+        if(m_pView)
+            m_pView->convertSelectedWorldObjectToLever();
+    });
+    m_activateOwnerMobAction = new QAction(tr("Activate Selected Object's MOB"), this);
+    viewMenu->addAction(m_activateOwnerMobAction);
+    connect(m_activateOwnerMobAction, &QAction::triggered, this, [this]()
+    {
+        if(m_pView)
+            m_pView->activateSelectedObjectMob();
     });
     m_recentFilesMenu = new QMenu(tr("Open Recent"), this);
     m_ui->menuFile->insertMenu(m_ui->actionOpen_recent, m_recentFilesMenu);
@@ -364,6 +556,8 @@ MainWindow::MainWindow(QWidget* parent) :
     QAction* openBugReportingGuide = new QAction(tr("Open Bug Reporting Guide"), this);
     QAction* gameAndModSetup = new QAction(tr("Game and Mod Setup..."), this);
     QAction* compareMobFiles = new QAction(tr("Compare MOB Files..."), this);
+    QAction* showUnitTexture = new QAction(tr("Show Selected Unit Final Texture..."), this);
+    QAction* captureShadowDiagnostics = new QAction(tr("Capture Shadow Diagnostics..."), this);
     QAction* validateMobFamily = new QAction(tr("Validate Active MOB Family"), this);
     QAction* validateCurrentMob = new QAction(tr("Validate Current MOB Only"), this);
     QAction* validateSelectedMobs = new QAction(tr("Validate Selected MOB Files..."), this);
@@ -385,8 +579,10 @@ MainWindow::MainWindow(QWidget* parent) :
     m_ui->menuTools->addAction(m_stopMapTestAction);
     m_ui->menuTools->addAction(openBackupFolder);
     m_ui->menuTools->addAction(openLogsFolder);
+    m_ui->menuTools->addAction(captureShadowDiagnostics);
     m_ui->menuTools->addAction(openTestRunsFolder);
     m_ui->menuTools->addAction(openBugReportingGuide);
+    viewMenu->addAction(showUnitTexture);
     connect(openBackupFolder, &QAction::triggered, this, [this]()
     {
         QString error;
@@ -400,6 +596,21 @@ MainWindow::MainWindow(QWidget* parent) :
         if(!QDesktopServices::openUrl(QUrl::fromLocalFile(path)))
             QMessageBox::warning(this, tr("Endurance logs"),
                 tr("Could not open the logs folder:\n%1").arg(path));
+    });
+    connect(captureShadowDiagnostics, &QAction::triggered, this, [this]()
+    {
+        if(!m_pView)
+            return;
+        QString error;
+        const QString path = m_pView->captureShadowDiagnostics(&error);
+        if(path.isEmpty())
+        {
+            QMessageBox::warning(this, tr("Shadow diagnostics"), error);
+            return;
+        }
+        QMessageBox::information(this, tr("Shadow diagnostics"),
+            tr("Shadow diagnostics captured. Send the entire folder:\n%1").arg(path));
+        QDesktopServices::openUrl(QUrl::fromLocalFile(path));
     });
     connect(openTestRunsFolder, &QAction::triggered, this, [this]()
     {
@@ -440,6 +651,8 @@ MainWindow::MainWindow(QWidget* parent) :
         dialog->raise();
         dialog->activateWindow();
     });
+    connect(showUnitTexture, &QAction::triggered,
+            this, &MainWindow::showUnitTexturePreview);
     connect(validateMobFamily, &QAction::triggered, this, &MainWindow::showMobFamilyValidation);
     connect(validateCurrentMob, &QAction::triggered, this, [this]()
     {
@@ -522,6 +735,26 @@ MainWindow::MainWindow(QWidget* parent) :
     restoreState(uiSettings.value("ui/mainWindowState").toByteArray());
     m_ui->workspaceSplitter->restoreState(uiSettings.value("ui/workspaceSplitter").toByteArray());
     m_ui->outlinerSplitter->restoreState(uiSettings.value("ui/outlinerSplitter").toByteArray());
+    if(firstRunSetup)
+    {
+        // A new profile must start from the documented usable workspace even
+        // if Windows still contains dock state from an older/test install.
+        m_mapsDock->setFloating(false);
+        m_loadedMapDock->setFloating(false);
+        m_outlinerDock->setFloating(false);
+        m_propertiesDock->setFloating(false);
+        addDockWidget(Qt::LeftDockWidgetArea, m_mapsDock);
+        addDockWidget(Qt::RightDockWidgetArea, m_loadedMapDock);
+        addDockWidget(Qt::RightDockWidgetArea, m_outlinerDock);
+        splitDockWidget(m_loadedMapDock, m_outlinerDock, Qt::Vertical);
+        splitDockWidget(m_outlinerDock, m_propertiesDock, Qt::Vertical);
+        m_mapsDock->show();
+        m_loadedMapDock->show();
+        m_outlinerDock->show();
+        m_propertiesDock->show();
+        uiSettings.setValue("ui/mapsBrowser/mapsExpanded", true);
+        uiSettings.setValue("ui/mapsBrowser/collectionsExpanded", true);
+    }
 
     m_pView = new CView(m_ui->centralWidget, m_createDialog.get()->viewWidget());
     m_mapTestLauncher = new CJmvMapTestLauncher(this);
@@ -535,6 +768,7 @@ MainWindow::MainWindow(QWidget* parent) :
     connect(m_mapTestLauncher, &CJmvMapTestLauncher::testFinished, this,
             [this](const QString& runId, int exitCode, const QString& cleanupMessage)
     {
+        closeHotReloadProgress();
         ei::log(eLogInfo, QString("JMV test launch finished run:%1 exit:%2 cleanup:%3")
                 .arg(runId).arg(exitCode).arg(cleanupMessage));
         statusBar()->showMessage(tr("JMV direct map test finished (exit code %1). Temporary files were cleaned up.").arg(exitCode), 8000);
@@ -545,6 +779,16 @@ MainWindow::MainWindow(QWidget* parent) :
             QTimer::singleShot(0, this, &MainWindow::close);
         }
     });
+    connect(m_mapTestLauncher, &CJmvMapTestLauncher::testReportReady,
+            this, [this](const QJsonObject& report)
+    {
+        // The report is emitted immediately before the final lifecycle signal.
+        // Let that sequence settle before showing the non-intrusive toast.
+        QTimer::singleShot(100, this, [this, report]()
+        {
+            showMapTestResultNotification(report);
+        });
+    });
     connect(m_mapTestLauncher, &CJmvMapTestLauncher::hotReloadReady, this, [this]()
     {
         statusBar()->showMessage(tr("JMV map test is ready for Ctrl+F5 hot reload."), 6000);
@@ -553,6 +797,7 @@ MainWindow::MainWindow(QWidget* parent) :
     connect(m_mapTestLauncher, &CJmvMapTestLauncher::hotReloadFinished, this,
             [this](quint64, bool success, const QString& message)
     {
+        closeHotReloadProgress();
         ei::log(success ? eLogInfo : eLogWarning, message);
         statusBar()->showMessage(message, 10000);
         updateMapTestAction();
@@ -560,6 +805,7 @@ MainWindow::MainWindow(QWidget* parent) :
     connect(m_mapTestLauncher, &CJmvMapTestLauncher::testError, this,
             [this](const QString& message)
     {
+        closeHotReloadProgress();
         ei::log(eLogFatal, message);
         QMessageBox::critical(this, tr("JMV test launch"), message);
         updateMapTestAction();
@@ -646,7 +892,17 @@ MainWindow::MainWindow(QWidget* parent) :
     m_ui->actionMap_parameters->setText(tr("MPR Atlas Tiles..."));
     m_ui->tileBrushButton->setText(tr("Paint"));
     m_ui->tileBrushButton->setToolTip(tr("Landscape tile painting (B)"));
-    connect(m_pView, &CView::mobStateChanged, this, [this]() { scheduleMobFamilyValidation(); });
+    connect(m_pView, &CView::mobStateChanged, this, [this]()
+    {
+        updateLoadedMapPanel();
+        scheduleMobFamilyValidation(2500);
+    });
+    connect(m_pView, &CView::loadedMapStateChanged,
+            this, &MainWindow::updateLoadedMapPanel);
+    connect(m_pView, &CView::updateMsg, this, [this](const QString& message)
+    {
+        statusBar()->showMessage(message, 5000);
+    });
     connect(m_pView, &CView::nidChangeProposed, this, &MainWindow::notifyProposedNid);
     connect(m_pView, &CView::nidAllocationRequested, this,
             [this](const QString& mobPath, quint32* suggestion)
@@ -682,9 +938,114 @@ MainWindow::MainWindow(QWidget* parent) :
             }
         }
     }, Qt::DirectConnection);
-    connect(m_undoStack, &QUndoStack::indexChanged, this, [this](int) { scheduleMobFamilyValidation(500); });
     initShortcuts();
+    QAction* viewportOnlyAction = new QAction(tr("Maximize viewport"), this);
+    viewportOnlyAction->setObjectName("actionViewportOnly");
+    viewportOnlyAction->setShortcut(QKeySequence(Qt::Key_F11));
+    viewportOnlyAction->setShortcutContext(Qt::ApplicationShortcut);
+    addAction(viewportOnlyAction);
+    connect(viewportOnlyAction, &QAction::triggered, this, [this, viewportOnlyAction]()
+    {
+        const bool entering = !property("enduranceViewportOnly").toBool();
+        setProperty("enduranceViewportOnly", entering);
+        viewportOnlyAction->setText(entering
+            ? tr("Restore editor UI")
+            : tr("Maximize viewport"));
+        if(entering)
+        {
+            setProperty("enduranceViewportSplitterState",
+                        m_ui->workspaceSplitter->saveState());
+            setProperty("enduranceMenuVisible", menuBar()->isVisible());
+            setProperty("enduranceStatusVisible", statusBar()->isVisible());
+            for(QDockWidget* dock : findChildren<QDockWidget*>())
+            {
+                dock->setProperty("enduranceWasVisible", dock->isVisible());
+                dock->hide();
+            }
+            for(QToolBar* toolbar : findChildren<QToolBar*>())
+            {
+                toolbar->setProperty("enduranceWasVisible", toolbar->isVisible());
+                toolbar->hide();
+            }
+            menuBar()->hide();
+            statusBar()->hide();
+            m_ui->workspaceSplitter->setSizes({1, 0});
+            if(QWidget* toolbar = m_ui->workspaceContainer->findChild<QWidget*>(
+                    "mapTestToolbar", Qt::FindDirectChildrenOnly))
+            {
+                toolbar->setProperty("enduranceWasVisible", toolbar->isVisible());
+                toolbar->hide();
+            }
+            if(QWidget* toolbar = m_ui->workspaceContainer->findChild<QWidget*>(
+                    "viewportOperationToolbar", Qt::FindDirectChildrenOnly))
+            {
+                toolbar->setProperty("enduranceWasVisible", toolbar->isVisible());
+                toolbar->hide();
+            }
+        }
+        else
+        {
+            const QByteArray splitterState = property(
+                "enduranceViewportSplitterState").toByteArray();
+            if(!splitterState.isEmpty())
+                m_ui->workspaceSplitter->restoreState(splitterState);
+            for(QDockWidget* dock : findChildren<QDockWidget*>())
+                if(dock->property("enduranceWasVisible").toBool())
+                    dock->show();
+            for(QToolBar* toolbar : findChildren<QToolBar*>())
+                if(toolbar->property("enduranceWasVisible").toBool())
+                    toolbar->show();
+            menuBar()->setVisible(property("enduranceMenuVisible").toBool());
+            statusBar()->setVisible(property("enduranceStatusVisible").toBool());
+            if(QWidget* toolbar = m_ui->workspaceContainer->findChild<QWidget*>(
+                    "mapTestToolbar", Qt::FindDirectChildrenOnly))
+                toolbar->setVisible(toolbar->property("enduranceWasVisible").toBool());
+            if(QWidget* toolbar = m_ui->workspaceContainer->findChild<QWidget*>(
+                    "viewportOperationToolbar", Qt::FindDirectChildrenOnly))
+                toolbar->setVisible(toolbar->property("enduranceWasVisible").toBool());
+        }
+        if(m_pView)
+            m_pView->setFocus();
+    });
+    QAction* fullScreenAction = new QAction(tr("Toggle fullscreen"), this);
+    fullScreenAction->setObjectName("actionToggleFullscreen");
+    fullScreenAction->setShortcut(QKeySequence(Qt::Key_F12));
+    fullScreenAction->setShortcutContext(Qt::ApplicationShortcut);
+    addAction(fullScreenAction);
+    connect(fullScreenAction, &QAction::triggered, this, [this]()
+    {
+        if(isFullScreen())
+        {
+            const Qt::WindowStates previous = Qt::WindowStates(
+                property("endurancePreviousWindowState").toInt());
+            showNormal();
+            if(previous.testFlag(Qt::WindowMaximized))
+                showMaximized();
+        }
+        else
+        {
+            setProperty("endurancePreviousWindowState", int(windowState()));
+            showFullScreen();
+        }
+        if(m_pView)
+            m_pView->setFocus();
+    });
     connect(m_settings.get(), &CSettings::shortcutsChanged, this, &MainWindow::initShortcuts);
+    m_autosaveTimer = new QTimer(this);
+    m_autosaveTimer->setTimerType(Qt::PreciseTimer);
+    connect(m_autosaveTimer, &QTimer::timeout, this, &MainWindow::beginAutosaveCountdown);
+    connect(m_settings.get(), &CSettings::autosaveSettingsApplied,
+            this, static_cast<void (MainWindow::*)(bool, int)>(
+                &MainWindow::configureAutosaveTimer));
+    connect(m_settings.get(), &CSettings::autosaveRequested,
+            this, &MainWindow::performAutosave);
+    connect(m_settings.get(), &CSettings::backupFolderRequested, this, [this]()
+    {
+        QString error;
+        if(!CBackupManager::openBackupFolder(&error))
+            QMessageBox::warning(this, tr("Endurance backups"), error);
+    });
+    configureAutosaveTimer();
     m_ui->action_Mob_parameters->setEnabled(false);
     m_ui->actionOpen_MOB_Script->setEnabled(false);
     m_externalScriptAction->setEnabled(false);
@@ -707,6 +1068,18 @@ MainWindow::MainWindow(QWidget* parent) :
         if(visible)
             m_landscapeToolsDock->raise();
     });
+    connect(m_pView, &CView::selectionChanged,
+            this, &MainWindow::updateUnitTexturePreview);
+    connect(m_pView, &CView::selectionChanged, this, [this]()
+    {
+        if(m_customSpawnSelected && !m_pView->selectionSnapshot().isEmpty())
+        {
+            m_customSpawnSelected = false;
+            m_pView->setTestSpawnMarkerSelected(false);
+            updateOperationAvailability();
+        }
+        updateOutlinerSelectionPath();
+    });
 
 
 //    m_ui->progressBar->setValue(0);
@@ -722,20 +1095,329 @@ MainWindow::MainWindow(QWidget* parent) :
     refreshMapTestContext();
     updateMapTestAction();
     updateWindowTitle(eTitleTypeData::eTitleTypeDataMpr, QString());
+    updateLoadedMapPanel();
+    QVector<SRecoverableAutosave> recoveries;
+    QString backupSessionError;
+    CBackupManager backupManager;
+    m_backupSessionStarted = backupManager.beginEditorSession(
+        &recoveries, &backupSessionError);
+    if(!m_backupSessionStarted)
+        ei::log(eLogWarning, "Editor backup session journal unavailable: "
+                + backupSessionError);
+    else
+    {
+        m_recoverableAutosaveNoticeCount = recoveries.size();
+        for(const SRecoverableAutosave& recovery : recoveries)
+            m_recoverableAutosaveNoticeKeys.append(recovery.notificationKey);
+        if(m_recoverableAutosaveNoticeCount > 0)
+            QTimer::singleShot(0, this, &MainWindow::showRecoverableAutosaves);
+    }
+    bool hasStartupDocument = false;
+    for(int index = 1; index < QCoreApplication::arguments().size(); ++index)
+    {
+        const QFileInfo candidate(QCoreApplication::arguments().at(index));
+        const QString suffix = candidate.suffix().toLower();
+        if(candidate.exists() && (suffix == "mpr" || suffix == "mob"))
+        {
+            hasStartupDocument = true;
+            break;
+        }
+    }
+    if(!firstRunSetup && !hasStartupDocument)
+    {
+        COptBool* openLastSession = dynamic_cast<COptBool*>(
+            m_settings->opt(eOptSetGeneral, "openLastSessionOnStartup"));
+        if(openLastSession && openLastSession->value())
+        {
+            QTimer::singleShot(0, this, [this]()
+            {
+                ei::log(eLogInfo, "Opening the previous editor session by user preference.");
+                m_pView->loadSession();
+            });
+        }
+    }
 //    if(m_pView->isRecentAvailable())
 //        m_ui->actionOpen_recent->setEnabled(true);
 }
 
 MainWindow::~MainWindow()
 {
-    QSettings uiSettings;
-    uiSettings.setValue("ui/mainWindowGeometry", saveGeometry());
-    uiSettings.setValue("ui/mainWindowState", saveState());
-    uiSettings.setValue("ui/workspaceSplitter", m_ui->workspaceSplitter->saveState());
-    uiSettings.setValue("ui/outlinerSplitter", m_ui->outlinerSplitter->saveState());
-    delete m_pView;
+    saveUiState();
+    if(m_pView && m_pView->prepareForApplicationShutdown())
+        delete m_pView;
+    else if(m_pView)
+    {
+        // A closed native window can lose its OpenGL surface before this
+        // destructor runs. Destroying QOpenGL* members then crashes inside Qt.
+        // This is application shutdown, so detach the stopped view and allow
+        // process teardown to reclaim it instead of invoking unsafe GL cleanup.
+        ei::log(eLogWarning,
+                "Viewport retained for process teardown because its OpenGL surface is unavailable");
+        m_pView->hide();
+        m_pView->setParent(nullptr);
+    }
+    m_pView = nullptr;
     delete m_ui;
     CIconManager::getInstance()->~CIconManager();
+}
+
+void MainWindow::showUnitTexturePreview()
+{
+    if(!m_unitTextureDialog)
+    {
+        m_unitTextureDialog = new QDialog(this);
+        m_unitTextureDialog->setAttribute(Qt::WA_QuitOnClose, false);
+        m_unitTextureDialog->setWindowTitle(tr("Final character texture"));
+        QVBoxLayout* layout = new QVBoxLayout(m_unitTextureDialog);
+        m_unitTextureDetails = new QLabel(m_unitTextureDialog);
+        m_unitTextureDetails->setTextInteractionFlags(Qt::TextSelectableByMouse);
+        layout->addWidget(m_unitTextureDetails);
+
+        QHBoxLayout* controls = new QHBoxLayout;
+        QGroupBox* layerGroup = new QGroupBox(tr("Texture layers"), m_unitTextureDialog);
+        QVBoxLayout* layerLayout = new QVBoxLayout(layerGroup);
+        m_unitTextureLayers = new QListWidget(layerGroup);
+        m_unitTextureLayers->setMaximumHeight(180);
+        layerLayout->addWidget(m_unitTextureLayers);
+        QHBoxLayout* layerButtons = new QHBoxLayout;
+        QPushButton* showLayers = new QPushButton(tr("Show all"), layerGroup);
+        QPushButton* hideLayers = new QPushButton(tr("Hide all"), layerGroup);
+        layerButtons->addWidget(showLayers);
+        layerButtons->addWidget(hideLayers);
+        layerLayout->addLayout(layerButtons);
+        controls->addWidget(layerGroup);
+
+        QGroupBox* partGroup = new QGroupBox(tr("Part UV projections"), m_unitTextureDialog);
+        QVBoxLayout* partLayout = new QVBoxLayout(partGroup);
+        m_unitTextureParts = new QListWidget(partGroup);
+        m_unitTextureParts->setMaximumHeight(180);
+        partLayout->addWidget(m_unitTextureParts);
+        QHBoxLayout* partButtons = new QHBoxLayout;
+        QPushButton* showParts = new QPushButton(tr("Show all"), partGroup);
+        QPushButton* hideParts = new QPushButton(tr("Hide all"), partGroup);
+        partButtons->addWidget(showParts);
+        partButtons->addWidget(hideParts);
+        partLayout->addLayout(partButtons);
+        controls->addWidget(partGroup);
+        layout->addLayout(controls);
+
+        auto setAllChecked = [this](QListWidget* list, bool checked)
+        {
+            if(!list)
+                return;
+            m_unitTextureUpdating = true;
+            for(int row = 0; row < list->count(); ++row)
+                list->item(row)->setCheckState(checked ? Qt::Checked : Qt::Unchecked);
+            m_unitTextureUpdating = false;
+            renderUnitTexturePreview();
+        };
+        connect(showLayers, &QPushButton::clicked, this,
+                [setAllChecked, this]() { setAllChecked(m_unitTextureLayers, true); });
+        connect(hideLayers, &QPushButton::clicked, this,
+                [setAllChecked, this]() { setAllChecked(m_unitTextureLayers, false); });
+        connect(showParts, &QPushButton::clicked, this,
+                [setAllChecked, this]() { setAllChecked(m_unitTextureParts, true); });
+        connect(hideParts, &QPushButton::clicked, this,
+                [setAllChecked, this]() { setAllChecked(m_unitTextureParts, false); });
+        connect(m_unitTextureLayers, &QListWidget::itemChanged, this,
+                [this](QListWidgetItem*)
+        {
+            if(!m_unitTextureUpdating)
+                renderUnitTexturePreview();
+        });
+        connect(m_unitTextureParts, &QListWidget::itemChanged, this,
+                [this](QListWidgetItem*)
+        {
+            if(!m_unitTextureUpdating)
+                renderUnitTexturePreview();
+        });
+
+        m_unitTextureImage = new QLabel;
+        m_unitTextureImage->setAlignment(Qt::AlignLeft | Qt::AlignTop);
+        m_unitTextureScroll = new QScrollArea(m_unitTextureDialog);
+        m_unitTextureScroll->setWidget(m_unitTextureImage);
+        m_unitTextureScroll->setWidgetResizable(false);
+        layout->addWidget(m_unitTextureScroll, 1);
+        QDialogButtonBox* buttons = new QDialogButtonBox(
+            QDialogButtonBox::Close, m_unitTextureDialog);
+        connect(buttons, &QDialogButtonBox::rejected,
+                m_unitTextureDialog, &QDialog::close);
+        layout->addWidget(buttons);
+        m_unitTextureDialog->resize(1100, 900);
+    }
+    m_unitTextureDialog->show();
+    updateUnitTexturePreview();
+    m_unitTextureDialog->raise();
+    m_unitTextureDialog->activateWindow();
+}
+
+void MainWindow::updateUnitTexturePreview()
+{
+    if(!m_unitTextureDialog || !m_unitTextureDialog->isVisible())
+        return;
+
+    const QList<CNode*> selected = m_pView ? m_pView->selectedNodes() : QList<CNode*>();
+    CUnit* unit = selected.size() == 1 ? dynamic_cast<CUnit*>(selected.first()) : nullptr;
+    if(!unit)
+    {
+        m_unitTextureDialog->setWindowTitle(tr("Final character texture"));
+        m_unitTextureDetails->setText(tr("Select a single unit to preview its texture and UVs."));
+        m_unitTextureImage->clear();
+        m_unitTextureImage->resize(0, 0);
+        m_unitTextureUpdating = true;
+        m_unitTextureLayers->clear();
+        m_unitTextureParts->clear();
+        m_unitTextureUpdating = false;
+        return;
+    }
+
+    QStringList layers = unit->renderedBodyTextureLayers();
+    if(layers.isEmpty())
+        layers.append(unit->renderedPrimaryTextureName());
+    const QStringList partNames = unit->renderedBodyPartUvTriangles().keys();
+    m_unitTextureUpdating = true;
+    m_unitTextureLayers->clear();
+    for(const QString& layer : layers)
+    {
+        QListWidgetItem* item = new QListWidgetItem(layer, m_unitTextureLayers);
+        item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
+        item->setCheckState(Qt::Checked);
+    }
+    m_unitTextureParts->clear();
+    for(const QString& part : partNames)
+    {
+        QListWidgetItem* item = new QListWidgetItem(part, m_unitTextureParts);
+        item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
+        item->setCheckState(Qt::Checked);
+    }
+    m_unitTextureUpdating = false;
+    renderUnitTexturePreview();
+}
+
+void MainWindow::renderUnitTexturePreview()
+{
+    if(!m_unitTextureDialog || !m_unitTextureDialog->isVisible() || m_unitTextureUpdating)
+        return;
+    const QList<CNode*> selected = m_pView ? m_pView->selectedNodes() : QList<CNode*>();
+    CUnit* unit = selected.size() == 1 ? dynamic_cast<CUnit*>(selected.first()) : nullptr;
+    if(!unit)
+    {
+        updateUnitTexturePreview();
+        return;
+    }
+
+    QStringList allLayers = unit->renderedBodyTextureLayers();
+    if(allLayers.isEmpty())
+        allLayers.append(unit->renderedPrimaryTextureName());
+    QStringList visibleLayers;
+    for(int row = 0; row < m_unitTextureLayers->count(); ++row)
+        if(m_unitTextureLayers->item(row)->checkState() == Qt::Checked)
+            visibleLayers.append(m_unitTextureLayers->item(row)->text());
+
+    QString diagnostic;
+    QImage texture;
+    if(!visibleLayers.isEmpty())
+        texture = CTextureList::getInstance()->layeredTextureImage(
+            visibleLayers, unit->renderedModelName(), &diagnostic);
+    else if(!allLayers.isEmpty())
+    {
+        const QImage sizeReference = CTextureList::getInstance()->textureImage(
+            allLayers.first(), unit->renderedModelName());
+        if(!sizeReference.isNull())
+        {
+            texture = QImage(sizeReference.size(), QImage::Format_ARGB32_Premultiplied);
+            texture.fill(Qt::transparent);
+        }
+    }
+
+    m_unitTextureDialog->setWindowTitle(
+        tr("Final character texture — %1").arg(unit->databaseName()));
+    if(texture.isNull())
+    {
+        if(diagnostic.isEmpty())
+            diagnostic = tr("The selected texture layers could not be decoded as a CPU image.");
+        m_unitTextureDetails->setText(diagnostic);
+        m_unitTextureImage->clear();
+        m_unitTextureImage->resize(0, 0);
+        return;
+    }
+
+    QImage preview(texture.size(), QImage::Format_RGB32);
+    QPainter painter(&preview);
+    const int cell = 16;
+    for(int y = 0; y < preview.height(); y += cell)
+        for(int x = 0; x < preview.width(); x += cell)
+            painter.fillRect(x, y, cell, cell,
+                ((x / cell) + (y / cell)) % 2
+                    ? QColor(190, 190, 190) : QColor(235, 235, 235));
+    // Display the authoring atlas rotated 180 degrees, but keep UI labels in
+    // normal reading orientation. Rotate the texture and UV coordinates here
+    // instead of mirroring the finished image after labels have been painted.
+    painter.drawImage(0, 0, texture.mirrored(true, true));
+
+    QSet<QString> visibleParts;
+    for(int row = 0; row < m_unitTextureParts->count(); ++row)
+        if(m_unitTextureParts->item(row)->checkState() == Qt::Checked)
+            visibleParts.insert(m_unitTextureParts->item(row)->text());
+    const QMap<QString, QVector<QVector2D>> projections =
+        unit->renderedBodyPartUvTriangles();
+    painter.setRenderHint(QPainter::Antialiasing, false);
+    auto texturePoint = [&preview](const QVector2D& uv)
+    {
+        const double wrappedU = uv.x() - std::floor(double(uv.x()));
+        const double wrappedV = uv.y() - std::floor(double(uv.y()));
+        return QPointF(qBound(0.0, (1.0 - wrappedU) * preview.width() - 1.0,
+                              double(preview.width() - 1)),
+                       qBound(0.0, (1.0 - wrappedV) * preview.height() - 1.0,
+                              double(preview.height() - 1)));
+    };
+    for(auto it = projections.constBegin(); it != projections.constEnd(); ++it)
+    {
+        if(!visibleParts.contains(it.key()))
+            continue;
+        const QColor color = QColor::fromHsv(int(qHash(it.key()) % 360), 230, 255, 220);
+        painter.setPen(QPen(color, 1.0));
+        QRectF bounds;
+        bool boundsInitialized = false;
+        const QVector<QVector2D>& coordinates = it.value();
+        for(int vertex = 0; vertex + 2 < coordinates.size(); vertex += 3)
+        {
+            QPolygonF triangle;
+            for(int corner = 0; corner < 3; ++corner)
+            {
+                const QPointF point = texturePoint(coordinates.at(vertex + corner));
+                triangle.append(point);
+                if(!boundsInitialized)
+                {
+                    bounds = QRectF(point, QSizeF(0, 0));
+                    boundsInitialized = true;
+                }
+                else
+                    bounds |= QRectF(point, QSizeF(0, 0));
+            }
+            painter.drawPolygon(triangle);
+        }
+        if(boundsInitialized)
+        {
+            const QString label = it.key();
+            const QFontMetrics metrics(painter.font());
+            QRectF labelRect = metrics.boundingRect(label);
+            labelRect.moveCenter(bounds.center());
+            labelRect.adjust(-3, -1, 3, 1);
+            painter.fillRect(labelRect, QColor(0, 0, 0, 190));
+            painter.setPen(color);
+            painter.drawText(labelRect, Qt::AlignCenter, label);
+        }
+    }
+    painter.end();
+
+    m_unitTextureDetails->setText(
+        tr("Model: %1\nSize: %2 × %3\nVisible layers: %4 / %5\n"
+           "UV projection: renderer-effective QImage upload, Repeat wrapping")
+            .arg(unit->renderedModelName()).arg(texture.width()).arg(texture.height())
+            .arg(visibleLayers.size()).arg(allLayers.size()));
+    m_unitTextureImage->setPixmap(QPixmap::fromImage(preview));
+    m_unitTextureImage->adjustSize();
 }
 
 void MainWindow::testFunc1()
@@ -856,11 +1538,7 @@ void MainWindow::runUndoToIndex(int targetIndex)
                                        : tr("Applying redo history..."),
             QString(), 0, 0, this));
         progress->setWindowTitle(tr("Updating map"));
-        progress->setCancelButton(nullptr);
-        progress->setWindowModality(Qt::ApplicationModal);
-        progress->setMinimumDuration(0);
-        progress->setAutoClose(false);
-        progress->setAutoReset(false);
+        configureBlockingProgress(progress.data());
         progress->show();
         QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
     }
@@ -873,6 +1551,44 @@ void MainWindow::runUndoToIndex(int targetIndex)
 
 bool MainWindow::eventFilter(QObject* watched, QEvent* event)
 {
+    if(m_loadedMapTree && watched == m_loadedMapTree->viewport())
+    {
+        if(event->type() == QEvent::MouseButtonPress)
+        {
+            QMouseEvent* mouse = static_cast<QMouseEvent*>(event);
+            QTreeWidgetItem* item = m_loadedMapTree->itemAt(mouse->pos());
+            if(mouse->button() == Qt::LeftButton && item
+               && m_loadedMapTree->columnAt(mouse->pos().x()) == 1
+               && item->flags().testFlag(Qt::ItemIsUserCheckable))
+            {
+                m_loadedMapVisibilityDragging = true;
+                m_loadedMapVisibilityTarget = item->checkState(1) == Qt::Checked
+                    ? Qt::Unchecked : Qt::Checked;
+                m_loadedMapVisibilityKeys.clear();
+                previewLoadedMapVisibility(item);
+                m_loadedMapTree->viewport()->grabMouse();
+                return true;
+            }
+        }
+        if(m_loadedMapVisibilityDragging && event->type() == QEvent::MouseMove)
+        {
+            QMouseEvent* mouse = static_cast<QMouseEvent*>(event);
+            if(mouse->buttons().testFlag(Qt::LeftButton)
+               && m_loadedMapTree->columnAt(mouse->pos().x()) == 1)
+                previewLoadedMapVisibility(m_loadedMapTree->itemAt(mouse->pos()));
+            return true;
+        }
+        if(m_loadedMapVisibilityDragging && event->type() == QEvent::MouseButtonRelease)
+        {
+            QMouseEvent* mouse = static_cast<QMouseEvent*>(event);
+            if(mouse->button() == Qt::LeftButton)
+            {
+                m_loadedMapTree->viewport()->releaseMouse();
+                commitLoadedMapVisibilityDrag();
+                return true;
+            }
+        }
+    }
     if(m_pView && watched == m_pView && m_suppressSpawnRelease)
     {
         // Placement/marker selection owns the complete pointer sequence. If
@@ -908,9 +1624,12 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event)
             if(mouse->button() == Qt::LeftButton)
             {
                 const bool hit = m_pView->testSpawnMarkerAt(mouse->pos());
+                if(hit)
+                    m_pView->clearObjectSelection();
                 m_customSpawnSelected = hit;
                 m_pView->setTestSpawnMarkerSelected(hit);
                 updateOperationAvailability();
+                updateOutlinerSelectionPath();
                 if(hit)
                 {
                     m_suppressSpawnRelease = true;
@@ -982,8 +1701,10 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event)
                 }
                 m_customSpawn = plan;
                 m_customSpawnPosition = resolved;
+                m_customSpawnContextKey = currentMapContextKey();
                 m_pickSpawnPending = false;
                 m_movingCustomSpawn = false;
+                m_pView->clearObjectSelection();
                 m_customSpawnSelected = true;
                 m_suppressSpawnRelease = true;
                 if(m_playFromHereButton && !m_playFromHereButton->isChecked())
@@ -1002,6 +1723,7 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event)
                 updateEntranceOverlays();
                 updateOperationAvailability();
                 updateMapTestAction();
+                updateOutlinerSelectionPath();
                 return true;
             }
         }
@@ -1023,6 +1745,41 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event)
         }
     }
     return QMainWindow::eventFilter(watched, event);
+}
+
+void MainWindow::previewLoadedMapVisibility(QTreeWidgetItem* item)
+{
+    if(!item || !m_loadedMapTree || !item->flags().testFlag(Qt::ItemIsUserCheckable))
+        return;
+    const int kind = item->data(0, kLoadedMapKindRole).toInt();
+    const QString key = kind == kLoadedMapMpr ? QString("__mpr__")
+        : (kind == kLoadedMapMob ? item->data(0, kLoadedMapPathRole).toString()
+                                : QString());
+    if(key.isEmpty())
+        return;
+    m_loadedMapVisibilityKeys.insert(key);
+    const QSignalBlocker blocker(m_loadedMapTree);
+    item->setCheckState(1, m_loadedMapVisibilityTarget);
+}
+
+void MainWindow::commitLoadedMapVisibilityDrag()
+{
+    const QSet<QString> keys = m_loadedMapVisibilityKeys;
+    const bool visible = m_loadedMapVisibilityTarget == Qt::Checked;
+    m_loadedMapVisibilityDragging = false;
+    m_loadedMapVisibilityKeys.clear();
+    if(!m_pView || keys.isEmpty())
+        return;
+    QList<CMob*> mobs;
+    bool includeLandscape = keys.contains("__mpr__");
+    for(const QString& path : keys)
+    {
+        if(path == "__mpr__")
+            continue;
+        if(CMob* mob = m_pView->mob(path))
+            mobs.append(mob);
+    }
+    m_pView->setWorkspaceVisibility(mobs, includeLandscape, visible);
 }
 
 SResourceProfileEvaluation MainWindow::activeResourceProfile() const
@@ -1137,7 +1894,8 @@ void MainWindow::updateEntranceOverlays()
                 .arg(entrance.destinationZoneId)
                 .arg(entrance.destinationExitId));
     }
-    const int selected = (m_customSpawn.valid && m_customSpawn.custom) ? -1
+    const int selected = (m_customSpawn.valid && m_customSpawn.custom
+                          && m_customSpawnContextKey == currentMapContextKey()) ? -1
         : (m_entranceCombo ? m_entranceCombo->currentData().toInt() : -1);
     m_pView->setTestEntranceOverlays(rectangles, labels, selected);
     updateCustomSpawnControls();
@@ -1148,8 +1906,12 @@ void MainWindow::refreshMapTestContext()
     m_mapTestEntry = SMapCatalogEntry();
     m_borrowedMapIdentity = false;
     m_customSpawn = SMapSpawnPlan();
+    m_customSpawnPosition = QVector3D();
+    m_customSpawnContextKey.clear();
+    m_pickSpawnPending = false;
     m_movingCustomSpawn = false;
     m_customSpawnSelected = false;
+    m_suppressSpawnRelease = false;
     if(m_pView)
         m_pView->clearTestSpawnMarker();
     if(m_playFromHereButton)
@@ -1159,6 +1921,7 @@ void MainWindow::refreshMapTestContext()
     }
     if(m_spawnPositionLabel)
         m_spawnPositionLabel->setText(tr("Entrance spawn"));
+    updateOutlinerSelectionPath();
 
     QVector<QString> resources;
     QVector<QString> maps;
@@ -1191,6 +1954,8 @@ void MainWindow::refreshMapTestContext()
         if(m_mapTestEntry.zoneId.isEmpty() && nameMatches.size() == 1)
             m_mapTestEntry = nameMatches.first();
     }
+    if(m_pView)
+        m_pView->setMapSkyType(m_mapTestEntry.skyType);
     populateEntranceCombo();
     updateCustomSpawnControls();
     updateMapTestAction();
@@ -1240,6 +2005,8 @@ void MainWindow::setCustomSpawnPicking(bool enabled)
         m_movingCustomSpawn = false;
         m_customSpawnSelected = false;
         m_customSpawn = SMapSpawnPlan();
+        m_customSpawnPosition = QVector3D();
+        m_customSpawnContextKey.clear();
         if(m_pView)
         {
             m_pView->unsetCursor();
@@ -1251,6 +2018,7 @@ void MainWindow::setCustomSpawnPicking(bool enabled)
         updateEntranceOverlays();
         updateOperationAvailability();
         updateMapTestAction();
+        updateOutlinerSelectionPath();
         return;
     }
     if(!selectedTravelZone())
@@ -1265,6 +2033,7 @@ void MainWindow::setCustomSpawnPicking(bool enabled)
     m_movingCustomSpawn = false;
     m_customSpawnSelected = false;
     m_customSpawn = SMapSpawnPlan();
+    m_customSpawnContextKey.clear();
     m_pView->setCursor(Qt::CrossCursor);
     m_pView->setFocus();
     m_spawnPositionLabel->setText(tr("Click terrain (Esc cancels)"));
@@ -1276,7 +2045,8 @@ void MainWindow::setCustomSpawnPicking(bool enabled)
 
 void MainWindow::updateCustomSpawnControls()
 {
-    const bool customActive = m_customSpawn.valid && m_customSpawn.custom;
+    const bool customActive = m_customSpawn.valid && m_customSpawn.custom
+        && m_customSpawnContextKey == currentMapContextKey();
     if(m_playFromHereButton)
         m_playFromHereButton->setText(customActive && !m_pickSpawnPending ? tr("Clear entrance")
                                                    : (m_pickSpawnPending ? (m_movingCustomSpawn
@@ -1290,11 +2060,21 @@ void MainWindow::updateCustomSpawnControls()
         m_gotoEntranceButton->setEnabled(customActive || selectedTravelZone());
 }
 
+QString MainWindow::currentMapContextKey() const
+{
+    const QString mprPath = CLandscape::getInstance()->isMprLoad()
+        ? QFileInfo(CLandscape::getInstance()->filePath()).absoluteFilePath()
+        : QString();
+    return QString("%1|%2").arg(QDir::cleanPath(mprPath), m_mapTestEntry.zoneId)
+        .toCaseFolded();
+}
+
 void MainWindow::moveCameraToActiveSpawn()
 {
     if(!m_pView)
         return;
-    if(m_customSpawn.valid && m_customSpawn.custom)
+    if(m_customSpawn.valid && m_customSpawn.custom
+       && m_customSpawnContextKey == currentMapContextKey())
     {
         m_pView->moveCameraToPoint(m_customSpawnPosition);
         return;
@@ -1333,7 +2113,9 @@ void MainWindow::initShortcuts()
     m_ui->actionDuplicate_selected_objects->setShortcut(shortcut("shortcutDuplicateObjects", "Ctrl+D"));
     m_ui->actionReset_cam_position->setShortcut(shortcut("shortcutResetCamera", "Ctrl+R"));
     m_ui->actionChange_mod_e->setShortcut(shortcut("shortcutSwitchMode", "Ctrl+Tab"));
-    //m_ui->actionSwitch_active_MOB->setShortcut(QKeySequence(Qt::CTRL + Qt::Key_T));
+    m_activateOwnerMobAction->setShortcut(
+        shortcut("shortcutActivateOwnerMob", "Ctrl+T"));
+    m_activateOwnerMobAction->setShortcutContext(Qt::ApplicationShortcut);
     m_ui->action_Mob_parameters->setShortcut(shortcut("shortcutMobParameters", "Ctrl+M"));
     m_ui->actionOpen_MOB_Script->setShortcut(shortcut("shortcutMobScript", "Ctrl+Shift+M"));
     m_externalScriptAction->setShortcut(shortcut("shortcutExternalMobScript", "Ctrl+Alt+M"));
@@ -1449,7 +2231,8 @@ void MainWindow::createViewportToolbars()
                 return;
             }
             if(operation.type == EButtonOpMove && m_customSpawnSelected
-               && m_customSpawn.valid && m_customSpawn.custom)
+               && m_customSpawn.valid && m_customSpawn.custom
+               && m_customSpawnContextKey == currentMapContextKey())
             {
                 m_pView->cancelPendingOperation();
                 m_pickSpawnPending = true;
@@ -1479,6 +2262,56 @@ void MainWindow::createViewportToolbars()
         });
     }
     operationLayout->addStretch(1);
+    operationLayout->addWidget(new QLabel(tr("Camera Speed:"), operationBar));
+    m_cameraSpeedSlider = new QSlider(Qt::Horizontal, operationBar);
+    m_cameraSpeedSlider->setObjectName("cameraSpeedSlider");
+    m_cameraSpeedSlider->setRange(1, 100);
+    m_cameraSpeedSlider->setSingleStep(1);
+    m_cameraSpeedSlider->setPageStep(5);
+    m_cameraSpeedSlider->setFixedWidth(150);
+    m_cameraSpeedSlider->setToolTip(tr(
+        "Camera movement and zoom speed. Hold the configured modifier (Ctrl by default) "
+        "and use the mouse wheel over the viewport to adjust it."));
+    m_cameraSpeedSpin = new QDoubleSpinBox(operationBar);
+    m_cameraSpeedSpin->setObjectName("cameraSpeedMultiplier");
+    m_cameraSpeedSpin->setRange(0.1, 10.0);
+    m_cameraSpeedSpin->setSingleStep(0.1);
+    m_cameraSpeedSpin->setDecimals(1);
+    m_cameraSpeedSpin->setPrefix(QString::fromUtf8("\xC3\x97"));
+    m_cameraSpeedSpin->setFixedWidth(72);
+    m_cameraSpeedSpin->setToolTip(m_cameraSpeedSlider->toolTip());
+    double cameraSpeed = 1.0;
+    if(const COptDouble* option = dynamic_cast<const COptDouble*>(
+           m_settings->opt(eOptSetGeneral, "cameraSpeedMultiplier")))
+        cameraSpeed = qBound(0.1, option->value(), 10.0);
+    m_cameraSpeedSlider->setValue(qRound(cameraSpeed * 10.0));
+    m_cameraSpeedSpin->setValue(cameraSpeed);
+    m_pView->setCameraSpeedMultiplier(cameraSpeed);
+    operationLayout->addWidget(m_cameraSpeedSlider);
+    operationLayout->addWidget(m_cameraSpeedSpin);
+
+    m_cameraSpeedPersistTimer = new QTimer(this);
+    m_cameraSpeedPersistTimer->setSingleShot(true);
+    connect(m_cameraSpeedPersistTimer, &QTimer::timeout,
+            m_settings.get(), &CSettings::persistOptions);
+    connect(m_cameraSpeedSlider, &QSlider::valueChanged, this, [this](int value)
+    {
+        m_pView->setCameraSpeedMultiplier(value / 10.0);
+    });
+    connect(m_cameraSpeedSpin, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+            m_pView, &CView::setCameraSpeedMultiplier);
+    connect(m_pView, &CView::cameraSpeedMultiplierChanged, this, [this](double value)
+    {
+        const QSignalBlocker sliderBlocker(m_cameraSpeedSlider);
+        const QSignalBlocker spinBlocker(m_cameraSpeedSpin);
+        m_cameraSpeedSlider->setValue(qRound(value * 10.0));
+        m_cameraSpeedSpin->setValue(value);
+        if(COptDouble* option = dynamic_cast<COptDouble*>(
+               m_settings->opt(eOptSetGeneral, "cameraSpeedMultiplier")))
+            option->setValue(value);
+        m_cameraSpeedPersistTimer->start(250);
+        statusBar()->showMessage(tr("Camera speed: %1x").arg(value, 0, 'f', 1), 1500);
+    });
     m_ui->toolsLayout->setContentsMargins(0, 0, 0, 0);
     m_ui->toolsLayout->setSpacing(0);
 
@@ -1523,11 +2356,14 @@ void MainWindow::updateMapTestAction()
             && !m_pView->mobs().isEmpty() && CLandscape::getInstance()->isMprLoad();
     const bool hasPair = hasMobs && (isJmv || m_pView->mobs().size() == 1);
     const bool hasEntrance = selectedTravelZone() != nullptr;
-    const bool customRequested = (m_customSpawn.valid && m_customSpawn.custom)
+    const bool customForCurrentMap = m_customSpawn.valid && m_customSpawn.custom
+        && m_customSpawnContextKey == currentMapContextKey();
+    const bool customRequested = customForCurrentMap
         || (m_playFromHereButton && m_playFromHereButton->isChecked());
     const bool customReady = !customRequested
         || (isJmv && m_customSpawn.valid && !m_pickSpawnPending);
-    const bool profileReady = (isJmv || isBaseProbe) && profile.valid
+    const bool profileReady = !m_workspaceLoadInProgress
+        && (isJmv || isBaseProbe) && profile.valid
         && profile.runtimeStackValidated;
     if(m_mapTestLauncher && m_mapTestLauncher->isRunning())
     {
@@ -1584,7 +2420,13 @@ void MainWindow::updateMapTestAction()
     else if(!isJmv && !isBaseProbe)
         m_mapTestAction->setToolTip(tr("The active profile has no Endurance direct-map-test provider."));
     else if(!profileReady)
-        m_mapTestAction->setToolTip(tr("The active runtime does not match an exact experimental manifest."));
+    {
+        const QString detail = runtimeManifestProblem(profile);
+        m_mapTestAction->setToolTip(detail.isEmpty()
+            ? tr("The active runtime does not match an exact experimental manifest.")
+            : tr("The active runtime does not match an exact experimental manifest.\n%1")
+                .arg(detail));
+    }
     else if(!hasPair)
         m_mapTestAction->setToolTip(isJmv
             ? tr("Load one MPR and at least one MOB before launching a map test.")
@@ -1612,18 +2454,15 @@ void MainWindow::launchCurrentMapTest()
         return;
     }
     notifyFamilyPreflight(hotReloadRequested ? tr("Hot Reload Map") : tr("Test Current Map"));
-    QProgressDialog progress(hotReloadRequested ? tr("Preparing hot reload...")
-                                               : tr("Preparing map test..."),
-                             QString(), 0, 6, this);
-    progress.setWindowTitle(hotReloadRequested ? tr("JMV hot reload")
-                                               : tr("Map test launch"));
-    progress.setWindowModality(Qt::WindowModal);
-    progress.setCancelButton(nullptr);
-    progress.setMinimumDuration(0);
-    progress.setAutoClose(false);
-    progress.setValue(0);
-    progress.show();
-    QApplication::processEvents();
+    QScopedPointer<QProgressDialog> progress(new QProgressDialog(
+        hotReloadRequested ? tr("Preparing hot reload...") : tr("Preparing map test..."),
+        QString(), 0, 6, this));
+    progress->setWindowTitle(hotReloadRequested ? tr("JMV hot reload")
+                                                : tr("Map test launch"));
+    configureBlockingProgress(progress.data());
+    progress->setValue(0);
+    progress->show();
+    QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
     if(m_pView->cancelPendingOperation())
         statusBar()->showMessage(tr("Pending object movement was cancelled before staging the test."), 4000);
     CLandscape* landscape = CLandscape::getInstance();
@@ -1633,9 +2472,9 @@ void MainWindow::launchCurrentMapTest()
             tr("Unsaved MPR edits cannot yet be staged losslessly. Save or revert the landscape first."));
         return;
     }
-    progress.setLabelText(tr("Validating the active runtime profile..."));
-    progress.setValue(1);
-    QApplication::processEvents();
+    progress->setLabelText(tr("Validating the active runtime profile..."));
+    progress->setValue(1);
+    QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
 
     const SResourceProfileEvaluation profile = activeResourceProfile();
     const bool isJmv = profile.profileId.compare("jamais-vu", Qt::CaseInsensitive) == 0;
@@ -1648,13 +2487,17 @@ void MainWindow::launchCurrentMapTest()
     }
     if((!isJmv && !isBase) || !profile.valid || !profile.runtimeStackValidated)
     {
+        const QString detail = runtimeManifestProblem(profile);
         QMessageBox::warning(this, tr("Map test launch"),
-            tr("The active installation does not match an exact supported or experimental runtime manifest. Run Game and Mod Setup again and review its diagnostics."));
+            detail.isEmpty()
+                ? tr("The active installation does not match an exact supported or experimental runtime manifest. Run Game and Mod Setup again and review its diagnostics.")
+                : tr("The active installation does not match an exact supported or experimental runtime manifest.\n\n%1\n\nRun Game and Mod Setup again if this is not the intended installation.")
+                    .arg(detail));
         return;
     }
-    progress.setLabelText(tr("Reading map-table metadata..."));
-    progress.setValue(2);
-    QApplication::processEvents();
+    progress->setLabelText(tr("Reading map-table metadata..."));
+    progress->setValue(2);
+    QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
 
     const SMapCatalogEntry entry = m_mapTestEntry;
     const SMapTravelZone* entrance = selectedTravelZone();
@@ -1664,9 +2507,9 @@ void MainWindow::launchCurrentMapTest()
             tr("No travel/deploy zone was found for the loaded MPR in the active map table. Endurance will not guess a player spawn."));
         return;
     }
-    progress.setLabelText(tr("Choosing a safe map-table entrance..."));
-    progress.setValue(3);
-    QApplication::processEvents();
+    progress->setLabelText(tr("Choosing a safe map-table entrance..."));
+    progress->setValue(3);
+    QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
 
     CMob* mob = nullptr;
     const QString expectedMain = entry.mobName;
@@ -1689,7 +2532,12 @@ void MainWindow::launchCurrentMapTest()
             tr("The Base probe currently accepts exactly one MOB. Supplemental MOB redirection is JMV-only."));
         return;
     }
-    const SMapSpawnPlan spawn = m_customSpawn.valid && m_customSpawn.custom
+    const bool customForCurrentMap = m_customSpawn.valid && m_customSpawn.custom
+        && m_customSpawnContextKey == currentMapContextKey();
+    if(m_customSpawn.valid && m_customSpawn.custom && !customForCurrentMap)
+        ei::log(eLogWarning, QString("Ignored stale Play from Here spawn context:%1 active:%2")
+            .arg(m_customSpawnContextKey, currentMapContextKey()));
+    const SMapSpawnPlan spawn = customForCurrentMap
         ? m_customSpawn
         : CMapSpawnPlanner::chooseEntrance(*entrance, mapTestObstacles());
     if(!spawn.valid)
@@ -1698,9 +2546,9 @@ void MainWindow::launchCurrentMapTest()
             tr("No deploy rectangle was found in the selected zone's map-table entrances. Endurance will not invent a player entrance.\n\n%1").arg(spawn.reason));
         return;
     }
-    progress.setLabelText(tr("Validating the current in-memory map pair..."));
-    progress.setValue(4);
-    QApplication::processEvents();
+    progress->setLabelText(tr("Validating the current in-memory map pair..."));
+    progress->setValue(4);
+    QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
 
     QFile mprFile(landscape->filePath().absoluteFilePath());
     if(!mprFile.open(QIODevice::ReadOnly))
@@ -1755,7 +2603,7 @@ void MainWindow::launchCurrentMapTest()
     if(!hotReloadRequested
        && (!warningVersion || warningVersion->value() < kMapTestWarningVersion))
     {
-        progress.hide();
+        progress->hide();
         QMessageBox confirmationBox(QMessageBox::Question,
             isJmv ? tr("Direct JMV map test (experimental)")
                   : tr("Base EI feasibility probe (experimental)"), confirmation,
@@ -1769,11 +2617,13 @@ void MainWindow::launchCurrentMapTest()
             warningVersion->setValue(kMapTestWarningVersion);
             m_settings->persistOptions();
         }
-        progress.show();
+        progress->show();
     }
-    progress.setLabelText(tr("Staging temporary maps and isolated test state..."));
-    progress.setValue(5);
-    QApplication::processEvents();
+    progress->setLabelText(hotReloadRequested
+        ? tr("Staging the next hot-reload generation...")
+        : tr("Staging temporary maps and isolated test state..."));
+    progress->setValue(5);
+    QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
 
     SJmvMapTestLaunchInput input;
     input.profile = profile;
@@ -1824,8 +2674,17 @@ void MainWindow::launchCurrentMapTest()
             hotReloadRequested ? tr("Hot reload") : tr("Map test launch"), error);
     }
     else if(hotReloadRequested)
+    {
+        // Keep this application-modal progress window alive until the bridge
+        // commits or rejects the staged generation. The launcher focuses the
+        // game only after hotReloadFinished, so editor input stays blocked.
+        progress->setRange(0, 0);
+        progress->setLabelText(tr("Applying the staged map generation in the game..."));
+        m_hotReloadProgress = progress.take();
         statusBar()->showMessage(tr("Hot reload queued on the verified JMV game thread."), 6000);
-    progress.setValue(6);
+    }
+    if(progress)
+        progress->setValue(6);
     updateMapTestAction();
 }
 
@@ -1878,14 +2737,21 @@ SMobFamilyValidationRequest MainWindow::mobFamilyValidationRequest()
         const QString workspaceRoot = QFileInfo(path).absolutePath();
         if(!request.workspaceRoots.contains(workspaceRoot, Qt::CaseInsensitive))
             request.workspaceRoots.prepend(workspaceRoot);
-        QByteArray data;
-        CValidationReport candidateReport;
-        QString saveClass;
-        if(mob->buildValidatedCandidate(&data, &candidateReport, &saveClass))
-            request.inMemoryMobData.insert(QDir::cleanPath(path).toLower(), data);
-        else
-            ei::log(eLogWarning, QString("Family validation used the on-disk MOB because the current in-memory candidate could not be mapped safely: %1\n%2")
-                .arg(path, candidateReport.toText()));
+        // Clean documents are already represented exactly by their source
+        // files. Re-serializing every loaded MOB here used to stall the GUI
+        // on every selection/undo gesture. Only dirty documents need an
+        // in-memory candidate override; the worker reads clean sources.
+        if(mob->isDirty())
+        {
+            QByteArray data;
+            CValidationReport candidateReport;
+            QString saveClass;
+            if(mob->buildValidatedCandidate(&data, &candidateReport, &saveClass))
+                request.inMemoryMobData.insert(QDir::cleanPath(path).toLower(), data);
+            else
+                ei::log(eLogWarning, QString("Family validation used the on-disk MOB because the current in-memory candidate could not be mapped safely: %1\n%2")
+                    .arg(path, candidateReport.toText()));
+        }
     }
     request.seedMobPaths.removeDuplicates();
     return request;
@@ -1899,6 +2765,13 @@ void MainWindow::scheduleMobFamilyValidation(int delayMs)
 
 void MainWindow::refreshMobFamilyValidation()
 {
+    if(m_pView && m_pView->hasPendingOperation())
+    {
+        // Never snapshot/serialize MOB state while the user is positioning a
+        // paste or transform preview. Validate once the gesture settles.
+        scheduleMobFamilyValidation(1000);
+        return;
+    }
     if(!m_pView || m_pView->mobs().isEmpty())
     {
         ++m_validationGeneration;
@@ -1938,7 +2811,7 @@ void MainWindow::startPendingMobFamilyValidation()
         QElapsedTimer elapsed;
         elapsed.start();
         CMobFamilyValidationReport report = CMobFamilyValidator::validate(request);
-        ei::log(eLogInfo, QString("MOB family validation worker finished family:%1 elapsedMs:%2 members:%3 findings:%4")
+        ei::log(eLogInfo, QString("MOB validation worker finished context:%1 elapsedMs:%2 members:%3 findings:%4")
                 .arg(request.familyLabel).arg(elapsed.elapsed())
                 .arg(report.members.size()).arg(report.findings.size()));
         return report;
@@ -1959,6 +2832,41 @@ void MainWindow::applyMobFamilyValidationReport(const CMobFamilyValidationReport
     elapsed.start();
     const QByteArray previousDigest = m_familyValidation.findingDigest();
     m_familyValidation = report;
+    // Visual providers resolve against live profile/database/resource state on
+    // the GUI-owned unit projection. Surface their fail-closed diagnostics in
+    // the same navigable validation report without repeating that work in the
+    // background structural validator.
+    if(m_pView)
+    {
+        for(CMob* mob : m_pView->mobs())
+        {
+            if(!mob)
+                continue;
+            const QString mobPath = mob->filePath().absoluteFilePath();
+            for(CNode* node : mob->nodes())
+            {
+                CUnit* unit = dynamic_cast<CUnit*>(node);
+                if(!unit)
+                    continue;
+                for(const QString& diagnostic : unit->visualDiagnostics())
+                {
+                    SMobFamilyFinding finding;
+                    finding.severity = EMobFamilyFindingSeverity::Warning;
+                    finding.code = "visual.profile_incompatible";
+                    finding.category = tr("Unit visual");
+                    finding.message = tr("NID %1 (%2): %3")
+                        .arg(unit->mapId())
+                        .arg(unit->databaseName().isEmpty() ? tr("unnamed prototype")
+                                                            : unit->databaseName(),
+                             diagnostic);
+                    finding.locations.append(mobPath);
+                    finding.nid = unit->mapId();
+                    finding.hasNid = true;
+                    m_familyValidation.findings.append(finding);
+                }
+            }
+        }
+    }
     m_validationFindingLimit = 250;
     const QByteArray currentDigest = m_familyValidation.findingDigest();
     if(previousDigest != currentDigest)
@@ -1966,7 +2874,8 @@ void MainWindow::applyMobFamilyValidationReport(const CMobFamilyValidationReport
     QSet<QString> currentRisks;
     for(const SMobFamilyFinding& finding : m_familyValidation.findings)
     {
-        if(finding.code != "nid.collision" && finding.code != "range.legacy_overlap")
+        if(finding.code != "nid.collision" && finding.code != "nid.workspace_collision"
+           && finding.code != "range.legacy_overlap" && finding.code != "range.workspace_overlap")
             continue;
         QStringList locations = finding.locations;
         locations.sort(Qt::CaseInsensitive);
@@ -2011,7 +2920,7 @@ void MainWindow::applyMobFamilyValidationReport(const CMobFamilyValidationReport
     }
     m_ui->treeWidget->setValidationNids(criticalNids, warningNids);
     updateMobFamilyValidationPanel();
-    ei::log(eLogInfo, QString("MOB family validation UI applied family:%1 elapsedMs:%2 members:%3 findings:%4")
+    ei::log(eLogInfo, QString("MOB validation UI applied context:%1 elapsedMs:%2 members:%3 findings:%4")
             .arg(m_familyValidation.familyLabel).arg(elapsed.elapsed())
             .arg(m_familyValidation.members.size()).arg(m_familyValidation.findings.size()));
     ei::log(m_familyValidation.criticalCount() > 0 ? eLogWarning : eLogInfo,
@@ -2114,7 +3023,7 @@ void MainWindow::updateMobFamilyValidationPanel()
                             owner.sectionPath));
                 ownerItem->setData(0, kValidationNidRole, owner.nid);
                 ownerItem->setData(0, kValidationSectionRole, owner.sectionPath);
-                ownerItem->setToolTip(1, tr("Double-click to select this object if its MOB is loaded."));
+                ownerItem->setToolTip(1, tr("Double-click to load its MOB if needed, then select this object."));
             }
         }
     }
@@ -2163,6 +3072,157 @@ void MainWindow::showValidationWarning(const QString& title, const QString& text
         showMobFamilyValidation();
 }
 
+void MainWindow::showMapTestResultNotification(const QJsonObject& report)
+{
+    const int errors = report.value("errorCount").toInt();
+    const int warnings = report.value("warningCount").toInt();
+    const QString reportText = QString::fromUtf8(
+        QJsonDocument(report).toJson(QJsonDocument::Compact));
+    ei::log(errors > 0 ? eLogFatal : (warnings > 0 ? eLogWarning : eLogInfo),
+            "JMV authoritative test result: " + reportText);
+    const bool failed = errors > 0;
+    const bool warned = !failed && warnings > 0;
+    QString detail;
+    const QJsonArray problems = failed ? report.value("errors").toArray()
+                                       : report.value("warnings").toArray();
+    if(!problems.isEmpty())
+        detail = problems.first().toString().simplified();
+    if(detail.size() > 180)
+        detail = detail.left(177) + "...";
+    const QString status = failed
+        ? tr("Map test finished with %1 error(s).").arg(errors)
+        : (warned ? tr("Map test finished with %1 warning(s).").arg(warnings)
+                  : tr("Map test completed successfully."));
+    QString text = status + tr("\nRequested: %1 / entrance %2   Runtime: %3 / entrance %4")
+        .arg(report.value("requestedZone").toString())
+        .arg(report.value("requestedEntrance").toInt())
+        .arg(report.value("actualZone").toString())
+        .arg(report.value("actualEntrance").toInt());
+    if(!detail.isEmpty())
+        text += "\n" + detail;
+    m_mapTestResultLogPath = report.value("runLogPath").toString();
+    if(m_mapTestResultLogPath.isEmpty())
+        m_mapTestResultLogPath = report.value("bridgeResultPath").toString();
+    showTransientResultNotification(text, failed, warned, tr("Open Log"),
+        ETransientNotificationAction::OpenLog,
+        failed ? 9000 : (warned ? 7000 : 5000));
+}
+
+void MainWindow::showTransientResultNotification(
+    const QString& text, bool failed, bool warned, const QString& actionText,
+    ETransientNotificationAction action, int timeoutMs)
+{
+    if(m_mapTestResultTimer)
+        m_mapTestResultTimer->stop();
+    if(!m_mapTestResultNotification)
+    {
+        m_mapTestResultNotification = new QFrame(this);
+        m_mapTestResultNotification->setObjectName("mapTestResultNotification");
+        m_mapTestResultNotification->setFrameShape(QFrame::StyledPanel);
+        m_mapTestResultNotification->setAttribute(Qt::WA_ShowWithoutActivating);
+        m_mapTestResultNotification->setFocusPolicy(Qt::NoFocus);
+        m_mapTestResultNotification->setStyleSheet(
+            "QFrame#mapTestResultNotification { background: #292929; border: 1px solid #808080; border-radius: 4px; }"
+            "QLabel { color: #eeeeee; } QPushButton { min-width: 88px; }");
+        QVBoxLayout* layout = new QVBoxLayout(m_mapTestResultNotification);
+        layout->setContentsMargins(12, 10, 12, 10);
+        QHBoxLayout* summary = new QHBoxLayout;
+        m_mapTestResultIcon = new QLabel(m_mapTestResultNotification);
+        QFont iconFont = m_mapTestResultIcon->font();
+        iconFont.setPointSize(24);
+        iconFont.setBold(true);
+        m_mapTestResultIcon->setFont(iconFont);
+        m_mapTestResultIcon->setAlignment(Qt::AlignTop | Qt::AlignHCenter);
+        m_mapTestResultIcon->setFixedWidth(38);
+        m_mapTestResultLabel = new QLabel(m_mapTestResultNotification);
+        m_mapTestResultLabel->setWordWrap(true);
+        m_mapTestResultLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
+        m_mapTestResultLabel->setMaximumWidth(520);
+        summary->addWidget(m_mapTestResultIcon);
+        summary->addWidget(m_mapTestResultLabel, 1);
+        layout->addLayout(summary);
+        QHBoxLayout* buttons = new QHBoxLayout;
+        buttons->addStretch(1);
+        m_mapTestResultActionButton = new QPushButton(m_mapTestResultNotification);
+        QPushButton* dismiss = new QPushButton(tr("Dismiss"), m_mapTestResultNotification);
+        buttons->addWidget(m_mapTestResultActionButton);
+        buttons->addWidget(dismiss);
+        layout->addLayout(buttons);
+        m_mapTestResultTimer = new QTimer(m_mapTestResultNotification);
+        m_mapTestResultTimer->setSingleShot(true);
+        connect(m_mapTestResultTimer, &QTimer::timeout, this, [this]()
+        {
+            m_mapTestResultNotification->hide();
+            positionAutosaveNotification();
+        });
+        connect(dismiss, &QPushButton::clicked, this, [this]()
+        {
+            m_mapTestResultTimer->stop();
+            m_mapTestResultNotification->hide();
+            positionAutosaveNotification();
+        });
+        connect(m_mapTestResultActionButton, &QPushButton::clicked, this, [this]()
+        {
+            m_mapTestResultTimer->stop();
+            if(m_transientNotificationAction == ETransientNotificationAction::OpenLog)
+            {
+                if(m_mapTestResultLogPath.isEmpty()
+                   || !QDesktopServices::openUrl(QUrl::fromLocalFile(m_mapTestResultLogPath)))
+                    statusBar()->showMessage(tr("The test-run log could not be opened."), 6000);
+            }
+            else if(m_transientNotificationAction
+                    == ETransientNotificationAction::OpenBackupFolder)
+            {
+                QString error;
+                if(!CBackupManager::openBackupFolder(&error))
+                    QMessageBox::warning(this, tr("Endurance backups"), error);
+            }
+            m_mapTestResultNotification->hide();
+            positionAutosaveNotification();
+        });
+    }
+
+    m_mapTestResultIcon->setText(failed ? QString::fromUtf8("\xE2\x9C\x95")
+                                       : (warned ? "!" : QString::fromUtf8("\xE2\x9C\x93")));
+    m_mapTestResultIcon->setStyleSheet(QString("color: %1;")
+        .arg(failed ? "#ff5c5c" : (warned ? "#ffc547" : "#4bd66f")));
+    m_mapTestResultLabel->setText(text);
+    m_transientNotificationAction = action;
+    m_mapTestResultActionButton->setText(actionText);
+    m_mapTestResultActionButton->setVisible(
+        action != ETransientNotificationAction::None && !actionText.isEmpty());
+    m_mapTestResultNotification->adjustSize();
+    positionMapTestResultNotification();
+    m_mapTestResultNotification->show();
+    m_mapTestResultNotification->raise();
+    m_mapTestResultTimer->start(qMax(1000, timeoutMs));
+    positionAutosaveNotification();
+}
+
+void MainWindow::positionMapTestResultNotification()
+{
+    if(!m_mapTestResultNotification)
+        return;
+    const int right = 18;
+    const int bottom = (statusBar() ? statusBar()->height() : 0) + 18;
+    m_mapTestResultNotification->move(
+        qMax(0, width() - m_mapTestResultNotification->width() - right),
+        qMax(0, height() - m_mapTestResultNotification->height() - bottom));
+}
+
+void MainWindow::positionAutosaveNotification()
+{
+    if(!m_autosaveNotification)
+        return;
+    const int right = 18;
+    int bottom = (statusBar() ? statusBar()->height() : 0) + 18;
+    if(m_mapTestResultNotification && m_mapTestResultNotification->isVisible())
+        bottom += m_mapTestResultNotification->height() + 10;
+    m_autosaveNotification->move(
+        qMax(0, width() - m_autosaveNotification->width() - right),
+        qMax(0, height() - m_autosaveNotification->height() - bottom));
+}
+
 QString MainWindow::validationWarningPreview(
     const QVector<SMobFamilyFinding>& findings) const
 {
@@ -2183,10 +3243,41 @@ void MainWindow::selectValidationObject(QTreeWidgetItem* item)
     const QString mobPath = item->data(0, kValidationPathRole).toString();
     const quint32 nid = item->data(0, kValidationNidRole).toUInt();
     const QString sectionPath = item->data(0, kValidationSectionRole).toString();
+    bool mobLoaded = false;
+    const QString wantedPath = QDir::cleanPath(QFileInfo(mobPath).absoluteFilePath());
+    for(CMob* mob : m_pView->mobs())
+    {
+        if(mob && QDir::cleanPath(mob->filePath().absoluteFilePath()).compare(
+               wantedPath, Qt::CaseInsensitive) == 0)
+        {
+            mobLoaded = true;
+            break;
+        }
+    }
+    if(!mobLoaded)
+    {
+        const QFileInfo source(mobPath);
+        if(!source.isFile())
+        {
+            statusBar()->showMessage(
+                tr("Cannot select NID %1 because its source MOB was not found: %2")
+                    .arg(nid).arg(mobPath), 9000);
+            return;
+        }
+        statusBar()->showMessage(tr("Loading %1 to select NID %2...")
+            .arg(source.fileName()).arg(nid));
+        if(!loadMobWithProgress(source))
+        {
+            statusBar()->showMessage(
+                tr("Could not load %1 to select NID %2.").arg(source.fileName()).arg(nid),
+                8000);
+            return;
+        }
+    }
     if(!m_pView->selectObjectByProvenance(mobPath, nid, sectionPath))
     {
         statusBar()->showMessage(
-            tr("Object NID %1 is not selectable: load its MOB or resolve its ambiguous provenance.")
+            tr("Object NID %1 is not selectable: its provenance is ambiguous or no longer present.")
                 .arg(nid), 7000);
         return;
     }
@@ -2409,6 +3500,11 @@ void MainWindow::notifyProposedNid(quint32 nid, const QString& mobPath)
 
 void MainWindow::openCollection(const QString& path)
 {
+    if(m_workspaceLoadInProgress)
+    {
+        statusBar()->showMessage(tr("Finish loading the current workspace first."), 4000);
+        return;
+    }
     SEnduranceCollection document;
     QString error;
     if(!CCollectionDocument::load(path, &document, &error))
@@ -2435,13 +3531,12 @@ void MainWindow::openCollection(const QString& path)
         return;
     if(!isExitAllowed())
         return;
+    if(!beginWorkspaceLoad(tr("collection %1").arg(QFileInfo(path).fileName())))
+        return;
     QProgressDialog progress(tr("Loading collection..."), QString(), 0,
                              resolved.mobPaths.size() + 3, this);
     progress.setWindowTitle(tr("Loading map workspace"));
-    progress.setWindowModality(Qt::ApplicationModal);
-    progress.setCancelButton(nullptr);
-    progress.setMinimumDuration(0);
-    progress.setAutoClose(false);
+    configureBlockingProgress(&progress);
     progress.setValue(0);
     progress.show();
     QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
@@ -2468,6 +3563,7 @@ void MainWindow::openCollection(const QString& path)
     refreshMapTestContext();
     progress.setValue(resolved.mobPaths.size() + 3);
     progress.close();
+    endWorkspaceLoad();
     ei::log(eLogInfo, QString("Opened collection path:%1 map:%2 mpr:%3 mobs:%4")
         .arg(path, document.mapZoneId, resolved.mprPath)
         .arg(resolved.mobPaths.size()));
@@ -2586,6 +3682,11 @@ void MainWindow::saveCollection(bool saveAs)
 void MainWindow::openMapPair(const QString& mprPath, const QString& mobPath,
                              const QString& zoneId)
 {
+    if(m_workspaceLoadInProgress)
+    {
+        statusBar()->showMessage(tr("Finish loading the current workspace first."), 4000);
+        return;
+    }
     if(!QFileInfo::exists(mprPath) || !QFileInfo::exists(mobPath))
     {
         QMessageBox::warning(this, tr("Open map"),
@@ -2595,12 +3696,11 @@ void MainWindow::openMapPair(const QString& mprPath, const QString& mobPath,
     }
     if(!isExitAllowed())
         return;
+    if(!beginWorkspaceLoad(tr("map %1").arg(zoneId)))
+        return;
     QProgressDialog progress(tr("Loading map..."), QString(), 0, 3, this);
     progress.setWindowTitle(tr("Loading map workspace"));
-    progress.setWindowModality(Qt::ApplicationModal);
-    progress.setCancelButton(nullptr);
-    progress.setMinimumDuration(0);
-    progress.setAutoClose(false);
+    configureBlockingProgress(&progress);
     progress.setValue(0);
     progress.show();
     QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
@@ -2629,6 +3729,7 @@ void MainWindow::openMapPair(const QString& mprPath, const QString& mobPath,
         .arg(zoneId, mprPath, mobPath));
     progress.setValue(3);
     progress.close();
+    endWorkspaceLoad();
     QTimer::singleShot(0, this, [this]()
     {
         if(!m_validEntrances.isEmpty())
@@ -2660,16 +3761,18 @@ void MainWindow::updateOperationAvailability(bool hasSelection)
     // still settling.  The view is the source of truth for toolbar and shortcut
     // availability, so never leave the controls disabled because of a stale
     // notification argument.
-    hasSelection = hasMob && m_pView->nSelectedNodes() > 0;
+    hasSelection = hasMob && m_pView->hasEditableSelection();
     const bool hasMpr = CLandscape::getInstance()->isMprLoad();
     const bool hasMovableSelection = (hasMob && hasSelection)
-        || (m_customSpawnSelected && m_customSpawn.valid && m_customSpawn.custom);
+        || (m_customSpawnSelected && m_customSpawn.valid && m_customSpawn.custom
+            && m_customSpawnContextKey == currentMapContextKey());
     const struct { EButtonOp type; QToolButton* button; bool enabled; } states[] = {
         {EButtonOpSelect, m_ui->selectButton, hasMob},
         {EButtonOpMove, m_ui->moveButton, hasMovableSelection},
         {EButtonOpRotate, m_ui->rotateButton, hasMob && hasSelection},
         {EButtonOpScale, m_ui->scaleButton, hasMob && hasSelection},
-        {EButtonOpTilebrush, m_ui->tileBrushButton, hasMpr}
+        {EButtonOpTilebrush, m_ui->tileBrushButton,
+            hasMpr && m_pView->isLandscapeVisible()}
     };
     for(const auto& state : states)
     {
@@ -2677,6 +3780,257 @@ void MainWindow::updateOperationAvailability(bool hasSelection)
         if(QAction* action = m_operationActions.value(state.type, nullptr))
             action->setEnabled(state.enabled);
     }
+    if(m_activateOwnerMobAction)
+    {
+        bool canActivateOwner = false;
+        if(m_pView)
+            for(CMob* mob : m_pView->mobs())
+            {
+                if(!mob || mob == m_pView->currentMob() || !m_pView->isMobVisible(mob))
+                    continue;
+                const QList<CNode*> candidates = mob->nodes() + mob->logicNodes();
+                for(CNode* node : candidates)
+                {
+                    if(node && node->nodeState() == ENodeState::eSelect)
+                    {
+                        canActivateOwner = true;
+                        break;
+                    }
+                }
+                if(canActivateOwner)
+                    break;
+            }
+        m_activateOwnerMobAction->setEnabled(canActivateOwner);
+    }
+    if(m_convertWorldObjectToLeverAction)
+        m_convertWorldObjectToLeverAction->setEnabled(
+            m_pView && m_pView->canConvertSelectedWorldObjectToLever());
+}
+
+void MainWindow::updateLoadedMapPanel()
+{
+    if(!m_loadedMapTree || !m_pView)
+        return;
+    const QSignalBlocker blocker(m_loadedMapTree);
+    m_loadedMapTree->clear();
+
+    QTreeWidgetItem* root = new QTreeWidgetItem(m_loadedMapTree);
+    const bool hasMpr = CLandscape::getInstance()->isMprLoad();
+    if(hasMpr)
+    {
+        root->setText(0, CLandscape::getInstance()->filePath().fileName());
+        root->setText(2, tr("MPR"));
+        root->setToolTip(0, CLandscape::getInstance()->filePath().absoluteFilePath());
+        root->setFlags(root->flags() | Qt::ItemIsUserCheckable);
+        root->setCheckState(1, m_pView->isLandscapeVisible()
+                            ? Qt::Checked : Qt::Unchecked);
+        root->setData(0, kLoadedMapKindRole, kLoadedMapMpr);
+    }
+    else
+    {
+        root->setText(0, m_pView->mobs().isEmpty()
+                      ? tr("No map loaded") : tr("No MPR (neutral grid)"));
+        root->setText(2, tr("Workspace"));
+    }
+    root->setExpanded(true);
+
+    QTreeWidgetItem* activeItem = nullptr;
+    for(CMob* mob : m_pView->mobs())
+    {
+        if(!mob)
+            continue;
+        QTreeWidgetItem* item = new QTreeWidgetItem(root);
+        item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
+        item->setCheckState(1, m_pView->isMobVisible(mob)
+                            ? Qt::Checked : Qt::Unchecked);
+        item->setText(0, mob->filePath().fileName() + (mob->isDirty() ? " *" : ""));
+        QSet<CNode*> selectedNodes;
+        for(CNode* node : mob->nodes())
+            if(node && node->nodeState() == ENodeState::eSelect) selectedNodes.insert(node);
+        for(CNode* node : mob->logicNodes())
+            if(node && node->nodeState() == ENodeState::eSelect) selectedNodes.insert(node);
+        QStringList states;
+        states.append(mob == m_pView->currentMob() ? tr("Active") : tr("Locked"));
+        if(!selectedNodes.isEmpty())
+            states.append(tr("Selected: %1").arg(selectedNodes.size()));
+        if(!m_pView->isMobVisible(mob))
+            states.append(tr("Hidden"));
+        item->setText(2, states.join(", "));
+        item->setToolTip(0, mob->filePath().absoluteFilePath()
+            + (selectedNodes.isEmpty() ? QString()
+               : tr("\n%1 selected object(s)").arg(selectedNodes.size())));
+        item->setData(0, kLoadedMapKindRole, kLoadedMapMob);
+        item->setData(0, kLoadedMapPathRole, mob->filePath().absoluteFilePath());
+        if(mob == m_pView->currentMob())
+        {
+            activeItem = item;
+            QFont font = item->font(0);
+            font.setBold(true);
+            item->setFont(0, font);
+        }
+        if(!selectedNodes.isEmpty())
+        {
+            const QColor background = mob == m_pView->currentMob()
+                ? QColor(20, 75, 88) : QColor(92, 64, 12);
+            for(int column = 0; column < 3; ++column)
+            {
+                item->setBackground(column, background);
+                item->setForeground(column, QColor(Qt::white));
+            }
+        }
+    }
+    if(activeItem)
+        m_loadedMapTree->setCurrentItem(activeItem, 0,
+            QItemSelectionModel::ClearAndSelect);
+    m_loadedMapTree->resizeColumnToContents(1);
+    updateOperationAvailability();
+}
+
+void MainWindow::updateOutlinerSelectionPath()
+{
+    if(!m_outlinerSelectionPath || !m_ui || !m_ui->treeWidget)
+        return;
+
+    const bool customSelected = m_customSpawnSelected && m_customSpawn.valid
+        && m_customSpawn.custom
+        && m_customSpawnContextKey == currentMapContextKey();
+    if(customSelected)
+    {
+        const QString coordinates = tr("Play from Here — X: %1  Y: %2  Z: %3")
+            .arg(m_customSpawnPosition.x(), 0, 'f', 2)
+            .arg(m_customSpawnPosition.y(), 0, 'f', 2)
+            .arg(m_customSpawnPosition.z(), 0, 'f', 2);
+        m_outlinerSelectionPath->setStyleSheet(
+            "QLabel { background: #29424a; color: white; padding: 5px 7px; "
+            "border-left: 3px solid #32c8e6; }");
+        m_outlinerSelectionPath->setText(coordinates);
+        m_outlinerSelectionPath->setToolTip(coordinates);
+        m_outlinerSelectionPath->show();
+        return;
+    }
+
+    const QList<CNode*> selectedNodes = m_pView
+        ? m_pView->selectionSnapshot() : QList<CNode*>();
+    if(selectedNodes.size() > 1)
+    {
+        bool includesLockedObject = false;
+        for(CNode* node : selectedNodes)
+            if(CMob* owner = m_pView->ownerMob(node))
+                includesLockedObject = includesLockedObject
+                    || owner != m_pView->currentMob();
+        const QString summary = tr("%1 objects selected").arg(selectedNodes.size());
+        m_outlinerSelectionPath->setStyleSheet(includesLockedObject
+            ? "QLabel { background: #5c400c; color: white; padding: 5px 7px; border-left: 3px solid #ff8c1a; }"
+            : "QLabel { background: #29424a; color: white; padding: 5px 7px; border-left: 3px solid #32c8e6; }");
+        m_outlinerSelectionPath->setText(summary);
+        m_outlinerSelectionPath->setToolTip(summary);
+        m_outlinerSelectionPath->show();
+        return;
+    }
+    QTreeWidgetItem* item = m_ui->treeWidget->currentItem();
+    if(!item || !item->parent())
+    {
+        m_outlinerSelectionPath->hide();
+        return;
+    }
+
+    QStringList path;
+    for(QTreeWidgetItem* part = item; part; part = part->parent())
+        path.prepend(part->text(0));
+
+    bool ancestorOutsideViewport = false;
+    for(QTreeWidgetItem* ancestor = item->parent(); ancestor;
+        ancestor = ancestor->parent())
+    {
+        const QRect ancestorRect = m_ui->treeWidget->visualItemRect(ancestor);
+        if(ancestor->isHidden() || !ancestorRect.isValid()
+           || !m_ui->treeWidget->viewport()->rect().contains(ancestorRect))
+        {
+            ancestorOutsideViewport = true;
+            break;
+        }
+    }
+    if(!ancestorOutsideViewport)
+    {
+        m_outlinerSelectionPath->hide();
+        return;
+    }
+
+    const QString hierarchy = path.join(QString::fromUtf8(" \u203a "));
+    bool locked = false;
+    if(CTreeObject* objectItem = dynamic_cast<CTreeObject*>(item))
+        if(CMob* owner = m_pView ? m_pView->ownerMob(objectItem->node()) : nullptr)
+            locked = owner != m_pView->currentMob();
+    m_outlinerSelectionPath->setStyleSheet(locked
+        ? "QLabel { background: #5c400c; color: white; padding: 5px 7px; border-left: 3px solid #ff8c1a; }"
+        : "QLabel { background: #29424a; color: white; padding: 5px 7px; border-left: 3px solid #32c8e6; }");
+    m_outlinerSelectionPath->setText(hierarchy);
+    m_outlinerSelectionPath->setToolTip(tr("Selected object hierarchy: %1").arg(hierarchy));
+    m_outlinerSelectionPath->show();
+}
+
+void MainWindow::updateDocumentActionAvailability()
+{
+    const bool idle = !m_workspaceLoadInProgress;
+    const bool hasActiveMob = m_pView && m_pView->hasActiveMob();
+    const bool hasAnyMob = m_pView && !m_pView->mobs().isEmpty();
+    const bool hasMpr = CLandscape::getInstance()->isMprLoad();
+    m_ui->actionOpen->setEnabled(idle);
+    m_ui->actionOpen_MPR->setEnabled(idle);
+    m_ui->actionOpen_MOB->setEnabled(idle);
+    m_ui->actionOpen_recent->setEnabled(idle);
+    if(m_recentFilesMenu) m_recentFilesMenu->setEnabled(idle);
+    if(m_mapsBrowser) m_mapsBrowser->setEnabled(idle);
+    m_ui->actionSave->setEnabled(idle && hasActiveMob);
+    m_ui->actionSave_as->setEnabled(idle && hasActiveMob);
+    m_ui->actionSave_all_MOB_s->setEnabled(idle && hasAnyMob);
+    m_ui->actionSave_landscape_MPR->setEnabled(idle && hasMpr);
+    m_ui->actionSave_landscape_MPR_as->setEnabled(idle && hasMpr);
+    m_ui->actionMap_parameters->setEnabled(idle && hasMpr);
+    m_ui->actionClose_all->setEnabled(idle && (hasAnyMob || hasMpr));
+}
+
+bool MainWindow::beginWorkspaceLoad(const QString& description)
+{
+    if(m_workspaceLoadInProgress)
+        return false;
+    m_workspaceLoadInProgress = true;
+    ei::log(eLogInfo, QString("Workspace load started: %1").arg(description));
+    updateDocumentActionAvailability();
+    updateMapTestAction();
+    return true;
+}
+
+void MainWindow::endWorkspaceLoad()
+{
+    if(!m_workspaceLoadInProgress)
+        return;
+    m_workspaceLoadInProgress = false;
+    ei::log(eLogInfo, "Workspace load finished");
+    updateDocumentActionAvailability();
+    updateMapTestAction();
+}
+
+void MainWindow::saveUiState()
+{
+    if(m_uiStateSaved || !m_ui)
+        return;
+    QSettings uiSettings;
+    uiSettings.setValue("ui/mainWindowGeometry", saveGeometry());
+    uiSettings.setValue("ui/mainWindowState", saveState());
+    uiSettings.setValue("ui/workspaceSplitter", m_ui->workspaceSplitter->saveState());
+    uiSettings.setValue("ui/outlinerSplitter", m_ui->outlinerSplitter->saveState());
+    uiSettings.sync();
+    m_uiStateSaved = true;
+}
+
+void MainWindow::closeHotReloadProgress()
+{
+    if(!m_hotReloadProgress)
+        return;
+    m_hotReloadProgress->close();
+    m_hotReloadProgress->deleteLater();
+    m_hotReloadProgress = nullptr;
 }
 
 bool MainWindow::isExitAllowed()
@@ -2708,6 +4062,7 @@ void MainWindow::closeAll()
         // isExitAllowed() already obtained the user's save/discard decision.
         // Do not ask for the same dirty MPR decision again during unload.
         m_pView->unloadLand(false);
+        updateDocumentActionAvailability();
     }
 }
 
@@ -2743,17 +4098,14 @@ void MainWindow::on_actionOpen_triggered()
 
     if(fileName.fileName().toLower().endsWith(".mpr"))
     {
-        m_openedMapZoneId.clear();
-        m_pView->cancelPendingOperation();
-        m_undoStack->clear();
-        m_pView->loadLandscape(fileName);
-        rememberRecentFile(fileName);
+        if(replaceLoadedLandscape(fileName))
+            rememberRecentFile(fileName);
     }
     else if(fileName.fileName().toLower().endsWith(".mob"))
     {
         m_pView->cancelPendingOperation();
-        m_pView->loadMob(fileName);
-        rememberRecentFile(fileName);
+        if(loadMobWithProgress(fileName))
+            rememberRecentFile(fileName);
     }
 }
 
@@ -2766,11 +4118,26 @@ void MainWindow::showGameAndModSetup()
     if(dialog.exec() != QDialog::Accepted)
         return;
     const SResourceProfileEvaluation profile = dialog.evaluation();
-    const QString previousProfile = configuredProfile ? configuredProfile->value() : QString();
-    const bool profileChanged = previousProfile.compare(profile.profileId,
-        Qt::CaseInsensitive) != 0;
-    if(profileChanged && m_pView
-       && (CLandscape::getInstance()->isMprLoad() || m_pView->hasActiveMob()))
+    const SResourceProfileEvaluation previous = activeResourceProfile();
+    auto samePaths = [](const QStringList& left, const QStringList& right)
+    {
+        if(left.size() != right.size()) return false;
+        for(int index = 0; index < left.size(); ++index)
+            if(QDir::cleanPath(left.at(index)).compare(QDir::cleanPath(right.at(index)),
+                                                      Qt::CaseInsensitive) != 0)
+                return false;
+        return true;
+    };
+    const bool resourceConfigurationChanged =
+        QDir::cleanPath(previous.gameRoot).compare(QDir::cleanPath(profile.gameRoot),
+                                                   Qt::CaseInsensitive) != 0
+        || QDir::cleanPath(previous.modRoot).compare(QDir::cleanPath(profile.modRoot),
+                                                   Qt::CaseInsensitive) != 0
+        || previous.profileId.compare(profile.profileId, Qt::CaseInsensitive) != 0
+        || !samePaths(previous.resourceDirectories, profile.resourceDirectories)
+        || !samePaths(previous.mapDirectories, profile.mapDirectories);
+    if(resourceConfigurationChanged && m_pView
+       && (CLandscape::getInstance()->isMprLoad() || !m_pView->mobs().isEmpty()))
     {
         if(!isExitAllowed())
             return;
@@ -2778,8 +4145,10 @@ void MainWindow::showGameAndModSetup()
         m_pView->unloadMob("");
         m_pView->unloadLand();
         m_openedMapZoneId.clear();
-        ei::log(eLogInfo, QString("Unloaded documents before resource profile switch %1 -> %2")
-            .arg(previousProfile, profile.profileId));
+        m_currentCollectionPath.clear();
+        ei::log(eLogInfo, QString("Unloaded documents before resource reinitialization profile:%1 -> %2 root:%3 -> %4")
+            .arg(previous.profileId, profile.profileId,
+                 previous.gameRoot, profile.gameRoot));
     }
     m_settings->applyResourceProfile(profile);
     if(m_pView)
@@ -2867,6 +4236,8 @@ void MainWindow::rebuildRecentFilesMenu()
 
 bool MainWindow::openDocument(const QFileInfo& fileName)
 {
+    if(m_workspaceLoadInProgress)
+        return false;
     const QString suffix = fileName.suffix().toLower();
     if(!fileName.exists() || (suffix != "mpr" && suffix != "mob"))
     {
@@ -2880,17 +4251,269 @@ bool MainWindow::openDocument(const QFileInfo& fileName)
     m_pView->cancelPendingOperation();
     if(suffix == "mpr")
     {
-        m_openedMapZoneId.clear();
-        m_undoStack->clear();
-        m_pView->loadLandscape(fileName);
+        if(!replaceLoadedLandscape(fileName))
+            return false;
     }
     else
     {
         QFileInfo mobFile(fileName);
-        m_pView->loadMob(mobFile);
+        if(!loadMobWithProgress(mobFile))
+            return false;
     }
     rememberRecentFile(fileName);
     return true;
+}
+
+bool MainWindow::replaceLoadedLandscape(const QFileInfo& fileName)
+{
+    CLandscape* landscape = CLandscape::getInstance();
+    if(landscape->isMprLoad())
+    {
+        const QFileInfo current = landscape->filePath();
+        const QString currentCanonical = current.canonicalFilePath().isEmpty()
+            ? current.absoluteFilePath() : current.canonicalFilePath();
+        const QString requestedCanonical = fileName.canonicalFilePath().isEmpty()
+            ? fileName.absoluteFilePath() : fileName.canonicalFilePath();
+        if(QDir::cleanPath(currentCanonical).compare(QDir::cleanPath(requestedCanonical),
+                                                     Qt::CaseInsensitive) == 0)
+        {
+            statusBar()->showMessage(tr("%1 is already loaded.").arg(fileName.fileName()), 4000);
+            return true;
+        }
+
+        if(!isExitAllowed())
+            return false;
+        m_undoStack->clear();
+        m_pView->unloadMob("");
+        m_pView->unloadLand(false);
+        m_currentCollectionPath.clear();
+    }
+
+    m_openedMapZoneId.clear();
+    m_pView->cancelPendingOperation();
+    m_undoStack->clear();
+    if(!loadLandscapeWithProgress(fileName))
+        return false;
+    updateDocumentActionAvailability();
+    return true;
+}
+
+bool MainWindow::loadMobWithProgress(QFileInfo fileName)
+{
+    if(!beginWorkspaceLoad(tr("MOB %1").arg(fileName.fileName())))
+        return false;
+    QProgressDialog progress(tr("Loading MOB: %1").arg(fileName.fileName()),
+                             QString(), 0, 0, this);
+    progress.setWindowTitle(tr("Loading MOB"));
+    configureBlockingProgress(&progress);
+    progress.setMinimumDuration(250);
+    progress.show();
+    QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+    const bool loaded = m_pView->loadMob(fileName);
+    progress.close();
+    endWorkspaceLoad();
+    updateDocumentActionAvailability();
+    return loaded;
+}
+
+bool MainWindow::loadLandscapeWithProgress(const QFileInfo& fileName)
+{
+    if(!beginWorkspaceLoad(tr("MPR %1").arg(fileName.fileName())))
+        return false;
+    QProgressDialog progress(tr("Loading MPR: %1").arg(fileName.fileName()),
+                             QString(), 0, 0, this);
+    progress.setWindowTitle(tr("Loading MPR"));
+    configureBlockingProgress(&progress);
+    progress.setMinimumDuration(250);
+    progress.show();
+    QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+    m_pView->loadLandscape(fileName);
+    progress.close();
+    endWorkspaceLoad();
+    return CLandscape::getInstance()->isMprLoad();
+}
+
+void MainWindow::configureAutosaveTimer()
+{
+    if(!m_autosaveTimer || !m_settings)
+        return;
+    const COptBool* enabled = dynamic_cast<const COptBool*>(m_settings->opt("autosaveEnabled"));
+    const COptInt* interval = dynamic_cast<const COptInt*>(m_settings->opt("autosaveIntervalMinutes"));
+    configureAutosaveTimer(enabled && enabled->value(), interval ? interval->value() : 5);
+}
+
+void MainWindow::configureAutosaveTimer(bool enabled, int intervalMinutes)
+{
+    if(!m_autosaveTimer)
+        return;
+    if(!enabled)
+    {
+        m_autosaveTimer->stop();
+        if(m_autosaveCountdownTimer) m_autosaveCountdownTimer->stop();
+        if(m_autosaveNotification) m_autosaveNotification->hide();
+        ei::log(eLogInfo, "Periodic recovery autosave disabled from applied settings");
+        return;
+    }
+    const int minutes = qBound(1, intervalMinutes, 120);
+    m_autosaveTimer->start(minutes * 60 * 1000);
+    ei::log(eLogInfo, QString("Periodic recovery autosave scheduled intervalMinutes:%1 active:%2 remainingMs:%3 timerIntervalMs:%4")
+            .arg(minutes).arg(m_autosaveTimer->isActive()).arg(m_autosaveTimer->remainingTime())
+            .arg(m_autosaveTimer->interval()));
+}
+
+void MainWindow::beginAutosaveCountdown()
+{
+    if(!m_pView || m_pView->hasPendingOperation())
+    {
+        ei::log(eLogInfo, "Recovery autosave countdown deferred while an edit operation is pending");
+        return;
+    }
+    bool dirty = false;
+    for(CMob* mob : m_pView->mobs())
+        dirty = dirty || (mob && mob->isDirty());
+    dirty = dirty || (CLandscape::getInstance()->isMprLoad()
+                      && CLandscape::getInstance()->isDirty());
+    if(!dirty)
+    {
+        ei::log(eLogInfo, "Recovery autosave tick skipped because no document is dirty");
+        return;
+    }
+    if(m_autosaveCountdownTimer && m_autosaveCountdownTimer->isActive())
+        return;
+
+    if(!m_autosaveNotification)
+    {
+        m_autosaveNotification = new QFrame(this);
+        m_autosaveNotification->setObjectName("autosaveNotification");
+        m_autosaveNotification->setFrameShape(QFrame::StyledPanel);
+        m_autosaveNotification->setAttribute(Qt::WA_ShowWithoutActivating);
+        m_autosaveNotification->setStyleSheet(
+            "QFrame#autosaveNotification { background: #292929; border: 1px solid #808080; border-radius: 4px; }"
+            "QLabel { color: #eeeeee; } QPushButton { min-width: 88px; }");
+        QHBoxLayout* layout = new QHBoxLayout(m_autosaveNotification);
+        layout->setContentsMargins(12, 10, 12, 10);
+        m_autosaveCountdownLabel = new QLabel(m_autosaveNotification);
+        m_cancelAutosaveButton = new QPushButton(
+            tr("Cancel Autosave"), m_autosaveNotification);
+        layout->addWidget(m_autosaveCountdownLabel, 1);
+        layout->addWidget(m_cancelAutosaveButton);
+        m_autosaveCountdownTimer = new QTimer(m_autosaveNotification);
+        m_autosaveCountdownTimer->setInterval(1000);
+        connect(m_autosaveCountdownTimer, &QTimer::timeout, this, [this]()
+        {
+            --m_autosaveCountdownSeconds;
+            if(m_autosaveCountdownSeconds <= 0)
+            {
+                m_autosaveCountdownTimer->stop();
+                m_autosaveCountdownLabel->setText(tr("Autosaving..."));
+                m_cancelAutosaveButton->setEnabled(false);
+                m_autosaveNotification->adjustSize();
+                positionAutosaveNotification();
+                m_autosaveNotification->repaint();
+                performAutosave();
+                m_autosaveNotification->hide();
+                m_cancelAutosaveButton->setEnabled(true);
+                return;
+            }
+            m_autosaveCountdownLabel->setText(
+                tr("Recovery autosave in %1 seconds...").arg(m_autosaveCountdownSeconds));
+        });
+        connect(m_cancelAutosaveButton, &QPushButton::clicked, this, [this]()
+        {
+            m_autosaveCountdownTimer->stop();
+            m_autosaveNotification->hide();
+            ei::log(eLogInfo, "Recovery autosave occurrence skipped by user");
+            statusBar()->showMessage(tr("This recovery autosave was skipped."), 3000);
+        });
+    }
+    m_autosaveCountdownSeconds = 15;
+    m_cancelAutosaveButton->setEnabled(true);
+    m_autosaveCountdownLabel->setText(
+        tr("Recovery autosave in %1 seconds...").arg(m_autosaveCountdownSeconds));
+    m_autosaveNotification->adjustSize();
+    positionAutosaveNotification();
+    m_autosaveNotification->show();
+    m_autosaveNotification->raise();
+    m_autosaveCountdownTimer->start();
+    ei::log(eLogInfo, "Recovery autosave countdown started seconds:15");
+}
+
+void MainWindow::performAutosave()
+{
+    ei::log(eLogInfo, QString("Recovery autosave tick active:%1 intervalMs:%2")
+            .arg(m_autosaveTimer && m_autosaveTimer->isActive())
+            .arg(m_autosaveTimer ? m_autosaveTimer->interval() : -1));
+    if(!m_pView || m_pView->hasPendingOperation())
+    {
+        ei::log(eLogInfo, "Recovery autosave deferred while an edit operation is pending");
+        return;
+    }
+    int written = 0;
+    int failed = 0;
+    CBackupManager manager;
+    for(CMob* mob : m_pView->mobs())
+    {
+        if(!mob || !mob->isDirty())
+            continue;
+        QByteArray candidate;
+        CValidationReport report;
+        QString saveClass;
+        if(!mob->buildValidatedCandidate(&candidate, &report, &saveClass))
+        {
+            ++failed;
+            ei::log(eLogWarning, QString("Recovery autosave skipped unsafe MOB path:%1 findings:%2")
+                .arg(mob->filePath().absoluteFilePath(), report.toText().trimmed()));
+            continue;
+        }
+        const SBackupResult result = manager.snapshotAutosave(mob->filePath(), candidate);
+        if(result.success)
+            written += result.skipped ? 0 : 1;
+        else
+        {
+            ++failed;
+            ei::log(eLogWarning, QString("Recovery autosave failed path:%1 error:%2")
+                .arg(mob->filePath().absoluteFilePath(), result.error));
+        }
+    }
+    CLandscape* landscape = CLandscape::getInstance();
+    if(landscape->isMprLoad() && landscape->isDirty())
+    {
+        // A changed MPR may only be emitted through CView's provenance-checked
+        // MprDocument/SEC transaction path. CLandscape's inherited rebuilding
+        // serializer is intentionally not exposed to recovery autosave.
+        ++failed;
+        ei::log(eLogWarning, QString("Recovery autosave skipped changed MPR until the lossless transaction path is available path:%1")
+            .arg(landscape->filePath().absoluteFilePath()));
+    }
+    if(written > 0)
+        statusBar()->showMessage(tr("Recovery autosave created %1 new generation(s).").arg(written), 4000);
+    ei::log(failed > 0 ? eLogWarning : eLogInfo,
+            QString("Recovery autosave pass complete written:%1 failed:%2").arg(written).arg(failed));
+}
+
+void MainWindow::showRecoverableAutosaves()
+{
+    if(m_recoverableAutosaveNoticeCount <= 0
+       || m_recoverableAutosaveNoticeKeys.isEmpty())
+        return;
+    ei::log(eLogInfo, QString("Recoverable editor autosaves available count:%1")
+            .arg(m_recoverableAutosaveNoticeCount));
+    showTransientResultNotification(
+        tr("%1 recoverable editor autosave generation(s) are available.\n"
+           "Their source maps are unchanged; open the backup folder to inspect or copy them.")
+            .arg(m_recoverableAutosaveNoticeCount),
+        false, true, tr("Open Backup Folder"),
+        ETransientNotificationAction::OpenBackupFolder, 7000);
+    QString acknowledgeError;
+    if(!CBackupManager().acknowledgeRecoveries(
+           m_recoverableAutosaveNoticeKeys, &acknowledgeError))
+        ei::log(eLogWarning, "Could not acknowledge recovery notification: "
+                + acknowledgeError);
+    else
+    {
+        m_recoverableAutosaveNoticeCount = 0;
+        m_recoverableAutosaveNoticeKeys.clear();
+    }
 }
 
 void MainWindow::on_actionOpen_MPR_triggered()
@@ -2901,11 +4524,8 @@ void MainWindow::on_actionOpen_MPR_triggered()
     if(fileName.fileName().isEmpty())
         return;
     opt->setValue(fileName.dir().path());
-    m_pView->cancelPendingOperation();
-    m_undoStack->clear();
-    m_openedMapZoneId.clear();
-    m_pView->loadLandscape(fileName);
-    rememberRecentFile(fileName);
+    if(replaceLoadedLandscape(fileName))
+        rememberRecentFile(fileName);
 }
 
 void MainWindow::on_actionOpen_MOB_triggered()
@@ -2918,8 +4538,8 @@ void MainWindow::on_actionOpen_MOB_triggered()
     {
         QFileInfo fileName(path);
         opt->setValue(fileName.dir().path());
-        m_pView->loadMob(fileName);
-        rememberRecentFile(fileName);
+        if(loadMobWithProgress(fileName))
+            rememberRecentFile(fileName);
     }
 }
 
@@ -3071,6 +4691,7 @@ void MainWindow::updateWindowTitle(eTitleTypeData type, QString data)
 
 
     setWindowTitle(title);
+    updateDocumentActionAvailability();
     updateMapTestAction();
     if(type == eTitleTypeData::eTitleTypeDataMpr)
         refreshMapTestContext();
@@ -3119,6 +4740,13 @@ void MainWindow::on_actionOpen_2_triggered()
     m_settings->onShow(eOptSetGeneral);
 }
 
+void MainWindow::resizeEvent(QResizeEvent* e)
+{
+    QMainWindow::resizeEvent(e);
+    positionMapTestResultNotification();
+    positionAutosaveNotification();
+}
+
 void MainWindow::closeEvent(QCloseEvent *e)
 {
     if(m_mapTestLauncher && m_mapTestLauncher->isRunning())
@@ -3143,7 +4771,37 @@ void MainWindow::closeEvent(QCloseEvent *e)
         return;
     }
 
+    // Persist dock visibility before secondary-window cleanup closes docks.
+    // Saving only from the destructor recorded every View panel as hidden.
+    saveUiState();
     ei::closeSecondaryWindows(this);
+    // Remove the editor from the desktop before synchronous scene teardown.
+    // Windows otherwise presents a still-visible window as unresponsive.
+    hide();
+    QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+    // Destroy the QGLWidget while the main window and its native child surface
+    // are still alive. Waiting for MainWindow::~MainWindow() is too late on
+    // Windows: Qt has already released the surface even though CView::isValid()
+    // may still report true, and GPU-resource cleanup then dereferences a null
+    // QOpenGLContext surface.
+    ei::setCrashContext("shutdown/delete-live-view");
+    QElapsedTimer shutdownTimer;
+    shutdownTimer.start();
+    ei::log(eLogInfo, "Shutdown live view deletion started");
+    delete m_pView;
+    m_pView = nullptr;
+    ei::log(eLogInfo, QString("Shutdown live view deletion complete elapsedMs:%1")
+            .arg(shutdownTimer.elapsed()));
+    ei::setCrashContext("shutdown/view-deleted");
+    if(m_backupSessionStarted)
+    {
+        QString backupSessionError;
+        if(!CBackupManager().finishEditorSession(&backupSessionError))
+            ei::log(eLogWarning, "Could not mark editor backup session clean: "
+                    + backupSessionError);
+        else
+            ei::log(eLogInfo, "Editor backup session marked clean");
+    }
     e->accept();
 }
 
@@ -3174,12 +4832,15 @@ void MainWindow::on_actionReset_selected_IDs_triggered()
 
 void MainWindow::on_action_About_triggered()
 {
-    QMessageBox::information(this, "About",
-        QString("EI Mapper: Endurance Edition %1\n\n"
-                "A private, independently versioned derivative of EI Mapper by konstvest.\n"
-                "Upstream: https://github.com/konstvest/ei_maper\n"
-                "License: GNU GPL-3.0")
-            .arg(QCoreApplication::applicationVersion()));
+    QMessageBox about(this);
+    about.setWindowTitle(tr("About"));
+    about.setIconPixmap(qApp->windowIcon().pixmap(96, 96));
+    about.setText(QString("EI Mapper: Endurance Edition %1\n\n"
+                          "A private, independently versioned derivative of EI Mapper by konstvest.\n"
+                          "Upstream: https://github.com/konstvest/ei_maper\n"
+                          "License: GNU GPL-3.0")
+                      .arg(QCoreApplication::applicationVersion()));
+    about.exec();
 }
 
 

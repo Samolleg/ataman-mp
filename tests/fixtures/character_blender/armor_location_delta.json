@@ -1,0 +1,10 @@
+{
+  "schema": 1,
+  "operations": [
+    {
+      "type": "location_delta",
+      "object": "armor",
+      "delta": [0.0, 0.0, 0.01]
+    }
+  ]
+}

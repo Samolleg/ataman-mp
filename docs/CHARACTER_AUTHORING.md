@@ -1,0 +1,303 @@
+# Safe character authoring workflow
+
+Use extracted copies only. Never point Blender, ei_figer, a converter, or an
+automation output at a Base/JMV install, live `Res`, or live map directory.
+
+## Capability boundary
+
+The authoring workflow has two isolated Blender lanes. Do not share preferences,
+installed add-ons, startup files, or candidate archives between them.
+
+| Lane | Blender/add-on | Primary assets | Export status |
+|---|---|---|---|
+| Item | Blender 3.5.1 + konstvest/ei_figer 5.2 plus the audited repository patch | Standalone inventory weapons, shields, armor and item/world figures | Primary item writer; require fresh re-open and semantic diff |
+| Humanoid/JMV | Blender 4.5.12 LTS (supported family 4.2-4.9) + alex-khod/ei_figer 6.10 at `a7eb929` | Humans, wearable assemblies, JMV hierarchy/UV rules; animations are secondary | Humanoid writer; fixed-topology item edits validated only for the audited weapon/shield/armor fixtures |
+
+For **every import from copied JMV game resources**, select the add-on's literal
+`JABAIS_VOUX` option **before import**. This is the import setting, not merely an
+export preference or a mode reserved for newly authored JMV assets. It changes part classification, UV
+unpacking, UV bases, and JMV weapon/armor families. It is fixture provenance,
+not a mode inferred from a mesh name. Base assets use `VANILLA` unless direct
+evidence says otherwise.
+
+| Asset | Inspect/import | Edit | Export status |
+|---|---|---|---|
+| FIG8 geometry/UV/morph extremes | Endurance report + lane-specific ei_figer | Blender, fixed topology | Both lanes; use expanded-corner semantic comparison because legal UV/component reindexing is not byte-stable |
+| `.mod`/`.lnk` assembly tree | Endurance report + lane-specific ei_figer | Blender hierarchy/names | Validate one root/no missing parent/cycles and canonical attachments |
+| ANM channels/morph frames | Endurance report + ei_figer | Blender actions/shapes | Secondary; not a geometry/item acceptance gate yet |
+| ADB action metadata/masks | Endurance provider/parser | Do not author yet | No verified writer in this workflow |
+| MMP/PNT3 atlas | Endurance decoder/viewer | External lossless RGBA editor | No verified general encoder in this workflow |
+| RES container | Read-only report / ei_figer | Staged member replacement | ei_figer writes; clean repack needs verified eipacker round trip |
+
+An ei_figer export is a candidate, not proof of compatibility. Stock 5.2 is not
+a safe item writer: it discards one field of every FIG vertex-component triple,
+forces the normal index to equal the vertex index, decodes component-major
+normal blocks as sequential vectors, and overruns Blender loops when a shipped
+FIG has an incomplete one/two-index tail. Apply
+`patches/konstvest-ei_figer-5.2-character-pipeline.patch`; it preserves all
+three indices, deswizzles normal blocks, retains imported split-normal tables,
+and explicitly omits only indices that cannot form a triangle. Use the
+independent report/modern reader for final comparison. Both RES append/replace paths leave
+unreachable old data. For zero-morph ANM members, the v5.2 writer omits an
+explicit stored zero morph-vertex-count dword; the copied
+`cidle01_/lh2.shield00` control would shrink from 1,864 to 1,860 bytes. Its
+Blender import sets `frame_end` but not `frame_start`, while export begins at
+`frame_start`, so Blender's usual start at 1 can also drop sample 0. Set the
+range explicitly, then require a no-op round trip. Do not distribute an export
+until the exact asset class passes the comparisons below.
+
+## Portable Blender quick path
+
+The old `work/blender-uv-investigation` Blender 3.6.23 scenes (including the
+humanoid examples with the normalized/full-image UV layout) predate the exact
+PNT3 decoder, the `JABAIS_VOUX` import requirement, and current assembly rules.
+They are historical evidence, not authoring fixtures, and must not be used as
+UV-placement references. Prepare the two current lanes from downloaded official ZIPs:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\prepare_character_blender.ps1 `
+  -Lane item -Workspace ..\work\character-blender-pipeline `
+  -AddonSource ..\research\ei_figer `
+  -DownloadCache ..\work\character-blender-pipeline\downloads
+
+powershell -ExecutionPolicy Bypass -File scripts\prepare_character_blender.ps1 `
+  -Lane humanoid -Workspace ..\work\character-blender-pipeline `
+  -AddonSource ..\work\alex-khod-ei_figer-pipeline `
+  -DownloadCache ..\work\character-blender-pipeline\downloads
+```
+
+Archive names, official URLs, and SHA-256 values are pinned in
+`scripts/character_blender_lanes.json`. The setup writes a per-lane tool
+provenance report and never overwrites an installed add-on unless
+`-RefreshAddon` is explicit. Launch a lane reproducibly:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\launch_character_blender.ps1 `
+  -Lane item -Workspace ..\work\character-blender-pipeline `
+  -EiFigerSource ..\work\character-blender-pipeline\item-lane\portable-config\scripts\addons\ei_figer
+```
+
+Use `-PrepareAddon` only on a fresh/archived `portable-config`; it refuses to
+overwrite an existing addon. Use `-BackgroundScript <path>` for deterministic
+headless probes. The launcher refuses a workspace containing `game.exe` and
+isolates Blender config/scripts/datafiles under that lane.
+
+The modern add-on at upstream `a7eb929` needs
+`patches/alex-khod-ei_figer-6.10-character-pipeline.patch` for deterministic
+headless import, correct FIG normal decoding, incomplete-triangle tolerance,
+repeated-vertex degenerate-triangle filtering, and semantically correct
+standalone-item bounds. The patch makes
+UI context optional in background mode, restores Euclidean bounding radius,
+and applies the part-name bounds convention independently of model-level
+header/UV classification and maps archive-prefixed standalone BON members back
+to local Blender part names. It finalizes mesh topology before assigning Blender
+split normals, stores exact authored per-corner normals in the
+`ei_fig_authored_normal` corner attribute, and writes FIG normal indices from
+corner normals rather than averaged vertex normals. Its validated research
+commit is `2e068cf`. It does not claim general modern item-export support or
+topology-changing item edits.
+
+Current controls prove:
+
+- Base `figures.res` was extracted with 7-Zip 25.01 from NSIS installer
+  `Evil_Islands_rus.exe` SHA-256
+  `143B2543A6A57517B50EB38835338D049105E69EBEC878972C0FC15DC31EB2CB`;
+  the copied archive SHA-256 is
+  `4A5CD30B3E2B0A170A41A7192C2521E45E3FF727E2395F0BDE45C1BC6C8F1E97`.
+  Patched Blender 4.5.12 imports its Base `unhuma` assembly with explicit
+  `BASE -> VANILLA` provenance and 2,752 meshes;
+- patched Blender 3.5.1 + 5.2 imports/exports Base `initwesw1` from that copied
+  archive. Its no-op preserves every renderable expanded-corner position,
+  normal, UV, vertex reference, and bound exactly. A controlled vertex edit
+  changes X by `0.01000000536441803` after float32 storage, producing the
+  expected 32 expanded-corner scalar differences across eight extremes, no
+  normal/UV/topology differences, and a fresh-reopen position hash equal to the
+  edited scene (`5AF1799F4987E8F0F739DBAF217718A01B0C81C4239332D44479B29B08855FFD`);
+- Blender 3.5.1 + 5.2 imports and exports `initwedg8`; its no-op changes normals
+  by at most `1.82e-5`, while geometry, UV mapping, hierarchy and bounds agree;
+- patched Blender 4.5.12 + 6.10 imports the complete JMV `unhuma` tree in
+  `JABAIS_VOUX` mode (6,232 base/morph mesh objects in the control). Finalizing
+  each mesh before the custom-normal setter removes the prior Blender-native
+  crash; the accepted stress report is
+  `unhuma-modern-full-import-split-normal-fix.json`;
+- the compact `unhuma`/armor24 inspection scene imports copied JMV data with a
+  part mask, preserves authored atlas UVs and split normals across a fresh
+  re-open, and records `JMV` -> `JABAIS_VOUX` plus the source RES hash in the
+  scene. It has no composed material/atlas yet and is therefore a geometry/UV
+  inspection fixture, not the corrected textured demo described below;
+- patched 6.10 no-op exports of `initwedg8` and `initarhl21` preserve expanded
+  per-corner position, normal and UV semantics and bounding volumes, while
+  legally reindexing UV/component tables and appending replacement RES data.
+- patched 6.10 changed controls also pass fresh-process re-open: `initwedg8`
+  changes the selected vertex by `+0.01` X across its eight FIG extremes and no
+  corner normals/UVs; `initarhl21` changes exactly eight BON Z values by `+0.01`
+  and leaves the FIG semantically identical; `initwesd14` changes the selected
+  U by `0.0009765625`, preserves every remaining authored corner normal exactly,
+  and changes no remaining position;
+- JMV shield `initwesd14weapon.fig` contains 2,944 indices: 2,943 make 981
+  complete triangle records, 39 of which repeat a vertex and have zero area;
+  tail component index `877` is also undrawable. Both patched importers omit
+  these renderer-undrawable records before Blender mesh construction. The
+  patched 5.2 no-op drops only that tail; all drawable corner positions, normal values,
+  vertex references, and bounds remain exact. Sixty-four UV components round by
+  at most `2.98e-8`. Against that repaired no-op, the controlled edit changes
+  exactly one corner U by `0.0009765625`, changes no drawable position, normal,
+  topology, or bound, and survives a fresh Blender re-open with matching hashes.
+- JMV armor `initarhl21` attachment control moves local part `armor` by `0.01`
+  on Z. Export changes exactly the Z coordinate in all eight 96-byte BON morph
+  positions; FIG mesh hashes remain unchanged, and a fresh patched 5.2 import
+  restores `0.009999999776482582`. Stock 5.2 silently left the object at zero
+  because it tried to apply archive name `initarhl21armor` to local object
+  `armor`; both repository patches correct that standalone-name mapping.
+
+The patched 5.2 importer stores the original normal table and per-corner normal
+indices in `ei_fig_normal_table_json` and `ei_fig_normal_index`. Keep those for
+UV/material/attachment edits. A same-topology geometry edit therefore preserves
+the authored source normals deliberately; delete or replace that provenance only
+as part of an explicit normal-authoring operation, then validate lighting in a
+disposable game profile. Automatic normal regeneration is not yet an acceptance
+gate.
+
+The patched modern importer applies the same preservation policy through the
+`ei_fig_authored_normal` corner attribute. Same-corner-topology edits retain it.
+If topology editing introduces corners without authored normals, export fails
+closed; deliberately remove the attribute only to opt into Blender-generated
+corner normals, then perform a semantic diff and disposable-profile lighting
+test. Modern item export is therefore a verified secondary path for these three
+bounded controls, while Blender 3.5.1 + 5.2 remains the primary inventory lane.
+
+Use `character_model_blender_fixture.py` for isolated import/export controls,
+`character_blend_scene_audit.py` for a read-only fresh-reopen scene audit, and
+`character_fig_semantic_diff.py` for expanded-corner FIG comparison.
+
+### Correct character atlases in Blender
+
+Do not assign a raw decoded MMP PNG directly and do not normalize/move the FIG
+UVs to compensate. `scripts/character_mmp_atlas.py` reproduces the fingerprinted
+PNT3 four-pixel decoder and the editor's premultiplied-BGRA layer compositor.
+For Blender PNG assignment, use `--orientation mirror-y`: a four-way controlled
+render showed that raw, `mirror-x`, and `rotate-180` place the face/body regions
+incorrectly, while `mirror-y` aligns the face, torso, limbs, cuffs, and linked
+armor geometry. This is an image-coordinate adapter; the report retains hashes
+for the raw decoded/composed pixels and the oriented straight-alpha PNG.
+
+Choose the overlay family from the equipment slot, not merely the shared numeric
+TTI suffix: `SH` shirt, `GL` gloves, `PT` pants, `BT` boots, `PL` plate, and `LG`
+leggings. The accepted leggings24 control uses `unhumalg_24.lo.0.x4.mmp`; the
+rejected `unhumapl_24` control correctly textures plate regions and therefore
+looks broken when paired with leggings-only geometry.
+
+The current replacement demo is staged at
+`work/character-blender-pipeline/humanoid-lane/examples/unhuma-jmv-leggings24-editor-pipeline.blend`.
+It was imported from the copied `unhuma.res` using `JABAIS_VOUX`, includes only
+the verified `ll1.armor24`/`rl1.armor24` replacements and their linked shell
+descendants, packs the composed and skin-only atlases, and keeps `hd`/`hr.NN` on
+the unlayered skin material. Its fresh-reopen audit has 160 meshes, two materials,
+zero position/topology/normal/UV hash differences, and scene SHA-256
+`F8E78D5EFA56008AB77650364A25FE9C33E73418835158E32D568DE8A32C6381`.
+The deterministic preview is
+`work/character-blender-pipeline/humanoid-lane/examples/unhuma-jmv-leggings24-editor-pipeline-preview.png`
+(SHA-256 `3D62901FB1A85EBFC913EE11FFAF2A8C69D483DA4BDF0017D4C521164B842D79`).
+
+Use `character_blend_assign_atlas.py` to create a new packed, textured scene and
+`character_blend_render_preview.py` for visual QA. Neither script overwrites the
+source `.blend`; the atlas tool rejects outputs in an input-layer directory.
+
+## Manual edit procedure
+
+1. Resolve the exact visible instance before opening Blender. Record the
+   presentation (`InitWeapons` standalone figure versus equipped assembly),
+   character family, hand, archive, outer assembly member, and inner FIG member.
+   Never treat a matching item name or texture as proof that two presentations,
+   families, or hands share geometry.
+2. Copy the exact source archive/member into an immutable `inputs/` tree. Record
+   SHA-256, source profile, archive/member name, extraction tool/version, and
+   database/MOB references.
+3. Run `scripts/character_asset_report.py INPUT --output STAGE/baseline.json`.
+   Preserve the baseline report beside the staged work.
+4. Import the copied model and, if required, its animation in portable Blender.
+   Preserve exact object/component names, one authored parent tree, texture
+   selector, UV coordinates, triangle winding, and vertex ordering.
+5. Geometry edits may move vertices. Apply an intended fixed-topology edit to
+   every one of the eight FIG extremes when it must survive all complexion
+   interpolation. This propagates only within that FIG: it does not cross from
+   standalone to equipped geometry, between `unhuma`/`unhufe`, or between
+   `rh*`/`lh*`. Do not add/delete/reorder vertices across morph extremes or ANM
+   morph channels. Do not normalize atlas UVs.
+6. For equipment, author a numbered member under the canonical `*00` attachment
+   node. Do not bake the attachment rotation into both node and geometry.
+7. For animation, keep 15 Hz logical timing, a closing loop sample, EI
+   child-before-parent rotation composition, root-relative translation, and
+   morph frame/vertex counts synchronized with the FIG part.
+8. Export into a new `candidate/` archive. Never append to the immutable input.
+9. Re-open the candidate in a fresh Blender process and run the report again.
+   Compare tree, names, header counts, UV bounds/values, indices, selectors,
+   channel counts, frame endpoints, and every untouched member hash.
+10. Test each intended presentation/family/hand independently. For dual wield,
+    equip distinguishable controls or swap hands so a right-only result cannot
+    be mistaken for a complexion/export failure. Inspect composed texture and
+    per-part UVs in Endurance, then use a disposable profile/game package for
+    `drawall`, idle frames, distance/orbit, save/load, unload/reload, and graceful
+    exit.
+11. Package only staged deltas, reports, attribution, and rollback instructions.
+
+## Automated procedure and report contract
+
+The report script accepts files/directories, recursively hashes them, inventories
+RES members, and structurally parses known envelopes. It never extracts or
+rewrites and requires explicit JSON output outside all inputs:
+
+```powershell
+python scripts\character_asset_report.py EXTRACTED_COPY `
+  --output STAGE\character-assets.json
+```
+
+For a copied standalone FIG or an exact FIG member inside a copied RES, run the
+safe repair tool in diagnose-only mode first:
+
+```powershell
+python scripts\character_fig_repair.py COPIED.res `
+  --member initwesd14weapon.fig `
+  --report STAGE\reports\shield-diagnose.json
+```
+
+Add `--apply-safe-repairs --output STAGE\candidate\shield.repaired.fig` only
+after reviewing the plan. The tool refuses in-place/pre-existing outputs and
+repairs exactly two proven renderer-undrawable structures: a one/two-index tail
+that cannot form a triangle, and triangles whose three component records repeat
+a position index. It preserves every byte before the index array and after the
+original index array, changing only the header index count and retained index
+values. Invalid component/vertex references fail closed. The audited
+`initwesd14weapon.fig` control changes from 2,944 to 2,826 indices, then reports
+zero dangling indices, zero repeated-vertex triangles, and no structural error;
+the repaired FIG SHA-256 is
+`5FC8F292E62CB35C5C0688405A7789D411733622D1D1535AADA584D9DF9727BF`.
+
+For a deterministic build, create `inputs/`, `candidate/`, `reports/`, and
+`rollback/` siblings. The build manifest must include tool hashes, command line,
+provider/profile, ordered inputs, output SHA-256, semantic comparison result,
+known diagnostics, and manual controls still outstanding. Re-run from immutable
+inputs and require byte-identical candidate/report output when timestamps are not
+part of the target format.
+
+## Validation and rollback
+
+Minimum automated gates:
+
+- parser reaches the exact expected end or explains known trailing bytes;
+- one assembly root, all parents present, no cycles;
+- unchanged member hashes identical;
+- FIG topology/counts/selectors and UV domain intentionally changed or equal;
+- ANM counts valid, morph vertices match the target FIG, loop endpoints reviewed;
+- candidate re-opens in a fresh ei_figer/Blender session;
+- provider incompatibilities remain visible diagnostics, never aliases.
+
+Known zero-morph ANM byte differences or a missing first sample fail the no-op
+gate. Patch and fixture-test the writer before proceeding; do not waive them as
+container noise.
+
+Installation is a separate, user-authorized step. Before it, close the game,
+hash the exact destination, and copy it to `rollback/` outside the replacement
+tree. Install only the intended staged files. Rollback restores those saved files
+and verifies their original SHA-256. Never call an extracted research copy an
+original backup.

@@ -361,6 +361,16 @@ bool CMobFamilyValidationReport::hasActionableFindings() const
 
 QString CMobFamilyValidationReport::summary() const
 {
+    const int outsideActiveFamily = std::count_if(
+        members.cbegin(), members.cend(), [](const SMobFamilyMember& member)
+        { return !member.activeRuntimeFamily; });
+    if(outsideActiveFamily > 0)
+    {
+        return QString("Workspace context %1: %2 active-family MOB(s), %3 other loaded MOB(s), %4 critical, %5 warning, %6 incomplete")
+            .arg(familyLabel.isEmpty() ? QString("standalone") : familyLabel)
+            .arg(members.size() - outsideActiveFamily).arg(outsideActiveFamily)
+            .arg(criticalCount()).arg(warningCount()).arg(incompleteCount());
+    }
     return QString("Family %1: %2 MOB(s), %3 critical, %4 warning, %5 incomplete")
         .arg(familyLabel.isEmpty() ? QString("standalone") : familyLabel)
         .arg(members.size()).arg(criticalCount()).arg(warningCount()).arg(incompleteCount());
@@ -667,6 +677,63 @@ CMobFamilyValidationReport CMobFamilyValidator::validate(
         }
     }
 
+    // A request can temporarily contain multiple map sets if a second load is
+    // admitted while the first is still finalising. Validate everything that
+    // is genuinely loaded, but distinguish the active map.txt/AddMob family
+    // from unrelated workspace documents.
+    if(!request.explicitComposition && !request.mappedPrimaryMobPath.isEmpty())
+    {
+        QMap<QString, int> memberByLogicalName;
+        for(int index = 0; index < report.members.size(); ++index)
+        {
+            report.members[index].activeRuntimeFamily = false;
+            if(!report.members.at(index).logicalName.isEmpty())
+                memberByLogicalName.insert(report.members.at(index).logicalName, index);
+        }
+
+        QQueue<int> familyPending;
+        const QString primaryLogicalName = logicalMobName(request.mappedPrimaryMobPath);
+        if(memberByLogicalName.contains(primaryLogicalName))
+            familyPending.enqueue(memberByLogicalName.value(primaryLogicalName));
+        for(int index = 0; index < report.members.size(); ++index)
+            if(report.members.at(index).sourceRole == "profile-wide")
+                familyPending.enqueue(index);
+
+        while(!familyPending.isEmpty())
+        {
+            const int index = familyPending.dequeue();
+            if(index < 0 || index >= report.members.size()
+               || report.members.at(index).activeRuntimeFamily)
+                continue;
+            report.members[index].activeRuntimeFamily = true;
+            for(const ScriptMobReference& reference : addMobReferences(report.members.at(index).script))
+            {
+                if(!reference.resolved)
+                    continue;
+                const QString targetLogicalName = logicalMobName(reference.fileName);
+                if(memberByLogicalName.contains(targetLogicalName))
+                    familyPending.enqueue(memberByLogicalName.value(targetLogicalName));
+            }
+        }
+
+        QStringList unrelatedPaths;
+        for(const SMobFamilyMember& member : report.members)
+            if(!member.activeRuntimeFamily && !member.missing)
+                unrelatedPaths.append(member.path);
+        if(!unrelatedPaths.isEmpty())
+        {
+            SMobFamilyFinding finding;
+            finding.severity = EMobFamilyFindingSeverity::Warning;
+            finding.code = "workspace.unrelated_loaded_mobs";
+            finding.category = "Mixed loaded map sets";
+            finding.message = QString(
+                "%1 loaded MOB(s) are outside active runtime family %2; overlaps with them are workspace-context findings")
+                .arg(unrelatedPaths.size()).arg(request.familyLabel);
+            finding.locations = unrelatedPaths;
+            report.findings.append(finding);
+        }
+    }
+
     for(const SMobFamilyMember& member : report.members)
     {
         if(member.missing || !member.error.isEmpty())
@@ -702,6 +769,7 @@ CMobFamilyValidationReport CMobFamilyValidator::validate(
             owner.objectType = object.objectType;
             owner.hasObjectType = object.hasObjectType;
             owner.useInScript = object.useInScript;
+            owner.activeRuntimeFamily = member.activeRuntimeFamily;
             owner.hasParentId = object.hasParentId;
             owner.parentId = object.parentId;
             report.nidOwners[object.nid].append(owner);
@@ -740,11 +808,16 @@ CMobFamilyValidationReport CMobFamilyValidator::validate(
                     if(!b.effective || !rangesOverlap(a, b)) continue;
                     SMobFamilyFinding finding;
                     finding.severity = EMobFamilyFindingSeverity::Info;
-                    finding.code = "range.legacy_overlap";
-                    finding.category = "Legacy range overlap";
-                    finding.message = QString("%1 %2-%3 overlaps %4 %5-%6")
+                    const bool crossFamily = left.activeRuntimeFamily != right.activeRuntimeFamily;
+                    finding.code = crossFamily ? "range.workspace_overlap" : "range.legacy_overlap";
+                    finding.category = crossFamily ? "Cross-family workspace range overlap"
+                                                   : "Legacy range overlap";
+                    finding.message = QString("%1 %2-%3 overlaps %4 %5-%6%7")
                         .arg(left.fileName).arg(a.minimum).arg(a.maximum)
-                        .arg(right.fileName).arg(b.minimum).arg(b.maximum);
+                        .arg(right.fileName).arg(b.minimum).arg(b.maximum)
+                        .arg(crossFamily
+                            ? QString(" (separately loaded map sets; not one %1 family)").arg(request.familyLabel)
+                            : QString());
                     finding.locations << left.path + ":" + a.sectionPath
                                       << right.path + ":" + b.sectionPath;
                     report.findings.append(finding);
@@ -786,12 +859,25 @@ CMobFamilyValidationReport CMobFamilyValidator::validate(
         if(scriptReferences.contains(it.key()) || typedReferences.contains(it.key()))
             safeStatic = false;
         SMobFamilyFinding finding;
+        bool hasActiveFamilyOwner = false;
+        bool hasOutsideFamilyOwner = false;
+        for(const SMobNidOwner& owner : it.value())
+        {
+            hasActiveFamilyOwner = hasActiveFamilyOwner || owner.activeRuntimeFamily;
+            hasOutsideFamilyOwner = hasOutsideFamilyOwner || !owner.activeRuntimeFamily;
+        }
+        const bool crossFamily = hasActiveFamilyOwner && hasOutsideFamilyOwner;
         finding.severity = safeStatic ? EMobFamilyFindingSeverity::Info
                                       : EMobFamilyFindingSeverity::Critical;
-        finding.code = safeStatic ? "nid.static_alias" : "nid.collision";
-        finding.category = safeStatic ? "Known static alias" : "NID collision";
-        finding.message = QString("NID %1 is owned by %2 objects across the runtime family")
-            .arg(it.key()).arg(it.value().size());
+        finding.code = crossFamily ? "nid.workspace_collision"
+                                   : (safeStatic ? "nid.static_alias" : "nid.collision");
+        finding.category = crossFamily ? "Cross-family workspace NID collision"
+                                       : (safeStatic ? "Known static alias" : "NID collision");
+        finding.message = crossFamily
+            ? QString("NID %1 is owned by %2 objects across separately loaded map sets; they are not one %3 runtime family")
+                .arg(it.key()).arg(it.value().size()).arg(request.familyLabel)
+            : QString("NID %1 is owned by %2 objects across the runtime family")
+                .arg(it.key()).arg(it.value().size());
         finding.hasNid = true;
         finding.nid = it.key();
         for(const SMobNidOwner& owner : it.value())

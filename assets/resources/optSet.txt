@@ -6,12 +6,16 @@ recentFiles
 version
 mouseSenseX
 mouseSenseY
+cameraSpeedMultiplier
 dipEditSymmetric
 rangeIncrement
 logLevel
 landCheckTime
 undoHistoryLimit
 mapTestWarningVersion
+openLastSessionOnStartup
+autosaveEnabled
+autosaveIntervalMinutes
 Option set name:Resource
 resourceProfile
 resourceRoots
@@ -24,3 +28,17 @@ freeCamera
 drawWater
 drawHelp
 frustumCulling
+animateUnits
+renderPerformanceCounters
+renderVSync
+renderFpsCap
+environmentLighting
+renderLightingMode
+drawSkybox
+renderFog
+renderSceneLights
+renderShadowQuality
+renderShadowDistance
+renderTextureMipmapping
+overrideWorldTime
+renderTimeOfDay

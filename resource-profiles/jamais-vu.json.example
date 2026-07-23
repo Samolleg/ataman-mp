@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "id": "jamais-vu-derived-example",
   "displayName": "My mod",
   "fixedModRoots": ["Starter/MODS/MyMod"],
@@ -9,5 +9,12 @@
   "requiredDirectories": ["res", "Maps"],
   "signatureFiles": ["res/databaseMyMod.res"],
   "resourceDirectories": ["{modRoot}/res", "{gameRoot}/Res"],
-  "mapDirectories": ["{modRoot}/Maps", "{gameRoot}/Maps"]
+  "mapDirectories": ["{modRoot}/Maps", "{gameRoot}/Maps"],
+  "providers": {
+    "database": "jmv.v1",
+    "characterAppearance": "jmv.v1",
+    "equipmentLayout": "jmv.v1",
+    "unitAnimation": "jmv.v1",
+    "semanticValidation": "jmv.v1"
+  }
 }

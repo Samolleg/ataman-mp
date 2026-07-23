@@ -9,12 +9,19 @@
 #include <QSignalBlocker>
 #include <QFocusEvent>
 #include <QKeyEvent>
+#include <QMouseEvent>
 #include <QMimeData>
 #include <QApplication>
 #include <QToolTip>
 #include <QContextMenuEvent>
 #include <QMenu>
 #include <QSet>
+#include <QScrollBar>
+#include <QItemSelectionModel>
+#include <QtMath>
+#include <cmath>
+#include <functional>
+#include <limits>
 
 #include "tablemanager.h"
 #include "resourcemanager.h"
@@ -22,10 +29,80 @@
 #include "multiline_edit_form.h"
 #include "unitstat_form.h"
 #include "bodypartedit_form.h"
+#include "profile_database.h"
 
 namespace {
 const char* kPropertyMimeType = "application/x-ei-mapper-property-type";
 QList<QSharedPointer<IPropertyBase>> g_propertyClipboard;
+
+bool numericValue(const IPropertyBase* property, double* value)
+{
+    if(!property || !property->isInit() || !value || dynamic_cast<const propBool*>(property))
+        return false;
+    if(const propFloat* number = dynamic_cast<const propFloat*>(property))
+        *value = number->value();
+    else if(const propUint* number = dynamic_cast<const propUint*>(property))
+        *value = number->value();
+    else if(const propInt* number = dynamic_cast<const propInt*>(property))
+        *value = number->value();
+    else if(const propChar* number = dynamic_cast<const propChar*>(property))
+        *value = number->value();
+    else
+        return false;
+    return std::isfinite(*value);
+}
+
+QSharedPointer<IPropertyBase> convertedNumericValue(
+        const IPropertyBase* source, const IPropertyBase* destination, QString* error = nullptr)
+{
+    double value = 0.0;
+    if(!numericValue(source, &value) || !destination || dynamic_cast<const propBool*>(destination))
+        return QSharedPointer<IPropertyBase>();
+    if(dynamic_cast<const propFloat*>(destination))
+    {
+        if(value < -std::numeric_limits<float>::max() || value > std::numeric_limits<float>::max())
+        {
+            if(error) *error = QObject::tr("The numeric value is outside this field's range.");
+            return QSharedPointer<IPropertyBase>();
+        }
+        return QSharedPointer<IPropertyBase>(new propFloat(destination->type(), float(value)));
+    }
+    if(value < double(std::numeric_limits<qint64>::min())
+       || value > double(std::numeric_limits<qint64>::max()))
+    {
+        if(error) *error = QObject::tr("The rounded value is outside this field's range.");
+        return QSharedPointer<IPropertyBase>();
+    }
+    const qint64 rounded = qRound64(value);
+    if(dynamic_cast<const propUint*>(destination))
+    {
+        if(rounded < 0 || quint64(rounded) > std::numeric_limits<uint>::max())
+        {
+            if(error) *error = QObject::tr("The rounded value is outside this unsigned field's range.");
+            return QSharedPointer<IPropertyBase>();
+        }
+        return QSharedPointer<IPropertyBase>(new propUint(destination->type(), uint(rounded)));
+    }
+    if(dynamic_cast<const propInt*>(destination))
+    {
+        if(rounded < std::numeric_limits<int>::min() || rounded > std::numeric_limits<int>::max())
+        {
+            if(error) *error = QObject::tr("The rounded value is outside this integer field's range.");
+            return QSharedPointer<IPropertyBase>();
+        }
+        return QSharedPointer<IPropertyBase>(new propInt(destination->type(), int(rounded)));
+    }
+    if(dynamic_cast<const propChar*>(destination))
+    {
+        if(rounded < std::numeric_limits<char>::min() || rounded > std::numeric_limits<char>::max())
+        {
+            if(error) *error = QObject::tr("The rounded value is outside this byte field's range.");
+            return QSharedPointer<IPropertyBase>();
+        }
+        return QSharedPointer<IPropertyBase>(new propChar(destination->type(), char(rounded)));
+    }
+    return QSharedPointer<IPropertyBase>();
+}
 
 QSharedPointer<IPropertyBase> clonePropertyValue(const QSharedPointer<IPropertyBase>& property)
 {
@@ -61,6 +138,259 @@ void copyProperty(const QSharedPointer<IPropertyBase>& property, const QString& 
     mime->setData(kPropertyMimeType, QByteArray::number(int(property->type())));
     QGuiApplication::clipboard()->setMimeData(mime);
 }
+
+class CVectorComponentPlate final : public QToolButton
+{
+public:
+    using ApplyValue = std::function<void(const QSharedPointer<IPropertyBase>&)>;
+
+    CVectorComponentPlate(const QString& label,
+                          const QSharedPointer<IPropertyBase>& property,
+                          const ApplyValue& applyValue,
+                          QWidget* parent)
+        : QToolButton(parent), m_property(clonePropertyValue(property)),
+          m_applyValue(applyValue)
+    {
+        setText(label);
+        setAutoRaise(true);
+        setCheckable(true);
+        // Exclusivity is managed across the complete property table, not just
+        // the three buttons belonging to this one Vector3 editor.
+        setAutoExclusive(false);
+        setFocusPolicy(Qt::StrongFocus);
+        // Qt may propagate a ContextMenu event from a child through C3DItem,
+        // whose table-level filter opens the aggregate property menu. Open the
+        // component menu explicitly from the consumed right-button release.
+        setContextMenuPolicy(Qt::PreventContextMenu);
+        setMinimumSize(32, 22);
+        setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Expanding);
+        setProperty("enduranceComponentType", int(property->type()));
+        setStyleSheet("QToolButton:checked { background-color: #315f46; "
+                      "border: 1px solid #55b878; }");
+        setToolTip(QObject::tr(
+            "Select this component only. Ctrl+C/Ctrl+V and the context menu operate on this value."));
+        QObject::connect(this, &QToolButton::clicked, this,
+                         [this]() { selectComponent(); });
+    }
+
+    void clearComponentSelection()
+    {
+        setChecked(false);
+    }
+
+protected:
+    void mousePressEvent(QMouseEvent* event) override
+    {
+        if(event->button() == Qt::RightButton)
+        {
+            prepareContextSelection();
+            m_rightPressArmed = true;
+            event->accept();
+            return;
+        }
+        QToolButton::mousePressEvent(event);
+    }
+
+    void mouseReleaseEvent(QMouseEvent* event) override
+    {
+        if(event->button() == Qt::RightButton)
+        {
+            const bool openMenu = m_rightPressArmed && rect().contains(event->pos());
+            m_rightPressArmed = false;
+            event->accept();
+            if(openMenu)
+                showComponentMenu(event->globalPos());
+            else
+                restoreContextSelection();
+            return;
+        }
+        QToolButton::mouseReleaseEvent(event);
+    }
+
+    void keyPressEvent(QKeyEvent* event) override
+    {
+        if(event->matches(QKeySequence::Copy) && !m_property.isNull())
+        {
+            copyProperty(m_property, m_property->toString());
+            event->accept();
+            return;
+        }
+        if(event->matches(QKeySequence::Paste))
+        {
+            pasteValue();
+            event->accept();
+            return;
+        }
+        if(event->key() == Qt::Key_Menu
+           || (event->key() == Qt::Key_F10
+               && event->modifiers().testFlag(Qt::ShiftModifier)))
+        {
+            prepareContextSelection();
+            showComponentMenu(mapToGlobal(QPoint(0, height())));
+            event->accept();
+            return;
+        }
+        QToolButton::keyPressEvent(event);
+    }
+
+    void contextMenuEvent(QContextMenuEvent* event) override
+    {
+        // PreventContextMenu normally suppresses this. Accept defensively so
+        // an OS-generated event can never bubble into the aggregate C3DItem.
+        event->accept();
+    }
+
+private:
+    void showComponentMenu(const QPoint& globalPos)
+    {
+        QMenu menu(this);
+        QAction* copy = menu.addAction(QObject::tr("Copy value"));
+        QAction* paste = menu.addAction(QObject::tr("Paste value"));
+        copy->setShortcut(QKeySequence::Copy);
+        paste->setShortcut(QKeySequence::Paste);
+        paste->setEnabled(canPaste(nullptr));
+        QObject::connect(copy, &QAction::triggered, this, [this]()
+        {
+            if(!m_property.isNull())
+                copyProperty(m_property, m_property->toString());
+        });
+        QObject::connect(paste, &QAction::triggered, this,
+                         [this]() { pasteValue(); });
+        menu.exec(globalPos);
+        restoreContextSelection();
+    }
+    QTableWidget* parentTable() const
+    {
+        QWidget* ancestor = parentWidget();
+        while(ancestor && !qobject_cast<QTableWidget*>(ancestor))
+            ancestor = ancestor->parentWidget();
+        return qobject_cast<QTableWidget*>(ancestor);
+    }
+
+    QList<CVectorComponentPlate*> tablePlates() const
+    {
+        QTableWidget* table = parentTable();
+        return table ? table->findChildren<CVectorComponentPlate*>()
+                     : QList<CVectorComponentPlate*>();
+    }
+
+    void selectOnly(CVectorComponentPlate* selected)
+    {
+        for(CVectorComponentPlate* plate : tablePlates())
+            plate->setChecked(plate == selected);
+    }
+
+    void clearParentTableSelection()
+    {
+        if(QTableWidget* table = parentTable())
+        {
+            const QSignalBlocker blocker(table);
+            // clearSelection() does not invalidate QAbstractItemView's current
+            // index. That current Vector3 cell can still paint as active when
+            // focus moves between two component context menus.
+            if(table->selectionModel())
+                table->selectionModel()->clear();
+            table->setCurrentCell(-1, -1, QItemSelectionModel::Clear);
+        }
+    }
+
+    void prepareContextSelection()
+    {
+        if(!m_contextSelectionPrepared)
+        {
+            m_previousCheckedPlate = nullptr;
+            for(CVectorComponentPlate* plate : tablePlates())
+                if(plate->isChecked())
+                {
+                    m_previousCheckedPlate = plate;
+                    break;
+                }
+            m_contextSelectionPrepared = true;
+        }
+        selectOnly(this);
+        // Match the working left-click path: the component itself must own
+        // focus before QMenu starts its nested event loop. Otherwise focus can
+        // remain on C3DItem and paint the aggregate Vector3 panel behind it.
+        setFocus(Qt::MouseFocusReason);
+        clearParentTableSelection();
+    }
+
+    void restoreContextSelection()
+    {
+        if(!m_contextSelectionPrepared)
+            return;
+        const QList<CVectorComponentPlate*> plates = tablePlates();
+        for(CVectorComponentPlate* plate : plates)
+            plate->setChecked(plate == m_previousCheckedPlate);
+        m_previousCheckedPlate = nullptr;
+        m_contextSelectionPrepared = false;
+        clearParentTableSelection();
+    }
+
+    void selectComponent()
+    {
+        selectOnly(this);
+        setFocus(Qt::MouseFocusReason);
+        clearParentTableSelection();
+    }
+
+    bool canPaste(QSharedPointer<IPropertyBase>* value) const
+    {
+        if(m_property.isNull() || property("enduranceReadOnly").toBool()
+           || (parentWidget() && parentWidget()->property("enduranceReadOnly").toBool()))
+            return false;
+        const QMimeData* mime = QGuiApplication::clipboard()->mimeData();
+        if(!mime)
+            return false;
+        QSharedPointer<IPropertyBase> converted;
+        if(mime->hasFormat(kPropertyMimeType) && g_propertyClipboard.size() == 1)
+        {
+            const QSharedPointer<IPropertyBase> source = g_propertyClipboard.first();
+            if(!source.isNull() && source->type() == m_property->type())
+                converted = clonePropertyValue(source);
+            else
+                converted = convertedNumericValue(source.get(), m_property.get());
+        }
+        else if(mime->hasText())
+        {
+            bool ok = false;
+            const double number = mime->text().trimmed().toDouble(&ok);
+            if(ok && std::isfinite(number)
+               && number >= -std::numeric_limits<float>::max()
+               && number <= std::numeric_limits<float>::max())
+            {
+                const propFloat source(m_property->type(), float(number));
+                converted = convertedNumericValue(&source, m_property.get());
+            }
+        }
+        if(converted.isNull())
+            return false;
+        if(value)
+            *value = converted;
+        return true;
+    }
+
+    void pasteValue()
+    {
+        QSharedPointer<IPropertyBase> value;
+        if(!canPaste(&value))
+        {
+            QApplication::beep();
+            QToolTip::showText(mapToGlobal(QPoint(0, height())),
+                QObject::tr("Clipboard value is not compatible with this component."), this);
+            return;
+        }
+        m_property = clonePropertyValue(value);
+        if(m_applyValue)
+            m_applyValue(m_property);
+    }
+
+    QSharedPointer<IPropertyBase> m_property;
+    ApplyValue m_applyValue;
+    CVectorComponentPlate* m_previousCheckedPlate{nullptr};
+    bool m_contextSelectionPrepared{false};
+    bool m_rightPressArmed{false};
+};
 
 bool clipboardMatches(EObjParam destination)
 {
@@ -126,6 +456,16 @@ CTableManager::CTableManager(QTableWidget* pTable):
     m_pTable->setSelectionBehavior(QAbstractItemView::SelectItems);
     m_pTable->installEventFilter(this);
     m_pTable->viewport()->installEventFilter(this);
+    connect(m_pTable, &QTableWidget::itemSelectionChanged, this, [this]()
+    {
+        if(m_pTable->selectedItems().isEmpty())
+            return;
+        for(CVectorComponentPlate* plate :
+            m_pTable->findChildren<CVectorComponentPlate*>())
+        {
+            plate->clearComponentSelection();
+        }
+    });
     reset();
     //QObject::connect(m_pTable, SIGNAL(itemChanged(QTableWidgetItem*)), this, SLOT(onCellEdit(QTableWidgetItem*)));
 }
@@ -145,18 +485,45 @@ void CTableManager::reset()
     //m_pTable->setSizeAdjustPolicy(QAbstractScrollArea::AdjustToContents); //adjust whole table. now both columns fill qtablewidget but it occurs blink and offset for main window
 }
 
+void CTableManager::setReadOnly(bool readOnly)
+{
+    m_readOnly = readOnly;
+    for(int row = 0; row < m_pTable->rowCount(); ++row)
+    {
+        QWidget* widget = m_pTable->cellWidget(row, 1);
+        if(!widget)
+            continue;
+        const bool compoundEditor = qobject_cast<C3DItem*>(widget) != nullptr;
+        widget->setProperty("enduranceReadOnly", readOnly);
+        if(QLineEdit* line = qobject_cast<QLineEdit*>(widget))
+            line->setReadOnly(readOnly);
+        const QList<QLineEdit*> lines = widget->findChildren<QLineEdit*>();
+        for(QLineEdit* line : lines)
+            line->setReadOnly(readOnly);
+        // Editable combo boxes contain a QLineEdit, but leaving the combo
+        // enabled would still allow a locked MOB property to change through
+        // its popup.  Compound numeric editors remain enabled so their
+        // read-only components can still be focused and copied.
+        if(qobject_cast<QComboBox*>(widget))
+            widget->setEnabled(!readOnly);
+        else if(!qobject_cast<QLineEdit*>(widget) && !compoundEditor)
+            widget->setEnabled(!readOnly);
+        widget->setToolTip(readOnly
+            ? tr("This object belongs to a locked MOB. Activate its owner to edit it.")
+            : QString());
+    }
+}
+
 void CTableManager::installClipboardFilter(QWidget* widget, int row)
 {
     if(!widget)
         return;
     widget->setProperty("propertyRow", row);
-    widget->installEventFilter(this);
-    const QList<QLineEdit*> editors = widget->findChildren<QLineEdit*>();
-    for(QLineEdit* child : editors)
-    {
-        child->setProperty("propertyRow", row);
-        child->installEventFilter(this);
-    }
+    // A focused text editor must retain native selection-aware clipboard
+    // behaviour. Property-level copy/paste remains available from the label,
+    // table selection, and non-text value widgets.
+    if(!qobject_cast<QLineEdit*>(widget))
+        widget->installEventFilter(this);
 }
 
 void CTableManager::registerPropertyRow(int row, const QSharedPointer<IPropertyBase>& value)
@@ -253,6 +620,11 @@ bool CTableManager::buildPasteValues(const QList<int>& rows,
         if(error) *error = tr("Select one or more property labels first.");
         return false;
     }
+    if(m_readOnly)
+    {
+        if(error) *error = tr("Activate the selected object's MOB before editing its properties.");
+        return false;
+    }
     const QMimeData* mime = QGuiApplication::clipboard()->mimeData();
     if(mime && mime->hasFormat(kPropertyMimeType))
     {
@@ -268,11 +640,25 @@ bool CTableManager::buildPasteValues(const QList<int>& rows,
             const int encodedType = encodedTypes.at(i).toInt(&ok);
             const QSharedPointer<IPropertyBase> destination = m_rowValues.value(rows.at(i));
             const QSharedPointer<IPropertyBase> source = g_propertyClipboard.at(i);
-            if(!ok || destination.isNull() || source.isNull()
-               || encodedType != int(destination->type()) || source->type() != destination->type())
+            if(!ok || destination.isNull() || source.isNull())
             {
                 if(error) *error = tr("Copied property types do not match every selected field.");
                 return false;
+            }
+            if(encodedType != int(destination->type()) || source->type() != destination->type())
+            {
+                QString conversionError;
+                const QSharedPointer<IPropertyBase> converted = convertedNumericValue(
+                    source.get(), destination.get(), &conversionError);
+                if(converted.isNull())
+                {
+                    if(error) *error = conversionError.isEmpty()
+                        ? tr("Copied property types do not match every selected field.")
+                        : conversionError;
+                    return false;
+                }
+                if(values) values->append(converted);
+                continue;
             }
             if(values)
                 values->append(clonePropertyValue(source));
@@ -295,6 +681,25 @@ bool CTableManager::buildPasteValues(const QList<int>& rows,
         return false;
     }
     QSharedPointer<IPropertyBase> parsed(destination->clone());
+    bool numericText = false;
+    const double plainNumber = text.trimmed().toDouble(&numericText);
+    if(numericText)
+    {
+        propFloat sourceNumber(destination->type(), float(plainNumber));
+        QString conversionError;
+        const QSharedPointer<IPropertyBase> converted = convertedNumericValue(
+            &sourceNumber, destination.get(), &conversionError);
+        if(!converted.isNull())
+        {
+            if(values) values->append(converted);
+            return true;
+        }
+        if(!conversionError.isEmpty())
+        {
+            if(error) *error = conversionError;
+            return false;
+        }
+    }
     if(CComboStItem* combo = qobject_cast<CComboStItem*>(m_pTable->cellWidget(row, 1)))
     {
         QMap<uint, QString> choices;
@@ -558,6 +963,8 @@ bool CTableManager::isValidValue(const EObjParam param, const QString &value)
 
 void CTableManager::onParamChange(const QSharedPointer<IPropertyBase>& pProp)
 {
+    if(m_readOnly)
+        return;
     for(auto it = m_rowValues.begin(); it != m_rowValues.end(); ++it)
     {
         if(it.value()->type() == pProp->type())
@@ -608,6 +1015,8 @@ bool variantLessThan(const std::pair<QSharedPointer<IPropertyBase>, bool> &v1, c
 
 void CTableManager::setNewData(const QList<QSharedPointer<IPropertyBase>>& aProp)
 {
+    const int verticalScroll = m_pTable->verticalScrollBar()->value();
+    const int horizontalScroll = m_pTable->horizontalScrollBar()->value();
     reset();
     int i(0); // row number
     EObjParam type;
@@ -676,6 +1085,7 @@ void CTableManager::setNewData(const QList<QSharedPointer<IPropertyBase>>& aProp
             break;
         }
         case eObjParam_PRIM_TXTR:
+        case eObjParam_UNIT_PROTOTYPE:
         {
             m_pTable->insertRow(i);
             m_pTable->setItem(i, 0, new QTableWidgetItem(m_aRowName[type]));
@@ -887,6 +1297,10 @@ void CTableManager::setNewData(const QList<QSharedPointer<IPropertyBase>>& aProp
         } //switch
     }
     m_pTable->blockSignals(false);
+    m_pTable->verticalScrollBar()->setValue(
+        qMin(verticalScroll, m_pTable->verticalScrollBar()->maximum()));
+    m_pTable->horizontalScrollBar()->setValue(
+        qMin(horizontalScroll, m_pTable->horizontalScrollBar()->maximum()));
 }
 
 void CColorButtonItem::applyColor()
@@ -1064,6 +1478,7 @@ CValueItem::CValueItem(const QSharedPointer<IPropertyBase>& prop):
 CComboDynItem::CComboDynItem(const QSharedPointer<IPropertyBase> &prop)
     : m_pCompleter(nullptr)
     , m_optionsLoaded(false)
+    , m_popupActive(false)
 {
     setFocusPolicy(Qt::FocusPolicy::StrongFocus);
     setStyleSheet("combobox-popup: 0;");
@@ -1097,6 +1512,7 @@ CComboDynItem::CComboDynItem(const QSharedPointer<IPropertyBase> &prop)
     QObject::connect(lineEdit(), SIGNAL(returnPressed()), this, SLOT(_onEditingFinished()));
     QObject::connect(lineEdit(), SIGNAL(textEdited(QString)), this, SLOT(_onFilterTextChanged(QString)));
     lineEdit()->installEventFilter(this);
+    updateDatabaseDiagnostic(m_committedText);
 }
 
 void CColorButtonItem::keyPressEvent(QKeyEvent* event)
@@ -1136,6 +1552,16 @@ void CComboDynItem::ensureOptionsLoaded()
         m_pListModel->setStringList(CTextureList::getInstance()->textureList());
     else if(m_pValue->type() == eObjParam_TEMPLATE)
         m_pListModel->setStringList(CObjectList::getInstance()->figureList());
+    else if(m_pValue->type() == eObjParam_UNIT_PROTOTYPE)
+    {
+        QStringList names;
+        const auto database = ei::ProfileDatabaseContext::instance().current();
+        if(!database.isNull())
+            for(const ei::SMonsterDatabaseRecord& monster : database->monsters)
+                names.append(monster.name);
+        names.sort(Qt::CaseInsensitive);
+        m_pListModel->setStringList(names);
+    }
     else
     {
         Q_ASSERT(false && "not defined");
@@ -1152,17 +1578,40 @@ void CComboDynItem::showPopup()
     const QSignalBlocker blocker(this);
     ensureOptionsLoaded();
     setEditText(current);
+    m_popupActive = true;
     QComboBox::showPopup();
+}
+
+void CComboDynItem::hidePopup()
+{
+    m_popupActive = false;
+    QComboBox::hidePopup();
 }
 
 void CComboDynItem::_onChange(QString str)
 {
     m_committedText = str;
+    updateDatabaseDiagnostic(str);
     if(m_pValue->isEqual(str))
         return;
 
     m_pValue->resetFromString(str);
     emit onParamChange(m_pValue);
+}
+
+void CComboDynItem::updateDatabaseDiagnostic(const QString& value)
+{
+    if(m_pValue->type() != eObjParam_UNIT_PROTOTYPE)
+        return;
+    const auto database = ei::ProfileDatabaseContext::instance().current();
+    QString diagnostic;
+    if(database.isNull() || !database->usable())
+        diagnostic = tr("The active profile database is unavailable; this value is preserved but cannot be validated.");
+    else if(!database->monsters.contains(value.trimmed().toLower()))
+        diagnostic = tr("Prototype is not present in the active profile database. The value is preserved.");
+    setToolTip(diagnostic);
+    lineEdit()->setToolTip(diagnostic);
+    lineEdit()->setStyleSheet(diagnostic.isEmpty() ? QString() : QString("QLineEdit { border: 1px solid #c88b2a; }"));
 }
 
 void CComboStItem::keyPressEvent(QKeyEvent* event)
@@ -1193,22 +1642,42 @@ void CComboStItem::keyPressEvent(QKeyEvent* event)
 
 void CValueItem::keyPressEvent(QKeyEvent* event)
 {
-    if(event->matches(QKeySequence::Copy))
-    {
-        copyProperty(m_pValue, hasSelectedText() ? selectedText() : text());
-        event->accept();
-        return;
-    }
+    // Inside the editable text, Ctrl+C/Ctrl+V are ordinary text operations:
+    // copy the exact highlighted characters and replace only the current
+    // selection. Validation and property application still happen on commit.
+    // A typed property copied from a plate retains compatibility checks; a
+    // numeric cross-type paste inserts its safely converted display value at
+    // the current selection without committing the edit early.
     if(event->matches(QKeySequence::Paste))
     {
-        const QString value = QGuiApplication::clipboard()->text();
-        if(rejectIncompatiblePaste(this, m_pValue->type(), value))
+        const QMimeData* mime = QGuiApplication::clipboard()->mimeData();
+        if(mime && mime->hasFormat(kPropertyMimeType)
+           && !clipboardMatches(m_pValue->type()))
         {
+            QString conversionError;
+            const QSharedPointer<IPropertyBase> converted = g_propertyClipboard.size() == 1
+                ? convertedNumericValue(g_propertyClipboard.first().get(),
+                                        m_pValue.get(), &conversionError)
+                : QSharedPointer<IPropertyBase>();
+            if(!converted.isNull())
+            {
+                insert(converted->toString());
+                event->accept();
+                return;
+            }
+            rejectIncompatiblePaste(this, m_pValue->type(), mime->text());
             event->accept();
             return;
         }
     }
     QLineEdit::keyPressEvent(event);
+}
+
+void CValueItem::contextMenuEvent(QContextMenuEvent* event)
+{
+    QMenu* menu = createStandardContextMenu();
+    menu->exec(event->globalPos());
+    delete menu;
 }
 
 void CComboDynItem::_onEditingFinished()
@@ -1260,33 +1729,40 @@ void CComboDynItem::keyPressEvent(QKeyEvent* event)
 void CComboDynItem::focusOutEvent(QFocusEvent* event)
 {
     // Typed text is only a filter preview until Enter or an explicit
-    // suggestion activation commits it.
+    // suggestion activation commits it. Opening the combo transfers focus to
+    // its popup; that is not an abandoned edit and must not close the popup.
     QComboBox::focusOutEvent(event);
-    cancelPendingEdit();
+    if(!m_popupActive && event->reason() != Qt::PopupFocusReason)
+        cancelPendingEdit();
 }
 
 bool CComboDynItem::eventFilter(QObject* watched, QEvent* event)
 {
     if(watched == lineEdit() && event->type() == QEvent::FocusOut)
-        cancelPendingEdit();
+    {
+        const QFocusEvent* focusEvent = static_cast<QFocusEvent*>(event);
+        if(!m_popupActive && focusEvent->reason() != Qt::PopupFocusReason)
+            cancelPendingEdit();
+    }
     if(watched == lineEdit() && event->type() == QEvent::KeyPress)
     {
         QKeyEvent* keyEvent = static_cast<QKeyEvent*>(event);
         if(keyEvent->matches(QKeySequence::Copy))
-        {
-            copyProperty(m_pValue, lineEdit()->hasSelectedText()
-                         ? lineEdit()->selectedText() : lineEdit()->text());
-            return true;
-        }
+            return false;
         if(keyEvent->matches(QKeySequence::Paste))
         {
-            const QString text = QGuiApplication::clipboard()->text().trimmed();
-            if(!rejectIncompatiblePaste(this, m_pValue->type(), text))
+            // Typed property bundles still cannot cross incompatible fields,
+            // but ordinary text (including a partial selection copied from
+            // another editor) is inserted natively and remains uncommitted
+            // until Enter or an explicit dropdown choice.
+            const QMimeData* mime = QGuiApplication::clipboard()->mimeData();
+            if(mime && mime->hasFormat(kPropertyMimeType)
+               && !clipboardMatches(m_pValue->type()))
             {
-                setEditText(text);
-                _onChange(text);
+                rejectIncompatiblePaste(this, m_pValue->type(), mime->text());
+                return true;
             }
-            return true;
+            return false;
         }
         if(keyEvent->key() == Qt::Key_Escape)
         {
@@ -1310,14 +1786,26 @@ C3DItem::C3DItem(const QSharedPointer<IPropertyBase>& propX,const QSharedPointer
     m_xValue.reset(propX->clone());
     m_yValue.reset(propY->clone());
     m_zValue.reset(propZ->clone());
-    setFocusPolicy(Qt::FocusPolicy::StrongFocus);
+    // Component plates and line edits own keyboard focus. The aggregate
+    // editor remains selectable through its table row but must not acquire
+    // focus behind a child component's context menu.
+    setFocusPolicy(Qt::FocusPolicy::NoFocus);
     auto* pLayout = new QFormLayout();
     pLayout->setMargin(0);
-    const auto setProp = [this, &pLayout](QString rowName, const QSharedPointer<IPropertyBase>& prop)
+    pLayout->setHorizontalSpacing(0);
+    pLayout->setVerticalSpacing(0);
+    const auto setProp = [this, &pLayout](const QString& rowName,
+                                         const QSharedPointer<IPropertyBase>& prop)
     {
-        auto pLine = new CValueItem(prop);
+        auto* pLine = new CValueItem(prop);
+        auto* plate = new CVectorComponentPlate(rowName, prop,
+            [this, pLine](const QSharedPointer<IPropertyBase>& value)
+            {
+                pLine->renewValue(value->toString());
+                _onParamChange(value);
+            }, this);
         QObject::connect(pLine, SIGNAL(onParamChange(const QSharedPointer<IPropertyBase>&)), this, SLOT(_onParamChange(const QSharedPointer<IPropertyBase>&)));
-        pLayout->addRow(rowName, pLine);
+        pLayout->addRow(plate, pLine);
     };
 
     setProp("X:", propX);
@@ -1344,6 +1832,12 @@ void C3DItem::keyPressEvent(QKeyEvent *event)
     }
     if((event->matches(QKeySequence::Paste)))
     {
+        if(property("enduranceReadOnly").toBool())
+        {
+            QApplication::beep();
+            event->accept();
+            return;
+        }
         QClipboard *pClipboard = QGuiApplication::clipboard();
         QString val = pClipboard->text();
         if(rejectIncompatiblePaste(this, EObjParam(m_xValue->type() + 3), val))
@@ -1370,6 +1864,14 @@ void C3DItem::keyPressEvent(QKeyEvent *event)
 
 void C3DItem::_onParamChange(const QSharedPointer<IPropertyBase> &prop)
 {
+    if(prop.isNull())
+        return;
+    if(prop->type() == m_xValue->type())
+        m_xValue = clonePropertyValue(prop);
+    else if(prop->type() == m_yValue->type())
+        m_yValue = clonePropertyValue(prop);
+    else if(prop->type() == m_zValue->type())
+        m_zValue = clonePropertyValue(prop);
     emit onParamChange(prop);
 }
 
@@ -1436,6 +1938,24 @@ void CMultiLineButtonItem::onTextEditOpen()
         m_pTextForm.reset(new CMultiLineEditForm());
         QObject::connect(m_pTextForm.get(), SIGNAL(onTextApplySignal(QString)), this, SLOT(onTextEdit(QString)));
     }
+
+    QStringList suggestions;
+    const auto database = ei::ProfileDatabaseContext::instance().current();
+    if(!database.isNull())
+    {
+        switch(m_pValue->type())
+        {
+        case eObjParam_UNIT_WEAPONS: suggestions = database->weapons; break;
+        case eObjParam_UNIT_ARMORS: suggestions = database->armor; break;
+        case eObjParam_UNIT_SPELLS: suggestions = database->spells; break;
+        case eObjParam_UNIT_QUICK_ITEMS: suggestions = database->quickItems; break;
+        case eObjParam_UNIT_QUEST_ITEMS: suggestions = database->questItems; break;
+        default: break;
+        }
+    }
+    m_pTextForm->setSuggestions(suggestions,
+        m_pValue->type() == eObjParam_UNIT_WEAPONS || m_pValue->type() == eObjParam_UNIT_ARMORS
+        || m_pValue->type() == eObjParam_UNIT_QUICK_ITEMS || m_pValue->type() == eObjParam_UNIT_QUEST_ITEMS);
 
     if(m_pValue->isInit())
     {

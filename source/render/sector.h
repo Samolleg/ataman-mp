@@ -44,6 +44,7 @@ public:
     void draw(QOpenGLShaderProgram* program);
     void drawTileGrid(QOpenGLShaderProgram* program);
     void drawWater(QOpenGLShaderProgram* program);
+    bool intersectsFrustum(const class CViewFrustum& frustum) const;
     void setIndex(UI2& index) {m_index = index; updatePosition(); }
     const UI2& index() {return m_index;}
     bool projectPt(QVector3D& origin, bool land = true);
@@ -79,6 +80,8 @@ private:
     QVector<SVertexData> m_arrWaterVrtData;
     QOpenGLBuffer m_waterVertexBuf;
     QOpenGLBuffer m_waterIndexBuf;
+    QVector3D m_boundsCenter;
+    float m_boundsRadius{0.0f};
 };
 
 #endif // MAP_SEC_H

@@ -4,6 +4,11 @@
 #include <QStandardPaths>
 #include <QTemporaryDir>
 
+#ifdef Q_OS_WIN
+#include <windows.h>
+#include <thread>
+#endif
+
 #include "jmv_map_test_launcher.h"
 #include "current_session_backup.h"
 #include "endurance_document.h"
@@ -19,14 +24,15 @@ private slots:
     void ignoresWorldScriptInStringsAndComments();
     void rejectsMalformedExistingWorldScript();
     void injectsActualAutorunRuntimeBootstrap();
-    void recognizesConfiguredJmvPluginSlot();
     void exposesTestRunsQuickAccessPath();
     void createsGenerationScopedSavePaths();
+    void resolvesHostedGamePidForHotReload();
     void preparesOwnedGodmodeAutoexec();
     void preservesExistingAutoexecForRecovery();
     void recoveryRemovesAutoexecCreatedByEndurance();
     void recoveryRestoresPreexistingAutoexec();
     void recoveryRemovesOwnedBridge();
+    void recoveryRetriesTransientBridgeLock();
     void recoveryRetainsChangedBridge();
     void recoveryRemovesDisposableSaveGenerations();
     void recoveryDoesNotTrustOrCleanLivePidOnlyJournal();
@@ -35,6 +41,10 @@ private slots:
     void currentSessionSnapshotRemovesDisposableTreeWhenOriginallyAbsent();
     void currentSessionRestoreRejectsTamperedBackupWithoutTouchingLiveTree();
     void currentSessionSnapshotRejectsUnsafePath();
+    void authoritativeResultAcceptsVerifiedRun();
+    void authoritativeResultAcceptsLatestHotReloadGeneration();
+    void authoritativeResultRejectsWrongZone();
+    void analyzesPersistedAuthoritativeResult();
 };
 
 static QString hash(const QByteArray& data)
@@ -92,15 +102,6 @@ void JmvMapTestLauncherTests::initTestCase()
     QDir(root).removeRecursively();
 }
 
-void JmvMapTestLauncherTests::recognizesConfiguredJmvPluginSlot()
-{
-    const QByteArray expected = QByteArray::fromHex(
-        "01000300444556ffff0d000000020600506c7567696e0a00706c7567696e2e646c6c");
-    QVERIFY(CJmvMapTestLauncher::hasConfiguredJmvPluginSlot(expected));
-    QVERIFY(!CJmvMapTestLauncher::hasConfiguredJmvPluginSlot(
-                QByteArray("Plugin=EIMapperEnduranceJmvBridge.plg")));
-}
-
 void JmvMapTestLauncherTests::exposesTestRunsQuickAccessPath()
 {
     const QString expected = QDir(QStandardPaths::writableLocation(
@@ -117,6 +118,168 @@ void JmvMapTestLauncherTests::createsGenerationScopedSavePaths()
     QVERIFY(QDir::fromNativeSeparators(initial).endsWith("generations/000000/saves"));
     QVERIFY(QDir::fromNativeSeparators(reload).endsWith("generations/000017/saves"));
     QVERIFY(initial != reload);
+}
+
+void JmvMapTestLauncherTests::resolvesHostedGamePidForHotReload()
+{
+    QTemporaryDir temporary;
+    QVERIFY(temporary.isValid());
+    const QString pidPath = QDir(temporary.path()).filePath("game.pid");
+    writeFile(pidPath, "424242\n");
+
+    QCOMPARE(CJmvMapTestLauncher::runtimeGameProcessId(true, pidPath, 111111),
+             qint64(424242));
+    QCOMPARE(CJmvMapTestLauncher::runtimeGameProcessId(false, pidPath, 111111),
+             qint64(111111));
+    QCOMPARE(CJmvMapTestLauncher::runtimeGameProcessId(true,
+             QDir(temporary.path()).filePath("missing.pid"), 111111), qint64(0));
+
+    // alpha.29's x86 host wrote UTF-16LE without a BOM. Keep existing test-run
+    // journals usable while the host protocol moves back to explicit ASCII.
+    const QString legacyValue = QStringLiteral("46232\n");
+    const QByteArray legacyUtf16(reinterpret_cast<const char*>(legacyValue.utf16()),
+                                 legacyValue.size() * int(sizeof(ushort)));
+    writeFile(pidPath, legacyUtf16);
+    QCOMPARE(CJmvMapTestLauncher::runtimeGameProcessId(true, pidPath, 111111),
+             qint64(46232));
+}
+
+static QJsonObject resultManifest(const QString& runRoot, const QString& sourcePath)
+{
+    QJsonObject session;
+    session.insert("sourceZone", "zone1");
+    session.insert("travelExit", 2);
+    QJsonObject saves;
+    saves.insert("activeGeneration", "0");
+    saves.insert("testPath", QDir(runRoot).filePath("generations/000000/saves"));
+    QJsonObject sources;
+    sources.insert(sourcePath, hash(QByteArray("source map")));
+    QJsonObject live;
+    live.insert("mprPath", QDir(runRoot).filePath("removed-live.mpr"));
+    live.insert("mobPath", QDir(runRoot).filePath("removed-live.mob"));
+    live.insert("mprSha256", "mpr-hash");
+    live.insert("mobSha256", "mob-hash");
+    QJsonObject bridge;
+    bridge.insert("path", QDir(runRoot).filePath("removed-bridge.plg"));
+    bridge.insert("resultPath", QDir(runRoot).filePath("bridge-result.log"));
+    QJsonObject manifest;
+    manifest.insert("runId", "run-authoritative-1");
+    manifest.insert("profileId", "jamais-vu");
+    manifest.insert("runRoot", runRoot);
+    manifest.insert("logPath", QDir(runRoot).filePath("runtime.log"));
+    manifest.insert("sessionSettings", session);
+    manifest.insert("isolatedSaves", saves);
+    manifest.insert("sourceSha256", sources);
+    manifest.insert("liveFiles", live);
+    manifest.insert("bridge", bridge);
+    return manifest;
+}
+
+static QString successfulBridgeEvidence(const QString& runRoot,
+                                        const QString& zone = "zone1")
+{
+    return QString(
+        "2026-07-21T00:00:00Z DIRECT_LAUNCH initialized New Game player zone=\"%1\" entrance_id=2 entrance_index=1 before transition\n"
+        "2026-07-21T00:00:01Z DIRECT_LAUNCH redirecting normal single-player transition loader mpr=\"%2\" mob=\"%3\" context=0x1\n"
+        "2026-07-21T00:00:02Z DIRECT_LAUNCH staged map loader returned result=1\n"
+        "2026-07-21T00:00:02Z RUNTIME_STATE sequence=3 from=Transitioning to=GameplayReady evidence=gameplay\n")
+        .arg(zone,
+             QDir(runRoot).filePath("removed-live.mpr"),
+             QDir(runRoot).filePath("removed-live.mob"));
+}
+
+void JmvMapTestLauncherTests::authoritativeResultAcceptsVerifiedRun()
+{
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+    const QString source = QDir(temp.path()).filePath("source.mob");
+    writeFile(source, QByteArray("source map"));
+    const QJsonObject report = CJmvMapTestLauncher::buildAuthoritativeResult(
+        resultManifest(temp.path(), source), successfulBridgeEvidence(temp.path()), 0,
+        int(QProcess::NormalExit), false, "Removed all owned runtime artifacts");
+    QCOMPARE(report.value("actualZone").toString(), QString("zone1"));
+    QCOMPARE(report.value("actualEntrance").toInt(), 2);
+    QCOMPARE(report.value("reportedPlayerCount").toInt(), 1);
+    QVERIFY(report.value("sourceFilesUnchanged").toBool());
+    QVERIFY(report.value("cleanupComplete").toBool());
+    QVERIFY(report.value("payloadHashesValidated").toBool());
+    QCOMPARE(report.value("actualMprSha256").toString(), QString("mpr-hash"));
+    QCOMPARE(report.value("actualMobSha256").toString(), QString("mob-hash"));
+    QStringList findings;
+    QVERIFY2(CJmvMapTestLauncher::validateAutomatedResult(report, &findings),
+             qPrintable(findings.join('\n')));
+}
+
+void JmvMapTestLauncherTests::authoritativeResultAcceptsLatestHotReloadGeneration()
+{
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+    const QString source = QDir(temp.path()).filePath("source.mob");
+    writeFile(source, QByteArray("source map"));
+    QJsonObject manifest = resultManifest(temp.path(), source);
+    const QString generationRoot = QDir(temp.path()).filePath("generations/000002");
+    QJsonObject reload;
+    reload.insert("sequence", "2");
+    reload.insert("generation", "2");
+    reload.insert("zoneId", "zone2");
+    reload.insert("entranceId", 1);
+    reload.insert("mprPath", QDir(generationRoot).filePath("map.mpr"));
+    reload.insert("mobPath", QDir(generationRoot).filePath("map.mob"));
+    reload.insert("mprSha256", "reload-mpr-hash");
+    reload.insert("mobSha256", "reload-mob-hash");
+    reload.insert("savePath", QDir(generationRoot).filePath("saves"));
+    manifest.insert("hotReloads", QJsonArray{reload});
+    const QString evidence = successfulBridgeEvidence(temp.path()) + QString(
+        "HOT_RELOAD dispatch sequence=2 generation=2 runtime_state=GameplayReady zone=\"zone2\" entrance_id=1 thread=1\n"
+        "DIRECT_LAUNCH initialized New Game player zone=\"zone2\" entrance_id=1 entrance_index=0 before transition\n"
+        "DIRECT_LAUNCH redirecting normal single-player transition loader mpr=\"%1\" mob=\"%2\" context=0x2\n"
+        "DIRECT_LAUNCH staged map loader returned result=1\n"
+        "RUNTIME_STATE sequence=9 from=Transitioning to=GameplayReady evidence=gameplay\n"
+        "HOT_RELOAD completed sequence=2 transition_result=1 staged_loader=observed\n")
+        .arg(reload.value("mprPath").toString(), reload.value("mobPath").toString());
+    const QJsonObject report = CJmvMapTestLauncher::buildAuthoritativeResult(
+        manifest, evidence, 0, int(QProcess::NormalExit), false,
+        "Removed all owned runtime artifacts");
+    QCOMPARE(report.value("actualZone").toString(), QString("zone2"));
+    QCOMPARE(report.value("actualGeneration").toString(), QString("2"));
+    QCOMPARE(report.value("actualMprSha256").toString(), QString("reload-mpr-hash"));
+    QCOMPARE(report.value("actualMobSha256").toString(), QString("reload-mob-hash"));
+    QCOMPARE(report.value("saveNamespace").toString(), reload.value("savePath").toString());
+    QStringList findings;
+    QVERIFY2(CJmvMapTestLauncher::validateAutomatedResult(report, &findings),
+             qPrintable(findings.join('\n')));
+}
+
+void JmvMapTestLauncherTests::authoritativeResultRejectsWrongZone()
+{
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+    const QString source = QDir(temp.path()).filePath("source.mob");
+    writeFile(source, QByteArray("source map"));
+    const QJsonObject report = CJmvMapTestLauncher::buildAuthoritativeResult(
+        resultManifest(temp.path(), source), successfulBridgeEvidence(temp.path(), "zone2"), 0,
+        int(QProcess::NormalExit), false, QString());
+    QVERIFY(!report.value("passed").toBool());
+    QVERIFY(QJsonDocument(report.value("errors").toArray()).toJson()
+            .contains("Requested zone zone1 but runtime reported zone2"));
+}
+
+void JmvMapTestLauncherTests::analyzesPersistedAuthoritativeResult()
+{
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+    const QString source = QDir(temp.path()).filePath("source.mob");
+    writeFile(source, QByteArray("source map"));
+    const QJsonObject expected = CJmvMapTestLauncher::buildAuthoritativeResult(
+        resultManifest(temp.path(), source), successfulBridgeEvidence(temp.path()), 0,
+        int(QProcess::NormalExit), false, QString());
+    writeFile(QDir(temp.path()).filePath("result.json"),
+              QJsonDocument(expected).toJson(QJsonDocument::Indented));
+    QJsonObject actual;
+    QStringList findings;
+    QVERIFY2(CJmvMapTestLauncher::analyzeCompletedRun(temp.path(), &actual, &findings),
+             qPrintable(findings.join('\n')));
+    QCOMPARE(actual.value("runId").toString(), QString("run-authoritative-1"));
 }
 
 void JmvMapTestLauncherTests::preparesOwnedGodmodeAutoexec()
@@ -320,6 +483,37 @@ void JmvMapTestLauncherTests::recoveryRemovesOwnedBridge()
     QDir(run).removeRecursively();
 }
 
+void JmvMapTestLauncherTests::recoveryRetriesTransientBridgeLock()
+{
+#ifndef Q_OS_WIN
+    QSKIP("The transient image-section lock regression is Windows-specific.");
+#else
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+    const QString bridge = QDir(temp.path()).filePath("plugin.dll");
+    const QByteArray owned("transiently locked bridge");
+    writeFile(bridge, owned);
+    const QString run = createRecoveryManifest(QString(), QString(), false,
+        QByteArray(), QByteArray(), bridge, owned);
+    QVERIFY(!run.isEmpty());
+
+    HANDLE lock = CreateFileW(reinterpret_cast<LPCWSTR>(bridge.utf16()),
+                              GENERIC_READ, FILE_SHARE_READ, nullptr,
+                              OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    QVERIFY(lock != INVALID_HANDLE_VALUE);
+    std::thread releaseLock([lock]()
+    {
+        Sleep(250);
+        CloseHandle(lock);
+    });
+    const QString summary = CJmvMapTestLauncher::recoverInterruptedRuns();
+    releaseLock.join();
+    QVERIFY2(!QFileInfo::exists(bridge), qPrintable(summary));
+    QVERIFY(summary.contains("cleanup retries"));
+    QDir(run).removeRecursively();
+#endif
+}
+
 void JmvMapTestLauncherTests::recoveryRetainsChangedBridge()
 {
     QTemporaryDir temp;
@@ -512,5 +706,5 @@ void JmvMapTestLauncherTests::currentSessionSnapshotRejectsUnsafePath()
     QVERIFY(!error.isEmpty());
 }
 
-QTEST_APPLESS_MAIN(JmvMapTestLauncherTests)
+QTEST_GUILESS_MAIN(JmvMapTestLauncherTests)
 #include "jmv_map_test_launcher_tests.moc"

@@ -1,17 +1,24 @@
 #include "tree_view.h"
 #include <QKeyEvent>
 #include <QDebug>
+#include <QApplication>
+#include <QKeySequence>
 #include "view.h"
 #include "node.h"
 #include <QHeaderView>
 #include <QTimer>
 #include <QRegularExpression>
+#include <QElapsedTimer>
+#include <QSignalBlocker>
 #include <algorithm>
 #include "objects/unit.h"
+#include "mob/mob.h"
+#include "log.h"
 
 CTreeView::CTreeView(QWidget *parent) : QTreeWidget(parent), m_pView(nullptr),
     m_filterTimer(new QTimer(this))
 {
+    setSelectionMode(QAbstractItemView::ExtendedSelection);
     m_filterTimer->setSingleShot(true);
     m_filterTimer->setInterval(150);
     connect(m_filterTimer, &QTimer::timeout, this, &CTreeView::applyFilter);
@@ -87,8 +94,8 @@ bool CTreeView::nodeMatches(CNode* node, const QStringList& terms) const
     const QString type = objectNameByType(node->nodeType()) + " "
         + QString::number(int(node->nodeType()));
     const QString database = unit ? unit->databaseName() : QString();
-    const QString mob = m_pView && m_pView->currentMob()
-        ? m_pView->currentMob()->mobName() : QString();
+    CMob* owner = m_pView ? m_pView->ownerMob(node) : nullptr;
+    const QString mob = owner ? owner->mobName() : QString();
     const QMap<QString, QString> fields{
         {"name", node->mapName()}, {"id", QString::number(node->mapId())},
         {"nid", QString::number(node->mapId())}, {"type", type},
@@ -154,7 +161,11 @@ bool CTreeView::filterItem(QTreeWidgetItem* item, const QStringList& terms,
                return !term.contains(':') && !term.contains('=')
                    && textMatches(item->text(0), value, mode);
            });
-    const bool selfMatches = terms.isEmpty() || (node && nodeMatches(node, terms))
+    // If a parent category already matched (for example "unit" matching the
+    // Units group), every descendant is visible. Avoid rebuilding expensive
+    // object metadata for thousands of children that cannot change the result.
+    const bool selfMatches = terms.isEmpty() || ancestorMatched
+        || (node && nodeMatches(node, terms))
         || textualGroupMatch;
     bool childMatches = false;
     for(int index = 0; index < item->childCount(); ++index)
@@ -172,6 +183,11 @@ bool CTreeView::filterItem(QTreeWidgetItem* item, const QStringList& terms,
 
 void CTreeView::applyFilter()
 {
+    QElapsedTimer elapsed;
+    elapsed.start();
+    const bool updatesWereEnabled = updatesEnabled();
+    setUpdatesEnabled(false);
+    QSignalBlocker signalBlocker(this);
     QString normalized = m_filterText.trimmed();
     normalized.replace(QRegularExpression("\\s*([:=])\\s*"), "\\1");
     QStringList terms;
@@ -193,11 +209,31 @@ void CTreeView::applyFilter()
             if(it.key()) it.key()->setExpanded(it.value());
         m_expansionBeforeFilter.clear();
     }
+    if(updatesWereEnabled)
+        setUpdatesEnabled(true);
+    viewport()->update();
+    signalBlocker.unblock();
     emit filterMatchCountChanged(visible, total);
+    const qint64 elapsedMs = elapsed.elapsed();
+    if(elapsedMs >= 100)
+        ei::log(eLogInfo, QString("Outliner filter applied elapsedMs:%1 visible:%2 total:%3 query:%4")
+                .arg(elapsedMs).arg(visible).arg(total).arg(m_filterText));
 }
 
 void CTreeView::keyPressEvent(QKeyEvent *pEvent)
 {
+    if(pEvent->matches(QKeySequence::Copy))
+    {
+        m_pView->selectedObjectToClipboardBuffer();
+        pEvent->accept();
+        return;
+    }
+    if(pEvent->matches(QKeySequence::Paste))
+    {
+        m_pView->clipboradObjectsToScene();
+        pEvent->accept();
+        return;
+    }
     auto key = pEvent->nativeVirtualKey();
     if(key == eKey_Delete)
     {
@@ -211,8 +247,10 @@ void CTreeView::keyPressEvent(QKeyEvent *pEvent)
             m_pView->deleteSelectedNodes();
         }
         clearSelection();
+        pEvent->accept();
+        return;
     }
-
+    QTreeWidget::keyPressEvent(pEvent);
 }
 
 int CTreeView::parentDeepCount(QTreeWidgetItem *pItem)
@@ -308,56 +346,45 @@ void CTreeView::itemClickedOver(QTreeWidgetItem *pItem, int column)
         return;
     }
 
-    int parentCount = parentDeepCount(pItem);
-
-    SSelect sel;
-    switch (parentCount)
+    CTreeObject* objectItem = dynamic_cast<CTreeObject*>(pItem);
+    if(!objectItem)
+        return;
+    QList<CNode*> nodes;
+    if(objectItem->node())
+        nodes.append(objectItem->node());
+    else if(parentDeepCount(pItem) > 0)
     {
-    case 0:
-        return; // for now skip clicking root items
-    case 1:
-    { // first child
-        ENodeType baseType = objectTypeByString(pItem->parent()->text(0));
-        sel.type = baseType == ENodeType::eUnit ? eSelectType_Database_name : eSelectType_Map_name;
-        sel.param1 = pItem->text(0);
-        //sel.param2 = sel.param1; //for hard comparison
-        sel.exactMatch = true;
-        m_pView->select(sel, false);
-        break;
+        QList<QTreeWidgetItem*> pending;
+        pending.append(pItem);
+        while(!pending.isEmpty())
+        {
+            QTreeWidgetItem* next = pending.takeLast();
+            if(CTreeObject* childObject = dynamic_cast<CTreeObject*>(next))
+                if(childObject->node() && !nodes.contains(childObject->node()))
+                    nodes.append(childObject->node());
+            for(int index = 0; index < next->childCount(); ++index)
+                pending.append(next->child(index));
+        }
     }
-    case 2:
-    { // second child
-        //ENodeType baseType = objectTypeByString(pItem->parent()->parent()->text(0));
-        sel.type = eSelectType_Id_range;
-        sel.param1 = pItem->text(0);
-        sel.param2 = pItem->text(0);
-        m_pView->select(sel, false);
-        break;
-    }
-
-    }
+    const Qt::KeyboardModifiers modifiers = QApplication::keyboardModifiers();
+    m_pView->selectNodes(nodes,
+        modifiers.testFlag(Qt::ShiftModifier)
+        || modifiers.testFlag(Qt::ControlModifier));
 }
 
 void CTreeView::onNodeDelete(uint nodeId)
 {
-    QTreeWidgetItemIterator it(this);
-    while (*it)
-    {
-        auto pNode = dynamic_cast<CTreeObject*>(*it);
-        if (pNode && pNode->nodeId()==nodeId)
-        {
-            auto pParent = (*it)->parent();
-            pParent->removeChild(*it);
-            removeItemWidget(*it, 0);
-            recalcParent(pParent);
-            break;
-        }
-        ++it;
-    }
+    Q_UNUSED(nodeId);
+    if(m_pView) m_pView->collectObjectTreeData();
 }
 
 void CTreeView::addNodeToTree(CNode *pNode)
 {
+    Q_UNUSED(pNode);
+    if(m_pView)
+        m_pView->collectObjectTreeData();
+    return;
+#if 0
     QString catName = "";
     QString groupName = "";
     ENodeType type = pNode->nodeType();
@@ -419,32 +446,68 @@ void CTreeView::addNodeToTree(CNode *pNode)
         sortItems(0, Qt::SortOrder::AscendingOrder);
         applyFilter();
     }
+#endif
 }
 
 void CTreeView::itemDoubleClickedOver(QTreeWidgetItem* pItem, int column)
 {
-    if(!pItem || column != 0 || parentDeepCount(pItem) == 0)
+    CTreeObject* objectItem = dynamic_cast<CTreeObject*>(pItem);
+    if(!objectItem || !objectItem->node() || column != 0)
         return;
+    m_pView->selectNode(objectItem->node(), false, true);
     m_pView->moveCamToSelectedObjects();
 }
 
 void CTreeView::revealNode(CNode* pNode)
 {
+    markNode(pNode, true);
+}
+
+void CTreeView::markNode(CNode* pNode, bool scrollToNode)
+{
     if(!pNode)
         return;
+    QList<CNode*> nodes;
+    if(m_pView)
+        nodes = m_pView->selectionSnapshot();
+    if(!nodes.contains(pNode))
+        nodes.append(pNode);
+    markNodes(nodes, pNode, scrollToNode);
+}
+
+void CTreeView::markNodes(const QList<CNode*>& nodes, CNode* primaryNode,
+                          bool scrollToPrimary)
+{
+    QSet<CNode*> wanted;
+    for(CNode* node : nodes)
+        if(node) wanted.insert(node);
+    if(wanted.isEmpty())
+    {
+        clearViewportSelectionMarker();
+        return;
+    }
+
+    clearSelection();
+    CTreeObject* primaryItem = nullptr;
     QTreeWidgetItemIterator it(this);
     while(*it)
     {
         CTreeObject* item = dynamic_cast<CTreeObject*>(*it);
-        if(item && item->node() == pNode)
+        if(item && wanted.contains(item->node()))
         {
+            item->setSelected(true);
             for(QTreeWidgetItem* parent = item->parent(); parent; parent = parent->parent())
                 parent->setExpanded(true);
-            setCurrentItem(item, 0, QItemSelectionModel::ClearAndSelect);
-            scrollToItem(item, QAbstractItemView::PositionAtCenter);
-            return;
+            if(item->node() == primaryNode)
+                primaryItem = item;
         }
         ++it;
+    }
+    if(primaryItem)
+    {
+        setCurrentItem(primaryItem, 0, QItemSelectionModel::NoUpdate);
+        if(scrollToPrimary)
+            scrollToItem(primaryItem, QAbstractItemView::PositionAtCenter);
     }
     applyFilter();
 }
@@ -457,6 +520,11 @@ void CTreeView::clearViewportSelectionMarker()
 
 void CTreeView::onChangeNodeId(uint oldId, uint newId)
 {
+    Q_UNUSED(oldId);
+    Q_UNUSED(newId);
+    if(m_pView) m_pView->collectObjectTreeData();
+    return;
+#if 0
     QTreeWidgetItemIterator it(this);
     while (*it)
     {
@@ -472,10 +540,15 @@ void CTreeView::onChangeNodeId(uint oldId, uint newId)
     }
     sortItems(0, Qt::SortOrder::AscendingOrder);
     applyFilter();
+#endif
 }
 
 void CTreeView::onChangeObjectName(CNode *pNode)
 {
+    Q_UNUSED(pNode);
+    if(m_pView) m_pView->collectObjectTreeData();
+    return;
+#if 0
     uint nodeId = pNode->mapId();
     QTreeWidgetItemIterator it(this);
     while (*it)
@@ -494,6 +567,7 @@ void CTreeView::onChangeObjectName(CNode *pNode)
     addNodeToTree(pNode);
 
     //sortItems(0, Qt::SortOrder::AscendingOrder);
+#endif
 }
 
 CTreeObject::CTreeObject(QTreeWidget *pParent): QTreeWidgetItem(pParent)

@@ -44,12 +44,14 @@ SProfileCapability capability(const QString& id, EProfileCapabilityStatus status
 }
 
 SRuntimeComponent runtimeComponent(const QString& id, const QString& path,
-                                   const QStringList& acceptedSha256 = QStringList())
+                                   const QStringList& acceptedSha256 = QStringList(),
+                                   bool enforceHash = true)
 {
     SRuntimeComponent value;
     value.id = id;
     value.path = path;
     value.acceptedSha256 = acceptedSha256;
+    value.enforceHash = enforceHash;
     return value;
 }
 
@@ -108,6 +110,8 @@ bool profileFromJson(const QByteArray& bytes, const QString& source,
             component.id = componentObject.value("id").toString().trimmed();
             component.path = componentObject.value("path").toString().trimmed();
             component.required = !componentObject.contains("required") || componentObject.value("required").toBool();
+            component.enforceHash = !componentObject.contains("enforceHash")
+                || componentObject.value("enforceHash").toBool();
             component.acceptedSha256 = jsonStrings(componentObject, "acceptedSha256");
             if(!component.id.isEmpty() && !component.path.isEmpty())
                 value.runtimeComponents.append(component);
@@ -127,6 +131,21 @@ bool profileFromJson(const QByteArray& bytes, const QString& source,
                 profileCapability.runtimeManifestId = capabilityObject.value("runtimeManifestId").toString();
             }
             value.capabilities.insert(profileCapability.id, profileCapability);
+        }
+        const QJsonObject providers = object.value("providers").toObject();
+        for(auto it = providers.constBegin(); it != providers.constEnd(); ++it)
+        {
+            SProfileProviderBinding binding;
+            if(it.value().isString())
+                binding.id = it.value().toString().trimmed();
+            else
+            {
+                const QJsonObject providerObject = it.value().toObject();
+                binding.id = providerObject.value("id").toString().trimmed();
+                binding.interfaceVersion = providerObject.value("interfaceVersion").toInt(1);
+            }
+            if(!binding.id.isEmpty())
+                value.providers.insert(it.key(), binding);
         }
     }
     if(value.id.isEmpty() || value.displayName.isEmpty() || value.resourceDirectories.isEmpty())
@@ -200,25 +219,19 @@ QVector<SResourceProfile> builtInResourceProfiles()
     jmv.fixedModRoots = QStringList() << "Starter/MODS/JamaisVu135";
     jmv.searchParent = "Starter/MODS";
     jmv.directoryNameContains = QStringList() << "JamaisVu";
-    jmv.requiredFiles = QStringList() << "main.lua" << "addon.dll";
+    jmv.requiredFiles = QStringList() << "main.lua";
     jmv.requiredDirectories = QStringList() << "res" << "Maps";
     jmv.signatureFiles = QStringList() << "res/databaseJmv.res";
     jmv.resourceDirectories = QStringList() << "{modRoot}/res" << "{gameRoot}/Res";
     jmv.mapDirectories = QStringList() << "{modRoot}/Maps" << "{gameRoot}/Maps";
     jmv.runtimeManifestId = "jmv-development-stack-v1";
+    for(const QString& role : {QString("database"), QString("characterAppearance"),
+                               QString("equipmentLayout"), QString("unitAnimation"),
+                               QString("semanticValidation")})
+        jmv.providers.insert(role, {"jmv.v1", 1});
     jmv.runtimeComponents
         << runtimeComponent("starter-engine", "{gameRoot}/Starter/Engine/game.exe",
-                            {"BE0FC330035E03983CCE590038CC7F881F1F5D1BCF082717F31776DD4DEE94E2"})
-        << runtimeComponent("starter-addon", "{gameRoot}/Starter/addon.dll",
-                            {"C02F6766B23F549A17455491B4EBC3B339F31AC153918D43B0183FD506ED11A9"})
-        << runtimeComponent("spell-addon", "{gameRoot}/Starter/Engine/SpellAddonX.asi",
-                            {"E6E0C8773CB8A2B064532D2E5AC5AD6D521129F8330FB30884D569E5CA52D151"})
-        << runtimeComponent("jmv-addon", "{modRoot}/addon.dll",
-                            {"9339552E199966A48ABD92808EA29674A0217FEC4DDBFCBCE27FECD7D85CA4A2"})
-        << runtimeComponent("jmv-lua", "{modRoot}/main.lua",
-                            {"23BC21E8A28126ACE5233413B75C51B21C1CFA97461E2BFC8EBAEE60F9C19318"})
-        << runtimeComponent("spell-addon-config", "{modRoot}/SPELLADDON.INI",
-                            {"7A096E354B02B82141DBE7E6E85917ED330BB374825F902FC1D6CB98718DF605"});
+                            {"BE0FC330035E03983CCE590038CC7F881F1F5D1BCF082717F31776DD4DEE94E2"});
     jmv.capabilities.insert("mob.losslessEditing", capability("mob.losslessEditing", EProfileCapabilityStatus::Unsupported,
         "Copy-only hardening is active until UI edits are migrated to provenance transactions."));
     jmv.capabilities.insert("mob.perspectiveDiff", capability("mob.perspectiveDiff", EProfileCapabilityStatus::Experimental,
@@ -227,10 +240,10 @@ QVector<SResourceProfile> builtInResourceProfiles()
         "A fingerprinted temporary JMV bridge is implemented after the public console route was rejected; runtime validation is pending.", jmv.runtimeManifestId));
     jmv.capabilities.insert("runtime.multiMobLaunch", capability("runtime.multiMobLaunch", EProfileCapabilityStatus::Unsupported,
         "JMV supplemental MOB discovery order has not been proven.", jmv.runtimeManifestId));
-    jmv.capabilities.insert("runtime.appearanceResolver", capability("runtime.appearanceResolver", EProfileCapabilityStatus::Experimental,
-        "Database-backed appearance resolution is incomplete.", jmv.runtimeManifestId));
-    jmv.capabilities.insert("runtime.equipmentResolver", capability("runtime.equipmentResolver", EProfileCapabilityStatus::Unsupported,
-        "JMV equipment-layout rules are not implemented.", jmv.runtimeManifestId));
+    jmv.capabilities.insert("runtime.appearanceResolver", capability("runtime.appearanceResolver", EProfileCapabilityStatus::Available,
+        "Profile-database and strict embedded-MOB appearance precedence is implemented.", jmv.runtimeManifestId));
+    jmv.capabilities.insert("runtime.equipmentResolver", capability("runtime.equipmentResolver", EProfileCapabilityStatus::Available,
+        "Ordinary, 1H+shield, dual-1H, and single-2H layouts are available; dual-2H and 2H+shield remain diagnostic-only.", jmv.runtimeManifestId));
     jmv.capabilities.insert("runtime.semanticValidation", capability("runtime.semanticValidation", EProfileCapabilityStatus::Experimental,
         "Runtime validation requires manual JMV game tests.", jmv.runtimeManifestId));
 
@@ -242,8 +255,13 @@ QVector<SResourceProfile> builtInResourceProfiles()
     base.resourceDirectories = QStringList() << "{gameRoot}/Res";
     base.mapDirectories = QStringList() << "{gameRoot}/Maps";
     base.runtimeManifestId = "base-ei-v1";
+    for(const QString& role : {QString("database"), QString("characterAppearance"),
+                               QString("equipmentLayout"), QString("unitAnimation"),
+                               QString("semanticValidation")})
+        base.providers.insert(role, {"base.standard.v1", 1});
     base.runtimeComponents << runtimeComponent("base-game", "{gameRoot}/game.exe",
-        {"B871D70D3876B2A5634F0920C92118BC49058B50C7D8CBE68376349F51C2E570"});
+        {"B871D70D3876B2A5634F0920C92118BC49058B50C7D8CBE68376349F51C2E570",
+         "8ED3F9A500D84D822BD311B74B1B49D5CD16DD12D3502C27D7667957311036C1"});
     base.capabilities.insert("mob.losslessEditing", capability("mob.losslessEditing", EProfileCapabilityStatus::Unsupported,
         "Copy-only hardening is active until UI edits are migrated to provenance transactions."));
     base.capabilities.insert("mob.perspectiveDiff", capability("mob.perspectiveDiff", EProfileCapabilityStatus::Experimental,
@@ -252,10 +270,10 @@ QVector<SResourceProfile> builtInResourceProfiles()
         "Exact-hash Base EI bridge injection and staged-map redirection are an experimental feasibility probe.", base.runtimeManifestId));
     base.capabilities.insert("runtime.multiMobLaunch", capability("runtime.multiMobLaunch", EProfileCapabilityStatus::Unsupported,
         "Direct multi-MOB launch is not in Base EI scope."));
-    base.capabilities.insert("runtime.appearanceResolver", capability("runtime.appearanceResolver", EProfileCapabilityStatus::Experimental,
-        "Base database-backed appearance resolution is incomplete."));
-    base.capabilities.insert("runtime.equipmentResolver", capability("runtime.equipmentResolver", EProfileCapabilityStatus::Unsupported,
-        "Base equipped-character rendering is not implemented."));
+    base.capabilities.insert("runtime.appearanceResolver", capability("runtime.appearanceResolver", EProfileCapabilityStatus::Available,
+        "Profile-database and strict embedded-MOB appearance precedence is implemented."));
+    base.capabilities.insert("runtime.equipmentResolver", capability("runtime.equipmentResolver", EProfileCapabilityStatus::Available,
+        "Ordinary armor and the Base single 1H/ranged weapon rule are implemented."));
     base.capabilities.insert("runtime.semanticValidation", capability("runtime.semanticValidation", EProfileCapabilityStatus::Experimental,
         "Runtime validation requires manual Base EI game tests."));
 
@@ -302,6 +320,7 @@ SResourceProfileEvaluation evaluateResourceProfile(const QString& gameRoot,
     result.profileName = profile.displayName;
     result.runtimeManifestId = profile.runtimeManifestId;
     result.capabilities = profile.capabilities;
+    result.providers = profile.providers;
     if(!QFileInfo(QDir(result.gameRoot).filePath("game.exe")).isFile())
     {
         result.messages.append("The selected folder does not contain game.exe.");
@@ -371,6 +390,7 @@ SResourceProfileEvaluation evaluateResourceProfile(const QString& gameRoot,
         SRuntimeComponentEvaluation evaluation;
         evaluation.id = component.id;
         evaluation.path = expandPath(component.path, result.gameRoot, result.modRoot);
+        evaluation.enforceHash = component.enforceHash;
         const QFileInfo componentInfo(evaluation.path);
         evaluation.exists = componentInfo.isFile();
         if(evaluation.exists)
@@ -387,8 +407,14 @@ SResourceProfileEvaluation evaluateResourceProfile(const QString& gameRoot,
             runtimeComplete = false;
             result.messages.append("Missing runtime component: " + evaluation.path);
         }
-        if(component.required && (!evaluation.exists || !evaluation.hashAccepted || component.acceptedSha256.isEmpty()))
+        if(component.required && component.enforceHash
+           && (!evaluation.exists || !evaluation.hashAccepted || component.acceptedSha256.isEmpty()))
+        {
             runtimeValidated = false;
+            if(evaluation.exists)
+                result.messages.append(QString("Runtime hash mismatch [%1]: %2 (SHA-256 %3)")
+                    .arg(component.id, evaluation.path, evaluation.sha256));
+        }
         result.runtimeComponents.append(evaluation);
     }
     result.runtimeStackComplete = runtimeComplete;

@@ -5,16 +5,24 @@ work is ordered from the newest planned minor line to the oldest completed one.
 An item is checked only after its implementation has landed and received the
 stated validation. Completed code should carry a commit, test, or release link.
 
-Current development line: `0.2.1-alpha.13` focused closed testing.
+Current development line: `0.2.1-alpha.42` focused closed testing. The 0.2.x
+feature set is substantially complete; the remaining release work is the final
+runtime/corpus matrix, a small number of explicit confirmation cases, and
+version/tag/package housekeeping rather than another editor architecture pass.
 
 <details open>
 <summary><strong>General wishlist — not assigned to a release</strong></summary>
 
 ## Compatibility and profile support
 
-- [ ] Define a documented provider/extension contract for other mods.
-  - A mod opts into only the capabilities it actually implements.
-  - Unsupported profile features remain hidden or disabled with a reason.
+- [ ] **Post-1.0:** define an optional runtime-plugin contract for other mods
+  only when their authors request direct-launch support.
+  - Core editing, validation, collections, and saving never depend on a game
+    executable or runtime plugin.
+  - Test Current Map remains an optional bonus capability. JMV and the
+    experimental Base provider do not imply support for other Starter builds.
+  - A mod opts into only the runtime capabilities it implements; unsupported
+    commands remain hidden or disabled with a reason.
 
 ## Optional editor integrations and accessibility
 
@@ -23,7 +31,17 @@ Current development line: `0.2.1-alpha.13` focused closed testing.
   built-in deterministic diff or exposing private/unsaved data silently.
 - [ ] Add configurable UI font-size scaling for 4K displays and accessibility.
 - [ ] Add a Russian translation and an in-app language switch.
-- [ ] Correct the remaining spacing/alignment offsets for disabled menu items.
+- [x] Render disabled menu items as a single ordinary grey label without
+  Fusion's bright etched underlay or an alignment offset.
+  ([`c38aaa7`](https://github.com/Ilufus/ei-mapper-endurance/commit/c38aaa7))
+
+## MOB diff enhancements
+
+- [ ] Add baseline/candidate swapping, original-versus-current entry points,
+  persisted column widths, a read-only 3D perspective overlay, deterministic
+  JSON export, and explicit unresolved handling for ambiguous duplicate-NID
+  matches. These are useful extensions to the working file-to-file semantic
+  diff, but are postponed beyond the 0.2.x stabilization line.
 - [x] Make the major workspace panels dockable, detachable, recoverable from
   **View**, and persistently rearrangeable within Qt5's supported docking
   model. Object Outliner and Object Properties start as a right-edge vertical
@@ -62,10 +80,43 @@ Current development line: `0.2.1-alpha.13` focused closed testing.
 - [ ] Convert concrete regressions into minimized synthetic fixtures whenever
   the format permits this without distributing game or JMV assets.
 
+## Object authoring conveniences
+
+- [x] Add an explicit **Convert World Object to Lever...** transaction.
+  - Preserve the original NID, transform, model, textures, body parts, common
+    object fields, directory membership, ordering position, and script-facing
+    identity.
+  - Use the corpus-proven Base/JMV lever schema directly: replace the raw
+    `OBJECT` envelope with `LEVER`, insert the six standard lever records, patch
+    `OBJTYPE` 54 to 60, and preserve every common/opaque target record. Never
+    send the converted object through the legacy rebuilding serializer. See
+    `docs/research/world-object-to-lever-audit.md`.
+  - Show editable lever defaults before conversion (open mode/key/skill, current
+    and total states, cycling, door, and graph-recalculation flags), scan the NID
+    for script references, and apply the subtree replacement as one undoable
+    transaction.
+  - Refuse conversion only when the source is not a structurally proven world
+    object, its raw provenance is unavailable/stale, or the active profile
+    declares a different lever schema. A matching lever model/template is not
+    required: shipped Base and JMV maps use multiple identical models as both
+    ordinary objects and levers, including within the same MOB.
+  - Implementation: [`a8f9cc1`](https://github.com/Ilufus/ei-mapper-endurance/commit/a8f9cc1).
+  - [ ] Runtime-validate a converted already-shared model and a model never before
+    used as a lever in disposable Base and JMV test maps before enabling the
+    command by default for stable profile releases. The alpha command remains
+    available for these disposable validation tests.
+
 </details>
 
 <details>
-<summary><strong>1.0.x or later — optional legacy-platform compatibility</strong></summary>
+<summary><strong>1.0.x or later — distribution and legacy-platform compatibility</strong></summary>
+
+## Distribution security and reputation
+
+- [ ] Separate the experimental Base runtime injector from ordinary JMV tester
+  packages, add stable Windows version metadata, evaluate code signing, and
+  establish a vendor false-positive submission workflow for immutable release
+  hashes. This is 1.0-era distribution hardening, not a 0.2.x feature gate.
 
 ## Windows 7 renderer compatibility
 
@@ -138,6 +189,10 @@ stroke or ordinary MPR Save.
   records whether the edited terrain actually causes a navigation defect.
 - [ ] Track terrain/object edits as navigation-dirty regions and retain the
   oversized-door runtime-regeneration convention as an explicit diagnostic.
+- [ ] Replace Play from Here's deliberately conservative geometric clearance
+  check with AI-graph-backed walkability and nearest-valid-position lookup.
+  The current check may reject legitimate standable mesh objects and platforms;
+  do not loosen it with unverified heuristics before graph support is available.
 
 ## Zone 6 source and state research
 
@@ -315,9 +370,107 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
 
 ### Current 0.2.x status
 
-- **Current tester build:** `0.2.1-alpha.13`, retaining alpha.12's same-session
-  orphan cleanup and adding the accumulated validation-stall, stale-family,
-  missing-dependency-provenance, and modular-panel fixes.
+- **Current test candidate:** `0.2.1-alpha.42`. Alpha.42 completes native
+  clipboard behavior for individual Vector3 components without selecting or
+  flashing the parent compound property. Alpha.41/42 make component context
+  selection exclusive and route child-label context menus directly. Alpha.38
+  also fixes the shutdown crash seen in alpha.34 by retaining the diagnostic
+  OpenGL timer query until process/context destruction instead of destroying it
+  through a dead Qt surface.
+  ([`0fa4708`](https://github.com/Ilufus/ei-mapper-endurance/commit/0fa4708),
+  [`3d9c4e8`](https://github.com/Ilufus/ei-mapper-endurance/commit/3d9c4e8))
+- **Recent confirmed baseline:** Alpha.32 adds a persistent
+  0.1x-10x viewport camera-speed control, a configurable Ctrl+mouse-wheel
+  gesture, and a cancellable 15-second notice before each periodic recovery
+  autosave. Selection-only undo steps no longer rebuild a full lossless MOB
+  candidate or schedule family validation, removing the observed selection
+  hitches. ([`c5feca5`](https://github.com/Ilufus/ei-mapper-endurance/commit/c5feca5))
+  Alpha.31 corrects the lever
+  eligibility rule using the complete Base/JMV corpus: basic `OBJECT` records
+  with proven subtypes 53 (flora), 54 (ordinary scenery), and 55
+  (stone/scenery) can be converted; malformed, duplicate, and unproven subtype
+  records still fail closed. Alpha.30 fixes the remaining
+  runtime-process ownership boundary: an unrelated `game.exe` can no longer
+  make an empty/legacy recovery journal claim an active Endurance test, and the
+  editor accepts alpha.29's accidental UTF-16LE `game.pid` while the rebuilt
+  host writes the protocol as ASCII. This restores Hot Reload readiness against
+  the hosted child `game.exe`. ([`e18f868`](https://github.com/Ilufus/ei-mapper-endurance/commit/e18f868))
+  Alpha.30 also adds the lossless, one-step World Object to Lever transaction
+  with editable defaults and script-reference warning.
+  ([`a8f9cc1`](https://github.com/Ilufus/ei-mapper-endurance/commit/a8f9cc1))
+  Alpha.29 fixes hosted JMV hot
+  reload dispatch: readiness already resolved the bridge thread against the
+  owned `game.exe`, but dispatch incorrectly compared that thread with the
+  separate injector-host PID. Runtime process identity now has one shared
+  resolver and a regression test. Alpha.28 retained the approved
+  alpha.24 character/render pipeline while reverting the unfinished environment,
+  weather, sky, and shadow prototype. Game & Mod Setup treats any effective
+  resource-root change like a profile switch: dirty documents are offered for
+  saving, the workspace is unloaded, resources are reinitialized, and Maps &
+  Collections is refreshed. Owned JMV tests virtualize both Nival and Starter
+  registry roots and guard stale same-mod absolute paths, so two installations
+  cannot silently mix the selected `game.exe` with another installation's JMV
+  maps or database. ([`b76fc3e`](https://github.com/Ilufus/ei-mapper-endurance/commit/b76fc3e))
+  Alpha.27 evidence also proved that the owned injector activated Endurance's
+  engine detours before JMV `AddonMain` began its own patch phase. Alpha.28
+  prepares path isolation before resume but defers engine detours until observed
+  executable patch activity becomes quiescent; no addon/ASI hash becomes a
+  manifest dependency.
+  Alpha.28 dual-install evidence shows the selected executable and virtualized
+  registry roots are correct, but cross-install stale-path redirection does not
+  reliably replace all Starter/JMV state. Treat multiple independent Starter
+  roots as unsupported pending a product decision; the proposed 0.2.x behavior
+  is a non-destructive preflight warning instead of broader runtime hooks.
+  Alpha.26 retained the alpha.24 render and
+  autosave baseline while hardening validation navigation and the NVIDIA test
+  overlay. JMV direct-launch compatibility now depends only on the exact
+  fingerprinted Starter `game.exe`; Starter addon.dll, SpellAddonX.asi, JMV
+  addon.dll, mutable Lua, and SpellAddon configuration no longer gate editor
+  discovery or Test Current Map. Optional autorun-MOB conveniences report their
+  own runtime evidence instead of defining global compatibility.
+  ([`eff6f99`](https://github.com/Ilufus/ei-mapper-endurance/commit/eff6f99))
+  Alpha.24 integrated the render pipeline
+  through [`191ac85`](https://github.com/Ilufus/ei-mapper-endurance/commit/191ac85e1990d9f7eddfef7d7cdef1a29aa67930)
+  and delivering the verified live autosave-cadence signal
+  ([`269c807`](https://github.com/Ilufus/ei-mapper-endurance/commit/269c80759a334174eca26eec7022524ffff4ea64)).
+  Post-alpha.24 stabilization distinguishes exact-hash code components from
+  fingerprinted mutable JMV scripts/configuration, accepts the known patched
+  JMV addon variant, and identifies a mismatched component/path/hash instead of
+  issuing only a generic manifest rejection. Validation object actions now load
+  an unloaded source MOB before selecting its proven object. Two supplied
+  NVIDIA crashes were traced to entrance-overlay draws inheriting stale mesh
+  vertex attributes; the overlay now resets VAO/VBO attribute state first.
+  ([`0b206e5`](https://github.com/Ilufus/ei-mapper-endurance/commit/0b206e5))
+  Alpha.23 added explicit autosave scheduling telemetry, Autosave Now, and Open
+  Backup Folder, but tester logs proved that changing the cadence still required
+  a restart. Alpha.22 fixed the General-settings
+  registration that left alpha.21's visible autosave controls disconnected
+  from persistence and prevented its timer from starting. Alpha.21 completed the remaining
+  release-facing editor priorities: exact duplicate-MOB detection, guarded
+  workspace replacement for manual MPR opens, named save/load progress,
+  versioned recoverable autosaves, and the optimized profile-correct humanoid
+  rendering merge. Alpha.20 hardened the dockable Loaded Map
+  tree, explicit active/locked MOB ownership, independent MPR/MOB visibility,
+  safe targeted MOB unload, all-loaded-MOB outliner grouping, locked-source
+  inspection/copying, Ctrl+T owner activation, and validated numeric component
+  copying. Undo/redo now reveals the MOB owning the applied document change.
+  Implementations: [`517cc1f`](https://github.com/Ilufus/ei-mapper-endurance/commit/517cc1f),
+  [`90eb899`](https://github.com/Ilufus/ei-mapper-endurance/commit/90eb899),
+  [`8a0badd`](https://github.com/Ilufus/ei-mapper-endurance/commit/8a0badd).
+  Alpha.19 fixes the unload-time stale-MOB lookup found in alpha.18 and adds
+  explicit selection ownership, persistent cross-MOB selection, locked-MOB
+  viewport colouring, outliner ancestry, and multi-row unload. Alpha.20 fixes
+  Ctrl+A ownership counters, aligns and drag-batches MPR/MOB visibility,
+  colours locked ancestry amber, and coalesces expensive family validation
+  outside active edit gestures. The focused Loaded Map interaction pass is
+  confirmed. Current source also mutes the complete outliner hierarchy of a
+  hidden MOB while retaining expansion and visibility controls
+  ([`807518c`](https://github.com/Ilufus/ei-mapper-endurance/commit/807518c)).
+  Alpha.21 activates an already loaded MOB instead of loading the same canonical
+  file twice; paths are canonicalized and compared case-insensitively.
+  Implementations: [`87c36b1`](https://github.com/Ilufus/ei-mapper-endurance/commit/87c36b1),
+  [`23cd7c4`](https://github.com/Ilufus/ei-mapper-endurance/commit/23cd7c4),
+  [`8200aaa`](https://github.com/Ilufus/ei-mapper-endurance/commit/8200aaa).
 - **Alpha.13 validation/UI changes:** validation no longer performs expensive automatic
   replacement-ID scans for fully shared ranges, map switches refresh their
   runtime-family identity, missing `AddMob(...)` dependencies identify the
@@ -330,20 +483,54 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
 - **Direct JMV gameplay:** working on tested normal, dungeon, and briefing maps,
   including selected entrances, zone metadata, startup-movie suppression,
   Godmode, supplemental `AddMob` loading, and temporary-map staging.
-- **0.2.x runtime release blockers:** runtime-validate generation Save/Load,
-  authoritative state handling from gameplay/Main Menu/inventory/store/world
-  map/transition, and interrupted-run recovery; then run the final focused
+- **0.2.x runtime release blockers:** generation-isolated Save/Load,
+  authoritative gameplay/Main Menu/inventory/store/world-map/transition state
+  handling, unsafe-transition deferral, same-map position/facing restoration,
+  and cross-MOB hot reload are runtime-confirmed. Different-map anchor reset
+  and authoritative result reporting are implemented; run the final focused
   gameplay matrix.
 - **0.2.1 hot reload:** protocol v2, immutable map/save generations, normal
   Main Menu/New Game rebootstrap, responsive stale-transition world-map
-  classification, and orphan monitoring are implemented. Supplemental/
-  collection runtime validation and same-position restoration remain unfinished.
+  classification, orphan monitoring, and same-position restoration are
+  implemented and runtime-confirmed. Nested/conditional supplemental loading
+  remains an explicit confirmation item because no controlled fixture exists.
 - **Stable 0.2.0 editor gate:** parameter-aware outliner filtering with strict
   contiguous matching by default and explicit `~` subsequence fuzziness.
   Unreal-style MOB ownership/locking remains the larger workspace follow-up.
 
 ### Critical: structural zone-family NID validation
 
+- [x] **HIGH — alpha.25 load re-entrancy:** prevent a second map load from
+  starting while the first MOB is still finalising.
+  - The supplied log shows Zone 4 starting at 04:01:21 while Zone 17 visual
+    preloading continued until 04:01:30. Only the Zone 17 landscape was
+    unloaded because its MOB had not yet been registered, leaving both map
+    sets loaded together.
+  - Block map/collection activation throughout every load-finalisation phase;
+    replace unrestricted event pumping with input-excluding progress updates.
+  - Validation must still report real overlaps in this state, but label them as
+    cross-family workspace findings rather than claiming Zone 4 and Zone 17
+    are one runtime family.
+  - Alpha.26 makes load progress input-blocking, excludes user input from all
+    explicit progress event pumping, rejects nested map/collection/document
+    activation, and disables open/save/test actions until finalisation ends.
+
+- [x] **RELEASE BLOCKER — alpha.25 JMV launch transport regression:** diagnose
+  runs where staging and `game.exe` launch succeed but the temporary bridge
+  entry point is never invoked.
+  - Run `20260721-190712-5a815226` reached the normal main menu and exited
+    cleanly, but produced neither `runtime.log` nor `bridge-result.log`.
+  - The staged files, JMV DEV `plugin.dll` slot, bridge exports, and exact
+    supported `game.exe` hash were all present; this is not an entrance, map,
+    or relaxed-manifest rejection.
+  - Alpha.26 removes the DEV plugin slot from Endurance delivery. Both JMV and
+    Base now use the editor-owned suspended-process host, run-local bridge DLL,
+    and explicit `EnduranceInitialize` export. JMV addon/ASI/Lua remain ordinary
+    mod gameplay components rather than bridge-delivery dependencies.
+  - The selected game root is virtualized inside the owned process so Evil
+    Islands' shared registry paths cannot redirect one Base installation into
+    another. Two exact Base executable hashes are admitted; all detour bytes
+    remain independently guarded.
 - [x] Detect intra-file duplicates and cross-file NID collisions across the
   complete active zone family before more multi-MOB editing is released.
   This is critical because the confirmed `zone7.mob` / `Autozone7altar.mob`
@@ -506,7 +693,7 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
 - [x] Expose **Stop JMV Map Test** in Endurance while its owned game process is
   active, with customizable `Shift+Esc` as the default shortcut
   ([implementation](https://github.com/Ilufus/ei-mapper-endurance/commit/5f693b2)).
-- [ ] Runtime-validate the guarded runtime-readiness/state gate.
+- [x] Runtime-validate the guarded runtime-readiness/state gate.
   - A completed main-menu map load does not prove UI/session initialization is
     finished on all hardware.
   - Observe a fingerprinted engine state; do not add another fixed delay.
@@ -531,22 +718,46 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
   - Read zone type from `map.txt` rather than assuming every staged pair is an
     ordinary gameplay zone.
   - Add explicit metadata for new maps that do not yet have a map-table entry.
-- [ ] Runtime-prove Save/Load inside one generation and the empty Load list after
+- [x] Runtime-prove Save/Load inside one generation and the empty Load list after
   hot reload. Saves from an older staged-map generation must remain invisible.
 - [x] Verify startup-movie suppression for root and active-mod movie paths.
   - Alpha.58 hides `1c.bik` and `nival.bik` in-process without renaming them.
   - Preserve map-specific cutscenes; only startup movies are skipped by default.
-- [ ] Add authoritative bridge results.
+- [x] Add authoritative bridge results.
   - Report actual loaded zone, MPR/MOB hashes, player count, selected entrance,
     save namespace, readiness, and cleanup outcome.
   - Distinguish a genuine crash from the game's known abnormal-looking but
     user-initiated exit path.
-- [ ] Complete the focused Alpha.58 matrix and publish `0.2.0`.
+  - Present post-test warnings/errors in a non-modal PIE-style notification
+    that auto-dismisses after a few seconds when untouched, with **Dismiss**
+    and **Open Log** actions. Keep the complete text in the workflow log now
+    and the future message-log panel later.
+  - Alpha.15 writes a structured `result.json` after every owned test process,
+    correlates observed loader paths with the hash-verified staged payload,
+    distinguishes user Stop Test from a crash exit, and records source-file and
+    hash-owned cleanup results.
+  - The editor validates deterministic evidence automatically and logs the
+    complete report. Warnings/errors use the non-modal notification above;
+    successful runs remain log-only.
+  - `EIMapperEndurance.exe --test-run-report <run-root> [--json]` provides the
+    same deterministic check for closed-test collection and automation.
+    Implementation: [`7677c60`](https://github.com/Ilufus/ei-mapper-endurance/commit/7677c60).
+- [ ] Complete the focused 0.2.x release matrix and publish `0.2.0`.
   - Normal JMV gameplay map.
   - Zone17/zone18 or another map that previously refused script injection.
   - Dungeon map and `bz` briefing map.
   - `drawall`, traversal, generation-local Save/Load/Main Menu, return/stop, and
     graceful exit.
+  - Automate staging/hash/source-preservation checks, launch readiness,
+    reported map/player/entrance/generation identity, same/different-map reload,
+    stop, and cleanup. Retain manual checks only for rendering, traversal,
+    `drawall`, and in-game Save/Load interaction.
+  - [x] Implement the automatic per-run evidence collector and offline report
+    validator. It evaluates every completed user-driven launch/reload without
+    adding extra runtime actions or touching game state.
+  - [ ] Exercise the matrix scenarios and archive their passing `result.json`
+    reports; rendering, traversal, `drawall`, and Save/Load behavior remain the
+    intentionally manual observations.
 
 ### Confirmed runtime behavior and research risks
 
@@ -617,7 +828,7 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
   payloads outside the Endurance-owned test-run directory.
   ([`4e62424`](https://github.com/Ilufus/ei-mapper-endurance/commit/4e62424))
 
-- [ ] Make repeated Ctrl+F5 hot-reload the Endurance-owned game process.
+- [x] Make repeated Ctrl+F5 hot-reload the Endurance-owned game process.
   - [x] Validate and restage the exact current in-memory pair under the current
     run, with fresh hashes and a losslessly patched autorun bootstrap.
   - [x] Keep a process-private message hook on the captured game thread and
@@ -631,32 +842,35 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
   - [x] Never attach to or stop an independently launched game.
   - [x] Report readiness only after the first staged loader completed; report
     each reload completion/failure back to the editor with a 20-second timeout.
-  - [ ] Runtime-prove that the verified normal zone-transition controller safely
-    unloads and reloads the same staged pair without restarting JMV. Current
-    source has reloaded the primary MOB in testing, but is not considered fully
-    validated until supplemental/collection MOBs also reload exactly once.
-  - [ ] Re-test cross-MOB copied objects during hot reload with alpha.4 or later;
+  - [x] Runtime-prove that the verified normal zone-transition controller safely
+    unloads and reloads the same staged pair without restarting JMV. Exact-once
+    supplemental/collection confirmation remains the only unchecked child.
+  - [x] Re-test cross-MOB copied objects during hot reload with alpha.4 or later;
     alpha.4 fixed the provenance rejection that previously stopped trees copied
     from `zone1.mob` into `Autozone1cyclopus.mob` from staging.
   - Implementation: [`5011954`](https://github.com/Ilufus/ei-mapper-endurance/commit/5011954).
-- [ ] Preserve position on same-map reload.
-  - Capture player position and facing before teardown.
-  - Restore them only after ground, bounds, and collision validation.
-  - Fall back to the selected map-table entrance when unsafe.
-- [ ] Use normal entrance deployment when the editor switches to a different
+- [x] Preserve position on same-map reload.
+  - Runtime testing confirms position and facing are captured before teardown,
+    restored after safety checks, and fall back to the selected entrance when
+    restoration is unsafe.
+- [x] Use normal entrance deployment when the editor switches to a different
   map set before Ctrl+F5.
+  - [x] Bind Play-from-Here state to the exact loaded MPR/map-table context and
+    invalidate every picking/movement/selection remnant when that context
+    changes. Stale anchors are ignored at launch even if retained accidentally;
+    alpha.14 runtime testing confirms map B no longer inherits map A's anchor.
+    ([`3f658af`](https://github.com/Ilufus/ei-mapper-endurance/commit/3f658af))
   - [x] Clear the previous generation's optional bootstrap MOB when the new
     reload request contains no Play from Here/Godmode/supplemental bootstrap.
     This prevents map A's cleared custom spawn from being replayed after map B
     selects a normal entrance. Runtime confirmation is pending the next tester
     build. ([`6286325`](https://github.com/Ilufus/ei-mapper-endurance/commit/6286325))
-- [ ] Keep the staged version mounted when travelling away and returning.
+- [x] Keep the staged version mounted when travelling away and returning.
   - Returning to the edited map must not silently load the installed original.
   - Record every active staged map identity and hash.
-- [ ] Reject or defer hot reload while the runtime is between zones/on a map
-  loading screen. A tester observed `game.exe` crash when a reload message was
-  delivered during that state; this remains low priority until the bridge has
-  an authoritative transition-idle signal.
+- [x] Reject or defer hot reload while the runtime is between zones/on a map
+  loading screen. Runtime testing confirms the bridge now defers until a stable
+  state instead of delivering into the unsafe transition window.
 - [x] Document the current staging split: complete immutable payloads and
   reload generations live under AppData, while JMV additionally requires one
   randomly named, hash-owned MPR/MOB alias in the active mod `Maps` directory.
@@ -671,14 +885,66 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
 - [x] Preserve exact raw object templates when copying between different MOBs.
   Cross-MOB paste now carries the donor source and clean-projection subtrees,
   validates their hashes, and can save or hot-reload the destination without
-  falling back to the rebuilding serializer. Runtime validation with trees
-  copied from `zone1.mob` into `Autozone1cyclopus.mob` remains pending.
-- [ ] Replace the secondary-MOB workflow with Unreal-style multi-MOB editing.
-  - Show every open MOB in a **Loaded MOBs** list/tab.
-  - Make the active destination MOB explicit for paste/create operations.
-  - Allow individual MOBs to be locked against selection and accidental edits.
-  - Show which loaded MOB owns the selected object.
-  - Save/validate all changed MOBs as a coordinated workspace action.
+  falling back to the rebuilding serializer. Runtime testing with cross-MOB
+  copied objects through hot reload is confirmed.
+- [x] Replace the secondary-MOB chooser with a dockable **Loaded Map** panel.
+  - Present the workspace as a tree. The loaded MPR is the root and the loaded
+    primary/supplemental MOBs are its children. A MOB-only workspace uses an
+    explicit `No MPR (neutral grid)` root rather than implying that a terrain
+    document is loaded.
+  - The MPR root has its own visibility toggle. Hiding it suppresses terrain
+    rendering and normal terrain picking only: the MPR remains attached and
+    continues to supply projection, height, entrance, validation, collection,
+    and Test Current Map data. Object coordinates and heights never change when
+    terrain visibility changes. Terrain-dependent interactive tools that would
+    be ambiguous against an invisible surface are disabled until it is shown.
+  - Endurance does not support simultaneous editing of multiple MOBs. Exactly
+    one MOB is active/unlocked; every other loaded MOB is locked against edits
+    but its visible objects remain selectable for inspection and copying.
+  - Double-clicking a MOB row in the panel switches the active destination;
+    single-click remains ordinary row selection for multi-row operations.
+    Switching locks the previous MOB and unlocks the selected MOB. Repurpose Ctrl+T as
+    **Activate Selected Object's MOB**; disable it when there is no selected MOB
+    object or its owner is already active.
+  - Each row can independently hide/show its MOB without unloading it.
+    Visibility is editor-rendering/picking state only: hidden MOBs remain loaded
+    and continue to participate in validation, Save All, collections, and Test
+    Current Map. The active MOB may also be hidden; doing so clears its current
+    selection and prevents its objects from being selected in either the
+    viewport or outliner until shown again. Its complete outliner hierarchy is
+    visually muted but remains expandable.
+  - Show objects from every loaded MOB in the outliner, grouped under top-level
+    MOB nodes. Objects from visible locked MOBs may be selected and inspected,
+    but property edits, transforms, deletion, patrol/look editing, and other
+    mutations remain disabled. The UI identifies their owning locked MOB.
+  - Copy is allowed from a selected locked-MOB object. Paste and Ctrl+D
+    duplicate always create the new object in the active MOB, never in the
+    selected source object's locked owner. Double-clicking a locked-MOB object
+    activates its owner and keeps that object selected.
+  - Show the owning MOB for the selected object. Reuse the already working
+    cross-MOB copy/paste path; no coordinated simultaneous-edit transaction or
+    multi-document Save All redesign is required for this feature.
+  - Switching MOBs cancels any uncommitted placement/transform and clears the
+    old selection without dirtying either document. Undo/redo remains global;
+    when its next command belongs to another loaded MOB, Endurance activates
+    that owner before applying the command rather than mutating a locked MOB
+    invisibly. Map/MOB open, close, visibility, and active-MOB switching remain
+    workspace UI state, not document undo commands.
+  - Provide **Unload MOB** on MOB rows. It runs the normal dirty-document
+    Save/Discard/Cancel check, closes or resolves document-owned parameter and
+    script windows, cancels pending transforms, clears selection, and prevents
+    stale undo/redo commands from referencing the unloaded document. A
+    successfully unloaded MOB is removed from the tree and from the workspace,
+    validation, Save All, collection snapshot, and Test Current Map document
+    sets. If the active MOB is unloaded, choose the next loaded MOB
+    deterministically; if no MOB remains, enter terrain-only mode and disable
+    MOB editing actions.
+  - Do not add drag reordering in the first version. Preserve collection/runtime
+    load order, show the primary/supplemental role, and keep unloading distinct
+    from hiding so a visibility click can never change the test-run document set.
+  - Implementations: [`517cc1f`](https://github.com/Ilufus/ei-mapper-endurance/commit/517cc1f),
+    [`90eb899`](https://github.com/Ilufus/ei-mapper-endurance/commit/90eb899),
+    [`8a0badd`](https://github.com/Ilufus/ei-mapper-endurance/commit/8a0badd).
 - [ ] Runtime-validate deterministic multi-MOB JMV test loading.
   - [x] Identify the primary MOB from `map.txt` (falling back to collection
     order), validate every loaded MOB, and inventory all source/staged hashes.
@@ -688,6 +954,8 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
     continue to the installed JMV file. No `AddMobEx` assumption is required.
   - [ ] Runtime-test immediate, conditional, and nested supplemental loads,
     then repeat after Ctrl+F5 hot reload and confirm no duplicate instances.
+    There is no current deterministic nested/conditional fixture; retain this
+    as a confirmation task and do not hold unrelated 0.2.x work on it.
   - Implementation: [`c1ea993`](https://github.com/Ilufus/ei-mapper-endurance/commit/c1ea993).
 - [x] Add portable Endurance `.collection` files.
   - Store one optional MPR and one or more ordered MOB references; never embed
@@ -719,19 +987,46 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
     `db:`/`prototype:`, `mob:`, and `validation:` fields.
   - Initial implementation: local commit `1685bdd`; alpha.9 carries the strict
     matching correction and awaits focused tester validation.
-- [ ] When opening an MPR while another workspace is loaded, offer to save
-  changed MOB/MPR documents and replace the current workspace in one guarded
-  action instead of only displaying a close-first warning.
+- [x] Make manual **Open MPR**, drag/drop, recent-file, and command-line MPR
+  opening reuse the guarded replacement already used by the Maps browser:
+  run the existing dirty-state Save/Discard/Cancel check, then unload every MOB
+  and the old MPR, clear document-bound undo state, and load the requested
+  terrain. Opening additional MOBs remains independent and is not affected.
+- [x] Prevent the same canonical MOB file from being loaded more than once.
+  Reopening it activates its existing document and reports that fact without
+  duplicating objects, validation candidates, or undo state.
+- [x] Persist the expanded/collapsed state of the **Maps** and **Collections**
+  roots in the browser across refreshes and editor restarts.
+- [x] Add an opt-in **Open last session on startup** General setting that invokes
+  the existing File-menu session loader. It defaults off and never restores
+  unsaved edits.
+- [x] On first-run setup, explicitly show Maps and Collections docked left and
+  Object Outliner above Object Properties on the right. Subsequent launches
+  respect the user's saved dock layout.
+- [x] Keep disabled menu entries aligned with enabled entries by using the same
+  font metrics; disabled state changes color only.
 - [ ] Add opt-in Windows file associations for `.mpr`, `.mob`, and
   `.collection`, with correct single-instance/open-argument behavior and an
   explicit removal path.
-- [ ] Add periodic autosave with versioned, recoverable backup states.
+- [x] **High priority:** add periodic autosave with versioned, recoverable
+  backup states soon after the RC gate. Autosaves must never overwrite live
+  source maps directly and recovery must identify the source hash/generation.
+  Each scheduled occurrence now gives a non-activating 15-second countdown and
+  can be skipped without disabling the autosave schedule.
+- [x] Add a viewport camera-speed multiplier from 0.1x to 10x, persisted in
+  Endurance settings and adjustable through a configurable Ctrl+mouse-wheel
+  gesture.
 - [ ] Add a resizable bottom workflow-log panel with filtering, copy/export, and
   quick access to the full rotated log.
-- [ ] Add phase-aware blocking progress for MOB/MPR save, including
-  serialization, validation, backup, and atomic replacement.
-- [ ] Move any remaining blocking MPR/MOB open phases into a cancellable modal
-  progress workflow so large maps never appear to freeze the editor.
+- [x] Show named, blocking save phases—serialize, validate, create backup,
+  re-open staged output, and atomically replace—so a large safe save cannot look
+  like a frozen editor. Save progress is deliberately non-cancellable.
+- [x] Move manual MPR/MOB loading phases behind the existing
+  blocking modal loading UI and expose a visible busy state. Loading is not
+  cancellable; the purpose is to prove the editor is working and prevent a
+  healthy long operation from looking frozen. This is responsiveness UX, not a
+  parser or serializer redesign. Deeper asynchronous resource indexing remains
+  tracked separately under resources and performance.
 - [ ] Stress large-map edit/undo/redo/save/open/close cycles with scripts,
   model parts, multi-selection, copy/delete, and patrol/look structures.
 - [ ] Finish closed-group coverage proving scripts and all CP1251 text edits
@@ -742,9 +1037,15 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
   history when documents unload.
 - [x] Support typed multi-field property copy/paste, including model parts and
   Create Object, with destination compatibility checks.
-- [ ] Allow copying/pasting one selected component of compound property values,
-  especially individual X/Y/Z vector components, while retaining the existing
-  type-compatibility checks.
+- [x] **0.2.x release task:** allow copying/pasting one selected component of a
+  compound property value—initially individual X/Y/Z vector components. A
+  copied component is an ordinary numeric scalar (for Vector3, a float), so it
+  may be pasted into any numeric destination that can represent it safely; it
+  is not restricted to the same component name or compound-property type.
+  Integer destinations round the numeric value to the nearest integer and then
+  apply the destination's normal range/validity checks; they do not require an
+  already-integral source value.
+  ([`517cc1f`](https://github.com/Ilufus/ei-mapper-endurance/commit/517cc1f))
 - [x] Provide independent internal/external MOB script editing with document-
   owned workspaces, undoable imports, recovery, and configurable editor path.
 - [x] Warn before changing/resetting/deleting object IDs referenced by the
@@ -752,13 +1053,9 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
 
 ## 0.2.x: resources, appearance, and performance
 
-Isolated implementation status: profile-correct visuals are under active
-runtime correction. `feature/humanoid-equipment` is clean at `7dcdfac`; the
-cumulative equipment/idle-animation line reached `b38d7b4` with 13/13 visual
-provider tests and 12/12 animation tests before the current corpus correction
-pass. Nothing is merged. Known remaining classes include striped equipment
-materials, non-humanoid empty-mask handling, weapon duplication, missing model
-parts/textures, standing-idle selection, dragon wings, and large-map progress.
+Database-driven humanoid appearance, equipment, standing animation, spatial
+candidate queries, and bounded render queues are merged into the active 0.2.x
+line. Profile/runtime validation remains part of the RC matrix.
 
 - [ ] Complete cancellable asynchronous RES indexing, MOB parsing, and CPU
   decoding while keeping OpenGL creation in bounded GUI-thread batches.
@@ -776,17 +1073,15 @@ parts/textures, standing-idle selection, dragon wings, and large-map progress.
 - [ ] Re-run cold/warm performance acceptance on representative JMV maps and
   keep the post-index target at least 10x faster than original v0.3 where the
   current machine permits it.
-- [ ] Resolve applicable humanoid appearance from active-profile database and
-  template data, including humans, skeletons, orcs, undead, and other equipped
-  humanoids.
-- [ ] Render database-equipped armor and weapons.
+- [x] Merge the optimized profile-correct visuals branch, including applicable
+  humanoid appearance from active-profile database/template data.
+- [x] Merge database-equipped armor and weapon rendering.
   - Base scope: one one-handed or one ranged weapon.
   - JMV profile scope: armor and ordinary equipped visuals.
   - JMV stretch: 1H+shield, dual 1H, 2H, dual 2H with perk, and 2H+shield with
     the applicable perk.
-- [ ] Select and render a profile-correct standing idle animation for units
-  instead of leaving characters in the null/T pose. Keep corpus correction and
-  missing-animation fallback diagnostic rather than inventing an animation.
+- [x] Merge profile-correct standing idle animation selection and its
+  diagnostic fallback instead of leaving characters in the null/T pose.
 - [ ] Populate prototype/model/texture fields from the active database with
   prefix filtering and manual entry where valid. Warn on missing entries rather
   than silently clearing stored values.
@@ -799,18 +1094,6 @@ parts/textures, standing-idle selection, dragon wings, and large-map progress.
 
 ## 0.2.x: MOB diff and validation tools
 
-- [ ] Add a **Swap baseline/candidate** action without reopening the dialog and
-  make all diff-table columns manually resizable with persisted widths.
-- [ ] Add original-versus-current and candidate-save-versus-transaction entry
-  points to the existing MOB diff.
-- [ ] Add the read-only 3D perspective overlay.
-  - Removed: translucent red baseline ghost.
-  - Added: green candidate.
-  - Modified: amber overlaid versions.
-  - Moved: old/new markers and a movement vector.
-  - Filter unchanged objects, logic paths, and opaque structural changes.
-- [ ] Export deterministic JSON in addition to the readable text/details view.
-- [ ] Keep ambiguous duplicate-NID matches unresolved rather than guessing.
 - [x] Add deterministic file-to-file MOB semantic diff, including embedded
   script and document-section differences. ([`fd30be0`](https://github.com/Ilufus/ei-mapper-endurance/commit/fd30be0), [`0a4624f`](https://github.com/Ilufus/ei-mapper-endurance/commit/0a4624f))
 
@@ -826,6 +1109,13 @@ parts/textures, standing-idle selection, dragon wings, and large-map progress.
   fingerprinted experimental Base provider. Local testing confirmed exact-hash
   probe levels 3 and 4; this does not claim support for arbitrary Base
   executables or other mods.
+- [x] Scope JMV bridge compatibility to the exact Starter `game.exe` code
+  layout actually hooked by Endurance. Frequently updated JMV/Starter runtime
+  extensions are mod-owned behavior, not editor dependencies or manifest
+  gates. ([`eff6f99`](https://github.com/Ilufus/ei-mapper-endurance/commit/eff6f99))
+- [ ] **Post-1.0, on request:** support other mods through optional,
+  fingerprinted runtime plugins owned by their profiles. Do not generalize
+  unsafe memory hooks merely to advertise universal Test Current Map support.
 
 </details>
 

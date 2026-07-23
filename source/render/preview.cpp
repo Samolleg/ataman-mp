@@ -1,8 +1,10 @@
 #include "preview.h"
+#include "gl_dispatch.h"
 #include "view.h"
 #include "node.h"
 #include "camera.h"
 #include <QWheelEvent>
+#include <QOpenGLContext>
 
 CPreview::CPreview(QWidget *parent):
     QGLWidget(parent)
@@ -34,13 +36,15 @@ void CPreview::initializeGL()
 {
     makeCurrent();
     qglClearColor(Qt::darkGray);
-    //glEnable(GL_EXT_texture_filter_anisotropic);
-    glEnable(GL_DEPTH_TEST);
-    //glEnable(GL_CULL_FACE); //draw only front faces (disable if need draw both sides)
+    //ei::gl::Enable(GL_EXT_texture_filter_anisotropic);
+    ei::gl::Enable(GL_DEPTH_TEST);
+    //ei::gl::Enable(GL_CULL_FACE); //draw only front faces (disable if need draw both sides)
 
-    glEnable(GL_ALPHA_TEST);
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    QOpenGLContext* context = QOpenGLContext::currentContext();
+    if(context && !context->isOpenGLES())
+        ei::gl::Enable(GL_ALPHA_TEST);
+    ei::gl::Enable(GL_BLEND);
+    ei::gl::BlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     //doneCurrent();
 }
 
@@ -50,7 +54,7 @@ void CPreview::resizeGL(int width, int height)
     m_height = height;
     m_width = width;
     const float ratio = float(width)/height;
-    glViewport(0, 0, width, height);
+    ei::gl::Viewport(0, 0, width, height);
     m_projection.setToIdentity();
     m_projection.perspective(45, ratio, 1, 1000);
 }
@@ -58,7 +62,7 @@ void CPreview::resizeGL(int width, int height)
 void CPreview::paintGL()
 {
     makeCurrent();
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    ei::gl::Clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     draw();
 }
 

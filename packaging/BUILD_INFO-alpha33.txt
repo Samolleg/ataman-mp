@@ -1,0 +1,5 @@
+EI Mapper: Endurance Edition 0.2.1-alpha.33
+Closed test build: property editing context and native clipboard behavior
+JMV runtime gate: Starter/Engine/game.exe BE0FC330035E03983CCE590038CC7F881F1F5D1BCF082717F31776DD4DEE94E2
+Base runtime gates: game.exe B871D70D3876B2A5634F0920C92118BC49058B50C7D8CBE68376349F51C2E570 or 8ED3F9A500D84D822BD311B74B1B49D5CD16DD12D3502C27D7667957311036C1
+No endurance-options.json is included.

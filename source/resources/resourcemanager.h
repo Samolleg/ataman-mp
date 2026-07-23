@@ -9,6 +9,7 @@
 #include <QJsonObject>
 #include "figure.h"
 #include "types.h"
+#include "render_material.h"
 
 //forward declarations
 class CSettings;
@@ -30,10 +31,12 @@ public:
     CSettings* settings(){Q_ASSERT(m_pSettings); return m_pSettings;}
     void attachSettings(CSettings* pSettings) {m_pSettings = pSettings;};
     QList<QString>& figureList() {return m_arrFigureForComboBox;}
+    QStringList figurePartNames(const QString& name);
+    QByteArray modelAnimation(const QString& name);
+    QByteArray resourceData(const QString& name, QString* sourcePath = nullptr) const;
 
     void initResource();
     void refreshConfiguredSources();
-
 private:
     CObjectList();
     ~CObjectList();
@@ -44,6 +47,8 @@ private:
     CSettings* m_pSettings;
     QMap<QString, ei::CFigure*> m_aFigure;
     QSet<QString> m_missingFigureNames;
+    QMap<QString, QByteArray> m_animationArchives;
+    QSet<QString> m_missingAnimationNames;
     QList<QString> m_arrFigureForComboBox; //optimization for cell widget
 };
 
@@ -80,7 +85,7 @@ struct SMmpHeader
     int m_height;
     int m_mipcount;
     uint m_format;
-    int size() {return 76;}
+    int size() const {return 76;}
 
     friend QDataStream& operator >> (QDataStream& data, SMmpHeader& header)
     {
@@ -113,11 +118,26 @@ public:
     void loadTexture(QSet<QString>& aName);
     QOpenGLTexture* texture(const QString& name);
     QOpenGLTexture* texture(const QString& name, const QString& modelName);
+    QOpenGLTexture* layeredTexture(const QStringList& layerNames, const QString& modelName);
+    // Read-only CPU images used by diagnostics. These use the same resource
+    // lookup and layer composition path as the OpenGL texture above.
+    QImage textureImage(const QString& name, const QString& modelName);
+    QImage layeredTextureImage(const QStringList& layerNames, const QString& modelName,
+                               QString* diagnostic = nullptr);
     QOpenGLTexture* buildLandTex(const QString& name, int expectedTexCount, int& texCount);
+    // Terrain atlases have an authored DXT mip chain. This only changes the
+    // terrain sampler; character/equipment atlases deliberately remain on
+    // their conservative non-mipmapped path because their small islands can
+    // disappear when filtered.
+    void setTerrainMipmappingEnabled(bool enabled);
     QOpenGLTexture* textureDefault();
+    ERenderMaterialClass materialClass(QOpenGLTexture* texture) const;
     void attachSettings(CSettings* pSettings) {m_pSettings = pSettings;};
     void initResource();
     void refreshConfiguredSources();
+    // Drop map-local composed humanoid atlases while an OpenGL context is
+    // current. Ordinary resource textures remain shared across maps.
+    void clearTransientVisualCache();
     const QList<QString>& textureList() const {return m_arrCellComboBox;}
     int extractMmpToDxt1(QVector<QImage>& outArrImage, const QStringList& inArrTextureName);
     int extractMmpToDxt1(QImage& outImage, const QString textureName);
@@ -128,10 +148,15 @@ private:
     void parse(QByteArray& data, const QString& name);
     void initAuxTexture();
     QOpenGLTexture* loadTextureResource(const QString& name, const QString& modelName);
+    QImage loadTextureImageResource(const QString& name, const QString& modelName);
 
 private:
     static CTextureList* m_pTextureContainer;
     QMap<QString, QOpenGLTexture*> m_aTexture;
+    QMap<QString, QImage> m_aTextureImages;
+    QMap<QOpenGLTexture*, ERenderMaterialClass> m_textureMaterialClasses;
+    QSet<QOpenGLTexture*> m_terrainTextures;
+    bool m_terrainMipmappingEnabled{true};
     QSet<QString> m_missingTextureNames;
     CSettings* m_pSettings;
     QList<QString> m_arrCellComboBox; //optimization for cell widget

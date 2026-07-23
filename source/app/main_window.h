@@ -11,6 +11,7 @@
 #include <QFileInfo>
 #include <QMap>
 #include <QSet>
+#include <QStringList>
 #include <QVector3D>
 #include <QFutureWatcher>
 #include "types.h"
@@ -44,6 +45,15 @@ class QTreeWidgetItem;
 class QTimer;
 class QPushButton;
 class QLineEdit;
+class QFrame;
+class QResizeEvent;
+class QJsonObject;
+class QProgressDialog;
+class QDialog;
+class QScrollArea;
+class QListWidget;
+class QSlider;
+class QDoubleSpinBox;
 
 struct SWindowTitle
 {
@@ -61,10 +71,25 @@ public:
     explicit MainWindow(QWidget* parent = nullptr);
     ~MainWindow();
     bool openDocument(const QFileInfo& fileName);
+    bool replaceLoadedLandscape(const QFileInfo& fileName);
+    bool loadMobWithProgress(QFileInfo fileName);
+    bool loadLandscapeWithProgress(const QFileInfo& fileName);
+    void configureAutosaveTimer();
+    void configureAutosaveTimer(bool enabled, int intervalMinutes);
+    void performAutosave();
+    void beginAutosaveCountdown();
+    void showRecoverableAutosaves();
 
     void testFunc1();
 
 private:
+    enum class ETransientNotificationAction
+    {
+        None,
+        OpenLog,
+        OpenBackupFolder
+    };
+
     void createUndoView();
     void initShortcuts();
     void connectUiButtons();
@@ -89,9 +114,19 @@ private:
     void chooseBorrowedMapIdentity();
     void setCustomSpawnPicking(bool enabled);
     void updateCustomSpawnControls();
+    QString currentMapContextKey() const;
     void moveCameraToActiveSpawn();
     void updateEntranceOverlays();
     void updateOperationAvailability(bool hasSelection = false);
+    void updateDocumentActionAvailability();
+    bool beginWorkspaceLoad(const QString& description);
+    void endWorkspaceLoad();
+    void updateLoadedMapPanel();
+    void updateOutlinerSelectionPath();
+    void previewLoadedMapVisibility(QTreeWidgetItem* item);
+    void commitLoadedMapVisibilityDrag();
+    void saveUiState();
+    void closeHotReloadProgress();
     QVector<SMapSpawnObstacle> mapTestObstacles() const;
     const SMapTravelZone* selectedTravelZone() const;
     SResourceProfileEvaluation activeResourceProfile() const;
@@ -110,6 +145,16 @@ private:
     void reviewAndRepairNidCollisions();
     void notifyFamilyPreflight(const QString& operation);
     void notifyProposedNid(quint32 nid, const QString& mobPath);
+    void showMapTestResultNotification(const QJsonObject& report);
+    void showTransientResultNotification(const QString& text, bool failed, bool warned,
+                                         const QString& actionText,
+                                         ETransientNotificationAction action,
+                                         int timeoutMs);
+    void positionMapTestResultNotification();
+    void positionAutosaveNotification();
+    void showUnitTexturePreview();
+    void updateUnitTexturePreview();
+    void renderUnitTexturePreview();
 
 private slots:
     void showOutliner(bool bShow);
@@ -153,6 +198,7 @@ private slots:
 
 protected:
     void closeEvent(QCloseEvent* e);
+    void resizeEvent(QResizeEvent* e) override;
     bool eventFilter(QObject* watched, QEvent* event) override;
 
 private:
@@ -169,6 +215,8 @@ private:
     QTableWidget* m_testTable;
     QMenu* m_recentFilesMenu;
     QAction* m_externalScriptAction;
+    QAction* m_activateOwnerMobAction;
+    QAction* m_convertWorldObjectToLeverAction;
     QDockWidget* m_mapsDock;
     QDockWidget* m_landscapeToolsDock;
     CLandscapeTools* m_landscapeTools;
@@ -176,6 +224,8 @@ private:
     QDockWidget* m_validationDock;
     QDockWidget* m_outlinerDock;
     QDockWidget* m_propertiesDock;
+    QDockWidget* m_loadedMapDock;
+    QTreeWidget* m_loadedMapTree;
     QTreeWidget* m_validationTree;
     QLabel* m_validationSummary;
     QTimer* m_validationTimer;
@@ -189,6 +239,33 @@ private:
     QPushButton* m_validationShowMore{nullptr};
     QLineEdit* m_outlinerFilterEdit{nullptr};
     QLabel* m_outlinerFilterStatus{nullptr};
+    QLabel* m_outlinerSelectionPath{nullptr};
+    bool m_loadedMapVisibilityDragging{false};
+    Qt::CheckState m_loadedMapVisibilityTarget{Qt::Unchecked};
+    QSet<QString> m_loadedMapVisibilityKeys;
+    QFrame* m_mapTestResultNotification{nullptr};
+    QLabel* m_mapTestResultIcon{nullptr};
+    QLabel* m_mapTestResultLabel{nullptr};
+    QPushButton* m_mapTestResultActionButton{nullptr};
+    QTimer* m_mapTestResultTimer{nullptr};
+    QProgressDialog* m_hotReloadProgress{nullptr};
+    QTimer* m_autosaveTimer{nullptr};
+    QTimer* m_autosaveCountdownTimer{nullptr};
+    QTimer* m_cameraSpeedPersistTimer{nullptr};
+    QFrame* m_autosaveNotification{nullptr};
+    QLabel* m_autosaveCountdownLabel{nullptr};
+    QPushButton* m_cancelAutosaveButton{nullptr};
+    int m_autosaveCountdownSeconds{0};
+    int m_recoverableAutosaveNoticeCount{0};
+    QStringList m_recoverableAutosaveNoticeKeys;
+    bool m_backupSessionStarted{false};
+    QSlider* m_cameraSpeedSlider{nullptr};
+    QDoubleSpinBox* m_cameraSpeedSpin{nullptr};
+    bool m_uiStateSaved{false};
+    bool m_workspaceLoadInProgress{false};
+    QString m_mapTestResultLogPath;
+    ETransientNotificationAction m_transientNotificationAction{
+        ETransientNotificationAction::None};
     CMobFamilyValidationReport m_familyValidation;
     QByteArray m_acknowledgedFindingDigest;
     QSet<QString> m_previousFamilyRiskKeys;
@@ -199,6 +276,13 @@ private:
     QAction* m_mapTestAction;
     QAction* m_stopMapTestAction;
     CJmvMapTestLauncher* m_mapTestLauncher;
+    QDialog* m_unitTextureDialog{nullptr};
+    QLabel* m_unitTextureDetails{nullptr};
+    QLabel* m_unitTextureImage{nullptr};
+    QScrollArea* m_unitTextureScroll{nullptr};
+    QListWidget* m_unitTextureLayers{nullptr};
+    QListWidget* m_unitTextureParts{nullptr};
+    bool m_unitTextureUpdating{false};
     bool m_closeAfterTestStop;
     QMap<EButtonOp, QAction*> m_operationActions;
     QComboBox* m_entranceCombo;
@@ -218,6 +302,7 @@ private:
     bool m_suppressSpawnRelease{false};
     SMapSpawnPlan m_customSpawn;
     QVector3D m_customSpawnPosition;
+    QString m_customSpawnContextKey;
 };
 
 #endif // MAIN_WINDOW_H

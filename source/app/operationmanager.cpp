@@ -152,11 +152,6 @@ void CSelect::keyRelease(COperation *pOp, EKeyCode key)
 {
     pOp->keyManager()->release(key);
     switch (key) {
-    case eKey_Ctrl:
-    { //todo: optimize logic for applying active mob selection
-        m_pView->applyRoundMob();
-        break;
-    }
     default:
         break;
     }
@@ -174,6 +169,14 @@ void CSelect::mousePressEvent(COperation *pOp, QMouseEvent *pEvent)
     }
     case Qt::RightButton:
     {
+        break;
+    }
+    case Qt::MiddleButton:
+    {
+        // Orbit the scene point currently under the viewport center. The
+        // inherited camera otherwise retains an old world-space pivot until
+        // another command explicitly recenters it.
+        m_pView->anchorCameraRotationToViewportCenter();
         break;
     }
     }

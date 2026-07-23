@@ -1,4 +1,5 @@
 #include "ogl_utils.h"
+#include "gl_dispatch.h"
 
 #include <QOpenGLShaderProgram>
 
@@ -19,7 +20,7 @@ void CSelectFrame::draw(QOpenGLShaderProgram *program)
     if(m_aPoints.size() == 0) // do not draw looking point if absent
         return;
 
-    glDisable(GL_DEPTH_TEST);
+    ei::gl::Disable(GL_DEPTH_TEST);
     //matrix.setToIdentity();
     program->setUniformValue("u_modelMmatrix", m_matrix);
 
@@ -46,9 +47,9 @@ void CSelectFrame::draw(QOpenGLShaderProgram *program)
 
     // Draw cube geometry using indices from VBO 1
     m_indexBuf.bind();
-    glDrawElements(GL_TRIANGLES, m_indexBuf.size(), GL_UNSIGNED_SHORT, nullptr);
+    ei::gl::DrawElements(GL_TRIANGLES, m_indexBuf.size(), GL_UNSIGNED_SHORT, nullptr);
     program->setUniformValue("customColor", QVector4D(0.0, 0.0, 0.0, 0.0));
-    glEnable(GL_DEPTH_TEST);
+    ei::gl::Enable(GL_DEPTH_TEST);
 }
 
 void CSelectFrame::updateFrame(QPointF& bottomLeft, QPointF& topRight)

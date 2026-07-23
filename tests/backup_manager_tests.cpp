@@ -16,7 +16,115 @@ private slots:
     void preSaveSnapshotsAreTimestampedAndExact();
     void retentionKeepsNewestFiftyPreSaveRevisions();
     void failureIsReportedWithoutChangingSource();
+    void autosavesAreVersionedAndDeduplicated();
+    void uncleanSessionNotifiesEachRecoveryOnlyOnce();
+    void cleanSessionDoesNotNotifyAndKeepsRecovery();
 };
+
+void BackupManagerTests::autosavesAreVersionedAndDeduplicated()
+{
+    QTemporaryDir temporary;
+    QVERIFY(temporary.isValid());
+    const QString sourcePath = temporary.filePath("zone.mob");
+    QFile source(sourcePath);
+    QVERIFY(source.open(QIODevice::WriteOnly));
+    QCOMPARE(source.write("baseline"), qint64(8));
+    source.close();
+
+    CBackupManager manager(temporary.filePath("backups"));
+    const SBackupResult first = manager.snapshotAutosave(
+        QFileInfo(sourcePath), QByteArray("candidate-one"));
+    QVERIFY2(first.success, qPrintable(first.error));
+    QVERIFY(!first.skipped);
+    QVERIFY(QFileInfo::exists(first.backupPath));
+    QVERIFY(QFileInfo::exists(first.backupPath + ".json"));
+    QFile autosave(first.backupPath);
+    QVERIFY(autosave.open(QIODevice::ReadOnly));
+    QCOMPARE(autosave.readAll(), QByteArray("candidate-one"));
+
+    const SBackupResult duplicate = manager.snapshotAutosave(
+        QFileInfo(sourcePath), QByteArray("candidate-one"));
+    QVERIFY(duplicate.success);
+    QVERIFY(duplicate.skipped);
+    QCOMPARE(duplicate.backupPath, first.backupPath);
+
+    const SBackupResult second = manager.snapshotAutosave(
+        QFileInfo(sourcePath), QByteArray("candidate-two"));
+    QVERIFY2(second.success, qPrintable(second.error));
+    QVERIFY(!second.skipped);
+    QVERIFY(second.backupPath != first.backupPath);
+
+    const SBackupResult clean = manager.snapshotAutosave(
+        QFileInfo(sourcePath), QByteArray("baseline"));
+    QVERIFY(clean.success);
+    QVERIFY(clean.skipped);
+    QVERIFY(clean.backupPath.isEmpty());
+}
+
+void BackupManagerTests::uncleanSessionNotifiesEachRecoveryOnlyOnce()
+{
+    QTemporaryDir temporary;
+    QVERIFY(temporary.isValid());
+    const QString sourcePath = temporary.filePath("zone.mob");
+    QFile source(sourcePath);
+    QVERIFY(source.open(QIODevice::WriteOnly));
+    QCOMPARE(source.write("baseline"), qint64(8));
+    source.close();
+
+    CBackupManager manager(temporary.filePath("backups"));
+    QVector<SRecoverableAutosave> recoveries;
+    QString error;
+    QVERIFY2(manager.beginEditorSession(&recoveries, &error), qPrintable(error));
+    QVERIFY(recoveries.isEmpty());
+    const SBackupResult first = manager.snapshotAutosave(
+        QFileInfo(sourcePath), QByteArray("candidate-one"));
+    QVERIFY2(first.success, qPrintable(first.error));
+
+    // Starting again without finishing simulates a forced/crashed shutdown.
+    QVERIFY2(manager.beginEditorSession(&recoveries, &error), qPrintable(error));
+    QCOMPARE(recoveries.size(), 1);
+    QCOMPARE(recoveries.first().autosavePath, first.backupPath);
+    QVERIFY(!recoveries.first().notificationKey.isEmpty());
+    QVERIFY2(manager.acknowledgeRecoveries(
+        QStringList() << recoveries.first().notificationKey, &error), qPrintable(error));
+
+    // Another crash without another generation must not repeat the warning.
+    QVERIFY2(manager.beginEditorSession(&recoveries, &error), qPrintable(error));
+    QVERIFY(recoveries.isEmpty());
+    const SBackupResult second = manager.snapshotAutosave(
+        QFileInfo(sourcePath), QByteArray("candidate-two"));
+    QVERIFY2(second.success, qPrintable(second.error));
+    QVERIFY2(manager.beginEditorSession(&recoveries, &error), qPrintable(error));
+    QCOMPARE(recoveries.size(), 1);
+    QCOMPARE(recoveries.first().autosavePath, second.backupPath);
+    QVERIFY(QFileInfo::exists(first.backupPath));
+    QVERIFY(QFileInfo::exists(second.backupPath));
+}
+
+void BackupManagerTests::cleanSessionDoesNotNotifyAndKeepsRecovery()
+{
+    QTemporaryDir temporary;
+    QVERIFY(temporary.isValid());
+    const QString sourcePath = temporary.filePath("zone.mob");
+    QFile source(sourcePath);
+    QVERIFY(source.open(QIODevice::WriteOnly));
+    QCOMPARE(source.write("baseline"), qint64(8));
+    source.close();
+
+    CBackupManager manager(temporary.filePath("backups"));
+    QVector<SRecoverableAutosave> recoveries;
+    QString error;
+    QVERIFY2(manager.beginEditorSession(&recoveries, &error), qPrintable(error));
+    const SBackupResult autosave = manager.snapshotAutosave(
+        QFileInfo(sourcePath), QByteArray("unsaved-editor-state"));
+    QVERIFY2(autosave.success, qPrintable(autosave.error));
+    QVERIFY2(manager.finishEditorSession(&error), qPrintable(error));
+
+    QVERIFY2(manager.beginEditorSession(&recoveries, &error), qPrintable(error));
+    QVERIFY(recoveries.isEmpty());
+    QVERIFY(QFileInfo::exists(autosave.backupPath));
+    QVERIFY(QFileInfo::exists(autosave.backupPath + ".json"));
+}
 
 void BackupManagerTests::openSnapshotIsHashAddressedAndDeduplicated()
 {

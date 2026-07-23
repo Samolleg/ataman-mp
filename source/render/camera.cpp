@@ -1,12 +1,14 @@
 #include <QGLWidget>
 #include <QtMath>
 #include "camera.h"
+#include "camera_orbit.h"
 #include "key_manager.h"
 #include "settings.h"
 #include "log.h"
 
 CCamera::CCamera()
-    :m_keyManager(nullptr)
+    :m_speedMultiplier(1.0f)
+    ,m_keyManager(nullptr)
     ,m_pSettings(nullptr)
 {
     m_pos = QVector3D(0.0, 1.0, 10.0);
@@ -22,6 +24,7 @@ CCamera::CCamera(QVector3D pos, QVector3D pivot, float xRot, float zRot)
     ,m_xRot(xRot)
     ,m_zRot(zRot)
     ,m_step(0.5f)
+    ,m_speedMultiplier(1.0f)
     ,m_keyManager(nullptr)
     ,m_pSettings(nullptr)
 {
@@ -65,6 +68,17 @@ void CCamera::setLocation(const QVector3D& pos, const QVector3D& pivot, const QV
     m_zRot = rot.z();
 }
 
+void CCamera::setOrbitPivotPreservingView(const QVector3D& pivot)
+{
+    // The legacy view matrix is T(pivot) * T(-position) * R * T(-pivot).
+    // Replacing only the pivot changes the current view before the user has
+    // moved the mouse. Compensate the stored position so the matrix remains
+    // identical, then subsequent rotations orbit the newly selected point.
+    m_pos = ei::reanchoredCameraPosition(
+        m_pos, m_pivot, pivot, m_xRot, m_zRot);
+    m_pivot = pivot;
+}
+
 void CCamera::xRotate(float& angle)
 {
     m_xRot += angle;
@@ -75,6 +89,11 @@ void CCamera::zRotate(float& angle)
 {
     m_zRot += angle;
     util::normalizeAngle(m_zRot);
+}
+
+void CCamera::setSpeedMultiplier(float multiplier)
+{
+    m_speedMultiplier = qBound(0.1f, multiplier, 10.0f);
 }
 
 QMatrix4x4 CCamera::update()
@@ -147,8 +166,9 @@ void CCamera::strafeUp(bool bShift)
 void CCamera::strafeUpward(bool bShift)
 {
     QVector3D dir(0.0f, 0.0f, 1.0f);
-    m_pos += dir*(bShift ? m_step*2.0f : m_step);
-    m_pivot += dir*(bShift ? m_step*2.0f : m_step);
+    const float amount = step();
+    m_pos += dir*(bShift ? amount*2.0f : amount);
+    m_pivot += dir*(bShift ? amount*2.0f : amount);
 }
 
 void CCamera::strafeDown(bool bShift)
@@ -160,8 +180,9 @@ void CCamera::strafeDown(bool bShift)
 void CCamera::strafeDownward(bool bShift)
 {
     QVector3D dir(0.0f, 0.0f, -1.0f);
-    m_pos += dir*(bShift ? m_step*2.0f : m_step);
-    m_pivot += dir*(bShift ? m_step*2.0f : m_step);
+    const float amount = step();
+    m_pos += dir*(bShift ? amount*2.0f : amount);
+    m_pivot += dir*(bShift ? amount*2.0f : amount);
 }
 
 void CCamera::move(QVector3D& orDir, bool bShift)
@@ -173,8 +194,9 @@ void CCamera::move(QVector3D& orDir, bool bShift)
     orDir=rot.transposed()*orDir;
     orDir.normalize();
 
-    m_pos += orDir*(bShift ? m_step*2.0f : m_step);
-    m_pivot += orDir*(bShift ? m_step*2.0f : m_step);
+    const float amount = step();
+    m_pos += orDir*(bShift ? amount*2.0f : amount);
+    m_pivot += orDir*(bShift ? amount*2.0f : amount);
 }
 
 void CCamera::shift(QVector3D& orDir, bool bShift)
@@ -187,9 +209,10 @@ void CCamera::shift(QVector3D& orDir, bool bShift)
     orDir.setZ(0.0f);
     orDir.normalize();
 
-    const QVector3D step = orDir*(bShift ? m_step*2.0f : m_step);
-    m_pos += step;
-    m_pivot += step;
+    const float amount = step();
+    const QVector3D movement = orDir*(bShift ? amount*2.0f : amount);
+    m_pos += movement;
+    m_pivot += movement;
 }
 
 void CCamera::enlarge(const bool bZoom)
@@ -200,7 +223,7 @@ void CCamera::enlarge(const bool bZoom)
     {
         QVector3D dir = bZoom ? m_pivot-m_pos : m_pos-m_pivot;
         dir.normalize();
-        m_pos += dir*m_step;
+        m_pos += dir*step();
     }
     else
     {
@@ -279,5 +302,8 @@ void CCamera::attachSettings(CSettings *pSetting)
             m_xRot = -70.0f;
             m_zRot = 45.0f;
         }
+        if(COptDouble* speed = dynamic_cast<COptDouble*>(
+               m_pSettings->opt("cameraSpeedMultiplier")))
+            setSpeedMultiplier(float(speed->value()));
     }
 }

@@ -283,6 +283,7 @@ private slots:
     void transactionPreservesEmptyContainers();
     void objectSubtreeDuplicateAndDeleteAreExact();
     void objectSubtreeRejectsStaleProvenance();
+    void worldObjectToLeverPreservesRawChildren();
     void objectSequenceRebuildIsExactAndOrdered();
     void crossMobObjectSequencePreservesDonorRawSubtree();
     void copiedObjectSequenceAcceptsOnlyIntendedLeafEdits();
@@ -707,6 +708,68 @@ void EnduranceDocumentTests::objectSubtreeRejectsStaleProvenance()
                                            QByteArray(32, '\x7f'), &output, &report));
     QVERIFY(output.isEmpty());
     QVERIFY(report.hasErrors());
+}
+
+void EnduranceDocumentTests::worldObjectToLeverPreservesRawChildren()
+{
+    const QByteArray opaque = section(0xDEADBEEF, QByteArray::fromHex("001122334455"));
+    const QByteArray source = section(0xB001,
+        section(0xB002, u32(1234)) + section(0xB003, u32(54)) +
+        section(0xB004, "converted") + opaque);
+    CMobDocument::SLeverConversionValues defaults;
+    QByteArray converted;
+    CValidationReport conversionReport;
+    QVERIFY(CMobDocument::convertWorldObjectSubtreeToLever(
+        source, defaults, &converted, &conversionReport));
+
+    QDataStream header(converted);
+    header.setByteOrder(QDataStream::LittleEndian);
+    quint32 type = 0;
+    quint32 length = 0;
+    header >> type >> length;
+    QCOMPARE(type, quint32(0xBBAC0000));
+    QCOMPARE(length, quint32(converted.size()));
+    QVERIFY(converted.contains(opaque));
+    QVERIFY(converted.endsWith(opaque));
+
+    CMobDocument document;
+    CValidationReport parseReport;
+    QVERIFY(document.loadBytes(validMob(section(0xB000, converted)),
+                               "converted-lever.mob", &parseReport));
+    QCOMPARE(document.objects().size(), 1);
+    QCOMPARE(document.objects().front().nid, quint32(1234));
+    QCOMPARE(document.objects().front().objectType, quint32(60));
+
+    QByteArray rejected;
+    QVERIFY(!CMobDocument::convertWorldObjectSubtreeToLever(
+        object(1234), defaults, &rejected, nullptr));
+
+    for(const quint32 sourceType : {quint32(53), quint32(55)})
+    {
+        const QByteArray scenery = section(0xB001,
+            section(0xB002, u32(2000 + sourceType)) +
+            section(0xB003, u32(sourceType)) +
+            section(0xB004, "scenery"));
+        QByteArray sceneryLever;
+        CValidationReport sceneryReport;
+        QVERIFY2(CMobDocument::convertWorldObjectSubtreeToLever(
+                     scenery, defaults, &sceneryLever, &sceneryReport),
+                 qPrintable(sceneryReport.toText()));
+
+        CMobDocument sceneryDocument;
+        QVERIFY(sceneryDocument.loadBytes(
+            validMob(section(0xB000, sceneryLever)), "converted-scenery.mob"));
+        QCOMPARE(sceneryDocument.objects().size(), 1);
+        QCOMPARE(sceneryDocument.objects().front().objectType, quint32(60));
+    }
+
+    const QByteArray unsupported = section(0xB001,
+        section(0xB002, u32(9999)) + section(0xB003, u32(51)) +
+        section(0xB004, "unsupported"));
+    CValidationReport unsupportedReport;
+    QVERIFY(!CMobDocument::convertWorldObjectSubtreeToLever(
+        unsupported, defaults, &rejected, &unsupportedReport));
+    QVERIFY(unsupportedReport.toText().contains("OBJTYPE 51"));
 }
 
 void EnduranceDocumentTests::objectSequenceRebuildIsExactAndOrdered()

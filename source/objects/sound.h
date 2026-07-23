@@ -18,6 +18,7 @@ public:
     void applyParam(const QSharedPointer<IPropertyBase>& prop) override;
     QJsonObject toJson() override;
     void loadFigure() override {}
+    float editorVisualScale() const override { return 0.5f; }
     bool isOperationAxisAllow(EOperationAxisType type) override final;
 
 private:

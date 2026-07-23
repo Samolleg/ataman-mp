@@ -25,3 +25,8 @@ Endurance does not include its tools, generated atlases, YAML descriptions,
 source code, or texture assets. EI-HD-tiles was developed by aspadm and is
 distributed for non-commercial use with attribution; it is acknowledged here
 as an independent research source.
+
+Character FIG/UV pipeline research was cross-checked against
+[konstvest/ei_figer](https://github.com/konstvest/ei_figer), the GPL-3.0 Blender
+add-on for importing and exporting Evil Islands models. No game or mod assets
+are redistributed with Endurance.

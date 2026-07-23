@@ -17,7 +17,93 @@ bool isWithin(const QString& root, const QString& candidate)
     return normalizedCandidate.compare(normalizedRoot, Qt::CaseInsensitive) == 0 ||
            normalizedCandidate.startsWith(prefix, Qt::CaseInsensitive);
 }
+}
 
+QString profileProviderRoleName(EProfileProviderRole role)
+{
+    switch(role)
+    {
+    case EProfileProviderRole::Database: return "database";
+    case EProfileProviderRole::CharacterAppearance: return "characterAppearance";
+    case EProfileProviderRole::EquipmentLayout: return "equipmentLayout";
+    case EProfileProviderRole::UnitAnimation: return "unitAnimation";
+    case EProfileProviderRole::SemanticValidation: return "semanticValidation";
+    }
+    return QString();
+}
+
+bool ProfileProviderRegistry::registerProvider(const SProfileProviderDescriptor& descriptor,
+                                               QString* diagnostic)
+{
+    const QString key = descriptor.id.trimmed().toLower();
+    if(key.isEmpty() || descriptor.interfaceVersion < 1 || descriptor.roles.isEmpty())
+    {
+        if(diagnostic)
+            *diagnostic = "Provider registration requires an ID, a positive interface version, and at least one role.";
+        return false;
+    }
+    if(m_providers.contains(key))
+    {
+        if(diagnostic)
+            *diagnostic = "Provider ID is already registered: " + descriptor.id;
+        return false;
+    }
+    m_providers.insert(key, descriptor);
+    return true;
+}
+
+SProfileProviderSelection ProfileProviderRegistry::select(EProfileProviderRole role,
+                                                           const QString& providerId,
+                                                           int requestedInterfaceVersion) const
+{
+    SProfileProviderSelection result;
+    result.role = role;
+    result.providerId = providerId.trimmed();
+    const auto it = m_providers.constFind(result.providerId.toLower());
+    if(it == m_providers.constEnd())
+    {
+        result.diagnostic = QString("Unknown %1 provider '%2'; resolution is disabled.")
+            .arg(profileProviderRoleName(role), result.providerId);
+        return result;
+    }
+    if(it->interfaceVersion != requestedInterfaceVersion)
+    {
+        result.diagnostic = QString("Provider '%1' implements interface v%2, but the profile requests v%3.")
+            .arg(it->id).arg(it->interfaceVersion).arg(requestedInterfaceVersion);
+        return result;
+    }
+    if(!it->roles.contains(role))
+    {
+        result.diagnostic = QString("Provider '%1' does not implement the %2 role.")
+            .arg(it->id, profileProviderRoleName(role));
+        return result;
+    }
+    result.valid = true;
+    result.providerId = it->id;
+    return result;
+}
+
+QVector<SProfileProviderDescriptor> ProfileProviderRegistry::providers() const
+{
+    return m_providers.values().toVector();
+}
+
+ProfileProviderRegistry ProfileProviderRegistry::builtIns()
+{
+    ProfileProviderRegistry registry;
+    const QSet<EProfileProviderRole> roles = {
+        EProfileProviderRole::Database, EProfileProviderRole::CharacterAppearance,
+        EProfileProviderRole::EquipmentLayout, EProfileProviderRole::UnitAnimation,
+        EProfileProviderRole::SemanticValidation
+    };
+    registry.registerProvider({"base.standard.v1", 1, roles,
+        "Base Evil Islands resource semantics."});
+    registry.registerProvider({"jmv.v1", 1, roles,
+        "Jamais Vu extensions; reference implementation for mod providers."});
+    return registry;
+}
+
+namespace {
 void requireStagedPath(const QString& label, const QString& path,
                        const QString& runRoot, QStringList* errors)
 {

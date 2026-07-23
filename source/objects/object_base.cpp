@@ -1,12 +1,106 @@
 #include "objects\object_base.h"
 #include <QJsonArray>
+#include <QCache>
+#include <QFileInfo>
 #include <QString>
 #include "mob\mob.h"
 #include "landscape.h"
 #include "view.h"
 #include "log.h"
 #include "resourcemanager.h"
+#include "resource_name.h"
+#include "render_performance.h"
+#include "render_queue.h"
+#include "settings.h"
 #include "property.h"
+
+#include <climits>
+
+namespace {
+struct CachedFigureAssembly
+{
+    ~CachedFigureAssembly()
+    {
+        qDeleteAll(parts);
+    }
+    QVector<CPart*> parts;
+};
+
+QCache<QString, CachedFigureAssembly>& transientAssemblyCache()
+{
+    static QCache<QString, CachedFigureAssembly> cache;
+    static bool initialized = false;
+    if(!initialized)
+    {
+        // Costs are KiB of retained CPU vertex data. This keeps the cache
+        // useful for dense humanoid maps without allowing old profiles/maps
+        // to retain an unbounded amount of assembly geometry.
+        cache.setMaxCost(128 * 1024);
+        initialized = true;
+    }
+    return cache;
+}
+
+QString meshCacheScope(const QString& modelName)
+{
+    CSettings* settings = CObjectList::getInstance()->settings();
+    const COptString* profile = settings
+        ? dynamic_cast<const COptString*>(settings->opt("resourceProfile")) : nullptr;
+    const COptStringList* roots = settings
+        ? dynamic_cast<const COptStringList*>(settings->opt(eOptSetResource, "resourceRoots")) : nullptr;
+    QString scope = (profile ? profile->value() : QString()) + '|';
+    QVector<QString> sourcePaths = roots ? roots->value() : QVector<QString>();
+    if(sourcePaths.isEmpty() && settings)
+    {
+        for(const char* optionName : {"figPaths", "texPaths"})
+        {
+            const COptStringList* paths = dynamic_cast<const COptStringList*>(
+                settings->opt(eOptSetResource, optionName));
+            if(paths)
+                sourcePaths += paths->value();
+        }
+    }
+    for(const QString& root : sourcePaths)
+            scope += QFileInfo(root).absoluteFilePath().toLower() + ';';
+    return scope + '|' + modelName.toLower();
+}
+
+void cloneAssembly(QVector<CPart*>& destination, const QVector<CPart*>& source)
+{
+    destination.reserve(source.size());
+    for(CPart* part : source)
+        destination.append(new CPart(*part));
+}
+
+void buildCachedAssembly(ei::CFigure* figure, const QString& scope,
+                         const QString& modelName, const QStringList& visibleParts,
+                         const QVector3D& complexion, QVector<CPart*>& destination)
+{
+    const QString key = scope + '|' + modelName.toLower() + '|'
+        + visibleParts.join(';').toLower() + '|'
+        + QString::number(complexion.x(), 'g', 8) + ','
+        + QString::number(complexion.y(), 'g', 8) + ','
+        + QString::number(complexion.z(), 'g', 8);
+    QCache<QString, CachedFigureAssembly>& cache = transientAssemblyCache();
+    CachedFigureAssembly* cached = cache.object(key);
+    if(!cached)
+    {
+        cached = new CachedFigureAssembly;
+        QStringList parts = visibleParts;
+        QVector3D renderComplexion = complexion;
+        figure->getVertexData(cached->parts, renderComplexion, parts);
+        quint64 retainedBytes = 0;
+        for(CPart* part : cached->parts)
+            retainedBytes += quint64(part->vertData().size()) * sizeof(SVertexData);
+        const int costKiB = qMax(1, int(qMin<quint64>(retainedBytes / 1024,
+                                                      quint64(INT_MAX))));
+        cloneAssembly(destination, cached->parts);
+        cache.insert(key, cached, costKiB);
+        return;
+    }
+    cloneAssembly(destination, cached->parts);
+}
+}
 
 CObjectBase::CObjectBase(): 
   m_modelName("")
@@ -28,9 +122,13 @@ CObjectBase::CObjectBase(const CObjectBase &base):
 {
     m_complection = base.m_complection;
     m_texture = base.m_texture;
+    m_secondaryTexture = base.m_secondaryTexture;
+    m_partTextures = base.m_partTextures;
     m_pFigure = base.m_pFigure;
     m_minPoint = base.m_minPoint;
     m_bodyParts = base.m_bodyParts;
+    m_figureComplexion = base.m_figureComplexion;
+    m_transientSkeleton = base.m_transientSkeleton;
 
     m_aPart.clear();
     for(auto& part:base.m_aPart)
@@ -95,6 +193,7 @@ void CObjectBase::updateFigure(ei::CFigure* fig)
             delete part;
         m_aPart.clear();
         m_pFigure = nullptr;
+        m_transientSkeleton = SAnimationSkeleton();
         return;
     }
     m_pFigure = fig;
@@ -135,27 +234,55 @@ void CObjectBase::draw(bool isActive, QOpenGLShaderProgram* program)
         return;
     }
 
-    m_texture->bind(0);
-    //if (!m_parent)
-    {
-        QMatrix4x4 matrix;
-        matrix.setToIdentity();
-        matrix.translate(m_drawPosition);
-        QMatrix4x4 rtMatrix;
-        rtMatrix.setToIdentity();
-        rtMatrix.rotate(m_rotation);
-        matrix = matrix * rtMatrix;
-        program->setUniformValue("u_modelMmatrix", matrix);
-    }
+    QMatrix4x4 matrix;
+    matrix.setToIdentity();
+    matrix.translate(m_drawPosition);
+    QMatrix4x4 rtMatrix;
+    rtMatrix.setToIdentity();
+    rtMatrix.rotate(m_rotation);
+    matrix = matrix * rtMatrix;
+    matrix.scale(editorVisualScale());
 
-    if (m_state == ENodeState::eSelect)
+    RenderQueueContext& queue = RenderQueueContext::instance();
+    const bool queued = queue.collecting();
+    if(!queued)
+        program->setUniformValue("u_modelMmatrix", matrix);
+
+    if (!queued && m_state == ENodeState::eSelect)
         program->setUniformValue("u_highlight", true);
 
-    program->setUniformValue("qt_Texture0", 0);
+    if(!queued)
+        program->setUniformValue("qt_Texture0", 0);
+    QOpenGLTexture* boundTexture = nullptr;
     for(auto& part: m_aPart)
+    {
+        QOpenGLTexture* texture = m_partTextures.value(part->name().toLower(), nullptr);
+        if(!texture)
+            texture = part->textureNumber() == 2 && m_secondaryTexture
+                ? m_secondaryTexture : m_texture;
+        if(queued)
+        {
+            queue.submit(part, texture, matrix,
+                         CTextureList::getInstance()->materialClass(texture),
+                         m_state == ENodeState::eSelect,
+                         castsRenderShadow(), nodeType() == ENodeType::eUnit);
+            continue;
+        }
+        if(texture != boundTexture)
+        {
+            texture->bind(0);
+            boundTexture = texture;
+            RenderPerformanceContext& performance = RenderPerformanceContext::instance();
+            if(performance.collecting())
+                ++performance.counters().textureBinds;
+        }
         part->draw(program);
-
-    program->setUniformValue("u_highlight", false);
+    }
+    if(!queued)
+    {
+        program->setUniformValue("u_partAnimated", false);
+        program->setUniformValue("u_highlight", false);
+    }
 }
 
 void CObjectBase::drawSelect(QOpenGLShaderProgram* program)
@@ -180,12 +307,95 @@ void CObjectBase::drawSelect(QOpenGLShaderProgram* program)
         rtMatrix.setToIdentity();
         rtMatrix.rotate(m_rotation);
         matrix = matrix * rtMatrix;
+        matrix.scale(editorVisualScale());
+        RenderQueueContext& queue = RenderQueueContext::instance();
+        if(queue.collectingSelection())
+        {
+            const QVector4D pickingColor = m_pickingColor.toVec4();
+            for(CPart* part : m_aPart)
+                queue.submitSelection(part, matrix, pickingColor);
+            return;
+        }
         program->setUniformValue("u_modelMmatrix", matrix);
         program->setUniformValue("u_color", m_pickingColor.toVec4());
     }
 
     for(auto& part: m_aPart)
         part->drawSelect(program);
+    program->setUniformValue("u_partAnimated", false);
+}
+
+QMap<QString, QVector<QVector2D>> CObjectBase::renderedBodyPartUvTriangles() const
+{
+    QMap<QString, QVector<QVector2D>> result;
+    for(const CPart* part : m_aPart)
+    {
+        if(!part)
+            continue;
+        const QString key = part->name().toLower();
+        // The final-character atlas is the primary body texture. Heads/hair,
+        // helmets, weapons, shields, and texture-number-2 members use another
+        // texture and would be misleading if projected over this image.
+        if(m_partTextures.contains(key)
+                || (part->textureNumber() == 2 && m_secondaryTexture))
+            continue;
+        QVector<QVector2D> coordinates;
+        coordinates.reserve(part->vertData().size());
+        for(const SVertexData& vertex : part->vertData())
+            coordinates.append(vertex.texCoord * part->textureUvScale());
+        if(coordinates.size() >= 3)
+            result.insert(part->name(), coordinates);
+    }
+    return result;
+}
+
+const SAnimationSkeleton& CObjectBase::transientAnimationSkeleton() const
+{
+    return m_transientSkeleton;
+}
+
+void CObjectBase::rebuildTransientAnimationSkeleton()
+{
+    m_transientSkeleton = SAnimationSkeleton();
+    if(!m_pFigure)
+        return;
+    SAnimationSkeleton full;
+    QVector3D complexion = m_figureComplexion;
+    m_pFigure->getAssemblyHierarchy(full.parents, full.restOffsets, complexion);
+    QSet<QString> required;
+    for(const CPart* part : m_aPart)
+    {
+        QString component = part->name().toLower();
+        QSet<QString> chain;
+        while(!component.isEmpty() && !chain.contains(component))
+        {
+            chain.insert(component);
+            required.insert(component);
+            component = full.parents.value(component);
+        }
+    }
+    for(const QString& component : required)
+    {
+        if(full.parents.contains(component))
+            m_transientSkeleton.parents.insert(component, full.parents.value(component));
+        if(full.restOffsets.contains(component))
+            m_transientSkeleton.restOffsets.insert(component, full.restOffsets.value(component));
+    }
+}
+
+void CObjectBase::applyTransientPartPoses(const QMap<QString, QMatrix4x4>& poses)
+{
+    for(CPart* part : m_aPart)
+    {
+        QMatrix4x4 identity; identity.setToIdentity();
+        part->setPoseMatrix(poses.value(part->name().toLower(), identity));
+    }
+}
+
+void CObjectBase::applyTransientPartMorphs(const QMap<QString, QVector<QVector3D>>& morphs)
+{
+    for(CPart* part : m_aPart)
+        part->setMorphDeltas(morphs.value(part->name().toLower()));
 }
 
 void CObjectBase::serializeJson(QJsonObject& obj)
@@ -277,6 +487,7 @@ CBox CObjectBase::getBBox()
     QMatrix4x4 rtMatrix;
     rtMatrix.setToIdentity();
     rtMatrix.rotate(m_rotation);
+    const float visualScale = editorVisualScale();
     const auto fillPoint = [&min, &max](const QVector3D& vec)
     {
         //x
@@ -301,7 +512,7 @@ CBox CObjectBase::getBBox()
         auto& arrVert = part->vertData();
         for(int i(0); i < arrVert.size(); ++i)
         {
-            const QVector3D rotatedPos = rtMatrix*arrVert[i].position;
+            const QVector3D rotatedPos = rtMatrix*(arrVert[i].position * visualScale);
             if(!bInit)
             {
                 min = rotatedPos;
@@ -465,25 +676,112 @@ void CObjectBase::recalcFigure()
     for(auto& part: m_aPart)
         delete part;
     m_aPart.clear();
+    m_figureComplexion = m_complection;
+    CPart::setCacheScope(meshCacheScope(m_modelName));
     m_pFigure->getVertexData(m_aPart, m_complection, m_bodyParts);
+    rebuildTransientAnimationSkeleton();
+    recalcMinPos();
+}
+
+void CObjectBase::applyTransientVisual(const QString& modelName, const QString& textureName,
+                                       const QStringList& visibleParts, const QVector3D& complexion,
+                                       const QMap<QString, QString>& partTextureNames,
+                                       const QString& secondaryTextureName,
+                                       const QStringList& bodyTextureLayers)
+{
+    QString textureFingerprint;
+    for(auto it = partTextureNames.constBegin(); it != partTextureNames.constEnd(); ++it)
+        textureFingerprint += it.key().toLower() + '=' + it.value().toLower() + ';';
+    const QString fingerprint = modelName.toLower() + '|' + textureName.toLower() + '|'
+        + secondaryTextureName.toLower() + '|'
+        + bodyTextureLayers.join(';').toLower() + '|'
+        + visibleParts.join(';').toLower() + '|' + QString::number(complexion.x(), 'g', 8)
+        + ',' + QString::number(complexion.y(), 'g', 8) + ',' + QString::number(complexion.z(), 'g', 8)
+        + '|' + textureFingerprint;
+    if(fingerprint == m_transientVisualFingerprint)
+        return;
+    m_transientVisualFingerprint = fingerprint;
+    m_pFigure = CObjectList::getInstance()->getFigure(modelName);
+    // The caller already resolved profile-vs-import precedence. The
+    // model-aware lookup normalizes a supplied .mmp suffix and resolves only
+    // aliases belonging to that model/profile resource catalog.
+    m_texture = bodyTextureLayers.isEmpty()
+        ? CTextureList::getInstance()->texture(textureName, modelName)
+        : CTextureList::getInstance()->layeredTexture(bodyTextureLayers, modelName);
+    m_secondaryTexture = secondaryTextureName.trimmed().isEmpty() ? nullptr
+        : CTextureList::getInstance()->texture(secondaryTextureName, modelName);
+    m_partTextures.clear();
+    for(auto it = partTextureNames.constBegin(); it != partTextureNames.constEnd(); ++it)
+        m_partTextures.insert(it.key().toLower(),
+            CTextureList::getInstance()->texture(it.value(), modelName));
+    if(!bodyTextureLayers.isEmpty())
+        for(const QString& partName : visibleParts)
+            if(ei::usesUnlayeredHumanoidTexture(partName)
+                    && !m_partTextures.contains(partName.toLower()))
+                m_partTextures.insert(partName.toLower(),
+                    CTextureList::getInstance()->texture(textureName, modelName));
+    m_bboxDirty = true;
+    for(CPart* part : m_aPart)
+        delete part;
+    m_aPart.clear();
+    if(!m_pFigure)
+        return;
+    m_figureComplexion = complexion;
+    const QString cacheScope = meshCacheScope(modelName);
+    CPart::setCacheScope(cacheScope);
+    buildCachedAssembly(m_pFigure, cacheScope, modelName, visibleParts,
+                        complexion, m_aPart);
+    for(CPart* part : m_aPart)
+    {
+        const QString partTexture = ei::usesUnlayeredHumanoidTexture(part->name())
+                && !bodyTextureLayers.isEmpty() ? textureName : partTextureNames.value(part->name(),
+            part->textureNumber() == 2 && !secondaryTextureName.trimmed().isEmpty()
+                ? secondaryTextureName : textureName);
+        float uvScale = ei::textureUvScale(partTexture);
+        if(!part->vertData().isEmpty())
+        {
+            float minU = part->vertData().first().texCoord.x();
+            float maxU = minU;
+            float minV = part->vertData().first().texCoord.y();
+            float maxV = minV;
+            for(const SVertexData& vertex : part->vertData())
+            {
+                minU = qMin(minU, vertex.texCoord.x());
+                maxU = qMax(maxU, vertex.texCoord.x());
+                minV = qMin(minV, vertex.texCoord.y());
+                maxV = qMax(maxV, vertex.texCoord.y());
+            }
+            uvScale = ei::textureUvScaleForBounds(partTexture, minU, maxU, minV, maxV);
+        }
+        part->setTextureUvScale(uvScale);
+    }
+    rebuildTransientAnimationSkeleton();
     recalcMinPos();
 }
 
 void CObjectBase::recalcMinPos()
 {
-    float min(1000.0f); // 0.0f?
+    float min(0.0f);
+    bool hasVertex = false;
     QVector3D rotatedPos;
     QMatrix4x4 rtMatrix;
     rtMatrix.setToIdentity();
     rtMatrix.rotate(m_rotation);
+    const float visualScale = editorVisualScale();
     for(auto& part: m_aPart)
         for(auto& vert : part->vertData())
         {
-            rotatedPos = rtMatrix*vert.position; //get vector, rotated with matrix
-            if (rotatedPos.z() < min)
+            rotatedPos = rtMatrix*(vert.position * visualScale); //get vector, rotated with matrix
+            if(!hasVertex || rotatedPos.z() < min)
                 min = rotatedPos.z();
+            hasVertex = true;
         }
 
+    // Empty or rejected assemblies must not acquire the historical +1000 Z
+    // projection sentinel. Keep their serialized position stable so the
+    // resolver diagnostic/placeholder remains selectable and inspectable.
+    if(!hasVertex)
+        min = 0.0f;
     m_minPoint = QVector3D(0.0f, 0.0f, min);
     CLandscape::getInstance()->projectPosition(this);
 }

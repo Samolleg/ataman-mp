@@ -3,6 +3,7 @@
 
 #include <QGLWidget>
 #include <QOpenGLShader>
+#include <QOpenGLTimerQuery>
 #include <QFileInfo>
 #include <QTimer>
 #include <QSharedPointer>
@@ -12,7 +13,10 @@
 #include <QHash>
 #include <QImage>
 #include <QPointer>
+#include <QOpenGLBuffer>
+#include <QElapsedTimer>
 #include <QRectF>
+#include <QSet>
 #include <QStringList>
 
 #include "types.h"
@@ -20,8 +24,15 @@
 #include "mpr_document.h"
 #include "terrain_edit_model.h"
 #include "terrain_atlas_analyzer.h"
+#include "spatial_grid.h"
 
 class QLineEdit;
+class QFrame;
+class QLabel;
+class QComboBox;
+class QSlider;
+class QToolButton;
+class QResizeEvent;
 class CKeyManager;
 class CMob;
 class CCamera;
@@ -55,11 +66,16 @@ class CTreeView;
 class IPropertyBase;
 class CTileForm;
 class CLandscapeTools;
+class CLight;
+class QOpenGLFramebufferObject;
+class RenderQueueContext;
+class CViewFrustum;
 class CPreviewTile;
 class CLandscape;
 class CExternalScriptWorkspaceManager;
 class CMobScriptWindow;
 struct SMobParameterState;
+namespace ei { struct SRenderEnvironment; }
 
 ///
 /// \brief The CView class is the main class for managing and editing 3D scene contents. It is also a link between read out *.mob files and their editing. It also controls the camera and current operations.
@@ -80,10 +96,11 @@ public:
     explicit CView(QWidget* parent=nullptr) = delete;
     explicit CView(QWidget* parent=nullptr, const QGLWidget* pShareWidget=nullptr);
     ~CView();
+    bool prepareForApplicationShutdown();
 
     void loadLandscape(const QFileInfo& filePath);
     void refreshAfterResourceSetup();
-    void unloadLand(bool confirmDirty = true);
+    void unloadLand(bool promptForSave = true);
     void saveLand();
     void saveLandAs();
     bool loadMob(QFileInfo& filePath);
@@ -111,28 +128,41 @@ public:
     CSettings* settings() {Q_ASSERT(m_pSettings); return m_pSettings;}
     int select(const SSelect& selectParam, bool bAddToSelect = false);
     CMob* mob(QString mobName);
-    const QVector<CMob*> mobs() {return m_aMob;}
+    const QVector<CMob*> mobs() const {return m_aMob;}
+    CMob* ownerMob(CNode* node) const;
+    bool isMobVisible(CMob* mob) const;
+    void setMobVisible(CMob* mob, bool visible);
+    void setWorkspaceVisibility(const QList<CMob*>& mobs,
+                                bool includeLandscape, bool visible);
+    bool isLandscapeVisible() const { return m_landscapeVisible; }
+    void setLandscapeVisible(bool visible);
+    bool unloadMobDocument(CMob* mob, bool promptForSave = true);
     void drawSelectFrame(QRect& rect);
     void pickObject(QPoint mousePos, bool bAddToSelect);
     void pickObject(const QRect& rect, bool bAddToSelect);
     QVector3D getTerrainPos(bool bLand = true);
-    QVector3D getTerrainPos(const int cursorPosX, const int cursorPosY, bool bLand = true);
+    QVector3D getTerrainPos(const int cursorPosX, const int cursorPosY,
+                            bool bLand = true, bool* hit = nullptr);
     bool terrainPositionAt(const QPoint& viewportPosition, QVector3D* position);
     QPoint operationAnchor() const;
     void setTestSpawnMarker(const QVector3D& position, bool adjusted = false);
     void setTestSpawnMarkerSelected(bool selected);
-    bool testSpawnMarkerAt(const QPoint& viewportPosition, int tolerance = 18) const;
+    bool testSpawnMarkerAt(const QPoint& viewportPosition, int padding = 8) const;
     void clearTestSpawnMarker();
+    void setMapSkyType(const QString& skyType);
     void setTestEntranceOverlays(const QVector<QRectF>& rectangles,
                                  const QStringList& labels,
                                  int selectedIndex);
     void moveCameraToPoint(const QVector3D& position);
+    void anchorCameraRotationToViewportCenter();
     void changeOperation(EButtonOp type);
     void operationSetBackup(EOperationAxisType operationType);
     void operationRevert(EOperationAxisType operationType);
     void operationApply(EOperationAxisType operationType);
     bool cancelPendingOperation();
     bool prepareHistoryNavigation();
+    bool hasPendingOperation() const;
+    bool prepareUndo();
     void moveTo(QVector3D& dir);
     void rotateTo(QVector3D& rot);
     void scaleTo(QVector3D& scale);
@@ -141,17 +171,26 @@ public:
     void selectedObjectToClipboardBuffer();
     void clipboradObjectsToScene();
     void duplicateSelectedObjects();
+    bool canConvertSelectedWorldObjectToLever() const;
+    void convertSelectedWorldObjectToLever();
     void hideSelectedNodes();
     void unHideAll();
     CMob* currentMob() {return m_activeMob;}
+    bool hasEditableSelection() const;
     QOpenGLShaderProgram& shaderObject() {return m_program;}
     void setDirtyMpr();
     void setDurty(CMob* pMob = nullptr);
     void resetCamPosition();
+    double cameraSpeedMultiplier() const;
+    void setCameraSpeedMultiplier(double multiplier);
     void addLogicPoint(bool bLookPoint = false);
     void copySelectedIDsToClipboard();
     void changeCurrentMob(CMob* pMob);
     void changeCurrentMob(QString mobName);
+    bool activateSelectedObjectMob();
+    bool selectNode(CNode* node, bool addToSelection = false,
+                    bool activateOwner = false);
+    bool selectNodes(const QList<CNode*>& nodes, bool addToSelection = false);
     void roundActiveMob();
     void undo_roundActiveMob();
     void execUnloadCommand();
@@ -196,6 +235,7 @@ public:
     bool applyTerrainTilePreview(const STerrainTileCommand& command, bool forward);
     void loadSession();
     bool onExit();
+    QString captureShadowDiagnostics(QString* error = nullptr);
 
 protected:
     void initializeGL() override;
@@ -208,8 +248,11 @@ protected:
     void mouseReleaseEvent(QMouseEvent* event) override;
     void wheelEvent(QWheelEvent* event) override;
     void focusOutEvent(QFocusEvent* event) override;
+    void resizeEvent(QResizeEvent* event) override;
 
 private:
+    bool saveMobDocument(CMob* mob, const QFileInfo& destination);
+    bool saveLandscapeDocument(const QFileInfo& destination);
     void refreshMobDirtyStates();
     void initShaders();
     void draw();
@@ -219,11 +262,18 @@ private:
     void getColorFromRect(const QRect& rect, QVector<SColor>& aColor);
     void onParamChangeLogic(CNode* pNode, const QSharedPointer<IPropertyBase>& prop);
     void logOpenGlData();
-    void checkOpenGlError();
+    void armOpenGlDiagnostics(const QString& reason, int frameCount = 4);
+    bool logOpenGlErrors(const QString& stage);
+    void logOpenGlDiagnosticState(const QString& stage, bool samplePixel = false);
+    void logShaderProgramDiagnostics(const QString& name,
+                                     const QOpenGLShaderProgram& program,
+                                     bool success);
     void drawTilePreview(QOpenGLShaderProgram* program);
     void drawTerrainPaintOutline(QOpenGLShaderProgram* program);
     void updateTileForm(bool bGenerateNewTable = false);
     void saveSession();
+    bool closeMobParameterWindow(CMob* mob);
+    bool closeAllMobParameterWindows();
     bool closeMobScriptWindow(CMob* mob);
     bool closeAllMobScriptWindows();
     bool confirmScriptReferencedObjectIds(const QVector<uint>& objectIds,
@@ -235,10 +285,38 @@ private:
     void clearLandscapeBrushSelection();
     void ensureManualTileSelection();
     void rebuildTerrainAutoCatalog();
+    void rebuildSpatialIndices();
+    QVector<CNode*> spatiallyVisibleNodes(CMob* mob, const CViewFrustum* frustum,
+                                          SSpatialQueryStats* stats);
+    QString sceneSourceFingerprint();
+    void drawSkybox(const QMatrix4x4& cameraMatrix,
+                    const ei::SRenderEnvironment& environment);
+    void drawParticles(const QMatrix4x4& cameraMatrix,
+                       const CViewFrustum* frustum);
+    bool ensureParticleRendererInitialized();
+    void initEnvironmentPreviewWidget();
+    void applyEnvironmentCompatibilityMode();
+    void positionEnvironmentPreviewWidget();
+    void syncEnvironmentPreviewWidget(float mapTimeHours);
+    void applyEnvironmentUniforms(QOpenGLShaderProgram& program,
+                                  const ei::SRenderEnvironment& environment,
+                                  const QVector<CLight*>& lights,
+                                  int lightingMode, bool fogEnabled);
+    bool renderShadowMap(const QVector3D& cameraPosition,
+                         const QVector3D& shadowFocus,
+                         const ei::SRenderEnvironment& environment,
+                         RenderQueueContext& queue,
+                         float maximumDistance);
+    bool ensureShadowFramebuffers(int quality);
+    void releaseShadowFramebuffers();
+    void applyShadowUniforms(QOpenGLShaderProgram& program, bool enabled,
+                             bool receiveStatic = true,
+                             bool receiveDynamic = true);
 
 
 public slots:
     void updateWindow();
+    void applyRenderScheduling();
     void updateParameter(EObjParam param);
     void viewParameters();
     void updateReadState(EReadState state); //get signal from reading texture/objects/map/mob
@@ -263,6 +341,7 @@ public slots:
 signals:
     void updateMsg(QString msg);
     void unloadMob(CMob*);
+    void selectionChanged();
     void updateMainWindowTitle(eTitleTypeData, QString);
     void showOutlinerSignal(bool bShow);
     void showLandscapeToolsSignal();
@@ -271,8 +350,10 @@ signals:
     void externalMobScriptImported(CMob* mob, const QString& displayScript);
     void selectionStateChanged(bool hasSelection);
     void mobStateChanged();
+    void loadedMapStateChanged();
     void nidChangeProposed(quint32 nid, const QString& mobPath);
     void nidAllocationRequested(const QString& mobPath, quint32* suggestion);
+    void cameraSpeedMultiplierChanged(double multiplier);
 
 private:
     int m_height; //for redraw window
@@ -281,13 +362,47 @@ private:
     QOpenGLShaderProgram m_program;
     QOpenGLShaderProgram m_landProgram;
     QOpenGLShaderProgram m_selectProgram;
+    QOpenGLShaderProgram m_skyProgram;
+    QOpenGLBuffer m_skyBuffer{QOpenGLBuffer::VertexBuffer};
+    int m_skyVertexCount{0};
+    bool m_skyResourcesChecked{false};
+    bool m_skyResourcesAvailable{false};
+    QOpenGLShaderProgram m_particleProgram;
+    QOpenGLBuffer m_particleBuffer{QOpenGLBuffer::VertexBuffer};
+    bool m_particleInitializationAttempted{false};
+    bool m_particleRendererReady{false};
+    QOpenGLShaderProgram m_shadowProgram;
+    QOpenGLFramebufferObject* m_shadowFbo{nullptr};
+    QOpenGLFramebufferObject* m_dynamicShadowFbo{nullptr};
+    QOpenGLFramebufferObject* m_farShadowFbo{nullptr};
+    QOpenGLFramebufferObject* m_farDynamicShadowFbo{nullptr};
+    int m_shadowResolution{0};
+    QMatrix4x4 m_staticLightSpaceMatrix;
+    QMatrix4x4 m_dynamicLightSpaceMatrix;
+    QMatrix4x4 m_farStaticLightSpaceMatrix;
+    QMatrix4x4 m_farDynamicLightSpaceMatrix;
+    float m_nearShadowSplit{64.0f};
+    bool m_shadowCascadeDiagnostic{false};
+    QElapsedTimer m_shadowUpdateTimer;
+    bool m_shadowInitialized{false};
+    QByteArray m_staticShadowFingerprint;
+    QByteArray m_farStaticShadowFingerprint;
+    QOpenGLTimerQuery* m_gpuTimer;
+    bool m_gpuTimerPending;
     QMatrix4x4 m_projection;
     QVector<CMob*> m_aMob;
+    // World lighting belongs to the loaded map, not to whichever MOB happens
+    // to be selected for editing. Keep the first loaded document as the
+    // environment owner until it is unloaded.
+    CMob* m_environmentMob{nullptr};
+    bool m_caveEnvironment{false};
+    QSet<CMob*> m_hiddenMobs;
     QTimer* m_timer;
     CSettings* m_pSettings;
     QVector<bool> m_aReadState;
     QSharedPointer<CTableManager> m_tableManager;
     QUndoStack* m_pUndoStack;
+    int m_lastUndoStackIndex{-1};
     CProgressView* m_pProgress;
     QSharedPointer<COperation> m_pOp;
     QMap<CNode*, QVector3D> m_operationBackup;
@@ -311,6 +426,7 @@ private:
     QDateTime m_lastModifiedLand;
     bool m_bDrawLand;
     bool m_bDrawWater;
+    bool m_landscapeVisible{true};
     bool m_bPreviewTile;
     CTileForm* m_pTileForm;
     QSharedPointer<CPreviewTile> m_pPreviewTile;
@@ -364,6 +480,22 @@ private:
     QVector<GLuint> m_testEntranceLabelTextures;
     bool m_testEntranceLabelTexturesDirty{false};
     int m_selectedTestEntrance{-1};
+    QHash<CMob*, QSharedPointer<CSpatialGrid<CNode*>>> m_spatialIndices;
+    QHash<CMob*, QVector<CNode*>> m_spatialOverflowNodes;
+    bool m_spatialIndexDirty;
+    bool m_sceneFingerprintDirty;
+    QString m_sceneFingerprint;
+    QFrame* m_environmentPreviewWidget{nullptr};
+    QWidget* m_environmentPreviewBody{nullptr};
+    QToolButton* m_environmentPreviewCollapse{nullptr};
+    QLabel* m_environmentPreviewTimeLabel{nullptr};
+    QComboBox* m_environmentPreviewMode{nullptr};
+    QSlider* m_environmentPreviewTime{nullptr};
+    bool m_environmentPreviewSyncing{false};
+    bool m_openGlesCompatibility{false};
+    int m_openGlDiagnosticFramesRemaining{0};
+    quint64 m_openGlDiagnosticFrame{0};
+    QString m_openGlDiagnosticReason;
 };
 
 #endif // MYGLWIDGET_H

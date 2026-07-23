@@ -33,9 +33,16 @@ public:
     void strafeDownward(bool bShift = false);
     void enlarge(const bool bZoom = true);
     void reset();
-    float step() const {return m_step;}
+    float step() const {return m_step * m_speedMultiplier;}
+    float speedMultiplier() const {return m_speedMultiplier;}
+    void setSpeedMultiplier(float multiplier);
+    // Legacy serialized orbit-controller state. `pos` is NOT guaranteed to be
+    // the rendered world-space eye after pivot rotations. Use viewMatrix() and
+    // ei::cameraEyeFromView() for culling, LOD, lighting, and shadow geometry.
+    // See docs/CAMERA_COORDINATE_CONTRACT.md.
     void getLocation(QVector3D& pos, QVector3D& pivot, QVector3D& rot);
     void setLocation(const QVector3D& pos, const QVector3D& pivot, const QVector3D& rot);
+    void setOrbitPivotPreservingView(const QVector3D& pivot);
     void move();
     void moveTo(QVector3D posTarget);
     void moveAwayOn(float distance);
@@ -52,6 +59,7 @@ private:
     float m_xRot;
     float m_zRot;
     float m_step;
+    float m_speedMultiplier;
     CKeyManager* m_keyManager;
     CSettings* m_pSettings;
 };

@@ -14,7 +14,7 @@ if (-not (Test-Path -LiteralPath $bridge -PathType Leaf)) {
 $runtimeHost = Join-Path $root 'runtime\EIMapperEnduranceRuntimeHost.exe'
 if(-not (Test-Path -LiteralPath $runtimeHost -PathType Leaf))
 {
-    $failures.Add('packaged Base runtime host is missing: runtime\EIMapperEnduranceRuntimeHost.exe')
+    $failures.Add('packaged Endurance runtime host is missing: runtime\EIMapperEnduranceRuntimeHost.exe')
 }
 
 foreach ($name in @('endurance-options.json', 'options.json')) {
@@ -32,9 +32,45 @@ if (Test-Path -LiteralPath $logsRoot) {
 }
 
 foreach ($dump in Get-ChildItem -LiteralPath $root -Recurse -File | Where-Object {
-    $_.Extension -in @('.dmp', '.mdmp')
+    $_.Extension -in @('.dmp', '.mdmp', '.sav')
 }) {
-    $failures.Add("crash dump included: $($dump.FullName.Substring($root.Length + 1))")
+    $failures.Add("private runtime artifact included: $($dump.FullName.Substring($root.Length + 1))")
+}
+
+$versionPath = Join-Path $root 'VERSION'
+if (-not (Test-Path -LiteralPath $versionPath -PathType Leaf)) {
+    $failures.Add('VERSION is missing')
+}
+else {
+    $version = (Get-Content -LiteralPath $versionPath -Raw).Trim()
+    if ($version -match 'alpha\.(\d+)') {
+        $alphaNumber = [int]$Matches[1]
+        $expectedPattern = "^ALPHA$alphaNumber(?:_|$).*\.md$"
+        $alphaChangelists = @(Get-ChildItem -LiteralPath $root -File -Filter 'ALPHA*.md')
+        $currentChangelists = @($alphaChangelists |
+            Where-Object { $_.Name -match $expectedPattern })
+        if ($currentChangelists.Count -ne 1) {
+            $failures.Add("expected exactly one alpha.$alphaNumber changelist; found $($currentChangelists.Count)")
+        }
+        foreach ($file in $alphaChangelists |
+            Where-Object { $_.Name -notmatch $expectedPattern }) {
+            $failures.Add("stale alpha changelist included: $($file.Name)")
+        }
+    }
+}
+
+$checksums = Join-Path $root 'SHA256SUMS.txt'
+if(Test-Path -LiteralPath $checksums)
+{
+    $forbiddenManifestEntries = Select-String -LiteralPath $checksums -Pattern '(endurance-options\.json|options\.json)$|(\*|/)logs/.+|\.(dmp|mdmp|sav)$'
+    foreach($entry in $forbiddenManifestEntries)
+    {
+        $failures.Add("checksum manifest references a private/runtime artifact: $($entry.Line)")
+    }
+}
+else
+{
+    $failures.Add('SHA256SUMS.txt is missing; the package was not finalized')
 }
 
 if ($failures.Count -ne 0) {
@@ -42,4 +78,4 @@ if ($failures.Count -ne 0) {
     exit 1
 }
 
-Write-Output "PASS: distribution contains no user settings, logs, or crash dumps"
+Write-Output "PASS: package contains only its current changelist and no user settings, logs, saves, or crash dumps"

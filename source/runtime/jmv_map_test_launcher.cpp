@@ -13,7 +13,9 @@
 #include <QSaveFile>
 #include <QSet>
 #include <QStandardPaths>
+#include <QSettings>
 #include <QTextStream>
+#include <QThread>
 #include <QTimer>
 #include <QProcessEnvironment>
 
@@ -199,8 +201,24 @@ qint64 readOwnedGamePid(const QString& path)
     QFile file(path);
     if(!file.open(QIODevice::ReadOnly | QIODevice::Text))
         return 0;
+    QByteArray bytes = file.readAll();
+    // alpha.29's x86 host used fwprintf on a binary stream and therefore
+    // emitted UTF-16LE without a BOM. Accept those journals during recovery as
+    // well as the ASCII protocol emitted by current hosts.
+    if(bytes.size() >= 2 && bytes.at(1) == '\0')
+    {
+        QByteArray ascii;
+        ascii.reserve((bytes.size() + 1) / 2);
+        for(int index = 0; index < bytes.size(); index += 2)
+        {
+            if(index + 1 >= bytes.size() || bytes.at(index + 1) != '\0')
+                return 0;
+            ascii.append(bytes.at(index));
+        }
+        bytes = ascii;
+    }
     bool ok = false;
-    const qint64 pid = QString::fromLatin1(file.readAll()).trimmed().toLongLong(&ok);
+    const qint64 pid = QString::fromLatin1(bytes).trimmed().toLongLong(&ok);
     return ok ? pid : 0;
 }
 
@@ -252,21 +270,39 @@ QString saveGenerationPath(const QString& runRoot, quint64 generation)
 
 bool removeIfOwned(const QString& path, const QString& expectedHash, QStringList* messages)
 {
-    if(!QFileInfo::exists(path))
-        return true;
-    const QString currentHash = fileSha256(path);
-    if(currentHash.compare(expectedHash, Qt::CaseInsensitive) != 0)
+    // A stopped runtime host can report completion a fraction before Windows
+    // releases the last image-section handle held by its game child. Keep the
+    // hash guard on every attempt, but tolerate that short teardown window.
+    constexpr int kRemovalAttempts = 11;
+    for(int attempt = 0; attempt < kRemovalAttempts; ++attempt)
     {
-        messages->append(QString("Retained changed temporary file: %1").arg(path));
-        return false;
+        if(!QFileInfo::exists(path))
+        {
+            if(attempt > 0)
+                messages->append(QString("Removed temporary file after %1 cleanup retries: %2")
+                                 .arg(attempt).arg(path));
+            return true;
+        }
+        const QString currentHash = fileSha256(path);
+        if(currentHash.compare(expectedHash, Qt::CaseInsensitive) != 0)
+        {
+            messages->append(QString("Retained changed temporary file: %1").arg(path));
+            return false;
+        }
+        if(QFile::remove(path))
+        {
+            messages->append(attempt == 0
+                ? QString("Removed temporary file: %1").arg(path)
+                : QString("Removed temporary file after %1 cleanup retries: %2")
+                    .arg(attempt).arg(path));
+            return true;
+        }
+        if(attempt + 1 < kRemovalAttempts)
+            QThread::msleep(100);
     }
-    if(!QFile::remove(path))
-    {
-        messages->append(QString("Could not remove temporary file: %1").arg(path));
-        return false;
-    }
-    messages->append(QString("Removed temporary file: %1").arg(path));
-    return true;
+    messages->append(QString("Could not remove temporary file after 1 second of hash-checked retries: %1")
+                     .arg(path));
+    return false;
 }
 
 bool restoreAutoexec(const QJsonObject& manifest, QStringList* messages)
@@ -477,7 +513,7 @@ CJmvMapTestLauncher::CJmvMapTestLauncher(QObject* parent)
     connect(m_process, &QProcess::started, this, [this]()
     {
         appendRunLog(QString("%1 started pid=%2")
-                     .arg(m_baseProbe ? "Base runtime host" : "game.exe")
+                     .arg(m_usesRuntimeHost ? "Endurance runtime host" : "game.exe")
                      .arg(m_process->processId()));
         const qint64 pid = m_process->processId();
         m_manifest.insert("pid", double(pid));
@@ -500,7 +536,28 @@ CJmvMapTestLauncher::CJmvMapTestLauncher(QObject* parent)
                      .arg(exitCode).arg(int(status)));
         const QString bridgeResult = bridgeResultSummary();
         appendRunLog(bridgeResult);
-        QString cleanupMessage = cleanup();
+        const QString cleanupOnly = cleanup();
+        QJsonObject report = buildAuthoritativeResult(
+            m_manifest,
+            bridgeResult.startsWith("Runtime bridge result:\n")
+                ? bridgeResult.mid(QString("Runtime bridge result:\n").size())
+                : QString(),
+            exitCode, int(status), m_stopRequested, cleanupOnly);
+        const QString resultPath = QDir(m_runRoot).filePath("result.json");
+        QString resultError;
+        if(!atomicWrite(resultPath,
+                        QJsonDocument(report).toJson(QJsonDocument::Indented),
+                        &resultError))
+            appendRunLog("Could not persist authoritative result: " + resultError);
+        m_manifest.insert("finalResultPath", resultPath);
+        m_manifest.insert("finalResultPassed", report.value("passed").toBool());
+        writeManifest(m_cleanupComplete ? "cleaned" : "cleanup-needed");
+        appendRunLog(QString("Authoritative test result passed=%1 errors=%2 warnings=%3 path=%4")
+                     .arg(report.value("passed").toBool())
+                     .arg(report.value("errorCount").toInt())
+                     .arg(report.value("warningCount").toInt()).arg(resultPath));
+        emit testReportReady(report);
+        QString cleanupMessage = cleanupOnly;
         if(!cleanupMessage.isEmpty())
             cleanupMessage += "\n";
         cleanupMessage += bridgeResult;
@@ -536,6 +593,305 @@ QString CJmvMapTestLauncher::generationSavesPath(const QString& runRoot,
     return saveGenerationPath(runRoot, generation);
 }
 
+qint64 CJmvMapTestLauncher::runtimeGameProcessId(bool usesRuntimeHost,
+                                                 const QString& gamePidPath,
+                                                 qint64 transportProcessId)
+{
+    return usesRuntimeHost ? readOwnedGamePid(gamePidPath) : transportProcessId;
+}
+
+qint64 CJmvMapTestLauncher::runtimeGameProcessId() const
+{
+    return runtimeGameProcessId(m_usesRuntimeHost, m_gamePidPath,
+                                m_process->processId());
+}
+
+QJsonObject CJmvMapTestLauncher::buildAuthoritativeResult(
+    const QJsonObject& manifest, const QString& bridgeResult, int exitCode,
+    int exitStatus, bool stopRequested, const QString& cleanupMessage)
+{
+    QJsonObject report;
+    report.insert("schemaVersion", 1);
+    report.insert("runId", manifest.value("runId").toString());
+    report.insert("profileId", manifest.value("profileId").toString());
+    report.insert("runRoot", manifest.value("runRoot").toString());
+    report.insert("runLogPath", manifest.value("sharedLogPath").toString(
+                      manifest.value("logPath").toString()));
+    report.insert("internalRunLogPath", manifest.value("logPath").toString());
+    report.insert("bridgeResultPath",
+                  manifest.value("bridge").toObject().value("resultPath").toString());
+    report.insert("exitCode", exitCode);
+    report.insert("exitStatus", exitStatus);
+    report.insert("exitReason", stopRequested ? "user-stop"
+                                                : (exitStatus == int(QProcess::CrashExit)
+                                                   ? "crash" : "process-exit"));
+    report.insert("cleanupMessage", cleanupMessage);
+
+    QString requestedZone = manifest.value("sessionSettings").toObject()
+        .value("sourceZone").toString();
+    int requestedEntrance = manifest.value("sessionSettings").toObject()
+        .value("travelExit").toInt();
+    quint64 requestedGeneration = manifest.value("isolatedSaves").toObject()
+        .value("activeGeneration").toString().toULongLong();
+    QString requestedMprHash;
+    QString requestedMobHash;
+    QString expectedMprPath = manifest.value("liveFiles").toObject()
+        .value("mprPath").toString();
+    QString expectedMobPath = manifest.value("liveFiles").toObject()
+        .value("mobPath").toString();
+    QString saveNamespace = manifest.value("isolatedSaves").toObject()
+        .value("testPath").toString();
+    const QJsonArray reloads = manifest.value("hotReloads").toArray();
+    if(!reloads.isEmpty())
+    {
+        const QJsonObject latest = reloads.last().toObject();
+        requestedZone = latest.value("zoneId").toString(requestedZone);
+        requestedEntrance = latest.value("entranceId").toInt(requestedEntrance);
+        requestedGeneration = latest.value("generation").toString()
+            .toULongLong();
+        requestedMprHash = latest.value("mprSha256").toString();
+        requestedMobHash = latest.value("mobSha256").toString();
+        expectedMprPath = latest.value("mprPath").toString();
+        expectedMobPath = latest.value("mobPath").toString();
+        saveNamespace = latest.value("savePath").toString(saveNamespace);
+    }
+    if(requestedMprHash.isEmpty() || requestedMobHash.isEmpty())
+    {
+        const QJsonObject live = manifest.value("liveFiles").toObject();
+        requestedMprHash = live.value("mprSha256").toString();
+        requestedMobHash = live.value("mobSha256").toString();
+    }
+
+    QString actualZone;
+    int actualEntrance = 0;
+    quint64 actualGeneration = 0;
+    quint64 completedReloadSequence = 0;
+    const QRegularExpression reloadExpression(
+        "HOT_RELOAD dispatch sequence=(\\d+) generation=(\\d+).*zone=\\\"([^\\\"]+)\\\" entrance_id=(\\d+)");
+    QRegularExpressionMatchIterator reloadMatches = reloadExpression.globalMatch(bridgeResult);
+    while(reloadMatches.hasNext())
+    {
+        const QRegularExpressionMatch match = reloadMatches.next();
+        const quint64 sequence = match.captured(1).toULongLong();
+        if(bridgeResult.contains(QString("HOT_RELOAD completed sequence=%1").arg(sequence)))
+        {
+            completedReloadSequence = sequence;
+            actualGeneration = match.captured(2).toULongLong();
+            actualZone = match.captured(3);
+            actualEntrance = match.captured(4).toInt();
+        }
+    }
+    if(actualZone.isEmpty())
+    {
+        const QRegularExpression initialExpression(
+            "DIRECT_LAUNCH initialized New Game player zone=\\\"([^\\\"]+)\\\" entrance_id=(\\d+)");
+        QRegularExpressionMatchIterator initialMatches = initialExpression.globalMatch(bridgeResult);
+        while(initialMatches.hasNext())
+        {
+            const QRegularExpressionMatch match = initialMatches.next();
+            actualZone = match.captured(1);
+            actualEntrance = match.captured(2).toInt();
+        }
+    }
+
+    QString actualMprPath;
+    QString actualMobPath;
+    const QRegularExpression loaderExpression(
+        "redirecting normal single-player transition loader mpr=\\\"([^\\\"]+)\\\" mob=\\\"([^\\\"]+)\\\"");
+    QRegularExpressionMatchIterator loaderMatches = loaderExpression.globalMatch(bridgeResult);
+    while(loaderMatches.hasNext())
+    {
+        const QRegularExpressionMatch match = loaderMatches.next();
+        actualMprPath = match.captured(1);
+        actualMobPath = match.captured(2);
+    }
+
+    const bool gameplayReady = bridgeResult.contains(
+        QRegularExpression("RUNTIME_STATE.*to=GameplayReady"));
+    const bool stagedLoaderObserved = bridgeResult.contains(
+        "DIRECT_LAUNCH staged map loader returned result=1")
+        || completedReloadSequence != 0;
+    const bool actualMprMatchesOwnedPayload = !actualMprPath.isEmpty()
+        && QFileInfo(actualMprPath).absoluteFilePath().compare(
+            QFileInfo(expectedMprPath).absoluteFilePath(),
+            Qt::CaseInsensitive) == 0;
+    const bool actualMobMatchesOwnedPayload = !actualMobPath.isEmpty()
+        && QFileInfo(actualMobPath).absoluteFilePath().compare(
+            QFileInfo(expectedMobPath).absoluteFilePath(),
+            Qt::CaseInsensitive) == 0;
+    const bool payloadHashesValidated = stagedLoaderObserved
+        && actualMprMatchesOwnedPayload && actualMobMatchesOwnedPayload
+        && !requestedMprHash.isEmpty() && !requestedMobHash.isEmpty();
+    const int playerInitializations = bridgeResult.count(
+        "DIRECT_LAUNCH initialized New Game player");
+
+    bool sourceFilesUnchanged = true;
+    QJsonArray changedSources;
+    const QJsonObject sources = manifest.value("sourceSha256").toObject();
+    for(auto it = sources.begin(); it != sources.end(); ++it)
+    {
+        if(fileSha256(it.key()).compare(it.value().toString(), Qt::CaseInsensitive) != 0)
+        {
+            sourceFilesUnchanged = false;
+            changedSources.append(it.key());
+        }
+    }
+
+    bool cleanupComplete = true;
+    QJsonArray retainedArtifacts;
+    const auto checkRemoved = [&cleanupComplete, &retainedArtifacts](const QString& path)
+    {
+        if(!path.isEmpty() && QFileInfo::exists(path))
+        {
+            cleanupComplete = false;
+            retainedArtifacts.append(path);
+        }
+    };
+    const QJsonObject live = manifest.value("liveFiles").toObject();
+    checkRemoved(live.value("mprPath").toString());
+    checkRemoved(live.value("mobPath").toString());
+    checkRemoved(manifest.value("bridge").toObject().value("path").toString());
+    checkRemoved(QDir(manifest.value("runRoot").toString()).filePath("generations"));
+    if(cleanupMessage.contains("Could not", Qt::CaseInsensitive)
+       || cleanupMessage.contains("Refused", Qt::CaseInsensitive)
+       || cleanupMessage.contains("Retained changed", Qt::CaseInsensitive))
+        cleanupComplete = false;
+
+    QJsonArray errors;
+    QJsonArray warnings;
+    const auto addUnique = [](QJsonArray* array, const QString& text)
+    {
+        if(!array || text.isEmpty()) return;
+        for(const QJsonValue& existing : *array)
+            if(existing.toString() == text) return;
+        array->append(text);
+    };
+    if(bridgeResult.trimmed().isEmpty())
+        addUnique(&errors, "The runtime bridge produced no result evidence.");
+    if(!gameplayReady || !stagedLoaderObserved)
+        addUnique(&errors, "The runtime did not prove a completed staged gameplay load.");
+    if(stagedLoaderObserved && !payloadHashesValidated)
+        addUnique(&errors, "The runtime loader paths could not be matched to the hash-verified staged payloads.");
+    if(actualZone.isEmpty())
+        addUnique(&errors, "The runtime did not report the actually initialized zone.");
+    else if(!requestedZone.isEmpty()
+            && actualZone.compare(requestedZone, Qt::CaseInsensitive) != 0)
+        addUnique(&errors, QString("Requested zone %1 but runtime reported %2.")
+                  .arg(requestedZone, actualZone));
+    if(requestedEntrance > 0 && actualEntrance != requestedEntrance)
+        addUnique(&errors, QString("Requested entrance %1 but runtime reported %2.")
+                  .arg(requestedEntrance).arg(actualEntrance));
+    if(requestedGeneration > 0 && actualGeneration > 0
+       && requestedGeneration != actualGeneration)
+        addUnique(&errors, QString("Requested save generation %1 but runtime committed %2.")
+                  .arg(requestedGeneration).arg(actualGeneration));
+    if(!sourceFilesUnchanged)
+        addUnique(&errors, "One or more source map files changed during the test.");
+    if(!cleanupComplete)
+        addUnique(&errors, "One or more owned runtime artifacts could not be cleaned up safely.");
+    if(exitStatus == int(QProcess::CrashExit) && !stopRequested)
+        addUnique(&errors, "The owned game process ended with a crash status.");
+    else if(exitCode != 0 && !stopRequested)
+        addUnique(&warnings, QString("The game returned non-zero exit code %1.").arg(exitCode));
+
+    const QStringList bridgeLines = bridgeResult.split('\n', QString::SkipEmptyParts);
+    for(const QString& line : bridgeLines)
+    {
+        if(line.contains(" failed", Qt::CaseInsensitive)
+           || line.contains(" refused", Qt::CaseInsensitive)
+           || line.contains(" disabled", Qt::CaseInsensitive))
+        {
+            const int marker = line.indexOf(QRegularExpression(
+                "(DIRECT_LAUNCH|HOT_RELOAD|BASE_PROBE)"));
+            addUnique(&errors, marker >= 0 ? line.mid(marker).trimmed() : line.trimmed());
+        }
+    }
+
+    report.insert("requestedZone", requestedZone);
+    report.insert("actualZone", actualZone);
+    report.insert("requestedEntrance", requestedEntrance);
+    report.insert("actualEntrance", actualEntrance);
+    report.insert("requestedGeneration", QString::number(requestedGeneration));
+    report.insert("actualGeneration", QString::number(actualGeneration));
+    report.insert("saveNamespace", saveNamespace);
+    report.insert("completedReloadSequence", QString::number(completedReloadSequence));
+    report.insert("mprSha256", requestedMprHash);
+    report.insert("mobSha256", requestedMobHash);
+    report.insert("actualMprSha256", actualMprMatchesOwnedPayload ? requestedMprHash : QString());
+    report.insert("actualMobSha256", actualMobMatchesOwnedPayload ? requestedMobHash : QString());
+    report.insert("actualMprPath", actualMprPath);
+    report.insert("actualMobPath", actualMobPath);
+    report.insert("gameplayReady", gameplayReady);
+    report.insert("stagedLoaderObserved", stagedLoaderObserved);
+    report.insert("payloadHashesValidated", payloadHashesValidated);
+    report.insert("playerInitializationCount", playerInitializations);
+    report.insert("reportedPlayerCount", playerInitializations > 0 ? 1 : -1);
+    report.insert("playerCountEvidence", playerInitializations > 0
+                  ? "New Game player-record initialization observed"
+                  : "not observed");
+    report.insert("sourceFilesUnchanged", sourceFilesUnchanged);
+    report.insert("changedSources", changedSources);
+    report.insert("cleanupComplete", cleanupComplete);
+    report.insert("retainedArtifacts", retainedArtifacts);
+    report.insert("errors", errors);
+    report.insert("warnings", warnings);
+    report.insert("errorCount", errors.size());
+    report.insert("warningCount", warnings.size());
+    report.insert("passed", errors.isEmpty());
+    report.insert("completedUtc", QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
+    return report;
+}
+
+bool CJmvMapTestLauncher::validateAutomatedResult(const QJsonObject& report,
+                                                  QStringList* findings)
+{
+    QStringList local;
+    if(report.value("schemaVersion").toInt() != 1)
+        local.append("Unsupported or missing test-result schema version.");
+    if(report.value("runId").toString().isEmpty())
+        local.append("The test result has no run ID.");
+    if(!report.value("gameplayReady").toBool())
+        local.append("Gameplay readiness was not proven.");
+    if(!report.value("stagedLoaderObserved").toBool())
+        local.append("The staged loader was not observed.");
+    if(!report.value("payloadHashesValidated").toBool())
+        local.append("The loaded payload hashes were not validated.");
+    if(report.value("actualZone").toString().isEmpty())
+        local.append("The actually loaded zone is missing.");
+    if(!report.value("sourceFilesUnchanged").toBool())
+        local.append("Source-file preservation failed.");
+    if(!report.value("cleanupComplete").toBool())
+        local.append("Runtime cleanup is incomplete.");
+    for(const QJsonValue& error : report.value("errors").toArray())
+        local.append(error.toString());
+    local.removeDuplicates();
+    if(findings) *findings = local;
+    return local.isEmpty();
+}
+
+bool CJmvMapTestLauncher::analyzeCompletedRun(const QString& runRoot,
+                                              QJsonObject* report,
+                                              QStringList* findings)
+{
+    if(!report)
+        return false;
+    QFile resultFile(QDir(runRoot).filePath("result.json"));
+    if(!resultFile.open(QIODevice::ReadOnly | QIODevice::Text))
+    {
+        if(findings) findings->append("The completed run has no readable result.json.");
+        return false;
+    }
+    QJsonParseError error{};
+    const QJsonDocument document = QJsonDocument::fromJson(resultFile.readAll(), &error);
+    if(error.error != QJsonParseError::NoError || !document.isObject())
+    {
+        if(findings) findings->append("The completed run result is not valid JSON.");
+        return false;
+    }
+    *report = document.object();
+    return validateAutomatedResult(*report, findings);
+}
+
 bool CJmvMapTestLauncher::isRunning() const
 {
     return m_process->state() != QProcess::NotRunning;
@@ -550,8 +906,9 @@ bool CJmvMapTestLauncher::isHotReloadReady() const
     quint32 threadId = 0;
     if(file.open(QIODevice::ReadOnly | QIODevice::Text))
         threadId = file.readAll().trimmed().toULong(&ok);
-    return ok && threadId != 0
-        && threadBelongsToProcess(threadId, quint32(m_process->processId()));
+    const qint64 gamePid = runtimeGameProcessId();
+    return ok && threadId != 0 && gamePid > 0
+        && threadBelongsToProcess(threadId, quint32(gamePid));
 }
 
 QString CJmvMapTestLauncher::runtimeState() const
@@ -681,12 +1038,6 @@ bool CJmvMapTestLauncher::injectWorldScriptBootstrap(const QString& script,
         generatedBody.append(commands.trimmed());
     output->append("WorldScript(\n" + generatedBody.join("\n") + "\n)\n");
     return true;
-}
-
-bool CJmvMapTestLauncher::hasConfiguredJmvPluginSlot(const QByteArray& configReg)
-{
-    static const QByteArray record("\x02\x06\x00Plugin\x0a\x00plugin.dll", 21);
-    return configReg.contains(record);
 }
 
 bool CJmvMapTestLauncher::prepareTemporaryAutoexec(const QString& engineDirectory,
@@ -872,6 +1223,7 @@ bool CJmvMapTestLauncher::launch(const SJmvMapTestLaunchInput& input, QString* e
     m_runRoot.clear();
     m_manifestPath.clear();
     m_runLogPath.clear();
+    m_sharedRunLogPath.clear();
     m_liveMprPath.clear();
     m_liveMobPath.clear();
     m_bridgeResultPath.clear();
@@ -892,8 +1244,10 @@ bool CJmvMapTestLauncher::launch(const SJmvMapTestLaunchInput& input, QString* e
     m_pendingSaveGeneration = 0;
     m_hotReloadResultPolls = 0;
     m_baseProbe = false;
+    m_usesRuntimeHost = false;
     m_manifest = QJsonObject();
     m_cleanupComplete = false;
+    m_stopRequested = false;
     if(!stage(input, error))
     {
         if(error && !error->isEmpty())
@@ -913,16 +1267,22 @@ bool CJmvMapTestLauncher::launch(const SJmvMapTestLaunchInput& input, QString* e
     }
     appendRunLog(QString("Launching %1 workingDirectory=%2 map=%3 transport=%4")
                  .arg(m_gameExePath, m_engineDirectory, m_temporaryMapName,
-                      m_baseProbe ? "owned-x86-injector" : "starter-plugin-slot"));
-    m_process->setProgram(m_baseProbe ? m_runtimeHostPath : m_gameExePath);
-    if(m_baseProbe)
+                      m_usesRuntimeHost ? "owned-x86-injector" : "direct-process"));
+    m_process->setProgram(m_usesRuntimeHost ? m_runtimeHostPath : m_gameExePath);
+    if(m_usesRuntimeHost)
         m_process->setArguments(QStringList() << m_gameExePath << m_bridgeLivePath
             << m_engineDirectory << m_gamePidPath
-            << QDir(m_runRoot).filePath("runtime-host.log"));
+            << QDir(m_runRoot).filePath("runtime-host.log")
+            << (m_baseProbe ? "base" : "jmv"));
     else
         m_process->setArguments(QStringList());
     m_process->setWorkingDirectory(m_engineDirectory);
     QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
+    environment.insert("EI_MAPPER_ENDURANCE_GAME_ROOT",
+                       QDir::cleanPath(input.profile.gameRoot));
+    if(!input.profile.modRoot.isEmpty())
+        environment.insert("EI_MAPPER_ENDURANCE_MOD_ROOT",
+                           QDir::cleanPath(input.profile.modRoot));
     environment.insert("EI_MAPPER_ENDURANCE_MAP", m_temporaryMapName);
     environment.insert("EI_MAPPER_ENDURANCE_SOURCE_ZONE", input.mapEntry.zoneId);
     environment.insert("EI_MAPPER_ENDURANCE_TARGET_EXIT", QString::number(input.spawn.exitId));
@@ -957,6 +1317,7 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
     const bool isJmv = input.profile.profileId.compare("jamais-vu", Qt::CaseInsensitive) == 0;
     const bool isBase = input.profile.profileId.compare("base-game", Qt::CaseInsensitive) == 0;
     m_baseProbe = isBase;
+    m_usesRuntimeHost = isJmv || isBase;
     if((!isJmv && !isBase) || !input.profile.valid || !input.profile.runtimeStackValidated)
     {
         if(error) *error = "The active runtime stack is incomplete or does not match an exact manifest.";
@@ -998,36 +1359,14 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
     m_engineDirectory = QFileInfo(m_gameExePath).absolutePath();
     m_bridgeSourcePath = QDir(QCoreApplication::applicationDirPath())
             .filePath("runtime/EIMapperEnduranceJmvBridge.plg");
-    if(isJmv)
-    {
-        const QString modConfigPath = QDir(input.profile.modRoot).filePath("config.reg");
-        QByteArray modConfig;
-        if(!readFile(modConfigPath, &modConfig, error) ||
-           !hasConfiguredJmvPluginSlot(modConfig))
-        {
-            if(error && error->isEmpty())
-                *error = "The active JMV config.reg does not declare the supported DEV Plugin=plugin.dll slot.";
-            return false;
-        }
-        m_bridgeLivePath = QDir(input.profile.modRoot).filePath("plugin.dll");
-        if(QFileInfo::exists(m_bridgeLivePath))
-        {
-            if(error) *error = "The JMV DEV Plugin path already exists. Endurance will not replace an installed mod plugin; run recovery or inspect plugin.dll first.";
-            return false;
-        }
-    }
-    // JMV's config.reg declares DEV/Plugin as plugin.dll. Starter loads that
-    // exact configured file; its *.plg scan is used only when the configured
-    // value names a directory. Keep the packaged provider descriptively named,
-    // but install it temporarily into the already-declared, currently empty slot.
     if(!QFileInfo(m_gameExePath).isFile())
     {
-        if(error) *error = "The validated Starter game.exe is missing.";
+        if(error) *error = "The validated profile game.exe is missing.";
         return false;
     }
     if(!QFileInfo(m_bridgeSourcePath).isFile())
     {
-        if(error) *error = "The packaged JMV launch bridge is missing. Reinstall this Endurance build.";
+        if(error) *error = "The packaged Endurance launch bridge is missing. Reinstall this Endurance build.";
         return false;
     }
     m_runId = QDateTime::currentDateTimeUtc().toString("yyyyMMdd-HHmmss-") +
@@ -1036,6 +1375,14 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
     m_runRoot = QDir(testRunsRoot()).filePath(m_runId);
     m_manifestPath = QDir(m_runRoot).filePath("manifest.json");
     m_runLogPath = QDir(m_runRoot).filePath("runtime.log");
+    const QString sharedLogsDirectory = QDir::current().filePath("logs");
+    if(!QDir().mkpath(sharedLogsDirectory))
+    {
+        if(error) *error = "Could not create the editor logs directory for the test runtime log.";
+        return false;
+    }
+    m_sharedRunLogPath = QDir(sharedLogsDirectory).filePath(
+        QString("test-runtime-%1.log").arg(m_runId));
     m_bridgeResultPath = QDir(m_runRoot).filePath("bridge-result.log");
     m_testSavesPath = saveGenerationPath(m_runRoot, 0);
     m_liveSavesPath = isJmv ? QDir(input.profile.modRoot).filePath("saves")
@@ -1045,21 +1392,65 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
     m_supplementalMobDirectory = QDir(m_runRoot).filePath("supplemental-mobs");
     m_profileId = input.profile.profileId;
     m_currentZoneId = input.mapEntry.zoneId;
+    m_bridgeLivePath = QDir(m_runRoot).filePath("EIMapperEnduranceRuntimeBridge.dll");
+    m_runtimeHostPath = QDir(QCoreApplication::applicationDirPath())
+        .filePath("runtime/EIMapperEnduranceRuntimeHost.exe");
+    m_gamePidPath = QDir(m_runRoot).filePath("game.pid");
+    if(!QFileInfo(m_runtimeHostPath).isFile())
+    {
+        if(error) *error = "The packaged x86 Endurance runtime host is missing.";
+        return false;
+    }
+    QString starterStoredSelection;
+    QString starterRegistryAddonPath;
+    QString selectedModConfig;
+    if(isJmv)
+    {
+        selectedModConfig = findCaseInsensitiveFile(
+            QStringList() << input.profile.modRoot, "config.reg");
+        if(selectedModConfig.isEmpty())
+        {
+            if(error) *error = "The selected JMV mod has no readable Starter config.reg.";
+            return false;
+        }
+        const QString starterRoot = QDir(input.profile.gameRoot).filePath("Starter");
+        QSettings starterConfig(QDir(starterRoot).filePath("starter.config"),
+                                QSettings::IniFormat);
+        starterStoredSelection = starterConfig.value("Settings/ModSel").toString();
+#ifdef Q_OS_WIN
+        QSettings starterRegistry(
+            "HKEY_CURRENT_USER\\Software\\Gipat.Ru\\EI_Starter\\Settings",
+            QSettings::NativeFormat);
+        starterRegistryAddonPath = starterRegistry.value("AddonPath").toString();
+#endif
+        const QString selectedModRoot = normalized(input.profile.modRoot);
+        const QString persistedModRoot = starterRegistryAddonPath.isEmpty()
+            ? QString() : normalized(starterRegistryAddonPath);
+        if(persistedModRoot.isEmpty()
+           || persistedModRoot.compare(selectedModRoot, Qt::CaseInsensitive) != 0)
+        {
+            if(error)
+            {
+                *error = QString(
+                    "Starter is not currently configured for the selected Endurance mod.\n\n"
+                    "Selected profile mod:\n%1\n\n"
+                    "Starter AddonPath:\n%2\n\n"
+                    "Select the intended mod in Starter, then retry Test Current Map. "
+                    "Endurance will not start with a different cached mod because that can mix incompatible resources.")
+                    .arg(QDir::toNativeSeparators(selectedModRoot),
+                         starterRegistryAddonPath.isEmpty()
+                             ? QString("<not configured>")
+                             : QDir::toNativeSeparators(persistedModRoot));
+            }
+            return false;
+        }
+    }
     if(isBase)
     {
         const QString liveDirectory = QDir(m_runRoot).filePath("live");
         if(!QDir().mkpath(liveDirectory))
         {
             if(error) *error = "Could not create the Base EI run-local map directory.";
-            return false;
-        }
-        m_bridgeLivePath = QDir(m_runRoot).filePath("EIMapperEnduranceRuntimeBridge.dll");
-        m_runtimeHostPath = QDir(QCoreApplication::applicationDirPath())
-            .filePath("runtime/EIMapperEnduranceRuntimeHost.exe");
-        m_gamePidPath = QDir(m_runRoot).filePath("game.pid");
-        if(!QFileInfo(m_runtimeHostPath).isFile())
-        {
-            if(error) *error = "The packaged x86 Base EI runtime host is missing.";
             return false;
         }
         m_liveMprPath = QDir(liveDirectory).filePath(m_temporaryMapName + ".mpr");
@@ -1105,10 +1496,22 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
     m_manifest.insert("journalVersion", 1);
     m_manifest.insert("runId", m_runId);
     m_manifest.insert("runRoot", m_runRoot);
+    m_manifest.insert("sharedLogPath", m_sharedRunLogPath);
     m_manifest.insert("createdUtc", QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
     m_manifest.insert("temporaryMapName", m_temporaryMapName);
     m_manifest.insert("gameExePath", m_gameExePath);
     m_manifest.insert("gameExeSha256", fileSha256(m_gameExePath));
+    if(isJmv)
+    {
+        QJsonObject starterSelection;
+        starterSelection.insert("policy", "owned-process-addon-path-override");
+        starterSelection.insert("targetModRoot", QDir::cleanPath(input.profile.modRoot));
+        starterSelection.insert("targetConfig", selectedModConfig);
+        starterSelection.insert("persistedModSelection", starterStoredSelection);
+        starterSelection.insert("persistedAddonPath", starterRegistryAddonPath);
+        starterSelection.insert("persistentConfigurationModified", false);
+        m_manifest.insert("starterModSelection", starterSelection);
+    }
     m_manifest.insert("liveFiles", liveJournal);
     m_manifest.insert("isolatedSaves", saveJournal);
     if(!writeManifest("staging", error))
@@ -1303,6 +1706,10 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
         m_manifest.insert("godmodeBootstrapPath", godmodeBootstrapPath);
     appendRunLog(QString("Prepared generation-scoped isolated saves generation=0 path=%1; live saves remain untouched")
                  .arg(m_testSavesPath));
+    if(isJmv)
+        appendRunLog(QString("Starter mod target=%1 persistedSelection=%2 persistedAddonPath=%3 policy=owned-process-override persistentModified=false")
+                     .arg(QDir::cleanPath(input.profile.modRoot), starterStoredSelection,
+                          starterRegistryAddonPath));
     appendRunLog(QString("Staged temporary map=%1 exit=%2 spawn=(%3,%4) clearance=%5")
                  .arg(m_temporaryMapName).arg(input.spawn.exitId)
                  .arg(x, y).arg(input.spawn.clearance, 0, 'f', 3));
@@ -1538,8 +1945,10 @@ bool CJmvMapTestLauncher::hotReload(const SJmvMapTestLaunchInput& input,
     if(threadFile.open(QIODevice::ReadOnly | QIODevice::Text))
         threadId = threadFile.readAll().trimmed().toULong(&threadOk);
 #ifdef Q_OS_WIN
+    const qint64 gamePid = runtimeGameProcessId();
     const bool ownsThread = threadOk && threadId != 0
-        && threadBelongsToProcess(threadId, quint32(m_process->processId()));
+        && gamePid > 0
+        && threadBelongsToProcess(threadId, quint32(gamePid));
     constexpr UINT kHotReloadMessage = WM_APP + 0x45E;
     if(!ownsThread || !PostThreadMessageW(DWORD(threadId), kHotReloadMessage, 0, 0))
     {
@@ -1592,6 +2001,7 @@ bool CJmvMapTestLauncher::installBridge(QString* error)
     bridgeManifest.insert("path", m_bridgeLivePath);
     bridgeManifest.insert("sha256", m_bridgeSha256);
     bridgeManifest.insert("resultPath", m_bridgeResultPath);
+    bridgeManifest.insert("transport", "owned-x86-injector");
     m_manifest.insert("bridge", bridgeManifest);
     if(!writeManifest("bridge-planned", error))
         return false;
@@ -1599,10 +2009,10 @@ bool CJmvMapTestLauncher::installBridge(QString* error)
        fileSha256(m_bridgeLivePath).compare(m_bridgeSha256, Qt::CaseInsensitive) != 0)
     {
         if(error && error->isEmpty())
-            *error = "The temporary JMV launch bridge failed its SHA-256 check.";
+            *error = "The run-local Endurance launch bridge failed its SHA-256 check.";
         return false;
     }
-    appendRunLog(QString("Installed temporary JMV launch bridge sha256=%1 path=%2")
+    appendRunLog(QString("Staged run-local Endurance launch bridge sha256=%1 path=%2 transport=owned-x86-injector")
                  .arg(m_bridgeSha256, m_bridgeLivePath));
     return writeManifest("bridge-installed", error);
 }
@@ -1620,13 +2030,18 @@ void CJmvMapTestLauncher::appendRunLog(const QString& message)
 {
     if(m_runLogPath.isEmpty())
         return;
-    QFile log(m_runLogPath);
-    if(log.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text))
+    const QString line = QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs)
+        + " " + message + "\n";
+    const auto append = [&line](const QString& path)
     {
-        QTextStream stream(&log);
-        stream << QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs)
-               << " " << message << "\n";
-    }
+        if(path.isEmpty()) return;
+        QFile log(path);
+        if(log.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text))
+            log.write(line.toUtf8());
+    };
+    append(m_runLogPath);
+    if(m_sharedRunLogPath.compare(m_runLogPath, Qt::CaseInsensitive) != 0)
+        append(m_sharedRunLogPath);
 }
 
 QString CJmvMapTestLauncher::bridgeResultSummary() const
@@ -1656,6 +2071,7 @@ void CJmvMapTestLauncher::stop()
 {
     if(!isRunning())
         return;
+    m_stopRequested = true;
     appendRunLog("Stop Test requested by user");
     m_process->terminate();
     QTimer::singleShot(5000, this, [this]()
@@ -1673,8 +2089,7 @@ void CJmvMapTestLauncher::focusGameWindow(bool maximize)
 #ifdef Q_OS_WIN
     if(!isRunning())
         return;
-    const qint64 ownedPid = m_baseProbe ? readOwnedGamePid(m_gamePidPath)
-                                       : m_process->processId();
+    const qint64 ownedPid = runtimeGameProcessId();
     if(ownedPid <= 0)
     {
         appendRunLog("Owned game PID is not available for focus yet");
@@ -1768,8 +2183,12 @@ QString CJmvMapTestLauncher::recoverInterruptedRuns(bool* pending)
         const qint64 recordedPid = qint64(expectedProcess.value("pid").toDouble());
         const bool incompleteIdentity = expectedProcess.value("imagePath").toString().isEmpty()
             || expectedProcess.value("creationTime100ns").toString().isEmpty();
-        if((incompleteIdentity && recordedPid > 0 && processExists(recordedPid))
-           || anotherGameIsRunning())
+        // An arbitrary game.exe is not evidence that it belongs to this
+        // journal. Only the journal's still-live recorded PID may defer legacy
+        // cleanup; complete journals already require path + creation time +
+        // optional hash above. This prevents a normal unrelated game session
+        // from blocking Test Current Map with a false ownership claim.
+        if(incompleteIdentity && recordedPid > 0 && processExists(recordedPid))
         {
             deferred = true;
             continue;
@@ -1857,9 +2276,11 @@ bool CJmvMapTestLauncher::hasActiveInterruptedRun(QString* description)
         const bool completeIdentity = !expectedProcess.value("imagePath").toString().isEmpty()
             && !expectedProcess.value("creationTime100ns").toString().isEmpty();
         const bool verified = completeIdentity && processIdentityMatches(expectedProcess);
-        const bool conservativePending = (!completeIdentity && recordedPid > 0
-                                          && processExists(recordedPid))
-            || (expectedProcess.isEmpty() && anotherGameIsRunning());
+        // A process found only by the filename game.exe is not owned by this
+        // journal. Legacy recovery may wait for its recorded PID, while modern
+        // journals require the complete guarded process identity above.
+        const bool conservativePending = !completeIdentity && recordedPid > 0
+            && processExists(recordedPid);
         if(!verified && !conservativePending)
             continue;
         if(description)

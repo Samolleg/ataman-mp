@@ -1,0 +1,6 @@
+EI Mapper: Endurance Edition 0.2.1-alpha.25
+Tester purpose: game.exe-only JMV manifest, unloaded validation navigation, and NVIDIA overlay crash guard
+Profile scope: core editing remains runtime-independent; Test Current Map is optional and exact-game-build-specific
+Runtime gate: Starter/Engine/game.exe BE0FC330035E03983CCE590038CC7F881F1F5D1BCF082717F31776DD4DEE94E2
+Package policy: finalized clean first-run folder; no options JSON, logs, saves, dumps, or stale checksum entries
+Focused checks: profile setup, ordinary launch, optional SpellAddon bootstrap features, unloaded validation selection, and NVIDIA entrance overlays

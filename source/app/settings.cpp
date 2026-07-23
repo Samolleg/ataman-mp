@@ -15,6 +15,7 @@
 #include "utils.h"
 #include "log.h"
 #include "resource_profile.h"
+#include "profile_database.h"
 
 CSettings::CSettings(QWidget *parent) :
     QWidget(parent, Qt::Window)
@@ -23,6 +24,11 @@ CSettings::CSettings(QWidget *parent) :
   ,m_version(1.0)
 {
     ui->setupUi(this);
+    const QStringList cameraWheelGestures = {
+        "Ctrl+Wheel", "Alt+Wheel", "Shift+Wheel", "Meta+Wheel"
+    };
+    for(int index = 0; index < cameraWheelGestures.size(); ++index)
+        ui->cameraSpeedWheelGesture->setItemData(index, cameraWheelGestures.at(index));
     QLabel* editorLabel = new QLabel(tr("External script editor"), ui->tabGeneral);
     editorLabel->setToolTip(tr("Executable used to edit managed MOB scripts. Clear this field to use the Windows .lua file association."));
     QLineEdit* editorPath = new QLineEdit(ui->tabGeneral);
@@ -37,6 +43,43 @@ CSettings::CSettings(QWidget *parent) :
     editorControls->addWidget(clearEditor);
     ui->gridLayout->addWidget(editorLabel, 6, 0);
     ui->gridLayout->addLayout(editorControls, 6, 1);
+    QCheckBox* openLastSession = new QCheckBox(tr("Open last session on startup"),
+                                               ui->tabGeneral);
+    openLastSession->setObjectName("openLastSessionOnStartup");
+    openLastSession->setToolTip(tr(
+        "Automatically invokes File > Open Last Session after startup. "
+        "Disabled by default; missing files are reported and skipped by the existing session loader."));
+    // Row 7 belongs to the inactive external-MPR polling control declared in
+    // settings.ui. Keep startup/session behavior on its own row.
+    ui->gridLayout->addWidget(openLastSession, 8, 0, 1, 2);
+    QCheckBox* autosaveEnabled = new QCheckBox(tr("Periodic recovery autosave"),
+                                               ui->tabGeneral);
+    autosaveEnabled->setObjectName("autosaveEnabled");
+    autosaveEnabled->setToolTip(tr(
+        "Writes validated, versioned recovery copies under the Endurance backup folder. "
+        "It never replaces the open MOB/MPR or marks it saved."));
+    ui->gridLayout->addWidget(autosaveEnabled, 9, 0, 1, 2);
+    QLabel* autosaveIntervalLabel = new QLabel(tr("Autosave interval (minutes)"),
+                                                ui->tabGeneral);
+    autosaveIntervalLabel->setToolTip(tr(
+        "How often Endurance snapshots dirty documents. Identical document states are deduplicated."));
+    QLineEdit* autosaveInterval = new QLineEdit(ui->tabGeneral);
+    autosaveInterval->setObjectName("autosaveIntervalMinutes");
+    autosaveInterval->setValidator(new QIntValidator(1, 120, autosaveInterval));
+    autosaveInterval->setToolTip(autosaveIntervalLabel->toolTip());
+    ui->gridLayout->addWidget(autosaveIntervalLabel, 10, 0);
+    ui->gridLayout->addWidget(autosaveInterval, 10, 1);
+    QPushButton* autosaveNow = new QPushButton(tr("Autosave Now"), ui->tabGeneral);
+    autosaveNow->setToolTip(tr("Immediately create recovery generations for all dirty documents."));
+    QPushButton* openBackupFolder = new QPushButton(tr("Open Backup Folder"), ui->tabGeneral);
+    openBackupFolder->setToolTip(tr("Open the Endurance folder containing automatic and pre-save backups."));
+    QHBoxLayout* autosaveActions = new QHBoxLayout;
+    autosaveActions->addWidget(autosaveNow);
+    autosaveActions->addWidget(openBackupFolder);
+    autosaveActions->addStretch(1);
+    ui->gridLayout->addLayout(autosaveActions, 11, 0, 1, 2);
+    connect(autosaveNow, &QPushButton::clicked, this, &CSettings::autosaveRequested);
+    connect(openBackupFolder, &QPushButton::clicked, this, &CSettings::backupFolderRequested);
     connect(browseEditor, &QPushButton::clicked, this, [this, editorPath]()
     {
         const QString selected = QFileDialog::getOpenFileName(this,
@@ -49,8 +92,24 @@ CSettings::CSettings(QWidget *parent) :
     setWindowModality(Qt::WindowModal);
     ui->rangeIncrement->setValidator(new QIntValidator(1, 1000000, this));
     ui->undoHistoryLimit->setValidator(new QIntValidator(1, 1000000, this));
+    ui->renderFpsCap->setValidator(new QIntValidator(0, 1000, this));
+    ui->renderShadowDistance->setValidator(new QIntValidator(1, 1024, this));
     initOptions();
     readOptions();
+    const COptString* savedProfile = dynamic_cast<const COptString*>(opt(eOptSetResource, "resourceProfile"));
+    const QString savedRoot = configuredGameRoot();
+    if(savedProfile && !savedProfile->value().isEmpty() && !savedRoot.isEmpty())
+    {
+        for(const SResourceProfile& candidate : loadResourceProfiles())
+        {
+            if(candidate.id.compare(savedProfile->value(), Qt::CaseInsensitive) != 0)
+                continue;
+            const SResourceProfileEvaluation evaluation = evaluateResourceProfile(savedRoot, candidate);
+            if(evaluation.valid)
+                applyResourceProfile(evaluation);
+            break;
+        }
+    }
 }
 
 CSettings::~CSettings()
@@ -188,6 +247,16 @@ void CSettings::applyResourceProfile(const SResourceProfileEvaluation& profile)
 {
     if(!profile.valid)
         return;
+    ei::SProfileDatabaseLoadRequest databaseRequest;
+    const SProfileProviderBinding databaseBinding = profile.providers.value("database");
+    databaseRequest.providerId = databaseBinding.id;
+    databaseRequest.providerInterfaceVersion = databaseBinding.interfaceVersion;
+    databaseRequest.profileId = profile.profileId;
+    databaseRequest.runtimeManifestId = profile.runtimeManifestId;
+    databaseRequest.resourceDirectories = profile.resourceDirectories;
+    static ei::ProfileDatabaseService databaseService;
+    const QSharedPointer<const ei::SProfileDatabaseSnapshot> database =
+        databaseService.snapshot(databaseRequest);
     if(COptString* root = dynamic_cast<COptString*>(opt(eOptSetGeneral, "gameRoot")))
         root->setValue(profile.gameRoot);
     if(COptString* id = dynamic_cast<COptString*>(opt(eOptSetResource, "resourceProfile")))
@@ -204,11 +273,28 @@ void CSettings::applyResourceProfile(const SResourceProfileEvaluation& profile)
     for(const char* legacyName : {"figPaths", "texPaths"})
         if(COptStringList* legacy = dynamic_cast<COptStringList*>(opt(eOptSetResource, legacyName)))
             legacy->setValue(QVector<QString>());
+    // One pointer swap publishes the new profile-scoped database to every
+    // dropdown and resolver after all profile options have been replaced.
+    QMap<QString, QString> providerBindings;
+    for(auto it = profile.providers.constBegin(); it != profile.providers.constEnd(); ++it)
+        providerBindings.insert(it.key(), it->id);
+    ei::ProfileDatabaseContext::instance().activate(database, providerBindings);
     updateOptUi();
     saveOptions();
     ei::log(eLogInfo, QString("Applied resource profile id:%1 gameRoot:%2 resourceDirectories:%3 archives:%4")
             .arg(profile.profileId, profile.gameRoot)
             .arg(profile.resourceDirectories.size()).arg(profile.archiveCount));
+    for(const SRuntimeComponentEvaluation& component : profile.runtimeComponents)
+    {
+        const ELogMessageType level = component.exists
+            && (!component.enforceHash || component.hashAccepted) ? eLogInfo : eLogWarning;
+        ei::log(level, QString("Runtime component id:%1 strict:%2 exists:%3 accepted:%4 sha256:%5 path:%6")
+            .arg(component.id).arg(component.enforceHash).arg(component.exists)
+            .arg(component.hashAccepted).arg(component.sha256, component.path));
+    }
+    for(const ei::SDatabaseDiagnostic& diagnostic : database->diagnostics)
+        ei::log(eLogWarning,
+                QString("Profile database [%1] %2").arg(diagnostic.code, diagnostic.message));
 }
 
 void CSettings::updateOptUi()
@@ -219,6 +305,13 @@ void CSettings::updateOptUi()
         {
             if (COptString* pOpt = dynamic_cast<COptString*>(opt.get()))
             {
+                QComboBox* combo = ui->tabWidget->findChild<QComboBox*>(pOpt->name());
+                if(combo)
+                {
+                    const int index = combo->findData(pOpt->value());
+                    combo->setCurrentIndex(index >= 0 ? index : 0);
+                    continue;
+                }
                 QKeySequenceEdit* keyEdit = ui->tabWidget->findChild<QKeySequenceEdit*>(pOpt->name());
                 if(keyEdit)
                 {
@@ -276,6 +369,12 @@ void CSettings::updateOptFromUi()
         {
             if (COptString* pOpt = dynamic_cast<COptString*>(opt.get()))
             {
+                QComboBox* combo = ui->tabWidget->findChild<QComboBox*>(pOpt->name());
+                if(combo)
+                {
+                    pOpt->setValue(combo->currentData().toString());
+                    continue;
+                }
                 QKeySequenceEdit* keyEdit = ui->tabWidget->findChild<QKeySequenceEdit*>(pOpt->name());
                 if(keyEdit)
                 {
@@ -352,16 +451,36 @@ void CSettings::initOptions()
     aOpt.append(QSharedPointer<COpt>(new COptBool("drawHelp", false)));
     aOpt.append(QSharedPointer<COpt>(new COptBool("frustumCulling", true)));
     aOpt.append(QSharedPointer<COpt>(new COptBool("mapTestGodmode", false)));
+    aOpt.append(QSharedPointer<COpt>(new COptBool("openLastSessionOnStartup", false)));
+    aOpt.append(QSharedPointer<COpt>(new COptBool("autosaveEnabled", true)));
+    aOpt.append(QSharedPointer<COpt>(new COptBool("animateUnits", true)));
+    aOpt.append(QSharedPointer<COpt>(new COptBool("renderPerformanceCounters", false)));
+    aOpt.append(QSharedPointer<COpt>(new COptBool("renderVSync", true)));
+    aOpt.append(QSharedPointer<COpt>(new COptBool("environmentLighting", true)));
+    aOpt.append(QSharedPointer<COpt>(new COptBool("drawSkybox", true)));
+    aOpt.append(QSharedPointer<COpt>(new COptBool("renderFog", true)));
+    aOpt.append(QSharedPointer<COpt>(new COptBool("renderSceneLights", true)));
+    aOpt.append(QSharedPointer<COpt>(new COptBool("renderTextureMipmapping", true)));
+    aOpt.append(QSharedPointer<COpt>(new COptBool("overrideWorldTime", false)));
 
 
     //init default options for digits
     aOpt.append(QSharedPointer<COpt>(new COptDouble("version", m_version)));
+    aOpt.append(QSharedPointer<COpt>(new COptDouble("cameraSpeedMultiplier", 1.0)));
     aOpt.append(QSharedPointer<COpt>(new COptInt("mouseSenseX", 25)));
     aOpt.append(QSharedPointer<COpt>(new COptInt("mouseSenseY", 25)));
     aOpt.append(QSharedPointer<COpt>(new COptInt("rangeIncrement", 999)));
     aOpt.append(QSharedPointer<COpt>(new COptInt("landCheckTime", 0)));
     aOpt.append(QSharedPointer<COpt>(new COptInt("undoHistoryLimit", 512)));
     aOpt.append(QSharedPointer<COpt>(new COptInt("mapTestWarningVersion", 0)));
+    aOpt.append(QSharedPointer<COpt>(new COptInt("autosaveIntervalMinutes", 5)));
+    aOpt.append(QSharedPointer<COpt>(new COptInt("renderFpsCap", 0)));
+    aOpt.append(QSharedPointer<COpt>(new COptInt("renderShadowQuality", 2)));
+    aOpt.append(QSharedPointer<COpt>(new COptInt("renderShadowDistance", 320)));
+    aOpt.append(QSharedPointer<COpt>(new COptInt("renderTimeOfDay", 1200)));
+    // 0 = authored texture/unlit, 1 = compatibility simple shading,
+    // 2 = resource-driven environment preview.
+    aOpt.append(QSharedPointer<COpt>(new COptInt("renderLightingMode", 2)));
 
     const QMap<QString, QString> shortcutDefaults = {
         {"shortcutOpen", "Ctrl+O"},
@@ -383,6 +502,7 @@ void CSettings::initOptions()
         {"shortcutResetCamera", "Ctrl+R"},
         {"shortcutResetLogicPaths", "Ctrl+P"},
         {"shortcutSwitchMode", "Ctrl+Tab"},
+        {"shortcutActivateOwnerMob", "Ctrl+T"},
         {"shortcutSelectTool", "Esc"},
         {"shortcutMoveTool", "G"},
         {"shortcutRotateTool", "R"},
@@ -392,6 +512,8 @@ void CSettings::initOptions()
     for(auto it = shortcutDefaults.constBegin(); it != shortcutDefaults.constEnd(); ++it)
         m_aOptCategory[eOptSetKeyBinding].append(
             QSharedPointer<COpt>(new COptString(it.key(), it.value())));
+    m_aOptCategory[eOptSetKeyBinding].append(QSharedPointer<COpt>(
+        new COptString("cameraSpeedWheelGesture", "Ctrl+Wheel")));
 
     //split options into different category
     QFile inputFile(":/optSet.txt");
@@ -591,7 +713,15 @@ void CSettings::saveOptions()
 void CSettings::on_buttonApply_clicked()
 {
     updateOptFromUi();
+    const COptBool* autosaveEnabled = dynamic_cast<const COptBool*>(
+        opt(eOptSetGeneral, "autosaveEnabled"));
+    const COptInt* autosaveInterval = dynamic_cast<const COptInt*>(
+        opt(eOptSetGeneral, "autosaveIntervalMinutes"));
+    emit autosaveSettingsApplied(autosaveEnabled && autosaveEnabled->value(),
+                                 qBound(1, autosaveInterval ? autosaveInterval->value() : 5, 120));
     emit shortcutsChanged();
+    emit settingsApplied();
+    emit renderSettingsChanged();
     onClose();
 }
 

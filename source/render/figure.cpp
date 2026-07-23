@@ -1,6 +1,10 @@
 #include <QDebug>
 #include <QVector4D>
 #include "figure.h"
+#include "figure_vertex_component.h"
+
+void calcComplection(QVector3D& complexPoint, QVector<QVector3D>& data,
+                     QVector3D& constitute);
 
 void ei::SHeader::read(QDataStream& stream)
 {
@@ -159,12 +163,26 @@ void convertUVCoords(QVector<F2>& coordsUV, int convertCount)
 //Creates trianlge from vertex component
 // in. aIndOrigin - triangle indices
 // in. aVertComp - vertex components
-void ei::CFigure::generateTriangles(QVector<SVertexData>& aVrtData, QVector<QVector3D>& aMorphVertex)
+void ei::CFigure::generateTriangles(QVector<SVertexData>& aVrtData, QVector<QVector3D>& aMorphVertex,
+                                    QVector<int>* sourceVertexIndices)
 {
     for(auto& ind: m_aInd)
-        aVrtData.append(SVertexData(aMorphVertex[m_aVertComp[ind].x]
-                          ,m_aNormal[m_aVertComp[ind].y]
-                          ,m_aUvCoord[m_aVertComp[ind].z]));
+    {
+        const US3& component = m_aVertComp[ind];
+        SVertexData decoded;
+        if(!ei::decodeFigureVertexComponent(
+                component, aMorphVertex, m_aNormal, m_aUvCoord, &decoded))
+        {
+            qWarning() << "Skipping invalid FIG8 vertex component in" << m_name
+                       << "indices" << component.x << component.y << component.z
+                       << "limits" << aMorphVertex.size() << m_aNormal.size()
+                       << m_aUvCoord.size();
+            continue;
+        }
+        aVrtData.append(decoded);
+        if(sourceVertexIndices)
+            sourceVertexIndices->append(ei::figureSourceVertexIndex(component));
+    }
 }
 
 //load morphing_vertices, indices, normals, texture coordinates
@@ -178,6 +196,7 @@ bool ei::CFigure::readData(QDataStream& stream)
 
     ei::SHeader header;
     header.read(stream);
+    m_textureNumber = header.textureNumber;
 
     //read center
     //QVector<F3> bboxCentr;
@@ -257,7 +276,8 @@ void calcComplection(QVector3D& complexPoint, QVector<QVector3D>& data, QVector3
 }
 
 //todo: request constitution from object
-void ei::CFigure::calculateConstitution(QVector<SVertexData>& aVrtData, QVector3D& constitute)
+void ei::CFigure::calculateConstitution(QVector<SVertexData>& aVrtData, QVector3D& constitute,
+                                        QVector<int>* sourceVertexIndices)
 { //x == str, y == dex, z == scale
     QVector3D res0;
     QVector3D res1;
@@ -281,21 +301,46 @@ void ei::CFigure::calculateConstitution(QVector<SVertexData>& aVrtData, QVector3
         res0 = res0 + (res1 - res0) * constitute.x();
         aMorphVertex.append(res2 + (res0 - res2) * constitute.z() + offset);
     }
-    generateTriangles(aVrtData, aMorphVertex);
+    generateTriangles(aVrtData, aMorphVertex, sourceVertexIndices);
 }
 
 void ei::CFigure::getVertexData(QVector<CPart*>& model, QVector3D& complection, QList<QString>& aBodyParts)
+{
+    appendVertexData(model, complection, aBodyParts);
+}
+
+void ei::CFigure::getAssemblyHierarchy(QMap<QString, QString>& parents,
+                                       QMap<QString, QVector3D>& restOffsets,
+                                       QVector3D& complection)
+{
+    QVector3D restOffset;
+    calcComplection(restOffset, m_offset, complection);
+    parents.insert(m_name.toLower(), m_parentName.toLower());
+    restOffsets.insert(m_name.toLower(), restOffset);
+    for(ei::CFigure* child : m_aChild)
+        child->getAssemblyHierarchy(parents, restOffsets, complection);
+}
+
+void ei::CFigure::appendVertexData(QVector<CPart*>& model, QVector3D& complection,
+                                   QList<QString>& aBodyParts)
 {
     if (aBodyParts.isEmpty() || aBodyParts.contains(m_name)) // calc only visible body parts
     {
         CPart* part = new CPart();
         part->setName(m_name);
-        calculateConstitution(part->vertData(), complection);
+        part->setParentName(m_parentName);
+        QVector3D restOffset;
+        calcComplection(restOffset, m_offset, complection);
+        part->setRestOffset(restOffset);
+        part->setTextureNumber(m_textureNumber);
+        QVector<int> sourceVertexIndices;
+        calculateConstitution(part->vertData(), complection, &sourceVertexIndices);
+        part->setSourceVertexIndices(sourceVertexIndices);
         part->update();
         model.append(part);
     }
     for(auto& child : m_aChild)
-        child->getVertexData(model, complection, aBodyParts);
+        child->appendVertexData(model, complection, aBodyParts);
 }
 
 void ei::CFigure::getMinimumBboxZ(float& value, QVector3D& complection)

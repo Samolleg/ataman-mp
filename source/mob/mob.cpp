@@ -1086,6 +1086,24 @@ CNode* CMob::restoreDeletedNode(CNode* pNode, int restoreIndex)
     return pNode;
 }
 
+bool CMob::replaceNode(CNode* current, CNode* replacement, int index)
+{
+    if(!current || !replacement || current == replacement)
+        return false;
+    const int currentIndex = m_aNode.indexOf(current);
+    if(currentIndex < 0 || m_aNode.contains(replacement))
+        return false;
+    const int targetIndex = index >= 0 ? qBound(0, index, m_aNode.size() - 1)
+                                       : currentIndex;
+    m_aNode.removeAt(currentIndex);
+    if(!m_aDeletedNode.contains(current))
+        m_aDeletedNode.append(current);
+    m_aDeletedNode.removeOne(replacement);
+    m_aNode.insert(qMin(targetIndex, m_aNode.size()), replacement);
+    logicNodesUpdate();
+    return true;
+}
+
 QVector<uint> CMob::checkUniqueId(QSet<uint> &aId)
 {
     QVector<uint> duplicates;
@@ -1747,7 +1765,23 @@ bool CMob::buildRawObjectSequenceCandidate(
         QByteArray sourceRaw;
         QByteArray cleanRaw;
         QByteArray cleanHash;
-        if(node->rawSourceDocumentSha256() == sourceDocumentSha256
+        if(node->hasRawStructuralReplacementBytes())
+        {
+            sourceRaw = node->rawTemplateSourceSubtree();
+            cleanRaw = node->rawTemplateCleanSubtree();
+            if(QCryptographicHash::hash(sourceRaw, QCryptographicHash::Sha256)
+                   != node->rawSourceSubtreeSha256())
+            {
+                if(report)
+                    report->add("mob.object_sequence.structural_replacement",
+                                EValidationSeverity::Error,
+                                "A structural replacement failed its raw provenance hash",
+                                QString::number(node->mapId()));
+                return false;
+            }
+            cleanHash = QCryptographicHash::hash(cleanRaw, QCryptographicHash::Sha256);
+        }
+        else if(node->rawSourceDocumentSha256() == sourceDocumentSha256
            && cleanBySourcePath.contains(node->rawSourceObjectPath()))
         {
             const SMobObjectSnapshot* clean = cleanBySourcePath.value(
@@ -1953,7 +1987,7 @@ bool CMob::buildValidatedCandidate(QByteArray* data,
     return true;
 }
 
-bool CMob::saveAs(const QFileInfo& path)
+bool CMob::saveAs(const QFileInfo& path, const SaveProgress& progress)
 {
     const QString filePath = path.filePath();
     try
@@ -1961,6 +1995,7 @@ bool CMob::saveAs(const QFileInfo& path)
         QByteArray data;
         CValidationReport candidateReport;
         QString saveClass;
+        if(progress) progress("Serializing verified MOB edits...", 0, 5);
         if(!buildValidatedCandidate(&data, &candidateReport, &saveClass))
         {
             ei::log(eLogFatal, QString("Refusing dirty MOB save because the edit could not be mapped safely to the original raw tree path:%1")
@@ -1975,6 +2010,7 @@ bool CMob::saveAs(const QFileInfo& path)
             return false;
         }
 
+        if(progress) progress("Freshly validating the staged MOB...", 1, 5);
         const SStagedSaveValidation validation = validateStagedSave(data, path);
         if(!validation.success)
         {
@@ -1988,6 +2024,7 @@ bool CMob::saveAs(const QFileInfo& path)
         ei::log(eLogInfo, QString("Staged MOB validation passed path:%1 size:%2 sha256:%3")
             .arg(filePath).arg(validation.size).arg(validation.sha256));
 
+        if(progress) progress("Creating the pre-save backup...", 2, 5);
         if(QFileInfo(filePath).exists())
         {
             const SBackupResult saveBackup = CBackupManager().snapshotBeforeSave(QFileInfo(filePath));
@@ -2002,6 +2039,7 @@ bool CMob::saveAs(const QFileInfo& path)
             }
         }
 
+        if(progress) progress("Atomically replacing the destination...", 3, 5);
         QSaveFile file(filePath);
         if(!file.open(QIODevice::WriteOnly) || file.write(data) != data.size() || !file.commit())
         {
@@ -2011,9 +2049,11 @@ bool CMob::saveAs(const QFileInfo& path)
         }
         m_originalData = data;
         captureCleanProjection();
+        if(progress) progress("Rebinding saved MOB provenance...", 4, 5);
         if(!rebindRawObjectProvenance())
             ei::log(eLogWarning, QString("Saved MOB reopened, but raw object provenance could not be rebound path:%1")
                     .arg(filePath));
+        if(progress) progress("MOB save complete.", 5, 5);
         return true;
     }
     catch (const std::exception& ex)
@@ -2025,9 +2065,9 @@ bool CMob::saveAs(const QFileInfo& path)
     }
 }
 
-bool CMob::save()
+bool CMob::save(const SaveProgress& progress)
 {
-    return saveAs(m_filePath);
+    return saveAs(m_filePath, progress);
 }
 bool SMobParameterState::operator==(const SMobParameterState& other) const
 {

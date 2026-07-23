@@ -1,5 +1,6 @@
 #include <QJsonArray>
 #include "magictrap.h"
+#include "gl_dispatch.h"
 #include "resourcemanager.h"
 #include "landscape.h"
 #include "settings.h"
@@ -115,7 +116,7 @@ void CMagicTrap::drawLogicVisual(bool isActive, QOpenGLShaderProgram* program)
     if (!pOpt->value() && nodeState() != ENodeState::eSelect && CScene::getInstance()->getMode() != eEditModeLogic)
         return;
 
-    glDisable(GL_DEPTH_TEST);
+    ei::gl::Disable(GL_DEPTH_TEST);
     QMatrix4x4 matrix;
     matrix.setToIdentity();
     program->setUniformValue("u_modelMmatrix", matrix);
@@ -132,14 +133,14 @@ void CMagicTrap::drawLogicVisual(bool isActive, QOpenGLShaderProgram* program)
 
     // Draw cube geometry using indices from VBO 1
     m_indexBuf.bind();
-    glDrawElements(GL_LINES, (m_aDrawingLine.count()-1)*2, GL_UNSIGNED_SHORT, nullptr);
+    ei::gl::DrawElements(GL_LINES, (m_aDrawingLine.count()-1)*2, GL_UNSIGNED_SHORT, nullptr);
     program->setUniformValue("customColor", QVector4D(0.0, 0.0, 0.0, 0.0));
 
     for(auto& actZone : m_aActZone)
     {
         actZone->draw(isActive, program);
     }
-    glEnable(GL_DEPTH_TEST);
+    ei::gl::Enable(GL_DEPTH_TEST);
 }
 
 uint CMagicTrap::deserialize(util::CMobParser& parser)
@@ -844,7 +845,7 @@ void CActivationZone::draw(bool isActive, QOpenGLShaderProgram *program)
         return;
 
     CObjectBase::draw(isActive, program);
-    glDisable(GL_DEPTH_TEST);
+    ei::gl::Disable(GL_DEPTH_TEST);
     //todo: draw help radius
     QMatrix4x4 matrix;
     matrix.setToIdentity();
@@ -861,13 +862,13 @@ void CActivationZone::draw(bool isActive, QOpenGLShaderProgram *program)
 
     // Draw cube geometry using indices from VBO 1
     m_indexBuf.bind();
-    glLineWidth(2);
+    ei::gl::LineWidth(2);
 
-    glDrawElements(GL_LINE_STRIP, m_aDrawPoint.count(), GL_UNSIGNED_SHORT, nullptr);
+    ei::gl::DrawElements(GL_LINE_STRIP, m_aDrawPoint.count(), GL_UNSIGNED_SHORT, nullptr);
 
     program->setUniformValue("customColor", QVector4D(0.0, 0.0, 0.0, 0.0));
 
-    glEnable(GL_DEPTH_TEST);
+    ei::gl::Enable(GL_DEPTH_TEST);
 }
 
 void CActivationZone::update()
