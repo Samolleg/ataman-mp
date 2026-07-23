@@ -29,6 +29,7 @@
 #include <limits>
 
 #include "view.h"
+#include "gl_dispatch.h"
 #include "render_scheduling.h"
 #include "camera.h"
 #include "unit_animation.h"
@@ -512,7 +513,7 @@ CView::~CView()
     if(isValid() && !m_testEntranceLabelTextures.isEmpty())
     {
         makeCurrent();
-        glDeleteTextures(m_testEntranceLabelTextures.size(),
+        ei::gl::DeleteTextures(m_testEntranceLabelTextures.size(),
                          m_testEntranceLabelTextures.constData());
         m_testEntranceLabelTextures.clear();
         // Keep the context current for renderer member destruction below.
@@ -963,18 +964,18 @@ void CView::initializeGL()
     logOpenGlData();
     logOpenGlDiagnosticState(QStringLiteral("initialize/begin"));
     qglClearColor(Qt::black);
-    //glEnable(GL_EXT_texture_filter_anisotropic);
-    glEnable(GL_DEPTH_TEST);
-    //glEnable(GL_CULL_FACE); //draw only front faces (disable if need draw both sides)
+    //ei::gl::Enable(GL_EXT_texture_filter_anisotropic);
+    ei::gl::Enable(GL_DEPTH_TEST);
+    //ei::gl::Enable(GL_CULL_FACE); //draw only front faces (disable if need draw both sides)
     const QOpenGLContext* initialContext = QOpenGLContext::currentContext();
     const bool fixedAlphaTest = initialContext && !initialContext->isOpenGLES();
     if(fixedAlphaTest)
     {
-        glAlphaFunc(GL_GREATER, 0.1f);
-        glEnable(GL_ALPHA_TEST);
+        ei::gl::AlphaFunc(GL_GREATER, 0.1f);
+        ei::gl::Enable(GL_ALPHA_TEST);
     }
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    ei::gl::Enable(GL_BLEND);
+    ei::gl::BlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     logOpenGlErrors(QStringLiteral("initialize/fixed-state"));
     initShaders();
     logOpenGlDiagnosticState(QStringLiteral("initialize/shaders"));
@@ -1039,14 +1040,14 @@ void CView::resizeGL(int width, int height)
     m_height = height;
     m_width = width;
     //const int side = qMin(width, height);
-    //glViewport((width - side) / 2, (height - side) / 2, side, side);
+    //ei::gl::Viewport((width - side) / 2, (height - side) / 2, side, side);
     const float ratio = float(width)/height;
-    glViewport(0, 0, width, height);
+    ei::gl::Viewport(0, 0, width, height);
 
     m_projection.setToIdentity();
     m_projection.perspective(45, ratio, 1, 1000);
-    //glOrtho(-2, +2, -2, +2, -2.0, 2.0);   // draw objects in orthogaphic view
-    //glFrustum (-2.0, 2.0, -2.0, 2.0, 1.5, 20.0); //convert project matrix to perpective view
+    //ei::gl::Ortho(-2, +2, -2, +2, -2.0, 2.0);   // draw objects in orthogaphic view
+    //ei::gl::Frustum(-2.0, 2.0, -2.0, 2.0, 1.5, 20.0); //convert project matrix to perpective view
     //doneCurrent();
 }
 
@@ -1093,12 +1094,12 @@ void CView::drawSkybox(const QMatrix4x4& cameraMatrix,
         ? dynamic_cast<const COptBool*>(m_pSettings->opt("renderFog")) : nullptr;
     m_skyProgram.setUniformValue("u_fogEnabled", !fogOption || fogOption->value());
 
-    glDepthMask(GL_FALSE);
-    glDepthFunc(GL_LEQUAL);
-    glDisable(GL_BLEND);
+    ei::gl::DepthMask(GL_FALSE);
+    ei::gl::DepthFunc(GL_LEQUAL);
+    ei::gl::Disable(GL_BLEND);
     const QOpenGLContext* skyContext = QOpenGLContext::currentContext();
     if(skyContext && !skyContext->isOpenGLES())
-        glDisable(GL_ALPHA_TEST);
+        ei::gl::Disable(GL_ALPHA_TEST);
     m_skyBuffer.bind();
     const int position = m_skyProgram.attributeLocation("a_position");
     const int texture = m_skyProgram.attributeLocation("a_texture");
@@ -1109,13 +1110,13 @@ void CView::drawSkybox(const QMatrix4x4& cameraMatrix,
     m_skyProgram.setAttributeBuffer(texture, GL_FLOAT,
         int(offsetof(SSkyVertex, texture)), 2, int(sizeof(SSkyVertex)));
     skyTexture->bind(0);
-    glDrawArrays(GL_TRIANGLES, 0, m_skyVertexCount);
+    ei::gl::DrawArrays(GL_TRIANGLES, 0, m_skyVertexCount);
     m_skyBuffer.release();
-    glDepthMask(GL_TRUE);
-    glDepthFunc(GL_LESS);
+    ei::gl::DepthMask(GL_TRUE);
+    ei::gl::DepthFunc(GL_LESS);
     if(skyContext && !skyContext->isOpenGLES())
-        glEnable(GL_ALPHA_TEST);
-    glEnable(GL_BLEND);
+        ei::gl::Enable(GL_ALPHA_TEST);
+    ei::gl::Enable(GL_BLEND);
 }
 
 void CView::applyEnvironmentUniforms(QOpenGLShaderProgram& program,
@@ -1183,7 +1184,7 @@ void CView::releaseShadowFramebuffers()
 bool CView::ensureShadowFramebuffers(int quality)
 {
     GLint maximumTextureSize = 0;
-    glGetIntegerv(GL_MAX_TEXTURE_SIZE, &maximumTextureSize);
+    ei::gl::GetIntegerv(GL_MAX_TEXTURE_SIZE, &maximumTextureSize);
     const int resolution = ei::shadowAtlasResolution(
         qBound(0, quality, 2), int(maximumTextureSize));
     if(resolution <= 0)
@@ -1223,13 +1224,13 @@ bool CView::ensureShadowFramebuffers(int quality)
     for(QOpenGLFramebufferObject* target : {m_shadowFbo, m_dynamicShadowFbo,
                                             m_farShadowFbo, m_farDynamicShadowFbo})
     {
-        glBindTexture(GL_TEXTURE_2D, target->texture());
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        ei::gl::BindTexture(GL_TEXTURE_2D, target->texture());
+        ei::gl::TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        ei::gl::TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        ei::gl::TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        ei::gl::TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     }
-    glBindTexture(GL_TEXTURE_2D, 0);
+    ei::gl::BindTexture(GL_TEXTURE_2D, 0);
     ei::log(eLogInfo, QString("Shadow atlases initialized: 4 x %1x%1 (quality %2, GL max %3)")
             .arg(resolution).arg(qBound(0, quality, 2)).arg(maximumTextureSize));
     return true;
@@ -1393,10 +1394,10 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
             += rebuildDynamic ? 2 : 0;
     }
 
-    glDisable(GL_BLEND);
+    ei::gl::Disable(GL_BLEND);
     const QOpenGLContext* shadowContext = QOpenGLContext::currentContext();
     if(shadowContext && !shadowContext->isOpenGLES())
-        glDisable(GL_ALPHA_TEST);
+        ei::gl::Disable(GL_ALPHA_TEST);
 
     // Depth is encoded into an RGBA8 color target. OpenGL enables dithering
     // by default, which is desirable for visible color but corrupts packed
@@ -1404,22 +1405,22 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
     // the decoded depth by 1/255; over this light-space depth range that can
     // erase several world units of a caster at the receiver and produces the
     // camera-dependent contact gaps seen on grounded units and trees.
-    const GLboolean restoreDithering = glIsEnabled(GL_DITHER);
-    glDisable(GL_DITHER);
+    const GLboolean restoreDithering = ei::gl::IsEnabled(GL_DITHER);
+    ei::gl::Disable(GL_DITHER);
 #ifdef GL_FRAMEBUFFER_SRGB
     // Packed values are linear bytes, not colors. Keep an externally enabled
     // sRGB framebuffer state from transforming them during the shadow pass.
-    const GLboolean restoreFramebufferSrgb = glIsEnabled(GL_FRAMEBUFFER_SRGB);
-    glDisable(GL_FRAMEBUFFER_SRGB);
+    const GLboolean restoreFramebufferSrgb = ei::gl::IsEnabled(GL_FRAMEBUFFER_SRGB);
+    ei::gl::Disable(GL_FRAMEBUFFER_SRGB);
 #endif
     const auto beginTarget = [&](QOpenGLFramebufferObject* target,
                                  const QMatrix4x4& projection,
                                  const QMatrix4x4& lightView)
     {
         target->bind();
-        glViewport(0, 0, target->width(), target->height());
-        glClearColor(1.0f, 1.0f, 1.0f, 1.0f);
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        ei::gl::Viewport(0, 0, target->width(), target->height());
+        ei::gl::ClearColor(1.0f, 1.0f, 1.0f, 1.0f);
+        ei::gl::Clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         m_shadowProgram.bind();
         m_shadowProgram.setUniformValue("u_projMmatrix", projection);
         m_shadowProgram.setUniformValue("u_viewMmatrix", lightView);
@@ -1465,16 +1466,16 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
         m_shadowUpdateTimer.restart();
     }
     m_shadowInitialized = true;
-    glViewport(0, 0, m_width, m_height);
+    ei::gl::Viewport(0, 0, m_width, m_height);
 #ifdef GL_FRAMEBUFFER_SRGB
     if(restoreFramebufferSrgb)
-        glEnable(GL_FRAMEBUFFER_SRGB);
+        ei::gl::Enable(GL_FRAMEBUFFER_SRGB);
 #endif
     if(restoreDithering)
-        glEnable(GL_DITHER);
+        ei::gl::Enable(GL_DITHER);
     if(shadowContext && !shadowContext->isOpenGLES())
-        glEnable(GL_ALPHA_TEST);
-    glEnable(GL_BLEND);
+        ei::gl::Enable(GL_ALPHA_TEST);
+    ei::gl::Enable(GL_BLEND);
     return true;
 }
 
@@ -1503,12 +1504,12 @@ QString CView::captureShadowDiagnostics(QString* error)
     makeCurrent();
     const QImage frame = grabFrameBuffer(true);
     m_shadowCascadeDiagnostic = true;
-    glViewport(0, 0, m_width, m_height);
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    ei::gl::Viewport(0, 0, m_width, m_height);
+    ei::gl::Clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     draw();
     const QImage cascadeSelection = grabFrameBuffer(true);
     m_shadowCascadeDiagnostic = false;
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    ei::gl::Clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     draw();
     struct SShadowImage
     {
@@ -1615,9 +1616,9 @@ QString CView::captureShadowDiagnostics(QString* error)
         {"renderFog", boolOption("renderFog", true)},
         {"renderTextureMipmapping", boolOption("renderTextureMipmapping", true)}};
 
-    const GLubyte* vendor = glGetString(GL_VENDOR);
-    const GLubyte* renderer = glGetString(GL_RENDERER);
-    const GLubyte* version = glGetString(GL_VERSION);
+    const GLubyte* vendor = ei::gl::GetString(GL_VENDOR);
+    const GLubyte* renderer = ei::gl::GetString(GL_RENDERER);
+    const GLubyte* version = ei::gl::GetString(GL_VERSION);
     rootObject["openGl"] = QJsonObject{
         {"vendor", vendor ? QString::fromLatin1(reinterpret_cast<const char*>(vendor)) : QString()},
         {"renderer", renderer ? QString::fromLatin1(reinterpret_cast<const char*>(renderer)) : QString()},
@@ -1751,13 +1752,13 @@ void CView::applyShadowUniforms(QOpenGLShaderProgram& program, bool enabled,
     {
         QOpenGLFunctions* functions = QOpenGLContext::currentContext()->functions();
         functions->glActiveTexture(GL_TEXTURE1);
-        glBindTexture(GL_TEXTURE_2D, m_shadowFbo->texture());
+        ei::gl::BindTexture(GL_TEXTURE_2D, m_shadowFbo->texture());
         functions->glActiveTexture(GL_TEXTURE2);
-        glBindTexture(GL_TEXTURE_2D, m_dynamicShadowFbo->texture());
+        ei::gl::BindTexture(GL_TEXTURE_2D, m_dynamicShadowFbo->texture());
         functions->glActiveTexture(GL_TEXTURE3);
-        glBindTexture(GL_TEXTURE_2D, m_farShadowFbo->texture());
+        ei::gl::BindTexture(GL_TEXTURE_2D, m_farShadowFbo->texture());
         functions->glActiveTexture(GL_TEXTURE4);
-        glBindTexture(GL_TEXTURE_2D, m_farDynamicShadowFbo->texture());
+        ei::gl::BindTexture(GL_TEXTURE_2D, m_farDynamicShadowFbo->texture());
         functions->glActiveTexture(GL_TEXTURE0);
     }
 }
@@ -1778,15 +1779,15 @@ void CView::paintGL()
             .arg(m_aMob.size()));
         logOpenGlDiagnosticState(QStringLiteral("frame/begin"));
     }
-    glViewport(0, 0, width(), height());
-    glEnable(GL_DEPTH_TEST);
-    glDepthMask(GL_TRUE);
+    ei::gl::Viewport(0, 0, width(), height());
+    ei::gl::Enable(GL_DEPTH_TEST);
+    ei::gl::DepthMask(GL_TRUE);
     QOpenGLContext* paintContext = QOpenGLContext::currentContext();
     if(paintContext && !paintContext->isOpenGLES())
-        glEnable(GL_ALPHA_TEST);
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+        ei::gl::Enable(GL_ALPHA_TEST);
+    ei::gl::Enable(GL_BLEND);
+    ei::gl::BlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    ei::gl::ColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
     const COptBool* statsOption = m_pSettings
         ? dynamic_cast<const COptBool*>(m_pSettings->opt("renderPerformanceCounters")) : nullptr;
     const bool collectStats = (statsOption && statsOption->value())
@@ -1801,7 +1802,7 @@ void CView::paintGL()
     const bool timeGpu = collectStats && m_gpuTimer && !m_gpuTimerPending;
     if(timeGpu)
         m_gpuTimer->begin();
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    ei::gl::Clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     if(diagnoseFrame)
         logOpenGlDiagnosticState(QStringLiteral("frame/initial-clear"), true);
     draw();
@@ -1888,10 +1889,10 @@ void CView::drawTestOverlaysOpenGl()
     m_program.setUniformValue("u_shadowsEnabled", false);
     m_program.setUniformValue("u_pointLightCount", 0);
 
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    glEnable(GL_DEPTH_TEST);
-    glDepthMask(GL_FALSE);
+    ei::gl::Enable(GL_BLEND);
+    ei::gl::BlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    ei::gl::Enable(GL_DEPTH_TEST);
+    ei::gl::DepthMask(GL_FALSE);
 
     for(int index = 0; index < m_testEntranceRectangles.size(); ++index)
     {
@@ -1920,19 +1921,19 @@ void CView::drawTestOverlaysOpenGl()
             selected ? QVector4D(0.20f, 1.0f, 0.38f, 0.37f)
                      : QVector4D(0.92f, 0.70f, 0.12f, 0.20f));
         m_program.setAttributeArray(position, vertices.constData());
-        glDrawArrays(GL_TRIANGLE_FAN, 0, vertices.size());
+        ei::gl::DrawArrays(GL_TRIANGLE_FAN, 0, vertices.size());
 
         m_program.setUniformValue("customColor",
             selected ? QVector4D(0.38f, 1.0f, 0.50f, 0.95f)
                      : QVector4D(0.92f, 0.75f, 0.18f, 0.80f));
-        glLineWidth(selected ? 3.0f : 1.0f);
-        glDrawArrays(GL_LINE_LOOP, 0, vertices.size());
+        ei::gl::LineWidth(selected ? 3.0f : 1.0f);
+        ei::gl::DrawArrays(GL_LINE_LOOP, 0, vertices.size());
     }
 
     if(m_testEntranceLabelTexturesDirty)
     {
         if(!m_testEntranceLabelTextures.isEmpty())
-            glDeleteTextures(m_testEntranceLabelTextures.size(),
+            ei::gl::DeleteTextures(m_testEntranceLabelTextures.size(),
                              m_testEntranceLabelTextures.constData());
         m_testEntranceLabelTextures.clear();
         for(const QImage& image : m_testEntranceLabelImages)
@@ -1950,7 +1951,7 @@ void CView::drawTestOverlaysOpenGl()
         m_program.setUniformValue("u_projMmatrix", identity);
         m_program.setUniformValue("customColor", QVector4D(0.0f, 0.0f, 0.0f, 0.0f));
         m_program.setUniformValue("qt_Texture0", 0);
-        glDisable(GL_DEPTH_TEST);
+        ei::gl::Disable(GL_DEPTH_TEST);
         const QRect viewport(0, 0, width(), height());
         const QVector<QVector2D> textureCoordinates = {
             QVector2D(0.0f, 0.0f), QVector2D(1.0f, 0.0f),
@@ -1982,12 +1983,12 @@ void CView::drawTestOverlaysOpenGl()
                 QVector3D(centerX + halfWidth, centerY + halfHeight, 0.0f),
                 QVector3D(centerX - halfWidth, centerY + halfHeight, 0.0f)
             };
-            glBindTexture(GL_TEXTURE_2D, m_testEntranceLabelTextures.at(index));
+            ei::gl::BindTexture(GL_TEXTURE_2D, m_testEntranceLabelTextures.at(index));
             m_program.setAttributeArray(position, quad.constData());
             m_program.setAttributeArray(texture, textureCoordinates.constData());
-            glDrawArrays(GL_TRIANGLE_FAN, 0, quad.size());
+            ei::gl::DrawArrays(GL_TRIANGLE_FAN, 0, quad.size());
         }
-        glBindTexture(GL_TEXTURE_2D, 0);
+        ei::gl::BindTexture(GL_TEXTURE_2D, 0);
         m_program.disableAttributeArray(texture);
     }
 
@@ -1999,8 +2000,8 @@ void CView::drawTestOverlaysOpenGl()
             m_testSpawnMarkerSelected ? QVector4D(0.92f, 1.0f, 0.32f, 1.0f)
             : m_testSpawnMarkerAdjusted ? QVector4D(1.0f, 0.67f, 0.18f, 0.82f)
                                         : QVector4D(0.31f, 1.0f, 0.47f, 0.72f));
-        glEnable(GL_DEPTH_TEST);
-        glLineWidth(3.0f);
+        ei::gl::Enable(GL_DEPTH_TEST);
+        ei::gl::LineWidth(3.0f);
         QVector<QVector3D> figure;
         const float z = m_testSpawnMarker.z() + 0.08f;
         const int segments = 24;
@@ -2011,7 +2012,7 @@ void CView::drawTestOverlaysOpenGl()
                                     m_testSpawnMarker.y() + qSin(angle) * 0.55f, z));
         }
         m_program.setAttributeArray(position, figure.constData());
-        glDrawArrays(GL_LINE_LOOP, 0, figure.size());
+        ei::gl::DrawArrays(GL_LINE_LOOP, 0, figure.size());
         const QVector<QVector3D> body = {
             QVector3D(m_testSpawnMarker.x(), m_testSpawnMarker.y(), z + 1.72f),
             QVector3D(m_testSpawnMarker.x(), m_testSpawnMarker.y(), z + 0.72f),
@@ -2023,7 +2024,7 @@ void CView::drawTestOverlaysOpenGl()
             QVector3D(m_testSpawnMarker.x() + 0.34f, m_testSpawnMarker.y(), z)
         };
         m_program.setAttributeArray(position, body.constData());
-        glDrawArrays(GL_LINES, 0, body.size());
+        ei::gl::DrawArrays(GL_LINES, 0, body.size());
         QVector<QVector3D> head;
         for(int i = 0; i < segments; ++i)
         {
@@ -2032,14 +2033,14 @@ void CView::drawTestOverlaysOpenGl()
                                   m_testSpawnMarker.y(), z + 1.93f + qSin(angle) * 0.24f));
         }
         m_program.setAttributeArray(position, head.constData());
-        glDrawArrays(GL_LINE_LOOP, 0, head.size());
+        ei::gl::DrawArrays(GL_LINE_LOOP, 0, head.size());
     }
 
     m_program.disableAttributeArray(position);
     m_program.setUniformValue("customColor", QVector4D(0.0f, 0.0f, 0.0f, 0.0f));
-    glLineWidth(1.0f);
-    glDepthMask(GL_TRUE);
-    glEnable(GL_DEPTH_TEST);
+    ei::gl::LineWidth(1.0f);
+    ei::gl::DepthMask(GL_TRUE);
+    ei::gl::Enable(GL_DEPTH_TEST);
 }
 
 bool CView::ensureParticleRendererInitialized()
@@ -2056,13 +2057,13 @@ bool CView::ensureParticleRendererInitialized()
     GLint previousProgram = 0;
     GLint previousArrayBuffer = 0;
     GLint previousVertexArray = 0;
-    glGetIntegerv(GL_CURRENT_PROGRAM, &previousProgram);
-    glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &previousArrayBuffer);
+    ei::gl::GetIntegerv(GL_CURRENT_PROGRAM, &previousProgram);
+    ei::gl::GetIntegerv(GL_ARRAY_BUFFER_BINDING, &previousArrayBuffer);
     QOpenGLContext* context = QOpenGLContext::currentContext();
     QOpenGLExtraFunctions* functions = context ? context->extraFunctions() : nullptr;
     if(functions)
     {
-        glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &previousVertexArray);
+        ei::gl::GetIntegerv(GL_VERTEX_ARRAY_BINDING, &previousVertexArray);
         functions->glBindVertexArray(0);
     }
 
@@ -2215,10 +2216,10 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
                                          2 * int(sizeof(float)), 2,
                                          4 * int(sizeof(float)));
 
-    glEnable(GL_DEPTH_TEST);
-    glDepthMask(GL_FALSE);
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    ei::gl::Enable(GL_DEPTH_TEST);
+    ei::gl::DepthMask(GL_FALSE);
+    ei::gl::Enable(GL_BLEND);
+    ei::gl::BlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     bool additiveBlend = false;
     QOpenGLTexture* boundTexture = nullptr;
     const float timeSeconds = float(QDateTime::currentMSecsSinceEpoch() % 600000) / 1000.0f;
@@ -2234,14 +2235,14 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
             if(texture)
                 texture->bind(0);
             else
-                glBindTexture(GL_TEXTURE_2D, 0);
+                ei::gl::BindTexture(GL_TEXTURE_2D, 0);
             boundTexture = texture;
             if(performance.collecting())
                 ++performance.counters().textureBinds;
         }
         if(additive != additiveBlend)
         {
-            glBlendFunc(GL_SRC_ALPHA, additive ? GL_ONE : GL_ONE_MINUS_SRC_ALPHA);
+            ei::gl::BlendFunc(GL_SRC_ALPHA, additive ? GL_ONE : GL_ONE_MINUS_SRC_ALPHA);
             additiveBlend = additive;
         }
         m_particleProgram.setUniformValue("u_center", center);
@@ -2254,7 +2255,7 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
         m_particleProgram.setUniformValue("u_radialMask", radialMask);
         m_particleProgram.setUniformValue("u_softness", softness);
         m_particleProgram.setUniformValue("u_uvRect", uvRect);
-        glDrawArrays(GL_TRIANGLES, 0, 6);
+        ei::gl::DrawArrays(GL_TRIANGLES, 0, 6);
         if(performance.collecting())
         {
             ++performance.counters().drawCalls;
@@ -2392,9 +2393,9 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
         }
     }
 
-    glBindTexture(GL_TEXTURE_2D, 0);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    glDepthMask(GL_TRUE);
+    ei::gl::BindTexture(GL_TEXTURE_2D, 0);
+    ei::gl::BlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    ei::gl::DepthMask(GL_TRUE);
     m_particleProgram.disableAttributeArray(textureLocation);
     m_particleProgram.disableAttributeArray(positionLocation);
     m_particleBuffer.release();
@@ -2473,11 +2474,11 @@ void CView::draw()
     // that distant geometry converges to. This removes the editor-only black
     // seam without modifying the profile sky asset.
     if(environmentEnabled && fogEnabled)
-        glClearColor(environment.fogColor.x(), environment.fogColor.y(),
+        ei::gl::ClearColor(environment.fogColor.x(), environment.fogColor.y(),
                      environment.fogColor.z(), 1.0f);
     else
-        glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-    glClear(GL_COLOR_BUFFER_BIT);
+        ei::gl::ClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    ei::gl::Clear(GL_COLOR_BUFFER_BIT);
 
     QVector<CLight*> sceneLights;
     if(environmentEnabled && sceneLightsEnabled)
@@ -2727,7 +2728,7 @@ void CView::draw()
         drawTerrainColor(shadowReady);
         renderQueue.flush();
         logOpenGlErrors(QStringLiteral("draw/object-queue"));
-        glDepthFunc(GL_LEQUAL);
+        ei::gl::DepthFunc(GL_LEQUAL);
         for(CMob* mob : m_aMob)
             if(isMobVisible(mob))
                 for(CNode* node : mob->nodes())
@@ -2746,7 +2747,7 @@ void CView::draw()
                     }
         m_program.setUniformValue("u_highlightColor", activeHighlight);
         renderQueue.flush();
-        glDepthFunc(GL_LESS);
+        ei::gl::DepthFunc(GL_LESS);
     }
 
     if(!terrainDrawn)
@@ -3141,8 +3142,8 @@ void CView::getColorFromRect(const QRect& rect, QVector<SColor>& aColor)
     uint size = component * w * h;
     QByteArray* pixel = new QByteArray();
     pixel->resize(size);
-    glPixelStorei(GL_PACK_ALIGNMENT, 1); // glReadPixels use 4 component by default. for RGB must define pack alignment
-    glReadPixels(inversedRect.left(), inversedRect.bottom(), w, h, GL_RGB, GL_UNSIGNED_BYTE, pixel->data());
+    ei::gl::PixelStorei(GL_PACK_ALIGNMENT, 1); // glReadPixels use 4 component by default. for RGB must define pack alignment
+    ei::gl::ReadPixels(inversedRect.left(), inversedRect.bottom(), w, h, GL_RGB, GL_UNSIGNED_BYTE, pixel->data());
     SColor color;
     for(int i(0); i<component * w * h; i+=3)
     {
@@ -3243,7 +3244,7 @@ bool CView::logOpenGlErrors(const QString& stage)
     QStringList errors;
     for(int index = 0; index < 32; ++index)
     {
-        const GLenum error = glGetError();
+        const GLenum error = ei::gl::GetError();
         if(error == GL_NO_ERROR)
             break;
         found = true;
@@ -3276,15 +3277,15 @@ void CView::logOpenGlDiagnosticState(const QString& stage, bool samplePixel)
     GLint texture = 0;
     GLboolean colorMask[4] = {GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE};
     GLfloat clearColor[4] = {0.0f, 0.0f, 0.0f, 0.0f};
-    glGetIntegerv(GL_VIEWPORT, viewport);
-    glGetIntegerv(GL_FRAMEBUFFER_BINDING, &framebuffer);
-    glGetIntegerv(GL_CURRENT_PROGRAM, &program);
-    glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &arrayBuffer);
-    glGetIntegerv(GL_ELEMENT_ARRAY_BUFFER_BINDING, &elementBuffer);
-    glGetIntegerv(GL_ACTIVE_TEXTURE, &activeTexture);
-    glGetIntegerv(GL_TEXTURE_BINDING_2D, &texture);
-    glGetBooleanv(GL_COLOR_WRITEMASK, colorMask);
-    glGetFloatv(GL_COLOR_CLEAR_VALUE, clearColor);
+    ei::gl::GetIntegerv(GL_VIEWPORT, viewport);
+    ei::gl::GetIntegerv(GL_FRAMEBUFFER_BINDING, &framebuffer);
+    ei::gl::GetIntegerv(GL_CURRENT_PROGRAM, &program);
+    ei::gl::GetIntegerv(GL_ARRAY_BUFFER_BINDING, &arrayBuffer);
+    ei::gl::GetIntegerv(GL_ELEMENT_ARRAY_BUFFER_BINDING, &elementBuffer);
+    ei::gl::GetIntegerv(GL_ACTIVE_TEXTURE, &activeTexture);
+    ei::gl::GetIntegerv(GL_TEXTURE_BINDING_2D, &texture);
+    ei::gl::GetBooleanv(GL_COLOR_WRITEMASK, colorMask);
+    ei::gl::GetFloatv(GL_COLOR_CLEAR_VALUE, clearColor);
     GLenum framebufferStatus = 0;
     const QGLContext* legacyContext = QGLContext::currentContext();
     if(legacyContext)
@@ -3302,7 +3303,7 @@ void CView::logOpenGlDiagnosticState(const QString& stage, bool samplePixel)
     if(samplePixel && width() > 0 && height() > 0)
     {
         GLubyte pixel[4] = {0, 0, 0, 0};
-        glReadPixels(width() / 2, height() / 2, 1, 1,
+        ei::gl::ReadPixels(width() / 2, height() / 2, 1, 1,
                      GL_RGBA, GL_UNSIGNED_BYTE, pixel);
         pixelText = QStringLiteral("%1,%2,%3,%4")
             .arg(pixel[0]).arg(pixel[1]).arg(pixel[2]).arg(pixel[3]);
@@ -3318,8 +3319,8 @@ void CView::logOpenGlDiagnosticState(const QString& stage, bool samplePixel)
         .arg(framebuffer).arg(QString::number(uint(framebufferStatus), 16))
         .arg(program).arg(arrayBuffer).arg(elementBuffer)
         .arg(activeTexture - GL_TEXTURE0).arg(texture)
-        .arg(glIsEnabled(GL_DEPTH_TEST) ? 1 : 0)
-        .arg(glIsEnabled(GL_BLEND) ? 1 : 0)
+        .arg(ei::gl::IsEnabled(GL_DEPTH_TEST) ? 1 : 0)
+        .arg(ei::gl::IsEnabled(GL_BLEND) ? 1 : 0)
         .arg(colorMask[0] ? 1 : 0).arg(colorMask[1] ? 1 : 0)
         .arg(colorMask[2] ? 1 : 0).arg(colorMask[3] ? 1 : 0)
         .arg(clearColor[0], 0, 'f', 3).arg(clearColor[1], 0, 'f', 3)
@@ -3342,9 +3343,9 @@ void CView::logShaderProgramDiagnostics(const QString& name,
 
 void CView::logOpenGlData()
 {
-    const GLubyte * version = glGetString(GL_VERSION);
-    const GLubyte * vendor = glGetString(GL_VENDOR);
-    const GLubyte * renderer = glGetString(GL_RENDERER);
+    const GLubyte * version = ei::gl::GetString(GL_VERSION);
+    const GLubyte * vendor = ei::gl::GetString(GL_VENDOR);
+    const GLubyte * renderer = ei::gl::GetString(GL_RENDERER);
     const QGLContext* legacyContext = QGLContext::currentContext();
     const QGLFormat legacyFormat = legacyContext
         ? legacyContext->format() : QGLFormat();
@@ -3660,7 +3661,7 @@ void CView::pickObject(const QRect &rect, bool bAddToSelect)
     const QMatrix4x4 viewMatrix = m_cam->update();
     m_selectProgram.setUniformValue("u_projMmatrix", m_projection);
     m_selectProgram.setUniformValue("u_viewMmatrix", viewMatrix);
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    ei::gl::Clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
     const COptBool* cullingOption = m_pSettings
         ? dynamic_cast<const COptBool*>(m_pSettings->opt("frustumCulling")) : nullptr;
@@ -5343,7 +5344,7 @@ CNode* CView::pickObject(QList<CNode*>& aNode, int x, int y)
     const QMatrix4x4 viewMatrix = m_cam->update();
     m_selectProgram.setUniformValue("u_projMmatrix", m_projection);
     m_selectProgram.setUniformValue("u_viewMmatrix", viewMatrix);
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    ei::gl::Clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
     const COptBool* cullingOption = m_pSettings
         ? dynamic_cast<const COptBool*>(m_pSettings->opt("frustumCulling")) : nullptr;
@@ -5368,7 +5369,7 @@ CNode* CView::pickObject(QList<CNode*>& aNode, int x, int y)
     }
 
     GLubyte pixel[3];
-    glReadPixels(x, m_height-y, 1, 1, GL_RGB, GL_UNSIGNED_BYTE, pixel);
+    ei::gl::ReadPixels(x, m_height-y, 1, 1, GL_RGB, GL_UNSIGNED_BYTE, pixel);
     SColor pickedColor(pixel[0], pixel[1], pixel[2]);
 
     for (auto& node: aNode)
@@ -5400,7 +5401,7 @@ QVector3D CView::getTerrainPos(const int cursorPosX, const int cursorPosY,
     // Set modelview-projection matrix
     m_landProgram.setUniformValue("u_projMmatrix", m_projection);
     m_landProgram.setUniformValue("u_viewMmatrix", camMatrix);
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    ei::gl::Clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
     if(bLand)
         m_pLand->draw(&m_landProgram);
@@ -5410,7 +5411,7 @@ QVector3D CView::getTerrainPos(const int cursorPosX, const int cursorPosY,
     }
     const int posY (height() - cursorPosY);
     float z;
-    glReadPixels(cursorPosX, posY, 1, 1, GL_DEPTH_COMPONENT, GL_FLOAT, &z );
+    ei::gl::ReadPixels(cursorPosX, posY, 1, 1, GL_DEPTH_COMPONENT, GL_FLOAT, &z );
     if(hit)
         *hit = qIsFinite(z) && z >= 0.0f && z < 1.0f;
     //QVector3D point (cursorPosX, posY, z);
@@ -5420,7 +5421,7 @@ QVector3D CView::getTerrainPos(const int cursorPosX, const int cursorPosY,
 
     QMatrix4x4 view = m_cam->viewMatrix();
     GLint viewPort[4];
-    glGetIntegerv(GL_VIEWPORT, viewPort);
+    ei::gl::GetIntegerv(GL_VIEWPORT, viewPort);
     QRect viewPortRect(viewPort[0], viewPort[1], viewPort[2], viewPort[3]);
     return point.unproject(view, m_projection, viewPortRect); //return Vector3D here
 }

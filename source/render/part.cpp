@@ -1,4 +1,5 @@
 #include "part.h"
+#include "gl_dispatch.h"
 #include "render_performance.h"
 
 #include <QCryptographicHash>
@@ -359,7 +360,7 @@ void CPart::drawImmediate(QOpenGLShaderProgram* program)
 
     // FIG triangles are already expanded sequentially. The old identity index
     // buffer duplicated every vertex and added a second bind to every part.
-    glDrawArrays(GL_TRIANGLES, 0, m_aVertData.count());
+    ei::gl::DrawArrays(GL_TRIANGLES, 0, m_aVertData.count());
     if(vertexArrayBound)
         arrays->immediate.release();
     RenderPerformanceContext& performance = RenderPerformanceContext::instance();
@@ -469,7 +470,7 @@ void CPart::drawSelect(QOpenGLShaderProgram *program)
                                     int(sizeof(SVertexData)));
     }
 
-    glDrawArrays(GL_TRIANGLES, 0, m_aVertData.count());
+    ei::gl::DrawArrays(GL_TRIANGLES, 0, m_aVertData.count());
     if(vertexArrayBound)
         arrays->selection.release();
 }

@@ -1,6 +1,7 @@
 #include <QtGlobal>
 
 #include "sector.h"
+#include "gl_dispatch.h"
 #include "render_performance.h"
 #include "landscape.h"
 #include "math_utils.h"
@@ -589,7 +590,7 @@ void CSector::draw(QOpenGLShaderProgram* program)
 
     m_indexBuf.bind();
     constexpr int indexNum = 256*24; // 256 tiles * 4 cells * 2 triangles * 3 indices
-    glDrawElements(GL_TRIANGLES, indexNum, GL_UNSIGNED_SHORT, nullptr);
+    ei::gl::DrawElements(GL_TRIANGLES, indexNum, GL_UNSIGNED_SHORT, nullptr);
     RenderPerformanceContext& performance = RenderPerformanceContext::instance();
     if(performance.collecting())
     {
@@ -625,7 +626,7 @@ void CSector::drawWater(QOpenGLShaderProgram *program)
 
     m_waterIndexBuf.bind();
     const int indexCount = (m_arrWaterVrtData.count() / 9) * 24;
-    glDrawElements(GL_TRIANGLES, indexCount, GL_UNSIGNED_SHORT, nullptr);
+    ei::gl::DrawElements(GL_TRIANGLES, indexCount, GL_UNSIGNED_SHORT, nullptr);
     RenderPerformanceContext& performance = RenderPerformanceContext::instance();
     if(performance.collecting())
     {

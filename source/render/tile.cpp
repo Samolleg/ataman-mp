@@ -1,5 +1,6 @@
 #include "log.h"
 #include "tile.h"
+#include "gl_dispatch.h"
 #include "math_utils.h"
 
 CTile::CTile():
@@ -276,5 +277,5 @@ void CPreviewTile::draw(QOpenGLShaderProgram* program)
     program->enableAttributeArray(textureLocation);
     program->setAttributeBuffer(textureLocation, GL_FLOAT, offset, 2, int(sizeof(SVertexData)));
     m_indexBuf.bind();
-    glDrawElements(GL_TRIANGLES, 24, GL_UNSIGNED_SHORT, nullptr);
+    ei::gl::DrawElements(GL_TRIANGLES, 24, GL_UNSIGNED_SHORT, nullptr);
 }

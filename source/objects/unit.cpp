@@ -1,6 +1,7 @@
 #include <QJsonObject>
 #include <QJsonArray>
 #include "unit.h"
+#include "gl_dispatch.h"
 #include "view.h"
 #include "resourcemanager.h"
 #include "landscape.h"
@@ -1062,7 +1063,7 @@ void CLogic::draw(bool isActive, QOpenGLShaderProgram* program)
 
 
 
-    glDisable(GL_DEPTH_TEST);
+    ei::gl::Disable(GL_DEPTH_TEST);
     //todo: draw help radius
     QMatrix4x4 matrix;
     matrix.setToIdentity();
@@ -1092,17 +1093,17 @@ void CLogic::draw(bool isActive, QOpenGLShaderProgram* program)
 
     // Draw cube geometry using indices from VBO 1
     m_indexBuf.bind();
-    glLineWidth(2);
+    ei::gl::LineWidth(2);
     bool bDottedLines = false;
     if(bDottedLines)
     {
-        glEnable(GL_LINE_STIPPLE);
-        glLineStipple(3,555);
+        ei::gl::Enable(GL_LINE_STIPPLE);
+        ei::gl::LineStipple(3,555);
     }
 
-    glDrawElements(GL_LINE_STRIP, m_aDrawPoint.count(), GL_UNSIGNED_SHORT, nullptr);
+    ei::gl::DrawElements(GL_LINE_STRIP, m_aDrawPoint.count(), GL_UNSIGNED_SHORT, nullptr);
     if(bDottedLines)
-        glDisable(GL_LINE_STIPPLE);
+        ei::gl::Disable(GL_LINE_STIPPLE);
 
     program->setUniformValue("customColor", QVector4D(0.0, 0.0, 0.0, 0.0));
 
@@ -1118,7 +1119,7 @@ void CLogic::draw(bool isActive, QOpenGLShaderProgram* program)
                 pp->draw(isActive, program);
     }
 
-    glEnable(GL_DEPTH_TEST);
+    ei::gl::Enable(GL_DEPTH_TEST);
 }
 
 void CLogic::drawSelect(QOpenGLShaderProgram* program)
@@ -1130,12 +1131,12 @@ void CLogic::drawSelect(QOpenGLShaderProgram* program)
     if (pOpt && !pOpt->value())
         return;
 
-    glDisable(GL_DEPTH_TEST);
+    ei::gl::Disable(GL_DEPTH_TEST);
     //todo: choose guard behavior
     for(auto& pp : m_aPatrolPt)
         pp->drawSelect(program);
 
-    glEnable(GL_DEPTH_TEST);
+    ei::gl::Enable(GL_DEPTH_TEST);
 }
 
 void CLogic::createLogicLines()
@@ -1392,7 +1393,7 @@ void CLogic::drawHelp(bool isActive, QOpenGLShaderProgram *program)
     if (!pOpt->value() && m_parent->nodeState() != ENodeState::eSelect)
         return;
 
-    glDisable(GL_DEPTH_TEST);
+    ei::gl::Disable(GL_DEPTH_TEST);
     //todo: draw help radius
     QMatrix4x4 matrix;
     matrix.setToIdentity();
@@ -1408,11 +1409,11 @@ void CLogic::drawHelp(bool isActive, QOpenGLShaderProgram *program)
     program->setAttributeBuffer(vertexLocation, GL_FLOAT, offset, 3, int(sizeof(QVector3D)));
 
     m_helpIndexBuf.bind();
-    glLineWidth(2);
-    glDrawElements(GL_LINE_STRIP, m_aHelpPoint.count(), GL_UNSIGNED_SHORT, nullptr);
+    ei::gl::LineWidth(2);
+    ei::gl::DrawElements(GL_LINE_STRIP, m_aHelpPoint.count(), GL_UNSIGNED_SHORT, nullptr);
     program->setUniformValue("customColor", QVector4D(0.0, 0.0, 0.0, 0.0));
 
-    glEnable(GL_DEPTH_TEST);
+    ei::gl::Enable(GL_DEPTH_TEST);
 }
 
 void CLogic::updatePos(QVector3D& offset)
@@ -1956,7 +1957,7 @@ void CPatrolPoint::draw(bool isActive, QOpenGLShaderProgram* program)
 
     // Draw cube geometry using indices from VBO 1
     m_indexBuf.bind();
-    glDrawElements(GL_LINES, (m_aDrawingLine.count()-1)*2, GL_UNSIGNED_SHORT, nullptr);
+    ei::gl::DrawElements(GL_LINES, (m_aDrawingLine.count()-1)*2, GL_UNSIGNED_SHORT, nullptr);
     program->setUniformValue("customColor", QVector4D(0.0, 0.0, 0.0, 0.0));
     for(auto& look: m_aLookPt)
         if(look->nodeState() != ENodeState::eSelect)

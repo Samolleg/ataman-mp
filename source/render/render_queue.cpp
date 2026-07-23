@@ -1,4 +1,5 @@
 #include "render_queue.h"
+#include "gl_dispatch.h"
 
 #include "part.h"
 #include "render_performance.h"
@@ -381,21 +382,21 @@ void RenderQueueContext::flush()
             activeClass = item.materialClass;
             if(activeClass == ERenderMaterialClass::Opaque)
             {
-                glDisable(GL_BLEND);
+                ei::gl::Disable(GL_BLEND);
                 if(supportsFixedFunctionAlphaTest())
-                    glDisable(GL_ALPHA_TEST);
+                    ei::gl::Disable(GL_ALPHA_TEST);
             }
             else if(activeClass == ERenderMaterialClass::Cutout)
             {
-                glDisable(GL_BLEND);
+                ei::gl::Disable(GL_BLEND);
                 if(supportsFixedFunctionAlphaTest())
-                    glEnable(GL_ALPHA_TEST);
+                    ei::gl::Enable(GL_ALPHA_TEST);
             }
             else
             {
                 if(supportsFixedFunctionAlphaTest())
-                    glEnable(GL_ALPHA_TEST);
-                glEnable(GL_BLEND);
+                    ei::gl::Enable(GL_ALPHA_TEST);
+                ei::gl::Enable(GL_BLEND);
             }
         }
         if(item.texture != boundTexture)
@@ -451,8 +452,8 @@ void RenderQueueContext::flush()
     m_program->setUniformValue(m_highlightLocation, false);
     m_program->setUniformValue("u_receiveDynamicShadow", true);
     if(supportsFixedFunctionAlphaTest())
-        glEnable(GL_ALPHA_TEST);
-    glEnable(GL_BLEND);
+        ei::gl::Enable(GL_ALPHA_TEST);
+    ei::gl::Enable(GL_BLEND);
     if(collectPerformance)
         performance.counters().queueDrawNanoseconds += quint64(m_phaseTimer.nsecsElapsed());
     m_items.clear();
