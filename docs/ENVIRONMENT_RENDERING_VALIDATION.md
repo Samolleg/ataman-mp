@@ -1,8 +1,10 @@
 # Environment rendering validation
 
-This feature remains isolated on `feature/render-pipeline` until its viewport
-quality is accepted. It must not be merged into `main` based on build success
-alone.
+This renderer is integrated into `main` and forms part of the `0.3.0` closed-test
+baseline. Build success alone is not the acceptance criterion: the focused
+viewport/runtime checks below remain part of the `0.3.0` release matrix, and
+profile-specific behavior remains bounded by the recorded resource and
+fingerprinted executable evidence.
 
 ## Data contract
 
@@ -15,6 +17,11 @@ alone.
   The format contains no direction or cone fields, so these records are
   rendered as omnidirectional map lights. Directional spotlight semantics must
   not be invented without additional corpus or executable evidence.
+- Global environment illumination and local map lights use channel-wise maxima,
+  matching the fingerprinted native terrain path rather than summing the eight
+  nearest camera lights. Endurance retains up to 64 eligible lights, which
+  covers the complete audited JMV MOB corpus without camera-relative
+  truncation. Point-light attenuation follows the native distance/range curve.
 - Geometry casts directional shadows only when its existing `Is shadow` value
   permits it. Static and animated casters use separate cached maps.
 - Terrain receives directional shadows but is never submitted as a caster.
@@ -92,4 +99,7 @@ alone.
 The MOB schema proves omnidirectional map-light inputs but does not yet prove
 the runtime meaning of `LIGHT_SHADOW`. Per-light shadow maps remain pending
 executable/corpus evidence; the checkbox is preserved and not silently assigned
-a guessed meaning.
+a guessed meaning. Non-Tendri particle families and the special native local-
+light flag also remain explicitly outside the confirmed model; see
+[particle reconstruction coverage](PARTICLE_RENDERING_STATUS.md) and the
+[runtime evidence ledger](investigations/2026-07-23-particle-runtime.md).

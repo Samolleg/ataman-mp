@@ -331,6 +331,17 @@ remain unchanged.
   texture/UV inspector, optimized render queues and culling, resource-format
   fixes, functional particle preview, ANGLE compatibility, and the integrated
   environment renderer.
+- [x] Replace the inferred environment/local-light approximation with the
+  fingerprinted native composition model: resource-driven weather curves,
+  channel-wise maximum environment and point-light accumulation, native
+  distance falloff, bounded projected-shadow opacity, authored torch lights,
+  and a 64-light capacity covering the audited JMV corpus. The implementation
+  and remaining evidence boundaries are recorded in
+  [environment resource evidence](docs/ENVIRONMENT_RESOURCE_EVIDENCE.md),
+  [environment rendering validation](docs/ENVIRONMENT_RENDERING_VALIDATION.md),
+  and the [particle/runtime evidence ledger](docs/investigations/2026-07-23-particle-runtime.md).
+  ([`37e0231`](https://github.com/Ilufus/ei-mapper-endurance/commit/37e0231),
+  [`aa465c3`](https://github.com/Ilufus/ei-mapper-endurance/commit/aa465c3))
 - [x] Separate always-available **Time of day** and **Lighting mode** viewport
   controls. JMV launch and hot reload now use `RunWorldTime` so the selected
   starting hour is applied without freezing normal clock progression.
