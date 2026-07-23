@@ -1,0 +1,8 @@
+EI Mapper: Endurance Edition 0.2.1-alpha.44
+Closed test build: profile-correct render pipeline integration
+Render integration tip: 05E7FD8506BB2F883AAAF8FF398FCA52787E7470
+Main integration commit: A284AE6BDC952B6864B2DFA529EC2B633C6A664C
+Includes environment rendering, shadows, ANGLE compatibility, particle preview,
+profile-correct humanoid visuals, and the selected-unit texture/UV inspector.
+Particle rendering is functional but remains under fidelity refinement.
+No endurance-options.json is included.
