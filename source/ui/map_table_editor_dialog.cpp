@@ -52,6 +52,7 @@ CMapTableEditorDialog::CMapTableEditorDialog(QWidget* parent)
     : QDialog(parent)
 {
     setWindowTitle(tr("Map Catalog Editor (map.txt in texts.res)"));
+    setWindowFlag(Qt::WindowContextHelpButtonHint, false);
     const QStringList arguments = QCoreApplication::arguments();
     m_persistUiState = !arguments.contains("--ui-widget-check") &&
         !arguments.contains("--validate-archive") &&

@@ -15,6 +15,8 @@ private slots:
     void validatesUnsafeMetadata();
     void rejectsUnknownZoneTypeAcrossDocument();
     void allowsDuplicateEdgeIdsAndEditsByIndex();
+    void allowsRepeatedExitIdsWithinEdgeZone();
+    void rejectsRepeatedExitIdsWithinGameZone();
     void rejectsDuplicateNonEdgeIds();
     void rejectsGameRegistrationWithoutResources();
     void editsOnlyRequestedKnownLines();
@@ -191,6 +193,34 @@ void MapTableDocumentTests::allowsDuplicateEdgeIdsAndEditsByIndex()
         "#zone shared island edge\r\n#position\r\n1 2 3\r\n"));
     QVERIFY(document.serialize().contains(
         "#zone shared other_island edge\r\n#position\r\n4 5 6\r\n"));
+}
+
+void MapTableDocumentTests::allowsRepeatedExitIdsWithinEdgeZone()
+{
+    const QByteArray bytes =
+        "#zone gz1g_bz1g gipat edge\r\n"
+        "#exit 1\r\ngz1g 1\r\n"
+        "#exit 1\r\ngz3g 2\r\n";
+    CMapTableDocument document;
+    QVERIFY(document.loadBytes(bytes));
+    const SMapTableEditResult result = document.validateAllZones();
+    QVERIFY2(result.success, qPrintable(result.toText()));
+    QCOMPARE(document.serialize(), bytes);
+    QVERIFY(!document.isDirty());
+}
+
+void MapTableDocumentTests::rejectsRepeatedExitIdsWithinGameZone()
+{
+    const QByteArray bytes =
+        "#zone gz1g gipat game\r\n"
+        "#res\r\nzone1 zone1\r\n"
+        "#exit 1\r\nbz1g 1\r\n"
+        "#exit 1\r\nbz2g 1\r\n";
+    CMapTableDocument document;
+    QVERIFY(document.loadBytes(bytes));
+    const SMapTableEditResult result = document.validateAllZones();
+    QVERIFY(!result.success);
+    QVERIFY(result.toText().contains("gz1g: Exit ID 1 is duplicated."));
 }
 
 void MapTableDocumentTests::rejectsDuplicateNonEdgeIds()

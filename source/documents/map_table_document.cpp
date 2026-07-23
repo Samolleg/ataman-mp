@@ -555,11 +555,13 @@ SMapTableEditResult CMapTableDocument::validateZone(
             result.errors.append("Minimap and objectives texture names are required and cannot contain whitespace.");
     }
     QSet<int> exitIds;
+    const bool repeatedExitIdsAllowed =
+        zone.zoneType.compare("edge", Qt::CaseInsensitive) == 0;
     for(const SMapTableExit& exit : zone.exits)
     {
         if(exit.exitId <= 0)
             result.errors.append("Exit IDs must be positive.");
-        if(exitIds.contains(exit.exitId))
+        if(!repeatedExitIdsAllowed && exitIds.contains(exit.exitId))
             result.errors.append(QString("Exit ID %1 is duplicated.").arg(exit.exitId));
         exitIds.insert(exit.exitId);
         if(!tokenIsSafe(exit.destinationZoneId))
