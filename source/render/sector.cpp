@@ -428,7 +428,12 @@ TODO: use 9 vertex, make quad via index array
 
 void CSector::generateVertexDataFromTile()
 {
-    uint vertSize = m_arrLand.size() * m_arrLand.front().size()*16; // 9 vertices, 16 indices per tile
+    // CTile::generateDrawVertexData emits the 3x3 vertex grid once per tile.
+    // The previous allocation retained the old GL_QUADS-era value of 16 and
+    // drawWater() consequently derived an index count beyond its index buffer.
+    // Desktop drivers happened to tolerate that invalid draw, while ANGLE
+    // correctly rejects it with GL_INVALID_OPERATION.
+    const int vertSize = m_arrLand.size() * m_arrLand.front().size() * 9;
     //m_aVertexData.clear(); // to recalc textures ?
     bool bWater = !m_arrWater.isEmpty();
     m_arrLandVrtData.resize(vertSize); // todo: check size. vrt size == tile count * 9 (verts per tile)
@@ -442,6 +447,9 @@ void CSector::generateVertexDataFromTile()
             if(bWater)
                 m_arrWater[row][col].generateDrawVertexData(m_arrWaterVrtData, waterIndex);
         }
+
+    Q_ASSERT(curIndex == m_arrLandVrtData.size());
+    Q_ASSERT(!bWater || waterIndex == m_arrWaterVrtData.size());
 }
 
 void CSector::updatePosition()
