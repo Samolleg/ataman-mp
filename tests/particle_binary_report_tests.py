@@ -21,6 +21,8 @@ class ParticleBinaryReportTests(unittest.TestCase):
         self.assertEqual(fixture["constants"]["late_scale_growth_float"]["bytes"], "14AE873F")
         self.assertEqual(fixture["constants"]["late_scale_growth_float"]["value"], 1.059999942779541)
         self.assertEqual(fixture["constants"]["logical_quant_milliseconds"]["value"], 55)
+        self.assertEqual(fixture["constants"]["torch_light_radius_multiplier"]["value"], 10.0)
+        self.assertAlmostEqual(fixture["constants"]["rgb_normalization_float"]["value"], 1.0 / 255.0)
         self.assertEqual(
             fixture["constants"]["logical_quant_normalization_float"]["value"],
             0.0181818176060915,
@@ -89,6 +91,14 @@ class ParticleBinaryReportTests(unittest.TestCase):
         self.assertIn(
             "8B839C000000508B11FF5248",
             fixture["sites"]["torch_runtime_light_and_sound_dispatch"]["bytes"],
+        )
+        self.assertIn(
+            "C786E80000000000803F899EEC000000899EF0000000",
+            fixture["sites"]["native_d3d_light_range_and_attenuation"]["bytes"],
+        )
+        self.assertEqual(
+            fixture["ranges"]["weather_runtime_interpolation"]["start_va"],
+            "0x00566360",
         )
         self.assertIn(
             "C783E0010000E0E94800C783E401000020EC48000F85",

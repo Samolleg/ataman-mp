@@ -105,6 +105,36 @@ The actual client-side torch class is fingerprinted by
    more particle emitters. The sound call receives authored record `+0x9C`,
    which for NID 1365 is `nature\fire\big.wav`.
 
+The light setup path is now decoded as well. At `0x592986..0x5929C2` the
+torch integration constructs the constant linear RGBA value
+`(0.8, 0.8, 0.8, 1.0)`, multiplies authored `TORCH_STRENGHT` by the binary32
+constant `10.0` at VA `0x73BAAC`, and calls vtable slot `+0x44` with
+`(&TORCH_PTLINK, strength * 10, &color)`. The slot resolves to
+`0x52D410..0x52D517`. It creates exactly one point light of native type
+`0x31`, sets its position to the torch client object's world position plus
+the authored PTLINK, stores the received radius at light `+0xE0`, its square
+at `+0x100`, and `1 / radius^2` at `+0x104`, then registers the light. The
+particle setup at `0x52D34D..0x52D370` performs the identical component-wise
+world-position-plus-PTLINK addition.
+
+The underlying native D3D-light constructor at `0x68CEF0..0x68CF9F` fixes its
+falloff semantics. It initializes D3D `Range` at `+0xE0`, `Falloff` at
+`+0xE4`, and attenuation coefficients at `+0xE8..+0xF0` to `(1, 0, 0)`.
+Torch setup replaces Range and caches its square and reciprocal square at
+`+0x100/+0x104`, but does not replace those attenuation coefficients. Thus the
+fixed-function point light has constant attenuation inside its range (with
+range used for rejection), not the editor's previous squared
+`(1-distance/range)` fade. Surface diffuse still uses the normalized
+light-to-vertex vector and normal dot product.
+
+Neither setup multiplies PTLINK by the torch rotation. This rejects the
+editor's previous `rotation.rotatedVector(PTLINK)` attachment rule. It also
+establishes that particle and generated light must share one unrotated native
+attachment position. The native routines add no extra vertical pivot or
+hidden particle-only offset; any remaining apparent source-height mismatch
+must be sought in the object/display-position path or billboard presentation,
+not corrected with an unsupported emitter offset.
+
 `OBJ_COMPLECTION` is not an input to this particle path. Setup
 `0x52D330..0x52D3E4` receives and forwards only the hardcoded particle kind,
 authored attachment, and authored strength; it neither reads the torch's
@@ -230,6 +260,53 @@ The fingerprinted `gz1g` `zone1.mob` record contains direction
 `0.20000000298023224`. Therefore ordinary TendriSmoke late frames receive the
 current world wind direction in `+0x140..+0x148` and current wind strength in
 `+0x14C` every logical quant.
+
+The rest of the same `WORLD_SET` branch also rejects an earlier editor
+assumption about authored lighting. The loader initializes time `14`, ambient
+`0.2`, and sunlight `0.6`, then reads the authored wind vector, wind strength,
+time, ambient, and sunlight fields in that order. On exit it calls `0x58EEA0`
+with only the time and `0x58EE20` with only wind direction/strength. The parsed
+ambient and sunlight floats are not consumed. Consequently `WS_AMBIENT` and
+`WS_SUN_LIGHT` must remain round-trippable MOB data, but using them as render
+intensity multipliers is rejected as non-native.
+
+Native outdoor illumination instead comes from the weather-table loader at
+`0x563930..0x563F60`. Its default resource is
+`Config\\LightsGipat.ini`; sections `sunlight`, `ambient`, and `sky` are read
+as RGB integer triples, normalized by the exact `1/255` float at `0x73C36C`,
+and stored as 24 RGBA entries at weather-object offsets `+0x22C`, `+0x3AC`,
+and `+0x52C`, respectively. Missing integer-hour entries are filled by linear
+interpolation between authored keys. The runtime at `0x566360..0x566BF7`
+reduces world time modulo 24 and linearly interpolates each table from
+`floor(time)` to `(floor(time)+1) % 24`. A zero RGB ambient entry alone falls
+back to interpolated sunlight times `0.8`; the stock outdoor tables are
+nonzero. Sunlight RGB becomes directional-light diffuse, ambient RGB becomes
+the global ambient term, and sky RGB is converted back to a packed 0..255
+background color. There is no additional `WORLD_SET` intensity multiplier.
+
+The read-only base `Config` fixture pins all six authored weather resources.
+`LightsGipat.ini` and `LightsSuslanger.ini` are byte-identical (SHA-256
+`8D64191F2CEC9C83E2545318B7EFB905575E94524E2A3CADFD3CCC5BA29A324C`);
+`LightsIngos.ini` is
+`93B176E3227DFDE8F48D5984361A3435409826B232710ADAF568F785593A05A1`;
+all three cave tables are byte-identical
+`68E9AC6A863F1D707969FBDE9A2BCC0422595F7FE01EE5A9C5826291BF802372`.
+The authored `map.txt` `#zone` record already classifies catalogued maps as
+`gipat`, `ingos`, or `suslanger`; that zone-type field selects the corresponding
+outdoor table, while uncatalogued/direct MOB loads retain the executable's
+Gipat default. JMV-specific zone types likewise retain that default unless
+their authored table identifies another stock allod. Because the Suslanger
+file is identical to Gipat, they share one immutable table in the renderer.
+
+The same runtime proves the exact ordinary sun direction. With time `t` in
+hours and azimuth `a = t * 2*pi/24`, elevation in degrees is
+`60 - 3.75*abs(t-12)` for `4 <= t <= 20`,
+`30 + (t-20)*45/4` for `t > 20`, and
+`30 + (4-t)*45/4` for `t < 4`. After conversion to radians `e`, the direction
+submitted by the game is `(cos(a)*cos(e), sin(a)*cos(e), -sin(e))`. Thus the
+editor's previous fixed `-0.62` Z component and extra 35-degree azimuth phase
+are rejected. At noon the exact direction is approximately
+`(-0.5, 0, -0.8660254)`.
 
 The complete scale mutator at `0x485480..0x485523` multiplies all six spawn
 bound components `+0xF0..+0x104`, initial scale `+0x10C`, field `+0x128`,

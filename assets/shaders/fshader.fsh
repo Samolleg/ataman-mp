@@ -174,11 +174,8 @@ void main(void)
           }
         }
       }
-      float skyExposure = 0.88 + 0.12 * max(normal.z, 0.0);
-      vec3 neutralAmbient = mix(vec3(1.0), u_ambientColor, 0.28);
-      float ambientLevel = 0.32 + 0.68 * u_ambientStrength;
-      vec3 light = (neutralAmbient * (ambientLevel * skyExposure)
-                 + u_sunColor * (u_sunStrength * sunDiffuse)) * shadow;
+      vec3 light = u_ambientColor
+                 + u_sunColor * (sunDiffuse * shadow);
       for (int i = 0; i < 8; ++i)
       {
         if (i >= u_pointLightCount)
@@ -186,12 +183,11 @@ void main(void)
         vec3 offset = u_pointLightPositionRange[i].xyz - v_worldPosition;
         float range = max(u_pointLightPositionRange[i].w, 0.001);
         float distanceToLight = length(offset);
-        float attenuation = max(0.0, 1.0 - distanceToLight / range);
-        attenuation *= attenuation;
+        float attenuation = step(distanceToLight, range);
         light += u_pointLightColor[i] * attenuation
                * max(dot(normal, normalize(offset)), 0.0);
       }
-      resColor.rgb *= light;
+      resColor.rgb *= clamp(light, 0.0, 1.0);
       if (u_fogEnabled)
       {
         float fog = max(clamp((v_viewDepth - u_fogStart) /

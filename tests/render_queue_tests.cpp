@@ -159,21 +159,44 @@ void RenderQueueTests::derivesEnvironmentFromWorldValues()
     const ei::SRenderEnvironment noon =
         ei::renderEnvironmentForValues(12.0f, 0.25f, 0.75f);
     QCOMPARE(noon.timeHours, 12.0f);
-    QCOMPARE(noon.ambientStrength, 0.25f);
-    QCOMPARE(noon.sunStrength, 0.75f);
+    QCOMPARE(noon.ambientStrength, 1.0f);
+    QCOMPARE(noon.sunStrength, 1.0f);
+    QCOMPARE(noon.sunColor, QVector3D(1.0f, 1.0f, 1.0f));
+    QCOMPARE(noon.ambientColor, QVector3D(129.0f, 135.0f, 125.0f) / 255.0f);
+    QCOMPARE(noon.skyColor, QVector3D(46.0f, 181.0f, 217.0f) / 255.0f);
     QVERIFY(noon.fogStart < noon.fogEnd);
     QCOMPARE(noon.fogEnd, 620.0f);
-    QVERIFY(noon.sunDirection.z() < -0.60f);
-    QVERIFY(noon.sunDirection.z() > -0.64f);
+    QVERIFY(qAbs(noon.sunDirection.x() + 0.5f) < 0.00001f);
+    QVERIFY(qAbs(noon.sunDirection.y()) < 0.00001f);
+    QVERIFY(qAbs(noon.sunDirection.z() + 0.8660254f) < 0.00001f);
 
     const ei::SRenderEnvironment midnight =
         ei::renderEnvironmentForValues(24.0f, -1.0f, 9.0f);
     QCOMPARE(midnight.timeHours, 0.0f);
-    QCOMPARE(midnight.ambientStrength, 0.0f);
-    QCOMPARE(midnight.sunStrength, 4.0f);
+    QCOMPARE(midnight.ambientStrength, 1.0f);
+    QCOMPARE(midnight.sunStrength, 1.0f);
+    QCOMPARE(midnight.sunColor, QVector3D(63.0f, 93.0f, 157.0f) / 255.0f);
+    QCOMPARE(midnight.ambientColor, QVector3D(54.0f, 83.0f, 147.0f) / 255.0f);
     QVERIFY(midnight.sunColor.z() > midnight.sunColor.x());
-    QVERIFY(qAbs(midnight.sunDirection.z() - noon.sunDirection.z()) < 0.001f);
-    QVERIFY((midnight.sunDirection - noon.sunDirection).length() > 1.0f);
+    QVERIFY(qAbs(midnight.sunDirection.x() - 0.2588190f) < 0.00001f);
+    QVERIFY(qAbs(midnight.sunDirection.y()) < 0.00001f);
+    QVERIFY(qAbs(midnight.sunDirection.z() + 0.9659258f) < 0.00001f);
+
+    const ei::SRenderEnvironment halfHour =
+        ei::renderEnvironmentForValues(19.5f, 99.0f, -99.0f);
+    const QVector3D expectedHalfHourSun =
+        QVector3D(255.0f, 162.5f, 109.0f) / 255.0f;
+    const QVector3D expectedHalfHourAmbient =
+        QVector3D(134.0f, 106.5f, 89.5f) / 255.0f;
+    QVERIFY((halfHour.sunColor - expectedHalfHourSun).length() < 0.000001f);
+    QVERIFY((halfHour.ambientColor - expectedHalfHourAmbient).length() < 0.000001f);
+
+    const ei::SRenderEnvironment ingosNoon =
+        ei::renderEnvironmentForValues(12.0f, 0.0f, 0.0f, false, "ingos");
+    QCOMPARE(ingosNoon.ambientColor,
+             QVector3D(111.0f, 121.0f, 151.0f) / 255.0f);
+    QCOMPARE(ingosNoon.skyColor,
+             QVector3D(46.0f, 132.0f, 217.0f) / 255.0f);
 
     const ei::SRenderEnvironment cave =
         ei::renderEnvironmentForValues(10.34f, 0.25f, 0.75f, true);

@@ -1133,9 +1133,7 @@ void CView::drawSkybox(const QMatrix4x4& cameraMatrix,
     skyView.rotate(environment.skyRotationDegrees, 0.0f, 0.0f, 1.0f);
     m_skyProgram.setUniformValue("u_viewMmatrix", skyView);
     m_skyProgram.setUniformValue("u_projMmatrix", m_projection);
-    const float tintStrength = qBound(0.3f,
-        environment.ambientStrength + environment.sunStrength, 1.0f);
-    m_skyProgram.setUniformValue("u_tint", environment.sunColor * tintStrength);
+    m_skyProgram.setUniformValue("u_tint", environment.skyColor);
     m_skyProgram.setUniformValue("u_fogColor", environment.fogColor);
     const COptBool* fogOption = m_pSettings
         ? dynamic_cast<const COptBool*>(m_pSettings->opt("renderFog")) : nullptr;
@@ -1168,7 +1166,7 @@ void CView::drawSkybox(const QMatrix4x4& cameraMatrix,
 
 void CView::applyEnvironmentUniforms(QOpenGLShaderProgram& program,
                                      const ei::SRenderEnvironment& environment,
-                                     const QVector<CLight*>& lights,
+                                     const QVector<ei::SScenePointLight>& lights,
                                      int lightingMode, bool fogEnabled)
 {
     const bool enabled = lightingMode != 0;
@@ -1194,11 +1192,9 @@ void CView::applyEnvironmentUniforms(QOpenGLShaderProgram& program,
     const int count = qMin(8, lights.size());
     for(int index = 0; index < count; ++index)
     {
-        CLight* light = lights.at(index);
-        const QVector3D position = light->drawPosition().isNull()
-            ? light->position() : light->drawPosition();
-        positionRange[index] = QVector4D(position, qMax(0.001f, light->range()));
-        QVector3D color = light->lightColor();
+        const ei::SScenePointLight& light = lights.at(index);
+        positionRange[index] = QVector4D(light.position, qMax(0.001f, light.range));
+        QVector3D color = light.color;
         const float maximum = qMax(color.x(), qMax(color.y(), color.z()));
         if(maximum > 1.01f)
             color /= 255.0f;
@@ -1631,7 +1627,8 @@ QString CView::captureShadowDiagnostics(QString* error)
     const float previewTime = ei::clockValueToHours(intOption("renderTimeOfDay", 1200));
     const CWorldSet* worldSet = m_environmentMob ? &m_environmentMob->worldSet() : nullptr;
     const ei::SRenderEnvironment environment = ei::renderEnvironment(
-        worldSet, overrideWorldTime, previewTime, m_caveEnvironment);
+        worldSet, overrideWorldTime, previewTime, m_caveEnvironment,
+        m_weatherRegion);
 
     QJsonObject rootObject;
     rootObject["format"] = "EIMapperEndurance.shadow-diagnostics.v3";
@@ -2504,7 +2501,8 @@ void CView::draw()
     const CWorldSet* worldSet = m_environmentMob
         ? &m_environmentMob->worldSet() : nullptr;
     const ei::SRenderEnvironment environment = ei::renderEnvironment(
-        worldSet, overrideWorldTime, previewTime, m_caveEnvironment);
+        worldSet, overrideWorldTime, previewTime, m_caveEnvironment,
+        m_weatherRegion);
     syncEnvironmentPreviewWidget(environment.timeHours);
     // Fill the open lower edge of the stock sky cylinder with the same color
     // that distant geometry converges to. This removes the editor-only black
@@ -2516,20 +2514,36 @@ void CView::draw()
         ei::gl::ClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     ei::gl::Clear(GL_COLOR_BUFFER_BIT);
 
-    QVector<CLight*> sceneLights;
+    QVector<ei::SScenePointLight> sceneLights;
     if(environmentEnabled && sceneLightsEnabled)
     {
         for(CMob* mob : m_aMob)
             for(CNode* node : mob->nodes())
+            {
+                if(node->nodeState() == ENodeState::eHidden)
+                    continue;
                 if(CLight* light = dynamic_cast<CLight*>(node))
-                    if(light->nodeState() != ENodeState::eHidden && light->range() > 0.0f
-                            && (!cullingEnabled || frustum.intersectsSphere(
-                                    light->position(), light->range())))
-                        sceneLights.append(light);
-        std::sort(sceneLights.begin(), sceneLights.end(), [&cameraPosition](CLight* left, CLight* right)
+                {
+                    const QVector3D position = light->drawPosition().isNull()
+                        ? light->position() : light->drawPosition();
+                    if(light->range() > 0.0f && (!cullingEnabled
+                            || frustum.intersectsSphere(position, light->range())))
+                        sceneLights.append({position, light->lightColor(), light->range()});
+                }
+                else if(CTorch* torch = dynamic_cast<CTorch*>(node))
+                {
+                    const float range = torch->power() * 10.0f;
+                    const QVector3D position = torch->particleWorldPosition();
+                    if(range > 0.0f && (!cullingEnabled
+                            || frustum.intersectsSphere(position, range)))
+                        sceneLights.append({position, QVector3D(0.8f, 0.8f, 0.8f), range});
+                }
+            }
+        std::sort(sceneLights.begin(), sceneLights.end(), [&cameraPosition](
+                  const ei::SScenePointLight& left, const ei::SScenePointLight& right)
         {
-            return (left->position() - cameraPosition).lengthSquared()
-                 < (right->position() - cameraPosition).lengthSquared();
+            return (left.position - cameraPosition).lengthSquared()
+                 < (right.position - cameraPosition).lengthSquared();
         });
         if(sceneLights.size() > 8)
             sceneLights.resize(8);
@@ -5229,13 +5243,16 @@ void CView::clearTestSpawnMarker()
     update();
 }
 
-void CView::setMapSkyType(const QString& skyType)
+void CView::setMapSkyType(const QString& skyType, const QString& region)
 {
     const bool cave = skyType.compare(QStringLiteral("cave"),
                                       Qt::CaseInsensitive) == 0;
-    if(m_caveEnvironment == cave)
+    const QString normalizedRegion = region.compare(QStringLiteral("ingos"),
+        Qt::CaseInsensitive) == 0 ? QStringLiteral("ingos") : QStringLiteral("gipat");
+    if(m_caveEnvironment == cave && m_weatherRegion == normalizedRegion)
         return;
     m_caveEnvironment = cave;
+    m_weatherRegion = normalizedRegion;
     m_shadowInitialized = false;
     m_staticShadowFingerprint.clear();
     m_farStaticShadowFingerprint.clear();
