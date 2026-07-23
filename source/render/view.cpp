@@ -1003,6 +1003,12 @@ void CView::initializeGL()
         ? dynamic_cast<const COptInt*>(m_pSettings->opt("renderShadowQuality")) : nullptr;
     ensureShadowFramebuffers(qBound(0,
         shadowQualityOption ? shadowQualityOption->value() : 2, 2));
+    // QOpenGLFramebufferObject construction may leave its newly-created FBO
+    // bound. Desktop QGLWidget drivers commonly repair this before paintGL,
+    // while ANGLE preserves the binding; the first scene frame would then be
+    // cleared and rendered into the last shadow atlas, leaving the viewport
+    // black. Explicitly restore Qt's context-owned presentation target.
+    QOpenGLFramebufferObject::bindDefault();
     m_shadowUpdateTimer.start();
     logOpenGlDiagnosticState(QStringLiteral("initialize/shadow-framebuffers"));
 
@@ -1766,6 +1772,10 @@ void CView::applyShadowUniforms(QOpenGLShaderProgram& program, bool enabled,
 void CView::paintGL()
 {
     makeCurrent();
+    // Treat framebuffer ownership as a frame-entry invariant. Shadow-map and
+    // diagnostic passes are allowed to bind private FBOs, but the visible
+    // scene must always begin on the widget/context default target.
+    const bool defaultFramebufferBound = QOpenGLFramebufferObject::bindDefault();
     const bool diagnoseFrame = m_openGlDiagnosticFramesRemaining > 0;
     if(diagnoseFrame)
     {
@@ -1777,6 +1787,9 @@ void CView::paintGL()
             .arg(m_pLand && m_pLand->isMprLoad()
                 ? m_pLand->filePath().fileName() : QStringLiteral("none"))
             .arg(m_aMob.size()));
+        ei::log(defaultFramebufferBound ? eLogInfo : eLogWarning,
+            QStringLiteral("OpenGL diagnostic presentation target rebound:%1")
+                .arg(defaultFramebufferBound ? 1 : 0));
         logOpenGlDiagnosticState(QStringLiteral("frame/begin"));
     }
     ei::gl::Viewport(0, 0, width(), height());

@@ -34,8 +34,6 @@ inline Proc glesProc(const char* name)
         if(proc) proc args; \
     }
 
-EI_GL_DISPATCH_VOID(Enable, (GLenum cap), (cap))
-EI_GL_DISPATCH_VOID(Disable, (GLenum cap), (cap))
 EI_GL_DISPATCH_VOID(Viewport, (GLint x, GLint y, GLsizei width, GLsizei height), (x, y, width, height))
 EI_GL_DISPATCH_VOID(Clear, (GLbitfield mask), (mask))
 EI_GL_DISPATCH_VOID(ClearColor, (GLclampf red, GLclampf green, GLclampf blue, GLclampf alpha), (red, green, blue, alpha))
@@ -56,6 +54,44 @@ EI_GL_DISPATCH_VOID(GetFloatv, (GLenum name, GLfloat* value), (name, value))
 EI_GL_DISPATCH_VOID(GetIntegerv, (GLenum name, GLint* value), (name, value))
 
 #undef EI_GL_DISPATCH_VOID
+
+inline bool unsupportedFixedFunctionCapability(GLenum cap)
+{
+    if(!usesGles())
+        return false;
+    // OpenGL ES 2 implements alpha rejection in the fragment shader and has
+    // no fixed-function framebuffer-sRGB switch. Passing either desktop-only
+    // enum to glEnable/glDisable poisons the ANGLE error state.
+    return cap == GL_ALPHA_TEST || cap == GL_FRAMEBUFFER_SRGB;
+}
+
+inline void Enable(GLenum cap)
+{
+    if(unsupportedFixedFunctionCapability(cap))
+        return;
+    if(!usesGles()) {
+        ::glEnable(cap);
+        return;
+    }
+    using Proc = void (APIENTRY*)(GLenum);
+    static Proc proc = nullptr;
+    if(!proc) proc = glesProc<Proc>("glEnable");
+    if(proc) proc(cap);
+}
+
+inline void Disable(GLenum cap)
+{
+    if(unsupportedFixedFunctionCapability(cap))
+        return;
+    if(!usesGles()) {
+        ::glDisable(cap);
+        return;
+    }
+    using Proc = void (APIENTRY*)(GLenum);
+    static Proc proc = nullptr;
+    if(!proc) proc = glesProc<Proc>("glDisable");
+    if(proc) proc(cap);
+}
 
 inline GLenum GetError()
 {
