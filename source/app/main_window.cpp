@@ -2463,7 +2463,7 @@ void MainWindow::launchCurrentMapTest()
     progress->setValue(0);
     progress->show();
     QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
-    if(m_pView->prepareMapTestInteraction())
+    if(m_pView->prepareDocumentTransition())
         statusBar()->showMessage(tr("Pending object movement was cancelled before staging the test."), 4000);
     CLandscape* landscape = CLandscape::getInstance();
     if(landscape->isDirty())
@@ -3542,7 +3542,8 @@ void MainWindow::openCollection(const QString& path)
     QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
     m_undoStack->clear();
     m_pView->unloadMob("");
-    m_pView->unloadLand();
+    // isExitAllowed() already collected the dirty-document decision.
+    m_pView->unloadLand(false);
     progress.setLabelText(tr("Loading landscape..."));
     progress.setValue(1);
     QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
@@ -3706,7 +3707,8 @@ void MainWindow::openMapPair(const QString& mprPath, const QString& mobPath,
     QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
     m_undoStack->clear();
     m_pView->unloadMob("");
-    m_pView->unloadLand();
+    // isExitAllowed() already collected the dirty-document decision.
+    m_pView->unloadLand(false);
     progress.setLabelText(tr("Loading landscape..."));
     progress.setValue(1);
     QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
@@ -4047,9 +4049,9 @@ bool MainWindow::isExitAllowed()
                 .arg(dirtyMobs.join('|'))
                 .arg(dirtyLandscape ? CLandscape::getInstance()->filePath().absoluteFilePath()
                                     : QString("none"))
-                .arg(m_pView && m_pView->cancelPendingOperation() ? "cancelled" : "none"));
+                .arg(m_pView && m_pView->prepareDocumentTransition() ? "cancelled" : "none"));
     else if(m_pView)
-        m_pView->cancelPendingOperation();
+        m_pView->prepareDocumentTransition();
     return m_pView->onExit();
 }
 
@@ -4103,7 +4105,7 @@ void MainWindow::on_actionOpen_triggered()
     }
     else if(fileName.fileName().toLower().endsWith(".mob"))
     {
-        m_pView->cancelPendingOperation();
+        m_pView->prepareDocumentTransition();
         if(loadMobWithProgress(fileName))
             rememberRecentFile(fileName);
     }
@@ -4143,7 +4145,8 @@ void MainWindow::showGameAndModSetup()
             return;
         m_undoStack->clear();
         m_pView->unloadMob("");
-        m_pView->unloadLand();
+        // isExitAllowed() already collected the dirty-document decision.
+        m_pView->unloadLand(false);
         m_openedMapZoneId.clear();
         m_currentCollectionPath.clear();
         ei::log(eLogInfo, QString("Unloaded documents before resource reinitialization profile:%1 -> %2 root:%3 -> %4")
@@ -4248,7 +4251,7 @@ bool MainWindow::openDocument(const QFileInfo& fileName)
     COptString* opt = dynamic_cast<COptString*>(m_settings->opt(eOptSetGeneral, "lastVisitedFolder"));
     if(opt)
         opt->setValue(fileName.dir().path());
-    m_pView->cancelPendingOperation();
+    m_pView->prepareDocumentTransition();
     if(suffix == "mpr")
     {
         if(!replaceLoadedLandscape(fileName))
@@ -4290,7 +4293,7 @@ bool MainWindow::replaceLoadedLandscape(const QFileInfo& fileName)
     }
 
     m_openedMapZoneId.clear();
-    m_pView->cancelPendingOperation();
+    m_pView->prepareDocumentTransition();
     m_undoStack->clear();
     if(!loadLandscapeWithProgress(fileName))
         return false;
@@ -4533,7 +4536,7 @@ void MainWindow::on_actionOpen_MOB_triggered()
     COptString* opt = dynamic_cast<COptString*>(m_settings->opt(eOptSetGeneral, "lastVisitedFolder"));
     Q_ASSERT(opt);
     const QStringList paths = QFileDialog::getOpenFileNames(this, "Open one or more MOB files", opt->value(), tr("MOB (*.mob)"));
-    m_pView->cancelPendingOperation();
+    m_pView->prepareDocumentTransition();
     for(const QString& path : paths)
     {
         QFileInfo fileName(path);

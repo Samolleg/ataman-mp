@@ -267,6 +267,7 @@ class EnduranceDocumentTests : public QObject
 
 private slots:
     void persistentPaintOperationSurvivesHistoryNavigation();
+    void persistentPaintOperationSurvivesDocumentTransition();
     void landscapeLayerChangesResetBrushSelection();
     void landscapeWheelDirectionUsesAvailableDelta();
     void unchangedMobIsByteIdentical();
@@ -349,6 +350,20 @@ void EnduranceDocumentTests::landscapeLayerChangesResetBrushSelection()
         ELandscapeEditMode::TilePaint, ELandscapeEditMode::OverlayPaint));
     QVERIFY(landscapeModeChangeRequiresBrushReset(
         ELandscapeEditMode::OverlayPaint, ELandscapeEditMode::TilePaint));
+}
+
+void EnduranceDocumentTests::persistentPaintOperationSurvivesDocumentTransition()
+{
+    QVERIFY(!operationRequiresCancellationForDocumentTransition(
+        eOperationMethodSelect));
+    QVERIFY(!operationRequiresCancellationForDocumentTransition(
+        eOperationMethodTileBrush));
+    QVERIFY(operationRequiresCancellationForDocumentTransition(
+        eOperationMethodMoveAxis));
+    QVERIFY(operationRequiresCancellationForDocumentTransition(
+        eOperationMethodRotateAxis));
+    QVERIFY(operationRequiresCancellationForDocumentTransition(
+        eOperationMethodScaleAxis));
 }
 
 void EnduranceDocumentTests::landscapeWheelDirectionUsesAvailableDelta()

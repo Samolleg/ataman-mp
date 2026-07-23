@@ -3675,7 +3675,9 @@ void CView::getColorFromRect(const QRect& rect, QVector<SColor>& aColor)
 
 void CView::changeCurrentMob(CMob *pMob)
 {
-    if(pMob != m_activeMob)
+    if(pMob != m_activeMob && m_pOp
+       && operationRequiresCancellationForDocumentTransition(
+           m_pOp->operationMethod()))
         cancelPendingOperation();
     m_activeMob = pMob;
     emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataActiveMob, nullptr == pMob ? "" : pMob->mobName());
@@ -4889,7 +4891,7 @@ bool CView::unloadMobDocument(CMob* mob, bool promptForSave)
 {
     if(!mob || !m_aMob.contains(mob))
         return false;
-    cancelPendingOperation();
+    prepareDocumentTransition();
     if(!closeMobParameterWindow(mob))
         return false;
     if(!closeMobScriptWindow(mob))
@@ -5094,7 +5096,7 @@ void CView::unloadMob(QString mobName)
     if(m_aMob.isEmpty())
         return;
 
-    cancelPendingOperation();
+    prepareDocumentTransition();
     if(mobName.isEmpty())
     {
         if(!closeAllMobParameterWindows())
@@ -7109,10 +7111,13 @@ bool CView::hasPendingOperation() const
     return m_pOp && m_pOp->operationMethod() != eOperationMethodSelect;
 }
 
-bool CView::prepareMapTestInteraction()
+bool CView::prepareDocumentTransition()
 {
     finishSculptStroke();
-    if(m_pOp && m_pOp->operationMethod() == eOperationMethodTileBrush)
+    if(!m_pOp)
+        return false;
+    const EOperationMethod method = m_pOp->operationMethod();
+    if(method == eOperationMethodTileBrush)
     {
         // Test staging is modal, but tile painting is the selected persistent
         // tool rather than a pending object transform. End the current stroke
@@ -7126,7 +7131,8 @@ bool CView::prepareMapTestInteraction()
         update();
         return false;
     }
-    return cancelPendingOperation();
+    return operationRequiresCancellationForDocumentTransition(method)
+        ? cancelPendingOperation() : false;
 }
 
 bool CView::prepareUndo()
@@ -8302,7 +8308,7 @@ void CView::loadSession()
         ei::log(eLogWarning, "Cannot find MPR file: " + mprFile.absoluteFilePath());
         return;
     }
-    cancelPendingOperation();
+    prepareDocumentTransition();
     m_pUndoStack->clear();
     loadLandscape(mprFile);
 
