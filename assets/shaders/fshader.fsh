@@ -201,7 +201,7 @@ void main(void)
     // Highlithing
     if (u_highlight == true)
     {
-      float highlightIntensity = 0.6f;
+      float highlightIntensity = 0.6;
       vec4 highlightColor = u_highlightColor;
       highlightColor *= highlightIntensity;
       resColor += highlightColor;
