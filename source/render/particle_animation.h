@@ -22,6 +22,29 @@ constexpr float kEarlyScale = 0.8500000238418579f;
 constexpr float kLateScale = 1.059999942779541f;
 constexpr float kLateMotion = 0.15000000596046448f;
 
+struct TendriParameters
+{
+    QVector3D lowerSpawnBound;
+    QVector3D upperSpawnBound;
+    float initialScale;
+    float verticalVelocity;
+    float displacementThreshold;
+    float smallParticleExpansion;
+};
+
+inline TendriParameters parametersForScale(float authoredScale)
+{
+    const float initialScale = 0.800000011920929f * authoredScale;
+    return {QVector3D(-0.20000000298023224f * authoredScale,
+                      -0.20000000298023224f * authoredScale, 0.0f),
+            QVector3D(0.20000000298023224f * authoredScale,
+                      0.20000000298023224f * authoredScale, 0.0f),
+            initialScale,
+            0.30000001192092896f * authoredScale,
+            1000.0f * authoredScale,
+            initialScale * 0.30000001192092896f};
+}
+
 enum class Family
 {
     FireAndSmoke,
@@ -289,22 +312,26 @@ private:
 
     void spawn(const QVector3D& origin, float authoredScale)
     {
+        const TendriParameters parameters = parametersForScale(authoredScale);
         TendriParticle particle;
         particle.frame = familyForKind(m_kind) == Family::SmokeOnly ? 8 : 0;
         particle.previousFrame = particle.frame;
-        particle.scale = authoredScale;
+        particle.scale = parameters.initialScale;
+        particle.verticalVelocity = parameters.verticalVelocity;
         float expansion = 0.0f;
         if((m_rng.next() % 100u) + 1u <= 40u)
         {
             particle.scale *= 0.5f;
-            expansion = authoredScale * 0.30000001192092896f;
+            expansion = parameters.smallParticleExpansion;
         }
-        const float minOffset = -0.2f - expansion;
-        const float maxOffset = 0.2f + expansion;
-        particle.drift.setX((minOffset + (maxOffset - minOffset) * m_rng.unit()) * 0.5f);
-        particle.drift.setY((minOffset + (maxOffset - minOffset) * m_rng.unit()) * 0.5f);
+        const float minX = parameters.lowerSpawnBound.x() - expansion;
+        const float maxX = parameters.upperSpawnBound.x() + expansion;
+        const float minY = parameters.lowerSpawnBound.y() - expansion;
+        const float maxY = parameters.upperSpawnBound.y() + expansion;
+        particle.drift.setX((minX + (maxX - minX) * m_rng.unit()) * 0.5f);
+        particle.drift.setY((minY + (maxY - minY) * m_rng.unit()) * 0.5f);
         particle.position = origin + particle.drift;
-        particle.position.setZ(origin.z() + 0.30000001192092896f * m_rng.unit());
+        particle.position.setZ(origin.z() + parameters.verticalVelocity * m_rng.unit());
         particle.previousPosition = particle.position;
         particle.previousScale = particle.scale;
         m_particles.append(particle);

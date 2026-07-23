@@ -29,6 +29,16 @@ class ParticleBinaryReportTests(unittest.TestCase):
             fixture["sites"]["global_render_lookup_type_0x2001"]["bytes"][18:26],
             "01200000",
         )
+        self.assertEqual(
+            fixture["ranges"]["particle_scale_mutator"]["sha256"],
+            "D0328F6AB7F419CB2A8F63BF9632A1BCADFAFF9398EB70F8E59A96A3E0953E24",
+        )
+        scale_mutator = fixture["sites"]["scale_mutator_all_fields"]["bytes"]
+        for field in ("F0000000", "F4000000", "F8000000", "FC000000",
+                      "00010000", "04010000", "0C010000", "28010000",
+                      "10010000", "D4000000"):
+            self.assertIn("D889" + field, scale_mutator)
+            self.assertIn("D999" + field, scale_mutator)
         self.assertIn(
             "C74658FFFFFFFF",
             fixture["sites"]["spawn_initial_color_white"]["bytes"],

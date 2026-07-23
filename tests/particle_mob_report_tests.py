@@ -85,6 +85,36 @@ class ParticleMobReportTests(unittest.TestCase):
         )
         self.assertEqual(world_fields["WS_WIND_STR"], 0.20000000298023224)
 
+    def test_zone18_torch_1182_is_strength_one_control(self):
+        fixture_path = Path(__file__).parent / "fixtures" / "particle_runtime" / "zone18-torch-1182.json"
+        fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+        self.assertEqual(
+            fixture["source"]["sha256"],
+            "0B3E1115FEA2C892B597D969AC8AB60965F88D9083398AF09C0E84581F279A90",
+        )
+        self.assertEqual(fixture["counts"], {"particle": 17, "torch": 1})
+        self.assertEqual(fixture["selection"], [1182])
+        torch = fixture["records"][0]
+        self.assertEqual(
+            torch["sha256"],
+            "8EB2E0F6B5E57BABD48BB57C354CE4DA7376D9DB1BBC3B00AECBBAD36F19BBD2",
+        )
+        fields = MODULE.field_map(torch)
+        self.assertEqual(fields["TORCH_STRENGHT"], 1.0)
+        self.assertEqual(fields["TORCH_PTLINK"], [0.0, 0.0, 1.0])
+        self.assertEqual(fields["TORCH_SOUND"], "nature\\fire\\small.wav")
+        world = fixture["world_settings"][0]
+        self.assertEqual(
+            world["sha256"],
+            "1101AA43304CBAAF3974E785F11A42FED6E1FB92997D488DE80816781D49D625",
+        )
+        world_fields = MODULE.field_map(world)
+        self.assertEqual(
+            world_fields["WS_WIND_DIR"],
+            [-0.8320502638816833, 0.5547001957893372, 0.0],
+        )
+        self.assertEqual(world_fields["WS_WIND_STR"], 0.800000011920929)
+
 
 if __name__ == "__main__":
     unittest.main()

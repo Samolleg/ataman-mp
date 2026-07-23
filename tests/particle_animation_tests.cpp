@@ -9,6 +9,7 @@ class ParticleAnimationTests : public QObject
 private slots:
     void atlasUsesNativeTopRowFirstInsets();
     void isaacPreviewStreamIsDeterministic();
+    void authoredStrengthScalesEveryNativeMutatorField();
     void schedulerUsesAttemptsRatherThanSlots();
     void prewarmedEmittersAreDeterministicAndBounded();
     void fireOnlyNeverReachesSmokeFrames();
@@ -47,6 +48,25 @@ void ParticleAnimationTests::isaacPreviewStreamIsDeterministic()
         differs = differs || value != different.next();
     }
     QVERIFY(differs);
+}
+
+void ParticleAnimationTests::authoredStrengthScalesEveryNativeMutatorField()
+{
+    const auto full = ei::particle::parametersForScale(1.0f);
+    QCOMPARE(full.lowerSpawnBound, QVector3D(-0.2f, -0.2f, 0.0f));
+    QCOMPARE(full.upperSpawnBound, QVector3D(0.2f, 0.2f, 0.0f));
+    QCOMPARE(full.initialScale, 0.8f);
+    QCOMPARE(full.verticalVelocity, 0.3f);
+    QCOMPARE(full.displacementThreshold, 1000.0f);
+    QCOMPARE(full.smallParticleExpansion, 0.24f);
+
+    const auto campfire = ei::particle::parametersForScale(0.4f);
+    QCOMPARE(campfire.lowerSpawnBound, QVector3D(-0.08f, -0.08f, 0.0f));
+    QCOMPARE(campfire.upperSpawnBound, QVector3D(0.08f, 0.08f, 0.0f));
+    QCOMPARE(campfire.initialScale, 0.32f);
+    QCOMPARE(campfire.verticalVelocity, 0.12f);
+    QCOMPARE(campfire.displacementThreshold, 400.0f);
+    QCOMPARE(campfire.smallParticleExpansion, 0.096f);
 }
 
 void ParticleAnimationTests::schedulerUsesAttemptsRatherThanSlots()

@@ -15,6 +15,7 @@ from typing import Any
 REFERENCE_SHA256 = "BE0FC330035E03983CCE590038CC7F881F1F5D1BCF082717F31776DD4DEE94E2"
 RANGES = {
     "global_render_particle_lookup": (0x40EB60, 0x40ECA5),
+    "particle_scale_mutator": (0x485480, 0x485523),
     "atlas_rectangle_builder": (0x4885B4, 0x488790),
     "tendri_factory_branch": (0x485B72, 0x485D58),
     "spawn_callback": (0x48E9E0, 0x48EC20),
@@ -40,6 +41,7 @@ RANGES = {
 }
 SITES = {
     "global_render_lookup_type_0x2001": (0x40EBD8, 18),
+    "scale_mutator_all_fields": (0x485480, 0xA3),
     "global_render_lookup_call": (0x4575AC, 26),
     "spawn_initial_color_white": (0x48E9EC, 21),
     "tendri_callback_selection": (0x485C28, 37),

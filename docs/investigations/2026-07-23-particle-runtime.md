@@ -112,6 +112,33 @@ class-specific evidence, rather than the rejected global lookup
 interpretation, establishes that a torch's core fire, peripheral flame, and
 smoke atlas stages are one emitter population.
 
+### Fingerprinted zone18 strength control
+
+The visually closer torch NID 1182 supplies a controlled authored-data case,
+not a rule inferred from its appearance. Its read-only source
+`D:\Evil Islands\Starter\MODS\JamaisVu135\Maps\zone18.mob` is 4,498,380
+bytes with SHA-256
+`0B3E1115FEA2C892B597D969AC8AB60965F88D9083398AF09C0E84581F279A90`.
+The complete fixture is emitted by `scripts/particle_mob_report.py` and stored
+as `tests/fixtures/particle_runtime/zone18-torch-1182.json`.
+
+Torch NID 1182 is at offset 2,004,158, is 308 bytes, and has record SHA-256
+`8EB2E0F6B5E57BABD48BB57C354CE4DA7376D9DB1BBC3B00AECBBAD36F19BBD2`.
+Its decoded fields include template `stto5`, primary texture `campfire00`,
+attachment `(0, 0, 1)`, strength `1.0`, sound
+`nature\fire\small.wav`, and position
+`(131.2783660888672, 245.04629516601562, -0.03333371877670288)`. The same
+MOB's world settings have record SHA-256
+`1101AA43304CBAAF3974E785F11A42FED6E1FB92997D488DE80816781D49D625`,
+wind direction `(-0.8320502638816833, 0.5547001957893372, 0)`, and wind
+strength `0.800000011920929`.
+
+This provides an exact contrast with gz1g NID 1365, whose authored strength is
+binary32 `0.4000000059604645`. Both reach the same hardcoded Campfire factory
+and the same scale mutator. Consequently the difference is not an
+emitter-family or scheduler choice: every field multiplied by the scale
+mutator must use the respective authored strength.
+
 ### Fingerprinted `gz10g` lava records
 
 The read-only `zone10.mob` is 568,201 bytes with SHA-256
@@ -194,10 +221,25 @@ The fingerprinted `gz1g` `zone1.mob` record contains direction
 current world wind direction in `+0x140..+0x148` and current wind strength in
 `+0x14C` every logical quant.
 
-The scale mutator at
-`0x485480` multiplies `+0x128` along with the spawn bounds, initial scale,
-vertical velocity, and displacement threshold. Field `+0x150 = 0` makes the
-Campfire family select render state 5/value 6, not the value-2 path used when
+The complete scale mutator at `0x485480..0x485523` multiplies all six spawn
+bound components `+0xF0..+0x104`, initial scale `+0x10C`, field `+0x128`,
+vertical velocity `+0x110`, and displacement threshold `+0xD4` by its single
+float argument. Applied to the TendriSmoke defaults, authored strength `s`
+therefore produces bounds `(-0.2s, -0.2s, 0)` through
+`(+0.2s, +0.2s, 0)`, initial scale `0.8s`, vertical velocity `0.3s`, and
+displacement threshold `1000s`. The spawn callback's 40% branch uses the
+already-scaled initial scale times `0.3`, so its extra bound expansion is
+`0.24s`.
+
+The previous editor implementation that used authored strength directly as
+initial particle scale while leaving bounds at `+/-0.2`, vertical velocity at
+`0.3`, and the branch expansion at `0.3s` is rejected. For gz1g strength
+`0.4`, that made emission width and rise speed 2.5 times their native values
+and initial scale `0.4` instead of `0.32`; strength-1 zone18 happened to mask
+the first two errors by matching the constructor defaults.
+
+Field `+0x150 = 0` makes the Campfire family select render state 5/value 6,
+not the value-2 path used when
 `+0x150 = 1`. Direct surrounding device calls at `0x56A1CD..0x56A1F1` set
 Direct3D render state 19/source blend to 5/`SRCALPHA` and state 20/destination
 blend to 6/`INVSRCALPHA`. The internal state-5 switch changes that destination
