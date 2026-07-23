@@ -160,6 +160,7 @@ public:
     void operationRevert(EOperationAxisType operationType);
     void operationApply(EOperationAxisType operationType);
     bool cancelPendingOperation();
+    bool prepareMapTestInteraction();
     bool prepareHistoryNavigation();
     bool hasPendingOperation() const;
     bool prepareUndo();

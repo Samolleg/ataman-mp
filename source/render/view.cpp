@@ -3274,7 +3274,7 @@ void CView::unloadLand(bool promptForSave)
     if(promptForSave && m_pLand->isDirty())
     {
         QMessageBox::StandardButton reply;
-        reply = QMessageBox::question(this, "Unload MPR", m_pLand->filePath().baseName() + " has unsaved changes.\nDo you want to save changes?", QMessageBox::Save|QMessageBox::No|QMessageBox::Cancel);
+        reply = QMessageBox::question(this, "Unload MPR", m_pLand->filePath().fileName() + " has unsaved changes.\nDo you want to save changes?", QMessageBox::Save|QMessageBox::No|QMessageBox::Cancel);
         if(reply == QMessageBox::Save)
         {
             if(!saveLandscapeDocument(m_pLand->filePath()))
@@ -5955,7 +5955,7 @@ bool CView::onExit()
     if(m_pLand && m_pLand->isDirty())
     {
         QMessageBox::StandardButton reply;
-        reply = QMessageBox::question(this, "Exit", m_pLand->filePath().baseName() + " has unsaved changes.\nDo you want to save changes?", QMessageBox::Save|QMessageBox::No|QMessageBox::Cancel);
+        reply = QMessageBox::question(this, "Exit", m_pLand->filePath().fileName() + " has unsaved changes.\nDo you want to save changes?", QMessageBox::Save|QMessageBox::No|QMessageBox::Cancel);
         if(reply == QMessageBox::Save)
         {
             if(!saveLandscapeDocument(m_pLand->filePath()))
@@ -6854,14 +6854,17 @@ void CView::anchorCameraRotationToViewportCenter()
 void CView::wheelEvent(QWheelEvent* event)
 {
     const bool landscapeModifier = event->modifiers()
-        & (Qt::AltModifier | Qt::ControlModifier);
+        & (Qt::AltModifier | Qt::ShiftModifier);
     if(m_landscapeTools && m_landscapeTools->editingEnabled()
        && landscapeModifier)
     {
         if(m_landscapeTools->sculptEnabled())
         {
-            const int step = event->angleDelta().y() > 0 ? 1 : -1;
-            if(event->modifiers() & Qt::ControlModifier)
+            const int step = landscapeWheelStep(event->angleDelta().y(),
+                                                event->delta(), event->pixelDelta().y());
+            if(step == 0)
+                return;
+            if(event->modifiers() & Qt::ShiftModifier)
             {
                 m_landscapeTools->adjustSculptStrength(step);
                 emit updateMsg(tr("Sculpt strength: %1").arg(
@@ -7104,6 +7107,26 @@ bool CView::cancelPendingOperation()
 bool CView::hasPendingOperation() const
 {
     return m_pOp && m_pOp->operationMethod() != eOperationMethodSelect;
+}
+
+bool CView::prepareMapTestInteraction()
+{
+    finishSculptStroke();
+    if(m_pOp && m_pOp->operationMethod() == eOperationMethodTileBrush)
+    {
+        // Test staging is modal, but tile painting is the selected persistent
+        // tool rather than a pending object transform. End the current stroke
+        // and clear transient feedback without switching the operation to
+        // Select; the next viewport move/click can immediately paint again.
+        endTileBrushGroup();
+        setPreviewTile(false);
+        m_terrainPaintOutlineValid = false;
+        m_sculptOutlineValid = false;
+        unsetCursor();
+        update();
+        return false;
+    }
+    return cancelPendingOperation();
 }
 
 bool CView::prepareUndo()

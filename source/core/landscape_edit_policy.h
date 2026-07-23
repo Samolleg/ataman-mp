@@ -14,5 +14,14 @@ inline bool landscapeModeChangeRequiresBrushReset(
     return previous != current;
 }
 
-#endif // LANDSCAPE_EDIT_POLICY_H
+inline int landscapeWheelStep(int angleDeltaY, int legacyDelta, int pixelDeltaY)
+{
+    // Some Windows wheel devices report only the legacy delta while precision
+    // devices may report angle or pixel deltas. A zero angle delta must not be
+    // mistaken for a downward step.
+    const int delta = angleDeltaY != 0 ? angleDeltaY
+        : (legacyDelta != 0 ? legacyDelta : pixelDeltaY);
+    return delta > 0 ? 1 : (delta < 0 ? -1 : 0);
+}
 
+#endif // LANDSCAPE_EDIT_POLICY_H

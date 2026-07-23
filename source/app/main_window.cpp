@@ -2463,7 +2463,7 @@ void MainWindow::launchCurrentMapTest()
     progress->setValue(0);
     progress->show();
     QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
-    if(m_pView->cancelPendingOperation())
+    if(m_pView->prepareMapTestInteraction())
         statusBar()->showMessage(tr("Pending object movement was cancelled before staging the test."), 4000);
     CLandscape* landscape = CLandscape::getInstance();
     if(landscape->isDirty())

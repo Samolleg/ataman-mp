@@ -3,6 +3,7 @@
 #include <cmath>
 
 #include "operationmanager.h"
+#include "landscape_edit_policy.h"
 #include "node.h"
 #include "view.h"
 #include "landscape.h"
@@ -1039,7 +1040,7 @@ CTileBrush::CTileBrush(CView* pView)
     :CState(pView)
 {
     qDebug()<< "CTileBrush init ";
-    CStatusConnector::getInstance()->updateStatus("brush.ico", "Esc-Cancel, LMB-paint, RMB-pick tile, Alt+Wheel-size/rotate, Wheel-camera. Choose Land/Overlay in Landscape Tools; M/J toggle visibility.");
+    CStatusConnector::getInstance()->updateStatus("brush.ico", "Esc-Cancel, LMB-paint, RMB-pick tile, Alt+Wheel-size, Shift+Wheel-material/rotate, Wheel-camera. Choose Land/Overlay in Landscape Tools; M/J toggle visibility.");
     CButtonConnector::getInstance()->pressButton(EButtonOpTilebrush);
     m_pView->showOutliner(false);
 }
@@ -1192,8 +1193,11 @@ void CTileBrush::mouseMoveEvent(COperation* pOp, QMouseEvent* pEvent)
 
 void CTileBrush::wheelEvent(COperation* pOp, QWheelEvent* pEvent)
 {
-    const int step = pEvent->delta() > 0 ? 1 : -1;
-    if(pEvent->modifiers() & Qt::ControlModifier)
+    const int step = landscapeWheelStep(pEvent->angleDelta().y(),
+                                        pEvent->delta(), pEvent->pixelDelta().y());
+    if(step == 0)
+        return;
+    if(pEvent->modifiers() & Qt::ShiftModifier)
     {
         if(m_pView->manualTilePaintingEnabled())
         {
@@ -1201,13 +1205,13 @@ void CTileBrush::wheelEvent(COperation* pOp, QWheelEvent* pEvent)
             const bool bLand = CScene::getInstance()->isLandTileEditMode();
             m_pView->updatePreviewTile(m_pView->getTerrainPos(bLand), bLand);
             CStatusConnector::getInstance()->updateStatus(
-                "brush.ico", "Manual atlas tile rotation changed. Ctrl+Wheel rotates; Alt+Wheel resizes; Wheel controls the camera.");
+                "brush.ico", "Manual atlas tile rotation changed. Shift+Wheel rotates; Alt+Wheel resizes; Wheel controls the camera.");
         }
         else
         {
             m_pView->adjustTerrainPaintMaterial(step);
             CStatusConnector::getInstance()->updateStatus(
-                "brush.ico", "Automatic terrain material changed. Ctrl+Wheel selects material; Alt+Wheel resizes; Wheel controls the camera.");
+                "brush.ico", "Automatic terrain material changed. Shift+Wheel selects material; Alt+Wheel resizes; Wheel controls the camera.");
         }
         pEvent->accept();
         return;
@@ -1216,7 +1220,7 @@ void CTileBrush::wheelEvent(COperation* pOp, QWheelEvent* pEvent)
     {
         m_pView->adjustTerrainPaintSize(step);
         CStatusConnector::getInstance()->updateStatus(
-            "brush.ico", "Terrain brush size changed. Alt+Wheel resizes; Ctrl+Wheel changes material or manual rotation; Wheel controls the camera.");
+            "brush.ico", "Terrain brush size changed. Alt+Wheel resizes; Shift+Wheel changes material or manual rotation; Wheel controls the camera.");
         pEvent->accept();
         return;
     }
