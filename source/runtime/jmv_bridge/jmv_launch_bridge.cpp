@@ -2155,9 +2155,20 @@ bool InstallPlayerDefaultsResetDetour()
 
 bool InstallMapLoadDetour()
 {
-    g_gameModule = GetModuleHandleW(nullptr);
+    // JMV activation runs after the host has resumed Starter long enough for
+    // its executable patch phase to settle, then temporarily suspends the
+    // game's main thread while the byte-guarded detours are installed. Do not
+    // call loader APIs here: the suspended thread can still own the Windows
+    // loader lock even though executable bytes have stopped changing. The
+    // first preparation call runs before process resume and caches this handle
+    // while loader ownership is deterministic.
+    if(!g_gameModule)
+    {
+        Log(L"DIRECT_LAUNCH disabled: prepared game module is unavailable");
+        return false;
+    }
     auto* game = reinterpret_cast<unsigned char*>(g_gameModule);
-    if(!game || !ReadDirectLaunchPaths())
+    if(!ReadDirectLaunchPaths())
         return false;
     if(std::memcmp(game + kStartZoneTransitionRva, kStartZoneTransitionBytes,
                    sizeof(kStartZoneTransitionBytes)) != 0 ||
@@ -2276,6 +2287,12 @@ bool PrepareRuntime()
 {
     if(InterlockedCompareExchange(&g_prepared, 1, 0) != 0)
         return true;
+    g_gameModule = GetModuleHandleW(nullptr);
+    if(!g_gameModule)
+    {
+        Log(L"DIRECT_LAUNCH disabled: could not cache the game module during preparation");
+        return false;
+    }
     GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_BRIDGE_RESULT", g_resultPath,
                             DWORD(sizeof(g_resultPath) / sizeof(g_resultPath[0])));
     if(!g_resultPath[0])
@@ -2370,7 +2387,11 @@ bool ActivateRuntime()
         return true;
     if(g_runtimeBuild == RuntimeBuild::BaseEi && g_baseProbeLevel == 1)
         return true;
+    Log(L"RUNTIME_ACTIVATION phase=install-map-detours begin module=cached");
     const bool directLaunch = InstallMapLoadDetour();
+    Log(directLaunch
+        ? L"RUNTIME_ACTIVATION phase=install-map-detours complete result=ready"
+        : L"RUNTIME_ACTIVATION phase=install-map-detours complete result=failed");
     if(g_runtimeBuild == RuntimeBuild::BaseEi && g_baseProbeLevel == 2 && directLaunch)
     {
         // Keep the byte-guarded detours installed, but use a state which can

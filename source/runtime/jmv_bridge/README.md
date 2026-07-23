@@ -64,10 +64,14 @@ Game click. The previously tested internal `server` handler remains absent
 because runtime evidence showed it enters an incomplete multiplayer/server
 transition instead.
 
-The legacy Starter callback exports remain for binary compatibility, but the
-owned runtime host calls `EnduranceInitialize` directly. Initialization
-failures are written to `runtime-host.log`; the suspended game is terminated
-without being resumed.
+The legacy Starter callback exports remain for binary compatibility. The owned
+runtime host prepares the bridge before process resume, caches the main module
+at that loader-safe point, then activates byte-guarded map detours only after
+the JMV executable patch phase becomes quiescent. Post-patch activation must
+not call module-loader APIs while the main thread is suspended: that thread may
+still own the Windows loader lock even after executable bytes stop changing.
+Each bridge-export phase and timeout is written to `runtime-host.log`; a failed
+activation terminates only the Endurance-owned game process.
 
 The complete user-facing dependency contract, including the conditional
 `AutoRunSpellAddon123.mob` requirement for Play from Here, Godmode, and explicit

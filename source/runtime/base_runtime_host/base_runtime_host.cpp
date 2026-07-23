@@ -72,6 +72,10 @@ bool invokeBridgeExport(HANDLE process, DWORD remoteModule,
                         const wchar_t* bridgePath, const char* exportName,
                         const wchar_t* logPath)
 {
+    wchar_t phaseMessage[256]{};
+    _snwprintf_s(phaseMessage, sizeof(phaseMessage) / sizeof(phaseMessage[0]),
+                 _TRUNCATE, L"RUNTIME_HOST invoking bridge export %S", exportName);
+    writeText(logPath, phaseMessage);
     HMODULE localModule = LoadLibraryExW(bridgePath, nullptr,
                                          DONT_RESOLVE_DLL_REFERENCES);
     FARPROC localExport = localModule ? GetProcAddress(localModule, exportName) : nullptr;
@@ -88,10 +92,30 @@ bool invokeBridgeExport(HANDLE process, DWORD remoteModule,
         uintptr_t(remoteModule) + exportRva);
     HANDLE initThread = CreateRemoteThread(process, nullptr, 0, remoteExport,
                                            nullptr, 0, nullptr);
-    if(!initThread || WaitForSingleObject(initThread, 15000) != WAIT_OBJECT_0)
+    if(!initThread)
     {
-        writeText(logPath, L"RUNTIME_HOST bridge initialization call failed");
-        if(initThread) CloseHandle(initThread);
+        const DWORD error = GetLastError();
+        _snwprintf_s(phaseMessage, sizeof(phaseMessage) / sizeof(phaseMessage[0]),
+                     _TRUNCATE,
+                     L"RUNTIME_HOST could not create bridge export thread %S error=%lu",
+                     exportName, static_cast<unsigned long>(error));
+        writeText(logPath, phaseMessage);
+        return false;
+    }
+    const DWORD started = GetTickCount();
+    const DWORD waitResult = WaitForSingleObject(initThread, 15000);
+    if(waitResult != WAIT_OBJECT_0)
+    {
+        const DWORD elapsed = GetTickCount() - started;
+        const DWORD error = waitResult == WAIT_FAILED ? GetLastError() : ERROR_SUCCESS;
+        _snwprintf_s(phaseMessage, sizeof(phaseMessage) / sizeof(phaseMessage[0]),
+                     _TRUNCATE,
+                     L"RUNTIME_HOST bridge export %S did not complete wait=0x%08lX elapsed_ms=%lu error=%lu",
+                     exportName, static_cast<unsigned long>(waitResult),
+                     static_cast<unsigned long>(elapsed),
+                     static_cast<unsigned long>(error));
+        writeText(logPath, phaseMessage);
+        CloseHandle(initThread);
         return false;
     }
     DWORD initialized = 0;
@@ -99,9 +123,17 @@ bool invokeBridgeExport(HANDLE process, DWORD remoteModule,
     CloseHandle(initThread);
     if(initialized != 1)
     {
-        writeText(logPath, L"RUNTIME_HOST bridge rejected the runtime fingerprint or hook signatures");
+        _snwprintf_s(phaseMessage, sizeof(phaseMessage) / sizeof(phaseMessage[0]),
+                     _TRUNCATE,
+                     L"RUNTIME_HOST bridge export %S rejected the runtime fingerprint or hook signatures result=%lu",
+                     exportName, static_cast<unsigned long>(initialized));
+        writeText(logPath, phaseMessage);
         return false;
     }
+    _snwprintf_s(phaseMessage, sizeof(phaseMessage) / sizeof(phaseMessage[0]),
+                 _TRUNCATE, L"RUNTIME_HOST bridge export %S completed result=1",
+                 exportName);
+    writeText(logPath, phaseMessage);
     return true;
 }
 
