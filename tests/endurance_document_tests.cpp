@@ -301,6 +301,7 @@ private slots:
     void mprSectorPatchIsProvenanceCheckedAndLocal();
     void mprLengthChangingAndStaleTransactionsFailClosed();
     void failedStagedMprSaveLeavesNoDestination();
+    void stagedMprTransactionProvesExactSemanticScopeWithoutDestination();
     void unchangedExistingFileComparisonIsReadOnly();
     void canonicalTerrainSeamsAreEditedAndUndoneTogether();
     void terrainBrushToolsAreDeterministicAndFailClosed();
@@ -308,6 +309,7 @@ private slots:
     void terrainDiagnosticsArePreApplyAndPolicyExplicit();
     void terrainTilePaintingIsUndoableLocalizedAndNamespaceSafe();
     void terrainTileStrokeCompositionKeepsFirstAndFinalValues();
+    void terrainHeightStrokeCompositionKeepsFirstAndFinalValues();
     void zone1NamespaceTemplateSeparatesLandOverlayAndVariants();
     void zone1NamespaceTemplateMatchesPrivateFixture();
     void terrainHeightTransactionReopensAndPreservesOverlay();
@@ -1223,6 +1225,48 @@ void EnduranceDocumentTests::failedStagedMprSaveLeavesNoDestination()
     const QFileInfo destination(dir.filePath("missing/subdirectory/test.mpr"));
     const SStagedSaveValidation result = validateStagedSave(syntheticMpr(), destination);
     QVERIFY(!result.success);
+    QVERIFY(!destination.exists());
+}
+
+void EnduranceDocumentTests::stagedMprTransactionProvesExactSemanticScopeWithoutDestination()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QFileInfo destination(dir.filePath("changed.mpr"));
+
+    CMprDocument baseline;
+    CValidationReport loadReport;
+    QVERIFY2(baseline.loadBytes(syntheticMpr(), "staged-baseline.mpr", &loadReport),
+             qPrintable(loadReport.toText()));
+    const SMprArchiveMember sector = baseline.members().at(2);
+    QByteArray replacement = sector.payload;
+    replacement[replacement.size() - 1] = char(replacement.back() ^ 0x01);
+    CMprEditTransaction transaction("change one synthetic SEC byte");
+    transaction.replaceMemberPayload(sector.name, sector.sha256, replacement);
+
+    const SStagedMprTransactionValidation result =
+        validateStagedMprTransaction(baseline, transaction, destination);
+    QVERIFY2(result.success, qPrintable(result.error));
+    QVERIFY(!result.candidateBytes.isEmpty());
+    QCOMPARE(result.size, qint64(baseline.originalBytes().size()));
+    QCOMPARE(result.changedMembers, QStringList() << sector.name);
+    QVERIFY(result.semanticDiff.contains(sector.name));
+    QVERIFY(!destination.exists());
+    QCOMPARE(QDir(dir.path()).entryList(QDir::Files).size(), 0);
+
+    CMprDocument reopened;
+    CValidationReport reopenReport;
+    QVERIFY2(reopened.loadBytes(result.candidateBytes, "reopened-stage.mpr", &reopenReport),
+             qPrintable(reopenReport.toText()));
+    QCOMPARE(reopened.memberPayload("unknown.bin"), baseline.memberPayload("unknown.bin"));
+    QCOMPARE(reopened.memberPayload(sector.name), replacement);
+
+    CMprEditTransaction stale("stale staged edit");
+    stale.replaceMemberPayload(sector.name, QByteArray(64, '0'), replacement);
+    const SStagedMprTransactionValidation refused =
+        validateStagedMprTransaction(baseline, stale, destination);
+    QVERIFY(!refused.success);
+    QVERIFY(refused.candidateBytes.isEmpty());
     QVERIFY(!destination.exists());
 }
 
@@ -2269,6 +2313,42 @@ void EnduranceDocumentTests::terrainTileStrokeCompositionKeepsFirstAndFinalValue
     QCOMPARE(stroke.deltas.at(1).layer, ETerrainTileLayer::Overlay);
     QCOMPARE(stroke.deltas.at(1).before, quint16(30));
     QCOMPARE(stroke.deltas.at(1).after, quint16(31));
+}
+
+void EnduranceDocumentTests::terrainHeightStrokeCompositionKeepsFirstAndFinalValues()
+{
+    const auto delta = [](int x, int y, quint16 before, quint16 after,
+                          bool clamped = false) {
+        STerrainHeightDelta value;
+        value.globalX = x;
+        value.globalY = y;
+        value.before = before;
+        value.after = after;
+        value.clamped = clamped;
+        return value;
+    };
+    STerrainHeightCommand stroke;
+    STerrainHeightCommand first;
+    first.deltas << delta(4, 5, 100, 110)
+                 << delta(8, 9, 200, 210);
+    STerrainHeightCommand second;
+    second.deltas << delta(4, 5, 110, 120, true)
+                  << delta(8, 9, 210, 200)
+                  << delta(12, 13, 300, 310);
+
+    appendTerrainHeightCommand(&stroke, first);
+    appendTerrainHeightCommand(&stroke, second);
+
+    QCOMPARE(stroke.deltas.size(), 2);
+    QCOMPARE(stroke.deltas.at(0).globalX, 4);
+    QCOMPARE(stroke.deltas.at(0).globalY, 5);
+    QCOMPARE(stroke.deltas.at(0).before, quint16(100));
+    QCOMPARE(stroke.deltas.at(0).after, quint16(120));
+    QVERIFY(stroke.deltas.at(0).clamped);
+    QCOMPARE(stroke.deltas.at(1).globalX, 12);
+    QCOMPARE(stroke.deltas.at(1).globalY, 13);
+    QCOMPARE(stroke.deltas.at(1).before, quint16(300));
+    QCOMPARE(stroke.deltas.at(1).after, quint16(310));
 }
 
 void EnduranceDocumentTests::zone1NamespaceTemplateMatchesPrivateFixture()

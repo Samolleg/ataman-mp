@@ -343,6 +343,7 @@ private:
     bool m_sculptOutlineValid{false};
     QVector3D m_sculptOutlineCenter;
     bool m_sculptStrokeActive;
+    STerrainHeightCommand m_sculptStrokeCommand;
     QVector3D m_lastSculptPoint;
     QVector3D m_lastSculptStampPoint;
     bool m_sculptStrokeChanged{false};

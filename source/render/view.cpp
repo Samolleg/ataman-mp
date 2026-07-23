@@ -92,16 +92,26 @@ QJsonObject packedTerrainTileJson(quint16 packed)
 class CTerrainHeightPreviewCommand : public QUndoCommand
 {
 public:
-    CTerrainHeightPreviewCommand(CView* view, const STerrainHeightCommand& command)
-        : m_view(view), m_command(command)
+    CTerrainHeightPreviewCommand(CView* view, const STerrainHeightCommand& command,
+                                 bool alreadyApplied = false)
+        : m_view(view), m_command(command), m_skipInitialRedo(alreadyApplied)
     {
         setText(command.description);
     }
     void undo() override { m_view->applyTerrainHeightPreview(m_command, false); }
-    void redo() override { m_view->applyTerrainHeightPreview(m_command, true); }
+    void redo() override
+    {
+        if(m_skipInitialRedo)
+        {
+            m_skipInitialRedo = false;
+            return;
+        }
+        m_view->applyTerrainHeightPreview(m_command, true);
+    }
 private:
     CView* m_view;
     STerrainHeightCommand m_command;
+    bool m_skipInitialRedo{false};
 };
 
 class CTerrainTilePreviewCommand : public QUndoCommand
@@ -3430,7 +3440,8 @@ void CView::mousePressEvent(QMouseEvent* event)
         m_sculptStrokeChanged = false;
         m_sculptStrokeStamps = 0;
         m_sculptStrokeVertices = 0;
-        m_pUndoStack->beginMacro(tr("Sculpt terrain"));
+        m_sculptStrokeCommand = STerrainHeightCommand();
+        m_sculptStrokeCommand.description = tr("Sculpt terrain");
         sculptTerrainAt(m_lastSculptPoint);
         m_sculptRepeatTimer->start();
         event->accept();
@@ -3474,6 +3485,12 @@ void CView::sculptTerrainAt(const QVector3D& position)
     if(command.requiresMaxZDecision())
     {
         emit updateMsg(tr("Sculpt stamp refused: it would clamp the MPR raw-height range."));
+        return;
+    }
+    if(m_sculptStrokeActive)
+    {
+        if(applyTerrainHeightPreview(command, true))
+            appendTerrainHeightCommand(&m_sculptStrokeCommand, command);
         return;
     }
     m_pUndoStack->push(new CTerrainHeightPreviewCommand(this, command));
@@ -4641,8 +4658,9 @@ void CView::finishSculptStroke()
         return;
     m_sculptRepeatTimer->stop();
     m_sculptStrokeActive = false;
-    if(m_pUndoStack)
-        m_pUndoStack->endMacro();
+    if(m_pUndoStack && !m_sculptStrokeCommand.isEmpty())
+        m_pUndoStack->push(new CTerrainHeightPreviewCommand(
+            this, m_sculptStrokeCommand, true));
     if(m_sculptStrokeChanged)
     {
         for(CMob* mob : m_aMob)

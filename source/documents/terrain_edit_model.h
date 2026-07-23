@@ -172,6 +172,12 @@ struct STerrainHeightCommand
     }
 };
 
+// Compose sequential live-preview height commands into one reversible
+// before/after transaction. Repeated vertices retain their first value and
+// final value so a whole sculpt stroke rebuilds each affected sector once.
+void appendTerrainHeightCommand(STerrainHeightCommand* stroke,
+                                const STerrainHeightCommand& stamp);
+
 struct STerrainObjectHeightProbe
 {
     QString identity;

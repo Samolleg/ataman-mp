@@ -158,6 +158,37 @@ void appendTerrainTileCommand(STerrainTileCommand* stroke,
     }
 }
 
+void appendTerrainHeightCommand(STerrainHeightCommand* stroke,
+                                const STerrainHeightCommand& stamp)
+{
+    if(!stroke)
+        return;
+    for(const STerrainHeightDelta& delta : stamp.deltas)
+    {
+        int existingIndex = -1;
+        for(int index = 0; index < stroke->deltas.size(); ++index)
+        {
+            const STerrainHeightDelta& existing = stroke->deltas.at(index);
+            if(existing.globalX == delta.globalX
+               && existing.globalY == delta.globalY)
+            {
+                existingIndex = index;
+                break;
+            }
+        }
+        if(existingIndex < 0)
+            stroke->deltas.append(delta);
+        else
+        {
+            STerrainHeightDelta& existing = stroke->deltas[existingIndex];
+            existing.after = delta.after;
+            existing.clamped = existing.clamped || delta.clamped;
+            if(existing.before == existing.after)
+                stroke->deltas.remove(existingIndex);
+        }
+    }
+}
+
 STerrainTransitionSignature CTerrainTransitionCatalog::rotated(
     const STerrainTransitionSignature& signature, int clockwiseQuarterTurns)
 {
