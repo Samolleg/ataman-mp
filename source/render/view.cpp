@@ -2353,7 +2353,9 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
             = emitter.samples(logicalFraction);
         for(const ei::particle::RenderSample& sample : samples)
         {
-            drawSprite(sample.position, sample.scale, 1.0f, 0.0f,
+            drawSprite(sample.position,
+                       ei::particle::billboardDiameter(sample.scale),
+                       1.0f, 0.0f,
                        QVector4D(1.0f, 1.0f, 1.0f, 1.0f), atlas,
                        ei::particle::atlasUv(sample.frame), false,
                        atlas == nullptr, 0.18f);

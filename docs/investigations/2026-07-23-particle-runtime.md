@@ -105,6 +105,16 @@ The actual client-side torch class is fingerprinted by
    more particle emitters. The sound call receives authored record `+0x9C`,
    which for NID 1365 is `nature\fire\big.wav`.
 
+`OBJ_COMPLECTION` is not an input to this particle path. Setup
+`0x52D330..0x52D3E4` receives and forwards only the hardcoded particle kind,
+authored attachment, and authored strength; it neither reads the torch's
+complexion nor passes one to the factory or scale mutator. The spawn callback
+also initializes every Tendri particle color to opaque white. A controlled
+runtime edit reported for zone18 torch 1182, changing the tested complexion
+field to 2, independently left both mesh and particle appearance unchanged in
+the game and editor. Complexion is therefore rejected as the cause of the
+torch and standalone-particle size discrepancy.
+
 The class contains no second particle-effect pointer or second factory call in
 this path. Method `0x52D3F0` then invokes that emitter's vtable slot `+0x18`
 exactly 60 times, prewarming the effect before its first ordinary render. This
@@ -261,6 +271,16 @@ Confirmed particle-record initialization:
 - Initial lateral drift is randomized and multiplied by `0.5`.
 - Z starts at emitter Z plus a random component multiplied by `0.3`.
 - `record +0x40 = 0.3` initial vertical velocity.
+
+The X/Y values used for initial drift are the same randomized values used to
+offset the initial position, and the update callback applies them only while
+the atlas frame is below 2. It never negates them or computes a vector toward
+the emitter center. Thus native particle centers do not converge inward. The
+observed fire-body taper is instead produced by the confirmed per-frame sprite
+scale contraction (`0.85`) while centers rise, followed by the confirmed smoke
+scale expansion (`1.059999942779541`). Any editor mismatch in that hourglass
+profile must be sought in scale evolution or conversion from particle scale to
+billboard dimensions, not an invented center-seeking velocity.
 
 The wrapper at `0x48ED60` calls this spawn callback and applies another
 randomized offset from emitter fields `+0x130/+0x134`, invokes world-height
@@ -422,6 +442,59 @@ The exact scale-growth constant at `0x73CE38` is the IEEE-754 single
 `0x3F87AE14`, or `1.059999942779541`. It replaces the earlier approximate
 label of 1.06.
 
+### Native billboard submission interface
+
+A read-only runtime probe of the exact fingerprinted executable captured the
+render-preparation thread at EIP `0x497C5E`. Its renderer argument was the
+static object at `0x7AF060`, with vtable `0x73D93C`; vtable slot `+0x44`
+resolves to the in-executable particle submission method
+`0x502CA0..0x50367C`. These static addresses apply only to the executable hash
+above. The process ID, thread ID, and any heap addresses observed by the probe
+are transient and are not fixture evidence.
+
+The call at `0x497CCB` supplies three arguments to this method: the additive
+flag, the global interpolated position/scale vector at `0x7A9BD0`, and the
+global UV/color vector at `0x7A9BE0`. Method `0x502CA0` reads the first vector's
+data pointer and count at `0x502F8E` and the second vector's data pointer at
+`0x502FAC`. Each position/scale entry is exactly the four interpolated floats
+`(x, y, z, scale)` emitted by `0x497B4C`; UV/color entries are 32 bytes each.
+This identifies the exact native scale-to-billboard path but does not yet
+establish the final world-space quad width by itself.
+
+The downstream implementation is the fingerprinted `3DfpFPU.dll` interface
+slot `+0x60`, RVA `0x6F00..0x73BC` in the isolated memory image. Its five
+arguments are the copied camera/projection matrix, input `(x,y,z,scale)`
+records, four 32-byte output vertices per particle, clipping-byte output, and
+particle count. At RVA `0x6FCF..0x6FEA` it loads source X/Y/Z and then the
+fourth float as scale. It transforms the center, calculates the perspective
+scale, and at RVA `0x70D3..0x70ED`, `0x7174..0x71B2`,
+`0x721F..0x7260`, and `0x72CA..0x7301` emits the four screen-space corners as
+center minus or plus that projected scale on each axis. Native scale is
+therefore the billboard half-extent/radius: total sprite width and height are
+exactly `2 * submittedScale` before projection.
+
+EI Mapper's particle VBO uses local corners `-0.5..+0.5` and its shader
+multiplies those by `u_size`. Passing submitted scale directly consequently
+made total editor width equal to scale, exactly half native width. The exact
+faithful conversion for that VBO convention is `u_size = 2 * scale`. This
+factor is established by native vertex math; the screenshots only exposed the
+discrepancy and did not determine it.
+
+For backend provenance, the loaded read-only modules are:
+
+- `D3DImm.dll`: 210,944 bytes, SHA-256
+  `8339438C623662415851062723A4E5141717FF7AA54AB41EB0774C7431DB68AD`;
+- `3DfpFPU.dll`: 147,456 bytes, SHA-256
+  `A7B11BF5C85898C4A9E1F02F609F05C87BAC627834FAE21A3466230C63E6FC82`.
+
+Isolated interface-export inspection rejects both initially suspected slot-44
+entries as this particle method: `D3DImm.dll`'s returned interface does not
+contain a callable slot there, and `3DfpFPU.dll`'s slot has a five-argument
+four-vertex transform signature. The actual particle submission method is the
+`game.exe` method above. Repository-local `scripts/particle_process_probe.cpp`
+performs the read-only process inspection and short thread-context sampling;
+`scripts/dump_d3dimm_interface.cpp` performs isolated DLL interface inspection.
+
 Other exact constants used by these callbacks are now fingerprinted:
 
 - `0x73B86C`: float `0x3F000000` = 0.5, used for half-scale and lateral drift;
@@ -488,6 +561,11 @@ orientation is incorrect; it is not a subjective screenshot adjustment.
   confirmed call at `0x4575C1` is a global render-time type-`0x2001` lookup, so
   it cannot prove that core flame, peripheral flame, and smoke use one emitter.
 - Visual descriptions and captured GIFs are validation targets and search pointers only. They do not establish density, lifetime, blend, color, or movement rules.
+- `OBJ_COMPLECTION` does not reach the torch particle factory or scale mutator
+  and is rejected as a particle size, tint, or intensity control.
+- The native Tendri callbacks contain no inward center motion. The apparent
+  fire-to-smoke hourglass is the established shrink-then-grow sprite sequence,
+  so adding convergence velocity would be an unsupported visual tuning rule.
 
 ## Implemented editor model
 

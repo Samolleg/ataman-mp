@@ -9,6 +9,7 @@ class ParticleAnimationTests : public QObject
 private slots:
     void atlasUsesNativeTopRowFirstInsets();
     void isaacPreviewStreamIsDeterministic();
+    void nativeSubmittedScaleIsBillboardRadius();
     void authoredStrengthScalesEveryNativeMutatorField();
     void schedulerUsesAttemptsRatherThanSlots();
     void prewarmedEmittersAreDeterministicAndBounded();
@@ -27,6 +28,12 @@ void ParticleAnimationTests::atlasUsesNativeTopRowFirstInsets()
     QCOMPARE(ei::particle::atlasUv(14),
              QVector4D(0.50f + inset, 0.25f - inset,
                        0.25f - 2.0f * inset, -0.25f + 2.0f * inset));
+}
+
+void ParticleAnimationTests::nativeSubmittedScaleIsBillboardRadius()
+{
+    QCOMPARE(ei::particle::billboardDiameter(0.8f), 1.6f);
+    QCOMPARE(ei::particle::billboardDiameter(0.32f), 0.64f);
 }
 
 void ParticleAnimationTests::isaacPreviewStreamIsDeterministic()
@@ -61,12 +68,16 @@ void ParticleAnimationTests::authoredStrengthScalesEveryNativeMutatorField()
     QCOMPARE(full.smallParticleExpansion, 0.24f);
 
     const auto campfire = ei::particle::parametersForScale(0.4f);
-    QCOMPARE(campfire.lowerSpawnBound, QVector3D(-0.08f, -0.08f, 0.0f));
-    QCOMPARE(campfire.upperSpawnBound, QVector3D(0.08f, 0.08f, 0.0f));
-    QCOMPARE(campfire.initialScale, 0.32f);
-    QCOMPARE(campfire.verticalVelocity, 0.12f);
+    QVERIFY(qAbs(campfire.lowerSpawnBound.x() + 0.08f) < 0.000001f);
+    QVERIFY(qAbs(campfire.lowerSpawnBound.y() + 0.08f) < 0.000001f);
+    QCOMPARE(campfire.lowerSpawnBound.z(), 0.0f);
+    QVERIFY(qAbs(campfire.upperSpawnBound.x() - 0.08f) < 0.000001f);
+    QVERIFY(qAbs(campfire.upperSpawnBound.y() - 0.08f) < 0.000001f);
+    QCOMPARE(campfire.upperSpawnBound.z(), 0.0f);
+    QVERIFY(qAbs(campfire.initialScale - 0.32f) < 0.000001f);
+    QVERIFY(qAbs(campfire.verticalVelocity - 0.12f) < 0.000001f);
     QCOMPARE(campfire.displacementThreshold, 400.0f);
-    QCOMPARE(campfire.smallParticleExpansion, 0.096f);
+    QVERIFY(qAbs(campfire.smallParticleExpansion - 0.096f) < 0.000001f);
 }
 
 void ParticleAnimationTests::schedulerUsesAttemptsRatherThanSlots()

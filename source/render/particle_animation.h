@@ -22,6 +22,13 @@ constexpr float kEarlyScale = 0.8500000238418579f;
 constexpr float kLateScale = 1.059999942779541f;
 constexpr float kLateMotion = 0.15000000596046448f;
 
+// 3DfpFPU slot +0x60 treats the submitted Tendri scale as the billboard
+// half-extent. The editor quad spans -0.5..+0.5, so it needs the diameter.
+inline float billboardDiameter(float submittedScale)
+{
+    return 2.0f * submittedScale;
+}
+
 struct TendriParameters
 {
     QVector3D lowerSpawnBound;

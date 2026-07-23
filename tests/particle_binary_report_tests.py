@@ -135,6 +135,18 @@ class ParticleBinaryReportTests(unittest.TestCase):
             fixture["sites"]["render_position_scale_interpolation"]["bytes"],
         )
         self.assertIn(
+            "8B088B70048A8424A4000000",
+            fixture["sites"]["particle_submission_inputs"]["bytes"],
+        )
+        self.assertIn(
+            "8B357CEF7A00",
+            fixture["sites"]["particle_pipeline_dispatch"]["bytes"],
+        )
+        self.assertIn(
+            "FF5260",
+            fixture["sites"]["particle_pipeline_dispatch"]["bytes"],
+        )
+        self.assertIn(
             "8B5E588B7E5C",
             fixture["sites"]["render_argb_interpolation"]["bytes"],
         )
