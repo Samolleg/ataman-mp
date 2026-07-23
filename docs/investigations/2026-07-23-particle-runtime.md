@@ -78,17 +78,39 @@ interpretation of this routine is rejected.
 
 The actual client-side torch class is fingerprinted by
 `CTorchObjectClientSpecific` at `0x78F7BC`, returned by vtable method
-`0x52D190`. Its effect setup method at `0x52D330` first clears the prior
-effect held in the single pointer at object `+0x5C`, calls the particle factory
-`0x498400` exactly once with the client record's kind field `+0x20`, places the
-result at the torch attachment position, scales it by client field `+0x28`
-(the exact server/authored source of that field remains to be traced), and
-attaches it to the torch object. The class contains no second particle-effect
-pointer or second factory call in this path. Method `0x52D3F0` then invokes
-that emitter's vtable slot `+0x18` exactly 60 times, prewarming the effect
-before its first ordinary render. This new class-specific evidence, rather
-than the rejected global lookup interpretation, establishes that a torch's
-fire and smoke atlas stages are one emitter population.
+`0x52D190`. The complete authored-to-runtime argument chain is now confirmed:
+
+1. Native MOB tag dispatch at `0x46B3C0` recognizes
+   `TORCH_STRENGHT`/`0xBBBF0001`, `TORCH_PTLINK`/`0xBBBF0002`, and
+   `TORCH_SOUND`/`0xBBBF0003`. It stores the decoded float at runtime torch
+   record `+0x8C`, the decoded vector at `+0x90..+0x98`, and the string at
+   `+0x9C` respectively (`0x46B40C..0x46B48A`). These are the exact fields
+   reported above for NID 1365.
+2. Torch object integration at `0x592968..0x592983` invokes client vtable
+   slot `+0x40` with arguments `(0x2001, &torchRecord[+0x90],
+   torchRecord[+0x8C])`. Thus the built-in torch particle kind is hardcoded
+   Campfire `0x2001`, its local attachment is authored `TORCH_PTLINK`, and its
+   emitter scale is the authored `TORCH_STRENGHT`; no database/template lookup
+   supplies either kind or scale on this path. For NID 1365 the exact scale is
+   therefore binary32 `0.4000000059604645`.
+3. That slot resolves to `CTorchObjectClientSpecific::setup` at `0x52D330`.
+   Common helper `0x52C590` snapshots the arguments into client fields
+   `+0x20`, `+0x40..+0x48`, and `+0x28`. Setup clears the prior effect held in
+   the single pointer at object `+0x5C`, calls particle factory `0x498400`
+   exactly once with the received `0x2001`, places the result at the authored
+   attachment, applies the received strength through scale mutator `0x485480`,
+   and attaches it to the torch object.
+4. The immediately following vtable `+0x44` and `+0x48` calls are separate
+   light and sound setup paths (`0x52D410` and `0x52D520`); they do not allocate
+   more particle emitters. The sound call receives authored record `+0x9C`,
+   which for NID 1365 is `nature\fire\big.wav`.
+
+The class contains no second particle-effect pointer or second factory call in
+this path. Method `0x52D3F0` then invokes that emitter's vtable slot `+0x18`
+exactly 60 times, prewarming the effect before its first ordinary render. This
+class-specific evidence, rather than the rejected global lookup
+interpretation, establishes that a torch's core fire, peripheral flame, and
+smoke atlas stages are one emitter population.
 
 ### Fingerprinted `gz10g` lava records
 
@@ -387,15 +409,12 @@ The current implementation is still partly inferred:
 
 ## Open questions, in priority order
 
-1. Trace the server/authored sources of torch client fields `+0x20` and
-   `+0x28`; confirm their exact kind and scale values for the fingerprinted
-   `gz1g` torch family.
-2. Label the higher-level engine meaning and update provenance of globals
+1. Label the higher-level engine meaning and update provenance of globals
    `0x7AF5DC..0x7AF5E8`, which the scheduler copies into ordinary TendriSmoke
    `+0x140..+0x14C`; the exact consumers/formula are now established. Across
    other factories, separately label `+0x128` and the type-`0x2010`-only
    `+0x130..+0x138` vector without applying them to ordinary Campfire.
-3. Verify native OpenGL and ANGLE blend/color behavior from identical authored records.
+2. Verify native OpenGL and ANGLE blend/color behavior from identical authored records.
 
 ## Required implementation discipline
 

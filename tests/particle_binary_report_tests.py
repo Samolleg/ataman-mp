@@ -53,6 +53,34 @@ class ParticleBinaryReportTests(unittest.TestCase):
         self.assertIn("BF3C000000", fixture["sites"]["torch_particle_prewarm_loop"]["bytes"])
         self.assertIn("FF5018", fixture["sites"]["torch_particle_prewarm_loop"]["bytes"])
         self.assertIn(
+            "3D0100BFBB",
+            fixture["sites"]["torch_mob_strength_and_link_fields"]["bytes"],
+        )
+        self.assertIn(
+            "3D0200BFBB",
+            fixture["sites"]["torch_mob_strength_and_link_fields"]["bytes"],
+        )
+        self.assertIn(
+            "D99E8C",
+            fixture["sites"]["torch_mob_strength_and_link_fields"]["bytes"],
+        )
+        self.assertIn(
+            "8D8390000000",
+            fixture["sites"]["torch_runtime_hardcoded_campfire"]["bytes"],
+        )
+        self.assertIn(
+            "8B8B8C000000",
+            fixture["sites"]["torch_runtime_hardcoded_campfire"]["bytes"],
+        )
+        self.assertIn(
+            "6801200000FF5240",
+            fixture["sites"]["torch_runtime_hardcoded_campfire"]["bytes"],
+        )
+        self.assertIn(
+            "8B839C000000508B11FF5248",
+            fixture["sites"]["torch_runtime_light_and_sound_dispatch"]["bytes"],
+        )
+        self.assertIn(
             "C783E0010000E0E94800C783E401000020EC48000F85",
             fixture["sites"]["tendri_callback_selection"]["bytes"],
         )
