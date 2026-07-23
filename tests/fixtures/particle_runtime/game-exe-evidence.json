@@ -1,0 +1,139 @@
+{
+  "constants": {
+    "half_double": {
+      "bytes": "000000000000E03F",
+      "va": "0x0073CC88",
+      "value": 0.5
+    },
+    "half_float": {
+      "bytes": "0000003F",
+      "va": "0x0073B86C",
+      "value": 0.5
+    },
+    "late_motion_float": {
+      "bytes": "9A99193E",
+      "va": "0x0073CD18",
+      "value": 0.15000000596046448
+    },
+    "late_scale_growth_float": {
+      "bytes": "14AE873F",
+      "va": "0x0073CE38",
+      "value": 1.059999942779541
+    },
+    "three_tenths_float": {
+      "bytes": "9A99993E",
+      "va": "0x0073C54C",
+      "value": 0.30000001192092896
+    },
+    "u32_normalization_double": {
+      "bytes": "000010000000F03D",
+      "va": "0x0073C468",
+      "value": 2.3283064370807974e-10
+    }
+  },
+  "format": "ei-particle-binary-report-v1",
+  "image_base": "0x00400000",
+  "particle_vtable_scheduler_slot": {
+    "slot_va": "0x0073CFE8",
+    "target_va": "0x00496EB0"
+  },
+  "ranges": {
+    "atlas_rectangle_builder": {
+      "end_va": "0x00488790",
+      "sha256": "DA76F7B72582EE10FE67717B0A23018E4E30E0A89872010BC6BA43FD373338AE",
+      "size": 476,
+      "start_va": "0x004885B4"
+    },
+    "blend_switch": {
+      "end_va": "0x00498AC3",
+      "sha256": "E13CB64E1D6959771C8A2279EFB571342162C8DB91030BF4A5DC00266D8807D1",
+      "size": 57,
+      "start_va": "0x00498A8A"
+    },
+    "scheduler": {
+      "end_va": "0x004975B0",
+      "sha256": "8E50A313A187F75E08EBD29E69FD89B0F107E468783E7E99F7ECCDEB0E8C7A47",
+      "size": 1792,
+      "start_va": "0x00496EB0"
+    },
+    "spawn_callback": {
+      "end_va": "0x0048EC20",
+      "sha256": "C8E922697CA9FC9E3D5A4A70D951F017090A36EF5650E883863C18E875D9897D",
+      "size": 576,
+      "start_va": "0x0048E9E0"
+    },
+    "torch_particle_attachment": {
+      "end_va": "0x0040ECA5",
+      "sha256": "575DA248FCE84901A59B687AE3C44C95118740231BE16251E4FD0FAE6DEED71D",
+      "size": 325,
+      "start_va": "0x0040EB60"
+    },
+    "update_callback": {
+      "end_va": "0x0048ED60",
+      "sha256": "0A82FD3791518A4D7BD302504AE2CD00C58B761C00079756E9417796A2111678",
+      "size": 320,
+      "start_va": "0x0048EC20"
+    }
+  },
+  "sections": [
+    {
+      "name": ".text",
+      "raw_offset": 4096,
+      "raw_size": 3383296,
+      "rva": 4096,
+      "virtual_size": 3380848
+    },
+    {
+      "name": ".rdata",
+      "raw_offset": 3387392,
+      "raw_size": 294912,
+      "rva": 3387392,
+      "virtual_size": 293042
+    },
+    {
+      "name": ".data",
+      "raw_offset": 3682304,
+      "raw_size": 102400,
+      "rva": 3682304,
+      "virtual_size": 299672
+    },
+    {
+      "name": ".rsrc",
+      "raw_offset": 3784704,
+      "raw_size": 40960,
+      "rva": 3985408,
+      "virtual_size": 37576
+    }
+  ],
+  "sites": {
+    "blend_additive_value_2": {
+      "bytes": "83BE5001000001751485ED75108B176A026A058BCFFF5228BD01000000",
+      "va": "0x00498A8A"
+    },
+    "blend_alpha_value_6": {
+      "bytes": "8B865001000085C0751283FD01750D8B076A066A058BCFFF502833ED",
+      "va": "0x00498AA7"
+    },
+    "scheduler_fallback_spawn_call": {
+      "bytes": "1200008BF885FF74216A00578BCEFF96E001000085C05775",
+      "va": "0x00497575"
+    },
+    "scheduler_spawn_call": {
+      "bytes": "581300008BF885FF742053578BCEFF96E001000085C05775",
+      "va": "0x00497514"
+    },
+    "scheduler_update_call": {
+      "bytes": "57588B490C89575C89480C8B47448BCE894748FF96E40100",
+      "va": "0x004972F5"
+    },
+    "torch_lookup_type_0x2001": {
+      "bytes": "8B86EC0200006A006801200000508D4C2410",
+      "va": "0x0040EBD8"
+    }
+  },
+  "source": {
+    "path": "D:\\Evil Islands\\Starter\\Engine\\game.exe",
+    "sha256": "BE0FC330035E03983CCE590038CC7F881F1F5D1BCF082717F31776DD4DEE94E2",
+    "size": 3825725
+  }
+}

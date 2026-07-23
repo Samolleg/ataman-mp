@@ -15,6 +15,10 @@ The investigation follows the Evil Islands modding rule: when documentation is m
 - SHA-256: `BE0FC330035E03983CCE590038CC7F881F1F5D1BCF082717F31776DD4DEE94E2`
 - Principal temporary analysis script: `C:\Users\ilufu\Downloads\ПЗ Жамевю\Codex\work\particle-reverse-tools\disasm_particle.py`
 - Latest temporary disassembly report at time of writing: `particle-disassembly-10.txt`
+- Repository-local byte evidence report: `scripts/particle_binary_report.py`.
+  Its stable fixture rejects executable fingerprint drift and pins the
+  scheduler vtable slot, callback sites, blend switch, torch attachment,
+  callback ranges, and exact constants without modifying the executable.
 
 All virtual addresses below apply only to this fingerprint.
 
@@ -26,7 +30,70 @@ All virtual addresses below apply only to this fingerprint.
   - `8193` — Campfire
   - `8196` — Smoke
   - `8197` — Vulcansmoke
-- Exact emitter records from representative `gz1g` fire and `gz10g` lava sources still need to be dumped and compared. Do not replace authored fields with renderer presets until this is complete.
+- `gz1g` maps to the installed JMV `zone1.mob`; `gz10g` maps to
+  `zone10.mob` plus `zone10.mpr`. These mappings are established by the map
+  catalog rather than inferred from filenames.
+
+### Fingerprinted `gz1g` records
+
+The read-only source `D:\Evil Islands\Starter\MODS\JamaisVu135\Maps\zone1.mob`
+is 1,586,436 bytes with SHA-256
+`FEFFDA09F7279F65562DB37BBDCDFC475D59C4EE6FF1678958E5117949FB9E5A`.
+It contains four torch records and eight particle-source records. The complete
+records are reproducibly emitted by `scripts/particle_mob_report.py`.
+
+Representative torch NID 1365 is at file offset 619,105, is 310 bytes, and has
+record SHA-256
+`D7450142441196107260624C61A4119B55D7FB11D443E7F9DE14FC13B4EDED34`.
+Its complete decoded authored fields include:
+
+- name `Camp fire 00-1365`, object type 58, mesh/template `stto5`, primary
+  texture `Campfire00`, parent template `Camp fire 00`;
+- world position `(133.5677947998047, 151.08291625976562,
+  -0.05000000074505806)`, identity quaternion, complexion `(0.5, 0.5, 0.5)`;
+- local `TORCH_PTLINK` `(0.10000000149011612, 0, 0.5)`, strength
+  `0.4000000059604645`, sound `nature\fire\big.wav`;
+- player 0, parent ID 1168, use-in-script 0, shadow 1, empty quest info and
+  body-part list.
+
+Representative independent particle source ID 357 is at offset 622,543, is
+104 bytes, and has record SHA-256
+`E2FFEEB487E2AA3CB51EFE2C1FCBD8CBDD19D44B9A5C290AAE005348167D7FD5`.
+It is named `Particles source-357`, kind `0x2001`/Campfire, scale
+`0.4000000059604645`, position `(178.94630432128906, 131.87026977539062,
+8.293479919433594)`, and comment `none`.
+
+No standalone particle source is co-located with any of the four torches. The
+nearest source to torch 1365 is about 49.98 world units away; the nearest to
+torch 331 is about 13.33 units away. Therefore the torch's attached visual
+cannot be attributed to an overlapping authored `PARTICL` record.
+
+The native torch attachment path at `0x40EB60..0x40ECA5` checks its active
+flag, performs one lookup for particle type `0x2001`, and applies one object
+transform to the returned effect. There are no additional particle-type
+lookups in that path. Combined with the authored proximity result and the
+single TendriSmoke frame state machine, this establishes that a torch's fire
+core, peripheral particles, and smoke are different ages/frames of one emitter
+population, not multiple co-located authored or attached emitters.
+
+### Fingerprinted `gz10g` lava records
+
+The read-only `zone10.mob` is 568,201 bytes with SHA-256
+`6C2FF44B72CE9850B4BBFF9759A00D17BC7DA3DDCC9CC7E124138110D31B78B2`.
+It contains zero `TORCH` and zero `PARTICL` records. This rejects the hypothesis
+that the representative lava surface is a MOB particle source.
+
+Lava is authored in `zone10.mpr`, 544,623 bytes, SHA-256
+`56F0A601330D88912EFCC17EF58A2EDB5168640D58E965CC040FC30E9076B925`.
+The embedded `zone10.mp` declares 512 tile entries, with indices 5, 6, and 7
+typed as lava (tile type 13), and no animated-tile records. Ten of 48 sectors
+contain liquid; together they contain 637 lava tiles, all using liquid material
+1. Material 1 is terrain type 3 with RGBA
+`(0.7960785031318665, 0, 0, 1)`, self-illumination 1, wave multiplier 0.5,
+warp speed 0, and zero reserved fields. Thus this representative `gz10g` lava
+belongs to the MPR liquid/terrain renderer, not the particle emitter renderer.
+`scripts/particle_mpr_report.py` emits every tile record and a compact stable
+fixture form.
 
 ## TendriSmoke factory and layout
 
@@ -38,8 +105,10 @@ Confirmed constructor values:
 | --- | ---: | --- |
 | `+0xF0..+0xF8` | `(-0.2, -0.2, 0)` | lower randomized spawn bounds |
 | `+0xFC..+0x104` | `(+0.2, +0.2, 0)` | upper randomized spawn bounds |
-| `+0xCC` | `0x58` | particle-record size, 88 bytes |
-| `+0xD0` | `6` | pool/emission-related count; exact scheduler meaning remains open |
+| `+0xCC` | `0x58` / `88` | per-attempt spawn probability in percent |
+| `+0xD0` | `6` | minimum spawn attempts per emitter update |
+| `+0xD4` | `1000.0` | displacement per extra spawn attempt |
+| `+0xD8` | `500` | maximum active-particle count |
 | `+0xDC` | `15` | exclusive terminal atlas frame |
 | `+0xE0` | `4` | atlas columns, established by common atlas construction |
 | `+0xE4` | `1` | frame-delay reset |
@@ -52,6 +121,22 @@ Confirmed constructor values:
 | `+0x1EC` | pointer | particle texture |
 
 Type `0x2010` shares this family but overrides `+0xD0` to 20, `+0xD8` to 1500, and callbacks. It must not be treated as evidence for ordinary Campfire/Fire cadence.
+
+The factory common prefix at `0x485540` establishes `+0xCC = 100` and
+`+0xD8 = 500`; the TendriSmoke branch then overrides `+0xCC` to `0x58` (88).
+The base initialization at `0x4849DA` establishes `+0xD4 = 1000.0`. These
+values are not inferred from the rendered effect. The earlier interpretation
+of `+0xCC = 0x58` as an 88-byte particle-record size is rejected; the payload
+allocator independently proves a 100-byte allocation.
+
+For ordinary TendriSmoke the base constructor initializes `+0x128 = 1`,
+`+0x130..+0x138 = (0,0,0)`, `+0x140..+0x148 = (0,0,0)`, `+0x14C = 0`, and
+`+0x150 = 0`; this factory branch does not override them. The scale mutator at
+`0x485480` multiplies `+0x128` along with the spawn bounds, initial scale,
+vertical velocity, and displacement threshold. Field `+0x150 = 0` makes the
+Campfire family select render state 5/value 6, not the value-2 path used when
+`+0x150 = 1`. The Direct3D meaning of the engine's state selector still needs
+to be traced before naming those paths source/destination blend factors.
 
 ## Spawn callback (`0x48E9E0`)
 
@@ -90,6 +175,55 @@ Confirmed behavior:
 
 ## Pool and render path
 
+### Scheduler (`0x496EB0`)
+
+The exact scheduler is the emitter virtual method at `0x496EB0`, installed at
+vtable `0x73CFD0 + 0x18`. It invokes all three emitter callbacks:
+
+- `0x497263` invokes `+0x1E8` for each auxiliary 0x38-byte record in
+  `+0x154`, count `+0x158`, before particle-list processing.
+- `0x497308` invokes the update callback at `+0x1E4` once for each live active
+  particle.
+- `0x497522` and the high-probability fallback at `0x497583` invoke the spawn
+  callback at `+0x1E0`.
+
+Allocation cadence is now confirmed:
+
+1. Update and retire the existing active list first.
+2. Compute `movementAttempts` by converting `+0xC8 / +0xD4` to an integer
+   using the current x87 rounding mode.
+3. Attempt `max(movementAttempts, +0xD0)` births.
+4. Refuse an attempt when active count `+0x1C0` is at least cap `+0xD8`.
+5. Otherwise draw `random % 100` and invoke the spawn callback only when the
+   result is below probability `+0xCC`.
+6. If no main-loop birth succeeded, probability is greater than 50, the
+   computed attempt count is positive, and the cap still permits it, make one
+   unconditional fallback spawn attempt.
+
+For ordinary stationary Campfire/TendriSmoke (`+0xCC = 88`, `+0xD0 = 6`,
+`+0xD4 = 1000.0`, `+0xD8 = 500`), this means six births are attempted per
+scheduler invocation. Each attempt succeeds with 88%
+probability; if all six fail, the high-probability fallback makes one
+unconditional attempt. Thus a permitted invocation creates between one and
+six particles, subject to allocator failure and the 500-active cap. The
+previous six-slot editor model is therefore rejected: six is an emission-rate
+floor, not a total record count.
+
+Particle retirement is two-stage. The update callback returning zero causes
+the scheduler to set `record +0x60 = 1` after restoring the previous
+position/frame/color snapshot. On the next scheduler traversal, the flagged
+record is unlinked, its emitter list node is returned to the emitter free
+list, active count is decremented, and the 100-byte payload is returned to the
+owning particle allocator.
+
+Emitter list-node allocation is block based. When `+0x1C4` is empty,
+`0x496BA8`/`0x496E09` allocate `+0x1CC` nodes (default 10), each 12 bytes,
+chain them into the free list, then pop one and append it to the active tail.
+The payload allocator at `0x498870` separately reuses returned payloads and
+allocates a zero-initialization-unspecified 100-byte record only when its
+recycler is empty. This distinguishes emitter-node reuse from particle-record
+reuse.
+
 Confirmed emitter-list fields:
 
 - `+0x1B8` active-list head
@@ -106,11 +240,44 @@ Render preparation around `0x4976B0` and submission around `0x498940/0x498A5D` e
 - Particles are camera-facing billboards before submission.
 - Emitter `+0x150` selects blend state: value 1 drives state 5/value 2; value 0 returns state 5/value 6 after that path.
 
+The exact scale-growth constant at `0x73CE38` is the IEEE-754 single
+`0x3F87AE14`, or `1.059999942779541`. It replaces the earlier approximate
+label of 1.06.
+
+Other exact constants used by these callbacks are now fingerprinted:
+
+- `0x73B86C`: float `0x3F000000` = 0.5, used for half-scale and lateral drift;
+- `0x73C54C`: float `0x3E99999A` = `0.30000001192092896`;
+- `0x73C468`: double `0x3DF0000000100000` =
+  `2.3283064370807974e-10`, the random-u32 normalization factor;
+- `0x73CC88`: double `0x3FE0000000000000` = 0.5, used when frame 8 halves
+  vertical velocity;
+- `0x73CD18`: float `0x3E19999A` = `0.15000000596046448`, applied with
+  emitter orientation after multiplying current scale and `+0x14C`.
+
+### Atlas rectangles and orientation
+
+The common factory tail at `0x4885B4..0x488781` constructs the atlas rectangle
+array directly. With `columns = +0xE0 = 4`, `step = 1 / columns`, and frame
+index `i`, it stores:
+
+`u0 = (i % 4) * step + 1/512`,
+`v0 = 1 - floor(i / 4) * step - 1/512`,
+`u1 = (i % 4 + 1) * step - 1/512`,
+`v1 = 1 - (floor(i / 4) + 1) * step + 1/512`.
+
+Frames are therefore row-major from the texture's top row to bottom row, with
+a 1/512 inset on every edge. `particle +0x48` selects one of these rectangles.
+This proves the prior editor presentation using the opposite vertical row
+orientation is incorrect; it is not a subjective screenshot adjustment.
+
 ## Rejected hypotheses and corrected labels
 
 - `0x485380` is an active-list clear/destructor path, not the emission scheduler.
 - `0x4976B0` is render preparation/visibility/vertex allocation, not the emission scheduler.
 - A prior label of these functions as the scheduler was incorrect and must not be propagated.
+- The editor interpretation of `+0xD0 = 6` as six persistent/staggered emitter
+  slots is rejected by the scheduler at `0x496EB0`.
 - Visual descriptions and captured GIFs are validation targets and search pointers only. They do not establish density, lifetime, blend, color, or movement rules.
 
 ## Current editor mismatch
@@ -124,13 +291,10 @@ The current implementation is still partly inferred:
 
 ## Open questions, in priority order
 
-1. Locate the function that invokes callbacks at `+0x1E0/+0x1E4` and establish exact allocation/emission cadence, count limits, and reuse rules.
-2. Dump the complete authored particle and torch records for representative `gz1g` campfires and `gz10g` lava, including scale, strength, attachment transform, kind/type, and any flags.
-3. Establish exact meanings of emitter fields `+0xD0`, `+0xD4`, `+0xD8`, `+0x128`, `+0x130`, `+0x134`, `+0x140..+0x14C`, and `+0x150` across multiple factories.
-4. Record exact float constants referenced by the update and wrapper paths.
-5. Determine whether fire core, peripheral flames, and smoke are one state machine over atlas frames or multiple co-located emitters for each authored source.
-6. Establish the texture-atlas orientation and frame ordering from decoded source data. The current editor presentation appears vertically inverted relative to the game.
-7. Verify native OpenGL and ANGLE blend/color behavior from identical authored records.
+1. Establish exact meanings of emitter fields `+0x128`, `+0x130`, `+0x134`, `+0x140..+0x14C`, and `+0x150` across multiple factories.
+2. Establish the source and destination blend mapping behind engine render
+   state 5 values 2 and 6, and the initialization of particle color `+0x5C`.
+3. Verify native OpenGL and ANGLE blend/color behavior from identical authored records.
 
 ## Required implementation discipline
 

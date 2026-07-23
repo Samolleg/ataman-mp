@@ -1,0 +1,15 @@
+{
+  "counts": {
+    "particle": 0,
+    "torch": 0
+  },
+  "format": "ei-particle-mob-report-v1",
+  "records": [],
+  "selection": null,
+  "source": {
+    "path": "D:\\Evil Islands\\Starter\\MODS\\JamaisVu135\\Maps\\zone10.mob",
+    "sha256": "6C2FF44B72CE9850B4BBFF9759A00D17BC7DA3DDCC9CC7E124138110D31B78B2",
+    "size": 568201
+  },
+  "torch_particle_proximity": []
+}
