@@ -133,22 +133,54 @@ conclusion that these D3D fields prove constant final surface illumination is
 rejected: the engine's higher-level software lighting path uses the cached
 reciprocal square before vertex colors reach the backend.
 
-Point-light application at `0x68D450..0x68D590` computes the exact radial
-factor `1 - distanceSquared * light[+0x104]`, rejects a negative result, then
-multiplies that factor by the surface-normal/light-direction dot product and
-the stored RGB before adding each channel to the existing light and clamping
-that channel at `1.0`. Since `+0x104 = 1 / radiusSquared`, native falloff is
-therefore `max(0, 1 - distanceSquared / radiusSquared)`. The editor's current
-binary `step(distance, radius)` is rejected: it retains full strength up to a
-hard edge and directly causes the observed circular boundaries and excessive
-overlap fields.
+The earlier identification of `0x68D450..0x68D590` as the terrain point-light
+application is rejected. That helper does have squared radial falloff, but the
+fingerprinted terrain caller does not invoke it. Terrain cell relighting at
+`0x6C3A00..0x6C3C7B` first invokes the global-light path `0x6C36B0`, then the
+cell-local-light path `0x6C31C0`; the latter calls the distinct point-light
+helper `0x68D5A0..0x68D727`.
+
+The actual terrain helper computes the exact radial factor
+`1 - distanceSquared * light[+0x104]` and returns the input base color outside
+the radius. Inside it computes the normalized surface-normal/light-direction
+dot product and uses `1 + min(dot, 0)`: front-facing and perpendicular
+surfaces receive full radial strength, while only back-facing surfaces are
+reduced. It then multiplies that factor by the caller's scalar and stored RGB,
+adds it to the per-vertex base color, and clamps each channel at `1.0`. Since
+`+0x104 = 1 / radiusSquared`, native terrain falloff is
+`max(0, 1 - distanceSquared / radiusSquared)`. The editor's positive Lambert
+term `max(dot, 0)` is rejected. In particular, a torch light authored directly
+on flat ground has dot approximately zero and therefore full native strength,
+not the editor's nearly zero strength.
 
 Registration at `0x6CA5D0` and cell insertion at `0x6CAC10` place each light
-only in the spatial cells intersected by its radius. Terrain/object vertex
-lighting traverses the cell-local light collection and saturates positive RGB
-contributions. This rejects the editor's global nearest-to-camera selection
-as a native rule; native eligibility is local to the rendered geometry, not
-to the camera.
+only in the spatial cells intersected by its radius. Terrain local lighting
+traverses that cell-local collection. Each ordinary light is evaluated from
+the same per-vertex base color, and `0x6C3431..0x6C35DD` takes the
+channel-by-channel maximum of the current result and the candidate result.
+Local lights therefore do not add to each other. This rejects both additive
+overlap and the editor's global nearest-to-camera selection as native rules;
+native eligibility is local to rendered geometry and overlapping candidates
+combine by maximum.
+
+A deterministic read-only scan of all 153 MOB files in the selected Jamais
+Vu 1.35 Maps directory finds at most 34 authored lights plus torches in one
+MOB (`zone10.mob`: 34 lights). The reported `zone3obr.mob` has 20. A preview
+uniform capacity of 64 therefore contains every light in each fingerprinted
+map corpus member; unlike the former nearest-eight list, nonintersecting
+lights naturally contribute zero through their native radius test.
+
+The global terrain path has the same non-additive structure. Directional
+helper `0x68D310..0x68D443` adds only the positive
+`dot(normal, -lightDirection)` directional RGB to the per-vertex base. The
+caller at `0x6C3965..0x6C39EF` then takes the channel-by-channel maximum of
+that candidate and the world ambient RGB. The faithful unbaked shader
+equivalent is thus `max(ambient, sun * diffuse)`, not
+`ambient + sun * diffuse`. The cell-local pass subsequently takes the maximum
+of this global result and each point-light candidate. This explains the
+controlled observations without visual tuning: late-night terrain is darker,
+low-power torch halos remain visible on flat ground, and overlapping lights
+do not make additive saturated fields.
 
 Standalone `LIGHT` construction at `0x511830..0x51194C` copies authored Range
 and Color unchanged, but adds the exact binary32 constant `2.0` at VA
@@ -164,6 +196,28 @@ attachment position. The native routines add no extra vertical pivot or
 hidden particle-only offset; any remaining apparent source-height mismatch
 must be sought in the object/display-position path or billboard presentation,
 not corrected with an unsupported emitter offset.
+
+### Fingerprinted zero-height torch-light controls
+
+The reported missing-light controls all author a zero local PTLINK and retain
+ordinary nonzero strength. In the read-only Jamais Vu resources:
+
+- `zone3obr.mob`, SHA-256
+  `F3F15E3A5DADD1ED52966DB94EFAB32D5E1780C2501FABC4C6B47E52CC3C7DC5`,
+  contains 20 torches and no generic `LIGHT` record. NIDs 166, 167, and 449
+  each author strength `0.5` and PTLINK `(0, 0, 0)`.
+- `zone11.mob`, size 3,138,272 bytes, contains two torches and no generic
+  `LIGHT` or standalone particle record. NID 3880 authors strength `0.4` and
+  PTLINK `(0, 0, 0)`.
+- `zone5_1.mob` (catalog map `gz5g`), SHA-256
+  `73A9154818A3F27B4A03543845A7154E86B342D6FE62E3E83607150498900D97`,
+  contains two strength-`0.5`, PTLINK-zero torches plus six generic lights.
+
+The native torch setup still adds no hidden Z offset in any of these cases.
+Their game-visible halos are instead explained by the confirmed terrain
+normal rule above. Increasing authored strength to make the editor's positive
+Lambert implementation visible was compensating for the wrong normal factor
+and is not a native strength rule.
 
 `OBJ_COMPLECTION` is not an input to this particle path. Setup
 `0x52D330..0x52D3E4` receives and forwards only the hardcoded particle kind,
@@ -187,13 +241,14 @@ smoke atlas stages are one emitter population.
 Stock projected shadows are composited silhouettes with union opacity
 `80 / 255`, rather than removal of only the direct-sun term. A fully covered
 receiver consequently retains visibility `175 / 255` (approximately
-`0.6862745`) regardless of the current weather RGB. Local map lights are added
-after that environment-shadow composition. The editor expression
+`0.6862745`) regardless of the current weather RGB. Local map lights are
+combined after that environment-shadow composition. The editor expression
 `ambient + sun * diffuse * shadow` is rejected because it makes visible shadow
 contrast depend on the sun/ambient ratio and can erase shadows when the
 unshadowed noon environment saturates. Faithful shader composition must first
-form and saturate the combined environment illumination, apply the bounded
-projected-shadow visibility to that result, and only then add point lights.
+form the channelwise-maximum global environment illumination, apply the
+bounded projected-shadow visibility to that result, and only then take the
+channelwise maximum with point-light candidates.
 The shadow-map comparison itself therefore represents geometric coverage:
 fully occluded is `0`, fully visible is `1`, and filtered edge samples average
 between them. Applying the `80 / 255` silhouette opacity happens exactly once

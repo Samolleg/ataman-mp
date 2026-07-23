@@ -106,8 +106,20 @@ class ParticleBinaryReportTests(unittest.TestCase):
             fixture["sites"]["native_point_light_squared_falloff"]["bytes"],
         )
         self.assertEqual(
-            fixture["ranges"]["native_point_light_application"]["start_va"],
+            fixture["ranges"]["native_point_light_application_nonterrain"]["start_va"],
             "0x0068D450",
+        )
+        self.assertEqual(
+            fixture["ranges"]["native_terrain_point_light_application"]["start_va"],
+            "0x0068D5A0",
+        )
+        self.assertIn(
+            "D9451C568BF1D88E04010000D84D1CD82D4CB87300",
+            fixture["sites"]["native_terrain_point_light_normal_factor"]["bytes"],
+        )
+        self.assertIn(
+            "E841A2FCFF",
+            fixture["sites"]["terrain_local_light_helper_call"]["bytes"],
         )
         self.assertEqual(
             fixture["ranges"]["weather_runtime_interpolation"]["start_va"],

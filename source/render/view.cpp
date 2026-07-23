@@ -1187,9 +1187,9 @@ void CView::applyEnvironmentUniforms(QOpenGLShaderProgram& program,
         : QVector3D();
     program.setUniformValue("u_mapFog", mapFog);
 
-    QVector4D positionRange[8];
-    QVector3D colors[8];
-    const int count = qMin(8, lights.size());
+    QVector4D positionRange[ei::kMaxScenePointLights];
+    QVector3D colors[ei::kMaxScenePointLights];
+    const int count = qMin(ei::kMaxScenePointLights, lights.size());
     for(int index = 0; index < count; ++index)
     {
         const ei::SScenePointLight& light = lights.at(index);
@@ -2544,14 +2544,12 @@ void CView::draw()
                         sceneLights.append({position, QVector3D(0.8f, 0.8f, 0.8f), range});
                 }
             }
-        std::sort(sceneLights.begin(), sceneLights.end(), [&cameraPosition](
-                  const ei::SScenePointLight& left, const ei::SScenePointLight& right)
-        {
-            return (left.position - cameraPosition).lengthSquared()
-                 < (right.position - cameraPosition).lengthSquared();
-        });
-        if(sceneLights.size() > 8)
-            sceneLights.resize(8);
+        // Native terrain registers lights into every intersected spatial cell;
+        // it does not select the eight nearest lights to the camera. The
+        // fingerprinted JMV map corpus peaks at 34 lights in one MOB, so the
+        // fixed shader capacity contains every authored map light.
+        if(sceneLights.size() > ei::kMaxScenePointLights)
+            sceneLights.resize(ei::kMaxScenePointLights);
     }
 
     RenderPerformanceContext& performance = RenderPerformanceContext::instance();

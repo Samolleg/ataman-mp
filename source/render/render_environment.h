@@ -8,6 +8,8 @@ class CWorldSet;
 
 namespace ei {
 
+constexpr int kMaxScenePointLights = 64;
+
 struct SScenePointLight
 {
     QVector3D position;

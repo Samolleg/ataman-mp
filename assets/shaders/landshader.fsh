@@ -25,8 +25,8 @@ uniform float u_fogStart;
 uniform float u_fogEnd;
 uniform vec3 u_mapFog;
 uniform int u_pointLightCount;
-uniform vec4 u_pointLightPositionRange[8];
-uniform vec3 u_pointLightColor[8];
+uniform vec4 u_pointLightPositionRange[64];
+uniform vec3 u_pointLightColor[64];
 uniform bool u_shadowsEnabled;
 uniform sampler2D u_staticShadowMap;
 uniform sampler2D u_dynamicShadowMap;
@@ -190,12 +190,11 @@ void main(void)
       }
     }
     // Stock shadows are an 80/255-alpha projected silhouette over the
-    // saturated environment result. Point lights are accumulated afterwards.
-    vec3 environmentLight = clamp(
-        u_ambientColor + u_sunColor * sunDiffuse, 0.0, 1.0);
+    // saturated environment result. Point lights are compared afterwards.
+    vec3 environmentLight = max(u_ambientColor, u_sunColor * sunDiffuse);
     float projectedShadowVisibility = mix(1.0, shadow, 80.0 / 255.0);
     light = environmentLight * projectedShadowVisibility;
-    for (int i = 0; i < 8; ++i)
+    for (int i = 0; i < 64; ++i)
     {
       if (i >= u_pointLightCount)
         break;
@@ -204,8 +203,10 @@ void main(void)
       float distanceSquared = dot(offset, offset);
       float attenuation = max(0.0,
           1.0 - distanceSquared / (range * range));
-      light += u_pointLightColor[i] * attenuation
-             * max(dot(norm, offset * inversesqrt(max(distanceSquared, 0.000001))), 0.0);
+      vec3 lightDirection = offset * inversesqrt(max(distanceSquared, 0.000001));
+      float normalFactor = 1.0 + min(dot(norm, lightDirection), 0.0);
+      vec3 pointCandidate = u_pointLightColor[i] * attenuation * normalFactor;
+      light = max(light, pointCandidate);
     }
     }
   }
