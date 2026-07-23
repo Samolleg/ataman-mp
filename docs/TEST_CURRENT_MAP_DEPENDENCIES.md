@@ -68,11 +68,15 @@ structurally valid installed `AutoRunSpellAddon123.mob`:
 
 - Play from Here;
 - Godmode;
+- a Time of Day override selected in the viewport;
 - explicit supplemental or collection MOB loading.
 
 For these features, Endurance creates a lossless run-local copy of the autorun
-MOB and adds only the required `SetCPFast`, `GodMode(0,3)`, or `AddMob(...)`
-commands. The installed MOB is never changed. The commands naturally depend on
+MOB and adds only the required `SetCPFast`, `GodMode(0,3)`,
+`FixWorldTime(hours)`, or `AddMob(...)` commands. The installed MOB is never
+changed. The time command uses the editor's effective clock independently of
+the selected viewport Lighting Mode and is regenerated for each hot-reload
+generation. The commands naturally depend on
 the active JMV runtime implementing the functions they call; no particular
 `SpellAddonX.asi` hash is treated as a global compatibility requirement.
 

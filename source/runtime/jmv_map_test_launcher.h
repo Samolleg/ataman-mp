@@ -34,6 +34,8 @@ struct SJmvMapTestLaunchInput
     SMapSpawnPlan spawn;
     double spawnZ{0.0};
     bool godmode{false};
+    bool overrideWorldTime{false};
+    double worldTimeHours{12.0};
     bool borrowedMapIdentity{false};
     int baseProbeLevel{0};
 };
@@ -94,6 +96,8 @@ public:
                                         double spawnZ,
                                         bool godmode,
                                         const QStringList& supplementalMobNames,
+                                        bool overrideWorldTime,
+                                        double worldTimeHours,
                                         QJsonObject* manifest,
                                         QString* outputPath,
                                         QString* error = nullptr);

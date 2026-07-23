@@ -162,6 +162,8 @@ public:
     void resetCamPosition();
     double cameraSpeedMultiplier() const;
     void setCameraSpeedMultiplier(double multiplier);
+    bool overridesWorldTime() const;
+    double effectiveWorldTimeHours() const;
     void addLogicPoint(bool bLookPoint = false);
     void copySelectedIDsToClipboard();
     void changeCurrentMob(CMob* pMob);
@@ -410,8 +412,9 @@ private:
     QFrame* m_environmentPreviewWidget{nullptr};
     QWidget* m_environmentPreviewBody{nullptr};
     QToolButton* m_environmentPreviewCollapse{nullptr};
-    QLabel* m_environmentPreviewTimeLabel{nullptr};
     QComboBox* m_environmentPreviewMode{nullptr};
+    QFrame* m_timeOfDayWidget{nullptr};
+    QLabel* m_timeOfDayLabel{nullptr};
     QSlider* m_environmentPreviewTime{nullptr};
     bool m_environmentPreviewSyncing{false};
     bool m_openGlesCompatibility{false};

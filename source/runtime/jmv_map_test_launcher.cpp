@@ -18,6 +18,7 @@
 #include <QThread>
 #include <QTimer>
 #include <QProcessEnvironment>
+#include <cmath>
 
 #include "endurance_document.h"
 #include "current_session_backup.h"
@@ -1097,11 +1098,13 @@ bool CJmvMapTestLauncher::prepareGodmodeBootstrap(
     const QStringList& mapDirectories, const QString& runRoot,
     const SMapSpawnPlan& spawn, double spawnZ, bool godmode,
     const QStringList& supplementalMobNames,
+    bool overrideWorldTime, double worldTimeHours,
     QJsonObject* manifest, QString* outputPath, QString* error)
 {
     if(outputPath)
         outputPath->clear();
-    if((!spawn.valid || !spawn.custom) && !godmode && supplementalMobNames.isEmpty())
+    if((!spawn.valid || !spawn.custom) && !godmode && supplementalMobNames.isEmpty()
+       && !overrideWorldTime)
         return true;
     if(!manifest || !outputPath || runRoot.isEmpty())
     {
@@ -1134,6 +1137,7 @@ bool CJmvMapTestLauncher::prepareGodmodeBootstrap(
     // Normal entrance starts already use the map table and must not be moved a
     // second time. Custom starts are grounded by requesting a zero offset.
     QString immediatePositionCommand;
+    QStringList immediateCommands;
     if(spawn.valid && spawn.custom)
     {
         immediatePositionCommand = QString("SetCPFast(GetLeader(), %1, %2, 0)")
@@ -1144,6 +1148,7 @@ bool CJmvMapTestLauncher::prepareGodmodeBootstrap(
         // delay as the guarded fallback for runtimes that register the leader
         // asynchronously.
         commands.append(immediatePositionCommand);
+        immediateCommands.append(immediatePositionCommand);
     }
     for(const QString& name : supplementalMobNames)
     {
@@ -1156,13 +1161,29 @@ bool CJmvMapTestLauncher::prepareGodmodeBootstrap(
         }
         commands.append(QString("AddMob(\"%1\")").arg(name));
     }
+    if(overrideWorldTime)
+    {
+        if(!qIsFinite(worldTimeHours))
+        {
+            if(error) *error = "The selected editor time of day is invalid.";
+            return false;
+        }
+        const double normalizedHours = std::fmod(std::fmod(worldTimeHours, 24.0) + 24.0, 24.0);
+        const QString fixTime = QString("FixWorldTime(%1)")
+            .arg(normalizedHours, 0, 'f', 6);
+        // Apply before the autorun delay when the world clock is already
+        // available, then repeat after it as a deterministic fallback.
+        immediateCommands.append(fixTime);
+        commands.append(fixTime);
+        worldTimeHours = normalizedHours;
+    }
     if(godmode)
         commands.append("GodMode(0,3)");
     QString bootstrappedScript;
     QString bootstrapError;
     if(!injectWorldScriptBootstrap(script, commands.join("\r\n"),
                                    &bootstrappedScript, &bootstrapError,
-                                   immediatePositionCommand))
+                                   immediateCommands.join("\r\n")))
     {
         if(error) *error = "Could not inject the JMV runtime commands into WorldScript: "
             + bootstrapError;
@@ -1188,6 +1209,8 @@ bool CJmvMapTestLauncher::prepareGodmodeBootstrap(
     bootstrap.insert("spawnY", spawn.position.y());
     bootstrap.insert("spawnZ", spawnZ);
     bootstrap.insert("godmode", godmode);
+    bootstrap.insert("overrideWorldTime", overrideWorldTime);
+    bootstrap.insert("worldTimeHours", worldTimeHours);
     bootstrap.insert("runtimeSpawnHeightOffset", 0.0);
     QJsonArray explicitMobs;
     for(const QString& name : supplementalMobNames)
@@ -1669,6 +1692,8 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
     request.sessionSettings.insert("requestedSpawnY", input.spawn.requestedPosition.y());
     request.sessionSettings.insert("spawnAdjusted", input.spawn.adjusted);
     request.sessionSettings.insert("godmode", input.godmode);
+    request.sessionSettings.insert("overrideWorldTime", input.overrideWorldTime);
+    request.sessionSettings.insert("worldTimeHours", input.worldTimeHours);
     request.sessionSettings.insert("borrowedMapIdentity", input.borrowedMapIdentity);
     request.sessionSettings.insert("baseProbeLevel", input.baseProbeLevel);
     request.sessionSettings.insert("clearance", input.spawn.clearance);
@@ -1699,7 +1724,9 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
         supplementalMobNames.append(QFileInfo(path).fileName());
     if(isJmv && !prepareGodmodeBootstrap(input.profile.mapDirectories, m_runRoot,
                                          input.spawn, input.spawnZ, input.godmode,
-                                         supplementalMobNames, &m_manifest,
+                                         supplementalMobNames,
+                                         input.overrideWorldTime, input.worldTimeHours,
+                                         &m_manifest,
                                          &godmodeBootstrapPath, error))
         return false;
     if(!godmodeBootstrapPath.isEmpty())
@@ -1842,6 +1869,7 @@ bool CJmvMapTestLauncher::hotReload(const SJmvMapTestLaunchInput& input,
     if(!prepareGodmodeBootstrap(input.profile.mapDirectories, reloadRoot,
                                 input.spawn, input.spawnZ, input.godmode,
                                 desiredSupplementalNames,
+                                input.overrideWorldTime, input.worldTimeHours,
                                 &reloadManifest, &bootstrapPath, error))
         return false;
 

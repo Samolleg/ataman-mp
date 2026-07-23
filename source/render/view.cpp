@@ -606,10 +606,10 @@ void CView::initEnvironmentPreviewWidget()
     outer->setSpacing(4);
     QHBoxLayout* title = new QHBoxLayout;
     title->setContentsMargins(0, 0, 0, 0);
-    QLabel* titleLabel = new QLabel(tr("Environment preview"), m_environmentPreviewWidget);
+    QLabel* titleLabel = new QLabel(tr("Lighting mode"), m_environmentPreviewWidget);
     m_environmentPreviewCollapse = new QToolButton(m_environmentPreviewWidget);
     m_environmentPreviewCollapse->setText(QString::fromUtf8("\xE2\x88\x92"));
-    m_environmentPreviewCollapse->setToolTip(tr("Minimize environment preview"));
+    m_environmentPreviewCollapse->setToolTip(tr("Minimize lighting mode"));
     title->addWidget(titleLabel);
     title->addStretch(1);
     title->addWidget(m_environmentPreviewCollapse);
@@ -624,36 +624,37 @@ void CView::initEnvironmentPreviewWidget()
     m_environmentPreviewMode->addItem(tr("Simple shading"), 1);
     m_environmentPreviewMode->addItem(tr("Full environment"), 2);
     body->addWidget(m_environmentPreviewMode);
+
+    m_timeOfDayWidget = new QFrame(this);
+    m_timeOfDayWidget->setObjectName("timeOfDayWidget");
+    m_timeOfDayWidget->setMinimumWidth(220);
+    m_timeOfDayWidget->setFrameShape(QFrame::StyledPanel);
+    m_timeOfDayWidget->setStyleSheet(
+        "QFrame#timeOfDayWidget { background: rgba(25,25,25,210); color: white; border: 1px solid #777; border-radius: 4px; }"
+        "QLabel { color: white; }");
+    QVBoxLayout* timeOuter = new QVBoxLayout(m_timeOfDayWidget);
+    timeOuter->setContentsMargins(7, 5, 7, 6);
+    timeOuter->setSpacing(4);
+    QLabel* timeTitle = new QLabel(tr("Time of day"), m_timeOfDayWidget);
+    timeOuter->addWidget(timeTitle);
     QHBoxLayout* timeRow = new QHBoxLayout;
-    m_environmentPreviewTimeLabel = new QLabel(tr("12:00"), m_environmentPreviewBody);
-    m_environmentPreviewTimeLabel->setMinimumWidth(42);
-    m_environmentPreviewTime = new QSlider(Qt::Horizontal, m_environmentPreviewBody);
+    timeRow->setContentsMargins(0, 0, 0, 0);
+    m_timeOfDayLabel = new QLabel(tr("12:00"), m_timeOfDayWidget);
+    m_timeOfDayLabel->setMinimumWidth(42);
+    m_environmentPreviewTime = new QSlider(Qt::Horizontal, m_timeOfDayWidget);
     m_environmentPreviewTime->setRange(0, 1439);
     m_environmentPreviewTime->setSingleStep(10);
     m_environmentPreviewTime->setPageStep(60);
-    m_environmentPreviewTime->setStyleSheet(QStringLiteral(
-        "QSlider::groove:horizontal:disabled { background: #505050; height: 4px; }"
-        "QSlider::sub-page:horizontal:disabled { background: #666666; }"
-        "QSlider::add-page:horizontal:disabled { background: #404040; }"
-        "QSlider::handle:horizontal:disabled { background: #707070; border: 1px solid #555555; }"));
-    timeRow->addWidget(m_environmentPreviewTimeLabel);
+    m_environmentPreviewTime->setToolTip(tr(
+        "Set the editor time of day. When changed, this time is also applied to JMV Test Current Map and hot reload."));
+    timeRow->addWidget(m_timeOfDayLabel);
     timeRow->addWidget(m_environmentPreviewTime, 1);
-    body->addLayout(timeRow);
+    timeOuter->addLayout(timeRow);
     outer->addWidget(m_environmentPreviewBody);
 
     const COptInt* mode = dynamic_cast<const COptInt*>(m_pSettings->opt("renderLightingMode"));
     m_environmentPreviewMode->setCurrentIndex(
         qBound(0, mode ? mode->value() : 2, 2));
-    const auto updateTimeControls = [this](int index)
-    {
-        const bool enabled = index == 2;
-        m_environmentPreviewTimeLabel->setEnabled(enabled);
-        m_environmentPreviewTime->setEnabled(enabled);
-        m_environmentPreviewTime->setToolTip(enabled
-            ? tr("Preview time of day")
-            : tr("Time of day is available only in Full environment mode"));
-    };
-    updateTimeControls(m_environmentPreviewMode->currentIndex());
     connect(m_environmentPreviewCollapse, &QToolButton::clicked, this, [this]()
     {
         const bool show = !m_environmentPreviewBody->isVisible();
@@ -663,9 +664,8 @@ void CView::initEnvironmentPreviewWidget()
         positionEnvironmentPreviewWidget();
     });
     connect(m_environmentPreviewMode, QOverload<int>::of(&QComboBox::currentIndexChanged),
-            this, [this, updateTimeControls](int index)
+            this, [this](int index)
     {
-        updateTimeControls(index);
         if(m_environmentPreviewSyncing || !m_pSettings)
             return;
         if(COptInt* option = dynamic_cast<COptInt*>(m_pSettings->opt("renderLightingMode")))
@@ -677,7 +677,7 @@ void CView::initEnvironmentPreviewWidget()
     {
         const int hour = minutes / 60;
         const int minute = minutes % 60;
-        m_environmentPreviewTimeLabel->setText(QString("%1:%2")
+        m_timeOfDayLabel->setText(QString("%1:%2")
             .arg(hour, 2, 10, QLatin1Char('0')).arg(minute, 2, 10, QLatin1Char('0')));
         if(m_environmentPreviewSyncing || !m_pSettings)
             return;
@@ -689,16 +689,25 @@ void CView::initEnvironmentPreviewWidget()
         update();
     });
     m_environmentPreviewWidget->adjustSize();
+    m_timeOfDayWidget->adjustSize();
     positionEnvironmentPreviewWidget();
     m_environmentPreviewWidget->show();
+    m_timeOfDayWidget->show();
     m_environmentPreviewWidget->raise();
+    m_timeOfDayWidget->raise();
     applyEnvironmentCompatibilityMode();
 }
 
 void CView::positionEnvironmentPreviewWidget()
 {
+    int y = 12;
+    if(m_timeOfDayWidget)
+    {
+        m_timeOfDayWidget->move(12, y);
+        y += m_timeOfDayWidget->height() + 8;
+    }
     if(m_environmentPreviewWidget)
-        m_environmentPreviewWidget->move(12, 12);
+        m_environmentPreviewWidget->move(12, y);
 }
 
 void CView::applyEnvironmentCompatibilityMode()
@@ -746,12 +755,6 @@ void CView::syncEnvironmentPreviewWidget(float mapTimeHours)
     const int maximumMode = m_openGlesCompatibility ? 1 : 2;
     m_environmentPreviewMode->setCurrentIndex(
         qBound(0, mode ? mode->value() : maximumMode, maximumMode));
-    const bool timeEnabled = m_environmentPreviewMode->currentIndex() == 2;
-    m_environmentPreviewTimeLabel->setEnabled(timeEnabled);
-    m_environmentPreviewTime->setEnabled(timeEnabled);
-    m_environmentPreviewTime->setToolTip(timeEnabled
-        ? tr("Preview time of day")
-        : tr("Time of day is available only in Full environment mode"));
     if(!m_environmentPreviewTime->isSliderDown())
         m_environmentPreviewTime->setValue(qBound(0, minutes, 1439));
     m_environmentPreviewSyncing = false;
@@ -6471,6 +6474,29 @@ void CView::setCameraSpeedMultiplier(double multiplier)
     m_cam->setSpeedMultiplier(float(rounded));
     emit cameraSpeedMultiplierChanged(rounded);
     update();
+}
+
+bool CView::overridesWorldTime() const
+{
+    const COptBool* option = m_pSettings
+        ? dynamic_cast<const COptBool*>(m_pSettings->opt("overrideWorldTime")) : nullptr;
+    return option && option->value();
+}
+
+double CView::effectiveWorldTimeHours() const
+{
+    const COptInt* timeOption = m_pSettings
+        ? dynamic_cast<const COptInt*>(m_pSettings->opt("renderTimeOfDay")) : nullptr;
+    const float selectedTime = timeOption
+        ? ei::clockValueToHours(timeOption->value()) : 12.0f;
+    // Cave lighting deliberately ignores the preview clock, but runtime
+    // scripts and gameplay still need the time explicitly chosen by the user.
+    if(overridesWorldTime())
+        return double(selectedTime);
+    const CWorldSet* worldSet = m_environmentMob
+        ? &m_environmentMob->worldSet() : nullptr;
+    return double(ei::renderEnvironment(
+        worldSet, false, selectedTime, m_caveEnvironment).timeHours);
 }
 
 void CView::addLogicPoint(bool bLookPoint)

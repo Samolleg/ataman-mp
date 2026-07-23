@@ -23,10 +23,13 @@ alone.
   terrain and a tight, pivot-centred animated projection. Ordinary static
   meshes do not sample the broad map on themselves, avoiding non-stock roof
   and fence self-shadow acne.
-- The upper-left viewport widget selects authored-texture **Unlit**, legacy
-  **Simple shading**, or resource-driven **Full environment** preview. Moving
-  its clock enables the existing transient time override and never edits MOB
-  world settings.
+- The upper-left **Time of day** widget is independent from the **Lighting
+  mode** widget beneath it. Its clock remains available in **Unlit**, **Simple
+  shading**, and **Full environment** modes. Moving the clock enables the
+  transient time override and never edits MOB world settings.
+- A selected time override is delivered to JMV Test Current Map and every hot
+  reload through the hash-owned autorun-MOB bootstrap as
+  `FixWorldTime(hours)`. The staged primary MOB and its script remain exact.
 - Map-edge fog reaches full density over four world units: two authored
   two-unit terrain tiles. The
   authored sky cylinder is lowered by one of its own vertical rings and its
@@ -62,17 +65,21 @@ alone.
    rendering is disabled.
 8. Toggle fog, sky, map lights, and shadows independently, then repeat unit
    selection and picking checks.
-9. Switch Unlit, Simple shading, and Full environment in the viewport widget.
-   Collapse/restore it and scrub through midnight, morning, noon, and evening.
+9. Switch Unlit, Simple shading, and Full environment in the Lighting Mode
+   widget. Collapse/restore it and confirm the separate Time of Day control
+   remains enabled while scrubbing midnight, morning, noon, and evening.
    Entrance labels and selection overlays must remain authored-colour UI.
-10. At a map edge, confirm full fog begins no farther than one 32-unit tile
+10. With a JMV test running, set a distinctive editor time, invoke Test Current
+    Map, then change the time and hot reload. Confirm the game clock is fixed to
+    the selected value in both generations and the source MOB hash is unchanged.
+11. At a map edge, confirm full fog begins no farther than one 32-unit tile
     inward and the lower sky/cloud field blends into exactly the same colour.
-11. Inspect an idle humanoid and held weapon at 04:45, noon, and 16:00. Feet
+12. Inspect an idle humanoid and held weapon at 04:45, noon, and 16:00. Feet
     and the weapon must meet their shadow without the former caster-base gap.
-12. Toggle **Texture mipmapping** while viewing distant terrain. Enabled must
+13. Toggle **Texture mipmapping** while viewing distant terrain. Enabled must
     reduce shimmer/grain without changing character faces, armor, or weapons;
     disabled must restore nearest level-zero terrain sampling immediately.
-13. Load `gz5g`, `gz10g`, `bz7g`, or `gz20g` through a profile whose
+14. Load `gz5g`, `gz10g`, `bz7g`, or `gz20g` through a profile whose
     `map.txt` marks it `#sky cave`. Confirm there is no outdoor sky, the map
     fades into a black boundary, and moving the preview time does not rotate or
     recolor shadows. Confirm an ordinary `#sky normal` map remains outdoor.

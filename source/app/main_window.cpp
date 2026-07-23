@@ -2589,6 +2589,8 @@ void MainWindow::launchCurrentMapTest()
     }
     input.spawnZ = runtimeSpawn.z();
     input.godmode = isJmv && m_godmodeCheckBox && m_godmodeCheckBox->isChecked();
+    input.overrideWorldTime = isJmv && m_pView->overridesWorldTime();
+    input.worldTimeHours = m_pView->effectiveWorldTimeHours();
     input.borrowedMapIdentity = m_borrowedMapIdentity;
     if(isBase && !hotReloadRequested)
     {
