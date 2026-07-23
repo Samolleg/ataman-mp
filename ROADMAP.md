@@ -89,10 +89,14 @@ Current development line: `0.2.1-alpha.13` focused closed testing.
 ## 0.3.0 release goal
 
 Deliver the first supported landscape-editing release together with
-profile-aware visualization, validation, and safe regeneration of the AI
-navigation graph stored in a primary MOB or an external `.grp`. Geometry,
-liquid, and collision changes must mark navigation dirty, and `0.3.0` cannot be
-declared production-stable while the corresponding graph remains stale.
+profile-aware visualization and validation of the AI navigation graph stored
+in a primary MOB or an external `.grp`. Controlled Test Current Map validation
+confirmed that changed height and texture data propagate at runtime and that
+the player can navigate correctly around newly impassable terrain without an
+offline graph rebuild. Geometry, liquid, and collision changes therefore mark
+navigation as potentially stale for diagnostics and review, but graph
+regeneration is not a landscape-save or `0.3.0` release gate unless later
+controlled evidence demonstrates a graph-dependent case.
 
 MPR/SEC and AI-graph persistence remain separate lossless document
 transactions because the graph is not owned by the MPR. Graph regeneration is
@@ -129,9 +133,9 @@ stroke or ordinary MPR Save.
   unfrozen/frozen landscape pair as the controlled fixture.
 - [ ] Validate dimensions, complete byte coverage, boundary links, unexpected
   asymmetry, isolated regions/entrances, and opaque-plane changes. Existing
-  graph defects remain diagnostic; navigation-dirty edits require explicit
-  acknowledgement for Test Current Map and cannot satisfy the `0.3.0` release
-  gate until regenerated and validated.
+  graph defects and navigation-dirty edits remain diagnostic findings; Test
+  Current Map may proceed with an explicit warning while runtime validation
+  records whether the edited terrain actually causes a navigation defect.
 - [ ] Track terrain/object edits as navigation-dirty regions and retain the
   oversized-door runtime-regeneration convention as an explicit diagnostic.
 
@@ -230,14 +234,61 @@ next gate, and changed landscape saving remains disabled.
   including zone identity/type, entrances, destinations, minimap, music, and
   profile-specific metadata validation.
 
+## Minimap generation and texture-resource export
+
+- [ ] Extend the lossless `map.txt` model to preserve and edit the complete
+  `#maps` block: sector width/height, minimap texture identity, and the separate
+  objectives-screen texture identity. Never invent or overwrite objectives
+  metadata as a minimap side effect.
+- [ ] Add an existing-minimap viewer that resolves the referenced `.mmp`
+  through the active Base/JMV resource profile and reports its archive
+  provenance, format, dimensions, mip layout, and hash.
+- [ ] Implement a deterministic orthographic minimap bake following the
+  observed ZoneView contract: source BMP dimensions are sector width/height
+  multiplied by 128 pixels per sector.
+- [ ] Make an active collection the production bake input: its MPR, primary
+  MOB, and ordered supplemental MOBs provide the complete authored static
+  scene. Include terrain, overlays/liquids, lighting, and static geometry while
+  excluding dynamic units. Permit an MPR-only terrain bake, but label it as
+  incomplete when collection static geometry is absent.
+- [ ] Retain the full-resolution bake for review and regeneration, then convert
+  it to the game-facing 256x256 minimap MMP only after orientation, framing,
+  filtering, and resampling are proven against matching stock and JMV
+  ZoneView/MMP pairs.
+- [ ] Provide one **Export Texture to RES...** workflow. The selected
+  destination determines the operation:
+  - a missing path creates a new RES archive;
+  - an existing archive receives a new member after backup and staged rebuild;
+  - an existing member requires explicit Replace, Rename, or Cancel handling.
+  Allow any compatible user-selected archive, including the mod's
+  `textures.res`, while warning about time and temporary-disk cost for large
+  archives.
+- [ ] Treat archive "append" as a semantic member addition, never an in-place
+  byte append. Stage and freshly reopen the candidate, prove untouched member
+  names/order/metadata/raw bytes are unchanged, verify the new/replaced MMP,
+  then back up and atomically replace the destination.
+- [ ] Coordinate the `map.txt` reference update only after the texture archive
+  validates. A failed archive or metadata step must leave both destinations
+  recoverable and must never publish a dangling minimap name.
+- [ ] Prove profile-specific discovery and duplicate-name precedence for a
+  newly created RES before recommending a dedicated archive. Prefer unique
+  texture names so users do not accidentally replace another zone's minimap.
+- [ ] Add synthetic tests for pixels-per-sector dimensions, orientation,
+  deterministic repeat generation, static-geometry inclusion, dynamic-unit
+  exclusion, new-archive creation, existing-archive addition/replacement,
+  collision cancellation, untouched-member equality, failed validation, and
+  rollback. Keep proprietary ZoneView/stock correlation as separate private
+  runtime validation.
+
 - [ ] Classify edits as visual-only or navigation-affecting. Height, liquid,
   collision, bridge, door, and multi-level changes mark explicit navigation-
   dirty regions; uncertain material/type changes fail conservatively to dirty.
 - [ ] Keep MPR saving independent from graph regeneration while presenting the
   complete MPR + primary MOB/external GRP state as one map-validation result.
-- [ ] Prevent navigation-dirty maps from being reported as release-ready, and
-  require explicit acknowledgement before staging a stale graph for a
-  development-only Test Current Map run.
+- [ ] Report navigation-dirty state and graph discrepancies without blocking
+  landscape save or release readiness solely because an offline graph was not
+  rebuilt; escalate only when diagnostics or runtime validation demonstrate an
+  actual navigation defect.
 - [ ] Detect and preserve the known oversized-door runtime graph-regeneration
   convention.
 - [ ] Provide placement/navigation findings before save and test launch.
