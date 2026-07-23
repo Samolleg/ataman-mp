@@ -145,7 +145,10 @@ allocator independently proves a 100-byte allocation.
 
 For ordinary TendriSmoke the base constructor initializes `+0x128 = 1`,
 `+0x130..+0x138 = (0,0,0)`, `+0x140..+0x148 = (0,0,0)`, `+0x14C = 0`, and
-`+0x150 = 0`; this factory branch does not override them. The scale mutator at
+`+0x150 = 0`; this factory branch does not override them. The scheduler later
+refreshes `+0x140..+0x14C` from globals `0x7AF5DC..0x7AF5E8` at
+`0x496ECC..0x496F17` on every emitter quant, so their constructor zeros are not
+the runtime late-life motion values. The scale mutator at
 `0x485480` multiplies `+0x128` along with the spawn bounds, initial scale,
 vertical velocity, and displacement threshold. Field `+0x150 = 0` makes the
 Campfire family select render state 5/value 6, not the value-2 path used when
@@ -171,7 +174,13 @@ Confirmed particle-record initialization:
 - Z starts at emitter Z plus a random component multiplied by `0.3`.
 - `record +0x40 = 0.3` initial vertical velocity.
 
-The wrapper at `0x48ED60` calls this spawn callback and applies another randomized offset from emitter fields `+0x130/+0x134`, invokes world-height query `0x564070`, and then adjusts Z relative to emitter field `+0xA0`. The precise authored meaning of those fields is not yet established.
+The wrapper at `0x48ED60` calls this spawn callback and applies another
+randomized offset from emitter fields `+0x130/+0x134`, invokes world-height
+query `0x564070`, and then adjusts Z relative to emitter field `+0xA0`.
+However, the constructor branch at `0x485C3C` installs that wrapper only for
+type `0x2010`; ordinary TendriSmoke keeps `+0x1E0 = 0x48E9E0`. Therefore the
+wrapper and `+0x130/+0x134` offset are rejected as evidence for ordinary
+Campfire particle placement.
 
 ## Update callback (`0x48EC20`)
 
@@ -190,7 +199,40 @@ Confirmed behavior:
 7. Every tick, add vertical speed to Z.
 8. For frames below 2, also apply initial XYZ drift.
 9. For frames below 7, multiply scale by `0.85` each tick.
-10. For frames 7 and above, scale grows by the constant referenced at `0x73CE38` (currently interpreted as approximately `1.06`; its exact float must be recorded before treating that number as final), and movement incorporates emitter orientation fields `+0x140/+0x144/+0x148` plus fields around `+0x14C`.
+10. For frames 7 and above, scale is multiplied by the exact binary32 value
+    `1.059999942779541` (`14 AE 87 3F` at `0x73CE38`). After that multiply,
+    position receives
+    `newScale * emitter[+0x14C] * 0.15000000596046448 *
+    emitter[+0x140..+0x148]`, component by component. The motion constant is
+    binary32 `9A 99 19 3E` at `0x73CD18`. The emitter vector/scalar are the
+    four scheduler-refreshed globals described above; their higher-level engine
+    semantics remain unlabelled.
+
+This is multiplicative scale evolution, not endpoint interpolation inside the
+update callback. Because ordinary TendriSmoke has frame delay one, the atlas
+frame advances at the start of every surviving logical update. Frames below 7
+apply the exact factory multiplier `0.8500000238418579` (`9A 99 59 3F` at
+emitter `+0x114`); frames 7 and above use the exact growth multiplier above.
+
+## Render interpolation (`0x4976B0`)
+
+Before each update, the scheduler copies current position/scale from particle
+`+0x00..+0x0C` to the previous snapshot at `+0x10..+0x1C`, color from `+0x58`
+to `+0x5C`, and atlas frame from `+0x44` to `+0x48`
+(`0x4972DE..0x497308`). Render preparation clamps the engine's fractional
+logical-quant value to `[0,1]` and names it here as `t`; it then emits:
+
+- position and scale: `previous * (1 - t) + current * t` for all four floats;
+- ARGB color: the same per-channel linear interpolation, followed by the
+  engine's x87-to-integer conversion routine;
+- atlas rectangle: the current snapshotted frame `+0x48`, without frame-number
+  interpolation.
+
+The same snapshot initialization is performed when a particle is attached at
+`0x496A20`. TendriSmoke initializes current color to `0xFFFFFFFF` and copies it
+to the previous endpoint, and no Tendri update changes either endpoint.
+Consequently its interpolated color remains exactly opaque white; texture alpha
+and the confirmed blend state supply the visible transparency.
 
 ## Pool and render path
 
@@ -348,8 +390,11 @@ The current implementation is still partly inferred:
 1. Trace the server/authored sources of torch client fields `+0x20` and
    `+0x28`; confirm their exact kind and scale values for the fingerprinted
    `gz1g` torch family.
-2. Establish exact meanings of emitter fields `+0x128`, `+0x130`, `+0x134`,
-   and `+0x140..+0x14C` across multiple factories.
+2. Label the higher-level engine meaning and update provenance of globals
+   `0x7AF5DC..0x7AF5E8`, which the scheduler copies into ordinary TendriSmoke
+   `+0x140..+0x14C`; the exact consumers/formula are now established. Across
+   other factories, separately label `+0x128` and the type-`0x2010`-only
+   `+0x130..+0x138` vector without applying them to ordinary Campfire.
 3. Verify native OpenGL and ANGLE blend/color behavior from identical authored records.
 
 ## Required implementation discipline
