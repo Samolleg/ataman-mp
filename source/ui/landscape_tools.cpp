@@ -75,7 +75,7 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     layout->addWidget(m_sculptControls);
 
     QLabel* help = new QLabel(tr(
-        "Left-drag sculpts. Middle-drag keeps the normal camera control. Each drag is one undo step."), this);
+        "Left-drag sculpts. Alt+Wheel changes radius; Ctrl+Wheel changes strength; Wheel keeps camera zoom. Each drag is one undo step."), this);
     help->setWordWrap(true);
     form->addRow(help);
 
@@ -84,6 +84,7 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     QLabel* paintHelp = new QLabel(tr(
         "Automatic mode always covers the brush core, uses an exact or constrained nearest authored seam when available, and otherwise leaves a hard edge. "
         "Manual mode paints the selected existing atlas tile and rotation without blending. Size 1 paints one core tile. Right-click samples from the map. "
+        "Alt+Wheel changes brush size. Ctrl+Wheel selects the automatic material or rotates the manual tile; Wheel keeps camera zoom. "
         "Overlay painting changes only already-active overlay cells and never creates liquid implicitly."), this);
     paintHelp->setWordWrap(true);
     paintLayout->addWidget(paintHelp);
@@ -227,9 +228,25 @@ bool CLandscapeTools::landFamiliesAllowedInOverlay() const
     return editMode() == ELandscapeEditMode::OverlayPaint
         && m_allowLandFamiliesInOverlay->isChecked();
 }
+void CLandscapeTools::adjustSculptRadius(int steps)
+{
+    m_radius->setValue(m_radius->value() + steps * m_radius->singleStep());
+}
+void CLandscapeTools::adjustSculptStrength(int steps)
+{
+    m_strength->setValue(m_strength->value() + steps * m_strength->singleStep());
+}
 void CLandscapeTools::adjustPaintSize(int steps)
 {
     m_paintRadius->setValue(m_paintRadius->value() + steps);
+}
+void CLandscapeTools::adjustPaintTerrainType(int steps)
+{
+    if(m_paintTerrainType->count() <= 0)
+        return;
+    const int current = qMax(0, m_paintTerrainType->currentIndex());
+    const int count = m_paintTerrainType->count();
+    m_paintTerrainType->setCurrentIndex((current + steps % count + count) % count);
 }
 qint32 CLandscapeTools::paintTerrainType(bool* selected) const
 {

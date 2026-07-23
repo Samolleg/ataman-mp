@@ -1189,22 +1189,33 @@ void CTileBrush::mouseMoveEvent(COperation* pOp, QMouseEvent* pEvent)
 
 void CTileBrush::wheelEvent(COperation* pOp, QWheelEvent* pEvent)
 {
-    if(!(pEvent->modifiers() & Qt::AltModifier))
-    {
-        pOp->camera()->enlarge(pEvent->delta() > 0);
-        return;
-    }
     const int step = pEvent->delta() > 0 ? 1 : -1;
-    if(m_pView->manualTilePaintingEnabled())
+    if(pEvent->modifiers() & Qt::ControlModifier)
     {
-        m_pView->addTileRotation(step);
-        bool bLand = CScene::getInstance()->isLandTileEditMode();
-        m_pView->updatePreviewTile(m_pView->getTerrainPos(bLand), bLand);
-        CStatusConnector::getInstance()->updateStatus(
-            "brush.ico", "Manual atlas tile rotation changed. Alt+Wheel rotates; Wheel controls the camera.");
+        if(m_pView->manualTilePaintingEnabled())
+        {
+            m_pView->addTileRotation(step);
+            const bool bLand = CScene::getInstance()->isLandTileEditMode();
+            m_pView->updatePreviewTile(m_pView->getTerrainPos(bLand), bLand);
+            CStatusConnector::getInstance()->updateStatus(
+                "brush.ico", "Manual atlas tile rotation changed. Ctrl+Wheel rotates; Alt+Wheel resizes; Wheel controls the camera.");
+        }
+        else
+        {
+            m_pView->adjustTerrainPaintMaterial(step);
+            CStatusConnector::getInstance()->updateStatus(
+                "brush.ico", "Automatic terrain material changed. Ctrl+Wheel selects material; Alt+Wheel resizes; Wheel controls the camera.");
+        }
+        pEvent->accept();
         return;
     }
-    m_pView->adjustTerrainPaintSize(step);
-    CStatusConnector::getInstance()->updateStatus(
-        "brush.ico", "Semantic brush size changed. Alt+Wheel resizes; Wheel controls the camera.");
+    if(pEvent->modifiers() & Qt::AltModifier)
+    {
+        m_pView->adjustTerrainPaintSize(step);
+        CStatusConnector::getInstance()->updateStatus(
+            "brush.ico", "Terrain brush size changed. Alt+Wheel resizes; Ctrl+Wheel changes material or manual rotation; Wheel controls the camera.");
+        pEvent->accept();
+        return;
+    }
+    pOp->camera()->enlarge(pEvent->delta() > 0);
 }

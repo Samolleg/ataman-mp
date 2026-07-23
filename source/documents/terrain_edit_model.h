@@ -100,6 +100,11 @@ struct STerrainTileCommand
     bool isEmpty() const { return deltas.isEmpty(); }
 };
 
+// Compose sequential live-preview commands into one reversible before/after
+// transaction. Repeated cells retain their first value and final value.
+void appendTerrainTileCommand(STerrainTileCommand* stroke,
+                              const STerrainTileCommand& stamp);
+
 struct STerrainTransitionVariant
 {
     STerrainTransitionSignature signature;

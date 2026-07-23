@@ -2705,7 +2705,9 @@ void MainWindow::closeAll()
     {
         m_undoStack->clear();
         m_pView->unloadMob("");
-        m_pView->unloadLand();
+        // isExitAllowed() already obtained the user's save/discard decision.
+        // Do not ask for the same dirty MPR decision again during unload.
+        m_pView->unloadLand(false);
     }
 }
 

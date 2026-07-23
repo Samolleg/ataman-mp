@@ -126,6 +126,38 @@ quint16 clampedHeight(float value, bool* wasClamped = nullptr)
 }
 }
 
+void appendTerrainTileCommand(STerrainTileCommand* stroke,
+                              const STerrainTileCommand& stamp)
+{
+    if(!stroke)
+        return;
+    for(const STerrainTileDelta& delta : stamp.deltas)
+    {
+        int existingIndex = -1;
+        for(int index = 0; index < stroke->deltas.size(); ++index)
+        {
+            const STerrainTileDelta& existing = stroke->deltas.at(index);
+            if(existing.globalX == delta.globalX
+               && existing.globalY == delta.globalY
+               && existing.layer == delta.layer)
+            {
+                existingIndex = index;
+                break;
+            }
+        }
+        if(existingIndex < 0)
+            stroke->deltas.append(delta);
+        else
+        {
+            STerrainTileDelta& existing = stroke->deltas[existingIndex];
+            existing.after = delta.after;
+            existing.diagnosticStrokeId = delta.diagnosticStrokeId;
+            if(existing.before == existing.after)
+                stroke->deltas.remove(existingIndex);
+        }
+    }
+}
+
 STerrainTransitionSignature CTerrainTransitionCatalog::rotated(
     const STerrainTransitionSignature& signature, int clockwiseQuarterTurns)
 {

@@ -83,7 +83,7 @@ public:
 
     void loadLandscape(const QFileInfo& filePath);
     void refreshAfterResourceSetup();
-    void unloadLand();
+    void unloadLand(bool confirmDirty = true);
     void saveLand();
     void saveLandAs();
     bool loadMob(QFileInfo& filePath);
@@ -179,6 +179,7 @@ public:
     void updatePreviewTile(QVector3D posOnLand, bool bLand = true);
     void addTileRotation(int step);
     void adjustTerrainPaintSize(int steps);
+    void adjustTerrainPaintMaterial(int steps);
     bool manualTilePaintingEnabled() const;
     float terrainPaintStampSpacing() const;
     void setDrawWater(bool bDraw = true);
@@ -321,6 +322,7 @@ private:
     STerrainAtlasAnalysis m_terrainAtlasAnalysis;
     QMap<qint32, int> m_terrainMaterialRepresentatives;
     QVector<STerrainTileDelta> m_terrainPaintAudit;
+    STerrainTileCommand m_tileStrokeCommand;
     QVector<STerrainPaintAuditAction> m_terrainPaintActions;
     int m_terrainPaintActionId{0};
     quint32 m_terrainSemanticSeed{0};

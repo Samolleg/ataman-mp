@@ -955,14 +955,16 @@ void CView::loadLandscape(const QFileInfo& filePath)
     updateTileForm(true);
     rebuildTerrainAutoCatalog();
     emit selectionStateChanged(nSelectedNodes() > 0);
+    if(m_landscapeTools && m_landscapeTools->editingEnabled())
+        syncLandscapeToolState();
 }
 
-void CView::unloadLand()
+void CView::unloadLand(bool confirmDirty)
 {
     if(!m_pLand->isMprLoad())
         return;
 
-    if(m_pLand->isDirty())
+    if(confirmDirty && m_pLand->isDirty())
     {
         QMessageBox::StandardButton reply;
         reply = QMessageBox::question(this, "Unload MPR", m_pLand->filePath().baseName() + " has unsaved changes.\nDo you want to save changes?", QMessageBox::Save|QMessageBox::No|QMessageBox::Cancel);
@@ -2738,7 +2740,10 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
             ++m_tileStrokeApplied;
             m_tileStrokeChangedTiles += audit.deltas.size();
             m_terrainPaintAudit += command.deltas;
-            m_pUndoStack->push(new CTerrainTilePreviewCommand(this, command, true));
+            // Compose all stamps into one before/after command. Live preview
+            // remains incremental, but undo/redo applies each final tile once
+            // and rebuilds each touched sector once.
+            appendTerrainTileCommand(&m_tileStrokeCommand, command);
         }
     }
     const QString actionLog = QString("Terrain paint action %1 stroke %2: %3, layer=%4 material=%5 center=%6,%7 radius=%8 core=%9 affected=%10 changed=%11 solver=%12 nodes=%13")
@@ -2866,6 +2871,14 @@ void CView::adjustTerrainPaintSize(int steps)
     update();
 }
 
+void CView::adjustTerrainPaintMaterial(int steps)
+{
+    if(!m_landscapeTools || manualTilePaintingEnabled())
+        return;
+    m_landscapeTools->adjustPaintTerrainType(steps);
+    update();
+}
+
 bool CView::manualTilePaintingEnabled() const
 {
     return m_landscapeTools && m_landscapeTools->manualTileSelectionEnabled();
@@ -2898,8 +2911,10 @@ void CView::endTileBrushGroup()
 {
     if(m_tilePaintStrokeActive)
     {
-        m_pUndoStack->endMacro();
         m_tilePaintStrokeActive = false;
+        if(m_pUndoStack && !m_tileStrokeCommand.isEmpty())
+            m_pUndoStack->push(new CTerrainTilePreviewCommand(
+                this, m_tileStrokeCommand, true));
         m_pLand->setDirty(m_terrainEdit.isDirty());
         emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMprDirtyFlag,
                                   m_terrainEdit.isDirty() ? "*" : "");
@@ -2921,8 +2936,9 @@ void CView::beginTileBrushGroup()
 {
     if(m_tilePaintStrokeActive || !m_pUndoStack)
         return;
-    m_pUndoStack->beginMacro(tr("Paint terrain tiles"));
     m_tilePaintStrokeActive = true;
+    m_tileStrokeCommand = STerrainTileCommand();
+    m_tileStrokeCommand.description = tr("Paint terrain tiles");
     m_lastTerrainPaintCenterValid = false;
     m_tileStrokeActions = 0;
     m_tileStrokeApplied = 0;
@@ -3804,6 +3820,26 @@ bool CView::terrainPositionAt(const QPoint& viewportPosition, QVector3D* positio
 
 void CView::wheelEvent(QWheelEvent* event)
 {
+    if(m_landscapeTools && m_landscapeTools->sculptEnabled()
+       && (event->modifiers() & (Qt::AltModifier | Qt::ControlModifier)))
+    {
+        const int step = event->delta() > 0 ? 1 : -1;
+        if(event->modifiers() & Qt::ControlModifier)
+        {
+            m_landscapeTools->adjustSculptStrength(step);
+            emit updateMsg(tr("Sculpt strength: %1").arg(
+                m_landscapeTools->strength(), 0, 'f', 2));
+        }
+        else
+        {
+            m_landscapeTools->adjustSculptRadius(step);
+            emit updateMsg(tr("Sculpt radius: %1 vertices").arg(
+                m_landscapeTools->radius(), 0, 'f', 1));
+        }
+        update();
+        event->accept();
+        return;
+    }
     m_pOp->wheelEvent(event);
 }
 

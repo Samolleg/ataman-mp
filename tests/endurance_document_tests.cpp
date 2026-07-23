@@ -307,6 +307,7 @@ private slots:
     void terrainHeightmapImportIsDeterministicAndSeamAware();
     void terrainDiagnosticsArePreApplyAndPolicyExplicit();
     void terrainTilePaintingIsUndoableLocalizedAndNamespaceSafe();
+    void terrainTileStrokeCompositionKeepsFirstAndFinalValues();
     void zone1NamespaceTemplateSeparatesLandOverlayAndVariants();
     void zone1NamespaceTemplateMatchesPrivateFixture();
     void terrainHeightTransactionReopensAndPreservesOverlay();
@@ -2115,6 +2116,25 @@ void EnduranceDocumentTests::zone1NamespaceTemplateSeparatesLandOverlayAndVarian
         QVERIFY2(families.size() <= 3,
                  "Zone1 unexpectedly contains a four-family land tile");
     }
+    bool hasThreeDarkOneLime = false;
+    bool hasOneDarkThreeLime = false;
+    for(const STerrainTransitionSignature& authored :
+        analysis.landCatalog.gridSignatures())
+    {
+        const qint32 corners[] = {authored.northWest, authored.northEast,
+                                  authored.southEast, authored.southWest};
+        int dark = 0;
+        int lime = 0;
+        for(qint32 corner : corners)
+        {
+            dark += corner == 3 ? 1 : 0;
+            lime += corner == 7 ? 1 : 0;
+        }
+        hasThreeDarkOneLime |= dark == 3 && lime == 1;
+        hasOneDarkThreeLime |= dark == 1 && lime == 3;
+    }
+    QVERIFY(!hasThreeDarkOneLime);
+    QVERIFY(hasOneDarkThreeLime);
     QMap<qint32, int> existingFamilyPreference;
     existingFamilyPreference.insert(4, 20);
     QCOMPARE(analysis.landCatalog.shortestMaterialPath(7, 3, existingFamilyPreference),
@@ -2214,6 +2234,41 @@ void EnduranceDocumentTests::zone1NamespaceTemplateSeparatesLandOverlayAndVarian
     CValidationReport countReport;
     QVERIFY(!CTerrainAtlasAnalyzer::analyze("zone1", 448, &countReport).usable);
     QVERIFY(countReport.hasErrors());
+}
+
+void EnduranceDocumentTests::terrainTileStrokeCompositionKeepsFirstAndFinalValues()
+{
+    const auto delta = [](int x, int y, ETerrainTileLayer layer,
+                          quint16 before, quint16 after) {
+        STerrainTileDelta value;
+        value.globalX = x;
+        value.globalY = y;
+        value.layer = layer;
+        value.before = before;
+        value.after = after;
+        return value;
+    };
+    STerrainTileCommand stroke;
+    STerrainTileCommand first;
+    first.deltas << delta(4, 5, ETerrainTileLayer::Land, 10, 11)
+                 << delta(8, 9, ETerrainTileLayer::Land, 20, 21);
+    STerrainTileCommand second;
+    second.deltas << delta(4, 5, ETerrainTileLayer::Land, 11, 12)
+                  << delta(8, 9, ETerrainTileLayer::Land, 21, 20)
+                  << delta(4, 5, ETerrainTileLayer::Overlay, 30, 31);
+
+    appendTerrainTileCommand(&stroke, first);
+    appendTerrainTileCommand(&stroke, second);
+
+    QCOMPARE(stroke.deltas.size(), 2);
+    QCOMPARE(stroke.deltas.at(0).globalX, 4);
+    QCOMPARE(stroke.deltas.at(0).globalY, 5);
+    QCOMPARE(stroke.deltas.at(0).layer, ETerrainTileLayer::Land);
+    QCOMPARE(stroke.deltas.at(0).before, quint16(10));
+    QCOMPARE(stroke.deltas.at(0).after, quint16(12));
+    QCOMPARE(stroke.deltas.at(1).layer, ETerrainTileLayer::Overlay);
+    QCOMPARE(stroke.deltas.at(1).before, quint16(30));
+    QCOMPARE(stroke.deltas.at(1).after, quint16(31));
 }
 
 void EnduranceDocumentTests::zone1NamespaceTemplateMatchesPrivateFixture()

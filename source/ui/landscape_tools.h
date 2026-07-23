@@ -44,7 +44,10 @@ public:
     ETerrainTileBrushShape paintShape() const;
     bool manualTileSelectionEnabled() const;
     bool landFamiliesAllowedInOverlay() const;
+    void adjustSculptRadius(int steps);
+    void adjustSculptStrength(int steps);
     void adjustPaintSize(int steps);
+    void adjustPaintTerrainType(int steps);
     qint32 paintTerrainType(bool* selected = nullptr) const;
     void setPaintTerrainTypes(const QVector<QPair<qint32, QString>>& landTypes,
                               const QVector<QPair<qint32, QString>>& underwaterTypes,
