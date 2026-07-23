@@ -931,8 +931,13 @@ void CView::initializeGL()
     //glEnable(GL_EXT_texture_filter_anisotropic);
     glEnable(GL_DEPTH_TEST);
     //glEnable(GL_CULL_FACE); //draw only front faces (disable if need draw both sides)
-    glAlphaFunc(GL_GREATER, 0.1f);
-    glEnable(GL_ALPHA_TEST);
+    const QOpenGLContext* initialContext = QOpenGLContext::currentContext();
+    const bool fixedAlphaTest = initialContext && !initialContext->isOpenGLES();
+    if(fixedAlphaTest)
+    {
+        glAlphaFunc(GL_GREATER, 0.1f);
+        glEnable(GL_ALPHA_TEST);
+    }
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     initShaders();
@@ -1053,7 +1058,9 @@ void CView::drawSkybox(const QMatrix4x4& cameraMatrix,
     glDepthMask(GL_FALSE);
     glDepthFunc(GL_LEQUAL);
     glDisable(GL_BLEND);
-    glDisable(GL_ALPHA_TEST);
+    const QOpenGLContext* skyContext = QOpenGLContext::currentContext();
+    if(skyContext && !skyContext->isOpenGLES())
+        glDisable(GL_ALPHA_TEST);
     m_skyBuffer.bind();
     const int position = m_skyProgram.attributeLocation("a_position");
     const int texture = m_skyProgram.attributeLocation("a_texture");
@@ -1068,7 +1075,8 @@ void CView::drawSkybox(const QMatrix4x4& cameraMatrix,
     m_skyBuffer.release();
     glDepthMask(GL_TRUE);
     glDepthFunc(GL_LESS);
-    glEnable(GL_ALPHA_TEST);
+    if(skyContext && !skyContext->isOpenGLES())
+        glEnable(GL_ALPHA_TEST);
     glEnable(GL_BLEND);
 }
 
@@ -1348,7 +1356,9 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
     }
 
     glDisable(GL_BLEND);
-    glDisable(GL_ALPHA_TEST);
+    const QOpenGLContext* shadowContext = QOpenGLContext::currentContext();
+    if(shadowContext && !shadowContext->isOpenGLES())
+        glDisable(GL_ALPHA_TEST);
 
     // Depth is encoded into an RGBA8 color target. OpenGL enables dithering
     // by default, which is desirable for visible color but corrupts packed
@@ -1424,7 +1434,8 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
 #endif
     if(restoreDithering)
         glEnable(GL_DITHER);
-    glEnable(GL_ALPHA_TEST);
+    if(shadowContext && !shadowContext->isOpenGLES())
+        glEnable(GL_ALPHA_TEST);
     glEnable(GL_BLEND);
     return true;
 }
@@ -1719,7 +1730,9 @@ void CView::paintGL()
     glViewport(0, 0, width(), height());
     glEnable(GL_DEPTH_TEST);
     glDepthMask(GL_TRUE);
-    glEnable(GL_ALPHA_TEST);
+    QOpenGLContext* paintContext = QOpenGLContext::currentContext();
+    if(paintContext && !paintContext->isOpenGLES())
+        glEnable(GL_ALPHA_TEST);
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);

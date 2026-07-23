@@ -3,6 +3,7 @@
 #include "node.h"
 #include "camera.h"
 #include <QWheelEvent>
+#include <QOpenGLContext>
 
 CPreview::CPreview(QWidget *parent):
     QGLWidget(parent)
@@ -38,7 +39,9 @@ void CPreview::initializeGL()
     glEnable(GL_DEPTH_TEST);
     //glEnable(GL_CULL_FACE); //draw only front faces (disable if need draw both sides)
 
-    glEnable(GL_ALPHA_TEST);
+    QOpenGLContext* context = QOpenGLContext::currentContext();
+    if(context && !context->isOpenGLES())
+        glEnable(GL_ALPHA_TEST);
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     //doneCurrent();

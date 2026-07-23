@@ -242,7 +242,12 @@ void CPreviewTile::updateTile(const CTile& tile, int tIndex, int rotation, int m
     m_vertexBuf.allocate(m_arrLandVrtData.data(), m_arrLandVrtData.count()*int(sizeof(SVertexData)));
     m_vertexBuf.release();
 
-    QVector<ushort> arrTileInd{0,1,4,3, 1,2,5,4, 3,4,7,6, 4,5,8,7}; // indices of quad vertices
+    const QVector<ushort> arrTileInd{
+        0,1,4, 0,4,3,
+        1,2,5, 1,5,4,
+        3,4,7, 3,7,6,
+        4,5,8, 4,8,7
+    };
     m_indexBuf.bind();
     m_indexBuf.allocate(arrTileInd.data(), arrTileInd.size() * sizeof(ushort));
     m_indexBuf.release();
@@ -271,5 +276,5 @@ void CPreviewTile::draw(QOpenGLShaderProgram* program)
     program->enableAttributeArray(textureLocation);
     program->setAttributeBuffer(textureLocation, GL_FLOAT, offset, 2, int(sizeof(SVertexData)));
     m_indexBuf.bind();
-    glDrawElements(GL_QUADS, 16, GL_UNSIGNED_SHORT, nullptr); // 16 indices for tile
+    glDrawElements(GL_TRIANGLES, 24, GL_UNSIGNED_SHORT, nullptr);
 }

@@ -113,6 +113,8 @@ void main(void)
                       cos(phase * 0.83) * 0.00042 + wave * 0.00010);
   }
   vec4 texColor = texture2D(qt_Texture0, sampledUv);
+  if (texColor.a <= 0.1)
+    discard;
   vec3 light = vec3(1.0);
   vec3 cascadeDebugColor = vec3(0.0);
   if (u_environmentEnabled)

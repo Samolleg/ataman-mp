@@ -94,6 +94,10 @@ float cascadeVisibility(vec3 staticProjected, vec3 dynamicProjected,
 void main(void)
 {    
     vec4 resColor = customColor.w == 0.0 ? texture2D(qt_Texture0, v_texture) : customColor;
+    // Fixed-function alpha testing is unavailable in OpenGL ES 2.0. Keep the
+    // legacy EI cutout threshold in the fragment shader on every backend.
+    if (resColor.a <= 0.1)
+      discard;
     vec3 cascadeDebugColor = vec3(0.0);
 
     if (u_environmentEnabled && customColor.w == 0.0)

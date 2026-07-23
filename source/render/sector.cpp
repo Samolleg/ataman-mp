@@ -488,7 +488,15 @@ void CSector::updatePosition()
 
     QVector<ushort> aInd;
     ushort indOffset = 0;
-    QVector<ushort> arrTileInd{0,1,4,3, 1,2,5,4, 3,4,7,6, 4,5,8,7}; // indices of quad vertices
+    // OpenGL ES 2.0 (the Qt 5 ANGLE path) does not support GL_QUADS. Store
+    // the same four terrain cells as ordinary triangles so desktop and GLES
+    // consume one portable index buffer.
+    const QVector<ushort> arrTileInd{
+        0,1,4, 0,4,3,
+        1,2,5, 1,5,4,
+        3,4,7, 3,7,6,
+        4,5,8, 4,8,7
+    };
     for(int i(0); i<256; ++i) // 256 - tile number per sector
     {
         for(auto ind: arrTileInd)
@@ -580,14 +588,14 @@ void CSector::draw(QOpenGLShaderProgram* program)
     program->setAttributeBuffer(textureLocation, GL_FLOAT, offset, 2, int(sizeof(SVertexData)));
 
     m_indexBuf.bind();
-    constexpr int indexNum = 256*16; // numTiles * index per tile
-    glDrawElements(GL_QUADS, indexNum, GL_UNSIGNED_SHORT, nullptr);
+    constexpr int indexNum = 256*24; // 256 tiles * 4 cells * 2 triangles * 3 indices
+    glDrawElements(GL_TRIANGLES, indexNum, GL_UNSIGNED_SHORT, nullptr);
     RenderPerformanceContext& performance = RenderPerformanceContext::instance();
     if(performance.collecting())
     {
         ++performance.counters().drawCalls;
         ++performance.counters().terrainDrawCalls;
-        performance.counters().triangles += quint64(indexNum / 2);
+        performance.counters().triangles += quint64(indexNum / 3);
     }
 
 }
@@ -616,13 +624,14 @@ void CSector::drawWater(QOpenGLShaderProgram *program)
     program->setAttributeBuffer(textureLocation, GL_FLOAT, offset, 2, int(sizeof(SVertexData)));
 
     m_waterIndexBuf.bind();
-    glDrawElements(GL_QUADS, m_arrWaterVrtData.count(), GL_UNSIGNED_SHORT, nullptr);
+    const int indexCount = (m_arrWaterVrtData.count() / 9) * 24;
+    glDrawElements(GL_TRIANGLES, indexCount, GL_UNSIGNED_SHORT, nullptr);
     RenderPerformanceContext& performance = RenderPerformanceContext::instance();
     if(performance.collecting())
     {
         ++performance.counters().drawCalls;
         ++performance.counters().terrainDrawCalls;
-        performance.counters().triangles += quint64(m_arrWaterVrtData.count() / 2);
+        performance.counters().triangles += quint64(indexCount / 3);
     }
 }
 

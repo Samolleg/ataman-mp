@@ -9,6 +9,15 @@
 #include <QSurfaceFormat>
 #include <QCryptographicHash>
 
+namespace
+{
+bool supportsFixedFunctionAlphaTest()
+{
+    QOpenGLContext* context = QOpenGLContext::currentContext();
+    return context && !context->isOpenGLES();
+}
+}
+
 RenderQueueContext& RenderQueueContext::instance()
 {
     static RenderQueueContext context;
@@ -373,16 +382,19 @@ void RenderQueueContext::flush()
             if(activeClass == ERenderMaterialClass::Opaque)
             {
                 glDisable(GL_BLEND);
-                glDisable(GL_ALPHA_TEST);
+                if(supportsFixedFunctionAlphaTest())
+                    glDisable(GL_ALPHA_TEST);
             }
             else if(activeClass == ERenderMaterialClass::Cutout)
             {
                 glDisable(GL_BLEND);
-                glEnable(GL_ALPHA_TEST);
+                if(supportsFixedFunctionAlphaTest())
+                    glEnable(GL_ALPHA_TEST);
             }
             else
             {
-                glEnable(GL_ALPHA_TEST);
+                if(supportsFixedFunctionAlphaTest())
+                    glEnable(GL_ALPHA_TEST);
                 glEnable(GL_BLEND);
             }
         }
@@ -438,7 +450,8 @@ void RenderQueueContext::flush()
     m_program->setUniformValue(m_partAnimatedLocation, false);
     m_program->setUniformValue(m_highlightLocation, false);
     m_program->setUniformValue("u_receiveDynamicShadow", true);
-    glEnable(GL_ALPHA_TEST);
+    if(supportsFixedFunctionAlphaTest())
+        glEnable(GL_ALPHA_TEST);
     glEnable(GL_BLEND);
     if(collectPerformance)
         performance.counters().queueDrawNanoseconds += quint64(m_phaseTimer.nsecsElapsed());
