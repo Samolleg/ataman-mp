@@ -7,55 +7,92 @@ class ParticleAnimationTests : public QObject
     Q_OBJECT
 
 private slots:
-    void campfireUsesAuthoredFrameRanges();
-    void smokeStartsAtFrameEight();
-    void atlasUsesBottomUpGameFrameOrder();
-    void samplesAreDeterministicAndBounded();
+    void atlasUsesNativeTopRowFirstInsets();
+    void isaacPreviewStreamIsDeterministic();
+    void schedulerUsesAttemptsRatherThanSlots();
+    void prewarmedEmittersAreDeterministicAndBounded();
+    void fireOnlyNeverReachesSmokeFrames();
 };
 
-void ParticleAnimationTests::campfireUsesAuthoredFrameRanges()
+void ParticleAnimationTests::atlasUsesNativeTopRowFirstInsets()
 {
-    const auto flame = ei::particle::sample(
-        ei::particle::Family::FireAndSmoke, 0, 0, 0);
-    const auto smoke = ei::particle::sample(
-        ei::particle::Family::FireAndSmoke, 12, 0, 0);
-    QCOMPARE(flame.frame, 0);
-    QVERIFY(!flame.smoke);
-    QCOMPARE(smoke.frame, 9);
-    QVERIFY(smoke.smoke);
+    const float inset = 1.0f / 512.0f;
+    QCOMPARE(ei::particle::atlasUv(0),
+             QVector4D(inset, 1.0f - inset,
+                       0.25f - 2.0f * inset, -0.25f + 2.0f * inset));
+    QCOMPARE(ei::particle::atlasUv(7),
+             QVector4D(0.75f + inset, 0.75f - inset,
+                       0.25f - 2.0f * inset, -0.25f + 2.0f * inset));
+    QCOMPARE(ei::particle::atlasUv(14),
+             QVector4D(0.50f + inset, 0.25f - inset,
+                       0.25f - 2.0f * inset, -0.25f + 2.0f * inset));
 }
 
-void ParticleAnimationTests::smokeStartsAtFrameEight()
+void ParticleAnimationTests::isaacPreviewStreamIsDeterministic()
 {
-    const auto sample = ei::particle::sample(
-        ei::particle::Family::SmokeOnly, 0, 0, 0);
-    QCOMPARE(sample.frame, 8);
-    QVERIFY(sample.smoke);
-}
+    ei::particle::Isaac32 pinned(1234u);
+    QCOMPARE(pinned.next(), quint32(0x760A7513u));
+    QCOMPARE(pinned.next(), quint32(0xAF6737FBu));
+    QCOMPARE(pinned.next(), quint32(0xF25CDBD8u));
+    QCOMPARE(pinned.next(), quint32(0x9B07A5AAu));
 
-void ParticleAnimationTests::atlasUsesBottomUpGameFrameOrder()
-{
-    QCOMPARE(ei::particle::atlasUv(0), QVector4D(0.0f, 0.75f, 0.25f, 0.25f));
-    QCOMPARE(ei::particle::atlasUv(7), QVector4D(0.75f, 0.50f, 0.25f, 0.25f));
-    QCOMPARE(ei::particle::atlasUv(8), QVector4D(0.0f, 0.25f, 0.25f, 0.25f));
-    QCOMPARE(ei::particle::atlasUv(14), QVector4D(0.50f, 0.0f, 0.25f, 0.25f));
-}
-
-void ParticleAnimationTests::samplesAreDeterministicAndBounded()
-{
-    for(int tick = 0; tick < 128; ++tick)
+    ei::particle::Isaac32 first(1234u);
+    ei::particle::Isaac32 second(1234u);
+    ei::particle::Isaac32 different(1235u);
+    bool differs = false;
+    for(int i = 0; i < 1024; ++i)
     {
-        for(int slot = 0; slot < ei::particle::kEmitterSlots; ++slot)
-        {
-            const auto first = ei::particle::sample(
-                ei::particle::Family::FireAndSmoke, tick, slot, 1234u);
-            const auto second = ei::particle::sample(
-                ei::particle::Family::FireAndSmoke, tick, slot, 1234u);
-            QCOMPARE(first.frame, second.frame);
-            QVERIFY(first.frame >= 0);
-            QVERIFY(first.frame <= 14);
-        }
+        const quint32 value = first.next();
+        QCOMPARE(value, second.next());
+        differs = differs || value != different.next();
     }
+    QVERIFY(differs);
+}
+
+void ParticleAnimationTests::schedulerUsesAttemptsRatherThanSlots()
+{
+    ei::particle::TendriEmitter emitter;
+    const QVector3D origin(1.0f, 2.0f, 3.0f);
+    emitter.advanceTo(10, 7u, 0x2001u, origin, 0.8f,
+                      QVector3D(), 0.0f, 0);
+    QCOMPARE(emitter.activeCount(), 0);
+    emitter.advanceTo(11, 7u, 0x2001u, origin, 0.8f,
+                      QVector3D(), 0.0f, 0);
+    QVERIFY(emitter.activeCount() >= 1); // >50 probability guarantees fallback
+    QVERIFY(emitter.activeCount() <= ei::particle::kSpawnAttempts);
+}
+
+void ParticleAnimationTests::prewarmedEmittersAreDeterministicAndBounded()
+{
+    ei::particle::TendriEmitter first;
+    ei::particle::TendriEmitter second;
+    const QVector3D origin(4.0f, -2.0f, 1.0f);
+    const QVector3D wind(-0.72819996f, -0.68536466f, 0.0f);
+    first.advanceTo(100, 42u, 0x2001u, origin, 0.8f, wind, 0.2f, 60);
+    second.advanceTo(100, 42u, 0x2001u, origin, 0.8f, wind, 0.2f, 60);
+    const auto a = first.samples(0.375f);
+    const auto b = second.samples(0.375f);
+    QCOMPARE(a.size(), b.size());
+    QVERIFY(a.size() > ei::particle::kSpawnAttempts);
+    QVERIFY(a.size() <= ei::particle::kActiveLimit);
+    for(int i = 0; i < a.size(); ++i)
+    {
+        QCOMPARE(a[i].position, b[i].position);
+        QCOMPARE(a[i].scale, b[i].scale);
+        QCOMPARE(a[i].frame, b[i].frame);
+        QVERIFY(a[i].frame >= 0 && a[i].frame < ei::particle::kTerminalFrame);
+    }
+}
+
+void ParticleAnimationTests::fireOnlyNeverReachesSmokeFrames()
+{
+    ei::particle::TendriEmitter emitter;
+    emitter.advanceTo(200, 99u, 0x2003u, QVector3D(), 0.8f,
+                      QVector3D(), 0.0f, 60);
+    const auto samples = emitter.samples(0.5f);
+    QVERIFY(!samples.isEmpty());
+    for(const auto& sample : samples)
+        QVERIFY(sample.frame >= 0 && sample.frame <= 7);
 }
 
 QTEST_APPLESS_MAIN(ParticleAnimationTests)

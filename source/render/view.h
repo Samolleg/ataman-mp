@@ -22,6 +22,7 @@
 #include "types.h"
 #include "select_window.h"
 #include "spatial_grid.h"
+#include "particle_animation.h"
 
 class QLineEdit;
 class QFrame;
@@ -324,6 +325,7 @@ private:
     QOpenGLBuffer m_particleBuffer{QOpenGLBuffer::VertexBuffer};
     bool m_particleInitializationAttempted{false};
     bool m_particleRendererReady{false};
+    QHash<const CNode*, ei::particle::TendriEmitter> m_tendriEmitters;
     QOpenGLShaderProgram m_shadowProgram;
     QOpenGLFramebufferObject* m_shadowFbo{nullptr};
     QOpenGLFramebufferObject* m_dynamicShadowFbo{nullptr};

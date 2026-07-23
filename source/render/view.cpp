@@ -62,6 +62,7 @@
 #include "render_environment.h"
 #include "shadow_cascade.h"
 #include "particle_animation.h"
+#include "utils.h"
 #include "part.h"
 #include "objects/light.h"
 #include "objects/particle.h"
@@ -2285,7 +2286,19 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
     ei::gl::BlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     bool additiveBlend = false;
     QOpenGLTexture* boundTexture = nullptr;
-    const float timeSeconds = float(QDateTime::currentMSecsSinceEpoch() % 600000) / 1000.0f;
+    const qint64 particleTimeMs = QDateTime::currentMSecsSinceEpoch();
+    const float timeSeconds = float(particleTimeMs % 600000) / 1000.0f;
+    const qint64 logicalTick = particleTimeMs / ei::particle::kLogicalQuantMilliseconds;
+    const float logicalFraction = float(
+        particleTimeMs % ei::particle::kLogicalQuantMilliseconds)
+        / float(ei::particle::kLogicalQuantMilliseconds);
+    const CWorldSet* particleWorldSet = m_environmentMob
+        ? &m_environmentMob->worldSet() : nullptr;
+    const QVector3D windDirection = particleWorldSet
+        ? util::vec3FromString(particleWorldSet->data(eWsTypeWindDir))
+        : QVector3D();
+    const float windStrength = particleWorldSet
+        ? particleWorldSet->data(eWsTypeWindStr).toFloat() : 0.0f;
     RenderPerformanceContext& performance = RenderPerformanceContext::instance();
 
     const auto drawSprite = [&](const QVector3D& center, float scale, float aspect, float rotation,
@@ -2327,41 +2340,22 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
         }
     };
 
-    const auto drawFireSmoke = [&](const QVector3D& origin, float authoredScale,
-                                   uint seed, bool selected, uint kind)
+    const auto drawFireSmoke = [&](const CNode* owner, const QVector3D& origin,
+                                   float authoredScale, uint seed, uint kind,
+                                   int prewarmTicks)
     {
-        const float baseScale = qBound(0.25f, authoredScale, 8.0f);
-        const int logicalTick = int(std::floor(timeSeconds
-            * float(ei::particle::kLogicalTicksPerSecond)));
-        const ei::particle::Family family = ei::particle::familyForKind(kind);
         QOpenGLTexture* atlas = tendrilSmokeTexture
             ? tendrilSmokeTexture : fireSmokeTexture;
-
-        // game.exe's CampFire constructor creates six records with a 32-tick
-        // life. Frames 0..7 are the authored flame sequence; frames 8..14 are
-        // smoke and advance once per four logical ticks. Render the complete
-        // 4x4 cells: the texture already contains its silhouette and alpha.
-        for(int slot = ei::particle::kEmitterSlots - 1; slot >= 0; --slot)
+        ei::particle::TendriEmitter& emitter = m_tendriEmitters[owner];
+        emitter.advanceTo(logicalTick, seed, kind, origin, authoredScale,
+                          windDirection, windStrength, prewarmTicks);
+        const QVector<ei::particle::RenderSample> samples
+            = emitter.samples(logicalFraction);
+        for(const ei::particle::RenderSample& sample : samples)
         {
-            const ei::particle::FrameSample frame = ei::particle::sample(
-                family, logicalTick, slot, seed);
-            const float age = frame.normalizedAge;
-            const float lateralX = ei::particle::signedNoise(seed, slot, 0x91e10da5u);
-            const float lateralY = ei::particle::signedNoise(seed, slot, 0x6d2b79f5u);
-            const float rise = frame.smoke
-                ? (0.70f + age * 1.65f) : (0.30f + age * 0.85f);
-            const QVector3D center = origin
-                + QVector3D(lateralX * 0.20f * baseScale,
-                            lateralY * 0.20f * baseScale,
-                            rise * baseScale);
-            const float spriteScale = baseScale * (frame.smoke
-                ? (0.62f + age * 0.38f) : (0.78f + age * 0.12f));
-            QVector4D tint = selected
-                ? QVector4D(0.42f, 0.88f, 1.0f, 0.92f)
-                : QVector4D(1.0f, 1.0f, 1.0f,
-                            frame.smoke ? (0.74f * (1.0f - age * 0.35f)) : 0.96f);
-            drawSprite(center, spriteScale, 1.0f, 0.0f, tint, atlas,
-                       ei::particle::atlasUv(frame.frame), !frame.smoke,
+            drawSprite(sample.position, sample.scale, 1.0f, 0.0f,
+                       QVector4D(1.0f, 1.0f, 1.0f, 1.0f), atlas,
+                       ei::particle::atlasUv(sample.frame), false,
                        atlas == nullptr, 0.18f);
         }
     };
@@ -2381,9 +2375,8 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
             {
                 // A torch remains an ordinary textured world object. Its
                 // authored TORCH_PTLINK only adds this attached effect.
-                drawFireSmoke(torch->particleWorldPosition(), 1.0f,
-                              torch->mapId(), torch->nodeState() == ENodeState::eSelect,
-                              8193u);
+                drawFireSmoke(torch, torch->particleWorldPosition(), torch->power(),
+                              torch->mapId(), 0x2001u, 60);
                 continue;
             }
 
@@ -2411,10 +2404,16 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
             if(isPersistentFireParticle(particle->kind())
                     || isPersistentSmokeParticle(particle->kind()))
             {
-                drawFireSmoke(center, authoredScale * style.scaleMultiplier,
-                              particle->mapId(),
-                              particle->nodeState() == ENodeState::eSelect,
-                              particle->kind());
+                drawFireSmoke(particle, center, authoredScale, particle->mapId(),
+                              particle->kind(), 0);
+                // Selection is an editor affordance, not a color mutation of
+                // the stock particle population.
+                if(particle->nodeState() == ENodeState::eSelect)
+                    drawSprite(center, qMax(0.3f, authoredScale * 0.35f),
+                               1.0f, 0.0f,
+                               QVector4D(0.10f, 0.90f, 1.0f, 0.72f), nullptr,
+                               QVector4D(0.0f, 0.0f, 1.0f, 1.0f), false,
+                               true, 0.12f);
                 continue;
             }
             drawSprite(center, authoredScale * style.scaleMultiplier * pulse,
@@ -4028,6 +4027,7 @@ bool CView::unloadMobDocument(CMob* mob, bool promptForSave)
     if(m_pUndoStack)
         m_pUndoStack->clear();
     m_hiddenMobs.remove(mob);
+    m_tendriEmitters.clear();
     m_aMob.removeAt(removedIndex);
     if(removedEnvironment)
         m_environmentMob = m_aMob.isEmpty() ? nullptr : m_aMob.first();
@@ -4225,6 +4225,7 @@ void CView::unloadMob(QString mobName)
     }
     if(m_pUndoStack)
         m_pUndoStack->clear();
+    m_tendriEmitters.clear();
     ei::log(eLogInfo, "unloading mob " + mobName);
     CMob* pMob = nullptr;
     if(mobName.isEmpty())

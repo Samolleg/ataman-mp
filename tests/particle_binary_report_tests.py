@@ -128,6 +128,18 @@ class ParticleBinaryReportTests(unittest.TestCase):
             "8B5E588B7E5C",
             fixture["sites"]["render_argb_interpolation"]["bytes"],
         )
+        self.assertEqual(
+            fixture["ranges"]["isaac_refill"]["start_va"],
+            "0x0049EE70",
+        )
+        self.assertIn(
+            "B979379E",
+            fixture["sites"]["isaac_golden_ratio_and_mix"]["bytes"],
+        )
+        self.assertIn(
+            "8B0D449D7A00",
+            fixture["sites"]["isaac_global_state_access"]["bytes"],
+        )
 
     def test_reference_hash_mismatch_is_rejected_before_parsing(self):
         with self.assertRaisesRegex(ValueError, "does not match required"):

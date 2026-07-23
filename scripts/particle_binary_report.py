@@ -35,6 +35,8 @@ RANGES = {
     "world_wind_wrapper": (0x564190, 0x5641E6),
     "world_wind_script_handler": (0x669800, 0x669842),
     "direct3d_particle_blend_setup": (0x56A1CD, 0x56A1F1),
+    "isaac_refill": (0x49EE70, 0x49F149),
+    "isaac_entropy_initialization": (0x49F150, 0x49F4B0),
 }
 SITES = {
     "global_render_lookup_type_0x2001": (0x40EBD8, 18),
@@ -71,6 +73,10 @@ SITES = {
     "blend_alpha_value_6": (0x498AA7, 28),
     "direct3d_source_blend_srcalpha": (0x56A1CD, 18),
     "direct3d_destination_blend_invsrcalpha": (0x56A1DF, 18),
+    "particle_spawn_random_calls": (0x48EA2B, 0x1E5),
+    "particle_late_survival_random": (0x48EC8A, 0x30),
+    "isaac_golden_ratio_and_mix": (0x49F16F, 165),
+    "isaac_global_state_access": (0x48EA2B, 40),
 }
 CONSTANTS = {
     "half_float": (0x73B86C, "f"),

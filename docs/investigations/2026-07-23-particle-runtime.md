@@ -393,6 +393,32 @@ Other exact constants used by these callbacks are now fingerprinted:
 - `0x73C348`: float `0x3C94F209` = `0.0181818176060915`, the logical-quant
   normalization multiplied by the 55 ms interval.
 
+### Random-number generator and reproducibility boundary
+
+Every random draw used by the ordinary Tendri spawn and update callbacks
+comes from the same global generator: state at `0x7A9D40`, remaining-result
+index at `0x7A9D44`, and the 256-word result array at `0x7A9D48`. Refill
+routine `0x49EE70..0x49F148` is Bob Jenkins' ISAAC construction: it maintains
+256-word state/results, uses golden-ratio word `0x9E3779B9`, performs the
+standard eight-word initialization mix, and applies ISAAC's four alternating
+shift/xor steps in its refill loop. Initializer `0x49F150..0x49F4AF` obtains
+external clock/system entropy through `0x49F660`; the stock game therefore
+does not have a resource-derived or otherwise repeatable random realization.
+
+The scheduler and Tendri callbacks consume this global stream, rather than a
+per-emitter PRNG. The spawn callback consumes one word for its 40-percent
+half-scale/expanded-bounds branch and three normalized words for X, Y, and Z.
+The late update consumes a word and tests its low two bits, killing when they
+are zero. These accesses and the complete ISAAC routines are pinned in the
+binary fixture.
+
+Consequently a deterministic editor preview can reproduce the exact ISAAC
+algorithm, draw order, distributions, and callback equations, but cannot
+reproduce the game's particular run without capturing the game's transient
+global state. EI Mapper must use an explicitly editor-local deterministic seed
+for stable validation; this is a reproducibility adaptation, not an authored
+particle rule and not evidence for a different RNG.
+
 ### Atlas rectangles and orientation
 
 The common factory tail at `0x4885B4..0x488781` constructs the atlas rectangle
@@ -421,14 +447,30 @@ orientation is incorrect; it is not a subjective screenshot adjustment.
   it cannot prove that core flame, peripheral flame, and smoke use one emitter.
 - Visual descriptions and captured GIFs are validation targets and search pointers only. They do not establish density, lifetime, blend, color, or movement rules.
 
-## Current editor mismatch
+## Implemented editor model
 
-The current implementation is still partly inferred:
+`source/render/particle_animation.h` now implements the confirmed ordinary
+Tendri scheduler and callbacks instead of the rejected six-slot
+approximation: 55 ms quants, six probability attempts plus fallback, the
+500-active cap, two-stage retirement, exact spawn bounds/draw order, frame
+delays and survival, vertical/drift/wind motion, scale constants, and
+snapshot interpolation. Its ISAAC implementation uses a stable editor-local
+seed for the reproducibility reason established above.
 
-- `source/render/particle_animation.h` creates six deterministic slots staggered over 32 ticks, with fire frames 0–7 and smoke frames 8–14.
-- `source/render/view.cpp` function `drawFireSmoke` uses invented rise, scale, alpha, tint, and noise curves.
-- These approximations explain why the editor resembles fire but does not match the game's dense core, secondary flame sprites, or expanding orange-to-gray smoke column.
-- Do not tune these constants further by eye. Replace them only with resource and executable evidence.
+`source/render/view.cpp` now passes authored particle scale (and exact torch
+strength), applies the loaded MOB's WORLD_SET wind, uses the native top-row
+atlas rectangles and inset, submits opaque-white texture color with standard
+alpha blending, and performs the native 60-quant torch prewarm. Campfire
+flame and smoke are rendered as one population. Selected particle-source
+nodes receive a separate procedural cyan editor marker; selection no longer
+recolors the gameplay Tendri sprites.
+
+Superseded implementation notes:
+
+- The former helper created six deterministic slots staggered over 32 ticks;
+  the scheduler evidence rejects that model.
+- The former `drawFireSmoke` rise, scale, alpha, tint, and hash-noise curves
+  were inferred and have been removed.
 
 ## Open questions, in priority order
 
