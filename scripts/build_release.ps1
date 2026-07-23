@@ -9,6 +9,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
+. (Join-Path $PSScriptRoot 'build_repository_identity.ps1')
 
 function Resolve-ToolDirectory {
     param(
@@ -73,23 +74,28 @@ if (($repositoryRoot -match '[^\x00-\x7F]') -or ($buildPath -match '[^\x00-\x7F]
     # repository mapping by its project and Git identity as a fallback.
     if (-not $existingDrive) {
         $projectHash = (Get-FileHash -LiteralPath (Join-Path $repositoryRoot 'ei_maper.pro') -Algorithm SHA256).Hash
-        $gitHead = (Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot '.git\HEAD')).Trim()
+        $gitIdentity = Get-EnduranceGitRepositoryIdentity -Root $repositoryRoot
+        if (-not $gitIdentity) {
+            throw "Could not determine Git repository identity for '$repositoryRoot'."
+        }
         foreach ($drive in (Get-PSDrive -PSProvider FileSystem)) {
             $candidateProject = Join-Path $drive.Root 'ei_maper.pro'
-            $candidateHead = Join-Path $drive.Root '.git\HEAD'
             # Disconnected network shares and sandbox/virtual drives may still
             # be enumerated by Get-PSDrive while rejecting even Test-Path.
             # They are not candidate repository mappings and must not abort an
             # otherwise local release build.
             try {
                 $hasProject = Test-Path -LiteralPath $candidateProject -PathType Leaf -ErrorAction Stop
-                $hasHead = Test-Path -LiteralPath $candidateHead -PathType Leaf -ErrorAction Stop
             } catch {
                 continue
             }
-            if ($hasProject -and $hasHead -and
+            if (-not $hasProject) {
+                continue
+            }
+            $candidateIdentity = Get-EnduranceGitRepositoryIdentity -Root $drive.Root
+            if ($candidateIdentity -and
                 ((Get-FileHash -LiteralPath $candidateProject -Algorithm SHA256).Hash -eq $projectHash) -and
-                ((Get-Content -Raw -LiteralPath $candidateHead).Trim() -eq $gitHead)) {
+                ($candidateIdentity -eq $gitIdentity)) {
                 $existingDrive = "$($drive.Name):"
                 break
             }

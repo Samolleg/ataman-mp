@@ -74,6 +74,7 @@ after finalization; do not bypass either step for convenience builds.
 | `uic`, `moc`, or `rcc` exits with `-1073741515` / `0xC0000135` | A Qt or MinGW runtime DLL is missing from the child-process `PATH`; this is not a source error. | Use `build_release.cmd` with the correct `-QtBin` and `-MinGwBin`, or set `EI_MAPPER_QT_BIN` and `EI_MAPPER_MINGW_BIN`. |
 | PowerShell says that running scripts is disabled | The machine's execution policy blocks direct `.ps1` invocation. | Use `build_release.cmd`. Its bypass applies only to that child process and does not change system policy. |
 | qmake displays the repository path as `??`, mojibake, or cannot write `Makefile.Release` | Qt 5.12 cannot reliably process the non-ASCII repository/build path. | Keep the shadow directory inside the repository and use the wrapper; it reuses or creates a temporary ASCII `subst` path and removes mappings it owns. |
+| The wrapper cannot find `.git\HEAD` in a linked worktree | A Git worktree uses a UTF-8 `.git` pointer file instead of a `.git` directory. | Use the current wrapper. It resolves normal repositories and linked worktrees without assuming `.git\HEAD` exists. |
 | `Test-Path` reports access denied for an unrelated mapped, network, or virtual drive | The drive is enumerated by PowerShell but is not readable while the wrapper searches for an existing ASCII repository mapping. | Current wrappers skip inaccessible drives automatically. If this appears in an older checkout, update the build scripts rather than granting the build access to unrelated drives. |
 | qmake cannot rewrite a generated `.rc`, Makefile, or object file | A compiler process from an interrupted/timed-out build may still own the file. | Let `qmake`, `mingw32-make`, `uic`, and `moc` finish or exit, then rerun the wrapper. Do not delete a live shadow tree. |
 | `VERSION` changed but `--version` still prints the previous value | qmake regenerated the Makefile, but Make does not track changes to compiler command-line definitions as source dependencies. | Build in a fresh shadow directory for every packaged version and verify the executable with `--version` before staging it. |
@@ -86,6 +87,14 @@ that opens the GUI and may leave version/setup windows behind. Use `--version`,
 `--ui-widget-check`, the focused tests, and the package validator.
 
 ## Unit tests
+
+The build-wrapper identity regression creates an isolated temporary repository,
+a linked worktree under a Unicode path, and an ASCII `subst` mapping. It removes
+all three after the check:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File tests\build_release_worktree_tests.ps1
+```
 
 ```powershell
 Set-Location tests
