@@ -200,7 +200,23 @@ fixture form.
 
 ## TendriSmoke factory and layout
 
-The string `TendriSmoke` is at VA `0x78AEA4`. Its factory path reaches the constructor at `0x485B72`. Nearby registered particle families include Banshee, Tornado, Fireworks, PoisonCloud, Healing, Vulkan, Explosion, Stench, Link, and AcidRay.
+The string `TendriSmoke\0` is pinned at VA `0x78AEA4` as bytes
+`54 65 6E 64 72 69 53 6D 6F 6B 65 00`. Its factory path reaches the constructor
+at `0x485B72`. Nearby registered particle families include Banshee, Tornado,
+Fireworks, PoisonCloud, Healing, Vulkan, Explosion, Stench, Link, and AcidRay.
+
+The read-only Jamais Vu 1.35 `config.ini` fixture is 2,627 bytes with SHA-256
+`4F623E975DA1BEE8170B9E67EECE60604D5BF24E111FBB7486B63FF1AAC636DA`.
+Its final `textures.res` mapping is exactly `textures.res=res\\textures.res`.
+That resolved archive is the previously fingerprinted Jamais Vu `textures.res`
+(SHA-256
+`2E8CA42FB75FAC12E5659C563C547FEE0F72D6C1B6E2E1C454B3072E3BE0703B`),
+whose `tendrismoke.mmp` is the editor fixture's exact payload (SHA-256
+`D7FCA4D4FC6DDBB52F8024B57EFD56E8871A8BE5BBE22A684AF6E9FD41FED987`).
+This rejects selection of the base-game TendriSmoke atlas as the cause of the
+remaining smoke-width/color discrepancy. The fixture records the complete
+configuration so repeated resource-order checks do not depend on an installed
+mod's mutable state.
 
 Confirmed constructor values:
 

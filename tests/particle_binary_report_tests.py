@@ -32,6 +32,10 @@ class ParticleBinaryReportTests(unittest.TestCase):
             "01200000",
         )
         self.assertEqual(
+            fixture["sites"]["tendri_texture_name"]["bytes"],
+            "54656E647269536D6F6B6500",
+        )
+        self.assertEqual(
             fixture["ranges"]["particle_scale_mutator"]["sha256"],
             "D0328F6AB7F419CB2A8F63BF9632A1BCADFAFF9398EB70F8E59A96A3E0953E24",
         )

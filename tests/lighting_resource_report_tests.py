@@ -24,6 +24,16 @@ class LightingResourceReportTests(unittest.TestCase):
                              ["LightsGipat.ini"])
             self.assertIn("time00 = 1, 2, 3", report["members"][0]["text_cp1251"])
 
+    def test_directory_does_not_read_unmatched_files(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "LightsGipat.ini").write_bytes(b"[sky]\n")
+            unreadable = root / "ignored.bin"
+            unreadable.mkdir()
+            report = MODULE.report(root, ["lights*.ini"])
+            self.assertEqual([entry["name"] for entry in report["members"]],
+                             ["LightsGipat.ini"])
+
     def test_res_report_rejects_out_of_bounds_member(self):
         header = struct.pack("<4I", MODULE.RES_SIGNATURE, 1, 16, 1)
         entry = struct.pack("<iIIIHI", 0, 100, 9999, 0, 1, 0)

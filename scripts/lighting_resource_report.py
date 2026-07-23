@@ -44,9 +44,16 @@ def report(path: Path, patterns: list[str]) -> dict:
     lowered = [pattern.lower() for pattern in patterns]
     selected = []
     if path.is_dir():
-        source_items = ((str(item.relative_to(path)).replace("\\", "/"),
-                         int(item.stat().st_mtime), item.read_bytes())
-                        for item in path.rglob("*") if item.is_file())
+        def matching_directory_items():
+            for item in path.rglob("*"):
+                if not item.is_file():
+                    continue
+                name = str(item.relative_to(path)).replace("\\", "/")
+                if not any(fnmatch.fnmatchcase(name.lower(), pattern)
+                           for pattern in lowered):
+                    continue
+                yield name, int(item.stat().st_mtime), item.read_bytes()
+        source_items = matching_directory_items()
         source = {"path": str(path.resolve()), "kind": "directory"}
     else:
         data = path.read_bytes()

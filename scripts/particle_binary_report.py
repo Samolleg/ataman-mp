@@ -45,6 +45,7 @@ RANGES = {
     "isaac_entropy_initialization": (0x49F150, 0x49F4B0),
 }
 SITES = {
+    "tendri_texture_name": (0x78AEA4, 12),
     "global_render_lookup_type_0x2001": (0x40EBD8, 18),
     "scale_mutator_all_fields": (0x485480, 0xA3),
     "global_render_lookup_call": (0x4575AC, 26),
