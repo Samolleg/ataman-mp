@@ -161,3 +161,17 @@ applicable items are evidenced:
 
 Lava in `gz10g` is not on this list: it is confirmed MPR liquid/terrain data,
 not a particle emitter.
+
+## All-type editor test scene
+
+The repeatable generator `scripts/build_particle_catalog_mob.ps1` builds a
+minimal supplemental MOB with one scale-1 standalone record for each of the 83
+public particle IDs. The default 10-by-9 layout uses 3 world-unit centers
+(1.5 terrain tiles), sequential names and IDs, and an adjacent JSON manifest.
+
+The current generated artifact is
+`artifacts/particle-catalog-grid/all-particles-grid.mob`. It is intended for
+loading by itself over EI Mapper's neutral grid or alongside a suitable MPR.
+Large effects can be regenerated with wider spacing. Standalone presence in
+this catalog does not replace attached or transient native controls for types
+whose real owner supplies additional parameters.

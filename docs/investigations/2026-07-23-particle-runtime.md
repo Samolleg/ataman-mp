@@ -810,3 +810,33 @@ Superseded implementation notes:
 - Preserve the editor-only particle marker independently of gameplay sprites; the marker remains selectable and is not part of the effect.
 - Validate native OpenGL and ANGLE separately.
 - Update this ledger with each confirmed finding before implementing it, so context compaction cannot reset the investigation.
+
+## Deterministic all-type editor catalog
+
+`scripts/build_particle_catalog_mob.ps1` creates a supplemental MOB containing
+one standalone `PARTICL` record for every public particle type from 8192 through
+8274. It clones a structurally valid authored particle record through the
+fingerprinted MobExplorer serializer instead of synthesizing MOB container
+bytes. Both input MOBs are read-only and the output must be a separate path.
+
+The generated control at
+`artifacts/particle-catalog-grid/all-particles-grid.mob` has:
+
+- 83 unique particle records and no other objects;
+- particle IDs 900000 through 900082;
+- type IDs 8192 through 8274 in row-major order;
+- a 10-by-9 grid starting at `(16, 16, 0)`;
+- center spacing of 3 world units, or 1.5 terrain tiles, and authored scale 1;
+- SHA-256
+  `75C6E1A2D6F524264EB616A4189CC8139A9158955F341F261A4E5CB4EB6E9867`.
+
+The independent particle MOB reporter finds exactly 83 unique IDs and types.
+EI Mapper strict validation covers all 12,094 bytes, finds 83 objects, and
+performs a byte-identical unchanged serialization. A second generation from
+the same fingerprinted inputs produces the identical output hash. The adjacent
+JSON manifest records the complete layout and input/output fingerprints.
+
+This catalog is an editor rendering inventory, not proof that every native
+family can operate as a standalone map source. Carrier-dependent, transient,
+moving, wall, and spell-owned types require separate native controls with their
+real owner parameters before their visual behavior can be called reconstructed.
