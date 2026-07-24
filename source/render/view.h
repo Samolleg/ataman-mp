@@ -398,6 +398,9 @@ private:
     QHash<const CNode*, ei::particle::PortalStarEmitter> m_portalStarEmitters;
     QHash<const CNode*, ei::particle::PortalEmitter> m_portalEmitters;
     QHash<const CNode*, ei::particle::CylinderEmitter> m_cylinderEmitters;
+    QHash<const CNode*, ei::particle::StarFlashEmitter> m_starFlashEmitters;
+    QHash<const CNode*, ei::particle::SparksEmitter> m_sparksEmitters;
+    QHash<const CNode*, ei::particle::VisionStarEmitter> m_visionStarEmitters;
     QHash<const CNode*, ei::particle::TornadoEmitter> m_tornadoEmitters;
     QHash<const CNode*, ei::particle::LightningBlastEmitter> m_lightningBlastEmitters;
     QHash<const CNode*, ei::particle::CastingEmitter> m_castingEmitters;

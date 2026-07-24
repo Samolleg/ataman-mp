@@ -3122,6 +3122,43 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
                        texture == nullptr, 0.18f);
     };
 
+    const auto drawStarFlash = [&](const CNode* owner, const QVector3D& origin,
+                                   float authoredScale, bool acid, uint seed)
+    {
+        ei::particle::StarFlashEmitter& emitter = m_starFlashEmitters[owner];
+        emitter.advanceTo(logicalTick, seed, origin, authoredScale);
+        QOpenGLTexture* texture = acid ? acidRayTexture : fireArrowSmokeTexture;
+        for(const ei::particle::EffectRenderSample& sample : emitter.samples())
+            drawSprite(sample.position, sample.scale, 1.0f, 0.0f,
+                       QVector4D(1.0f, 1.0f, 1.0f, sample.alpha), texture,
+                       ei::particle::atlasUv(sample.frame), false,
+                       texture == nullptr, 0.18f);
+    };
+
+    const auto drawSparks = [&](const CNode* owner, const QVector3D& origin,
+                                float authoredScale, uint seed)
+    {
+        ei::particle::SparksEmitter& emitter = m_sparksEmitters[owner];
+        emitter.advanceTo(logicalTick, seed, origin, authoredScale);
+        for(const ei::particle::EffectRenderSample& sample : emitter.samples())
+            drawSprite(sample.position, sample.scale, 1.0f, 0.0f,
+                       QVector4D(1.0f, 1.0f, 1.0f, sample.alpha),
+                       casting6Texture, ei::particle::atlasUv(sample.frame), true,
+                       casting6Texture == nullptr, 0.18f);
+    };
+
+    const auto drawVisionStar = [&](const CNode* owner, const QVector3D& origin,
+                                    float authoredScale, int subtype, uint seed)
+    {
+        ei::particle::VisionStarEmitter& emitter = m_visionStarEmitters[owner];
+        emitter.advanceTo(logicalTick, seed, origin, authoredScale, subtype);
+        for(const ei::particle::EffectRenderSample& sample : emitter.samples())
+            drawSprite(sample.position, sample.scale, 1.0f, 0.0f,
+                       QVector4D(1.0f, 1.0f, 1.0f, sample.alpha), stunTexture,
+                       ei::particle::atlasUv(sample.frame), true,
+                       stunTexture == nullptr, 0.18f);
+    };
+
     for(CMob* mob : m_aMob)
     {
         if(!isMobVisible(mob))
@@ -3287,6 +3324,38 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
             {
                 drawCylinder(particle, center, authoredScale,
                              particle->kind() == 8256u, particle->mapId());
+                if(particle->nodeState() == ENodeState::eSelect)
+                    drawSprite(center, qMax(0.3f, authoredScale * 0.35f), 1.0f, 0.0f,
+                               QVector4D(0.10f, 0.90f, 1.0f, 0.72f), nullptr,
+                               QVector4D(0.0f, 0.0f, 1.0f, 1.0f), false, true, 0.12f);
+                continue;
+            }
+            if(particle->kind() == 8257u || particle->kind() == 8258u)
+            {
+                drawStarFlash(particle, center, authoredScale,
+                              particle->kind() == 8258u, particle->mapId());
+                if(particle->nodeState() == ENodeState::eSelect)
+                    drawSprite(center, qMax(0.3f, authoredScale * 0.35f), 1.0f, 0.0f,
+                               QVector4D(0.10f, 0.90f, 1.0f, 0.72f), nullptr,
+                               QVector4D(0.0f, 0.0f, 1.0f, 1.0f), false, true, 0.12f);
+                continue;
+            }
+            if(particle->kind() == 8259u)
+            {
+                drawSparks(particle, center, authoredScale, particle->mapId());
+                if(particle->nodeState() == ENodeState::eSelect)
+                    drawSprite(center, qMax(0.3f, authoredScale * 0.35f), 1.0f, 0.0f,
+                               QVector4D(0.10f, 0.90f, 1.0f, 0.72f), nullptr,
+                               QVector4D(0.0f, 0.0f, 1.0f, 1.0f), false, true, 0.12f);
+                continue;
+            }
+            if((particle->kind() >= 8260u && particle->kind() <= 8262u)
+                    || particle->kind() == 8268u)
+            {
+                const int subtype = particle->kind() == 8268u
+                    ? 3 : int(particle->kind() - 8260u);
+                drawVisionStar(particle, center, authoredScale, subtype,
+                               particle->mapId());
                 if(particle->nodeState() == ENodeState::eSelect)
                     drawSprite(center, qMax(0.3f, authoredScale * 0.35f), 1.0f, 0.0f,
                                QVector4D(0.10f, 0.90f, 1.0f, 0.72f), nullptr,
@@ -5626,6 +5695,9 @@ bool CView::unloadMobDocument(CMob* mob, bool promptForSave)
     m_portalStarEmitters.clear();
     m_portalEmitters.clear();
     m_cylinderEmitters.clear();
+    m_starFlashEmitters.clear();
+    m_sparksEmitters.clear();
+    m_visionStarEmitters.clear();
     m_fireArrowEmitters.clear();
     m_acidRayEmitters.clear();
     m_blueGasEmitters.clear();
@@ -5842,6 +5914,9 @@ void CView::unloadMob(QString mobName)
     m_portalStarEmitters.clear();
     m_portalEmitters.clear();
     m_cylinderEmitters.clear();
+    m_starFlashEmitters.clear();
+    m_sparksEmitters.clear();
+    m_visionStarEmitters.clear();
     m_fireArrowEmitters.clear();
     m_acidRayEmitters.clear();
     m_blueGasEmitters.clear();

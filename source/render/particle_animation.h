@@ -3974,6 +3974,382 @@ private:
     bool m_initialized{false};
 };
 
+struct StarFlashParticle
+{
+    QVector3D position;
+    float scale{0.0f};
+    float pendingScale{0.0f};
+    int lifetime{3};
+};
+
+class StarFlashEmitter
+{
+public:
+    static constexpr int kPreviewCycleTicks = 16;
+
+    void advanceTo(qint64 logicalTick, quint32 seed, const QVector3D& origin,
+                   float authoredScale)
+    {
+        const int cycleTick = int(logicalTick % kPreviewCycleTicks);
+        if(!m_initialized || seed != m_seed || cycleTick < m_cycleTick)
+            reset(seed, origin, authoredScale);
+        m_origin = origin;
+        m_authoredScale = qFuzzyIsNull(authoredScale) ? 1.0f : qAbs(authoredScale);
+        while(m_cycleTick < cycleTick)
+        {
+            advanceOne();
+            ++m_cycleTick;
+        }
+    }
+
+    QVector<EffectRenderSample> samples() const
+    {
+        if(!m_active || m_particle.scale <= 0.0f)
+            return {};
+        EffectRenderSample sample;
+        sample.position = m_particle.position;
+        sample.scale = billboardDiameter(m_particle.scale);
+        sample.alpha = 1.0f;
+        sample.frame = 15;
+        return {sample};
+    }
+
+    int activeCount() const { return m_active ? 1 : 0; }
+
+private:
+    void reset(quint32 seed, const QVector3D& origin, float authoredScale)
+    {
+        m_seed = seed;
+        m_origin = origin;
+        m_authoredScale = qFuzzyIsNull(authoredScale) ? 1.0f : qAbs(authoredScale);
+        m_particle = StarFlashParticle{};
+        m_active = false;
+        m_spawned = false;
+        m_cycleTick = 0;
+        m_initialized = true;
+    }
+
+    void advanceOne()
+    {
+        if(!m_spawned)
+        {
+            m_particle.position = m_origin;
+            m_particle.pendingScale = m_authoredScale;
+            m_particle.scale = 0.0f;
+            m_particle.lifetime = 3;
+            m_active = true;
+            m_spawned = true;
+            return;
+        }
+        if(!m_active)
+            return;
+        if(--m_particle.lifetime <= 0)
+        {
+            m_particle.scale = 0.0f;
+            m_active = false;
+            return;
+        }
+        m_particle.position = m_origin;
+        m_particle.scale = m_particle.pendingScale;
+        m_particle.pendingScale *= 0.9f;
+    }
+
+    StarFlashParticle m_particle;
+    QVector3D m_origin;
+    float m_authoredScale{1.0f};
+    quint32 m_seed{0};
+    int m_cycleTick{0};
+    bool m_active{false};
+    bool m_spawned{false};
+    bool m_initialized{false};
+};
+
+struct SparksParticle
+{
+    QVector3D position;
+    QVector3D velocity;
+    float scale{0.0f};
+    float alpha{1.0f};
+    int lifetime{6};
+    int frame{0};
+    bool sourceFlash{false};
+};
+
+class SparksEmitter
+{
+public:
+    static constexpr int kPreviewCycleTicks = 24;
+
+    void advanceTo(qint64 logicalTick, quint32 seed, const QVector3D& origin,
+                   float authoredScale)
+    {
+        const int cycleTick = int(logicalTick % kPreviewCycleTicks);
+        if(!m_initialized || seed != m_seed || cycleTick < m_cycleTick)
+            reset(seed, origin, authoredScale);
+        m_origin = origin;
+        m_authoredScale = qFuzzyIsNull(authoredScale) ? 1.0f : qAbs(authoredScale);
+        while(m_cycleTick < cycleTick)
+        {
+            advanceOne();
+            ++m_cycleTick;
+        }
+    }
+
+    QVector<EffectRenderSample> samples() const
+    {
+        QVector<EffectRenderSample> result;
+        result.reserve(m_particles.size());
+        for(const SparksParticle& particle : m_particles)
+        {
+            if(particle.scale <= 0.0f || particle.alpha <= 0.0f)
+                continue;
+            EffectRenderSample sample;
+            sample.position = particle.position;
+            sample.scale = billboardDiameter(particle.scale);
+            sample.alpha = particle.alpha;
+            sample.frame = particle.frame;
+            result.append(sample);
+        }
+        return result;
+    }
+
+    int activeCount() const { return m_particles.size(); }
+
+private:
+    float randomRange(float low, float high)
+    {
+        return low + (high - low) * m_rng.unit();
+    }
+
+    QVector3D randomSphereDirection()
+    {
+        QVector3D direction(0.0f, 0.0f, 1.0f);
+        for(int attempt = 0; attempt < 10; ++attempt)
+        {
+            direction = QVector3D(randomRange(-1.0f, 1.0f),
+                                  randomRange(-1.0f, 1.0f),
+                                  randomRange(-1.0f, 1.0f));
+            const float lengthSquared = direction.lengthSquared();
+            if(lengthSquared > 0.0f && lengthSquared < 1.0f)
+                break;
+        }
+        return direction.lengthSquared() > 0.0f
+            ? direction.normalized() : QVector3D(0.0f, 0.0f, 1.0f);
+    }
+
+    void reset(quint32 seed, const QVector3D& origin, float authoredScale)
+    {
+        m_seed = seed;
+        m_rng.reset(seed ^ 0x53504152u);
+        m_origin = origin;
+        m_authoredScale = qFuzzyIsNull(authoredScale) ? 1.0f : qAbs(authoredScale);
+        m_particles.clear();
+        m_spawned = false;
+        m_cycleTick = 0;
+        m_initialized = true;
+    }
+
+    void spawnInitialPopulation()
+    {
+        for(int attempt = 0; attempt < 10; ++attempt)
+        {
+            SparksParticle particle;
+            particle.position = m_origin;
+            if(attempt == 0)
+            {
+                particle.frame = 0;
+                particle.sourceFlash = true;
+                particle.scale = 0.0f;
+            }
+            else
+            {
+                const float speedScale = randomRange(0.8f, 1.4f);
+                particle.velocity = randomSphereDirection()
+                    * (speedScale * speedScale * m_authoredScale * 0.2f);
+                particle.position += particle.velocity * m_rng.unit();
+                particle.scale = 0.2f * m_authoredScale
+                    * randomRange(0.8f, 1.2f);
+                particle.frame = 1 + int(m_rng.next() % 3u);
+                particle.lifetime = 6;
+            }
+            m_particles.append(particle);
+        }
+        m_spawned = true;
+    }
+
+    void updateParticles()
+    {
+        static constexpr std::array<int, 8> alpha = {
+            0, 64, 128, 255, 255, 255, 255, 255
+        };
+        for(int i = m_particles.size() - 1; i >= 0; --i)
+        {
+            SparksParticle& particle = m_particles[i];
+            if(particle.sourceFlash)
+            {
+                if(qFuzzyIsNull(particle.scale))
+                {
+                    particle.scale = 0.55f * m_authoredScale
+                        * randomRange(0.8f, 1.2f);
+                    continue;
+                }
+                m_particles.removeAt(i);
+                continue;
+            }
+            if(--particle.lifetime < 0)
+            {
+                m_particles.removeAt(i);
+                continue;
+            }
+            particle.alpha = float(alpha[size_t(particle.lifetime)]) / 255.0f;
+            particle.position += particle.velocity;
+            particle.scale *= 0.9f;
+            particle.velocity *= 0.6f;
+            ++particle.frame;
+        }
+    }
+
+    void advanceOne()
+    {
+        if(!m_spawned)
+            spawnInitialPopulation();
+        else
+            updateParticles();
+    }
+
+    Isaac32 m_rng;
+    QVector<SparksParticle> m_particles;
+    QVector3D m_origin;
+    float m_authoredScale{1.0f};
+    quint32 m_seed{0};
+    int m_cycleTick{0};
+    bool m_spawned{false};
+    bool m_initialized{false};
+};
+
+struct VisionStarParticle
+{
+    QVector3D position;
+    QVector3D offset;
+    float scale{0.0f};
+};
+
+class VisionStarEmitter
+{
+public:
+    void advanceTo(qint64 logicalTick, quint32 seed, const QVector3D& origin,
+                   float authoredScale, int subtype)
+    {
+        subtype = qBound(0, subtype, 3);
+        if(!m_initialized || seed != m_seed || logicalTick < m_tick
+                || subtype != m_subtype)
+            reset(seed, origin, authoredScale, subtype);
+        m_origin = origin;
+        m_authoredScale = qFuzzyIsNull(authoredScale) ? 1.0f : qAbs(authoredScale);
+        while(m_tick < logicalTick)
+        {
+            advanceOne();
+            ++m_tick;
+        }
+    }
+
+    QVector<EffectRenderSample> samples() const
+    {
+        QVector<EffectRenderSample> result;
+        result.reserve(m_particles.size());
+        for(const VisionStarParticle& particle : m_particles)
+        {
+            if(particle.scale <= 0.0f)
+                continue;
+            EffectRenderSample sample;
+            sample.position = particle.position;
+            sample.scale = billboardDiameter(particle.scale);
+            sample.alpha = 1.0f;
+            sample.frame = m_subtype;
+            result.append(sample);
+        }
+        return result;
+    }
+
+    int activeCount() const { return m_particles.size(); }
+
+private:
+    float randomRange(float low, float high)
+    {
+        return low + (high - low) * m_rng.unit();
+    }
+
+    void reset(quint32 seed, const QVector3D& origin, float authoredScale, int subtype)
+    {
+        m_seed = seed;
+        m_rng.reset(seed ^ 0x56535452u ^ quint32(subtype));
+        m_origin = origin;
+        m_authoredScale = qFuzzyIsNull(authoredScale) ? 1.0f : qAbs(authoredScale);
+        m_subtype = subtype;
+        m_particles.clear();
+        m_tick = 0;
+        m_initialized = true;
+    }
+
+    void spawn(int index)
+    {
+        VisionStarParticle particle;
+        particle.position = m_origin;
+        if(m_subtype == 1)
+        {
+            const float angle = float(index) * (2.0f * float(M_PI) / 5.0f);
+            particle.offset = QVector3D(0.5f * qCos(angle),
+                                        0.5f * qSin(angle), 0.0f);
+            particle.position += particle.offset;
+        }
+        m_particles.append(particle);
+    }
+
+    void updateParticles()
+    {
+        const float coefficient = m_subtype == 1 ? 0.17f : 0.3f;
+        const float c = qCos(0.07f);
+        const float s = qSin(0.07f);
+        for(VisionStarParticle& particle : m_particles)
+        {
+            if(m_subtype == 1)
+            {
+                const float x = c * particle.offset.x() + s * particle.offset.y();
+                const float y = -s * particle.offset.x() + c * particle.offset.y();
+                particle.offset.setX(x);
+                particle.offset.setY(y);
+            }
+            particle.position = m_origin + particle.offset;
+            if(m_subtype == 3)
+                particle.position.setZ(particle.position.z() + 0.7f);
+            particle.scale = particle.scale * 0.95f
+                + m_authoredScale * coefficient * randomRange(0.1f, 1.9f) * 0.05f;
+        }
+    }
+
+    void spawnPass()
+    {
+        const int maximum = m_subtype == 1 ? 5 : 1;
+        for(int attempt = 0; attempt < 3 && m_particles.size() < maximum; ++attempt)
+            spawn(m_particles.size());
+    }
+
+    void advanceOne()
+    {
+        updateParticles();
+        spawnPass();
+    }
+
+    Isaac32 m_rng;
+    QVector<VisionStarParticle> m_particles;
+    QVector3D m_origin;
+    float m_authoredScale{1.0f};
+    quint32 m_seed{0};
+    qint64 m_tick{0};
+    int m_subtype{0};
+    bool m_initialized{false};
+};
+
 } // namespace particle
 } // namespace ei
 

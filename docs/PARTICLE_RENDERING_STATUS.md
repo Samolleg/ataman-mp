@@ -96,6 +96,9 @@ covering the selected JMV corpus.
 | 8253 / `0x203D` | Portalstar | Dedicated persistent phase-zero `Casting6` star with the native per-quant random scale range and ordinary alpha blending. | Validate a gameplay-owned portal-star carrier; the standalone visual path is closed. |
 | 8254 / `0x203E` | Portal | Dedicated additive `Teleport` column with the persistent elevated head, dual phase-band rotating trails, radial birth distribution, accelerating rise, height termination, scale and alpha evolution, and native population cap. | Validate owner-driven size below one, which intentionally suppresses the elevated head; the normal standalone control is closed. |
 | 8255–8256 / `0x203F`–`0x2040` | Cylinder1, Cylinder2 | Dedicated finite counter-rotating two-source helices with native anchor/trail cadence, source growth, tangent motion, scale/alpha evolution, and distinct `Casting2`/`Casting1` atlases using ordinary alpha blending. The editor repeats the completed one-shot for catalog inspection. | Validate gameplay-owned carrier bounds and orientation; the stationary synthetic-bound controls are closed. |
+| 8257–8258 / `0x2041`–`0x2042` | Firestar, Acidstar | Dedicated three-quant phase-15 flash with exact two visible sizes, ordinary blending, and the type-specific `FireArrowSmoke` or `AcidRay` atlas. The catalog uses authored origin/size as a synthetic carrier and repeats the finite one-shot. | Validate gameplay body-part attachment; the stationary synthetic-carrier controls are closed. |
+| 8259 / `0x2043` | Sparks | Dedicated additive `Casting6` source flash plus nine radial trails with native random ranges, phase selection, lifetime alpha table, motion, size and velocity damping. The catalog uses authored origin/size as a synthetic carrier and repeats the finite burst. | Validate gameplay body-part attachment and owner motion; the stationary synthetic-carrier control is closed. |
+| 8260–8262, 8268 / `0x2044`–`0x2046`, `0x204C` | Visionstar1–Visionstar4 | Dedicated persistent additive `Stun` stars with subtype phases, one-point/pentagon populations, pentagon rotation, Visionstar4 elevation, and native random size smoothing. The catalog uses authored origin/size as a synthetic stationary carrier. | Validate above-head attachment and detach fade on gameplay carriers; the persistent synthetic-carrier controls are closed. |
 
 ## Preview-only families
 
@@ -104,12 +107,10 @@ runtime behavior has not been reconstructed:
 
 | IDs | Names |
 |---|---|
-| 8192, 8194, 8231, 8257 | Fireball, Fireblast, Castingfire, Firestar |
+| 8192, 8194, 8231 | Fireball, Fireblast, Castingfire |
 | 8198, 8263 | Healing, Regeneration |
 | 8199 | Poisonfog |
 | 8200, 8201 | Aggressionfog, Geyser |
-| 8258 | Acidstar |
-| 8259 | Sparks |
 | 8232–8239 | Elemental, divination, illusion, domination, enchantment, healing, and failed casting variants |
 
 Texture names used by these previews are limited to direct resource matches
@@ -123,7 +124,6 @@ still require both native reverse engineering and a dedicated renderer:
 
 | IDs | Names |
 |---|---|
-| 8260–8262, 8268 | Visionstar1 through Visionstar4 |
 | 8264–8267 | Silence, Feeblemind, Feetcloud1, Feetcloud2 |
 | 8269–8274 | Ballofstars, Rickarrow, Cursestars, Curseholder, Starttrans, Transform |
 

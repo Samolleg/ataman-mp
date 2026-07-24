@@ -192,6 +192,27 @@ class ParticleBinaryReportTests(unittest.TestCase):
             fixture["constants"]["cylinder_circle_radius_factor"]["value"], 0.7)
         self.assertAlmostEqual(
             fixture["constants"]["cylinder_vertical_growth"]["value"], 1.25)
+        self.assertEqual(fixture["ranges"]["star_create_callback"]["start_va"],
+                         "0x00494950")
+        self.assertEqual(fixture["ranges"]["sparks_create_callback"]["start_va"],
+                         "0x00494A10")
+        self.assertEqual(
+            fixture["ranges"]["visionstar_create_callback"]["start_va"],
+            "0x00494E00")
+        self.assertEqual(
+            fixture["sites"]["sparks_alpha_table"]["bytes"],
+            "000000004000000080000000FF000000FF000000FF000000FF000000FF000000",
+        )
+        self.assertAlmostEqual(fixture["constants"]["star_scale_decay"]["value"],
+                               0.9)
+        self.assertAlmostEqual(
+            fixture["constants"]["sparks_source_flash_size_factor"]["value"],
+            0.55,
+        )
+        self.assertAlmostEqual(
+            fixture["constants"]["visionstar_orbit_step"]["value"], 0.07)
+        self.assertAlmostEqual(
+            fixture["constants"]["visionstar_smoothing_decay"]["value"], 0.95)
         self.assertEqual(len(fixture["sites"]["zoneexit_alpha_table"]["bytes"]),
                          128)
         self.assertEqual(len(fixture["sites"]["path_brightness_table"]["bytes"]),

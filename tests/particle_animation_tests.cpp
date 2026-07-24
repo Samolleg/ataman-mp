@@ -41,6 +41,9 @@ private slots:
     void portalStarUsesPersistentNativePhaseZero();
     void portalUsesHeadAndRotatingRisingTrails();
     void cylindersUseOppositeFiniteHelices();
+    void fireAndAcidStarsUseFinitePhaseFifteenFlash();
+    void sparksUseSourceFlashAndNineTrails();
+    void visionStarsUseSubtypePopulationsAndOffsets();
 };
 
 void ParticleAnimationTests::atlasUsesNativeTopRowFirstInsets()
@@ -843,6 +846,95 @@ void ParticleAnimationTests::cylindersUseOppositeFiniteHelices()
     QCOMPARE(forward.activeCount(), 0);
     forward.advanceTo(66, 8255u, origin, 2.0f, false);
     QVERIFY(forward.activeCount() > 2);
+}
+
+void ParticleAnimationTests::fireAndAcidStarsUseFinitePhaseFifteenFlash()
+{
+    ei::particle::StarFlashEmitter emitter;
+    const QVector3D origin(1.0f, 2.0f, 3.0f);
+    emitter.advanceTo(1, 8257u, origin, 2.0f);
+    QCOMPARE(emitter.activeCount(), 1);
+    QCOMPARE(emitter.samples().size(), 0);
+    emitter.advanceTo(2, 8257u, origin, 2.0f);
+    auto samples = emitter.samples();
+    QCOMPARE(samples.size(), 1);
+    QCOMPARE(samples[0].position, origin);
+    QCOMPARE(samples[0].scale, ei::particle::billboardDiameter(2.0f));
+    QCOMPARE(samples[0].alpha, 1.0f);
+    QCOMPARE(samples[0].frame, 15);
+    emitter.advanceTo(3, 8257u, origin, 2.0f);
+    QCOMPARE(emitter.samples()[0].scale, ei::particle::billboardDiameter(1.8f));
+    emitter.advanceTo(4, 8257u, origin, 2.0f);
+    QCOMPARE(emitter.activeCount(), 0);
+    emitter.advanceTo(18, 8257u, origin, 2.0f);
+    QCOMPARE(emitter.samples().size(), 1);
+}
+
+void ParticleAnimationTests::sparksUseSourceFlashAndNineTrails()
+{
+    ei::particle::SparksEmitter first;
+    ei::particle::SparksEmitter second;
+    const QVector3D origin(-2.0f, 0.5f, 1.0f);
+    first.advanceTo(1, 8259u, origin, 1.0f);
+    QCOMPARE(first.activeCount(), 10);
+    QCOMPARE(first.samples().size(), 9);
+    first.advanceTo(2, 8259u, origin, 1.0f);
+    second.advanceTo(2, 8259u, origin, 1.0f);
+    const auto a = first.samples();
+    const auto b = second.samples();
+    QCOMPARE(a.size(), 10);
+    QCOMPARE(a.size(), b.size());
+    bool foundSource = false;
+    bool foundTrail = false;
+    for(int i = 0; i < a.size(); ++i)
+    {
+        QCOMPARE(a[i].position, b[i].position);
+        QCOMPARE(a[i].scale, b[i].scale);
+        QCOMPARE(a[i].alpha, b[i].alpha);
+        QCOMPARE(a[i].frame, b[i].frame);
+        QVERIFY(a[i].frame >= 0 && a[i].frame <= 4);
+        if(a[i].frame == 0 && a[i].position == origin)
+            foundSource = true;
+        if(a[i].frame > 0 && a[i].position != origin)
+            foundTrail = true;
+    }
+    QVERIFY(foundSource);
+    QVERIFY(foundTrail);
+    first.advanceTo(8, 8259u, origin, 1.0f);
+    QCOMPARE(first.activeCount(), 0);
+    first.advanceTo(26, 8259u, origin, 1.0f);
+    QCOMPARE(first.activeCount(), 10);
+}
+
+void ParticleAnimationTests::visionStarsUseSubtypePopulationsAndOffsets()
+{
+    const QVector3D origin(3.0f, -1.0f, 0.25f);
+    ei::particle::VisionStarEmitter single;
+    ei::particle::VisionStarEmitter pentagon;
+    ei::particle::VisionStarEmitter elevated;
+    single.advanceTo(3, 8260u, origin, 1.0f, 0);
+    pentagon.advanceTo(3, 8261u, origin, 1.0f, 1);
+    elevated.advanceTo(3, 8268u, origin, 1.0f, 3);
+    QCOMPARE(single.activeCount(), 1);
+    QCOMPARE(single.samples().size(), 1);
+    QCOMPARE(single.samples()[0].frame, 0);
+    QCOMPARE(pentagon.activeCount(), 5);
+    QCOMPARE(pentagon.samples().size(), 5);
+    for(const auto& sample : pentagon.samples())
+    {
+        QCOMPARE(sample.frame, 1);
+        const QVector2D planar(sample.position.x() - origin.x(),
+                               sample.position.y() - origin.y());
+        QVERIFY(qAbs(planar.length() - 0.5f) < 0.001f);
+        QCOMPARE(sample.position.z(), origin.z());
+    }
+    QCOMPARE(elevated.activeCount(), 1);
+    QCOMPARE(elevated.samples().size(), 1);
+    QCOMPARE(elevated.samples()[0].frame, 3);
+    QVERIFY(qAbs(elevated.samples()[0].position.z() - origin.z() - 0.7f) < 0.001f);
+    single.advanceTo(50, 8260u, origin, 1.0f, 0);
+    QCOMPARE(single.activeCount(), 1);
+    QVERIFY(single.samples()[0].scale > 0.0f);
 }
 
 QTEST_APPLESS_MAIN(ParticleAnimationTests)

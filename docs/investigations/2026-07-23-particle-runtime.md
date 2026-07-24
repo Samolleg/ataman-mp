@@ -1542,3 +1542,65 @@ The Base archive contains separately fingerprinted 256-square variants. The
 Portal texture was already fingerprinted for Teleport. These findings precede
 renderer changes and distinguish the ordinary Portalstar/Cylinders from the
 additive Portal.
+
+## Ordered catalog reconstruction: Firestar through Visionstar4
+
+Firestar and Acidstar (types 8257 and 8258 / `0x2041` and `0x2042`) share
+factory range `0x00487EEA..0x00487F97` and callbacks `0x00494950`,
+`0x004949B0`, and `0x00494A00`. They require a body carrier in gameplay, use
+one creation attempt, ordinary alpha blending, and stop generation in their
+first successful birth. Both select phase 15. Firestar uses
+`FireArrowSmoke`; Acidstar uses `AcidRay`. The particle is born transparent
+at submitted size zero with a three-quant life and the authored size stored as
+its pending size. Its first two updates make it opaque at authored size and
+`.9 * authoredSize`; the third update retires it. A bare catalog record has no
+native carrier, so the editor uses its authored origin and size as an explicit
+synthetic stationary carrier and repeats the finite flash for inspection.
+
+Sparks (type 8259 / `0x2043`) selects factory range
+`0x00487F98..0x00487FEB`, callbacks `0x00494A10`, `0x00494CD0`, and
+`0x00494DF0`, the `Casting6` atlas, additive blending, ten creation attempts,
+and capacity 300. It also requires a gameplay body carrier. The first birth is
+a phase-zero source flash. It begins at size zero; its first update assigns
+`.55 * authoredSize * random(.8,1.2)`, and the following update retires it.
+The other nine births in that first scheduler pass disable further generation.
+Each chooses phase 1..3, a normalized random-sphere direction, speed
+`random(.8,1.4)^2 * authoredSize * .2`, a random point from the carrier origin
+through one full speed step, submitted size
+`.2 * authoredSize * random(.8,1.2)`, and life six. Each update decrements
+life, looks up alpha from `0,64,128,255,255,255,255,255`, advances position,
+increments phase, multiplies size by .9, and multiplies velocity by .6; it
+retires once life becomes negative. The editor supplies the same explicit
+synthetic stationary carrier used for other owner-required catalog controls
+and repeats this finite burst.
+
+Visionstar1, Visionstar2, Visionstar3, and Visionstar4 (types 8260, 8261,
+8262, and 8268 / `0x2044`, `0x2045`, `0x2046`, and `0x204C`) share factory
+range `0x00487FEC..0x00488089` and callbacks `0x00494E00`, `0x00494F30`,
+and `0x004950A0`. They use the additive `Stun` atlas, three attempts per
+quant, and bind above a gameplay carrier's head. Their fixed atlas phases are
+respectively 0, 1, 2, and 3. Visionstar1, Visionstar3, and Visionstar4 permit
+one persistent particle at the carrier point; Visionstar4 additionally adds
+.7 to Z. Visionstar2 permits five particles on a radius-.5 pentagon and
+rotates their stored offsets by .07 radians per update. The three-attempt
+scheduler fills three points in the first quant and the remaining two in the
+second.
+
+Every Visionstar update makes the particle opaque, resnaps it to the current
+carrier point and optional offset, and smooths submitted size as
+`oldSize * .95 + authoredSize * coefficient * random(.1,1.9) * .05`, where
+the coefficient is .17 for Visionstar2 and .3 for the other variants. When
+generation or the carrier disappears, the native path instead decays both the
+particle and system size until submitted size falls below .03. A bare placed
+record cannot supply the required carrier object; the editor explicitly treats
+its authored origin and size as a stationary synthetic carrier so the
+confirmed persistent visuals remain inspectable.
+
+The selected JMV archive fingerprints `firearrowsmoke.mmp`, `acidray.mmp`,
+`casting6.mmp`, and `stun.mmp` payloads as
+`9624B8F3F769DDAD435F69D0D780BBD1F5EA7EA50DA1019E0484836FCD41466B`,
+`48C7F220718AE66AD98C17B6C53C3230E2F9ED7C2FB88320809E19650F0A2ADE`,
+`9B62B28521029B2CC4A3F342BC6542168638F75B0E43882136764F7118D04585`,
+and `2A2084F1DC9A0A2F1946A36F3D7C54D510E3A51BD39B2351EF3354AF83E51170`.
+Their dimensions and formats are already pinned in the deterministic texture
+fixture. These binary/resource findings precede simulator and renderer changes.
