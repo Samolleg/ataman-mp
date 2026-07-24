@@ -1,0 +1,9 @@
+EI Mapper: Endurance Edition 0.3.0-alpha.1
+Test candidate: AI graph terrain policy and landscape interaction hardening
+Branch: feature/mpr-direct-save
+Commit: C5AED61
+Base: 9AB5B7F (merged landscape baseline plus committed main)
+Built with Qt 5.12.12 / MinGW 7.3 through the documented linked-worktree/ASCII-drive workflow.
+Automated evidence: AI graph tests 9 passed, 0 failed; Endurance document tests 57 passed, 0 failed, 3 fixture-dependent skips; linked-worktree identity regression passed; UI widget check passed; release build passed.
+The editor was not launched interactively during automated validation.
+No game archive, map corpus, save, log, dump, or persisted Endurance options are included.
