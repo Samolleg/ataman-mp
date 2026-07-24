@@ -1135,3 +1135,75 @@ confirmed atlas, ordinary alpha blending, and the separate cyan selection
 marker. Focused tests pin deterministic replay, phase bounds, stationary
 Firearrow/Acidray positions, Firearrow head scale, and the bounded Bluegas
 population.
+
+## Ordered catalog reconstruction: Link and the acid/electric sphere shells
+
+The fingerprinted executable maps Link (type 8212) to factory range
+`0x0048599D..0x00485A9D`, callbacks `0x0048D8D0`, `0x0048DE30`, and
+`0x0048E040`, and the `Link` atlas. The factory fixes 80-percent birth
+probability, ten attempts per quant, 45-quant nominal life, three quants per
+phase, unit authored size, and a default wall vector of `(-10, 0, 0)`. A bare
+`PARTICL` record does not carry another destination/vector field, so this
+constructor default is the exact standalone catalog control rather than an
+editor-authored guess.
+
+The Link create callback builds an orthonormal basis around the wall vector,
+starts particles within the authored +/-0.2 source box, and advances them
+along the ten-unit vector. One quarter of central births use progression
+0.10..0.12 and size 0.13..0.16; the rest use progression 0.17..0.25 and size
+0.03..0.05. Each birth stores an angular step of `0.2 * radialDistance`.
+Updates rotate the radial offset, terminate after the accumulated progression
+exceeds the wall length, and add the confirmed parabolic height
+`part * (1 - part) * wallLength * 0.9`. Alpha is the source alpha clamped by
+`1000 * min(part, 1 - part)`, producing the native endpoint fades. The local
+source callback fades that source alpha by 16 per quant only after generation
+is disabled. This rejects both the previous no-preview state and any straight
+beam substitute.
+
+Sphereacid (type 8213) and Sphereelectricity (type 8214) share factory range
+`0x0048560E..0x00485734` and callbacks `0x0048E070` and `0x0048E7C0`, but bind
+the separate `ProtectionA` and `ProtectionE` atlases. Both are additive,
+carrier-required systems with 90-percent birth probability, 15-quant life,
+15 active phases, and one-quant phase timing. The first creation obtains the
+carrier bounding sphere, multiplies its radius by 1.2, and places births on a
+spherical shell at 0.65 of that radius. Particles rotate around the local Z
+axis by 0.01 radians per quant and are projected back against smoothed carrier
+motion; the stationary catalog control therefore remains a rotating sphere.
+
+For both shell types, one birth in eleven receives a larger random size
+multiplier: 1.5..2.5 for acid and 3.5..4.5 for electricity; other births use
+0.7..1.3. Size follows the exact 16-entry lifetime table
+`.01, .02, .03, .035, .035, .035, .035, .035, .035, .035, .035, .035,
+.035, .03, .02, .01`; acid additionally multiplies it by 1.6. Initial phase is
+0..10 and subsequent phases advance modulo 15. A bare particle record has no
+carrier bounding volume, so the catalog/editor control must explicitly use
+authored scale as a synthetic carrier bound, as already documented for
+Bluegas, Casting, and Blood1. This does not claim a native ownerless default.
+
+The active JMV texture archive pins `link.mmp` as a 1024-square DXT3 atlas with
+SHA-256 `443B941A24B0984F4F53448CF2747E7D84F83A004E1C5557480C4DEECAF45A1C`,
+`protectiona.mmp` as a 1024-square single-mip DXT3 atlas with SHA-256
+`7CB038591A9092BA9DC0E745539EB2966B86037DFD2B92B91BAA9619D00F0CAD`,
+and `protectione.mmp` as a 1024-square DXT3 atlas with SHA-256
+`5BEC16963B7548BAF64B9C4DE985B945EF45FAA14B773037D12F2CBF1426896F`.
+The Base fallback archive contains independently fingerprinted 256-square
+versions of all three. The binary fixture now pins the two factories, five
+callback bodies, callback and texture selections, bounded rule windows, size
+table, and scalar constants before renderer dispatch is changed.
+
+### Implemented ordered controls
+
+The editor now dispatches Link, Sphereacid, and Sphereelectricity before the
+generic preview path. Link replays the constructor's confirmed default wall
+vector with native births, rotating cross-section, arc, phase progression, and
+endpoint fades through the `Link` atlas and ordinary alpha blending. The two
+sphere effects use separate deterministic shell simulators, their confirmed
+size classes and lifetime table, their own atlases, and additive blending.
+Because standalone records do not provide a carrier bounding volume, authored
+scale is explicitly the synthetic stationary carrier bound for both shell
+controls. The cyan editor selection marker remains a separate overlay.
+
+Focused tests pin Link determinism, population bounds, phase/alpha limits, arc
+height and travel distance, plus both sphere populations, shell radius, phase
+bounds, scale positivity and opacity. The complete executable and texture
+reports regenerate byte-identically from their fingerprinted read-only inputs.

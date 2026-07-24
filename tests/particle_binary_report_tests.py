@@ -54,6 +54,12 @@ class ParticleBinaryReportTests(unittest.TestCase):
                          "466972654172726F77536D6F6B6500")
         self.assertEqual(fixture["sites"]["stench_texture_name"]["bytes"],
                          "5374656E636800")
+        self.assertEqual(fixture["sites"]["link_texture_name"]["bytes"],
+                         "4C696E6B00")
+        self.assertEqual(fixture["sites"]["protectiona_texture_name"]["bytes"],
+                         "50726F74656374696F6E4100")
+        self.assertEqual(fixture["sites"]["protectione_texture_name"]["bytes"],
+                         "50726F74656374696F6E4500")
         self.assertEqual(fixture["constants"]["tornado_height_float"]["value"], 12.0)
         self.assertAlmostEqual(
             fixture["constants"]["tornado_speed_factor_float"]["value"], 0.2)
@@ -83,6 +89,10 @@ class ParticleBinaryReportTests(unittest.TestCase):
                          "0x0048D050")
         self.assertEqual(fixture["ranges"]["bluegas_create_callback"]["start_va"],
                          "0x0048D420")
+        self.assertEqual(fixture["ranges"]["link_create_callback"]["start_va"],
+                         "0x0048D8D0")
+        self.assertEqual(fixture["ranges"]["sphere_create_callback"]["start_va"],
+                         "0x0048E070")
         self.assertIn(
             "C783E0010000D0894800C783E4010000B08D4800",
             fixture["sites"]["mushroom_callback_selection"]["bytes"],
@@ -111,6 +121,21 @@ class ParticleBinaryReportTests(unittest.TestCase):
             "C783E001000020D44800C783E4010000F0D74800",
             fixture["sites"]["bluegas_callback_selection"]["bytes"],
         )
+        self.assertIn(
+            "C783E0010000D0D84800C783E401000030DE4800C783E801000040E04800",
+            fixture["sites"]["link_callback_selection"]["bytes"],
+        )
+        self.assertIn(
+            "C783E001000070E04800894208C783E4010000C0E74800",
+            fixture["sites"]["sphere_callback_selection"]["bytes"],
+        )
+        self.assertAlmostEqual(
+            fixture["constants"]["sphere_carrier_radius_multiplier"]["value"], 1.2)
+        self.assertAlmostEqual(
+            fixture["constants"]["sphere_surface_radius_multiplier"]["value"], 0.65)
+        self.assertAlmostEqual(
+            fixture["constants"]["sphere_acid_size_multiplier"]["value"], 1.6)
+        self.assertEqual(len(fixture["sites"]["sphere_size_table"]["bytes"]), 128)
         self.assertAlmostEqual(
             fixture["constants"]["firearrow_head_size_float"]["value"], 0.4)
         self.assertAlmostEqual(

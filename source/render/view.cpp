@@ -230,10 +230,8 @@ SParticleVisualStyle particleVisualStyle(uint kind)
     case 8202:
         return {"tornado", QVector4D(0.76f, 0.80f, 0.84f, 0.70f), 2.0f, 0.36f, false};
     case 8210:
-    case 8213:
     case 8258:
         return {nullptr, QVector4D(0.48f, 1.0f, 0.34f, 0.78f), 1.0f, 0.24f, true};
-    case 8214:
     case 8240:
     case 8259:
         return {nullptr, QVector4D(0.38f, 0.70f, 1.0f, 0.86f), 1.0f, 0.20f, true};
@@ -2608,6 +2606,15 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
     QOpenGLTexture* stenchTexture = textures->texture("stench");
     if(stenchTexture == fallbackTexture)
         stenchTexture = nullptr;
+    QOpenGLTexture* linkTexture = textures->texture("link");
+    if(linkTexture == fallbackTexture)
+        linkTexture = nullptr;
+    QOpenGLTexture* protectionATexture = textures->texture("protectiona");
+    if(protectionATexture == fallbackTexture)
+        protectionATexture = nullptr;
+    QOpenGLTexture* protectionETexture = textures->texture("protectione");
+    if(protectionETexture == fallbackTexture)
+        protectionETexture = nullptr;
 
     bool inverseOk = false;
     const QMatrix4x4 inverseView = cameraMatrix.inverted(&inverseOk);
@@ -2890,6 +2897,43 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
                        stenchTexture == nullptr, 0.18f);
     };
 
+    const auto drawLink = [&](const CNode* owner, const QVector3D& origin,
+                              float authoredScale, uint seed)
+    {
+        ei::particle::LinkEmitter& emitter = m_linkEmitters[owner];
+        emitter.advanceTo(logicalTick, seed, origin, authoredScale);
+        for(const ei::particle::EffectRenderSample& sample : emitter.samples())
+            drawSprite(sample.position, sample.scale, 1.0f, 0.0f,
+                       QVector4D(1.0f, 1.0f, 1.0f, sample.alpha),
+                       linkTexture, ei::particle::atlasUv(sample.frame), false,
+                       linkTexture == nullptr, 0.18f);
+    };
+
+    const auto drawSphereAcid = [&](const CNode* owner, const QVector3D& origin,
+                                    float syntheticCarrierBound, uint seed)
+    {
+        ei::particle::SphereAcidEmitter& emitter = m_sphereAcidEmitters[owner];
+        emitter.advanceTo(logicalTick, seed, origin, syntheticCarrierBound);
+        for(const ei::particle::EffectRenderSample& sample : emitter.samples())
+            drawSprite(sample.position, sample.scale, 1.0f, 0.0f,
+                       QVector4D(1.0f, 1.0f, 1.0f, sample.alpha),
+                       protectionATexture, ei::particle::atlasUv(sample.frame), true,
+                       protectionATexture == nullptr, 0.18f);
+    };
+
+    const auto drawSphereElectricity = [&](const CNode* owner, const QVector3D& origin,
+                                           float syntheticCarrierBound, uint seed)
+    {
+        ei::particle::SphereElectricityEmitter& emitter =
+            m_sphereElectricityEmitters[owner];
+        emitter.advanceTo(logicalTick, seed, origin, syntheticCarrierBound);
+        for(const ei::particle::EffectRenderSample& sample : emitter.samples())
+            drawSprite(sample.position, sample.scale, 1.0f, 0.0f,
+                       QVector4D(1.0f, 1.0f, 1.0f, sample.alpha),
+                       protectionETexture, ei::particle::atlasUv(sample.frame), true,
+                       protectionETexture == nullptr, 0.18f);
+    };
+
     for(CMob* mob : m_aMob)
     {
         if(!isMobVisible(mob))
@@ -2996,6 +3040,33 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
             if(particle->kind() == 8211u)
             {
                 drawBlueGas(particle, center, authoredScale, particle->mapId());
+                if(particle->nodeState() == ENodeState::eSelect)
+                    drawSprite(center, qMax(0.3f, authoredScale * 0.35f), 1.0f, 0.0f,
+                               QVector4D(0.10f, 0.90f, 1.0f, 0.72f), nullptr,
+                               QVector4D(0.0f, 0.0f, 1.0f, 1.0f), false, true, 0.12f);
+                continue;
+            }
+            if(particle->kind() == 8212u)
+            {
+                drawLink(particle, center, authoredScale, particle->mapId());
+                if(particle->nodeState() == ENodeState::eSelect)
+                    drawSprite(center, qMax(0.3f, authoredScale * 0.35f), 1.0f, 0.0f,
+                               QVector4D(0.10f, 0.90f, 1.0f, 0.72f), nullptr,
+                               QVector4D(0.0f, 0.0f, 1.0f, 1.0f), false, true, 0.12f);
+                continue;
+            }
+            if(particle->kind() == 8213u)
+            {
+                drawSphereAcid(particle, center, authoredScale, particle->mapId());
+                if(particle->nodeState() == ENodeState::eSelect)
+                    drawSprite(center, qMax(0.3f, authoredScale * 0.35f), 1.0f, 0.0f,
+                               QVector4D(0.10f, 0.90f, 1.0f, 0.72f), nullptr,
+                               QVector4D(0.0f, 0.0f, 1.0f, 1.0f), false, true, 0.12f);
+                continue;
+            }
+            if(particle->kind() == 8214u)
+            {
+                drawSphereElectricity(particle, center, authoredScale, particle->mapId());
                 if(particle->nodeState() == ENodeState::eSelect)
                     drawSprite(center, qMax(0.3f, authoredScale * 0.35f), 1.0f, 0.0f,
                                QVector4D(0.10f, 0.90f, 1.0f, 0.72f), nullptr,

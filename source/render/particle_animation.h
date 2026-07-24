@@ -1779,6 +1779,334 @@ private:
     bool m_initialized{false};
 };
 
+struct LinkParticle
+{
+    QVector3D position;
+    QVector3D radialOffset;
+    float stepCos{1.0f};
+    float stepSin{0.0f};
+    float progression{0.0f};
+    float progressionRate{0.1f};
+    float scale{0.1f};
+    float alpha{0.0f};
+    int frame{0};
+};
+
+class LinkEmitter
+{
+public:
+    void advanceTo(qint64 logicalTick, quint32 seed, const QVector3D& origin,
+                   float authoredScale)
+    {
+        if(!m_initialized || seed != m_seed || logicalTick < m_lastTick
+                || logicalTick - m_lastTick > 4096)
+            reset(logicalTick, seed, origin, authoredScale);
+        m_origin = origin;
+        m_authoredScale = qMax(0.001f, authoredScale);
+        while(m_lastTick < logicalTick)
+        {
+            advanceOne();
+            ++m_lastTick;
+        }
+    }
+
+    QVector<EffectRenderSample> samples() const
+    {
+        QVector<EffectRenderSample> result;
+        result.reserve(m_particles.size());
+        for(const LinkParticle& particle : m_particles)
+        {
+            EffectRenderSample sample;
+            sample.position = particle.position;
+            sample.scale = billboardDiameter(particle.scale);
+            sample.alpha = particle.alpha;
+            sample.frame = particle.frame;
+            result.append(sample);
+        }
+        return result;
+    }
+
+    int activeCount() const { return m_particles.size(); }
+
+private:
+    float randomRange(float low, float high)
+    {
+        return low + (high - low) * m_rng.unit();
+    }
+
+    void reset(qint64 logicalTick, quint32 seed, const QVector3D& origin,
+               float authoredScale)
+    {
+        m_seed = seed;
+        m_rng.reset(seed ^ 0x4C494E4Bu);
+        m_origin = origin;
+        m_authoredScale = qMax(0.001f, authoredScale);
+        m_particles.clear();
+        m_lastTick = logicalTick;
+        m_initialized = true;
+    }
+
+    void spawn()
+    {
+        const float randomX = randomRange(-1.0f, 1.0f);
+        const float randomY = randomRange(-1.0f, 1.0f);
+        LinkParticle particle;
+        particle.radialOffset = QVector3D(-0.2f * m_authoredScale * randomX,
+                                          -0.2f * m_authoredScale * randomY,
+                                          randomRange(-0.2f, 0.2f)
+                                              * m_authoredScale);
+        const float radialDistance = qSqrt(randomX * randomX + randomY * randomY);
+        const float angularStep = 0.2f * radialDistance;
+        particle.stepCos = qCos(angularStep);
+        particle.stepSin = qSin(angularStep);
+        particle.position = m_origin + particle.radialOffset;
+        if((m_rng.next() & 3u) == 0u && radialDistance < 0.5f)
+        {
+            particle.progressionRate = randomRange(0.10f, 0.12f);
+            particle.scale = m_authoredScale * randomRange(0.13f, 0.16f);
+        }
+        else
+        {
+            particle.progressionRate = randomRange(0.17f, 0.25f);
+            particle.scale = m_authoredScale * randomRange(0.03f, 0.05f);
+        }
+        particle.frame = int(m_rng.next() % 16u);
+        m_particles.append(particle);
+    }
+
+    void advanceOne()
+    {
+        constexpr float wallLength = 10.0f;
+        const QVector3D wallDirection(-wallLength, 0.0f, 0.0f);
+        const QVector3D forward(-1.0f, 0.0f, 0.0f);
+        const QVector3D radialX(0.0f, 1.0f, 0.0f);
+        const QVector3D radialY(0.0f, 0.0f, -1.0f);
+        for(int i = m_particles.size() - 1; i >= 0; --i)
+        {
+            LinkParticle& particle = m_particles[i];
+            particle.frame = (particle.frame + 1) % 15;
+            particle.progression += particle.progressionRate;
+            if(particle.progression > wallLength)
+            {
+                m_particles.removeAt(i);
+                continue;
+            }
+            const float oldX = particle.radialOffset.x();
+            const float oldY = particle.radialOffset.y();
+            particle.radialOffset.setX(oldX * particle.stepCos
+                                       - oldY * particle.stepSin);
+            particle.radialOffset.setY(oldX * particle.stepSin
+                                       + oldY * particle.stepCos);
+            const float part = particle.progression / wallLength;
+            particle.position = m_origin
+                + radialX * particle.radialOffset.x()
+                + radialY * particle.radialOffset.y()
+                + forward * particle.radialOffset.z()
+                + wallDirection * part;
+            particle.position.setZ(particle.position.z()
+                                   + part * (1.0f - part) * wallLength * 0.9f);
+            particle.alpha = qBound(0.0f,
+                                    1000.0f * qMin(part, 1.0f - part) / 255.0f,
+                                    1.0f);
+        }
+
+        int spawned = 0;
+        for(int attempt = 0; attempt < 10 && m_particles.size() < 500; ++attempt)
+        {
+            if((m_rng.next() % 100u) + 1u <= 80u)
+            {
+                spawn();
+                ++spawned;
+            }
+        }
+        if(spawned == 0 && m_particles.size() < 500)
+            spawn();
+    }
+
+    Isaac32 m_rng;
+    QVector<LinkParticle> m_particles;
+    QVector3D m_origin;
+    float m_authoredScale{1.0f};
+    quint32 m_seed{0};
+    qint64 m_lastTick{0};
+    bool m_initialized{false};
+};
+
+struct SphereShellParticle
+{
+    QVector3D offset;
+    QVector3D position;
+    float sizeMultiplier{1.0f};
+    float scale{0.01f};
+    int lifetime{15};
+    int frame{0};
+};
+
+class SphereShellEmitter
+{
+public:
+    enum class Kind { Acid, Electricity };
+
+    explicit SphereShellEmitter(Kind kind = Kind::Acid) : m_kind(kind) {}
+
+    void advanceTo(qint64 logicalTick, quint32 seed, const QVector3D& origin,
+                   float syntheticCarrierBound)
+    {
+        if(!m_initialized || seed != m_seed || logicalTick < m_lastTick
+                || logicalTick - m_lastTick > 4096)
+            reset(logicalTick, seed, origin, syntheticCarrierBound);
+        m_origin = origin;
+        m_bound = qMax(0.001f, syntheticCarrierBound);
+        while(m_lastTick < logicalTick)
+        {
+            advanceOne();
+            ++m_lastTick;
+        }
+    }
+
+    QVector<EffectRenderSample> samples() const
+    {
+        QVector<EffectRenderSample> result;
+        result.reserve(m_particles.size());
+        for(const SphereShellParticle& particle : m_particles)
+        {
+            EffectRenderSample sample;
+            sample.position = particle.position;
+            sample.scale = billboardDiameter(particle.scale);
+            sample.alpha = 1.0f;
+            sample.frame = particle.frame;
+            result.append(sample);
+        }
+        return result;
+    }
+
+    int activeCount() const { return m_particles.size(); }
+
+private:
+    static float sizeAt(int lifetime)
+    {
+        static constexpr std::array<float, 16> sizes = {
+            0.010f, 0.020f, 0.030f, 0.035f,
+            0.035f, 0.035f, 0.035f, 0.035f,
+            0.035f, 0.035f, 0.035f, 0.035f,
+            0.035f, 0.030f, 0.020f, 0.010f
+        };
+        return sizes[size_t(qBound(0, lifetime, 15))];
+    }
+
+    float randomRange(float low, float high)
+    {
+        return low + (high - low) * m_rng.unit();
+    }
+
+    QVector3D randomBallDirection()
+    {
+        for(int attempt = 0; attempt < 10; ++attempt)
+        {
+            QVector3D value(randomRange(-1.0f, 1.0f),
+                            randomRange(-1.0f, 1.0f),
+                            randomRange(-1.0f, 1.0f));
+            const float lengthSquared = value.lengthSquared();
+            if(lengthSquared > 0.000001f && lengthSquared <= 1.0f)
+                return value / qSqrt(lengthSquared);
+        }
+        return QVector3D(0.0f, 0.0f, 1.0f);
+    }
+
+    void reset(qint64 logicalTick, quint32 seed, const QVector3D& origin,
+               float syntheticCarrierBound)
+    {
+        m_seed = seed;
+        m_rng.reset(seed ^ (m_kind == Kind::Acid ? 0x53504143u : 0x5350454Cu));
+        m_origin = origin;
+        m_bound = qMax(0.001f, syntheticCarrierBound);
+        m_particles.clear();
+        m_lastTick = logicalTick;
+        m_initialized = true;
+    }
+
+    void updateScale(SphereShellParticle& particle) const
+    {
+        const float radius = 1.2f * m_bound;
+        const float typeFactor = m_kind == Kind::Acid ? 1.6f : 1.0f;
+        particle.scale = particle.sizeMultiplier * radius
+            * sizeAt(particle.lifetime) * typeFactor;
+    }
+
+    void spawn()
+    {
+        SphereShellParticle particle;
+        if(m_rng.next() % 11u == 0u)
+            particle.sizeMultiplier = m_kind == Kind::Electricity
+                ? randomRange(3.5f, 4.5f) : randomRange(1.5f, 2.5f);
+        else
+            particle.sizeMultiplier = randomRange(0.7f, 1.3f);
+        const float radius = 1.2f * m_bound;
+        particle.offset = randomBallDirection() * (0.65f * radius);
+        particle.position = m_origin + particle.offset;
+        particle.frame = int(m_rng.next() % 11u);
+        updateScale(particle);
+        m_particles.append(particle);
+    }
+
+    void advanceOne()
+    {
+        constexpr float rotation = 0.01f;
+        const float sine = qSin(rotation);
+        const float cosine = qCos(rotation);
+        for(int i = m_particles.size() - 1; i >= 0; --i)
+        {
+            SphereShellParticle& particle = m_particles[i];
+            if(--particle.lifetime == 0)
+            {
+                m_particles.removeAt(i);
+                continue;
+            }
+            particle.frame = (particle.frame + 1) % 15;
+            const float oldX = particle.offset.x();
+            const float oldY = particle.offset.y();
+            particle.offset.setX(oldX * cosine - oldY * sine);
+            particle.offset.setY(oldX * sine + oldY * cosine);
+            particle.position = m_origin + particle.offset;
+            updateScale(particle);
+        }
+
+        const int attempts = qMax(1, qRound(6.0f * m_bound));
+        int spawned = 0;
+        for(int attempt = 0; attempt < attempts && m_particles.size() < 500; ++attempt)
+        {
+            if((m_rng.next() % 100u) + 1u <= 90u)
+            {
+                spawn();
+                ++spawned;
+            }
+        }
+        if(spawned == 0 && m_particles.size() < 500)
+            spawn();
+    }
+
+    Isaac32 m_rng;
+    QVector<SphereShellParticle> m_particles;
+    QVector3D m_origin;
+    float m_bound{1.0f};
+    quint32 m_seed{0};
+    qint64 m_lastTick{0};
+    Kind m_kind{Kind::Acid};
+    bool m_initialized{false};
+};
+
+class SphereAcidEmitter : public SphereShellEmitter
+{
+public:
+    SphereAcidEmitter() : SphereShellEmitter(Kind::Acid) {}
+};
+
+class SphereElectricityEmitter : public SphereShellEmitter
+{
+public:
+    SphereElectricityEmitter() : SphereShellEmitter(Kind::Electricity) {}
+};
+
 } // namespace particle
 } // namespace ei
 

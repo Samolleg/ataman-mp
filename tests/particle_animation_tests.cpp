@@ -25,6 +25,8 @@ private slots:
     void fireArrowUsesActivatedZeroSpeedControl();
     void acidRayUsesStationaryWidthAndSizeTable();
     void blueGasUsesSyntheticCarrierCylinder();
+    void linkUsesNativeDefaultArc();
+    void sphereShellsUseSyntheticCarrierBound();
 };
 
 void ParticleAnimationTests::atlasUsesNativeTopRowFirstInsets()
@@ -371,6 +373,69 @@ void ParticleAnimationTests::blueGasUsesSyntheticCarrierCylinder()
         QVERIFY(a[i].scale > 0.0f);
         QVERIFY(a[i].alpha >= 0.0f && a[i].alpha <= 1.0f);
         QVERIFY(a[i].frame >= 0 && a[i].frame <= 14);
+    }
+}
+
+void ParticleAnimationTests::linkUsesNativeDefaultArc()
+{
+    ei::particle::LinkEmitter first;
+    ei::particle::LinkEmitter second;
+    const QVector3D origin(6.0f, -3.0f, 2.0f);
+    first.advanceTo(0, 8212u, origin, 1.0f);
+    second.advanceTo(0, 8212u, origin, 1.0f);
+    first.advanceTo(40, 8212u, origin, 1.0f);
+    second.advanceTo(40, 8212u, origin, 1.0f);
+    const auto a = first.samples();
+    const auto b = second.samples();
+    QCOMPARE(a.size(), b.size());
+    QVERIFY(a.size() > 100);
+    QVERIFY(a.size() <= 500);
+    float highest = origin.z();
+    float farthest = origin.x();
+    for(int i = 0; i < a.size(); ++i)
+    {
+        QCOMPARE(a[i].position, b[i].position);
+        QCOMPARE(a[i].scale, b[i].scale);
+        QCOMPARE(a[i].alpha, b[i].alpha);
+        QCOMPARE(a[i].frame, b[i].frame);
+        highest = qMax(highest, a[i].position.z());
+        farthest = qMin(farthest, a[i].position.x());
+        QVERIFY(a[i].scale > 0.0f);
+        QVERIFY(a[i].alpha >= 0.0f && a[i].alpha <= 1.0f);
+        QVERIFY(a[i].frame >= 0 && a[i].frame <= 15);
+    }
+    QVERIFY(highest > origin.z() + 1.5f);
+    QVERIFY(farthest < origin.x() - 5.0f);
+}
+
+void ParticleAnimationTests::sphereShellsUseSyntheticCarrierBound()
+{
+    ei::particle::SphereAcidEmitter acid;
+    ei::particle::SphereElectricityEmitter electricity;
+    const QVector3D origin(-2.0f, 4.0f, 1.5f);
+    acid.advanceTo(0, 8213u, origin, 1.0f);
+    electricity.advanceTo(0, 8214u, origin, 1.0f);
+    acid.advanceTo(30, 8213u, origin, 1.0f);
+    electricity.advanceTo(30, 8214u, origin, 1.0f);
+    const auto acidSamples = acid.samples();
+    const auto electricitySamples = electricity.samples();
+    QVERIFY(acidSamples.size() > 40);
+    QVERIFY(electricitySamples.size() > 40);
+    QVERIFY(acidSamples.size() <= 500);
+    QVERIFY(electricitySamples.size() <= 500);
+    for(const auto& sample : acidSamples)
+    {
+        QVERIFY(qAbs((sample.position - origin).length() - 0.78f) < 0.0001f);
+        QVERIFY(sample.scale > 0.0f);
+        QCOMPARE(sample.alpha, 1.0f);
+        QVERIFY(sample.frame >= 0 && sample.frame <= 14);
+    }
+    for(const auto& sample : electricitySamples)
+    {
+        QVERIFY(qAbs((sample.position - origin).length() - 0.78f) < 0.0001f);
+        QVERIFY(sample.scale > 0.0f);
+        QCOMPARE(sample.alpha, 1.0f);
+        QVERIFY(sample.frame >= 0 && sample.frame <= 14);
     }
 }
 

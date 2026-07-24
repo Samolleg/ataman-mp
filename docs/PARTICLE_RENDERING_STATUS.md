@@ -79,6 +79,9 @@ covering the selected JMV corpus.
 | 8209 / `0x2011` | Firearrow | Dedicated owner-activated FireArrowSmoke head/trail callback replay with native phase, lifetime, class, scale, and ordinary-alpha rules. The standalone catalog deliberately uses zero owner speed, so its trail remains collapsed at the source. | Capture a moving projectile owner to supply and validate native velocity plus the two perpendicular trail basis vectors. |
 | 8210 / `0x2012` | Acidray | Dedicated continuous stationary path with native one-particle-per-quant creation, 15-quant phase/lifetime rules, and exact width/size tables, using `AcidRay` and ordinary alpha blending. | Capture a moving owner only for the transverse ray geometry; the placed zero-speed path is closed. |
 | 8211 / `0x2013` | Bluegas | Dedicated carrier-cylinder cloud with native orbit, rise acceleration, growth, phase cadence, final alpha decay, `Stench` Base-fallback atlas, and ordinary alpha blending. The catalog uses authored scale as an explicit synthetic carrier bound. | Capture attached carriers with different bounding volumes; no ownerless native default exists. |
+| 8212 / `0x2014` | Link | Dedicated ten-attempt directional stream using the native default ten-unit wall vector, rotating cross-section, parabolic arc, endpoint alpha fades, phase cadence, `Link` atlas, and ordinary alpha blending. | Capture an effect-owned non-default destination vector; the bare placed-record constructor path is closed. |
+| 8213 / `0x2015` | Sphereacid | Dedicated rotating carrier shell with native population, lifetime/phase cadence, size table and rare size class, using `ProtectionA` and additive blending. The catalog uses authored scale as an explicit synthetic carrier bound. | Capture attached carriers with different bounding volumes and motion; the stationary synthetic-bound control is closed. |
+| 8214 / `0x2016` | Sphereelectricity | Dedicated rotating carrier shell with the electricity-specific rare size class, native population, lifetime/phase cadence and size table, using `ProtectionE` and additive blending. The catalog uses authored scale as an explicit synthetic carrier bound. | Capture attached carriers with different bounding volumes and motion; the stationary synthetic-bound control is closed. |
 
 ## Preview-only families
 
@@ -91,8 +94,8 @@ runtime behavior has not been reconstructed:
 | 8198, 8263 | Healing, Regeneration |
 | 8199 | Poisonfog |
 | 8200, 8201 | Aggressionfog, Geyser |
-| 8213, 8258 | Sphereacid, Acidstar |
-| 8214, 8259 | Sphereelectricity, Sparks |
+| 8258 | Acidstar |
+| 8259 | Sparks |
 | 8217, 8253, 8254 | Teleport, Portalstar, Portal |
 | 8232–8239 | Elemental, divination, illusion, domination, enchantment, healing, and failed casting variants |
 
@@ -107,7 +110,6 @@ still require both native reverse engineering and a dedicated renderer:
 
 | IDs | Names |
 |---|---|
-| 8212 | Link |
 | 8215–8216 | Spherefire, Clayring |
 | 8218 | Antimagic |
 | 8219–8230 | Modifier1 through Modifier12 |
