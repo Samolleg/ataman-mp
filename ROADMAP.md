@@ -273,6 +273,40 @@ serializer remains forbidden for every changed MPR.
 - [ ] Validate changed MPRs on copied Base/JMV maps before enabling live-map
   replacement.
 
+## New MPR creation
+
+- [ ] Add a user-facing **Create New MPR...** workflow that is independent from
+  `map.txt` registration. Creating terrain must not silently invent zone IDs,
+  entrances, minimap, music, quest, objectives, or other catalog metadata.
+- [ ] Let the author choose the map dimensions/sector layout, initial flat
+  height, initial land material, active Base/JMV profile, and a supplied terrain
+  atlas namespace. Endurance reads compatible atlases but does not author or
+  bundle atlas imagery.
+- [ ] Generate deterministic MP/SEC members with canonical 33x33 sector vertex
+  ownership, synchronized shared seams, explicit land/overlay initialization,
+  and names derived from the chosen internal MPR namespace.
+- [ ] Construct a game-compatible MPR/RES member table. Lowercase each member
+  name, encode it as CP1251, place it in its native hash slot, and preserve
+  deterministic `NextIndex` collision chains; a linear member inventory alone
+  is not runtime validation.
+- [ ] Before packaging or Test Current Map, resolve every generated MP/SEC member
+  through the runtime-style hash slot and chain. Reject case-insensitive
+  duplicate names, cycles, out-of-range links, unreachable members, invalid
+  dimensions/namespaces, and missing required sectors.
+- [ ] Apply the changed-MPR save contract to the initial archive: stage outside
+  the destination, freshly reopen, validate archive reachability and terrain
+  semantics, create a backup when replacing an existing path, and publish with
+  atomic replacement only after every check passes.
+- [ ] Offer explicit follow-up registration through the `map.txt` editor after
+  the MPR validates. Cancelling registration must leave the standalone MPR
+  usable and must not create partial catalog or texture-resource changes.
+- [ ] Add minimized synthetic tests for 1x1 and multi-sector maps, deterministic
+  repeat generation, seam equality, initial height/material selection, supplied
+  atlas namespaces, deliberate hash collisions, uppercase runtime lookup,
+  unreachable/cyclic chain rejection, failed destination replacement, and
+  byte-identical reopen. Keep proprietary Base/JMV runtime checks private and
+  operate only on copied fixtures with recorded hashes.
+
 ## Heightmap editing
 
 - [ ] Refactor terrain ownership around each sector's canonical 33x33 vertex
