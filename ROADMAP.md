@@ -35,6 +35,16 @@ another editor architecture pass.
 
 ## Optional editor integrations and accessibility
 
+- [ ] Add an opt-in MCP server for EI Mapper automation and AI-assisted
+  workflows. Start with read-only discovery, active-workspace inspection,
+  validation, semantic diff, object queries, and diagnostics. Editing commands
+  must use the same typed transactions, undo history, validation, dirty-state,
+  backup, and save protections as interactive UI actions. Destructive edits,
+  file writes, Test Current Map, hot reload, and process control require
+  explicit capability grants and user confirmation; the server must never
+  expose proprietary resources, scripts, local paths, or unsaved document data
+  without an intentional request. Define a versioned tool/resource schema so
+  external clients do not depend on internal C++ or widget structure.
 - [ ] Add optional external MOB diff-tool integration. Pass two explicit files
   or exported snapshots to a configured executable without replacing the
   built-in deterministic diff or exposing private/unsaved data silently.
