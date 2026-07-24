@@ -70,7 +70,8 @@ class ParticleCatalogCollectionTests(unittest.TestCase):
             "../test-scenes/particle-catalog-grid/particle-zone1-flat-7x5.mpr",
             "../test-scenes/particle-catalog-grid/all-particles-grid.mob",
         )
-        self.assertIn('map="gz1g"', text)
+        self.assertIn('map=""', text)
+        self.assertNotIn('map="gz1g"', text)
         self.assertIn('mpr="../test-scenes/particle-catalog-grid/', text)
         self.assertIn('mob="../test-scenes/particle-catalog-grid/', text)
         self.assertNotIn(":\\", text)
@@ -87,7 +88,7 @@ class ParticleCatalogCollectionTests(unittest.TestCase):
         self.assertEqual(tile_types[1], 1)
         self.assertEqual(sum(value != 0 for value in tile_types), 1)
 
-    def test_borrowed_zone1_bootstrap_entrance_is_inside_terrain(self):
+    def test_legacy_zone1_control_entrance_is_inside_terrain(self):
         left, top, right, bottom = MODULE.ZONE1_BOOTSTRAP_DEPLOY
         self.assertGreaterEqual(left, 0)
         self.assertGreaterEqual(top, 0)

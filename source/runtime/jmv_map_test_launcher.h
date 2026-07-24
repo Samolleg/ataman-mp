@@ -50,6 +50,9 @@ struct SJmvMapTestLaunchInput
     bool overrideWorldTime{false};
     double worldTimeHours{12.0};
     bool borrowedMapIdentity{false};
+    bool syntheticMapIdentity{false};
+    int mapSizeX{0};
+    int mapSizeY{0};
     bool allowMissingAiGraph{false};
     int baseProbeLevel{0};
 };
@@ -85,6 +88,7 @@ public:
     static bool validateExternalGraph(const QByteArray& bytes,
                                       QString* error = nullptr);
     static bool bridgeSupportsGraphlessLaunch(const QByteArray& bridgeBytes);
+    static bool bridgeSupportsSyntheticMapIdentity(const QByteArray& bridgeBytes);
     static qint64 runtimeGameProcessId(bool usesRuntimeHost,
                                        const QString& gamePidPath,
                                        qint64 transportProcessId);
@@ -185,6 +189,7 @@ private:
     int m_hotReloadResultPolls{0};
     bool m_cleanupComplete;
     bool m_stopRequested{false};
+    bool m_processCrashObserved{false};
     bool m_baseProbe;
     bool m_usesRuntimeHost{false};
     bool m_recoveryPending{false};

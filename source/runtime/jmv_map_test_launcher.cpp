@@ -546,7 +546,8 @@ CJmvMapTestLauncher::CJmvMapTestLauncher(QObject* parent)
             bridgeResult.startsWith("Runtime bridge result:\n")
                 ? bridgeResult.mid(QString("Runtime bridge result:\n").size())
                 : QString(),
-            exitCode, int(status), m_stopRequested, cleanupOnly);
+            exitCode, int(status), m_stopRequested && !m_processCrashObserved,
+            cleanupOnly);
         const QString resultPath = QDir(m_runRoot).filePath("result.json");
         QString resultError;
         if(!atomicWrite(resultPath,
@@ -569,6 +570,8 @@ CJmvMapTestLauncher::CJmvMapTestLauncher(QObject* parent)
     });
     connect(m_process, &QProcess::errorOccurred, this, [this](QProcess::ProcessError error)
     {
+        if(error == QProcess::Crashed)
+            m_processCrashObserved = true;
         appendRunLog(QString("game.exe process error=%1 text=%2")
                      .arg(int(error)).arg(m_process->errorString()));
         if(error == QProcess::FailedToStart)
@@ -631,6 +634,15 @@ bool CJmvMapTestLauncher::bridgeSupportsGraphlessLaunch(
     const QByteArray& bridgeBytes)
 {
     const QString marker = QStringLiteral("EI_MAPPER_ENDURANCE_GRAPHLESS");
+    const QByteArray utf16Marker(
+        reinterpret_cast<const char*>(marker.utf16()), marker.size() * 2);
+    return bridgeBytes.contains(utf16Marker);
+}
+
+bool CJmvMapTestLauncher::bridgeSupportsSyntheticMapIdentity(
+    const QByteArray& bridgeBytes)
+{
+    const QString marker = QStringLiteral("EI_MAPPER_ENDURANCE_SYNTHETIC_MAP");
     const QByteArray utf16Marker(
         reinterpret_cast<const char*>(marker.utf16()), marker.size() * 2);
     return bridgeBytes.contains(utf16Marker);
@@ -1398,6 +1410,7 @@ bool CJmvMapTestLauncher::launch(const SJmvMapTestLaunchInput& input, QString* e
     m_manifest = QJsonObject();
     m_cleanupComplete = false;
     m_stopRequested = false;
+    m_processCrashObserved = false;
     if(!stage(input, error))
     {
         if(error && !error->isEmpty())
@@ -1434,7 +1447,16 @@ bool CJmvMapTestLauncher::launch(const SJmvMapTestLaunchInput& input, QString* e
         environment.insert("EI_MAPPER_ENDURANCE_MOD_ROOT",
                            QDir::cleanPath(input.profile.modRoot));
     environment.insert("EI_MAPPER_ENDURANCE_MAP", m_temporaryMapName);
-    environment.insert("EI_MAPPER_ENDURANCE_SOURCE_ZONE", input.mapEntry.zoneId);
+    environment.insert("EI_MAPPER_ENDURANCE_SOURCE_ZONE",
+                       input.syntheticMapIdentity ? m_temporaryMapName
+                                                  : input.mapEntry.zoneId);
+    environment.insert("EI_MAPPER_ENDURANCE_BOOTSTRAP_ZONE", input.mapEntry.zoneId);
+    environment.insert("EI_MAPPER_ENDURANCE_BOOTSTRAP_MPR", input.mapEntry.mprName);
+    environment.insert("EI_MAPPER_ENDURANCE_BOOTSTRAP_MOB", input.mapEntry.mobName);
+    environment.insert("EI_MAPPER_ENDURANCE_SYNTHETIC_MAP",
+                       input.syntheticMapIdentity ? "1" : "0");
+    environment.insert("EI_MAPPER_ENDURANCE_MAP_SIZE_X", QString::number(input.mapSizeX));
+    environment.insert("EI_MAPPER_ENDURANCE_MAP_SIZE_Y", QString::number(input.mapSizeY));
     environment.insert("EI_MAPPER_ENDURANCE_TARGET_EXIT", QString::number(input.spawn.exitId));
     environment.insert("EI_MAPPER_ENDURANCE_SPAWN_MODE", input.spawn.custom ? "custom" : "entrance");
     environment.insert("EI_MAPPER_ENDURANCE_SPAWN_X", QString::number(input.spawn.position.x(), 'f', 6));
@@ -1543,7 +1565,8 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
     m_hotReloadThreadPath = QDir(m_runRoot).filePath("game-thread.id");
     m_supplementalMobDirectory = QDir(m_runRoot).filePath("supplemental-mobs");
     m_profileId = input.profile.profileId;
-    m_currentZoneId = input.mapEntry.zoneId;
+    m_currentZoneId = input.syntheticMapIdentity
+        ? m_temporaryMapName : input.mapEntry.zoneId;
     m_bridgeLivePath = QDir(m_runRoot).filePath("EIMapperEnduranceRuntimeBridge.dll");
     m_runtimeHostPath = QDir(QCoreApplication::applicationDirPath())
         .filePath("runtime/EIMapperEnduranceRuntimeHost.exe");
@@ -1551,6 +1574,13 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
     if(!QFileInfo(m_runtimeHostPath).isFile())
     {
         if(error) *error = "The packaged x86 Endurance runtime host is missing.";
+        return false;
+    }
+    if(input.syntheticMapIdentity
+       && (input.mapSizeX <= 0 || input.mapSizeY <= 0
+           || input.mapSizeX > 1024 || input.mapSizeY > 1024))
+    {
+        if(error) *error = "Synthetic-map dimensions derived from the loaded MPR are invalid.";
         return false;
     }
     if(input.allowMissingAiGraph)
@@ -1561,6 +1591,17 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
         {
             if(error)
                 *error = "The packaged runtime bridge predates graphless Test Current Map support. Rebuild or reinstall this Endurance package; launching with the stale bridge could crash game.exe.";
+            return false;
+        }
+    }
+    if(input.syntheticMapIdentity)
+    {
+        QFile bridgeFile(m_bridgeSourcePath);
+        if(!bridgeFile.open(QIODevice::ReadOnly)
+           || !bridgeSupportsSyntheticMapIdentity(bridgeFile.readAll()))
+        {
+            if(error)
+                *error = "The packaged runtime bridge predates synthetic-map Test Current Map support. Rebuild or reinstall this Endurance package.";
             return false;
         }
     }
@@ -1863,6 +1904,10 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
     request.stagedSha256.insert(QFileInfo(stagedMobPath).fileName(), m_liveMobSha256);
     request.sessionSettings.insert("travelExit", input.spawn.exitId);
     request.sessionSettings.insert("sourceZone", input.mapEntry.zoneId);
+    request.sessionSettings.insert("runtimeZone", m_currentZoneId);
+    request.sessionSettings.insert("syntheticMapIdentity", input.syntheticMapIdentity);
+    request.sessionSettings.insert("mapSizeX", input.mapSizeX);
+    request.sessionSettings.insert("mapSizeY", input.mapSizeY);
     request.sessionSettings.insert("zoneType",
                                    input.mapEntry.zoneId.startsWith("bz", Qt::CaseInsensitive)
                                    ? "briefing" : "gameplay");
@@ -2109,8 +2154,11 @@ bool CJmvMapTestLauncher::hotReload(const SJmvMapTestLaunchInput& input,
     request.runtimeStateSequence = latestRuntimeStateSequence();
     request.runId = m_runId;
     request.profileId = input.profile.profileId;
-    request.sourceZoneId = m_currentZoneId;
-    request.zoneId = input.mapEntry.zoneId;
+    request.sourceZoneId = input.mapEntry.zoneId;
+    request.bootstrapMprName = input.mapEntry.mprName;
+    request.bootstrapMobName = input.mapEntry.mobName;
+    request.zoneId = input.syntheticMapIdentity
+        ? m_temporaryMapName : input.mapEntry.zoneId;
     request.bootstrapMode = "automatic";
     request.entranceId = input.spawn.exitId;
     request.mprPath = payloadMpr;
@@ -2125,6 +2173,11 @@ bool CJmvMapTestLauncher::hotReload(const SJmvMapTestLaunchInput& input,
     // Until that provider exists, use normal entrance/custom-spawn bootstrap.
     request.preservePosition = false;
     request.graphless = graphSource.missing;
+    request.syntheticMapIdentity = input.syntheticMapIdentity;
+    request.mapSizeX = input.mapSizeX;
+    request.mapSizeY = input.mapSizeY;
+    request.spawnX = input.spawn.position.x();
+    request.spawnY = input.spawn.position.y();
     QStringList validationErrors;
     if(!validateMapHotReloadRequest(request, m_runRoot, &validationErrors))
     {
@@ -2227,7 +2280,7 @@ bool CJmvMapTestLauncher::hotReload(const SJmvMapTestLaunchInput& input,
     m_pendingSaveGeneration = generation;
     m_hotReloadResultPolls = 0;
     m_hotReloadResultTimer->start();
-    m_currentZoneId = input.mapEntry.zoneId;
+    m_currentZoneId = request.zoneId;
     QJsonArray reloads = m_manifest.value("hotReloads").toArray();
     QJsonObject audit = mapHotReloadRequestToJson(request);
     QJsonArray supplementalAudit;

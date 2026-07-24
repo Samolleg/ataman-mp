@@ -48,6 +48,10 @@ $collections = Join-Path $outputRoot "collections"
 $scenes = Join-Path $outputRoot "test-scenes\particle-catalog-bisection"
 [IO.Directory]::CreateDirectory($collections) | Out-Null
 [IO.Directory]::CreateDirectory($scenes) | Out-Null
+Get-ChildItem -LiteralPath $collections -Filter "*.collection" -File |
+    Remove-Item -Force
+Get-ChildItem -LiteralPath $scenes -Filter "*.mob" -File |
+    Remove-Item -Force
 Copy-Item -LiteralPath $sourceMpr -Destination (
     Join-Path $scenes "particle-zone1-flat-7x5.mpr") -Force
 
@@ -58,25 +62,24 @@ if ($null -eq $constructor) { throw "Expected MobFile(string) constructor was no
 
 $variants = [ordered]@{
     "00-empty-control" = @()
-    "10-half-000-041" = @(0..41)
-    "11-half-042-082" = @(42..82)
-    "20-quarter-000-020" = @(0..20)
-    "21-quarter-021-041" = @(21..41)
-    "22-quarter-042-062" = @(42..62)
-    "23-quarter-063-082" = @(63..82)
-}
-for ($row = 0; $row -le 8; $row++) {
-    $variants["3$row-row-$row"] = @($sourceManifest.records |
-        Where-Object { [int]$_.row -eq $row } |
-        ForEach-Object { [int]$_.index })
+    "30-row-0" = @(0..9)
+    "40-single-2000-fireball" = @(0)
+    "41-single-2001-campfire" = @(1)
+    "42-single-2002-fireblast" = @(2)
+    "43-single-2003-fire" = @(3)
+    "44-single-2004-smoke" = @(4)
+    "45-single-2005-vulcansmoke" = @(5)
+    "46-single-2006-healing" = @(6)
+    "47-single-2007-poisonfog" = @(7)
+    "48-single-2008-aggressionfog" = @(8)
+    "49-single-2009-geyser" = @(9)
 }
 
 $bundle = [ordered]@{
-    format = "ei-particle-runtime-bisection-v2"
+    format = "ei-particle-runtime-bisection-v3"
     sourceMobSha256 = $expectedMob
     sourceMprSha256 = $expectedMpr
-    borrowedZone = "gz1g"
-    borrowedExit = 1
+    syntheticMapIdentity = $true
     variants = @()
 }
 
@@ -112,7 +115,7 @@ foreach ($variant in $variants.GetEnumerator()) {
     $collection = @(
         "# EI Mapper Endurance Collection", "[collection]", "version=1",
         "name=`"Particle runtime bisection - $name`"", "profile=`"jamais-vu`"",
-        "map=`"gz1g`"",
+        "map=`"`"",
         "mpr=`"../test-scenes/particle-catalog-bisection/particle-zone1-flat-7x5.mpr`"",
         "mob=`"../test-scenes/particle-catalog-bisection/$mobName`""
     ) -join [Environment]::NewLine
@@ -141,15 +144,15 @@ foreach ($variant in $variants.GetEnumerator()) {
 $readme = @'
 # Particle runtime crash bisection
 
-All controls use the canonical 7x5 flat MPR and the catalog positions centered
-around the valid borrowed Zone 1 entrance. Records preserve their canonical ID,
-type, position, scale, order, and serialized field data.
+All controls use the canonical 7x5 flat MPR and its process-local synthetic map
+identity. Records preserve their canonical ID, type, position, scale, order,
+and serialized field data.
 
-Run `00-empty-control` first and wait at least 30 seconds. Then run both halves,
-the quarters in a crashing half, and the rows intersecting a crashing quarter.
-Record whether waiting or camera movement triggers the crash and retain the
-test-run directory. Do not attribute a type until an isolated control is tested
-both standalone and with its expected carrier/lifecycle where applicable.
+Run `00-empty-control` and `30-row-0` first. Then run the ten `40`-through-`49`
+single-particle controls until the crashing type is isolated. Record whether
+waiting or camera movement triggers the crash and retain the test-run directory.
+Do not attribute a type until its isolated control is tested both standalone and
+with its expected carrier/lifecycle where applicable.
 '@
 [IO.File]::WriteAllText((Join-Path $outputRoot "README.md"),
     $readme + [Environment]::NewLine, [Text.UTF8Encoding]::new($false))

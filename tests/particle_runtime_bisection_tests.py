@@ -34,17 +34,18 @@ class ParticleRuntimeBisectionTests(unittest.TestCase):
     def test_variant_partition_contract(self):
         expected = {
             "00-empty-control": [],
-            "10-half-000-041": list(range(0, 42)),
-            "11-half-042-082": list(range(42, 83)),
-            "20-quarter-000-020": list(range(0, 21)),
-            "21-quarter-021-041": list(range(21, 42)),
-            "22-quarter-042-062": list(range(42, 63)),
-            "23-quarter-063-082": list(range(63, 83)),
+            "30-row-0": list(range(0, 10)),
+            "40-single-2000-fireball": [0],
+            "41-single-2001-campfire": [1],
+            "42-single-2002-fireblast": [2],
+            "43-single-2003-fire": [3],
+            "44-single-2004-smoke": [4],
+            "45-single-2005-vulcansmoke": [5],
+            "46-single-2006-healing": [6],
+            "47-single-2007-poisonfog": [7],
+            "48-single-2008-aggressionfog": [8],
+            "49-single-2009-geyser": [9],
         }
-        for row in range(9):
-            expected[f"3{row}-row-{row}"] = list(
-                range(row * 10, min(row * 10 + 10, 83))
-            )
         self.assertEqual(set(self.variants), set(expected))
         for name, indices in expected.items():
             self.assertEqual(self.variants[name]["indices"], indices)
@@ -61,7 +62,8 @@ class ParticleRuntimeBisectionTests(unittest.TestCase):
             text = (BUNDLE / "collections" / variant["collection"]).read_text(
                 encoding="utf-8"
             )
-            self.assertIn('map="gz1g"', text)
+            self.assertIn('map=""', text)
+            self.assertNotIn('map="gz1g"', text)
             self.assertIn("particle-zone1-flat-7x5.mpr", text)
             self.assertIn(variant["mob"]["fileName"], text)
             self.assertNotIn("flat-3x3", text)

@@ -7,13 +7,15 @@
 
 struct SMapHotReloadRequest
 {
-    int protocolVersion{2};
+    int protocolVersion{3};
     quint64 sequence{0};
     quint64 generation{0};
     quint64 runtimeStateSequence{0};
     QString runId;
     QString profileId;
     QString sourceZoneId;
+    QString bootstrapMprName;
+    QString bootstrapMobName;
     QString zoneId;
     QString bootstrapMode{"automatic"};
     int entranceId{0};
@@ -26,6 +28,11 @@ struct SMapHotReloadRequest
     QString savePath;
     bool preservePosition{false};
     bool graphless{false};
+    bool syntheticMapIdentity{false};
+    int mapSizeX{0};
+    int mapSizeY{0};
+    double spawnX{0.0};
+    double spawnY{0.0};
 };
 
 QJsonObject mapHotReloadRequestToJson(const SMapHotReloadRequest& request);

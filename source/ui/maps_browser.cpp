@@ -12,6 +12,8 @@
 #include <QTreeWidget>
 #include <QVBoxLayout>
 
+#include "collection_document.h"
+
 namespace {
 enum EMapItemData
 {
@@ -135,10 +137,19 @@ void CMapsBrowser::rebuildTree()
     for(const QString& path : m_collectionPaths)
     {
         const QFileInfo file(path);
+        SEnduranceCollection collection;
+        QString collectionError;
+        const bool readable = CCollectionDocument::load(path, &collection,
+                                                        &collectionError);
+        const QString displayName = readable && !collection.name.trimmed().isEmpty()
+            ? collection.name.trimmed() : file.completeBaseName();
         QTreeWidgetItem* item = new QTreeWidgetItem(collections,
-            {file.completeBaseName(), tr("Portable map set")});
+            {displayName, tr("Portable map set")});
         item->setData(0, eCollectionPath, path);
-        item->setToolTip(0, QDir::toNativeSeparators(path));
+        item->setToolTip(0, readable
+            ? QDir::toNativeSeparators(path)
+            : tr("%1\n\nCould not read collection metadata: %2")
+                .arg(QDir::toNativeSeparators(path), collectionError));
     }
     if(m_collectionPaths.isEmpty())
         collections->setToolTip(0, tr("No .collection files were found. Create one from File > Collections."));

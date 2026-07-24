@@ -5,7 +5,7 @@ work is ordered from the newest planned minor line to the oldest completed one.
 An item is checked only after its implementation has landed and received the
 stated validation. Completed code should carry a commit, test, or release link.
 
-Current development line: `0.3.0-alpha.2` focused closed testing. This is a
+Current development line: `0.3.0-alpha.3` focused closed testing. This is a
 version reclassification of the feature set that outgrew the `0.2.1` label,
 not a serializer or compatibility reset. The remaining 0.3 release work is the
 final runtime/corpus matrix, focused confirmation of the new live-clock and
@@ -407,6 +407,13 @@ remain unchanged.
 - [x] Preserve collection identity across sessions, offer an immediate safe
   reload after editing the active collection, and keep explicitly unmapped
   collections free of stale/inferred map.txt entrances.
+- [x] Treat unmapped single-MPR/single-MOB collections as process-local
+  synthetic maps for JMV testing: use the loaded MPR dimensions and Play from
+  Here entrance without inheriting a borrowed zone's minimap, travel zones, or
+  runtime coordinates. The installed map table remains unchanged.
+- [x] Show collection display names from their editable `name` field, preserve
+  new-collection drafts when Save As is cancelled, and offer to open both new
+  and duplicated collections after saving.
 - [x] Versioned recovery autosaves, atomic saves/backups, rotated workflow
   logs, crash dumps, interrupted-test recovery, and clean package validation.
 - [x] Parameter-aware outliner filtering, dockable workspace panels, compound

@@ -2770,8 +2770,7 @@ void MainWindow::launchCurrentMapTest()
         : tr("This exact-hash Base EI feasibility probe uses an editor-owned 32-bit host. It creates Base game.exe suspended, loads the run-local bridge only into that owned process, calls its explicit initializer outside DllMain, and resumes only after fingerprint and byte guards pass.\n\nRun the probe levels in order. Source maps and the Base game installation are not modified.\n\nContinue to probe-level selection?");
     if(loosePair)
         confirmation.prepend(tr(
-            "LOOSE MAP WARNING: this MPR/MOB pair has no map.txt entry. Endurance will borrow zone %1 only to initialize the player session, then move the player to the Play from Here position. Minimap, quest, travel, save identity, weather, and scripts that depend on the zone identity may describe the borrowed zone.\n\n")
-            .arg(entry.zoneId));
+            "LOOSE MAP WARNING: this MPR/MOB pair has no map.txt entry. Endurance will create a process-local synthetic zone with the loaded MPR dimensions and the Play from Here point as its only entrance. It has no inherited minimap, travel zones, or registered quest identity. The installed map table and source files are not changed.\n\n"));
     constexpr int kMapTestWarningVersion = 4;
     COptInt* warningVersion = dynamic_cast<COptInt*>(
                 m_settings->opt(eOptSetGeneral, "mapTestWarningVersion"));
@@ -2821,7 +2820,10 @@ void MainWindow::launchCurrentMapTest()
     input.godmode = isJmv && m_godmodeCheckBox && m_godmodeCheckBox->isChecked();
     input.overrideWorldTime = isJmv && m_pView->overridesWorldTime();
     input.worldTimeHours = m_pView->effectiveWorldTimeHours();
-    input.borrowedMapIdentity = m_borrowedMapIdentity || loosePair;
+    input.borrowedMapIdentity = m_borrowedMapIdentity;
+    input.syntheticMapIdentity = loosePair;
+    input.mapSizeX = int(landscape->widthInWorldUnits() / 32u);
+    input.mapSizeY = int(landscape->heightInWorldUnits() / 32u);
     input.allowMissingAiGraph = allowMissingAiGraph;
     if(isBase && !hotReloadRequested)
     {
@@ -3802,38 +3804,48 @@ void MainWindow::createCollectionFromTemplate(
     bool promptToLoad)
 {
     CCollectionEditorDialog dialog(initial, m_mapCatalog.entries, this);
-    if(dialog.exec() != QDialog::Accepted)
-        return;
-    QDir().mkpath(CCollectionDocument::defaultDirectory());
-    QString suggested = suggestedBaseName.trimmed().isEmpty()
-        ? dialog.collection().name : suggestedBaseName;
-    suggested.replace(QRegularExpression("[^A-Za-z0-9_.-]+"), "-");
-    const QString path = QFileDialog::getSaveFileName(this, tr("Save Collection"),
-        QDir(CCollectionDocument::defaultDirectory()).filePath(suggested + ".collection"),
-        tr("Endurance Collection (*.collection)"));
-    if(path.isEmpty())
-        return;
-    QString outputPath = path;
-    if(!outputPath.endsWith(".collection", Qt::CaseInsensitive))
-        outputPath += ".collection";
-    SEnduranceCollection value = dialog.collection();
-    value.mprReference = CCollectionDocument::portableReference(
-        value.mprReference, outputPath, activeMapRoots());
-    for(QString& mob : value.mobReferences)
-        mob = CCollectionDocument::portableReference(mob, outputPath, activeMapRoots());
-    QString error;
-    if(!CCollectionDocument::save(outputPath, value, &error))
-        QMessageBox::warning(this, tr("Save Collection"), error);
-    else
+    for(;;)
     {
+        if(dialog.exec() != QDialog::Accepted)
+            return;
+        QDir().mkpath(CCollectionDocument::defaultDirectory());
+        QString suggested = suggestedBaseName.trimmed().isEmpty()
+            ? dialog.collection().name : suggestedBaseName;
+        suggested.replace(QRegularExpression("[^A-Za-z0-9_.-]+"), "-");
+        const QString path = QFileDialog::getSaveFileName(this, tr("Save Collection"),
+            QDir(CCollectionDocument::defaultDirectory()).filePath(suggested + ".collection"),
+            tr("Endurance Collection (*.collection)"));
+        if(path.isEmpty())
+        {
+            // The editor dialog retains the user's values. Returning to it is
+            // less destructive than discarding the draft because the native
+            // Save As dialog was cancelled.
+            dialog.show();
+            dialog.raise();
+            dialog.activateWindow();
+            continue;
+        }
+        QString outputPath = path;
+        if(!outputPath.endsWith(".collection", Qt::CaseInsensitive))
+            outputPath += ".collection";
+        SEnduranceCollection value = dialog.collection();
+        value.mprReference = CCollectionDocument::portableReference(
+            value.mprReference, outputPath, activeMapRoots());
+        for(QString& mob : value.mobReferences)
+            mob = CCollectionDocument::portableReference(mob, outputPath, activeMapRoots());
+        QString error;
+        if(!CCollectionDocument::save(outputPath, value, &error))
+        {
+            QMessageBox::warning(this, tr("Save Collection"), error);
+            continue;
+        }
         refreshMapsBrowser();
         statusBar()->showMessage(tr("Collection saved: %1").arg(outputPath), 5000);
         if(promptToLoad && QMessageBox::question(this, tr("New Collection"),
             tr("The collection was created successfully.\n\nLoad it now?"),
             QMessageBox::Yes | QMessageBox::No, QMessageBox::Yes) == QMessageBox::Yes)
-        {
             openCollection(QFileInfo(outputPath).absoluteFilePath());
-        }
+        return;
     }
 }
 
@@ -3932,7 +3944,7 @@ void MainWindow::duplicateCollection(const QString& path)
     value.mobReferences = resolved.mobPaths;
     value.sourcePath.clear();
     createCollectionFromTemplate(value,
-        QFileInfo(path).completeBaseName() + "-copy");
+        QFileInfo(path).completeBaseName() + "-copy", true);
 }
 
 void MainWindow::saveCollectionAs(const QString& path)

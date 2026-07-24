@@ -70,6 +70,8 @@ void HotReloadProtocolTests::roundTripsBridgeControlFile()
     request.runId = "run-19";
     request.profileId = "jamais-vu";
     request.sourceZoneId = "gz10g";
+    request.bootstrapMprName = "zone10";
+    request.bootstrapMobName = "zone10";
     request.zoneId = "gz10g";
     request.entranceId = 4;
     request.mprPath = "C:/test runs/run-19/reloads/19/map.mpr";
@@ -81,6 +83,11 @@ void HotReloadProtocolTests::roundTripsBridgeControlFile()
     request.savePath = "C:/test runs/run-19/generations/000007/saves";
     request.preservePosition = true;
     request.graphless = true;
+    request.syntheticMapIdentity = true;
+    request.mapSizeX = 7;
+    request.mapSizeY = 5;
+    request.spawnX = 180.25;
+    request.spawnY = 96.5;
 
     SMapHotReloadRequest parsed;
     QStringList errors;
@@ -91,6 +98,8 @@ void HotReloadProtocolTests::roundTripsBridgeControlFile()
     QCOMPARE(parsed.runtimeStateSequence, request.runtimeStateSequence);
     QCOMPARE(parsed.runId, request.runId);
     QCOMPARE(parsed.zoneId, request.zoneId);
+    QCOMPARE(parsed.bootstrapMprName, request.bootstrapMprName);
+    QCOMPARE(parsed.bootstrapMobName, request.bootstrapMobName);
     QCOMPARE(parsed.entranceId, request.entranceId);
     QCOMPARE(parsed.mprPath, request.mprPath);
     QCOMPARE(parsed.mobPath, request.mobPath);
@@ -98,6 +107,11 @@ void HotReloadProtocolTests::roundTripsBridgeControlFile()
     QCOMPARE(parsed.savePath, request.savePath);
     QCOMPARE(parsed.preservePosition, request.preservePosition);
     QCOMPARE(parsed.graphless, request.graphless);
+    QCOMPARE(parsed.syntheticMapIdentity, request.syntheticMapIdentity);
+    QCOMPARE(parsed.mapSizeX, request.mapSizeX);
+    QCOMPARE(parsed.mapSizeY, request.mapSizeY);
+    QCOMPARE(parsed.spawnX, request.spawnX);
+    QCOMPARE(parsed.spawnY, request.spawnY);
 }
 
 QTEST_APPLESS_MAIN(HotReloadProtocolTests)

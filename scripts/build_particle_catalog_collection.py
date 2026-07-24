@@ -164,7 +164,7 @@ def collection_text(mpr_reference: str, mob_reference: str) -> str:
         "version=1\n"
         'name="Particle catalog - flat Zone 1"\n'
         'profile="jamais-vu"\n'
-        'map="gz1g"\n'
+        'map=""\n'
         f'mpr="{mpr_reference}"\n'
         f'mob="{mob_reference}"\n'
     )
@@ -226,12 +226,7 @@ def build(catalog_mob: Path, output_root: Path) -> dict[str, Any]:
             "atlasSlot": ZONE1_GROUND_ATLAS_SLOT,
             "rotation": 0,
         },
-        "runtimeBootstrap": {
-            "borrowedZone": "gz1g",
-            "exitId": ZONE1_BOOTSTRAP_EXIT,
-            "deployRectangle": list(ZONE1_BOOTSTRAP_DEPLOY),
-            "terrainContainsDeployRectangle": True,
-        },
+        "runtimeBootstrap": {"syntheticMapIdentity": True},
         "outputs": {
             "collection": {"path": "collections/particle-catalog.collection"},
             "mpr": {

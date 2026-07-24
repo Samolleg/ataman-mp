@@ -8,6 +8,7 @@
 #include <cwchar>
 #include <cstring>
 #include <cctype>
+#include <cmath>
 #include <intrin.h>
 
 #include "../runtime_variant_registry.h"
@@ -153,8 +154,16 @@ void* g_zoneTransitionController = nullptr;
 char g_temporaryMpr[MAX_PATH * 4] = {};
 char g_temporaryMob[MAX_PATH * 4] = {};
 char g_sourceZone[128] = {};
+char g_bootstrapZone[128] = {};
+char g_bootstrapMpr[128] = {};
+char g_bootstrapMob[128] = {};
 int g_targetExit = -1;
 int g_targetExitId = 0;
+bool g_syntheticMapIdentity = false;
+int g_syntheticMapSizeX = 0;
+int g_syntheticMapSizeY = 0;
+float g_syntheticSpawnX = 0.0f;
+float g_syntheticSpawnY = 0.0f;
 wchar_t g_liveSaves[MAX_PATH * 4] = {};
 wchar_t g_testSaves[MAX_PATH * 4] = {};
 CRITICAL_SECTION g_savePathLock{};
@@ -182,6 +191,7 @@ int __fastcall ZoneTransitionDetour(void* self, void*, const char* zoneName,
                                     int requestedMode);
 void __fastcall PlayerDefaultsResetDetour(void* self, void*);
 LRESULT CALLBACK DirectLaunchMessageHook(int code, WPARAM wParam, LPARAM lParam);
+const char* FileNamePartA(const char* path);
 
 struct HotReloadControl
 {
@@ -199,10 +209,50 @@ struct HotReloadControl
     unsigned char bootstrapMobSha256[32] = {};
     bool hasBootstrap = false;
     bool graphless = false;
+    bool syntheticMapIdentity = false;
+    int mapSizeX = 0;
+    int mapSizeY = 0;
+    float spawnX = 0.0f;
+    float spawnY = 0.0f;
     char sourceZone[128] = {};
+    char bootstrapMpr[128] = {};
+    char bootstrapMob[128] = {};
     char zone[128] = {};
     char bootstrapMode[32] = {};
 };
+
+constexpr size_t kZoneNameOffset = 0;
+constexpr size_t kZoneAllodOffset = 4;
+constexpr size_t kZoneMobOffset = 8;
+constexpr size_t kZoneTerrainOffset = 12;
+constexpr size_t kZoneFigureOffset = 16;
+constexpr size_t kZoneMapTextureOffset = 20;
+constexpr size_t kZoneMinimapTextureOffset = 24;
+constexpr size_t kZoneCameraOffset = 28;
+constexpr size_t kZoneSizeXOffset = 32;
+constexpr size_t kZoneSizeYOffset = 36;
+constexpr size_t kZoneTypeOffset = 40;
+constexpr size_t kZoneWeatherOffset = 44;
+constexpr size_t kZoneSkyOffset = 48;
+constexpr size_t kZoneRestrictOffset = 52;
+constexpr size_t kZoneCageOffset = 68;
+constexpr size_t kZoneExitsDataOffset = 72;
+constexpr size_t kZoneExitsSizeOffset = 76;
+constexpr size_t kZoneExitSize = 60;
+constexpr size_t kExitZoneOffset = 40;
+
+struct SyntheticZoneSnapshot
+{
+    unsigned char* zone = nullptr;
+    char strings[8][128]{};
+    unsigned char scalarBytes[40]{};
+    unsigned char firstExit[kZoneExitSize]{};
+    char firstExitZone[128]{};
+    int exitCount = 0;
+    bool active = false;
+};
+
+SyntheticZoneSnapshot g_syntheticZoneSnapshot;
 
 const wchar_t* FileNamePart(const wchar_t* path)
 {
@@ -250,6 +300,267 @@ void Log(const wchar_t* message)
             WriteFile(file, utf8, DWORD(bytes), &written, nullptr);
     }
     CloseHandle(file);
+}
+
+bool IsReadableRange(const void* address, size_t bytes)
+{
+    if(!address || bytes == 0)
+        return false;
+    const unsigned char* cursor = static_cast<const unsigned char*>(address);
+    const unsigned char* end = cursor + bytes;
+    if(end < cursor)
+        return false;
+    while(cursor < end)
+    {
+        MEMORY_BASIC_INFORMATION info{};
+        if(!VirtualQuery(cursor, &info, sizeof(info))
+           || info.State != MEM_COMMIT
+           || (info.Protect & (PAGE_NOACCESS | PAGE_GUARD)))
+            return false;
+        const DWORD readable = info.Protect & 0xFF;
+        if(readable != PAGE_READONLY && readable != PAGE_READWRITE
+           && readable != PAGE_WRITECOPY && readable != PAGE_EXECUTE_READ
+           && readable != PAGE_EXECUTE_READWRITE
+           && readable != PAGE_EXECUTE_WRITECOPY)
+            return false;
+        const unsigned char* regionEnd = static_cast<const unsigned char*>(info.BaseAddress)
+            + info.RegionSize;
+        if(regionEnd <= cursor)
+            return false;
+        cursor = regionEnd < end ? regionEnd : end;
+    }
+    return true;
+}
+
+bool ReadBoundedCString(const char* value, char* output, size_t capacity)
+{
+    if(!value || !output || capacity < 2 || !IsReadableRange(value, 1))
+        return false;
+    size_t length = 0;
+    while(length + 1 < capacity)
+    {
+        if(!IsReadableRange(value + length, 1))
+            return false;
+        const char c = value[length];
+        output[length++] = c;
+        if(c == '\0')
+            return true;
+    }
+    output[capacity - 1] = '\0';
+    return false;
+}
+
+bool ReadGameStringField(const unsigned char* object, size_t offset,
+                         char* output, size_t capacity)
+{
+    if(!IsReadableRange(object + offset, sizeof(char*)))
+        return false;
+    const char* value = *reinterpret_cast<char* const*>(object + offset);
+    return ReadBoundedCString(value, output, capacity);
+}
+
+bool MatchesGameStringField(const unsigned char* object, size_t offset,
+                            const char* expected)
+{
+    char value[128]{};
+    return expected && ReadGameStringField(object, offset, value, sizeof(value))
+        && _stricmp(value, expected) == 0;
+}
+
+bool ValidateZoneCandidate(unsigned char* candidate, const char* zoneName,
+                           const char* expectedMpr, const char* expectedMob)
+{
+    if(!IsReadableRange(candidate, 88)
+       || !MatchesGameStringField(candidate, kZoneNameOffset, zoneName)
+       || !MatchesGameStringField(candidate, kZoneTerrainOffset, expectedMpr)
+       || !MatchesGameStringField(candidate, kZoneMobOffset, expectedMob))
+        return false;
+    char allod[128]{};
+    if(!ReadGameStringField(candidate, kZoneAllodOffset, allod, sizeof(allod))
+       || !allod[0])
+        return false;
+    const int sizeX = *reinterpret_cast<int*>(candidate + kZoneSizeXOffset);
+    const int sizeY = *reinterpret_cast<int*>(candidate + kZoneSizeYOffset);
+    const int type = *reinterpret_cast<int*>(candidate + kZoneTypeOffset);
+    const int exitCount = *reinterpret_cast<int*>(candidate + kZoneExitsSizeOffset);
+    auto* exits = *reinterpret_cast<unsigned char**>(candidate + kZoneExitsDataOffset);
+    return sizeX > 0 && sizeY > 0 && sizeX <= 1024 && sizeY <= 1024
+        && type >= 0 && type <= 2 && exitCount > 0 && exitCount <= 1024
+        && IsReadableRange(exits, kZoneExitSize);
+}
+
+unsigned char* FindZoneCandidate(const char* zoneName, const char* expectedMpr,
+                                 const char* expectedMob)
+{
+    DWORD heapCount = GetProcessHeaps(0, nullptr);
+    if(!heapCount || heapCount > 1024)
+        return nullptr;
+    HANDLE* heaps = static_cast<HANDLE*>(HeapAlloc(GetProcessHeap(), 0,
+                                                   heapCount * sizeof(HANDLE)));
+    if(!heaps)
+        return nullptr;
+    heapCount = GetProcessHeaps(heapCount, heaps);
+    unsigned char* found = nullptr;
+    int matches = 0;
+    for(DWORD heapIndex = 0; heapIndex < heapCount && matches < 2; ++heapIndex)
+    {
+        HANDLE heap = heaps[heapIndex];
+        if(!HeapLock(heap))
+            continue;
+        PROCESS_HEAP_ENTRY entry{};
+        while(HeapWalk(heap, &entry))
+        {
+            if(!(entry.wFlags & PROCESS_HEAP_ENTRY_BUSY) || entry.cbData < 88)
+                continue;
+            auto* begin = static_cast<unsigned char*>(entry.lpData);
+            const size_t limit = entry.cbData - 88;
+            for(size_t offset = 0; offset <= limit; offset += sizeof(void*))
+            {
+                unsigned char* candidate = begin + offset;
+                if(ValidateZoneCandidate(candidate, zoneName, expectedMpr, expectedMob))
+                {
+                    found = candidate;
+                    ++matches;
+                    if(matches > 1)
+                        break;
+                }
+            }
+        }
+        HeapUnlock(heap);
+    }
+    HeapFree(GetProcessHeap(), 0, heaps);
+    return matches == 1 ? found : nullptr;
+}
+
+bool SnapshotSyntheticZone(unsigned char* zone)
+{
+    if(!zone || g_syntheticZoneSnapshot.active)
+        return zone && g_syntheticZoneSnapshot.zone == zone;
+    const size_t offsets[8] = {kZoneNameOffset, kZoneAllodOffset, kZoneMobOffset,
+        kZoneTerrainOffset, kZoneFigureOffset, kZoneMapTextureOffset,
+        kZoneMinimapTextureOffset, kZoneCameraOffset};
+    for(int index = 0; index < 8; ++index)
+        if(!ReadGameStringField(zone, offsets[index],
+                                g_syntheticZoneSnapshot.strings[index], 128))
+            return false;
+    std::memcpy(g_syntheticZoneSnapshot.scalarBytes, zone + kZoneSizeXOffset,
+                sizeof(g_syntheticZoneSnapshot.scalarBytes));
+    auto* exits = *reinterpret_cast<unsigned char**>(zone + kZoneExitsDataOffset);
+    const int exitCount = *reinterpret_cast<int*>(zone + kZoneExitsSizeOffset);
+    if(exitCount <= 0 || !IsReadableRange(exits, kZoneExitSize)
+       || !ReadGameStringField(exits, kExitZoneOffset,
+                               g_syntheticZoneSnapshot.firstExitZone,
+                               sizeof(g_syntheticZoneSnapshot.firstExitZone)))
+        return false;
+    std::memcpy(g_syntheticZoneSnapshot.firstExit, exits, kZoneExitSize);
+    g_syntheticZoneSnapshot.zone = zone;
+    g_syntheticZoneSnapshot.exitCount = exitCount;
+    g_syntheticZoneSnapshot.active = true;
+    return true;
+}
+
+void AssignZoneString(unsigned char* zone, size_t offset, const char* value)
+{
+    auto* game = reinterpret_cast<unsigned char*>(g_gameModule);
+    const auto assign = reinterpret_cast<GameStringAssignFn>(game + kGameStringAssignRva);
+    assign(zone + offset, value ? value : "");
+}
+
+bool RestoreSyntheticZone()
+{
+    if(!g_syntheticZoneSnapshot.active)
+        return true;
+    unsigned char* zone = g_syntheticZoneSnapshot.zone;
+    if(!IsReadableRange(zone, 88))
+        return false;
+    const size_t offsets[8] = {kZoneNameOffset, kZoneAllodOffset, kZoneMobOffset,
+        kZoneTerrainOffset, kZoneFigureOffset, kZoneMapTextureOffset,
+        kZoneMinimapTextureOffset, kZoneCameraOffset};
+    for(int index = 0; index < 8; ++index)
+        AssignZoneString(zone, offsets[index], g_syntheticZoneSnapshot.strings[index]);
+    std::memcpy(zone + kZoneSizeXOffset, g_syntheticZoneSnapshot.scalarBytes,
+                sizeof(g_syntheticZoneSnapshot.scalarBytes));
+    auto* exits = *reinterpret_cast<unsigned char**>(zone + kZoneExitsDataOffset);
+    if(!IsReadableRange(exits, kZoneExitSize))
+        return false;
+    char* currentExitString = *reinterpret_cast<char**>(exits + kExitZoneOffset);
+    std::memcpy(exits, g_syntheticZoneSnapshot.firstExit, kZoneExitSize);
+    *reinterpret_cast<char**>(exits + kExitZoneOffset) = currentExitString;
+    AssignZoneString(exits, kExitZoneOffset,
+                     g_syntheticZoneSnapshot.firstExitZone);
+    *reinterpret_cast<int*>(zone + kZoneExitsSizeOffset) =
+        g_syntheticZoneSnapshot.exitCount;
+    g_syntheticZoneSnapshot = SyntheticZoneSnapshot();
+    Log(L"SYNTHETIC_MAP restored the borrowed bootstrap zone record");
+    return true;
+}
+
+bool ConfigureSyntheticZone()
+{
+    if(!g_syntheticMapIdentity)
+        return RestoreSyntheticZone();
+    if(g_syntheticMapSizeX <= 0 || g_syntheticMapSizeY <= 0
+       || !std::isfinite(g_syntheticSpawnX) || !std::isfinite(g_syntheticSpawnY)
+       || !g_sourceZone[0] || !g_bootstrapZone[0]
+       || !g_bootstrapMpr[0] || !g_bootstrapMob[0])
+        return false;
+    unsigned char* zone = g_syntheticZoneSnapshot.active
+        ? g_syntheticZoneSnapshot.zone
+        : FindZoneCandidate(g_bootstrapZone, g_bootstrapMpr, g_bootstrapMob);
+    if(!zone || !SnapshotSyntheticZone(zone))
+    {
+        Log(L"SYNTHETIC_MAP refused: a unique validated bootstrap zone record was not found");
+        return false;
+    }
+    const char* mapName = FileNamePartA(g_temporaryMpr);
+    char logicalMap[128]{};
+    if(!mapName || strcpy_s(logicalMap, mapName) != 0)
+        return false;
+    char* extension = std::strrchr(logicalMap, '.');
+    if(extension) *extension = '\0';
+    AssignZoneString(zone, kZoneNameOffset, g_sourceZone);
+    AssignZoneString(zone, kZoneMobOffset, logicalMap);
+    AssignZoneString(zone, kZoneTerrainOffset, logicalMap);
+    AssignZoneString(zone, kZoneFigureOffset, "");
+    AssignZoneString(zone, kZoneMapTextureOffset, "");
+    AssignZoneString(zone, kZoneMinimapTextureOffset, "");
+    AssignZoneString(zone, kZoneCameraOffset, "");
+    *reinterpret_cast<int*>(zone + kZoneSizeXOffset) = g_syntheticMapSizeX;
+    *reinterpret_cast<int*>(zone + kZoneSizeYOffset) = g_syntheticMapSizeY;
+    *reinterpret_cast<int*>(zone + kZoneTypeOffset) = 0;
+    *reinterpret_cast<int*>(zone + kZoneWeatherOffset) = 0;
+    *reinterpret_cast<int*>(zone + kZoneSkyOffset) = 0;
+    *reinterpret_cast<unsigned char*>(zone + kZoneRestrictOffset) = 0;
+    *reinterpret_cast<unsigned char*>(zone + kZoneCageOffset) = 0;
+    auto* exit = *reinterpret_cast<unsigned char**>(zone + kZoneExitsDataOffset);
+    if(!IsReadableRange(exit, kZoneExitSize))
+        return false;
+    const float radius = 0.75f;
+    *reinterpret_cast<float*>(exit + 0) = 0.0f;
+    *reinterpret_cast<float*>(exit + 4) = g_syntheticSpawnX - radius;
+    *reinterpret_cast<float*>(exit + 8) = g_syntheticSpawnY - radius;
+    *reinterpret_cast<float*>(exit + 12) = g_syntheticSpawnX + radius;
+    *reinterpret_cast<float*>(exit + 16) = g_syntheticSpawnY + radius;
+    *reinterpret_cast<float*>(exit + 20) = g_syntheticSpawnX - radius;
+    *reinterpret_cast<float*>(exit + 24) = g_syntheticSpawnY - radius;
+    *reinterpret_cast<float*>(exit + 28) = g_syntheticSpawnX + radius;
+    *reinterpret_cast<float*>(exit + 32) = g_syntheticSpawnY + radius;
+    *reinterpret_cast<float*>(exit + 36) = 0.0f;
+    AssignZoneString(exit, kExitZoneOffset, "none");
+    *reinterpret_cast<int*>(exit + 44) = 0;
+    *reinterpret_cast<float*>(exit + 48) = 0.0f;
+    *reinterpret_cast<unsigned char*>(exit + 52) = 0;
+    *reinterpret_cast<float*>(exit + 56) = 0.0f;
+    *reinterpret_cast<int*>(zone + kZoneExitsSizeOffset) = 1;
+    g_targetExitId = 1;
+    g_targetExit = 0;
+    wchar_t message[768]{};
+    _snwprintf_s(message, sizeof(message) / sizeof(message[0]), _TRUNCATE,
+                 L"SYNTHETIC_MAP configured identity=%S bootstrap=%S size=%dx%d entrance=(%.3f,%.3f) minimap=none exits=1",
+                 g_sourceZone, g_bootstrapZone, g_syntheticMapSizeX,
+                 g_syntheticMapSizeY, g_syntheticSpawnX, g_syntheticSpawnY);
+    Log(message);
+    return true;
 }
 
 const wchar_t* RuntimeStateName(RuntimeState state)
@@ -432,6 +743,14 @@ bool ReadHotReloadControl(HotReloadControl* output)
         {
             if(strcpy_s(parsed.sourceZone, value) != 0) return false;
         }
+        else if(std::strcmp(line, "bootstrapMpr") == 0)
+        {
+            if(strcpy_s(parsed.bootstrapMpr, value) != 0) return false;
+        }
+        else if(std::strcmp(line, "bootstrapMobName") == 0)
+        {
+            if(strcpy_s(parsed.bootstrapMob, value) != 0) return false;
+        }
         else if(std::strcmp(line, "bootstrapMode") == 0)
         {
             if(strcpy_s(parsed.bootstrapMode, value) != 0) return false;
@@ -468,6 +787,16 @@ bool ReadHotReloadControl(HotReloadControl* output)
         }
         else if(std::strcmp(line, "graphless") == 0)
             parsed.graphless = std::strcmp(value, "1") == 0;
+        else if(std::strcmp(line, "syntheticMapIdentity") == 0)
+            parsed.syntheticMapIdentity = std::strcmp(value, "1") == 0;
+        else if(std::strcmp(line, "mapSizeX") == 0)
+            parsed.mapSizeX = std::atoi(value);
+        else if(std::strcmp(line, "mapSizeY") == 0)
+            parsed.mapSizeY = std::atoi(value);
+        else if(std::strcmp(line, "spawnX") == 0)
+            parsed.spawnX = float(std::atof(value));
+        else if(std::strcmp(line, "spawnY") == 0)
+            parsed.spawnY = float(std::atof(value));
     }
     for(const char* cursor = parsed.zone; *cursor; ++cursor)
         if(!std::isalnum(static_cast<unsigned char>(*cursor))
@@ -482,7 +811,7 @@ bool ReadHotReloadControl(HotReloadControl* output)
        && _stricmp(parsed.bootstrapMode, "transition") != 0
        && _stricmp(parsed.bootstrapMode, "new-game") != 0)
         return false;
-    if(parsed.protocol != 2 || parsed.sequence == 0 || parsed.generation == 0
+    if(parsed.protocol != 3 || parsed.sequence == 0 || parsed.generation == 0
        || !haveProfile || !haveRunId
        || parsed.sequence <= g_hotReloadSequence || parsed.entranceId <= 0
        || parsed.entranceId > 1024
@@ -494,6 +823,13 @@ bool ReadHotReloadControl(HotReloadControl* output)
        || !IsPathInsideHotReloadRoot(parsed.savePath)
        || !HashMatches(parsed.mprPath, parsed.mprSha256)
        || !HashMatches(parsed.mobPath, parsed.mobSha256))
+        return false;
+    if(parsed.syntheticMapIdentity
+       && (parsed.mapSizeX <= 0 || parsed.mapSizeX > 1024
+           || parsed.mapSizeY <= 0 || parsed.mapSizeY > 1024
+           || !std::isfinite(parsed.spawnX) || !std::isfinite(parsed.spawnY)
+           || !parsed.sourceZone[0] || !parsed.bootstrapMpr[0]
+           || !parsed.bootstrapMob[0]))
         return false;
     const DWORD saveAttributes = GetFileAttributesW(parsed.savePath);
     if(saveAttributes == INVALID_FILE_ATTRIBUTES || !(saveAttributes & FILE_ATTRIBUTE_DIRECTORY)
@@ -1675,6 +2011,14 @@ bool ReadDirectLaunchPaths()
     wchar_t mpr[MAX_PATH * 4]{};
     wchar_t mob[MAX_PATH * 4]{};
     wchar_t sourceZone[128]{};
+    wchar_t bootstrapZone[128]{};
+    wchar_t bootstrapMpr[128]{};
+    wchar_t bootstrapMob[128]{};
+    wchar_t syntheticMap[8]{};
+    wchar_t mapSizeX[16]{};
+    wchar_t mapSizeY[16]{};
+    wchar_t spawnX[64]{};
+    wchar_t spawnY[64]{};
     wchar_t targetExit[16]{};
     wchar_t graphless[8]{};
     GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_GRAPHLESS", graphless,
@@ -1704,6 +2048,8 @@ bool ReadDirectLaunchPaths()
                                 DWORD(sizeof(mob) / sizeof(mob[0]))) ||
        !GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_SOURCE_ZONE", sourceZone,
                                 DWORD(sizeof(sourceZone) / sizeof(sourceZone[0]))) ||
+       !GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_BOOTSTRAP_ZONE", bootstrapZone,
+                                DWORD(sizeof(bootstrapZone) / sizeof(bootstrapZone[0]))) ||
        !GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_TARGET_EXIT", targetExit,
                                 DWORD(sizeof(targetExit) / sizeof(targetExit[0]))) ||
        !GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_LIVE_SAVES", g_liveSaves,
@@ -1716,6 +2062,20 @@ bool ReadDirectLaunchPaths()
         Log(L"DIRECT_LAUNCH disabled: staged MPR/MOB environment paths are missing or unreadable");
         return false;
     }
+    GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_BOOTSTRAP_MPR", bootstrapMpr,
+                            DWORD(sizeof(bootstrapMpr) / sizeof(bootstrapMpr[0])));
+    GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_BOOTSTRAP_MOB", bootstrapMob,
+                            DWORD(sizeof(bootstrapMob) / sizeof(bootstrapMob[0])));
+    GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_SYNTHETIC_MAP", syntheticMap,
+                            DWORD(sizeof(syntheticMap) / sizeof(syntheticMap[0])));
+    GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_MAP_SIZE_X", mapSizeX,
+                            DWORD(sizeof(mapSizeX) / sizeof(mapSizeX[0])));
+    GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_MAP_SIZE_Y", mapSizeY,
+                            DWORD(sizeof(mapSizeY) / sizeof(mapSizeY[0])));
+    GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_SPAWN_X", spawnX,
+                            DWORD(sizeof(spawnX) / sizeof(spawnX[0])));
+    GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_SPAWN_Y", spawnY,
+                            DWORD(sizeof(spawnY) / sizeof(spawnY[0])));
     wchar_t* exitEnd = nullptr;
     const long parsedExit = std::wcstol(targetExit, &exitEnd, 10);
     if(exitEnd == targetExit || *exitEnd != L'\0' || parsedExit <= 0 || parsedExit > 1024)
@@ -1747,15 +2107,51 @@ bool ReadDirectLaunchPaths()
                             &mobSubstitution) ||
        !WideCharToMultiByte(CP_ACP, WC_NO_BEST_FIT_CHARS, sourceZone, -1,
                             g_sourceZone, int(sizeof(g_sourceZone)), nullptr, nullptr) ||
+       !WideCharToMultiByte(CP_ACP, WC_NO_BEST_FIT_CHARS, bootstrapZone, -1,
+                            g_bootstrapZone, int(sizeof(g_bootstrapZone)), nullptr, nullptr) ||
        mprSubstitution || mobSubstitution)
     {
         Log(L"DIRECT_LAUNCH disabled: staged paths cannot be represented in the game ANSI code page");
         return false;
     }
+    g_syntheticMapIdentity = std::wcscmp(syntheticMap, L"1") == 0;
+    if(g_syntheticMapIdentity)
+    {
+        wchar_t* endSizeX = nullptr;
+        wchar_t* endSizeY = nullptr;
+        wchar_t* endSpawnX = nullptr;
+        wchar_t* endSpawnY = nullptr;
+        const long parsedSizeX = std::wcstol(mapSizeX, &endSizeX, 10);
+        const long parsedSizeY = std::wcstol(mapSizeY, &endSizeY, 10);
+        const double parsedSpawnX = std::wcstod(spawnX, &endSpawnX);
+        const double parsedSpawnY = std::wcstod(spawnY, &endSpawnY);
+        if(!bootstrapMpr[0] || !bootstrapMob[0]
+           || endSizeX == mapSizeX || *endSizeX != L'\0'
+           || endSizeY == mapSizeY || *endSizeY != L'\0'
+           || endSpawnX == spawnX || *endSpawnX != L'\0'
+           || endSpawnY == spawnY || *endSpawnY != L'\0'
+           || parsedSizeX <= 0 || parsedSizeX > 1024
+           || parsedSizeY <= 0 || parsedSizeY > 1024
+           || !std::isfinite(parsedSpawnX) || !std::isfinite(parsedSpawnY)
+           || !WideCharToMultiByte(CP_ACP, WC_NO_BEST_FIT_CHARS, bootstrapMpr, -1,
+                                   g_bootstrapMpr, int(sizeof(g_bootstrapMpr)), nullptr, nullptr)
+           || !WideCharToMultiByte(CP_ACP, WC_NO_BEST_FIT_CHARS, bootstrapMob, -1,
+                                   g_bootstrapMob, int(sizeof(g_bootstrapMob)), nullptr, nullptr))
+        {
+            Log(L"DIRECT_LAUNCH disabled: synthetic-map metadata is incomplete or invalid");
+            return false;
+        }
+        g_syntheticMapSizeX = int(parsedSizeX);
+        g_syntheticMapSizeY = int(parsedSizeY);
+        g_syntheticSpawnX = float(parsedSpawnX);
+        g_syntheticSpawnY = float(parsedSpawnY);
+    }
     wchar_t message[1800]{};
     _snwprintf_s(message, sizeof(message) / sizeof(message[0]), _TRUNCATE,
-                 L"DIRECT_LAUNCH profile zone=\"%s\" entrance_id=%d entrance_index=%d isolated_saves=\"%s\" live_saves_protected=\"%s\"",
-                 sourceZone, g_targetExitId, g_targetExit, g_testSaves, g_liveSaves);
+                 L"DIRECT_LAUNCH profile zone=\"%s\" entrance_id=%d entrance_index=%d synthetic=%d size=%dx%d isolated_saves=\"%s\" live_saves_protected=\"%s\"",
+                 sourceZone, g_targetExitId, g_targetExit,
+                 g_syntheticMapIdentity ? 1 : 0, g_syntheticMapSizeX,
+                 g_syntheticMapSizeY, g_testSaves, g_liveSaves);
     Log(message);
     return true;
 }
@@ -2043,6 +2439,19 @@ bool ProcessHotReloadOnGameThread()
         Log(L"HOT_RELOAD refused: map-table zone identity is too long");
         return false;
     }
+    if(strcpy_s(g_bootstrapZone, request.sourceZone) != 0
+       || (request.syntheticMapIdentity
+           && (strcpy_s(g_bootstrapMpr, request.bootstrapMpr) != 0
+               || strcpy_s(g_bootstrapMob, request.bootstrapMob) != 0)))
+    {
+        Log(L"HOT_RELOAD refused: bootstrap map identity is too long");
+        return false;
+    }
+    g_syntheticMapIdentity = request.syntheticMapIdentity;
+    g_syntheticMapSizeX = request.mapSizeX;
+    g_syntheticMapSizeY = request.mapSizeY;
+    g_syntheticSpawnX = request.spawnX;
+    g_syntheticSpawnY = request.spawnY;
     g_targetExitId = request.entranceId;
     g_targetExit = request.entranceId - 1;
     InterlockedExchange(&g_graphlessPayload, request.graphless ? 1 : 0);
@@ -2116,6 +2525,12 @@ bool ProcessHotReloadOnGameThread()
     }
 
     InterlockedExchange(&g_pendingStateAwareReload, 0);
+    if(!ConfigureSyntheticZone())
+    {
+        Log(L"HOT_RELOAD refused: synthetic map identity could not be prepared safely");
+        InterlockedExchange(&g_directLaunchState, -1);
+        return false;
+    }
     InterlockedExchange(&g_directLaunchState, 3);
     const int transitionResult = 1;
     auto* game = reinterpret_cast<unsigned char*>(g_gameModule);
@@ -2161,6 +2576,13 @@ LRESULT CALLBACK DirectLaunchMessageHook(int code, WPARAM wParam, LPARAM lParam)
     }
     if(InterlockedCompareExchange(&g_directLaunchState, 3, 2) != 2)
         return next;
+
+    if(!ConfigureSyntheticZone())
+    {
+        Log(L"DIRECT_LAUNCH failed: synthetic map identity could not be prepared safely");
+        InterlockedExchange(&g_directLaunchState, -1);
+        return next;
+    }
 
     auto* game = reinterpret_cast<unsigned char*>(g_gameModule);
     wchar_t bootstrapMessage[384]{};

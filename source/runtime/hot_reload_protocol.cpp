@@ -5,6 +5,7 @@
 #include <QHash>
 #include <QRegularExpression>
 #include <QTextStream>
+#include <QtGlobal>
 
 namespace {
 bool isOwnedPath(const QString& path, const QString& root)
@@ -28,6 +29,8 @@ QJsonObject mapHotReloadRequestToJson(const SMapHotReloadRequest& request)
     object.insert("runId", request.runId);
     object.insert("profileId", request.profileId);
     object.insert("sourceZoneId", request.sourceZoneId);
+    object.insert("bootstrapMprName", request.bootstrapMprName);
+    object.insert("bootstrapMobName", request.bootstrapMobName);
     object.insert("zoneId", request.zoneId);
     object.insert("bootstrapMode", request.bootstrapMode);
     object.insert("entranceId", request.entranceId);
@@ -40,6 +43,11 @@ QJsonObject mapHotReloadRequestToJson(const SMapHotReloadRequest& request)
     object.insert("savePath", request.savePath);
     object.insert("preservePosition", request.preservePosition);
     object.insert("graphless", request.graphless);
+    object.insert("syntheticMapIdentity", request.syntheticMapIdentity);
+    object.insert("mapSizeX", request.mapSizeX);
+    object.insert("mapSizeY", request.mapSizeY);
+    object.insert("spawnX", request.spawnX);
+    object.insert("spawnY", request.spawnY);
     return object;
 }
 
@@ -60,6 +68,8 @@ bool mapHotReloadRequestFromJson(const QJsonObject& object,
     parsed.runId = object.value("runId").toString();
     parsed.profileId = object.value("profileId").toString();
     parsed.sourceZoneId = object.value("sourceZoneId").toString();
+    parsed.bootstrapMprName = object.value("bootstrapMprName").toString();
+    parsed.bootstrapMobName = object.value("bootstrapMobName").toString();
     parsed.zoneId = object.value("zoneId").toString();
     parsed.bootstrapMode = object.value("bootstrapMode").toString();
     parsed.entranceId = object.value("entranceId").toInt();
@@ -72,6 +82,11 @@ bool mapHotReloadRequestFromJson(const QJsonObject& object,
     parsed.savePath = object.value("savePath").toString();
     parsed.preservePosition = object.value("preservePosition").toBool();
     parsed.graphless = object.value("graphless").toBool();
+    parsed.syntheticMapIdentity = object.value("syntheticMapIdentity").toBool();
+    parsed.mapSizeX = object.value("mapSizeX").toInt();
+    parsed.mapSizeY = object.value("mapSizeY").toInt();
+    parsed.spawnX = object.value("spawnX").toDouble();
+    parsed.spawnY = object.value("spawnY").toDouble();
     if(!sequenceValid && errors) errors->append("Hot-reload sequence is invalid.");
     if(!generationValid && errors) errors->append("Hot-reload generation is invalid.");
     if(!stateSequenceValid && errors) errors->append("Runtime-state sequence is invalid.");
@@ -84,7 +99,7 @@ bool validateMapHotReloadRequest(const SMapHotReloadRequest& request,
                                  QStringList* errors)
 {
     QStringList local;
-    if(request.protocolVersion != 2) local.append("Unsupported hot-reload protocol version.");
+    if(request.protocolVersion != 3) local.append("Unsupported hot-reload protocol version.");
     if(request.sequence == 0) local.append("Hot-reload sequence must be positive.");
     if(request.generation == 0) local.append("Hot-reload generation must be positive.");
     if(request.runId.isEmpty() || request.profileId.isEmpty() || request.zoneId.isEmpty())
@@ -106,6 +121,14 @@ bool validateMapHotReloadRequest(const SMapHotReloadRequest& request,
     if(request.bootstrapMode != "automatic" && request.bootstrapMode != "transition"
        && request.bootstrapMode != "new-game")
         local.append("Unsupported hot-reload bootstrap mode.");
+    if(request.syntheticMapIdentity
+       && (request.mapSizeX <= 0 || request.mapSizeY <= 0
+           || request.mapSizeX > 1024 || request.mapSizeY > 1024
+           || !qIsFinite(request.spawnX) || !qIsFinite(request.spawnY)
+           || request.sourceZoneId.isEmpty()
+           || request.bootstrapMprName.isEmpty()
+           || request.bootstrapMobName.isEmpty()))
+        local.append("Synthetic-map dimensions or entrance coordinates are invalid.");
     if(!request.bootstrapMobPath.isEmpty() && !QFileInfo::exists(request.bootstrapMobPath))
         local.append("The hot-reload bootstrap MOB is missing.");
     const QRegularExpression hash("^[0-9a-f]{64}$", QRegularExpression::CaseInsensitiveOption);
@@ -137,6 +160,8 @@ QByteArray mapHotReloadRequestToControlBytes(const SMapHotReloadRequest& request
     line("runId", request.runId);
     line("profile", request.profileId);
     line("sourceZone", request.sourceZoneId);
+    line("bootstrapMpr", request.bootstrapMprName);
+    line("bootstrapMobName", request.bootstrapMobName);
     line("zone", request.zoneId);
     line("bootstrapMode", request.bootstrapMode);
     line("entrance", QString::number(request.entranceId));
@@ -149,6 +174,11 @@ QByteArray mapHotReloadRequestToControlBytes(const SMapHotReloadRequest& request
     line("savePath", QDir::toNativeSeparators(request.savePath));
     line("preservePosition", request.preservePosition ? "1" : "0");
     line("graphless", request.graphless ? "1" : "0");
+    line("syntheticMapIdentity", request.syntheticMapIdentity ? "1" : "0");
+    line("mapSizeX", QString::number(request.mapSizeX));
+    line("mapSizeY", QString::number(request.mapSizeY));
+    line("spawnX", QString::number(request.spawnX, 'f', 6));
+    line("spawnY", QString::number(request.spawnY, 'f', 6));
     stream.flush();
     return bytes;
 }
@@ -186,6 +216,8 @@ bool mapHotReloadRequestFromControlBytes(const QByteArray& bytes,
     parsed.runId = values.value("runId");
     parsed.profileId = values.value("profile");
     parsed.sourceZoneId = values.value("sourceZone");
+    parsed.bootstrapMprName = values.value("bootstrapMpr");
+    parsed.bootstrapMobName = values.value("bootstrapMobName");
     parsed.zoneId = values.value("zone");
     parsed.bootstrapMode = values.value("bootstrapMode");
     parsed.entranceId = values.value("entrance").toInt(&entranceOk);
@@ -198,7 +230,19 @@ bool mapHotReloadRequestFromControlBytes(const QByteArray& bytes,
     parsed.savePath = QDir::fromNativeSeparators(values.value("savePath"));
     parsed.preservePosition = values.value("preservePosition") == "1";
     parsed.graphless = values.value("graphless") == "1";
-    if(!protocolOk || !sequenceOk || !generationOk || !stateSequenceOk || !entranceOk)
+    parsed.syntheticMapIdentity = values.value("syntheticMapIdentity") == "1";
+    bool mapSizeXOk = false;
+    bool mapSizeYOk = false;
+    bool spawnXOk = false;
+    bool spawnYOk = false;
+    parsed.mapSizeX = values.value("mapSizeX").toInt(&mapSizeXOk);
+    parsed.mapSizeY = values.value("mapSizeY").toInt(&mapSizeYOk);
+    parsed.spawnX = values.value("spawnX").toDouble(&spawnXOk);
+    parsed.spawnY = values.value("spawnY").toDouble(&spawnYOk);
+    if(!parsed.syntheticMapIdentity)
+        mapSizeXOk = mapSizeYOk = spawnXOk = spawnYOk = true;
+    if(!protocolOk || !sequenceOk || !generationOk || !stateSequenceOk || !entranceOk
+       || !mapSizeXOk || !mapSizeYOk || !spawnXOk || !spawnYOk)
     {
         if(errors) errors->append("Hot-reload control numeric fields are invalid.");
         return false;

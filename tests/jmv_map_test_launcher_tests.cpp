@@ -179,6 +179,14 @@ void JmvMapTestLauncherTests::recognizesGraphlessBridgeProtocolMarker()
         QByteArray("prefix") + encoded + QByteArray("suffix")));
     QVERIFY(!CJmvMapTestLauncher::bridgeSupportsGraphlessLaunch(
         QByteArray("stale runtime bridge")));
+    const QString syntheticMarker = QStringLiteral("EI_MAPPER_ENDURANCE_SYNTHETIC_MAP");
+    const QByteArray syntheticEncoded(
+        reinterpret_cast<const char*>(syntheticMarker.utf16()),
+        syntheticMarker.size() * 2);
+    QVERIFY(CJmvMapTestLauncher::bridgeSupportsSyntheticMapIdentity(
+        QByteArray("prefix") + syntheticEncoded + QByteArray("suffix")));
+    QVERIFY(!CJmvMapTestLauncher::bridgeSupportsSyntheticMapIdentity(
+        QByteArray("stale runtime bridge")));
 }
 
 void JmvMapTestLauncherTests::resolvesWorkspaceExternalGraph()

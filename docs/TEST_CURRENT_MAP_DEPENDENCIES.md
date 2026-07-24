@@ -19,9 +19,10 @@ Both Base EI and JMV require:
   malformed graph remains a staging error;
 - a usable `map.txt` identity and selected entrance. JMV additionally accepts
   one loose MPR plus one MOB with no mapping when a valid Play from Here point
-  is placed; it borrows a deterministic gameplay identity only for player
-  bootstrap. MPR-only, MOB-only, and unmapped multi-MOB compositions are not
-  launchable;
+  is placed. For that run, Endurance derives a synthetic process-local zone
+  identity from the loaded MPR dimensions and the selected point. It does not
+  inherit a registered zone's minimap, exits, or coordinate frame. MPR-only,
+  MOB-only, and unmapped multi-MOB compositions are not launchable;
 - the packaged `runtime/EIMapperEnduranceRuntimeHost.exe`;
 - the packaged `runtime/EIMapperEnduranceJmvBridge.plg`;
 - writable Endurance test-run storage under `%LOCALAPPDATA%`;
@@ -121,9 +122,13 @@ are recorded in the manifest and workflow/runtime log.
 
 An unmapped loose JMV pair must have a current Play from Here point. Endurance
 does not guess the landscape center because it may be obstructed, outside the
-playable area, or vertically unsuitable. The borrowed bootstrap identity still
-owns minimap, quest, travel, save-zone, weather, and identity-sensitive script
-metadata, so the editor logs and confirms that mismatch before launch.
+playable area, or vertically unsuitable. Endurance reuses a verified gameplay
+record only as a temporary in-process bootstrap container, replaces its runtime
+identity, dimensions, terrain/MOB namespace, and sole entrance for the owned
+test process, and clears inherited minimap/travel metadata. No installed
+`map.txt`, map file, or profile resource is changed. This is deliberately a
+minimal unregistered test identity; registered quest and story metadata are not
+invented.
 
 Base and JMV share the owned-process delivery mechanism. Profile-specific game
 data, map conventions, bootstrap behavior, and optional providers remain
