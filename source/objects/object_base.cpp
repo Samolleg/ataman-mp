@@ -15,6 +15,7 @@
 #include "property.h"
 
 #include <climits>
+#include <limits>
 
 namespace {
 struct CachedFigureAssembly
@@ -345,6 +346,47 @@ QMap<QString, QVector<QVector2D>> CObjectBase::renderedBodyPartUvTriangles() con
             coordinates.append(vertex.texCoord * part->textureUvScale());
         if(coordinates.size() >= 3)
             result.insert(part->name(), coordinates);
+    }
+    return result;
+}
+
+QVector<SNavigationCollisionProxy> CObjectBase::navigationCollisionProxies() const
+{
+    QVector<SNavigationCollisionProxy> result;
+    const float scale = editorVisualScale();
+    for(const CPart* part : m_aPart)
+    {
+        if(!part || !part->isDrawable())
+            continue;
+        const QString upperName = part->name().toUpper();
+        if(upperName.startsWith(QStringLiteral("CROWN"))
+           || upperName.startsWith(QStringLiteral("EMPTY"))
+           || upperName.startsWith(QStringLiteral("BASE")))
+            continue;
+
+        QVector3D minimum(std::numeric_limits<float>::max(),
+                          std::numeric_limits<float>::max(),
+                          std::numeric_limits<float>::max());
+        QVector3D maximum(-std::numeric_limits<float>::max(),
+                          -std::numeric_limits<float>::max(),
+                          -std::numeric_limits<float>::max());
+        for(const SVertexData& vertex : part->vertData())
+        {
+            const QVector3D local = part->poseMatrix().map(vertex.position * scale);
+            const QVector3D world = m_rotation.rotatedVector(local) + m_drawPosition;
+            minimum.setX(qMin(minimum.x(), world.x()));
+            minimum.setY(qMin(minimum.y(), world.y()));
+            minimum.setZ(qMin(minimum.z(), world.z()));
+            maximum.setX(qMax(maximum.x(), world.x()));
+            maximum.setY(qMax(maximum.y(), world.y()));
+            maximum.setZ(qMax(maximum.z(), world.z()));
+        }
+        SNavigationCollisionProxy proxy;
+        proxy.minimum = minimum;
+        proxy.maximum = maximum;
+        proxy.objectId = m_mapID;
+        proxy.partName = part->name();
+        result.append(proxy);
     }
     return result;
 }

@@ -18,6 +18,7 @@
 #include <QRectF>
 #include <QSet>
 #include <QStringList>
+#include <QFutureWatcher>
 
 #include "types.h"
 #include "select_window.h"
@@ -27,6 +28,7 @@
 #include "spatial_grid.h"
 #include "particle_animation.h"
 #include "ai_graph_document.h"
+#include "ai_graph_preview_builder.h"
 
 class QLineEdit;
 class QFrame;
@@ -106,6 +108,8 @@ public:
     void unloadLand(bool promptForSave = true);
     void saveLand();
     void saveLandAs();
+    bool buildValidatedLandscapeCandidate(QByteArray* data,
+                                          CValidationReport* report = nullptr);
     bool loadMob(QFileInfo& filePath);
     void saveMobAs();
     void saveActiveMob();
@@ -259,11 +263,9 @@ protected:
 
 private:
     bool saveMobDocument(CMob* mob, const QFileInfo& destination);
-    bool saveLandscapeDocument(const QFileInfo& destination,
-                               bool confirmChangedCommit = true);
+    bool saveLandscapeDocument(const QFileInfo& destination);
     bool saveChangedLandscapeDocument(const QFileInfo& destination,
-                                      bool adoptAsOpenBaseline,
-                                      bool confirmCommit);
+                                      bool adoptAsOpenBaseline);
     bool adoptCommittedLandscapeBaseline(const QFileInfo& destination,
                                          const SMprSaveCommitResult& commit);
     void refreshMobDirtyStates();
@@ -314,6 +316,9 @@ private:
     void refreshAiGraphPreviewSource();
     void syncAiGraphPreviewWidget();
     void rebuildAiGraphOverlayGeometry();
+    void startAiGraphPreviewRegeneration();
+    bool captureAiGraphPreviewBuildInput(SAiGraphPreviewBuildInput* input,
+                                         QString* error);
     void syncEnvironmentPreviewWidget(float mapTimeHours);
     void applyEnvironmentUniforms(QOpenGLShaderProgram& program,
                                   const ei::SRenderEnvironment& environment,
@@ -513,11 +518,17 @@ private:
     QSlider* m_environmentPreviewTime{nullptr};
     QFrame* m_aiGraphPreviewWidget{nullptr};
     QToolButton* m_aiGraphPreviewToggle{nullptr};
+    QToolButton* m_aiGraphRegenerateButton{nullptr};
+    QToolButton* m_aiGraphUseLoadedButton{nullptr};
     QSlider* m_aiGraphLayerSlider{nullptr};
     QLabel* m_aiGraphLayerLabel{nullptr};
     QLabel* m_aiGraphSourceLabel{nullptr};
     CAiGraphDocument m_aiGraphDocument;
+    CAiGraphDocument m_aiGraphLoadedDocument;
     QString m_aiGraphSource;
+    QString m_aiGraphLoadedSource;
+    QFutureWatcher<SAiGraphPreviewBuildResult>* m_aiGraphBuildWatcher{nullptr};
+    quint64 m_aiGraphBuildRequest{0};
     bool m_aiGraphPreviewVisible{false};
     bool m_aiGraphOverlayDirty{true};
     QVector<QVector3D> m_aiGraphOpenLinks;

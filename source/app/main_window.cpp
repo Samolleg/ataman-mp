@@ -899,7 +899,7 @@ MainWindow::MainWindow(QWidget* parent) :
     m_pView->attachLandscapeTools(m_landscapeTools);
     m_ui->actionMap_parameters->setText(tr("MPR Atlas Tiles..."));
     m_ui->tileBrushButton->setText(tr("Paint"));
-    m_ui->tileBrushButton->setToolTip(tr("Landscape tile painting (B)"));
+    m_ui->tileBrushButton->setToolTip(tr("Landscape tools (L)"));
     connect(m_pView, &CView::mobStateChanged, this, [this]()
     {
         updateLoadedMapPanel();
@@ -2096,6 +2096,15 @@ void MainWindow::moveCameraToActiveSpawn()
 
 void MainWindow::initShortcuts()
 {
+    if(COptString* landscapeShortcut = dynamic_cast<COptString*>(
+           m_settings->opt(eOptSetKeyBinding, "shortcutTileBrushTool")))
+    {
+        if(landscapeShortcut->value().compare(QStringLiteral("B"), Qt::CaseInsensitive) == 0)
+        {
+            landscapeShortcut->setValue(QStringLiteral("L"));
+            m_settings->persistOptions();
+        }
+    }
     const auto shortcut = [this](const char* name, const char* fallback)
     {
         COptString* option = dynamic_cast<COptString*>(m_settings->opt(eOptSetKeyBinding, name));
@@ -2136,7 +2145,7 @@ void MainWindow::initShortcuts()
         {EButtonOpMove, "shortcutMoveTool", "G", "Move selected objects"},
         {EButtonOpRotate, "shortcutRotateTool", "R", "Rotate selected objects"},
         {EButtonOpScale, "shortcutScaleTool", "T", "Scale selected objects"},
-        {EButtonOpTilebrush, "shortcutTileBrushTool", "B", "Terrain tile brush"}
+        {EButtonOpTilebrush, "shortcutTileBrushTool", "L", "Landscape tools"}
     };
     for(const auto& operation : operations)
     {
@@ -2474,12 +2483,6 @@ void MainWindow::launchCurrentMapTest()
     if(m_pView->prepareDocumentTransition())
         statusBar()->showMessage(tr("Pending object movement was cancelled before staging the test."), 4000);
     CLandscape* landscape = CLandscape::getInstance();
-    if(landscape->isDirty())
-    {
-        QMessageBox::warning(this, tr("JMV test launch"),
-            tr("Unsaved MPR edits cannot yet be staged losslessly. Save or revert the landscape first."));
-        return;
-    }
     progress->setLabelText(tr("Validating the active runtime profile..."));
     progress->setValue(1);
     QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
@@ -2558,10 +2561,13 @@ void MainWindow::launchCurrentMapTest()
     progress->setValue(4);
     QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
 
-    QFile mprFile(landscape->filePath().absoluteFilePath());
-    if(!mprFile.open(QIODevice::ReadOnly))
+    QByteArray mprData;
+    CValidationReport mprReport;
+    if(!m_pView->buildValidatedLandscapeCandidate(&mprData, &mprReport))
     {
-        QMessageBox::warning(this, tr("JMV test launch"), mprFile.errorString());
+        QMessageBox::warning(this, tr("JMV test launch"),
+            tr("The current MPR edits could not be staged safely:\n\n%1")
+                .arg(mprReport.toText()));
         return;
     }
     QByteArray mobData;
@@ -2637,7 +2643,7 @@ void MainWindow::launchCurrentMapTest()
     input.profile = profile;
     input.sourceMpr = landscape->filePath();
     input.sourceMob = mob->filePath();
-    input.mprData = mprFile.readAll();
+    input.mprData = mprData;
     input.mobData = mobData;
     input.supplementalMobs = supplementalMobs;
     input.embeddedScript = mob->script();

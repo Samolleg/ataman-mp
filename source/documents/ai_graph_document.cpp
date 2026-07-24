@@ -112,6 +112,37 @@ bool CAiGraphDocument::parse(const QByteArray& data, QString* error,
     return true;
 }
 
+bool CAiGraphDocument::initializePreview(int width, int height,
+                                         const QVector<SAiGraphLayer>& layers,
+                                         QString* error)
+{
+    clear();
+    if(error)
+        error->clear();
+    if(width <= 0 || height <= 0 || width > 256 || height > 256
+       || layers.size() != LayerCount)
+    {
+        if(error)
+            *error = QStringLiteral("Invalid decoded AI graph dimensions or layer count.");
+        return false;
+    }
+    const int cells = width * height;
+    for(const SAiGraphLayer& layer : layers)
+        if(layer.weights.size() != cells * DirectionCount
+           || layer.packedPositions.size() != cells
+           || layer.components.size() != cells)
+        {
+            if(error)
+                *error = QStringLiteral("Decoded AI graph layer sizes are inconsistent.");
+            return false;
+        }
+    m_width = width;
+    m_height = height;
+    m_layers = layers;
+    m_valid = true;
+    return true;
+}
+
 int CAiGraphDocument::index(int x, int y) const
 {
     return y * m_width + x;

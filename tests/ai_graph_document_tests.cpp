@@ -2,6 +2,7 @@
 #include <QDataStream>
 
 #include "ai_graph_document.h"
+#include "ai_graph_preview_builder.h"
 
 namespace {
 QByteArray syntheticGraph(int width, int height, bool trailing = false)
@@ -46,6 +47,8 @@ private slots:
     void preservesNoOpBytesIncludingTrailingData();
     void rejectsMalformedDimensionsAndTruncation();
     void exposesStableLayerAndDirectionDefinitions();
+    void initializesDecodedPreviewWithoutSerializableBytes();
+    void regenerationRespectsFenceAndVerticalClearanceProfiles();
 };
 
 void AiGraphDocumentTests::parsesKindMajorPlanesAndSignedValues()
@@ -101,6 +104,57 @@ void AiGraphDocumentTests::exposesStableLayerAndDirectionDefinitions()
     QCOMPARE(CAiGraphDocument::directionDelta(6), QPoint(1, 0));
     QCOMPARE(CAiGraphDocument::layerLabel(3), QStringLiteral("Narrow / human-sized"));
     QCOMPARE(CAiGraphDocument::canonicalHeight(3), 1.6);
+}
+
+void AiGraphDocumentTests::initializesDecodedPreviewWithoutSerializableBytes()
+{
+    QVector<SAiGraphLayer> layers(CAiGraphDocument::LayerCount);
+    for(SAiGraphLayer& layer : layers)
+    {
+        layer.weights.fill(qint16(-1), CAiGraphDocument::DirectionCount);
+        layer.packedPositions.fill(char(0x33), 1);
+        layer.components.fill(quint16(1), 1);
+    }
+    CAiGraphDocument document;
+    QString error;
+    QVERIFY2(document.initializePreview(1, 1, layers, &error), qPrintable(error));
+    QVERIFY(document.isValid());
+    QVERIFY(document.rawBytes().isEmpty());
+    QVERIFY(document.serializeNoOp().isEmpty());
+}
+
+void AiGraphDocumentTests::regenerationRespectsFenceAndVerticalClearanceProfiles()
+{
+    SAiGraphPreviewBuildInput flat;
+    flat.graphWidth = 4;
+    flat.graphHeight = 3;
+    flat.terrainHeights.fill(0.0f, 4 * 8 * 3 * 8);
+    const SAiGraphPreviewBuildResult open = CAiGraphPreviewBuilder::build(flat);
+    QVERIFY2(open.valid, qPrintable(open.error));
+    QVERIFY(open.document.weight(0, 1, 1, 6) >= 0);
+    QVERIFY(open.document.weight(3, 1, 1, 6) >= 0);
+
+    SAiGraphCollisionProxy fence;
+    fence.minimum = QVector3D(7.8f, 0.0f, 0.0f);
+    fence.maximum = QVector3D(8.2f, 12.0f, 2.5f);
+    fence.objectId = 568;
+    SAiGraphPreviewBuildInput fenced = flat;
+    fenced.collisionProxies.append(fence);
+    const SAiGraphPreviewBuildResult blocked = CAiGraphPreviewBuilder::build(fenced);
+    QVERIFY2(blocked.valid, qPrintable(blocked.error));
+    QCOMPARE(blocked.collisionProxyCount, 1);
+    QCOMPARE(blocked.document.weight(0, 1, 1, 6), qint16(-1));
+    QCOMPARE(blocked.document.weight(3, 1, 1, 6), qint16(-1));
+
+    SAiGraphCollisionProxy overhead = fence;
+    overhead.minimum.setZ(2.0f);
+    overhead.maximum.setZ(3.0f);
+    SAiGraphPreviewBuildInput clearance = flat;
+    clearance.collisionProxies.append(overhead);
+    const SAiGraphPreviewBuildResult vertical = CAiGraphPreviewBuilder::build(clearance);
+    QVERIFY2(vertical.valid, qPrintable(vertical.error));
+    QVERIFY(vertical.document.weight(3, 1, 1, 6) >= 0);
+    QCOMPARE(vertical.document.weight(6, 1, 1, 6), qint16(-1));
 }
 
 QTEST_APPLESS_MAIN(AiGraphDocumentTests)

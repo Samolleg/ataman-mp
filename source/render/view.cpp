@@ -22,6 +22,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QSaveFile>
+#include <QtConcurrent>
 #include <QtEndian>
 #include <cstddef>
 #include <cmath>
@@ -76,10 +77,22 @@
 #include "staged_save_validator.h"
 #include "terrain_atlas_analyzer.h"
 #include "ai_graph_document.h"
+#include "ai_graph_preview_builder.h"
 
 class CLogic;
 
 namespace {
+QVector4D aiGraphLayerColor(int layer)
+{
+    static const QVector4D colors[CAiGraphDocument::LayerCount] = {
+        {0.55f, 0.30f, 1.00f, 0.90f}, {0.42f, 0.38f, 1.00f, 0.90f},
+        {0.30f, 0.50f, 0.94f, 0.90f}, {0.20f, 0.62f, 0.84f, 0.90f},
+        {0.14f, 0.70f, 0.72f, 0.90f}, {0.12f, 0.75f, 0.59f, 0.90f},
+        {0.15f, 0.79f, 0.45f, 0.90f}, {0.28f, 0.82f, 0.36f, 0.90f}
+    };
+    return colors[qBound(0, layer, CAiGraphDocument::LayerCount - 1)];
+}
+
 QByteArray terrainAtlasPixelSha256(const QVector<QImage>& images)
 {
     QCryptographicHash hash(QCryptographicHash::Sha256);
@@ -1064,7 +1077,7 @@ void CView::initAiGraphPreviewWidget()
         return;
     m_aiGraphPreviewWidget = new QFrame(this);
     m_aiGraphPreviewWidget->setObjectName(QStringLiteral("aiGraphPreviewWidget"));
-    m_aiGraphPreviewWidget->setMinimumWidth(250);
+    m_aiGraphPreviewWidget->setMinimumWidth(330);
     m_aiGraphPreviewWidget->setFrameShape(QFrame::StyledPanel);
     m_aiGraphPreviewWidget->setStyleSheet(
         "QFrame#aiGraphPreviewWidget { background: rgba(25,25,25,210); color: white; border: 1px solid #777; border-radius: 4px; }"
@@ -1085,6 +1098,7 @@ void CView::initAiGraphPreviewWidget()
 
     m_aiGraphLayerLabel = new QLabel(m_aiGraphPreviewWidget);
     m_aiGraphLayerLabel->setWordWrap(true);
+    m_aiGraphLayerLabel->setMinimumWidth(300);
     layout->addWidget(m_aiGraphLayerLabel);
     m_aiGraphLayerSlider = new QSlider(Qt::Horizontal, m_aiGraphPreviewWidget);
     m_aiGraphLayerSlider->setRange(0, CAiGraphDocument::LayerCount - 1);
@@ -1096,6 +1110,17 @@ void CView::initAiGraphPreviewWidget()
     m_aiGraphSourceLabel = new QLabel(tr("No graph source loaded"), m_aiGraphPreviewWidget);
     m_aiGraphSourceLabel->setWordWrap(true);
     layout->addWidget(m_aiGraphSourceLabel);
+
+    QHBoxLayout* actions = new QHBoxLayout;
+    m_aiGraphRegenerateButton = new QToolButton(m_aiGraphPreviewWidget);
+    m_aiGraphRegenerateButton->setText(tr("Regenerate preview"));
+    m_aiGraphRegenerateButton->setToolTip(tr(
+        "Build a non-saving diagnostic graph from current terrain and static-object collision proxies."));
+    m_aiGraphUseLoadedButton = new QToolButton(m_aiGraphPreviewWidget);
+    m_aiGraphUseLoadedButton->setText(tr("Use loaded graph"));
+    actions->addWidget(m_aiGraphRegenerateButton);
+    actions->addWidget(m_aiGraphUseLoadedButton);
+    layout->addLayout(actions);
 
     connect(m_aiGraphPreviewToggle, &QToolButton::toggled, this, [this](bool visible)
     {
@@ -1111,6 +1136,19 @@ void CView::initAiGraphPreviewWidget()
     });
     connect(m_aiGraphLayerSlider, &QSlider::valueChanged, this, [this](int)
     {
+        m_aiGraphOverlayDirty = true;
+        syncAiGraphPreviewWidget();
+        update();
+    });
+    connect(m_aiGraphRegenerateButton, &QToolButton::clicked,
+            this, &CView::startAiGraphPreviewRegeneration);
+    connect(m_aiGraphUseLoadedButton, &QToolButton::clicked, this, [this]()
+    {
+        if(!m_aiGraphLoadedDocument.isValid())
+            return;
+        ++m_aiGraphBuildRequest;
+        m_aiGraphDocument = m_aiGraphLoadedDocument;
+        m_aiGraphSource = m_aiGraphLoadedSource;
         m_aiGraphOverlayDirty = true;
         syncAiGraphPreviewWidget();
         update();
@@ -1138,24 +1176,36 @@ void CView::syncAiGraphPreviewWidget()
     if(!m_aiGraphPreviewWidget)
         return;
     const int layer = m_aiGraphLayerSlider ? m_aiGraphLayerSlider->value() : 3;
-    m_aiGraphLayerLabel->setText(tr("Layer %1 — %2 (%3 m)")
-        .arg(layer).arg(CAiGraphDocument::layerLabel(layer))
+    const QVector4D color = aiGraphLayerColor(layer);
+    const QColor profileColor = QColor::fromRgbF(color.x(), color.y(), color.z());
+    m_aiGraphLayerLabel->setText(tr("Layer %1 - <b><span style=\"color:%2\">%3</span></b> (%4 m)")
+        .arg(layer).arg(profileColor.name())
+        .arg(CAiGraphDocument::layerLabel(layer).toHtmlEscaped())
         .arg(CAiGraphDocument::canonicalHeight(layer), 0, 'f', 1));
     const bool available = m_aiGraphDocument.isValid();
     m_aiGraphLayerSlider->setEnabled(available);
     m_aiGraphSourceLabel->setText(available
-        ? tr("%1 · %2 x %3")
+        ? tr("%1 - %2 x %3")
               .arg(m_aiGraphSource).arg(m_aiGraphDocument.width()).arg(m_aiGraphDocument.height())
         : tr("No graph source loaded"));
     m_aiGraphPreviewToggle->setToolTip(available
         ? tr("Show or hide the current AI graph layer in the viewport (N).")
         : tr("Load a MOB with an embedded graph or a matching external .grp file."));
+    if(m_aiGraphRegenerateButton)
+        m_aiGraphRegenerateButton->setEnabled(m_terrainEditAvailable
+            && (!m_aiGraphBuildWatcher || !m_aiGraphBuildWatcher->isRunning()));
+    if(m_aiGraphUseLoadedButton)
+        m_aiGraphUseLoadedButton->setEnabled(m_aiGraphLoadedDocument.isValid()
+            && m_aiGraphSource != m_aiGraphLoadedSource);
 }
 
 void CView::refreshAiGraphPreviewSource()
 {
+    ++m_aiGraphBuildRequest;
     m_aiGraphDocument.clear();
+    m_aiGraphLoadedDocument.clear();
     m_aiGraphSource.clear();
+    m_aiGraphLoadedSource.clear();
     m_aiGraphOpenLinks.clear();
     m_aiGraphNodes.clear();
     m_aiGraphIsolatedNodes.clear();
@@ -1199,6 +1249,8 @@ void CView::refreshAiGraphPreviewSource()
                     .arg(m_aiGraphDocument.height()));
             for(const QString& warning : warnings)
                 ei::log(eLogWarning, "AI graph preview: " + warning);
+            m_aiGraphLoadedDocument = m_aiGraphDocument;
+            m_aiGraphLoadedSource = m_aiGraphSource;
         }
     }
     if(!m_aiGraphDocument.isValid())
@@ -1209,6 +1261,133 @@ void CView::refreshAiGraphPreviewSource()
     }
     syncAiGraphPreviewWidget();
     update();
+}
+
+bool CView::captureAiGraphPreviewBuildInput(SAiGraphPreviewBuildInput* input,
+                                            QString* error)
+{
+    if(error)
+        error->clear();
+    if(!input || !m_terrainEditAvailable || !m_pLand || !m_pLand->isMprLoad())
+    {
+        if(error)
+            *error = tr("Load an MPR with canonical terrain data first.");
+        return false;
+    }
+
+    input->graphWidth = m_aiGraphLoadedDocument.isValid()
+        ? m_aiGraphLoadedDocument.width()
+        : qCeil(float(m_terrainEdit.vertexCountX() - 1) / 4.0f);
+    input->graphHeight = m_aiGraphLoadedDocument.isValid()
+        ? m_aiGraphLoadedDocument.height()
+        : qCeil(float(m_terrainEdit.vertexCountY() - 1) / 4.0f);
+    if(input->graphWidth * 4 != m_terrainEdit.vertexCountX() - 1
+       || input->graphHeight * 4 != m_terrainEdit.vertexCountY() - 1)
+    {
+        if(error)
+            *error = tr("AI graph dimensions do not match the loaded terrain bounds.");
+        return false;
+    }
+    const int aiWidth = input->graphWidth * CAiGraphPreviewBuilder::AiTilesPerGraphCell;
+    const int aiHeight = input->graphHeight * CAiGraphPreviewBuilder::AiTilesPerGraphCell;
+    input->terrainHeights.resize(aiWidth * aiHeight);
+    const float maximumHeight = m_mprDocument.mapInfo().maxZ;
+    for(int y = 0; y < aiHeight; ++y)
+        for(int x = 0; x < aiWidth; ++x)
+        {
+            const float worldX = (x + 0.5f) * CAiGraphPreviewBuilder::AiTileWorldSize;
+            const float worldY = (y + 0.5f) * CAiGraphPreviewBuilder::AiTileWorldSize;
+            const int x0 = qBound(0, int(qFloor(worldX)), m_terrainEdit.vertexCountX() - 1);
+            const int y0 = qBound(0, int(qFloor(worldY)), m_terrainEdit.vertexCountY() - 1);
+            const int x1 = qMin(x0 + 1, m_terrainEdit.vertexCountX() - 1);
+            const int y1 = qMin(y0 + 1, m_terrainEdit.vertexCountY() - 1);
+            const float fx = qBound(0.0f, worldX - float(x0), 1.0f);
+            const float fy = qBound(0.0f, worldY - float(y0), 1.0f);
+            const float top = float(m_terrainEdit.height(x0, y0)) * (1.0f - fx)
+                            + float(m_terrainEdit.height(x1, y0)) * fx;
+            const float bottom = float(m_terrainEdit.height(x0, y1)) * (1.0f - fx)
+                               + float(m_terrainEdit.height(x1, y1)) * fx;
+            input->terrainHeights[y * aiWidth + x] =
+                (top * (1.0f - fy) + bottom * fy) * maximumHeight / 65535.0f;
+        }
+
+    input->collisionProxies.clear();
+    for(CMob* mob : m_aMob)
+        if(mob)
+            for(CNode* node : mob->nodes())
+            {
+                if(!node || node->isMarkDeleted()
+                   || (node->nodeType() != eWorldObject && node->nodeType() != eLever))
+                    continue;
+                CObjectBase* object = dynamic_cast<CObjectBase*>(node);
+                if(!object)
+                    continue;
+                for(const SNavigationCollisionProxy& source : object->navigationCollisionProxies())
+                {
+                    SAiGraphCollisionProxy proxy;
+                    proxy.minimum = source.minimum;
+                    proxy.maximum = source.maximum;
+                    proxy.objectId = source.objectId;
+                    input->collisionProxies.append(proxy);
+                }
+            }
+    return true;
+}
+
+void CView::startAiGraphPreviewRegeneration()
+{
+    if(m_aiGraphBuildWatcher && m_aiGraphBuildWatcher->isRunning())
+        return;
+    SAiGraphPreviewBuildInput input;
+    QString error;
+    if(!captureAiGraphPreviewBuildInput(&input, &error))
+    {
+        emit updateMsg(error);
+        return;
+    }
+
+    if(!m_aiGraphBuildWatcher)
+    {
+        m_aiGraphBuildWatcher = new QFutureWatcher<SAiGraphPreviewBuildResult>(this);
+        connect(m_aiGraphBuildWatcher, &QFutureWatcher<SAiGraphPreviewBuildResult>::finished,
+                this, [this]()
+        {
+            const quint64 request = m_aiGraphBuildWatcher->property("requestId").toULongLong();
+            const SAiGraphPreviewBuildResult result = m_aiGraphBuildWatcher->result();
+            if(request != m_aiGraphBuildRequest)
+            {
+                syncAiGraphPreviewWidget();
+                return;
+            }
+            if(!result.valid)
+            {
+                emit updateMsg(tr("AI graph preview regeneration failed: %1").arg(result.error));
+                syncAiGraphPreviewWidget();
+                return;
+            }
+            m_aiGraphDocument = result.document;
+            m_aiGraphSource = tr("Regenerated diagnostic (%1 collision parts)")
+                .arg(result.collisionProxyCount);
+            m_aiGraphOverlayDirty = true;
+            if(m_aiGraphPreviewToggle && !m_aiGraphPreviewToggle->isChecked())
+                m_aiGraphPreviewToggle->setChecked(true);
+            ei::log(eLogInfo, QString("AI graph diagnostic regeneration complete dimensions:%1x%2 proxies:%3 human_blocked_tiles:%4")
+                .arg(result.document.width()).arg(result.document.height())
+                .arg(result.collisionProxyCount).arg(result.blockedAiTiles));
+            syncAiGraphPreviewWidget();
+            update();
+        });
+    }
+    const quint64 request = ++m_aiGraphBuildRequest;
+    m_aiGraphBuildWatcher->setProperty("requestId", QVariant::fromValue(request));
+    m_aiGraphRegenerateButton->setEnabled(false);
+    m_aiGraphSourceLabel->setText(tr("Regenerating diagnostic graph..."));
+    ei::log(eLogInfo, QString("AI graph diagnostic regeneration started dimensions:%1x%2 proxies:%3")
+        .arg(input.graphWidth).arg(input.graphHeight).arg(input.collisionProxies.size()));
+    m_aiGraphBuildWatcher->setFuture(QtConcurrent::run([input]()
+    {
+        return CAiGraphPreviewBuilder::build(input);
+    }));
 }
 
 void CView::applyEnvironmentCompatibilityMode()
@@ -2545,7 +2724,8 @@ void CView::drawTestOverlaysOpenGl()
             rebuildAiGraphOverlayGeometry();
         if(!m_aiGraphOpenLinks.isEmpty())
         {
-            m_program.setUniformValue("customColor", QVector4D(0.15f, 0.92f, 1.0f, 0.82f));
+            const int layer = m_aiGraphLayerSlider ? m_aiGraphLayerSlider->value() : 3;
+            m_program.setUniformValue("customColor", aiGraphLayerColor(layer));
             ei::gl::LineWidth(1.5f);
             m_program.setAttributeArray(position, m_aiGraphOpenLinks.constData());
             ei::gl::DrawArrays(GL_LINES, 0, m_aiGraphOpenLinks.size());
@@ -3565,7 +3745,7 @@ void CView::unloadLand(bool promptForSave)
         reply = QMessageBox::question(this, "Unload MPR", m_pLand->filePath().fileName() + " has unsaved changes.\nDo you want to save changes?", QMessageBox::Save|QMessageBox::No|QMessageBox::Cancel);
         if(reply == QMessageBox::Save)
         {
-            if(!saveLandscapeDocument(m_pLand->filePath(), false))
+            if(!saveLandscapeDocument(m_pLand->filePath()))
                 return;
         }
         else if(reply == QMessageBox::Cancel)
@@ -3621,7 +3801,7 @@ void CView::saveLandAs()
         const QString destinationPath = QDir::cleanPath(fileName.absoluteFilePath());
         const bool samePath = QString::compare(sourcePath, destinationPath,
                                                Qt::CaseInsensitive) == 0;
-        saveChangedLandscapeDocument(fileName, samePath, true);
+        saveChangedLandscapeDocument(fileName, samePath);
         return;
     }
     //QFileInfo fileName("c:\\konst\\Проклятые Земли (Дополнение)\\Mods\\ferneo_mod\\Maps\\zone1gTest.mpr");
@@ -3633,8 +3813,7 @@ void CView::saveLandAs()
     }
 }
 
-bool CView::saveLandscapeDocument(const QFileInfo& destination,
-                                  bool confirmChangedCommit)
+bool CView::saveLandscapeDocument(const QFileInfo& destination)
 {
     if(m_pLand->isDirty())
     {
@@ -3642,8 +3821,7 @@ bool CView::saveLandscapeDocument(const QFileInfo& destination,
         const QString destinationPath = QDir::cleanPath(destination.absoluteFilePath());
         const bool samePath = QString::compare(sourcePath, destinationPath,
                                                Qt::CaseInsensitive) == 0;
-        return saveChangedLandscapeDocument(destination, samePath,
-                                            confirmChangedCommit);
+        return saveChangedLandscapeDocument(destination, samePath);
     }
 
     QProgressDialog progress(tr("Preparing safe MPR save..."), QString(), 0, 4, this);
@@ -3665,9 +3843,70 @@ bool CView::saveLandscapeDocument(const QFileInfo& destination,
     return saved;
 }
 
+bool CView::buildValidatedLandscapeCandidate(QByteArray* data,
+                                              CValidationReport* report)
+{
+    if(data)
+        data->clear();
+    if(!data || !m_pLand->isMprLoad() || !m_terrainEditAvailable)
+    {
+        if(report)
+            report->add(QStringLiteral("mpr.test.candidate.unavailable"),
+                        EValidationSeverity::Error,
+                        tr("Canonical terrain ownership is unavailable."));
+        return false;
+    }
+    if(!m_pLand->isDirty())
+    {
+        *data = m_mprDocument.originalBytes();
+        return !data->isEmpty();
+    }
+
+    finishSculptStroke();
+    endTileBrushGroup();
+    CMprEditTransaction transaction(tr("Stage current landscape for map test"));
+    CValidationReport localReport;
+    if(!m_terrainEdit.appendSectorEdits(&transaction, &localReport)
+       || localReport.hasErrors() || transaction.isEmpty())
+    {
+        if(report)
+            for(const SValidationFinding& finding : localReport.findings())
+                report->add(finding.code, finding.severity,
+                            finding.message, finding.location);
+        return false;
+    }
+
+    QTemporaryDir validationDirectory;
+    if(!validationDirectory.isValid())
+    {
+        if(report)
+            report->add(QStringLiteral("mpr.test.stage.temp"),
+                        EValidationSeverity::Error,
+                        tr("Could not create the isolated MPR validation directory."));
+        return false;
+    }
+    const QFileInfo validationPath(validationDirectory.filePath(
+        QStringLiteral("test-current-map.mpr")));
+    const SStagedMprTransactionValidation validation =
+        validateStagedMprTransaction(m_mprDocument, transaction, validationPath);
+    if(!validation.success)
+    {
+        if(report)
+            report->add(QStringLiteral("mpr.test.stage.validation"),
+                        EValidationSeverity::Error, validation.error);
+        return false;
+    }
+    *data = validation.candidateBytes;
+    ei::log(eLogInfo, QString("Test Current Map staged unsaved MPR candidate members:%1 sha256:%2")
+        .arg(validation.changedMembers.join(QStringLiteral(",")), validation.sha256));
+    ei::log(eLogInfo, QString("Test Current Map staged MPR semantic diff:\n%1")
+        .arg(validation.semanticDiff.isEmpty() ? QStringLiteral("(none)")
+                                               : validation.semanticDiff));
+    return true;
+}
+
 bool CView::saveChangedLandscapeDocument(const QFileInfo& destination,
-                                         bool adoptAsOpenBaseline,
-                                         bool confirmCommit)
+                                         bool adoptAsOpenBaseline)
 {
     if(!m_terrainEditAvailable)
     {
@@ -3707,28 +3946,6 @@ bool CView::saveChangedLandscapeDocument(const QFileInfo& destination,
         return false;
     }
 
-    if(confirmCommit)
-    {
-        const QString behavior = adoptAsOpenBaseline
-            ? tr("The currently open MPR will be backed up and atomically replaced. "
-                 "After verification, this candidate becomes the new undo/redo baseline. ")
-            : tr("An existing destination will be backed up before atomic replacement. "
-                 "The currently open source remains unchanged and marked dirty. ");
-        if(QMessageBox::question(this,
-            adoptAsOpenBaseline ? tr("Save validated MPR?")
-                                : tr("Write validated MPR copy?"),
-            tr("Endurance validated a lossless changed-MPR candidate.\n\n"
-               "Destination: %1\nChanged archive members: %2\nSHA-256: %3\n\n"
-               "%4Navigation data may be stale and must be reviewed separately.\n\n"
-               "Semantic diff:\n%5")
-                .arg(destinationPath, preview.changedMembers.join(QStringLiteral(", ")),
-                     preview.sha256, behavior,
-                     preview.semanticDiff.isEmpty() ? tr("(no semantic changes)")
-                                                    : preview.semanticDiff),
-            QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes)
-            return false;
-    }
-
     SMprSaveCommitRequest request;
     request.source = m_pLand->filePath();
     request.destination = destination;
@@ -3751,6 +3968,11 @@ bool CView::saveChangedLandscapeDocument(const QFileInfo& destination,
     if(adoptAsOpenBaseline && !adoptCommittedLandscapeBaseline(destination, result))
         return false;
 
+    ei::log(eLogInfo, QString("Changed MPR semantic diff destination:%1\n%2")
+        .arg(destinationPath,
+             result.semanticDiff.isEmpty() ? QStringLiteral("(none)")
+                                           : result.semanticDiff));
+
     ei::log(eLogInfo, QString("Changed MPR committed source:%1 destination:%2 members:%3 sha256:%4 backup:%5 adopted:%6")
         .arg(sourcePath, destinationPath, result.changedMembers.join(","),
              result.candidateSha256,
@@ -3763,10 +3985,6 @@ bool CView::saveChangedLandscapeDocument(const QFileInfo& destination,
     }
     else
     {
-        QMessageBox::information(this, tr("Validated MPR copy written"),
-            tr("The changed MPR was written as a separate validated copy.\n\n%1\n\n"
-               "The open source remains unchanged and marked dirty.")
-                .arg(destinationPath));
         emit updateMsg(tr("Validated changed MPR copy written: %1").arg(destinationPath));
     }
     return true;
@@ -6345,7 +6563,7 @@ bool CView::onExit()
         reply = QMessageBox::question(this, "Exit", m_pLand->filePath().fileName() + " has unsaved changes.\nDo you want to save changes?", QMessageBox::Save|QMessageBox::No|QMessageBox::Cancel);
         if(reply == QMessageBox::Save)
         {
-            if(!saveLandscapeDocument(m_pLand->filePath(), false))
+            if(!saveLandscapeDocument(m_pLand->filePath()))
                 bCloseAllowed = false;
         }
         else if(reply == QMessageBox::Cancel)

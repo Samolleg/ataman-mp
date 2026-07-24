@@ -14,6 +14,14 @@
 
 class CMob;
 
+struct SNavigationCollisionProxy
+{
+    QVector3D minimum;
+    QVector3D maximum;
+    quint32 objectId{0};
+    QString partName;
+};
+
 class CObjectBase : public CNode
 {
 public:
@@ -53,6 +61,7 @@ public:
     bool isMarkDeleted() override {return m_bDeleted;}
     bool isOperationAxisAllow(EOperationAxisType type) override {Q_UNUSED(type); return true;};
     QMap<QString, QVector<QVector2D>> renderedBodyPartUvTriangles() const;
+    QVector<SNavigationCollisionProxy> navigationCollisionProxies() const;
 
 protected:
     // Editor-only helper figures (lights, particle anchors) can be presented

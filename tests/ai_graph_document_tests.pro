@@ -6,6 +6,9 @@ TARGET = ai_graph_document_tests
 INCLUDEPATH += ../source/documents
 SOURCES += \
     ai_graph_document_tests.cpp \
-    ../source/documents/ai_graph_document.cpp
+    ../source/documents/ai_graph_document.cpp \
+    ../source/documents/ai_graph_preview_builder.cpp
 
-HEADERS += ../source/documents/ai_graph_document.h
+HEADERS += \
+    ../source/documents/ai_graph_document.h \
+    ../source/documents/ai_graph_preview_builder.h

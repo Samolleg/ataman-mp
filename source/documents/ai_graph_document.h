@@ -22,6 +22,9 @@ public:
 
     bool parse(const QByteArray& data, QString* error = nullptr,
                QStringList* warnings = nullptr);
+    bool initializePreview(int width, int height,
+                           const QVector<SAiGraphLayer>& layers,
+                           QString* error = nullptr);
     void clear();
 
     bool isValid() const { return m_valid; }
