@@ -2590,6 +2590,12 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
     QOpenGLTexture* tendriLightTexture = textures->texture("tendrilight");
     if(tendriLightTexture == fallbackTexture)
         tendriLightTexture = nullptr;
+    QOpenGLTexture* acidRayTexture = textures->texture("acidray");
+    if(acidRayTexture == fallbackTexture)
+        acidRayTexture = nullptr;
+    QOpenGLTexture* bansheeTexture = textures->texture("banshee");
+    if(bansheeTexture == fallbackTexture)
+        bansheeTexture = nullptr;
 
     bool inverseOk = false;
     const QMatrix4x4 inverseView = cameraMatrix.inverted(&inverseOk);
@@ -2767,6 +2773,51 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
         }
     };
 
+    const auto drawCasting = [&](const CNode* owner, const QVector3D& origin,
+                                 float authoredScale, uint seed)
+    {
+        ei::particle::CastingEmitter& emitter = m_castingEmitters[owner];
+        emitter.advanceTo(logicalTick, seed, origin, authoredScale);
+        const QVector<ei::particle::WeatherRenderSample> samples = emitter.samples();
+        for(const ei::particle::WeatherRenderSample& sample : samples)
+        {
+            drawSprite(sample.position, sample.scale, 1.0f, 0.0f,
+                       QVector4D(1.0f, 1.0f, 1.0f, sample.alpha),
+                       fireSmokeTexture, ei::particle::atlasUv(sample.frame), false,
+                       fireSmokeTexture == nullptr, 0.18f);
+        }
+    };
+
+    const auto drawNuke = [&](const CNode* owner, const QVector3D& origin,
+                              float authoredScale, uint seed)
+    {
+        ei::particle::NukeEmitter& emitter = m_nukeEmitters[owner];
+        emitter.advanceTo(logicalTick, seed, origin, authoredScale);
+        const QVector<ei::particle::WeatherRenderSample> samples = emitter.samples();
+        for(const ei::particle::WeatherRenderSample& sample : samples)
+        {
+            drawSprite(sample.position, sample.scale, 1.0f, 0.0f,
+                       QVector4D(1.0f, 1.0f, 1.0f, sample.alpha),
+                       acidRayTexture, ei::particle::atlasUv(sample.frame), false,
+                       acidRayTexture == nullptr, 0.18f);
+        }
+    };
+
+    const auto drawBansheeCasting = [&](const CNode* owner, const QVector3D& origin,
+                                        float authoredScale, uint seed)
+    {
+        ei::particle::BansheeCastingEmitter& emitter = m_bansheeCastingEmitters[owner];
+        emitter.advanceTo(logicalTick, seed, origin, authoredScale);
+        const QVector<ei::particle::WeatherRenderSample> samples = emitter.samples();
+        for(const ei::particle::WeatherRenderSample& sample : samples)
+        {
+            drawSprite(sample.position, sample.scale, 1.0f, 0.0f,
+                       QVector4D(1.0f, 1.0f, 1.0f, sample.alpha),
+                       bansheeTexture, ei::particle::atlasUv(sample.frame), false,
+                       bansheeTexture == nullptr, 0.18f);
+        }
+    };
+
     for(CMob* mob : m_aMob)
     {
         if(!isMobVisible(mob))
@@ -2837,6 +2888,39 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
             if(particle->kind() == 8240u)
             {
                 drawLightningBlast(particle, center, authoredScale, particle->mapId());
+                if(particle->nodeState() == ENodeState::eSelect)
+                    drawSprite(center, qMax(0.3f, authoredScale * 0.35f),
+                               1.0f, 0.0f,
+                               QVector4D(0.10f, 0.90f, 1.0f, 0.72f), nullptr,
+                               QVector4D(0.0f, 0.0f, 1.0f, 1.0f), false,
+                               true, 0.12f);
+                continue;
+            }
+            if(particle->kind() == 8203u)
+            {
+                drawCasting(particle, center, authoredScale, particle->mapId());
+                if(particle->nodeState() == ENodeState::eSelect)
+                    drawSprite(center, qMax(0.3f, authoredScale * 0.35f),
+                               1.0f, 0.0f,
+                               QVector4D(0.10f, 0.90f, 1.0f, 0.72f), nullptr,
+                               QVector4D(0.0f, 0.0f, 1.0f, 1.0f), false,
+                               true, 0.12f);
+                continue;
+            }
+            if(particle->kind() == 8204u)
+            {
+                drawNuke(particle, center, authoredScale, particle->mapId());
+                if(particle->nodeState() == ENodeState::eSelect)
+                    drawSprite(center, qMax(0.3f, authoredScale * 0.35f),
+                               1.0f, 0.0f,
+                               QVector4D(0.10f, 0.90f, 1.0f, 0.72f), nullptr,
+                               QVector4D(0.0f, 0.0f, 1.0f, 1.0f), false,
+                               true, 0.12f);
+                continue;
+            }
+            if(particle->kind() == 8205u)
+            {
+                drawBansheeCasting(particle, center, authoredScale, particle->mapId());
                 if(particle->nodeState() == ENodeState::eSelect)
                     drawSprite(center, qMax(0.3f, authoredScale * 0.35f),
                                1.0f, 0.0f,
@@ -5023,6 +5107,9 @@ bool CView::unloadMobDocument(CMob* mob, bool promptForSave)
     m_tendriEmitters.clear();
     m_tornadoEmitters.clear();
     m_lightningBlastEmitters.clear();
+    m_castingEmitters.clear();
+    m_nukeEmitters.clear();
+    m_bansheeCastingEmitters.clear();
     m_aMob.removeAt(removedIndex);
     if(removedEnvironment)
         m_environmentMob = m_aMob.isEmpty() ? nullptr : m_aMob.first();
@@ -5223,6 +5310,9 @@ void CView::unloadMob(QString mobName)
     m_tendriEmitters.clear();
     m_tornadoEmitters.clear();
     m_lightningBlastEmitters.clear();
+    m_castingEmitters.clear();
+    m_nukeEmitters.clear();
+    m_bansheeCastingEmitters.clear();
     ei::log(eLogInfo, "unloading mob " + mobName);
     CMob* pMob = nullptr;
     if(mobName.isEmpty())

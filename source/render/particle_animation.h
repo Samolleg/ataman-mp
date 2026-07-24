@@ -748,6 +748,454 @@ private:
     bool m_initialized{false};
 };
 
+struct BurstParticle
+{
+    QVector3D position;
+    QVector3D velocity;
+    float scale{0.1f};
+    float alpha{1.0f};
+    int lifetime{1};
+    int frame{0};
+    bool impacted{false};
+};
+
+class NukeEmitter
+{
+public:
+    static constexpr int kPreviewCycleTicks = 80;
+
+    void advanceTo(qint64 logicalTick, quint32 seed, const QVector3D& origin,
+                   float authoredScale)
+    {
+        const int tick = int(logicalTick % kPreviewCycleTicks);
+        if(!m_initialized || seed != m_seed || tick < m_cycleTick)
+            reset(seed, origin, authoredScale);
+        m_origin = origin;
+        m_authoredScale = qMax(0.001f, authoredScale);
+        while(m_cycleTick < tick)
+        {
+            advanceOne();
+            ++m_cycleTick;
+        }
+    }
+
+    QVector<WeatherRenderSample> samples() const
+    {
+        QVector<WeatherRenderSample> result;
+        result.reserve(m_particles.size());
+        for(const BurstParticle& particle : m_particles)
+        {
+            WeatherRenderSample sample;
+            sample.position = particle.position;
+            sample.scale = billboardDiameter(particle.scale);
+            sample.alpha = particle.alpha;
+            sample.frame = particle.frame;
+            result.append(sample);
+        }
+        return result;
+    }
+
+    int activeCount() const { return m_particles.size(); }
+
+private:
+    float randomRange(float low, float high)
+    {
+        return low + (high - low) * m_rng.unit();
+    }
+
+    void reset(quint32 seed, const QVector3D& origin, float authoredScale)
+    {
+        m_seed = seed;
+        m_rng.reset(seed ^ 0x4E554B45u);
+        m_origin = origin;
+        m_authoredScale = qMax(0.001f, authoredScale);
+        m_particles.clear();
+        m_sourceAge = 0;
+        m_attempts = 128;
+        m_cycleTick = 0;
+        m_generating = true;
+        m_initialized = true;
+    }
+
+    void spawn()
+    {
+        const int phasesLeft = 11 - m_sourceAge;
+        const float radius = randomRange(0.0f, m_authoredScale * 0.2f);
+        const float angle = randomRange(0.0f, float(M_PI) * 2.0f);
+        BurstParticle particle;
+        particle.position = m_origin + QVector3D(radius * qSin(angle),
+                                                  radius * qCos(angle),
+                                                  randomRange(0.0f, m_authoredScale * 2.0f));
+        particle.scale = m_authoredScale * 0.2f;
+        particle.velocity = QVector3D(qSin(angle), qCos(angle),
+                                      m_authoredScale * 0.1f * float(phasesLeft));
+        particle.frame = m_sourceAge / 3;
+        particle.lifetime = 30 + phasesLeft;
+        float alpha = 4.0f;
+        for(int i = 0; i < m_sourceAge; ++i)
+            alpha *= 4.0f;
+        particle.alpha = qMin(255.0f, alpha) / 255.0f;
+        m_particles.append(particle);
+    }
+
+    void advanceOne()
+    {
+        for(int i = m_particles.size() - 1; i >= 0; --i)
+        {
+            BurstParticle& particle = m_particles[i];
+            if(--particle.lifetime == 0)
+            {
+                m_particles.removeAt(i);
+                continue;
+            }
+            if(particle.impacted)
+            {
+                if(particle.frame < 14)
+                    ++particle.frame;
+                else
+                {
+                    m_particles.removeAt(i);
+                    continue;
+                }
+                particle.position += QVector3D(particle.velocity.x(),
+                                               particle.velocity.y(), 0.0f);
+                particle.velocity.setX(particle.velocity.x() * 0.85f);
+                particle.velocity.setY(particle.velocity.y() * 0.85f);
+                particle.scale *= 1.13f;
+                particle.alpha = qMax(0.0f, particle.alpha - 16.0f / 255.0f);
+            }
+            else
+            {
+                particle.velocity.setZ(particle.velocity.z() * 0.85f - 0.055f);
+                particle.position.setZ(particle.position.z() + particle.velocity.z());
+                particle.alpha = qMin(1.0f, particle.alpha * 4.0f);
+                if(particle.velocity.z() < 0.0f
+                        && particle.position.z() < m_origin.z() + 0.5f * m_authoredScale)
+                {
+                    const float speed = qAbs(particle.velocity.z());
+                    particle.velocity.setX(particle.velocity.x() * speed);
+                    particle.velocity.setY(particle.velocity.y() * speed);
+                    particle.impacted = true;
+                }
+            }
+        }
+
+        if(!m_generating)
+            return;
+        for(int attempt = 0; attempt < m_attempts && m_particles.size() < 400; ++attempt)
+        {
+            if((m_rng.next() % 100u) + 1u <= 88u)
+                spawn();
+        }
+        ++m_sourceAge;
+        if(m_attempts > 8)
+            m_attempts /= 2;
+        if(m_sourceAge >= 13)
+            m_generating = false;
+    }
+
+    Isaac32 m_rng;
+    QVector<BurstParticle> m_particles;
+    QVector3D m_origin;
+    float m_authoredScale{1.0f};
+    quint32 m_seed{0};
+    int m_sourceAge{0};
+    int m_attempts{128};
+    int m_cycleTick{0};
+    bool m_generating{false};
+    bool m_initialized{false};
+};
+
+struct RingSource
+{
+    QVector3D base;
+    float radius{0.0f};
+    float angle{0.0f};
+    float zVelocity{0.0f};
+    int lifetime{0};
+};
+
+class CastingEmitter
+{
+public:
+    static constexpr int kPreviewCycleTicks = 72;
+
+    void advanceTo(qint64 logicalTick, quint32 seed, const QVector3D& origin,
+                   float authoredScale)
+    {
+        const int tick = int(logicalTick % kPreviewCycleTicks);
+        if(!m_initialized || seed != m_seed || tick < m_cycleTick)
+            reset(seed, origin, authoredScale);
+        while(m_cycleTick < tick)
+        {
+            advanceOne();
+            ++m_cycleTick;
+        }
+    }
+
+    QVector<WeatherRenderSample> samples() const
+    {
+        QVector<WeatherRenderSample> result;
+        result.reserve(m_particles.size());
+        for(const BurstParticle& particle : m_particles)
+        {
+            WeatherRenderSample sample;
+            sample.position = particle.position;
+            sample.scale = billboardDiameter(particle.scale);
+            sample.alpha = particle.alpha;
+            sample.frame = particle.frame;
+            result.append(sample);
+        }
+        return result;
+    }
+
+    int activeCount() const { return m_particles.size(); }
+
+private:
+    float randomRange(float low, float high)
+    {
+        return low + (high - low) * m_rng.unit();
+    }
+
+    void reset(quint32 seed, const QVector3D& origin, float authoredScale)
+    {
+        m_seed = seed;
+        m_rng.reset(seed ^ 0x43415354u);
+        m_origin = origin;
+        m_authoredScale = qMax(0.001f, authoredScale);
+        m_speedFactor = m_authoredScale / 18.0f;
+        m_sources.clear();
+        m_particles.clear();
+        for(int i = 0; i < 3; ++i)
+        {
+            const float zRandom = randomRange(-m_authoredScale * 0.2f,
+                                              m_authoredScale * 0.2f);
+            RingSource source;
+            source.base = m_origin + QVector3D(0.0f, 0.0f,
+                                               -m_authoredScale + zRandom);
+            source.angle = float(i) * float(M_PI) * 2.0f / 3.0f;
+            source.zVelocity = (2.0f * m_authoredScale - zRandom) / 36.0f;
+            source.lifetime = 45;
+            m_sources.append(source);
+        }
+        m_cycleTick = 0;
+        m_generating = true;
+        m_initialized = true;
+    }
+
+    QVector3D sourcePosition(const RingSource& source) const
+    {
+        return source.base + QVector3D(source.radius * qSin(source.angle),
+                                       source.radius * qCos(source.angle), 0.0f);
+    }
+
+    void spawnTail()
+    {
+        const int sourceIndex = int(m_rng.next() % quint32(m_sources.size()));
+        const RingSource& source = m_sources[sourceIndex];
+        const float spread = source.radius * 0.1f + 0.001f;
+        BurstParticle particle;
+        particle.position = sourcePosition(source)
+            + QVector3D(randomRange(-spread, spread), randomRange(-spread, spread),
+                        randomRange(-spread, 0.0f));
+        particle.scale = m_authoredScale * 0.1f;
+        particle.frame = 1;
+        particle.lifetime = 7;
+        m_particles.append(particle);
+    }
+
+    void spawnClosingRing()
+    {
+        const RingSource& source = m_sources[0];
+        const float wanted = m_speedFactor * 20.0f;
+        const float nextRadius = source.radius + (source.radius - wanted) * 0.5f;
+        const float low = qMin(nextRadius, source.radius);
+        const float high = qMax(nextRadius, source.radius);
+        const float radius = randomRange(low, high);
+        const float angle = randomRange(0.0f, float(M_PI) * 2.0f);
+        const int baseLifetime = qMin(source.lifetime, 5);
+        BurstParticle particle;
+        particle.position = m_origin + QVector3D(radius * qSin(angle),
+                                                  radius * qCos(angle),
+                                                  source.base.z() - m_origin.z());
+        particle.scale = m_authoredScale * 0.1f;
+        particle.frame = 1;
+        particle.lifetime = baseLifetime + 1 + int(m_rng.next() % 4u);
+        m_particles.append(particle);
+    }
+
+    void advanceOne()
+    {
+        for(int i = m_particles.size() - 1; i >= 0; --i)
+        {
+            BurstParticle& particle = m_particles[i];
+            if(--particle.lifetime == 0)
+                m_particles.removeAt(i);
+            else
+                particle.frame = qMin(15, particle.frame + 1);
+        }
+        if(!m_generating)
+            return;
+
+        const bool closingRing = m_sources[0].lifetime < 9;
+        const int attempts = closingRing ? 72 : 27;
+        for(int attempt = 0; attempt < attempts && m_particles.size() < 500; ++attempt)
+        {
+            if((m_rng.next() % 100u) + 1u <= 88u)
+                closingRing ? spawnClosingRing() : spawnTail();
+        }
+
+        for(RingSource& source : m_sources)
+        {
+            if(--source.lifetime == 0)
+            {
+                m_generating = false;
+                continue;
+            }
+            if(source.lifetime >= 27)
+                source.radius += m_speedFactor;
+            else if(source.lifetime >= 9)
+                source.radius -= m_speedFactor;
+            else
+            {
+                const float wanted = m_speedFactor * 20.0f;
+                source.radius = wanted + (source.radius - wanted) * 0.5f;
+            }
+            if(source.lifetime >= 9)
+            {
+                source.angle += float(M_PI) / 18.0f;
+                source.base.setZ(source.base.z() + source.zVelocity);
+            }
+        }
+    }
+
+    Isaac32 m_rng;
+    QVector<RingSource> m_sources;
+    QVector<BurstParticle> m_particles;
+    QVector3D m_origin;
+    float m_authoredScale{1.0f};
+    float m_speedFactor{0.0f};
+    quint32 m_seed{0};
+    int m_cycleTick{0};
+    bool m_generating{false};
+    bool m_initialized{false};
+};
+
+class BansheeCastingEmitter
+{
+public:
+    static constexpr int kPreviewCycleTicks = 32;
+
+    void advanceTo(qint64 logicalTick, quint32 seed, const QVector3D& origin,
+                   float authoredScale)
+    {
+        const int tick = int(logicalTick % kPreviewCycleTicks);
+        if(!m_initialized || seed != m_seed || tick < m_cycleTick)
+            reset(seed, origin, authoredScale);
+        while(m_cycleTick < tick)
+        {
+            advanceOne();
+            ++m_cycleTick;
+        }
+    }
+
+    QVector<WeatherRenderSample> samples() const
+    {
+        QVector<WeatherRenderSample> result;
+        result.reserve(m_particles.size());
+        for(const BurstParticle& particle : m_particles)
+        {
+            WeatherRenderSample sample;
+            sample.position = particle.position;
+            sample.scale = billboardDiameter(particle.scale);
+            sample.alpha = particle.alpha;
+            sample.frame = particle.frame;
+            result.append(sample);
+        }
+        return result;
+    }
+
+    int activeCount() const { return m_particles.size(); }
+
+private:
+    float randomRange(float low, float high)
+    {
+        return low + (high - low) * m_rng.unit();
+    }
+
+    void reset(quint32 seed, const QVector3D& origin, float authoredScale)
+    {
+        m_seed = seed;
+        m_rng.reset(seed ^ 0x42414E53u);
+        m_origin = origin;
+        m_authoredScale = qMax(0.001f, authoredScale);
+        m_speedFactor = m_authoredScale / 18.0f;
+        m_radius = 0.0f;
+        m_lifetime = 8;
+        m_particles.clear();
+        m_cycleTick = 0;
+        m_generating = true;
+        m_initialized = true;
+    }
+
+    void spawn()
+    {
+        const float wanted = m_speedFactor * 30.0f;
+        const float nextRadius = m_radius + (m_radius - wanted) * 0.5f;
+        const float low = qMin(nextRadius, m_radius);
+        const float high = qMax(nextRadius, m_radius);
+        const float radius = high > low + 0.001f ? randomRange(low, high) : nextRadius;
+        const float angle = randomRange(0.0f, float(M_PI) * 2.0f);
+        const int baseLifetime = qMin(m_lifetime, 5);
+        BurstParticle particle;
+        particle.position = m_origin + QVector3D(radius * qSin(angle),
+                                                  radius * qCos(angle),
+                                                  m_authoredScale * 1.5f);
+        particle.scale = m_authoredScale * 0.15f;
+        particle.frame = 0;
+        particle.lifetime = baseLifetime + 1 + int(m_rng.next() % 3u);
+        m_particles.append(particle);
+    }
+
+    void advanceOne()
+    {
+        for(int i = m_particles.size() - 1; i >= 0; --i)
+        {
+            BurstParticle& particle = m_particles[i];
+            if(--particle.lifetime == 0)
+                m_particles.removeAt(i);
+            else
+                particle.frame = qMin(15, particle.frame + 1);
+        }
+        if(!m_generating)
+            return;
+        for(int attempt = 0; attempt < 72 && m_particles.size() < 500; ++attempt)
+        {
+            if((m_rng.next() % 100u) + 1u <= 88u)
+                spawn();
+        }
+        if(--m_lifetime == 0)
+        {
+            m_generating = false;
+            return;
+        }
+        const float wanted = m_speedFactor * 30.0f;
+        m_radius = wanted + (m_radius - wanted) * 0.5f;
+    }
+
+    Isaac32 m_rng;
+    QVector<BurstParticle> m_particles;
+    QVector3D m_origin;
+    float m_authoredScale{1.0f};
+    float m_speedFactor{0.0f};
+    float m_radius{0.0f};
+    quint32 m_seed{0};
+    int m_lifetime{8};
+    int m_cycleTick{0};
+    bool m_generating{false};
+    bool m_initialized{false};
+};
+
 } // namespace particle
 } // namespace ei
 

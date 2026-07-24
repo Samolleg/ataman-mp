@@ -18,9 +18,9 @@ RES_SIGNATURE = 0x019CE23C
 MP_SIGNATURE = 0xCE4AF672
 SEC_SIGNATURE = 0xCF4BF774
 REFERENCE_MOB_SIZE = 12_094
-REFERENCE_MOB_SHA256 = "6EBE2B6892EC700CF7FA4B6F776A7142D960CB389EEDF112693F280599C8AB1F"
-SECTOR_COUNT_X = 1
-SECTOR_COUNT_Y = 1
+REFERENCE_MOB_SHA256 = "68C91991A8BB9BCF3EB031690DDAFB61A870756B95A6BDF84EBE3A8A38DFCBCA"
+SECTOR_COUNT_X = 2
+SECTOR_COUNT_Y = 2
 SECTOR_WORLD_SIZE = 32
 ZONE1_GROUND_PACKED_TILE = 1
 ZONE1_GROUND_ATLAS_SLOT = 1
@@ -135,16 +135,17 @@ def build(catalog_mob: Path, output_root: Path) -> dict[str, Any]:
         raise ValueError(
             f"particle catalog MOB hash mismatch: {mob_hash} != {REFERENCE_MOB_SHA256}"
         )
-    mpr_bytes = build_archive([
-        ("zone1.mp", synthetic_zone1_mp()),
-        ("zone1000000.sec", flat_sector()),
-    ])
+    mpr_members = [("zone1.mp", synthetic_zone1_mp())]
+    for sector_x in range(SECTOR_COUNT_X):
+        for sector_y in range(SECTOR_COUNT_Y):
+            mpr_members.append((f"zone1{sector_x:03d}{sector_y:03d}.sec", flat_sector()))
+    mpr_bytes = build_archive(mpr_members)
 
     scene_directory = output_root / "test-scenes" / "particle-catalog-grid"
     collection_directory = output_root / "collections"
     scene_directory.mkdir(parents=True, exist_ok=True)
     collection_directory.mkdir(parents=True, exist_ok=True)
-    mpr_path = scene_directory / "particle-zone1-flat-1x1.mpr"
+    mpr_path = scene_directory / "particle-zone1-flat-2x2.mpr"
     mob_path = scene_directory / "all-particles-grid.mob"
     manifest_path = scene_directory / "particle-catalog-collection.json"
     collection_path = collection_directory / "particle-catalog.collection"
@@ -152,7 +153,7 @@ def build(catalog_mob: Path, output_root: Path) -> dict[str, Any]:
     if catalog_mob.resolve() != mob_path.resolve():
         shutil.copyfile(catalog_mob, mob_path)
     collection_path.write_text(collection_text(
-        "../test-scenes/particle-catalog-grid/particle-zone1-flat-1x1.mpr",
+        "../test-scenes/particle-catalog-grid/particle-zone1-flat-2x2.mpr",
         "../test-scenes/particle-catalog-grid/all-particles-grid.mob",
     ), encoding="utf-8", newline="\n")
 
@@ -172,7 +173,8 @@ def build(catalog_mob: Path, output_root: Path) -> dict[str, Any]:
         },
         "layout": {
             "sectorCount": [SECTOR_COUNT_X, SECTOR_COUNT_Y],
-            "worldExtent": [SECTOR_WORLD_SIZE, SECTOR_WORLD_SIZE],
+            "worldExtent": [SECTOR_COUNT_X * SECTOR_WORLD_SIZE,
+                            SECTOR_COUNT_Y * SECTOR_WORLD_SIZE],
             "rawHeight": 0,
             "packedTile": ZONE1_GROUND_PACKED_TILE,
             "atlasSlot": ZONE1_GROUND_ATLAS_SLOT,
@@ -181,7 +183,7 @@ def build(catalog_mob: Path, output_root: Path) -> dict[str, Any]:
         "outputs": {
             "collection": {"path": "collections/particle-catalog.collection"},
             "mpr": {
-                "path": "test-scenes/particle-catalog-grid/particle-zone1-flat-1x1.mpr",
+                "path": "test-scenes/particle-catalog-grid/particle-zone1-flat-2x2.mpr",
                 "size": len(mpr_bytes),
                 "sha256": sha256(mpr_bytes),
             },

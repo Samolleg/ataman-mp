@@ -33,6 +33,48 @@
       "size": 1398204,
       "textureFormat": "0x33545844",
       "width": 1024
+    },
+    {
+      "atlas": {
+        "columns": 4,
+        "phaseCount": 16,
+        "rows": 4
+      },
+      "height": 1024,
+      "mipCount": 11,
+      "name": "firesmoke.mmp",
+      "sha256": "EF61A113CCB8598D37C6A5147C852C0D2A594156EB51B8092313AA62BAA312CA",
+      "size": 1398204,
+      "textureFormat": "0x33545844",
+      "width": 1024
+    },
+    {
+      "atlas": {
+        "columns": 4,
+        "phaseCount": 16,
+        "rows": 4
+      },
+      "height": 1024,
+      "mipCount": 11,
+      "name": "banshee.mmp",
+      "sha256": "5FAC702469510F5C1E6ACB5C520629DF40810C837AA83A76AB1871C013EFDC63",
+      "size": 1398204,
+      "textureFormat": "0x33545844",
+      "width": 1024
+    },
+    {
+      "atlas": {
+        "columns": 4,
+        "phaseCount": 16,
+        "rows": 4
+      },
+      "height": 512,
+      "mipCount": 10,
+      "name": "acidray.mmp",
+      "sha256": "48C7F220718AE66AD98C17B6C53C3230E2F9ED7C2FB88320809E19650F0A2ADE",
+      "size": 349628,
+      "textureFormat": "0x33545844",
+      "width": 512
     }
   ]
 }

@@ -11,7 +11,7 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$OutputMob,
 
-    [double]$SpacingWorldUnits = 3.0,
+    [double]$SpacingWorldUnits = 4.0,
     [int]$Columns = 10,
     [double]$OriginX = 2.0,
     [double]$OriginY = 2.0,

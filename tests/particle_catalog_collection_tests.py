@@ -28,16 +28,20 @@ class ParticleCatalogCollectionTests(unittest.TestCase):
         archive = MODULE.build_archive([
             ("zone1.mp", MODULE.synthetic_zone1_mp()),
             ("zone1000000.sec", MODULE.flat_sector()),
+            ("zone1000001.sec", MODULE.flat_sector()),
+            ("zone1001000.sec", MODULE.flat_sector()),
+            ("zone1001001.sec", MODULE.flat_sector()),
         ])
         members = MODULE.read_members(archive)
         self.assertEqual([member["name"] for member in members], [
-            "zone1.mp", "zone1000000.sec"
+            "zone1.mp", "zone1000000.sec", "zone1000001.sec",
+            "zone1001000.sec", "zone1001001.sec"
         ])
         self.assertEqual(members[1]["payload"], MODULE.flat_sector())
 
     def test_collection_uses_portable_relative_references(self):
         text = MODULE.collection_text(
-            "../test-scenes/particle-catalog-grid/particle-zone1-flat-1x1.mpr",
+            "../test-scenes/particle-catalog-grid/particle-zone1-flat-2x2.mpr",
             "../test-scenes/particle-catalog-grid/all-particles-grid.mob",
         )
         self.assertIn('map="gz1g"', text)
@@ -49,7 +53,7 @@ class ParticleCatalogCollectionTests(unittest.TestCase):
         mp = MODULE.synthetic_zone1_mp()
         header = struct.unpack_from("<If6IHI", mp)
         self.assertEqual(header[0], MODULE.MP_SIGNATURE)
-        self.assertEqual(header[2:4], (1, 1))
+        self.assertEqual(header[2:4], (2, 2))
         self.assertEqual(header[4:8], (8, 512, 512, 64))
         tile_types = struct.unpack_from("<512i", mp, 38 + 44)
         self.assertEqual(tile_types[1], 1)

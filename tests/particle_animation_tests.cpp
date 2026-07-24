@@ -16,6 +16,9 @@ private slots:
     void fireOnlyNeverReachesSmokeFrames();
     void tornadoUsesNativePopulationAndPhasePartitions();
     void lightningBlastIsFiniteAndRepeatingForPreview();
+    void nukeUsesFiniteNativeBurstAndImpactPhases();
+    void castingUsesDeterministicSyntheticCarrierControl();
+    void bansheeCastingUsesFiniteElevatedRing();
 };
 
 void ParticleAnimationTests::atlasUsesNativeTopRowFirstInsets()
@@ -170,6 +173,76 @@ void ParticleAnimationTests::lightningBlastIsFiniteAndRepeatingForPreview()
     QCOMPARE(first.activeCount(), 0);
     first.advanceTo(81, 8240u, origin, 1.0f);
     QVERIFY(first.activeCount() > 0);
+}
+
+void ParticleAnimationTests::nukeUsesFiniteNativeBurstAndImpactPhases()
+{
+    ei::particle::NukeEmitter first;
+    ei::particle::NukeEmitter second;
+    const QVector3D origin(3.0f, 4.0f, 1.0f);
+    first.advanceTo(20, 8204u, origin, 1.0f);
+    second.advanceTo(20, 8204u, origin, 1.0f);
+    const auto a = first.samples();
+    const auto b = second.samples();
+    QCOMPARE(a.size(), b.size());
+    QVERIFY(!a.isEmpty());
+    bool hasImpactPhase = false;
+    for(int i = 0; i < a.size(); ++i)
+    {
+        QCOMPARE(a[i].position, b[i].position);
+        QCOMPARE(a[i].scale, b[i].scale);
+        QCOMPARE(a[i].alpha, b[i].alpha);
+        QCOMPARE(a[i].frame, b[i].frame);
+        QVERIFY(a[i].frame >= 0 && a[i].frame <= 14);
+        hasImpactPhase = hasImpactPhase || a[i].frame >= 4;
+    }
+    QVERIFY(hasImpactPhase);
+    first.advanceTo(79, 8204u, origin, 1.0f);
+    QCOMPARE(first.activeCount(), 0);
+    first.advanceTo(81, 8204u, origin, 1.0f);
+    QVERIFY(first.activeCount() > 0);
+}
+
+void ParticleAnimationTests::castingUsesDeterministicSyntheticCarrierControl()
+{
+    ei::particle::CastingEmitter first;
+    ei::particle::CastingEmitter second;
+    const QVector3D origin(-2.0f, 1.0f, 0.0f);
+    first.advanceTo(30, 8203u, origin, 1.0f);
+    second.advanceTo(30, 8203u, origin, 1.0f);
+    const auto a = first.samples();
+    const auto b = second.samples();
+    QCOMPARE(a.size(), b.size());
+    QVERIFY(!a.isEmpty());
+    for(int i = 0; i < a.size(); ++i)
+    {
+        QCOMPARE(a[i].position, b[i].position);
+        QCOMPARE(a[i].scale, b[i].scale);
+        QCOMPARE(a[i].frame, b[i].frame);
+        QVERIFY(a[i].frame >= 1 && a[i].frame <= 15);
+    }
+    first.advanceTo(71, 8203u, origin, 1.0f);
+    QCOMPARE(first.activeCount(), 0);
+    first.advanceTo(73, 8203u, origin, 1.0f);
+    QVERIFY(first.activeCount() > 0);
+}
+
+void ParticleAnimationTests::bansheeCastingUsesFiniteElevatedRing()
+{
+    ei::particle::BansheeCastingEmitter emitter;
+    const QVector3D origin(1.0f, 2.0f, 0.5f);
+    emitter.advanceTo(6, 8205u, origin, 1.0f);
+    const auto samples = emitter.samples();
+    QVERIFY(!samples.isEmpty());
+    for(const auto& sample : samples)
+    {
+        QVERIFY(sample.position.z() > origin.z());
+        QVERIFY(sample.frame >= 0 && sample.frame <= 15);
+    }
+    emitter.advanceTo(31, 8205u, origin, 1.0f);
+    QCOMPARE(emitter.activeCount(), 0);
+    emitter.advanceTo(33, 8205u, origin, 1.0f);
+    QVERIFY(emitter.activeCount() > 0);
 }
 
 QTEST_APPLESS_MAIN(ParticleAnimationTests)

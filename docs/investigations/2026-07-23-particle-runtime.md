@@ -826,9 +826,9 @@ The generated control at
 - particle IDs 900000 through 900082;
 - type IDs 8192 through 8274 in row-major order;
 - a 10-by-9 grid starting at `(2, 2, 0)`;
-- center spacing of 3 world units, or 1.5 terrain tiles, and authored scale 1;
+- center spacing of 4 world units, or 2 terrain tiles, and authored scale 1;
 - SHA-256
-  `6EBE2B6892EC700CF7FA4B6F776A7142D960CB389EEDF112693F280599C8AB1F`.
+  `68C91991A8BB9BCF3EB031690DDAFB61A870756B95A6BDF84EBE3A8A38DFCBCA`.
 
 The independent particle MOB reporter finds exactly 83 unique IDs and types.
 EI Mapper strict validation covers all 12,094 bytes, finds 83 objects, and
@@ -844,16 +844,17 @@ real owner parameters before their visual behavior can be called reconstructed.
 ### Portable flat-ground collection
 
 `scripts/build_particle_catalog_collection.py` packages the catalog with a
-fully synthetic one-sector MPR and a directly discoverable collection file.
-The MPR has the internal members `zone1.mp` and `zone1000000.sec`, declares the
-stock 512-slot terrain atlas, has constant height and normals, and assigns all
-256 terrain tile words to atlas slot 1 with rotation 0. It embeds no proprietary
+fully synthetic 2-by-2-sector MPR and a directly discoverable collection file.
+The MPR has the internal member `zone1.mp` plus `zone1000000.sec`,
+`zone1000001.sec`, `zone1001000.sec`, and `zone1001001.sec`, declares the stock
+512-slot terrain atlas, has constant height and normals, and assigns all 1,024
+terrain tile words to atlas slot 1 with rotation 0. It embeds no proprietary
 imagery; at render time the configured Jamais Vu Zone 1 atlas supplies the
 uniform common-ground tile.
 
-The canonical generated MPR is 11,459 bytes with SHA-256
-`9DCFD1547F6E69E3D3DB8C54890DFE66890EB1F3DDBAE98D0CD3F036E9D0A46F`.
-Independent parsing confirms both archive members, one flat sector, 512 atlas
+The canonical generated MPR is 39,266 bytes with SHA-256
+`59BF400197135FE89C7952FDBFF41C82EB0C150292BA97E6A6636F7CBC08706A`.
+Independent parsing confirms the map member plus four flat sectors, 512 atlas
 slots, and the uniform slot-1 tile assignment. EI Mapper parses all bytes and
 performs a byte-identical unchanged round trip. Two independent generations
 produce identical collection, MPR, MOB, and manifest bytes. The collection
@@ -915,3 +916,61 @@ constants. Remaining controls before claiming complete native equivalence are
 a moving Tornado carrier (for source-spine bending) and a runtime
 Lightningblast spell capture (for owner-supplied size and destination). These
 do not block faithful stationary catalog previews of the confirmed paths.
+
+## Ordered catalog reconstruction: Casting, Nuke, and Bansheecasting
+
+The three catalog IDs immediately after Tornado bind distinct factories and
+must not reuse Tornado, Tendri fire/smoke, or the generic soft-circle preview.
+
+Nuke (type 8204) is fully defined for a stationary map source. The factory at
+`0x00486A72..0x00486BD4` confirms an initial 128 attempts, capacity 400,
+one local source, texture `AcidRay`, ordinary alpha blending, and callbacks
+`0x00488F90`, `0x00489190`, and `0x004892E0`. The callbacks confirm a finite
+13-quant generator: the attempt count halves toward 8; particles begin inside a
+0.2-scale cylinder up to two scale units high; early alpha grows by four; upward
+velocity is attenuated by 0.85 and receives 0.055 downward acceleration per
+quant. On falling below the half-scale impact plane, particles spread radially,
+advance toward phase 14, expand by 1.13, and lose 16 alpha units per quant.
+
+Casting (type 8203) and Bansheecasting (type 8205) explicitly require a carrier.
+Their factory branches at `0x00486993..0x004869DC` and
+`0x004869DD..0x00486A71` confirm textures `FireSmoke` and `Banshee`, one-quant
+phase timing, indefinite system lifespan, and their distinct callback triplets
+starting at `0x00489320` and `0x00489BE0`. Callback evidence confirms that both
+derive their ring radius and height from the carrier bounding volume; a bare
+standalone particle record does not contain those values. Casting uses three
+orbiting/rising tails followed by an expanding closing ring. Bansheecasting uses
+an eight-quant elevated ring whose radius converges toward a carrier-derived
+target while its short-lived sprites advance atlas phases.
+
+For the catalog only, the editor may supply an explicit synthetic carrier bound
+equal to the authored particle scale and replay each finite sequence. That is a
+stable visualization control, not a claim that an ownerless native record has
+implicit bounds. Attached runtime controls remain required to validate arbitrary
+carrier sizes.
+
+The active texture archive confirms 4-by-4 DXT3 atlases for all three paths.
+`firesmoke.mmp` is 1024 square with SHA-256
+`EF61A113CCB8598D37C6A5147C852C0D2A594156EB51B8092313AA62BAA312CA`;
+`banshee.mmp` is 1024 square with SHA-256
+`5FAC702469510F5C1E6ACB5C520629DF40810C837AA83A76AB1871C013EFDC63`;
+and `acidray.mmp` is 512 square with SHA-256
+`48C7F220718AE66AD98C17B6C53C3230E2F9ED7C2FB88320809E19650F0A2ADE`.
+
+### Implemented ordered controls
+
+`source/render/particle_animation.h` now contains separate deterministic
+simulators for these three families, and `source/render/view.cpp` dispatches
+types 8203, 8204, and 8205 before the generic preview path. Each uses its
+confirmed atlas and ordinary-alpha submission. Nuke retains the complete
+stationary callback path. Casting and Bansheecasting explicitly construct the
+synthetic scale-derived carrier bound described above; they do not silently
+claim an ownerless native default. Each finite effect repeats only after its
+particles have aged out so it remains inspectable in the all-type catalog.
+
+The focused animation tests pin deterministic replay, phase bounds, finite
+retirement, restart behavior, Nuke impact phases, and the elevated ring control.
+The complete application builds successfully after the graphless-test merge,
+and the noninteractive widget smoke test passes. Native OpenGL and ANGLE visual
+approval remain required before promoting the two carrier-dependent controls
+to fully validated status.

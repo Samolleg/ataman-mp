@@ -18,12 +18,19 @@ class ParticleTextureReportTests(unittest.TestCase):
         fixture = json.loads(path.read_text(encoding="utf-8"))
         self.assertEqual(fixture["source"]["sha256"], MODULE.REFERENCE_JMV_TEXTURES_SHA256)
         by_name = {item["name"]: item for item in fixture["textures"]}
-        self.assertEqual(set(by_name), {"tornado.mmp", "tendrilight.mmp"})
-        for item in by_name.values():
+        self.assertEqual(set(by_name), {
+            "tornado.mmp", "tendrilight.mmp", "firesmoke.mmp",
+            "banshee.mmp", "acidray.mmp",
+        })
+        for name in ("tornado.mmp", "tendrilight.mmp", "firesmoke.mmp", "banshee.mmp"):
+            item = by_name[name]
             self.assertEqual((item["width"], item["height"]), (1024, 1024))
             self.assertEqual(item["mipCount"], 11)
             self.assertEqual(item["textureFormat"], "0x33545844")
             self.assertEqual(item["atlas"]["phaseCount"], 16)
+        self.assertEqual((by_name["acidray.mmp"]["width"],
+                          by_name["acidray.mmp"]["height"]), (512, 512))
+        self.assertEqual(by_name["acidray.mmp"]["mipCount"], 10)
 
     def test_invalid_archive_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "not an EI RES"):

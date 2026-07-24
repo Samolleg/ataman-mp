@@ -1,6 +1,6 @@
 # Particle rendering status
 
-Last updated: 2026-07-24
+Last updated: 2026-07-25
 
 This document records which Evil Islands particle families EI Mapper currently
 reconstructs from executable and resource evidence, which families only have a
@@ -66,6 +66,14 @@ covering the selected JMV corpus.
 | 8202 / `0x200A` | Tornado | Dedicated persistent six-source spiral, native phase partitions, spawn/lifetime/rotation/contraction/height/alpha rules, sunlight tint, `Tornado` atlas, and ordinary alpha blending. | Capture a moving native carrier to validate source-spine bending; the standalone catalog control correctly exercises the stationary path. |
 | 8240 / `0x2030` | Lightningblast | Dedicated finite ten-source burst with source flashes, ground clouds, short bolts, native phase/lifetime/gravity/generation rules, `TendriLight` atlas, and additive blending. The editor repeats the completed burst every 80 quants solely for inspection. | Capture a native spell owner to validate owner-supplied size and destination; the confirmed standalone visual path is implemented. |
 
+## Ordered reconstructed previews
+
+| ID | Name | Implemented | Remaining control |
+|---:|---|---|---|
+| 8203 / `0x200B` | Casting | Dedicated three-source orbiting and rising tails followed by the closing ring, native phase cadence, `FireSmoke` atlas, and ordinary alpha blending. The standalone catalog uses an explicit synthetic carrier bound equal to authored scale and repeats the finite sequence every 72 quants. | Capture attached carriers with different bounding volumes; the standalone bound is a documented editor control, not a native ownerless default. |
+| 8204 / `0x200C` | Nuke | Dedicated finite 13-quant generator with the native shrinking attempt count, cylindrical spawn volume, vertical attenuation and gravity, half-scale impact plane, radial impact motion, phase progression, expansion and alpha decay, using the `AcidRay` atlas and ordinary alpha blending. The editor repeats the completed burst every 80 quants. | Capture a native placed/spell control as a visual validation case; the stationary callback path itself is closed. |
+| 8205 / `0x200D` | Bansheecasting | Dedicated eight-quant elevated closing ring with native short-lived phase-advancing sprites, `Banshee` atlas, and ordinary alpha blending. The standalone catalog uses an explicit synthetic carrier bound equal to authored scale and repeats the finite sequence every 32 quants. | Capture attached carriers with different bounding volumes; the standalone bound is a documented editor control, not a native ownerless default. |
+
 ## Preview-only families
 
 These IDs currently receive a recognizable editor style, but their native
@@ -80,7 +88,7 @@ runtime behavior has not been reconstructed:
 | 8210, 8213, 8258 | Acidray, Sphereacid, Acidstar |
 | 8214, 8259 | Sphereelectricity, Sparks |
 | 8217, 8253, 8254 | Teleport, Portalstar, Portal |
-| 8203–8205, 8232–8239 | Casting, Nuke, Bansheecasting, and the elemental/divination/illusion/domination/enchantment/healing/failed casting variants |
+| 8232–8239 | Elemental, divination, illusion, domination, enchantment, healing, and failed casting variants |
 
 Texture names used by these previews are limited to direct resource matches
 where available. Procedural soft sprites are intentional placeholders rather
@@ -171,8 +179,8 @@ not a particle emitter.
 
 The repeatable generator `scripts/build_particle_catalog_mob.ps1` builds a
 minimal supplemental MOB with one scale-1 standalone record for each of the 83
-public particle IDs. The default 10-by-9 layout uses 3 world-unit centers
-(1.5 terrain tiles), sequential names and IDs, and an adjacent JSON manifest.
+public particle IDs. The default 10-by-9 layout uses 4-world-unit centers
+(2 terrain tiles), sequential names and IDs, and an adjacent JSON manifest.
 
 The current generated artifact is
 `artifacts/particle-catalog-grid/all-particles-grid.mob`. It is intended for
@@ -183,8 +191,8 @@ whose real owner supplies additional parameters.
 
 The portable one-click control is
 `artifacts/particle-catalog-collection/collections/particle-catalog.collection`.
-It loads the same 83-type MOB over a deterministic, flat, one-sector synthetic
+It loads the same 83-type MOB over a deterministic, flat, 2-by-2-sector synthetic
 MPR. The MPR uses the `zone1` internal namespace and atlas slot 1, so the active
 Jamais Vu Zone 1 atlas supplies the common-ground texture; no texture imagery is
 embedded in the fixture. The grid begins at `(2, 2, 0)` and fits inside the
-32-by-32-world-unit plane.
+64-by-64-world-unit plane.

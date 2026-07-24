@@ -379,6 +379,9 @@ private:
     QHash<const CNode*, ei::particle::TendriEmitter> m_tendriEmitters;
     QHash<const CNode*, ei::particle::TornadoEmitter> m_tornadoEmitters;
     QHash<const CNode*, ei::particle::LightningBlastEmitter> m_lightningBlastEmitters;
+    QHash<const CNode*, ei::particle::CastingEmitter> m_castingEmitters;
+    QHash<const CNode*, ei::particle::NukeEmitter> m_nukeEmitters;
+    QHash<const CNode*, ei::particle::BansheeCastingEmitter> m_bansheeCastingEmitters;
     QOpenGLShaderProgram m_shadowProgram;
     QOpenGLFramebufferObject* m_shadowFbo{nullptr};
     QOpenGLFramebufferObject* m_dynamicShadowFbo{nullptr};
