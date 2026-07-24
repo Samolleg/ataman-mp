@@ -369,6 +369,22 @@ serializer remains forbidden for every changed MPR.
 
 ## Heightmap editing
 
+- [ ] Replace the residual atlas-oriented parameters dialog with a consolidated
+  **MPR Settings** workflow following
+  [`docs/MPR_SETTINGS_AND_HEIGHT_RANGE.md`](docs/MPR_SETTINGS_AND_HEIGHT_RANGE.md):
+  map/profile/namespace summary, sector/tile/vertex dimensions, raw and world
+  height ranges, `maxZ`, materials, overlays, diagnostics, and separately gated
+  height-scale and resize transactions.
+- [ ] Add undoable whole-map offset, flatten, clamp, and normalize/remap
+  operations. These retain the existing sector dimensions and canonical vertex
+  count; no-ops must not dirty the MPR.
+- [ ] Treat `maxZ` as the global raw-to-world vertical range. Offer explicit
+  **Scale terrain** and **Preserve heights by requantizing** policies, preview
+  rounding and clamp effects, and never disguise a scale migration as an
+  ordinary maximum-height field.
+- [ ] Add existing-map crop/expand only as a structural, initially Save-As-only
+  transaction. Preview discarded/initialized sectors and coordinate—but never
+  silently invent—`map.txt` dimensions and minimap updates.
 - [ ] Refactor terrain ownership around each sector's canonical 33x33 vertex
   lattice rather than independently duplicated tile vertices.
 - [ ] Synchronize shared seams between adjacent sectors.

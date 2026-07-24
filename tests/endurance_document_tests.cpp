@@ -4,6 +4,8 @@
 #include <QTemporaryFile>
 #include <QTemporaryDir>
 
+#include <limits>
+
 #include "endurance_document.h"
 #include "landscape_edit_policy.h"
 #include "operation_history_policy.h"
@@ -315,6 +317,8 @@ private slots:
     void canonicalTerrainSeamsAreEditedAndUndoneTogether();
     void terrainBrushToolsAreDeterministicAndFailClosed();
     void terrainHeightmapImportIsDeterministicAndSeamAware();
+    void globalTerrainHeightOperationsKeepDimensionsAndSeams();
+    void globalTerrainHeightOperationsRejectInvalidRanges();
     void terrainDiagnosticsArePreApplyAndPolicyExplicit();
     void terrainTilePaintingIsUndoableLocalizedAndNamespaceSafe();
     void terrainTileStrokeCompositionKeepsFirstAndFinalValues();
@@ -1900,6 +1904,117 @@ void EnduranceDocumentTests::terrainHeightmapImportIsDeterministicAndSeamAware()
     QVERIFY(croppedTerrain.makeHeightmapImport(
         saturatedGrid, settings, &invalidReport).isEmpty());
     QVERIFY(invalidReport.hasErrors());
+}
+
+void EnduranceDocumentTests::globalTerrainHeightOperationsKeepDimensionsAndSeams()
+{
+    const QVector<STerrainSectorSource> sources = twoSectorTerrain(1000);
+    CTerrainEditModel terrain;
+    QVERIFY(terrain.loadSources(2, 1, 100.0f, sources));
+    const int vertexCountX = terrain.vertexCountX();
+    const int vertexCountY = terrain.vertexCountY();
+    const int uniqueVertexCount = vertexCountX * vertexCountY;
+    QCOMPARE(vertexCountX, 65);
+    QCOMPARE(vertexCountY, 33);
+
+    STerrainBrush point;
+    point.radius = 0.0f;
+    point.falloff = ETerrainBrushFalloff::Constant;
+    point.centerX = 32.0f;
+    point.centerY = 10.0f;
+    QVERIFY(terrain.apply(terrain.makeFlatten(point, 2000, 1.0f), true));
+    point.centerX = 64.0f;
+    QVERIFY(terrain.apply(terrain.makeFlatten(point, 3000, 1.0f), true));
+
+    const STerrainHeightRange before = terrain.heightRange();
+    QCOMPARE(before.vertexCount, uniqueVertexCount);
+    QCOMPARE(before.minimumRaw, quint16(1000));
+    QCOMPARE(before.maximumRaw, quint16(3000));
+    QCOMPARE(before.minimumWorld, 1000.0f * 100.0f / 65535.0f);
+    QCOMPARE(before.maximumWorld, 3000.0f * 100.0f / 65535.0f);
+
+    const STerrainHeightCommand normalize =
+        terrain.makeGlobalNormalize(10000, 30000);
+    QCOMPARE(normalize.deltas.size(), uniqueVertexCount);
+    int seamDeltaCount = 0;
+    for(const STerrainHeightDelta& delta : normalize.deltas)
+        if(delta.globalX == 32 && delta.globalY == 10)
+        {
+            QCOMPARE(delta.after, quint16(20000));
+            ++seamDeltaCount;
+        }
+    QCOMPARE(seamDeltaCount, 1);
+
+    CTerrainEditHistory history;
+    QVERIFY(history.execute(&terrain, normalize));
+    QCOMPARE(terrain.vertexCountX(), vertexCountX);
+    QCOMPARE(terrain.vertexCountY(), vertexCountY);
+    QCOMPARE(terrain.height(32, 10), quint16(20000));
+    QCOMPARE(sectorHeight(terrain.sectorPayload(0, 0), 32, 10), quint16(20000));
+    QCOMPARE(sectorHeight(terrain.sectorPayload(1, 0), 0, 10), quint16(20000));
+    QCOMPARE(terrain.heightRange().minimumRaw, quint16(10000));
+    QCOMPARE(terrain.heightRange().maximumRaw, quint16(30000));
+    QVERIFY(terrain.makeGlobalNormalize(10000, 30000).isEmpty());
+
+    const STerrainHeightCommand clamp = terrain.makeGlobalClamp(15000, 25000);
+    QVERIFY(!clamp.isEmpty());
+    QVERIFY(history.execute(&terrain, clamp));
+    QCOMPARE(terrain.heightRange().minimumRaw, quint16(15000));
+    QCOMPARE(terrain.heightRange().maximumRaw, quint16(25000));
+    QVERIFY(terrain.makeGlobalClamp(15000, 25000).isEmpty());
+
+    QVERIFY(history.undo(&terrain));
+    QCOMPARE(terrain.heightRange().minimumRaw, quint16(10000));
+    QCOMPARE(terrain.heightRange().maximumRaw, quint16(30000));
+    QVERIFY(history.undo(&terrain));
+    QCOMPARE(terrain.height(32, 10), quint16(2000));
+    QCOMPARE(terrain.height(64, 10), quint16(3000));
+    QVERIFY(history.redo(&terrain));
+    QVERIFY(history.redo(&terrain));
+    QCOMPARE(terrain.vertexCountX() * terrain.vertexCountY(), uniqueVertexCount);
+
+    const STerrainHeightCommand flatten = terrain.makeGlobalFlatten(12345);
+    QVERIFY(!flatten.isEmpty());
+    QVERIFY(terrain.apply(flatten, true));
+    QCOMPARE(terrain.heightRange().minimumRaw, quint16(12345));
+    QCOMPARE(terrain.heightRange().maximumRaw, quint16(12345));
+    QVERIFY(terrain.makeGlobalFlatten(12345).isEmpty());
+}
+
+void EnduranceDocumentTests::globalTerrainHeightOperationsRejectInvalidRanges()
+{
+    CTerrainEditModel terrain;
+    QVERIFY(terrain.loadSources(1, 1, 100.0f, twoSectorTerrain(1000).mid(0, 1)));
+
+    CValidationReport clampReport;
+    QVERIFY(terrain.makeGlobalClamp(2000, 1000, &clampReport).isEmpty());
+    QVERIFY(clampReport.hasErrors());
+
+    CValidationReport normalizeRangeReport;
+    QVERIFY(terrain.makeGlobalNormalize(2000, 1000,
+                                        &normalizeRangeReport).isEmpty());
+    QVERIFY(normalizeRangeReport.hasErrors());
+
+    CValidationReport flatReport;
+    QVERIFY(terrain.makeGlobalNormalize(1000, 5000, &flatReport).isEmpty());
+    QVERIFY(flatReport.hasErrors());
+
+    CValidationReport nonFiniteReport;
+    QVERIFY(terrain.makeGlobalOffset(
+        std::numeric_limits<float>::quiet_NaN(), &nonFiniteReport).isEmpty());
+    QVERIFY(nonFiniteReport.hasErrors());
+    QVERIFY(terrain.makeGlobalOffset(0.0f).isEmpty());
+
+    const STerrainHeightCommand saturated = terrain.makeGlobalOffset(70000.0f);
+    QCOMPARE(saturated.deltas.size(), terrain.vertexCountX() * terrain.vertexCountY());
+    QVERIFY(saturated.requiresMaxZDecision());
+    CValidationReport blockedReport;
+    QVERIFY(!terrain.apply(saturated, true, &blockedReport));
+    QVERIFY(blockedReport.hasErrors());
+    QCOMPARE(terrain.heightRange().minimumRaw, quint16(1000));
+    QVERIFY(terrain.apply(saturated, true, nullptr, true));
+    QCOMPARE(terrain.heightRange().minimumRaw, quint16(65535));
+    QCOMPARE(terrain.heightRange().maximumRaw, quint16(65535));
 }
 
 void EnduranceDocumentTests::terrainDiagnosticsArePreApplyAndPolicyExplicit()

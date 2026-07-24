@@ -227,6 +227,7 @@ public:
     bool applyFamilyNidRepairs(const QVector<SNidRepair>& repairs, QString* error = nullptr);
     quint32 suggestFamilyNid(CMob* mob, quint32 localSuggestion);
     void openMapParameters();
+    void openAtlasTiles();
     void pickTile(QVector3D posOnLand, bool bLand = true);
     void setTile(QVector3D posOnLand, bool bLand = true);
     void updatePreviewTile(QVector3D posOnLand, bool bLand = true);

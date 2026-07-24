@@ -172,6 +172,16 @@ struct STerrainHeightCommand
     }
 };
 
+struct STerrainHeightRange
+{
+    int vertexCount{0};
+    quint16 minimumRaw{0};
+    quint16 maximumRaw{0};
+    float minimumWorld{0.0f};
+    float maximumWorld{0.0f};
+    float worldUnitsPerRawStep{0.0f};
+};
+
 // Compose sequential live-preview height commands into one reversible
 // before/after transaction. Repeated vertices retain their first value and
 // final value so a whole sculpt stroke rebuilds each affected sector once.
@@ -283,6 +293,8 @@ public:
     int vertexCountX() const { return m_vertexCountX; }
     int vertexCountY() const { return m_vertexCountY; }
     quint16 height(int globalX, int globalY) const;
+    float maxZ() const { return m_maxZ; }
+    STerrainHeightRange heightRange() const;
     bool hasSeamConflicts() const;
     bool isDirty() const;
     int tileCountX() const { return m_sectorCountX * 16; }
@@ -305,6 +317,16 @@ public:
     STerrainHeightCommand makeHeightmapImport(
         const STerrainHeightmapGrid& grid,
         const STerrainHeightmapImportSettings& settings,
+        CValidationReport* report = nullptr) const;
+    STerrainHeightCommand makeGlobalOffset(
+        float rawHeightDelta,
+        CValidationReport* report = nullptr) const;
+    STerrainHeightCommand makeGlobalFlatten(quint16 targetHeight) const;
+    STerrainHeightCommand makeGlobalClamp(
+        quint16 minimumHeight, quint16 maximumHeight,
+        CValidationReport* report = nullptr) const;
+    STerrainHeightCommand makeGlobalNormalize(
+        quint16 outputMinimum, quint16 outputMaximum,
         CValidationReport* report = nullptr) const;
     STerrainEditDiagnostics diagnose(
         const STerrainHeightCommand& command,

@@ -1,5 +1,6 @@
 #include "terrain_edit_model.h"
 
+#include <algorithm>
 #include <QCryptographicHash>
 #include <QSet>
 #include <QtEndian>
@@ -637,6 +638,21 @@ quint16 CTerrainEditModel::height(int globalX, int globalY) const
     return m_heights.at(globalIndex(globalX, globalY));
 }
 
+STerrainHeightRange CTerrainEditModel::heightRange() const
+{
+    STerrainHeightRange range;
+    range.vertexCount = m_heights.size();
+    range.worldUnitsPerRawStep = m_maxZ / 65535.0f;
+    if(m_heights.isEmpty())
+        return range;
+    const auto bounds = std::minmax_element(m_heights.constBegin(), m_heights.constEnd());
+    range.minimumRaw = *bounds.first;
+    range.maximumRaw = *bounds.second;
+    range.minimumWorld = float(range.minimumRaw) * range.worldUnitsPerRawStep;
+    range.maximumWorld = float(range.maximumRaw) * range.worldUnitsPerRawStep;
+    return range;
+}
+
 bool CTerrainEditModel::isDirty() const
 {
     for(const SSector& sector : m_sectors)
@@ -958,6 +974,135 @@ STerrainHeightCommand CTerrainEditModel::makeHeightmapImport(
             const float sourceX = m_vertexCountX > 1
                 ? float(x) * float(grid.width - 1) / float(m_vertexCountX - 1) : 0.0f;
             appendDelta(x, y, sampleGrid(sourceX, sourceY));
+        }
+    }
+    return command;
+}
+
+STerrainHeightCommand CTerrainEditModel::makeGlobalOffset(
+    float rawHeightDelta, CValidationReport* report) const
+{
+    STerrainHeightCommand command;
+    command.description = QStringLiteral("Offset all terrain heights");
+    if(!std::isfinite(rawHeightDelta))
+    {
+        if(report)
+            report->add("terrain.global_offset", EValidationSeverity::Error,
+                        "The global terrain offset must be finite");
+        return command;
+    }
+    if(rawHeightDelta == 0.0f)
+        return command;
+    for(int y = 0; y < m_vertexCountY; ++y)
+    {
+        for(int x = 0; x < m_vertexCountX; ++x)
+        {
+            STerrainHeightDelta delta;
+            delta.globalX = x;
+            delta.globalY = y;
+            delta.before = height(x, y);
+            delta.after = clampedHeight(float(delta.before) + rawHeightDelta,
+                                        &delta.clamped);
+            if(delta.before != delta.after)
+                command.deltas.append(delta);
+        }
+    }
+    return command;
+}
+
+STerrainHeightCommand CTerrainEditModel::makeGlobalFlatten(quint16 targetHeight) const
+{
+    STerrainHeightCommand command;
+    command.description = QStringLiteral("Flatten all terrain");
+    for(int y = 0; y < m_vertexCountY; ++y)
+    {
+        for(int x = 0; x < m_vertexCountX; ++x)
+        {
+            const quint16 before = height(x, y);
+            if(before == targetHeight)
+                continue;
+            STerrainHeightDelta delta;
+            delta.globalX = x;
+            delta.globalY = y;
+            delta.before = before;
+            delta.after = targetHeight;
+            command.deltas.append(delta);
+        }
+    }
+    return command;
+}
+
+STerrainHeightCommand CTerrainEditModel::makeGlobalClamp(
+    quint16 minimumHeight, quint16 maximumHeight, CValidationReport* report) const
+{
+    STerrainHeightCommand command;
+    command.description = QStringLiteral("Clamp all terrain heights");
+    if(minimumHeight > maximumHeight)
+    {
+        if(report)
+            report->add("terrain.global_clamp_range", EValidationSeverity::Error,
+                        "The terrain clamp minimum must not exceed its maximum");
+        return command;
+    }
+    for(int y = 0; y < m_vertexCountY; ++y)
+    {
+        for(int x = 0; x < m_vertexCountX; ++x)
+        {
+            const quint16 before = height(x, y);
+            const quint16 after = qBound(minimumHeight, before, maximumHeight);
+            if(before == after)
+                continue;
+            STerrainHeightDelta delta;
+            delta.globalX = x;
+            delta.globalY = y;
+            delta.before = before;
+            delta.after = after;
+            command.deltas.append(delta);
+        }
+    }
+    return command;
+}
+
+STerrainHeightCommand CTerrainEditModel::makeGlobalNormalize(
+    quint16 outputMinimum, quint16 outputMaximum, CValidationReport* report) const
+{
+    STerrainHeightCommand command;
+    command.description = QStringLiteral("Normalize all terrain heights");
+    if(outputMinimum > outputMaximum)
+    {
+        if(report)
+            report->add("terrain.global_normalize_range", EValidationSeverity::Error,
+                        "The terrain normalize minimum must not exceed its maximum");
+        return command;
+    }
+    const STerrainHeightRange input = heightRange();
+    if(input.vertexCount == 0)
+        return command;
+    if(input.minimumRaw == input.maximumRaw)
+    {
+        if(report)
+            report->add("terrain.global_normalize_flat", EValidationSeverity::Error,
+                        "A flat landscape has no height range to normalize; use Flatten instead");
+        return command;
+    }
+    const double inputSpan = double(input.maximumRaw) - double(input.minimumRaw);
+    const double outputSpan = double(outputMaximum) - double(outputMinimum);
+    for(int y = 0; y < m_vertexCountY; ++y)
+    {
+        for(int x = 0; x < m_vertexCountX; ++x)
+        {
+            const quint16 before = height(x, y);
+            const double normalized = (double(before) - double(input.minimumRaw)) / inputSpan;
+            const quint16 after = quint16(qBound<qint64>(0,
+                qRound64(double(outputMinimum) + outputSpan * normalized), 65535));
+            if(before == after)
+                continue;
+            STerrainHeightDelta delta;
+            delta.globalX = x;
+            delta.globalY = y;
+            delta.before = before;
+            delta.after = after;
+            command.deltas.append(delta);
         }
     }
     return command;
