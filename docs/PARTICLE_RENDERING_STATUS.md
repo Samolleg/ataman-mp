@@ -59,6 +59,13 @@ covering the selected JMV corpus.
 | 8197 / `0x2005` | Vulcansmoke | The symbolic type and current Tendri-based editor presentation are known. | Establish its exact factory branch, starting frame, callbacks, texture, blend, and scale. The current smoke-only classification remains provisional. |
 | internal `0x2010` | special Tendri wrapper | Has separate count/lifetime fields, a special spawn wrapper, world-height adjustment, and fire-only termination. | Identify the public effect/owner that constructs it and document its resource and attachment path. It must not be generalized to ordinary Campfire. |
 
+## Reconstructed weather previews
+
+| ID | Name | Implemented | Remaining control |
+|---:|---|---|---|
+| 8202 / `0x200A` | Tornado | Dedicated persistent six-source spiral, native phase partitions, spawn/lifetime/rotation/contraction/height/alpha rules, sunlight tint, `Tornado` atlas, and ordinary alpha blending. | Capture a moving native carrier to validate source-spine bending; the standalone catalog control correctly exercises the stationary path. |
+| 8240 / `0x2030` | Lightningblast | Dedicated finite ten-source burst with source flashes, ground clouds, short bolts, native phase/lifetime/gravity/generation rules, `TendriLight` atlas, and additive blending. The editor repeats the completed burst every 80 quants solely for inspection. | Capture a native spell owner to validate owner-supplied size and destination; the confirmed standalone visual path is implemented. |
+
 ## Preview-only families
 
 These IDs currently receive a recognizable editor style, but their native
@@ -70,9 +77,8 @@ runtime behavior has not been reconstructed:
 | 8198, 8263 | Healing, Regeneration |
 | 8199 | Poisonfog |
 | 8200, 8201 | Aggressionfog, Geyser |
-| 8202 | Tornado |
 | 8210, 8213, 8258 | Acidray, Sphereacid, Acidstar |
-| 8214, 8240, 8259 | Sphereelectricity, Lightningblast, Sparks |
+| 8214, 8259 | Sphereelectricity, Sparks |
 | 8217, 8253, 8254 | Teleport, Portalstar, Portal |
 | 8203–8205, 8232–8239 | Casting, Nuke, Bansheecasting, and the elemental/divination/illusion/domination/enchantment/healing/failed casting variants |
 
