@@ -27,8 +27,10 @@
 #include <QEventLoop>
 #include <QPainter>
 #include <QPaintEvent>
+#include <QMouseEvent>
 #include <QScreen>
 #include <QWidget>
+#include <QVariant>
 #include <cstdio>
 #include <cstring>
 
@@ -68,7 +70,11 @@ public:
     void showCentered()
     {
         if(QScreen* screen = QGuiApplication::primaryScreen())
+        {
+            qApp->setProperty("enduranceStartupScreenGeometry",
+                              screen->availableGeometry());
             move(screen->availableGeometry().center() - rect().center());
+        }
         show();
         raise();
         activateWindow();
@@ -82,6 +88,34 @@ public:
     }
 
 protected:
+    void mousePressEvent(QMouseEvent* event) override
+    {
+        QWidget::mousePressEvent(event);
+        // Treat the splash like the application's taskbar surface: restore and
+        // raise every already-visible Endurance top-level window, then leave
+        // the active modal dialog (first-run setup or its confirmation) on top.
+        raise();
+        activateWindow();
+        QWidget* modal = QApplication::activeModalWidget();
+        const auto windows = QApplication::topLevelWidgets();
+        for(QWidget* window : windows)
+        {
+            if(!window || window == this || window == modal
+               || (!window->isVisible() && !window->isMinimized()))
+                continue;
+            if(window->isMinimized())
+                window->showNormal();
+            window->raise();
+        }
+        if(modal)
+        {
+            if(modal->isMinimized())
+                modal->showNormal();
+            modal->raise();
+            modal->activateWindow();
+        }
+    }
+
     void paintEvent(QPaintEvent*) override
     {
         QPainter painter(this);
@@ -1284,6 +1318,7 @@ int main(int argc, char *argv[])
     window.show();
     QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
     splash.close();
+    qApp->setProperty("enduranceStartupScreenGeometry", QVariant());
     window.raise();
     window.activateWindow();
     QStringList startupDocuments;

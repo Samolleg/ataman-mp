@@ -54,6 +54,9 @@
 #include <QGroupBox>
 #include <QPainter>
 #include <QPolygonF>
+#include <QVariant>
+#include <QGuiApplication>
+#include <QScreen>
 #include <QtConcurrent/QtConcurrentRun>
 
 #include <cmath>
@@ -100,6 +103,35 @@ constexpr int kLoadedMapKindRole = Qt::UserRole + 20;
 constexpr int kLoadedMapPathRole = Qt::UserRole + 21;
 constexpr int kLoadedMapMpr = 1;
 constexpr int kLoadedMapMob = 2;
+
+QRect preferredDialogScreenGeometry(const QWidget* owner)
+{
+    if(owner && owner->isVisible())
+    {
+        if(QScreen* screen = QGuiApplication::screenAt(owner->frameGeometry().center()))
+            return screen->availableGeometry();
+    }
+    const QVariant startupGeometry = qApp->property("enduranceStartupScreenGeometry");
+    if(startupGeometry.canConvert<QRect>() && startupGeometry.toRect().isValid())
+        return startupGeometry.toRect();
+    if(QScreen* screen = QGuiApplication::primaryScreen())
+        return screen->availableGeometry();
+    return QRect();
+}
+
+void centerDialogOnPreferredScreen(QWidget* dialog, const QWidget* owner)
+{
+    if(!dialog)
+        return;
+    const QRect available = preferredDialogScreenGeometry(owner);
+    if(!available.isValid())
+        return;
+    dialog->adjustSize();
+    const QSize size = dialog->frameGeometry().size();
+    const int x = available.left() + qMax(0, (available.width() - size.width()) / 2);
+    const int y = available.top() + qMax(0, (available.height() - size.height()) / 2);
+    dialog->move(x, y);
+}
 
 QString conciseValidationLine(const SMobFamilyFinding& finding)
 {
@@ -4397,6 +4429,13 @@ void MainWindow::showGameAndModSetup()
         m_settings->opt(eOptSetResource, "resourceProfile"));
     CResourceSetupDialog dialog(m_settings->configuredGameRoot(),
         configuredProfile ? configuredProfile->value() : QString(), this);
+    centerDialogOnPreferredScreen(&dialog, this);
+    QTimer::singleShot(0, &dialog, [this, &dialog]()
+    {
+        centerDialogOnPreferredScreen(&dialog, this);
+        dialog.raise();
+        dialog.activateWindow();
+    });
     if(dialog.exec() != QDialog::Accepted)
         return;
     const SResourceProfileEvaluation profile = dialog.evaluation();
@@ -4438,10 +4477,18 @@ void MainWindow::showGameAndModSetup()
         m_pView->refreshAfterResourceSetup();
     refreshMapsBrowser();
     updateWindowTitle(eTitleTypeData::eTitleTypeDataMpr, m_sWindowTitle.mpr);
-    QMessageBox::information(this, tr("Game and mod setup"),
+    QMessageBox confirmation(QMessageBox::Information, tr("Game and mod setup"),
         tr("%1 is ready. Endurance found %2 RES archives across %3 ordered resource folders.")
             .arg(profile.profileName).arg(profile.archiveCount)
-            .arg(profile.resourceDirectories.size()));
+            .arg(profile.resourceDirectories.size()), QMessageBox::Ok, this);
+    centerDialogOnPreferredScreen(&confirmation, this);
+    QTimer::singleShot(0, &confirmation, [this, &confirmation]()
+    {
+        centerDialogOnPreferredScreen(&confirmation, this);
+        confirmation.raise();
+        confirmation.activateWindow();
+    });
+    confirmation.exec();
 }
 
 void MainWindow::rememberRecentFile(const QFileInfo& fileName)
