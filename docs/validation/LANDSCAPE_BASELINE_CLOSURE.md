@@ -1,6 +1,6 @@
 # Landscape Editing Baseline Closure
 
-Status: release candidate pending the final manual smoke matrix below.
+Status: closed on 2026-07-24 after the complete manual smoke matrix passed.
 
 This baseline closes the first safely saveable landscape-editing increment. It
 does not claim completion of every 0.3.x landscape feature.
@@ -84,6 +84,14 @@ Use copied MPR/MOB/RES files only.
 
 ## Closure decision
 
-After the manual matrix passes, tag this scope as the baseline
-landscape-editing foundation. Merge/push remain separate explicit operations;
-deferred features must not be added to the baseline merge as incidental fixes.
+All eight manual checks passed on 2026-07-24. The supplied copied catalog-save
+artifact reopened successfully, remained unchanged during validation, and was
+byte-identical to its sibling copied baseline:
+
+- size: `1,317,804` bytes;
+- SHA-256: `95FD33A0C43003E17622CCF899BEADDB4501EEABC0035285EAC9BEE03B048322`;
+- derived-RES untouched-member validation: passed.
+
+This scope is now the closed baseline landscape-editing foundation. Merge and
+push remain separate explicit operations; deferred features must not be added
+to the baseline merge as incidental fixes.
