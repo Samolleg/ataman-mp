@@ -113,7 +113,7 @@ private:
                                   const QString& mobPath);
     void createCollectionFromTemplate(const SEnduranceCollection& initial,
                                       const QString& suggestedBaseName,
-                                      bool makeCurrent = false);
+                                      bool promptToLoad = false);
     void saveCollection(bool saveAs);
     QVector<QString> activeMapRoots() const;
     void updateMapTestAction();

@@ -3769,7 +3769,7 @@ void MainWindow::newCollection()
 
 void MainWindow::createCollectionFromTemplate(
     const SEnduranceCollection& initial, const QString& suggestedBaseName,
-    bool makeCurrent)
+    bool promptToLoad)
 {
     CCollectionEditorDialog dialog(initial, m_mapCatalog.entries, this);
     if(dialog.exec() != QDialog::Accepted)
@@ -3796,10 +3796,14 @@ void MainWindow::createCollectionFromTemplate(
         QMessageBox::warning(this, tr("Save Collection"), error);
     else
     {
-        if(makeCurrent)
-            m_currentCollectionPath = QFileInfo(outputPath).absoluteFilePath();
         refreshMapsBrowser();
         statusBar()->showMessage(tr("Collection saved: %1").arg(outputPath), 5000);
+        if(promptToLoad && QMessageBox::question(this, tr("New Collection"),
+            tr("The collection was created successfully.\n\nLoad it now?"),
+            QMessageBox::Yes | QMessageBox::No, QMessageBox::Yes) == QMessageBox::Yes)
+        {
+            openCollection(QFileInfo(outputPath).absoluteFilePath());
+        }
     }
 }
 
