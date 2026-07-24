@@ -914,6 +914,8 @@ MainWindow::MainWindow(QWidget* parent) :
     m_pView->attachLandscapeTools(m_landscapeTools);
     m_ui->actionMap_parameters->setText(tr("MPR Atlas Tiles..."));
     m_ui->tileBrushButton->setText(tr("Landscape Tools"));
+    m_ui->tileBrushButton->setIcon(*ei::icon("landscape.ico"));
+    m_ui->tileBrushButton->setIconSize(QSize(32, 32));
     m_ui->tileBrushButton->setToolTip(tr("Landscape tools (L)"));
     connect(m_pView, &CView::mobStateChanged, this, [this]()
     {
