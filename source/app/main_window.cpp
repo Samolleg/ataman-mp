@@ -481,9 +481,11 @@ MainWindow::MainWindow(QWidget* parent) :
                                       QDockWidget::DockWidgetFloatable);
     m_landscapeToolsDock->setWidget(m_landscapeTools);
     addDockWidget(Qt::RightDockWidgetArea, m_landscapeToolsDock);
-    enableNativeFloatingControls(m_landscapeToolsDock);
     m_landscapeToolsDock->hide();
-    viewMenu->addAction(m_landscapeToolsDock->toggleViewAction());
+    m_landscapeToolsAction = viewMenu->addAction(tr("Landscape Tools"));
+    m_landscapeToolsAction->setCheckable(true);
+    connect(m_landscapeToolsAction, &QAction::triggered,
+            this, &MainWindow::toggleLandscapeTools);
     QAction* tileGridAction = viewMenu->addAction(tr("Show Terrain Tile Grid"));
     tileGridAction->setCheckable(true);
     tileGridAction->setToolTip(tr("Draw the 2 x 2 terrain-tile boundaries over the landscape."));
@@ -743,6 +745,14 @@ MainWindow::MainWindow(QWidget* parent) :
     restoreState(uiSettings.value("ui/mainWindowState").toByteArray());
     m_ui->workspaceSplitter->restoreState(uiSettings.value("ui/workspaceSplitter").toByteArray());
     m_ui->outlinerSplitter->restoreState(uiSettings.value("ui/outlinerSplitter").toByteArray());
+    const int storedLandscapeArea = uiSettings.value(
+        "ui/landscapeDockArea", int(dockWidgetArea(m_landscapeToolsDock))).toInt();
+    if(storedLandscapeArea == int(Qt::LeftDockWidgetArea)
+       || storedLandscapeArea == int(Qt::RightDockWidgetArea))
+        m_landscapeDockArea = Qt::DockWidgetArea(storedLandscapeArea);
+    m_landscapeDockHeight = qBound(260,
+        uiSettings.value("ui/landscapeDockHeight", 420).toInt(), 900);
+    m_landscapeDockFloating = m_landscapeToolsDock->isFloating();
     // Landscape editing is an explicit working mode, not session layout.
     // Always start closed while preserving the user's last sculpt controls.
     m_landscapeToolsDock->hide();
@@ -969,11 +979,13 @@ MainWindow::MainWindow(QWidget* parent) :
                         m_ui->workspaceSplitter->saveState());
             setProperty("enduranceMenuVisible", menuBar()->isVisible());
             setProperty("enduranceStatusVisible", statusBar()->isVisible());
+            m_suppressLandscapeDockRestore = true;
             for(QDockWidget* dock : findChildren<QDockWidget*>())
             {
                 dock->setProperty("enduranceWasVisible", dock->isVisible());
                 dock->hide();
             }
+            m_suppressLandscapeDockRestore = false;
             for(QToolBar* toolbar : findChildren<QToolBar*>())
             {
                 toolbar->setProperty("enduranceWasVisible", toolbar->isVisible());
@@ -1069,16 +1081,46 @@ MainWindow::MainWindow(QWidget* parent) :
     QObject::connect(m_pView, SIGNAL(showOutlinerSignal(bool)), this, SLOT(showOutliner(bool)));
     connect(m_pView, &CView::showLandscapeToolsSignal, this, [this]()
     {
-        m_landscapeToolsDock->show();
-        m_landscapeToolsDock->raise();
+        showLandscapeTools();
     });
     connect(m_pView, &CView::hideLandscapeToolsSignal,
-            m_landscapeToolsDock, &QDockWidget::hide);
+            this, &MainWindow::hideLandscapeTools);
+    connect(m_landscapeToolsDock, &QDockWidget::topLevelChanged, this, [this](bool floating)
+    {
+        if(m_restoringLandscapeDockLayout)
+            return;
+        m_landscapeDockFloating = floating;
+        if(!floating)
+        {
+            const Qt::DockWidgetArea area = dockWidgetArea(m_landscapeToolsDock);
+            if(area == Qt::LeftDockWidgetArea || area == Qt::RightDockWidgetArea)
+                m_landscapeDockArea = area;
+        }
+    });
+    connect(m_landscapeToolsDock, &QDockWidget::dockLocationChanged,
+            this, [this](Qt::DockWidgetArea area)
+    {
+        if(!m_restoringLandscapeDockLayout
+           && (area == Qt::LeftDockWidgetArea || area == Qt::RightDockWidgetArea))
+            m_landscapeDockArea = area;
+    });
     connect(m_landscapeToolsDock, &QDockWidget::visibilityChanged, this, [this](bool visible)
     {
+        if(m_landscapeToolsAction)
+        {
+            const QSignalBlocker blocker(m_landscapeToolsAction);
+            m_landscapeToolsAction->setChecked(visible);
+        }
         m_pView->setLandscapeEditingEnabled(visible);
         if(visible)
             m_landscapeToolsDock->raise();
+        else
+        {
+            if(!m_landscapeToolsDock->isFloating())
+                m_landscapeDockHeight = qBound(260, m_landscapeToolsDock->height(), 900);
+            if(!m_suppressLandscapeDockRestore)
+                restoreLayoutAfterLandscapeTools();
+        }
     });
     connect(m_pView, &CView::selectionChanged,
             this, &MainWindow::updateUnitTexturePreview);
@@ -2248,14 +2290,11 @@ void MainWindow::createViewportToolbars()
                 return;
             if(operation.type == EButtonOpTilebrush)
             {
-                if(m_landscapeToolsDock->isVisible())
-                    m_landscapeToolsDock->hide();
-                else
+                if(!m_landscapeToolsDock->isVisible())
                 {
                     m_pView->prepareLandscapeTilePainting(false);
-                    m_landscapeToolsDock->show();
-                    m_landscapeToolsDock->raise();
                 }
+                toggleLandscapeTools();
                 m_pView->setFocus();
                 return;
             }
@@ -4042,17 +4081,92 @@ void MainWindow::endWorkspaceLoad()
     updateMapTestAction();
 }
 
+void MainWindow::showLandscapeTools()
+{
+    if(!m_landscapeToolsDock)
+        return;
+    if(m_landscapeToolsDock->isVisible())
+    {
+        m_landscapeToolsDock->raise();
+        return;
+    }
+
+    // Preserve the user's exact ordinary workspace. Landscape Tools is a
+    // temporary editing mode; hiding it must put Loaded Map, Outliner, and
+    // Properties back at their pre-landscape sizes.
+    m_layoutBeforeLandscapeTools = saveState();
+    m_restoringLandscapeDockLayout = true;
+    if(m_landscapeDockFloating)
+        m_landscapeToolsDock->setFloating(true);
+    else
+    {
+        m_landscapeToolsDock->setFloating(false);
+        addDockWidget(m_landscapeDockArea, m_landscapeToolsDock);
+        QDockWidget* anchor = m_landscapeDockArea == Qt::LeftDockWidgetArea
+            ? m_mapsDock : m_loadedMapDock;
+        if(anchor && anchor != m_landscapeToolsDock)
+            splitDockWidget(anchor, m_landscapeToolsDock, Qt::Vertical);
+    }
+    m_restoringLandscapeDockLayout = false;
+
+    m_landscapeToolsDock->show();
+    m_landscapeToolsDock->raise();
+    if(!m_landscapeToolsDock->isFloating())
+    {
+        QTimer::singleShot(0, this, [this]()
+        {
+            if(!m_landscapeToolsDock || !m_landscapeToolsDock->isVisible()
+               || m_landscapeToolsDock->isFloating())
+                return;
+            resizeDocks(QList<QDockWidget*>() << m_landscapeToolsDock,
+                        QList<int>() << m_landscapeDockHeight, Qt::Vertical);
+        });
+    }
+}
+
+void MainWindow::hideLandscapeTools()
+{
+    if(m_landscapeToolsDock && m_landscapeToolsDock->isVisible())
+        m_landscapeToolsDock->hide();
+}
+
+void MainWindow::toggleLandscapeTools()
+{
+    if(!m_landscapeToolsDock)
+        return;
+    if(m_landscapeToolsDock->isVisible())
+        hideLandscapeTools();
+    else
+        showLandscapeTools();
+}
+
+void MainWindow::restoreLayoutAfterLandscapeTools()
+{
+    if(m_restoringLandscapeDockLayout || m_layoutBeforeLandscapeTools.isEmpty())
+        return;
+    const QByteArray state = m_layoutBeforeLandscapeTools;
+    m_layoutBeforeLandscapeTools.clear();
+    m_restoringLandscapeDockLayout = true;
+    restoreState(state);
+    m_restoringLandscapeDockLayout = false;
+}
+
 void MainWindow::saveUiState()
 {
     if(m_uiStateSaved || !m_ui)
         return;
     if(m_landscapeToolsDock)
-        m_landscapeToolsDock->hide();
+    {
+        hideLandscapeTools();
+        restoreLayoutAfterLandscapeTools();
+    }
     QSettings uiSettings;
     uiSettings.setValue("ui/mainWindowGeometry", saveGeometry());
     uiSettings.setValue("ui/mainWindowState", saveState());
     uiSettings.setValue("ui/workspaceSplitter", m_ui->workspaceSplitter->saveState());
     uiSettings.setValue("ui/outlinerSplitter", m_ui->outlinerSplitter->saveState());
+    uiSettings.setValue("ui/landscapeDockArea", int(m_landscapeDockArea));
+    uiSettings.setValue("ui/landscapeDockHeight", m_landscapeDockHeight);
     uiSettings.sync();
     m_uiStateSaved = true;
 }

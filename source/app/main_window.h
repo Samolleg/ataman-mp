@@ -125,6 +125,10 @@ private:
     void updateOutlinerSelectionPath();
     void previewLoadedMapVisibility(QTreeWidgetItem* item);
     void commitLoadedMapVisibilityDrag();
+    void showLandscapeTools();
+    void hideLandscapeTools();
+    void toggleLandscapeTools();
+    void restoreLayoutAfterLandscapeTools();
     void saveUiState();
     void closeHotReloadProgress();
     QVector<SMapSpawnObstacle> mapTestObstacles() const;
@@ -217,9 +221,16 @@ private:
     QAction* m_externalScriptAction;
     QAction* m_activateOwnerMobAction;
     QAction* m_convertWorldObjectToLeverAction;
+    QAction* m_landscapeToolsAction{nullptr};
     QDockWidget* m_mapsDock;
     QDockWidget* m_landscapeToolsDock;
     CLandscapeTools* m_landscapeTools;
+    QByteArray m_layoutBeforeLandscapeTools;
+    Qt::DockWidgetArea m_landscapeDockArea{Qt::RightDockWidgetArea};
+    int m_landscapeDockHeight{420};
+    bool m_landscapeDockFloating{false};
+    bool m_restoringLandscapeDockLayout{false};
+    bool m_suppressLandscapeDockRestore{false};
     QDockWidget* m_historyDock;
     QDockWidget* m_validationDock;
     QDockWidget* m_outlinerDock;
