@@ -5,7 +5,7 @@ work is ordered from the newest planned minor line to the oldest completed one.
 An item is checked only after its implementation has landed and received the
 stated validation. Completed code should carry a commit, test, or release link.
 
-Current development line: `0.3.0-alpha.5` focused closed testing. This is a
+Current development line: `0.3.0-alpha.6` focused closed testing. This is a
 version reclassification of the feature set that outgrew the `0.2.1` label,
 not a serializer or compatibility reset. The remaining 0.3 release work is the
 final runtime/corpus matrix, focused confirmation of the new live-clock and
@@ -444,13 +444,17 @@ remain unchanged.
 - [x] Preserve collection identity across sessions, offer an immediate safe
   reload after editing the active collection, and keep explicitly unmapped
   collections free of stale/inferred map.txt entrances.
-- [x] Treat unmapped single-MPR/single-MOB collections as process-local
-  synthetic maps for JMV testing: use the loaded MPR dimensions and Play from
-  Here entrance without inheriting a borrowed zone's minimap, travel zones, or
-  runtime coordinates. The installed map table remains unchanged.
-- [x] Replace synthetic-map bootstrap heap discovery with the fingerprinted
-  runtime's byte-guarded map-table lookup. The prior game-thread heap locks
-  could stall an unmapped launch at `MainMenuReady` before New Game bootstrap.
+- [x] Treat unmapped single-MPR/single-MOB collections as run-local synthetic
+  maps for JMV testing: append one random map record to a losslessly staged
+  private `texts.res`, redirect only that process's archive reads, and use the
+  loaded MPR dimensions and Play from Here entrance without inheriting a
+  borrowed zone's minimap or travel zones. The installed map table remains
+  byte-identical.
+- [x] Remove unsafe renaming/rebuilding of an already constructed runtime map
+  record. The bridge now looks up the preloaded private record through the
+  fingerprinted byte-guarded API and updates only its numeric dimensions and
+  entrance rectangle. This supersedes both the rejected heap scan and the
+  delayed allocator crash reproduced by `0.3.0-alpha.5`.
 - [x] Show collection display names from their editable `name` field, preserve
   new-collection drafts when Save As is cancelled, and offer to open both new
   and duplicated collections after saving.

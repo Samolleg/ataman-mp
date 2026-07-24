@@ -177,6 +177,9 @@ CRITICAL_SECTION g_savePathLock{};
 volatile LONG g_savePathLockReady = 0;
 wchar_t g_godmodeMob[MAX_PATH * 4] = {};
 wchar_t g_supplementalMobDirectory[MAX_PATH * 4] = {};
+wchar_t g_mapTableSource[MAX_PATH * 4] = {};
+wchar_t g_mapTableStage[MAX_PATH * 4] = {};
+volatile LONG g_mapTableRedirectLogCount = 0;
 wchar_t g_hotReloadRequestPath[MAX_PATH * 4] = {};
 wchar_t g_hotReloadThreadPath[MAX_PATH * 4] = {};
 wchar_t g_hotReloadRoot[MAX_PATH * 4] = {};
@@ -251,19 +254,6 @@ constexpr size_t kZoneExitsDataOffset = 76;
 constexpr size_t kZoneExitsSizeOffset = 80;
 constexpr size_t kZoneExitSize = 60;
 constexpr size_t kExitZoneOffset = 40;
-
-struct SyntheticZoneSnapshot
-{
-    unsigned char* zone = nullptr;
-    char strings[8][128]{};
-    unsigned char scalarBytes[40]{};
-    unsigned char firstExit[kZoneExitSize]{};
-    char firstExitZone[128]{};
-    int exitCount = 0;
-    bool active = false;
-};
-
-SyntheticZoneSnapshot g_syntheticZoneSnapshot;
 
 const wchar_t* FileNamePart(const wchar_t* path)
 {
@@ -390,13 +380,10 @@ bool ValidateZoneCandidate(unsigned char* candidate, const char* zoneName,
     if(!ReadGameStringField(candidate, kZoneAllodOffset, allod, sizeof(allod))
        || !allod[0])
         return false;
-    const int sizeX = *reinterpret_cast<int*>(candidate + kZoneSizeXOffset);
-    const int sizeY = *reinterpret_cast<int*>(candidate + kZoneSizeYOffset);
     const int type = *reinterpret_cast<int*>(candidate + kZoneTypeOffset);
     const int exitCount = *reinterpret_cast<int*>(candidate + kZoneExitsSizeOffset);
     auto* exits = *reinterpret_cast<unsigned char**>(candidate + kZoneExitsDataOffset);
-    return sizeX > 0 && sizeY > 0 && sizeX <= 1024 && sizeY <= 1024
-        && type >= 0 && type <= 2 && exitCount > 0 && exitCount <= 1024
+    return type >= 0 && type <= 2 && exitCount > 0 && exitCount <= 1024
         && IsReadableRange(exits, kZoneExitSize);
 }
 
@@ -425,108 +412,34 @@ unsigned char* FindZoneCandidate(const char* zoneName, const char* expectedMpr,
         ? candidate : nullptr;
 }
 
-bool SnapshotSyntheticZone(unsigned char* zone)
-{
-    if(!zone || g_syntheticZoneSnapshot.active)
-        return zone && g_syntheticZoneSnapshot.zone == zone;
-    const size_t offsets[8] = {kZoneNameOffset, kZoneAllodOffset, kZoneMobOffset,
-        kZoneTerrainOffset, kZoneFigureOffset, kZoneMapTextureOffset,
-        kZoneMinimapTextureOffset, kZoneCameraOffset};
-    for(int index = 0; index < 8; ++index)
-        if(!ReadGameStringField(zone, offsets[index],
-                                g_syntheticZoneSnapshot.strings[index], 128))
-            return false;
-    std::memcpy(g_syntheticZoneSnapshot.scalarBytes, zone + kZoneSizeXOffset,
-                sizeof(g_syntheticZoneSnapshot.scalarBytes));
-    auto* exits = *reinterpret_cast<unsigned char**>(zone + kZoneExitsDataOffset);
-    const int exitCount = *reinterpret_cast<int*>(zone + kZoneExitsSizeOffset);
-    if(exitCount <= 0 || !IsReadableRange(exits, kZoneExitSize)
-       || !ReadGameStringField(exits, kExitZoneOffset,
-                               g_syntheticZoneSnapshot.firstExitZone,
-                               sizeof(g_syntheticZoneSnapshot.firstExitZone)))
-        return false;
-    std::memcpy(g_syntheticZoneSnapshot.firstExit, exits, kZoneExitSize);
-    g_syntheticZoneSnapshot.zone = zone;
-    g_syntheticZoneSnapshot.exitCount = exitCount;
-    g_syntheticZoneSnapshot.active = true;
-    return true;
-}
-
-void AssignZoneString(unsigned char* zone, size_t offset, const char* value)
-{
-    auto* game = reinterpret_cast<unsigned char*>(g_gameModule);
-    const auto assign = reinterpret_cast<GameStringAssignFn>(game + kGameStringAssignRva);
-    assign(zone + offset, value ? value : "");
-}
-
-bool RestoreSyntheticZone()
-{
-    if(!g_syntheticZoneSnapshot.active)
-        return true;
-    unsigned char* zone = g_syntheticZoneSnapshot.zone;
-    if(!IsReadableRange(zone, kZoneRecordSize))
-        return false;
-    const size_t offsets[8] = {kZoneNameOffset, kZoneAllodOffset, kZoneMobOffset,
-        kZoneTerrainOffset, kZoneFigureOffset, kZoneMapTextureOffset,
-        kZoneMinimapTextureOffset, kZoneCameraOffset};
-    for(int index = 0; index < 8; ++index)
-        AssignZoneString(zone, offsets[index], g_syntheticZoneSnapshot.strings[index]);
-    std::memcpy(zone + kZoneSizeXOffset, g_syntheticZoneSnapshot.scalarBytes,
-                sizeof(g_syntheticZoneSnapshot.scalarBytes));
-    auto* exits = *reinterpret_cast<unsigned char**>(zone + kZoneExitsDataOffset);
-    if(!IsReadableRange(exits, kZoneExitSize))
-        return false;
-    char* currentExitString = *reinterpret_cast<char**>(exits + kExitZoneOffset);
-    std::memcpy(exits, g_syntheticZoneSnapshot.firstExit, kZoneExitSize);
-    *reinterpret_cast<char**>(exits + kExitZoneOffset) = currentExitString;
-    AssignZoneString(exits, kExitZoneOffset,
-                     g_syntheticZoneSnapshot.firstExitZone);
-    *reinterpret_cast<int*>(zone + kZoneExitsSizeOffset) =
-        g_syntheticZoneSnapshot.exitCount;
-    g_syntheticZoneSnapshot = SyntheticZoneSnapshot();
-    Log(L"SYNTHETIC_MAP restored the borrowed bootstrap zone record");
-    return true;
-}
-
 bool ConfigureSyntheticZone()
 {
     if(!g_syntheticMapIdentity)
-        return RestoreSyntheticZone();
+        return true;
     if(g_syntheticMapSizeX <= 0 || g_syntheticMapSizeY <= 0
        || !std::isfinite(g_syntheticSpawnX) || !std::isfinite(g_syntheticSpawnY)
-       || !g_sourceZone[0] || !g_bootstrapZone[0]
-       || !g_bootstrapMpr[0] || !g_bootstrapMob[0])
+       || !g_sourceZone[0])
         return false;
-    unsigned char* zone = g_syntheticZoneSnapshot.active
-        ? g_syntheticZoneSnapshot.zone
-        : FindZoneCandidate(g_bootstrapZone, g_bootstrapMpr, g_bootstrapMob);
-    if(!zone || !SnapshotSyntheticZone(zone))
-    {
-        Log(L"SYNTHETIC_MAP refused: a unique validated bootstrap zone record was not found");
-        return false;
-    }
     const char* mapName = FileNamePartA(g_temporaryMpr);
     char logicalMap[128]{};
     if(!mapName || strcpy_s(logicalMap, mapName) != 0)
         return false;
     char* extension = std::strrchr(logicalMap, '.');
     if(extension) *extension = '\0';
-    AssignZoneString(zone, kZoneNameOffset, g_sourceZone);
-    AssignZoneString(zone, kZoneMobOffset, logicalMap);
-    AssignZoneString(zone, kZoneTerrainOffset, logicalMap);
-    AssignZoneString(zone, kZoneFigureOffset, "");
-    AssignZoneString(zone, kZoneMapTextureOffset, "");
-    AssignZoneString(zone, kZoneMinimapTextureOffset, "");
-    AssignZoneString(zone, kZoneCameraOffset, "");
+    // The launcher appends this exact random record to a run-local map.txt
+    // before game.exe starts. Change numeric fields only; strings and container
+    // ownership remain exactly as constructed by the game parser.
+    unsigned char* zone = FindZoneCandidate(g_sourceZone, logicalMap, logicalMap);
+    if(!zone)
+    {
+        Log(L"SYNTHETIC_MAP refused: the preloaded private zone record was not found");
+        return false;
+    }
     *reinterpret_cast<int*>(zone + kZoneSizeXOffset) = g_syntheticMapSizeX;
     *reinterpret_cast<int*>(zone + kZoneSizeYOffset) = g_syntheticMapSizeY;
-    *reinterpret_cast<int*>(zone + kZoneTypeOffset) = 0;
-    *reinterpret_cast<int*>(zone + kZoneWeatherOffset) = 0;
-    *reinterpret_cast<int*>(zone + kZoneSkyOffset) = 0;
-    *reinterpret_cast<unsigned char*>(zone + kZoneRestrictOffset) = 0;
-    *reinterpret_cast<unsigned char*>(zone + kZoneCageOffset) = 0;
     auto* exit = *reinterpret_cast<unsigned char**>(zone + kZoneExitsDataOffset);
-    if(!IsReadableRange(exit, kZoneExitSize))
+    const int exitCount = *reinterpret_cast<int*>(zone + kZoneExitsSizeOffset);
+    if(exitCount != 1 || !IsReadableRange(exit, kZoneExitSize))
         return false;
     const float radius = 0.75f;
     *reinterpret_cast<float*>(exit + 0) = 0.0f;
@@ -539,18 +452,12 @@ bool ConfigureSyntheticZone()
     *reinterpret_cast<float*>(exit + 28) = g_syntheticSpawnX + radius;
     *reinterpret_cast<float*>(exit + 32) = g_syntheticSpawnY + radius;
     *reinterpret_cast<float*>(exit + 36) = 0.0f;
-    AssignZoneString(exit, kExitZoneOffset, "none");
-    *reinterpret_cast<int*>(exit + 44) = 0;
-    *reinterpret_cast<float*>(exit + 48) = 0.0f;
-    *reinterpret_cast<unsigned char*>(exit + 52) = 0;
-    *reinterpret_cast<float*>(exit + 56) = 0.0f;
-    *reinterpret_cast<int*>(zone + kZoneExitsSizeOffset) = 1;
     g_targetExitId = 1;
     g_targetExit = 0;
     wchar_t message[768]{};
     _snwprintf_s(message, sizeof(message) / sizeof(message[0]), _TRUNCATE,
-                 L"SYNTHETIC_MAP configured identity=%S bootstrap=%S size=%dx%d entrance=(%.3f,%.3f) minimap=none exits=1",
-                 g_sourceZone, g_bootstrapZone, g_syntheticMapSizeX,
+                 L"SYNTHETIC_MAP configured preloaded identity=%S size=%dx%d entrance=(%.3f,%.3f) minimap=none exits=1 string_mutations=0",
+                 g_sourceZone, g_syntheticMapSizeX,
                  g_syntheticMapSizeY, g_syntheticSpawnX, g_syntheticSpawnY);
     Log(message);
     return true;
@@ -1152,6 +1059,49 @@ bool RewriteOwnedPathA(LPCSTR path, char* output, size_t capacity)
     return modRedirected && strcpy_s(output, capacity, selected) == 0;
 }
 
+bool RewriteMapTableW(LPCWSTR path, wchar_t* output, size_t capacity)
+{
+    if(!path || !output || !capacity || !g_mapTableSource[0]
+       || !g_mapTableStage[0])
+        return false;
+    wchar_t full[MAX_PATH * 4]{};
+    const DWORD length = GetFullPathNameW(
+        path, DWORD(sizeof(full) / sizeof(full[0])), full, nullptr);
+    if(!length || length >= sizeof(full) / sizeof(full[0]))
+        return false;
+    NormalizeSlashes(full);
+    if(_wcsicmp(full, g_mapTableSource) != 0
+       || wcscpy_s(output, capacity, g_mapTableStage) != 0)
+        return false;
+    const LONG sequence = InterlockedIncrement(&g_mapTableRedirectLogCount);
+    if(sequence <= 8)
+    {
+        wchar_t message[1900]{};
+        _snwprintf_s(message, sizeof(message) / sizeof(message[0]), _TRUNCATE,
+                     L"MAP_TABLE_REDIRECT seq=%ld from=\"%s\" to=\"%s\"",
+                     sequence, full, output);
+        Log(message);
+    }
+    return true;
+}
+
+bool RewriteMapTableA(LPCSTR path, char* output, size_t capacity)
+{
+    if(!path || !output || !capacity)
+        return false;
+    wchar_t wide[MAX_PATH * 4]{};
+    wchar_t rewritten[MAX_PATH * 4]{};
+    if(!MultiByteToWideChar(CP_ACP, 0, path, -1, wide,
+                            int(sizeof(wide) / sizeof(wide[0])))
+       || !RewriteMapTableW(wide, rewritten,
+                            sizeof(rewritten) / sizeof(rewritten[0])))
+        return false;
+    BOOL substituted = FALSE;
+    return WideCharToMultiByte(CP_ACP, WC_NO_BEST_FIT_CHARS, rewritten, -1,
+                               output, int(capacity), nullptr, &substituted) != 0
+        && !substituted;
+}
+
 bool CommitSaveGeneration(const HotReloadControl& request)
 {
     if(request.generation == g_saveGeneration)
@@ -1311,10 +1261,14 @@ HANDLE WINAPI HookCreateFileW(LPCWSTR path, DWORD access, DWORD share,
     void* caller = _ReturnAddress();
     if(ShouldSkipIntroW(path))
         return INVALID_HANDLE_VALUE;
+    wchar_t owned[MAX_PATH * 4]{};
     wchar_t redirected[MAX_PATH * 4]{};
-    LPCWSTR selected = (RewriteGodmodeMobW(path, redirected, sizeof(redirected) / sizeof(redirected[0]))
-        || RewriteSupplementalMobW(path, redirected, sizeof(redirected) / sizeof(redirected[0]))
-        || RewriteOwnedPathW(path, redirected, sizeof(redirected) / sizeof(redirected[0]))) ? redirected : path;
+    LPCWSTR selected = (RewriteGodmodeMobW(path, owned, sizeof(owned) / sizeof(owned[0]))
+        || RewriteSupplementalMobW(path, owned, sizeof(owned) / sizeof(owned[0]))
+        || RewriteOwnedPathW(path, owned, sizeof(owned) / sizeof(owned[0]))) ? owned : path;
+    if(RewriteMapTableW(selected, redirected,
+                        sizeof(redirected) / sizeof(redirected[0])))
+        selected = redirected;
     HANDLE result = g_originalCreateFileW(selected, access, share, security, creation, flags, templateFile);
     const DWORD error = GetLastError();
     Observe(L"CreateFileW", path, reinterpret_cast<ULONG_PTR>(result), error, caller, access, creation);
@@ -1329,10 +1283,13 @@ HANDLE WINAPI HookCreateFileA(LPCSTR path, DWORD access, DWORD share,
     void* caller = _ReturnAddress();
     if(ShouldSkipIntroA(path))
         return INVALID_HANDLE_VALUE;
+    char owned[MAX_PATH * 4]{};
     char redirected[MAX_PATH * 4]{};
-    LPCSTR selected = (RewriteGodmodeMobA(path, redirected, sizeof(redirected))
-        || RewriteSupplementalMobA(path, redirected, sizeof(redirected))
-        || RewriteOwnedPathA(path, redirected, sizeof(redirected))) ? redirected : path;
+    LPCSTR selected = (RewriteGodmodeMobA(path, owned, sizeof(owned))
+        || RewriteSupplementalMobA(path, owned, sizeof(owned))
+        || RewriteOwnedPathA(path, owned, sizeof(owned))) ? owned : path;
+    if(RewriteMapTableA(selected, redirected, sizeof(redirected)))
+        selected = redirected;
     HANDLE result = g_originalCreateFileA(selected, access, share, security, creation, flags, templateFile);
     const DWORD error = GetLastError();
     if(path)
@@ -1351,10 +1308,14 @@ DWORD WINAPI HookGetFileAttributesW(LPCWSTR path)
     void* caller = _ReturnAddress();
     if(ShouldSkipIntroW(path))
         return INVALID_FILE_ATTRIBUTES;
+    wchar_t owned[MAX_PATH * 4]{};
     wchar_t redirected[MAX_PATH * 4]{};
-    LPCWSTR selected = (RewriteGodmodeMobW(path, redirected, sizeof(redirected) / sizeof(redirected[0]))
-        || RewriteSupplementalMobW(path, redirected, sizeof(redirected) / sizeof(redirected[0]))
-        || RewriteOwnedPathW(path, redirected, sizeof(redirected) / sizeof(redirected[0]))) ? redirected : path;
+    LPCWSTR selected = (RewriteGodmodeMobW(path, owned, sizeof(owned) / sizeof(owned[0]))
+        || RewriteSupplementalMobW(path, owned, sizeof(owned) / sizeof(owned[0]))
+        || RewriteOwnedPathW(path, owned, sizeof(owned) / sizeof(owned[0]))) ? owned : path;
+    if(RewriteMapTableW(selected, redirected,
+                        sizeof(redirected) / sizeof(redirected[0])))
+        selected = redirected;
     const DWORD result = g_originalGetFileAttributesW(selected);
     const DWORD error = GetLastError();
     Observe(L"GetFileAttributesW", path, result, error, caller);
@@ -1367,10 +1328,13 @@ DWORD WINAPI HookGetFileAttributesA(LPCSTR path)
     void* caller = _ReturnAddress();
     if(ShouldSkipIntroA(path))
         return INVALID_FILE_ATTRIBUTES;
+    char owned[MAX_PATH * 4]{};
     char redirected[MAX_PATH * 4]{};
-    LPCSTR selected = (RewriteGodmodeMobA(path, redirected, sizeof(redirected))
-        || RewriteSupplementalMobA(path, redirected, sizeof(redirected))
-        || RewriteOwnedPathA(path, redirected, sizeof(redirected))) ? redirected : path;
+    LPCSTR selected = (RewriteGodmodeMobA(path, owned, sizeof(owned))
+        || RewriteSupplementalMobA(path, owned, sizeof(owned))
+        || RewriteOwnedPathA(path, owned, sizeof(owned))) ? owned : path;
+    if(RewriteMapTableA(selected, redirected, sizeof(redirected)))
+        selected = redirected;
     const DWORD result = g_originalGetFileAttributesA(selected);
     const DWORD error = GetLastError();
     if(path)
@@ -2054,6 +2018,37 @@ bool ReadDirectLaunchPaths()
     {
         Log(L"DIRECT_LAUNCH disabled: staged MPR/MOB environment paths are missing or unreadable");
         return false;
+    }
+    GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_MAP_TABLE_SOURCE",
+                            g_mapTableSource,
+                            DWORD(sizeof(g_mapTableSource)
+                                  / sizeof(g_mapTableSource[0])));
+    GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_MAP_TABLE_STAGE",
+                            g_mapTableStage,
+                            DWORD(sizeof(g_mapTableStage)
+                                  / sizeof(g_mapTableStage[0])));
+    if(g_mapTableSource[0] || g_mapTableStage[0])
+    {
+        wchar_t sourceFull[MAX_PATH * 4]{};
+        wchar_t stageFull[MAX_PATH * 4]{};
+        const DWORD sourceLength = GetFullPathNameW(
+            g_mapTableSource, DWORD(sizeof(sourceFull) / sizeof(sourceFull[0])),
+            sourceFull, nullptr);
+        const DWORD stageLength = GetFullPathNameW(
+            g_mapTableStage, DWORD(sizeof(stageFull) / sizeof(stageFull[0])),
+            stageFull, nullptr);
+        if(!sourceLength || sourceLength >= sizeof(sourceFull) / sizeof(sourceFull[0])
+           || !stageLength || stageLength >= sizeof(stageFull) / sizeof(stageFull[0])
+           || GetFileAttributesW(sourceFull) == INVALID_FILE_ATTRIBUTES
+           || GetFileAttributesW(stageFull) == INVALID_FILE_ATTRIBUTES)
+        {
+            Log(L"DIRECT_LAUNCH disabled: private map-table source/stage paths are incomplete or unreadable");
+            return false;
+        }
+        NormalizeSlashes(sourceFull);
+        NormalizeSlashes(stageFull);
+        wcscpy_s(g_mapTableSource, sourceFull);
+        wcscpy_s(g_mapTableStage, stageFull);
     }
     GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_BOOTSTRAP_MPR", bootstrapMpr,
                             DWORD(sizeof(bootstrapMpr) / sizeof(bootstrapMpr[0])));

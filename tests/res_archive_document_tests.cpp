@@ -2,6 +2,8 @@
 
 #include "res_archive_document.h"
 #include "res_save_coordinator.h"
+#include "synthetic_map_table_archive.h"
+#include "map_table_document.h"
 
 #include <QCryptographicHash>
 #include <QDataStream>
@@ -63,6 +65,7 @@ private slots:
     void stagedCommitBacksUpAndReopens();
     void failedAtomicCommitLeavesDestinationUntouched();
     void sourceRaceRefusesSave();
+    void syntheticMapTableAddsOwnedMaplessZoneLosslessly();
 };
 
 void ResArchiveDocumentTests::noOpIsByteIdentical()
@@ -218,6 +221,43 @@ void ResArchiveDocumentTests::sourceRaceRefusesSave()
     QVERIFY(!result.success);
     QCOMPARE(result.phase, QString("source-check"));
     QVERIFY(!QFileInfo::exists(destinationPath));
+}
+
+void ResArchiveDocumentTests::syntheticMapTableAddsOwnedMaplessZoneLosslessly()
+{
+    const QByteArray original = syntheticRes();
+    QByteArray staged;
+    QStringList errors;
+    QVERIFY2(buildSyntheticMapTableArchive(
+        original, "texts.res", "ed1234abcd", "island", "ed1234abcd",
+        QPointF(12.5, 18.25), &staged, &errors), qPrintable(errors.join('\n')));
+    QVERIFY(staged != original);
+
+    CResArchiveDocument baseline;
+    CResArchiveDocument candidate;
+    QVERIFY(baseline.loadBytes(original));
+    QVERIFY(candidate.loadBytes(staged));
+    QCOMPARE(candidate.members().size(), baseline.members().size());
+    QCOMPARE(candidate.members().at(0).payload, baseline.members().at(0).payload);
+    QCOMPARE(candidate.members().at(2).payload, baseline.members().at(2).payload);
+
+    CMapTableDocument table;
+    QVERIFY2(table.loadBytes(candidate.memberPayload("map.txt"), &errors),
+             qPrintable(errors.join('\n')));
+    int matches = 0;
+    for(const SMapTableZone& zone : table.zones())
+    {
+        if(zone.zoneId != "ed1234abcd")
+            continue;
+        ++matches;
+        QCOMPARE(zone.mprName, QString("ed1234abcd"));
+        QCOMPARE(zone.mobName, QString("ed1234abcd"));
+        QVERIFY(!zone.maps.present);
+        QCOMPARE(zone.exits.size(), 1);
+        QCOMPARE(zone.exits.first().destinationZoneId, QString("none"));
+        QCOMPARE(zone.exits.first().deployRectangle.center(), QPointF(12.5, 18.25));
+    }
+    QCOMPARE(matches, 1);
 }
 
 QTEST_APPLESS_MAIN(ResArchiveDocumentTests)

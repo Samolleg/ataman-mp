@@ -25,6 +25,7 @@
 #include "current_session_backup.h"
 #include "hot_reload_protocol.h"
 #include "runtime_providers.h"
+#include "synthetic_map_table_archive.h"
 
 #ifdef Q_OS_WIN
 #include <windows.h>
@@ -1387,12 +1388,16 @@ bool CJmvMapTestLauncher::launch(const SJmvMapTestLaunchInput& input, QString* e
     m_liveMprPath.clear();
     m_liveMobPath.clear();
     m_liveGrpPath.clear();
+    m_mapTableSourcePath.clear();
+    m_stagedMapTablePath.clear();
     m_bridgeResultPath.clear();
     m_testSavesPath.clear();
     m_bridgeSha256.clear();
     m_liveMprSha256.clear();
     m_liveMobSha256.clear();
     m_liveGrpSha256.clear();
+    m_mapTableSourceSha256.clear();
+    m_stagedMapTableSha256.clear();
     m_runtimeHostPath.clear();
     m_gamePidPath.clear();
     m_liveSavesPath.clear();
@@ -1472,6 +1477,13 @@ bool CJmvMapTestLauncher::launch(const SJmvMapTestLaunchInput& input, QString* e
     environment.insert("EI_MAPPER_ENDURANCE_HOT_RELOAD_THREAD", m_hotReloadThreadPath);
     environment.insert("EI_MAPPER_ENDURANCE_GRAPHLESS",
                        input.allowMissingAiGraph ? "1" : "0");
+    if(!m_mapTableSourcePath.isEmpty())
+    {
+        environment.insert("EI_MAPPER_ENDURANCE_MAP_TABLE_SOURCE",
+                           m_mapTableSourcePath);
+        environment.insert("EI_MAPPER_ENDURANCE_MAP_TABLE_STAGE",
+                           m_stagedMapTablePath);
+    }
     if(!m_supplementalMobDirectory.isEmpty())
         environment.insert("EI_MAPPER_ENDURANCE_SUPPLEMENTAL_MOB_DIR",
                            m_supplementalMobDirectory);
@@ -1864,6 +1876,58 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
         if(error) *error = "A temporary live map copy failed its post-write SHA-256 check.";
         return false;
     }
+
+    // Add one private, randomly named map record before game.exe begins loading
+    // texts.res. Normal mapped launches ignore it; mapless launches and later
+    // mapless hot reloads use it without renaming an already constructed game
+    // object. The installed archive remains byte-identical.
+    if(isJmv)
+    {
+        m_mapTableSourcePath = QFileInfo(input.mapEntry.sourceArchive).absoluteFilePath();
+        QByteArray sourceArchive;
+        if(m_mapTableSourcePath.isEmpty()
+           || !QFileInfo(m_mapTableSourcePath).isFile()
+           || !readFile(m_mapTableSourcePath, &sourceArchive, error))
+        {
+            if(error && error->isEmpty())
+                *error = "The active map.txt source archive could not be resolved for safe test staging.";
+            return false;
+        }
+        QByteArray stagedArchive;
+        QStringList stagingErrors;
+        if(!buildSyntheticMapTableArchive(sourceArchive, m_mapTableSourcePath,
+                                          m_temporaryMapName,
+                                          input.mapEntry.allodId,
+                                          m_temporaryMapName,
+                                          input.spawn.position,
+                                          &stagedArchive, &stagingErrors))
+        {
+            if(error) *error = "Could not stage the private test map table:\n"
+                + stagingErrors.join('\n');
+            return false;
+        }
+        const QString mapTableDirectory = QDir(m_runRoot).filePath("map-table");
+        m_stagedMapTablePath = QDir(mapTableDirectory).filePath("texts.res");
+        if(!QDir().mkpath(mapTableDirectory)
+           || !atomicWrite(m_stagedMapTablePath, stagedArchive, error))
+            return false;
+        m_mapTableSourceSha256 = sha256(sourceArchive);
+        m_stagedMapTableSha256 = sha256(stagedArchive);
+        if(fileSha256(m_stagedMapTablePath) != m_stagedMapTableSha256)
+        {
+            if(error) *error = "The private staged texts.res failed its post-write hash check.";
+            return false;
+        }
+        QJsonObject mapTableJournal;
+        mapTableJournal.insert("policy", "read-only-exact-path-redirection");
+        mapTableJournal.insert("sourcePath", m_mapTableSourcePath);
+        mapTableJournal.insert("sourceSha256", m_mapTableSourceSha256);
+        mapTableJournal.insert("stagedPath", m_stagedMapTablePath);
+        mapTableJournal.insert("stagedSha256", m_stagedMapTableSha256);
+        mapTableJournal.insert("syntheticZone", m_temporaryMapName);
+        mapTableJournal.insert("installedArchiveModified", false);
+        m_manifest.insert("syntheticMapTable", mapTableJournal);
+    }
     if(graphSource.usesExternalGraph()
        && fileSha256(m_liveGrpPath).compare(m_liveGrpSha256, Qt::CaseInsensitive) != 0)
     {
@@ -1903,7 +1967,7 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
     request.stagedSha256.insert(QFileInfo(stagedMprPath).fileName(), m_liveMprSha256);
     request.stagedSha256.insert(QFileInfo(stagedMobPath).fileName(), m_liveMobSha256);
     request.sessionSettings.insert("travelExit", input.spawn.exitId);
-    request.sessionSettings.insert("sourceZone", input.mapEntry.zoneId);
+    request.sessionSettings.insert("sourceZone", m_currentZoneId);
     request.sessionSettings.insert("runtimeZone", m_currentZoneId);
     request.sessionSettings.insert("syntheticMapIdentity", input.syntheticMapIdentity);
     request.sessionSettings.insert("mapSizeX", input.mapSizeX);
@@ -1977,6 +2041,13 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
         appendRunLog(QString("Starter mod target=%1 persistedSelection=%2 persistedAddonPath=%3 policy=owned-process-override persistentModified=false")
                      .arg(QDir::cleanPath(input.profile.modRoot), starterStoredSelection,
                           starterRegistryAddonPath));
+    if(isJmv)
+        appendRunLog(QString("Staged private map table source=%1 sourceSha256=%2 staged=%3 stagedSha256=%4 syntheticZone=%5 installedModified=false")
+                     .arg(QDir::toNativeSeparators(m_mapTableSourcePath),
+                          m_mapTableSourceSha256,
+                          QDir::toNativeSeparators(m_stagedMapTablePath),
+                          m_stagedMapTableSha256,
+                          m_temporaryMapName));
     appendRunLog(QString("Staged temporary map=%1 exit=%2 spawn=(%3,%4) clearance=%5")
                  .arg(m_temporaryMapName).arg(input.spawn.exitId)
                  .arg(x, y).arg(input.spawn.clearance, 0, 'f', 3));
