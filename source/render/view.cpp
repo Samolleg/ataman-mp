@@ -75,6 +75,7 @@
 #include "endurance_document.h"
 #include "staged_save_validator.h"
 #include "terrain_atlas_analyzer.h"
+#include "ai_graph_document.h"
 
 class CLogic;
 
@@ -848,6 +849,7 @@ void CView::attach(CSettings* pSettings, QTableWidget* pParam, QUndoStack* pStac
 {
     m_pSettings = pSettings;
     initEnvironmentPreviewWidget();
+    initAiGraphPreviewWidget();
     connect(m_pSettings, &CSettings::renderSettingsChanged,
             this, &CView::applyRenderScheduling);
     m_cam->attachSettings(pSettings);
@@ -1048,7 +1050,165 @@ void CView::positionEnvironmentPreviewWidget()
         y += m_timeOfDayWidget->height() + 8;
     }
     if(m_environmentPreviewWidget)
+    {
         m_environmentPreviewWidget->move(12, y);
+        y += m_environmentPreviewWidget->height() + 8;
+    }
+    if(m_aiGraphPreviewWidget)
+        m_aiGraphPreviewWidget->move(12, y);
+}
+
+void CView::initAiGraphPreviewWidget()
+{
+    if(m_aiGraphPreviewWidget)
+        return;
+    m_aiGraphPreviewWidget = new QFrame(this);
+    m_aiGraphPreviewWidget->setObjectName(QStringLiteral("aiGraphPreviewWidget"));
+    m_aiGraphPreviewWidget->setMinimumWidth(250);
+    m_aiGraphPreviewWidget->setFrameShape(QFrame::StyledPanel);
+    m_aiGraphPreviewWidget->setStyleSheet(
+        "QFrame#aiGraphPreviewWidget { background: rgba(25,25,25,210); color: white; border: 1px solid #777; border-radius: 4px; }"
+        "QLabel, QToolButton { color: white; }");
+    QVBoxLayout* layout = new QVBoxLayout(m_aiGraphPreviewWidget);
+    layout->setContentsMargins(7, 5, 7, 6);
+    layout->setSpacing(4);
+
+    QHBoxLayout* title = new QHBoxLayout;
+    QLabel* titleLabel = new QLabel(tr("AI navigation graph"), m_aiGraphPreviewWidget);
+    m_aiGraphPreviewToggle = new QToolButton(m_aiGraphPreviewWidget);
+    m_aiGraphPreviewToggle->setCheckable(true);
+    m_aiGraphPreviewToggle->setText(tr("Show (N)"));
+    title->addWidget(titleLabel);
+    title->addStretch(1);
+    title->addWidget(m_aiGraphPreviewToggle);
+    layout->addLayout(title);
+
+    m_aiGraphLayerLabel = new QLabel(m_aiGraphPreviewWidget);
+    m_aiGraphLayerLabel->setWordWrap(true);
+    layout->addWidget(m_aiGraphLayerLabel);
+    m_aiGraphLayerSlider = new QSlider(Qt::Horizontal, m_aiGraphPreviewWidget);
+    m_aiGraphLayerSlider->setRange(0, CAiGraphDocument::LayerCount - 1);
+    m_aiGraphLayerSlider->setSingleStep(1);
+    m_aiGraphLayerSlider->setPageStep(1);
+    m_aiGraphLayerSlider->setTickPosition(QSlider::TicksBelow);
+    m_aiGraphLayerSlider->setValue(3);
+    layout->addWidget(m_aiGraphLayerSlider);
+    m_aiGraphSourceLabel = new QLabel(tr("No graph source loaded"), m_aiGraphPreviewWidget);
+    m_aiGraphSourceLabel->setWordWrap(true);
+    layout->addWidget(m_aiGraphSourceLabel);
+
+    connect(m_aiGraphPreviewToggle, &QToolButton::toggled, this, [this](bool visible)
+    {
+        if(visible && !m_aiGraphDocument.isValid())
+        {
+            m_aiGraphPreviewToggle->setChecked(false);
+            emit updateMsg(tr("No valid AI graph is available for the loaded map."));
+            return;
+        }
+        m_aiGraphPreviewVisible = visible;
+        m_aiGraphPreviewToggle->setText(visible ? tr("Hide (N)") : tr("Show (N)"));
+        update();
+    });
+    connect(m_aiGraphLayerSlider, &QSlider::valueChanged, this, [this](int)
+    {
+        m_aiGraphOverlayDirty = true;
+        syncAiGraphPreviewWidget();
+        update();
+    });
+    QShortcut* shortcut = new QShortcut(QKeySequence(Qt::Key_N), this);
+    shortcut->setContext(Qt::WidgetWithChildrenShortcut);
+    connect(shortcut, &QShortcut::activated, this, [this]()
+    {
+        if(!m_aiGraphDocument.isValid())
+        {
+            emit updateMsg(tr("No valid AI graph is available for the loaded map."));
+            return;
+        }
+        m_aiGraphPreviewToggle->toggle();
+    });
+    m_aiGraphPreviewWidget->adjustSize();
+    m_aiGraphPreviewWidget->show();
+    m_aiGraphPreviewWidget->raise();
+    syncAiGraphPreviewWidget();
+    positionEnvironmentPreviewWidget();
+}
+
+void CView::syncAiGraphPreviewWidget()
+{
+    if(!m_aiGraphPreviewWidget)
+        return;
+    const int layer = m_aiGraphLayerSlider ? m_aiGraphLayerSlider->value() : 3;
+    m_aiGraphLayerLabel->setText(tr("Layer %1 — %2 (%3 m)")
+        .arg(layer).arg(CAiGraphDocument::layerLabel(layer))
+        .arg(CAiGraphDocument::canonicalHeight(layer), 0, 'f', 1));
+    const bool available = m_aiGraphDocument.isValid();
+    m_aiGraphLayerSlider->setEnabled(available);
+    m_aiGraphSourceLabel->setText(available
+        ? tr("%1 · %2 x %3")
+              .arg(m_aiGraphSource).arg(m_aiGraphDocument.width()).arg(m_aiGraphDocument.height())
+        : tr("No graph source loaded"));
+    m_aiGraphPreviewToggle->setToolTip(available
+        ? tr("Show or hide the current AI graph layer in the viewport (N).")
+        : tr("Load a MOB with an embedded graph or a matching external .grp file."));
+}
+
+void CView::refreshAiGraphPreviewSource()
+{
+    m_aiGraphDocument.clear();
+    m_aiGraphSource.clear();
+    m_aiGraphOpenLinks.clear();
+    m_aiGraphNodes.clear();
+    m_aiGraphIsolatedNodes.clear();
+    m_aiGraphOverlayDirty = true;
+
+    QByteArray sourceBytes;
+    CMob* sourceMob = nullptr;
+    if(m_environmentMob && !m_environmentMob->aiGraphData().isEmpty())
+        sourceMob = m_environmentMob;
+    if(sourceMob)
+    {
+        sourceBytes = sourceMob->aiGraphData();
+        m_aiGraphSource = tr("Embedded: %1").arg(sourceMob->filePath().fileName());
+    }
+    else if(m_pLand && m_pLand->isMprLoad())
+    {
+        const QFileInfo mpr = m_pLand->filePath();
+        const QFileInfo external(QDir(mpr.absolutePath()).filePath(mpr.completeBaseName() + ".grp"));
+        QFile file(external.absoluteFilePath());
+        if(file.open(QIODevice::ReadOnly))
+        {
+            sourceBytes = file.readAll();
+            m_aiGraphSource = tr("External: %1").arg(external.fileName());
+        }
+    }
+
+    if(!sourceBytes.isEmpty())
+    {
+        QString error;
+        QStringList warnings;
+        if(!m_aiGraphDocument.parse(sourceBytes, &error, &warnings))
+        {
+            ei::log(eLogWarning, QString("AI graph preview rejected %1: %2")
+                    .arg(m_aiGraphSource, error));
+            m_aiGraphSource.clear();
+        }
+        else
+        {
+            ei::log(eLogInfo, QString("AI graph preview source %1 dimensions:%2x%3")
+                    .arg(m_aiGraphSource).arg(m_aiGraphDocument.width())
+                    .arg(m_aiGraphDocument.height()));
+            for(const QString& warning : warnings)
+                ei::log(eLogWarning, "AI graph preview: " + warning);
+        }
+    }
+    if(!m_aiGraphDocument.isValid())
+    {
+        m_aiGraphPreviewVisible = false;
+        if(m_aiGraphPreviewToggle)
+            m_aiGraphPreviewToggle->setChecked(false);
+    }
+    syncAiGraphPreviewWidget();
+    update();
 }
 
 void CView::applyEnvironmentCompatibilityMode()
@@ -2255,10 +2415,77 @@ bool CView::prepareForApplicationShutdown()
     return current && current->surface();
 }
 
+void CView::rebuildAiGraphOverlayGeometry()
+{
+    m_aiGraphOpenLinks.clear();
+    m_aiGraphNodes.clear();
+    m_aiGraphIsolatedNodes.clear();
+    m_aiGraphOverlayDirty = false;
+    if(!m_aiGraphDocument.isValid() || !m_pLand || !m_pLand->isMprLoad())
+        return;
+
+    const int layer = m_aiGraphLayerSlider ? m_aiGraphLayerSlider->value() : 3;
+    const int width = m_aiGraphDocument.width();
+    const int height = m_aiGraphDocument.height();
+    QVector<QVector3D> positions(width * height);
+    QVector<bool> valid(width * height, false);
+    for(int y = 0; y < height; ++y)
+        for(int x = 0; x < width; ++x)
+        {
+            const int localX = m_aiGraphDocument.localX(layer, x, y);
+            const int localY = m_aiGraphDocument.localY(layer, x, y);
+            if(localX > 7 || localY > 7)
+                continue;
+            QVector3D position((x * 8 + localX + 0.5f) * 0.5f,
+                               (y * 8 + localY + 0.5f) * 0.5f, 0.0f);
+            if(!m_pLand->projectPt(position))
+                continue;
+            position.setZ(position.z() + 0.20f);
+            const int cell = y * width + x;
+            positions[cell] = position;
+            valid[cell] = true;
+            m_aiGraphNodes.append(position);
+        }
+
+    for(int y = 0; y < height; ++y)
+        for(int x = 0; x < width; ++x)
+        {
+            const int cell = y * width + x;
+            if(!valid[cell])
+                continue;
+            bool connected = false;
+            for(int direction = 0; direction < CAiGraphDocument::DirectionCount; ++direction)
+            {
+                if(m_aiGraphDocument.weight(layer, x, y, direction) < 0)
+                    continue;
+                connected = true;
+                const QPoint delta = CAiGraphDocument::directionDelta(direction);
+                const int nx = x + delta.x();
+                const int ny = y + delta.y();
+                if(nx < 0 || nx >= width || ny < 0 || ny >= height)
+                    continue;
+                const int neighbor = ny * width + nx;
+                if(!valid[neighbor])
+                    continue;
+                if(neighbor < cell)
+                {
+                    const int reverseDirection = (direction + 4) % 8;
+                    if(m_aiGraphDocument.weight(layer, nx, ny, reverseDirection) >= 0)
+                        continue;
+                }
+                m_aiGraphOpenLinks.append(positions[cell]);
+                m_aiGraphOpenLinks.append(positions[neighbor]);
+            }
+            if(!connected)
+                m_aiGraphIsolatedNodes.append(positions[cell]);
+        }
+}
+
 void CView::drawTestOverlaysOpenGl()
 {
     if((m_testEntranceRectangles.isEmpty() && !m_testSpawnMarkerValid
-        && !m_terrainPaintOutlineValid && !m_sculptOutlineValid)
+        && !m_terrainPaintOutlineValid && !m_sculptOutlineValid
+        && !(m_aiGraphPreviewVisible && m_aiGraphDocument.isValid()))
        || width() <= 0 || height() <= 0)
         return;
 
@@ -2311,6 +2538,34 @@ void CView::drawTestOverlaysOpenGl()
     ei::gl::BlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     ei::gl::Enable(GL_DEPTH_TEST);
     ei::gl::DepthMask(GL_FALSE);
+
+    if(m_aiGraphPreviewVisible && m_aiGraphDocument.isValid())
+    {
+        if(m_aiGraphOverlayDirty)
+            rebuildAiGraphOverlayGeometry();
+        if(!m_aiGraphOpenLinks.isEmpty())
+        {
+            m_program.setUniformValue("customColor", QVector4D(0.15f, 0.92f, 1.0f, 0.82f));
+            ei::gl::LineWidth(1.5f);
+            m_program.setAttributeArray(position, m_aiGraphOpenLinks.constData());
+            ei::gl::DrawArrays(GL_LINES, 0, m_aiGraphOpenLinks.size());
+        }
+        if(!m_aiGraphNodes.isEmpty())
+        {
+            m_program.setUniformValue("customColor", QVector4D(0.95f, 0.82f, 0.20f, 0.88f));
+            glPointSize(3.0f);
+            m_program.setAttributeArray(position, m_aiGraphNodes.constData());
+            ei::gl::DrawArrays(GL_POINTS, 0, m_aiGraphNodes.size());
+        }
+        if(!m_aiGraphIsolatedNodes.isEmpty())
+        {
+            m_program.setUniformValue("customColor", QVector4D(1.0f, 0.16f, 0.12f, 1.0f));
+            glPointSize(6.0f);
+            m_program.setAttributeArray(position, m_aiGraphIsolatedNodes.constData());
+            ei::gl::DrawArrays(GL_POINTS, 0, m_aiGraphIsolatedNodes.size());
+        }
+        glPointSize(1.0f);
+    }
 
     for(int index = 0; index < m_testEntranceRectangles.size(); ++index)
     {
@@ -3292,6 +3547,7 @@ void CView::loadLandscape(const QFileInfo& filePath)
     m_pPreviewTile.reset(new CPreviewTile());
     updateTileForm(true);
     rebuildTerrainAutoCatalog();
+    refreshAiGraphPreviewSource();
     emit selectionStateChanged(nSelectedNodes() > 0);
     if(m_landscapeTools && m_landscapeTools->editingEnabled())
         syncLandscapeToolState();
@@ -3325,6 +3581,7 @@ void CView::unloadLand(bool promptForSave)
     m_terrainSemanticSeed = 0;
     m_mprDocument = CMprDocument();
     m_pLand->unloadMpr();
+    refreshAiGraphPreviewSource();
     m_caveEnvironment = false;
     for(CMob* mob : m_aMob)
         mob->reprojectForCurrentTerrain();
@@ -4909,6 +5166,7 @@ bool CView::loadMob(QFileInfo &filePath)
     m_sceneFingerprintDirty = true;
     m_scriptWorkspaces->registerMob(pMob);
     changeCurrentMob(pMob);
+    refreshAiGraphPreviewSource();
     emit mobStateChanged();
     return true;
 }
@@ -5071,6 +5329,7 @@ bool CView::unloadMobDocument(CMob* mob, bool promptForSave)
         CTextureList::getInstance()->clearTransientVisualCache();
     }
     ei::log(eLogInfo, "Mob unloaded");
+    refreshAiGraphPreviewSource();
     emit mobStateChanged();
     return true;
 }
@@ -5295,6 +5554,7 @@ void CView::unloadMob(QString mobName)
     }
 
     ei::log(eLogInfo, "Mob unloaded");
+    refreshAiGraphPreviewSource();
     viewParameters();
     emit mobStateChanged();
     emit selectionChanged();
@@ -6638,6 +6898,7 @@ bool CView::applyTerrainHeightPreview(const STerrainHeightCommand& command, bool
             mob->reprojectForCurrentTerrain();
     }
     m_pLand->setDirty(m_terrainEdit.isDirty());
+    m_aiGraphOverlayDirty = true;
     if(!m_sculptStrokeActive)
     {
         emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMprDirtyFlag,

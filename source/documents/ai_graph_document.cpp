@@ -1,0 +1,182 @@
+#include "ai_graph_document.h"
+
+#include <QtEndian>
+
+namespace {
+constexpr quint64 HeaderSize = 8;
+constexpr quint64 WeightBytesPerCell = 16;
+constexpr quint64 PositionBytesPerCell = 1;
+constexpr quint64 ComponentBytesPerCell = 2;
+constexpr quint64 BytesPerCellAllLayers =
+    CAiGraphDocument::LayerCount
+    * (WeightBytesPerCell + PositionBytesPerCell + ComponentBytesPerCell);
+
+quint16 readLe16(const char* bytes)
+{
+    return qFromLittleEndian<quint16>(reinterpret_cast<const uchar*>(bytes));
+}
+
+quint32 readLe32(const char* bytes)
+{
+    return qFromLittleEndian<quint32>(reinterpret_cast<const uchar*>(bytes));
+}
+}
+
+void CAiGraphDocument::clear()
+{
+    m_width = 0;
+    m_height = 0;
+    m_valid = false;
+    m_rawBytes.clear();
+    m_layers.clear();
+}
+
+bool CAiGraphDocument::parse(const QByteArray& data, QString* error,
+                             QStringList* warnings)
+{
+    clear();
+    if(error)
+        error->clear();
+    if(warnings)
+        warnings->clear();
+    const auto fail = [&](const QString& message)
+    {
+        if(error)
+            *error = message;
+        clear();
+        return false;
+    };
+
+    if(data.size() < qint64(HeaderSize))
+        return fail(QStringLiteral("AI graph is shorter than its 8-byte header."));
+
+    const qint32 width = qint32(readLe32(data.constData()));
+    const qint32 height = qint32(readLe32(data.constData() + 4));
+    if(width <= 0 || height <= 0 || width > 256 || height > 256)
+        return fail(QStringLiteral("AI graph dimensions %1 x %2 are outside the supported 1..256 range.")
+                    .arg(width).arg(height));
+
+    const quint64 cells = quint64(width) * quint64(height);
+    const quint64 requiredSize = HeaderSize + cells * BytesPerCellAllLayers;
+    if(quint64(data.size()) < requiredSize)
+        return fail(QStringLiteral("AI graph is truncated: expected at least %1 bytes, found %2.")
+                    .arg(requiredSize).arg(data.size()));
+    if(quint64(data.size()) > requiredSize && warnings)
+        warnings->append(QStringLiteral("AI graph has %1 preserved trailing byte(s).")
+                         .arg(quint64(data.size()) - requiredSize));
+
+    m_width = width;
+    m_height = height;
+    m_rawBytes = data;
+    m_layers.resize(LayerCount);
+    quint64 offset = HeaderSize;
+    int invalidLocalPositions = 0;
+    for(int layer = 0; layer < LayerCount; ++layer)
+    {
+        SAiGraphLayer& destination = m_layers[layer];
+        destination.weights.resize(int(cells) * DirectionCount);
+        destination.packedPositions.resize(int(cells));
+        destination.components.resize(int(cells));
+        for(int y = 0; y < height; ++y)
+        {
+            for(int x = 0; x < width; ++x)
+                for(int direction = 0; direction < DirectionCount; ++direction)
+                {
+                    const int cell = y * width + x;
+                    destination.weights[cell * DirectionCount + direction] =
+                        qint16(readLe16(data.constData() + offset));
+                    offset += 2;
+                }
+
+            for(int x = 0; x < width; ++x)
+            {
+                const int cell = y * width + x;
+                const quint8 packed = quint8(data.at(int(offset++)));
+                destination.packedPositions[cell] = char(packed);
+                if((packed & 0x0f) > 7 || ((packed >> 4) & 0x0f) > 7)
+                    ++invalidLocalPositions;
+            }
+
+            for(int x = 0; x < width; ++x)
+            {
+                const int cell = y * width + x;
+                destination.components[cell] = readLe16(data.constData() + offset);
+                offset += 2;
+            }
+        }
+    }
+    if(invalidLocalPositions > 0 && warnings)
+        warnings->append(QStringLiteral("AI graph contains %1 local position(s) outside the expected 0..7 cell range.")
+                         .arg(invalidLocalPositions));
+    m_valid = true;
+    return true;
+}
+
+int CAiGraphDocument::index(int x, int y) const
+{
+    return y * m_width + x;
+}
+
+bool CAiGraphDocument::validCell(int layer, int x, int y) const
+{
+    return m_valid && layer >= 0 && layer < m_layers.size()
+        && x >= 0 && x < m_width && y >= 0 && y < m_height;
+}
+
+qint16 CAiGraphDocument::weight(int layer, int x, int y, int direction) const
+{
+    if(!validCell(layer, x, y) || direction < 0 || direction >= DirectionCount)
+        return qint16(-1);
+    return m_layers[layer].weights[index(x, y) * DirectionCount + direction];
+}
+
+quint8 CAiGraphDocument::packedPosition(int layer, int x, int y) const
+{
+    if(!validCell(layer, x, y))
+        return 0;
+    return quint8(m_layers[layer].packedPositions.at(index(x, y)));
+}
+
+int CAiGraphDocument::localX(int layer, int x, int y) const
+{
+    return packedPosition(layer, x, y) & 0x0f;
+}
+
+int CAiGraphDocument::localY(int layer, int x, int y) const
+{
+    return (packedPosition(layer, x, y) >> 4) & 0x0f;
+}
+
+quint16 CAiGraphDocument::component(int layer, int x, int y) const
+{
+    if(!validCell(layer, x, y))
+        return 0;
+    return m_layers[layer].components.at(index(x, y));
+}
+
+QPoint CAiGraphDocument::directionDelta(int direction)
+{
+    static const QPoint deltas[DirectionCount] = {
+        QPoint(0, -1), QPoint(-1, -1), QPoint(-1, 0), QPoint(-1, 1),
+        QPoint(0, 1), QPoint(1, 1), QPoint(1, 0), QPoint(1, -1)
+    };
+    return direction >= 0 && direction < DirectionCount
+        ? deltas[direction] : QPoint();
+}
+
+QString CAiGraphDocument::layerLabel(int layer)
+{
+    static const char* labels[LayerCount] = {
+        "Flying / levitating", "Narrow / prone", "Narrow / crawling",
+        "Narrow / human-sized", "Narrow / tall", "Wide / low",
+        "Wide / tall", "Very large"
+    };
+    return layer >= 0 && layer < LayerCount
+        ? QString::fromLatin1(labels[layer]) : QStringLiteral("Unknown");
+}
+
+double CAiGraphDocument::canonicalHeight(int layer)
+{
+    static const double heights[LayerCount] = {2.0, 0.4, 1.0, 1.6, 2.2, 1.7, 3.0, 6.0};
+    return layer >= 0 && layer < LayerCount ? heights[layer] : 0.0;
+}

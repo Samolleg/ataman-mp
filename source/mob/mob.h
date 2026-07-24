@@ -107,6 +107,7 @@ public:
     SMobParameterState parameterState();
     void applyParameterState(const SMobParameterState& state);
     uint freeMapId();
+    const QByteArray& aiGraphData() const { return m_aiGraph; }
 
     //functions for logic processing
     QList<CNode*>& logicNodes();

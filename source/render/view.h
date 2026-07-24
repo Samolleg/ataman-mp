@@ -26,6 +26,7 @@
 #include "terrain_atlas_analyzer.h"
 #include "spatial_grid.h"
 #include "particle_animation.h"
+#include "ai_graph_document.h"
 
 class QLineEdit;
 class QFrame;
@@ -307,8 +308,12 @@ private:
                        const CViewFrustum* frustum);
     bool ensureParticleRendererInitialized();
     void initEnvironmentPreviewWidget();
+    void initAiGraphPreviewWidget();
     void applyEnvironmentCompatibilityMode();
     void positionEnvironmentPreviewWidget();
+    void refreshAiGraphPreviewSource();
+    void syncAiGraphPreviewWidget();
+    void rebuildAiGraphOverlayGeometry();
     void syncEnvironmentPreviewWidget(float mapTimeHours);
     void applyEnvironmentUniforms(QOpenGLShaderProgram& program,
                                   const ei::SRenderEnvironment& environment,
@@ -506,6 +511,18 @@ private:
     QFrame* m_timeOfDayWidget{nullptr};
     QLabel* m_timeOfDayLabel{nullptr};
     QSlider* m_environmentPreviewTime{nullptr};
+    QFrame* m_aiGraphPreviewWidget{nullptr};
+    QToolButton* m_aiGraphPreviewToggle{nullptr};
+    QSlider* m_aiGraphLayerSlider{nullptr};
+    QLabel* m_aiGraphLayerLabel{nullptr};
+    QLabel* m_aiGraphSourceLabel{nullptr};
+    CAiGraphDocument m_aiGraphDocument;
+    QString m_aiGraphSource;
+    bool m_aiGraphPreviewVisible{false};
+    bool m_aiGraphOverlayDirty{true};
+    QVector<QVector3D> m_aiGraphOpenLinks;
+    QVector<QVector3D> m_aiGraphNodes;
+    QVector<QVector3D> m_aiGraphIsolatedNodes;
     bool m_environmentPreviewSyncing{false};
     bool m_openGlesCompatibility{false};
     int m_openGlDiagnosticFramesRemaining{0};
