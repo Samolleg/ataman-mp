@@ -2806,7 +2806,6 @@ void MainWindow::launchCurrentMapTest()
             tr("The current MOB edits could not be staged safely:\n\n%1").arg(mobReport.toText()));
         return;
     }
-    const QByteArray mprData = mprFile.readAll();
     SMapGraphSource graphSource;
     QString graphError;
     if(!CJmvMapTestLauncher::resolveMapGraphSource(
