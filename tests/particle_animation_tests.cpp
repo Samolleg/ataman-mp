@@ -14,6 +14,8 @@ private slots:
     void schedulerUsesAttemptsRatherThanSlots();
     void prewarmedEmittersAreDeterministicAndBounded();
     void fireOnlyNeverReachesSmokeFrames();
+    void tornadoUsesNativePopulationAndPhasePartitions();
+    void lightningBlastIsFiniteAndRepeatingForPreview();
 };
 
 void ParticleAnimationTests::atlasUsesNativeTopRowFirstInsets()
@@ -124,6 +126,50 @@ void ParticleAnimationTests::fireOnlyNeverReachesSmokeFrames()
     QVERIFY(!samples.isEmpty());
     for(const auto& sample : samples)
         QVERIFY(sample.frame >= 0 && sample.frame <= 7);
+}
+
+void ParticleAnimationTests::tornadoUsesNativePopulationAndPhasePartitions()
+{
+    ei::particle::TornadoEmitter emitter;
+    emitter.advanceTo(1000, 8202u, QVector3D(2.0f, 3.0f, 0.0f), 1.0f, 100);
+    const auto samples = emitter.samples();
+    QVERIFY(samples.size() >= 300);
+    QVERIFY(samples.size() <= 432);
+    bool hasCloud = false;
+    bool hasDebris = false;
+    for(const auto& sample : samples)
+    {
+        QVERIFY(sample.position.z() >= 1.0f);
+        QVERIFY(sample.position.z() <= 13.0f);
+        QVERIFY(sample.alpha >= 0.0f && sample.alpha <= 1.0f);
+        hasCloud = hasCloud || sample.frame < 12;
+        hasDebris = hasDebris || sample.frame >= 12;
+    }
+    QVERIFY(hasCloud);
+    QVERIFY(hasDebris);
+}
+
+void ParticleAnimationTests::lightningBlastIsFiniteAndRepeatingForPreview()
+{
+    ei::particle::LightningBlastEmitter first;
+    ei::particle::LightningBlastEmitter second;
+    const QVector3D origin(1.0f, 1.0f, 0.0f);
+    first.advanceTo(5, 8240u, origin, 1.0f);
+    second.advanceTo(5, 8240u, origin, 1.0f);
+    const auto a = first.samples();
+    const auto b = second.samples();
+    QCOMPARE(a.size(), b.size());
+    QVERIFY(!a.isEmpty());
+    for(int i = 0; i < a.size(); ++i)
+    {
+        QCOMPARE(a[i].position, b[i].position);
+        QCOMPARE(a[i].scale, b[i].scale);
+        QCOMPARE(a[i].frame, b[i].frame);
+    }
+    first.advanceTo(70, 8240u, origin, 1.0f);
+    QCOMPARE(first.activeCount(), 0);
+    first.advanceTo(81, 8240u, origin, 1.0f);
+    QVERIFY(first.activeCount() > 0);
 }
 
 QTEST_APPLESS_MAIN(ParticleAnimationTests)

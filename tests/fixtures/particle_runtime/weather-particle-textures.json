@@ -1,0 +1,38 @@
+{
+  "format": "ei-particle-texture-report-v1",
+  "source": {
+    "path": "D:\\Evil Islands\\Starter\\MODS\\JamaisVu135\\res\\textures.res",
+    "sha256": "2E8CA42FB75FAC12E5659C563C547FEE0F72D6C1B6E2E1C454B3072E3BE0703B",
+    "size": 763801000
+  },
+  "textures": [
+    {
+      "atlas": {
+        "columns": 4,
+        "phaseCount": 16,
+        "rows": 4
+      },
+      "height": 1024,
+      "mipCount": 11,
+      "name": "tornado.mmp",
+      "sha256": "549EBC0C8FC0DC57544DB97FB0E426E92F85863315A00035BC54A198473C280A",
+      "size": 1398204,
+      "textureFormat": "0x33545844",
+      "width": 1024
+    },
+    {
+      "atlas": {
+        "columns": 4,
+        "phaseCount": 16,
+        "rows": 4
+      },
+      "height": 1024,
+      "mipCount": 11,
+      "name": "tendrilight.mmp",
+      "sha256": "F63D73CE04ED76339D2B15296E91B2089873C7FA115099CEDD596831ACBACC88",
+      "size": 1398204,
+      "textureFormat": "0x33545844",
+      "width": 1024
+    }
+  ]
+}

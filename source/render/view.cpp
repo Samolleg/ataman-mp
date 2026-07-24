@@ -2584,6 +2584,12 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
     QOpenGLTexture* tendrilSmokeTexture = textures->texture("tendrismoke");
     if(tendrilSmokeTexture == fallbackTexture)
         tendrilSmokeTexture = fireSmokeTexture;
+    QOpenGLTexture* tornadoTexture = textures->texture("tornado");
+    if(tornadoTexture == fallbackTexture)
+        tornadoTexture = nullptr;
+    QOpenGLTexture* tendriLightTexture = textures->texture("tendrilight");
+    if(tendriLightTexture == fallbackTexture)
+        tendriLightTexture = nullptr;
 
     bool inverseOk = false;
     const QMatrix4x4 inverseView = cameraMatrix.inverted(&inverseOk);
@@ -2650,6 +2656,17 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
         / float(ei::particle::kLogicalQuantMilliseconds);
     const CWorldSet* particleWorldSet = m_environmentMob
         ? &m_environmentMob->worldSet() : nullptr;
+    const COptBool* particleOverrideTimeOption = m_pSettings
+        ? dynamic_cast<const COptBool*>(m_pSettings->opt("overrideWorldTime")) : nullptr;
+    const COptInt* particleTimeOption = m_pSettings
+        ? dynamic_cast<const COptInt*>(m_pSettings->opt("renderTimeOfDay")) : nullptr;
+    const bool particleOverrideTime = particleOverrideTimeOption
+        ? particleOverrideTimeOption->value() : false;
+    const float particlePreviewTime = particleTimeOption
+        ? ei::clockValueToHours(particleTimeOption->value()) : 12.0f;
+    const ei::SRenderEnvironment particleEnvironment = ei::renderEnvironment(
+        particleWorldSet, particleOverrideTime, particlePreviewTime,
+        m_caveEnvironment, m_weatherRegion);
     const QVector3D windDirection = particleWorldSet
         ? util::vec3FromString(particleWorldSet->data(eWsTypeWindDir))
         : QVector3D();
@@ -2718,6 +2735,38 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
         }
     };
 
+    const auto drawTornado = [&](const CNode* owner, const QVector3D& origin,
+                                 float authoredScale, uint seed)
+    {
+        ei::particle::TornadoEmitter& emitter = m_tornadoEmitters[owner];
+        emitter.advanceTo(logicalTick, seed, origin, authoredScale, 100);
+        const QVector4D sunlightTint(particleEnvironment.sunColor, 1.0f);
+        const QVector<ei::particle::WeatherRenderSample> samples = emitter.samples();
+        for(const ei::particle::WeatherRenderSample& sample : samples)
+        {
+            QVector4D tint = sunlightTint;
+            tint.setW(sample.alpha);
+            drawSprite(sample.position, sample.scale, 1.0f, 0.0f, tint,
+                       tornadoTexture, ei::particle::atlasUv(sample.frame), false,
+                       tornadoTexture == nullptr, 0.18f);
+        }
+    };
+
+    const auto drawLightningBlast = [&](const CNode* owner, const QVector3D& origin,
+                                        float authoredScale, uint seed)
+    {
+        ei::particle::LightningBlastEmitter& emitter = m_lightningBlastEmitters[owner];
+        emitter.advanceTo(logicalTick, seed, origin, authoredScale);
+        const QVector<ei::particle::WeatherRenderSample> samples = emitter.samples();
+        for(const ei::particle::WeatherRenderSample& sample : samples)
+        {
+            drawSprite(sample.position, sample.scale, 1.0f, 0.0f,
+                       QVector4D(1.0f, 1.0f, 1.0f, sample.alpha),
+                       tendriLightTexture, ei::particle::atlasUv(sample.frame), true,
+                       tendriLightTexture == nullptr, 0.14f);
+        }
+    };
+
     for(CMob* mob : m_aMob)
     {
         if(!isMobVisible(mob))
@@ -2766,6 +2815,28 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
                               particle->kind(), 0);
                 // Selection is an editor affordance, not a color mutation of
                 // the stock particle population.
+                if(particle->nodeState() == ENodeState::eSelect)
+                    drawSprite(center, qMax(0.3f, authoredScale * 0.35f),
+                               1.0f, 0.0f,
+                               QVector4D(0.10f, 0.90f, 1.0f, 0.72f), nullptr,
+                               QVector4D(0.0f, 0.0f, 1.0f, 1.0f), false,
+                               true, 0.12f);
+                continue;
+            }
+            if(particle->kind() == 8202u)
+            {
+                drawTornado(particle, center, authoredScale, particle->mapId());
+                if(particle->nodeState() == ENodeState::eSelect)
+                    drawSprite(center, qMax(0.3f, authoredScale * 0.35f),
+                               1.0f, 0.0f,
+                               QVector4D(0.10f, 0.90f, 1.0f, 0.72f), nullptr,
+                               QVector4D(0.0f, 0.0f, 1.0f, 1.0f), false,
+                               true, 0.12f);
+                continue;
+            }
+            if(particle->kind() == 8240u)
+            {
+                drawLightningBlast(particle, center, authoredScale, particle->mapId());
                 if(particle->nodeState() == ENodeState::eSelect)
                     drawSprite(center, qMax(0.3f, authoredScale * 0.35f),
                                1.0f, 0.0f,
@@ -4950,6 +5021,8 @@ bool CView::unloadMobDocument(CMob* mob, bool promptForSave)
         m_pUndoStack->clear();
     m_hiddenMobs.remove(mob);
     m_tendriEmitters.clear();
+    m_tornadoEmitters.clear();
+    m_lightningBlastEmitters.clear();
     m_aMob.removeAt(removedIndex);
     if(removedEnvironment)
         m_environmentMob = m_aMob.isEmpty() ? nullptr : m_aMob.first();
@@ -5148,6 +5221,8 @@ void CView::unloadMob(QString mobName)
     if(m_pUndoStack)
         m_pUndoStack->clear();
     m_tendriEmitters.clear();
+    m_tornadoEmitters.clear();
+    m_lightningBlastEmitters.clear();
     ei::log(eLogInfo, "unloading mob " + mobName);
     CMob* pMob = nullptr;
     if(mobName.isEmpty())

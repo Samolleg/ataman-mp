@@ -377,6 +377,8 @@ private:
     bool m_particleInitializationAttempted{false};
     bool m_particleRendererReady{false};
     QHash<const CNode*, ei::particle::TendriEmitter> m_tendriEmitters;
+    QHash<const CNode*, ei::particle::TornadoEmitter> m_tornadoEmitters;
+    QHash<const CNode*, ei::particle::LightningBlastEmitter> m_lightningBlastEmitters;
     QOpenGLShaderProgram m_shadowProgram;
     QOpenGLFramebufferObject* m_shadowFbo{nullptr};
     QOpenGLFramebufferObject* m_dynamicShadowFbo{nullptr};

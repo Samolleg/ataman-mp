@@ -5,6 +5,7 @@
 #include <QVector>
 #include <QVector3D>
 #include <QVector4D>
+#include <QtMath>
 
 #include <algorithm>
 #include <array>
@@ -389,6 +390,361 @@ private:
     quint32 m_seed{0};
     quint32 m_kind{0};
     qint64 m_lastTick{0};
+    bool m_initialized{false};
+};
+
+struct WeatherRenderSample
+{
+    QVector3D position;
+    float scale{1.0f};
+    float alpha{1.0f};
+    int frame{0};
+};
+
+struct TornadoParticle
+{
+    float height{0.0f};
+    float alphaRamp{0.1f};
+    float angle{0.0f};
+    float radius{1.0f};
+    float angularVelocity{0.0f};
+    float verticalVelocity{0.0f};
+    int lifetime{100};
+    int frame{0};
+    bool large{true};
+};
+
+class TornadoEmitter
+{
+public:
+    void advanceTo(qint64 logicalTick, quint32 seed, const QVector3D& origin,
+                   float authoredScale, int prewarmTicks)
+    {
+        if(!m_initialized || seed != m_seed || logicalTick < m_lastTick
+                || logicalTick - m_lastTick > 4096)
+        {
+            m_seed = seed;
+            m_rng.reset(seed ^ 0x544F524Eu);
+            m_particles.clear();
+            for(int i = 0; i < prewarmTicks; ++i)
+                advanceOne();
+            m_lastTick = logicalTick;
+            m_initialized = true;
+        }
+        m_origin = origin;
+        m_authoredScale = qMax(0.001f, authoredScale);
+        while(m_lastTick < logicalTick)
+        {
+            advanceOne();
+            ++m_lastTick;
+        }
+    }
+
+    QVector<WeatherRenderSample> samples() const
+    {
+        QVector<WeatherRenderSample> result;
+        result.reserve(m_particles.size());
+        const float heightScale = 12.0f * m_authoredScale;
+        const QVector3D base = m_origin + QVector3D(0.0f, 0.0f, 1.0f);
+        for(const TornadoParticle& particle : m_particles)
+        {
+            WeatherRenderSample sample;
+            sample.position = base + QVector3D(qSin(particle.angle) * particle.radius,
+                                                qCos(particle.angle) * particle.radius,
+                                                particle.height * heightScale);
+            const float submittedRadius = particle.large
+                ? m_authoredScale * (particle.radius + 0.3f)
+                : m_authoredScale * 0.15f;
+            sample.scale = billboardDiameter(submittedRadius);
+            sample.alpha = particle.alphaRamp * qSqrt(qMax(0.0f, 1.0f - particle.height));
+            sample.frame = particle.frame;
+            result.append(sample);
+        }
+        return result;
+    }
+
+    int activeCount() const { return m_particles.size(); }
+
+private:
+    float randomRange(float low, float high)
+    {
+        return low + (high - low) * m_rng.unit();
+    }
+
+    void spawn()
+    {
+        TornadoParticle particle;
+        particle.height = m_rng.unit();
+        particle.large = (m_rng.next() % 3u) != 0u;
+        particle.lifetime = 100 + int(m_rng.next() % 9u);
+        const float baseShape = 1.0f - particle.height;
+        const float radiusShape = baseShape * baseShape * baseShape * baseShape;
+        particle.radius = randomRange(0.8f, 2.0f) * (radiusShape + 0.2f) * 2.0f;
+        particle.angle = randomRange(-float(M_PI), float(M_PI));
+        particle.angularVelocity = randomRange(float(M_PI) * 0.06f,
+                                                float(M_PI) * 0.07f)
+            * (1.1f - baseShape * baseShape) * 1.5f;
+        particle.frame = particle.large ? int(m_rng.next() % 12u)
+                                        : 12 + int(m_rng.next() & 3u);
+        m_particles.append(particle);
+    }
+
+    void advanceOne()
+    {
+        for(int i = m_particles.size() - 1; i >= 0; --i)
+        {
+            TornadoParticle& particle = m_particles[i];
+            if(--particle.lifetime == 0)
+            {
+                m_particles.removeAt(i);
+                continue;
+            }
+            particle.height += particle.verticalVelocity;
+            particle.verticalVelocity += 0.0001f;
+            if(particle.height > 1.0f)
+            {
+                m_particles.removeAt(i);
+                continue;
+            }
+            particle.angle += particle.angularVelocity;
+            particle.angularVelocity *= 1.01f;
+            particle.radius *= 0.99f;
+            if(particle.lifetime > 8)
+                particle.alphaRamp = qMin(1.0f, particle.alphaRamp + 0.1f);
+            else
+                particle.alphaRamp = qMax(0.1f, particle.alphaRamp);
+            particle.frame = particle.large ? (particle.frame + 1) % 12
+                                            : 12 + ((particle.frame + 1) & 3);
+        }
+        for(int attempt = 0; attempt < 4 && m_particles.size() < 800; ++attempt)
+            spawn();
+    }
+
+    Isaac32 m_rng;
+    QVector<TornadoParticle> m_particles;
+    QVector3D m_origin;
+    float m_authoredScale{1.0f};
+    quint32 m_seed{0};
+    qint64 m_lastTick{0};
+    bool m_initialized{false};
+};
+
+struct LightningSource
+{
+    QVector3D position;
+    QVector3D previous;
+    QVector3D velocity;
+    int age{0};
+};
+
+struct LightningParticle
+{
+    QVector3D position;
+    QVector3D velocity;
+    int source{-1};
+    int lifetime{0};
+    int frame{0};
+    float scale{0.0f};
+    float alpha{1.0f};
+    bool followSource{false};
+    bool oneFrameFlash{false};
+    bool cloud{false};
+};
+
+class LightningBlastEmitter
+{
+public:
+    static constexpr int kPreviewCycleTicks = 80;
+
+    void advanceTo(qint64 logicalTick, quint32 seed, const QVector3D& origin,
+                   float authoredScale)
+    {
+        const int cycleTick = int(logicalTick % kPreviewCycleTicks);
+        if(!m_initialized || seed != m_seed || cycleTick < m_cycleTick)
+            reset(seed, origin, authoredScale);
+        m_origin = origin;
+        m_authoredScale = qMax(0.001f, authoredScale);
+        while(m_cycleTick < cycleTick)
+        {
+            advanceOne();
+            ++m_cycleTick;
+        }
+    }
+
+    QVector<WeatherRenderSample> samples() const
+    {
+        QVector<WeatherRenderSample> result;
+        result.reserve(m_particles.size());
+        for(const LightningParticle& particle : m_particles)
+        {
+            if(particle.scale <= 0.0f)
+                continue;
+            WeatherRenderSample sample;
+            sample.position = particle.position;
+            sample.scale = billboardDiameter(particle.scale);
+            sample.alpha = particle.alpha;
+            sample.frame = particle.frame;
+            result.append(sample);
+        }
+        return result;
+    }
+
+    int activeCount() const { return m_particles.size(); }
+
+private:
+    float randomRange(float low, float high)
+    {
+        return low + (high - low) * m_rng.unit();
+    }
+
+    QVector3D randomDisk()
+    {
+        const float radius = qSqrt(m_rng.unit());
+        const float angle = randomRange(0.0f, float(M_PI) * 2.0f);
+        return QVector3D(qCos(angle) * radius, qSin(angle) * radius, 0.0f);
+    }
+
+    void reset(quint32 seed, const QVector3D& origin, float authoredScale)
+    {
+        m_seed = seed;
+        m_rng.reset(seed ^ 0x4C425354u);
+        m_origin = origin;
+        m_authoredScale = qMax(0.001f, authoredScale);
+        m_sources.clear();
+        m_particles.clear();
+        m_sourcePhase = 0;
+        m_generating = true;
+        m_cycleTick = 0;
+        for(int i = 0; i < 10; ++i)
+        {
+            QVector3D direction = i == 0 ? QVector3D() : randomDisk();
+            LightningSource source;
+            source.position = origin + direction * (m_authoredScale * 0.3f);
+            source.position.setZ(origin.z() + 0.3f);
+            source.previous = source.position;
+            direction.setZ(0.5f);
+            source.velocity = direction.normalized() * 0.5f;
+            m_sources.append(source);
+        }
+        m_initialized = true;
+    }
+
+    void spawn()
+    {
+        LightningParticle particle;
+        if(m_sourcePhase < m_sources.size() * 2)
+        {
+            particle.source = m_sourcePhase / 2;
+            particle.position = m_sources[particle.source].position;
+            particle.lifetime = 10;
+            particle.followSource = (m_sourcePhase & 1) == 0;
+            particle.oneFrameFlash = !particle.followSource;
+            if(particle.oneFrameFlash)
+            {
+                particle.frame = 12 + int(m_rng.next() & 3u);
+                particle.scale = m_authoredScale * 0.2f * randomRange(0.5f, 1.4f);
+                if(particle.source == 0)
+                    particle.scale = m_authoredScale * 0.4f;
+            }
+            ++m_sourcePhase;
+            m_particles.append(particle);
+            return;
+        }
+
+        const int sourceAge = m_sources.isEmpty() ? 10 : m_sources[0].age;
+        if(m_particles.size() < 200 && sourceAge < 5)
+        {
+            const float radiusPart = 1.0f - qPow(m_rng.unit(), 2.0f);
+            const float angle = randomRange(0.0f, 6.28f);
+            particle.velocity = QVector3D(radiusPart * qCos(angle),
+                                          radiusPart * qSin(angle), 0.0f)
+                * (m_authoredScale * 0.3f);
+            particle.position = m_sources[0].position + particle.velocity;
+            particle.position.setZ(m_sources[0].position.z()
+                                   + (1.0f - radiusPart) * m_authoredScale * 0.1f);
+            particle.frame = 8;
+            particle.lifetime = int(9.0f - 3.0f * radiusPart);
+            particle.scale = randomRange(0.1f, 0.14f) * m_authoredScale
+                * (2.0f - radiusPart);
+            particle.alpha = 0.25f;
+            particle.cloud = true;
+            m_particles.append(particle);
+            return;
+        }
+
+        const int sourceIndex = int(m_rng.next() % quint32(m_sources.size()));
+        const float part = m_rng.unit();
+        particle.position = m_sources[sourceIndex].position * part
+            + m_sources[sourceIndex].previous * (1.0f - part);
+        particle.frame = 1;
+        particle.lifetime = 6;
+        particle.scale = randomRange(0.02f, 0.03f) * 3.0f;
+        m_particles.append(particle);
+    }
+
+    void advanceOne()
+    {
+        static const int alphaTable[16] = {
+            0, 0x50, 0xB0, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF
+        };
+        for(int i = m_particles.size() - 1; i >= 0; --i)
+        {
+            LightningParticle& particle = m_particles[i];
+            if(--particle.lifetime < 0 || particle.oneFrameFlash)
+            {
+                m_particles.removeAt(i);
+                continue;
+            }
+            if(particle.followSource)
+            {
+                particle.position = m_sources[particle.source].position;
+                particle.scale = 0.1f;
+                continue;
+            }
+            particle.alpha = float(alphaTable[qBound(0, particle.lifetime, 15)])
+                / (255.0f * 4.0f);
+            if(particle.cloud)
+            {
+                particle.frame = (particle.frame & ~3) + ((particle.frame + 1) & 3);
+                particle.position += particle.velocity;
+                particle.velocity *= 0.6f;
+            }
+            else
+            {
+                ++particle.frame;
+            }
+            particle.scale *= 0.9f;
+        }
+
+        if(!m_generating)
+            return;
+        const int attempts = m_cycleTick == 0 ? 250 : 50;
+        for(int attempt = 0; attempt < attempts && m_particles.size() < 600; ++attempt)
+        {
+            if((m_rng.next() % 100u) + 1u <= 88u)
+                spawn();
+        }
+        for(LightningSource& source : m_sources)
+        {
+            ++source.age;
+            source.previous = source.position;
+            source.position += source.velocity;
+            source.velocity.setZ(source.velocity.z() - 0.075f);
+        }
+        if(!m_sources.isEmpty() && m_sources[0].age >= 10)
+            m_generating = false;
+    }
+
+    Isaac32 m_rng;
+    QVector<LightningSource> m_sources;
+    QVector<LightningParticle> m_particles;
+    QVector3D m_origin;
+    float m_authoredScale{1.0f};
+    quint32 m_seed{0};
+    int m_sourcePhase{0};
+    int m_cycleTick{0};
+    bool m_generating{false};
     bool m_initialized{false};
 };
 

@@ -825,10 +825,10 @@ The generated control at
 - 83 unique particle records and no other objects;
 - particle IDs 900000 through 900082;
 - type IDs 8192 through 8274 in row-major order;
-- a 10-by-9 grid starting at `(16, 16, 0)`;
+- a 10-by-9 grid starting at `(2, 2, 0)`;
 - center spacing of 3 world units, or 1.5 terrain tiles, and authored scale 1;
 - SHA-256
-  `75C6E1A2D6F524264EB616A4189CC8139A9158955F341F261A4E5CB4EB6E9867`.
+  `6EBE2B6892EC700CF7FA4B6F776A7142D960CB389EEDF112693F280599C8AB1F`.
 
 The independent particle MOB reporter finds exactly 83 unique IDs and types.
 EI Mapper strict validation covers all 12,094 bytes, finds 83 objects, and
@@ -840,3 +840,78 @@ This catalog is an editor rendering inventory, not proof that every native
 family can operate as a standalone map source. Carrier-dependent, transient,
 moving, wall, and spell-owned types require separate native controls with their
 real owner parameters before their visual behavior can be called reconstructed.
+
+### Portable flat-ground collection
+
+`scripts/build_particle_catalog_collection.py` packages the catalog with a
+fully synthetic one-sector MPR and a directly discoverable collection file.
+The MPR has the internal members `zone1.mp` and `zone1000000.sec`, declares the
+stock 512-slot terrain atlas, has constant height and normals, and assigns all
+256 terrain tile words to atlas slot 1 with rotation 0. It embeds no proprietary
+imagery; at render time the configured Jamais Vu Zone 1 atlas supplies the
+uniform common-ground tile.
+
+The canonical generated MPR is 11,459 bytes with SHA-256
+`9DCFD1547F6E69E3D3DB8C54890DFE66890EB1F3DDBAE98D0CD3F036E9D0A46F`.
+Independent parsing confirms both archive members, one flat sector, 512 atlas
+slots, and the uniform slot-1 tile assignment. EI Mapper parses all bytes and
+performs a byte-identical unchanged round trip. Two independent generations
+produce identical collection, MPR, MOB, and manifest bytes. The collection
+selects the `jamais-vu` profile and registered `gz1g` metadata, resolves the MPR
+first and then the existing 83-type MOB by package-relative paths, and does not
+modify or depend on a live installed map file.
+
+## Weather-family reconstruction: Tornado and Lightningblast
+
+The fingerprinted executable selects Tornado (type 8202) and Lightningblast
+(type 8240) as independent particle families. They do not use the generic
+Tendri fire/smoke callbacks, and the catalog's former single textured circle is
+therefore rejected.
+
+For Tornado, the factory branch at `0x00486574..0x0048679F` confirms four spawn
+attempts per logical quant, probability 100, capacity 800, six local sources,
+a 12-world-unit source spine, ordinary source-alpha blending, texture
+`Tornado`, and callback addresses `0x00489F70`, `0x0048A310`, and
+`0x0048A560`. The callback ranges establish the visual rules:
+
+- particles select one of three classes, live 100 through 108 quants, and
+  spawn at a random relative height along the six-source spine;
+- two classes use phases 0..11 and billboard radius based on spiral radius;
+  the third uses phases 12..15 and a small fixed radius;
+- particles rotate around the source spine, angular speed grows by 1.01 per
+  quant, spiral radius contracts by 0.99, and relative vertical speed gains
+  0.0001 per quant;
+- alpha ramps from 0.1 toward 1 and is multiplied by `sqrt(1-height)`, while
+  RGB is captured from the current sunlight color;
+- the local-source callback anchors the base one world unit above terrain and
+  bends the six-source spine when its carrier moves. A stationary standalone
+  catalog source therefore uses a straight vertical spine.
+
+For Lightningblast, the factory branch at `0x00487746..0x0048783F` confirms
+probability 88, initial 250 spawn attempts, capacity 600, lifespan/phase count
+15, one-quant phase timing, +/-0.2 random position bounds, additive blending,
+texture `TendriLight`, and callbacks `0x004923B0`, `0x00492B80`, and
+`0x00492CC0`. The callback ranges establish that it is a finite burst, not a
+persistent glow: it creates ten moving local sources, emits source flashes,
+ground-cloud phases, and short animated bolt particles, applies 0.075 downward
+acceleration to each source, reduces generation to 50 attempts, and stops
+generation after ten local-source updates. A catalog preview may repeat the
+complete finite burst for inspection, but each individual cycle must retain
+the native timing and motion rather than turning it into a continuous emitter.
+
+`scripts/particle_texture_report.py` independently fingerprints the active JMV
+texture archive (SHA-256
+`2E8CA42FB75FAC12E5659C563C547FEE0F72D6C1B6E2E1C454B3072E3BE0703B`).
+Both `tornado.mmp` and `tendrilight.mmp` are 1024-by-1024 DXT3 textures with 11
+mip levels and 16 phases in a 4-by-4 atlas. Their payload SHA-256 values are
+`549EBC0C8FC0DC57544DB97FB0E426E92F85863315A00035BC54A198473C280A` and
+`F63D73CE04ED76339D2B15296E91B2089873C7FA115099CEDD596831ACBACC88`
+respectively. The established top-row-first, half-texel-inset atlas addressing
+therefore applies unchanged.
+
+The binary-report fixture now pins each factory and callback range plus the
+12.0 tornado height, 0.2 factory speed factor, and 0.075 Lightningblast gravity
+constants. Remaining controls before claiming complete native equivalence are
+a moving Tornado carrier (for source-spine bending) and a runtime
+Lightningblast spell capture (for owner-supplied size and destination). These
+do not block faithful stationary catalog previews of the confirmed paths.

@@ -1,0 +1,34 @@
+import importlib.util
+import json
+from pathlib import Path
+import struct
+import unittest
+
+
+SCRIPT = Path(__file__).parents[1] / "scripts" / "particle_texture_report.py"
+SPEC = importlib.util.spec_from_file_location("particle_texture_report", SCRIPT)
+MODULE = importlib.util.module_from_spec(SPEC)
+assert SPEC.loader
+SPEC.loader.exec_module(MODULE)
+
+
+class ParticleTextureReportTests(unittest.TestCase):
+    def test_reference_fixture_pins_weather_atlases(self):
+        path = Path(__file__).parent / "fixtures" / "particle_runtime" / "weather-particle-textures.json"
+        fixture = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual(fixture["source"]["sha256"], MODULE.REFERENCE_JMV_TEXTURES_SHA256)
+        by_name = {item["name"]: item for item in fixture["textures"]}
+        self.assertEqual(set(by_name), {"tornado.mmp", "tendrilight.mmp"})
+        for item in by_name.values():
+            self.assertEqual((item["width"], item["height"]), (1024, 1024))
+            self.assertEqual(item["mipCount"], 11)
+            self.assertEqual(item["textureFormat"], "0x33545844")
+            self.assertEqual(item["atlas"]["phaseCount"], 16)
+
+    def test_invalid_archive_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "not an EI RES"):
+            MODULE.archive_members(struct.pack("<4I", 0, 0, 16, 0))
+
+
+if __name__ == "__main__":
+    unittest.main()

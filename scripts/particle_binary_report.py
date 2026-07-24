@@ -18,6 +18,14 @@ RANGES = {
     "particle_scale_mutator": (0x485480, 0x485523),
     "atlas_rectangle_builder": (0x4885B4, 0x488790),
     "tendri_factory_branch": (0x485B72, 0x485D58),
+    "tornado_factory_branch": (0x486574, 0x4867A0),
+    "tornado_create_callback": (0x489F70, 0x48A310),
+    "tornado_update_callback": (0x48A310, 0x48A560),
+    "tornado_local_source_callback": (0x48A560, 0x48A8F0),
+    "lightningblast_factory_branch": (0x487746, 0x487840),
+    "lightningblast_create_callback": (0x4923B0, 0x492B80),
+    "lightningblast_update_callback": (0x492B80, 0x492CC0),
+    "lightningblast_local_source_callback": (0x492CC0, 0x492D25),
     "spawn_callback": (0x48E9E0, 0x48EC20),
     "update_callback": (0x48EC20, 0x48ED60),
     "type_0x2010_spawn_wrapper": (0x48ED60, 0x48EE20),
@@ -54,6 +62,12 @@ RANGES = {
 }
 SITES = {
     "tendri_texture_name": (0x78AEA4, 12),
+    "tornado_texture_name": (0x78AE68, 8),
+    "tendrilight_texture_name": (0x78ADC8, 12),
+    "tornado_factory_parameters": (0x486574, 0x227),
+    "tornado_callback_selection": (0x48677D, 30),
+    "lightningblast_factory_parameters": (0x487746, 0xFA),
+    "lightningblast_callback_selection": (0x487804, 42),
     "global_render_lookup_type_0x2001": (0x40EBD8, 18),
     "scale_mutator_all_fields": (0x485480, 0xA3),
     "global_render_lookup_call": (0x4575AC, 26),
@@ -131,6 +145,9 @@ CONSTANTS = {
     "weather_minimum_elevation_float": (0x73BAF0, "f"),
     "pi_float": (0x73F3D0, "f"),
     "degrees_to_radians_float": (0x73BA30, "f"),
+    "tornado_height_float": (0x73CB18, "f"),
+    "tornado_speed_factor_float": (0x73CCA0, "f"),
+    "lightningblast_gravity_float": (0x73CF28, "f"),
 }
 
 

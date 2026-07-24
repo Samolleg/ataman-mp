@@ -36,6 +36,20 @@ class ParticleBinaryReportTests(unittest.TestCase):
             fixture["sites"]["tendri_texture_name"]["bytes"],
             "54656E647269536D6F6B6500",
         )
+        self.assertEqual(fixture["sites"]["tornado_texture_name"]["bytes"],
+                         "546F726E61646F00")
+        self.assertEqual(fixture["sites"]["tendrilight_texture_name"]["bytes"],
+                         "54656E6472694C6967687400")
+        self.assertEqual(fixture["constants"]["tornado_height_float"]["value"], 12.0)
+        self.assertAlmostEqual(
+            fixture["constants"]["tornado_speed_factor_float"]["value"], 0.2)
+        self.assertAlmostEqual(
+            fixture["constants"]["lightningblast_gravity_float"]["value"], 0.075)
+        self.assertEqual(fixture["ranges"]["tornado_create_callback"]["start_va"],
+                         "0x00489F70")
+        self.assertEqual(
+            fixture["ranges"]["lightningblast_create_callback"]["start_va"],
+            "0x004923B0")
         self.assertEqual(
             fixture["ranges"]["particle_scale_mutator"]["sha256"],
             "D0328F6AB7F419CB2A8F63BF9632A1BCADFAFF9398EB70F8E59A96A3E0953E24",

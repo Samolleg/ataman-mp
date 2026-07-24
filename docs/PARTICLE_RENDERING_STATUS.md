@@ -174,3 +174,11 @@ loading by itself over EI Mapper's neutral grid or alongside a suitable MPR.
 Large effects can be regenerated with wider spacing. Standalone presence in
 this catalog does not replace attached or transient native controls for types
 whose real owner supplies additional parameters.
+
+The portable one-click control is
+`artifacts/particle-catalog-collection/collections/particle-catalog.collection`.
+It loads the same 83-type MOB over a deterministic, flat, one-sector synthetic
+MPR. The MPR uses the `zone1` internal namespace and atlas slot 1, so the active
+Jamais Vu Zone 1 atlas supplies the common-ground texture; no texture imagery is
+embedded in the fixture. The grid begins at `(2, 2, 0)` and fits inside the
+32-by-32-world-unit plane.
