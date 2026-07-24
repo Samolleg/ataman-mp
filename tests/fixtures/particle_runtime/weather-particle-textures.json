@@ -75,6 +75,34 @@
       "size": 349628,
       "textureFormat": "0x33545844",
       "width": 512
+    },
+    {
+      "atlas": {
+        "columns": 4,
+        "phaseCount": 16,
+        "rows": 4
+      },
+      "height": 1024,
+      "mipCount": 11,
+      "name": "changehero.mmp",
+      "sha256": "36BFF7B3FD282EBF45A97DAD5A752B7B61102AC7831EA31D87A984CC6BE574B9",
+      "size": 1398204,
+      "textureFormat": "0x33545844",
+      "width": 1024
+    },
+    {
+      "atlas": {
+        "columns": 4,
+        "phaseCount": 16,
+        "rows": 4
+      },
+      "height": 2048,
+      "mipCount": 12,
+      "name": "rainsnow.mmp",
+      "sha256": "BF324F155FF82C9C6C17942BDBA1ADC45423FFB4AA2A1AF85E26177B28FF7E43",
+      "size": 5592508,
+      "textureFormat": "0x33545844",
+      "width": 2048
     }
   ]
 }

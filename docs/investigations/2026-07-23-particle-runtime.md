@@ -975,3 +975,76 @@ The complete application builds successfully after the graphless-test merge,
 and the noninteractive widget smoke test passes. Native OpenGL and ANGLE visual
 approval remain required before promoting the two carrier-dependent controls
 to fully validated status.
+
+## Ordered catalog reconstruction: Mushroom, Blood1, and Firewall
+
+The executable's complete 83-entry particle dispatch table maps types 8206,
+8207, and 8208 to factory branches `0x00486BD5`, `0x00486C43`, and
+`0x00485B72` respectively. This rejects the catalog's former generic glowing
+circle for Mushroom and Blood1, and rejects the generic orange-fire style for
+Firewall.
+
+Mushroom (type 8206) uses the `ChangeHero` atlas and the callback triplet
+`0x004889D0`, `0x00488DB0`, and `0x00488F00`. The factory fixes ten creation
+attempts, capacity 4000, indefinite system life, one-quant phase timing, and a
+single local source. Callback evidence establishes a finite generator: the
+source expands logarithmically, rises by 0.12 authored-scale units per quant,
+and disables generation after 30 updates. Particles live 16 through 19 quants,
+advance only through phase 14, grow by 1.1 while below phase 8, damp velocity by
+0.7, ramp alpha upward in 0x40 steps, and fade during the last four quants.
+Their horizontal velocity is additionally steered toward the expanding local
+source. The callback contains a separate type-8206-only one-shot auxiliary
+effect dispatch at source age zero; that non-particle gameplay effect is not
+part of the standalone billboard preview.
+
+Blood1 (type 8207) uses `RainSnow`, ordinary alpha blending, and callbacks
+`0x0048EEA0`, `0x0048F300`, and `0x0048F380`. Its factory fixes capacity 300,
+six-quant particle life, 15 phase ticks, and one local source. The first create
+callback derives both its local-source count and ten-times-larger creation
+attempt count from the attached carrier's size field, then emits phase-12
+particles from the carrier position along randomized unit directions. Per-quant
+updates move the particle, multiply velocity by 0.9 and scale by 0.8, add a
+scale-proportional downward term of 0.05, and use the seven-entry native alpha
+sequence. Generation stops after the local source passes age five. A bare
+`PARTICL` record contains only type, position, and scale, so the all-type catalog
+does not author the carrier-size input. As with Casting, the editor catalog may
+use authored scale as an explicitly synthetic carrier bound; attached-carrier
+captures remain required before claiming arbitrary-owner equivalence.
+
+Firewall (type 8208) shares the `TendriSmoke` atlas and ordinary Tendri update
+callback with the fire/smoke family, but the factory specializes it at
+`0x00485BBF..0x00485D46`: 20 base attempts, capacity 1500, the wrapper at
+`0x0048ED60`, and local-source callback `0x0048EE20`. The local callback derives
+the active attempt count from wall-vector length, clamps it to at least six and
+to capacity/16, while the wrapper distributes births along that vector and
+snaps each birth to terrain height. The standalone MOB record has no wall-vector
+field; the constructor's zero vector therefore selects the confirmed six-attempt
+point-source path. Firewall terminates particles after the fire phase range and
+must render the `TendriSmoke` atlas, not a procedural orange disc. A nonzero wall
+control must be captured from the spell/effect owner before the elongated wall
+form can be validated.
+
+The binary evidence report now fingerprints all three factory specializations,
+their callback ranges, callback-selection sites, texture-name sites, and the
+bounded motion/lifetime/source-update instruction windows. Texture payload
+fingerprints for `changehero.mmp` and `rainsnow.mmp` are recorded separately
+before renderer dispatch is enabled.
+
+### Implemented ordered controls
+
+The editor now dispatches Mushroom and Blood1 to separate deterministic
+simulators and routes Firewall through the confirmed TendriSmoke fire-phase
+path. Mushroom repeats only after its 30-quant generator and live population
+finish. Blood1 repeats its short burst with authored scale explicitly serving
+as the catalog's synthetic carrier bound. Firewall retains the constructor's
+zero wall vector for standalone records; no invented wall direction is added.
+All three preserve the independent cyan editor selection marker.
+
+The active texture archive pins `changehero.mmp` as a 1024-square DXT3 atlas
+with SHA-256 `36BFF7B3FD282EBF45A97DAD5A752B7B61102AC7831EA31D87A984CC6BE574B9`
+and `rainsnow.mmp` as a 2048-square DXT3 atlas with SHA-256
+`BF324F155FF82C9C6C17942BDBA1ADC45423FFB4AA2A1AF85E26177B28FF7E43`.
+The executable fixture also pins Blood1's alpha table as
+`0, 64, 128, 192, 255, 255, 255`. Focused tests cover deterministic replay,
+finite retirement/restart, atlas phase bounds, Blood1's fixed phase 12, and
+Firewall's phase-0-through-7 restriction.

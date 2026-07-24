@@ -260,7 +260,7 @@ SParticleVisualStyle particleVisualStyle(uint kind)
 
 bool isPersistentFireParticle(uint kind)
 {
-    return kind == 8193u || kind == 8195u;
+    return kind == 8193u || kind == 8195u || kind == 8208u;
 }
 
 bool isPersistentSmokeParticle(uint kind)
@@ -2596,6 +2596,12 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
     QOpenGLTexture* bansheeTexture = textures->texture("banshee");
     if(bansheeTexture == fallbackTexture)
         bansheeTexture = nullptr;
+    QOpenGLTexture* changeHeroTexture = textures->texture("changehero");
+    if(changeHeroTexture == fallbackTexture)
+        changeHeroTexture = nullptr;
+    QOpenGLTexture* rainSnowTexture = textures->texture("rainsnow");
+    if(rainSnowTexture == fallbackTexture)
+        rainSnowTexture = nullptr;
 
     bool inverseOk = false;
     const QMatrix4x4 inverseView = cameraMatrix.inverted(&inverseOk);
@@ -2818,6 +2824,30 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
         }
     };
 
+    const auto drawMushroom = [&](const CNode* owner, const QVector3D& origin,
+                                  float authoredScale, uint seed)
+    {
+        ei::particle::MushroomEmitter& emitter = m_mushroomEmitters[owner];
+        emitter.advanceTo(logicalTick, seed, origin, authoredScale);
+        for(const ei::particle::EffectRenderSample& sample : emitter.samples())
+            drawSprite(sample.position, sample.scale, 1.0f, 0.0f,
+                       QVector4D(1.0f, 1.0f, 1.0f, sample.alpha),
+                       changeHeroTexture, ei::particle::atlasUv(sample.frame), false,
+                       changeHeroTexture == nullptr, 0.18f);
+    };
+
+    const auto drawBlood1 = [&](const CNode* owner, const QVector3D& origin,
+                                float syntheticCarrierBound, uint seed)
+    {
+        ei::particle::Blood1Emitter& emitter = m_blood1Emitters[owner];
+        emitter.advanceTo(logicalTick, seed, origin, syntheticCarrierBound);
+        for(const ei::particle::EffectRenderSample& sample : emitter.samples())
+            drawSprite(sample.position, sample.scale, 1.0f, 0.0f,
+                       QVector4D(1.0f, 1.0f, 1.0f, sample.alpha),
+                       rainSnowTexture, ei::particle::atlasUv(sample.frame), false,
+                       rainSnowTexture == nullptr, 0.18f);
+    };
+
     for(CMob* mob : m_aMob)
     {
         if(!isMobVisible(mob))
@@ -2883,6 +2913,24 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
                                QVector4D(0.10f, 0.90f, 1.0f, 0.72f), nullptr,
                                QVector4D(0.0f, 0.0f, 1.0f, 1.0f), false,
                                true, 0.12f);
+                continue;
+            }
+            if(particle->kind() == 8206u)
+            {
+                drawMushroom(particle, center, authoredScale, particle->mapId());
+                if(particle->nodeState() == ENodeState::eSelect)
+                    drawSprite(center, qMax(0.3f, authoredScale * 0.35f), 1.0f, 0.0f,
+                               QVector4D(0.10f, 0.90f, 1.0f, 0.72f), nullptr,
+                               QVector4D(0.0f, 0.0f, 1.0f, 1.0f), false, true, 0.12f);
+                continue;
+            }
+            if(particle->kind() == 8207u)
+            {
+                drawBlood1(particle, center, authoredScale, particle->mapId());
+                if(particle->nodeState() == ENodeState::eSelect)
+                    drawSprite(center, qMax(0.3f, authoredScale * 0.35f), 1.0f, 0.0f,
+                               QVector4D(0.10f, 0.90f, 1.0f, 0.72f), nullptr,
+                               QVector4D(0.0f, 0.0f, 1.0f, 1.0f), false, true, 0.12f);
                 continue;
             }
             if(particle->kind() == 8240u)
@@ -5105,6 +5153,8 @@ bool CView::unloadMobDocument(CMob* mob, bool promptForSave)
         m_pUndoStack->clear();
     m_hiddenMobs.remove(mob);
     m_tendriEmitters.clear();
+    m_mushroomEmitters.clear();
+    m_blood1Emitters.clear();
     m_tornadoEmitters.clear();
     m_lightningBlastEmitters.clear();
     m_castingEmitters.clear();
@@ -5308,6 +5358,8 @@ void CView::unloadMob(QString mobName)
     if(m_pUndoStack)
         m_pUndoStack->clear();
     m_tendriEmitters.clear();
+    m_mushroomEmitters.clear();
+    m_blood1Emitters.clear();
     m_tornadoEmitters.clear();
     m_lightningBlastEmitters.clear();
     m_castingEmitters.clear();

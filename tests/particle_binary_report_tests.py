@@ -46,6 +46,10 @@ class ParticleBinaryReportTests(unittest.TestCase):
                          "42616E7368656500")
         self.assertEqual(fixture["sites"]["acidray_texture_name"]["bytes"],
                          "4163696452617900")
+        self.assertEqual(fixture["sites"]["changehero_texture_name"]["bytes"],
+                         "4368616E67654865726F00")
+        self.assertEqual(fixture["sites"]["rainsnow_texture_name"]["bytes"],
+                         "5261696E536E6F7700")
         self.assertEqual(fixture["constants"]["tornado_height_float"]["value"], 12.0)
         self.assertAlmostEqual(
             fixture["constants"]["tornado_speed_factor_float"]["value"], 0.2)
@@ -63,6 +67,28 @@ class ParticleBinaryReportTests(unittest.TestCase):
         self.assertEqual(
             fixture["ranges"]["bansheecasting_create_callback"]["start_va"],
             "0x00489BE0")
+        self.assertEqual(fixture["ranges"]["mushroom_create_callback"]["start_va"],
+                         "0x004889D0")
+        self.assertEqual(fixture["ranges"]["blood1_create_callback"]["start_va"],
+                         "0x0048EEA0")
+        self.assertEqual(fixture["ranges"]["firewall_create_callback"]["start_va"],
+                         "0x0048ED60")
+        self.assertIn(
+            "C783E0010000D0894800C783E4010000B08D4800",
+            fixture["sites"]["mushroom_callback_selection"]["bytes"],
+        )
+        self.assertIn(
+            "C783E0010000A0EE4800C783E401000000F34800",
+            fixture["sites"]["blood1_callback_selection"]["bytes"],
+        )
+        self.assertIn(
+            "C783E001000060ED4800C783E801000020EE4800",
+            fixture["sites"]["firewall_callback_selection"]["bytes"],
+        )
+        self.assertEqual(
+            fixture["sites"]["blood1_alpha_table"]["bytes"],
+            "000000004000000080000000C0000000FF000000FF000000FF000000",
+        )
         self.assertEqual(
             fixture["ranges"]["particle_scale_mutator"]["sha256"],
             "D0328F6AB7F419CB2A8F63BF9632A1BCADFAFF9398EB70F8E59A96A3E0953E24",

@@ -227,6 +227,14 @@ struct RenderSample
     int frame{0};
 };
 
+struct EffectRenderSample
+{
+    QVector3D position;
+    float scale{1.0f};
+    float alpha{1.0f};
+    int frame{0};
+};
+
 class TendriEmitter
 {
 public:
@@ -390,6 +398,222 @@ private:
     quint32 m_seed{0};
     quint32 m_kind{0};
     qint64 m_lastTick{0};
+    bool m_initialized{false};
+};
+
+struct MushroomParticle
+{
+    QVector3D position;
+    QVector3D velocity;
+    float scale{0.1f};
+    float alpha{0.25f};
+    int lifetime{16};
+    int frame{0};
+    int phaseDelay{2};
+};
+
+class MushroomEmitter
+{
+public:
+    static constexpr int kPreviewCycleTicks = 64;
+
+    void advanceTo(qint64 logicalTick, quint32 seed, const QVector3D& origin,
+                   float authoredScale)
+    {
+        const int cycleTick = int(logicalTick % kPreviewCycleTicks);
+        if(!m_initialized || seed != m_seed || cycleTick < m_cycleTick)
+            reset(seed, origin, authoredScale);
+        m_origin = origin;
+        m_scale = qMax(0.001f, authoredScale);
+        while(m_cycleTick < cycleTick) { advanceOne(); ++m_cycleTick; }
+    }
+
+    QVector<EffectRenderSample> samples() const
+    {
+        QVector<EffectRenderSample> result;
+        result.reserve(m_particles.size());
+        for(const MushroomParticle& p : m_particles)
+        {
+            EffectRenderSample sample;
+            sample.position = p.position;
+            sample.scale = billboardDiameter(p.scale);
+            sample.alpha = p.alpha;
+            sample.frame = p.frame;
+            result.append(sample);
+        }
+        return result;
+    }
+
+    int activeCount() const { return m_particles.size(); }
+
+private:
+    float randomRange(float low, float high) { return low + (high - low) * m_rng.unit(); }
+
+    void reset(quint32 seed, const QVector3D& origin, float scale)
+    {
+        m_seed = seed;
+        m_rng.reset(seed ^ 0x4D555348u);
+        m_origin = origin;
+        m_scale = qMax(0.001f, scale);
+        m_sourceAge = m_cycleTick = 0;
+        m_sourceHeight = m_sourceRadius = 0.0f;
+        m_particles.clear();
+        m_initialized = true;
+    }
+
+    void spawn()
+    {
+        QVector3D direction(randomRange(-1.0f, 1.0f), randomRange(-1.0f, 1.0f),
+                            randomRange(0.1f, 1.0f));
+        if(direction.lengthSquared() < 0.0001f) direction.setZ(1.0f);
+        direction.normalize();
+        MushroomParticle p;
+        p.position = m_origin + QVector3D(direction.x() * m_sourceRadius,
+                                           direction.y() * m_sourceRadius,
+                                           m_sourceHeight);
+        p.velocity = direction * (0.06f * m_scale);
+        p.velocity.setZ(p.velocity.z() + 0.12f * m_scale);
+        p.scale = (0.1f + 0.008f * float(m_sourceAge)) * m_scale;
+        p.lifetime = 16 + int(m_rng.next() & 3u);
+        p.frame = qBound(0, m_sourceAge / 5 + int(m_rng.next() % 3u) - 1, 14);
+        m_particles.append(p);
+    }
+
+    void advanceOne()
+    {
+        for(int i = m_particles.size() - 1; i >= 0; --i)
+        {
+            MushroomParticle& p = m_particles[i];
+            if(--p.lifetime == 0) { m_particles.removeAt(i); continue; }
+            if(--p.phaseDelay == 0 && p.frame < 14)
+            { ++p.frame; p.phaseDelay = p.frame < 8 ? 2 : 1; }
+            if(p.frame < 8) p.scale *= 1.1f;
+            p.alpha = p.lifetime > 4 ? qMin(1.0f, p.alpha + 64.0f / 255.0f)
+                                      : qMax(0.0f, p.alpha - 63.0f / 255.0f);
+            p.position += p.velocity;
+            const QVector3D horizontal(m_origin.x() - p.position.x(),
+                                       m_origin.y() - p.position.y(), 0.0f);
+            p.velocity = p.velocity * 0.7f + horizontal * 0.02f;
+        }
+        if(m_sourceAge < 30)
+            for(int attempt = 0; attempt < 10; ++attempt) spawn();
+        ++m_sourceAge;
+        m_sourceRadius = qLn(float(m_sourceAge + 1)) * 0.2f * m_scale;
+        m_sourceHeight += 0.12f * m_scale;
+    }
+
+    Isaac32 m_rng;
+    QVector<MushroomParticle> m_particles;
+    QVector3D m_origin;
+    float m_scale{1.0f}, m_sourceHeight{0.0f}, m_sourceRadius{0.0f};
+    quint32 m_seed{0};
+    int m_sourceAge{0}, m_cycleTick{0};
+    bool m_initialized{false};
+};
+
+struct BloodParticle
+{
+    QVector3D position;
+    QVector3D velocity;
+    float scale{1.0f};
+    int lifetime{6};
+};
+
+class Blood1Emitter
+{
+public:
+    static constexpr int kPreviewCycleTicks = 32;
+
+    void advanceTo(qint64 logicalTick, quint32 seed, const QVector3D& origin, float bound)
+    {
+        const int cycleTick = int(logicalTick % kPreviewCycleTicks);
+        if(!m_initialized || seed != m_seed || cycleTick < m_cycleTick)
+            reset(seed, origin, bound);
+        m_origin = origin;
+        m_bound = qMax(0.001f, bound);
+        while(m_cycleTick < cycleTick) { advanceOne(); ++m_cycleTick; }
+    }
+
+    QVector<EffectRenderSample> samples() const
+    {
+        static constexpr std::array<float, 7> alpha = {
+            0.0f, 64.0f / 255.0f, 128.0f / 255.0f,
+            192.0f / 255.0f, 1.0f, 1.0f, 1.0f
+        };
+        QVector<EffectRenderSample> result;
+        result.reserve(m_particles.size());
+        for(const BloodParticle& p : m_particles)
+        {
+            EffectRenderSample sample;
+            sample.position = p.position;
+            sample.scale = billboardDiameter(p.scale);
+            sample.alpha = alpha[size_t(qBound(0, p.lifetime, 6))];
+            sample.frame = 12;
+            result.append(sample);
+        }
+        return result;
+    }
+
+    int activeCount() const { return m_particles.size(); }
+
+private:
+    float randomRange(float low, float high) { return low + (high - low) * m_rng.unit(); }
+
+    void reset(quint32 seed, const QVector3D& origin, float bound)
+    {
+        m_seed = seed;
+        m_rng.reset(seed ^ 0x424C4431u);
+        m_origin = origin;
+        m_bound = qMax(0.001f, bound);
+        m_sourceAge = m_cycleTick = 0;
+        m_particles.clear();
+        m_initialized = true;
+    }
+
+    QVector3D randomDirection()
+    {
+        for(int attempt = 0; attempt < 10; ++attempt)
+        {
+            QVector3D v(randomRange(-1.0f, 1.0f), randomRange(-1.0f, 1.0f),
+                        randomRange(-1.0f, 1.0f));
+            if(v.lengthSquared() > 0.0001f && v.lengthSquared() <= 1.0f)
+                return v.normalized();
+        }
+        return QVector3D(0.0f, 0.0f, 1.0f);
+    }
+
+    void spawn()
+    {
+        BloodParticle p;
+        p.position = m_origin;
+        p.velocity = randomDirection() * (0.166666672f * m_bound);
+        p.scale = m_bound;
+        m_particles.append(p);
+    }
+
+    void advanceOne()
+    {
+        for(int i = m_particles.size() - 1; i >= 0; --i)
+        {
+            BloodParticle& p = m_particles[i];
+            if(--p.lifetime == 0) { m_particles.removeAt(i); continue; }
+            p.position += p.velocity;
+            p.scale *= 0.8f;
+            p.velocity *= 0.9f;
+            p.velocity.setZ(p.velocity.z() - p.scale * 0.05f);
+        }
+        if(m_sourceAge <= 5)
+            for(int i = 0, count = qMax(1, qRound(m_bound * 8.0f)) * 10;
+                i < count; ++i) spawn();
+        ++m_sourceAge;
+    }
+
+    Isaac32 m_rng;
+    QVector<BloodParticle> m_particles;
+    QVector3D m_origin;
+    float m_bound{1.0f};
+    quint32 m_seed{0};
+    int m_sourceAge{0}, m_cycleTick{0};
     bool m_initialized{false};
 };
 

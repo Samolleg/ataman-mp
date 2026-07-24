@@ -20,9 +20,10 @@ class ParticleTextureReportTests(unittest.TestCase):
         by_name = {item["name"]: item for item in fixture["textures"]}
         self.assertEqual(set(by_name), {
             "tornado.mmp", "tendrilight.mmp", "firesmoke.mmp",
-            "banshee.mmp", "acidray.mmp",
+            "banshee.mmp", "acidray.mmp", "changehero.mmp", "rainsnow.mmp",
         })
-        for name in ("tornado.mmp", "tendrilight.mmp", "firesmoke.mmp", "banshee.mmp"):
+        for name in ("tornado.mmp", "tendrilight.mmp", "firesmoke.mmp",
+                     "banshee.mmp", "changehero.mmp"):
             item = by_name[name]
             self.assertEqual((item["width"], item["height"]), (1024, 1024))
             self.assertEqual(item["mipCount"], 11)
@@ -31,6 +32,9 @@ class ParticleTextureReportTests(unittest.TestCase):
         self.assertEqual((by_name["acidray.mmp"]["width"],
                           by_name["acidray.mmp"]["height"]), (512, 512))
         self.assertEqual(by_name["acidray.mmp"]["mipCount"], 10)
+        self.assertEqual((by_name["rainsnow.mmp"]["width"],
+                          by_name["rainsnow.mmp"]["height"]), (2048, 2048))
+        self.assertEqual(by_name["rainsnow.mmp"]["mipCount"], 12)
 
     def test_invalid_archive_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "not an EI RES"):

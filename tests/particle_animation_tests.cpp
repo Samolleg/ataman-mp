@@ -19,6 +19,9 @@ private slots:
     void nukeUsesFiniteNativeBurstAndImpactPhases();
     void castingUsesDeterministicSyntheticCarrierControl();
     void bansheeCastingUsesFiniteElevatedRing();
+    void mushroomUsesFiniteRisingCloud();
+    void blood1UsesFiniteSyntheticCarrierBurst();
+    void firewallUsesTendriFirePhaseRange();
 };
 
 void ParticleAnimationTests::atlasUsesNativeTopRowFirstInsets()
@@ -243,6 +246,61 @@ void ParticleAnimationTests::bansheeCastingUsesFiniteElevatedRing()
     QCOMPARE(emitter.activeCount(), 0);
     emitter.advanceTo(33, 8205u, origin, 1.0f);
     QVERIFY(emitter.activeCount() > 0);
+}
+
+void ParticleAnimationTests::mushroomUsesFiniteRisingCloud()
+{
+    ei::particle::MushroomEmitter first;
+    ei::particle::MushroomEmitter second;
+    const QVector3D origin(2.0f, -1.0f, 0.5f);
+    first.advanceTo(24, 8206u, origin, 1.0f);
+    second.advanceTo(24, 8206u, origin, 1.0f);
+    const auto a = first.samples();
+    const auto b = second.samples();
+    QCOMPARE(a.size(), b.size());
+    QVERIFY(a.size() > 100);
+    for(int i = 0; i < a.size(); ++i)
+    {
+        QCOMPARE(a[i].position, b[i].position);
+        QCOMPARE(a[i].scale, b[i].scale);
+        QCOMPARE(a[i].alpha, b[i].alpha);
+        QCOMPARE(a[i].frame, b[i].frame);
+        QVERIFY(a[i].position.z() > origin.z());
+        QVERIFY(a[i].frame >= 0 && a[i].frame <= 14);
+    }
+    first.advanceTo(63, 8206u, origin, 1.0f);
+    QCOMPARE(first.activeCount(), 0);
+    first.advanceTo(65, 8206u, origin, 1.0f);
+    QVERIFY(first.activeCount() > 0);
+}
+
+void ParticleAnimationTests::blood1UsesFiniteSyntheticCarrierBurst()
+{
+    ei::particle::Blood1Emitter emitter;
+    emitter.advanceTo(4, 8207u, QVector3D(), 1.0f);
+    const auto samples = emitter.samples();
+    QVERIFY(!samples.isEmpty());
+    for(const auto& sample : samples)
+    {
+        QCOMPARE(sample.frame, 12);
+        QVERIFY(sample.scale > 0.0f);
+        QVERIFY(sample.alpha >= 0.0f && sample.alpha <= 1.0f);
+    }
+    emitter.advanceTo(31, 8207u, QVector3D(), 1.0f);
+    QCOMPARE(emitter.activeCount(), 0);
+    emitter.advanceTo(33, 8207u, QVector3D(), 1.0f);
+    QVERIFY(emitter.activeCount() > 0);
+}
+
+void ParticleAnimationTests::firewallUsesTendriFirePhaseRange()
+{
+    ei::particle::TendriEmitter emitter;
+    emitter.advanceTo(100, 8208u, 0x2010u, QVector3D(), 1.0f,
+                      QVector3D(), 0.0f, 60);
+    const auto samples = emitter.samples(0.5f);
+    QVERIFY(!samples.isEmpty());
+    for(const auto& sample : samples)
+        QVERIFY(sample.frame >= 0 && sample.frame <= 7);
 }
 
 QTEST_APPLESS_MAIN(ParticleAnimationTests)

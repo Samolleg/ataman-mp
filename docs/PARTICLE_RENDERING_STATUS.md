@@ -73,6 +73,9 @@ covering the selected JMV corpus.
 | 8203 / `0x200B` | Casting | Dedicated three-source orbiting and rising tails followed by the closing ring, native phase cadence, `FireSmoke` atlas, and ordinary alpha blending. The standalone catalog uses an explicit synthetic carrier bound equal to authored scale and repeats the finite sequence every 72 quants. | Capture attached carriers with different bounding volumes; the standalone bound is a documented editor control, not a native ownerless default. |
 | 8204 / `0x200C` | Nuke | Dedicated finite 13-quant generator with the native shrinking attempt count, cylindrical spawn volume, vertical attenuation and gravity, half-scale impact plane, radial impact motion, phase progression, expansion and alpha decay, using the `AcidRay` atlas and ordinary alpha blending. The editor repeats the completed burst every 80 quants. | Capture a native placed/spell control as a visual validation case; the stationary callback path itself is closed. |
 | 8205 / `0x200D` | Bansheecasting | Dedicated eight-quant elevated closing ring with native short-lived phase-advancing sprites, `Banshee` atlas, and ordinary alpha blending. The standalone catalog uses an explicit synthetic carrier bound equal to authored scale and repeats the finite sequence every 32 quants. | Capture attached carriers with different bounding volumes; the standalone bound is a documented editor control, not a native ownerless default. |
+| 8206 / `0x200E` | Mushroom | Dedicated finite 30-quant rising and logarithmically expanding source, native 16–19-quant particle lives, phase/scale/alpha/velocity rules, `ChangeHero` atlas, and ordinary alpha blending. The completed cloud repeats every 64 quants for catalog inspection. | Validate the type-specific one-shot auxiliary dispatch separately; it is not part of the billboard population. |
+| 8207 / `0x200F` | Blood1 | Dedicated six-quant phase-12 directional burst with native velocity/scale/gravity and alpha-table updates, using `RainSnow` and ordinary alpha blending. The catalog uses authored scale as an explicit synthetic carrier bound and repeats every 32 quants. | Capture attached carriers with different bounds; a standalone record does not author the carrier-size input. |
+| 8208 / `0x2010` | Firewall | Confirmed zero-wall-vector standalone path through the TendriSmoke spawn/update family, restricted to fire phases with ordinary alpha blending. | Capture a spell-owned nonzero wall vector to validate elongated placement and terrain snapping along the wall. |
 
 ## Preview-only families
 
@@ -81,7 +84,7 @@ runtime behavior has not been reconstructed:
 
 | IDs | Names |
 |---|---|
-| 8192, 8194, 8208, 8209, 8231, 8257 | Fireball, Fireblast, Firewall, Firearrow, Castingfire, Firestar |
+| 8192, 8194, 8209, 8231, 8257 | Fireball, Fireblast, Firearrow, Castingfire, Firestar |
 | 8198, 8263 | Healing, Regeneration |
 | 8199 | Poisonfog |
 | 8200, 8201 | Aggressionfog, Geyser |
@@ -101,7 +104,6 @@ still require both native reverse engineering and a dedicated renderer:
 
 | IDs | Names |
 |---|---|
-| 8206–8207 | Mushroom, Blood1 |
 | 8211–8212 | Bluegas, Link |
 | 8215–8216 | Spherefire, Clayring |
 | 8218 | Antimagic |
