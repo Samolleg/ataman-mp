@@ -853,8 +853,19 @@ slot 1 with rotation 0. It embeds no proprietary
 imagery; at render time the configured Jamais Vu Zone 1 atlas supplies the
 uniform common-ground tile.
 
-The canonical generated MPR is 85,611 bytes with SHA-256
-`6BD452E1328BDD753D0779D1AF69F300EE50C76954F8914526F46E99E696B489`.
+The original synthetic writer emitted a linear member table with every
+`NextIndex` set to -1. That archive was editor-readable, but this is rejected
+as runtime-safe evidence: the shipped lookup hashes the lowercase CP1251
+filename by byte sum into the member table and then follows the `NextIndex`
+collision chain. The corrected deterministic writer case-insensitively sorts
+and rejects duplicate member names, assigns the hash slots, and links
+collisions through valid in-range acyclic chains. The ten-member fixture
+deliberately exercises collisions in three buckets (including a three-member
+chain), and regression lookup resolves every MP/SEC payload using uppercase
+requests.
+
+The corrected canonical generated MPR is 85,611 bytes with SHA-256
+`63E8AF4DA06B384253B8D167FF14452325F6057CEE7E567CCA66C03EBA621C0E`.
 Independent parsing confirms the map member plus nine flat sectors, 512 atlas
 slots, and the uniform slot-1 tile assignment. EI Mapper parses all bytes and
 performs a byte-identical unchanged round trip. Two independent generations
