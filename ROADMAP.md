@@ -201,6 +201,9 @@ lossless transactions because the graph is not owned by the MPR.
   precedence when both exist and differ.
 - [ ] Add deterministic graph-to-graph diff, initially using Base Zone 6's
   unfrozen/frozen landscape pair as the controlled fixture.
+- [x] Stage external MPR-basename `.grp` files losslessly and provide an
+  explicit byte-guarded graphless test exception. Graphless testing loads an
+  empty graph and is not a substitute for regeneration.
 - [ ] Validate dimensions, complete byte coverage, boundary links, unexpected
   asymmetry, isolated regions/entrances, and opaque-plane changes. Existing
   graph defects and navigation-dirty edits remain diagnostic findings; Test

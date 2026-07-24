@@ -107,6 +107,7 @@ constexpr DWORD kNewGameBootstrapRva = 0x0017BD10;
 constexpr DWORD kPlayerDefaultsResetRva = 0x000A5BD0;
 constexpr DWORD kPlayerDefaultsManagerRva = 0x003AA5C4;
 constexpr DWORD kGameStringAssignRva = 0x00300AF9;
+constexpr DWORD kGraphRequirementRva = 0x001955CC;
 constexpr UINT kDirectLaunchMessage = WM_APP + 0x45D;
 constexpr UINT kHotReloadMessage = WM_APP + 0x45E;
 constexpr unsigned char kMapLoadEntryBytes[6] = {
@@ -120,6 +121,13 @@ constexpr unsigned char kNewGameBootstrapBytes[7] = {
 };
 constexpr unsigned char kPlayerDefaultsResetBytes[6] = {
     0x64, 0xA1, 0x00, 0x00, 0x00, 0x00
+};
+constexpr unsigned char kGraphRequirementBytes[33] = {
+    0x8D, 0x54, 0x24, 0x24, 0x8B, 0xCE, 0x52, 0x55,
+    0x57, 0xC7, 0x44, 0x24, 0x60, 0x02, 0x00, 0x00,
+    0x00, 0xE8, 0x5E, 0x0B, 0x00, 0x00, 0x85, 0xC0,
+    0x75, 0x07, 0x68, 0xD8, 0x0A, 0x79, 0x00, 0xEB,
+    0x50
 };
 enum class RuntimeState : LONG
 {
@@ -162,6 +170,7 @@ volatile LONG g_runtimeState = LONG(RuntimeState::Initializing);
 volatile LONG g_runtimeStateSequence = 0;
 volatile LONG g_runtimeStateTick = 0;
 volatile LONG g_pendingStateAwareReload = 0;
+volatile LONG g_graphlessPayload = 0;
 volatile LONG g_saveRedirectLogCount = 0;
 volatile LONG g_godmodeRedirectLogged = 0;
 volatile LONG g_introSkipMask = 0;
@@ -189,6 +198,7 @@ struct HotReloadControl
     unsigned char mobSha256[32] = {};
     unsigned char bootstrapMobSha256[32] = {};
     bool hasBootstrap = false;
+    bool graphless = false;
     char sourceZone[128] = {};
     char zone[128] = {};
     char bootstrapMode[32] = {};
@@ -456,6 +466,8 @@ bool ReadHotReloadControl(HotReloadControl* output)
         {
             if(!ParseSha256(value, parsed.bootstrapMobSha256)) return false;
         }
+        else if(std::strcmp(line, "graphless") == 0)
+            parsed.graphless = std::strcmp(value, "1") == 0;
     }
     for(const char* cursor = parsed.zone; *cursor; ++cursor)
         if(!std::isalnum(static_cast<unsigned char>(*cursor))
@@ -1664,6 +1676,11 @@ bool ReadDirectLaunchPaths()
     wchar_t mob[MAX_PATH * 4]{};
     wchar_t sourceZone[128]{};
     wchar_t targetExit[16]{};
+    wchar_t graphless[8]{};
+    GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_GRAPHLESS", graphless,
+                            DWORD(sizeof(graphless) / sizeof(graphless[0])));
+    InterlockedExchange(&g_graphlessPayload,
+                        std::wcscmp(graphless, L"1") == 0 ? 1 : 0);
     GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_GODMODE_MOB", g_godmodeMob,
                             DWORD(sizeof(g_godmodeMob) / sizeof(g_godmodeMob[0])));
     if(g_godmodeMob[0])
@@ -1871,6 +1888,35 @@ int __fastcall ZoneTransitionDetour(void* self, void*, const char* zoneName,
     return g_originalZoneTransition(self, zoneName, requestedMode);
 }
 
+bool SetGraphRequirementBypass(bool enabled)
+{
+    if(!g_gameModule)
+        return false;
+    auto* target = reinterpret_cast<unsigned char*>(g_gameModule)
+        + kGraphRequirementRva;
+    unsigned char nops[sizeof(kGraphRequirementBytes)]{};
+    std::memset(nops, 0x90, sizeof(nops));
+    const unsigned char* expected = enabled ? kGraphRequirementBytes : nops;
+    const unsigned char* replacement = enabled ? nops : kGraphRequirementBytes;
+    if(std::memcmp(target, expected, sizeof(kGraphRequirementBytes)) != 0)
+    {
+        Log(enabled
+            ? L"GRAPHLESS refused: graph-requirement bytes do not match the validated game.exe"
+            : L"GRAPHLESS cleanup failed: temporary graph bypass bytes changed unexpectedly");
+        return false;
+    }
+    DWORD oldProtect = 0;
+    if(!VirtualProtect(target, sizeof(kGraphRequirementBytes),
+                       PAGE_EXECUTE_READWRITE, &oldProtect))
+        return false;
+    std::memcpy(target, replacement, sizeof(kGraphRequirementBytes));
+    FlushInstructionCache(GetCurrentProcess(), target,
+                          sizeof(kGraphRequirementBytes));
+    DWORD ignored = 0;
+    VirtualProtect(target, sizeof(kGraphRequirementBytes), oldProtect, &ignored);
+    return true;
+}
+
 int __fastcall MapLoadDetour(void* self, void*, const char* mprPath,
                              const char* mobPath, void* context)
 {
@@ -1921,7 +1967,24 @@ int __fastcall MapLoadDetour(void* self, void*, const char* mprPath,
         Log(message);
     }
 
+    const bool graphless = redirect
+        && InterlockedCompareExchange(&g_graphlessPayload, 0, 0) != 0;
+    if(graphless && !SetGraphRequirementBypass(true))
+    {
+        SetRuntimeState(RuntimeState::Unknown,
+                        L"graphless map bypass byte guard failed");
+        return 0;
+    }
+    if(graphless)
+        Log(L"GRAPHLESS temporarily bypassed the required AI-graph load for this staged map only");
     const int result = g_originalMapLoad(self, selectedMpr, selectedMob, context);
+    if(graphless)
+    {
+        if(SetGraphRequirementBypass(false))
+            Log(L"GRAPHLESS restored the original AI-graph requirement after the staged loader returned");
+        else
+            Log(L"GRAPHLESS WARNING: failed to restore the temporary graph-requirement bytes");
+    }
     if(result)
         SetRuntimeState(IsMainMenuMpr(selectedMpr) ? RuntimeState::MainMenuReady
                                                    : RuntimeState::GameplayReady,
@@ -1982,6 +2045,7 @@ bool ProcessHotReloadOnGameThread()
     }
     g_targetExitId = request.entranceId;
     g_targetExit = request.entranceId - 1;
+    InterlockedExchange(&g_graphlessPayload, request.graphless ? 1 : 0);
     // The bootstrap is generation-scoped. An entrance-only reload deliberately
     // has no bootstrap MOB, so retaining the previous generation's path would
     // replay its custom spawn (and any other bootstrap actions) on the new map.
