@@ -11,6 +11,7 @@ private slots:
     void roundTripsOrderedMobs();
     void resolvesMapRootRelativeReferences();
     void reportsAllMissingReferences();
+    void comparesEditableCollectionContent();
 };
 
 void CollectionDocumentTests::roundTripsOrderedMobs()
@@ -60,6 +61,26 @@ void CollectionDocumentTests::reportsAllMissingReferences()
     source.mobReferences << "first.mob" << "second.mob";
     const SResolvedCollection resolved = CCollectionDocument::resolve(source, {});
     QCOMPARE(resolved.errors.size(), 3);
+}
+
+void CollectionDocumentTests::comparesEditableCollectionContent()
+{
+    SEnduranceCollection left;
+    left.name = "Particle control";
+    left.profileId = "jamais-vu";
+    left.mprReference = "../test-scenes/control.mpr";
+    left.mobReferences << "../test-scenes/control.mob";
+    left.sourcePath = "C:/first/collection.collection";
+    SEnduranceCollection right = left;
+    right.sourcePath = "D:/copied/collection.collection";
+    right.mprReference = "..\\test-scenes\\control.mpr";
+    QVERIFY(CCollectionDocument::equivalent(left, right));
+
+    right.mapZoneId = "gz1g";
+    QVERIFY(!CCollectionDocument::equivalent(left, right));
+    right = left;
+    right.mobReferences.append("../test-scenes/extra.mob");
+    QVERIFY(!CCollectionDocument::equivalent(left, right));
 }
 
 QTEST_APPLESS_MAIN(CollectionDocumentTests)

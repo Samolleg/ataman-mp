@@ -627,6 +627,15 @@ bool CJmvMapTestLauncher::validateExternalGraph(const QByteArray& bytes,
     return true;
 }
 
+bool CJmvMapTestLauncher::bridgeSupportsGraphlessLaunch(
+    const QByteArray& bridgeBytes)
+{
+    const QString marker = QStringLiteral("EI_MAPPER_ENDURANCE_GRAPHLESS");
+    const QByteArray utf16Marker(
+        reinterpret_cast<const char*>(marker.utf16()), marker.size() * 2);
+    return bridgeBytes.contains(utf16Marker);
+}
+
 bool CJmvMapTestLauncher::resolveMapGraphSource(
     const QByteArray& primaryMobData,
     const QFileInfo& sourceMpr,
@@ -1543,6 +1552,17 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
     {
         if(error) *error = "The packaged x86 Endurance runtime host is missing.";
         return false;
+    }
+    if(input.allowMissingAiGraph)
+    {
+        QFile bridgeFile(m_bridgeSourcePath);
+        if(!bridgeFile.open(QIODevice::ReadOnly)
+           || !bridgeSupportsGraphlessLaunch(bridgeFile.readAll()))
+        {
+            if(error)
+                *error = "The packaged runtime bridge predates graphless Test Current Map support. Rebuild or reinstall this Endurance package; launching with the stale bridge could crash game.exe.";
+            return false;
+        }
     }
     QString starterStoredSelection;
     QString starterRegistryAddonPath;

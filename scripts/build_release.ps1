@@ -149,3 +149,44 @@ try {
 }
 
 Write-Host "Built: $(Join-Path $buildPath 'release\EIMapperEndurance.exe')"
+
+# Test Current Map is delivered by two independently compiled 32-bit runtime
+# components. Building only the Qt executable can otherwise leave an older
+# bridge in source/runtime/*/bin, producing a package whose UI and protocol no
+# longer agree (the graphless launch flag was one such failure). Rebuild both
+# components for every release build and copy only distributable binaries into
+# the release tree.
+$runtimeComponentBuild = Join-Path $buildPath 'runtime-components'
+$runtimeRelease = Join-Path $buildPath 'release\runtime'
+New-Item -ItemType Directory -Force -Path $runtimeComponentBuild | Out-Null
+New-Item -ItemType Directory -Force -Path $runtimeRelease | Out-Null
+
+$bridgeScript = Join-Path $repositoryRoot 'source\runtime\jmv_bridge\build-x86.cmd'
+$hostScript = Join-Path $repositoryRoot 'source\runtime\base_runtime_host\build-x86.cmd'
+$previousBridgeOut = $env:EI_BRIDGE_OUT_DIR
+$previousHostOut = $env:EI_RUNTIME_HOST_OUT_DIR
+try {
+    $env:EI_BRIDGE_OUT_DIR = $runtimeComponentBuild
+    & cmd.exe /d /c ('"{0}"' -f $bridgeScript)
+    if ($LASTEXITCODE -ne 0) {
+        throw "32-bit runtime bridge build failed with exit code $LASTEXITCODE."
+    }
+    $env:EI_RUNTIME_HOST_OUT_DIR = $runtimeComponentBuild
+    & cmd.exe /d /c ('"{0}"' -f $hostScript)
+    if ($LASTEXITCODE -ne 0) {
+        throw "32-bit runtime host build failed with exit code $LASTEXITCODE."
+    }
+} finally {
+    $env:EI_BRIDGE_OUT_DIR = $previousBridgeOut
+    $env:EI_RUNTIME_HOST_OUT_DIR = $previousHostOut
+}
+
+foreach ($name in @('EIMapperEnduranceJmvBridge.plg',
+                     'EIMapperEnduranceRuntimeHost.exe')) {
+    $source = Join-Path $runtimeComponentBuild $name
+    if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
+        throw "Runtime component was not produced: $source"
+    }
+    Copy-Item -LiteralPath $source -Destination (Join-Path $runtimeRelease $name) -Force
+}
+Write-Host "Built runtime components: $runtimeRelease"

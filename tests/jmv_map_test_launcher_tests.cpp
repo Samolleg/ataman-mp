@@ -28,6 +28,7 @@ private slots:
     void exposesTestRunsQuickAccessPath();
     void createsGenerationScopedSavePaths();
     void validatesExternalGraphEnvelope();
+    void recognizesGraphlessBridgeProtocolMarker();
     void resolvesWorkspaceExternalGraph();
     void embeddedGraphShadowsExternalGraph();
     void reportsMissingOptionalGraph();
@@ -167,6 +168,17 @@ void JmvMapTestLauncherTests::validatesExternalGraphEnvelope()
     QVERIFY(error.contains("requires exactly"));
     QVERIFY(!CJmvMapTestLauncher::validateExternalGraph(externalGraph(0, 2), &error));
     QVERIFY(error.contains("invalid dimensions"));
+}
+
+void JmvMapTestLauncherTests::recognizesGraphlessBridgeProtocolMarker()
+{
+    const QString marker = QStringLiteral("EI_MAPPER_ENDURANCE_GRAPHLESS");
+    const QByteArray encoded(reinterpret_cast<const char*>(marker.utf16()),
+                             marker.size() * 2);
+    QVERIFY(CJmvMapTestLauncher::bridgeSupportsGraphlessLaunch(
+        QByteArray("prefix") + encoded + QByteArray("suffix")));
+    QVERIFY(!CJmvMapTestLauncher::bridgeSupportsGraphlessLaunch(
+        QByteArray("stale runtime bridge")));
 }
 
 void JmvMapTestLauncherTests::resolvesWorkspaceExternalGraph()

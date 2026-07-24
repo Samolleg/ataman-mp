@@ -64,6 +64,25 @@ QString CCollectionDocument::defaultDirectory()
     return QDir(QCoreApplication::applicationDirPath()).filePath("collections");
 }
 
+bool CCollectionDocument::equivalent(const SEnduranceCollection& left,
+                                     const SEnduranceCollection& right)
+{
+    auto normalizedReference = [](const QString& value) {
+        return QDir::cleanPath(QDir::fromNativeSeparators(value.trimmed()));
+    };
+    if(left.version != right.version || left.name != right.name
+       || left.profileId != right.profileId || left.mapZoneId != right.mapZoneId
+       || normalizedReference(left.mprReference)
+            != normalizedReference(right.mprReference)
+       || left.mobReferences.size() != right.mobReferences.size())
+        return false;
+    for(int i = 0; i < left.mobReferences.size(); ++i)
+        if(normalizedReference(left.mobReferences.at(i))
+           != normalizedReference(right.mobReferences.at(i)))
+            return false;
+    return true;
+}
+
 bool CCollectionDocument::load(const QString& path, SEnduranceCollection* output,
                                QString* error)
 {

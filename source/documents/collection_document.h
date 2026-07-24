@@ -33,6 +33,8 @@ public:
     static bool load(const QString& path, SEnduranceCollection* output, QString* error = nullptr);
     static bool save(const QString& path, const SEnduranceCollection& collection,
                      QString* error = nullptr);
+    static bool equivalent(const SEnduranceCollection& left,
+                           const SEnduranceCollection& right);
     static SResolvedCollection resolve(const SEnduranceCollection& collection,
                                        const QVector<QString>& mapRoots);
     static QString portableReference(const QString& absolutePath,

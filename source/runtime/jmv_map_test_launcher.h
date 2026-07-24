@@ -84,6 +84,7 @@ public:
                                       QString* error = nullptr);
     static bool validateExternalGraph(const QByteArray& bytes,
                                       QString* error = nullptr);
+    static bool bridgeSupportsGraphlessLaunch(const QByteArray& bridgeBytes);
     static qint64 runtimeGameProcessId(bool usesRuntimeHost,
                                        const QString& gamePidPath,
                                        qint64 transportProcessId);

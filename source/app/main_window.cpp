@@ -2024,6 +2024,11 @@ void MainWindow::refreshMapTestContext()
     m_mapCatalog = CMapCatalog::load(resources, maps);
     if(CLandscape::getInstance()->isMprLoad())
     {
+        // An explicitly unmapped collection must stay unmapped. Do not infer
+        // map.txt metadata from a same-named installed MPR, otherwise a reload
+        // can resurrect entrances and runtime identity from the prior map.
+        const bool allowCatalogInference = m_currentCollectionPath.isEmpty()
+            || !m_openedMapZoneId.isEmpty();
         const QString loaded = QFileInfo(CLandscape::getInstance()->filePath()).absoluteFilePath();
         QVector<SMapCatalogEntry> nameMatches;
         for(const SMapCatalogEntry& entry : m_mapCatalog.entries)
@@ -2034,6 +2039,8 @@ void MainWindow::refreshMapTestContext()
                 m_mapTestEntry = entry;
                 break;
             }
+            if(!allowCatalogInference)
+                continue;
             if(!entry.mprPath.isEmpty()
                && QFileInfo(entry.mprPath).absoluteFilePath().compare(loaded, Qt::CaseInsensitive) == 0)
             {
@@ -3850,6 +3857,7 @@ void MainWindow::editCollection(const QString& path)
         QMessageBox::warning(this, tr("Edit Collection"), error);
         return;
     }
+    const SEnduranceCollection original = value;
     const SResolvedCollection resolved = CCollectionDocument::resolve(value, activeMapRoots());
     if(!resolved.mprPath.isEmpty()) value.mprReference = resolved.mprPath;
     if(resolved.mobPaths.size() == value.mobReferences.size())
@@ -3861,17 +3869,25 @@ void MainWindow::editCollection(const QString& path)
         value.mprReference, path, activeMapRoots());
     for(QString& mob : value.mobReferences)
         mob = CCollectionDocument::portableReference(mob, path, activeMapRoots());
+    const bool changed = !CCollectionDocument::equivalent(original, value);
     if(!CCollectionDocument::save(path, value, &error))
         QMessageBox::warning(this, tr("Edit Collection"), error);
     else
     {
-        if(QFileInfo(m_currentCollectionPath).absoluteFilePath().compare(
-               QFileInfo(path).absoluteFilePath(), Qt::CaseInsensitive) == 0)
-            setWorkspaceIdentity("collection", QFileInfo(path).absoluteFilePath(),
-                                 value.name.isEmpty()
-                                    ? QFileInfo(path).completeBaseName() : value.name,
-                                 value.mapZoneId);
         refreshMapsBrowser();
+        const bool editsLoadedCollection = !m_currentCollectionPath.isEmpty()
+            && QFileInfo(m_currentCollectionPath).absoluteFilePath().compare(
+                QFileInfo(path).absoluteFilePath(), Qt::CaseInsensitive) == 0;
+        if(changed && editsLoadedCollection)
+        {
+            const QMessageBox::StandardButton reload = QMessageBox::question(
+                this, tr("Collection updated"),
+                tr("This collection is currently loaded. Reload it now to apply the changed MPR, MOB set, and map identity?\n\n"
+                   "If any loaded document has unsaved edits, Endurance will ask whether to save them before replacing the workspace."),
+                QMessageBox::Yes | QMessageBox::No, QMessageBox::Yes);
+            if(reload == QMessageBox::Yes)
+                openCollection(QFileInfo(path).absoluteFilePath());
+        }
     }
 }
 

@@ -6,6 +6,8 @@
 - Qt 5.12 or newer with the MinGW x64 toolchain
 - qmake
 - C++11
+- Visual Studio 2022 C++ tools with the x86 compiler (for the process-owned
+  Test Current Map bridge and runtime host)
 
 The application target is `EIMapperEndurance.exe`. The upstream v0.3 binary and
 its `options.json` are not build inputs and are never overwritten.
@@ -25,6 +27,12 @@ The paths can instead be stored in `EI_MAPPER_QT_BIN` and
 `EI_MAPPER_MINGW_BIN`. The wrapper validates `qmake`, `uic`, and
 `mingw32-make`, prepends both runtime directories to `PATH`, reruns qmake, and
 builds into a separate shadow directory.
+
+The wrapper also rebuilds both 32-bit runtime components on every release
+build and places only their distributable `.plg`/`.exe` files under
+`build-release\release\runtime`. This is intentional: copying an older binary
+from `source\runtime\*\bin` can leave the editor executable and runtime protocol
+out of sync even though the Qt application compiled successfully.
 
 Qt 5.12 also cannot reliably generate Makefiles below a non-ASCII Windows path.
 When necessary, the wrapper temporarily maps the repository to a free drive
@@ -101,6 +109,7 @@ after finalization; do not bypass either step for convenience builds.
 | qmake cannot rewrite a generated `.rc`, Makefile, or object file | A compiler process from an interrupted/timed-out build may still own the file. | Let `qmake`, `mingw32-make`, `uic`, and `moc` finish or exit, then rerun the wrapper. Do not delete a live shadow tree. |
 | `VERSION` changed but `--version` still prints the previous value | qmake regenerated the Makefile, but Make does not track changes to compiler command-line definitions as source dependencies. | Build in a fresh shadow directory for every packaged version and verify the executable with `--version` before staging it. |
 | qmake reports an unknown module or a compiler header/library is missing | The selected Qt kit and MinGW kit do not belong to a compatible installation. | Select the matching 64-bit Qt/MinGW pair; do not mix MSVC Qt libraries with MinGW. |
+| The build finishes the Qt executable and then reports that the x86 runtime bridge/host failed | Visual Studio 2022 C++ x86 tools are unavailable, or a runtime component has a compiler error. A package made with an older bridge is not valid. | Install/repair the Visual Studio Desktop C++ workload, run from a normal prompt, and rebuild; never copy a stale runtime directory into the package. |
 | `mingw32-make` prints a C++ filename, line number, and compiler diagnostic | This is a source compile failure rather than tool discovery. | Fix the first compiler error and rerun the same wrapper; qmake is regenerated automatically. |
 | The editor builds but the package validator rejects the folder | Runtime bridge/host, notices, hashes, or required deployment files are missing, or private settings/logs leaked into the folder. | Stage a fresh folder, deploy the runtime components, then run `finalize_package.ps1`; never distribute a previously launched folder. |
 
