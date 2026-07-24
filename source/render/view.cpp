@@ -594,7 +594,7 @@ void CView::attachLandscapeTools(CLandscapeTools* tools)
         connect(m_landscapeTools, &CLandscapeTools::importHeightmapRequested,
                 this, &CView::importTerrainHeightmap);
         connect(m_landscapeTools, &CLandscapeTools::tilePickerRequested,
-                this, &CView::openMapParameters);
+                this, &CView::openAtlasTiles);
         connect(m_landscapeTools, &CLandscapeTools::exportPaintDiagnosticRequested,
                 this, &CView::exportTerrainPaintDiagnostic);
         connect(m_landscapeTools, &CLandscapeTools::editingStateChanged,
@@ -6394,6 +6394,231 @@ void CView::resetSelectedId()
 
 
 void CView::openMapParameters()
+{
+    if(!m_pLand->isMprLoad() || !m_terrainEditAvailable)
+        return;
+
+    QDialog dialog(this);
+    dialog.setWindowTitle(tr("MPR Settings"));
+    dialog.setModal(true);
+    dialog.resize(620, 520);
+    QVBoxLayout* layout = new QVBoxLayout(&dialog);
+    QTabWidget* tabs = new QTabWidget(&dialog);
+    layout->addWidget(tabs, 1);
+
+    QWidget* summaryPage = new QWidget(tabs);
+    QFormLayout* summaryForm = new QFormLayout(summaryPage);
+    QLabel* sourceValue = new QLabel(m_pLand->filePath().absoluteFilePath(), summaryPage);
+    sourceValue->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    sourceValue->setWordWrap(true);
+    const SMprMapInfo& map = m_mprDocument.mapInfo();
+    QLabel* namespaceValue = new QLabel(map.innerNamespace, summaryPage);
+    namespaceValue->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    QLabel* dimensionsValue = new QLabel(summaryPage);
+    QLabel* rangeValue = new QLabel(summaryPage);
+    QLabel* scaleValue = new QLabel(summaryPage);
+    QLabel* materialsValue = new QLabel(summaryPage);
+    summaryForm->addRow(tr("Source MPR"), sourceValue);
+    summaryForm->addRow(tr("Embedded namespace"), namespaceValue);
+    summaryForm->addRow(tr("Dimensions"), dimensionsValue);
+    summaryForm->addRow(tr("Height range"), rangeValue);
+    summaryForm->addRow(tr("Vertical scale (maxZ)"), scaleValue);
+    summaryForm->addRow(tr("Atlas / liquid materials"), materialsValue);
+    QLabel* scaleExplanation = new QLabel(tr(
+        "maxZ maps the complete 0-65535 raw range into world height. Changing it either "
+        "scales the landscape or requantizes every height; that migration is not enabled "
+        "in this first settings increment."), summaryPage);
+    scaleExplanation->setWordWrap(true);
+    summaryForm->addRow(scaleExplanation);
+    tabs->addTab(summaryPage, tr("Summary"));
+
+    QWidget* heightsPage = new QWidget(tabs);
+    QVBoxLayout* heightsLayout = new QVBoxLayout(heightsPage);
+    QFormLayout* operationForm = new QFormLayout;
+    QComboBox* operation = new QComboBox(heightsPage);
+    operation->addItem(tr("Offset all heights"));
+    operation->addItem(tr("Flatten whole map"));
+    operation->addItem(tr("Clamp to range"));
+    operation->addItem(tr("Normalize / remap range"));
+    operationForm->addRow(tr("Operation"), operation);
+
+    QStackedWidget* parameters = new QStackedWidget(heightsPage);
+    QSpinBox* offset = new QSpinBox(parameters);
+    offset->setRange(-65535, 65535);
+    offset->setSingleStep(100);
+    QWidget* offsetPage = new QWidget(parameters);
+    QFormLayout* offsetForm = new QFormLayout(offsetPage);
+    offsetForm->addRow(tr("Raw height delta"), offset);
+    parameters->addWidget(offsetPage);
+
+    QSpinBox* flatten = new QSpinBox(parameters);
+    flatten->setRange(0, 65535);
+    QWidget* flattenPage = new QWidget(parameters);
+    QFormLayout* flattenForm = new QFormLayout(flattenPage);
+    flattenForm->addRow(tr("Target raw height"), flatten);
+    parameters->addWidget(flattenPage);
+
+    QSpinBox* clampMinimum = new QSpinBox(parameters);
+    QSpinBox* clampMaximum = new QSpinBox(parameters);
+    clampMinimum->setRange(0, 65535);
+    clampMaximum->setRange(0, 65535);
+    QWidget* clampPage = new QWidget(parameters);
+    QFormLayout* clampForm = new QFormLayout(clampPage);
+    clampForm->addRow(tr("Minimum raw height"), clampMinimum);
+    clampForm->addRow(tr("Maximum raw height"), clampMaximum);
+    parameters->addWidget(clampPage);
+
+    QSpinBox* normalizeMinimum = new QSpinBox(parameters);
+    QSpinBox* normalizeMaximum = new QSpinBox(parameters);
+    normalizeMinimum->setRange(0, 65535);
+    normalizeMaximum->setRange(0, 65535);
+    QWidget* normalizePage = new QWidget(parameters);
+    QFormLayout* normalizeForm = new QFormLayout(normalizePage);
+    normalizeForm->addRow(tr("Output minimum"), normalizeMinimum);
+    normalizeForm->addRow(tr("Output maximum"), normalizeMaximum);
+    parameters->addWidget(normalizePage);
+    operationForm->addRow(parameters);
+    heightsLayout->addLayout(operationForm);
+
+    QLabel* operationExplanation = new QLabel(tr(
+        "These operations retain the current sector dimensions and vertex count. "
+        "They are applied as one undoable canonical terrain command and saved through "
+        "the validated MPR transaction."), heightsPage);
+    operationExplanation->setWordWrap(true);
+    heightsLayout->addWidget(operationExplanation);
+    QLabel* preview = new QLabel(heightsPage);
+    preview->setFrameShape(QFrame::StyledPanel);
+    preview->setWordWrap(true);
+    preview->setMinimumHeight(105);
+    heightsLayout->addWidget(preview);
+    QPushButton* apply = new QPushButton(tr("Apply undoable operation"), heightsPage);
+    heightsLayout->addWidget(apply, 0, Qt::AlignRight);
+    heightsLayout->addStretch(1);
+    tabs->addTab(heightsPage, tr("Height operations"));
+
+    QWidget* structuralPage = new QWidget(tabs);
+    QVBoxLayout* structuralLayout = new QVBoxLayout(structuralPage);
+    QLabel* structuralText = new QLabel(tr(
+        "Changing maxZ is a vertical-scale migration. Resizing changes SEC members, "
+        "vertices, tiles, and archive hash chains. Both require dedicated staged "
+        "transactions and remain disabled until their synthetic and copied-map "
+        "validation gates pass."), structuralPage);
+    structuralText->setWordWrap(true);
+    structuralLayout->addWidget(structuralText);
+    structuralLayout->addStretch(1);
+    tabs->addTab(structuralPage, tr("Scale and resize"));
+
+    QDialogButtonBox* buttons = new QDialogButtonBox(QDialogButtonBox::Close, &dialog);
+    QPushButton* atlas = buttons->addButton(tr("Open Atlas Tiles..."),
+                                            QDialogButtonBox::ActionRole);
+    layout->addWidget(buttons);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    connect(atlas, &QPushButton::clicked, &dialog, [&dialog]() { dialog.done(2); });
+
+    const auto refreshSummary = [&, this]() {
+        const STerrainHeightRange range = m_terrainEdit.heightRange();
+        dimensionsValue->setText(tr("%1 x %2 sectors; %3 x %4 tiles; %5 x %6 vertices")
+            .arg(map.sectorCountX).arg(map.sectorCountY)
+            .arg(map.sectorCountX * 16).arg(map.sectorCountY * 16)
+            .arg(m_terrainEdit.vertexCountX()).arg(m_terrainEdit.vertexCountY()));
+        rangeValue->setText(tr("raw %1 to %2; world %3 to %4")
+            .arg(range.minimumRaw).arg(range.maximumRaw)
+            .arg(range.minimumWorld, 0, 'f', 4)
+            .arg(range.maximumWorld, 0, 'f', 4));
+        scaleValue->setText(tr("%1 world units; %2 per raw step")
+            .arg(map.maxZ, 0, 'g', 8)
+            .arg(range.worldUnitsPerRawStep, 0, 'g', 8));
+        materialsValue->setText(tr("%1 atlas slots; %2 liquid material record(s)")
+            .arg(map.tileCount).arg(map.materialCount));
+        flatten->setValue(range.minimumRaw);
+        clampMinimum->setValue(range.minimumRaw);
+        clampMaximum->setValue(range.maximumRaw);
+        normalizeMinimum->setValue(range.minimumRaw);
+        normalizeMaximum->setValue(range.maximumRaw);
+    };
+    refreshSummary();
+
+    const auto makeCommand = [&, this](CValidationReport* report) {
+        switch(operation->currentIndex())
+        {
+        case 0: return m_terrainEdit.makeGlobalOffset(float(offset->value()), report);
+        case 1: return m_terrainEdit.makeGlobalFlatten(quint16(flatten->value()));
+        case 2: return m_terrainEdit.makeGlobalClamp(
+                    quint16(clampMinimum->value()), quint16(clampMaximum->value()), report);
+        default: return m_terrainEdit.makeGlobalNormalize(
+                    quint16(normalizeMinimum->value()), quint16(normalizeMaximum->value()), report);
+        }
+    };
+    const auto refreshPreview = [&, this]() {
+        CValidationReport report;
+        const STerrainHeightCommand command = makeCommand(&report);
+        if(report.hasErrors())
+        {
+            preview->setText(report.toText());
+            apply->setEnabled(false);
+            return;
+        }
+        if(command.isEmpty())
+        {
+            preview->setText(tr("No vertices would change. The MPR will remain clean."));
+            apply->setEnabled(false);
+            return;
+        }
+        const STerrainEditDiagnostics diagnostics = m_terrainEdit.diagnose(command);
+        if(!diagnostics.valid || command.requiresMaxZDecision())
+        {
+            preview->setText(tr(
+                "The requested operation would exceed the current raw range. "
+                "It is refused until you choose an explicit clamp or maxZ migration policy."));
+            apply->setEnabled(false);
+            return;
+        }
+        preview->setText(tr(
+            "%1 unique vertices across %2 sector(s) would change.\n"
+            "Changed values: raw %3-%4 -> %5-%6.\n"
+            "The vertex count remains %7 and the operation is undoable.")
+            .arg(diagnostics.changedVertexCount).arg(diagnostics.affectedSectorCount)
+            .arg(diagnostics.minimumBefore).arg(diagnostics.maximumBefore)
+            .arg(diagnostics.minimumAfter).arg(diagnostics.maximumAfter)
+            .arg(m_terrainEdit.vertexCountX() * m_terrainEdit.vertexCountY()));
+        apply->setEnabled(true);
+    };
+    connect(operation, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            parameters, &QStackedWidget::setCurrentIndex);
+    connect(operation, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            &dialog, [refreshPreview](int) { refreshPreview(); });
+    const QList<QSpinBox*> editors = {offset, flatten, clampMinimum, clampMaximum,
+                                      normalizeMinimum, normalizeMaximum};
+    for(QSpinBox* editor : editors)
+        connect(editor, QOverload<int>::of(&QSpinBox::valueChanged),
+                &dialog, [refreshPreview](int) { refreshPreview(); });
+    connect(apply, &QPushButton::clicked, &dialog, [&, this]() {
+        CValidationReport report;
+        const STerrainHeightCommand command = makeCommand(&report);
+        const STerrainEditDiagnostics diagnostics = m_terrainEdit.diagnose(command);
+        if(report.hasErrors() || command.isEmpty() || !diagnostics.valid
+           || command.requiresMaxZDecision())
+        {
+            refreshPreview();
+            return;
+        }
+        if(QMessageBox::question(&dialog, tr("Apply MPR height operation"),
+            tr("Apply %1 to %2 vertices in %3 sector(s)?\n\n"
+               "This changes the terrain preview immediately and is one undoable action.")
+                .arg(command.description)
+                .arg(diagnostics.changedVertexCount)
+                .arg(diagnostics.affectedSectorCount)) != QMessageBox::Yes)
+            return;
+        m_pUndoStack->push(new CTerrainHeightPreviewCommand(this, command));
+        refreshSummary();
+        refreshPreview();
+    });
+    refreshPreview();
+    if(dialog.exec() == 2)
+        openAtlasTiles();
+}
+
+void CView::openAtlasTiles()
 {
     if(!m_pLand->isMprLoad())
         return;

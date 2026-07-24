@@ -963,7 +963,7 @@ MainWindow::MainWindow(QWidget* parent) :
     connectUiButtons();
     m_pView->attach(m_settings.get(), m_ui->tableWidget, m_undoStack, m_ui->progressBar, m_ui->mousePosText, m_ui->treeWidget, m_pTileForm.get());
     m_pView->attachLandscapeTools(m_landscapeTools);
-    m_ui->actionMap_parameters->setText(tr("MPR Atlas Tiles..."));
+    m_ui->actionMap_parameters->setText(tr("MPR Settings..."));
     m_ui->tileBrushButton->setText(tr("Landscape Tools"));
     m_ui->tileBrushButton->setIcon(*ei::icon("landscape.ico"));
     m_ui->tileBrushButton->setIconSize(QSize(32, 32));
