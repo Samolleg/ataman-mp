@@ -243,8 +243,12 @@ constexpr size_t kZoneWeatherOffset = 44;
 constexpr size_t kZoneSkyOffset = 48;
 constexpr size_t kZoneRestrictOffset = 52;
 constexpr size_t kZoneCageOffset = 68;
-constexpr size_t kZoneExitsDataOffset = 72;
-constexpr size_t kZoneExitsSizeOffset = 76;
+// SScenarioZone::exits is an MFC CArray-derived object.  Its first word is the
+// CObject virtual-table pointer; m_pData and m_nSize follow that header.  The
+// containing SScenarioZone is consequently 92 bytes in this 32-bit runtime.
+constexpr size_t kZoneRecordSize = 92;
+constexpr size_t kZoneExitsDataOffset = 76;
+constexpr size_t kZoneExitsSizeOffset = 80;
 constexpr size_t kZoneExitSize = 60;
 constexpr size_t kExitZoneOffset = 40;
 
@@ -377,7 +381,7 @@ bool MatchesGameStringField(const unsigned char* object, size_t offset,
 bool ValidateZoneCandidate(unsigned char* candidate, const char* zoneName,
                            const char* expectedMpr, const char* expectedMob)
 {
-    if(!IsReadableRange(candidate, 88)
+    if(!IsReadableRange(candidate, kZoneRecordSize)
        || !MatchesGameStringField(candidate, kZoneNameOffset, zoneName)
        || !MatchesGameStringField(candidate, kZoneTerrainOffset, expectedMpr)
        || !MatchesGameStringField(candidate, kZoneMobOffset, expectedMob))
@@ -460,7 +464,7 @@ bool RestoreSyntheticZone()
     if(!g_syntheticZoneSnapshot.active)
         return true;
     unsigned char* zone = g_syntheticZoneSnapshot.zone;
-    if(!IsReadableRange(zone, 88))
+    if(!IsReadableRange(zone, kZoneRecordSize))
         return false;
     const size_t offsets[8] = {kZoneNameOffset, kZoneAllodOffset, kZoneMobOffset,
         kZoneTerrainOffset, kZoneFigureOffset, kZoneMapTextureOffset,

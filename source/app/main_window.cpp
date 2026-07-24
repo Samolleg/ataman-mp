@@ -2027,12 +2027,14 @@ void MainWindow::populateEntranceCombo()
     {
         m_entranceCombo->addItem(tr("Open an MPR"), -2);
         m_entranceCombo->setEnabled(false);
+        updateEntranceOverlays();
         return;
     }
     if(m_mapTestEntry.zoneId.isEmpty())
     {
         m_entranceCombo->addItem(tr("Choose map.txt identity..."), -1);
         m_entranceCombo->setEnabled(true);
+        updateEntranceOverlays();
         return;
     }
     for(const SMapTravelZone& entrance : m_mapTestEntry.travelZones)
