@@ -49,6 +49,7 @@ private slots:
     void exposesStableLayerAndDirectionDefinitions();
     void initializesDecodedPreviewWithoutSerializableBytes();
     void regenerationRespectsFenceAndVerticalClearanceProfiles();
+    void regenerationRejectsGameScaleTerrainCliffs();
 };
 
 void AiGraphDocumentTests::parsesKindMajorPlanesAndSignedValues()
@@ -155,6 +156,35 @@ void AiGraphDocumentTests::regenerationRespectsFenceAndVerticalClearanceProfiles
     QVERIFY2(vertical.valid, qPrintable(vertical.error));
     QVERIFY(vertical.document.weight(3, 1, 1, 6) >= 0);
     QCOMPARE(vertical.document.weight(6, 1, 1, 6), qint16(-1));
+}
+
+void AiGraphDocumentTests::regenerationRejectsGameScaleTerrainCliffs()
+{
+    SAiGraphPreviewBuildInput input;
+    input.graphWidth = 4;
+    input.graphHeight = 3;
+    const int aiWidth = input.graphWidth * CAiGraphPreviewBuilder::AiTilesPerGraphCell;
+    const int aiHeight = input.graphHeight * CAiGraphPreviewBuilder::AiTilesPerGraphCell;
+    input.terrainHeights.fill(0.0f, aiWidth * aiHeight);
+
+    // A 0.5 m rise over one 0.5 m AI tile is too steep for ordinary units,
+    // but remains below the levitating profile's terrain-gradient limit.
+    for(int y = 0; y < aiHeight; ++y)
+        for(int x = 16; x < aiWidth; ++x)
+            input.terrainHeights[y * aiWidth + x] = 0.5f;
+    const SAiGraphPreviewBuildResult walkCliff = CAiGraphPreviewBuilder::build(input);
+    QVERIFY2(walkCliff.valid, qPrintable(walkCliff.error));
+    QVERIFY(walkCliff.document.weight(0, 1, 1, 6) >= 0);
+    QCOMPARE(walkCliff.document.weight(3, 1, 1, 6), qint16(-1));
+
+    // A 0.9 m rise crosses the levitating limit as well.
+    for(int y = 0; y < aiHeight; ++y)
+        for(int x = 16; x < aiWidth; ++x)
+            input.terrainHeights[y * aiWidth + x] = 0.9f;
+    const SAiGraphPreviewBuildResult flyCliff = CAiGraphPreviewBuilder::build(input);
+    QVERIFY2(flyCliff.valid, qPrintable(flyCliff.error));
+    QCOMPARE(flyCliff.document.weight(0, 1, 1, 6), qint16(-1));
+    QCOMPARE(flyCliff.document.weight(3, 1, 1, 6), qint16(-1));
 }
 
 QTEST_APPLESS_MAIN(AiGraphDocumentTests)

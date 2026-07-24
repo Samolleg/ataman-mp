@@ -6,6 +6,7 @@
 #include <QFormLayout>
 #include <QLabel>
 #include <QPushButton>
+#include <QSettings>
 #include <QSignalBlocker>
 #include <QSpinBox>
 #include <QVBoxLayout>
@@ -34,7 +35,7 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
 {
     QVBoxLayout* layout = new QVBoxLayout(this);
     QLabel* warning = new QLabel(tr(
-        "Experimental live preview. Terrain edits are undoable, but saving a changed MPR is intentionally disabled."), this);
+        "Terrain edits are undoable. Changed MPR saves use staged validation, backup, and atomic replacement."), this);
     warning->setWordWrap(true);
     warning->setStyleSheet("QLabel { color: #b06000; font-weight: bold; }");
     layout->addWidget(warning);
@@ -65,6 +66,14 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     m_delta->setValue(180.0);
     m_flatten->setRange(0, 65535);
     m_flatten->setValue(20000);
+
+    QSettings settings;
+    m_tool->setCurrentIndex(qBound(0,
+        settings.value("ui/landscape/sculptTool", 0).toInt(), m_tool->count() - 1));
+    m_radius->setValue(settings.value("ui/landscape/sculptRadius", 4.0).toDouble());
+    m_strength->setValue(settings.value("ui/landscape/sculptStrength", 0.35).toDouble());
+    m_delta->setValue(settings.value("ui/landscape/sculptDelta", 180.0).toDouble());
+    m_flatten->setValue(settings.value("ui/landscape/flattenHeight", 20000).toInt());
 
     QFormLayout* form = new QFormLayout(m_sculptControls);
     form->addRow(tr("Tool"), m_tool);
@@ -150,6 +159,16 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
         refreshPaintTerrainTypes();
         emit editingStateChanged();
     });
+    connect(m_tool, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
+            [](int value) { QSettings().setValue("ui/landscape/sculptTool", value); });
+    connect(m_radius, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this,
+            [](double value) { QSettings().setValue("ui/landscape/sculptRadius", value); });
+    connect(m_strength, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this,
+            [](double value) { QSettings().setValue("ui/landscape/sculptStrength", value); });
+    connect(m_delta, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this,
+            [](double value) { QSettings().setValue("ui/landscape/sculptDelta", value); });
+    connect(m_flatten, QOverload<int>::of(&QSpinBox::valueChanged), this,
+            [](int value) { QSettings().setValue("ui/landscape/flattenHeight", value); });
     updateModeVisibility();
 }
 

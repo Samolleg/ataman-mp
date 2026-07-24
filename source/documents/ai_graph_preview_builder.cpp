@@ -9,6 +9,8 @@ namespace {
 constexpr int LayerCount = CAiGraphDocument::LayerCount;
 constexpr int DirectionCount = CAiGraphDocument::DirectionCount;
 const float ProfileRadii[LayerCount] = {0.4f, 0.4f, 0.4f, 0.4f, 0.4f, 0.7f, 0.7f, 1.5f};
+constexpr float WalkSlopeLimitDegrees = 40.0f;
+constexpr float FlySlopeLimitDegrees = 60.0f;
 
 int tileIndex(int x, int y, int width)
 {
@@ -109,13 +111,41 @@ SAiGraphPreviewBuildResult CAiGraphPreviewBuilder::build(
                 proxyCandidates[tileIndex(x, y, aiWidth)].append(proxyIndex);
     }
 
+    QVector<bool> walkSlopeBlocked(aiWidth * aiHeight, false);
+    QVector<bool> flySlopeBlocked(aiWidth * aiHeight, false);
+    const float walkStep = qTan(qDegreesToRadians(WalkSlopeLimitDegrees))
+                         * AiTileWorldSize;
+    const float flyStep = qTan(qDegreesToRadians(FlySlopeLimitDegrees))
+                        * AiTileWorldSize;
+    for(int y = 1; y < aiHeight - 1; ++y)
+        for(int x = 1; x < aiWidth - 1; ++x)
+        {
+            const int index = tileIndex(x, y, aiWidth);
+            const float ground = input.terrainHeights[index];
+            const int dx[4] = {-1, 1, 0, 0};
+            const int dy[4] = {0, 0, -1, 1};
+            float maximumDifference = 0.0f;
+            for(int direction = 0; direction < 4; ++direction)
+                maximumDifference = qMax(maximumDifference, qAbs(
+                    input.terrainHeights[tileIndex(x + dx[direction],
+                                                   y + dy[direction], aiWidth)]
+                    - ground));
+            walkSlopeBlocked[index] = maximumDifference > walkStep;
+            flySlopeBlocked[index] = maximumDifference > flyStep;
+        }
+
     QVector<SAiGraphLayer> layers(LayerCount);
     for(int layerIndex = 0; layerIndex < LayerCount; ++layerIndex)
     {
         const float profileHeight = float(CAiGraphDocument::canonicalHeight(layerIndex));
         const float radius = ProfileRadii[layerIndex];
         QVector<bool> passable(aiWidth * aiHeight, true);
-        const float maximumStep = layerIndex == 0 ? 1.5f : 0.75f;
+        static const QPoint largeProfileSlopeMask[] = {
+            QPoint(0, 2), QPoint(-1, 1), QPoint(0, 1), QPoint(1, 1),
+            QPoint(-2, 0), QPoint(-1, 0), QPoint(0, 0), QPoint(1, 0),
+            QPoint(2, 0), QPoint(-1, -1), QPoint(0, -1), QPoint(1, -1),
+            QPoint(0, -2)
+        };
         for(int y = 0; y < aiHeight; ++y)
             for(int x = 0; x < aiWidth; ++x)
             {
@@ -125,16 +155,41 @@ SAiGraphPreviewBuildResult CAiGraphPreviewBuilder::build(
                     passable[index] = false;
                     continue;
                 }
-                const float ground = input.terrainHeights[index];
-                const int dx[4] = {-1, 1, 0, 0};
-                const int dy[4] = {0, 0, -1, 1};
-                for(int direction = 0; direction < 4 && passable[index]; ++direction)
+                if(layerIndex == 0)
+                    passable[index] = !flySlopeBlocked[index];
+                else if(layerIndex <= 4)
+                    passable[index] = !walkSlopeBlocked[index];
+                else if(layerIndex <= 6)
                 {
-                    const float neighbor = input.terrainHeights[
-                        tileIndex(x + dx[direction], y + dy[direction], aiWidth)];
-                    if(qAbs(neighbor - ground) > maximumStep)
-                        passable[index] = false;
+                    static const QPoint mediumProfileSlopeMask[] = {
+                        QPoint(0, 0), QPoint(-1, 0), QPoint(1, 0),
+                        QPoint(0, -1), QPoint(0, 1)
+                    };
+                    for(const QPoint& offset : mediumProfileSlopeMask)
+                    {
+                        const int sx = x + offset.x();
+                        const int sy = y + offset.y();
+                        if(sx >= 0 && sx < aiWidth && sy >= 0 && sy < aiHeight
+                           && walkSlopeBlocked[tileIndex(sx, sy, aiWidth)])
+                        {
+                            passable[index] = false;
+                            break;
+                        }
+                    }
                 }
+                else
+                    for(const QPoint& offset : largeProfileSlopeMask)
+                    {
+                        const int sx = x + offset.x();
+                        const int sy = y + offset.y();
+                        if(sx >= 0 && sx < aiWidth && sy >= 0 && sy < aiHeight
+                           && walkSlopeBlocked[tileIndex(sx, sy, aiWidth)])
+                        {
+                            passable[index] = false;
+                            break;
+                        }
+                    }
+                const float ground = input.terrainHeights[index];
                 const float worldX = (x + 0.5f) * AiTileWorldSize;
                 const float worldY = (y + 0.5f) * AiTileWorldSize;
                 for(int proxyIndex : proxyCandidates.at(index))

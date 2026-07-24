@@ -568,6 +568,21 @@ CView::CView(QWidget *parent, const QGLWidget *pShareWidget) : QGLWidget(parent,
         if(m_sculptStrokeActive)
             sculptTerrainTowardLatestPoint();
     });
+    m_aiGraphRegenerationTimer = new QTimer(this);
+    m_aiGraphRegenerationTimer->setSingleShot(true);
+    m_aiGraphRegenerationTimer->setInterval(500);
+    connect(m_aiGraphRegenerationTimer, &QTimer::timeout, this, [this]()
+    {
+        if(!m_aiGraphAutoRegenerationEnabled)
+            return;
+        if(m_aiGraphBuildWatcher && m_aiGraphBuildWatcher->isRunning())
+        {
+            m_aiGraphRegenerationPending = true;
+            return;
+        }
+        m_aiGraphRegenerationPending = false;
+        startAiGraphPreviewRegeneration();
+    });
 }
 
 void CView::attachLandscapeTools(CLandscapeTools* tools)
@@ -661,6 +676,25 @@ void CView::setLandscapeEditingEnabled(bool enabled)
         update();
     }
     syncLandscapeToolState();
+}
+
+void CView::setLandscapeInteractionSuspended(bool suspended)
+{
+    if(m_landscapeInteractionSuspended == suspended)
+        return;
+    m_landscapeInteractionSuspended = suspended;
+    finishSculptStroke();
+    endTileBrushGroup();
+    m_sculptRepeatTimer->stop();
+    m_sculptOutlineValid = false;
+    m_terrainPaintOutlineValid = false;
+    setPreviewTile(false);
+    unsetCursor();
+    if(suspended && m_pOp
+       && m_pOp->operationMethod() != eOperationMethodTileBrush
+       && m_pOp->operationMethod() != eOperationMethodSelect)
+        cancelPendingOperation();
+    update();
 }
 
 void CView::closeLandscapeTools()
@@ -886,6 +920,16 @@ void CView::attach(CSettings* pSettings, QTableWidget* pParam, QUndoStack* pStac
                 m_pUndoStack->command(commandIndex)) != nullptr;
         if(!selectionOnly)
             refreshMobDirtyStates();
+        bool navigationChange = false;
+        for(int commandIndex = first; !navigationChange && commandIndex < last;
+            ++commandIndex)
+        {
+            const QUndoCommand* command = m_pUndoStack->command(commandIndex);
+            navigationChange = dynamic_cast<const CSelectionCommand*>(command) == nullptr
+                && dynamic_cast<const CTerrainTilePreviewCommand*>(command) == nullptr;
+        }
+        if(navigationChange)
+            scheduleAiGraphPreviewRegeneration();
         m_lastUndoStackIndex = index;
         m_spatialIndexDirty = true;
     });
@@ -1147,6 +1191,10 @@ void CView::initAiGraphPreviewWidget()
         if(!m_aiGraphLoadedDocument.isValid())
             return;
         ++m_aiGraphBuildRequest;
+        m_aiGraphAutoRegenerationEnabled = false;
+        m_aiGraphRegenerationPending = false;
+        if(m_aiGraphRegenerationTimer)
+            m_aiGraphRegenerationTimer->stop();
         m_aiGraphDocument = m_aiGraphLoadedDocument;
         m_aiGraphSource = m_aiGraphLoadedSource;
         m_aiGraphOverlayDirty = true;
@@ -1202,6 +1250,10 @@ void CView::syncAiGraphPreviewWidget()
 void CView::refreshAiGraphPreviewSource()
 {
     ++m_aiGraphBuildRequest;
+    m_aiGraphAutoRegenerationEnabled = false;
+    m_aiGraphRegenerationPending = false;
+    if(m_aiGraphRegenerationTimer)
+        m_aiGraphRegenerationTimer->stop();
     m_aiGraphDocument.clear();
     m_aiGraphLoadedDocument.clear();
     m_aiGraphSource.clear();
@@ -1338,6 +1390,9 @@ void CView::startAiGraphPreviewRegeneration()
 {
     if(m_aiGraphBuildWatcher && m_aiGraphBuildWatcher->isRunning())
         return;
+    m_aiGraphRegenerationPending = false;
+    if(m_aiGraphRegenerationTimer)
+        m_aiGraphRegenerationTimer->stop();
     SAiGraphPreviewBuildInput input;
     QString error;
     if(!captureAiGraphPreviewBuildInput(&input, &error))
@@ -1345,6 +1400,7 @@ void CView::startAiGraphPreviewRegeneration()
         emit updateMsg(error);
         return;
     }
+    m_aiGraphAutoRegenerationEnabled = true;
 
     if(!m_aiGraphBuildWatcher)
     {
@@ -1357,12 +1413,16 @@ void CView::startAiGraphPreviewRegeneration()
             if(request != m_aiGraphBuildRequest)
             {
                 syncAiGraphPreviewWidget();
+                if(m_aiGraphRegenerationPending && m_aiGraphRegenerationTimer)
+                    m_aiGraphRegenerationTimer->start();
                 return;
             }
             if(!result.valid)
             {
                 emit updateMsg(tr("AI graph preview regeneration failed: %1").arg(result.error));
                 syncAiGraphPreviewWidget();
+                if(m_aiGraphRegenerationPending && m_aiGraphRegenerationTimer)
+                    m_aiGraphRegenerationTimer->start();
                 return;
             }
             m_aiGraphDocument = result.document;
@@ -1376,6 +1436,8 @@ void CView::startAiGraphPreviewRegeneration()
                 .arg(result.collisionProxyCount).arg(result.blockedAiTiles));
             syncAiGraphPreviewWidget();
             update();
+            if(m_aiGraphRegenerationPending && m_aiGraphRegenerationTimer)
+                m_aiGraphRegenerationTimer->start();
         });
     }
     const quint64 request = ++m_aiGraphBuildRequest;
@@ -1388,6 +1450,15 @@ void CView::startAiGraphPreviewRegeneration()
     {
         return CAiGraphPreviewBuilder::build(input);
     }));
+}
+
+void CView::scheduleAiGraphPreviewRegeneration()
+{
+    if(!m_aiGraphAutoRegenerationEnabled || !m_terrainEditAvailable
+       || !m_aiGraphRegenerationTimer)
+        return;
+    m_aiGraphRegenerationPending = true;
+    m_aiGraphRegenerationTimer->start();
 }
 
 void CView::applyEnvironmentCompatibilityMode()
@@ -3915,6 +3986,22 @@ bool CView::saveChangedLandscapeDocument(const QFileInfo& destination,
         return false;
     }
 
+    QProgressDialog progress(tr("Preparing canonical terrain patches..."), QString(),
+                             0, 4, this);
+    progress.setWindowTitle(tr("Saving MPR"));
+    progress.setWindowModality(Qt::ApplicationModal);
+    progress.setCancelButton(nullptr);
+    progress.setMinimumDuration(0);
+    progress.setWindowFlags(progress.windowFlags() & ~Qt::WindowContextHelpButtonHint
+                             & ~Qt::WindowCloseButtonHint);
+    const auto updateProgress = [&progress](const QString& label, int value)
+    {
+        progress.setLabelText(label);
+        progress.setValue(value);
+        QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+    };
+    updateProgress(tr("Preparing canonical terrain patches..."), 0);
+
     finishSculptStroke();
     endTileBrushGroup();
     const QString sourcePath = QDir::cleanPath(m_pLand->filePath().absoluteFilePath());
@@ -3933,6 +4020,7 @@ bool CView::saveChangedLandscapeDocument(const QFileInfo& destination,
                "No destination was changed.\n\n%1").arg(transactionReport.toText().trimmed()));
         return false;
     }
+    updateProgress(tr("Validating staged MPR candidate..."), 1);
 
     const SStagedMprTransactionValidation preview =
         validateStagedMprTransaction(m_mprDocument, transaction, destination);
@@ -3945,6 +4033,7 @@ bool CView::saveChangedLandscapeDocument(const QFileInfo& destination,
                 .arg(preview.error));
         return false;
     }
+    updateProgress(tr("Creating backup and committing atomically..."), 2);
 
     SMprSaveCommitRequest request;
     request.source = m_pLand->filePath();
@@ -3965,6 +4054,7 @@ bool CView::saveChangedLandscapeDocument(const QFileInfo& destination,
         return false;
     }
 
+    updateProgress(tr("Reopening and adopting validated terrain..."), 3);
     if(adoptAsOpenBaseline && !adoptCommittedLandscapeBaseline(destination, result))
         return false;
 
@@ -3987,6 +4077,7 @@ bool CView::saveChangedLandscapeDocument(const QFileInfo& destination,
     {
         emit updateMsg(tr("Validated changed MPR copy written: %1").arg(destinationPath));
     }
+    progress.setValue(progress.maximum());
     return true;
 }
 
@@ -4686,7 +4777,7 @@ void CView::updateTileForm(bool bGenerateNewTable)
 void CView::drawTerrainPaintOutline(QOpenGLShaderProgram* program)
 {
     if(!m_landscapeTools || !m_pLand || !m_pLand->isMprLoad()
-       || !m_landscapeTools->editingEnabled())
+       || !m_landscapeTools->editingEnabled() || m_landscapeInteractionSuspended)
         return;
     const int position = program->attributeLocation("a_position");
     if(position < 0)
@@ -6977,6 +7068,11 @@ void CView::mousePressEvent(QMouseEvent* event)
 {
     m_lastViewportMousePos = event->pos();
     m_hasViewportMousePos = rect().contains(event->pos());
+    if(m_landscapeInteractionSuspended)
+    {
+        event->accept();
+        return;
+    }
     if(m_landscapeTools && m_landscapeTools->sculptEnabled()
         && m_terrainEditAvailable && event->button() == Qt::LeftButton)
     {
@@ -7188,7 +7284,7 @@ void CView::importTerrainHeightmap()
     if(QMessageBox::question(this, tr("Confirm heightmap preview"),
         tr("Stretch %1 x %2 samples across %3 x %4 terrain vertices?\n"
            "Orientation: %5\nRaw range: %6 to %7\n\n"
-           "This is undoable and cannot yet be saved to MPR.")
+           "This is undoable and can be committed through the validated MPR save path.")
             .arg(grid.width).arg(grid.height)
             .arg(m_terrainEdit.vertexCountX()).arg(m_terrainEdit.vertexCountY())
             .arg(orientation).arg(minimum).arg(maximum)) != QMessageBox::Yes)
@@ -7200,6 +7296,11 @@ void CView::mouseMoveEvent(QMouseEvent* event)
 {
     m_lastViewportMousePos = event->pos();
     m_hasViewportMousePos = rect().contains(event->pos());
+    if(m_landscapeInteractionSuspended)
+    {
+        event->accept();
+        return;
+    }
     if(m_landscapeTools && m_landscapeTools->sculptEnabled()
        && m_terrainEditAvailable)
     {
@@ -7224,6 +7325,11 @@ void CView::mouseReleaseEvent(QMouseEvent *event)
 {
     m_lastViewportMousePos = event->pos();
     m_hasViewportMousePos = rect().contains(event->pos());
+    if(m_landscapeInteractionSuspended)
+    {
+        event->accept();
+        return;
+    }
     if(m_sculptStrokeActive && event->button() == Qt::LeftButton)
     {
         if(m_lastSculptPoint.distanceToPoint(m_lastSculptStampPoint) > 0.01f)

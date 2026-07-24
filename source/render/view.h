@@ -130,6 +130,7 @@ public:
     void activateLandscapeTilePainting();
     void prepareLandscapeTilePainting(bool showTools = true);
     void setLandscapeEditingEnabled(bool enabled);
+    void setLandscapeInteractionSuspended(bool suspended);
     void closeLandscapeTools();
     void setTileGridVisible(bool visible) { m_tileGridVisible = visible; update(); }
     CSettings* settings() {Q_ASSERT(m_pSettings); return m_pSettings;}
@@ -317,6 +318,7 @@ private:
     void syncAiGraphPreviewWidget();
     void rebuildAiGraphOverlayGeometry();
     void startAiGraphPreviewRegeneration();
+    void scheduleAiGraphPreviewRegeneration();
     bool captureAiGraphPreviewBuildInput(SAiGraphPreviewBuildInput* input,
                                          QString* error);
     void syncEnvironmentPreviewWidget(float mapTimeHours);
@@ -467,6 +469,7 @@ private:
     int m_terrainPaintActionId{0};
     quint32 m_terrainSemanticSeed{0};
     bool m_terrainEditAvailable;
+    bool m_landscapeInteractionSuspended{false};
     bool m_tilePaintStrokeActive{false};
     bool m_terrainPaintOutlineValid{false};
     int m_terrainPaintOutlineX{0};
@@ -528,7 +531,10 @@ private:
     QString m_aiGraphSource;
     QString m_aiGraphLoadedSource;
     QFutureWatcher<SAiGraphPreviewBuildResult>* m_aiGraphBuildWatcher{nullptr};
+    QTimer* m_aiGraphRegenerationTimer{nullptr};
     quint64 m_aiGraphBuildRequest{0};
+    bool m_aiGraphAutoRegenerationEnabled{false};
+    bool m_aiGraphRegenerationPending{false};
     bool m_aiGraphPreviewVisible{false};
     bool m_aiGraphOverlayDirty{true};
     QVector<QVector3D> m_aiGraphOpenLinks;

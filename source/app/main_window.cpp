@@ -473,7 +473,7 @@ MainWindow::MainWindow(QWidget* parent) :
     m_ui->menuBar->insertMenu(m_ui->menuSettings->menuAction(), viewMenu);
     viewMenu->addAction(m_mapsDock->toggleViewAction());
     m_landscapeTools = new CLandscapeTools(this);
-    m_landscapeToolsDock = new QDockWidget(tr("Landscape Tools (Preview)"), this);
+    m_landscapeToolsDock = new QDockWidget(tr("Landscape Tools"), this);
     m_landscapeToolsDock->setObjectName("landscapeToolsDock");
     m_landscapeToolsDock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
     m_landscapeToolsDock->setFeatures(QDockWidget::DockWidgetClosable |
@@ -743,6 +743,10 @@ MainWindow::MainWindow(QWidget* parent) :
     restoreState(uiSettings.value("ui/mainWindowState").toByteArray());
     m_ui->workspaceSplitter->restoreState(uiSettings.value("ui/workspaceSplitter").toByteArray());
     m_ui->outlinerSplitter->restoreState(uiSettings.value("ui/outlinerSplitter").toByteArray());
+    // Landscape editing is an explicit working mode, not session layout.
+    // Always start closed while preserving the user's last sculpt controls.
+    m_landscapeToolsDock->hide();
+    m_landscapeTools->setEditingEnabled(false, false);
     if(firstRunSetup)
     {
         // A new profile must start from the documented usable workspace even
@@ -1633,7 +1637,12 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event)
             {
                 const bool hit = m_pView->testSpawnMarkerAt(mouse->pos());
                 if(hit)
+                {
+                    m_pView->setLandscapeInteractionSuspended(true);
                     m_pView->clearObjectSelection();
+                }
+                else
+                    m_pView->setLandscapeInteractionSuspended(false);
                 m_customSpawnSelected = hit;
                 m_pView->setTestSpawnMarkerSelected(hit);
                 updateOperationAvailability();
@@ -1662,6 +1671,7 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event)
                     m_pView->setTestSpawnMarker(m_customSpawnPosition,
                                                 m_customSpawn.adjusted);
                     m_pView->setTestSpawnMarkerSelected(true);
+                    m_pView->setLandscapeInteractionSuspended(false);
                     updateCustomSpawnControls();
                     updateEntranceOverlays();
                     updateOperationAvailability();
@@ -1723,6 +1733,7 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event)
                 m_pView->unsetCursor();
                 m_pView->setTestSpawnMarker(resolved, plan.adjusted);
                 m_pView->setTestSpawnMarkerSelected(true);
+                m_pView->setLandscapeInteractionSuspended(false);
                 m_spawnPositionLabel->setText(tr("Custom: %1, %2, %3%4")
                     .arg(resolved.x(), 0, 'f', 2).arg(resolved.y(), 0, 'f', 2)
                     .arg(resolved.z(), 0, 'f', 2)
@@ -2017,6 +2028,7 @@ void MainWindow::setCustomSpawnPicking(bool enabled)
         m_customSpawnContextKey.clear();
         if(m_pView)
         {
+            m_pView->setLandscapeInteractionSuspended(false);
             m_pView->unsetCursor();
             m_pView->clearTestSpawnMarker();
         }
@@ -2036,7 +2048,7 @@ void MainWindow::setCustomSpawnPicking(bool enabled)
         statusBar()->showMessage(tr("Select a valid map.txt entrance before choosing a custom spawn."), 5000);
         return;
     }
-    m_pView->cancelPendingOperation();
+    m_pView->setLandscapeInteractionSuspended(true);
     m_pickSpawnPending = true;
     m_movingCustomSpawn = false;
     m_customSpawnSelected = false;
@@ -2251,7 +2263,7 @@ void MainWindow::createViewportToolbars()
                && m_customSpawn.valid && m_customSpawn.custom
                && m_customSpawnContextKey == currentMapContextKey())
             {
-                m_pView->cancelPendingOperation();
+                m_pView->setLandscapeInteractionSuspended(true);
                 m_pickSpawnPending = true;
                 m_movingCustomSpawn = true;
                 m_pView->setCursor(Qt::CrossCursor);
@@ -2262,6 +2274,7 @@ void MainWindow::createViewportToolbars()
                 updateMapTestAction();
                 return;
             }
+            m_pView->setLandscapeInteractionSuspended(false);
             if(operation.type == EButtonOpSelect)
             {
                 if(m_pickSpawnPending && m_playFromHereButton)
@@ -4033,6 +4046,8 @@ void MainWindow::saveUiState()
 {
     if(m_uiStateSaved || !m_ui)
         return;
+    if(m_landscapeToolsDock)
+        m_landscapeToolsDock->hide();
     QSettings uiSettings;
     uiSettings.setValue("ui/mainWindowGeometry", saveGeometry());
     uiSettings.setValue("ui/mainWindowState", saveState());
@@ -4790,8 +4805,9 @@ void MainWindow::closeEvent(QCloseEvent *e)
         return;
     }
 
-    // Persist dock visibility before secondary-window cleanup closes docks.
-    // Saving only from the destructor recorded every View panel as hidden.
+    // Persist ordinary dock visibility before secondary-window cleanup closes
+    // docks. Landscape Tools is intentionally normalized to closed by
+    // saveUiState(); editing mode never resumes implicitly next session.
     saveUiState();
     ei::closeSecondaryWindows(this);
     // Remove the editor from the desktop before synchronous scene teardown.
