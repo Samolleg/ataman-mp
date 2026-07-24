@@ -4235,24 +4235,6 @@ bool CView::selectNodes(const QList<CNode*>& nodes, bool addToSelection)
     return true;
 }
 
-bool CView::activateSelectedObjectMob()
-{
-    const QList<CNode*> selected = selectionSnapshot();
-    if(selected.isEmpty())
-        return false;
-    CMob* owner = ownerMob(selected.back());
-    if(!owner || owner == m_activeMob)
-        return false;
-    CNode* selectedNode = selected.back();
-    changeCurrentMob(owner);
-    selectedNode->setState(ENodeState::eSelect);
-    viewParameters();
-    update();
-    if(m_pTree)
-        m_pTree->revealNode(selectedNode);
-    return true;
-}
-
 void CView::drawTilePreview(QOpenGLShaderProgram* program)
 {
     if(m_pPreviewTile.isNull())

@@ -885,7 +885,6 @@ int runHeadlessCommand(QApplication& app)
                 QKeySequenceEdit* historyShortcut = settingsWindow.findChild<QKeySequenceEdit*>("shortcutHistory");
                 QKeySequenceEdit* duplicateShortcut = settingsWindow.findChild<QKeySequenceEdit*>("shortcutDuplicateObjects");
                 QKeySequenceEdit* stopTestShortcut = settingsWindow.findChild<QKeySequenceEdit*>("shortcutStopMapTest");
-                QKeySequenceEdit* activateOwnerShortcut = settingsWindow.findChild<QKeySequenceEdit*>("shortcutActivateOwnerMob");
                 QCheckBox* autosaveEnabled = settingsWindow.findChild<QCheckBox*>("autosaveEnabled");
                 QLineEdit* autosaveInterval = settingsWindow.findChild<QLineEdit*>("autosaveIntervalMinutes");
                 QComboBox* cameraWheelGesture = settingsWindow.findChild<QComboBox*>(
@@ -911,7 +910,7 @@ int runHeadlessCommand(QApplication& app)
                         && settingsWindow.findChild<QCheckBox*>("renderVSync")
                         && settingsWindow.findChild<QCheckBox*>("renderTextureMipmapping")
                         && settingsWindow.findChild<QLineEdit*>("renderFpsCap");
-                if(historyShortcut && duplicateShortcut && stopTestShortcut && activateOwnerShortcut)
+                if(historyShortcut && duplicateShortcut && stopTestShortcut)
                 {
                     historyShortcut->setKeySequence(QKeySequence("Alt+L"));
                     if(autosaveEnabled)
@@ -925,8 +924,7 @@ int runHeadlessCommand(QApplication& app)
                         settingsWindow.opt(eOptSetKeyBinding, "shortcutHistory"));
                     settingsShortcutsPersist = saved && saved->value() == "Alt+L"
                             && duplicateShortcut->keySequence() == QKeySequence("Ctrl+D")
-                            && stopTestShortcut->keySequence() == QKeySequence("Shift+Esc")
-                            && activateOwnerShortcut->keySequence() == QKeySequence("Ctrl+T");
+                            && stopTestShortcut->keySequence() == QKeySequence("Shift+Esc");
                     COptBool* savedAutosaveEnabled = dynamic_cast<COptBool*>(
                         settingsWindow.opt(eOptSetGeneral, "autosaveEnabled"));
                     COptInt* savedAutosaveInterval = dynamic_cast<COptInt*>(

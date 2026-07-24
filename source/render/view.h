@@ -192,7 +192,6 @@ public:
     void copySelectedIDsToClipboard();
     void changeCurrentMob(CMob* pMob);
     void changeCurrentMob(QString mobName);
-    bool activateSelectedObjectMob();
     bool selectNode(CNode* node, bool addToSelection = false,
                     bool activateOwner = false);
     bool selectNodes(const QList<CNode*>& nodes, bool addToSelection = false);

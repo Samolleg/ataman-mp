@@ -222,7 +222,6 @@ MainWindow::MainWindow(QWidget* parent) :
     m_testTable(nullptr),
     m_recentFilesMenu(nullptr),
     m_externalScriptAction(nullptr),
-    m_activateOwnerMobAction(nullptr),
     m_convertWorldObjectToLeverAction(nullptr),
     m_mapsDock(nullptr),
     m_historyDock(nullptr),
@@ -578,13 +577,6 @@ MainWindow::MainWindow(QWidget* parent) :
     connect(m_convertWorldObjectToLeverAction, &QAction::triggered, this, [this]() {
         if(m_pView)
             m_pView->convertSelectedWorldObjectToLever();
-    });
-    m_activateOwnerMobAction = new QAction(tr("Activate Selected Object's MOB"), this);
-    viewMenu->addAction(m_activateOwnerMobAction);
-    connect(m_activateOwnerMobAction, &QAction::triggered, this, [this]()
-    {
-        if(m_pView)
-            m_pView->activateSelectedObjectMob();
     });
     m_recentFilesMenu = new QMenu(tr("Open Recent"), this);
     m_ui->menuFile->insertMenu(m_ui->actionOpen_recent, m_recentFilesMenu);
@@ -2213,9 +2205,6 @@ void MainWindow::initShortcuts()
     m_ui->actionDuplicate_selected_objects->setShortcut(shortcut("shortcutDuplicateObjects", "Ctrl+D"));
     m_ui->actionReset_cam_position->setShortcut(shortcut("shortcutResetCamera", "Ctrl+R"));
     m_ui->actionChange_mod_e->setShortcut(shortcut("shortcutSwitchMode", "Ctrl+Tab"));
-    m_activateOwnerMobAction->setShortcut(
-        shortcut("shortcutActivateOwnerMob", "Ctrl+T"));
-    m_activateOwnerMobAction->setShortcutContext(Qt::ApplicationShortcut);
     m_ui->action_Mob_parameters->setShortcut(shortcut("shortcutMobParameters", "Ctrl+M"));
     m_ui->actionOpen_MOB_Script->setShortcut(shortcut("shortcutMobScript", "Ctrl+Shift+M"));
     m_externalScriptAction->setShortcut(shortcut("shortcutExternalMobScript", "Ctrl+Alt+M"));
@@ -4097,28 +4086,6 @@ void MainWindow::updateOperationAvailability(bool hasSelection)
         state.button->setEnabled(state.enabled);
         if(QAction* action = m_operationActions.value(state.type, nullptr))
             action->setEnabled(state.enabled);
-    }
-    if(m_activateOwnerMobAction)
-    {
-        bool canActivateOwner = false;
-        if(m_pView)
-            for(CMob* mob : m_pView->mobs())
-            {
-                if(!mob || mob == m_pView->currentMob() || !m_pView->isMobVisible(mob))
-                    continue;
-                const QList<CNode*> candidates = mob->nodes() + mob->logicNodes();
-                for(CNode* node : candidates)
-                {
-                    if(node && node->nodeState() == ENodeState::eSelect)
-                    {
-                        canActivateOwner = true;
-                        break;
-                    }
-                }
-                if(canActivateOwner)
-                    break;
-            }
-        m_activateOwnerMobAction->setEnabled(canActivateOwner);
     }
     if(m_convertWorldObjectToLeverAction)
         m_convertWorldObjectToLeverAction->setEnabled(

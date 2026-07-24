@@ -1035,9 +1035,9 @@ briefing maps. The larger resulting baseline is now tracked under 0.3 above.
     but its visible objects remain selectable for inspection and copying.
   - Double-clicking a MOB row in the panel switches the active destination;
     single-click remains ordinary row selection for multi-row operations.
-    Switching locks the previous MOB and unlocks the selected MOB. Repurpose Ctrl+T as
-    **Activate Selected Object's MOB**; disable it when there is no selected MOB
-    object or its owner is already active.
+    Switching locks the previous MOB and unlocks the selected MOB. The former
+    Ctrl+T owner-MOB command was removed after the persistent Loaded Map panel
+    made it redundant.
   - Each row can independently hide/show its MOB without unloading it.
     Visibility is editor-rendering/picking state only: hidden MOBs remain loaded
     and continue to participate in validation, Save All, collections, and Test
