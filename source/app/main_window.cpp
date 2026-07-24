@@ -2573,6 +2573,42 @@ void MainWindow::launchCurrentMapTest()
             tr("The current MOB edits could not be staged safely:\n\n%1").arg(mobReport.toText()));
         return;
     }
+    const QByteArray mprData = mprFile.readAll();
+    SMapGraphSource graphSource;
+    QString graphError;
+    if(!CJmvMapTestLauncher::resolveMapGraphSource(
+           mobData, landscape->filePath(), entry.mprName,
+           profile.mapDirectories, &graphSource, &graphError))
+    {
+        QMessageBox::critical(this, tr("Map test launch"), graphError);
+        return;
+    }
+    bool allowMissingAiGraph = false;
+    if(graphSource.missing)
+    {
+        progress->hide();
+        QMessageBox graphWarning(QMessageBox::Warning,
+            tr("AI graph not found"),
+            tr("The primary MOB has no embedded AI_GRAPH and no matching %1.grp was found beside the open MPR or in the active profile Maps folders.\n\n"
+               "The game may rebuild navigation at runtime, but units can also navigate incorrectly or fail to move. The source map will not be changed.\n\n"
+               "Start anyway?")
+                .arg(landscape->filePath().completeBaseName()),
+            QMessageBox::NoButton, this);
+        QPushButton* startAnyway = graphWarning.addButton(
+            tr("Start Anyway"), QMessageBox::AcceptRole);
+        graphWarning.addButton(QMessageBox::Cancel);
+        graphWarning.setDefaultButton(QMessageBox::Cancel);
+        graphWarning.exec();
+        if(graphWarning.clickedButton() != startAnyway)
+            return;
+        allowMissingAiGraph = true;
+        ei::log(eLogWarning,
+            QString("User accepted graphless %1 for MPR:%2 primary-MOB:%3")
+                .arg(hotReloadRequested ? "hot reload" : "map test",
+                     landscape->filePath().absoluteFilePath(),
+                     mob->filePath().absoluteFilePath()));
+        progress->show();
+    }
     QVector<SJmvSupplementalMobInput> supplementalMobs;
     for(CMob* supplemental : m_pView->mobs())
     {
@@ -2637,7 +2673,7 @@ void MainWindow::launchCurrentMapTest()
     input.profile = profile;
     input.sourceMpr = landscape->filePath();
     input.sourceMob = mob->filePath();
-    input.mprData = mprFile.readAll();
+    input.mprData = mprData;
     input.mobData = mobData;
     input.supplementalMobs = supplementalMobs;
     input.embeddedScript = mob->script();
@@ -2655,6 +2691,7 @@ void MainWindow::launchCurrentMapTest()
     input.overrideWorldTime = isJmv && m_pView->overridesWorldTime();
     input.worldTimeHours = m_pView->effectiveWorldTimeHours();
     input.borrowedMapIdentity = m_borrowedMapIdentity;
+    input.allowMissingAiGraph = allowMissingAiGraph;
     if(isBase && !hotReloadRequested)
     {
         const QStringList levels = {

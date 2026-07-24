@@ -30,7 +30,8 @@ private slots:
     void validatesExternalGraphEnvelope();
     void resolvesWorkspaceExternalGraph();
     void embeddedGraphShadowsExternalGraph();
-    void rejectsMissingRequiredGraph();
+    void reportsMissingOptionalGraph();
+    void rejectsMalformedExternalGraph();
     void resolvesActualZone6ExternalGraph();
     void resolvesHostedGamePidForHotReload();
     void preparesOwnedGodmodeAutoexec();
@@ -216,7 +217,7 @@ void JmvMapTestLauncherTests::embeddedGraphShadowsExternalGraph()
              QFileInfo(grpPath).absoluteFilePath());
 }
 
-void JmvMapTestLauncherTests::rejectsMissingRequiredGraph()
+void JmvMapTestLauncherTests::reportsMissingOptionalGraph()
 {
     QTemporaryDir temporary;
     QVERIFY(temporary.isValid());
@@ -224,11 +225,30 @@ void JmvMapTestLauncherTests::rejectsMissingRequiredGraph()
     writeFile(mprPath, "mpr");
     SMapGraphSource graph;
     QString error;
-    QVERIFY(!CJmvMapTestLauncher::resolveMapGraphSource(
+    QVERIFY2(CJmvMapTestLauncher::resolveMapGraphSource(
         minimalMob(false), QFileInfo(mprPath), "newmap.mpr",
+        QStringList(), &graph, &error), qPrintable(error));
+    QVERIFY(graph.missing);
+    QVERIFY(!graph.embedded);
+    QVERIFY(!graph.usesExternalGraph());
+}
+
+void JmvMapTestLauncherTests::rejectsMalformedExternalGraph()
+{
+    QTemporaryDir temporary;
+    QVERIFY(temporary.isValid());
+    const QString mprPath = QDir(temporary.path()).filePath("broken.mpr");
+    writeFile(mprPath, "mpr");
+    QByteArray malformed = externalGraph(2, 2);
+    malformed.chop(7);
+    writeFile(QDir(temporary.path()).filePath("broken.grp"), malformed);
+    SMapGraphSource graph;
+    QString error;
+    QVERIFY(!CJmvMapTestLauncher::resolveMapGraphSource(
+        minimalMob(false), QFileInfo(mprPath), "broken.mpr",
         QStringList(), &graph, &error));
-    QVERIFY(error.contains("could not be found"));
-    QVERIFY(error.contains("newmap.grp"));
+    QVERIFY(error.contains("external graph is invalid"));
+    QVERIFY(error.contains("requires exactly"));
 }
 
 void JmvMapTestLauncherTests::resolvesActualZone6ExternalGraph()

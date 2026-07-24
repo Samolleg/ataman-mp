@@ -689,11 +689,8 @@ bool CJmvMapTestLauncher::resolveMapGraphSource(
     }
     if(candidates.isEmpty())
     {
-        if(error)
-            *error = QString(
-                "The primary MOB has no embedded AI_GRAPH and the required external graph %1.grp could not be found beside the open MPR or in the active profile Maps directories.")
-                .arg(sourceBase.isEmpty() ? logicalBase : sourceBase);
-        return false;
+        graph->missing = true;
+        return true;
     }
 
     graph->externalPath = candidates.first();
@@ -1611,6 +1608,12 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
                               input.profile.mapDirectories,
                               &graphSource, error))
         return false;
+    if(graphSource.missing && !input.allowMissingAiGraph)
+    {
+        if(error)
+            *error = "The primary MOB has no embedded AI_GRAPH and no matching external .grp was found. Explicit confirmation is required before starting a graphless test.";
+        return false;
+    }
     if(graphSource.usesExternalGraph())
         m_liveGrpPath = QFileInfo(m_liveMprPath).dir().filePath(
             m_temporaryMapName + ".grp");
@@ -1869,7 +1872,8 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
         m_manifest.insert(it.key(), it.value());
     m_manifest.insert("liveFiles", liveFiles);
     QJsonObject graphManifest;
-    graphManifest.insert("source", graphSource.embedded ? "embedded-mob" : "external-grp");
+    graphManifest.insert("source", graphSource.missing ? "missing-allowed"
+                                                        : (graphSource.embedded ? "embedded-mob" : "external-grp"));
     if(graphSource.usesExternalGraph())
     {
         graphManifest.insert("sourcePath", graphSource.externalPath);
@@ -1916,6 +1920,8 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
     else if(!graphSource.shadowedExternalPath.isEmpty())
         appendRunLog(QString("Using embedded AI_GRAPH; external graph is shadowed: %1")
                      .arg(QDir::toNativeSeparators(graphSource.shadowedExternalPath)));
+    else if(graphSource.missing)
+        appendRunLog("WARNING: Test Current Map is starting without an embedded AI_GRAPH or external .grp by explicit user confirmation");
     else
         appendRunLog("Using embedded AI_GRAPH from the primary MOB");
     return writeManifest("staged", error);
@@ -1963,6 +1969,12 @@ bool CJmvMapTestLauncher::hotReload(const SJmvMapTestLaunchInput& input,
                               input.profile.mapDirectories,
                               &graphSource, error))
         return false;
+    if(graphSource.missing && !input.allowMissingAiGraph)
+    {
+        if(error)
+            *error = "The primary MOB has no embedded AI_GRAPH and no matching external .grp was found. Explicit confirmation is required before hot reloading a graphless map.";
+        return false;
+    }
 
     const quint64 sequence = m_hotReloadSequence + 1;
     const quint64 generation = m_saveGeneration + 1;
@@ -2200,7 +2212,8 @@ bool CJmvMapTestLauncher::hotReload(const SJmvMapTestLaunchInput& input,
         supplementalAudit.append(stableSupplemental.filePath(name));
     audit.insert("supplementalMobPaths", supplementalAudit);
     QJsonObject graphAudit;
-    graphAudit.insert("source", graphSource.embedded ? "embedded-mob" : "external-grp");
+    graphAudit.insert("source", graphSource.missing ? "missing-allowed"
+                                                     : (graphSource.embedded ? "embedded-mob" : "external-grp"));
     if(graphSource.usesExternalGraph())
     {
         graphAudit.insert("sourcePath", graphSource.externalPath);
@@ -2231,6 +2244,9 @@ bool CJmvMapTestLauncher::hotReload(const SJmvMapTestLaunchInput& input,
         appendRunLog(QString("Hot reload generation=%1 uses embedded AI_GRAPH; external graph is shadowed: %2")
                      .arg(generation)
                      .arg(QDir::toNativeSeparators(graphSource.shadowedExternalPath)));
+    else if(graphSource.missing)
+        appendRunLog(QString("WARNING: Hot reload generation=%1 is starting without an embedded AI_GRAPH or external .grp by explicit user confirmation")
+                     .arg(generation));
     else
         appendRunLog(QString("Hot reload generation=%1 uses embedded AI_GRAPH from the primary MOB")
                      .arg(generation));

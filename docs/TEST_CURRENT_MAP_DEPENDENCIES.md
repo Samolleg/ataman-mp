@@ -10,8 +10,10 @@ for its own gameplay.
 Both Base EI and JMV require:
 
 - a loaded, validated MPR and primary MOB;
-- either an embedded primary-MOB `AI_GRAPH`, or a structurally valid external
-  `.grp` matching the selected MPR basename;
+- preferably an embedded primary-MOB `AI_GRAPH`, or a structurally valid
+  external `.grp` matching the selected MPR basename. If neither exists, the
+  user may explicitly accept a graphless test; a present but malformed graph
+  remains a staging error;
 - a usable `map.txt` identity and selected entrance, or a valid Play from Here
   position;
 - the packaged `runtime/EIMapperEnduranceRuntimeHost.exe`;
@@ -104,7 +106,9 @@ from the open MPR's directory before profile Maps fallbacks, validates its
 dimensions and exact byte length, then stages an unchanged sibling copy beside
 the temporary MPR. Every hot-reload generation receives its own immutable
 `map.grp`. Source graph files are never modified, and graph regeneration is
-not part of this staging feature.
+not part of this staging feature. If no graph source exists, Endurance warns
+about possible navigation failures and requires **Start Anyway** confirmation.
+The graphless decision is recorded in the manifest and workflow/runtime log.
 
 Base and JMV share the owned-process delivery mechanism. Profile-specific game
 data, map conventions, bootstrap behavior, and optional providers remain
