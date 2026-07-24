@@ -520,7 +520,9 @@ private:
     QLabel* m_timeOfDayLabel{nullptr};
     QSlider* m_environmentPreviewTime{nullptr};
     QFrame* m_aiGraphPreviewWidget{nullptr};
+    QWidget* m_aiGraphPreviewBody{nullptr};
     QToolButton* m_aiGraphPreviewToggle{nullptr};
+    QToolButton* m_aiGraphPreviewCollapse{nullptr};
     QToolButton* m_aiGraphRegenerateButton{nullptr};
     QToolButton* m_aiGraphUseLoadedButton{nullptr};
     QSlider* m_aiGraphLayerSlider{nullptr};

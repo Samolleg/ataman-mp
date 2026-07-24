@@ -232,6 +232,7 @@ private:
     bool m_landscapeDockFloating{false};
     bool m_restoringLandscapeDockLayout{false};
     bool m_suppressLandscapeDockRestore{false};
+    quint64 m_landscapeVisibilityGeneration{0};
     QDockWidget* m_historyDock;
     QDockWidget* m_validationDock;
     QDockWidget* m_outlinerDock;

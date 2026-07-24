@@ -1112,7 +1112,8 @@ void CView::positionEnvironmentPreviewWidget()
         y += m_environmentPreviewWidget->height() + 8;
     }
     if(m_aiGraphPreviewWidget)
-        m_aiGraphPreviewWidget->move(12, y);
+        m_aiGraphPreviewWidget->move(12,
+            qMax(12, height() - m_aiGraphPreviewWidget->height() - 12));
 }
 
 void CView::initAiGraphPreviewWidget()
@@ -1121,11 +1122,17 @@ void CView::initAiGraphPreviewWidget()
         return;
     m_aiGraphPreviewWidget = new QFrame(this);
     m_aiGraphPreviewWidget->setObjectName(QStringLiteral("aiGraphPreviewWidget"));
-    m_aiGraphPreviewWidget->setMinimumWidth(330);
+    m_aiGraphPreviewWidget->setFixedWidth(520);
     m_aiGraphPreviewWidget->setFrameShape(QFrame::StyledPanel);
+    m_aiGraphPreviewWidget->setAttribute(Qt::WA_OpaquePaintEvent, true);
+    m_aiGraphPreviewWidget->setAutoFillBackground(true);
+    QPalette graphPalette = m_aiGraphPreviewWidget->palette();
+    graphPalette.setColor(QPalette::Window, QColor(25, 25, 25));
+    m_aiGraphPreviewWidget->setPalette(graphPalette);
     m_aiGraphPreviewWidget->setStyleSheet(
-        "QFrame#aiGraphPreviewWidget { background: rgba(25,25,25,210); color: white; border: 1px solid #777; border-radius: 4px; }"
-        "QLabel, QToolButton { color: white; }");
+        "QFrame#aiGraphPreviewWidget { background-color: rgb(25,25,25); color: white; border: 1px solid #777; border-radius: 4px; }"
+        "QWidget#aiGraphPreviewBody, QLabel { background-color: rgb(25,25,25); color: white; }"
+        "QToolButton { color: white; }");
     QVBoxLayout* layout = new QVBoxLayout(m_aiGraphPreviewWidget);
     layout->setContentsMargins(7, 5, 7, 6);
     layout->setSpacing(4);
@@ -1135,40 +1142,52 @@ void CView::initAiGraphPreviewWidget()
     m_aiGraphPreviewToggle = new QToolButton(m_aiGraphPreviewWidget);
     m_aiGraphPreviewToggle->setCheckable(true);
     m_aiGraphPreviewToggle->setText(tr("Show (N)"));
+    m_aiGraphPreviewCollapse = new QToolButton(m_aiGraphPreviewWidget);
+    m_aiGraphPreviewCollapse->setText(QString::fromUtf8("\xE2\x88\x92"));
+    m_aiGraphPreviewCollapse->setToolTip(tr("Minimize AI navigation graph"));
     title->addWidget(titleLabel);
     title->addStretch(1);
     title->addWidget(m_aiGraphPreviewToggle);
+    title->addWidget(m_aiGraphPreviewCollapse);
     layout->addLayout(title);
 
-    m_aiGraphLayerLabel = new QLabel(m_aiGraphPreviewWidget);
+    m_aiGraphPreviewBody = new QWidget(m_aiGraphPreviewWidget);
+    m_aiGraphPreviewBody->setObjectName(QStringLiteral("aiGraphPreviewBody"));
+    QVBoxLayout* body = new QVBoxLayout(m_aiGraphPreviewBody);
+    body->setContentsMargins(0, 0, 0, 0);
+    body->setSpacing(4);
+
+    m_aiGraphLayerLabel = new QLabel(m_aiGraphPreviewBody);
     m_aiGraphLayerLabel->setWordWrap(true);
-    m_aiGraphLayerLabel->setMinimumWidth(380);
-    layout->addWidget(m_aiGraphLayerLabel);
-    m_aiGraphLayerSlider = new QSlider(Qt::Horizontal, m_aiGraphPreviewWidget);
+    m_aiGraphLayerLabel->setMinimumWidth(480);
+    body->addWidget(m_aiGraphLayerLabel);
+    m_aiGraphLayerSlider = new QSlider(Qt::Horizontal, m_aiGraphPreviewBody);
     m_aiGraphLayerSlider->setRange(0, CAiGraphDocument::LayerCount - 1);
     m_aiGraphLayerSlider->setSingleStep(1);
     m_aiGraphLayerSlider->setPageStep(1);
     m_aiGraphLayerSlider->setTickPosition(QSlider::TicksBelow);
     m_aiGraphLayerSlider->setValue(3);
-    layout->addWidget(m_aiGraphLayerSlider);
-    m_aiGraphSourceLabel = new QLabel(tr("No graph source loaded"), m_aiGraphPreviewWidget);
+    body->addWidget(m_aiGraphLayerSlider);
+    m_aiGraphSourceLabel = new QLabel(tr("No graph source loaded"), m_aiGraphPreviewBody);
     m_aiGraphSourceLabel->setWordWrap(true);
-    m_aiGraphSourceLabel->setMinimumWidth(380);
-    layout->addWidget(m_aiGraphSourceLabel);
+    m_aiGraphSourceLabel->setTextFormat(Qt::PlainText);
+    m_aiGraphSourceLabel->setMinimumWidth(480);
+    body->addWidget(m_aiGraphSourceLabel);
 
     QHBoxLayout* actions = new QHBoxLayout;
-    m_aiGraphRegenerateButton = new QToolButton(m_aiGraphPreviewWidget);
+    m_aiGraphRegenerateButton = new QToolButton(m_aiGraphPreviewBody);
     m_aiGraphRegenerateButton->setText(tr("Regenerate preview"));
     m_aiGraphRegenerateButton->setToolTip(tr(
         "Build a non-saving diagnostic graph from current terrain and static-object collision proxies."));
-    m_aiGraphUseLoadedButton = new QToolButton(m_aiGraphPreviewWidget);
+    m_aiGraphUseLoadedButton = new QToolButton(m_aiGraphPreviewBody);
     m_aiGraphUseLoadedButton->setCheckable(true);
     m_aiGraphUseLoadedButton->setText(tr("Loaded graph override: OFF"));
     m_aiGraphUseLoadedButton->setToolTip(tr(
         "Toggle between the graph loaded from the map and a regenerated diagnostic preview."));
-    actions->addWidget(m_aiGraphRegenerateButton);
     actions->addWidget(m_aiGraphUseLoadedButton);
-    layout->addLayout(actions);
+    actions->addWidget(m_aiGraphRegenerateButton);
+    body->addLayout(actions);
+    layout->addWidget(m_aiGraphPreviewBody);
 
     connect(m_aiGraphPreviewToggle, &QToolButton::toggled, this, [this](bool visible)
     {
@@ -1181,6 +1200,19 @@ void CView::initAiGraphPreviewWidget()
         m_aiGraphPreviewVisible = visible;
         m_aiGraphPreviewToggle->setText(visible ? tr("Hide (N)") : tr("Show (N)"));
         update();
+    });
+    connect(m_aiGraphPreviewCollapse, &QToolButton::clicked, this, [this]()
+    {
+        const bool show = !m_aiGraphPreviewBody->isVisible();
+        m_aiGraphPreviewBody->setVisible(show);
+        m_aiGraphPreviewCollapse->setText(show
+            ? QString::fromUtf8("\xE2\x88\x92") : "+");
+        m_aiGraphPreviewCollapse->setToolTip(show
+            ? tr("Minimize AI navigation graph")
+            : tr("Expand AI navigation graph"));
+        m_aiGraphPreviewWidget->adjustSize();
+        m_aiGraphPreviewWidget->update();
+        positionEnvironmentPreviewWidget();
     });
     connect(m_aiGraphLayerSlider, &QSlider::valueChanged, this, [this](int)
     {
@@ -1247,7 +1279,7 @@ void CView::syncAiGraphPreviewWidget()
     const bool available = m_aiGraphDocument.isValid();
     m_aiGraphLayerSlider->setEnabled(available);
     m_aiGraphSourceLabel->setText(available
-        ? tr("%1 - %2 x %3")
+        ? tr("%1\n%2 x %3")
               .arg(m_aiGraphSource).arg(m_aiGraphDocument.width()).arg(m_aiGraphDocument.height())
         : tr("No graph source loaded"));
     m_aiGraphPreviewToggle->setToolTip(available
@@ -1267,6 +1299,11 @@ void CView::syncAiGraphPreviewWidget()
             : tr("Loaded graph override: OFF"));
         m_aiGraphUseLoadedButton->setEnabled(m_aiGraphLoadedDocument.isValid());
     }
+    if(m_aiGraphPreviewBody->layout())
+        m_aiGraphPreviewBody->layout()->activate();
+    m_aiGraphPreviewWidget->adjustSize();
+    m_aiGraphPreviewWidget->update();
+    positionEnvironmentPreviewWidget();
 }
 
 void CView::refreshAiGraphPreviewSource()
@@ -1454,7 +1491,7 @@ void CView::startAiGraphPreviewRegeneration()
                 return;
             }
             m_aiGraphDocument = result.document;
-            m_aiGraphSource = tr("Regenerated diagnostic (%1 collision parts)")
+            m_aiGraphSource = tr("Regenerated: %1 collision parts")
                 .arg(result.collisionProxyCount);
             m_aiGraphOverlayDirty = true;
             if(m_aiGraphPreviewToggle && !m_aiGraphPreviewToggle->isChecked())

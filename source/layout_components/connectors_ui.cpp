@@ -71,7 +71,7 @@ void CButtonConnector::addButton(EButtonOp btnType, QToolButton *pButton)
     case EButtonOpScale:
         pButton->setIcon(*(ei::icon("scale.ico"))); break;
     case EButtonOpTilebrush:
-        pButton->setIcon(*(ei::icon("brush.ico"))); break;
+        pButton->setIcon(*(ei::icon("landscape.ico"))); break;
     }
 }
 

@@ -7,8 +7,8 @@
 - `Esc` resolves Play From Here and Landscape state in a fixed order.
 - Loaded AI graph selection is a visible ON/OFF override and enables graph
   display automatically.
-- Repeated NIDs within one MOB are reported by MOB Family Validation instead of
-  a load-time modal dialog.
+- Only authored raw NIDs are authoritative for MOB Family Validation. Legacy
+  projected objects without NID fields are not treated as duplicate objects.
 
 ## Automated evidence
 
@@ -32,9 +32,9 @@
    restores the anchor before affecting Landscape Tools.
 4. Confirm the bottom control hint says `L-Landscape Tools` and contains no old
    `B-Landscape tile painting` text.
-5. Open `zone1testhut.mob`. Confirm no duplicate-ID modal appears. Open MOB
-   Family Validation and confirm NIDs 334, 335, 336, 347, 351, 352, 353, 354,
-   and 355 are listed as repeated within that MOB.
+5. Open `zone1testhut.mob`. Confirm no duplicate-ID modal appears and MOB Family
+   Validation reports no NID overlap for the file. Its nine legacy projected
+   mapId aliases are not authored raw NIDs and must not appear as duplicates.
 6. Regenerate the AI graph, then enable Loaded graph override. Confirm Show
    Graph activates automatically, the button reads `ON`, and the loaded graph
    is displayed. Toggle it `OFF`; regeneration should begin and retain visible

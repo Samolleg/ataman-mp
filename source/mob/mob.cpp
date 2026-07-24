@@ -1049,6 +1049,11 @@ int CMob::readMob(QFileInfo &path)
                 .arg(projectionReport.toText().trimmed()));
         }
 
+        // Only authored NID fields in the lossless document are authoritative.
+        // Some projected object kinds have no authored NID and reuse legacy
+        // default mapId values, which previously produced false duplicate logs.
+        m_duplicateIds = structuralDocument.duplicateIds();
+
         file.close();
     }
     catch (const std::exception& ex)
@@ -1058,10 +1063,6 @@ int CMob::readMob(QFileInfo &path)
         file.close();
         return 5;
     }
-    m_duplicateIds = findIdDuplicate();
-    // The authoritative asynchronous MOB-family validator reports repeated
-    // IDs. Detailed occurrences remain in workflow.log without a legacy modal
-    // warning interrupting direct MOB loads.
     updateObjects();
     logicNodesUpdate();
     captureCleanProjection();
@@ -1278,33 +1279,6 @@ uint CMob::freeMapId()
     if(m_view)
         id = m_view->suggestFamilyNid(this, id);
     return id;
-}
-
-QVector<uint> CMob::findIdDuplicate()
-{
-    QSet<uint> arrId;
-    QVector<uint> arrDuplicate;
-    uint mapId;
-    CNode* pNode = nullptr;
-    int objectIndex = 0;
-    foreach(pNode, m_aNode)
-    {
-        mapId = pNode->mapId();
-        if(arrId.contains(mapId))
-        {
-            ei::log(eLogWarning,
-                QString("Duplicate object ID during load validation mob:%1 objectIndex:%2 objectName:%3 id:%4")
-                    .arg(mobName())
-                    .arg(objectIndex)
-                    .arg(pNode->mapName())
-                    .arg(mapId));
-            arrDuplicate.append(mapId);
-        }
-        else
-            arrId.insert(mapId);
-        ++objectIndex;
-    }
-    return arrDuplicate;
 }
 
 /// file - inout. mob file

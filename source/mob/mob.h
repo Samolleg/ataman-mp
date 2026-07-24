@@ -142,7 +142,6 @@ private:
     void writeData(QJsonObject& mob, const QFileInfo& file, const QString key, QByteArray& value);
     bool isFreeMapId(uint id);
     void collectTreeView();
-    QVector<uint> findIdDuplicate();
 
 private:
     //todo: global text data, script

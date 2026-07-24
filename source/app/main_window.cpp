@@ -484,6 +484,7 @@ MainWindow::MainWindow(QWidget* parent) :
     m_landscapeToolsDock->hide();
     m_landscapeToolsAction = viewMenu->addAction(tr("Landscape Tools"));
     m_landscapeToolsAction->setCheckable(true);
+    m_landscapeToolsAction->setIcon(*ei::icon("landscape.ico"));
     connect(m_landscapeToolsAction, &QAction::triggered,
             this, &MainWindow::toggleLandscapeTools);
     QAction* tileGridAction = viewMenu->addAction(tr("Show Terrain Tile Grid"));
@@ -1104,7 +1105,7 @@ MainWindow::MainWindow(QWidget* parent) :
            && (area == Qt::LeftDockWidgetArea || area == Qt::RightDockWidgetArea))
             m_landscapeDockArea = area;
     });
-    connect(m_landscapeToolsDock, &QDockWidget::visibilityChanged, this, [this](bool visible)
+    const auto applyLandscapeVisibility = [this](bool visible)
     {
         if(m_landscapeToolsAction)
         {
@@ -1131,6 +1132,28 @@ MainWindow::MainWindow(QWidget* parent) :
             if(!m_suppressLandscapeDockRestore)
                 restoreLayoutAfterLandscapeTools();
         }
+    };
+    connect(m_landscapeToolsDock, &QDockWidget::visibilityChanged, this,
+            [this, applyLandscapeVisibility](bool visible)
+    {
+        const quint64 visibilityGeneration = ++m_landscapeVisibilityGeneration;
+        if(visible)
+        {
+            applyLandscapeVisibility(true);
+            return;
+        }
+        // QDockWidget emits a transient hidden state while changing between
+        // docked and floating windows. Deferring the complete hidden-state
+        // transition avoids both cancelling the active brush and re-entering
+        // Qt's dock layout engine during that native-window move.
+        QTimer::singleShot(0, this, [this, visibilityGeneration,
+                                    applyLandscapeVisibility]()
+        {
+            if(visibilityGeneration != m_landscapeVisibilityGeneration
+               || !m_landscapeToolsDock || m_landscapeToolsDock->isVisible())
+                return;
+            applyLandscapeVisibility(false);
+        });
     });
     connect(m_pView, &CView::selectionChanged,
             this, &MainWindow::updateUnitTexturePreview);
@@ -4129,7 +4152,9 @@ void MainWindow::showLandscapeTools()
         QDockWidget* anchor = m_landscapeDockArea == Qt::LeftDockWidgetArea
             ? m_mapsDock : m_loadedMapDock;
         if(anchor && anchor != m_landscapeToolsDock)
-            splitDockWidget(anchor, m_landscapeToolsDock, Qt::Vertical);
+            // Landscape Tools owns the top slot; Loaded Map/Maps Browser moves
+            // below it, matching the established landscape workspace.
+            splitDockWidget(m_landscapeToolsDock, anchor, Qt::Vertical);
     }
     m_restoringLandscapeDockLayout = false;
 
