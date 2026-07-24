@@ -7,6 +7,7 @@
 #include <QJsonObject>
 #include <QPointer>
 #include <QProcess>
+#include <QStringList>
 #include <QVector>
 
 #include "map_catalog.h"
@@ -14,6 +15,17 @@
 #include "resource_profile.h"
 
 class QTimer;
+
+struct SMapGraphSource
+{
+    bool embedded{false};
+    QString externalPath;
+    QString shadowedExternalPath;
+    QByteArray externalData;
+    QString sha256;
+
+    bool usesExternalGraph() const { return !externalPath.isEmpty(); }
+};
 
 struct SJmvSupplementalMobInput
 {
@@ -62,6 +74,14 @@ public:
 
     static QString testRunsRootPath();
     static QString generationSavesPath(const QString& runRoot, quint64 generation);
+    static bool resolveMapGraphSource(const QByteArray& primaryMobData,
+                                      const QFileInfo& sourceMpr,
+                                      const QString& logicalMprName,
+                                      const QStringList& mapDirectories,
+                                      SMapGraphSource* graph,
+                                      QString* error = nullptr);
+    static bool validateExternalGraph(const QByteArray& bytes,
+                                      QString* error = nullptr);
     static qint64 runtimeGameProcessId(bool usesRuntimeHost,
                                        const QString& gamePidPath,
                                        qint64 transportProcessId);
@@ -135,6 +155,7 @@ private:
     QString m_sharedRunLogPath;
     QString m_liveMprPath;
     QString m_liveMobPath;
+    QString m_liveGrpPath;
     QString m_bridgeSourcePath;
     QString m_bridgeLivePath;
     QString m_bridgeResultPath;
@@ -142,6 +163,7 @@ private:
     QString m_bridgeSha256;
     QString m_liveMprSha256;
     QString m_liveMobSha256;
+    QString m_liveGrpSha256;
     QString m_gameExePath;
     QString m_engineDirectory;
     QString m_runtimeHostPath;

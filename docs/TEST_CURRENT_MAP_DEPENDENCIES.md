@@ -10,6 +10,8 @@ for its own gameplay.
 Both Base EI and JMV require:
 
 - a loaded, validated MPR and primary MOB;
+- either an embedded primary-MOB `AI_GRAPH`, or a structurally valid external
+  `.grp` matching the selected MPR basename;
 - a usable `map.txt` identity and selected entrance, or a valid Play from Here
   position;
 - the packaged `runtime/EIMapperEnduranceRuntimeHost.exe`;
@@ -94,6 +96,15 @@ and generation-scoped saves are staged beneath the owned test-run directory.
 Temporary runtime aliases are journalled and removed only when their recorded
 hash still matches. Live campaign saves and source editor documents are not
 used as the test session's writable save namespace.
+
+When the primary MOB contains an embedded `AI_GRAPH`, Endurance preserves and
+uses it as part of the MOB and records any same-name loose `.grp` as shadowed.
+When the MOB has no embedded graph, Endurance resolves the matching `.grp`
+from the open MPR's directory before profile Maps fallbacks, validates its
+dimensions and exact byte length, then stages an unchanged sibling copy beside
+the temporary MPR. Every hot-reload generation receives its own immutable
+`map.grp`. Source graph files are never modified, and graph regeneration is
+not part of this staging feature.
 
 Base and JMV share the owned-process delivery mechanism. Profile-specific game
 data, map conventions, bootstrap behavior, and optional providers remain

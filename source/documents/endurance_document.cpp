@@ -2167,6 +2167,14 @@ bool CMobDocument::load(const QFileInfo& file, CValidationReport* report)
     return loadBytes(bytes, file.filePath(), report);
 }
 
+bool CMobDocument::hasEmbeddedAiGraph() const
+{
+    for(const SMobSection& section : m_sections)
+        if(section.type == 0x31415926)
+            return true;
+    return false;
+}
+
 bool CMobDocument::loadBytes(const QByteArray& bytes, const QString& sourceName,
                              CValidationReport* report)
 {

@@ -205,8 +205,10 @@ lossless transactions because the graph is not owned by the MPR.
 
 ## Zone 6 source and state research
 
-- [ ] Resolve runtime precedence between embedded `AI_GRAPH` and external
-  `.grp` data for every profile before enabling writes.
+- [x] Follow the verified runtime read precedence for staging: embedded
+  primary-MOB `AI_GRAPH` first, external MPR-basename `.grp` fallback. This
+  does not enable graph writes or settle how a future editor should present
+  conflicting sources for intentional editing.
 - [ ] Base: correlate `zone6.mpr` + `zone6.grp` (unfrozen lake) with
   `zone6_2.mpr` + `zone6_2.grp` (frozen lake). Both graphs are `56x96`; they
   differ in 55,208 bytes across 2,642 graph coordinates.
@@ -397,6 +399,10 @@ remain unchanged.
 - [x] JMV Test Current Map, selected entrances, Play from Here, Godmode,
   supplemental MOB staging, generation-isolated saves, state-aware hot reload,
   orphan recovery, and same-map position/facing restoration.
+- [x] Preserve the runtime graph source during Test Current Map and hot reload:
+  retain embedded primary-MOB `AI_GRAPH` data, or validate and stage an
+  unchanged sibling `.grp` in every immutable generation. Graph generation and
+  editing remain in the 0.5.x workstream.
 - [x] Profile-correct humanoid appearance/equipment/idle animation, the final
   texture/UV inspector, optimized render queues and culling, resource-format
   fixes, functional particle preview, ANGLE compatibility, and the integrated
