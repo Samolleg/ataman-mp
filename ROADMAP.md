@@ -1136,7 +1136,11 @@ briefing maps. The larger resulting baseline is now tracked under 0.3 above.
   roots in the browser across refreshes and editor restarts.
 - [x] Add an opt-in **Open last session on startup** General setting that invokes
   the existing File-menu session loader. It defaults off and never restores
-  unsaved edits.
+  unsaved edits. Session data now preserves whether the workspace was opened as
+  a catalog map or collection, including the exact zone/collection identity;
+  restored workspaces no longer degrade into anonymous loose-file sets.
+- [x] Show the active catalog map or collection identity in the main window
+  title alongside the editing profile and active MPR/MOB.
 - [x] On first-run setup, explicitly show Maps and Collections docked left and
   Object Outliner above Object Properties on the right. Subsequent launches
   respect the user's saved dock layout.

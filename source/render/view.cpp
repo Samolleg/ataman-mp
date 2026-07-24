@@ -8488,6 +8488,10 @@ void CView::saveSession()
     auto pManager = CSessionDataManager::getInstance();
     pManager->reset();
     pManager->addZoneData(mprPath, arrMobPath);
+    pManager->addWorkspaceIdentity(m_sessionWorkspaceKind,
+                                   m_sessionWorkspaceIdentifier,
+                                   m_sessionWorkspaceDisplayName,
+                                   m_sessionWorkspaceMapZoneId);
     QVector3D pos, pivot, rot;
     m_cam->getLocation(pos, pivot, rot);
     pManager->addCameraData(pos, pivot, rot);
@@ -8500,6 +8504,10 @@ void CView::loadSession()
     auto pManager = CSessionDataManager::getInstance();
     pManager->reset();
     pManager->loadSession();
+    pManager->getWorkspaceIdentity(m_sessionWorkspaceKind,
+                                   m_sessionWorkspaceIdentifier,
+                                   m_sessionWorkspaceDisplayName,
+                                   m_sessionWorkspaceMapZoneId);
 
     QString mprPath;
     QVector<QString> arrMobPath;
@@ -8543,6 +8551,15 @@ void CView::loadSession()
     {
         m_pTileForm->setQuickTileSet(arrQuickInd);
     }
+}
+
+void CView::setSessionWorkspaceIdentity(const QString& kind, const QString& identifier,
+                                        const QString& displayName, const QString& mapZoneId)
+{
+    m_sessionWorkspaceKind = kind;
+    m_sessionWorkspaceIdentifier = identifier;
+    m_sessionWorkspaceDisplayName = displayName;
+    m_sessionWorkspaceMapZoneId = mapZoneId;
 }
 
 bool CView::isRecentAvailable()

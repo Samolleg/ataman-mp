@@ -238,6 +238,12 @@ public:
     bool applyTerrainHeightPreview(const STerrainHeightCommand& command, bool forward);
     bool applyTerrainTilePreview(const STerrainTileCommand& command, bool forward);
     void loadSession();
+    void setSessionWorkspaceIdentity(const QString& kind, const QString& identifier,
+                                     const QString& displayName, const QString& mapZoneId);
+    QString sessionWorkspaceKind() const { return m_sessionWorkspaceKind; }
+    QString sessionWorkspaceIdentifier() const { return m_sessionWorkspaceIdentifier; }
+    QString sessionWorkspaceDisplayName() const { return m_sessionWorkspaceDisplayName; }
+    QString sessionWorkspaceMapZoneId() const { return m_sessionWorkspaceMapZoneId; }
     bool onExit();
     QString captureShadowDiagnostics(QString* error = nullptr);
 
@@ -508,6 +514,10 @@ private:
     int m_openGlDiagnosticFramesRemaining{0};
     quint64 m_openGlDiagnosticFrame{0};
     QString m_openGlDiagnosticReason;
+    QString m_sessionWorkspaceKind;
+    QString m_sessionWorkspaceIdentifier;
+    QString m_sessionWorkspaceDisplayName;
+    QString m_sessionWorkspaceMapZoneId;
 };
 
 #endif // MYGLWIDGET_H

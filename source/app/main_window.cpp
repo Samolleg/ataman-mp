@@ -1191,7 +1191,7 @@ MainWindow::MainWindow(QWidget* parent) :
             QTimer::singleShot(0, this, [this]()
             {
                 ei::log(eLogInfo, "Opening the previous editor session by user preference.");
-                m_pView->loadSession();
+                loadLastSession();
             });
         }
     }
@@ -3718,8 +3718,10 @@ void MainWindow::openCollection(const QString& path)
     progress.setLabelText(tr("Loading landscape..."));
     progress.setValue(1);
     QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
-    m_openedMapZoneId = document.mapZoneId;
-    m_currentCollectionPath = QFileInfo(path).absoluteFilePath();
+    setWorkspaceIdentity("collection", QFileInfo(path).absoluteFilePath(),
+                         document.name.isEmpty()
+                            ? QFileInfo(path).completeBaseName() : document.name,
+                         document.mapZoneId);
     m_pView->loadLandscape(QFileInfo(resolved.mprPath));
     int progressValue = 2;
     for(const QString& mobPath : resolved.mobPaths)
@@ -3736,6 +3738,7 @@ void MainWindow::openCollection(const QString& path)
     progress.setValue(resolved.mobPaths.size() + 3);
     progress.close();
     endWorkspaceLoad();
+    rebuildWindowTitle();
     ei::log(eLogInfo, QString("Opened collection path:%1 map:%2 mpr:%3 mobs:%4")
         .arg(path, document.mapZoneId, resolved.mprPath)
         .arg(resolved.mobPaths.size()));
@@ -3754,6 +3757,37 @@ void MainWindow::newCollection()
         for(CMob* mob : m_pView->mobs())
             if(mob) initial.mobReferences.append(mob->filePath().absoluteFilePath());
     createCollectionFromTemplate(initial, initial.name, true);
+}
+
+void MainWindow::setWorkspaceIdentity(const QString& kind, const QString& identifier,
+                                      const QString& displayName, const QString& mapZoneId,
+                                      bool syncView)
+{
+    m_workspaceIdentityKind = kind;
+    m_workspaceDisplayName = displayName;
+    m_openedMapZoneId = mapZoneId;
+    m_currentCollectionPath = kind.compare("collection", Qt::CaseInsensitive) == 0
+        ? QFileInfo(identifier).absoluteFilePath() : QString();
+    if(syncView && m_pView)
+        m_pView->setSessionWorkspaceIdentity(kind, identifier, displayName, mapZoneId);
+    rebuildWindowTitle();
+}
+
+void MainWindow::loadLastSession()
+{
+    if(!m_pView)
+        return;
+    m_pView->loadSession();
+    if(!CLandscape::getInstance()->isMprLoad())
+        return;
+    setWorkspaceIdentity(m_pView->sessionWorkspaceKind(),
+                         m_pView->sessionWorkspaceIdentifier(),
+                         m_pView->sessionWorkspaceDisplayName(),
+                         m_pView->sessionWorkspaceMapZoneId(), false);
+    refreshMapTestContext();
+    ei::log(eLogInfo, QString("Restored session workspace kind:%1 identity:%2 map:%3")
+        .arg(m_workspaceIdentityKind,
+             m_pView->sessionWorkspaceIdentifier(), m_openedMapZoneId));
 }
 
 void MainWindow::createCollectionFromTemplate(
@@ -3831,7 +3865,12 @@ void MainWindow::editCollection(const QString& path)
         QMessageBox::warning(this, tr("Edit Collection"), error);
     else
     {
-        m_currentCollectionPath = QFileInfo(path).absoluteFilePath();
+        if(QFileInfo(m_currentCollectionPath).absoluteFilePath().compare(
+               QFileInfo(path).absoluteFilePath(), Qt::CaseInsensitive) == 0)
+            setWorkspaceIdentity("collection", QFileInfo(path).absoluteFilePath(),
+                                 value.name.isEmpty()
+                                    ? QFileInfo(path).completeBaseName() : value.name,
+                                 value.mapZoneId);
         refreshMapsBrowser();
     }
 }
@@ -3943,7 +3982,7 @@ void MainWindow::deleteCollection(const QString& path)
     }
     if(QFileInfo(m_currentCollectionPath).absoluteFilePath().compare(
            file.absoluteFilePath(), Qt::CaseInsensitive) == 0)
-        m_currentCollectionPath.clear();
+        setWorkspaceIdentity(QString(), QString(), QString(), QString());
     refreshMapsBrowser();
     statusBar()->showMessage(tr("Collection deleted: %1").arg(file.fileName()), 5000);
 }
@@ -3979,7 +4018,10 @@ void MainWindow::saveCollection(bool saveAs)
         QMessageBox::warning(this, tr("Save Collection"), error);
     else
     {
-        m_currentCollectionPath = QFileInfo(path).absoluteFilePath();
+        setWorkspaceIdentity("collection", QFileInfo(path).absoluteFilePath(),
+                             value.name.isEmpty()
+                                ? QFileInfo(path).completeBaseName() : value.name,
+                             value.mapZoneId);
         refreshMapsBrowser();
         statusBar()->showMessage(tr("Collection saved: %1").arg(path), 5000);
     }
@@ -4017,8 +4059,7 @@ void MainWindow::openMapPair(const QString& mprPath, const QString& mobPath,
     progress.setLabelText(tr("Loading landscape..."));
     progress.setValue(1);
     QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
-    m_openedMapZoneId = zoneId;
-    m_currentCollectionPath.clear();
+    setWorkspaceIdentity("map", zoneId, zoneId, zoneId);
     m_pView->loadLandscape(QFileInfo(mprPath));
     progress.setLabelText(tr("Loading %1...").arg(QFileInfo(mobPath).fileName()));
     progress.setValue(2);
@@ -4037,6 +4078,7 @@ void MainWindow::openMapPair(const QString& mprPath, const QString& mobPath,
     progress.setValue(3);
     progress.close();
     endWorkspaceLoad();
+    rebuildWindowTitle();
     QTimer::singleShot(0, this, [this]()
     {
         if(!m_validEntrances.isEmpty())
@@ -4347,6 +4389,7 @@ void MainWindow::closeAll()
         // isExitAllowed() already obtained the user's save/discard decision.
         // Do not ask for the same dirty MPR decision again during unload.
         m_pView->unloadLand(false);
+        setWorkspaceIdentity(QString(), QString(), QString(), QString());
         updateDocumentActionAvailability();
     }
 }
@@ -4437,8 +4480,7 @@ void MainWindow::showGameAndModSetup()
         m_pView->unloadMob("");
         // isExitAllowed() already collected the dirty-document decision.
         m_pView->unloadLand(false);
-        m_openedMapZoneId.clear();
-        m_currentCollectionPath.clear();
+        setWorkspaceIdentity(QString(), QString(), QString(), QString());
         ei::log(eLogInfo, QString("Unloaded documents before resource reinitialization profile:%1 -> %2 root:%3 -> %4")
             .arg(previous.profileId, profile.profileId,
                  previous.gameRoot, profile.gameRoot));
@@ -4587,10 +4629,9 @@ bool MainWindow::replaceLoadedLandscape(const QFileInfo& fileName)
         m_undoStack->clear();
         m_pView->unloadMob("");
         m_pView->unloadLand(false);
-        m_currentCollectionPath.clear();
     }
 
-    m_openedMapZoneId.clear();
+    setWorkspaceIdentity(QString(), QString(), QString(), QString());
     m_pView->prepareDocumentTransition();
     m_undoStack->clear();
     if(!loadLandscapeWithProgress(fileName))
@@ -4974,8 +5015,27 @@ void MainWindow::updateWindowTitle(eTitleTypeData type, QString data)
         Q_ASSERT(false);
         break;
     }
+    rebuildWindowTitle();
+    updateDocumentActionAvailability();
+    updateMapTestAction();
+    if(type == eTitleTypeData::eTitleTypeDataMpr)
+        refreshMapTestContext();
+}
+
+void MainWindow::rebuildWindowTitle()
+{
     QString title = QString("EI Mapper: Endurance Edition %1 [%2]")
         .arg(QCoreApplication::applicationVersion(), activeProfileDisplayName());
+    if(m_workspaceIdentityKind.compare("collection", Qt::CaseInsensitive) == 0)
+    {
+        const QString fileName = QFileInfo(m_currentCollectionPath).fileName();
+        const QString identity = m_workspaceDisplayName.isEmpty() ? fileName
+            : (fileName.isEmpty() ? m_workspaceDisplayName
+                                  : QString("%1 — %2").arg(m_workspaceDisplayName, fileName));
+        title += QString(" Collection: (%1)").arg(identity);
+    }
+    else if(m_workspaceIdentityKind.compare("map", Qt::CaseInsensitive) == 0)
+        title += QString(" Map: (%1)").arg(m_workspaceDisplayName);
     if(!m_sWindowTitle.mpr.isEmpty())
     {
         title += QString(" MPR: (%1)").arg(m_sWindowTitle.mpr);
@@ -4989,13 +5049,7 @@ void MainWindow::updateWindowTitle(eTitleTypeData type, QString data)
         if(m_sWindowTitle.durty) //show durty flag only if mob is loaded. if it will be possible to edit mpr, move flag outside this block
             title += "*";
     }
-
-
     setWindowTitle(title);
-    updateDocumentActionAvailability();
-    updateMapTestAction();
-    if(type == eTitleTypeData::eTitleTypeDataMpr)
-        refreshMapTestContext();
 }
 
 
@@ -5108,7 +5162,7 @@ void MainWindow::closeEvent(QCloseEvent *e)
 
 void MainWindow::on_actionOpen_recent_triggered()
 {
-    m_pView->loadSession();
+    loadLastSession();
 }
 
 

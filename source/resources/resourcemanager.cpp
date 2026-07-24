@@ -1950,6 +1950,38 @@ bool CSessionDataManager::getZoneData(QString& mprPath, QVector<QString>& arrMob
     return true;
 }
 
+void CSessionDataManager::addWorkspaceIdentity(const QString& kind,
+                                               const QString& identifier,
+                                               const QString& displayName,
+                                               const QString& mapZoneId)
+{
+    if(kind.isEmpty())
+        return;
+    QJsonObject identity;
+    identity.insert("kind", kind);
+    identity.insert("identifier", identifier);
+    identity.insert("displayName", displayName);
+    identity.insert("mapZoneId", mapZoneId);
+    m_lastSession.insert("workspace identity", identity);
+}
+
+bool CSessionDataManager::getWorkspaceIdentity(QString& kind, QString& identifier,
+                                               QString& displayName, QString& mapZoneId)
+{
+    kind.clear();
+    identifier.clear();
+    displayName.clear();
+    mapZoneId.clear();
+    const QJsonObject identity = m_lastSession.value("workspace identity").toObject();
+    kind = identity.value("kind").toString();
+    if(kind.isEmpty())
+        return false;
+    identifier = identity.value("identifier").toString();
+    displayName = identity.value("displayName").toString();
+    mapZoneId = identity.value("mapZoneId").toString();
+    return true;
+}
+
 void CSessionDataManager::addCameraData(const QVector3D& position, const QVector3D& pivot, const QVector3D& rotation)
 {
     QJsonObject camera;

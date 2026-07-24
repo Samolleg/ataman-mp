@@ -214,6 +214,10 @@ public:
     void getLastSession(QString& mprPath, QVector<QString>& arrMobPath);
     void addZoneData(const QString& mprPath, const QVector<QString>& arrMobPath);
     bool getZoneData(QString& mprPath, QVector<QString>& arrMobPath);
+    void addWorkspaceIdentity(const QString& kind, const QString& identifier,
+                              const QString& displayName, const QString& mapZoneId);
+    bool getWorkspaceIdentity(QString& kind, QString& identifier,
+                              QString& displayName, QString& mapZoneId);
     void addCameraData(const QVector3D& position, const QVector3D& pivot, const QVector3D& rotation);
     bool getCameraData(QVector3D& position, QVector3D& pivot, QVector3D& rotation);
     void addQuickTileIndices(const QVector<int>& arrInd);

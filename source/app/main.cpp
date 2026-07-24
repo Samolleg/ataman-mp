@@ -990,10 +990,27 @@ int runHeadlessCommand(QApplication& app)
         const bool logicPointRedoAtomic = logicPointHistory.index() == 1
                 && logicPoints == 1 && logicPlacementChanges == 1;
 
+        CSessionDataManager* sessionManager = CSessionDataManager::getInstance();
+        sessionManager->reset();
+        sessionManager->addWorkspaceIdentity("collection", "C:/maps/test.collection",
+                                             "Test collection", "zone7");
+        QString sessionKind;
+        QString sessionIdentifier;
+        QString sessionDisplayName;
+        QString sessionMapZoneId;
+        const bool sessionIdentityRoundTrip = sessionManager->getWorkspaceIdentity(
+            sessionKind, sessionIdentifier, sessionDisplayName, sessionMapZoneId)
+            && sessionKind == "collection"
+            && sessionIdentifier == "C:/maps/test.collection"
+            && sessionDisplayName == "Test collection"
+            && sessionMapZoneId == "zone7";
+        sessionManager->reset();
+
         const bool passed = prefixesOnly && valueStable && focusCancel && escapeCancel
                 && enterCommit && clickCommit && settingsTabsUsable && settingsShortcutsPersist
                 && autosaveSettingsPersist && settingsApplySignal && autosaveLiveReconfigure
                 && cameraSpeedSettingsPersist
+                && sessionIdentityRoundTrip
                 && renderOptionsRegistered
                 && secondaryWindowsClosed
                 && deletingSecondaryWindowClosedSafely
@@ -1031,6 +1048,7 @@ int runHeadlessCommand(QApplication& app)
                << " autosaveSettingsPersist=" << autosaveSettingsPersist
                << " autosaveLiveReconfigure=" << autosaveLiveReconfigure
                << " cameraSpeedSettingsPersist=" << cameraSpeedSettingsPersist
+               << " sessionIdentityRoundTrip=" << sessionIdentityRoundTrip
                << " settingsApplySignal=" << settingsApplySignal
                << " renderOptionsRegistered=" << renderOptionsRegistered
                << " secondaryWindowsClosed=" << secondaryWindowsClosed

@@ -99,6 +99,11 @@ private:
     void showGameAndModSetup();
     void rememberRecentFile(const QFileInfo& fileName);
     void rebuildRecentFilesMenu();
+    void loadLastSession();
+    void setWorkspaceIdentity(const QString& kind, const QString& identifier,
+                              const QString& displayName, const QString& mapZoneId,
+                              bool syncView = true);
+    void rebuildWindowTitle();
     void runUndoToIndex(int targetIndex);
     void refreshMapsBrowser();
     void openMapPair(const QString& mprPath, const QString& mobPath, const QString& zoneId);
@@ -306,6 +311,8 @@ private:
     QVector<SMapTravelZone> m_validEntrances;
     QString m_openedMapZoneId;
     QString m_currentCollectionPath;
+    QString m_workspaceIdentityKind;
+    QString m_workspaceDisplayName;
     bool m_borrowedMapIdentity;
     bool m_pickSpawnPending;
     bool m_movingCustomSpawn{false};
