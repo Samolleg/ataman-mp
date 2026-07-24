@@ -8,6 +8,7 @@
 
 class QLabel;
 class QLineEdit;
+class QPoint;
 class QPushButton;
 class QTreeWidget;
 class QTreeWidgetItem;
@@ -23,12 +24,21 @@ public:
 
 signals:
     void openMapRequested(QString mprPath, QString mobPath, QString zoneId);
+    void editMapRequested(QString sourceArchive, QString zoneId);
+    void duplicateMapAsCollectionRequested(QString zoneId, QString mprPath,
+                                           QString mobPath);
     void openCollectionRequested(QString path);
+    void editCollectionRequested(QString path);
+    void duplicateCollectionRequested(QString path);
+    void saveCollectionAsRequested(QString path);
+    void deleteCollectionRequested(QString path);
+    void newCollectionRequested();
     void refreshRequested();
 
 private slots:
     void applyFilter(const QString& text);
     void activateItem(QTreeWidgetItem* item, int column);
+    void showContextMenu(const QPoint& position);
 
 private:
     void rebuildTree();
@@ -36,6 +46,7 @@ private:
     QLineEdit* m_filter;
     QTreeWidget* m_tree;
     QLabel* m_status;
+    QPushButton* m_newCollection;
     QPushButton* m_refresh;
     QVector<SMapCatalogEntry> m_entries;
     QStringList m_collectionPaths;

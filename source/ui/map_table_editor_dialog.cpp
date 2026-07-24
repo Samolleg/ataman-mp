@@ -344,6 +344,21 @@ bool CMapTableEditorDialog::openArchive(const QString& path)
     return true;
 }
 
+bool CMapTableEditorDialog::selectZoneById(const QString& zoneId)
+{
+    for(int zoneIndex = 0; zoneIndex < m_table.zones().size(); ++zoneIndex)
+    {
+        if(m_table.zones().at(zoneIndex).zoneId.compare(
+               zoneId, Qt::CaseInsensitive) != 0)
+            continue;
+        m_zoneFilter->clear();
+        refreshZoneList(zoneIndex);
+        return true;
+    }
+    setStatus(tr("Zone '%1' was not found in the loaded map.txt.").arg(zoneId), true);
+    return false;
+}
+
 void CMapTableEditorDialog::refreshZoneList(int selectedZoneIndex)
 {
     m_zoneList->blockSignals(true);

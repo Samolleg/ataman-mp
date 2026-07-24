@@ -1104,6 +1104,11 @@ briefing maps. The larger resulting baseline is now tracked under 0.3 above.
     deferred.
 - [x] Add the hideable **Maps and Collections** browser with a `map.txt`-based
   Maps MVP and customizable Ctrl+Space shortcut. ([`a8e1ac7`](https://github.com/Ilufus/ei-mapper-endurance/commit/a8e1ac7), [`d86188f`](https://github.com/Ilufus/ei-mapper-endurance/commit/d86188f))
+  - Map rows now expose **Open Map**, catalog editing with the matching
+    `map.txt` entry preselected, and **Duplicate as Collection**. Collection
+    rows expose open, edit, duplicate, save-as, and guarded deletion; a
+    persistent **New Collection** shortcut sits above Refresh.
+    ([`51d9ad0`](https://github.com/Ilufus/ei-mapper-endurance/commit/51d9ad0))
 
 ## 0.2.x: MOB editing workflow and recovery
 
