@@ -1,6 +1,6 @@
-# EI Mapper Endurance 0.3.0-alpha.3 — MPR Settings R1
+# EI Mapper Endurance 0.3.0-alpha.4 — MPR Settings R1
 
-This tester build adds the first safe whole-map terrain-height workflow.
+This tester build adds the first safe whole-map terrain-height workflow on top of the alpha.4 main boundary.
 
 ## Changes
 
@@ -11,6 +11,7 @@ This tester build adds the first safe whole-map terrain-height workflow.
 - Rejects invalid ranges, non-finite values, flat-range normalization, and implicit saturation.
 - Retains the existing atlas tile viewer through **Open Atlas Tiles**.
 - Documents fixed SEC dimensions, canonical shared vertices, maxZ scaling, structural resize risk, and future staged transactions.
+- Includes main's alpha.4 synthetic-map bootstrap correction.
 
 ## Deliberately deferred
 
