@@ -25,14 +25,20 @@ single-player loader identified by the alpha.51/52 evidence.
 
 The provider first observes the engine's own `MainMenu`, mode-2 transition and
 captures its real transition-controller object. After the ordinary main-menu
-loader returns, it queues a private message to that same game thread. The
-message hook resolves the requested `map.txt` zone record and invokes the
-engine's normal transition as `(captured controller, zone ID, mode 0)`. The
-loader detour substitutes only that transition's verified MPR/MOB arguments
-with the staged Endurance paths. The engine retains its normal session, zone,
-and player initialization. Relevant file operations retain module-relative
-call stacks for verification; initialization records only an aggregate count
-of already loaded modules rather than dumping every Windows DLL path.
+loader returns, it queues a private message to that same game thread and uses
+the complete New Game bootstrap. The loader detour substitutes only the
+bootstrap's verified MPR/MOB arguments with the staged Endurance paths. The
+engine retains its normal session, zone, and player initialization. Relevant
+file operations retain module-relative call stacks for verification;
+initialization records only an aggregate count of already loaded modules rather
+than dumping every Windows DLL path.
+
+For an explicitly unmapped MPR/MOB pair, the bridge obtains the selected
+bootstrap record through the fingerprinted game's byte-guarded map-table lookup
+and temporarily gives that record a run-local identity, MPR dimensions, empty
+map/minimap metadata, and one synthetic entrance. It never scans or locks the
+process heaps and never writes the installed `texts.res`/`map.txt`. The original
+record is restored before a mapped reload or process cleanup.
 
 The provider remains deliberately narrow:
 
@@ -48,7 +54,7 @@ The provider remains deliberately narrow:
 - it does not infer readiness from a fixed delay; the normal main-menu loader
   return and game-thread message loop provide the lifecycle boundary.
 
-Hot reload protocol v2 gives each initial launch/reload an immutable map and
+Hot reload protocol v3 gives each initial launch/reload an immutable map and
 save generation beneath the owned run directory. Save path switching occurs on
 the game thread immediately before a committed transition. The bridge records
 guarded runtime-state changes and defers reload while state is initializing or
