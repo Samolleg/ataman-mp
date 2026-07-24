@@ -36,6 +36,7 @@ class CMapsBrowser;
 class CJmvMapTestLauncher;
 class CLandscapeTools;
 struct SResourceProfileEvaluation;
+struct SEnduranceCollection;
 class QComboBox;
 class QCheckBox;
 class QToolButton;
@@ -104,6 +105,15 @@ private:
     void openCollection(const QString& path);
     void newCollection();
     void editCollection();
+    void editCollection(const QString& path);
+    void duplicateCollection(const QString& path);
+    void saveCollectionAs(const QString& path);
+    void deleteCollection(const QString& path);
+    void duplicateMapAsCollection(const QString& zoneId, const QString& mprPath,
+                                  const QString& mobPath);
+    void createCollectionFromTemplate(const SEnduranceCollection& initial,
+                                      const QString& suggestedBaseName,
+                                      bool makeCurrent = false);
     void saveCollection(bool saveAs);
     QVector<QString> activeMapRoots() const;
     void updateMapTestAction();

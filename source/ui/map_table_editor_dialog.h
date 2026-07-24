@@ -25,6 +25,7 @@ public:
     explicit CMapTableEditorDialog(QWidget* parent = nullptr);
     ~CMapTableEditorDialog() override;
     bool openArchive(const QString& path);
+    bool selectZoneById(const QString& zoneId);
 
 private slots:
     void chooseArchive();

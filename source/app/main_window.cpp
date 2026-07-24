@@ -500,8 +500,34 @@ MainWindow::MainWindow(QWidget* parent) :
             this, &MainWindow::showMobFamilyValidation);
     connect(m_mapsBrowser, &CMapsBrowser::openMapRequested,
             this, &MainWindow::openMapPair);
+    connect(m_mapsBrowser, &CMapsBrowser::editMapRequested,
+            this, [this](const QString& sourceArchive, const QString& zoneId)
+    {
+        CMapTableEditorDialog dialog(this);
+        if(!dialog.openArchive(sourceArchive))
+        {
+            QMessageBox::warning(this, tr("Map Catalog Editor"),
+                tr("Could not open the map catalog source:\n\n%1")
+                    .arg(QDir::toNativeSeparators(sourceArchive)));
+            return;
+        }
+        dialog.selectZoneById(zoneId);
+        dialog.exec();
+    });
+    connect(m_mapsBrowser, &CMapsBrowser::duplicateMapAsCollectionRequested,
+            this, &MainWindow::duplicateMapAsCollection);
     connect(m_mapsBrowser, &CMapsBrowser::openCollectionRequested,
             this, &MainWindow::openCollection);
+    connect(m_mapsBrowser, &CMapsBrowser::editCollectionRequested,
+            this, QOverload<const QString&>::of(&MainWindow::editCollection));
+    connect(m_mapsBrowser, &CMapsBrowser::duplicateCollectionRequested,
+            this, &MainWindow::duplicateCollection);
+    connect(m_mapsBrowser, &CMapsBrowser::saveCollectionAsRequested,
+            this, &MainWindow::saveCollectionAs);
+    connect(m_mapsBrowser, &CMapsBrowser::deleteCollectionRequested,
+            this, &MainWindow::deleteCollection);
+    connect(m_mapsBrowser, &CMapsBrowser::newCollectionRequested,
+            this, &MainWindow::newCollection);
     connect(m_mapsBrowser, &CMapsBrowser::refreshRequested,
             this, [this]() { refreshMapsBrowser(); refreshMapTestContext(); });
     m_externalScriptAction = new QAction(tr("Open MOB Script in External Editor"), this);
@@ -547,7 +573,8 @@ MainWindow::MainWindow(QWidget* parent) :
             CCollectionDocument::defaultDirectory(), tr("Endurance Collection (*.collection)"));
         if(!path.isEmpty()) openCollection(path);
     });
-    connect(editCollectionAction, &QAction::triggered, this, &MainWindow::editCollection);
+    connect(editCollectionAction, &QAction::triggered,
+            this, QOverload<>::of(&MainWindow::editCollection));
     connect(saveCollectionAction, &QAction::triggered, this, [this]() { saveCollection(false); });
     connect(saveCollectionAsAction, &QAction::triggered, this, [this]() { saveCollection(true); });
 
@@ -3705,29 +3732,42 @@ void MainWindow::newCollection()
     if(m_pView)
         for(CMob* mob : m_pView->mobs())
             if(mob) initial.mobReferences.append(mob->filePath().absoluteFilePath());
+    createCollectionFromTemplate(initial, initial.name, true);
+}
+
+void MainWindow::createCollectionFromTemplate(
+    const SEnduranceCollection& initial, const QString& suggestedBaseName,
+    bool makeCurrent)
+{
     CCollectionEditorDialog dialog(initial, m_mapCatalog.entries, this);
     if(dialog.exec() != QDialog::Accepted)
         return;
     QDir().mkpath(CCollectionDocument::defaultDirectory());
-    QString suggested = dialog.collection().name;
+    QString suggested = suggestedBaseName.trimmed().isEmpty()
+        ? dialog.collection().name : suggestedBaseName;
     suggested.replace(QRegularExpression("[^A-Za-z0-9_.-]+"), "-");
     const QString path = QFileDialog::getSaveFileName(this, tr("Save Collection"),
         QDir(CCollectionDocument::defaultDirectory()).filePath(suggested + ".collection"),
         tr("Endurance Collection (*.collection)"));
     if(path.isEmpty())
         return;
+    QString outputPath = path;
+    if(!outputPath.endsWith(".collection", Qt::CaseInsensitive))
+        outputPath += ".collection";
     SEnduranceCollection value = dialog.collection();
     value.mprReference = CCollectionDocument::portableReference(
-        value.mprReference, path, activeMapRoots());
+        value.mprReference, outputPath, activeMapRoots());
     for(QString& mob : value.mobReferences)
-        mob = CCollectionDocument::portableReference(mob, path, activeMapRoots());
+        mob = CCollectionDocument::portableReference(mob, outputPath, activeMapRoots());
     QString error;
-    if(!CCollectionDocument::save(path, value, &error))
+    if(!CCollectionDocument::save(outputPath, value, &error))
         QMessageBox::warning(this, tr("Save Collection"), error);
     else
     {
-        m_currentCollectionPath = QFileInfo(path).absoluteFilePath();
+        if(makeCurrent)
+            m_currentCollectionPath = QFileInfo(outputPath).absoluteFilePath();
         refreshMapsBrowser();
+        statusBar()->showMessage(tr("Collection saved: %1").arg(outputPath), 5000);
     }
 }
 
@@ -3739,6 +3779,11 @@ void MainWindow::editCollection()
                                           : m_currentCollectionPath,
         tr("Endurance Collection (*.collection)"));
     if(path.isEmpty()) return;
+    editCollection(path);
+}
+
+void MainWindow::editCollection(const QString& path)
+{
     SEnduranceCollection value;
     QString error;
     if(!CCollectionDocument::load(path, &value, &error))
@@ -3764,6 +3809,118 @@ void MainWindow::editCollection()
         m_currentCollectionPath = QFileInfo(path).absoluteFilePath();
         refreshMapsBrowser();
     }
+}
+
+void MainWindow::duplicateMapAsCollection(const QString& zoneId,
+                                          const QString& mprPath,
+                                          const QString& mobPath)
+{
+    if(!QFileInfo::exists(mprPath) || !QFileInfo::exists(mobPath))
+    {
+        QMessageBox::warning(this, tr("Duplicate as Collection"),
+            tr("The map entry is incomplete and cannot seed a collection."));
+        return;
+    }
+    SEnduranceCollection initial;
+    initial.name = zoneId + tr(" Copy");
+    initial.profileId = activeResourceProfile().profileId;
+    initial.mapZoneId = zoneId;
+    initial.mprReference = QFileInfo(mprPath).absoluteFilePath();
+    initial.mobReferences.append(QFileInfo(mobPath).absoluteFilePath());
+    createCollectionFromTemplate(initial, zoneId + "-copy");
+}
+
+void MainWindow::duplicateCollection(const QString& path)
+{
+    SEnduranceCollection value;
+    QString error;
+    if(!CCollectionDocument::load(path, &value, &error))
+    {
+        QMessageBox::warning(this, tr("Duplicate Collection"), error);
+        return;
+    }
+    const SResolvedCollection resolved = CCollectionDocument::resolve(value, activeMapRoots());
+    if(!resolved.isValid())
+    {
+        QMessageBox::warning(this, tr("Duplicate Collection"),
+            tr("These collection references could not be resolved:\n\n%1")
+                .arg(resolved.errors.join('\n')));
+        return;
+    }
+    value.name += tr(" Copy");
+    value.mprReference = resolved.mprPath;
+    value.mobReferences = resolved.mobPaths;
+    value.sourcePath.clear();
+    createCollectionFromTemplate(value,
+        QFileInfo(path).completeBaseName() + "-copy");
+}
+
+void MainWindow::saveCollectionAs(const QString& path)
+{
+    SEnduranceCollection value;
+    QString error;
+    if(!CCollectionDocument::load(path, &value, &error))
+    {
+        QMessageBox::warning(this, tr("Save Collection As"), error);
+        return;
+    }
+    const SResolvedCollection resolved = CCollectionDocument::resolve(value, activeMapRoots());
+    if(!resolved.isValid())
+    {
+        QMessageBox::warning(this, tr("Save Collection As"),
+            tr("These collection references could not be resolved:\n\n%1")
+                .arg(resolved.errors.join('\n')));
+        return;
+    }
+    QString destination = QFileDialog::getSaveFileName(this, tr("Save Collection As"),
+        QDir(CCollectionDocument::defaultDirectory()).filePath(
+            QFileInfo(path).completeBaseName() + "-copy.collection"),
+        tr("Endurance Collection (*.collection)"));
+    if(destination.isEmpty())
+        return;
+    if(!destination.endsWith(".collection", Qt::CaseInsensitive))
+        destination += ".collection";
+    value.name = QFileInfo(destination).completeBaseName();
+    value.mprReference = CCollectionDocument::portableReference(
+        resolved.mprPath, destination, activeMapRoots());
+    value.mobReferences.clear();
+    for(const QString& mobPath : resolved.mobPaths)
+        value.mobReferences.append(CCollectionDocument::portableReference(
+            mobPath, destination, activeMapRoots()));
+    value.sourcePath.clear();
+    if(!CCollectionDocument::save(destination, value, &error))
+        QMessageBox::warning(this, tr("Save Collection As"), error);
+    else
+    {
+        refreshMapsBrowser();
+        statusBar()->showMessage(tr("Collection saved as: %1").arg(destination), 5000);
+    }
+}
+
+void MainWindow::deleteCollection(const QString& path)
+{
+    const QFileInfo file(path);
+    if(!file.exists() || !file.isFile())
+    {
+        refreshMapsBrowser();
+        return;
+    }
+    if(QMessageBox::warning(this, tr("Delete Collection"),
+        tr("Delete collection '%1'?\n\n%2\n\nMap files referenced by it will not be deleted.")
+            .arg(file.completeBaseName(), QDir::toNativeSeparators(file.absoluteFilePath())),
+        QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel) != QMessageBox::Yes)
+        return;
+    if(!QFile::remove(file.absoluteFilePath()))
+    {
+        QMessageBox::warning(this, tr("Delete Collection"),
+            tr("Could not delete the collection file."));
+        return;
+    }
+    if(QFileInfo(m_currentCollectionPath).absoluteFilePath().compare(
+           file.absoluteFilePath(), Qt::CaseInsensitive) == 0)
+        m_currentCollectionPath.clear();
+    refreshMapsBrowser();
+    statusBar()->showMessage(tr("Collection deleted: %1").arg(file.fileName()), 5000);
 }
 
 void MainWindow::saveCollection(bool saveAs)
