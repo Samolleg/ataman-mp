@@ -1945,7 +1945,7 @@ struct SphereShellParticle
 class SphereShellEmitter
 {
 public:
-    enum class Kind { Acid, Electricity };
+    enum class Kind { Acid, Electricity, Fire };
 
     explicit SphereShellEmitter(Kind kind = Kind::Acid) : m_kind(kind) {}
 
@@ -2017,7 +2017,9 @@ private:
                float syntheticCarrierBound)
     {
         m_seed = seed;
-        m_rng.reset(seed ^ (m_kind == Kind::Acid ? 0x53504143u : 0x5350454Cu));
+        const quint32 salt = m_kind == Kind::Acid ? 0x53504143u
+            : m_kind == Kind::Electricity ? 0x5350454Cu : 0x53504649u;
+        m_rng.reset(seed ^ salt);
         m_origin = origin;
         m_bound = qMax(0.001f, syntheticCarrierBound);
         m_particles.clear();
@@ -2028,7 +2030,8 @@ private:
     void updateScale(SphereShellParticle& particle) const
     {
         const float radius = 1.2f * m_bound;
-        const float typeFactor = m_kind == Kind::Acid ? 1.6f : 1.0f;
+        const float typeFactor = m_kind == Kind::Acid ? 1.6f
+            : m_kind == Kind::Fire ? 2.0f : 1.0f;
         particle.scale = particle.sizeMultiplier * radius
             * sizeAt(particle.lifetime) * typeFactor;
     }
@@ -2105,6 +2108,369 @@ class SphereElectricityEmitter : public SphereShellEmitter
 {
 public:
     SphereElectricityEmitter() : SphereShellEmitter(Kind::Electricity) {}
+};
+
+class SphereFireEmitter : public SphereShellEmitter
+{
+public:
+    SphereFireEmitter() : SphereShellEmitter(Kind::Fire) {}
+};
+
+struct ClayRingSource
+{
+    QVector3D position;
+    QVector3D previous;
+    QVector3D direction;
+    int lifetime{14};
+};
+
+struct ClayRingParticle
+{
+    QVector3D position;
+    QVector3D segmentPoint;
+    QVector3D jitter;
+    float scale{0.1f};
+    float alpha{0.0f};
+    int lifetime{5};
+    int frame{1};
+    int phaseDelay{2};
+    int source{-1};
+    bool anchor{false};
+};
+
+class ClayRingEmitter
+{
+public:
+    static constexpr int kPreviewCycleTicks = 64;
+
+    void advanceTo(qint64 logicalTick, quint32 seed, const QVector3D& origin,
+                   float signedAuthoredScale)
+    {
+        const int cycleTick = int(logicalTick % kPreviewCycleTicks);
+        if(!m_initialized || seed != m_seed || cycleTick < m_cycleTick)
+            reset(seed, origin, signedAuthoredScale);
+        m_origin = origin;
+        m_authoredScale = qFuzzyIsNull(signedAuthoredScale)
+            ? 1.0f : signedAuthoredScale;
+        while(m_cycleTick < cycleTick)
+        {
+            advanceOne();
+            ++m_cycleTick;
+        }
+    }
+
+    QVector<EffectRenderSample> samples() const
+    {
+        QVector<EffectRenderSample> result;
+        result.reserve(m_particles.size());
+        for(const ClayRingParticle& particle : m_particles)
+        {
+            EffectRenderSample sample;
+            sample.position = particle.position;
+            sample.scale = billboardDiameter(particle.scale);
+            sample.alpha = particle.alpha;
+            sample.frame = particle.frame;
+            result.append(sample);
+        }
+        return result;
+    }
+
+    int activeCount() const { return m_particles.size(); }
+
+private:
+    static float radiusAt(int index)
+    {
+        static constexpr std::array<float, 16> radii = {
+            0.000f, 0.025f, 0.056f, 0.092f,
+            0.136f, 0.188f, 0.251f, 0.326f,
+            0.417f, 0.525f, 0.656f, 0.812f,
+            1.000f, 1.000f, 1.000f, 1.000f
+        };
+        return radii[size_t(qBound(0, index, 15))];
+    }
+
+    static float alphaAt(int index)
+    {
+        static constexpr std::array<int, 16> alpha = {
+            0, 128, 255, 255, 255, 255, 255, 255,
+            255, 160, 80, 32, 0, 0, 0, 0
+        };
+        return float(alpha[size_t(qBound(0, index, 15))]) / 255.0f;
+    }
+
+    float randomRange(float low, float high)
+    {
+        return low + (high - low) * m_rng.unit();
+    }
+
+    void reset(quint32 seed, const QVector3D& origin, float signedAuthoredScale)
+    {
+        m_seed = seed;
+        m_rng.reset(seed ^ 0x434C4159u);
+        m_origin = origin;
+        m_authoredScale = qFuzzyIsNull(signedAuthoredScale)
+            ? 1.0f : signedAuthoredScale;
+        m_sources.clear();
+        m_particles.clear();
+        m_sources.reserve(10);
+        for(int i = 0; i < 10; ++i)
+        {
+            const float angle = 0.62832f * float(i);
+            ClayRingSource source;
+            source.position = source.previous = origin;
+            source.direction = QVector3D(qSin(angle), qCos(angle), 0.0f);
+            m_sources.append(source);
+        }
+        m_generating = true;
+        m_cycleTick = 0;
+        m_initialized = true;
+    }
+
+    void updateSources()
+    {
+        for(ClayRingSource& source : m_sources)
+        {
+            if(--source.lifetime < 0)
+            {
+                m_generating = false;
+                continue;
+            }
+            source.previous = source.position;
+            const int index = m_authoredScale < 0.0f
+                ? source.lifetime : 14 - source.lifetime;
+            source.position = m_origin
+                + source.direction * (m_authoredScale * radiusAt(index));
+            source.position.setZ(m_origin.z() + 1.0f);
+            const float oldX = source.direction.x();
+            const float oldY = source.direction.y();
+            source.direction.setX(oldX * 0.95f + oldY * 0.31225f);
+            source.direction.setY(-oldX * 0.31225f + oldY * 0.95f);
+        }
+    }
+
+    void spawn(int number)
+    {
+        ClayRingParticle particle;
+        const int sourceLife = m_sources.isEmpty() ? 0 : m_sources[0].lifetime;
+        particle.alpha = alphaAt(sourceLife);
+        if(sourceLife == 13 && number < m_sources.size())
+        {
+            particle.position = m_sources[number].position;
+            particle.scale = 0.2f;
+            particle.lifetime = 15;
+            particle.frame = 0;
+            particle.source = number;
+            particle.anchor = true;
+            m_particles.append(particle);
+            return;
+        }
+
+        const int sourceIndex = int(m_rng.next() % quint32(m_sources.size()));
+        const float part = m_rng.unit();
+        const ClayRingSource& source = m_sources[sourceIndex];
+        particle.segmentPoint = source.position * part + source.previous * (1.0f - part);
+        particle.jitter = QVector3D(randomRange(-0.1f, 0.1f),
+                                    randomRange(-0.1f, 0.1f),
+                                    randomRange(-0.1f, 0.1f));
+        particle.position = source.previous;
+        m_particles.append(particle);
+    }
+
+    void advanceOne()
+    {
+        updateSources();
+        for(int i = m_particles.size() - 1; i >= 0; --i)
+        {
+            ClayRingParticle& particle = m_particles[i];
+            if(--particle.lifetime == 0)
+            {
+                m_particles.removeAt(i);
+                continue;
+            }
+            if(particle.anchor)
+            {
+                const int sourceLife = m_sources.isEmpty() ? 0 : m_sources[0].lifetime;
+                particle.alpha = alphaAt(sourceLife);
+                particle.position = m_sources[particle.source].position;
+                particle.scale = 0.2f;
+                continue;
+            }
+            if(--particle.phaseDelay == 0)
+            {
+                if(++particle.frame >= 16)
+                {
+                    m_particles.removeAt(i);
+                    continue;
+                }
+                particle.phaseDelay = 2;
+            }
+            particle.jitter *= 0.9f;
+            particle.position = particle.segmentPoint + particle.jitter;
+            particle.scale *= 0.9f;
+            particle.alpha = qMax(0.0f, particle.alpha - 48.0f / 255.0f);
+        }
+
+        if(!m_generating || m_sources.isEmpty())
+            return;
+        for(int attempt = 0; attempt < 80 && m_particles.size() < 500; ++attempt)
+            spawn(attempt);
+    }
+
+    Isaac32 m_rng;
+    QVector<ClayRingSource> m_sources;
+    QVector<ClayRingParticle> m_particles;
+    QVector3D m_origin;
+    float m_authoredScale{1.0f};
+    quint32 m_seed{0};
+    int m_cycleTick{0};
+    bool m_generating{true};
+    bool m_initialized{false};
+};
+
+struct TeleportParticle
+{
+    QVector3D position;
+    float verticalOffset{0.0f};
+    float verticalFactor{1.2f};
+    float visibleScale{0.0f};
+    float targetScale{0.2f};
+    float alpha{1.0f};
+    float alphaStep{-19.0f / 255.0f};
+    int lifetime{14};
+    int frame{0};
+};
+
+class TeleportEmitter
+{
+public:
+    static constexpr int kPreviewCycleTicks = 64;
+
+    void advanceTo(qint64 logicalTick, quint32 seed, const QVector3D& origin,
+                   float signedAuthoredScale)
+    {
+        const int cycleTick = int(logicalTick % kPreviewCycleTicks);
+        if(!m_initialized || seed != m_seed || cycleTick < m_cycleTick)
+            reset(seed, origin, signedAuthoredScale);
+        m_origin = origin;
+        m_authoredScale = qFuzzyIsNull(signedAuthoredScale)
+            ? 1.0f : signedAuthoredScale;
+        while(m_cycleTick < cycleTick)
+        {
+            advanceOne();
+            ++m_cycleTick;
+        }
+    }
+
+    QVector<EffectRenderSample> samples() const
+    {
+        QVector<EffectRenderSample> result;
+        result.reserve(m_particles.size());
+        for(const TeleportParticle& particle : m_particles)
+        {
+            if(particle.visibleScale <= 0.0f)
+                continue;
+            EffectRenderSample sample;
+            sample.position = particle.position;
+            sample.scale = billboardDiameter(particle.visibleScale);
+            sample.alpha = particle.alpha;
+            sample.frame = particle.frame;
+            result.append(sample);
+        }
+        return result;
+    }
+
+    int activeCount() const { return m_particles.size(); }
+
+private:
+    float randomRange(float low, float high)
+    {
+        return low + (high - low) * m_rng.unit();
+    }
+
+    void reset(quint32 seed, const QVector3D& origin, float signedAuthoredScale)
+    {
+        m_seed = seed;
+        m_rng.reset(seed ^ 0x54454C45u);
+        m_origin = origin;
+        m_authoredScale = qFuzzyIsNull(signedAuthoredScale)
+            ? 1.0f : signedAuthoredScale;
+        m_particles.clear();
+        m_sourceAge = 0;
+        m_generating = true;
+        m_cycleTick = 0;
+        m_initialized = true;
+    }
+
+    void spawn()
+    {
+        const float radius = qAbs(m_authoredScale);
+        const float unitRadius = m_rng.unit();
+        const float radialPart = (unitRadius * unitRadius + unitRadius) * 0.5f;
+        const float angle = m_rng.unit() * 6.2832f;
+        TeleportParticle particle;
+        particle.position = m_origin
+            + QVector3D(radius * radialPart * qSin(angle),
+                        radius * radialPart * qCos(angle),
+                        randomRange(-0.4f, -0.2f) * radius);
+        particle.targetScale = 0.2f * (2.0f - radialPart);
+        particle.frame = m_rng.unit() > radialPart
+            ? 4 + int(m_rng.next() % 12u) : int(m_rng.next() & 3u);
+        if(m_authoredScale > 0.0f)
+        {
+            particle.verticalOffset = radius * 0.15f * (4.0f - radialPart);
+            particle.verticalFactor = 1.2f;
+            particle.alpha = 1.0f;
+            particle.alphaStep = -19.0f / 255.0f;
+        }
+        else
+        {
+            particle.verticalOffset = radius * 2.25f * (4.0f - radialPart);
+            particle.verticalFactor = 1.0f / 1.2f;
+            particle.alpha = 0.0f;
+            particle.alphaStep = 19.0f / 255.0f;
+        }
+        particle.position.setZ(particle.position.z() + particle.verticalOffset);
+        m_particles.append(particle);
+    }
+
+    void advanceOne()
+    {
+        if(++m_sourceAge > 35)
+            m_generating = false;
+        for(int i = m_particles.size() - 1; i >= 0; --i)
+        {
+            TeleportParticle& particle = m_particles[i];
+            if(--particle.lifetime == 0)
+            {
+                m_particles.removeAt(i);
+                continue;
+            }
+            ++particle.frame;
+            if(particle.frame == 4)
+                particle.frame = 0;
+            if(particle.frame == 16)
+                particle.frame = 4;
+            particle.position.setZ(particle.position.z() - particle.verticalOffset);
+            particle.verticalOffset *= particle.verticalFactor;
+            particle.position.setZ(particle.position.z() + particle.verticalOffset);
+            particle.visibleScale = particle.lifetime == 1 ? 0.0f : particle.targetScale;
+            particle.alpha = qBound(0.0f, particle.alpha + particle.alphaStep, 1.0f);
+        }
+        if(!m_generating)
+            return;
+        for(int attempt = 0; attempt < 20 && m_particles.size() < 320; ++attempt)
+            spawn();
+    }
+
+    Isaac32 m_rng;
+    QVector<TeleportParticle> m_particles;
+    QVector3D m_origin;
+    float m_authoredScale{1.0f};
+    quint32 m_seed{0};
+    int m_sourceAge{0};
+    int m_cycleTick{0};
+    bool m_generating{true};
+    bool m_initialized{false};
 };
 
 } // namespace particle

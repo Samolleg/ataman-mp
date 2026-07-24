@@ -60,6 +60,12 @@ class ParticleBinaryReportTests(unittest.TestCase):
                          "50726F74656374696F6E4100")
         self.assertEqual(fixture["sites"]["protectione_texture_name"]["bytes"],
                          "50726F74656374696F6E4500")
+        self.assertEqual(fixture["sites"]["protectionf_texture_name"]["bytes"],
+                         "50726F74656374696F6E4600")
+        self.assertEqual(fixture["sites"]["clayring_texture_name"]["bytes"],
+                         "436C617952696E6700")
+        self.assertEqual(fixture["sites"]["teleport_texture_name"]["bytes"],
+                         "54656C65706F727400")
         self.assertEqual(fixture["constants"]["tornado_height_float"]["value"], 12.0)
         self.assertAlmostEqual(
             fixture["constants"]["tornado_speed_factor_float"]["value"], 0.2)
@@ -93,6 +99,10 @@ class ParticleBinaryReportTests(unittest.TestCase):
                          "0x0048D8D0")
         self.assertEqual(fixture["ranges"]["sphere_create_callback"]["start_va"],
                          "0x0048E070")
+        self.assertEqual(fixture["ranges"]["clayring_create_callback"]["start_va"],
+                         "0x0048F7F0")
+        self.assertEqual(fixture["ranges"]["teleport_create_callback"]["start_va"],
+                         "0x0048FDB0")
         self.assertIn(
             "C783E0010000D0894800C783E4010000B08D4800",
             fixture["sites"]["mushroom_callback_selection"]["bytes"],
@@ -136,6 +146,32 @@ class ParticleBinaryReportTests(unittest.TestCase):
         self.assertAlmostEqual(
             fixture["constants"]["sphere_acid_size_multiplier"]["value"], 1.6)
         self.assertEqual(len(fixture["sites"]["sphere_size_table"]["bytes"]), 128)
+        self.assertIn(
+            "C783E0010000F0F74800C783E4010000B0FA4800C783E8010000E0FB4800",
+            fixture["sites"]["clayring_callback_selection"]["bytes"],
+        )
+        self.assertIn(
+            "C783E0010000B0FD4800C783E401000060004900C783E801000010014900",
+            fixture["sites"]["teleport_callback_selection"]["bytes"],
+        )
+        self.assertEqual(len(fixture["sites"]["clayring_radius_table"]["bytes"]), 128)
+        self.assertEqual(
+            fixture["sites"]["clayring_alpha_table"]["bytes"],
+            "0000000080000000FF000000FF000000FF000000FF000000FF000000FF000000"
+            "FF000000A0000000500000002000000000000000000000000000000000000000",
+        )
+        self.assertAlmostEqual(
+            fixture["constants"]["clayring_source_angle_step"]["value"], 0.62832)
+        self.assertAlmostEqual(
+            fixture["constants"]["clayring_direction_sine"]["value"], 0.31225)
+        self.assertAlmostEqual(
+            fixture["constants"]["teleport_positive_vertical_multiplier"]["value"],
+            0.15,
+        )
+        self.assertEqual(
+            fixture["constants"]["teleport_negative_vertical_multiplier"]["value"],
+            2.25,
+        )
         self.assertAlmostEqual(
             fixture["constants"]["firearrow_head_size_float"]["value"], 0.4)
         self.assertAlmostEqual(

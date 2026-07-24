@@ -61,6 +61,48 @@
       "size": 172108,
       "textureFormat": "0x00004444",
       "width": 256
+    },
+    {
+      "atlas": {
+        "columns": 4,
+        "phaseCount": 16,
+        "rows": 4
+      },
+      "height": 256,
+      "mipCount": 3,
+      "name": "protectionf.mmp",
+      "sha256": "B152577655E178268E3BFA8E2E1A3551C8D1702699D7E3F2E5D7A7DD0F074E65",
+      "size": 172108,
+      "textureFormat": "0x00004444",
+      "width": 256
+    },
+    {
+      "atlas": {
+        "columns": 4,
+        "phaseCount": 16,
+        "rows": 4
+      },
+      "height": 256,
+      "mipCount": 3,
+      "name": "clayring.mmp",
+      "sha256": "8C729409D2F5210D457A2F59EF5727AA6C671FF7A124BF9E5E288A7435F1C7A2",
+      "size": 172108,
+      "textureFormat": "0x00004444",
+      "width": 256
+    },
+    {
+      "atlas": {
+        "columns": 4,
+        "phaseCount": 16,
+        "rows": 4
+      },
+      "height": 256,
+      "mipCount": 3,
+      "name": "teleport.mmp",
+      "sha256": "82EE9DD7F0EF2D28D257354BAF372E94BAD66586D345B83F9E50F83CEB6484A1",
+      "size": 172108,
+      "textureFormat": "0x00004444",
+      "width": 256
     }
   ]
 }

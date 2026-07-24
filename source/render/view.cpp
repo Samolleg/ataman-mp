@@ -235,7 +235,6 @@ SParticleVisualStyle particleVisualStyle(uint kind)
     case 8240:
     case 8259:
         return {nullptr, QVector4D(0.38f, 0.70f, 1.0f, 0.86f), 1.0f, 0.20f, true};
-    case 8217:
     case 8253:
     case 8254:
         return {"teleport00", QVector4D(0.62f, 0.46f, 1.0f, 0.82f), 1.55f, 0.22f, true};
@@ -2615,6 +2614,15 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
     QOpenGLTexture* protectionETexture = textures->texture("protectione");
     if(protectionETexture == fallbackTexture)
         protectionETexture = nullptr;
+    QOpenGLTexture* protectionFTexture = textures->texture("protectionf");
+    if(protectionFTexture == fallbackTexture)
+        protectionFTexture = nullptr;
+    QOpenGLTexture* clayRingTexture = textures->texture("clayring");
+    if(clayRingTexture == fallbackTexture)
+        clayRingTexture = nullptr;
+    QOpenGLTexture* teleportTexture = textures->texture("teleport");
+    if(teleportTexture == fallbackTexture)
+        teleportTexture = nullptr;
 
     bool inverseOk = false;
     const QMatrix4x4 inverseView = cameraMatrix.inverted(&inverseOk);
@@ -2934,6 +2942,42 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
                        protectionETexture == nullptr, 0.18f);
     };
 
+    const auto drawSphereFire = [&](const CNode* owner, const QVector3D& origin,
+                                    float syntheticCarrierBound, uint seed)
+    {
+        ei::particle::SphereFireEmitter& emitter = m_sphereFireEmitters[owner];
+        emitter.advanceTo(logicalTick, seed, origin, syntheticCarrierBound);
+        for(const ei::particle::EffectRenderSample& sample : emitter.samples())
+            drawSprite(sample.position, sample.scale, 1.0f, 0.0f,
+                       QVector4D(1.0f, 1.0f, 1.0f, sample.alpha),
+                       protectionFTexture, ei::particle::atlasUv(sample.frame), true,
+                       protectionFTexture == nullptr, 0.18f);
+    };
+
+    const auto drawClayRing = [&](const CNode* owner, const QVector3D& origin,
+                                  float signedAuthoredScale, uint seed)
+    {
+        ei::particle::ClayRingEmitter& emitter = m_clayRingEmitters[owner];
+        emitter.advanceTo(logicalTick, seed, origin, signedAuthoredScale);
+        for(const ei::particle::EffectRenderSample& sample : emitter.samples())
+            drawSprite(sample.position, sample.scale, 1.0f, 0.0f,
+                       QVector4D(1.0f, 1.0f, 1.0f, sample.alpha),
+                       clayRingTexture, ei::particle::atlasUv(sample.frame), true,
+                       clayRingTexture == nullptr, 0.18f);
+    };
+
+    const auto drawTeleport = [&](const CNode* owner, const QVector3D& origin,
+                                  float signedAuthoredScale, uint seed)
+    {
+        ei::particle::TeleportEmitter& emitter = m_teleportEmitters[owner];
+        emitter.advanceTo(logicalTick, seed, origin, signedAuthoredScale);
+        for(const ei::particle::EffectRenderSample& sample : emitter.samples())
+            drawSprite(sample.position, sample.scale, 1.0f, 0.0f,
+                       QVector4D(1.0f, 1.0f, 1.0f, sample.alpha),
+                       teleportTexture, ei::particle::atlasUv(sample.frame), false,
+                       teleportTexture == nullptr, 0.18f);
+    };
+
     for(CMob* mob : m_aMob)
     {
         if(!isMobVisible(mob))
@@ -2968,6 +3012,8 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
                 center = particle->position();
             const float authoredScale = particle->particleScale() > 0.0f
                 ? particle->particleScale() : 1.0f;
+            const float signedAuthoredScale = qFuzzyIsNull(particle->particleScale())
+                ? 1.0f : particle->particleScale();
             const float phase = timeSeconds * (0.75f + float(particle->kind() % 7) * 0.08f)
                 + float(particle->mapId() % 31) * 0.37f;
             const float pulse = 1.0f + 0.08f * qSin(phase * 2.1f);
@@ -3069,6 +3115,35 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
                 drawSphereElectricity(particle, center, authoredScale, particle->mapId());
                 if(particle->nodeState() == ENodeState::eSelect)
                     drawSprite(center, qMax(0.3f, authoredScale * 0.35f), 1.0f, 0.0f,
+                               QVector4D(0.10f, 0.90f, 1.0f, 0.72f), nullptr,
+                               QVector4D(0.0f, 0.0f, 1.0f, 1.0f), false, true, 0.12f);
+                continue;
+            }
+            if(particle->kind() == 8215u)
+            {
+                drawSphereFire(particle, center, authoredScale, particle->mapId());
+                if(particle->nodeState() == ENodeState::eSelect)
+                    drawSprite(center, qMax(0.3f, authoredScale * 0.35f), 1.0f, 0.0f,
+                               QVector4D(0.10f, 0.90f, 1.0f, 0.72f), nullptr,
+                               QVector4D(0.0f, 0.0f, 1.0f, 1.0f), false, true, 0.12f);
+                continue;
+            }
+            if(particle->kind() == 8216u)
+            {
+                drawClayRing(particle, center, signedAuthoredScale, particle->mapId());
+                if(particle->nodeState() == ENodeState::eSelect)
+                    drawSprite(center, qMax(0.3f, qAbs(signedAuthoredScale) * 0.35f),
+                               1.0f, 0.0f,
+                               QVector4D(0.10f, 0.90f, 1.0f, 0.72f), nullptr,
+                               QVector4D(0.0f, 0.0f, 1.0f, 1.0f), false, true, 0.12f);
+                continue;
+            }
+            if(particle->kind() == 8217u)
+            {
+                drawTeleport(particle, center, signedAuthoredScale, particle->mapId());
+                if(particle->nodeState() == ENodeState::eSelect)
+                    drawSprite(center, qMax(0.3f, qAbs(signedAuthoredScale) * 0.35f),
+                               1.0f, 0.0f,
                                QVector4D(0.10f, 0.90f, 1.0f, 0.72f), nullptr,
                                QVector4D(0.0f, 0.0f, 1.0f, 1.0f), false, true, 0.12f);
                 continue;

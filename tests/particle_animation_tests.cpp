@@ -27,6 +27,9 @@ private slots:
     void blueGasUsesSyntheticCarrierCylinder();
     void linkUsesNativeDefaultArc();
     void sphereShellsUseSyntheticCarrierBound();
+    void sphereFireUsesFireSizeFactor();
+    void clayRingUsesFiniteGroundRing();
+    void teleportUsesFiniteSignedColumn();
 };
 
 void ParticleAnimationTests::atlasUsesNativeTopRowFirstInsets()
@@ -437,6 +440,87 @@ void ParticleAnimationTests::sphereShellsUseSyntheticCarrierBound()
         QCOMPARE(sample.alpha, 1.0f);
         QVERIFY(sample.frame >= 0 && sample.frame <= 14);
     }
+}
+
+void ParticleAnimationTests::sphereFireUsesFireSizeFactor()
+{
+    ei::particle::SphereFireEmitter emitter;
+    const QVector3D origin(1.0f, -2.0f, 0.5f);
+    emitter.advanceTo(0, 8215u, origin, 1.0f);
+    emitter.advanceTo(30, 8215u, origin, 1.0f);
+    const auto samples = emitter.samples();
+    QVERIFY(samples.size() > 40);
+    QVERIFY(samples.size() <= 500);
+    for(const auto& sample : samples)
+    {
+        QVERIFY(qAbs((sample.position - origin).length() - 0.78f) < 0.0001f);
+        QVERIFY(sample.scale > 0.0f);
+        QCOMPARE(sample.alpha, 1.0f);
+        QVERIFY(sample.frame >= 0 && sample.frame <= 14);
+    }
+}
+
+void ParticleAnimationTests::clayRingUsesFiniteGroundRing()
+{
+    ei::particle::ClayRingEmitter first;
+    ei::particle::ClayRingEmitter second;
+    const QVector3D origin(3.0f, 2.0f, -0.25f);
+    first.advanceTo(0, 8216u, origin, 1.0f);
+    second.advanceTo(0, 8216u, origin, 1.0f);
+    first.advanceTo(10, 8216u, origin, 1.0f);
+    second.advanceTo(10, 8216u, origin, 1.0f);
+    const auto a = first.samples();
+    const auto b = second.samples();
+    QCOMPARE(a.size(), b.size());
+    QVERIFY(a.size() > 100);
+    QVERIFY(a.size() <= 500);
+    for(int i = 0; i < a.size(); ++i)
+    {
+        QCOMPARE(a[i].position, b[i].position);
+        QCOMPARE(a[i].scale, b[i].scale);
+        QCOMPARE(a[i].alpha, b[i].alpha);
+        QCOMPARE(a[i].frame, b[i].frame);
+        QVERIFY(a[i].scale > 0.0f);
+        QVERIFY(a[i].alpha >= 0.0f && a[i].alpha <= 1.0f);
+        QVERIFY(a[i].frame >= 0 && a[i].frame <= 3);
+    }
+    first.advanceTo(20, 8216u, origin, 1.0f);
+    QCOMPARE(first.activeCount(), 0);
+    first.advanceTo(66, 8216u, origin, 1.0f);
+    QVERIFY(first.activeCount() > 0);
+}
+
+void ParticleAnimationTests::teleportUsesFiniteSignedColumn()
+{
+    ei::particle::TeleportEmitter positive;
+    ei::particle::TeleportEmitter negative;
+    const QVector3D origin(-4.0f, 1.0f, 0.0f);
+    positive.advanceTo(0, 8217u, origin, 1.0f);
+    negative.advanceTo(0, 8217u, origin, -1.0f);
+    positive.advanceTo(20, 8217u, origin, 1.0f);
+    negative.advanceTo(20, 8217u, origin, -1.0f);
+    const auto positiveSamples = positive.samples();
+    const auto negativeSamples = negative.samples();
+    QVERIFY(positiveSamples.size() > 100);
+    QVERIFY(negativeSamples.size() > 100);
+    QVERIFY(positive.activeCount() <= 320);
+    QVERIFY(negative.activeCount() <= 320);
+    for(const auto& sample : positiveSamples)
+    {
+        QVERIFY(sample.scale > 0.0f);
+        QVERIFY(sample.alpha >= 0.0f && sample.alpha <= 1.0f);
+        QVERIFY(sample.frame >= 0 && sample.frame <= 15);
+    }
+    for(const auto& sample : negativeSamples)
+    {
+        QVERIFY(sample.scale > 0.0f);
+        QVERIFY(sample.alpha >= 0.0f && sample.alpha <= 1.0f);
+        QVERIFY(sample.frame >= 0 && sample.frame <= 15);
+    }
+    positive.advanceTo(50, 8217u, origin, 1.0f);
+    QCOMPARE(positive.activeCount(), 0);
+    positive.advanceTo(66, 8217u, origin, 1.0f);
+    QVERIFY(positive.activeCount() > 0);
 }
 
 QTEST_APPLESS_MAIN(ParticleAnimationTests)

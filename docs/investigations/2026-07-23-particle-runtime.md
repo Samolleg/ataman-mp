@@ -1207,3 +1207,84 @@ Focused tests pin Link determinism, population bounds, phase/alpha limits, arc
 height and travel distance, plus both sphere populations, shell radius, phase
 bounds, scale positivity and opacity. The complete executable and texture
 reports regenerate byte-identically from their fingerprinted read-only inputs.
+
+## Ordered catalog reconstruction: Spherefire, Clayring, and Teleport
+
+Spherefire (type 8215) is binary-confirmed as the third ordinary member of the
+same factory and callback pair used by Sphereacid and Sphereelectricity. It is
+carrier-required, additive, uses `ProtectionF`, inherits the same 90-percent
+birth probability, 15-quant life, 0.65-of-carrier-shell placement, 0.01-radian
+rotation, 16-entry lifetime size table and stationary/moving-carrier projection.
+Its one-in-eleven large class uses 1.5..2.5 like acid, while final submitted
+size is `speedClass * carrierRadius * sizeTable[lifetime] * 2`. As with the two
+earlier sphere controls, authored scale is an explicitly synthetic stationary
+carrier bound for a bare catalog record; no native ownerless bound is claimed.
+
+Clayring (type 8216) selects factory range `0x004870D2..0x004872E4`, callbacks
+`0x0048F7F0`, `0x0048FAB0`, and `0x0048FBE0`, the `ClayRing` atlas, and additive
+blending. It creates ten local sources on a circle, uses 80 attempts per quant,
+15-quant nominal life and two quants per phase. Each source begins with life 14.
+The first local update decrements it to 13 and creates one phase-0, scale-0.2
+anchor for each source; those anchors track the moving source and take alpha
+from the source lifetime. Other births select a random source segment, live five
+quants, start in phase 1 at scale 0.1, interpolate between the source's previous
+and current points, add a +/-0.1 offset, damp that offset and scale by 0.9, and
+lose 48 alpha units per update.
+
+The exact Clayring radius sequence is
+`0, .025, .056, .092, .136, .188, .251, .326, .417, .525, .656, .812, 1, 1, 1, 1`;
+its alpha sequence is
+`0, 128, 255, 255, 255, 255, 255, 255, 255, 160, 80, 32, 0, 0, 0, 0`.
+Positive authored size indexes the radius table outward as source life falls;
+negative size indexes it in the opposite order. Source direction advances each
+quant by the binary-confirmed `.95/.31225` rotation and each point is snapped to
+terrain height plus one. The flat catalog control therefore uses its authored
+origin as the terrain plane and places the ring one unit above it. Generation
+stops after the sources pass their final table entry.
+
+Teleport (type 8217) selects factory range `0x004872E5..0x0048745E`, callbacks
+`0x0048FDB0`, `0x00490060`, and `0x00490110`, the `Teleport` atlas, ordinary
+alpha blending, 20 attempts, capacity 320, 14-quant life and one quant per
+phase. Birth radius uses `(u^2 + u) / 2`, followed by a uniform angle. The lower
+birth plane is a random -0.4..-0.2 authored-radius offset. Inner births select
+phases 4..15 when a second random value exceeds radial fraction; outer births
+select phases 0..3, and updates wrap independently within those two phase bands.
+
+For positive authored size, Teleport begins fully opaque, rises by
+`radius * .15 * (4 - radialFraction)`, multiplies that height by 1.2 each update,
+and subtracts 19 alpha units. Negative size begins transparent, uses
+`radius * 2.25 * (4 - radialFraction)`, contracts height by `1/1.2`, and adds 19
+alpha units. Visible scale is zero on birth and the last live quant, otherwise
+`.2 * (2 - radialFraction)`. Its single local source stops generation after 36
+updates. The catalog's positive scale-one record therefore has a complete native
+finite path; the editor may repeat it only after the source and population have
+finished so the one-shot remains inspectable.
+
+The active JMV archive pins 1024-square DXT3 atlases `protectionf.mmp`,
+`clayring.mmp`, and `teleport.mmp` with respective payload SHA-256 values
+`BC8A148B9431DBDCE011A0DD800AD317BF2F819E91860F5315EA76AD591A9261`,
+`9B62B28521029B2CC4A3F342BC6542168638F75B0E43882136764F7118D04585`,
+and `1D6AABCE5725E108CC8A3B03A18B98970624C29F49DA8E51B8A69B44D661921E`.
+The Base archive contains separately fingerprinted 256-square fallbacks. The
+binary fixture pins both new factories, six callback bodies, texture/callback
+selection sites, both Clayring tables, and all scalar constants before code
+dispatch is changed.
+
+### Implemented ordered controls
+
+The editor now routes Spherefire through the shared deterministic carrier-shell
+simulator with its own atlas and exact 2.0 size factor. Clayring independently
+replays the ten source records, source-table progression, anchors, segment
+trails, finite generator and additive atlas path. Teleport independently replays
+both signs of authored size, its radial/phase partitions, finite generator,
+vertical and alpha evolution, and ordinary-alpha atlas path. Clayring uses the
+catalog's flat authored origin as its terrain control; no arbitrary terrain
+shape is synthesized. Both finite effects repeat only after their native source
+and live population have completed. All three preserve the separate cyan editor
+selection overlay.
+
+Focused tests cover the Spherefire shell radius/population/phase constraints,
+Clayring deterministic finite retirement and preview restart, and Teleport's
+positive/negative population, phase, scale, alpha, retirement and restart. The
+expanded executable and texture reports remain deterministic fingerprints of
+the read-only shipped inputs.

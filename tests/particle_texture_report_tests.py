@@ -22,11 +22,13 @@ class ParticleTextureReportTests(unittest.TestCase):
             "tornado.mmp", "tendrilight.mmp", "firesmoke.mmp",
             "banshee.mmp", "acidray.mmp", "changehero.mmp", "rainsnow.mmp",
             "firearrowsmoke.mmp", "link.mmp", "protectiona.mmp",
-            "protectione.mmp",
+            "protectione.mmp", "protectionf.mmp", "clayring.mmp",
+            "teleport.mmp",
         })
         for name in ("tornado.mmp", "tendrilight.mmp", "firesmoke.mmp",
                      "banshee.mmp", "changehero.mmp", "firearrowsmoke.mmp",
-                     "link.mmp", "protectione.mmp"):
+                     "link.mmp", "protectione.mmp", "protectionf.mmp",
+                     "clayring.mmp", "teleport.mmp"):
             item = by_name[name]
             self.assertEqual((item["width"], item["height"]), (1024, 1024))
             self.assertEqual(item["mipCount"], 11)
@@ -49,10 +51,11 @@ class ParticleTextureReportTests(unittest.TestCase):
         base_fixture = json.loads(base_path.read_text(encoding="utf-8"))
         self.assertEqual(base_fixture["source"]["sha256"],
                          MODULE.REFERENCE_BASE_TEXTURES_SHA256)
-        self.assertEqual(len(base_fixture["textures"]), 4)
+        self.assertEqual(len(base_fixture["textures"]), 7)
         base_by_name = {item["name"]: item for item in base_fixture["textures"]}
         self.assertEqual(set(base_by_name), {
             "stench.mmp", "link.mmp", "protectiona.mmp", "protectione.mmp",
+            "protectionf.mmp", "clayring.mmp", "teleport.mmp",
         })
         stench = base_by_name["stench.mmp"]
         self.assertEqual(stench["name"], "stench.mmp")

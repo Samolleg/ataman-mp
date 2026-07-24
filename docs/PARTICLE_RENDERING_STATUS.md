@@ -82,6 +82,9 @@ covering the selected JMV corpus.
 | 8212 / `0x2014` | Link | Dedicated ten-attempt directional stream using the native default ten-unit wall vector, rotating cross-section, parabolic arc, endpoint alpha fades, phase cadence, `Link` atlas, and ordinary alpha blending. | Capture an effect-owned non-default destination vector; the bare placed-record constructor path is closed. |
 | 8213 / `0x2015` | Sphereacid | Dedicated rotating carrier shell with native population, lifetime/phase cadence, size table and rare size class, using `ProtectionA` and additive blending. The catalog uses authored scale as an explicit synthetic carrier bound. | Capture attached carriers with different bounding volumes and motion; the stationary synthetic-bound control is closed. |
 | 8214 / `0x2016` | Sphereelectricity | Dedicated rotating carrier shell with the electricity-specific rare size class, native population, lifetime/phase cadence and size table, using `ProtectionE` and additive blending. The catalog uses authored scale as an explicit synthetic carrier bound. | Capture attached carriers with different bounding volumes and motion; the stationary synthetic-bound control is closed. |
+| 8215 / `0x2017` | Spherefire | Dedicated rotating carrier shell with the fire-specific 2.0 size factor, native population, lifetime/phase cadence and size table, using `ProtectionF` and additive blending. The catalog uses authored scale as an explicit synthetic carrier bound. | Capture attached carriers with different bounding volumes and motion; the stationary synthetic-bound control is closed. |
+| 8216 / `0x2018` | Clayring | Dedicated finite ten-source expanding/rotating ground ring with native anchor/trail populations, exact radius/alpha tables, phase/scale/offset decay, `ClayRing` atlas and additive blending. The editor repeats the completed one-shot for catalog inspection. | Validate non-flat terrain snapping and a negative authored-scale control; the positive flat catalog path is closed. |
+| 8217 / `0x2019` | Teleport | Dedicated finite signed radial column with native radial distribution, dual phase bands, vertical/alpha evolution, population limits and `Teleport` atlas using ordinary alpha blending. The editor repeats the completed one-shot for catalog inspection. | Capture a negative authored-scale game control; both signed callback paths are implemented from binary evidence. |
 
 ## Preview-only families
 
@@ -96,7 +99,7 @@ runtime behavior has not been reconstructed:
 | 8200, 8201 | Aggressionfog, Geyser |
 | 8258 | Acidstar |
 | 8259 | Sparks |
-| 8217, 8253, 8254 | Teleport, Portalstar, Portal |
+| 8253, 8254 | Portalstar, Portal |
 | 8232–8239 | Elemental, divination, illusion, domination, enchantment, healing, and failed casting variants |
 
 Texture names used by these previews are limited to direct resource matches
@@ -110,7 +113,6 @@ still require both native reverse engineering and a dedicated renderer:
 
 | IDs | Names |
 |---|---|
-| 8215–8216 | Spherefire, Clayring |
 | 8218 | Antimagic |
 | 8219–8230 | Modifier1 through Modifier12 |
 | 8241–8247 | Blood2, Blood3, Blood4, A4bloodred, A4bloodgreen, A4bloodblue, A4bloodblack |
