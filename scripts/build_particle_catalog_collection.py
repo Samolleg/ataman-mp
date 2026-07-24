@@ -88,24 +88,68 @@ def flat_sector(packed_tile: int = ZONE1_GROUND_PACKED_TILE) -> bytes:
     return bytes(result)
 
 
+def ei_string_hash(name: str, table_size: int) -> int:
+    if not name or table_size <= 0:
+        raise ValueError("EI archive hashing requires a name and non-empty table")
+    # EI hashes the CP1251 bytes of the lower-case filename by addition. All
+    # generated catalog member names are ASCII, but retaining CP1251 here keeps
+    # the fixture builder faithful to the archive contract.
+    return sum(name.lower().encode("cp1251")) % table_size
+
+
 def build_archive(members: Iterable[tuple[str, bytes]], timestamp: int = 0) -> bytes:
+    ordered_members = sorted(members, key=lambda member: member[0])
+    if not ordered_members:
+        raise ValueError("MPR/RES archive requires at least one member")
+    normalized_names = [name.lower() for name, _ in ordered_members]
+    if len(set(normalized_names)) != len(normalized_names):
+        raise ValueError("MPR/RES archive member names must be case-insensitively unique")
+
     records: list[dict[str, Any]] = []
     result = bytearray(16)
-    for name, payload in members:
+    for name, payload in ordered_members:
         encoded_name = name.encode("cp1251")
         offset = len(result)
         result.extend(payload)
         result.extend(b"\0" * ((16 - len(result) % 16) % 16))
         records.append({"name": encoded_name, "payload": payload, "offset": offset})
-    table_offset = len(result)
+
+    # The game does not scan the member table linearly. It hashes a requested
+    # name to a table slot and follows NextIndex for collisions. Populate the
+    # slots using the same deterministic last-free-slot chaining convention as
+    # the native tools; a table containing all -1 links is readable by the
+    # editor but can make valid members invisible to the runtime.
+    table: list[dict[str, Any] | None] = [None] * len(records)
+    last_free_index = len(table) - 1
     names = bytearray()
     for record in records:
+        decoded_name = record["name"].decode("cp1251")
+        index = ei_string_hash(decoded_name, len(table))
+        if table[index] is not None:
+            while table[index]["next_index"] != -1:
+                index = table[index]["next_index"]
+            while last_free_index >= 0 and table[last_free_index] is not None:
+                last_free_index -= 1
+            if last_free_index < 0:
+                raise ValueError("MPR/RES hash table has no free collision slot")
+            table[index]["next_index"] = last_free_index
+            index = last_free_index
+            last_free_index -= 1
+        entry = dict(record)
+        entry["next_index"] = -1
+        entry["name_offset"] = len(names)
+        names.extend(record["name"])
+        table[index] = entry
+
+    table_offset = len(result)
+    for record in table:
+        if record is None:
+            raise ValueError("MPR/RES hash table contains an unassigned slot")
         encoded_name = record["name"]
         result.extend(struct.pack(
-            "<iIIIHI", -1, len(record["payload"]), record["offset"],
-            timestamp, len(encoded_name), len(names)
+            "<iIIIHI", record["next_index"], len(record["payload"]), record["offset"],
+            timestamp, len(encoded_name), record["name_offset"]
         ))
-        names.extend(encoded_name)
     result.extend(names)
     struct.pack_into("<4I", result, 0, RES_SIGNATURE, len(records), table_offset, len(names))
     return bytes(result)
