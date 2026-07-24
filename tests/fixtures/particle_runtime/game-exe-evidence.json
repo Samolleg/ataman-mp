@@ -150,6 +150,16 @@
       "va": "0x0073CC80",
       "value": 1.600000023841858
     },
+    "sphere_antimagic_attempt_multiplier": {
+      "bytes": "0000C041",
+      "va": "0x0073CE28",
+      "value": 24.0
+    },
+    "sphere_antimagic_rare_size_base": {
+      "bytes": "00002040",
+      "va": "0x0073CE18",
+      "value": 2.5
+    },
     "sphere_carrier_radius_multiplier": {
       "bytes": "9A99993F",
       "va": "0x0073CDF4",
@@ -838,6 +848,10 @@
       "bytes": "000000009A99593F7B146E3F0000803FEC51783F7B146E3F52B85E3FCDCC4C3F48E13A3F6666263FCDCC0C3FF628DC3E9A99993ECDCC4C3E0000000000000000000000000000000000000000",
       "va": "0x0078A61C"
     },
+    "antimagic_texture_name": {
+      "bytes": "416E74694D6167696300",
+      "va": "0x0078AF00"
+    },
     "attach_copies_color_endpoint": {
       "bytes": "8B57588B490C89575C89480C",
       "va": "0x00496A4A"
@@ -1133,6 +1147,10 @@
     "special_spawn_random_offset": {
       "bytes": "D8254CB87300D9C0D88F30010000D806D91E8B0ED88F34010000D84604D95424188B442418D95E045051B9B8F57A00E878520D00D94608D8A7A00000005FB801",
       "va": "0x0048EDC4"
+    },
+    "sphere_antimagic_factory_parameters": {
+      "bytes": "0C0281FE1A20000089430889AB50010000C783CC0000005A00000089ABD0000000B80F000000750CC783EC00000004000000EB068983EC000000",
+      "va": "0x0048560E"
     },
     "sphere_antimagic_size_table": {
       "bytes": "0AD7233C8FC2753C0AD7A33C8FC2F53C8FC2753C0AD7233C",

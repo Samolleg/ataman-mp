@@ -28,6 +28,7 @@ private slots:
     void linkUsesNativeDefaultArc();
     void sphereShellsUseSyntheticCarrierBound();
     void sphereFireUsesFireSizeFactor();
+    void antimagicUsesShortDenseShell();
     void clayRingUsesFiniteGroundRing();
     void teleportUsesFiniteSignedColumn();
 };
@@ -457,6 +458,32 @@ void ParticleAnimationTests::sphereFireUsesFireSizeFactor()
         QVERIFY(sample.scale > 0.0f);
         QCOMPARE(sample.alpha, 1.0f);
         QVERIFY(sample.frame >= 0 && sample.frame <= 14);
+    }
+}
+
+void ParticleAnimationTests::antimagicUsesShortDenseShell()
+{
+    ei::particle::AntimagicEmitter first;
+    ei::particle::AntimagicEmitter second;
+    const QVector3D origin(-1.0f, 4.0f, 0.25f);
+    first.advanceTo(0, 8218u, origin, 1.0f);
+    second.advanceTo(0, 8218u, origin, 1.0f);
+    first.advanceTo(30, 8218u, origin, 1.0f);
+    second.advanceTo(30, 8218u, origin, 1.0f);
+    const auto a = first.samples();
+    const auto b = second.samples();
+    QCOMPARE(a.size(), b.size());
+    QVERIFY(a.size() > 40);
+    QVERIFY(a.size() < 100);
+    for(int i = 0; i < a.size(); ++i)
+    {
+        QCOMPARE(a[i].position, b[i].position);
+        QCOMPARE(a[i].scale, b[i].scale);
+        QCOMPARE(a[i].frame, b[i].frame);
+        QVERIFY(qAbs((a[i].position - origin).length() - 0.78f) < 0.0001f);
+        QVERIFY(a[i].scale > 0.0f);
+        QCOMPARE(a[i].alpha, 1.0f);
+        QVERIFY(a[i].frame >= 0 && a[i].frame <= 14);
     }
 }
 

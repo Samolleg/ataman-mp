@@ -1945,7 +1945,7 @@ struct SphereShellParticle
 class SphereShellEmitter
 {
 public:
-    enum class Kind { Acid, Electricity, Fire };
+    enum class Kind { Acid, Electricity, Fire, Antimagic };
 
     explicit SphereShellEmitter(Kind kind = Kind::Acid) : m_kind(kind) {}
 
@@ -1983,8 +1983,15 @@ public:
     int activeCount() const { return m_particles.size(); }
 
 private:
-    static float sizeAt(int lifetime)
+    float sizeAt(int lifetime) const
     {
+        if(m_kind == Kind::Antimagic)
+        {
+            static constexpr std::array<float, 6> sizes = {
+                0.010f, 0.015f, 0.020f, 0.030f, 0.015f, 0.010f
+            };
+            return sizes[size_t(qBound(0, lifetime, 5))];
+        }
         static constexpr std::array<float, 16> sizes = {
             0.010f, 0.020f, 0.030f, 0.035f,
             0.035f, 0.035f, 0.035f, 0.035f,
@@ -2018,7 +2025,8 @@ private:
     {
         m_seed = seed;
         const quint32 salt = m_kind == Kind::Acid ? 0x53504143u
-            : m_kind == Kind::Electricity ? 0x5350454Cu : 0x53504649u;
+            : m_kind == Kind::Electricity ? 0x5350454Cu
+            : m_kind == Kind::Fire ? 0x53504649u : 0x414E5449u;
         m_rng.reset(seed ^ salt);
         m_origin = origin;
         m_bound = qMax(0.001f, syntheticCarrierBound);
@@ -2041,13 +2049,16 @@ private:
         SphereShellParticle particle;
         if(m_rng.next() % 11u == 0u)
             particle.sizeMultiplier = m_kind == Kind::Electricity
-                ? randomRange(3.5f, 4.5f) : randomRange(1.5f, 2.5f);
+                ? randomRange(3.5f, 4.5f)
+                : m_kind == Kind::Antimagic ? randomRange(2.5f, 3.5f)
+                : randomRange(1.5f, 2.5f);
         else
             particle.sizeMultiplier = randomRange(0.7f, 1.3f);
         const float radius = 1.2f * m_bound;
         particle.offset = randomBallDirection() * (0.65f * radius);
         particle.position = m_origin + particle.offset;
         particle.frame = int(m_rng.next() % 11u);
+        particle.lifetime = m_kind == Kind::Antimagic ? 4 : 15;
         updateScale(particle);
         m_particles.append(particle);
     }
@@ -2074,7 +2085,8 @@ private:
             updateScale(particle);
         }
 
-        const int attempts = qMax(1, qRound(6.0f * m_bound));
+        const float attemptMultiplier = m_kind == Kind::Antimagic ? 24.0f : 6.0f;
+        const int attempts = qMax(1, qRound(attemptMultiplier * m_bound));
         int spawned = 0;
         for(int attempt = 0; attempt < attempts && m_particles.size() < 500; ++attempt)
         {
@@ -2114,6 +2126,12 @@ class SphereFireEmitter : public SphereShellEmitter
 {
 public:
     SphereFireEmitter() : SphereShellEmitter(Kind::Fire) {}
+};
+
+class AntimagicEmitter : public SphereShellEmitter
+{
+public:
+    AntimagicEmitter() : SphereShellEmitter(Kind::Antimagic) {}
 };
 
 struct ClayRingSource

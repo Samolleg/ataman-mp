@@ -103,6 +103,20 @@
       "size": 172108,
       "textureFormat": "0x00004444",
       "width": 256
+    },
+    {
+      "atlas": {
+        "columns": 4,
+        "phaseCount": 16,
+        "rows": 4
+      },
+      "height": 256,
+      "mipCount": 3,
+      "name": "antimagic.mmp",
+      "sha256": "64DF1A10242CAF1A1616E0BCF75666F634A155095BAD727FD3E2312A34C3C30E",
+      "size": 172108,
+      "textureFormat": "0x00004444",
+      "width": 256
     }
   ]
 }

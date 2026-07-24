@@ -1288,3 +1288,28 @@ Clayring deterministic finite retirement and preview restart, and Teleport's
 positive/negative population, phase, scale, alpha, retirement and restart. The
 expanded executable and texture reports remain deterministic fingerprints of
 the read-only shipped inputs.
+
+## Ordered catalog reconstruction: Antimagic
+
+Antimagic (type 8218 / `0x201A`) is binary-confirmed as a fourth specialization
+of the same carrier-shell factory and callback pair used by Sphereacid,
+Sphereelectricity, and Spherefire. It is additive and uses the distinct
+`AntiMagic` atlas. The factory retains 90-percent birth probability and the
+same shell placement, carrier projection, and 0.01-radian rotation, but selects
+24 creation attempts per authored carrier-bound unit, four-quant particle life,
+and the six-entry lifetime size table `.01, .015, .02, .03, .015, .01`.
+Particles still begin in a random phase 0..10 and advance within the 15-phase
+range during their short life. The one-in-eleven large size class is 2.5..3.5;
+ordinary births retain the shared 0.7..1.3 class. Unlike the other sphere
+specializations, Antimagic applies no additional final type multiplier.
+
+A bare `PARTICL` record has no native carrier bounding volume. As for the three
+other catalog shell controls, the editor therefore treats authored scale as an
+explicit synthetic stationary carrier bound rather than claiming an ownerless
+native default. The adjacent Modifier1..Modifier12 IDs do not use this sphere
+path: the top-level dispatch table sends all twelve to a separate `Stun`-atlas,
+carrier-dependent local-source family. That relationship is confirmed but is
+not used to approximate Antimagic or implemented as part of this control.
+The selected JMV texture archive does not override `antimagic.mmp`; the active
+resource therefore resolves the Base 256-square, three-mip atlas with payload
+SHA-256 `64DF1A10242CAF1A1616E0BCF75666F634A155095BAD727FD3E2312A34C3C30E`.
