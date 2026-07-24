@@ -30,7 +30,6 @@
 #include "scene.h"
 #include "layout_components/tree_view.h"
 #include "backup_manager.h"
-#include "duplicate_id_report.h"
 #include "staged_save_validator.h"
 #include "endurance_document.h"
 
@@ -1060,11 +1059,9 @@ int CMob::readMob(QFileInfo &path)
         return 5;
     }
     m_duplicateIds = findIdDuplicate();
-    if(!m_duplicateIds.isEmpty())
-    {
-        QMessageBox::warning(nullptr, "Duplicate object IDs",
-            ei::duplicateIdWarningText(m_duplicateIds));
-    }
+    // The authoritative asynchronous MOB-family validator reports repeated
+    // IDs. Detailed occurrences remain in workflow.log without a legacy modal
+    // warning interrupting direct MOB loads.
     updateObjects();
     logicNodesUpdate();
     captureCleanProjection();

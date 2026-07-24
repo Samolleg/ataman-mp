@@ -129,6 +129,7 @@ private:
     void hideLandscapeTools();
     void toggleLandscapeTools();
     void restoreLayoutAfterLandscapeTools();
+    void handleEscapeShortcut();
     void saveUiState();
     void closeHotReloadProgress();
     QVector<SMapSpawnObstacle> mapTestObstacles() const;

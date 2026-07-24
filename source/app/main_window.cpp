@@ -912,7 +912,7 @@ MainWindow::MainWindow(QWidget* parent) :
     m_pView->attach(m_settings.get(), m_ui->tableWidget, m_undoStack, m_ui->progressBar, m_ui->mousePosText, m_ui->treeWidget, m_pTileForm.get());
     m_pView->attachLandscapeTools(m_landscapeTools);
     m_ui->actionMap_parameters->setText(tr("MPR Atlas Tiles..."));
-    m_ui->tileBrushButton->setText(tr("Paint"));
+    m_ui->tileBrushButton->setText(tr("Landscape Tools"));
     m_ui->tileBrushButton->setToolTip(tr("Landscape tools (L)"));
     connect(m_pView, &CView::mobStateChanged, this, [this]()
     {
@@ -1111,6 +1111,16 @@ MainWindow::MainWindow(QWidget* parent) :
             const QSignalBlocker blocker(m_landscapeToolsAction);
             m_landscapeToolsAction->setChecked(visible);
         }
+        if(QAction* operationAction = m_operationActions.value(EButtonOpTilebrush, nullptr))
+        {
+            const QSignalBlocker blocker(operationAction);
+            operationAction->setChecked(visible);
+        }
+        if(m_ui->tileBrushButton)
+        {
+            const QSignalBlocker blocker(m_ui->tileBrushButton);
+            m_ui->tileBrushButton->setChecked(visible);
+        }
         m_pView->setLandscapeEditingEnabled(visible);
         if(visible)
             m_landscapeToolsDock->raise();
@@ -1189,6 +1199,17 @@ MainWindow::MainWindow(QWidget* parent) :
                 m_pView->loadSession();
             });
         }
+    }
+    if(firstRunSetup)
+    {
+        // First-run setup can queue a dock-state restoration after the early
+        // hide. Landscape Tools is working-mode state, never startup state.
+        QTimer::singleShot(0, this, [this]()
+        {
+            hideLandscapeTools();
+            if(m_landscapeTools)
+                m_landscapeTools->setEditingEnabled(false, false);
+        });
     }
 //    if(m_pView->isRecentAvailable())
 //        m_ui->actionOpen_recent->setEnabled(true);
@@ -1605,6 +1626,15 @@ void MainWindow::runUndoToIndex(int targetIndex)
 
 bool MainWindow::eventFilter(QObject* watched, QEvent* event)
 {
+    if(m_pView && watched == m_pView && event->type() == QEvent::KeyPress)
+    {
+        QKeyEvent* key = static_cast<QKeyEvent*>(event);
+        if(key->key() == Qt::Key_Escape && key->modifiers() == Qt::NoModifier)
+        {
+            handleEscapeShortcut();
+            return true;
+        }
+    }
     if(m_loadedMapTree && watched == m_loadedMapTree->viewport())
     {
         if(event->type() == QEvent::MouseButtonPress)
@@ -1703,26 +1733,7 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event)
         {
             QKeyEvent* key = static_cast<QKeyEvent*>(event);
             if(key->key() == Qt::Key_Escape)
-            {
-                if(m_movingCustomSpawn)
-                {
-                    m_pickSpawnPending = false;
-                    m_movingCustomSpawn = false;
-                    m_customSpawnSelected = true;
-                    m_pView->unsetCursor();
-                    m_pView->setTestSpawnMarker(m_customSpawnPosition,
-                                                m_customSpawn.adjusted);
-                    m_pView->setTestSpawnMarkerSelected(true);
-                    m_pView->setLandscapeInteractionSuspended(false);
-                    updateCustomSpawnControls();
-                    updateEntranceOverlays();
-                    updateOperationAvailability();
-                    updateMapTestAction();
-                }
-                else
-                    m_playFromHereButton->setChecked(false);
                 return true;
-            }
         }
         if(event->type() == QEvent::MouseMove)
         {
@@ -2199,16 +2210,22 @@ void MainWindow::initShortcuts()
         {EButtonOpMove, "shortcutMoveTool", "G", "Move selected objects"},
         {EButtonOpRotate, "shortcutRotateTool", "R", "Rotate selected objects"},
         {EButtonOpScale, "shortcutScaleTool", "T", "Scale selected objects"},
-        {EButtonOpTilebrush, "shortcutTileBrushTool", "L", "Landscape tools"}
+        {EButtonOpTilebrush, "shortcutTileBrushTool", "L", "Landscape Tools"}
     };
     for(const auto& operation : operations)
     {
         QAction* action = m_operationActions.value(operation.type, nullptr);
         if(!action)
             continue;
-        action->setShortcut(shortcut(operation.option, operation.fallback));
+        // Escape has stateful precedence (spawn anchor, Landscape Tools, then
+        // Select), so a dedicated application shortcut owns it below.
+        if(operation.type != EButtonOpSelect)
+            action->setShortcut(shortcut(operation.option, operation.fallback));
         action->setShortcutContext(Qt::ApplicationShortcut);
-        const QString tip = tr(operation.label) + " (" + action->shortcut().toString(QKeySequence::NativeText) + ")";
+        const QString shortcutText = operation.type == EButtonOpSelect
+            ? QKeySequence(Qt::Key_Escape).toString(QKeySequence::NativeText)
+            : action->shortcut().toString(QKeySequence::NativeText);
+        const QString tip = tr(operation.label) + " (" + shortcutText + ")";
         action->setToolTip(tip);
     }
     if(m_ui->selectButton) m_ui->selectButton->setToolTip(m_operationActions.value(EButtonOpSelect)->toolTip());
@@ -2216,6 +2233,11 @@ void MainWindow::initShortcuts()
     if(m_ui->rotateButton) m_ui->rotateButton->setToolTip(m_operationActions.value(EButtonOpRotate)->toolTip());
     if(m_ui->scaleButton) m_ui->scaleButton->setToolTip(m_operationActions.value(EButtonOpScale)->toolTip());
     if(m_ui->tileBrushButton) m_ui->tileBrushButton->setToolTip(m_operationActions.value(EButtonOpTilebrush)->toolTip());
+
+    QShortcut* escapeShortcut = new QShortcut(QKeySequence(Qt::Key_Escape), this);
+    escapeShortcut->setContext(Qt::ApplicationShortcut);
+    connect(escapeShortcut, &QShortcut::activated,
+            this, &MainWindow::handleEscapeShortcut);
 }
 
 void MainWindow::createViewportToolbars()
@@ -2268,7 +2290,7 @@ void MainWindow::createViewportToolbars()
         {EButtonOpMove, m_ui->moveButton, "Move"},
         {EButtonOpRotate, m_ui->rotateButton, "Rotate"},
         {EButtonOpScale, m_ui->scaleButton, "Scale"},
-        {EButtonOpTilebrush, m_ui->tileBrushButton, "Tile Brush"}
+        {EButtonOpTilebrush, m_ui->tileBrushButton, "Landscape Tools"}
     };
     QActionGroup* actionGroup = new QActionGroup(this);
     actionGroup->setExclusive(true);
@@ -2276,7 +2298,8 @@ void MainWindow::createViewportToolbars()
     {
         QAction* action = new QAction(tr(operation.text), this);
         action->setCheckable(true);
-        actionGroup->addAction(action);
+        if(operation.type != EButtonOpTilebrush)
+            actionGroup->addAction(action);
         addAction(action);
         m_operationActions.insert(operation.type, action);
         operation.button->setCheckable(true);
@@ -3818,7 +3841,8 @@ void MainWindow::connectUiButtons()
     CButtonConnector::getInstance()->addButton(EButtonOpMove, m_ui->moveButton);
     CButtonConnector::getInstance()->addButton(EButtonOpRotate, m_ui->rotateButton);
     CButtonConnector::getInstance()->addButton(EButtonOpScale, m_ui->scaleButton);
-    CButtonConnector::getInstance()->addButton(EButtonOpTilebrush, m_ui->tileBrushButton);
+    // Landscape Tools is a persistent dock/mode toggle, not an exclusive
+    // transform operation. Its checked state mirrors dock visibility.
     connect(m_pView, &CView::selectionStateChanged,
             this, &MainWindow::updateOperationAvailability);
     updateOperationAvailability(false);
@@ -4138,6 +4162,59 @@ void MainWindow::toggleLandscapeTools()
         hideLandscapeTools();
     else
         showLandscapeTools();
+}
+
+void MainWindow::handleEscapeShortcut()
+{
+    if(!m_pView)
+        return;
+
+    if(m_pickSpawnPending)
+    {
+        if(m_movingCustomSpawn)
+        {
+            m_pickSpawnPending = false;
+            m_movingCustomSpawn = false;
+            m_customSpawnSelected = true;
+            m_pView->unsetCursor();
+            m_pView->setTestSpawnMarker(m_customSpawnPosition, m_customSpawn.adjusted);
+            m_pView->setTestSpawnMarkerSelected(true);
+            m_pView->setLandscapeInteractionSuspended(false);
+            updateCustomSpawnControls();
+            updateEntranceOverlays();
+            updateOperationAvailability();
+            updateMapTestAction();
+        }
+        else if(m_playFromHereButton)
+            m_playFromHereButton->setChecked(false);
+        m_pView->setFocus();
+        return;
+    }
+
+    if(m_customSpawnSelected)
+    {
+        m_customSpawnSelected = false;
+        m_pView->setTestSpawnMarkerSelected(false);
+        m_pView->setLandscapeInteractionSuspended(false);
+        updateCustomSpawnControls();
+        updateEntranceOverlays();
+        updateOperationAvailability();
+        updateOutlinerSelectionPath();
+        m_pView->setFocus();
+        return;
+    }
+
+    if(m_landscapeToolsDock && m_landscapeToolsDock->isVisible())
+    {
+        hideLandscapeTools();
+        m_pView->setFocus();
+        return;
+    }
+
+    if(!m_pView->cancelPendingOperation())
+        m_pView->clearObjectSelection();
+    CButtonConnector::getInstance()->pressButton(EButtonOpSelect);
+    m_pView->setFocus();
 }
 
 void MainWindow::restoreLayoutAfterLandscapeTools()
@@ -5007,8 +5084,8 @@ void MainWindow::on_actionMap_parameters_triggered()
 
 void MainWindow::on_tileBrushButton_clicked()
 {
-    // The tool button owns a QAction which performs the toggle. Qt Designer's
-    // auto-connected clicked slot must not toggle it a second time.
+    if(QAction* action = m_operationActions.value(EButtonOpTilebrush, nullptr))
+        action->trigger();
 }
 
 

@@ -1142,7 +1142,7 @@ void CView::initAiGraphPreviewWidget()
 
     m_aiGraphLayerLabel = new QLabel(m_aiGraphPreviewWidget);
     m_aiGraphLayerLabel->setWordWrap(true);
-    m_aiGraphLayerLabel->setMinimumWidth(300);
+    m_aiGraphLayerLabel->setMinimumWidth(380);
     layout->addWidget(m_aiGraphLayerLabel);
     m_aiGraphLayerSlider = new QSlider(Qt::Horizontal, m_aiGraphPreviewWidget);
     m_aiGraphLayerSlider->setRange(0, CAiGraphDocument::LayerCount - 1);
@@ -1153,6 +1153,7 @@ void CView::initAiGraphPreviewWidget()
     layout->addWidget(m_aiGraphLayerSlider);
     m_aiGraphSourceLabel = new QLabel(tr("No graph source loaded"), m_aiGraphPreviewWidget);
     m_aiGraphSourceLabel->setWordWrap(true);
+    m_aiGraphSourceLabel->setMinimumWidth(380);
     layout->addWidget(m_aiGraphSourceLabel);
 
     QHBoxLayout* actions = new QHBoxLayout;
@@ -1161,7 +1162,10 @@ void CView::initAiGraphPreviewWidget()
     m_aiGraphRegenerateButton->setToolTip(tr(
         "Build a non-saving diagnostic graph from current terrain and static-object collision proxies."));
     m_aiGraphUseLoadedButton = new QToolButton(m_aiGraphPreviewWidget);
-    m_aiGraphUseLoadedButton->setText(tr("Use loaded graph"));
+    m_aiGraphUseLoadedButton->setCheckable(true);
+    m_aiGraphUseLoadedButton->setText(tr("Loaded graph override: OFF"));
+    m_aiGraphUseLoadedButton->setToolTip(tr(
+        "Toggle between the graph loaded from the map and a regenerated diagnostic preview."));
     actions->addWidget(m_aiGraphRegenerateButton);
     actions->addWidget(m_aiGraphUseLoadedButton);
     layout->addLayout(actions);
@@ -1186,10 +1190,18 @@ void CView::initAiGraphPreviewWidget()
     });
     connect(m_aiGraphRegenerateButton, &QToolButton::clicked,
             this, &CView::startAiGraphPreviewRegeneration);
-    connect(m_aiGraphUseLoadedButton, &QToolButton::clicked, this, [this]()
+    connect(m_aiGraphUseLoadedButton, &QToolButton::clicked, this, [this](bool loaded)
     {
-        if(!m_aiGraphLoadedDocument.isValid())
+        if(!loaded)
+        {
+            startAiGraphPreviewRegeneration();
             return;
+        }
+        if(!m_aiGraphLoadedDocument.isValid())
+        {
+            m_aiGraphUseLoadedButton->setChecked(false);
+            return;
+        }
         ++m_aiGraphBuildRequest;
         m_aiGraphAutoRegenerationEnabled = false;
         m_aiGraphRegenerationPending = false;
@@ -1198,6 +1210,8 @@ void CView::initAiGraphPreviewWidget()
         m_aiGraphDocument = m_aiGraphLoadedDocument;
         m_aiGraphSource = m_aiGraphLoadedSource;
         m_aiGraphOverlayDirty = true;
+        if(m_aiGraphPreviewToggle && !m_aiGraphPreviewToggle->isChecked())
+            m_aiGraphPreviewToggle->setChecked(true);
         syncAiGraphPreviewWidget();
         update();
     });
@@ -1243,8 +1257,16 @@ void CView::syncAiGraphPreviewWidget()
         m_aiGraphRegenerateButton->setEnabled(m_terrainEditAvailable
             && (!m_aiGraphBuildWatcher || !m_aiGraphBuildWatcher->isRunning()));
     if(m_aiGraphUseLoadedButton)
-        m_aiGraphUseLoadedButton->setEnabled(m_aiGraphLoadedDocument.isValid()
-            && m_aiGraphSource != m_aiGraphLoadedSource);
+    {
+        const bool loadedOverride = m_aiGraphLoadedDocument.isValid()
+            && m_aiGraphSource == m_aiGraphLoadedSource;
+        const QSignalBlocker blocker(m_aiGraphUseLoadedButton);
+        m_aiGraphUseLoadedButton->setChecked(loadedOverride);
+        m_aiGraphUseLoadedButton->setText(loadedOverride
+            ? tr("Loaded graph override: ON")
+            : tr("Loaded graph override: OFF"));
+        m_aiGraphUseLoadedButton->setEnabled(m_aiGraphLoadedDocument.isValid());
+    }
 }
 
 void CView::refreshAiGraphPreviewSource()
@@ -1390,6 +1412,12 @@ void CView::startAiGraphPreviewRegeneration()
 {
     if(m_aiGraphBuildWatcher && m_aiGraphBuildWatcher->isRunning())
         return;
+    if(m_aiGraphUseLoadedButton)
+    {
+        const QSignalBlocker blocker(m_aiGraphUseLoadedButton);
+        m_aiGraphUseLoadedButton->setChecked(false);
+        m_aiGraphUseLoadedButton->setText(tr("Loaded graph override: OFF"));
+    }
     m_aiGraphRegenerationPending = false;
     if(m_aiGraphRegenerationTimer)
         m_aiGraphRegenerationTimer->stop();

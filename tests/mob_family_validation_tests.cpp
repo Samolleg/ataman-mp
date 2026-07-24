@@ -35,6 +35,18 @@ QByteArray mobWithObject(quint32 nid)
     return section(0xA000, section(0xC000) + section(0xB000, object));
 }
 
+QByteArray mobWithObjects(quint32 firstNid, quint32 secondNid)
+{
+    const auto object = [](quint32 nid, const QByteArray& name)
+    {
+        return section(0xB001,
+            section(0xB002, u32(nid)) + section(0xB003, u32(50))
+            + section(0xB004, name));
+    };
+    return section(0xA000, section(0xC000)
+        + section(0xB000, object(firstNid, "first") + object(secondNid, "second")));
+}
+
 QByteArray encryptedScript(const QByteArray& script, quint32 key = 0x12345678)
 {
     QByteArray encrypted = u32(key);
@@ -71,6 +83,7 @@ private slots:
     void differentLogicalNamesRemainIndependent();
     void missingScriptDependencyReportsExactReferenceSource();
     void separatelyLoadedMapSetsAreNotReportedAsOneFamily();
+    void duplicateIdsWithinOneMobAreAuthoritativeWarnings();
 };
 
 void MobFamilyValidationTests::workspaceCopyShadowsInstalledLogicalMob()
@@ -183,6 +196,31 @@ void MobFamilyValidationTests::separatelyLoadedMapSetsAreNotReportedAsOneFamily(
     QVERIFY(collision != report.findings.cend());
     QVERIFY(collision->message.contains("separately loaded map sets"));
     QVERIFY(collision->message.contains("not one gz4g runtime family"));
+}
+
+void MobFamilyValidationTests::duplicateIdsWithinOneMobAreAuthoritativeWarnings()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString path = writeMob(directory.path(), "duplicate.mob",
+                                  mobWithObjects(568, 568));
+    QVERIFY(!path.isEmpty());
+
+    SMobFamilyValidationRequest request;
+    request.familyLabel = "duplicate-test";
+    request.profileId = "test";
+    request.seedMobPaths << path;
+    request.explicitComposition = true;
+    request.includeProfileWideMobs = false;
+    const CMobFamilyValidationReport report = CMobFamilyValidator::validate(request);
+
+    const auto finding = std::find_if(report.findings.cbegin(), report.findings.cend(),
+        [](const SMobFamilyFinding& item)
+        { return item.code == "nid.duplicate_within_mob"; });
+    QVERIFY(finding != report.findings.cend());
+    QCOMPARE(finding->severity, EMobFamilyFindingSeverity::Warning);
+    QVERIFY(finding->message.contains("NID 568 is used by 2 objects in duplicate.mob"));
+    QCOMPARE(finding->locations.size(), 2);
 }
 
 QTEST_APPLESS_MAIN(MobFamilyValidationTests)
