@@ -1387,3 +1387,87 @@ therefore comes from an external gameplay owner setting particle color, not
 from standalone `PARTICL_TYPE` data. The editor's bare catalog controls correctly
 remain the same white additive burst; hardcoding four colors from their symbolic
 names would contradict the standalone native path.
+
+## Ordered catalog reconstruction: Zoneexit through Moshka
+
+Zoneexit (type 8248 / `0x2038`) selects factory range
+`0x0048783B..0x00487887`, callbacks `0x00492D30`, `0x00492F40`, and
+`0x00492FB0`, the `ZoneExit` atlas, ordinary alpha blending, ten initial
+attempts, capacity 600, fixed power fields five and five, and pause-when-hidden.
+Each creation callback replaces the attempt count with
+`min(40, round(power * power2))`, so its fixed factory fields produce 25 births
+per quant. The authored-scale mutator does not alter either power field. Births
+choose a random atlas phase and two independent -1..1 offsets.
+Those offsets are transformed by the emitter's two planar direction parameters
+and fixed powers. Both direction parameters remain zero in a bare `PARTICL`
+record, so its native standalone control is a coincident rising column; a
+spread field requires external owner code to supply the planar basis.
+Birth size is `(1.9 - x^2 - y^2) * .05 * random(.7, 1.3)`. Particles start at
+the terrain surface plus .1, rise .05 per quant, retain that size, advance
+within their original four-phase atlas row, and use the exact alpha sequence
+`0,80,176,255,255,255,255,255,255,255,255,255,255,255,128,64` over their
+15-quant life. The wall-direction branch only changes the birth RGB from white
+to pale red; a bare `PARTICL` record supplies no wall direction, so the catalog
+control correctly uses white.
+
+Path (type 8249 / `0x2039`) selects factory range
+`0x00487888..0x004878CC`, callbacks `0x00492FC0`, `0x00493280`, and
+`0x004932F0`, the `ShapeChange` atlas, ordinary alpha blending, 2500 attempts
+and capacity 2500. This is not an autonomous placed field: each successful
+birth samples a map-object carrier's predicted position at an increasing
+future quant, rejects repeated positions, and snaps the point to the bridge
+surface plus .15. It uses phase 15, scale .07, and a staggered life computed
+from its index and final population. The source disables generation after the
+first pass. The constructor's default power value one selects green RGB; zero
+and two select gray and orange. Authored scale does not alter this power field;
+other values require external owner code, and only exact values zero, one, or
+two select those initialized colors.
+Because a bare stationary catalog record has no predicted path, the editor may
+show only the single native-style green phase-15 point at its authored origin;
+it must not fabricate a moving trail or reinterpret authored scale as path
+power.
+
+Pathdestination and Pathfailed (types 8250 and 8251 / `0x203A` and `0x203B`)
+share factory range `0x004878CD..0x00487A3F`, callbacks `0x00493300`,
+`0x004933F0`, and `0x004934F0`, the `ShapeChange` atlas, and ordinary alpha
+blending. Pathdestination creates 128 green points on a radius-.1 ring.
+Pathfailed creates the same ring plus four 32-point diagonal arms and uses pale
+red. All points use phase 15, six-quant life, initial submitted size .07, and
+expand their planar offset by 1.05 per update. Their alpha lookup is
+`0,64,144,255,255,255,255,255,255,255,255,255,255,255,128,64`.
+The native callback also projects each update to terrain/bridge geometry. The
+flat catalog control uses its authored Z as the known surface and applies the
+confirmed +.1 offset; arbitrary terrain projection remains renderer-context
+work rather than a synthetic particle rule.
+
+Moshka (type 8252 / `0x203C`) selects factory range
+`0x00487A40..0x00487B93`, callbacks `0x00493560`, `0x00493770`, and
+`0x004938C0`, the `Bag` atlas, ordinary alpha blending, 100 attempts, capacity
+800, carrier-required generation, and 80 local sources. The first 80 births are
+source anchors. Each source repeatedly chooses phase band 0..2, a point within
++/- `.2 * authoredSize` of the carrier, a random-ball direction scaled by
+`.2 * authoredSize`, and life 7..9. On later updates it increments the source
+phase, has a one-in-six chance to perturb direction by a random-ball vector
+scaled by `.05 * authoredSize`, and advances its point by that direction.
+
+The 80 anchors follow their corresponding sources, cycle atlas phases 0..3,
+and use submitted size `.15 * authoredSize * .93^sourcePhase`. The ordinary
+trail population chooses a source, starts between its current point and one
+direction step behind it, uses phases 4 upward, initial life `min(5,
+sourceLife + 1)`, and size `.1 * authoredSize * .93^sourcePhase`. Its exact
+12-entry RGB gradient runs from `(251,254,143)` through warm pink into
+`(239,144,249)`; alpha uses `0,64,112,255` followed by full opacity. Trail
+particles only advance phase and alpha before retiring. When the carrier is
+removed, sources enter terminal state -13 and their anchors retire. A bare
+catalog record has no native carrier object; the editor therefore treats its
+authored origin and size as an explicit stationary synthetic carrier solely to
+exercise the confirmed swarm visuals.
+
+The active JMV archive pins 1024-square DXT3 atlases `zoneexit.mmp`,
+`shapechange.mmp`, and `bag.mmp` with payload SHA-256 values
+`29E3C3005E508A6D37C68CCCDBB0036817E1224F4742DF87C924C88BB64A2E80`,
+`84BB998BD3FAB3BD72F947FF48A6DC1E06D890402670ED1C488687E4DF8A3666`,
+and `C69C26230EAC0830E69E5F40E9748014A6C9A74270BA3410CB80BAE15F6635BE`.
+The Base archive contains independently fingerprinted 256-square variants.
+These findings are pinned from the shipped executable and selected archives;
+they precede renderer dispatch changes.

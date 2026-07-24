@@ -89,6 +89,10 @@ covering the selected JMV corpus.
 | 8219–8230 / `0x201B`–`0x2026` | Modifier1–Modifier12 | Dedicated finite carrier-source family with subtype phases/axes, signed contraction or expansion, anchor and trail populations, exact alpha/scale evolution, `Stun` atlas and additive blending. The catalog uses authored scale and identity orientation as an explicit synthetic carrier. | Capture representative attached carriers to validate their actual bounds and direction; the complete identity-carrier controls are implemented. |
 | 8241–8243 / `0x2031`–`0x2033` | Blood2–Blood4 | Shared native Blood burst with subtype-specific RainSnow phases 13–15, finite source, motion/scale damping, gravity, alpha table and ordinary blending. The catalog uses authored scale as an explicit synthetic carrier bound. | Capture attached carriers with different bounds; the standalone phase-specialized controls are closed. |
 | 8244–8247 / `0x2034`–`0x2037` | A4bloodred/green/blue/black | Dedicated one-quant multi-source radial splatter with exact random ranges, gravity/terminal velocity, ground-zero retirement, phase-12 RainSnow atlas and additive blending. Bare records correctly remain the same white burst because color is supplied externally by gameplay owners. | Capture an owner-colored gameplay control for each external tint; the standalone factory path is closed. |
+| 8248 / `0x2038` | Zoneexit | Dedicated continuous rising phase-row column with the native fixed 25-birth cadence, lifetime/alpha sequence, size distribution, `ZoneExit` atlas and ordinary blending. Bare records retain the native zero planar basis; spread requires external owner parameters. | Capture an owner-configured exit zone to validate nonzero planar basis and wall-direction tint; the bare record path is closed. |
+| 8249 / `0x2039` | Path | Dedicated finite green phase-15 path point using the native lifetime brightness sequence and `ShapeChange` atlas. A bare stationary record cannot provide the predicted carrier positions required for a trail. | Validate on a moving gameplay carrier; the truthful stationary standalone control is closed. |
+| 8250–8251 / `0x203A`–`0x203B` | Pathdestination, Pathfailed | Dedicated finite green ring and red ring-plus-cross controls with exact point counts, offsets, alpha/scale evolution, `ShapeChange` atlas and ordinary blending. | Validate bridge-plane projection on non-flat terrain; the flat standalone controls are closed. |
+| 8252 / `0x203C` | Moshka | Dedicated carrier-swarm simulator with 80 anchors, native source resets and random-ball motion, short gradient trails, phase/alpha/size tables, `Bag` atlas and ordinary blending. The catalog uses authored origin/scale as an explicit synthetic stationary carrier. | Capture an attached moving carrier and detach behavior; the stationary synthetic-carrier control is closed. |
 
 ## Preview-only families
 
@@ -117,7 +121,6 @@ still require both native reverse engineering and a dedicated renderer:
 
 | IDs | Names |
 |---|---|
-| 8248–8252 | Zoneexit, Path, Pathdestination, Pathfailed, Moshka |
 | 8255–8256 | Cylinder1, Cylinder2 |
 | 8260–8262, 8268 | Visionstar1 through Visionstar4 |
 | 8264–8267 | Silence, Feeblemind, Feetcloud1, Feetcloud2 |

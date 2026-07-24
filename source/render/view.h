@@ -391,6 +391,10 @@ private:
     QHash<const CNode*, ei::particle::ModifierEmitter> m_modifierEmitters;
     QHash<const CNode*, ei::particle::ClayRingEmitter> m_clayRingEmitters;
     QHash<const CNode*, ei::particle::TeleportEmitter> m_teleportEmitters;
+    QHash<const CNode*, ei::particle::ZoneExitEmitter> m_zoneExitEmitters;
+    QHash<const CNode*, ei::particle::PathEmitter> m_pathEmitters;
+    QHash<const CNode*, ei::particle::PathDestinationEmitter> m_pathDestinationEmitters;
+    QHash<const CNode*, ei::particle::MoshkaEmitter> m_moshkaEmitters;
     QHash<const CNode*, ei::particle::TornadoEmitter> m_tornadoEmitters;
     QHash<const CNode*, ei::particle::LightningBlastEmitter> m_lightningBlastEmitters;
     QHash<const CNode*, ei::particle::CastingEmitter> m_castingEmitters;

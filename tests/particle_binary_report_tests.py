@@ -156,6 +156,41 @@ class ParticleBinaryReportTests(unittest.TestCase):
                          "0x0048F7F0")
         self.assertEqual(fixture["ranges"]["teleport_create_callback"]["start_va"],
                          "0x0048FDB0")
+        self.assertEqual(fixture["ranges"]["zoneexit_create_callback"]["start_va"],
+                         "0x00492D30")
+        self.assertEqual(fixture["ranges"]["path_create_callback"]["start_va"],
+                         "0x00492FC0")
+        self.assertEqual(
+            fixture["ranges"]["pathdestination_create_callback"]["start_va"],
+            "0x00493300",
+        )
+        self.assertEqual(fixture["ranges"]["moshka_create_callback"]["start_va"],
+                         "0x00493560")
+        self.assertEqual(fixture["sites"]["zoneexit_texture_name"]["bytes"],
+                         "5A6F6E654578697400")
+        self.assertEqual(fixture["sites"]["shapechange_texture_name"]["bytes"],
+                         "53686170654368616E676500")
+        self.assertEqual(fixture["sites"]["bag_texture_name"]["bytes"],
+                         "42616700")
+        self.assertEqual(len(fixture["sites"]["zoneexit_alpha_table"]["bytes"]),
+                         128)
+        self.assertEqual(len(fixture["sites"]["path_brightness_table"]["bytes"]),
+                         128)
+        self.assertEqual(
+            fixture["sites"]["pathdestination_alpha_table"]["bytes"],
+            "000000004000000090000000FF000000FF000000FF000000FF000000FF000000"
+            "FF000000FF000000FF000000FF000000FF000000FF0000008000000040000000",
+        )
+        self.assertEqual(len(fixture["sites"]["moshka_color_table"]["bytes"]),
+                         288)
+        self.assertEqual(len(fixture["sites"]["moshka_alpha_table"]["bytes"]),
+                         128)
+        self.assertAlmostEqual(fixture["constants"]["zoneexit_size_base"]["value"],
+                               1.9)
+        self.assertAlmostEqual(
+            fixture["constants"]["pathdestination_offset_growth"]["value"], 1.05)
+        self.assertAlmostEqual(
+            fixture["constants"]["moshka_phase_size_decay"]["value"], 0.93)
         self.assertIn(
             "C783E0010000D0894800C783E4010000B08D4800",
             fixture["sites"]["mushroom_callback_selection"]["bytes"],

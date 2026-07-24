@@ -2629,6 +2629,15 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
     QOpenGLTexture* teleportTexture = textures->texture("teleport");
     if(teleportTexture == fallbackTexture)
         teleportTexture = nullptr;
+    QOpenGLTexture* zoneExitTexture = textures->texture("zoneexit");
+    if(zoneExitTexture == fallbackTexture)
+        zoneExitTexture = nullptr;
+    QOpenGLTexture* shapeChangeTexture = textures->texture("shapechange");
+    if(shapeChangeTexture == fallbackTexture)
+        shapeChangeTexture = nullptr;
+    QOpenGLTexture* bagTexture = textures->texture("bag");
+    if(bagTexture == fallbackTexture)
+        bagTexture = nullptr;
 
     bool inverseOk = false;
     const QMatrix4x4 inverseView = cameraMatrix.inverted(&inverseOk);
@@ -3020,6 +3029,53 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
                        teleportTexture == nullptr, 0.18f);
     };
 
+    const auto drawZoneExit = [&](const CNode* owner, const QVector3D& origin,
+                                  float authoredScale, uint seed)
+    {
+        ei::particle::ZoneExitEmitter& emitter = m_zoneExitEmitters[owner];
+        emitter.advanceTo(logicalTick, seed, origin, authoredScale);
+        for(const ei::particle::EffectRenderSample& sample : emitter.samples())
+            drawSprite(sample.position, sample.scale, 1.0f, 0.0f,
+                       QVector4D(sample.color, sample.alpha), zoneExitTexture,
+                       ei::particle::atlasUv(sample.frame), false,
+                       zoneExitTexture == nullptr, 0.18f);
+    };
+
+    const auto drawPath = [&](const CNode* owner, const QVector3D& origin, uint seed)
+    {
+        ei::particle::PathEmitter& emitter = m_pathEmitters[owner];
+        emitter.advanceTo(logicalTick, seed, origin);
+        for(const ei::particle::EffectRenderSample& sample : emitter.samples())
+            drawSprite(sample.position, sample.scale, 1.0f, 0.0f,
+                       QVector4D(sample.color, sample.alpha), shapeChangeTexture,
+                       ei::particle::atlasUv(sample.frame), false,
+                       shapeChangeTexture == nullptr, 0.18f);
+    };
+
+    const auto drawPathDestination = [&](const CNode* owner, const QVector3D& origin,
+                                         bool failed, uint seed)
+    {
+        ei::particle::PathDestinationEmitter& emitter = m_pathDestinationEmitters[owner];
+        emitter.advanceTo(logicalTick, seed, origin, failed);
+        for(const ei::particle::EffectRenderSample& sample : emitter.samples())
+            drawSprite(sample.position, sample.scale, 1.0f, 0.0f,
+                       QVector4D(sample.color, sample.alpha), shapeChangeTexture,
+                       ei::particle::atlasUv(sample.frame), false,
+                       shapeChangeTexture == nullptr, 0.18f);
+    };
+
+    const auto drawMoshka = [&](const CNode* owner, const QVector3D& origin,
+                                float authoredScale, uint seed)
+    {
+        ei::particle::MoshkaEmitter& emitter = m_moshkaEmitters[owner];
+        emitter.advanceTo(logicalTick, seed, origin, authoredScale);
+        for(const ei::particle::EffectRenderSample& sample : emitter.samples())
+            drawSprite(sample.position, sample.scale, 1.0f, 0.0f,
+                       QVector4D(sample.color, sample.alpha), bagTexture,
+                       ei::particle::atlasUv(sample.frame), false,
+                       bagTexture == nullptr, 0.18f);
+    };
+
     for(CMob* mob : m_aMob)
     {
         if(!isMobVisible(mob))
@@ -3120,6 +3176,43 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
             if(particle->kind() >= 8244u && particle->kind() <= 8247u)
             {
                 drawA4Blood(particle, center, particle->mapId());
+                if(particle->nodeState() == ENodeState::eSelect)
+                    drawSprite(center, qMax(0.3f, authoredScale * 0.35f), 1.0f, 0.0f,
+                               QVector4D(0.10f, 0.90f, 1.0f, 0.72f), nullptr,
+                               QVector4D(0.0f, 0.0f, 1.0f, 1.0f), false, true, 0.12f);
+                continue;
+            }
+            if(particle->kind() == 8248u)
+            {
+                drawZoneExit(particle, center, authoredScale, particle->mapId());
+                if(particle->nodeState() == ENodeState::eSelect)
+                    drawSprite(center, qMax(0.3f, authoredScale * 0.35f), 1.0f, 0.0f,
+                               QVector4D(0.10f, 0.90f, 1.0f, 0.72f), nullptr,
+                               QVector4D(0.0f, 0.0f, 1.0f, 1.0f), false, true, 0.12f);
+                continue;
+            }
+            if(particle->kind() == 8249u)
+            {
+                drawPath(particle, center, particle->mapId());
+                if(particle->nodeState() == ENodeState::eSelect)
+                    drawSprite(center, qMax(0.3f, authoredScale * 0.35f), 1.0f, 0.0f,
+                               QVector4D(0.10f, 0.90f, 1.0f, 0.72f), nullptr,
+                               QVector4D(0.0f, 0.0f, 1.0f, 1.0f), false, true, 0.12f);
+                continue;
+            }
+            if(particle->kind() == 8250u || particle->kind() == 8251u)
+            {
+                drawPathDestination(particle, center, particle->kind() == 8251u,
+                                    particle->mapId());
+                if(particle->nodeState() == ENodeState::eSelect)
+                    drawSprite(center, qMax(0.3f, authoredScale * 0.35f), 1.0f, 0.0f,
+                               QVector4D(0.10f, 0.90f, 1.0f, 0.72f), nullptr,
+                               QVector4D(0.0f, 0.0f, 1.0f, 1.0f), false, true, 0.12f);
+                continue;
+            }
+            if(particle->kind() == 8252u)
+            {
+                drawMoshka(particle, center, authoredScale, particle->mapId());
                 if(particle->nodeState() == ENodeState::eSelect)
                     drawSprite(center, qMax(0.3f, authoredScale * 0.35f), 1.0f, 0.0f,
                                QVector4D(0.10f, 0.90f, 1.0f, 0.72f), nullptr,
@@ -5452,6 +5545,10 @@ bool CView::unloadMobDocument(CMob* mob, bool promptForSave)
     m_mushroomEmitters.clear();
     m_blood1Emitters.clear();
     m_a4BloodEmitters.clear();
+    m_zoneExitEmitters.clear();
+    m_pathEmitters.clear();
+    m_pathDestinationEmitters.clear();
+    m_moshkaEmitters.clear();
     m_fireArrowEmitters.clear();
     m_acidRayEmitters.clear();
     m_blueGasEmitters.clear();
@@ -5661,6 +5758,10 @@ void CView::unloadMob(QString mobName)
     m_mushroomEmitters.clear();
     m_blood1Emitters.clear();
     m_a4BloodEmitters.clear();
+    m_zoneExitEmitters.clear();
+    m_pathEmitters.clear();
+    m_pathDestinationEmitters.clear();
+    m_moshkaEmitters.clear();
     m_fireArrowEmitters.clear();
     m_acidRayEmitters.clear();
     m_blueGasEmitters.clear();

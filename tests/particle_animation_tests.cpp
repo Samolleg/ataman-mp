@@ -34,6 +34,10 @@ private slots:
     void modifiersUseSubtypeAnchorsAndFiniteTrails();
     void clayRingUsesFiniteGroundRing();
     void teleportUsesFiniteSignedColumn();
+    void zoneExitUsesNativeStandaloneColumn();
+    void pathUsesTruthfulStationaryCarrierPoint();
+    void pathDestinationDistinguishesRingAndFailureCross();
+    void moshkaUsesSyntheticCarrierSwarm();
 };
 
 void ParticleAnimationTests::atlasUsesNativeTopRowFirstInsets()
@@ -656,6 +660,106 @@ void ParticleAnimationTests::teleportUsesFiniteSignedColumn()
     QCOMPARE(positive.activeCount(), 0);
     positive.advanceTo(66, 8217u, origin, 1.0f);
     QVERIFY(positive.activeCount() > 0);
+}
+
+void ParticleAnimationTests::zoneExitUsesNativeStandaloneColumn()
+{
+    ei::particle::ZoneExitEmitter first;
+    ei::particle::ZoneExitEmitter second;
+    const QVector3D origin(2.0f, -5.0f, 0.25f);
+    first.advanceTo(20, 8248u, origin, 1.0f);
+    second.advanceTo(20, 8248u, origin, 1.0f);
+    const auto a = first.samples();
+    const auto b = second.samples();
+    QCOMPARE(a.size(), b.size());
+    QVERIFY(a.size() > 250);
+    QVERIFY(first.activeCount() <= 600);
+    for(int i = 0; i < a.size(); ++i)
+    {
+        QCOMPARE(a[i].position, b[i].position);
+        QCOMPARE(a[i].scale, b[i].scale);
+        QCOMPARE(a[i].alpha, b[i].alpha);
+        QCOMPARE(a[i].frame, b[i].frame);
+        QCOMPARE(a[i].position.x(), origin.x());
+        QCOMPARE(a[i].position.y(), origin.y());
+        QVERIFY(a[i].position.z() >= origin.z() + 0.15f);
+        QVERIFY(a[i].scale > 0.0f);
+        QVERIFY(a[i].alpha >= 0.0f && a[i].alpha <= 1.0f);
+        QVERIFY(a[i].frame >= 0 && a[i].frame <= 15);
+    }
+}
+
+void ParticleAnimationTests::pathUsesTruthfulStationaryCarrierPoint()
+{
+    ei::particle::PathEmitter emitter;
+    const QVector3D origin(-1.0f, 3.0f, 0.0f);
+    emitter.advanceTo(2, 8249u, origin);
+    const auto samples = emitter.samples();
+    QCOMPARE(samples.size(), 1);
+    QCOMPARE(samples[0].position, origin + QVector3D(0.0f, 0.0f, 0.15f));
+    QCOMPARE(samples[0].scale, ei::particle::billboardDiameter(0.07f));
+    QCOMPARE(samples[0].frame, 15);
+    QCOMPARE(samples[0].color,
+             QVector3D(64.0f / 255.0f, 1.0f, 64.0f / 255.0f));
+    QVERIFY(samples[0].alpha > 0.0f);
+    emitter.advanceTo(12, 8249u, origin);
+    QCOMPARE(emitter.activeCount(), 0);
+}
+
+void ParticleAnimationTests::pathDestinationDistinguishesRingAndFailureCross()
+{
+    ei::particle::PathDestinationEmitter destination;
+    ei::particle::PathDestinationEmitter failed;
+    const QVector3D origin(0.5f, -0.5f, 1.0f);
+    destination.advanceTo(2, 8250u, origin, false);
+    failed.advanceTo(2, 8251u, origin, true);
+    const auto ring = destination.samples();
+    const auto cross = failed.samples();
+    QCOMPARE(ring.size(), 128);
+    QCOMPARE(cross.size(), 256);
+    for(const auto& sample : ring)
+    {
+        QCOMPARE(sample.position.z(), origin.z() + 0.1f);
+        QCOMPARE(sample.frame, 15);
+        QCOMPARE(sample.color,
+                 QVector3D(64.0f / 255.0f, 1.0f, 64.0f / 255.0f));
+    }
+    for(const auto& sample : cross)
+    {
+        QCOMPARE(sample.position.z(), origin.z() + 0.1f);
+        QCOMPARE(sample.color,
+                 QVector3D(1.0f, 64.0f / 255.0f, 64.0f / 255.0f));
+    }
+    destination.advanceTo(10, 8250u, origin, false);
+    QCOMPARE(destination.activeCount(), 0);
+}
+
+void ParticleAnimationTests::moshkaUsesSyntheticCarrierSwarm()
+{
+    ei::particle::MoshkaEmitter first;
+    ei::particle::MoshkaEmitter second;
+    const QVector3D origin(4.0f, 2.0f, -0.25f);
+    first.advanceTo(10, 8252u, origin, 1.0f);
+    second.advanceTo(10, 8252u, origin, 1.0f);
+    const auto a = first.samples();
+    const auto b = second.samples();
+    QCOMPARE(a.size(), b.size());
+    QVERIFY(a.size() > 100);
+    QVERIFY(first.activeCount() <= 800);
+    float farthest = 0.0f;
+    for(int i = 0; i < a.size(); ++i)
+    {
+        QCOMPARE(a[i].position, b[i].position);
+        QCOMPARE(a[i].scale, b[i].scale);
+        QCOMPARE(a[i].alpha, b[i].alpha);
+        QCOMPARE(a[i].frame, b[i].frame);
+        QCOMPARE(a[i].color, b[i].color);
+        farthest = qMax(farthest, (a[i].position - origin).length());
+        QVERIFY(a[i].scale > 0.0f);
+        QVERIFY(a[i].alpha >= 0.0f && a[i].alpha <= 1.0f);
+        QVERIFY(a[i].frame >= 0 && a[i].frame <= 15);
+    }
+    QVERIFY(farthest > 0.2f);
 }
 
 QTEST_APPLESS_MAIN(ParticleAnimationTests)
