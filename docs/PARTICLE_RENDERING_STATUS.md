@@ -99,6 +99,10 @@ covering the selected JMV corpus.
 | 8257–8258 / `0x2041`–`0x2042` | Firestar, Acidstar | Dedicated three-quant phase-15 flash with exact two visible sizes, ordinary blending, and the type-specific `FireArrowSmoke` or `AcidRay` atlas. The catalog uses authored origin/size as a synthetic carrier and repeats the finite one-shot. | Validate gameplay body-part attachment; the stationary synthetic-carrier controls are closed. |
 | 8259 / `0x2043` | Sparks | Dedicated additive `Casting6` source flash plus nine radial trails with native random ranges, phase selection, lifetime alpha table, motion, size and velocity damping. The catalog uses authored origin/size as a synthetic carrier and repeats the finite burst. | Validate gameplay body-part attachment and owner motion; the stationary synthetic-carrier control is closed. |
 | 8260–8262, 8268 / `0x2044`–`0x2046`, `0x204C` | Visionstar1–Visionstar4 | Dedicated persistent additive `Stun` stars with subtype phases, one-point/pentagon populations, pentagon rotation, Visionstar4 elevation, and native random size smoothing. The catalog uses authored origin/size as a synthetic stationary carrier. | Validate above-head attachment and detach fade on gameplay carriers; the persistent synthetic-carrier controls are closed. |
+| 8263 / `0x2047` | Regeneration | Dedicated pair of phase-three additive `Stun` particles using the native carrier-side targets, position smoothing, vertical offset and random size range. The catalog uses authored origin/size and identity orientation as a synthetic stationary carrier. | Validate gameplay body attachment, carrier radius/orientation and detach fade; the stationary synthetic-carrier control is closed. |
+| 8264 / `0x2048` | Silence | Dedicated two-anchor additive `Stun` orbit with native compound angles, carrier radius, anchor motion, finite interpolated trails and size decay. The catalog uses authored origin/size as a synthetic stationary carrier. | Validate gameplay body attachment and detach fade; the stationary synthetic-carrier control is closed. |
+| 8265 / `0x2049` | Feeblemind | Dedicated continuous additive `Link` spiral with native phase selection, radial rotation/expansion, rise, alpha ramp and scale growth. The catalog uses authored origin/size as a synthetic stationary head carrier. | Validate gameplay head attachment and carrier motion; the stationary synthetic-carrier control is closed. |
+| 8266–8267 / `0x204A`–`0x204B` | Feetcloud1, Feetcloud2 | Dedicated blue/red additive `VisionFog` clouds with two synthetic foot sources, native disk velocity, size/alpha/blend/velocity decay and phase selection. | Validate actual left/right body-part attachment points and detach lifetime cap; the coincident-source standalone controls are closed. |
 
 ## Preview-only families
 
@@ -108,7 +112,7 @@ runtime behavior has not been reconstructed:
 | IDs | Names |
 |---|---|
 | 8192, 8194, 8231 | Fireball, Fireblast, Castingfire |
-| 8198, 8263 | Healing, Regeneration |
+| 8198 | Healing |
 | 8199 | Poisonfog |
 | 8200, 8201 | Aggressionfog, Geyser |
 | 8232–8239 | Elemental, divination, illusion, domination, enchantment, healing, and failed casting variants |
@@ -124,7 +128,6 @@ still require both native reverse engineering and a dedicated renderer:
 
 | IDs | Names |
 |---|---|
-| 8264–8267 | Silence, Feeblemind, Feetcloud1, Feetcloud2 |
 | 8269–8274 | Ballofstars, Rickarrow, Cursestars, Curseholder, Starttrans, Transform |
 
 Some of these effects may be transient spell/script effects rather than

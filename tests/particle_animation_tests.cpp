@@ -44,6 +44,11 @@ private slots:
     void fireAndAcidStarsUseFinitePhaseFifteenFlash();
     void sparksUseSourceFlashAndNineTrails();
     void visionStarsUseSubtypePopulationsAndOffsets();
+    void regenerationUsesTwoSmoothedCarrierSides();
+    void silenceUsesTwoAnchorsAndFiniteTrails();
+    void feeblemindUsesExpandingRotatingLinkPhases();
+    void feetCloudsUseNativeColorsAndDecayingDrift();
+    void persistentEmittersBoundInitialWallClockReplay();
 };
 
 void ParticleAnimationTests::atlasUsesNativeTopRowFirstInsets()
@@ -935,6 +940,140 @@ void ParticleAnimationTests::visionStarsUseSubtypePopulationsAndOffsets()
     single.advanceTo(50, 8260u, origin, 1.0f, 0);
     QCOMPARE(single.activeCount(), 1);
     QVERIFY(single.samples()[0].scale > 0.0f);
+}
+
+void ParticleAnimationTests::regenerationUsesTwoSmoothedCarrierSides()
+{
+    ei::particle::RegenerationEmitter first;
+    ei::particle::RegenerationEmitter second;
+    const QVector3D origin(2.0f, -1.0f, 0.5f);
+    first.advanceTo(2, 8263u, origin, 2.0f);
+    second.advanceTo(2, 8263u, origin, 2.0f);
+    const auto a = first.samples();
+    const auto b = second.samples();
+    QCOMPARE(first.activeCount(), 2);
+    QCOMPARE(a.size(), 2);
+    QCOMPARE(a.size(), b.size());
+    for(int i = 0; i < a.size(); ++i)
+    {
+        QCOMPARE(a[i].position, b[i].position);
+        QCOMPARE(a[i].scale, b[i].scale);
+        QCOMPARE(a[i].frame, 3);
+        QCOMPARE(a[i].alpha, 1.0f);
+        QVERIFY(a[i].scale >= ei::particle::billboardDiameter(0.4f));
+        QVERIFY(a[i].scale <= ei::particle::billboardDiameter(0.6f));
+        QVERIFY(qAbs(a[i].position.y() - origin.y()) < 0.0001f);
+        QVERIFY(a[i].position.z() > origin.z());
+    }
+    QVERIFY(a[0].position.x() < origin.x());
+    QVERIFY(a[1].position.x() > origin.x());
+}
+
+void ParticleAnimationTests::silenceUsesTwoAnchorsAndFiniteTrails()
+{
+    ei::particle::SilenceEmitter first;
+    ei::particle::SilenceEmitter second;
+    const QVector3D origin(-2.0f, 3.0f, 0.25f);
+    first.advanceTo(2, 8264u, origin, 1.0f);
+    second.advanceTo(2, 8264u, origin, 1.0f);
+    const auto a = first.samples();
+    const auto b = second.samples();
+    QCOMPARE(a.size(), b.size());
+    QVERIFY(a.size() >= 4);
+    QVERIFY(first.activeCount() <= 300);
+    for(int i = 0; i < a.size(); ++i)
+    {
+        QCOMPARE(a[i].position, b[i].position);
+        QCOMPARE(a[i].scale, b[i].scale);
+        QCOMPARE(a[i].frame, 6);
+        QCOMPARE(a[i].alpha, 1.0f);
+        QVERIFY(a[i].scale > 0.0f);
+    }
+    first.advanceTo(40, 8264u, origin, 1.0f);
+    QVERIFY(first.activeCount() > 2);
+    QVERIFY(first.activeCount() < 40);
+}
+
+void ParticleAnimationTests::feeblemindUsesExpandingRotatingLinkPhases()
+{
+    ei::particle::FeeblemindEmitter first;
+    ei::particle::FeeblemindEmitter second;
+    const QVector3D origin(1.0f, 4.0f, -0.5f);
+    first.advanceTo(2, 8265u, origin, 1.0f);
+    second.advanceTo(2, 8265u, origin, 1.0f);
+    const auto a = first.samples();
+    const auto b = second.samples();
+    QCOMPARE(a.size(), 5);
+    QCOMPARE(a.size(), b.size());
+    QCOMPARE(first.activeCount(), 7);
+    for(int i = 0; i < a.size(); ++i)
+    {
+        QCOMPARE(a[i].position, b[i].position);
+        QCOMPARE(a[i].scale, b[i].scale);
+        QCOMPARE(a[i].frame, b[i].frame);
+        QCOMPARE(a[i].alpha, 1.0f);
+        QVERIFY(a[i].frame >= 0 && a[i].frame <= 15);
+        QVERIFY(a[i].scale > 0.0f);
+        QVERIFY(qAbs(a[i].position.z() - origin.z() - 0.05f) < 0.0001f);
+        const QVector2D offset(a[i].position.x() - origin.x(),
+                               a[i].position.y() - origin.y());
+        QVERIFY(qAbs(offset.length() - 0.055f) < 0.0001f);
+    }
+    first.advanceTo(40, 8265u, origin, 1.0f);
+    QVERIFY(first.activeCount() > 20);
+    QVERIFY(first.activeCount() <= 300);
+}
+
+void ParticleAnimationTests::feetCloudsUseNativeColorsAndDecayingDrift()
+{
+    ei::particle::FeetCloudEmitter blue;
+    ei::particle::FeetCloudEmitter red;
+    const QVector3D origin(-1.0f, -2.0f, 0.75f);
+    blue.advanceTo(2, 8266u, origin, 1.0f, false);
+    red.advanceTo(2, 8267u, origin, 1.0f, true);
+    const auto blueSamples = blue.samples();
+    const auto redSamples = red.samples();
+    QCOMPARE(blueSamples.size(), 8);
+    QCOMPARE(redSamples.size(), 8);
+    QCOMPARE(blue.activeCount(), 16);
+    QCOMPARE(red.activeCount(), 16);
+    for(const auto& sample : blueSamples)
+    {
+        QCOMPARE(sample.color, QVector3D(0.0f, 0.0f, 1.0f));
+        QCOMPARE(sample.scale, ei::particle::billboardDiameter(0.4f));
+        QCOMPARE(sample.alpha, 1.0f);
+        QVERIFY(sample.frame >= 0 && sample.frame <= 15);
+        QCOMPARE(sample.position.z(), origin.z());
+    }
+    for(const auto& sample : redSamples)
+        QCOMPARE(sample.color, QVector3D(1.0f, 0.0f, 0.0f));
+    blue.advanceTo(40, 8266u, origin, 1.0f, false);
+    QVERIFY(blue.activeCount() > 50);
+    QVERIFY(blue.activeCount() <= 300);
+}
+
+void ParticleAnimationTests::persistentEmittersBoundInitialWallClockReplay()
+{
+    constexpr qint64 wallClockTick = 32000000000LL;
+    const QVector3D origin(0.0f, 0.0f, 0.0f);
+    ei::particle::MoshkaEmitter moshka;
+    ei::particle::VisionStarEmitter vision;
+    ei::particle::RegenerationEmitter regeneration;
+    ei::particle::SilenceEmitter silence;
+    ei::particle::FeeblemindEmitter feeblemind;
+    ei::particle::FeetCloudEmitter feet;
+    moshka.advanceTo(wallClockTick, 8252u, origin, 1.0f);
+    vision.advanceTo(wallClockTick, 8260u, origin, 1.0f, 0);
+    regeneration.advanceTo(wallClockTick, 8263u, origin, 1.0f);
+    silence.advanceTo(wallClockTick, 8264u, origin, 1.0f);
+    feeblemind.advanceTo(wallClockTick, 8265u, origin, 1.0f);
+    feet.advanceTo(wallClockTick, 8266u, origin, 1.0f, false);
+    QVERIFY(moshka.activeCount() > 0 && moshka.activeCount() <= 800);
+    QCOMPARE(vision.activeCount(), 1);
+    QCOMPARE(regeneration.activeCount(), 2);
+    QVERIFY(silence.activeCount() > 2 && silence.activeCount() < 50);
+    QVERIFY(feeblemind.activeCount() > 20 && feeblemind.activeCount() <= 300);
+    QVERIFY(feet.activeCount() > 50 && feet.activeCount() <= 300);
 }
 
 QTEST_APPLESS_MAIN(ParticleAnimationTests)

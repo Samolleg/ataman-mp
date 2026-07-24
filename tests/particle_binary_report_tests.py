@@ -213,6 +213,37 @@ class ParticleBinaryReportTests(unittest.TestCase):
             fixture["constants"]["visionstar_orbit_step"]["value"], 0.07)
         self.assertAlmostEqual(
             fixture["constants"]["visionstar_smoothing_decay"]["value"], 0.95)
+        self.assertEqual(
+            fixture["ranges"]["regeneration_create_callback"]["start_va"],
+            "0x004950B0")
+        self.assertEqual(
+            fixture["ranges"]["silence_create_callback"]["start_va"],
+            "0x00495320")
+        self.assertEqual(
+            fixture["ranges"]["feeblemind_create_callback"]["start_va"],
+            "0x004957E0")
+        self.assertEqual(
+            fixture["ranges"]["feetcloud_create_callback"]["start_va"],
+            "0x00495A30")
+        self.assertEqual(fixture["sites"]["visionfog_texture_name"]["bytes"],
+                         "566973696F6E466F6700")
+        self.assertEqual(
+            fixture["sites"]["feeblemind_alpha_table"]["bytes"],
+            "00000000200000004000000080000000" + "FF000000" * 17)
+        self.assertEqual(
+            fixture["sites"]["feetcloud_alpha_table"]["bytes"],
+            "00000000200000004000000080000000" + "FF000000" * 7)
+        self.assertAlmostEqual(
+            fixture["constants"]["regeneration_carrier_radius_factor"]["value"],
+            0.65)
+        self.assertAlmostEqual(
+            fixture["constants"]["silence_anchor_size_factor"]["value"], 0.22)
+        self.assertAlmostEqual(
+            fixture["constants"]["feeblemind_orbit_radius"]["value"], 0.05)
+        self.assertAlmostEqual(
+            fixture["constants"]["feeblemind_size_growth"]["value"], 1.04)
+        self.assertAlmostEqual(
+            fixture["constants"]["feetcloud_blend_decay"]["value"], 0.98)
         self.assertEqual(len(fixture["sites"]["zoneexit_alpha_table"]["bytes"]),
                          128)
         self.assertEqual(len(fixture["sites"]["path_brightness_table"]["bytes"]),

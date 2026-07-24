@@ -215,6 +215,20 @@
       "size": 172108,
       "textureFormat": "0x00004444",
       "width": 256
+    },
+    {
+      "atlas": {
+        "columns": 4,
+        "phaseCount": 16,
+        "rows": 4
+      },
+      "height": 256,
+      "mipCount": 3,
+      "name": "visionfog.mmp",
+      "sha256": "0D7A9F860ED7716F47BD013DC4B4B9B41EB24CEEBD8EDA15A63C256D29BA4A47",
+      "size": 172108,
+      "textureFormat": "0x00004444",
+      "width": 256
     }
   ]
 }

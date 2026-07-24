@@ -1604,3 +1604,89 @@ The selected JMV archive fingerprints `firearrowsmoke.mmp`, `acidray.mmp`,
 and `2A2084F1DC9A0A2F1946A36F3D7C54D510E3A51BD39B2351EF3354AF83E51170`.
 Their dimensions and formats are already pinned in the deterministic texture
 fixture. These binary/resource findings precede simulator and renderer changes.
+
+## Ordered catalog reconstruction: Regeneration through Feetcloud2
+
+Regeneration (type 8263 / `0x2047`) selects factory range
+`0x0048808A..0x004880D3`, callbacks `0x004950B0`, `0x00495120`, and
+`0x00495310`, the additive `Stun` atlas, two creation attempts, and a gameplay
+body carrier. The creation callback admits exactly two particles. Both begin
+at the carrier point in phase three with zero submitted size; their stored
+signs are -1 and +1. With a carrier, each update targets the carrier point plus
+the carrier-local X axis times `sign * .65 * carrierRadius`. Position is
+smoothed as `old * .7 + target * .3`, with an additional `.4 * authoredSize`
+on Z. Submitted size is
+`.25 * authoredSize * random(.8,1.2)`, and alpha is fully opaque. When the
+carrier or generation is absent, system size is multiplied by .75 and a
+particle retires below .02. A bare catalog record has no carrier transform or
+bounds, so the editor uses its origin, identity X axis, and authored size as a
+stationary synthetic carrier radius.
+
+Silence (type 8264 / `0x2048`) selects factory range
+`0x004880D4..0x00488127`, callbacks `0x00495320`, `0x004955D0`, and
+`0x004957D0`, the additive `Stun` atlas, four creation attempts, capacity 300,
+and a gameplay body carrier. Its first two births are persistent phase-six
+anchors at the carrier point. Their initial angles are pi and zero, their
+horizontal steps are .1 radians, their vertical-angle steps are .12 radians,
+and their initial submitted size is zero. Each update places an anchor on a
+normalized direction `(cos(a), sin(a), .5*sin(verticalAngle))` at
+`.5 * carrierRadius`, then adds another `.5 * distance` to Z. The stored
+velocity is the new position minus the old position. Anchor size is
+`.22 * authoredSize * random(.9,1.1)`, with full opacity.
+
+Once both Silence anchors exist, later births select either anchor, interpolate
+from one previous velocity step through its current point, and add a random
+unit-ball displacement scaled by `.8 * anchorSize`. A trail uses phase six,
+life seven, zero initial submitted size, and pending size
+`.08 * authoredSize * random(.8,1.2)`. Each update decrements life, copies the
+pending size to submitted size, and multiplies the pending size by .8; it
+retires when life reaches zero. On detach, the system size is multiplied by
+.85 and anchors retire below .02. The catalog supplies origin, identity
+orientation, and authored size as the stationary synthetic carrier.
+
+Feeblemind (type 8265 / `0x2049`) selects factory range
+`0x00488128..0x0048817B`, callbacks `0x004957E0`, `0x00495950`, and
+`0x00495A20`, the additive `Link` atlas, five initial creation attempts,
+capacity 300, and a gameplay head carrier. Each birth replaces following
+attempts with `round(2 * authoredSize)`, chooses phase 0..15, and begins on a
+radius-.05 horizontal ring at the carrier point. It starts transparent with
+life 20 and target size
+`.035 * authoredSize * random(.9,1.1)`. Every update decrements life and uses
+the exact alpha ramp `0,32,64,128` followed by full opacity through life 20.
+The stored radial offset is removed, rotated by .07 radians, expanded by 1.1,
+and added back; Z rises by .05, phase advances modulo 16, submitted size takes
+the target size, and the next target is multiplied by 1.04. It retires after
+life becomes negative. The standalone editor control uses the authored origin
+and size as a stationary synthetic head carrier.
+
+Feetcloud1 and Feetcloud2 (types 8266 and 8267 / `0x204A` and `0x204B`) share
+factory range `0x0048817C..0x0048836E`, callbacks `0x00495A30`,
+`0x00495C80`, and `0x00495E00`, the additive `VisionFog` atlas, eight initial
+creation attempts, capacity 300, a required gameplay carrier, and two local
+sources. Gameplay updates those sources from the left and right foot/leg
+attachment points when available and otherwise uses the carrier point. A bare
+record has neither body-part attachment points nor bounds; its two synthetic
+sources therefore coincide at the authored origin and use authored size as
+their radius.
+
+Each Feetcloud birth replaces following attempts with
+`round(8 * authoredSize)`, randomly chooses one source and phase 0..15, and
+starts at that source with zero submitted size. Velocity is a random point in
+the unit disk scaled by `.1 * sourceRadius * authoredSize`. Pending size is
+`.4 * sourceRadius * authoredSize`, blend is one, accumulated offset is zero,
+Z receives `1.2 * pendingSize`, and life is ten. Each update decrements life,
+uses alpha `0,32,64,128,255,255,255,255,255,255,255`, accumulates velocity,
+and blends from the old position to `sourcePoint + accumulatedOffset`. It then
+copies pending size to submitted size and multiplies pending size by .8, blend
+by .98, and velocity by .9. On detach, remaining life is capped at eight.
+Feetcloud1 uses packed color `0x000000FF` (blue in the native ARGB value) and
+Feetcloud2 uses `0x00FF0000` (red).
+
+The fingerprinted executable stores the selected atlas name as `VisionFog`.
+The active JMV archive pins `visionfog.mmp` as a 1024-square, 11-mip DXT3 atlas
+with payload SHA-256
+`C0A34776BB04D999BE9DB33908C734D6DE637D75775A7A6722A4E2921B0D2575`.
+The Base archive contains a separately fingerprinted 256-square, three-mip
+`0x00004444` variant with payload SHA-256
+`0D7A9F860ED7716F47BD013DC4B4B9B41EB24CEEBD8EDA15A63C256D29BA4A47`.
+All behavior and resources above were confirmed before renderer wiring.

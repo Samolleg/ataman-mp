@@ -220,7 +220,6 @@ SParticleVisualStyle particleVisualStyle(uint kind)
     case 8197:
         return {"tendrismoke", QVector4D(1.0f, 1.0f, 1.0f, 0.72f), 1.55f, 0.42f, false};
     case 8198:
-    case 8263:
         return {nullptr, QVector4D(0.28f, 1.0f, 0.42f, 0.70f), 1.1f, 0.26f, true};
     case 8199:
         return {"poisoncloud", QVector4D(0.42f, 0.86f, 0.22f, 0.68f), 1.8f, 0.48f, false};
@@ -2647,6 +2646,9 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
     QOpenGLTexture* casting1Texture = textures->texture("casting1");
     if(casting1Texture == fallbackTexture)
         casting1Texture = nullptr;
+    QOpenGLTexture* visionFogTexture = textures->texture("visionfog");
+    if(visionFogTexture == fallbackTexture)
+        visionFogTexture = nullptr;
 
     bool inverseOk = false;
     const QMatrix4x4 inverseView = cameraMatrix.inverted(&inverseOk);
@@ -3159,6 +3161,54 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
                        stunTexture == nullptr, 0.18f);
     };
 
+    const auto drawRegeneration = [&](const CNode* owner, const QVector3D& origin,
+                                      float authoredScale, uint seed)
+    {
+        ei::particle::RegenerationEmitter& emitter = m_regenerationEmitters[owner];
+        emitter.advanceTo(logicalTick, seed, origin, authoredScale);
+        for(const ei::particle::EffectRenderSample& sample : emitter.samples())
+            drawSprite(sample.position, sample.scale, 1.0f, 0.0f,
+                       QVector4D(1.0f, 1.0f, 1.0f, sample.alpha), stunTexture,
+                       ei::particle::atlasUv(sample.frame), true,
+                       stunTexture == nullptr, 0.18f);
+    };
+
+    const auto drawSilence = [&](const CNode* owner, const QVector3D& origin,
+                                 float authoredScale, uint seed)
+    {
+        ei::particle::SilenceEmitter& emitter = m_silenceEmitters[owner];
+        emitter.advanceTo(logicalTick, seed, origin, authoredScale);
+        for(const ei::particle::EffectRenderSample& sample : emitter.samples())
+            drawSprite(sample.position, sample.scale, 1.0f, 0.0f,
+                       QVector4D(1.0f, 1.0f, 1.0f, sample.alpha), stunTexture,
+                       ei::particle::atlasUv(sample.frame), true,
+                       stunTexture == nullptr, 0.18f);
+    };
+
+    const auto drawFeeblemind = [&](const CNode* owner, const QVector3D& origin,
+                                    float authoredScale, uint seed)
+    {
+        ei::particle::FeeblemindEmitter& emitter = m_feeblemindEmitters[owner];
+        emitter.advanceTo(logicalTick, seed, origin, authoredScale);
+        for(const ei::particle::EffectRenderSample& sample : emitter.samples())
+            drawSprite(sample.position, sample.scale, 1.0f, 0.0f,
+                       QVector4D(1.0f, 1.0f, 1.0f, sample.alpha), linkTexture,
+                       ei::particle::atlasUv(sample.frame), true,
+                       linkTexture == nullptr, 0.18f);
+    };
+
+    const auto drawFeetCloud = [&](const CNode* owner, const QVector3D& origin,
+                                   float authoredScale, bool red, uint seed)
+    {
+        ei::particle::FeetCloudEmitter& emitter = m_feetCloudEmitters[owner];
+        emitter.advanceTo(logicalTick, seed, origin, authoredScale, red);
+        for(const ei::particle::EffectRenderSample& sample : emitter.samples())
+            drawSprite(sample.position, sample.scale, 1.0f, 0.0f,
+                       QVector4D(sample.color, sample.alpha), visionFogTexture,
+                       ei::particle::atlasUv(sample.frame), true,
+                       visionFogTexture == nullptr, 0.18f);
+    };
+
     for(CMob* mob : m_aMob)
     {
         if(!isMobVisible(mob))
@@ -3356,6 +3406,43 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
                     ? 3 : int(particle->kind() - 8260u);
                 drawVisionStar(particle, center, authoredScale, subtype,
                                particle->mapId());
+                if(particle->nodeState() == ENodeState::eSelect)
+                    drawSprite(center, qMax(0.3f, authoredScale * 0.35f), 1.0f, 0.0f,
+                               QVector4D(0.10f, 0.90f, 1.0f, 0.72f), nullptr,
+                               QVector4D(0.0f, 0.0f, 1.0f, 1.0f), false, true, 0.12f);
+                continue;
+            }
+            if(particle->kind() == 8263u)
+            {
+                drawRegeneration(particle, center, authoredScale, particle->mapId());
+                if(particle->nodeState() == ENodeState::eSelect)
+                    drawSprite(center, qMax(0.3f, authoredScale * 0.35f), 1.0f, 0.0f,
+                               QVector4D(0.10f, 0.90f, 1.0f, 0.72f), nullptr,
+                               QVector4D(0.0f, 0.0f, 1.0f, 1.0f), false, true, 0.12f);
+                continue;
+            }
+            if(particle->kind() == 8264u)
+            {
+                drawSilence(particle, center, authoredScale, particle->mapId());
+                if(particle->nodeState() == ENodeState::eSelect)
+                    drawSprite(center, qMax(0.3f, authoredScale * 0.35f), 1.0f, 0.0f,
+                               QVector4D(0.10f, 0.90f, 1.0f, 0.72f), nullptr,
+                               QVector4D(0.0f, 0.0f, 1.0f, 1.0f), false, true, 0.12f);
+                continue;
+            }
+            if(particle->kind() == 8265u)
+            {
+                drawFeeblemind(particle, center, authoredScale, particle->mapId());
+                if(particle->nodeState() == ENodeState::eSelect)
+                    drawSprite(center, qMax(0.3f, authoredScale * 0.35f), 1.0f, 0.0f,
+                               QVector4D(0.10f, 0.90f, 1.0f, 0.72f), nullptr,
+                               QVector4D(0.0f, 0.0f, 1.0f, 1.0f), false, true, 0.12f);
+                continue;
+            }
+            if(particle->kind() == 8266u || particle->kind() == 8267u)
+            {
+                drawFeetCloud(particle, center, authoredScale,
+                              particle->kind() == 8267u, particle->mapId());
                 if(particle->nodeState() == ENodeState::eSelect)
                     drawSprite(center, qMax(0.3f, authoredScale * 0.35f), 1.0f, 0.0f,
                                QVector4D(0.10f, 0.90f, 1.0f, 0.72f), nullptr,
@@ -5698,6 +5785,10 @@ bool CView::unloadMobDocument(CMob* mob, bool promptForSave)
     m_starFlashEmitters.clear();
     m_sparksEmitters.clear();
     m_visionStarEmitters.clear();
+    m_regenerationEmitters.clear();
+    m_silenceEmitters.clear();
+    m_feeblemindEmitters.clear();
+    m_feetCloudEmitters.clear();
     m_fireArrowEmitters.clear();
     m_acidRayEmitters.clear();
     m_blueGasEmitters.clear();
@@ -5917,6 +6008,10 @@ void CView::unloadMob(QString mobName)
     m_starFlashEmitters.clear();
     m_sparksEmitters.clear();
     m_visionStarEmitters.clear();
+    m_regenerationEmitters.clear();
+    m_silenceEmitters.clear();
+    m_feeblemindEmitters.clear();
+    m_feetCloudEmitters.clear();
     m_fireArrowEmitters.clear();
     m_acidRayEmitters.clear();
     m_blueGasEmitters.clear();
