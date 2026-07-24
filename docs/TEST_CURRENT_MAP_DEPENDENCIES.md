@@ -47,6 +47,13 @@ Approved executable fingerprints are recorded in
 profiles. A matching hash is necessary but not sufficient: guarded code bytes
 must also match at runtime.
 
+The canonical built-in executable allowlist lives in
+`source/runtime/runtime_variant_registry.h`. Both the editor's profile
+evaluation and the injected bridge compile from that same registry; neither
+side maintains a private duplicate hash list. The registry remains built-in
+and exact-hash. User-managed experimental variants require a future guarded
+analysis/approval workflow and cannot currently be enabled by editing settings.
+
 ## JMV gameplay components versus bridge dependencies
 
 Starter `addon.dll`, `SpellAddonX.asi`, the JMV `addon.dll`, Lua files, and mod

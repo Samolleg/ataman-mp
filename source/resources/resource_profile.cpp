@@ -1,4 +1,5 @@
 #include "resource_profile.h"
+#include "../runtime/runtime_variant_registry.h"
 
 #include <QCoreApplication>
 #include <QCryptographicHash>
@@ -53,6 +54,18 @@ SRuntimeComponent runtimeComponent(const QString& id, const QString& path,
     value.acceptedSha256 = acceptedSha256;
     value.enforceHash = enforceHash;
     return value;
+}
+
+QStringList registeredRuntimeHashes(ei::runtime::ERuntimeProfile profile)
+{
+    QStringList hashes;
+    for(std::size_t index = 0; index < ei::runtime::runtimeVariantCount(); ++index)
+    {
+        const ei::runtime::SRuntimeVariant& variant = ei::runtime::kRuntimeVariants[index];
+        if(variant.profile == profile)
+            hashes.append(QString::fromLatin1(variant.sha256));
+    }
+    return hashes;
 }
 
 QString sha256File(const QString& path)
@@ -231,7 +244,7 @@ QVector<SResourceProfile> builtInResourceProfiles()
         jmv.providers.insert(role, {"jmv.v1", 1});
     jmv.runtimeComponents
         << runtimeComponent("starter-engine", "{gameRoot}/Starter/Engine/game.exe",
-                            {"BE0FC330035E03983CCE590038CC7F881F1F5D1BCF082717F31776DD4DEE94E2"});
+                            registeredRuntimeHashes(ei::runtime::ERuntimeProfile::Jmv));
     jmv.capabilities.insert("mob.losslessEditing", capability("mob.losslessEditing", EProfileCapabilityStatus::Unsupported,
         "Copy-only hardening is active until UI edits are migrated to provenance transactions."));
     jmv.capabilities.insert("mob.perspectiveDiff", capability("mob.perspectiveDiff", EProfileCapabilityStatus::Experimental,
@@ -259,9 +272,9 @@ QVector<SResourceProfile> builtInResourceProfiles()
                                QString("equipmentLayout"), QString("unitAnimation"),
                                QString("semanticValidation")})
         base.providers.insert(role, {"base.standard.v1", 1});
-    base.runtimeComponents << runtimeComponent("base-game", "{gameRoot}/game.exe",
-        {"B871D70D3876B2A5634F0920C92118BC49058B50C7D8CBE68376349F51C2E570",
-         "8ED3F9A500D84D822BD311B74B1B49D5CD16DD12D3502C27D7667957311036C1"});
+    base.runtimeComponents << runtimeComponent(
+        "base-game", "{gameRoot}/game.exe",
+        registeredRuntimeHashes(ei::runtime::ERuntimeProfile::Base));
     base.capabilities.insert("mob.losslessEditing", capability("mob.losslessEditing", EProfileCapabilityStatus::Unsupported,
         "Copy-only hardening is active until UI edits are migrated to provenance transactions."));
     base.capabilities.insert("mob.perspectiveDiff", capability("mob.perspectiveDiff", EProfileCapabilityStatus::Experimental,

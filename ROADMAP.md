@@ -17,6 +17,13 @@ another editor architecture pass.
 
 ## Compatibility and profile support
 
+- [ ] Add an advanced, explicitly experimental runtime-variant management UI.
+  It may let a user fingerprint a patched `game.exe`, compare its changed
+  sections/ranges with a known layout, and locally approve the hash only after
+  every required hook, caller, global, and PE-layout guard passes. A bare
+  user-entered hash is never sufficient, locally working variants are not
+  automatically promoted to supported, and this UI is not part of the current
+  `0.3.0` release scope.
 - [ ] **Post-1.0:** define an optional runtime-plugin contract for other mods
   only when their authors request direct-launch support.
   - Core editing, validation, collections, and saving never depend on a game
