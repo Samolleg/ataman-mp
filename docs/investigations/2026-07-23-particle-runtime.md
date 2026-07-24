@@ -1354,3 +1354,36 @@ The active JMV `stun.mmp` is a 1024-square, 11-mip DXT3 atlas with payload
 SHA-256 `2A2084F1DC9A0A2F1946A36F3D7C54D510E3A51BD39B2351EF3354AF83E51170`.
 The separately fingerprinted Base fallback is 256-square DXT3. These confirmed
 rules replace neither Antimagic nor any generic marker preview.
+
+## Ordered catalog reconstruction: Blood2..4 and A4 blood variants
+
+Blood2, Blood3, and Blood4 (types 8241..8243 / `0x2031..0x2033`) select the
+same factory and callback triplet as Blood1. The only factory specialization is
+the fixed RainSnow atlas phase: Blood1 uses 12, while Blood2, Blood3, and Blood4
+use 13, 14, and 15 respectively. They retain the confirmed ten creation
+attempts times the synthetic carrier-derived count, six-quant life, scale and
+velocity damping, downward acceleration, alpha table, finite six-update source,
+ordinary alpha blending, and capacity 300. A bare catalog record still lacks
+the carrier bound used by the native spell path, so authored scale remains the
+explicit synthetic bound for all four controls.
+
+A4bloodred, A4bloodgreen, A4bloodblue, and A4bloodblack (types 8244..8247 /
+`0x2034..0x2037`) instead select factory range `0x00486E7F..0x004870D1`,
+callbacks `0x0048F3B0`, `0x0048F670`, and `0x0048F6F0`, the `RainSnow` atlas,
+additive blending, phase 12, 45 creation attempts, capacity 300, six-quant
+nominal life field, and a single generation quant. The factory creates four through eight
+local radial sources. On their first update, each receives radius `.1..0.3` and
+angle `0..6` radians; the next local update clears generation. Births choose a
+source, begin at the emitter origin, use scale `.1..0.2`, and receive horizontal
+velocity along that source line with signed radial magnitude between minus and
+plus half its radius. Vertical acceleration is `-.18..-.06`; downward terminal
+velocity is `-.6..-.2`. Updates add velocity, retain particle scale, and clamp
+vertical velocity to that terminal value; the update callback does not consume
+the nominal life field and particles retire only after falling below world Z zero.
+
+No A4 callback or factory branch inspects which of the four named A4 type IDs
+was selected, and the particle starts white. The red/green/blue/black distinction
+therefore comes from an external gameplay owner setting particle color, not
+from standalone `PARTICL_TYPE` data. The editor's bare catalog controls correctly
+remain the same white additive burst; hardcoding four colors from their symbolic
+names would contradict the standalone native path.

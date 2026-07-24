@@ -524,11 +524,13 @@ class Blood1Emitter
 public:
     static constexpr int kPreviewCycleTicks = 32;
 
-    void advanceTo(qint64 logicalTick, quint32 seed, const QVector3D& origin, float bound)
+    void advanceTo(qint64 logicalTick, quint32 seed, const QVector3D& origin, float bound,
+                   int frame = 12)
     {
         const int cycleTick = int(logicalTick % kPreviewCycleTicks);
-        if(!m_initialized || seed != m_seed || cycleTick < m_cycleTick)
-            reset(seed, origin, bound);
+        frame = qBound(12, frame, 15);
+        if(!m_initialized || seed != m_seed || cycleTick < m_cycleTick || frame != m_frame)
+            reset(seed, origin, bound, frame);
         m_origin = origin;
         m_bound = qMax(0.001f, bound);
         while(m_cycleTick < cycleTick) { advanceOne(); ++m_cycleTick; }
@@ -548,7 +550,7 @@ public:
             sample.position = p.position;
             sample.scale = billboardDiameter(p.scale);
             sample.alpha = alpha[size_t(qBound(0, p.lifetime, 6))];
-            sample.frame = 12;
+            sample.frame = m_frame;
             result.append(sample);
         }
         return result;
@@ -559,12 +561,13 @@ public:
 private:
     float randomRange(float low, float high) { return low + (high - low) * m_rng.unit(); }
 
-    void reset(quint32 seed, const QVector3D& origin, float bound)
+    void reset(quint32 seed, const QVector3D& origin, float bound, int frame)
     {
         m_seed = seed;
         m_rng.reset(seed ^ 0x424C4431u);
         m_origin = origin;
         m_bound = qMax(0.001f, bound);
+        m_frame = frame;
         m_sourceAge = m_cycleTick = 0;
         m_particles.clear();
         m_initialized = true;
@@ -614,6 +617,141 @@ private:
     float m_bound{1.0f};
     quint32 m_seed{0};
     int m_sourceAge{0}, m_cycleTick{0};
+    int m_frame{12};
+    bool m_initialized{false};
+};
+
+struct A4BloodSource
+{
+    float radius{0.1f};
+    float angle{0.0f};
+    int age{0};
+};
+
+struct A4BloodParticle
+{
+    QVector3D position;
+    QVector3D velocity;
+    float scale{0.1f};
+    float verticalAcceleration{-0.1f};
+    float terminalVelocity{-0.4f};
+};
+
+class A4BloodEmitter
+{
+public:
+    static constexpr int kPreviewCycleTicks = 32;
+
+    void advanceTo(qint64 logicalTick, quint32 seed, const QVector3D& origin)
+    {
+        const int cycleTick = int(logicalTick % kPreviewCycleTicks);
+        if(!m_initialized || seed != m_seed || cycleTick < m_cycleTick)
+            reset(seed, origin);
+        m_origin = origin;
+        while(m_cycleTick < cycleTick)
+        {
+            advanceOne();
+            ++m_cycleTick;
+        }
+    }
+
+    QVector<EffectRenderSample> samples() const
+    {
+        QVector<EffectRenderSample> result;
+        result.reserve(m_particles.size());
+        for(const A4BloodParticle& particle : m_particles)
+        {
+            EffectRenderSample sample;
+            sample.position = particle.position;
+            sample.scale = billboardDiameter(particle.scale);
+            sample.alpha = 1.0f;
+            sample.frame = 12;
+            result.append(sample);
+        }
+        return result;
+    }
+
+    int activeCount() const { return m_particles.size(); }
+    int sourceCount() const { return m_sources.size(); }
+
+private:
+    float randomRange(float low, float high)
+    {
+        return low + (high - low) * m_rng.unit();
+    }
+
+    void reset(quint32 seed, const QVector3D& origin)
+    {
+        m_seed = seed;
+        m_rng.reset(seed ^ 0x4134424Cu);
+        m_origin = origin;
+        m_sources.clear();
+        m_particles.clear();
+        const int count = 4 + int(m_rng.next() % 5u);
+        m_sources.resize(count);
+        m_generating = true;
+        m_cycleTick = 0;
+        m_initialized = true;
+    }
+
+    void updateSources()
+    {
+        for(A4BloodSource& source : m_sources)
+        {
+            if(source.age == 0)
+            {
+                source.radius = randomRange(0.1f, 0.3f);
+                source.angle = randomRange(0.0f, 6.0f);
+            }
+            else
+                m_generating = false;
+            ++source.age;
+        }
+    }
+
+    void spawn()
+    {
+        const A4BloodSource& source =
+            m_sources[int(m_rng.next() % quint32(m_sources.size()))];
+        const float radial = randomRange(-0.5f * source.radius,
+                                          0.5f * source.radius);
+        A4BloodParticle particle;
+        particle.position = m_origin;
+        particle.scale = randomRange(0.1f, 0.2f);
+        particle.velocity = QVector3D(qSin(source.angle) * radial,
+                                      qCos(source.angle) * radial, 0.0f);
+        particle.verticalAcceleration = randomRange(-0.18f, -0.06f);
+        particle.terminalVelocity = randomRange(-0.6f, -0.2f);
+        m_particles.append(particle);
+    }
+
+    void advanceOne()
+    {
+        updateSources();
+        for(int i = m_particles.size() - 1; i >= 0; --i)
+        {
+            A4BloodParticle& particle = m_particles[i];
+            if(particle.position.z() < 0.0f)
+            {
+                m_particles.removeAt(i);
+                continue;
+            }
+            particle.position += particle.velocity;
+            particle.velocity.setZ(qMax(particle.terminalVelocity,
+                particle.velocity.z() + particle.verticalAcceleration));
+        }
+        if(m_generating)
+            for(int attempt = 0; attempt < 45 && m_particles.size() < 300; ++attempt)
+                spawn();
+    }
+
+    Isaac32 m_rng;
+    QVector<A4BloodSource> m_sources;
+    QVector<A4BloodParticle> m_particles;
+    QVector3D m_origin;
+    quint32 m_seed{0};
+    int m_cycleTick{0};
+    bool m_generating{true};
     bool m_initialized{false};
 };
 

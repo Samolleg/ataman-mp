@@ -2863,15 +2863,27 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
                        changeHeroTexture == nullptr, 0.18f);
     };
 
-    const auto drawBlood1 = [&](const CNode* owner, const QVector3D& origin,
-                                float syntheticCarrierBound, uint seed)
+    const auto drawBlood = [&](const CNode* owner, const QVector3D& origin,
+                               float syntheticCarrierBound, int frame, uint seed)
     {
         ei::particle::Blood1Emitter& emitter = m_blood1Emitters[owner];
-        emitter.advanceTo(logicalTick, seed, origin, syntheticCarrierBound);
+        emitter.advanceTo(logicalTick, seed, origin, syntheticCarrierBound, frame);
         for(const ei::particle::EffectRenderSample& sample : emitter.samples())
             drawSprite(sample.position, sample.scale, 1.0f, 0.0f,
                        QVector4D(1.0f, 1.0f, 1.0f, sample.alpha),
                        rainSnowTexture, ei::particle::atlasUv(sample.frame), false,
+                       rainSnowTexture == nullptr, 0.18f);
+    };
+
+    const auto drawA4Blood = [&](const CNode* owner, const QVector3D& origin,
+                                 uint seed)
+    {
+        ei::particle::A4BloodEmitter& emitter = m_a4BloodEmitters[owner];
+        emitter.advanceTo(logicalTick, seed, origin);
+        for(const ei::particle::EffectRenderSample& sample : emitter.samples())
+            drawSprite(sample.position, sample.scale, 1.0f, 0.0f,
+                       QVector4D(1.0f, 1.0f, 1.0f, sample.alpha),
+                       rainSnowTexture, ei::particle::atlasUv(sample.frame), true,
                        rainSnowTexture == nullptr, 0.18f);
     };
 
@@ -3088,7 +3100,26 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
             }
             if(particle->kind() == 8207u)
             {
-                drawBlood1(particle, center, authoredScale, particle->mapId());
+                drawBlood(particle, center, authoredScale, 12, particle->mapId());
+                if(particle->nodeState() == ENodeState::eSelect)
+                    drawSprite(center, qMax(0.3f, authoredScale * 0.35f), 1.0f, 0.0f,
+                               QVector4D(0.10f, 0.90f, 1.0f, 0.72f), nullptr,
+                               QVector4D(0.0f, 0.0f, 1.0f, 1.0f), false, true, 0.12f);
+                continue;
+            }
+            if(particle->kind() >= 8241u && particle->kind() <= 8243u)
+            {
+                drawBlood(particle, center, authoredScale,
+                          13 + int(particle->kind() - 8241u), particle->mapId());
+                if(particle->nodeState() == ENodeState::eSelect)
+                    drawSprite(center, qMax(0.3f, authoredScale * 0.35f), 1.0f, 0.0f,
+                               QVector4D(0.10f, 0.90f, 1.0f, 0.72f), nullptr,
+                               QVector4D(0.0f, 0.0f, 1.0f, 1.0f), false, true, 0.12f);
+                continue;
+            }
+            if(particle->kind() >= 8244u && particle->kind() <= 8247u)
+            {
+                drawA4Blood(particle, center, particle->mapId());
                 if(particle->nodeState() == ENodeState::eSelect)
                     drawSprite(center, qMax(0.3f, authoredScale * 0.35f), 1.0f, 0.0f,
                                QVector4D(0.10f, 0.90f, 1.0f, 0.72f), nullptr,
@@ -5420,6 +5451,7 @@ bool CView::unloadMobDocument(CMob* mob, bool promptForSave)
     m_tendriEmitters.clear();
     m_mushroomEmitters.clear();
     m_blood1Emitters.clear();
+    m_a4BloodEmitters.clear();
     m_fireArrowEmitters.clear();
     m_acidRayEmitters.clear();
     m_blueGasEmitters.clear();
@@ -5628,6 +5660,7 @@ void CView::unloadMob(QString mobName)
     m_tendriEmitters.clear();
     m_mushroomEmitters.clear();
     m_blood1Emitters.clear();
+    m_a4BloodEmitters.clear();
     m_fireArrowEmitters.clear();
     m_acidRayEmitters.clear();
     m_blueGasEmitters.clear();

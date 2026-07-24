@@ -91,6 +91,24 @@ class ParticleBinaryReportTests(unittest.TestCase):
                          "0x004889D0")
         self.assertEqual(fixture["ranges"]["blood1_create_callback"]["start_va"],
                          "0x0048EEA0")
+        self.assertEqual(fixture["ranges"]["a4blood_factory_branch"]["start_va"],
+                         "0x00486E7F")
+        self.assertEqual(fixture["ranges"]["a4blood_create_callback"]["start_va"],
+                         "0x0048F3B0")
+        self.assertEqual(fixture["ranges"]["a4blood_update_callback"]["start_va"],
+                         "0x0048F670")
+        self.assertEqual(
+            fixture["ranges"]["a4blood_local_source_callback"]["start_va"],
+            "0x0048F6F0",
+        )
+        self.assertAlmostEqual(
+            fixture["constants"]["a4blood_particle_scale_random_multiplier"]["value"],
+            0.1 / 4294967296.0,
+        )
+        self.assertAlmostEqual(
+            fixture["constants"]["a4blood_source_radius_random_multiplier"]["value"],
+            0.2 / 4294967296.0,
+        )
         self.assertEqual(fixture["ranges"]["firewall_create_callback"]["start_va"],
                          "0x0048ED60")
         self.assertEqual(fixture["ranges"]["firearrow_create_callback"]["start_va"],

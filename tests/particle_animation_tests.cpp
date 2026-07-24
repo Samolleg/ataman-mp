@@ -21,6 +21,8 @@ private slots:
     void bansheeCastingUsesFiniteElevatedRing();
     void mushroomUsesFiniteRisingCloud();
     void blood1UsesFiniteSyntheticCarrierBurst();
+    void bloodVariantsUseDedicatedAtlasPhases();
+    void a4BloodUsesOneShotRadialGroundBurst();
     void firewallUsesTendriFirePhaseRange();
     void fireArrowUsesActivatedZeroSpeedControl();
     void acidRayUsesStationaryWidthAndSizeTable();
@@ -300,6 +302,50 @@ void ParticleAnimationTests::blood1UsesFiniteSyntheticCarrierBurst()
     QCOMPARE(emitter.activeCount(), 0);
     emitter.advanceTo(33, 8207u, QVector3D(), 1.0f);
     QVERIFY(emitter.activeCount() > 0);
+}
+
+void ParticleAnimationTests::bloodVariantsUseDedicatedAtlasPhases()
+{
+    for(int frame = 12; frame <= 15; ++frame)
+    {
+        ei::particle::Blood1Emitter emitter;
+        const uint kind = frame == 12 ? 8207u : 8240u + uint(frame - 12);
+        emitter.advanceTo(4, kind, QVector3D(), 1.0f, frame);
+        const auto samples = emitter.samples();
+        QVERIFY(!samples.isEmpty());
+        for(const auto& sample : samples)
+            QCOMPARE(sample.frame, frame);
+    }
+}
+
+void ParticleAnimationTests::a4BloodUsesOneShotRadialGroundBurst()
+{
+    ei::particle::A4BloodEmitter first;
+    ei::particle::A4BloodEmitter second;
+    const QVector3D origin(1.0f, -2.0f, 0.0f);
+    first.advanceTo(0, 8244u, origin);
+    second.advanceTo(0, 8244u, origin);
+    first.advanceTo(1, 8244u, origin);
+    second.advanceTo(1, 8244u, origin);
+    QCOMPARE(first.sourceCount(), second.sourceCount());
+    QVERIFY(first.sourceCount() >= 4 && first.sourceCount() <= 8);
+    const auto a = first.samples();
+    const auto b = second.samples();
+    QCOMPARE(a.size(), 45);
+    QCOMPARE(a.size(), b.size());
+    for(int i = 0; i < a.size(); ++i)
+    {
+        QCOMPARE(a[i].position, origin);
+        QCOMPARE(a[i].position, b[i].position);
+        QCOMPARE(a[i].scale, b[i].scale);
+        QCOMPARE(a[i].frame, 12);
+        QCOMPARE(a[i].alpha, 1.0f);
+        QVERIFY(a[i].scale >= 0.2f && a[i].scale <= 0.4f);
+    }
+    first.advanceTo(4, 8244u, origin);
+    QCOMPARE(first.activeCount(), 0);
+    first.advanceTo(33, 8244u, origin);
+    QCOMPARE(first.activeCount(), 45);
 }
 
 void ParticleAnimationTests::firewallUsesTendriFirePhaseRange()

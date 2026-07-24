@@ -87,6 +87,8 @@ covering the selected JMV corpus.
 | 8217 / `0x2019` | Teleport | Dedicated finite signed radial column with native radial distribution, dual phase bands, vertical/alpha evolution, population limits and `Teleport` atlas using ordinary alpha blending. The editor repeats the completed one-shot for catalog inspection. | Capture a negative authored-scale game control; both signed callback paths are implemented from binary evidence. |
 | 8218 / `0x201A` | Antimagic | Dedicated short-lived rotating carrier shell with native 24-attempt cadence, four-quant life, six-entry scale table, rare size class, `AntiMagic` atlas and additive blending. The catalog uses authored scale as an explicit synthetic carrier bound. | Capture an attached carrier with a native bounding volume; the stationary synthetic-bound control is closed. |
 | 8219–8230 / `0x201B`–`0x2026` | Modifier1–Modifier12 | Dedicated finite carrier-source family with subtype phases/axes, signed contraction or expansion, anchor and trail populations, exact alpha/scale evolution, `Stun` atlas and additive blending. The catalog uses authored scale and identity orientation as an explicit synthetic carrier. | Capture representative attached carriers to validate their actual bounds and direction; the complete identity-carrier controls are implemented. |
+| 8241–8243 / `0x2031`–`0x2033` | Blood2–Blood4 | Shared native Blood burst with subtype-specific RainSnow phases 13–15, finite source, motion/scale damping, gravity, alpha table and ordinary blending. The catalog uses authored scale as an explicit synthetic carrier bound. | Capture attached carriers with different bounds; the standalone phase-specialized controls are closed. |
+| 8244–8247 / `0x2034`–`0x2037` | A4bloodred/green/blue/black | Dedicated one-quant multi-source radial splatter with exact random ranges, gravity/terminal velocity, ground-zero retirement, phase-12 RainSnow atlas and additive blending. Bare records correctly remain the same white burst because color is supplied externally by gameplay owners. | Capture an owner-colored gameplay control for each external tint; the standalone factory path is closed. |
 
 ## Preview-only families
 
@@ -115,7 +117,6 @@ still require both native reverse engineering and a dedicated renderer:
 
 | IDs | Names |
 |---|---|
-| 8241–8247 | Blood2, Blood3, Blood4, A4bloodred, A4bloodgreen, A4bloodblue, A4bloodblack |
 | 8248–8252 | Zoneexit, Path, Pathdestination, Pathfailed, Moshka |
 | 8255–8256 | Cylinder1, Cylinder2 |
 | 8260–8262, 8268 | Visionstar1 through Visionstar4 |
