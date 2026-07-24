@@ -14,6 +14,28 @@ SPEC.loader.exec_module(MODULE)
 
 
 class ParticleCatalogCollectionTests(unittest.TestCase):
+    @staticmethod
+    def runtime_lookup(archive, requested_name):
+        _, count, table_offset, names_size = struct.unpack_from("<4I", archive)
+        entry_size = struct.calcsize("<iIIIHI")
+        names = archive[
+            table_offset + count * entry_size:
+            table_offset + count * entry_size + names_size
+        ]
+        index = MODULE.ei_string_hash(requested_name, count)
+        visited = set()
+        while index != -1:
+            if index in visited or not 0 <= index < count:
+                raise AssertionError("invalid RES hash chain")
+            visited.add(index)
+            row = struct.unpack_from("<iIIIHI", archive, table_offset + index * entry_size)
+            next_index, size, offset, _, name_length, name_offset = row
+            name = names[name_offset:name_offset + name_length].decode("cp1251")
+            if name.casefold() == requested_name.casefold():
+                return archive[offset:offset + size]
+            index = next_index
+        return None
+
     def test_flat_sector_has_expected_shape(self):
         sector = MODULE.flat_sector()
         self.assertEqual(struct.unpack_from("<IB", sector), (MODULE.SEC_SIGNATURE, 0))
@@ -33,10 +55,14 @@ class ParticleCatalogCollectionTests(unittest.TestCase):
         archive = MODULE.build_archive(archive_members)
         members = MODULE.read_members(archive)
         self.assertEqual(
-            [member["name"] for member in members],
-            [name for name, _ in archive_members],
+            {member["name"] for member in members},
+            {name for name, _ in archive_members},
         )
-        self.assertEqual(members[1]["payload"], MODULE.flat_sector())
+        for name, payload in archive_members:
+            self.assertEqual(self.runtime_lookup(archive, name.upper()), payload)
+        self.assertEqual(
+            self.runtime_lookup(archive, "Zone1000000.SEC"), MODULE.flat_sector()
+        )
 
     def test_collection_uses_portable_relative_references(self):
         text = MODULE.collection_text(
