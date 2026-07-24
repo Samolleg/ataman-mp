@@ -50,7 +50,8 @@ class ParticleCatalogCollectionTests(unittest.TestCase):
         archive_members = [("zone1.mp", MODULE.synthetic_zone1_mp())]
         archive_members.extend(
             (f"zone1{x:03d}{y:03d}.sec", MODULE.flat_sector())
-            for x in range(3) for y in range(3)
+            for x in range(MODULE.SECTOR_COUNT_X)
+            for y in range(MODULE.SECTOR_COUNT_Y)
         )
         archive = MODULE.build_archive(archive_members)
         members = MODULE.read_members(archive)
@@ -66,7 +67,7 @@ class ParticleCatalogCollectionTests(unittest.TestCase):
 
     def test_collection_uses_portable_relative_references(self):
         text = MODULE.collection_text(
-            "../test-scenes/particle-catalog-grid/particle-zone1-flat-3x3.mpr",
+            "../test-scenes/particle-catalog-grid/particle-zone1-flat-7x5.mpr",
             "../test-scenes/particle-catalog-grid/all-particles-grid.mob",
         )
         self.assertIn('map="gz1g"', text)
@@ -78,11 +79,20 @@ class ParticleCatalogCollectionTests(unittest.TestCase):
         mp = MODULE.synthetic_zone1_mp()
         header = struct.unpack_from("<If6IHI", mp)
         self.assertEqual(header[0], MODULE.MP_SIGNATURE)
-        self.assertEqual(header[2:4], (3, 3))
+        self.assertEqual(
+            header[2:4], (MODULE.SECTOR_COUNT_X, MODULE.SECTOR_COUNT_Y)
+        )
         self.assertEqual(header[4:8], (8, 512, 512, 64))
         tile_types = struct.unpack_from("<512i", mp, 38 + 44)
         self.assertEqual(tile_types[1], 1)
         self.assertEqual(sum(value != 0 for value in tile_types), 1)
+
+    def test_borrowed_zone1_bootstrap_entrance_is_inside_terrain(self):
+        left, top, right, bottom = MODULE.ZONE1_BOOTSTRAP_DEPLOY
+        self.assertGreaterEqual(left, 0)
+        self.assertGreaterEqual(top, 0)
+        self.assertLessEqual(right, MODULE.SECTOR_COUNT_X * MODULE.SECTOR_WORLD_SIZE)
+        self.assertLessEqual(bottom, MODULE.SECTOR_COUNT_Y * MODULE.SECTOR_WORLD_SIZE)
 
 
 if __name__ == "__main__":

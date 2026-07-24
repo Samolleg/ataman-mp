@@ -825,11 +825,11 @@ The generated control at
 - 83 unique particle records and no other objects;
 - particle IDs 900000 through 900082;
 - type IDs 8192 through 8274 in row-major order;
-- a 10-by-9 grid spanning `(12, 16, 0)` through `(84, 80, 0)`, centered at
-  `(48, 48)`;
+- a 10-by-9 grid spanning `(148, 72, 0)` through `(220, 136, 0)`, centered at
+  `(184, 104)`;
 - center spacing of 8 world units, or 4 terrain tiles, and authored scale 1;
 - SHA-256
-  `3BA88B8FD932D4B46DC632233541FF63B218FBDC6C4996BFA614877527379638`.
+  `24CA3352EBCC174EDADB9A35A180B9DEA3F2A57B70BD9BBE5F5BFA014A0F113B`.
 
 The independent particle MOB reporter finds exactly 83 unique IDs and types.
 EI Mapper strict validation covers all 12,094 bytes, finds 83 objects, and
@@ -845,17 +845,17 @@ real owner parameters before their visual behavior can be called reconstructed.
 ### Portable flat-ground collection
 
 `scripts/build_particle_catalog_collection.py` packages the catalog with a
-fully synthetic 3-by-3-sector MPR and a directly discoverable collection file.
-The MPR has the internal member `zone1.mp` plus the nine sector members for
-X/Y indices 000 through 002, declares the stock 512-slot terrain atlas, has
-constant height and normals, and assigns all 2,304 terrain tile words to atlas
+fully synthetic 7-by-5-sector MPR and a directly discoverable collection file.
+The MPR has the internal member `zone1.mp` plus 35 sector members for X indices
+000 through 006 and Y indices 000 through 004, declares the stock 512-slot
+terrain atlas, has constant height and normals, and assigns all 8,960 terrain tile words to atlas
 slot 1 with rotation 0. It embeds no proprietary
 imagery; at render time the configured Jamais Vu Zone 1 atlas supplies the
 uniform common-ground tile.
 
-The canonical generated MPR is 85,611 bytes with SHA-256
-`6BD452E1328BDD753D0779D1AF69F300EE50C76954F8914526F46E99E696B489`.
-Independent parsing confirms the map member plus nine flat sectors, 512 atlas
+The canonical generated MPR is 326,605 bytes with SHA-256
+`2D4A14374676364FC7E36DE4C93B0B66F7161A9DC3A67B2134E05F116A6B7192`.
+Independent parsing confirms the map member plus 35 flat sectors, 512 atlas
 slots, and the uniform slot-1 tile assignment. EI Mapper parses all bytes and
 performs a byte-identical unchanged round trip. Two independent generations
 produce identical collection, MPR, MOB, and manifest bytes. The collection

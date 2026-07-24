@@ -191,8 +191,10 @@ whose real owner supplies additional parameters.
 
 The portable one-click control is
 `artifacts/particle-catalog-collection/collections/particle-catalog.collection`.
-It loads the same 83-type MOB over a deterministic, flat, 3-by-3-sector synthetic
+It loads the same 83-type MOB over a deterministic, flat, 7-by-5-sector synthetic
 MPR. The MPR uses the `zone1` internal namespace and atlas slot 1, so the active
 Jamais Vu Zone 1 atlas supplies the common-ground texture; no texture imagery is
-embedded in the fixture. The grid spans `(12, 16, 0)` through `(84, 80, 0)`,
-centering it at `(48, 48)` inside the 96-by-96-world-unit plane.
+embedded in the fixture. The grid spans `(148, 72, 0)` through `(220, 136, 0)`,
+centering it at `(184, 104)` inside the 224-by-160-world-unit plane. The plane
+contains the borrowed Zone 1 entrance 1 so native player initialization remains
+in bounds before optional Play from Here positioning.

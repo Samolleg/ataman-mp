@@ -18,12 +18,14 @@ RES_SIGNATURE = 0x019CE23C
 MP_SIGNATURE = 0xCE4AF672
 SEC_SIGNATURE = 0xCF4BF774
 REFERENCE_MOB_SIZE = 12_094
-REFERENCE_MOB_SHA256 = "3BA88B8FD932D4B46DC632233541FF63B218FBDC6C4996BFA614877527379638"
-SECTOR_COUNT_X = 3
-SECTOR_COUNT_Y = 3
+REFERENCE_MOB_SHA256 = "24CA3352EBCC174EDADB9A35A180B9DEA3F2A57B70BD9BBE5F5BFA014A0F113B"
+SECTOR_COUNT_X = 7
+SECTOR_COUNT_Y = 5
 SECTOR_WORLD_SIZE = 32
 ZONE1_GROUND_PACKED_TILE = 1
 ZONE1_GROUND_ATLAS_SLOT = 1
+ZONE1_BOOTSTRAP_EXIT = 1
+ZONE1_BOOTSTRAP_DEPLOY = (184, 101, 190, 108)
 FLAT_NORMAL = (1000 << 22) | (1000 << 11) | 1000
 TEXTURE_COUNT = 8
 TEXTURE_SIZE = 512
@@ -189,7 +191,7 @@ def build(catalog_mob: Path, output_root: Path) -> dict[str, Any]:
     collection_directory = output_root / "collections"
     scene_directory.mkdir(parents=True, exist_ok=True)
     collection_directory.mkdir(parents=True, exist_ok=True)
-    mpr_path = scene_directory / "particle-zone1-flat-3x3.mpr"
+    mpr_path = scene_directory / "particle-zone1-flat-7x5.mpr"
     mob_path = scene_directory / "all-particles-grid.mob"
     manifest_path = scene_directory / "particle-catalog-collection.json"
     collection_path = collection_directory / "particle-catalog.collection"
@@ -197,7 +199,7 @@ def build(catalog_mob: Path, output_root: Path) -> dict[str, Any]:
     if catalog_mob.resolve() != mob_path.resolve():
         shutil.copyfile(catalog_mob, mob_path)
     collection_path.write_text(collection_text(
-        "../test-scenes/particle-catalog-grid/particle-zone1-flat-3x3.mpr",
+        "../test-scenes/particle-catalog-grid/particle-zone1-flat-7x5.mpr",
         "../test-scenes/particle-catalog-grid/all-particles-grid.mob",
     ), encoding="utf-8", newline="\n")
 
@@ -224,10 +226,16 @@ def build(catalog_mob: Path, output_root: Path) -> dict[str, Any]:
             "atlasSlot": ZONE1_GROUND_ATLAS_SLOT,
             "rotation": 0,
         },
+        "runtimeBootstrap": {
+            "borrowedZone": "gz1g",
+            "exitId": ZONE1_BOOTSTRAP_EXIT,
+            "deployRectangle": list(ZONE1_BOOTSTRAP_DEPLOY),
+            "terrainContainsDeployRectangle": True,
+        },
         "outputs": {
             "collection": {"path": "collections/particle-catalog.collection"},
             "mpr": {
-                "path": "test-scenes/particle-catalog-grid/particle-zone1-flat-3x3.mpr",
+                "path": "test-scenes/particle-catalog-grid/particle-zone1-flat-7x5.mpr",
                 "size": len(mpr_bytes),
                 "sha256": sha256(mpr_bytes),
             },

@@ -13,8 +13,8 @@ param(
 
     [double]$SpacingWorldUnits = 8.0,
     [int]$Columns = 10,
-    [double]$OriginX = 12.0,
-    [double]$OriginY = 16.0,
+    [double]$OriginX = 148.0,
+    [double]$OriginY = 72.0,
     [double]$OriginZ = 0.0,
     [double]$Scale = 1.0
 )
