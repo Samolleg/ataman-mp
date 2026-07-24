@@ -976,8 +976,8 @@
              <item row="31" column="1"><widget class="QKeySequenceEdit" name="shortcutRotateTool"><property name="keySequence"><string>R</string></property></widget></item>
              <item row="32" column="0"><widget class="QLabel" name="labelScaleToolShortcut"><property name="text"><string>Scale selected objects</string></property></widget></item>
              <item row="32" column="1"><widget class="QKeySequenceEdit" name="shortcutScaleTool"><property name="keySequence"><string>T</string></property></widget></item>
-             <item row="33" column="0"><widget class="QLabel" name="labelTileBrushToolShortcut"><property name="text"><string>Terrain tile brush</string></property></widget></item>
-             <item row="33" column="1"><widget class="QKeySequenceEdit" name="shortcutTileBrushTool"><property name="keySequence"><string>B</string></property></widget></item>
+             <item row="33" column="0"><widget class="QLabel" name="labelTileBrushToolShortcut"><property name="text"><string>Landscape tools</string></property></widget></item>
+             <item row="33" column="1"><widget class="QKeySequenceEdit" name="shortcutTileBrushTool"><property name="keySequence"><string>L</string></property></widget></item>
              <item row="34" column="0">
               <widget class="QLabel" name="labelCameraSpeedWheelGesture">
                <property name="toolTip"><string>Modifier used with the mouse wheel over the viewport to change camera speed.</string></property>

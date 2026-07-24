@@ -32,6 +32,11 @@ dirty and untouched, then requires reopening the copy before runtime testing.
 This prevents the legacy rebuilding serializer or an unreviewed terrain edit
 from replacing an authored map.
 
+This historical boundary was closed by the subsequent direct-save increment
+documented in `MPR_DIRECT_SAVE_VALIDATION.md`. The baseline package itself is
+unchanged; newer builds may replace the open dirty MPR only through the fully
+validated canonical transaction described there.
+
 ## Deferred beyond this baseline
 
 - direct replacement/save-back of the currently open dirty MPR;

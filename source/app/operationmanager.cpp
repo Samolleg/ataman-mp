@@ -1032,7 +1032,7 @@ CSelect::CSelect(CView *pView):
     if(CScene::getInstance()->getMode()==eEditModeLogic)
         CStatusConnector::getInstance()->updateStatus("select.ico", "LMB-Select object, Shift+LMB-Add to select, MMB-camera rotation, G-Move, P-Add Patrol(trap zone), L-Add look(cast point), CTLR+Tab-change mode");
     else
-        CStatusConnector::getInstance()->updateStatus("select.ico", "LMB-Select object, Shift+LMB-Add to select, MMB-camera rotation, G-Move, T-Scale, R-Rotate, B-Landscape tile painting, CTRL+Tab-change mode");
+        CStatusConnector::getInstance()->updateStatus("select.ico", "LMB-Select object, Shift+LMB-Add to select, MMB-camera rotation, G-Move, T-Scale, R-Rotate, B-Landscape tile painting, L-Landscape Tools, CTRL+Tab-change mode");
     CButtonConnector::getInstance()->pressButton(EButtonOpSelect);
 }
 

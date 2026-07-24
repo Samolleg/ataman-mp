@@ -504,7 +504,7 @@ MainWindow::MainWindow(QWidget* parent) :
     m_ui->menuBar->insertMenu(m_ui->menuSettings->menuAction(), viewMenu);
     viewMenu->addAction(m_mapsDock->toggleViewAction());
     m_landscapeTools = new CLandscapeTools(this);
-    m_landscapeToolsDock = new QDockWidget(tr("Landscape Tools (Preview)"), this);
+    m_landscapeToolsDock = new QDockWidget(tr("Landscape Tools"), this);
     m_landscapeToolsDock->setObjectName("landscapeToolsDock");
     m_landscapeToolsDock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
     m_landscapeToolsDock->setFeatures(QDockWidget::DockWidgetClosable |
@@ -512,9 +512,12 @@ MainWindow::MainWindow(QWidget* parent) :
                                       QDockWidget::DockWidgetFloatable);
     m_landscapeToolsDock->setWidget(m_landscapeTools);
     addDockWidget(Qt::RightDockWidgetArea, m_landscapeToolsDock);
-    enableNativeFloatingControls(m_landscapeToolsDock);
     m_landscapeToolsDock->hide();
-    viewMenu->addAction(m_landscapeToolsDock->toggleViewAction());
+    m_landscapeToolsAction = viewMenu->addAction(tr("Landscape Tools"));
+    m_landscapeToolsAction->setCheckable(true);
+    m_landscapeToolsAction->setIcon(*ei::icon("landscape.ico"));
+    connect(m_landscapeToolsAction, &QAction::triggered,
+            this, &MainWindow::toggleLandscapeTools);
     QAction* tileGridAction = viewMenu->addAction(tr("Show Terrain Tile Grid"));
     tileGridAction->setCheckable(true);
     tileGridAction->setToolTip(tr("Draw the 2 x 2 terrain-tile boundaries over the landscape."));
@@ -794,6 +797,18 @@ MainWindow::MainWindow(QWidget* parent) :
     restoreState(uiSettings.value("ui/mainWindowState").toByteArray());
     m_ui->workspaceSplitter->restoreState(uiSettings.value("ui/workspaceSplitter").toByteArray());
     m_ui->outlinerSplitter->restoreState(uiSettings.value("ui/outlinerSplitter").toByteArray());
+    const int storedLandscapeArea = uiSettings.value(
+        "ui/landscapeDockArea", int(dockWidgetArea(m_landscapeToolsDock))).toInt();
+    if(storedLandscapeArea == int(Qt::LeftDockWidgetArea)
+       || storedLandscapeArea == int(Qt::RightDockWidgetArea))
+        m_landscapeDockArea = Qt::DockWidgetArea(storedLandscapeArea);
+    m_landscapeDockHeight = qBound(260,
+        uiSettings.value("ui/landscapeDockHeight", 420).toInt(), 900);
+    m_landscapeDockFloating = m_landscapeToolsDock->isFloating();
+    // Landscape editing is an explicit working mode, not session layout.
+    // Always start closed while preserving the user's last sculpt controls.
+    m_landscapeToolsDock->hide();
+    m_landscapeTools->setEditingEnabled(false, false);
     if(firstRunSetup)
     {
         // A new profile must start from the documented usable workspace even
@@ -949,8 +964,10 @@ MainWindow::MainWindow(QWidget* parent) :
     m_pView->attach(m_settings.get(), m_ui->tableWidget, m_undoStack, m_ui->progressBar, m_ui->mousePosText, m_ui->treeWidget, m_pTileForm.get());
     m_pView->attachLandscapeTools(m_landscapeTools);
     m_ui->actionMap_parameters->setText(tr("MPR Atlas Tiles..."));
-    m_ui->tileBrushButton->setText(tr("Paint"));
-    m_ui->tileBrushButton->setToolTip(tr("Landscape tile painting (B)"));
+    m_ui->tileBrushButton->setText(tr("Landscape Tools"));
+    m_ui->tileBrushButton->setIcon(*ei::icon("landscape.ico"));
+    m_ui->tileBrushButton->setIconSize(QSize(32, 32));
+    m_ui->tileBrushButton->setToolTip(tr("Landscape tools (L)"));
     connect(m_pView, &CView::mobStateChanged, this, [this]()
     {
         updateLoadedMapPanel();
@@ -1016,11 +1033,13 @@ MainWindow::MainWindow(QWidget* parent) :
                         m_ui->workspaceSplitter->saveState());
             setProperty("enduranceMenuVisible", menuBar()->isVisible());
             setProperty("enduranceStatusVisible", statusBar()->isVisible());
+            m_suppressLandscapeDockRestore = true;
             for(QDockWidget* dock : findChildren<QDockWidget*>())
             {
                 dock->setProperty("enduranceWasVisible", dock->isVisible());
                 dock->hide();
             }
+            m_suppressLandscapeDockRestore = false;
             for(QToolBar* toolbar : findChildren<QToolBar*>())
             {
                 toolbar->setProperty("enduranceWasVisible", toolbar->isVisible());
@@ -1116,16 +1135,78 @@ MainWindow::MainWindow(QWidget* parent) :
     QObject::connect(m_pView, SIGNAL(showOutlinerSignal(bool)), this, SLOT(showOutliner(bool)));
     connect(m_pView, &CView::showLandscapeToolsSignal, this, [this]()
     {
-        m_landscapeToolsDock->show();
-        m_landscapeToolsDock->raise();
+        showLandscapeTools();
     });
     connect(m_pView, &CView::hideLandscapeToolsSignal,
-            m_landscapeToolsDock, &QDockWidget::hide);
-    connect(m_landscapeToolsDock, &QDockWidget::visibilityChanged, this, [this](bool visible)
+            this, &MainWindow::hideLandscapeTools);
+    connect(m_landscapeToolsDock, &QDockWidget::topLevelChanged, this, [this](bool floating)
     {
+        if(m_restoringLandscapeDockLayout)
+            return;
+        m_landscapeDockFloating = floating;
+        if(!floating)
+        {
+            const Qt::DockWidgetArea area = dockWidgetArea(m_landscapeToolsDock);
+            if(area == Qt::LeftDockWidgetArea || area == Qt::RightDockWidgetArea)
+                m_landscapeDockArea = area;
+        }
+    });
+    connect(m_landscapeToolsDock, &QDockWidget::dockLocationChanged,
+            this, [this](Qt::DockWidgetArea area)
+    {
+        if(!m_restoringLandscapeDockLayout
+           && (area == Qt::LeftDockWidgetArea || area == Qt::RightDockWidgetArea))
+            m_landscapeDockArea = area;
+    });
+    const auto applyLandscapeVisibility = [this](bool visible)
+    {
+        if(m_landscapeToolsAction)
+        {
+            const QSignalBlocker blocker(m_landscapeToolsAction);
+            m_landscapeToolsAction->setChecked(visible);
+        }
+        if(QAction* operationAction = m_operationActions.value(EButtonOpTilebrush, nullptr))
+        {
+            const QSignalBlocker blocker(operationAction);
+            operationAction->setChecked(visible);
+        }
+        if(m_ui->tileBrushButton)
+        {
+            const QSignalBlocker blocker(m_ui->tileBrushButton);
+            m_ui->tileBrushButton->setChecked(visible);
+        }
         m_pView->setLandscapeEditingEnabled(visible);
         if(visible)
             m_landscapeToolsDock->raise();
+        else
+        {
+            if(!m_landscapeToolsDock->isFloating())
+                m_landscapeDockHeight = qBound(260, m_landscapeToolsDock->height(), 900);
+            if(!m_suppressLandscapeDockRestore)
+                restoreLayoutAfterLandscapeTools();
+        }
+    };
+    connect(m_landscapeToolsDock, &QDockWidget::visibilityChanged, this,
+            [this, applyLandscapeVisibility](bool visible)
+    {
+        const quint64 visibilityGeneration = ++m_landscapeVisibilityGeneration;
+        if(visible)
+        {
+            applyLandscapeVisibility(true);
+            return;
+        }
+        // QDockWidget emits a transient hidden state while changing between
+        // docked and floating windows. Deferring the complete hidden-state
+        // transition avoids both cancelling the active brush and re-entering
+        // Qt's dock layout engine during that native-window move.
+        QTimer::singleShot(0, this, [this, visibilityGeneration,
+                                    applyLandscapeVisibility]()
+        {
+            if(visibilityGeneration != m_landscapeVisibilityGeneration
+               || !m_landscapeToolsDock || m_landscapeToolsDock->isVisible())
+                return;
+            applyLandscapeVisibility(false);
+        });
     });
     connect(m_pView, &CView::selectionChanged,
             this, &MainWindow::updateUnitTexturePreview);
@@ -1194,6 +1275,17 @@ MainWindow::MainWindow(QWidget* parent) :
                 loadLastSession();
             });
         }
+    }
+    if(firstRunSetup)
+    {
+        // First-run setup can queue a dock-state restoration after the early
+        // hide. Landscape Tools is working-mode state, never startup state.
+        QTimer::singleShot(0, this, [this]()
+        {
+            hideLandscapeTools();
+            if(m_landscapeTools)
+                m_landscapeTools->setEditingEnabled(false, false);
+        });
     }
 //    if(m_pView->isRecentAvailable())
 //        m_ui->actionOpen_recent->setEnabled(true);
@@ -1610,6 +1702,15 @@ void MainWindow::runUndoToIndex(int targetIndex)
 
 bool MainWindow::eventFilter(QObject* watched, QEvent* event)
 {
+    if(m_pView && watched == m_pView && event->type() == QEvent::KeyPress)
+    {
+        QKeyEvent* key = static_cast<QKeyEvent*>(event);
+        if(key->key() == Qt::Key_Escape && key->modifiers() == Qt::NoModifier)
+        {
+            handleEscapeShortcut();
+            return true;
+        }
+    }
     if(m_loadedMapTree && watched == m_loadedMapTree->viewport())
     {
         if(event->type() == QEvent::MouseButtonPress)
@@ -1684,7 +1785,12 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event)
             {
                 const bool hit = m_pView->testSpawnMarkerAt(mouse->pos());
                 if(hit)
+                {
+                    m_pView->setLandscapeInteractionSuspended(true);
                     m_pView->clearObjectSelection();
+                }
+                else
+                    m_pView->setLandscapeInteractionSuspended(false);
                 m_customSpawnSelected = hit;
                 m_pView->setTestSpawnMarkerSelected(hit);
                 updateOperationAvailability();
@@ -1703,25 +1809,7 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event)
         {
             QKeyEvent* key = static_cast<QKeyEvent*>(event);
             if(key->key() == Qt::Key_Escape)
-            {
-                if(m_movingCustomSpawn)
-                {
-                    m_pickSpawnPending = false;
-                    m_movingCustomSpawn = false;
-                    m_customSpawnSelected = true;
-                    m_pView->unsetCursor();
-                    m_pView->setTestSpawnMarker(m_customSpawnPosition,
-                                                m_customSpawn.adjusted);
-                    m_pView->setTestSpawnMarkerSelected(true);
-                    updateCustomSpawnControls();
-                    updateEntranceOverlays();
-                    updateOperationAvailability();
-                    updateMapTestAction();
-                }
-                else
-                    m_playFromHereButton->setChecked(false);
                 return true;
-            }
         }
         if(event->type() == QEvent::MouseMove)
         {
@@ -1775,6 +1863,7 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event)
                 m_pView->unsetCursor();
                 m_pView->setTestSpawnMarker(resolved, plan.adjusted);
                 m_pView->setTestSpawnMarkerSelected(true);
+                m_pView->setLandscapeInteractionSuspended(false);
                 m_spawnPositionLabel->setText(tr("Custom: %1, %2, %3%4")
                     .arg(resolved.x(), 0, 'f', 2).arg(resolved.y(), 0, 'f', 2)
                     .arg(resolved.z(), 0, 'f', 2)
@@ -2108,6 +2197,7 @@ void MainWindow::setCustomSpawnPicking(bool enabled)
         m_customSpawnContextKey.clear();
         if(m_pView)
         {
+            m_pView->setLandscapeInteractionSuspended(false);
             m_pView->unsetCursor();
             m_pView->clearTestSpawnMarker();
         }
@@ -2127,7 +2217,7 @@ void MainWindow::setCustomSpawnPicking(bool enabled)
         statusBar()->showMessage(tr("Select a valid map.txt entrance before choosing a custom spawn."), 5000);
         return;
     }
-    m_pView->cancelPendingOperation();
+    m_pView->setLandscapeInteractionSuspended(true);
     m_pickSpawnPending = true;
     m_movingCustomSpawn = false;
     m_customSpawnSelected = false;
@@ -2187,6 +2277,15 @@ void MainWindow::moveCameraToActiveSpawn()
 
 void MainWindow::initShortcuts()
 {
+    if(COptString* landscapeShortcut = dynamic_cast<COptString*>(
+           m_settings->opt(eOptSetKeyBinding, "shortcutTileBrushTool")))
+    {
+        if(landscapeShortcut->value().compare(QStringLiteral("B"), Qt::CaseInsensitive) == 0)
+        {
+            landscapeShortcut->setValue(QStringLiteral("L"));
+            m_settings->persistOptions();
+        }
+    }
     const auto shortcut = [this](const char* name, const char* fallback)
     {
         COptString* option = dynamic_cast<COptString*>(m_settings->opt(eOptSetKeyBinding, name));
@@ -2224,16 +2323,22 @@ void MainWindow::initShortcuts()
         {EButtonOpMove, "shortcutMoveTool", "G", "Move selected objects"},
         {EButtonOpRotate, "shortcutRotateTool", "R", "Rotate selected objects"},
         {EButtonOpScale, "shortcutScaleTool", "T", "Scale selected objects"},
-        {EButtonOpTilebrush, "shortcutTileBrushTool", "B", "Terrain tile brush"}
+        {EButtonOpTilebrush, "shortcutTileBrushTool", "L", "Landscape Tools"}
     };
     for(const auto& operation : operations)
     {
         QAction* action = m_operationActions.value(operation.type, nullptr);
         if(!action)
             continue;
-        action->setShortcut(shortcut(operation.option, operation.fallback));
+        // Escape has stateful precedence (spawn anchor, Landscape Tools, then
+        // Select), so a dedicated application shortcut owns it below.
+        if(operation.type != EButtonOpSelect)
+            action->setShortcut(shortcut(operation.option, operation.fallback));
         action->setShortcutContext(Qt::ApplicationShortcut);
-        const QString tip = tr(operation.label) + " (" + action->shortcut().toString(QKeySequence::NativeText) + ")";
+        const QString shortcutText = operation.type == EButtonOpSelect
+            ? QKeySequence(Qt::Key_Escape).toString(QKeySequence::NativeText)
+            : action->shortcut().toString(QKeySequence::NativeText);
+        const QString tip = tr(operation.label) + " (" + shortcutText + ")";
         action->setToolTip(tip);
     }
     if(m_ui->selectButton) m_ui->selectButton->setToolTip(m_operationActions.value(EButtonOpSelect)->toolTip());
@@ -2241,6 +2346,11 @@ void MainWindow::initShortcuts()
     if(m_ui->rotateButton) m_ui->rotateButton->setToolTip(m_operationActions.value(EButtonOpRotate)->toolTip());
     if(m_ui->scaleButton) m_ui->scaleButton->setToolTip(m_operationActions.value(EButtonOpScale)->toolTip());
     if(m_ui->tileBrushButton) m_ui->tileBrushButton->setToolTip(m_operationActions.value(EButtonOpTilebrush)->toolTip());
+
+    QShortcut* escapeShortcut = new QShortcut(QKeySequence(Qt::Key_Escape), this);
+    escapeShortcut->setContext(Qt::ApplicationShortcut);
+    connect(escapeShortcut, &QShortcut::activated,
+            this, &MainWindow::handleEscapeShortcut);
 }
 
 void MainWindow::createViewportToolbars()
@@ -2293,7 +2403,7 @@ void MainWindow::createViewportToolbars()
         {EButtonOpMove, m_ui->moveButton, "Move"},
         {EButtonOpRotate, m_ui->rotateButton, "Rotate"},
         {EButtonOpScale, m_ui->scaleButton, "Scale"},
-        {EButtonOpTilebrush, m_ui->tileBrushButton, "Tile Brush"}
+        {EButtonOpTilebrush, m_ui->tileBrushButton, "Landscape Tools"}
     };
     QActionGroup* actionGroup = new QActionGroup(this);
     actionGroup->setExclusive(true);
@@ -2301,7 +2411,8 @@ void MainWindow::createViewportToolbars()
     {
         QAction* action = new QAction(tr(operation.text), this);
         action->setCheckable(true);
-        actionGroup->addAction(action);
+        if(operation.type != EButtonOpTilebrush)
+            actionGroup->addAction(action);
         addAction(action);
         m_operationActions.insert(operation.type, action);
         operation.button->setCheckable(true);
@@ -2315,14 +2426,11 @@ void MainWindow::createViewportToolbars()
                 return;
             if(operation.type == EButtonOpTilebrush)
             {
-                if(m_landscapeToolsDock->isVisible())
-                    m_landscapeToolsDock->hide();
-                else
+                if(!m_landscapeToolsDock->isVisible())
                 {
                     m_pView->prepareLandscapeTilePainting(false);
-                    m_landscapeToolsDock->show();
-                    m_landscapeToolsDock->raise();
                 }
+                toggleLandscapeTools();
                 m_pView->setFocus();
                 return;
             }
@@ -2330,7 +2438,7 @@ void MainWindow::createViewportToolbars()
                && m_customSpawn.valid && m_customSpawn.custom
                && m_customSpawnContextKey == currentMapContextKey())
             {
-                m_pView->cancelPendingOperation();
+                m_pView->setLandscapeInteractionSuspended(true);
                 m_pickSpawnPending = true;
                 m_movingCustomSpawn = true;
                 m_pView->setCursor(Qt::CrossCursor);
@@ -2341,6 +2449,7 @@ void MainWindow::createViewportToolbars()
                 updateMapTestAction();
                 return;
             }
+            m_pView->setLandscapeInteractionSuspended(false);
             if(operation.type == EButtonOpSelect)
             {
                 if(m_pickSpawnPending && m_playFromHereButton)
@@ -2571,12 +2680,6 @@ void MainWindow::launchCurrentMapTest()
     if(m_pView->prepareDocumentTransition())
         statusBar()->showMessage(tr("Pending object movement was cancelled before staging the test."), 4000);
     CLandscape* landscape = CLandscape::getInstance();
-    if(landscape->isDirty())
-    {
-        QMessageBox::warning(this, tr("JMV test launch"),
-            tr("Unsaved MPR edits cannot yet be staged losslessly. Save or revert the landscape first."));
-        return;
-    }
     progress->setLabelText(tr("Validating the active runtime profile..."));
     progress->setValue(1);
     QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
@@ -2685,10 +2788,13 @@ void MainWindow::launchCurrentMapTest()
     progress->setValue(4);
     QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
 
-    QFile mprFile(landscape->filePath().absoluteFilePath());
-    if(!mprFile.open(QIODevice::ReadOnly))
+    QByteArray mprData;
+    CValidationReport mprReport;
+    if(!m_pView->buildValidatedLandscapeCandidate(&mprData, &mprReport))
     {
-        QMessageBox::warning(this, tr("JMV test launch"), mprFile.errorString());
+        QMessageBox::warning(this, tr("JMV test launch"),
+            tr("The current MPR edits could not be staged safely:\n\n%1")
+                .arg(mprReport.toText()));
         return;
     }
     QByteArray mobData;
@@ -4125,7 +4231,8 @@ void MainWindow::connectUiButtons()
     CButtonConnector::getInstance()->addButton(EButtonOpMove, m_ui->moveButton);
     CButtonConnector::getInstance()->addButton(EButtonOpRotate, m_ui->rotateButton);
     CButtonConnector::getInstance()->addButton(EButtonOpScale, m_ui->scaleButton);
-    CButtonConnector::getInstance()->addButton(EButtonOpTilebrush, m_ui->tileBrushButton);
+    // Landscape Tools is a persistent dock/mode toggle, not an exclusive
+    // transform operation. Its checked state mirrors dock visibility.
     connect(m_pView, &CView::selectionStateChanged,
             this, &MainWindow::updateOperationAvailability);
     updateOperationAvailability(false);
@@ -4366,15 +4473,147 @@ void MainWindow::endWorkspaceLoad()
     updateMapTestAction();
 }
 
+void MainWindow::showLandscapeTools()
+{
+    if(!m_landscapeToolsDock)
+        return;
+    if(m_landscapeToolsDock->isVisible())
+    {
+        m_landscapeToolsDock->raise();
+        return;
+    }
+
+    // Preserve the user's exact ordinary workspace. Landscape Tools is a
+    // temporary editing mode; hiding it must put Loaded Map, Outliner, and
+    // Properties back at their pre-landscape sizes.
+    m_layoutBeforeLandscapeTools = saveState();
+    m_restoringLandscapeDockLayout = true;
+    if(m_landscapeDockFloating)
+        m_landscapeToolsDock->setFloating(true);
+    else
+    {
+        m_landscapeToolsDock->setFloating(false);
+        addDockWidget(m_landscapeDockArea, m_landscapeToolsDock);
+        QDockWidget* anchor = m_landscapeDockArea == Qt::LeftDockWidgetArea
+            ? m_mapsDock : m_loadedMapDock;
+        if(anchor && anchor != m_landscapeToolsDock)
+            // Landscape Tools owns the top slot; Loaded Map/Maps Browser moves
+            // below it, matching the established landscape workspace.
+            splitDockWidget(m_landscapeToolsDock, anchor, Qt::Vertical);
+    }
+    m_restoringLandscapeDockLayout = false;
+
+    m_landscapeToolsDock->show();
+    m_landscapeToolsDock->raise();
+    if(!m_landscapeToolsDock->isFloating())
+    {
+        QTimer::singleShot(0, this, [this]()
+        {
+            if(!m_landscapeToolsDock || !m_landscapeToolsDock->isVisible()
+               || m_landscapeToolsDock->isFloating())
+                return;
+            resizeDocks(QList<QDockWidget*>() << m_landscapeToolsDock,
+                        QList<int>() << m_landscapeDockHeight, Qt::Vertical);
+        });
+    }
+}
+
+void MainWindow::hideLandscapeTools()
+{
+    if(m_landscapeToolsDock && m_landscapeToolsDock->isVisible())
+        m_landscapeToolsDock->hide();
+}
+
+void MainWindow::toggleLandscapeTools()
+{
+    if(!m_landscapeToolsDock)
+        return;
+    if(m_landscapeToolsDock->isVisible())
+        hideLandscapeTools();
+    else
+        showLandscapeTools();
+}
+
+void MainWindow::handleEscapeShortcut()
+{
+    if(!m_pView)
+        return;
+
+    if(m_pickSpawnPending)
+    {
+        if(m_movingCustomSpawn)
+        {
+            m_pickSpawnPending = false;
+            m_movingCustomSpawn = false;
+            m_customSpawnSelected = true;
+            m_pView->unsetCursor();
+            m_pView->setTestSpawnMarker(m_customSpawnPosition, m_customSpawn.adjusted);
+            m_pView->setTestSpawnMarkerSelected(true);
+            m_pView->setLandscapeInteractionSuspended(false);
+            updateCustomSpawnControls();
+            updateEntranceOverlays();
+            updateOperationAvailability();
+            updateMapTestAction();
+        }
+        else if(m_playFromHereButton)
+            m_playFromHereButton->setChecked(false);
+        m_pView->setFocus();
+        return;
+    }
+
+    if(m_customSpawnSelected)
+    {
+        m_customSpawnSelected = false;
+        m_pView->setTestSpawnMarkerSelected(false);
+        m_pView->setLandscapeInteractionSuspended(false);
+        updateCustomSpawnControls();
+        updateEntranceOverlays();
+        updateOperationAvailability();
+        updateOutlinerSelectionPath();
+        m_pView->setFocus();
+        return;
+    }
+
+    if(m_landscapeToolsDock && m_landscapeToolsDock->isVisible())
+    {
+        hideLandscapeTools();
+        m_pView->setFocus();
+        return;
+    }
+
+    if(!m_pView->cancelPendingOperation())
+        m_pView->clearObjectSelection();
+    CButtonConnector::getInstance()->pressButton(EButtonOpSelect);
+    m_pView->setFocus();
+}
+
+void MainWindow::restoreLayoutAfterLandscapeTools()
+{
+    if(m_restoringLandscapeDockLayout || m_layoutBeforeLandscapeTools.isEmpty())
+        return;
+    const QByteArray state = m_layoutBeforeLandscapeTools;
+    m_layoutBeforeLandscapeTools.clear();
+    m_restoringLandscapeDockLayout = true;
+    restoreState(state);
+    m_restoringLandscapeDockLayout = false;
+}
+
 void MainWindow::saveUiState()
 {
     if(m_uiStateSaved || !m_ui)
         return;
+    if(m_landscapeToolsDock)
+    {
+        hideLandscapeTools();
+        restoreLayoutAfterLandscapeTools();
+    }
     QSettings uiSettings;
     uiSettings.setValue("ui/mainWindowGeometry", saveGeometry());
     uiSettings.setValue("ui/mainWindowState", saveState());
     uiSettings.setValue("ui/workspaceSplitter", m_ui->workspaceSplitter->saveState());
     uiSettings.setValue("ui/outlinerSplitter", m_ui->outlinerSplitter->saveState());
+    uiSettings.setValue("ui/landscapeDockArea", int(m_landscapeDockArea));
+    uiSettings.setValue("ui/landscapeDockHeight", m_landscapeDockHeight);
     uiSettings.sync();
     m_uiStateSaved = true;
 }
@@ -5154,8 +5393,9 @@ void MainWindow::closeEvent(QCloseEvent *e)
         return;
     }
 
-    // Persist dock visibility before secondary-window cleanup closes docks.
-    // Saving only from the destructor recorded every View panel as hidden.
+    // Persist ordinary dock visibility before secondary-window cleanup closes
+    // docks. Landscape Tools is intentionally normalized to closed by
+    // saveUiState(); editing mode never resumes implicitly next session.
     saveUiState();
     ei::closeSecondaryWindows(this);
     // Remove the editor from the desktop before synchronous scene teardown.
@@ -5241,8 +5481,8 @@ void MainWindow::on_actionMap_parameters_triggered()
 
 void MainWindow::on_tileBrushButton_clicked()
 {
-    // The tool button owns a QAction which performs the toggle. Qt Designer's
-    // auto-connected clicked slot must not toggle it a second time.
+    if(QAction* action = m_operationActions.value(EButtonOpTilebrush, nullptr))
+        action->trigger();
 }
 
 

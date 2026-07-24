@@ -267,9 +267,12 @@ archive and canonical-lattice foundation into height sculpting/import,
 semantic ground and overlay painting, undo batching, terrain diagnostics,
 staged changed-MPR Save As, lossless RES member replacement, and a structured
 `map.txt` catalog editor. Its focused automated suites and disposable manual
-smoke matrix passed before this integration. Direct replacement of the open
-dirty MPR remains outside the baseline; changed terrain is written only as a
-separate validated test copy.
+smoke matrix passed before this integration. The follow-up direct-save
+increment enables replacement of the open dirty MPR only through the same
+provenance-checked transaction: staged candidate, fresh reopen, semantic diff,
+source-race refusal, pre-save backup, atomic replacement, post-commit byte and
+reopen verification, and canonical document rebinding. The legacy rebuilding
+serializer remains forbidden for every changed MPR.
 
 - [ ] Preserve untouched archive members, internal names, member order,
   timestamps/metadata, alignment, unknown entries, and original MP/SEC
@@ -278,12 +281,46 @@ separate validated test copy.
   from the embedded map name.
 - [ ] Patch only edited sector/overlay payloads and derive affected lengths and
   metadata from emitted content.
-- [ ] Stage, freshly reopen, validate, back up, and atomically replace every
+- [x] Stage, freshly reopen, validate, back up, and atomically replace every
   changed MPR.
 - [ ] Add deterministic MPR/SEC semantic diff and untouched-member equality
   checks.
 - [ ] Validate changed MPRs on copied Base/JMV maps before enabling live-map
   replacement.
+
+## New MPR creation
+
+- [ ] Add a user-facing **Create New MPR...** workflow that is independent from
+  `map.txt` registration. Creating terrain must not silently invent zone IDs,
+  entrances, minimap, music, quest, objectives, or other catalog metadata.
+- [ ] Let the author choose the map dimensions/sector layout, initial flat
+  height, initial land material, active Base/JMV profile, and a supplied terrain
+  atlas namespace. Endurance reads compatible atlases but does not author or
+  bundle atlas imagery.
+- [ ] Generate deterministic MP/SEC members with canonical 33x33 sector vertex
+  ownership, synchronized shared seams, explicit land/overlay initialization,
+  and names derived from the chosen internal MPR namespace.
+- [ ] Construct a game-compatible MPR/RES member table. Lowercase each member
+  name, encode it as CP1251, place it in its native hash slot, and preserve
+  deterministic `NextIndex` collision chains; a linear member inventory alone
+  is not runtime validation.
+- [ ] Before packaging or Test Current Map, resolve every generated MP/SEC member
+  through the runtime-style hash slot and chain. Reject case-insensitive
+  duplicate names, cycles, out-of-range links, unreachable members, invalid
+  dimensions/namespaces, and missing required sectors.
+- [ ] Apply the changed-MPR save contract to the initial archive: stage outside
+  the destination, freshly reopen, validate archive reachability and terrain
+  semantics, create a backup when replacing an existing path, and publish with
+  atomic replacement only after every check passes.
+- [ ] Offer explicit follow-up registration through the `map.txt` editor after
+  the MPR validates. Cancelling registration must leave the standalone MPR
+  usable and must not create partial catalog or texture-resource changes.
+- [ ] Add minimized synthetic tests for 1x1 and multi-sector maps, deterministic
+  repeat generation, seam equality, initial height/material selection, supplied
+  atlas namespaces, deliberate hash collisions, uppercase runtime lookup,
+  unreachable/cyclic chain rejection, failed destination replacement, and
+  byte-identical reopen. Keep proprietary Base/JMV runtime checks private and
+  operate only on copied fixtures with recorded hashes.
 
 ## Heightmap editing
 

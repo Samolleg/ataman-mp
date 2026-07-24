@@ -506,7 +506,7 @@ void CSettings::initOptions()
         {"shortcutMoveTool", "G"},
         {"shortcutRotateTool", "R"},
         {"shortcutScaleTool", "T"},
-        {"shortcutTileBrushTool", "B"}
+        {"shortcutTileBrushTool", "L"}
     };
     for(auto it = shortcutDefaults.constBegin(); it != shortcutDefaults.constEnd(); ++it)
         m_aOptCategory[eOptSetKeyBinding].append(

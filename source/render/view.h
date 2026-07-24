@@ -18,6 +18,7 @@
 #include <QRectF>
 #include <QSet>
 #include <QStringList>
+#include <QFutureWatcher>
 
 #include "types.h"
 #include "select_window.h"
@@ -26,6 +27,8 @@
 #include "terrain_atlas_analyzer.h"
 #include "spatial_grid.h"
 #include "particle_animation.h"
+#include "ai_graph_document.h"
+#include "ai_graph_preview_builder.h"
 
 class QLineEdit;
 class QFrame;
@@ -49,6 +52,7 @@ class CProgressView;
 class CTableManager;
 class COperation;
 struct SColor;
+struct SMprSaveCommitResult;
 
 struct STerrainPaintAuditAction
 {
@@ -104,6 +108,8 @@ public:
     void unloadLand(bool promptForSave = true);
     void saveLand();
     void saveLandAs();
+    bool buildValidatedLandscapeCandidate(QByteArray* data,
+                                          CValidationReport* report = nullptr);
     bool loadMob(QFileInfo& filePath);
     void saveMobAs();
     void saveActiveMob();
@@ -124,6 +130,7 @@ public:
     void activateLandscapeTilePainting();
     void prepareLandscapeTilePainting(bool showTools = true);
     void setLandscapeEditingEnabled(bool enabled);
+    void setLandscapeInteractionSuspended(bool suspended);
     void closeLandscapeTools();
     void setTileGridVisible(bool visible) { m_tileGridVisible = visible; update(); }
     CSettings* settings() {Q_ASSERT(m_pSettings); return m_pSettings;}
@@ -263,6 +270,10 @@ protected:
 private:
     bool saveMobDocument(CMob* mob, const QFileInfo& destination);
     bool saveLandscapeDocument(const QFileInfo& destination);
+    bool saveChangedLandscapeDocument(const QFileInfo& destination,
+                                      bool adoptAsOpenBaseline);
+    bool adoptCommittedLandscapeBaseline(const QFileInfo& destination,
+                                         const SMprSaveCommitResult& commit);
     void refreshMobDirtyStates();
     void initShaders();
     void draw();
@@ -305,8 +316,16 @@ private:
                        const CViewFrustum* frustum);
     bool ensureParticleRendererInitialized();
     void initEnvironmentPreviewWidget();
+    void initAiGraphPreviewWidget();
     void applyEnvironmentCompatibilityMode();
     void positionEnvironmentPreviewWidget();
+    void refreshAiGraphPreviewSource();
+    void syncAiGraphPreviewWidget();
+    void rebuildAiGraphOverlayGeometry();
+    void startAiGraphPreviewRegeneration();
+    void scheduleAiGraphPreviewRegeneration();
+    bool captureAiGraphPreviewBuildInput(SAiGraphPreviewBuildInput* input,
+                                         QString* error);
     void syncEnvironmentPreviewWidget(float mapTimeHours);
     void applyEnvironmentUniforms(QOpenGLShaderProgram& program,
                                   const ei::SRenderEnvironment& environment,
@@ -460,6 +479,7 @@ private:
     int m_terrainPaintActionId{0};
     quint32 m_terrainSemanticSeed{0};
     bool m_terrainEditAvailable;
+    bool m_landscapeInteractionSuspended{false};
     bool m_tilePaintStrokeActive{false};
     bool m_terrainPaintOutlineValid{false};
     int m_terrainPaintOutlineX{0};
@@ -509,6 +529,29 @@ private:
     QFrame* m_timeOfDayWidget{nullptr};
     QLabel* m_timeOfDayLabel{nullptr};
     QSlider* m_environmentPreviewTime{nullptr};
+    QFrame* m_aiGraphPreviewWidget{nullptr};
+    QWidget* m_aiGraphPreviewBody{nullptr};
+    QToolButton* m_aiGraphPreviewToggle{nullptr};
+    QToolButton* m_aiGraphPreviewCollapse{nullptr};
+    QToolButton* m_aiGraphRegenerateButton{nullptr};
+    QToolButton* m_aiGraphUseLoadedButton{nullptr};
+    QSlider* m_aiGraphLayerSlider{nullptr};
+    QLabel* m_aiGraphLayerLabel{nullptr};
+    QLabel* m_aiGraphSourceLabel{nullptr};
+    CAiGraphDocument m_aiGraphDocument;
+    CAiGraphDocument m_aiGraphLoadedDocument;
+    QString m_aiGraphSource;
+    QString m_aiGraphLoadedSource;
+    QFutureWatcher<SAiGraphPreviewBuildResult>* m_aiGraphBuildWatcher{nullptr};
+    QTimer* m_aiGraphRegenerationTimer{nullptr};
+    quint64 m_aiGraphBuildRequest{0};
+    bool m_aiGraphAutoRegenerationEnabled{false};
+    bool m_aiGraphRegenerationPending{false};
+    bool m_aiGraphPreviewVisible{false};
+    bool m_aiGraphOverlayDirty{true};
+    QVector<QVector3D> m_aiGraphOpenLinks;
+    QVector<QVector3D> m_aiGraphNodes;
+    QVector<QVector3D> m_aiGraphIsolatedNodes;
     bool m_environmentPreviewSyncing{false};
     bool m_openGlesCompatibility{false};
     int m_openGlDiagnosticFramesRemaining{0};

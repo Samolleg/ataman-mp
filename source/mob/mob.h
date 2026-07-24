@@ -107,6 +107,7 @@ public:
     SMobParameterState parameterState();
     void applyParameterState(const SMobParameterState& state);
     uint freeMapId();
+    const QByteArray& aiGraphData() const { return m_aiGraph; }
 
     //functions for logic processing
     QList<CNode*>& logicNodes();
@@ -141,7 +142,6 @@ private:
     void writeData(QJsonObject& mob, const QFileInfo& file, const QString key, QByteArray& value);
     bool isFreeMapId(uint id);
     void collectTreeView();
-    QVector<uint> findIdDuplicate();
 
 private:
     //todo: global text data, script

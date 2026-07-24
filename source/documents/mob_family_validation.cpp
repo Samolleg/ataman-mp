@@ -739,6 +739,7 @@ CMobFamilyValidationReport CMobFamilyValidator::validate(
         if(member.missing || !member.error.isEmpty())
             continue;
         QVector<SMobIdRangeSnapshot> effective;
+        QMap<quint32, QVector<const SMobObjectSnapshot*>> ownersWithinMob;
         for(const SMobIdRangeSnapshot& range : member.ranges)
         {
             if(range.minimum > range.maximum)
@@ -759,6 +760,7 @@ CMobFamilyValidationReport CMobFamilyValidator::validate(
         {
             if(!object.hasNid)
                 continue;
+            ownersWithinMob[object.nid].append(&object);
             SMobNidOwner owner;
             owner.nid = object.nid;
             owner.mobPath = member.path;
@@ -789,6 +791,24 @@ CMobFamilyValidationReport CMobFamilyValidator::validate(
                 finding.nid = object.nid;
                 report.findings.append(finding);
             }
+        }
+        for(auto ownerIt = ownersWithinMob.constBegin();
+            ownerIt != ownersWithinMob.constEnd(); ++ownerIt)
+        {
+            if(ownerIt.value().size() < 2)
+                continue;
+            SMobFamilyFinding finding;
+            finding.severity = EMobFamilyFindingSeverity::Warning;
+            finding.code = "nid.duplicate_within_mob";
+            finding.category = "Duplicate object ID";
+            finding.message = QString("NID %1 is used by %2 objects in %3")
+                .arg(ownerIt.key()).arg(ownerIt.value().size()).arg(member.fileName);
+            finding.hasNid = true;
+            finding.nid = ownerIt.key();
+            for(const SMobObjectSnapshot* object : ownerIt.value())
+                finding.locations.append(QString("%1: %2")
+                    .arg(object->sectionPath, object->name));
+            report.findings.append(finding);
         }
     }
 

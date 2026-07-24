@@ -91,6 +91,7 @@ public:
                               bool updateSector = true);
     void setDirty(bool bDirty) {m_bDirty = bDirty;}
     bool isDirty() const {return m_bDirty;}
+    bool adoptCanonicalSave(const QFileInfo& path, const QByteArray& bytes);
     const QString& mapName() const {return m_innerMapName;}
 
 private:
