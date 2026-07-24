@@ -1,9 +1,69 @@
 {
   "constants": {
+    "bluegas_attempt_factor_float": {
+      "bytes": "0000A040",
+      "va": "0x0073BF34",
+      "value": 5.0
+    },
+    "bluegas_radius_factor_float": {
+      "bytes": "9A99993E",
+      "va": "0x0073C54C",
+      "value": 0.30000001192092896
+    },
+    "bluegas_size_factor_float": {
+      "bytes": "3333333F",
+      "va": "0x0073C538",
+      "value": 0.699999988079071
+    },
+    "bluegas_size_growth_float": {
+      "bytes": "AE47813F",
+      "va": "0x0073CD40",
+      "value": 1.0099999904632568
+    },
+    "bluegas_vertical_acceleration_float": {
+      "bytes": "5C8F823F",
+      "va": "0x0073CDE4",
+      "value": 1.0199999809265137
+    },
+    "bluegas_vertical_speed_max_float": {
+      "bytes": "8FC2F53C",
+      "va": "0x0073CD74",
+      "value": 0.029999999329447746
+    },
+    "bluegas_vertical_speed_min_float": {
+      "bytes": "0AD7A33C",
+      "va": "0x0073CCD8",
+      "value": 0.019999999552965164
+    },
     "degrees_to_radians_float": {
       "bytes": "176CC116",
       "va": "0x0073BA30",
       "value": 3.124904596571646e-25
+    },
+    "firearrow_early_growth_float": {
+      "bytes": "3333B33F",
+      "va": "0x0073CDF8",
+      "value": 1.399999976158142
+    },
+    "firearrow_head_size_float": {
+      "bytes": "CDCCCC3E",
+      "va": "0x0073B868",
+      "value": 0.4000000059604645
+    },
+    "firearrow_regular_velocity_growth_float": {
+      "bytes": "CDCC8C3F",
+      "va": "0x0073BAC4",
+      "value": 1.100000023841858
+    },
+    "firearrow_slow_velocity_decay_float": {
+      "bytes": "3333733F",
+      "va": "0x0073CD50",
+      "value": 0.949999988079071
+    },
+    "firearrow_trail_size_float": {
+      "bytes": "CDCC4C3E",
+      "va": "0x0073BAD4",
+      "value": 0.20000000298023224
     },
     "generic_light_z_offset": {
       "bytes": "00000040",
@@ -118,6 +178,24 @@
     "target_va": "0x00496EB0"
   },
   "ranges": {
+    "acidray_create_callback": {
+      "end_va": "0x0048D330",
+      "sha256": "F419F1BC5B34A1C318A4CF92A43B89B9325D4F28BB1ED4F74D1B07ED5AE85F71",
+      "size": 736,
+      "start_va": "0x0048D050"
+    },
+    "acidray_factory_branch": {
+      "end_va": "0x0048599D",
+      "sha256": "6DD6E33B7282DEEF91EBBAF40F83651E500BC0A5424DA59BC76F0B3622F5DF2B",
+      "size": 186,
+      "start_va": "0x004858E3"
+    },
+    "acidray_update_callback": {
+      "end_va": "0x0048D420",
+      "sha256": "FEE3B6E823077BC86EB922DE188BED193360FBE3630D9D7DD7A4FCB11FB74275",
+      "size": 240,
+      "start_va": "0x0048D330"
+    },
     "atlas_rectangle_builder": {
       "end_va": "0x00488790",
       "sha256": "DA76F7B72582EE10FE67717B0A23018E4E30E0A89872010BC6BA43FD373338AE",
@@ -178,6 +256,24 @@
       "size": 128,
       "start_va": "0x0048F300"
     },
+    "bluegas_create_callback": {
+      "end_va": "0x0048D7F0",
+      "sha256": "78475299726E62937D108C9C035C45F931FC119677ED9D75F3D22E155C678B26",
+      "size": 976,
+      "start_va": "0x0048D420"
+    },
+    "bluegas_factory_branch": {
+      "end_va": "0x00485B72",
+      "sha256": "93A0A20ECAEFF5EA32373CA9B54A5D3B680992F9D8CD0E68D4ACCDD3D851072D",
+      "size": 212,
+      "start_va": "0x00485A9E"
+    },
+    "bluegas_update_callback": {
+      "end_va": "0x0048D8D0",
+      "sha256": "2CFBF2AEE50458AF687B09EC6261C6CD84F2F2DC6CF413B3F64B69F9578D6863",
+      "size": 224,
+      "start_va": "0x0048D7F0"
+    },
     "casting_create_callback": {
       "end_va": "0x00489A50",
       "sha256": "D9C2EE669E096BEA24012DA99209A73F4EDE630856890E93668E339EA04F94E8",
@@ -207,6 +303,24 @@
       "sha256": "22141AF17DE0CB65AFFBFBAF08E52CD54B820103378E1CF2C05967BF1F765CD6",
       "size": 36,
       "start_va": "0x0056A1CD"
+    },
+    "firearrow_create_callback": {
+      "end_va": "0x0048CED0",
+      "sha256": "3B45A6BFCDAB6B08E4671C72F820B1D9C315204844EF2DBB75188BAF83AE9E55",
+      "size": 816,
+      "start_va": "0x0048CBA0"
+    },
+    "firearrow_factory_branch": {
+      "end_va": "0x004858E3",
+      "sha256": "3FFB87F1F73C0E2A0042242A00E6039E61455D0478A05D26BC824E440CCA2ECC",
+      "size": 224,
+      "start_va": "0x00485803"
+    },
+    "firearrow_update_callback": {
+      "end_va": "0x0048D050",
+      "sha256": "C0C7545486B00F15C3BDA99FAE11BA58C2A016F0538638F190FD90465589FD9D",
+      "size": 384,
+      "start_va": "0x0048CED0"
     },
     "firewall_create_callback": {
       "end_va": "0x0048EE20",
@@ -558,9 +672,21 @@
     }
   ],
   "sites": {
+    "acidray_callback_selection": {
+      "bytes": "C783E001000050D04800C783E401000030D348008D942480000000BFC0AE7800",
+      "va": "0x00485978"
+    },
+    "acidray_size_table": {
+      "bytes": "CDCC8C3F9A99593F7B146E3F0000803FEC51783F7B146E3F52B85E3FCDCC4C3F48E13A3F6666263FCDCC0C3FF628DC3E9A99993ECDCC4C3E0000000000000000000000000000000000000000",
+      "va": "0x0078A668"
+    },
     "acidray_texture_name": {
       "bytes": "4163696452617900",
       "va": "0x0078AEC0"
+    },
+    "acidray_width_table": {
+      "bytes": "000000009A99593F7B146E3F0000803FEC51783F7B146E3F52B85E3FCDCC4C3F48E13A3F6666263FCDCC0C3FF628DC3E9A99993ECDCC4C3E0000000000000000000000000000000000000000",
+      "va": "0x0078A61C"
     },
     "attach_copies_color_endpoint": {
       "bytes": "8B57588B490C89575C89480C",
@@ -610,6 +736,10 @@
       "bytes": "8B4424048B50504A895050750533C0C20400D94038D8008B1495B4A67800C1E21881CAFFFFFF00D918D9403CD84004895058D95804D94008D84040D95808D94024D8480CD9580CD94020D9C0D84838D95838D9C0D8483CD9583CD84840D95840D9810C010000D80D2CC57300D86840D95840B801000000C2",
       "va": "0x0048F300"
     },
+    "bluegas_callback_selection": {
+      "bytes": "C7830C0100000000803FC783E001000020D44800C783E4010000F0D74800C783E8010000305548008D942480000000BFB0AE7800",
+      "va": "0x00485B39"
+    },
     "casting_callback_selection": {
       "bytes": "0C0283C9FF894308C783D0000000FFFFFF7F898BEC00000089ABE4000000C783E001000020934800C783E4010000509A4800C783E8010000409B48008D942480000000BFE8AE7800EB48",
       "va": "0x00486993"
@@ -625,6 +755,14 @@
     "direct3d_source_blend_srcalpha": {
       "bytes": "A180F07A006A056A138B4054508B10FF5250",
       "va": "0x0056A1CD"
+    },
+    "firearrow_callback_selection": {
+      "bytes": "C7832C01000000000000C783E0010000A0CB4800C783E4010000D0CE48008D942480000000750ABFD8AE7800E9A92C0000BFC8AE7800",
+      "va": "0x004858A8"
+    },
+    "firearrowsmoke_texture_name": {
+      "bytes": "466972654172726F77536D6F6B6500",
+      "va": "0x0078AEC8"
     },
     "firesmoke_texture_name": {
       "bytes": "46697265536D6F6B6500",
@@ -781,6 +919,10 @@
     "special_spawn_random_offset": {
       "bytes": "D8254CB87300D9C0D88F30010000D806D91E8B0ED88F34010000D84604D95424188B442418D95E045051B9B8F57A00E878520D00D94608D8A7A00000005FB801",
       "va": "0x0048EDC4"
+    },
+    "stench_texture_name": {
+      "bytes": "5374656E636800",
+      "va": "0x0078AEB0"
     },
     "tendri_callback_selection": {
       "bytes": "C783E0010000E0E94800C783E401000020EC48000F8505010000C783D000000014000000C7",

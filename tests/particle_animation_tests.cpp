@@ -22,6 +22,9 @@ private slots:
     void mushroomUsesFiniteRisingCloud();
     void blood1UsesFiniteSyntheticCarrierBurst();
     void firewallUsesTendriFirePhaseRange();
+    void fireArrowUsesActivatedZeroSpeedControl();
+    void acidRayUsesStationaryWidthAndSizeTable();
+    void blueGasUsesSyntheticCarrierCylinder();
 };
 
 void ParticleAnimationTests::atlasUsesNativeTopRowFirstInsets()
@@ -301,6 +304,74 @@ void ParticleAnimationTests::firewallUsesTendriFirePhaseRange()
     QVERIFY(!samples.isEmpty());
     for(const auto& sample : samples)
         QVERIFY(sample.frame >= 0 && sample.frame <= 7);
+}
+
+void ParticleAnimationTests::fireArrowUsesActivatedZeroSpeedControl()
+{
+    ei::particle::FireArrowEmitter first;
+    ei::particle::FireArrowEmitter second;
+    const QVector3D origin(2.0f, 3.0f, 4.0f);
+    first.advanceTo(0, 8209u, origin, 1.0f);
+    second.advanceTo(0, 8209u, origin, 1.0f);
+    first.advanceTo(20, 8209u, origin, 1.0f);
+    second.advanceTo(20, 8209u, origin, 1.0f);
+    const auto a = first.samples();
+    const auto b = second.samples();
+    QCOMPARE(a.size(), b.size());
+    QVERIFY(a.size() > 1);
+    QCOMPARE(a[0].position, origin);
+    QVERIFY(qAbs(a[0].scale - 0.24f) < 0.000001f);
+    for(int i = 0; i < a.size(); ++i)
+    {
+        QCOMPARE(a[i].position, b[i].position);
+        QCOMPARE(a[i].scale, b[i].scale);
+        QCOMPARE(a[i].frame, b[i].frame);
+        QCOMPARE(a[i].position, origin);
+        QVERIFY(a[i].frame >= 0 && a[i].frame <= 14);
+    }
+}
+
+void ParticleAnimationTests::acidRayUsesStationaryWidthAndSizeTable()
+{
+    ei::particle::AcidRayEmitter emitter;
+    const QVector3D origin(-1.0f, 2.0f, 0.5f);
+    emitter.advanceTo(0, 8210u, origin, 1.0f);
+    emitter.advanceTo(20, 8210u, origin, 1.0f);
+    const auto samples = emitter.samples();
+    QVERIFY(!samples.isEmpty());
+    QVERIFY(samples.size() <= 15);
+    for(const auto& sample : samples)
+    {
+        QCOMPARE(sample.position, origin);
+        QVERIFY(sample.scale >= 0.0f);
+        QVERIFY(sample.frame >= 0 && sample.frame <= 14);
+    }
+}
+
+void ParticleAnimationTests::blueGasUsesSyntheticCarrierCylinder()
+{
+    ei::particle::BlueGasEmitter first;
+    ei::particle::BlueGasEmitter second;
+    const QVector3D origin(4.0f, -2.0f, 1.0f);
+    first.advanceTo(0, 8211u, origin, 1.0f);
+    second.advanceTo(0, 8211u, origin, 1.0f);
+    first.advanceTo(30, 8211u, origin, 1.0f);
+    second.advanceTo(30, 8211u, origin, 1.0f);
+    const auto a = first.samples();
+    const auto b = second.samples();
+    QCOMPARE(a.size(), b.size());
+    QVERIFY(a.size() > 50);
+    QVERIFY(a.size() <= 500);
+    for(int i = 0; i < a.size(); ++i)
+    {
+        QCOMPARE(a[i].position, b[i].position);
+        QCOMPARE(a[i].scale, b[i].scale);
+        QCOMPARE(a[i].alpha, b[i].alpha);
+        QCOMPARE(a[i].frame, b[i].frame);
+        QVERIFY(a[i].scale > 0.0f);
+        QVERIFY(a[i].alpha >= 0.0f && a[i].alpha <= 1.0f);
+        QVERIFY(a[i].frame >= 0 && a[i].frame <= 14);
+    }
 }
 
 QTEST_APPLESS_MAIN(ParticleAnimationTests)

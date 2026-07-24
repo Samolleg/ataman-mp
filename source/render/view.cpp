@@ -2602,6 +2602,12 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
     QOpenGLTexture* rainSnowTexture = textures->texture("rainsnow");
     if(rainSnowTexture == fallbackTexture)
         rainSnowTexture = nullptr;
+    QOpenGLTexture* fireArrowSmokeTexture = textures->texture("firearrowsmoke");
+    if(fireArrowSmokeTexture == fallbackTexture)
+        fireArrowSmokeTexture = nullptr;
+    QOpenGLTexture* stenchTexture = textures->texture("stench");
+    if(stenchTexture == fallbackTexture)
+        stenchTexture = nullptr;
 
     bool inverseOk = false;
     const QMatrix4x4 inverseView = cameraMatrix.inverted(&inverseOk);
@@ -2848,6 +2854,42 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
                        rainSnowTexture == nullptr, 0.18f);
     };
 
+    const auto drawFireArrow = [&](const CNode* owner, const QVector3D& origin,
+                                   float authoredScale, uint seed)
+    {
+        ei::particle::FireArrowEmitter& emitter = m_fireArrowEmitters[owner];
+        emitter.advanceTo(logicalTick, seed, origin, authoredScale);
+        for(const ei::particle::EffectRenderSample& sample : emitter.samples())
+            drawSprite(sample.position, sample.scale, 1.0f, 0.0f,
+                       QVector4D(1.0f, 1.0f, 1.0f, sample.alpha),
+                       fireArrowSmokeTexture, ei::particle::atlasUv(sample.frame), false,
+                       fireArrowSmokeTexture == nullptr, 0.18f);
+    };
+
+    const auto drawAcidRay = [&](const CNode* owner, const QVector3D& origin,
+                                 float authoredScale, uint seed)
+    {
+        ei::particle::AcidRayEmitter& emitter = m_acidRayEmitters[owner];
+        emitter.advanceTo(logicalTick, seed, origin, authoredScale);
+        for(const ei::particle::EffectRenderSample& sample : emitter.samples())
+            drawSprite(sample.position, sample.scale, 1.0f, 0.0f,
+                       QVector4D(1.0f, 1.0f, 1.0f, sample.alpha),
+                       acidRayTexture, ei::particle::atlasUv(sample.frame), false,
+                       acidRayTexture == nullptr, 0.18f);
+    };
+
+    const auto drawBlueGas = [&](const CNode* owner, const QVector3D& origin,
+                                 float syntheticCarrierBound, uint seed)
+    {
+        ei::particle::BlueGasEmitter& emitter = m_blueGasEmitters[owner];
+        emitter.advanceTo(logicalTick, seed, origin, syntheticCarrierBound);
+        for(const ei::particle::EffectRenderSample& sample : emitter.samples())
+            drawSprite(sample.position, sample.scale, 1.0f, 0.0f,
+                       QVector4D(1.0f, 1.0f, 1.0f, sample.alpha),
+                       stenchTexture, ei::particle::atlasUv(sample.frame), false,
+                       stenchTexture == nullptr, 0.18f);
+    };
+
     for(CMob* mob : m_aMob)
     {
         if(!isMobVisible(mob))
@@ -2927,6 +2969,33 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
             if(particle->kind() == 8207u)
             {
                 drawBlood1(particle, center, authoredScale, particle->mapId());
+                if(particle->nodeState() == ENodeState::eSelect)
+                    drawSprite(center, qMax(0.3f, authoredScale * 0.35f), 1.0f, 0.0f,
+                               QVector4D(0.10f, 0.90f, 1.0f, 0.72f), nullptr,
+                               QVector4D(0.0f, 0.0f, 1.0f, 1.0f), false, true, 0.12f);
+                continue;
+            }
+            if(particle->kind() == 8209u)
+            {
+                drawFireArrow(particle, center, authoredScale, particle->mapId());
+                if(particle->nodeState() == ENodeState::eSelect)
+                    drawSprite(center, qMax(0.3f, authoredScale * 0.35f), 1.0f, 0.0f,
+                               QVector4D(0.10f, 0.90f, 1.0f, 0.72f), nullptr,
+                               QVector4D(0.0f, 0.0f, 1.0f, 1.0f), false, true, 0.12f);
+                continue;
+            }
+            if(particle->kind() == 8210u)
+            {
+                drawAcidRay(particle, center, authoredScale, particle->mapId());
+                if(particle->nodeState() == ENodeState::eSelect)
+                    drawSprite(center, qMax(0.3f, authoredScale * 0.35f), 1.0f, 0.0f,
+                               QVector4D(0.10f, 0.90f, 1.0f, 0.72f), nullptr,
+                               QVector4D(0.0f, 0.0f, 1.0f, 1.0f), false, true, 0.12f);
+                continue;
+            }
+            if(particle->kind() == 8211u)
+            {
+                drawBlueGas(particle, center, authoredScale, particle->mapId());
                 if(particle->nodeState() == ENodeState::eSelect)
                     drawSprite(center, qMax(0.3f, authoredScale * 0.35f), 1.0f, 0.0f,
                                QVector4D(0.10f, 0.90f, 1.0f, 0.72f), nullptr,
@@ -5155,6 +5224,9 @@ bool CView::unloadMobDocument(CMob* mob, bool promptForSave)
     m_tendriEmitters.clear();
     m_mushroomEmitters.clear();
     m_blood1Emitters.clear();
+    m_fireArrowEmitters.clear();
+    m_acidRayEmitters.clear();
+    m_blueGasEmitters.clear();
     m_tornadoEmitters.clear();
     m_lightningBlastEmitters.clear();
     m_castingEmitters.clear();
@@ -5360,6 +5432,9 @@ void CView::unloadMob(QString mobName)
     m_tendriEmitters.clear();
     m_mushroomEmitters.clear();
     m_blood1Emitters.clear();
+    m_fireArrowEmitters.clear();
+    m_acidRayEmitters.clear();
+    m_blueGasEmitters.clear();
     m_tornadoEmitters.clear();
     m_lightningBlastEmitters.clear();
     m_castingEmitters.clear();

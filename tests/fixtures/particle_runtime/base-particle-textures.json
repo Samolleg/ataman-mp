@@ -1,0 +1,24 @@
+{
+  "format": "ei-particle-texture-report-v1",
+  "source": {
+    "path": "D:\\Evil Islands\\Res\\textures.res",
+    "sha256": "79548FBD94E797FE9EDC3E990EB0231A350571B2CEF575B009FA972F0002268C",
+    "size": 107649220
+  },
+  "textures": [
+    {
+      "atlas": {
+        "columns": 4,
+        "phaseCount": 16,
+        "rows": 4
+      },
+      "height": 256,
+      "mipCount": 3,
+      "name": "stench.mmp",
+      "sha256": "D2468084C3D8FFEFDD0FCC1614220A5CE43C2799AA860545BBF4CF13CB816CE5",
+      "size": 172108,
+      "textureFormat": "0x00004444",
+      "width": 256
+    }
+  ]
+}

@@ -76,6 +76,9 @@ covering the selected JMV corpus.
 | 8206 / `0x200E` | Mushroom | Dedicated finite 30-quant rising and logarithmically expanding source, native 16–19-quant particle lives, phase/scale/alpha/velocity rules, `ChangeHero` atlas, and ordinary alpha blending. The completed cloud repeats every 64 quants for catalog inspection. | Validate the type-specific one-shot auxiliary dispatch separately; it is not part of the billboard population. |
 | 8207 / `0x200F` | Blood1 | Dedicated six-quant phase-12 directional burst with native velocity/scale/gravity and alpha-table updates, using `RainSnow` and ordinary alpha blending. The catalog uses authored scale as an explicit synthetic carrier bound and repeats every 32 quants. | Capture attached carriers with different bounds; a standalone record does not author the carrier-size input. |
 | 8208 / `0x2010` | Firewall | Confirmed zero-wall-vector standalone path through the TendriSmoke spawn/update family, restricted to fire phases with ordinary alpha blending. | Capture a spell-owned nonzero wall vector to validate elongated placement and terrain snapping along the wall. |
+| 8209 / `0x2011` | Firearrow | Dedicated owner-activated FireArrowSmoke head/trail callback replay with native phase, lifetime, class, scale, and ordinary-alpha rules. The standalone catalog deliberately uses zero owner speed, so its trail remains collapsed at the source. | Capture a moving projectile owner to supply and validate native velocity plus the two perpendicular trail basis vectors. |
+| 8210 / `0x2012` | Acidray | Dedicated continuous stationary path with native one-particle-per-quant creation, 15-quant phase/lifetime rules, and exact width/size tables, using `AcidRay` and ordinary alpha blending. | Capture a moving owner only for the transverse ray geometry; the placed zero-speed path is closed. |
+| 8211 / `0x2013` | Bluegas | Dedicated carrier-cylinder cloud with native orbit, rise acceleration, growth, phase cadence, final alpha decay, `Stench` Base-fallback atlas, and ordinary alpha blending. The catalog uses authored scale as an explicit synthetic carrier bound. | Capture attached carriers with different bounding volumes; no ownerless native default exists. |
 
 ## Preview-only families
 
@@ -84,11 +87,11 @@ runtime behavior has not been reconstructed:
 
 | IDs | Names |
 |---|---|
-| 8192, 8194, 8209, 8231, 8257 | Fireball, Fireblast, Firearrow, Castingfire, Firestar |
+| 8192, 8194, 8231, 8257 | Fireball, Fireblast, Castingfire, Firestar |
 | 8198, 8263 | Healing, Regeneration |
 | 8199 | Poisonfog |
 | 8200, 8201 | Aggressionfog, Geyser |
-| 8210, 8213, 8258 | Acidray, Sphereacid, Acidstar |
+| 8213, 8258 | Sphereacid, Acidstar |
 | 8214, 8259 | Sphereelectricity, Sparks |
 | 8217, 8253, 8254 | Teleport, Portalstar, Portal |
 | 8232–8239 | Elemental, divination, illusion, domination, enchantment, healing, and failed casting variants |
@@ -104,7 +107,7 @@ still require both native reverse engineering and a dedicated renderer:
 
 | IDs | Names |
 |---|---|
-| 8211–8212 | Bluegas, Link |
+| 8212 | Link |
 | 8215–8216 | Spherefire, Clayring |
 | 8218 | Antimagic |
 | 8219–8230 | Modifier1 through Modifier12 |

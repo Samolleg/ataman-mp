@@ -1420,6 +1420,365 @@ private:
     bool m_initialized{false};
 };
 
+struct FireArrowParticle
+{
+    QVector3D position;
+    float scale{0.1f};
+    int lifetime{15};
+    int frame{0};
+    int phaseDelay{1};
+    int special{0};
+};
+
+class FireArrowEmitter
+{
+public:
+    void advanceTo(qint64 logicalTick, quint32 seed, const QVector3D& origin,
+                   float authoredScale)
+    {
+        if(!m_initialized || seed != m_seed || logicalTick < m_lastTick
+                || logicalTick - m_lastTick > 4096)
+            reset(logicalTick, seed, origin, authoredScale);
+        m_origin = origin;
+        m_authoredScale = qMax(0.001f, authoredScale);
+        while(m_lastTick < logicalTick)
+        {
+            advanceOne();
+            ++m_lastTick;
+        }
+    }
+
+    QVector<EffectRenderSample> samples() const
+    {
+        QVector<EffectRenderSample> result;
+        result.reserve(m_particles.size());
+        for(const FireArrowParticle& particle : m_particles)
+        {
+            EffectRenderSample sample;
+            sample.position = particle.position;
+            sample.scale = billboardDiameter(particle.scale);
+            sample.alpha = 1.0f;
+            sample.frame = particle.frame;
+            result.append(sample);
+        }
+        return result;
+    }
+
+    int activeCount() const { return m_particles.size(); }
+
+private:
+    void reset(qint64 logicalTick, quint32 seed, const QVector3D& origin,
+               float authoredScale)
+    {
+        m_seed = seed;
+        m_rng.reset(seed ^ 0x46415252u);
+        m_origin = origin;
+        m_authoredScale = qMax(0.001f, authoredScale);
+        m_particles.clear();
+        FireArrowParticle head;
+        head.position = m_origin;
+        head.scale = 0.3f * m_authoredScale * 0.4f;
+        head.special = 2;
+        m_particles.append(head);
+        m_lastTick = logicalTick;
+        m_initialized = true;
+    }
+
+    void spawnTrail()
+    {
+        FireArrowParticle particle;
+        particle.position = m_origin;
+        particle.scale = 0.3f * m_authoredScale * 0.2f;
+        particle.special = (m_rng.next() % 100u) > 70u ? 1 : 0;
+        particle.frame = 2 + int(m_rng.next() & 1u);
+        m_particles.append(particle);
+    }
+
+    void advanceOne()
+    {
+        for(int i = m_particles.size() - 1; i >= 0; --i)
+        {
+            FireArrowParticle& particle = m_particles[i];
+            if(particle.special == 2)
+            {
+                particle.position = m_origin;
+                particle.frame = int(m_rng.next() % 3u);
+                continue;
+            }
+            if(--particle.lifetime == 0)
+            {
+                m_particles.removeAt(i);
+                continue;
+            }
+            if(--particle.phaseDelay == 0)
+            {
+                if(++particle.frame >= 15)
+                {
+                    m_particles.removeAt(i);
+                    continue;
+                }
+                particle.phaseDelay = 1;
+            }
+            if(particle.frame < 6)
+                particle.scale *= 1.4f;
+            else if(particle.special == 0)
+                particle.scale *= 1.03f;
+        }
+        if(m_particles.size() < 500)
+            spawnTrail();
+    }
+
+    Isaac32 m_rng;
+    QVector<FireArrowParticle> m_particles;
+    QVector3D m_origin;
+    float m_authoredScale{1.0f};
+    quint32 m_seed{0};
+    qint64 m_lastTick{0};
+    bool m_initialized{false};
+};
+
+struct AcidRayParticle
+{
+    QVector3D position;
+    float scale{0.1f};
+    int lifetime{15};
+    int frame{0};
+};
+
+class AcidRayEmitter
+{
+public:
+    void advanceTo(qint64 logicalTick, quint32 seed, const QVector3D& origin,
+                   float authoredScale)
+    {
+        if(!m_initialized || seed != m_seed || logicalTick < m_lastTick
+                || logicalTick - m_lastTick > 4096)
+            reset(logicalTick, seed, origin, authoredScale);
+        m_origin = origin;
+        m_authoredScale = qMax(0.001f, authoredScale);
+        while(m_lastTick < logicalTick)
+        {
+            advanceOne();
+            ++m_lastTick;
+        }
+    }
+
+    QVector<EffectRenderSample> samples() const
+    {
+        QVector<EffectRenderSample> result;
+        result.reserve(m_particles.size());
+        for(const AcidRayParticle& particle : m_particles)
+        {
+            if(particle.scale <= 0.0f)
+                continue;
+            EffectRenderSample sample;
+            sample.position = particle.position;
+            sample.scale = billboardDiameter(particle.scale);
+            sample.alpha = 1.0f;
+            sample.frame = particle.frame;
+            result.append(sample);
+        }
+        return result;
+    }
+
+    int activeCount() const { return m_particles.size(); }
+
+private:
+    static float sizeAt(int age)
+    {
+        static constexpr std::array<float, 15> sizes = {
+            1.10f, 0.85f, 0.93f, 1.00f, 0.97f,
+            0.93f, 0.87f, 0.80f, 0.73f, 0.65f,
+            0.55f, 0.43f, 0.30f, 0.20f, 0.00f
+        };
+        return sizes[size_t(qBound(0, age, 14))];
+    }
+
+    void reset(qint64 logicalTick, quint32 seed, const QVector3D& origin,
+               float authoredScale)
+    {
+        m_seed = seed;
+        m_rng.reset(seed ^ 0x41434944u);
+        m_origin = origin;
+        m_authoredScale = qMax(0.001f, authoredScale);
+        m_particles.clear();
+        m_lastTick = logicalTick;
+        m_initialized = true;
+    }
+
+    void spawn()
+    {
+        AcidRayParticle particle;
+        particle.position = m_origin;
+        particle.scale = 0.3f * m_authoredScale * sizeAt(0);
+        particle.frame = int(m_rng.next() & 1u);
+        m_particles.append(particle);
+    }
+
+    void advanceOne()
+    {
+        for(int i = m_particles.size() - 1; i >= 0; --i)
+        {
+            AcidRayParticle& particle = m_particles[i];
+            if(--particle.lifetime == 0)
+            {
+                m_particles.removeAt(i);
+                continue;
+            }
+            const int age = 15 - particle.lifetime;
+            particle.scale = 0.3f * m_authoredScale * sizeAt(age);
+            if(++particle.frame >= 15)
+                m_particles.removeAt(i);
+        }
+        if(m_particles.size() < 500)
+            spawn();
+    }
+
+    Isaac32 m_rng;
+    QVector<AcidRayParticle> m_particles;
+    QVector3D m_origin;
+    float m_authoredScale{1.0f};
+    quint32 m_seed{0};
+    qint64 m_lastTick{0};
+    bool m_initialized{false};
+};
+
+struct BlueGasParticle
+{
+    QVector3D offset;
+    float angularStep{0.0f};
+    float verticalSpeed{0.0f};
+    float scale{0.1f};
+    float alpha{1.0f};
+    int lifetime{45};
+    int frame{0};
+    int phaseDelay{3};
+};
+
+class BlueGasEmitter
+{
+public:
+    void advanceTo(qint64 logicalTick, quint32 seed, const QVector3D& origin,
+                   float syntheticCarrierBound)
+    {
+        if(!m_initialized || seed != m_seed || logicalTick < m_lastTick
+                || logicalTick - m_lastTick > 4096)
+            reset(logicalTick, seed, origin, syntheticCarrierBound);
+        m_origin = origin;
+        m_bound = qMax(0.001f, syntheticCarrierBound);
+        while(m_lastTick < logicalTick)
+        {
+            advanceOne();
+            ++m_lastTick;
+        }
+    }
+
+    QVector<EffectRenderSample> samples() const
+    {
+        QVector<EffectRenderSample> result;
+        result.reserve(m_particles.size());
+        for(const BlueGasParticle& particle : m_particles)
+        {
+            EffectRenderSample sample;
+            sample.position = m_origin + particle.offset;
+            sample.scale = billboardDiameter(particle.scale);
+            sample.alpha = particle.alpha;
+            sample.frame = particle.frame;
+            result.append(sample);
+        }
+        return result;
+    }
+
+    int activeCount() const { return m_particles.size(); }
+
+private:
+    float randomRange(float low, float high)
+    {
+        return low + (high - low) * m_rng.unit();
+    }
+
+    void reset(qint64 logicalTick, quint32 seed, const QVector3D& origin,
+               float syntheticCarrierBound)
+    {
+        m_seed = seed;
+        m_rng.reset(seed ^ 0x42474153u);
+        m_origin = origin;
+        m_bound = qMax(0.001f, syntheticCarrierBound);
+        m_particles.clear();
+        m_lastTick = logicalTick;
+        m_initialized = true;
+    }
+
+    void spawn()
+    {
+        const float radius = 0.3f * m_bound;
+        const float height = 2.0f * m_bound;
+        const float radial = randomRange(0.0f, radius);
+        const float angle = randomRange(0.0f, float(M_PI) * 2.0f);
+        BlueGasParticle particle;
+        particle.offset = QVector3D(qSin(angle) * radial, qCos(angle) * radial,
+                                    randomRange(-0.3f * radius, 0.3f * radius));
+        particle.angularStep = radius > 0.0f ? 0.3f * radial / radius : 0.0f;
+        particle.verticalSpeed = randomRange(0.02f * height, 0.03f * height);
+        particle.scale = radius * 0.7f;
+        m_particles.append(particle);
+    }
+
+    void advanceOne()
+    {
+        for(int i = m_particles.size() - 1; i >= 0; --i)
+        {
+            BlueGasParticle& particle = m_particles[i];
+            if(--particle.lifetime == 0)
+            {
+                m_particles.removeAt(i);
+                continue;
+            }
+            if(--particle.phaseDelay == 0)
+            {
+                if(++particle.frame >= 15)
+                {
+                    m_particles.removeAt(i);
+                    continue;
+                }
+                particle.phaseDelay = 3;
+            }
+            const float sine = qSin(particle.angularStep);
+            const float cosine = qCos(particle.angularStep);
+            const float oldX = particle.offset.x();
+            const float oldY = particle.offset.y();
+            particle.offset.setX(oldX * cosine - oldY * sine);
+            particle.offset.setY(oldX * sine + oldY * cosine);
+            particle.offset.setZ(particle.offset.z() + particle.verticalSpeed);
+            particle.verticalSpeed *= 1.02f;
+            particle.scale *= 1.01f;
+            if(particle.lifetime < 8)
+                particle.alpha = qMax(0.0f, particle.alpha - 32.0f / 255.0f);
+        }
+
+        const int attempts = qMax(1, qRound(5.0f * m_bound));
+        int spawned = 0;
+        for(int attempt = 0; attempt < attempts && m_particles.size() < 500; ++attempt)
+        {
+            if((m_rng.next() % 100u) + 1u <= 80u)
+            {
+                spawn();
+                ++spawned;
+            }
+        }
+        if(spawned == 0 && m_particles.size() < 500)
+            spawn();
+    }
+
+    Isaac32 m_rng;
+    QVector<BlueGasParticle> m_particles;
+    QVector3D m_origin;
+    float m_bound{1.0f};
+    quint32 m_seed{0};
+    qint64 m_lastTick{0};
+    bool m_initialized{false};
+};
+
 } // namespace particle
 } // namespace ei
 

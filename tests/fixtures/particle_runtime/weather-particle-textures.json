@@ -103,6 +103,20 @@
       "size": 5592508,
       "textureFormat": "0x33545844",
       "width": 2048
+    },
+    {
+      "atlas": {
+        "columns": 4,
+        "phaseCount": 16,
+        "rows": 4
+      },
+      "height": 1024,
+      "mipCount": 11,
+      "name": "firearrowsmoke.mmp",
+      "sha256": "9624B8F3F769DDAD435F69D0D780BBD1F5EA7EA50DA1019E0484836FCD41466B",
+      "size": 1398204,
+      "textureFormat": "0x33545844",
+      "width": 1024
     }
   ]
 }

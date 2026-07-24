@@ -379,6 +379,9 @@ private:
     QHash<const CNode*, ei::particle::TendriEmitter> m_tendriEmitters;
     QHash<const CNode*, ei::particle::MushroomEmitter> m_mushroomEmitters;
     QHash<const CNode*, ei::particle::Blood1Emitter> m_blood1Emitters;
+    QHash<const CNode*, ei::particle::FireArrowEmitter> m_fireArrowEmitters;
+    QHash<const CNode*, ei::particle::AcidRayEmitter> m_acidRayEmitters;
+    QHash<const CNode*, ei::particle::BlueGasEmitter> m_blueGasEmitters;
     QHash<const CNode*, ei::particle::TornadoEmitter> m_tornadoEmitters;
     QHash<const CNode*, ei::particle::LightningBlastEmitter> m_lightningBlastEmitters;
     QHash<const CNode*, ei::particle::CastingEmitter> m_castingEmitters;

@@ -50,6 +50,10 @@ class ParticleBinaryReportTests(unittest.TestCase):
                          "4368616E67654865726F00")
         self.assertEqual(fixture["sites"]["rainsnow_texture_name"]["bytes"],
                          "5261696E536E6F7700")
+        self.assertEqual(fixture["sites"]["firearrowsmoke_texture_name"]["bytes"],
+                         "466972654172726F77536D6F6B6500")
+        self.assertEqual(fixture["sites"]["stench_texture_name"]["bytes"],
+                         "5374656E636800")
         self.assertEqual(fixture["constants"]["tornado_height_float"]["value"], 12.0)
         self.assertAlmostEqual(
             fixture["constants"]["tornado_speed_factor_float"]["value"], 0.2)
@@ -73,6 +77,12 @@ class ParticleBinaryReportTests(unittest.TestCase):
                          "0x0048EEA0")
         self.assertEqual(fixture["ranges"]["firewall_create_callback"]["start_va"],
                          "0x0048ED60")
+        self.assertEqual(fixture["ranges"]["firearrow_create_callback"]["start_va"],
+                         "0x0048CBA0")
+        self.assertEqual(fixture["ranges"]["acidray_create_callback"]["start_va"],
+                         "0x0048D050")
+        self.assertEqual(fixture["ranges"]["bluegas_create_callback"]["start_va"],
+                         "0x0048D420")
         self.assertIn(
             "C783E0010000D0894800C783E4010000B08D4800",
             fixture["sites"]["mushroom_callback_selection"]["bytes"],
@@ -89,6 +99,26 @@ class ParticleBinaryReportTests(unittest.TestCase):
             fixture["sites"]["blood1_alpha_table"]["bytes"],
             "000000004000000080000000C0000000FF000000FF000000FF000000",
         )
+        self.assertIn(
+            "C783E0010000A0CB4800C783E4010000D0CE4800",
+            fixture["sites"]["firearrow_callback_selection"]["bytes"],
+        )
+        self.assertIn(
+            "C783E001000050D04800C783E401000030D34800",
+            fixture["sites"]["acidray_callback_selection"]["bytes"],
+        )
+        self.assertIn(
+            "C783E001000020D44800C783E4010000F0D74800",
+            fixture["sites"]["bluegas_callback_selection"]["bytes"],
+        )
+        self.assertAlmostEqual(
+            fixture["constants"]["firearrow_head_size_float"]["value"], 0.4)
+        self.assertAlmostEqual(
+            fixture["constants"]["firearrow_early_growth_float"]["value"], 1.4)
+        self.assertAlmostEqual(
+            fixture["constants"]["bluegas_vertical_acceleration_float"]["value"], 1.02)
+        self.assertEqual(len(fixture["sites"]["acidray_width_table"]["bytes"]), 152)
+        self.assertEqual(len(fixture["sites"]["acidray_size_table"]["bytes"]), 152)
         self.assertEqual(
             fixture["ranges"]["particle_scale_mutator"]["sha256"],
             "D0328F6AB7F419CB2A8F63BF9632A1BCADFAFF9398EB70F8E59A96A3E0953E24",

@@ -1059,3 +1059,79 @@ The executable fixture also pins Blood1's alpha table as
 `0, 64, 128, 192, 255, 255, 255`. Focused tests cover deterministic replay,
 finite retirement/restart, atlas phase bounds, Blood1's fixed phase 12, and
 Firewall's phase-0-through-7 restriction.
+
+## Ordered catalog reconstruction: Firearrow, Acidray, and Bluegas
+
+The fingerprinted executable maps types 8209, 8210, and 8211 to three distinct
+factories. Their former generic orange, green, and blue circles are rejected.
+All three use ordinary source-alpha/inverse-source-alpha blending.
+
+Firearrow (type 8209) selects `FireArrowSmoke` and callbacks `0x0048CBA0` and
+`0x0048CED0`. The factory fixes one creation attempt, 15-quant particle life,
+one-quant phase timing, a 0.3 base size, and 1.03 late size growth, but also
+clears the generation flags. This is an owner-activated projectile trail, not
+an independently persistent map emitter. Once generation is enabled, the
+first particle is a 0.4-size-factor head anchored to carrier position plus
+carrier velocity and randomly selects phases 0..2. Later particles start at
+0.2 size factor in phase 2 or 3. Ordinary trail particles grow by 1.4 below
+phase 6, then by 1.03, while their stored transverse displacement grows by
+1.1; the alternate roughly 29-percent class grows only below phase 6 and
+damps its displacement by 0.95. The actual trail geometry depends on the
+owner's velocity and its two perpendicular basis vectors, neither of which is
+authored by a standalone `PARTICL` record. The catalog control must therefore
+be labeled as an explicitly activated zero-speed callback replay; inventing a
+projectile speed or direction is rejected.
+
+Acidray (type 8210) selects `AcidRay` and callbacks `0x0048D050` and
+`0x0048D330`. It creates one particle per quant at the default 100-percent
+probability, with 15-quant life, phases starting at 0 or 1, and 0.3 authored
+base size. Its 19-entry width table is
+`0, .85, .93, 1, .97, .93, .87, .8, .73, .65, .55, .43, .3, .2, 0, 0, 0, 0, 0`;
+the size table is identical except for an initial 1.1. Position is the spawn
+snapshot plus the transverse vector multiplied by authored size and the
+current width. With no moving carrier the transverse vector is exactly zero,
+so a standalone map source has a fully defined stationary pulsing-drop path at
+its authored origin. A future moving-owner fixture is required only for the
+ray's transverse geometry.
+
+Bluegas (type 8211) selects `Stench`, sets 80-percent birth probability,
+45-quant life, three quants per phase, and the carrier-required flag, then
+uses callbacks `0x0048D420` and `0x0048D7F0`. Creation fails when no carrier is
+attached. From the carrier bound it derives a horizontal radius of 0.3 times
+the bound, a height of twice the bound, and `max(1, round(5 * authoredScale))`
+attempts. Each particle begins inside that cylinder at 0.7 radius size,
+rotates around the carrier axis by an angle proportional to its starting
+radius, rises at a random 0.02..0.03 fraction of the height, accelerates that
+rise by 1.02, expands by 1.01, and loses 32 alpha units per quant during its
+last seven updates. The all-type catalog may use authored scale as an explicit
+synthetic carrier bound, as for Casting and Blood1; it is not evidence for a
+native ownerless default.
+
+The active JMV texture archive (SHA-256
+`2E8CA42FB75FAC12E5659C563C547FEE0F72D6C1B6E2E1C454B3072E3BE0703B`)
+contains `firearrowsmoke.mmp`, a 1024-square DXT3 4-by-4 atlas with payload
+SHA-256 `9624B8F3F769DDAD435F69D0D780BBD1F5EA7EA50DA1019E0484836FCD41466B`.
+`acidray.mmp` retains the previously pinned 512-square DXT3 atlas fingerprint.
+`stench.mmp` is absent from that JMV archive and resolves through the active
+Base fallback texture archive instead. That archive has SHA-256
+`79548FBD94E797FE9EDC3E990EB0231A350571B2CEF575B009FA972F0002268C`;
+its `stench.mmp` payload is a 256-square `0x00004444` texture with three mip
+levels and SHA-256
+`D2468084C3D8FFEFDD0FCC1614220A5CE43C2799AA860545BBF4CF13CB816CE5`.
+The repeatable binary and texture fixtures pin all three factories, callbacks,
+tables, constants, texture names, and archive provenance before renderer
+dispatch is enabled.
+
+### Implemented ordered controls
+
+The editor now dispatches all three IDs before the generic preview path.
+Firearrow replays the explicitly activated zero-speed callback population with
+its persistent head and phase-advancing collapsed trail; no un-authored carrier
+velocity is introduced. Acidray continuously runs its confirmed stationary
+one-particle-per-quant size-table path. Bluegas constructs the documented
+authored-scale synthetic carrier cylinder and runs its native orbit, rise,
+growth, phase, population, and terminal-alpha rules. Each path uses its own
+confirmed atlas, ordinary alpha blending, and the separate cyan selection
+marker. Focused tests pin deterministic replay, phase bounds, stationary
+Firearrow/Acidray positions, Firearrow head scale, and the bounded Bluegas
+population.
