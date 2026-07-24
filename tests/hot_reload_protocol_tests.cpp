@@ -80,6 +80,7 @@ void HotReloadProtocolTests::roundTripsBridgeControlFile()
     request.bootstrapMobSha256 = QString(64, 'c');
     request.savePath = "C:/test runs/run-19/generations/000007/saves";
     request.preservePosition = true;
+    request.graphless = true;
 
     SMapHotReloadRequest parsed;
     QStringList errors;
@@ -96,6 +97,7 @@ void HotReloadProtocolTests::roundTripsBridgeControlFile()
     QCOMPARE(parsed.bootstrapMobPath, request.bootstrapMobPath);
     QCOMPARE(parsed.savePath, request.savePath);
     QCOMPARE(parsed.preservePosition, request.preservePosition);
+    QCOMPARE(parsed.graphless, request.graphless);
 }
 
 QTEST_APPLESS_MAIN(HotReloadProtocolTests)

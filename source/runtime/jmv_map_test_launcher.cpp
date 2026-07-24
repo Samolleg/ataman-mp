@@ -1439,6 +1439,8 @@ bool CJmvMapTestLauncher::launch(const SJmvMapTestLaunchInput& input, QString* e
     environment.insert("EI_MAPPER_ENDURANCE_SKIP_INTROS", "1");
     environment.insert("EI_MAPPER_ENDURANCE_HOT_RELOAD_REQUEST", m_hotReloadRequestPath);
     environment.insert("EI_MAPPER_ENDURANCE_HOT_RELOAD_THREAD", m_hotReloadThreadPath);
+    environment.insert("EI_MAPPER_ENDURANCE_GRAPHLESS",
+                       input.allowMissingAiGraph ? "1" : "0");
     if(!m_supplementalMobDirectory.isEmpty())
         environment.insert("EI_MAPPER_ENDURANCE_SUPPLEMENTAL_MOB_DIR",
                            m_supplementalMobDirectory);
@@ -2102,6 +2104,7 @@ bool CJmvMapTestLauncher::hotReload(const SJmvMapTestLaunchInput& input,
     // Position preservation requires a verified runtime position provider.
     // Until that provider exists, use normal entrance/custom-spawn bootstrap.
     request.preservePosition = false;
+    request.graphless = graphSource.missing;
     QStringList validationErrors;
     if(!validateMapHotReloadRequest(request, m_runRoot, &validationErrors))
     {

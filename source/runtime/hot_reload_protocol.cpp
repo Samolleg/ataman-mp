@@ -39,6 +39,7 @@ QJsonObject mapHotReloadRequestToJson(const SMapHotReloadRequest& request)
     object.insert("bootstrapMobSha256", request.bootstrapMobSha256);
     object.insert("savePath", request.savePath);
     object.insert("preservePosition", request.preservePosition);
+    object.insert("graphless", request.graphless);
     return object;
 }
 
@@ -70,6 +71,7 @@ bool mapHotReloadRequestFromJson(const QJsonObject& object,
     parsed.bootstrapMobSha256 = object.value("bootstrapMobSha256").toString();
     parsed.savePath = object.value("savePath").toString();
     parsed.preservePosition = object.value("preservePosition").toBool();
+    parsed.graphless = object.value("graphless").toBool();
     if(!sequenceValid && errors) errors->append("Hot-reload sequence is invalid.");
     if(!generationValid && errors) errors->append("Hot-reload generation is invalid.");
     if(!stateSequenceValid && errors) errors->append("Runtime-state sequence is invalid.");
@@ -146,6 +148,7 @@ QByteArray mapHotReloadRequestToControlBytes(const SMapHotReloadRequest& request
     line("bootstrapMobSha256", request.bootstrapMobSha256.toLower());
     line("savePath", QDir::toNativeSeparators(request.savePath));
     line("preservePosition", request.preservePosition ? "1" : "0");
+    line("graphless", request.graphless ? "1" : "0");
     stream.flush();
     return bytes;
 }
@@ -194,6 +197,7 @@ bool mapHotReloadRequestFromControlBytes(const QByteArray& bytes,
     parsed.bootstrapMobSha256 = values.value("bootstrapMobSha256");
     parsed.savePath = QDir::fromNativeSeparators(values.value("savePath"));
     parsed.preservePosition = values.value("preservePosition") == "1";
+    parsed.graphless = values.value("graphless") == "1";
     if(!protocolOk || !sequenceOk || !generationOk || !stateSequenceOk || !entranceOk)
     {
         if(errors) errors->append("Hot-reload control numeric fields are invalid.");

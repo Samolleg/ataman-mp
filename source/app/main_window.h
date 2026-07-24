@@ -129,6 +129,8 @@ private:
     void closeHotReloadProgress();
     QVector<SMapSpawnObstacle> mapTestObstacles() const;
     const SMapTravelZone* selectedTravelZone() const;
+    bool automaticLooseMapBootstrap(SMapCatalogEntry* entry,
+                                    SMapTravelZone* entrance) const;
     SResourceProfileEvaluation activeResourceProfile() const;
     QString activeProfileDisplayName() const;
     SMobFamilyValidationRequest mobFamilyValidationRequest();

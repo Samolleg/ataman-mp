@@ -1687,7 +1687,7 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event)
             if(mouse->button() == Qt::LeftButton)
             {
                 const SMapTravelZone* entrance = selectedTravelZone();
-                if(!entrance)
+                if(!entrance && !m_mapTestEntry.zoneId.isEmpty())
                 {
                     m_playFromHereButton->setChecked(false);
                     return true;
@@ -1699,7 +1699,8 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event)
                     return true;
                 }
                 SMapSpawnPlan plan = CMapSpawnPlanner::chooseCustom(
-                    QPointF(requested.x(), requested.y()), entrance->exitId,
+                    QPointF(requested.x(), requested.y()),
+                    entrance ? entrance->exitId : 1,
                     mapTestObstacles());
                 QVector3D resolved(plan.position.x(), plan.position.y(), 0.0f);
                 if(!plan.valid || !CLandscape::getInstance()->projectPt(resolved))
@@ -1841,6 +1842,38 @@ const SMapTravelZone* MainWindow::selectedTravelZone() const
     const int index = m_entranceCombo->currentData().toInt();
     return index >= 0 && index < m_validEntrances.size()
         ? &m_validEntrances[index] : nullptr;
+}
+
+bool MainWindow::automaticLooseMapBootstrap(SMapCatalogEntry* selectedEntry,
+                                            SMapTravelZone* selectedEntrance) const
+{
+    if(!selectedEntry || !selectedEntrance)
+        return false;
+    int bestScore = -1;
+    for(const SMapCatalogEntry& entry : m_mapCatalog.entries)
+    {
+        if(entry.zoneId.isEmpty()
+           || entry.zoneType.compare("game", Qt::CaseInsensitive) != 0)
+            continue;
+        for(const SMapTravelZone& entrance : entry.travelZones)
+        {
+            if(entrance.exitId <= 0 || !entrance.hasDeployRectangle
+               || entrance.deployRectangle.normalized().isEmpty())
+                continue;
+            int score = 10;
+            if(entry.mprName.compare("zone1", Qt::CaseInsensitive) == 0)
+                score += 20;
+            if(entry.zoneId.compare("gz1g", Qt::CaseInsensitive) == 0)
+                score += 30;
+            if(score > bestScore)
+            {
+                bestScore = score;
+                *selectedEntry = entry;
+                *selectedEntrance = entrance;
+            }
+        }
+    }
+    return bestScore >= 0;
 }
 
 void MainWindow::populateEntranceCombo()
@@ -2029,7 +2062,7 @@ void MainWindow::setCustomSpawnPicking(bool enabled)
         updateOutlinerSelectionPath();
         return;
     }
-    if(!selectedTravelZone())
+    if(!selectedTravelZone() && !m_mapTestEntry.zoneId.isEmpty())
     {
         QSignalBlocker blocker(m_playFromHereButton);
         m_playFromHereButton->setChecked(false);
@@ -2362,10 +2395,16 @@ void MainWindow::updateMapTestAction()
     const bool isBaseProbe = profile.profileId.compare("base-game", Qt::CaseInsensitive) == 0;
     const bool hasMobs = m_pView && m_pView->hasActiveMob()
             && !m_pView->mobs().isEmpty() && CLandscape::getInstance()->isMprLoad();
-    const bool hasPair = hasMobs && (isJmv || m_pView->mobs().size() == 1);
+    const bool looseCompositionValid = !isJmv || !m_mapTestEntry.zoneId.isEmpty()
+        || (m_pView && m_pView->mobs().size() == 1);
+    const bool hasPair = hasMobs && (isJmv || m_pView->mobs().size() == 1)
+        && looseCompositionValid;
     const bool hasEntrance = selectedTravelZone() != nullptr;
     const bool customForCurrentMap = m_customSpawn.valid && m_customSpawn.custom
         && m_customSpawnContextKey == currentMapContextKey();
+    const bool loosePairReady = isJmv && m_mapTestEntry.zoneId.isEmpty()
+        && customForCurrentMap && !m_pickSpawnPending;
+    const bool hasBootstrap = hasEntrance || loosePairReady;
     const bool customRequested = customForCurrentMap
         || (m_playFromHereButton && m_playFromHereButton->isChecked());
     const bool customReady = !customRequested
@@ -2375,7 +2414,8 @@ void MainWindow::updateMapTestAction()
         && profile.runtimeStackValidated;
     if(m_mapTestLauncher && m_mapTestLauncher->isRunning())
     {
-        const bool canConfigureReload = isJmv && profileReady && hasPair && hasEntrance;
+        const bool canEditTestSetup = isJmv && profileReady && hasPair;
+        const bool canConfigureReload = canEditTestSetup && hasBootstrap;
         const bool runtimeReady = m_mapTestLauncher->isHotReloadReady();
         const bool pendingReload = m_mapTestLauncher->isHotReloadPending();
         const QString runtimeState = m_mapTestLauncher->runtimeState();
@@ -2389,10 +2429,10 @@ void MainWindow::updateMapTestAction()
         m_mapTestAction->setEnabled(canHotReload);
         m_stopMapTestAction->setEnabled(true);
         if(m_entranceCombo)
-            m_entranceCombo->setEnabled(canConfigureReload && !customRequested);
+            m_entranceCombo->setEnabled(canEditTestSetup && !customRequested);
         if(m_gotoEntranceButton) m_gotoEntranceButton->setEnabled(canConfigureReload);
-        if(m_playFromHereButton) m_playFromHereButton->setEnabled(canConfigureReload);
-        if(m_godmodeCheckBox) m_godmodeCheckBox->setEnabled(canConfigureReload);
+        if(m_playFromHereButton) m_playFromHereButton->setEnabled(canEditTestSetup);
+        if(m_godmodeCheckBox) m_godmodeCheckBox->setEnabled(canEditTestSetup);
         m_mapTestAction->setToolTip(canHotReload
             ? tr("Restage the exact editor pair and reload it in the Endurance-owned JMV process (Ctrl+F5).\nRuntime state: %1\nSave generation: %2")
                 .arg(runtimeState).arg(saveGeneration)
@@ -2412,13 +2452,13 @@ void MainWindow::updateMapTestAction()
     // provider. Base keeps the picker unavailable until it has an equivalent
     // exact-hash runtime position provider.
     m_mapTestAction->setEnabled(!recoveryPending && profileReady && hasPair
-                                && hasEntrance && customReady);
+                                && hasBootstrap && customReady);
     if(m_entranceCombo)
         m_entranceCombo->setEnabled(hasPair && !customRequested &&
             (!m_validEntrances.isEmpty() || m_entranceCombo->findData(-1) >= 0));
     if(m_gotoEntranceButton)
-        m_gotoEntranceButton->setEnabled(hasPair && hasEntrance);
-    if(m_playFromHereButton) m_playFromHereButton->setEnabled(isJmv && hasPair && hasEntrance);
+        m_gotoEntranceButton->setEnabled(hasPair && (hasEntrance || customForCurrentMap));
+    if(m_playFromHereButton) m_playFromHereButton->setEnabled(isJmv && hasPair);
     if(m_godmodeCheckBox) m_godmodeCheckBox->setEnabled(isJmv && hasPair);
     if(recoveryPending)
         m_mapTestAction->setToolTip(interruptedRun.isEmpty()
@@ -2439,8 +2479,10 @@ void MainWindow::updateMapTestAction()
         m_mapTestAction->setToolTip(isJmv
             ? tr("Load one MPR and at least one MOB before launching a map test.")
             : tr("The Base probe requires exactly one MPR/MOB pair."));
-    else if(!hasEntrance)
-        m_mapTestAction->setToolTip(tr("Select a valid map.txt entrance or explicitly borrow a registered map identity."));
+    else if(!hasBootstrap)
+        m_mapTestAction->setToolTip(isJmv && m_mapTestEntry.zoneId.isEmpty()
+            ? tr("This loose MPR/MOB pair has no map.txt identity. Place Play from Here, or explicitly borrow a registered map identity.")
+            : tr("Select a valid map.txt entrance or explicitly borrow a registered map identity."));
     else if(!customReady)
         m_mapTestAction->setToolTip(tr("Finish placing the JMV custom entrance before launching the map test."));
     else
@@ -2507,19 +2549,49 @@ void MainWindow::launchCurrentMapTest()
     progress->setValue(2);
     QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
 
-    const SMapCatalogEntry entry = m_mapTestEntry;
+    SMapCatalogEntry entry = m_mapTestEntry;
+    SMapTravelZone looseBootstrapEntrance;
     const SMapTravelZone* entrance = selectedTravelZone();
-    if(entry.zoneId.isEmpty() || !entrance)
+    const bool customForCurrentMap = m_customSpawn.valid && m_customSpawn.custom
+        && m_customSpawnContextKey == currentMapContextKey();
+    const bool loosePair = entry.zoneId.isEmpty();
+    if(loosePair)
+    {
+        if(!isJmv || m_pView->mobs().size() != 1)
+        {
+            QMessageBox::warning(this, tr("Loose map test"),
+                tr("An unmapped test requires exactly one loaded MPR and one loaded MOB. Use a collection or map.txt mapping for supplemental MOB sets."));
+            return;
+        }
+        if(!customForCurrentMap)
+        {
+            QMessageBox::warning(this, tr("Loose map test"),
+                tr("This MPR/MOB pair has no map.txt identity. Place a Play from Here entrance before starting the test."));
+            return;
+        }
+        if(!automaticLooseMapBootstrap(&entry, &looseBootstrapEntrance))
+        {
+            QMessageBox::warning(this, tr("Loose map test"),
+                tr("The active profile has no valid gameplay map.txt entrance that can initialize a temporary player session."));
+            return;
+        }
+        entrance = &looseBootstrapEntrance;
+        ei::log(eLogWarning, QString("Loose MPR/MOB test has no map.txt mapping; using bootstrap identity zone:%1 exit:%2 mpr:%3 mob:%4")
+            .arg(entry.zoneId).arg(entrance->exitId)
+            .arg(landscape->filePath().absoluteFilePath(),
+                 m_pView->currentMob()->filePath().absoluteFilePath()));
+    }
+    else if(!entrance)
     {
         QMessageBox::warning(this, tr("JMV test launch"),
-            tr("No travel/deploy zone was found for the loaded MPR in the active map table. Endurance will not guess a player spawn."));
+            tr("No travel/deploy zone was found for the loaded MPR in the active map table. Select a valid entrance."));
         return;
     }
     progress->setLabelText(tr("Choosing a safe map-table entrance..."));
     progress->setValue(3);
     QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
 
-    CMob* mob = nullptr;
+    CMob* mob = loosePair ? m_pView->currentMob() : nullptr;
     const QString expectedMain = entry.mobName;
     for(CMob* candidate : m_pView->mobs())
     {
@@ -2540,14 +2612,14 @@ void MainWindow::launchCurrentMapTest()
             tr("The Base probe currently accepts exactly one MOB. Supplemental MOB redirection is JMV-only."));
         return;
     }
-    const bool customForCurrentMap = m_customSpawn.valid && m_customSpawn.custom
-        && m_customSpawnContextKey == currentMapContextKey();
     if(m_customSpawn.valid && m_customSpawn.custom && !customForCurrentMap)
         ei::log(eLogWarning, QString("Ignored stale Play from Here spawn context:%1 active:%2")
             .arg(m_customSpawnContextKey, currentMapContextKey()));
-    const SMapSpawnPlan spawn = customForCurrentMap
+    SMapSpawnPlan spawn = customForCurrentMap
         ? m_customSpawn
         : CMapSpawnPlanner::chooseEntrance(*entrance, mapTestObstacles());
+    if(loosePair)
+        spawn.exitId = entrance->exitId;
     if(!spawn.valid)
     {
         QMessageBox::warning(this, tr("JMV test launch"),
@@ -2590,7 +2662,7 @@ void MainWindow::launchCurrentMapTest()
         QMessageBox graphWarning(QMessageBox::Warning,
             tr("AI graph not found"),
             tr("The primary MOB has no embedded AI_GRAPH and no matching %1.grp was found beside the open MPR or in the active profile Maps folders.\n\n"
-               "The game may rebuild navigation at runtime, but units can also navigate incorrectly or fail to move. The source map will not be changed.\n\n"
+               "Endurance can temporarily use the runtime's graph-generator loading exception for this owned test process. It does not generate a graph: AI navigation and graph-dependent behavior may be unavailable or unreliable. The source map will not be changed.\n\n"
                "Start anyway?")
                 .arg(landscape->filePath().completeBaseName()),
             QMessageBox::NoButton, this);
@@ -2635,12 +2707,16 @@ void MainWindow::launchCurrentMapTest()
         ? tr("its checked clear point is (%1, %2)")
               .arg(spawn.position.x(), 0, 'f', 2).arg(spawn.position.y(), 0, 'f', 2)
         : tr("the editor could not prove that its center is clear, so the game will perform the final deployment");
-    const QString confirmation = isJmv ? tr(
+    QString confirmation = isJmv ? tr(
         "This experimental JMV-only test stages the exact current MPR/MOB pair, including unsaved in-memory edits, under a unique temporary name. After JMV completes its normal menu load, Endurance invokes the fingerprinted single-player New Game path on the game thread and supplies the staged pair. No console/server command or fixed delay is used.\n\n"
         "JMV initializes one normal player through map-table zone %1 and hand-placed entrance %2; %3.\n\n"
         "Source maps, JMV configuration, and live campaign saves are not changed. Complete payloads remain under Endurance AppData; the proven JMV loader also uses one randomly named, hash-owned MPR/MOB alias in the mod Maps directory and removes it on guarded cleanup. Every save/load path is redirected into a persistent profile-specific AppData folder shared by Endurance test runs. Intro movies are hidden only for the test process. Returning to the menu or travelling away may use original installed maps; use Stop Test when finished.\n\nStart the direct JMV map test?")
         .arg(entry.zoneId).arg(spawn.exitId).arg(entranceAssessment)
         : tr("This exact-hash Base EI feasibility probe uses an editor-owned 32-bit host. It creates Base game.exe suspended, loads the run-local bridge only into that owned process, calls its explicit initializer outside DllMain, and resumes only after fingerprint and byte guards pass.\n\nRun the probe levels in order. Source maps and the Base game installation are not modified.\n\nContinue to probe-level selection?");
+    if(loosePair)
+        confirmation.prepend(tr(
+            "LOOSE MAP WARNING: this MPR/MOB pair has no map.txt entry. Endurance will borrow zone %1 only to initialize the player session, then move the player to the Play from Here position. Minimap, quest, travel, save identity, weather, and scripts that depend on the zone identity may describe the borrowed zone.\n\n")
+            .arg(entry.zoneId));
     constexpr int kMapTestWarningVersion = 4;
     COptInt* warningVersion = dynamic_cast<COptInt*>(
                 m_settings->opt(eOptSetGeneral, "mapTestWarningVersion"));
@@ -2690,7 +2766,7 @@ void MainWindow::launchCurrentMapTest()
     input.godmode = isJmv && m_godmodeCheckBox && m_godmodeCheckBox->isChecked();
     input.overrideWorldTime = isJmv && m_pView->overridesWorldTime();
     input.worldTimeHours = m_pView->effectiveWorldTimeHours();
-    input.borrowedMapIdentity = m_borrowedMapIdentity;
+    input.borrowedMapIdentity = m_borrowedMapIdentity || loosePair;
     input.allowMissingAiGraph = allowMissingAiGraph;
     if(isBase && !hotReloadRequested)
     {

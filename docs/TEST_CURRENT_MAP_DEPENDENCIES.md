@@ -12,10 +12,16 @@ Both Base EI and JMV require:
 - a loaded, validated MPR and primary MOB;
 - preferably an embedded primary-MOB `AI_GRAPH`, or a structurally valid
   external `.grp` matching the selected MPR basename. If neither exists, the
-  user may explicitly accept a graphless test; a present but malformed graph
-  remains a staging error;
-- a usable `map.txt` identity and selected entrance, or a valid Play from Here
-  position;
+  user may explicitly accept a graphless test. Endurance then applies the
+  shipped runtime layout's byte-guarded graph-loader exception around only the
+  staged loader call and restores the original bytes immediately afterward.
+  This loads an empty graph; it does not regenerate navigation. A present but
+  malformed graph remains a staging error;
+- a usable `map.txt` identity and selected entrance. JMV additionally accepts
+  one loose MPR plus one MOB with no mapping when a valid Play from Here point
+  is placed; it borrows a deterministic gameplay identity only for player
+  bootstrap. MPR-only, MOB-only, and unmapped multi-MOB compositions are not
+  launchable;
 - the packaged `runtime/EIMapperEnduranceRuntimeHost.exe`;
 - the packaged `runtime/EIMapperEnduranceJmvBridge.plg`;
 - writable Endurance test-run storage under `%LOCALAPPDATA%`;
@@ -107,8 +113,17 @@ dimensions and exact byte length, then stages an unchanged sibling copy beside
 the temporary MPR. Every hot-reload generation receives its own immutable
 `map.grp`. Source graph files are never modified, and graph regeneration is
 not part of this staging feature. If no graph source exists, Endurance warns
-about possible navigation failures and requires **Start Anyway** confirmation.
-The graphless decision is recorded in the manifest and workflow/runtime log.
+that the runtime exception supplies no navigation data and requires **Start
+Anyway** confirmation. The exact-hash bridge temporarily bypasses the graph
+requirement only for the staged loader invocation and restores it before normal
+runtime operation continues. The graphless decision and restoration outcome
+are recorded in the manifest and workflow/runtime log.
+
+An unmapped loose JMV pair must have a current Play from Here point. Endurance
+does not guess the landscape center because it may be obstructed, outside the
+playable area, or vertically unsuitable. The borrowed bootstrap identity still
+owns minimap, quest, travel, save-zone, weather, and identity-sensitive script
+metadata, so the editor logs and confirms that mismatch before launch.
 
 Base and JMV share the owned-process delivery mechanism. Profile-specific game
 data, map conventions, bootstrap behavior, and optional providers remain

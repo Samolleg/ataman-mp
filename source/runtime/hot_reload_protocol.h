@@ -25,6 +25,7 @@ struct SMapHotReloadRequest
     QString bootstrapMobSha256;
     QString savePath;
     bool preservePosition{false};
+    bool graphless{false};
 };
 
 QJsonObject mapHotReloadRequestToJson(const SMapHotReloadRequest& request);
