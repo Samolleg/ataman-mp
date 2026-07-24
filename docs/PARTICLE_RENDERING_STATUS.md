@@ -86,6 +86,7 @@ covering the selected JMV corpus.
 | 8216 / `0x2018` | Clayring | Dedicated finite ten-source expanding/rotating ground ring with native anchor/trail populations, exact radius/alpha tables, phase/scale/offset decay, `ClayRing` atlas and additive blending. The editor repeats the completed one-shot for catalog inspection. | Validate non-flat terrain snapping and a negative authored-scale control; the positive flat catalog path is closed. |
 | 8217 / `0x2019` | Teleport | Dedicated finite signed radial column with native radial distribution, dual phase bands, vertical/alpha evolution, population limits and `Teleport` atlas using ordinary alpha blending. The editor repeats the completed one-shot for catalog inspection. | Capture a negative authored-scale game control; both signed callback paths are implemented from binary evidence. |
 | 8218 / `0x201A` | Antimagic | Dedicated short-lived rotating carrier shell with native 24-attempt cadence, four-quant life, six-entry scale table, rare size class, `AntiMagic` atlas and additive blending. The catalog uses authored scale as an explicit synthetic carrier bound. | Capture an attached carrier with a native bounding volume; the stationary synthetic-bound control is closed. |
+| 8219–8230 / `0x201B`–`0x2026` | Modifier1–Modifier12 | Dedicated finite carrier-source family with subtype phases/axes, signed contraction or expansion, anchor and trail populations, exact alpha/scale evolution, `Stun` atlas and additive blending. The catalog uses authored scale and identity orientation as an explicit synthetic carrier. | Capture representative attached carriers to validate their actual bounds and direction; the complete identity-carrier controls are implemented. |
 
 ## Preview-only families
 
@@ -114,7 +115,6 @@ still require both native reverse engineering and a dedicated renderer:
 
 | IDs | Names |
 |---|---|
-| 8219–8230 | Modifier1 through Modifier12 |
 | 8241–8247 | Blood2, Blood3, Blood4, A4bloodred, A4bloodgreen, A4bloodblue, A4bloodblack |
 | 8248–8252 | Zoneexit, Path, Pathdestination, Pathfailed, Moshka |
 | 8255–8256 | Cylinder1, Cylinder2 |

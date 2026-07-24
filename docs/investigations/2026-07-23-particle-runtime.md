@@ -1313,3 +1313,44 @@ not used to approximate Antimagic or implemented as part of this control.
 The selected JMV texture archive does not override `antimagic.mmp`; the active
 resource therefore resolves the Base 256-square, three-mip atlas with payload
 SHA-256 `64DF1A10242CAF1A1616E0BCF75666F634A155095BAD727FD3E2312A34C3C30E`.
+
+## Ordered catalog reconstruction: Modifier1 through Modifier12
+
+Types 8219..8230 (`0x201B..0x2026`) all select factory range
+`0x0048745F..0x004874B0`, callbacks `0x00490130`, `0x00490990`, and
+`0x00490B00`, the `Stun` atlas, additive blending, 80 creation attempts,
+capacity 500, nominal life 14, and two quants per phase. The create callback
+requires a carrier in the native path. It allocates
+`max(1, round(abs(authoredScale) * 10))` local sources and derives their radius
+from half the carrier bounding-box diagonal. A standalone catalog record does
+not supply either the carrier bounds or its orientation; the editor control
+therefore uses absolute authored scale as an explicit synthetic carrier radius
+and an identity carrier orientation.
+
+Each source starts on a random direction perpendicular to a subtype axis. For
+Modifier1 the axis is world Z. Modifier2 and Modifier3 use world Z and lift the
+source center by `.4 * carrierDiameter`; Modifier4 lowers it by the same amount.
+Modifier5..Modifier8 use the carrier's rotated local +Y direction (world +Y
+for the documented identity synthetic carrier). Modifier9..Modifier12 use no rejection axis and
+therefore distribute sources over the sphere. All source centers are additionally
+raised by one carrier radius. Positive authored scale starts at full carrier
+diameter and contracts direction by `1 / 1.4` per local update. Negative scale
+starts at `1 / 23` of that diameter and expands by `1.4`. Sources update ten
+times, then clear generation.
+
+The first creation pass occurs before the newly allocated sources have received
+a local update. Its first `sourceCount` successful attempts create 25-quant
+source anchors in phase 0..11 according to Modifier subtype. Positive anchors
+start at scale `.125`, grow by `1.07` per update, and take alpha from
+`0,32,64,128,255,255,255,255,255,255,255,128,0`; negative anchors start at
+scale `.2`, multiply by `.9345793724`, and use
+`0,128,255,255,255,255,255,255,192,128,64,32,0`. Remaining births choose a
+random source segment, use phases 12..15, life five, scale `.06`, random
+`+/- .04` offsets, then damp offset and scale by `.9` and subtract 48 alpha
+units per update. Their birth alpha follows source age through
+`0,32,64,128,255,207,159,111,63,15,0`.
+
+The active JMV `stun.mmp` is a 1024-square, 11-mip DXT3 atlas with payload
+SHA-256 `2A2084F1DC9A0A2F1946A36F3D7C54D510E3A51BD39B2351EF3354AF83E51170`.
+The separately fingerprinted Base fallback is 256-square DXT3. These confirmed
+rules replace neither Antimagic nor any generic marker preview.

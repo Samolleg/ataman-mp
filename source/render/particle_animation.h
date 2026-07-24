@@ -2134,6 +2134,276 @@ public:
     AntimagicEmitter() : SphereShellEmitter(Kind::Antimagic) {}
 };
 
+struct ModifierSource
+{
+    QVector3D position;
+    QVector3D previous;
+    QVector3D direction;
+    int age{0};
+};
+
+struct ModifierParticle
+{
+    QVector3D position;
+    QVector3D segmentPoint;
+    QVector3D jitter;
+    float scale{0.06f};
+    float alpha{0.0f};
+    int lifetime{5};
+    int frame{12};
+    int phaseDelay{2};
+    int source{-1};
+    bool anchor{false};
+};
+
+class ModifierEmitter
+{
+public:
+    static constexpr int kPreviewCycleTicks = 48;
+
+    void advanceTo(qint64 logicalTick, quint32 seed, const QVector3D& origin,
+                   float signedAuthoredScale, int subtype)
+    {
+        subtype = qBound(1, subtype, 12);
+        const float scale = qFuzzyIsNull(signedAuthoredScale)
+            ? 1.0f : signedAuthoredScale;
+        const int cycleTick = int(logicalTick % kPreviewCycleTicks);
+        if(!m_initialized || seed != m_seed || cycleTick < m_cycleTick
+                || subtype != m_subtype || !qFuzzyCompare(scale, m_authoredScale))
+            reset(seed, origin, scale, subtype);
+        m_origin = origin;
+        while(m_cycleTick < cycleTick)
+        {
+            advanceOne();
+            ++m_cycleTick;
+        }
+    }
+
+    QVector<EffectRenderSample> samples() const
+    {
+        QVector<EffectRenderSample> result;
+        result.reserve(m_particles.size());
+        for(const ModifierParticle& particle : m_particles)
+        {
+            EffectRenderSample sample;
+            sample.position = particle.position;
+            sample.scale = billboardDiameter(particle.scale);
+            sample.alpha = particle.alpha;
+            sample.frame = particle.frame;
+            result.append(sample);
+        }
+        return result;
+    }
+
+    int activeCount() const { return m_particles.size(); }
+
+private:
+    static float birthAlpha(int age)
+    {
+        static constexpr std::array<int, 11> values = {
+            0, 32, 64, 128, 255, 207, 159, 111, 63, 15, 0
+        };
+        return float(values[size_t(qBound(0, age, 10))]) / 255.0f;
+    }
+
+    static float anchorAlpha(int age, bool negative)
+    {
+        static constexpr std::array<int, 13> positive = {
+            0, 32, 64, 128, 255, 255, 255, 255, 255, 255, 255, 128, 0
+        };
+        static constexpr std::array<int, 13> negativeValues = {
+            0, 128, 255, 255, 255, 255, 255, 255, 192, 128, 64, 32, 0
+        };
+        const auto& values = negative ? negativeValues : positive;
+        return float(values[size_t(qBound(0, age, 12))]) / 255.0f;
+    }
+
+    float randomRange(float low, float high)
+    {
+        return low + (high - low) * m_rng.unit();
+    }
+
+    QVector3D randomSourceDirection(const QVector3D& axis)
+    {
+        for(int attempt = 0; attempt < 32; ++attempt)
+        {
+            QVector3D value(randomRange(-1.0f, 1.0f),
+                            randomRange(-1.0f, 1.0f),
+                            randomRange(-1.0f, 1.0f));
+            if(!axis.isNull())
+                value -= axis * QVector3D::dotProduct(axis, value);
+            if(value.lengthSquared() > 0.000001f)
+                return value.normalized();
+        }
+        return axis.isNull() ? QVector3D(0.0f, 0.0f, 1.0f)
+                             : QVector3D(1.0f, 0.0f, 0.0f);
+    }
+
+    void reset(quint32 seed, const QVector3D& origin, float signedAuthoredScale,
+               int subtype)
+    {
+        m_seed = seed;
+        m_rng.reset(seed ^ (0x4D4F4400u + quint32(subtype)));
+        m_origin = origin;
+        m_authoredScale = signedAuthoredScale;
+        m_subtype = subtype;
+        m_particles.clear();
+        m_sources.clear();
+        const float radius = qMax(0.001f, qAbs(m_authoredScale));
+        const float diameter = 2.0f * radius;
+        const int sourceCount = qMax(1, qRound(qAbs(m_authoredScale) * 10.0f));
+        QVector3D axis;
+        if(m_subtype <= 4)
+            axis = QVector3D(0.0f, 0.0f, 1.0f);
+        else if(m_subtype <= 8)
+            axis = QVector3D(0.0f, 1.0f, 0.0f);
+        float centerZ = radius;
+        if(m_subtype == 2 || m_subtype == 3)
+            centerZ += 0.4f * diameter;
+        else if(m_subtype == 4)
+            centerZ -= 0.4f * diameter;
+        const float initialLength = m_authoredScale < 0.0f
+            ? diameter / 23.0f : diameter;
+        m_sources.reserve(sourceCount);
+        for(int i = 0; i < sourceCount; ++i)
+        {
+            ModifierSource source;
+            source.direction = randomSourceDirection(axis) * initialLength;
+            source.position = m_origin + source.direction
+                + QVector3D(0.0f, 0.0f, centerZ);
+            source.previous = source.position;
+            m_sources.append(source);
+        }
+        m_generating = true;
+        m_firstCreationPass = true;
+        m_cycleTick = 0;
+        m_initialized = true;
+    }
+
+    void updateSources()
+    {
+        const float radius = qMax(0.001f, qAbs(m_authoredScale));
+        const float diameter = 2.0f * radius;
+        float centerZ = radius;
+        if(m_subtype == 2 || m_subtype == 3)
+            centerZ += 0.4f * diameter;
+        else if(m_subtype == 4)
+            centerZ -= 0.4f * diameter;
+        const float factor = m_authoredScale < 0.0f ? 1.4f : 1.0f / 1.4f;
+        for(ModifierSource& source : m_sources)
+        {
+            const int oldAge = source.age++;
+            if(oldAge >= 10)
+            {
+                m_generating = false;
+                continue;
+            }
+            source.previous = source.position;
+            source.position = m_origin + source.direction
+                + QVector3D(0.0f, 0.0f, centerZ);
+            source.direction *= factor;
+        }
+    }
+
+    void spawn(int number)
+    {
+        if(m_sources.isEmpty())
+            return;
+        ModifierParticle particle;
+        const int age = m_sources[0].age;
+        particle.alpha = birthAlpha(age);
+        if(age == 0 && number < m_sources.size())
+        {
+            particle.position = m_sources[number].position;
+            particle.scale = m_authoredScale < 0.0f ? 0.2f : 0.125f;
+            particle.lifetime = 25;
+            particle.frame = m_subtype - 1;
+            particle.source = number;
+            particle.anchor = true;
+            m_particles.append(particle);
+            return;
+        }
+
+        const int sourceIndex = int(m_rng.next() % quint32(m_sources.size()));
+        const float part = m_rng.unit();
+        const ModifierSource& source = m_sources[sourceIndex];
+        particle.segmentPoint = source.position * part
+            + source.previous * (1.0f - part);
+        particle.jitter = QVector3D(randomRange(-0.04f, 0.04f),
+                                    randomRange(-0.04f, 0.04f),
+                                    randomRange(-0.04f, 0.04f));
+        particle.position = source.previous;
+        particle.frame = 12 + int(m_rng.next() & 3u);
+        m_particles.append(particle);
+    }
+
+    void updateParticles()
+    {
+        const bool negative = m_authoredScale < 0.0f;
+        const float anchorFactor = negative ? 0.9345793724060059f : 1.0700000524520874f;
+        for(int i = m_particles.size() - 1; i >= 0; --i)
+        {
+            ModifierParticle& particle = m_particles[i];
+            if(--particle.lifetime == 0)
+            {
+                m_particles.removeAt(i);
+                continue;
+            }
+            if(particle.anchor)
+            {
+                const ModifierSource& source = m_sources[particle.source];
+                particle.position = source.position;
+                particle.scale *= anchorFactor;
+                particle.alpha = anchorAlpha(source.age, negative);
+                continue;
+            }
+            if(--particle.phaseDelay == 0)
+            {
+                if(++particle.frame >= 16)
+                    particle.frame = 12;
+                particle.phaseDelay = 2;
+            }
+            particle.jitter *= 0.9f;
+            particle.position = particle.segmentPoint + particle.jitter;
+            particle.scale *= 0.9f;
+            particle.alpha = qMax(0.0f, particle.alpha - 48.0f / 255.0f);
+        }
+    }
+
+    void spawnPass()
+    {
+        if(!m_generating)
+            return;
+        for(int attempt = 0; attempt < 80 && m_particles.size() < 500; ++attempt)
+            spawn(attempt);
+    }
+
+    void advanceOne()
+    {
+        if(m_firstCreationPass)
+        {
+            spawnPass();
+            m_firstCreationPass = false;
+            return;
+        }
+        updateSources();
+        updateParticles();
+        spawnPass();
+    }
+
+    Isaac32 m_rng;
+    QVector<ModifierSource> m_sources;
+    QVector<ModifierParticle> m_particles;
+    QVector3D m_origin;
+    float m_authoredScale{1.0f};
+    quint32 m_seed{0};
+    int m_subtype{1};
+    int m_cycleTick{0};
+    bool m_generating{true};
+    bool m_firstCreationPass{true};
+    bool m_initialized{false};
+};
+
 struct ClayRingSource
 {
     QVector3D position;

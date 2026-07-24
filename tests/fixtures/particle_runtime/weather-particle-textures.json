@@ -201,6 +201,20 @@
       "size": 1398204,
       "textureFormat": "0x33545844",
       "width": 1024
+    },
+    {
+      "atlas": {
+        "columns": 4,
+        "phaseCount": 16,
+        "rows": 4
+      },
+      "height": 1024,
+      "mipCount": 11,
+      "name": "stun.mmp",
+      "sha256": "2A2084F1DC9A0A2F1946A36F3D7C54D510E3A51BD39B2351EF3354AF83E51170",
+      "size": 1398204,
+      "textureFormat": "0x33545844",
+      "width": 1024
     }
   ]
 }

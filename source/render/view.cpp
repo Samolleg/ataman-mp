@@ -2620,6 +2620,9 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
     QOpenGLTexture* antimagicTexture = textures->texture("antimagic");
     if(antimagicTexture == fallbackTexture)
         antimagicTexture = nullptr;
+    QOpenGLTexture* stunTexture = textures->texture("stun");
+    if(stunTexture == fallbackTexture)
+        stunTexture = nullptr;
     QOpenGLTexture* clayRingTexture = textures->texture("clayring");
     if(clayRingTexture == fallbackTexture)
         clayRingTexture = nullptr;
@@ -2969,6 +2972,18 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
                        antimagicTexture == nullptr, 0.18f);
     };
 
+    const auto drawModifier = [&](const CNode* owner, const QVector3D& origin,
+                                  float signedAuthoredScale, int subtype, uint seed)
+    {
+        ei::particle::ModifierEmitter& emitter = m_modifierEmitters[owner];
+        emitter.advanceTo(logicalTick, seed, origin, signedAuthoredScale, subtype);
+        for(const ei::particle::EffectRenderSample& sample : emitter.samples())
+            drawSprite(sample.position, sample.scale, 1.0f, 0.0f,
+                       QVector4D(1.0f, 1.0f, 1.0f, sample.alpha),
+                       stunTexture, ei::particle::atlasUv(sample.frame), true,
+                       stunTexture == nullptr, 0.18f);
+    };
+
     const auto drawClayRing = [&](const CNode* owner, const QVector3D& origin,
                                   float signedAuthoredScale, uint seed)
     {
@@ -3168,6 +3183,17 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
                 drawAntimagic(particle, center, authoredScale, particle->mapId());
                 if(particle->nodeState() == ENodeState::eSelect)
                     drawSprite(center, qMax(0.3f, authoredScale * 0.35f), 1.0f, 0.0f,
+                               QVector4D(0.10f, 0.90f, 1.0f, 0.72f), nullptr,
+                               QVector4D(0.0f, 0.0f, 1.0f, 1.0f), false, true, 0.12f);
+                continue;
+            }
+            if(particle->kind() >= 8219u && particle->kind() <= 8230u)
+            {
+                drawModifier(particle, center, signedAuthoredScale,
+                             int(particle->kind() - 8218u), particle->mapId());
+                if(particle->nodeState() == ENodeState::eSelect)
+                    drawSprite(center, qMax(0.3f, qAbs(signedAuthoredScale) * 0.35f),
+                               1.0f, 0.0f,
                                QVector4D(0.10f, 0.90f, 1.0f, 0.72f), nullptr,
                                QVector4D(0.0f, 0.0f, 1.0f, 1.0f), false, true, 0.12f);
                 continue;

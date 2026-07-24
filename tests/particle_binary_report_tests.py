@@ -64,6 +64,8 @@ class ParticleBinaryReportTests(unittest.TestCase):
                          "50726F74656374696F6E4600")
         self.assertEqual(fixture["sites"]["antimagic_texture_name"]["bytes"],
                          "416E74694D6167696300")
+        self.assertEqual(fixture["sites"]["stun_texture_name"]["bytes"],
+                         "5374756E00")
         self.assertEqual(fixture["sites"]["clayring_texture_name"]["bytes"],
                          "436C617952696E6700")
         self.assertEqual(fixture["sites"]["teleport_texture_name"]["bytes"],
@@ -108,6 +110,26 @@ class ParticleBinaryReportTests(unittest.TestCase):
         self.assertEqual(
             fixture["constants"]["sphere_antimagic_rare_size_base"]["value"],
             2.5,
+        )
+        self.assertEqual(fixture["ranges"]["modifier_create_callback"]["start_va"],
+                         "0x00490130")
+        self.assertEqual(fixture["ranges"]["modifier_update_callback"]["start_va"],
+                         "0x00490990")
+        self.assertEqual(
+            fixture["ranges"]["modifier_local_source_callback"]["start_va"],
+            "0x00490B00",
+        )
+        self.assertAlmostEqual(
+            fixture["constants"]["modifier_positive_direction_factor"]["value"],
+            1.0 / 1.4,
+        )
+        self.assertAlmostEqual(
+            fixture["constants"]["modifier_negative_direction_factor"]["value"],
+            1.4,
+        )
+        self.assertEqual(
+            fixture["sites"]["modifier_birth_alpha_table"]["bytes"],
+            "00000000200000004000000080000000FF000000CF0000009F0000006F0000003F0000000F00000000000000",
         )
         anti_table = fixture["sites"]["sphere_antimagic_size_table"]
         self.assertEqual(anti_table["bytes"],

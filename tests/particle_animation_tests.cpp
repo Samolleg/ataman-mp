@@ -29,6 +29,7 @@ private slots:
     void sphereShellsUseSyntheticCarrierBound();
     void sphereFireUsesFireSizeFactor();
     void antimagicUsesShortDenseShell();
+    void modifiersUseSubtypeAnchorsAndFiniteTrails();
     void clayRingUsesFiniteGroundRing();
     void teleportUsesFiniteSignedColumn();
 };
@@ -485,6 +486,67 @@ void ParticleAnimationTests::antimagicUsesShortDenseShell()
         QCOMPARE(a[i].alpha, 1.0f);
         QVERIFY(a[i].frame >= 0 && a[i].frame <= 14);
     }
+}
+
+void ParticleAnimationTests::modifiersUseSubtypeAnchorsAndFiniteTrails()
+{
+    const QVector3D origin(2.0f, -3.0f, 0.5f);
+    for(int subtype = 1; subtype <= 12; ++subtype)
+    {
+        ei::particle::ModifierEmitter emitter;
+        emitter.advanceTo(0, 8218u + uint(subtype), origin, 1.0f, subtype);
+        emitter.advanceTo(1, 8218u + uint(subtype), origin, 1.0f, subtype);
+        const auto first = emitter.samples();
+        QCOMPARE(first.size(), 80);
+        int anchors = 0;
+        for(const auto& sample : first)
+        {
+            QVERIFY(sample.frame >= 0 && sample.frame <= 15);
+            QVERIFY(sample.scale > 0.0f);
+            QVERIFY(sample.alpha >= 0.0f && sample.alpha <= 1.0f);
+            if(sample.frame == subtype - 1)
+                ++anchors;
+        }
+        QVERIFY(anchors >= 10);
+        emitter.advanceTo(30, 8218u + uint(subtype), origin, 1.0f, subtype);
+        QCOMPARE(emitter.activeCount(), 0);
+        emitter.advanceTo(49, 8218u + uint(subtype), origin, 1.0f, subtype);
+        QVERIFY(emitter.activeCount() > 0);
+    }
+
+    ei::particle::ModifierEmitter worldZAxis;
+    ei::particle::ModifierEmitter carrierYAxis;
+    worldZAxis.advanceTo(0, 8219u, origin, 1.0f, 1);
+    carrierYAxis.advanceTo(0, 8223u, origin, 1.0f, 5);
+    worldZAxis.advanceTo(1, 8219u, origin, 1.0f, 1);
+    carrierYAxis.advanceTo(1, 8223u, origin, 1.0f, 5);
+    float zAxisYSpread = 0.0f;
+    float yAxisYSpread = 0.0f;
+    for(const auto& sample : worldZAxis.samples())
+        if(sample.frame == 0)
+            zAxisYSpread = qMax(zAxisYSpread, qAbs(sample.position.y() - origin.y()));
+    for(const auto& sample : carrierYAxis.samples())
+        if(sample.frame == 4)
+            yAxisYSpread = qMax(yAxisYSpread, qAbs(sample.position.y() - origin.y()));
+    QVERIFY(zAxisYSpread > 0.1f);
+    QVERIFY(yAxisYSpread < 0.0001f);
+
+    ei::particle::ModifierEmitter inward;
+    ei::particle::ModifierEmitter outward;
+    inward.advanceTo(0, 8219u, origin, 1.0f, 1);
+    outward.advanceTo(0, 8219u, origin, -1.0f, 1);
+    inward.advanceTo(8, 8219u, origin, 1.0f, 1);
+    outward.advanceTo(8, 8219u, origin, -1.0f, 1);
+    float inwardRadius = 0.0f;
+    float outwardRadius = 0.0f;
+    const QVector3D center = origin + QVector3D(0.0f, 0.0f, 1.0f);
+    for(const auto& sample : inward.samples())
+        if(sample.frame == 0)
+            inwardRadius = qMax(inwardRadius, (sample.position - center).length());
+    for(const auto& sample : outward.samples())
+        if(sample.frame == 0)
+            outwardRadius = qMax(outwardRadius, (sample.position - center).length());
+    QVERIFY(outwardRadius > inwardRadius);
 }
 
 void ParticleAnimationTests::clayRingUsesFiniteGroundRing()
