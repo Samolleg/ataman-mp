@@ -19,6 +19,7 @@ class QTimer;
 struct SMapGraphSource
 {
     bool embedded{false};
+    bool missing{false};
     QString externalPath;
     QString shadowedExternalPath;
     QByteArray externalData;
@@ -49,6 +50,7 @@ struct SJmvMapTestLaunchInput
     bool overrideWorldTime{false};
     double worldTimeHours{12.0};
     bool borrowedMapIdentity{false};
+    bool allowMissingAiGraph{false};
     int baseProbeLevel{0};
 };
 
