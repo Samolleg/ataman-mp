@@ -1,6 +1,9 @@
 #include <QLineEdit>
 
+#include <cmath>
+
 #include "operationmanager.h"
+#include "landscape_edit_policy.h"
 #include "node.h"
 #include "view.h"
 #include "landscape.h"
@@ -60,6 +63,26 @@ void CSelect::keyPress(COperation *pOp, EKeyCode key)
     case eKey_Esc:
     {
         m_pView->clearObjectSelection();
+        break;
+    }
+    case eKey_G:
+    {
+        pOp->setCurrent(new CMoveAxis(m_pView, EOperateAxisXY));
+        delete this;
+        break;
+    }
+    case eKey_R:
+    {
+        pOp->setCurrent(new CRotateAxis(m_pView, EOperateAxisZ));
+        delete this;
+        break;
+    }
+    case eKey_T:
+    {
+        if (pOp->keyManager()->isPressed(eKey_Ctrl))
+        {
+            m_pView->iterateRoundMob();
+        }
         break;
     }
     case eKey_Delete:
@@ -1009,21 +1032,16 @@ CSelect::CSelect(CView *pView):
     if(CScene::getInstance()->getMode()==eEditModeLogic)
         CStatusConnector::getInstance()->updateStatus("select.ico", "LMB-Select object, Shift+LMB-Add to select, MMB-camera rotation, G-Move, P-Add Patrol(trap zone), L-Add look(cast point), CTLR+Tab-change mode");
     else
-        CStatusConnector::getInstance()->updateStatus("select.ico", "LMB-Select object, Shift+LMB-Add to select, MMB-camera rotation, G-Move, T-Scale, R-Rotate, B-Tile brush, CTLR+Tab-change mode, CTRL+T-switch active Mob");
+        CStatusConnector::getInstance()->updateStatus("select.ico", "LMB-Select object, Shift+LMB-Add to select, MMB-camera rotation, G-Move, T-Scale, R-Rotate, B-Landscape tile painting, CTRL+Tab-change mode, CTRL+T-switch active Mob");
     CButtonConnector::getInstance()->pressButton(EButtonOpSelect);
 }
 
 CTileBrush::CTileBrush(CView* pView)
     :CState(pView)
-    ,m_bDrawWater(true)
-    ,m_bDrawLand(true)
 {
     qDebug()<< "CTileBrush init ";
-    CStatusConnector::getInstance()->updateStatus("brush.ico", "Esc - Cancel, LMB - draw selected tile. RMB - pick tile under cursor, Wheel - rotate tile, T - change land/water tyle type, M/J - draw land/water");
+    CStatusConnector::getInstance()->updateStatus("brush.ico", "Esc-Cancel, LMB-paint, RMB-pick tile, Alt+Wheel-size, Shift+Wheel-material/rotate, Wheel-camera. Choose Land/Overlay in Landscape Tools; M/J toggle visibility.");
     CButtonConnector::getInstance()->pressButton(EButtonOpTilebrush);
-    m_pView->setDrawLand(m_bDrawLand);
-    m_pView->setDrawWater(m_bDrawWater);
-    m_pView->setPreviewTile(true);
     m_pView->showOutliner(false);
 }
 
@@ -1036,27 +1054,17 @@ void CTileBrush::keyPress(COperation* pOp, EKeyCode key)
         m_pView->onRestoreCursor();
         m_pView->setPreviewTile(false);
         m_pView->showOutliner(true);
-        m_pView->setDrawLand(true);
-        m_pView->setDrawWater(true);
-        pOp->setCurrent(new CSelect(m_pView));
-        delete this;
-        break;
-    }
-    case eKey_T:
-    { // change tile type editing (land/water)
-        CScene::getInstance()->switchTileEditMode();
+        m_pView->closeLandscapeTools();
         break;
     }
     case eKey_J:
     {
-        m_bDrawWater = !m_bDrawWater;
-        m_pView->setDrawWater(m_bDrawWater);
+        m_pView->setDrawWater(!m_pView->drawWater());
         break;
     }
     case eKey_M:
     {
-        m_bDrawLand = !m_bDrawLand;
-        m_pView->setDrawLand(m_bDrawLand);
+        m_pView->setDrawLand(!m_pView->drawLand());
         break;
     }
     case eKey_1 ... eKey_8:
@@ -1097,6 +1105,7 @@ void CTileBrush::mousePressEvent(COperation* pOp, QMouseEvent* pEvent)
     switch (pEvent->buttons()) {
     case Qt::LeftButton:
     {
+        m_pView->beginTileBrushGroup();
         m_pView->setTile(m_pView->getTerrainPos(pEvent->pos().x(), pEvent->pos().y(), bLand), bLand);
         break;
     }
@@ -1111,8 +1120,12 @@ void CTileBrush::mousePressEvent(COperation* pOp, QMouseEvent* pEvent)
 void CTileBrush::mouseReleaseEvent(COperation* pOp, QMouseEvent* pEvent)
 {
     Q_UNUSED(pOp);
-    Q_UNUSED(pEvent);
     if (pEvent->button() == Qt::LeftButton) {
+        const bool bLand = CScene::getInstance()->isLandTileEditMode();
+        // Always resolve the release position. The view de-duplicates an
+        // unchanged center, while a short/fast gesture cannot lose its tail.
+        m_pView->setTile(m_pView->getTerrainPos(
+            pEvent->pos().x(), pEvent->pos().y(), bLand), bLand);
         m_pView->endTileBrushGroup();
     }
     if(!m_pView->isPreviewTile()) // if we finished brushing, we will come here
@@ -1121,7 +1134,6 @@ void CTileBrush::mouseReleaseEvent(COperation* pOp, QMouseEvent* pEvent)
         QVector3D landPos(m_pView->getTerrainPos(pEvent->x(), pEvent->y()));
         m_pView->updatePreviewTile(m_pView->getTerrainPos(pEvent->pos().x(), pEvent->pos().y(), bLand), bLand);
         m_lastLandPos = landPos;
-        m_pView->setPreviewTile();
     }
 }
 
@@ -1143,12 +1155,23 @@ void CTileBrush::mouseMoveEvent(COperation* pOp, QMouseEvent* pEvent)
             m_pView->setPreviewTile(false);
 
         bool bLand = CScene::getInstance()->isLandTileEditMode();
-        QVector3D landPos(m_pView->getTerrainPos(pEvent->x(), pEvent->y()));
-        if(landPos.distanceToPoint(m_lastLandPos) > 1.0f) // avoid re-brushing single tile of each movement.
+        const QVector3D landPos(m_pView->getTerrainPos(pEvent->x(), pEvent->y(), bLand));
+        const float distance = landPos.distanceToPoint(m_lastLandPos);
+        const float spacing = m_pView->terrainPaintStampSpacing();
+        if(distance >= spacing)
         {
-            m_pView->setTile(m_pView->getTerrainPos(pEvent->pos().x(), pEvent->pos().y(), bLand), bLand);
+            // Interpolate fast pointer movement so a small brush cannot leave
+            // unpainted tile gaps between mouse events. All stamps remain in
+            // the press/release undo macro.
+            const int steps = qMax(1, int(std::ceil(distance / spacing)));
+            for(int step = 1; step <= steps; ++step)
+            {
+                const float ratio = float(step) / float(steps);
+                m_pView->setTile(m_lastLandPos * (1.0f - ratio) + landPos * ratio, bLand);
+            }
             m_lastLandPos = landPos;
         }
+        m_pView->updatePreviewTile(landPos, bLand);
 
     }
     else
@@ -1170,8 +1193,36 @@ void CTileBrush::mouseMoveEvent(COperation* pOp, QMouseEvent* pEvent)
 
 void CTileBrush::wheelEvent(COperation* pOp, QWheelEvent* pEvent)
 {
-    Q_UNUSED(pOp);
-    m_pView->addTileRotation(pEvent->delta() > 0 ? 1 : -1);
-    bool bLand = CScene::getInstance()->isLandTileEditMode();
-    m_pView->updatePreviewTile(m_pView->getTerrainPos(pEvent->pos().x(), pEvent->pos().y(), bLand), bLand);
+    const int step = landscapeWheelStep(pEvent->angleDelta().y(),
+                                        pEvent->delta(), pEvent->pixelDelta().y());
+    if(step == 0)
+        return;
+    if(pEvent->modifiers() & Qt::ShiftModifier)
+    {
+        if(m_pView->manualTilePaintingEnabled())
+        {
+            m_pView->addTileRotation(step);
+            const bool bLand = CScene::getInstance()->isLandTileEditMode();
+            m_pView->updatePreviewTile(m_pView->getTerrainPos(bLand), bLand);
+            CStatusConnector::getInstance()->updateStatus(
+                "brush.ico", "Manual atlas tile rotation changed. Shift+Wheel rotates; Alt+Wheel resizes; Wheel controls the camera.");
+        }
+        else
+        {
+            m_pView->adjustTerrainPaintMaterial(step);
+            CStatusConnector::getInstance()->updateStatus(
+                "brush.ico", "Automatic terrain material changed. Shift+Wheel selects material; Alt+Wheel resizes; Wheel controls the camera.");
+        }
+        pEvent->accept();
+        return;
+    }
+    if(pEvent->modifiers() & Qt::AltModifier)
+    {
+        m_pView->adjustTerrainPaintSize(step);
+        CStatusConnector::getInstance()->updateStatus(
+            "brush.ico", "Terrain brush size changed. Alt+Wheel resizes; Shift+Wheel changes material or manual rotation; Wheel controls the camera.");
+        pEvent->accept();
+        return;
+    }
+    pOp->camera()->enlarge(pEvent->delta() > 0);
 }

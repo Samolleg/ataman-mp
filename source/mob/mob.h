@@ -61,6 +61,7 @@ public:
     CNode* createNode(QJsonObject data);
     void undo_createNode(uint mapId);
     CNode* restoreDeletedNode(CNode* pNode, int restoreIndex = -1);
+    bool replaceNode(CNode* current, CNode* replacement, int index = -1);
     bool rebaseCopiedObjectProvenance(CNode* node, const QString& templatePath,
                                       const QByteArray& templateSubtreeSha256);
     bool rawObjectTemplateBytes(const CNode* node, QByteArray* sourceSubtree,

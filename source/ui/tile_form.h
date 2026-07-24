@@ -5,6 +5,7 @@
 #include <QTableWidget>
 #include <QKeyEvent>
 #include <QMenu>
+#include <QImage>
 #include "types.h"
 #include "property.h"
 
@@ -44,6 +45,7 @@ public:
     void setTileTypes(const QVector<ETileType>& arrTileType) {m_tileTypes = arrTileType;}
     void selectTile(int index);
     void selectQuickAccessTile(int index);
+    void clearTileSelection();
     int activeMaterialindex();
     void setActiveMatIndex(int index);
     void getSelectedTile(int& index, int& rotNum);
@@ -58,6 +60,7 @@ public:
     const QVector<int> quickTileSet() const {return m_arrQuickTile;}
     void setQuickTileSet(const QVector<int>& arrIndices);
     QPixmap tileWithRot(int index) {return tileWithRot(index, m_tileRot);};
+    const QVector<QImage>& tileImages() const { return m_tileImages; }
 
 private:
     void fitTable();
@@ -106,6 +109,7 @@ protected:
 private:
     Ui::CTileForm *ui;
     QList<QIcon> m_icoList;
+    QVector<QImage> m_tileImages;
     int m_nTilePerRow;
     int m_nTextureAtlas;
     int m_originalTilesize;

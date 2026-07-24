@@ -11,6 +11,7 @@
 #include <QFileInfo>
 #include <QMap>
 #include <QSet>
+#include <QStringList>
 #include <QVector3D>
 #include <QFutureWatcher>
 #include "types.h"
@@ -33,6 +34,7 @@ class QAction;
 class QDockWidget;
 class CMapsBrowser;
 class CJmvMapTestLauncher;
+class CLandscapeTools;
 struct SResourceProfileEvaluation;
 class QComboBox;
 class QCheckBox;
@@ -50,6 +52,8 @@ class QProgressDialog;
 class QDialog;
 class QScrollArea;
 class QListWidget;
+class QSlider;
+class QDoubleSpinBox;
 
 struct SWindowTitle
 {
@@ -73,11 +77,19 @@ public:
     void configureAutosaveTimer();
     void configureAutosaveTimer(bool enabled, int intervalMinutes);
     void performAutosave();
+    void beginAutosaveCountdown();
     void showRecoverableAutosaves();
 
     void testFunc1();
 
 private:
+    enum class ETransientNotificationAction
+    {
+        None,
+        OpenLog,
+        OpenBackupFolder
+    };
+
     void createUndoView();
     void initShortcuts();
     void connectUiButtons();
@@ -134,7 +146,12 @@ private:
     void notifyFamilyPreflight(const QString& operation);
     void notifyProposedNid(quint32 nid, const QString& mobPath);
     void showMapTestResultNotification(const QJsonObject& report);
+    void showTransientResultNotification(const QString& text, bool failed, bool warned,
+                                         const QString& actionText,
+                                         ETransientNotificationAction action,
+                                         int timeoutMs);
     void positionMapTestResultNotification();
+    void positionAutosaveNotification();
     void showUnitTexturePreview();
     void updateUnitTexturePreview();
     void renderUnitTexturePreview();
@@ -199,7 +216,10 @@ private:
     QMenu* m_recentFilesMenu;
     QAction* m_externalScriptAction;
     QAction* m_activateOwnerMobAction;
+    QAction* m_convertWorldObjectToLeverAction;
     QDockWidget* m_mapsDock;
+    QDockWidget* m_landscapeToolsDock;
+    CLandscapeTools* m_landscapeTools;
     QDockWidget* m_historyDock;
     QDockWidget* m_validationDock;
     QDockWidget* m_outlinerDock;
@@ -226,12 +246,26 @@ private:
     QFrame* m_mapTestResultNotification{nullptr};
     QLabel* m_mapTestResultIcon{nullptr};
     QLabel* m_mapTestResultLabel{nullptr};
+    QPushButton* m_mapTestResultActionButton{nullptr};
     QTimer* m_mapTestResultTimer{nullptr};
     QProgressDialog* m_hotReloadProgress{nullptr};
     QTimer* m_autosaveTimer{nullptr};
+    QTimer* m_autosaveCountdownTimer{nullptr};
+    QTimer* m_cameraSpeedPersistTimer{nullptr};
+    QFrame* m_autosaveNotification{nullptr};
+    QLabel* m_autosaveCountdownLabel{nullptr};
+    QPushButton* m_cancelAutosaveButton{nullptr};
+    int m_autosaveCountdownSeconds{0};
+    int m_recoverableAutosaveNoticeCount{0};
+    QStringList m_recoverableAutosaveNoticeKeys;
+    bool m_backupSessionStarted{false};
+    QSlider* m_cameraSpeedSlider{nullptr};
+    QDoubleSpinBox* m_cameraSpeedSpin{nullptr};
     bool m_uiStateSaved{false};
     bool m_workspaceLoadInProgress{false};
     QString m_mapTestResultLogPath;
+    ETransientNotificationAction m_transientNotificationAction{
+        ETransientNotificationAction::None};
     CMobFamilyValidationReport m_familyValidation;
     QByteArray m_acknowledgedFindingDigest;
     QSet<QString> m_previousFamilyRiskKeys;

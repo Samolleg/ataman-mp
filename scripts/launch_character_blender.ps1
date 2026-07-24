@@ -1,6 +1,8 @@
 param(
     [Parameter(Mandatory = $true)] [string] $Workspace,
     [Parameter(Mandatory = $true)] [string] $EiFigerSource,
+    [ValidateSet('item', 'humanoid')] [string] $Lane,
+    [string] $BlenderExecutable,
     [string] $BackgroundScript,
     [switch] $PrepareAddon
 )
@@ -18,13 +20,30 @@ if (-not (Test-Path -LiteralPath (Join-Path $addonPath '__init__.py') -PathType 
     throw "EiFigerSource must be the extracted ei_figer package directory: $addonPath"
 }
 
-$blender = Get-ChildItem -LiteralPath (Join-Path $workspacePath 'runtime') -Filter blender.exe -File -Recurse |
-    Sort-Object FullName | Select-Object -First 1
-if (-not $blender) {
-    throw "No portable blender.exe found below $workspacePath\runtime"
+$blenderPath = $null
+if ($BlenderExecutable) {
+    $blenderPath = [IO.Path]::GetFullPath($BlenderExecutable)
+} elseif ($Lane) {
+    $manifest = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'character_blender_lanes.json') -Raw |
+        ConvertFrom-Json
+    $laneConfig = $manifest.lanes.$Lane
+    $blenderPath = Join-Path $workspacePath "$Lane-lane\runtime\$($laneConfig.runtime_directory)\blender.exe"
+} else {
+    $matches = @(Get-ChildItem -LiteralPath (Join-Path $workspacePath 'runtime') -Filter blender.exe -File -Recurse)
+    if ($matches.Count -ne 1) {
+        throw 'Specify -Lane or -BlenderExecutable when the workspace does not contain exactly one Blender runtime.'
+    }
+    $blenderPath = $matches[0].FullName
+}
+if (-not (Test-Path -LiteralPath $blenderPath -PathType Leaf)) {
+    throw "Portable blender.exe not found: $blenderPath"
 }
 
-$configRoot = Join-Path $workspacePath 'portable-config'
+$configRoot = if ($Lane) {
+    Join-Path $workspacePath "$Lane-lane\portable-config"
+} else {
+    Join-Path $workspacePath 'portable-config'
+}
 $scriptRoot = Join-Path $configRoot 'scripts'
 $addonRoot = Join-Path $scriptRoot 'addons'
 New-Item -ItemType Directory -Force -Path $addonRoot | Out-Null
@@ -50,8 +69,8 @@ if ($BackgroundScript) {
     $arguments += @('--background', '--python', $scriptPath)
 }
 
-Write-Host "Blender: $($blender.FullName)"
+Write-Host "Blender: $blenderPath"
 Write-Host "Workspace: $workspacePath"
 Write-Host "ei_figer: $addonPath"
-& $blender.FullName @arguments
+& $blenderPath @arguments
 exit $LASTEXITCODE

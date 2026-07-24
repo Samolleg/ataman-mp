@@ -8,6 +8,7 @@ INCLUDEPATH += ../source/documents ../source/resources ../source/runtime
 SOURCES += \
     jmv_map_test_launcher_tests.cpp \
     ../source/documents/endurance_document.cpp \
+    ../source/documents/mpr_document.cpp \
     ../source/runtime/current_session_backup.cpp \
     ../source/runtime/hot_reload_protocol.cpp \
     ../source/runtime/jmv_map_test_launcher.cpp \
@@ -15,6 +16,7 @@ SOURCES += \
 
 HEADERS += \
     ../source/documents/endurance_document.h \
+    ../source/documents/mpr_document.h \
     ../source/runtime/current_session_backup.h \
     ../source/runtime/hot_reload_protocol.h \
     ../source/runtime/jmv_map_test_launcher.h \

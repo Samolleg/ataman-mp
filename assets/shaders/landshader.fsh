@@ -12,6 +12,8 @@ uniform highp vec3 u_watcherPos;
 uniform highp vec4 u_lightColor;
 uniform bool u_highlight;
 uniform float transparency;
+uniform bool u_solidColorEnabled;
+uniform highp vec4 u_solidColor;
 uniform bool u_environmentEnabled;
 uniform int u_lightingMode;
 uniform bool u_fogEnabled;
@@ -225,6 +227,6 @@ void main(void)
     resColor.rgb = cascadeDebugColor;
 
 
-  gl_FragColor = resColor;
+  gl_FragColor = u_solidColorEnabled ? u_solidColor : resColor;
 
 }

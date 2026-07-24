@@ -44,6 +44,7 @@
 #include "undo.h"
 #include "objects/object_base.h"
 #include "objects/worldobj.h"
+#include "objects/lever.h"
 #include "objects/unit.h"
 #include "objects/magictrap.h"
 #include "mob\mob_parameters.h"
@@ -70,10 +71,105 @@
 #include "external_script_workspace.h"
 #include "mob_script_window.h"
 #include "script_reference_analyzer.h"
+#include "landscape_tools.h"
+#include "endurance_document.h"
+#include "staged_save_validator.h"
+#include "terrain_atlas_analyzer.h"
 
 class CLogic;
 
 namespace {
+QByteArray terrainAtlasPixelSha256(const QVector<QImage>& images)
+{
+    QCryptographicHash hash(QCryptographicHash::Sha256);
+    hash.addData(QByteArray::number(images.size()));
+    hash.addData("\n", 1);
+    for(const QImage& source : images)
+    {
+        const QImage image = source.convertToFormat(QImage::Format_RGBA8888);
+        hash.addData(QByteArray::number(image.width()));
+        hash.addData("x", 1);
+        hash.addData(QByteArray::number(image.height()));
+        hash.addData("\n", 1);
+        for(int y = 0; y < image.height(); ++y)
+            hash.addData(reinterpret_cast<const char*>(image.constScanLine(y)), image.width() * 4);
+    }
+    return hash.result().toHex();
+}
+
+QJsonObject terrainGridSignatureJson(const STerrainTransitionSignature& signature)
+{
+    QJsonObject result;
+    result.insert("x0y0", signature.northWest);
+    result.insert("x1y0", signature.northEast);
+    result.insert("x1y1", signature.southEast);
+    result.insert("x0y1", signature.southWest);
+    return result;
+}
+
+QJsonObject packedTerrainTileJson(quint16 packed)
+{
+    const SMprPackedTile tile = SMprPackedTile::decode(packed);
+    QJsonObject result;
+    result.insert("decimal", int(packed));
+    result.insert("hex", QString("0x%1").arg(packed, 4, 16, QLatin1Char('0')));
+    result.insert("atlasIndex", int(tile.atlasIndex));
+    result.insert("tileIndex", int(tile.tileIndex));
+    result.insert("atlasSlot", tile.atlasSlot());
+    result.insert("rotation", int(tile.rotation));
+    return result;
+}
+
+class CTerrainHeightPreviewCommand : public QUndoCommand
+{
+public:
+    CTerrainHeightPreviewCommand(CView* view, const STerrainHeightCommand& command,
+                                 bool alreadyApplied = false)
+        : m_view(view), m_command(command), m_skipInitialRedo(alreadyApplied)
+    {
+        setText(command.description);
+    }
+    void undo() override { m_view->applyTerrainHeightPreview(m_command, false); }
+    void redo() override
+    {
+        if(m_skipInitialRedo)
+        {
+            m_skipInitialRedo = false;
+            return;
+        }
+        m_view->applyTerrainHeightPreview(m_command, true);
+    }
+private:
+    CView* m_view;
+    STerrainHeightCommand m_command;
+    bool m_skipInitialRedo{false};
+};
+
+class CTerrainTilePreviewCommand : public QUndoCommand
+{
+public:
+    CTerrainTilePreviewCommand(CView* view, const STerrainTileCommand& command,
+                               bool alreadyApplied)
+        : m_view(view), m_command(command), m_skipInitialRedo(alreadyApplied)
+    {
+        setText(command.description);
+    }
+    void undo() override { m_view->applyTerrainTilePreview(m_command, false); }
+    void redo() override
+    {
+        if(m_skipInitialRedo)
+        {
+            m_skipInitialRedo = false;
+            return;
+        }
+        m_view->applyTerrainTilePreview(m_command, true);
+    }
+private:
+    CView* m_view;
+    STerrainTileCommand m_command;
+    bool m_skipInitialRedo{false};
+};
+
 QString openGlErrorName(GLenum error)
 {
     switch(error)
@@ -415,6 +511,12 @@ CView::CView(QWidget *parent, const QGLWidget *pShareWidget) : QGLWidget(parent,
   ,m_bDrawWater(true)
   ,m_bPreviewTile(false)
   ,m_tileBrushCommandId(0)
+  ,m_landscapeTools(nullptr)
+  ,m_terrainEditAvailable(false)
+  ,m_sculptStrokeActive(false)
+  ,m_sculptRepeatTimer(new QTimer(this))
+  ,m_tileGridVisible(false)
+  ,m_lastLandscapeEditMode(-1)
   ,m_hasViewportMousePos(false)
   ,m_testSpawnMarkerValid(false)
   ,m_testSpawnMarkerAdjusted(false)
@@ -443,6 +545,215 @@ CView::CView(QWidget *parent, const QGLWidget *pShareWidget) : QGLWidget(parent,
     m_scriptWorkspaces.reset(new CExternalScriptWorkspaceManager(this, this));
     connect(m_scriptWorkspaces.get(), &CExternalScriptWorkspaceManager::scriptImportAccepted,
             this, &CView::importExternalMobScript);
+    // A single cadence owns sculpt stamps. Mouse events only update the latest
+    // target, preventing the timer and pointer stream from doing duplicate
+    // canonical-sector rebuilds during a drag.
+    m_sculptRepeatTimer->setInterval(50);
+    connect(m_sculptRepeatTimer, &QTimer::timeout, this, [this]()
+    {
+        if(m_sculptStrokeActive)
+            sculptTerrainTowardLatestPoint();
+    });
+}
+
+void CView::attachLandscapeTools(CLandscapeTools* tools)
+{
+    m_landscapeTools = tools;
+    if(m_landscapeTools)
+    {
+        m_lastLandscapeEditMode = int(m_landscapeTools->editMode());
+        connect(m_landscapeTools, &CLandscapeTools::importHeightmapRequested,
+                this, &CView::importTerrainHeightmap);
+        connect(m_landscapeTools, &CLandscapeTools::tilePickerRequested,
+                this, &CView::openMapParameters);
+        connect(m_landscapeTools, &CLandscapeTools::exportPaintDiagnosticRequested,
+                this, &CView::exportTerrainPaintDiagnostic);
+        connect(m_landscapeTools, &CLandscapeTools::editingStateChanged,
+                this, &CView::syncLandscapeToolState);
+        connect(m_landscapeTools, &CLandscapeTools::paintTerrainTypeChanged,
+                this, [this](qint32 terrainType)
+        {
+            Q_UNUSED(terrainType);
+            if(!manualTilePaintingEnabled())
+            {
+                setPreviewTile(false);
+                unsetCursor();
+            }
+            if(m_hasViewportMousePos)
+            {
+                const bool land = CScene::getInstance()->isLandTileEditMode();
+                updatePreviewTile(getTerrainPos(m_lastViewportMousePos.x(),
+                                                 m_lastViewportMousePos.y(), land), land);
+            }
+        });
+        connect(m_landscapeTools, &CLandscapeTools::terrainVisibilityChanged,
+                this, [this](bool drawLand, bool drawWater)
+        {
+            setDrawLand(drawLand);
+            setDrawWater(drawWater);
+        });
+        m_landscapeTools->setTerrainVisibility(m_bDrawLand, m_bDrawWater);
+    }
+}
+
+void CView::setDrawWater(bool bDraw)
+{
+    if(m_bDrawWater == bDraw)
+        return;
+    m_bDrawWater = bDraw;
+    if(m_landscapeTools)
+        m_landscapeTools->setTerrainVisibility(m_bDrawLand, m_bDrawWater);
+    update();
+}
+
+void CView::setDrawLand(bool bDraw)
+{
+    if(m_bDrawLand == bDraw)
+        return;
+    m_bDrawLand = bDraw;
+    if(m_landscapeTools)
+        m_landscapeTools->setTerrainVisibility(m_bDrawLand, m_bDrawWater);
+    update();
+}
+
+void CView::activateLandscapeTilePainting()
+{
+    prepareLandscapeTilePainting();
+    changeOperation(EButtonOpTilebrush);
+}
+
+void CView::prepareLandscapeTilePainting(bool showTools)
+{
+    if(!m_landscapeTools)
+        return;
+    if(m_landscapeTools->editMode() != ELandscapeEditMode::TilePaint)
+        clearLandscapeBrushSelection();
+    m_landscapeTools->activateMode(ELandscapeEditMode::TilePaint, false);
+    m_lastLandscapeEditMode = int(ELandscapeEditMode::TilePaint);
+    CScene::getInstance()->setLandTileEditMode(true);
+    if(showTools)
+        emit showLandscapeToolsSignal();
+    emit updateMsg(tr("Land tile painting enabled. Choose an atlas tile in Landscape Tools."));
+}
+
+void CView::setLandscapeEditingEnabled(bool enabled)
+{
+    if(m_landscapeTools)
+        m_landscapeTools->setEditingEnabled(enabled, false);
+    if(!enabled)
+    {
+        m_terrainPaintOutlineValid = false;
+        m_sculptOutlineValid = false;
+        update();
+    }
+    syncLandscapeToolState();
+}
+
+void CView::closeLandscapeTools()
+{
+    emit hideLandscapeToolsSignal();
+}
+
+void CView::syncLandscapeToolState()
+{
+    finishSculptStroke();
+    if(m_landscapeTools)
+    {
+        const ELandscapeEditMode current = m_landscapeTools->editMode();
+        if(current != ELandscapeEditMode::Sculpt)
+            m_sculptOutlineValid = false;
+        if(m_lastLandscapeEditMode >= 0
+           && landscapeModeChangeRequiresBrushReset(
+               ELandscapeEditMode(m_lastLandscapeEditMode), current))
+            clearLandscapeBrushSelection();
+        m_lastLandscapeEditMode = int(current);
+    }
+    if(!m_landscapeTools || !m_landscapeTools->editingEnabled())
+    {
+        if(m_pOp && m_pOp->operationMethod() == eOperationMethodTileBrush)
+            changeOperation(EButtonOpSelect);
+        setPreviewTile(false);
+        return;
+    }
+    switch(m_landscapeTools->editMode())
+    {
+    case ELandscapeEditMode::Sculpt:
+        if(m_pOp && m_pOp->operationMethod() == eOperationMethodTileBrush)
+            changeOperation(EButtonOpSelect);
+        setPreviewTile(false);
+        emit updateMsg(tr("Landscape sculpt mode enabled."));
+        break;
+    case ELandscapeEditMode::TilePaint:
+        CScene::getInstance()->setLandTileEditMode(true);
+        changeOperation(EButtonOpTilebrush);
+        emit updateMsg(tr("Land tile painting enabled. Choose an atlas tile in Landscape Tools."));
+        break;
+    case ELandscapeEditMode::OverlayPaint:
+        CScene::getInstance()->setLandTileEditMode(false);
+        changeOperation(EButtonOpTilebrush);
+        emit updateMsg(tr("Overlay painting enabled for existing overlay cells only."));
+        break;
+    }
+    ensureManualTileSelection();
+}
+
+void CView::clearLandscapeBrushSelection()
+{
+    if(m_pTileForm)
+        m_pTileForm->clearTileSelection();
+    if(m_landscapeTools)
+        m_landscapeTools->selectPaintTerrainType(-1);
+    setPreviewTile(false);
+    m_terrainPaintOutlineValid = false;
+    unsetCursor();
+}
+
+void CView::ensureManualTileSelection()
+{
+    if(!m_landscapeTools || !m_pTileForm
+       || !m_landscapeTools->manualTileSelectionEnabled()
+       || !m_terrainAtlasAnalysis.usable)
+        return;
+    const ETerrainTileLayer layer = m_landscapeTools->editMode()
+            == ELandscapeEditMode::OverlayPaint
+        ? ETerrainTileLayer::Overlay : ETerrainTileLayer::Land;
+    const CTerrainTransitionCatalog& catalog = layer == ETerrainTileLayer::Overlay
+            && m_landscapeTools->landFamiliesAllowedInOverlay()
+        ? m_terrainAtlasAnalysis.overlayCatalogWithLandFamilies()
+        : m_terrainAtlasAnalysis.catalog(layer);
+    int selectedIndex = -1;
+    int selectedRotation = 0;
+    m_pTileForm->getSelectedTile(selectedIndex, selectedRotation);
+    bool selectedValid = false;
+    if(selectedIndex >= 0)
+    {
+        SMprPackedTile selected;
+        selected.atlasIndex = quint8(selectedIndex / 64);
+        selected.tileIndex = quint8(selectedIndex % 64);
+        selected.rotation = quint8(selectedRotation & 3);
+        catalog.signatureForPacked(selected.encode(), &selectedValid);
+    }
+    if(selectedValid)
+        return;
+    for(int slot = 0; slot < m_pTileForm->tileImages().size(); ++slot)
+    {
+        SMprPackedTile candidate;
+        candidate.atlasIndex = quint8(slot / 64);
+        candidate.tileIndex = quint8(slot % 64);
+        bool found = false;
+        catalog.signatureForPacked(candidate.encode(), &found);
+        if(!found)
+            continue;
+        m_pTileForm->selectTile(slot);
+        onChangeCursorTile(m_pTileForm->tileWithRot(slot));
+        if(m_hasViewportMousePos)
+        {
+            const bool land = layer == ETerrainTileLayer::Land;
+            updatePreviewTile(getTerrainPos(m_lastViewportMousePos.x(),
+                                            m_lastViewportMousePos.y(), land), land);
+        }
+        return;
+    }
 }
 
 void CView::updateReadState(EReadState state)
@@ -475,14 +786,12 @@ CView::~CView()
     ei::setCrashContext("shutdown/view-gpu-timer");
     if(m_gpuTimer)
     {
-        // QOpenGLTimerQuery::destroy() and its destructor both enter Qt's
-        // platform OpenGL wrapper. During widget teardown the context can
-        // still report a surface while the platform query backend has already
-        // been detached (observed as a Qt5Gui null dereference on NVIDIA).
-        // This is one process-lifetime diagnostics object, so detach it and
-        // let the driver reclaim the query with the context instead of risking
-        // a shutdown crash.
-        ei::log(eLogInfo, "GPU timer query retained for OpenGL context teardown");
+        // QOpenGLContext::surface() may still be non-null after the underlying
+        // Windows surface has become unusable. Calling destroy() or the query
+        // destructor during final widget teardown can then crash in Qt5Gui.
+        // This is one diagnostic object at process exit; detach it and let the
+        // driver release it with the context instead of racing the dead surface.
+        ei::log(eLogInfo, "GPU timer query retained for process-exit context cleanup");
         m_gpuTimer->setParent(nullptr);
         m_gpuTimer = nullptr;
         m_gpuTimerPending = false;
@@ -548,9 +857,21 @@ void CView::attach(CSettings* pSettings, QTableWidget* pParam, QUndoStack* pStac
     QObject::connect(m_tableManager.get(), SIGNAL(onUpdateProperties(const QList<QSharedPointer<IPropertyBase>>&)),
                      this, SLOT(onPropertiesChange(const QList<QSharedPointer<IPropertyBase>>&)));
     m_pUndoStack = pStack;
-    connect(m_pUndoStack, &QUndoStack::indexChanged, this, [this](int)
+    m_lastUndoStackIndex = m_pUndoStack ? m_pUndoStack->index() : -1;
+    connect(m_pUndoStack, &QUndoStack::indexChanged, this, [this](int index)
     {
-        refreshMobDirtyStates();
+        bool selectionOnly = m_lastUndoStackIndex >= 0
+            && index != m_lastUndoStackIndex && m_pUndoStack;
+        const int first = qMin(index, m_lastUndoStackIndex);
+        const int last = qMax(index, m_lastUndoStackIndex);
+        if(first < 0 || last > (m_pUndoStack ? m_pUndoStack->count() : 0))
+            selectionOnly = false;
+        for(int commandIndex = first; selectionOnly && commandIndex < last; ++commandIndex)
+            selectionOnly = dynamic_cast<const CSelectionCommand*>(
+                m_pUndoStack->command(commandIndex)) != nullptr;
+        if(!selectionOnly)
+            refreshMobDirtyStates();
+        m_lastUndoStackIndex = index;
         m_spatialIndexDirty = true;
     });
     connect(this, &CView::selectionChanged, this, [this]()
@@ -568,6 +889,37 @@ void CView::attach(CSettings* pSettings, QTableWidget* pParam, QUndoStack* pStac
     m_pTree = pTree;
     m_pTree->attachView(this);
     m_pTileForm = pTileForm;
+    connect(m_pTileForm, &CTileForm::onSelect, this, [this](const QPixmap& pixmap)
+    {
+        onChangeCursorTile(pixmap);
+        int index = -1;
+        int rotation = 0;
+        m_pTileForm->getSelectedTile(index, rotation);
+        if(m_landscapeTools && index >= 0 && m_terrainAtlasAnalysis.usable)
+        {
+            SMprPackedTile packed;
+            packed.atlasIndex = quint8(index / 64);
+            packed.tileIndex = quint8(index % 64);
+            packed.rotation = quint8(rotation & 3);
+            const ETerrainTileLayer layer = m_landscapeTools->editMode()
+                    == ELandscapeEditMode::OverlayPaint
+                ? ETerrainTileLayer::Overlay : ETerrainTileLayer::Land;
+            const CTerrainTransitionCatalog& catalog =
+                layer == ETerrainTileLayer::Overlay
+                    && m_landscapeTools->landFamiliesAllowedInOverlay()
+                ? m_terrainAtlasAnalysis.overlayCatalogWithLandFamilies()
+                : m_terrainAtlasAnalysis.catalog(layer);
+            bool found = false;
+            const STerrainTransitionSignature signature =
+                catalog.signatureForPacked(packed.encode(), &found);
+            if(found && signature.northWest == signature.northEast
+               && signature.northWest == signature.southEast
+               && signature.northWest == signature.southWest)
+                m_landscapeTools->selectPaintTerrainType(signature.northWest);
+            else
+                m_landscapeTools->selectPaintTerrainType(-1);
+        }
+    });
 
     // MOB-only workspaces need the same responsive viewport as terrain-backed
     // workspaces. Previously this timer was started only by loadLandscape().
@@ -595,10 +947,10 @@ void CView::initEnvironmentPreviewWidget()
     outer->setSpacing(4);
     QHBoxLayout* title = new QHBoxLayout;
     title->setContentsMargins(0, 0, 0, 0);
-    QLabel* titleLabel = new QLabel(tr("Environment preview"), m_environmentPreviewWidget);
+    QLabel* titleLabel = new QLabel(tr("Lighting mode"), m_environmentPreviewWidget);
     m_environmentPreviewCollapse = new QToolButton(m_environmentPreviewWidget);
     m_environmentPreviewCollapse->setText(QString::fromUtf8("\xE2\x88\x92"));
-    m_environmentPreviewCollapse->setToolTip(tr("Minimize environment preview"));
+    m_environmentPreviewCollapse->setToolTip(tr("Minimize lighting mode"));
     title->addWidget(titleLabel);
     title->addStretch(1);
     title->addWidget(m_environmentPreviewCollapse);
@@ -613,36 +965,37 @@ void CView::initEnvironmentPreviewWidget()
     m_environmentPreviewMode->addItem(tr("Simple shading"), 1);
     m_environmentPreviewMode->addItem(tr("Full environment"), 2);
     body->addWidget(m_environmentPreviewMode);
+
+    m_timeOfDayWidget = new QFrame(this);
+    m_timeOfDayWidget->setObjectName("timeOfDayWidget");
+    m_timeOfDayWidget->setMinimumWidth(220);
+    m_timeOfDayWidget->setFrameShape(QFrame::StyledPanel);
+    m_timeOfDayWidget->setStyleSheet(
+        "QFrame#timeOfDayWidget { background: rgba(25,25,25,210); color: white; border: 1px solid #777; border-radius: 4px; }"
+        "QLabel { color: white; }");
+    QVBoxLayout* timeOuter = new QVBoxLayout(m_timeOfDayWidget);
+    timeOuter->setContentsMargins(7, 5, 7, 6);
+    timeOuter->setSpacing(4);
+    QLabel* timeTitle = new QLabel(tr("Time of day"), m_timeOfDayWidget);
+    timeOuter->addWidget(timeTitle);
     QHBoxLayout* timeRow = new QHBoxLayout;
-    m_environmentPreviewTimeLabel = new QLabel(tr("12:00"), m_environmentPreviewBody);
-    m_environmentPreviewTimeLabel->setMinimumWidth(42);
-    m_environmentPreviewTime = new QSlider(Qt::Horizontal, m_environmentPreviewBody);
+    timeRow->setContentsMargins(0, 0, 0, 0);
+    m_timeOfDayLabel = new QLabel(tr("12:00"), m_timeOfDayWidget);
+    m_timeOfDayLabel->setMinimumWidth(42);
+    m_environmentPreviewTime = new QSlider(Qt::Horizontal, m_timeOfDayWidget);
     m_environmentPreviewTime->setRange(0, 1439);
     m_environmentPreviewTime->setSingleStep(10);
     m_environmentPreviewTime->setPageStep(60);
-    m_environmentPreviewTime->setStyleSheet(QStringLiteral(
-        "QSlider::groove:horizontal:disabled { background: #505050; height: 4px; }"
-        "QSlider::sub-page:horizontal:disabled { background: #666666; }"
-        "QSlider::add-page:horizontal:disabled { background: #404040; }"
-        "QSlider::handle:horizontal:disabled { background: #707070; border: 1px solid #555555; }"));
-    timeRow->addWidget(m_environmentPreviewTimeLabel);
+    m_environmentPreviewTime->setToolTip(tr(
+        "Set the editor time of day. When changed, this time is also applied to JMV Test Current Map and hot reload."));
+    timeRow->addWidget(m_timeOfDayLabel);
     timeRow->addWidget(m_environmentPreviewTime, 1);
-    body->addLayout(timeRow);
+    timeOuter->addLayout(timeRow);
     outer->addWidget(m_environmentPreviewBody);
 
     const COptInt* mode = dynamic_cast<const COptInt*>(m_pSettings->opt("renderLightingMode"));
     m_environmentPreviewMode->setCurrentIndex(
         qBound(0, mode ? mode->value() : 2, 2));
-    const auto updateTimeControls = [this](int index)
-    {
-        const bool enabled = index == 2;
-        m_environmentPreviewTimeLabel->setEnabled(enabled);
-        m_environmentPreviewTime->setEnabled(enabled);
-        m_environmentPreviewTime->setToolTip(enabled
-            ? tr("Preview time of day")
-            : tr("Time of day is available only in Full environment mode"));
-    };
-    updateTimeControls(m_environmentPreviewMode->currentIndex());
     connect(m_environmentPreviewCollapse, &QToolButton::clicked, this, [this]()
     {
         const bool show = !m_environmentPreviewBody->isVisible();
@@ -652,9 +1005,8 @@ void CView::initEnvironmentPreviewWidget()
         positionEnvironmentPreviewWidget();
     });
     connect(m_environmentPreviewMode, QOverload<int>::of(&QComboBox::currentIndexChanged),
-            this, [this, updateTimeControls](int index)
+            this, [this](int index)
     {
-        updateTimeControls(index);
         if(m_environmentPreviewSyncing || !m_pSettings)
             return;
         if(COptInt* option = dynamic_cast<COptInt*>(m_pSettings->opt("renderLightingMode")))
@@ -666,7 +1018,7 @@ void CView::initEnvironmentPreviewWidget()
     {
         const int hour = minutes / 60;
         const int minute = minutes % 60;
-        m_environmentPreviewTimeLabel->setText(QString("%1:%2")
+        m_timeOfDayLabel->setText(QString("%1:%2")
             .arg(hour, 2, 10, QLatin1Char('0')).arg(minute, 2, 10, QLatin1Char('0')));
         if(m_environmentPreviewSyncing || !m_pSettings)
             return;
@@ -678,16 +1030,25 @@ void CView::initEnvironmentPreviewWidget()
         update();
     });
     m_environmentPreviewWidget->adjustSize();
+    m_timeOfDayWidget->adjustSize();
     positionEnvironmentPreviewWidget();
     m_environmentPreviewWidget->show();
+    m_timeOfDayWidget->show();
     m_environmentPreviewWidget->raise();
+    m_timeOfDayWidget->raise();
     applyEnvironmentCompatibilityMode();
 }
 
 void CView::positionEnvironmentPreviewWidget()
 {
+    int y = 12;
+    if(m_timeOfDayWidget)
+    {
+        m_timeOfDayWidget->move(12, y);
+        y += m_timeOfDayWidget->height() + 8;
+    }
     if(m_environmentPreviewWidget)
-        m_environmentPreviewWidget->move(12, 12);
+        m_environmentPreviewWidget->move(12, y);
 }
 
 void CView::applyEnvironmentCompatibilityMode()
@@ -735,12 +1096,6 @@ void CView::syncEnvironmentPreviewWidget(float mapTimeHours)
     const int maximumMode = m_openGlesCompatibility ? 1 : 2;
     m_environmentPreviewMode->setCurrentIndex(
         qBound(0, mode ? mode->value() : maximumMode, maximumMode));
-    const bool timeEnabled = m_environmentPreviewMode->currentIndex() == 2;
-    m_environmentPreviewTimeLabel->setEnabled(timeEnabled);
-    m_environmentPreviewTime->setEnabled(timeEnabled);
-    m_environmentPreviewTime->setToolTip(timeEnabled
-        ? tr("Preview time of day")
-        : tr("Time of day is available only in Full environment mode"));
     if(!m_environmentPreviewTime->isSliderDown())
         m_environmentPreviewTime->setValue(qBound(0, minutes, 1439));
     m_environmentPreviewSyncing = false;
@@ -935,6 +1290,7 @@ void CView::initShaders()
     m_landProgram.setUniformValue("u_lightPower", 5.0f);
     m_landProgram.setUniformValue("u_lightColor", QVector4D(1.0, 1.0, 1.0, 1.0));
     m_landProgram.setUniformValue("u_highlight", false);
+    m_landProgram.setUniformValue("u_solidColorEnabled", false);
     m_landProgram.setUniformValue("u_animateLiquid", false);
     m_landProgram.setUniformValue("u_liquidTime", 0.0f);
 
@@ -1901,7 +2257,8 @@ bool CView::prepareForApplicationShutdown()
 
 void CView::drawTestOverlaysOpenGl()
 {
-    if((m_testEntranceRectangles.isEmpty() && !m_testSpawnMarkerValid)
+    if((m_testEntranceRectangles.isEmpty() && !m_testSpawnMarkerValid
+        && !m_terrainPaintOutlineValid && !m_sculptOutlineValid)
        || width() <= 0 || height() <= 0)
         return;
 
@@ -1990,6 +2347,8 @@ void CView::drawTestOverlaysOpenGl()
         ei::gl::LineWidth(selected ? 3.0f : 1.0f);
         ei::gl::DrawArrays(GL_LINE_LOOP, 0, vertices.size());
     }
+
+    drawTerrainPaintOutline(&m_program);
 
     if(m_testEntranceLabelTexturesDirty)
     {
@@ -2532,8 +2891,13 @@ void CView::draw()
                     const QVector3D runtimePosition = position + QVector3D(0.0f, 0.0f, 2.0f);
                     if(light->range() > 0.0f && (!cullingEnabled
                             || frustum.intersectsSphere(runtimePosition, light->range())))
-                        sceneLights.append({runtimePosition,
-                                            light->lightColor(), light->range()});
+                    {
+                        ei::SScenePointLight sceneLight;
+                        sceneLight.position = runtimePosition;
+                        sceneLight.color = light->lightColor();
+                        sceneLight.range = light->range();
+                        sceneLights.append(sceneLight);
+                    }
                 }
                 else if(CTorch* torch = dynamic_cast<CTorch*>(node))
                 {
@@ -2541,7 +2905,13 @@ void CView::draw()
                     const QVector3D position = torch->particleWorldPosition();
                     if(range > 0.0f && (!cullingEnabled
                             || frustum.intersectsSphere(position, range)))
-                        sceneLights.append({position, QVector3D(0.8f, 0.8f, 0.8f), range});
+                    {
+                        ei::SScenePointLight sceneLight;
+                        sceneLight.position = position;
+                        sceneLight.color = QVector3D(0.8f, 0.8f, 0.8f);
+                        sceneLight.range = range;
+                        sceneLights.append(sceneLight);
+                    }
                 }
             }
         // Native terrain registers lights into every intersected spatial cell;
@@ -2653,6 +3023,22 @@ void CView::draw()
             m_pLand->draw(&m_landProgram, cullingEnabled ? &frustum : nullptr);
         if(m_landscapeVisible && m_pLand && m_pLand->isMprLoad() && m_bPreviewTile)
             drawTilePreview(&m_landProgram);
+        if(m_landscapeVisible && m_pLand && m_pLand->isMprLoad()
+           && m_bDrawLand && m_tileGridVisible)
+        {
+            m_landProgram.setUniformValue("u_solidColorEnabled", true);
+            m_landProgram.setUniformValue("u_solidColor",
+                                          QVector4D(0.05f, 0.9f, 1.0f, 1.0f));
+            glDepthFunc(GL_LEQUAL);
+            glEnable(GL_POLYGON_OFFSET_LINE);
+            glPolygonOffset(-1.0f, -1.0f);
+            glLineWidth(1.25f);
+            m_pLand->drawTileGrid(&m_landProgram);
+            glLineWidth(1.0f);
+            glDisable(GL_POLYGON_OFFSET_LINE);
+            glDepthFunc(GL_LESS);
+            m_landProgram.setUniformValue("u_solidColorEnabled", false);
+        }
         logOpenGlErrors(QStringLiteral("draw/terrain"));
         terrainDrawn = true;
         m_program.bind();
@@ -2871,6 +3257,21 @@ void CView::loadLandscape(const QFileInfo& filePath)
         ei::log(eLogWarning, "Landscape failed to load: " + filePath.absoluteFilePath());
         return;
     }
+    CValidationReport canonicalReport;
+    m_terrainEditAvailable = m_mprDocument.load(filePath, &canonicalReport)
+        && !canonicalReport.hasErrors()
+        && m_terrainEdit.load(m_mprDocument, &canonicalReport)
+        && !canonicalReport.hasErrors();
+    if(!m_terrainEditAvailable)
+    {
+        ei::log(eLogWarning, "Canonical terrain editing disabled for this MPR:\n"
+            + canonicalReport.toText());
+    }
+    else
+    {
+        ei::log(eLogInfo, QString("Canonical terrain preview ready: %1 x %2 vertices")
+            .arg(m_terrainEdit.vertexCountX()).arg(m_terrainEdit.vertexCountY()));
+    }
     for(CMob* mob : m_aMob)
         mob->reprojectForCurrentTerrain();
     m_landscapeVisible = true;
@@ -2890,6 +3291,10 @@ void CView::loadLandscape(const QFileInfo& filePath)
     }
     m_pPreviewTile.reset(new CPreviewTile());
     updateTileForm(true);
+    rebuildTerrainAutoCatalog();
+    emit selectionStateChanged(nSelectedNodes() > 0);
+    if(m_landscapeTools && m_landscapeTools->editingEnabled())
+        syncLandscapeToolState();
     emit loadedMapStateChanged();
 }
 
@@ -2901,7 +3306,7 @@ void CView::unloadLand(bool promptForSave)
     if(promptForSave && m_pLand->isDirty())
     {
         QMessageBox::StandardButton reply;
-        reply = QMessageBox::question(this, "Unload MPR", m_pLand->filePath().baseName() + " has unsaved changes.\nDo you want to save changes?", QMessageBox::Save|QMessageBox::No|QMessageBox::Cancel);
+        reply = QMessageBox::question(this, "Unload MPR", m_pLand->filePath().fileName() + " has unsaved changes.\nDo you want to save changes?", QMessageBox::Save|QMessageBox::No|QMessageBox::Cancel);
         if(reply == QMessageBox::Save)
         {
             if(!saveLandscapeDocument(m_pLand->filePath()))
@@ -2913,6 +3318,12 @@ void CView::unloadLand(bool promptForSave)
     }
 
     m_mprModifyTimer->stop();
+    m_terrainEditAvailable = false;
+    finishSculptStroke();
+    m_terrainEdit = CTerrainEditModel();
+    rebuildTerrainAutoCatalog();
+    m_terrainSemanticSeed = 0;
+    m_mprDocument = CMprDocument();
     m_pLand->unloadMpr();
     m_caveEnvironment = false;
     for(CMob* mob : m_aMob)
@@ -2921,6 +3332,7 @@ void CView::unloadLand(bool promptForSave)
     m_sceneFingerprintDirty = true;
     emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMpr, "");
     m_pPreviewTile.clear();
+    emit selectionStateChanged(nSelectedNodes() > 0);
     ei::log(eLogInfo, "Landscape unloaded");
     m_landscapeVisible = true;
     emit loadedMapStateChanged();
@@ -2940,9 +3352,95 @@ void CView::saveLandAs()
     if(!m_pLand->isMprLoad())
         return;
 
-    const QFileInfo fileName = QFileDialog::getSaveFileName(this, "Save " + m_pLand->filePath().fileName() + " as... ", "" , tr("Landscape (*.mpr);;)"));
+    const QFileInfo fileName = QFileDialog::getSaveFileName(
+        this, "Save " + m_pLand->filePath().fileName() + " as... ",
+        m_pLand->filePath().absoluteFilePath(), tr("Landscape (*.mpr);;)"));
     if(fileName.filePath().isEmpty())
         return;
+
+    if(m_pLand->isDirty())
+    {
+        if(!m_terrainEditAvailable)
+        {
+            QMessageBox::critical(this, tr("Lossless MPR Save As unavailable"),
+                tr("Canonical terrain ownership is unavailable for this map. No destination was changed."));
+            return;
+        }
+        const QString sourcePath = QDir::cleanPath(m_pLand->filePath().absoluteFilePath());
+        const QString destinationPath = QDir::cleanPath(fileName.absoluteFilePath());
+        if(QString::compare(sourcePath, destinationPath, Qt::CaseInsensitive) == 0)
+        {
+            QMessageBox::critical(this, tr("Use a separate test MPR"),
+                tr("Direct replacement of the open changed MPR remains disabled. Choose a different Save As path."));
+            return;
+        }
+
+        CMprEditTransaction transaction(tr("Save canonical landscape test copy"));
+        CValidationReport transactionReport;
+        if(!m_terrainEdit.appendSectorEdits(&transaction, &transactionReport)
+           || transactionReport.hasErrors() || transaction.isEmpty())
+        {
+            ei::log(eLogFatal, QString("Refusing changed MPR Save As because the canonical transaction failed path:%1 findings:%2")
+                .arg(destinationPath, transactionReport.toText().trimmed()));
+            QMessageBox::critical(this, tr("Lossless MPR Save As refused"),
+                tr("Endurance could not represent the complete terrain edit as provenance-checked sector patches. "
+                   "No destination was changed.\n\n%1").arg(transactionReport.toText().trimmed()));
+            return;
+        }
+
+        const SStagedMprTransactionValidation preview =
+            validateStagedMprTransaction(m_mprDocument, transaction, fileName);
+        if(!preview.success)
+        {
+            ei::log(eLogFatal, QString("Refusing changed MPR Save As because preview validation failed path:%1 error:%2")
+                .arg(destinationPath, preview.error));
+            QMessageBox::critical(this, tr("Staged MPR validation failed"),
+                tr("The temporary candidate failed validation. No destination was changed.\n\n%1")
+                    .arg(preview.error));
+            return;
+        }
+
+        const QString memberSummary = preview.changedMembers.join(QStringLiteral(", "));
+        if(QMessageBox::question(this, tr("Write validated MPR test copy?"),
+            tr("Endurance validated a lossless changed-MPR candidate.\n\n"
+               "Destination: %1\nChanged archive members: %2\nSHA-256: %3\n\n"
+               "An existing destination will be backed up before atomic replacement. "
+               "The currently open source remains unchanged and marked dirty. "
+               "Navigation data may be stale and must be reviewed separately.\n\n"
+               "Semantic diff:\n%4")
+                .arg(destinationPath, memberSummary, preview.sha256,
+                     preview.semanticDiff.isEmpty() ? tr("(no semantic changes)")
+                                                    : preview.semanticDiff),
+            QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes)
+            return;
+
+        SMprSaveCommitRequest request;
+        request.source = m_pLand->filePath();
+        request.destination = fileName;
+        const SMprSaveCommitResult result =
+            commitStagedMprTransaction(m_mprDocument, transaction, request);
+        if(!result.success)
+        {
+            ei::log(eLogFatal, QString("Changed MPR Save As failed phase:%1 path:%2 error:%3")
+                .arg(result.phase, destinationPath, result.error));
+            QMessageBox::critical(this, tr("Changed MPR Save As failed"),
+                tr("The changed MPR test copy was not committed.\n\nPhase: %1\n%2")
+                    .arg(result.phase, result.error));
+            return;
+        }
+
+        ei::log(eLogInfo, QString("Changed MPR test copy committed source:%1 destination:%2 members:%3 sha256:%4 backup:%5")
+            .arg(sourcePath, destinationPath, result.changedMembers.join(","),
+                 result.candidateSha256,
+                 result.backupPath.isEmpty() ? QStringLiteral("not-required")
+                                             : result.backupPath));
+        QMessageBox::information(this, tr("Validated MPR test copy written"),
+            tr("The changed MPR was written as a separate validated test copy.\n\n%1\n\n"
+               "The open source remains unchanged and marked dirty. Reopen the test copy separately before runtime testing.")
+                .arg(destinationPath));
+        emit updateMsg(tr("Validated changed MPR test copy written: %1").arg(destinationPath));
+        return;
+    }
     //QFileInfo fileName("c:\\konst\\Проклятые Земли (Дополнение)\\Mods\\ferneo_mod\\Maps\\zone1gTest.mpr");
 
     if(saveLandscapeDocument(fileName))
@@ -3209,7 +3707,9 @@ void CView::getColorFromRect(const QRect& rect, QVector<SColor>& aColor)
 
 void CView::changeCurrentMob(CMob *pMob)
 {
-    if(pMob != m_activeMob)
+    if(pMob != m_activeMob && m_pOp
+       && operationRequiresCancellationForDocumentTransition(
+           m_pOp->operationMethod()))
         cancelPendingOperation();
     m_activeMob = pMob;
     emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataActiveMob, nullptr == pMob ? "" : pMob->mobName());
@@ -3566,6 +4066,14 @@ bool CView::selectNodes(const QList<CNode*>& nodes, bool addToSelection)
             node->setState(ENodeState::eSelect);
     }
     recordSelectionChange(before);
+    if(m_pTree)
+    {
+        const QList<CNode*> selected = selectionSnapshot();
+        if(selected.isEmpty())
+            m_pTree->clearViewportSelectionMarker();
+        else
+            m_pTree->markNode(selected.back(), false);
+    }
     viewParameters();
     update();
     emit loadedMapStateChanged();
@@ -3607,6 +4115,403 @@ void CView::updateTileForm(bool bGenerateNewTable)
     m_pTileForm->setTileTypes(m_pLand->tileTypes());
     m_pTileForm->setMaterial(m_pLand->materials());
     m_pTileForm->setAnimTile(m_pLand->animTiles());
+}
+
+void CView::drawTerrainPaintOutline(QOpenGLShaderProgram* program)
+{
+    if(!m_landscapeTools || !m_pLand || !m_pLand->isMprLoad()
+       || !m_landscapeTools->editingEnabled())
+        return;
+    const int position = program->attributeLocation("a_position");
+    if(position < 0)
+        return;
+    if(m_landscapeTools->editMode() == ELandscapeEditMode::Sculpt)
+    {
+        if(!m_sculptOutlineValid)
+            return;
+        QVector<QVector3D> circle;
+        constexpr int segments = 64;
+        circle.reserve(segments);
+        const float radius = m_landscapeTools->radius();
+        for(int segment = 0; segment < segments; ++segment)
+        {
+            const float angle = float(segment) * float(2.0 * M_PI / segments);
+            QVector3D point(m_sculptOutlineCenter.x() + qCos(angle) * radius,
+                            m_sculptOutlineCenter.y() + qSin(angle) * radius, 0.0f);
+            if(!m_pLand->projectPt(point))
+                return;
+            point.setZ(point.z() + 0.12f);
+            circle.append(point);
+        }
+        program->setUniformValue("customColor", QVector4D(1.0f, 0.52f, 0.10f, 0.95f));
+        program->setAttributeArray(position, circle.constData());
+        glDepthFunc(GL_LEQUAL);
+        glLineWidth(2.0f);
+        glDrawArrays(GL_LINE_LOOP, 0, circle.size());
+        glLineWidth(1.0f);
+        glDepthFunc(GL_LESS);
+        return;
+    }
+    if(!m_terrainPaintOutlineValid || m_landscapeTools->manualTileSelectionEnabled())
+        return;
+    const bool landLayer = m_landscapeTools->editMode() == ELandscapeEditMode::TilePaint;
+    const int radius = qMax(0, int(qRound(m_landscapeTools->paintRadius())));
+    const ETerrainTileBrushShape shape = m_landscapeTools->paintShape();
+    const auto included = [this, radius, shape](int x, int y)
+    {
+        const int dx = qAbs(x - m_terrainPaintOutlineX);
+        const int dy = qAbs(y - m_terrainPaintOutlineY);
+        return shape == ETerrainTileBrushShape::Square
+            ? qMax(dx, dy) <= radius
+            : dx * dx + dy * dy <= radius * radius;
+    };
+    QVector<QVector3D> lines;
+    const auto appendEdge = [this, &lines, landLayer](float x1, float y1, float x2, float y2)
+    {
+        QVector3D first(x1, y1, 0.0f);
+        QVector3D second(x2, y2, 0.0f);
+        if(!m_pLand->projectPt(first, landLayer)
+           || !m_pLand->projectPt(second, landLayer))
+            return;
+        first.setZ(first.z() + 0.12f);
+        second.setZ(second.z() + 0.12f);
+        lines.append(first);
+        lines.append(second);
+    };
+    for(int y = m_terrainPaintOutlineY - radius;
+        y <= m_terrainPaintOutlineY + radius; ++y)
+    {
+        for(int x = m_terrainPaintOutlineX - radius;
+            x <= m_terrainPaintOutlineX + radius; ++x)
+        {
+            if(!included(x, y))
+                continue;
+            const float left = float(x * 2);
+            const float right = left + 2.0f;
+            const float bottom = float(y * 2);
+            const float top = bottom + 2.0f;
+            if(!included(x, y - 1)) appendEdge(left, bottom, right, bottom);
+            if(!included(x + 1, y)) appendEdge(right, bottom, right, top);
+            if(!included(x, y + 1)) appendEdge(right, top, left, top);
+            if(!included(x - 1, y)) appendEdge(left, top, left, bottom);
+        }
+    }
+    if(lines.isEmpty())
+        return;
+    program->setUniformValue("customColor", landLayer
+        ? QVector4D(1.0f, 0.72f, 0.08f, 0.95f)
+        : QVector4D(0.10f, 0.82f, 1.0f, 0.95f));
+    program->setAttributeArray(position, lines.constData());
+    glDepthFunc(GL_LEQUAL);
+    glLineWidth(2.0f);
+    glDrawArrays(GL_LINES, 0, lines.size());
+    glLineWidth(1.0f);
+    glDepthFunc(GL_LESS);
+}
+
+void CView::rebuildTerrainAutoCatalog()
+{
+    m_terrainAtlasAnalysis = STerrainAtlasAnalysis();
+    m_terrainMaterialRepresentatives.clear();
+    m_terrainPaintAudit.clear();
+    m_terrainPaintActions.clear();
+    m_terrainPaintActionId = 0;
+    if(m_landscapeTools)
+        m_landscapeTools->setPaintTerrainTypes({}, {}, {});
+    QByteArray seedText = m_mprDocument.mapInfo().innerNamespace.toUtf8();
+    quint32 seed = 2166136261u;
+    for(char byte : seedText)
+    {
+        seed ^= quint8(byte);
+        seed *= 16777619u;
+    }
+    m_terrainSemanticSeed = seed;
+    if(!m_terrainEditAvailable || !m_pTileForm)
+        return;
+    CValidationReport report;
+    m_terrainAtlasAnalysis = CTerrainAtlasAnalyzer::analyze(
+        m_mprDocument.mapInfo().innerNamespace,
+        m_pTileForm->tileImages().size(), &report);
+    QVector<QPair<qint32, QString>> landChoices;
+    QVector<QPair<qint32, QString>> underwaterChoices;
+    QVector<QPair<qint32, QString>> overlayChoices;
+    for(const STerrainAtlasMaterial& material : m_terrainAtlasAnalysis.materials)
+    {
+        QVector<QPair<qint32, QString>>& choices = material.layer == ETerrainAtlasLayer::Overlay
+            ? overlayChoices : (material.underwater ? underwaterChoices : landChoices);
+        choices.append(qMakePair(material.id,
+            tr("%1 (%2 natural variant(s))")
+                .arg(material.name).arg(material.pureVariantCount)));
+        m_terrainMaterialRepresentatives.insert(material.id, material.representativeSlot);
+    }
+    const QString status = m_terrainAtlasAnalysis.usable
+        ? tr("%1 loaded: %2 land and %3 overlay materials.")
+              .arg(m_terrainAtlasAnalysis.templateName)
+              .arg(landChoices.size()).arg(overlayChoices.size())
+        : tr("No authored slot template is registered for namespace '%1'. Semantic painting is disabled.")
+              .arg(m_mprDocument.mapInfo().innerNamespace);
+    m_landscapeTools->setPaintTerrainTypes(
+        landChoices, underwaterChoices, overlayChoices, status);
+    ei::log(report.hasErrors() ? eLogWarning : eLogInfo,
+        QString("Terrain namespace template: %1, %2 land materials, %3 overlay materials, %4/%5 described slots%6")
+            .arg(m_terrainAtlasAnalysis.templateName)
+            .arg(landChoices.size()).arg(overlayChoices.size())
+            .arg(m_terrainAtlasAnalysis.describedSlots).arg(m_terrainAtlasAnalysis.expectedSlots)
+            .arg(report.findings().isEmpty() ? QString() : "\n" + report.toText()));
+    emit updateMsg(m_terrainAtlasAnalysis.usable
+        ? status
+        : tr("This atlas layout is not registered; semantic terrain painting is disabled."));
+}
+
+void CView::exportTerrainPaintDiagnostic()
+{
+    if(!m_pLand->isMprLoad())
+    {
+        emit updateMsg(tr("Load an MPR before exporting a paint diagnostic."));
+        return;
+    }
+    const QString suggested = m_pLand->filePath().absolutePath() + QDir::separator()
+        + m_pLand->filePath().completeBaseName() + "-paint-diagnostic.json";
+    const QString path = QFileDialog::getSaveFileName(
+        this, tr("Export terrain paint diagnostic"), suggested, tr("JSON files (*.json)"));
+    if(path.isEmpty())
+        return;
+    QJsonObject root;
+    root.insert("schema", "ei-mapper-endurance-paint-diagnostic");
+    root.insert("version", 5);
+    root.insert("mprFileName", m_pLand->filePath().fileName());
+    root.insert("mprNamespace", m_mprDocument.mapInfo().innerNamespace);
+    root.insert("sourceMprSha256", QString::fromLatin1(QCryptographicHash::hash(
+        m_mprDocument.originalBytes(), QCryptographicHash::Sha256).toHex()));
+    root.insert("atlasSlotCount", m_pTileForm ? m_pTileForm->tileImages().size() : 0);
+    root.insert("atlasPixelSha256", m_pTileForm
+        ? QString::fromLatin1(terrainAtlasPixelSha256(m_pTileForm->tileImages())) : QString());
+    root.insert("analysisMode", "authored-namespace-template-v1");
+    root.insert("paintLookupTransform", "mirror-grid-y-v1");
+    root.insert("templateName", m_terrainAtlasAnalysis.templateName);
+    root.insert("registeredMaterialCount", m_terrainAtlasAnalysis.materials.size());
+    root.insert("describedAtlasSlots", m_terrainAtlasAnalysis.describedSlots);
+    root.insert("changedMprSavingEnabled", false);
+    QJsonArray paintActions;
+    for(const STerrainPaintAuditAction& action : m_terrainPaintActions)
+    {
+        QJsonObject object;
+        object.insert("actionId", action.actionId);
+        object.insert("strokeId", action.strokeId);
+        object.insert("outcome", action.outcome);
+        object.insert("validation", action.validation);
+        object.insert("layer", action.semantic.layer == ETerrainTileLayer::Land
+            ? "land" : "overlay");
+        object.insert("requestedMaterialId", action.semantic.requestedMaterialId);
+        object.insert("backgroundMaterialId", action.semantic.backgroundMaterialId);
+        QJsonObject brush;
+        brush.insert("centerX", action.semantic.brush.centerX);
+        brush.insert("centerY", action.semantic.brush.centerY);
+        brush.insert("radius", action.semantic.brush.radius);
+        brush.insert("shape", action.semantic.brush.shape == ETerrainTileBrushShape::Circle
+            ? "circle" : "square");
+        object.insert("brush", brush);
+        QJsonArray path;
+        for(qint32 material : action.semantic.materialPath)
+            path.append(material);
+        object.insert("materialPath", path);
+        const auto cellsJson = [](const QVector<QPoint>& cells) {
+            QJsonArray result;
+            for(const QPoint& cell : cells)
+            {
+                QJsonObject point;
+                point.insert("x", cell.x());
+                point.insert("y", cell.y());
+                result.append(point);
+            }
+            return result;
+        };
+        object.insert("paintedCoreCells", cellsJson(action.semantic.paintedCoreCells));
+        object.insert("affectedCells", cellsJson(action.semantic.affectedCells));
+        QJsonArray changedCells;
+        QJsonArray changedTiles;
+        const CTerrainTransitionCatalog& actionCatalog =
+            m_terrainAtlasAnalysis.catalog(action.semantic.layer);
+        for(const STerrainTileDelta& delta : action.deltas)
+        {
+            QJsonObject point;
+            point.insert("x", delta.globalX);
+            point.insert("y", delta.globalY);
+            changedCells.append(point);
+            QJsonObject tile;
+            tile.insert("x", delta.globalX);
+            tile.insert("y", delta.globalY);
+            tile.insert("before", packedTerrainTileJson(delta.before));
+            tile.insert("after", packedTerrainTileJson(delta.after));
+            bool beforeFound = false;
+            bool afterFound = false;
+            const STerrainTransitionSignature beforeSignature =
+                actionCatalog.gridSignatureForPacked(delta.before, &beforeFound);
+            const STerrainTransitionSignature afterSignature =
+                actionCatalog.gridSignatureForPacked(delta.after, &afterFound);
+            tile.insert("beforeCatalogRecognized", beforeFound);
+            tile.insert("afterCatalogRecognized", afterFound);
+            if(beforeFound)
+                tile.insert("beforeGridCorners",
+                            terrainGridSignatureJson(beforeSignature));
+            if(afterFound)
+                tile.insert("afterGridCorners",
+                            terrainGridSignatureJson(afterSignature));
+            changedTiles.append(tile);
+        }
+        object.insert("changedCells", changedCells);
+        object.insert("changedTiles", changedTiles);
+        object.insert("solverMode", action.semantic.solverMode);
+        object.insert("junctionPadding", action.semantic.junctionPadding);
+        object.insert("solverNodes", action.semantic.solverNodes);
+        object.insert("solverLimit", action.semantic.solverLimit);
+        paintActions.append(object);
+    }
+    root.insert("paintActions", paintActions);
+    QJsonArray operations;
+    for(const STerrainTileDelta& delta : m_terrainPaintAudit)
+    {
+        QJsonObject operation;
+        operation.insert("x", delta.globalX);
+        operation.insert("y", delta.globalY);
+        QJsonObject globalGrid;
+        globalGrid.insert("x", delta.globalX);
+        globalGrid.insert("y", delta.globalY);
+        operation.insert("globalGrid", globalGrid);
+        QJsonObject sectorGrid;
+        sectorGrid.insert("sectorX", delta.globalX / 16);
+        sectorGrid.insert("sectorY", delta.globalY / 16);
+        sectorGrid.insert("localColumn", delta.globalX % 16);
+        sectorGrid.insert("localRow", delta.globalY % 16);
+        operation.insert("sectorGrid", sectorGrid);
+        operation.insert("layer", delta.layer == ETerrainTileLayer::Land ? "land" : "overlay");
+        operation.insert("beforePacked", int(delta.before));
+        operation.insert("afterPacked", int(delta.after));
+        operation.insert("before", packedTerrainTileJson(delta.before));
+        operation.insert("after", packedTerrainTileJson(delta.after));
+        operation.insert("hasSemanticRequest", delta.hasSemanticRequest);
+        operation.insert("strokeId", delta.diagnosticStrokeId);
+        if(delta.hasSemanticRequest)
+        {
+            QJsonObject brushCenter;
+            brushCenter.insert("x", delta.brushCenterX);
+            brushCenter.insert("y", delta.brushCenterY);
+            operation.insert("brushCenterGrid", brushCenter);
+            QJsonObject brushOffset;
+            brushOffset.insert("x", delta.globalX - delta.brushCenterX);
+            brushOffset.insert("y", delta.globalY - delta.brushCenterY);
+            operation.insert("brushGridOffset", brushOffset);
+            operation.insert("requestedMaterialId", delta.requestedMaterialId);
+            operation.insert("requestedGridCorners",
+                             terrainGridSignatureJson(delta.requestedSignature));
+        }
+        const CTerrainTransitionCatalog& catalog = m_terrainAtlasAnalysis.catalog(delta.layer);
+        bool beforeFound = false;
+        bool afterFound = false;
+        bool baseFound = false;
+        const STerrainTransitionSignature beforeSignature =
+            catalog.signatureForPacked(delta.before, &beforeFound);
+        const STerrainTransitionSignature afterSignature =
+            catalog.signatureForPacked(delta.after, &afterFound);
+        SMprPackedTile baseTile = SMprPackedTile::decode(delta.after);
+        baseTile.rotation = 0;
+        const STerrainTransitionSignature baseSignature =
+            catalog.signatureForPacked(baseTile.encode(), &baseFound);
+        operation.insert("beforeCatalogRecognized", beforeFound);
+        operation.insert("afterCatalogRecognized", afterFound);
+        operation.insert("slotRotationZeroCatalogRecognized", baseFound);
+        if(beforeFound)
+            operation.insert("beforeCatalogGridCorners",
+                             terrainGridSignatureJson(beforeSignature));
+        if(afterFound)
+            operation.insert("afterCatalogGridCorners",
+                             terrainGridSignatureJson(afterSignature));
+        if(baseFound)
+            operation.insert("slotRotationZeroCatalogGridCorners",
+                             terrainGridSignatureJson(baseSignature));
+        operations.append(operation);
+    }
+    root.insert("paintDeltas", operations);
+    QMap<QString, STerrainTileDelta> snapshotCells;
+    for(const STerrainPaintAuditAction& action : m_terrainPaintActions)
+    {
+        for(const QPoint& affected : action.semantic.affectedCells)
+        {
+            for(int offsetY = -1; offsetY <= 1; ++offsetY)
+            {
+                for(int offsetX = -1; offsetX <= 1; ++offsetX)
+                {
+                    STerrainTileDelta cell;
+                    cell.globalX = affected.x() + offsetX;
+                    cell.globalY = affected.y() + offsetY;
+                    cell.layer = action.semantic.layer;
+                    const QString key = QString("%1:%2:%3")
+                        .arg(cell.layer == ETerrainTileLayer::Land ? "land" : "overlay")
+                        .arg(cell.globalX).arg(cell.globalY);
+                    snapshotCells.insert(key, cell);
+                }
+            }
+        }
+    }
+    for(const STerrainTileDelta& delta : m_terrainPaintAudit)
+    {
+        for(int offsetY = -1; offsetY <= 1; ++offsetY)
+        {
+            for(int offsetX = -1; offsetX <= 1; ++offsetX)
+            {
+                STerrainTileDelta cell;
+                cell.globalX = delta.globalX + offsetX;
+                cell.globalY = delta.globalY + offsetY;
+                cell.layer = delta.layer;
+                const QString key = QString("%1:%2:%3")
+                    .arg(cell.layer == ETerrainTileLayer::Land ? "land" : "overlay")
+                    .arg(cell.globalX).arg(cell.globalY);
+                snapshotCells.insert(key, cell);
+            }
+        }
+    }
+    QJsonArray currentTiles;
+    for(const STerrainTileDelta& cell : snapshotCells)
+    {
+        bool available = false;
+        const quint16 packed = m_terrainEdit.packedTile(
+            cell.globalX, cell.globalY, cell.layer, &available);
+        if(!available)
+            continue;
+        QJsonObject current;
+        current.insert("x", cell.globalX);
+        current.insert("y", cell.globalY);
+        current.insert("layer", cell.layer == ETerrainTileLayer::Land ? "land" : "overlay");
+        current.insert("packed", packedTerrainTileJson(packed));
+        const CTerrainTransitionCatalog& catalog = m_terrainAtlasAnalysis.catalog(cell.layer);
+        bool found = false;
+        const STerrainTransitionSignature catalogSignature =
+            catalog.signatureForPacked(packed, &found);
+        current.insert("catalogRecognized", found);
+        if(found)
+        {
+            current.insert("catalogGridCorners",
+                           terrainGridSignatureJson(catalogSignature));
+            bool gridFound = false;
+            const STerrainTransitionSignature gridSignature =
+                catalog.gridSignatureForPacked(packed, &gridFound);
+            if(gridFound)
+                current.insert("visibleGridCorners",
+                               terrainGridSignatureJson(gridSignature));
+        }
+        currentTiles.append(current);
+    }
+    root.insert("currentTileSnapshot", currentTiles);
+    QFile output(path);
+    if(!output.open(QIODevice::WriteOnly | QIODevice::Truncate)
+       || output.write(QJsonDocument(root).toJson(QJsonDocument::Indented)) < 0)
+    {
+        QMessageBox::warning(this, tr("Paint diagnostic"),
+                             tr("Could not write %1: %2").arg(path, output.errorString()));
+        return;
+    }
+    output.close();
+    emit updateMsg(tr("Paint diagnostic exported without writing an MPR: %1").arg(path));
 }
 
 void CView::onChangeCursorTile(QPixmap ico)
@@ -3658,10 +4563,8 @@ void CView::onMapMaterialUpdate()
 {
     if(!m_pLand->isMprLoad())
         return;
-
-    m_pLand->setMaterials(m_pTileForm->material());
-    m_pLand->setAnimTils(m_pTileForm->animTile());
-    m_pLand->setTileTypes(m_pTileForm->tileTypes());
+    QMessageBox::information(this, tr("MPR metadata"),
+        tr("Direct atlas-category and liquid-material mutation is disabled until it uses the canonical staged MPR transaction path."));
 }
 
 void CView::onRestoreTileData()
@@ -4020,7 +4923,7 @@ bool CView::unloadMobDocument(CMob* mob, bool promptForSave)
 {
     if(!mob || !m_aMob.contains(mob))
         return false;
-    cancelPendingOperation();
+    prepareDocumentTransition();
     if(!closeMobParameterWindow(mob))
         return false;
     if(!closeMobScriptWindow(mob))
@@ -4226,7 +5129,7 @@ void CView::unloadMob(QString mobName)
     if(m_aMob.isEmpty())
         return;
 
-    cancelPendingOperation();
+    prepareDocumentTransition();
     if(mobName.isEmpty())
     {
         if(!closeAllMobParameterWindows())
@@ -4645,6 +5548,33 @@ void CView::pickTile(QVector3D posOnLand, bool bLand)
 
     m_pTileForm->selectTile(pTile->tileIndex());
     m_pTileForm->setTileRotation(pTile->tileRotation());
+    if(m_landscapeTools && m_terrainEditAvailable)
+    {
+        const int globalX = tileLoc.xSec * 16 + tileLoc.col;
+        const int globalY = tileLoc.ySec * 16 + tileLoc.row;
+        bool found = false;
+        const quint16 packed = m_terrainEdit.packedTile(globalX, globalY,
+            bLand ? ETerrainTileLayer::Land : ETerrainTileLayer::Overlay, &found);
+        const ETerrainTileLayer layer = bLand
+            ? ETerrainTileLayer::Land : ETerrainTileLayer::Overlay;
+        const CTerrainTransitionCatalog& catalog = !bLand
+            ? m_terrainAtlasAnalysis.overlayCatalogWithLandFamilies()
+            : m_terrainAtlasAnalysis.catalog(layer);
+        const STerrainTransitionSignature signature = found
+            ? catalog.signatureForPacked(packed, &found)
+            : STerrainTransitionSignature();
+        if(found && signature.northWest == signature.northEast
+           && signature.northWest == signature.southEast
+           && signature.northWest == signature.southWest)
+        {
+            if(m_landscapeTools->selectPaintTerrainType(signature.northWest))
+                emit updateMsg(tr("Sampled visual terrain material %1.").arg(signature.northWest));
+            else
+                emit updateMsg(tr("This atlas family is reserved for underwater or internal transitions and is not a land brush."));
+        }
+        else if(found)
+            emit updateMsg(tr("This is a transition tile; sample a uniform tile to choose one material."));
+    }
     if(!bLand)
         m_pTileForm->setActiveMatIndex(pTile->materialIndex());
 
@@ -4653,7 +5583,7 @@ void CView::pickTile(QVector3D posOnLand, bool bLand)
 
 void CView::setTile(QVector3D posOnLand, bool bLand)
 {
-    if(!m_pLand->isMprLoad())
+    if(!m_pLand->isMprLoad() || !m_terrainEditAvailable || !m_landscapeTools)
         return;
 
     CTile* pTile = nullptr;
@@ -4661,31 +5591,201 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
     if(!m_pLand->pickTile(posOnLand, pTile, tileLoc, bLand))
         return;
 
-    int index, rotNum, matIndex;
-    m_pTileForm->getSelectedTile(index, rotNum);
-    if(index < 0)
+    STerrainTileBrush brush;
+    brush.centerX = tileLoc.xSec * 16 + tileLoc.col;
+    brush.centerY = tileLoc.ySec * 16 + tileLoc.row;
+    const QPoint brushCenter(brush.centerX, brush.centerY);
+    if(m_tilePaintStrokeActive && m_lastTerrainPaintCenterValid
+       && m_lastTerrainPaintCenter == brushCenter
+       && m_lastTerrainPaintLayerLand == bLand)
         return;
-
-    matIndex = m_pTileForm->activeMaterialindex();
-
-    STileInfo tileInfoNew{index, rotNum, matIndex};
-    STileInfo tileInfoOld{pTile->tileIndex(), pTile->tileRotation(), pTile->materialIndex()};
-    CBrushTileCommand* pReset = new CBrushTileCommand(this, tileInfoNew, tileLoc, tileInfoOld, m_tileBrushCommandId);
-    m_pUndoStack->push(pReset);
-
-//    pTile->setTile(index, rotNum);
-//    if(!bLand)
-//        pTile->setMaterialIndex(matIndex);
-
-//    m_pLand->updateSectorDrawData(tileLoc.xSec, tileLoc.ySec);
+    m_lastTerrainPaintCenter = brushCenter;
+    m_lastTerrainPaintCenterValid = true;
+    m_lastTerrainPaintLayerLand = bLand;
+    brush.radius = m_landscapeTools->paintRadius();
+    brush.shape = m_landscapeTools->paintShape();
+    CValidationReport report;
+    const ETerrainTileLayer layer = bLand
+        ? ETerrainTileLayer::Land : ETerrainTileLayer::Overlay;
+    const CTerrainTransitionCatalog& manualCatalog = !bLand
+            && m_landscapeTools->landFamiliesAllowedInOverlay()
+        ? m_terrainAtlasAnalysis.overlayCatalogWithLandFamilies()
+        : m_terrainAtlasAnalysis.catalog(layer);
+    const CTerrainTransitionCatalog& semanticCatalog = !bLand
+        ? m_terrainAtlasAnalysis.overlayCatalogWithLandFamilies()
+        : m_terrainAtlasAnalysis.catalog(layer);
+    const bool manual = m_landscapeTools->manualTileSelectionEnabled();
+    qint32 terrainType = -1;
+    STerrainTileCommand command;
+    if(manual)
+    {
+        int selectedIndex = -1;
+        int selectedRotation = 0;
+        m_pTileForm->getSelectedTile(selectedIndex, selectedRotation);
+        if(selectedIndex < 0)
+        {
+            emit updateMsg(tr("Choose an atlas tile before painting in manual mode."));
+            return;
+        }
+        SMprPackedTile selected;
+        selected.atlasIndex = quint8(selectedIndex / 64);
+        selected.tileIndex = quint8(selectedIndex % 64);
+        selected.rotation = quint8(selectedRotation & 3);
+        bool layerCompatible = false;
+        manualCatalog.signatureForPacked(selected.encode(), &layerCompatible);
+        if(!layerCompatible)
+        {
+            emit updateMsg(layer == ETerrainTileLayer::Land
+                ? tr("That atlas slot is not a land-family tile.")
+                : tr("That atlas slot is not enabled for overlay painting."));
+            return;
+        }
+        command = m_terrainEdit.makeTilePaint(
+            brush, layer, selected.atlasIndex, selected.tileIndex,
+            selected.rotation);
+        command.description = tr("Paint manual atlas tiles");
+        command.semanticAudit.valid = true;
+        command.semanticAudit.brush = brush;
+        command.semanticAudit.layer = layer;
+        command.semanticAudit.requestedMaterialId = -1;
+        command.semanticAudit.solverMode = QStringLiteral("manual-atlas");
+        for(const STerrainTileDelta& delta : command.deltas)
+        {
+            const QPoint point(delta.globalX, delta.globalY);
+            command.semanticAudit.paintedCoreCells.append(point);
+            command.semanticAudit.affectedCells.append(point);
+        }
+    }
+    else
+    {
+        bool materialSelected = false;
+        terrainType = m_landscapeTools->paintTerrainType(&materialSelected);
+        if(!materialSelected)
+        {
+            emit updateMsg(m_terrainAtlasAnalysis.usable
+                ? tr("Choose a terrain material before painting.")
+                : tr("No authored slot template is registered for this atlas namespace."));
+            return;
+        }
+        command = m_terrainEdit.makeSemanticTilePaint(
+            brush, layer, terrainType, semanticCatalog,
+            m_terrainSemanticSeed, &report);
+    }
+    STerrainPaintAuditAction audit;
+    audit.actionId = m_terrainPaintActionId++;
+    audit.strokeId = m_tileBrushCommandId;
+    audit.validation = report.toText();
+    audit.semantic = command.semanticAudit;
+    audit.deltas = command.deltas;
+    ++m_tileStrokeActions;
+    m_tileStrokeSolverNodes += audit.semantic.solverNodes;
+    if(command.isEmpty())
+    {
+        audit.outcome = report.hasErrors()
+            ? QStringLiteral("refused") : QStringLiteral("no-op");
+        m_terrainPaintActions.append(audit);
+        if(audit.outcome == QStringLiteral("refused"))
+            ++m_tileStrokeRefused;
+        else
+            ++m_tileStrokeNoOps;
+        if(report.hasErrors())
+            ei::log(eLogWarning, "Semantic terrain paint refused:\n" + report.toText());
+        if(!m_tilePaintStrokeActive || report.hasErrors())
+            emit updateMsg(report.findings().isEmpty()
+                ? tr("The terrain material is already resolved at this brush position.")
+                : report.toText());
+    }
+    else
+    {
+        for(STerrainTileDelta& delta : command.deltas)
+            delta.diagnosticStrokeId = m_tileBrushCommandId;
+        audit.deltas = command.deltas;
+        if(!applyTerrainTilePreview(command, true))
+        {
+            audit.outcome = QStringLiteral("refused");
+            audit.validation += QStringLiteral(
+                "ERROR terrain.preview_apply: The canonical preview command was not applied\n");
+            m_terrainPaintActions.append(audit);
+            ++m_tileStrokeRefused;
+            emit updateMsg(tr("Terrain preview was refused; no undo entry was created."));
+        }
+        else
+        {
+            audit.outcome = QStringLiteral("applied");
+            m_terrainPaintActions.append(audit);
+            ++m_tileStrokeApplied;
+            m_tileStrokeChangedTiles += audit.deltas.size();
+            m_terrainPaintAudit += command.deltas;
+            // Compose all stamps into one before/after command. Live preview
+            // remains incremental, but undo/redo applies each final tile once
+            // and rebuilds each touched sector once.
+            appendTerrainTileCommand(&m_tileStrokeCommand, command);
+        }
+    }
+    const QString actionLog = QString("Terrain paint action %1 stroke %2: %3, layer=%4 material=%5 center=%6,%7 radius=%8 core=%9 affected=%10 changed=%11 solver=%12 nodes=%13")
+            .arg(audit.actionId).arg(audit.strokeId).arg(audit.outcome)
+            .arg(bLand ? "land" : "overlay")
+            .arg(manual ? QStringLiteral("manual") : QString::number(terrainType))
+            .arg(brush.centerX).arg(brush.centerY).arg(brush.radius)
+            .arg(audit.semantic.paintedCoreCells.size())
+            .arg(audit.semantic.affectedCells.size()).arg(audit.deltas.size())
+            .arg(audit.semantic.solverMode).arg(audit.semantic.solverNodes);
+    // The exported diagnostic retains every action. Keep synchronous workflow
+    // logging off the pointer hot path and emit one summary on release.
+    if(!m_tilePaintStrokeActive || audit.outcome == QStringLiteral("refused"))
+        ei::log(audit.outcome == QStringLiteral("refused") ? eLogWarning : eLogInfo,
+                actionLog);
 }
 
 void CView::setTile(QMap<STileLocation, STileInfo>& arrTileData)
 {
-    if(!m_pLand->isMprLoad())
+    if(!m_pLand->isMprLoad() || !m_terrainEditAvailable)
         return;
 
-    m_pLand->setTile(arrTileData);
+    STerrainTileCommand command;
+    command.description = tr("Paint terrain tiles");
+    for(auto entry = arrTileData.constBegin(); entry != arrTileData.constEnd(); ++entry)
+    {
+        const STileLocation& location = entry.key();
+        const STileInfo& requested = entry.value();
+        const int globalX = location.xSec * 16 + location.col;
+        const int globalY = location.ySec * 16 + location.row;
+        const ETerrainTileLayer layer = location.bLand
+            ? ETerrainTileLayer::Land : ETerrainTileLayer::Overlay;
+        bool available = false;
+        const quint16 before = m_terrainEdit.packedTile(globalX, globalY, layer, &available);
+        if(!available || requested.index < 0)
+            continue;
+        SMprPackedTile packed;
+        packed.atlasIndex = quint8(requested.index / 64);
+        packed.tileIndex = quint8(requested.index % 64);
+        packed.rotation = quint8(requested.rotNum & 3);
+        const quint16 after = packed.encode();
+        if(before == after)
+            continue;
+        STerrainTileDelta delta;
+        delta.globalX = globalX;
+        delta.globalY = globalY;
+        delta.layer = layer;
+        delta.before = before;
+        delta.after = after;
+        command.deltas.append(delta);
+    }
+    if(command.isEmpty())
+        return;
+    CValidationReport report;
+    if(!m_terrainEdit.apply(command, true, &report))
+    {
+        ei::log(eLogWarning, "Canonical tile preview refused:\n" + report.toText());
+        return;
+    }
+    for(const STerrainTileDelta& delta : command.deltas)
+        m_pLand->previewCanonicalTile(delta.globalX, delta.globalY,
+            delta.layer == ETerrainTileLayer::Land, delta.after);
+    m_pLand->setDirty(m_terrainEdit.isDirty());
+    emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMprDirtyFlag,
+                              m_terrainEdit.isDirty() ? "*" : "");
+    update();
 }
 
 void CView::updatePreviewTile(QVector3D posOnLand, bool bLand)
@@ -4696,16 +5796,39 @@ void CView::updatePreviewTile(QVector3D posOnLand, bool bLand)
     CTile* pTile = nullptr;
     STileLocation tileLoc;
     if(!m_pLand->pickTile(posOnLand, pTile, tileLoc, bLand))
+    {
+        m_terrainPaintOutlineValid = false;
         return;
+    }
 
-    onChangeCursorTile(m_pTileForm->tileWithRot(pTile->tileIndex()));
-    int index, rotNum, matIndex;
+    if(!manualTilePaintingEnabled())
+    {
+        m_terrainPaintOutlineX = tileLoc.xSec * 16 + tileLoc.col;
+        m_terrainPaintOutlineY = tileLoc.ySec * 16 + tileLoc.row;
+        m_terrainPaintOutlineValid = true;
+        setPreviewTile(false);
+        unsetCursor();
+        update();
+        return;
+    }
+    m_terrainPaintOutlineValid = false;
+
+    int index = -1;
+    int rotNum = 0;
     m_pTileForm->getSelectedTile(index, rotNum);
     if(index < 0)
+    {
+        setPreviewTile(false);
+        unsetCursor();
         return;
+    }
+
+    onChangeCursorTile(m_pTileForm->tileWithRot(index));
+    int matIndex;
 
     matIndex = m_pTileForm->activeMaterialindex();
     m_pPreviewTile->updateTile(*pTile, index, rotNum, matIndex, tileLoc.xSec, tileLoc.ySec);
+    setPreviewTile(true);
 }
 
 void CView::addTileRotation(int step)
@@ -4714,6 +5837,37 @@ void CView::addTileRotation(int step)
     if(curRot < 0)
         curRot = 3;
     m_pTileForm->setTileRotation(curRot);
+}
+
+void CView::adjustTerrainPaintSize(int steps)
+{
+    if(!m_landscapeTools)
+        return;
+    m_landscapeTools->adjustPaintSize(steps);
+    update();
+}
+
+void CView::adjustTerrainPaintMaterial(int steps)
+{
+    if(!m_landscapeTools || manualTilePaintingEnabled())
+        return;
+    m_landscapeTools->adjustPaintTerrainType(steps);
+    update();
+}
+
+bool CView::manualTilePaintingEnabled() const
+{
+    return m_landscapeTools && m_landscapeTools->manualTileSelectionEnabled();
+}
+
+float CView::terrainPaintStampSpacing() const
+{
+    if(!m_landscapeTools || manualTilePaintingEnabled())
+        return 2.0f;
+    // Terrain cells are two world units wide. Larger semantic brushes overlap
+    // heavily, so proportional spacing avoids resolving the same seam network
+    // for every crossed cell while retaining continuous core coverage.
+    return qMax(2.0f, float(m_landscapeTools->paintRadius()) * 2.0f);
 }
 
 void CView::showOutliner(bool bShow)
@@ -4731,7 +5885,77 @@ void CView::pickQuickAccessTile(int index)
 
 void CView::endTileBrushGroup()
 {
-    m_tileBrushCommandId = (m_tileBrushCommandId+1)%9;
+    if(m_tilePaintStrokeActive)
+    {
+        m_tilePaintStrokeActive = false;
+        if(m_pUndoStack && !m_tileStrokeCommand.isEmpty())
+            m_pUndoStack->push(new CTerrainTilePreviewCommand(
+                this, m_tileStrokeCommand, true));
+        m_pLand->setDirty(m_terrainEdit.isDirty());
+        emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMprDirtyFlag,
+                                  m_terrainEdit.isDirty() ? "*" : "");
+        emit updateMsg(tr("Terrain stroke: %1 stamp(s), %2 changed tile(s), %3 no-op, %4 refused.")
+            .arg(m_tileStrokeActions).arg(m_tileStrokeChangedTiles)
+            .arg(m_tileStrokeNoOps).arg(m_tileStrokeRefused));
+        ei::log(m_tileStrokeRefused > 0 ? eLogWarning : eLogInfo,
+            QString("Terrain paint stroke %1 summary: actions=%2 applied=%3 no-op=%4 refused=%5 changed=%6 solverNodes=%7")
+                .arg(m_tileBrushCommandId).arg(m_tileStrokeActions)
+                .arg(m_tileStrokeApplied).arg(m_tileStrokeNoOps)
+                .arg(m_tileStrokeRefused).arg(m_tileStrokeChangedTiles)
+                .arg(m_tileStrokeSolverNodes));
+    }
+    m_lastTerrainPaintCenterValid = false;
+    ++m_tileBrushCommandId;
+}
+
+void CView::beginTileBrushGroup()
+{
+    if(m_tilePaintStrokeActive || !m_pUndoStack)
+        return;
+    m_tilePaintStrokeActive = true;
+    m_tileStrokeCommand = STerrainTileCommand();
+    m_tileStrokeCommand.description = tr("Paint terrain tiles");
+    m_lastTerrainPaintCenterValid = false;
+    m_tileStrokeActions = 0;
+    m_tileStrokeApplied = 0;
+    m_tileStrokeNoOps = 0;
+    m_tileStrokeRefused = 0;
+    m_tileStrokeChangedTiles = 0;
+    m_tileStrokeSolverNodes = 0;
+}
+
+bool CView::applyTerrainTilePreview(const STerrainTileCommand& command, bool forward)
+{
+    if(!m_terrainEditAvailable)
+        return false;
+    CValidationReport report;
+    if(!m_terrainEdit.apply(command, forward, &report))
+    {
+        ei::log(eLogWarning, "Semantic terrain preview command refused:\n" + report.toText());
+        return false;
+    }
+    QSet<QPair<int, int>> sectors;
+    for(const STerrainTileDelta& delta : command.deltas)
+    {
+        m_pLand->previewCanonicalTile(delta.globalX, delta.globalY,
+            delta.layer == ETerrainTileLayer::Land,
+            forward ? delta.after : delta.before, false);
+        sectors.insert(qMakePair(delta.globalX / 16, delta.globalY / 16));
+    }
+    for(const QPair<int, int>& sector : sectors)
+        m_pLand->updateSectorDrawData(sector.first, sector.second);
+    m_pLand->setDirty(m_terrainEdit.isDirty());
+    if(!m_tilePaintStrokeActive)
+    {
+        emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMprDirtyFlag,
+                                  m_terrainEdit.isDirty() ? "*" : "");
+        emit updateMsg(command.semanticAudit.solverMode == QStringLiteral("manual-atlas")
+            ? tr("Painted %1 atlas tile(s) manually.").arg(command.deltas.size())
+            : tr("Painted %1 atlas tile(s), including bounded seam updates.")
+                  .arg(command.deltas.size()));
+    }
+    update();
+    return true;
 }
 
 bool CView::onExit()
@@ -4767,7 +5991,7 @@ bool CView::onExit()
     if(m_pLand && m_pLand->isDirty())
     {
         QMessageBox::StandardButton reply;
-        reply = QMessageBox::question(this, "Exit", m_pLand->filePath().baseName() + " has unsaved changes.\nDo you want to save changes?", QMessageBox::Save|QMessageBox::No|QMessageBox::Cancel);
+        reply = QMessageBox::question(this, "Exit", m_pLand->filePath().fileName() + " has unsaved changes.\nDo you want to save changes?", QMessageBox::Save|QMessageBox::No|QMessageBox::Cancel);
         if(reply == QMessageBox::Save)
         {
             if(!saveLandscapeDocument(m_pLand->filePath()))
@@ -5184,13 +6408,245 @@ void CView::mousePressEvent(QMouseEvent* event)
 {
     m_lastViewportMousePos = event->pos();
     m_hasViewportMousePos = rect().contains(event->pos());
+    if(m_landscapeTools && m_landscapeTools->sculptEnabled()
+        && m_terrainEditAvailable && event->button() == Qt::LeftButton)
+    {
+        m_sculptStrokeActive = true;
+        m_lastSculptPoint = getTerrainPos(event->x(), event->y(), true);
+        m_sculptOutlineCenter = m_lastSculptPoint;
+        m_sculptOutlineValid = true;
+        m_lastSculptStampPoint = m_lastSculptPoint;
+        m_sculptStrokeChanged = false;
+        m_sculptStrokeStamps = 0;
+        m_sculptStrokeVertices = 0;
+        m_sculptStrokeCommand = STerrainHeightCommand();
+        m_sculptStrokeCommand.description = tr("Sculpt terrain");
+        sculptTerrainAt(m_lastSculptPoint);
+        m_sculptRepeatTimer->start();
+        event->accept();
+        return;
+    }
     m_pOp->mousePressEvent(event);
+}
+
+void CView::sculptTerrainAt(const QVector3D& position)
+{
+    if(!m_terrainEditAvailable || !m_landscapeTools)
+        return;
+
+    STerrainBrush brush;
+    brush.centerX = position.x();
+    brush.centerY = position.y();
+    brush.radius = m_landscapeTools->radius();
+    brush.falloff = ETerrainBrushFalloff::Smooth;
+
+    STerrainHeightCommand command;
+    switch(m_landscapeTools->sculptTool())
+    {
+    case ELandscapeSculptTool::Raise:
+        command = m_terrainEdit.makeRaiseLower(
+            brush, m_landscapeTools->rawDelta() * m_landscapeTools->strength());
+        break;
+    case ELandscapeSculptTool::Lower:
+        command = m_terrainEdit.makeRaiseLower(
+            brush, -m_landscapeTools->rawDelta() * m_landscapeTools->strength());
+        break;
+    case ELandscapeSculptTool::Flatten:
+        command = m_terrainEdit.makeFlatten(
+            brush, m_landscapeTools->flattenHeight(), m_landscapeTools->strength());
+        break;
+    case ELandscapeSculptTool::Smooth:
+        command = m_terrainEdit.makeSmooth(brush, m_landscapeTools->strength());
+        break;
+    }
+    if(command.isEmpty())
+        return;
+    if(command.requiresMaxZDecision())
+    {
+        emit updateMsg(tr("Sculpt stamp refused: it would clamp the MPR raw-height range."));
+        return;
+    }
+    if(m_sculptStrokeActive)
+    {
+        if(applyTerrainHeightPreview(command, true))
+            appendTerrainHeightCommand(&m_sculptStrokeCommand, command);
+        return;
+    }
+    m_pUndoStack->push(new CTerrainHeightPreviewCommand(this, command));
+}
+
+void CView::sculptTerrainTowardLatestPoint()
+{
+    if(!m_sculptStrokeActive || !m_landscapeTools)
+        return;
+    const float distance = m_lastSculptPoint.distanceToPoint(m_lastSculptStampPoint);
+    const float spacing = qMax(1.0f, m_landscapeTools->radius() * 0.5f);
+    // Preserve a continuous moving stroke without letting a burst of mouse
+    // events enqueue unbounded work. Stationary holds still receive one stamp.
+    const int steps = distance > spacing
+        ? qMin(8, qMax(1, int(std::ceil(distance / spacing)))) : 1;
+    const QVector3D start = m_lastSculptStampPoint;
+    for(int step = 1; step <= steps; ++step)
+    {
+        const float ratio = float(step) / float(steps);
+        sculptTerrainAt(start * (1.0f - ratio) + m_lastSculptPoint * ratio);
+    }
+    m_lastSculptStampPoint = m_lastSculptPoint;
+}
+
+bool CView::applyTerrainHeightPreview(const STerrainHeightCommand& command, bool forward)
+{
+    if(!m_terrainEditAvailable)
+        return false;
+    CValidationReport report;
+    if(!m_terrainEdit.apply(command, forward, &report, false))
+    {
+        ei::log(eLogWarning, "Terrain preview command refused:\n" + report.toText());
+        return false;
+    }
+
+    QSet<QPair<int, int>> sectors;
+    const int sectorCountX = int(m_mprDocument.mapInfo().sectorCountX);
+    const int sectorCountY = int(m_mprDocument.mapInfo().sectorCountY);
+    for(const STerrainHeightDelta& delta : command.deltas)
+    {
+        QVector<int> xs;
+        QVector<int> ys;
+        int sx = qMin(delta.globalX / 32, sectorCountX - 1);
+        int sy = qMin(delta.globalY / 32, sectorCountY - 1);
+        xs.append(sx);
+        ys.append(sy);
+        if(delta.globalX > 0 && delta.globalX % 32 == 0)
+            xs.append(sx - 1);
+        if(delta.globalY > 0 && delta.globalY % 32 == 0)
+            ys.append(sy - 1);
+        for(int x : xs)
+            for(int y : ys)
+                if(x >= 0 && y >= 0)
+                    sectors.insert(qMakePair(x, y));
+    }
+    for(const QPair<int, int>& sector : sectors)
+    {
+        if(!m_pLand->previewCanonicalSector(
+            sector.first, sector.second,
+            m_terrainEdit.sectorPayload(sector.first, sector.second)))
+        {
+            ei::log(eLogWarning, QString("Terrain preview renderer rejected sector %1,%2")
+                .arg(sector.first).arg(sector.second));
+        }
+    }
+    if(m_sculptStrokeActive)
+    {
+        m_sculptStrokeChanged = true;
+        ++m_sculptStrokeStamps;
+        m_sculptStrokeVertices += command.deltas.size();
+    }
+    else
+    {
+        for(CMob* mob : m_aMob)
+            mob->reprojectForCurrentTerrain();
+    }
+    m_pLand->setDirty(m_terrainEdit.isDirty());
+    if(!m_sculptStrokeActive)
+    {
+        emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMprDirtyFlag,
+                                  m_terrainEdit.isDirty() ? "*" : "");
+        emit updateMsg(tr("Terrain preview changed %1 vertices in %2 sector(s); navigation data may need review.")
+            .arg(command.deltas.size()).arg(sectors.size()));
+    }
+    update();
+    return true;
+}
+
+void CView::importTerrainHeightmap()
+{
+    if(!m_terrainEditAvailable)
+    {
+        QMessageBox::information(this, tr("Heightmap import"),
+            tr("Open a supported MPR before importing a heightmap."));
+        return;
+    }
+    const QString path = QFileDialog::getOpenFileName(this, tr("Import grayscale heightmap"),
+        QString(), tr("Heightmaps (*.png *.bmp *.tif *.tiff);;Images (*)"));
+    if(path.isEmpty())
+        return;
+    QImage image(path);
+    if(image.isNull())
+    {
+        QMessageBox::warning(this, tr("Heightmap import"), tr("The image could not be decoded."));
+        return;
+    }
+    bool accepted = false;
+    const double minimum = QInputDialog::getDouble(this, tr("Heightmap minimum"),
+        tr("Raw MPR height for black (0-65535):"), 0.0, 0.0, 65535.0, 0, &accepted);
+    if(!accepted)
+        return;
+    const double maximum = QInputDialog::getDouble(this, tr("Heightmap maximum"),
+        tr("Raw MPR height for white (0-65535):"), 65535.0, 0.0, 65535.0, 0, &accepted);
+    if(!accepted || maximum < minimum)
+    {
+        if(accepted)
+            QMessageBox::warning(this, tr("Heightmap import"), tr("Maximum height must not be below minimum height."));
+        return;
+    }
+
+    STerrainHeightmapGrid grid;
+    grid.width = image.width();
+    grid.height = image.height();
+    grid.samples.reserve(grid.width * grid.height);
+    const bool flip = m_landscapeTools && m_landscapeTools->flipHeightmapVertically();
+    for(int outputY = 0; outputY < grid.height; ++outputY)
+    {
+        const int imageY = flip ? grid.height - 1 - outputY : outputY;
+        for(int x = 0; x < grid.width; ++x)
+            grid.samples.append(float(qGray(image.pixel(x, imageY))) / 255.0f);
+    }
+    STerrainHeightmapImportSettings settings;
+    settings.placement = ETerrainHeightmapPlacement::StretchToTerrain;
+    settings.minimumRawHeight = float(minimum);
+    settings.maximumRawHeight = float(maximum);
+    settings.strength = 1.0f;
+    CValidationReport report;
+    const STerrainHeightCommand command = m_terrainEdit.makeHeightmapImport(grid, settings, &report);
+    if(command.isEmpty() || report.hasErrors() || command.requiresMaxZDecision())
+    {
+        QMessageBox::warning(this, tr("Heightmap import"),
+            tr("The heightmap preview was refused.\n\n%1").arg(report.toText()));
+        return;
+    }
+    const QString orientation = flip ? tr("bottom row first") : tr("top row first");
+    if(QMessageBox::question(this, tr("Confirm heightmap preview"),
+        tr("Stretch %1 x %2 samples across %3 x %4 terrain vertices?\n"
+           "Orientation: %5\nRaw range: %6 to %7\n\n"
+           "This is undoable and cannot yet be saved to MPR.")
+            .arg(grid.width).arg(grid.height)
+            .arg(m_terrainEdit.vertexCountX()).arg(m_terrainEdit.vertexCountY())
+            .arg(orientation).arg(minimum).arg(maximum)) != QMessageBox::Yes)
+        return;
+    m_pUndoStack->push(new CTerrainHeightPreviewCommand(this, command));
 }
 
 void CView::mouseMoveEvent(QMouseEvent* event)
 {
     m_lastViewportMousePos = event->pos();
     m_hasViewportMousePos = rect().contains(event->pos());
+    if(m_landscapeTools && m_landscapeTools->sculptEnabled()
+       && m_terrainEditAvailable)
+    {
+        m_sculptOutlineCenter = getTerrainPos(event->x(), event->y(), true);
+        m_sculptOutlineValid = true;
+        update();
+    }
+    if(m_sculptStrokeActive && (event->buttons() & Qt::LeftButton)
+        && m_landscapeTools && m_terrainEditAvailable)
+    {
+        const QVector3D position = getTerrainPos(event->x(), event->y(), true);
+        m_lastSculptPoint = position;
+        // The repeat timer applies the latest point. This keeps pointer input
+        // responsive and caps canonical preview work to one stamp per tick.
+        event->accept();
+        return;
+    }
     m_pOp->mouseMoveEvent(event);
 }
 
@@ -5198,6 +6654,14 @@ void CView::mouseReleaseEvent(QMouseEvent *event)
 {
     m_lastViewportMousePos = event->pos();
     m_hasViewportMousePos = rect().contains(event->pos());
+    if(m_sculptStrokeActive && event->button() == Qt::LeftButton)
+    {
+        if(m_lastSculptPoint.distanceToPoint(m_lastSculptStampPoint) > 0.01f)
+            sculptTerrainTowardLatestPoint();
+        finishSculptStroke();
+        event->accept();
+        return;
+    }
     m_pOp->mouseReleaseEvent(event);
 }
 
@@ -5222,21 +6686,71 @@ void CView::setTestSpawnMarkerSelected(bool selected)
     update();
 }
 
-bool CView::testSpawnMarkerAt(const QPoint& viewportPosition, int tolerance) const
+bool CView::testSpawnMarkerAt(const QPoint& viewportPosition, int padding) const
 {
     if(!m_testSpawnMarkerValid || !m_cam || width() <= 0 || height() <= 0)
         return false;
-    const QVector3D marker = QVector3D(m_testSpawnMarker.x(), m_testSpawnMarker.y(),
-                                       m_testSpawnMarker.z() + 1.0f).project(
-        m_cam->viewMatrix(), m_projection, QRect(0, 0, width(), height()));
-    if(marker.z() < 0.0f || marker.z() > 1.0f)
+
+    const QRect viewport(0, 0, width(), height());
+    const auto projectToWidget = [&](const QVector3D& world, QPointF& result) {
+        const QVector3D projected = world.project(
+            m_cam->viewMatrix(), m_projection, viewport);
+        if(projected.z() < 0.0f || projected.z() > 1.0f)
+            return false;
+        // QVector3D::project uses the OpenGL bottom-left viewport origin,
+        // while QMouseEvent positions use Qt's top-left widget origin.
+        result = QPointF(projected.x(), height() - projected.y());
+        return true;
+    };
+
+    const float baseZ = m_testSpawnMarker.z() + 0.08f;
+    QPointF capsuleBottom;
+    QPointF capsuleTop;
+    if(!projectToWidget(QVector3D(m_testSpawnMarker.x(), m_testSpawnMarker.y(), baseZ),
+                        capsuleBottom)
+       || !projectToWidget(QVector3D(m_testSpawnMarker.x(), m_testSpawnMarker.y(),
+                                     baseZ + 1.93f), capsuleTop))
         return false;
-    // QVector3D::project uses the OpenGL bottom-left viewport origin, while
-    // QMouseEvent positions use Qt's top-left widget origin.
-    const QPointF markerInWidget(marker.x(), height() - marker.y());
-    const QPointF delta = markerInWidget - viewportPosition;
-    return delta.x() * delta.x() + delta.y() * delta.y()
-        <= double(tolerance * tolerance);
+
+    const QPointF capsuleAxis = capsuleTop - capsuleBottom;
+    const double axisLengthSquared = QPointF::dotProduct(capsuleAxis, capsuleAxis);
+    const auto distanceSquaredToCapsuleAxis = [&](const QPointF& point) {
+        if(axisLengthSquared <= 0.0001)
+        {
+            const QPointF delta = point - capsuleBottom;
+            return QPointF::dotProduct(delta, delta);
+        }
+        const QPointF fromBottom = point - capsuleBottom;
+        const double fraction = qBound(
+            0.0, QPointF::dotProduct(fromBottom, capsuleAxis) / axisLengthSquared, 1.0);
+        const QPointF delta = point - (capsuleBottom + capsuleAxis * fraction);
+        return QPointF::dotProduct(delta, delta);
+    };
+
+    // Fit the clickable capsule to the same ground and head rings that are
+    // drawn for the marker. This covers the complete hero silhouette at every
+    // camera angle instead of approximating it with a small circle at its
+    // centre. A little screen-space padding keeps the outline easy to pick.
+    double radiusSquared = 0.0;
+    const int segments = 24;
+    for(int index = 0; index < segments; ++index)
+    {
+        const float angle = float(index) * 2.0f * float(M_PI) / float(segments);
+        QPointF projected;
+        if(projectToWidget(QVector3D(m_testSpawnMarker.x() + qCos(angle) * 0.55f,
+                                     m_testSpawnMarker.y() + qSin(angle) * 0.55f,
+                                     baseZ), projected))
+            radiusSquared = qMax(radiusSquared, distanceSquaredToCapsuleAxis(projected));
+        if(projectToWidget(QVector3D(m_testSpawnMarker.x() + qCos(angle) * 0.24f,
+                                     m_testSpawnMarker.y(),
+                                     baseZ + 1.93f + qSin(angle) * 0.24f), projected))
+            radiusSquared = qMax(radiusSquared, distanceSquaredToCapsuleAxis(projected));
+    }
+
+    const double capsuleRadius = qMax(12.0, qSqrt(radiusSquared))
+        + qMax(0, padding);
+    return distanceSquaredToCapsuleAxis(QPointF(viewportPosition))
+        <= capsuleRadius * capsuleRadius;
 }
 
 void CView::clearTestSpawnMarker()
@@ -5378,12 +6892,65 @@ void CView::anchorCameraRotationToViewportCenter()
 
 void CView::wheelEvent(QWheelEvent* event)
 {
+    const bool landscapeModifier = event->modifiers()
+        & (Qt::AltModifier | Qt::ShiftModifier);
+    if(m_landscapeTools && m_landscapeTools->editingEnabled()
+       && landscapeModifier)
+    {
+        if(m_landscapeTools->sculptEnabled())
+        {
+            const int step = landscapeWheelStep(event->angleDelta().y(),
+                                                event->delta(), event->pixelDelta().y());
+            if(step == 0)
+                return;
+            if(event->modifiers() & Qt::ShiftModifier)
+            {
+                m_landscapeTools->adjustSculptStrength(step);
+                emit updateMsg(tr("Sculpt strength: %1").arg(
+                    m_landscapeTools->strength(), 0, 'f', 2));
+            }
+            else
+            {
+                m_landscapeTools->adjustSculptRadius(step);
+                emit updateMsg(tr("Sculpt radius: %1 vertices").arg(
+                    m_landscapeTools->radius(), 0, 'f', 1));
+            }
+            update();
+            event->accept();
+            return;
+        }
+        if(m_landscapeTools->tilePaintEnabled()
+           || m_landscapeTools->overlayPaintEnabled())
+        {
+            m_pOp->wheelEvent(event);
+            if(event->isAccepted())
+                return;
+        }
+    }
+
+    QString gesture = "Ctrl+Wheel";
+    if(m_pSettings)
+        if(const COptString* option = dynamic_cast<const COptString*>(
+               m_pSettings->opt(eOptSetKeyBinding, "cameraSpeedWheelGesture")))
+            gesture = option->value();
+    Qt::KeyboardModifier modifier = Qt::ControlModifier;
+    if(gesture.startsWith("Alt", Qt::CaseInsensitive)) modifier = Qt::AltModifier;
+    else if(gesture.startsWith("Shift", Qt::CaseInsensitive)) modifier = Qt::ShiftModifier;
+    else if(gesture.startsWith("Meta", Qt::CaseInsensitive)) modifier = Qt::MetaModifier;
+    if(event->modifiers() & modifier)
+    {
+        const double direction = event->angleDelta().y() >= 0 ? 0.1 : -0.1;
+        setCameraSpeedMultiplier(cameraSpeedMultiplier() + direction);
+        event->accept();
+        return;
+    }
     m_pOp->wheelEvent(event);
 }
 
 void CView::focusOutEvent(QFocusEvent *event)
 {
     Q_UNUSED(event);
+    finishSculptStroke();
     auto keySet = m_pOp->keyManager()->keys();
     for(auto& key : keySet)
     {
@@ -5487,6 +7054,10 @@ QVector3D CView::getTerrainPos(const int cursorPosX, const int cursorPosY,
 void CView::changeOperation(EButtonOp type)
 {
     cancelPendingOperation();
+    if(type != EButtonOpTilebrush && m_landscapeTools
+        && (m_landscapeTools->editMode() == ELandscapeEditMode::TilePaint
+            || m_landscapeTools->editMode() == ELandscapeEditMode::OverlayPaint))
+        m_landscapeTools->setEditingEnabled(false, false);
     switch (type) {
     case EButtonOpSelect:
         m_pOp->changeState(new CSelect(this)); break;
@@ -5530,6 +7101,9 @@ bool CView::cancelPendingOperation()
     case eOperationMethodTileBrush:
         methodName = "tile-brush";
         endTileBrushGroup();
+        setPreviewTile(false);
+        unsetCursor();
+        showOutliner(true);
         break;
     case eOperationMethodSelect:
         return false;
@@ -5574,13 +7148,44 @@ bool CView::hasPendingOperation() const
     return m_pOp && m_pOp->operationMethod() != eOperationMethodSelect;
 }
 
+bool CView::prepareDocumentTransition()
+{
+    finishSculptStroke();
+    if(!m_pOp)
+        return false;
+    const EOperationMethod method = m_pOp->operationMethod();
+    if(method == eOperationMethodTileBrush)
+    {
+        // Test staging is modal, but tile painting is the selected persistent
+        // tool rather than a pending object transform. End the current stroke
+        // and clear transient feedback without switching the operation to
+        // Select; the next viewport move/click can immediately paint again.
+        endTileBrushGroup();
+        setPreviewTile(false);
+        m_terrainPaintOutlineValid = false;
+        m_sculptOutlineValid = false;
+        unsetCursor();
+        update();
+        return false;
+    }
+    return operationRequiresCancellationForDocumentTransition(method)
+        ? cancelPendingOperation() : false;
+}
+
 bool CView::prepareUndo()
 {
-    if(!m_pOp || m_pOp->operationMethod() == eOperationMethodSelect)
+    return prepareHistoryNavigation();
+}
+
+bool CView::prepareHistoryNavigation()
+{
+    if(!m_pOp || operationAllowsHistoryNavigation(m_pOp->operationMethod()))
         return true;
 
     // Unfinished transforms are previews, not committed history entries.
     // Cancelling a paste preview also removes its temporary objects.
+    // Tile painting is a persistent tool, so Undo and Redo operate on history
+    // without cancelling the brush or consuming a key press first.
     cancelPendingOperation();
     return false;
 }
@@ -6168,10 +7773,34 @@ void CView::unHideAll()
 
 void CView::setDirtyMpr()
 {
-    m_pLand->setDirty(true);
+    const bool dirty = m_terrainEditAvailable ? m_terrainEdit.isDirty() : true;
+    m_pLand->setDirty(dirty);
     m_staticShadowFingerprint.clear();
     m_farStaticShadowFingerprint.clear();
-    emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMprDirtyFlag, "*");
+    emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMprDirtyFlag, dirty ? "*" : "");
+}
+
+void CView::finishSculptStroke()
+{
+    if(!m_sculptStrokeActive)
+        return;
+    m_sculptRepeatTimer->stop();
+    m_sculptStrokeActive = false;
+    if(m_pUndoStack && !m_sculptStrokeCommand.isEmpty())
+        m_pUndoStack->push(new CTerrainHeightPreviewCommand(
+            this, m_sculptStrokeCommand, true));
+    if(m_sculptStrokeChanged)
+    {
+        for(CMob* mob : m_aMob)
+            mob->reprojectForCurrentTerrain();
+        m_pLand->setDirty(m_terrainEdit.isDirty());
+        m_staticShadowFingerprint.clear();
+        m_farStaticShadowFingerprint.clear();
+        emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMprDirtyFlag,
+                                  m_terrainEdit.isDirty() ? "*" : "");
+        emit updateMsg(tr("Sculpt stroke: %1 stamp(s), %2 vertex updates; MOB placement and navigation may need review.")
+            .arg(m_sculptStrokeStamps).arg(m_sculptStrokeVertices));
+    }
 }
 
 void CView::setDurty(CMob* pMob)
@@ -6239,6 +7868,143 @@ void CView::duplicateSelectedObjects()
     clipboradObjectsToScene();
 }
 
+bool CView::canConvertSelectedWorldObjectToLever() const
+{
+    if(!m_activeMob || CScene::getInstance()->getMode() != eEditModeObjects)
+        return false;
+    CNode* candidate = nullptr;
+    for(CMob* mob : m_aMob)
+        if(mob)
+            for(CNode* node : mob->nodes())
+                if(node && node->nodeState() == ENodeState::eSelect)
+                {
+                    if(candidate || mob != m_activeMob || node->nodeType() != eWorldObject)
+                        return false;
+                    candidate = node;
+                }
+    return candidate && !hasPendingOperation();
+}
+
+void CView::convertSelectedWorldObjectToLever()
+{
+    if(!canConvertSelectedWorldObjectToLever() || !m_pUndoStack)
+        return;
+    CWorldObj* worldObject = nullptr;
+    for(CNode* node : m_activeMob->nodes())
+        if(node && node->nodeState() == ENodeState::eSelect)
+        {
+            worldObject = dynamic_cast<CWorldObj*>(node);
+            break;
+        }
+    if(!worldObject || !worldObject->hasRawObjectProvenance())
+        return;
+    if(!confirmScriptReferencedObjectIds({worldObject->mapId()},
+                                         tr("convert this world object to a lever")))
+        return;
+
+    QDialog conversion(this);
+    conversion.setWindowTitle(tr("Convert World Object to Lever"));
+    QVBoxLayout* layout = new QVBoxLayout(&conversion);
+    QLabel* explanation = new QLabel(tr(
+        "Convert object ID %1 (%2) using the proven Base/JMV lever layout. "
+        "The original common and opaque object records remain byte-identical. "
+        "The conversion is one undoable edit.")
+        .arg(worldObject->mapId()).arg(worldObject->mapName()), &conversion);
+    explanation->setWordWrap(true);
+    layout->addWidget(explanation);
+    QFormLayout* form = new QFormLayout;
+    QComboBox* openMode = new QComboBox(&conversion);
+    openMode->addItem(tr("Enabled (free open)"), 1);
+    openMode->addItem(tr("Disabled"), 0);
+    openMode->addItem(tr("Hands skill required"), 5);
+    openMode->addItem(tr("Key required"), 8);
+    QSpinBox* keyId = new QSpinBox(&conversion);
+    keyId->setRange(0, std::numeric_limits<int>::max());
+    QSpinBox* handsSkill = new QSpinBox(&conversion);
+    handsSkill->setRange(0, std::numeric_limits<int>::max());
+    QSpinBox* currentState = new QSpinBox(&conversion);
+    currentState->setRange(0, 255);
+    QSpinBox* totalStates = new QSpinBox(&conversion);
+    totalStates->setRange(1, 255);
+    totalStates->setValue(2);
+    QCheckBox* cycled = new QCheckBox(tr("Cycle through states"), &conversion);
+    QCheckBox* door = new QCheckBox(tr("Treat as door"), &conversion);
+    QCheckBox* recalculateGraph = new QCheckBox(tr("Recalculate AI graph"), &conversion);
+    form->addRow(tr("Open mode"), openMode);
+    form->addRow(tr("Key ID"), keyId);
+    form->addRow(tr("Hands skill"), handsSkill);
+    form->addRow(tr("Current state"), currentState);
+    form->addRow(tr("State count"), totalStates);
+    form->addRow(QString(), cycled);
+    form->addRow(QString(), door);
+    form->addRow(QString(), recalculateGraph);
+    layout->addLayout(form);
+    QDialogButtonBox* buttons = new QDialogButtonBox(
+        QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &conversion);
+    buttons->button(QDialogButtonBox::Ok)->setText(tr("Convert"));
+    connect(buttons, &QDialogButtonBox::accepted, &conversion, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &conversion, &QDialog::reject);
+    layout->addWidget(buttons);
+    if(conversion.exec() != QDialog::Accepted)
+        return;
+
+    QByteArray sourceObject;
+    QByteArray cleanObject;
+    if(!m_activeMob->rawObjectTemplateBytes(worldObject, &sourceObject, &cleanObject))
+    {
+        QMessageBox::warning(this, tr("Conversion unavailable"),
+            tr("Endurance could not verify the selected object's lossless raw provenance."));
+        return;
+    }
+    CMobDocument::SLeverConversionValues defaults;
+    defaults.openType = openMode->currentData().toUInt();
+    defaults.keyId = quint32(keyId->value());
+    defaults.handsSkill = quint32(handsSkill->value());
+    defaults.currentState = quint8(currentState->value());
+    defaults.totalStates = quint8(totalStates->value());
+    defaults.cycled = cycled->isChecked();
+    defaults.door = door->isChecked();
+    defaults.recalculateGraph = recalculateGraph->isChecked();
+    QByteArray sourceLever;
+    QByteArray cleanLever;
+    CValidationReport report;
+    if(!CMobDocument::convertWorldObjectSubtreeToLever(sourceObject, defaults,
+                                                       &sourceLever, &report) ||
+       !CMobDocument::convertWorldObjectSubtreeToLever(cleanObject, defaults,
+                                                       &cleanLever, &report))
+    {
+        ei::log(eLogWarning, QString("World object to lever conversion rejected: %1")
+                .arg(report.toText()));
+        QMessageBox::warning(this, tr("Conversion unavailable"),
+            tr("The selected object's raw structure could not be converted safely. See the workflow log."));
+        return;
+    }
+
+    QJsonObject leverData;
+    leverData.insert("World object", worldObject->toJson());
+    leverData.insert("State", int(defaults.currentState));
+    leverData.insert("State numbers", int(defaults.totalStates));
+    leverData.insert("Is cycled?", defaults.cycled);
+    leverData.insert("Is cast once?", false);
+    QJsonArray scienceStats;
+    scienceStats.append(int(defaults.openType));
+    scienceStats.append(int(defaults.keyId));
+    scienceStats.append(int(defaults.handsSkill));
+    leverData.insert("Science stats", scienceStats);
+    leverData.insert("Is door?", defaults.door);
+    leverData.insert("Is recalculate graph?", defaults.recalculateGraph);
+    CLever* lever = new CLever(leverData);
+    lever->loadFigure();
+    lever->loadTexture();
+    lever->setRawObjectProvenance(worldObject->rawSourceDocumentSha256(),
+                                  worldObject->rawSourceObjectPath(),
+                                  QCryptographicHash::hash(sourceLever, QCryptographicHash::Sha256));
+    lever->setRawStructuralReplacementBytes(sourceLever, cleanLever);
+    lever->setState(worldObject->nodeState());
+    m_pUndoStack->push(new CConvertWorldObjectToLeverCommand(
+        this, m_activeMob, worldObject, lever));
+}
+
 void CView::refreshMobDirtyStates()
 {
     for(CMob* mob : m_aMob)
@@ -6253,6 +8019,47 @@ void CView::refreshMobDirtyStates()
 void CView::resetCamPosition()
 {
     m_cam->reset();
+}
+
+double CView::cameraSpeedMultiplier() const
+{
+    return m_cam ? double(m_cam->speedMultiplier()) : 1.0;
+}
+
+void CView::setCameraSpeedMultiplier(double multiplier)
+{
+    if(!m_cam)
+        return;
+    const double bounded = qBound(0.1, multiplier, 10.0);
+    const double rounded = qRound(bounded * 10.0) / 10.0;
+    if(qAbs(cameraSpeedMultiplier() - rounded) < 0.001)
+        return;
+    m_cam->setSpeedMultiplier(float(rounded));
+    emit cameraSpeedMultiplierChanged(rounded);
+    update();
+}
+
+bool CView::overridesWorldTime() const
+{
+    const COptBool* option = m_pSettings
+        ? dynamic_cast<const COptBool*>(m_pSettings->opt("overrideWorldTime")) : nullptr;
+    return option && option->value();
+}
+
+double CView::effectiveWorldTimeHours() const
+{
+    const COptInt* timeOption = m_pSettings
+        ? dynamic_cast<const COptInt*>(m_pSettings->opt("renderTimeOfDay")) : nullptr;
+    const float selectedTime = timeOption
+        ? ei::clockValueToHours(timeOption->value()) : 12.0f;
+    // Cave lighting deliberately ignores the preview clock, but runtime
+    // scripts and gameplay still need the time explicitly chosen by the user.
+    if(overridesWorldTime())
+        return double(selectedTime);
+    const CWorldSet* worldSet = m_environmentMob
+        ? &m_environmentMob->worldSet() : nullptr;
+    return double(ei::renderEnvironment(
+        worldSet, false, selectedTime, m_caveEnvironment).timeHours);
 }
 
 void CView::addLogicPoint(bool bLookPoint)
@@ -6561,7 +8368,7 @@ void CView::loadSession()
         ei::log(eLogWarning, "Cannot find MPR file: " + mprFile.absoluteFilePath());
         return;
     }
-    cancelPendingOperation();
+    prepareDocumentTransition();
     m_pUndoStack->clear();
     loadLandscape(mprFile);
 

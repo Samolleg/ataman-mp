@@ -20,6 +20,15 @@
 #include <QUndoStack>
 #include <QClipboard>
 #include <QMimeData>
+#include <QMenu>
+#include <QContextMenuEvent>
+#include <QScrollBar>
+#include <QFormLayout>
+#include <QEventLoop>
+#include <QPainter>
+#include <QPaintEvent>
+#include <QScreen>
+#include <QWidget>
 #include <cstdio>
 #include <cstring>
 
@@ -28,6 +37,7 @@
 #include "resource_profile.h"
 #include "resourcemanager.h"
 #include "layout_components/tablemanager.h"
+#include "ui/landscape_tools.h"
 #include "window_lifecycle.h"
 #include "settings.h"
 #include "jmv_map_test_launcher.h"
@@ -39,6 +49,87 @@
 #endif
 
 namespace {
+class CStartupSplash final: public QWidget
+{
+public:
+    CStartupSplash():
+        QWidget(nullptr, Qt::Window | Qt::FramelessWindowHint |
+                Qt::WindowTitleHint | Qt::WindowSystemMenuHint |
+                Qt::WindowMinimizeButtonHint),
+        m_art(QStringLiteral(":/endurance_splash.png")),
+        m_status(tr("Initializing editor..."))
+    {
+        setWindowTitle(tr("EI Mapper: Endurance Edition"));
+        setWindowIcon(QIcon(QStringLiteral(":/endurance_gate.png")));
+        setFixedSize(960, 400);
+        setAttribute(Qt::WA_OpaquePaintEvent);
+    }
+
+    void showCentered()
+    {
+        if(QScreen* screen = QGuiApplication::primaryScreen())
+            move(screen->availableGeometry().center() - rect().center());
+        show();
+        raise();
+        activateWindow();
+    }
+
+    void setStatus(const QString& status)
+    {
+        m_status = status;
+        update();
+        QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+    }
+
+protected:
+    void paintEvent(QPaintEvent*) override
+    {
+        QPainter painter(this);
+        painter.setRenderHint(QPainter::Antialiasing, true);
+        if(!m_art.isNull())
+            painter.drawPixmap(rect(), m_art);
+        else
+            painter.fillRect(rect(), QColor(20, 20, 20));
+
+        painter.fillRect(QRect(0, 0, 520, 150), QColor(0, 0, 0, 168));
+        painter.fillRect(QRect(0, height() - 48, width(), 48), QColor(0, 0, 0, 190));
+
+        QFont titleFont = painter.font();
+        titleFont.setPointSize(28);
+        titleFont.setBold(true);
+        painter.setFont(titleFont);
+        painter.setPen(Qt::white);
+        painter.drawText(QRect(30, 22, 470, 48), Qt::AlignLeft | Qt::AlignVCenter,
+                         tr("EI Mapper"));
+
+        QFont subtitleFont = painter.font();
+        subtitleFont.setPointSize(17);
+        subtitleFont.setBold(false);
+        painter.setFont(subtitleFont);
+        painter.setPen(QColor(218, 190, 130));
+        painter.drawText(QRect(32, 70, 468, 34), Qt::AlignLeft | Qt::AlignVCenter,
+                         tr("Endurance Edition"));
+
+        QFont detailFont = painter.font();
+        detailFont.setPointSize(10);
+        painter.setFont(detailFont);
+        painter.setPen(QColor(220, 220, 220));
+        painter.drawText(QRect(33, 108, 465, 24), Qt::AlignLeft | Qt::AlignVCenter,
+                         tr("Version %1").arg(QCoreApplication::applicationVersion()));
+
+        QFont statusFont = painter.font();
+        statusFont.setPointSize(10);
+        painter.setFont(statusFont);
+        painter.setPen(Qt::white);
+        painter.drawText(QRect(24, height() - 48, width() - 48, 48),
+                         Qt::AlignLeft | Qt::AlignVCenter, m_status);
+    }
+
+private:
+    QPixmap m_art;
+    QString m_status;
+};
+
 class CEnduranceStyle final: public QProxyStyle
 {
 public:
@@ -369,8 +460,10 @@ int runHeadlessCommand(QApplication& app)
         textureCombo.lineEdit()->selectAll();
         QKeyEvent pastePlainText(QEvent::KeyPress, Qt::Key_V, Qt::ControlModifier);
         QApplication::sendEvent(textureCombo.lineEdit(), &pastePlainText);
-        const bool compatiblePasteImmediate = textureCombo.currentText() == "custom_texture"
-                && textureCombo.value()->toString() == "custom_texture";
+        const bool compatiblePastePreview = textureCombo.currentText() == "custom_texture"
+                && textureCombo.value()->toString() == "original_texture";
+        textureCombo._onEditingFinished();
+        const bool compatiblePasteCommit = textureCombo.value()->toString() == "custom_texture";
 
         const auto rowForType = [](QTableWidget& table, EObjParam type)
         {
@@ -438,9 +531,13 @@ int runHeadlessCommand(QApplication& app)
         });
         CComboDynItem* destinationModel = qobject_cast<CComboDynItem*>(
                     destinationPropertyTable.cellWidget(destinationModelRow, 1));
+        destinationModel->lineEdit()->selectAll();
         QKeyEvent pasteModelField(QEvent::KeyPress, Qt::Key_V, Qt::ControlModifier);
         QApplication::sendEvent(destinationModel->lineEdit(), &pasteModelField);
-        const bool fieldPasteImmediate = !immediateModelPaste.isNull()
+        const bool fieldPastePreview = immediateModelPaste.isNull()
+                && destinationModel->currentText() == "copied_model";
+        destinationModel->_onEditingFinished();
+        const bool fieldPasteCommit = !immediateModelPaste.isNull()
                 && immediateModelPaste->type() == eObjParam_TEMPLATE
                 && immediateModelPaste->toString() == "copied_model";
 
@@ -486,21 +583,31 @@ int runHeadlessCommand(QApplication& app)
         QTableWidget vectorComponentTable;
         CTableManager vectorComponentManager(&vectorComponentTable);
         vectorComponentManager.setNewData(vectorComponents);
-        CValueItem* zComponent = nullptr;
-        const QList<CValueItem*> componentEditors = vectorComponentTable.findChildren<CValueItem*>();
-        for(CValueItem* component : componentEditors)
+        QToolButton* xComponentPlate = nullptr;
+        QToolButton* yComponentPlate = nullptr;
+        QToolButton* zComponentPlate = nullptr;
+        const QList<QToolButton*> componentPlates = vectorComponentTable.findChildren<QToolButton*>();
+        for(QToolButton* component : componentPlates)
         {
-            if(component->param() == eObjParam_POSITION_Z)
-            {
-                zComponent = component;
-                break;
-            }
+            if(component->text() == "X:") xComponentPlate = component;
+            if(component->text() == "Y:") yComponentPlate = component;
+            if(component->text() == "Z:") zComponentPlate = component;
         }
-        if(zComponent)
+        vectorComponentTable.item(0, 0)->setSelected(true);
+        if(xComponentPlate)
+            xComponentPlate->click();
+        const bool individualComponentSelection = xComponentPlate && yComponentPlate
+                && zComponentPlate && xComponentPlate->isChecked()
+                && !yComponentPlate->isChecked() && !zComponentPlate->isChecked()
+                && vectorComponentTable.selectedItems().isEmpty();
+        if(zComponentPlate)
         {
+            zComponentPlate->click();
             QKeyEvent copyZComponent(QEvent::KeyPress, Qt::Key_C, Qt::ControlModifier);
-            QApplication::sendEvent(zComponent, &copyZComponent);
+            QApplication::sendEvent(zComponentPlate, &copyZComponent);
         }
+        const bool selectedComponentCopy = zComponentPlate && zComponentPlate->isChecked()
+                && QGuiApplication::clipboard()->text() == "3.6";
         QList<QSharedPointer<IPropertyBase>> integerDestination;
         integerDestination << QSharedPointer<IPropertyBase>(new propUint(eObjParam_RANGE, 0));
         QTableWidget integerDestinationTable;
@@ -512,23 +619,173 @@ int runHeadlessCommand(QApplication& app)
         {
             roundedComponentPaste.reset(value->clone());
         });
-        CValueItem* integerEditor = integerDestinationTable.findChild<CValueItem*>();
-        if(integerEditor)
-        {
-            QKeyEvent pasteZComponent(QEvent::KeyPress, Qt::Key_V, Qt::ControlModifier);
-            QApplication::sendEvent(integerEditor, &pasteZComponent);
-        }
+        integerDestinationTable.item(0, 0)->setSelected(true);
+        QKeyEvent pasteZComponent(QEvent::KeyPress, Qt::Key_V, Qt::ControlModifier);
+        QApplication::sendEvent(&integerDestinationTable, &pasteZComponent);
         const propUint* roundedInteger = dynamic_cast<propUint*>(roundedComponentPaste.get());
-        const bool numericComponentPaste = zComponent && roundedInteger
+        const bool numericComponentPaste = zComponentPlate && roundedInteger
                 && roundedInteger->value() == 4u;
         roundedComponentPaste.clear();
         integerDestinationManager.setReadOnly(true);
-        if(integerEditor)
-        {
-            QKeyEvent pasteLockedComponent(QEvent::KeyPress, Qt::Key_V, Qt::ControlModifier);
-            QApplication::sendEvent(integerEditor, &pasteLockedComponent);
-        }
+        QKeyEvent pasteLockedComponent(QEvent::KeyPress, Qt::Key_V, Qt::ControlModifier);
+        QApplication::sendEvent(&integerDestinationTable, &pasteLockedComponent);
         const bool lockedNumericPasteBlocked = roundedComponentPaste.isNull();
+
+        QSharedPointer<IPropertyBase> componentPlateChange;
+        QObject::connect(&vectorComponentManager, &CTableManager::onUpdateProperty,
+                         [&componentPlateChange](const QSharedPointer<IPropertyBase>& value)
+        {
+            componentPlateChange = QSharedPointer<IPropertyBase>(value->clone());
+        });
+        QMimeData* componentText = new QMimeData;
+        componentText->setText("8.75");
+        QGuiApplication::clipboard()->setMimeData(componentText);
+        if(xComponentPlate)
+        {
+            xComponentPlate->click();
+            QKeyEvent pasteXComponent(QEvent::KeyPress, Qt::Key_V, Qt::ControlModifier);
+            QApplication::sendEvent(xComponentPlate, &pasteXComponent);
+        }
+        const propFloat* changedX = dynamic_cast<propFloat*>(componentPlateChange.get());
+        const bool componentPlatePaste = changedX
+                && changedX->type() == eObjParam_POSITION_X
+                && qAbs(changedX->value() - 8.75f) < 0.0001f;
+
+        componentPlateChange.clear();
+        componentText = new QMimeData;
+        componentText->setText("6.25");
+        QGuiApplication::clipboard()->setMimeData(componentText);
+        bool componentContextShowsOnlyComponent = false;
+        bool componentContextGestureKeepsTableClear = false;
+        if(yComponentPlate)
+        {
+            QTimer::singleShot(0, [&componentContextShowsOnlyComponent,
+                                   xComponentPlate, yComponentPlate,
+                                   &vectorComponentTable]()
+            {
+                QMenu* menu = qobject_cast<QMenu*>(QApplication::activePopupWidget());
+                if(!menu)
+                    return;
+                componentContextShowsOnlyComponent = yComponentPlate->isChecked()
+                        && !xComponentPlate->isChecked()
+                        && vectorComponentTable.selectedItems().isEmpty()
+                        && !vectorComponentTable.currentIndex().isValid();
+                for(QAction* action : menu->actions())
+                    if(action->text().contains("Paste", Qt::CaseInsensitive))
+                    {
+                        action->trigger();
+                        menu->close();
+                        return;
+                    }
+                menu->close();
+            });
+            QMouseEvent contextPress(QEvent::MouseButtonPress, QPointF(2, 2),
+                                     Qt::RightButton, Qt::RightButton, Qt::NoModifier);
+            QApplication::sendEvent(yComponentPlate, &contextPress);
+            QMouseEvent contextRelease(QEvent::MouseButtonRelease, QPointF(2, 2),
+                                       Qt::RightButton, Qt::NoButton, Qt::NoModifier);
+            QApplication::sendEvent(yComponentPlate, &contextRelease);
+            componentContextGestureKeepsTableClear = contextPress.isAccepted()
+                    && contextRelease.isAccepted()
+                    && vectorComponentTable.selectedItems().isEmpty()
+                    && !vectorComponentTable.currentIndex().isValid();
+        }
+        const propFloat* changedY = dynamic_cast<propFloat*>(componentPlateChange.get());
+        const bool componentContextPaste = changedY
+                && changedY->type() == eObjParam_POSITION_Y
+                && qAbs(changedY->value() - 6.25f) < 0.0001f;
+        const bool componentContextPreservesSelection = xComponentPlate
+                && xComponentPlate->isChecked()
+                && yComponentPlate && !yComponentPlate->isChecked()
+                && vectorComponentTable.selectedItems().isEmpty()
+                && !vectorComponentTable.currentIndex().isValid();
+        const bool componentContextUsesManualDispatch = yComponentPlate
+                && yComponentPlate->contextMenuPolicy() == Qt::PreventContextMenu;
+        const bool componentContextFocusIsChildOwned = yComponentPlate
+                && yComponentPlate->focusPolicy() == Qt::StrongFocus
+                && yComponentPlate->parentWidget()
+                && yComponentPlate->parentWidget()->focusPolicy() == Qt::NoFocus;
+
+        QList<QSharedPointer<IPropertyBase>> exclusiveComponents;
+        exclusiveComponents
+                << QSharedPointer<IPropertyBase>(new propFloat(eObjParam_POSITION_X, 1.0f))
+                << QSharedPointer<IPropertyBase>(new propFloat(eObjParam_POSITION_Y, 2.0f))
+                << QSharedPointer<IPropertyBase>(new propFloat(eObjParam_POSITION_Z, 3.0f))
+                << QSharedPointer<IPropertyBase>(new propFloat(eObjParam_ROTATION_X, 4.0f))
+                << QSharedPointer<IPropertyBase>(new propFloat(eObjParam_ROTATION_Y, 5.0f))
+                << QSharedPointer<IPropertyBase>(new propFloat(eObjParam_ROTATION_Z, 6.0f))
+                << QSharedPointer<IPropertyBase>(new propStr(eObjParam_COMMENTS, "normal row"));
+        QTableWidget exclusiveComponentTable;
+        CTableManager exclusiveComponentManager(&exclusiveComponentTable);
+        exclusiveComponentManager.setNewData(exclusiveComponents);
+        QToolButton* positionXPlate = nullptr;
+        QToolButton* rotationYPlate = nullptr;
+        bool componentHitTargetsExpanded = true;
+        bool componentLayoutHasNoDeadSpace = true;
+        const QList<QToolButton*> exclusivePlates =
+                exclusiveComponentTable.findChildren<QToolButton*>();
+        for(QToolButton* plate : exclusivePlates)
+        {
+            const int componentType = plate->property("enduranceComponentType").toInt();
+            if(componentType == int(eObjParam_POSITION_X)) positionXPlate = plate;
+            if(componentType == int(eObjParam_ROTATION_Y)) rotationYPlate = plate;
+            componentHitTargetsExpanded = componentHitTargetsExpanded
+                    && plate->minimumWidth() >= 32 && plate->minimumHeight() >= 22;
+            QFormLayout* form = qobject_cast<QFormLayout*>(plate->parentWidget()->layout());
+            componentLayoutHasNoDeadSpace = componentLayoutHasNoDeadSpace
+                    && form && form->horizontalSpacing() == 0 && form->verticalSpacing() == 0;
+        }
+        if(positionXPlate) positionXPlate->click();
+        if(rotationYPlate) rotationYPlate->click();
+        const bool componentSelectionTableExclusive = positionXPlate && rotationYPlate
+                && !positionXPlate->isChecked() && rotationYPlate->isChecked();
+        if(exclusiveComponentTable.rowCount() > 0)
+            exclusiveComponentTable.item(exclusiveComponentTable.rowCount() - 1, 0)->setSelected(true);
+        bool componentSelectionClearsForProperty = true;
+        for(QToolButton* plate : exclusivePlates)
+            componentSelectionClearsForProperty = componentSelectionClearsForProperty
+                    && !plate->isChecked();
+
+        QSharedPointer<IPropertyBase> partialValue(new propStr(eObjParam_COMMENTS, "abcdef"));
+        CValueItem partialEditor(partialValue);
+        partialEditor.setSelection(2, 2);
+        QKeyEvent copyPartialText(QEvent::KeyPress, Qt::Key_C, Qt::ControlModifier);
+        QApplication::sendEvent(&partialEditor, &copyPartialText);
+        const bool partialCopyExact = QGuiApplication::clipboard()->text() == "cd"
+                && !QGuiApplication::clipboard()->mimeData()->hasFormat(
+                    "application/x-ei-mapper-property-type");
+        QSharedPointer<IPropertyBase> partialDestinationValue(
+                    new propStr(eObjParam_COMMENTS, "123456"));
+        CValueItem partialDestination(partialDestinationValue);
+        int partialChanges = 0;
+        QObject::connect(&partialDestination, &CValueItem::onParamChange,
+                         [&partialChanges](const QSharedPointer<IPropertyBase>&) { ++partialChanges; });
+        partialDestination.setSelection(2, 2);
+        QKeyEvent pastePartialText(QEvent::KeyPress, Qt::Key_V, Qt::ControlModifier);
+        QApplication::sendEvent(&partialDestination, &pastePartialText);
+        const bool partialPasteExact = partialDestination.text() == "12cd56"
+                && partialChanges == 0;
+        partialDestination.onTextChangeEnd();
+        const bool partialPasteCommit = partialDestination.value()->toString() == "12cd56"
+                && partialChanges == 1;
+
+        QList<QSharedPointer<IPropertyBase>> scrollingProperties;
+        for(int index = 0; index < 40; ++index)
+            scrollingProperties << QSharedPointer<IPropertyBase>(
+                new propStr(eObjParam_COMMENTS, QString("comment-%1").arg(index)));
+        QTableWidget scrollingTable;
+        scrollingTable.resize(320, 120);
+        scrollingTable.setAttribute(Qt::WA_DontShowOnScreen);
+        scrollingTable.show();
+        CTableManager scrollingManager(&scrollingTable);
+        scrollingManager.setNewData(scrollingProperties);
+        QApplication::processEvents();
+        const int wantedScroll = qMax(1, scrollingTable.verticalScrollBar()->maximum() / 2);
+        scrollingTable.verticalScrollBar()->setValue(wantedScroll);
+        scrollingManager.setNewData(scrollingProperties);
+        QApplication::processEvents();
+        const bool propertyScrollPreserved = scrollingTable.verticalScrollBar()->value()
+                == qMin(wantedScroll, scrollingTable.verticalScrollBar()->maximum());
 
         QMap<QString, QSharedPointer<propBool>> mixedParts;
         mixedParts.insert("head", QSharedPointer<propBool>(new propBool(eObjParam_BODYPARTS)));
@@ -543,11 +800,31 @@ int runHeadlessCommand(QApplication& app)
         const bool mixedModelPartsVisible = rowForType(mixedModelTable,
                                                        eObjParam_BODYPARTS) >= 0;
 
+        CLandscapeTools landscapeTools;
+        const bool minimumPaintBrushIsSingleTile = qFuzzyIsNull(
+            landscapeTools.paintRadius());
+        landscapeTools.setPaintTerrainTypes(
+            {{2, "Ground"}}, {{1, "Underwater ground"}}, {{5, "Swamp"}});
+        landscapeTools.activateMode(ELandscapeEditMode::TilePaint, false);
+        const bool underwaterFamiliesHiddenByDefault =
+            !landscapeTools.underwaterFamiliesVisible()
+            && !landscapeTools.selectPaintTerrainType(1);
+        landscapeTools.setUnderwaterFamiliesVisible(true);
+        const bool underwaterFamiliesCanBeShown =
+            landscapeTools.underwaterFamiliesVisible()
+            && landscapeTools.selectPaintTerrainType(1);
+        const bool landscapeLayersVisibleByDefault =
+            landscapeTools.mainTerrainVisible() && landscapeTools.overlaysVisible();
+        landscapeTools.setTerrainVisibility(false, true);
+        const bool landscapeVisibilityControlsWork =
+            !landscapeTools.mainTerrainVisible() && landscapeTools.overlaysVisible();
+
         QWidget primaryWindow;
         bool settingsTabsUsable = false;
         bool settingsShortcutsPersist = false;
         bool autosaveSettingsPersist = false;
         bool autosaveLiveReconfigure = false;
+        bool cameraSpeedSettingsPersist = false;
         bool settingsApplySignal = false;
         bool renderOptionsRegistered = false;
         {
@@ -577,6 +854,8 @@ int runHeadlessCommand(QApplication& app)
                 QKeySequenceEdit* activateOwnerShortcut = settingsWindow.findChild<QKeySequenceEdit*>("shortcutActivateOwnerMob");
                 QCheckBox* autosaveEnabled = settingsWindow.findChild<QCheckBox*>("autosaveEnabled");
                 QLineEdit* autosaveInterval = settingsWindow.findChild<QLineEdit*>("autosaveIntervalMinutes");
+                QComboBox* cameraWheelGesture = settingsWindow.findChild<QComboBox*>(
+                    "cameraSpeedWheelGesture");
                 COptBool* animateUnits = dynamic_cast<COptBool*>(
                     settingsWindow.opt(eOptSetRender, "animateUnits"));
                 COptBool* performanceCounters = dynamic_cast<COptBool*>(
@@ -605,6 +884,8 @@ int runHeadlessCommand(QApplication& app)
                         autosaveEnabled->setChecked(true);
                     if(autosaveInterval)
                         autosaveInterval->setText("1");
+                    if(cameraWheelGesture)
+                        cameraWheelGesture->setCurrentIndex(2);
                     QMetaObject::invokeMethod(&settingsWindow, "on_buttonApply_clicked", Qt::DirectConnection);
                     COptString* saved = dynamic_cast<COptString*>(
                         settingsWindow.opt(eOptSetKeyBinding, "shortcutHistory"));
@@ -618,18 +899,32 @@ int runHeadlessCommand(QApplication& app)
                         settingsWindow.opt(eOptSetGeneral, "autosaveIntervalMinutes"));
                     autosaveSettingsPersist = savedAutosaveEnabled && savedAutosaveEnabled->value()
                             && savedAutosaveInterval && savedAutosaveInterval->value() == 1;
+                    COptString* savedCameraGesture = dynamic_cast<COptString*>(
+                        settingsWindow.opt(eOptSetKeyBinding, "cameraSpeedWheelGesture"));
+                    COptDouble* savedCameraMultiplier = dynamic_cast<COptDouble*>(
+                        settingsWindow.opt(eOptSetGeneral, "cameraSpeedMultiplier"));
+                    cameraSpeedSettingsPersist = cameraWheelGesture
+                            && savedCameraGesture && savedCameraGesture->value() == "Shift+Wheel"
+                            && savedCameraMultiplier
+                            && qAbs(savedCameraMultiplier->value() - 1.0) < 0.001;
                 }
             }
             QDir::setCurrent(previousDirectory);
         }
         QWidget ownedWindow(&primaryWindow, Qt::Window);
         QWidget orphanWindow(nullptr, Qt::Window);
+        QPointer<QWidget> deletingWindow = new QWidget(nullptr, Qt::Window);
         ownedWindow.setAttribute(Qt::WA_DontShowOnScreen);
         orphanWindow.setAttribute(Qt::WA_DontShowOnScreen);
+        deletingWindow->setAttribute(Qt::WA_DontShowOnScreen);
+        deletingWindow->setAttribute(Qt::WA_DeleteOnClose);
         ownedWindow.show();
         orphanWindow.show();
+        deletingWindow->show();
         ei::closeSecondaryWindows(&primaryWindow);
         const bool secondaryWindowsClosed = !ownedWindow.isVisible() && !orphanWindow.isVisible();
+        QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+        const bool deletingSecondaryWindowClosedSafely = deletingWindow.isNull();
 
         // Paste creation and its automatic placement transform must be one
         // top-level history item. This mirrors CView::operationApply().
@@ -666,15 +961,30 @@ int runHeadlessCommand(QApplication& app)
         const bool passed = prefixesOnly && valueStable && focusCancel && escapeCancel
                 && enterCommit && clickCommit && settingsTabsUsable && settingsShortcutsPersist
                 && autosaveSettingsPersist && settingsApplySignal && autosaveLiveReconfigure
+                && cameraSpeedSettingsPersist
                 && renderOptionsRegistered
                 && secondaryWindowsClosed
+                && deletingSecondaryWindowClosedSafely
                 && pasteSingleAction && pasteUndoAtomic && pasteRedoAtomic
-                && incompatiblePasteBlocked && compatiblePasteImmediate
+                && incompatiblePasteBlocked && compatiblePastePreview && compatiblePasteCommit
                 && multiPropertyPaste && mismatchedPropertyPasteBlocked
-                && fieldPasteImmediate && fieldCopyAvailable && nonTextPropertyPaste
-                && numericComponentPaste
+                && fieldPastePreview && fieldPasteCommit && fieldCopyAvailable && nonTextPropertyPaste
+                && numericComponentPaste && individualComponentSelection
+                && selectedComponentCopy && componentPlatePaste && componentContextPaste
+                && componentContextPreservesSelection && componentContextShowsOnlyComponent
+                && componentContextGestureKeepsTableClear && componentContextUsesManualDispatch
+                && componentContextFocusIsChildOwned
+                && componentSelectionTableExclusive && componentSelectionClearsForProperty
+                && componentHitTargetsExpanded && componentLayoutHasNoDeadSpace
                 && lockedNumericPasteBlocked
+                && partialCopyExact && partialPasteExact && partialPasteCommit
+                && propertyScrollPreserved
                 && mixedModelPartsVisible
+                && minimumPaintBrushIsSingleTile
+                && underwaterFamiliesHiddenByDefault
+                && underwaterFamiliesCanBeShown
+                && landscapeLayersVisibleByDefault
+                && landscapeVisibilityControlsWork
                 && logicPointUndoAtomic && logicPointRedoAtomic;
         QTextStream output(stdout);
         output << "asset-picker prefixes=" << completions.join(",") << "\n"
@@ -688,22 +998,49 @@ int runHeadlessCommand(QApplication& app)
                << " settingsShortcutsPersist=" << settingsShortcutsPersist
                << " autosaveSettingsPersist=" << autosaveSettingsPersist
                << " autosaveLiveReconfigure=" << autosaveLiveReconfigure
+               << " cameraSpeedSettingsPersist=" << cameraSpeedSettingsPersist
                << " settingsApplySignal=" << settingsApplySignal
                << " renderOptionsRegistered=" << renderOptionsRegistered
                << " secondaryWindowsClosed=" << secondaryWindowsClosed
+               << " deletingSecondaryWindowClosedSafely=" << deletingSecondaryWindowClosedSafely
                << " pasteSingleAction=" << pasteSingleAction
                << " pasteUndoAtomic=" << pasteUndoAtomic
                << " pasteRedoAtomic=" << pasteRedoAtomic
                << " incompatiblePasteBlocked=" << incompatiblePasteBlocked
-               << " compatiblePasteImmediate=" << compatiblePasteImmediate
+               << " compatiblePastePreview=" << compatiblePastePreview
+               << " compatiblePasteCommit=" << compatiblePasteCommit
                << " multiPropertyPaste=" << multiPropertyPaste
                << " mismatchedPropertyPasteBlocked=" << mismatchedPropertyPasteBlocked
-               << " fieldPasteImmediate=" << fieldPasteImmediate
+               << " fieldPastePreview=" << fieldPastePreview
+               << " fieldPasteCommit=" << fieldPasteCommit
                << " fieldCopyAvailable=" << fieldCopyAvailable
                << " nonTextPropertyPaste=" << nonTextPropertyPaste << "\n"
                << " numericComponentPaste=" << numericComponentPaste << "\n"
+               << " individualComponentSelection=" << individualComponentSelection
+               << " selectedComponentCopy=" << selectedComponentCopy
+               << " componentPlatePaste=" << componentPlatePaste
+               << " componentContextPaste=" << componentContextPaste
+               << " componentContextPreservesSelection=" << componentContextPreservesSelection
+               << " componentContextShowsOnlyComponent=" << componentContextShowsOnlyComponent
+               << " componentContextGestureKeepsTableClear="
+               << componentContextGestureKeepsTableClear
+               << " componentContextUsesManualDispatch=" << componentContextUsesManualDispatch
+               << " componentContextFocusIsChildOwned=" << componentContextFocusIsChildOwned
+               << " componentSelectionTableExclusive=" << componentSelectionTableExclusive
+               << " componentSelectionClearsForProperty=" << componentSelectionClearsForProperty
+               << " componentHitTargetsExpanded=" << componentHitTargetsExpanded
+               << " componentLayoutHasNoDeadSpace=" << componentLayoutHasNoDeadSpace << "\n"
                << " lockedNumericPasteBlocked=" << lockedNumericPasteBlocked << "\n"
+               << " partialCopyExact=" << partialCopyExact
+               << " partialPasteExact=" << partialPasteExact
+               << " partialPasteCommit=" << partialPasteCommit << "\n"
+               << " propertyScrollPreserved=" << propertyScrollPreserved << "\n"
                << " mixedModelPartsVisible=" << mixedModelPartsVisible
+               << " minimumPaintBrushIsSingleTile=" << minimumPaintBrushIsSingleTile
+               << " underwaterFamiliesHiddenByDefault=" << underwaterFamiliesHiddenByDefault
+               << " underwaterFamiliesCanBeShown=" << underwaterFamiliesCanBeShown
+               << " landscapeLayersVisibleByDefault=" << landscapeLayersVisibleByDefault
+               << " landscapeVisibilityControlsWork=" << landscapeVisibilityControlsWork
                << " logicPointUndoAtomic=" << logicPointUndoAtomic
                << " logicPointRedoAtomic=" << logicPointRedoAtomic << "\n"
                << (passed ? "PASS" : "FAIL")
@@ -870,6 +1207,7 @@ int main(int argc, char *argv[])
         QCoreApplication::setAttribute(Qt::AA_UseDesktopOpenGL);
 
     QApplication app(argc, argv);
+    app.setWindowIcon(QIcon(":/endurance_gate.png"));
 
     // QGLWidget reads the default format when the first preview/view widget is
     // constructed. Normal editing follows display VSync; benchmark mode is an
@@ -934,11 +1272,20 @@ int main(int argc, char *argv[])
         "QMenu::item:disabled { color: #808080; }");
 
 
+    CStartupSplash splash;
+    splash.showCentered();
+    QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+
     MainWindow window;
     window.setWindowTitle(QString("EI Mapper: Endurance Edition %1").arg(QCoreApplication::applicationVersion()));
     //window.resize(window.sizeHint());
 
+    splash.setStatus(QObject::tr("Opening main window..."));
     window.show();
+    QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+    splash.close();
+    window.raise();
+    window.activateWindow();
     QStringList startupDocuments;
     for(int i = 1; i < app.arguments().size(); ++i)
     {

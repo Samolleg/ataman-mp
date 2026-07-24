@@ -2,6 +2,7 @@
 #define WINDOW_LIFECYCLE_H
 
 #include <QApplication>
+#include <QPointer>
 #include <QWidget>
 
 namespace ei {
@@ -16,9 +17,12 @@ inline void closeSecondaryWindows(QWidget* primaryWindow)
     {
         if(!window || window == primaryWindow)
             continue;
-        window->close();
-        if(window->isVisible())
-            window->hide();
+        // A WA_DeleteOnClose tool window (or a custom close handler) may
+        // destroy itself from close(). Guard the follow-up visibility check.
+        QPointer<QWidget> guardedWindow(window);
+        guardedWindow->close();
+        if(guardedWindow && guardedWindow->isVisible())
+            guardedWindow->hide();
     }
 }
 

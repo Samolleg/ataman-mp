@@ -33,7 +33,9 @@ public:
     void strafeDownward(bool bShift = false);
     void enlarge(const bool bZoom = true);
     void reset();
-    float step() const {return m_step;}
+    float step() const {return m_step * m_speedMultiplier;}
+    float speedMultiplier() const {return m_speedMultiplier;}
+    void setSpeedMultiplier(float multiplier);
     // Legacy serialized orbit-controller state. `pos` is NOT guaranteed to be
     // the rendered world-space eye after pivot rotations. Use viewMatrix() and
     // ei::cameraEyeFromView() for culling, LOD, lighting, and shadow geometry.
@@ -57,6 +59,7 @@ private:
     float m_xRot;
     float m_zRot;
     float m_step;
+    float m_speedMultiplier;
     CKeyManager* m_keyManager;
     CSettings* m_pSettings;
 };

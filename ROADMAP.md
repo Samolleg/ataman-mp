@@ -5,13 +5,25 @@ work is ordered from the newest planned minor line to the oldest completed one.
 An item is checked only after its implementation has landed and received the
 stated validation. Completed code should carry a commit, test, or release link.
 
-Current development line: `0.2.1-alpha.26` focused closed testing.
+Current development line: `0.3.0-alpha.1` focused closed testing. This is a
+version reclassification of the feature set that outgrew the `0.2.1` label,
+not a serializer or compatibility reset. The remaining 0.3 release work is the
+final runtime/corpus matrix, focused confirmation of the new live-clock and
+startup-splash behavior, and version/tag/package housekeeping rather than
+another editor architecture pass.
 
 <details open>
 <summary><strong>General wishlist — not assigned to a release</strong></summary>
 
 ## Compatibility and profile support
 
+- [ ] Add an advanced, explicitly experimental runtime-variant management UI.
+  It may let a user fingerprint a patched `game.exe`, compare its changed
+  sections/ranges with a known layout, and locally approve the hash only after
+  every required hook, caller, global, and PE-layout guard passes. A bare
+  user-entered hash is never sufficient, locally working variants are not
+  automatically promoted to supported, and this UI is not part of the current
+  `0.3.0` release scope.
 - [ ] **Post-1.0:** define an optional runtime-plugin contract for other mods
   only when their authors request direct-launch support.
   - Core editing, validation, collections, and saving never depend on a game
@@ -23,6 +35,16 @@ Current development line: `0.2.1-alpha.26` focused closed testing.
 
 ## Optional editor integrations and accessibility
 
+- [ ] Add an opt-in MCP server for EI Mapper automation and AI-assisted
+  workflows. Start with read-only discovery, active-workspace inspection,
+  validation, semantic diff, object queries, and diagnostics. Editing commands
+  must use the same typed transactions, undo history, validation, dirty-state,
+  backup, and save protections as interactive UI actions. Destructive edits,
+  file writes, Test Current Map, hot reload, and process control require
+  explicit capability grants and user confirmation; the server must never
+  expose proprietary resources, scripts, local paths, or unsaved document data
+  without an intentional request. Define a versioned tool/resource schema so
+  external clients do not depend on internal C++ or widget structure.
 - [ ] Add optional external MOB diff-tool integration. Pass two explicit files
   or exported snapshots to a configured executable without replacing the
   built-in deterministic diff or exposing private/unsaved data silently.
@@ -79,21 +101,29 @@ Current development line: `0.2.1-alpha.26` focused closed testing.
 
 ## Object authoring conveniences
 
-- [ ] Add an explicit **Convert World Object to Lever...** transaction.
+- [x] Add an explicit **Convert World Object to Lever...** transaction.
   - Preserve the original NID, transform, model, textures, body parts, common
     object fields, directory membership, ordering position, and script-facing
     identity.
-  - Source the lever envelope and lever-only records from a verified same-profile
-    raw lever template; never send the converted object through the legacy
-    rebuilding serializer.
+  - Use the corpus-proven Base/JMV lever schema directly: replace the raw
+    `OBJECT` envelope with `LEVER`, insert the six standard lever records, patch
+    `OBJTYPE` 54 to 60, and preserve every common/opaque target record. Never
+    send the converted object through the legacy rebuilding serializer. See
+    `docs/research/world-object-to-lever-audit.md`.
   - Show editable lever defaults before conversion (open mode/key/skill, current
     and total states, cycling, door, and graph-recalculation flags), scan the NID
     for script references, and apply the subtree replacement as one undoable
     transaction.
-  - Refuse conversion when no compatible raw template/provenance mapping can be
-    proven. ZoneView offering a similar command is useful workflow evidence, but
-    is not proof that its serialized output preserves Endurance's lossless-save
-    guarantees.
+  - Refuse conversion only when the source is not a structurally proven world
+    object, its raw provenance is unavailable/stale, or the active profile
+    declares a different lever schema. A matching lever model/template is not
+    required: shipped Base and JMV maps use multiple identical models as both
+    ordinary objects and levers, including within the same MOB.
+  - Implementation: [`a8f9cc1`](https://github.com/Ilufus/ei-mapper-endurance/commit/a8f9cc1).
+  - [ ] Runtime-validate a converted already-shared model and a model never before
+    used as a lever in disposable Base and JMV test maps before enabling the
+    command by default for stable profile releases. The alpha command remains
+    available for these disposable validation tests.
 
 </details>
 
@@ -124,15 +154,24 @@ Current development line: `0.2.1-alpha.26` focused closed testing.
 </details>
 
 <details open>
-<summary><strong>0.4.x — AI navigation graph visualization and regeneration</strong></summary>
+<summary><strong>0.5.x — AI navigation graph visualization and regeneration</strong></summary>
 
-## 0.4.0 release goal
+## 0.5.0 release goal
 
 Deliver profile-aware visualization, validation, and safe regeneration of the
 AI navigation graph stored in a primary MOB or an external `.grp`. This work is
-deliberately separated from the `0.3.x` landscape serializer: terrain editing
+deliberately separated from the `0.4.x` landscape serializer: terrain editing
 may warn that navigation is stale, but production graph replacement remains a
-`0.4.0` capability.
+`0.5.0` capability.
+
+Controlled Test Current Map validation confirmed that changed height and
+texture data propagate at runtime and that the player can navigate correctly
+around newly impassable terrain without an offline graph rebuild. Geometry,
+liquid, and collision changes therefore mark navigation as potentially stale
+for diagnostics and review, but graph regeneration is not a `0.4.0`
+landscape-save gate unless later controlled evidence demonstrates a
+graph-dependent case. MPR/SEC and AI-graph persistence remain separate
+lossless transactions because the graph is not owned by the MPR.
 
 ## Confirmed format foundation
 
@@ -163,15 +202,23 @@ may warn that navigation is stale, but production graph replacement remains a
 - [ ] Add deterministic graph-to-graph diff, initially using Base Zone 6's
   unfrozen/frozen landscape pair as the controlled fixture.
 - [ ] Validate dimensions, complete byte coverage, boundary links, unexpected
-  asymmetry, isolated regions/entrances, and opaque-plane changes without
-  blocking Save or Test Current Map.
+  asymmetry, isolated regions/entrances, and opaque-plane changes. Existing
+  graph defects and navigation-dirty edits remain diagnostic findings; Test
+  Current Map may proceed with an explicit warning while runtime validation
+  records whether the edited terrain actually causes a navigation defect.
 - [ ] Track terrain/object edits as navigation-dirty regions and retain the
   oversized-door runtime-regeneration convention as an explicit diagnostic.
+- [ ] Replace Play from Here's deliberately conservative geometric clearance
+  check with AI-graph-backed walkability and nearest-valid-position lookup.
+  The current check may reject legitimate standable mesh objects and platforms;
+  do not loosen it with unverified heuristics before graph support is available.
 
 ## Zone 6 source and state research
 
-- [ ] Resolve runtime precedence between embedded `AI_GRAPH` and external
-  `.grp` data for every profile before enabling writes.
+- [x] Follow the verified runtime read precedence for staging: embedded
+  primary-MOB `AI_GRAPH` first, external MPR-basename `.grp` fallback. This
+  does not enable graph writes or settle how a future editor should present
+  conflicting sources for intentional editing.
 - [ ] Base: correlate `zone6.mpr` + `zone6.grp` (unfrozen lake) with
   `zone6_2.mpr` + `zone6_2.grp` (frozen lake). Both graphs are `56x96`; they
   differ in 55,208 bytes across 2,642 graph coordinates.
@@ -202,9 +249,9 @@ may warn that navigation is stale, but production graph replacement remains a
 </details>
 
 <details open>
-<summary><strong>0.3.x — lossless MPR/SEC and landscape editing</strong></summary>
+<summary><strong>0.4.x — lossless MPR/SEC and landscape editing</strong></summary>
 
-## 0.3.0 release goal
+## 0.4.0 release goal
 
 Deliver the first supported landscape-editing release. Merely displaying an MPR
 does not qualify: changed terrain must use a lossless archive/sector document
@@ -212,12 +259,14 @@ path and must never fall back to the legacy rebuilding serializer.
 
 ## Lossless MPR/SEC foundation
 
-Isolated implementation status: `feature/landscape-editing` has clean commits
-`201b3ff` (lossless archive document) and `195e469` (canonical terrain lattice
-and undoable sculpt-command foundation). Its focused suite passes 38/38 and a
-copied 8-Base/32-JMV corpus round-trips byte-identically. These commits are not
-merged; packed-normal recalculation and renderer/UI integration remain the
-next gate, and changed landscape saving remains disabled.
+The closed `feature/landscape-editing` baseline advances the original lossless
+archive and canonical-lattice foundation into height sculpting/import,
+semantic ground and overlay painting, undo batching, terrain diagnostics,
+staged changed-MPR Save As, lossless RES member replacement, and a structured
+`map.txt` catalog editor. Its focused automated suites and disposable manual
+smoke matrix passed before this integration. Direct replacement of the open
+dirty MPR remains outside the baseline; changed terrain is written only as a
+separate validated test copy.
 
 - [ ] Preserve untouched archive members, internal names, member order,
   timestamps/metadata, alignment, unknown entries, and original MP/SEC
@@ -268,20 +317,171 @@ next gate, and changed landscape saving remains disabled.
   including zone identity/type, entrances, destinations, minimap, music, and
   profile-specific metadata validation.
 
-- [ ] Warn when terrain edits can invalidate MOB object heights or the AI
-  navigation graph.
+## Minimap generation and texture-resource export
+
+- [ ] Extend the lossless `map.txt` model to preserve and edit the complete
+  `#maps` block: sector width/height, minimap texture identity, and the separate
+  objectives-screen texture identity. Never invent or overwrite objectives
+  metadata as a minimap side effect.
+- [ ] Add an existing-minimap viewer that resolves the referenced `.mmp`
+  through the active Base/JMV resource profile and reports its archive
+  provenance, format, dimensions, mip layout, and hash.
+- [ ] Implement a deterministic orthographic minimap bake following the
+  observed ZoneView contract: source BMP dimensions are sector width/height
+  multiplied by 128 pixels per sector.
+- [ ] Make an active collection the production bake input: its MPR, primary
+  MOB, and ordered supplemental MOBs provide the complete authored static
+  scene. Include terrain, overlays/liquids, lighting, and static geometry while
+  excluding dynamic units. Permit an MPR-only terrain bake, but label it as
+  incomplete when collection static geometry is absent.
+- [ ] Retain the full-resolution bake for review and regeneration, then convert
+  it to the game-facing 256x256 minimap MMP only after orientation, framing,
+  filtering, and resampling are proven against matching stock and JMV
+  ZoneView/MMP pairs.
+- [ ] Provide one **Export Texture to RES...** workflow. The selected
+  destination determines the operation:
+  - a missing path creates a new RES archive;
+  - an existing archive receives a new member after backup and staged rebuild;
+  - an existing member requires explicit Replace, Rename, or Cancel handling.
+  Allow any compatible user-selected archive, including the mod's
+  `textures.res`, while warning about time and temporary-disk cost for large
+  archives.
+- [ ] Treat archive "append" as a semantic member addition, never an in-place
+  byte append. Stage and freshly reopen the candidate, prove untouched member
+  names/order/metadata/raw bytes are unchanged, verify the new/replaced MMP,
+  then back up and atomically replace the destination.
+- [ ] Coordinate the `map.txt` reference update only after the texture archive
+  validates. A failed archive or metadata step must leave both destinations
+  recoverable and must never publish a dangling minimap name.
+- [ ] Prove profile-specific discovery and duplicate-name precedence for a
+  newly created RES before recommending a dedicated archive. Prefer unique
+  texture names so users do not accidentally replace another zone's minimap.
+- [ ] Add synthetic tests for pixels-per-sector dimensions, orientation,
+  deterministic repeat generation, static-geometry inclusion, dynamic-unit
+  exclusion, new-archive creation, existing-archive addition/replacement,
+  collision cancellation, untouched-member equality, failed validation, and
+  rollback. Keep proprietary ZoneView/stock correlation as separate private
+  runtime validation.
+
+- [ ] Classify edits as visual-only or navigation-affecting. Height, liquid,
+  collision, bridge, door, and multi-level changes mark explicit navigation-
+  dirty regions; uncertain material/type changes fail conservatively to dirty.
+- [ ] Keep MPR saving independent from graph regeneration while presenting the
+  complete MPR + primary MOB/external GRP state as one map-validation result.
+- [ ] Report navigation-dirty state and graph discrepancies without blocking
+  landscape save or release readiness solely because an offline graph was not
+  rebuilt; escalate only when diagnostics or runtime validation demonstrate an
+  actual navigation defect.
 - [ ] Detect and preserve the known oversized-door runtime graph-regeneration
   convention.
 - [ ] Provide placement/navigation findings before save and test launch.
 - [ ] Require in-game traversal, water/overlay interaction, unload/reload, and
-  graceful-exit tests before `0.3.0` release.
+  graceful-exit tests before `0.4.0` release.
 
 </details>
 
 <details open>
-<summary><strong>0.2.x — hardened MOB editor and JMV direct gameplay</strong></summary>
+<summary><strong>0.3.x — integrated Endurance editor and direct-gameplay release</strong></summary>
 
-## 0.2.0 release gate
+## 0.3.0 release goal
+
+Publish the current hardened editor as one coherent tester-facing release.
+`0.3.0-alpha.1` promotes the accumulated `0.2.1-alpha.44` feature set because
+it now contains several minor-release-sized capabilities beyond the original
+0.2 direct-launch milestone. Existing MOB safety and compatibility contracts
+remain unchanged.
+
+### Included feature baseline
+
+- [x] Lossless MOB editing for the supported property, transform, script,
+  patrol/look-point, copy/paste, create/delete, and conversion workflows.
+- [x] Runtime-family range/NID validation, copied-workspace source overlays,
+  non-blocking findings, navigation to source objects, and conservative guided
+  repair.
+- [x] Independent MPR/MOB opening, collections, the dockable Loaded Map tree,
+  one active editable MOB, locked-source inspection/copying, visibility, and
+  safe targeted unload.
+- [x] Versioned recovery autosaves, atomic saves/backups, rotated workflow
+  logs, crash dumps, interrupted-test recovery, and clean package validation.
+- [x] Parameter-aware outliner filtering, dockable workspace panels, compound
+  property/component copying, configurable shortcuts, camera speed, and
+  external/internal script workflows.
+- [x] JMV Test Current Map, selected entrances, Play from Here, Godmode,
+  supplemental MOB staging, generation-isolated saves, state-aware hot reload,
+  orphan recovery, and same-map position/facing restoration.
+- [x] Preserve the runtime graph source during Test Current Map and hot reload:
+  retain embedded primary-MOB `AI_GRAPH` data, or validate and stage an
+  unchanged sibling `.grp` in every immutable generation. Graph generation and
+  editing remain in the 0.5.x workstream.
+- [x] Profile-correct humanoid appearance/equipment/idle animation, the final
+  texture/UV inspector, optimized render queues and culling, resource-format
+  fixes, functional particle preview, ANGLE compatibility, and the integrated
+  environment renderer.
+- [x] Replace the inferred environment/local-light approximation with the
+  fingerprinted native composition model: resource-driven weather curves,
+  channel-wise maximum environment and point-light accumulation, native
+  distance falloff, bounded projected-shadow opacity, authored torch lights,
+  and a 64-light capacity covering the audited JMV corpus. The implementation
+  and remaining evidence boundaries are recorded in
+  [environment resource evidence](docs/ENVIRONMENT_RESOURCE_EVIDENCE.md),
+  [environment rendering validation](docs/ENVIRONMENT_RENDERING_VALIDATION.md),
+  and the [particle/runtime evidence ledger](docs/investigations/2026-07-23-particle-runtime.md).
+  ([`37e0231`](https://github.com/Ilufus/ei-mapper-endurance/commit/37e0231),
+  [`aa465c3`](https://github.com/Ilufus/ei-mapper-endurance/commit/aa465c3))
+- [x] Separate always-available **Time of day** and **Lighting mode** viewport
+  controls. JMV launch and hot reload now use `RunWorldTime` so the selected
+  starting hour is applied without freezing normal clock progression.
+  ([`7401874`](https://github.com/Ilufus/ei-mapper-endurance/commit/7401874),
+  [`3af2099`](https://github.com/Ilufus/ei-mapper-endurance/commit/3af2099))
+- [x] Add a taskbar-visible, focusable startup splash using the Endurance art,
+  product name, edition, current version, and initialization status until the
+  main window is ready. ([`3af2099`](https://github.com/Ilufus/ei-mapper-endurance/commit/3af2099))
+
+### 0.3.0 release gate
+
+- [ ] Runtime-confirm that Test Current Map and hot reload start at the editor
+  time while the game clock continues normally, including a cave/briefing map.
+- [ ] Confirm the startup splash/taskbar handoff on an existing profile and a
+  clean first run whose setup dialog appears before the main window.
+- [ ] Run the final representative Base/JMV editor corpus matrix: open,
+  no-op round trip, intended changed save, undo/redo, autosave/recovery,
+  validation, and graceful shutdown.
+- [ ] Run the final JMV runtime matrix across normal gameplay, dungeon, and
+  briefing maps: entrance/custom spawn, supplemental MOBs, Save/Load within one
+  generation, same-map and different-map hot reload, scripts, `drawall`, map
+  transition/return, and graceful exit. Retain the authoritative `result.json`
+  and hashes.
+- [ ] Reconfirm the clean distribution contract: no settings, logs, saves,
+  dumps, private paths, or game assets; exactly one current changelist; matching
+  executable/folder/source version; source/GPL notices and checksums included.
+- [ ] Resolve any concrete release-blocking regression found by the closed
+  group, then create the immutable `v0.3.0` tag and tester package.
+
+### Explicitly non-blocking follow-ups
+
+- [ ] Confirm immediate, conditional, and nested supplemental `AddMob` chains
+  load exactly once when a deterministic fixture becomes available.
+- [ ] Runtime-confirm World Object to Lever conversion for both an already
+  shared model and a model never previously used as a lever.
+- [ ] Extend guided NID repair to explicit per-script-reference assignment and
+  coordinated multi-MOB save cohorts.
+- [ ] File associations, a dockable workflow-log panel, deeper persistent RES
+  indexing, and broader diff presentation remain useful follow-ups but do not
+  hold the 0.3.0 safety/runtime release gate.
+
+</details>
+
+<details>
+<summary><strong>0.2.x — hardened MOB editor and JMV direct-gameplay development history</strong></summary>
+
+## 0.2.x outcome
+
+The 0.2.x prerelease line established the hardened MOB editor, profile-aware
+resources, direct JMV gameplay, and hot reload. It closed without pretending
+that the much larger accumulated `0.2.1` feature set was merely a patch; that
+working baseline is promoted intact to `0.3.0-alpha.1` above.
+
+## Historical 0.2.0 release gate
 
 `0.1.0-alpha.58` is the immutable selected-zone/save-isolation test build.
 `0.2.0-alpha.1` moves the selected zone and entrance into the engine's New
@@ -291,12 +491,66 @@ profile-isolated test saves. Test Save/Load/Main Menu remain available through
 run-local generation namespaces: every initial launch and hot reload starts a
 new empty save generation, so saves remain useful within one exact staged-map
 state and can never reach live campaign saves or a later map generation.
-Publish the first immutable `0.2.0` package after the following runtime contract
-is demonstrated on normal gameplay, dungeon, and briefing maps.
+This historical gate targeted the first immutable `0.2.0` package after the
+following runtime contract was demonstrated on normal gameplay, dungeon, and
+briefing maps. The larger resulting baseline is now tracked under 0.3 above.
 
-### Current 0.2.x status
+### Final 0.2.x status before promotion
 
-- **Current tester build:** `0.2.1-alpha.26`, retaining the alpha.24 render and
+- **Final packaged baseline:** `0.2.1-alpha.44`. Alpha.44 integrates the
+  committed profile-correct render pipeline, environment renderer, particles,
+  ANGLE support, and current runtime/editor safeguards. Alpha.42 completed native
+  clipboard behavior for individual Vector3 components without selecting or
+  flashing the parent compound property. Alpha.41/42 make component context
+  selection exclusive and route child-label context menus directly. Alpha.38
+  also fixes the shutdown crash seen in alpha.34 by retaining the diagnostic
+  OpenGL timer query until process/context destruction instead of destroying it
+  through a dead Qt surface.
+  ([`0fa4708`](https://github.com/Ilufus/ei-mapper-endurance/commit/0fa4708),
+  [`3d9c4e8`](https://github.com/Ilufus/ei-mapper-endurance/commit/3d9c4e8))
+- **Recent confirmed baseline:** Alpha.32 adds a persistent
+  0.1x-10x viewport camera-speed control, a configurable Ctrl+mouse-wheel
+  gesture, and a cancellable 15-second notice before each periodic recovery
+  autosave. Selection-only undo steps no longer rebuild a full lossless MOB
+  candidate or schedule family validation, removing the observed selection
+  hitches. ([`c5feca5`](https://github.com/Ilufus/ei-mapper-endurance/commit/c5feca5))
+  Alpha.31 corrects the lever
+  eligibility rule using the complete Base/JMV corpus: basic `OBJECT` records
+  with proven subtypes 53 (flora), 54 (ordinary scenery), and 55
+  (stone/scenery) can be converted; malformed, duplicate, and unproven subtype
+  records still fail closed. Alpha.30 fixes the remaining
+  runtime-process ownership boundary: an unrelated `game.exe` can no longer
+  make an empty/legacy recovery journal claim an active Endurance test, and the
+  editor accepts alpha.29's accidental UTF-16LE `game.pid` while the rebuilt
+  host writes the protocol as ASCII. This restores Hot Reload readiness against
+  the hosted child `game.exe`. ([`e18f868`](https://github.com/Ilufus/ei-mapper-endurance/commit/e18f868))
+  Alpha.30 also adds the lossless, one-step World Object to Lever transaction
+  with editable defaults and script-reference warning.
+  ([`a8f9cc1`](https://github.com/Ilufus/ei-mapper-endurance/commit/a8f9cc1))
+  Alpha.29 fixes hosted JMV hot
+  reload dispatch: readiness already resolved the bridge thread against the
+  owned `game.exe`, but dispatch incorrectly compared that thread with the
+  separate injector-host PID. Runtime process identity now has one shared
+  resolver and a regression test. Alpha.28 retained the approved
+  alpha.24 character/render pipeline while reverting the unfinished environment,
+  weather, sky, and shadow prototype. Game & Mod Setup treats any effective
+  resource-root change like a profile switch: dirty documents are offered for
+  saving, the workspace is unloaded, resources are reinitialized, and Maps &
+  Collections is refreshed. Owned JMV tests virtualize both Nival and Starter
+  registry roots and guard stale same-mod absolute paths, so two installations
+  cannot silently mix the selected `game.exe` with another installation's JMV
+  maps or database. ([`b76fc3e`](https://github.com/Ilufus/ei-mapper-endurance/commit/b76fc3e))
+  Alpha.27 evidence also proved that the owned injector activated Endurance's
+  engine detours before JMV `AddonMain` began its own patch phase. Alpha.28
+  prepares path isolation before resume but defers engine detours until observed
+  executable patch activity becomes quiescent; no addon/ASI hash becomes a
+  manifest dependency.
+  Alpha.28 dual-install evidence shows the selected executable and virtualized
+  registry roots are correct, but cross-install stale-path redirection does not
+  reliably replace all Starter/JMV state. Treat multiple independent Starter
+  roots as unsupported pending a product decision; the proposed 0.2.x behavior
+  is a non-destructive preflight warning instead of broader runtime hooks.
+  Alpha.26 retained the alpha.24 render and
   autosave baseline while hardening validation navigation and the NVIDIA test
   overlay. JMV direct-launch compatibility now depends only on the exact
   fingerprinted Starter `game.exe`; Starter addon.dll, SpellAddonX.asi, JMV
@@ -703,7 +957,7 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
   payloads outside the Endurance-owned test-run directory.
   ([`4e62424`](https://github.com/Ilufus/ei-mapper-endurance/commit/4e62424))
 
-- [ ] Make repeated Ctrl+F5 hot-reload the Endurance-owned game process.
+- [x] Make repeated Ctrl+F5 hot-reload the Endurance-owned game process.
   - [x] Validate and restage the exact current in-memory pair under the current
     run, with fresh hashes and a losslessly patched autorun bootstrap.
   - [x] Keep a process-private message hook on the captured game thread and
@@ -886,6 +1140,11 @@ is demonstrated on normal gameplay, dungeon, and briefing maps.
 - [x] **High priority:** add periodic autosave with versioned, recoverable
   backup states soon after the RC gate. Autosaves must never overwrite live
   source maps directly and recovery must identify the source hash/generation.
+  Each scheduled occurrence now gives a non-activating 15-second countdown and
+  can be skipped without disabling the autosave schedule.
+- [x] Add a viewport camera-speed multiplier from 0.1x to 10x, persisted in
+  Endurance settings and adjustable through a configurable Ctrl+mouse-wheel
+  gesture.
 - [ ] Add a resizable bottom workflow-log panel with filtering, copy/export, and
   quick access to the full rotated log.
 - [x] Show named, blocking save phases—serialize, validate, create backup,

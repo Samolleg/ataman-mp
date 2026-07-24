@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import struct
@@ -72,7 +73,9 @@ def parse_fig(data: bytes) -> dict[str, Any]:
     (vertex_blocks, normal_blocks, uv_count, index_count,
      component_count, morph_component_count) = header[:6]
     offset = 4 + 9 * 4 + 3 * 8 * 3 * 4 + 8 * 4
+    vertex_offset = offset
     offset += vertex_blocks * 3 * 8 * 4 * 4
+    normal_offset = offset
     offset += normal_blocks * 4 * 4 * 4
     uv_end = offset + uv_count * 8
     index_end = uv_end + index_count * 2
@@ -81,21 +84,187 @@ def parse_fig(data: bytes) -> dict[str, Any]:
     if morph_component_end > len(data):
         raise ValueError("FIG8 arrays are truncated")
     uvs = [struct.unpack_from("<2f", data, offset + i * 8) for i in range(uv_count)]
+    normal_floats = struct.unpack_from(f"<{normal_blocks * 16}f", data, normal_offset) \
+        if normal_blocks else ()
+    vertex_floats = struct.unpack_from(f"<{vertex_blocks * 96}f", data, vertex_offset) \
+        if vertex_blocks else ()
+    base_vertices = []
+    for block in range(vertex_blocks):
+        values = vertex_floats[block * 96:(block + 1) * 96]
+        base_vertices.extend(tuple(values[axis * 32 + lane] for axis in range(3))
+                             for lane in range(4))
+    normals = []
+    for block in range(normal_blocks):
+        values = normal_floats[block * 16:(block + 1) * 16]
+        normals.extend(tuple(values[axis * 4 + lane] for axis in range(4))
+                       for lane in range(4))
+    indices = list(struct.unpack_from(f"<{index_count}H", data, uv_end)) if index_count else []
+    components = [
+        struct.unpack_from("<3H", data, index_end + i * 6)
+        for i in range(component_count)
+    ]
+    triangle_index_count = index_count - index_count % 3
+    dangling_indices = indices[triangle_index_count:]
+    invalid_component_indices = sorted({index for index in indices if index >= component_count})
+    dangling_components = [
+        list(components[index]) if index < component_count else None
+        for index in dangling_indices
+    ]
+    repeated_component_triangles = 0
+    repeated_vertex_triangles = 0
+    zero_area_base_triangles = 0
+    near_zero_area_base_triangles = 0
+    for triangle_offset in range(0, triangle_index_count, 3):
+        triangle_components = indices[triangle_offset:triangle_offset + 3]
+        if len(set(triangle_components)) < 3:
+            repeated_component_triangles += 1
+        if all(index < component_count for index in triangle_components):
+            triangle_vertices = [components[index][0] for index in triangle_components]
+            if len(set(triangle_vertices)) < 3:
+                repeated_vertex_triangles += 1
+            a, b, c = (base_vertices[index] for index in triangle_vertices)
+            ab = tuple(b[axis] - a[axis] for axis in range(3))
+            ac = tuple(c[axis] - a[axis] for axis in range(3))
+            cross = (ab[1] * ac[2] - ab[2] * ac[1],
+                     ab[2] * ac[0] - ab[0] * ac[2],
+                     ab[0] * ac[1] - ab[1] * ac[0])
+            doubled_area = math.sqrt(sum(value * value for value in cross))
+            if doubled_area == 0.0:
+                zero_area_base_triangles += 1
+            if doubled_area <= 1.0e-12:
+                near_zero_area_base_triangles += 1
+    component_limit_violations = []
+    vertex_count = vertex_blocks * 4
+    normal_count = normal_blocks * 4
+    for index, (vertex, normal, uv) in enumerate(components):
+        if vertex >= vertex_count or normal >= normal_count or uv >= uv_count:
+            component_limit_violations.append({
+                "component": index,
+                "vertex": vertex,
+                "normal": normal,
+                "uv": uv,
+            })
+    nonfinite_uvs = sum(not (math.isfinite(u) and math.isfinite(v)) for u, v in uvs)
+    nonfinite_normals = sum(not all(math.isfinite(value) for value in normal)
+                            for normal in normals)
+    normal_lengths = [math.sqrt(x * x + y * y + z * z)
+                      for x, y, z, _ in normals
+                      if math.isfinite(x) and math.isfinite(y) and math.isfinite(z)]
+    zero_normals = sum(length <= 1.0e-12 for length in normal_lengths)
+    referenced_normal_indices = [components[index][1]
+                                 for index in indices[:triangle_index_count]
+                                 if index < component_count and components[index][1] < len(normals)]
+    referenced_zero_normals = sum(
+        math.sqrt(sum(value * value for value in normals[index][:3])) <= 1.0e-12
+        for index in referenced_normal_indices
+    )
+    diagnostics = []
+    safe_repairs = []
+    if dangling_indices:
+        diagnostics.append({
+            "code": "FIG_INDEX_TAIL_NOT_A_TRIANGLE",
+            "severity": "warning",
+            "message": (
+                f"{len(dangling_indices)} trailing index value(s) cannot form a triangle; "
+                "render/import policy must be explicit"
+            ),
+        })
+        safe_repairs.append({
+            "operation": "drop_trailing_non_triangle_indices",
+            "count": len(dangling_indices),
+            "reason": "Trailing values cannot form a triangle and are renderer-undrawable",
+        })
+    if repeated_vertex_triangles:
+        diagnostics.append({
+            "code": "FIG_REPEATED_VERTEX_TRIANGLE",
+            "severity": "warning",
+            "count": repeated_vertex_triangles,
+            "message": "Triangles repeating a position index have zero raster area",
+        })
+        safe_repairs.append({
+            "operation": "drop_repeated_vertex_triangles",
+            "count": repeated_vertex_triangles,
+            "reason": "Repeated position indices make these triangles renderer-undrawable",
+        })
+    if zero_area_base_triangles > repeated_vertex_triangles:
+        diagnostics.append({
+            "code": "FIG_OTHER_ZERO_AREA_BASE_TRIANGLE",
+            "severity": "warning",
+            "count": zero_area_base_triangles - repeated_vertex_triangles,
+            "message": "Zero-area triangles without repeated position indices require review",
+        })
+    if invalid_component_indices:
+        diagnostics.append({
+            "code": "FIG_INDEX_COMPONENT_OUT_OF_RANGE",
+            "severity": "error",
+            "indices": invalid_component_indices,
+        })
+    if component_limit_violations:
+        diagnostics.append({
+            "code": "FIG_COMPONENT_VALUE_OUT_OF_RANGE",
+            "severity": "error",
+            "count": len(component_limit_violations),
+        })
+    if nonfinite_uvs:
+        diagnostics.append({
+            "code": "FIG_NONFINITE_UV",
+            "severity": "error",
+            "count": nonfinite_uvs,
+        })
+    if nonfinite_normals:
+        diagnostics.append({
+            "code": "FIG_NONFINITE_NORMAL",
+            "severity": "error",
+            "count": nonfinite_normals,
+        })
+    if zero_normals:
+        diagnostics.append({
+            "code": "FIG_ZERO_NORMAL",
+            "severity": "warning",
+            "count": zero_normals,
+            "message": "Zero authored normals require an explicit importer policy",
+        })
     return {
         "format": "FIG8",
         "vertex_blocks": vertex_blocks,
         "normal_blocks": normal_blocks,
         "uv_count": uv_count,
         "index_count": index_count,
+        "triangle_index_count": triangle_index_count,
+        "triangle_count": triangle_index_count // 3,
+        "repeated_component_triangle_count": repeated_component_triangles,
+        "repeated_vertex_triangle_count": repeated_vertex_triangles,
+        "zero_area_base_triangle_count": zero_area_base_triangles,
+        "near_zero_area_base_triangle_count": near_zero_area_base_triangles,
+        "dangling_indices": dangling_indices,
+        "dangling_components": dangling_components,
         "component_count": component_count,
+        "invalid_component_indices": invalid_component_indices,
+        "component_limit_violations": component_limit_violations,
         "morph_component_count": morph_component_count,
         "vertex_count_per_extreme": vertex_blocks * 4,
         "morph_extreme_count": 8,
         "texture_selector": header[8],
+        "vertex_data_offset": vertex_offset,
+        "normal_data_offset": normal_offset,
+        "normal_stats": {
+            "count": len(normals),
+            "nonfinite_count": nonfinite_normals,
+            "zero_count": zero_normals,
+            "xyz_length_min": min(normal_lengths) if normal_lengths else None,
+            "xyz_length_max": max(normal_lengths) if normal_lengths else None,
+            "w_min": min((normal[3] for normal in normals), default=None),
+            "w_max": max((normal[3] for normal in normals), default=None),
+            "referenced_loop_count": len(referenced_normal_indices),
+            "referenced_zero_count": referenced_zero_normals,
+        },
+        "nonfinite_uv_count": nonfinite_uvs,
         "uv_bounds": ([min(u for u, _ in uvs), max(u for u, _ in uvs),
                        min(v for _, v in uvs), max(v for _, v in uvs)] if uvs else None),
         "parsed_bytes": morph_component_end,
         "trailing_bytes": len(data) - morph_component_end,
+        "diagnostics": diagnostics,
+        "safe_repairs": safe_repairs,
     }
 
 

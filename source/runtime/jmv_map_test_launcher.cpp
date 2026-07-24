@@ -13,9 +13,13 @@
 #include <QSaveFile>
 #include <QSet>
 #include <QStandardPaths>
+#include <QSettings>
 #include <QTextStream>
+#include <QThread>
 #include <QTimer>
 #include <QProcessEnvironment>
+#include <QtEndian>
+#include <cmath>
 
 #include "endurance_document.h"
 #include "current_session_backup.h"
@@ -199,8 +203,24 @@ qint64 readOwnedGamePid(const QString& path)
     QFile file(path);
     if(!file.open(QIODevice::ReadOnly | QIODevice::Text))
         return 0;
+    QByteArray bytes = file.readAll();
+    // alpha.29's x86 host used fwprintf on a binary stream and therefore
+    // emitted UTF-16LE without a BOM. Accept those journals during recovery as
+    // well as the ASCII protocol emitted by current hosts.
+    if(bytes.size() >= 2 && bytes.at(1) == '\0')
+    {
+        QByteArray ascii;
+        ascii.reserve((bytes.size() + 1) / 2);
+        for(int index = 0; index < bytes.size(); index += 2)
+        {
+            if(index + 1 >= bytes.size() || bytes.at(index + 1) != '\0')
+                return 0;
+            ascii.append(bytes.at(index));
+        }
+        bytes = ascii;
+    }
     bool ok = false;
-    const qint64 pid = QString::fromLatin1(file.readAll()).trimmed().toLongLong(&ok);
+    const qint64 pid = QString::fromLatin1(bytes).trimmed().toLongLong(&ok);
     return ok ? pid : 0;
 }
 
@@ -252,21 +272,39 @@ QString saveGenerationPath(const QString& runRoot, quint64 generation)
 
 bool removeIfOwned(const QString& path, const QString& expectedHash, QStringList* messages)
 {
-    if(!QFileInfo::exists(path))
-        return true;
-    const QString currentHash = fileSha256(path);
-    if(currentHash.compare(expectedHash, Qt::CaseInsensitive) != 0)
+    // A stopped runtime host can report completion a fraction before Windows
+    // releases the last image-section handle held by its game child. Keep the
+    // hash guard on every attempt, but tolerate that short teardown window.
+    constexpr int kRemovalAttempts = 11;
+    for(int attempt = 0; attempt < kRemovalAttempts; ++attempt)
     {
-        messages->append(QString("Retained changed temporary file: %1").arg(path));
-        return false;
+        if(!QFileInfo::exists(path))
+        {
+            if(attempt > 0)
+                messages->append(QString("Removed temporary file after %1 cleanup retries: %2")
+                                 .arg(attempt).arg(path));
+            return true;
+        }
+        const QString currentHash = fileSha256(path);
+        if(currentHash.compare(expectedHash, Qt::CaseInsensitive) != 0)
+        {
+            messages->append(QString("Retained changed temporary file: %1").arg(path));
+            return false;
+        }
+        if(QFile::remove(path))
+        {
+            messages->append(attempt == 0
+                ? QString("Removed temporary file: %1").arg(path)
+                : QString("Removed temporary file after %1 cleanup retries: %2")
+                    .arg(attempt).arg(path));
+            return true;
+        }
+        if(attempt + 1 < kRemovalAttempts)
+            QThread::msleep(100);
     }
-    if(!QFile::remove(path))
-    {
-        messages->append(QString("Could not remove temporary file: %1").arg(path));
-        return false;
-    }
-    messages->append(QString("Removed temporary file: %1").arg(path));
-    return true;
+    messages->append(QString("Could not remove temporary file after 1 second of hash-checked retries: %1")
+                     .arg(path));
+    return false;
 }
 
 bool restoreAutoexec(const QJsonObject& manifest, QStringList* messages)
@@ -334,6 +372,8 @@ bool cleanupManifest(const QJsonObject& manifest, QStringList* messages)
                             live.value("mprSha256").toString(), messages) && success;
     success = removeIfOwned(live.value("mobPath").toString(),
                             live.value("mobSha256").toString(), messages) && success;
+    success = removeIfOwned(live.value("grpPath").toString(),
+                            live.value("grpSha256").toString(), messages) && success;
     const QString recordedRunRoot = manifest.value("runRoot").toString();
     const QString runRoot = recordedRunRoot.isEmpty()
         ? QString() : QFileInfo(recordedRunRoot).absoluteFilePath();
@@ -557,6 +597,133 @@ QString CJmvMapTestLauncher::generationSavesPath(const QString& runRoot,
     return saveGenerationPath(runRoot, generation);
 }
 
+bool CJmvMapTestLauncher::validateExternalGraph(const QByteArray& bytes,
+                                                QString* error)
+{
+    if(bytes.size() < 8)
+    {
+        if(error) *error = "The external AI graph is too small to contain width and height.";
+        return false;
+    }
+    const uchar* raw = reinterpret_cast<const uchar*>(bytes.constData());
+    const quint32 width = qFromLittleEndian<quint32>(raw);
+    const quint32 height = qFromLittleEndian<quint32>(raw + 4);
+    if(width == 0 || height == 0 || width > 256 || height > 256)
+    {
+        if(error)
+            *error = QString("The external AI graph has invalid dimensions %1x%2.")
+                .arg(width).arg(height);
+        return false;
+    }
+    constexpr quint64 bytesPerCoordinate = 8u * (8u * 2u + 1u + 2u);
+    const quint64 expected = 8u + quint64(width) * quint64(height) * bytesPerCoordinate;
+    if(expected != quint64(bytes.size()))
+    {
+        if(error)
+            *error = QString("The external AI graph size is %1 bytes; %2x%3 requires exactly %4 bytes.")
+                .arg(bytes.size()).arg(width).arg(height).arg(expected);
+        return false;
+    }
+    return true;
+}
+
+bool CJmvMapTestLauncher::resolveMapGraphSource(
+    const QByteArray& primaryMobData,
+    const QFileInfo& sourceMpr,
+    const QString& logicalMprName,
+    const QStringList& mapDirectories,
+    SMapGraphSource* graph,
+    QString* error)
+{
+    if(!graph)
+    {
+        if(error) *error = "No graph-source result destination was provided.";
+        return false;
+    }
+    *graph = SMapGraphSource();
+
+    CMobDocument primaryMob;
+    CValidationReport report;
+    if(!primaryMob.loadBytes(primaryMobData, "test-run-primary.mob", &report))
+    {
+        if(error) *error = "The primary MOB could not be inspected for its AI graph:\n"
+            + report.toText();
+        return false;
+    }
+
+    QStringList candidates;
+    const QString sourceBase = sourceMpr.completeBaseName();
+    const QString logicalBase = QFileInfo(logicalMprName).completeBaseName();
+    const auto appendCandidate = [&candidates](const QString& directory,
+                                               const QString& baseName)
+    {
+        if(directory.isEmpty() || baseName.isEmpty())
+            return;
+        const QString found = findCaseInsensitiveFile(
+            QStringList() << directory, baseName + ".grp");
+        if(found.isEmpty())
+            return;
+        for(const QString& existing : candidates)
+            if(QFileInfo(existing).absoluteFilePath().compare(
+                   QFileInfo(found).absoluteFilePath(), Qt::CaseInsensitive) == 0)
+                return;
+        candidates.append(found);
+    };
+
+    // The open workspace overlays installed profile maps. Prefer the selected
+    // MPR's own basename, then its borrowed/logical map-table identity.
+    appendCandidate(sourceMpr.absolutePath(), sourceBase);
+    appendCandidate(sourceMpr.absolutePath(), logicalBase);
+    for(const QString& directory : mapDirectories)
+    {
+        appendCandidate(directory, logicalBase);
+        appendCandidate(directory, sourceBase);
+    }
+
+    graph->embedded = primaryMob.hasEmbeddedAiGraph();
+    if(graph->embedded)
+    {
+        if(!candidates.isEmpty())
+            graph->shadowedExternalPath = candidates.first();
+        return true;
+    }
+    if(candidates.isEmpty())
+    {
+        if(error)
+            *error = QString(
+                "The primary MOB has no embedded AI_GRAPH and the required external graph %1.grp could not be found beside the open MPR or in the active profile Maps directories.")
+                .arg(sourceBase.isEmpty() ? logicalBase : sourceBase);
+        return false;
+    }
+
+    graph->externalPath = candidates.first();
+    if(!readFile(graph->externalPath, &graph->externalData, error))
+        return false;
+    QString graphError;
+    if(!validateExternalGraph(graph->externalData, &graphError))
+    {
+        if(error)
+            *error = QString("The required external graph is invalid:\n%1\n\n%2")
+                .arg(QDir::toNativeSeparators(graph->externalPath), graphError);
+        return false;
+    }
+    graph->sha256 = sha256(graph->externalData);
+    return true;
+}
+
+qint64 CJmvMapTestLauncher::runtimeGameProcessId(bool usesRuntimeHost,
+                                                 const QString& gamePidPath,
+                                                 qint64 transportProcessId)
+{
+    return usesRuntimeHost ? readOwnedGamePid(gamePidPath) : transportProcessId;
+}
+
+qint64 CJmvMapTestLauncher::runtimeGameProcessId() const
+{
+    return runtimeGameProcessId(m_usesRuntimeHost, m_gamePidPath,
+                                m_process->processId());
+}
+
 QJsonObject CJmvMapTestLauncher::buildAuthoritativeResult(
     const QJsonObject& manifest, const QString& bridgeResult, int exitCode,
     int exitStatus, bool stopRequested, const QString& cleanupMessage)
@@ -701,6 +868,7 @@ QJsonObject CJmvMapTestLauncher::buildAuthoritativeResult(
     const QJsonObject live = manifest.value("liveFiles").toObject();
     checkRemoved(live.value("mprPath").toString());
     checkRemoved(live.value("mobPath").toString());
+    checkRemoved(live.value("grpPath").toString());
     checkRemoved(manifest.value("bridge").toObject().value("path").toString());
     checkRemoved(QDir(manifest.value("runRoot").toString()).filePath("generations"));
     if(cleanupMessage.contains("Could not", Qt::CaseInsensitive)
@@ -857,8 +1025,7 @@ bool CJmvMapTestLauncher::isHotReloadReady() const
     quint32 threadId = 0;
     if(file.open(QIODevice::ReadOnly | QIODevice::Text))
         threadId = file.readAll().trimmed().toULong(&ok);
-    const qint64 gamePid = m_usesRuntimeHost ? readOwnedGamePid(m_gamePidPath)
-                                             : m_process->processId();
+    const qint64 gamePid = runtimeGameProcessId();
     return ok && threadId != 0 && gamePid > 0
         && threadBelongsToProcess(threadId, quint32(gamePid));
 }
@@ -1049,11 +1216,13 @@ bool CJmvMapTestLauncher::prepareGodmodeBootstrap(
     const QStringList& mapDirectories, const QString& runRoot,
     const SMapSpawnPlan& spawn, double spawnZ, bool godmode,
     const QStringList& supplementalMobNames,
+    bool overrideWorldTime, double worldTimeHours,
     QJsonObject* manifest, QString* outputPath, QString* error)
 {
     if(outputPath)
         outputPath->clear();
-    if((!spawn.valid || !spawn.custom) && !godmode && supplementalMobNames.isEmpty())
+    if((!spawn.valid || !spawn.custom) && !godmode && supplementalMobNames.isEmpty()
+       && !overrideWorldTime)
         return true;
     if(!manifest || !outputPath || runRoot.isEmpty())
     {
@@ -1086,6 +1255,7 @@ bool CJmvMapTestLauncher::prepareGodmodeBootstrap(
     // Normal entrance starts already use the map table and must not be moved a
     // second time. Custom starts are grounded by requesting a zero offset.
     QString immediatePositionCommand;
+    QStringList immediateCommands;
     if(spawn.valid && spawn.custom)
     {
         immediatePositionCommand = QString("SetCPFast(GetLeader(), %1, %2, 0)")
@@ -1096,6 +1266,7 @@ bool CJmvMapTestLauncher::prepareGodmodeBootstrap(
         // delay as the guarded fallback for runtimes that register the leader
         // asynchronously.
         commands.append(immediatePositionCommand);
+        immediateCommands.append(immediatePositionCommand);
     }
     for(const QString& name : supplementalMobNames)
     {
@@ -1108,13 +1279,30 @@ bool CJmvMapTestLauncher::prepareGodmodeBootstrap(
         }
         commands.append(QString("AddMob(\"%1\")").arg(name));
     }
+    if(overrideWorldTime)
+    {
+        if(!qIsFinite(worldTimeHours))
+        {
+            if(error) *error = "The selected editor time of day is invalid.";
+            return false;
+        }
+        const double normalizedHours = std::fmod(std::fmod(worldTimeHours, 24.0) + 24.0, 24.0);
+        const QString runTime = QString("RunWorldTime(%1)")
+            .arg(normalizedHours, 0, 'f', 6);
+        // Apply before the autorun delay when the world clock is already
+        // available, then repeat after it as a deterministic fallback. Unlike
+        // FixWorldTime, RunWorldTime resumes normal clock progression.
+        immediateCommands.append(runTime);
+        commands.append(runTime);
+        worldTimeHours = normalizedHours;
+    }
     if(godmode)
         commands.append("GodMode(0,3)");
     QString bootstrappedScript;
     QString bootstrapError;
     if(!injectWorldScriptBootstrap(script, commands.join("\r\n"),
                                    &bootstrappedScript, &bootstrapError,
-                                   immediatePositionCommand))
+                                   immediateCommands.join("\r\n")))
     {
         if(error) *error = "Could not inject the JMV runtime commands into WorldScript: "
             + bootstrapError;
@@ -1140,6 +1328,8 @@ bool CJmvMapTestLauncher::prepareGodmodeBootstrap(
     bootstrap.insert("spawnY", spawn.position.y());
     bootstrap.insert("spawnZ", spawnZ);
     bootstrap.insert("godmode", godmode);
+    bootstrap.insert("overrideWorldTime", overrideWorldTime);
+    bootstrap.insert("worldTimeHours", worldTimeHours);
     bootstrap.insert("runtimeSpawnHeightOffset", 0.0);
     QJsonArray explicitMobs;
     for(const QString& name : supplementalMobNames)
@@ -1178,11 +1368,13 @@ bool CJmvMapTestLauncher::launch(const SJmvMapTestLaunchInput& input, QString* e
     m_sharedRunLogPath.clear();
     m_liveMprPath.clear();
     m_liveMobPath.clear();
+    m_liveGrpPath.clear();
     m_bridgeResultPath.clear();
     m_testSavesPath.clear();
     m_bridgeSha256.clear();
     m_liveMprSha256.clear();
     m_liveMobSha256.clear();
+    m_liveGrpSha256.clear();
     m_runtimeHostPath.clear();
     m_gamePidPath.clear();
     m_liveSavesPath.clear();
@@ -1224,7 +1416,8 @@ bool CJmvMapTestLauncher::launch(const SJmvMapTestLaunchInput& input, QString* e
     if(m_usesRuntimeHost)
         m_process->setArguments(QStringList() << m_gameExePath << m_bridgeLivePath
             << m_engineDirectory << m_gamePidPath
-            << QDir(m_runRoot).filePath("runtime-host.log"));
+            << QDir(m_runRoot).filePath("runtime-host.log")
+            << (m_baseProbe ? "base" : "jmv"));
     else
         m_process->setArguments(QStringList());
     m_process->setWorkingDirectory(m_engineDirectory);
@@ -1352,6 +1545,50 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
         if(error) *error = "The packaged x86 Endurance runtime host is missing.";
         return false;
     }
+    QString starterStoredSelection;
+    QString starterRegistryAddonPath;
+    QString selectedModConfig;
+    if(isJmv)
+    {
+        selectedModConfig = findCaseInsensitiveFile(
+            QStringList() << input.profile.modRoot, "config.reg");
+        if(selectedModConfig.isEmpty())
+        {
+            if(error) *error = "The selected JMV mod has no readable Starter config.reg.";
+            return false;
+        }
+        const QString starterRoot = QDir(input.profile.gameRoot).filePath("Starter");
+        QSettings starterConfig(QDir(starterRoot).filePath("starter.config"),
+                                QSettings::IniFormat);
+        starterStoredSelection = starterConfig.value("Settings/ModSel").toString();
+#ifdef Q_OS_WIN
+        QSettings starterRegistry(
+            "HKEY_CURRENT_USER\\Software\\Gipat.Ru\\EI_Starter\\Settings",
+            QSettings::NativeFormat);
+        starterRegistryAddonPath = starterRegistry.value("AddonPath").toString();
+#endif
+        const QString selectedModRoot = normalized(input.profile.modRoot);
+        const QString persistedModRoot = starterRegistryAddonPath.isEmpty()
+            ? QString() : normalized(starterRegistryAddonPath);
+        if(persistedModRoot.isEmpty()
+           || persistedModRoot.compare(selectedModRoot, Qt::CaseInsensitive) != 0)
+        {
+            if(error)
+            {
+                *error = QString(
+                    "Starter is not currently configured for the selected Endurance mod.\n\n"
+                    "Selected profile mod:\n%1\n\n"
+                    "Starter AddonPath:\n%2\n\n"
+                    "Select the intended mod in Starter, then retry Test Current Map. "
+                    "Endurance will not start with a different cached mod because that can mix incompatible resources.")
+                    .arg(QDir::toNativeSeparators(selectedModRoot),
+                         starterRegistryAddonPath.isEmpty()
+                             ? QString("<not configured>")
+                             : QDir::toNativeSeparators(persistedModRoot));
+            }
+            return false;
+        }
+    }
     if(isBase)
     {
         const QString liveDirectory = QDir(m_runRoot).filePath("live");
@@ -1368,7 +1605,17 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
         m_liveMprPath = QDir(profileMapsDirectory).filePath(m_temporaryMapName + ".mpr");
         m_liveMobPath = QDir(profileMapsDirectory).filePath(m_temporaryMapName + ".mob");
     }
-    if(QFileInfo::exists(m_liveMprPath) || QFileInfo::exists(m_liveMobPath))
+    SMapGraphSource graphSource;
+    if(!resolveMapGraphSource(input.mobData, input.sourceMpr,
+                              input.mapEntry.mprName,
+                              input.profile.mapDirectories,
+                              &graphSource, error))
+        return false;
+    if(graphSource.usesExternalGraph())
+        m_liveGrpPath = QFileInfo(m_liveMprPath).dir().filePath(
+            m_temporaryMapName + ".grp");
+    if(QFileInfo::exists(m_liveMprPath) || QFileInfo::exists(m_liveMobPath)
+       || (!m_liveGrpPath.isEmpty() && QFileInfo::exists(m_liveGrpPath)))
     {
         if(error) *error = "The randomly generated Endurance test-map name already exists; retry the launch.";
         return false;
@@ -1383,11 +1630,17 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
     // staging point can therefore be recovered without guessing ownership.
     m_liveMprSha256 = sha256(input.mprData);
     m_liveMobSha256 = sha256(input.mobData);
+    m_liveGrpSha256 = graphSource.sha256;
     QJsonObject liveJournal;
     liveJournal.insert("mprPath", m_liveMprPath);
     liveJournal.insert("mprSha256", m_liveMprSha256);
     liveJournal.insert("mobPath", m_liveMobPath);
     liveJournal.insert("mobSha256", m_liveMobSha256);
+    if(graphSource.usesExternalGraph())
+    {
+        liveJournal.insert("grpPath", m_liveGrpPath);
+        liveJournal.insert("grpSha256", m_liveGrpSha256);
+    }
     QJsonObject saveJournal;
     saveJournal.insert("mode", "generation-scoped-runtime-path-redirection");
     saveJournal.insert("livePath", m_liveSavesPath);
@@ -1408,6 +1661,17 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
     m_manifest.insert("temporaryMapName", m_temporaryMapName);
     m_manifest.insert("gameExePath", m_gameExePath);
     m_manifest.insert("gameExeSha256", fileSha256(m_gameExePath));
+    if(isJmv)
+    {
+        QJsonObject starterSelection;
+        starterSelection.insert("policy", "owned-process-addon-path-override");
+        starterSelection.insert("targetModRoot", QDir::cleanPath(input.profile.modRoot));
+        starterSelection.insert("targetConfig", selectedModConfig);
+        starterSelection.insert("persistedModSelection", starterStoredSelection);
+        starterSelection.insert("persistedAddonPath", starterRegistryAddonPath);
+        starterSelection.insert("persistentConfigurationModified", false);
+        m_manifest.insert("starterModSelection", starterSelection);
+    }
     m_manifest.insert("liveFiles", liveJournal);
     m_manifest.insert("isolatedSaves", saveJournal);
     if(!writeManifest("staging", error))
@@ -1426,13 +1690,7 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
 
     const QString x = QString::number(input.spawn.position.x(), 'f', 3);
     const QString y = QString::number(input.spawn.position.y(), 'f', 3);
-    CMobDocument sourceMob;
     CValidationReport report;
-    if(!sourceMob.loadBytes(input.mobData, "test-run-source.mob", &report))
-    {
-        if(error) *error = "The in-memory MOB candidate failed validation:\n" + report.toText();
-        return false;
-    }
     const QByteArray stagedMob = input.mobData;
     if(isBase && input.baseProbeLevel == 3)
     {
@@ -1456,8 +1714,14 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
     }
     const QString stagedMprPath = QDir(payloadDirectory).filePath(m_temporaryMapName + ".mpr");
     const QString stagedMobPath = QDir(payloadDirectory).filePath(m_temporaryMapName + ".mob");
+    const QString stagedGrpPath = graphSource.usesExternalGraph()
+        ? QDir(payloadDirectory).filePath(m_temporaryMapName + ".grp")
+        : QString();
     if(!atomicWrite(stagedMprPath, input.mprData, error) ||
        !atomicWrite(stagedMobPath, stagedMob, error))
+        return false;
+    if(graphSource.usesExternalGraph()
+       && !atomicWrite(stagedGrpPath, graphSource.externalData, error))
         return false;
     CMprDocument mprDocument;
     if(!mprDocument.load(QFileInfo(stagedMprPath), &report))
@@ -1517,13 +1781,27 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
     liveFiles.insert("mprSha256", m_liveMprSha256);
     liveFiles.insert("mobPath", m_liveMobPath);
     liveFiles.insert("mobSha256", m_liveMobSha256);
+    if(graphSource.usesExternalGraph())
+    {
+        liveFiles.insert("grpPath", m_liveGrpPath);
+        liveFiles.insert("grpSha256", m_liveGrpSha256);
+    }
     m_manifest.insert("liveFiles", liveFiles);
     if(!atomicWrite(m_liveMprPath, input.mprData, error) ||
        !atomicWrite(m_liveMobPath, stagedMob, error))
         return false;
+    if(graphSource.usesExternalGraph()
+       && !atomicWrite(m_liveGrpPath, graphSource.externalData, error))
+        return false;
     if(fileSha256(m_liveMprPath) != m_liveMprSha256 || fileSha256(m_liveMobPath) != m_liveMobSha256)
     {
         if(error) *error = "A temporary live map copy failed its post-write SHA-256 check.";
+        return false;
+    }
+    if(graphSource.usesExternalGraph()
+       && fileSha256(m_liveGrpPath).compare(m_liveGrpSha256, Qt::CaseInsensitive) != 0)
+    {
+        if(error) *error = "The temporary live external AI graph failed its post-write SHA-256 check.";
         return false;
     }
 
@@ -1541,6 +1819,12 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
                                 fileSha256(input.sourceMpr.absoluteFilePath()));
     request.sourceSha256.insert(input.sourceMob.absoluteFilePath(),
                                 fileSha256(input.sourceMob.absoluteFilePath()));
+    if(graphSource.usesExternalGraph())
+    {
+        request.sourceSha256.insert(graphSource.externalPath, graphSource.sha256);
+        request.stagedSha256.insert(QFileInfo(stagedGrpPath).fileName(),
+                                    graphSource.sha256);
+    }
     for(int index = 0; index < input.supplementalMobs.size(); ++index)
     {
         const SJmvSupplementalMobInput& supplemental = input.supplementalMobs.at(index);
@@ -1565,6 +1849,8 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
     request.sessionSettings.insert("requestedSpawnY", input.spawn.requestedPosition.y());
     request.sessionSettings.insert("spawnAdjusted", input.spawn.adjusted);
     request.sessionSettings.insert("godmode", input.godmode);
+    request.sessionSettings.insert("overrideWorldTime", input.overrideWorldTime);
+    request.sessionSettings.insert("worldTimeHours", input.worldTimeHours);
     request.sessionSettings.insert("borrowedMapIdentity", input.borrowedMapIdentity);
     request.sessionSettings.insert("baseProbeLevel", input.baseProbeLevel);
     request.sessionSettings.insert("clearance", input.spawn.clearance);
@@ -1582,6 +1868,18 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
     for(auto it = requestManifest.begin(); it != requestManifest.end(); ++it)
         m_manifest.insert(it.key(), it.value());
     m_manifest.insert("liveFiles", liveFiles);
+    QJsonObject graphManifest;
+    graphManifest.insert("source", graphSource.embedded ? "embedded-mob" : "external-grp");
+    if(graphSource.usesExternalGraph())
+    {
+        graphManifest.insert("sourcePath", graphSource.externalPath);
+        graphManifest.insert("sourceSha256", graphSource.sha256);
+        graphManifest.insert("payloadPath", stagedGrpPath);
+        graphManifest.insert("livePath", m_liveGrpPath);
+    }
+    if(!graphSource.shadowedExternalPath.isEmpty())
+        graphManifest.insert("shadowedExternalPath", graphSource.shadowedExternalPath);
+    m_manifest.insert("aiGraph", graphManifest);
     if(!stagedSupplementalPaths.isEmpty())
     {
         QJsonArray supplemental;
@@ -1595,16 +1893,31 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
         supplementalMobNames.append(QFileInfo(path).fileName());
     if(isJmv && !prepareGodmodeBootstrap(input.profile.mapDirectories, m_runRoot,
                                          input.spawn, input.spawnZ, input.godmode,
-                                         supplementalMobNames, &m_manifest,
+                                         supplementalMobNames,
+                                         input.overrideWorldTime, input.worldTimeHours,
+                                         &m_manifest,
                                          &godmodeBootstrapPath, error))
         return false;
     if(!godmodeBootstrapPath.isEmpty())
         m_manifest.insert("godmodeBootstrapPath", godmodeBootstrapPath);
     appendRunLog(QString("Prepared generation-scoped isolated saves generation=0 path=%1; live saves remain untouched")
                  .arg(m_testSavesPath));
+    if(isJmv)
+        appendRunLog(QString("Starter mod target=%1 persistedSelection=%2 persistedAddonPath=%3 policy=owned-process-override persistentModified=false")
+                     .arg(QDir::cleanPath(input.profile.modRoot), starterStoredSelection,
+                          starterRegistryAddonPath));
     appendRunLog(QString("Staged temporary map=%1 exit=%2 spawn=(%3,%4) clearance=%5")
                  .arg(m_temporaryMapName).arg(input.spawn.exitId)
                  .arg(x, y).arg(input.spawn.clearance, 0, 'f', 3));
+    if(graphSource.usesExternalGraph())
+        appendRunLog(QString("Staged external AI graph source=%1 live=%2 sha256=%3")
+                     .arg(QDir::toNativeSeparators(graphSource.externalPath),
+                          QDir::toNativeSeparators(m_liveGrpPath), graphSource.sha256));
+    else if(!graphSource.shadowedExternalPath.isEmpty())
+        appendRunLog(QString("Using embedded AI_GRAPH; external graph is shadowed: %1")
+                     .arg(QDir::toNativeSeparators(graphSource.shadowedExternalPath)));
+    else
+        appendRunLog("Using embedded AI_GRAPH from the primary MOB");
     return writeManifest("staged", error);
 }
 
@@ -1644,6 +1957,13 @@ bool CJmvMapTestLauncher::hotReload(const SJmvMapTestLaunchInput& input,
         return false;
     }
 
+    SMapGraphSource graphSource;
+    if(!resolveMapGraphSource(input.mobData, input.sourceMpr,
+                              input.mapEntry.mprName,
+                              input.profile.mapDirectories,
+                              &graphSource, error))
+        return false;
+
     const quint64 sequence = m_hotReloadSequence + 1;
     const quint64 generation = m_saveGeneration + 1;
     const QString reloadRoot = QDir(m_runRoot).filePath(
@@ -1651,6 +1971,8 @@ bool CJmvMapTestLauncher::hotReload(const SJmvMapTestLaunchInput& input,
     const QString generationSavePath = QDir(reloadRoot).filePath("saves");
     const QString payloadMpr = QDir(reloadRoot).filePath("map.mpr");
     const QString payloadMob = QDir(reloadRoot).filePath("map.mob");
+    const QString payloadGrp = graphSource.usesExternalGraph()
+        ? QDir(reloadRoot).filePath("map.grp") : QString();
     QJsonObject isolatedSaves = m_manifest.value("isolatedSaves").toObject();
     QJsonArray saveGenerations = isolatedSaves.value("generations").toArray();
     QJsonObject stagedGeneration;
@@ -1682,6 +2004,15 @@ bool CJmvMapTestLauncher::hotReload(const SJmvMapTestLaunchInput& input,
        || !atomicWrite(payloadMpr, input.mprData, error)
        || !atomicWrite(payloadMob, input.mobData, error))
         return false;
+    if(graphSource.usesExternalGraph()
+       && !atomicWrite(payloadGrp, graphSource.externalData, error))
+        return false;
+    if(graphSource.usesExternalGraph()
+       && fileSha256(payloadGrp).compare(graphSource.sha256, Qt::CaseInsensitive) != 0)
+    {
+        if(error) *error = "The hot-reload external AI graph failed its post-write SHA-256 check.";
+        return false;
+    }
 
     CValidationReport report;
     CMprDocument mprDocument;
@@ -1734,6 +2065,7 @@ bool CJmvMapTestLauncher::hotReload(const SJmvMapTestLaunchInput& input,
     if(!prepareGodmodeBootstrap(input.profile.mapDirectories, reloadRoot,
                                 input.spawn, input.spawnZ, input.godmode,
                                 desiredSupplementalNames,
+                                input.overrideWorldTime, input.worldTimeHours,
                                 &reloadManifest, &bootstrapPath, error))
         return false;
 
@@ -1837,8 +2169,10 @@ bool CJmvMapTestLauncher::hotReload(const SJmvMapTestLaunchInput& input,
     if(threadFile.open(QIODevice::ReadOnly | QIODevice::Text))
         threadId = threadFile.readAll().trimmed().toULong(&threadOk);
 #ifdef Q_OS_WIN
+    const qint64 gamePid = runtimeGameProcessId();
     const bool ownsThread = threadOk && threadId != 0
-        && threadBelongsToProcess(threadId, quint32(m_process->processId()));
+        && gamePid > 0
+        && threadBelongsToProcess(threadId, quint32(gamePid));
     constexpr UINT kHotReloadMessage = WM_APP + 0x45E;
     if(!ownsThread || !PostThreadMessageW(DWORD(threadId), kHotReloadMessage, 0, 0))
     {
@@ -1865,6 +2199,18 @@ bool CJmvMapTestLauncher::hotReload(const SJmvMapTestLaunchInput& input,
     for(const QString& name : desiredSupplementalNames)
         supplementalAudit.append(stableSupplemental.filePath(name));
     audit.insert("supplementalMobPaths", supplementalAudit);
+    QJsonObject graphAudit;
+    graphAudit.insert("source", graphSource.embedded ? "embedded-mob" : "external-grp");
+    if(graphSource.usesExternalGraph())
+    {
+        graphAudit.insert("sourcePath", graphSource.externalPath);
+        graphAudit.insert("sourceSha256", graphSource.sha256);
+        graphAudit.insert("stagedPath", payloadGrp);
+        graphAudit.insert("stagedSha256", fileSha256(payloadGrp));
+    }
+    if(!graphSource.shadowedExternalPath.isEmpty())
+        graphAudit.insert("shadowedExternalPath", graphSource.shadowedExternalPath);
+    audit.insert("aiGraph", graphAudit);
     audit.insert("auditPath", auditPath);
     audit.insert("queuedUtc", QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
     reloads.append(audit);
@@ -1876,6 +2222,18 @@ bool CJmvMapTestLauncher::hotReload(const SJmvMapTestLaunchInput& input,
     writeManifest("running");
     appendRunLog(QString("Queued JMV hot reload sequence=%1 generation=%2 zone=%3 exit=%4")
                  .arg(sequence).arg(generation).arg(request.zoneId).arg(request.entranceId));
+    if(graphSource.usesExternalGraph())
+        appendRunLog(QString("Hot reload generation=%1 staged external AI graph source=%2 sha256=%3")
+                     .arg(generation)
+                     .arg(QDir::toNativeSeparators(graphSource.externalPath),
+                          graphSource.sha256));
+    else if(!graphSource.shadowedExternalPath.isEmpty())
+        appendRunLog(QString("Hot reload generation=%1 uses embedded AI_GRAPH; external graph is shadowed: %2")
+                     .arg(generation)
+                     .arg(QDir::toNativeSeparators(graphSource.shadowedExternalPath)));
+    else
+        appendRunLog(QString("Hot reload generation=%1 uses embedded AI_GRAPH from the primary MOB")
+                     .arg(generation));
     emit hotReloadQueued(sequence, request.zoneId);
     return true;
 }
@@ -1979,8 +2337,7 @@ void CJmvMapTestLauncher::focusGameWindow(bool maximize)
 #ifdef Q_OS_WIN
     if(!isRunning())
         return;
-    const qint64 ownedPid = m_usesRuntimeHost ? readOwnedGamePid(m_gamePidPath)
-                                             : m_process->processId();
+    const qint64 ownedPid = runtimeGameProcessId();
     if(ownedPid <= 0)
     {
         appendRunLog("Owned game PID is not available for focus yet");
@@ -2074,8 +2431,12 @@ QString CJmvMapTestLauncher::recoverInterruptedRuns(bool* pending)
         const qint64 recordedPid = qint64(expectedProcess.value("pid").toDouble());
         const bool incompleteIdentity = expectedProcess.value("imagePath").toString().isEmpty()
             || expectedProcess.value("creationTime100ns").toString().isEmpty();
-        if((incompleteIdentity && recordedPid > 0 && processExists(recordedPid))
-           || anotherGameIsRunning())
+        // An arbitrary game.exe is not evidence that it belongs to this
+        // journal. Only the journal's still-live recorded PID may defer legacy
+        // cleanup; complete journals already require path + creation time +
+        // optional hash above. This prevents a normal unrelated game session
+        // from blocking Test Current Map with a false ownership claim.
+        if(incompleteIdentity && recordedPid > 0 && processExists(recordedPid))
         {
             deferred = true;
             continue;
@@ -2163,9 +2524,11 @@ bool CJmvMapTestLauncher::hasActiveInterruptedRun(QString* description)
         const bool completeIdentity = !expectedProcess.value("imagePath").toString().isEmpty()
             && !expectedProcess.value("creationTime100ns").toString().isEmpty();
         const bool verified = completeIdentity && processIdentityMatches(expectedProcess);
-        const bool conservativePending = (!completeIdentity && recordedPid > 0
-                                          && processExists(recordedPid))
-            || (expectedProcess.isEmpty() && anotherGameIsRunning());
+        // A process found only by the filename game.exe is not owned by this
+        // journal. Legacy recovery may wait for its recorded PID, while modern
+        // journals require the complete guarded process identity above.
+        const bool conservativePending = !completeIdentity && recordedPid > 0
+            && processExists(recordedPid);
         if(!verified && !conservativePending)
             continue;
         if(description)

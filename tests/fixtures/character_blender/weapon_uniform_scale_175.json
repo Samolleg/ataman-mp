@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "operations": [
+    {
+      "type": "mesh_scale",
+      "object": "weapon",
+      "factors": [1.75, 1.75, 1.75],
+      "pivot": [0.0, 0.0, 0.0]
+    }
+  ]
+}

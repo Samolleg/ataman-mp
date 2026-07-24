@@ -1,4 +1,5 @@
 #include <QFileInfo>
+#include <QDir>
 #include <QRandomGenerator>
 #include <QSaveFile>
 #include <QMessageBox>
@@ -14,6 +15,7 @@
 #include "backup_manager.h"
 #include "staged_save_validator.h"
 #include "log.h"
+#include "mpr_document.h"
 
 CLandscape* CLandscape::m_pLand = nullptr;
 
@@ -249,21 +251,61 @@ bool CLandscape::saveMapAs(const QFileInfo& path, const SaveProgress& progress)
 {
     // TODO: check if source texture has correct textureSize and tileSize with map header
 
-    //QString filePath = path.filePath();
-    //QFile file(filePath);
-    QByteArray data;
-    if(progress) progress("Serializing the MPR candidate...", 0, 4);
-    QString candidateError;
-    if(progress) progress("Freshly validating the staged MPR...", 1, 4);
-    if(!buildValidatedCandidate(path, &data, &candidateError))
+    if(m_bDirty)
     {
-        ei::log(eLogFatal, QString("Refusing MPR save because staged validation failed path:%1 error:%2")
-            .arg(path.absoluteFilePath(), candidateError));
+        ei::log(eLogFatal,
+            QString("Refusing changed MPR save through the legacy rebuilding serializer path:%1")
+                .arg(path.absoluteFilePath()));
         QMessageBox::critical(nullptr, "Endurance safe save",
-            QString("The staged MPR failed fresh validation, so the destination was not replaced.\n\n%1")
-                .arg(candidateError));
+            "Changed landscape saving remains disabled while the lossless MPR/SEC edit path is "
+            "being validated. The destination was not created or replaced.");
         return false;
     }
+    const QByteArray data = m_originalMprData;
+    if(data.isEmpty())
+    {
+        QMessageBox::critical(nullptr, "Endurance safe save",
+            "The original MPR bytes are unavailable. The destination was not created or replaced.");
+        return false;
+    }
+
+    const QString sourcePath = QDir::cleanPath(m_filePath.absoluteFilePath());
+    const QString destinationPath = QDir::cleanPath(path.absoluteFilePath());
+    if(QString::compare(sourcePath, destinationPath, Qt::CaseInsensitive) == 0)
+    {
+        const SExistingFileComparison comparison = compareExistingFile(path, data);
+        if(comparison.exists && comparison.readable && comparison.equal)
+        {
+            ei::log(eLogInfo, QString("Unchanged MPR save is a no-op; source bytes and timestamp preserved:%1")
+                .arg(destinationPath));
+            return true;
+        }
+        if(comparison.exists)
+        {
+            const QString detail = comparison.readable
+                ? QString("The loaded MPR changed on disk after it was opened.")
+                : QString("The loaded MPR could not be read: %1").arg(comparison.error);
+            ei::log(eLogFatal, QString("Refusing unchanged MPR overwrite:%1 error:%2")
+                .arg(destinationPath, detail));
+            QMessageBox::critical(nullptr, "Endurance safe save",
+                detail + "\n\nEndurance did not overwrite the file. Reopen it before saving.");
+            return false;
+        }
+    }
+
+    if(progress) progress("Freshly validating the staged MPR...", 1, 4);
+    const SStagedSaveValidation validation = validateStagedSave(data, path);
+    if(!validation.success)
+    {
+        ei::log(eLogFatal, QString("Refusing MPR save because staged validation failed path:%1 error:%2")
+            .arg(path.absoluteFilePath(), validation.error));
+        QMessageBox::critical(nullptr, "Endurance safe save",
+            QString("The staged MPR failed fresh validation, so the destination was not replaced.\n\n%1")
+                .arg(validation.error));
+        return false;
+    }
+    ei::log(eLogInfo, QString("Staged MPR validation passed path:%1 size:%2 sha256:%3")
+        .arg(path.absoluteFilePath()).arg(validation.size).arg(validation.sha256));
 
     if(progress) progress("Creating the pre-save backup...", 2, 4);
     if(path.exists())
@@ -292,31 +334,6 @@ bool CLandscape::saveMapAs(const QFileInfo& path, const SaveProgress& progress)
     m_originalMprData = data;
     m_bDirty = false;
     if(progress) progress("MPR save complete.", 4, 4);
-    return true;
-}
-
-bool CLandscape::buildValidatedCandidate(const QFileInfo& validationTarget,
-                                         QByteArray* data, QString* error)
-{
-    if(!data)
-        return false;
-    if(!m_bDirty && !m_originalMprData.isEmpty())
-        *data = m_originalMprData;
-    else
-    {
-        CResFile mprFile(m_originalMprData);
-        serializeMpr(m_innerMapName, mprFile);
-        *data = mprFile.generateResData();
-    }
-    const SStagedSaveValidation validation = validateStagedSave(*data, validationTarget);
-    if(!validation.success)
-    {
-        if(error) *error = validation.error;
-        data->clear();
-        return false;
-    }
-    ei::log(eLogInfo, QString("Staged MPR validation passed path:%1 size:%2 sha256:%3")
-        .arg(validationTarget.absoluteFilePath()).arg(validation.size).arg(validation.sha256));
     return true;
 }
 
@@ -364,7 +381,7 @@ void CLandscape::drawWater(QOpenGLShaderProgram *program, const CViewFrustum* fr
         }
 }
 
-bool CLandscape::projectPt(QVector3D& point)
+bool CLandscape::projectPt(QVector3D& point, bool land)
 {
     int xIndex = int(point.x()/32.0f);
     int yIndex = int(point.y()/32.0f);
@@ -378,7 +395,7 @@ bool CLandscape::projectPt(QVector3D& point)
         return false;
     }
     //Q_ASSERT(yIndex < m_aSector.size() && xIndex < m_aSector.first().size());
-    return m_aSector[yIndex][xIndex]->projectPt(point);
+    return m_aSector[yIndex][xIndex]->projectPt(point, land);
 }
 
 bool CLandscape::projectPt(QVector<QVector3D>& aPoint)
@@ -472,6 +489,45 @@ void CLandscape::setTile(const QMap<STileLocation, STileInfo>& arrTileInfo)
 void CLandscape::updateSectorDrawData(int xSec, int ySec)
 {
     m_aSector[ySec][xSec]->updateDrawData();
+}
+
+void CLandscape::drawTileGrid(QOpenGLShaderProgram* program)
+{
+    for(auto& row : m_aSector)
+        for(CSector* sector : row)
+            sector->drawTileGrid(program);
+}
+
+bool CLandscape::previewCanonicalSector(int xSec, int ySec, const QByteArray& payload)
+{
+    if(ySec < 0 || ySec >= m_aSector.size() || xSec < 0
+        || xSec >= m_aSector.at(ySec).size() || !m_aSector.at(ySec).at(xSec))
+        return false;
+    return m_aSector[ySec][xSec]->previewCanonicalPayload(payload);
+}
+
+bool CLandscape::previewCanonicalTile(int globalX, int globalY, bool land,
+                                      quint16 packedTile, bool updateSector)
+{
+    if(globalX < 0 || globalY < 0)
+        return false;
+    const int xSec = globalX / 16;
+    const int ySec = globalY / 16;
+    if(ySec >= m_aSector.size() || xSec >= m_aSector.at(ySec).size()
+        || !m_aSector.at(ySec).at(xSec))
+        return false;
+    QVector<QVector<CTile>>& tiles = land
+        ? m_aSector[ySec][xSec]->arrTileEdit()
+        : m_aSector[ySec][xSec]->arrWaterEdit();
+    if(tiles.isEmpty())
+        return false;
+    const int row = globalY % 16;
+    const int col = globalX % 16;
+    const SMprPackedTile decoded = SMprPackedTile::decode(packedTile);
+    tiles[row][col].setTile(decoded.atlasSlot(), decoded.rotation);
+    if(updateSector)
+        m_aSector[ySec][xSec]->updateDrawData();
+    return true;
 }
 
 void CLandscape::projectPositions(QList<CNode*>& aNode)

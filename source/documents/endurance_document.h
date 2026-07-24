@@ -185,12 +185,25 @@ private:
 class CMobDocument
 {
 public:
+    struct SLeverConversionValues
+    {
+        quint32 openType = 1;
+        quint32 keyId = 0;
+        quint32 handsSkill = 0;
+        quint8 currentState = 0;
+        quint8 totalStates = 2;
+        bool cycled = false;
+        bool door = false;
+        bool recalculateGraph = false;
+    };
+
     bool load(const QFileInfo& file, CValidationReport* report = nullptr);
     bool loadBytes(const QByteArray& bytes, const QString& sourceName,
                    CValidationReport* report = nullptr);
     QByteArray serialize() const { return m_originalBytes; }
     const QByteArray& originalBytes() const { return m_originalBytes; }
     const QVector<SMobSection>& sections() const { return m_sections; }
+    bool hasEmbeddedAiGraph() const;
     const QVector<SMobObjectSnapshot>& objects() const { return m_objects; }
     const QVector<SMobIdRangeSnapshot>& idRanges() const { return m_idRanges; }
     bool isQuestMob() const { return m_questMob; }
@@ -220,6 +233,11 @@ public:
     bool objectSubtreeBytes(const QString& objectPath,
                             const QByteArray& expectedSubtreeSha256,
                             QByteArray* output) const;
+    static bool convertWorldObjectSubtreeToLever(
+        const QByteArray& worldObjectSubtree,
+        const SLeverConversionValues& values,
+        QByteArray* leverSubtree,
+        CValidationReport* report = nullptr);
     bool reconcileLogicPointStructure(const CMobDocument& cleanProjection,
                                       const CMobDocument& editedProjection,
                                       QByteArray* output,
@@ -247,16 +265,6 @@ private:
     bool m_questMob = false;
 };
 
-class CMprDocument
-{
-public:
-    bool load(const QFileInfo& file, CValidationReport* report = nullptr);
-    QByteArray serialize() const { return m_originalBytes; }
-    const QByteArray& originalBytes() const { return m_originalBytes; }
-    bool isDirty() const { return false; }
-
-private:
-    QByteArray m_originalBytes;
-};
+#include "mpr_document.h"
 
 #endif

@@ -17,6 +17,7 @@ may record hashes and structural summaries but not redistribute game data.
 | Material suffix exact; incompatibility fails closed | JMV | resolver tests and corpus | bz8k 1000292348; bz16h 382 | Verified provider; visible runtime diagnostic control |
 | Hair hidden by helmet; quick items invisible | Base/JMV | focused provider tests | helmet toggle; quick→equipped move | Verified renderer/provider |
 | Base one weapon; JMV first pair/layouts | Base/JMV | provider tests | ordinary, 1H+shield, dual 1H, 2H | Verified renderer/provider |
+| Standalone item, family, and hand geometry are independent | JMV | clean nested FIG replacements plus controlled game screenshots | `InitWeapons.res/initwedg8weapon.fig`; `unhuma.mod/rh3.dagger08`; negative `lh3.dagger08` control | Verified JMV male runtime control; other families/hands require their own control |
 | TitanGrip requires StrongMan ownership | JMV | JMV Lua branch analysis + safe fallback | zone17 47533 | Ownership interpretation supported; parser/render layouts deferred |
 | Attachment channel inherited once | Base/JMV | hierarchy tests + viewer | zon3obr 233/234 shield across frames | Verified renderer; runtime control retained |
 | ADB standing IDLE and provider masks | Base/JMV | animation parser/provider tests | unarmed/1H/ranged, JMV 2H | Verified renderer/provider |
@@ -81,6 +82,29 @@ to preserve embedded creature data and diagnose missing/incompatible members.
 - Renderer behavior alone proves engine truth: rejected as methodology; keep
   renderer, corpus, ei_figer, binary routine, and controlled game comparisons
   distinct in reports.
+- Inventory thumbnail and equipped weapon share one FIG: rejected by the
+  `initwedg8weapon.fig` thumbnail-only edit and the separate held
+  `unhuma.mod/rh3.dagger08` runtime edit.
+- Editing all eight complexion extremes propagates to every character or hand:
+  rejected. FIG8 extremes cover interpolation within one FIG member only;
+  family (`unhuma`/`unhufe`) and hand (`rh*`/`lh*`) remain separate assets.
+
+## Equipped dagger hand-resolution control (2026-07-22)
+
+- Original copied/live-before-test `unhuma.res`: SHA-256
+  `E8430155D0AA96558B75BEDA8B66F7360C4BEAD7685D9D855FFBCEDCA88800CE`.
+- Serrated candidate: SHA-256
+  `44C3B90030D5DE6BEB86B0CEE6ECF9510FE729A8C825D86056B532D426CD9465`.
+- Only outer `unhuma.mod` and nested `unhuma.mod/rh3.dagger08` changed among
+  10,389 recursive members. The 5,360-byte FIG retained 36 vertices, 68
+  triangles, UVs, and renderer-visible corner normals. Three X coordinates per
+  extreme changed across all eight extremes (24 stored vertex scalars; maximum
+  absolute delta `0.009000003337860107`).
+- In the controlled male dual-wield inventory view, the right/main-hand bone
+  dagger displayed the coarse serration and the left/off-hand weapon did not.
+  This confirms the hand-specific member selection. No female runtime claim was
+  made; a staged `unhufe` experiment was stopped before installation because it
+  was unnecessary to resolve this control.
 
 ## Round-trip plan
 

@@ -189,6 +189,42 @@ CSelectionCommand::CSelectionCommand(CView* pView, const QList<CNode*>& before,
     setText(text);
 }
 
+CConvertWorldObjectToLeverCommand::CConvertWorldObjectToLeverCommand(
+    CView* view, CMob* mob, CNode* worldObject, CNode* lever, QUndoCommand* parent)
+    : QUndoCommand(parent), m_view(view), m_mob(mob),
+      m_worldObject(worldObject), m_lever(lever),
+      m_index(mob && worldObject ? mob->nodes().indexOf(worldObject) : -1),
+      m_selected(worldObject && worldObject->nodeState() == ENodeState::eSelect)
+{
+    setText(QString("Convert world object ID %1 to lever")
+            .arg(worldObject ? worldObject->mapId() : 0));
+}
+
+void CConvertWorldObjectToLeverCommand::apply(CNode* from, CNode* to)
+{
+    if(!m_view || !m_mob || !from || !to || !m_mob->replaceNode(from, to, m_index))
+    {
+        ei::log(eLogWarning, "World-object/lever replacement could not be applied");
+        return;
+    }
+    from->setState(ENodeState::eDraw);
+    to->setState(m_selected ? ENodeState::eSelect : ENodeState::eDraw);
+    m_view->collectObjectTreeData();
+    m_view->viewParameters();
+    m_view->setDurty(m_mob);
+    m_view->update();
+}
+
+void CConvertWorldObjectToLeverCommand::undo()
+{
+    apply(m_lever, m_worldObject);
+}
+
+void CConvertWorldObjectToLeverCommand::redo()
+{
+    apply(m_worldObject, m_lever);
+}
+
 void CSelectionCommand::undo()
 {
     if(m_pView)

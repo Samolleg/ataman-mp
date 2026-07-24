@@ -1,8 +1,14 @@
 #include <QtTest>
+#include <QCryptographicHash>
+#include <QSet>
 #include <QTemporaryFile>
 #include <QTemporaryDir>
 
 #include "endurance_document.h"
+#include "landscape_edit_policy.h"
+#include "operation_history_policy.h"
+#include "terrain_edit_model.h"
+#include "terrain_atlas_analyzer.h"
 #include "staged_save_validator.h"
 
 namespace {
@@ -106,6 +112,142 @@ QByteArray emptyMpr()
     return bytes;
 }
 
+QByteArray syntheticMp()
+{
+    QByteArray bytes;
+    QDataStream stream(&bytes, QIODevice::WriteOnly);
+    stream.setByteOrder(QDataStream::LittleEndian);
+    stream.setFloatingPointPrecision(QDataStream::SinglePrecision);
+    stream << quint32(0xCE4AF672) << float(100.0f)
+           << quint32(1) << quint32(1)
+           << quint32(2) << quint32(512)
+           << quint32(3) << quint32(64)
+           << quint16(2) << quint32(0);
+    for(int material = 0; material < 2; ++material)
+    {
+        stream << qint32(3)
+               << float(0.2f + material * 0.1f) << float(0.3f) << float(0.6f)
+               << float(0.7f) << float(0.0f) << float(0.5f)
+               << float(0.0f) << float(0.0f) << float(0.0f) << float(0.0f);
+    }
+    stream << qint32(1) << qint32(2) << qint32(2);
+    return bytes;
+}
+
+QByteArray syntheticOverlaySector()
+{
+    QByteArray bytes;
+    QDataStream stream(&bytes, QIODevice::WriteOnly);
+    stream.setByteOrder(QDataStream::LittleEndian);
+    stream << quint32(0xCF4BF774) << quint8(3);
+    bytes.append(QByteArray(33 * 33 * 8 * 2, '\0'));
+    bytes.append(QByteArray(16 * 16 * 2, '\0'));
+    QDataStream overlayTiles(&bytes, QIODevice::Append);
+    overlayTiles.setByteOrder(QDataStream::LittleEndian);
+    for(int tile = 0; tile < 16 * 16; ++tile)
+        overlayTiles << quint16((tile % 3) == 0 ? 0xFFFF : 0);
+    QDataStream materials(&bytes, QIODevice::Append);
+    materials.setByteOrder(QDataStream::LittleEndian);
+    for(int tile = 0; tile < 16 * 16; ++tile)
+        materials << qint16((tile % 3) == 0 ? -1 : 1);
+    return bytes;
+}
+
+QByteArray syntheticMpr()
+{
+    struct Member
+    {
+        QByteArray name;
+        QByteArray payload;
+        quint32 timestamp;
+        quint32 offset;
+    };
+    QVector<Member> members;
+    members.append({QByteArray("unknown.bin"), QByteArray("opaque-unknown-payload"), 0x10203040, 0});
+    members.append({QByteArray("CaveSet.MP"), syntheticMp(), 0x50607080, 0});
+    members.append({QByteArray("CaveSet000000.SEC"), syntheticOverlaySector(), 0x90A0B0C0, 0});
+
+    QByteArray bytes(16, '\0');
+    for(int index = 0; index < members.size(); ++index)
+    {
+        members[index].offset = quint32(bytes.size());
+        bytes.append(members.at(index).payload);
+        const int padding = (16 - (bytes.size() % 16)) % 16;
+        bytes.append(QByteArray(padding, char(0xA0 + index)));
+    }
+    const quint32 tableOffset = quint32(bytes.size());
+    QByteArray names;
+    QDataStream table(&bytes, QIODevice::Append);
+    table.setByteOrder(QDataStream::LittleEndian);
+    for(const Member& member : members)
+    {
+        table << quint32(-1) << quint32(member.payload.size()) << member.offset
+              << member.timestamp << quint16(member.name.size()) << quint32(names.size());
+        names.append(member.name);
+    }
+    bytes.append(names);
+    bytes.append("preserved-trailer");
+
+    QByteArray header;
+    QDataStream headerStream(&header, QIODevice::WriteOnly);
+    headerStream.setByteOrder(QDataStream::LittleEndian);
+    headerStream << quint32(0x019CE23C) << quint32(members.size())
+                 << tableOffset << quint32(names.size());
+    bytes.replace(0, header.size(), header);
+    return bytes;
+}
+
+QByteArray syntheticLandSector(quint16 height)
+{
+    QByteArray bytes;
+    QDataStream stream(&bytes, QIODevice::WriteOnly);
+    stream.setByteOrder(QDataStream::LittleEndian);
+    stream << quint32(0xCF4BF774) << quint8(0);
+    for(int y = 0; y < 33; ++y)
+        for(int x = 0; x < 33; ++x)
+            stream << qint8(0) << qint8(0) << height
+                   << quint32((1000u << 22) | (1000u << 11) | 1000u);
+    bytes.append(QByteArray(16 * 16 * 2, '\0'));
+    return bytes;
+}
+
+quint32 sectorPackedNormal(const QByteArray& sector, int x, int y)
+{
+    const int offset = 5 + (y * 33 + x) * 8 + 4;
+    QDataStream stream(sector.mid(offset, 4));
+    stream.setByteOrder(QDataStream::LittleEndian);
+    quint32 value = 0;
+    stream >> value;
+    return value;
+}
+
+quint16 sectorHeight(const QByteArray& sector, int x, int y)
+{
+    const int offset = 5 + (y * 33 + x) * 8 + 2;
+    QDataStream stream(sector.mid(offset, 2));
+    stream.setByteOrder(QDataStream::LittleEndian);
+    quint16 value = 0;
+    stream >> value;
+    return value;
+}
+
+QVector<STerrainSectorSource> twoSectorTerrain(quint16 height)
+{
+    QVector<STerrainSectorSource> sources;
+    for(int x = 0; x < 2; ++x)
+    {
+        STerrainSectorSource source;
+        source.memberName = QString("test%1000.sec").arg(x, 3, 10, QChar('0'));
+        source.sectorX = x;
+        source.sectorY = 0;
+        source.payload = syntheticLandSector(height);
+        source.expectedPayloadSha256 = QCryptographicHash::hash(
+            source.payload, QCryptographicHash::Sha256).toHex();
+        sources.append(source);
+    }
+    return sources;
+}
+
 const SMobSection* firstSectionOfType(const QVector<SMobSection>& sections, quint32 type)
 {
     for(const SMobSection& candidate : sections)
@@ -124,6 +266,10 @@ class EnduranceDocumentTests : public QObject
     Q_OBJECT
 
 private slots:
+    void persistentPaintOperationSurvivesHistoryNavigation();
+    void persistentPaintOperationSurvivesDocumentTransition();
+    void landscapeLayerChangesResetBrushSelection();
+    void landscapeWheelDirectionUsesAvailableDelta();
     void unchangedMobIsByteIdentical();
     void duplicateMobIdsAreWarningsOnly();
     void unknownLeafIsPreservedAsOpaque();
@@ -139,6 +285,7 @@ private slots:
     void transactionPreservesEmptyContainers();
     void objectSubtreeDuplicateAndDeleteAreExact();
     void objectSubtreeRejectsStaleProvenance();
+    void worldObjectToLeverPreservesRawChildren();
     void objectSequenceRebuildIsExactAndOrdered();
     void crossMobObjectSequencePreservesDonorRawSubtree();
     void copiedObjectSequenceAcceptsOnlyIntendedLeafEdits();
@@ -153,9 +300,82 @@ private slots:
     void transactionRejectsStaleProvenance();
     void cp1251EncodingIsStrict();
     void unchangedMprIsByteIdentical();
+    void syntheticMprPreservesArchiveNamespaceAndInactiveSentinel();
+    void mprSectorPatchIsProvenanceCheckedAndLocal();
+    void mprLengthChangingAndStaleTransactionsFailClosed();
+    void failedStagedMprSaveLeavesNoDestination();
+    void stagedMprTransactionProvesExactSemanticScopeWithoutDestination();
+    void mprSaveCoordinatorBacksUpAndAtomicallyCommits();
+    void mprSaveCoordinatorRejectsSourceRace();
+    void mprSaveCoordinatorFailuresLeaveDestinationUntouched();
+    void privateMprSaveCoordinatorCorpusUsesCopiesOnly();
+    void unchangedExistingFileComparisonIsReadOnly();
+    void canonicalTerrainSeamsAreEditedAndUndoneTogether();
+    void terrainBrushToolsAreDeterministicAndFailClosed();
+    void terrainHeightmapImportIsDeterministicAndSeamAware();
+    void terrainDiagnosticsArePreApplyAndPolicyExplicit();
+    void terrainTilePaintingIsUndoableLocalizedAndNamespaceSafe();
+    void terrainTileStrokeCompositionKeepsFirstAndFinalValues();
+    void terrainHeightStrokeCompositionKeepsFirstAndFinalValues();
+    void zone1NamespaceTemplateSeparatesLandOverlayAndVariants();
+    void zone1NamespaceTemplateMatchesPrivateFixture();
+    void terrainHeightTransactionReopensAndPreservesOverlay();
+    void conflictingTerrainSeamIsPreservedAndNotEditable();
     void malformedMprTableIsRejected();
     void stagedMobIsReopenedWithoutCreatingDestination();
 };
+
+void EnduranceDocumentTests::persistentPaintOperationSurvivesHistoryNavigation()
+{
+    QVERIFY(operationAllowsHistoryNavigation(eOperationMethodSelect));
+    QVERIFY(operationAllowsHistoryNavigation(eOperationMethodTileBrush));
+    QVERIFY(!operationAllowsHistoryNavigation(eOperationMethodMoveAxis));
+    QVERIFY(!operationAllowsHistoryNavigation(eOperationMethodRotateAxis));
+    QVERIFY(!operationAllowsHistoryNavigation(eOperationMethodScaleAxis));
+}
+
+void EnduranceDocumentTests::landscapeLayerChangesResetBrushSelection()
+{
+    QVERIFY(!landscapeModeChangeRequiresBrushReset(
+        ELandscapeEditMode::Sculpt, ELandscapeEditMode::Sculpt));
+    QVERIFY(!landscapeModeChangeRequiresBrushReset(
+        ELandscapeEditMode::TilePaint, ELandscapeEditMode::TilePaint));
+    QVERIFY(!landscapeModeChangeRequiresBrushReset(
+        ELandscapeEditMode::OverlayPaint, ELandscapeEditMode::OverlayPaint));
+    QVERIFY(landscapeModeChangeRequiresBrushReset(
+        ELandscapeEditMode::Sculpt, ELandscapeEditMode::TilePaint));
+    QVERIFY(landscapeModeChangeRequiresBrushReset(
+        ELandscapeEditMode::Sculpt, ELandscapeEditMode::OverlayPaint));
+    QVERIFY(landscapeModeChangeRequiresBrushReset(
+        ELandscapeEditMode::TilePaint, ELandscapeEditMode::OverlayPaint));
+    QVERIFY(landscapeModeChangeRequiresBrushReset(
+        ELandscapeEditMode::OverlayPaint, ELandscapeEditMode::TilePaint));
+}
+
+void EnduranceDocumentTests::persistentPaintOperationSurvivesDocumentTransition()
+{
+    QVERIFY(!operationRequiresCancellationForDocumentTransition(
+        eOperationMethodSelect));
+    QVERIFY(!operationRequiresCancellationForDocumentTransition(
+        eOperationMethodTileBrush));
+    QVERIFY(operationRequiresCancellationForDocumentTransition(
+        eOperationMethodMoveAxis));
+    QVERIFY(operationRequiresCancellationForDocumentTransition(
+        eOperationMethodRotateAxis));
+    QVERIFY(operationRequiresCancellationForDocumentTransition(
+        eOperationMethodScaleAxis));
+}
+
+void EnduranceDocumentTests::landscapeWheelDirectionUsesAvailableDelta()
+{
+    QCOMPARE(landscapeWheelStep(120, 120, 0), 1);
+    QCOMPARE(landscapeWheelStep(-120, -120, 0), -1);
+    QCOMPARE(landscapeWheelStep(0, 120, 0), 1);
+    QCOMPARE(landscapeWheelStep(0, -120, 0), -1);
+    QCOMPARE(landscapeWheelStep(0, 0, 7), 1);
+    QCOMPARE(landscapeWheelStep(0, 0, -7), -1);
+    QCOMPARE(landscapeWheelStep(0, 0, 0), 0);
+}
 
 void EnduranceDocumentTests::unchangedMobIsByteIdentical()
 {
@@ -515,6 +735,68 @@ void EnduranceDocumentTests::objectSubtreeRejectsStaleProvenance()
                                            QByteArray(32, '\x7f'), &output, &report));
     QVERIFY(output.isEmpty());
     QVERIFY(report.hasErrors());
+}
+
+void EnduranceDocumentTests::worldObjectToLeverPreservesRawChildren()
+{
+    const QByteArray opaque = section(0xDEADBEEF, QByteArray::fromHex("001122334455"));
+    const QByteArray source = section(0xB001,
+        section(0xB002, u32(1234)) + section(0xB003, u32(54)) +
+        section(0xB004, "converted") + opaque);
+    CMobDocument::SLeverConversionValues defaults;
+    QByteArray converted;
+    CValidationReport conversionReport;
+    QVERIFY(CMobDocument::convertWorldObjectSubtreeToLever(
+        source, defaults, &converted, &conversionReport));
+
+    QDataStream header(converted);
+    header.setByteOrder(QDataStream::LittleEndian);
+    quint32 type = 0;
+    quint32 length = 0;
+    header >> type >> length;
+    QCOMPARE(type, quint32(0xBBAC0000));
+    QCOMPARE(length, quint32(converted.size()));
+    QVERIFY(converted.contains(opaque));
+    QVERIFY(converted.endsWith(opaque));
+
+    CMobDocument document;
+    CValidationReport parseReport;
+    QVERIFY(document.loadBytes(validMob(section(0xB000, converted)),
+                               "converted-lever.mob", &parseReport));
+    QCOMPARE(document.objects().size(), 1);
+    QCOMPARE(document.objects().front().nid, quint32(1234));
+    QCOMPARE(document.objects().front().objectType, quint32(60));
+
+    QByteArray rejected;
+    QVERIFY(!CMobDocument::convertWorldObjectSubtreeToLever(
+        object(1234), defaults, &rejected, nullptr));
+
+    for(const quint32 sourceType : {quint32(53), quint32(55)})
+    {
+        const QByteArray scenery = section(0xB001,
+            section(0xB002, u32(2000 + sourceType)) +
+            section(0xB003, u32(sourceType)) +
+            section(0xB004, "scenery"));
+        QByteArray sceneryLever;
+        CValidationReport sceneryReport;
+        QVERIFY2(CMobDocument::convertWorldObjectSubtreeToLever(
+                     scenery, defaults, &sceneryLever, &sceneryReport),
+                 qPrintable(sceneryReport.toText()));
+
+        CMobDocument sceneryDocument;
+        QVERIFY(sceneryDocument.loadBytes(
+            validMob(section(0xB000, sceneryLever)), "converted-scenery.mob"));
+        QCOMPARE(sceneryDocument.objects().size(), 1);
+        QCOMPARE(sceneryDocument.objects().front().objectType, quint32(60));
+    }
+
+    const QByteArray unsupported = section(0xB001,
+        section(0xB002, u32(9999)) + section(0xB003, u32(51)) +
+        section(0xB004, "unsupported"));
+    CValidationReport unsupportedReport;
+    QVERIFY(!CMobDocument::convertWorldObjectSubtreeToLever(
+        unsupported, defaults, &rejected, &unsupportedReport));
+    QVERIFY(unsupportedReport.toText().contains("OBJTYPE 51"));
 }
 
 void EnduranceDocumentTests::objectSequenceRebuildIsExactAndOrdered()
@@ -921,6 +1203,2482 @@ void EnduranceDocumentTests::unchangedMprIsByteIdentical()
     QVERIFY(document.load(QFileInfo(file.fileName()), &report));
     QCOMPARE(document.serialize(), bytes);
     QVERIFY(!document.isDirty());
+}
+
+void EnduranceDocumentTests::syntheticMprPreservesArchiveNamespaceAndInactiveSentinel()
+{
+    const QByteArray bytes = syntheticMpr();
+    CMprDocument document;
+    CValidationReport report;
+    QVERIFY2(document.loadBytes(bytes, "DifferentOuterName.mpr", &report),
+             qPrintable(report.toText()));
+    QVERIFY2(!report.hasErrors(), qPrintable(report.toText()));
+    QCOMPARE(document.serialize(), bytes);
+    QCOMPARE(document.members().size(), 3);
+    QCOMPARE(document.members().at(0).name, QString("unknown.bin"));
+    QCOMPARE(document.members().at(1).name, QString("CaveSet.MP"));
+    QCOMPARE(document.members().at(2).name, QString("CaveSet000000.SEC"));
+    QCOMPARE(document.members().at(0).lastWriteTime, quint32(0x10203040));
+    QCOMPARE(document.mapInfo().innerNamespace, QString("CaveSet"));
+    QCOMPARE(document.mapInfo().textureCount, quint32(2));
+    QCOMPARE(document.mapInfo().tileTypes, QVector<qint32>({1, 2, 2}));
+    bool foundTileType = false;
+    QCOMPARE(document.mapInfo().tileType(1, &foundTileType), qint32(2));
+    QVERIFY(foundTileType);
+    QCOMPARE(document.mapInfo().tileType(64, &foundTileType), qint32(0));
+    QVERIFY(!foundTileType);
+    SMprPackedTile packedTile;
+    packedTile.tileIndex = 37;
+    packedTile.atlasIndex = 129;
+    packedTile.rotation = 3;
+    const quint16 encodedTile = packedTile.encode();
+    const SMprPackedTile decodedTile = SMprPackedTile::decode(encodedTile);
+    QCOMPARE(decodedTile.tileIndex, quint8(37));
+    QCOMPARE(decodedTile.atlasIndex, quint8(129));
+    QCOMPARE(decodedTile.rotation, quint8(3));
+    QCOMPARE(decodedTile.atlasSlot(), 129 * 64 + 37);
+    QCOMPARE(document.sectors().size(), 1);
+    QVERIFY(document.sectors().front().hasOverlay);
+    QCOMPARE(document.sectors().front().overlayMaterialIndices.size(), 256);
+    QCOMPARE(document.sectors().front().overlayMaterialIndices.at(0), qint16(-1));
+    QCOMPARE(document.sectors().front().overlayMaterialIndices.at(1), qint16(1));
+    for(const SValidationFinding& finding : report.findings())
+        QVERIFY(finding.code != "mpr.atlas_namespace");
+}
+
+void EnduranceDocumentTests::mprSectorPatchIsProvenanceCheckedAndLocal()
+{
+    const QByteArray bytes = syntheticMpr();
+    CMprDocument baseline;
+    CValidationReport baselineReport;
+    QVERIFY2(baseline.loadBytes(bytes, "baseline.mpr", &baselineReport),
+             qPrintable(baselineReport.toText()));
+    const SMprArchiveMember sector = baseline.members().at(2);
+    QByteArray replacement = sector.payload;
+    const int landTileOffset = int(baseline.sectors().front().landTileOffset);
+    replacement[landTileOffset + 1] = char(quint8(replacement.at(landTileOffset + 1)) ^ 0x40);
+
+    CMprEditTransaction transaction("rotate one synthetic land tile");
+    transaction.replaceMemberPayload(sector.name, sector.sha256, replacement);
+    QByteArray candidateBytes;
+    CValidationReport transactionReport;
+    QVERIFY2(baseline.applyTransaction(transaction, &candidateBytes, &transactionReport),
+             qPrintable(transactionReport.toText()));
+    QCOMPARE(candidateBytes.size(), bytes.size());
+    int changedByteCount = 0;
+    for(int index = 0; index < bytes.size(); ++index)
+        changedByteCount += bytes.at(index) != candidateBytes.at(index);
+    QCOMPARE(changedByteCount, 1);
+
+    CMprDocument candidate;
+    CValidationReport candidateReport;
+    QVERIFY2(candidate.loadBytes(candidateBytes, "candidate.mpr", &candidateReport),
+             qPrintable(candidateReport.toText()));
+    QCOMPARE(candidate.memberPayload("unknown.bin"), baseline.memberPayload("unknown.bin"));
+    QCOMPARE(candidate.memberPayload("caveset.mp"), baseline.memberPayload("CaveSet.MP"));
+    for(int index = 0; index < baseline.members().size(); ++index)
+    {
+        QCOMPARE(candidate.members().at(index).encodedName, baseline.members().at(index).encodedName);
+        QCOMPARE(candidate.members().at(index).lastWriteTime, baseline.members().at(index).lastWriteTime);
+        QCOMPARE(candidate.members().at(index).dataOffset, baseline.members().at(index).dataOffset);
+    }
+    const CMprSemanticDiff diff = CMprSemanticDiff::compare(baseline, candidate);
+    QCOMPARE(diff.entries().size(), 1);
+    QCOMPARE(diff.entries().front().kind, QString("modified"));
+    QCOMPARE(diff.entries().front().memberName, sector.name);
+}
+
+void EnduranceDocumentTests::mprLengthChangingAndStaleTransactionsFailClosed()
+{
+    CMprDocument document;
+    CValidationReport loadReport;
+    QVERIFY(document.loadBytes(syntheticMpr(), "synthetic.mpr", &loadReport));
+    const SMprArchiveMember sector = document.members().at(2);
+
+    CMprEditTransaction lengthChange("unproven overlay structure change");
+    lengthChange.replaceMemberPayload(sector.name, sector.sha256, sector.payload + QByteArray("x"));
+    QByteArray output("must be cleared");
+    CValidationReport lengthReport;
+    QVERIFY(!document.applyTransaction(lengthChange, &output, &lengthReport));
+    QVERIFY(output.isEmpty());
+    QVERIFY(lengthReport.hasErrors());
+
+    CMprEditTransaction stale("stale edit");
+    stale.replaceMemberPayload(sector.name, QByteArray(64, '0'), sector.payload);
+    output = "must be cleared";
+    CValidationReport staleReport;
+    QVERIFY(!document.applyTransaction(stale, &output, &staleReport));
+    QVERIFY(output.isEmpty());
+    QVERIFY(staleReport.hasErrors());
+}
+
+void EnduranceDocumentTests::failedStagedMprSaveLeavesNoDestination()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QFileInfo destination(dir.filePath("missing/subdirectory/test.mpr"));
+    const SStagedSaveValidation result = validateStagedSave(syntheticMpr(), destination);
+    QVERIFY(!result.success);
+    QVERIFY(!destination.exists());
+}
+
+void EnduranceDocumentTests::stagedMprTransactionProvesExactSemanticScopeWithoutDestination()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QFileInfo destination(dir.filePath("changed.mpr"));
+
+    CMprDocument baseline;
+    CValidationReport loadReport;
+    QVERIFY2(baseline.loadBytes(syntheticMpr(), "staged-baseline.mpr", &loadReport),
+             qPrintable(loadReport.toText()));
+    const SMprArchiveMember sector = baseline.members().at(2);
+    QByteArray replacement = sector.payload;
+    replacement[replacement.size() - 1] = char(replacement.back() ^ 0x01);
+    CMprEditTransaction transaction("change one synthetic SEC byte");
+    transaction.replaceMemberPayload(sector.name, sector.sha256, replacement);
+
+    const SStagedMprTransactionValidation result =
+        validateStagedMprTransaction(baseline, transaction, destination);
+    QVERIFY2(result.success, qPrintable(result.error));
+    QVERIFY(!result.candidateBytes.isEmpty());
+    QCOMPARE(result.size, qint64(baseline.originalBytes().size()));
+    QCOMPARE(result.changedMembers, QStringList() << sector.name);
+    QVERIFY(result.semanticDiff.contains(sector.name));
+    QVERIFY(!destination.exists());
+    QCOMPARE(QDir(dir.path()).entryList(QDir::Files).size(), 0);
+
+    CMprDocument reopened;
+    CValidationReport reopenReport;
+    QVERIFY2(reopened.loadBytes(result.candidateBytes, "reopened-stage.mpr", &reopenReport),
+             qPrintable(reopenReport.toText()));
+    QCOMPARE(reopened.memberPayload("unknown.bin"), baseline.memberPayload("unknown.bin"));
+    QCOMPARE(reopened.memberPayload(sector.name), replacement);
+
+    CMprEditTransaction stale("stale staged edit");
+    stale.replaceMemberPayload(sector.name, QByteArray(64, '0'), replacement);
+    const SStagedMprTransactionValidation refused =
+        validateStagedMprTransaction(baseline, stale, destination);
+    QVERIFY(!refused.success);
+    QVERIFY(refused.candidateBytes.isEmpty());
+    QVERIFY(!destination.exists());
+}
+
+void EnduranceDocumentTests::mprSaveCoordinatorBacksUpAndAtomicallyCommits()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QByteArray original = syntheticMpr();
+    const QString sourcePath = dir.filePath("source.mpr");
+    const QString destinationPath = dir.filePath("destination.mpr");
+    for(const QString& path : {sourcePath, destinationPath})
+    {
+        QFile file(path);
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        QCOMPARE(file.write(original), qint64(original.size()));
+    }
+
+    CMprDocument baseline;
+    CValidationReport loadReport;
+    QVERIFY2(baseline.load(QFileInfo(sourcePath), &loadReport),
+             qPrintable(loadReport.toText()));
+    const SMprArchiveMember sector = baseline.members().at(2);
+    QByteArray replacement = sector.payload;
+    replacement[replacement.size() - 1] = char(replacement.back() ^ 0x01);
+    CMprEditTransaction transaction("coordinated synthetic change");
+    transaction.replaceMemberPayload(sector.name, sector.sha256, replacement);
+
+    SMprSaveCommitRequest request;
+    request.source = QFileInfo(sourcePath);
+    request.destination = QFileInfo(destinationPath);
+    request.backupRootOverride = dir.filePath("backups");
+    const SMprSaveCommitResult result =
+        commitStagedMprTransaction(baseline, transaction, request);
+    QVERIFY2(result.success, qPrintable(result.phase + ": " + result.error));
+    QCOMPARE(result.phase, QString("complete"));
+    QVERIFY(!result.backupPath.isEmpty());
+
+    QFile source(sourcePath);
+    QVERIFY(source.open(QIODevice::ReadOnly));
+    QCOMPARE(source.readAll(), original);
+    QFile backup(result.backupPath);
+    QVERIFY(backup.open(QIODevice::ReadOnly));
+    QCOMPARE(backup.readAll(), original);
+    QFile destination(destinationPath);
+    QVERIFY(destination.open(QIODevice::ReadOnly));
+    const QByteArray committed = destination.readAll();
+    QVERIFY(committed != original);
+    QCOMPARE(QString::fromLatin1(QCryptographicHash::hash(
+                 committed, QCryptographicHash::Sha256).toHex()),
+             result.candidateSha256);
+}
+
+void EnduranceDocumentTests::mprSaveCoordinatorRejectsSourceRace()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QByteArray original = syntheticMpr();
+    const QString sourcePath = dir.filePath("source.mpr");
+    const QString destinationPath = dir.filePath("destination.mpr");
+    QFile source(sourcePath);
+    QVERIFY(source.open(QIODevice::WriteOnly));
+    QCOMPARE(source.write(original), qint64(original.size()));
+    source.close();
+    QFile destination(destinationPath);
+    QVERIFY(destination.open(QIODevice::WriteOnly));
+    QCOMPARE(destination.write(original), qint64(original.size()));
+    destination.close();
+
+    CMprDocument baseline;
+    CValidationReport report;
+    QVERIFY(baseline.load(QFileInfo(sourcePath), &report));
+    const SMprArchiveMember sector = baseline.members().at(2);
+    QByteArray replacement = sector.payload;
+    replacement[replacement.size() - 1] = char(replacement.back() ^ 0x01);
+    CMprEditTransaction transaction("source race");
+    transaction.replaceMemberPayload(sector.name, sector.sha256, replacement);
+
+    QVERIFY(source.open(QIODevice::Append));
+    QCOMPARE(source.write("external-change"), qint64(15));
+    source.close();
+    SMprSaveCommitRequest request;
+    request.source = QFileInfo(sourcePath);
+    request.destination = QFileInfo(destinationPath);
+    request.backupRootOverride = dir.filePath("backups");
+    const SMprSaveCommitResult result =
+        commitStagedMprTransaction(baseline, transaction, request);
+    QVERIFY(!result.success);
+    QCOMPARE(result.phase, QString("source-check"));
+    QVERIFY(destination.open(QIODevice::ReadOnly));
+    QCOMPARE(destination.readAll(), original);
+}
+
+void EnduranceDocumentTests::mprSaveCoordinatorFailuresLeaveDestinationUntouched()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QByteArray original = syntheticMpr();
+    const QString sourcePath = dir.filePath("source.mpr");
+    const QString destinationPath = dir.filePath("destination.mpr");
+    QFile source(sourcePath);
+    QVERIFY(source.open(QIODevice::WriteOnly));
+    QCOMPARE(source.write(original), qint64(original.size()));
+    source.close();
+    QFile destination(destinationPath);
+    QVERIFY(destination.open(QIODevice::WriteOnly));
+    QCOMPARE(destination.write(original), qint64(original.size()));
+    destination.close();
+
+    CMprDocument baseline;
+    CValidationReport report;
+    QVERIFY(baseline.load(QFileInfo(sourcePath), &report));
+    const SMprArchiveMember sector = baseline.members().at(2);
+    QByteArray replacement = sector.payload;
+    replacement[replacement.size() - 1] = char(replacement.back() ^ 0x01);
+    CMprEditTransaction transaction("failure preservation");
+    transaction.replaceMemberPayload(sector.name, sector.sha256, replacement);
+
+    const QString blockerPath = dir.filePath("backup-root-blocker");
+    QFile blocker(blockerPath);
+    QVERIFY(blocker.open(QIODevice::WriteOnly));
+    QCOMPARE(blocker.write("x"), qint64(1));
+    blocker.close();
+    SMprSaveCommitRequest backupFailure;
+    backupFailure.source = QFileInfo(sourcePath);
+    backupFailure.destination = QFileInfo(destinationPath);
+    backupFailure.backupRootOverride = QDir(blockerPath).filePath("impossible");
+    const SMprSaveCommitResult backupResult =
+        commitStagedMprTransaction(baseline, transaction, backupFailure);
+    QVERIFY(!backupResult.success);
+    QCOMPARE(backupResult.phase, QString("backup"));
+    QVERIFY(destination.open(QIODevice::ReadOnly));
+    QCOMPARE(destination.readAll(), original);
+    destination.close();
+
+    SMprSaveCommitRequest atomicFailure;
+    atomicFailure.source = QFileInfo(sourcePath);
+    atomicFailure.destination = QFileInfo(destinationPath);
+    atomicFailure.backupRootOverride = dir.filePath("backups");
+    atomicFailure.simulateAtomicCommitFailure = true;
+    const SMprSaveCommitResult atomicResult =
+        commitStagedMprTransaction(baseline, transaction, atomicFailure);
+    QVERIFY(!atomicResult.success);
+    QCOMPARE(atomicResult.phase, QString("atomic-replacement"));
+    QVERIFY(!atomicResult.backupPath.isEmpty());
+    QVERIFY(destination.open(QIODevice::ReadOnly));
+    QCOMPARE(destination.readAll(), original);
+}
+
+void EnduranceDocumentTests::privateMprSaveCoordinatorCorpusUsesCopiesOnly()
+{
+    const QString fixtureList =
+        qEnvironmentVariable("ENDURANCE_MPR_SAVE_FIXTURES");
+    if(fixtureList.isEmpty())
+        QSKIP("Set ENDURANCE_MPR_SAVE_FIXTURES to a path-list of copied private MPR fixtures.");
+    const QStringList fixtures = fixtureList.split(QDir::listSeparator(),
+                                                    QString::SkipEmptyParts);
+    QVERIFY(!fixtures.isEmpty());
+
+    for(const QString& fixturePath : fixtures)
+    {
+        const QFileInfo fixture(fixturePath);
+        QVERIFY2(fixture.exists(), qPrintable(fixture.absoluteFilePath()));
+        CMprDocument fixtureDocument;
+        CValidationReport fixtureReport;
+        QVERIFY2(fixtureDocument.load(fixture, &fixtureReport),
+                 qPrintable(fixture.fileName() + ": " + fixtureReport.toText()));
+        CTerrainEditModel terrain;
+        CValidationReport terrainReport;
+        QVERIFY2(terrain.load(fixtureDocument, &terrainReport),
+                 qPrintable(fixture.fileName() + ": " + terrainReport.toText()));
+
+        STerrainBrush brush;
+        brush.centerX = 1.0f;
+        brush.centerY = 1.0f;
+        brush.radius = 0.0f;
+        brush.falloff = ETerrainBrushFalloff::Constant;
+        const float delta = terrain.height(1, 1) < 65535 ? 1.0f : -1.0f;
+        const STerrainHeightCommand edit = terrain.makeRaiseLower(brush, delta);
+        QVERIFY2(!edit.isEmpty(), qPrintable(fixture.fileName()));
+        QVERIFY(terrain.apply(edit, true));
+        CMprEditTransaction transaction("private copied-fixture vertex edit");
+        CValidationReport transactionReport;
+        QVERIFY2(terrain.appendSectorEdits(&transaction, &transactionReport),
+                 qPrintable(fixture.fileName() + ": " + transactionReport.toText()));
+        QVERIFY(!transaction.isEmpty());
+
+        QTemporaryDir temp;
+        QVERIFY(temp.isValid());
+        const QString sourcePath = temp.filePath("source.mpr");
+        const QString destinationPath = temp.filePath("candidate.mpr");
+        QVERIFY(QFile::copy(fixture.absoluteFilePath(), sourcePath));
+        QVERIFY(QFile::copy(fixture.absoluteFilePath(), destinationPath));
+        CMprDocument baseline;
+        CValidationReport baselineReport;
+        QVERIFY2(baseline.load(QFileInfo(sourcePath), &baselineReport),
+                 qPrintable(fixture.fileName() + ": " + baselineReport.toText()));
+
+        SMprSaveCommitRequest request;
+        request.source = QFileInfo(sourcePath);
+        request.destination = QFileInfo(destinationPath);
+        request.backupRootOverride = temp.filePath("backups");
+        const SMprSaveCommitResult result =
+            commitStagedMprTransaction(baseline, transaction, request);
+        QVERIFY2(result.success,
+                 qPrintable(fixture.fileName() + " " + result.phase + ": " + result.error));
+        QCOMPARE(result.changedMembers.size(), transaction.edits().size());
+
+        CMprDocument reopened;
+        CValidationReport reopenReport;
+        QVERIFY2(reopened.load(QFileInfo(destinationPath), &reopenReport),
+                 qPrintable(fixture.fileName() + ": " + reopenReport.toText()));
+        const CMprSemanticDiff diff = CMprSemanticDiff::compare(baseline, reopened);
+        QCOMPARE(diff.entries().size(), transaction.edits().size());
+        QVERIFY(QFileInfo(result.backupPath).exists());
+    }
+}
+
+void EnduranceDocumentTests::unchangedExistingFileComparisonIsReadOnly()
+{
+    QTemporaryFile file;
+    QVERIFY(file.open());
+    const QByteArray bytes("mpr-no-op-probe");
+    QCOMPARE(file.write(bytes), qint64(bytes.size()));
+    file.flush();
+    const QFileInfo before(file.fileName());
+
+    const SExistingFileComparison equal = compareExistingFile(before, bytes);
+    QVERIFY(equal.exists);
+    QVERIFY(equal.readable);
+    QVERIFY(equal.equal);
+    QCOMPARE(QFileInfo(file.fileName()).lastModified(), before.lastModified());
+
+    const SExistingFileComparison different = compareExistingFile(before, "other");
+    QVERIFY(different.exists);
+    QVERIFY(different.readable);
+    QVERIFY(!different.equal);
+    QCOMPARE(QFileInfo(file.fileName()).lastModified(), before.lastModified());
+}
+
+void EnduranceDocumentTests::canonicalTerrainSeamsAreEditedAndUndoneTogether()
+{
+    CTerrainEditModel terrain;
+    CValidationReport loadReport;
+    const QVector<STerrainSectorSource> sources = twoSectorTerrain(1000);
+    QVERIFY2(terrain.loadSources(2, 1, 100.0f, sources, &loadReport),
+             qPrintable(loadReport.toText()));
+    QCOMPARE(terrain.vertexCountX(), 65);
+    QCOMPARE(terrain.vertexCountY(), 33);
+    QVERIFY(!terrain.hasSeamConflicts());
+
+    STerrainBrush brush;
+    brush.centerX = 32.0f;
+    brush.centerY = 10.0f;
+    brush.radius = 0.0f;
+    brush.falloff = ETerrainBrushFalloff::Constant;
+    const STerrainHeightCommand raise = terrain.makeRaiseLower(brush, 250.0f);
+    QCOMPARE(raise.deltas.size(), 1);
+    CTerrainEditHistory history;
+    QVERIFY(history.execute(&terrain, raise));
+    QCOMPARE(terrain.height(32, 10), quint16(1250));
+    QCOMPARE(sectorHeight(terrain.sectorPayload(0, 0), 32, 10), quint16(1250));
+    QCOMPARE(sectorHeight(terrain.sectorPayload(1, 0), 0, 10), quint16(1250));
+    QCOMPARE(sectorPackedNormal(terrain.sectorPayload(0, 0), 32, 10),
+             sectorPackedNormal(terrain.sectorPayload(1, 0), 0, 10));
+    QVERIFY(sectorPackedNormal(terrain.sectorPayload(0, 0), 31, 10)
+            != sectorPackedNormal(sources.at(0).payload, 31, 10));
+    QCOMPARE(history.undoCount(), 1);
+
+    CMprEditTransaction firstTransaction("height candidate");
+    CValidationReport firstSaveReport;
+    QVERIFY2(terrain.appendSectorEdits(&firstTransaction, &firstSaveReport),
+             qPrintable(firstSaveReport.toText()));
+    QCOMPARE(firstTransaction.edits().size(), 2);
+    QCOMPARE(sectorPackedNormal(firstTransaction.edits().at(0).replacementPayload, 32, 10),
+             sectorPackedNormal(firstTransaction.edits().at(1).replacementPayload, 0, 10));
+    QCOMPARE(sectorPackedNormal(firstTransaction.edits().at(0).replacementPayload, 5, 5),
+             sectorPackedNormal(sources.at(0).payload, 5, 5));
+
+    QVERIFY(history.undo(&terrain));
+    QCOMPARE(terrain.height(32, 10), quint16(1000));
+    QCOMPARE(sectorHeight(terrain.sectorPayload(0, 0), 32, 10), quint16(1000));
+    QCOMPARE(sectorHeight(terrain.sectorPayload(1, 0), 0, 10), quint16(1000));
+    QCOMPARE(terrain.sectorPayload(0, 0), sources.at(0).payload);
+    QCOMPARE(terrain.sectorPayload(1, 0), sources.at(1).payload);
+    QVERIFY(!terrain.isDirty());
+    CMprEditTransaction undoneTransaction("undone height candidate");
+    QVERIFY(terrain.appendSectorEdits(&undoneTransaction));
+    QVERIFY(undoneTransaction.isEmpty());
+    QVERIFY(history.redo(&terrain));
+    QCOMPARE(terrain.height(32, 10), quint16(1250));
+    QCOMPARE(sectorPackedNormal(terrain.sectorPayload(0, 0), 32, 10),
+             sectorPackedNormal(terrain.sectorPayload(1, 0), 0, 10));
+
+    CMprEditTransaction redoneTransaction("redone height candidate");
+    CValidationReport redoneSaveReport;
+    QVERIFY2(terrain.appendSectorEdits(&redoneTransaction, &redoneSaveReport),
+             qPrintable(redoneSaveReport.toText()));
+    QCOMPARE(redoneTransaction.edits().size(), firstTransaction.edits().size());
+    for(int index = 0; index < firstTransaction.edits().size(); ++index)
+        QCOMPARE(redoneTransaction.edits().at(index).replacementPayload,
+                 firstTransaction.edits().at(index).replacementPayload);
+}
+
+void EnduranceDocumentTests::terrainBrushToolsAreDeterministicAndFailClosed()
+{
+    CTerrainEditModel terrain;
+    QVERIFY(terrain.loadSources(2, 1, 100.0f, twoSectorTerrain(1000)));
+    CTerrainEditHistory history;
+
+    STerrainBrush point;
+    point.centerX = 5.0f;
+    point.centerY = 5.0f;
+    point.radius = 0.0f;
+    point.falloff = ETerrainBrushFalloff::Constant;
+    QVERIFY(history.execute(&terrain, terrain.makeFlatten(point, 3000, 1.0f)));
+    QCOMPARE(terrain.height(5, 5), quint16(3000));
+
+    STerrainBrush smooth = point;
+    smooth.radius = 1.0f;
+    QVERIFY(history.execute(&terrain, terrain.makeSmooth(smooth, 1.0f)));
+    QVERIFY(terrain.height(5, 5) < 3000);
+    QVERIFY(terrain.height(5, 5) > 1000);
+
+    const STerrainHeightCommand ramp = terrain.makeRamp(
+        10.0f, 10.0f, 2000, 20.0f, 10.0f, 4000,
+        0.0f, 1.0f, ETerrainBrushFalloff::Constant);
+    QVERIFY(!ramp.isEmpty());
+    QVERIFY(history.execute(&terrain, ramp));
+    QCOMPARE(terrain.height(10, 10), quint16(2000));
+    QCOMPARE(terrain.height(20, 10), quint16(4000));
+    QCOMPARE(terrain.height(15, 10), quint16(3000));
+
+    CValidationReport staleReport;
+    QVERIFY(!terrain.apply(ramp, true, &staleReport));
+    QVERIFY(staleReport.hasErrors());
+}
+
+void EnduranceDocumentTests::terrainHeightmapImportIsDeterministicAndSeamAware()
+{
+    const QVector<STerrainSectorSource> sources = twoSectorTerrain(1000);
+    CTerrainEditModel terrain;
+    QVERIFY(terrain.loadSources(2, 1, 100.0f, sources));
+    STerrainHeightmapGrid grid;
+    grid.width = 2;
+    grid.height = 2;
+    grid.samples = {0.0f, 1.0f, 0.0f, 1.0f};
+    STerrainHeightmapImportSettings settings;
+    settings.minimumRawHeight = 1000.0f;
+    settings.maximumRawHeight = 5000.0f;
+    const STerrainHeightCommand stretched = terrain.makeHeightmapImport(grid, settings);
+    QVERIFY(!stretched.isEmpty());
+    int seamDeltaCount = 0;
+    for(const STerrainHeightDelta& delta : stretched.deltas)
+    {
+        if(delta.globalX == 32 && delta.globalY == 0)
+        {
+            QCOMPARE(delta.after, quint16(3000));
+            ++seamDeltaCount;
+        }
+    }
+    QCOMPARE(seamDeltaCount, 1);
+    CTerrainEditHistory history;
+    QVERIFY(history.execute(&terrain, stretched));
+    QCOMPARE(terrain.height(32, 0), quint16(3000));
+    QCOMPARE(sectorHeight(terrain.sectorPayload(0, 0), 32, 0), quint16(3000));
+    QCOMPARE(sectorHeight(terrain.sectorPayload(1, 0), 0, 0), quint16(3000));
+    QVERIFY(sectorPackedNormal(terrain.sectorPayload(0, 0), 10, 10)
+            != sectorPackedNormal(sources.at(0).payload, 10, 10));
+    QVERIFY(history.undo(&terrain));
+    QCOMPARE(terrain.height(32, 0), quint16(1000));
+    QCOMPARE(terrain.sectorPayload(0, 0), sources.at(0).payload);
+    QCOMPARE(terrain.sectorPayload(1, 0), sources.at(1).payload);
+    QVERIFY(history.redo(&terrain));
+    QCOMPARE(terrain.height(64, 32), quint16(5000));
+
+    CTerrainEditModel placedTerrain;
+    QVERIFY(placedTerrain.loadSources(2, 1, 100.0f, twoSectorTerrain(1000)));
+    grid.width = 3;
+    grid.height = 1;
+    grid.samples = {0.0f, 0.5f, 1.0f};
+    settings.placement = ETerrainHeightmapPlacement::OneSamplePerVertex;
+    settings.destinationX = 31;
+    settings.destinationY = 0;
+    settings.minimumRawHeight = 1000.0f;
+    settings.maximumRawHeight = 3000.0f;
+    const STerrainHeightCommand placed = placedTerrain.makeHeightmapImport(grid, settings);
+    QCOMPARE(placed.deltas.size(), 2);
+    QCOMPARE(placed.deltas.front().globalX, 32);
+    QCOMPARE(placed.deltas.front().after, quint16(2000));
+    QVERIFY(placedTerrain.apply(placed, true));
+    QCOMPARE(placedTerrain.height(33, 0), quint16(3000));
+
+    settings.destinationX = -1;
+    CTerrainEditModel croppedTerrain;
+    QVERIFY(croppedTerrain.loadSources(1, 1, 100.0f,
+                                       twoSectorTerrain(1000).mid(0, 1)));
+    const STerrainHeightCommand croppedLoaded =
+        croppedTerrain.makeHeightmapImport(grid, settings);
+    QCOMPARE(croppedLoaded.deltas.size(), 2);
+    QCOMPARE(croppedLoaded.deltas.front().globalX, 0);
+    QCOMPARE(croppedLoaded.deltas.front().after, quint16(2000));
+
+    STerrainHeightmapGrid saturatedGrid;
+    saturatedGrid.width = 1;
+    saturatedGrid.height = 1;
+    saturatedGrid.samples = {1.0f};
+    settings.destinationX = 10;
+    settings.maximumRawHeight = 70000.0f;
+    const STerrainHeightCommand saturated =
+        croppedTerrain.makeHeightmapImport(saturatedGrid, settings);
+    QVERIFY(saturated.requiresMaxZDecision());
+    QVERIFY(!croppedTerrain.apply(saturated, true));
+
+    saturatedGrid.samples = {1.1f};
+    CValidationReport invalidReport;
+    QVERIFY(croppedTerrain.makeHeightmapImport(
+        saturatedGrid, settings, &invalidReport).isEmpty());
+    QVERIFY(invalidReport.hasErrors());
+}
+
+void EnduranceDocumentTests::terrainDiagnosticsArePreApplyAndPolicyExplicit()
+{
+    CTerrainEditModel terrain;
+    QVERIFY(terrain.loadSources(1, 1, 100.0f, twoSectorTerrain(1000).mid(0, 1)));
+    STerrainBrush brush;
+    brush.centerX = 10.0f;
+    brush.centerY = 10.0f;
+    brush.radius = 0.0f;
+    brush.falloff = ETerrainBrushFalloff::Constant;
+    const STerrainHeightCommand saturated = terrain.makeRaiseLower(brush, 70000.0f);
+    QCOMPARE(saturated.deltas.size(), 1);
+    QVERIFY(saturated.requiresMaxZDecision());
+
+    STerrainObjectHeightProbe object;
+    object.identity = "synthetic object 7";
+    object.positionX = 10.0f;
+    object.positionY = 10.0f;
+    object.positionZ = float(1000) * 100.0f / 65535.0f;
+    STerrainDiagnosticPolicy policy;
+    policy.steepSlopeDegrees = 10.0f;
+    policy.objectVerticalDelta = 0.5f;
+    CValidationReport report;
+    const STerrainEditDiagnostics diagnostics = terrain.diagnose(
+        saturated, QVector<STerrainObjectHeightProbe>() << object, policy, &report);
+    QVERIFY(diagnostics.valid);
+    QVERIFY(diagnostics.requiresMaxZDecision);
+    QVERIFY(diagnostics.navigationGraphMayBeStale);
+    QVERIFY(diagnostics.steepSlopeRisk);
+    QCOMPARE(diagnostics.changedVertexCount, 1);
+    QCOMPARE(diagnostics.sharedSeamVertexCount, 0);
+    QCOMPARE(diagnostics.affectedSectorCount, 1);
+    QCOMPARE(diagnostics.maximumAfter, quint16(65535));
+    QCOMPARE(diagnostics.objectFindings.size(), 1);
+    QVERIFY(diagnostics.objectFindings.front().exceedsThreshold);
+    QVERIFY(diagnostics.objectFindings.front().terrainDelta > 90.0f);
+    QCOMPARE(terrain.height(10, 10), quint16(1000));
+    bool sawMaxZ = false;
+    bool sawNavigation = false;
+    bool sawSlope = false;
+    bool sawObject = false;
+    for(const SValidationFinding& finding : report.findings())
+    {
+        sawMaxZ |= finding.code == "terrain.maxz_saturation";
+        sawNavigation |= finding.code == "terrain.navigation_stale";
+        sawSlope |= finding.code == "terrain.slope_risk";
+        sawObject |= finding.code == "terrain.mob_height_risk";
+    }
+    QVERIFY(sawMaxZ);
+    QVERIFY(sawNavigation);
+    QVERIFY(sawSlope);
+    QVERIFY(sawObject);
+
+    const STerrainEditDiagnostics withoutThresholds = terrain.diagnose(
+        saturated, QVector<STerrainObjectHeightProbe>() << object);
+    QVERIFY(withoutThresholds.valid);
+    QVERIFY(!withoutThresholds.steepSlopeRisk);
+    QCOMPARE(withoutThresholds.objectFindings.size(), 1);
+    QVERIFY(!withoutThresholds.objectFindings.front().exceedsThreshold);
+
+    CTerrainEditModel seamTerrain;
+    QVERIFY(seamTerrain.loadSources(2, 1, 100.0f, twoSectorTerrain(1000)));
+    brush.centerX = 32.0f;
+    const STerrainHeightCommand seam = seamTerrain.makeRaiseLower(brush, 1000.0f);
+    const STerrainEditDiagnostics seamDiagnostics = seamTerrain.diagnose(seam);
+    QVERIFY(seamDiagnostics.valid);
+    QVERIFY(!seamDiagnostics.requiresMaxZDecision);
+    QCOMPARE(seamDiagnostics.sharedSeamVertexCount, 1);
+    QCOMPARE(seamDiagnostics.affectedSectorCount, 2);
+
+    STerrainHeightCommand duplicate = seam;
+    duplicate.deltas.append(seam.deltas.front());
+    CValidationReport duplicateReport;
+    QVERIFY(!seamTerrain.apply(duplicate, true, &duplicateReport));
+    QVERIFY(duplicateReport.hasErrors());
+
+    CValidationReport blockedReport;
+    QVERIFY(!terrain.apply(saturated, true, &blockedReport));
+    QVERIFY(blockedReport.hasErrors());
+    QCOMPARE(terrain.height(10, 10), quint16(1000));
+    QVERIFY(terrain.apply(saturated, true, nullptr, true));
+    CValidationReport staleReport;
+    QVERIFY(!terrain.diagnose(saturated, QVector<STerrainObjectHeightProbe>(),
+                              policy, &staleReport).valid);
+    QVERIFY(staleReport.hasErrors());
+}
+
+void EnduranceDocumentTests::terrainTilePaintingIsUndoableLocalizedAndNamespaceSafe()
+{
+    STerrainTransitionSignature signature;
+    signature.northWest = 1;
+    signature.northEast = 2;
+    signature.southEast = 3;
+    signature.southWest = 4;
+    const STerrainTransitionSignature rotated =
+        CTerrainTransitionCatalog::rotated(signature, 1);
+    QCOMPARE(rotated.northWest, qint32(4));
+    QCOMPARE(rotated.northEast, qint32(1));
+    QCOMPARE(rotated.southEast, qint32(2));
+    QCOMPARE(rotated.southWest, qint32(3));
+    QCOMPARE(CTerrainTransitionCatalog::rotated(rotated, -1), signature);
+    CTerrainTransitionCatalog catalog;
+    STerrainTransitionVariant firstVariant;
+    firstVariant.signature = signature;
+    firstVariant.packedTile = 1;
+    STerrainTransitionVariant secondVariant = firstVariant;
+    secondVariant.packedTile = 2;
+    secondVariant.distributionWeight = 3;
+    QVERIFY(catalog.addVariant(firstVariant));
+    QVERIFY(catalog.addVariant(secondVariant));
+    QVERIFY(!catalog.addVariant(firstVariant));
+    QSet<quint16> distributed;
+    for(int x = 0; x < 64; ++x)
+    {
+        bool found = false;
+        const quint16 selected = catalog.select(signature, x, 7, 12345, &found);
+        QVERIFY(found);
+        QCOMPARE(selected, catalog.select(signature, x, 7, 12345));
+        distributed.insert(selected);
+    }
+    QCOMPARE(distributed, QSet<quint16>({1, 2}));
+    bool foundTransition = true;
+    STerrainTransitionSignature missingSignature;
+    QCOMPARE(catalog.select(missingSignature, 0, 0, 0, &foundTransition), quint16(0));
+    QVERIFY(!foundTransition);
+
+    CMprDocument baseline;
+    CValidationReport baselineReport;
+    QVERIFY(baseline.loadBytes(syntheticMpr(), "tile-paint-baseline.mpr", &baselineReport));
+    QVERIFY(!baselineReport.hasErrors());
+
+    CTerrainEditModel terrain;
+    CValidationReport loadReport;
+    QVERIFY(terrain.load(baseline, &loadReport));
+    QVERIFY(!loadReport.hasErrors());
+    QCOMPARE(terrain.tileCountX(), 16);
+    QCOMPARE(terrain.tileCountY(), 16);
+    bool available = false;
+    QCOMPARE(terrain.packedTile(0, 0, ETerrainTileLayer::Land, &available), quint16(0));
+    QVERIFY(available);
+    QCOMPARE(terrain.tileType(quint16(1), &available), qint32(2));
+    QVERIFY(available);
+
+    STerrainTileBrush area;
+    area.centerX = 5.0f;
+    area.centerY = 5.0f;
+    area.radius = 1.0f;
+    area.shape = ETerrainTileBrushShape::Circle;
+    QCOMPARE(terrain.makeTilePaint(area, ETerrainTileLayer::Land,
+                                   0, 1, 0).deltas.size(), 5);
+    area.shape = ETerrainTileBrushShape::Square;
+    QCOMPARE(terrain.makeTilePaint(area, ETerrainTileLayer::Land,
+                                   0, 1, 0).deltas.size(), 9);
+
+    CTerrainTransitionCatalog semanticCatalog;
+    const QVector<int> semanticMasks({0, 15, 12, 9, 3, 6, 1, 2, 4, 8,
+                                      7, 11, 13, 14});
+    for(int variantIndex = 0; variantIndex < semanticMasks.size(); ++variantIndex)
+    {
+        const int mask = semanticMasks.at(variantIndex);
+        STerrainTransitionVariant visualVariant;
+        visualVariant.signature.northWest = (mask & 1) ? 2 : 1;
+        visualVariant.signature.northEast = (mask & 2) ? 2 : 1;
+        visualVariant.signature.southEast = (mask & 4) ? 2 : 1;
+        visualVariant.signature.southWest = (mask & 8) ? 2 : 1;
+        if(variantIndex == 0)
+            visualVariant.packedTile = 0;
+        else if(variantIndex == 1)
+            visualVariant.packedTile = quint16(1 << 14);
+        else if(variantIndex < 6)
+            visualVariant.packedTile = quint16(1 | ((variantIndex - 2) << 14));
+        else if(variantIndex < 10)
+            visualVariant.packedTile = quint16(2 | ((variantIndex - 6) << 14));
+        else
+            visualVariant.packedTile = quint16(3 | ((variantIndex - 10) << 14));
+        QVERIFY(semanticCatalog.addVariant(visualVariant));
+    }
+    QVERIFY(semanticCatalog.hasMaterial(1));
+    QVERIFY(semanticCatalog.hasMaterial(2));
+    QVERIFY(!semanticCatalog.hasMaterial(99));
+    bool semanticFound = false;
+    const STerrainTransitionSignature decoded =
+        semanticCatalog.signatureForPacked(quint16(1 << 14), &semanticFound);
+    QVERIFY(semanticFound);
+    QCOMPARE(decoded.northWest, qint32(2));
+
+    STerrainTileBrush semanticPoint;
+    semanticPoint.centerX = 8.0f;
+    semanticPoint.centerY = 8.0f;
+    semanticPoint.radius = 0.0f;
+    CValidationReport semanticReport;
+    const STerrainTileCommand semantic = terrain.makeSemanticTilePaint(
+        semanticPoint, ETerrainTileLayer::Land, 2, semanticCatalog,
+        0x53454D41u, &semanticReport);
+    QVERIFY2(!semantic.isEmpty(), qPrintable(semanticReport.toText()));
+    QVERIFY(semantic.deltas.size() <= 9);
+    bool changedCenter = false;
+    for(const STerrainTileDelta& delta : semantic.deltas)
+    {
+        QVERIFY(qAbs(delta.globalX - 8) <= 1);
+        QVERIFY(qAbs(delta.globalY - 8) <= 1);
+        QVERIFY(delta.hasSemanticRequest);
+        QCOMPARE(delta.brushCenterX, 8);
+        QCOMPARE(delta.brushCenterY, 8);
+        QCOMPARE(delta.requestedMaterialId, qint32(2));
+        bool requestedFound = false;
+        const STerrainTransitionSignature selectedSignature =
+            semanticCatalog.signatureForPacked(delta.after, &requestedFound);
+        QVERIFY(requestedFound);
+        QCOMPARE(delta.requestedSignature.northWest, selectedSignature.northWest);
+        QCOMPARE(delta.requestedSignature.northEast, selectedSignature.northEast);
+        QCOMPARE(delta.requestedSignature.southEast, selectedSignature.southEast);
+        QCOMPARE(delta.requestedSignature.southWest, selectedSignature.southWest);
+        if(delta.globalX == 8 && delta.globalY == 8)
+        {
+            bool centerFound = false;
+            const STerrainTransitionSignature centerSignature =
+                semanticCatalog.signatureForPacked(delta.after, &centerFound);
+            QVERIFY(centerFound);
+            QCOMPARE(centerSignature.northWest, qint32(2));
+            QCOMPARE(centerSignature.northEast, qint32(2));
+            QCOMPARE(centerSignature.southEast, qint32(2));
+            QCOMPARE(centerSignature.southWest, qint32(2));
+            changedCenter = true;
+        }
+    }
+    QVERIFY(changedCenter);
+    const STerrainTileCommand repeatedSemantic = terrain.makeSemanticTilePaint(
+        semanticPoint, ETerrainTileLayer::Land, 2, semanticCatalog,
+        0x53454D41u);
+    QCOMPARE(repeatedSemantic.deltas.size(), semantic.deltas.size());
+    for(int index = 0; index < semantic.deltas.size(); ++index)
+    {
+        QCOMPARE(repeatedSemantic.deltas.at(index).globalX, semantic.deltas.at(index).globalX);
+        QCOMPARE(repeatedSemantic.deltas.at(index).globalY, semantic.deltas.at(index).globalY);
+        QCOMPARE(repeatedSemantic.deltas.at(index).before, semantic.deltas.at(index).before);
+        QCOMPARE(repeatedSemantic.deltas.at(index).after, semantic.deltas.at(index).after);
+    }
+    QVERIFY(terrain.makeSemanticTilePaint(
+        semanticPoint, ETerrainTileLayer::Land, 99, semanticCatalog,
+        0x53454D41u).isEmpty());
+    QVERIFY(terrain.apply(semantic, true));
+    QVERIFY(terrain.makeSemanticTilePaint(
+        semanticPoint, ETerrainTileLayer::Land, 2, semanticCatalog,
+        0x53454D41u).isEmpty());
+    QVERIFY(terrain.apply(semantic, false));
+
+    // Adjacent stamps of the same material must merge into one shared-corner
+    // field. The selected material on the second perimeter is continuation,
+    // not a zero-radius background family.
+    STerrainTileBrush firstAdjacent = semanticPoint;
+    firstAdjacent.centerX = 6.0f;
+    STerrainTileBrush secondAdjacent = semanticPoint;
+    secondAdjacent.centerX = 8.0f;
+    const STerrainTileCommand firstMerge = terrain.makeSemanticTilePaint(
+        firstAdjacent, ETerrainTileLayer::Land, 2, semanticCatalog,
+        0x53454D41u);
+    QVERIFY(!firstMerge.isEmpty());
+    QVERIFY(terrain.apply(firstMerge, true));
+    const STerrainTileCommand secondMerge = terrain.makeSemanticTilePaint(
+        secondAdjacent, ETerrainTileLayer::Land, 2, semanticCatalog,
+        0x53454D41u);
+    QVERIFY(secondMerge.deltas.size() > 1);
+    QVERIFY(terrain.apply(secondMerge, true));
+    for(int y = 0; y < terrain.tileCountY(); ++y)
+    {
+        for(int x = 0; x < terrain.tileCountX(); ++x)
+        {
+            bool hereFound = false;
+            const STerrainTransitionSignature here =
+                semanticCatalog.gridSignatureForPacked(
+                    terrain.packedTile(x, y, ETerrainTileLayer::Land),
+                    &hereFound);
+            QVERIFY(hereFound);
+            if(x + 1 < terrain.tileCountX())
+            {
+                bool eastFound = false;
+                const STerrainTransitionSignature east =
+                    semanticCatalog.gridSignatureForPacked(
+                        terrain.packedTile(x + 1, y, ETerrainTileLayer::Land),
+                        &eastFound);
+                QVERIFY(eastFound);
+                QCOMPARE(here.northEast, east.northWest);
+                QCOMPARE(here.southEast, east.southWest);
+            }
+            if(y + 1 < terrain.tileCountY())
+            {
+                bool nextRowFound = false;
+                const STerrainTransitionSignature nextRow =
+                    semanticCatalog.gridSignatureForPacked(
+                        terrain.packedTile(x, y + 1, ETerrainTileLayer::Land),
+                        &nextRowFound);
+                QVERIFY(nextRowFound);
+                QCOMPARE(here.southWest, nextRow.northWest);
+                QCOMPARE(here.southEast, nextRow.northEast);
+            }
+        }
+    }
+    QVERIFY(terrain.apply(secondMerge, false));
+    QVERIFY(terrain.apply(firstMerge, false));
+
+    // Fixed atlases cannot express every boundary. The modern brush contract
+    // is still deterministic: paint every core cell, mutate at most one ring,
+    // and leave a hard seam when no safe authored transition exists.
+    CTerrainTransitionCatalog hardEdgeCatalog;
+    STerrainTransitionVariant hardCommon;
+    hardCommon.signature.northWest = hardCommon.signature.northEast = 1;
+    hardCommon.signature.southEast = hardCommon.signature.southWest = 1;
+    hardCommon.packedTile = 0;
+    QVERIFY(hardEdgeCatalog.addVariant(hardCommon));
+    STerrainTransitionVariant hardSelected;
+    hardSelected.signature.northWest = hardSelected.signature.northEast = 2;
+    hardSelected.signature.southEast = hardSelected.signature.southWest = 2;
+    hardSelected.packedTile = 2;
+    QVERIFY(hardEdgeCatalog.addVariant(hardSelected));
+
+    CTerrainEditModel hardEdgeTerrain;
+    QVERIFY(hardEdgeTerrain.load(baseline));
+    STerrainTileBrush boundedBrush;
+    boundedBrush.centerX = 8.0f;
+    boundedBrush.centerY = 8.0f;
+    boundedBrush.radius = 1.0f;
+    boundedBrush.shape = ETerrainTileBrushShape::Circle;
+    CValidationReport hardEdgeReport;
+    const STerrainTileCommand hardEdgePaint = hardEdgeTerrain.makeSemanticTilePaint(
+        boundedBrush, ETerrainTileLayer::Land, 2, hardEdgeCatalog,
+        0x424F554Eu, &hardEdgeReport);
+    QCOMPARE(hardEdgePaint.semanticAudit.solverMode,
+             QStringLiteral("bounded-hard-edge"));
+    QCOMPARE(hardEdgePaint.semanticAudit.paintedCoreCells.size(), 5);
+    QCOMPARE(hardEdgePaint.deltas.size(), 5);
+    QVERIFY(!hardEdgeReport.hasErrors());
+    QVERIFY(hardEdgeReport.toText().contains("terrain.semantic_hard_edge"));
+    for(const STerrainTileDelta& delta : hardEdgePaint.deltas)
+    {
+        const int dx = qAbs(delta.globalX - 8);
+        const int dy = qAbs(delta.globalY - 8);
+        QVERIFY(dx + dy <= 1);
+        bool signatureFound = false;
+        const STerrainTransitionSignature after =
+            hardEdgeCatalog.gridSignatureForPacked(delta.after, &signatureFound);
+        QVERIFY(signatureFound);
+        QCOMPARE(after.northWest, qint32(2));
+        QCOMPARE(after.northEast, qint32(2));
+        QCOMPARE(after.southEast, qint32(2));
+        QCOMPARE(after.southWest, qint32(2));
+    }
+    QVERIFY(hardEdgeTerrain.apply(hardEdgePaint, true));
+    CValidationReport repeatedHardEdgeReport;
+    QVERIFY(hardEdgeTerrain.makeSemanticTilePaint(
+        boundedBrush, ETerrainTileLayer::Land, 2, hardEdgeCatalog,
+        0x424F554Eu, &repeatedHardEdgeReport).isEmpty());
+    QVERIFY(!repeatedHardEdgeReport.hasErrors());
+    QVERIFY(hardEdgeTerrain.apply(hardEdgePaint, false));
+
+    // A one-corner approximation is accepted only when it remains anchored to
+    // the painted core, contains no new family, and every existing tile at the
+    // changed outer vertex already supports the approximated material.
+    CTerrainTransitionCatalog nearestCatalog;
+    QVERIFY(nearestCatalog.addVariant(hardCommon));
+    QVERIFY(nearestCatalog.addVariant(hardSelected));
+    STerrainTransitionSignature threeSelected;
+    threeSelected.northWest = 1;
+    threeSelected.northEast = 2;
+    threeSelected.southEast = 2;
+    threeSelected.southWest = 2;
+    for(int rotation = 0; rotation < 4; ++rotation)
+    {
+        STerrainTransitionVariant transition;
+        transition.signature = CTerrainTransitionCatalog::rotated(
+            threeSelected, rotation);
+        transition.packedTile = quint16(1 | (rotation << 14));
+        QVERIFY(nearestCatalog.addVariant(transition));
+    }
+    CTerrainEditModel nearestTerrain;
+    QVERIFY(nearestTerrain.load(baseline));
+    STerrainTileBrush setupNearest;
+    setupNearest.radius = 0.0f;
+    setupNearest.shape = ETerrainTileBrushShape::Circle;
+    setupNearest.centerX = 8.0f;
+    setupNearest.centerY = 6.0f;
+    QVERIFY(nearestTerrain.apply(nearestTerrain.makeTilePaint(
+        setupNearest, ETerrainTileLayer::Land, 0, 1, 0), true));
+    setupNearest.centerX = 9.0f;
+    QVERIFY(nearestTerrain.apply(nearestTerrain.makeTilePaint(
+        setupNearest, ETerrainTileLayer::Land, 0, 1, 0), true));
+    setupNearest.centerY = 7.0f;
+    QVERIFY(nearestTerrain.apply(nearestTerrain.makeTilePaint(
+        setupNearest, ETerrainTileLayer::Land, 0, 1, 1), true));
+    boundedBrush.radius = 0.0f;
+    CValidationReport nearestReport;
+    const STerrainTileCommand nearestPaint = nearestTerrain.makeSemanticTilePaint(
+        boundedBrush, ETerrainTileLayer::Land, 2, nearestCatalog,
+        0x424F554Eu, &nearestReport);
+    QVERIFY(!nearestPaint.isEmpty());
+    QVERIFY(!nearestReport.hasErrors());
+    QVERIFY(nearestReport.toText().contains("terrain.semantic_nearest"));
+    QVERIFY(nearestReport.toText().contains("terrain.semantic_hard_edge"));
+    QSet<int> nearestChanged;
+    for(const STerrainTileDelta& delta : nearestPaint.deltas)
+    {
+        QVERIFY(qAbs(delta.globalX - 8) <= 1);
+        QVERIFY(qAbs(delta.globalY - 8) <= 1);
+        const int relativeX = delta.globalX - 8;
+        const int relativeY = delta.globalY - 8;
+        nearestChanged.insert((relativeY + 1) * 3 + relativeX + 1);
+        bool signatureFound = false;
+        const STerrainTransitionSignature after =
+            nearestCatalog.gridSignatureForPacked(delta.after, &signatureFound);
+        QVERIFY(signatureFound);
+        const qint32 families[4] = {after.northWest, after.northEast,
+                                    after.southEast, after.southWest};
+        for(qint32 family : families)
+            QVERIFY(family == 1 || family == 2);
+    }
+    QCOMPARE(nearestChanged, QSet<int>({4, 1}));
+    QVERIFY(nearestTerrain.apply(nearestPaint, true));
+    bool approximatedFound = false;
+    bool northWestSupportFound = false;
+    bool northEastSupportFound = false;
+    bool eastSupportFound = false;
+    const STerrainTransitionSignature approximated =
+        nearestCatalog.gridSignatureForPacked(nearestTerrain.packedTile(
+            8, 7, ETerrainTileLayer::Land), &approximatedFound);
+    const STerrainTransitionSignature northWestSupport =
+        nearestCatalog.gridSignatureForPacked(nearestTerrain.packedTile(
+            8, 6, ETerrainTileLayer::Land), &northWestSupportFound);
+    const STerrainTransitionSignature northEastSupport =
+        nearestCatalog.gridSignatureForPacked(nearestTerrain.packedTile(
+            9, 6, ETerrainTileLayer::Land), &northEastSupportFound);
+    const STerrainTransitionSignature eastSupport =
+        nearestCatalog.gridSignatureForPacked(nearestTerrain.packedTile(
+            9, 7, ETerrainTileLayer::Land), &eastSupportFound);
+    QVERIFY(approximatedFound);
+    QVERIFY(northWestSupportFound);
+    QVERIFY(northEastSupportFound);
+    QVERIFY(eastSupportFound);
+    QCOMPARE(approximated.northEast, northWestSupport.southEast);
+    QCOMPARE(approximated.northEast, northEastSupport.southWest);
+    QCOMPARE(approximated.northEast, eastSupport.northWest);
+    QVERIFY(nearestTerrain.makeSemanticTilePaint(
+        boundedBrush, ETerrainTileLayer::Land, 2, nearestCatalog,
+        0x424F554Eu).isEmpty());
+
+    // The same approximation against a uniform neighborhood would contradict
+    // the three other tiles at its outer vertex. It must become a hard edge,
+    // not the two seam disagreements captured in the Dark/Lime diagnostic.
+    CTerrainEditModel unsupportedNearestTerrain;
+    QVERIFY(unsupportedNearestTerrain.load(baseline));
+    CValidationReport unsupportedNearestReport;
+    const STerrainTileCommand unsupportedNearest =
+        unsupportedNearestTerrain.makeSemanticTilePaint(
+            boundedBrush, ETerrainTileLayer::Land, 2, nearestCatalog,
+            0x424F554Eu, &unsupportedNearestReport);
+    QCOMPARE(unsupportedNearest.deltas.size(), 1);
+    QCOMPARE(unsupportedNearest.deltas.front().globalX, 8);
+    QCOMPARE(unsupportedNearest.deltas.front().globalY, 8);
+    QVERIFY(!unsupportedNearestReport.toText().contains("terrain.semantic_nearest"));
+    QVERIFY(unsupportedNearestReport.toText().contains("terrain.semantic_hard_edge"));
+
+    STerrainTileBrush point;
+    point.centerX = 0.0f;
+    point.centerY = 0.0f;
+    point.radius = 0.0f;
+    const STerrainTileCommand land = terrain.makeTilePaint(
+        point, ETerrainTileLayer::Land, 0, 1, 3);
+    QCOMPARE(land.deltas.size(), 1);
+    STerrainTileCommand duplicateLand = land;
+    duplicateLand.deltas.append(land.deltas.front());
+    CValidationReport duplicateReport;
+    QVERIFY(!terrain.apply(duplicateLand, true, &duplicateReport));
+    QVERIFY(duplicateReport.hasErrors());
+    CTerrainTileEditHistory history;
+    QVERIFY(history.execute(&terrain, land));
+    QCOMPARE(SMprPackedTile::decode(
+        terrain.packedTile(0, 0, ETerrainTileLayer::Land)).rotation, quint8(3));
+    QVERIFY(history.undo(&terrain));
+    QCOMPARE(terrain.packedTile(0, 0, ETerrainTileLayer::Land), quint16(0));
+    QVERIFY(history.redo(&terrain));
+    CValidationReport staleTileReport;
+    QVERIFY(!terrain.apply(land, true, &staleTileReport));
+    QVERIFY(staleTileReport.hasErrors());
+
+    point.centerX = 1.0f;
+    // Active overlay records may currently reference a land-family atlas slot.
+    // A combined authored catalog must be able to decode that pre-state and
+    // replace it with an overlay family without requiring land-family paint
+    // selection to be enabled in the UI.
+    const STerrainTileCommand semanticOverlay = terrain.makeSemanticTilePaint(
+        point, ETerrainTileLayer::Overlay, 2, semanticCatalog,
+        0x4F564552u);
+    QVERIFY(!semanticOverlay.isEmpty());
+    QVERIFY(std::any_of(semanticOverlay.deltas.constBegin(),
+                        semanticOverlay.deltas.constEnd(),
+                        [](const STerrainTileDelta& delta) {
+        return delta.globalX == 1 && delta.globalY == 0;
+    }));
+
+    const STerrainTileCommand overlay = terrain.makeTilePaint(
+        point, ETerrainTileLayer::Overlay, 0, 1, 1);
+    QCOMPARE(overlay.deltas.size(), 1);
+    QVERIFY(terrain.apply(overlay, true));
+    point.centerX = 0.0f;
+    QVERIFY(terrain.makeTilePaint(point, ETerrainTileLayer::Overlay,
+                                  0, 1, 1).isEmpty());
+
+    STerrainTileCommand inactive;
+    STerrainTileDelta inactiveDelta;
+    inactiveDelta.globalX = 0;
+    inactiveDelta.globalY = 0;
+    inactiveDelta.layer = ETerrainTileLayer::Overlay;
+    inactiveDelta.before = quint16(0xFFFF);
+    inactiveDelta.after = quint16(1);
+    inactive.deltas.append(inactiveDelta);
+    CValidationReport inactiveReport;
+    QVERIFY(!terrain.apply(inactive, true, &inactiveReport));
+    QVERIFY(inactiveReport.hasErrors());
+
+    STerrainTileCommand outsideNamespace;
+    STerrainTileDelta invalidDelta;
+    invalidDelta.globalX = 2;
+    invalidDelta.globalY = 0;
+    invalidDelta.before = terrain.packedTile(2, 0, ETerrainTileLayer::Land);
+    SMprPackedTile invalidSelection;
+    invalidSelection.atlasIndex = 1;
+    invalidDelta.after = invalidSelection.encode();
+    outsideNamespace.deltas.append(invalidDelta);
+    CValidationReport namespaceReport;
+    QVERIFY(!terrain.apply(outsideNamespace, true, &namespaceReport));
+    QVERIFY(namespaceReport.hasErrors());
+
+    CMprEditTransaction transaction("paint synthetic land and overlay tiles");
+    CValidationReport editReport;
+    QVERIFY(terrain.appendSectorEdits(&transaction, &editReport));
+    QCOMPARE(transaction.edits().size(), 1);
+    QByteArray candidateBytes;
+    QVERIFY(baseline.applyTransaction(transaction, &candidateBytes, &editReport));
+    CMprDocument candidate;
+    CValidationReport candidateReport;
+    QVERIFY(candidate.loadBytes(candidateBytes, "tile-paint-candidate.mpr", &candidateReport));
+    QVERIFY(!candidateReport.hasErrors());
+    QCOMPARE(CMprSemanticDiff::compare(baseline, candidate).entries().size(), 1);
+
+    const SMprSectorInfo& sector = baseline.sectors().front();
+    const QByteArray original = baseline.members().at(sector.memberIndex).payload;
+    QByteArray localized = candidate.members().at(candidate.sectors().front().memberIndex).payload;
+    localized.replace(int(sector.landTileOffset), 2,
+                      original.mid(int(sector.landTileOffset), 2));
+    localized.replace(int(sector.overlayTileOffset + 2), 2,
+                      original.mid(int(sector.overlayTileOffset + 2), 2));
+    QCOMPARE(localized, original);
+
+    CTerrainEditModel reopened;
+    QVERIFY(reopened.load(candidate));
+    QCOMPARE(reopened.packedTile(0, 0, ETerrainTileLayer::Land), land.deltas.front().after);
+    QCOMPARE(reopened.packedTile(1, 0, ETerrainTileLayer::Overlay),
+             overlay.deltas.front().after);
+
+    STerrainBrush heightPoint;
+    heightPoint.centerX = 10.0f;
+    heightPoint.centerY = 10.0f;
+    heightPoint.radius = 0.0f;
+    heightPoint.falloff = ETerrainBrushFalloff::Constant;
+    QVERIFY(terrain.apply(terrain.makeRaiseLower(heightPoint, 100.0f), true));
+    CMprEditTransaction combined("combine height and tile edits");
+    QVERIFY(terrain.appendSectorEdits(&combined));
+    QCOMPARE(combined.edits().size(), 1);
+    QByteArray combinedBytes;
+    QVERIFY(baseline.applyTransaction(combined, &combinedBytes));
+    CMprDocument combinedCandidate;
+    QVERIFY(combinedCandidate.loadBytes(combinedBytes, "combined-height-tile.mpr"));
+    CTerrainEditModel combinedReopened;
+    QVERIFY(combinedReopened.load(combinedCandidate));
+    QCOMPARE(combinedReopened.height(10, 10), quint16(100));
+    QCOMPARE(combinedReopened.packedTile(0, 0, ETerrainTileLayer::Land),
+             land.deltas.front().after);
+    QCOMPARE(combinedReopened.packedTile(1, 0, ETerrainTileLayer::Overlay),
+             overlay.deltas.front().after);
+}
+
+void EnduranceDocumentTests::zone1NamespaceTemplateSeparatesLandOverlayAndVariants()
+{
+    CValidationReport report;
+    const STerrainAtlasAnalysis analysis =
+        CTerrainAtlasAnalyzer::analyze("zone1", 512, &report);
+    QVERIFY2(analysis.usable, qPrintable(report.toText()));
+    QCOMPARE(analysis.templateName, QString("Zone1 stock slot layout"));
+    QCOMPARE(analysis.materials.size(), 9);
+    QCOMPARE(analysis.describedSlots, 512);
+    int landMaterials = 0;
+    int overlayMaterials = 0;
+    for(const STerrainAtlasMaterial& material : analysis.materials)
+    {
+        if(material.layer == ETerrainAtlasLayer::Land)
+            ++landMaterials;
+        else
+            ++overlayMaterials;
+    }
+    QCOMPARE(landMaterials, 7);
+    QCOMPARE(overlayMaterials, 2);
+    QCOMPARE(analysis.materials.at(1).name, QString("Ground / common"));
+    QCOMPARE(analysis.materials.at(2).name, QString("Grass / dark"));
+    QCOMPARE(analysis.materials.at(3).name, QString("Grass / common"));
+    QCOMPARE(std::count_if(analysis.materials.constBegin(), analysis.materials.constEnd(),
+                           [](const STerrainAtlasMaterial& material) {
+        return material.underwater;
+    }), 2);
+
+    SMprPackedTile packed;
+    packed.tileIndex = 50;
+    bool found = false;
+    const STerrainTransitionSignature signature =
+        analysis.landCatalog.signatureForPacked(packed.encode(), &found);
+    QVERIFY(found);
+    QCOMPARE(signature.northWest, 4);
+    QCOMPARE(signature.northEast, 4);
+    QCOMPARE(signature.southEast, 3);
+    QCOMPARE(signature.southWest, 3);
+    packed.tileIndex = 16;
+    analysis.landCatalog.signatureForPacked(packed.encode(), &found);
+    QVERIFY(!found);
+    analysis.overlayCatalog.signatureForPacked(packed.encode(), &found);
+    QVERIFY(found);
+    analysis.overlayCatalogWithLandFamilies().signatureForPacked(
+        packed.encode(), &found);
+    QVERIFY(found);
+    packed.tileIndex = 50;
+    analysis.overlayCatalogWithLandFamilies().signatureForPacked(
+        packed.encode(), &found);
+    QVERIFY(found);
+    QCOMPARE(analysis.overlayCatalogWithLandFamilies().size(),
+             analysis.landCatalog.size() + analysis.overlayCatalog.size());
+    QCOMPARE(analysis.overlayCatalogWithLandFamilies().materialIds().size(),
+             analysis.landCatalog.materialIds().size()
+                 + analysis.overlayCatalog.materialIds().size());
+    const auto stillWater = std::find_if(
+        analysis.materials.constBegin(), analysis.materials.constEnd(),
+        [](const STerrainAtlasMaterial& material) { return material.id == 6; });
+    QVERIFY(stillWater != analysis.materials.constEnd());
+    QCOMPARE(stillWater->representativeSlot, 16);
+
+    const QVector<qint32> selectableLand({2, 3, 4, 7, 9});
+    for(qint32 target : selectableLand)
+    {
+        for(qint32 background : selectableLand)
+        {
+            const QVector<qint32> path =
+                analysis.landCatalog.shortestMaterialPath(target, background);
+            QVERIFY2(!path.isEmpty(), qPrintable(QString("No route %1 -> %2")
+                .arg(target).arg(background)));
+            QCOMPARE(path.front(), target);
+            QCOMPARE(path.back(), background);
+            for(qint32 routedMaterial : path)
+                QVERIFY(selectableLand.contains(routedMaterial));
+            for(int edge = 1; edge < path.size(); ++edge)
+            {
+                for(int mask = 0; mask < 16; ++mask)
+                {
+                    if(mask == 5 || mask == 10)
+                        continue;
+                    STerrainTransitionSignature routed;
+                    routed.northWest = (mask & 1) ? path.at(edge - 1) : path.at(edge);
+                    routed.northEast = (mask & 2) ? path.at(edge - 1) : path.at(edge);
+                    routed.southEast = (mask & 4) ? path.at(edge - 1) : path.at(edge);
+                    routed.southWest = (mask & 8) ? path.at(edge - 1) : path.at(edge);
+                    bool routedFound = false;
+                    analysis.landCatalog.select(routed, 0, 0, 0, &routedFound);
+                    QVERIFY2(routedFound, qPrintable(QString("Missing routed mask %1 on %2 -> %3")
+                        .arg(mask).arg(path.at(edge - 1)).arg(path.at(edge))));
+                }
+            }
+        }
+    }
+    QCOMPARE(analysis.overlayCatalog.shortestMaterialPath(5, 6),
+             QVector<qint32>({5, 6}));
+    QCOMPARE(analysis.overlayCatalog.shortestMaterialPath(6, 5),
+             QVector<qint32>({6, 5}));
+    for(const STerrainTransitionSignature& authored :
+        analysis.landCatalog.gridSignatures())
+    {
+        QSet<qint32> families;
+        families.insert(authored.northWest);
+        families.insert(authored.northEast);
+        families.insert(authored.southEast);
+        families.insert(authored.southWest);
+        QVERIFY2(families.size() <= 3,
+                 "Zone1 unexpectedly contains a four-family land tile");
+    }
+    bool hasThreeDarkOneLime = false;
+    bool hasOneDarkThreeLime = false;
+    for(const STerrainTransitionSignature& authored :
+        analysis.landCatalog.gridSignatures())
+    {
+        const qint32 corners[] = {authored.northWest, authored.northEast,
+                                  authored.southEast, authored.southWest};
+        int dark = 0;
+        int lime = 0;
+        for(qint32 corner : corners)
+        {
+            dark += corner == 3 ? 1 : 0;
+            lime += corner == 7 ? 1 : 0;
+        }
+        hasThreeDarkOneLime |= dark == 3 && lime == 1;
+        hasOneDarkThreeLime |= dark == 1 && lime == 3;
+    }
+    QVERIFY(!hasThreeDarkOneLime);
+    QVERIFY(hasOneDarkThreeLime);
+    QMap<qint32, int> existingFamilyPreference;
+    existingFamilyPreference.insert(4, 20);
+    QCOMPARE(analysis.landCatalog.shortestMaterialPath(7, 3, existingFamilyPreference),
+             QVector<qint32>({7, 4, 3}));
+
+    // The stock namespace authors real three-family junction tiles. Keep
+    // these public metadata checks separate from the private map replay so a
+    // regression cannot silently reduce semantic painting to pairwise bands.
+    QVector<STerrainTransitionSignature> threeFamilyJunctions;
+    STerrainTransitionSignature groundDarkCommon;
+    groundDarkCommon.northWest = 3;
+    groundDarkCommon.northEast = 2;
+    groundDarkCommon.southEast = 4;
+    groundDarkCommon.southWest = 4;
+    threeFamilyJunctions.append(groundDarkCommon);
+    STerrainTransitionSignature stoneDarkCommon;
+    stoneDarkCommon.northWest = 7;
+    stoneDarkCommon.northEast = 3;
+    stoneDarkCommon.southEast = 4;
+    stoneDarkCommon.southWest = 4;
+    threeFamilyJunctions.append(stoneDarkCommon);
+    for(const STerrainTransitionSignature& junction : threeFamilyJunctions)
+    {
+        bool junctionFound = false;
+        const quint16 packedJunction = analysis.landCatalog.selectForPaint(
+            junction, 100, 100, 12345u, &junctionFound);
+        QVERIFY(junctionFound);
+        bool decodedJunction = false;
+        QCOMPARE(analysis.landCatalog.gridSignatureForPacked(
+                     packedJunction, &decodedJunction), junction);
+        QVERIFY(decodedJunction);
+    }
+
+    STerrainTransitionSignature sideEdge;
+    sideEdge.northWest = 4;
+    sideEdge.northEast = 2;
+    sideEdge.southEast = 2;
+    sideEdge.southWest = 4;
+    bool normalFound = false;
+    bool paintFound = false;
+    const SMprPackedTile normalSide = SMprPackedTile::decode(
+        analysis.landCatalog.select(sideEdge, 100, 100, 12345u, &normalFound));
+    const SMprPackedTile paintedSide = SMprPackedTile::decode(
+        analysis.landCatalog.selectForPaint(sideEdge, 100, 100, 12345u, &paintFound));
+    QVERIFY(normalFound);
+    QVERIFY(paintFound);
+    QCOMPARE(paintedSide.atlasSlot(), normalSide.atlasSlot());
+    QCOMPARE(paintedSide.rotation, normalSide.rotation);
+
+    // Manual R14 evidence plus the renderer's row-zero geometry establish one
+    // conversion for every shape: catalog image Y is the reverse of terrain
+    // grid Y. This fixture-independent nine-cell contract fails under every
+    // rejected half-edge-only rotation workaround.
+    for(int dy = -1; dy <= 1; ++dy)
+    {
+        for(int dx = -1; dx <= 1; ++dx)
+        {
+            STerrainTransitionSignature stamp;
+            stamp.northWest = (dx >= 0 && dy >= 0) ? 2 : 4;
+            stamp.northEast = (dx <= 0 && dy >= 0) ? 2 : 4;
+            stamp.southEast = (dx <= 0 && dy <= 0) ? 2 : 4;
+            stamp.southWest = (dx >= 0 && dy <= 0) ? 2 : 4;
+            bool authoredFound = false;
+            bool paintedFound = false;
+            analysis.landCatalog.select(stamp, 100 + dx, 100 + dy,
+                                        12345u, &authoredFound);
+            const quint16 paintedPacked = analysis.landCatalog.selectForPaint(
+                stamp, 100 + dx, 100 + dy, 12345u, &paintedFound);
+            QVERIFY(authoredFound);
+            QVERIFY(paintedFound);
+            bool decodedFound = false;
+            const STerrainTransitionSignature decoded =
+                analysis.landCatalog.signatureForPacked(paintedPacked, &decodedFound);
+            QVERIFY(decodedFound);
+            QCOMPARE(decoded.northWest, stamp.southWest);
+            QCOMPARE(decoded.northEast, stamp.southEast);
+            QCOMPARE(decoded.southEast, stamp.northEast);
+            QCOMPARE(decoded.southWest, stamp.northWest);
+
+            // Apply the independently specified renderer grid-Y conversion:
+            // the visible result must equal the solver request at all corners.
+            STerrainTransitionSignature visible;
+            visible.northWest = decoded.southWest;
+            visible.northEast = decoded.southEast;
+            visible.southEast = decoded.northEast;
+            visible.southWest = decoded.northWest;
+            QCOMPARE(visible.northWest, stamp.northWest);
+            QCOMPARE(visible.northEast, stamp.northEast);
+            QCOMPARE(visible.southEast, stamp.southEast);
+            QCOMPARE(visible.southWest, stamp.southWest);
+        }
+    }
+
+    CValidationReport unknownReport;
+    QVERIFY(!CTerrainAtlasAnalyzer::analyze("custom", 512, &unknownReport).usable);
+    QVERIFY(unknownReport.hasErrors());
+    CValidationReport countReport;
+    QVERIFY(!CTerrainAtlasAnalyzer::analyze("zone1", 448, &countReport).usable);
+    QVERIFY(countReport.hasErrors());
+}
+
+void EnduranceDocumentTests::terrainTileStrokeCompositionKeepsFirstAndFinalValues()
+{
+    const auto delta = [](int x, int y, ETerrainTileLayer layer,
+                          quint16 before, quint16 after) {
+        STerrainTileDelta value;
+        value.globalX = x;
+        value.globalY = y;
+        value.layer = layer;
+        value.before = before;
+        value.after = after;
+        return value;
+    };
+    STerrainTileCommand stroke;
+    STerrainTileCommand first;
+    first.deltas << delta(4, 5, ETerrainTileLayer::Land, 10, 11)
+                 << delta(8, 9, ETerrainTileLayer::Land, 20, 21);
+    STerrainTileCommand second;
+    second.deltas << delta(4, 5, ETerrainTileLayer::Land, 11, 12)
+                  << delta(8, 9, ETerrainTileLayer::Land, 21, 20)
+                  << delta(4, 5, ETerrainTileLayer::Overlay, 30, 31);
+
+    appendTerrainTileCommand(&stroke, first);
+    appendTerrainTileCommand(&stroke, second);
+
+    QCOMPARE(stroke.deltas.size(), 2);
+    QCOMPARE(stroke.deltas.at(0).globalX, 4);
+    QCOMPARE(stroke.deltas.at(0).globalY, 5);
+    QCOMPARE(stroke.deltas.at(0).layer, ETerrainTileLayer::Land);
+    QCOMPARE(stroke.deltas.at(0).before, quint16(10));
+    QCOMPARE(stroke.deltas.at(0).after, quint16(12));
+    QCOMPARE(stroke.deltas.at(1).layer, ETerrainTileLayer::Overlay);
+    QCOMPARE(stroke.deltas.at(1).before, quint16(30));
+    QCOMPARE(stroke.deltas.at(1).after, quint16(31));
+}
+
+void EnduranceDocumentTests::terrainHeightStrokeCompositionKeepsFirstAndFinalValues()
+{
+    const auto delta = [](int x, int y, quint16 before, quint16 after,
+                          bool clamped = false) {
+        STerrainHeightDelta value;
+        value.globalX = x;
+        value.globalY = y;
+        value.before = before;
+        value.after = after;
+        value.clamped = clamped;
+        return value;
+    };
+    STerrainHeightCommand stroke;
+    STerrainHeightCommand first;
+    first.deltas << delta(4, 5, 100, 110)
+                 << delta(8, 9, 200, 210);
+    STerrainHeightCommand second;
+    second.deltas << delta(4, 5, 110, 120, true)
+                  << delta(8, 9, 210, 200)
+                  << delta(12, 13, 300, 310);
+
+    appendTerrainHeightCommand(&stroke, first);
+    appendTerrainHeightCommand(&stroke, second);
+
+    QCOMPARE(stroke.deltas.size(), 2);
+    QCOMPARE(stroke.deltas.at(0).globalX, 4);
+    QCOMPARE(stroke.deltas.at(0).globalY, 5);
+    QCOMPARE(stroke.deltas.at(0).before, quint16(100));
+    QCOMPARE(stroke.deltas.at(0).after, quint16(120));
+    QVERIFY(stroke.deltas.at(0).clamped);
+    QCOMPARE(stroke.deltas.at(1).globalX, 12);
+    QCOMPARE(stroke.deltas.at(1).globalY, 13);
+    QCOMPARE(stroke.deltas.at(1).before, quint16(300));
+    QCOMPARE(stroke.deltas.at(1).after, quint16(310));
+}
+
+void EnduranceDocumentTests::zone1NamespaceTemplateMatchesPrivateFixture()
+{
+    const QString fixture = qEnvironmentVariable("ENDURANCE_ZONE1_MPR_FIXTURE");
+    if(fixture.isEmpty())
+        QSKIP("Set ENDURANCE_ZONE1_MPR_FIXTURE to a copied private Zone1 MPR.");
+    CMprDocument document;
+    CValidationReport openReport;
+    QVERIFY2(document.load(QFileInfo(fixture), &openReport), qPrintable(openReport.toText()));
+    QCOMPARE(document.mapInfo().innerNamespace.toLower(), QString("zone1"));
+    CTerrainEditModel terrain;
+    CValidationReport terrainReport;
+    QVERIFY2(terrain.load(document, &terrainReport), qPrintable(terrainReport.toText()));
+    CValidationReport templateReport;
+    const STerrainAtlasAnalysis analysis = CTerrainAtlasAnalyzer::analyze(
+        document.mapInfo().innerNamespace, document.mapInfo().tileTypes.size(), &templateReport);
+    QVERIFY2(analysis.usable, qPrintable(templateReport.toText()));
+
+    int decoded = 0;
+    for(const ETerrainTileLayer layer : {ETerrainTileLayer::Land, ETerrainTileLayer::Overlay})
+    {
+        const CTerrainTransitionCatalog& catalog = analysis.catalog(layer);
+        for(int y = 0; y < terrain.tileCountY(); ++y)
+        {
+            for(int x = 0; x < terrain.tileCountX(); ++x)
+            {
+                bool available = false;
+                const quint16 packed = terrain.packedTile(x, y, layer, &available);
+                if(!available)
+                    continue;
+                bool found = false;
+                catalog.signatureForPacked(packed, &found);
+                QVERIFY2(found, qPrintable(QString("Undescribed %1 tile at %2,%3: 0x%4")
+                    .arg(layer == ETerrainTileLayer::Land ? "land" : "overlay")
+                    .arg(x).arg(y).arg(packed, 4, 16, QLatin1Char('0'))));
+                ++decoded;
+            }
+        }
+    }
+    QVERIFY(decoded > 0);
+
+    QMap<qint32, qint64> uniformLandCounts;
+    QMap<qint32, qint64> uniformLandWithOverlayCounts;
+    for(int y = 0; y < terrain.tileCountY(); ++y)
+    {
+        for(int x = 0; x < terrain.tileCountX(); ++x)
+        {
+            bool available = false;
+            const quint16 landPacked = terrain.packedTile(
+                x, y, ETerrainTileLayer::Land, &available);
+            if(!available)
+                continue;
+            bool found = false;
+            const STerrainTransitionSignature signature =
+                analysis.landCatalog.signatureForPacked(landPacked, &found);
+            if(!found || signature.northWest != signature.northEast
+               || signature.northWest != signature.southEast
+               || signature.northWest != signature.southWest)
+                continue;
+            ++uniformLandCounts[signature.northWest];
+            terrain.packedTile(x, y, ETerrainTileLayer::Overlay, &available);
+            if(available)
+                ++uniformLandWithOverlayCounts[signature.northWest];
+        }
+    }
+    // The two source families named ground/darkwater and ground/water are
+    // underwater bases in the copied Zone1 fixture, not ordinary land paint:
+    // every uniform occurrence sits beneath an active overlay.
+    QVERIFY(uniformLandCounts.value(1) > 0);
+    QCOMPARE(uniformLandWithOverlayCounts.value(1), uniformLandCounts.value(1));
+    QVERIFY(uniformLandCounts.value(8) > 0);
+    QCOMPARE(uniformLandWithOverlayCounts.value(8), uniformLandCounts.value(8));
+
+    // Correct atlas flip and packed-rotation interpretation makes the shipped
+    // map an almost perfectly coherent corner lattice. Preserve the few
+    // authored exceptions, but reject the thousands of disagreements produced
+    // by the former image-space interpretation.
+    qint64 disagreements = 0;
+    qint64 comparisons = 0;
+    for(int y = 0; y < terrain.tileCountY(); ++y)
+    {
+        for(int x = 0; x < terrain.tileCountX(); ++x)
+        {
+            bool found = false;
+            const STerrainTransitionSignature here =
+                analysis.landCatalog.signatureForPacked(terrain.packedTile(
+                    x, y, ETerrainTileLayer::Land), &found);
+            QVERIFY(found);
+            if(x + 1 < terrain.tileCountX())
+            {
+                const STerrainTransitionSignature east =
+                    analysis.landCatalog.signatureForPacked(terrain.packedTile(
+                        x + 1, y, ETerrainTileLayer::Land), &found);
+                QVERIFY(found);
+                disagreements += here.northEast != east.northWest;
+                disagreements += here.southEast != east.southWest;
+                comparisons += 2;
+            }
+            if(y + 1 < terrain.tileCountY())
+            {
+                const STerrainTransitionSignature north =
+                    analysis.landCatalog.signatureForPacked(terrain.packedTile(
+                        x, y + 1, ETerrainTileLayer::Land), &found);
+                QVERIFY(found);
+                disagreements += here.northWest != north.southWest;
+                disagreements += here.northEast != north.southEast;
+                comparisons += 2;
+            }
+        }
+    }
+    QVERIFY(comparisons > 100000);
+    QVERIFY(disagreements <= 100);
+
+    QSet<qint32> paintableMaterials;
+    STerrainTileBrush brush;
+    brush.radius = 0.0f;
+    brush.shape = ETerrainTileBrushShape::Square;
+    for(const STerrainAtlasMaterial& material : analysis.materials)
+    {
+        const ETerrainTileLayer layer = material.layer == ETerrainAtlasLayer::Land
+            ? ETerrainTileLayer::Land : ETerrainTileLayer::Overlay;
+        for(int y = 0; y < terrain.tileCountY() && !paintableMaterials.contains(material.id); ++y)
+        {
+            for(int x = 0; x < terrain.tileCountX(); ++x)
+            {
+                brush.centerX = float(x);
+                brush.centerY = float(y);
+                CValidationReport paintReport;
+                const STerrainTileCommand command = terrain.makeSemanticTilePaint(
+                    brush, layer, material.id, analysis.catalog(layer), 12345u, &paintReport);
+                if(!command.isEmpty())
+                {
+                    paintableMaterials.insert(material.id);
+                    break;
+                }
+            }
+        }
+    }
+    QCOMPARE(paintableMaterials.size(), analysis.materials.size());
+
+    // Coordinates captured from the R9 manual refusal log. Every selectable
+    // land family must now either produce a routed stamp or be an exact no-op;
+    // none may fail because a direct pair is absent from the atlas.
+    const QVector<QPoint> refusalProbes({QPoint(97, 76), QPoint(95, 74),
+                                         QPoint(102, 97)});
+    brush.radius = 0.0f; // UI brush size 1: one painted core tile.
+    QSet<qint32> changedMaterials;
+    for(const STerrainAtlasMaterial& material : analysis.materials)
+    {
+        if(material.layer != ETerrainAtlasLayer::Land || material.underwater)
+            continue;
+        for(const QPoint& probe : refusalProbes)
+        {
+            brush.centerX = float(probe.x());
+            brush.centerY = float(probe.y());
+            CValidationReport paintReport;
+            const STerrainTileCommand paint = terrain.makeSemanticTilePaint(
+                brush, ETerrainTileLayer::Land, material.id,
+                analysis.landCatalog, 12345u, &paintReport);
+            QVERIFY2(!paintReport.hasErrors(), qPrintable(QString("Material %1 at %2,%3:\n%4")
+                .arg(material.id).arg(probe.x()).arg(probe.y())
+                .arg(paintReport.toText())));
+            if(!paint.deltas.isEmpty())
+            {
+                changedMaterials.insert(material.id);
+                for(const STerrainTileDelta& delta : paint.deltas)
+                {
+                    // Pairwise routes require at most two cells; an authored
+                    // multi-family junction may use one additional constrained
+                    // ring while keeping the painted core at size one.
+                    QVERIFY(qAbs(delta.globalX - probe.x()) <= 3);
+                    QVERIFY(qAbs(delta.globalY - probe.y()) <= 3);
+                }
+            }
+        }
+    }
+    // At most the family already covering all probes may legitimately be a
+    // no-op. This catches the R9 failure mode where only one family painted.
+    QVERIFY(changedMaterials.size() >= 4);
+
+    // R22 diagnostic 1: a direct Lime/Irregular click must not expand merely
+    // because Common grass is visible beyond the existing radius-1 island.
+    CTerrainEditModel compactIsland;
+    QVERIFY(compactIsland.load(document));
+    STerrainTileBrush compactBrush;
+    compactBrush.centerX = 101.0f;
+    compactBrush.centerY = 32.0f;
+    compactBrush.radius = 1.0f;
+    compactBrush.shape = ETerrainTileBrushShape::Circle;
+    CValidationReport compactIrregularReport;
+    const STerrainTileCommand compactIrregular = compactIsland.makeSemanticTilePaint(
+        compactBrush, ETerrainTileLayer::Land, 9,
+        analysis.landCatalog, 12345u, &compactIrregularReport);
+    QVERIFY2(!compactIrregularReport.hasErrors(),
+             qPrintable(compactIrregularReport.toText()));
+    QVERIFY(!compactIrregular.isEmpty());
+    QVERIFY(compactIsland.apply(compactIrregular, true));
+    compactBrush.radius = 0.0f;
+    CValidationReport compactLimeReport;
+    const STerrainTileCommand compactLime = compactIsland.makeSemanticTilePaint(
+        compactBrush, ETerrainTileLayer::Land, 7,
+        analysis.landCatalog, 12345u, &compactLimeReport);
+    QVERIFY2(!compactLimeReport.hasErrors(), qPrintable(compactLimeReport.toText()));
+    QVERIFY(!compactLime.isEmpty());
+    QCOMPARE(compactLime.semanticAudit.junctionPadding, 1);
+    int commonToIrregular = 0;
+    QSet<int> countedCompactCorners;
+    for(const STerrainTileDelta& delta : compactLime.deltas)
+    {
+        bool beforeFound = false;
+        bool afterFound = false;
+        const STerrainTransitionSignature before =
+            analysis.landCatalog.gridSignatureForPacked(delta.before, &beforeFound);
+        const STerrainTransitionSignature after =
+            analysis.landCatalog.gridSignatureForPacked(delta.after, &afterFound);
+        QVERIFY(beforeFound);
+        QVERIFY(afterFound);
+        const qint32 beforeValues[4] = {before.northWest, before.northEast,
+                                        before.southEast, before.southWest};
+        const qint32 afterValues[4] = {after.northWest, after.northEast,
+                                       after.southEast, after.southWest};
+        const int keys[4] = {
+            delta.globalY * (compactIsland.tileCountX() + 1) + delta.globalX,
+            delta.globalY * (compactIsland.tileCountX() + 1) + delta.globalX + 1,
+            (delta.globalY + 1) * (compactIsland.tileCountX() + 1) + delta.globalX + 1,
+            (delta.globalY + 1) * (compactIsland.tileCountX() + 1) + delta.globalX
+        };
+        for(int corner = 0; corner < 4; ++corner)
+        {
+            if(countedCompactCorners.contains(keys[corner]))
+                continue;
+            countedCompactCorners.insert(keys[corner]);
+            commonToIrregular += beforeValues[corner] == 4
+                && afterValues[corner] == 9;
+        }
+    }
+    QCOMPARE(commonToIrregular, 0);
+    QVERIFY(compactIsland.apply(compactLime, true));
+    CValidationReport repeatedLimeReport;
+    const STerrainTileCommand repeatedLime = compactIsland.makeSemanticTilePaint(
+        compactBrush, ETerrainTileLayer::Land, 7,
+        analysis.landCatalog, 12345u, &repeatedLimeReport);
+    QVERIFY2(!repeatedLimeReport.hasErrors(), qPrintable(repeatedLimeReport.toText()));
+    QVERIFY(repeatedLime.isEmpty());
+
+    // R22 diagnostic 2 minimized to the 5x5 state around the refused click.
+    // The atlas already contains direct Dark/Lime signatures in this exact
+    // neighborhood, so route discovery must not force Ground as an
+    // intermediary and break the continuous Dark patch.
+    CTerrainEditModel directObserved;
+    QVERIFY(directObserved.load(document));
+    const QVector<quint16> directObservedState({
+        32861,32877,32877,32883,32887,
+        49261,32817,16742,410,411,
+        49262,49201,16794,16386,2,
+        49268,49,33126,33178,33179,
+        49269,16433,49,16742,410
+    });
+    STerrainTileCommand directObservedSetup;
+    for(int localY = 0; localY < 5; ++localY)
+    {
+        for(int localX = 0; localX < 5; ++localX)
+        {
+            const int x = 95 + localX;
+            const int y = 31 + localY;
+            const quint16 after = directObservedState.at(localY * 5 + localX);
+            const quint16 before = directObserved.packedTile(
+                x, y, ETerrainTileLayer::Land);
+            if(before == after)
+                continue;
+            STerrainTileDelta delta;
+            delta.globalX = x;
+            delta.globalY = y;
+            delta.layer = ETerrainTileLayer::Land;
+            delta.before = before;
+            delta.after = after;
+            directObservedSetup.deltas.append(delta);
+        }
+    }
+    QVERIFY(directObserved.apply(directObservedSetup, true));
+    STerrainTileBrush directObservedBrush;
+    directObservedBrush.centerX = 97.0f;
+    directObservedBrush.centerY = 33.0f;
+    directObservedBrush.radius = 0.0f;
+    directObservedBrush.shape = ETerrainTileBrushShape::Circle;
+    CValidationReport directObservedReport;
+    const STerrainTileCommand directDark = directObserved.makeSemanticTilePaint(
+        directObservedBrush, ETerrainTileLayer::Land, 3,
+        analysis.landCatalog, 12345u, &directObservedReport);
+    QVERIFY2(!directObservedReport.hasErrors(), qPrintable(directObservedReport.toText()));
+    QVERIFY(!directDark.isEmpty());
+    QCOMPARE(directDark.semanticAudit.materialPath, QVector<qint32>({3, 7}));
+    QCOMPARE(directDark.semanticAudit.junctionPadding, 0);
+
+    // Replay the Ground/common path captured by the user's R16 diagnostic on
+    // this exact copied Zone1 fixture. Consecutive samples belong to nearby
+    // strokes and must merge into one corner-consistent region instead of
+    // treating already-painted Ground/common as the new background family.
+    CTerrainEditModel mergedTerrain;
+    CValidationReport mergedLoadReport;
+    QVERIFY2(mergedTerrain.load(document, &mergedLoadReport),
+             qPrintable(mergedLoadReport.toText()));
+    const QVector<QPoint> capturedCenters({
+        QPoint(103, 40), QPoint(107, 41), QPoint(106, 40), QPoint(105, 40),
+        QPoint(104, 40), QPoint(104, 39), QPoint(103, 41), QPoint(104, 41),
+        QPoint(105, 41), QPoint(105, 40), QPoint(106, 40), QPoint(106, 39),
+        QPoint(107, 39), QPoint(108, 38), QPoint(107, 40), QPoint(105, 40),
+        QPoint(113, 46), QPoint(113, 42)
+    });
+    QSet<int> changedCells;
+    for(int sample = 0; sample < capturedCenters.size(); ++sample)
+    {
+        const QPoint center = capturedCenters.at(sample);
+        brush.centerX = float(center.x());
+        brush.centerY = float(center.y());
+        brush.radius = sample >= 16 ? 1.0f : 0.0f;
+        brush.shape = ETerrainTileBrushShape::Circle;
+        CValidationReport mergeReport;
+        const STerrainTileCommand paint = mergedTerrain.makeSemanticTilePaint(
+            brush, ETerrainTileLayer::Land, 2, analysis.landCatalog,
+            12345u, &mergeReport);
+        QVERIFY2(!mergeReport.hasErrors(), qPrintable(QString("Captured sample %1 at %2,%3:\n%4")
+            .arg(sample).arg(center.x()).arg(center.y()).arg(mergeReport.toText())));
+        for(const STerrainTileDelta& delta : paint.deltas)
+            changedCells.insert(delta.globalY * mergedTerrain.tileCountX() + delta.globalX);
+        QVERIFY2(mergedTerrain.apply(paint, true, &mergeReport),
+                 qPrintable(mergeReport.toText()));
+    }
+    QVERIFY(changedCells.size() > 20);
+
+    const auto gridSignature = [&](int x, int y, bool* found) {
+        return analysis.landCatalog.gridSignatureForPacked(mergedTerrain.packedTile(
+            x, y, ETerrainTileLayer::Land), found);
+    };
+    for(int index : changedCells)
+    {
+        const int x = index % mergedTerrain.tileCountX();
+        const int y = index / mergedTerrain.tileCountX();
+        bool found = false;
+        const STerrainTransitionSignature here = gridSignature(x, y, &found);
+        QVERIFY(found);
+        if(x + 1 < mergedTerrain.tileCountX())
+        {
+            const STerrainTransitionSignature east = gridSignature(x + 1, y, &found);
+            QVERIFY(found);
+            QCOMPARE(here.northEast, east.northWest);
+            QCOMPARE(here.southEast, east.southWest);
+        }
+        if(y + 1 < mergedTerrain.tileCountY())
+        {
+            const STerrainTransitionSignature south = gridSignature(x, y + 1, &found);
+            QVERIFY(found);
+            QCOMPARE(here.southWest, south.northWest);
+            QCOMPARE(here.southEast, south.northEast);
+        }
+    }
+
+    // R17 version-3 evidence: lay down the captured Ground/common region,
+    // then introduce Grass/dark at its boundary with untouched Grass/common.
+    // The atlas contains authored 2+3+4 junctions; a two-family-only solve
+    // must not erase family 4 or leave a shared-edge disagreement.
+    CTerrainEditModel threeWayTerrain;
+    CValidationReport threeWayLoadReport;
+    QVERIFY2(threeWayTerrain.load(document, &threeWayLoadReport),
+             qPrintable(threeWayLoadReport.toText()));
+    const QVector<QPoint> groundCenters({
+        QPoint(102, 40), QPoint(103, 40), QPoint(105, 40), QPoint(108, 40),
+        QPoint(106, 40), QPoint(103, 39), QPoint(103, 38), QPoint(102, 38),
+        QPoint(101, 38), QPoint(101, 37), QPoint(100, 38), QPoint(99, 38),
+        QPoint(99, 39), QPoint(100, 40), QPoint(102, 41), QPoint(102, 42),
+        QPoint(101, 42), QPoint(100, 42), QPoint(98, 39), QPoint(98, 40)
+    });
+    QSet<int> threeWayChanged;
+    const auto paintSample = [&](const QPoint& center, qint32 material) {
+        STerrainTileBrush sampleBrush;
+        sampleBrush.centerX = float(center.x());
+        sampleBrush.centerY = float(center.y());
+        sampleBrush.radius = 0.0f;
+        sampleBrush.shape = ETerrainTileBrushShape::Circle;
+        CValidationReport sampleReport;
+        const STerrainTileCommand command = threeWayTerrain.makeSemanticTilePaint(
+            sampleBrush, ETerrainTileLayer::Land, material,
+            analysis.landCatalog, 12345u, &sampleReport);
+        QVERIFY2(!sampleReport.hasErrors(), qPrintable(sampleReport.toText()));
+        for(const STerrainTileDelta& delta : command.deltas)
+            threeWayChanged.insert(delta.globalY * threeWayTerrain.tileCountX()
+                                   + delta.globalX);
+        QVERIFY2(threeWayTerrain.apply(command, true, &sampleReport),
+                 qPrintable(sampleReport.toText()));
+    };
+    for(const QPoint& center : groundCenters)
+        paintSample(center, 2);
+    paintSample(QPoint(100, 40), 3);
+
+    for(int index : threeWayChanged)
+    {
+        const int x = index % threeWayTerrain.tileCountX();
+        const int y = index / threeWayTerrain.tileCountX();
+        bool found = false;
+        const STerrainTransitionSignature here =
+            analysis.landCatalog.gridSignatureForPacked(threeWayTerrain.packedTile(
+                x, y, ETerrainTileLayer::Land), &found);
+        QVERIFY(found);
+        if(x + 1 < threeWayTerrain.tileCountX())
+        {
+            const STerrainTransitionSignature east =
+                analysis.landCatalog.gridSignatureForPacked(threeWayTerrain.packedTile(
+                    x + 1, y, ETerrainTileLayer::Land), &found);
+            QVERIFY(found);
+            QCOMPARE(here.northEast, east.northWest);
+            QCOMPARE(here.southEast, east.southWest);
+        }
+        if(y + 1 < threeWayTerrain.tileCountY())
+        {
+            const STerrainTransitionSignature south =
+                analysis.landCatalog.gridSignatureForPacked(threeWayTerrain.packedTile(
+                    x, y + 1, ETerrainTileLayer::Land), &found);
+            QVERIFY(found);
+            QCOMPARE(here.southWest, south.northWest);
+            QCOMPARE(here.southEast, south.northEast);
+        }
+    }
+    const QVector<QPoint> darkGrassCenters({
+        QPoint(100, 38), QPoint(99, 38), QPoint(99, 37), QPoint(99, 36),
+        QPoint(99, 39), QPoint(101, 35), QPoint(100, 41)
+    });
+    for(const QPoint& center : darkGrassCenters)
+        paintSample(center, 3);
+    paintSample(QPoint(100, 39), 7);
+
+    for(int index : threeWayChanged)
+    {
+        const int x = index % threeWayTerrain.tileCountX();
+        const int y = index / threeWayTerrain.tileCountX();
+        bool found = false;
+        const STerrainTransitionSignature here =
+            analysis.landCatalog.gridSignatureForPacked(threeWayTerrain.packedTile(
+                x, y, ETerrainTileLayer::Land), &found);
+        QVERIFY(found);
+        if(x + 1 < threeWayTerrain.tileCountX())
+        {
+            const STerrainTransitionSignature east =
+                analysis.landCatalog.gridSignatureForPacked(threeWayTerrain.packedTile(
+                    x + 1, y, ETerrainTileLayer::Land), &found);
+            QVERIFY(found);
+            QCOMPARE(here.northEast, east.northWest);
+            QCOMPARE(here.southEast, east.southWest);
+        }
+        if(y + 1 < threeWayTerrain.tileCountY())
+        {
+            const STerrainTransitionSignature south =
+                analysis.landCatalog.gridSignatureForPacked(threeWayTerrain.packedTile(
+                    x, y + 1, ETerrainTileLayer::Land), &found);
+            QVERIFY(found);
+            QCOMPARE(here.southWest, south.northWest);
+            QCOMPARE(here.southEast, south.northEast);
+        }
+    }
+
+    const auto applyJunctionSample = [&](CTerrainEditModel& model,
+                                         QSet<int>& changed,
+                                         const QPoint& center,
+                                         qint32 material) {
+        STerrainTileBrush sampleBrush;
+        sampleBrush.centerX = float(center.x());
+        sampleBrush.centerY = float(center.y());
+        sampleBrush.radius = 0.0f;
+        sampleBrush.shape = ETerrainTileBrushShape::Circle;
+        CValidationReport sampleReport;
+        const STerrainTileCommand sample = model.makeSemanticTilePaint(
+            sampleBrush, ETerrainTileLayer::Land, material,
+            analysis.landCatalog, 12345u, &sampleReport);
+        QVERIFY2(!sampleReport.hasErrors(), qPrintable(sampleReport.toText()));
+        QVERIFY(sample.semanticAudit.valid);
+        QCOMPARE(sample.semanticAudit.requestedMaterialId, material);
+        QCOMPARE(sample.semanticAudit.paintedCoreCells,
+                 QVector<QPoint>({center}));
+        QVERIFY(!sample.semanticAudit.affectedCells.isEmpty());
+        QVERIFY(sample.semanticAudit.solverMode != QStringLiteral("not-run"));
+        for(const STerrainTileDelta& delta : sample.deltas)
+            changed.insert(delta.globalY * model.tileCountX() + delta.globalX);
+        QVERIFY2(model.apply(sample, true, &sampleReport),
+                 qPrintable(sampleReport.toText()));
+    };
+    const auto verifyJunctionSeams = [&](const CTerrainEditModel& model,
+                                         const QSet<int>& changed) {
+        for(int index : changed)
+        {
+            const int x = index % model.tileCountX();
+            const int y = index / model.tileCountX();
+            bool found = false;
+            const STerrainTransitionSignature here =
+                analysis.landCatalog.gridSignatureForPacked(model.packedTile(
+                    x, y, ETerrainTileLayer::Land), &found);
+            QVERIFY(found);
+            if(x + 1 < model.tileCountX())
+            {
+                const STerrainTransitionSignature east =
+                    analysis.landCatalog.gridSignatureForPacked(model.packedTile(
+                        x + 1, y, ETerrainTileLayer::Land), &found);
+                QVERIFY(found);
+                QCOMPARE(here.northEast, east.northWest);
+                QCOMPARE(here.southEast, east.southWest);
+            }
+            if(y + 1 < model.tileCountY())
+            {
+                const STerrainTransitionSignature south =
+                    analysis.landCatalog.gridSignatureForPacked(model.packedTile(
+                        x, y + 1, ETerrainTileLayer::Land), &found);
+                QVERIFY(found);
+                QCOMPARE(here.southWest, south.northWest);
+                QCOMPARE(here.southEast, south.northEast);
+            }
+        }
+    };
+
+    // A dark patch followed by adjacent irregular grass, both surrounded by
+    // common grass, must select an authored 3/4/9 junction instead of erasing
+    // either minority family merely because the resulting edges are valid.
+    CTerrainEditModel preservedMinorityJunction;
+    QVERIFY(preservedMinorityJunction.load(document));
+    QSet<int> preservedMinorityChanged;
+    applyJunctionSample(preservedMinorityJunction, preservedMinorityChanged,
+                        QPoint(101, 38), 3);
+    bool darkPresentBeforeIrregular = false;
+    for(int index : preservedMinorityChanged)
+    {
+        bool found = false;
+        const STerrainTransitionSignature signature =
+            analysis.landCatalog.gridSignatureForPacked(
+                preservedMinorityJunction.packedTile(
+                    index % preservedMinorityJunction.tileCountX(),
+                    index / preservedMinorityJunction.tileCountX(),
+                    ETerrainTileLayer::Land), &found);
+        QVERIFY(found);
+        darkPresentBeforeIrregular |= signature.northWest == 3 || signature.northEast == 3
+            || signature.southEast == 3 || signature.southWest == 3;
+    }
+    QVERIFY(darkPresentBeforeIrregular);
+    applyJunctionSample(preservedMinorityJunction, preservedMinorityChanged,
+                        QPoint(102, 38), 9);
+    verifyJunctionSeams(preservedMinorityJunction, preservedMinorityChanged);
+    bool foundDarkIrregularCommonJunction = false;
+    QStringList observedMinoritySignatures;
+    for(int index : preservedMinorityChanged)
+    {
+        bool found = false;
+        const STerrainTransitionSignature signature =
+            analysis.landCatalog.gridSignatureForPacked(
+                preservedMinorityJunction.packedTile(
+                    index % preservedMinorityJunction.tileCountX(),
+                    index / preservedMinorityJunction.tileCountX(),
+                    ETerrainTileLayer::Land), &found);
+        QVERIFY(found);
+        const QSet<qint32> families({signature.northWest, signature.northEast,
+                                     signature.southEast, signature.southWest});
+        observedMinoritySignatures.append(QString("%1,%2,%3,%4")
+            .arg(signature.northWest).arg(signature.northEast)
+            .arg(signature.southEast).arg(signature.southWest));
+        if(families.contains(3) && families.contains(4) && families.contains(9))
+            foundDarkIrregularCommonJunction = true;
+    }
+    QVERIFY2(foundDarkIrregularCommonJunction,
+             qPrintable(observedMinoritySignatures.join(" | ")));
+
+    const auto applyRadiusSample = [&](CTerrainEditModel& model,
+                                        const QPoint& center,
+                                        float radius,
+                                        qint32 material) -> STerrainTileCommand {
+        STerrainTileBrush sampleBrush;
+        sampleBrush.centerX = float(center.x());
+        sampleBrush.centerY = float(center.y());
+        sampleBrush.radius = radius;
+        sampleBrush.shape = ETerrainTileBrushShape::Circle;
+        CValidationReport sampleReport;
+        const STerrainTileCommand sample = model.makeSemanticTilePaint(
+            sampleBrush, ETerrainTileLayer::Land, material,
+            analysis.landCatalog, 12345u, &sampleReport);
+        if(sampleReport.hasErrors() || sample.isEmpty()
+           || !model.apply(sample, true, &sampleReport))
+            return STerrainTileCommand();
+        return sample;
+    };
+    const auto materialCornerCount = [&](const CTerrainEditModel& model,
+                                          const QRect& area,
+                                          qint32 material) {
+        int count = 0;
+        for(int y = area.top(); y <= area.bottom(); ++y)
+        {
+            for(int x = area.left(); x <= area.right(); ++x)
+            {
+                bool found = false;
+                const STerrainTransitionSignature signature =
+                    analysis.landCatalog.gridSignatureForPacked(model.packedTile(
+                        x, y, ETerrainTileLayer::Land), &found);
+                if(!found)
+                    continue;
+                count += signature.northWest == material;
+                count += signature.northEast == material;
+                count += signature.southEast == material;
+                count += signature.southWest == material;
+            }
+        }
+        return count;
+    };
+
+    // R22 diagnostic 3: the two later strokes do not overlap the Irregular
+    // core. Lime and then Ground may retile their contacted boundaries, but
+    // neither may consume the established Irregular ownership or make the
+    // preceding Lime island retreat.
+    CTerrainEditModel preservedSequenceThree;
+    QVERIFY(preservedSequenceThree.load(document));
+    QVERIFY(!applyRadiusSample(preservedSequenceThree,
+                               QPoint(101, 34), 0.0f, 9).isEmpty());
+    const QRect sequenceThreeArea(97, 28, 9, 11);
+    const int irregularAfterPaint = materialCornerCount(
+        preservedSequenceThree, sequenceThreeArea, 9);
+    QVERIFY(!applyRadiusSample(preservedSequenceThree,
+                               QPoint(101, 32), 0.0f, 7).isEmpty());
+    const int irregularAfterLime = materialCornerCount(
+        preservedSequenceThree, sequenceThreeArea, 9);
+    QVERIFY(irregularAfterLime >= irregularAfterPaint);
+    const int limeBeforeGround = materialCornerCount(
+        preservedSequenceThree, sequenceThreeArea, 7);
+    STerrainTileBrush sequenceGroundBrush;
+    sequenceGroundBrush.centerX = 100.0f;
+    sequenceGroundBrush.centerY = 33.0f;
+    sequenceGroundBrush.radius = 0.0f;
+    sequenceGroundBrush.shape = ETerrainTileBrushShape::Circle;
+    CValidationReport sequenceGroundReport;
+    const STerrainTileCommand sequenceGround =
+        preservedSequenceThree.makeSemanticTilePaint(
+            sequenceGroundBrush, ETerrainTileLayer::Land, 2,
+            analysis.landCatalog, 12345u, &sequenceGroundReport);
+    QVERIFY(sequenceGround.isEmpty());
+    QVERIFY(sequenceGroundReport.hasErrors());
+    QCOMPARE(sequenceGroundReport.findings().front().code,
+             QStringLiteral("terrain.semantic_core_unsupported"));
+    QVERIFY(materialCornerCount(preservedSequenceThree,
+                                sequenceThreeArea, 9) >= irregularAfterLime);
+    QVERIFY(materialCornerCount(preservedSequenceThree,
+                                sequenceThreeArea, 7) >= limeBeforeGround);
+
+    // R22 diagnostics 4/5: once a Lime boundary is established, nearby Ground
+    // strokes must not consume isolated Lime half-corners outside their core.
+    CTerrainEditModel stableLimeBoundary;
+    QVERIFY(stableLimeBoundary.load(document));
+    const QVector<QPoint> limeBoundaryPoints({QPoint(101, 32), QPoint(100, 32),
+                                               QPoint(99, 32), QPoint(99, 31),
+                                               QPoint(99, 30), QPoint(100, 30),
+                                               QPoint(101, 30)});
+    for(const QPoint& point : limeBoundaryPoints)
+        QVERIFY(!applyRadiusSample(stableLimeBoundary, point, 0.0f, 7).isEmpty());
+    const QRect stableLimeArea(95, 25, 11, 14);
+    int stableLimeCount = materialCornerCount(
+        stableLimeBoundary, stableLimeArea, 7);
+    const QVector<QPoint> nearbyGroundPoints({QPoint(100, 34), QPoint(101, 34),
+                                               QPoint(99, 34), QPoint(99, 28),
+                                               QPoint(100, 28), QPoint(101, 28)});
+    for(const QPoint& point : nearbyGroundPoints)
+    {
+        QVERIFY(!applyRadiusSample(stableLimeBoundary, point, 0.0f, 2).isEmpty());
+        const int afterGround = materialCornerCount(
+            stableLimeBoundary, stableLimeArea, 7);
+        QVERIFY(afterGround >= stableLimeCount);
+        stableLimeCount = afterGround;
+    }
+
+    // Lime inside a Dark-grass patch surrounded by Common grass has two
+    // equally short authored routes. Reuse Common (7/4/3), never introduce
+    // absent Ground (7/2/3) merely because material 2 sorts first.
+    CTerrainEditModel limeInsideDark;
+    QVERIFY(limeInsideDark.load(document));
+    QSet<int> limeInsideDarkChanged;
+    for(int y = 45; y <= 47; ++y)
+        for(int x = 114; x <= 116; ++x)
+            applyJunctionSample(limeInsideDark, limeInsideDarkChanged, QPoint(x, y), 3);
+    const QRect limeDarkArea(110, 41, 11, 11);
+    const int groundBeforeLime = materialCornerCount(limeInsideDark, limeDarkArea, 2);
+    const STerrainTileCommand limeCommand =
+        applyRadiusSample(limeInsideDark, QPoint(115, 46), 1.0f, 7);
+    QVERIFY(!limeCommand.isEmpty());
+    QCOMPARE(limeCommand.semanticAudit.materialPath,
+             QVector<qint32>({7, 4, 3}));
+    QCOMPARE(materialCornerCount(limeInsideDark, limeDarkArea, 2), groundBeforeLime);
+    QVERIFY(materialCornerCount(limeInsideDark, limeDarkArea, 3) > 0);
+
+    // The former preservation anchors could reject this ordinary nested edit
+    // before search began. Ground must be paintable inside Irregular grass
+    // surrounded by Lime without deleting the command as an impossible CSP.
+    CTerrainEditModel nestedGround;
+    QVERIFY(nestedGround.load(document));
+    QVERIFY(!applyRadiusSample(nestedGround, QPoint(109, 40), 2.0f, 7).isEmpty());
+    QVERIFY(!applyRadiusSample(nestedGround, QPoint(109, 40), 1.0f, 9).isEmpty());
+    const STerrainTileCommand nestedGroundCommand =
+        applyRadiusSample(nestedGround, QPoint(109, 40), 0.0f, 2);
+    QVERIFY(!nestedGroundCommand.isEmpty());
+
+    // R21 diagnostic 4 minimized to the exact 7x7 pre-stroke neighborhood.
+    // Painting Ground/common at 103,37 previously changed the unrelated
+    // Common-grass corner at 105,39 into Stone/lime solely because Lime was
+    // present nearby. Local support must break that otherwise valid CSP tie.
+    struct SLocalPackedTile { int x; int y; quint16 packed; };
+    const QVector<SLocalPackedTile> diagnosticFourState({
+        {100,34,5},{101,34,32775},{102,34,49155},{103,34,32772},{104,34,5},{105,34,32855},{106,34,32881},
+        {100,35,49159},{101,35,32775},{102,35,49158},{103,35,7},{104,35,16388},{105,35,49272},{106,35,16512},
+        {100,36,7},{101,36,16389},{102,36,7},{103,36,49157},{104,36,6},{105,36,49241},{106,36,84},
+        {100,37,49157},{101,37,16387},{102,37,16387},{103,37,16390},{104,37,16387},{105,37,7},{106,37,32771},
+        {100,38,16391},{101,38,4},{102,38,32853},{103,38,32882},{104,38,16467},{105,38,16390},{106,38,49155},
+        {100,39,32771},{101,39,6},{102,39,49262},{103,39,32817},{104,39,16493},{105,39,6},{106,39,49156},
+        {100,40,16508},{101,40,185},{102,40,49651},{103,40,16432},{104,40,16501},{105,40,49155},{106,40,16391}
+    });
+    CTerrainEditModel diagnosticFour;
+    QVERIFY(diagnosticFour.load(document));
+    STerrainTileCommand diagnosticFourSetup;
+    for(const SLocalPackedTile& tile : diagnosticFourState)
+    {
+        const quint16 before = diagnosticFour.packedTile(
+            tile.x, tile.y, ETerrainTileLayer::Land);
+        if(before == tile.packed)
+            continue;
+        STerrainTileDelta delta;
+        delta.globalX = tile.x;
+        delta.globalY = tile.y;
+        delta.layer = ETerrainTileLayer::Land;
+        delta.before = before;
+        delta.after = tile.packed;
+        diagnosticFourSetup.deltas.append(delta);
+    }
+    QVERIFY(diagnosticFour.apply(diagnosticFourSetup, true));
+    STerrainTileBrush diagnosticFourBrush;
+    diagnosticFourBrush.centerX = 103.0f;
+    diagnosticFourBrush.centerY = 37.0f;
+    diagnosticFourBrush.radius = 0.0f;
+    diagnosticFourBrush.shape = ETerrainTileBrushShape::Circle;
+    CValidationReport diagnosticFourReport;
+    const STerrainTileCommand diagnosticFourPaint = diagnosticFour.makeSemanticTilePaint(
+        diagnosticFourBrush, ETerrainTileLayer::Land, 2,
+        analysis.landCatalog, 12345u, &diagnosticFourReport);
+    QVERIFY2(!diagnosticFourReport.hasErrors(),
+             qPrintable(diagnosticFourReport.toText()));
+    QVERIFY(!diagnosticFourPaint.isEmpty());
+    int commonToLimeCorners = 0;
+    QSet<int> countedDiagnosticFourCorners;
+    for(const STerrainTileDelta& delta : diagnosticFourPaint.deltas)
+    {
+        bool beforeFound = false;
+        bool afterFound = false;
+        const STerrainTransitionSignature before =
+            analysis.landCatalog.gridSignatureForPacked(delta.before, &beforeFound);
+        const STerrainTransitionSignature after =
+            analysis.landCatalog.gridSignatureForPacked(delta.after, &afterFound);
+        QVERIFY(beforeFound);
+        QVERIFY(afterFound);
+        const qint32 beforeValues[4] = {before.northWest, before.northEast,
+                                        before.southEast, before.southWest};
+        const qint32 afterValues[4] = {after.northWest, after.northEast,
+                                       after.southEast, after.southWest};
+        const int cornerKeys[4] = {
+            delta.globalY * (diagnosticFour.tileCountX() + 1) + delta.globalX,
+            delta.globalY * (diagnosticFour.tileCountX() + 1) + delta.globalX + 1,
+            (delta.globalY + 1) * (diagnosticFour.tileCountX() + 1) + delta.globalX + 1,
+            (delta.globalY + 1) * (diagnosticFour.tileCountX() + 1) + delta.globalX
+        };
+        for(int corner = 0; corner < 4; ++corner)
+        {
+            if(countedDiagnosticFourCorners.contains(cornerKeys[corner]))
+                continue;
+            countedDiagnosticFourCorners.insert(cornerKeys[corner]);
+            commonToLimeCorners += beforeValues[corner] == 4 && afterValues[corner] == 7;
+        }
+    }
+    QCOMPARE(commonToLimeCorners, 0);
+
+    const auto diagnosticConversionCount = [&](const STerrainTileCommand& paint,
+                                                 qint32 fromMaterial,
+                                                 qint32 toMaterial) {
+        int count = 0;
+        QSet<int> counted;
+        for(const STerrainTileDelta& delta : paint.deltas)
+        {
+            bool beforeFound = false;
+            bool afterFound = false;
+            const STerrainTransitionSignature before =
+                analysis.landCatalog.gridSignatureForPacked(delta.before, &beforeFound);
+            const STerrainTransitionSignature after =
+                analysis.landCatalog.gridSignatureForPacked(delta.after, &afterFound);
+            if(!beforeFound || !afterFound)
+                return -1;
+            const qint32 beforeValues[4] = {before.northWest, before.northEast,
+                                            before.southEast, before.southWest};
+            const qint32 afterValues[4] = {after.northWest, after.northEast,
+                                           after.southEast, after.southWest};
+            const int cornerKeys[4] = {
+                delta.globalY * (diagnosticFour.tileCountX() + 1) + delta.globalX,
+                delta.globalY * (diagnosticFour.tileCountX() + 1) + delta.globalX + 1,
+                (delta.globalY + 1) * (diagnosticFour.tileCountX() + 1) + delta.globalX + 1,
+                (delta.globalY + 1) * (diagnosticFour.tileCountX() + 1) + delta.globalX
+            };
+            for(int corner = 0; corner < 4; ++corner)
+            {
+                if(counted.contains(cornerKeys[corner]))
+                    continue;
+                counted.insert(cornerKeys[corner]);
+                count += beforeValues[corner] == fromMaterial
+                    && afterValues[corner] == toMaterial;
+            }
+        }
+        return count;
+    };
+    const auto replayLocalDiagnostic = [&](const QVector<SLocalPackedTile>& state,
+                                            const QPoint& center,
+                                            qint32 material) {
+        CTerrainEditModel model;
+        if(!model.load(document))
+            return STerrainTileCommand();
+        STerrainTileCommand setup;
+        for(const SLocalPackedTile& tile : state)
+        {
+            const quint16 before = model.packedTile(tile.x, tile.y,
+                                                    ETerrainTileLayer::Land);
+            if(before == tile.packed)
+                continue;
+            STerrainTileDelta delta;
+            delta.globalX = tile.x;
+            delta.globalY = tile.y;
+            delta.layer = ETerrainTileLayer::Land;
+            delta.before = before;
+            delta.after = tile.packed;
+            setup.deltas.append(delta);
+        }
+        if(!model.apply(setup, true))
+            return STerrainTileCommand();
+        STerrainTileBrush sampleBrush;
+        sampleBrush.centerX = float(center.x());
+        sampleBrush.centerY = float(center.y());
+        sampleBrush.radius = 0.0f;
+        sampleBrush.shape = ETerrainTileBrushShape::Circle;
+        CValidationReport sampleReport;
+        return model.makeSemanticTilePaint(sampleBrush, ETerrainTileLayer::Land,
+                                           material, analysis.landCatalog,
+                                           12345u, &sampleReport);
+    };
+
+    const QVector<SLocalPackedTile> diagnosticOneState({
+        {95,36,32894},{96,36,49276},{97,36,49155},{98,36,7},{99,36,3},{100,36,7},{101,36,16389},
+        {95,37,4},{96,37,49156},{97,37,32945},{98,37,32999},{99,37,32992},{100,37,32998},{101,37,16834},
+        {95,38,49156},{96,38,16388},{97,38,49380},{98,38,33112},{99,38,33268},{100,38,33258},{101,38,16884},
+        {95,39,49157},{96,39,5},{97,39,49597},{98,39,49496},{99,39,49642},{100,39,16433},{101,39,16874},
+        {95,40,16389},{96,40,3},{97,40,49590},{98,40,344},{99,40,49652},{100,40,490},{101,40,500},
+        {95,41,32772},{96,41,49155},{97,41,33218},{98,41,16728},{99,41,344},{100,41,49496},{101,41,33112},
+        {95,42,32774},{96,42,32774},{97,42,49330},{98,42,438},{99,42,445},{100,42,439},{101,42,445}
+    });
+    const STerrainTileCommand diagnosticOnePaint = replayLocalDiagnostic(
+        diagnosticOneState, QPoint(98, 39), 7);
+    QVERIFY(!diagnosticOnePaint.isEmpty());
+    QCOMPARE(diagnosticConversionCount(diagnosticOnePaint, 4, 7), 0);
+
+    const QVector<SLocalPackedTile> diagnosticTwoState({
+        {96,33,5},{97,33,6},{98,33,32774},{99,33,16391},{100,33,32774},{101,33,32771},{102,33,16387},{103,33,5},{104,33,5},
+        {96,34,16390},{97,34,7},{98,34,49155},{99,34,5},{100,34,5},{101,34,32775},{102,34,49155},{103,34,32772},{104,34,5},
+        {96,35,126},{97,35,49157},{98,35,3},{99,35,32773},{100,35,49159},{101,35,32775},{102,35,49158},{103,35,7},{104,35,16388},
+        {96,36,49276},{97,36,49155},{98,36,7},{99,36,32852},{100,36,32876},{101,36,16470},{102,36,7},{103,36,49157},{104,36,6},
+        {96,37,49156},{97,37,49155},{98,37,32854},{99,37,49287},{100,37,49201},{101,37,32897},{102,37,16468},{103,37,16390},{104,37,16387},
+        {96,38,16388},{97,38,32852},{98,38,49658},{99,38,411},{100,38,410},{101,38,411},{102,38,33274},{103,38,16466},{104,38,32771},
+        {96,39,5},{97,39,49267},{98,39,16795},{99,39,32770},{100,39,16386},{101,39,2},{102,39,49563},{103,39,16500},{104,39,32775},
+        {96,40,3},{97,40,49238},{98,40,506},{99,40,33179},{100,40,33178},{101,40,33179},{102,40,16890},{103,40,88},{104,40,5},
+        {96,41,49155},{97,41,49155},{98,41,49232},{99,41,139},{100,41,49200},{101,41,16521},{102,41,90},{103,41,7},{104,41,5}
+    });
+    const STerrainTileCommand diagnosticTwoPaint = replayLocalDiagnostic(
+        diagnosticTwoState, QPoint(100, 37), 3);
+    QVERIFY(!diagnosticTwoPaint.isEmpty());
+    QCOMPARE(diagnosticConversionCount(diagnosticTwoPaint, 3, 4), 0);
+
+    const QVector<SLocalPackedTile> diagnosticThreeState({
+        {99,35,32773},{100,35,49159},{101,35,32775},{102,35,49158},{103,35,7},{104,35,16388},{105,35,49272},
+        {99,36,3},{100,36,7},{101,36,16389},{102,36,7},{103,36,49157},{104,36,6},{105,36,49241},
+        {99,37,32992},{100,37,32998},{101,37,16834},{102,37,33208},{103,37,32886},{104,37,16476},{105,37,7},
+        {99,38,49496},{100,38,470},{101,38,16854},{102,38,49642},{103,38,49201},{104,38,16497},{105,38,16390},
+        {99,39,33112},{100,39,16854},{101,39,470},{102,39,49642},{103,39,32817},{104,39,16493},{105,39,6},
+        {99,40,16728},{100,40,33112},{101,40,49496},{102,40,49642},{103,40,16432},{104,40,16501},{105,40,49155},
+        {99,41,33258},{100,41,33258},{101,41,33258},{102,41,16703},{103,41,119},{104,41,80},{105,41,16387}
+    });
+    const STerrainTileCommand diagnosticThreePaint = replayLocalDiagnostic(
+        diagnosticThreeState, QPoint(102, 38), 2);
+    QVERIFY(!diagnosticThreePaint.isEmpty());
+    QCOMPARE(diagnosticConversionCount(diagnosticThreePaint, 9, 7), 0);
+
+    // R18 follow-up diagnostic cases: irregular grass must coexist with
+    // Ground/common and Grass/dark through Grass/common, then Stone/lime must
+    // join that dark/irregular boundary without dropping a shared corner.
+    CTerrainEditModel irregularJunction;
+    QVERIFY(irregularJunction.load(document));
+    QSet<int> irregularChanged;
+    applyJunctionSample(irregularJunction, irregularChanged, QPoint(101, 40), 2);
+    applyJunctionSample(irregularJunction, irregularChanged, QPoint(101, 38), 3);
+    applyJunctionSample(irregularJunction, irregularChanged, QPoint(101, 36), 9);
+    applyJunctionSample(irregularJunction, irregularChanged, QPoint(99, 37), 7);
+    verifyJunctionSeams(irregularJunction, irregularChanged);
+
+    // Dark grass placed between and slightly below two Ground/common circles
+    // must keep both boundaries coherent, using authored junction tiles or a
+    // Grass/common intermediary where the exact corner pattern is absent.
+    CTerrainEditModel groundSandwich;
+    QVERIFY(groundSandwich.load(document));
+    QSet<int> sandwichChanged;
+    applyJunctionSample(groundSandwich, sandwichChanged, QPoint(103, 47), 2);
+    applyJunctionSample(groundSandwich, sandwichChanged, QPoint(103, 44), 2);
+    const QVector<QPoint> sandwichDarkCenters({
+        QPoint(103, 46), QPoint(103, 45), QPoint(102, 46),
+        QPoint(101, 45), QPoint(101, 46)
+    });
+    for(const QPoint& center : sandwichDarkCenters)
+        applyJunctionSample(groundSandwich, sandwichChanged, center, 3);
+    verifyJunctionSeams(groundSandwich, sandwichChanged);
+}
+
+void EnduranceDocumentTests::terrainHeightTransactionReopensAndPreservesOverlay()
+{
+    const QByteArray bytes = syntheticMpr();
+    CMprDocument baseline;
+    CValidationReport baselineReport;
+    QVERIFY2(baseline.loadBytes(bytes, "overlay-height-baseline.mpr", &baselineReport),
+             qPrintable(baselineReport.toText()));
+    QCOMPARE(baseline.sectors().size(), 1);
+    QVERIFY(baseline.sectors().front().hasOverlay);
+
+    CTerrainEditModel terrain;
+    CValidationReport terrainReport;
+    QVERIFY2(terrain.load(baseline, &terrainReport), qPrintable(terrainReport.toText()));
+    STerrainBrush brush;
+    brush.centerX = 10.0f;
+    brush.centerY = 10.0f;
+    brush.radius = 0.0f;
+    brush.falloff = ETerrainBrushFalloff::Constant;
+    CTerrainEditHistory history;
+    QVERIFY(history.execute(&terrain, terrain.makeRaiseLower(brush, 2000.0f)));
+
+    CMprEditTransaction transaction("raise one overlay-sector land vertex");
+    CValidationReport editReport;
+    QVERIFY2(terrain.appendSectorEdits(&transaction, &editReport),
+             qPrintable(editReport.toText()));
+    QCOMPARE(transaction.edits().size(), 1);
+    const SMprMemberEdit edit = transaction.edits().front();
+    const QByteArray originalSector = baseline.memberPayload(edit.memberName);
+    QCOMPARE(edit.replacementPayload.size(), originalSector.size());
+    const int overlayOffset = int(baseline.sectors().front().overlayVertexOffset);
+    QVERIFY(overlayOffset > 0);
+    QCOMPARE(edit.replacementPayload.mid(overlayOffset), originalSector.mid(overlayOffset));
+    QCOMPARE(sectorHeight(edit.replacementPayload, 10, 10), quint16(2000));
+    QCOMPARE(sectorPackedNormal(edit.replacementPayload, 2, 2),
+             sectorPackedNormal(originalSector, 2, 2));
+    QSet<int> allowedChangedBytes;
+    const int changedVertexOffset = 5 + (10 * 33 + 10) * 8;
+    allowedChangedBytes.insert(changedVertexOffset + 2);
+    allowedChangedBytes.insert(changedVertexOffset + 3);
+    for(int y = 9; y <= 11; ++y)
+    {
+        for(int x = 9; x <= 11; ++x)
+        {
+            const int normalOffset = 5 + (y * 33 + x) * 8 + 4;
+            for(int byte = 0; byte < 4; ++byte)
+                allowedChangedBytes.insert(normalOffset + byte);
+        }
+    }
+    for(int offset = 0; offset < originalSector.size(); ++offset)
+    {
+        if(!allowedChangedBytes.contains(offset))
+            QCOMPARE(edit.replacementPayload.at(offset), originalSector.at(offset));
+    }
+
+    QByteArray candidateBytes;
+    CValidationReport transactionReport;
+    QVERIFY2(baseline.applyTransaction(transaction, &candidateBytes, &transactionReport),
+             qPrintable(transactionReport.toText()));
+    CMprDocument candidate;
+    CValidationReport candidateReport;
+    QVERIFY2(candidate.loadBytes(candidateBytes, "overlay-height-candidate.mpr", &candidateReport),
+             qPrintable(candidateReport.toText()));
+    QCOMPARE(candidate.memberPayload("unknown.bin"), baseline.memberPayload("unknown.bin"));
+    QCOMPARE(candidate.memberPayload("caveset.mp"), baseline.memberPayload("caveset.mp"));
+    QCOMPARE(candidate.memberPayload(edit.memberName), edit.replacementPayload);
+    const CMprSemanticDiff diff = CMprSemanticDiff::compare(baseline, candidate);
+    QCOMPARE(diff.entries().size(), 1);
+    QCOMPARE(diff.entries().front().memberName, edit.memberName);
+}
+
+void EnduranceDocumentTests::conflictingTerrainSeamIsPreservedAndNotEditable()
+{
+    QVector<STerrainSectorSource> sources = twoSectorTerrain(1000);
+    QByteArray right = sources[1].payload;
+    const int offset = 5 + (10 * 33) * 8 + 2;
+    right[offset] = char(0xD0);
+    right[offset + 1] = char(0x07); // 2000, little endian
+    sources[1].payload = right;
+
+    CTerrainEditModel terrain;
+    CValidationReport loadReport;
+    QVERIFY(terrain.loadSources(2, 1, 100.0f, sources, &loadReport));
+    QVERIFY(terrain.hasSeamConflicts());
+    QCOMPARE(sectorHeight(terrain.sectorPayload(0, 0), 32, 10), quint16(1000));
+    QCOMPARE(sectorHeight(terrain.sectorPayload(1, 0), 0, 10), quint16(2000));
+
+    STerrainBrush brush;
+    brush.centerX = 32.0f;
+    brush.centerY = 10.0f;
+    brush.radius = 0.0f;
+    brush.falloff = ETerrainBrushFalloff::Constant;
+    const STerrainHeightCommand command = terrain.makeRaiseLower(brush, 100.0f);
+    CValidationReport editReport;
+    QVERIFY(!terrain.apply(command, true, &editReport));
+    QCOMPARE(sectorHeight(terrain.sectorPayload(0, 0), 32, 10), quint16(1000));
+    QCOMPARE(sectorHeight(terrain.sectorPayload(1, 0), 0, 10), quint16(2000));
+
+    brush.centerX = 31.0f;
+    const STerrainHeightCommand adjacent = terrain.makeRaiseLower(brush, 100.0f);
+    QVERIFY(!terrain.apply(adjacent, true));
+    CMprEditTransaction transaction("normal touches conflicting seam");
+    CValidationReport serializationReport;
+    QVERIFY(terrain.appendSectorEdits(&transaction, &serializationReport));
+    QVERIFY(transaction.isEmpty());
 }
 
 void EnduranceDocumentTests::malformedMprTableIsRejected()

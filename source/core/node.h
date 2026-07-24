@@ -116,6 +116,16 @@ public:
         m_rawTemplateSourceSubtree = sourceSubtree;
         m_rawTemplateCleanSubtree = cleanSubtree;
     }
+    void setRawStructuralReplacementBytes(const QByteArray& sourceSubtree,
+                                          const QByteArray& cleanSubtree)
+    {
+        setRawObjectTemplateBytes(sourceSubtree, cleanSubtree);
+        m_rawStructuralReplacement = true;
+    }
+    bool hasRawStructuralReplacementBytes() const
+    {
+        return m_rawStructuralReplacement && hasRawObjectTemplateBytes();
+    }
     bool hasRawObjectTemplateBytes() const
     {
         return !m_rawTemplateSourceSubtree.isEmpty()
@@ -145,6 +155,7 @@ protected:
     bool m_rawCopiedObject;
     QByteArray m_rawTemplateSourceSubtree;
     QByteArray m_rawTemplateCleanSubtree;
+    bool m_rawStructuralReplacement;
 
 private:
     uint m_id;

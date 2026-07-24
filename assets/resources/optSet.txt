@@ -6,6 +6,7 @@ recentFiles
 version
 mouseSenseX
 mouseSenseY
+cameraSpeedMultiplier
 dipEditSymmetric
 rangeIncrement
 logLevel

@@ -113,6 +113,24 @@ axes, pikes, and other `*00` attachment families. Hand geometry remains the
 selected anatomical/glove mesh; weapon selection adds weapon geometry rather
 than activating unrelated `base*` variants.
 
+Weapon geometry is resolved independently along three axes:
+
+1. Presentation: a standalone inventory/thumbnail or dropped-world figure may
+   come from `InitWeapons.res`, while an equipped weapon comes from a nested
+   member of the active character-family assembly.
+2. Character family: human male and female assemblies are separate resources
+   (`unhuma` and `unhufe`). An edit in one does not imply a change in the other.
+3. Hand: JMV dual-wield assemblies use distinct authored members. In the
+   controlled dagger case, `rh3.dagger08` is the character's right/main-hand
+   geometry and `lh3.dagger08` is the left/off-hand geometry. A front-facing
+   character's right hand appears on the viewer's left.
+
+The male JMV runtime control changed only `unhuma.mod/rh3.dagger08`; the
+right/main-hand dagger showed the serration while the left/off-hand copy remained
+smooth. The separately patched `InitWeapons.res/initwedg8weapon.fig` changed the
+thumbnail but not either equipped assembly member. This rejects any general rule
+that one item prototype has a single shared visible FIG.
+
 ## Animation
 
 The provider selects a compatible standing `IDLE` from ADB metadata and weapon

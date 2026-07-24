@@ -1,0 +1,100 @@
+#ifndef LANDSCAPE_TOOLS_H
+#define LANDSCAPE_TOOLS_H
+
+#include <QWidget>
+#include <QVector>
+
+#include "landscape_edit_policy.h"
+#include "terrain_edit_model.h"
+
+class QCheckBox;
+class QComboBox;
+class QDoubleSpinBox;
+class QLabel;
+class QSpinBox;
+
+enum class ELandscapeSculptTool
+{
+    Raise,
+    Lower,
+    Flatten,
+    Smooth
+};
+
+class CLandscapeTools : public QWidget
+{
+    Q_OBJECT
+public:
+    explicit CLandscapeTools(QWidget* parent = nullptr);
+
+    bool sculptEnabled() const;
+    bool editingEnabled() const;
+    bool tilePaintEnabled() const;
+    bool overlayPaintEnabled() const;
+    ELandscapeEditMode editMode() const;
+    void activateMode(ELandscapeEditMode mode, bool notify = true);
+    void setEditingEnabled(bool enabled, bool notify = true);
+    ELandscapeSculptTool sculptTool() const;
+    float radius() const;
+    float strength() const;
+    float rawDelta() const;
+    quint16 flattenHeight() const;
+    bool flipHeightmapVertically() const;
+    float paintRadius() const;
+    ETerrainTileBrushShape paintShape() const;
+    bool manualTileSelectionEnabled() const;
+    bool landFamiliesAllowedInOverlay() const;
+    void adjustSculptRadius(int steps);
+    void adjustSculptStrength(int steps);
+    void adjustPaintSize(int steps);
+    void adjustPaintTerrainType(int steps);
+    qint32 paintTerrainType(bool* selected = nullptr) const;
+    void setPaintTerrainTypes(const QVector<QPair<qint32, QString>>& landTypes,
+                              const QVector<QPair<qint32, QString>>& underwaterTypes,
+                              const QVector<QPair<qint32, QString>>& overlayTypes,
+                              const QString& status = QString());
+    bool selectPaintTerrainType(qint32 terrainType);
+    bool underwaterFamiliesVisible() const;
+    void setUnderwaterFamiliesVisible(bool visible);
+    bool mainTerrainVisible() const;
+    bool overlaysVisible() const;
+    void setTerrainVisibility(bool mainTerrainVisible, bool overlaysVisible,
+                              bool notify = false);
+
+signals:
+    void importHeightmapRequested();
+    void tilePickerRequested();
+    void exportPaintDiagnosticRequested();
+    void editingStateChanged();
+    void paintTerrainTypeChanged(qint32 terrainType);
+    void terrainVisibilityChanged(bool mainTerrainVisible, bool overlaysVisible);
+
+private:
+    bool m_editingActive{false};
+    QComboBox* m_mode;
+    QComboBox* m_tool;
+    QDoubleSpinBox* m_radius;
+    QDoubleSpinBox* m_strength;
+    QDoubleSpinBox* m_delta;
+    QSpinBox* m_flatten;
+    QCheckBox* m_flipVertical;
+    QComboBox* m_paintTerrainType;
+    QDoubleSpinBox* m_paintRadius;
+    QComboBox* m_paintShape;
+    QCheckBox* m_manualTileSelection;
+    QCheckBox* m_showUnderwaterFamilies;
+    QCheckBox* m_allowLandFamiliesInOverlay;
+    QCheckBox* m_showMainTerrain;
+    QCheckBox* m_showOverlays;
+    QLabel* m_tilesetStatus;
+    QWidget* m_sculptControls;
+    QWidget* m_paintControls;
+    QVector<QPair<qint32, QString>> m_landPaintTypes;
+    QVector<QPair<qint32, QString>> m_underwaterPaintTypes;
+    QVector<QPair<qint32, QString>> m_overlayPaintTypes;
+    QString m_paintCatalogStatus;
+    void updateModeVisibility();
+    void refreshPaintTerrainTypes();
+};
+
+#endif

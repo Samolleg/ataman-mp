@@ -3,6 +3,12 @@
 #include <QJsonDocument>
 #include <QStandardPaths>
 #include <QTemporaryDir>
+#include <QtEndian>
+
+#ifdef Q_OS_WIN
+#include <windows.h>
+#include <thread>
+#endif
 
 #include "jmv_map_test_launcher.h"
 #include "current_session_backup.h"
@@ -21,11 +27,19 @@ private slots:
     void injectsActualAutorunRuntimeBootstrap();
     void exposesTestRunsQuickAccessPath();
     void createsGenerationScopedSavePaths();
+    void validatesExternalGraphEnvelope();
+    void resolvesWorkspaceExternalGraph();
+    void embeddedGraphShadowsExternalGraph();
+    void rejectsMissingRequiredGraph();
+    void resolvesActualZone6ExternalGraph();
+    void resolvesHostedGamePidForHotReload();
     void preparesOwnedGodmodeAutoexec();
     void preservesExistingAutoexecForRecovery();
     void recoveryRemovesAutoexecCreatedByEndurance();
     void recoveryRestoresPreexistingAutoexec();
     void recoveryRemovesOwnedBridge();
+    void recoveryRemovesOwnedGraph();
+    void recoveryRetriesTransientBridgeLock();
     void recoveryRetainsChangedBridge();
     void recoveryRemovesDisposableSaveGenerations();
     void recoveryDoesNotTrustOrCleanLivePidOnlyJournal();
@@ -50,6 +64,34 @@ static void writeFile(const QString& path, const QByteArray& data)
     QFile file(path);
     QVERIFY(file.open(QIODevice::WriteOnly));
     QCOMPARE(file.write(data), qint64(data.size()));
+}
+
+static void appendU32(QByteArray* bytes, quint32 value)
+{
+    const quint32 encoded = qToLittleEndian(value);
+    bytes->append(reinterpret_cast<const char*>(&encoded), sizeof(encoded));
+}
+
+static QByteArray minimalMob(bool embeddedGraph)
+{
+    QByteArray bytes;
+    appendU32(&bytes, 0xA000);
+    appendU32(&bytes, 8);
+    if(embeddedGraph)
+    {
+        appendU32(&bytes, 0x31415926);
+        appendU32(&bytes, 8);
+    }
+    return bytes;
+}
+
+static QByteArray externalGraph(quint32 width, quint32 height)
+{
+    QByteArray bytes;
+    appendU32(&bytes, width);
+    appendU32(&bytes, height);
+    bytes.append(QByteArray(int(width * height * 152u), '\0'));
+    return bytes;
 }
 
 static QString createRecoveryManifest(const QString& autoexecPath,
@@ -111,6 +153,125 @@ void JmvMapTestLauncherTests::createsGenerationScopedSavePaths()
     QVERIFY(QDir::fromNativeSeparators(initial).endsWith("generations/000000/saves"));
     QVERIFY(QDir::fromNativeSeparators(reload).endsWith("generations/000017/saves"));
     QVERIFY(initial != reload);
+}
+
+void JmvMapTestLauncherTests::validatesExternalGraphEnvelope()
+{
+    QString error;
+    QVERIFY2(CJmvMapTestLauncher::validateExternalGraph(externalGraph(3, 2), &error),
+             qPrintable(error));
+    QByteArray truncated = externalGraph(3, 2);
+    truncated.chop(1);
+    QVERIFY(!CJmvMapTestLauncher::validateExternalGraph(truncated, &error));
+    QVERIFY(error.contains("requires exactly"));
+    QVERIFY(!CJmvMapTestLauncher::validateExternalGraph(externalGraph(0, 2), &error));
+    QVERIFY(error.contains("invalid dimensions"));
+}
+
+void JmvMapTestLauncherTests::resolvesWorkspaceExternalGraph()
+{
+    QTemporaryDir temporary;
+    QVERIFY(temporary.isValid());
+    const QString workspace = QDir(temporary.path()).filePath("workspace");
+    const QString installed = QDir(temporary.path()).filePath("installed");
+    QVERIFY(QDir().mkpath(workspace));
+    QVERIFY(QDir().mkpath(installed));
+    const QString mprPath = QDir(workspace).filePath("Zone6.MPR");
+    writeFile(mprPath, "mpr");
+    const QByteArray workspaceGraph = externalGraph(2, 2);
+    const QByteArray installedGraph = externalGraph(1, 1);
+    const QString workspaceGraphPath = QDir(workspace).filePath("ZoNe6.GrP");
+    writeFile(workspaceGraphPath, workspaceGraph);
+    writeFile(QDir(installed).filePath("zone6.grp"), installedGraph);
+
+    SMapGraphSource graph;
+    QString error;
+    QVERIFY2(CJmvMapTestLauncher::resolveMapGraphSource(
+        minimalMob(false), QFileInfo(mprPath), "zone6.mpr",
+        QStringList() << installed, &graph, &error), qPrintable(error));
+    QVERIFY(!graph.embedded);
+    QCOMPARE(QFileInfo(graph.externalPath).absoluteFilePath(),
+             QFileInfo(workspaceGraphPath).absoluteFilePath());
+    QCOMPARE(graph.externalData, workspaceGraph);
+    QCOMPARE(graph.sha256, hash(workspaceGraph));
+}
+
+void JmvMapTestLauncherTests::embeddedGraphShadowsExternalGraph()
+{
+    QTemporaryDir temporary;
+    QVERIFY(temporary.isValid());
+    const QString mprPath = QDir(temporary.path()).filePath("zone6_2.mpr");
+    const QString grpPath = QDir(temporary.path()).filePath("zone6_2.grp");
+    writeFile(mprPath, "mpr");
+    writeFile(grpPath, externalGraph(1, 1));
+
+    SMapGraphSource graph;
+    QString error;
+    QVERIFY2(CJmvMapTestLauncher::resolveMapGraphSource(
+        minimalMob(true), QFileInfo(mprPath), "zone6_2.mpr",
+        QStringList(), &graph, &error), qPrintable(error));
+    QVERIFY(graph.embedded);
+    QVERIFY(!graph.usesExternalGraph());
+    QCOMPARE(QFileInfo(graph.shadowedExternalPath).absoluteFilePath(),
+             QFileInfo(grpPath).absoluteFilePath());
+}
+
+void JmvMapTestLauncherTests::rejectsMissingRequiredGraph()
+{
+    QTemporaryDir temporary;
+    QVERIFY(temporary.isValid());
+    const QString mprPath = QDir(temporary.path()).filePath("newmap.mpr");
+    writeFile(mprPath, "mpr");
+    SMapGraphSource graph;
+    QString error;
+    QVERIFY(!CJmvMapTestLauncher::resolveMapGraphSource(
+        minimalMob(false), QFileInfo(mprPath), "newmap.mpr",
+        QStringList(), &graph, &error));
+    QVERIFY(error.contains("could not be found"));
+    QVERIFY(error.contains("newmap.grp"));
+}
+
+void JmvMapTestLauncherTests::resolvesActualZone6ExternalGraph()
+{
+    const QString maps = QString::fromLocal8Bit(qgetenv("EI_TEST_BASE_MAPS"));
+    if(maps.isEmpty())
+        QSKIP("Set EI_TEST_BASE_MAPS to run the installed Zone 6 graph check.");
+    const QString mobPath = QDir(maps).filePath("zone6.mob");
+    const QString mprPath = QDir(maps).filePath("zone6.mpr");
+    QFile mob(mobPath);
+    QVERIFY2(mob.open(QIODevice::ReadOnly), qPrintable(mob.errorString()));
+    SMapGraphSource graph;
+    QString error;
+    QVERIFY2(CJmvMapTestLauncher::resolveMapGraphSource(
+        mob.readAll(), QFileInfo(mprPath), "zone6.mpr",
+        QStringList() << maps, &graph, &error), qPrintable(error));
+    QVERIFY(!graph.embedded);
+    QCOMPARE(QFileInfo(graph.externalPath).fileName().toLower(), QString("zone6.grp"));
+    QVERIFY(CJmvMapTestLauncher::validateExternalGraph(graph.externalData, &error));
+}
+
+void JmvMapTestLauncherTests::resolvesHostedGamePidForHotReload()
+{
+    QTemporaryDir temporary;
+    QVERIFY(temporary.isValid());
+    const QString pidPath = QDir(temporary.path()).filePath("game.pid");
+    writeFile(pidPath, "424242\n");
+
+    QCOMPARE(CJmvMapTestLauncher::runtimeGameProcessId(true, pidPath, 111111),
+             qint64(424242));
+    QCOMPARE(CJmvMapTestLauncher::runtimeGameProcessId(false, pidPath, 111111),
+             qint64(111111));
+    QCOMPARE(CJmvMapTestLauncher::runtimeGameProcessId(true,
+             QDir(temporary.path()).filePath("missing.pid"), 111111), qint64(0));
+
+    // alpha.29's x86 host wrote UTF-16LE without a BOM. Keep existing test-run
+    // journals usable while the host protocol moves back to explicit ASCII.
+    const QString legacyValue = QStringLiteral("46232\n");
+    const QByteArray legacyUtf16(reinterpret_cast<const char*>(legacyValue.utf16()),
+                                 legacyValue.size() * int(sizeof(ushort)));
+    writeFile(pidPath, legacyUtf16);
+    QCOMPARE(CJmvMapTestLauncher::runtimeGameProcessId(true, pidPath, 111111),
+             qint64(46232));
 }
 
 static QJsonObject resultManifest(const QString& runRoot, const QString& sourcePath)
@@ -359,6 +520,7 @@ void JmvMapTestLauncherTests::injectsActualAutorunRuntimeBootstrap()
     QVERIFY2(CJmvMapTestLauncher::prepareGodmodeBootstrap(
         QStringList() << maps, temp.path(), spawn, 12.75, true,
         QStringList() << "Autozone1cyclopus.mob",
+        true, 21.5,
         &manifest, &outputPath, &error), qPrintable(error));
 
     CMobDocument output;
@@ -374,6 +536,9 @@ void JmvMapTestLauncherTests::injectsActualAutorunRuntimeBootstrap()
     QCOMPARE(script.count("SetCPFast(GetLeader(), 290.500000, 219.200000, 0)"), 2);
     QVERIFY(script.contains("AddMob(\"Autozone1cyclopus.mob\")"));
     QVERIFY(script.contains("GodMode(0,3)"));
+    QVERIFY(script.contains("RunWorldTime(21.500000)"));
+    QCOMPARE(script.count("RunWorldTime(21.500000)"), 2);
+    QVERIFY(!script.contains("FixWorldTime("));
     QVERIFY(!script.contains("GodMode(0,3);"));
 
     QFile unchanged(source);
@@ -388,7 +553,8 @@ void JmvMapTestLauncherTests::injectsActualAutorunRuntimeBootstrap()
     QString entranceOutputPath;
     QVERIFY2(CJmvMapTestLauncher::prepareGodmodeBootstrap(
         QStringList() << maps, entranceTemp.path(), entrance, 12.75, true,
-        QStringList(), &entranceManifest, &entranceOutputPath, &error),
+        QStringList(), false, 12.0,
+        &entranceManifest, &entranceOutputPath, &error),
         qPrintable(error));
     CMobDocument entranceOutput;
     QVERIFY2(entranceOutput.load(QFileInfo(entranceOutputPath), &report),
@@ -450,6 +616,65 @@ void JmvMapTestLauncherTests::recoveryRemovesOwnedBridge()
     QVERIFY2(!QFileInfo::exists(bridge), qPrintable(summary));
     QVERIFY(summary.contains("Removed temporary file"));
     QDir(run).removeRecursively();
+}
+
+void JmvMapTestLauncherTests::recoveryRemovesOwnedGraph()
+{
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+    const QString graphPath = QDir(temp.path()).filePath("temporary-map.grp");
+    const QByteArray graphBytes = externalGraph(2, 2);
+    writeFile(graphPath, graphBytes);
+    const QString run = createRecoveryManifest(QString(), QString(), false,
+        QByteArray(), QByteArray());
+    QVERIFY(!run.isEmpty());
+
+    QFile manifestFile(QDir(run).filePath("manifest.json"));
+    QVERIFY(manifestFile.open(QIODevice::ReadOnly));
+    QJsonObject manifest = QJsonDocument::fromJson(manifestFile.readAll()).object();
+    manifestFile.close();
+    QJsonObject live;
+    live.insert("grpPath", graphPath);
+    live.insert("grpSha256", hash(graphBytes));
+    manifest.insert("liveFiles", live);
+    writeFile(QDir(run).filePath("manifest.json"),
+              QJsonDocument(manifest).toJson(QJsonDocument::Indented));
+
+    const QString summary = CJmvMapTestLauncher::recoverInterruptedRuns();
+    QVERIFY2(!QFileInfo::exists(graphPath), qPrintable(summary));
+    QVERIFY(summary.contains("Removed temporary file"));
+    QDir(run).removeRecursively();
+}
+
+void JmvMapTestLauncherTests::recoveryRetriesTransientBridgeLock()
+{
+#ifndef Q_OS_WIN
+    QSKIP("The transient image-section lock regression is Windows-specific.");
+#else
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+    const QString bridge = QDir(temp.path()).filePath("plugin.dll");
+    const QByteArray owned("transiently locked bridge");
+    writeFile(bridge, owned);
+    const QString run = createRecoveryManifest(QString(), QString(), false,
+        QByteArray(), QByteArray(), bridge, owned);
+    QVERIFY(!run.isEmpty());
+
+    HANDLE lock = CreateFileW(reinterpret_cast<LPCWSTR>(bridge.utf16()),
+                              GENERIC_READ, FILE_SHARE_READ, nullptr,
+                              OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    QVERIFY(lock != INVALID_HANDLE_VALUE);
+    std::thread releaseLock([lock]()
+    {
+        Sleep(250);
+        CloseHandle(lock);
+    });
+    const QString summary = CJmvMapTestLauncher::recoverInterruptedRuns();
+    releaseLock.join();
+    QVERIFY2(!QFileInfo::exists(bridge), qPrintable(summary));
+    QVERIFY(summary.contains("cleanup retries"));
+    QDir(run).removeRecursively();
+#endif
 }
 
 void JmvMapTestLauncherTests::recoveryRetainsChangedBridge()
@@ -644,5 +869,5 @@ void JmvMapTestLauncherTests::currentSessionSnapshotRejectsUnsafePath()
     QVERIFY(!error.isEmpty());
 }
 
-QTEST_APPLESS_MAIN(JmvMapTestLauncherTests)
+QTEST_GUILESS_MAIN(JmvMapTestLauncherTests)
 #include "jmv_map_test_launcher_tests.moc"

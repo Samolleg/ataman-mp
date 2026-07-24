@@ -35,6 +35,29 @@ foreach ($file in Get-ChildItem -LiteralPath $root -Recurse -File | Where-Object
     Remove-PackageFile $file
 }
 
+# Tester packages carry one concise changelist: the file matching the alpha
+# number in VERSION. Carrying every historical ALPHA*.md forward made the
+# distribution root noisy and obscured which notes apply to the executable.
+$versionPath = Join-Path $root 'VERSION'
+if (Test-Path -LiteralPath $versionPath -PathType Leaf) {
+    $version = (Get-Content -LiteralPath $versionPath -Raw).Trim()
+    if ($version -match 'alpha\.(\d+)') {
+        $alphaNumber = [int]$Matches[1]
+        $expectedPattern = "^ALPHA$alphaNumber(?:_|$).*\.md$"
+        $alphaChangelists = @(Get-ChildItem -LiteralPath $root -File -Filter 'ALPHA*.md')
+        foreach ($file in $alphaChangelists) {
+            if ($file.Name -notmatch $expectedPattern) {
+                Remove-PackageFile $file
+            }
+        }
+        $currentChangelists = @(Get-ChildItem -LiteralPath $root -File -Filter 'ALPHA*.md' |
+            Where-Object { $_.Name -match $expectedPattern })
+        if ($currentChangelists.Count -ne 1) {
+            throw "Expected exactly one alpha.$alphaNumber changelist, found $($currentChangelists.Count)."
+        }
+    }
+}
+
 $checksums = Join-Path $root 'SHA256SUMS.txt'
 if (Test-Path -LiteralPath $checksums) {
     Remove-Item -LiteralPath $checksums -Force
@@ -52,7 +75,7 @@ if (-not $?) {
     exit 1
 }
 
-Write-Output "PASS: finalized clean package; removed $($removed.Count) private/runtime file(s)"
+Write-Output "PASS: finalized clean package; removed $($removed.Count) stale/private/runtime file(s)"
 foreach ($path in $removed) {
     Write-Output "removed: $path"
 }

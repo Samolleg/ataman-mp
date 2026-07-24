@@ -42,11 +42,12 @@ public:
     ~CSector();
     QByteArray serializeSector();
     void draw(QOpenGLShaderProgram* program);
+    void drawTileGrid(QOpenGLShaderProgram* program);
     void drawWater(QOpenGLShaderProgram* program);
     bool intersectsFrustum(const class CViewFrustum& frustum) const;
     void setIndex(UI2& index) {m_index = index; updatePosition(); }
     const UI2& index() {return m_index;}
-    bool projectPt(QVector3D& origin);
+    bool projectPt(QVector3D& origin, bool land = true);
     bool pickTile(int& row, int& col, QVector3D& point, bool bLand = true);
     void setTile(QVector3D& point, int index, int rotNum, bool bLand = true, int matIndex = 0);
     //void setTile(const STileLocation tileLoc, const STileInfo tileInfo);
@@ -57,6 +58,7 @@ public:
     QVector<QVector<CTile>>& arrWaterEdit() {return m_arrWater;};
     bool existsTileIndices(const QVector<int>& arrInd); // function for find incorrect\coorrupt tile indices
     void updateDrawData();
+    bool previewCanonicalPayload(const QByteArray& payload);
 
 private:
     void updatePosition();
@@ -72,6 +74,7 @@ private:
     QVector<SVertexData> m_arrLandVrtData;
     QOpenGLBuffer m_vertexBuf;
     QOpenGLBuffer m_indexBuf;
+    QOpenGLBuffer m_gridIndexBuf;
 
     QVector<QVector<CTile>> m_arrWater;
     QVector<SVertexData> m_arrWaterVrtData;

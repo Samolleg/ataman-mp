@@ -26,6 +26,9 @@
 #include <QCheckBox>
 #include <QToolButton>
 #include <QComboBox>
+#include <QSlider>
+#include <QDoubleSpinBox>
+#include <QSignalBlocker>
 #include <QLabel>
 #include <QHBoxLayout>
 #include <QVBoxLayout>
@@ -80,8 +83,10 @@
 #include "jmv_map_test_launcher.h"
 #include "resource_profile.h"
 #include "endurance_document.h"
+#include "landscape_tools.h"
 #include "collection_document.h"
 #include "collection_editor_dialog.h"
+#include "map_table_editor_dialog.h"
 #include "script_reference_analyzer.h"
 #include "unit.h"
 
@@ -186,6 +191,7 @@ MainWindow::MainWindow(QWidget* parent) :
     m_recentFilesMenu(nullptr),
     m_externalScriptAction(nullptr),
     m_activateOwnerMobAction(nullptr),
+    m_convertWorldObjectToLeverAction(nullptr),
     m_mapsDock(nullptr),
     m_historyDock(nullptr),
     m_validationDock(nullptr),
@@ -197,6 +203,8 @@ MainWindow::MainWindow(QWidget* parent) :
     m_validationSummary(nullptr),
     m_validationTimer(nullptr),
     m_mapsBrowser(nullptr),
+    m_landscapeToolsDock(nullptr),
+    m_landscapeTools(nullptr),
     m_mapTestAction(nullptr),
     m_stopMapTestAction(nullptr),
     m_mapTestLauncher(nullptr),
@@ -464,6 +472,25 @@ MainWindow::MainWindow(QWidget* parent) :
     QMenu* viewMenu = new QMenu(tr("View"), this);
     m_ui->menuBar->insertMenu(m_ui->menuSettings->menuAction(), viewMenu);
     viewMenu->addAction(m_mapsDock->toggleViewAction());
+    m_landscapeTools = new CLandscapeTools(this);
+    m_landscapeToolsDock = new QDockWidget(tr("Landscape Tools (Preview)"), this);
+    m_landscapeToolsDock->setObjectName("landscapeToolsDock");
+    m_landscapeToolsDock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
+    m_landscapeToolsDock->setFeatures(QDockWidget::DockWidgetClosable |
+                                      QDockWidget::DockWidgetMovable |
+                                      QDockWidget::DockWidgetFloatable);
+    m_landscapeToolsDock->setWidget(m_landscapeTools);
+    addDockWidget(Qt::RightDockWidgetArea, m_landscapeToolsDock);
+    enableNativeFloatingControls(m_landscapeToolsDock);
+    m_landscapeToolsDock->hide();
+    viewMenu->addAction(m_landscapeToolsDock->toggleViewAction());
+    QAction* tileGridAction = viewMenu->addAction(tr("Show Terrain Tile Grid"));
+    tileGridAction->setCheckable(true);
+    tileGridAction->setToolTip(tr("Draw the 2 x 2 terrain-tile boundaries over the landscape."));
+    connect(tileGridAction, &QAction::toggled, this, [this](bool visible)
+    {
+        m_pView->setTileGridVisible(visible);
+    });
     viewMenu->addAction(m_loadedMapDock->toggleViewAction());
     viewMenu->addAction(m_outlinerDock->toggleViewAction());
     viewMenu->addAction(m_propertiesDock->toggleViewAction());
@@ -483,6 +510,16 @@ MainWindow::MainWindow(QWidget* parent) :
     {
         if(m_pView && m_pView->hasActiveMob())
             m_pView->openExternalMobScript(m_pView->currentMob());
+    });
+    QMenu* objectEditMenu = m_ui->menuEdit->addMenu(tr("Object"));
+    m_convertWorldObjectToLeverAction = objectEditMenu->addAction(
+        tr("Convert World Object to Lever..."));
+    m_convertWorldObjectToLeverAction->setEnabled(false);
+    m_convertWorldObjectToLeverAction->setToolTip(
+        tr("Converts one selected basic world object into an interactable lever as one undoable edit."));
+    connect(m_convertWorldObjectToLeverAction, &QAction::triggered, this, [this]() {
+        if(m_pView)
+            m_pView->convertSelectedWorldObjectToLever();
     });
     m_activateOwnerMobAction = new QAction(tr("Activate Selected Object's MOB"), this);
     viewMenu->addAction(m_activateOwnerMobAction);
@@ -526,6 +563,7 @@ MainWindow::MainWindow(QWidget* parent) :
     QAction* validateCurrentMob = new QAction(tr("Validate Current MOB Only"), this);
     QAction* validateSelectedMobs = new QAction(tr("Validate Selected MOB Files..."), this);
     QAction* repairMobFamily = new QAction(tr("Review and Repair NID Collisions..."), this);
+    QAction* openMapCatalog = new QAction(tr("Map Catalog Editor..."), this);
     m_mapTestAction = new QAction(tr("Test Current Map"), this);
     m_mapTestAction->setToolTip(tr("Stages unique temporary MPR/MOB copies and launches the active validated runtime profile. JMV uses hash-owned temporary aliases in the mod Maps directory; source maps are never overwritten."));
     m_stopMapTestAction = new QAction(tr("Stop Test"), this);
@@ -539,6 +577,7 @@ MainWindow::MainWindow(QWidget* parent) :
     m_ui->menuTools->addAction(validateCurrentMob);
     m_ui->menuTools->addAction(validateSelectedMobs);
     m_ui->menuTools->addAction(repairMobFamily);
+    m_ui->menuTools->addAction(openMapCatalog);
     m_ui->menuTools->addAction(m_mapTestAction);
     m_ui->menuTools->addAction(m_stopMapTestAction);
     m_ui->menuTools->addAction(openBackupFolder);
@@ -547,6 +586,11 @@ MainWindow::MainWindow(QWidget* parent) :
     m_ui->menuTools->addAction(openTestRunsFolder);
     m_ui->menuTools->addAction(openBugReportingGuide);
     viewMenu->addAction(showUnitTexture);
+    connect(openMapCatalog, &QAction::triggered, this, [this]()
+    {
+        CMapTableEditorDialog dialog(this);
+        dialog.exec();
+    });
     connect(openBackupFolder, &QAction::triggered, this, [this]()
     {
         QString error;
@@ -852,6 +896,10 @@ MainWindow::MainWindow(QWidget* parent) :
     CStatusConnector::getInstance()->attach(m_ui->statusIco, m_ui->statusBar);
     connectUiButtons();
     m_pView->attach(m_settings.get(), m_ui->tableWidget, m_undoStack, m_ui->progressBar, m_ui->mousePosText, m_ui->treeWidget, m_pTileForm.get());
+    m_pView->attachLandscapeTools(m_landscapeTools);
+    m_ui->actionMap_parameters->setText(tr("MPR Atlas Tiles..."));
+    m_ui->tileBrushButton->setText(tr("Paint"));
+    m_ui->tileBrushButton->setToolTip(tr("Landscape tile painting (B)"));
     connect(m_pView, &CView::mobStateChanged, this, [this]()
     {
         updateLoadedMapPanel();
@@ -898,8 +946,6 @@ MainWindow::MainWindow(QWidget* parent) :
             }
         }
     }, Qt::DirectConnection);
-    connect(m_undoStack, &QUndoStack::indexChanged, this,
-            [this](int) { scheduleMobFamilyValidation(2500); });
     initShortcuts();
     QAction* viewportOnlyAction = new QAction(tr("Maximize viewport"), this);
     viewportOnlyAction->setObjectName("actionViewportOnly");
@@ -995,7 +1041,7 @@ MainWindow::MainWindow(QWidget* parent) :
     connect(m_settings.get(), &CSettings::shortcutsChanged, this, &MainWindow::initShortcuts);
     m_autosaveTimer = new QTimer(this);
     m_autosaveTimer->setTimerType(Qt::PreciseTimer);
-    connect(m_autosaveTimer, &QTimer::timeout, this, &MainWindow::performAutosave);
+    connect(m_autosaveTimer, &QTimer::timeout, this, &MainWindow::beginAutosaveCountdown);
     connect(m_settings.get(), &CSettings::autosaveSettingsApplied,
             this, static_cast<void (MainWindow::*)(bool, int)>(
                 &MainWindow::configureAutosaveTimer));
@@ -1011,11 +1057,37 @@ MainWindow::MainWindow(QWidget* parent) :
     m_ui->action_Mob_parameters->setEnabled(false);
     m_ui->actionOpen_MOB_Script->setEnabled(false);
     m_externalScriptAction->setEnabled(false);
+    m_ui->actionSave->setEnabled(false);
+    m_ui->actionSave_as->setEnabled(false);
+    m_ui->actionSave_all_MOB_s->setEnabled(false);
     QObject::connect(m_pView, SIGNAL(updateMainWindowTitle(eTitleTypeData,QString)), this, SLOT(updateWindowTitle(eTitleTypeData,QString)));
     QObject::connect(CScene::getInstance(), SIGNAL(modeChanged()), m_pView, SLOT(viewParameters()));
     QObject::connect(m_pView, SIGNAL(showOutlinerSignal(bool)), this, SLOT(showOutliner(bool)));
+    connect(m_pView, &CView::showLandscapeToolsSignal, this, [this]()
+    {
+        m_landscapeToolsDock->show();
+        m_landscapeToolsDock->raise();
+    });
+    connect(m_pView, &CView::hideLandscapeToolsSignal,
+            m_landscapeToolsDock, &QDockWidget::hide);
+    connect(m_landscapeToolsDock, &QDockWidget::visibilityChanged, this, [this](bool visible)
+    {
+        m_pView->setLandscapeEditingEnabled(visible);
+        if(visible)
+            m_landscapeToolsDock->raise();
+    });
     connect(m_pView, &CView::selectionChanged,
             this, &MainWindow::updateUnitTexturePreview);
+    connect(m_pView, &CView::selectionChanged, this, [this]()
+    {
+        if(m_customSpawnSelected && !m_pView->selectionSnapshot().isEmpty())
+        {
+            m_customSpawnSelected = false;
+            m_pView->setTestSpawnMarkerSelected(false);
+            updateOperationAvailability();
+        }
+        updateOutlinerSelectionPath();
+    });
 
 
 //    m_ui->progressBar->setValue(0);
@@ -1032,7 +1104,22 @@ MainWindow::MainWindow(QWidget* parent) :
     updateMapTestAction();
     updateWindowTitle(eTitleTypeData::eTitleTypeDataMpr, QString());
     updateLoadedMapPanel();
-    QTimer::singleShot(0, this, &MainWindow::showRecoverableAutosaves);
+    QVector<SRecoverableAutosave> recoveries;
+    QString backupSessionError;
+    CBackupManager backupManager;
+    m_backupSessionStarted = backupManager.beginEditorSession(
+        &recoveries, &backupSessionError);
+    if(!m_backupSessionStarted)
+        ei::log(eLogWarning, "Editor backup session journal unavailable: "
+                + backupSessionError);
+    else
+    {
+        m_recoverableAutosaveNoticeCount = recoveries.size();
+        for(const SRecoverableAutosave& recovery : recoveries)
+            m_recoverableAutosaveNoticeKeys.append(recovery.notificationKey);
+        if(m_recoverableAutosaveNoticeCount > 0)
+            QTimer::singleShot(0, this, &MainWindow::showRecoverableAutosaves);
+    }
     bool hasStartupDocument = false;
     for(int index = 1; index < QCoreApplication::arguments().size(); ++index)
     {
@@ -1545,9 +1632,12 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event)
             if(mouse->button() == Qt::LeftButton)
             {
                 const bool hit = m_pView->testSpawnMarkerAt(mouse->pos());
+                if(hit)
+                    m_pView->clearObjectSelection();
                 m_customSpawnSelected = hit;
                 m_pView->setTestSpawnMarkerSelected(hit);
                 updateOperationAvailability();
+                updateOutlinerSelectionPath();
                 if(hit)
                 {
                     m_suppressSpawnRelease = true;
@@ -1622,6 +1712,7 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event)
                 m_customSpawnContextKey = currentMapContextKey();
                 m_pickSpawnPending = false;
                 m_movingCustomSpawn = false;
+                m_pView->clearObjectSelection();
                 m_customSpawnSelected = true;
                 m_suppressSpawnRelease = true;
                 if(m_playFromHereButton && !m_playFromHereButton->isChecked())
@@ -1640,6 +1731,7 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event)
                 updateEntranceOverlays();
                 updateOperationAvailability();
                 updateMapTestAction();
+                updateOutlinerSelectionPath();
                 return true;
             }
         }
@@ -1653,7 +1745,7 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event)
             const QModelIndex item = m_undoView->indexAt(mouse->pos());
             if(item.isValid())
             {
-                if(m_pView->cancelPendingOperation())
+                if(!m_pView->prepareHistoryNavigation())
                     return true;
                 runUndoToIndex(item.row());
                 return true;
@@ -1837,6 +1929,7 @@ void MainWindow::refreshMapTestContext()
     }
     if(m_spawnPositionLabel)
         m_spawnPositionLabel->setText(tr("Entrance spawn"));
+    updateOutlinerSelectionPath();
 
     QVector<QString> resources;
     QVector<QString> maps;
@@ -1933,6 +2026,7 @@ void MainWindow::setCustomSpawnPicking(bool enabled)
         updateEntranceOverlays();
         updateOperationAvailability();
         updateMapTestAction();
+        updateOutlinerSelectionPath();
         return;
     }
     if(!selectedTravelZone())
@@ -2131,6 +2225,19 @@ void MainWindow::createViewportToolbars()
         {
             if(!m_pView)
                 return;
+            if(operation.type == EButtonOpTilebrush)
+            {
+                if(m_landscapeToolsDock->isVisible())
+                    m_landscapeToolsDock->hide();
+                else
+                {
+                    m_pView->prepareLandscapeTilePainting(false);
+                    m_landscapeToolsDock->show();
+                    m_landscapeToolsDock->raise();
+                }
+                m_pView->setFocus();
+                return;
+            }
             if(operation.type == EButtonOpMove && m_customSpawnSelected
                && m_customSpawn.valid && m_customSpawn.custom
                && m_customSpawnContextKey == currentMapContextKey())
@@ -2163,6 +2270,56 @@ void MainWindow::createViewportToolbars()
         });
     }
     operationLayout->addStretch(1);
+    operationLayout->addWidget(new QLabel(tr("Camera Speed:"), operationBar));
+    m_cameraSpeedSlider = new QSlider(Qt::Horizontal, operationBar);
+    m_cameraSpeedSlider->setObjectName("cameraSpeedSlider");
+    m_cameraSpeedSlider->setRange(1, 100);
+    m_cameraSpeedSlider->setSingleStep(1);
+    m_cameraSpeedSlider->setPageStep(5);
+    m_cameraSpeedSlider->setFixedWidth(150);
+    m_cameraSpeedSlider->setToolTip(tr(
+        "Camera movement and zoom speed. Hold the configured modifier (Ctrl by default) "
+        "and use the mouse wheel over the viewport to adjust it."));
+    m_cameraSpeedSpin = new QDoubleSpinBox(operationBar);
+    m_cameraSpeedSpin->setObjectName("cameraSpeedMultiplier");
+    m_cameraSpeedSpin->setRange(0.1, 10.0);
+    m_cameraSpeedSpin->setSingleStep(0.1);
+    m_cameraSpeedSpin->setDecimals(1);
+    m_cameraSpeedSpin->setPrefix(QString::fromUtf8("\xC3\x97"));
+    m_cameraSpeedSpin->setFixedWidth(72);
+    m_cameraSpeedSpin->setToolTip(m_cameraSpeedSlider->toolTip());
+    double cameraSpeed = 1.0;
+    if(const COptDouble* option = dynamic_cast<const COptDouble*>(
+           m_settings->opt(eOptSetGeneral, "cameraSpeedMultiplier")))
+        cameraSpeed = qBound(0.1, option->value(), 10.0);
+    m_cameraSpeedSlider->setValue(qRound(cameraSpeed * 10.0));
+    m_cameraSpeedSpin->setValue(cameraSpeed);
+    m_pView->setCameraSpeedMultiplier(cameraSpeed);
+    operationLayout->addWidget(m_cameraSpeedSlider);
+    operationLayout->addWidget(m_cameraSpeedSpin);
+
+    m_cameraSpeedPersistTimer = new QTimer(this);
+    m_cameraSpeedPersistTimer->setSingleShot(true);
+    connect(m_cameraSpeedPersistTimer, &QTimer::timeout,
+            m_settings.get(), &CSettings::persistOptions);
+    connect(m_cameraSpeedSlider, &QSlider::valueChanged, this, [this](int value)
+    {
+        m_pView->setCameraSpeedMultiplier(value / 10.0);
+    });
+    connect(m_cameraSpeedSpin, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+            m_pView, &CView::setCameraSpeedMultiplier);
+    connect(m_pView, &CView::cameraSpeedMultiplierChanged, this, [this](double value)
+    {
+        const QSignalBlocker sliderBlocker(m_cameraSpeedSlider);
+        const QSignalBlocker spinBlocker(m_cameraSpeedSpin);
+        m_cameraSpeedSlider->setValue(qRound(value * 10.0));
+        m_cameraSpeedSpin->setValue(value);
+        if(COptDouble* option = dynamic_cast<COptDouble*>(
+               m_settings->opt(eOptSetGeneral, "cameraSpeedMultiplier")))
+            option->setValue(value);
+        m_cameraSpeedPersistTimer->start(250);
+        statusBar()->showMessage(tr("Camera speed: %1x").arg(value, 0, 'f', 1), 1500);
+    });
     m_ui->toolsLayout->setContentsMargins(0, 0, 0, 0);
     m_ui->toolsLayout->setSpacing(0);
 
@@ -2314,7 +2471,7 @@ void MainWindow::launchCurrentMapTest()
     progress->setValue(0);
     progress->show();
     QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
-    if(m_pView->cancelPendingOperation())
+    if(m_pView->prepareDocumentTransition())
         statusBar()->showMessage(tr("Pending object movement was cancelled before staging the test."), 4000);
     CLandscape* landscape = CLandscape::getInstance();
     if(landscape->isDirty())
@@ -2495,6 +2652,8 @@ void MainWindow::launchCurrentMapTest()
     }
     input.spawnZ = runtimeSpawn.z();
     input.godmode = isJmv && m_godmodeCheckBox && m_godmodeCheckBox->isChecked();
+    input.overrideWorldTime = isJmv && m_pView->overridesWorldTime();
+    input.worldTimeHours = m_pView->effectiveWorldTimeHours();
     input.borrowedMapIdentity = m_borrowedMapIdentity;
     if(isBase && !hotReloadRequested)
     {
@@ -2925,14 +3084,46 @@ void MainWindow::showValidationWarning(const QString& title, const QString& text
 
 void MainWindow::showMapTestResultNotification(const QJsonObject& report)
 {
-    if(m_mapTestResultTimer)
-        m_mapTestResultTimer->stop();
     const int errors = report.value("errorCount").toInt();
     const int warnings = report.value("warningCount").toInt();
     const QString reportText = QString::fromUtf8(
         QJsonDocument(report).toJson(QJsonDocument::Compact));
     ei::log(errors > 0 ? eLogFatal : (warnings > 0 ? eLogWarning : eLogInfo),
             "JMV authoritative test result: " + reportText);
+    const bool failed = errors > 0;
+    const bool warned = !failed && warnings > 0;
+    QString detail;
+    const QJsonArray problems = failed ? report.value("errors").toArray()
+                                       : report.value("warnings").toArray();
+    if(!problems.isEmpty())
+        detail = problems.first().toString().simplified();
+    if(detail.size() > 180)
+        detail = detail.left(177) + "...";
+    const QString status = failed
+        ? tr("Map test finished with %1 error(s).").arg(errors)
+        : (warned ? tr("Map test finished with %1 warning(s).").arg(warnings)
+                  : tr("Map test completed successfully."));
+    QString text = status + tr("\nRequested: %1 / entrance %2   Runtime: %3 / entrance %4")
+        .arg(report.value("requestedZone").toString())
+        .arg(report.value("requestedEntrance").toInt())
+        .arg(report.value("actualZone").toString())
+        .arg(report.value("actualEntrance").toInt());
+    if(!detail.isEmpty())
+        text += "\n" + detail;
+    m_mapTestResultLogPath = report.value("runLogPath").toString();
+    if(m_mapTestResultLogPath.isEmpty())
+        m_mapTestResultLogPath = report.value("bridgeResultPath").toString();
+    showTransientResultNotification(text, failed, warned, tr("Open Log"),
+        ETransientNotificationAction::OpenLog,
+        failed ? 9000 : (warned ? 7000 : 5000));
+}
+
+void MainWindow::showTransientResultNotification(
+    const QString& text, bool failed, bool warned, const QString& actionText,
+    ETransientNotificationAction action, int timeoutMs)
+{
+    if(m_mapTestResultTimer)
+        m_mapTestResultTimer->stop();
     if(!m_mapTestResultNotification)
     {
         m_mapTestResultNotification = new QFrame(this);
@@ -2962,60 +3153,60 @@ void MainWindow::showMapTestResultNotification(const QJsonObject& report)
         layout->addLayout(summary);
         QHBoxLayout* buttons = new QHBoxLayout;
         buttons->addStretch(1);
-        QPushButton* openLog = new QPushButton(tr("Open Log"), m_mapTestResultNotification);
+        m_mapTestResultActionButton = new QPushButton(m_mapTestResultNotification);
         QPushButton* dismiss = new QPushButton(tr("Dismiss"), m_mapTestResultNotification);
-        buttons->addWidget(openLog);
+        buttons->addWidget(m_mapTestResultActionButton);
         buttons->addWidget(dismiss);
         layout->addLayout(buttons);
         m_mapTestResultTimer = new QTimer(m_mapTestResultNotification);
         m_mapTestResultTimer->setSingleShot(true);
-        connect(m_mapTestResultTimer, &QTimer::timeout,
-                m_mapTestResultNotification, &QWidget::hide);
-        connect(dismiss, &QPushButton::clicked,
-                m_mapTestResultNotification, &QWidget::hide);
-        connect(openLog, &QPushButton::clicked, this, [this]()
+        connect(m_mapTestResultTimer, &QTimer::timeout, this, [this]()
+        {
+            m_mapTestResultNotification->hide();
+            positionAutosaveNotification();
+        });
+        connect(dismiss, &QPushButton::clicked, this, [this]()
         {
             m_mapTestResultTimer->stop();
-            if(m_mapTestResultLogPath.isEmpty()
-               || !QDesktopServices::openUrl(QUrl::fromLocalFile(m_mapTestResultLogPath)))
-                statusBar()->showMessage(tr("The test-run log could not be opened."), 6000);
             m_mapTestResultNotification->hide();
+            positionAutosaveNotification();
+        });
+        connect(m_mapTestResultActionButton, &QPushButton::clicked, this, [this]()
+        {
+            m_mapTestResultTimer->stop();
+            if(m_transientNotificationAction == ETransientNotificationAction::OpenLog)
+            {
+                if(m_mapTestResultLogPath.isEmpty()
+                   || !QDesktopServices::openUrl(QUrl::fromLocalFile(m_mapTestResultLogPath)))
+                    statusBar()->showMessage(tr("The test-run log could not be opened."), 6000);
+            }
+            else if(m_transientNotificationAction
+                    == ETransientNotificationAction::OpenBackupFolder)
+            {
+                QString error;
+                if(!CBackupManager::openBackupFolder(&error))
+                    QMessageBox::warning(this, tr("Endurance backups"), error);
+            }
+            m_mapTestResultNotification->hide();
+            positionAutosaveNotification();
         });
     }
 
-    const bool failed = errors > 0;
-    const bool warned = !failed && warnings > 0;
     m_mapTestResultIcon->setText(failed ? QString::fromUtf8("\xE2\x9C\x95")
                                        : (warned ? "!" : QString::fromUtf8("\xE2\x9C\x93")));
     m_mapTestResultIcon->setStyleSheet(QString("color: %1;")
         .arg(failed ? "#ff5c5c" : (warned ? "#ffc547" : "#4bd66f")));
-    QString detail;
-    const QJsonArray problems = failed ? report.value("errors").toArray()
-                                       : report.value("warnings").toArray();
-    if(!problems.isEmpty())
-        detail = problems.first().toString().simplified();
-    if(detail.size() > 180)
-        detail = detail.left(177) + "...";
-    const QString status = failed
-        ? tr("Map test finished with %1 error(s).").arg(errors)
-        : (warned ? tr("Map test finished with %1 warning(s).").arg(warnings)
-                  : tr("Map test completed successfully."));
-    QString text = status + tr("\nRequested: %1 / entrance %2   Runtime: %3 / entrance %4")
-        .arg(report.value("requestedZone").toString())
-        .arg(report.value("requestedEntrance").toInt())
-        .arg(report.value("actualZone").toString())
-        .arg(report.value("actualEntrance").toInt());
-    if(!detail.isEmpty())
-        text += "\n" + detail;
     m_mapTestResultLabel->setText(text);
-    m_mapTestResultLogPath = report.value("runLogPath").toString();
-    if(m_mapTestResultLogPath.isEmpty())
-        m_mapTestResultLogPath = report.value("bridgeResultPath").toString();
+    m_transientNotificationAction = action;
+    m_mapTestResultActionButton->setText(actionText);
+    m_mapTestResultActionButton->setVisible(
+        action != ETransientNotificationAction::None && !actionText.isEmpty());
     m_mapTestResultNotification->adjustSize();
     positionMapTestResultNotification();
     m_mapTestResultNotification->show();
     m_mapTestResultNotification->raise();
-    m_mapTestResultTimer->start(failed ? 9000 : (warned ? 7000 : 5000));
+    m_mapTestResultTimer->start(qMax(1000, timeoutMs));
+    positionAutosaveNotification();
 }
 
 void MainWindow::positionMapTestResultNotification()
@@ -3027,6 +3218,19 @@ void MainWindow::positionMapTestResultNotification()
     m_mapTestResultNotification->move(
         qMax(0, width() - m_mapTestResultNotification->width() - right),
         qMax(0, height() - m_mapTestResultNotification->height() - bottom));
+}
+
+void MainWindow::positionAutosaveNotification()
+{
+    if(!m_autosaveNotification)
+        return;
+    const int right = 18;
+    int bottom = (statusBar() ? statusBar()->height() : 0) + 18;
+    if(m_mapTestResultNotification && m_mapTestResultNotification->isVisible())
+        bottom += m_mapTestResultNotification->height() + 10;
+    m_autosaveNotification->move(
+        qMax(0, width() - m_autosaveNotification->width() - right),
+        qMax(0, height() - m_autosaveNotification->height() - bottom));
 }
 
 QString MainWindow::validationWarningPreview(
@@ -3348,7 +3552,8 @@ void MainWindow::openCollection(const QString& path)
     QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
     m_undoStack->clear();
     m_pView->unloadMob("");
-    m_pView->unloadLand();
+    // isExitAllowed() already collected the dirty-document decision.
+    m_pView->unloadLand(false);
     progress.setLabelText(tr("Loading landscape..."));
     progress.setValue(1);
     QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
@@ -3512,7 +3717,8 @@ void MainWindow::openMapPair(const QString& mprPath, const QString& mobPath,
     QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
     m_undoStack->clear();
     m_pView->unloadMob("");
-    m_pView->unloadLand();
+    // isExitAllowed() already collected the dirty-document decision.
+    m_pView->unloadLand(false);
     progress.setLabelText(tr("Loading landscape..."));
     progress.setValue(1);
     QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
@@ -3608,6 +3814,9 @@ void MainWindow::updateOperationAvailability(bool hasSelection)
             }
         m_activateOwnerMobAction->setEnabled(canActivateOwner);
     }
+    if(m_convertWorldObjectToLeverAction)
+        m_convertWorldObjectToLeverAction->setEnabled(
+            m_pView && m_pView->canConvertSelectedWorldObjectToLever());
 }
 
 void MainWindow::updateLoadedMapPanel()
@@ -3693,6 +3902,43 @@ void MainWindow::updateOutlinerSelectionPath()
 {
     if(!m_outlinerSelectionPath || !m_ui || !m_ui->treeWidget)
         return;
+
+    const bool customSelected = m_customSpawnSelected && m_customSpawn.valid
+        && m_customSpawn.custom
+        && m_customSpawnContextKey == currentMapContextKey();
+    if(customSelected)
+    {
+        const QString coordinates = tr("Play from Here — X: %1  Y: %2  Z: %3")
+            .arg(m_customSpawnPosition.x(), 0, 'f', 2)
+            .arg(m_customSpawnPosition.y(), 0, 'f', 2)
+            .arg(m_customSpawnPosition.z(), 0, 'f', 2);
+        m_outlinerSelectionPath->setStyleSheet(
+            "QLabel { background: #29424a; color: white; padding: 5px 7px; "
+            "border-left: 3px solid #32c8e6; }");
+        m_outlinerSelectionPath->setText(coordinates);
+        m_outlinerSelectionPath->setToolTip(coordinates);
+        m_outlinerSelectionPath->show();
+        return;
+    }
+
+    const QList<CNode*> selectedNodes = m_pView
+        ? m_pView->selectionSnapshot() : QList<CNode*>();
+    if(selectedNodes.size() > 1)
+    {
+        bool includesLockedObject = false;
+        for(CNode* node : selectedNodes)
+            if(CMob* owner = m_pView->ownerMob(node))
+                includesLockedObject = includesLockedObject
+                    || owner != m_pView->currentMob();
+        const QString summary = tr("%1 objects selected").arg(selectedNodes.size());
+        m_outlinerSelectionPath->setStyleSheet(includesLockedObject
+            ? "QLabel { background: #5c400c; color: white; padding: 5px 7px; border-left: 3px solid #ff8c1a; }"
+            : "QLabel { background: #29424a; color: white; padding: 5px 7px; border-left: 3px solid #32c8e6; }");
+        m_outlinerSelectionPath->setText(summary);
+        m_outlinerSelectionPath->setToolTip(summary);
+        m_outlinerSelectionPath->show();
+        return;
+    }
     QTreeWidgetItem* item = m_ui->treeWidget->currentItem();
     if(!item || !item->parent())
     {
@@ -3701,15 +3947,22 @@ void MainWindow::updateOutlinerSelectionPath()
     }
 
     QStringList path;
-    QTreeWidgetItem* root = item;
     for(QTreeWidgetItem* part = item; part; part = part->parent())
-    {
         path.prepend(part->text(0));
-        root = part;
+
+    bool ancestorOutsideViewport = false;
+    for(QTreeWidgetItem* ancestor = item->parent(); ancestor;
+        ancestor = ancestor->parent())
+    {
+        const QRect ancestorRect = m_ui->treeWidget->visualItemRect(ancestor);
+        if(ancestor->isHidden() || !ancestorRect.isValid()
+           || !m_ui->treeWidget->viewport()->rect().contains(ancestorRect))
+        {
+            ancestorOutsideViewport = true;
+            break;
+        }
     }
-    const QRect rootRect = m_ui->treeWidget->visualItemRect(root);
-    if(!root->isHidden() && rootRect.isValid()
-       && rootRect.intersects(m_ui->treeWidget->viewport()->rect()))
+    if(!ancestorOutsideViewport)
     {
         m_outlinerSelectionPath->hide();
         return;
@@ -3806,9 +4059,9 @@ bool MainWindow::isExitAllowed()
                 .arg(dirtyMobs.join('|'))
                 .arg(dirtyLandscape ? CLandscape::getInstance()->filePath().absoluteFilePath()
                                     : QString("none"))
-                .arg(m_pView && m_pView->cancelPendingOperation() ? "cancelled" : "none"));
+                .arg(m_pView && m_pView->prepareDocumentTransition() ? "cancelled" : "none"));
     else if(m_pView)
-        m_pView->cancelPendingOperation();
+        m_pView->prepareDocumentTransition();
     return m_pView->onExit();
 }
 
@@ -3818,7 +4071,9 @@ void MainWindow::closeAll()
     {
         m_undoStack->clear();
         m_pView->unloadMob("");
-        m_pView->unloadLand();
+        // isExitAllowed() already obtained the user's save/discard decision.
+        // Do not ask for the same dirty MPR decision again during unload.
+        m_pView->unloadLand(false);
         updateDocumentActionAvailability();
     }
 }
@@ -3860,7 +4115,7 @@ void MainWindow::on_actionOpen_triggered()
     }
     else if(fileName.fileName().toLower().endsWith(".mob"))
     {
-        m_pView->cancelPendingOperation();
+        m_pView->prepareDocumentTransition();
         if(loadMobWithProgress(fileName))
             rememberRecentFile(fileName);
     }
@@ -3900,7 +4155,8 @@ void MainWindow::showGameAndModSetup()
             return;
         m_undoStack->clear();
         m_pView->unloadMob("");
-        m_pView->unloadLand();
+        // isExitAllowed() already collected the dirty-document decision.
+        m_pView->unloadLand(false);
         m_openedMapZoneId.clear();
         m_currentCollectionPath.clear();
         ei::log(eLogInfo, QString("Unloaded documents before resource reinitialization profile:%1 -> %2 root:%3 -> %4")
@@ -4005,7 +4261,7 @@ bool MainWindow::openDocument(const QFileInfo& fileName)
     COptString* opt = dynamic_cast<COptString*>(m_settings->opt(eOptSetGeneral, "lastVisitedFolder"));
     if(opt)
         opt->setValue(fileName.dir().path());
-    m_pView->cancelPendingOperation();
+    m_pView->prepareDocumentTransition();
     if(suffix == "mpr")
     {
         if(!replaceLoadedLandscape(fileName))
@@ -4047,7 +4303,7 @@ bool MainWindow::replaceLoadedLandscape(const QFileInfo& fileName)
     }
 
     m_openedMapZoneId.clear();
-    m_pView->cancelPendingOperation();
+    m_pView->prepareDocumentTransition();
     m_undoStack->clear();
     if(!loadLandscapeWithProgress(fileName))
         return false;
@@ -4106,6 +4362,8 @@ void MainWindow::configureAutosaveTimer(bool enabled, int intervalMinutes)
     if(!enabled)
     {
         m_autosaveTimer->stop();
+        if(m_autosaveCountdownTimer) m_autosaveCountdownTimer->stop();
+        if(m_autosaveNotification) m_autosaveNotification->hide();
         ei::log(eLogInfo, "Periodic recovery autosave disabled from applied settings");
         return;
     }
@@ -4114,6 +4372,83 @@ void MainWindow::configureAutosaveTimer(bool enabled, int intervalMinutes)
     ei::log(eLogInfo, QString("Periodic recovery autosave scheduled intervalMinutes:%1 active:%2 remainingMs:%3 timerIntervalMs:%4")
             .arg(minutes).arg(m_autosaveTimer->isActive()).arg(m_autosaveTimer->remainingTime())
             .arg(m_autosaveTimer->interval()));
+}
+
+void MainWindow::beginAutosaveCountdown()
+{
+    if(!m_pView || m_pView->hasPendingOperation())
+    {
+        ei::log(eLogInfo, "Recovery autosave countdown deferred while an edit operation is pending");
+        return;
+    }
+    bool dirty = false;
+    for(CMob* mob : m_pView->mobs())
+        dirty = dirty || (mob && mob->isDirty());
+    dirty = dirty || (CLandscape::getInstance()->isMprLoad()
+                      && CLandscape::getInstance()->isDirty());
+    if(!dirty)
+    {
+        ei::log(eLogInfo, "Recovery autosave tick skipped because no document is dirty");
+        return;
+    }
+    if(m_autosaveCountdownTimer && m_autosaveCountdownTimer->isActive())
+        return;
+
+    if(!m_autosaveNotification)
+    {
+        m_autosaveNotification = new QFrame(this);
+        m_autosaveNotification->setObjectName("autosaveNotification");
+        m_autosaveNotification->setFrameShape(QFrame::StyledPanel);
+        m_autosaveNotification->setAttribute(Qt::WA_ShowWithoutActivating);
+        m_autosaveNotification->setStyleSheet(
+            "QFrame#autosaveNotification { background: #292929; border: 1px solid #808080; border-radius: 4px; }"
+            "QLabel { color: #eeeeee; } QPushButton { min-width: 88px; }");
+        QHBoxLayout* layout = new QHBoxLayout(m_autosaveNotification);
+        layout->setContentsMargins(12, 10, 12, 10);
+        m_autosaveCountdownLabel = new QLabel(m_autosaveNotification);
+        m_cancelAutosaveButton = new QPushButton(
+            tr("Cancel Autosave"), m_autosaveNotification);
+        layout->addWidget(m_autosaveCountdownLabel, 1);
+        layout->addWidget(m_cancelAutosaveButton);
+        m_autosaveCountdownTimer = new QTimer(m_autosaveNotification);
+        m_autosaveCountdownTimer->setInterval(1000);
+        connect(m_autosaveCountdownTimer, &QTimer::timeout, this, [this]()
+        {
+            --m_autosaveCountdownSeconds;
+            if(m_autosaveCountdownSeconds <= 0)
+            {
+                m_autosaveCountdownTimer->stop();
+                m_autosaveCountdownLabel->setText(tr("Autosaving..."));
+                m_cancelAutosaveButton->setEnabled(false);
+                m_autosaveNotification->adjustSize();
+                positionAutosaveNotification();
+                m_autosaveNotification->repaint();
+                performAutosave();
+                m_autosaveNotification->hide();
+                m_cancelAutosaveButton->setEnabled(true);
+                return;
+            }
+            m_autosaveCountdownLabel->setText(
+                tr("Recovery autosave in %1 seconds...").arg(m_autosaveCountdownSeconds));
+        });
+        connect(m_cancelAutosaveButton, &QPushButton::clicked, this, [this]()
+        {
+            m_autosaveCountdownTimer->stop();
+            m_autosaveNotification->hide();
+            ei::log(eLogInfo, "Recovery autosave occurrence skipped by user");
+            statusBar()->showMessage(tr("This recovery autosave was skipped."), 3000);
+        });
+    }
+    m_autosaveCountdownSeconds = 15;
+    m_cancelAutosaveButton->setEnabled(true);
+    m_autosaveCountdownLabel->setText(
+        tr("Recovery autosave in %1 seconds...").arg(m_autosaveCountdownSeconds));
+    m_autosaveNotification->adjustSize();
+    positionAutosaveNotification();
+    m_autosaveNotification->show();
+    m_autosaveNotification->raise();
+    m_autosaveCountdownTimer->start();
+    ei::log(eLogInfo, "Recovery autosave countdown started seconds:15");
 }
 
 void MainWindow::performAutosave()
@@ -4156,26 +4491,12 @@ void MainWindow::performAutosave()
     CLandscape* landscape = CLandscape::getInstance();
     if(landscape->isMprLoad() && landscape->isDirty())
     {
-        QByteArray candidate;
-        QString error;
-        if(landscape->buildValidatedCandidate(landscape->filePath(), &candidate, &error))
-        {
-            const SBackupResult result = manager.snapshotAutosave(landscape->filePath(), candidate);
-            if(result.success)
-                written += result.skipped ? 0 : 1;
-            else
-            {
-                ++failed;
-                ei::log(eLogWarning, QString("Recovery autosave failed path:%1 error:%2")
-                    .arg(landscape->filePath().absoluteFilePath(), result.error));
-            }
-        }
-        else
-        {
-            ++failed;
-            ei::log(eLogWarning, QString("Recovery autosave skipped unsafe MPR path:%1 error:%2")
-                .arg(landscape->filePath().absoluteFilePath(), error));
-        }
+        // A changed MPR may only be emitted through CView's provenance-checked
+        // MprDocument/SEC transaction path. CLandscape's inherited rebuilding
+        // serializer is intentionally not exposed to recovery autosave.
+        ++failed;
+        ei::log(eLogWarning, QString("Recovery autosave skipped changed MPR until the lossless transaction path is available path:%1")
+            .arg(landscape->filePath().absoluteFilePath()));
     }
     if(written > 0)
         statusBar()->showMessage(tr("Recovery autosave created %1 new generation(s).").arg(written), 4000);
@@ -4185,23 +4506,26 @@ void MainWindow::performAutosave()
 
 void MainWindow::showRecoverableAutosaves()
 {
-    const QVector<SRecoverableAutosave> recoveries = CBackupManager::recoverableAutosaves();
-    if(recoveries.isEmpty())
+    if(m_recoverableAutosaveNoticeCount <= 0
+       || m_recoverableAutosaveNoticeKeys.isEmpty())
         return;
-    QMessageBox prompt(QMessageBox::Warning, tr("Recoverable editor autosaves"),
-        tr("Endurance found %1 validated autosave generation(s) whose source files have not "
-           "changed since the recovery copy was made.").arg(recoveries.size()),
-        QMessageBox::NoButton, this);
-    prompt.setInformativeText(tr("Open the Endurance backup folder to inspect or copy them. "
-                                 "The original map files have not been modified."));
-    QPushButton* openFolder = prompt.addButton(tr("Open Backup Folder"), QMessageBox::AcceptRole);
-    prompt.addButton(tr("Later"), QMessageBox::RejectRole);
-    prompt.exec();
-    if(prompt.clickedButton() == openFolder)
+    ei::log(eLogInfo, QString("Recoverable editor autosaves available count:%1")
+            .arg(m_recoverableAutosaveNoticeCount));
+    showTransientResultNotification(
+        tr("%1 recoverable editor autosave generation(s) are available.\n"
+           "Their source maps are unchanged; open the backup folder to inspect or copy them.")
+            .arg(m_recoverableAutosaveNoticeCount),
+        false, true, tr("Open Backup Folder"),
+        ETransientNotificationAction::OpenBackupFolder, 7000);
+    QString acknowledgeError;
+    if(!CBackupManager().acknowledgeRecoveries(
+           m_recoverableAutosaveNoticeKeys, &acknowledgeError))
+        ei::log(eLogWarning, "Could not acknowledge recovery notification: "
+                + acknowledgeError);
+    else
     {
-        QString error;
-        if(!CBackupManager::openBackupFolder(&error))
-            QMessageBox::warning(this, tr("Endurance backups"), error);
+        m_recoverableAutosaveNoticeCount = 0;
+        m_recoverableAutosaveNoticeKeys.clear();
     }
 }
 
@@ -4222,7 +4546,7 @@ void MainWindow::on_actionOpen_MOB_triggered()
     COptString* opt = dynamic_cast<COptString*>(m_settings->opt(eOptSetGeneral, "lastVisitedFolder"));
     Q_ASSERT(opt);
     const QStringList paths = QFileDialog::getOpenFileNames(this, "Open one or more MOB files", opt->value(), tr("MOB (*.mob)"));
-    m_pView->cancelPendingOperation();
+    m_pView->prepareDocumentTransition();
     for(const QString& path : paths)
     {
         QFileInfo fileName(path);
@@ -4281,7 +4605,7 @@ void MainWindow::on_action_Mob_parameters_triggered()
 
 void MainWindow::on_actionUndo_triggered()
 {
-    if(m_pView->prepareUndo())
+    if(m_pView->prepareHistoryNavigation())
         runUndoToIndex(m_undoStack->index() - 1);
 }
 
@@ -4299,9 +4623,8 @@ void MainWindow::on_moveButton_clicked()
 
 void MainWindow::on_actionRedo_triggered()
 {
-    if(m_pView->cancelPendingOperation())
-        return;
-    runUndoToIndex(m_undoStack->index() + 1);
+    if(m_pView->prepareHistoryNavigation())
+        runUndoToIndex(m_undoStack->index() + 1);
 }
 
 void MainWindow::on_actionOpen_MOB_Script_triggered()
@@ -4338,6 +4661,9 @@ void MainWindow::updateWindowTitle(eTitleTypeData type, QString data)
         m_ui->actionOpen_MOB_Script->setEnabled(!data.isEmpty());
         m_externalScriptAction->setEnabled(!data.isEmpty());
         m_ui->actionCreate_new_object->setEnabled(!data.isEmpty());
+        m_ui->actionSave->setEnabled(!data.isEmpty());
+        m_ui->actionSave_as->setEnabled(!data.isEmpty());
+        m_ui->actionSave_all_MOB_s->setEnabled(!data.isEmpty());
         updateOperationAvailability(m_pView && m_pView->nSelectedNodes() > 0);
         break;
     }
@@ -4431,6 +4757,7 @@ void MainWindow::resizeEvent(QResizeEvent* e)
 {
     QMainWindow::resizeEvent(e);
     positionMapTestResultNotification();
+    positionAutosaveNotification();
 }
 
 void MainWindow::closeEvent(QCloseEvent *e)
@@ -4479,6 +4806,15 @@ void MainWindow::closeEvent(QCloseEvent *e)
     ei::log(eLogInfo, QString("Shutdown live view deletion complete elapsedMs:%1")
             .arg(shutdownTimer.elapsed()));
     ei::setCrashContext("shutdown/view-deleted");
+    if(m_backupSessionStarted)
+    {
+        QString backupSessionError;
+        if(!CBackupManager().finishEditorSession(&backupSessionError))
+            ei::log(eLogWarning, "Could not mark editor backup session clean: "
+                    + backupSessionError);
+        else
+            ei::log(eLogInfo, "Editor backup session marked clean");
+    }
     e->accept();
 }
 
@@ -4509,12 +4845,15 @@ void MainWindow::on_actionReset_selected_IDs_triggered()
 
 void MainWindow::on_action_About_triggered()
 {
-    QMessageBox::information(this, "About",
-        QString("EI Mapper: Endurance Edition %1\n\n"
-                "A private, independently versioned derivative of EI Mapper by konstvest.\n"
-                "Upstream: https://github.com/konstvest/ei_maper\n"
-                "License: GNU GPL-3.0")
-            .arg(QCoreApplication::applicationVersion()));
+    QMessageBox about(this);
+    about.setWindowTitle(tr("About"));
+    about.setIconPixmap(qApp->windowIcon().pixmap(96, 96));
+    about.setText(QString("EI Mapper: Endurance Edition %1\n\n"
+                          "A private, independently versioned derivative of EI Mapper by konstvest.\n"
+                          "Upstream: https://github.com/konstvest/ei_maper\n"
+                          "License: GNU GPL-3.0")
+                      .arg(QCoreApplication::applicationVersion()));
+    about.exec();
 }
 
 
@@ -4532,7 +4871,8 @@ void MainWindow::on_actionMap_parameters_triggered()
 
 void MainWindow::on_tileBrushButton_clicked()
 {
-    CButtonConnector::getInstance()->clickButton(EButtonOpTilebrush);
+    // The tool button owns a QAction which performs the toggle. Qt Designer's
+    // auto-connected clicked slot must not toggle it a second time.
 }
 
 

@@ -1,0 +1,8 @@
+EI Mapper: Endurance Edition 0.3.0-alpha.1
+Closed test build: integrated Endurance baseline
+Promoted from the verified 0.2.1-alpha.44 feature line without changing the
+lossless MOB compatibility contract.
+Includes independent Time of Day and Lighting Mode controls, RunWorldTime JMV
+test starts, and the taskbar-visible startup splash through commit 3AF2099.
+No endurance-options.json, workflow logs, saves, crash dumps, or game assets
+may be included in the finalized package.

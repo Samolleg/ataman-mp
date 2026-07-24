@@ -20,6 +20,16 @@ CTileForm::CTileForm(QWidget *parent) :
   ,m_tileRot(0)
 {
     ui->setupUi(this);
+    setWindowTitle(tr("MPR Atlas Tiles"));
+    ui->label->setText(tr("Atlas category (read-only)"));
+    ui->comboTileType->setEnabled(false);
+    ui->comboTileType->setToolTip(tr("Atlas slot categories are MPR metadata and are not edited by the painting brush."));
+    ui->comboActiveLiquidMaterial->setEnabled(false);
+    ui->comboActiveLiquidMaterial->setToolTip(tr("Overlay material editing is not enabled in this preview build."));
+    ui->tabWidget->setTabEnabled(1, false);
+    ui->tabWidget->setTabToolTip(1, tr("Liquid material editing will use the staged MPR transaction path in a later increment."));
+    ui->buttonApply->hide();
+    ui->buttonCancel->setText(tr("Close"));
     setAttribute(Qt::WA_ShowWithoutActivating);
     ui->comboTileType->addItems(CResourceStringList::getInstance()->tileTypes().values());
     //connect(ui->tableTile, SIGNAL(cellClicked(int,int)), this, SLOT(onCellClicked(int,int)));
@@ -263,7 +273,7 @@ public:
 // tile number per atlas -> calc tile size
 void CTileForm::fillTable(QString mapName, int textureAtlasNumber)
 {
-
+    m_tileImages.clear();
     const QStringList arrTexName = ei::terrainTextureResourceNames(mapName, textureAtlasNumber);
     QVector<QImage> arrImage;
     if(!CTextureList::getInstance()->extractMmpToDxt1(arrImage, arrTexName) || arrImage.isEmpty())
@@ -298,6 +308,7 @@ void CTileForm::fillTable(QString mapName, int textureAtlasNumber)
             {
                 QImage croppedImage = arrImage[i].copy(row*m_originalTilesize, col*m_originalTilesize, m_originalTilesize, m_originalTilesize);
                 croppedImage = croppedImage.mirrored(false, true);
+                m_tileImages.append(croppedImage.convertToFormat(QImage::Format_RGBA8888));
                 QPixmap croppedPixmap = QPixmap::fromImage(croppedImage);
                 m_icoList.append(QIcon(croppedPixmap));
             }
@@ -351,6 +362,15 @@ void CTileForm::selectQuickAccessTile(int index)
 {
     ui->tableQuick->selectColumn(index);
     onQuickCellClicked(0, index);
+}
+
+void CTileForm::clearTileSelection()
+{
+    ui->tableTile->clearSelection();
+    ui->tableTile->setCurrentCell(-1, -1);
+    ui->tableQuick->clearSelection();
+    ui->tableQuick->setCurrentCell(-1, -1);
+    m_tileRot = 0;
 }
 
 int CTileForm::activeMaterialindex()

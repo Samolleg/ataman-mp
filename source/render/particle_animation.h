@@ -269,11 +269,13 @@ public:
         const float alpha = qBound(0.0f, fraction, 1.0f);
         for(const TendriParticle& particle : m_particles)
         {
-            result.append({particle.previousPosition
-                               + (particle.position - particle.previousPosition) * alpha,
-                           particle.previousScale
-                               + (particle.scale - particle.previousScale) * alpha,
-                           particle.previousFrame});
+            RenderSample sample;
+            sample.position = particle.previousPosition
+                + (particle.position - particle.previousPosition) * alpha;
+            sample.scale = particle.previousScale
+                + (particle.scale - particle.previousScale) * alpha;
+            sample.frame = particle.previousFrame;
+            result.append(sample);
         }
         return result;
     }

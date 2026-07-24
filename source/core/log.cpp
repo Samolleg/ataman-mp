@@ -7,7 +7,6 @@
 #include <QDir>
 #include <QFileInfo>
 #include <cstring>
-#include "settings.h"
 
 namespace {
 char g_crashContext[2048] = "startup";

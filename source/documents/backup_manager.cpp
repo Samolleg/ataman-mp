@@ -7,11 +7,14 @@
 #include <QDirIterator>
 #include <QFile>
 #include <QJsonDocument>
+#include <QJsonArray>
 #include <QJsonObject>
 #include <QRegExp>
 #include <QSaveFile>
+#include <QSet>
 #include <QStandardPaths>
 #include <QUrl>
+#include <QUuid>
 
 #include "log.h"
 
@@ -43,6 +46,55 @@ bool writeAtomically(const QString& path, const QByteArray& data, QString& error
         return false;
     }
     return true;
+}
+
+QJsonObject readJsonObject(const QString& path)
+{
+    QFile file(path);
+    if(!file.open(QIODevice::ReadOnly))
+        return QJsonObject();
+    return QJsonDocument::fromJson(file.readAll()).object();
+}
+
+QString sessionJournalPath(const QString& root)
+{
+    return QDir(root).filePath("editor-session.json");
+}
+
+QString notificationJournalPath(const QString& root)
+{
+    return QDir(root).filePath("recovery-notifications.json");
+}
+
+QString recoveryNotificationKey(const QString& sourcePath,
+                                const QString& candidateSha256,
+                                const QString& createdUtc)
+{
+    QString normalized = QDir::cleanPath(sourcePath);
+#ifdef Q_OS_WIN
+    normalized = normalized.toLower();
+#endif
+    return QCryptographicHash::hash(
+        QString("%1\n%2\n%3").arg(normalized, candidateSha256, createdUtc).toUtf8(),
+        QCryptographicHash::Sha256).toHex();
+}
+
+QSet<QString> acknowledgedRecoveryKeys(const QString& root)
+{
+    QSet<QString> keys;
+    const QJsonArray entries = readJsonObject(notificationJournalPath(root))
+        .value("keys").toArray();
+    for(const QJsonValue& entry : entries)
+        if(!entry.toString().isEmpty())
+            keys.insert(entry.toString());
+    return keys;
+}
+
+QString activeSessionId(const QString& root)
+{
+    const QJsonObject journal = readJsonObject(sessionJournalPath(root));
+    return journal.value("state").toString() == "active"
+        ? journal.value("sessionId").toString() : QString();
 }
 }
 
@@ -148,6 +200,9 @@ SBackupResult CBackupManager::snapshotAutosave(const QFileInfo& source,
     metadata.insert("sourceSha256", sourceHash);
     metadata.insert("candidateSha256", result.sha256);
     metadata.insert("backupPath", autosavePath);
+    const QString sessionId = activeSessionId(m_rootPath);
+    if(!sessionId.isEmpty())
+        metadata.insert("sessionId", sessionId);
     if(!writeAtomically(autosavePath + ".json",
                         QJsonDocument(metadata).toJson(QJsonDocument::Indented), error))
     {
@@ -177,8 +232,13 @@ SBackupResult CBackupManager::snapshotAutosave(const QFileInfo& source,
 
 QVector<SRecoverableAutosave> CBackupManager::recoverableAutosaves()
 {
+    return CBackupManager().recoverableAutosavesForRoot();
+}
+
+QVector<SRecoverableAutosave> CBackupManager::recoverableAutosavesForRoot() const
+{
     QVector<SRecoverableAutosave> result;
-    QDirIterator iterator(defaultRootPath(), QStringList() << "*-autosave-*.json",
+    QDirIterator iterator(m_rootPath, QStringList() << "*-autosave-*.json",
                           QDir::Files, QDirIterator::Subdirectories);
     while(iterator.hasNext())
     {
@@ -202,9 +262,155 @@ QVector<SRecoverableAutosave> CBackupManager::recoverableAutosaves()
         recovery.autosavePath = autosavePath;
         recovery.createdUtc = metadata.value("createdUtc").toString();
         recovery.candidateSha256 = metadata.value("candidateSha256").toString();
+        recovery.sessionId = metadata.value("sessionId").toString();
+        recovery.notificationKey = recoveryNotificationKey(
+            recovery.sourcePath, recovery.candidateSha256, recovery.createdUtc);
         result.append(recovery);
     }
     return result;
+}
+
+bool CBackupManager::beginEditorSession(QVector<SRecoverableAutosave>* recoveries,
+                                        QString* error) const
+{
+    if(recoveries)
+        recoveries->clear();
+    if(!QDir().mkpath(m_rootPath))
+    {
+        if(error)
+            *error = QString("Cannot create backup session directory: %1").arg(m_rootPath);
+        return false;
+    }
+
+    const QString journalPath = sessionJournalPath(m_rootPath);
+    const QJsonObject previous = readJsonObject(journalPath);
+    const bool previousUnclean = previous.value("state").toString() == "active";
+    const QString previousSessionId = previous.value("sessionId").toString();
+    QSet<QString> pendingKeys;
+    for(const QJsonValue& value : previous.value("pendingRecoveryKeys").toArray())
+        if(!value.toString().isEmpty())
+            pendingKeys.insert(value.toString());
+
+    QVector<SRecoverableAutosave> newlyRecoverable;
+    if(previousUnclean)
+    {
+        const QSet<QString> acknowledged = acknowledgedRecoveryKeys(m_rootPath);
+        QDateTime previousStarted = QDateTime::fromString(
+            previous.value("startedUtc").toString(), Qt::ISODateWithMs);
+        if(!previousStarted.isValid())
+            previousStarted = QDateTime::fromString(
+                previous.value("startedUtc").toString(), Qt::ISODate);
+        for(const SRecoverableAutosave& recovery : recoverableAutosavesForRoot())
+        {
+            bool belongsToUncleanSession = pendingKeys.contains(recovery.notificationKey)
+                || (!previousSessionId.isEmpty()
+                    && recovery.sessionId == previousSessionId);
+            // Autosaves made by builds predating session IDs can still be
+            // recovered, but only when their timestamp falls inside the
+            // unfinished session rather than merely existing in the folder.
+            if(!belongsToUncleanSession && recovery.sessionId.isEmpty()
+               && previousStarted.isValid())
+            {
+                QDateTime created = QDateTime::fromString(
+                    recovery.createdUtc, Qt::ISODateWithMs);
+                if(!created.isValid())
+                    created = QDateTime::fromString(recovery.createdUtc, Qt::ISODate);
+                belongsToUncleanSession = created.isValid() && created >= previousStarted;
+            }
+            if(belongsToUncleanSession
+               && !acknowledged.contains(recovery.notificationKey))
+                newlyRecoverable.append(recovery);
+        }
+    }
+
+    QJsonArray carriedKeys;
+    for(const SRecoverableAutosave& recovery : newlyRecoverable)
+        carriedKeys.append(recovery.notificationKey);
+    QJsonObject current;
+    current.insert("schema", 1);
+    current.insert("state", "active");
+    current.insert("sessionId", QUuid::createUuid().toString(QUuid::WithoutBraces));
+    current.insert("startedUtc", QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
+    current.insert("pendingRecoveryKeys", carriedKeys);
+    QString writeError;
+    if(!writeAtomically(journalPath,
+                        QJsonDocument(current).toJson(QJsonDocument::Indented), writeError))
+    {
+        if(error)
+            *error = QString("Cannot write editor backup session journal: %1").arg(writeError);
+        return false;
+    }
+    if(recoveries)
+        *recoveries = newlyRecoverable;
+    return true;
+}
+
+bool CBackupManager::acknowledgeRecoveries(const QStringList& notificationKeys,
+                                           QString* error) const
+{
+    if(notificationKeys.isEmpty())
+        return true;
+    QSet<QString> acknowledged = acknowledgedRecoveryKeys(m_rootPath);
+    for(const QString& key : notificationKeys)
+        if(!key.isEmpty())
+            acknowledged.insert(key);
+    QStringList orderedKeys = acknowledged.values();
+    orderedKeys.sort();
+    QJsonArray entries;
+    for(const QString& key : orderedKeys)
+        entries.append(key);
+    QJsonObject notifications;
+    notifications.insert("schema", 1);
+    notifications.insert("updatedUtc", QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
+    notifications.insert("keys", entries);
+    QString writeError;
+    if(!writeAtomically(notificationJournalPath(m_rootPath),
+                        QJsonDocument(notifications).toJson(QJsonDocument::Indented), writeError))
+    {
+        if(error)
+            *error = QString("Cannot acknowledge recovery notification: %1").arg(writeError);
+        return false;
+    }
+
+    QJsonObject session = readJsonObject(sessionJournalPath(m_rootPath));
+    if(session.value("state").toString() == "active")
+    {
+        QSet<QString> acknowledgedNow;
+        for(const QString& key : notificationKeys)
+            acknowledgedNow.insert(key);
+        QJsonArray remaining;
+        for(const QJsonValue& value : session.value("pendingRecoveryKeys").toArray())
+            if(!acknowledgedNow.contains(value.toString()))
+                remaining.append(value);
+        session.insert("pendingRecoveryKeys", remaining);
+        if(!writeAtomically(sessionJournalPath(m_rootPath),
+                            QJsonDocument(session).toJson(QJsonDocument::Indented), writeError))
+        {
+            if(error)
+                *error = QString("Cannot update editor backup session journal: %1").arg(writeError);
+            return false;
+        }
+    }
+    return true;
+}
+
+bool CBackupManager::finishEditorSession(QString* error) const
+{
+    QJsonObject session = readJsonObject(sessionJournalPath(m_rootPath));
+    if(session.isEmpty() || session.value("state").toString() != "active")
+        return true;
+    session.insert("state", "clean");
+    session.insert("closedUtc", QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
+    session.insert("pendingRecoveryKeys", QJsonArray());
+    QString writeError;
+    if(!writeAtomically(sessionJournalPath(m_rootPath),
+                        QJsonDocument(session).toJson(QJsonDocument::Indented), writeError))
+    {
+        if(error)
+            *error = QString("Cannot finish editor backup session journal: %1").arg(writeError);
+        return false;
+    }
+    return true;
 }
 
 SBackupResult CBackupManager::createSnapshot(const QFileInfo& source, const QString& event, bool deduplicate) const

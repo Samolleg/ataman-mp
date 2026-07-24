@@ -1086,6 +1086,24 @@ CNode* CMob::restoreDeletedNode(CNode* pNode, int restoreIndex)
     return pNode;
 }
 
+bool CMob::replaceNode(CNode* current, CNode* replacement, int index)
+{
+    if(!current || !replacement || current == replacement)
+        return false;
+    const int currentIndex = m_aNode.indexOf(current);
+    if(currentIndex < 0 || m_aNode.contains(replacement))
+        return false;
+    const int targetIndex = index >= 0 ? qBound(0, index, m_aNode.size() - 1)
+                                       : currentIndex;
+    m_aNode.removeAt(currentIndex);
+    if(!m_aDeletedNode.contains(current))
+        m_aDeletedNode.append(current);
+    m_aDeletedNode.removeOne(replacement);
+    m_aNode.insert(qMin(targetIndex, m_aNode.size()), replacement);
+    logicNodesUpdate();
+    return true;
+}
+
 QVector<uint> CMob::checkUniqueId(QSet<uint> &aId)
 {
     QVector<uint> duplicates;
@@ -1747,7 +1765,23 @@ bool CMob::buildRawObjectSequenceCandidate(
         QByteArray sourceRaw;
         QByteArray cleanRaw;
         QByteArray cleanHash;
-        if(node->rawSourceDocumentSha256() == sourceDocumentSha256
+        if(node->hasRawStructuralReplacementBytes())
+        {
+            sourceRaw = node->rawTemplateSourceSubtree();
+            cleanRaw = node->rawTemplateCleanSubtree();
+            if(QCryptographicHash::hash(sourceRaw, QCryptographicHash::Sha256)
+                   != node->rawSourceSubtreeSha256())
+            {
+                if(report)
+                    report->add("mob.object_sequence.structural_replacement",
+                                EValidationSeverity::Error,
+                                "A structural replacement failed its raw provenance hash",
+                                QString::number(node->mapId()));
+                return false;
+            }
+            cleanHash = QCryptographicHash::hash(cleanRaw, QCryptographicHash::Sha256);
+        }
+        else if(node->rawSourceDocumentSha256() == sourceDocumentSha256
            && cleanBySourcePath.contains(node->rawSourceObjectPath()))
         {
             const SMobObjectSnapshot* clean = cleanBySourcePath.value(

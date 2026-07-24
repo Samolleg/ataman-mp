@@ -1,8 +1,11 @@
 #include <QtTest>
 #include <QFile>
+#include <QRegularExpression>
+#include <QSet>
 #include <QTemporaryDir>
 
 #include "resource_profile.h"
+#include "../source/runtime/runtime_variant_registry.h"
 
 namespace {
 void createFile(const QString& path, const QByteArray& data = QByteArray("test"))
@@ -39,6 +42,7 @@ private slots:
     void invalidGameRootIsRejected();
     void externalProfileCanBeAdded();
     void informationalRuntimeHashDoesNotInvalidateManifest();
+    void builtInProfilesUseCanonicalRuntimeRegistry();
 };
 
 void ResourceProfileTests::jmvPresetFindsModAndBaseResources()
@@ -169,6 +173,38 @@ void ResourceProfileTests::informationalRuntimeHashDoesNotInvalidateManifest()
     QCOMPARE(result.runtimeComponents.size(), 2);
     QVERIFY(!result.runtimeComponents.at(1).hashAccepted);
     QVERIFY(!result.runtimeComponents.at(1).enforceHash);
+}
+
+void ResourceProfileTests::builtInProfilesUseCanonicalRuntimeRegistry()
+{
+    const QVector<SResourceProfile> profiles = builtInResourceProfiles();
+    QCOMPARE(profiles.size(), 2);
+
+    QStringList expectedJmv;
+    QStringList expectedBase;
+    QSet<QString> uniqueHashes;
+    for(std::size_t index = 0; index < ei::runtime::runtimeVariantCount(); ++index)
+    {
+        const ei::runtime::SRuntimeVariant& variant = ei::runtime::kRuntimeVariants[index];
+        const QString hash = QString::fromLatin1(variant.sha256);
+        QCOMPARE(QString::fromLatin1(variant.layoutId),
+                 QString::fromLatin1(ei::runtime::kGameLayoutV1));
+        QCOMPARE(hash.size(), 64);
+        QVERIFY(QRegularExpression("^[0-9A-F]{64}$").match(hash).hasMatch());
+        QVERIFY2(!uniqueHashes.contains(hash), qPrintable(hash));
+        uniqueHashes.insert(hash);
+        if(variant.profile == ei::runtime::ERuntimeProfile::Jmv)
+            expectedJmv.append(hash);
+        else
+            expectedBase.append(hash);
+    }
+
+    QCOMPARE(profiles.at(0).runtimeComponents.size(), 1);
+    QCOMPARE(profiles.at(1).runtimeComponents.size(), 1);
+    QCOMPARE(profiles.at(0).runtimeComponents.first().acceptedSha256, expectedJmv);
+    QCOMPARE(profiles.at(1).runtimeComponents.first().acceptedSha256, expectedBase);
+    QCOMPARE(expectedJmv.size(), 1);
+    QCOMPARE(expectedBase.size(), 2);
 }
 
 QTEST_APPLESS_MAIN(ResourceProfileTests)

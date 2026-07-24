@@ -37,6 +37,28 @@ foreach ($dump in Get-ChildItem -LiteralPath $root -Recurse -File | Where-Object
     $failures.Add("private runtime artifact included: $($dump.FullName.Substring($root.Length + 1))")
 }
 
+$versionPath = Join-Path $root 'VERSION'
+if (-not (Test-Path -LiteralPath $versionPath -PathType Leaf)) {
+    $failures.Add('VERSION is missing')
+}
+else {
+    $version = (Get-Content -LiteralPath $versionPath -Raw).Trim()
+    if ($version -match 'alpha\.(\d+)') {
+        $alphaNumber = [int]$Matches[1]
+        $expectedPattern = "^ALPHA$alphaNumber(?:_|$).*\.md$"
+        $alphaChangelists = @(Get-ChildItem -LiteralPath $root -File -Filter 'ALPHA*.md')
+        $currentChangelists = @($alphaChangelists |
+            Where-Object { $_.Name -match $expectedPattern })
+        if ($currentChangelists.Count -ne 1) {
+            $failures.Add("expected exactly one alpha.$alphaNumber changelist; found $($currentChangelists.Count)")
+        }
+        foreach ($file in $alphaChangelists |
+            Where-Object { $_.Name -notmatch $expectedPattern }) {
+            $failures.Add("stale alpha changelist included: $($file.Name)")
+        }
+    }
+}
+
 $checksums = Join-Path $root 'SHA256SUMS.txt'
 if(Test-Path -LiteralPath $checksums)
 {
@@ -56,4 +78,4 @@ if ($failures.Count -ne 0) {
     exit 1
 }
 
-Write-Output "PASS: package contains no user settings, logs, saves, or crash dumps"
+Write-Output "PASS: package contains only its current changelist and no user settings, logs, saves, or crash dumps"

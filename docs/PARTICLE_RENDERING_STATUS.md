@@ -161,7 +161,6 @@ applicable items are evidenced:
 
 Lava in `gz10g` is not on this list: it is confirmed MPR liquid/terrain data,
 not a particle emitter.
-
 ## All-type editor test scene
 
 The repeatable generator `scripts/build_particle_catalog_mob.ps1` builds a

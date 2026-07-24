@@ -4,5 +4,7 @@
         <file>_emptyIco.ico</file>
         <file>auxData.res</file>
         <file>arrow_right.ico</file>
+        <file>endurance_gate.png</file>
+        <file>endurance_splash.png</file>
     </qresource>
 </RCC>
