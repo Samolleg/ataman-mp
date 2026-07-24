@@ -1471,3 +1471,74 @@ and `C69C26230EAC0830E69E5F40E9748014A6C9A74270BA3410CB80BAE15F6635BE`.
 The Base archive contains independently fingerprinted 256-square variants.
 These findings are pinned from the shipped executable and selected archives;
 they precede renderer dispatch changes.
+
+## Ordered catalog reconstruction: Portalstar through Cylinder2
+
+Portalstar (type 8253 / `0x203D`) selects factory range
+`0x00487D03..0x00487D3D`, callbacks `0x00493D10`, `0x00493D50`, and
+`0x00493DD0`, the `Casting6` atlas, ordinary alpha blending, one attempt and
+capacity one. Its only particle stays at the carrier point in phase zero while
+generation is enabled. Birth scale and alpha are zero; every update makes it
+fully opaque and chooses submitted size `.8..1.2 * authoredSize`. A bare placed
+record therefore has a complete persistent standalone path at its authored
+origin and needs no invented owner state.
+
+Portal (type 8254 / `0x203E`) selects factory range
+`0x00487B94..0x00487D02`, callbacks `0x00494470`, `0x00494770`, and
+`0x00494930`, the `Teleport` atlas, additive blending, 50 initial attempts,
+capacity 800, nominal life ten, and three quants per atlas phase. Its first
+particle is a persistent phase-15 portal head at `origin.z + 6.4`; when authored
+size is at least one, every update gives that head a random submitted size
+`1.2..1.8`, otherwise it remains hidden. Other births use fixed radius 2.5 and
+radial fraction `(u^2 + u) / 2`. They choose phases 4..14 inside the fraction
+test and phases 0..3 outside it, rotate by positive or negative .1 radians per
+update, and advance within their phase band every three quants.
+
+Portal trail submitted size is `.3 * (2 - radialFraction)`. Its initial vertical
+step is `.0375 * (4 - radialFraction)`, its birth Z receives a random
+`-.5..+.5` fraction of that step, and each update adds `step * authoredSize`
+before multiplying the step by 1.03. Alpha is the clamped quarter-scale value
+derived from remaining height and never exceeds 64/255. A trail reaching eight
+units above the carrier becomes transparent and retires on the next update.
+The local source replaces subsequent creation attempts with
+`int(10 * authoredSize)`. The fixed-radius horizontal shape is intentionally
+not rescaled: the native authored-scale mutator changes vertical motion and
+cadence through `fpSize`, not the callback's fixed 2.5 radius.
+
+Cylinder1 and Cylinder2 (types 8255 and 8256 / `0x203F` and `0x2040`) share
+factory range `0x00487D3E..0x00487EE9`, callbacks `0x00493DE0`, `0x00494170`,
+and `0x00494340`, ordinary alpha blending, 30 initial attempts, capacity 600,
+one quant per phase, two carrier-required local sources, and the exact alpha
+table `0,32,64,128` followed by full opacity. Cylinder1 uses `Casting2`;
+Cylinder2 uses `Casting1` and reverses both confirmed rotation signs. A bare
+record has no native carrier bounds, so the flat catalog uses authored scale as
+an explicit synthetic spherical carrier radius and identity orientation.
+
+The two sources begin on opposite points of a `.7 * carrierRadius` circle at
+height `.2 * carrierRadius`. Their initial orbit step is
+`2*pi/15 * .3`, their life is reset from the factory placeholder 100 to 18,
+and their initial vertical increment is
+`carrierRadius * (2/18) * .04`. Every update rotates and raises the source,
+multiplies vertical increment by 1.25, and rotates the stored orbit basis by
+`2*pi/15 * .1` in the opposite sense. Source zero reduces the creation-attempt
+count once every update and once more on odd source life; generation stops when
+a source update observes life zero.
+
+The first two particles are source anchors. They follow their source at
+submitted size .3 and use source-life alpha. Later births require nonzero source
+motion, begin on a random point from one source step behind through its current
+point, use phase one, submitted size .1, and life `min(14, sourceLife + 6)`.
+Every update advances phase, moves by the stored source velocity, renormalizes
+the horizontal point back to the `.7 * radius` circle, replaces velocity with a
+.6-scaled tangent (and .6-scaled vertical component), and multiplies submitted
+size by .9.
+
+The active JMV archive pins `casting6.mmp`, `casting2.mmp`, and `casting1.mmp`
+as 1024-square, 11-mip DXT3 atlases with payload SHA-256 values
+`9B62B28521029B2CC4A3F342BC6542168638F75B0E43882136764F7118D04585`,
+`ABA7C36565888863AEED4C1AF0295C9A21486FBDB6F9F61272A555F37436E3CC`,
+and `FAFC10F85C3458A96BB74F701183BDF7801017FA5F385C58AD1B1AC24A65C613`.
+The Base archive contains separately fingerprinted 256-square variants. The
+Portal texture was already fingerprinted for Teleport. These findings precede
+renderer changes and distinguish the ordinary Portalstar/Cylinders from the
+additive Portal.

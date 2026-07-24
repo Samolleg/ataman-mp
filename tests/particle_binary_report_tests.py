@@ -172,6 +172,26 @@ class ParticleBinaryReportTests(unittest.TestCase):
                          "53686170654368616E676500")
         self.assertEqual(fixture["sites"]["bag_texture_name"]["bytes"],
                          "42616700")
+        self.assertEqual(fixture["sites"]["casting6_texture_name"]["bytes"],
+                         "43617374696E673600")
+        self.assertEqual(fixture["sites"]["casting2_texture_name"]["bytes"],
+                         "43617374696E673200")
+        self.assertEqual(fixture["sites"]["casting1_texture_name"]["bytes"],
+                         "43617374696E673100")
+        self.assertEqual(fixture["ranges"]["portalstar_create_callback"]["start_va"],
+                         "0x00493D10")
+        self.assertEqual(fixture["ranges"]["portal_create_callback"]["start_va"],
+                         "0x00494470")
+        self.assertEqual(fixture["ranges"]["cylinder_create_callback"]["start_va"],
+                         "0x00493DE0")
+        self.assertEqual(len(fixture["sites"]["cylinder_alpha_table"]["bytes"]),
+                         256)
+        self.assertAlmostEqual(fixture["constants"]["portal_radius"]["value"], 2.5)
+        self.assertAlmostEqual(fixture["constants"]["portal_height"]["value"], 8.0)
+        self.assertAlmostEqual(
+            fixture["constants"]["cylinder_circle_radius_factor"]["value"], 0.7)
+        self.assertAlmostEqual(
+            fixture["constants"]["cylinder_vertical_growth"]["value"], 1.25)
         self.assertEqual(len(fixture["sites"]["zoneexit_alpha_table"]["bytes"]),
                          128)
         self.assertEqual(len(fixture["sites"]["path_brightness_table"]["bytes"]),

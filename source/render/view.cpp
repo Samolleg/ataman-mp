@@ -2638,6 +2638,15 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
     QOpenGLTexture* bagTexture = textures->texture("bag");
     if(bagTexture == fallbackTexture)
         bagTexture = nullptr;
+    QOpenGLTexture* casting6Texture = textures->texture("casting6");
+    if(casting6Texture == fallbackTexture)
+        casting6Texture = nullptr;
+    QOpenGLTexture* casting2Texture = textures->texture("casting2");
+    if(casting2Texture == fallbackTexture)
+        casting2Texture = nullptr;
+    QOpenGLTexture* casting1Texture = textures->texture("casting1");
+    if(casting1Texture == fallbackTexture)
+        casting1Texture = nullptr;
 
     bool inverseOk = false;
     const QMatrix4x4 inverseView = cameraMatrix.inverted(&inverseOk);
@@ -3076,6 +3085,43 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
                        bagTexture == nullptr, 0.18f);
     };
 
+    const auto drawPortalStar = [&](const CNode* owner, const QVector3D& origin,
+                                    float authoredScale, uint seed)
+    {
+        ei::particle::PortalStarEmitter& emitter = m_portalStarEmitters[owner];
+        emitter.advanceTo(logicalTick, seed, origin, authoredScale);
+        for(const ei::particle::EffectRenderSample& sample : emitter.samples())
+            drawSprite(sample.position, sample.scale, 1.0f, 0.0f,
+                       QVector4D(1.0f, 1.0f, 1.0f, sample.alpha),
+                       casting6Texture, ei::particle::atlasUv(sample.frame), false,
+                       casting6Texture == nullptr, 0.18f);
+    };
+
+    const auto drawPortal = [&](const CNode* owner, const QVector3D& origin,
+                                float authoredScale, uint seed)
+    {
+        ei::particle::PortalEmitter& emitter = m_portalEmitters[owner];
+        emitter.advanceTo(logicalTick, seed, origin, authoredScale);
+        for(const ei::particle::EffectRenderSample& sample : emitter.samples())
+            drawSprite(sample.position, sample.scale, 1.0f, 0.0f,
+                       QVector4D(1.0f, 1.0f, 1.0f, sample.alpha),
+                       teleportTexture, ei::particle::atlasUv(sample.frame), true,
+                       teleportTexture == nullptr, 0.18f);
+    };
+
+    const auto drawCylinder = [&](const CNode* owner, const QVector3D& origin,
+                                  float authoredScale, bool reverse, uint seed)
+    {
+        ei::particle::CylinderEmitter& emitter = m_cylinderEmitters[owner];
+        emitter.advanceTo(logicalTick, seed, origin, authoredScale, reverse);
+        QOpenGLTexture* texture = reverse ? casting1Texture : casting2Texture;
+        for(const ei::particle::EffectRenderSample& sample : emitter.samples())
+            drawSprite(sample.position, sample.scale, 1.0f, 0.0f,
+                       QVector4D(1.0f, 1.0f, 1.0f, sample.alpha), texture,
+                       ei::particle::atlasUv(sample.frame), false,
+                       texture == nullptr, 0.18f);
+    };
+
     for(CMob* mob : m_aMob)
     {
         if(!isMobVisible(mob))
@@ -3213,6 +3259,34 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
             if(particle->kind() == 8252u)
             {
                 drawMoshka(particle, center, authoredScale, particle->mapId());
+                if(particle->nodeState() == ENodeState::eSelect)
+                    drawSprite(center, qMax(0.3f, authoredScale * 0.35f), 1.0f, 0.0f,
+                               QVector4D(0.10f, 0.90f, 1.0f, 0.72f), nullptr,
+                               QVector4D(0.0f, 0.0f, 1.0f, 1.0f), false, true, 0.12f);
+                continue;
+            }
+            if(particle->kind() == 8253u)
+            {
+                drawPortalStar(particle, center, authoredScale, particle->mapId());
+                if(particle->nodeState() == ENodeState::eSelect)
+                    drawSprite(center, qMax(0.3f, authoredScale * 0.35f), 1.0f, 0.0f,
+                               QVector4D(0.10f, 0.90f, 1.0f, 0.72f), nullptr,
+                               QVector4D(0.0f, 0.0f, 1.0f, 1.0f), false, true, 0.12f);
+                continue;
+            }
+            if(particle->kind() == 8254u)
+            {
+                drawPortal(particle, center, authoredScale, particle->mapId());
+                if(particle->nodeState() == ENodeState::eSelect)
+                    drawSprite(center, qMax(0.3f, authoredScale * 0.35f), 1.0f, 0.0f,
+                               QVector4D(0.10f, 0.90f, 1.0f, 0.72f), nullptr,
+                               QVector4D(0.0f, 0.0f, 1.0f, 1.0f), false, true, 0.12f);
+                continue;
+            }
+            if(particle->kind() == 8255u || particle->kind() == 8256u)
+            {
+                drawCylinder(particle, center, authoredScale,
+                             particle->kind() == 8256u, particle->mapId());
                 if(particle->nodeState() == ENodeState::eSelect)
                     drawSprite(center, qMax(0.3f, authoredScale * 0.35f), 1.0f, 0.0f,
                                QVector4D(0.10f, 0.90f, 1.0f, 0.72f), nullptr,
@@ -5549,6 +5623,9 @@ bool CView::unloadMobDocument(CMob* mob, bool promptForSave)
     m_pathEmitters.clear();
     m_pathDestinationEmitters.clear();
     m_moshkaEmitters.clear();
+    m_portalStarEmitters.clear();
+    m_portalEmitters.clear();
+    m_cylinderEmitters.clear();
     m_fireArrowEmitters.clear();
     m_acidRayEmitters.clear();
     m_blueGasEmitters.clear();
@@ -5762,6 +5839,9 @@ void CView::unloadMob(QString mobName)
     m_pathEmitters.clear();
     m_pathDestinationEmitters.clear();
     m_moshkaEmitters.clear();
+    m_portalStarEmitters.clear();
+    m_portalEmitters.clear();
+    m_cylinderEmitters.clear();
     m_fireArrowEmitters.clear();
     m_acidRayEmitters.clear();
     m_blueGasEmitters.clear();

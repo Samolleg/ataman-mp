@@ -93,6 +93,9 @@ covering the selected JMV corpus.
 | 8249 / `0x2039` | Path | Dedicated finite green phase-15 path point using the native lifetime brightness sequence and `ShapeChange` atlas. A bare stationary record cannot provide the predicted carrier positions required for a trail. | Validate on a moving gameplay carrier; the truthful stationary standalone control is closed. |
 | 8250–8251 / `0x203A`–`0x203B` | Pathdestination, Pathfailed | Dedicated finite green ring and red ring-plus-cross controls with exact point counts, offsets, alpha/scale evolution, `ShapeChange` atlas and ordinary blending. | Validate bridge-plane projection on non-flat terrain; the flat standalone controls are closed. |
 | 8252 / `0x203C` | Moshka | Dedicated carrier-swarm simulator with 80 anchors, native source resets and random-ball motion, short gradient trails, phase/alpha/size tables, `Bag` atlas and ordinary blending. The catalog uses authored origin/scale as an explicit synthetic stationary carrier. | Capture an attached moving carrier and detach behavior; the stationary synthetic-carrier control is closed. |
+| 8253 / `0x203D` | Portalstar | Dedicated persistent phase-zero `Casting6` star with the native per-quant random scale range and ordinary alpha blending. | Validate a gameplay-owned portal-star carrier; the standalone visual path is closed. |
+| 8254 / `0x203E` | Portal | Dedicated additive `Teleport` column with the persistent elevated head, dual phase-band rotating trails, radial birth distribution, accelerating rise, height termination, scale and alpha evolution, and native population cap. | Validate owner-driven size below one, which intentionally suppresses the elevated head; the normal standalone control is closed. |
+| 8255–8256 / `0x203F`–`0x2040` | Cylinder1, Cylinder2 | Dedicated finite counter-rotating two-source helices with native anchor/trail cadence, source growth, tangent motion, scale/alpha evolution, and distinct `Casting2`/`Casting1` atlases using ordinary alpha blending. The editor repeats the completed one-shot for catalog inspection. | Validate gameplay-owned carrier bounds and orientation; the stationary synthetic-bound controls are closed. |
 
 ## Preview-only families
 
@@ -107,7 +110,6 @@ runtime behavior has not been reconstructed:
 | 8200, 8201 | Aggressionfog, Geyser |
 | 8258 | Acidstar |
 | 8259 | Sparks |
-| 8253, 8254 | Portalstar, Portal |
 | 8232–8239 | Elemental, divination, illusion, domination, enchantment, healing, and failed casting variants |
 
 Texture names used by these previews are limited to direct resource matches
@@ -121,7 +123,6 @@ still require both native reverse engineering and a dedicated renderer:
 
 | IDs | Names |
 |---|---|
-| 8255–8256 | Cylinder1, Cylinder2 |
 | 8260–8262, 8268 | Visionstar1 through Visionstar4 |
 | 8264–8267 | Silence, Feeblemind, Feetcloud1, Feetcloud2 |
 | 8269–8274 | Ballofstars, Rickarrow, Cursestars, Curseholder, Starttrans, Transform |

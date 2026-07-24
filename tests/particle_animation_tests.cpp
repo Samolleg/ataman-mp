@@ -38,6 +38,9 @@ private slots:
     void pathUsesTruthfulStationaryCarrierPoint();
     void pathDestinationDistinguishesRingAndFailureCross();
     void moshkaUsesSyntheticCarrierSwarm();
+    void portalStarUsesPersistentNativePhaseZero();
+    void portalUsesHeadAndRotatingRisingTrails();
+    void cylindersUseOppositeFiniteHelices();
 };
 
 void ParticleAnimationTests::atlasUsesNativeTopRowFirstInsets()
@@ -760,6 +763,86 @@ void ParticleAnimationTests::moshkaUsesSyntheticCarrierSwarm()
         QVERIFY(a[i].frame >= 0 && a[i].frame <= 15);
     }
     QVERIFY(farthest > 0.2f);
+}
+
+void ParticleAnimationTests::portalStarUsesPersistentNativePhaseZero()
+{
+    ei::particle::PortalStarEmitter first;
+    ei::particle::PortalStarEmitter second;
+    const QVector3D origin(1.0f, -2.0f, 0.5f);
+    first.advanceTo(10, 8253u, origin, 2.0f);
+    second.advanceTo(10, 8253u, origin, 2.0f);
+    const auto a = first.samples();
+    const auto b = second.samples();
+    QCOMPARE(a.size(), 1);
+    QCOMPARE(a.size(), b.size());
+    QCOMPARE(a[0].position, origin);
+    QCOMPARE(a[0].position, b[0].position);
+    QCOMPARE(a[0].scale, b[0].scale);
+    QCOMPARE(a[0].frame, 0);
+    QCOMPARE(a[0].alpha, 1.0f);
+    QVERIFY(a[0].scale >= ei::particle::billboardDiameter(1.6f));
+    QVERIFY(a[0].scale <= ei::particle::billboardDiameter(2.4f));
+}
+
+void ParticleAnimationTests::portalUsesHeadAndRotatingRisingTrails()
+{
+    ei::particle::PortalEmitter first;
+    ei::particle::PortalEmitter second;
+    const QVector3D origin(-3.0f, 1.5f, 0.25f);
+    first.advanceTo(20, 8254u, origin, 1.0f);
+    second.advanceTo(20, 8254u, origin, 1.0f);
+    const auto a = first.samples();
+    const auto b = second.samples();
+    QCOMPARE(a.size(), b.size());
+    QVERIFY(a.size() > 100);
+    QVERIFY(first.activeCount() <= 800);
+    bool foundHead = false;
+    bool foundLowerTrail = false;
+    for(int i = 0; i < a.size(); ++i)
+    {
+        QCOMPARE(a[i].position, b[i].position);
+        QCOMPARE(a[i].scale, b[i].scale);
+        QCOMPARE(a[i].alpha, b[i].alpha);
+        QCOMPARE(a[i].frame, b[i].frame);
+        QVERIFY(a[i].frame >= 0 && a[i].frame <= 15);
+        QVERIFY(a[i].alpha >= 0.0f && a[i].alpha <= 96.0f / 255.0f);
+        if(a[i].frame == 15 && qAbs(a[i].position.z() - origin.z() - 6.4f) < 0.001f)
+            foundHead = true;
+        if(a[i].position.z() < origin.z() + 4.0f)
+            foundLowerTrail = true;
+    }
+    QVERIFY(foundHead);
+    QVERIFY(foundLowerTrail);
+}
+
+void ParticleAnimationTests::cylindersUseOppositeFiniteHelices()
+{
+    ei::particle::CylinderEmitter forward;
+    ei::particle::CylinderEmitter reverse;
+    const QVector3D origin(0.0f, 0.0f, 1.0f);
+    forward.advanceTo(10, 8255u, origin, 2.0f, false);
+    reverse.advanceTo(10, 8256u, origin, 2.0f, true);
+    const auto a = forward.samples();
+    const auto b = reverse.samples();
+    QVERIFY(a.size() > 2);
+    QVERIFY(b.size() > 2);
+    QVERIFY(forward.activeCount() <= 600);
+    QVERIFY(reverse.activeCount() <= 600);
+    bool differs = a.size() != b.size();
+    for(int i = 0; i < qMin(a.size(), b.size()); ++i)
+    {
+        QVERIFY(a[i].scale > 0.0f);
+        QVERIFY(a[i].alpha >= 0.0f && a[i].alpha <= 1.0f);
+        QVERIFY(a[i].frame >= 0);
+        if(a[i].position != b[i].position)
+            differs = true;
+    }
+    QVERIFY(differs);
+    forward.advanceTo(35, 8255u, origin, 2.0f, false);
+    QCOMPARE(forward.activeCount(), 0);
+    forward.advanceTo(66, 8255u, origin, 2.0f, false);
+    QVERIFY(forward.activeCount() > 2);
 }
 
 QTEST_APPLESS_MAIN(ParticleAnimationTests)
