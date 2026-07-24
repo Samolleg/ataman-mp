@@ -825,10 +825,11 @@ The generated control at
 - 83 unique particle records and no other objects;
 - particle IDs 900000 through 900082;
 - type IDs 8192 through 8274 in row-major order;
-- a 10-by-9 grid starting at `(2, 2, 0)`;
-- center spacing of 4 world units, or 2 terrain tiles, and authored scale 1;
+- a 10-by-9 grid spanning `(12, 16, 0)` through `(84, 80, 0)`, centered at
+  `(48, 48)`;
+- center spacing of 8 world units, or 4 terrain tiles, and authored scale 1;
 - SHA-256
-  `68C91991A8BB9BCF3EB031690DDAFB61A870756B95A6BDF84EBE3A8A38DFCBCA`.
+  `3BA88B8FD932D4B46DC632233541FF63B218FBDC6C4996BFA614877527379638`.
 
 The independent particle MOB reporter finds exactly 83 unique IDs and types.
 EI Mapper strict validation covers all 12,094 bytes, finds 83 objects, and
@@ -844,17 +845,17 @@ real owner parameters before their visual behavior can be called reconstructed.
 ### Portable flat-ground collection
 
 `scripts/build_particle_catalog_collection.py` packages the catalog with a
-fully synthetic 2-by-2-sector MPR and a directly discoverable collection file.
-The MPR has the internal member `zone1.mp` plus `zone1000000.sec`,
-`zone1000001.sec`, `zone1001000.sec`, and `zone1001001.sec`, declares the stock
-512-slot terrain atlas, has constant height and normals, and assigns all 1,024
-terrain tile words to atlas slot 1 with rotation 0. It embeds no proprietary
+fully synthetic 3-by-3-sector MPR and a directly discoverable collection file.
+The MPR has the internal member `zone1.mp` plus the nine sector members for
+X/Y indices 000 through 002, declares the stock 512-slot terrain atlas, has
+constant height and normals, and assigns all 2,304 terrain tile words to atlas
+slot 1 with rotation 0. It embeds no proprietary
 imagery; at render time the configured Jamais Vu Zone 1 atlas supplies the
 uniform common-ground tile.
 
-The canonical generated MPR is 39,266 bytes with SHA-256
-`59BF400197135FE89C7952FDBFF41C82EB0C150292BA97E6A6636F7CBC08706A`.
-Independent parsing confirms the map member plus four flat sectors, 512 atlas
+The canonical generated MPR is 85,611 bytes with SHA-256
+`6BD452E1328BDD753D0779D1AF69F300EE50C76954F8914526F46E99E696B489`.
+Independent parsing confirms the map member plus nine flat sectors, 512 atlas
 slots, and the uniform slot-1 tile assignment. EI Mapper parses all bytes and
 performs a byte-identical unchanged round trip. Two independent generations
 produce identical collection, MPR, MOB, and manifest bytes. The collection

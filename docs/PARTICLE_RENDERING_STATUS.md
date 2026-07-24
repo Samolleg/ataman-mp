@@ -179,8 +179,8 @@ not a particle emitter.
 
 The repeatable generator `scripts/build_particle_catalog_mob.ps1` builds a
 minimal supplemental MOB with one scale-1 standalone record for each of the 83
-public particle IDs. The default 10-by-9 layout uses 4-world-unit centers
-(2 terrain tiles), sequential names and IDs, and an adjacent JSON manifest.
+public particle IDs. The default 10-by-9 layout uses 8-world-unit centers
+(4 terrain tiles), sequential names and IDs, and an adjacent JSON manifest.
 
 The current generated artifact is
 `artifacts/particle-catalog-grid/all-particles-grid.mob`. It is intended for
@@ -191,8 +191,8 @@ whose real owner supplies additional parameters.
 
 The portable one-click control is
 `artifacts/particle-catalog-collection/collections/particle-catalog.collection`.
-It loads the same 83-type MOB over a deterministic, flat, 2-by-2-sector synthetic
+It loads the same 83-type MOB over a deterministic, flat, 3-by-3-sector synthetic
 MPR. The MPR uses the `zone1` internal namespace and atlas slot 1, so the active
 Jamais Vu Zone 1 atlas supplies the common-ground texture; no texture imagery is
-embedded in the fixture. The grid begins at `(2, 2, 0)` and fits inside the
-64-by-64-world-unit plane.
+embedded in the fixture. The grid spans `(12, 16, 0)` through `(84, 80, 0)`,
+centering it at `(48, 48)` inside the 96-by-96-world-unit plane.

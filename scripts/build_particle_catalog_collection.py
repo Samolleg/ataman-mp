@@ -18,9 +18,9 @@ RES_SIGNATURE = 0x019CE23C
 MP_SIGNATURE = 0xCE4AF672
 SEC_SIGNATURE = 0xCF4BF774
 REFERENCE_MOB_SIZE = 12_094
-REFERENCE_MOB_SHA256 = "68C91991A8BB9BCF3EB031690DDAFB61A870756B95A6BDF84EBE3A8A38DFCBCA"
-SECTOR_COUNT_X = 2
-SECTOR_COUNT_Y = 2
+REFERENCE_MOB_SHA256 = "3BA88B8FD932D4B46DC632233541FF63B218FBDC6C4996BFA614877527379638"
+SECTOR_COUNT_X = 3
+SECTOR_COUNT_Y = 3
 SECTOR_WORLD_SIZE = 32
 ZONE1_GROUND_PACKED_TILE = 1
 ZONE1_GROUND_ATLAS_SLOT = 1
@@ -145,7 +145,7 @@ def build(catalog_mob: Path, output_root: Path) -> dict[str, Any]:
     collection_directory = output_root / "collections"
     scene_directory.mkdir(parents=True, exist_ok=True)
     collection_directory.mkdir(parents=True, exist_ok=True)
-    mpr_path = scene_directory / "particle-zone1-flat-2x2.mpr"
+    mpr_path = scene_directory / "particle-zone1-flat-3x3.mpr"
     mob_path = scene_directory / "all-particles-grid.mob"
     manifest_path = scene_directory / "particle-catalog-collection.json"
     collection_path = collection_directory / "particle-catalog.collection"
@@ -153,7 +153,7 @@ def build(catalog_mob: Path, output_root: Path) -> dict[str, Any]:
     if catalog_mob.resolve() != mob_path.resolve():
         shutil.copyfile(catalog_mob, mob_path)
     collection_path.write_text(collection_text(
-        "../test-scenes/particle-catalog-grid/particle-zone1-flat-2x2.mpr",
+        "../test-scenes/particle-catalog-grid/particle-zone1-flat-3x3.mpr",
         "../test-scenes/particle-catalog-grid/all-particles-grid.mob",
     ), encoding="utf-8", newline="\n")
 
@@ -183,7 +183,7 @@ def build(catalog_mob: Path, output_root: Path) -> dict[str, Any]:
         "outputs": {
             "collection": {"path": "collections/particle-catalog.collection"},
             "mpr": {
-                "path": "test-scenes/particle-catalog-grid/particle-zone1-flat-2x2.mpr",
+                "path": "test-scenes/particle-catalog-grid/particle-zone1-flat-3x3.mpr",
                 "size": len(mpr_bytes),
                 "sha256": sha256(mpr_bytes),
             },
