@@ -1,8 +1,10 @@
 # Environment rendering validation
 
-This feature remains isolated on `feature/render-pipeline` until its viewport
-quality is accepted. It must not be merged into `main` based on build success
-alone.
+This renderer is integrated into `main` and forms part of the `0.3.0` closed-test
+baseline. Build success alone is not the acceptance criterion: the focused
+viewport/runtime checks below remain part of the `0.3.0` release matrix, and
+profile-specific behavior remains bounded by the recorded resource and
+fingerprinted executable evidence.
 
 ## Data contract
 
@@ -15,6 +17,11 @@ alone.
   The format contains no direction or cone fields, so these records are
   rendered as omnidirectional map lights. Directional spotlight semantics must
   not be invented without additional corpus or executable evidence.
+- Global environment illumination and local map lights use channel-wise maxima,
+  matching the fingerprinted native terrain path rather than summing the eight
+  nearest camera lights. Endurance retains up to 64 eligible lights, which
+  covers the complete audited JMV MOB corpus without camera-relative
+  truncation. Point-light attenuation follows the native distance/range curve.
 - Geometry casts directional shadows only when its existing `Is shadow` value
   permits it. Static and animated casters use separate cached maps.
 - Terrain receives directional shadows but is never submitted as a caster.
@@ -23,10 +30,15 @@ alone.
   terrain and a tight, pivot-centred animated projection. Ordinary static
   meshes do not sample the broad map on themselves, avoiding non-stock roof
   and fence self-shadow acne.
-- The upper-left viewport widget selects authored-texture **Unlit**, legacy
-  **Simple shading**, or resource-driven **Full environment** preview. Moving
-  its clock enables the existing transient time override and never edits MOB
-  world settings.
+- The upper-left **Time of day** widget is independent from the **Lighting
+  mode** widget beneath it. Its clock remains available in **Unlit**, **Simple
+  shading**, and **Full environment** modes. Moving the clock enables the
+  transient time override and never edits MOB world settings.
+- A selected time override is delivered to JMV Test Current Map and every hot
+  reload through the hash-owned autorun-MOB bootstrap as
+  `RunWorldTime(hours)`. This sets the requested starting hour and lets the
+  game clock continue normally. The staged primary MOB and its script remain
+  exact.
 - Map-edge fog reaches full density over four world units: two authored
   two-unit terrain tiles. The
   authored sky cylinder is lowered by one of its own vertical rings and its
@@ -62,17 +74,22 @@ alone.
    rendering is disabled.
 8. Toggle fog, sky, map lights, and shadows independently, then repeat unit
    selection and picking checks.
-9. Switch Unlit, Simple shading, and Full environment in the viewport widget.
-   Collapse/restore it and scrub through midnight, morning, noon, and evening.
+9. Switch Unlit, Simple shading, and Full environment in the Lighting Mode
+   widget. Collapse/restore it and confirm the separate Time of Day control
+   remains enabled while scrubbing midnight, morning, noon, and evening.
    Entrance labels and selection overlays must remain authored-colour UI.
-10. At a map edge, confirm full fog begins no farther than one 32-unit tile
+10. With a JMV test running, set a distinctive editor time, invoke Test Current
+    Map, then change the time and hot reload. Confirm each generation starts at
+    the selected value, the clock continues normally, and the source MOB hash
+    is unchanged.
+11. At a map edge, confirm full fog begins no farther than one 32-unit tile
     inward and the lower sky/cloud field blends into exactly the same colour.
-11. Inspect an idle humanoid and held weapon at 04:45, noon, and 16:00. Feet
+12. Inspect an idle humanoid and held weapon at 04:45, noon, and 16:00. Feet
     and the weapon must meet their shadow without the former caster-base gap.
-12. Toggle **Texture mipmapping** while viewing distant terrain. Enabled must
+13. Toggle **Texture mipmapping** while viewing distant terrain. Enabled must
     reduce shimmer/grain without changing character faces, armor, or weapons;
     disabled must restore nearest level-zero terrain sampling immediately.
-13. Load `gz5g`, `gz10g`, `bz7g`, or `gz20g` through a profile whose
+14. Load `gz5g`, `gz10g`, `bz7g`, or `gz20g` through a profile whose
     `map.txt` marks it `#sky cave`. Confirm there is no outdoor sky, the map
     fades into a black boundary, and moving the preview time does not rotate or
     recolor shadows. Confirm an ordinary `#sky normal` map remains outdoor.
@@ -82,4 +99,7 @@ alone.
 The MOB schema proves omnidirectional map-light inputs but does not yet prove
 the runtime meaning of `LIGHT_SHADOW`. Per-light shadow maps remain pending
 executable/corpus evidence; the checkbox is preserved and not silently assigned
-a guessed meaning.
+a guessed meaning. Non-Tendri particle families and the special native local-
+light flag also remain explicitly outside the confirmed model; see
+[particle reconstruction coverage](PARTICLE_RENDERING_STATUS.md) and the
+[runtime evidence ledger](investigations/2026-07-23-particle-runtime.md).

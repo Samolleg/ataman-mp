@@ -1,0 +1,64 @@
+{
+  "counts": {
+    "particle": 0,
+    "torch": 0
+  },
+  "format": "ei-particle-mob-report-v2",
+  "records": [],
+  "selection": null,
+  "source": {
+    "path": "D:\\Evil Islands\\Starter\\MODS\\JamaisVu135\\Maps\\zone10.mob",
+    "sha256": "6C2FF44B72CE9850B4BBFF9759A00D17BC7DA3DDCC9CC7E124138110D31B78B2",
+    "size": 568201
+  },
+  "torch_particle_proximity": [],
+  "world_settings": [
+    {
+      "fields": [
+        {
+          "length": 20,
+          "offset": 27244,
+          "tag": "WS_WIND_DIR",
+          "tag_id": "0x0000ABD1",
+          "value": [
+            0.9994449019432068,
+            0.03331482782959938,
+            0.0
+          ]
+        },
+        {
+          "length": 12,
+          "offset": 27264,
+          "tag": "WS_WIND_STR",
+          "tag_id": "0x0000ABD2",
+          "value": 0.15000000596046448
+        },
+        {
+          "length": 12,
+          "offset": 27276,
+          "tag": "WS_TIME",
+          "tag_id": "0x0000ABD3",
+          "value": 8.0600004196167
+        },
+        {
+          "length": 12,
+          "offset": 27288,
+          "tag": "WS_AMBIENT",
+          "tag_id": "0x0000ABD4",
+          "value": 0.20000000298023224
+        },
+        {
+          "length": 12,
+          "offset": 27300,
+          "tag": "WS_SUN_LIGHT",
+          "tag_id": "0x0000ABD5",
+          "value": 0.6000000238418579
+        }
+      ],
+      "length": 76,
+      "offset": 27236,
+      "record_type": "world_settings",
+      "sha256": "B87E84F2AE7E1AF106A957113A2F4132689EE1615BB32C6CA2C1CDE38DC0E0F6"
+    }
+  ]
+}

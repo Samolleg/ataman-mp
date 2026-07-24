@@ -1,0 +1,537 @@
+{
+  "counts": {
+    "light": 7,
+    "particle": 8,
+    "torch": 4
+  },
+  "format": "ei-particle-mob-report-v3",
+  "records": [
+    {
+      "fields": [
+        {
+          "length": 12,
+          "offset": 620344,
+          "tag": "LIGHT_ID",
+          "tag_id": "0x0000AA05",
+          "value": 334
+        },
+        {
+          "length": 9,
+          "offset": 620356,
+          "tag": "LIGHT_SHADOW",
+          "tag_id": "0x0000AA06",
+          "value": 1
+        },
+        {
+          "length": 20,
+          "offset": 620365,
+          "tag": "LIGHT_POSITION",
+          "tag_id": "0x0000AA04",
+          "value": [
+            204.60693359375,
+            126.6507339477539,
+            8.345731735229492
+          ]
+        },
+        {
+          "length": 20,
+          "offset": 620385,
+          "tag": "LIGHT_COLOR",
+          "tag_id": "0x0000AA07",
+          "value": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        },
+        {
+          "length": 12,
+          "offset": 620405,
+          "tag": "LIGHT_RANGE",
+          "tag_id": "0x0000AA02",
+          "value": 10.0
+        },
+        {
+          "length": 17,
+          "offset": 620417,
+          "tag": "LIGHT_NAME",
+          "tag_id": "0x0000AA03",
+          "value": "Light-334"
+        },
+        {
+          "length": 12,
+          "offset": 620434,
+          "tag": "LIGHT_COMMENTS",
+          "tag_id": "0x0000AA08",
+          "value": "none"
+        }
+      ],
+      "length": 110,
+      "offset": 620336,
+      "raw_record_hex": "01AA00006E00000005AA00000C0000004E01000006AA0000090000000104AA000014000000609B4C432D4DFD421E88054107AA0000140000000000803F0000803F0000803F02AA00000C0000000000204103AA0000110000004C696768742D33333408AA00000C0000006E6F6E65",
+      "record_type": "light",
+      "sha256": "E121709F96CA6F961D1E97B2A0F9C734FBD7D0CB526030B3F6A6DB19EC45326B"
+    },
+    {
+      "fields": [
+        {
+          "length": 12,
+          "offset": 620454,
+          "tag": "LIGHT_ID",
+          "tag_id": "0x0000AA05",
+          "value": 335
+        },
+        {
+          "length": 9,
+          "offset": 620466,
+          "tag": "LIGHT_SHADOW",
+          "tag_id": "0x0000AA06",
+          "value": 1
+        },
+        {
+          "length": 20,
+          "offset": 620475,
+          "tag": "LIGHT_POSITION",
+          "tag_id": "0x0000AA04",
+          "value": [
+            193.34747314453125,
+            140.5518341064453,
+            8.534600257873535
+          ]
+        },
+        {
+          "length": 20,
+          "offset": 620495,
+          "tag": "LIGHT_COLOR",
+          "tag_id": "0x0000AA07",
+          "value": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        },
+        {
+          "length": 12,
+          "offset": 620515,
+          "tag": "LIGHT_RANGE",
+          "tag_id": "0x0000AA02",
+          "value": 10.0
+        },
+        {
+          "length": 17,
+          "offset": 620527,
+          "tag": "LIGHT_NAME",
+          "tag_id": "0x0000AA03",
+          "value": "Light-335"
+        },
+        {
+          "length": 12,
+          "offset": 620544,
+          "tag": "LIGHT_COMMENTS",
+          "tag_id": "0x0000AA08",
+          "value": "none"
+        }
+      ],
+      "length": 110,
+      "offset": 620446,
+      "raw_record_hex": "01AA00006E00000005AA00000C0000004F01000006AA0000090000000104AA000014000000F4584143458D0C43B98D084107AA0000140000000000803F0000803F0000803F02AA00000C0000000000204103AA0000110000004C696768742D33333508AA00000C0000006E6F6E65",
+      "record_type": "light",
+      "sha256": "A9693E0792A6226954F9005F9B1125796BF1D7A2872952C41CFD9F08208CB78D"
+    },
+    {
+      "fields": [
+        {
+          "length": 12,
+          "offset": 620564,
+          "tag": "LIGHT_ID",
+          "tag_id": "0x0000AA05",
+          "value": 336
+        },
+        {
+          "length": 9,
+          "offset": 620576,
+          "tag": "LIGHT_SHADOW",
+          "tag_id": "0x0000AA06",
+          "value": 1
+        },
+        {
+          "length": 20,
+          "offset": 620585,
+          "tag": "LIGHT_POSITION",
+          "tag_id": "0x0000AA04",
+          "value": [
+            179.45797729492188,
+            131.97705078125,
+            8.533479690551758
+          ]
+        },
+        {
+          "length": 20,
+          "offset": 620605,
+          "tag": "LIGHT_COLOR",
+          "tag_id": "0x0000AA07",
+          "value": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        },
+        {
+          "length": 12,
+          "offset": 620625,
+          "tag": "LIGHT_RANGE",
+          "tag_id": "0x0000AA02",
+          "value": 10.0
+        },
+        {
+          "length": 17,
+          "offset": 620637,
+          "tag": "LIGHT_NAME",
+          "tag_id": "0x0000AA03",
+          "value": "Light-336"
+        },
+        {
+          "length": 12,
+          "offset": 620654,
+          "tag": "LIGHT_COMMENTS",
+          "tag_id": "0x0000AA08",
+          "value": "none"
+        }
+      ],
+      "length": 110,
+      "offset": 620556,
+      "raw_record_hex": "01AA00006E00000005AA00000C0000005001000006AA0000090000000104AA0000140000003E75334320FA03432289084107AA0000140000000000803F0000803F0000803F02AA00000C0000000000204103AA0000110000004C696768742D33333608AA00000C0000006E6F6E65",
+      "record_type": "light",
+      "sha256": "495F27C453A5AD4AAC482EF032A07FCA61B08993CDB094BFB9DF9E4C59614E3B"
+    },
+    {
+      "fields": [
+        {
+          "length": 12,
+          "offset": 620674,
+          "tag": "LIGHT_ID",
+          "tag_id": "0x0000AA05",
+          "value": 337
+        },
+        {
+          "length": 9,
+          "offset": 620686,
+          "tag": "LIGHT_SHADOW",
+          "tag_id": "0x0000AA06",
+          "value": 1
+        },
+        {
+          "length": 20,
+          "offset": 620695,
+          "tag": "LIGHT_POSITION",
+          "tag_id": "0x0000AA04",
+          "value": [
+            184.6084747314453,
+            120.73090362548828,
+            8.545706748962402
+          ]
+        },
+        {
+          "length": 20,
+          "offset": 620715,
+          "tag": "LIGHT_COLOR",
+          "tag_id": "0x0000AA07",
+          "value": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        },
+        {
+          "length": 12,
+          "offset": 620735,
+          "tag": "LIGHT_RANGE",
+          "tag_id": "0x0000AA02",
+          "value": 10.0
+        },
+        {
+          "length": 17,
+          "offset": 620747,
+          "tag": "LIGHT_NAME",
+          "tag_id": "0x0000AA03",
+          "value": "Light-337"
+        },
+        {
+          "length": 12,
+          "offset": 620764,
+          "tag": "LIGHT_COMMENTS",
+          "tag_id": "0x0000AA08",
+          "value": "none"
+        }
+      ],
+      "length": 110,
+      "offset": 620666,
+      "raw_record_hex": "01AA00006E00000005AA00000C0000005101000006AA0000090000000104AA000014000000C59B38433976F14237BB084107AA0000140000000000803F0000803F0000803F02AA00000C0000000000204103AA0000110000004C696768742D33333708AA00000C0000006E6F6E65",
+      "record_type": "light",
+      "sha256": "2411D943335E4D5CAA351F94ECE4BE4D6C958682E8DC18F1779F52C5AE0802C3"
+    },
+    {
+      "fields": [
+        {
+          "length": 12,
+          "offset": 620784,
+          "tag": "LIGHT_ID",
+          "tag_id": "0x0000AA05",
+          "value": 347
+        },
+        {
+          "length": 9,
+          "offset": 620796,
+          "tag": "LIGHT_SHADOW",
+          "tag_id": "0x0000AA06",
+          "value": 1
+        },
+        {
+          "length": 20,
+          "offset": 620805,
+          "tag": "LIGHT_POSITION",
+          "tag_id": "0x0000AA04",
+          "value": [
+            224.01280212402344,
+            131.62570190429688,
+            8.19014835357666
+          ]
+        },
+        {
+          "length": 20,
+          "offset": 620825,
+          "tag": "LIGHT_COLOR",
+          "tag_id": "0x0000AA07",
+          "value": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        },
+        {
+          "length": 12,
+          "offset": 620845,
+          "tag": "LIGHT_RANGE",
+          "tag_id": "0x0000AA02",
+          "value": 10.0
+        },
+        {
+          "length": 21,
+          "offset": 620857,
+          "tag": "LIGHT_NAME",
+          "tag_id": "0x0000AA03",
+          "value": "NewObject-347"
+        },
+        {
+          "length": 12,
+          "offset": 620878,
+          "tag": "LIGHT_COMMENTS",
+          "tag_id": "0x0000AA08",
+          "value": "none"
+        }
+      ],
+      "length": 114,
+      "offset": 620776,
+      "raw_record_hex": "01AA00007200000005AA00000C0000005B01000006AA0000090000000104AA000014000000470360432EA00343D90A034107AA0000140000000000803F0000803F0000803F02AA00000C0000000000204103AA0000150000004E65774F626A6563742D33343708AA00000C0000006E6F6E65",
+      "record_type": "light",
+      "sha256": "4B26A2532F9150B17642B7DA76506486C4F518E2DDA94C3BD278756DAB2A6681"
+    },
+    {
+      "fields": [
+        {
+          "length": 12,
+          "offset": 620898,
+          "tag": "LIGHT_ID",
+          "tag_id": "0x0000AA05",
+          "value": 348
+        },
+        {
+          "length": 9,
+          "offset": 620910,
+          "tag": "LIGHT_SHADOW",
+          "tag_id": "0x0000AA06",
+          "value": 1
+        },
+        {
+          "length": 20,
+          "offset": 620919,
+          "tag": "LIGHT_POSITION",
+          "tag_id": "0x0000AA04",
+          "value": [
+            202.12583923339844,
+            141.44798278808594,
+            8.76793384552002
+          ]
+        },
+        {
+          "length": 20,
+          "offset": 620939,
+          "tag": "LIGHT_COLOR",
+          "tag_id": "0x0000AA07",
+          "value": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        },
+        {
+          "length": 12,
+          "offset": 620959,
+          "tag": "LIGHT_RANGE",
+          "tag_id": "0x0000AA02",
+          "value": 10.0
+        },
+        {
+          "length": 21,
+          "offset": 620971,
+          "tag": "LIGHT_NAME",
+          "tag_id": "0x0000AA03",
+          "value": "NewObject-348"
+        },
+        {
+          "length": 12,
+          "offset": 620992,
+          "tag": "LIGHT_COMMENTS",
+          "tag_id": "0x0000AA08",
+          "value": "none"
+        }
+      ],
+      "length": 114,
+      "offset": 620890,
+      "raw_record_hex": "01AA00007200000005AA00000C0000005C01000006AA0000090000000104AA00001400000037204A43AF720D4375490C4107AA0000140000000000803F0000803F0000803F02AA00000C0000000000204103AA0000150000004E65774F626A6563742D33343808AA00000C0000006E6F6E65",
+      "record_type": "light",
+      "sha256": "ECA6E80CDA6EE0459B0D11CDB238171C9114AB6156E56ACE1798ECDB87DF7230"
+    },
+    {
+      "fields": [
+        {
+          "length": 12,
+          "offset": 621012,
+          "tag": "LIGHT_ID",
+          "tag_id": "0x0000AA05",
+          "value": 349
+        },
+        {
+          "length": 9,
+          "offset": 621024,
+          "tag": "LIGHT_SHADOW",
+          "tag_id": "0x0000AA06",
+          "value": 1
+        },
+        {
+          "length": 20,
+          "offset": 621033,
+          "tag": "LIGHT_POSITION",
+          "tag_id": "0x0000AA04",
+          "value": [
+            182.79629516601562,
+            169.88592529296875,
+            8.701271057128906
+          ]
+        },
+        {
+          "length": 20,
+          "offset": 621053,
+          "tag": "LIGHT_COLOR",
+          "tag_id": "0x0000AA07",
+          "value": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        },
+        {
+          "length": 12,
+          "offset": 621073,
+          "tag": "LIGHT_RANGE",
+          "tag_id": "0x0000AA02",
+          "value": 10.0
+        },
+        {
+          "length": 21,
+          "offset": 621085,
+          "tag": "LIGHT_NAME",
+          "tag_id": "0x0000AA03",
+          "value": "NewObject-349"
+        },
+        {
+          "length": 12,
+          "offset": 621106,
+          "tag": "LIGHT_COMMENTS",
+          "tag_id": "0x0000AA08",
+          "value": "none"
+        }
+      ],
+      "length": 114,
+      "offset": 621004,
+      "raw_record_hex": "01AA00007200000005AA00000C0000005D01000006AA0000090000000104AA000014000000DACB3643CCE2294368380B4107AA0000140000000000803F0000803F0000803F02AA00000C0000000000204103AA0000150000004E65774F626A6563742D33343908AA00000C0000006E6F6E65",
+      "record_type": "light",
+      "sha256": "0751E7315E3A960DC0B36BD442ECF097628D7A5B2819F0C8C808536EE35FB8F4"
+    }
+  ],
+  "selection": [
+    334,
+    335,
+    336,
+    337,
+    347,
+    348,
+    349
+  ],
+  "source": {
+    "path": "D:\\Evil Islands\\Starter\\MODS\\JamaisVu135\\Maps\\zone1.mob",
+    "sha256": "FEFFDA09F7279F65562DB37BBDCDFC475D59C4EE6FF1678958E5117949FB9E5A",
+    "size": 1586436
+  },
+  "torch_particle_proximity": [],
+  "world_settings": [
+    {
+      "fields": [
+        {
+          "length": 20,
+          "offset": 71947,
+          "tag": "WS_WIND_DIR",
+          "tag_id": "0x0000ABD1",
+          "value": [
+            -0.7281999588012695,
+            -0.6853646636009216,
+            0.0
+          ]
+        },
+        {
+          "length": 12,
+          "offset": 71967,
+          "tag": "WS_WIND_STR",
+          "tag_id": "0x0000ABD2",
+          "value": 0.20000000298023224
+        },
+        {
+          "length": 12,
+          "offset": 71979,
+          "tag": "WS_TIME",
+          "tag_id": "0x0000ABD3",
+          "value": 6.400000095367432
+        },
+        {
+          "length": 12,
+          "offset": 71991,
+          "tag": "WS_AMBIENT",
+          "tag_id": "0x0000ABD4",
+          "value": 0.20000000298023224
+        },
+        {
+          "length": 12,
+          "offset": 72003,
+          "tag": "WS_SUN_LIGHT",
+          "tag_id": "0x0000ABD5",
+          "value": 0.6000000238418579
+        }
+      ],
+      "length": 76,
+      "offset": 71939,
+      "raw_record_hex": "D0AB00004C000000D1AB000014000000506B3ABF0F742FBF00000000D2AB00000C000000CDCC4C3ED3AB00000C000000CDCCCC40D4AB00000C000000CDCC4C3ED5AB00000C0000009A99193F",
+      "record_type": "world_settings",
+      "sha256": "79349A8A729F888B9D0C937F8CA028C89553AA2399B0BC533870F9DB92D75B5C"
+    }
+  ]
+}

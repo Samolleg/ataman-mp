@@ -5,16 +5,25 @@ work is ordered from the newest planned minor line to the oldest completed one.
 An item is checked only after its implementation has landed and received the
 stated validation. Completed code should carry a commit, test, or release link.
 
-Current development line: `0.2.1-alpha.42` focused closed testing. The 0.2.x
-feature set is substantially complete; the remaining release work is the final
-runtime/corpus matrix, a small number of explicit confirmation cases, and
-version/tag/package housekeeping rather than another editor architecture pass.
+Current development line: `0.3.0-alpha.1` focused closed testing. This is a
+version reclassification of the feature set that outgrew the `0.2.1` label,
+not a serializer or compatibility reset. The remaining 0.3 release work is the
+final runtime/corpus matrix, focused confirmation of the new live-clock and
+startup-splash behavior, and version/tag/package housekeeping rather than
+another editor architecture pass.
 
 <details open>
 <summary><strong>General wishlist — not assigned to a release</strong></summary>
 
 ## Compatibility and profile support
 
+- [ ] Add an advanced, explicitly experimental runtime-variant management UI.
+  It may let a user fingerprint a patched `game.exe`, compare its changed
+  sections/ranges with a known layout, and locally approve the hash only after
+  every required hook, caller, global, and PE-layout guard passes. A bare
+  user-entered hash is never sufficient, locally working variants are not
+  automatically promoted to supported, and this UI is not part of the current
+  `0.3.0` release scope.
 - [ ] **Post-1.0:** define an optional runtime-plugin contract for other mods
   only when their authors request direct-launch support.
   - Core editing, validation, collections, and saving never depend on a game
@@ -135,24 +144,24 @@ version/tag/package housekeeping rather than another editor architecture pass.
 </details>
 
 <details open>
-<summary><strong>0.3.x — lossless MPR/SEC, landscape editing, and AI navigation</strong></summary>
+<summary><strong>0.5.x — AI navigation graph visualization and regeneration</strong></summary>
 
-## 0.3.0 release goal
+## 0.5.0 release goal
 
-Deliver the first supported landscape-editing release together with
-profile-aware visualization and validation of the AI navigation graph stored
-in a primary MOB or an external `.grp`. Controlled Test Current Map validation
-confirmed that changed height and texture data propagate at runtime and that
-the player can navigate correctly around newly impassable terrain without an
-offline graph rebuild. Geometry, liquid, and collision changes therefore mark
-navigation as potentially stale for diagnostics and review, but graph
-regeneration is not a landscape-save or `0.3.0` release gate unless later
-controlled evidence demonstrates a graph-dependent case.
+Deliver profile-aware visualization, validation, and safe regeneration of the
+AI navigation graph stored in a primary MOB or an external `.grp`. This work is
+deliberately separated from the `0.4.x` landscape serializer: terrain editing
+may warn that navigation is stale, but production graph replacement remains a
+`0.5.0` capability.
 
-MPR/SEC and AI-graph persistence remain separate lossless document
-transactions because the graph is not owned by the MPR. Graph regeneration is
-an explicit reviewed operation, never an automatic side effect of every brush
-stroke or ordinary MPR Save.
+Controlled Test Current Map validation confirmed that changed height and
+texture data propagate at runtime and that the player can navigate correctly
+around newly impassable terrain without an offline graph rebuild. Geometry,
+liquid, and collision changes therefore mark navigation as potentially stale
+for diagnostics and review, but graph regeneration is not a `0.4.0`
+landscape-save gate unless later controlled evidence demonstrates a
+graph-dependent case. MPR/SEC and AI-graph persistence remain separate
+lossless transactions because the graph is not owned by the MPR.
 
 ## Confirmed format foundation
 
@@ -225,7 +234,12 @@ stroke or ordinary MPR Save.
   probes, entrances, NPC traversal, water/ice state changes, dynamic doors,
   unload/reload, save/load, and separate fingerprinted Base/JMV runtime tests.
 
-## Lossless landscape save contract
+</details>
+
+<details open>
+<summary><strong>0.4.x — lossless MPR/SEC and landscape editing</strong></summary>
+
+## 0.4.0 release goal
 
 Deliver the first supported landscape-editing release. Merely displaying an MPR
 does not qualify: changed terrain must use a lossless archive/sector document
@@ -233,12 +247,14 @@ path and must never fall back to the legacy rebuilding serializer.
 
 ## Lossless MPR/SEC foundation
 
-Isolated implementation status: `feature/landscape-editing` has clean commits
-`201b3ff` (lossless archive document) and `195e469` (canonical terrain lattice
-and undoable sculpt-command foundation). Its focused suite passes 38/38 and a
-copied 8-Base/32-JMV corpus round-trips byte-identically. These commits are not
-merged; packed-normal recalculation and renderer/UI integration remain the
-next gate, and changed landscape saving remains disabled.
+The closed `feature/landscape-editing` baseline advances the original lossless
+archive and canonical-lattice foundation into height sculpting/import,
+semantic ground and overlay painting, undo batching, terrain diagnostics,
+staged changed-MPR Save As, lossless RES member replacement, and a structured
+`map.txt` catalog editor. Its focused automated suites and disposable manual
+smoke matrix passed before this integration. Direct replacement of the open
+dirty MPR remains outside the baseline; changed terrain is written only as a
+separate validated test copy.
 
 - [ ] Preserve untouched archive members, internal names, member order,
   timestamps/metadata, alignment, unknown entries, and original MP/SEC
@@ -348,14 +364,108 @@ next gate, and changed landscape saving remains disabled.
   convention.
 - [ ] Provide placement/navigation findings before save and test launch.
 - [ ] Require in-game traversal, water/overlay interaction, unload/reload, and
-  graceful-exit tests before `0.3.0` release.
+  graceful-exit tests before `0.4.0` release.
 
 </details>
 
 <details open>
-<summary><strong>0.2.x — hardened MOB editor and JMV direct gameplay</strong></summary>
+<summary><strong>0.3.x — integrated Endurance editor and direct-gameplay release</strong></summary>
 
-## 0.2.0 release gate
+## 0.3.0 release goal
+
+Publish the current hardened editor as one coherent tester-facing release.
+`0.3.0-alpha.1` promotes the accumulated `0.2.1-alpha.44` feature set because
+it now contains several minor-release-sized capabilities beyond the original
+0.2 direct-launch milestone. Existing MOB safety and compatibility contracts
+remain unchanged.
+
+### Included feature baseline
+
+- [x] Lossless MOB editing for the supported property, transform, script,
+  patrol/look-point, copy/paste, create/delete, and conversion workflows.
+- [x] Runtime-family range/NID validation, copied-workspace source overlays,
+  non-blocking findings, navigation to source objects, and conservative guided
+  repair.
+- [x] Independent MPR/MOB opening, collections, the dockable Loaded Map tree,
+  one active editable MOB, locked-source inspection/copying, visibility, and
+  safe targeted unload.
+- [x] Versioned recovery autosaves, atomic saves/backups, rotated workflow
+  logs, crash dumps, interrupted-test recovery, and clean package validation.
+- [x] Parameter-aware outliner filtering, dockable workspace panels, compound
+  property/component copying, configurable shortcuts, camera speed, and
+  external/internal script workflows.
+- [x] JMV Test Current Map, selected entrances, Play from Here, Godmode,
+  supplemental MOB staging, generation-isolated saves, state-aware hot reload,
+  orphan recovery, and same-map position/facing restoration.
+- [x] Profile-correct humanoid appearance/equipment/idle animation, the final
+  texture/UV inspector, optimized render queues and culling, resource-format
+  fixes, functional particle preview, ANGLE compatibility, and the integrated
+  environment renderer.
+- [x] Replace the inferred environment/local-light approximation with the
+  fingerprinted native composition model: resource-driven weather curves,
+  channel-wise maximum environment and point-light accumulation, native
+  distance falloff, bounded projected-shadow opacity, authored torch lights,
+  and a 64-light capacity covering the audited JMV corpus. The implementation
+  and remaining evidence boundaries are recorded in
+  [environment resource evidence](docs/ENVIRONMENT_RESOURCE_EVIDENCE.md),
+  [environment rendering validation](docs/ENVIRONMENT_RENDERING_VALIDATION.md),
+  and the [particle/runtime evidence ledger](docs/investigations/2026-07-23-particle-runtime.md).
+  ([`37e0231`](https://github.com/Ilufus/ei-mapper-endurance/commit/37e0231),
+  [`aa465c3`](https://github.com/Ilufus/ei-mapper-endurance/commit/aa465c3))
+- [x] Separate always-available **Time of day** and **Lighting mode** viewport
+  controls. JMV launch and hot reload now use `RunWorldTime` so the selected
+  starting hour is applied without freezing normal clock progression.
+  ([`7401874`](https://github.com/Ilufus/ei-mapper-endurance/commit/7401874),
+  [`3af2099`](https://github.com/Ilufus/ei-mapper-endurance/commit/3af2099))
+- [x] Add a taskbar-visible, focusable startup splash using the Endurance art,
+  product name, edition, current version, and initialization status until the
+  main window is ready. ([`3af2099`](https://github.com/Ilufus/ei-mapper-endurance/commit/3af2099))
+
+### 0.3.0 release gate
+
+- [ ] Runtime-confirm that Test Current Map and hot reload start at the editor
+  time while the game clock continues normally, including a cave/briefing map.
+- [ ] Confirm the startup splash/taskbar handoff on an existing profile and a
+  clean first run whose setup dialog appears before the main window.
+- [ ] Run the final representative Base/JMV editor corpus matrix: open,
+  no-op round trip, intended changed save, undo/redo, autosave/recovery,
+  validation, and graceful shutdown.
+- [ ] Run the final JMV runtime matrix across normal gameplay, dungeon, and
+  briefing maps: entrance/custom spawn, supplemental MOBs, Save/Load within one
+  generation, same-map and different-map hot reload, scripts, `drawall`, map
+  transition/return, and graceful exit. Retain the authoritative `result.json`
+  and hashes.
+- [ ] Reconfirm the clean distribution contract: no settings, logs, saves,
+  dumps, private paths, or game assets; exactly one current changelist; matching
+  executable/folder/source version; source/GPL notices and checksums included.
+- [ ] Resolve any concrete release-blocking regression found by the closed
+  group, then create the immutable `v0.3.0` tag and tester package.
+
+### Explicitly non-blocking follow-ups
+
+- [ ] Confirm immediate, conditional, and nested supplemental `AddMob` chains
+  load exactly once when a deterministic fixture becomes available.
+- [ ] Runtime-confirm World Object to Lever conversion for both an already
+  shared model and a model never previously used as a lever.
+- [ ] Extend guided NID repair to explicit per-script-reference assignment and
+  coordinated multi-MOB save cohorts.
+- [ ] File associations, a dockable workflow-log panel, deeper persistent RES
+  indexing, and broader diff presentation remain useful follow-ups but do not
+  hold the 0.3.0 safety/runtime release gate.
+
+</details>
+
+<details>
+<summary><strong>0.2.x — hardened MOB editor and JMV direct-gameplay development history</strong></summary>
+
+## 0.2.x outcome
+
+The 0.2.x prerelease line established the hardened MOB editor, profile-aware
+resources, direct JMV gameplay, and hot reload. It closed without pretending
+that the much larger accumulated `0.2.1` feature set was merely a patch; that
+working baseline is promoted intact to `0.3.0-alpha.1` above.
+
+## Historical 0.2.0 release gate
 
 `0.1.0-alpha.58` is the immutable selected-zone/save-isolation test build.
 `0.2.0-alpha.1` moves the selected zone and entrance into the engine's New
@@ -365,12 +475,15 @@ profile-isolated test saves. Test Save/Load/Main Menu remain available through
 run-local generation namespaces: every initial launch and hot reload starts a
 new empty save generation, so saves remain useful within one exact staged-map
 state and can never reach live campaign saves or a later map generation.
-Publish the first immutable `0.2.0` package after the following runtime contract
-is demonstrated on normal gameplay, dungeon, and briefing maps.
+This historical gate targeted the first immutable `0.2.0` package after the
+following runtime contract was demonstrated on normal gameplay, dungeon, and
+briefing maps. The larger resulting baseline is now tracked under 0.3 above.
 
-### Current 0.2.x status
+### Final 0.2.x status before promotion
 
-- **Current test candidate:** `0.2.1-alpha.42`. Alpha.42 completes native
+- **Final packaged baseline:** `0.2.1-alpha.44`. Alpha.44 integrates the
+  committed profile-correct render pipeline, environment renderer, particles,
+  ANGLE support, and current runtime/editor safeguards. Alpha.42 completed native
   clipboard behavior for individual Vector3 components without selecting or
   flashing the parent compound property. Alpha.41/42 make component context
   selection exclusive and route child-label context menus directly. Alpha.38

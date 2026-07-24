@@ -47,6 +47,13 @@ Approved executable fingerprints are recorded in
 profiles. A matching hash is necessary but not sufficient: guarded code bytes
 must also match at runtime.
 
+The canonical built-in executable allowlist lives in
+`source/runtime/runtime_variant_registry.h`. Both the editor's profile
+evaluation and the injected bridge compile from that same registry; neither
+side maintains a private duplicate hash list. The registry remains built-in
+and exact-hash. User-managed experimental variants require a future guarded
+analysis/approval workflow and cannot currently be enabled by editing settings.
+
 ## JMV gameplay components versus bridge dependencies
 
 Starter `addon.dll`, `SpellAddonX.asi`, the JMV `addon.dll`, Lua files, and mod
@@ -68,11 +75,15 @@ structurally valid installed `AutoRunSpellAddon123.mob`:
 
 - Play from Here;
 - Godmode;
+- a Time of Day override selected in the viewport;
 - explicit supplemental or collection MOB loading.
 
 For these features, Endurance creates a lossless run-local copy of the autorun
-MOB and adds only the required `SetCPFast`, `GodMode(0,3)`, or `AddMob(...)`
-commands. The installed MOB is never changed. The commands naturally depend on
+MOB and adds only the required `SetCPFast`, `GodMode(0,3)`,
+`RunWorldTime(hours)`, or `AddMob(...)` commands. The installed MOB is never
+changed. The time command sets the editor's effective clock and resumes normal
+time progression independently of the selected viewport Lighting Mode. It is
+regenerated for each hot-reload generation. The commands naturally depend on
 the active JMV runtime implementing the functions they call; no particular
 `SpellAddonX.asi` hash is treated as a global compatibility requirement.
 

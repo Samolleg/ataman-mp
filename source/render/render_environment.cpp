@@ -4,6 +4,8 @@
 
 #include <QtMath>
 
+#include <array>
+
 namespace ei {
 
 namespace {
@@ -21,24 +23,95 @@ QVector3D lerp(const QVector3D& from, const QVector3D& to, float amount)
     return from * (1.0f - amount) + to * amount;
 }
 
-QVector3D cyclicHue(float hours)
+using HourlyColors = std::array<QVector3D, 24>;
+
+QVector3D rgb(int red, int green, int blue)
 {
-    // The stock weather fields change continuously over the full clock cycle;
-    // they do not gate the directional light at a horizon. These four keys are
-    // a bounded editor approximation until provider weather-RGB curves are
-    // exposed by the immutable database/resource service.
-    static const QVector3D keys[] = {
-        QVector3D(0.48f, 0.56f, 0.76f),
-        QVector3D(0.92f, 0.70f, 0.48f),
-        QVector3D(1.00f, 0.96f, 0.86f),
-        QVector3D(0.92f, 0.64f, 0.43f),
-        QVector3D(0.48f, 0.56f, 0.76f)
-    };
-    const float phase = hours / 6.0f;
-    const int index = qBound(0, int(qFloor(phase)), 3);
-    const float local = phase - float(index);
-    const float smooth = local * local * (3.0f - 2.0f * local);
-    return lerp(keys[index], keys[index + 1], smooth);
+    return QVector3D(float(red), float(green), float(blue)) / 255.0f;
+}
+
+const HourlyColors& gipatSunlight()
+{
+    static const HourlyColors values{{
+        rgb(63,93,157), rgb(63,93,157), rgb(92,122,165), rgb(171,131,119),
+        rgb(255,140,104), rgb(255,198,129), rgb(255,248,207), rgb(255,255,255),
+        rgb(255,255,255), rgb(255,255,255), rgb(255,255,255), rgb(255,255,255),
+        rgb(255,255,255), rgb(255,255,255), rgb(255,255,255), rgb(255,255,255),
+        rgb(255,255,255), rgb(255,255,255), rgb(255,248,207), rgb(255,202,136),
+        rgb(255,123,82), rgb(166,128,116), rgb(92,122,165), rgb(63,93,157)
+    }};
+    return values;
+}
+
+const HourlyColors& gipatAmbient()
+{
+    static const HourlyColors values{{
+        rgb(54,83,147), rgb(54,83,147), rgb(87,89,110), rgb(122,81,68),
+        rgb(133,96,85), rgb(135,117,94), rgb(129,135,125), rgb(129,135,125),
+        rgb(129,135,125), rgb(129,135,125), rgb(129,135,125), rgb(129,135,125),
+        rgb(129,135,125), rgb(129,135,125), rgb(129,135,125), rgb(129,135,125),
+        rgb(129,135,125), rgb(129,135,125), rgb(129,135,125), rgb(135,117,94),
+        rgb(133,96,85), rgb(122,81,68), rgb(87,89,110), rgb(54,83,147)
+    }};
+    return values;
+}
+
+const HourlyColors& ingosAmbient()
+{
+    static const HourlyColors values{{
+        rgb(54,83,147), rgb(54,83,147), rgb(77,87,135), rgb(88,94,133),
+        rgb(99,104,133), rgb(108,115,138), rgb(111,121,151), rgb(111,121,151),
+        rgb(111,121,151), rgb(111,121,151), rgb(111,121,151), rgb(111,121,151),
+        rgb(111,121,151), rgb(111,121,151), rgb(111,121,151), rgb(111,121,151),
+        rgb(111,121,151), rgb(111,121,151), rgb(111,121,151), rgb(108,115,138),
+        rgb(99,104,133), rgb(88,94,133), rgb(77,87,135), rgb(54,83,147)
+    }};
+    return values;
+}
+
+const HourlyColors& gipatSky()
+{
+    static const HourlyColors values{{
+        rgb(0,0,118), rgb(0,0,118), rgb(76,78,97), rgb(151,80,58),
+        rgb(196,89,56), rgb(175,150,126), rgb(138,176,177), rgb(53,182,198),
+        rgb(46,181,217), rgb(46,181,217), rgb(46,181,217), rgb(46,181,217),
+        rgb(46,181,217), rgb(46,181,217), rgb(46,181,217), rgb(46,181,217),
+        rgb(46,181,217), rgb(103,181,183), rgb(174,168,157), rgb(210,154,101),
+        rgb(210,95,36), rgb(136,81,81), rgb(76,78,97), rgb(0,0,118)
+    }};
+    return values;
+}
+
+const HourlyColors& ingosSky()
+{
+    static const HourlyColors values{{
+        rgb(0,0,118), rgb(0,0,118), rgb(75,83,95), rgb(151,80,58),
+        rgb(196,89,56), rgb(175,150,126), rgb(138,167,177), rgb(53,157,198),
+        rgb(46,132,217), rgb(46,132,217), rgb(46,132,217), rgb(46,132,217),
+        rgb(46,132,217), rgb(46,132,217), rgb(46,132,217), rgb(46,132,217),
+        rgb(53,157,198), rgb(103,168,183), rgb(174,168,157), rgb(210,154,101),
+        rgb(210,95,36), rgb(136,81,81), rgb(75,83,95), rgb(0,0,118)
+    }};
+    return values;
+}
+
+const HourlyColors& ingosSunlight()
+{
+    static HourlyColors values = gipatSunlight();
+    static const bool initialized = []()
+    {
+        values[2] = rgb(92,113,165);
+        return true;
+    }();
+    Q_UNUSED(initialized)
+    return values;
+}
+
+QVector3D hourlyColor(const HourlyColors& values, float hours)
+{
+    const int hour = int(qFloor(hours)) % 24;
+    return lerp(values[size_t(hour)], values[size_t((hour + 1) % 24)],
+                hours - float(hour));
 }
 }
 
@@ -53,24 +126,33 @@ float clockValueToHours(int hourMinuteValue)
 SRenderEnvironment renderEnvironmentForValues(float timeHours,
                                                float ambientStrength,
                                                float sunStrength,
-                                               bool caveEnvironment)
+                                               bool caveEnvironment,
+                                               const QString& region)
 {
     SRenderEnvironment result;
     result.timeHours = timeHours;
     result.timeHours = std::fmod(std::fmod(result.timeHours, 24.0f) + 24.0f, 24.0f);
-    result.ambientStrength = qBound(0.0f, ambientStrength, 2.0f);
-    result.sunStrength = qBound(0.0f, sunStrength, 4.0f);
+    Q_UNUSED(ambientStrength)
+    Q_UNUSED(sunStrength)
+    // game.exe parses WS_AMBIENT and WS_SUN_LIGHT but does not apply either
+    // value. The normalized weather-table colors are the actual light terms.
+    result.ambientStrength = 1.0f;
+    result.sunStrength = 1.0f;
 
-    // EI rotates a slanted light vector around the map. It neither crosses a
-    // horizon nor reaches a vertical zenith, so light strength never vanishes
-    // merely because the clock advances.
     result.skyRotationDegrees = result.timeHours * 15.0f;
-    const float azimuth = qDegreesToRadians(result.skyRotationDegrees + 35.0f);
-    const float vertical = 0.62f;
-    const float horizontal = qSqrt(1.0f - vertical * vertical);
-    const QVector3D fromSurface(horizontal * qCos(azimuth),
-                                horizontal * qSin(azimuth), vertical);
-    result.sunDirection = -fromSurface.normalized();
+    float elevationDegrees = 0.0f;
+    if(result.timeHours >= 4.0f && result.timeHours <= 20.0f)
+        elevationDegrees = 60.0f - 3.75f * qAbs(result.timeHours - 12.0f);
+    else if(result.timeHours > 20.0f)
+        elevationDegrees = 30.0f + (result.timeHours - 20.0f) * 11.25f;
+    else
+        elevationDegrees = 30.0f + (4.0f - result.timeHours) * 11.25f;
+    const float elevation = qDegreesToRadians(elevationDegrees);
+    const float azimuth = result.timeHours * (2.0f * float(M_PI) / 24.0f);
+    const float horizontal = qCos(elevation);
+    result.sunDirection = QVector3D(qCos(azimuth) * horizontal,
+                                    qSin(azimuth) * horizontal,
+                                    -qSin(elevation));
 
     if(caveEnvironment)
     {
@@ -80,17 +162,22 @@ SRenderEnvironment renderEnvironmentForValues(float timeHours,
         // shadow direction; preview time must not alter cave illumination.
         result.sunColor = QVector3D(161.0f, 179.0f, 170.0f) / 255.0f;
         result.ambientColor = QVector3D(75.0f, 75.0f, 89.0f) / 255.0f;
+        result.skyColor = QVector3D();
         result.fogColor = QVector3D(0.0f, 0.0f, 0.0f);
         result.fogStart = 180.0f;
         result.fogEnd = 620.0f;
         return result;
     }
 
-    result.sunColor = cyclicHue(result.timeHours);
-    result.ambientColor = lerp(QVector3D(0.52f, 0.58f, 0.68f),
-                               result.sunColor, 0.35f);
-    result.fogColor = lerp(QVector3D(0.46f, 0.52f, 0.60f),
-                           result.sunColor, 0.28f);
+    const bool ingos = region.compare(QStringLiteral("ingos"),
+                                      Qt::CaseInsensitive) == 0;
+    result.sunColor = hourlyColor(ingos ? ingosSunlight() : gipatSunlight(),
+                                  result.timeHours);
+    result.ambientColor = hourlyColor(ingos ? ingosAmbient() : gipatAmbient(),
+                                      result.timeHours);
+    result.skyColor = hourlyColor(ingos ? ingosSky() : gipatSky(),
+                                  result.timeHours);
+    result.fogColor = result.skyColor;
     // The stock sky cylinder is open below its horizon. Distant landscape must
     // reach the environment color before the finite editor map edge exposes
     // that opening.
@@ -101,7 +188,8 @@ SRenderEnvironment renderEnvironmentForValues(float timeHours,
 
 SRenderEnvironment renderEnvironment(const CWorldSet* worldSet,
                                      bool overrideTime, float overrideHours,
-                                     bool caveEnvironment)
+                                     bool caveEnvironment,
+                                     const QString& region)
 {
     SRenderEnvironment defaults;
     return renderEnvironmentForValues(
@@ -109,7 +197,7 @@ SRenderEnvironment renderEnvironment(const CWorldSet* worldSet,
                      : worldFloat(worldSet, eWsTypeTime, defaults.timeHours),
         worldFloat(worldSet, eWsTypeAmbient, defaults.ambientStrength),
         worldFloat(worldSet, eWsTypeSunLight, defaults.sunStrength),
-        caveEnvironment);
+        caveEnvironment, region);
 }
 
 }

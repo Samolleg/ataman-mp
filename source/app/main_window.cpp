@@ -1963,7 +1963,7 @@ void MainWindow::refreshMapTestContext()
             m_mapTestEntry = nameMatches.first();
     }
     if(m_pView)
-        m_pView->setMapSkyType(m_mapTestEntry.skyType);
+        m_pView->setMapSkyType(m_mapTestEntry.skyType, m_mapTestEntry.zoneType);
     populateEntranceCombo();
     updateCustomSpawnControls();
     updateMapTestAction();
@@ -2652,6 +2652,8 @@ void MainWindow::launchCurrentMapTest()
     }
     input.spawnZ = runtimeSpawn.z();
     input.godmode = isJmv && m_godmodeCheckBox && m_godmodeCheckBox->isChecked();
+    input.overrideWorldTime = isJmv && m_pView->overridesWorldTime();
+    input.worldTimeHours = m_pView->effectiveWorldTimeHours();
     input.borrowedMapIdentity = m_borrowedMapIdentity;
     if(isBase && !hotReloadRequested)
     {

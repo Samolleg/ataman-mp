@@ -24,8 +24,8 @@ uniform float u_fogStart;
 uniform float u_fogEnd;
 uniform vec3 u_mapFog;
 uniform int u_pointLightCount;
-uniform vec4 u_pointLightPositionRange[8];
-uniform vec3 u_pointLightColor[8];
+uniform vec4 u_pointLightPositionRange[64];
+uniform vec3 u_pointLightColor[64];
 uniform bool u_shadowsEnabled;
 uniform sampler2D u_staticShadowMap;
 uniform sampler2D u_dynamicShadowMap;
@@ -70,7 +70,6 @@ float cascadeVisibility(vec3 staticProjected, vec3 dynamicProjected,
                         float staticBias, float dynamicBias)
 {
   float visibility = 0.0;
-  bool centerOccluded = false;
   for (int y = -1; y <= 1; ++y)
     for (int x = -1; x <= 1; ++x)
     {
@@ -83,12 +82,10 @@ float cascadeVisibility(vec3 staticProjected, vec3 dynamicProjected,
           : 1.0;
       bool staticOccluded = staticInside && staticProjected.z - staticBias > staticDepth;
       bool dynamicOccluded = dynamicInside && dynamicProjected.z - dynamicBias > dynamicDepth;
-      if (x == 0 && y == 0)
-        centerOccluded = staticOccluded || dynamicOccluded;
-      visibility += (staticOccluded || dynamicOccluded) ? 0.58 : 1.0;
+      visibility += (staticOccluded || dynamicOccluded) ? 0.0 : 1.0;
     }
   visibility /= 9.0;
-  return centerOccluded ? min(visibility, 0.58) : visibility;
+  return visibility;
 }
 
 void main(void)
@@ -174,24 +171,26 @@ void main(void)
           }
         }
       }
-      float skyExposure = 0.88 + 0.12 * max(normal.z, 0.0);
-      vec3 neutralAmbient = mix(vec3(1.0), u_ambientColor, 0.28);
-      float ambientLevel = 0.32 + 0.68 * u_ambientStrength;
-      vec3 light = (neutralAmbient * (ambientLevel * skyExposure)
-                 + u_sunColor * (u_sunStrength * sunDiffuse)) * shadow;
-      for (int i = 0; i < 8; ++i)
+      // Stock shadows are an 80/255-alpha projected silhouette over the
+      // saturated environment result. Point lights are compared afterwards.
+      vec3 environmentLight = max(u_ambientColor, u_sunColor * sunDiffuse);
+      float projectedShadowVisibility = mix(1.0, shadow, 80.0 / 255.0);
+      vec3 light = environmentLight * projectedShadowVisibility;
+      for (int i = 0; i < 64; ++i)
       {
         if (i >= u_pointLightCount)
           break;
         vec3 offset = u_pointLightPositionRange[i].xyz - v_worldPosition;
         float range = max(u_pointLightPositionRange[i].w, 0.001);
-        float distanceToLight = length(offset);
-        float attenuation = max(0.0, 1.0 - distanceToLight / range);
-        attenuation *= attenuation;
-        light += u_pointLightColor[i] * attenuation
-               * max(dot(normal, normalize(offset)), 0.0);
+        float distanceSquared = dot(offset, offset);
+        float attenuation = max(0.0,
+            1.0 - distanceSquared / (range * range));
+        vec3 lightDirection = offset * inversesqrt(max(distanceSquared, 0.000001));
+        float normalFactor = 1.0 + min(dot(normal, lightDirection), 0.0);
+        vec3 pointCandidate = u_pointLightColor[i] * attenuation * normalFactor;
+        light = max(light, pointCandidate);
       }
-      resColor.rgb *= light;
+      resColor.rgb *= clamp(light, 0.0, 1.0);
       if (u_fogEnabled)
       {
         float fog = max(clamp((v_viewDepth - u_fogStart) /

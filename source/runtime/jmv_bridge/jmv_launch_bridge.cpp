@@ -10,28 +10,11 @@
 #include <cctype>
 #include <intrin.h>
 
+#include "../runtime_variant_registry.h"
+
 #pragma intrinsic(_ReturnAddress)
 
 namespace {
-constexpr unsigned char kExpectedGameSha256[32] = {
-    0xBE, 0x0F, 0xC3, 0x30, 0x03, 0x5E, 0x03, 0x98,
-    0x3C, 0xCE, 0x59, 0x00, 0x38, 0xCC, 0x7F, 0x88,
-    0x1F, 0x1F, 0x5D, 0x1B, 0xCF, 0x08, 0x27, 0x17,
-    0xF3, 0x17, 0x76, 0xDD, 0x4D, 0xEE, 0x94, 0xE2
-};
-constexpr unsigned char kExpectedBaseGameSha256[32] = {
-    0xB8, 0x71, 0xD7, 0x0D, 0x38, 0x76, 0xB2, 0xA5,
-    0x63, 0x4F, 0x09, 0x20, 0xC9, 0x21, 0x18, 0xBC,
-    0x49, 0x05, 0x8B, 0x50, 0xC7, 0xD8, 0xCB, 0xE6,
-    0x83, 0x76, 0x34, 0x9F, 0x51, 0xC2, 0xE5, 0x70
-};
-constexpr unsigned char kExpectedBaseVkGameSha256[32] = {
-    0x8E, 0xD3, 0xF9, 0xA5, 0x00, 0xD8, 0x4D, 0x82,
-    0x2B, 0xD3, 0x11, 0xB7, 0x4B, 0x1B, 0x49, 0xD5,
-    0xCD, 0x16, 0xDD, 0x12, 0xD3, 0x50, 0x2C, 0x27,
-    0xD7, 0x66, 0x79, 0x57, 0x31, 0x10, 0x36, 0xC1
-};
-
 using CreateFileAFn = HANDLE (WINAPI*)(LPCSTR, DWORD, DWORD, LPSECURITY_ATTRIBUTES,
                                       DWORD, DWORD, HANDLE);
 using CreateFileWFn = HANDLE (WINAPI*)(LPCWSTR, DWORD, DWORD, LPSECURITY_ATTRIBUTES,
@@ -528,6 +511,29 @@ void PublishHotReloadThreadId()
     CloseHandle(file);
 }
 
+int HexNibble(char value)
+{
+    if(value >= '0' && value <= '9') return value - '0';
+    if(value >= 'A' && value <= 'F') return value - 'A' + 10;
+    if(value >= 'a' && value <= 'f') return value - 'a' + 10;
+    return -1;
+}
+
+bool HashMatchesHex(const unsigned char actual[32], const char* expected)
+{
+    if(!actual || !expected || std::strlen(expected) != 64)
+        return false;
+    for(std::size_t index = 0; index < 32; ++index)
+    {
+        const int high = HexNibble(expected[index * 2]);
+        const int low = HexNibble(expected[index * 2 + 1]);
+        if(high < 0 || low < 0
+           || actual[index] != static_cast<unsigned char>((high << 4) | low))
+            return false;
+    }
+    return true;
+}
+
 RuntimeBuild VerifyRuntime()
 {
     wchar_t gamePath[MAX_PATH * 4]{};
@@ -536,11 +542,15 @@ RuntimeBuild VerifyRuntime()
     unsigned char hash[32]{};
     if(!HashFileSha256(gamePath, hash))
         return RuntimeBuild::Unsupported;
-    if(std::memcmp(hash, kExpectedGameSha256, sizeof(hash)) == 0)
-        return RuntimeBuild::JmvStarter;
-    if(std::memcmp(hash, kExpectedBaseGameSha256, sizeof(hash)) == 0
-       || std::memcmp(hash, kExpectedBaseVkGameSha256, sizeof(hash)) == 0)
-        return RuntimeBuild::BaseEi;
+    for(std::size_t index = 0; index < ei::runtime::runtimeVariantCount(); ++index)
+    {
+        const ei::runtime::SRuntimeVariant& variant = ei::runtime::kRuntimeVariants[index];
+        if(std::strcmp(variant.layoutId, ei::runtime::kGameLayoutV1) != 0
+           || !HashMatchesHex(hash, variant.sha256))
+            continue;
+        return variant.profile == ei::runtime::ERuntimeProfile::Jmv
+            ? RuntimeBuild::JmvStarter : RuntimeBuild::BaseEi;
+    }
     return RuntimeBuild::Unsupported;
 }
 
