@@ -3309,7 +3309,7 @@ void CView::unloadLand(bool promptForSave)
         reply = QMessageBox::question(this, "Unload MPR", m_pLand->filePath().fileName() + " has unsaved changes.\nDo you want to save changes?", QMessageBox::Save|QMessageBox::No|QMessageBox::Cancel);
         if(reply == QMessageBox::Save)
         {
-            if(!saveLandscapeDocument(m_pLand->filePath()))
+            if(!saveLandscapeDocument(m_pLand->filePath(), false))
                 return;
         }
         else if(reply == QMessageBox::Cancel)
@@ -3360,85 +3360,11 @@ void CView::saveLandAs()
 
     if(m_pLand->isDirty())
     {
-        if(!m_terrainEditAvailable)
-        {
-            QMessageBox::critical(this, tr("Lossless MPR Save As unavailable"),
-                tr("Canonical terrain ownership is unavailable for this map. No destination was changed."));
-            return;
-        }
         const QString sourcePath = QDir::cleanPath(m_pLand->filePath().absoluteFilePath());
         const QString destinationPath = QDir::cleanPath(fileName.absoluteFilePath());
-        if(QString::compare(sourcePath, destinationPath, Qt::CaseInsensitive) == 0)
-        {
-            QMessageBox::critical(this, tr("Use a separate test MPR"),
-                tr("Direct replacement of the open changed MPR remains disabled. Choose a different Save As path."));
-            return;
-        }
-
-        CMprEditTransaction transaction(tr("Save canonical landscape test copy"));
-        CValidationReport transactionReport;
-        if(!m_terrainEdit.appendSectorEdits(&transaction, &transactionReport)
-           || transactionReport.hasErrors() || transaction.isEmpty())
-        {
-            ei::log(eLogFatal, QString("Refusing changed MPR Save As because the canonical transaction failed path:%1 findings:%2")
-                .arg(destinationPath, transactionReport.toText().trimmed()));
-            QMessageBox::critical(this, tr("Lossless MPR Save As refused"),
-                tr("Endurance could not represent the complete terrain edit as provenance-checked sector patches. "
-                   "No destination was changed.\n\n%1").arg(transactionReport.toText().trimmed()));
-            return;
-        }
-
-        const SStagedMprTransactionValidation preview =
-            validateStagedMprTransaction(m_mprDocument, transaction, fileName);
-        if(!preview.success)
-        {
-            ei::log(eLogFatal, QString("Refusing changed MPR Save As because preview validation failed path:%1 error:%2")
-                .arg(destinationPath, preview.error));
-            QMessageBox::critical(this, tr("Staged MPR validation failed"),
-                tr("The temporary candidate failed validation. No destination was changed.\n\n%1")
-                    .arg(preview.error));
-            return;
-        }
-
-        const QString memberSummary = preview.changedMembers.join(QStringLiteral(", "));
-        if(QMessageBox::question(this, tr("Write validated MPR test copy?"),
-            tr("Endurance validated a lossless changed-MPR candidate.\n\n"
-               "Destination: %1\nChanged archive members: %2\nSHA-256: %3\n\n"
-               "An existing destination will be backed up before atomic replacement. "
-               "The currently open source remains unchanged and marked dirty. "
-               "Navigation data may be stale and must be reviewed separately.\n\n"
-               "Semantic diff:\n%4")
-                .arg(destinationPath, memberSummary, preview.sha256,
-                     preview.semanticDiff.isEmpty() ? tr("(no semantic changes)")
-                                                    : preview.semanticDiff),
-            QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes)
-            return;
-
-        SMprSaveCommitRequest request;
-        request.source = m_pLand->filePath();
-        request.destination = fileName;
-        const SMprSaveCommitResult result =
-            commitStagedMprTransaction(m_mprDocument, transaction, request);
-        if(!result.success)
-        {
-            ei::log(eLogFatal, QString("Changed MPR Save As failed phase:%1 path:%2 error:%3")
-                .arg(result.phase, destinationPath, result.error));
-            QMessageBox::critical(this, tr("Changed MPR Save As failed"),
-                tr("The changed MPR test copy was not committed.\n\nPhase: %1\n%2")
-                    .arg(result.phase, result.error));
-            return;
-        }
-
-        ei::log(eLogInfo, QString("Changed MPR test copy committed source:%1 destination:%2 members:%3 sha256:%4 backup:%5")
-            .arg(sourcePath, destinationPath, result.changedMembers.join(","),
-                 result.candidateSha256,
-                 result.backupPath.isEmpty() ? QStringLiteral("not-required")
-                                             : result.backupPath));
-        QMessageBox::information(this, tr("Validated MPR test copy written"),
-            tr("The changed MPR was written as a separate validated test copy.\n\n%1\n\n"
-               "The open source remains unchanged and marked dirty. Reopen the test copy separately before runtime testing.")
-                .arg(destinationPath));
-        emit updateMsg(tr("Validated changed MPR test copy written: %1").arg(destinationPath));
+        const bool samePath = QString::compare(sourcePath, destinationPath,
+                                               Qt::CaseInsensitive) == 0;
+        saveChangedLandscapeDocument(fileName, samePath, true);
         return;
     }
     //QFileInfo fileName("c:\\konst\\Проклятые Земли (Дополнение)\\Mods\\ferneo_mod\\Maps\\zone1gTest.mpr");
@@ -3450,8 +3376,19 @@ void CView::saveLandAs()
     }
 }
 
-bool CView::saveLandscapeDocument(const QFileInfo& destination)
+bool CView::saveLandscapeDocument(const QFileInfo& destination,
+                                  bool confirmChangedCommit)
 {
+    if(m_pLand->isDirty())
+    {
+        const QString sourcePath = QDir::cleanPath(m_pLand->filePath().absoluteFilePath());
+        const QString destinationPath = QDir::cleanPath(destination.absoluteFilePath());
+        const bool samePath = QString::compare(sourcePath, destinationPath,
+                                               Qt::CaseInsensitive) == 0;
+        return saveChangedLandscapeDocument(destination, samePath,
+                                            confirmChangedCommit);
+    }
+
     QProgressDialog progress(tr("Preparing safe MPR save..."), QString(), 0, 4, this);
     progress.setWindowTitle(tr("Saving MPR"));
     progress.setWindowModality(Qt::ApplicationModal);
@@ -3469,6 +3406,160 @@ bool CView::saveLandscapeDocument(const QFileInfo& destination)
     const bool saved = m_pLand->saveMapAs(destination, updateProgress);
     progress.setValue(progress.maximum());
     return saved;
+}
+
+bool CView::saveChangedLandscapeDocument(const QFileInfo& destination,
+                                         bool adoptAsOpenBaseline,
+                                         bool confirmCommit)
+{
+    if(!m_terrainEditAvailable)
+    {
+        QMessageBox::critical(this, tr("Lossless MPR save unavailable"),
+            tr("Canonical terrain ownership is unavailable for this map. No destination was changed."));
+        return false;
+    }
+
+    finishSculptStroke();
+    endTileBrushGroup();
+    const QString sourcePath = QDir::cleanPath(m_pLand->filePath().absoluteFilePath());
+    const QString destinationPath = QDir::cleanPath(destination.absoluteFilePath());
+    CMprEditTransaction transaction(adoptAsOpenBaseline
+        ? tr("Save canonical landscape")
+        : tr("Save canonical landscape copy"));
+    CValidationReport transactionReport;
+    if(!m_terrainEdit.appendSectorEdits(&transaction, &transactionReport)
+       || transactionReport.hasErrors() || transaction.isEmpty())
+    {
+        ei::log(eLogFatal, QString("Refusing changed MPR save because the canonical transaction failed path:%1 findings:%2")
+            .arg(destinationPath, transactionReport.toText().trimmed()));
+        QMessageBox::critical(this, tr("Lossless MPR save refused"),
+            tr("Endurance could not represent the complete terrain edit as provenance-checked sector patches. "
+               "No destination was changed.\n\n%1").arg(transactionReport.toText().trimmed()));
+        return false;
+    }
+
+    const SStagedMprTransactionValidation preview =
+        validateStagedMprTransaction(m_mprDocument, transaction, destination);
+    if(!preview.success)
+    {
+        ei::log(eLogFatal, QString("Refusing changed MPR save because preview validation failed path:%1 error:%2")
+            .arg(destinationPath, preview.error));
+        QMessageBox::critical(this, tr("Staged MPR validation failed"),
+            tr("The temporary candidate failed validation. No destination was changed.\n\n%1")
+                .arg(preview.error));
+        return false;
+    }
+
+    if(confirmCommit)
+    {
+        const QString behavior = adoptAsOpenBaseline
+            ? tr("The currently open MPR will be backed up and atomically replaced. "
+                 "After verification, this candidate becomes the new undo/redo baseline. ")
+            : tr("An existing destination will be backed up before atomic replacement. "
+                 "The currently open source remains unchanged and marked dirty. ");
+        if(QMessageBox::question(this,
+            adoptAsOpenBaseline ? tr("Save validated MPR?")
+                                : tr("Write validated MPR copy?"),
+            tr("Endurance validated a lossless changed-MPR candidate.\n\n"
+               "Destination: %1\nChanged archive members: %2\nSHA-256: %3\n\n"
+               "%4Navigation data may be stale and must be reviewed separately.\n\n"
+               "Semantic diff:\n%5")
+                .arg(destinationPath, preview.changedMembers.join(QStringLiteral(", ")),
+                     preview.sha256, behavior,
+                     preview.semanticDiff.isEmpty() ? tr("(no semantic changes)")
+                                                    : preview.semanticDiff),
+            QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes)
+            return false;
+    }
+
+    SMprSaveCommitRequest request;
+    request.source = m_pLand->filePath();
+    request.destination = destination;
+    const SMprSaveCommitResult result =
+        commitStagedMprTransaction(m_mprDocument, transaction, request);
+    if(!result.success)
+    {
+        ei::log(eLogFatal, QString("Changed MPR save failed phase:%1 path:%2 error:%3 backup:%4")
+            .arg(result.phase, destinationPath, result.error,
+                 result.backupPath.isEmpty() ? QStringLiteral("not-created")
+                                             : result.backupPath));
+        QMessageBox::critical(this, tr("Changed MPR save failed"),
+            tr("The changed MPR save did not complete.\n\nPhase: %1\n%2\n\nBackup: %3")
+                .arg(result.phase, result.error,
+                     result.backupPath.isEmpty() ? tr("not created")
+                                                 : result.backupPath));
+        return false;
+    }
+
+    if(adoptAsOpenBaseline && !adoptCommittedLandscapeBaseline(destination, result))
+        return false;
+
+    ei::log(eLogInfo, QString("Changed MPR committed source:%1 destination:%2 members:%3 sha256:%4 backup:%5 adopted:%6")
+        .arg(sourcePath, destinationPath, result.changedMembers.join(","),
+             result.candidateSha256,
+             result.backupPath.isEmpty() ? QStringLiteral("not-required")
+                                         : result.backupPath,
+             adoptAsOpenBaseline ? QStringLiteral("yes") : QStringLiteral("no")));
+    if(adoptAsOpenBaseline)
+    {
+        emit updateMsg(tr("Validated MPR saved: %1").arg(destinationPath));
+    }
+    else
+    {
+        QMessageBox::information(this, tr("Validated MPR copy written"),
+            tr("The changed MPR was written as a separate validated copy.\n\n%1\n\n"
+               "The open source remains unchanged and marked dirty.")
+                .arg(destinationPath));
+        emit updateMsg(tr("Validated changed MPR copy written: %1").arg(destinationPath));
+    }
+    return true;
+}
+
+bool CView::adoptCommittedLandscapeBaseline(const QFileInfo& destination,
+                                            const SMprSaveCommitResult& commit)
+{
+    CMprDocument reopenedDocument;
+    CValidationReport report;
+    if(!reopenedDocument.load(destination, &report) || report.hasErrors())
+    {
+        QMessageBox::critical(this, tr("MPR saved; reopen required"),
+            tr("The validated MPR was committed, but the editor could not rebind the open document. "
+               "The backup is intact. Reopen the MPR before making further edits.\n\n%1")
+                .arg(report.toText().trimmed()));
+        return false;
+    }
+    const QString reopenedSha256 = QString::fromLatin1(QCryptographicHash::hash(
+        reopenedDocument.originalBytes(), QCryptographicHash::Sha256).toHex());
+    if(reopenedSha256.compare(commit.candidateSha256, Qt::CaseInsensitive) != 0)
+    {
+        QMessageBox::critical(this, tr("MPR saved; reopen required"),
+            tr("The committed file hash changed before the editor could adopt it. "
+               "The backup is intact. Reopen the MPR before making further edits."));
+        return false;
+    }
+
+    CTerrainEditModel reopenedTerrain;
+    if(!reopenedTerrain.load(reopenedDocument, &report) || report.hasErrors()
+       || !m_pLand->adoptCanonicalSave(destination,
+                                      reopenedDocument.originalBytes()))
+    {
+        QMessageBox::critical(this, tr("MPR saved; reopen required"),
+            tr("The validated MPR was committed, but its canonical terrain baseline could not be adopted. "
+               "The backup is intact. Reopen the MPR before making further edits.\n\n%1")
+                .arg(report.toText().trimmed()));
+        return false;
+    }
+
+    m_mprDocument = reopenedDocument;
+    m_terrainEdit = reopenedTerrain;
+    m_terrainEditAvailable = true;
+    m_lastModifiedLand = QFileInfo(destination.absoluteFilePath()).lastModified();
+    rebuildTerrainAutoCatalog();
+    m_pLand->setDirty(false);
+    emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMpr,
+                              destination.baseName());
+    emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMprDirtyFlag, "");
+    return true;
 }
 
 int CView::select(const SSelect &selectParam, bool bAddToSelect)
@@ -5994,7 +6085,7 @@ bool CView::onExit()
         reply = QMessageBox::question(this, "Exit", m_pLand->filePath().fileName() + " has unsaved changes.\nDo you want to save changes?", QMessageBox::Save|QMessageBox::No|QMessageBox::Cancel);
         if(reply == QMessageBox::Save)
         {
-            if(!saveLandscapeDocument(m_pLand->filePath()))
+            if(!saveLandscapeDocument(m_pLand->filePath(), false))
                 bCloseAllowed = false;
         }
         else if(reply == QMessageBox::Cancel)

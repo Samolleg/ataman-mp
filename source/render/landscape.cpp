@@ -337,6 +337,17 @@ bool CLandscape::saveMapAs(const QFileInfo& path, const SaveProgress& progress)
     return true;
 }
 
+bool CLandscape::adoptCanonicalSave(const QFileInfo& path, const QByteArray& bytes)
+{
+    const SExistingFileComparison comparison = compareExistingFile(path, bytes);
+    if(!comparison.exists || !comparison.readable || !comparison.equal)
+        return false;
+    m_filePath = QFileInfo(path.absoluteFilePath());
+    m_originalMprData = bytes;
+    m_bDirty = false;
+    return true;
+}
+
 void CLandscape::draw(QOpenGLShaderProgram* program, const CViewFrustum* frustum)
 {
     m_texture->bind(0);

@@ -73,8 +73,8 @@ SStagedMprTransactionValidation validateStagedMprTransaction(
     const QFileInfo& destination);
 
 // Commits a previously representable MPR transaction through the complete
-// race-check, stage, backup, and atomic replacement contract. UI callers must
-// keep this unreachable until copied Base/JMV validation is complete.
+// race-check, stage, backup, atomic replacement, and post-commit reopen
+// contract. Source and destination may be the same path.
 SMprSaveCommitResult commitStagedMprTransaction(
     const CMprDocument& baseline, const CMprEditTransaction& transaction,
     const SMprSaveCommitRequest& request);

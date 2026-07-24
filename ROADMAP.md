@@ -252,9 +252,12 @@ archive and canonical-lattice foundation into height sculpting/import,
 semantic ground and overlay painting, undo batching, terrain diagnostics,
 staged changed-MPR Save As, lossless RES member replacement, and a structured
 `map.txt` catalog editor. Its focused automated suites and disposable manual
-smoke matrix passed before this integration. Direct replacement of the open
-dirty MPR remains outside the baseline; changed terrain is written only as a
-separate validated test copy.
+smoke matrix passed before this integration. The follow-up direct-save
+increment enables replacement of the open dirty MPR only through the same
+provenance-checked transaction: staged candidate, fresh reopen, semantic diff,
+source-race refusal, pre-save backup, atomic replacement, post-commit byte and
+reopen verification, and canonical document rebinding. The legacy rebuilding
+serializer remains forbidden for every changed MPR.
 
 - [ ] Preserve untouched archive members, internal names, member order,
   timestamps/metadata, alignment, unknown entries, and original MP/SEC
@@ -263,7 +266,7 @@ separate validated test copy.
   from the embedded map name.
 - [ ] Patch only edited sector/overlay payloads and derive affected lengths and
   metadata from emitted content.
-- [ ] Stage, freshly reopen, validate, back up, and atomically replace every
+- [x] Stage, freshly reopen, validate, back up, and atomically replace every
   changed MPR.
 - [ ] Add deterministic MPR/SEC semantic diff and untouched-member equality
   checks.

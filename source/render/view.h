@@ -49,6 +49,7 @@ class CProgressView;
 class CTableManager;
 class COperation;
 struct SColor;
+struct SMprSaveCommitResult;
 
 struct STerrainPaintAuditAction
 {
@@ -257,7 +258,13 @@ protected:
 
 private:
     bool saveMobDocument(CMob* mob, const QFileInfo& destination);
-    bool saveLandscapeDocument(const QFileInfo& destination);
+    bool saveLandscapeDocument(const QFileInfo& destination,
+                               bool confirmChangedCommit = true);
+    bool saveChangedLandscapeDocument(const QFileInfo& destination,
+                                      bool adoptAsOpenBaseline,
+                                      bool confirmCommit);
+    bool adoptCommittedLandscapeBaseline(const QFileInfo& destination,
+                                         const SMprSaveCommitResult& commit);
     void refreshMobDirtyStates();
     void initShaders();
     void draw();

@@ -356,6 +356,29 @@ SMprSaveCommitResult commitStagedMprTransaction(
         return result;
     }
 
+    result.phase = QStringLiteral("post-commit-validation");
+    QByteArray committedBytes;
+    if(!readFileBytes(request.destination, &committedBytes, &result.error))
+        return result;
+    if(committedBytes != staged.candidateBytes)
+    {
+        result.error = "The committed MPR bytes do not match the validated candidate. "
+            "The pre-save backup has been retained for recovery.";
+        return result;
+    }
+    CMprDocument committed;
+    CValidationReport committedReport;
+    if(!committed.loadBytes(committedBytes,
+                            request.destination.absoluteFilePath(),
+                            &committedReport)
+       || committedReport.hasErrors())
+    {
+        result.error = "The committed MPR failed a fresh reopen. "
+            "The pre-save backup has been retained for recovery:\n"
+            + committedReport.toText().trimmed();
+        return result;
+    }
+
     result.phase = QStringLiteral("complete");
     result.success = true;
     return result;
