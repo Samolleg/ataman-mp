@@ -55,6 +55,7 @@ using ZoneTransitionFn = int (__thiscall*)(void*, const char*, int);
 using NewGameBootstrapFn = void (__thiscall*)(void*);
 using PlayerDefaultsResetFn = void (__thiscall*)(void*);
 using GameStringAssignFn = void (__thiscall*)(void*, const char*);
+using GetZoneByNameFn = unsigned char* (__thiscall*)(void*, const char*);
 enum class RuntimeBuild { Unsupported, JmvStarter, BaseEi };
 
 HMODULE g_instance = nullptr;
@@ -108,6 +109,8 @@ constexpr DWORD kNewGameBootstrapRva = 0x0017BD10;
 constexpr DWORD kPlayerDefaultsResetRva = 0x000A5BD0;
 constexpr DWORD kPlayerDefaultsManagerRva = 0x003AA5C4;
 constexpr DWORD kGameStringAssignRva = 0x00300AF9;
+constexpr DWORD kGetZoneByNameRva = 0x0005E850;
+constexpr DWORD kGlobalMapRva = 0x0039BF00;
 constexpr DWORD kGraphRequirementRva = 0x001955CC;
 constexpr UINT kDirectLaunchMessage = WM_APP + 0x45D;
 constexpr UINT kHotReloadMessage = WM_APP + 0x45E;
@@ -129,6 +132,10 @@ constexpr unsigned char kGraphRequirementBytes[33] = {
     0x00, 0xE8, 0x5E, 0x0B, 0x00, 0x00, 0x85, 0xC0,
     0x75, 0x07, 0x68, 0xD8, 0x0A, 0x79, 0x00, 0xEB,
     0x50
+};
+constexpr unsigned char kGetZoneByNameBytes[15] = {
+    0x53, 0x55, 0x56, 0x8B, 0xF1, 0x57, 0x33, 0xFF,
+    0x8B, 0x46, 0x1C, 0x85, 0xC0, 0x7E, 0x25
 };
 enum class RuntimeState : LONG
 {
@@ -392,44 +399,26 @@ bool ValidateZoneCandidate(unsigned char* candidate, const char* zoneName,
 unsigned char* FindZoneCandidate(const char* zoneName, const char* expectedMpr,
                                  const char* expectedMob)
 {
-    DWORD heapCount = GetProcessHeaps(0, nullptr);
-    if(!heapCount || heapCount > 1024)
+    if(!g_gameModule || !zoneName || !zoneName[0])
         return nullptr;
-    HANDLE* heaps = static_cast<HANDLE*>(HeapAlloc(GetProcessHeap(), 0,
-                                                   heapCount * sizeof(HANDLE)));
-    if(!heaps)
-        return nullptr;
-    heapCount = GetProcessHeaps(heapCount, heaps);
-    unsigned char* found = nullptr;
-    int matches = 0;
-    for(DWORD heapIndex = 0; heapIndex < heapCount && matches < 2; ++heapIndex)
+    auto* game = reinterpret_cast<unsigned char*>(g_gameModule);
+    unsigned char* lookupEntry = game + kGetZoneByNameRva;
+    if(std::memcmp(lookupEntry, kGetZoneByNameBytes,
+                   sizeof(kGetZoneByNameBytes)) != 0)
     {
-        HANDLE heap = heaps[heapIndex];
-        if(!HeapLock(heap))
-            continue;
-        PROCESS_HEAP_ENTRY entry{};
-        while(HeapWalk(heap, &entry))
-        {
-            if(!(entry.wFlags & PROCESS_HEAP_ENTRY_BUSY) || entry.cbData < 88)
-                continue;
-            auto* begin = static_cast<unsigned char*>(entry.lpData);
-            const size_t limit = entry.cbData - 88;
-            for(size_t offset = 0; offset <= limit; offset += sizeof(void*))
-            {
-                unsigned char* candidate = begin + offset;
-                if(ValidateZoneCandidate(candidate, zoneName, expectedMpr, expectedMob))
-                {
-                    found = candidate;
-                    ++matches;
-                    if(matches > 1)
-                        break;
-                }
-            }
-        }
-        HeapUnlock(heap);
+        Log(L"SYNTHETIC_MAP refused: map-table lookup signature does not match the verified runtime");
+        return nullptr;
     }
-    HeapFree(GetProcessHeap(), 0, heaps);
-    return matches == 1 ? found : nullptr;
+
+    // The map table is a fixed game-owned object in every fingerprinted runtime
+    // variant supported by this bridge. Calling its guarded lookup is bounded
+    // and stays on the game thread. Never walk or lock process heaps here: the
+    // game allocates from worker threads while the main-menu hook is active.
+    auto* globalMap = game + kGlobalMapRva;
+    const auto getZoneByName = reinterpret_cast<GetZoneByNameFn>(lookupEntry);
+    unsigned char* candidate = getZoneByName(globalMap, zoneName);
+    return ValidateZoneCandidate(candidate, zoneName, expectedMpr, expectedMob)
+        ? candidate : nullptr;
 }
 
 bool SnapshotSyntheticZone(unsigned char* zone)
