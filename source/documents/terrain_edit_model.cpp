@@ -20,6 +20,11 @@ const int kLandVertexOffset = 5;
 const int kSectorTiles = 16;
 const int kSectorTileCount = kSectorTiles * kSectorTiles;
 const int kTileSize = 2;
+const int kVertexBlockSize = kSectorVertices * kSectorVertices * kVertexSize;
+const int kTileBlockSize = kSectorTileCount * kTileSize;
+const int kLandSectorSize = kLandVertexOffset + kVertexBlockSize + kTileBlockSize;
+const int kOverlaySectorSize = kLandVertexOffset + 2 * kVertexBlockSize
+    + 3 * kTileBlockSize;
 const quint32 kSectorSignature = 0xCF4BF774;
 
 quint16 readHeight(const QByteArray& payload, int localX, int localY)
@@ -80,6 +85,21 @@ void writePackedTile(QByteArray& payload, quint64 baseOffset, int localTile, qui
 qint16 readOverlayMaterial(const QByteArray& payload, quint64 baseOffset, int localTile)
 {
     return qint16(readPackedTile(payload, baseOffset, localTile));
+}
+
+void writeOverlayMaterial(QByteArray& payload, quint64 baseOffset,
+                          int localTile, qint16 material)
+{
+    writePackedTile(payload, baseOffset, localTile, quint16(material));
+}
+
+bool tileInsideBrush(const STerrainTileBrush& brush, int x, int y)
+{
+    const float dx = std::fabs(float(x) - brush.centerX);
+    const float dy = std::fabs(float(y) - brush.centerY);
+    return brush.shape == ETerrainTileBrushShape::Square
+        ? qMax(dx, dy) <= brush.radius
+        : std::sqrt(dx * dx + dy * dy) <= brush.radius;
 }
 
 struct SVector3
@@ -476,13 +496,15 @@ bool CTerrainEditModel::load(const CMprDocument& document, CValidationReport* re
     return loadSources(int(document.mapInfo().sectorCountX),
                        int(document.mapInfo().sectorCountY), document.mapInfo().maxZ,
                        sources, report, int(document.mapInfo().textureCount),
-                       document.mapInfo().tileTypes);
+                       document.mapInfo().tileTypes,
+                       int(document.mapInfo().materialCount));
 }
 
 bool CTerrainEditModel::loadSources(int sectorCountX, int sectorCountY, float maxZ,
                                     const QVector<STerrainSectorSource>& sources,
                                     CValidationReport* report, int textureCount,
-                                    const QVector<qint32>& tileTypes)
+                                    const QVector<qint32>& tileTypes,
+                                    int materialCount)
 {
     m_sectorCountX = 0;
     m_sectorCountY = 0;
@@ -491,6 +513,7 @@ bool CTerrainEditModel::loadSources(int sectorCountX, int sectorCountY, float ma
     m_maxZ = 0.0f;
     m_originalMaxZ = 0.0f;
     m_textureCount = 0;
+    m_materialCount = 0;
     m_tileTypes.clear();
     m_heights.clear();
     m_originalHeights.clear();
@@ -570,6 +593,7 @@ bool CTerrainEditModel::loadSources(int sectorCountX, int sectorCountY, float ma
     m_maxZ = maxZ;
     m_originalMaxZ = maxZ;
     m_textureCount = qMax(0, textureCount);
+    m_materialCount = qMax(0, materialCount);
     m_tileTypes = tileTypes;
     m_vertexCountX = sectorCountX * kSectorStride + 1;
     m_vertexCountY = sectorCountY * kSectorStride + 1;
@@ -688,6 +712,43 @@ bool CTerrainEditModel::tileLocation(int globalX, int globalY, int* sectorIndex,
     if(localTile)
         *localTile = (globalY % kSectorTiles) * kSectorTiles
             + (globalX % kSectorTiles);
+    return true;
+}
+
+bool CTerrainEditModel::refreshSectorLayout(SSector* sector,
+                                            CValidationReport* report) const
+{
+    if(!sector || sector->currentPayload.size() < 5
+       || qFromLittleEndian<quint32>(reinterpret_cast<const uchar*>(
+              sector->currentPayload.constData())) != kSectorSignature)
+        return false;
+    const quint8 type = quint8(sector->currentPayload.at(4));
+    if(type != 0 && type != 3)
+    {
+        if(report)
+            report->add("terrain.overlay_sector_type", EValidationSeverity::Error,
+                        "Overlay editing supports only ordinary and overlay SEC members",
+                        sector->source.memberName);
+        return false;
+    }
+    const int required = type == 3 ? kOverlaySectorSize : kLandSectorSize;
+    if(sector->currentPayload.size() < required)
+    {
+        if(report)
+            report->add("terrain.overlay_sector_size", EValidationSeverity::Error,
+                        "Overlay edit produced a truncated SEC payload",
+                        sector->source.memberName);
+        return false;
+    }
+    sector->source.type = type;
+    sector->source.overlayVertexOffset = type == 3
+        ? kLandVertexOffset + kVertexBlockSize : 0;
+    sector->source.landTileOffset = kLandVertexOffset + kVertexBlockSize
+        + (type == 3 ? kVertexBlockSize : 0);
+    sector->source.overlayTileOffset = type == 3
+        ? sector->source.landTileOffset + kTileBlockSize : 0;
+    sector->source.overlayMaterialOffset = type == 3
+        ? sector->source.overlayTileOffset + kTileBlockSize : 0;
     return true;
 }
 
@@ -1002,6 +1063,144 @@ qint16 CTerrainEditModel::overlayMaterialIndex(int globalTileX, int globalTileY,
     return present ? readOverlayMaterial(sector.currentPayload,
                                          sector.source.overlayMaterialOffset,
                                          localTile) : qint16(-1);
+}
+
+SOverlaySurfaceCommand CTerrainEditModel::makeOverlayActivation(
+    const STerrainTileBrush& brush, qint16 materialIndex,
+    quint8 atlasIndex, quint8 tileIndex, quint8 rotation,
+    CValidationReport* report) const
+{
+    SOverlaySurfaceCommand command;
+    command.description = QStringLiteral("Activate overlay surface");
+    SMprPackedTile selected;
+    selected.atlasIndex = atlasIndex;
+    selected.tileIndex = tileIndex;
+    selected.rotation = rotation;
+    if(brush.radius < 0.0f || materialIndex < 0 || tileIndex >= 64 || rotation >= 4
+       || atlasIndex >= m_textureCount || selected.atlasSlot() >= m_tileTypes.size()
+       || (m_materialCount > 0 && materialIndex >= m_materialCount))
+    {
+        if(report)
+            report->add("terrain.overlay_activation", EValidationSeverity::Error,
+                        "Overlay activation requires an existing material and atlas tile");
+        return command;
+    }
+
+    QMap<int, QByteArray> replacements;
+    const int minimumX = qMax(0, int(std::ceil(brush.centerX - brush.radius)));
+    const int maximumX = qMin(tileCountX() - 1,
+                              int(std::floor(brush.centerX + brush.radius)));
+    const int minimumY = qMax(0, int(std::ceil(brush.centerY - brush.radius)));
+    const int maximumY = qMin(tileCountY() - 1,
+                              int(std::floor(brush.centerY + brush.radius)));
+    for(int y = minimumY; y <= maximumY; ++y)
+        for(int x = minimumX; x <= maximumX; ++x)
+        {
+            if(!tileInsideBrush(brush, x, y))
+                continue;
+            int sectorIndex = -1;
+            int localTile = -1;
+            if(!tileLocation(x, y, &sectorIndex, &localTile, report))
+                return SOverlaySurfaceCommand();
+            const SSector& sector = m_sectors.at(sectorIndex);
+            QByteArray payload = replacements.value(sectorIndex, sector.currentPayload);
+            quint64 overlayTileOffset = sector.source.overlayTileOffset;
+            quint64 overlayMaterialOffset = sector.source.overlayMaterialOffset;
+            if(quint8(payload.at(4)) == 0)
+            {
+                const QByteArray landVertices = payload.mid(kLandVertexOffset, kVertexBlockSize);
+                const QByteArray landTiles = payload.mid(
+                    kLandVertexOffset + kVertexBlockSize, kTileBlockSize);
+                const QByteArray trailing = payload.mid(kLandSectorSize);
+                QByteArray upgraded;
+                upgraded.reserve(payload.size() + kVertexBlockSize + 2 * kTileBlockSize);
+                upgraded.append(payload.left(kLandVertexOffset));
+                upgraded[4] = char(3);
+                // New overlay geometry starts as an exact copy of land. Only
+                // explicitly activated cells become visible; inactive records
+                // retain the native -1 sentinel.
+                upgraded.append(landVertices);
+                upgraded.append(landVertices);
+                upgraded.append(landTiles);
+                upgraded.append(QByteArray(kTileBlockSize, char(0xFF)));
+                upgraded.append(QByteArray(kTileBlockSize, char(0xFF)));
+                upgraded.append(trailing);
+                payload = upgraded;
+                overlayTileOffset = kLandVertexOffset + 2 * kVertexBlockSize
+                    + kTileBlockSize;
+                overlayMaterialOffset = overlayTileOffset + kTileBlockSize;
+            }
+            if(readPackedTile(payload, overlayTileOffset, localTile) == selected.encode()
+               && readOverlayMaterial(payload, overlayMaterialOffset, localTile)
+                    == materialIndex)
+                continue;
+            writePackedTile(payload, overlayTileOffset, localTile, selected.encode());
+            writeOverlayMaterial(payload, overlayMaterialOffset, localTile, materialIndex);
+            replacements.insert(sectorIndex, payload);
+        }
+
+    for(auto it = replacements.constBegin(); it != replacements.constEnd(); ++it)
+    {
+        const SSector& sector = m_sectors.at(it.key());
+        if(it.value() == sector.currentPayload)
+            continue;
+        SOverlaySectorDelta delta;
+        delta.sectorX = sector.source.sectorX;
+        delta.sectorY = sector.source.sectorY;
+        delta.beforePayload = sector.currentPayload;
+        delta.afterPayload = it.value();
+        command.sectors.append(delta);
+    }
+    return command;
+}
+
+SOverlaySurfaceCommand CTerrainEditModel::makeOverlayDeactivation(
+    const STerrainTileBrush& brush, CValidationReport* report) const
+{
+    SOverlaySurfaceCommand command;
+    command.description = QStringLiteral("Deactivate overlay surface");
+    if(brush.radius < 0.0f)
+        return command;
+    QMap<int, QByteArray> replacements;
+    const int minimumX = qMax(0, int(std::ceil(brush.centerX - brush.radius)));
+    const int maximumX = qMin(tileCountX() - 1,
+                              int(std::floor(brush.centerX + brush.radius)));
+    const int minimumY = qMax(0, int(std::ceil(brush.centerY - brush.radius)));
+    const int maximumY = qMin(tileCountY() - 1,
+                              int(std::floor(brush.centerY + brush.radius)));
+    for(int y = minimumY; y <= maximumY; ++y)
+        for(int x = minimumX; x <= maximumX; ++x)
+        {
+            if(!tileInsideBrush(brush, x, y))
+                continue;
+            int sectorIndex = -1;
+            int localTile = -1;
+            if(!tileLocation(x, y, &sectorIndex, &localTile, report))
+                return SOverlaySurfaceCommand();
+            const SSector& sector = m_sectors.at(sectorIndex);
+            if(sector.source.type != 3)
+                continue;
+            QByteArray payload = replacements.value(sectorIndex, sector.currentPayload);
+            if(readOverlayMaterial(payload, sector.source.overlayMaterialOffset,
+                                   localTile) == -1)
+                continue;
+            // Deactivation changes only the proven native sentinel. Tile and
+            // vertex bytes remain available for exact undo or later reuse.
+            writeOverlayMaterial(payload, sector.source.overlayMaterialOffset,
+                                 localTile, -1);
+            replacements.insert(sectorIndex, payload);
+        }
+    for(auto it = replacements.constBegin(); it != replacements.constEnd(); ++it)
+    {
+        const SSector& sector = m_sectors.at(it.key());
+        SOverlaySectorDelta delta;
+        delta.sectorX = sector.source.sectorX;
+        delta.sectorY = sector.source.sectorY;
+        delta.beforePayload = sector.currentPayload;
+        delta.afterPayload = it.value();
+        command.sectors.append(delta);
+    }
+    return command;
 }
 
 float CTerrainEditModel::navigationHeightSample(int aiTileX, int aiTileY,
@@ -3006,6 +3205,63 @@ bool CTerrainEditModel::apply(const STerrainTileCommand& command, bool forward,
     return true;
 }
 
+bool CTerrainEditModel::apply(const SOverlaySurfaceCommand& command, bool forward,
+                              CValidationReport* report)
+{
+    QSet<int> seen;
+    QVector<int> indices;
+    indices.reserve(command.sectors.size());
+    for(const SOverlaySectorDelta& delta : command.sectors)
+    {
+        const int index = m_sectorLookup.value(
+            QPair<int, int>(delta.sectorX, delta.sectorY), -1);
+        if(index < 0 || seen.contains(index))
+        {
+            if(report)
+                report->add("terrain.overlay_sector", EValidationSeverity::Error,
+                            index < 0 ? "Overlay command references a missing sector"
+                                      : "Overlay command references a sector more than once",
+                            QString("%1,%2").arg(delta.sectorX).arg(delta.sectorY));
+            return false;
+        }
+        seen.insert(index);
+        const QByteArray& expected = forward ? delta.beforePayload : delta.afterPayload;
+        if(m_sectors.at(index).currentPayload != expected)
+        {
+            if(report)
+                report->add("terrain.overlay_provenance", EValidationSeverity::Error,
+                            "Overlay command no longer matches the canonical SEC payload",
+                            m_sectors.at(index).source.memberName);
+            return false;
+        }
+        const QByteArray& replacement = forward ? delta.afterPayload : delta.beforePayload;
+        const bool headerValid = replacement.size() >= 5
+            && qFromLittleEndian<quint32>(reinterpret_cast<const uchar*>(
+                   replacement.constData())) == kSectorSignature;
+        const quint8 type = headerValid ? quint8(replacement.at(4)) : quint8(255);
+        const int required = type == 3 ? kOverlaySectorSize : kLandSectorSize;
+        if(!headerValid || (type != 0 && type != 3) || replacement.size() < required)
+        {
+            if(report)
+                report->add("terrain.overlay_payload", EValidationSeverity::Error,
+                            "Overlay command contains an invalid replacement SEC payload",
+                            m_sectors.at(index).source.memberName);
+            return false;
+        }
+        indices.append(index);
+    }
+    for(int commandIndex = 0; commandIndex < command.sectors.size(); ++commandIndex)
+    {
+        SSector& sector = m_sectors[indices.at(commandIndex)];
+        const SOverlaySectorDelta& delta = command.sectors.at(commandIndex);
+        sector.currentPayload = forward ? delta.afterPayload : delta.beforePayload;
+        if(!refreshSectorLayout(&sector, report))
+            return false;
+        sector.dirty = sector.currentPayload != sector.source.payload;
+    }
+    return true;
+}
+
 bool CTerrainEditModel::appendSectorEdits(CMprEditTransaction* transaction,
                                           CValidationReport* report) const
 {
@@ -3193,6 +3449,49 @@ bool CTerrainTileEditHistory::redo(CTerrainEditModel* model,
 }
 
 void CTerrainTileEditHistory::clear()
+{
+    m_undo.clear();
+    m_redo.clear();
+}
+
+bool COverlaySurfaceEditHistory::execute(CTerrainEditModel* model,
+                                         const SOverlaySurfaceCommand& command,
+                                         CValidationReport* report)
+{
+    if(!model || command.isEmpty() || !model->apply(command, true, report))
+        return false;
+    m_undo.append(command);
+    m_redo.clear();
+    return true;
+}
+
+bool COverlaySurfaceEditHistory::undo(CTerrainEditModel* model,
+                                      CValidationReport* report)
+{
+    if(!model || m_undo.isEmpty())
+        return false;
+    const SOverlaySurfaceCommand command = m_undo.back();
+    if(!model->apply(command, false, report))
+        return false;
+    m_undo.removeLast();
+    m_redo.append(command);
+    return true;
+}
+
+bool COverlaySurfaceEditHistory::redo(CTerrainEditModel* model,
+                                      CValidationReport* report)
+{
+    if(!model || m_redo.isEmpty())
+        return false;
+    const SOverlaySurfaceCommand command = m_redo.back();
+    if(!model->apply(command, true, report))
+        return false;
+    m_redo.removeLast();
+    m_undo.append(command);
+    return true;
+}
+
+void COverlaySurfaceEditHistory::clear()
 {
     m_undo.clear();
     m_redo.clear();

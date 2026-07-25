@@ -367,6 +367,11 @@ must not independently change its shaders or animation policy.
   from the embedded map name.
 - [x] Patch only edited sector/overlay payloads and derive affected lengths and
   metadata from emitted content.
+- [x] Prove append-only relocation for a length-changing MP/SEC replacement:
+  preserve the complete original data area, append aligned replacement bytes,
+  copy the original table/name/trailer bytes, patch only the edited member's
+  size/offset and the header table offset, then freshly reopen and validate
+  untouched payloads and immutable metadata.
 - [x] Stage, freshly reopen, validate, back up, and atomically replace every
   changed MPR.
 - [x] Add deterministic MPR/SEC semantic diff and untouched-member equality
@@ -459,6 +464,15 @@ land vertices, choose existing atlas tiles, and edit typed MPR material values.
 No operation may normalize inactive sentinels, unknown records, or untouched
 sector bytes. Creation/removal must pass the same staged reopen, locality,
 semantic-diff, backup, and atomic-save contract as land edits.
+
+The backend activation/deactivation transaction is now implemented. A land-only
+SEC upgrades deterministically to the native overlay layout only when the first
+cell is activated: land vertices and tiles remain byte-identical, overlay
+vertices start as an exact land-height copy, inactive material entries use the
+verified `-1` sentinel, and SEC trailing bytes are retained. Deactivation
+changes only that material sentinel and retains inactive tile/vertex bytes.
+Both directions are provenance-checked and undo back to the exact original SEC.
+Viewport tools, overlay-only sculpting, and typed material editing remain open.
 
 ## Landscape safety and game validation
 

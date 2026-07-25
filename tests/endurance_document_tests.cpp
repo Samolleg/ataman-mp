@@ -155,7 +155,7 @@ QByteArray syntheticOverlaySector()
     return bytes;
 }
 
-QByteArray syntheticMpr()
+QByteArray syntheticMpr(const QByteArray& sectorPayload = syntheticOverlaySector())
 {
     struct Member
     {
@@ -167,7 +167,7 @@ QByteArray syntheticMpr()
     QVector<Member> members;
     members.append({QByteArray("unknown.bin"), QByteArray("opaque-unknown-payload"), 0x10203040, 0});
     members.append({QByteArray("CaveSet.MP"), syntheticMp(), 0x50607080, 0});
-    members.append({QByteArray("CaveSet000000.SEC"), syntheticOverlaySector(), 0x90A0B0C0, 0});
+    members.append({QByteArray("CaveSet000000.SEC"), sectorPayload, 0x90A0B0C0, 0});
 
     QByteArray bytes(16, '\0');
     for(int index = 0; index < members.size(); ++index)
@@ -307,10 +307,11 @@ private slots:
     void mprSectorPatchIsProvenanceCheckedAndLocal();
     void mprMaxZPatchIsProvenanceCheckedAndLocal();
     void mprVerticalScaleTransactionReopensWithDerivedNormals();
-    void mprLengthChangingAndStaleTransactionsFailClosed();
+    void mprLengthChangingTransactionsRelocateAndStaleFailClosed();
     void failedStagedMprSaveLeavesNoDestination();
     void stagedMprTransactionProvesExactSemanticScopeWithoutDestination();
     void mprSaveCoordinatorBacksUpAndAtomicallyCommits();
+    void mprSaveCoordinatorCommitsLengthChangingOverlay();
     void mprSaveCoordinatorReplacesSourceAndRebasesTerrain();
     void mprSaveCoordinatorRejectsSourceRace();
     void mprSaveCoordinatorFailuresLeaveDestinationUntouched();
@@ -329,6 +330,7 @@ private slots:
     void zone1NamespaceTemplateSeparatesLandOverlayAndVariants();
     void zone1NamespaceTemplateMatchesPrivateFixture();
     void terrainHeightTransactionReopensAndPreservesOverlay();
+    void overlayActivationDeactivationIsLosslessAndUndoable();
     void conflictingTerrainSeamIsPreservedAndNotEditable();
     void malformedMprTableIsRejected();
     void stagedMobIsReopenedWithoutCreatingDestination();
@@ -1409,20 +1411,31 @@ void EnduranceDocumentTests::mprVerticalScaleTransactionReopensWithDerivedNormal
         }));
 }
 
-void EnduranceDocumentTests::mprLengthChangingAndStaleTransactionsFailClosed()
+void EnduranceDocumentTests::mprLengthChangingTransactionsRelocateAndStaleFailClosed()
 {
     CMprDocument document;
     CValidationReport loadReport;
     QVERIFY(document.loadBytes(syntheticMpr(), "synthetic.mpr", &loadReport));
     const SMprArchiveMember sector = document.members().at(2);
 
-    CMprEditTransaction lengthChange("unproven overlay structure change");
+    CMprEditTransaction lengthChange("proven append-only overlay structure change");
     lengthChange.replaceMemberPayload(sector.name, sector.sha256, sector.payload + QByteArray("x"));
-    QByteArray output("must be cleared");
+    QByteArray output;
     CValidationReport lengthReport;
-    QVERIFY(!document.applyTransaction(lengthChange, &output, &lengthReport));
-    QVERIFY(output.isEmpty());
-    QVERIFY(lengthReport.hasErrors());
+    QVERIFY2(document.applyTransaction(lengthChange, &output, &lengthReport),
+             qPrintable(lengthReport.toText()));
+    CMprDocument relocated;
+    CValidationReport relocatedReport;
+    QVERIFY2(relocated.loadBytes(output, "relocated.mpr", &relocatedReport),
+             qPrintable(relocatedReport.toText()));
+    QCOMPARE(relocated.memberPayload(sector.name), sector.payload + QByteArray("x"));
+    QCOMPARE(relocated.memberPayload("unknown.bin"), document.memberPayload("unknown.bin"));
+    QCOMPARE(relocated.memberPayload("caveset.mp"), document.memberPayload("caveset.mp"));
+    QCOMPARE(relocated.members().at(2).nextIndex, sector.nextIndex);
+    QCOMPARE(relocated.members().at(2).lastWriteTime, sector.lastWriteTime);
+    QCOMPARE(relocated.members().at(2).encodedName, sector.encodedName);
+    QVERIFY(relocated.members().at(2).dataOffset != sector.dataOffset);
+    QVERIFY(output.size() > document.originalBytes().size());
 
     CMprEditTransaction stale("stale edit");
     stale.replaceMemberPayload(sector.name, QByteArray(64, '0'), sector.payload);
@@ -1532,6 +1545,59 @@ void EnduranceDocumentTests::mprSaveCoordinatorBacksUpAndAtomicallyCommits()
     QCOMPARE(QString::fromLatin1(QCryptographicHash::hash(
                  committed, QCryptographicHash::Sha256).toHex()),
              result.candidateSha256);
+}
+
+void EnduranceDocumentTests::mprSaveCoordinatorCommitsLengthChangingOverlay()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QByteArray original = syntheticMpr(syntheticLandSector(900));
+    const QString sourcePath = dir.filePath("source.mpr");
+    const QString destinationPath = dir.filePath("destination.mpr");
+    for(const QString& path : {sourcePath, destinationPath})
+    {
+        QFile file(path);
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        QCOMPARE(file.write(original), qint64(original.size()));
+    }
+    CMprDocument baseline;
+    CValidationReport report;
+    QVERIFY2(baseline.load(QFileInfo(sourcePath), &report), qPrintable(report.toText()));
+    CTerrainEditModel terrain;
+    QVERIFY(terrain.load(baseline));
+    STerrainTileBrush point;
+    point.centerX = 4.0f;
+    point.centerY = 5.0f;
+    point.radius = 0.0f;
+    const SOverlaySurfaceCommand activation = terrain.makeOverlayActivation(
+        point, 1, 0, 1, 0, &report);
+    QVERIFY2(!activation.isEmpty(), qPrintable(report.toText()));
+    QVERIFY(terrain.apply(activation, true, &report));
+    CMprEditTransaction transaction("commit structural overlay activation");
+    QVERIFY(terrain.appendSectorEdits(&transaction, &report));
+
+    SMprSaveCommitRequest request;
+    request.source = QFileInfo(sourcePath);
+    request.destination = QFileInfo(destinationPath);
+    request.backupRootOverride = dir.filePath("backups");
+    const SMprSaveCommitResult result =
+        commitStagedMprTransaction(baseline, transaction, request);
+    QVERIFY2(result.success, qPrintable(result.phase + ": " + result.error));
+    QCOMPARE(result.changedMembers,
+             QStringList({QStringLiteral("CaveSet000000.SEC")}));
+    QFile backup(result.backupPath);
+    QVERIFY(backup.open(QIODevice::ReadOnly));
+    QCOMPARE(backup.readAll(), original);
+    CMprDocument reopened;
+    CValidationReport reopenReport;
+    QVERIFY2(reopened.load(QFileInfo(destinationPath), &reopenReport),
+             qPrintable(reopenReport.toText()));
+    QCOMPARE(reopened.sectors().front().type, quint8(3));
+    CTerrainEditModel rebound;
+    QVERIFY(rebound.load(reopened));
+    bool available = false;
+    QCOMPARE(rebound.overlayMaterialIndex(4, 5, &available), qint16(1));
+    QVERIFY(available);
 }
 
 void EnduranceDocumentTests::mprSaveCoordinatorReplacesSourceAndRebasesTerrain()
@@ -4035,6 +4101,98 @@ void EnduranceDocumentTests::terrainHeightTransactionReopensAndPreservesOverlay(
     const CMprSemanticDiff diff = CMprSemanticDiff::compare(baseline, candidate);
     QCOMPARE(diff.entries().size(), 1);
     QCOMPARE(diff.entries().front().memberName, edit.memberName);
+}
+
+void EnduranceDocumentTests::overlayActivationDeactivationIsLosslessAndUndoable()
+{
+    QByteArray landSector = syntheticLandSector(1200);
+    landSector.append("preserved-sec-tail");
+    CMprDocument baseline;
+    CValidationReport baselineReport;
+    QVERIFY2(baseline.loadBytes(syntheticMpr(landSector),
+                                "overlay-activation-baseline.mpr", &baselineReport),
+             qPrintable(baselineReport.toText()));
+    QCOMPARE(baseline.sectors().front().type, quint8(0));
+
+    CTerrainEditModel terrain;
+    QVERIFY(terrain.load(baseline));
+    STerrainTileBrush point;
+    point.centerX = 2.0f;
+    point.centerY = 3.0f;
+    point.radius = 0.0f;
+    CValidationReport activationReport;
+    const SOverlaySurfaceCommand activation = terrain.makeOverlayActivation(
+        point, 1, 0, 1, 2, &activationReport);
+    QVERIFY2(!activation.isEmpty(), qPrintable(activationReport.toText()));
+    QCOMPARE(activation.sectors.size(), 1);
+    QCOMPARE(activation.sectors.front().beforePayload, landSector);
+    QCOMPARE(activation.sectors.front().afterPayload.size(),
+             landSector.size() + 33 * 33 * 8 + 2 * 16 * 16 * 2);
+    QVERIFY(activation.sectors.front().afterPayload.endsWith("preserved-sec-tail"));
+
+    COverlaySurfaceEditHistory history;
+    QVERIFY(history.execute(&terrain, activation));
+    bool available = false;
+    QCOMPARE(terrain.overlayMaterialIndex(2, 3, &available), qint16(1));
+    QVERIFY(available);
+    const quint16 activatedTile = terrain.packedTile(
+        2, 3, ETerrainTileLayer::Overlay, &available);
+    QVERIFY(available);
+    QCOMPARE(SMprPackedTile::decode(activatedTile).rotation, quint8(2));
+    QCOMPARE(terrain.overlayMaterialIndex(3, 3, &available), qint16(-1));
+    QVERIFY(!available);
+    QVERIFY(terrain.makeOverlayActivation(point, 1, 0, 1, 2).isEmpty());
+
+    CMprEditTransaction transaction("activate one synthetic overlay cell");
+    QVERIFY(terrain.appendSectorEdits(&transaction));
+    QByteArray candidateBytes;
+    QVERIFY(baseline.applyTransaction(transaction, &candidateBytes));
+    CMprDocument candidate;
+    CValidationReport candidateReport;
+    QVERIFY2(candidate.loadBytes(candidateBytes, "overlay-activation-candidate.mpr",
+                                 &candidateReport), qPrintable(candidateReport.toText()));
+    QCOMPARE(candidate.sectors().front().type, quint8(3));
+    QCOMPARE(candidate.memberPayload("unknown.bin"), baseline.memberPayload("unknown.bin"));
+    QCOMPARE(candidate.memberPayload("caveset.mp"), baseline.memberPayload("caveset.mp"));
+    QVERIFY(candidate.memberPayload("caveset000000.sec").endsWith("preserved-sec-tail"));
+    QTemporaryDir stagedDirectory;
+    QVERIFY(stagedDirectory.isValid());
+    const SStagedMprTransactionValidation staged = validateStagedMprTransaction(
+        baseline, transaction, QFileInfo(stagedDirectory.filePath("overlay-created.mpr")));
+    QVERIFY2(staged.success, qPrintable(staged.error));
+    QCOMPARE(staged.changedMembers, QStringList({QStringLiteral("CaveSet000000.SEC")}));
+    CTerrainEditModel reopened;
+    QVERIFY(reopened.load(candidate));
+    QCOMPARE(reopened.overlayMaterialIndex(2, 3, &available), qint16(1));
+    QVERIFY(available);
+
+    const SOverlaySurfaceCommand deactivation = terrain.makeOverlayDeactivation(point);
+    QVERIFY(!deactivation.isEmpty());
+    QVERIFY(history.execute(&terrain, deactivation));
+    QCOMPARE(terrain.overlayMaterialIndex(2, 3, &available), qint16(-1));
+    QVERIFY(!available);
+    const QByteArray activePayload = deactivation.sectors.front().beforePayload;
+    QByteArray deactivatedPayload = deactivation.sectors.front().afterPayload;
+    const int materialOffset = 5 + 2 * 33 * 33 * 8 + 2 * 16 * 16 * 2
+        + (3 * 16 + 2) * 2;
+    deactivatedPayload.replace(materialOffset, 2, activePayload.mid(materialOffset, 2));
+    QCOMPARE(deactivatedPayload, activePayload);
+
+    QVERIFY(history.undo(&terrain));
+    QCOMPARE(terrain.overlayMaterialIndex(2, 3, &available), qint16(1));
+    QVERIFY(available);
+    QVERIFY(history.undo(&terrain));
+    QCOMPARE(terrain.sectorPayload(0, 0), landSector);
+    QVERIFY(!terrain.isDirty());
+    QVERIFY(history.redo(&terrain));
+    QVERIFY(history.redo(&terrain));
+
+    SOverlaySurfaceCommand stale = activation;
+    CValidationReport staleReport;
+    const QByteArray beforeRejected = terrain.sectorPayload(0, 0);
+    QVERIFY(!terrain.apply(stale, true, &staleReport));
+    QVERIFY(staleReport.hasErrors());
+    QCOMPARE(terrain.sectorPayload(0, 0), beforeRejected);
 }
 
 void EnduranceDocumentTests::conflictingTerrainSeamIsPreservedAndNotEditable()
