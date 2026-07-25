@@ -1431,6 +1431,42 @@ bool CView::captureAiGraphPreviewBuildInput(SAiGraphPreviewBuildInput* input,
     return true;
 }
 
+bool CView::buildGeneratedAiGraphCandidate(QByteArray* data, QString* error)
+{
+    if(data)
+        data->clear();
+    if(!data)
+    {
+        if(error)
+            *error = tr("No generated AI graph output buffer was provided.");
+        return false;
+    }
+    SAiGraphPreviewBuildInput input;
+    if(!captureAiGraphPreviewBuildInput(&input, error))
+        return false;
+    const SAiGraphPreviewBuildResult result = CAiGraphPreviewBuilder::build(input);
+    if(!result.valid)
+    {
+        if(error)
+            *error = result.error;
+        return false;
+    }
+    const QByteArray candidate = result.document.serialize(error);
+    if(candidate.isEmpty())
+        return false;
+    CAiGraphDocument reopened;
+    QString reopenError;
+    if(!reopened.parse(candidate, &reopenError))
+    {
+        if(error)
+            *error = tr("Generated AI graph failed fresh validation: %1")
+                .arg(reopenError);
+        return false;
+    }
+    *data = candidate;
+    return true;
+}
+
 void CView::startAiGraphPreviewRegeneration()
 {
     if(m_aiGraphBuildWatcher && m_aiGraphBuildWatcher->isRunning())

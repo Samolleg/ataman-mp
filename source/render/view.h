@@ -110,6 +110,8 @@ public:
     void saveLandAs();
     bool buildValidatedLandscapeCandidate(QByteArray* data,
                                           CValidationReport* report = nullptr);
+    bool buildGeneratedAiGraphCandidate(QByteArray* data,
+                                        QString* error = nullptr);
     bool loadMob(QFileInfo& filePath);
     void saveMobAs();
     void saveActiveMob();

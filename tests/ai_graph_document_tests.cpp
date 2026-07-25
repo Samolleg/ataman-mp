@@ -47,7 +47,7 @@ private slots:
     void preservesNoOpBytesIncludingTrailingData();
     void rejectsMalformedDimensionsAndTruncation();
     void exposesStableLayerAndDirectionDefinitions();
-    void initializesDecodedPreviewWithoutSerializableBytes();
+    void initializesDecodedPreviewWithSerializableBytes();
     void regenerationRespectsFenceAndVerticalClearanceProfiles();
     void regenerationRejectsGameScaleTerrainCliffs();
 };
@@ -107,7 +107,7 @@ void AiGraphDocumentTests::exposesStableLayerAndDirectionDefinitions()
     QCOMPARE(CAiGraphDocument::canonicalHeight(3), 1.6);
 }
 
-void AiGraphDocumentTests::initializesDecodedPreviewWithoutSerializableBytes()
+void AiGraphDocumentTests::initializesDecodedPreviewWithSerializableBytes()
 {
     QVector<SAiGraphLayer> layers(CAiGraphDocument::LayerCount);
     for(SAiGraphLayer& layer : layers)
@@ -121,7 +121,17 @@ void AiGraphDocumentTests::initializesDecodedPreviewWithoutSerializableBytes()
     QVERIFY2(document.initializePreview(1, 1, layers, &error), qPrintable(error));
     QVERIFY(document.isValid());
     QVERIFY(document.rawBytes().isEmpty());
-    QVERIFY(document.serializeNoOp().isEmpty());
+    const QByteArray serialized = document.serialize(&error);
+    QVERIFY2(!serialized.isEmpty(), qPrintable(error));
+    QCOMPARE(serialized.size(), 8 + 152);
+    CAiGraphDocument reopened;
+    QVERIFY2(reopened.parse(serialized, &error), qPrintable(error));
+    QCOMPARE(reopened.width(), 1);
+    QCOMPARE(reopened.height(), 1);
+    QCOMPARE(reopened.weight(0, 0, 0, 0), qint16(-1));
+    QCOMPARE(reopened.packedPosition(0, 0, 0), quint8(0x33));
+    QCOMPARE(reopened.component(0, 0, 0), quint16(1));
+    QCOMPARE(reopened.serialize(&error), serialized);
 }
 
 void AiGraphDocumentTests::regenerationRespectsFenceAndVerticalClearanceProfiles()

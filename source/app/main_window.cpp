@@ -2818,30 +2818,51 @@ void MainWindow::launchCurrentMapTest()
         return;
     }
     bool allowMissingAiGraph = false;
+    QByteArray generatedAiGraphData;
     if(graphSource.missing)
     {
-        progress->hide();
-        QMessageBox graphWarning(QMessageBox::Warning,
+        if(mob->nodes().isEmpty())
+        {
+            progress->setLabelText(tr("Generating a temporary AI graph for the empty MOB..."));
+            progress->setValue(4);
+            QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+            QString generatedGraphError;
+            if(!m_pView->buildGeneratedAiGraphCandidate(
+                   &generatedAiGraphData, &generatedGraphError))
+            {
+                QMessageBox::critical(this, tr("Map test launch"),
+                    tr("The zero-object MOB has no AI graph, and Endurance could not generate a safe run-local graph:\n\n%1")
+                        .arg(generatedGraphError));
+                return;
+            }
+            ei::log(eLogInfo, QString("Generated run-local AI graph for zero-object MOB bytes:%1")
+                .arg(generatedAiGraphData.size()));
+        }
+        else
+        {
+            progress->hide();
+            QMessageBox graphWarning(QMessageBox::Warning,
             tr("AI graph not found"),
             tr("The primary MOB has no embedded AI_GRAPH and no matching %1.grp was found beside the open MPR or in the active profile Maps folders.\n\n"
                "Endurance can temporarily use the runtime's graph-generator loading exception for this owned test process. It does not generate a graph: AI navigation and graph-dependent behavior may be unavailable or unreliable. The source map will not be changed.\n\n"
                "Start anyway?")
                 .arg(landscape->filePath().completeBaseName()),
             QMessageBox::NoButton, this);
-        QPushButton* startAnyway = graphWarning.addButton(
-            tr("Start Anyway"), QMessageBox::AcceptRole);
-        graphWarning.addButton(QMessageBox::Cancel);
-        graphWarning.setDefaultButton(QMessageBox::Cancel);
-        graphWarning.exec();
-        if(graphWarning.clickedButton() != startAnyway)
-            return;
-        allowMissingAiGraph = true;
-        ei::log(eLogWarning,
-            QString("User accepted graphless %1 for MPR:%2 primary-MOB:%3")
+            QPushButton* startAnyway = graphWarning.addButton(
+                tr("Start Anyway"), QMessageBox::AcceptRole);
+            graphWarning.addButton(QMessageBox::Cancel);
+            graphWarning.setDefaultButton(QMessageBox::Cancel);
+            graphWarning.exec();
+            if(graphWarning.clickedButton() != startAnyway)
+                return;
+            allowMissingAiGraph = true;
+            ei::log(eLogWarning,
+                QString("User accepted graphless %1 for MPR:%2 primary-MOB:%3")
                 .arg(hotReloadRequested ? "hot reload" : "map test",
                      landscape->filePath().absoluteFilePath(),
                      mob->filePath().absoluteFilePath()));
-        progress->show();
+            progress->show();
+        }
     }
     QVector<SJmvSupplementalMobInput> supplementalMobs;
     for(CMob* supplemental : m_pView->mobs())
@@ -2912,6 +2933,7 @@ void MainWindow::launchCurrentMapTest()
     input.sourceMob = mob->filePath();
     input.mprData = mprData;
     input.mobData = mobData;
+    input.generatedAiGraphData = generatedAiGraphData;
     input.supplementalMobs = supplementalMobs;
     input.embeddedScript = mob->script();
     input.mapEntry = entry;

@@ -20,6 +20,20 @@ quint32 readLe32(const char* bytes)
 {
     return qFromLittleEndian<quint32>(reinterpret_cast<const uchar*>(bytes));
 }
+
+void appendLe16(QByteArray* bytes, quint16 value)
+{
+    char encoded[2];
+    qToLittleEndian<quint16>(value, reinterpret_cast<uchar*>(encoded));
+    bytes->append(encoded, sizeof(encoded));
+}
+
+void appendLe32(QByteArray* bytes, quint32 value)
+{
+    char encoded[4];
+    qToLittleEndian<quint32>(value, reinterpret_cast<uchar*>(encoded));
+    bytes->append(encoded, sizeof(encoded));
+}
 }
 
 void CAiGraphDocument::clear()
@@ -141,6 +155,51 @@ bool CAiGraphDocument::initializePreview(int width, int height,
     m_layers = layers;
     m_valid = true;
     return true;
+}
+
+QByteArray CAiGraphDocument::serialize(QString* error) const
+{
+    if(error)
+        error->clear();
+    if(!m_valid || m_width <= 0 || m_height <= 0
+       || m_layers.size() != LayerCount)
+    {
+        if(error)
+            *error = QStringLiteral("AI graph document is not serializable.");
+        return QByteArray();
+    }
+
+    const int cells = m_width * m_height;
+    QByteArray bytes;
+    bytes.reserve(int(HeaderSize + quint64(cells) * BytesPerCellAllLayers));
+    appendLe32(&bytes, quint32(m_width));
+    appendLe32(&bytes, quint32(m_height));
+    for(const SAiGraphLayer& layer : m_layers)
+    {
+        if(layer.weights.size() != cells * DirectionCount
+           || layer.packedPositions.size() != cells
+           || layer.components.size() != cells)
+        {
+            if(error)
+                *error = QStringLiteral("AI graph layer sizes are inconsistent.");
+            return QByteArray();
+        }
+        for(int y = 0; y < m_height; ++y)
+        {
+            for(int x = 0; x < m_width; ++x)
+            {
+                const int cell = y * m_width + x;
+                for(int direction = 0; direction < DirectionCount; ++direction)
+                    appendLe16(&bytes, quint16(layer.weights.at(
+                        cell * DirectionCount + direction)));
+            }
+            for(int x = 0; x < m_width; ++x)
+                bytes.append(layer.packedPositions.at(y * m_width + x));
+            for(int x = 0; x < m_width; ++x)
+                appendLe16(&bytes, layer.components.at(y * m_width + x));
+        }
+    }
+    return bytes;
 }
 
 int CAiGraphDocument::index(int x, int y) const

@@ -41,6 +41,7 @@ struct SJmvMapTestLaunchInput
     QFileInfo sourceMob;
     QByteArray mprData;
     QByteArray mobData;
+    QByteArray generatedAiGraphData;
     QVector<SJmvSupplementalMobInput> supplementalMobs;
     QString embeddedScript;
     SMapCatalogEntry mapEntry;
