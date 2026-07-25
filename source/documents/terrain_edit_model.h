@@ -21,6 +21,7 @@ struct STerrainSectorSource
     int sectorX{-1};
     int sectorY{-1};
     quint8 type{0};
+    quint64 overlayVertexOffset{0};
     quint64 landTileOffset{0};
     quint64 overlayTileOffset{0};
     quint64 overlayMaterialOffset{0};
@@ -322,6 +323,14 @@ public:
     quint16 packedTile(int globalX, int globalY, ETerrainTileLayer layer,
                        bool* available = nullptr) const;
     qint32 tileType(quint16 packed, bool* found = nullptr) const;
+    // Source-compatible half-metre navigation samples. Each 1 m terrain quad
+    // contributes four samples using the three adjacent SEC vertices; this is
+    // deliberately not ordinary bilinear filtering.
+    float navigationHeightSample(int aiTileX, int aiTileY,
+                                 ETerrainTileLayer layer,
+                                 bool* available = nullptr) const;
+    qint16 overlayMaterialIndex(int globalTileX, int globalTileY,
+                                bool* available = nullptr) const;
 
     STerrainHeightCommand makeRaiseLower(const STerrainBrush& brush,
                                          float rawHeightDelta) const;
