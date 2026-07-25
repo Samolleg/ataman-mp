@@ -5,7 +5,16 @@ work is ordered from the newest planned minor line to the oldest completed one.
 An item is checked only after its implementation has landed and received the
 stated validation. Completed code should carry a commit, test, or release link.
 
-Current development line: `0.3.0-alpha.4` focused closed testing. This is a
+Current development line: `0.3.0-alpha.13` focused closed testing. Alpha.11
+was withdrawn after its temporary-resource bootstrap passed the fixed world
+object's first word as the object pointer and crashed both normal and synthetic
+Test Current Map launches. Alpha.12 corrects the pointer contract and adds an
+uncompressed 8888 placeholder MMP with explicit runtime-compatible masks. Its
+owned-process runtime smoke test must reach `GameplayReady`, remain stable for
+15 seconds, and produce no native dump for both Zone 1 and the generated
+empty-control fixture before packaging. Alpha.13 gates Play from Here on the
+verified JMV autorun-MOB lifecycle and makes keyboard camera movement
+frame-rate independent. This is a
 version reclassification of the feature set that outgrew the `0.2.1` label,
 not a serializer or compatibility reset. The remaining 0.3 release work is the
 final runtime/corpus matrix, focused confirmation of the new live-clock and
@@ -211,10 +220,14 @@ lossless transactions because the graph is not owned by the MPR.
   records whether the edited terrain actually causes a navigation defect.
 - [ ] Track terrain/object edits as navigation-dirty regions and retain the
   oversized-door runtime-regeneration convention as an explicit diagnostic.
-- [ ] Replace Play from Here's deliberately conservative geometric clearance
-  check with AI-graph-backed walkability and nearest-valid-position lookup.
-  The current check may reject legitimate standable mesh objects and platforms;
-  do not loosen it with unverified heuristics before graph support is available.
+- [ ] Replace Play from Here's deliberately conservative terrain clearance
+  probe with the active regenerated AI graph as the authoritative walkability
+  and nearest-valid-position source. Automatic graph regeneration should make
+  that graph available for every loaded MPR; terrain projection remains useful
+  only for marker rendering and final Z display, not for deciding whether the
+  player can stand there. The current probe may reject legitimate standable mesh
+  objects and platforms; do not loosen it with unverified heuristics before the
+  graph-backed route is available.
 
 ## Zone 6 source and state research
 
@@ -460,13 +473,20 @@ remain unchanged.
 - [x] Preserve collection identity across sessions, offer an immediate safe
   reload after editing the active collection, and keep explicitly unmapped
   collections free of stale/inferred map.txt entrances.
-- [x] Treat unmapped single-MPR/single-MOB collections as process-local
-  synthetic maps for JMV testing: use the loaded MPR dimensions and Play from
-  Here entrance without inheriting a borrowed zone's minimap, travel zones, or
-  runtime coordinates. The installed map table remains unchanged.
-- [x] Replace synthetic-map bootstrap heap discovery with the fingerprinted
-  runtime's byte-guarded map-table lookup. The prior game-thread heap locks
-  could stall an unmapped launch at `MainMenuReady` before New Game bootstrap.
+- [x] Treat unmapped single-MPR/single-MOB collections as run-local synthetic
+  maps for JMV testing: append one random map record to a losslessly staged
+  private `texts.res`, redirect only that process's archive reads, and use the
+  loaded MPR dimensions and Play from Here entrance without inheriting a
+  borrowed zone's minimap or travel zones. The installed map table remains
+  byte-identical.
+- [x] Remove unsafe renaming/rebuilding of an already constructed runtime map
+  record. The bridge now looks up the preloaded private record through the
+  fingerprinted byte-guarded API and updates only its numeric dimensions and
+  entrance rectangle. This supersedes both the rejected heap scan and the
+  delayed allocator crash reproduced by `0.3.0-alpha.5`.
+- `0.3.0-alpha.9` keeps a synthetic map's logical MPR/MOB identity stable when
+  hot-reload generation files are named `map.mpr`/`map.mob`, and replaces the
+  borrowed player-interface minimap with a run-local neutral checker resource.
 - [x] Show collection display names from their editable `name` field, preserve
   new-collection drafts when Save As is cancelled, and offer to open both new
   and duplicated collections after saving.
@@ -1504,3 +1524,14 @@ an operation safely.
 - If testing exposes a regression, reopen the item and record the concrete case.
 
 </details>
+- [ ] Runtime-confirm the complete synthetic `game` identity used by unmapped
+  MPR/MOB testing. The alpha.7 generated-graph control still crashed after
+  `GameplayReady`, disproving the graph-only explanation. Alpha.8 now supplies
+  the loaded MPR dimensions, safe built-in minimap/objectives placeholders,
+  and one private deploy entrance because the normal mission UI and player
+  bootstrap consume those fields. The installed map table and source files
+  remain unchanged.
+- [ ] Determine the native Vulcansmoke (8197 / `0x2005`) crash mechanism with
+  the isolated exact-name `Vulkan.mmp` run-local alias control and dump/runtime
+  analysis. Keep the editor's Critical validation notice in place meanwhile;
+  do not install or treat a borrowed atlas as visual-fidelity evidence.

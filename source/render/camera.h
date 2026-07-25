@@ -2,6 +2,7 @@
 #define CAMERA_H
 
 #include <QMatrix4x4>
+#include <QElapsedTimer>
 #include "utils.h"
 
 class CKeyManager;
@@ -33,7 +34,7 @@ public:
     void strafeDownward(bool bShift = false);
     void enlarge(const bool bZoom = true);
     void reset();
-    float step() const {return m_step * m_speedMultiplier;}
+    float step() const {return m_step * m_speedMultiplier * m_frameMovementScale;}
     float speedMultiplier() const {return m_speedMultiplier;}
     void setSpeedMultiplier(float multiplier);
     // Legacy serialized orbit-controller state. `pos` is NOT guaranteed to be
@@ -60,6 +61,8 @@ private:
     float m_zRot;
     float m_step;
     float m_speedMultiplier;
+    float m_frameMovementScale;
+    QElapsedTimer m_updateTimer;
     CKeyManager* m_keyManager;
     CSettings* m_pSettings;
 };

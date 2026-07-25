@@ -46,6 +46,30 @@ class ParticleBinaryReportTests(unittest.TestCase):
                          "42616E7368656500")
         self.assertEqual(fixture["sites"]["acidray_texture_name"]["bytes"],
                          "4163696452617900")
+        self.assertEqual(fixture["sites"]["changehero_texture_name"]["bytes"],
+                         "4368616E67654865726F00")
+        self.assertEqual(fixture["sites"]["rainsnow_texture_name"]["bytes"],
+                         "5261696E536E6F7700")
+        self.assertEqual(fixture["sites"]["firearrowsmoke_texture_name"]["bytes"],
+                         "466972654172726F77536D6F6B6500")
+        self.assertEqual(fixture["sites"]["stench_texture_name"]["bytes"],
+                         "5374656E636800")
+        self.assertEqual(fixture["sites"]["link_texture_name"]["bytes"],
+                         "4C696E6B00")
+        self.assertEqual(fixture["sites"]["protectiona_texture_name"]["bytes"],
+                         "50726F74656374696F6E4100")
+        self.assertEqual(fixture["sites"]["protectione_texture_name"]["bytes"],
+                         "50726F74656374696F6E4500")
+        self.assertEqual(fixture["sites"]["protectionf_texture_name"]["bytes"],
+                         "50726F74656374696F6E4600")
+        self.assertEqual(fixture["sites"]["antimagic_texture_name"]["bytes"],
+                         "416E74694D6167696300")
+        self.assertEqual(fixture["sites"]["stun_texture_name"]["bytes"],
+                         "5374756E00")
+        self.assertEqual(fixture["sites"]["clayring_texture_name"]["bytes"],
+                         "436C617952696E6700")
+        self.assertEqual(fixture["sites"]["teleport_texture_name"]["bytes"],
+                         "54656C65706F727400")
         self.assertEqual(fixture["constants"]["tornado_height_float"]["value"], 12.0)
         self.assertAlmostEqual(
             fixture["constants"]["tornado_speed_factor_float"]["value"], 0.2)
@@ -63,6 +87,363 @@ class ParticleBinaryReportTests(unittest.TestCase):
         self.assertEqual(
             fixture["ranges"]["bansheecasting_create_callback"]["start_va"],
             "0x00489BE0")
+        self.assertEqual(fixture["ranges"]["mushroom_create_callback"]["start_va"],
+                         "0x004889D0")
+        self.assertEqual(fixture["ranges"]["blood1_create_callback"]["start_va"],
+                         "0x0048EEA0")
+        self.assertEqual(fixture["ranges"]["a4blood_factory_branch"]["start_va"],
+                         "0x00486E7F")
+        self.assertEqual(fixture["ranges"]["a4blood_create_callback"]["start_va"],
+                         "0x0048F3B0")
+        self.assertEqual(fixture["ranges"]["a4blood_update_callback"]["start_va"],
+                         "0x0048F670")
+        self.assertEqual(
+            fixture["ranges"]["a4blood_local_source_callback"]["start_va"],
+            "0x0048F6F0",
+        )
+        self.assertAlmostEqual(
+            fixture["constants"]["a4blood_particle_scale_random_multiplier"]["value"],
+            0.1 / 4294967296.0,
+        )
+        self.assertAlmostEqual(
+            fixture["constants"]["a4blood_source_radius_random_multiplier"]["value"],
+            0.2 / 4294967296.0,
+        )
+        self.assertEqual(fixture["ranges"]["firewall_create_callback"]["start_va"],
+                         "0x0048ED60")
+        self.assertEqual(fixture["ranges"]["firearrow_create_callback"]["start_va"],
+                         "0x0048CBA0")
+        self.assertEqual(fixture["ranges"]["acidray_create_callback"]["start_va"],
+                         "0x0048D050")
+        self.assertEqual(fixture["ranges"]["bluegas_create_callback"]["start_va"],
+                         "0x0048D420")
+        self.assertEqual(fixture["ranges"]["link_create_callback"]["start_va"],
+                         "0x0048D8D0")
+        self.assertEqual(fixture["ranges"]["sphere_create_callback"]["start_va"],
+                         "0x0048E070")
+        self.assertEqual(
+            fixture["constants"]["sphere_antimagic_attempt_multiplier"]["value"],
+            24.0,
+        )
+        self.assertEqual(
+            fixture["constants"]["sphere_antimagic_rare_size_base"]["value"],
+            2.5,
+        )
+        self.assertEqual(fixture["ranges"]["modifier_create_callback"]["start_va"],
+                         "0x00490130")
+        self.assertEqual(fixture["ranges"]["modifier_update_callback"]["start_va"],
+                         "0x00490990")
+        self.assertEqual(
+            fixture["ranges"]["modifier_local_source_callback"]["start_va"],
+            "0x00490B00",
+        )
+        self.assertAlmostEqual(
+            fixture["constants"]["modifier_positive_direction_factor"]["value"],
+            1.0 / 1.4,
+        )
+        self.assertAlmostEqual(
+            fixture["constants"]["modifier_negative_direction_factor"]["value"],
+            1.4,
+        )
+        self.assertEqual(
+            fixture["sites"]["modifier_birth_alpha_table"]["bytes"],
+            "00000000200000004000000080000000FF000000CF0000009F0000006F0000003F0000000F00000000000000",
+        )
+        anti_table = fixture["sites"]["sphere_antimagic_size_table"]
+        self.assertEqual(anti_table["bytes"],
+                         "0AD7233C8FC2753C0AD7A33C8FC2F53C8FC2753C0AD7233C")
+        self.assertEqual(fixture["ranges"]["clayring_create_callback"]["start_va"],
+                         "0x0048F7F0")
+        self.assertEqual(fixture["ranges"]["teleport_create_callback"]["start_va"],
+                         "0x0048FDB0")
+        self.assertEqual(fixture["ranges"]["zoneexit_create_callback"]["start_va"],
+                         "0x00492D30")
+        self.assertEqual(fixture["ranges"]["path_create_callback"]["start_va"],
+                         "0x00492FC0")
+        self.assertEqual(
+            fixture["ranges"]["pathdestination_create_callback"]["start_va"],
+            "0x00493300",
+        )
+        self.assertEqual(fixture["ranges"]["moshka_create_callback"]["start_va"],
+                         "0x00493560")
+        self.assertEqual(fixture["sites"]["zoneexit_texture_name"]["bytes"],
+                         "5A6F6E654578697400")
+        self.assertEqual(fixture["sites"]["shapechange_texture_name"]["bytes"],
+                         "53686170654368616E676500")
+        self.assertEqual(fixture["sites"]["bag_texture_name"]["bytes"],
+                         "42616700")
+        self.assertEqual(fixture["sites"]["casting6_texture_name"]["bytes"],
+                         "43617374696E673600")
+        self.assertEqual(fixture["sites"]["casting2_texture_name"]["bytes"],
+                         "43617374696E673200")
+        self.assertEqual(fixture["sites"]["casting1_texture_name"]["bytes"],
+                         "43617374696E673100")
+        self.assertEqual(fixture["sites"]["casting3_texture_name"]["bytes"],
+                         "43617374696E673300")
+        self.assertEqual(fixture["sites"]["casting4_texture_name"]["bytes"],
+                         "43617374696E673400")
+        self.assertEqual(fixture["sites"]["casting7_texture_name"]["bytes"],
+                         "43617374696E673700")
+        self.assertEqual(fixture["sites"]["casting8_texture_name"]["bytes"],
+                         "43617374696E673800")
+        self.assertEqual(
+            fixture["ranges"]["casting_star_round_create_callback"]["start_va"],
+            "0x00490C10",
+        )
+        self.assertEqual(
+            fixture["ranges"]["casting_failed_create_callback"]["start_va"],
+            "0x00491420",
+        )
+        self.assertEqual(
+            fixture["ranges"]["casting_gather_create_callback"]["start_va"],
+            "0x004918E0",
+        )
+        self.assertEqual(
+            fixture["sites"]["casting_star_round_alpha_table"]["bytes"],
+            "00000000200000004000000070000000A0000000D0000000FF000000",
+        )
+        self.assertEqual(
+            fixture["sites"]["casting_failed_alpha_table"]["bytes"],
+            "FF000000" * 6 + "CF0000009F0000006F0000003F0000000F00000000000000",
+        )
+        self.assertEqual(
+            fixture["sites"]["casting_gather_fade_table"]["bytes"],
+            "00000000200000004000000070000000A0000000D0000000FF000000",
+        )
+        self.assertEqual(fixture["ranges"]["portalstar_create_callback"]["start_va"],
+                         "0x00493D10")
+        self.assertEqual(fixture["ranges"]["portal_create_callback"]["start_va"],
+                         "0x00494470")
+        self.assertEqual(fixture["ranges"]["cylinder_create_callback"]["start_va"],
+                         "0x00493DE0")
+        self.assertEqual(len(fixture["sites"]["cylinder_alpha_table"]["bytes"]),
+                         256)
+        self.assertAlmostEqual(fixture["constants"]["portal_radius"]["value"], 2.5)
+        self.assertAlmostEqual(fixture["constants"]["portal_height"]["value"], 8.0)
+        self.assertAlmostEqual(
+            fixture["constants"]["cylinder_circle_radius_factor"]["value"], 0.7)
+        self.assertAlmostEqual(
+            fixture["constants"]["cylinder_vertical_growth"]["value"], 1.25)
+        self.assertEqual(fixture["ranges"]["star_create_callback"]["start_va"],
+                         "0x00494950")
+        self.assertEqual(fixture["ranges"]["sparks_create_callback"]["start_va"],
+                         "0x00494A10")
+        self.assertEqual(
+            fixture["ranges"]["visionstar_create_callback"]["start_va"],
+            "0x00494E00")
+        self.assertEqual(
+            fixture["sites"]["sparks_alpha_table"]["bytes"],
+            "000000004000000080000000FF000000FF000000FF000000FF000000FF000000",
+        )
+        self.assertAlmostEqual(fixture["constants"]["star_scale_decay"]["value"],
+                               0.9)
+        self.assertAlmostEqual(
+            fixture["constants"]["sparks_source_flash_size_factor"]["value"],
+            0.55,
+        )
+        self.assertAlmostEqual(
+            fixture["constants"]["visionstar_orbit_step"]["value"], 0.07)
+        self.assertAlmostEqual(
+            fixture["constants"]["visionstar_smoothing_decay"]["value"], 0.95)
+        self.assertEqual(
+            fixture["ranges"]["regeneration_create_callback"]["start_va"],
+            "0x004950B0")
+        self.assertEqual(
+            fixture["ranges"]["silence_create_callback"]["start_va"],
+            "0x00495320")
+        self.assertEqual(
+            fixture["ranges"]["feeblemind_create_callback"]["start_va"],
+            "0x004957E0")
+        self.assertEqual(
+            fixture["ranges"]["feetcloud_create_callback"]["start_va"],
+            "0x00495A30")
+        self.assertEqual(fixture["sites"]["visionfog_texture_name"]["bytes"],
+                         "566973696F6E466F6700")
+        self.assertEqual(
+            fixture["sites"]["feeblemind_alpha_table"]["bytes"],
+            "00000000200000004000000080000000" + "FF000000" * 17)
+        self.assertEqual(
+            fixture["sites"]["feetcloud_alpha_table"]["bytes"],
+            "00000000200000004000000080000000" + "FF000000" * 7)
+        self.assertAlmostEqual(
+            fixture["constants"]["regeneration_carrier_radius_factor"]["value"],
+            0.65)
+        self.assertAlmostEqual(
+            fixture["constants"]["silence_anchor_size_factor"]["value"], 0.22)
+        self.assertAlmostEqual(
+            fixture["constants"]["feeblemind_orbit_radius"]["value"], 0.05)
+        self.assertAlmostEqual(
+            fixture["constants"]["feeblemind_size_growth"]["value"], 1.04)
+        self.assertAlmostEqual(
+            fixture["constants"]["feetcloud_blend_decay"]["value"], 0.98)
+        self.assertEqual(
+            fixture["ranges"]["ballofstars_create_callback"]["start_va"],
+            "0x00495FB0")
+        self.assertEqual(
+            fixture["ranges"]["cursestars_create_callback"]["start_va"],
+            "0x00496270")
+        self.assertEqual(
+            fixture["ranges"]["starttrans_create_callback"]["start_va"],
+            "0x004965E0")
+        self.assertEqual(fixture["sites"]["healing_texture_name"]["bytes"],
+                         "4865616C696E6700")
+        self.assertEqual(
+            fixture["sites"]["rikarrowsmoke_texture_name"]["bytes"],
+            "52696B4172726F77536D6F6B6500")
+        self.assertEqual(
+            fixture["sites"]["cursestars_alpha_table"]["bytes"],
+            "00000000200000004000000080000000" + "FF000000" * 17)
+        self.assertEqual(
+            fixture["sites"]["starttrans_alpha_table"]["bytes"],
+            "0000000050000000B0000000" + "FF000000" * 11
+            + "8000000040000000")
+        self.assertAlmostEqual(
+            fixture["constants"]["ballofstars_offset_factor"]["value"], 0.8)
+        self.assertAlmostEqual(
+            fixture["constants"]["cursestars_initial_size_factor"]["value"],
+            0.04)
+        self.assertAlmostEqual(
+            fixture["constants"]["starttrans_source_radius_step"]["value"],
+            0.02)
+        self.assertEqual(
+            fixture["ranges"]["fireball_create_callback"]["start_va"],
+            "0x0048C800")
+        self.assertEqual(
+            fixture["ranges"]["fireblast_create_callback"]["start_va"],
+            "0x0048C090")
+        self.assertEqual(
+            fixture["ranges"]["healing_create_callback"]["start_va"],
+            "0x0048B630")
+        self.assertEqual(
+            fixture["ranges"]["poisonfog_create_callback"]["start_va"],
+            "0x0048B080")
+        self.assertEqual(
+            fixture["ranges"]["geyser_create_callback"]["start_va"],
+            "0x0048A8F0")
+        self.assertEqual(fixture["sites"]["fireworks_texture_name"]["bytes"],
+                         "46697265776F726B7300")
+        self.assertEqual(fixture["sites"]["poisoncloud_texture_name"]["bytes"],
+                         "506F69736F6E436C6F756400")
+        self.assertEqual(fixture["sites"]["vulkan_texture_name"]["bytes"],
+                         "56756C6B616E00")
+        self.assertEqual(fixture["sites"]["explosion_texture_name"]["bytes"],
+                         "4578706C6F73696F6E00")
+        self.assertEqual(
+            fixture["sites"]["fireblast_alpha_table"]["bytes"],
+            "FF000000FF000000CF000000AF00000080000000800000008000000080000000"
+            "80000000AF000000CF000000C000000080000000300000000000000000000000")
+        self.assertAlmostEqual(
+            fixture["constants"]["fireball_head_size_factor"]["value"], 1.2)
+        self.assertAlmostEqual(
+            fixture["constants"]["fireblast_flash_size_factor"]["value"], 2.3)
+        self.assertEqual(
+            fixture["constants"]["poisonfog_alpha_scale"]["value"], 160.0)
+        self.assertEqual(
+            fixture["constants"]["healing_source_count_scale"]["value"], 6.0)
+        self.assertAlmostEqual(
+            fixture["constants"]["geyser_gravity_factor"]["value"], 0.06)
+        self.assertIn(
+            "C7422C643B7F3F",
+            fixture["sites"]["curseholder_tornado_reuse_and_controls"]["bytes"])
+        self.assertIn(
+            "81FE02200000",
+            fixture["sites"]["transform_mushroom_reuse_and_texture_selection"]["bytes"])
+        self.assertEqual(len(fixture["sites"]["zoneexit_alpha_table"]["bytes"]),
+                         128)
+        self.assertEqual(len(fixture["sites"]["path_brightness_table"]["bytes"]),
+                         128)
+        self.assertEqual(
+            fixture["sites"]["pathdestination_alpha_table"]["bytes"],
+            "000000004000000090000000FF000000FF000000FF000000FF000000FF000000"
+            "FF000000FF000000FF000000FF000000FF000000FF0000008000000040000000",
+        )
+        self.assertEqual(len(fixture["sites"]["moshka_color_table"]["bytes"]),
+                         288)
+        self.assertEqual(len(fixture["sites"]["moshka_alpha_table"]["bytes"]),
+                         128)
+        self.assertAlmostEqual(fixture["constants"]["zoneexit_size_base"]["value"],
+                               1.9)
+        self.assertAlmostEqual(
+            fixture["constants"]["pathdestination_offset_growth"]["value"], 1.05)
+        self.assertAlmostEqual(
+            fixture["constants"]["moshka_phase_size_decay"]["value"], 0.93)
+        self.assertIn(
+            "C783E0010000D0894800C783E4010000B08D4800",
+            fixture["sites"]["mushroom_callback_selection"]["bytes"],
+        )
+        self.assertIn(
+            "C783E0010000A0EE4800C783E401000000F34800",
+            fixture["sites"]["blood1_callback_selection"]["bytes"],
+        )
+        self.assertIn(
+            "C783E001000060ED4800C783E801000020EE4800",
+            fixture["sites"]["firewall_callback_selection"]["bytes"],
+        )
+        self.assertEqual(
+            fixture["sites"]["blood1_alpha_table"]["bytes"],
+            "000000004000000080000000C0000000FF000000FF000000FF000000",
+        )
+        self.assertIn(
+            "C783E0010000A0CB4800C783E4010000D0CE4800",
+            fixture["sites"]["firearrow_callback_selection"]["bytes"],
+        )
+        self.assertIn(
+            "C783E001000050D04800C783E401000030D34800",
+            fixture["sites"]["acidray_callback_selection"]["bytes"],
+        )
+        self.assertIn(
+            "C783E001000020D44800C783E4010000F0D74800",
+            fixture["sites"]["bluegas_callback_selection"]["bytes"],
+        )
+        self.assertIn(
+            "C783E0010000D0D84800C783E401000030DE4800C783E801000040E04800",
+            fixture["sites"]["link_callback_selection"]["bytes"],
+        )
+        self.assertIn(
+            "C783E001000070E04800894208C783E4010000C0E74800",
+            fixture["sites"]["sphere_callback_selection"]["bytes"],
+        )
+        self.assertAlmostEqual(
+            fixture["constants"]["sphere_carrier_radius_multiplier"]["value"], 1.2)
+        self.assertAlmostEqual(
+            fixture["constants"]["sphere_surface_radius_multiplier"]["value"], 0.65)
+        self.assertAlmostEqual(
+            fixture["constants"]["sphere_acid_size_multiplier"]["value"], 1.6)
+        self.assertEqual(len(fixture["sites"]["sphere_size_table"]["bytes"]), 128)
+        self.assertIn(
+            "C783E0010000F0F74800C783E4010000B0FA4800C783E8010000E0FB4800",
+            fixture["sites"]["clayring_callback_selection"]["bytes"],
+        )
+        self.assertIn(
+            "C783E0010000B0FD4800C783E401000060004900C783E801000010014900",
+            fixture["sites"]["teleport_callback_selection"]["bytes"],
+        )
+        self.assertEqual(len(fixture["sites"]["clayring_radius_table"]["bytes"]), 128)
+        self.assertEqual(
+            fixture["sites"]["clayring_alpha_table"]["bytes"],
+            "0000000080000000FF000000FF000000FF000000FF000000FF000000FF000000"
+            "FF000000A0000000500000002000000000000000000000000000000000000000",
+        )
+        self.assertAlmostEqual(
+            fixture["constants"]["clayring_source_angle_step"]["value"], 0.62832)
+        self.assertAlmostEqual(
+            fixture["constants"]["clayring_direction_sine"]["value"], 0.31225)
+        self.assertAlmostEqual(
+            fixture["constants"]["teleport_positive_vertical_multiplier"]["value"],
+            0.15,
+        )
+        self.assertEqual(
+            fixture["constants"]["teleport_negative_vertical_multiplier"]["value"],
+            2.25,
+        )
+        self.assertAlmostEqual(
+            fixture["constants"]["firearrow_head_size_float"]["value"], 0.4)
+        self.assertAlmostEqual(
+            fixture["constants"]["firearrow_early_growth_float"]["value"], 1.4)
+        self.assertAlmostEqual(
+            fixture["constants"]["bluegas_vertical_acceleration_float"]["value"], 1.02)
+        self.assertEqual(len(fixture["sites"]["acidray_width_table"]["bytes"]), 152)
+        self.assertEqual(len(fixture["sites"]["acidray_size_table"]["bytes"]), 152)
         self.assertEqual(
             fixture["ranges"]["particle_scale_mutator"]["sha256"],
             "D0328F6AB7F419CB2A8F63BF9632A1BCADFAFF9398EB70F8E59A96A3E0953E24",

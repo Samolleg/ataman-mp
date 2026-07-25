@@ -12,6 +12,7 @@ enum class EValidationSeverity
 {
     Info,
     Warning,
+    Critical,
     Error
 };
 

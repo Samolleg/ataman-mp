@@ -25,6 +25,7 @@
 #include "current_session_backup.h"
 #include "hot_reload_protocol.h"
 #include "runtime_providers.h"
+#include "synthetic_map_table_archive.h"
 
 #ifdef Q_OS_WIN
 #include <windows.h>
@@ -374,6 +375,8 @@ bool cleanupManifest(const QJsonObject& manifest, QStringList* messages)
                             live.value("mobSha256").toString(), messages) && success;
     success = removeIfOwned(live.value("grpPath").toString(),
                             live.value("grpSha256").toString(), messages) && success;
+    success = removeIfOwned(live.value("placeholderResPath").toString(),
+                            live.value("placeholderResSha256").toString(), messages) && success;
     const QString recordedRunRoot = manifest.value("runRoot").toString();
     const QString runRoot = recordedRunRoot.isEmpty()
         ? QString() : QFileInfo(recordedRunRoot).absoluteFilePath();
@@ -570,10 +573,13 @@ CJmvMapTestLauncher::CJmvMapTestLauncher(QObject* parent)
     });
     connect(m_process, &QProcess::errorOccurred, this, [this](QProcess::ProcessError error)
     {
-        if(error == QProcess::Crashed)
+        if(error == QProcess::Crashed && !m_stopRequested)
             m_processCrashObserved = true;
-        appendRunLog(QString("game.exe process error=%1 text=%2")
-                     .arg(int(error)).arg(m_process->errorString()));
+        if(error == QProcess::Crashed && m_stopRequested)
+            appendRunLog("Endurance-owned process terminated after Stop Test request");
+        else
+            appendRunLog(QString("game.exe process error=%1 text=%2")
+                         .arg(int(error)).arg(m_process->errorString()));
         if(error == QProcess::FailedToStart)
         {
             const QString cleanupMessage = cleanup();
@@ -646,6 +652,58 @@ bool CJmvMapTestLauncher::bridgeSupportsSyntheticMapIdentity(
     const QByteArray utf16Marker(
         reinterpret_cast<const char*>(marker.utf16()), marker.size() * 2);
     return bridgeBytes.contains(utf16Marker);
+}
+
+bool CJmvMapTestLauncher::hasAutoSpellMob(
+    const SResourceProfileEvaluation& profile,
+    const QString& zoneType,
+    bool syntheticMapIdentity,
+    QString* reason)
+{
+    auto reject = [reason](const QString& message) {
+        if(reason)
+            *reason = message;
+        return false;
+    };
+    if(reason)
+        reason->clear();
+    if(profile.profileId.compare("jamais-vu", Qt::CaseInsensitive) != 0)
+        return reject(QStringLiteral("The active profile does not support Play from Here."));
+    if(!syntheticMapIdentity
+       && zoneType.compare("game", Qt::CaseInsensitive) != 0)
+    {
+        if(zoneType.compare("brief", Qt::CaseInsensitive) == 0)
+            return reject(QStringLiteral("The current briefing map does not support Play from Here."));
+        return reject(QStringLiteral("The current map does not support Play from Here."));
+    }
+
+    QString engineDirectory;
+    for(const SRuntimeComponentEvaluation& component : profile.runtimeComponents)
+    {
+        if(component.id.compare("starter-engine", Qt::CaseInsensitive) == 0)
+        {
+            engineDirectory = QFileInfo(component.path).absolutePath();
+            break;
+        }
+    }
+    if(engineDirectory.isEmpty())
+        engineDirectory = QDir(profile.gameRoot).filePath("Starter/Engine");
+    if(findCaseInsensitiveFile(QStringList() << engineDirectory,
+                               "SpellAddonX.asi").isEmpty())
+        return reject(QStringLiteral("Play from Here requires SpellAddon's autorun-MOB feature."));
+
+    const QString settingsPath = findCaseInsensitiveFile(
+        QStringList() << profile.modRoot, "SPELLADDON.INI");
+    if(!settingsPath.isEmpty())
+    {
+        QSettings settings(settingsPath, QSettings::IniFormat);
+        if(settings.value("gameplay/autorunmobfile", 1).toInt() < 1)
+            return reject(QStringLiteral("Play from Here is disabled by gameplay/autorunmobfile in SPELLADDON.INI."));
+    }
+    if(findCaseInsensitiveFile(profile.mapDirectories,
+                               "AutoRunSpellAddon123.mob").isEmpty())
+        return reject(QStringLiteral("Play from Here requires AutoRunSpellAddon123.mob in the active mod."));
+    return true;
 }
 
 bool CJmvMapTestLauncher::resolveMapGraphSource(
@@ -887,6 +945,7 @@ QJsonObject CJmvMapTestLauncher::buildAuthoritativeResult(
     checkRemoved(live.value("mprPath").toString());
     checkRemoved(live.value("mobPath").toString());
     checkRemoved(live.value("grpPath").toString());
+    checkRemoved(live.value("placeholderResPath").toString());
     checkRemoved(manifest.value("bridge").toObject().value("path").toString());
     checkRemoved(QDir(manifest.value("runRoot").toString()).filePath("generations"));
     if(cleanupMessage.contains("Could not", Qt::CaseInsensitive)
@@ -1387,12 +1446,18 @@ bool CJmvMapTestLauncher::launch(const SJmvMapTestLaunchInput& input, QString* e
     m_liveMprPath.clear();
     m_liveMobPath.clear();
     m_liveGrpPath.clear();
+    m_mapTableSourcePath.clear();
+    m_stagedMapTablePath.clear();
+    m_livePlaceholderResourcePath.clear();
     m_bridgeResultPath.clear();
     m_testSavesPath.clear();
     m_bridgeSha256.clear();
     m_liveMprSha256.clear();
     m_liveMobSha256.clear();
     m_liveGrpSha256.clear();
+    m_mapTableSourceSha256.clear();
+    m_stagedMapTableSha256.clear();
+    m_livePlaceholderResourceSha256.clear();
     m_runtimeHostPath.clear();
     m_gamePidPath.clear();
     m_liveSavesPath.clear();
@@ -1472,6 +1537,16 @@ bool CJmvMapTestLauncher::launch(const SJmvMapTestLaunchInput& input, QString* e
     environment.insert("EI_MAPPER_ENDURANCE_HOT_RELOAD_THREAD", m_hotReloadThreadPath);
     environment.insert("EI_MAPPER_ENDURANCE_GRAPHLESS",
                        input.allowMissingAiGraph ? "1" : "0");
+    if(!m_mapTableSourcePath.isEmpty())
+    {
+        environment.insert("EI_MAPPER_ENDURANCE_MAP_TABLE_SOURCE",
+                           m_mapTableSourcePath);
+        environment.insert("EI_MAPPER_ENDURANCE_MAP_TABLE_STAGE",
+                           m_stagedMapTablePath);
+    }
+    if(!m_livePlaceholderResourcePath.isEmpty())
+        environment.insert("EI_MAPPER_ENDURANCE_TEMP_TEXTURE_RES",
+                           m_livePlaceholderResourcePath);
     if(!m_supplementalMobDirectory.isEmpty())
         environment.insert("EI_MAPPER_ENDURANCE_SUPPLEMENTAL_MOB_DIR",
                            m_supplementalMobDirectory);
@@ -1671,6 +1746,19 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
                               input.profile.mapDirectories,
                               &graphSource, error))
         return false;
+    if(graphSource.missing && !input.generatedAiGraphData.isEmpty())
+    {
+        QString graphError;
+        if(!validateExternalGraph(input.generatedAiGraphData, &graphError))
+        {
+            if(error) *error = "The generated test AI graph is invalid: " + graphError;
+            return false;
+        }
+        graphSource.missing = false;
+        graphSource.externalPath = "<Endurance generated graph>";
+        graphSource.externalData = input.generatedAiGraphData;
+        graphSource.sha256 = sha256(input.generatedAiGraphData);
+    }
     if(graphSource.missing && !input.allowMissingAiGraph)
     {
         if(error)
@@ -1697,6 +1785,24 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
     m_liveMprSha256 = sha256(input.mprData);
     m_liveMobSha256 = sha256(input.mobData);
     m_liveGrpSha256 = graphSource.sha256;
+    QByteArray placeholderArchive;
+    QStringList placeholderErrors;
+    if(!buildSyntheticMapPlaceholderArchive(&placeholderArchive, &placeholderErrors))
+    {
+        if(error) *error = "Could not build the run-owned placeholder texture archive:\n"
+            + placeholderErrors.join('\n');
+        return false;
+    }
+    const QString resourcesDirectory = QDir(input.profile.gameRoot).filePath("Res");
+    m_livePlaceholderResourcePath = QDir(resourcesDirectory).filePath(
+        "EIMapperEndurance-" + m_runId + ".res");
+    m_livePlaceholderResourceSha256 = sha256(placeholderArchive);
+    if(!QFileInfo(resourcesDirectory).isDir()
+       || QFileInfo::exists(m_livePlaceholderResourcePath))
+    {
+        if(error) *error = "The run-owned placeholder RES path is unavailable or already exists.";
+        return false;
+    }
     QJsonObject liveJournal;
     liveJournal.insert("mprPath", m_liveMprPath);
     liveJournal.insert("mprSha256", m_liveMprSha256);
@@ -1707,6 +1813,8 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
         liveJournal.insert("grpPath", m_liveGrpPath);
         liveJournal.insert("grpSha256", m_liveGrpSha256);
     }
+    liveJournal.insert("placeholderResPath", m_livePlaceholderResourcePath);
+    liveJournal.insert("placeholderResSha256", m_livePlaceholderResourceSha256);
     QJsonObject saveJournal;
     saveJournal.insert("mode", "generation-scoped-runtime-path-redirection");
     saveJournal.insert("livePath", m_liveSavesPath);
@@ -1852,17 +1960,77 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
         liveFiles.insert("grpPath", m_liveGrpPath);
         liveFiles.insert("grpSha256", m_liveGrpSha256);
     }
+    liveFiles.insert("placeholderResPath", m_livePlaceholderResourcePath);
+    liveFiles.insert("placeholderResSha256", m_livePlaceholderResourceSha256);
     m_manifest.insert("liveFiles", liveFiles);
     if(!atomicWrite(m_liveMprPath, input.mprData, error) ||
-       !atomicWrite(m_liveMobPath, stagedMob, error))
+       !atomicWrite(m_liveMobPath, stagedMob, error) ||
+       !atomicWrite(m_livePlaceholderResourcePath, placeholderArchive, error))
         return false;
     if(graphSource.usesExternalGraph()
        && !atomicWrite(m_liveGrpPath, graphSource.externalData, error))
         return false;
-    if(fileSha256(m_liveMprPath) != m_liveMprSha256 || fileSha256(m_liveMobPath) != m_liveMobSha256)
+    if(fileSha256(m_liveMprPath) != m_liveMprSha256
+       || fileSha256(m_liveMobPath) != m_liveMobSha256
+       || fileSha256(m_livePlaceholderResourcePath) != m_livePlaceholderResourceSha256)
     {
-        if(error) *error = "A temporary live map copy failed its post-write SHA-256 check.";
+        if(error) *error = "A temporary live map/resource copy failed its post-write SHA-256 check.";
         return false;
+    }
+
+    // Add one private, randomly named map record before game.exe begins loading
+    // texts.res. Normal mapped launches ignore it; mapless launches and later
+    // mapless hot reloads use it without renaming an already constructed game
+    // object. The installed archive remains byte-identical.
+    if(isJmv)
+    {
+        m_mapTableSourcePath = QFileInfo(input.mapEntry.sourceArchive).absoluteFilePath();
+        QByteArray sourceArchive;
+        if(m_mapTableSourcePath.isEmpty()
+           || !QFileInfo(m_mapTableSourcePath).isFile()
+           || !readFile(m_mapTableSourcePath, &sourceArchive, error))
+        {
+            if(error && error->isEmpty())
+                *error = "The active map.txt source archive could not be resolved for safe test staging.";
+            return false;
+        }
+        QByteArray stagedArchive;
+        QStringList stagingErrors;
+        if(!buildSyntheticMapTableArchive(sourceArchive, m_mapTableSourcePath,
+                                          m_temporaryMapName,
+                                          input.mapEntry.allodId,
+                                          m_temporaryMapName,
+                                          input.mapSizeX,
+                                          input.mapSizeY,
+                                          input.spawn.position,
+                                          &stagedArchive, &stagingErrors))
+        {
+            if(error) *error = "Could not stage the private test map table:\n"
+                + stagingErrors.join('\n');
+            return false;
+        }
+        const QString mapTableDirectory = QDir(m_runRoot).filePath("map-table");
+        m_stagedMapTablePath = QDir(mapTableDirectory).filePath("texts.res");
+        if(!QDir().mkpath(mapTableDirectory)
+           || !atomicWrite(m_stagedMapTablePath, stagedArchive, error))
+            return false;
+        m_mapTableSourceSha256 = sha256(sourceArchive);
+        m_stagedMapTableSha256 = sha256(stagedArchive);
+        if(fileSha256(m_stagedMapTablePath) != m_stagedMapTableSha256)
+        {
+            if(error) *error = "The private staged texts.res failed its post-write hash check.";
+            return false;
+        }
+        QJsonObject mapTableJournal;
+        mapTableJournal.insert("policy", "read-only-exact-path-redirection");
+        mapTableJournal.insert("sourcePath", m_mapTableSourcePath);
+        mapTableJournal.insert("sourceSha256", m_mapTableSourceSha256);
+        mapTableJournal.insert("stagedPath", m_stagedMapTablePath);
+        mapTableJournal.insert("stagedSha256", m_stagedMapTableSha256);
+        mapTableJournal.insert("syntheticZone", m_temporaryMapName);
+        mapTableJournal.insert("installedArchiveModified", false);
+        m_manifest.insert("syntheticMapTable", mapTableJournal);
+
     }
     if(graphSource.usesExternalGraph()
        && fileSha256(m_liveGrpPath).compare(m_liveGrpSha256, Qt::CaseInsensitive) != 0)
@@ -1885,9 +2053,16 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
                                 fileSha256(input.sourceMpr.absoluteFilePath()));
     request.sourceSha256.insert(input.sourceMob.absoluteFilePath(),
                                 fileSha256(input.sourceMob.absoluteFilePath()));
-    if(graphSource.usesExternalGraph())
+    // A generated graph is an owned staged payload, not a source file. Do not
+    // put its diagnostic pseudo-path into the source-integrity inventory.
+    if(graphSource.usesExternalGraph() && QFileInfo(graphSource.externalPath).isFile())
     {
         request.sourceSha256.insert(graphSource.externalPath, graphSource.sha256);
+        request.stagedSha256.insert(QFileInfo(stagedGrpPath).fileName(),
+                                    graphSource.sha256);
+    }
+    else if(graphSource.usesExternalGraph())
+    {
         request.stagedSha256.insert(QFileInfo(stagedGrpPath).fileName(),
                                     graphSource.sha256);
     }
@@ -1903,7 +2078,7 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
     request.stagedSha256.insert(QFileInfo(stagedMprPath).fileName(), m_liveMprSha256);
     request.stagedSha256.insert(QFileInfo(stagedMobPath).fileName(), m_liveMobSha256);
     request.sessionSettings.insert("travelExit", input.spawn.exitId);
-    request.sessionSettings.insert("sourceZone", input.mapEntry.zoneId);
+    request.sessionSettings.insert("sourceZone", m_currentZoneId);
     request.sessionSettings.insert("runtimeZone", m_currentZoneId);
     request.sessionSettings.insert("syntheticMapIdentity", input.syntheticMapIdentity);
     request.sessionSettings.insert("mapSizeX", input.mapSizeX);
@@ -1977,6 +2152,16 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
         appendRunLog(QString("Starter mod target=%1 persistedSelection=%2 persistedAddonPath=%3 policy=owned-process-override persistentModified=false")
                      .arg(QDir::cleanPath(input.profile.modRoot), starterStoredSelection,
                           starterRegistryAddonPath));
+    if(isJmv)
+        appendRunLog(QString("Staged private map table source=%1 sourceSha256=%2 staged=%3 stagedSha256=%4 syntheticZone=%5 installedModified=false")
+                     .arg(QDir::toNativeSeparators(m_mapTableSourcePath),
+                          m_mapTableSourceSha256,
+                          QDir::toNativeSeparators(m_stagedMapTablePath),
+                          m_stagedMapTableSha256,
+                          m_temporaryMapName));
+    appendRunLog(QString("Staged standalone temporary texture RES path=%1 sha256=%2 registration=shared-owned-process-bridge installedArchivesModified=false")
+                 .arg(QDir::toNativeSeparators(m_livePlaceholderResourcePath),
+                      m_livePlaceholderResourceSha256));
     appendRunLog(QString("Staged temporary map=%1 exit=%2 spawn=(%3,%4) clearance=%5")
                  .arg(m_temporaryMapName).arg(input.spawn.exitId)
                  .arg(x, y).arg(input.spawn.clearance, 0, 'f', 3));
@@ -2036,6 +2221,19 @@ bool CJmvMapTestLauncher::hotReload(const SJmvMapTestLaunchInput& input,
                               input.profile.mapDirectories,
                               &graphSource, error))
         return false;
+    if(graphSource.missing && !input.generatedAiGraphData.isEmpty())
+    {
+        QString graphError;
+        if(!validateExternalGraph(input.generatedAiGraphData, &graphError))
+        {
+            if(error) *error = "The generated hot-reload AI graph is invalid: " + graphError;
+            return false;
+        }
+        graphSource.missing = false;
+        graphSource.externalPath = "<Endurance generated graph>";
+        graphSource.externalData = input.generatedAiGraphData;
+        graphSource.sha256 = sha256(input.generatedAiGraphData);
+    }
     if(graphSource.missing && !input.allowMissingAiGraph)
     {
         if(error)

@@ -1,0 +1,402 @@
+{
+  "format": "ei-particle-texture-report-v1",
+  "source": {
+    "path": "D:\\Evil Islands\\Res\\textures.res",
+    "sha256": "79548FBD94E797FE9EDC3E990EB0231A350571B2CEF575B009FA972F0002268C",
+    "size": 107649220
+  },
+  "textures": [
+    {
+      "atlas": {
+        "columns": 4,
+        "phaseCount": 16,
+        "rows": 4
+      },
+      "height": 256,
+      "mipCount": 3,
+      "name": "stench.mmp",
+      "sha256": "D2468084C3D8FFEFDD0FCC1614220A5CE43C2799AA860545BBF4CF13CB816CE5",
+      "size": 172108,
+      "textureFormat": "0x00004444",
+      "width": 256
+    },
+    {
+      "atlas": {
+        "columns": 4,
+        "phaseCount": 16,
+        "rows": 4
+      },
+      "height": 256,
+      "mipCount": 3,
+      "name": "link.mmp",
+      "sha256": "41139C0623B7E14A14A09222C0638233BFF54DF88B964484AD2DEAE93AABEE9F",
+      "size": 172108,
+      "textureFormat": "0x00004444",
+      "width": 256
+    },
+    {
+      "atlas": {
+        "columns": 4,
+        "phaseCount": 16,
+        "rows": 4
+      },
+      "height": 256,
+      "mipCount": 3,
+      "name": "protectiona.mmp",
+      "sha256": "46FD613DDA143EC7B915D08F0309421264AAA14510EFC9F6BF4E3C8DED9038EE",
+      "size": 172108,
+      "textureFormat": "0x00004444",
+      "width": 256
+    },
+    {
+      "atlas": {
+        "columns": 4,
+        "phaseCount": 16,
+        "rows": 4
+      },
+      "height": 256,
+      "mipCount": 3,
+      "name": "protectione.mmp",
+      "sha256": "C4B884BDAFA84C15B747F1CBE81F61C1C6FEF02A9C0304B3EF5AF6E3BF1590FA",
+      "size": 172108,
+      "textureFormat": "0x00004444",
+      "width": 256
+    },
+    {
+      "atlas": {
+        "columns": 4,
+        "phaseCount": 16,
+        "rows": 4
+      },
+      "height": 256,
+      "mipCount": 3,
+      "name": "protectionf.mmp",
+      "sha256": "B152577655E178268E3BFA8E2E1A3551C8D1702699D7E3F2E5D7A7DD0F074E65",
+      "size": 172108,
+      "textureFormat": "0x00004444",
+      "width": 256
+    },
+    {
+      "atlas": {
+        "columns": 4,
+        "phaseCount": 16,
+        "rows": 4
+      },
+      "height": 256,
+      "mipCount": 3,
+      "name": "clayring.mmp",
+      "sha256": "8C729409D2F5210D457A2F59EF5727AA6C671FF7A124BF9E5E288A7435F1C7A2",
+      "size": 172108,
+      "textureFormat": "0x00004444",
+      "width": 256
+    },
+    {
+      "atlas": {
+        "columns": 4,
+        "phaseCount": 16,
+        "rows": 4
+      },
+      "height": 256,
+      "mipCount": 3,
+      "name": "teleport.mmp",
+      "sha256": "82EE9DD7F0EF2D28D257354BAF372E94BAD66586D345B83F9E50F83CEB6484A1",
+      "size": 172108,
+      "textureFormat": "0x00004444",
+      "width": 256
+    },
+    {
+      "atlas": {
+        "columns": 4,
+        "phaseCount": 16,
+        "rows": 4
+      },
+      "height": 256,
+      "mipCount": 3,
+      "name": "antimagic.mmp",
+      "sha256": "64DF1A10242CAF1A1616E0BCF75666F634A155095BAD727FD3E2312A34C3C30E",
+      "size": 172108,
+      "textureFormat": "0x00004444",
+      "width": 256
+    },
+    {
+      "atlas": {
+        "columns": 4,
+        "phaseCount": 16,
+        "rows": 4
+      },
+      "height": 256,
+      "mipCount": 3,
+      "name": "stun.mmp",
+      "sha256": "FCE8E282D32EBB91FA7ABC61DD5C998B838FAB37E278D6274DE7C27EDFEFB0BD",
+      "size": 86092,
+      "textureFormat": "0x33545844",
+      "width": 256
+    },
+    {
+      "atlas": {
+        "columns": 4,
+        "phaseCount": 16,
+        "rows": 4
+      },
+      "height": 256,
+      "mipCount": 3,
+      "name": "zoneexit.mmp",
+      "sha256": "4C33D5CE4F0EF383DF2E3A3CBE21E9699290555953E421875191292EAA2FDDE1",
+      "size": 172108,
+      "textureFormat": "0x00004444",
+      "width": 256
+    },
+    {
+      "atlas": {
+        "columns": 4,
+        "phaseCount": 16,
+        "rows": 4
+      },
+      "height": 256,
+      "mipCount": 3,
+      "name": "shapechange.mmp",
+      "sha256": "1FA2D83DACEC08EBE409E712AA46BCFB22502D3F73460497F572EF92123B6ECA",
+      "size": 172108,
+      "textureFormat": "0x00004444",
+      "width": 256
+    },
+    {
+      "atlas": {
+        "columns": 4,
+        "phaseCount": 16,
+        "rows": 4
+      },
+      "height": 256,
+      "mipCount": 3,
+      "name": "bag.mmp",
+      "sha256": "FD25B847FF4244356CBA73F5E502C96EF7DBA70D9F5373DC435393E967771607",
+      "size": 172108,
+      "textureFormat": "0x00004444",
+      "width": 256
+    },
+    {
+      "atlas": {
+        "columns": 4,
+        "phaseCount": 16,
+        "rows": 4
+      },
+      "height": 256,
+      "mipCount": 3,
+      "name": "casting6.mmp",
+      "sha256": "8C729409D2F5210D457A2F59EF5727AA6C671FF7A124BF9E5E288A7435F1C7A2",
+      "size": 172108,
+      "textureFormat": "0x00004444",
+      "width": 256
+    },
+    {
+      "atlas": {
+        "columns": 4,
+        "phaseCount": 16,
+        "rows": 4
+      },
+      "height": 256,
+      "mipCount": 3,
+      "name": "casting2.mmp",
+      "sha256": "09645A2DB9F54BD3D3651138D050A07EBFDB7FCD654425A1C609B57611C09778",
+      "size": 172108,
+      "textureFormat": "0x00004444",
+      "width": 256
+    },
+    {
+      "atlas": {
+        "columns": 4,
+        "phaseCount": 16,
+        "rows": 4
+      },
+      "height": 256,
+      "mipCount": 3,
+      "name": "casting1.mmp",
+      "sha256": "26DD1E6DA5BB9EECA41CE4AA5FCB4BD4D06F9EAE77C6167E7C93CDC9B37094B6",
+      "size": 172108,
+      "textureFormat": "0x00004444",
+      "width": 256
+    },
+    {
+      "atlas": {
+        "columns": 4,
+        "phaseCount": 16,
+        "rows": 4
+      },
+      "height": 256,
+      "mipCount": 3,
+      "name": "visionfog.mmp",
+      "sha256": "0D7A9F860ED7716F47BD013DC4B4B9B41EB24CEEBD8EDA15A63C256D29BA4A47",
+      "size": 172108,
+      "textureFormat": "0x00004444",
+      "width": 256
+    },
+    {
+      "atlas": {
+        "columns": 4,
+        "phaseCount": 16,
+        "rows": 4
+      },
+      "height": 256,
+      "mipCount": 3,
+      "name": "healing.mmp",
+      "sha256": "A39229D751FD037648DF96B9DCF3D19A83C9D39796EF70F3C0B96A523FE03FB8",
+      "size": 172108,
+      "textureFormat": "0x00004444",
+      "width": 256
+    },
+    {
+      "atlas": {
+        "columns": 4,
+        "phaseCount": 16,
+        "rows": 4
+      },
+      "height": 256,
+      "mipCount": 3,
+      "name": "rikarrowsmoke.mmp",
+      "sha256": "1487BD789EDD1B8D01310FF0EFA14E3FE086D5CE1ABB00E84CEA8384DC1DFEB9",
+      "size": 86092,
+      "textureFormat": "0x33545844",
+      "width": 256
+    },
+    {
+      "atlas": {
+        "columns": 4,
+        "phaseCount": 16,
+        "rows": 4
+      },
+      "height": 256,
+      "mipCount": 3,
+      "name": "changehero.mmp",
+      "sha256": "41F98270814FDB96EEC5BD43DF342AC8B4296F1DA516FADFC737689787671F90",
+      "size": 86092,
+      "textureFormat": "0x33545844",
+      "width": 256
+    },
+    {
+      "atlas": {
+        "columns": 4,
+        "phaseCount": 16,
+        "rows": 4
+      },
+      "height": 256,
+      "mipCount": 3,
+      "name": "tornado.mmp",
+      "sha256": "0A40C22661AE64B75E65269BFB13FFFFBBF249B264A89EBA9BD0F7A57E84C313",
+      "size": 172108,
+      "textureFormat": "0x00004444",
+      "width": 256
+    },
+    {
+      "atlas": {
+        "columns": 4,
+        "phaseCount": 16,
+        "rows": 4
+      },
+      "height": 256,
+      "mipCount": 3,
+      "name": "explosion.mmp",
+      "sha256": "241AAF55FD59944E7FC4214A0652F12CEEC348A8B90D1691C3FED95104420276",
+      "size": 172108,
+      "textureFormat": "0x00004444",
+      "width": 256
+    },
+    {
+      "atlas": {
+        "columns": 4,
+        "phaseCount": 16,
+        "rows": 4
+      },
+      "height": 256,
+      "mipCount": 3,
+      "name": "poisoncloud.mmp",
+      "sha256": "308D208BB558461FE2DD2D737749A122C6E2C987A2886A7EEAF2B913DE30F8D0",
+      "size": 172108,
+      "textureFormat": "0x00004444",
+      "width": 256
+    },
+    {
+      "atlas": {
+        "columns": 4,
+        "phaseCount": 16,
+        "rows": 4
+      },
+      "height": 256,
+      "mipCount": 3,
+      "name": "fireworks.mmp",
+      "sha256": "8BF4915BD31A78854ABB98213F584E6436E767103E463F4954C57E95F7E92DDF",
+      "size": 172108,
+      "textureFormat": "0x00004444",
+      "width": 256
+    },
+    {
+      "atlas": {
+        "columns": 4,
+        "phaseCount": 16,
+        "rows": 4
+      },
+      "height": 256,
+      "mipCount": 3,
+      "name": "firesmoke.mmp",
+      "sha256": "FBB634A3F11F6B1D783915F2A11DA4E99ACA71344FCBD057AA4BCC35C33C8ABD",
+      "size": 172108,
+      "textureFormat": "0x00004444",
+      "width": 256
+    },
+    {
+      "atlas": {
+        "columns": 4,
+        "phaseCount": 16,
+        "rows": 4
+      },
+      "height": 256,
+      "mipCount": 3,
+      "name": "casting3.mmp",
+      "sha256": "6D0ED48BE10BFC981F50BD4693B74EC2A3C7DE80955283595C7DD3C154456FDA",
+      "size": 172108,
+      "textureFormat": "0x00004444",
+      "width": 256
+    },
+    {
+      "atlas": {
+        "columns": 4,
+        "phaseCount": 16,
+        "rows": 4
+      },
+      "height": 256,
+      "mipCount": 3,
+      "name": "casting4.mmp",
+      "sha256": "8D62D43F6F5194FFFD844133D11B7BCAFFADEEBE9BB935AFD6A2F3DED47E7DE5",
+      "size": 172108,
+      "textureFormat": "0x00004444",
+      "width": 256
+    },
+    {
+      "atlas": {
+        "columns": 4,
+        "phaseCount": 16,
+        "rows": 4
+      },
+      "height": 256,
+      "mipCount": 3,
+      "name": "casting7.mmp",
+      "sha256": "EDF9DE998B90AF338E00AEA294CB3AFADD34E03A139C4F513C8DE9D2FB727B37",
+      "size": 172108,
+      "textureFormat": "0x00004444",
+      "width": 256
+    },
+    {
+      "atlas": {
+        "columns": 4,
+        "phaseCount": 16,
+        "rows": 4
+      },
+      "height": 256,
+      "mipCount": 3,
+      "name": "casting8.mmp",
+      "sha256": "B412D2B1E2F7D6D0269359CDAD048D9623469DD58E83ADC246F2C50B0EE79108",
+      "size": 172108,
+      "textureFormat": "0x00004444",
+      "width": 256
+    }
+  ]
+}

@@ -33,6 +33,7 @@ public:
     int cellCount() const { return m_width * m_height; }
     const QByteArray& rawBytes() const { return m_rawBytes; }
     QByteArray serializeNoOp() const { return m_rawBytes; }
+    QByteArray serialize(QString* error = nullptr) const;
 
     qint16 weight(int layer, int x, int y, int direction) const;
     quint8 packedPosition(int layer, int x, int y) const;

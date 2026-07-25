@@ -41,6 +41,7 @@ struct SJmvMapTestLaunchInput
     QFileInfo sourceMob;
     QByteArray mprData;
     QByteArray mobData;
+    QByteArray generatedAiGraphData;
     QVector<SJmvSupplementalMobInput> supplementalMobs;
     QString embeddedScript;
     SMapCatalogEntry mapEntry;
@@ -89,6 +90,10 @@ public:
                                       QString* error = nullptr);
     static bool bridgeSupportsGraphlessLaunch(const QByteArray& bridgeBytes);
     static bool bridgeSupportsSyntheticMapIdentity(const QByteArray& bridgeBytes);
+    static bool hasAutoSpellMob(const SResourceProfileEvaluation& profile,
+                                const QString& zoneType,
+                                bool syntheticMapIdentity,
+                                QString* reason = nullptr);
     static qint64 runtimeGameProcessId(bool usesRuntimeHost,
                                        const QString& gamePidPath,
                                        qint64 transportProcessId);
@@ -163,6 +168,9 @@ private:
     QString m_liveMprPath;
     QString m_liveMobPath;
     QString m_liveGrpPath;
+    QString m_mapTableSourcePath;
+    QString m_stagedMapTablePath;
+    QString m_livePlaceholderResourcePath;
     QString m_bridgeSourcePath;
     QString m_bridgeLivePath;
     QString m_bridgeResultPath;
@@ -171,6 +179,9 @@ private:
     QString m_liveMprSha256;
     QString m_liveMobSha256;
     QString m_liveGrpSha256;
+    QString m_mapTableSourceSha256;
+    QString m_stagedMapTableSha256;
+    QString m_livePlaceholderResourceSha256;
     QString m_gameExePath;
     QString m_engineDirectory;
     QString m_runtimeHostPath;

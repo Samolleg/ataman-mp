@@ -55,6 +55,13 @@ class ParticleCatalogCollectionTests(unittest.TestCase):
         )
         archive = MODULE.build_archive(archive_members)
         members = MODULE.read_members(archive)
+        buckets = {}
+        for name, _ in archive_members:
+            buckets.setdefault(MODULE.ei_string_hash(name, len(archive_members)), []).append(name)
+        self.assertTrue(
+            any(len(names) > 1 for names in buckets.values()),
+            "fixture must exercise at least one runtime hash collision",
+        )
         self.assertEqual(
             {member["name"] for member in members},
             {name for name, _ in archive_members},

@@ -2,11 +2,14 @@
 
 #include "res_archive_document.h"
 #include "res_save_coordinator.h"
+#include "synthetic_map_table_archive.h"
+#include "map_table_document.h"
 
 #include <QCryptographicHash>
 #include <QDataStream>
 #include <QFile>
 #include <QTemporaryDir>
+#include <QtEndian>
 
 namespace {
 QByteArray syntheticRes()
@@ -50,6 +53,45 @@ QByteArray sha(const QByteArray& bytes)
 {
     return QCryptographicHash::hash(bytes, QCryptographicHash::Sha256).toHex();
 }
+
+QByteArray runtimeMemberPayload(const QByteArray& archive, const QString& requested)
+{
+    const quint32 count = qFromLittleEndian<quint32>(
+        reinterpret_cast<const uchar*>(archive.constData() + 4));
+    const quint32 tableOffset = qFromLittleEndian<quint32>(
+        reinterpret_cast<const uchar*>(archive.constData() + 8));
+    const quint32 namesSize = qFromLittleEndian<quint32>(
+        reinterpret_cast<const uchar*>(archive.constData() + 12));
+    const quint32 entrySize = 22;
+    const quint32 namesOffset = tableOffset + count * entrySize;
+    const QByteArray encoded = requested.toLower().toLocal8Bit();
+    quint32 sum = 0;
+    for(const unsigned char byte : encoded) sum += byte;
+    quint32 index = sum % count;
+    for(quint32 guard = 0; guard < count; ++guard)
+    {
+        const quint32 entry = tableOffset + index * entrySize;
+        const quint32 next = qFromLittleEndian<quint32>(
+            reinterpret_cast<const uchar*>(archive.constData() + entry));
+        const quint32 size = qFromLittleEndian<quint32>(
+            reinterpret_cast<const uchar*>(archive.constData() + entry + 4));
+        const quint32 offset = qFromLittleEndian<quint32>(
+            reinterpret_cast<const uchar*>(archive.constData() + entry + 8));
+        const quint16 nameLength = qFromLittleEndian<quint16>(
+            reinterpret_cast<const uchar*>(archive.constData() + entry + 16));
+        const quint32 nameOffset = qFromLittleEndian<quint32>(
+            reinterpret_cast<const uchar*>(archive.constData() + entry + 18));
+        if(nameOffset + nameLength <= namesSize)
+        {
+            const QByteArray name = archive.mid(int(namesOffset + nameOffset), nameLength);
+            if(QString::fromLocal8Bit(name).compare(requested, Qt::CaseInsensitive) == 0)
+                return archive.mid(int(offset), int(size));
+        }
+        if(next == quint32(-1) || next >= count) break;
+        index = next;
+    }
+    return QByteArray();
+}
 }
 
 class ResArchiveDocumentTests : public QObject
@@ -63,6 +105,8 @@ private slots:
     void stagedCommitBacksUpAndReopens();
     void failedAtomicCommitLeavesDestinationUntouched();
     void sourceRaceRefusesSave();
+    void syntheticMapTableAddsOwnedMaplessZoneLosslessly();
+    void syntheticPlaceholderBuildsStandaloneResolvableChecker();
 };
 
 void ResArchiveDocumentTests::noOpIsByteIdentical()
@@ -218,6 +262,84 @@ void ResArchiveDocumentTests::sourceRaceRefusesSave()
     QVERIFY(!result.success);
     QCOMPARE(result.phase, QString("source-check"));
     QVERIFY(!QFileInfo::exists(destinationPath));
+}
+
+void ResArchiveDocumentTests::syntheticMapTableAddsOwnedMaplessZoneLosslessly()
+{
+    const QByteArray original = syntheticRes();
+    QByteArray staged;
+    QStringList errors;
+    QVERIFY2(buildSyntheticMapTableArchive(
+        original, "texts.res", "ed1234abcd", "island", "ed1234abcd",
+        7, 5, QPointF(12.5, 18.25), &staged, &errors),
+        qPrintable(errors.join('\n')));
+    QVERIFY(staged != original);
+
+    CResArchiveDocument baseline;
+    CResArchiveDocument candidate;
+    QVERIFY(baseline.loadBytes(original));
+    QVERIFY(candidate.loadBytes(staged));
+    QCOMPARE(candidate.members().size(), baseline.members().size());
+    QCOMPARE(candidate.members().at(0).payload, baseline.members().at(0).payload);
+    QCOMPARE(candidate.members().at(2).payload, baseline.members().at(2).payload);
+
+    CMapTableDocument table;
+    QVERIFY2(table.loadBytes(candidate.memberPayload("map.txt"), &errors),
+             qPrintable(errors.join('\n')));
+    int matches = 0;
+    for(const SMapTableZone& zone : table.zones())
+    {
+        if(zone.zoneId != "ed1234abcd")
+            continue;
+        ++matches;
+        QCOMPARE(zone.mprName, QString("ed1234abcd"));
+        QCOMPARE(zone.mobName, QString("ed1234abcd"));
+        QVERIFY(zone.maps.present);
+        QCOMPARE(zone.maps.sectorWidth, 7);
+        QCOMPARE(zone.maps.sectorHeight, 5);
+        QCOMPARE(zone.maps.minimapTexture, syntheticMapPlaceholderTextureName());
+        QCOMPARE(zone.maps.objectivesTexture, syntheticMapPlaceholderTextureName());
+        QCOMPARE(zone.exits.size(), 1);
+        QCOMPARE(zone.exits.first().destinationZoneId, QString("none"));
+        QCOMPARE(zone.exits.first().deployRectangle.center(), QPointF(12.5, 18.25));
+    }
+    QCOMPARE(matches, 1);
+}
+
+void ResArchiveDocumentTests::syntheticPlaceholderBuildsStandaloneResolvableChecker()
+{
+    QByteArray staged;
+    QStringList errors;
+    QVERIFY2(buildSyntheticMapPlaceholderArchive(&staged, &errors),
+             qPrintable(errors.join('\n')));
+    CResArchiveDocument candidate;
+    QVERIFY2(candidate.loadBytes(staged, "temporary-placeholder.res", &errors),
+             qPrintable(errors.join('\n')));
+    QCOMPARE(candidate.members().size(), 1);
+    QCOMPARE(candidate.members().first().name,
+             syntheticMapPlaceholderTextureName() + ".mmp");
+    const QByteArray checker = candidate.memberPayload(
+        syntheticMapPlaceholderTextureName() + ".mmp");
+    QCOMPARE(runtimeMemberPayload(
+        staged, syntheticMapPlaceholderTextureName() + ".mmp"), checker);
+    QCOMPARE(checker.size(), 76 + 256 * 256 * 4);
+    QCOMPARE(qFromLittleEndian<quint32>(
+        reinterpret_cast<const uchar*>(checker.constData())), quint32(0x00504D4D));
+    QCOMPARE(qFromLittleEndian<quint32>(
+        reinterpret_cast<const uchar*>(checker.constData() + 4)), quint32(256));
+    QCOMPARE(qFromLittleEndian<quint32>(
+        reinterpret_cast<const uchar*>(checker.constData() + 12)),
+        quint32(1));
+    QCOMPARE(qFromLittleEndian<quint32>(
+        reinterpret_cast<const uchar*>(checker.constData() + 16)), quint32(0x00008888));
+    QCOMPARE(qFromLittleEndian<quint32>(
+        reinterpret_cast<const uchar*>(checker.constData() + 24)), quint32(0xFF000000));
+    QCOMPARE(qFromLittleEndian<quint32>(
+        reinterpret_cast<const uchar*>(checker.constData() + 36)), quint32(0x00FF0000));
+    QCOMPARE(qFromLittleEndian<quint32>(
+        reinterpret_cast<const uchar*>(checker.constData() + 48)), quint32(0x0000FF00));
+    QCOMPARE(qFromLittleEndian<quint32>(
+        reinterpret_cast<const uchar*>(checker.constData() + 60)), quint32(0x000000FF));
 }
 
 QTEST_APPLESS_MAIN(ResArchiveDocumentTests)

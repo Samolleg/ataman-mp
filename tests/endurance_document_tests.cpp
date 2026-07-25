@@ -274,6 +274,7 @@ private slots:
     void landscapeWheelDirectionUsesAvailableDelta();
     void unchangedMobIsByteIdentical();
     void duplicateMobIdsAreWarningsOnly();
+    void vulcansmokeIsACriticalNonBlockingFinding();
     void unknownLeafIsPreservedAsOpaque();
     void suppliedOpaqueChestCanPatchKnownLeafSafely();
     void malformedMobRootIsRejected();
@@ -413,6 +414,30 @@ void EnduranceDocumentTests::duplicateMobIdsAreWarningsOnly()
     QCOMPARE(document.duplicateIds().front(), quint32(1000100));
     QCOMPARE(document.serialize(), bytes);
     QVERIFY(!report.hasErrors());
+}
+
+void EnduranceDocumentTests::vulcansmokeIsACriticalNonBlockingFinding()
+{
+    const QByteArray bytes = validMob(section(0xDD01,
+        section(0xDD06, u32(0x2005u))));
+    CMobDocument document;
+    CValidationReport report;
+    QVERIFY(document.loadBytes(bytes, "vulcansmoke-control.mob", &report));
+    QCOMPARE(document.serialize(), bytes);
+    QVERIFY(!report.hasErrors());
+
+    int criticalFindings = 0;
+    for(const SValidationFinding& finding : report.findings())
+    {
+        if(finding.code != "mob.semantic.vulcansmoke_runtime_crash")
+            continue;
+        ++criticalFindings;
+        QCOMPARE(finding.severity, EValidationSeverity::Critical);
+        QVERIFY(finding.message.contains("8197"));
+        QVERIFY(finding.message.contains("terminate", Qt::CaseInsensitive));
+    }
+    QCOMPARE(criticalFindings, 1);
+    QVERIFY(report.toText().contains("CRITICAL mob.semantic.vulcansmoke_runtime_crash"));
 }
 
 void EnduranceDocumentTests::unknownLeafIsPreservedAsOpaque()
