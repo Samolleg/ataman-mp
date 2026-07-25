@@ -204,6 +204,54 @@ private:
     bool m_skipInitialRedo{false};
 };
 
+class COverlaySurfacePreviewCommand : public QUndoCommand
+{
+public:
+    COverlaySurfacePreviewCommand(CView* view, const SOverlaySurfaceCommand& command,
+                                  bool alreadyApplied)
+        : m_view(view), m_command(command), m_skipInitialRedo(alreadyApplied)
+    {
+        setText(command.description);
+    }
+    void undo() override { m_view->applyOverlaySurfacePreview(m_command, false); }
+    void redo() override
+    {
+        if(m_skipInitialRedo)
+        {
+            m_skipInitialRedo = false;
+            return;
+        }
+        m_view->applyOverlaySurfacePreview(m_command, true);
+    }
+private:
+    CView* m_view;
+    SOverlaySurfaceCommand m_command;
+    bool m_skipInitialRedo{false};
+};
+
+void appendOverlaySurfaceCommand(SOverlaySurfaceCommand* stroke,
+                                 const SOverlaySurfaceCommand& stamp)
+{
+    if(!stroke)
+        return;
+    if(stroke->description.isEmpty())
+        stroke->description = stamp.description;
+    for(const SOverlaySectorDelta& delta : stamp.sectors)
+    {
+        bool merged = false;
+        for(SOverlaySectorDelta& existing : stroke->sectors)
+        {
+            if(existing.sectorX != delta.sectorX || existing.sectorY != delta.sectorY)
+                continue;
+            existing.afterPayload = delta.afterPayload;
+            merged = true;
+            break;
+        }
+        if(!merged)
+            stroke->sectors.append(delta);
+    }
+}
+
 QString openGlErrorName(GLenum error)
 {
     switch(error)
@@ -6165,6 +6213,8 @@ void CView::updateTileForm(bool bGenerateNewTable)
         m_pTileForm->fillTable(m_pLand->mapName(), m_pLand->textureNum());
     m_pTileForm->setTileTypes(m_pLand->tileTypes());
     m_pTileForm->setMaterial(m_pLand->materials());
+    if(m_landscapeTools)
+        m_landscapeTools->setOverlayMaterials(m_pLand->materials());
     m_pTileForm->setAnimTile(m_pLand->animTiles());
 }
 
@@ -6205,7 +6255,10 @@ void CView::drawTerrainPaintOutline(QOpenGLShaderProgram* program)
     }
     if(!m_terrainPaintOutlineValid || m_landscapeTools->manualTileSelectionEnabled())
         return;
-    const bool landLayer = m_landscapeTools->editMode() == ELandscapeEditMode::TilePaint;
+    const bool landLayer = m_landscapeTools->editMode() == ELandscapeEditMode::TilePaint
+        || (m_landscapeTools->editMode() == ELandscapeEditMode::OverlayPaint
+            && m_landscapeTools->overlaySurfaceOperation()
+                == EOverlaySurfaceOperation::Activate);
     const int radius = qMax(0, int(qRound(m_landscapeTools->paintRadius())));
     const ETerrainTileBrushShape shape = m_landscapeTools->paintShape();
     const auto included = [this, radius, shape](int x, int y)
@@ -8201,7 +8254,10 @@ void CView::pickTile(QVector3D posOnLand, bool bLand)
 
     CTile* pTile = nullptr;
     STileLocation tileLoc;
-    if(!m_pLand->pickTile(posOnLand, pTile, tileLoc, bLand))
+    const bool pickLand = bLand || (!bLand && m_landscapeTools
+        && m_landscapeTools->overlaySurfaceOperation()
+            == EOverlaySurfaceOperation::Activate);
+    if(!m_pLand->pickTile(posOnLand, pTile, tileLoc, pickLand))
         return;
 
     m_pTileForm->selectTile(pTile->tileIndex());
@@ -8246,7 +8302,10 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
 
     CTile* pTile = nullptr;
     STileLocation tileLoc;
-    if(!m_pLand->pickTile(posOnLand, pTile, tileLoc, bLand))
+    const bool pickLand = bLand || (!bLand && m_landscapeTools
+        && m_landscapeTools->overlaySurfaceOperation()
+            == EOverlaySurfaceOperation::Activate);
+    if(!m_pLand->pickTile(posOnLand, pTile, tileLoc, pickLand))
         return;
 
     STerrainTileBrush brush;
@@ -8263,6 +8322,62 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
     brush.radius = m_landscapeTools->paintRadius();
     brush.shape = m_landscapeTools->paintShape();
     CValidationReport report;
+    if(!bLand && m_landscapeTools->overlaySurfaceOperation()
+                     != EOverlaySurfaceOperation::PaintExisting)
+    {
+        SOverlaySurfaceCommand surfaceCommand;
+        if(m_landscapeTools->overlaySurfaceOperation()
+           == EOverlaySurfaceOperation::Deactivate)
+        {
+            surfaceCommand = m_terrainEdit.makeOverlayDeactivation(brush, &report);
+        }
+        else
+        {
+            bool materialSelected = false;
+            const qint16 material = m_landscapeTools->overlayMaterialIndex(&materialSelected);
+            int selectedIndex = -1;
+            int selectedRotation = 0;
+            if(m_landscapeTools->manualTileSelectionEnabled())
+                m_pTileForm->getSelectedTile(selectedIndex, selectedRotation);
+            else
+            {
+                bool terrainSelected = false;
+                const qint32 terrainType = m_landscapeTools->paintTerrainType(&terrainSelected);
+                if(terrainSelected)
+                    selectedIndex = m_terrainMaterialRepresentatives.value(terrainType, -1);
+            }
+            if(!materialSelected || selectedIndex < 0)
+            {
+                emit updateMsg(tr("Adding an overlay requires an existing liquid material and atlas tile family."));
+                return;
+            }
+            surfaceCommand = m_terrainEdit.makeOverlayActivation(
+                brush, material, quint8(selectedIndex / 64), quint8(selectedIndex % 64),
+                quint8(selectedRotation & 3), &report);
+        }
+        ++m_tileStrokeActions;
+        if(surfaceCommand.isEmpty())
+        {
+            if(report.hasErrors())
+            {
+                ++m_tileStrokeRefused;
+                emit updateMsg(report.toText());
+            }
+            else
+                ++m_tileStrokeNoOps;
+            return;
+        }
+        if(!applyOverlaySurfacePreview(surfaceCommand, true))
+        {
+            ++m_tileStrokeRefused;
+            emit updateMsg(tr("Overlay surface edit was refused; no undo entry was created."));
+            return;
+        }
+        ++m_tileStrokeApplied;
+        m_tileStrokeChangedTiles += surfaceCommand.sectors.size();
+        appendOverlaySurfaceCommand(&m_overlaySurfaceStrokeCommand, surfaceCommand);
+        return;
+    }
     const ETerrainTileLayer layer = bLand
         ? ETerrainTileLayer::Land : ETerrainTileLayer::Overlay;
     const CTerrainTransitionCatalog& manualCatalog = !bLand
@@ -8454,7 +8569,10 @@ void CView::updatePreviewTile(QVector3D posOnLand, bool bLand)
 
     CTile* pTile = nullptr;
     STileLocation tileLoc;
-    if(!m_pLand->pickTile(posOnLand, pTile, tileLoc, bLand))
+    const bool pickLand = bLand || (!bLand && m_landscapeTools
+        && m_landscapeTools->overlaySurfaceOperation()
+            == EOverlaySurfaceOperation::Activate);
+    if(!m_pLand->pickTile(posOnLand, pTile, tileLoc, pickLand))
     {
         m_terrainPaintOutlineValid = false;
         return;
@@ -8529,6 +8647,15 @@ float CView::terrainPaintStampSpacing() const
     return qMax(2.0f, float(m_landscapeTools->paintRadius()) * 2.0f);
 }
 
+bool CView::terrainBrushProjectsToLand() const
+{
+    if(CScene::getInstance()->isLandTileEditMode())
+        return true;
+    return m_landscapeTools
+        && m_landscapeTools->overlaySurfaceOperation()
+            == EOverlaySurfaceOperation::Activate;
+}
+
 void CView::showOutliner(bool bShow)
 {
     emit showOutlinerSignal(bShow);
@@ -8547,7 +8674,10 @@ void CView::endTileBrushGroup()
     if(m_tilePaintStrokeActive)
     {
         m_tilePaintStrokeActive = false;
-        if(m_pUndoStack && !m_tileStrokeCommand.isEmpty())
+        if(m_pUndoStack && !m_overlaySurfaceStrokeCommand.isEmpty())
+            m_pUndoStack->push(new COverlaySurfacePreviewCommand(
+                this, m_overlaySurfaceStrokeCommand, true));
+        else if(m_pUndoStack && !m_tileStrokeCommand.isEmpty())
             m_pUndoStack->push(new CTerrainTilePreviewCommand(
                 this, m_tileStrokeCommand, true));
         m_pLand->setDirty(m_terrainEdit.isDirty());
@@ -8574,6 +8704,7 @@ void CView::beginTileBrushGroup()
     m_tilePaintStrokeActive = true;
     m_tileStrokeCommand = STerrainTileCommand();
     m_tileStrokeCommand.description = tr("Paint terrain tiles");
+    m_overlaySurfaceStrokeCommand = SOverlaySurfaceCommand();
     m_lastTerrainPaintCenterValid = false;
     m_tileStrokeActions = 0;
     m_tileStrokeApplied = 0;
@@ -8613,6 +8744,33 @@ bool CView::applyTerrainTilePreview(const STerrainTileCommand& command, bool for
             : tr("Painted %1 atlas tile(s), including bounded seam updates.")
                   .arg(command.deltas.size()));
     }
+    update();
+    return true;
+}
+
+bool CView::applyOverlaySurfacePreview(const SOverlaySurfaceCommand& command,
+                                       bool forward)
+{
+    if(!m_terrainEditAvailable)
+        return false;
+    CValidationReport report;
+    if(!m_terrainEdit.apply(command, forward, &report))
+    {
+        ei::log(eLogWarning, "Overlay surface preview command refused:\n" + report.toText());
+        return false;
+    }
+    for(const SOverlaySectorDelta& delta : command.sectors)
+    {
+        if(!m_pLand->previewCanonicalSector(
+            delta.sectorX, delta.sectorY,
+            m_terrainEdit.sectorPayload(delta.sectorX, delta.sectorY)))
+            ei::log(eLogWarning, QString(
+                "Overlay model changed but preview renderer rejected sector %1,%2")
+                    .arg(delta.sectorX).arg(delta.sectorY));
+    }
+    m_pLand->setDirty(m_terrainEdit.isDirty());
+    emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMprDirtyFlag,
+                              m_terrainEdit.isDirty() ? "*" : "");
     update();
     return true;
 }
