@@ -335,6 +335,8 @@ private slots:
     void zone1NamespaceTemplateMatchesPrivateFixture();
     void terrainHeightTransactionReopensAndPreservesOverlay();
     void overlayActivationDeactivationIsLosslessAndUndoable();
+    void overlaySculptChangesOnlyActiveOverlayGeometry();
+    void overlaySculptSynchronizesSectorSeam();
     void conflictingTerrainSeamIsPreservedAndNotEditable();
     void malformedMprTableIsRejected();
     void stagedMobIsReopenedWithoutCreatingDestination();
@@ -4397,6 +4399,97 @@ void EnduranceDocumentTests::overlayActivationDeactivationIsLosslessAndUndoable(
     QVERIFY(!terrain.apply(stale, true, &staleReport));
     QVERIFY(staleReport.hasErrors());
     QCOMPARE(terrain.sectorPayload(0, 0), beforeRejected);
+}
+
+void EnduranceDocumentTests::overlaySculptChangesOnlyActiveOverlayGeometry()
+{
+    const QByteArray landSector = syntheticLandSector(1200);
+    CMprDocument baseline;
+    CValidationReport report;
+    QVERIFY2(baseline.loadBytes(syntheticMpr(landSector),
+                                "overlay-sculpt-baseline.mpr", &report),
+             qPrintable(report.toText()));
+    CTerrainEditModel terrain;
+    QVERIFY(terrain.load(baseline));
+    STerrainTileBrush cell;
+    cell.centerX = 2.0f;
+    cell.centerY = 3.0f;
+    cell.radius = 0.0f;
+    const SOverlaySurfaceCommand activation = terrain.makeOverlayActivation(
+        cell, 1, 0, 1, 0, &report);
+    QVERIFY2(!activation.isEmpty(), qPrintable(report.toText()));
+    QVERIFY(terrain.apply(activation, true, &report));
+    const QByteArray activePayload = terrain.sectorPayload(0, 0);
+
+    STerrainBrush brush;
+    brush.centerX = 5.0f;
+    brush.centerY = 7.0f;
+    brush.radius = 1.5f;
+    brush.falloff = ETerrainBrushFalloff::Constant;
+    const SOverlaySurfaceCommand sculpt = terrain.makeOverlayRaiseLower(
+        brush, 100.0f, &report);
+    QVERIFY2(!sculpt.isEmpty(), qPrintable(report.toText()));
+    QCOMPARE(sculpt.sectors.size(), 1);
+    const QByteArray sculpted = sculpt.sectors.front().afterPayload;
+    const int landVertexEnd = 5 + 33 * 33 * 8;
+    QCOMPARE(sculpted.left(landVertexEnd), activePayload.left(landVertexEnd));
+    const int overlayTileOffset = 5 + 2 * 33 * 33 * 8 + 16 * 16 * 2;
+    QCOMPARE(sculpted.mid(overlayTileOffset), activePayload.mid(overlayTileOffset));
+    QVERIFY(sculpted.mid(5 + 33 * 33 * 8, 33 * 33 * 8)
+            != activePayload.mid(5 + 33 * 33 * 8, 33 * 33 * 8));
+
+    COverlaySurfaceEditHistory history;
+    QVERIFY(history.execute(&terrain, sculpt, &report));
+    QVERIFY(terrain.sectorPayload(0, 0) != activePayload);
+    QVERIFY(history.undo(&terrain, &report));
+    QCOMPARE(terrain.sectorPayload(0, 0), activePayload);
+    QVERIFY(history.redo(&terrain, &report));
+    QCOMPARE(terrain.sectorPayload(0, 0), sculpted);
+
+    STerrainBrush inactive;
+    inactive.centerX = 20.0f;
+    inactive.centerY = 20.0f;
+    inactive.radius = 1.0f;
+    QVERIFY(terrain.makeOverlayRaiseLower(inactive, 100.0f, &report).isEmpty());
+}
+
+void EnduranceDocumentTests::overlaySculptSynchronizesSectorSeam()
+{
+    QVector<STerrainSectorSource> sources = twoSectorTerrain(1000);
+    for(STerrainSectorSource& source : sources)
+        source.landTileOffset = 5 + 33 * 33 * 8;
+    CTerrainEditModel terrain;
+    QVector<qint32> tileTypes(64, 0);
+    CValidationReport report;
+    QVERIFY2(terrain.loadSources(2, 1, 100.0f, sources, &report,
+                                 1, tileTypes, 2), qPrintable(report.toText()));
+    STerrainTileBrush cells;
+    cells.centerX = 15.5f;
+    cells.centerY = 3.0f;
+    cells.radius = 0.6f;
+    cells.shape = ETerrainTileBrushShape::Square;
+    const SOverlaySurfaceCommand activation = terrain.makeOverlayActivation(
+        cells, 1, 0, 1, 0, &report);
+    QVERIFY2(!activation.isEmpty(), qPrintable(report.toText()));
+    QCOMPARE(activation.sectors.size(), 2);
+    QVERIFY(terrain.apply(activation, true, &report));
+
+    STerrainBrush brush;
+    brush.centerX = 32.0f;
+    brush.centerY = 7.0f;
+    brush.radius = 1.5f;
+    brush.falloff = ETerrainBrushFalloff::Constant;
+    const SOverlaySurfaceCommand sculpt = terrain.makeOverlayRaiseLower(
+        brush, 200.0f, &report);
+    QVERIFY2(!sculpt.isEmpty(), qPrintable(report.toText()));
+    QCOMPARE(sculpt.sectors.size(), 2);
+    QVERIFY(terrain.apply(sculpt, true, &report));
+    const QByteArray left = terrain.sectorPayload(0, 0);
+    const QByteArray right = terrain.sectorPayload(1, 0);
+    const int overlayBase = 5 + 33 * 33 * 8;
+    const int leftVertex = overlayBase + (7 * 33 + 32) * 8;
+    const int rightVertex = overlayBase + (7 * 33) * 8;
+    QCOMPARE(left.mid(leftVertex, 8), right.mid(rightVertex, 8));
 }
 
 void EnduranceDocumentTests::conflictingTerrainSeamIsPreservedAndNotEditable()

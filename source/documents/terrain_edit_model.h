@@ -354,6 +354,15 @@ public:
     SOverlaySurfaceCommand makeOverlayDeactivation(
         const STerrainTileBrush& brush,
         CValidationReport* report = nullptr) const;
+    SOverlaySurfaceCommand makeOverlayRaiseLower(
+        const STerrainBrush& brush, float rawHeightDelta,
+        CValidationReport* report = nullptr) const;
+    SOverlaySurfaceCommand makeOverlayFlatten(
+        const STerrainBrush& brush, quint16 targetHeight, float strength,
+        CValidationReport* report = nullptr) const;
+    SOverlaySurfaceCommand makeOverlaySmooth(
+        const STerrainBrush& brush, float strength,
+        CValidationReport* report = nullptr) const;
 
     STerrainHeightCommand makeRaiseLower(const STerrainBrush& brush,
                                          float rawHeightDelta) const;
@@ -438,6 +447,10 @@ private:
     bool overlayTileIsActive(const SSector& sector, int localTile) const;
     bool refreshSectorLayout(SSector* sector,
                              CValidationReport* report = nullptr) const;
+    SOverlaySurfaceCommand makeOverlayHeightEdit(
+        const QString& description, const STerrainBrush& brush,
+        int operation, float value, float strength,
+        CValidationReport* report) const;
     STerrainTileCommand makeBoundedSemanticTilePaint(
         const STerrainTileBrush& brush, ETerrainTileLayer layer,
         qint32 materialId, const CTerrainTransitionCatalog& catalog,

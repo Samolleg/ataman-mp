@@ -87,6 +87,45 @@ qint16 readOverlayMaterial(const QByteArray& payload, quint64 baseOffset, int lo
     return qint16(readPackedTile(payload, baseOffset, localTile));
 }
 
+quint16 readVertexHeight(const QByteArray& payload, quint64 baseOffset,
+                         int localX, int localY)
+{
+    const quint64 offset = baseOffset
+        + quint64(localY * kSectorVertices + localX) * kVertexSize + 2;
+    return qFromLittleEndian<quint16>(reinterpret_cast<const uchar*>(
+        payload.constData() + offset));
+}
+
+void writeVertexHeight(QByteArray& payload, quint64 baseOffset,
+                       int localX, int localY, quint16 height)
+{
+    const quint64 offset = baseOffset
+        + quint64(localY * kSectorVertices + localX) * kVertexSize + 2;
+    uchar encoded[2];
+    qToLittleEndian<quint16>(height, encoded);
+    payload[int(offset)] = char(encoded[0]);
+    payload[int(offset) + 1] = char(encoded[1]);
+}
+
+qint8 readVertexOffset(const QByteArray& payload, quint64 baseOffset,
+                       int localX, int localY, int component)
+{
+    const quint64 offset = baseOffset
+        + quint64(localY * kSectorVertices + localX) * kVertexSize + component;
+    return qint8(payload.at(int(offset)));
+}
+
+void writeVertexNormal(QByteArray& payload, quint64 baseOffset,
+                       int localX, int localY, quint32 packed)
+{
+    const quint64 offset = baseOffset
+        + quint64(localY * kSectorVertices + localX) * kVertexSize + 4;
+    uchar encoded[4];
+    qToLittleEndian<quint32>(packed, encoded);
+    for(int byte = 0; byte < 4; ++byte)
+        payload[int(offset) + byte] = char(encoded[byte]);
+}
+
 void writeOverlayMaterial(QByteArray& payload, quint64 baseOffset,
                           int localTile, qint16 material)
 {
@@ -1198,6 +1237,259 @@ SOverlaySurfaceCommand CTerrainEditModel::makeOverlayDeactivation(
         delta.sectorY = sector.source.sectorY;
         delta.beforePayload = sector.currentPayload;
         delta.afterPayload = it.value();
+        command.sectors.append(delta);
+    }
+    return command;
+}
+
+SOverlaySurfaceCommand CTerrainEditModel::makeOverlayRaiseLower(
+    const STerrainBrush& brush, float rawHeightDelta,
+    CValidationReport* report) const
+{
+    return makeOverlayHeightEdit(QStringLiteral("Sculpt overlay height"), brush,
+                                 0, rawHeightDelta, 1.0f, report);
+}
+
+SOverlaySurfaceCommand CTerrainEditModel::makeOverlayFlatten(
+    const STerrainBrush& brush, quint16 targetHeight, float strength,
+    CValidationReport* report) const
+{
+    return makeOverlayHeightEdit(QStringLiteral("Flatten overlay height"), brush,
+                                 1, float(targetHeight), strength, report);
+}
+
+SOverlaySurfaceCommand CTerrainEditModel::makeOverlaySmooth(
+    const STerrainBrush& brush, float strength,
+    CValidationReport* report) const
+{
+    return makeOverlayHeightEdit(QStringLiteral("Smooth overlay height"), brush,
+                                 2, 0.0f, strength, report);
+}
+
+SOverlaySurfaceCommand CTerrainEditModel::makeOverlayHeightEdit(
+    const QString& description, const STerrainBrush& brush,
+    int operation, float value, float strength,
+    CValidationReport* report) const
+{
+    SOverlaySurfaceCommand command;
+    command.description = description;
+    if(brush.radius <= 0.0f || !std::isfinite(value) || !std::isfinite(strength)
+       || strength < 0.0f || strength > 1.0f || operation < 0 || operation > 2)
+    {
+        if(report)
+            report->add("terrain.overlay_sculpt_input", EValidationSeverity::Error,
+                        "Overlay sculpt parameters are outside the supported range");
+        return command;
+    }
+
+    struct SOverlayRef { int sectorIndex; int localX; int localY; };
+    QMap<int, QVector<SOverlayRef>> refs;
+    QMap<int, quint16> heights;
+    QMap<int, qint8> xOffsets;
+    QMap<int, qint8> yOffsets;
+    QSet<int> activeVertices;
+    for(int sectorIndex = 0; sectorIndex < m_sectors.size(); ++sectorIndex)
+    {
+        const SSector& sector = m_sectors.at(sectorIndex);
+        if(sector.source.type != 3 || sector.source.overlayVertexOffset == 0)
+            continue;
+        for(int localY = 0; localY < kSectorVertices; ++localY)
+        {
+            for(int localX = 0; localX < kSectorVertices; ++localX)
+            {
+                const int globalX = sector.source.sectorX * kSectorStride + localX;
+                const int globalY = sector.source.sectorY * kSectorStride + localY;
+                const int key = globalIndex(globalX, globalY);
+                const quint16 height = readVertexHeight(
+                    sector.currentPayload, sector.source.overlayVertexOffset,
+                    localX, localY);
+                const qint8 xOffset = readVertexOffset(
+                    sector.currentPayload, sector.source.overlayVertexOffset,
+                    localX, localY, 0);
+                const qint8 yOffset = readVertexOffset(
+                    sector.currentPayload, sector.source.overlayVertexOffset,
+                    localX, localY, 1);
+                if(heights.contains(key)
+                   && (heights.value(key) != height
+                       || xOffsets.value(key) != xOffset
+                       || yOffsets.value(key) != yOffset))
+                {
+                    if(report)
+                        report->add("terrain.overlay_seam", EValidationSeverity::Error,
+                                    "Overlay sculpting found a conflicting shared SEC vertex",
+                                    QString("%1,%2").arg(globalX).arg(globalY));
+                    return command;
+                }
+                heights.insert(key, height);
+                xOffsets.insert(key, xOffset);
+                yOffsets.insert(key, yOffset);
+                refs[key].append({sectorIndex, localX, localY});
+            }
+        }
+        for(int tileY = 0; tileY < kSectorTiles; ++tileY)
+        {
+            for(int tileX = 0; tileX < kSectorTiles; ++tileX)
+            {
+                const int localTile = tileY * kSectorTiles + tileX;
+                if(!overlayTileIsActive(sector, localTile))
+                    continue;
+                for(int vertexY = tileY * 2; vertexY <= tileY * 2 + 2; ++vertexY)
+                    for(int vertexX = tileX * 2; vertexX <= tileX * 2 + 2; ++vertexX)
+                    {
+                        const int globalX = sector.source.sectorX * kSectorStride + vertexX;
+                        const int globalY = sector.source.sectorY * kSectorStride + vertexY;
+                        activeVertices.insert(globalIndex(globalX, globalY));
+                    }
+            }
+        }
+    }
+
+    QMap<int, quint16> afterHeights = heights;
+    QSet<int> changedVertices;
+    for(int key : activeVertices)
+    {
+        if(!heights.contains(key))
+            continue;
+        const int x = key % m_vertexCountX;
+        const int y = key / m_vertexCountX;
+        const float dx = float(x) - brush.centerX;
+        const float dy = float(y) - brush.centerY;
+        const float weight = brushWeight(std::sqrt(dx * dx + dy * dy),
+                                         brush.radius, brush.falloff);
+        if(weight <= 0.0f)
+            continue;
+        const float before = float(heights.value(key));
+        float target = before;
+        if(operation == 0)
+            target = before + value * weight;
+        else if(operation == 1)
+            target = before + (value - before) * strength * weight;
+        else
+        {
+            float sum = 0.0f;
+            int samples = 0;
+            for(int oy = -1; oy <= 1; ++oy)
+                for(int ox = -1; ox <= 1; ++ox)
+                {
+                    const int nx = x + ox;
+                    const int ny = y + oy;
+                    if(nx < 0 || ny < 0 || nx >= m_vertexCountX || ny >= m_vertexCountY)
+                        continue;
+                    const int neighbor = globalIndex(nx, ny);
+                    if(!heights.contains(neighbor))
+                        continue;
+                    sum += heights.value(neighbor);
+                    ++samples;
+                }
+            if(samples > 0)
+                target = before + (sum / float(samples) - before) * strength * weight;
+        }
+        bool clamped = false;
+        const quint16 after = clampedHeight(target, &clamped);
+        if(clamped)
+        {
+            if(report)
+                report->add("terrain.overlay_sculpt_range", EValidationSeverity::Error,
+                            "Overlay sculpting would clamp the raw MPR height range",
+                            QString("%1,%2").arg(x).arg(y));
+            return SOverlaySurfaceCommand();
+        }
+        if(after != heights.value(key))
+        {
+            afterHeights.insert(key, after);
+            changedVertices.insert(key);
+        }
+    }
+    if(changedVertices.isEmpty())
+        return command;
+
+    QVector<QByteArray> replacements;
+    replacements.reserve(m_sectors.size());
+    for(const SSector& sector : m_sectors)
+        replacements.append(sector.currentPayload);
+    for(int key : changedVertices)
+        for(const SOverlayRef& ref : refs.value(key))
+            writeVertexHeight(replacements[ref.sectorIndex],
+                m_sectors.at(ref.sectorIndex).source.overlayVertexOffset,
+                ref.localX, ref.localY, afterHeights.value(key));
+
+    QSet<int> affectedNormals;
+    for(int changed : changedVertices)
+    {
+        const int centerX = changed % m_vertexCountX;
+        const int centerY = changed / m_vertexCountX;
+        for(int oy = -1; oy <= 1; ++oy)
+            for(int ox = -1; ox <= 1; ++ox)
+            {
+                const int x = centerX + ox;
+                const int y = centerY + oy;
+                if(x < 0 || y < 0 || x >= m_vertexCountX || y >= m_vertexCountY)
+                    continue;
+                const int key = globalIndex(x, y);
+                if(activeVertices.contains(key) && refs.contains(key))
+                    affectedNormals.insert(key);
+            }
+    }
+    const auto position = [&](int x, int y) {
+        const int key = globalIndex(x, y);
+        return SVector3(double(x) + double(xOffsets.value(key)) / 254.0,
+                        double(y) + double(yOffsets.value(key)) / 254.0,
+                        double(afterHeights.value(key)) * double(m_maxZ) / 65535.0);
+    };
+    static const int ring[8][2] = {
+        {1, 0}, {1, 1}, {0, 1}, {-1, 1},
+        {-1, 0}, {-1, -1}, {0, -1}, {1, -1}
+    };
+    for(int key : affectedNormals)
+    {
+        const int x = key % m_vertexCountX;
+        const int y = key / m_vertexCountX;
+        const SVector3 center = position(x, y);
+        SVector3 normal;
+        for(int edge = 0; edge < 8; ++edge)
+        {
+            const int next = (edge + 1) % 8;
+            const int ax = x + ring[edge][0];
+            const int ay = y + ring[edge][1];
+            const int bx = x + ring[next][0];
+            const int by = y + ring[next][1];
+            if(ax < 0 || ay < 0 || bx < 0 || by < 0
+               || ax >= m_vertexCountX || ay >= m_vertexCountY
+               || bx >= m_vertexCountX || by >= m_vertexCountY
+               || !afterHeights.contains(globalIndex(ax, ay))
+               || !afterHeights.contains(globalIndex(bx, by)))
+                continue;
+            SVector3 face = cross(subtract(position(ax, ay), center),
+                                  subtract(position(bx, by), center));
+            if(face.z < 0.0)
+                face = {-face.x, -face.y, -face.z};
+            if(!normalize(&face))
+                continue;
+            normal.x += face.x;
+            normal.y += face.y;
+            normal.z += face.z;
+        }
+        if(!normalize(&normal))
+            normal = {0.0, 0.0, 1.0};
+        const quint32 packedX = quint32(qBound(0, int(normal.x * 1000.0 + 1000.0), 2047));
+        const quint32 packedY = quint32(qBound(0, int(normal.y * 1000.0 + 1000.0), 2047));
+        const quint32 packedZ = quint32(qBound(0, int(normal.z * 1000.0), 1023));
+        const quint32 packed = (packedZ << 22) | (packedX << 11) | packedY;
+        for(const SOverlayRef& ref : refs.value(key))
+            writeVertexNormal(replacements[ref.sectorIndex],
+                m_sectors.at(ref.sectorIndex).source.overlayVertexOffset,
+                ref.localX, ref.localY, packed);
+    }
+
+    for(int index = 0; index < replacements.size(); ++index)
+    {
+        if(replacements.at(index) == m_sectors.at(index).currentPayload)
+            continue;
+        SOverlaySectorDelta delta;
+        delta.sectorX = m_sectors.at(index).source.sectorX;
+        delta.sectorY = m_sectors.at(index).source.sectorY;
+        delta.beforePayload = m_sectors.at(index).currentPayload;
+        delta.afterPayload = replacements.at(index);
         command.sectors.append(delta);
     }
     return command;

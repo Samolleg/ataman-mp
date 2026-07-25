@@ -5,7 +5,8 @@ enum class ELandscapeEditMode
 {
     Sculpt,
     TilePaint,
-    OverlayPaint
+    OverlayPaint,
+    OverlaySculpt
 };
 
 inline bool landscapeModeChangeRequiresBrushReset(

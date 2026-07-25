@@ -764,7 +764,8 @@ void CView::syncLandscapeToolState()
     if(m_landscapeTools)
     {
         const ELandscapeEditMode current = m_landscapeTools->editMode();
-        if(current != ELandscapeEditMode::Sculpt)
+        if(current != ELandscapeEditMode::Sculpt
+           && current != ELandscapeEditMode::OverlaySculpt)
             m_sculptOutlineValid = false;
         if(m_lastLandscapeEditMode >= 0
            && landscapeModeChangeRequiresBrushReset(
@@ -796,6 +797,13 @@ void CView::syncLandscapeToolState()
         CScene::getInstance()->setLandTileEditMode(false);
         changeOperation(EButtonOpTilebrush);
         emit updateMsg(tr("Overlay painting enabled for existing overlay cells only."));
+        break;
+    case ELandscapeEditMode::OverlaySculpt:
+        if(m_pOp && m_pOp->operationMethod() == eOperationMethodTileBrush)
+            changeOperation(EButtonOpSelect);
+        CScene::getInstance()->setLandTileEditMode(false);
+        setPreviewTile(false);
+        emit updateMsg(tr("Overlay-only sculpting enabled for active surfaces."));
         break;
     }
     ensureManualTileSelection();
@@ -6226,7 +6234,8 @@ void CView::drawTerrainPaintOutline(QOpenGLShaderProgram* program)
     const int position = program->attributeLocation("a_position");
     if(position < 0)
         return;
-    if(m_landscapeTools->editMode() == ELandscapeEditMode::Sculpt)
+    if(m_landscapeTools->editMode() == ELandscapeEditMode::Sculpt
+       || m_landscapeTools->editMode() == ELandscapeEditMode::OverlaySculpt)
     {
         if(!m_sculptOutlineValid)
             return;
@@ -6239,7 +6248,8 @@ void CView::drawTerrainPaintOutline(QOpenGLShaderProgram* program)
             const float angle = float(segment) * float(2.0 * M_PI / segments);
             QVector3D point(m_sculptOutlineCenter.x() + qCos(angle) * radius,
                             m_sculptOutlineCenter.y() + qSin(angle) * radius, 0.0f);
-            if(!m_pLand->projectPt(point))
+            if(!m_pLand->projectPt(point,
+                m_landscapeTools->editMode() == ELandscapeEditMode::Sculpt))
                 return;
             point.setZ(point.z() + 0.12f);
             circle.append(point);
@@ -8769,6 +8779,9 @@ bool CView::applyOverlaySurfacePreview(const SOverlaySurfaceCommand& command,
                     .arg(delta.sectorX).arg(delta.sectorY));
     }
     m_pLand->setDirty(m_terrainEdit.isDirty());
+    m_aiGraphOverlayDirty = true;
+    m_staticShadowFingerprint.clear();
+    m_farStaticShadowFingerprint.clear();
     emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMprDirtyFlag,
                               m_terrainEdit.isDirty() ? "*" : "");
     update();
@@ -9236,8 +9249,9 @@ void CView::mousePressEvent(QMouseEvent* event)
     if(m_landscapeTools && m_landscapeTools->sculptEnabled()
         && m_terrainEditAvailable && event->button() == Qt::LeftButton)
     {
+        const bool overlaySculpt = m_landscapeTools->overlaySculptEnabled();
         m_sculptStrokeActive = true;
-        m_lastSculptPoint = getTerrainPos(event->x(), event->y(), true);
+        m_lastSculptPoint = getTerrainPos(event->x(), event->y(), !overlaySculpt);
         m_sculptOutlineCenter = m_lastSculptPoint;
         m_sculptOutlineValid = true;
         m_lastSculptStampPoint = m_lastSculptPoint;
@@ -9246,6 +9260,8 @@ void CView::mousePressEvent(QMouseEvent* event)
         m_sculptStrokeVertices = 0;
         m_sculptStrokeCommand = STerrainHeightCommand();
         m_sculptStrokeCommand.description = tr("Sculpt terrain");
+        m_overlaySurfaceStrokeCommand = SOverlaySurfaceCommand();
+        m_overlaySurfaceStrokeCommand.description = tr("Sculpt overlay height");
         sculptTerrainAt(m_lastSculptPoint);
         m_sculptRepeatTimer->start();
         event->accept();
@@ -9264,6 +9280,48 @@ void CView::sculptTerrainAt(const QVector3D& position)
     brush.centerY = position.y();
     brush.radius = m_landscapeTools->radius();
     brush.falloff = ETerrainBrushFalloff::Smooth;
+
+    if(m_landscapeTools->overlaySculptEnabled())
+    {
+        CValidationReport report;
+        SOverlaySurfaceCommand overlayCommand;
+        switch(m_landscapeTools->sculptTool())
+        {
+        case ELandscapeSculptTool::Raise:
+            overlayCommand = m_terrainEdit.makeOverlayRaiseLower(
+                brush, m_landscapeTools->rawDelta() * m_landscapeTools->strength(),
+                &report);
+            break;
+        case ELandscapeSculptTool::Lower:
+            overlayCommand = m_terrainEdit.makeOverlayRaiseLower(
+                brush, -m_landscapeTools->rawDelta() * m_landscapeTools->strength(),
+                &report);
+            break;
+        case ELandscapeSculptTool::Flatten:
+            overlayCommand = m_terrainEdit.makeOverlayFlatten(
+                brush, m_landscapeTools->flattenHeight(),
+                m_landscapeTools->strength(), &report);
+            break;
+        case ELandscapeSculptTool::Smooth:
+            overlayCommand = m_terrainEdit.makeOverlaySmooth(
+                brush, m_landscapeTools->strength(), &report);
+            break;
+        }
+        if(overlayCommand.isEmpty())
+        {
+            if(report.hasErrors())
+                emit updateMsg(report.toText());
+            return;
+        }
+        if(applyOverlaySurfacePreview(overlayCommand, true))
+        {
+            appendOverlaySurfaceCommand(&m_overlaySurfaceStrokeCommand, overlayCommand);
+            m_sculptStrokeChanged = true;
+            ++m_sculptStrokeStamps;
+            m_sculptStrokeVertices += overlayCommand.sectors.size();
+        }
+        return;
+    }
 
     STerrainHeightCommand command;
     switch(m_landscapeTools->sculptTool())
@@ -9519,14 +9577,16 @@ void CView::mouseMoveEvent(QMouseEvent* event)
     if(m_landscapeTools && m_landscapeTools->sculptEnabled()
        && m_terrainEditAvailable)
     {
-        m_sculptOutlineCenter = getTerrainPos(event->x(), event->y(), true);
+        const bool overlaySculpt = m_landscapeTools->overlaySculptEnabled();
+        m_sculptOutlineCenter = getTerrainPos(event->x(), event->y(), !overlaySculpt);
         m_sculptOutlineValid = true;
         update();
     }
     if(m_sculptStrokeActive && (event->buttons() & Qt::LeftButton)
         && m_landscapeTools && m_terrainEditAvailable)
     {
-        const QVector3D position = getTerrainPos(event->x(), event->y(), true);
+        const bool overlaySculpt = m_landscapeTools->overlaySculptEnabled();
+        const QVector3D position = getTerrainPos(event->x(), event->y(), !overlaySculpt);
         m_lastSculptPoint = position;
         // The repeat timer applies the latest point. This keeps pointer input
         // responsive and caps canonical preview work to one stamp per tick.
@@ -10708,20 +10768,28 @@ void CView::finishSculptStroke()
         return;
     m_sculptRepeatTimer->stop();
     m_sculptStrokeActive = false;
-    if(m_pUndoStack && !m_sculptStrokeCommand.isEmpty())
+    const bool overlayStroke = !m_overlaySurfaceStrokeCommand.isEmpty();
+    if(m_pUndoStack && overlayStroke)
+        m_pUndoStack->push(new COverlaySurfacePreviewCommand(
+            this, m_overlaySurfaceStrokeCommand, true));
+    else if(m_pUndoStack && !m_sculptStrokeCommand.isEmpty())
         m_pUndoStack->push(new CTerrainHeightPreviewCommand(
             this, m_sculptStrokeCommand, true));
     if(m_sculptStrokeChanged)
     {
-        for(CMob* mob : m_aMob)
-            mob->reprojectForCurrentTerrain();
+        if(!overlayStroke)
+            for(CMob* mob : m_aMob)
+                mob->reprojectForCurrentTerrain();
         m_pLand->setDirty(m_terrainEdit.isDirty());
         m_staticShadowFingerprint.clear();
         m_farStaticShadowFingerprint.clear();
         emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMprDirtyFlag,
                                   m_terrainEdit.isDirty() ? "*" : "");
-        emit updateMsg(tr("Sculpt stroke: %1 stamp(s), %2 vertex updates; MOB placement and navigation may need review.")
-            .arg(m_sculptStrokeStamps).arg(m_sculptStrokeVertices));
+        emit updateMsg(overlayStroke
+            ? tr("Overlay sculpt stroke: %1 stamp(s), %2 sector update(s); liquid navigation may need review.")
+                .arg(m_sculptStrokeStamps).arg(m_sculptStrokeVertices)
+            : tr("Sculpt stroke: %1 stamp(s), %2 vertex updates; MOB placement and navigation may need review.")
+                .arg(m_sculptStrokeStamps).arg(m_sculptStrokeVertices));
     }
 }
 

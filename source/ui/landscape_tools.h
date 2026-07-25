@@ -36,6 +36,7 @@ public:
     explicit CLandscapeTools(QWidget* parent = nullptr);
 
     bool sculptEnabled() const;
+    bool overlaySculptEnabled() const;
     bool editingEnabled() const;
     bool tilePaintEnabled() const;
     bool overlayPaintEnabled() const;

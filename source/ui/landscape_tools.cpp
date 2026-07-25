@@ -52,6 +52,7 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     m_mode->addItem(tr("Sculpt terrain"));
     m_mode->addItem(tr("Paint land tiles"));
     m_mode->addItem(tr("Paint existing overlays"));
+    m_mode->addItem(tr("Sculpt overlay surfaces"));
     QFormLayout* modeForm = new QFormLayout();
     modeForm->addRow(tr("Landscape tool"), m_mode);
     layout->addLayout(modeForm);
@@ -201,7 +202,13 @@ ELandscapeEditMode CLandscapeTools::editMode() const
 }
 bool CLandscapeTools::sculptEnabled() const
 {
-    return editingEnabled() && editMode() == ELandscapeEditMode::Sculpt;
+    return editingEnabled()
+        && (editMode() == ELandscapeEditMode::Sculpt
+            || editMode() == ELandscapeEditMode::OverlaySculpt);
+}
+bool CLandscapeTools::overlaySculptEnabled() const
+{
+    return editingEnabled() && editMode() == ELandscapeEditMode::OverlaySculpt;
 }
 bool CLandscapeTools::tilePaintEnabled() const
 {
@@ -232,7 +239,8 @@ void CLandscapeTools::setEditingEnabled(bool enabled, bool notify)
 }
 void CLandscapeTools::updateModeVisibility()
 {
-    const bool sculpt = editMode() == ELandscapeEditMode::Sculpt;
+    const bool sculpt = editMode() == ELandscapeEditMode::Sculpt
+        || editMode() == ELandscapeEditMode::OverlaySculpt;
     m_sculptControls->setVisible(sculpt);
     m_paintControls->setVisible(!sculpt);
     m_showUnderwaterFamilies->setVisible(
