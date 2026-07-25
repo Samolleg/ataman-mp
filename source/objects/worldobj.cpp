@@ -338,7 +338,7 @@ void CWorldObj::collectParams(QList<QSharedPointer<IPropertyBase>>& aProp, ENode
     {//bodyparts
         QMap<QString, QSharedPointer<propBool>> arrBodyPart;
         util::bodyPartToProp(arrBodyPart, m_modelName, m_bodyParts);
-        propBodyPart bodyPart(eObjParam_BODYPARTS, arrBodyPart);
+        propBodyPart bodyPart(eObjParam_BODYPARTS, arrBodyPart, m_bodyParts);
         util::addBodyPartParam(aProp, &bodyPart);
     }
     propStr parentTemplate(eObjParam_PARENT_TEMPLATE, m_parentTemplate);
@@ -383,7 +383,7 @@ void CWorldObj::getParam(QSharedPointer<IPropertyBase>& prop, EObjParam propType
     {
         QMap<QString, QSharedPointer<propBool>> arrBodyPart;
         util::bodyPartToProp(arrBodyPart, m_modelName, m_bodyParts);
-        prop.reset(new propBodyPart(eObjParam_BODYPARTS, arrBodyPart));
+        prop.reset(new propBodyPart(eObjParam_BODYPARTS, arrBodyPart, m_bodyParts));
         break;
     }
     case eObjParam_PLAYER:
@@ -483,21 +483,8 @@ void CWorldObj::applyParam(const QSharedPointer<IPropertyBase>& prop)
     {
     case eObjParam_BODYPARTS:
     {
-        const auto& supplied = dynamic_cast<propBodyPart*>(prop.get())->value();
-        QMap<QString, QSharedPointer<propBool>> compatible = supplied;
-        if(ei::CFigure* figure = CObjectList::getInstance()->getFigure(m_modelName))
-        {
-            QStringList modelParts;
-            figure->getPartNames(modelParts);
-            if(!modelParts.isEmpty())
-            {
-                compatible.clear();
-                for(const QString& part : modelParts)
-                    if(supplied.contains(part))
-                        compatible.insert(part, supplied.value(part));
-            }
-        }
-        util::propToBodyPart(m_bodyParts, compatible);
+        const propBodyPart* parts = dynamic_cast<propBodyPart*>(prop.get());
+        m_bodyParts = parts->valueAppliedTo(m_bodyParts);
         recalcFigure();
         updatePos(m_position);
         break;

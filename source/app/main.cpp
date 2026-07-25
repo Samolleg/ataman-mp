@@ -40,6 +40,7 @@
 #include "resourcemanager.h"
 #include "layout_components/tablemanager.h"
 #include "ui/landscape_tools.h"
+#include "ui/bodypartedit_form.h"
 #include "window_lifecycle.h"
 #include "settings.h"
 #include "jmv_map_test_launcher.h"
@@ -834,6 +835,56 @@ int runHeadlessCommand(QApplication& app)
         const bool mixedModelPartsVisible = rowForType(mixedModelTable,
                                                        eObjParam_BODYPARTS) >= 0;
 
+        QMap<QString, QSharedPointer<propBool>> serializedPartMap;
+        serializedPartMap.insert("bd", QSharedPointer<propBool>(
+            new propBool(eObjParam_BODYPARTS, true)));
+        serializedPartMap.insert("hr", QSharedPointer<propBool>(
+            new propBool(eObjParam_BODYPARTS, true)));
+        serializedPartMap.insert("future_part", QSharedPointer<propBool>(
+            new propBool(eObjParam_BODYPARTS, true)));
+        const QStringList exactSerializedParts = {
+            "bd", "hr", "future_part", "future_part"
+        };
+        QSharedPointer<IPropertyBase> serializedPartsProperty(new propBodyPart(
+            eObjParam_BODYPARTS, serializedPartMap, exactSerializedParts));
+        CBodyPartEditForm bodyPartForm;
+        bodyPartForm.setPartData(serializedPartsProperty);
+        QTableWidget* bodyPartTable = bodyPartForm.findChild<QTableWidget*>("tablePart");
+        QLineEdit* bodyPartFilter = bodyPartForm.findChild<QLineEdit*>("lineFilter");
+        const bool serializedUnknownPartsVisible = bodyPartTable
+            && bodyPartTable->findItems("hr", Qt::MatchExactly).size() == 1
+            && bodyPartTable->findItems("future_part", Qt::MatchExactly).size() == 1;
+        if(bodyPartFilter) bodyPartFilter->setText("hr");
+        bool bodyPartFilterDisplayOnly = bodyPartTable && bodyPartFilter;
+        if(bodyPartTable)
+            for(int row = 0; row < bodyPartTable->rowCount(); ++row)
+                bodyPartFilterDisplayOnly = bodyPartFilterDisplayOnly
+                    && (bodyPartTable->item(row, 0)->text() == "hr"
+                        ? !bodyPartTable->isRowHidden(row)
+                        : bodyPartTable->isRowHidden(row));
+        const propBodyPart* serializedParts =
+            dynamic_cast<const propBodyPart*>(serializedPartsProperty.get());
+        const bool bodyPartNoOpPreservesExactArray = serializedParts
+            && serializedParts->valueAppliedTo(exactSerializedParts)
+                == exactSerializedParts;
+        propBodyPart reorderedParts(eObjParam_BODYPARTS, serializedPartMap,
+            QStringList{"hr", "bd", "future_part", "future_part"});
+        const bool bodyPartOrderParticipatesInEquality = serializedParts
+            && !serializedParts->isEqual(&reorderedParts);
+        QMap<QString, QSharedPointer<propBool>> changedPartMap;
+        for(const QString& part : QStringList{"bd", "hr", "future_part"})
+            changedPartMap.insert(part, QSharedPointer<propBool>(
+                new propBool(eObjParam_BODYPARTS, true)));
+        propBodyPart changedParts(eObjParam_BODYPARTS, changedPartMap,
+                                  exactSerializedParts);
+        changedParts.value().value("bd")->resetValue(false);
+        const QStringList changedSerializedParts =
+            changedParts.valueAppliedTo(exactSerializedParts);
+        const bool bodyPartDeltaPreservesHiddenAndDuplicates =
+            !changedSerializedParts.contains("bd")
+            && changedSerializedParts.contains("hr")
+            && changedSerializedParts.count("future_part") == 2;
+
         CLandscapeTools landscapeTools;
         const bool minimumPaintBrushIsSingleTile = qFuzzyIsNull(
             landscapeTools.paintRadius());
@@ -1029,6 +1080,11 @@ int runHeadlessCommand(QApplication& app)
                 && partialCopyExact && partialPasteExact && partialPasteCommit
                 && propertyScrollPreserved
                 && mixedModelPartsVisible
+                && serializedUnknownPartsVisible
+                && bodyPartFilterDisplayOnly
+                && bodyPartNoOpPreservesExactArray
+                && bodyPartOrderParticipatesInEquality
+                && bodyPartDeltaPreservesHiddenAndDuplicates
                 && minimumPaintBrushIsSingleTile
                 && underwaterFamiliesHiddenByDefault
                 && underwaterFamiliesCanBeShown
@@ -1086,6 +1142,13 @@ int runHeadlessCommand(QApplication& app)
                << " partialPasteCommit=" << partialPasteCommit << "\n"
                << " propertyScrollPreserved=" << propertyScrollPreserved << "\n"
                << " mixedModelPartsVisible=" << mixedModelPartsVisible
+               << " serializedUnknownPartsVisible=" << serializedUnknownPartsVisible
+               << " bodyPartFilterDisplayOnly=" << bodyPartFilterDisplayOnly
+               << " bodyPartNoOpPreservesExactArray=" << bodyPartNoOpPreservesExactArray
+               << " bodyPartOrderParticipatesInEquality="
+               << bodyPartOrderParticipatesInEquality
+               << " bodyPartDeltaPreservesHiddenAndDuplicates="
+               << bodyPartDeltaPreservesHiddenAndDuplicates
                << " minimumPaintBrushIsSingleTile=" << minimumPaintBrushIsSingleTile
                << " underwaterFamiliesHiddenByDefault=" << underwaterFamiliesHiddenByDefault
                << " underwaterFamiliesCanBeShown=" << underwaterFamiliesCanBeShown

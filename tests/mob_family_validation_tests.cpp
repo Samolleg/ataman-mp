@@ -80,6 +80,7 @@ class MobFamilyValidationTests : public QObject
     Q_OBJECT
 private slots:
     void workspaceCopyShadowsInstalledLogicalMob();
+    void renamedLoadedPrimaryReplacesInstalledCatalogPrimary();
     void differentLogicalNamesRemainIndependent();
     void missingScriptDependencyReportsExactReferenceSource();
     void separatelyLoadedMapSetsAreNotReportedAsOneFamily();
@@ -123,6 +124,36 @@ void MobFamilyValidationTests::workspaceCopyShadowsInstalledLogicalMob()
     QVERIFY(report.nidOwners.contains(77));
     QCOMPARE(report.nidOwners.value(77).size(), 2);
     QVERIFY(!report.nidOwners.contains(41));
+}
+
+void MobFamilyValidationTests::renamedLoadedPrimaryReplacesInstalledCatalogPrimary()
+{
+    QTemporaryDir workspace;
+    QTemporaryDir installed;
+    QVERIFY(workspace.isValid());
+    QVERIFY(installed.isValid());
+    const QString installedPrimary = writeMob(installed.path(), "zone3obr.mob",
+                                               mobWithObject(3470));
+    const QString testPrimary = writeMob(workspace.path(), "zone3obrtest.mob",
+                                         mobWithObject(202));
+    QVERIFY(!installedPrimary.isEmpty() && !testPrimary.isEmpty());
+
+    SMobFamilyValidationRequest request;
+    request.familyLabel = "gz3obr";
+    request.profileId = "test";
+    request.seedMobPaths << testPrimary;
+    request.mappedPrimaryMobPath = installedPrimary;
+    request.preferredMobPath = testPrimary;
+    request.workspaceRoots << workspace.path();
+    request.mapRoots << installed.path();
+    request.includeProfileWideMobs = false;
+    const CMobFamilyValidationReport report = CMobFamilyValidator::validate(request);
+
+    QCOMPARE(report.members.size(), 1);
+    QCOMPARE(QDir::cleanPath(report.members.first().path), QDir::cleanPath(testPrimary));
+    QCOMPARE(report.members.first().inclusionReason, QString("explicit seed"));
+    QVERIFY(report.nidOwners.contains(202));
+    QVERIFY(!report.nidOwners.contains(3470));
 }
 
 void MobFamilyValidationTests::differentLogicalNamesRemainIndependent()

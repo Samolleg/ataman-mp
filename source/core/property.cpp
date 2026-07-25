@@ -275,6 +275,22 @@ void CPropertyUnitStat::resetValue(const QVector<QSharedPointer<IPropertyBase>> 
     m_value = val;
 }
 
+CPropertyObjectParts::CPropertyObjectParts(
+    EObjParam type, const QMap<QString, QSharedPointer<propBool>>& val)
+    : IPropertyBase(type, true), m_value(val)
+{
+    captureBaseline();
+}
+
+CPropertyObjectParts::CPropertyObjectParts(
+    EObjParam type, const QMap<QString, QSharedPointer<propBool>>& val,
+    const QStringList& serializedValue)
+    : IPropertyBase(type, true), m_value(val), m_serializedValue(serializedValue),
+      m_hasSerializedValue(true)
+{
+    captureBaseline();
+}
+
 IPropertyBase *CPropertyObjectParts::clone() const
 {
     const CPropertyObjectParts* pProp = dynamic_cast<const CPropertyObjectParts*>(this);
@@ -289,7 +305,12 @@ IPropertyBase *CPropertyObjectParts::clone() const
         for(auto it = pProp->value().constBegin(); it != pProp->value().constEnd(); ++it)
             copied.insert(it.key(), QSharedPointer<propBool>(
                 dynamic_cast<propBool*>(it.value()->clone())));
-        return new CPropertyObjectParts(type(), copied);
+        CPropertyObjectParts* result = new CPropertyObjectParts(type(), copied);
+        result->m_baselineStates = m_baselineStates;
+        result->m_serializedValue = m_serializedValue;
+        result->m_hasSerializedValue = m_hasSerializedValue;
+        result->m_replaceAll = m_replaceAll;
+        return result;
     }
     else
         return new CPropertyObjectParts(type());
@@ -307,6 +328,9 @@ bool CPropertyObjectParts::isEqual(const IPropertyBase *pProp) const
         if (!m_value[part]->isEqual(arr[part].get()))
             return false;
     }
+    if(m_hasSerializedValue && pData->m_hasSerializedValue
+       && effectiveSerializedValue() != pData->effectiveSerializedValue())
+        return false;
     return true;
 
 }
@@ -357,4 +381,84 @@ void CPropertyObjectParts::mergePartDataFromProp(CPropertyObjectParts* partFrom)
         QSharedPointer<propBool> different(new propBool(eObjParam_BODYPARTS));
         m_value.insert(it.key(), different);
     }
+    m_hasSerializedValue = false;
+    m_serializedValue.clear();
+    m_replaceAll = false;
+    captureBaseline();
+}
+
+void CPropertyObjectParts::captureBaseline()
+{
+    m_baselineStates.clear();
+    for(auto it = m_value.constBegin(); it != m_value.constEnd(); ++it)
+        m_baselineStates.insert(it.key(), !it.value()->isInit() ? -1
+            : (it.value()->value() ? 1 : 0));
+}
+
+QStringList CPropertyObjectParts::valueAppliedTo(const QStringList& target) const
+{
+    if(m_replaceAll && m_hasSerializedValue)
+        return m_serializedValue;
+    QStringList result = target;
+    bool changed = false;
+    for(auto it = m_value.constBegin(); it != m_value.constEnd(); ++it)
+    {
+        if(!it.value()->isInit())
+            continue;
+        const int state = it.value()->value() ? 1 : 0;
+        if(m_baselineStates.value(it.key(), -1) == state)
+            continue;
+        changed = true;
+        if(state)
+        {
+            if(!result.contains(it.key()))
+                result.append(it.key());
+        }
+        else
+            result.removeAll(it.key());
+    }
+    if(!changed)
+        return target;
+    if(target.isEmpty())
+    {
+        result.clear();
+        for(auto it = m_value.constBegin(); it != m_value.constEnd(); ++it)
+            if(it.value()->isInit() && it.value()->value())
+                result.append(it.key());
+    }
+    return result;
+}
+
+QStringList CPropertyObjectParts::effectiveSerializedValue() const
+{
+    if(m_hasSerializedValue)
+        return valueAppliedTo(m_serializedValue);
+    QStringList result;
+    for(auto it = m_value.constBegin(); it != m_value.constEnd(); ++it)
+        if(it.value()->isInit() && it.value()->value())
+            result.append(it.key());
+    return result;
+}
+
+void CPropertyObjectParts::replaceSerializedValue(const QStringList& value)
+{
+    m_serializedValue = value;
+    m_hasSerializedValue = true;
+    m_replaceAll = true;
+    for(const QString& part : value)
+        if(!m_value.contains(part))
+            m_value.insert(part, QSharedPointer<propBool>(
+                new propBool(eObjParam_BODYPARTS, true)));
+    for(auto it = m_value.begin(); it != m_value.end(); ++it)
+        it.value()->resetValue(value.contains(it.key()));
+}
+
+bool CPropertyObjectParts::isSerializedPart(const QString& part) const
+{
+    return m_hasSerializedValue && m_serializedValue.contains(part);
+}
+
+int CPropertyObjectParts::serializedOccurrenceCount(const QString& part) const
+{
+    return m_hasSerializedValue ? m_serializedValue.count(part) : 0;
 }

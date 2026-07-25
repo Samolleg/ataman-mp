@@ -401,11 +401,37 @@ MainWindow::MainWindow(QWidget* parent) :
         QMenu menu(this);
         QAction* activate = menu.addAction(tr("Make Active"));
         activate->setEnabled(mob != m_pView->currentMob());
+        menu.addSeparator();
+        QAction* parameters = menu.addAction(tr("Open MOB Parameters"));
+        parameters->setShortcut(m_ui->action_Mob_parameters->shortcut());
+        QAction* script = menu.addAction(tr("Open MOB Script"));
+        script->setShortcut(m_ui->actionOpen_MOB_Script->shortcut());
+        menu.addSeparator();
+        QAction* save = menu.addAction(tr("Save MOB"));
+        save->setShortcut(m_ui->actionSave->shortcut());
+        save->setEnabled(mob->isDirty());
+        QAction* saveAs = menu.addAction(tr("Save MOB As..."));
+        saveAs->setShortcut(m_ui->actionSave_as->shortcut());
+        menu.addSeparator();
         QAction* unload = menu.addAction(selectedMobs.size() > 1
             ? tr("Unload %1 MOBs").arg(selectedMobs.size()) : tr("Unload MOB"));
         QAction* selected = menu.exec(m_loadedMapTree->viewport()->mapToGlobal(point));
         if(selected == activate)
             m_pView->changeCurrentMob(mob);
+        else if(selected == parameters || selected == script
+                || selected == save || selected == saveAs)
+        {
+            if(mob != m_pView->currentMob())
+                m_pView->changeCurrentMob(mob);
+            if(selected == parameters)
+                on_action_Mob_parameters_triggered();
+            else if(selected == script)
+                on_actionOpen_MOB_Script_triggered();
+            else if(selected == save)
+                on_actionSave_triggered();
+            else
+                on_actionSave_as_triggered();
+        }
         else if(selected == unload)
         {
             QList<CMob*> dirty;
@@ -4075,7 +4101,7 @@ void MainWindow::duplicateMapAsCollection(const QString& zoneId,
     initial.mapZoneId = zoneId;
     initial.mprReference = QFileInfo(mprPath).absoluteFilePath();
     initial.mobReferences.append(QFileInfo(mobPath).absoluteFilePath());
-    createCollectionFromTemplate(initial, zoneId + "-copy");
+    createCollectionFromTemplate(initial, zoneId + "-copy", true);
 }
 
 void MainWindow::duplicateCollection(const QString& path)

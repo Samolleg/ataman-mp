@@ -479,6 +479,17 @@ remain unchanged.
 - [x] Parameter-aware outliner filtering, dockable workspace panels, compound
   property/component copying, configurable shortcuts, camera speed, and
   external/internal script workflows.
+- [x] Make `OBJBODYPARTS` editing lossless at the property/UI boundary: expose
+  every serialized token (including unknown/profile-future values), retain
+  exact order and duplicates, copy/paste the complete underlying array, and
+  provide a display-only Parts filter. Evidence:
+  [body-part array preservation](docs/validation/BODYPART_ARRAY_PRESERVATION.md).
+- [x] Complete Loaded Map MOB context actions for parameters, script, targeted
+  Save/Save As, and dirty-aware Save enablement; duplicated catalog maps now
+  offer to open the collection they create.
+- [x] Restore renamed-primary workspace overlay behavior so a loaded test copy
+  such as `zone3obrtest.mob` does not also import the installed catalog primary
+  into validation and generate an unbounded false-collision workload.
 - [x] JMV Test Current Map, selected entrances, Play from Here, Godmode,
   supplemental MOB staging, generation-isolated saves, state-aware hot reload,
   orphan recovery, and same-map position/facing restoration.

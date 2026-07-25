@@ -28,6 +28,9 @@ private slots:
 
 private:
     void reset();
+    void populateTable();
+    void syncTableToProperty();
+    void applyFilter(const QString& text);
 
 signals:
     void onApplyChangesSignal(const QSharedPointer<IPropertyBase>&);

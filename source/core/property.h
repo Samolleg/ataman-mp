@@ -214,7 +214,9 @@ class CPropertyObjectParts: public IPropertyBase
 public:
     CPropertyObjectParts() = delete;
     CPropertyObjectParts(EObjParam type): IPropertyBase(type) {m_value.clear();}
-    CPropertyObjectParts(EObjParam type, const QMap<QString, QSharedPointer<propBool>>& val): IPropertyBase(type, true), m_value(val) {}
+    CPropertyObjectParts(EObjParam type, const QMap<QString, QSharedPointer<propBool>>& val);
+    CPropertyObjectParts(EObjParam type, const QMap<QString, QSharedPointer<propBool>>& val,
+                         const QStringList& serializedValue);
     ~CPropertyObjectParts() {}
     IPropertyBase* clone() const override;
     bool isEqual(const IPropertyBase* pProp) const override final;
@@ -224,9 +226,19 @@ public:
     QSharedPointer<IPropertyBase> createEmptyCopy() override final;
     const QMap<QString, QSharedPointer<propBool>>& value() const {Q_ASSERT(m_bInit); return m_value;}
     void mergePartDataFromProp(CPropertyObjectParts* partFrom);
+    QStringList valueAppliedTo(const QStringList& target) const;
+    QStringList effectiveSerializedValue() const;
+    void replaceSerializedValue(const QStringList& value);
+    bool isSerializedPart(const QString& part) const;
+    int serializedOccurrenceCount(const QString& part) const;
 
 private:
+    void captureBaseline();
     QMap<QString, QSharedPointer<propBool>> m_value;
+    QMap<QString, int> m_baselineStates;
+    QStringList m_serializedValue;
+    bool m_hasSerializedValue = false;
+    bool m_replaceAll = false;
 };
 
 typedef CPropertyObjectParts propBodyPart;

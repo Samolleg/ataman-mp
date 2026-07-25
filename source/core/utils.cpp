@@ -1278,11 +1278,16 @@ void util::bodyPartToProp(QMap<QString, QSharedPointer<propBool>>& arrBodyPart, 
 {
     arrBodyPart.clear();
     QStringList arrModelPart;
-    CObjectList::getInstance()->getFigure(modelName)->getPartNames(arrModelPart);
+    if(ei::CFigure* figure = CObjectList::getInstance()->getFigure(modelName))
+        figure->getPartNames(arrModelPart);
     for(auto& part: arrModelPart)
     {
         arrBodyPart[part] = QSharedPointer<propBool>(new propBool(eObjParam_BODYPARTS, bodyParts.empty() || bodyParts.contains(part)));
     }
+    for(const QString& part : bodyParts)
+        if(!arrBodyPart.contains(part))
+            arrBodyPart.insert(part, QSharedPointer<propBool>(
+                new propBool(eObjParam_BODYPARTS, true)));
 }
 
 void util::addBodyPartParam(QList<QSharedPointer<IPropertyBase>>& aProp, IPropertyBase* pProp)
