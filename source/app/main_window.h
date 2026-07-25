@@ -30,6 +30,7 @@ class CView;
 class CMob;
 class CRandomizeForm;
 class CTileForm;
+struct SMapTableSaveReport;
 class QMenu;
 class QAction;
 class QDockWidget;
@@ -107,6 +108,8 @@ private:
     void rebuildWindowTitle();
     void runUndoToIndex(int targetIndex);
     void refreshMapsBrowser();
+    void refreshActiveCatalog(bool preserveWorkspaceState);
+    void processMapTableSaveReports(const QVector<SMapTableSaveReport>& reports);
     void openMapPair(const QString& mprPath, const QString& mobPath, const QString& zoneId);
     void openCollection(const QString& path);
     void newCollection();
@@ -126,7 +129,8 @@ private:
     CMob* mapTestStagingMob() const;
     void launchCurrentMapTest();
     void createViewportToolbars();
-    void refreshMapTestContext();
+    void refreshMapTestContext(bool preserveWorkspaceState = false,
+                               bool reloadCatalog = true);
     void populateEntranceCombo();
     void chooseBorrowedMapIdentity();
     void setCustomSpawnPicking(bool enabled);

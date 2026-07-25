@@ -84,7 +84,12 @@ void CMapsBrowser::refresh(const QVector<QString>& resourceRoots,
                            const QVector<QString>& mapRoots,
                            const QString& collectionsRoot)
 {
-    const SMapCatalogResult result = CMapCatalog::load(resourceRoots, mapRoots);
+    refresh(CMapCatalog::load(resourceRoots, mapRoots), collectionsRoot);
+}
+
+void CMapsBrowser::refresh(const SMapCatalogResult& result,
+                           const QString& collectionsRoot)
+{
     m_entries = result.entries;
     m_collectionPaths.clear();
     QDir collectionDirectory(collectionsRoot);

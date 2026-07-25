@@ -11,6 +11,7 @@ private slots:
     void acceptsWhitespaceAndCase();
     void parsesTravelZoneSpawnData();
     void parsesSkyEnvironment();
+    void parsesCompleteMapsIdentityAndRepeatedRoutes();
 };
 
 void MapCatalogTests::parsesResourcePairsOnly()
@@ -83,6 +84,27 @@ void MapCatalogTests::parsesSkyEnvironment()
     QCOMPARE(entries.size(), 2);
     QCOMPARE(entries.at(0).skyType, QString("cave"));
     QCOMPARE(entries.at(1).skyType, QString("normal"));
+}
+
+void MapCatalogTests::parsesCompleteMapsIdentityAndRepeatedRoutes()
+{
+    const QVector<SMapCatalogEntry> entries = CMapCatalog::parseMapTable(
+        "#zone gz1g gipat game\n#res\nzone1 zone1\n"
+        "#maps\n11 9\nzone1map zone1quest\n"
+        "#exit 1\nbz1g 2\n#deploy\n1 2 3 4\n"
+        "#exit 1\nbz1g 2\n#deploy\n5 6 7 8\n");
+    QCOMPARE(entries.size(), 1);
+    QCOMPARE(entries.first().sectorWidth, 11);
+    QCOMPARE(entries.first().sectorHeight, 9);
+    QCOMPARE(entries.first().minimapTexture, QString("zone1map"));
+    QCOMPARE(entries.first().objectivesTexture, QString("zone1quest"));
+    QCOMPARE(entries.first().travelZones.size(), 2);
+    QCOMPARE(entries.first().travelZones.at(0).spawnPoint(), QPointF(2, 3));
+    QCOMPARE(entries.first().travelZones.at(1).spawnPoint(), QPointF(6, 7));
+    QCOMPARE(mapTravelRouteKey(entries.first().travelZones, 0),
+             QString("1|bz1g|2|0"));
+    QCOMPARE(mapTravelRouteKey(entries.first().travelZones, 1),
+             QString("1|bz1g|2|1"));
 }
 
 QTEST_APPLESS_MAIN(MapCatalogTests)
