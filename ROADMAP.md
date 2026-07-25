@@ -33,10 +33,11 @@ secondary-only launch guard: Test Current Map and Hot Reload fall back to the
 selected normal entrance when a stale Play from Here marker cannot be applied,
 while Play from Here, Godmode, and time override alone remain unavailable. It
 also adds `enabled` and `disabled` as exact Parts checkbox-state filter aliases.
-The remaining 0.3 release work is the
-final runtime/corpus matrix, focused confirmation of the new live-clock and
-startup-splash behavior, and version/tag/package housekeeping rather than
-another editor architecture pass.
+The current line also integrates authored water-overlay material animation and
+its measured renderer-optimization plan. The remaining 0.3 release work is the
+final runtime/corpus matrix, focused confirmation of the live clock, startup
+splash, and merged overlay behavior, plus version/tag/package housekeeping
+rather than another editor architecture pass.
 
 <details open>
 <summary><strong>General wishlist — not assigned to a release</strong></summary>
@@ -541,6 +542,16 @@ remain unchanged.
   and the [particle/runtime evidence ledger](docs/investigations/2026-07-23-particle-runtime.md).
   ([`37e0231`](https://github.com/Ilufus/ei-mapper-endurance/commit/37e0231),
   [`aa465c3`](https://github.com/Ilufus/ei-mapper-endurance/commit/aa465c3))
+- [x] Animate liquid overlay geometry for authored material types 2/3 from the
+  material `waveMultiplier` and wind parameters using the measured runtime
+  phase, table-sine, displacement, and fixed horizontal-warp behavior. Keep
+  material/noise/grid data static in the sector VBO, preserve sector batching,
+  expand liquid culling bounds conservatively, and restore exact neutral base
+  geometry for landscape editing and picking. Non-liquid overlays remain
+  stationary and the superseded fragment UV drift is removed. Evidence and
+  compatibility boundaries are recorded in
+  [overlay material animation](docs/investigations/2026-07-26-overlay-material-animation.md).
+  (implementation `13639ca`, local-main merge `a6e245a`)
 - [x] Separate always-available **Time of day** and **Lighting mode** viewport
   controls. JMV launch and hot reload now use `RunWorldTime` so the selected
   starting hour is applied without freezing normal clock progression.
@@ -552,6 +563,10 @@ remain unchanged.
 
 ### 0.3.0 release gate
 
+- [ ] Runtime-confirm the merged overlay path on current main: animated Zone 18
+  water, exact neutral/picking geometry while landscape editing, stationary
+  Zone 16 lava, animation reset after unload/reload, and equivalent water draws
+  through desktop OpenGL and ANGLE.
 - [ ] Runtime-confirm that Test Current Map and hot reload start at the editor
   time while the game clock continues normally, including a cave/briefing map.
 - [ ] Confirm the startup splash/taskbar handoff on an existing profile and a
@@ -572,6 +587,17 @@ remain unchanged.
 
 ### Explicitly non-blocking follow-ups
 
+- [ ] Isolate the recurring ANGLE `GL_INVALID_OPERATION` reported after
+  `frame/overlays-complete`. Water/terrain shader creation and explicit liquid
+  draws passed, so do not attribute the later error to water animation without
+  a captured failing call and state transition.
+- [ ] Execute the architectural renderer work ranked in the
+  [measured optimization plan](docs/RENDERER_OPTIMIZATION_PLAN_2026-07-26.md):
+  persistent/GPU-driven submission, dirty-state scene and animation
+  preparation, cached static/dynamic shadow separation, and evidence-gated
+  raster reduction. The measured Zone 18 baseline rejects micro-optimization
+  as a credible route to the 200+ FPS 4K target; these changes are not a 0.3
+  release blocker.
 - [ ] Confirm immediate, conditional, and nested supplemental `AddMob` chains
   load exactly once when a deterministic fixture becomes available.
 - [ ] Runtime-confirm World Object to Lever conversion for both an already
