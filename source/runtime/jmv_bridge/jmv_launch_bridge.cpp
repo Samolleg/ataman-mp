@@ -115,8 +115,8 @@ constexpr DWORD kGetZoneByNameRva = 0x0005E850;
 constexpr DWORD kGlobalMapRva = 0x0039BF00;
 constexpr DWORD kGraphRequirementRva = 0x001955CC;
 constexpr DWORD kWorldClientGlobalRva = 0x003AF5B8;
+constexpr DWORD kWorldGetTextureManagerRva = 0x00161990;
 constexpr DWORD kTextureManagerAddResourceRva = 0x00275050;
-constexpr size_t kWorldGetTextureManagerVtableIndex = 34;
 constexpr UINT kDirectLaunchMessage = WM_APP + 0x45D;
 constexpr UINT kHotReloadMessage = WM_APP + 0x45E;
 constexpr unsigned char kMapLoadEntryBytes[6] = {
@@ -144,6 +144,9 @@ constexpr unsigned char kGetZoneByNameBytes[15] = {
 };
 constexpr unsigned char kTextureManagerAddResourceBytes[8] = {
     0x6A, 0xFF, 0x68, 0xBC, 0x15, 0x73, 0x00, 0x64
+};
+constexpr unsigned char kWorldGetTextureManagerBytes[7] = {
+    0x8B, 0x81, 0x8C, 0x01, 0x00, 0x00, 0xC3
 };
 enum class RuntimeState : LONG
 {
@@ -477,6 +480,9 @@ bool RegisterTemporaryTextureResource()
         return true;
     auto* game = reinterpret_cast<unsigned char*>(g_gameModule);
     if(!game
+       || std::memcmp(game + kWorldGetTextureManagerRva,
+                      kWorldGetTextureManagerBytes,
+                      sizeof(kWorldGetTextureManagerBytes)) != 0
        || std::memcmp(game + kTextureManagerAddResourceRva,
                       kTextureManagerAddResourceBytes,
                       sizeof(kTextureManagerAddResourceBytes)) != 0)
@@ -502,21 +508,11 @@ bool RegisterTemporaryTextureResource()
         return false;
     }
     void* world = *worldSlot;
-    auto** vtable = *reinterpret_cast<void***>(world);
-    if(!vtable
-       || !IsReadableRange(vtable + kWorldGetTextureManagerVtableIndex,
-                           sizeof(void*)))
-    {
-        Log(L"TEMP_TEXTURE_RES refused: world interface layout is unavailable");
-        return false;
-    }
+    // Call the fingerprinted game accessor directly.  Looking it up through a
+    // reconstructed vtable index is not safe: that table is build-specific and
+    // alpha.10 consequently aborted the otherwise valid staged-map bootstrap.
     const auto getTextureManager = reinterpret_cast<GetTextureManagerFn>(
-        vtable[kWorldGetTextureManagerVtableIndex]);
-    if(!getTextureManager || !IsReadableRange(reinterpret_cast<void*>(getTextureManager), 1))
-    {
-        Log(L"TEMP_TEXTURE_RES refused: texture-manager accessor is unavailable");
-        return false;
-    }
+        game + kWorldGetTextureManagerRva);
     void* manager = getTextureManager(world);
     if(!manager || !IsReadableRange(manager, sizeof(void*)))
     {
