@@ -5,6 +5,8 @@ TARGET = minimap_export_tests
 INCLUDEPATH += ../source/documents ../source/resources ../source/core ../source/app
 SOURCES += minimap_export_tests.cpp \
     ../source/documents/minimap_bake.cpp \
+    ../source/documents/minimap_catalog_registration.cpp \
+    ../source/documents/map_table_document.cpp \
     ../source/documents/res_texture_export.cpp \
     ../source/documents/res_archive_document.cpp \
     ../source/documents/backup_manager.cpp \
@@ -12,6 +14,8 @@ SOURCES += minimap_export_tests.cpp \
     ../source/resources/mmp_inspector.cpp \
     ../source/core/log.cpp
 HEADERS += ../source/documents/minimap_bake.h \
+    ../source/documents/minimap_catalog_registration.h \
+    ../source/documents/map_table_document.h \
     ../source/documents/res_texture_export.h \
     ../source/documents/res_archive_document.h \
     ../source/documents/backup_manager.h \
