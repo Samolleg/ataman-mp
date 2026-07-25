@@ -15,6 +15,7 @@ from typing import Any
 RES_SIGNATURE = 0x019CE23C
 MMP_SIGNATURE = 0x00504D4D
 REFERENCE_JMV_TEXTURES_SHA256 = "2E8CA42FB75FAC12E5659C563C547FEE0F72D6C1B6E2E1C454B3072E3BE0703B"
+REFERENCE_BASE_TEXTURES_SHA256 = "79548FBD94E797FE9EDC3E990EB0231A350571B2CEF575B009FA972F0002268C"
 DEFAULT_NAMES = ("tornado.mmp", "tendrilight.mmp")
 
 
@@ -88,12 +89,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("textures_res", type=Path)
     parser.add_argument("--name", action="append", dest="names")
     parser.add_argument("--require-jmv-reference", action="store_true")
+    parser.add_argument("--require-base-reference", action="store_true")
     parser.add_argument("--output", type=Path)
     args = parser.parse_args(argv)
     try:
-        result = report(args.textures_res, tuple(args.names or DEFAULT_NAMES),
-                        REFERENCE_JMV_TEXTURES_SHA256
-                        if args.require_jmv_reference else None)
+        if args.require_jmv_reference and args.require_base_reference:
+            raise ValueError("choose only one reference texture archive")
+        required = (REFERENCE_JMV_TEXTURES_SHA256 if args.require_jmv_reference else
+                    REFERENCE_BASE_TEXTURES_SHA256 if args.require_base_reference else None)
+        result = report(args.textures_res, tuple(args.names or DEFAULT_NAMES), required)
         encoded = json.dumps(result, indent=2, ensure_ascii=False, sort_keys=True) + "\n"
         if args.output:
             args.output.write_text(encoded, encoding="utf-8", newline="\n")

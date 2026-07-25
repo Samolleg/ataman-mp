@@ -1,14 +1,269 @@
 {
   "constants": {
+    "a4blood_particle_scale_random_multiplier": {
+      "bytes": "9A9919A09999B93D",
+      "va": "0x0073CE68",
+      "value": 2.328306471775267e-11
+    },
+    "a4blood_source_radius_random_multiplier": {
+      "bytes": "9A9919B09999C93D",
+      "va": "0x0073CE70",
+      "value": 4.6566131170228816e-11
+    },
+    "a4blood_terminal_velocity_random_multiplier": {
+      "bytes": "9A9919B09999D93D",
+      "va": "0x0073CE58",
+      "value": 9.313226234045763e-11
+    },
+    "a4blood_vertical_acceleration_random_multiplier": {
+      "bytes": "52B81EE051B8BE3D",
+      "va": "0x0073CE60",
+      "value": 2.7939676620469117e-11
+    },
+    "ballofstars_offset_factor": {
+      "bytes": "CDCC4C3F",
+      "va": "0x0073CCA8",
+      "value": 0.800000011920929
+    },
+    "ballofstars_size_low": {
+      "bytes": "3333333F",
+      "va": "0x0073C538",
+      "value": 0.699999988079071
+    },
+    "bluegas_attempt_factor_float": {
+      "bytes": "0000A040",
+      "va": "0x0073BF34",
+      "value": 5.0
+    },
+    "bluegas_radius_factor_float": {
+      "bytes": "9A99993E",
+      "va": "0x0073C54C",
+      "value": 0.30000001192092896
+    },
+    "bluegas_size_factor_float": {
+      "bytes": "3333333F",
+      "va": "0x0073C538",
+      "value": 0.699999988079071
+    },
+    "bluegas_size_growth_float": {
+      "bytes": "AE47813F",
+      "va": "0x0073CD40",
+      "value": 1.0099999904632568
+    },
+    "bluegas_vertical_acceleration_float": {
+      "bytes": "5C8F823F",
+      "va": "0x0073CDE4",
+      "value": 1.0199999809265137
+    },
+    "bluegas_vertical_speed_max_float": {
+      "bytes": "8FC2F53C",
+      "va": "0x0073CD74",
+      "value": 0.029999999329447746
+    },
+    "bluegas_vertical_speed_min_float": {
+      "bytes": "0AD7A33C",
+      "va": "0x0073CCD8",
+      "value": 0.019999999552965164
+    },
+    "clayring_direction_cosine": {
+      "bytes": "3333733F",
+      "va": "0x0073CD50",
+      "value": 0.949999988079071
+    },
+    "clayring_direction_sine": {
+      "bytes": "3BDF9F3E",
+      "va": "0x0073CE78",
+      "value": 0.3122499883174896
+    },
+    "clayring_source_angle_step": {
+      "bytes": "EC866D8B321BE43F",
+      "va": "0x0073CC98",
+      "value": 0.62832
+    },
+    "cursestars_initial_size_factor": {
+      "bytes": "0AD7233D",
+      "va": "0x0073CE90",
+      "value": 0.03999999910593033
+    },
+    "cursestars_size_decay": {
+      "bytes": "3333733F",
+      "va": "0x0073CD50",
+      "value": 0.949999988079071
+    },
+    "cursestars_speed_factor": {
+      "bytes": "CDCCCC3D",
+      "va": "0x0073B850",
+      "value": 0.10000000149011612
+    },
+    "cursestars_velocity_decay": {
+      "bytes": "6666663F",
+      "va": "0x0073CD70",
+      "value": 0.8999999761581421
+    },
+    "cylinder_circle_radius_factor": {
+      "bytes": "3333333F",
+      "va": "0x0073C538",
+      "value": 0.699999988079071
+    },
+    "cylinder_source_height_factor": {
+      "bytes": "CDCC4C3E",
+      "va": "0x0073BAD4",
+      "value": 0.20000000298023224
+    },
+    "cylinder_trail_scale_decay": {
+      "bytes": "6666663F",
+      "va": "0x0073CD70",
+      "value": 0.8999999761581421
+    },
+    "cylinder_trail_tangent_factor": {
+      "bytes": "9A99193F",
+      "va": "0x0073CDE0",
+      "value": 0.6000000238418579
+    },
+    "cylinder_vertical_growth": {
+      "bytes": "0000A03F",
+      "va": "0x0073CF50",
+      "value": 1.25
+    },
     "degrees_to_radians_float": {
       "bytes": "176CC116",
       "va": "0x0073BA30",
       "value": 3.124904596571646e-25
     },
+    "feeblemind_orbit_expansion": {
+      "bytes": "CDCC8C3F",
+      "va": "0x0073BAC4",
+      "value": 1.100000023841858
+    },
+    "feeblemind_orbit_radius": {
+      "bytes": "000000A09999A93F",
+      "va": "0x0073CF90",
+      "value": 0.05000000074505806
+    },
+    "feeblemind_size_factor": {
+      "bytes": "295C0F3D",
+      "va": "0x0073CF8C",
+      "value": 0.03500000014901161
+    },
+    "feeblemind_size_growth": {
+      "bytes": "B81E853F",
+      "va": "0x0073CF98",
+      "value": 1.0399999618530273
+    },
+    "feetcloud_attempt_factor": {
+      "bytes": "00000041",
+      "va": "0x0073CE50",
+      "value": 8.0
+    },
+    "feetcloud_birth_height_factor": {
+      "bytes": "9A99993F",
+      "va": "0x0073CDF4",
+      "value": 1.2000000476837158
+    },
+    "feetcloud_blend_decay": {
+      "bytes": "48E17A3F",
+      "va": "0x0073CF9C",
+      "value": 0.9800000190734863
+    },
+    "feetcloud_size_decay": {
+      "bytes": "CDCC4C3F",
+      "va": "0x0073CCA8",
+      "value": 0.800000011920929
+    },
+    "feetcloud_size_factor": {
+      "bytes": "CDCCCC3E",
+      "va": "0x0073B868",
+      "value": 0.4000000059604645
+    },
+    "feetcloud_velocity_decay": {
+      "bytes": "6666663F",
+      "va": "0x0073CD70",
+      "value": 0.8999999761581421
+    },
+    "feetcloud_velocity_factor": {
+      "bytes": "CDCCCC3D",
+      "va": "0x0073B850",
+      "value": 0.10000000149011612
+    },
+    "firearrow_early_growth_float": {
+      "bytes": "3333B33F",
+      "va": "0x0073CDF8",
+      "value": 1.399999976158142
+    },
+    "firearrow_head_size_float": {
+      "bytes": "CDCCCC3E",
+      "va": "0x0073B868",
+      "value": 0.4000000059604645
+    },
+    "firearrow_regular_velocity_growth_float": {
+      "bytes": "CDCC8C3F",
+      "va": "0x0073BAC4",
+      "value": 1.100000023841858
+    },
+    "firearrow_slow_velocity_decay_float": {
+      "bytes": "3333733F",
+      "va": "0x0073CD50",
+      "value": 0.949999988079071
+    },
+    "firearrow_trail_size_float": {
+      "bytes": "CDCC4C3E",
+      "va": "0x0073BAD4",
+      "value": 0.20000000298023224
+    },
+    "fireball_head_size_factor": {
+      "bytes": "9A99993F",
+      "va": "0x0073CDF4",
+      "value": 1.2000000476837158
+    },
+    "fireball_transverse_size_factor": {
+      "bytes": "0000003F",
+      "va": "0x0073B86C",
+      "value": 0.5
+    },
+    "fireball_velocity_decay": {
+      "bytes": "3333733F",
+      "va": "0x0073CD50",
+      "value": 0.949999988079071
+    },
+    "fireblast_cloud_size_factor": {
+      "bytes": "9A99193F",
+      "va": "0x0073CDE0",
+      "value": 0.6000000238418579
+    },
+    "fireblast_cloud_velocity_factor": {
+      "bytes": "2549123E",
+      "va": "0x0073CDCC",
+      "value": 0.1428571492433548
+    },
+    "fireblast_flash_size_factor": {
+      "bytes": "33331340",
+      "va": "0x0073CDEC",
+      "value": 2.299999952316284
+    },
+    "fireblast_source_velocity_decay": {
+      "bytes": "0000403F",
+      "va": "0x0073C524",
+      "value": 0.75
+    },
     "generic_light_z_offset": {
       "bytes": "00000040",
       "va": "0x0073DBE8",
       "value": 2.0
+    },
+    "geyser_gravity_factor": {
+      "bytes": "8FC2753D",
+      "va": "0x0073CCB8",
+      "value": 0.05999999865889549
+    },
+    "geyser_particle_size_factor": {
+      "bytes": "CDCC4C3E",
+      "va": "0x0073BAD4",
+      "value": 0.20000000298023224
+    },
+    "geyser_scale_decay": {
+      "bytes": "6666663F",
+      "va": "0x0073CD70",
+      "value": 0.8999999761581421
     },
     "half_double": {
       "bytes": "000000000000E03F",
@@ -19,6 +274,26 @@
       "bytes": "0000003F",
       "va": "0x0073B86C",
       "value": 0.5
+    },
+    "healing_source_count_scale": {
+      "bytes": "0000C040",
+      "va": "0x0073BA98",
+      "value": 6.0
+    },
+    "healing_source_radius_factor": {
+      "bytes": "CDCC8C3F",
+      "va": "0x0073BAC4",
+      "value": 1.100000023841858
+    },
+    "healing_source_size_factor": {
+      "bytes": "CDCCCC3D",
+      "va": "0x0073B850",
+      "value": 0.10000000149011612
+    },
+    "healing_tail_size_factor": {
+      "bytes": "295C8F3D",
+      "va": "0x0073CDB0",
+      "value": 0.07000000029802322
     },
     "late_motion_float": {
       "bytes": "9A99193E",
@@ -35,6 +310,21 @@
       "va": "0x0073CF28",
       "value": 0.07500000298023224
     },
+    "link_alpha_multiplier": {
+      "bytes": "00007A44",
+      "va": "0x0073C34C",
+      "value": 1000.0
+    },
+    "link_angular_step_multiplier": {
+      "bytes": "CDCC4C3E",
+      "va": "0x0073BAD4",
+      "value": 0.20000000298023224
+    },
+    "link_arc_height_multiplier": {
+      "bytes": "6666663F",
+      "va": "0x0073CD70",
+      "value": 0.8999999761581421
+    },
     "logical_quant_milliseconds": {
       "bytes": "37000000",
       "va": "0x0078FF34",
@@ -45,15 +335,280 @@
       "va": "0x0073C348",
       "value": 0.0181818176060915
     },
+    "modifier_negative_direction_factor": {
+      "bytes": "3333B33F",
+      "va": "0x0073CDF8",
+      "value": 1.399999976158142
+    },
+    "modifier_negative_scale_factor": {
+      "bytes": "98406F3F",
+      "va": "0x0073CEA8",
+      "value": 0.9345793724060059
+    },
+    "modifier_positive_direction_factor": {
+      "bytes": "6EDB363F",
+      "va": "0x0073CEAC",
+      "value": 0.7142857313156128
+    },
+    "modifier_positive_scale_factor": {
+      "bytes": "C3F5883F",
+      "va": "0x0073CEA4",
+      "value": 1.0700000524520874
+    },
+    "moshka_anchor_size": {
+      "bytes": "9A99193E",
+      "va": "0x0073CD18",
+      "value": 0.15000000596046448
+    },
+    "moshka_phase_size_decay": {
+      "bytes": "7B146E3F",
+      "va": "0x0073CF40",
+      "value": 0.9300000071525574
+    },
+    "moshka_source_extent": {
+      "bytes": "CDCC4C3E",
+      "va": "0x0073BAD4",
+      "value": 0.20000000298023224
+    },
+    "moshka_source_jitter": {
+      "bytes": "CDCC4C3D",
+      "va": "0x0073C52C",
+      "value": 0.05000000074505806
+    },
+    "moshka_source_negative_extent": {
+      "bytes": "CDCC4CBE",
+      "va": "0x0073CF44",
+      "value": -0.20000000298023224
+    },
+    "pathdestination_arm_length_step": {
+      "bytes": "0D68533B",
+      "va": "0x0073CF3C",
+      "value": 0.003225806402042508
+    },
+    "pathdestination_offset_growth": {
+      "bytes": "6666863F",
+      "va": "0x0073CEE0",
+      "value": 1.0499999523162842
+    },
+    "pathdestination_radius": {
+      "bytes": "000000A09999B93F",
+      "va": "0x0073CF30",
+      "value": 0.10000000149011612
+    },
+    "pathdestination_ring_angle_step": {
+      "bytes": "AE47493D",
+      "va": "0x0073CF38",
+      "value": 0.049140624701976776
+    },
     "pi_float": {
       "bytes": "182D4454",
       "va": "0x0073F3D0",
       "value": 3370280550400.0
     },
+    "poisonfog_alpha_scale": {
+      "bytes": "00002043",
+      "va": "0x0073CD98",
+      "value": 160.0
+    },
+    "poisonfog_grid_spacing": {
+      "bytes": "0000803F",
+      "va": "0x0073CB34",
+      "value": 1.0
+    },
+    "poisonfog_jitter": {
+      "bytes": "0000803E",
+      "va": "0x0073C3B0",
+      "value": 0.25
+    },
+    "portal_head_scale": {
+      "bytes": "0000C03F",
+      "va": "0x0073C51C",
+      "value": 1.5
+    },
+    "portal_height": {
+      "bytes": "00000041",
+      "va": "0x0073CC7C",
+      "value": 8.0
+    },
+    "portal_radius": {
+      "bytes": "00002040",
+      "va": "0x0073CC78",
+      "value": 2.5
+    },
+    "portal_trail_rotation_step": {
+      "bytes": "CDCCCC3D",
+      "va": "0x0073B850",
+      "value": 0.10000000149011612
+    },
+    "portal_trail_scale_factor": {
+      "bytes": "9A99993E",
+      "va": "0x0073C54C",
+      "value": 0.30000001192092896
+    },
+    "portal_vertical_growth": {
+      "bytes": "0AD7833F",
+      "va": "0x0073CDE8",
+      "value": 1.0299999713897705
+    },
+    "portalstar_scale_low": {
+      "bytes": "CDCC4C3F",
+      "va": "0x0073CCA8",
+      "value": 0.800000011920929
+    },
+    "portalstar_scale_random_multiplier": {
+      "bytes": "9A9919C09999D93D",
+      "va": "0x0073CCB0",
+      "value": 9.313226580990458e-11
+    },
+    "regeneration_carrier_radius_factor": {
+      "bytes": "6666263F",
+      "va": "0x0073CE08",
+      "value": 0.6499999761581421
+    },
+    "regeneration_detach_cutoff": {
+      "bytes": "0AD7A33C",
+      "va": "0x0073CCD8",
+      "value": 0.019999999552965164
+    },
+    "regeneration_detach_decay": {
+      "bytes": "0000403F",
+      "va": "0x0073C524",
+      "value": 0.75
+    },
+    "regeneration_old_position_factor": {
+      "bytes": "3333333F",
+      "va": "0x0073C538",
+      "value": 0.699999988079071
+    },
+    "regeneration_size_factor": {
+      "bytes": "0000803E",
+      "va": "0x0073C3B0",
+      "value": 0.25
+    },
+    "regeneration_target_position_factor": {
+      "bytes": "9A99993E",
+      "va": "0x0073C54C",
+      "value": 0.30000001192092896
+    },
+    "regeneration_vertical_offset_factor": {
+      "bytes": "CDCCCC3E",
+      "va": "0x0073B868",
+      "value": 0.4000000059604645
+    },
     "rgb_normalization_float": {
       "bytes": "8180803B",
       "va": "0x0073C36C",
       "value": 0.003921568859368563
+    },
+    "silence_anchor_size_factor": {
+      "bytes": "AE47613E",
+      "va": "0x0073CF88",
+      "value": 0.2199999988079071
+    },
+    "silence_carrier_radius_factor": {
+      "bytes": "0000003F",
+      "va": "0x0073B86C",
+      "value": 0.5
+    },
+    "silence_detach_decay": {
+      "bytes": "9A99593F",
+      "va": "0x0073CEB8",
+      "value": 0.8500000238418579
+    },
+    "silence_initial_angle": {
+      "bytes": "F90F4940",
+      "va": "0x0073CF80",
+      "value": 3.1415998935699463
+    },
+    "silence_trail_size_factor": {
+      "bytes": "0AD7A33D",
+      "va": "0x0073CF84",
+      "value": 0.07999999821186066
+    },
+    "sparks_scale_decay": {
+      "bytes": "6666663F",
+      "va": "0x0073CD70",
+      "value": 0.8999999761581421
+    },
+    "sparks_source_flash_size_factor": {
+      "bytes": "CDCC0C3F",
+      "va": "0x0073CF60",
+      "value": 0.550000011920929
+    },
+    "sparks_speed_random_multiplier": {
+      "bytes": "333313203333E33D",
+      "va": "0x0073CE10",
+      "value": 1.3969837789817515e-10
+    },
+    "sparks_velocity_decay": {
+      "bytes": "9A99193F",
+      "va": "0x0073CDE0",
+      "value": 0.6000000238418579
+    },
+    "sphere_acid_size_multiplier": {
+      "bytes": "CDCCCC3F",
+      "va": "0x0073CC80",
+      "value": 1.600000023841858
+    },
+    "sphere_antimagic_attempt_multiplier": {
+      "bytes": "0000C041",
+      "va": "0x0073CE28",
+      "value": 24.0
+    },
+    "sphere_antimagic_rare_size_base": {
+      "bytes": "00002040",
+      "va": "0x0073CE18",
+      "value": 2.5
+    },
+    "sphere_carrier_radius_multiplier": {
+      "bytes": "9A99993F",
+      "va": "0x0073CDF4",
+      "value": 1.2000000476837158
+    },
+    "sphere_surface_radius_multiplier": {
+      "bytes": "6666263F",
+      "va": "0x0073CE08",
+      "value": 0.6499999761581421
+    },
+    "star_scale_decay": {
+      "bytes": "6666663F",
+      "va": "0x0073CD70",
+      "value": 0.8999999761581421
+    },
+    "starttrans_anchor_detach_decay": {
+      "bytes": "9A99193F",
+      "va": "0x0073CDE0",
+      "value": 0.6000000238418579
+    },
+    "starttrans_attempt_accumulator_step": {
+      "bytes": "CDCCCC3E",
+      "va": "0x0073B868",
+      "value": 0.4000000059604645
+    },
+    "starttrans_source_radius_step": {
+      "bytes": "0AD7A33C",
+      "va": "0x0073CCD8",
+      "value": 0.019999999552965164
+    },
+    "starttrans_trail_size_factor": {
+      "bytes": "CDCC4C3D",
+      "va": "0x0073C52C",
+      "value": 0.05000000074505806
+    },
+    "teleport_angle_normalization": {
+      "bytes": "FF211920FF21193E",
+      "va": "0x0073CE88",
+      "value": 1.4629214509862508e-09
+    },
+    "teleport_negative_vertical_multiplier": {
+      "bytes": "00001040",
+      "va": "0x0073CE7C",
+      "value": 2.25
+    },
+    "teleport_positive_vertical_multiplier": {
+      "bytes": "9A99193E",
+      "va": "0x0073CE80",
+      "value": 0.15000000596046448
     },
     "three_tenths_float": {
       "bytes": "9A99993E",
@@ -79,6 +634,31 @@
       "bytes": "000010000000F03D",
       "va": "0x0073C468",
       "value": 2.3283064370807974e-10
+    },
+    "visionstar_detach_cutoff": {
+      "bytes": "8FC2F53C",
+      "va": "0x0073CD74",
+      "value": 0.029999999329447746
+    },
+    "visionstar_orbit_radius": {
+      "bytes": "0000003F",
+      "va": "0x0073B86C",
+      "value": 0.5
+    },
+    "visionstar_orbit_step": {
+      "bytes": "0000002085EBB13F",
+      "va": "0x0073CF78",
+      "value": 0.07000000029802322
+    },
+    "visionstar_random_multiplier": {
+      "bytes": "CDCC1CC6CCCCFC3D",
+      "va": "0x0073CF70",
+      "value": 4.190951527764837e-10
+    },
+    "visionstar_smoothing_decay": {
+      "bytes": "3333733F",
+      "va": "0x0073CD50",
+      "value": 0.949999988079071
     },
     "weather_day_fraction_float": {
       "bytes": "ABAA2A3D",
@@ -109,6 +689,21 @@
       "bytes": "0000A041",
       "va": "0x0073F3F8",
       "value": 20.0
+    },
+    "zoneexit_size_base": {
+      "bytes": "3333F33F",
+      "va": "0x0073CF2C",
+      "value": 1.899999976158142
+    },
+    "zoneexit_size_random_low": {
+      "bytes": "3333333F",
+      "va": "0x0073C538",
+      "value": 0.699999988079071
+    },
+    "zoneexit_size_random_multiplier": {
+      "bytes": "333313203333E33D",
+      "va": "0x0073CE10",
+      "value": 1.3969837789817515e-10
     }
   },
   "format": "ei-particle-binary-report-v1",
@@ -118,11 +713,77 @@
     "target_va": "0x00496EB0"
   },
   "ranges": {
+    "a4blood_create_callback": {
+      "end_va": "0x0048F670",
+      "sha256": "5C702034398DCF0D8E965EB46224142D3C191AAFD20FF850CABF7C4B8DB693A7",
+      "size": 704,
+      "start_va": "0x0048F3B0"
+    },
+    "a4blood_factory_branch": {
+      "end_va": "0x004870D2",
+      "sha256": "5358A70F2D0E3B3EC2568E9ACCDCF99BD27E020D28C5DA5552E45C62E6CECFA7",
+      "size": 595,
+      "start_va": "0x00486E7F"
+    },
+    "a4blood_local_source_callback": {
+      "end_va": "0x0048F7F0",
+      "sha256": "8F03B04432D7B8D37D8DCF2138D72F7E6389E7A2D972160F5BF9A84ADBE30291",
+      "size": 256,
+      "start_va": "0x0048F6F0"
+    },
+    "a4blood_update_callback": {
+      "end_va": "0x0048F6F0",
+      "sha256": "C9C62084A6D0025C5B973933186E5BBFB7B46ADE6CAC0565A7C6196EF22FCD63",
+      "size": 128,
+      "start_va": "0x0048F670"
+    },
+    "acidray_create_callback": {
+      "end_va": "0x0048D330",
+      "sha256": "F419F1BC5B34A1C318A4CF92A43B89B9325D4F28BB1ED4F74D1B07ED5AE85F71",
+      "size": 736,
+      "start_va": "0x0048D050"
+    },
+    "acidray_factory_branch": {
+      "end_va": "0x0048599D",
+      "sha256": "6DD6E33B7282DEEF91EBBAF40F83651E500BC0A5424DA59BC76F0B3622F5DF2B",
+      "size": 186,
+      "start_va": "0x004858E3"
+    },
+    "acidray_update_callback": {
+      "end_va": "0x0048D420",
+      "sha256": "FEE3B6E823077BC86EB922DE188BED193360FBE3630D9D7DD7A4FCB11FB74275",
+      "size": 240,
+      "start_va": "0x0048D330"
+    },
     "atlas_rectangle_builder": {
       "end_va": "0x00488790",
       "sha256": "DA76F7B72582EE10FE67717B0A23018E4E30E0A89872010BC6BA43FD373338AE",
       "size": 476,
       "start_va": "0x004885B4"
+    },
+    "ballofstars_create_callback": {
+      "end_va": "0x004961B0",
+      "sha256": "E6C3436D91E9DE992C0C2102C2E6164DE463D489A51533ECB2ABADB47453A5DA",
+      "size": 512,
+      "start_va": "0x00495FB0"
+    },
+    "ballofstars_factory_branch": {
+      "end_va": "0x004883C3",
+      "sha256": "416A029D92BBC24A3B819046F1C189C6CA0BD263D28478795212E105DBA294D6",
+      "size": 84,
+      "start_va": "0x0048836F"
+    },
+    "ballofstars_local_source_callback": {
+      "end_va": "0x00496270",
+      "sha256": "C4E48398AA494FD8ABF1C3E8E6CC058BCDCA3836FDFE6744B7D353C518E1C019",
+      "size": 16,
+      "start_va": "0x00496260"
+    },
+    "ballofstars_update_callback": {
+      "end_va": "0x00496260",
+      "sha256": "3B8145C9CAEA6C6752DB1884C1E62DC73B706287FC844A13931306DAAB7560A9",
+      "size": 176,
+      "start_va": "0x004961B0"
     },
     "bansheecasting_create_callback": {
       "end_va": "0x00489EF0",
@@ -154,6 +815,48 @@
       "size": 57,
       "start_va": "0x00498A8A"
     },
+    "blood1_create_callback": {
+      "end_va": "0x0048F300",
+      "sha256": "652C0F1B7898BA6D169E908D3991393B7CF6DA9464E254E57B1F75ACA079D94E",
+      "size": 1120,
+      "start_va": "0x0048EEA0"
+    },
+    "blood1_factory_branch": {
+      "end_va": "0x00486E7F",
+      "sha256": "BF96E5EF55E3FEAE5CEF3C39404233DD3ED97681F2D74DC5D084301C79DB639E",
+      "size": 572,
+      "start_va": "0x00486C43"
+    },
+    "blood1_local_source_callback": {
+      "end_va": "0x0048F3B0",
+      "sha256": "B7270718231C04215FCEEA7017C551D32CD48C29FB547FDE097623F28C854730",
+      "size": 48,
+      "start_va": "0x0048F380"
+    },
+    "blood1_update_callback": {
+      "end_va": "0x0048F380",
+      "sha256": "2BD739FC0FE56D043F1E16B5D7FD89862A5788CA93806BBE5D26A054E3105CAC",
+      "size": 128,
+      "start_va": "0x0048F300"
+    },
+    "bluegas_create_callback": {
+      "end_va": "0x0048D7F0",
+      "sha256": "78475299726E62937D108C9C035C45F931FC119677ED9D75F3D22E155C678B26",
+      "size": 976,
+      "start_va": "0x0048D420"
+    },
+    "bluegas_factory_branch": {
+      "end_va": "0x00485B72",
+      "sha256": "93A0A20ECAEFF5EA32373CA9B54A5D3B680992F9D8CD0E68D4ACCDD3D851072D",
+      "size": 212,
+      "start_va": "0x00485A9E"
+    },
+    "bluegas_update_callback": {
+      "end_va": "0x0048D8D0",
+      "sha256": "2CFBF2AEE50458AF687B09EC6261C6CD84F2F2DC6CF413B3F64B69F9578D6863",
+      "size": 224,
+      "start_va": "0x0048D7F0"
+    },
     "casting_create_callback": {
       "end_va": "0x00489A50",
       "sha256": "D9C2EE669E096BEA24012DA99209A73F4EDE630856890E93668E339EA04F94E8",
@@ -166,11 +869,83 @@
       "size": 74,
       "start_va": "0x00486993"
     },
+    "casting_failed_create_callback": {
+      "end_va": "0x00491830",
+      "sha256": "6927FAB471F9C9886B69003CECAE6E634D38D79ED87B8972CA415E1CA659696E",
+      "size": 1040,
+      "start_va": "0x00491420"
+    },
+    "casting_failed_factory_branch": {
+      "end_va": "0x0048761F",
+      "sha256": "AB1008C656C1D1B9CCE2785F034D0B69AFE2A7910E70043C27CDC51BDB2789CE",
+      "size": 78,
+      "start_va": "0x004875D1"
+    },
+    "casting_failed_local_source_callback": {
+      "end_va": "0x004918E0",
+      "sha256": "EA980F466CFD691FD629E540375336F98E9F700E7019836E085025920DE92CA8",
+      "size": 16,
+      "start_va": "0x004918D0"
+    },
+    "casting_failed_update_callback": {
+      "end_va": "0x004918D0",
+      "sha256": "FEF126164E8678B820C5424FC94961DEC97DEC582B4F7C1426F0351F0AFC385D",
+      "size": 160,
+      "start_va": "0x00491830"
+    },
+    "casting_gather_create_callback": {
+      "end_va": "0x00492030",
+      "sha256": "8A01556E13C626DC2E85A6395F024508A4AFEA2E2FC794FC0828559AD31D997A",
+      "size": 1872,
+      "start_va": "0x004918E0"
+    },
+    "casting_gather_factory_branch": {
+      "end_va": "0x00487746",
+      "sha256": "A5AE5C6665F49CB7B947173B6BE7431749CF5DFCAC54FEDB9BA348B0B882FE72",
+      "size": 295,
+      "start_va": "0x0048761F"
+    },
+    "casting_gather_local_source_callback": {
+      "end_va": "0x004923B0",
+      "sha256": "4CB19105BC34BC8F812BA164299ED68D02609396B47216F738987B9A9FEA8EB7",
+      "size": 480,
+      "start_va": "0x004921D0"
+    },
+    "casting_gather_update_callback": {
+      "end_va": "0x004921D0",
+      "sha256": "0617F46E9E974572A5FEE54A0E8755A7BDC8ECF13C2FBED50653AEE6939BC745",
+      "size": 416,
+      "start_va": "0x00492030"
+    },
     "casting_local_source_callback": {
       "end_va": "0x00489BE0",
       "sha256": "06E4D6DF644057524D131C5274C8B210CD6A3AC844DBA8DC7A0D50E91BACE99B",
       "size": 160,
       "start_va": "0x00489B40"
+    },
+    "casting_star_round_create_callback": {
+      "end_va": "0x00491230",
+      "sha256": "7069992B09428D723A4A89DB072B3E39AA3CBD6EF6DB114A4904A943B00CC3DD",
+      "size": 1568,
+      "start_va": "0x00490C10"
+    },
+    "casting_star_round_factory_branch": {
+      "end_va": "0x004875D1",
+      "sha256": "FE58104760E268C8C717DA1878AF5E2E9E9861089FA4CBEE04E9DA195301C2A7",
+      "size": 288,
+      "start_va": "0x004874B1"
+    },
+    "casting_star_round_local_source_callback": {
+      "end_va": "0x00491420",
+      "sha256": "6EAE70E749EC56A2B7F7FE2CCE49173E222CC82205314C88A6B12F093EC8D5D1",
+      "size": 144,
+      "start_va": "0x00491390"
+    },
+    "casting_star_round_update_callback": {
+      "end_va": "0x00491390",
+      "sha256": "D302BA99B813279C5F8AE02B36CB4AC4A956925F3CD0A4A1B09402FAD731D6CC",
+      "size": 352,
+      "start_va": "0x00491230"
     },
     "casting_update_callback": {
       "end_va": "0x00489B40",
@@ -178,11 +953,215 @@
       "size": 240,
       "start_va": "0x00489A50"
     },
+    "clayring_create_callback": {
+      "end_va": "0x0048FAB0",
+      "sha256": "3C04CCC541541C71EC928497D4B40B0C9F48B6D4E02B64DC2D80B859A4D64CDB",
+      "size": 704,
+      "start_va": "0x0048F7F0"
+    },
+    "clayring_factory_branch": {
+      "end_va": "0x004872E5",
+      "sha256": "1214A8A16B85C15746DFD1B91E6ABFA14251F45BA990914E0379CA7AE7726DD9",
+      "size": 531,
+      "start_va": "0x004870D2"
+    },
+    "clayring_local_source_callback": {
+      "end_va": "0x0048FDB0",
+      "sha256": "93E0893F88D9B7479EFAD1FCA10D2717BE4819EC8849849EDD1B7ED795A1934F",
+      "size": 464,
+      "start_va": "0x0048FBE0"
+    },
+    "clayring_update_callback": {
+      "end_va": "0x0048FBE0",
+      "sha256": "99EEBC109C545F7942D62B2AC53C3FDD19C53036FAA6E6E0E693847DD1949ABC",
+      "size": 304,
+      "start_va": "0x0048FAB0"
+    },
+    "curseholder_factory_branch": {
+      "end_va": "0x00486993",
+      "sha256": "C0017D4AA827C769C70BDEF2D804FD5241976F41734339665050A175CDFF8F42",
+      "size": 499,
+      "start_va": "0x004867A0"
+    },
+    "cursestars_create_callback": {
+      "end_va": "0x004964B0",
+      "sha256": "A32228CC889BCE8815FF51A280310F96B91545FBEC1DF14630D1E0368E68870C",
+      "size": 576,
+      "start_va": "0x00496270"
+    },
+    "cursestars_factory_branch": {
+      "end_va": "0x00488417",
+      "sha256": "6F4B7A8F3E8F5F04FB999EC638B07DEE48B674C9B6CF1445C328679E6C4FC8FB",
+      "size": 84,
+      "start_va": "0x004883C3"
+    },
+    "cursestars_local_source_callback": {
+      "end_va": "0x004965E0",
+      "sha256": "C4E48398AA494FD8ABF1C3E8E6CC058BCDCA3836FDFE6744B7D353C518E1C019",
+      "size": 16,
+      "start_va": "0x004965D0"
+    },
+    "cursestars_update_callback": {
+      "end_va": "0x004965D0",
+      "sha256": "9D5CB2738695F5C227762CCD1DE0A71F105CA07B1E4BF3B2A64FFE85B2A9F871",
+      "size": 288,
+      "start_va": "0x004964B0"
+    },
+    "cylinder_create_callback": {
+      "end_va": "0x00494170",
+      "sha256": "AC17E1DAE9411E4FDC3E9DE782D49F097AA6FB07DE2634809CC26C4D37788124",
+      "size": 912,
+      "start_va": "0x00493DE0"
+    },
+    "cylinder_factory_branch": {
+      "end_va": "0x00487EEA",
+      "sha256": "9B6E597D1E67293C2BD28CACB1E542C05AC4D76854DF134139D5DA76989D1167",
+      "size": 428,
+      "start_va": "0x00487D3E"
+    },
+    "cylinder_local_source_callback": {
+      "end_va": "0x00494470",
+      "sha256": "DA1DB0E59949FF8F5E51A8E27D776D3C7D22BA407DED342E98A6644FDDEA6829",
+      "size": 304,
+      "start_va": "0x00494340"
+    },
+    "cylinder_update_callback": {
+      "end_va": "0x00494340",
+      "sha256": "F6FEB23B53A9A7999FDF97B5DC1B46D180D0B07FD60F02D7E2D038F253B7B250",
+      "size": 464,
+      "start_va": "0x00494170"
+    },
     "direct3d_particle_blend_setup": {
       "end_va": "0x0056A1F1",
       "sha256": "22141AF17DE0CB65AFFBFBAF08E52CD54B820103378E1CF2C05967BF1F765CD6",
       "size": 36,
       "start_va": "0x0056A1CD"
+    },
+    "feeblemind_create_callback": {
+      "end_va": "0x00495950",
+      "sha256": "2D6ECB4F1F80877B6A06483FB58247320FED399B195BAE32D2EDC958A80A7EAE",
+      "size": 368,
+      "start_va": "0x004957E0"
+    },
+    "feeblemind_factory_branch": {
+      "end_va": "0x0048817C",
+      "sha256": "15E2AFC8C072BDD3B8FB266706EA81D48ABC984D245C52FBF7DAD645B58F98A5",
+      "size": 84,
+      "start_va": "0x00488128"
+    },
+    "feeblemind_local_source_callback": {
+      "end_va": "0x00495A30",
+      "sha256": "C4E48398AA494FD8ABF1C3E8E6CC058BCDCA3836FDFE6744B7D353C518E1C019",
+      "size": 16,
+      "start_va": "0x00495A20"
+    },
+    "feeblemind_update_callback": {
+      "end_va": "0x00495A20",
+      "sha256": "BD141E0ABD246D677CB6BB8601936185BC775915AF51430C0F32F765598B0F95",
+      "size": 208,
+      "start_va": "0x00495950"
+    },
+    "feetcloud_create_callback": {
+      "end_va": "0x00495C80",
+      "sha256": "0C0A882285382309BC811BC9CF41C6F5EE47A6A177AD1CA0409183B7BA478F82",
+      "size": 592,
+      "start_va": "0x00495A30"
+    },
+    "feetcloud_factory_branch": {
+      "end_va": "0x0048836F",
+      "sha256": "AAA3021A18797E12DEFA16BE2EE6475B0411CD74C56CA3212B2BAF6CECA899A7",
+      "size": 499,
+      "start_va": "0x0048817C"
+    },
+    "feetcloud_local_source_callback": {
+      "end_va": "0x00495FB0",
+      "sha256": "A41E8A41199C7DFA282B77B88C4AEB3A0F02C239BB090A67A3FBA2514527C302",
+      "size": 432,
+      "start_va": "0x00495E00"
+    },
+    "feetcloud_update_callback": {
+      "end_va": "0x00495E00",
+      "sha256": "260153153F3856A0F1EDAD5D58891D48C1BE0853843E1ED2CD8FE326611AD706",
+      "size": 384,
+      "start_va": "0x00495C80"
+    },
+    "firearrow_create_callback": {
+      "end_va": "0x0048CED0",
+      "sha256": "3B45A6BFCDAB6B08E4671C72F820B1D9C315204844EF2DBB75188BAF83AE9E55",
+      "size": 816,
+      "start_va": "0x0048CBA0"
+    },
+    "firearrow_factory_branch": {
+      "end_va": "0x004858E3",
+      "sha256": "3FFB87F1F73C0E2A0042242A00E6039E61455D0478A05D26BC824E440CCA2ECC",
+      "size": 224,
+      "start_va": "0x00485803"
+    },
+    "firearrow_update_callback": {
+      "end_va": "0x0048D050",
+      "sha256": "C0C7545486B00F15C3BDA99FAE11BA58C2A016F0538638F190FD90465589FD9D",
+      "size": 384,
+      "start_va": "0x0048CED0"
+    },
+    "fireball_create_callback": {
+      "end_va": "0x0048CAD0",
+      "sha256": "DC16CA303C708E6889B64628B262367ED4D8481DAADE2BD77AC4C02B65202C83",
+      "size": 720,
+      "start_va": "0x0048C800"
+    },
+    "fireball_factory_branch": {
+      "end_va": "0x00485803",
+      "sha256": "F58BAA0A50FB1C0BCBBC80DDDF6E26A9C6D45E78AB4238BE9F53C99379EBB659",
+      "size": 206,
+      "start_va": "0x00485735"
+    },
+    "fireball_update_callback": {
+      "end_va": "0x0048CBA0",
+      "sha256": "2EA08333B173CC6E124068B5DF7F94B371D6BA4D8E2AC2AF1C10ADB07F654702",
+      "size": 208,
+      "start_va": "0x0048CAD0"
+    },
+    "fireblast_create_callback": {
+      "end_va": "0x0048C590",
+      "sha256": "96205D365E12709AA58BE774AEDA55D80168A6EF727E21FE56660FCD1DF05A1E",
+      "size": 1280,
+      "start_va": "0x0048C090"
+    },
+    "fireblast_factory_branch": {
+      "end_va": "0x004861D8",
+      "sha256": "40380CD96A6F23230B7E87FFAAE747A0FC4A055F86F4ACD80741BD26F187356F",
+      "size": 1152,
+      "start_va": "0x00485D58"
+    },
+    "fireblast_local_source_callback": {
+      "end_va": "0x0048C800",
+      "sha256": "195550012AE0EAE77044EE2E0439A660F9963E179F193AC158B322B6847C067B",
+      "size": 160,
+      "start_va": "0x0048C760"
+    },
+    "fireblast_update_callback": {
+      "end_va": "0x0048C760",
+      "sha256": "B3BC13FE9E6C5D1160366C74814C8FB01A2A7C8BC8F43CB66A56E146A19CF2F8",
+      "size": 464,
+      "start_va": "0x0048C590"
+    },
+    "firewall_create_callback": {
+      "end_va": "0x0048EE20",
+      "sha256": "477D6C64FFCD1F0CFE77505FC8DF090EA8B8F5CE377646F96D9CA6BC797B15A8",
+      "size": 192,
+      "start_va": "0x0048ED60"
+    },
+    "firewall_factory_specialization": {
+      "end_va": "0x00485D47",
+      "sha256": "1E9954F0BE8E33360DBEE910916AA317E623D2C152B11361A82538BFA6624CA9",
+      "size": 392,
+      "start_va": "0x00485BBF"
+    },
+    "firewall_local_source_callback": {
+      "end_va": "0x0048EEA0",
+      "sha256": "B3C53D6E95A561B1E39BB82111CAA4CF0177D8078A8BEAA800386D7C3ED079C5",
+      "size": 128,
+      "start_va": "0x0048EE20"
     },
     "generic_light_setup": {
       "end_va": "0x0051194C",
@@ -190,11 +1169,59 @@
       "size": 284,
       "start_va": "0x00511830"
     },
+    "geyser_create_callback": {
+      "end_va": "0x0048ADA0",
+      "sha256": "E275A269FF668B5DBDFC9786B6DA1D491590E538806CBA0CA498AEF006E8649D",
+      "size": 1200,
+      "start_va": "0x0048A8F0"
+    },
+    "geyser_factory_branch": {
+      "end_va": "0x00486574",
+      "sha256": "7D20CDBD2AA28B83AF79EB2BED0E1FF9841A3DBC3FB06F74BB5F91FAC8A489DF",
+      "size": 514,
+      "start_va": "0x00486372"
+    },
+    "geyser_local_source_callback": {
+      "end_va": "0x0048B080",
+      "sha256": "04777D9760629EBB0D23226BB4BF4B30041186B6A069F7E66AF1DDC358875252",
+      "size": 448,
+      "start_va": "0x0048AEC0"
+    },
+    "geyser_update_callback": {
+      "end_va": "0x0048AEC0",
+      "sha256": "473A1AF9D6E431029CEABFCA86A6F1E80D818257009BE980A66B1C508382B286",
+      "size": 288,
+      "start_va": "0x0048ADA0"
+    },
     "global_render_particle_lookup": {
       "end_va": "0x0040ECA5",
       "sha256": "575DA248FCE84901A59B687AE3C44C95118740231BE16251E4FD0FAE6DEED71D",
       "size": 325,
       "start_va": "0x0040EB60"
+    },
+    "healing_create_callback": {
+      "end_va": "0x0048BBE0",
+      "sha256": "764FF91E6C68EC840372835DF434C259920D7D7C97DEBECE0922821340DC10C8",
+      "size": 1456,
+      "start_va": "0x0048B630"
+    },
+    "healing_factory_branch": {
+      "end_va": "0x00486319",
+      "sha256": "B24DC0056B0DFA020E149FB3F0F6C9FB819DAF111CB513F48E38B364C9E1E0A5",
+      "size": 97,
+      "start_va": "0x004862B8"
+    },
+    "healing_local_source_callback": {
+      "end_va": "0x0048BD50",
+      "sha256": "7C57E0ABDD309A552D1C95B5DB4B175233C44A3D21C4448CDDB02A43F5F42792",
+      "size": 112,
+      "start_va": "0x0048BCE0"
+    },
+    "healing_update_callback": {
+      "end_va": "0x0048BCE0",
+      "sha256": "2CB07EE532036500034CBA65E9D4297FF560B734B7D545F5F9724469B4BBEDD4",
+      "size": 256,
+      "start_va": "0x0048BBE0"
     },
     "isaac_entropy_initialization": {
       "end_va": "0x0049F4B0",
@@ -232,11 +1259,107 @@
       "size": 320,
       "start_va": "0x00492B80"
     },
+    "link_create_callback": {
+      "end_va": "0x0048DE30",
+      "sha256": "C4D36D8B3302C310C205BCCC5FE5ABF9F2F2FE17725390969B4CCD7443BD72D1",
+      "size": 1376,
+      "start_va": "0x0048D8D0"
+    },
+    "link_factory_branch": {
+      "end_va": "0x00485A9E",
+      "sha256": "A003C7385B76A16E083A2F49145EA9CD14773B03198C8833D4EE8F079796EEAB",
+      "size": 257,
+      "start_va": "0x0048599D"
+    },
+    "link_local_source_callback": {
+      "end_va": "0x0048E060",
+      "sha256": "BF9ABE7AEAA331E623B972C4C9665ACBED5CD723120AD1F3B45A2644A6548CA6",
+      "size": 32,
+      "start_va": "0x0048E040"
+    },
+    "link_update_callback": {
+      "end_va": "0x0048E040",
+      "sha256": "F20CF1D70DDA82B1373550E1B1C6D6F39ECCF16DB92CFA5AE29BED7374FB21E2",
+      "size": 528,
+      "start_va": "0x0048DE30"
+    },
     "logical_quant_loop": {
       "end_va": "0x0045759A",
       "sha256": "7F1550F828FA30CEF447FF22C26FCF93AC9EB6F7437D5439322DC395837E1CA0",
       "size": 670,
       "start_va": "0x004572FC"
+    },
+    "modifier_create_callback": {
+      "end_va": "0x00490990",
+      "sha256": "67B05F5EC50D313D0F1E8CE5BA94E4EEF850EED6F13819BA123C531AA34DF2FC",
+      "size": 2144,
+      "start_va": "0x00490130"
+    },
+    "modifier_factory_branch": {
+      "end_va": "0x004874B1",
+      "sha256": "BF6DE349B3E676B81CDE8CE7F56E797B1193C098E15DBB296BEDE55CAC8F8E8A",
+      "size": 82,
+      "start_va": "0x0048745F"
+    },
+    "modifier_local_source_callback": {
+      "end_va": "0x00490C10",
+      "sha256": "F76CEE3B9BA8945FFC370C3CA349E34F424EFDBE2BD5BEA76DFF45C4367FA829",
+      "size": 272,
+      "start_va": "0x00490B00"
+    },
+    "modifier_update_callback": {
+      "end_va": "0x00490B00",
+      "sha256": "8D5FBA43939D4248DA6E9CAAFE19FAC0FB8E5D49E232A66070ED3A63DBF720DB",
+      "size": 368,
+      "start_va": "0x00490990"
+    },
+    "moshka_create_callback": {
+      "end_va": "0x00493770",
+      "sha256": "05A8A1DDA72E15BAF010AF0F48F0BF041F1BD780E38ACCEFD4B099B8A0E99CC9",
+      "size": 528,
+      "start_va": "0x00493560"
+    },
+    "moshka_factory_branch": {
+      "end_va": "0x00487B94",
+      "sha256": "5ACC0B4F862F0CF09EB68CAC446B739F58F53A9CEAD99C6DED39D9896844C1E3",
+      "size": 340,
+      "start_va": "0x00487A40"
+    },
+    "moshka_local_source_callback": {
+      "end_va": "0x00493D10",
+      "sha256": "E631DA9FF7E76C5B94E4E3EDAE9A9A9D2DE1947274C940EDD6E4A9BCD86F4E9E",
+      "size": 1104,
+      "start_va": "0x004938C0"
+    },
+    "moshka_update_callback": {
+      "end_va": "0x004938C0",
+      "sha256": "A2ED0E87C5C7CD218C1950E498CEFB74F1CE2B3C9A2ED506D530D11866ADBB40",
+      "size": 336,
+      "start_va": "0x00493770"
+    },
+    "mushroom_create_callback": {
+      "end_va": "0x00488DB0",
+      "sha256": "F92BECDF98ECCF37DE37E53D448D7CF0C44506E275DED2269360750D72CE4A5E",
+      "size": 992,
+      "start_va": "0x004889D0"
+    },
+    "mushroom_factory_branch": {
+      "end_va": "0x00486C43",
+      "sha256": "3EECEC26D78D6C389199E9A8D83830DBB2865C7E5C1AEF7F54B837A4D58671BA",
+      "size": 110,
+      "start_va": "0x00486BD5"
+    },
+    "mushroom_local_source_callback": {
+      "end_va": "0x00488F90",
+      "sha256": "E8D425A224C0CD87C4FB826800FEFA6B93305A55801B34318B801FCF8EEA7F61",
+      "size": 144,
+      "start_va": "0x00488F00"
+    },
+    "mushroom_update_callback": {
+      "end_va": "0x00488F00",
+      "sha256": "A69A4B03DF366ECF2311CB6062A55AD1466510E48DFE11BC5577271E9E28E36F",
+      "size": 336,
+      "start_va": "0x00488DB0"
     },
     "native_d3d_light_constructor": {
       "end_va": "0x0068CF9F",
@@ -310,6 +1433,144 @@
       "size": 2524,
       "start_va": "0x00502CA0"
     },
+    "path_create_callback": {
+      "end_va": "0x00493280",
+      "sha256": "BA55A0E16BC6FBC63B6028A9B1CE8E6A8848C43D1F28D2834B7B4CE22D5B06FE",
+      "size": 704,
+      "start_va": "0x00492FC0"
+    },
+    "path_factory_branch": {
+      "end_va": "0x004878CD",
+      "sha256": "B81372CA944AC2133645334863150BA84E29AFCA8055D2E646D69A94B22D4EBC",
+      "size": 69,
+      "start_va": "0x00487888"
+    },
+    "path_local_source_callback": {
+      "end_va": "0x00493300",
+      "sha256": "AE4BCB9F7D50B0ED1F8B150B5FD0ADB8735538F91FFF765EEDBBABB778F03D5F",
+      "size": 16,
+      "start_va": "0x004932F0"
+    },
+    "path_update_callback": {
+      "end_va": "0x004932F0",
+      "sha256": "D154918F3C164246B1EE8C7801ABA82AC4EE3FDEDC68B8D87AB2C95D5ED5F161",
+      "size": 112,
+      "start_va": "0x00493280"
+    },
+    "pathdestination_create_callback": {
+      "end_va": "0x004933F0",
+      "sha256": "89D45C5FCD6058AD6529936BB63DD681ECF203BB48E871A04AED67D969A7F8A5",
+      "size": 240,
+      "start_va": "0x00493300"
+    },
+    "pathdestination_factory_branch": {
+      "end_va": "0x00487A40",
+      "sha256": "553EA7AFD7C092BD99269CD4DADEEB8A3F9FFDE43BBB7D8C7CE85782D5D608D3",
+      "size": 371,
+      "start_va": "0x004878CD"
+    },
+    "pathdestination_local_source_callback": {
+      "end_va": "0x00493560",
+      "sha256": "6E10E1C8D6E22720E92694766AA3BF5BB583AB12AAF350D6E3C5FEF33CE40246",
+      "size": 112,
+      "start_va": "0x004934F0"
+    },
+    "pathdestination_update_callback": {
+      "end_va": "0x004934F0",
+      "sha256": "F8A738F72B83A787DBBE6DCD2367BF819A3FF4AB1E9DF909A49C75B1BE795B82",
+      "size": 256,
+      "start_va": "0x004933F0"
+    },
+    "poisonfog_create_callback": {
+      "end_va": "0x0048B570",
+      "sha256": "11D87AA28E4FFAE9D9F5BD1F2766CE7E3D8B2CA12AD95D572A70DAFF10D4D42C",
+      "size": 1264,
+      "start_va": "0x0048B080"
+    },
+    "poisonfog_factory_branch": {
+      "end_va": "0x00486372",
+      "sha256": "7411FD394055B243C694789995FD180E9E7853760F3767B7D6E67FEB9B932055",
+      "size": 89,
+      "start_va": "0x00486319"
+    },
+    "poisonfog_update_callback": {
+      "end_va": "0x0048B630",
+      "sha256": "C72F36E3AD816406C6B7FC975463B0B97028D8B67292F864D2550EFBA4F3F6E0",
+      "size": 192,
+      "start_va": "0x0048B570"
+    },
+    "portal_create_callback": {
+      "end_va": "0x00494770",
+      "sha256": "472357E223065B2F96E333DD55C4D3DA593FD1A689A86C0C5B6E425F60C91007",
+      "size": 768,
+      "start_va": "0x00494470"
+    },
+    "portal_factory_branch": {
+      "end_va": "0x00487D03",
+      "sha256": "FDA93FE7887A037A68E63B9A0115FFC1ACF05D741D1894AA731E509020B442B9",
+      "size": 367,
+      "start_va": "0x00487B94"
+    },
+    "portal_local_source_callback": {
+      "end_va": "0x00494950",
+      "sha256": "AF70877052C2B9B9A323C565A804AF1FC84F7F1B542FA1630D8DA00EBEBDF9F0",
+      "size": 32,
+      "start_va": "0x00494930"
+    },
+    "portal_update_callback": {
+      "end_va": "0x00494930",
+      "sha256": "563B6BD129A08795D3A35BEA52AEF1DE1677CCBCAB14D5C57986DA7A778CB785",
+      "size": 448,
+      "start_va": "0x00494770"
+    },
+    "portalstar_create_callback": {
+      "end_va": "0x00493D50",
+      "sha256": "AC0D5F60A9A69CB1F2DC5274B156BF81291EEFF8B0BFB2BA4DDAEB5CDC486655",
+      "size": 64,
+      "start_va": "0x00493D10"
+    },
+    "portalstar_factory_branch": {
+      "end_va": "0x00487D3E",
+      "sha256": "6937602FE187CADA59D054B61AED4B6860FF835B42A0324AB3BC4B376AFD05A6",
+      "size": 59,
+      "start_va": "0x00487D03"
+    },
+    "portalstar_local_source_callback": {
+      "end_va": "0x00493DE0",
+      "sha256": "C4E48398AA494FD8ABF1C3E8E6CC058BCDCA3836FDFE6744B7D353C518E1C019",
+      "size": 16,
+      "start_va": "0x00493DD0"
+    },
+    "portalstar_update_callback": {
+      "end_va": "0x00493DD0",
+      "sha256": "39C8B1EB9A713FD148A9092775937FD603F9F90B05DC95C88D09559528D75569",
+      "size": 128,
+      "start_va": "0x00493D50"
+    },
+    "regeneration_create_callback": {
+      "end_va": "0x00495120",
+      "sha256": "6082CB7EC8F9795BBB044B0FB3237ACF037630C468B3BA8AC784B235CB48969A",
+      "size": 112,
+      "start_va": "0x004950B0"
+    },
+    "regeneration_factory_branch": {
+      "end_va": "0x004880D4",
+      "sha256": "44E65AD293C2CA724F1614CAAB853E7560470EB7BE9BF5D2F95CBEF00FB43236",
+      "size": 74,
+      "start_va": "0x0048808A"
+    },
+    "regeneration_local_source_callback": {
+      "end_va": "0x00495320",
+      "sha256": "C4E48398AA494FD8ABF1C3E8E6CC058BCDCA3836FDFE6744B7D353C518E1C019",
+      "size": 16,
+      "start_va": "0x00495310"
+    },
+    "regeneration_update_callback": {
+      "end_va": "0x00495310",
+      "sha256": "2BAD9E614DD46C894C6C8524DD72CDD4BCA41DDBBAA67278E6C32D80428C050C",
+      "size": 496,
+      "start_va": "0x00495120"
+    },
     "render_interpolation": {
       "end_va": "0x00497CD5",
       "sha256": "78E12D99A1888CF536FA87688669104F4DEFE16418EC911DA3144C3642493E1D",
@@ -321,6 +1582,54 @@
       "sha256": "8E50A313A187F75E08EBD29E69FD89B0F107E468783E7E99F7ECCDEB0E8C7A47",
       "size": 1792,
       "start_va": "0x00496EB0"
+    },
+    "silence_create_callback": {
+      "end_va": "0x004955D0",
+      "sha256": "7810F50826F5724286E7E14CB417BEC46D9A3CA284C7DDD2571365EF48FBE793",
+      "size": 688,
+      "start_va": "0x00495320"
+    },
+    "silence_factory_branch": {
+      "end_va": "0x00488128",
+      "sha256": "7578934398182B5DBFA7716E3C9C3D309D322BC9E5E893F49F89C32085E4D48C",
+      "size": 84,
+      "start_va": "0x004880D4"
+    },
+    "silence_local_source_callback": {
+      "end_va": "0x004957E0",
+      "sha256": "C4E48398AA494FD8ABF1C3E8E6CC058BCDCA3836FDFE6744B7D353C518E1C019",
+      "size": 16,
+      "start_va": "0x004957D0"
+    },
+    "silence_update_callback": {
+      "end_va": "0x004957D0",
+      "sha256": "B49A18B1C48C45FEC752F05A538DB3CE7BF44DD04D37C6D389D7F8CFB786B833",
+      "size": 512,
+      "start_va": "0x004955D0"
+    },
+    "sparks_create_callback": {
+      "end_va": "0x00494CD0",
+      "sha256": "073D977809365CF6A5830934CEE72C22928A9991017DCFD61D1C49A3F4FE18B9",
+      "size": 704,
+      "start_va": "0x00494A10"
+    },
+    "sparks_factory_branch": {
+      "end_va": "0x00487FEC",
+      "sha256": "026011E1B3886BE26537CDEB72565B6179DF55E8E290F15A506B6A6EA1031CE6",
+      "size": 84,
+      "start_va": "0x00487F98"
+    },
+    "sparks_local_source_callback": {
+      "end_va": "0x00494E00",
+      "sha256": "C4E48398AA494FD8ABF1C3E8E6CC058BCDCA3836FDFE6744B7D353C518E1C019",
+      "size": 16,
+      "start_va": "0x00494DF0"
+    },
+    "sparks_update_callback": {
+      "end_va": "0x00494DF0",
+      "sha256": "4B11DB5CA9A12AB348D240C5F980F2B2F58724CF685A71B00A28CCC646C0EE4E",
+      "size": 288,
+      "start_va": "0x00494CD0"
     },
     "spatial_light_cell_insertion": {
       "end_va": "0x006CAF69",
@@ -339,6 +1648,96 @@
       "sha256": "C8E922697CA9FC9E3D5A4A70D951F017090A36EF5650E883863C18E875D9897D",
       "size": 576,
       "start_va": "0x0048E9E0"
+    },
+    "sphere_create_callback": {
+      "end_va": "0x0048E7C0",
+      "sha256": "4A0156E2D9D81D11DD3044827DBDA0351EACE01F2313F23AD6FA7990514813CE",
+      "size": 1872,
+      "start_va": "0x0048E070"
+    },
+    "sphere_factory_branch": {
+      "end_va": "0x00485735",
+      "sha256": "4724EE8634BC18B76DB5DA54B26E4BB8623655D37C3E04010BCC24FD3EAD01E9",
+      "size": 295,
+      "start_va": "0x0048560E"
+    },
+    "sphere_update_callback": {
+      "end_va": "0x0048E9E0",
+      "sha256": "BCA1BB7BC1E0E79749BFF17936E07A923ADE34EF358D1D3054461937DDA5C8E7",
+      "size": 544,
+      "start_va": "0x0048E7C0"
+    },
+    "star_create_callback": {
+      "end_va": "0x004949B0",
+      "sha256": "B59E5303F531CA63FB5B985432F6A06AA36E4B17E67059E9513D9F7244EDFD5B",
+      "size": 96,
+      "start_va": "0x00494950"
+    },
+    "star_factory_branch": {
+      "end_va": "0x00487F98",
+      "sha256": "70DA143192728CB452ACFF7A896E708AF912FC2794ED54F84D914873A8D3F759",
+      "size": 174,
+      "start_va": "0x00487EEA"
+    },
+    "star_local_source_callback": {
+      "end_va": "0x00494A10",
+      "sha256": "C4E48398AA494FD8ABF1C3E8E6CC058BCDCA3836FDFE6744B7D353C518E1C019",
+      "size": 16,
+      "start_va": "0x00494A00"
+    },
+    "star_update_callback": {
+      "end_va": "0x00494A00",
+      "sha256": "6C069F90CBAF8D3735CC3116BCC1874E6B08D2BD1D5A838213B07A6BB542DCD4",
+      "size": 80,
+      "start_va": "0x004949B0"
+    },
+    "starttrans_create_callback": {
+      "end_va": "0x00496840",
+      "sha256": "D1B2183C5F9DF7870C70EE3A9727B881BD2B0DAD60D66C7C7BDF3FE4134CA804",
+      "size": 608,
+      "start_va": "0x004965E0"
+    },
+    "starttrans_factory_branch": {
+      "end_va": "0x004885B4",
+      "sha256": "E60643FB9D0779BF093754563F7668B0EDDF3E75B0C4E8D01EC8983365FC65A1",
+      "size": 413,
+      "start_va": "0x00488417"
+    },
+    "starttrans_local_source_callback": {
+      "end_va": "0x00496A20",
+      "sha256": "C95A2CE844A5FDF4E07C2D4B7CE0A421F407A66F1FFE09A087669ABC64B67B29",
+      "size": 144,
+      "start_va": "0x00496990"
+    },
+    "starttrans_update_callback": {
+      "end_va": "0x00496990",
+      "sha256": "01C911811074A63E165B05A69B432DA56593252F9DE09C3C62791C7A94C4E309",
+      "size": 336,
+      "start_va": "0x00496840"
+    },
+    "teleport_create_callback": {
+      "end_va": "0x00490060",
+      "sha256": "23972B3B58339944F0C0C1A548DD3D575C90A1F6B3693EA25B43164D2236E71C",
+      "size": 688,
+      "start_va": "0x0048FDB0"
+    },
+    "teleport_factory_branch": {
+      "end_va": "0x0048745F",
+      "sha256": "52660B3EA690BF469C3128DA9E5FC3B981FEAE0B423D3F9321892537974CB013",
+      "size": 378,
+      "start_va": "0x004872E5"
+    },
+    "teleport_local_source_callback": {
+      "end_va": "0x00490130",
+      "sha256": "401CA4E654A1521447EB48C4F21D88C3F0CF6D5133B90204F47305EF60E228BF",
+      "size": 32,
+      "start_va": "0x00490110"
+    },
+    "teleport_update_callback": {
+      "end_va": "0x00490110",
+      "sha256": "B954210C856BCECC96CCBFF4160EBCAF60950F9416C418DEBC68B1B3622FB6AB",
+      "size": 176,
+      "start_va": "0x00490060"
     },
     "tendri_factory_branch": {
       "end_va": "0x00485D58",
@@ -424,6 +1823,48 @@
       "size": 320,
       "start_va": "0x0048EC20"
     },
+    "visionstar_create_callback": {
+      "end_va": "0x00494F30",
+      "sha256": "390383D64CAA647E26A6824FD6A7D2BE875F5B2030478A779556DB3C03CDE12A",
+      "size": 304,
+      "start_va": "0x00494E00"
+    },
+    "visionstar_factory_branch": {
+      "end_va": "0x0048808A",
+      "sha256": "0118D43A2886F5A7ED1669D36B969BBE57DFE6576FA91673D99BA0CC2EEF1482",
+      "size": 158,
+      "start_va": "0x00487FEC"
+    },
+    "visionstar_local_source_callback": {
+      "end_va": "0x004950B0",
+      "sha256": "C4E48398AA494FD8ABF1C3E8E6CC058BCDCA3836FDFE6744B7D353C518E1C019",
+      "size": 16,
+      "start_va": "0x004950A0"
+    },
+    "visionstar_update_callback": {
+      "end_va": "0x004950A0",
+      "sha256": "C7325D95200A8F3E5148357CADB05C9958DEDC53C7C2A70617E7FDD21A0FDD2D",
+      "size": 368,
+      "start_va": "0x00494F30"
+    },
+    "vulcansmoke_create_callback": {
+      "end_va": "0x0048C010",
+      "sha256": "0468205E30E99248388A9C774B03BDF3A9D1F29AAEF5E1B023D637BCA898091A",
+      "size": 704,
+      "start_va": "0x0048BD50"
+    },
+    "vulcansmoke_factory_branch": {
+      "end_va": "0x004862B8",
+      "sha256": "F5EA630A7D469F0796EC5E2A856B63CB11BD58C7862D553B59000C7965FA3D58",
+      "size": 224,
+      "start_va": "0x004861D8"
+    },
+    "vulcansmoke_update_callback": {
+      "end_va": "0x0048C090",
+      "sha256": "CE71E967523207E73AB872830E1B5245A7B8F9E6BD5F1D6D3C913DFA4FC85EB4",
+      "size": 128,
+      "start_va": "0x0048C010"
+    },
     "weather_runtime_interpolation": {
       "end_va": "0x00566BF7",
       "sha256": "A5B04A073B658077428D486314E5B56A87AAA034D202932C4C9C485D6C0DA6CF",
@@ -459,6 +1900,30 @@
       "sha256": "15F84CB89645248B9A30DF83CE145F5999F659948541B03BC329EF10250A275A",
       "size": 86,
       "start_va": "0x00564190"
+    },
+    "zoneexit_create_callback": {
+      "end_va": "0x00492F40",
+      "sha256": "B5E2C16ADE6A662CA9AFB6E88884724AE2F5644CE9D01A2F2F6CD9DE50B43A89",
+      "size": 528,
+      "start_va": "0x00492D30"
+    },
+    "zoneexit_factory_branch": {
+      "end_va": "0x00487888",
+      "sha256": "AEFE5B28BC8AD83D27C4FECC03A3F1F7FB66D8C7A272BD23E98AA0D987A11AAE",
+      "size": 77,
+      "start_va": "0x0048783B"
+    },
+    "zoneexit_local_source_callback": {
+      "end_va": "0x00492FC0",
+      "sha256": "C4E48398AA494FD8ABF1C3E8E6CC058BCDCA3836FDFE6744B7D353C518E1C019",
+      "size": 16,
+      "start_va": "0x00492FB0"
+    },
+    "zoneexit_update_callback": {
+      "end_va": "0x00492FB0",
+      "sha256": "8B3F59313A7F28E9D2C68DE7BB82FF2DA6A9B7812C907622FE0095034C64830B",
+      "size": 112,
+      "start_va": "0x00492F40"
     }
   },
   "sections": [
@@ -492,13 +1957,61 @@
     }
   ],
   "sites": {
+    "a4blood_factory_parameters": {
+      "bytes": "C783D00000002D000000895004C783D80000002C010000C783EC00000006000000C783E40000000F000000894808C783E0010000B0F34800C783E401000070F64800C783E8010000F0F64800A1449D7A008BD04885D2A3449D7A007514B9409D7A00E8217F0100B8FF000000A3449D7A008B0485489D7A0033D2B905000000F7F18BEA83C504752F8B835401000033F63BC674128B50FC52E85396270083C40489B35401000089B35C01000089B358010000E9FC0000008B835401000033F63BC675398D04ED000000002BC58D0CC52400000051E8EE9527008D482383C40483E1E08941FC898B5401000089AB5C01000089AB58010000E9B70000008B8B5C0100003BE97F0B89AB58010000E9A20000008B83600100003BC675278B83580100009983E20703C2C1F80383F8047D07B804000000EB0C3D000400007E05B80004000003C13BE8894424107C04896C24108B4C2410E86F0E01008B93580100008BB3540100008BF8894424308D0CD5000000002BCAC1E1038BD1C1E902F3A58BCA83E103F3A48B83540100008B48FC51E85C9527008B5424348B44241483C40489935401000089AB5801000089835C01000033F68B8B5801000033C03BCE7E1A33C98B935401000040897411308B935801000083C1383BC27CE88D9424800000",
+      "va": "0x00486EE8"
+    },
+    "a4blood_radial_birth": {
+      "bytes": "83EC18535556578B7C242C8BE9C74758FFFFFFFFC747440C0000008B859800000089078B8D9C000000894F048B95A0000000895708A1449D7A008BC84885C9A3449D7A007514B9409D7A00E870FA0000B8FF000000A3449D7A008B1485489D7A00C74424180000000089542414DF6C2414DC0D68CE7300D80550B87300D95F0C8B35449D7A008B9D580100008BC64E85C08935449D7A007515B9409D7A00E81DFA0000BEFF0000008935449D7A008B04B5489D7A0033D2F7F38B8D540100008D1CD5000000002BDAC1E303D944190CD80D6CB873008D041989442410D95C242CDD05E8CA7300DC0D30BA7300DC0D10CD7300E8959025008B54241089442414DB4424148BC64E85C0D84A108935449D7A00D95C2414D944242CD9E0D95C24107515B9409D7A00E895F90000BEFF0000008935449D7A008B0CB5489D7A00C744242000000000894C241C8B9554010000DF6C241CD944242CD86424108BC64E85C0DEC9DC0D68C47300D8441A0C8935449D7A00D8442410D95C2410D9442414D9E0D95C242C7515B9409D7A00E830F90000BEFF0000008935449D7A008B0CB5489D7A00C744242000000000894C241C8B9554010000DF6C241CD9442414D864242C8D4738C744242400000000DEC9DC0D68C47300D8441A10C747200000803FC747288FC2F5BDD844242CD9C0D9FED84C2410D95C241C8B4C241CD9FF89088B4C2424D84C2410D95C24208B542420895004894808A1449D7A008BD04885D2A3449D7A007514B9409D7A00E892F80000B8FF000000A3449D7A008B0485489D7A00C7442420000000008944241CDF6C241CDC0D60CE7300D84728D825B8CC7300D95F28A1449D7A008BC84885C9A3449D7A007514B9409D7A",
+      "va": "0x0048F3B0"
+    },
+    "a4blood_source_initialization_and_stop": {
+      "bytes": "83EC08568B742410578BF98B463085C00F85BC000000A1449D7A008BC84885C9A3449D7A007514B9409D7A00E84FF70000B8FF000000A3449D7A008B1485489D7A00C744240C0000000089542408DF6C2408DC0D70CE7300D80550B87300D95E0CDD05E8CA7300DC0D30BA7300DC0DC0CD7300E8D48D250089442414A1449D7A00DB4424148BC84885C9D95C2414A3449D7A007514B9409D7A00E8E1F60000B8FF000000A3449D7A008B1485489D7A00C744240C00000000895424088B4630DF6C240885C0D84C2414DC0D68C47300D95E107E128B57086A0083E2FE8BCF895708E81A52FFFF8B46305F408946305E83C408",
+      "va": "0x0048F6F0"
+    },
+    "a4blood_velocity_and_ground_update": {
+      "bytes": "558BEC83EC088B5508D94208D81D58B87300DFE0F6C401740833C08BE55DC20400D94238D8028B4224894508D91AD9423CD84204D95A04D94240D84208D95A08D94220D84A0CD95A0CD94228D84240D95DFCD945FCD85D08DFE08B4D08C1E017C1F81F23C8F7D02345FC0BC18945F8D945F8D95A40B8010000008BE55DC2",
+      "va": "0x0048F670"
+    },
+    "acidray_callback_selection": {
+      "bytes": "C783E001000050D04800C783E401000030D348008D942480000000BFC0AE7800",
+      "va": "0x00485978"
+    },
+    "acidray_size_table": {
+      "bytes": "CDCC8C3F9A99593F7B146E3F0000803FEC51783F7B146E3F52B85E3FCDCC4C3F48E13A3F6666263FCDCC0C3FF628DC3E9A99993ECDCC4C3E0000000000000000000000000000000000000000",
+      "va": "0x0078A668"
+    },
     "acidray_texture_name": {
       "bytes": "4163696452617900",
       "va": "0x0078AEC0"
     },
+    "acidray_width_table": {
+      "bytes": "000000009A99593F7B146E3F0000803FEC51783F7B146E3F52B85E3FCDCC4C3F48E13A3F6666263FCDCC0C3FF628DC3E9A99993ECDCC4C3E0000000000000000000000000000000000000000",
+      "va": "0x0078A61C"
+    },
+    "antimagic_texture_name": {
+      "bytes": "416E74694D6167696300",
+      "va": "0x0078AF00"
+    },
     "attach_copies_color_endpoint": {
       "bytes": "8B57588B490C89575C89480C",
       "va": "0x00496A4A"
+    },
+    "bag_texture_name": {
+      "bytes": "42616700",
+      "va": "0x0078ADB8"
+    },
+    "ballofstars_callback_and_texture_selection": {
+      "bytes": "0C1289AB50010000894308C7833C0100000000000089ABD0000000C783D80000002C010000C783E0010000B05F4900C783E4010000B0614900C783E8010000606249008D942480000000BF28AE7800E9BF010000",
+      "va": "0x0048836F"
+    },
+    "ballofstars_carrier_ball_birth": {
+      "bytes": "83EC388D4424085355568BF1578D4C243C50518BCEE8B6F2FEFF8B7C244CBD0A00000033DBC74758FFFFFF00C7474403000000B9409D7A00E80308FDFF8944241C895C2420DF6C241CB9409D7A00DC0D08C57300D8254CB87300D95C2414E8DD07FDFF89442424895C2428DF6C2424680000803F68000080BFB9409D7A00DC0D08C57300D8254CB87300D95C2418E82D29FFFFD954244CD84C244CD9442410D84C2410DEC1D9442414D84C2414DEC1D81D4CB87300DFE0F6C40175094D3BEB0F8F6EFFFFFF8B54244C8B4424108B4C24145250518D4C243CE853BDF6FFD9442418D80DA8CC7300D9442430D8C9D95C2424D9442434D8C9D95C2428D84C2438D9442424D88698000000D9442428D8869C000000D95C2434D9C9D886A00000008B542434895F0C895704D95C24388B442438D91F894708A1449D7A008BC84885C9A3449D7A007514B9409D7A00E86F8D0000B8FF000000A3449D7A008B1485489D7A00895C242889542424C7475014000000DF6C2424DC0D10CE7300D80538C57300D95F208B8E940000003BCB745283B964020000037513C786D000000004000000C7475005000000EB0AC786D0000000010000008B01FF90DC00000085C074118B4E085383E1FA894E088BCEE86FE8FEFF5F5E5DB8010000005B83C438C208008B4E085383E1FA894E088BCEE84FE8FEFF5F5E5D33C05B83C438C20800909090",
+      "va": "0x00495FB0"
+    },
+    "ballofstars_lifetime_and_random_size_update": {
+      "bytes": "83EC08568B742410578BF98B4650488946507918C74658FFFFFF00C7460C000000005F33C05E83C408C20400C74658FFFFFFFFA1449D7A008BC84885C9A3449D7A007514B9409D7A00E8728C0000B8FF000000A3449D7A008B1485489D7A00C744240C0000000089542408DF6C2408DC0DB0CC7300D805A8CC7300D88F0C010000D84E20D95E0C8B879400000085C075128B4F086A0083E1FA894F088BCFE89DE7FEFF5FB8010000005E83C408C20400",
+      "va": "0x004961B0"
     },
     "banshee_texture_name": {
       "bytes": "42616E7368656500",
@@ -520,9 +2033,165 @@
       "bytes": "8B865001000085C0751283FD01750D8B076A066A058BCFFF502833ED",
       "va": "0x00498AA7"
     },
+    "blood1_alpha_table": {
+      "bytes": "000000004000000080000000C0000000FF000000FF000000FF000000",
+      "va": "0x0078A6B4"
+    },
+    "blood1_callback_selection": {
+      "bytes": "C783E0010000A0EE4800C783E401000000F34800C783E801000080F34800",
+      "va": "0x00486CE4"
+    },
+    "blood1_create_count_from_scale": {
+      "bytes": "D98318010000D80D50CE7300D95DF0D945F0DB5DF48B45F483F8018983E40000007D0AC783E4000000010000008BB3E40000008975F48D0CB6D1E1898BD00000008B83",
+      "va": "0x0048EEBC"
+    },
+    "blood1_factory_parameters": {
+      "bytes": "C783D00000000A000000C783D80000002C010000C783EC0000000600000089480883C9FF33C0C783E40000000F000000C783E0010000A0EE4800C783E401000000F34800C783E801000080F34800",
+      "va": "0x00486CB4"
+    },
+    "blood1_source_stop": {
+      "bytes": "8B4424048B50304283FA058950307E108B51086A0083E2FE895108E85056FFFFC20400",
+      "va": "0x0048F380"
+    },
+    "blood1_update_motion_alpha": {
+      "bytes": "8B4424048B50504A895050750533C0C20400D94038D8008B1495B4A67800C1E21881CAFFFFFF00D918D9403CD84004895058D95804D94008D84040D95808D94024D8480CD9580CD94020D9C0D84838D95838D9C0D8483CD9583CD84840D95840D9810C010000D80D2CC57300D86840D95840B801000000C2",
+      "va": "0x0048F300"
+    },
+    "blood_phase_type_selection": {
+      "bytes": "8B431005F1DFFFFF83F8240F877717000033D28A90D0884800FF2495BC8848008B8354010000C740340C000000E9561700008B8B54010000C741340D000000E9441700008B9354010000C742340E000000E9321700008B8354010000C740340F000000",
+      "va": "0x00486E17"
+    },
+    "bluegas_callback_selection": {
+      "bytes": "C7830C0100000000803FC783E001000020D44800C783E4010000F0D74800C783E8010000305548008D942480000000BFB0AE7800",
+      "va": "0x00485B39"
+    },
+    "casting1_texture_name": {
+      "bytes": "43617374696E673100",
+      "va": "0x0078ADF8"
+    },
+    "casting2_texture_name": {
+      "bytes": "43617374696E673200",
+      "va": "0x0078AE1C"
+    },
+    "casting3_texture_name": {
+      "bytes": "43617374696E673300",
+      "va": "0x0078AE04"
+    },
+    "casting4_texture_name": {
+      "bytes": "43617374696E673400",
+      "va": "0x0078ADD4"
+    },
+    "casting6_texture_name": {
+      "bytes": "43617374696E673600",
+      "va": "0x0078AE10"
+    },
+    "casting7_texture_name": {
+      "bytes": "43617374696E673700",
+      "va": "0x0078ADE0"
+    },
+    "casting8_texture_name": {
+      "bytes": "43617374696E673800",
+      "va": "0x0078ADEC"
+    },
     "casting_callback_selection": {
       "bytes": "0C0283C9FF894308C783D0000000FFFFFF7F898BEC00000089ABE4000000C783E001000020934800C783E4010000509A4800C783E8010000409B48008D942480000000BFE8AE7800EB48",
       "va": "0x00486993"
+    },
+    "casting_failed_alpha_table": {
+      "bytes": "FF000000FF000000FF000000FF000000FF000000FF000000CF0000009F0000006F0000003F0000000F00000000000000",
+      "va": "0x0078A934"
+    },
+    "casting_gather_divination_alpha_table": {
+      "bytes": "00000000200000004000000070000000A0000000D0000000FF000000FF000000E0000000C00000008000000040000000200000001000000000000000",
+      "va": "0x0078A980"
+    },
+    "casting_gather_element_alpha_table": {
+      "bytes": "00000000FF000000FF000000FF000000FF000000FF000000FF000000FF000000E0000000C00000008000000040000000200000001000000000000000",
+      "va": "0x0078A9BC"
+    },
+    "casting_gather_fade_table": {
+      "bytes": "00000000200000004000000070000000A0000000D0000000FF000000",
+      "va": "0x0078A964"
+    },
+    "casting_star_round_alpha_table": {
+      "bytes": "00000000200000004000000070000000A0000000D0000000FF000000",
+      "va": "0x0078A918"
+    },
+    "changehero_texture_name": {
+      "bytes": "4368616E67654865726F00",
+      "va": "0x0078AE54"
+    },
+    "clayring_alpha_table": {
+      "bytes": "0000000080000000FF000000FF000000FF000000FF000000FF000000FF000000FF000000A0000000500000002000000000000000000000000000000000000000",
+      "va": "0x0078A734"
+    },
+    "clayring_anchor_and_trail_birth": {
+      "bytes": "83EC24538BD9568B7424308B83540100008B48348B148D34A77800C1E21881CAFFFFFF008956588B83EC000000894650C74644010000008B8BE4000000894E4C8B9354010000837A340D757D8B4C24348B83580100003BC87D6FC7442408000000008B5424088D4620C744240C00000000C74424100000000089108B54240C8950048B5424108950088B93540100008D04CD000000002BC18D04C28B1089168B50048956048B4008894608C7460CCDCC4C3EC7464400000000894E545EB8010000005B83C424C208008B0D449D7A00558BD1578BBB580100004985D2890D449D7A007515B9409D7A00E892F50000B9FF000000890D449D7A008B048D489D7A0033D2F7F78BC14985C0890D449D7A008BEA7515B9409D7A00E863F50000B9FF000000890D449D7A008B0C8D489D7A00C744241400000000894C24108D3CED00000000DF6C24102BFDC74650050000008B9354010000DC0D68C47300D9054CB87300C1E703D8E18D0417D9C0D8480CD95C2410D9C0D84810D95C2414D84814D95C2418D9C0D808D95C2428D9C0D84804D95C242CD84808D9442428D84424108D4620D95C241CD944242CD84424148B4C241C8908D95C24208B542420D8442418895004D95C24248B4C2424894808B9409D7A00E8296EFDFF33ED89442410896C2414A1449D7A00DF6C24108BD04885D2DC0D58CD7300A3449D7A00D82550B87300D95C24387514B9409D7A00E870F40000B8FF000000A3449D7A008B0485489D7A00896C2414894424108B4C2438DF6C2410894C2420B9409D7A00DC0D58CD7300D82550B87300D95C241CE8B16DFDFF89442410896C2414DF6C24108B44241C8B4C24208D562CDC0D58CD73008902D82550B87300894A04D95C24248B4424248942088B8B540100008B540F0C8D440F0C89165F8B48045D894E048B5008895608C7460CCDCCCC3D5EB8010000005B83C424",
+      "va": "0x0048F7F0"
+    },
+    "clayring_anchor_and_trail_update": {
+      "bytes": "8B44240483EC0C8B5050564A895050750933C05E83C40CC204008B504485D275568B91540100008B52348B149534A77800C1E21881CAFFFFFF008950588B50548B89540100008D34D5000000002BF28B14F189108B54F1048D0CF18950045E8B4908C7400CCDCC4C3E894808B80100000083C40CC204008B704C4E89704C7520428950448BB1DC0000003BD67C0933C05E83C40CC204008B91E400000089504CD9402CD80D70CD73005ED9582CD94030D80D70CD7300D95830D94034D80D70CD7300D95834D9400CD94020D8402CD94024D84030D95C2404D94028D840348B4C24048948048B4858D95C24088B542408D918C1E91889500883E930D80D70CD7300BA000000000F98C24AD9580C23CAC1E11881C9FFFFFF00894858B80100000083C40CC2",
+      "va": "0x0048FAB0"
+    },
+    "clayring_callback_selection": {
+      "bytes": "89AB50010000C783D000000050000000C783EC0000000F000000C783E400000002000000C783E0010000F0F74800C783E4010000B0FA4800C783E8010000E0FB4800",
+      "va": "0x004870DC"
+    },
+    "clayring_radius_table": {
+      "bytes": "00000000CDCCCC3C4260653D7F6ABC3D96430B3E1283403E1283803E79E9A63E0681D53E6666063F9EEF273F3BDF4F3F0000803F0000803F0000803F0000803F",
+      "va": "0x0078A6F4"
+    },
+    "clayring_source_initialization": {
+      "bytes": "6854020000E85E9427008D482383C40483E1E08941FCB80A000000898B5401000089835C010000898358010000E9B80000008B8B5C010000BE0A0000003BCE7C0B89B358010000E99E0000008B836001000085C075278B83580100009983E20703C2C1F80383F8047D07B804000000EB0C3D000400007E05B80004000003C13BC6894424107F04897424108B4C2410E8D50C01008BE88B83580100008BB3540100008BFD8D0CC5000000002BC8C1E1038BD1C1E902F3A58BCA83E103F3A48B83540100008B48FC51E8C49327008B54241483C40489AB54010000C783580100000A00000089935C0100008B835801000033F685C08974242C0F8E5A130000897424288D531C33C9DB44242C8B8354010000DC0D98CC73008D440118D9C0D9FED95C24208B7C2420D9FF8938D95C24248B7C24248978048B7C24288978088BBB540100008BC103C78BFA468B2F8974242C89288B6F048968048B7F088978088B83540100008BFA8D44010C83C1388B2F89288B6F048968048B7F088978088B8354010000C74401FC0E0000008B83580100003BF00F8C6EFFFFFFE9BA120000",
+      "va": "0x00487147"
+    },
+    "clayring_source_radius_rotation_and_ground": {
+      "bytes": "83EC24568B74242C578B4634488946348BD079108B41085F24FE5E89410883C424C204008D7E0C8BC653558B288BDF892B8B68048B4008896B045D8943085BD9810C010000D81D58B87300D9810C010000D9C0D84E18DFE0F6C4017471D95C2408D9C0D84E1CD95C240CD84E20D90495F4A67800D9442408D8C9D95C2414D944240CD8C9D95C2418D9C9D8C9D9C9DDD8D9442414D88198000000D95C2408D9442418D8819C0000008B542408D95C240C8B44240CD881A00000008BCE8911D95C24108B542410894104895108EB78D95C24148D049500000000BA2CA77800D9C0D84E1C2BD08BC6D95C2418D84E20D902D9442414D8C9D95C2420D9442418D8C9D95C2424D9C9D8C9D9C9DDD8D9442420D88198000000D95C2408D9442424D8819C000000D95C240C8B54240CD881A00000008B4C24088908D95C24108B4C24108950048948088B56048B065250B9B8F57A00E839430D00D8054CB87300D95E08D9461CD80D50CD7300D94618D80D78CE7300DEE9D94618D80D50CD7300D9461CD80D78CE7300DEC1D95E18D95E1CD907D81D58B87300DFE0F6C4407420D94610D81D58B87300DFE0F6C44074108B0E8B56048B4608890F8957048947085F5E83C424",
+      "va": "0x0048FBE0"
+    },
+    "clayring_texture_name": {
+      "bytes": "436C617952696E6700",
+      "va": "0x0078AE3C"
+    },
+    "curseholder_tornado_reuse_and_controls": {
+      "bytes": "0C12C783CC00000064000000C783D000000004000000894308898B3C010000C783D800000020030000C78310010000CDCC4C3EC783E4000000000000198B835401000085C07523BE060000008BCEE8BD16010089835401000089B35C01000089B358010000E9BD0000008B8B5C01000083F9067C0FC7835801000006000000E9A30000008B836001000085C075278B83580100009983E20703C2C1F80383F8047D07B804000000EB0C3D000400007E05B80004000003C183F806894424107F08C7442410060000008B4C2410E83F1601008BE88B83580100008BB3540100008BFD8D0CC5000000002BC8C1E1038BD1C1E902F3A58BCA83E103F3A48B83540100008B48FC51E82E9D27008B54241483C40489AB54010000C783580100000600000089935C0100008B835801000033FF33C93BC7894C242C7E60894C2420894C242433C08BD18BF1DB44242C8BAB540100008BF803FD83C038D80D18CB73008937D80DA0CC7300895704D95C24288B6C2428896F088BAB5401000033FF41897C28FC8BAB54010000894C242C897C28F88BAB580100003BCD7CAED90518CB7300D80D68B873008B8354010000D958248B8B540100008979288B9354010000BF68AE7800C7422C643B7F3FC783E0010000709F4800C783E401000010A34800C783E801000060A548008D942480000000E9EF1B0000",
+      "va": "0x004867A0"
+    },
+    "cursestars_alpha_size_motion_update": {
+      "bytes": "83EC08568B742410578BF98B4650488946507918C74658FFFFFF00C7460C000000005F33C05E83C408C204008B048598AC7800D9460CD81D58B87300C1E0180DFFFFFF00894658DFE0F6C4407456A1449D7A008BC84885C9A3449D7A007514B9409D7A00E857890000B8FF000000A3449D7A008B1485489D7A00C744240C0000000089542408DF6C2408DC0DB0CC7300D805A8CC7300D88F0C010000D80D90CE7300EB09D9460CD80D50CD7300D95E0CD94638D806D91ED9463CD84604D95E04D94640D84608D95E08D94638D80D70CD7300D95E38D9463CD80D70CD7300D95E3CD94640D80D70CD7300D95E408B879400000085C075128B4F086A0083E1FA894F088BCFE837E4FEFF5FB8010000005E83C408C2040090909090909090909090",
+      "va": "0x004964B0"
+    },
+    "cursestars_alpha_table": {
+      "bytes": "00000000200000004000000080000000FF000000FF000000FF000000FF000000FF000000FF000000FF000000FF000000FF000000FF000000FF000000FF000000FF000000FF000000FF000000FF000000FF000000",
+      "va": "0x0078AC98"
+    },
+    "cursestars_callback_and_texture_selection": {
+      "bytes": "0C1289AB50010000894308898B3C010000C783D000000008000000C783D80000002C010000C783E001000070624900C783E4010000B0644900C783E8010000D06549008D942480000000BF88AE7800E96B010000",
+      "va": "0x004883C3"
+    },
+    "cursestars_radial_birth_and_velocity": {
+      "bytes": "83EC2853568B7424348BD9C74658FFFFFF00A1449D7A008BC84885C9A3449D7A007514B9409D7A00E8D38B0000B8FF000000A3449D7A008B1485489D7A005583E20F57895644BD0A00000033FFB9409D7A00E82905FDFF89442418897C241CDF6C2418B9409D7A00DC0D08C57300D8254CB87300D95C2414E80305FDFF89442420897C2424DF6C2420680000803F68000080BFB9409D7A00DC0D08C57300D8254CB87300D95C2418E85326FFFFD95C243CD9442410D84C2410D944243CD84C243CDEC1D9442414D84C2414DEC1D81D4CB87300DFE0F6C40175094D3BEF0F8F6AFFFFFF8B44243C8B4C24108B5424145051528D4C2438E875BAF6FFD9830C010000D944242CD8C9D95C2420D9442430D8C9D95C2424D84C2434D9442420D88398000000D9442424D8839C000000D95C2430D9C1D883A00000008B442430897E0C8946045FD95C24308B4C24305DD91E894E08D9C0D8C9D944241CD84C241CDEC1D9442418D84C2418DEC1D9FAD9542434D81D58B87300DFE0F6C4417573D9830C010000D80D50B87300D94424188D5638C7465014000000D8C95E5BD95C241CD9442414D8C9D95C2420D9C9D8C9D9C9DDD8D944241CD874242CD95C2410D9442420D874242C8B4424108902D95C24148B4C2414D874242C894A04D95C24188B442418894208B80100000083C428C20800C7442418000000008B5424188D4E38C744241C000000008B44241CC74424200000000089118B542420C74650140000005E894104B801000000DDD88951085B83C428C208009090909090909090909090",
+      "va": "0x00496270"
+    },
+    "cylinder_alpha_table": {
+      "bytes": "00000000200000004000000080000000FF000000FF000000FF000000FF000000FF000000FF000000FF000000FF000000FF000000FF000000FF000000FF000000FF000000FF000000FF000000FF000000FF000000FF000000FF000000FF000000FF000000FF000000FF000000FF000000FF000000FF000000FF000000FF000000",
+      "va": "0x0078AB18"
+    },
+    "cylinder_anchor_and_trail_birth": {
+      "bytes": "83EC34535556578B7C24488BF1C74758FFFFFF008B9EC00100008BAE58010000895C24203BDD0F8DCA01000033ED3BDD0F85620100008D4424488D4C243850518BCEE85914FFFFD90574CC7300D80DF0CA7300817E1040200000D80D48CF73007502D9E0D9C0D9FF8B865801000033D23BC589442414D95C2418D9FED95C241C0F8E120100008954242C895424308954243433C0896C24108BDAD9442448D80D38C57300DB4424108B8E540100008B6C242CD9C0D80DF0CA7300DA742414D9FFD9C2DEC9D91C088B8E54010000D80DF0CA7300DAB658010000D9FED9C1DEC9D95C0804D9442448D80DD4BA73008B8E54010000D95C08088B8E54010000D94424188D4C080C89298B6C24348959048969088B8E540100008B6C2410D95C08188B8E5401000083C502D944241C896C2410D95C081C8B8E54010000C7440834120000008B8E5401000003C84283C038DB4134D83DB8CD7300D84C2448D80D90CE7300D9592CD9054CB87300D8F18B8E54010000D95C08EC8B8E54010000D95C08F08B8E580100003BD1894C24140F8C08FFFFFF8B5C242033ED8D14DD00000000896F44895F548B86540100002BD3D904D0D88698000000D944D0048D04D0D8869C000000D95C2430D94008D886A00000008B4C2430896F0C894F04B801000000D95C24348B542434D91F8957085F5E5D5B83C434C20800A1449D7A008BC84885C9A3449D7A007514B9409D7A00E87FAE0000B8FF000000A3449D7A008B0485489D7A0033D2F7F58B8E540100008D04D5000000002BC28D2CC18B44C13483C00683F80E7E05B80E00000085C08947507D0C5F5E5D33C05B83C434C20800D9450CD81D58B873008D5D0CDFE0F6C440741CD94510D81D58B87300DFE0F6C440740C5F5E5D33C05B83C434C20800C7474401000000C74754FFFFFFFFA1449D7A008BD04885D2A3449D7A007514B9409D7A00E8DCAD0000B8FF000000A3449D7A008B0485489D7A00C744242400000000894424208D4720DF6C24208BC8DC0D68C47300D8254CB87300D9C0D80BD95C2420D9C0D84B04D95C2424D84B08D9442420D84500D95C242CD9442424D845048B54242CD95C2430D8450889118B542430D95C24348951048B5424348951088B138D4F2C89572C8B53048951048B5308895108D900D88698000000D9869C000000D84004D95C2430D986A0000000D840088B442430C7470CCDCCCC3D894704B801000000D95C24348B4C2434D91F894F085F5E5D5B83C434C20800909090909090909090",
+      "va": "0x00493DE0"
+    },
+    "cylinder_anchor_and_trail_update": {
+      "bytes": "8B44240483EC108B50545385D20F8C8C000000F64108017517C7400C00000000C74058FFFFFF0033C05B83C410C20400568D34D5000000002BF28B91540100008D14F28B72348B34B518AB7800C1E61881CEFFFFFF008970585ED98198000000D802D9819C000000D842045BD95C2408D981A0000000D842088B4C2408C7400C9A99993E894804D95C240C8B54240CD918895008B80100000083C410C204008B50448B5850424B8950448BD385D28958507F0933C05B83C410C204008B149518AB7800C1E21881CAFFFFFF00895058D94020D8402CD95820D94030D84024D95824D94034D84028D95828D940208B9154010000D94024D94228D9C2D8CBD9C2D8CBDEC1D9FADEF9DDDADDD8D9C0D84820D9542404D95820D84824D95024D94034D94030D9402CD9C0D8C9D9C2D8CB8B9154010000DEC1D9C3D8CCDEC1D9FADDDBDDD8DDD8D84A24D95C2418D84C2418D80DE0CD7300D9582CD9442404D9E0D84C2418D80DE0CD7300D95830D94034D80DE0CD7300D95834D9400CD94020D88198000000D94024D8819C000000D95C240CD94028D881A00000008B4C240C894804D95C24108B542410D918895008D80D70CD7300D9580CB8010000005B83C410C204009090909090909090909090909090",
+      "va": "0x00494170"
+    },
+    "cylinder_callback_and_texture_selection": {
+      "bytes": "0C0281EE3F200000894308C783D00000001E00000089ABE4000000C783D800000058020000C783E0010000E03D4900C783E401000070414900C783E80100004043490074114E75378D942480000000BFF8AD7800EB0C8D942480000000BF1CAE780083C9FF33C0F2AEF7D12BF98BC18BF78BFAC1E902F3A58BC883E103F3A48B835401000085C075326894000000E8DE8727008D482383C40483E1E08941FCB802000000898B5401000089835C010000898358010000E9BD0000008B8B5C01000083F9027C0FC7835801000002000000E9A30000008B836001000085C075278B83580100009983E20703C2C1F80383F8047D07B804000000EB0C3D000400007E05B80004000003C183F802894424107F08C7442410020000008B4C2410E8500001008BE88B83580100008BB3540100008BFD8D0CC5000000002BC8C1E1038BD1C1E902F3A58BCA83E103F3A48B83540100008B48FC51E83F8727008B54241483C40489AB54010000C783580100000200000089935C0100008B8B5801000033C085C90F8ED906000033C9BA640000008BB35401000040895431348BB35801000083C1383BC67CE8E9B5060000",
+      "va": "0x00487D3E"
+    },
+    "cylinder_source_orbit_and_stop": {
+      "bytes": "8B4424048B915401000083EC183BC2751E8B503481E20100008079054A83CAFE427406FF89D0000000FF89D00000008B50345685D28D72FF8970347F0F8B41085E24FE89410883C418C20400D9401CD84804D94018D8088D500CDEC1D95C2404D94018D84804D9401CD808DEE9D95C2408D94008D8402CD95C240CD9442404D820D95C2410D9442408D860048B7424108932D95C2414D944240CD860088B742414897204D95C24188B742418D9402CD80D50CF73008972088B7424048BD0D9582C89328B7424088972048B74240C8972088B5110D905F0CA7300D80D4CCF730081FA402000007502D9E0D9C0D9FF5ED95C241CD9FED9C0D8481CD944241CD84818DEC1D944241CD8481CD9CAD84818DEEAD9C9D95C24048B4C2404D9581889481C83C418C20400909090909090909090",
+      "va": "0x00494340"
     },
     "direct3d_destination_blend_invsrcalpha": {
       "bytes": "A180F07A006A066A148B4054508B08FF5150",
@@ -532,13 +2201,125 @@
       "bytes": "A180F07A006A056A138B4054508B10FF5250",
       "va": "0x0056A1CD"
     },
+    "explosion_texture_name": {
+      "bytes": "4578706C6F73696F6E00",
+      "va": "0x0078AE98"
+    },
+    "feeblemind_alpha_table": {
+      "bytes": "00000000200000004000000080000000FF000000FF000000FF000000FF000000FF000000FF000000FF000000FF000000FF000000FF000000FF000000FF000000FF000000FF000000FF000000FF000000FF000000",
+      "va": "0x0078ABB8"
+    },
+    "feeblemind_callback_and_texture_selection": {
+      "bytes": "0C1289AB5001000089430889AB3C010000C783D000000005000000C783D80000002C010000C783E0010000E0574900C783E401000050594900C783E8010000205A49008D942480000000BFB8AE7800E906040000",
+      "va": "0x00488128"
+    },
+    "feeblemind_radial_birth": {
+      "bytes": "558BEC83EC0C5356578BF9D9870C010000DCC0D95DFCD945FCDB5DF88B45F88B75088987D0000000C74658FFFFFF00A1449D7A008BC84885C9A3449D7A007514B9409D7A00E846960000B8FF000000A3449D7A008B1485489D7A0033DB83E20F8956448B879800000089068B8F9C000000894E048B97A0000000895608895E0CC7465014000000A1449D7A00D905F0CA7300DCC08BC84885C9A3449D7A00D95D087514B9409D7A00E8E3950000B8FF000000A3449D7A008B1485489D7A00895DF88955F4895E28DF6DF4D84D08DC0D68C47300D9C0D9FFDC0D90CF7300D95E20D9FEDC0D90CF7300D95E24D94620D806D91ED94624D84604D95E04D94628D84608D95E08A1449D7A008BC84885C9A3449D7A007514B9409D7A00E871950000B8FF000000A3449D7A008B1485489D7A00895DF88955F4B801000000DF6DF4DC0DD8CE7300D80570CD7300D88F0C0100005FD80D8CCF7300D95E345E5B8BE55DC208009090909090909090909090909090",
+      "va": "0x004957E0"
+    },
+    "feeblemind_rotation_phase_and_scale_update": {
+      "bytes": "8B4424048B485049894850790533C0C204008B0C8DB8AB78008B5034D900C1E11881C9FFFFFF008948588B4844D860204183E10FD918D94004D86024D95804D94008D86028D95808DD0578CF7300D9FFDD0578CF7300D9FED94024D8CAD94020D8CADEE9D95C2404D94020DECAD94024D8C9DEC2DDD8D80DC4BA7300D95820D9442404D80DC4BA7300D95824D94020D800D918D94024D84004D95804D94028D8400889500C894844D8052CC57300D95808D94034D80D98CF7300D95834B801000000C204009090909090909090909090",
+      "va": "0x00495950"
+    },
+    "feetcloud_alpha_table": {
+      "bytes": "00000000200000004000000080000000FF000000FF000000FF000000FF000000FF000000FF000000FF000000",
+      "va": "0x0078AC18"
+    },
+    "feetcloud_attachment_source_update": {
+      "bytes": "83EC24538BD956578B8B9400000085C90F845D0100008B01FF503083F8500F854F0100008B7C24348BB3940000008B473485C00F84A20000006808B078008BCEE83B0C080085C074288D4C240C50518BCEE85A2A08008B44240C8B4C24108B5424148BF78906894E04895608E91E0100006838AD78008BCEE8030C080085C074288D54241850528BCEE8222A08008B4424188B4C241C8B5424208BF78906894E04895608E9E60000008D461C8BD08B028B4A048B520889542420D9442420D8864C0100008BF78906D95C24208B542420894E04895608E9B40000006804B078008BCEE8990B080085C07425508D44241C508BCEE8B82908008B4424188B4C241C8B5424208BF78906894E04895608EB7F6838AD78008BCEE8640B080085C074258D4C240C50518BCEE8832908008B44240C8B4C24108B5424148BF78906894E04895608EB4A8D561C8B461C8B4A048B520889542420D9442420D8864C0100008BF78906D95C24208B542420894E04895608EB1C8B7C24348D83980000008BCF8B1089118B50048951048B40088941088D4F188D54242451528BCBE8E1F2FEFFC74730000000005F5E5B83C424C2040090",
+      "va": "0x00495E00"
+    },
+    "feetcloud_callback_texture_and_color_selection": {
+      "bytes": "BE0200000089AB500100000BC6C783D000000008000000894308C783D80000002C0100008B835401000085C0752D6894000000E8FB8327008D482383C40483E1E08941FC898B5401000089B35C01000089B358010000E9CB0000008B8B5C0100003BCE7C0B89B358010000E9B60000008B836001000085C075278B83580100009983E20703C2C1F80383F8047D07B804000000EB0C3D000400007E05B80004000003C13BC6894424107F04897424108B4424108D0CC5000000002BC88D14CD2400000052E86A8327008D682383E5E08BFD8945FC8B83580100008BB3540100008D0CC5000000002BC8C1E1038BC1C1E902F3A58BC883E103F3A48B8B540100008B51FC52E8538327008B44241883C40889AB54010000C783580100000200000089835C01000033D233C089542420895424248954242883C9FF8BF28BBB54010000894C38308BBB54010000895438348BAB540100008BF883C03803FD8B6C24204283F870892F8B6C2428897704896F088BBB54010000C74438E0000000007CBBBFACAD780033C0C783E0010000305A4900C783E4010000805C4900C783E8010000005E49008D942480000000F2AEF7D12BF98BC18BF78BFAC1E902F3A58BC88B431083E1032D4A200000F3A47416480F854E020000C783EC0000000000FF00E93F020000C783EC000000FF000000E930020000",
+      "va": "0x0048817C"
+    },
+    "feetcloud_drift_scale_and_alpha_update": {
+      "bytes": "8B44240483EC248B50504A895050790833C083C424C20400538A5908F6C30156740A8BB19400000085F6750D83FA087E05BA080000008950508B149518AC78008BB1EC000000C1E21803D6895058D94038D8402CD9582CD9403CD84030D95830D94040D84034D958348B50048B8954010000895424248B5008D900895424288B5054D9402C8D34D5000000002BF28B502489542430D804F1D94030D844F1048D0CF1D95C2418D94034D84108D95C241CD84C2430D95C2408D9442418D84C2430D95C240CD944241CD84C2430D95C2410D9054CB87300D86024D9542430DEC9D9442430D84C2424D95C2418D9442430D84C2428D95C241CD8442408D9442418D844240CD95C2424D944241CD84424108B4C24248948048B4820D95C24288B54242889480CD918D94020D80DA8CC7300895008D95820D94024D80D9CCF73005E5BD95824D94038D80D70CD7300D95838D9403CD80D70CD7300D9583CD94040D80D70CD7300D95840B80100000083C424C204009090909090909090909090909090",
+      "va": "0x00495C80"
+    },
+    "feetcloud_source_birth": {
+      "bytes": "558BEC83EC285356578BF9D9870C010000D80D50CE7300D95DF8D945F8DB5DFC8B45FC8B75088987D0000000C74658FFFFFF00A1449D7A008BC84885C9A3449D7A007514B9409D7A00E8F2930000B8FF000000A3449D7A008B1485489D7A0083E20F895644A1449D7A008BC84885C9A3449D7A007514B9409D7A00E8C0930000B8FF000000A3449D7A008B0485489D7A0083E0018946548D14C5000000002BD08B87540100008D1CD08B44D03085C07C0F8B0B890E8B53048956048B4308EB178B8F98000000890E8B979C0000008956048B87A0000000C7460C0000803F894608C7460C00000000C745F80A000000B9409D7A00E8C70CFDFF8945F0C745F400000000DF6DF0B9409D7A00DC0D08C57300D8254CB87300D95DFCE8A10CFDFF8945E8C745EC00000000DF6DE8DC0D08C57300D8254CB87300D95508D84D08D945FCD84DFCDEC1D81D4CB87300DFE0F6C401750B8B45F84885C08945F87F918B4D088B55FC6A0051528D4DD8E840C2F6FFD945D8D80D50B87300D945DCD80D50B873008B43188B8F0C0100008945088D5638D95DE8D945E0D80D50B87300D95DECD84D08D945E8D84D08D95DDCD945ECD84D08894D08D95DE0D84D08D95DE4D945DCD84D088B45E4C745E4000000008902D95DE8D945E0D84D088B4DE8C745E800000000894A048D4E2CD95DEC8B45ECC745EC000000008942088B55E4D9870C010000D84B188B45E889118B55ECC746240000803FD80D68B87300894104C746500A0000005FB801000000895108D95E20D94620D80DF4CD7300D84608D95E085E5B8BE55DC20800909090909090909090",
+      "va": "0x00495A30"
+    },
+    "firearrow_callback_selection": {
+      "bytes": "C7832C01000000000000C783E0010000A0CB4800C783E4010000D0CE48008D942480000000750ABFD8AE7800E9A92C0000BFC8AE7800",
+      "va": "0x004858A8"
+    },
+    "firearrowsmoke_texture_name": {
+      "bytes": "466972654172726F77536D6F6B6500",
+      "va": "0x0078AEC8"
+    },
+    "fireball_birth_and_carrier_basis": {
+      "bytes": "83EC145355568B742424578BF9C74658FFFFFFFF33ED8B87EC000000896E448946508B8FE4000000894E4C8B979800000089168B879C0000008946048B8FA00000008B44242C894E08C7460C0000803F3BC5D9870C010000D80D6CB87300D95424287520DDD8D9870C010000D80DF4CD7300C7465401000000D95E0CD90558B87300EB4AD95E0CA1449D7A008BD04885D2A3449D7A007514B9409D7A00E8CE250100B8FF000000A3449D7A008B0485489D7A00896C241489442410896E54DF6C2410DC0D68C47300D8254CB87300D987C8000000D81DF0CD7300DFE0F6C4410F85A3010000D9C0D88FA4000000D95C2418D9C0D88FA8000000D95C241CD88FAC000000D9442418D806D91ED944241CD84604D95E04D84608D95E08D9442428D887FC000000A1449D7A008BC84885C9D95C2410D987F0000000D8642428A3449D7A00D95C242C7514B9409D7A00E81E250100B8FF000000A3449D7A008B1485489D7A00896C241C895424188D5E20DF6C2418D9442410D864242C8BC3DEC9DC0D68C47300D844242CD9C0D88FB0000000D95C24188B4C2418D9C0D88FB4000000D95C241C8B54241CD88FB80000008908D95C24208B4C2420895004D9442428894808A1449D7A00D887000100008BD04885D2D95C242CD987F4000000D8642428A3449D7A00D95C24287514B9409D7A00E87B240100B8FF000000A3449D7A008B0485489D7A00896C241C89442418DF6C2418D944242CD8642428DEC9DC0D68C47300D8442428D9C0D88FBC000000D95C2418D9C0D88FC0000000D95C241CD88FC4000000D9442418D803D91BD944241CD84304D95B04D84308D95B08396E547558D903D8065FB801000000D91ED94304D84604D95E04D94308D84608D95E085E5D5B83C414C20800C7442418000000008B4C241883C620C744241C000000008B54241CC7442420000000008B442420890EDDD88956048946085F5E5DB8010000005B83C414C208009090909090909090",
+      "va": "0x0048C800"
+    },
+    "fireball_factory_parameters_and_callbacks": {
+      "bytes": "C7442414CDCC4CBE8B5424148D8BF0000000B80F0000008983EC0000008983DC000000C7442418CDCC4CBE8B4424188911C744241C000080BF8B54241CC7442414CDCC4C3E8941048D83FC000000C7442418CDCC4C3EC744241C000000008951088B4C24148B54241889088B4C241CC783CC0000005800000089500489ABD0000000C783D4000000EC51B83D89ABE4000000894808C7830C010000CDCC4C3FC78314010000D7A3703FC783E001000000C84800C783E4010000D0CA48008D942480000000BFE8AE7800E97F2D0000",
+      "va": "0x00485735"
+    },
+    "fireball_phase_scale_and_motion_update": {
+      "bytes": "8B4424048B50504A895050750533C0C204008B504C4A89504C75218B504456428950448BB1DC0000003BD65E7C0533C0C204008B91E400000089504CD98114010000D8480C8B485485C9D9580C7415D9400CD80D6CB87300C7405400000000D9580CEB19D900D86020D918D94004D86024D95804D94008D86028D95808D94020D80D50CD7300D95820D94024D80D50CD7300D95824D94028D80D50CD7300D95828D94020D800D918D94024D84004D95804D94028D84008D95808B801000000C204009090909090909090909090909090",
+      "va": "0x0048CAD0"
+    },
+    "fireblast_alpha_table": {
+      "bytes": "FF000000FF000000CF000000AF0000008000000080000000800000008000000080000000AF000000CF000000C000000080000000300000000000000000000000",
+      "va": "0x0078A5DC"
+    },
+    "fireblast_cloud_and_source_birth": {
+      "bytes": "83EC24535556578BF9B9409D7A008BAF54010000E847A7FDFF33D2B91D000000F7F18B74243833C0C74658FFFFFFFF8BDA83EB0E895E548B8FC00100003BC87540837D3001753AC746543AFBFFFF8B979800000089168B8F9C000000894E048B97A0000000895608C746440F00000089460C5F5E5DB8010000005B83C424C208003BD80F8DE6020000894650C74424180A000000B9409D7A00E8C2A6FDFF33DB8944241C895C2420680000803FDF6C242068000080BFB9409D7A00DC0D08C57300D8254CB87300D95C241CE810C8FFFFD95C2410680000803F68000080BFB9409D7A00E8F8C7FFFFD9542438D84C2438D9442410D84C2410DEC1D9442414D84C2414DEC1D81D4CB87300DFE0F6C40175118B442418483BC3894424180F8F72FFFFFF8B4424388B4C24108B5424145051528D4C2434E8165CF7FFD9442430D84C2430D944242CD84C242C8B8754010000DEC1D9442428D84C2428DEC1D82D4CB87300D9542418D9870C010000D9C0D84C2428D95C2428D944242CD8C9D95C242CD9442430D8C9D95C2430DDD8D94018D9442428D8C9D95C241CD944242CD8C9D95C2420D84C2430D944241CD88798000000D9442420D8879C000000D95C2420D9C9D887A00000008B4C2420C7460C0000803F894E048D4E20D95C24248B542424D91E8956088B8754010000D9401CD9442428D8C9895E0CD95C241CD944242CD8C98B54241C8911D95C2420D94424308B442420D8C9894104D95C24248B542424DDD88951088B4D30B893244992F7E903D1C1FA028BC2C1E81F03D089542438DB442438D805D4BA7300D95C2438D85C2438DFE0F6C4017479B9409D7A00C7464408000000E8F7A4FDFF8944241C895C2420DF6C241CB9409D7A00DC0DB0CC7300D805A8CC7300D94518D88F0C010000D8C9D80DE0CD7300D95E2CDDD8DB4644D95E30E8B9A4FDFF8944241C895C2420DF6C241C5FB801000000DC0DD8CD7300D805D4CD7300D95E345E5D5B83C424C20800B9409D7A00E885A4FDFF33D2B903000000F7F1B9409D7A00895644E86FA4FDFF8944241C895C2420DF6C241CB9409D7A00DC0DB0CC7300D805A8CC7300D94518D88F0C010000D8C9D80DE0CD7300D95E2CDDD8DB4644D95E30E831A4FDFF8944241C895C2420DF6C241C5FB801000000DC0DD8CD7300D80D6CB87300D9442414D80DD4CD7300D8742434DEC1D805D0CD7300D95E345E5D5B83C424C20800B9409D7A00E8E7A3FDFF33D2B903000000F7F18956448D14DD000000002BD3D944D524D81D58B873008D5CD500DFE0F6C4407407C7464408000000B9409D7A00E8ACA3FDFF8944241CC744242000000000DF6C241C8D6B0C8B870C0100008944241451DC0D68C47300D95C243CD944243CD84D00D944243CD84D04D95C2430D944243CD84D08D95C2434D84C2418D9442430D84C2418D9442434D84C2418D903D88798000000D95C242CD9879C000000D84304D95C2430D987A0000000D84308D8E1D91C2451DDD8D9442434D8E1D91C24518D4C2434DDD8D9442434D8E1D91C24DDD8E8F958F7FF8B4C24288B54242C8B442430890EB9409D7A00895604894608C7460C0000803FE8E4A2FDFF8944241CC744242000000000DF6C241CDC0D40C57300D80538C57300D9442438D80D18CD7300D82D4CC57300DEC9D94318D80DCCCD7300D8054CC57300DEC9D9560CD84B288BD5D88F0C010000D95E0C8B8F0C010000518D4C242CE8A4C4FBFF8B1083C6205F89168B4804894E048B5008B8010000008956085E5D5B83C424C208009090",
+      "va": "0x0048C090"
+    },
+    "fireblast_factory_sources_and_callbacks": {
+      "bytes": "C74424140AD7A3BC8B4424148D8BF0000000C74424180AD7A3BCC744241C0AD7A3BCC74424140AD7A33C89018B442418C74424180AD7A33CBA0F0000008941048B44241CC744241C0AD7A33CBF98AE78008941088B4424148D8BFC000000C783CC00000064000000C783D00000003C000000C783D80000005802000089018B4424188993EC00000089ABE40000008941048B44241CC7830C0100009A99193FC783100100000000803F89410883C9FF33C0C78314010000CDCC4C3FC783E001000090C04800C783E401000090C54800C783E801000060C748008DAC2480000000F2AEF7D12BF98BC18BF78BFDC1E902F3A58BC88B835401000083E10385C0F3A475208BF28BCEE84D20010089835401000089B35C01000089B358010000E9B80000008B8B5C0100003BCA7C0B899358010000E9A30000008B836001000085C075278B83580100009983E20703C2C1F80383F8047D07B804000000EB0C3D000400007E05B80004000003C183F80F8944242C7F08C744242C0F0000008B4C242CE8D41F01008BE88B83580100008BB3540100008BFD8D0CC5000000002BC8C1E1038BD1C1E902F3A58BCA83E103F3A48B83540100008B48FC51E8C3A627008B54243083C40489AB54010000C783580100000F00000089935C0100008B8358010000C744242C0000000085C00F8E57260000C744243800000000C744243C00000000C74424400000000033F68B8B540100008B54243C8BC6BD0A00000003C18B4C243833FF89088B4C2440895004894808EB02DDD8B9409D7A00E85B08FEFF8944246C897C2470DF6C246C680000803F68000080BFB9409D7A00DC0D08C57300D8254CB87300D95C2418E8AB290000D95C2430680000803F68000080BFB9409D7A00E893290000D80538C57300D9542434D84C2434D9442430D84C2430DEC1D9442410D84C2410DEC1D8154CB87300DFE0F6C40175094D3BEF0F8F74FFFFFFD9FA8B5424348B442430518B4C2414D91C245250518D8C2490010000E8AABDF7FF8BD08D4C2478E8FF2800008B4424788B5424748B4C247C89442448A1449D7A00895424448BD04885D2894C244CA3449D7A007514B9409D7A00E8FC8D0100B8FF000000A3449D7A008B0485489D7A00897C2468894424648B8B54010000DF6C24648D540E0CDC0DB0CC7300D805A8CC7300D9442444D8C9D95C2450D9C0D84C2448D95C2454D84C244CD9442450D80DA8CC7300D95C2420D9442454D80DA8CC73008B4424208902D95C24248B4C2424D80DA8CC7300894A04D95C24288B4424288942088B8B54010000897C0E308B9354010000897C16188B8354010000C744061CCDCCCC3E8B8B54010000C7440E203333333FA1449D7A008BD04885D2A3449D7A007514B9409D7A00E82C8D0100B8FF000000A3449D7A008B0485489D7A0033D2B906000000897C2460F7F18954245C8B9354010000DF6C245CD95C1624A1449D7A008BC84885C9A3449D7A007514B9409D7A00E8E18C0100B8FF000000A3449D7A008B1485489D7A008B835401000083E201897C24188954241483C638DF6C2414D95C06F08B44242C8B8B58010000403BC18944242C0F8C8FFDFFFFE9C7230000",
+      "va": "0x00485D58"
+    },
+    "fireblast_phase_scale_motion_and_alpha": {
+      "bytes": "558BEC518B550856578BB9540100008B425485C00F8D370100008B724483FE0E7C573D3AFBFFFF0F8534010000D9420CD81D58B87300DFE0F6C4407422D9810C010000D80DECCD730033C0D95A0C8B4F305F83F9035E0F9CC08BE55DC20400C7420C000000008B4F3033C083F9035F5E0F9CC08BE55DC20400D902D842208B7A504783FE07897A50D91AD94224D84204D95A04D94228D84208D95A08D9422CD9520C7E2FD80DE8CD7300D95A0CD94230D84234D95A30D94234D80DE4CD73008B4230894508D95A34D94508DB5DFC8B45FCEB2DD80D40CD7300D95A0CD94230D84234D95A30D94234D80DE4CD73008B4230894508D95A34D94508DB5DFC8B45FC8942448B420C89422C8B89540100005F5ED94120D82574CD7300D9C0D84A20D95A20D9C0D84A24D95A24D84A28D95A288B42448B0C85DCA57800B801000000C1E11881C9FFFFFF00894A588BE55DC204008B7A44478BC7897A4483E0073C07750A5F33C05E8BE55DC20400C74258FFFFFFFF5FD94220D802B8010000005ED91AD94224D84204D95A04D94228D84208D95A08D94220D80D38C57300D95A20D94224D80D38C57300D95A24D94228D80D38C57300D95A28D9420CD80DA8CC7300D95A0C8BE55DC204009090909090909090",
+      "va": "0x0048C590"
+    },
+    "fireblast_source_growth_motion_and_stop": {
+      "bytes": "8B44240483EC0CD94018D8401C8B50304283FA06895030D95818D94020D8481CD9581C7E04836108FED9810C010000D9C0D8480CD95C2400D9C0D84810D95C2404D84814D9442400D800D918D9442404D84004D95804D84008D95808D9400CD80D24C57300D9580CD94010D80D24C57300D95810D94014D80D24C57300D95814D94014D82574CD7300D9581483C40CC204009090909090909090909090909090",
+      "va": "0x0048C760"
+    },
     "firesmoke_texture_name": {
       "bytes": "46697265536D6F6B6500",
       "va": "0x0078AEE8"
     },
+    "firewall_attempts_from_wall_length": {
+      "bytes": "568BF1D98638010000D98634010000D98630010000D9C0D8C9D9C2D8CBDEC1D9C3D8CCDEC1D9FADDDBDDD8DDD8D80D3CCE7300E8E496250083F8068986D0000000B9060000007C028BC88B86D8000000898ED00000009983E20F03C2C1F8043BC87D0A898ED00000005EC204008986D00000005EC2",
+      "va": "0x0048EE20"
+    },
+    "firewall_callback_selection": {
+      "bytes": "C783E0010000E0E94800C783E401000020EC48000F8505010000C783D000000014000000C783D8000000DC0500008B835401000085C0751E8BCDE84922010089835401000089AB5C01000089AB58010000E9B50000008B8B5C0100003BCD7C0B89AB58010000E9A00000008B836001000085C075278B83580100009983E20703C2C1F80383F8047D07B804000000EB0C3D000400007E05B80004000003C13BC58944242C7F04896C242C8B4C242CE8D52101008B93580100008BB3540100008BF8894424108D0CD5000000002BCAC1E1038BD1C1E902F3A58BCA83E103F3A48B83540100008B48FC51E8C2A827008B5424148B44243083C40489935401000089AB5801000089835C010000C783E001000060ED4800C783E801000020EE4800",
+      "va": "0x00485C28"
+    },
+    "firewall_ground_snap_and_wall_offset": {
+      "bytes": "A1449D7A008BC84885C9A3449D7A007514B9409D7A00E8D3000100B8FF000000A3449D7A008B1485489D7A00C744240C0000000089542408DF6C2408DC0D08C57300D8254CB87300D9C0D88F30010000D806D91E8B0ED88F34010000D84604D95424188B442418D95E045051B9B8F57A00E878520D00D94608D8A7A00000005FB801000000DEC1D95E085E83C408",
+      "va": "0x0048ED82"
+    },
+    "fireworks_texture_name": {
+      "bytes": "46697265776F726B7300",
+      "va": "0x0078AE70"
+    },
     "generic_light_z_offset_and_registration": {
       "bytes": "83EC1856578BF98B47508D775085C074428B48088BD1C1EA07F6D2F6C2017433F6C502752E80C9808948088B068B0D38F77A0050E8B78E1B008B471C85C074138B809400000085C074098B106A008BC8FF52688B0D48F77A006AFF6A318B01FF505C508BCEE8F60200008B4424248D4C24088D54240851D900D95C240CD940048B0E52D95C2414D94008D95C2418E84DB717008B471C83C01C8BD0D905E8DB73008B028B4A048B52088954241C8B16D844241C83C21C8902D95C241CD94424288B44241C894A04D84C24288942088B068B4C24288988E0000000D99000010000D9054CB87300D8F1D998040100008B06DDD88B480881C9800500008948088A44242C84C0740A8B368B46080C408946088BCFE8090000005F5E83C418",
       "va": "0x00511830"
+    },
+    "geyser_anchor_stream_birth": {
+      "bytes": "A1449D7A0083EC145556578BF98BC8488BB758010000A3449D7A0085C97514B9409D7A00E857450100B8FF000000A3449D7A008B0485489D7A0033D2F7F68B742424C74658FFFFFFFF8BEA8B979800000089168B879C0000008946048B8FA0000000894E088B8FC001000033C03BC8751B89460CB801000000894654C746440F0000005F5E5D83C414C20800894654A1449D7A008BD04885D2A3449D7A007514B9409D7A00E8D6440100B8FF000000A3449D7A008B0485489D7A0033D2B90C00000053F7F18D1CED000000002BDD33EDC1E303895644D9870C010000D80DD4BA7300C7465014000000D95C24188B54241889560C8B8754010000396C03340F8E94020000C74650FFFFFF7FA1449D7A008BC84885C9A3449D7A007514B9409D7A00E85A440100B8FF000000A3449D7A008B1485489D7A00896C2414895424108B8F54010000DF6C24108BD04885D2DC0D68CD7300D825F8CC7300DD05E8CA7300DC0D30BA7300DEC9D8040BA3449D7A00D95C24287514B9409D7A00E800440100B8FF000000A3449D7A008B0C85489D7A00896C2414894C24108B9754010000DF6C24108BC84885C9DC0D60CD7300D825ACBA7300DD05E8CA7300DC0D30BA7300DEC9D8441304A3449D7A00D95C24107514B9409D7A00E8A5430100B8FF000000A3449D7A008B1485489D7A008B87540100008954241C896C2420DF6C241CDC0D58CD7300D8440308D82550B87300D9442410D9FED9442428D9FED8C9D8CAD88F10010000D95E38D9442428D9FFD8C9D8CAD88F10010000D95E3CDDD8D9442410D9FFD8C9D88F10010000D95E408B8FFC000000A1449D7A008B97F0000000894C24108BC84885C9DDD889542428A3449D7A007514B9409D7A00E802430100B8FF000000A3449D7A008B1485489D7A00896C24208954241CDF6C241CD9442410D8642428DEC9DC0D68C47300D806D8442428D91E8B87F40000008B8F0001000089442428A1449D7A008BD04885D2894C2410A3449D7A007514B9409D7A00E89E420100B8FF000000A3449D7A008B0485489D7A00896C24208944241CDF6C241CD9442410D8642428DEC9DC0D68C47300D84604D8442428D95E048B8FF8000000A1449D7A008B9704010000894C24288BC84885C989542410A3449D7A007514B9409D7A00E838420100B8FF000000A3449D7A008B1485489D7A00896C24208954241C8B442418DF6C241CD9442410D86424285B896E0C8946205FDEC9B801000000DC0D68C47300D84608D8442420D95E085E5D83C414C20800C7465001000000896E38896E3C896E40D987FC000000D80D6CB87300A1449D7A008BC84885C9D95C2418D987F0000000D80D6CB87300A3449D7A00D95C24287514B9409D7A00E89D410100B8FF000000A3449D7A008B1485489D7A00896C24208954241CDF6C241CD9442418D8642428DEC9DC0D68C47300D806D8442428D91ED987F4000000D80D6CB87300A1449D7A008BC84885C9D95C2428D98700010000D80D6CB87300A3449D7A00D95C24187514B9409D7A00E82D410100B8FF000000A3449D7A008B1485489D7A00896C24208954241C5BDF6C2418D9442414D8642424B801000000DEC9DC0D68C47300D84604D8442424D95E04D9870C010000D80D48C573005FD95E0C5E5D83C414C208009090909090909090",
+      "va": "0x0048A8F0"
+    },
+    "geyser_factory_sources_and_callbacks": {
+      "bytes": "C7442420CDCCCCBD8B5424208D8BF0000000C7442424CDCCCCBD8B442424C74424280AD7A3BC89118B542428C7442420CDCCCC3DC7442424CDCCCC3D8941048D83FC000000C74424280AD7A33CC783CC000000580000008951088B4C24208B54242489088B4C2428C783D000000014000000895004C783E400000064000000C783100100009A99993E33D28948088B83540100003BC27523BE030000008BCEE89A1A010089835401000089B35C01000089B358010000E9C30000008B8B5C01000083F9037C0FC7835801000003000000E9AB0000008B83600100003BC275278B83580100009983E20703C2C1F80383F8047D07B804000000EB0C3D000400007E05B80004000003C183F803894424107F08C7442410030000008B4C2410E81C1A01008B93580100008BB3540100008BF8894424308D0CD5000000002BCAC1E1038BD1C1E902F3A58BCA83E103F3A48B83540100008B48FC51E809A127008B5424348B44241483C404899354010000C783580100000300000089835C01000033D28B835801000033C93BC27E2433C08BB35401000041895430348BB354010000895430308BB35801000083C0383BCE7CDEBF70AE780083C9FF33C0C783E0010000F0A84800C783E4010000A0AD4800C783E8010000C0AE4800F2AEF7D12BF98D9424800000008BC18BF78BFAC1E902F3A58BC883E103F3A489AB50010000E92B200000",
+      "va": "0x00486372"
+    },
+    "geyser_phase_ballistics_scale_and_alpha": {
+      "bytes": "83EC08568B742410578BF98B465485C07475F64708017511C7460C000000005F33C05E83C408C20400A1449D7A008BC84885C9A3449D7A007514B9409D7A00E88C400100B8FF000000A3449D7A008B1485489D7A00C744240C0000000089542408B801000000DF6C2408DC0D78CD7300D80574CD7300D88F0C0100005FD95E0C5E83C408C204008B4658C1E81883F809770A5F33C05E83C408C204008B56504A8BCA89565085C97F0A5F33C05E83C408C20400D94620D80D70CD73008B4E44C1E0188D51012D01000008D95620D94638D80633D183E20333D10DFFFFFF00D91ED9463CD84604895644D95E04D94608D84640D95E08D95E0CD98710010000D80DB8CC73008946585FB801000000D86E40D95E405E83C408C20400909090909090",
+      "va": "0x0048ADA0"
+    },
+    "geyser_source_active_relax_cycle": {
+      "bytes": "83EC14568B74241C8B463485C07E4E4885C08946340F8592010000A1449D7A008BC84885C9A3449D7A007514B9409D7A00E87A3F0100B8FF000000A3449D7A008B0485489D7A0033D2B922000000F7F183C2038956305E83C414C204008B4E30498BC1894E3085C00F8F3F010000A1449D7A008BD04885D2A3449D7A007514B9409D7A00E8273F0100B8FF000000A3449D7A008B0485489D7A0033D2B907000000F7F142895634A1449D7A008BD04885D2A3449D7A007514B9409D7A00E8EE3E0100B8FF000000A3449D7A008B0C85489D7A00C744240800000000894C24048BD0DF6C24044885D2DC0D90CD7300DD05E8CA7300DC0D30BA7300A3449D7A00DEC9D95C241C7514B9409D7A00E89F3E0100B8FF000000A3449D7A008B0C85489D7A00C744240800000000894C24048BD0DF6C24044885D2DC0D88CD7300DD05E8CA7300DC0D30BA7300A3449D7A00DEC9D95C24047514B9409D7A00E8503E0100B8FF000000A3449D7A008B0485489D7A008B54240489442404C744240800000000DF6C24048B4C241C89542410890E895604DC0D80CD7300894C240CD80568B87300D95C24148B4424148946085E83C414C20400909090909090909090909090",
+      "va": "0x0048AEC0"
     },
     "global_render_lookup_call": {
       "bytes": "DB051CF67A0051B9A8B27900D805A8FC7A00D91C24E89A75FBFF",
@@ -547,6 +2328,26 @@
     "global_render_lookup_type_0x2001": {
       "bytes": "8B86EC0200006A006801200000508D4C2410",
       "va": "0x0040EBD8"
+    },
+    "healing_factory_parameters_and_callbacks": {
+      "bytes": "0C0289AB50010000894308C783D0000000FFFFFF7FC783EC0000000800000089ABE4000000C7830C0100000000003FC783E001000030B64800C783E4010000E0BB4800C783E8010000E0BC48008D942480000000BF88AE780083C9FFE90C070000",
+      "va": "0x004862B8"
+    },
+    "healing_phase_size_alpha_and_attachment_update": {
+      "bytes": "8B442404568B50504A8950508BF2752C8B485485C97C1F81F9FFFF00007417C74054FFFF0000C7405008000000B8010000005EC2040033C05EC204008B505481FAFFFF000075218B48585E81E1000000FF81E90100001E81C9FFFFFF00894858B801000000C2040085D27C76578B78444789784483FF085F7C07C740440000000083FE12C7404C010000007C0BD98114010000D8400CEB09D9400CD8A114010000D9580CD981980000008D34D5000000002BF28B9154010000D804F28D14F25ED918D9819C000000D84204D95804D981A0000000D84208D95808B801000000C204008B48445E41894844B801000000C204009090909090909090909090909090",
+      "va": "0x0048BBE0"
+    },
+    "healing_source_anchor_and_tail_birth": {
+      "bytes": "558BEC83EC2C538BD956578B835801000033FF3BC70F85FE02000039BB9400000075186850AF7800E8130EFCFF83C40433C05F5E5B8BE55DC20800D9830C010000D80D98BA7300D805B8CD7300D95DF0D945F0DB5DF48B75F489B3D00000008B83540100003BF775273BC774128B40FC50E8324F270083C40489BB5401000089BB5C01000089BB58010000E9D60000003BC7751E8BCEE8E5C7000089835401000089B35C01000089B358010000E9B40000008B8B5C0100003BF17F0B89B358010000E99F0000008B83600100003BC775278B83580100009983E20703C2C1F80383F8047D07B804000000EB0C3D000400007E05B80004000003C13BF08945F87C038975F88B4DF8E874C700008B93580100008BB3540100008BF88945F08D0CD5000000002BCAC1E1038BD1C1E902F3A58BCA83E103F3A48B83540100008B48FC51E8624E27008B55F08B45F48B4DF883C404899354010000898358010000898B5C01000033FFDB83D00000008D55FC8D45D45250D83D08CD73008BCBDD05E8CA7300DC0D30BA7300DEC9D95DE8E8BE9AFFFFD945FCD945DCD865FC8B83D0000000C745F4000000003BC7D95DDCD945FCD80DC4BA7300D95DFCDCC0D95DF8D945FCD80D04CD7300DCC0D99B10010000D9830C010000D8054CB87300D80DB4CD7300D99B140100000F8E17010000D945F8D80D00CD730033F6D95DF0D945F8D80D80BA7300D95DEC8B8B54010000C7440E30000000008B9354010000C744163424000000A1449D7A008BC84885C9A3449D7A007514B9409D7A00E802360100B8FF000000A3449D7A008B1485489D7A008B83540100008955E0C745E400000000DF6DE0D945ECD865F08B55D48D4C061847DEC989118B45D8DC0D68C473008941048B55DCD845F08951088B83540100008D440620D9C0D800D9188B8B54010000D945F48D040E83C6388D50188B481889088B4A048948048B52088950088B8354010000C74406D4000000008B8B54010000D95C0ED8D945F88B9354010000D8E1D80D04CD7300D95C16DC8B83D0000000DDD8D945F4D845E83BF8D95DF40F8C05FFFFFF33FF8B83D000000089BB2C0100008D04408983D00000008BB3580100008B832C0100003BC60F8FCC0000007512405F89832C0100005E33C05B8BE55DC208008B4508C74058FFFFFFFF897844C7405024000000C7404C010000008B8B2C0100005F8948548B8B2C0100005E8D14CD000000002BD18B8B54010000D904D1D88398000000D9188B8B2C0100008D14CD000000002BD18B8B54010000D944D104D8839C000000D958048B8B2C0100008D14CD000000002BD18B8B54010000D944D108D883A0000000D95808D9830C010000D8054CB87300D80D50B87300D9580C8B832C0100004089832C010000B8010000005B8BE55DC20800A1449D7A008BD04885D2A3449D7A007514B9409D7A00E82C340100B8FF000000A3449D7A008B0485489D7A0033D2F7F68B750883C9FFB808000000894E58894644894650C7464C01000000894E548B83540100008D3CD5000000002BFAC1E703D944070CD80D18CD7300A1449D7A008BD04885D2D95508D9E0D95DF48B4DF4A3449D7A00894DF07514B9409D7A00E8B4330100B8FF000000A3449D7A008B0485489D7A00C745E4000000008945E08B8B54010000DF6DE0D94508D865F08B55F4DEC9DC0D68C47300D8040FD88398000000D845F08955F0D91EA1449D7A008BC84885C9A3449D7A007514B9409D7A00E853330100B8FF000000A3449D7A008B1485489D7A00C745E4000000008955E08B8354010000DF6DE0D94508D865F08B4DF4894D08DEC9DC0D68C47300D8440704D8839C000000D845F0D95E04A1449D7A008BD04885D2A3449D7A007514B9409D7A00E8F0320100B8FF000000A3449D7A008B1485489D7A00C745E4000000008955E08B8B54010000DF6DE0B801000000D84D08DC0D68C47300D86C0F085FD883A0000000D84508D95E08D9830C010000D8054CB87300D80DB0CD7300D95E0C5E5B8BE55DC20800",
+      "va": "0x0048B630"
+    },
+    "healing_source_spiral_and_stop": {
+      "bytes": "8B4424048B50344A895034750B8B410824FE894108C2040083FA127C0BD98110010000D8400CEB09D9400CD8A110010000D9580CDD05E8CA7300DC0D30BA7300DC0D10CD7300D84010D95010D9FED8480CD84018D918D94010D9FFD8480CD8401CD95804D94014D84008D95808C20400",
+      "va": "0x0048BCE0"
+    },
+    "healing_texture_name": {
+      "bytes": "4865616C696E6700",
+      "va": "0x0078AE88"
     },
     "isaac_global_state_access": {
       "bytes": "8B0D449D7A008BD14985D2890D449D7A007515B9409D7A00E828040100B9FF000000890D449D7A00",
@@ -564,9 +2365,109 @@
       "bytes": "C7442420CDCC4CBE8B5424208D8BF0000000B80F0000008983EC0000008983DC000000C7442424CDCC4CBE8B4424248911C7442428CDCC4CBE8B542428C7442420CDCC4C3E8941048D83FC000000C7442424CDCC4C3EC7442428CDCC4C3E8951088B4C24208B54242489088B4C2428BFC8AD7800895004C783CC00000058000000C783D0000000FA000000C783D80000005802000089480883C9FF33C089ABE4000000C7830C0100000000803FC783E0010000B0234900C783E4010000802B4900C783E8010000C02C4900F2AEF7D12BF98D9424800000008BC18BF78BFAC1E902F3A58BC883E103F3A489AB50010000E9640D0000B90000A040",
       "va": "0x00487746"
     },
+    "link_arc_motion_alpha_and_finish": {
+      "bytes": "558BEC83EC3C568B7508578BF98B46444099D9463CF7BFDC000000D84638D95638D9C08956448B8754010000D8481CD95D08D85818DFE0F6C441750A5F33C05E8BE55DC20400D94624D84E2CD94620D84E3051DEC1D9462CD84E20D94624D84E30DEE9D95E20D95624D94508D88F300100008B8754010000D95DE8D94508D88F34010000D95DECD94508D88F38010000D95DF0D94628D9C0D84850D95DF4D9C0D84854D95DF8D84858D95DFCD9C0D888C0000000D95DC4D9C0D888C4000000D95DC8D888C8000000D94620D9C0D88888000000D95DDCD9C0D8888C000000D95DE0D88890000000D945DCD88798000000D95DD0D945E0D8879C000000D95DD4D887A0000000D8C1D91C2451DDD8D945D4D845C8D91C24D945D0D845C451D91C248D4DC4E8883EF7FFD945CCD845FC51D91C24D945C8D845F851D91C24D945C4D845F4518D4DD0D91C24E8623EF7FFD945D8D845F051D91C24D945D4D845EC51D91C24D945D0D845E8518D4DDCD91C24E83C3EF7FFD94508D8256CB873008B45DC8B4DE08B55E48906D9C0D9C0D8C9894E04895608C7460C0000803F8B8754010000D82DB0C373008B4E40D84818894E0CD80D70CD7300D845E4D95E08DDD8D95D088B450825FFFFFF7F894508D94508D82D6CB87300D80D4CC37300E82CA525008B97540100008B4A343BC873028BC1C1E0180DFFFFFF005F894658B8010000005E8BE55DC204009090909090909090908A41088B4C2404A8017504834134F08B413433D285C00F9CC24A23C2894134C2",
+      "va": "0x0048DE30"
+    },
+    "link_basis_and_source_initialization": {
+      "bytes": "8B835801000033FF3BC70F856803000039BB540100007523BE040000008BCEE8B4A5000089835401000089B35C01000089B358010000E9B80000008B8B5C010000BE040000003BCE7C0B89B358010000E99E0000008B83600100003BC775238B83580100009983E20703C2C1F8033BC67D048BC6EB0C3D000400007E05B80004000003C13BC68944240C7F048974240C8B4C240C55E83EA500008BE88B83580100008BB3540100008BFD8D0CC5000000002BC8C1E1038BC1C1E902F3A58BC883E103F3A48B8B540100008B51FC52E82D2C27008B44241483C40489AB54010000C783580100000400000089835C01000033FF5DD98338010000D98334010000D98330010000D9C0D8C9D9C2D8CB8B8B540100005751DEC1D9C3D8CCDEC1D9FADDDBDDD8DDD8D959188B8354010000D9054CB87300D87018D9581CD90558B87300D9C0D8A330010000D91C24D98334010000D8E1518D4C242CD91C24DDD8E8A643F7FFD9442428D84C2428D9442424D84C2424DEC1D9442420D84C2420DEC1D9FADC1500CE7300DFE0F6C40174688B9330010000DDD88954240C8BC2D944240C5051D9E0D91C24D98334010000D8A338010000518D4C2438D91C24E84943F7FFD944242CD84C242CD9442430D84C24308B4C242C8B5424308B442434894C2420DEC1D9442434D84C24348954242489442428DEC1D9FAD83D4CB8730051D9C0D84C2424D95C2424D9442428D8C9D95C2428D944242CD8C9D95C242CDDD8D9442428D88B30010000D9442424D88B34010000DEE9D91C24D9442424D88B38010000D944242CD88B3001000051DEE9D91C24D9442430D88B34010000D944242CD88B38010000518D4C2420DEE9D91C24E89642F7FFD944241CD84C241CD9442418D84C241851DEC1D9442418D84C2418DEC1D9FAD83D4CB87300D9C0D84C2418D95C2418D944241CD8C9D95C241CD9442420D8C9D95C2420DDD8D98338010000D98334010000D98330010000D9C0D8C9D9C2D8CBDEC1D9C3D8CCDEC1D9FADDDBDDD8DDD8D98338010000D8F1D91C24D98334010000D8F151D91C24D98330010000D8F151D91C248D4C2438DDD8E8F941F7FF8B8B540100008B54242C83C15089118B4424308941048B5424348951088B83540100008B4C2420058800000089088B5424248950048B4C24288948088B93540100008B44241481C2C000000089028B4C2418894A048B44241C8942088B8B54010000C74134FF000000",
+      "va": "0x0048D8D8"
+    },
+    "link_birth_motion_and_phase": {
+      "bytes": "8B74243CB9409D7A00C74658FFFFFF00E88B8BFDFF89442414897C2418DF6C2414B9409D7A00DC0D08C57300D8254CB87300D95C240CE8658BFDFF89442414897C2418DF6C24148B93040100008B83F8000000B9409D7A0089542414DC0D08C5730089442410D8254CB87300D95C243CE82B8BFDFF89442420897C2424DF6C2420D9442414D86424108D46208BC8DEC9DC0D68C47300D8442410D944240CD88BF0000000D95C242CD944243CD88BF40000008B54242C8911D95C24308B542430D95C2434D944243CD84C243CD944240CD84C240C8951048B54243451DEC1895108D9FAD9542440D80DD4BA7300D9C0D9FFD95E2CD9FED95E30D983A0000000D84008D91C24D9839C000000D8400451D91C24D900D88398000000518D4C2438D91C24E86940F7FF8D44242C8BCE50E84D9CFDFFB9409D7A00E8638AFDFFA8037534D944243CD81D6CB87300DFE0F6C4017423688FC2F53D68CDCCCC3DB9409D7A00E8BAABFFFFD95E3C680AD7233E68B81E053EEB21680000803E687B142E3EB9409D7A00E897ABFFFFD95E3C68CDCC4C3D688FC2F53CB9409D7A00E880ABFFFFD88B0C010000897E38D95E408B4E40894E0C8B9BDC000000B9409D7A00E8DE89FDFF4333D2F7F35FB8010000008956445E5B83C42CC2",
+      "va": "0x0048DC50"
+    },
+    "link_callback_selection": {
+      "bytes": "C7830C0100000000803FC783E0010000D0D84800C783E401000030DE4800C783E801000040E048008D9424800000",
+      "va": "0x00485A65"
+    },
+    "link_texture_name": {
+      "bytes": "4C696E6B00",
+      "va": "0x0078AEB8"
+    },
     "main_world_quant_call": {
       "bytes": "8B1534FF7800A168BC79003BC27271B9B8F57A00E8CFFA100084C0750EB9B8F57A00E861FB100084C07555B9B8F57A00E883CE100085C00F847402",
       "va": "0x00457338"
+    },
+    "modifier_anchor_and_trail_birth": {
+      "bytes": "8B8B540100008B51348B049574A77800C1E0180DFFFFFF008946588B8B540100008B413485C00F85070100008B4D0C8B83580100003BC80F8DF60000008B431005E5DFFFFF83F80B7771FF248554094900C7464400000000EB61C7464401000000EB58C7464402000000EB4FC7464403000000EB46C7464404000000EB3DC7464405000000EB34C7464406000000EB2BC7464407000000EB22C7464408000000EB19C7464409000000EB10C746440A000000EB07C746440B0000008D14CD00000000894E548B83540100002BD18B0CD08D04D0890E8B50048956048B4008894608C7460C0000803FD9830C010000D81D58B87300DFE0F6C401741CC7460CCDCC4C3EC74650190000005F5EB8010000005B8BE55DC20800C7460C0000003EC74650190000005F5EB8010000005B8BE55DC208008B0D449D7A008BBB580100008BD14985D2890D449D7A007515B9409D7A00E859E70000B9FF000000890D449D7A008B048D489D7A0033D2F7F78BC14985C0890D449D7A008BFA897D0C7515B9409D7A00E827E70000B9FF000000890D449D7A008B148D489D7A00C745E8000000008955E48BC1DF6DE44985C0DC0D68C47300890D449D7A00D95D087515B9409D7A00E8E8E60000B9FF000000890D449D7A008B0C8D489D7A008B450CD9054CB87300D8650883E103C7465005000000C1E70383C10C2BF8894E448B9354010000C1E7038D0417D9C0D8480CD95DB4D9C0D84810D95DB8D84814D94508D808D94508D84804D95DD0D94508D848088D4620D95DD4D845B4D95DC0D945D0D845B88B4DC08908D95DC4D945D48B55C4D8C1895004D95DC88B4DC8894808A1449D7A008BD04885D2DDD8A3449D7A007514B9409D7A00E837E60000B8FF000000A3449D7A008B0C85489D7A008BD048894D0C85D2A3449D7A007514B9409D7A00E80DE60000B8FF000000A3449D7A008B0C85489D7A008BD048894D0885D2A3449D7A007514B9409D7A00E8E3E50000B8FF000000A3449D7A008B0485489D7A008B4D088945E433C08945E88B550CDF6DE4894DE48945E8DC0D98CE7300D82590CE7300D95DC0DF6DE48955E48945E88B4DC08D462CDC0D98CE73008908D82590CE7300D95DC4DF6DE48B55C4895004DC0D98CE7300D82590CE7300D95DC88B4DC88948088B93540100008B44170C8D7C170C8906B8010000008B4F04894E048B5708895608C7460C8FC2753D5F5E5B8BE55D",
+      "va": "0x004905C1"
+    },
+    "modifier_anchor_and_trail_update": {
+      "bytes": "8B54240483EC0C8B42505648894250750933C05E83C40CC204008B424483F80C0F8D990000008B4254578BB9540100008D34C5000000002BF0C1E6038BC603C7D9420C8B38893A8B7804897A048B4008894208C7420C0000803FD9810C010000D81D58B873005FDFE0F6C4017432D80DA8CE7300D95A0C8B89540100008B440E345E8B0C8500A87800B801000000C1E11881C9FFFFFF00894A5883C40CC20400D80DA4CE7300D95A0C8B81540100008B4C06348B048D8CA87800E9950000008B724C4E89724C751E408942448BB1DC0000003BC67C07C742440C0000008B89E4000000894A4CD9422CD80D70CD7300D95A2CD94230D80D70CD7300D95A30D94234D80D70CD7300D95A34D9420CD9422CD84220D94230D84224D95C2408D94234D842288B4424088942048B4258D95C240C8B4C240CD91AC1E818D80D70CD7300894A0883E830B9000000000F98C1D95A0C4923C1C1E0180DFFFFFF005E8942",
+      "va": "0x00490990"
+    },
+    "modifier_birth_alpha_table": {
+      "bytes": "00000000200000004000000080000000FF000000CF0000009F0000006F0000003F0000000F00000000000000",
+      "va": "0x0078A774"
+    },
+    "modifier_callback_selection": {
+      "bytes": "C783D000000050000000894308C783EC0000000E000000C783E400000002000000C783E001000030014900C783E401000090094900C783E8010000000B49008D94248000",
+      "va": "0x00487461"
+    },
+    "modifier_negative_alpha_table": {
+      "bytes": "0000000080000000FF000000FF000000FF000000FF000000FF000000FF000000C000000080000000400000002000000000000000",
+      "va": "0x0078A800"
+    },
+    "modifier_positive_alpha_table": {
+      "bytes": "00000000200000004000000080000000FF000000FF000000FF000000FF000000FF000000FF000000FF0000008000000000000000",
+      "va": "0x0078A88C"
+    },
+    "modifier_source_allocation_and_axes": {
+      "bytes": "8B930C0100008955F88B45F825FFFFFF7F8945F8D945F8D80DACBA7300E89383250083F8017D0ABF01000000897DF8EB058945F88BF88B835401000085FF752D85C074168B40FC50E80404270083C404C783540100000000000033C089835C010000898358010000E9D700000085C0751E8BCFE8B17C000089835401000089BB5C01000089BB58010000E9B50000008B8B5C0100003BF97F0B89BB58010000E9A00000008B836001000085C075278B83580100009983E20703C2C1F80383F8047D07B804000000EB0C3D000400007E05B80004000003C13BF88945F07C03897DF08B4DF0E8407C00008B93580100008BB3540100008BF88945E88D0CD5000000002BCAC1E1038BD1C1E902F3A58BCA83E103F3A48B83540100008B48FC51E82E0327008B55E88B45F88B4DF08B750883C404899354010000898358010000898B5C0100008D55FC8D45A852508BCBE8A64FFFFFD945FC8B43108B4DFCDCC005E5DFFFFF898BF000000083F807C745CC00000000C745D000000000C745D400000000D95DFC0F87D3000000FF248534094900C745D8000000008B55D8C745DC000000008B45DCC745E00000803F8B4DE08955CC8945D0894DD4E9A0000000D945FCD80D68B87300C745D8000000008B55D8C745DC000000008B45DCD883F0000000C745E00000803F8B4DE08955CC8945D0894DD4D99BF0000000EB62D945FCD80D68B87300C745D8000000008B55D8C745DC000000008B45DCD8ABF0000000C745E00000803F8B4DE08955CC8945D0D99BF0000000894DD4EB248B8B940000008D55C05283C134E88EF1F7FF8B45C08B4DC48B55C88945CC894DD08955D4",
+      "va": "0x00490187"
+    },
+    "modifier_source_initialization": {
+      "bytes": "8B8358010000C745080000000085C00F8EC801000033FF8B8354010000C744383400000000EB04DDD8DDD8B9409D7A00E8D763FDFF8945E4C745E800000000DF6DE4B9409D7A00DC0D08C57300D8254CB87300D95DD8E8B163FDFF8945ECC745F000000000DF6DECB9409D7A00DC0D08C57300D8254CB87300D95DDCE88B63FDFF8945F4C745F800000000DF6DF4DC0D08C57300D8254CB87300D945D4D8C9D945D0D84DDCDEC1D945CCD84DD8DEC1D945CCD8C9D95DB4D945D0D8C9D95DB8D84DD4D945D8D865B4D95DD8D945DCD865B8D95DDCD9C9D8E1D9C9DDD8D9C0D8C9D945DCD84DDCDEC1D945D8D84DD8DEC1D81558B87300DFE0F6C4400F8526FFFFFFD945FCD9C9D9FADEF9D9830C010000D81D58B87300DFE0F6C4017406D80DA0CE7300D9C0D84DD88B8B540100008D543918D95DD88B45D8D9C0D84DDC8902D95DDC8B4DDCD8C9894A04D95DE08B45E0DDD8D945D88942088B8B54010000D8839800000003CFD95DC0D945DCD8839C0000008B55C0D95DC4D945E0D883A00000008B45C48911D95DC88B55C88941048951088B8354010000D983F0000000D84438088D443808D9188B8B540100008D043983C7388B088D500C89480C8B4804894A048B40088942088B45088B8B58010000403BC18945080F8C3AFEFFFF",
+      "va": "0x004903E4"
+    },
+    "modifier_source_motion_and_stop": {
+      "bytes": "8B54240483EC0C8B42345683F80A8D70018972347C0F8B41085E24FE89410883C40CC204008BF2578D420C8B3E89388B7E048978045F8B7608897008D9810C010000D81D58B87300DFE0F6C4017451D94218D881980000008BC2D95C2404D9421CD8819C0000008B742404D95C2408D94220D881A000000089308B742408D95C240C8970048B74240C897008D981F0000000D84208D95A08D905F8CD7300EB4FD98198000000D842188BC2D95C2404D9819C000000D8421C8B742404D95C2408D981A0000000D8422089308B742408D95C240C8970048B74240C897008D981F0000000D84208D95A08D905ACCE7300D9C0D84A185ED95A18D9C0D84A1CD95A1CD84A20D95A2083C40CC2",
+      "va": "0x00490B00"
+    },
+    "moshka_alpha_table": {
+      "bytes": "000000004000000070000000FF000000FF000000FF000000FF000000FF000000FF000000FF000000FF000000FF000000FF000000FF000000FF000000FF000000",
+      "va": "0x0073CC34"
+    },
+    "moshka_anchor_and_trail_birth": {
+      "bytes": "83EC0C558BE983BDC0010000500F8DA10000008B44241885C0751FD9054CB87300B8FC9B7A00D910D80D40CF730083C0043D2C9C7A007CEEDDD8A1449D7A008BC84885C9A3449D7A007514B9409D7A00E8BBB80000B8FF000000A3449D7A008B0C85489D7A008B4424148B95C001000083E103895054C74058FFFFFF00C740500F0000008948448B8D9800000089088B959C0000008950048B8DA0000000894808C7400C00000000B8010000005D83C40CC20800A1449D7A008BD04885D2A3449D7A007514B9409D7A00E841B80000B8FF000000A3449D7A008B0485489D7A0033D2B95000000053F7F1568BB554010000578D3CD5000000002BFAC1E70303F78B46308D0440C1E0028B90A4CB73008B98A8CB7300C1E2080BD38B98ACCB7300C1E2080BD38B5C24208953588B46344083F8057E05B805000000894350C7434404000000C74354FFFFFFFF8B0D449D7A008BC14985C0890D449D7A007515B9409D7A00E8A8B70000B9FF000000890D449D7A008B0C8D489D7A00C744241400000000894C24108B9554010000DF6C24108D443A0C5FDC0D68C47300D8254CB87300D9C0D808D95C240CD9C0D84804D95C2410D84808D944240CD806D9442410D84604D95C2410D9C9D846088B542410C7430C0000803F895304D95C24148B442414D91B8943088B4E305EB801000000D9048DFC9B7A00D88D0C010000D80D50B87300D95B0C5B5D83C40CC20800909090",
+      "va": "0x00493560"
+    },
+    "moshka_anchor_and_trail_update": {
+      "bytes": "8B542404568B425485C07D3B8B72504E8BC689725085C07F0633C05EC204008B72448B4A584681E1FFFFFF008972448B048534CC7300C1E01803C15E894258B801000000C204008D34C5000000002BF08B81540100008D34F0837E34F3750633C05EC204008B42445740BF0900000083E0038942448B0689028B46048942048B4608894208C7420C0000803F8B4630D90485FC9B7A00D8890C0100008B425083F809D80D18CD7300D95A0C7F028BF88B46308B3CBD34CC7300538D0440C1E002C1E7088B98A4CB73000BFB8B98A8CB7300C1E7080BFB8B98ACCB7300C1E7080BFB5B897A58D9460CD81D58B87300DFE0F6C4407450D94610D81D58B87300DFE0F6C4407440D94614D81D58B87300DFE0F6C44074308BF28D42108B3E89388B7E048978048B7E088978088B760C89700C8B425889425CD9810C010000D80D18CD7300D95A0C5FB8010000005EC2040090",
+      "va": "0x00493770"
+    },
+    "moshka_callback_selection": {
+      "bytes": "0C02C783D000000064000000894308C783D800000020030000C783E001000060354900C783E401000070374900C783E8010000C0",
+      "va": "0x00487A40"
+    },
+    "moshka_color_table": {
+      "bytes": "FB000000FE0000008F000000FC000000E300000095000000FC000000C90000009A000000FF000000B00000009A000000FF0000009B000000A3000000FC00000098000000B0000000FA00000096000000C3000000F700000095000000D4000000F300000093000000ED000000EF00000090000000F9000000EF00000090000000F9000000EF00000090000000F9000000",
+      "va": "0x0073CBA4"
+    },
+    "moshka_source_allocation": {
+      "bytes": "8B835401000085C0753268A4110000E8248B27008D482383C40483E1E08941FCB850000000898B5401000089835C010000898358010000E9B80000008B8B5C010000BE500000003BCE7C0B89B358010000E99E0000008B836001000085C075278B83580100009983E20703C2C1F80383F8047D07B804000000EB0C3D000400007E05B80004000003C13BC6894424107F04897424108B4C2410E89B0301008BE88B83580100008BB3540100008BFD8D0CC5000000002BC8C1E1038BD1C1E902F3A58BCA83E103F3A48B83540100008B48FC51E88A8A27008B54241483C40489AB54010000C783580100005000000089935C01000033C933C08B935401000083C0383D80110000894C10FC7CEC8D942480000000BFB8AD7800E9EE090000",
+      "va": "0x00487A77"
+    },
+    "moshka_source_motion": {
+      "bytes": "83EC305355568B742440578BF98B4634488946340F89D50200008B879400000033ED3BC57511C74634F3FFFFFF5F5E5D5B83C430C20400A1449D7A008BC84885C9A3449D7A007514B9409D7A00E85EB50000B8FF000000A3449D7A008B0485489D7A0033D2B903000000F7F18BC68956308D97980000008B8F9800000089088B4A04894804B9409D7A008B5208895008D9870C010000D80DD4BA7300D95C2418D9870C010000D80D44CF7300D95C2444E87B2EFDFF89442410896C2414DF6C2410D9442418D8642444DEC9DC0D68C47300D806D8442444D91ED9870C010000D80D44CF7300A1449D7A008BC84885C9D95C2444D9870C010000D80DD4BA7300A3449D7A00D95C24187514B9409D7A00E89CB40000B8FF000000A3449D7A008B1485489D7A00896C241489542410B9409D7A00DF6C2410D9442418D8642444DEC9DC0D68C47300D8442444D84604D95E04D9870C010000D80D44CF7300D95C2444D9870C010000D80DD4BA7300D95C2418E8BB2DFDFF89442410896C2414DF6C2410D9442418D8642444BB0A000000DEC9DC0D68C47300D84608D8442444D95E08B9409D7A00E8862DFDFF8944241C896C2420DF6C241C680000803F68000080BFB9409D7A00DC0D08C57300D8254CB87300D95C2420E8D64EFFFFD95C2410680000803F68000080BFB9409D7A00E8BE4EFFFFD9542444D84C2444D9442410D84C2410DEC1D9442418D84C2418DEC1D81D4CB87300DFE0F6C40175054B3BDD7F808B4424448B4C24108B5424185051528D4C2434E8E8E2F6FFD9870C010000D9442428D8C951D95C2420D9442430D8C9D95C2424D84C2434D80DD4BA7300D91C24D9442424D80DD4BA730051D91C24D9442424D80DD4BA7300518D4C2440D91C24E89BE2F6FF8B4C24348B5424388D4618894E188B4C243C895004894808B9409D7A00E8892CFDFF33D2B903000000F7F1C744241C00000000C7442420000000008B442420C7442424000000008B4C24245F83C2078956348B54241883C60C8916894604894E085E5D5B83C430C204008B4E3041894E30B9409D7A00E8302CFDFF33D2B906000000F7F185D20F8515010000BB0A00000033ED680000803F68000080BFB9409D7A00E8844DFFFFD95C2410680000803F68000080BFB9409D7A00E86C4DFFFFD95C2418680000803F68000080BFB9409D7A00E8544DFFFFD95C2444D9442418D84C2418D9442410D84C2410DEC1D9442444D84C2444DEC1D81D4CB87300DFE0F6C40175054B3BDD7F8A8B5424448B4424188B4C24105250518D4C2440E87AE1F6FFD9870C010000D944243CD8C951D91C24D944243CD8C951D91C24D944243CD8C9518D4C2434D91C24DDD8E84BE1F6FFD9442430D80D2CC5730051D91C24D9442430D80D2CC5730051D91C24D9442430D80D2CC57300518D4C2428D91C24E818E1F6FFD944241CD84618D95E18D9442420D8461CD95E1CD9442424D84620D95E208D7E188BCE57E85FCAF7FF8B178B47048B4F0883C60C5F8916894604894E085E5D5B83C430C204009090",
+      "va": "0x004938C0"
+    },
+    "mushroom_callback_selection": {
+      "bytes": "C783E0010000D0894800C783E4010000B08D4800C783E8010000008F4800",
+      "va": "0x00486C08"
+    },
+    "mushroom_lifetime_phase_alpha": {
+      "bytes": "83E00383C010894650A1449D7A008BC84885C9A3449D7A007514B9409D7A00E82F610100B8FF000000A3449D7A008B0485489D7A0033D2B903000000F7F1B8676666668BEA8B93540100008B4A34C7464C02000000F7E9C1FA028BC203D5C1E81F33C9C74658FFFFFF408D4410FF3BC75F0F9CC14923C18946445E5DB8010000005B83C41CC208",
+      "va": "0x00488D1D"
+    },
+    "mushroom_source_growth_and_stop": {
+      "bytes": "8B5634428BC2895634D9ED8D500183F81E8954240CDB44240CD9F1D88F0C010000DC0DE0CC7300D91ED9870C010000D80DC0CC7300D84608D95E0875088B470824FE8947085F5EC2",
+      "va": "0x00488F42"
+    },
+    "mushroom_update_motion": {
+      "bytes": "8B54240483EC088B425056488942508BF0750933C05E83C408C204008B424483F80E7D28578B7A4C4F897A4C5F750B40C7424C01000000894244837A44087D0CD9420CD80DC4BA7300D95A0C8B425883FE047E17C1E81883C0403DFF0000007605B8FF000000C1E018EB0A25000000FF2D0100003FD902D842380DFFFFFF00894258D91AD9423CD84204D95A04D94240D84208D95A08D94238D80D38C57300D95238D9423CD80D38C57300D9542408D95A3CD94240D80D38C57300D95A408B8154010000D902D86018D94204D8601CD9542410D84C2410D9C1D8CADEC1D9FAD95C2404D94208D86020D94008DED9DFE0F6C441753ED8890C010000B8010000005ED80DD8CC7300D8742400D8E9D95A38DDD8D944240CD8890C010000D80DD8CC7300D8742400D86C2404D95A3C83C408C20400DDD8DDD8B8010000005E83C408",
+      "va": "0x00488DB0"
     },
     "native_d3d_light_range_and_attenuation": {
       "bytes": "8B4C2410899EFC000000C786E80000000000803F899EEC000000899EF0000000C786E40000000000803F8BC65FD996E0000000D9C0DEC9D99600010000D9054CB87300D8F1D99E04010000",
@@ -608,6 +2509,118 @@
       "bytes": "8B8424A8000000D99C24880000008B088B70048A8424A40000008954246C8B9424AC000000894C243484C08B4A048974241C894C2430",
       "va": "0x00502F8E"
     },
+    "path_brightness_table": {
+      "bytes": "000000009A99193E9A99993E6666E63E9A99193F0000403F6666663F0000803F0000803F0000803F0000803F0000803F0000803F0000803F0000803F0000803F",
+      "va": "0x0078AA78"
+    },
+    "path_callback_selection": {
+      "bytes": "0C08C783E0010000C02F4900894308B8C40900008983D00000008983D8000000C783E401000080324900C783E8010000F03249008D942480000000BFBCAD7800E9B50C0000",
+      "va": "0x00487888"
+    },
+    "path_carrier_prediction_and_birth": {
+      "bytes": "83EC20538BD955568B83580100008BB39400000085C057897424140F85740100008B835401000085C07523BF010000008BCFE8B94E000089835401000089BB5C01000089BB58010000E9BC0000008B8B5C010000BF010000003BCF7C0B89BB58010000E9A20000008B836001000085C075278B83580100009983E20703C2C1F80383F8047D07B804000000EB0C3D000400007E05B80004000003C13BC7894424107F04897C24108B4C2410E8404E00008BE88B83580100008BB3540100008BFD8D0CC5000000002BC8C1E1038BC1C1E902F3A58BC883E103F3A48B8B540100008B51FC52E82FD526008B4424148B74241883C40489AB54010000C783580100000100000089835C0100008B8B54010000C7442418000080BF8B54241883C118C744241C000080BF8B44241C8911C7442420000080BF8B542420894104895108D98318010000D81D58B87300DFE0F6C440740F8B8354010000C74030B0B0B000EB3481BB180100000000803F750F8B8B54010000C7413040FF4000EB1981BB1801000000000040750D8B9354010000C742302880FF0085F6750C5F5E5D33C05B83C420C20800DB442438D89B1C010000DFE0F6C441750C5F5E5D33C05B83C420C20800A11CF67A008B7C24388B1603C7508D442428508BCEFF92D00000008B10895424188B70048974241C8B68088B8354010000896C2420D94018D85C24188D4818DFE0F6C4407428D94104D85C241CDFE0F6C440741AD94108D85C2420DFE0F6C440740C5F5E5D33C05B83C420C208008B44241C89118971048969088B4C241856528B15B8F57A00894C242CB9B8F57A0089442430C744243400000000FF5270518D442428B98CF77A00D91C2450E8CDDC0C008B4424348B4C241CD80518CD7300D9442418894804C7400C295C8F3DD918C740440F000000C74050F6FFFFFFD9580889784C8B93540100005F5E8B4A305D894858B8010000005B83C420C20800",
+      "va": "0x00492FC0"
+    },
+    "path_lifetime_and_brightness_update": {
+      "bytes": "558BEC51568B7508837E50F675138B464CC1E00399F7B9C001000083C0078946508B465048894650790933C05E8BE55DC20400D9048578AA7800D80D70C37300D95D08D94508DB5DFC8B46588B4DFC25FFFFFF00C1E11803C1894658B8010000005E8BE55DC204009090909090909090",
+      "va": "0x00493280"
+    },
+    "pathdestination_alpha_table": {
+      "bytes": "000000004000000090000000FF000000FF000000FF000000FF000000FF000000FF000000FF000000FF000000FF000000FF000000FF0000008000000040000000",
+      "va": "0x0078AAD8"
+    },
+    "pathdestination_callback_selection": {
+      "bytes": "8B43102D3A200000741C4875308B9354010000C783D000000000010000C742304040FF00EB178B8354010000C783D000000080000000C7403040FF40008B8BD0000000C783E001000000334900898BD8000000C783E4010000F0334900C783E8010000F03449008D942480000000BFBCAD7800E9420B0000",
+      "va": "0x004879C8"
+    },
+    "pathdestination_dx_table": {
+      "bytes": "F4FD343FF4FD34BFF4FD34BFF4FD343F",
+      "va": "0x0078AAB8"
+    },
+    "pathdestination_dy_table": {
+      "bytes": "F4FD343FF4FD34BFF4FD343FF4FD34BF",
+      "va": "0x0078AAC8"
+    },
+    "pathdestination_motion_scale_alpha_update": {
+      "bytes": "558BEC83EC08568B7508578BF98B465048894650790A5F33C05E8BE55DC204008B0485D8AA78008B4E58C1E01881E1FFFFFF0003C1B9B8F57A00894658D94620D806D91ED94624D846048B06D95E04D94628D846088B56045250D95E08E81E0C0D00D80550B87300D95608D906D8A7980000008B8754010000D84818D94604D8A79C000000D8481CDEC1D84820D8680CD80550B87300D95D08D95DFCD945FCD85D08DFE08B4D08C1E017C1F81F23C8F7D02345FC0BC18945F8D945F88B4E2C5FD95E08894E0CB801000000D94620D80DE0CE7300D95E20D94624D80DE0CE7300D95E24D94628D80DE0CE7300D95E28D94630D84E2CD95E2C5E8BE55DC2040090",
+      "va": "0x004933F0"
+    },
+    "pathdestination_ring_cross_birth": {
+      "bytes": "8B44240883EC0C3D80000000567C378D70808BC69983E21F03C2C1F80583E61F89742418DB442418D80D3CCF7300D9542418D80C85B8AA7800D9442418D80C85C8AA7800EB22DB442418D80D38CF7300D9542418D9FEDC0D30CF7300D9442418D9FFDC0D30CF73008B4424148B9198000000D95C241889108B919C000000D95C24048950048B91A00000008B7424048950088B542418C744240C00000000895424088D5020C7400C00000000C740500600000089328B742408C740440F0000008972048B74240C8972088B89540100005E8B5130C7402C295C8F3D895058C740300000803FB80100000083C40CC20800",
+      "va": "0x00493300"
+    },
+    "pathdestination_source_projection_stop": {
+      "bytes": "568B742408578BF98B463485C07542D9879C0000008D460C8D4E18505151D91C24D9879800000051B98CF77A00D91C24E82BDC0C00D94620D81D58B87300DFE0F6C440750CD9054CB87300D87620D95E208B4E34418BC1894E3483F8017E088B470824FE8947085F5EC2040090909090",
+      "va": "0x004934F0"
+    },
+    "poisoncloud_texture_name": {
+      "bytes": "506F69736F6E436C6F756400",
+      "va": "0x0078AE7C"
+    },
+    "poisonfog_factory_parameters_and_callbacks": {
+      "bytes": "C783CC0000003200000089ABD0000000C783D8000000FFFFFF7FC783EC000000A40C0000C783DC0000000F00000089ABE4000000C783E001000080B04800C783E401000070B548008D942480000000BF7CAE7800E910220000",
+      "va": "0x00486319"
+    },
+    "poisonfog_grid_birth_color_and_surface": {
+      "bytes": "558BEC81EC9000000053568BF18B86C001000085C00F85C9040000D9860C010000D8054CB873008B860C0100008945E4D83534CB7300E881D425008BD8F7D88BD0895D9C3BD38945948955EC0F8F920400008B0D449D7A00573BC38945E80F8F69040000DB45ECD95DB8D945E4D84DE4D95DD8DB45E88BD14985D2D80D34CB7300890D449D7A00D95DF8D945B8D80D34CB7300D95DFCD90534CB7300D80DB0C37300D95DF4D90534CB7300D80DA8CD7300D95DF07515B9409D7A00E8303D0100B9FF000000890D449D7A008B048D489D7A0033FF894580897D84DF6D80D945F4D865F08BD14985D2DEC9890D449D7A00DC0D68C47300D845F0D845F8D95DF8D90534CB7300D80DB0C37300D95DF4D90534CB7300D80DA8CD7300D95DF07515B9409D7A00E8C73C0100B9FF000000890D449D7A008B048D489D7A0089BD7CFFFFFF898578FFFFFFDFAD78FFFFFFD945F4D865F0DEC9DC0D68C47300D845F0D845FCD955FCD84DFCD945F8D84DF8DEC1D85DD8DFE0F6C4010F843B0300008B4E14E86BD600008BF885FF0F8423030000D945F8D8461CD955F8D945FCD84620D95DFC8B4DFCD91F894F04A1449D7A008BD04885D2A3449D7A007514B9409D7A00E82C3C0100B8FF000000A3449D7A008B0485489D7A00C78574FFFFFF00000000898570FFFFFF8B4DFCDFAD70FFFFFF8B55F85152B9B8F57A00DC0DA0CD7300D80530CB7300D825B0C37300D95F0CE8DE8D0D00D8470CD95F08817E10082000007509C747587FAFFFFFEB2FD98618010000D80D98CD7300D95DF4D945F4DB5DA88B45A83DFF0000007E05B8FF000000C1E0180DFFFFFF008947588B86EC0000008947508B9EDC000000A1449D7A004B8BC84885C9A3449D7A007514B9409D7A00E86C3B0100B8FF000000A3449D7A008B0485489D7A004333D28BCFF7F38D47108957448B96E400000089574C8B118910C74760000000008B51048950048B51088950088B57588B490C89575C89480C8B47448B0F8947488B9664010000894D908955D0D94590D85DD0DFE08B4D90C1E017C1F81F23C8F7D02345D00BC18945C8D945C88B8E68010000D99E640100008B4704894DA08945C0D945C0D85DA0DFE08B4DC0C1E017C1F81F23C8F7D02345A00BC1894588D945888B866C010000D99E680100008B57088945E0895598D94598D85DE0DFE08B4D98C1E017C1F81F23C8F7D02345E00BC18945B0D945B08B9670010000D99E6C0100008B0F8955DC894D8CD945DCD85D8CDFE08B4D8CC1E017C1F81F23C8F7D02345DC0BC18945D4D945D48B8E74010000D99E700100008B4704894DC48945CCD945C4D85DCCDFE08B4DCCC1E017C1F81F23C8F7D02345C40BC18945BCD945BC8B8678010000D99E740100008B57088945AC8955B4D945ACD85DB4DFE08B4DB4C1E017C1F81F23C8F7D02345AC0BC18945A4D945A4D99E780100008B86C40100008B9EBC01000085C0753F8B8ECC0100006A0C8D96C80100005152E83A3427008B8ECC01000083C0048D14494985C98D4490F47C15418B96C401000089108986C401000083E80C4975EC8B86C40100008B08898EC4010000895804C700000000008B9EC001000043899EC0010000C74008000000008978088B8EBC01000085C974048901EB068986B80100008B5D9C8986BC0100008B0D449D7A00EB068B0D449D7A008B45E8403BC38945E80F8EACFBFFFF8B45948B55EC423BD38955EC0F8E80FBFFFF5F5E33C05B8BE55DC208005E33C05B8BE55DC208009090",
+      "va": "0x0048B080"
+    },
+    "poisonfog_phase_and_finish_fade": {
+      "bytes": "558BEC518B4508568B504C4A89504C75218B5044428950448BB1DC0000003BD67C07C74044000000008B91E400000089504CF641080175778B7058C1EE1883FE09770933C05E8BE55DC20400D98118010000D80DACCD7300D95D08D94508DB5DFC8B55FC83FA017D05BA01000000578B791081FF082000005F8BCA751FC1E1082BCA03CE5EC1E11881C97FAFFF00894858B8010000008BE55DC20400C1E1082BCA03CEC1E11881C9FFFFFF00894858B8010000005E8BE55DC204009090909090",
+      "va": "0x0048B570"
+    },
+    "portal_callback_selection": {
+      "bytes": "BF30AE780083C9FF33C0C783D000000032000000C783D800000020030000C783EC0000000A000000C783E400000003000000C783E001000070444900C783E401000070474900C783E801000030494900F2AEF7D12BF98D9424800000008BC18BF78BFAC1E902F3A58BC88B835401000083E10385C0F3A475306A5CE89B8927008D482383C40483E1E08941FC898B5401000089AB5C01000089AB5801000089AB50010000E9620900008B8B5C0100003BCD7C1189AB5801000089AB50010000E9470900008B836001000085C075278B83580100009983E20703C2C1F80383F8047D07B804000000EB0C3D000400007E05B80004000003C13BC5894424107F04896C24108B4C2410E8100201008B93580100008BB3540100008BF8894424308D0CD5000000002BCAC1E1038BD1C1E902F3A58BCA83E103F3A48B83540100008B48FC51E8FD8827008B5424348B44241489935401000089AB5801000089835C01000083C40489AB50010000E99C080000",
+      "va": "0x00487B94"
+    },
+    "portal_head_and_trail_birth": {
+      "bytes": "83EC1853578BF933DB399FC0010000755C8B4424248B8F9800000089088B979C0000008950048B8FA0000000894808C7400C0000803FD9057CCC7300D80DA8CC730089580CC74058FFFFFF60C7405401000000C740440F000000D840085F5BD95808B80100000083C418C20800568B742428895E54C74658FFFFFF408B97EC0000008956508B87E400000089464CA1449D7A008B0D78CC73008BD048894C241485D2A3449D7A007514B9409D7A00E84DA90000B8FF000000A3449D7A008B0C85489D7A00895C241C894C24188BD0DF6C24184885D2DC0D68C47300A3449D7A00D9C0D8054CB87300D8C9D80D6CB87300D95C2418DDD87514B9409D7A00E8FEA80000B8FF000000A3449D7A008B0485489D7A00895C24108944240C8B4C2418DF6C240C894C240CDC0D88CE7300D95C2428D9442428D9FED9442418D84C2414DEC9D9442428D9FFD944240CD84C2414DEC9D95C24288B4C2428D9C0D88798000000D9442428D8879C000000D95C241CD987A0000000D95C24208B54241C8B442420D91ED905B8CD7300D864240C895604894608895E0C894E30D80D4CC57300D95E34D95E2CD9442414D83578CC73008B0D449D7A008BD14985D2890D449D7A00D80D50B87300D95C24287515B9409D7A00E82AA80000B9FF000000890D449D7A008B048D489D7A00895C241C894424188BD1DF6C2418DC0D68C47300D85C240CDFE0F6C44175384985D2890D449D7A007515B9409D7A00E8E4A70000B9FF000000890D449D7A008B048D489D7A0033D2B90B000000F7F183C204895644EB374985D2890D449D7A007515B9409D7A00E8ACA70000B9FF000000890D449D7A008B048D489D7A00D944242883E003D9E0D95C2428894644D9442428D9FFD95E20D9442428D9FED95E24D9054CB87300D864240CD805A4BA7300D84C2414D80D54CF7300D95E28A1449D7A008BC84885C9A3449D7A007514B9409D7A00E840A70000B8FF000000A3449D7A008B1485489D7A00895C241C89542418B801000000DF6C2418DC0D68C47300D8256CB87300D84E28D84608D95E085E5F5B83C418C20800",
+      "va": "0x00494470"
+    },
+    "portal_phase_motion_scale_alpha_update": {
+      "bytes": "558BEC83EC08568B75085733FF397E540F848A000000F6410801750A5F33C05E8BE55DC20400D9810C010000D81D4CB87300DFE0F6C4017557A1449D7A008BC84885C9A3449D7A007514B9409D7A00E8ACA60000B8FF000000A3449D7A008B1485489D7A00897DFC8955F85FDF6DF8B801000000DC0DB0CC7300D80D1CC57300D8055CCF7300D95E0C5E8BE55DC20400897E0C5FB8010000005E8BE55DC20400397E50750A5F33C05E8BE55DC20400D94630D84E24D94620D84E2C8B464C48DEC1D94630D84E20D9462CD84E24DEE9D95508D9C1D95E2CD95E30D88198000000D91ED94508D8819C000000D95E04D9810C010000D84E2889464CD84608D95E08D94628D80DE8CD7300D95E2875258B46444083F8048946447503897E44837E440F7507C74644040000008B81E400000089464CD94608D8A1A0000000D8157CCC7300DFE0F6C441751C897E0C897E50C74658FFFFFF005FDDD8B8010000005E8BE55DC204008B4E34894E0CD9057CCC7300D8E1D90558CF7300D8357CCC7300DEC9D95D08DDD8D94508DB5DFC8B55FC8D4237C1F80283F8407C05B840000000C1E0180DFFFFFF005F894658B8010000005E8BE55DC20400909090909090909090",
+      "va": "0x00494770"
+    },
+    "portal_source_update": {
+      "bytes": "568BF1D9860C010000D80DACBA7300E8F83B25008986D00000005EC204009090",
+      "va": "0x00494930"
+    },
+    "portalstar_callback_selection": {
+      "bytes": "89ABD000000089ABD8000000C783E0010000103D4900C783E4010000503D4900C783E8010000D03D49008D942480000000BF10AE7800E944080000",
+      "va": "0x00487D03"
+    },
+    "portalstar_random_scale_update": {
+      "bytes": "83EC08568BF1F6460801750933C05E83C408C20400578B7C2414C74758FFFFFFFFA1449D7A008BC84885C9A3449D7A007514B9409D7A00E8E4B00000B8FF000000A3449D7A008B1485489D7A00C744240C0000000089542408B801000000DF6C2408DC0DB0CC7300D805A8CC7300D88E0C010000D95F0C5F5E83C408C2040090",
+      "va": "0x00493D50"
+    },
+    "protectiona_texture_name": {
+      "bytes": "50726F74656374696F6E4100",
+      "va": "0x0078AEF4"
+    },
+    "protectione_texture_name": {
+      "bytes": "50726F74656374696F6E4500",
+      "va": "0x0078AF0C"
+    },
+    "protectionf_texture_name": {
+      "bytes": "50726F74656374696F6E4600",
+      "va": "0x0078AF18"
+    },
+    "rainsnow_texture_name": {
+      "bytes": "5261696E536E6F7700",
+      "va": "0x0078AE48"
+    },
+    "regeneration_callback_and_texture_selection": {
+      "bytes": "0C1289AB50010000894308898B3C010000C783D000000002000000C783E0010000B0504900C783E401000020514900C783E8010000105349008D942480000000BF28AE7800E9AE040000",
+      "va": "0x0048808A"
+    },
+    "regeneration_carrier_smoothing_and_scale": {
+      "bytes": "83EC24578BF9F6470801740A8B879400000085C0753AD9870C010000D80D24C57300D9970C010000D81DD8CC7300DFE0F6C401741B8B44242C5FC7400C00000000C74058FFFFFF0033C083C424C20400568B7424308D8798000000C74658FFFFFFFF8B08894C24148B5004895424188B40088944241C8B879400000085C00F84A5000000D94034D94040D9403CD94038D9C0DEC9D9C3DECCD9C1D8CAD9C3D8CCDEC1D8C1DEECD9C0DCC0DEC4DDD8DDD8DDD8D94038D8483CD94040D84834DEC1DCC0D95C240CD94038D84840D9403CD84834DEE9DCC0D95C2410D98034010000D84E20D80D08CE7300D95C2430D84C2430D944240CD84C2430D95C2424D9442410D84C2430D95C2428D8442414D95C2414D9442424D8442418D95C2418D9442428D844241CD95C241CA1449D7A008BC84885C9A3449D7A007514B9409D7A00E80C9C0000B8FF000000A3449D7A008B1485489D7A00C744240C0000000089542408B801000000DF6C2408DC0DB0CC7300D805A8CC7300D88F0C010000D80DB0C37300D95E0CD906D80D38C57300D9442414D80D4CC57300DEC1D91ED94604D80D38C57300D9442418D80D4CC57300DEC1D95E04D94608D80D38C57300D9870C010000D80D68B87300DEC1D944241CD80D4CC57300DEC1D95E085E5F83C424C20400909090909090909090909090909090",
+      "va": "0x00495120"
+    },
+    "regeneration_population_birth": {
+      "bytes": "83B9C0010000017E0533C0C208008B442404C74058FFFFFF00C74044030000008B919800000089108B919C0000008950048B91A0000000895008C7400C000000008B89C0010000F7D91BC983E10249894C2404DB442404D95820B801000000C208009090909090909090909090909090",
+      "va": "0x004950B0"
+    },
     "render_argb_interpolation": {
       "bytes": "8B5E588B7E5C8BD38BCFC1EA1081E2FF000000895DEC8955D8DF6DD8C1E91081E1FF000000D84DFC894DD0DF6DD0D84DF8DEC1E86C0925008BD033C0C1EB18895DC88945CCDF6DC88BCF8945C4C1E918D84DFC894DC08BDADF6DC0D84DF8DEC1E83F0925008B55ECC1E008C1EA080BD881E2FF00000033C08955B88945BC8BCFDF6DB8C1E908C1E308D84DFC81E1FF000000894DB08945B4DF6DB0D84DF8DEC1E8FF0825000BD88B45ECC1E308895DE025FF00000033DB8945A8895DAC81E7FF000000DF6DA8897DA0895DA4D84DFCDF6DA0D84DF8DEC1E8C80825008B55E08B7DE80BD08B45E483C7108910",
       "va": "0x00497B98"
@@ -615,6 +2628,14 @@
     "render_position_scale_interpolation": {
       "bytes": "8B3033C0D945F8D84E10D945FCD80E8945DC8945D4DEC1D95FF8D945F8D84E14D945FCD84E04DEC1D95FFCD945F8D84E18D945FCD84E08DEC1D91FD945F8D84E1CD945FCD84E0CDEC1D95F04",
       "va": "0x00497B4C"
+    },
+    "rickarrow_firearrow_reuse_and_texture_selection": {
+      "bytes": "C7442414CDCC4CBE8B5424148D8BF0000000B80F0000008983EC0000008983DC000000C7442418CDCC4CBE8B4424188911C744241CCDCC4CBE8B54241CC7442414CDCC4C3E8941048D83FC000000C7442418CDCC4C3EC744241CCDCC4C3E8951088B4C24148B54241889088B4C241C81FE4E20000089500489ABD0000000C783D40000008FC2753D89ABE4000000894808C7830C0100009A99993EC783140100000AD7833FC7832C01000000000000C783E0010000A0CB4800C783E4010000D0CE48008D942480000000750ABFD8AE7800E9A92C0000BFC8AE7800E99F2C0000",
+      "va": "0x00485803"
+    },
+    "rikarrowsmoke_texture_name": {
+      "bytes": "52696B4172726F77536D6F6B6500",
+      "va": "0x0078AED8"
     },
     "scale_mutator_all_fields": {
       "bytes": "D9442404D889F0000000D999F0000000D9442404D889F4000000D999F4000000D9442404D889F8000000D999F8000000D9442404D889FC000000D999FC000000D9442404D88900010000D99900010000D9442404D88904010000D99904010000D9442404D8890C010000D9990C010000D9442404D88928010000D99928010000D9442404D88910010000D99910010000D9442404D889D4000000D999D4000000C20400",
@@ -644,6 +2665,38 @@
       "bytes": "B8CF78001E0000000000000088D67800",
       "va": "0x0078C460"
     },
+    "shapechange_texture_name": {
+      "bytes": "53686170654368616E676500",
+      "va": "0x0078ADBC"
+    },
+    "silence_anchor_and_trail_birth": {
+      "bytes": "83EC34538BD9B90100000057398BC00100000F8E23020000A1449D7A008BC84885C9A3449D7A007514B9409D7A00E81D9B0000B8FF000000A3449D7A008A1485489D7A008B8BB8010000F6C20174028B098BD0568B71084885D2A3449D7A007514B9409D7A00E8E59A0000B8FF000000A3449D7A008B0485489D7A0033FF89442414897C2418DF6C241455BD0A000000DC0D68C47300D9C0D84E38D82ED95C242CD9C0D84E3CD86E04D95C2430D84E40D86E08D95C2434B9409D7A00E80F14FDFF89442420897C2424DF6C2420680000803F68000080BFB9409D7A00DC0D08C57300D8254CB87300D95C2420E85F35FFFFD95C2414680000803F68000080BFB9409D7A00E84735FFFFD9542410D84C2410D9442414D84C2414DEC1D9442418D84C2418DEC1D81D4CB87300DFE0F6C40175054D3BEF7F808B4C24108B5424148B4424185152508D4C2444E871C9F6FFD9460CD9442438D8C98B7424485DD95C241CD9442438D8C9897E0CD95C2420D84C243CD944241CD80DA8CC7300D95C2434D9442420D80DA8CC7300D95C2438D80DA8CC7300D9442434D8442428D95C2428D9442438D844242CD9C9D8442430D95C2430D94424288B4C2430D91E894E08D95E04A1449D7A008BD04885D2A3449D7A007514B9409D7A00E873990000B8FF000000A3449D7A008B0485489D7A00897C24208944241CB801000000DF6C241CDC0DB0CC7300D805A8CC7300D88B0C010000C74658FFFFFFFFC7464406000000897E54C7465007000000D80D84CF7300D95E205E5F5B83C434C208008B44244033FFC74058FFFFFF00C74044060000008B939800000089108B939C0000008950048B93A000000089500889780C39BBC00100007408D90558B87300EB06D90580CF7300D95020D9582CC74024CDCCCC3DC740308FC2F53DC740340000803F8948545F8BC15B83C434C20800909090909090",
+      "va": "0x00495320"
+    },
+    "silence_anchor_and_trail_update": {
+      "bytes": "83EC0C568B742414578BF9F6470801740A8B879400000085C075448B465485C07412D9870C010000D80DB8CE7300D99F0C010000D9870C010000D81DD8CC7300DFE0F6C4017418C7460C00000000C74658FFFFFF005F33C05E83C40CC204008B465485C00F84500100008B879400000085C07411D98034010000D80D6CB87300D95634EB03D94634D94620D9FFC74658FFFFFFFFD94620D9FED95C240CD9462CD9FEDC0D88CC7300D9542410D84C2410D944240CD84C240CDEC1D9C1D8CADEC1D9FAD8FAD9542418DEC9D9442418D84C240CD95C240CD9442418D84C2410D95C2410D88798000000D95C2408D944240CD8879C0000008B442408D95C240CD9442410D887A0000000D9C9D80D6CB873008B4C240CC7460C0000803FD8C1D9C9DDD8D9442408D8268906D95E38D944240CD86604894E04D95E3CD9C0D86608D95E40D95E08D94624D84620D95E20D94630D8462CD95E2CA1449D7A008BD04885D2A3449D7A007514B9409D7A00E82F970000B8FF000000A3449D7A008B0485489D7A00C744240C0000000089442408B801000000DF6C2408DC0DD8CE7300D80570CD7300D88F0C0100005FD80D88CF7300D95E0C5E83C40CC204008B4E50498BC1894E5085C07F11C7460C000000005F33C05E83C40CC20400D94620D80DA8CC73008B4E205F894E0CB801000000D95E205E83C40CC20400909090909090909090",
+      "va": "0x004955D0"
+    },
+    "silence_callback_and_texture_selection": {
+      "bytes": "0C1289AB50010000894308898B3C010000C783D000000004000000C783D80000002C010000C783E001000020534900C783E4010000D0554900C783E8010000D05749008D942480000000BF28AE7800E95A040000",
+      "va": "0x004880D4"
+    },
+    "sparks_alpha_table": {
+      "bytes": "000000004000000080000000FF000000FF000000FF000000FF000000FF000000",
+      "va": "0x0078AB98"
+    },
+    "sparks_callback_and_texture_selection": {
+      "bytes": "0C1289AB50010000894308898B3C010000C783D00000000A000000C783D80000002C010000C783E0010000104A4900C783E4010000D04C4900C783E8010000F04D49008D942480000000BF10AE7800E996050000",
+      "va": "0x00487F98"
+    },
+    "sparks_source_flash_and_trail_birth": {
+      "bytes": "83EC2855568BF133ED39AEC0010000753F8B442434C74058FFFFFFFF8B8E9800000089088B969C0000008950048B8EA000000089480889680C896844C74054010000005EB8010000005D83C428C208008B4608578B7C243824FE894608C74758FFFFFFFFA1449D7A008BD04885D2A3449D7A007514B9409D7A00E8E1A30000B8FF000000A3449D7A008B0485489D7A00896C24188944241453DF6C2418BB0A000000DC0D10CE7300D805A8CC7300D95C2418EB02DDD8B9409D7A00E8201DFDFF89442420896C2424DF6C2420680000803F68000080BFB9409D7A00DC0D08C57300D8254CB87300D95C241CE8703EFFFFD95C2410680000803F68000080BFB9409D7A00E8583EFFFFD954243CD84C243CD9442410D84C2410DEC1D9442414D84C2414DEC1D8154CB87300DFE0F6C40175094B3BDD0F8F7AFFFFFFD9FA8B5424108B442414518B4C2440D91C245152508D4C2430E878D2F6FF8BD08D4C2430E8CD3DFFFFD9442418D88E0C0100008D5F388BCBD84C2418D80DD4BA7300D944242CD8C9D95C2420D9442430D8C98B5424208911D95C2424D94424348B442424D8C9894104D95C24288B542428895108A1449D7A008BC84885C9DDD8A3449D7A007514B9409D7A00E895A20000B8FF000000A3449D7A008B1485489D7A00896C242489542420DF6C2420DC0D68C47300D9C0D80BD95C242CD9C0D84B04D95C2430D84B08D944242CD88698000000D9442430D8869C000000D95C2430D9C9D886A00000008B442430C7470C0000803F894704D95C24348B4C2434D91F894F08B9409D7A00E8991BFDFF89442420896C2424DF6C24205BDC0DB0CC7300D805A8CC7300D88E0C010000D80DD4BA7300D95F0CA1449D7A008BD04885D2A3449D7A007514B9409D7A00E8D6A10000B8FF000000A3449D7A008B0485489D7A0033D2B903000000C7475006000000F7F1896F54B801000000428957445F5E5D83C428C20800",
+      "va": "0x00494A10"
+    },
+    "sparks_source_flash_and_trail_update": {
+      "bytes": "83EC08568B742410578BF98B465485C00F8485000000D9460CD81D58B87300DFE0F6C4407464A1449D7A008BC84885C9A3449D7A007514B9409D7A00E85FA10000B8FF000000A3449D7A008B1485489D7A00C744240C0000000089542408B801000000DF6C2408DC0DB0CC7300D805A8CC7300D88F0C0100005FD80D60CF7300D95E0C5E83C408C20400C7460C000000005F33C05E83C408C204008B465048894650790A5F33C05E83C408C204008B048598AB78005FC1E0180DFFFFFF00894658D94638D806D91ED9463CD84604D95E04D94640D84608D95E08D9460CD80D70CD7300D95E0CD94638D80DE0CD7300D95E38D9463CD80DE0CD7300D95E3CD94640D80DE0CD7300D95E408B464440894644B8010000005E83C408C20400909090",
+      "va": "0x00494CD0"
+    },
     "spatial_light_radius_test": {
       "bytes": "8B4424343BF2D980E0000000D9C0D8C9D95C2428DDD80F8FD80200008B4424108BCEC1E10503C12BD603C68D0CC5000000008D3C402BC8C1E7028D0C49897C2420C1E10242894C241C89542424EB048B6C24308BB5940100008BAD800100008B5424148BC103C68B74241003EF3BF20F8F5C0200008BCE83C0502BD18944243C42895424188B4424388B4C243CD94500D820D945048B39D86004D94508D860088BCF3BCB74198B7424348BC18BD18B098B400C3BC674063BCB75EBEB028BCA395C24400F8522010000D9C0D8C9D9C2D8CBDEC1D9C3D8CCDEC1D85C2428DDD8DFE0DDD8F6C401DDD80F84030100003BCB0F85",
       "va": "0x006CAC6D"
@@ -655,6 +2708,110 @@
     "special_spawn_random_offset": {
       "bytes": "D8254CB87300D9C0D88F30010000D806D91E8B0ED88F34010000D84604D95424188B442418D95E045051B9B8F57A00E878520D00D94608D8A7A00000005FB801",
       "va": "0x0048EDC4"
+    },
+    "sphere_antimagic_factory_parameters": {
+      "bytes": "0C0281FE1A20000089430889AB50010000C783CC0000005A00000089ABD0000000B80F000000750CC783EC00000004000000EB068983EC000000",
+      "va": "0x0048560E"
+    },
+    "sphere_antimagic_size_table": {
+      "bytes": "0AD7233C8FC2753C0AD7A33C8FC2F53C8FC2753C0AD7233C",
+      "va": "0x0073CB78"
+    },
+    "sphere_birth_speed_selection": {
+      "bytes": "33D2BE0B000000F7F685D20F85DE0000008B43103D1A20000075468BC14985C0890D449D7A007515B9409D7A00E8980A0100B9FF000000890D449D7A008B0C8D489D7A00897DF4894DF08B7508DF6DF0DC0D68C47300D80518CE7300E9CF0000003D162000008BD175444985D2890D449D7A007515B9409D7A00E84B0A0100B9FF000000890D449D7A008B048D489D7A00897DF48945F08B7508DF6DF0DC0D68C47300D80534C57300E9820000004985D2890D449D7A007515B9409D7A00E8070A0100B9FF000000890D449D7A008B048D489D7A00897DF48945F08B7508DF6DF0DC0D68C47300D8051CC57300EB418BD14985D2890D449D7A007515B9409D7A00E8C4090100B9FF000000890D449D7A008B048D489D7A00897DF48945F08B7508DF6DF0DC0D10CE7300D80538C57300",
+      "va": "0x0048E3A6"
+    },
+    "sphere_callback_selection": {
+      "bytes": "C7830C0100000000803FC783E001000070E04800894208C783E4010000C0E74800C783E801000030",
+      "va": "0x004856BB"
+    },
+    "sphere_lifetime_rotation_and_projection": {
+      "bytes": "558BEC83EC30568B7508578BF98B465048894650750A5F33C05E8BE55DC204008B464453408D5E2099F7BFDC0000008956448B8754010000D94050D84E24D903D848548B4818894D08DEC1D94050D80BD94054D84E24DEE9D91BD95E248B9754010000D94220DC1520CE7300DFE0F6C4410F85A2000000D94308D84A40D94304D84A3CC745FC0000803FDEC1D903D84A38DEC1D8F1D9E0D95DF8DDD8D945F8D85DFCDFE08B4DF8C1E017C1F81F23C8F7D02345FC0BC18945F4D945F4D95DF4C745F800000000D945F4D85DF8DFE08B4DF8C1E017C1F81F23C8F7D02345F40BC18945FCD945FCD84A4051D91C24D945FCD84A3C51D91C24D945FCD84A38518D4DD0D91C24E81735F7FF8D55D08D4DE8528BD3E859B9FBFFEB138B038B4B048B53088945E8DDD8894DEC8955F08B87540100005BD98798000000D800D9879C000000D84004D95DE0D987A0000000D84008C7460C0000803FD95DE4D845E8D945ECD845E0D95DD4D945F0D845E48B45D4894604D95DD88B4DD8D91E894E08",
+      "va": "0x0048E7C0"
+    },
+    "sphere_size_table": {
+      "bytes": "0AD7233C0AD7A33C8FC2F53C295C0F3D295C0F3D295C0F3D295C0F3D295C0F3D295C0F3D295C0F3D295C0F3D295C0F3D295C0F3D8FC2F53C0AD7A33C0AD7233C",
+      "va": "0x0073CB38"
+    },
+    "sphere_surface_and_phase_initialization": {
+      "bytes": "D95E38BF0A000000B9409D7A00E80883FDFF8945F0C745F400000000DF6DF0680000803F68000080BFB9409D7A00DC0D08C57300D8254CB87300D95DF8E858A4FFFFD95DFC680000803F68000080BFB9409D7A00E841A4FFFFD95508D84D08D945FCD84DFCDEC1D945F8D84DF8DEC1D81D4CB87300DFE0F6C40175054F85FF7F878B4D088B55FC8B45F85152508D4DE0E87538F7FF8B55E08B45E48D7E208BCF89118B55E8894104895108D94708D94704D907D9450CD80D08CE7300D9C1D8CAD9C3D8CCDEC1D9C4D8CDDEC1D9FADDDCD9CBDEFBDDD8DDD8D9C0D80FD91FD9C0D84F04D95F04D84F08D95F08C74658FFFFFFFFA1449D7A008BC84885C9A3449D7A007514B9409D7A00E88C080100B8FF000000A3449D7A008B0485489D7A0033D2B90B000000F7F18956448B93EC000000895650C7464C01000000",
+      "va": "0x0048E4D6"
+    },
+    "sphere_type_size_selection_create": {
+      "bytes": "8B5B1081FB1720000075238B56505FB801000000D9049538CB7300D84E38D84D0CDCC0D95E0C5E5B8BE55DC2080081FB1A20000075218B46505FD9048578CB7300D84E38B801000000D84D0CD95E0C5E5B8BE55DC2080081FB1620000075218B4E505FB801000000D9048D38CB7300D84E38D84D0CD95E0C5E5B8BE55DC208008B56505FB801000000D9049538CB7300D84E38D84D0CD80D80CC7300D95E0C5E",
+      "va": "0x0048E718"
+    },
+    "sphere_type_size_selection_update": {
+      "bytes": "8B7F1081FF1720000075228B56505FB801000000D9049538CB7300D84E38D84D08DCC0D95E0C5E8BE55DC2040081FF1A20000075208B46505FD9048578CB7300D84E38B801000000D84D08D95E0C5E8BE55DC2040081FF1620000075208B4E505FB801000000D9048D38CB7300D84E38D84D08D95E0C5E8BE55DC204008B56505FB801000000D9049538CB7300D84E38D84D08D80D80CC7300D95E0C5E8BE55D",
+      "va": "0x0048E93D"
+    },
+    "sphere_type_texture_selection": {
+      "bytes": "75118D942480000000BF18AF7800E9892E000081FE1620000075118D942480000000BF0CAF7800E9702E000081FE1A2000008D942480000000750ABF00AF7800E9572E0000BFF4AE7800",
+      "va": "0x004856E6"
+    },
+    "star_birth_and_generation_stop": {
+      "bytes": "8B410824FE8941088B442404C74058FFFFFF00C74050030000008B91EC0000008950448B919800000089108B919C0000008950048B91A0000000895008C7400C000000008B890C010000894820B801000000C208009090909090909090909090",
+      "va": "0x00494950"
+    },
+    "star_callback_and_texture_selection": {
+      "bytes": "0C1281EE41200000894308898B3C01000089ABD0000000C783E001000050494900C783E4010000B0494900C783E8010000004A4900743F4E0F8577060000BFC0AE780083C9FF33C08D942480000000F2AEF7D12BF98BC18BF78BFAC1E902F3A58BC883E103F3A4C783EC0000000F000000E93F060000BFC8AE780083C9FF33C08D942480000000F2AEF7D12BF98BC18BF78BFAC1E902F3A58BC883E103F3A4C783EC0000000F000000E907060000",
+      "va": "0x00487EEA"
+    },
+    "star_lifetime_scale_and_alpha_update": {
+      "bytes": "8B4424048B48504985C98948507F13C74058FFFFFF00C7400C0000000033C0C20400D94020D80D70CD73008B4820C74058FFFFFFFF89480CD95820B801000000C2040090909090909090909090909090",
+      "va": "0x004949B0"
+    },
+    "starttrans_alpha_table": {
+      "bytes": "0000000050000000B0000000FF000000FF000000FF000000FF000000FF000000FF000000FF000000FF000000FF000000FF000000FF0000008000000040000000",
+      "va": "0x0078ACF8"
+    },
+    "starttrans_anchor_and_returning_trail_birth": {
+      "bytes": "83EC2855568B742434578BF933ED39AFC0010000753BC7465004000000C7465401000000C746440C0000008B879800000089068B8F9C000000894E048B97A0000000895608C7460C0000803FE9F2010000C746500F000000896E54A1449D7A008BC84885C9A3449D7A007514B9409D7A00E81A880000B8FF000000A3449D7A008B0485489D7A0033D2B90C00000053F7F1BB0A000000895644EB02DDD8B9409D7A00E86901FDFF89442418896C241CDF6C2418B9409D7A00DC0D08C57300D8254CB87300D95C2414E84301FDFF89442420896C2424DF6C2420680000803F68000080BFB9409D7A00DC0D08C57300D8254CB87300D95C2418E89322FFFFD95C243CD9442410D84C2410D944243CD84C243CDEC1D9442414D84C2414DEC1D8154CB87300DFE0F6C40175094B3BDD0F8F68FFFFFFD9FA8B54243C8B442410518B4C2418D91C245250518D4C2430E8AFB6F6FF8BD08D4C2430E80422FFFFD9870C010000D944242CD8C98D46208BD0D95C2420D9442430D8C98B4C2420890AD95C2424D94424348B4C2424D8C9894A04D95C24288B4C2428DDD8894A08D900D88798000000D94004D8879C000000D95C2430D94008D887A00000008B542430C7460C0000803F8956048B5650D95C24348B4C243483C203D91E894E088954243CD900D9E0D94004D9E0D95C2430D94008D9E0D95C2434DB44243C8D4638D95C243CD874243CD95C2420D9442430D874243CD95C2424D9442434D874243CD95C24288B4C24208B54242489088B4C24285B895004894808D9870C010000D80D2CC57300D95E2CC74658FFFFFF00896E0C5F5EB8010000005D83C428C208009090909090",
+      "va": "0x004965E0"
+    },
+    "starttrans_anchor_trail_alpha_and_phase_update": {
+      "bytes": "83EC08568B742410578BF98B465485C00F84B00000008B879400000085C0753E8B465048894650790A5F33C05E83C408C20400D9460C8B0485F8AC78005FD80DE0CD7300C1E0180DFFFFFF00894658B801000000D95E0C5E83C408C20400C74658FFFFFFFFA1449D7A008BC84885C9A3449D7A007514B9409D7A00E8B0850000B8FF000000A3449D7A008B1485489D7A00C744240C00000000895424088B8754010000DF6C24085FDC0DB0CC7300D805A8CC7300D84818B801000000D95E0C5E83C408C204008B465048894650790A5F33C05E83C408C204008B8F9400000085C9750D83F8047C05B8040000008946508B46448B562C5F8D480133C883E10333C88B4650894E44D94638D806D91ED9463CD84604D95E04D94640D8460889560CD95E088B0C85F8AC7800B801000000C1E11881C9FFFFFF00894E585E83C408C204009090909090909090909090909090",
+      "va": "0x00496840"
+    },
+    "starttrans_callback_source_and_texture_selection": {
+      "bytes": "0C12898B3C01000089430889ABD0000000C783D80000002C010000C783E0010000E0654900C783E401000040684900C783E8010000906949008B835401000085C0752A6A5CE84E8127008D482383C40483E1E08941FC898B5401000089AB5C01000089AB58010000E9CB0000008B8B5C0100003BCD7C0B89AB58010000E9B60000008B836001000085C075278B83580100009983E20703C2C1F80383F8047D07B804000000EB0C3D000400007E05B80004000003C13BC5894424107F04896C24108B4424108D0CC5000000002BC88D14CD2400000052E8BD8027008D682383E5E08BFD8945FC8B83580100008BB3540100008D0CC5000000002BC8C1E1038BC1C1E902F3A58BC883E103F3A48B8B540100008B51FC52E8A68027008B44241883C40889AB54010000C783580100000100000089835C0100008B8B54010000C741341E0000008B9354010000C74218000000008B8354010000C7401C0000803F8D942480000000BFA0AD780083C9FF33C0F2AEF7D12BF98BC18BF78BFAC1E902F3A58BC883E103F3A48D8C2480000000516A068D8BEC010000E84C840700",
+      "va": "0x00488417"
+    },
+    "starttrans_source_growth_attempts_and_stop": {
+      "bytes": "558BEC5156578B7D088BF18B473485C08D48FF894F347D128B4E086A0083E1FA894E088BCEE836E0FEFFD9860C010000D80DD8CC7300D84718D95F188B8654010000D9401CD80568B87300D9581C8B96540100008B421C894508D94508DB5DFC8B45FC83F8088986D00000007C05B8080000008986D00000005F5E8BE55DC20400909090909090909090909090909090",
+      "va": "0x00496990"
+    },
+    "stench_texture_name": {
+      "bytes": "5374656E636800",
+      "va": "0x0078AEB0"
+    },
+    "stun_texture_name": {
+      "bytes": "5374756E00",
+      "va": "0x0078AE28"
+    },
+    "teleport_callback_selection": {
+      "bytes": "C783D000000014000000C783D800000040010000C783EC0000000E00000089ABE4000000C783E0010000B0FD4800C783E401000060004900C783E801000010014900",
+      "va": "0x004872EF"
+    },
+    "teleport_phase_vertical_scale_and_alpha_update": {
+      "bytes": "8B442404568B50504A8950508BF2750633C05EC204008B504C4A89504C75298B50444283FA048950447507C7404400000000837844107507C74044040000008B89E400000089484CD94008D8602883FE01D95808D94020D84828D95028D84008D958087509C7400C00000000EB068B502C89500C8B48588B7054C1E91803CE81F9FF0000007205B9FF000000C1E11881C9FFFFFF005E894858B801000000C20400",
+      "va": "0x00490060"
+    },
+    "teleport_radial_birth_and_phase_partition": {
+      "bytes": "558BEC83EC1453568B7508578BF933DBC74658FFFFFFFF8B87EC000000895E448946508B8FE4000000894E4C8B970C0100008955088B450825FFFFFF7F894508A1449D7A008BC84885C9A3449D7A007514B9409D7A00E865F00000B8FF000000A3449D7A008B1485489D7A00895DFC8955F88BC8DF6DF84885C9DC0D68C47300A3449D7A00D9C0D8054CB87300D8C9D80D6CB87300D95DFCDDD87514B9409D7A00E81AF00000B8FF000000A3449D7A008B1485489D7A00895DF48955F0DF6DF0DC0D88CE7300D94508D84DFCD9C1D9FED9C1DEC9D95DECD9C9D9FFD9C9DEC9D945ECD88798000000D9C9D8879C000000D95DF0D987A00000008B45F0C7460C0000803FD95DF48B4DF4894604D91E894E08A1449D7A008BD04885D2A3449D7A007514B9409D7A00E894EF0000B8FF000000A3449D7A008B0485489D7A00895DF48945F0895E0CDF6DF0DC0D58CD7300D82568B87300D84D08D84608D95E08D905B8CD7300D865FCD80DD4BA7300D95E2C8B0D449D7A008BD14985D2890D449D7A007515B9409D7A00E833EF0000B9FF000000890D449D7A008B048D489D7A00895DF48945F08BD1DF6DF0DC0D68C47300D85DFCDFE0F6C44175384985D2890D449D7A007515B9409D7A00E8F1EE0000B9FF000000890D449D7A008B048D489D7A0033D2B90C000000F7F183C204895644EB2D4985D2890D449D7A007515B9409D7A00E8B9EE0000B9FF000000890D449D7A008B048D489D7A0083E003894644",
+      "va": "0x0048FDB0"
+    },
+    "teleport_signed_vertical_and_alpha_birth": {
+      "bytes": "D9870C010000D81D58B87300DFE0F6C441752BD9054CB87300D865FCC746209A99993FC74654EDFFFFFFD805A4BA7300D84D08D80D80CE7300D95E28EB30D9054CB87300D865FCC74658FFFFFF00C746205555553FC7465413000000D805A4BA7300D84D08D80D7CCE7300D95E28D94628D846085FB801000000D95E085E5B8BE55DC20800909090909090909090",
+      "va": "0x0048FFCF"
+    },
+    "teleport_source_stop": {
+      "bytes": "8B4424048B50344283FA238950347E088B410824FE894108C2",
+      "va": "0x00490110"
+    },
+    "teleport_texture_name": {
+      "bytes": "54656C65706F727400",
+      "va": "0x0078AE30"
     },
     "tendri_callback_selection": {
       "bytes": "C783E0010000E0E94800C783E401000020EC48000F8505010000C783D000000014000000C7",
@@ -728,6 +2885,42 @@
       "bytes": "546F726E61646F00",
       "va": "0x0078AE68"
     },
+    "transform_mushroom_reuse_and_texture_selection": {
+      "bytes": "83C9FF81FE02200000C783D00000000A000000C783D8000000A00F0000898BEC00000089ABE4000000C783100100000000803FC783E0010000D0894800C783E4010000B08D4800C783E8010000008F48008D942480000000750ABF98AE7800E94C190000BF54AE7800E942190000",
+      "va": "0x00486BD5"
+    },
+    "visionfog_texture_name": {
+      "bytes": "566973696F6E466F6700",
+      "va": "0x0078ADAC"
+    },
+    "visionstar_callback_and_phase_selection": {
+      "bytes": "0C1281C6BCDFFFFF894308B802000000BA0300000083FE0889AB5001000089833C0100008993D0000000C783E0010000004E4900C783E4010000304F4900C783E8010000A05049007729FF24B518894800C783EC00000000000000EB1689ABEC000000EB0E8983EC000000EB068993EC000000BF28AE780083C9FF33C08DAC2480000000F2AEF7D12BF98BC18BF78BFDC1E902F3A58BC823CAE913050000",
+      "va": "0x00487FEC"
+    },
+    "visionstar_population_and_offset_birth": {
+      "bytes": "8B91C00100005683FA040F8F0501000033F6B8010000003BD67E0C3981EC0000000F85EE0000008B54240857C74258FFFFFF008BB9EC000000897A448BB998000000893A8BB99C000000897A048BB9A0000000897A0889720C8BB9EC0000003BF85F0F85AF0000008B89C001000083F9047761FF248D1C4F4900DD0540C37300D9FFD95A20DD0540C37300D9FEEB3FD905F89B7A00D80DA0CC7300EB28D905F89B7A00D80D6CCF7300EB1AD905F89B7A00D80D68CF7300EB0CD905F89B7A00D80D64CF7300D9C0D9FFD95A20D9FED95A24897228D94220D80D6CB873005ED95A20D94224D80D6CB87300D95A24D94228D80D6CB87300D95A28D902D84220D91AD94224D84204D95A04D94228D84208D95A08C2080033C05EC20800907A4E49008F4E49009D4E4900AB4E4900B94E4900",
+      "va": "0x00494E00"
+    },
+    "visionstar_rotation_scale_and_detach_update": {
+      "bytes": "83EC10568B742418578BF98B460CC74658FFFFFFFF8B8F980000008944240C890E8B979C0000008956048B87A0000000894608C7460C0000803F8B87EC000000C74424089A99993E83F8017559DD0578CF7300D9FFC74424087B142E3EDD0578CF7300D9FED94624D8CAD94620D8CADEE9D95C241CD94620DECAD94624D8C98B4C241C894E24DEC2DDD8D95E20D906D84620D91ED94624D84604D95E04D94628D84608D95E08817F104C200000750CD94608D80538C57300D95E08A1449D7A008BD04885D2A3449D7A007514B9409D7A00E86A9E0000B8FF000000A3449D7A008B0485489D7A0033C989442410894C2414DF6C2410DC0D70CF7300D80550B87300D88F0C010000D84C2408D80D2CC57300D944240CD80D50CD7300DEC1D9560CF64708017408398F940000007533D80D50CD7300D95E0C898F0C010000D9460CD81D74CD7300DFE0F6C4017416894E0CC74658FFFFFF005F33C05E83C410C20400DDD85FB8010000005E83C410C20400",
+      "va": "0x00494F30"
+    },
+    "vulcansmoke_cloud_pillar_birth": {
+      "bytes": "83EC0C53568B74241833DB578BF9C74658FFFFFFFF895E44A1449D7A008BC84885C9A3449D7A007514B9409D7A00E8ED300100B8FF000000A3449D7A008B0485489D7A0033D2B964000000F7F14283FA3C0F8743010000B8080000008946548B97EC000000C1E20389565089464C8B879800000089068B8F9C000000894E04A1449D7A00D987F4000000D80DC8CD73008BD04885D2D95C241CD987F4000000D80D6CB87300A3449D7A00D95C240C7514B9409D7A00E866300100B8FF000000A3449D7A008B0485489D7A00895C241489442410DF6C2410D944240CD864241CDEC9DC0D68C47300D88700010000D887A0000000D844241CD95E088B8F0C010000894E0C8B9714010000895620C746243D0A773FDD05E8CA7300DC0D30BA73008B87F00000008944241CA1449D7A00DC0DC0CD73008BC84885C9A3449D7A00D95C240C7514B9409D7A00E8D22F0100B8FF000000A3449D7A008B1485489D7A00895C241489542410895E40DF6C24105FB801000000D84C2408DC0D68C47300D9C0D9FED84C2418D95E38D9FFD84C2418D95E3C5E5B83C40CC20800B8040000008946548B8FEC000000C1E102894E5089464CA1449D7A008B97FC0000008BC84885C98954241CA3449D7A007514B9409D7A00E84A2F0100B8FF000000A3449D7A008B1485489D7A00895C2414895424108BC8DF6C24104885C9D84C241CA3449D7A00DC0D68C47300D95C241CDD05E8CA7300DC0D30BA7300DC0DC0CD7300D95C240C7514B9409D7A00E8F32E0100B8FF000000A3449D7A008B1485489D7A00895C241489542410DF6C2410D84C240CDC0D68C47300D9C0D9FED84C241CD88798000000D91ED9FFD84C241CD8879C000000D95E048B87A0000000894608B801000000D9870C010000D80D4CC57300C746205C8F823FC746240000803F895E38895E3CD95E0C8B8F100100005F894E405E5B83C40CC2080090909090909090909090",
+      "va": "0x0048BD50"
+    },
+    "vulcansmoke_factory_parameters_and_callbacks": {
+      "bytes": "C7442420CDCC4C3E8B5424208D8BF0000000C74424240000003F8B442424C74424280000000089118B542428C74424209A99993EC7442424000080408941048D83FC000000C744242800000000C783CC000000580000008951088B4C24208B54242489088B4C2428C783D000000002000000895004C783D800000090010000C783EC0000001000000089ABE4000000894808C7830C01000000002040D98300010000D80DA4CC7300C78314010000A4707D3FC783E001000050BD4800C783E401000010C048008D942480000000BF90AE780083C9FFD99B10010000E96D070000",
+      "va": "0x004861D8"
+    },
+    "vulcansmoke_phase_scale_and_motion_update": {
+      "bytes": "8B4424048B50504A895050750533C0C204008B504C4A89504C751E8B504456428950448BB1DC0000003BD65E7C0533C0C204008B485489484CD94038D800D918D9403CD84004D95804D94040D84008D95808D94020D8480CD9580CD94024D9C0D84838D95838D9C0D8483CD9583CD84840D95840B801000000C2040090909090",
+      "va": "0x0048C010"
+    },
+    "vulkan_texture_name": {
+      "bytes": "56756C6B616E00",
+      "va": "0x0078AE90"
+    },
     "weather_hour_interpolation": {
       "bytes": "E8142F1800D955FCE89E1E1800D945FCD81DDCF373008BD8895DE4DFE0F6C401751DD945FCD81DE0F37300DFE0F6C441740DA1D4BE79008945F8E986000000D945FCD81DE4F37300DFE0F6C401746DD945FCD81DE8F37300DFE0F6C441755DD945FCD81DDCF37300D945FCDFE0F6C4017425D825E8F37300D835ECF37300D905D4BE7900D825D0BE7900DEC9D805D0BE7900D95DF8EB2ED825E0F37300D835F0F37300D905D4BE7900D825D0BE7900DEC9D82DD4BE7900D95DF8EB098B0DD0BE7900894DF8E805A2F9FF8B40088B480CA154BE7900508B45F88B1150FF5214C786DC06000080000000D90538FF7800D85DFCDFE0F6C441750AC70538FF7800000080BF",
       "va": "0x00566691"
@@ -771,6 +2964,26 @@
     "world_wind_wrapper_call": {
       "bytes": "83EC0C538B5C2418568B74241857538BF956E809BBFFFF8B8F8001000085C9741F8B56048B06895424108944240C8B46088D54240C53528944241CE8E03C160053568D8FF4060000E81300F8FF5F5E5B83C40CC20800",
       "va": "0x00564190"
+    },
+    "zoneexit_alpha_table": {
+      "bytes": "0000000050000000B0000000FF000000FF000000FF000000FF000000FF000000FF000000FF000000FF000000FF000000FF000000FF0000008000000040000000",
+      "va": "0x0078AA38"
+    },
+    "zoneexit_birth_basis_size_and_ground": {
+      "bytes": "558BEC83EC1053568BF157D98618010000D88E1C010000D95DFCD945FCDB5DF48B45F483F8287E05B828000000D98630010000D81D58B873008B7D088986D0000000DFE0F6C4407509C747586060FF00EB07C74758FFFFFF00A1449D7A008BC84885C9A3449D7A007514B9409D7A00E8CCC00000B8FF000000A3449D7A008B1485489D7A0033DB83E20FC747500F000000895744C7474C01000000895F54A1449D7A008BC84885C9A3449D7A007514B9409D7A00E887C00000B8FF000000A3449D7A008B1485489D7A00895DF48955F08BC8DF6DF04885C9DC0D08C57300A3449D7A00D8254CB87300D95D087514B9409D7A00E848C00000B8FF000000A3449D7A008B1485489D7A00895DF48955F0DF6DF0DC0D08C57300D8254CB87300D94508D84D08D82D2CCF7300D9C1D8CADEE9D95DF4D94508D88E18010000D88E20010000D88698000000D9C1D88E24010000D88E1C010000DEE9D95DFCD98624010000D88E180100008B4DFCD84D08D9C9D88E20010000D88E1C010000DEC1D8869C000000D95D088B45085051B9B8F57A00E8AB110D00D80550B873008B55FC8B45088917894704895F0CD95F08A1449D7A008BC84885C9A3449D7A007514B9409D7A00E879BF0000B8FF000000A3449D7A008B1485489D7A00895DFC8955F8B801000000DF6DF8DC0D10CE7300D80538C57300D84DF4D80D2CC57300D95F205F5E5B8BE55DC20800909090909090909090",
+      "va": "0x00492D30"
+    },
+    "zoneexit_callback_selection": {
+      "bytes": "B90000A0400C20C783D00000000A000000C783D800000058020000898B18010000898B1C010000894308C783E0010000302D4900C783E4010000402F4900C783E8010000B02F4900E9EE0C0000",
+      "va": "0x0048783B"
+    },
+    "zoneexit_phase_rise_and_alpha_update": {
+      "bytes": "8B442404568B485881E1FFFFFF008948588BD18B48508B348D38AA7800C1E6180BF24989705889485085C95E7D0533C0C20400D94008D8052CC573008B48448D5101D95808D9402CD80D70CD730033D183E20333D18B4820D9582C89504489480CB801000000C2040090909090909090",
+      "va": "0x00492F40"
+    },
+    "zoneexit_texture_name": {
+      "bytes": "5A6F6E654578697400",
+      "va": "0x0078ADA0"
     }
   },
   "source": {
