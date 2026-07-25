@@ -143,7 +143,6 @@ private:
     void showLandscapeTools();
     void hideLandscapeTools();
     void toggleLandscapeTools();
-    void restoreLayoutAfterLandscapeTools();
     void handleEscapeShortcut();
     void saveUiState();
     void closeHotReloadProgress();
@@ -242,13 +241,6 @@ private:
     QDockWidget* m_mapsDock;
     QDockWidget* m_landscapeToolsDock;
     CLandscapeTools* m_landscapeTools;
-    QByteArray m_layoutBeforeLandscapeTools;
-    QByteArray m_landscapeToolsLayout;
-    Qt::DockWidgetArea m_landscapeDockArea{Qt::RightDockWidgetArea};
-    int m_landscapeDockHeight{420};
-    bool m_landscapeDockFloating{false};
-    bool m_restoringLandscapeDockLayout{false};
-    bool m_suppressLandscapeDockRestore{false};
     quint64 m_landscapeVisibilityGeneration{0};
     QDockWidget* m_historyDock;
     QDockWidget* m_validationDock;

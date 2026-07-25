@@ -76,8 +76,8 @@ Use a copied MPR or disposable test map only.
     place and reads **No MPR loaded.** Load a different MPR and confirm the same
     dock updates its source, namespace, dimensions, and ranges without reopening.
 13. Arrange **MPR Settings** above or below **Landscape Tools**, then close and
-    reopen Landscape Tools with **L**. Confirm the exact landscape-workspace dock
-    arrangement returns, while closing Landscape Tools still restores the prior
-    ordinary workspace.
+    reopen Landscape Tools with **L**. Confirm it behaves exactly like **Maps and
+    Collections**: only visibility changes, its native dock slot/size is retained,
+    and no unrelated dock layout is restored or rearranged.
 
 No test requires or authorizes mutation of the live game installation.
