@@ -9,8 +9,10 @@ Current development line: `0.3.0-alpha.12` focused closed testing. Alpha.11
 was withdrawn after its temporary-resource bootstrap passed the fixed world
 object's first word as the object pointer and crashed both normal and synthetic
 Test Current Map launches. Alpha.12 corrects the pointer contract and adds an
-owned-process runtime smoke test that must reach `GameplayReady` for both Zone
-1 and the generated empty-control fixture before packaging. This is a
+uncompressed 8888 placeholder MMP with explicit runtime-compatible masks. Its
+owned-process runtime smoke test must reach `GameplayReady`, remain stable for
+15 seconds, and produce no native dump for both Zone 1 and the generated
+empty-control fixture before packaging. This is a
 version reclassification of the feature set that outgrew the `0.2.1` label,
 not a serializer or compatibility reset. The remaining 0.3 release work is the
 final runtime/corpus matrix, focused confirmation of the new live-clock and

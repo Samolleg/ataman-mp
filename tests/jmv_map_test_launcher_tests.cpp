@@ -1,5 +1,7 @@
 #include <QtTest>
 #include <QCryptographicHash>
+#include <QDateTime>
+#include <QHash>
 #include <QJsonDocument>
 #include <QStandardPaths>
 #include <QTemporaryDir>
@@ -244,6 +246,29 @@ void JmvMapTestLauncherTests::runtimeSmokeReachesGameplayReady()
     if(!graphPath.isEmpty())
         input.generatedAiGraphData = readAll(graphPath);
 
+    struct DumpStamp
+    {
+        qint64 size{0};
+        QDateTime modified;
+    };
+    auto snapshotDumps = [](const QString& directory) {
+        QHash<QString, DumpStamp> result;
+        const QFileInfoList dumps = QDir(directory).entryInfoList(
+            QStringList() << "*.dmp", QDir::Files, QDir::Name);
+        for(const QFileInfo& dump : dumps)
+        {
+            DumpStamp stamp;
+            stamp.size = dump.size();
+            stamp.modified = dump.lastModified();
+            result.insert(dump.absoluteFilePath().toLower(), stamp);
+        }
+        return result;
+    };
+    const QString dumpDirectory = qEnvironmentVariable(
+        "EI_ENDURANCE_RUNTIME_SMOKE_DUMP_DIR",
+        QDir(gameRoot).filePath("Starter/Dumps"));
+    const QHash<QString, DumpStamp> dumpsBefore = snapshotDumps(dumpDirectory);
+
     CJmvMapTestLauncher launcher;
     QString error;
     QVERIFY2(launcher.launch(input, &error), qPrintable(error));
@@ -253,10 +278,34 @@ void JmvMapTestLauncherTests::runtimeSmokeReachesGameplayReady()
           && launcher.runtimeState() != "GameplayReady")
         QTest::qWait(50);
     const QString finalState = launcher.runtimeState();
+    int dwellMs = qEnvironmentVariableIntValue("EI_ENDURANCE_RUNTIME_SMOKE_DWELL_MS");
+    if(dwellMs <= 0)
+        dwellMs = 15000;
+    QElapsedTimer dwell;
+    dwell.start();
+    while(dwell.elapsed() < dwellMs && launcher.isRunning()
+          && launcher.runtimeState() == "GameplayReady")
+        QTest::qWait(50);
+    const bool survivedDwell = launcher.isRunning()
+        && launcher.runtimeState() == "GameplayReady";
+    const QHash<QString, DumpStamp> dumpsAfter = snapshotDumps(dumpDirectory);
+    QStringList newDumps;
+    for(auto it = dumpsAfter.constBegin(); it != dumpsAfter.constEnd(); ++it)
+    {
+        const auto before = dumpsBefore.constFind(it.key());
+        if(before == dumpsBefore.constEnd()
+           || before->size != it->size || before->modified != it->modified)
+            newDumps.append(it.key());
+    }
     const QString runId = launcher.runId();
     launcher.stop();
     QTRY_VERIFY_WITH_TIMEOUT(!launcher.isRunning(), 10000);
     QCOMPARE(finalState, QString("GameplayReady"));
+    QVERIFY2(survivedDwell,
+             "The game did not remain in GameplayReady for the required post-load dwell.");
+    QVERIFY2(newDumps.isEmpty(),
+             qPrintable("The game wrote a native dump after GameplayReady: "
+                        + newDumps.join(", ")));
     QVERIFY2(!runId.isEmpty(), "Runtime smoke did not create a run ID.");
 }
 

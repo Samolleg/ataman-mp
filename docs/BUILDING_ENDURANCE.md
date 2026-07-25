@@ -199,5 +199,6 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\run_jmv_runtime_smok
 
 The gate launches only processes it owns. It requires both the installed Zone
 1 pair and the repository's generated empty-control fixture to reach
-`GameplayReady`, then stops the process and verifies cleanup. Do not run it
-while another Endurance-owned test session is active.
+`GameplayReady`, remain there for 15 seconds without producing a new native
+dump, then stops the process and verifies cleanup. Do not run it while another
+Endurance-owned test session is active.

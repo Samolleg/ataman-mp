@@ -329,9 +329,17 @@ void ResArchiveDocumentTests::syntheticPlaceholderBuildsStandaloneResolvableChec
         reinterpret_cast<const uchar*>(checker.constData() + 4)), quint32(256));
     QCOMPARE(qFromLittleEndian<quint32>(
         reinterpret_cast<const uchar*>(checker.constData() + 12)),
-        quint32(256 * 256 * 4));
+        quint32(1));
     QCOMPARE(qFromLittleEndian<quint32>(
-        reinterpret_cast<const uchar*>(checker.constData() + 16)), quint32(0x33544E50));
+        reinterpret_cast<const uchar*>(checker.constData() + 16)), quint32(0x00008888));
+    QCOMPARE(qFromLittleEndian<quint32>(
+        reinterpret_cast<const uchar*>(checker.constData() + 24)), quint32(0xFF000000));
+    QCOMPARE(qFromLittleEndian<quint32>(
+        reinterpret_cast<const uchar*>(checker.constData() + 36)), quint32(0x00FF0000));
+    QCOMPARE(qFromLittleEndian<quint32>(
+        reinterpret_cast<const uchar*>(checker.constData() + 48)), quint32(0x0000FF00));
+    QCOMPARE(qFromLittleEndian<quint32>(
+        reinterpret_cast<const uchar*>(checker.constData() + 60)), quint32(0x000000FF));
 }
 
 QTEST_APPLESS_MAIN(ResArchiveDocumentTests)

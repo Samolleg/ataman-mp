@@ -38,9 +38,12 @@ QByteArray checkerboardMmp()
     QDataStream stream(&result, QIODevice::WriteOnly);
     stream.setByteOrder(QDataStream::LittleEndian);
     stream << quint32(0x00504D4D) << quint32(width) << quint32(height)
-           << quint32(pixels.size()) << quint32(0x33544E50) << quint32(32);
-    for(int index = 0; index < 13; ++index)
-        stream << quint32(0);
+           << quint32(1) << quint32(0x00008888) << quint32(32)
+           << quint32(0xFF000000) << quint32(24) << quint32(8)
+           << quint32(0x00FF0000) << quint32(16) << quint32(8)
+           << quint32(0x0000FF00) << quint32(8) << quint32(8)
+           << quint32(0x000000FF) << quint32(0) << quint32(8)
+           << quint32(0);
     result.append(pixels);
     return result;
 }
