@@ -520,8 +520,26 @@ CMobFamilyValidationReport CMobFamilyValidator::validate(
     QQueue<Pending> pending;
     for(const QString& seed : request.seedMobPaths)
         pending.enqueue({seed, "explicit seed", QString(), 0, QString()});
-    if(!request.explicitComposition && !request.mappedPrimaryMobPath.isEmpty())
-        pending.enqueue({request.mappedPrimaryMobPath, "map.txt primary", QString(), 0, QString()});
+    QString effectivePrimaryPath = request.mappedPrimaryMobPath;
+    if(!request.explicitComposition && !request.preferredMobPath.isEmpty()
+       && request.seedMobPaths.contains(request.preferredMobPath, Qt::CaseInsensitive))
+    {
+        const QString mappedLogical = logicalMobName(request.mappedPrimaryMobPath);
+        bool mappedPrimaryLoaded = false;
+        for(const QString& seed : request.seedMobPaths)
+            mappedPrimaryLoaded = mappedPrimaryLoaded
+                || logicalMobName(seed) == mappedLogical;
+        const QString mappedStem = QFileInfo(request.mappedPrimaryMobPath).completeBaseName();
+        const QString preferredStem = QFileInfo(request.preferredMobPath).completeBaseName();
+        if(!mappedPrimaryLoaded && !mappedStem.isEmpty()
+           && preferredStem.startsWith(mappedStem, Qt::CaseInsensitive))
+            effectivePrimaryPath = request.preferredMobPath;
+    }
+    if(!request.explicitComposition && !effectivePrimaryPath.isEmpty())
+        pending.enqueue({effectivePrimaryPath,
+                         effectivePrimaryPath == request.mappedPrimaryMobPath
+                            ? "map.txt primary" : "loaded primary overlay",
+                         QString(), 0, QString()});
     if(request.includeProfileWideMobs &&
        (request.profileId.contains("jamais", Qt::CaseInsensitive) ||
         request.profileId.compare("jmv", Qt::CaseInsensitive) == 0))
@@ -638,6 +656,7 @@ CMobFamilyValidationReport CMobFamilyValidator::validate(
         }
         member.objects = document.objects();
         member.ranges = document.idRanges();
+        member.primaryMob = !document.isQuestMob();
         member.sourceSha256 = QCryptographicHash::hash(document.originalBytes(),
                                                         QCryptographicHash::Sha256);
         document.embeddedScript(&member.script, nullptr);
@@ -677,11 +696,31 @@ CMobFamilyValidationReport CMobFamilyValidator::validate(
         }
     }
 
+    QStringList loadedPrimaryPaths;
+    for(const SMobFamilyMember& member : report.members)
+    {
+        if(member.primaryMob
+           && request.seedMobPaths.contains(member.path, Qt::CaseInsensitive))
+            loadedPrimaryPaths.append(member.path);
+    }
+    if(loadedPrimaryPaths.size() > 1)
+    {
+        SMobFamilyFinding finding;
+        finding.severity = EMobFamilyFindingSeverity::Warning;
+        finding.code = "workspace.multiple_primary_mobs";
+        finding.category = "Workspace composition";
+        finding.message = QString(
+            "%1 primary SC_OBJECT_DB_FILE MOBs are loaded; map ownership and Test Current Map are ambiguous")
+            .arg(loadedPrimaryPaths.size());
+        finding.locations = loadedPrimaryPaths;
+        report.findings.append(finding);
+    }
+
     // A request can temporarily contain multiple map sets if a second load is
     // admitted while the first is still finalising. Validate everything that
     // is genuinely loaded, but distinguish the active map.txt/AddMob family
     // from unrelated workspace documents.
-    if(!request.explicitComposition && !request.mappedPrimaryMobPath.isEmpty())
+    if(!request.explicitComposition && !effectivePrimaryPath.isEmpty())
     {
         QMap<QString, int> memberByLogicalName;
         for(int index = 0; index < report.members.size(); ++index)
@@ -692,7 +731,7 @@ CMobFamilyValidationReport CMobFamilyValidator::validate(
         }
 
         QQueue<int> familyPending;
-        const QString primaryLogicalName = logicalMobName(request.mappedPrimaryMobPath);
+        const QString primaryLogicalName = logicalMobName(effectivePrimaryPath);
         if(memberByLogicalName.contains(primaryLogicalName))
             familyPending.enqueue(memberByLogicalName.value(primaryLogicalName));
         for(int index = 0; index < report.members.size(); ++index)

@@ -790,6 +790,7 @@ CChangeProp::CChangeProp(CView* pView, CMob* pMob, CNode* pNode,
   ,m_nodeId(pNode ? pNode->mapId() : 0)
   ,m_unitMovementStateCaptured(false)
   ,m_modelStateCaptured(false)
+  ,m_bodyPartStateCaptured(false)
 {
     m_newValue.reset(prop->clone());
 }
@@ -807,6 +808,8 @@ void CChangeProp::undo()
         pNode->applyParam(m_oldValue);
         pNode->applyParam(m_oldModelParts);
     }
+    else if(m_bodyPartStateCaptured && m_oldValue->type() == eObjParam_BODYPARTS)
+        pNode->applyParam(m_oldValue);
     else
         pNode->applyParam(m_oldValue);
     if(m_oldValue->type() == eObjParam_NID)
@@ -859,6 +862,24 @@ void CChangeProp::redo()
             pNode->applyParam(m_newValue);
             pNode->applyParam(m_newModelParts);
         }
+    }
+    else if(m_newValue->type() == eObjParam_BODYPARTS)
+    {
+        if(!m_bodyPartStateCaptured)
+        {
+            pNode->getParam(m_oldValue, eObjParam_BODYPARTS);
+            if(propBodyPart* oldParts = dynamic_cast<propBodyPart*>(m_oldValue.get()))
+                oldParts->replaceSerializedValue(oldParts->effectiveSerializedValue());
+            pNode->applyParam(m_newValue);
+            QSharedPointer<IPropertyBase> appliedValue;
+            pNode->getParam(appliedValue, eObjParam_BODYPARTS);
+            if(propBodyPart* appliedParts = dynamic_cast<propBodyPart*>(appliedValue.get()))
+                appliedParts->replaceSerializedValue(appliedParts->effectiveSerializedValue());
+            m_newValue = appliedValue;
+            m_bodyPartStateCaptured = true;
+        }
+        else
+            pNode->applyParam(m_newValue);
     }
     else
     {

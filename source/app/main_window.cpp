@@ -418,11 +418,37 @@ MainWindow::MainWindow(QWidget* parent) :
         QMenu menu(this);
         QAction* activate = menu.addAction(tr("Make Active"));
         activate->setEnabled(mob != m_pView->currentMob());
+        menu.addSeparator();
+        QAction* parameters = menu.addAction(tr("Open MOB Parameters"));
+        parameters->setShortcut(m_ui->action_Mob_parameters->shortcut());
+        QAction* script = menu.addAction(tr("Open MOB Script"));
+        script->setShortcut(m_ui->actionOpen_MOB_Script->shortcut());
+        menu.addSeparator();
+        QAction* save = menu.addAction(tr("Save MOB"));
+        save->setShortcut(m_ui->actionSave->shortcut());
+        save->setEnabled(mob->isDirty());
+        QAction* saveAs = menu.addAction(tr("Save MOB As..."));
+        saveAs->setShortcut(m_ui->actionSave_as->shortcut());
+        menu.addSeparator();
         QAction* unload = menu.addAction(selectedMobs.size() > 1
             ? tr("Unload %1 MOBs").arg(selectedMobs.size()) : tr("Unload MOB"));
         QAction* selected = menu.exec(m_loadedMapTree->viewport()->mapToGlobal(point));
         if(selected == activate)
             m_pView->changeCurrentMob(mob);
+        else if(selected == parameters || selected == script
+                || selected == save || selected == saveAs)
+        {
+            if(mob != m_pView->currentMob())
+                m_pView->changeCurrentMob(mob);
+            if(selected == parameters)
+                on_action_Mob_parameters_triggered();
+            else if(selected == script)
+                on_actionOpen_MOB_Script_triggered();
+            else if(selected == save)
+                on_actionSave_triggered();
+            else
+                on_actionSave_as_triggered();
+        }
         else if(selected == unload)
         {
             QList<CMob*> dirty;
@@ -2543,6 +2569,7 @@ void MainWindow::updateMapTestAction()
     const SResourceProfileEvaluation profile = activeResourceProfile();
     const bool isJmv = profile.profileId.compare("jamais-vu", Qt::CaseInsensitive) == 0;
     const bool isBaseProbe = profile.profileId.compare("base-game", Qt::CaseInsensitive) == 0;
+    CMob* stagingMob = mapTestStagingMob();
     const bool hasMobs = m_pView && m_pView->hasActiveMob()
             && !m_pView->mobs().isEmpty() && CLandscape::getInstance()->isMprLoad();
     const bool looseCompositionValid = !isJmv || !m_mapTestEntry.zoneId.isEmpty()
@@ -2553,10 +2580,17 @@ void MainWindow::updateMapTestAction()
     const bool customForCurrentMap = m_customSpawn.valid && m_customSpawn.custom
         && m_customSpawnContextKey == currentMapContextKey();
     QString autoSpellMobReason;
-    const bool hasAutoSpellMob = CJmvMapTestLauncher::hasAutoSpellMob(
+    bool hasAutoSpellMob = CJmvMapTestLauncher::hasAutoSpellMob(
         profile, m_mapTestEntry.zoneType, m_mapTestEntry.zoneId.isEmpty(),
         &autoSpellMobReason);
-    const bool loosePairReady = isJmv && m_mapTestEntry.zoneId.isEmpty()
+    if(hasAutoSpellMob && isJmv && (!stagingMob || stagingMob->isQuestMob()))
+    {
+        hasAutoSpellMob = false;
+        autoSpellMobReason = tr(
+            "Play from Here, Godmode, and time override are unavailable for this loaded MOB set. Test Current Map and Hot Reload remain available.");
+    }
+    const bool loosePairReady = isJmv && hasAutoSpellMob
+        && m_mapTestEntry.zoneId.isEmpty()
         && customForCurrentMap && !m_pickSpawnPending;
     const bool hasBootstrap = hasEntrance || loosePairReady;
     const bool customRequested = hasAutoSpellMob && (customForCurrentMap
@@ -2659,6 +2693,44 @@ void MainWindow::updateMapTestAction()
             : tr("Stages the current pair and launches it through JMV's normal single-player New Game path (Ctrl+F5)."));
 }
 
+CMob* MainWindow::mapTestStagingMob() const
+{
+    if(!m_pView)
+        return nullptr;
+
+    const QString expected = m_mapTestEntry.mobName.trimmed();
+    if(!expected.isEmpty())
+    {
+        for(CMob* candidate : m_pView->mobs())
+        {
+            if(!candidate)
+                continue;
+            const QFileInfo file(candidate->filePath());
+            if(file.completeBaseName().compare(expected, Qt::CaseInsensitive) == 0
+               || file.fileName().compare(expected, Qt::CaseInsensitive) == 0)
+                return candidate;
+        }
+    }
+
+    // Prefer the unique structurally primary MOB when map.txt naming cannot
+    // identify a copied/renamed source. A supplemental MOB remains a valid
+    // staging source; it merely lacks SpellAddon's autorun-dependent features.
+    CMob* structuralPrimary = nullptr;
+    int structuralPrimaryCount = 0;
+    for(CMob* candidate : m_pView->mobs())
+    {
+        if(!candidate || candidate->isQuestMob())
+            continue;
+        ++structuralPrimaryCount;
+        structuralPrimary = candidate;
+    }
+    if(structuralPrimaryCount == 1)
+        return structuralPrimary;
+    if(m_pView->currentMob())
+        return m_pView->currentMob();
+    return m_pView->mobs().isEmpty() ? nullptr : m_pView->mobs().first();
+}
+
 void MainWindow::launchCurrentMapTest()
 {
     activateWindow();
@@ -2712,18 +2784,33 @@ void MainWindow::launchCurrentMapTest()
     QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
 
     SMapCatalogEntry entry = m_mapTestEntry;
+    CMob* mob = mapTestStagingMob();
+    if(!mob)
+    {
+        QMessageBox::warning(this, tr("Map test launch"),
+            tr("No loaded MOB is available for staging."));
+        return;
+    }
     SMapTravelZone looseBootstrapEntrance;
     const SMapTravelZone* entrance = selectedTravelZone();
-    const bool customForCurrentMap = m_customSpawn.valid && m_customSpawn.custom
+    const bool customContextMatched = m_customSpawn.valid && m_customSpawn.custom
         && m_customSpawnContextKey == currentMapContextKey();
+    bool customForCurrentMap = customContextMatched;
     const bool loosePair = entry.zoneId.isEmpty();
     QString autoSpellMobReason;
-    const bool hasAutoSpellMob = CJmvMapTestLauncher::hasAutoSpellMob(
+    bool hasAutoSpellMob = CJmvMapTestLauncher::hasAutoSpellMob(
         profile, entry.zoneType, loosePair, &autoSpellMobReason);
+    if(hasAutoSpellMob && mob->isQuestMob())
+    {
+        hasAutoSpellMob = false;
+        autoSpellMobReason = tr(
+            "Play from Here, Godmode, and time override are unavailable for this loaded MOB set. Test Current Map and Hot Reload remain available.");
+    }
     if(customForCurrentMap && !hasAutoSpellMob)
     {
-        QMessageBox::information(this, tr("Play from Here"), autoSpellMobReason);
-        return;
+        ei::log(eLogWarning, QString("Ignoring unavailable Play from Here override: %1")
+            .arg(autoSpellMobReason));
+        customForCurrentMap = false;
     }
     if(loosePair)
     {
@@ -2761,28 +2848,13 @@ void MainWindow::launchCurrentMapTest()
     progress->setValue(3);
     QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
 
-    CMob* mob = loosePair ? m_pView->currentMob() : nullptr;
-    const QString expectedMain = entry.mobName;
-    for(CMob* candidate : m_pView->mobs())
-    {
-        if(candidate && (QFileInfo(candidate->filePath()).completeBaseName().compare(
-                             expectedMain, Qt::CaseInsensitive) == 0
-                          || QFileInfo(candidate->filePath()).fileName().compare(
-                              expectedMain, Qt::CaseInsensitive) == 0))
-        {
-            mob = candidate;
-            break;
-        }
-    }
-    if(!mob && !m_pView->mobs().isEmpty())
-        mob = m_pView->mobs().first();
     if(isBase && m_pView->mobs().size() != 1)
     {
         QMessageBox::warning(this, tr("Base EI feasibility probe"),
             tr("The Base probe currently accepts exactly one MOB. Supplemental MOB redirection is JMV-only."));
         return;
     }
-    if(m_customSpawn.valid && m_customSpawn.custom && !customForCurrentMap)
+    if(m_customSpawn.valid && m_customSpawn.custom && !customContextMatched)
         ei::log(eLogWarning, QString("Ignored stale Play from Here spawn context:%1 active:%2")
             .arg(m_customSpawnContextKey, currentMapContextKey()));
     SMapSpawnPlan spawn = customForCurrentMap
@@ -4059,7 +4131,7 @@ void MainWindow::duplicateMapAsCollection(const QString& zoneId,
     initial.mapZoneId = zoneId;
     initial.mprReference = QFileInfo(mprPath).absoluteFilePath();
     initial.mobReferences.append(QFileInfo(mobPath).absoluteFilePath());
-    createCollectionFromTemplate(initial, zoneId + "-copy");
+    createCollectionFromTemplate(initial, zoneId + "-copy", true);
 }
 
 void MainWindow::duplicateCollection(const QString& path)

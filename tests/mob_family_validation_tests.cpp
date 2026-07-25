@@ -80,9 +80,11 @@ class MobFamilyValidationTests : public QObject
     Q_OBJECT
 private slots:
     void workspaceCopyShadowsInstalledLogicalMob();
+    void renamedLoadedPrimaryReplacesInstalledCatalogPrimary();
     void differentLogicalNamesRemainIndependent();
     void missingScriptDependencyReportsExactReferenceSource();
     void separatelyLoadedMapSetsAreNotReportedAsOneFamily();
+    void multipleLoadedPrimaryMobsAreReported();
     void duplicateIdsWithinOneMobAreAuthoritativeWarnings();
 };
 
@@ -123,6 +125,36 @@ void MobFamilyValidationTests::workspaceCopyShadowsInstalledLogicalMob()
     QVERIFY(report.nidOwners.contains(77));
     QCOMPARE(report.nidOwners.value(77).size(), 2);
     QVERIFY(!report.nidOwners.contains(41));
+}
+
+void MobFamilyValidationTests::renamedLoadedPrimaryReplacesInstalledCatalogPrimary()
+{
+    QTemporaryDir workspace;
+    QTemporaryDir installed;
+    QVERIFY(workspace.isValid());
+    QVERIFY(installed.isValid());
+    const QString installedPrimary = writeMob(installed.path(), "zone3obr.mob",
+                                               mobWithObject(3470));
+    const QString testPrimary = writeMob(workspace.path(), "zone3obrtest.mob",
+                                         mobWithObject(202));
+    QVERIFY(!installedPrimary.isEmpty() && !testPrimary.isEmpty());
+
+    SMobFamilyValidationRequest request;
+    request.familyLabel = "gz3obr";
+    request.profileId = "test";
+    request.seedMobPaths << testPrimary;
+    request.mappedPrimaryMobPath = installedPrimary;
+    request.preferredMobPath = testPrimary;
+    request.workspaceRoots << workspace.path();
+    request.mapRoots << installed.path();
+    request.includeProfileWideMobs = false;
+    const CMobFamilyValidationReport report = CMobFamilyValidator::validate(request);
+
+    QCOMPARE(report.members.size(), 1);
+    QCOMPARE(QDir::cleanPath(report.members.first().path), QDir::cleanPath(testPrimary));
+    QCOMPARE(report.members.first().inclusionReason, QString("explicit seed"));
+    QVERIFY(report.nidOwners.contains(202));
+    QVERIFY(!report.nidOwners.contains(3470));
 }
 
 void MobFamilyValidationTests::differentLogicalNamesRemainIndependent()
@@ -221,6 +253,33 @@ void MobFamilyValidationTests::duplicateIdsWithinOneMobAreAuthoritativeWarnings(
     QCOMPARE(finding->severity, EMobFamilyFindingSeverity::Warning);
     QVERIFY(finding->message.contains("NID 568 is used by 2 objects in duplicate.mob"));
     QCOMPARE(finding->locations.size(), 2);
+}
+
+void MobFamilyValidationTests::multipleLoadedPrimaryMobsAreReported()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString first = writeMob(directory.path(), "zone4.mob", mobWithObject(100));
+    const QString second = writeMob(directory.path(), "zone17.mob", mobWithObject(200));
+    QVERIFY(!first.isEmpty() && !second.isEmpty());
+
+    SMobFamilyValidationRequest request;
+    request.familyLabel = "mixed-workspace";
+    request.profileId = "test";
+    request.seedMobPaths << first << second;
+    request.mappedPrimaryMobPath = first;
+    request.workspaceRoots << directory.path();
+    request.includeProfileWideMobs = false;
+    const CMobFamilyValidationReport report = CMobFamilyValidator::validate(request);
+
+    const auto finding = std::find_if(report.findings.cbegin(), report.findings.cend(),
+        [](const SMobFamilyFinding& item)
+        { return item.code == "workspace.multiple_primary_mobs"; });
+    QVERIFY(finding != report.findings.cend());
+    QCOMPARE(finding->severity, EMobFamilyFindingSeverity::Warning);
+    QCOMPARE(finding->locations.size(), 2);
+    QVERIFY(finding->locations.contains(first));
+    QVERIFY(finding->locations.contains(second));
 }
 
 QTEST_APPLESS_MAIN(MobFamilyValidationTests)

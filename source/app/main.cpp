@@ -13,6 +13,7 @@
 #include <QDir>
 #include <QTabWidget>
 #include <QCheckBox>
+#include <QHeaderView>
 #include <QKeySequenceEdit>
 #include <QLineEdit>
 #include <QTemporaryDir>
@@ -31,6 +32,7 @@
 #include <QScreen>
 #include <QWidget>
 #include <QVariant>
+#include <QSettings>
 #include <cstdio>
 #include <cstring>
 
@@ -40,10 +42,12 @@
 #include "resourcemanager.h"
 #include "layout_components/tablemanager.h"
 #include "ui/landscape_tools.h"
+#include "ui/bodypartedit_form.h"
 #include "window_lifecycle.h"
 #include "settings.h"
 #include "jmv_map_test_launcher.h"
 #include "render_scheduling.h"
+#include "utils.h"
 
 #ifdef Q_OS_WIN
 #include <windows.h>
@@ -834,6 +838,172 @@ int runHeadlessCommand(QApplication& app)
         const bool mixedModelPartsVisible = rowForType(mixedModelTable,
                                                        eObjParam_BODYPARTS) >= 0;
 
+        QMap<QString, QSharedPointer<propBool>> serializedPartMap;
+        serializedPartMap.insert("bd", QSharedPointer<propBool>(
+            new propBool(eObjParam_BODYPARTS, true)));
+        serializedPartMap.insert("hr", QSharedPointer<propBool>(
+            new propBool(eObjParam_BODYPARTS, true)));
+        serializedPartMap.insert("future_part", QSharedPointer<propBool>(
+            new propBool(eObjParam_BODYPARTS, true)));
+        serializedPartMap.insert("optional_part", QSharedPointer<propBool>(
+            new propBool(eObjParam_BODYPARTS, false)));
+        const QStringList exactSerializedParts = {
+            "bd", "hr", "future_part", "future_part"
+        };
+        const QSet<QString> recognizedPartOptions = {
+            "bd", "hr", "optional_part"
+        };
+        QSharedPointer<IPropertyBase> serializedPartsProperty(new propBodyPart(
+            eObjParam_BODYPARTS, serializedPartMap, exactSerializedParts,
+            recognizedPartOptions));
+        CBodyPartEditForm bodyPartForm;
+        bodyPartForm.setPartData(serializedPartsProperty);
+        QTableWidget* bodyPartTable = bodyPartForm.findChild<QTableWidget*>("tablePart");
+        QLineEdit* bodyPartFilter = bodyPartForm.findChild<QLineEdit*>("lineFilter");
+        const bool serializedUnknownPartsVisible = bodyPartTable
+            && bodyPartTable->findItems("hr", Qt::MatchExactly).size() == 1
+            && bodyPartTable->findItems("future_part", Qt::MatchExactly).size() == 1;
+        if(bodyPartFilter) bodyPartFilter->setText("hr");
+        bool bodyPartFilterDisplayOnly = bodyPartTable && bodyPartFilter;
+        if(bodyPartTable)
+            for(int row = 0; row < bodyPartTable->rowCount(); ++row)
+                bodyPartFilterDisplayOnly = bodyPartFilterDisplayOnly
+                    && (bodyPartTable->item(row, 0)->text() == "hr"
+                        ? !bodyPartTable->isRowHidden(row)
+                        : bodyPartTable->isRowHidden(row));
+        auto filterShowsOnly = [&](const QString& filter,
+                                   const QStringList& visibleParts) {
+            if(!bodyPartTable || !bodyPartFilter) return false;
+            bodyPartFilter->setText(filter);
+            for(int row = 0; row < bodyPartTable->rowCount(); ++row)
+            {
+                const QString part = bodyPartTable->item(row, 0)->text();
+                if(bodyPartTable->isRowHidden(row) == visibleParts.contains(part))
+                    return false;
+            }
+            return true;
+        };
+        const QStringList checkedParts = {"bd", "hr", "future_part"};
+        const QStringList uncheckedParts = {"optional_part"};
+        const bool bodyPartStateFilterAliases =
+            filterShowsOnly("checked", checkedParts)
+            && filterShowsOnly("true", checkedParts)
+            && filterShowsOnly("on", checkedParts)
+            && filterShowsOnly("enabled", checkedParts)
+            && filterShowsOnly("unchecked", uncheckedParts)
+            && filterShowsOnly("false", uncheckedParts)
+            && filterShowsOnly("off", uncheckedParts)
+            && filterShowsOnly("disabled", uncheckedParts);
+        bool bodyPartStateTextHidden = bodyPartTable != nullptr;
+        bool bodyPartColumnsResizable = bodyPartTable != nullptr;
+        if(bodyPartTable)
+        {
+            for(int row = 0; row < bodyPartTable->rowCount(); ++row)
+                bodyPartStateTextHidden = bodyPartStateTextHidden
+                    && bodyPartTable->item(row, 1)
+                    && bodyPartTable->item(row, 1)->text().isEmpty();
+            for(int column = 0; column < bodyPartTable->columnCount(); ++column)
+                bodyPartColumnsResizable = bodyPartColumnsResizable
+                    && bodyPartTable->horizontalHeader()->sectionResizeMode(column)
+                        == QHeaderView::Interactive;
+        }
+        const bool bodyPartSourceFiltering =
+            filterShowsOnly("model option", {"optional_part"})
+            && filterShowsOnly("unknown", {"future_part"});
+        bodyPartFilter->clear();
+        bodyPartTable->sortItems(0, Qt::DescendingOrder);
+        const bool bodyPartColumnSorting = bodyPartTable->isSortingEnabled()
+            && bodyPartTable->horizontalHeader()->sectionsClickable()
+            && bodyPartTable->item(0, 0)->text() == "optional_part";
+        const bool humanoidHairOptionAvailable =
+            util::knownBodyPartOptions("unhufe").contains("hr")
+            && util::knownBodyPartOptions("unhuma.mod").contains("hr")
+            && !util::knownBodyPartOptions("unwolf").contains("hr");
+        QSettings bodyPartSettings;
+        const QString bodyPartSizeKey = "ui/bodyPartEditorSize";
+        const bool hadBodyPartSize = bodyPartSettings.contains(bodyPartSizeKey);
+        const QVariant previousBodyPartSize = bodyPartSettings.value(bodyPartSizeKey);
+        const QSize testBodyPartSize(612, 734);
+        bodyPartForm.resize(testBodyPartSize);
+        bodyPartForm.close();
+        CBodyPartEditForm restoredBodyPartForm;
+        const bool bodyPartWindowSizePersists =
+            restoredBodyPartForm.size() == testBodyPartSize;
+        if(hadBodyPartSize)
+            bodyPartSettings.setValue(bodyPartSizeKey, previousBodyPartSize);
+        else
+            bodyPartSettings.remove(bodyPartSizeKey);
+        const propBodyPart* serializedParts =
+            dynamic_cast<const propBodyPart*>(serializedPartsProperty.get());
+        const bool bodyPartNoOpPreservesExactArray = serializedParts
+            && serializedParts->valueAppliedTo(exactSerializedParts)
+                == exactSerializedParts;
+        propBodyPart reorderedParts(eObjParam_BODYPARTS, serializedPartMap,
+            QStringList{"hr", "bd", "future_part", "future_part"});
+        const bool bodyPartOrderParticipatesInEquality = serializedParts
+            && !serializedParts->isEqual(&reorderedParts);
+        QMap<QString, QSharedPointer<propBool>> changedPartMap;
+        for(const QString& part : QStringList{"bd", "hr", "future_part"})
+            changedPartMap.insert(part, QSharedPointer<propBool>(
+                new propBool(eObjParam_BODYPARTS, true)));
+        propBodyPart changedParts(eObjParam_BODYPARTS, changedPartMap,
+                                  exactSerializedParts);
+        changedParts.value().value("bd")->resetValue(false);
+        const QStringList changedSerializedParts =
+            changedParts.valueAppliedTo(exactSerializedParts);
+        const bool bodyPartDeltaPreservesHiddenAndDuplicates =
+            !changedSerializedParts.contains("bd")
+            && changedSerializedParts.contains("hr")
+            && changedSerializedParts.count("future_part") == 2;
+
+        QList<QSharedPointer<IPropertyBase>> bodyPartCopySource;
+        bodyPartCopySource << QSharedPointer<IPropertyBase>(
+                                  new propStr(eObjParam_TEMPLATE, "unhufe"))
+                           << serializedPartsProperty;
+        QTableWidget bodyPartCopySourceTable;
+        CTableManager bodyPartCopySourceManager(&bodyPartCopySourceTable);
+        bodyPartCopySourceManager.setNewData(bodyPartCopySource);
+        const int bodyPartCopySourceRow = rowForType(
+            bodyPartCopySourceTable, eObjParam_BODYPARTS);
+        if(bodyPartCopySourceRow >= 0)
+            bodyPartCopySourceTable.item(bodyPartCopySourceRow, 0)->setSelected(true);
+        QKeyEvent copyBodyParts(QEvent::KeyPress, Qt::Key_C, Qt::ControlModifier);
+        QApplication::sendEvent(&bodyPartCopySourceTable, &copyBodyParts);
+        QMap<QString, QSharedPointer<propBool>> destinationPartMap;
+        destinationPartMap.insert("bd", QSharedPointer<propBool>(
+            new propBool(eObjParam_BODYPARTS, true)));
+        destinationPartMap.insert("hr", QSharedPointer<propBool>(
+            new propBool(eObjParam_BODYPARTS, false)));
+        QList<QSharedPointer<IPropertyBase>> bodyPartCopyDestination;
+        bodyPartCopyDestination << QSharedPointer<IPropertyBase>(
+                                       new propStr(eObjParam_TEMPLATE, "unhufe"))
+                                << QSharedPointer<IPropertyBase>(new propBodyPart(
+                                       eObjParam_BODYPARTS, destinationPartMap,
+                                       QStringList{"bd"}, QSet<QString>{"bd", "hr"}));
+        QTableWidget bodyPartCopyDestinationTable;
+        CTableManager bodyPartCopyDestinationManager(&bodyPartCopyDestinationTable);
+        bodyPartCopyDestinationManager.setNewData(bodyPartCopyDestination);
+        const int bodyPartCopyDestinationRow = rowForType(
+            bodyPartCopyDestinationTable, eObjParam_BODYPARTS);
+        if(bodyPartCopyDestinationRow >= 0)
+            bodyPartCopyDestinationTable.item(bodyPartCopyDestinationRow, 0)
+                ->setSelected(true);
+        QSharedPointer<IPropertyBase> pastedBodyParts;
+        QObject::connect(&bodyPartCopyDestinationManager,
+                         &CTableManager::onUpdateProperty,
+                         [&pastedBodyParts](const QSharedPointer<IPropertyBase>& value)
+        {
+            pastedBodyParts.reset(value->clone());
+        });
+        QKeyEvent pasteBodyParts(QEvent::KeyPress, Qt::Key_V, Qt::ControlModifier);
+        QApplication::sendEvent(&bodyPartCopyDestinationTable, &pasteBodyParts);
+        const propBodyPart* pastedBodyPartValue =
+            dynamic_cast<const propBodyPart*>(pastedBodyParts.get());
+        const bool bodyPartPropertyPasteIsExact = bodyPartCopySourceRow >= 0
+            && bodyPartCopyDestinationRow >= 0 && pastedBodyPartValue
+            && pastedBodyPartValue->valueAppliedTo(QStringList{"bd"})
+                == exactSerializedParts;
+
         CLandscapeTools landscapeTools;
         const bool minimumPaintBrushIsSingleTile = qFuzzyIsNull(
             landscapeTools.paintRadius());
@@ -1029,6 +1199,19 @@ int runHeadlessCommand(QApplication& app)
                 && partialCopyExact && partialPasteExact && partialPasteCommit
                 && propertyScrollPreserved
                 && mixedModelPartsVisible
+                && serializedUnknownPartsVisible
+                && bodyPartFilterDisplayOnly
+                && bodyPartStateFilterAliases
+                && bodyPartStateTextHidden
+                && bodyPartColumnsResizable
+                && bodyPartSourceFiltering
+                && bodyPartColumnSorting
+                && humanoidHairOptionAvailable
+                && bodyPartWindowSizePersists
+                && bodyPartNoOpPreservesExactArray
+                && bodyPartOrderParticipatesInEquality
+                && bodyPartDeltaPreservesHiddenAndDuplicates
+                && bodyPartPropertyPasteIsExact
                 && minimumPaintBrushIsSingleTile
                 && underwaterFamiliesHiddenByDefault
                 && underwaterFamiliesCanBeShown
@@ -1086,6 +1269,21 @@ int runHeadlessCommand(QApplication& app)
                << " partialPasteCommit=" << partialPasteCommit << "\n"
                << " propertyScrollPreserved=" << propertyScrollPreserved << "\n"
                << " mixedModelPartsVisible=" << mixedModelPartsVisible
+               << " serializedUnknownPartsVisible=" << serializedUnknownPartsVisible
+               << " bodyPartFilterDisplayOnly=" << bodyPartFilterDisplayOnly
+               << " bodyPartStateFilterAliases=" << bodyPartStateFilterAliases
+               << " bodyPartStateTextHidden=" << bodyPartStateTextHidden
+               << " bodyPartColumnsResizable=" << bodyPartColumnsResizable
+               << " bodyPartSourceFiltering=" << bodyPartSourceFiltering
+               << " bodyPartColumnSorting=" << bodyPartColumnSorting
+               << " humanoidHairOptionAvailable=" << humanoidHairOptionAvailable
+               << " bodyPartWindowSizePersists=" << bodyPartWindowSizePersists
+               << " bodyPartNoOpPreservesExactArray=" << bodyPartNoOpPreservesExactArray
+               << " bodyPartOrderParticipatesInEquality="
+               << bodyPartOrderParticipatesInEquality
+               << " bodyPartDeltaPreservesHiddenAndDuplicates="
+               << bodyPartDeltaPreservesHiddenAndDuplicates
+               << " bodyPartPropertyPasteIsExact=" << bodyPartPropertyPasteIsExact
                << " minimumPaintBrushIsSingleTile=" << minimumPaintBrushIsSingleTile
                << " underwaterFamiliesHiddenByDefault=" << underwaterFamiliesHiddenByDefault
                << " underwaterFamiliesCanBeShown=" << underwaterFamiliesCanBeShown

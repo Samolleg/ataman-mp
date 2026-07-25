@@ -2,6 +2,7 @@
 #define BODYPARTEDIT_FORM_H
 
 #include <QWidget>
+#include <QCloseEvent>
 #include "property.h"
 
 namespace Ui {
@@ -28,6 +29,12 @@ private slots:
 
 private:
     void reset();
+    void populateTable();
+    void syncTableToProperty();
+    void applyFilter(const QString& text);
+
+protected:
+    void closeEvent(QCloseEvent* event) override;
 
 signals:
     void onApplyChangesSignal(const QSharedPointer<IPropertyBase>&);

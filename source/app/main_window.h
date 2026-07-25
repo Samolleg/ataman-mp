@@ -27,6 +27,7 @@ class CSettings;
 class CSelectForm;
 class CCreateObjectForm;
 class CView;
+class CMob;
 class CRandomizeForm;
 class CTileForm;
 class QMenu;
@@ -122,6 +123,7 @@ private:
     void saveCollection(bool saveAs);
     QVector<QString> activeMapRoots() const;
     void updateMapTestAction();
+    CMob* mapTestStagingMob() const;
     void launchCurrentMapTest();
     void createViewportToolbars();
     void refreshMapTestContext();

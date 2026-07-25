@@ -6,6 +6,32 @@
 #include <QJsonObject>
 #include <QJsonArray>
 #include <QDir>
+#include <QSettings>
+#include <QHeaderView>
+#include <QRegularExpression>
+#include <QSet>
+
+namespace {
+
+class CBodyPartStateItem final : public QTableWidgetItem
+{
+public:
+    bool operator<(const QTableWidgetItem& other) const override
+    {
+        return data(Qt::UserRole).toInt() < other.data(Qt::UserRole).toInt();
+    }
+};
+
+QString stateSearchText(Qt::CheckState state)
+{
+    if(state == Qt::Checked)
+        return QStringLiteral("checked true on enabled");
+    if(state == Qt::Unchecked)
+        return QStringLiteral("unchecked false off disabled");
+    return QStringLiteral("mixed partial undefined");
+}
+
+}
 
 CBodyPartEditForm::CBodyPartEditForm(QWidget *parent) :
     QWidget(parent)
@@ -14,6 +40,11 @@ CBodyPartEditForm::CBodyPartEditForm(QWidget *parent) :
 {
     ui->setupUi(this);
     setWindowTitle("Bodypart visibility");
+    const QSize savedSize = QSettings().value(
+        "ui/bodyPartEditorSize", QSize(384, 559)).toSize();
+    if(savedSize.isValid()) resize(savedSize);
+    connect(ui->lineFilter, &QLineEdit::textChanged,
+            this, &CBodyPartEditForm::applyFilter);
 }
 
 CBodyPartEditForm::~CBodyPartEditForm()
@@ -25,7 +56,15 @@ void CBodyPartEditForm::setPartData(const QSharedPointer<IPropertyBase>& prop)
 {
     reset();
     m_prop.reset(prop->clone());
-    auto arrStat = dynamic_cast<propBodyPart*>(m_prop.get())->value();
+    populateTable();
+}
+
+void CBodyPartEditForm::populateTable()
+{
+    ui->tablePart->setSortingEnabled(false);
+    ui->tablePart->setRowCount(0);
+    propBodyPart* parts = dynamic_cast<propBodyPart*>(m_prop.get());
+    const auto arrStat = parts->value();
     int i(0);
     for(auto& item: arrStat.toStdMap())
     {
@@ -37,22 +76,57 @@ void CBodyPartEditForm::setPartData(const QSharedPointer<IPropertyBase>& prop)
             state = item.second->value() ? Qt::CheckState::Checked : Qt::CheckState::Unchecked;
         pCheck->setCheckState(state);
         ui->tablePart->setCellWidget(i, 1, pCheck);
+        QTableWidgetItem* checkSort = new CBodyPartStateItem;
+        checkSort->setData(Qt::UserRole, int(state));
+        checkSort->setFlags(checkSort->flags() & ~Qt::ItemIsEditable);
+        ui->tablePart->setItem(i, 1, checkSort);
+        connect(pCheck, &QCheckBox::stateChanged, this,
+                [this, checkSort](int changedState) {
+            const Qt::CheckState state = Qt::CheckState(changedState);
+            checkSort->setData(Qt::UserRole, int(state));
+            applyFilter(ui->lineFilter->text());
+        });
+        const int occurrences = parts->serializedOccurrenceCount(item.first);
+        const bool recognized = parts->isRecognizedPart(item.first);
+        QString sourceText;
+        if(occurrences > 0)
+            sourceText = recognized
+                ? (occurrences == 1 ? tr("Serialized")
+                                    : tr("Serialized x%1").arg(occurrences))
+                : (occurrences == 1 ? tr("Unknown serialized")
+                                    : tr("Unknown serialized x%1").arg(occurrences));
+        else
+            sourceText = tr("Model option");
+        QTableWidgetItem* source = new QTableWidgetItem(sourceText);
+        source->setFlags(source->flags() & ~Qt::ItemIsEditable);
+        ui->tablePart->setItem(i, 2, source);
         ++i;
     }
+    ui->tablePart->setSortingEnabled(true);
+    applyFilter(ui->lineFilter->text());
 }
 
 void CBodyPartEditForm::reset()
 {
     ui->tablePart->clear();
-    ui->tablePart->setColumnCount(2);
+    ui->tablePart->setColumnCount(3);
     ui->tablePart->setRowCount(0);
     QStringList header;
     header.append("Part");
-    header.append("");
+    header.append("Enabled");
+    header.append("Source");
     ui->tablePart->setHorizontalHeaderLabels(header);
     ui->tablePart->horizontalHeader()->setVisible(true);
-    ui->tablePart->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
-    ui->tablePart->setColumnWidth(1, 8);
+    QHeaderView* headerView = ui->tablePart->horizontalHeader();
+    headerView->setSectionResizeMode(QHeaderView::Interactive);
+    const QByteArray savedHeader = QSettings().value(
+        "ui/bodyPartEditorHeader").toByteArray();
+    if(savedHeader.isEmpty() || !headerView->restoreState(savedHeader))
+    {
+        ui->tablePart->setColumnWidth(0, 150);
+        ui->tablePart->setColumnWidth(1, 78);
+        ui->tablePart->setColumnWidth(2, 150);
+    }
     ui->tablePart->verticalHeader()->hide();
 }
 
@@ -64,37 +138,36 @@ void CBodyPartEditForm::on_pushCancel_clicked()
 
 void CBodyPartEditForm::on_pushApply_clicked()
 {
+    syncTableToProperty();
+    emit onApplyChangesSignal(m_prop);
+    close();
+}
+
+void CBodyPartEditForm::syncTableToProperty()
+{
     auto arrStat = dynamic_cast<propBodyPart*>(m_prop.get())->value();
 
     for(int i(0); i<ui->tablePart->rowCount(); ++i)
     {
-        //auto pBox = dynamic_cast<CBodyPartCheckBox*>(ui->tablePart->cellWidget(1, i));
         auto pBox = dynamic_cast<QCheckBox*>(ui->tablePart->cellWidget(i, 1));
         if(pBox->checkState() == Qt::CheckState::PartiallyChecked)
             continue;
 
-        //arrStat[ui->tablePart->item(0,i)->text()] = QSharedPointer<propBool>(new propBool(eObjParam_BODYPARTS, pBox->checkState() == Qt::CheckState::Checked));
         arrStat[ui->tablePart->item(i,0)->text()]->resetValue(pBox->checkState() == Qt::CheckState::Checked);
     }
-    emit onApplyChangesSignal(m_prop);
-    close();
 }
 
 
 void CBodyPartEditForm::on_toolCopy_clicked()
 {
+    syncTableToProperty();
     QJsonObject obj;
-    obj.insert("Version", 2);
-
-    QJsonObject part;
-    for(int i(0); i<ui->tablePart->rowCount(); ++i)
-    {
-        auto pBox = dynamic_cast<QCheckBox*>(ui->tablePart->cellWidget(i, 1));
-        if(pBox->checkState() == Qt::CheckState::PartiallyChecked)
-            continue;
-
-        part.insert(ui->tablePart->item(i,0)->text(), pBox->checkState() == Qt::CheckState::Checked);
-    }
+    obj.insert("Version", 3);
+    QJsonArray part;
+    const QStringList serialized =
+        dynamic_cast<propBodyPart*>(m_prop.get())->effectiveSerializedValue();
+    for(const QString& value : serialized)
+        part.append(value);
     obj.insert("bodyparts", part);
     QJsonDocument doc(obj);
 
@@ -127,28 +200,59 @@ void CBodyPartEditForm::on_toolPaste_clicked()
     QJsonParseError parseError;
     QJsonDocument doc = QJsonDocument::fromJson(m_clipboardFile.readAll(), &parseError);
     m_clipboardFile.close();
-    //todo: check if has no error
     QJsonObject obj = doc.object();
-    if (obj["Version"].toInt() != 2)
-        return;
-
-    auto arrPart = obj["bodyparts"].toObject();
-    if(arrPart.isEmpty())
+    QStringList serialized;
+    if(obj["Version"].toInt() == 3 && obj["bodyparts"].isArray())
     {
-        ei::log(eLogInfo, "bodypart empty");
-        return;
+        for(const QJsonValue& value : obj["bodyparts"].toArray())
+            if(value.isString()) serialized.append(value.toString());
     }
-    QStringList arrKey = arrPart.keys();
-    QString partName;
-    for(int i(0); i<ui->tablePart->rowCount(); ++i)
+    else if(obj["Version"].toInt() == 2 && obj["bodyparts"].isObject())
     {
-        partName = ui->tablePart->item(i,0)->text();
-        if(!arrKey.contains(partName))
-            continue;
-
-        auto pBox = dynamic_cast<QCheckBox*>(ui->tablePart->cellWidget(i, 1));
-        pBox->setCheckState(arrPart[partName].toBool()? Qt::CheckState::Checked : Qt::CheckState::Unchecked);
+        const QJsonObject legacy = obj["bodyparts"].toObject();
+        for(const QString& key : legacy.keys())
+            if(legacy.value(key).toBool()) serialized.append(key);
     }
+    else return;
+    dynamic_cast<propBodyPart*>(m_prop.get())->replaceSerializedValue(serialized);
+    populateTable();
+}
 
+void CBodyPartEditForm::applyFilter(const QString& text)
+{
+    const QStringList terms = text.trimmed().toLower().split(
+        QRegularExpression("\\s+"), QString::SkipEmptyParts);
+    for(int row = 0; row < ui->tablePart->rowCount(); ++row)
+    {
+        const QTableWidgetItem* stateItem = ui->tablePart->item(row, 1);
+        const Qt::CheckState state = stateItem
+            ? Qt::CheckState(stateItem->data(Qt::UserRole).toInt())
+            : Qt::PartiallyChecked;
+        const QString stateText = stateSearchText(state);
+        const QString searchable = QString("%1 %2")
+            .arg(ui->tablePart->item(row, 0)->text(),
+                 ui->tablePart->item(row, 2)->text())
+            .toLower();
+        static const QSet<QString> stateAliases = {
+            "checked", "true", "on", "enabled",
+            "unchecked", "false", "off", "disabled",
+            "mixed", "partial", "undefined"
+        };
+        const QStringList rowStateAliases = stateText.split(' ');
+        bool matches = true;
+        for(const QString& term : terms)
+            matches = matches && (stateAliases.contains(term)
+                ? rowStateAliases.contains(term) : searchable.contains(term));
+        ui->tablePart->setRowHidden(row, !matches);
+    }
+}
+
+void CBodyPartEditForm::closeEvent(QCloseEvent* event)
+{
+    QSettings settings;
+    settings.setValue("ui/bodyPartEditorSize", size());
+    settings.setValue("ui/bodyPartEditorHeader",
+                      ui->tablePart->horizontalHeader()->saveState());
+    QWidget::closeEvent(event);
 }
 

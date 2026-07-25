@@ -29,6 +29,16 @@
    <item>
     <layout class="QVBoxLayout" name="verticalLayout">
      <item>
+      <widget class="QLineEdit" name="lineFilter">
+       <property name="placeholderText">
+        <string>Filter parts...</string>
+       </property>
+       <property name="clearButtonEnabled">
+        <bool>true</bool>
+       </property>
+      </widget>
+     </item>
+     <item>
       <layout class="QHBoxLayout" name="horizontalLayout_3" stretch="2">
        <item>
         <widget class="QTableWidget" name="tablePart">

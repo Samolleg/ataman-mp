@@ -33,6 +33,7 @@ struct SMobFamilyMember
     QVector<SMobObjectSnapshot> objects;
     QVector<SMobIdRangeSnapshot> ranges;
     QString script;
+    bool primaryMob = false;
     bool activeRuntimeFamily = true;
 };
 
