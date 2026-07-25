@@ -25,9 +25,9 @@ public:
 QString stateSearchText(Qt::CheckState state)
 {
     if(state == Qt::Checked)
-        return QStringLiteral("checked true on");
+        return QStringLiteral("checked true on enabled");
     if(state == Qt::Unchecked)
-        return QStringLiteral("unchecked false off");
+        return QStringLiteral("unchecked false off disabled");
     return QStringLiteral("mixed partial undefined");
 }
 
@@ -234,7 +234,8 @@ void CBodyPartEditForm::applyFilter(const QString& text)
                  ui->tablePart->item(row, 2)->text())
             .toLower();
         static const QSet<QString> stateAliases = {
-            "checked", "true", "on", "unchecked", "false", "off",
+            "checked", "true", "on", "enabled",
+            "unchecked", "false", "off", "disabled",
             "mixed", "partial", "undefined"
         };
         const QStringList rowStateAliases = stateText.split(' ');

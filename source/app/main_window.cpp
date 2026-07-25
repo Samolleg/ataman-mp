@@ -2603,7 +2603,7 @@ void MainWindow::updateMapTestAction()
     {
         hasAutoSpellMob = false;
         autoSpellMobReason = tr(
-            "The staged supplemental/Autozone MOB does not provide SpellAddon's autorun lifecycle. Test Current Map remains available, but Play from Here, Godmode, and time override are unavailable.");
+            "Play from Here, Godmode, and time override are unavailable for this loaded MOB set. Test Current Map and Hot Reload remain available.");
     }
     const bool loosePairReady = isJmv && hasAutoSpellMob
         && m_mapTestEntry.zoneId.isEmpty()
@@ -2809,8 +2809,9 @@ void MainWindow::launchCurrentMapTest()
     }
     SMapTravelZone looseBootstrapEntrance;
     const SMapTravelZone* entrance = selectedTravelZone();
-    const bool customForCurrentMap = m_customSpawn.valid && m_customSpawn.custom
+    const bool customContextMatched = m_customSpawn.valid && m_customSpawn.custom
         && m_customSpawnContextKey == currentMapContextKey();
+    bool customForCurrentMap = customContextMatched;
     const bool loosePair = entry.zoneId.isEmpty();
     QString autoSpellMobReason;
     bool hasAutoSpellMob = CJmvMapTestLauncher::hasAutoSpellMob(
@@ -2819,12 +2820,13 @@ void MainWindow::launchCurrentMapTest()
     {
         hasAutoSpellMob = false;
         autoSpellMobReason = tr(
-            "The staged supplemental/Autozone MOB does not provide SpellAddon's autorun lifecycle.");
+            "Play from Here, Godmode, and time override are unavailable for this loaded MOB set. Test Current Map and Hot Reload remain available.");
     }
     if(customForCurrentMap && !hasAutoSpellMob)
     {
-        QMessageBox::information(this, tr("Play from Here"), autoSpellMobReason);
-        return;
+        ei::log(eLogWarning, QString("Ignoring unavailable Play from Here override: %1")
+            .arg(autoSpellMobReason));
+        customForCurrentMap = false;
     }
     if(loosePair)
     {
@@ -2868,7 +2870,7 @@ void MainWindow::launchCurrentMapTest()
             tr("The Base probe currently accepts exactly one MOB. Supplemental MOB redirection is JMV-only."));
         return;
     }
-    if(m_customSpawn.valid && m_customSpawn.custom && !customForCurrentMap)
+    if(m_customSpawn.valid && m_customSpawn.custom && !customContextMatched)
         ei::log(eLogWarning, QString("Ignored stale Play from Here spawn context:%1 active:%2")
             .arg(m_customSpawnContextKey, currentMapContextKey()));
     SMapSpawnPlan spawn = customForCurrentMap

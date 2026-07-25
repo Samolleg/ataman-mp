@@ -889,9 +889,11 @@ int runHeadlessCommand(QApplication& app)
             filterShowsOnly("checked", checkedParts)
             && filterShowsOnly("true", checkedParts)
             && filterShowsOnly("on", checkedParts)
+            && filterShowsOnly("enabled", checkedParts)
             && filterShowsOnly("unchecked", uncheckedParts)
             && filterShowsOnly("false", uncheckedParts)
-            && filterShowsOnly("off", uncheckedParts);
+            && filterShowsOnly("off", uncheckedParts)
+            && filterShowsOnly("disabled", uncheckedParts);
         bool bodyPartStateTextHidden = bodyPartTable != nullptr;
         bool bodyPartColumnsResizable = bodyPartTable != nullptr;
         if(bodyPartTable)

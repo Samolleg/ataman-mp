@@ -5,7 +5,7 @@ work is ordered from the newest planned minor line to the oldest completed one.
 An item is checked only after its implementation has landed and received the
 stated validation. Completed code should carry a commit, test, or release link.
 
-Current development line: `0.3.0-alpha.17` focused closed testing. Alpha.11
+Current development line: `0.3.0-alpha.18` focused closed testing. Alpha.11
 was withdrawn after its temporary-resource bootstrap passed the fixed world
 object's first word as the object pointer and crashed both normal and synthetic
 Test Current Map launches. Alpha.12 corrects the pointer contract and adds an
@@ -28,7 +28,12 @@ valid Test Current Map inputs, while only the SpellAddon autorun-dependent
 Play from Here, Godmode, and time override controls are disabled. It also
 makes all six Parts checkbox filter aliases reliable after sorting. This is a
 version reclassification of the feature set that outgrew the `0.2.1` label,
-not a serializer or compatibility reset. The remaining 0.3 release work is the
+not a serializer or compatibility reset. Alpha.18 removes the remaining
+secondary-only launch guard: Test Current Map and Hot Reload fall back to the
+selected normal entrance when a stale Play from Here marker cannot be applied,
+while Play from Here, Godmode, and time override alone remain unavailable. It
+also adds `enabled` and `disabled` as exact Parts checkbox-state filter aliases.
+The remaining 0.3 release work is the
 final runtime/corpus matrix, focused confirmation of the new live-clock and
 startup-splash behavior, and version/tag/package housekeeping rather than
 another editor architecture pass.
