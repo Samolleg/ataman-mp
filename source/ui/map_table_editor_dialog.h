@@ -4,6 +4,7 @@
 #include <QDialog>
 
 #include "map_table_document.h"
+#include "map_table_change_report.h"
 #include "res_archive_document.h"
 
 class QCheckBox;
@@ -26,6 +27,7 @@ public:
     ~CMapTableEditorDialog() override;
     bool openArchive(const QString& path);
     bool selectZoneById(const QString& zoneId);
+    const QVector<SMapTableSaveReport>& saveReports() const { return m_saveReports; }
 
 private slots:
     void chooseArchive();
@@ -61,6 +63,7 @@ private:
     CResArchiveDocument m_archive;
     CMapTableDocument m_table;
     SMapTableMaps m_loadedMaps;
+    QVector<SMapTableSaveReport> m_saveReports;
     int m_selectedZone{-1};
     bool m_newZoneMode{false};
     bool m_persistUiState{true};

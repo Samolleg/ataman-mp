@@ -880,6 +880,10 @@ void CMapTableEditorDialog::saveArchiveAs()
         this, tr("Save verified texts.res"), m_archivePath, tr("RES archives (*.res)"));
     if(destination.isEmpty())
         return;
+    QByteArray previousDestinationBytes;
+    QFile previousDestination(destination);
+    if(previousDestination.open(QIODevice::ReadOnly))
+        previousDestinationBytes = previousDestination.readAll();
     const QByteArray currentPayload = m_archive.memberPayload(m_mapMemberName);
     SResMemberSaveRequest request;
     request.source = QFileInfo(m_archivePath);
@@ -894,11 +898,23 @@ void CMapTableEditorDialog::saveArchiveAs()
         setStatus(result.phase + ": " + result.error, true);
         return;
     }
+    SMapTableSaveReport report;
+    report.destinationArchive = QFileInfo(destination).absoluteFilePath();
+    if(!previousDestinationBytes.isEmpty())
+        report.oldArchiveSha256 = QCryptographicHash::hash(
+            previousDestinationBytes, QCryptographicHash::Sha256).toHex();
+    report.newArchiveSha256 = result.candidateSha256.toLatin1();
+    report.oldMapTableSha256 = QCryptographicHash::hash(
+        currentPayload, QCryptographicHash::Sha256).toHex();
+    report.newMapTableSha256 = QCryptographicHash::hash(
+        request.replacementPayload, QCryptographicHash::Sha256).toHex();
+    report.changes = analyzeMapTableChange(currentPayload, request.replacementPayload);
     const QString message = result.noOp ? tr("Destination already matches; no write was needed.")
         : tr("Verified RES saved. Backup: %1").arg(
               result.backupPath.isEmpty() ? tr("not needed (new file)") : result.backupPath);
     if(!openArchive(destination))
         return;
+    m_saveReports.append(report);
     setStatus(message);
 }
 
