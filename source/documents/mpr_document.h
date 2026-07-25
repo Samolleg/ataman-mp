@@ -146,6 +146,8 @@ public:
     bool applyTransaction(const CMprEditTransaction& transaction,
                           QByteArray* output,
                           CValidationReport* report = nullptr) const;
+    bool appendMaxZEdit(float newMaxZ, CMprEditTransaction* transaction,
+                        CValidationReport* report = nullptr) const;
     bool isDirty() const { return false; }
 
 private:

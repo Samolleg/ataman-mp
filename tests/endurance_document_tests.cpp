@@ -305,6 +305,7 @@ private slots:
     void unchangedMprIsByteIdentical();
     void syntheticMprPreservesArchiveNamespaceAndInactiveSentinel();
     void mprSectorPatchIsProvenanceCheckedAndLocal();
+    void mprMaxZPatchIsProvenanceCheckedAndLocal();
     void mprLengthChangingAndStaleTransactionsFailClosed();
     void failedStagedMprSaveLeavesNoDestination();
     void stagedMprTransactionProvesExactSemanticScopeWithoutDestination();
@@ -1316,6 +1317,53 @@ void EnduranceDocumentTests::mprSectorPatchIsProvenanceCheckedAndLocal()
     QCOMPARE(diff.entries().size(), 1);
     QCOMPARE(diff.entries().front().kind, QString("modified"));
     QCOMPARE(diff.entries().front().memberName, sector.name);
+}
+
+void EnduranceDocumentTests::mprMaxZPatchIsProvenanceCheckedAndLocal()
+{
+    CMprDocument baseline;
+    CValidationReport loadReport;
+    QVERIFY2(baseline.loadBytes(syntheticMpr(), "maxz-baseline.mpr", &loadReport),
+             qPrintable(loadReport.toText()));
+    const float originalMaxZ = baseline.mapInfo().maxZ;
+
+    CMprEditTransaction noOp("no-op maxZ");
+    QVERIFY(baseline.appendMaxZEdit(originalMaxZ, &noOp));
+    QVERIFY(noOp.isEmpty());
+
+    CMprEditTransaction transaction("change synthetic maxZ");
+    CValidationReport editReport;
+    QVERIFY2(baseline.appendMaxZEdit(originalMaxZ * 1.5f, &transaction, &editReport),
+             qPrintable(editReport.toText()));
+    QCOMPARE(transaction.edits().size(), 1);
+    QCOMPARE(transaction.edits().front().memberName, baseline.mapInfo().memberName);
+
+    QByteArray candidateBytes;
+    QVERIFY2(baseline.applyTransaction(transaction, &candidateBytes, &editReport),
+             qPrintable(editReport.toText()));
+    QCOMPARE(candidateBytes.size(), baseline.originalBytes().size());
+
+    CMprDocument candidate;
+    CValidationReport reopenReport;
+    QVERIFY2(candidate.loadBytes(candidateBytes, "maxz-candidate.mpr", &reopenReport),
+             qPrintable(reopenReport.toText()));
+    QCOMPARE(candidate.mapInfo().maxZ, originalMaxZ * 1.5f);
+    QCOMPARE(candidate.memberPayload("unknown.bin"), baseline.memberPayload("unknown.bin"));
+    QCOMPARE(candidate.memberPayload(baseline.sectors().front().memberName),
+             baseline.memberPayload(baseline.sectors().front().memberName));
+    const CMprSemanticDiff diff = CMprSemanticDiff::compare(baseline, candidate);
+    QCOMPARE(diff.entries().size(), 1);
+    QCOMPARE(diff.entries().front().memberName, baseline.mapInfo().memberName);
+
+    CMprEditTransaction invalid("invalid maxZ");
+    CValidationReport invalidReport;
+    QVERIFY(!baseline.appendMaxZEdit(0.0f, &invalid, &invalidReport));
+    QVERIFY(invalid.isEmpty());
+    QVERIFY(invalidReport.hasErrors());
+    QVERIFY(!baseline.appendMaxZEdit(-1.0f, &invalid));
+    QVERIFY(!baseline.appendMaxZEdit(std::numeric_limits<float>::infinity(), &invalid));
+    QVERIFY(!baseline.appendMaxZEdit(std::numeric_limits<float>::quiet_NaN(), &invalid));
+    QVERIFY(!baseline.appendMaxZEdit(originalMaxZ * 2.0f, nullptr));
 }
 
 void EnduranceDocumentTests::mprLengthChangingAndStaleTransactionsFailClosed()

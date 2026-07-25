@@ -10,6 +10,7 @@
 #include <QtEndian>
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 
 #include "endurance_document.h"
@@ -70,6 +71,15 @@ float readF32(const QByteArray& bytes, quint64 offset)
     static_assert(sizeof(value) == sizeof(raw), "Unexpected float representation");
     std::memcpy(&value, &raw, sizeof(value));
     return value;
+}
+
+void writeF32(QByteArray* bytes, quint64 offset, float value)
+{
+    quint32 raw = 0;
+    static_assert(sizeof(value) == sizeof(raw), "Unexpected float representation");
+    std::memcpy(&raw, &value, sizeof(raw));
+    qToLittleEndian<quint32>(raw,
+        reinterpret_cast<uchar*>(bytes->data() + offset));
 }
 
 QString normalizedName(const QString& name)
@@ -586,6 +596,48 @@ bool CMprDocument::applyTransaction(const CMprEditTransaction& transaction,
         report->add("mpr.transaction", EValidationSeverity::Info,
                     QString("Applied %1 provenance-checked same-length member patch(es)")
                         .arg(editedIndices.size()), transaction.description());
+    return true;
+}
+
+bool CMprDocument::appendMaxZEdit(float newMaxZ,
+                                  CMprEditTransaction* transaction,
+                                  CValidationReport* report) const
+{
+    if(!transaction)
+    {
+        if(report)
+            report->add("mpr.maxz_transaction", EValidationSeverity::Error,
+                        "No MPR edit transaction was supplied");
+        return false;
+    }
+    if(!m_mapInfo.valid || !std::isfinite(newMaxZ) || newMaxZ <= 0.0f)
+    {
+        if(report)
+            report->add("mpr.maxz_value", EValidationSeverity::Error,
+                        "maxZ must be finite and greater than zero");
+        return false;
+    }
+    if(newMaxZ == m_mapInfo.maxZ)
+        return true;
+    const int index = uniqueMemberIndex(m_mapInfo.memberName);
+    if(index < 0)
+    {
+        if(report)
+            report->add("mpr.maxz_member", EValidationSeverity::Error,
+                        "The MP member is missing or ambiguous", m_mapInfo.memberName);
+        return false;
+    }
+    const SMprArchiveMember& member = m_members.at(index);
+    if(member.kind != EMprMemberKind::MapParameters || member.payload.size() < 8)
+    {
+        if(report)
+            report->add("mpr.maxz_member", EValidationSeverity::Error,
+                        "The MP member cannot hold a maxZ value", member.name);
+        return false;
+    }
+    QByteArray replacement = member.payload;
+    writeF32(&replacement, 4, newMaxZ);
+    transaction->replaceMemberPayload(member.name, member.sha256, replacement);
     return true;
 }
 
