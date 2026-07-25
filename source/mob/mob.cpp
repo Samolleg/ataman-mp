@@ -963,14 +963,31 @@ int CMob::readMob(QFileInfo &path)
             file.close();
             return 3;
         }
+        QStringList criticalValidationMessages;
         for(const SValidationFinding& finding : structuralReport.findings())
         {
+            if(finding.severity == EValidationSeverity::Critical)
+            {
+                ei::log(eLogWarning,
+                        QString("MOB critical validation finding code:%1 path:%2 location:%3 message:%4")
+                            .arg(finding.code, m_filePath.absoluteFilePath(),
+                                 finding.location, finding.message));
+                criticalValidationMessages.append(finding.message);
+                continue;
+            }
             if(finding.severity != EValidationSeverity::Warning)
                 continue;
             ei::log(eLogWarning,
                     QString("MOB validation warning code:%1 path:%2 location:%3 message:%4")
                         .arg(finding.code, m_filePath.absoluteFilePath(),
                              finding.location, finding.message));
+        }
+        if(!criticalValidationMessages.isEmpty())
+        {
+            criticalValidationMessages.removeDuplicates();
+            QMessageBox::critical(nullptr, "Critical runtime compatibility notice",
+                QString("This MOB remains open so the affected records can be repaired.\n\n%1")
+                    .arg(criticalValidationMessages.join("\n\n")));
         }
         const SBackupResult openBackup = CBackupManager().snapshotOnOpen(m_filePath);
         if(!openBackup.success)

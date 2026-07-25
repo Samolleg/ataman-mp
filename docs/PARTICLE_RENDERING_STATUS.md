@@ -182,6 +182,21 @@ applicable items are evidenced:
 
 Lava in `gz10g` is not on this list: it is confirmed MPR liquid/terrain data,
 not a particle emitter.
+
+## Runtime safety and performance
+
+- **Critical authoring hazard:** standalone Vulcansmoke (8197 / `0x2005`) is
+  isolated by a retained native-runtime A/B control as the record that makes the
+  test MOB terminate. Endurance validation must flag it critically while still
+  allowing the MOB to open for repair. The absent `Vulkan.mmp` is the leading
+  hypothesis, not a confirmed cause; the exact crash mechanism remains backlog.
+- **Dense-effect performance:** the order-preserving dynamic batch stream is
+  implemented without changing native populations or visual laws. On the
+  supplied campfire grid, desktop OpenGL improves from 23.15 to 446 FPS and
+  from 42.92 to 2.01 ms CPU submission at roughly 6,445 live billboards. ANGLE
+  submits the same control at 657 FPS / 1.34 ms CPU submission; its GPU timer
+  is unavailable, so only CPU/throughput values are claimed.
+
 ## All-type editor test scene
 
 The repeatable generator `scripts/build_particle_catalog_mob.ps1` builds a

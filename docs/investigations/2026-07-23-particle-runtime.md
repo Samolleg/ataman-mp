@@ -1905,6 +1905,48 @@ evidence. Existing shutdown dumps occur in both nominal pass and failure runs,
 so they do not prove that the missing atlas is the corruptor. The empty-MOB
 graphless/bootstrap failure remains independent.
 
+The controlled runtime result is now promoted to an authoring-safety rule,
+without promoting the unproven resource hypothesis: a MOB containing standalone
+Vulcansmoke (8197 / `0x2005`) must receive a critical validation finding because
+the retained A/B fixture terminates the shipped runtime when that record is
+present and survives when only that record is removed. The editor must continue
+to open the MOB so the record can be inspected or replaced. Establishing the
+native crash mechanism, including the exact-name `Vulkan.mmp` alias control,
+remains backlog work.
+
+## Dense-campfire editor submission cost
+
+The supplied 2026-07-25 dense-campfire control has SHA-256
+`54E60FF57FE174887A804114A1379EBA683A13C6072FABFE8D5D1951BCAE089F`.
+The observed comparison is approximately 20 FPS in Endurance versus 200 FPS in
+the game. Inspection confirms an editor-side submission multiplier: every
+simulated billboard currently performs its own uniform updates and
+`glDrawArrays`, even when all billboards share the Tendri atlas, ordinary-alpha
+blend mode, radial-mask state, and camera basis. This is not a particle-law or
+atlas difference and must not be addressed by reducing the native population.
+
+The accepted optimization boundary is an order-preserving billboard stream:
+expand the existing sprite samples into one dynamic vertex upload, retain their
+current traversal order, and issue one draw for each contiguous compatible
+texture/blend/mask run. This preserves simulation, authored scale, atlas frames,
+and alpha order while removing the per-sprite draw/uniform overhead. Desktop
+OpenGL and ANGLE controls plus the dense-campfire benchmark are required before
+the path is considered complete.
+
+The implemented A/B uses the same alpha.8 package, fixture, camera, 2457-by-1875
+viewport, uncapped benchmark mode, and desktop OpenGL backend. After steady
+state at approximately 6,445 live billboards, the old path records 6,415 total
+draws, 42.92 ms average CPU submission, and 23.15 FPS. The batched path records
+35 total draws (33 terrain plus two compatible submitted batches), 2.01 ms CPU
+submission, and 446 FPS. This is a 21.3-times CPU-submission reduction and a
+19.3-times throughput increase without reducing the particle population.
+
+The corresponding ANGLE/OpenGL ES control also remains responsive and visually
+submits the full population: approximately 6,385 billboards, 98 total draws
+(33 terrain, 64 non-instanced scene objects, and one particle run), 1.34 ms CPU
+submission, and 657 FPS. ANGLE GPU timer queries are unavailable in this
+configuration, so no ANGLE GPU-time claim is made.
+
 ## Casting specialization reconstruction
 
 The fingerprinted executable maps the nine remaining preview-only casting

@@ -3109,21 +3109,9 @@ bool CView::ensureParticleRendererInitialized()
     if(!m_particleProgram.link())
         return fail(QStringLiteral("program link"));
 
-    static const float particleQuad[] = {
-        -0.5f, -0.5f, 0.0f, 1.0f,
-         0.5f, -0.5f, 1.0f, 1.0f,
-         0.5f,  0.5f, 1.0f, 0.0f,
-        -0.5f, -0.5f, 0.0f, 1.0f,
-         0.5f,  0.5f, 1.0f, 0.0f,
-        -0.5f,  0.5f, 0.0f, 0.0f
-    };
     if(!m_particleBuffer.create())
         return fail(QStringLiteral("vertex buffer creation"));
-    m_particleBuffer.setUsagePattern(QOpenGLBuffer::StaticDraw);
-    if(!m_particleBuffer.bind())
-        return fail(QStringLiteral("vertex buffer binding"));
-    m_particleBuffer.allocate(particleQuad, int(sizeof(particleQuad)));
-    m_particleBuffer.release();
+    m_particleBuffer.setUsagePattern(QOpenGLBuffer::DynamicDraw);
     restoreBindings();
 
     m_particleRendererReady = true;
@@ -3292,14 +3280,11 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
         return;
     m_particleProgram.setUniformValue("u_projMmatrix", m_projection);
     m_particleProgram.setUniformValue("u_viewMmatrix", cameraMatrix);
-    m_particleProgram.setUniformValue("u_cameraRight", cameraRight);
-    m_particleProgram.setUniformValue("u_cameraUp", cameraUp);
 
     // Scene parts are submitted through cached VAOs. Never configure the
-    // particle quad while the last part VAO is still bound: doing so replaces
-    // that cached VAO's position/UV layout with the particle VBO and corrupts
-    // normal scene submission on the following frame. The default VAO is
-    // sufficient for this small compatibility-profile billboard pass and
+    // dynamic particle stream while the last part VAO is still bound: doing so
+    // replaces that cached VAO's attribute layout with the particle VBO and
+    // corrupts normal scene submission on the following frame. The default VAO
     // keeps the particle attributes isolated from every shared mesh.
     QOpenGLContext* particleContext = QOpenGLContext::currentContext();
     QOpenGLExtraFunctions* particleFunctions
@@ -3307,33 +3292,10 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
     if(particleFunctions)
         particleFunctions->glBindVertexArray(0);
 
-    if(!m_particleBuffer.bind())
-    {
-        m_particleProgram.release();
-        return;
-    }
-    const int positionLocation = m_particleProgram.attributeLocation("a_position");
-    const int textureLocation = m_particleProgram.attributeLocation("a_texture");
-    if(positionLocation < 0 || textureLocation < 0)
-    {
-        m_particleBuffer.release();
-        m_particleProgram.release();
-        return;
-    }
-    m_particleProgram.enableAttributeArray(positionLocation);
-    m_particleProgram.enableAttributeArray(textureLocation);
-    m_particleProgram.setAttributeBuffer(positionLocation, GL_FLOAT, 0, 2,
-                                         4 * int(sizeof(float)));
-    m_particleProgram.setAttributeBuffer(textureLocation, GL_FLOAT,
-                                         2 * int(sizeof(float)), 2,
-                                         4 * int(sizeof(float)));
-
     ei::gl::Enable(GL_DEPTH_TEST);
     ei::gl::DepthMask(GL_FALSE);
     ei::gl::Enable(GL_BLEND);
     ei::gl::BlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    bool additiveBlend = false;
-    QOpenGLTexture* boundTexture = nullptr;
     const qint64 particleTimeMs = QDateTime::currentMSecsSinceEpoch();
     const float timeSeconds = float(particleTimeMs % 600000) / 1000.0f;
     const qint64 logicalTick = particleTimeMs / ei::particle::kLogicalQuantMilliseconds;
@@ -3360,43 +3322,84 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
         ? particleWorldSet->data(eWsTypeWindStr).toFloat() : 0.0f;
     RenderPerformanceContext& performance = RenderPerformanceContext::instance();
 
+    struct ParticleVertex
+    {
+        float world[3];
+        float texture[2];
+        float localTexture[2];
+        float tint[4];
+    };
+    struct ParticleBatch
+    {
+        QOpenGLTexture* texture{nullptr};
+        bool additive{false};
+        bool radialMask{false};
+        float softness{0.0f};
+        int first{0};
+        int count{0};
+    };
+    QVector<ParticleVertex> particleVertices;
+    QVector<ParticleBatch> particleBatches;
+    particleVertices.reserve(4096);
+    particleBatches.reserve(64);
+
     const auto drawSprite = [&](const QVector3D& center, float scale, float aspect, float rotation,
                                 const QVector4D& tint, QOpenGLTexture* texture,
                                 const QVector4D& uvRect, bool additive, bool radialMask,
                                 float softness)
     {
-        if(texture != boundTexture)
+        const bool compatible = !particleBatches.isEmpty()
+            && particleBatches.back().texture == texture
+            && particleBatches.back().additive == additive
+            && particleBatches.back().radialMask == radialMask
+            && qFuzzyCompare(particleBatches.back().softness + 1.0f,
+                             softness + 1.0f);
+        if(!compatible)
         {
-            if(texture)
-                texture->bind(0);
-            else
-                ei::gl::BindTexture(GL_TEXTURE_2D, 0);
-            boundTexture = texture;
-            if(performance.collecting())
-                ++performance.counters().textureBinds;
+            ParticleBatch batch;
+            batch.texture = texture;
+            batch.additive = additive;
+            batch.radialMask = radialMask;
+            batch.softness = softness;
+            batch.first = particleVertices.size();
+            particleBatches.append(batch);
         }
-        if(additive != additiveBlend)
-        {
-            ei::gl::BlendFunc(GL_SRC_ALPHA, additive ? GL_ONE : GL_ONE_MINUS_SRC_ALPHA);
-            additiveBlend = additive;
-        }
-        m_particleProgram.setUniformValue("u_center", center);
         const float width = qBound(0.03f, scale, 64.0f);
-        m_particleProgram.setUniformValue("u_size",
-            QVector2D(width, width * qBound(0.25f, aspect, 4.0f)));
-        m_particleProgram.setUniformValue("u_rotation", rotation);
-        m_particleProgram.setUniformValue("u_tint", tint);
-        m_particleProgram.setUniformValue("u_useTexture", texture != nullptr);
-        m_particleProgram.setUniformValue("u_radialMask", radialMask);
-        m_particleProgram.setUniformValue("u_softness", softness);
-        m_particleProgram.setUniformValue("u_uvRect", uvRect);
-        ei::gl::DrawArrays(GL_TRIANGLES, 0, 6);
-        if(performance.collecting())
+        const float height = width * qBound(0.25f, aspect, 4.0f);
+        const float cosine = qCos(rotation);
+        const float sine = qSin(rotation);
+        static const float corners[6][2] = {
+            {-0.5f, -0.5f}, {0.5f, -0.5f}, {0.5f, 0.5f},
+            {-0.5f, -0.5f}, {0.5f, 0.5f}, {-0.5f, 0.5f}
+        };
+        static const float textureCoordinates[6][2] = {
+            {0.0f, 1.0f}, {1.0f, 1.0f}, {1.0f, 0.0f},
+            {0.0f, 1.0f}, {1.0f, 0.0f}, {0.0f, 0.0f}
+        };
+        for(int vertexIndex = 0; vertexIndex < 6; ++vertexIndex)
         {
-            ++performance.counters().drawCalls;
-            performance.counters().triangles += 2;
-            ++performance.counters().nodesSubmitted;
+            const float sizedX = corners[vertexIndex][0] * width;
+            const float sizedY = corners[vertexIndex][1] * height;
+            const float localX = cosine * sizedX - sine * sizedY;
+            const float localY = sine * sizedX + cosine * sizedY;
+            const QVector3D world = center + cameraRight * localX + cameraUp * localY;
+            ParticleVertex vertex;
+            vertex.world[0] = world.x();
+            vertex.world[1] = world.y();
+            vertex.world[2] = world.z();
+            vertex.texture[0] = uvRect.x() + textureCoordinates[vertexIndex][0] * uvRect.z();
+            vertex.texture[1] = uvRect.y() + textureCoordinates[vertexIndex][1] * uvRect.w();
+            vertex.localTexture[0] = textureCoordinates[vertexIndex][0];
+            vertex.localTexture[1] = textureCoordinates[vertexIndex][1];
+            vertex.tint[0] = tint.x();
+            vertex.tint[1] = tint.y();
+            vertex.tint[2] = tint.z();
+            vertex.tint[3] = tint.w();
+            particleVertices.append(vertex);
         }
+        particleBatches.back().count += 6;
+        if(performance.collecting())
+            ++performance.counters().nodesSubmitted;
     };
 
     const auto drawFireSmoke = [&](const CNode* owner, const QVector3D& origin,
@@ -4546,12 +4549,72 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
         }
     }
 
+    const int worldLocation = m_particleProgram.attributeLocation("a_worldPosition");
+    const int textureLocation = m_particleProgram.attributeLocation("a_texture");
+    const int localTextureLocation = m_particleProgram.attributeLocation("a_localTexture");
+    const int tintLocation = m_particleProgram.attributeLocation("a_tint");
+    const bool validAttributes = worldLocation >= 0 && textureLocation >= 0
+        && localTextureLocation >= 0 && tintLocation >= 0;
+    if(!particleVertices.isEmpty() && validAttributes && m_particleBuffer.bind())
+    {
+        m_particleBuffer.allocate(particleVertices.constData(),
+            particleVertices.size() * int(sizeof(ParticleVertex)));
+        const int stride = int(sizeof(ParticleVertex));
+        m_particleProgram.enableAttributeArray(worldLocation);
+        m_particleProgram.enableAttributeArray(textureLocation);
+        m_particleProgram.enableAttributeArray(localTextureLocation);
+        m_particleProgram.enableAttributeArray(tintLocation);
+        m_particleProgram.setAttributeBuffer(worldLocation, GL_FLOAT,
+            int(offsetof(ParticleVertex, world)), 3, stride);
+        m_particleProgram.setAttributeBuffer(textureLocation, GL_FLOAT,
+            int(offsetof(ParticleVertex, texture)), 2, stride);
+        m_particleProgram.setAttributeBuffer(localTextureLocation, GL_FLOAT,
+            int(offsetof(ParticleVertex, localTexture)), 2, stride);
+        m_particleProgram.setAttributeBuffer(tintLocation, GL_FLOAT,
+            int(offsetof(ParticleVertex, tint)), 4, stride);
+
+        QOpenGLTexture* boundTexture = nullptr;
+        bool additiveBlend = false;
+        for(const ParticleBatch& batch : particleBatches)
+        {
+            if(batch.texture != boundTexture)
+            {
+                if(batch.texture)
+                    batch.texture->bind(0);
+                else
+                    ei::gl::BindTexture(GL_TEXTURE_2D, 0);
+                boundTexture = batch.texture;
+                if(performance.collecting())
+                    ++performance.counters().textureBinds;
+            }
+            if(batch.additive != additiveBlend)
+            {
+                ei::gl::BlendFunc(GL_SRC_ALPHA,
+                    batch.additive ? GL_ONE : GL_ONE_MINUS_SRC_ALPHA);
+                additiveBlend = batch.additive;
+            }
+            m_particleProgram.setUniformValue("u_useTexture", batch.texture != nullptr);
+            m_particleProgram.setUniformValue("u_radialMask", batch.radialMask);
+            m_particleProgram.setUniformValue("u_softness", batch.softness);
+            ei::gl::DrawArrays(GL_TRIANGLES, batch.first, batch.count);
+            if(performance.collecting())
+            {
+                ++performance.counters().drawCalls;
+                ++performance.counters().batches;
+                performance.counters().triangles += quint64(batch.count / 3);
+            }
+        }
+
+        m_particleProgram.disableAttributeArray(tintLocation);
+        m_particleProgram.disableAttributeArray(localTextureLocation);
+        m_particleProgram.disableAttributeArray(textureLocation);
+        m_particleProgram.disableAttributeArray(worldLocation);
+        m_particleBuffer.release();
+    }
+
     ei::gl::BindTexture(GL_TEXTURE_2D, 0);
     ei::gl::BlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     ei::gl::DepthMask(GL_TRUE);
-    m_particleProgram.disableAttributeArray(textureLocation);
-    m_particleProgram.disableAttributeArray(positionLocation);
-    m_particleBuffer.release();
     m_particleProgram.release();
 }
 

@@ -1502,3 +1502,7 @@ an operation safely.
   and one private deploy entrance because the normal mission UI and player
   bootstrap consume those fields. The installed map table and source files
   remain unchanged.
+- [ ] Determine the native Vulcansmoke (8197 / `0x2005`) crash mechanism with
+  the isolated exact-name `Vulkan.mmp` run-local alias control and dump/runtime
+  analysis. Keep the editor's Critical validation notice in place meanwhile;
+  do not install or treat a borrowed atlas as visual-fidelity evidence.

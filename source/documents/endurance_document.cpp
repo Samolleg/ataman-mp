@@ -24,6 +24,7 @@ QString severityName(EValidationSeverity severity)
     {
     case EValidationSeverity::Info: return "info";
     case EValidationSeverity::Warning: return "warning";
+    case EValidationSeverity::Critical: return "critical";
     case EValidationSeverity::Error: return "error";
     }
     return "error";
@@ -432,6 +433,20 @@ void addMobSemanticWarnings(const QVector<SMobSection>& sections,
     }
 
     QVector<const SMobSection*> targets;
+
+    QVector<const SMobSection*> particleTypes;
+    collectSections(sections, 0xDD06, particleTypes);
+    for(const SMobSection* particleType : particleTypes)
+    {
+        const QByteArray data = payload(*particleType);
+        if(data.size() < 4 || readU32(data, 0) != 0x2005u)
+            continue;
+        report->add("mob.semantic.vulcansmoke_runtime_crash",
+                    EValidationSeverity::Critical,
+                    "Vulcansmoke (8197 / 0x2005) is known to terminate the shipped game when authored as a standalone MOB particle. Remove or replace it before runtime testing; the exact native cause remains under investigation.",
+                    sourcePath + ":" + particleType->path);
+    }
+
     collectSections(sections, 0xBBAB0004, targets);
     for(const SMobSection* target : targets)
     {
