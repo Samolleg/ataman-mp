@@ -332,6 +332,22 @@ void ei::CFigure::appendVertexData(QVector<CPart*>& model, QVector3D& complectio
         QVector3D restOffset;
         calcComplection(restOffset, m_offset, complection);
         part->setRestOffset(restOffset);
+        QVector3D authoredCenter;
+        QVector3D authoredMinimum;
+        QVector3D authoredMaximum;
+        if(m_morphCenter.size() == 8 && m_morphMin.size() == 8
+           && m_morphMax.size() == 8)
+        {
+            calcComplection(authoredCenter, m_morphCenter, complection);
+            calcComplection(authoredMinimum, m_morphMin, complection);
+            calcComplection(authoredMaximum, m_morphMax, complection);
+            QVector3D minimum = authoredCenter + authoredMinimum + restOffset;
+            QVector3D maximum = authoredCenter + authoredMaximum + restOffset;
+            for(int axis = 0; axis < 3; ++axis)
+                if(minimum[axis] > maximum[axis])
+                    qSwap(minimum[axis], maximum[axis]);
+            part->setAuthoredNavigationBounds(minimum, maximum);
+        }
         part->setTextureNumber(m_textureNumber);
         QVector<int> sourceVertexIndices;
         calculateConstitution(part->vertData(), complection, &sourceVertexIndices);

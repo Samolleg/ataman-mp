@@ -67,6 +67,21 @@ QByteArray syntheticTraversalRegistry()
     putU32(&data, 63, 50);
     return data;
 }
+
+SAiGraphCollisionProxy boxVolume(float minimumX, float minimumY, float minimumZ,
+                                 float maximumX, float maximumY, float maximumZ,
+                                 EAiGraphObjectPassability passability =
+                                     EAiGraphObjectPassability::Blocking)
+{
+    SAiGraphCollisionProxy volume;
+    volume.footprint = {QVector2D(minimumX, minimumY), QVector2D(maximumX, minimumY),
+                        QVector2D(maximumX, maximumY), QVector2D(minimumX, maximumY)};
+    volume.minimumZ = minimumZ;
+    volume.maximumZ = maximumZ;
+    volume.passability = passability;
+    volume.authored = true;
+    return volume;
+}
 }
 
 class AiGraphDocumentTests : public QObject
@@ -81,6 +96,7 @@ private slots:
     void regenerationRespectsFenceAndVerticalClearanceProfiles();
     void regenerationRejectsGameScaleTerrainCliffs();
     void regenerationAppliesWaterClearanceToEveryProfile();
+    void regenerationUsesBridgeSurfaceAndObjectSemantics();
     void regenerationHonorsConfiguredTerrainTraversal();
     void parsesProfileTerrainTraversalRegistry();
 };
@@ -178,9 +194,8 @@ void AiGraphDocumentTests::regenerationRespectsFenceAndVerticalClearanceProfiles
     QVERIFY(open.document.weight(0, 1, 1, 6) >= 0);
     QVERIFY(open.document.weight(3, 1, 1, 6) >= 0);
 
-    SAiGraphCollisionProxy fence;
-    fence.minimum = QVector3D(7.8f, 0.0f, 0.0f);
-    fence.maximum = QVector3D(8.2f, 12.0f, 2.5f);
+    SAiGraphCollisionProxy fence = boxVolume(7.8f, 0.0f, 0.0f,
+                                             8.2f, 12.0f, 2.5f);
     fence.objectId = 568;
     SAiGraphPreviewBuildInput fenced = flat;
     fenced.collisionProxies.append(fence);
@@ -190,9 +205,8 @@ void AiGraphDocumentTests::regenerationRespectsFenceAndVerticalClearanceProfiles
     QCOMPARE(blocked.document.weight(0, 1, 1, 6), qint16(-1));
     QCOMPARE(blocked.document.weight(3, 1, 1, 6), qint16(-1));
 
-    SAiGraphCollisionProxy overhead = fence;
-    overhead.minimum.setZ(2.0f);
-    overhead.maximum.setZ(3.0f);
+    SAiGraphCollisionProxy overhead = boxVolume(7.8f, 0.0f, 2.0f,
+                                                8.2f, 12.0f, 3.0f);
     SAiGraphPreviewBuildInput clearance = flat;
     clearance.collisionProxies.append(overhead);
     const SAiGraphPreviewBuildResult vertical = CAiGraphPreviewBuilder::build(clearance);
@@ -228,6 +242,53 @@ void AiGraphDocumentTests::regenerationRejectsGameScaleTerrainCliffs()
     QVERIFY2(flyCliff.valid, qPrintable(flyCliff.error));
     QCOMPARE(flyCliff.document.weight(0, 1, 1, 6), qint16(-1));
     QCOMPARE(flyCliff.document.weight(3, 1, 1, 6), qint16(-1));
+}
+
+void AiGraphDocumentTests::regenerationUsesBridgeSurfaceAndObjectSemantics()
+{
+    SAiGraphPreviewBuildInput input;
+    input.graphWidth = 4;
+    input.graphHeight = 3;
+    const int aiWidth = input.graphWidth * CAiGraphPreviewBuilder::AiTilesPerGraphCell;
+    const int aiHeight = input.graphHeight * CAiGraphPreviewBuilder::AiTilesPerGraphCell;
+    input.terrainHeights.fill(0.0f, aiWidth * aiHeight);
+    input.waterDepths.fill(0.0f, aiWidth * aiHeight);
+    for(int y = 0; y < aiHeight; ++y)
+        for(int x = 15; x <= 17; ++x)
+            input.waterDepths[y * aiWidth + x] = 6.0f;
+
+    const SAiGraphPreviewBuildResult water = CAiGraphPreviewBuilder::build(input);
+    QVERIFY2(water.valid, qPrintable(water.error));
+    QCOMPARE(water.document.weight(3, 1, 1, 6), qint16(-1));
+
+    SAiGraphCollisionProxy bridge = boxVolume(
+        7.4f, 0.0f, -0.2f, 8.6f, 12.0f, 0.0f,
+        EAiGraphObjectPassability::Bridge);
+    input.collisionProxies.append(bridge);
+    const SAiGraphPreviewBuildResult bridged = CAiGraphPreviewBuilder::build(input);
+    QVERIFY2(bridged.valid, qPrintable(bridged.error));
+    QVERIFY(bridged.bridgeAiTiles > 0);
+    QCOMPARE(bridged.authoredCollisionProxyCount, 1);
+    for(int layer = 0; layer < CAiGraphDocument::LayerCount; ++layer)
+        QVERIFY2(bridged.document.weight(layer, 1, 1, 6) >= 0,
+                 qPrintable(QStringLiteral("bridge layer %1").arg(layer)));
+
+    SAiGraphPreviewBuildInput easyInput = input;
+    easyInput.waterDepths.fill(0.0f, aiWidth * aiHeight);
+    easyInput.collisionProxies.clear();
+    easyInput.collisionProxies.append(boxVolume(
+        7.8f, 0.0f, 0.0f, 8.2f, 12.0f, 4.0f,
+        EAiGraphObjectPassability::Easy));
+    const SAiGraphPreviewBuildResult easy = CAiGraphPreviewBuilder::build(easyInput);
+    QVERIFY2(easy.valid, qPrintable(easy.error));
+    for(int layer = 0; layer < CAiGraphDocument::LayerCount; ++layer)
+        QVERIFY(easy.document.weight(layer, 1, 1, 6) >= 0);
+
+    easyInput.collisionProxies[0].passability = EAiGraphObjectPassability::Ignored;
+    const SAiGraphPreviewBuildResult ignored = CAiGraphPreviewBuilder::build(easyInput);
+    QVERIFY2(ignored.valid, qPrintable(ignored.error));
+    for(int layer = 0; layer < CAiGraphDocument::LayerCount; ++layer)
+        QVERIFY(ignored.document.weight(layer, 1, 1, 6) >= 0);
 }
 
 void AiGraphDocumentTests::regenerationAppliesWaterClearanceToEveryProfile()

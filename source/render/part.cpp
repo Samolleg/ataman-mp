@@ -204,6 +204,9 @@ CPart::CPart(const CPart &part)
     m_sourceVertexIndices = part.m_sourceVertexIndices;
     m_localBoundsCenter = part.m_localBoundsCenter;
     m_localBoundsRadius = part.m_localBoundsRadius;
+    m_authoredNavigationMinimum = part.m_authoredNavigationMinimum;
+    m_authoredNavigationMaximum = part.m_authoredNavigationMaximum;
+    m_hasAuthoredNavigationBounds = part.m_hasAuthoredNavigationBounds;
     m_morphApplied = part.m_morphApplied;
     if(m_morphApplied)
         attachPrivateMesh(m_aVertData);
