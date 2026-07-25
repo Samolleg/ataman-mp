@@ -2,12 +2,32 @@
 
 #include <QRegularExpression>
 
+QString mapTravelRouteKey(const QVector<SMapTravelZone>& routes, int index)
+{
+    if(index < 0 || index >= routes.size()) return QString();
+    const SMapTravelZone& route = routes.at(index);
+    int occurrence = 0;
+    for(int prior = 0; prior < index; ++prior)
+    {
+        const SMapTravelZone& candidate = routes.at(prior);
+        if(candidate.exitId == route.exitId
+           && candidate.destinationZoneId.compare(route.destinationZoneId,
+                                                  Qt::CaseInsensitive) == 0
+           && candidate.destinationExitId == route.destinationExitId)
+            ++occurrence;
+    }
+    return QStringLiteral("%1|%2|%3|%4")
+        .arg(route.exitId).arg(route.destinationZoneId.toCaseFolded())
+        .arg(route.destinationExitId).arg(occurrence);
+}
+
 QVector<SMapCatalogEntry> CMapCatalog::parseMapTable(const QString& text,
                                                      const QString& sourceArchive)
 {
     QVector<SMapCatalogEntry> entries;
     SMapCatalogEntry current;
-    enum class PendingValue { None, Resources, Sky, ExitTarget, Deploy, View };
+    enum class PendingValue { None, Resources, MapsSize, MapsTextures,
+                              Sky, ExitTarget, Deploy, View };
     PendingValue pending = PendingValue::None;
     int currentExitIndex = -1;
     const QStringList lines = text.split(QRegularExpression("\\r?\\n"));
@@ -48,6 +68,11 @@ QVector<SMapCatalogEntry> CMapCatalog::parseMapTable(const QString& text,
         if(line.compare("#sky", Qt::CaseInsensitive) == 0)
         {
             pending = current.zoneId.isEmpty() ? PendingValue::None : PendingValue::Sky;
+            continue;
+        }
+        if(line.compare("#maps", Qt::CaseInsensitive) == 0)
+        {
+            pending = current.zoneId.isEmpty() ? PendingValue::None : PendingValue::MapsSize;
             continue;
         }
         if(line.startsWith("#exit", Qt::CaseInsensitive))
@@ -92,6 +117,31 @@ QVector<SMapCatalogEntry> CMapCatalog::parseMapTable(const QString& text,
             {
                 current.mprName = parts.at(0);
                 current.mobName = parts.at(1);
+            }
+        }
+        else if(pending == PendingValue::MapsSize)
+        {
+            bool widthOk = false;
+            bool heightOk = false;
+            if(parts.size() >= 2)
+            {
+                current.sectorWidth = parts.at(0).toInt(&widthOk);
+                current.sectorHeight = parts.at(1).toInt(&heightOk);
+            }
+            if(widthOk && heightOk)
+            {
+                pending = PendingValue::MapsTextures;
+                continue;
+            }
+            current.sectorWidth = 0;
+            current.sectorHeight = 0;
+        }
+        else if(pending == PendingValue::MapsTextures)
+        {
+            if(parts.size() >= 2)
+            {
+                current.minimapTexture = parts.at(0);
+                current.objectivesTexture = parts.at(1);
             }
         }
         else if(pending == PendingValue::Sky && !parts.isEmpty())

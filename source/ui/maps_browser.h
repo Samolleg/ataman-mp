@@ -21,6 +21,7 @@ public:
     explicit CMapsBrowser(QWidget* parent = nullptr);
     void refresh(const QVector<QString>& resourceRoots, const QVector<QString>& mapRoots,
                  const QString& collectionsRoot);
+    void refresh(const SMapCatalogResult& catalog, const QString& collectionsRoot);
 
 signals:
     void openMapRequested(QString mprPath, QString mobPath, QString zoneId);

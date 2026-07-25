@@ -12,6 +12,10 @@
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLabel>
+#include <QDialog>
+#include <QDialogButtonBox>
+#include <QPixmap>
+#include <QScrollArea>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QMessageBox>
@@ -27,6 +31,8 @@
 #include <QVBoxLayout>
 
 #include "res_save_coordinator.h"
+#include "mmp_inspector.h"
+#include "resourcemanager.h"
 
 namespace {
 enum EExitColumn
@@ -147,11 +153,13 @@ CMapTableEditorDialog::CMapTableEditorDialog(QWidget* parent)
     m_minimapEdit = new QLineEdit;
     m_minimapEdit->setObjectName("mapMinimapTexture");
     m_objectivesEdit = new QLineEdit;
+    m_viewMinimapButton = new QPushButton(tr("View existing minimap..."));
     mapsForm->addRow(m_mapsEnabled);
     mapsForm->addRow(tr("Map sectors X"), m_sectorWidth);
     mapsForm->addRow(tr("Map sectors Y"), m_sectorHeight);
     mapsForm->addRow(tr("Minimap texture name"), m_minimapEdit);
     mapsForm->addRow(tr("Objectives texture name"), m_objectivesEdit);
+    mapsForm->addRow(m_viewMinimapButton);
     QLabel* mapsNote = new QLabel(tr(
         "These names refer to textures supplied through the selected resource profile. "
         "This editor changes registration only; it does not silently create or install textures."));
@@ -234,6 +242,8 @@ CMapTableEditorDialog::CMapTableEditorDialog(QWidget* parent)
     connect(addExitButton, &QPushButton::clicked, this, &CMapTableEditorDialog::addExit);
     connect(removeExitButton, &QPushButton::clicked, this, &CMapTableEditorDialog::removeExit);
     connect(m_saveButton, &QPushButton::clicked, this, &CMapTableEditorDialog::saveArchiveAs);
+    connect(m_viewMinimapButton, &QPushButton::clicked,
+            this, &CMapTableEditorDialog::viewExistingMinimap);
     connect(closeButton, &QPushButton::clicked, this, &QDialog::reject);
     connect(m_mapsEnabled, &QCheckBox::toggled, m_sectorWidth, &QWidget::setEnabled);
     connect(m_mapsEnabled, &QCheckBox::toggled, m_sectorHeight, &QWidget::setEnabled);
@@ -449,6 +459,7 @@ void CMapTableEditorDialog::loadZone(const SMapTableZone& zone)
     m_mprEdit->setText(zone.mprName);
     m_mobEdit->setText(zone.mobName);
     m_mapsEnabled->setChecked(zone.maps.present);
+    m_loadedMaps = zone.maps;
     m_sectorWidth->setValue(qMax(1, zone.maps.sectorWidth));
     m_sectorHeight->setValue(qMax(1, zone.maps.sectorHeight));
     m_minimapEdit->setText(zone.maps.minimapTexture);
@@ -497,11 +508,18 @@ bool CMapTableEditorDialog::collectZone(SMapTableZone* zone, QString* error) con
     zone->zoneType = m_zoneTypeCombo->currentText();
     zone->mprName = m_mprEdit->text().trimmed();
     zone->mobName = m_mobEdit->text().trimmed();
-    zone->maps.present = m_mapsEnabled->isChecked();
-    zone->maps.sectorWidth = m_sectorWidth->value();
-    zone->maps.sectorHeight = m_sectorHeight->value();
-    zone->maps.minimapTexture = m_minimapEdit->text().trimmed();
-    zone->maps.objectivesTexture = m_objectivesEdit->text().trimmed();
+    // Disabled controls are display placeholders, not authored metadata. Keep
+    // an absent or malformed source #maps projection untouched unless the
+    // user explicitly enables it. Unchecking a previously valid block remains
+    // the explicit remove operation.
+    if(m_mapsEnabled->isChecked() || m_loadedMaps.present)
+    {
+        zone->maps.present = m_mapsEnabled->isChecked();
+        zone->maps.sectorWidth = m_sectorWidth->value();
+        zone->maps.sectorHeight = m_sectorHeight->value();
+        zone->maps.minimapTexture = m_minimapEdit->text().trimmed();
+        zone->maps.objectivesTexture = m_objectivesEdit->text().trimmed();
+    }
     zone->exits.clear();
     const auto parseDouble = [this, error](int row, int column, double* value) {
         const QString text = cellText(row, column);
@@ -862,6 +880,10 @@ void CMapTableEditorDialog::saveArchiveAs()
         this, tr("Save verified texts.res"), m_archivePath, tr("RES archives (*.res)"));
     if(destination.isEmpty())
         return;
+    QByteArray previousDestinationBytes;
+    QFile previousDestination(destination);
+    if(previousDestination.open(QIODevice::ReadOnly))
+        previousDestinationBytes = previousDestination.readAll();
     const QByteArray currentPayload = m_archive.memberPayload(m_mapMemberName);
     SResMemberSaveRequest request;
     request.source = QFileInfo(m_archivePath);
@@ -876,12 +898,74 @@ void CMapTableEditorDialog::saveArchiveAs()
         setStatus(result.phase + ": " + result.error, true);
         return;
     }
+    SMapTableSaveReport report;
+    report.destinationArchive = QFileInfo(destination).absoluteFilePath();
+    if(!previousDestinationBytes.isEmpty())
+        report.oldArchiveSha256 = QCryptographicHash::hash(
+            previousDestinationBytes, QCryptographicHash::Sha256).toHex();
+    report.newArchiveSha256 = result.candidateSha256.toLatin1();
+    report.oldMapTableSha256 = QCryptographicHash::hash(
+        currentPayload, QCryptographicHash::Sha256).toHex();
+    report.newMapTableSha256 = QCryptographicHash::hash(
+        request.replacementPayload, QCryptographicHash::Sha256).toHex();
+    report.changes = analyzeMapTableChange(currentPayload, request.replacementPayload);
     const QString message = result.noOp ? tr("Destination already matches; no write was needed.")
         : tr("Verified RES saved. Backup: %1").arg(
               result.backupPath.isEmpty() ? tr("not needed (new file)") : result.backupPath);
     if(!openArchive(destination))
         return;
+    m_saveReports.append(report);
     setStatus(message);
+}
+
+void CMapTableEditorDialog::viewExistingMinimap()
+{
+    QString textureName = m_minimapEdit->text().trimmed();
+    if(textureName.isEmpty())
+    {
+        setStatus(tr("This zone does not reference a minimap texture."), true);
+        return;
+    }
+    if(!textureName.endsWith(".mmp", Qt::CaseInsensitive))
+        textureName += ".mmp";
+    QString source;
+    const QByteArray bytes = CObjectList::getInstance()->resourceData(textureName, &source);
+    if(bytes.isEmpty())
+    {
+        setStatus(tr("The active resource profile could not resolve %1.").arg(textureName), true);
+        return;
+    }
+    const ei::SMmpInspection inspection = ei::inspectMmp(bytes);
+    if(!inspection.valid)
+    {
+        setStatus(tr("%1 is not reviewable: %2").arg(textureName, inspection.diagnostic), true);
+        return;
+    }
+
+    QDialog viewer(this);
+    viewer.setWindowTitle(tr("Existing minimap — %1").arg(textureName));
+    QVBoxLayout* layout = new QVBoxLayout(&viewer);
+    QLabel* details = new QLabel(tr(
+        "Profile source: %1\nFormat: %2\nDimensions: %3 × %4\nAuthored mip levels: %5\nSHA-256: %6")
+        .arg(QDir::toNativeSeparators(source), inspection.formatName)
+        .arg(inspection.width).arg(inspection.height)
+        .arg(inspection.authoredMipSizes.size())
+        .arg(QString::fromLatin1(inspection.sha256)));
+    details->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    layout->addWidget(details);
+    QLabel* image = new QLabel;
+    image->setPixmap(QPixmap::fromImage(inspection.baseImage));
+    image->setAlignment(Qt::AlignCenter);
+    QScrollArea* scroll = new QScrollArea;
+    scroll->setWidget(image);
+    scroll->setWidgetResizable(true);
+    layout->addWidget(scroll, 1);
+    QDialogButtonBox* buttons = new QDialogButtonBox(QDialogButtonBox::Close);
+    connect(buttons, &QDialogButtonBox::rejected, &viewer, &QDialog::reject);
+    layout->addWidget(buttons);
+    viewer.resize(qBound(560, inspection.width + 80, 1200),
+                  qBound(500, inspection.height + 180, 900));
+    viewer.exec();
 }
 
 void CMapTableEditorDialog::setStatus(const QString& text, bool error)
