@@ -423,7 +423,24 @@ MainWindow::MainWindow(QWidget* parent) :
             [this](const QPoint& point)
     {
         QTreeWidgetItem* item = m_loadedMapTree->itemAt(point);
-        if(!item || item->data(0, kLoadedMapKindRole).toInt() != kLoadedMapMob)
+        if(!item)
+            return;
+        const int kind = item->data(0, kLoadedMapKindRole).toInt();
+        if(kind == kLoadedMapMpr)
+        {
+            if(!item->isSelected())
+                m_loadedMapTree->setCurrentItem(item, 0,
+                    QItemSelectionModel::ClearAndSelect);
+            updateDocumentActionAvailability();
+            QMenu menu(this);
+            menu.addAction(m_ui->actionMap_parameters);
+            menu.addSeparator();
+            menu.addAction(m_ui->actionSave_landscape_MPR);
+            menu.addAction(m_ui->actionSave_landscape_MPR_as);
+            menu.exec(m_loadedMapTree->viewport()->mapToGlobal(point));
+            return;
+        }
+        if(kind != kLoadedMapMob)
             return;
         if(!item->isSelected())
             m_loadedMapTree->setCurrentItem(item, 0,
@@ -1259,6 +1276,8 @@ MainWindow::MainWindow(QWidget* parent) :
         {
             if(!m_landscapeToolsDock->isFloating())
                 m_landscapeDockHeight = qBound(260, m_landscapeToolsDock->height(), 900);
+            if(!m_restoringLandscapeDockLayout)
+                m_landscapeToolsLayout = saveState();
             if(!m_suppressLandscapeDockRestore)
                 restoreLayoutAfterLandscapeTools();
         }
@@ -4483,7 +4502,8 @@ void MainWindow::updateLoadedMapPanel()
     const bool hasMpr = CLandscape::getInstance()->isMprLoad();
     if(hasMpr)
     {
-        root->setText(0, CLandscape::getInstance()->filePath().fileName());
+        root->setText(0, CLandscape::getInstance()->filePath().fileName()
+                      + (CLandscape::getInstance()->isDirty() ? " *" : ""));
         root->setText(2, tr("MPR"));
         root->setToolTip(0, CLandscape::getInstance()->filePath().absoluteFilePath());
         root->setFlags(root->flags() | Qt::ItemIsUserCheckable);
@@ -4640,6 +4660,7 @@ void MainWindow::updateDocumentActionAvailability()
     const bool hasActiveMob = m_pView && m_pView->hasActiveMob();
     const bool hasAnyMob = m_pView && !m_pView->mobs().isEmpty();
     const bool hasMpr = CLandscape::getInstance()->isMprLoad();
+    const bool dirtyMpr = hasMpr && CLandscape::getInstance()->isDirty();
     m_ui->actionOpen->setEnabled(idle);
     m_ui->actionOpen_MPR->setEnabled(idle);
     m_ui->actionOpen_MOB->setEnabled(idle);
@@ -4649,9 +4670,9 @@ void MainWindow::updateDocumentActionAvailability()
     m_ui->actionSave->setEnabled(idle && hasActiveMob);
     m_ui->actionSave_as->setEnabled(idle && hasActiveMob);
     m_ui->actionSave_all_MOB_s->setEnabled(idle && hasAnyMob);
-    m_ui->actionSave_landscape_MPR->setEnabled(idle && hasMpr);
+    m_ui->actionSave_landscape_MPR->setEnabled(idle && dirtyMpr);
     m_ui->actionSave_landscape_MPR_as->setEnabled(idle && hasMpr);
-    m_ui->actionMap_parameters->setEnabled(idle && hasMpr);
+    m_ui->actionMap_parameters->setEnabled(idle);
     m_ui->actionClose_all->setEnabled(idle && (hasAnyMob || hasMpr));
 }
 
@@ -4690,6 +4711,15 @@ void MainWindow::showLandscapeTools()
     // temporary editing mode; hiding it must put Loaded Map, Outliner, and
     // Properties back at their pre-landscape sizes.
     m_layoutBeforeLandscapeTools = saveState();
+    if(!m_landscapeToolsLayout.isEmpty())
+    {
+        m_restoringLandscapeDockLayout = true;
+        restoreState(m_landscapeToolsLayout);
+        m_restoringLandscapeDockLayout = false;
+        m_landscapeToolsDock->show();
+        m_landscapeToolsDock->raise();
+        return;
+    }
     m_restoringLandscapeDockLayout = true;
     if(m_landscapeDockFloating)
         m_landscapeToolsDock->setFloating(true);
@@ -4724,7 +4754,11 @@ void MainWindow::showLandscapeTools()
 void MainWindow::hideLandscapeTools()
 {
     if(m_landscapeToolsDock && m_landscapeToolsDock->isVisible())
+    {
+        if(!m_restoringLandscapeDockLayout)
+            m_landscapeToolsLayout = saveState();
         m_landscapeToolsDock->hide();
+    }
 }
 
 void MainWindow::toggleLandscapeTools()
@@ -5495,6 +5529,9 @@ void MainWindow::updateWindowTitle(eTitleTypeData type, QString data)
     }
     rebuildWindowTitle();
     updateDocumentActionAvailability();
+    if(type == eTitleTypeData::eTitleTypeDataMpr
+       || type == eTitleTypeData::eTitleTypeDataMprDirtyFlag)
+        updateLoadedMapPanel();
     updateMapTestAction();
     if(type == eTitleTypeData::eTitleTypeDataMpr)
         refreshMapTestContext();

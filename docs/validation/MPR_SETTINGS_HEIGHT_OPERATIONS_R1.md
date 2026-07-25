@@ -65,6 +65,19 @@ Use a copied MPR or disposable test map only.
    Confirm there is no context-help button and the panel remains usable.
 10. Open **Atlas Tiles...** and select **Materials**. Confirm liquid material
     records and animated-tile records can be inspected. Mutation controls must
-    remain disabled in this increment.
+    remain disabled in this increment. Confirm the explanation identifies these
+    as overlay/liquid parameter slots referenced by overlay tiles, rather than
+    four selectable ground textures.
+11. In **Loaded Map**, right-click the MPR. Confirm **MPR Settings**, **Save
+    MPR**, and **Save MPR As** use the normal application actions. **Save MPR**
+    must be disabled while clean, become enabled after a terrain edit, and return
+    to disabled after a successful save or undo back to the clean state.
+12. Leave **MPR Settings** open and unload the MPR. Confirm the dock remains in
+    place and reads **No MPR loaded.** Load a different MPR and confirm the same
+    dock updates its source, namespace, dimensions, and ranges without reopening.
+13. Arrange **MPR Settings** above or below **Landscape Tools**, then close and
+    reopen Landscape Tools with **L**. Confirm the exact landscape-workspace dock
+    arrangement returns, while closing Landscape Tools still restores the prior
+    ordinary workspace.
 
 No test requires or authorizes mutation of the live game installation.

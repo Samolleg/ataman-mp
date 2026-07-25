@@ -5139,6 +5139,7 @@ void CView::loadLandscape(const QFileInfo& filePath)
     updateTileForm(true);
     rebuildTerrainAutoCatalog();
     refreshAiGraphPreviewSource();
+    refreshMprSettingsDock();
     emit selectionStateChanged(nSelectedNodes() > 0);
     if(m_landscapeTools && m_landscapeTools->editingEnabled())
         syncLandscapeToolState();
@@ -5164,7 +5165,6 @@ void CView::unloadLand(bool promptForSave)
 
     }
 
-    closeMprSettingsDock();
     m_mprModifyTimer->stop();
     m_overlayAnimationTimer.invalidate();
     m_terrainEditAvailable = false;
@@ -5174,6 +5174,7 @@ void CView::unloadLand(bool promptForSave)
     m_terrainSemanticSeed = 0;
     m_mprDocument = CMprDocument();
     m_pLand->unloadMpr();
+    refreshMprSettingsDock();
     refreshAiGraphPreviewSource();
     m_caveEnvironment = false;
     for(CMob* mob : m_aMob)
@@ -7581,11 +7582,9 @@ void CView::resetSelectedId()
 
 void CView::openMapParameters()
 {
-    if(!m_pLand->isMprLoad() || !m_terrainEditAvailable)
-        return;
-
     if(m_mprSettingsDock)
     {
+        refreshMprSettingsDock();
         m_mprSettingsDock->show();
         m_mprSettingsDock->raise();
         return;
@@ -7603,19 +7602,27 @@ void CView::openMapParameters()
                       QDockWidget::DockWidgetMovable |
                       QDockWidget::DockWidgetFloatable);
     dock->setWindowFlags(dock->windowFlags() & ~Qt::WindowContextHelpButtonHint);
-    QWidget* panel = new QWidget(dock);
-    dock->setWidget(panel);
+    QWidget* container = new QWidget(dock);
+    dock->setWidget(container);
+    QVBoxLayout* containerLayout = new QVBoxLayout(container);
+    QStackedWidget* statePages = new QStackedWidget(container);
+    containerLayout->addWidget(statePages);
+    QLabel* noMpr = new QLabel(tr("No MPR loaded."), statePages);
+    noMpr->setAlignment(Qt::AlignCenter);
+    noMpr->setWordWrap(true);
+    statePages->addWidget(noMpr);
+    QWidget* panel = new QWidget(statePages);
+    statePages->addWidget(panel);
     QVBoxLayout* layout = new QVBoxLayout(panel);
     QTabWidget* tabs = new QTabWidget(panel);
     layout->addWidget(tabs, 1);
 
     QWidget* summaryPage = new QWidget(tabs);
     QFormLayout* summaryForm = new QFormLayout(summaryPage);
-    QLabel* sourceValue = new QLabel(m_pLand->filePath().absoluteFilePath(), summaryPage);
+    QLabel* sourceValue = new QLabel(summaryPage);
     sourceValue->setTextInteractionFlags(Qt::TextSelectableByMouse);
     sourceValue->setWordWrap(true);
-    const SMprMapInfo& map = m_mprDocument.mapInfo();
-    QLabel* namespaceValue = new QLabel(map.innerNamespace, summaryPage);
+    QLabel* namespaceValue = new QLabel(summaryPage);
     namespaceValue->setTextInteractionFlags(Qt::TextSelectableByMouse);
     QLabel* dimensionsValue = new QLabel(summaryPage);
     QLabel* rangeValue = new QLabel(summaryPage);
@@ -7743,7 +7750,6 @@ void CView::openMapParameters()
         normalizeMinimum->setValue(range.minimumRaw);
         normalizeMaximum->setValue(range.maximumRaw);
     };
-    refreshSummary();
 
     const auto makeCommand = [this, operation, offset, flatten, clampMinimum,
                               clampMaximum, normalizeMinimum,
@@ -7803,6 +7809,8 @@ void CView::openMapParameters()
                 dock, [refreshPreview](int) { refreshPreview(); });
     connect(apply, &QPushButton::clicked, dock,
             [this, dock, makeCommand, refreshPreview, refreshSummary]() {
+        if(!m_pLand->isMprLoad() || !m_terrainEditAvailable)
+            return;
         CValidationReport report;
         const STerrainHeightCommand command = makeCommand(&report);
         const STerrainEditDiagnostics diagnostics = m_terrainEdit.diagnose(command);
@@ -7823,7 +7831,21 @@ void CView::openMapParameters()
         refreshSummary();
         refreshPreview();
     });
-    refreshPreview();
+    m_refreshMprSettingsDock = [this, statePages, panel, sourceValue,
+                                namespaceValue, refreshSummary, refreshPreview]() {
+        const bool loaded = m_pLand->isMprLoad() && m_terrainEditAvailable;
+        statePages->setCurrentIndex(loaded ? 1 : 0);
+        panel->setEnabled(loaded);
+        if(!loaded)
+            return;
+        sourceValue->setText(m_pLand->filePath().absoluteFilePath());
+        namespaceValue->setText(m_mprDocument.mapInfo().innerNamespace);
+        refreshSummary();
+        refreshPreview();
+    };
+    connect(m_pUndoStack, &QUndoStack::indexChanged, dock,
+            [this](int) { refreshMprSettingsDock(); });
+    refreshMprSettingsDock();
     host->addDockWidget(Qt::RightDockWidgetArea, dock);
     dock->resize(620, 520);
     dock->show();
@@ -7832,10 +7854,17 @@ void CView::openMapParameters()
 
 void CView::closeMprSettingsDock()
 {
+    m_refreshMprSettingsDock = {};
     if(!m_mprSettingsDock)
         return;
     delete m_mprSettingsDock.data();
     m_mprSettingsDock = nullptr;
+}
+
+void CView::refreshMprSettingsDock()
+{
+    if(m_refreshMprSettingsDock)
+        m_refreshMprSettingsDock();
 }
 
 void CView::openAtlasTiles()

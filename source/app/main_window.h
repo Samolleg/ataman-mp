@@ -245,6 +245,7 @@ private:
     QDockWidget* m_landscapeToolsDock;
     CLandscapeTools* m_landscapeTools;
     QByteArray m_layoutBeforeLandscapeTools;
+    QByteArray m_landscapeToolsLayout;
     Qt::DockWidgetArea m_landscapeDockArea{Qt::RightDockWidgetArea};
     int m_landscapeDockHeight{420};
     bool m_landscapeDockFloating{false};
