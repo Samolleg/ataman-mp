@@ -54,7 +54,10 @@ QVector3D getMaxValue(const QVector3D& vec1, const QVector3D& vec2);
 void removeProp(QList<QSharedPointer<IPropertyBase>>& aProp, EObjParam type);
 const QSharedPointer<IPropertyBase>& constProp(const QList<QSharedPointer<IPropertyBase>>& aProp, EObjParam type);
 void propListToUnitStat(SUnitStat& stat, const QVector<QSharedPointer<IPropertyBase>>& val);
-void bodyPartToProp(QMap<QString, QSharedPointer<propBool>>& arrBodyPart, const QString& modelName, const QStringList& bodyParts);
+void bodyPartToProp(QMap<QString, QSharedPointer<propBool>>& arrBodyPart,
+                    const QString& modelName, const QStringList& bodyParts,
+                    QSet<QString>* recognizedParts = nullptr);
+QStringList knownBodyPartOptions(const QString& modelName);
 void propToBodyPart(QStringList& bodyParts, const QMap<QString, QSharedPointer<propBool>>& arrBodyPart);
 
 float randomFloat(float a, float b);

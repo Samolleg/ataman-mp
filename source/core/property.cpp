@@ -284,9 +284,9 @@ CPropertyObjectParts::CPropertyObjectParts(
 
 CPropertyObjectParts::CPropertyObjectParts(
     EObjParam type, const QMap<QString, QSharedPointer<propBool>>& val,
-    const QStringList& serializedValue)
+    const QStringList& serializedValue, const QSet<QString>& recognizedParts)
     : IPropertyBase(type, true), m_value(val), m_serializedValue(serializedValue),
-      m_hasSerializedValue(true)
+      m_recognizedParts(recognizedParts), m_hasSerializedValue(true)
 {
     captureBaseline();
 }
@@ -308,6 +308,7 @@ IPropertyBase *CPropertyObjectParts::clone() const
         CPropertyObjectParts* result = new CPropertyObjectParts(type(), copied);
         result->m_baselineStates = m_baselineStates;
         result->m_serializedValue = m_serializedValue;
+        result->m_recognizedParts = m_recognizedParts;
         result->m_hasSerializedValue = m_hasSerializedValue;
         result->m_replaceAll = m_replaceAll;
         return result;
@@ -384,6 +385,7 @@ void CPropertyObjectParts::mergePartDataFromProp(CPropertyObjectParts* partFrom)
     m_hasSerializedValue = false;
     m_serializedValue.clear();
     m_replaceAll = false;
+    m_recognizedParts.unite(partFrom->m_recognizedParts);
     captureBaseline();
 }
 
@@ -461,4 +463,9 @@ bool CPropertyObjectParts::isSerializedPart(const QString& part) const
 int CPropertyObjectParts::serializedOccurrenceCount(const QString& part) const
 {
     return m_hasSerializedValue ? m_serializedValue.count(part) : 0;
+}
+
+bool CPropertyObjectParts::isRecognizedPart(const QString& part) const
+{
+    return m_recognizedParts.contains(part);
 }

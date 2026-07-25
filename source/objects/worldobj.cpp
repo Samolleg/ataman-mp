@@ -337,8 +337,10 @@ void CWorldObj::collectParams(QList<QSharedPointer<IPropertyBase>>& aProp, ENode
     if(nodeType() != eMagicTrap)
     {//bodyparts
         QMap<QString, QSharedPointer<propBool>> arrBodyPart;
-        util::bodyPartToProp(arrBodyPart, m_modelName, m_bodyParts);
-        propBodyPart bodyPart(eObjParam_BODYPARTS, arrBodyPart, m_bodyParts);
+        QSet<QString> recognizedParts;
+        util::bodyPartToProp(arrBodyPart, m_modelName, m_bodyParts, &recognizedParts);
+        propBodyPart bodyPart(eObjParam_BODYPARTS, arrBodyPart, m_bodyParts,
+                              recognizedParts);
         util::addBodyPartParam(aProp, &bodyPart);
     }
     propStr parentTemplate(eObjParam_PARENT_TEMPLATE, m_parentTemplate);
@@ -382,8 +384,10 @@ void CWorldObj::getParam(QSharedPointer<IPropertyBase>& prop, EObjParam propType
     case eObjParam_BODYPARTS:
     {
         QMap<QString, QSharedPointer<propBool>> arrBodyPart;
-        util::bodyPartToProp(arrBodyPart, m_modelName, m_bodyParts);
-        prop.reset(new propBodyPart(eObjParam_BODYPARTS, arrBodyPart, m_bodyParts));
+        QSet<QString> recognizedParts;
+        util::bodyPartToProp(arrBodyPart, m_modelName, m_bodyParts, &recognizedParts);
+        prop.reset(new propBodyPart(eObjParam_BODYPARTS, arrBodyPart, m_bodyParts,
+                                    recognizedParts));
         break;
     }
     case eObjParam_PLAYER:

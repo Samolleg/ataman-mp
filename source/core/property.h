@@ -2,6 +2,7 @@
 #define IPROPERTYBASE_H
 #include <QString>
 #include <QMap>
+#include <QSet>
 #include <QVector3D>
 #include <QStringList>
 #include "types.h"
@@ -216,7 +217,8 @@ public:
     CPropertyObjectParts(EObjParam type): IPropertyBase(type) {m_value.clear();}
     CPropertyObjectParts(EObjParam type, const QMap<QString, QSharedPointer<propBool>>& val);
     CPropertyObjectParts(EObjParam type, const QMap<QString, QSharedPointer<propBool>>& val,
-                         const QStringList& serializedValue);
+                         const QStringList& serializedValue,
+                         const QSet<QString>& recognizedParts = QSet<QString>());
     ~CPropertyObjectParts() {}
     IPropertyBase* clone() const override;
     bool isEqual(const IPropertyBase* pProp) const override final;
@@ -231,12 +233,14 @@ public:
     void replaceSerializedValue(const QStringList& value);
     bool isSerializedPart(const QString& part) const;
     int serializedOccurrenceCount(const QString& part) const;
+    bool isRecognizedPart(const QString& part) const;
 
 private:
     void captureBaseline();
     QMap<QString, QSharedPointer<propBool>> m_value;
     QMap<QString, int> m_baselineStates;
     QStringList m_serializedValue;
+    QSet<QString> m_recognizedParts;
     bool m_hasSerializedValue = false;
     bool m_replaceAll = false;
 };

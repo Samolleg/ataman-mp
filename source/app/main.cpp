@@ -13,6 +13,7 @@
 #include <QDir>
 #include <QTabWidget>
 #include <QCheckBox>
+#include <QHeaderView>
 #include <QKeySequenceEdit>
 #include <QLineEdit>
 #include <QTemporaryDir>
@@ -31,6 +32,7 @@
 #include <QScreen>
 #include <QWidget>
 #include <QVariant>
+#include <QSettings>
 #include <cstdio>
 #include <cstring>
 
@@ -45,6 +47,7 @@
 #include "settings.h"
 #include "jmv_map_test_launcher.h"
 #include "render_scheduling.h"
+#include "utils.h"
 
 #ifdef Q_OS_WIN
 #include <windows.h>
@@ -842,11 +845,17 @@ int runHeadlessCommand(QApplication& app)
             new propBool(eObjParam_BODYPARTS, true)));
         serializedPartMap.insert("future_part", QSharedPointer<propBool>(
             new propBool(eObjParam_BODYPARTS, true)));
+        serializedPartMap.insert("optional_part", QSharedPointer<propBool>(
+            new propBool(eObjParam_BODYPARTS, false)));
         const QStringList exactSerializedParts = {
             "bd", "hr", "future_part", "future_part"
         };
+        const QSet<QString> recognizedPartOptions = {
+            "bd", "hr", "optional_part"
+        };
         QSharedPointer<IPropertyBase> serializedPartsProperty(new propBodyPart(
-            eObjParam_BODYPARTS, serializedPartMap, exactSerializedParts));
+            eObjParam_BODYPARTS, serializedPartMap, exactSerializedParts,
+            recognizedPartOptions));
         CBodyPartEditForm bodyPartForm;
         bodyPartForm.setPartData(serializedPartsProperty);
         QTableWidget* bodyPartTable = bodyPartForm.findChild<QTableWidget*>("tablePart");
@@ -862,6 +871,47 @@ int runHeadlessCommand(QApplication& app)
                     && (bodyPartTable->item(row, 0)->text() == "hr"
                         ? !bodyPartTable->isRowHidden(row)
                         : bodyPartTable->isRowHidden(row));
+        auto filterShowsOnly = [&](const QString& filter,
+                                   const QStringList& visibleParts) {
+            if(!bodyPartTable || !bodyPartFilter) return false;
+            bodyPartFilter->setText(filter);
+            for(int row = 0; row < bodyPartTable->rowCount(); ++row)
+            {
+                const QString part = bodyPartTable->item(row, 0)->text();
+                if(bodyPartTable->isRowHidden(row) == visibleParts.contains(part))
+                    return false;
+            }
+            return true;
+        };
+        const bool bodyPartStateFilterAliases =
+            filterShowsOnly("true", {"bd", "hr", "future_part"})
+            && filterShowsOnly("unchecked", {"optional_part"});
+        const bool bodyPartSourceFiltering =
+            filterShowsOnly("model option", {"optional_part"})
+            && filterShowsOnly("unknown", {"future_part"});
+        bodyPartFilter->clear();
+        bodyPartTable->sortItems(0, Qt::DescendingOrder);
+        const bool bodyPartColumnSorting = bodyPartTable->isSortingEnabled()
+            && bodyPartTable->horizontalHeader()->sectionsClickable()
+            && bodyPartTable->item(0, 0)->text() == "optional_part";
+        const bool humanoidHairOptionAvailable =
+            util::knownBodyPartOptions("unhufe").contains("hr")
+            && util::knownBodyPartOptions("unhuma.mod").contains("hr")
+            && !util::knownBodyPartOptions("unwolf").contains("hr");
+        QSettings bodyPartSettings;
+        const QString bodyPartSizeKey = "ui/bodyPartEditorSize";
+        const bool hadBodyPartSize = bodyPartSettings.contains(bodyPartSizeKey);
+        const QVariant previousBodyPartSize = bodyPartSettings.value(bodyPartSizeKey);
+        const QSize testBodyPartSize(612, 734);
+        bodyPartForm.resize(testBodyPartSize);
+        bodyPartForm.close();
+        CBodyPartEditForm restoredBodyPartForm;
+        const bool bodyPartWindowSizePersists =
+            restoredBodyPartForm.size() == testBodyPartSize;
+        if(hadBodyPartSize)
+            bodyPartSettings.setValue(bodyPartSizeKey, previousBodyPartSize);
+        else
+            bodyPartSettings.remove(bodyPartSizeKey);
         const propBodyPart* serializedParts =
             dynamic_cast<const propBodyPart*>(serializedPartsProperty.get());
         const bool bodyPartNoOpPreservesExactArray = serializedParts
@@ -1082,6 +1132,11 @@ int runHeadlessCommand(QApplication& app)
                 && mixedModelPartsVisible
                 && serializedUnknownPartsVisible
                 && bodyPartFilterDisplayOnly
+                && bodyPartStateFilterAliases
+                && bodyPartSourceFiltering
+                && bodyPartColumnSorting
+                && humanoidHairOptionAvailable
+                && bodyPartWindowSizePersists
                 && bodyPartNoOpPreservesExactArray
                 && bodyPartOrderParticipatesInEquality
                 && bodyPartDeltaPreservesHiddenAndDuplicates
@@ -1144,6 +1199,11 @@ int runHeadlessCommand(QApplication& app)
                << " mixedModelPartsVisible=" << mixedModelPartsVisible
                << " serializedUnknownPartsVisible=" << serializedUnknownPartsVisible
                << " bodyPartFilterDisplayOnly=" << bodyPartFilterDisplayOnly
+               << " bodyPartStateFilterAliases=" << bodyPartStateFilterAliases
+               << " bodyPartSourceFiltering=" << bodyPartSourceFiltering
+               << " bodyPartColumnSorting=" << bodyPartColumnSorting
+               << " humanoidHairOptionAvailable=" << humanoidHairOptionAvailable
+               << " bodyPartWindowSizePersists=" << bodyPartWindowSizePersists
                << " bodyPartNoOpPreservesExactArray=" << bodyPartNoOpPreservesExactArray
                << " bodyPartOrderParticipatesInEquality="
                << bodyPartOrderParticipatesInEquality

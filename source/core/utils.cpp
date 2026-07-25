@@ -1274,12 +1274,40 @@ void util::propListToUnitStat(SUnitStat& stat, const QVector<QSharedPointer<IPro
     if(val[50]->isInit()) stat.empty3              = dynamic_cast<propChar*>(val[50].get())->value();
 }
 
-void util::bodyPartToProp(QMap<QString, QSharedPointer<propBool>>& arrBodyPart, const QString& modelName, const QStringList& bodyParts)
+QStringList util::knownBodyPartOptions(const QString& modelName)
+{
+    QString normalizedModel = modelName.trimmed().toLower();
+    if(normalizedModel.endsWith(".mod")) normalizedModel.chop(4);
+    static const QSet<QString> wearableHumanoids = {
+        "unhuma", "unhufe", "unorma", "unorfe", "unhusk", "unhuzm", "unhuzf"
+    };
+    if(!wearableHumanoids.contains(normalizedModel)) return {};
+    return {
+            "hp", "bd", "hd", "hr",
+            "lh1", "rh1", "lh2", "rh2", "lh3", "rh3",
+            "ll1", "rl1", "ll2", "rl2", "ll3", "rl3"
+    };
+}
+
+void util::bodyPartToProp(QMap<QString, QSharedPointer<propBool>>& arrBodyPart,
+                          const QString& modelName, const QStringList& bodyParts,
+                          QSet<QString>* recognizedParts)
 {
     arrBodyPart.clear();
     QStringList arrModelPart;
     if(ei::CFigure* figure = CObjectList::getInstance()->getFigure(modelName))
         figure->getPartNames(arrModelPart);
+    QSet<QString> recognized;
+    for(const QString& part : arrModelPart) recognized.insert(part);
+
+    // Wearable humanoid assemblies can omit optional runtime-selected anatomy
+    // from the loaded model tree. OBJBODYPARTS still uses these canonical base
+    // tokens, notably hr, which the game needs for correct helmet/hair logic.
+    for(const QString& part : knownBodyPartOptions(modelName))
+    {
+        recognized.insert(part);
+        if(!arrModelPart.contains(part)) arrModelPart.append(part);
+    }
     for(auto& part: arrModelPart)
     {
         arrBodyPart[part] = QSharedPointer<propBool>(new propBool(eObjParam_BODYPARTS, bodyParts.empty() || bodyParts.contains(part)));
@@ -1288,6 +1316,7 @@ void util::bodyPartToProp(QMap<QString, QSharedPointer<propBool>>& arrBodyPart, 
         if(!arrBodyPart.contains(part))
             arrBodyPart.insert(part, QSharedPointer<propBool>(
                 new propBool(eObjParam_BODYPARTS, true)));
+    if(recognizedParts) *recognizedParts = recognized;
 }
 
 void util::addBodyPartParam(QList<QSharedPointer<IPropertyBase>>& aProp, IPropertyBase* pProp)

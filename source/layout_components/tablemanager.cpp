@@ -111,12 +111,7 @@ QSharedPointer<IPropertyBase> clonePropertyValue(const QSharedPointer<IPropertyB
     if(!property->isInit())
         return property->createEmptyCopy();
     if(const propBodyPart* parts = dynamic_cast<const propBodyPart*>(property.get()))
-    {
-        QMap<QString, QSharedPointer<propBool>> copied;
-        for(auto it = parts->value().constBegin(); it != parts->value().constEnd(); ++it)
-            copied.insert(it.key(), QSharedPointer<propBool>(dynamic_cast<propBool*>(it.value()->clone())));
-        return QSharedPointer<IPropertyBase>(new propBodyPart(property->type(), copied));
-    }
+        return QSharedPointer<IPropertyBase>(parts->clone());
     if(const propUnitStat* stats = dynamic_cast<const propUnitStat*>(property.get()))
     {
         QVector<QSharedPointer<IPropertyBase>> copied;

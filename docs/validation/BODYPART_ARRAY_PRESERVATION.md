@@ -27,7 +27,14 @@ so NID 800004's missing `hr` predates Endurance.
 - The serialized MOB string array is authoritative.
 - Every serialized token is visible, even when the current figure or profile
   does not recognize it.
-- Filtering changes display only.
+- Filtering changes display only. It searches part name, source, and state;
+  `true`/`checked`/`on` and `false`/`unchecked`/`off` are state aliases.
+- Recognized but absent entries are labeled `Model option`. Unrecognized MOB
+  entries are labeled `Unknown serialized` and remain fully editable/lossless.
+- Wearable humanoid families expose the canonical base-anatomy options even
+  when an optional runtime-selected member such as `hr` is absent from the
+  currently resolved assembly and from the malformed MOB object.
+- Column headers sort the table, and the Parts window retains its last size.
 - No-op Apply retains the exact array byte semantics: order, duplicate tokens,
   unknown tokens, and the empty-list convention.
 - Checkbox edits are deltas against each selected object's original array.
@@ -40,10 +47,12 @@ extensions and must remain inspectable and lossless.
 ## Automated evidence
 
 - `EIMapperEndurance.exe --ui-widget-check`: passes exact-array, unknown-token,
-  filter-only, order-sensitive equality, duplicate-token, and delta-preservation
-  checks.
+  state/source-filter, column-sorting, canonical-hair-option, filter-only,
+  order-sensitive equality, duplicate-token, and delta-preservation checks.
 - `mob_family_validation_tests`: passes the renamed-primary overlay regression
   for installed `zone3obr.mob` plus loaded `zone3obrtest.mob`.
 - The supplied `zone3obrtest2.mob` passes `--validate` and
   `--roundtrip-check`; neither command writes the input.
-
+- The supplied `zone3obrtest1.mob` is byte-identical to original
+  `zone3obr.mob` after opening Parts and applying without changes: both have
+  SHA-256 `F3F15E3A5DADD1ED52966DB94EFAB32D5E1780C2501FABC4C6B47E52CC3C7DC5`.
