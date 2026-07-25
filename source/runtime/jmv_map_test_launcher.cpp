@@ -1912,6 +1912,8 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
                                           m_temporaryMapName,
                                           input.mapEntry.allodId,
                                           m_temporaryMapName,
+                                          input.mapSizeX,
+                                          input.mapSizeY,
                                           input.spawn.position,
                                           &stagedArchive, &stagingErrors))
         {
@@ -1962,9 +1964,16 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
                                 fileSha256(input.sourceMpr.absoluteFilePath()));
     request.sourceSha256.insert(input.sourceMob.absoluteFilePath(),
                                 fileSha256(input.sourceMob.absoluteFilePath()));
-    if(graphSource.usesExternalGraph())
+    // A generated graph is an owned staged payload, not a source file. Do not
+    // put its diagnostic pseudo-path into the source-integrity inventory.
+    if(graphSource.usesExternalGraph() && QFileInfo(graphSource.externalPath).isFile())
     {
         request.sourceSha256.insert(graphSource.externalPath, graphSource.sha256);
+        request.stagedSha256.insert(QFileInfo(stagedGrpPath).fileName(),
+                                    graphSource.sha256);
+    }
+    else if(graphSource.usesExternalGraph())
+    {
         request.stagedSha256.insert(QFileInfo(stagedGrpPath).fileName(),
                                     graphSource.sha256);
     }

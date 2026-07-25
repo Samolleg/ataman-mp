@@ -13,6 +13,8 @@ bool buildSyntheticMapTableArchive(const QByteArray& sourceArchive,
                                    const QString& zoneId,
                                    const QString& allodId,
                                    const QString& mapName,
+                                   int mapSizeX,
+                                   int mapSizeY,
                                    const QPointF& spawn,
                                    QByteArray* outputArchive,
                                    QStringList* errors = nullptr);

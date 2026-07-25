@@ -19,6 +19,8 @@ bool buildSyntheticMapTableArchive(const QByteArray& sourceArchive,
                                    const QString& zoneId,
                                    const QString& allodId,
                                    const QString& mapName,
+                                   int mapSizeX,
+                                   int mapSizeY,
                                    const QPointF& spawn,
                                    QByteArray* outputArchive,
                                    QStringList* errors)
@@ -26,7 +28,8 @@ bool buildSyntheticMapTableArchive(const QByteArray& sourceArchive,
     if(outputArchive)
         outputArchive->clear();
     if(sourceArchive.isEmpty() || zoneId.isEmpty() || allodId.isEmpty()
-       || mapName.isEmpty() || !outputArchive)
+       || mapName.isEmpty() || mapSizeX <= 0 || mapSizeY <= 0
+       || mapSizeX > 1024 || mapSizeY > 1024 || !outputArchive)
     {
         addError(errors, "Synthetic map-table staging received incomplete input.");
         return false;
@@ -58,8 +61,18 @@ bool buildSyntheticMapTableArchive(const QByteArray& sourceArchive,
     zone.zoneType = "game";
     zone.mprName = mapName;
     zone.mobName = mapName;
-    // Deliberately omit #maps. This keeps both UI texture names empty. The
-    // bridge sets only the two numeric terrain dimensions after lookup.
+    // A gameplay-zone mission screen constructs its minimap immediately and
+    // expects both a valid map size and a successfully loaded minimap texture.
+    // battle00 is a base interface texture which is already required by the
+    // mission UI, so it is a safe neutral fallback without staging or replacing
+    // any installed texture archive. The objectives screen uses the second
+    // name lazily and receives the same owned fallback until generated map
+    // captures are available.
+    zone.maps.present = true;
+    zone.maps.sectorWidth = mapSizeX;
+    zone.maps.sectorHeight = mapSizeY;
+    zone.maps.minimapTexture = "battle00";
+    zone.maps.objectivesTexture = "battle00";
     SMapTableExit exit;
     exit.exitId = 1;
     exit.destinationZoneId = "none";
@@ -109,7 +122,12 @@ bool buildSyntheticMapTableArchive(const QByteArray& sourceArchive,
         ++matches;
         if(item.mprName.compare(mapName, Qt::CaseInsensitive) != 0
            || item.mobName.compare(mapName, Qt::CaseInsensitive) != 0
-           || item.maps.present || item.exits.size() != 1)
+           || !item.maps.present
+           || item.maps.sectorWidth != mapSizeX
+           || item.maps.sectorHeight != mapSizeY
+           || item.maps.minimapTexture.compare("battle00", Qt::CaseInsensitive) != 0
+           || item.maps.objectivesTexture.compare("battle00", Qt::CaseInsensitive) != 0
+           || item.exits.size() != 1)
             addError(&localErrors, "The staged synthetic zone failed semantic reopen validation.");
     }
     if(matches != 1)

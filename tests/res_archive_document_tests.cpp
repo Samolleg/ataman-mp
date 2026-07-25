@@ -230,7 +230,8 @@ void ResArchiveDocumentTests::syntheticMapTableAddsOwnedMaplessZoneLosslessly()
     QStringList errors;
     QVERIFY2(buildSyntheticMapTableArchive(
         original, "texts.res", "ed1234abcd", "island", "ed1234abcd",
-        QPointF(12.5, 18.25), &staged, &errors), qPrintable(errors.join('\n')));
+        7, 5, QPointF(12.5, 18.25), &staged, &errors),
+        qPrintable(errors.join('\n')));
     QVERIFY(staged != original);
 
     CResArchiveDocument baseline;
@@ -252,7 +253,11 @@ void ResArchiveDocumentTests::syntheticMapTableAddsOwnedMaplessZoneLosslessly()
         ++matches;
         QCOMPARE(zone.mprName, QString("ed1234abcd"));
         QCOMPARE(zone.mobName, QString("ed1234abcd"));
-        QVERIFY(!zone.maps.present);
+        QVERIFY(zone.maps.present);
+        QCOMPARE(zone.maps.sectorWidth, 7);
+        QCOMPARE(zone.maps.sectorHeight, 5);
+        QCOMPARE(zone.maps.minimapTexture, QString("battle00"));
+        QCOMPARE(zone.maps.objectivesTexture, QString("battle00"));
         QCOMPARE(zone.exits.size(), 1);
         QCOMPARE(zone.exits.first().destinationZoneId, QString("none"));
         QCOMPARE(zone.exits.first().deployRectangle.center(), QPointF(12.5, 18.25));

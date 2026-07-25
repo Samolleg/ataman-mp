@@ -5,7 +5,7 @@ work is ordered from the newest planned minor line to the oldest completed one.
 An item is checked only after its implementation has landed and received the
 stated validation. Completed code should carry a commit, test, or release link.
 
-Current development line: `0.3.0-alpha.7` focused closed testing. This is a
+Current development line: `0.3.0-alpha.8` focused closed testing. This is a
 version reclassification of the feature set that outgrew the `0.2.1` label,
 not a serializer or compatibility reset. The remaining 0.3 release work is the
 final runtime/corpus matrix, focused confirmation of the new live-clock and
@@ -1492,10 +1492,10 @@ an operation safely.
 - If testing exposes a regression, reopen the item and record the concrete case.
 
 </details>
-- [x] Rescue a zero-object, graphless Test Current Map without weakening the
-  ordinary graphless workflow. Endurance now regenerates the current terrain's
-  navigation graph only for a structurally empty primary MOB, serializes and
-  freshly reparses it, and stages it as a run-local `.grp`. Ordinary graphless
-  maps still use the existing non-blocking warning and explicit confirmation;
-  source MPR/MOB files are never changed. Runtime confirmation remains required
-  against the `00-empty-control` collection.
+- [ ] Runtime-confirm the complete synthetic `game` identity used by unmapped
+  MPR/MOB testing. The alpha.7 generated-graph control still crashed after
+  `GameplayReady`, disproving the graph-only explanation. Alpha.8 now supplies
+  the loaded MPR dimensions, safe built-in minimap/objectives placeholders,
+  and one private deploy entrance because the normal mission UI and player
+  bootstrap consume those fields. The installed map table and source files
+  remain unchanged.
