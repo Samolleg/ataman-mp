@@ -3,6 +3,7 @@
 #include <QFile>
 
 #include "minimap_bake.h"
+#include "minimap_catalog_registration.h"
 #include "mmp_codec.h"
 #include "mmp_inspector.h"
 #include "res_archive_document.h"
@@ -22,6 +23,7 @@ private slots:
     void encodesInspectable256Mmp();
     void createsAddsReplacesAndRefusesCollision();
     void validationFailureDoesNotPublish();
+    void registersCatalogOnlyAfterExportAndPreservesObjectives();
 };
 
 void MinimapExportTests::bakes128PixelsPerSectorAndExcludesDynamic()
@@ -113,6 +115,38 @@ void MinimapExportTests::validationFailureDoesNotPublish()
     const auto result = exportMmpToRes(request);
     QVERIFY(!result.success);
     QVERIFY(!QFileInfo::exists(path));
+}
+
+void MinimapExportTests::registersCatalogOnlyAfterExportAndPreservesObjectives()
+{
+    const QByteArray mapTable =
+        "#zone gz1g gipat game\r\n"
+        "#res\r\nzone1 zone1\r\n"
+        "#maps\r\n11 9\r\noldmap zone1quest\r\n"
+        "#unknown\r\nauthored bytes\r\n";
+    SMinimapCatalogRegistrationRequest request;
+    request.mapTableBytes = mapTable;
+    request.zoneId = "gz1g";
+    request.textureName = "newmap";
+    request.registrationConfirmed = true;
+
+    auto beforeExport = prepareMinimapCatalogRegistration(request);
+    QVERIFY(!beforeExport.success);
+    QCOMPARE(beforeExport.updatedMapTableBytes, mapTable);
+
+    request.textureExportSucceeded = true;
+    request.registrationConfirmed = false;
+    auto unconfirmed = prepareMinimapCatalogRegistration(request);
+    QVERIFY(!unconfirmed.success);
+    QCOMPARE(unconfirmed.updatedMapTableBytes, mapTable);
+
+    request.registrationConfirmed = true;
+    auto registered = prepareMinimapCatalogRegistration(request);
+    QVERIFY2(registered.success, qPrintable(registered.error));
+    QCOMPARE(registered.preservedObjectivesTexture, QString("zone1quest"));
+    QVERIFY(registered.updatedMapTableBytes.contains("newmap zone1quest\r\n"));
+    QVERIFY(registered.updatedMapTableBytes.contains("#unknown\r\nauthored bytes\r\n"));
+    QVERIFY(!registered.updatedMapTableBytes.contains("oldmap zone1quest"));
 }
 
 QTEST_APPLESS_MAIN(MinimapExportTests)
