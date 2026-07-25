@@ -6,6 +6,7 @@
 #include "landscape.h"
 #include "math_utils.h"
 #include "log.h"
+#include "overlay_material_animation.h"
 #include "utils.h"
 #include "view_frustum.h"
 
@@ -24,10 +25,12 @@ CSector::~CSector()
     m_waterIndexBuf.destroy();
 }
 
-CSector::CSector(QDataStream& stream, float maxZ, int texCount)
+CSector::CSector(QDataStream& stream, float maxZ, int texCount,
+                 const QVector<SMaterial>* materials)
     :m_indexBuf(QOpenGLBuffer::IndexBuffer)
     ,m_gridIndexBuf(QOpenGLBuffer::IndexBuffer)
     ,m_waterIndexBuf(QOpenGLBuffer::IndexBuffer)
+    ,m_materials(materials)
 {
     uint signature;
     stream >> signature;
@@ -507,6 +510,33 @@ void CSector::generateVertexDataFromTile()
 
     Q_ASSERT(curIndex == m_arrLandVrtData.size());
     Q_ASSERT(!bWater || waterIndex == m_arrWaterVrtData.size());
+
+    m_arrAnimatedWaterVrtData.resize(m_arrWaterVrtData.size());
+    for(int row = 0; bWater && row < m_arrWater.size(); ++row)
+        for(int col = 0; col < m_arrWater.at(row).size(); ++col)
+        {
+            const int materialIndex = m_arrWater.at(row).at(col).materialIndex();
+            const SMaterial* material = m_materials && materialIndex >= 0
+                    && materialIndex < m_materials->size()
+                ? &m_materials->at(materialIndex) : nullptr;
+            const ei::SOverlayMaterialAnimation animation =
+                ei::overlayMaterialAnimation(material);
+            for(int vertex = 0; vertex < 9; ++vertex)
+            {
+                const int index = (row * nTile + col) * 9 + vertex;
+                const SVertexData& source = m_arrWaterVrtData.at(index);
+                SWaterVertexData& target = m_arrAnimatedWaterVrtData[index];
+                target.position = source.position;
+                target.normal = source.normal;
+                target.texCoord = source.texCoord;
+                const int gridX = col * 2 + vertex % 3;
+                const int gridY = row * 2 + vertex / 3;
+                target.animation = QVector4D(animation.waveMultiplier,
+                    animation.authoredWarpSpeed, ei::overlayWindNoise(gridX, gridY),
+                    animation.animated ? 1.0f : 0.0f);
+                target.grid = QVector2D(float(gridX), float(gridY));
+            }
+        }
 }
 
 void CSector::updatePosition()
@@ -542,6 +572,8 @@ void CSector::updatePosition()
     {
         m_boundsCenter = (minimum + maximum) * 0.5f + sectorOffset;
         m_boundsRadius = (maximum - minimum).length() * 0.5f;
+        if(!m_arrWaterVrtData.isEmpty())
+            m_boundsRadius += 1.0f;
     }
     else
     {
@@ -595,7 +627,8 @@ void CSector::updatePosition()
     {
         //m_modelMatrix.translate(QVector3D(m_index.x*32.0f, m_index.y*32.0f, .0f));
         m_waterVertexBuf.bind();
-        m_waterVertexBuf.allocate(m_arrWaterVrtData.data(), m_arrWaterVrtData.count()*int(sizeof(SVertexData)));
+        m_waterVertexBuf.allocate(m_arrAnimatedWaterVrtData.data(),
+            m_arrAnimatedWaterVrtData.count() * int(sizeof(SWaterVertexData)));
         m_waterVertexBuf.release();
 
         m_waterIndexBuf.bind();
@@ -666,6 +699,18 @@ void CSector::draw(QOpenGLShaderProgram* program)
     int textureLocation = program->attributeLocation("a_texture");
     program->enableAttributeArray(textureLocation);
     program->setAttributeBuffer(textureLocation, GL_FLOAT, offset, 2, int(sizeof(SVertexData)));
+    const int animationLocation = program->attributeLocation("a_overlayAnimation");
+    if(animationLocation >= 0)
+    {
+        program->disableAttributeArray(animationLocation);
+        program->setAttributeValue(animationLocation, QVector4D());
+    }
+    const int gridLocation = program->attributeLocation("a_overlayGrid");
+    if(gridLocation >= 0)
+    {
+        program->disableAttributeArray(gridLocation);
+        program->setAttributeValue(gridLocation, QVector2D());
+    }
 
     m_indexBuf.bind();
     constexpr int indexNum = 256*24; // 256 tiles * 4 cells * 2 triangles * 3 indices
@@ -691,17 +736,34 @@ void CSector::drawWater(QOpenGLShaderProgram *program)
     m_waterVertexBuf.bind();
     int vertLoc = program->attributeLocation("a_position");
     program->enableAttributeArray(vertLoc);
-    program->setAttributeBuffer(vertLoc, GL_FLOAT, offset, 3, int(sizeof(SVertexData)));
+    program->setAttributeBuffer(vertLoc, GL_FLOAT, offset, 3, int(sizeof(SWaterVertexData)));
 
     offset += int(sizeof(QVector3D));
     int normLoc = program->attributeLocation("a_normal");
     program->enableAttributeArray(normLoc);
-    program->setAttributeBuffer(normLoc, GL_FLOAT, offset, 3, int(sizeof(SVertexData)));
+    program->setAttributeBuffer(normLoc, GL_FLOAT, offset, 3, int(sizeof(SWaterVertexData)));
 
     offset+=int(sizeof(QVector3D)); // size of normal
     int textureLocation = program->attributeLocation("a_texture");
     program->enableAttributeArray(textureLocation);
-    program->setAttributeBuffer(textureLocation, GL_FLOAT, offset, 2, int(sizeof(SVertexData)));
+    program->setAttributeBuffer(textureLocation, GL_FLOAT, offset, 2, int(sizeof(SWaterVertexData)));
+
+    offset += int(sizeof(QVector2D));
+    const int animationLocation = program->attributeLocation("a_overlayAnimation");
+    if(animationLocation >= 0)
+    {
+        program->enableAttributeArray(animationLocation);
+        program->setAttributeBuffer(animationLocation, GL_FLOAT, offset, 4,
+                                    int(sizeof(SWaterVertexData)));
+    }
+    offset += int(sizeof(QVector4D));
+    const int gridLocation = program->attributeLocation("a_overlayGrid");
+    if(gridLocation >= 0)
+    {
+        program->enableAttributeArray(gridLocation);
+        program->setAttributeBuffer(gridLocation, GL_FLOAT, offset, 2,
+                                    int(sizeof(SWaterVertexData)));
+    }
 
     m_waterIndexBuf.bind();
     const int indexCount = (m_arrWaterVrtData.count() / 9) * 24;
