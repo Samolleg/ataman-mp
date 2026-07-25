@@ -1429,6 +1429,9 @@ void ParticleAnimationTests::persistentEmittersBoundInitialWallClockReplay()
     ei::particle::CastingGatherEmitter castingGather;
     ei::particle::CastingStarRoundEmitter castingRound;
     ei::particle::CastingFailedEmitter castingFailed;
+    ei::particle::ZoneExitEmitter zoneExit;
+    ei::particle::PortalStarEmitter portalStar;
+    ei::particle::PortalEmitter portal;
     moshka.advanceTo(wallClockTick, 8252u, origin, 1.0f);
     vision.advanceTo(wallClockTick, 8260u, origin, 1.0f, 0);
     regeneration.advanceTo(wallClockTick, 8263u, origin, 1.0f);
@@ -1446,6 +1449,9 @@ void ParticleAnimationTests::persistentEmittersBoundInitialWallClockReplay()
     castingGather.advanceTo(wallClockTick, 8231u, 8231u, origin, 1.0f);
     castingRound.advanceTo(wallClockTick, 8235u, 8235u, origin, 1.0f);
     castingFailed.advanceTo(wallClockTick, 8239u, origin, 1.0f);
+    zoneExit.advanceTo(wallClockTick, 8248u, origin, 1.0f);
+    portalStar.advanceTo(wallClockTick, 8253u, origin, 1.0f);
+    portal.advanceTo(wallClockTick, 8254u, origin, 1.0f);
     QVERIFY(moshka.activeCount() > 0 && moshka.activeCount() <= 800);
     QCOMPARE(vision.activeCount(), 1);
     QCOMPARE(regeneration.activeCount(), 2);
@@ -1463,6 +1469,9 @@ void ParticleAnimationTests::persistentEmittersBoundInitialWallClockReplay()
     QVERIFY(castingGather.activeCount() > 0 && castingGather.activeCount() <= 500);
     QVERIFY(castingRound.activeCount() > 0 && castingRound.activeCount() <= 600);
     QVERIFY(castingFailed.activeCount() > 0 && castingFailed.activeCount() <= 500);
+    QVERIFY(zoneExit.activeCount() > 0 && zoneExit.activeCount() <= 600);
+    QCOMPARE(portalStar.samples().size(), 1);
+    QVERIFY(portal.activeCount() > 0 && portal.activeCount() <= 800);
 }
 
 QTEST_APPLESS_MAIN(ParticleAnimationTests)

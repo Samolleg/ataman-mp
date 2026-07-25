@@ -3947,7 +3947,7 @@ public:
                    float)
     {
         if(!m_initialized || seed != m_seed || logicalTick < m_tick)
-            reset(seed, origin);
+            reset(logicalTick, seed, origin);
         m_origin = origin;
         while(m_tick < logicalTick)
         {
@@ -3991,13 +3991,15 @@ private:
         return low + (high - low) * m_rng.unit();
     }
 
-    void reset(quint32 seed, const QVector3D& origin)
+    void reset(qint64 logicalTick, quint32 seed, const QVector3D& origin)
     {
         m_seed = seed;
         m_rng.reset(seed ^ 0x5A4F4E45u);
         m_origin = origin;
         m_particles.clear();
-        m_tick = 0;
+        // Preserve the established 20-quant preview warm-up without replaying
+        // absolute wall-clock time when this persistent emitter is first seen.
+        m_tick = qMax<qint64>(0, logicalTick - 20);
         m_initialized = true;
     }
 
@@ -4514,7 +4516,7 @@ public:
                    float authoredScale)
     {
         if(!m_initialized || seed != m_seed || logicalTick < m_tick)
-            reset(seed, origin, authoredScale);
+            reset(logicalTick, seed, origin, authoredScale);
         m_origin = origin;
         m_authoredScale = qFuzzyIsNull(authoredScale) ? 1.0f : authoredScale;
         while(m_tick < logicalTick)
@@ -4543,7 +4545,8 @@ private:
         return low + (high - low) * m_rng.unit();
     }
 
-    void reset(quint32 seed, const QVector3D& origin, float authoredScale)
+    void reset(qint64 logicalTick, quint32 seed, const QVector3D& origin,
+               float authoredScale)
     {
         m_seed = seed;
         m_rng.reset(seed ^ 0x50535452u);
@@ -4551,7 +4554,7 @@ private:
         m_authoredScale = qFuzzyIsNull(authoredScale) ? 1.0f : authoredScale;
         m_particle = PortalStarParticle{};
         m_particle.position = origin;
-        m_tick = 0;
+        m_tick = qMax<qint64>(0, logicalTick - 1);
         m_initialized = true;
     }
 
@@ -4588,7 +4591,7 @@ public:
                    float authoredScale)
     {
         if(!m_initialized || seed != m_seed || logicalTick < m_tick)
-            reset(seed, origin, authoredScale);
+            reset(logicalTick, seed, origin, authoredScale);
         m_origin = origin;
         m_authoredScale = qFuzzyIsNull(authoredScale) ? 1.0f : authoredScale;
         while(m_tick < logicalTick)
@@ -4624,7 +4627,8 @@ private:
         return low + (high - low) * m_rng.unit();
     }
 
-    void reset(quint32 seed, const QVector3D& origin, float authoredScale)
+    void reset(qint64 logicalTick, quint32 seed, const QVector3D& origin,
+               float authoredScale)
     {
         m_seed = seed;
         m_rng.reset(seed ^ 0x504F5254u);
@@ -4632,7 +4636,9 @@ private:
         m_authoredScale = qFuzzyIsNull(authoredScale) ? 1.0f : authoredScale;
         m_particles.clear();
         m_firstCreationPass = true;
-        m_tick = 0;
+        // Twenty quants reproduce the existing stable portal preview while
+        // bounding first-frame work for epoch-derived logical ticks.
+        m_tick = qMax<qint64>(0, logicalTick - 20);
         m_initialized = true;
     }
 

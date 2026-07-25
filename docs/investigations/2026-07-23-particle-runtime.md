@@ -1876,6 +1876,35 @@ and `8BF4915BD31A78854ABB98213F584E6436E767103E463F4954C57E95F7E92DDF`.
 `FireSmoke` and `Healing` were already fingerprinted. These executable and
 resource findings precede the simulator and renderer changes below.
 
+## Full-catalog editor freeze and Vulcansmoke runtime control
+
+The 2026-07-25 alpha.6 full-catalog freeze is editor-confirmed and is not
+caused by the absent `Vulkan` atlas. Single-Smoke, single-Vulcansmoke, and the
+complete first catalog row containing Vulcansmoke all continue rendering and
+reach later frame-end records after the missing-texture diagnostic. Catalog
+row and subgroup bisection instead isolates persistent `ZoneExit` (8248),
+`PortalStar` (8253), and `Portal` (8254). Their preview simulators reset an
+absolute logical tick to zero, then replay until the epoch-derived current
+tick on their first frame. This produces tens of billions of GUI-thread
+iterations. The other persistent simulators already initialize from a bounded
+prewarm window. ZoneExit and Portal require at most the established 20-quant
+preview warm-up; PortalStar requires one quant. The epoch-sized regression
+must cover all three before the fix is accepted.
+
+The separate native-runtime A/B remains narrower but does not yet establish a
+mechanism. Keeping standalone Vulcansmoke 8197 causes an early termination;
+removing only that record lets the otherwise identical fixture survive the
+observation window. Carrier requirement and particle-record size have been
+rejected as explanations. `Vulkan.mmp` remains uniquely requested and absent
+from the exhaustive resource inventory, making it the leading resource
+hypothesis. The decisive next control is an isolated, run-local pair using the
+same single-Vulcansmoke MOB: one run with no alias and one with a temporary
+valid atlas exposed under the exact `Vulkan.mmp` name. The alias must remain a
+diagnostic fixture and must not be installed or treated as texture-fidelity
+evidence. Existing shutdown dumps occur in both nominal pass and failure runs,
+so they do not prove that the missing atlas is the corruptor. The empty-MOB
+graphless/bootstrap failure remains independent.
+
 ## Casting specialization reconstruction
 
 The fingerprinted executable maps the nine remaining preview-only casting
