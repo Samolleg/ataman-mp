@@ -478,7 +478,11 @@ vertices start as an exact land-height copy, inactive material entries use the
 verified `-1` sentinel, and SEC trailing bytes are retained. Deactivation
 changes only that material sentinel and retains inactive tile/vertex bytes.
 Both directions are provenance-checked and undo back to the exact original SEC.
-Overlay-only sculpting and typed material-value editing remain open.
+Overlay-only Raise, Lower, Flatten, and Smooth now operate only on vertices
+belonging to active overlay cells, synchronize duplicated SEC seam vertices,
+rebuild the independent overlay normals, refuse conflicting seams/range clamps,
+and retain land vertices plus overlay tile/material blocks byte-for-byte. Typed
+material-value editing remains open.
 
 ## Landscape safety and game validation
 
