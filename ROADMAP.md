@@ -5,14 +5,16 @@ work is ordered from the newest planned minor line to the oldest completed one.
 An item is checked only after its implementation has landed and received the
 stated validation. Completed code should carry a commit, test, or release link.
 
-Current development line: `0.3.0-alpha.12` focused closed testing. Alpha.11
+Current development line: `0.3.0-alpha.13` focused closed testing. Alpha.11
 was withdrawn after its temporary-resource bootstrap passed the fixed world
 object's first word as the object pointer and crashed both normal and synthetic
 Test Current Map launches. Alpha.12 corrects the pointer contract and adds an
 uncompressed 8888 placeholder MMP with explicit runtime-compatible masks. Its
 owned-process runtime smoke test must reach `GameplayReady`, remain stable for
 15 seconds, and produce no native dump for both Zone 1 and the generated
-empty-control fixture before packaging. This is a
+empty-control fixture before packaging. Alpha.13 gates Play from Here on the
+verified JMV autorun-MOB lifecycle and makes keyboard camera movement
+frame-rate independent. This is a
 version reclassification of the feature set that outgrew the `0.2.1` label,
 not a serializer or compatibility reset. The remaining 0.3 release work is the
 final runtime/corpus matrix, focused confirmation of the new live-clock and
@@ -218,10 +220,14 @@ lossless transactions because the graph is not owned by the MPR.
   records whether the edited terrain actually causes a navigation defect.
 - [ ] Track terrain/object edits as navigation-dirty regions and retain the
   oversized-door runtime-regeneration convention as an explicit diagnostic.
-- [ ] Replace Play from Here's deliberately conservative geometric clearance
-  check with AI-graph-backed walkability and nearest-valid-position lookup.
-  The current check may reject legitimate standable mesh objects and platforms;
-  do not loosen it with unverified heuristics before graph support is available.
+- [ ] Replace Play from Here's deliberately conservative terrain clearance
+  probe with the active regenerated AI graph as the authoritative walkability
+  and nearest-valid-position source. Automatic graph regeneration should make
+  that graph available for every loaded MPR; terrain projection remains useful
+  only for marker rendering and final Z display, not for deciding whether the
+  player can stand there. The current probe may reject legitimate standable mesh
+  objects and platforms; do not loosen it with unverified heuristics before the
+  graph-backed route is available.
 
 ## Zone 6 source and state research
 
