@@ -345,6 +345,8 @@ void CTileForm::fillTable(QString mapName, int textureAtlasNumber)
             item->setText("");
             item->setTextAlignment(Qt::AlignTop);
             item->setFlags(item->flags() & ~Qt::ItemIsEditable);
+            if(iIco < m_semanticAnnotations.size())
+                item->setToolTip(m_semanticAnnotations.at(iIco));
             ui->tableTile->setItem(row, col, item);
             ++iIco;
         }
@@ -365,6 +367,22 @@ void CTileForm::fillTable(QString mapName, int textureAtlasNumber)
         item->setTextAlignment(Qt::AlignCenter);
         //item->setFlags(item->flags() & ~Qt::ItemIsEditable);
         ui->tableQuick->setItem(0, i, item);
+    }
+}
+
+void CTileForm::setSemanticAnnotations(const QStringList& annotations,
+                                       const QString& profileStatus)
+{
+    m_semanticAnnotations = annotations;
+    m_semanticProfileStatus = profileStatus;
+    setWindowTitle(profileStatus.isEmpty()
+        ? tr("MPR Atlas Tiles")
+        : tr("MPR Atlas Tiles — %1").arg(profileStatus));
+    for(int slot = 0; slot < m_semanticAnnotations.size(); ++slot)
+    {
+        QTableWidgetItem* item = ui->tableTile->item(slot / m_nTilePerRow,
+                                                     slot % m_nTilePerRow);
+        if(item) item->setToolTip(m_semanticAnnotations.at(slot));
     }
 }
 

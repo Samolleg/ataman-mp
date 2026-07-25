@@ -26,6 +26,7 @@
 #include "mpr_document.h"
 #include "terrain_edit_model.h"
 #include "terrain_atlas_analyzer.h"
+#include "terrain_atlas_profile.h"
 #include "spatial_grid.h"
 #include "particle_animation.h"
 #include "ai_graph_document.h"
@@ -315,6 +316,9 @@ private:
     void clearLandscapeBrushSelection();
     void ensureManualTileSelection();
     void rebuildTerrainAutoCatalog();
+    QVector<STerrainAtlasSlotUsage> terrainAtlasUsage() const;
+    void reviewTerrainAtlasProfile();
+    void updateTerrainAtlasViewerAnnotations(const QString& status);
     void rebuildSpatialIndices();
     QVector<CNode*> spatiallyVisibleNodes(CMob* mob, const CViewFrustum* frustum,
                                           SSpatialQueryStats* stats);
@@ -524,6 +528,7 @@ private:
     CMprDocument m_mprDocument;
     CTerrainEditModel m_terrainEdit;
     STerrainAtlasAnalysis m_terrainAtlasAnalysis;
+    STerrainAtlasProfile m_terrainAtlasProfile;
     QMap<qint32, int> m_terrainMaterialRepresentatives;
     QVector<STerrainTileDelta> m_terrainPaintAudit;
     STerrainTileCommand m_tileStrokeCommand;

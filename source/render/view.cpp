@@ -76,6 +76,8 @@
 #include "endurance_document.h"
 #include "staged_save_validator.h"
 #include "terrain_atlas_analyzer.h"
+#include "terrain_atlas_profile.h"
+#include "terrain_atlas_review_dialog.h"
 #include "ai_graph_document.h"
 #include "ai_graph_preview_builder.h"
 
@@ -597,6 +599,8 @@ void CView::attachLandscapeTools(CLandscapeTools* tools)
                 this, &CView::importTerrainHeightmap);
         connect(m_landscapeTools, &CLandscapeTools::tilePickerRequested,
                 this, &CView::openAtlasTiles);
+        connect(m_landscapeTools, &CLandscapeTools::atlasProfileReviewRequested,
+                this, &CView::reviewTerrainAtlasProfile);
         connect(m_landscapeTools, &CLandscapeTools::exportPaintDiagnosticRequested,
                 this, &CView::exportTerrainPaintDiagnostic);
         connect(m_landscapeTools, &CLandscapeTools::editingStateChanged,
@@ -6257,6 +6261,7 @@ void CView::drawTerrainPaintOutline(QOpenGLShaderProgram* program)
 void CView::rebuildTerrainAutoCatalog()
 {
     m_terrainAtlasAnalysis = STerrainAtlasAnalysis();
+    m_terrainAtlasProfile = STerrainAtlasProfile();
     m_terrainMaterialRepresentatives.clear();
     m_terrainPaintAudit.clear();
     m_terrainPaintActions.clear();
@@ -6274,9 +6279,44 @@ void CView::rebuildTerrainAutoCatalog()
     if(!m_terrainEditAvailable || !m_pTileForm)
         return;
     CValidationReport report;
-    m_terrainAtlasAnalysis = CTerrainAtlasAnalyzer::analyze(
-        m_mprDocument.mapInfo().innerNamespace,
-        m_pTileForm->tileImages().size(), &report);
+    const QString mprNamespace = m_mprDocument.mapInfo().innerNamespace;
+    const int slotCount = m_pTileForm->tileImages().size();
+    const QByteArray atlasHash = CTerrainAtlasProfileInference::pixelSha256(
+        m_pTileForm->tileImages());
+    const QString profilePath = CTerrainAtlasProfileStore::profilePath(mprNamespace);
+    bool reviewedProfileActive = false;
+    bool staleProfile = false;
+    if(QFileInfo::exists(profilePath))
+    {
+        STerrainAtlasProfile stored;
+        CValidationReport storedReport;
+        if(CTerrainAtlasProfileStore::load(mprNamespace, &stored, QString(), &storedReport)
+           && stored.validateBinding(mprNamespace, atlasHash, slotCount, &storedReport))
+        {
+            m_terrainAtlasProfile = stored;
+            if(stored.approved)
+            {
+                m_terrainAtlasAnalysis = stored.approvedAnalysis(&storedReport);
+                reviewedProfileActive = m_terrainAtlasAnalysis.usable;
+                if(!reviewedProfileActive)
+                {
+                    m_terrainAtlasProfile.approved = false;
+                    staleProfile = true;
+                }
+            }
+        }
+        else
+            staleProfile = true;
+        for(const SValidationFinding& finding : storedReport.findings())
+            report.add(finding.code, finding.severity, finding.message, finding.location);
+    }
+    if(!reviewedProfileActive)
+        m_terrainAtlasAnalysis = CTerrainAtlasAnalyzer::analyze(
+            mprNamespace, slotCount, &report);
+    if(m_terrainAtlasProfile.slotDefinitions.isEmpty())
+        m_terrainAtlasProfile = CTerrainAtlasProfileInference::propose(
+            mprNamespace, m_pTileForm->tileImages(),
+            m_mprDocument.mapInfo().tileTypes, terrainAtlasUsage(), &report);
     QVector<QPair<qint32, QString>> landChoices;
     QVector<QPair<qint32, QString>> underwaterChoices;
     QVector<QPair<qint32, QString>> overlayChoices;
@@ -6289,14 +6329,22 @@ void CView::rebuildTerrainAutoCatalog()
                 .arg(material.name).arg(material.pureVariantCount)));
         m_terrainMaterialRepresentatives.insert(material.id, material.representativeSlot);
     }
-    const QString status = m_terrainAtlasAnalysis.usable
+    QString status = m_terrainAtlasAnalysis.usable
         ? tr("%1 loaded: %2 land and %3 overlay materials.")
               .arg(m_terrainAtlasAnalysis.templateName)
               .arg(landChoices.size()).arg(overlayChoices.size())
-        : tr("No authored slot template is registered for namespace '%1'. Semantic painting is disabled.")
-              .arg(m_mprDocument.mapInfo().innerNamespace);
+        : tr("No approved semantic profile is available for namespace '%1'. Automatic painting is disabled; manual atlas tile mode remains available.")
+              .arg(mprNamespace);
+    if(reviewedProfileActive)
+        status = tr("Approved semantic profile loaded: %1 land and %2 overlay materials.")
+            .arg(landChoices.size()).arg(overlayChoices.size());
+    else if(staleProfile)
+        status += tr(" A saved profile failed its namespace/hash/slot binding or review contract; review conversion before use.");
+    else if(!m_terrainAtlasProfile.approved)
+        status += tr(" An inference proposal is ready for review.");
     m_landscapeTools->setPaintTerrainTypes(
         landChoices, underwaterChoices, overlayChoices, status);
+    updateTerrainAtlasViewerAnnotations(status);
     ei::log(report.hasErrors() ? eLogWarning : eLogInfo,
         QString("Terrain namespace template: %1, %2 land materials, %3 overlay materials, %4/%5 described slots%6")
             .arg(m_terrainAtlasAnalysis.templateName)
@@ -6306,6 +6354,89 @@ void CView::rebuildTerrainAutoCatalog()
     emit updateMsg(m_terrainAtlasAnalysis.usable
         ? status
         : tr("This atlas layout is not registered; semantic terrain painting is disabled."));
+}
+
+QVector<STerrainAtlasSlotUsage> CView::terrainAtlasUsage() const
+{
+    const int slotCount = m_pTileForm ? m_pTileForm->tileImages().size() : 0;
+    QVector<STerrainAtlasSlotUsage> usage(slotCount);
+    for(int y = 0; y < m_terrainEdit.tileCountY(); ++y)
+        for(int x = 0; x < m_terrainEdit.tileCountX(); ++x)
+        {
+            bool landAvailable = false;
+            const SMprPackedTile land = SMprPackedTile::decode(m_terrainEdit.packedTile(
+                x, y, ETerrainTileLayer::Land, &landAvailable));
+            bool overlayAvailable = false;
+            const SMprPackedTile overlay = SMprPackedTile::decode(m_terrainEdit.packedTile(
+                x, y, ETerrainTileLayer::Overlay, &overlayAvailable));
+            if(landAvailable && land.atlasSlot() >= 0 && land.atlasSlot() < slotCount)
+            {
+                ++usage[land.atlasSlot()].landCount;
+                if(overlayAvailable) ++usage[land.atlasSlot()].landBelowOverlayCount;
+            }
+            if(overlayAvailable && overlay.atlasSlot() >= 0 && overlay.atlasSlot() < slotCount)
+                ++usage[overlay.atlasSlot()].overlayCount;
+        }
+    return usage;
+}
+
+void CView::reviewTerrainAtlasProfile()
+{
+    if(!m_terrainEditAvailable || !m_pTileForm || m_pTileForm->tileImages().isEmpty())
+    {
+        emit updateMsg(tr("Load an MPR and its complete terrain atlas before reviewing semantic conversion."));
+        return;
+    }
+    const QString mprNamespace = m_mprDocument.mapInfo().innerNamespace;
+    const QByteArray hash = CTerrainAtlasProfileInference::pixelSha256(m_pTileForm->tileImages());
+    STerrainAtlasProfile profile = m_terrainAtlasProfile;
+    CValidationReport report;
+    if(profile.slotDefinitions.isEmpty()
+       || !profile.validateBinding(mprNamespace, hash, m_pTileForm->tileImages().size(), &report))
+    {
+        profile = CTerrainAtlasProfileInference::propose(
+            mprNamespace, m_pTileForm->tileImages(), m_mprDocument.mapInfo().tileTypes,
+            terrainAtlasUsage(), &report);
+    }
+    CTerrainAtlasReviewDialog dialog(profile, m_pTileForm->tileImages(), this);
+    if(dialog.exec() != QDialog::Accepted) return;
+    const STerrainAtlasProfile reviewed = dialog.reviewedProfile();
+    CValidationReport saveReport;
+    if(!CTerrainAtlasProfileStore::save(reviewed, QString(), &saveReport))
+    {
+        QMessageBox::warning(this, tr("Could not save semantic atlas profile"), saveReport.toText());
+        return;
+    }
+    rebuildTerrainAutoCatalog();
+    emit updateMsg(reviewed.approved
+        ? tr("The reviewed semantic atlas profile is approved and automatic painting is enabled.")
+        : tr("Semantic atlas draft saved. Automatic painting remains disabled until approval."));
+}
+
+void CView::updateTerrainAtlasViewerAnnotations(const QString& status)
+{
+    if(!m_pTileForm) return;
+    QStringList annotations;
+    annotations.reserve(m_terrainAtlasProfile.atlasSlotCount);
+    QMap<qint32, STerrainAtlasProfileFamily> families;
+    for(const STerrainAtlasProfileFamily& family : m_terrainAtlasProfile.families)
+        families.insert(family.id, family);
+    for(const STerrainAtlasProfileSlot& slot : m_terrainAtlasProfile.slotDefinitions)
+    {
+        const qint32 ids[] = {slot.signature.northWest, slot.signature.northEast,
+                              slot.signature.southEast, slot.signature.southWest};
+        QStringList names;
+        for(qint32 id : ids)
+            names.append(families.contains(id) ? families.value(id).name : QString::number(id));
+        annotations.append(tr("Slot %1\nNW / NE / SE / SW: %2\n%3")
+            .arg(slot.slot).arg(names.join(QStringLiteral(" / ")))
+            .arg(slot.ambiguous ? tr("Needs review") : tr("Reviewed")));
+    }
+    m_pTileForm->setSemanticAnnotations(annotations,
+        m_terrainAtlasProfile.approved ? tr("semantic profile approved")
+        : (m_terrainAtlasAnalysis.usable ? tr("authored semantic template active")
+                                         : tr("semantic profile draft — automatic paint disabled")));
+    Q_UNUSED(status);
 }
 
 void CView::exportTerrainPaintDiagnostic()
@@ -6331,7 +6462,13 @@ void CView::exportTerrainPaintDiagnostic()
     root.insert("atlasSlotCount", m_pTileForm ? m_pTileForm->tileImages().size() : 0);
     root.insert("atlasPixelSha256", m_pTileForm
         ? QString::fromLatin1(terrainAtlasPixelSha256(m_pTileForm->tileImages())) : QString());
-    root.insert("analysisMode", "authored-namespace-template-v1");
+    root.insert("analysisMode", m_terrainAtlasProfile.approved
+        ? QStringLiteral("reviewed-semantic-profile-v1")
+        : (m_terrainAtlasAnalysis.usable
+            ? QStringLiteral("authored-namespace-template-v1")
+            : QStringLiteral("manual-atlas-only")));
+    root.insert("semanticProfileApproved", m_terrainAtlasProfile.approved);
+    root.insert("semanticProfileProvenance", m_terrainAtlasProfile.provenance);
     root.insert("paintLookupTransform", "mirror-grid-y-v1");
     root.insert("templateName", m_terrainAtlasAnalysis.templateName);
     root.insert("registeredMaterialCount", m_terrainAtlasAnalysis.materials.size());
@@ -8150,8 +8287,9 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
         selected.atlasIndex = quint8(selectedIndex / 64);
         selected.tileIndex = quint8(selectedIndex % 64);
         selected.rotation = quint8(selectedRotation & 3);
-        bool layerCompatible = false;
-        manualCatalog.signatureForPacked(selected.encode(), &layerCompatible);
+        bool layerCompatible = !m_terrainAtlasAnalysis.usable;
+        if(m_terrainAtlasAnalysis.usable)
+            manualCatalog.signatureForPacked(selected.encode(), &layerCompatible);
         if(!layerCompatible)
         {
             emit updateMsg(layer == ETerrainTileLayer::Land

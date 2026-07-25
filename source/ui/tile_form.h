@@ -6,6 +6,7 @@
 #include <QKeyEvent>
 #include <QMenu>
 #include <QImage>
+#include <QStringList>
 #include "types.h"
 #include "property.h"
 
@@ -61,6 +62,8 @@ public:
     void setQuickTileSet(const QVector<int>& arrIndices);
     QPixmap tileWithRot(int index) {return tileWithRot(index, m_tileRot);};
     const QVector<QImage>& tileImages() const { return m_tileImages; }
+    void setSemanticAnnotations(const QStringList& annotations,
+                                const QString& profileStatus);
 
 private:
     void fitTable();
@@ -121,6 +124,8 @@ private:
     QSharedPointer<CValueItem> m_pIndexText;
     QSharedPointer<CValueItem> m_pPhaseNumText;
     QVector<int> m_arrQuickTile;
+    QStringList m_semanticAnnotations;
+    QString m_semanticProfileStatus;
 };
 
 class CCustomSelectionTable : public QTableWidget
