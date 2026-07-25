@@ -229,6 +229,62 @@
       "size": 172108,
       "textureFormat": "0x00004444",
       "width": 256
+    },
+    {
+      "atlas": {
+        "columns": 4,
+        "phaseCount": 16,
+        "rows": 4
+      },
+      "height": 256,
+      "mipCount": 3,
+      "name": "healing.mmp",
+      "sha256": "A39229D751FD037648DF96B9DCF3D19A83C9D39796EF70F3C0B96A523FE03FB8",
+      "size": 172108,
+      "textureFormat": "0x00004444",
+      "width": 256
+    },
+    {
+      "atlas": {
+        "columns": 4,
+        "phaseCount": 16,
+        "rows": 4
+      },
+      "height": 256,
+      "mipCount": 3,
+      "name": "rikarrowsmoke.mmp",
+      "sha256": "1487BD789EDD1B8D01310FF0EFA14E3FE086D5CE1ABB00E84CEA8384DC1DFEB9",
+      "size": 86092,
+      "textureFormat": "0x33545844",
+      "width": 256
+    },
+    {
+      "atlas": {
+        "columns": 4,
+        "phaseCount": 16,
+        "rows": 4
+      },
+      "height": 256,
+      "mipCount": 3,
+      "name": "changehero.mmp",
+      "sha256": "41F98270814FDB96EEC5BD43DF342AC8B4296F1DA516FADFC737689787671F90",
+      "size": 86092,
+      "textureFormat": "0x33545844",
+      "width": 256
+    },
+    {
+      "atlas": {
+        "columns": 4,
+        "phaseCount": 16,
+        "rows": 4
+      },
+      "height": 256,
+      "mipCount": 3,
+      "name": "tornado.mmp",
+      "sha256": "0A40C22661AE64B75E65269BFB13FFFFBBF249B264A89EBA9BD0F7A57E84C313",
+      "size": 172108,
+      "textureFormat": "0x00004444",
+      "width": 256
     }
   ]
 }

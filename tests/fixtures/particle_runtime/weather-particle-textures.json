@@ -313,6 +313,34 @@
       "size": 1398204,
       "textureFormat": "0x33545844",
       "width": 1024
+    },
+    {
+      "atlas": {
+        "columns": 4,
+        "phaseCount": 16,
+        "rows": 4
+      },
+      "height": 1024,
+      "mipCount": 11,
+      "name": "healing.mmp",
+      "sha256": "D417D779BF68C551EFDEAEE5010C7D9BBA4627E746AAA6CD897EFBB489078968",
+      "size": 1398204,
+      "textureFormat": "0x33545844",
+      "width": 1024
+    },
+    {
+      "atlas": {
+        "columns": 4,
+        "phaseCount": 16,
+        "rows": 4
+      },
+      "height": 1024,
+      "mipCount": 11,
+      "name": "rikarrowsmoke.mmp",
+      "sha256": "8360A32C7D862DA20C6892D815E2CF9C96EC5EDCCCA88A42237844B69316242F",
+      "size": 1398204,
+      "textureFormat": "0x33545844",
+      "width": 1024
     }
   ]
 }

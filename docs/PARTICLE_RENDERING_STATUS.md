@@ -104,6 +104,13 @@ covering the selected JMV corpus.
 | 8265 / `0x2049` | Feeblemind | Dedicated continuous additive `Link` spiral with native phase selection, radial rotation/expansion, rise, alpha ramp and scale growth. The catalog uses authored origin/size as a synthetic stationary head carrier. | Validate gameplay head attachment and carrier motion; the stationary synthetic-carrier control is closed. |
 | 8266–8267 / `0x204A`–`0x204B` | Feetcloud1, Feetcloud2 | Dedicated blue/red additive `VisionFog` clouds with two synthetic foot sources, native disk velocity, size/alpha/blend/velocity decay and phase selection. | Validate actual left/right body-part attachment points and detach lifetime cap; the coincident-source standalone controls are closed. |
 
+| 8269 / `0x204D` | Ballofstars | Dedicated continuous phase-three additive `Stun` carrier-ball population with native lifetime and random size law. | Validate run-pose attempt/lifetime specialization and gameplay body-part attachment; the default stationary synthetic-carrier path is closed. |
+| 8270 / `0x204E` | Rickarrow | Exact FireArrow callback reuse with the type-selected `RikArrowSmoke` atlas and ordinary blending. | Capture a moving projectile owner for velocity/basis validation; the zero-speed standalone path is closed. |
+| 8271 / `0x204F` | Cursestars | Dedicated continuous additive `Healing` burst with random carrier-ball positions, normalized outward motion, exact alpha ramp, size contraction and velocity damping. | Validate gameplay body attachment and carrier movement; the stationary synthetic-carrier path is closed. |
+| 8272 / `0x2050` | Curseholder | Exact Tornado callback reuse with its shorter 4.8-unit spine, zero bend control, .997 radius retention and fixed dark color. | Validate a moving gameplay carrier; the stationary parameter-specialized path is closed. |
+| 8273 / `0x2051` | Starttrans | Dedicated finite ordinary-alpha `ZoneExit` anchor and returning trails with exact source growth, attempt ramp, phases, alpha table and termination. | Validate gameplay carrier attachment/detach timing; the complete stationary catalog cycle is implemented. |
+| 8274 / `0x2052` | Transform | Exact Mushroom callback and `ChangeHero` atlas reuse, including the finite rising/expanding source law. | Validate the gameplay transformation owner and auxiliary one-shot dispatch; the billboard population is closed. |
+
 ## Preview-only families
 
 These IDs currently receive a recognizable editor style, but their native
@@ -120,19 +127,6 @@ runtime behavior has not been reconstructed:
 Texture names used by these previews are limited to direct resource matches
 where available. Procedural soft sprites are intentional placeholders rather
 than borrowed unrelated assets.
-
-## Named types without a dedicated gameplay preview
-
-The parser preserves all of these type IDs and their authored scale, but they
-still require both native reverse engineering and a dedicated renderer:
-
-| IDs | Names |
-|---|---|
-| 8269–8274 | Ballofstars, Rickarrow, Cursestars, Curseholder, Starttrans, Transform |
-
-Some of these effects may be transient spell/script effects rather than
-ordinary placed `PARTICL` records. Their creation owner and attachment rules
-must be established instead of assuming the standalone-source path.
 
 ## Torch corpus audit
 

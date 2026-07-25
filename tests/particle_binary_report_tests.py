@@ -244,6 +244,41 @@ class ParticleBinaryReportTests(unittest.TestCase):
             fixture["constants"]["feeblemind_size_growth"]["value"], 1.04)
         self.assertAlmostEqual(
             fixture["constants"]["feetcloud_blend_decay"]["value"], 0.98)
+        self.assertEqual(
+            fixture["ranges"]["ballofstars_create_callback"]["start_va"],
+            "0x00495FB0")
+        self.assertEqual(
+            fixture["ranges"]["cursestars_create_callback"]["start_va"],
+            "0x00496270")
+        self.assertEqual(
+            fixture["ranges"]["starttrans_create_callback"]["start_va"],
+            "0x004965E0")
+        self.assertEqual(fixture["sites"]["healing_texture_name"]["bytes"],
+                         "4865616C696E6700")
+        self.assertEqual(
+            fixture["sites"]["rikarrowsmoke_texture_name"]["bytes"],
+            "52696B4172726F77536D6F6B6500")
+        self.assertEqual(
+            fixture["sites"]["cursestars_alpha_table"]["bytes"],
+            "00000000200000004000000080000000" + "FF000000" * 17)
+        self.assertEqual(
+            fixture["sites"]["starttrans_alpha_table"]["bytes"],
+            "0000000050000000B0000000" + "FF000000" * 11
+            + "8000000040000000")
+        self.assertAlmostEqual(
+            fixture["constants"]["ballofstars_offset_factor"]["value"], 0.8)
+        self.assertAlmostEqual(
+            fixture["constants"]["cursestars_initial_size_factor"]["value"],
+            0.04)
+        self.assertAlmostEqual(
+            fixture["constants"]["starttrans_source_radius_step"]["value"],
+            0.02)
+        self.assertIn(
+            "C7422C643B7F3F",
+            fixture["sites"]["curseholder_tornado_reuse_and_controls"]["bytes"])
+        self.assertIn(
+            "81FE02200000",
+            fixture["sites"]["transform_mushroom_reuse_and_texture_selection"]["bytes"])
         self.assertEqual(len(fixture["sites"]["zoneexit_alpha_table"]["bytes"]),
                          128)
         self.assertEqual(len(fixture["sites"]["path_brightness_table"]["bytes"]),

@@ -2601,6 +2601,9 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
     QOpenGLTexture* fireArrowSmokeTexture = textures->texture("firearrowsmoke");
     if(fireArrowSmokeTexture == fallbackTexture)
         fireArrowSmokeTexture = nullptr;
+    QOpenGLTexture* rikArrowSmokeTexture = textures->texture("rikarrowsmoke");
+    if(rikArrowSmokeTexture == fallbackTexture)
+        rikArrowSmokeTexture = nullptr;
     QOpenGLTexture* stenchTexture = textures->texture("stench");
     if(stenchTexture == fallbackTexture)
         stenchTexture = nullptr;
@@ -2622,6 +2625,9 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
     QOpenGLTexture* stunTexture = textures->texture("stun");
     if(stunTexture == fallbackTexture)
         stunTexture = nullptr;
+    QOpenGLTexture* healingTexture = textures->texture("healing");
+    if(healingTexture == fallbackTexture)
+        healingTexture = nullptr;
     QOpenGLTexture* clayRingTexture = textures->texture("clayring");
     if(clayRingTexture == fallbackTexture)
         clayRingTexture = nullptr;
@@ -2795,15 +2801,17 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
     };
 
     const auto drawTornado = [&](const CNode* owner, const QVector3D& origin,
-                                 float authoredScale, uint seed)
+                                 float authoredScale, bool curseHolder, uint seed)
     {
         ei::particle::TornadoEmitter& emitter = m_tornadoEmitters[owner];
-        emitter.advanceTo(logicalTick, seed, origin, authoredScale, 100);
+        emitter.advanceTo(logicalTick, seed, origin, authoredScale, 100,
+                          curseHolder);
         const QVector4D sunlightTint(particleEnvironment.sunColor, 1.0f);
         const QVector<ei::particle::WeatherRenderSample> samples = emitter.samples();
         for(const ei::particle::WeatherRenderSample& sample : samples)
         {
-            QVector4D tint = sunlightTint;
+            QVector4D tint = curseHolder
+                ? QVector4D(0.0f, 0.0f, 0.0f, 1.0f) : sunlightTint;
             tint.setW(sample.alpha);
             drawSprite(sample.position, sample.scale, 1.0f, 0.0f, tint,
                        tornadoTexture, ei::particle::atlasUv(sample.frame), false,
@@ -2908,15 +2916,16 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
     };
 
     const auto drawFireArrow = [&](const CNode* owner, const QVector3D& origin,
-                                   float authoredScale, uint seed)
+                                   float authoredScale, QOpenGLTexture* atlas,
+                                   uint seed)
     {
         ei::particle::FireArrowEmitter& emitter = m_fireArrowEmitters[owner];
         emitter.advanceTo(logicalTick, seed, origin, authoredScale);
         for(const ei::particle::EffectRenderSample& sample : emitter.samples())
             drawSprite(sample.position, sample.scale, 1.0f, 0.0f,
                        QVector4D(1.0f, 1.0f, 1.0f, sample.alpha),
-                       fireArrowSmokeTexture, ei::particle::atlasUv(sample.frame), false,
-                       fireArrowSmokeTexture == nullptr, 0.18f);
+                       atlas, ei::particle::atlasUv(sample.frame), false,
+                       atlas == nullptr, 0.18f);
     };
 
     const auto drawAcidRay = [&](const CNode* owner, const QVector3D& origin,
@@ -3209,6 +3218,42 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
                        visionFogTexture == nullptr, 0.18f);
     };
 
+    const auto drawBallStars = [&](const CNode* owner, const QVector3D& origin,
+                                   float authoredScale, uint seed)
+    {
+        ei::particle::BallStarsEmitter& emitter = m_ballStarsEmitters[owner];
+        emitter.advanceTo(logicalTick, seed, origin, authoredScale);
+        for(const ei::particle::EffectRenderSample& sample : emitter.samples())
+            drawSprite(sample.position, sample.scale, 1.0f, 0.0f,
+                       QVector4D(1.0f, 1.0f, 1.0f, sample.alpha), stunTexture,
+                       ei::particle::atlasUv(sample.frame), true,
+                       stunTexture == nullptr, 0.18f);
+    };
+
+    const auto drawCurseStars = [&](const CNode* owner, const QVector3D& origin,
+                                    float authoredScale, uint seed)
+    {
+        ei::particle::CurseStarsEmitter& emitter = m_curseStarsEmitters[owner];
+        emitter.advanceTo(logicalTick, seed, origin, authoredScale);
+        for(const ei::particle::EffectRenderSample& sample : emitter.samples())
+            drawSprite(sample.position, sample.scale, 1.0f, 0.0f,
+                       QVector4D(1.0f, 1.0f, 1.0f, sample.alpha), healingTexture,
+                       ei::particle::atlasUv(sample.frame), true,
+                       healingTexture == nullptr, 0.18f);
+    };
+
+    const auto drawStartTrans = [&](const CNode* owner, const QVector3D& origin,
+                                    float authoredScale, uint seed)
+    {
+        ei::particle::StartTransEmitter& emitter = m_startTransEmitters[owner];
+        emitter.advanceTo(logicalTick, seed, origin, authoredScale);
+        for(const ei::particle::EffectRenderSample& sample : emitter.samples())
+            drawSprite(sample.position, sample.scale, 1.0f, 0.0f,
+                       QVector4D(1.0f, 1.0f, 1.0f, sample.alpha), zoneExitTexture,
+                       ei::particle::atlasUv(sample.frame), false,
+                       zoneExitTexture == nullptr, 0.18f);
+    };
+
     for(CMob* mob : m_aMob)
     {
         if(!isMobVisible(mob))
@@ -3269,7 +3314,8 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
             }
             if(particle->kind() == 8202u)
             {
-                drawTornado(particle, center, authoredScale, particle->mapId());
+                drawTornado(particle, center, authoredScale, false,
+                            particle->mapId());
                 if(particle->nodeState() == ENodeState::eSelect)
                     drawSprite(center, qMax(0.3f, authoredScale * 0.35f),
                                1.0f, 0.0f,
@@ -3449,9 +3495,66 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
                                QVector4D(0.0f, 0.0f, 1.0f, 1.0f), false, true, 0.12f);
                 continue;
             }
+            if(particle->kind() == 8269u)
+            {
+                drawBallStars(particle, center, authoredScale, particle->mapId());
+                if(particle->nodeState() == ENodeState::eSelect)
+                    drawSprite(center, qMax(0.3f, authoredScale * 0.35f), 1.0f, 0.0f,
+                               QVector4D(0.10f, 0.90f, 1.0f, 0.72f), nullptr,
+                               QVector4D(0.0f, 0.0f, 1.0f, 1.0f), false, true, 0.12f);
+                continue;
+            }
+            if(particle->kind() == 8270u)
+            {
+                drawFireArrow(particle, center, authoredScale,
+                              rikArrowSmokeTexture, particle->mapId());
+                if(particle->nodeState() == ENodeState::eSelect)
+                    drawSprite(center, qMax(0.3f, authoredScale * 0.35f), 1.0f, 0.0f,
+                               QVector4D(0.10f, 0.90f, 1.0f, 0.72f), nullptr,
+                               QVector4D(0.0f, 0.0f, 1.0f, 1.0f), false, true, 0.12f);
+                continue;
+            }
+            if(particle->kind() == 8271u)
+            {
+                drawCurseStars(particle, center, authoredScale, particle->mapId());
+                if(particle->nodeState() == ENodeState::eSelect)
+                    drawSprite(center, qMax(0.3f, authoredScale * 0.35f), 1.0f, 0.0f,
+                               QVector4D(0.10f, 0.90f, 1.0f, 0.72f), nullptr,
+                               QVector4D(0.0f, 0.0f, 1.0f, 1.0f), false, true, 0.12f);
+                continue;
+            }
+            if(particle->kind() == 8272u)
+            {
+                drawTornado(particle, center, authoredScale, true,
+                            particle->mapId());
+                if(particle->nodeState() == ENodeState::eSelect)
+                    drawSprite(center, qMax(0.3f, authoredScale * 0.35f), 1.0f, 0.0f,
+                               QVector4D(0.10f, 0.90f, 1.0f, 0.72f), nullptr,
+                               QVector4D(0.0f, 0.0f, 1.0f, 1.0f), false, true, 0.12f);
+                continue;
+            }
+            if(particle->kind() == 8273u)
+            {
+                drawStartTrans(particle, center, authoredScale, particle->mapId());
+                if(particle->nodeState() == ENodeState::eSelect)
+                    drawSprite(center, qMax(0.3f, authoredScale * 0.35f), 1.0f, 0.0f,
+                               QVector4D(0.10f, 0.90f, 1.0f, 0.72f), nullptr,
+                               QVector4D(0.0f, 0.0f, 1.0f, 1.0f), false, true, 0.12f);
+                continue;
+            }
+            if(particle->kind() == 8274u)
+            {
+                drawMushroom(particle, center, authoredScale, particle->mapId());
+                if(particle->nodeState() == ENodeState::eSelect)
+                    drawSprite(center, qMax(0.3f, authoredScale * 0.35f), 1.0f, 0.0f,
+                               QVector4D(0.10f, 0.90f, 1.0f, 0.72f), nullptr,
+                               QVector4D(0.0f, 0.0f, 1.0f, 1.0f), false, true, 0.12f);
+                continue;
+            }
             if(particle->kind() == 8209u)
             {
-                drawFireArrow(particle, center, authoredScale, particle->mapId());
+                drawFireArrow(particle, center, authoredScale,
+                              fireArrowSmokeTexture, particle->mapId());
                 if(particle->nodeState() == ENodeState::eSelect)
                     drawSprite(center, qMax(0.3f, authoredScale * 0.35f), 1.0f, 0.0f,
                                QVector4D(0.10f, 0.90f, 1.0f, 0.72f), nullptr,
@@ -5789,6 +5892,9 @@ bool CView::unloadMobDocument(CMob* mob, bool promptForSave)
     m_silenceEmitters.clear();
     m_feeblemindEmitters.clear();
     m_feetCloudEmitters.clear();
+    m_ballStarsEmitters.clear();
+    m_curseStarsEmitters.clear();
+    m_startTransEmitters.clear();
     m_fireArrowEmitters.clear();
     m_acidRayEmitters.clear();
     m_blueGasEmitters.clear();
@@ -6012,6 +6118,9 @@ void CView::unloadMob(QString mobName)
     m_silenceEmitters.clear();
     m_feeblemindEmitters.clear();
     m_feetCloudEmitters.clear();
+    m_ballStarsEmitters.clear();
+    m_curseStarsEmitters.clear();
+    m_startTransEmitters.clear();
     m_fireArrowEmitters.clear();
     m_acidRayEmitters.clear();
     m_blueGasEmitters.clear();

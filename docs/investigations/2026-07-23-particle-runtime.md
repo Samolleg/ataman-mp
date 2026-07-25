@@ -1690,3 +1690,90 @@ The Base archive contains a separately fingerprinted 256-square, three-mip
 `0x00004444` variant with payload SHA-256
 `0D7A9F860ED7716F47BD013DC4B4B9B41EB24CEEBD8EDA15A63C256D29BA4A47`.
 All behavior and resources above were confirmed before renderer wiring.
+
+## Ordered catalog reconstruction: Ballofstars through Transform
+
+The final six catalog IDs are three dedicated families and three exact factory
+reuses. The fingerprinted executable maps Ballofstars, Cursestars, and
+Starttrans (types 8269, 8271, and 8273 / `0x204D`, `0x204F`, and `0x2051`) to
+factory ranges `0x0048836F..0x004883C2`, `0x004883C3..0x00488416`, and
+`0x00488417..0x004885B3`. Their callback triplets are respectively
+`0x00495FB0` / `0x004961B0` / `0x00496260`, `0x00496270` /
+`0x004964B0` / `0x004965D0`, and `0x004965E0` / `0x00496840` /
+`0x00496990`. This rejects the former generic colored-circle previews.
+
+Ballofstars uses the additive `Stun` atlas, phase three, one default creation
+attempt, and capacity 300. A birth chooses a point from the unit ball, scales
+it by `.8 * carrierRadius`, and adds it to the carrier point. It begins
+transparent with zero submitted size, stores
+`random(.7,1.3)` as its size multiplier, and lives 20 quants. Each update
+decrements life, makes the particle opaque, and submits
+`authoredSize * storedMultiplier * random(.8,1.2)`; it retires once life
+becomes negative. The gameplay run-pose specialization changes the system to
+four attempts and life five, but that condition is not present on a bare map
+particle. The editor therefore uses the placed origin and authored size as a
+stationary synthetic carrier and retains the confirmed default path.
+
+Rickarrow (type 8270 / `0x204E`) enters the FireArrow factory range
+`0x00485803..0x004858E2`. The type comparison at `0x00485872` selects
+`RikArrowSmoke`, while callbacks `0x0048CBA0` and `0x0048CED0`, capacity,
+lifetime, phases, and ordinary-alpha behavior are identical to FireArrow.
+Rickarrow must consequently reuse the FireArrow simulator with its own atlas;
+it is not a separately tuned trail.
+
+Cursestars uses the additive `Healing` atlas, eight creation attempts per
+quant, capacity 300, and a gameplay body carrier. Each birth selects phase
+0..15 and a random unit-ball displacement scaled by authored size. It starts
+at `carrierPoint + displacement`, with life 20, zero submitted size, and
+velocity equal to the normalized displacement times `.1 * authoredSize`.
+Every update decrements life and applies the exact alpha ramp
+`0,32,64,128,255` followed by full opacity through life 20. A zero submitted
+size is replaced by `.04 * authoredSize * random(.8,1.2)`; subsequent updates
+multiply size by .95. Position advances by velocity and velocity is multiplied
+by .9. The particle retires once life becomes negative. The catalog control
+supplies the placed origin and authored size as the stationary carrier.
+
+Curseholder (type 8272 / `0x2050`) selects factory range
+`0x004867A0..0x00486992` and reuses the Tornado callbacks and `Tornado` atlas.
+It retains four attempts, capacity 800, ordinary alpha, and six local sources,
+but deliberately changes three constructor controls: the active source-spine
+height is 4.8 instead of 12, carrier-motion bending is zero instead of .5,
+and spiral-radius retention is .997 instead of .99. Its packed initial color
+is fixed `0x19000000`, rather than the normal Tornado's captured sunlight
+color. Thus the stationary catalog form is a shorter, denser, dark tornado;
+reusing the ordinary Tornado parameters is explicitly rejected.
+
+Starttrans uses ordinary-alpha `ZoneExit`, one initial attempt, capacity 300,
+and one local source initialized with life 30, radius zero, and attempt
+accumulator one. The first birth is a special phase-12 carrier anchor with life
+four. While attached it is opaque and its size is the expanding source radius
+times `random(.8,1.2)`. Later births live 15 quants, select phases 0..11, and
+start at the carrier plus a random unit direction scaled by authored size.
+Their velocity points back toward the carrier and is the negative displacement
+divided by 18; pending size is `.05 * authoredSize`. Updates decrement life,
+advance the phase modulo four without leaving its atlas row, move by velocity,
+copy pending size to submitted size, and apply the exact 16-entry alpha ramp
+`0,80,176,255,255,255,255,255,255,255,255,255,255,255,128,64`.
+The local-source callback decrements its 30-quant life, grows radius by
+`.02 * authoredSize`, adds .4 to the attempt accumulator, rounds and caps the
+active attempts at eight, then stops generation after expiry. The editor may
+repeat the complete finite cycle for catalog inspection.
+
+Transform (type 8274 / `0x2052`) enters the same factory range and callbacks
+as Mushroom: `0x00486BD5..0x00486C42`, `0x004889D0`, `0x00488DB0`, and
+`0x00488F00`. The type branch selects `ChangeHero`, ten creation attempts,
+capacity 4000, and the already reconstructed finite Mushroom source law.
+Transform therefore reuses that simulator and atlas exactly; a second inferred
+animation is neither present nor needed.
+
+The active JMV texture archive independently pins `healing.mmp` and
+`rikarrowsmoke.mmp` payloads as
+`D417D779BF68C551EFDEAEE5010C7D9BBA4627E746AAA6CD897EFBB489078968`
+and `8360A32C7D862DA20C6892D815E2CF9C96EC5EDCCCA88A42237844B69316242F`.
+Both are 1024-square, 11-mip DXT3 atlases. The Base archive contains
+256-square, three-mip variants with payloads
+`A39229D751FD037648DF96B9DCF3D19A83C9D39796EF70F3C0B96A523FE03FB8`
+and `1487BD789EDD1B8D01310FF0EFA14E3FE086D5CE1ABB00E84CEA8384DC1DFEB9`.
+`Stun`, `Tornado`, `ZoneExit`, and `ChangeHero` were already fingerprinted;
+the selected archives confirm all six batch dependencies in both profiles.
+All findings above precede simulator and renderer changes.

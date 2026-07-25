@@ -48,6 +48,10 @@ private slots:
     void silenceUsesTwoAnchorsAndFiniteTrails();
     void feeblemindUsesExpandingRotatingLinkPhases();
     void feetCloudsUseNativeColorsAndDecayingDrift();
+    void ballStarsUsePhaseThreeCarrierBall();
+    void curseStarsUseHealingPhasesAndDampedMotion();
+    void curseHolderUsesShortDenseTornadoControls();
+    void startTransUsesFiniteAnchorAndReturningTrails();
     void persistentEmittersBoundInitialWallClockReplay();
 };
 
@@ -1052,6 +1056,110 @@ void ParticleAnimationTests::feetCloudsUseNativeColorsAndDecayingDrift()
     QVERIFY(blue.activeCount() <= 300);
 }
 
+void ParticleAnimationTests::ballStarsUsePhaseThreeCarrierBall()
+{
+    ei::particle::BallStarsEmitter first;
+    ei::particle::BallStarsEmitter second;
+    const QVector3D origin(2.0f, -3.0f, 0.5f);
+    first.advanceTo(21, 8269u, origin, 2.0f);
+    second.advanceTo(21, 8269u, origin, 2.0f);
+    const auto a = first.samples();
+    const auto b = second.samples();
+    QCOMPARE(first.activeCount(), 21);
+    QCOMPARE(a.size(), 20);
+    QCOMPARE(a.size(), b.size());
+    for(int i = 0; i < a.size(); ++i)
+    {
+        QCOMPARE(a[i].position, b[i].position);
+        QCOMPARE(a[i].scale, b[i].scale);
+        QCOMPARE(a[i].frame, 3);
+        QCOMPARE(a[i].alpha, 1.0f);
+        QVERIFY((a[i].position - origin).length() < 1.6f);
+        QVERIFY(a[i].scale >= ei::particle::billboardDiameter(1.12f));
+        QVERIFY(a[i].scale <= ei::particle::billboardDiameter(3.12f));
+    }
+}
+
+void ParticleAnimationTests::curseStarsUseHealingPhasesAndDampedMotion()
+{
+    ei::particle::CurseStarsEmitter first;
+    ei::particle::CurseStarsEmitter second;
+    const QVector3D origin(-1.0f, 4.0f, 0.25f);
+    first.advanceTo(21, 8271u, origin, 1.0f);
+    second.advanceTo(21, 8271u, origin, 1.0f);
+    const auto a = first.samples();
+    const auto b = second.samples();
+    QCOMPARE(first.activeCount(), 168);
+    QCOMPARE(a.size(), b.size());
+    QVERIFY(a.size() > 100);
+    for(int i = 0; i < a.size(); ++i)
+    {
+        QCOMPARE(a[i].position, b[i].position);
+        QCOMPARE(a[i].scale, b[i].scale);
+        QCOMPARE(a[i].alpha, b[i].alpha);
+        QCOMPARE(a[i].frame, b[i].frame);
+        QVERIFY(a[i].frame >= 0 && a[i].frame <= 15);
+        QVERIFY(a[i].scale > 0.0f);
+        QVERIFY(a[i].alpha > 0.0f && a[i].alpha <= 1.0f);
+    }
+}
+
+void ParticleAnimationTests::curseHolderUsesShortDenseTornadoControls()
+{
+    ei::particle::TornadoEmitter normal;
+    ei::particle::TornadoEmitter curse;
+    const QVector3D origin(0.0f, 0.0f, 2.0f);
+    normal.advanceTo(100, 8202u, origin, 1.0f, 100, false);
+    curse.advanceTo(100, 8272u, origin, 1.0f, 100, true);
+    const auto normalSamples = normal.samples();
+    const auto curseSamples = curse.samples();
+    QVERIFY(normal.activeCount() >= 300 && normal.activeCount() <= 400);
+    QVERIFY(curse.activeCount() >= 300 && curse.activeCount() <= 400);
+    QVERIFY(!normalSamples.isEmpty());
+    QVERIFY(!curseSamples.isEmpty());
+    float normalMaximumZ = origin.z();
+    float curseMaximumZ = origin.z();
+    for(const auto& sample : normalSamples)
+        normalMaximumZ = qMax(normalMaximumZ, sample.position.z());
+    for(const auto& sample : curseSamples)
+        curseMaximumZ = qMax(curseMaximumZ, sample.position.z());
+    QVERIFY(curseMaximumZ <= origin.z() + 1.0f + 4.8f + 0.001f);
+    QVERIFY(normalMaximumZ > curseMaximumZ + 2.0f);
+}
+
+void ParticleAnimationTests::startTransUsesFiniteAnchorAndReturningTrails()
+{
+    ei::particle::StartTransEmitter first;
+    ei::particle::StartTransEmitter second;
+    const QVector3D origin(1.0f, 2.0f, 3.0f);
+    first.advanceTo(10, 8273u, origin, 2.0f);
+    second.advanceTo(10, 8273u, origin, 2.0f);
+    const auto a = first.samples();
+    const auto b = second.samples();
+    QCOMPARE(a.size(), b.size());
+    QVERIFY(a.size() > 10);
+    bool foundAnchor = false;
+    bool foundTrail = false;
+    for(int i = 0; i < a.size(); ++i)
+    {
+        QCOMPARE(a[i].position, b[i].position);
+        QCOMPARE(a[i].scale, b[i].scale);
+        QCOMPARE(a[i].alpha, b[i].alpha);
+        QCOMPARE(a[i].frame, b[i].frame);
+        QVERIFY(a[i].frame >= 0 && a[i].frame <= 15);
+        if(a[i].frame == 12 && a[i].position == origin)
+            foundAnchor = true;
+        if(a[i].position != origin)
+            foundTrail = true;
+    }
+    QVERIFY(foundAnchor);
+    QVERIFY(foundTrail);
+    first.advanceTo(52, 8273u, origin, 2.0f);
+    QCOMPARE(first.activeCount(), 0);
+    first.advanceTo(74, 8273u, origin, 2.0f);
+    QVERIFY(first.activeCount() > 10);
+}
+
 void ParticleAnimationTests::persistentEmittersBoundInitialWallClockReplay()
 {
     constexpr qint64 wallClockTick = 32000000000LL;
@@ -1062,18 +1170,24 @@ void ParticleAnimationTests::persistentEmittersBoundInitialWallClockReplay()
     ei::particle::SilenceEmitter silence;
     ei::particle::FeeblemindEmitter feeblemind;
     ei::particle::FeetCloudEmitter feet;
+    ei::particle::BallStarsEmitter ballStars;
+    ei::particle::CurseStarsEmitter curseStars;
     moshka.advanceTo(wallClockTick, 8252u, origin, 1.0f);
     vision.advanceTo(wallClockTick, 8260u, origin, 1.0f, 0);
     regeneration.advanceTo(wallClockTick, 8263u, origin, 1.0f);
     silence.advanceTo(wallClockTick, 8264u, origin, 1.0f);
     feeblemind.advanceTo(wallClockTick, 8265u, origin, 1.0f);
     feet.advanceTo(wallClockTick, 8266u, origin, 1.0f, false);
+    ballStars.advanceTo(wallClockTick, 8269u, origin, 1.0f);
+    curseStars.advanceTo(wallClockTick, 8271u, origin, 1.0f);
     QVERIFY(moshka.activeCount() > 0 && moshka.activeCount() <= 800);
     QCOMPARE(vision.activeCount(), 1);
     QCOMPARE(regeneration.activeCount(), 2);
     QVERIFY(silence.activeCount() > 2 && silence.activeCount() < 50);
     QVERIFY(feeblemind.activeCount() > 20 && feeblemind.activeCount() <= 300);
     QVERIFY(feet.activeCount() > 50 && feet.activeCount() <= 300);
+    QCOMPARE(ballStars.activeCount(), 21);
+    QCOMPARE(curseStars.activeCount(), 168);
 }
 
 QTEST_APPLESS_MAIN(ParticleAnimationTests)
