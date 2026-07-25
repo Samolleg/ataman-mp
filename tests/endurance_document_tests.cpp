@@ -9,6 +9,7 @@
 #include "operation_history_policy.h"
 #include "terrain_edit_model.h"
 #include "terrain_atlas_analyzer.h"
+#include "terrain_atlas_profile.h"
 #include "staged_save_validator.h"
 
 namespace {
@@ -320,6 +321,8 @@ private slots:
     void terrainTileStrokeCompositionKeepsFirstAndFinalValues();
     void terrainHeightStrokeCompositionKeepsFirstAndFinalValues();
     void zone1NamespaceTemplateSeparatesLandOverlayAndVariants();
+    void semanticAtlasProposalIsDeterministicAndApprovalGated();
+    void semanticAtlasProfileRejectsBindingMismatchAndAmbiguity();
     void zone1NamespaceTemplateMatchesPrivateFixture();
     void terrainHeightTransactionReopensAndPreservesOverlay();
     void conflictingTerrainSeamIsPreservedAndNotEditable();
@@ -2707,6 +2710,132 @@ void EnduranceDocumentTests::zone1NamespaceTemplateSeparatesLandOverlayAndVarian
     CValidationReport countReport;
     QVERIFY(!CTerrainAtlasAnalyzer::analyze("zone1", 448, &countReport).usable);
     QVERIFY(countReport.hasErrors());
+}
+
+void EnduranceDocumentTests::semanticAtlasProposalIsDeterministicAndApprovalGated()
+{
+    const auto tile = [](const QColor& nw, const QColor& ne,
+                         const QColor& se, const QColor& sw) {
+        QImage image(18, 18, QImage::Format_RGBA8888);
+        for(int y = 0; y < image.height(); ++y)
+            for(int x = 0; x < image.width(); ++x)
+            {
+                const bool east = x >= image.width() / 2;
+                const bool south = y >= image.height() / 2;
+                image.setPixelColor(x, y, south ? (east ? se : sw)
+                                                 : (east ? ne : nw));
+            }
+        return image;
+    };
+    const QColor soil(110, 70, 40), grass(35, 125, 45);
+    const QColor water(25, 65, 150), submerged(55, 50, 40);
+    QVector<QImage> images;
+    images << tile(soil, soil, soil, soil)
+           << tile(soil, grass, grass, soil)
+           << tile(grass, grass, grass, grass)
+           << tile(water, water, water, water)
+           << tile(submerged, submerged, submerged, submerged);
+    const QVector<qint32> tileTypes({1, 1, 1, 6, 4});
+    QVector<STerrainAtlasSlotUsage> usage(images.size());
+    usage[0].landCount = 40;
+    usage[1].landCount = 12;
+    usage[2].landCount = 25;
+    usage[3].overlayCount = 30;
+    usage[4].landCount = 30;
+    usage[4].landBelowOverlayCount = 30;
+
+    CValidationReport firstReport;
+    const STerrainAtlasProfile first = CTerrainAtlasProfileInference::propose(
+        "synthetic_forest", images, tileTypes, usage, &firstReport);
+    const STerrainAtlasProfile second = CTerrainAtlasProfileInference::propose(
+        "synthetic_forest", images, tileTypes, usage);
+    QCOMPARE(first.toJson(), second.toJson());
+    QCOMPARE(first.atlasSlotCount, images.size());
+    QCOMPARE(first.atlasPixelSha256.size(), 64);
+    QVERIFY(!first.approved);
+    QCOMPARE(first.slotDefinitions.size(), images.size());
+
+    const STerrainAtlasProfileSlot transition = first.slotDefinitions.at(1);
+    QCOMPARE(transition.signature.northWest, transition.signature.southWest);
+    QCOMPARE(transition.signature.northEast, transition.signature.southEast);
+    QVERIFY(transition.signature.northWest != transition.signature.northEast);
+    int overlayFamilies = 0, underwaterFamilies = 0;
+    for(const STerrainAtlasProfileFamily& family : first.families)
+    {
+        overlayFamilies += family.layer == ETerrainAtlasLayer::Overlay;
+        underwaterFamilies += family.underwater;
+        QVERIFY(!family.ambiguous);
+    }
+    QCOMPARE(overlayFamilies, 1);
+    QCOMPARE(underwaterFamilies, 1);
+
+    CValidationReport gateReport;
+    QVERIFY(!first.approvedAnalysis(&gateReport).usable);
+    QVERIFY(gateReport.hasErrors());
+
+    STerrainAtlasProfile approved = first;
+    approved.approved = true;
+    CValidationReport analysisReport;
+    const STerrainAtlasAnalysis analysis = approved.approvedAnalysis(&analysisReport);
+    QVERIFY2(analysis.usable, qPrintable(analysisReport.toText()));
+    bool found = false;
+    const quint16 packed = analysis.landCatalog.selectForPaint(
+        transition.signature, 3, 7, 99, &found);
+    QVERIFY(found);
+    bool decoded = false;
+    const STerrainTransitionSignature decodedSignature =
+        analysis.landCatalog.gridSignatureForPacked(packed, &decoded);
+    QVERIFY(decoded);
+    QCOMPARE(decodedSignature, transition.signature);
+
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString path = directory.filePath("semantic-atlas-profile.json");
+    CValidationReport saveReport;
+    QVERIFY2(approved.save(path, &saveReport), qPrintable(saveReport.toText()));
+    STerrainAtlasProfile reopened;
+    CValidationReport loadReport;
+    QVERIFY2(STerrainAtlasProfile::load(path, &reopened, &loadReport),
+             qPrintable(loadReport.toText()));
+    QCOMPARE(reopened.toJson(), approved.toJson());
+    const QByteArray json = QJsonDocument(reopened.toJson()).toJson();
+    QVERIFY(!json.contains(".mpr"));
+    QVERIFY(!json.contains(".mmp"));
+    QVERIFY(!json.contains("Maps\\"));
+}
+
+void EnduranceDocumentTests::semanticAtlasProfileRejectsBindingMismatchAndAmbiguity()
+{
+    QImage image(12, 12, QImage::Format_RGBA8888);
+    image.fill(QColor(80, 100, 60));
+    QVector<STerrainAtlasSlotUsage> usage(1);
+    usage[0].landCount = 5;
+    usage[0].overlayCount = 5;
+    CValidationReport proposalReport;
+    STerrainAtlasProfile profile = CTerrainAtlasProfileInference::propose(
+        "synthetic_mixed", QVector<QImage>({image}), QVector<qint32>({1}),
+        usage, &proposalReport);
+    QVERIFY(!profile.families.isEmpty());
+    QVERIFY(profile.families.front().ambiguous);
+    QVERIFY(proposalReport.toText().contains("both land and overlay"));
+
+    profile.approved = true;
+    CValidationReport ambiguousReport;
+    QVERIFY(!profile.approvedAnalysis(&ambiguousReport).usable);
+    QVERIFY(ambiguousReport.hasErrors());
+
+    CValidationReport namespaceReport;
+    QVERIFY(!profile.validateBinding("another_namespace", profile.atlasPixelSha256,
+                                     1, &namespaceReport));
+    QVERIFY(namespaceReport.toText().contains("another MPR namespace"));
+    CValidationReport hashReport;
+    QVERIFY(!profile.validateBinding(profile.mprNamespace, QByteArray(64, '0'),
+                                     1, &hashReport));
+    QVERIFY(hashReport.toText().contains("pixels no longer match"));
+    CValidationReport countReport;
+    QVERIFY(!profile.validateBinding(profile.mprNamespace, profile.atlasPixelSha256,
+                                     2, &countReport));
+    QVERIFY(countReport.toText().contains("slot count"));
 }
 
 void EnduranceDocumentTests::terrainTileStrokeCompositionKeepsFirstAndFinalValues()
