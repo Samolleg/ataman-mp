@@ -41,6 +41,7 @@ private slots:
     void exportText();
     void importText();
     void saveArchiveAs();
+    void viewExistingMinimap();
     void applyZoneFilter(const QString& text);
 
 private:
@@ -59,6 +60,7 @@ private:
     QString m_mapMemberName;
     CResArchiveDocument m_archive;
     CMapTableDocument m_table;
+    SMapTableMaps m_loadedMaps;
     int m_selectedZone{-1};
     bool m_newZoneMode{false};
     bool m_persistUiState{true};
@@ -77,6 +79,7 @@ private:
     QSpinBox* m_sectorHeight{nullptr};
     QLineEdit* m_minimapEdit{nullptr};
     QLineEdit* m_objectivesEdit{nullptr};
+    QPushButton* m_viewMinimapButton{nullptr};
     QTableWidget* m_exitTable{nullptr};
     QPlainTextEdit* m_rawReview{nullptr};
     QString m_loadedRawText;
