@@ -31,6 +31,7 @@ private slots:
     void createsGenerationScopedSavePaths();
     void validatesExternalGraphEnvelope();
     void recognizesGraphlessBridgeProtocolMarker();
+    void detectsAutoSpellMobCapability();
     void resolvesWorkspaceExternalGraph();
     void embeddedGraphShadowsExternalGraph();
     void reportsMissingOptionalGraph();
@@ -339,6 +340,48 @@ void JmvMapTestLauncherTests::recognizesGraphlessBridgeProtocolMarker()
         QByteArray("prefix") + syntheticEncoded + QByteArray("suffix")));
     QVERIFY(!CJmvMapTestLauncher::bridgeSupportsSyntheticMapIdentity(
         QByteArray("stale runtime bridge")));
+}
+
+void JmvMapTestLauncherTests::detectsAutoSpellMobCapability()
+{
+    QTemporaryDir temporary;
+    QVERIFY(temporary.isValid());
+    const QString engine = QDir(temporary.path()).filePath("Starter/Engine");
+    const QString mod = QDir(temporary.path()).filePath("Starter/MODS/TestMod");
+    const QString maps = QDir(mod).filePath("Maps");
+    QVERIFY(QDir().mkpath(engine));
+    QVERIFY(QDir().mkpath(maps));
+
+    SResourceProfileEvaluation profile;
+    profile.profileId = "jamais-vu";
+    profile.gameRoot = temporary.path();
+    profile.modRoot = mod;
+    profile.mapDirectories << maps;
+    SRuntimeComponentEvaluation runtime;
+    runtime.id = "starter-engine";
+    runtime.path = QDir(engine).filePath("game.exe");
+    profile.runtimeComponents.append(runtime);
+
+    QString reason;
+    QVERIFY(!CJmvMapTestLauncher::hasAutoSpellMob(profile, "game", false, &reason));
+    QVERIFY(reason.contains("SpellAddon", Qt::CaseInsensitive));
+
+    writeFile(QDir(engine).filePath("SpellAddonX.asi"), "asi");
+    writeFile(QDir(maps).filePath("AutoRunSpellAddon123.mob"), "mob");
+    QVERIFY(CJmvMapTestLauncher::hasAutoSpellMob(profile, "game", false, &reason));
+    QVERIFY(reason.isEmpty());
+    QVERIFY(CJmvMapTestLauncher::hasAutoSpellMob(profile, QString(), true, &reason));
+    QVERIFY(!CJmvMapTestLauncher::hasAutoSpellMob(profile, "brief", false, &reason));
+    QVERIFY(reason.contains("briefing", Qt::CaseInsensitive));
+    QVERIFY(!CJmvMapTestLauncher::hasAutoSpellMob(profile, "edge", false, &reason));
+
+    writeFile(QDir(mod).filePath("SPELLADDON.INI"),
+              "[gameplay]\nautorunmobfile=0\n");
+    QVERIFY(!CJmvMapTestLauncher::hasAutoSpellMob(profile, "game", false, &reason));
+    QVERIFY(reason.contains("autorunmobfile", Qt::CaseInsensitive));
+
+    profile.profileId = "base-game";
+    QVERIFY(!CJmvMapTestLauncher::hasAutoSpellMob(profile, "game", false, &reason));
 }
 
 void JmvMapTestLauncherTests::resolvesWorkspaceExternalGraph()

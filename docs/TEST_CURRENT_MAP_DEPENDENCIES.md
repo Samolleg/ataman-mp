@@ -89,6 +89,14 @@ structurally valid installed `AutoRunSpellAddon123.mob`:
 - a Time of Day override selected in the viewport;
 - explicit supplemental or collection MOB loading.
 
+Endurance exposes Play from Here only when the active runtime can execute that
+autorun MOB during map entry. The built-in JMV provider requires the ordinary
+`game` map lifecycle, an installed `SpellAddonX.asi`, an enabled
+`gameplay/autorunmobfile` setting (the runtime default is enabled), and the
+profile's `AutoRunSpellAddon123.mob`. JMV `brief`/`edge` maps and Base EI do not
+provide this path, so Play from Here is disabled for them. Endurance does not
+temporarily rewrite live entrance records as a fallback.
+
 For these features, Endurance creates a lossless run-local copy of the autorun
 MOB and adds only the required `SetCPFast`, `GodMode(0,3)`,
 `RunWorldTime(hours)`, or `AddMob(...)` commands. The installed MOB is never

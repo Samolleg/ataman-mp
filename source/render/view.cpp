@@ -6575,7 +6575,7 @@ void CView::pickObject(const QRect &rect, bool bAddToSelect)
     if (!m_selectProgram.bind())
         close();
 
-    const QMatrix4x4 viewMatrix = m_cam->update();
+    const QMatrix4x4 viewMatrix = m_cam->viewMatrix();
     m_selectProgram.setUniformValue("u_projMmatrix", m_projection);
     m_selectProgram.setUniformValue("u_viewMmatrix", viewMatrix);
     ei::gl::Clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -9020,7 +9020,7 @@ CNode* CView::pickObject(QList<CNode*>& aNode, int x, int y)
     if (!m_selectProgram.bind())
         close();
 
-    const QMatrix4x4 viewMatrix = m_cam->update();
+    const QMatrix4x4 viewMatrix = m_cam->viewMatrix();
     m_selectProgram.setUniformValue("u_projMmatrix", m_projection);
     m_selectProgram.setUniformValue("u_viewMmatrix", viewMatrix);
     ei::gl::Clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);

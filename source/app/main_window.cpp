@@ -2568,13 +2568,17 @@ void MainWindow::updateMapTestAction()
     const bool hasEntrance = selectedTravelZone() != nullptr;
     const bool customForCurrentMap = m_customSpawn.valid && m_customSpawn.custom
         && m_customSpawnContextKey == currentMapContextKey();
+    QString autoSpellMobReason;
+    const bool hasAutoSpellMob = CJmvMapTestLauncher::hasAutoSpellMob(
+        profile, m_mapTestEntry.zoneType, m_mapTestEntry.zoneId.isEmpty(),
+        &autoSpellMobReason);
     const bool loosePairReady = isJmv && m_mapTestEntry.zoneId.isEmpty()
         && customForCurrentMap && !m_pickSpawnPending;
     const bool hasBootstrap = hasEntrance || loosePairReady;
-    const bool customRequested = customForCurrentMap
-        || (m_playFromHereButton && m_playFromHereButton->isChecked());
+    const bool customRequested = hasAutoSpellMob && (customForCurrentMap
+        || (m_playFromHereButton && m_playFromHereButton->isChecked()));
     const bool customReady = !customRequested
-        || (isJmv && m_customSpawn.valid && !m_pickSpawnPending);
+        || (hasAutoSpellMob && m_customSpawn.valid && !m_pickSpawnPending);
     const bool profileReady = !m_workspaceLoadInProgress
         && (isJmv || isBaseProbe) && profile.valid
         && profile.runtimeStackValidated;
@@ -2597,8 +2601,15 @@ void MainWindow::updateMapTestAction()
         if(m_entranceCombo)
             m_entranceCombo->setEnabled(canEditTestSetup && !customRequested);
         if(m_gotoEntranceButton) m_gotoEntranceButton->setEnabled(canConfigureReload);
-        if(m_playFromHereButton) m_playFromHereButton->setEnabled(canEditTestSetup);
-        if(m_godmodeCheckBox) m_godmodeCheckBox->setEnabled(canEditTestSetup);
+        if(m_playFromHereButton)
+        {
+            m_playFromHereButton->setEnabled(canEditTestSetup && hasAutoSpellMob);
+            m_playFromHereButton->setToolTip(hasAutoSpellMob
+                ? tr("Place a temporary player start point for this test session.")
+                : autoSpellMobReason);
+        }
+        if(m_godmodeCheckBox)
+            m_godmodeCheckBox->setEnabled(canEditTestSetup && hasAutoSpellMob);
         m_mapTestAction->setToolTip(canHotReload
             ? tr("Restage the exact editor pair and reload it in the Endurance-owned JMV process (Ctrl+F5).\nRuntime state: %1\nSave generation: %2")
                 .arg(runtimeState).arg(saveGeneration)
@@ -2624,8 +2635,15 @@ void MainWindow::updateMapTestAction()
             (!m_validEntrances.isEmpty() || m_entranceCombo->findData(-1) >= 0));
     if(m_gotoEntranceButton)
         m_gotoEntranceButton->setEnabled(hasPair && (hasEntrance || customForCurrentMap));
-    if(m_playFromHereButton) m_playFromHereButton->setEnabled(isJmv && hasPair);
-    if(m_godmodeCheckBox) m_godmodeCheckBox->setEnabled(isJmv && hasPair);
+    if(m_playFromHereButton)
+    {
+        m_playFromHereButton->setEnabled(isJmv && hasPair && hasAutoSpellMob);
+        m_playFromHereButton->setToolTip(hasAutoSpellMob
+            ? tr("Place a temporary player start point for this test session.")
+            : autoSpellMobReason);
+    }
+    if(m_godmodeCheckBox)
+        m_godmodeCheckBox->setEnabled(isJmv && hasPair && hasAutoSpellMob);
     if(recoveryPending)
         m_mapTestAction->setToolTip(interruptedRun.isEmpty()
             ? tr("Endurance is waiting for an interrupted test game to finish exiting and for hash-owned cleanup to complete.")
@@ -2715,6 +2733,14 @@ void MainWindow::launchCurrentMapTest()
     const bool customForCurrentMap = m_customSpawn.valid && m_customSpawn.custom
         && m_customSpawnContextKey == currentMapContextKey();
     const bool loosePair = entry.zoneId.isEmpty();
+    QString autoSpellMobReason;
+    const bool hasAutoSpellMob = CJmvMapTestLauncher::hasAutoSpellMob(
+        profile, entry.zoneType, loosePair, &autoSpellMobReason);
+    if(customForCurrentMap && !hasAutoSpellMob)
+    {
+        QMessageBox::information(this, tr("Play from Here"), autoSpellMobReason);
+        return;
+    }
     if(loosePair)
     {
         if(!isJmv || m_pView->mobs().size() != 1)
@@ -2946,8 +2972,9 @@ void MainWindow::launchCurrentMapTest()
         return;
     }
     input.spawnZ = runtimeSpawn.z();
-    input.godmode = isJmv && m_godmodeCheckBox && m_godmodeCheckBox->isChecked();
-    input.overrideWorldTime = isJmv && m_pView->overridesWorldTime();
+    input.godmode = hasAutoSpellMob && m_godmodeCheckBox
+        && m_godmodeCheckBox->isChecked();
+    input.overrideWorldTime = hasAutoSpellMob && m_pView->overridesWorldTime();
     input.worldTimeHours = m_pView->effectiveWorldTimeHours();
     input.borrowedMapIdentity = m_borrowedMapIdentity;
     input.syntheticMapIdentity = loosePair;

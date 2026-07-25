@@ -654,6 +654,58 @@ bool CJmvMapTestLauncher::bridgeSupportsSyntheticMapIdentity(
     return bridgeBytes.contains(utf16Marker);
 }
 
+bool CJmvMapTestLauncher::hasAutoSpellMob(
+    const SResourceProfileEvaluation& profile,
+    const QString& zoneType,
+    bool syntheticMapIdentity,
+    QString* reason)
+{
+    auto reject = [reason](const QString& message) {
+        if(reason)
+            *reason = message;
+        return false;
+    };
+    if(reason)
+        reason->clear();
+    if(profile.profileId.compare("jamais-vu", Qt::CaseInsensitive) != 0)
+        return reject(QStringLiteral("The active profile does not support Play from Here."));
+    if(!syntheticMapIdentity
+       && zoneType.compare("game", Qt::CaseInsensitive) != 0)
+    {
+        if(zoneType.compare("brief", Qt::CaseInsensitive) == 0)
+            return reject(QStringLiteral("The current briefing map does not support Play from Here."));
+        return reject(QStringLiteral("The current map does not support Play from Here."));
+    }
+
+    QString engineDirectory;
+    for(const SRuntimeComponentEvaluation& component : profile.runtimeComponents)
+    {
+        if(component.id.compare("starter-engine", Qt::CaseInsensitive) == 0)
+        {
+            engineDirectory = QFileInfo(component.path).absolutePath();
+            break;
+        }
+    }
+    if(engineDirectory.isEmpty())
+        engineDirectory = QDir(profile.gameRoot).filePath("Starter/Engine");
+    if(findCaseInsensitiveFile(QStringList() << engineDirectory,
+                               "SpellAddonX.asi").isEmpty())
+        return reject(QStringLiteral("Play from Here requires SpellAddon's autorun-MOB feature."));
+
+    const QString settingsPath = findCaseInsensitiveFile(
+        QStringList() << profile.modRoot, "SPELLADDON.INI");
+    if(!settingsPath.isEmpty())
+    {
+        QSettings settings(settingsPath, QSettings::IniFormat);
+        if(settings.value("gameplay/autorunmobfile", 1).toInt() < 1)
+            return reject(QStringLiteral("Play from Here is disabled by gameplay/autorunmobfile in SPELLADDON.INI."));
+    }
+    if(findCaseInsensitiveFile(profile.mapDirectories,
+                               "AutoRunSpellAddon123.mob").isEmpty())
+        return reject(QStringLiteral("Play from Here requires AutoRunSpellAddon123.mob in the active mod."));
+    return true;
+}
+
 bool CJmvMapTestLauncher::resolveMapGraphSource(
     const QByteArray& primaryMobData,
     const QFileInfo& sourceMpr,

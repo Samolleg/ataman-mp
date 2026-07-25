@@ -8,6 +8,7 @@
 
 CCamera::CCamera()
     :m_speedMultiplier(1.0f)
+    ,m_frameMovementScale(1.0f)
     ,m_keyManager(nullptr)
     ,m_pSettings(nullptr)
 {
@@ -25,6 +26,7 @@ CCamera::CCamera(QVector3D pos, QVector3D pivot, float xRot, float zRot)
     ,m_zRot(zRot)
     ,m_step(0.5f)
     ,m_speedMultiplier(1.0f)
+    ,m_frameMovementScale(1.0f)
     ,m_keyManager(nullptr)
     ,m_pSettings(nullptr)
 {
@@ -33,6 +35,7 @@ CCamera::CCamera(QVector3D pos, QVector3D pivot, float xRot, float zRot)
 
 void CCamera::reset()
 {
+    m_updateTimer.invalidate();
     COptBool* pOpt = dynamic_cast<COptBool*>(m_pSettings->opt("freeCamera"));
     Q_ASSERT(pOpt);
     if (pOpt->value())
@@ -98,7 +101,17 @@ void CCamera::setSpeedMultiplier(float multiplier)
 
 QMatrix4x4 CCamera::update()
 {
+    double elapsedSeconds = 1.0 / 60.0;
+    if(m_updateTimer.isValid())
+    {
+        elapsedSeconds = double(m_updateTimer.nsecsElapsed()) / 1000000000.0;
+        m_updateTimer.restart();
+    }
+    else
+        m_updateTimer.start();
+    m_frameMovementScale = ei::cameraFrameMovementScale(elapsedSeconds);
     move();
+    m_frameMovementScale = 1.0f;
     QMatrix4x4 matrix;
     matrix.setToIdentity();
     matrix.translate(m_pivot.x(), m_pivot.y(), m_pivot.z());

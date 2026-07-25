@@ -90,6 +90,10 @@ public:
                                       QString* error = nullptr);
     static bool bridgeSupportsGraphlessLaunch(const QByteArray& bridgeBytes);
     static bool bridgeSupportsSyntheticMapIdentity(const QByteArray& bridgeBytes);
+    static bool hasAutoSpellMob(const SResourceProfileEvaluation& profile,
+                                const QString& zoneType,
+                                bool syntheticMapIdentity,
+                                QString* reason = nullptr);
     static qint64 runtimeGameProcessId(bool usesRuntimeHost,
                                        const QString& gamePidPath,
                                        qint64 transportProcessId);

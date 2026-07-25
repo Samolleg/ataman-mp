@@ -11,6 +11,7 @@ private slots:
     void changesOrbitPivotWithoutMovingTheCurrentView();
     void frustumSliceUsesTheRenderedCameraEye();
     void mapsShadowQualityToCapabilityBoundResolution();
+    void integratesMovementIndependentlyOfFrameRate();
 };
 
 void CameraTests::changesOrbitPivotWithoutMovingTheCurrentView()
@@ -78,6 +79,23 @@ void CameraTests::mapsShadowQualityToCapabilityBoundResolution()
     QCOMPARE(ei::shadowAtlasResolution(2, 16384), 4096);
     QCOMPARE(ei::shadowAtlasResolution(2, 2048), 2048);
     QCOMPARE(ei::shadowAtlasResolution(1, 1024), 1024);
+}
+
+void CameraTests::integratesMovementIndependentlyOfFrameRate()
+{
+    auto distanceAfterOneSecond = [](int framesPerSecond) {
+        float distance = 0.0f;
+        for(int frame = 0; frame < framesPerSecond; ++frame)
+            distance += 0.5f * ei::cameraFrameMovementScale(
+                1.0 / double(framesPerSecond));
+        return distance;
+    };
+    const float at30 = distanceAfterOneSecond(30);
+    const float at60 = distanceAfterOneSecond(60);
+    const float at240 = distanceAfterOneSecond(240);
+    QVERIFY(qAbs(at30 - at60) < 0.0001f);
+    QVERIFY(qAbs(at240 - at60) < 0.0001f);
+    QCOMPARE(ei::cameraFrameMovementScale(1.0), 6.0f);
 }
 
 QTEST_APPLESS_MAIN(CameraTests)
