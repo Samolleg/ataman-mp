@@ -5,7 +5,7 @@ work is ordered from the newest planned minor line to the oldest completed one.
 An item is checked only after its implementation has landed and received the
 stated validation. Completed code should carry a commit, test, or release link.
 
-Current development line: `0.3.0-alpha.13` focused closed testing. Alpha.11
+Current development line: `0.3.0-alpha.14` focused closed testing. Alpha.11
 was withdrawn after its temporary-resource bootstrap passed the fixed world
 object's first word as the object pointer and crashed both normal and synthetic
 Test Current Map launches. Alpha.12 corrects the pointer contract and adds an
@@ -14,7 +14,9 @@ owned-process runtime smoke test must reach `GameplayReady`, remain stable for
 15 seconds, and produce no native dump for both Zone 1 and the generated
 empty-control fixture before packaging. Alpha.13 gates Play from Here on the
 verified JMV autorun-MOB lifecycle and makes keyboard camera movement
-frame-rate independent. This is a
+frame-rate independent. Alpha.14 preserves the complete serialized Parts array
+through editing/copying, restores renamed-primary validation overlays, and
+completes Loaded Map MOB context actions. This is a
 version reclassification of the feature set that outgrew the `0.2.1` label,
 not a serializer or compatibility reset. The remaining 0.3 release work is the
 final runtime/corpus matrix, focused confirmation of the new live-clock and
@@ -483,7 +485,8 @@ remain unchanged.
   every serialized token (including unknown/profile-future values), retain
   exact order and duplicates, copy/paste the complete underlying array, and
   provide a display-only Parts filter. Evidence:
-  [body-part array preservation](docs/validation/BODYPART_ARRAY_PRESERVATION.md).
+  [body-part array preservation](docs/validation/BODYPART_ARRAY_PRESERVATION.md)
+  and [`53da556`](https://github.com/Ilufus/ei-mapper-endurance/commit/53da556).
 - [x] Complete Loaded Map MOB context actions for parameters, script, targeted
   Save/Save As, and dirty-aware Save enablement; duplicated catalog maps now
   offer to open the collection they create.
