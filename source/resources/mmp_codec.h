@@ -42,6 +42,11 @@ bool decodePnt3Image(const QByteArray& compressed, int width, int height,
 bool decodeDirectDrawImage(const QByteArray& descriptorAndPixels, int width, int height,
                            QImage* image, QString* diagnostic = nullptr);
 
+// Deterministic uncompressed 8888 writer used only after a review bake has
+// passed orientation/framing validation. Pixels are emitted as BGRA matching
+// the explicit masks in the 76-byte MMP descriptor.
+QByteArray encodeMmp8888(const QImage& image, QString* diagnostic = nullptr);
+
 // Compose the shared humanoid atlas with the original 2dintmmx.dll formula.
 // PNT3 pixels are already premultiplied, so routing them through a generic
 // source-over painter would premultiply translucent armor edges twice.

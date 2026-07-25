@@ -1,6 +1,7 @@
 #include "mmp_codec.h"
 
 #include <QtEndian>
+#include <QDataStream>
 #include <cstring>
 #include <limits>
 
@@ -322,6 +323,29 @@ bool compositeTextureLayers(const QVector<QImage>& layers, QImage* composite,
     }
     *composite = result;
     return true;
+}
+
+QByteArray encodeMmp8888(const QImage& image, QString* diagnostic)
+{
+    if(image.isNull() || image.width() <= 0 || image.height() <= 0)
+    {
+        if(diagnostic) *diagnostic = "A non-empty image is required for 8888 MMP encoding.";
+        return {};
+    }
+    const QImage source = image.convertToFormat(QImage::Format_ARGB32);
+    QByteArray result;
+    QDataStream stream(&result, QIODevice::WriteOnly);
+    stream.setByteOrder(QDataStream::LittleEndian);
+    stream << quint32(0x00504d4d) << quint32(source.width()) << quint32(source.height())
+           << quint32(1) << quint32(0x00008888) << quint32(32)
+           << quint32(0xff000000) << quint32(24) << quint32(8)
+           << quint32(0x00ff0000) << quint32(16) << quint32(8)
+           << quint32(0x0000ff00) << quint32(8) << quint32(8)
+           << quint32(0x000000ff) << quint32(0) << quint32(8) << quint32(0);
+    for(int y = 0; y < source.height(); ++y)
+        for(int x = 0; x < source.width(); ++x)
+            stream << quint32(source.pixel(x, y));
+    return result;
 }
 
 }
