@@ -199,21 +199,29 @@ landscape-save gate unless later controlled evidence demonstrates a
 graph-dependent case. MPR/SEC and AI-graph persistence remain separate
 lossless transactions because the graph is not owned by the MPR.
 
+The user-run R6 matrix passed on 2026-07-26. The regenerated preview now applies
+the eight confirmed movement profiles, half-metre terrain samples, profile
+footprints, terrain traversal costs, slope limits, water depth/clearance,
+diagonal-corner rejection, reciprocal links, and deterministic component
+colouring. This closes terrain/liquid/profile preview policy. Object placement
+still uses conservative rendered bounds and is the active source-accuracy gap;
+generated graph persistence remains disabled.
+
 ## Confirmed format foundation
 
-- [ ] Add `AiGraphDocument` with exact raw-byte retention for embedded
+- [x] Add `AiGraphDocument` with exact raw-byte retention for embedded
   `AI_GRAPH` records and external `.grp` files.
-- [ ] Parse and validate the confirmed envelope: width, height, and
+- [x] Parse and validate the confirmed envelope: width, height, and
   `width * height * 152` bytes of graph data.
-- [ ] Model the article-derived `8 * 19` subdivision conservatively:
+- [x] Model the confirmed `8 * 19` subdivision without truncation:
   - eight neutral slots/layers per graph coordinate;
   - eight little-endian 16-bit directional values in each slot;
   - `0xFFFF` as an unavailable connection;
-  - the remaining one-byte and two-byte planes retained as opaque until their
-    engine or builder meaning is proven.
-- [ ] Confirm graph-to-world orientation and the observed eight graph
+  - the packed one-byte local X/Y position and two-byte connected-component
+    identifier retained as separate planes.
+- [x] Confirm graph-to-world orientation and the observed eight graph
   coordinates per terrain SEC across Base and JMV maps.
-- [ ] Treat the published BMP converters as research evidence only. Their
+- [x] Treat the published BMP converters as research evidence only. Their
   reverse conversion drops high bytes from finite 16-bit values, ignores the
   auxiliary planes, and is not a safe serializer or graph builder.
   ([Habr research article](https://habr.com/ru/articles/769050/))
@@ -267,11 +275,34 @@ lossless transactions because the graph is not owned by the MPR.
 
 - [ ] Characterize the separate map editor's `AiGraphBaker` on disposable
   copies as a behavioral oracle, recording exact executable and output hashes.
-- [ ] Derive terrain slope, height, liquid/ice, collision object, bridge,
-  multi-level, door, and profile-specific graph-building rules through
-  one-variable controlled fixtures.
-- [ ] Implement full-map regeneration first. Partial dirty-region rebuilding is
-  deferred until it is proven byte/semantic-equivalent to a full rebuild.
+- [x] Derive and implement terrain height/slope, liquid depth, profile footprint,
+  terrain-cost, node-placement, link-cost, and component-colouring rules through
+  one-variable controlled fixtures for all eight movement profiles.
+- [x] Implement deterministic full-map regeneration as non-persistent preview
+  data. Partial dirty-region rebuilding remains deferred until it is proven
+  byte/semantic-equivalent to a full rebuild.
+- [ ] Retain each active FIG part's authored navigation bounds and semantic
+  class, including current complexion, assembly/bone offsets, body-part
+  selection, object transform, ignored parts, obstacle severity, danger, and
+  bridge classification. Rendered mesh AABBs remain a visibly labelled fallback
+  only when authored metadata cannot be resolved.
+- [ ] Rasterize oriented object volumes into half-metre cells as vertical
+  occupancy intervals, compose overlapping volumes deterministically, and apply
+  profile height/footprint rules without converting a rotated object into one
+  oversized world-axis-aligned blocker.
+- [ ] Implement bridge cells as the engine's single-floor 2.5D special case:
+  select the highest active bridge surface, replace navigation ground with the
+  deck, clear water/depth for traversal, retain overhead obstacles, and restore
+  underlying terrain/liquid state when the bridge is removed. Report that an
+  underpass and deck cannot coexist at one graph XY coordinate.
+- [ ] Resolve current door/moving-object pose and graph-recalculation policy;
+  moving, rotating, scaling, opening, closing, creating, or deleting relevant
+  objects must invalidate the correct preview region while full rebuild remains
+  the correctness reference.
+- [ ] Add synthetic object-navigation fixtures for rotated fences, ignored/easy
+  parts, danger volumes, deep-water bridges, overlapping/sloped bridges,
+  overhead clearance, bridge removal, and open/closed doors across all layers;
+  compare copied Base/JMV loaded graphs and runtime traversal separately.
 - [ ] Make regeneration explicit, previewed, staged, freshly reparsed,
   undoable, backed up, and atomic. Never invoke it as an ordinary Save side
   effect and never fall back to the legacy MOB rebuilding serializer.
@@ -311,6 +342,23 @@ reviewed only for the Zone 1 atlas. Other zone or custom atlases remain usable
 through manual tile painting, but automatic material painting must stay gated
 until the built-in atlas conversion/review workflow has produced and validated
 their material tables.
+
+The user-run R5 matrix passed on 2026-07-26, closing whole-map offset, flatten,
+clamp, normalize/remap, and both explicit `maxZ` migration policies. R6 changed
+only diagnostic navigation preview and does not broaden the MPR save contract.
+
+Three post-baseline workstreams are intentionally isolated:
+
+- `feature/semantic-atlas-coverage` owns automatic atlas conversion, review,
+  approval, and profile/namespace-scoped semantic definitions beyond Zone 1.
+- `feature/minimap-catalog-integration` owns deterministic collection minimap
+  baking, MMP/RES export transactions, and live catalog refresh/rebinding.
+- `feature/mpr-settings` owns source-accurate object navigation diagnostics,
+  overlay-surface data mutation, new-MPR creation, and structural crop/expand.
+
+The overlay-material-animation renderer work owns existing liquid wave/warp
+visual semantics. Landscape work may expose and serialize material values but
+must not independently change its shaders or animation policy.
 
 - [x] Preserve untouched archive members, internal names, member order,
   timestamps/metadata, alignment, unknown entries, and original MP/SEC
@@ -404,6 +452,13 @@ their material tables.
 - [ ] Provide validated Base and JMV material presets while retaining manual
   controls for mod-specific materials.
 - [ ] Preserve unknown overlay records and extra archive members.
+
+Implement this as separate undoable transactions: activate/deactivate cells,
+initialize or retain overlay vertices, sculpt overlay height without changing
+land vertices, choose existing atlas tiles, and edit typed MPR material values.
+No operation may normalize inactive sentinels, unknown records, or untouched
+sector bytes. Creation/removal must pass the same staged reopen, locality,
+semantic-diff, backup, and atomic-save contract as land edits.
 
 ## Landscape safety and game validation
 
