@@ -133,3 +133,11 @@ invented.
 Base and JMV share the owned-process delivery mechanism. Profile-specific game
 data, map conventions, bootstrap behavior, and optional providers remain
 separate.
+
+When both profiles expose the same guarded runtime facility, Endurance uses
+one shared owned-process mechanism. A profile-specific implementation is added
+only when the observable runtime contract actually differs. Synthetic-map
+minimap resources follow this rule: both profiles register the same standalone,
+run-owned RES through the fingerprinted bridge. JMV does not receive a separate
+configuration rewrite merely because its normal launcher supports additional
+resource entries.

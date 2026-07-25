@@ -41,6 +41,8 @@ private slots:
     void recoveryRestoresPreexistingAutoexec();
     void recoveryRemovesOwnedBridge();
     void recoveryRemovesOwnedGraph();
+    void recoveryRemovesOwnedPlaceholderResource();
+    void recoveryRetainsChangedPlaceholderResource();
     void recoveryRetriesTransientBridgeLock();
     void recoveryRetainsChangedBridge();
     void recoveryRemovesDisposableSaveGenerations();
@@ -683,6 +685,57 @@ void JmvMapTestLauncherTests::recoveryRemovesOwnedGraph()
     const QString summary = CJmvMapTestLauncher::recoverInterruptedRuns();
     QVERIFY2(!QFileInfo::exists(graphPath), qPrintable(summary));
     QVERIFY(summary.contains("Removed temporary file"));
+    QDir(run).removeRecursively();
+}
+
+void JmvMapTestLauncherTests::recoveryRemovesOwnedPlaceholderResource()
+{
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+    const QString resourcePath = QDir(temp.path()).filePath("EIMapperEndurance-run.res");
+    const QByteArray resourceBytes("owned standalone placeholder resource");
+    writeFile(resourcePath, resourceBytes);
+    const QString run = createRecoveryManifest(QString(), QString(), false,
+        QByteArray(), QByteArray());
+    QVERIFY(!run.isEmpty());
+    QFile manifestFile(QDir(run).filePath("manifest.json"));
+    QVERIFY(manifestFile.open(QIODevice::ReadOnly));
+    QJsonObject manifest = QJsonDocument::fromJson(manifestFile.readAll()).object();
+    manifestFile.close();
+    QJsonObject live;
+    live.insert("placeholderResPath", resourcePath);
+    live.insert("placeholderResSha256", hash(resourceBytes));
+    manifest.insert("liveFiles", live);
+    writeFile(QDir(run).filePath("manifest.json"),
+              QJsonDocument(manifest).toJson(QJsonDocument::Indented));
+    const QString summary = CJmvMapTestLauncher::recoverInterruptedRuns();
+    QVERIFY2(!QFileInfo::exists(resourcePath), qPrintable(summary));
+    QDir(run).removeRecursively();
+}
+
+void JmvMapTestLauncherTests::recoveryRetainsChangedPlaceholderResource()
+{
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+    const QString resourcePath = QDir(temp.path()).filePath("EIMapperEndurance-run.res");
+    const QByteArray expected("owned standalone placeholder resource");
+    writeFile(resourcePath, QByteArray("externally changed resource"));
+    const QString run = createRecoveryManifest(QString(), QString(), false,
+        QByteArray(), QByteArray());
+    QVERIFY(!run.isEmpty());
+    QFile manifestFile(QDir(run).filePath("manifest.json"));
+    QVERIFY(manifestFile.open(QIODevice::ReadOnly));
+    QJsonObject manifest = QJsonDocument::fromJson(manifestFile.readAll()).object();
+    manifestFile.close();
+    QJsonObject live;
+    live.insert("placeholderResPath", resourcePath);
+    live.insert("placeholderResSha256", hash(expected));
+    manifest.insert("liveFiles", live);
+    writeFile(QDir(run).filePath("manifest.json"),
+              QJsonDocument(manifest).toJson(QJsonDocument::Indented));
+    const QString summary = CJmvMapTestLauncher::recoverInterruptedRuns();
+    QVERIFY(QFileInfo::exists(resourcePath));
+    QVERIFY(summary.contains("Retained changed temporary file"));
     QDir(run).removeRecursively();
 }
 

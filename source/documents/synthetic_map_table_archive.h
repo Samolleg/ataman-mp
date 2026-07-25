@@ -19,12 +19,9 @@ bool buildSyntheticMapTableArchive(const QByteArray& sourceArchive,
                                    QByteArray* outputArchive,
                                    QStringList* errors = nullptr);
 
-// Replaces one existing MMP with a neutral checkerboard in a run-local,
-// append-only copy of menus.res. This preserves the shipped hash table and
-// lookup chains; the installed archive remains untouched.
-bool buildSyntheticMapPlaceholderArchive(const QByteArray& sourceArchive,
-                                         const QString& sourceName,
-                                         QByteArray* outputArchive,
+// Builds a standalone run-owned RES containing only Endurance's neutral
+// checkerboard. It does not borrow, replace, or rebuild any installed archive.
+bool buildSyntheticMapPlaceholderArchive(QByteArray* outputArchive,
                                          QStringList* errors = nullptr);
 
 QString syntheticMapPlaceholderTextureName();

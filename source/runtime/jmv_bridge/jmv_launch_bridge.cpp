@@ -56,6 +56,8 @@ using NewGameBootstrapFn = void (__thiscall*)(void*);
 using PlayerDefaultsResetFn = void (__thiscall*)(void*);
 using GameStringAssignFn = void (__thiscall*)(void*, const char*);
 using GetZoneByNameFn = unsigned char* (__thiscall*)(void*, const char*);
+using GetTextureManagerFn = void* (__thiscall*)(void*);
+using AddTextureResourceFn = int (__thiscall*)(void*, const char*);
 enum class RuntimeBuild { Unsupported, JmvStarter, BaseEi };
 
 HMODULE g_instance = nullptr;
@@ -112,6 +114,9 @@ constexpr DWORD kGameStringAssignRva = 0x00300AF9;
 constexpr DWORD kGetZoneByNameRva = 0x0005E850;
 constexpr DWORD kGlobalMapRva = 0x0039BF00;
 constexpr DWORD kGraphRequirementRva = 0x001955CC;
+constexpr DWORD kWorldClientGlobalRva = 0x003AF5B8;
+constexpr DWORD kTextureManagerAddResourceRva = 0x00275050;
+constexpr size_t kWorldGetTextureManagerVtableIndex = 34;
 constexpr UINT kDirectLaunchMessage = WM_APP + 0x45D;
 constexpr UINT kHotReloadMessage = WM_APP + 0x45E;
 constexpr unsigned char kMapLoadEntryBytes[6] = {
@@ -136,6 +141,9 @@ constexpr unsigned char kGraphRequirementBytes[33] = {
 constexpr unsigned char kGetZoneByNameBytes[15] = {
     0x53, 0x55, 0x56, 0x8B, 0xF1, 0x57, 0x33, 0xFF,
     0x8B, 0x46, 0x1C, 0x85, 0xC0, 0x7E, 0x25
+};
+constexpr unsigned char kTextureManagerAddResourceBytes[8] = {
+    0x6A, 0xFF, 0x68, 0xBC, 0x15, 0x73, 0x00, 0x64
 };
 enum class RuntimeState : LONG
 {
@@ -180,9 +188,8 @@ wchar_t g_supplementalMobDirectory[MAX_PATH * 4] = {};
 wchar_t g_mapTableSource[MAX_PATH * 4] = {};
 wchar_t g_mapTableStage[MAX_PATH * 4] = {};
 volatile LONG g_mapTableRedirectLogCount = 0;
-wchar_t g_placeholderResourceSource[MAX_PATH * 4] = {};
-wchar_t g_placeholderResourceStage[MAX_PATH * 4] = {};
-volatile LONG g_placeholderResourceRedirectLogCount = 0;
+wchar_t g_temporaryTextureResource[MAX_PATH * 4] = {};
+volatile LONG g_temporaryTextureResourceRegistered = 0;
 wchar_t g_hotReloadRequestPath[MAX_PATH * 4] = {};
 wchar_t g_hotReloadThreadPath[MAX_PATH * 4] = {};
 wchar_t g_hotReloadRoot[MAX_PATH * 4] = {};
@@ -459,6 +466,76 @@ bool ConfigureSyntheticZone()
                  L"SYNTHETIC_MAP configured preloaded identity=%S size=%dx%d entrance=(%.3f,%.3f) minimap=none exits=1 string_mutations=0",
                  g_sourceZone, g_syntheticMapSizeX,
                  g_syntheticMapSizeY, g_syntheticSpawnX, g_syntheticSpawnY);
+    Log(message);
+    return true;
+}
+
+bool RegisterTemporaryTextureResource()
+{
+    if(!g_temporaryTextureResource[0]
+       || InterlockedCompareExchange(&g_temporaryTextureResourceRegistered, 0, 0))
+        return true;
+    auto* game = reinterpret_cast<unsigned char*>(g_gameModule);
+    if(!game
+       || std::memcmp(game + kTextureManagerAddResourceRva,
+                      kTextureManagerAddResourceBytes,
+                      sizeof(kTextureManagerAddResourceBytes)) != 0)
+    {
+        Log(L"TEMP_TEXTURE_RES refused: texture resource registration signature does not match");
+        return false;
+    }
+    char resourcePath[MAX_PATH * 4]{};
+    BOOL substituted = FALSE;
+    if(!WideCharToMultiByte(CP_ACP, WC_NO_BEST_FIT_CHARS,
+                            g_temporaryTextureResource, -1,
+                            resourcePath, int(sizeof(resourcePath)),
+                            nullptr, &substituted) || substituted)
+    {
+        Log(L"TEMP_TEXTURE_RES refused: path cannot round-trip through the game code page");
+        return false;
+    }
+    auto** worldSlot = reinterpret_cast<void**>(game + kWorldClientGlobalRva);
+    if(!IsReadableRange(worldSlot, sizeof(void*)) || !*worldSlot
+       || !IsReadableRange(*worldSlot, sizeof(void*)))
+    {
+        Log(L"TEMP_TEXTURE_RES refused: world client is not initialized");
+        return false;
+    }
+    void* world = *worldSlot;
+    auto** vtable = *reinterpret_cast<void***>(world);
+    if(!vtable
+       || !IsReadableRange(vtable + kWorldGetTextureManagerVtableIndex,
+                           sizeof(void*)))
+    {
+        Log(L"TEMP_TEXTURE_RES refused: world interface layout is unavailable");
+        return false;
+    }
+    const auto getTextureManager = reinterpret_cast<GetTextureManagerFn>(
+        vtable[kWorldGetTextureManagerVtableIndex]);
+    if(!getTextureManager || !IsReadableRange(reinterpret_cast<void*>(getTextureManager), 1))
+    {
+        Log(L"TEMP_TEXTURE_RES refused: texture-manager accessor is unavailable");
+        return false;
+    }
+    void* manager = getTextureManager(world);
+    if(!manager || !IsReadableRange(manager, sizeof(void*)))
+    {
+        Log(L"TEMP_TEXTURE_RES refused: texture manager is not initialized");
+        return false;
+    }
+    const auto addResource = reinterpret_cast<AddTextureResourceFn>(
+        game + kTextureManagerAddResourceRva);
+    if(!addResource(manager, resourcePath))
+    {
+        Log(L"TEMP_TEXTURE_RES refused: game texture manager rejected the run-owned archive");
+        return false;
+    }
+    InterlockedExchange(&g_temporaryTextureResourceRegistered, 1);
+    wchar_t message[1800]{};
+    _snwprintf_s(message, sizeof(message) / sizeof(message[0]), _TRUNCATE,
+                 L"TEMP_TEXTURE_RES registered path=\"%s\" profile=%s installed_archives_modified=false",
+                 g_temporaryTextureResource,
+                 g_runtimeBuild == RuntimeBuild::BaseEi ? L"base" : L"jmv");
     Log(message);
     return true;
 }
@@ -1102,49 +1179,6 @@ bool RewriteMapTableA(LPCSTR path, char* output, size_t capacity)
         && !substituted;
 }
 
-bool RewritePlaceholderResourceW(LPCWSTR path, wchar_t* output, size_t capacity)
-{
-    if(!path || !output || !capacity || !g_placeholderResourceSource[0]
-       || !g_placeholderResourceStage[0])
-        return false;
-    wchar_t full[MAX_PATH * 4]{};
-    const DWORD length = GetFullPathNameW(
-        path, DWORD(sizeof(full) / sizeof(full[0])), full, nullptr);
-    if(!length || length >= sizeof(full) / sizeof(full[0]))
-        return false;
-    NormalizeSlashes(full);
-    if(_wcsicmp(full, g_placeholderResourceSource) != 0
-       || wcscpy_s(output, capacity, g_placeholderResourceStage) != 0)
-        return false;
-    const LONG sequence = InterlockedIncrement(&g_placeholderResourceRedirectLogCount);
-    if(sequence <= 8)
-    {
-        wchar_t message[1900]{};
-        _snwprintf_s(message, sizeof(message) / sizeof(message[0]), _TRUNCATE,
-                     L"PLACEHOLDER_RESOURCE_REDIRECT seq=%ld from=\"%s\" to=\"%s\"",
-                     sequence, full, output);
-        Log(message);
-    }
-    return true;
-}
-
-bool RewritePlaceholderResourceA(LPCSTR path, char* output, size_t capacity)
-{
-    if(!path || !output || !capacity)
-        return false;
-    wchar_t wide[MAX_PATH * 4]{};
-    wchar_t rewritten[MAX_PATH * 4]{};
-    if(!MultiByteToWideChar(CP_ACP, 0, path, -1, wide,
-                            int(sizeof(wide) / sizeof(wide[0])))
-       || !RewritePlaceholderResourceW(
-           wide, rewritten, sizeof(rewritten) / sizeof(rewritten[0])))
-        return false;
-    BOOL substituted = FALSE;
-    return WideCharToMultiByte(CP_ACP, WC_NO_BEST_FIT_CHARS, rewritten, -1,
-                               output, int(capacity), nullptr, &substituted) != 0
-        && !substituted;
-}
-
 bool CommitSaveGeneration(const HotReloadControl& request)
 {
     if(request.generation == g_saveGeneration)
@@ -1312,9 +1346,6 @@ HANDLE WINAPI HookCreateFileW(LPCWSTR path, DWORD access, DWORD share,
     if(RewriteMapTableW(selected, redirected,
                         sizeof(redirected) / sizeof(redirected[0])))
         selected = redirected;
-    else if(RewritePlaceholderResourceW(selected, redirected,
-                                         sizeof(redirected) / sizeof(redirected[0])))
-        selected = redirected;
     HANDLE result = g_originalCreateFileW(selected, access, share, security, creation, flags, templateFile);
     const DWORD error = GetLastError();
     Observe(L"CreateFileW", path, reinterpret_cast<ULONG_PTR>(result), error, caller, access, creation);
@@ -1335,8 +1366,6 @@ HANDLE WINAPI HookCreateFileA(LPCSTR path, DWORD access, DWORD share,
         || RewriteSupplementalMobA(path, owned, sizeof(owned))
         || RewriteOwnedPathA(path, owned, sizeof(owned))) ? owned : path;
     if(RewriteMapTableA(selected, redirected, sizeof(redirected)))
-        selected = redirected;
-    else if(RewritePlaceholderResourceA(selected, redirected, sizeof(redirected)))
         selected = redirected;
     HANDLE result = g_originalCreateFileA(selected, access, share, security, creation, flags, templateFile);
     const DWORD error = GetLastError();
@@ -1364,9 +1393,6 @@ DWORD WINAPI HookGetFileAttributesW(LPCWSTR path)
     if(RewriteMapTableW(selected, redirected,
                         sizeof(redirected) / sizeof(redirected[0])))
         selected = redirected;
-    else if(RewritePlaceholderResourceW(selected, redirected,
-                                         sizeof(redirected) / sizeof(redirected[0])))
-        selected = redirected;
     const DWORD result = g_originalGetFileAttributesW(selected);
     const DWORD error = GetLastError();
     Observe(L"GetFileAttributesW", path, result, error, caller);
@@ -1385,8 +1411,6 @@ DWORD WINAPI HookGetFileAttributesA(LPCSTR path)
         || RewriteSupplementalMobA(path, owned, sizeof(owned))
         || RewriteOwnedPathA(path, owned, sizeof(owned))) ? owned : path;
     if(RewriteMapTableA(selected, redirected, sizeof(redirected)))
-        selected = redirected;
-    else if(RewritePlaceholderResourceA(selected, redirected, sizeof(redirected)))
         selected = redirected;
     const DWORD result = g_originalGetFileAttributesA(selected);
     const DWORD error = GetLastError();
@@ -2103,36 +2127,24 @@ bool ReadDirectLaunchPaths()
         wcscpy_s(g_mapTableSource, sourceFull);
         wcscpy_s(g_mapTableStage, stageFull);
     }
-    GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_PLACEHOLDER_RESOURCE_SOURCE",
-                            g_placeholderResourceSource,
-                            DWORD(sizeof(g_placeholderResourceSource)
-                                  / sizeof(g_placeholderResourceSource[0])));
-    GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_PLACEHOLDER_RESOURCE_STAGE",
-                            g_placeholderResourceStage,
-                            DWORD(sizeof(g_placeholderResourceStage)
-                                  / sizeof(g_placeholderResourceStage[0])));
-    if(g_placeholderResourceSource[0] || g_placeholderResourceStage[0])
+    GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_TEMP_TEXTURE_RES",
+                            g_temporaryTextureResource,
+                            DWORD(sizeof(g_temporaryTextureResource)
+                                  / sizeof(g_temporaryTextureResource[0])));
+    if(g_temporaryTextureResource[0])
     {
-        wchar_t sourceFull[MAX_PATH * 4]{};
-        wchar_t stageFull[MAX_PATH * 4]{};
-        const DWORD sourceLength = GetFullPathNameW(
-            g_placeholderResourceSource,
-            DWORD(sizeof(sourceFull) / sizeof(sourceFull[0])), sourceFull, nullptr);
-        const DWORD stageLength = GetFullPathNameW(
-            g_placeholderResourceStage,
-            DWORD(sizeof(stageFull) / sizeof(stageFull[0])), stageFull, nullptr);
-        if(!sourceLength || sourceLength >= sizeof(sourceFull) / sizeof(sourceFull[0])
-           || !stageLength || stageLength >= sizeof(stageFull) / sizeof(stageFull[0])
-           || GetFileAttributesW(sourceFull) == INVALID_FILE_ATTRIBUTES
-           || GetFileAttributesW(stageFull) == INVALID_FILE_ATTRIBUTES)
+        wchar_t full[MAX_PATH * 4]{};
+        const DWORD length = GetFullPathNameW(
+            g_temporaryTextureResource,
+            DWORD(sizeof(full) / sizeof(full[0])), full, nullptr);
+        if(!length || length >= sizeof(full) / sizeof(full[0])
+           || GetFileAttributesW(full) == INVALID_FILE_ATTRIBUTES)
         {
-            Log(L"DIRECT_LAUNCH disabled: placeholder resource source/stage paths are incomplete or unreadable");
+            Log(L"DIRECT_LAUNCH disabled: run-owned texture RES is unreadable");
             return false;
         }
-        NormalizeSlashes(sourceFull);
-        NormalizeSlashes(stageFull);
-        wcscpy_s(g_placeholderResourceSource, sourceFull);
-        wcscpy_s(g_placeholderResourceStage, stageFull);
+        NormalizeSlashes(full);
+        wcscpy_s(g_temporaryTextureResource, full);
     }
     GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_BOOTSTRAP_MPR", bootstrapMpr,
                             DWORD(sizeof(bootstrapMpr) / sizeof(bootstrapMpr[0])));
@@ -2597,6 +2609,12 @@ bool ProcessHotReloadOnGameThread()
     }
 
     InterlockedExchange(&g_pendingStateAwareReload, 0);
+    if(!RegisterTemporaryTextureResource())
+    {
+        Log(L"HOT_RELOAD refused: run-owned texture RES could not be registered safely");
+        InterlockedExchange(&g_directLaunchState, -1);
+        return false;
+    }
     if(!ConfigureSyntheticZone())
     {
         Log(L"HOT_RELOAD refused: synthetic map identity could not be prepared safely");
@@ -2649,6 +2667,12 @@ LRESULT CALLBACK DirectLaunchMessageHook(int code, WPARAM wParam, LPARAM lParam)
     if(InterlockedCompareExchange(&g_directLaunchState, 3, 2) != 2)
         return next;
 
+    if(!RegisterTemporaryTextureResource())
+    {
+        Log(L"DIRECT_LAUNCH failed: run-owned texture RES could not be registered safely");
+        InterlockedExchange(&g_directLaunchState, -1);
+        return next;
+    }
     if(!ConfigureSyntheticZone())
     {
         Log(L"DIRECT_LAUNCH failed: synthetic map identity could not be prepared safely");

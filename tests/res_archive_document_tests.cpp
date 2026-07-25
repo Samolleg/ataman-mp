@@ -106,7 +106,7 @@ private slots:
     void failedAtomicCommitLeavesDestinationUntouched();
     void sourceRaceRefusesSave();
     void syntheticMapTableAddsOwnedMaplessZoneLosslessly();
-    void syntheticPlaceholderAddsResolvableCheckerWithoutChangingMembers();
+    void syntheticPlaceholderBuildsStandaloneResolvableChecker();
 };
 
 void ResArchiveDocumentTests::noOpIsByteIdentical()
@@ -306,32 +306,18 @@ void ResArchiveDocumentTests::syntheticMapTableAddsOwnedMaplessZoneLosslessly()
     QCOMPARE(matches, 1);
 }
 
-void ResArchiveDocumentTests::syntheticPlaceholderAddsResolvableCheckerWithoutChangingMembers()
+void ResArchiveDocumentTests::syntheticPlaceholderBuildsStandaloneResolvableChecker()
 {
-    CResArchiveDocument menuFixture;
-    QVERIFY(menuFixture.loadBytes(syntheticRes(), "menus-base.res"));
-    QByteArray original;
-    QStringList fixtureErrors;
-    QVERIFY2(menuFixture.buildWithAppendedMember(
-        "mainmenu00.mmp", QByteArray(128, char(0x5A)), 0x11223344,
-        &original, &fixtureErrors), qPrintable(fixtureErrors.join('\n')));
     QByteArray staged;
     QStringList errors;
-    QVERIFY2(buildSyntheticMapPlaceholderArchive(
-        original, "menus.res", &staged, &errors), qPrintable(errors.join('\n')));
-    CResArchiveDocument baseline;
-    CResArchiveDocument candidate;
-    QVERIFY(baseline.loadBytes(original));
-    QVERIFY2(candidate.loadBytes(staged, "menus.res [staged]", &errors),
+    QVERIFY2(buildSyntheticMapPlaceholderArchive(&staged, &errors),
              qPrintable(errors.join('\n')));
-    QCOMPARE(candidate.members().size(), baseline.members().size());
-    for(const SResArchiveMember& member : baseline.members())
-    {
-        if(member.name.compare(syntheticMapPlaceholderTextureName() + ".mmp",
-                               Qt::CaseInsensitive) == 0)
-            continue;
-        QCOMPARE(candidate.memberPayload(member.name), member.payload);
-    }
+    CResArchiveDocument candidate;
+    QVERIFY2(candidate.loadBytes(staged, "temporary-placeholder.res", &errors),
+             qPrintable(errors.join('\n')));
+    QCOMPARE(candidate.members().size(), 1);
+    QCOMPARE(candidate.members().first().name,
+             syntheticMapPlaceholderTextureName() + ".mmp");
     const QByteArray checker = candidate.memberPayload(
         syntheticMapPlaceholderTextureName() + ".mmp");
     QCOMPARE(runtimeMemberPayload(

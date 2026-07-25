@@ -8,12 +8,7 @@
 #include "res_archive_document.h"
 
 namespace {
-// Keep the original menus.res member table and hash chains intact. The shipped
-// game accepts the append-only replacement format already used for map.txt,
-// while a completely rebuilt menus.res table proved unstable at runtime.
-// mainmenu00 is only the transient main-menu background and can safely serve
-// as the private test run's synthetic minimap/objective alias.
-const char kPlaceholderTextureName[] = "mainmenu00";
+const char kPlaceholderTextureName[] = "enduranceplaceholder";
 
 void addError(QStringList* errors, const QString& text)
 {
@@ -56,42 +51,43 @@ QString syntheticMapPlaceholderTextureName()
     return QString::fromLatin1(kPlaceholderTextureName);
 }
 
-bool buildSyntheticMapPlaceholderArchive(const QByteArray& sourceArchive,
-                                         const QString& sourceName,
-                                         QByteArray* outputArchive,
+bool buildSyntheticMapPlaceholderArchive(QByteArray* outputArchive,
                                          QStringList* errors)
 {
+    if(outputArchive)
+        outputArchive->clear();
+    if(!outputArchive)
+    {
+        addError(errors, "A placeholder RES output is required.");
+        return false;
+    }
+    QByteArray emptyArchive(16, '\0');
+    QDataStream header(&emptyArchive, QIODevice::WriteOnly);
+    header.setByteOrder(QDataStream::LittleEndian);
+    header << quint32(0x019CE23C) << quint32(0) << quint32(16) << quint32(0);
     CResArchiveDocument baseline;
     QStringList localErrors;
-    if(!baseline.loadBytes(sourceArchive, sourceName, &localErrors))
+    if(!baseline.loadBytes(emptyArchive, "Endurance temporary placeholder", &localErrors))
     {
         if(errors) errors->append(localErrors);
         return false;
     }
     const QString memberName = syntheticMapPlaceholderTextureName() + ".mmp";
-    const QByteArray original = baseline.memberPayload(memberName);
-    if(original.isEmpty())
-    {
-        addError(errors, QString("The placeholder source member %1 is missing.")
-                          .arg(memberName));
-        return false;
-    }
-    const QByteArray expectedHash = QCryptographicHash::hash(
-        original, QCryptographicHash::Sha256).toHex();
     const QByteArray checker = checkerboardMmp();
-    if(!baseline.replaceMember(memberName, expectedHash, checker,
-                               outputArchive, &localErrors))
+    if(!baseline.buildWithAppendedMember(memberName, checker, 0,
+                                         outputArchive, &localErrors))
     {
         if(errors) errors->append(localErrors);
         return false;
     }
     CResArchiveDocument candidate;
-    if(!candidate.loadBytes(*outputArchive, sourceName + " [placeholder]",
+    if(!candidate.loadBytes(*outputArchive, "Endurance temporary placeholder [reopen]",
                             &localErrors)
-       || !CResArchiveDocument::validateReplacement(
-           baseline, candidate, memberName, checker, &localErrors))
+       || candidate.members().size() != 1
+       || candidate.memberPayload(memberName) != checker)
     {
         if(errors) errors->append(localErrors);
+        addError(errors, "The standalone placeholder RES failed semantic reopen validation.");
         return false;
     }
     return true;
@@ -145,10 +141,9 @@ bool buildSyntheticMapTableArchive(const QByteArray& sourceArchive,
     zone.mprName = mapName;
     zone.mobName = mapName;
     // A gameplay-zone mission screen constructs its minimap immediately and
-    // expects both a valid map size and a successfully loaded texture. A neutral
-    // generated checker replaces an existing texture only in a run-local,
-    // append-only menus.res derivative. The objectives screen uses the same
-    // owned placeholder until generated map captures are available.
+    // expects both a valid map size and a successfully loaded texture. The
+    // bridge registers a standalone, run-owned RES containing this neutral
+    // placeholder before invoking the New Game bootstrap.
     zone.maps.present = true;
     zone.maps.sectorWidth = mapSizeX;
     zone.maps.sectorHeight = mapSizeY;

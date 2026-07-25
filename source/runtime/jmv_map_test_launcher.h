@@ -166,8 +166,7 @@ private:
     QString m_liveGrpPath;
     QString m_mapTableSourcePath;
     QString m_stagedMapTablePath;
-    QString m_placeholderResourceSourcePath;
-    QString m_stagedPlaceholderResourcePath;
+    QString m_livePlaceholderResourcePath;
     QString m_bridgeSourcePath;
     QString m_bridgeLivePath;
     QString m_bridgeResultPath;
@@ -178,8 +177,7 @@ private:
     QString m_liveGrpSha256;
     QString m_mapTableSourceSha256;
     QString m_stagedMapTableSha256;
-    QString m_placeholderResourceSourceSha256;
-    QString m_stagedPlaceholderResourceSha256;
+    QString m_livePlaceholderResourceSha256;
     QString m_gameExePath;
     QString m_engineDirectory;
     QString m_runtimeHostPath;
