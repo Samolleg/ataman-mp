@@ -248,6 +248,8 @@ public:
     void beginTileBrushGroup();
     void endTileBrushGroup();
     bool applyTerrainHeightPreview(const STerrainHeightCommand& command, bool forward);
+    bool applyTerrainVerticalScalePreview(const STerrainVerticalScaleCommand& command,
+                                          bool forward);
     bool applyTerrainTilePreview(const STerrainTileCommand& command, bool forward);
     void loadSession();
     void setSessionWorkspaceIdentity(const QString& kind, const QString& identifier,

@@ -112,7 +112,9 @@ types or silently modify atlas resources.
   deterministic rounding, and fixed vertex/member counts.
 - Changed candidates use staged serialization, fresh reopen, semantic diff,
   backup, source-race refusal, and atomic replacement.
-- Existing `maxZ` and resize implementation remain disabled until their
-  dedicated transactions prove untouched-member equality and private copied
-  Base/JMV runtime validation.
+- `maxZ` migration is enabled only through its dedicated undoable staged
+  transaction, with synthetic reopen and untouched-member equality coverage.
+  Crop/expand remains disabled until its separate transaction proves runtime
+  hash-chain construction, untouched-member equality, and private copied
+  Base/JMV validation.
 - Live installations and proprietary map corpora are never mutation targets.

@@ -343,10 +343,10 @@ serializer remains forbidden for every changed MPR.
   map/profile/namespace summary, sector/tile/vertex dimensions, raw and world
   height ranges, `maxZ`, materials, overlays, diagnostics, and separately gated
   height-scale and resize transactions.
-- [ ] Add undoable whole-map offset, flatten, clamp, and normalize/remap
+- [x] Add undoable whole-map offset, flatten, clamp, and normalize/remap
   operations. These retain the existing sector dimensions and canonical vertex
   count; no-ops must not dirty the MPR.
-- [ ] Treat `maxZ` as the global raw-to-world vertical range. Offer explicit
+- [x] Treat `maxZ` as the global raw-to-world vertical range. Offer explicit
   **Scale terrain** and **Preserve heights by requantizing** policies, preview
   rounding and clamp effects, and never disguise a scale migration as an
   ordinary maximum-height field.

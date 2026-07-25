@@ -306,6 +306,7 @@ private slots:
     void syntheticMprPreservesArchiveNamespaceAndInactiveSentinel();
     void mprSectorPatchIsProvenanceCheckedAndLocal();
     void mprMaxZPatchIsProvenanceCheckedAndLocal();
+    void mprVerticalScaleTransactionReopensWithDerivedNormals();
     void mprLengthChangingAndStaleTransactionsFailClosed();
     void failedStagedMprSaveLeavesNoDestination();
     void stagedMprTransactionProvesExactSemanticScopeWithoutDestination();
@@ -319,6 +320,7 @@ private slots:
     void terrainBrushToolsAreDeterministicAndFailClosed();
     void terrainHeightmapImportIsDeterministicAndSeamAware();
     void globalTerrainHeightOperationsKeepDimensionsAndSeams();
+    void terrainVerticalScalePoliciesAreUndoableAndExplicit();
     void globalTerrainHeightOperationsRejectInvalidRanges();
     void terrainDiagnosticsArePreApplyAndPolicyExplicit();
     void terrainTilePaintingIsUndoableLocalizedAndNamespaceSafe();
@@ -1366,6 +1368,47 @@ void EnduranceDocumentTests::mprMaxZPatchIsProvenanceCheckedAndLocal()
     QVERIFY(!baseline.appendMaxZEdit(originalMaxZ * 2.0f, nullptr));
 }
 
+void EnduranceDocumentTests::mprVerticalScaleTransactionReopensWithDerivedNormals()
+{
+    CMprDocument baseline;
+    CValidationReport report;
+    QVERIFY2(baseline.loadBytes(syntheticMpr(), "scale-baseline.mpr", &report),
+             qPrintable(report.toText()));
+    CTerrainEditModel terrain;
+    QVERIFY2(terrain.load(baseline, &report), qPrintable(report.toText()));
+    const STerrainVerticalScaleCommand scale = terrain.makeVerticalScale(
+        baseline.mapInfo().maxZ * 1.25f,
+        ETerrainVerticalScalePolicy::ScaleTerrain);
+    QVERIFY(scale.valid);
+    QVERIFY(terrain.apply(scale, true, &report));
+
+    CMprEditTransaction transaction("scale maxZ and rebuild derived normals");
+    QVERIFY2(terrain.appendSectorEdits(&transaction, &report), qPrintable(report.toText()));
+    QVERIFY2(baseline.appendMaxZEdit(terrain.maxZ(), &transaction, &report),
+             qPrintable(report.toText()));
+    QCOMPARE(transaction.edits().size(), 2);
+
+    QByteArray candidateBytes;
+    QVERIFY2(baseline.applyTransaction(transaction, &candidateBytes, &report),
+             qPrintable(report.toText()));
+    CMprDocument candidate;
+    CValidationReport reopenReport;
+    QVERIFY2(candidate.loadBytes(candidateBytes, "scale-candidate.mpr", &reopenReport),
+             qPrintable(reopenReport.toText()));
+    QCOMPARE(candidate.mapInfo().maxZ, scale.afterMaxZ);
+    QCOMPARE(candidate.memberPayload("unknown.bin"), baseline.memberPayload("unknown.bin"));
+    const CMprSemanticDiff diff = CMprSemanticDiff::compare(baseline, candidate);
+    QCOMPARE(diff.entries().size(), 2);
+    QVERIFY(std::any_of(diff.entries().constBegin(), diff.entries().constEnd(),
+        [&baseline](const SMprDocumentDiffEntry& entry) {
+            return entry.memberName == baseline.mapInfo().memberName;
+        }));
+    QVERIFY(std::any_of(diff.entries().constBegin(), diff.entries().constEnd(),
+        [&baseline](const SMprDocumentDiffEntry& entry) {
+            return entry.memberName == baseline.sectors().front().memberName;
+        }));
+}
+
 void EnduranceDocumentTests::mprLengthChangingAndStaleTransactionsFailClosed()
 {
     CMprDocument document;
@@ -2027,6 +2070,71 @@ void EnduranceDocumentTests::globalTerrainHeightOperationsKeepDimensionsAndSeams
     QCOMPARE(terrain.heightRange().minimumRaw, quint16(12345));
     QCOMPARE(terrain.heightRange().maximumRaw, quint16(12345));
     QVERIFY(terrain.makeGlobalFlatten(12345).isEmpty());
+}
+
+void EnduranceDocumentTests::terrainVerticalScalePoliciesAreUndoableAndExplicit()
+{
+    CTerrainEditModel terrain;
+    QVERIFY(terrain.loadSources(1, 1, 100.0f,
+                                twoSectorTerrain(1000).mid(0, 1)));
+    const float originalWorld = terrain.heightRange().minimumWorld;
+
+    const STerrainVerticalScaleCommand scale = terrain.makeVerticalScale(
+        200.0f, ETerrainVerticalScalePolicy::ScaleTerrain);
+    QVERIFY(scale.valid);
+    QVERIFY(scale.heights.isEmpty());
+    QVERIFY(terrain.apply(scale, true));
+    QCOMPARE(terrain.maxZ(), 200.0f);
+    QCOMPARE(terrain.height(0, 0), quint16(1000));
+    QCOMPARE(terrain.heightRange().minimumWorld, originalWorld * 2.0f);
+    QVERIFY(terrain.isDirty());
+    QVERIFY(terrain.apply(scale, false));
+    QCOMPARE(terrain.maxZ(), 100.0f);
+    QCOMPARE(terrain.height(0, 0), quint16(1000));
+    QVERIFY(!terrain.isDirty());
+
+    const STerrainVerticalScaleCommand preserve = terrain.makeVerticalScale(
+        150.0f, ETerrainVerticalScalePolicy::PreserveWorldHeights);
+    QVERIFY(preserve.valid);
+    QCOMPARE(preserve.heights.deltas.size(), terrain.vertexCountX() * terrain.vertexCountY());
+    QCOMPARE(preserve.heights.deltas.front().after, quint16(667));
+    QVERIFY(preserve.roundedVertexCount > 0);
+    QVERIFY(preserve.maximumWorldError > 0.0f);
+    QVERIFY(terrain.apply(preserve, true));
+    QCOMPARE(terrain.maxZ(), 150.0f);
+    QCOMPARE(terrain.height(0, 0), quint16(667));
+    QVERIFY(qAbs(terrain.heightRange().minimumWorld - originalWorld)
+            <= preserve.maximumWorldError + 1.0e-6f);
+    QVERIFY(terrain.apply(preserve, false));
+    QCOMPARE(terrain.maxZ(), 100.0f);
+    QCOMPARE(terrain.height(0, 0), quint16(1000));
+    QVERIFY(!terrain.isDirty());
+
+    CValidationReport refusedReport;
+    const STerrainVerticalScaleCommand refused = terrain.makeVerticalScale(
+        1.0f, ETerrainVerticalScalePolicy::PreserveWorldHeights,
+        false, &refusedReport);
+    QVERIFY(!refused.valid);
+    QVERIFY(refused.clampedVertexCount > 0);
+    QVERIFY(refusedReport.hasErrors());
+    const STerrainVerticalScaleCommand accepted = terrain.makeVerticalScale(
+        1.0f, ETerrainVerticalScalePolicy::PreserveWorldHeights, true);
+    QVERIFY(accepted.valid);
+    QVERIFY(accepted.clampedVertexCount > 0);
+    QVERIFY(terrain.apply(accepted, true));
+    QCOMPARE(terrain.heightRange().maximumRaw, quint16(65535));
+    QVERIFY(terrain.apply(accepted, false));
+    QVERIFY(!terrain.isDirty());
+
+    CValidationReport tinyReport;
+    const STerrainVerticalScaleCommand tiny = terrain.makeVerticalScale(
+        std::numeric_limits<float>::min(),
+        ETerrainVerticalScalePolicy::PreserveWorldHeights,
+        false, &tinyReport);
+    QVERIFY(!tiny.valid);
+    QCOMPARE(tiny.clampedVertexCount,
+             terrain.vertexCountX() * terrain.vertexCountY());
+    QVERIFY(tinyReport.hasErrors());
 }
 
 void EnduranceDocumentTests::globalTerrainHeightOperationsRejectInvalidRanges()

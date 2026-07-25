@@ -5,6 +5,8 @@
 #include <QMessageBox>
 
 #include "landscape.h"
+
+#include <cmath>
 #include "render_performance.h"
 #include "view_frustum.h"
 #include "res_file.h"
@@ -515,6 +517,18 @@ bool CLandscape::previewCanonicalSector(int xSec, int ySec, const QByteArray& pa
         || xSec >= m_aSector.at(ySec).size() || !m_aSector.at(ySec).at(xSec))
         return false;
     return m_aSector[ySec][xSec]->previewCanonicalPayload(payload);
+}
+
+bool CLandscape::previewCanonicalMaxZ(float maxZ)
+{
+    if(!std::isfinite(maxZ) || maxZ <= 0.0f || m_aSector.isEmpty())
+        return false;
+    m_header.maxZ = maxZ;
+    for(QVector<CSector*>& row : m_aSector)
+        for(CSector* sector : row)
+            if(sector)
+                sector->setPreviewMaxZ(maxZ);
+    return true;
 }
 
 bool CLandscape::previewCanonicalTile(int globalX, int globalY, bool land,

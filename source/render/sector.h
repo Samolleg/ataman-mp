@@ -59,6 +59,7 @@ public:
     bool existsTileIndices(const QVector<int>& arrInd); // function for find incorrect\coorrupt tile indices
     void updateDrawData();
     bool previewCanonicalPayload(const QByteArray& payload);
+    void setPreviewMaxZ(float maxZ);
 
 private:
     void updatePosition();

@@ -182,6 +182,26 @@ struct STerrainHeightRange
     float worldUnitsPerRawStep{0.0f};
 };
 
+enum class ETerrainVerticalScalePolicy
+{
+    ScaleTerrain,
+    PreserveWorldHeights
+};
+
+struct STerrainVerticalScaleCommand
+{
+    bool valid{false};
+    QString description;
+    ETerrainVerticalScalePolicy policy{ETerrainVerticalScalePolicy::ScaleTerrain};
+    float beforeMaxZ{0.0f};
+    float afterMaxZ{0.0f};
+    STerrainHeightCommand heights;
+    int roundedVertexCount{0};
+    int clampedVertexCount{0};
+    float maximumWorldError{0.0f};
+    bool isEmpty() const { return valid && beforeMaxZ == afterMaxZ && heights.isEmpty(); }
+};
+
 // Compose sequential live-preview height commands into one reversible
 // before/after transaction. Repeated vertices retain their first value and
 // final value so a whole sculpt stroke rebuilds each affected sector once.
@@ -328,6 +348,10 @@ public:
     STerrainHeightCommand makeGlobalNormalize(
         quint16 outputMinimum, quint16 outputMaximum,
         CValidationReport* report = nullptr) const;
+    STerrainVerticalScaleCommand makeVerticalScale(
+        float newMaxZ, ETerrainVerticalScalePolicy policy,
+        bool allowClamping = false,
+        CValidationReport* report = nullptr) const;
     STerrainEditDiagnostics diagnose(
         const STerrainHeightCommand& command,
         const QVector<STerrainObjectHeightProbe>& objects = QVector<STerrainObjectHeightProbe>(),
@@ -336,6 +360,8 @@ public:
     bool apply(const STerrainHeightCommand& command, bool forward,
                CValidationReport* report = nullptr,
                bool allowHeightClamping = false);
+    bool apply(const STerrainVerticalScaleCommand& command, bool forward,
+               CValidationReport* report = nullptr);
     STerrainTileCommand makeTilePaint(const STerrainTileBrush& brush,
                                      ETerrainTileLayer layer,
                                      quint8 atlasIndex, quint8 tileIndex,
@@ -386,6 +412,7 @@ private:
     int m_vertexCountX{0};
     int m_vertexCountY{0};
     float m_maxZ{0.0f};
+    float m_originalMaxZ{0.0f};
     int m_textureCount{0};
     QVector<qint32> m_tileTypes;
     QVector<quint16> m_heights;

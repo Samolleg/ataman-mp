@@ -488,6 +488,7 @@ bool CTerrainEditModel::loadSources(int sectorCountX, int sectorCountY, float ma
     m_vertexCountX = 0;
     m_vertexCountY = 0;
     m_maxZ = 0.0f;
+    m_originalMaxZ = 0.0f;
     m_textureCount = 0;
     m_tileTypes.clear();
     m_heights.clear();
@@ -566,6 +567,7 @@ bool CTerrainEditModel::loadSources(int sectorCountX, int sectorCountY, float ma
     m_sectorCountX = sectorCountX;
     m_sectorCountY = sectorCountY;
     m_maxZ = maxZ;
+    m_originalMaxZ = maxZ;
     m_textureCount = qMax(0, textureCount);
     m_tileTypes = tileTypes;
     m_vertexCountX = sectorCountX * kSectorStride + 1;
@@ -655,6 +657,8 @@ STerrainHeightRange CTerrainEditModel::heightRange() const
 
 bool CTerrainEditModel::isDirty() const
 {
+    if(m_maxZ != m_originalMaxZ)
+        return true;
     for(const SSector& sector : m_sectors)
         if(sector.dirty)
             return true;
@@ -977,6 +981,99 @@ STerrainHeightCommand CTerrainEditModel::makeHeightmapImport(
         }
     }
     return command;
+}
+
+STerrainVerticalScaleCommand CTerrainEditModel::makeVerticalScale(
+    float newMaxZ, ETerrainVerticalScalePolicy policy, bool allowClamping,
+    CValidationReport* report) const
+{
+    STerrainVerticalScaleCommand command;
+    command.policy = policy;
+    command.beforeMaxZ = m_maxZ;
+    command.afterMaxZ = newMaxZ;
+    command.description = policy == ETerrainVerticalScalePolicy::ScaleTerrain
+        ? QStringLiteral("Scale terrain vertical range")
+        : QStringLiteral("Preserve world heights while changing vertical range");
+    if(!std::isfinite(newMaxZ) || newMaxZ <= 0.0f || m_heights.isEmpty())
+    {
+        if(report)
+            report->add("terrain.maxz_value", EValidationSeverity::Error,
+                        "The new maxZ must be finite and greater than zero");
+        return command;
+    }
+    if(newMaxZ == m_maxZ || policy == ETerrainVerticalScalePolicy::ScaleTerrain)
+    {
+        command.valid = true;
+        return command;
+    }
+
+    command.heights.description = command.description;
+    for(int index = 0; index < m_heights.size(); ++index)
+    {
+        const quint16 before = m_heights.at(index);
+        const double exact = double(before) * double(m_maxZ) / double(newMaxZ);
+        // qRound64 has undefined results outside qint64's representable range.
+        // Values above the packed terrain ceiling are clamped anyway, so use a
+        // small out-of-range sentinel without converting an enormous/inf value.
+        const qint64 rounded = !std::isfinite(exact) || exact > 65535.0
+            ? qint64(65536) : qRound64(exact);
+        const qint64 bounded = qBound<qint64>(0, rounded, 65535);
+        const bool clamped = bounded != rounded;
+        if(clamped)
+            ++command.clampedVertexCount;
+        if(std::fabs(exact - double(rounded)) > 1.0e-9)
+            ++command.roundedVertexCount;
+        const quint16 after = quint16(bounded);
+        const double beforeWorld = double(before) * double(m_maxZ) / 65535.0;
+        const double afterWorld = double(after) * double(newMaxZ) / 65535.0;
+        command.maximumWorldError = qMax(command.maximumWorldError,
+            float(std::fabs(afterWorld - beforeWorld)));
+        if(after == before)
+            continue;
+        STerrainHeightDelta delta;
+        delta.globalX = index % m_vertexCountX;
+        delta.globalY = index / m_vertexCountX;
+        delta.before = before;
+        delta.after = after;
+        delta.clamped = clamped;
+        command.heights.deltas.append(delta);
+    }
+    if(command.clampedVertexCount > 0 && !allowClamping)
+    {
+        if(report)
+            report->add("terrain.maxz_clamp", EValidationSeverity::Error,
+                        QString("Preserving world heights would clamp %1 vertex/vertices; explicit clamp acceptance is required")
+                            .arg(command.clampedVertexCount));
+        return command;
+    }
+    command.valid = true;
+    return command;
+}
+
+bool CTerrainEditModel::apply(const STerrainVerticalScaleCommand& command,
+                              bool forward, CValidationReport* report)
+{
+    if(!command.valid)
+    {
+        if(report)
+            report->add("terrain.maxz_command", EValidationSeverity::Error,
+                        "The vertical-scale command is invalid");
+        return false;
+    }
+    const float expected = forward ? command.beforeMaxZ : command.afterMaxZ;
+    const float target = forward ? command.afterMaxZ : command.beforeMaxZ;
+    if(m_maxZ != expected)
+    {
+        if(report)
+            report->add("terrain.maxz_provenance", EValidationSeverity::Error,
+                        "The current maxZ no longer matches the command baseline");
+        return false;
+    }
+    if(!command.heights.isEmpty()
+       && !apply(command.heights, forward, report, true))
+        return false;
+    m_maxZ = target;
+    return true;
 }
 
 STerrainHeightCommand CTerrainEditModel::makeGlobalOffset(
@@ -2834,6 +2931,9 @@ bool CTerrainEditModel::appendSectorEdits(CMprEditTransaction* transaction,
         if(m_heights.at(index) != m_originalHeights.at(index))
             changedVertices.insert(index);
     QSet<int> affectedNormals;
+    if(m_maxZ != m_originalMaxZ)
+        for(int index = 0; index < m_heights.size(); ++index)
+            affectedNormals.insert(index);
     for(int index : changedVertices)
     {
         const int centerX = index % m_vertexCountX;

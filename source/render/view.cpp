@@ -159,6 +159,22 @@ private:
     bool m_skipInitialRedo{false};
 };
 
+class CTerrainVerticalScalePreviewCommand : public QUndoCommand
+{
+public:
+    CTerrainVerticalScalePreviewCommand(
+        CView* view, const STerrainVerticalScaleCommand& command)
+        : m_view(view), m_command(command)
+    {
+        setText(command.description);
+    }
+    void undo() override { m_view->applyTerrainVerticalScalePreview(m_command, false); }
+    void redo() override { m_view->applyTerrainVerticalScalePreview(m_command, true); }
+private:
+    CView* m_view;
+    STerrainVerticalScaleCommand m_command;
+};
+
 class CTerrainTilePreviewCommand : public QUndoCommand
 {
 public:
@@ -5263,6 +5279,7 @@ bool CView::buildValidatedLandscapeCandidate(QByteArray* data,
     CMprEditTransaction transaction(tr("Stage current landscape for map test"));
     CValidationReport localReport;
     if(!m_terrainEdit.appendSectorEdits(&transaction, &localReport)
+       || !m_mprDocument.appendMaxZEdit(m_terrainEdit.maxZ(), &transaction, &localReport)
        || localReport.hasErrors() || transaction.isEmpty())
     {
         if(report)
@@ -5336,6 +5353,8 @@ bool CView::saveChangedLandscapeDocument(const QFileInfo& destination,
         : tr("Save canonical landscape copy"));
     CValidationReport transactionReport;
     if(!m_terrainEdit.appendSectorEdits(&transaction, &transactionReport)
+       || !m_mprDocument.appendMaxZEdit(m_terrainEdit.maxZ(), &transaction,
+                                        &transactionReport)
        || transactionReport.hasErrors() || transaction.isEmpty())
     {
         ei::log(eLogFatal, QString("Refusing changed MPR save because the canonical transaction failed path:%1 findings:%2")
@@ -7616,12 +7635,12 @@ void CView::openMapParameters()
     summaryForm->addRow(tr("Height range"), rangeValue);
     summaryForm->addRow(tr("Vertical scale (maxZ)"), scaleValue);
     summaryForm->addRow(tr("Atlas / liquid materials"), materialsValue);
-    QLabel* scaleExplanation = new QLabel(tr(
+    QLabel* summaryScaleExplanation = new QLabel(tr(
         "maxZ maps the complete 0-65535 raw range into world height. Changing it either "
-        "scales the landscape or requantizes every height; that migration is not enabled "
-        "in this first settings increment."), summaryPage);
-    scaleExplanation->setWordWrap(true);
-    summaryForm->addRow(scaleExplanation);
+        "scales the landscape or requantizes every height. Use Vertical scale to choose "
+        "the migration policy explicitly."), summaryPage);
+    summaryScaleExplanation->setWordWrap(true);
+    summaryForm->addRow(summaryScaleExplanation);
     tabs->addTab(summaryPage, tr("Summary"));
 
     QWidget* heightsPage = new QWidget(tabs);
@@ -7688,17 +7707,42 @@ void CView::openMapParameters()
     heightsLayout->addStretch(1);
     tabs->addTab(heightsPage, tr("Height operations"));
 
-    QWidget* structuralPage = new QWidget(tabs);
-    QVBoxLayout* structuralLayout = new QVBoxLayout(structuralPage);
-    QLabel* structuralText = new QLabel(tr(
-        "Changing maxZ is a vertical-scale migration. Resizing changes SEC members, "
-        "vertices, tiles, and archive hash chains. Both require dedicated staged "
-        "transactions and remain disabled until their synthetic and copied-map "
-        "validation gates pass."), structuralPage);
-    structuralText->setWordWrap(true);
-    structuralLayout->addWidget(structuralText);
-    structuralLayout->addStretch(1);
-    tabs->addTab(structuralPage, tr("Scale and resize"));
+    QWidget* scalePage = new QWidget(tabs);
+    QVBoxLayout* scaleLayout = new QVBoxLayout(scalePage);
+    QFormLayout* scaleForm = new QFormLayout;
+    QDoubleSpinBox* scaleTarget = new QDoubleSpinBox(scalePage);
+    scaleTarget->setDecimals(6);
+    scaleTarget->setRange(0.000001, 1000000000.0);
+    scaleTarget->setSingleStep(1.0);
+    QComboBox* scalePolicy = new QComboBox(scalePage);
+    scalePolicy->addItem(tr("Scale terrain with vertical range"));
+    scalePolicy->addItem(tr("Preserve world heights by requantizing"));
+    QCheckBox* acceptScaleClamp = new QCheckBox(
+        tr("Allow vertices above the new range to clamp"), scalePage);
+    scaleForm->addRow(tr("New maxZ"), scaleTarget);
+    scaleForm->addRow(tr("Policy"), scalePolicy);
+    scaleForm->addRow(acceptScaleClamp);
+    scaleLayout->addLayout(scaleForm);
+    QLabel* scaleExplanation = new QLabel(tr(
+        "Scale terrain keeps every raw sample and changes world-space heights. "
+        "Preserve world heights requantizes raw samples and may introduce rounding. "
+        "Clamping is never accepted silently."), scalePage);
+    scaleExplanation->setWordWrap(true);
+    scaleLayout->addWidget(scaleExplanation);
+    QLabel* scalePreview = new QLabel(scalePage);
+    scalePreview->setFrameShape(QFrame::StyledPanel);
+    scalePreview->setWordWrap(true);
+    scalePreview->setMinimumHeight(110);
+    scaleLayout->addWidget(scalePreview);
+    QPushButton* applyScale = new QPushButton(tr("Apply undoable scale migration"), scalePage);
+    scaleLayout->addWidget(applyScale, 0, Qt::AlignRight);
+    QLabel* resizeDeferred = new QLabel(tr(
+        "Crop/expand remains disabled: resizing changes SEC members and archive hash "
+        "chains and will be introduced as a separate Save As-only transaction."), scalePage);
+    resizeDeferred->setWordWrap(true);
+    scaleLayout->addWidget(resizeDeferred);
+    scaleLayout->addStretch(1);
+    tabs->addTab(scalePage, tr("Vertical scale"));
 
     QDialogButtonBox* buttons = new QDialogButtonBox(QDialogButtonBox::Close, panel);
     QPushButton* atlas = buttons->addButton(tr("Open Atlas Tiles..."),
@@ -7722,7 +7766,7 @@ void CView::openMapParameters()
             .arg(range.minimumWorld, 0, 'f', 4)
             .arg(range.maximumWorld, 0, 'f', 4));
         scaleValue->setText(tr("%1 world units; %2 per raw step")
-            .arg(map.maxZ, 0, 'g', 8)
+            .arg(m_terrainEdit.maxZ(), 0, 'g', 8)
             .arg(range.worldUnitsPerRawStep, 0, 'g', 8));
         materialsValue->setText(tr("%1 atlas slots; %2 liquid material record(s)")
             .arg(map.tileCount).arg(map.materialCount));
@@ -7731,6 +7775,57 @@ void CView::openMapParameters()
         clampMaximum->setValue(range.maximumRaw);
         normalizeMinimum->setValue(range.minimumRaw);
         normalizeMaximum->setValue(range.maximumRaw);
+    };
+
+    const auto makeScaleCommand = [this, scaleTarget, scalePolicy,
+                                   acceptScaleClamp](CValidationReport* report) {
+        const ETerrainVerticalScalePolicy policy = scalePolicy->currentIndex() == 0
+            ? ETerrainVerticalScalePolicy::ScaleTerrain
+            : ETerrainVerticalScalePolicy::PreserveWorldHeights;
+        return m_terrainEdit.makeVerticalScale(float(scaleTarget->value()), policy,
+                                               acceptScaleClamp->isChecked(), report);
+    };
+    const auto refreshScalePreview = [this, makeScaleCommand, scalePreview,
+                                      applyScale, acceptScaleClamp, scalePolicy]() {
+        acceptScaleClamp->setEnabled(scalePolicy->currentIndex() == 1);
+        CValidationReport report;
+        const STerrainVerticalScaleCommand command = makeScaleCommand(&report);
+        if(!command.valid)
+        {
+            scalePreview->setText(report.toText().trimmed().isEmpty()
+                ? tr("The requested migration is invalid.")
+                : report.toText().trimmed());
+            applyScale->setEnabled(false);
+            return;
+        }
+        if(command.isEmpty())
+        {
+            scalePreview->setText(tr("No change: maxZ already has this value."));
+            applyScale->setEnabled(false);
+            return;
+        }
+        const STerrainHeightRange before = m_terrainEdit.heightRange();
+        if(command.policy == ETerrainVerticalScalePolicy::ScaleTerrain)
+        {
+            scalePreview->setText(tr(
+                "Raw height samples remain unchanged; packed normals are rebuilt in every SEC.\n"
+                "World height range: %1-%2 -> %3-%4.\n"
+                "The MP maxZ field and derived SEC normals change; terrain and navigation scale vertically.")
+                .arg(before.minimumWorld, 0, 'f', 4)
+                .arg(before.maximumWorld, 0, 'f', 4)
+                .arg(float(before.minimumRaw) * command.afterMaxZ / 65535.0f, 0, 'f', 4)
+                .arg(float(before.maximumRaw) * command.afterMaxZ / 65535.0f, 0, 'f', 4));
+        }
+        else
+        {
+            scalePreview->setText(tr(
+                "%1 vertex/vertices will be requantized across the affected SEC members.\n"
+                "%2 value(s) round; %3 value(s) clamp. Maximum world-height error: %4.")
+                .arg(command.heights.deltas.size()).arg(command.roundedVertexCount)
+                .arg(command.clampedVertexCount)
+                .arg(command.maximumWorldError, 0, 'g', 8));
+        }
+        applyScale->setEnabled(true);
     };
 
     const auto makeCommand = [this, operation, offset, flatten, clampMinimum,
@@ -7813,8 +7908,37 @@ void CView::openMapParameters()
         refreshSummary();
         refreshPreview();
     });
+    connect(scaleTarget, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+            dock, [refreshScalePreview](double) { refreshScalePreview(); });
+    connect(scalePolicy, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            dock, [refreshScalePreview](int) { refreshScalePreview(); });
+    connect(acceptScaleClamp, &QCheckBox::toggled,
+            dock, [refreshScalePreview](bool) { refreshScalePreview(); });
+    connect(applyScale, &QPushButton::clicked, dock,
+            [this, dock, makeScaleCommand, refreshScalePreview]() {
+        CValidationReport report;
+        const STerrainVerticalScaleCommand command = makeScaleCommand(&report);
+        if(!command.valid || command.isEmpty())
+        {
+            refreshScalePreview();
+            return;
+        }
+        const QString detail = command.policy == ETerrainVerticalScalePolicy::ScaleTerrain
+            ? tr("Raw height samples remain unchanged; world heights scale with maxZ and derived SEC normals are rebuilt.")
+            : tr("%1 vertices will be requantized; %2 will clamp; maximum world-height error is %3.")
+                .arg(command.heights.deltas.size()).arg(command.clampedVertexCount)
+                .arg(command.maximumWorldError, 0, 'g', 8);
+        if(QMessageBox::question(dock, tr("Apply vertical-scale migration"),
+            tr("Change maxZ from %1 to %2?\n\n%3\n\n"
+               "This is one undoable action and will be saved through staged MPR validation.")
+                .arg(command.beforeMaxZ, 0, 'g', 8)
+                .arg(command.afterMaxZ, 0, 'g', 8).arg(detail)) != QMessageBox::Yes)
+            return;
+        m_pUndoStack->push(new CTerrainVerticalScalePreviewCommand(this, command));
+    });
     m_refreshMprSettingsDock = [this, statePages, panel, sourceValue,
-                                namespaceValue, refreshSummary, refreshPreview]() {
+                                namespaceValue, refreshSummary, refreshPreview,
+                                scaleTarget, refreshScalePreview]() {
         const bool loaded = m_pLand->isMprLoad() && m_terrainEditAvailable;
         statePages->setCurrentIndex(loaded ? 1 : 0);
         panel->setEnabled(loaded);
@@ -7824,6 +7948,11 @@ void CView::openMapParameters()
         namespaceValue->setText(m_mprDocument.mapInfo().innerNamespace);
         refreshSummary();
         refreshPreview();
+        {
+            const QSignalBlocker blocker(scaleTarget);
+            scaleTarget->setValue(m_terrainEdit.maxZ());
+        }
+        refreshScalePreview();
     };
     connect(m_pUndoStack, &QUndoStack::indexChanged, dock,
             [this](int) { refreshMprSettingsDock(); });
@@ -8888,6 +9017,58 @@ bool CView::applyTerrainHeightPreview(const STerrainHeightCommand& command, bool
         emit updateMsg(tr("Terrain preview changed %1 vertices in %2 sector(s); navigation data may need review.")
             .arg(command.deltas.size()).arg(sectors.size()));
     }
+    update();
+    return true;
+}
+
+bool CView::applyTerrainVerticalScalePreview(
+    const STerrainVerticalScaleCommand& command, bool forward)
+{
+    if(!m_terrainEditAvailable)
+        return false;
+    CValidationReport report;
+    if(!m_terrainEdit.apply(command, forward, &report))
+    {
+        ei::log(eLogWarning, "Vertical-scale preview command refused:\n" + report.toText());
+        return false;
+    }
+    if(!m_pLand->previewCanonicalMaxZ(m_terrainEdit.maxZ()))
+    {
+        m_terrainEdit.apply(command, !forward, nullptr);
+        ei::log(eLogWarning, "Vertical-scale preview renderer refused maxZ");
+        return false;
+    }
+
+    QSet<QPair<int, int>> sectors;
+    const int sectorCountX = int(m_mprDocument.mapInfo().sectorCountX);
+    const int sectorCountY = int(m_mprDocument.mapInfo().sectorCountY);
+    for(const STerrainHeightDelta& delta : command.heights.deltas)
+    {
+        QVector<int> xs{qMin(delta.globalX / 32, sectorCountX - 1)};
+        QVector<int> ys{qMin(delta.globalY / 32, sectorCountY - 1)};
+        if(delta.globalX > 0 && delta.globalX % 32 == 0)
+            xs.append(xs.front() - 1);
+        if(delta.globalY > 0 && delta.globalY % 32 == 0)
+            ys.append(ys.front() - 1);
+        for(int x : xs)
+            for(int y : ys)
+                if(x >= 0 && y >= 0)
+                    sectors.insert(qMakePair(x, y));
+    }
+    for(const QPair<int, int>& sector : sectors)
+        m_pLand->previewCanonicalSector(sector.first, sector.second,
+            m_terrainEdit.sectorPayload(sector.first, sector.second));
+
+    for(CMob* mob : m_aMob)
+        mob->reprojectForCurrentTerrain();
+    m_pLand->setDirty(m_terrainEdit.isDirty());
+    m_aiGraphOverlayDirty = true;
+    emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMprDirtyFlag,
+                              m_terrainEdit.isDirty() ? "*" : "");
+    emit updateMsg(tr("Vertical range changed to %1; %2 vertex/vertices were requantized and navigation data may need review.")
+        .arg(m_terrainEdit.maxZ(), 0, 'g', 8)
+        .arg(command.heights.deltas.size()));
+    refreshMprSettingsDock();
     update();
     return true;
 }

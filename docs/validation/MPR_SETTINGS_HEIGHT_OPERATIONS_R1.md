@@ -2,8 +2,8 @@
 
 ## Scope
 
-This increment begins the consolidated **MPR Settings** workflow without
-enabling structural resize or `maxZ` mutation.
+This increment provides the consolidated **MPR Settings** workflow for
+non-structural height editing and explicit `maxZ` migration.
 
 Included:
 
@@ -16,19 +16,21 @@ Included:
   changed-value ranges;
 - fail-closed invalid ranges, flat normalization, non-finite offsets, and raw
   saturation;
+- undoable `maxZ` migration with separate **scale terrain** and **preserve world
+  heights** policies, explicit clamp acceptance, rounding/error preview, and
+  derived-normal rebuilds;
 - the existing atlas tile window retained through **Open Atlas Tiles...** and
   through Landscape Tools manual-tile selection.
 
 Not enabled:
 
-- changing `maxZ`;
 - crop/expand or any sector/member addition/removal;
 - liquid-material mutation;
 - atlas tile-type mutation.
 
 ## Automated evidence
 
-- `endurance_document_tests`: 59 passed, 0 failed, 3 expected private-fixture
+- `endurance_document_tests`: 63 passed, 0 failed, 3 expected private-fixture
   skips;
 - global operation tests preserve a two-sector `65 x 33` canonical lattice,
   emit one seam delta, update both owning SEC payloads, and pass undo/redo;
@@ -79,5 +81,20 @@ Use a copied MPR or disposable test map only.
     reopen Landscape Tools with **L**. Confirm it behaves exactly like **Maps and
     Collections**: only visibility changes, its native dock slot/size is retained,
     and no unrelated dock layout is restored or rearranged.
+14. On a disposable map, choose **Vertical scale**, double `maxZ`, and keep
+    **Scale terrain with vertical range**. Confirm the preview says raw samples
+    stay unchanged, Apply is one undo step, and the landscape becomes twice as
+    tall in world space. Undo and confirm the original shape/range returns.
+15. Set a moderately different `maxZ` with **Preserve world heights by
+    requantizing**. Confirm the preview reports changed/rounded vertices and a
+    maximum world error. Apply and confirm the visible world heights remain
+    effectively fixed; Undo/Redo must restore each state in one action.
+16. Request a preserve-world migration whose smaller range would clamp terrain.
+    Confirm Apply is refused until **Allow vertices above the new range to
+    clamp** is checked. Do not accept this on a valuable map.
+17. Save As after either maxZ policy, reopen the copy, and confirm the new maxZ
+    and terrain persist. Unknown/archive members remain governed by the normal
+    staged semantic-diff and backup contract. Undo back to the original state
+    before Save must return MPR to clean.
 
 No test requires or authorizes mutation of the live game installation.
