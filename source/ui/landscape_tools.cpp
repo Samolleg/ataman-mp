@@ -115,6 +115,11 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     paintLayout->addLayout(paintForm);
     QPushButton* tilePicker = new QPushButton(tr("Inspect atlas / choose tile..."), this);
     paintLayout->addWidget(tilePicker);
+    QPushButton* reviewAtlas = new QPushButton(tr("Convert / review semantic atlas..."), this);
+    reviewAtlas->setToolTip(tr(
+        "Infer a namespace-scoped semantic profile, review every ambiguity, and explicitly approve it. "
+        "This does not edit atlas images or MPR resources."));
+    paintLayout->addWidget(reviewAtlas);
     QPushButton* exportDiagnostic = new QPushButton(tr("Export paint diagnostic..."), this);
     paintLayout->addWidget(exportDiagnostic);
     layout->addWidget(m_paintControls);
@@ -126,6 +131,7 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     layout->addStretch(1);
     connect(importButton, &QPushButton::clicked, this, &CLandscapeTools::importHeightmapRequested);
     connect(tilePicker, &QPushButton::clicked, this, &CLandscapeTools::tilePickerRequested);
+    connect(reviewAtlas, &QPushButton::clicked, this, &CLandscapeTools::atlasProfileReviewRequested);
     connect(exportDiagnostic, &QPushButton::clicked, this, &CLandscapeTools::exportPaintDiagnosticRequested);
     connect(m_paintTerrainType, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, [this](int)

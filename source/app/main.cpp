@@ -14,6 +14,7 @@
 #include <QDir>
 #include <QTabWidget>
 #include <QCheckBox>
+#include <QPushButton>
 #include <QHeaderView>
 #include <QKeySequenceEdit>
 #include <QLineEdit>
@@ -1040,6 +1041,20 @@ int runHeadlessCommand(QApplication& app)
         landscapeTools.setTerrainVisibility(false, true);
         const bool landscapeVisibilityControlsWork =
             !landscapeTools.mainTerrainVisible() && landscapeTools.overlaysVisible();
+        bool semanticAtlasReviewRequested = false;
+        QObject::connect(&landscapeTools, &CLandscapeTools::atlasProfileReviewRequested,
+                         [&semanticAtlasReviewRequested]() {
+            semanticAtlasReviewRequested = true;
+        });
+        bool semanticAtlasReviewButtonAvailable = false;
+        for(QPushButton* button : landscapeTools.findChildren<QPushButton*>())
+            if(button->text().contains("review semantic atlas", Qt::CaseInsensitive))
+            {
+                semanticAtlasReviewButtonAvailable = true;
+                button->click();
+                break;
+            }
+        semanticAtlasReviewButtonAvailable &= semanticAtlasReviewRequested;
 
         QWidget primaryWindow;
         QLabel existingWindowChild(&primaryWindow);
@@ -1340,6 +1355,7 @@ int runHeadlessCommand(QApplication& app)
                 && underwaterFamiliesCanBeShown
                 && landscapeLayersVisibleByDefault
                 && landscapeVisibilityControlsWork
+                && semanticAtlasReviewButtonAvailable
                 && logicPointUndoAtomic && logicPointRedoAtomic
                 && viewportBackgroundConsumesClick && viewportChildConsumesClick
                 && viewportSurfaceFullyOwned;
@@ -1421,6 +1437,7 @@ int runHeadlessCommand(QApplication& app)
                << " underwaterFamiliesCanBeShown=" << underwaterFamiliesCanBeShown
                << " landscapeLayersVisibleByDefault=" << landscapeLayersVisibleByDefault
                << " landscapeVisibilityControlsWork=" << landscapeVisibilityControlsWork
+               << " semanticAtlasReviewButtonAvailable=" << semanticAtlasReviewButtonAvailable
                << " logicPointUndoAtomic=" << logicPointUndoAtomic
                << " logicPointRedoAtomic=" << logicPointRedoAtomic
                << " viewportBackgroundConsumesClick=" << viewportBackgroundConsumesClick

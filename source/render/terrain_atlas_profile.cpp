@@ -1,13 +1,17 @@
 #include "terrain_atlas_profile.h"
 
 #include <QCryptographicHash>
+#include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QMap>
 #include <QSaveFile>
 #include <QSet>
+#include <QStandardPaths>
 #include <QStringList>
+#include <QRegularExpression>
 #include <algorithm>
 
 #include "endurance_document.h"
@@ -54,7 +58,14 @@ bool parseSignature(const QJsonObject& object, STerrainTransitionSignature* sign
     return true;
 }
 
-struct SCornerColor { int r{0}; int g{0}; int b{0}; };
+struct SCornerColor
+{
+    SCornerColor(int red = 0, int green = 0, int blue = 0)
+        : r(red), g(green), b(blue) {}
+    int r;
+    int g;
+    int b;
+};
 
 SCornerColor cornerColor(const QImage& source, int corner)
 {
@@ -205,6 +216,8 @@ bool STerrainAtlasProfile::fromJson(const QJsonObject& object,
                                "The semantic atlas profile does not describe every atlas slot");
         return false;
     }
+    if(!parsed.normalizeMembership(report))
+        return false;
     *profile = parsed;
     return true;
 }
@@ -242,6 +255,181 @@ bool STerrainAtlasProfile::load(const QString& path, STerrainAtlasProfile* profi
         return false;
     }
     return fromJson(document.object(), profile, report);
+}
+
+bool STerrainAtlasProfile::normalizeMembership(CValidationReport* report)
+{
+    QMap<qint32, int> familyIndex;
+    for(int index = 0; index < families.size(); ++index)
+    {
+        if(families.at(index).id <= 0 || familyIndex.contains(families.at(index).id))
+        {
+            if(report) report->add("terrain.atlas_profile_family_id", EValidationSeverity::Error,
+                                   "Material family identifiers must be unique positive integers");
+            return false;
+        }
+        familyIndex.insert(families.at(index).id, index);
+        families[index].memberSlots.clear();
+    }
+    for(const STerrainAtlasProfileSlot& slot : slotDefinitions)
+    {
+        const qint32 ids[] = {slot.signature.northWest, slot.signature.northEast,
+                              slot.signature.southEast, slot.signature.southWest};
+        for(qint32 id : ids)
+        {
+            if(!familyIndex.contains(id))
+            {
+                if(report) report->add("terrain.atlas_profile_orphan_family", EValidationSeverity::Error,
+                                       "A slot signature refers to a missing material family",
+                                       QString::number(slot.slot));
+                return false;
+            }
+            QVector<int>& memberSlots = families[familyIndex.value(id)].memberSlots;
+            if(!memberSlots.contains(slot.slot)) memberSlots.append(slot.slot);
+        }
+    }
+    for(STerrainAtlasProfileFamily& family : families)
+        std::sort(family.memberSlots.begin(), family.memberSlots.end());
+    std::sort(families.begin(), families.end(), [](const STerrainAtlasProfileFamily& a,
+                                                    const STerrainAtlasProfileFamily& b) {
+        return a.id < b.id;
+    });
+    return true;
+}
+
+bool STerrainAtlasProfile::mergeFamilies(const QVector<qint32>& requestedIds,
+                                         const QString& mergedName,
+                                         CValidationReport* report)
+{
+    QSet<qint32> ids;
+    for(qint32 id : requestedIds) ids.insert(id);
+    if(ids.size() < 2 || mergedName.trimmed().isEmpty())
+    {
+        if(report) report->add("terrain.atlas_profile_merge", EValidationSeverity::Error,
+                               "Select at least two families and provide a merged name");
+        return false;
+    }
+    QVector<int> indices;
+    for(int index = 0; index < families.size(); ++index)
+        if(ids.contains(families.at(index).id)) indices.append(index);
+    if(indices.size() != ids.size())
+    {
+        if(report) report->add("terrain.atlas_profile_merge_missing", EValidationSeverity::Error,
+                               "A selected material family no longer exists");
+        return false;
+    }
+    const ETerrainAtlasLayer layer = families.at(indices.front()).layer;
+    for(int index : indices)
+        if(families.at(index).layer != layer)
+        {
+            if(report) report->add("terrain.atlas_profile_merge_layer", EValidationSeverity::Error,
+                                   "Land and overlay families cannot be merged");
+            return false;
+        }
+    const qint32 targetId = *std::min_element(ids.constBegin(), ids.constEnd());
+    for(STerrainAtlasProfileSlot& slot : slotDefinitions)
+    {
+        qint32* corners[] = {&slot.signature.northWest, &slot.signature.northEast,
+                             &slot.signature.southEast, &slot.signature.southWest};
+        for(qint32* corner : corners) if(ids.contains(*corner)) *corner = targetId;
+    }
+    for(int index = families.size() - 1; index >= 0; --index)
+        if(ids.contains(families.at(index).id) && families.at(index).id != targetId)
+            families.removeAt(index);
+    for(STerrainAtlasProfileFamily& family : families)
+        if(family.id == targetId)
+        {
+            family.name = mergedName.trimmed();
+            family.ambiguous = true;
+            break;
+        }
+    approved = false;
+    return normalizeMembership(report);
+}
+
+bool STerrainAtlasProfile::splitFamily(qint32 familyId,
+                                       const QVector<int>& selectedSlots,
+                                       const QString& newName,
+                                       CValidationReport* report)
+{
+    QSet<int> requested;
+    for(int slot : selectedSlots) requested.insert(slot);
+    int familyIndex = -1;
+    qint32 maximumId = 0;
+    for(int index = 0; index < families.size(); ++index)
+    {
+        maximumId = qMax(maximumId, families.at(index).id);
+        if(families.at(index).id == familyId) familyIndex = index;
+    }
+    if(familyIndex < 0 || requested.isEmpty() || newName.trimmed().isEmpty())
+    {
+        if(report) report->add("terrain.atlas_profile_split", EValidationSeverity::Error,
+                               "Select a family, at least one of its slots, and provide a split name");
+        return false;
+    }
+    QSet<int> existing;
+    for(int slot : families.at(familyIndex).memberSlots) existing.insert(slot);
+    if(requested == existing || !std::all_of(requested.constBegin(), requested.constEnd(),
+                                              [&existing](int slot) { return existing.contains(slot); }))
+    {
+        if(report) report->add("terrain.atlas_profile_split_scope", EValidationSeverity::Error,
+                               "A split must move a proper subset of the selected family's slots");
+        return false;
+    }
+    STerrainAtlasProfileFamily split = families.at(familyIndex);
+    split.id = maximumId + 1;
+    split.name = newName.trimmed();
+    split.ambiguous = true;
+    split.memberSlots.clear();
+    families[familyIndex].ambiguous = true;
+    families.append(split);
+    for(STerrainAtlasProfileSlot& slot : slotDefinitions)
+    {
+        if(!requested.contains(slot.slot)) continue;
+        qint32* corners[] = {&slot.signature.northWest, &slot.signature.northEast,
+                             &slot.signature.southEast, &slot.signature.southWest};
+        for(qint32* corner : corners) if(*corner == familyId) *corner = split.id;
+    }
+    approved = false;
+    return normalizeMembership(report);
+}
+
+QString CTerrainAtlasProfileStore::profilePath(const QString& mprNamespace,
+                                                const QString& rootDirectory)
+{
+    QString safe = mprNamespace.trimmed().toLower();
+    safe.replace(QRegularExpression(QStringLiteral("[^a-z0-9._-]+")), QStringLiteral("_"));
+    if(safe.isEmpty()) safe = QStringLiteral("unnamed");
+    const QByteArray namespaceSuffix = QCryptographicHash::hash(
+        mprNamespace.trimmed().toLower().toUtf8(), QCryptographicHash::Sha256).toHex().left(12);
+    const QString root = rootDirectory.isEmpty()
+        ? QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation)
+        : rootDirectory;
+    return QDir(root).filePath(QStringLiteral("terrain-atlas-profiles/%1-%2.semantic-atlas.json")
+        .arg(safe, QString::fromLatin1(namespaceSuffix)));
+}
+
+bool CTerrainAtlasProfileStore::save(const STerrainAtlasProfile& profile,
+                                     const QString& rootDirectory,
+                                     CValidationReport* report)
+{
+    const QString path = profilePath(profile.mprNamespace, rootDirectory);
+    if(!QDir().mkpath(QFileInfo(path).absolutePath()))
+    {
+        if(report) report->add("terrain.atlas_profile_directory", EValidationSeverity::Error,
+                               "Could not create the semantic atlas profile directory",
+                               QFileInfo(path).absolutePath());
+        return false;
+    }
+    return profile.save(path, report);
+}
+
+bool CTerrainAtlasProfileStore::load(const QString& mprNamespace,
+                                     STerrainAtlasProfile* profile,
+                                     const QString& rootDirectory,
+                                     CValidationReport* report)
+{
+    return STerrainAtlasProfile::load(profilePath(mprNamespace, rootDirectory), profile, report);
 }
 
 bool STerrainAtlasProfile::validateBinding(const QString& currentNamespace,
@@ -290,7 +478,17 @@ STerrainAtlasAnalysis STerrainAtlasProfile::approvedAnalysis(CValidationReport* 
             return result;
         }
     QMap<qint32, STerrainAtlasProfileFamily> byId;
-    for(const STerrainAtlasProfileFamily& family : families) byId.insert(family.id, family);
+    for(const STerrainAtlasProfileFamily& family : families)
+    {
+        if(family.name.trimmed().isEmpty())
+        {
+            if(report) report->add("terrain.atlas_profile_family_name", EValidationSeverity::Error,
+                                   "Every reviewed material family requires a name",
+                                   QString::number(family.id));
+            return result;
+        }
+        byId.insert(family.id, family);
+    }
     result.templateName = QStringLiteral("Reviewed semantic profile for %1").arg(mprNamespace);
     result.expectedSlots = atlasSlotCount;
     result.landCatalog.setMirrorPaintGridY(true);
@@ -342,7 +540,13 @@ STerrainAtlasAnalysis STerrainAtlasProfile::approvedAnalysis(CValidationReport* 
     }
     for(const STerrainAtlasProfileFamily& family : families)
     {
-        if(!pureCounts.contains(family.id)) continue;
+        if(!pureCounts.contains(family.id))
+        {
+            if(report) report->add("terrain.atlas_profile_missing_uniform", EValidationSeverity::Error,
+                                   "A reviewed material family has no uniform atlas tile and cannot be painted safely",
+                                   family.name);
+            return STerrainAtlasAnalysis();
+        }
         STerrainAtlasMaterial material;
         material.id = family.id;
         material.name = family.name;
