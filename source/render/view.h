@@ -36,6 +36,7 @@ class QLabel;
 class QComboBox;
 class QSlider;
 class QToolButton;
+class QDockWidget;
 class QResizeEvent;
 class CKeyManager;
 class CMob;
@@ -272,6 +273,7 @@ protected:
     void resizeEvent(QResizeEvent* event) override;
 
 private:
+    void closeMprSettingsDock();
     bool saveMobDocument(CMob* mob, const QFileInfo& destination);
     bool saveLandscapeDocument(const QFileInfo& destination);
     bool saveChangedLandscapeDocument(const QFileInfo& destination,
@@ -510,6 +512,7 @@ private:
     bool m_landscapeVisible{true};
     bool m_bPreviewTile;
     CTileForm* m_pTileForm;
+    QPointer<QDockWidget> m_mprSettingsDock;
     QSharedPointer<CPreviewTile> m_pPreviewTile;
     CLandscape* m_pLand;
     int m_tileBrushCommandId;

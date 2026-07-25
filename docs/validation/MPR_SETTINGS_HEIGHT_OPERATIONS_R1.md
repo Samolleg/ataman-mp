@@ -59,5 +59,12 @@ Use a copied MPR or disposable test map only.
    and explains that an explicit clamp or `maxZ` policy is required.
 8. Save a deliberate edit through normal MPR Save As or direct Save. Confirm
    staged validation and backup behavior remain unchanged.
+9. Leave **MPR Settings** open, apply an operation, and use the editor's normal
+   Undo and Redo actions without closing the panel. Undock and redock it, close
+   it with the title-bar button, then reopen it through **MPR Settings...**.
+   Confirm there is no context-help button and the panel remains usable.
+10. Open **Atlas Tiles...** and select **Materials**. Confirm liquid material
+    records and animated-tile records can be inspected. Mutation controls must
+    remain disabled in this increment.
 
 No test requires or authorizes mutation of the live game installation.

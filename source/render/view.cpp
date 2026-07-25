@@ -802,6 +802,7 @@ CView::~CView()
 {
     QElapsedTimer shutdownTimer;
     shutdownTimer.start();
+    closeMprSettingsDock();
 //    for(auto& param : m_arrParamWindow)
 //    {
 //        param->close();
@@ -5163,6 +5164,7 @@ void CView::unloadLand(bool promptForSave)
 
     }
 
+    closeMprSettingsDock();
     m_mprModifyTimer->stop();
     m_overlayAnimationTimer.invalidate();
     m_terrainEditAvailable = false;
@@ -7582,12 +7584,29 @@ void CView::openMapParameters()
     if(!m_pLand->isMprLoad() || !m_terrainEditAvailable)
         return;
 
-    QDialog dialog(this);
-    dialog.setWindowTitle(tr("MPR Settings"));
-    dialog.setModal(true);
-    dialog.resize(620, 520);
-    QVBoxLayout* layout = new QVBoxLayout(&dialog);
-    QTabWidget* tabs = new QTabWidget(&dialog);
+    if(m_mprSettingsDock)
+    {
+        m_mprSettingsDock->show();
+        m_mprSettingsDock->raise();
+        return;
+    }
+
+    QMainWindow* host = qobject_cast<QMainWindow*>(window());
+    if(!host)
+        return;
+
+    QDockWidget* dock = new QDockWidget(tr("MPR Settings"), host);
+    m_mprSettingsDock = dock;
+    dock->setObjectName(QStringLiteral("mprSettingsDock"));
+    dock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
+    dock->setFeatures(QDockWidget::DockWidgetClosable |
+                      QDockWidget::DockWidgetMovable |
+                      QDockWidget::DockWidgetFloatable);
+    dock->setWindowFlags(dock->windowFlags() & ~Qt::WindowContextHelpButtonHint);
+    QWidget* panel = new QWidget(dock);
+    dock->setWidget(panel);
+    QVBoxLayout* layout = new QVBoxLayout(panel);
+    QTabWidget* tabs = new QTabWidget(panel);
     layout->addWidget(tabs, 1);
 
     QWidget* summaryPage = new QWidget(tabs);
@@ -7692,14 +7711,18 @@ void CView::openMapParameters()
     structuralLayout->addStretch(1);
     tabs->addTab(structuralPage, tr("Scale and resize"));
 
-    QDialogButtonBox* buttons = new QDialogButtonBox(QDialogButtonBox::Close, &dialog);
+    QDialogButtonBox* buttons = new QDialogButtonBox(QDialogButtonBox::Close, panel);
     QPushButton* atlas = buttons->addButton(tr("Open Atlas Tiles..."),
                                             QDialogButtonBox::ActionRole);
     layout->addWidget(buttons);
-    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
-    connect(atlas, &QPushButton::clicked, &dialog, [&dialog]() { dialog.done(2); });
+    connect(buttons, &QDialogButtonBox::rejected, dock, &QDockWidget::hide);
+    connect(atlas, &QPushButton::clicked, dock, [this]() { openAtlasTiles(); });
 
-    const auto refreshSummary = [&, this]() {
+    const auto refreshSummary = [this, dimensionsValue, rangeValue, scaleValue,
+                                 materialsValue, flatten, clampMinimum,
+                                 clampMaximum, normalizeMinimum,
+                                 normalizeMaximum]() {
+        const SMprMapInfo& map = m_mprDocument.mapInfo();
         const STerrainHeightRange range = m_terrainEdit.heightRange();
         dimensionsValue->setText(tr("%1 x %2 sectors; %3 x %4 tiles; %5 x %6 vertices")
             .arg(map.sectorCountX).arg(map.sectorCountY)
@@ -7722,7 +7745,9 @@ void CView::openMapParameters()
     };
     refreshSummary();
 
-    const auto makeCommand = [&, this](CValidationReport* report) {
+    const auto makeCommand = [this, operation, offset, flatten, clampMinimum,
+                              clampMaximum, normalizeMinimum,
+                              normalizeMaximum](CValidationReport* report) {
         switch(operation->currentIndex())
         {
         case 0: return m_terrainEdit.makeGlobalOffset(float(offset->value()), report);
@@ -7733,7 +7758,7 @@ void CView::openMapParameters()
                     quint16(normalizeMinimum->value()), quint16(normalizeMaximum->value()), report);
         }
     };
-    const auto refreshPreview = [&, this]() {
+    const auto refreshPreview = [this, makeCommand, preview, apply]() {
         CValidationReport report;
         const STerrainHeightCommand command = makeCommand(&report);
         if(report.hasErrors())
@@ -7770,13 +7795,14 @@ void CView::openMapParameters()
     connect(operation, QOverload<int>::of(&QComboBox::currentIndexChanged),
             parameters, &QStackedWidget::setCurrentIndex);
     connect(operation, QOverload<int>::of(&QComboBox::currentIndexChanged),
-            &dialog, [refreshPreview](int) { refreshPreview(); });
+            dock, [refreshPreview](int) { refreshPreview(); });
     const QList<QSpinBox*> editors = {offset, flatten, clampMinimum, clampMaximum,
                                       normalizeMinimum, normalizeMaximum};
     for(QSpinBox* editor : editors)
         connect(editor, QOverload<int>::of(&QSpinBox::valueChanged),
-                &dialog, [refreshPreview](int) { refreshPreview(); });
-    connect(apply, &QPushButton::clicked, &dialog, [&, this]() {
+                dock, [refreshPreview](int) { refreshPreview(); });
+    connect(apply, &QPushButton::clicked, dock,
+            [this, dock, makeCommand, refreshPreview, refreshSummary]() {
         CValidationReport report;
         const STerrainHeightCommand command = makeCommand(&report);
         const STerrainEditDiagnostics diagnostics = m_terrainEdit.diagnose(command);
@@ -7786,7 +7812,7 @@ void CView::openMapParameters()
             refreshPreview();
             return;
         }
-        if(QMessageBox::question(&dialog, tr("Apply MPR height operation"),
+        if(QMessageBox::question(dock, tr("Apply MPR height operation"),
             tr("Apply %1 to %2 vertices in %3 sector(s)?\n\n"
                "This changes the terrain preview immediately and is one undoable action.")
                 .arg(command.description)
@@ -7798,8 +7824,18 @@ void CView::openMapParameters()
         refreshPreview();
     });
     refreshPreview();
-    if(dialog.exec() == 2)
-        openAtlasTiles();
+    host->addDockWidget(Qt::RightDockWidgetArea, dock);
+    dock->resize(620, 520);
+    dock->show();
+    dock->raise();
+}
+
+void CView::closeMprSettingsDock()
+{
+    if(!m_mprSettingsDock)
+        return;
+    delete m_mprSettingsDock.data();
+    m_mprSettingsDock = nullptr;
 }
 
 void CView::openAtlasTiles()

@@ -26,8 +26,17 @@ CTileForm::CTileForm(QWidget *parent) :
     ui->comboTileType->setToolTip(tr("Atlas slot categories are MPR metadata and are not edited by the painting brush."));
     ui->comboActiveLiquidMaterial->setEnabled(false);
     ui->comboActiveLiquidMaterial->setToolTip(tr("Overlay material editing is not enabled in this preview build."));
-    ui->tabWidget->setTabEnabled(1, false);
-    ui->tabWidget->setTabToolTip(1, tr("Liquid material editing will use the staged MPR transaction path in a later increment."));
+    ui->tabWidget->setTabEnabled(1, true);
+    ui->tabWidget->setTabToolTip(1, tr("Read-only liquid-material and animated-tile inspection."));
+    ui->toolButtonAddMaterial->setEnabled(false);
+    ui->toolButtonDelMaterial->setEnabled(false);
+    ui->comboMaterialType->setEnabled(false);
+    ui->sliderOpacity->setEnabled(false);
+    ui->sliderIllumination->setEnabled(false);
+    ui->sliderWaveMultiplier->setEnabled(false);
+    ui->sliderWarpSpeed->setEnabled(false);
+    ui->toolButtonAddAnimTile->setEnabled(false);
+    ui->toolButtonDelAnimTile->setEnabled(false);
     ui->buttonApply->hide();
     ui->buttonCancel->setText(tr("Close"));
     setAttribute(Qt::WA_ShowWithoutActivating);
@@ -58,15 +67,18 @@ CTileForm::CTileForm(QWidget *parent) :
     QSharedPointer<IPropertyBase> prop;
     prop.reset(new prop3D(EObjParam::eObjParamUnknow));
     m_pColorButton.reset(new CColorButtonItem(prop));
+    m_pColorButton->setEnabled(false);
     connect(m_pColorButton.get(), SIGNAL(onColorChange(QSharedPointer<IPropertyBase>)), this, SLOT(onColorSelect(QSharedPointer<IPropertyBase>)));
 
     ui->formLayout->setWidget(2, QFormLayout::FieldRole, m_pColorButton.get());
 
     prop.reset(new propUint(EObjParam::eObjParamUnknow));
     m_pIndexText.reset(new CValueItem(prop));
+    m_pIndexText->setEnabled(false);
     ui->formLayout_2->setWidget(1, QFormLayout::FieldRole, m_pIndexText.get());
     connect(m_pIndexText.get(), SIGNAL(onParamChange(QSharedPointer<IPropertyBase>)), this, SLOT(onIndexSet(QSharedPointer<IPropertyBase>)));
     m_pPhaseNumText.reset(new CValueItem(prop));
+    m_pPhaseNumText->setEnabled(false);
     ui->formLayout_2->setWidget(2, QFormLayout::FieldRole, m_pPhaseNumText.get());
     connect(m_pPhaseNumText.get(), SIGNAL(onParamChange(QSharedPointer<IPropertyBase>)), this, SLOT(onPhaseNumSet(QSharedPointer<IPropertyBase>)));
     m_arrQuickTile.resize(8);
