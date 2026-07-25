@@ -3,6 +3,7 @@
 #include <QKeyEvent>
 #include <QScrollBar>
 #include <QShortcut>
+#include <QLabel>
 
 #include "tile_form.h"
 #include "ui_tile_form.h"
@@ -28,6 +29,13 @@ CTileForm::CTileForm(QWidget *parent) :
     ui->comboActiveLiquidMaterial->setToolTip(tr("Overlay material editing is not enabled in this preview build."));
     ui->tabWidget->setTabEnabled(1, true);
     ui->tabWidget->setTabToolTip(1, tr("Read-only liquid-material and animated-tile inspection."));
+    QLabel* materialHelp = new QLabel(tr(
+        "Materials are overlay/liquid parameter slots stored in this MPR, not ground "
+        "textures. Overlay tiles reference one of these records for color, opacity, "
+        "illumination and animation behavior. Several tile families may share a slot; "
+        "the records are read-only until staged material serialization is validated."), this);
+    materialHelp->setWordWrap(true);
+    ui->verticalLayout->insertWidget(0, materialHelp);
     ui->toolButtonAddMaterial->setEnabled(false);
     ui->toolButtonDelMaterial->setEnabled(false);
     ui->comboMaterialType->setEnabled(false);

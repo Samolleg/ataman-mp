@@ -19,6 +19,7 @@
 #include <QSet>
 #include <QStringList>
 #include <QFutureWatcher>
+#include <functional>
 
 #include "types.h"
 #include "select_window.h"
@@ -273,6 +274,7 @@ protected:
 
 private:
     void closeMprSettingsDock();
+    void refreshMprSettingsDock();
     bool saveMobDocument(CMob* mob, const QFileInfo& destination);
     bool saveLandscapeDocument(const QFileInfo& destination);
     bool saveChangedLandscapeDocument(const QFileInfo& destination,
@@ -511,6 +513,7 @@ private:
     bool m_bPreviewTile;
     CTileForm* m_pTileForm;
     QPointer<QDockWidget> m_mprSettingsDock;
+    std::function<void()> m_refreshMprSettingsDock;
     QSharedPointer<CPreviewTile> m_pPreviewTile;
     CLandscape* m_pLand;
     int m_tileBrushCommandId;
