@@ -276,6 +276,18 @@ void CPreviewTile::draw(QOpenGLShaderProgram* program)
     int textureLocation = program->attributeLocation("a_texture");
     program->enableAttributeArray(textureLocation);
     program->setAttributeBuffer(textureLocation, GL_FLOAT, offset, 2, int(sizeof(SVertexData)));
+    const int animationLocation = program->attributeLocation("a_overlayAnimation");
+    if(animationLocation >= 0)
+    {
+        program->disableAttributeArray(animationLocation);
+        program->setAttributeValue(animationLocation, QVector4D());
+    }
+    const int gridLocation = program->attributeLocation("a_overlayGrid");
+    if(gridLocation >= 0)
+    {
+        program->disableAttributeArray(gridLocation);
+        program->setAttributeValue(gridLocation, QVector2D());
+    }
     m_indexBuf.bind();
     ei::gl::DrawElements(GL_TRIANGLES, 24, GL_UNSIGNED_SHORT, nullptr);
 }

@@ -38,7 +38,8 @@ class CSector
 {
 public:
     CSector();
-    CSector(QDataStream& stream, float maxZ, int texCount);
+    CSector(QDataStream& stream, float maxZ, int texCount,
+            const QVector<SMaterial>* materials);
     ~CSector();
     QByteArray serializeSector();
     void draw(QOpenGLShaderProgram* program);
@@ -67,6 +68,15 @@ private:
 
 
 private:
+    struct SWaterVertexData
+    {
+        QVector3D position;
+        QVector3D normal;
+        QVector2D texCoord;
+        QVector4D animation;
+        QVector2D grid;
+    };
+
     UI2 m_index;
     QMatrix4x4 m_modelMatrix;
 
@@ -78,8 +88,10 @@ private:
 
     QVector<QVector<CTile>> m_arrWater;
     QVector<SVertexData> m_arrWaterVrtData;
+    QVector<SWaterVertexData> m_arrAnimatedWaterVrtData;
     QOpenGLBuffer m_waterVertexBuf;
     QOpenGLBuffer m_waterIndexBuf;
+    const QVector<SMaterial>* m_materials{nullptr};
     QVector3D m_boundsCenter;
     float m_boundsRadius{0.0f};
 };

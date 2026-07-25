@@ -1761,7 +1761,7 @@ void CView::initShaders()
     //release shader program?
 
     // Compile land shader
-    if (!m_landProgram.addShaderFromSourceFile(QOpenGLShader::Vertex, ":/vshader.vsh"))
+    if (!m_landProgram.addShaderFromSourceFile(QOpenGLShader::Vertex, ":/landshader.vsh"))
     {
         reportShaderFailure("terrain vertex", m_landProgram);
         close();
@@ -1788,8 +1788,10 @@ void CView::initShaders()
     m_landProgram.setUniformValue("u_lightColor", QVector4D(1.0, 1.0, 1.0, 1.0));
     m_landProgram.setUniformValue("u_highlight", false);
     m_landProgram.setUniformValue("u_solidColorEnabled", false);
-    m_landProgram.setUniformValue("u_animateLiquid", false);
-    m_landProgram.setUniformValue("u_liquidTime", 0.0f);
+    m_landProgram.setUniformValue("u_overlayMotionEnabled", false);
+    m_landProgram.setUniformValue("u_overlayTimeSeconds", 0.0f);
+    m_landProgram.setUniformValue("u_overlayWindDirection", QVector3D());
+    m_landProgram.setUniformValue("u_overlayWindStrength", 0.0f);
 
     bool skySuccess = m_skyProgram.addShaderFromSourceFile(
         QOpenGLShader::Vertex, ":/skybox.vsh");
@@ -5038,16 +5040,28 @@ void CView::draw()
             close();
 
         m_landProgram.setUniformValue("transparency", 0.3f);
-        m_landProgram.setUniformValue("u_animateLiquid", true);
-        m_landProgram.setUniformValue("u_liquidTime",
-            float(QDateTime::currentMSecsSinceEpoch() % 600000) / 1000.0f);
+        const CWorldSet* overlayWorldSet = m_environmentMob
+            ? &m_environmentMob->worldSet() : nullptr;
+        const QVector3D overlayWindDirection = overlayWorldSet
+            ? util::vec3FromString(overlayWorldSet->data(eWsTypeWindDir))
+            : QVector3D();
+        const float overlayWindStrength = overlayWorldSet
+            ? overlayWorldSet->data(eWsTypeWindStr).toFloat() : 0.0f;
+        const bool landscapeEditing = m_landscapeTools
+            && m_landscapeTools->editingEnabled();
+        m_landProgram.setUniformValue("u_overlayMotionEnabled", !landscapeEditing);
+        m_landProgram.setUniformValue("u_overlayTimeSeconds",
+            m_overlayAnimationTimer.isValid()
+                ? float(m_overlayAnimationTimer.elapsed()) / 1000.0f : 0.0f);
+        m_landProgram.setUniformValue("u_overlayWindDirection", overlayWindDirection);
+        m_landProgram.setUniformValue("u_overlayWindStrength", overlayWindStrength);
         applyEnvironmentUniforms(m_landProgram, environment, sceneLights,
                                  lightingMode, fogEnabled);
         applyShadowUniforms(m_landProgram, environmentEnabled && shadowsEnabled,
                             true, true);
         m_pLand->drawWater(&m_landProgram, cullingEnabled ? &frustum : nullptr);
         logOpenGlErrors(QStringLiteral("draw/water"));
-        m_landProgram.setUniformValue("u_animateLiquid", false);
+        m_landProgram.setUniformValue("u_overlayMotionEnabled", false);
         m_landProgram.setUniformValue("transparency", 0.0f);
     }
 
@@ -5103,6 +5117,7 @@ void CView::loadLandscape(const QFileInfo& filePath)
     for(CMob* mob : m_aMob)
         mob->reprojectForCurrentTerrain();
     m_landscapeVisible = true;
+    m_overlayAnimationTimer.restart();
     armOpenGlDiagnostics(QStringLiteral("landscape loaded: %1")
         .arg(filePath.fileName()), 6);
     m_spatialIndexDirty = true;
@@ -5147,6 +5162,7 @@ void CView::unloadLand(bool promptForSave)
     }
 
     m_mprModifyTimer->stop();
+    m_overlayAnimationTimer.invalidate();
     m_terrainEditAvailable = false;
     finishSculptStroke();
     m_terrainEdit = CTerrainEditModel();
