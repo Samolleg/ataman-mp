@@ -5,7 +5,7 @@ work is ordered from the newest planned minor line to the oldest completed one.
 An item is checked only after its implementation has landed and received the
 stated validation. Completed code should carry a commit, test, or release link.
 
-Current development line: `0.3.0-alpha.16` focused closed testing. Alpha.11
+Current development line: `0.3.0-alpha.17` focused closed testing. Alpha.11
 was withdrawn after its temporary-resource bootstrap passed the fixed world
 object's first word as the object pointer and crashed both normal and synthetic
 Test Current Map launches. Alpha.12 corrects the pointer contract and adds an
@@ -22,7 +22,11 @@ and the missing canonical humanoid `hr` option. Alpha.16 keeps state aliases
 filter-only, makes every Parts column resizable,
 uses exact serialized snapshots for Parts undo/redo and cross-MOB paste, warns
 when multiple structurally primary MOBs are loaded, and refuses to treat an
-Autozone-only set as a valid Test Current Map composition. This is a
+Autozone-only set as a valid Test Current Map composition. Alpha.17 corrects
+that boundary: secondary-only mapped compositions remain
+valid Test Current Map inputs, while only the SpellAddon autorun-dependent
+Play from Here, Godmode, and time override controls are disabled. It also
+makes all six Parts checkbox filter aliases reliable after sorting. This is a
 version reclassification of the feature set that outgrew the `0.2.1` label,
 not a serializer or compatibility reset. The remaining 0.3 release work is the
 final runtime/corpus matrix, focused confirmation of the new live-clock and
@@ -496,10 +500,11 @@ remain unchanged.
 - [x] Make Parts property operations transactional: exact-array cross-MOB
   paste and exact before/after undo/redo snapshots, with checkbox-only state
   display and resizable/persistent columns.
-- [x] Treat `SC_OBJECT_DB_FILE` as the structural primary-map declaration for
-  Test Current Map. Renamed copies remain supported, Autozone-only
-  `PR_OBJECT_DB_FILE` sets are rejected, and multiple loaded primaries produce
-  one non-blocking workspace validation warning.
+- [x] Use `SC_OBJECT_DB_FILE` to decide whether SpellAddon autorun-dependent
+  Test controls are available. Renamed copies remain supported; secondary-only
+  `PR_OBJECT_DB_FILE` sets can still run Test Current Map with mapped identity,
+  while Play from Here, Godmode, and time override stay disabled. Multiple
+  loaded primaries produce one non-blocking workspace validation warning.
 - [x] Complete Loaded Map MOB context actions for parameters, script, targeted
   Save/Save As, and dirty-aware Save enablement; duplicated catalog maps now
   offer to open the collection they create.

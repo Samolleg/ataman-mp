@@ -123,7 +123,7 @@ private:
     void saveCollection(bool saveAs);
     QVector<QString> activeMapRoots() const;
     void updateMapTestAction();
-    CMob* mapTestPrimaryMob() const;
+    CMob* mapTestStagingMob() const;
     void launchCurrentMapTest();
     void createViewportToolbars();
     void refreshMapTestContext();

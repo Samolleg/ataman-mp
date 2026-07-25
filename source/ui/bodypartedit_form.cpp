@@ -9,6 +9,7 @@
 #include <QSettings>
 #include <QHeaderView>
 #include <QRegularExpression>
+#include <QSet>
 
 namespace {
 
@@ -223,16 +224,24 @@ void CBodyPartEditForm::applyFilter(const QString& text)
         QRegularExpression("\\s+"), QString::SkipEmptyParts);
     for(int row = 0; row < ui->tablePart->rowCount(); ++row)
     {
-        const QCheckBox* box = qobject_cast<QCheckBox*>(
-            ui->tablePart->cellWidget(row, 1));
-        const QString searchable = QString("%1 %2 %3")
+        const QTableWidgetItem* stateItem = ui->tablePart->item(row, 1);
+        const Qt::CheckState state = stateItem
+            ? Qt::CheckState(stateItem->data(Qt::UserRole).toInt())
+            : Qt::PartiallyChecked;
+        const QString stateText = stateSearchText(state);
+        const QString searchable = QString("%1 %2")
             .arg(ui->tablePart->item(row, 0)->text(),
-                 ui->tablePart->item(row, 2)->text(),
-                 stateSearchText(box ? box->checkState() : Qt::PartiallyChecked))
+                 ui->tablePart->item(row, 2)->text())
             .toLower();
+        static const QSet<QString> stateAliases = {
+            "checked", "true", "on", "unchecked", "false", "off",
+            "mixed", "partial", "undefined"
+        };
+        const QStringList rowStateAliases = stateText.split(' ');
         bool matches = true;
         for(const QString& term : terms)
-            matches = matches && searchable.contains(term);
+            matches = matches && (stateAliases.contains(term)
+                ? rowStateAliases.contains(term) : searchable.contains(term));
         ui->tablePart->setRowHidden(row, !matches);
     }
 }

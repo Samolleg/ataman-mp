@@ -883,9 +883,15 @@ int runHeadlessCommand(QApplication& app)
             }
             return true;
         };
+        const QStringList checkedParts = {"bd", "hr", "future_part"};
+        const QStringList uncheckedParts = {"optional_part"};
         const bool bodyPartStateFilterAliases =
-            filterShowsOnly("true", {"bd", "hr", "future_part"})
-            && filterShowsOnly("unchecked", {"optional_part"});
+            filterShowsOnly("checked", checkedParts)
+            && filterShowsOnly("true", checkedParts)
+            && filterShowsOnly("on", checkedParts)
+            && filterShowsOnly("unchecked", uncheckedParts)
+            && filterShowsOnly("false", uncheckedParts)
+            && filterShowsOnly("off", uncheckedParts);
         bool bodyPartStateTextHidden = bodyPartTable != nullptr;
         bool bodyPartColumnsResizable = bodyPartTable != nullptr;
         if(bodyPartTable)
