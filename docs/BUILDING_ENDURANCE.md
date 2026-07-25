@@ -180,3 +180,24 @@ EIMapperEndurance.exe --profile-load <game-installation> --json
 `--roundtrip-check` never writes the input file.
 `--profile-load` only discovers and validates a recommended resource profile;
 it does not write settings or modify the installation.
+
+## Owned-process JMV runtime smoke test
+
+Changes to the Test Current Map bootstrap must pass a real-process smoke test;
+file staging and protocol unit tests do not prove that the game accepts the
+bridge calls. Build `tests/jmv_map_test_launcher_tests.pro`, copy the release
+runtime bridge and host into `release/runtime`, then run:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\run_jmv_runtime_smoke.ps1 `
+  -TestExecutable build-runtime-smoke\release\jmv_map_test_launcher_tests.exe `
+  -GameRoot "D:\Evil Islands" `
+  -ModRoot "D:\Evil Islands\Starter\MODS\JamaisVu135" `
+  -QtBin <Qt-bin> `
+  -MinGwBin <MinGW-bin>
+```
+
+The gate launches only processes it owns. It requires both the installed Zone
+1 pair and the repository's generated empty-control fixture to reach
+`GameplayReady`, then stops the process and verifies cleanup. Do not run it
+while another Endurance-owned test session is active.

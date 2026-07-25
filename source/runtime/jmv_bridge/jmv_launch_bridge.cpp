@@ -500,14 +500,16 @@ bool RegisterTemporaryTextureResource()
         Log(L"TEMP_TEXTURE_RES refused: path cannot round-trip through the game code page");
         return false;
     }
-    auto** worldSlot = reinterpret_cast<void**>(game + kWorldClientGlobalRva);
-    if(!IsReadableRange(worldSlot, sizeof(void*)) || !*worldSlot
-       || !IsReadableRange(*worldSlot, sizeof(void*)))
+    // The supported executable owns CWorldClient as a fixed global object.
+    // Shipped call sites load this address directly into ECX; it is not a
+    // pointer slot.  Dereferencing it made alpha.11 pass the object's vtable
+    // address as `this`, crashing immediately after MainMenuReady.
+    void* world = game + kWorldClientGlobalRva;
+    if(!IsReadableRange(world, sizeof(void*)))
     {
         Log(L"TEMP_TEXTURE_RES refused: world client is not initialized");
         return false;
     }
-    void* world = *worldSlot;
     // Call the fingerprinted game accessor directly.  Looking it up through a
     // reconstructed vtable index is not safe: that table is build-specific and
     // alpha.10 consequently aborted the otherwise valid staged-map bootstrap.

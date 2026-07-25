@@ -573,10 +573,13 @@ CJmvMapTestLauncher::CJmvMapTestLauncher(QObject* parent)
     });
     connect(m_process, &QProcess::errorOccurred, this, [this](QProcess::ProcessError error)
     {
-        if(error == QProcess::Crashed)
+        if(error == QProcess::Crashed && !m_stopRequested)
             m_processCrashObserved = true;
-        appendRunLog(QString("game.exe process error=%1 text=%2")
-                     .arg(int(error)).arg(m_process->errorString()));
+        if(error == QProcess::Crashed && m_stopRequested)
+            appendRunLog("Endurance-owned process terminated after Stop Test request");
+        else
+            appendRunLog(QString("game.exe process error=%1 text=%2")
+                         .arg(int(error)).arg(m_process->errorString()));
         if(error == QProcess::FailedToStart)
         {
             const QString cleanupMessage = cleanup();

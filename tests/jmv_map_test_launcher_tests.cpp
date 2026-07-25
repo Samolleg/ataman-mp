@@ -56,6 +56,7 @@ private slots:
     void authoritativeResultAcceptsLatestHotReloadGeneration();
     void authoritativeResultRejectsWrongZone();
     void analyzesPersistedAuthoritativeResult();
+    void runtimeSmokeReachesGameplayReady();
 };
 
 static QString hash(const QByteArray& data)
@@ -157,6 +158,106 @@ void JmvMapTestLauncherTests::createsGenerationScopedSavePaths()
     QVERIFY(QDir::fromNativeSeparators(initial).endsWith("generations/000000/saves"));
     QVERIFY(QDir::fromNativeSeparators(reload).endsWith("generations/000017/saves"));
     QVERIFY(initial != reload);
+}
+
+void JmvMapTestLauncherTests::runtimeSmokeReachesGameplayReady()
+{
+    const QString gameRoot = qEnvironmentVariable("EI_ENDURANCE_RUNTIME_SMOKE_GAME_ROOT");
+    const QString modRoot = qEnvironmentVariable("EI_ENDURANCE_RUNTIME_SMOKE_MOD_ROOT");
+    const QString mprPath = qEnvironmentVariable("EI_ENDURANCE_RUNTIME_SMOKE_MPR");
+    const QString mobPath = qEnvironmentVariable("EI_ENDURANCE_RUNTIME_SMOKE_MOB");
+    if(gameRoot.isEmpty() || modRoot.isEmpty() || mprPath.isEmpty() || mobPath.isEmpty())
+        QSKIP("Set EI_ENDURANCE_RUNTIME_SMOKE_* to run the owned-process gameplay smoke test.");
+
+    auto readAll = [](const QString& path) {
+        QFile file(path);
+        if(!file.open(QIODevice::ReadOnly))
+            return QByteArray();
+        return file.readAll();
+    };
+    const QByteArray mprData = readAll(mprPath);
+    const QByteArray mobData = readAll(mobPath);
+    QVERIFY2(!mprData.isEmpty(), qPrintable("Could not read smoke MPR: " + mprPath));
+    QVERIFY2(!mobData.isEmpty(), qPrintable("Could not read smoke MOB: " + mobPath));
+
+    SJmvMapTestLaunchInput input;
+    input.profile.valid = true;
+    input.profile.runtimeStackComplete = true;
+    input.profile.runtimeStackValidated = true;
+    input.profile.profileId = "jamais-vu";
+    input.profile.profileName = "Jamais Vu runtime smoke";
+    input.profile.gameRoot = QDir::cleanPath(gameRoot);
+    input.profile.modRoot = QDir::cleanPath(modRoot);
+    input.profile.mapDirectories << QDir(modRoot).filePath("Maps");
+    input.profile.resourceDirectories
+        << QDir(modRoot).filePath("res")
+        << QDir(gameRoot).filePath("Res");
+    input.profile.runtimeManifestId = "runtime-smoke";
+    SRuntimeComponentEvaluation gameComponent;
+    gameComponent.id = "game.exe";
+    gameComponent.path = QDir(gameRoot).filePath("Starter/Engine/game.exe");
+    gameComponent.exists = QFileInfo::exists(gameComponent.path);
+    gameComponent.hashAccepted = true;
+    gameComponent.enforceHash = true;
+    gameComponent.sha256 = hash(readAll(gameComponent.path));
+    input.profile.runtimeComponents.append(gameComponent);
+
+    input.sourceMpr = QFileInfo(mprPath);
+    input.sourceMob = QFileInfo(mobPath);
+    input.mprData = mprData;
+    input.mobData = mobData;
+    input.mapEntry.zoneId = qEnvironmentVariable("EI_ENDURANCE_RUNTIME_SMOKE_ZONE", "gz1g");
+    input.mapEntry.mprName = qEnvironmentVariable(
+        "EI_ENDURANCE_RUNTIME_SMOKE_MPR_NAME",
+        QFileInfo(mprPath).completeBaseName());
+    input.mapEntry.mobName = qEnvironmentVariable(
+        "EI_ENDURANCE_RUNTIME_SMOKE_MOB_NAME",
+        QFileInfo(mobPath).completeBaseName());
+    input.mapEntry.sourceArchive = qEnvironmentVariable(
+        "EI_ENDURANCE_RUNTIME_SMOKE_TEXTS_RES",
+        QDir(modRoot).filePath("res/texts.res"));
+    input.mapEntry.allodId = qEnvironmentVariable(
+        "EI_ENDURANCE_RUNTIME_SMOKE_ALLOD", "gipat");
+    input.spawn.valid = true;
+    input.spawn.unobstructed = true;
+    input.spawn.exitId = qEnvironmentVariableIntValue("EI_ENDURANCE_RUNTIME_SMOKE_EXIT");
+    if(input.spawn.exitId <= 0)
+        input.spawn.exitId = 1;
+    bool xOk = false;
+    bool yOk = false;
+    const double x = qEnvironmentVariable("EI_ENDURANCE_RUNTIME_SMOKE_X", "54").toDouble(&xOk);
+    const double y = qEnvironmentVariable("EI_ENDURANCE_RUNTIME_SMOKE_Y", "138").toDouble(&yOk);
+    QVERIFY(xOk && yOk);
+    input.spawn.position = QPointF(x, y);
+    input.spawn.requestedPosition = input.spawn.position;
+    input.syntheticMapIdentity = qEnvironmentVariableIntValue(
+        "EI_ENDURANCE_RUNTIME_SMOKE_SYNTHETIC") != 0;
+    input.mapSizeX = qEnvironmentVariableIntValue("EI_ENDURANCE_RUNTIME_SMOKE_SIZE_X");
+    input.mapSizeY = qEnvironmentVariableIntValue("EI_ENDURANCE_RUNTIME_SMOKE_SIZE_Y");
+    if(input.mapSizeX <= 0)
+        input.mapSizeX = 7;
+    if(input.mapSizeY <= 0)
+        input.mapSizeY = 5;
+    input.allowMissingAiGraph = qEnvironmentVariableIntValue(
+        "EI_ENDURANCE_RUNTIME_SMOKE_ALLOW_GRAPHLESS") != 0;
+    const QString graphPath = qEnvironmentVariable("EI_ENDURANCE_RUNTIME_SMOKE_GRAPH");
+    if(!graphPath.isEmpty())
+        input.generatedAiGraphData = readAll(graphPath);
+
+    CJmvMapTestLauncher launcher;
+    QString error;
+    QVERIFY2(launcher.launch(input, &error), qPrintable(error));
+    QElapsedTimer timeout;
+    timeout.start();
+    while(timeout.elapsed() < 45000 && launcher.isRunning()
+          && launcher.runtimeState() != "GameplayReady")
+        QTest::qWait(50);
+    const QString finalState = launcher.runtimeState();
+    const QString runId = launcher.runId();
+    launcher.stop();
+    QTRY_VERIFY_WITH_TIMEOUT(!launcher.isRunning(), 10000);
+    QCOMPARE(finalState, QString("GameplayReady"));
+    QVERIFY2(!runId.isEmpty(), "Runtime smoke did not create a run ID.");
 }
 
 void JmvMapTestLauncherTests::validatesExternalGraphEnvelope()
