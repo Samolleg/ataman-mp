@@ -12,6 +12,14 @@ class QComboBox;
 class QDoubleSpinBox;
 class QLabel;
 class QSpinBox;
+struct SMaterial;
+
+enum class EOverlaySurfaceOperation
+{
+    PaintExisting,
+    Activate,
+    Deactivate
+};
 
 enum class ELandscapeSculptTool
 {
@@ -44,6 +52,9 @@ public:
     ETerrainTileBrushShape paintShape() const;
     bool manualTileSelectionEnabled() const;
     bool landFamiliesAllowedInOverlay() const;
+    EOverlaySurfaceOperation overlaySurfaceOperation() const;
+    qint16 overlayMaterialIndex(bool* selected = nullptr) const;
+    void setOverlayMaterials(const QVector<SMaterial>& materials);
     void adjustSculptRadius(int steps);
     void adjustSculptStrength(int steps);
     void adjustPaintSize(int steps);
@@ -85,6 +96,10 @@ private:
     QCheckBox* m_manualTileSelection;
     QCheckBox* m_showUnderwaterFamilies;
     QCheckBox* m_allowLandFamiliesInOverlay;
+    QComboBox* m_overlaySurfaceOperation;
+    QComboBox* m_overlayMaterial;
+    QLabel* m_overlaySurfaceOperationLabel;
+    QLabel* m_overlayMaterialLabel;
     QCheckBox* m_showMainTerrain;
     QCheckBox* m_showOverlays;
     QLabel* m_tilesetStatus;

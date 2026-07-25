@@ -465,14 +465,20 @@ No operation may normalize inactive sentinels, unknown records, or untouched
 sector bytes. Creation/removal must pass the same staged reopen, locality,
 semantic-diff, backup, and atomic-save contract as land edits.
 
-The backend activation/deactivation transaction is now implemented. A land-only
+The activation/deactivation transaction and viewport brush are now implemented.
+Landscape Tools exposes **Paint active surfaces**, **Add surface**, and
+**Remove surface** as explicit operations. Adding requires a user-selected
+existing liquid-material record and an existing atlas family; it never creates
+or guesses either resource. Empty overlay regions are picked against land only
+for the initial placement, then rendered and edited as the overlay layer. One
+drag is one undo command. A land-only
 SEC upgrades deterministically to the native overlay layout only when the first
 cell is activated: land vertices and tiles remain byte-identical, overlay
 vertices start as an exact land-height copy, inactive material entries use the
 verified `-1` sentinel, and SEC trailing bytes are retained. Deactivation
 changes only that material sentinel and retains inactive tile/vertex bytes.
 Both directions are provenance-checked and undo back to the exact original SEC.
-Viewport tools, overlay-only sculpting, and typed material editing remain open.
+Overlay-only sculpting and typed material-value editing remain open.
 
 ## Landscape safety and game validation
 

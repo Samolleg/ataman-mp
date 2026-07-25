@@ -238,6 +238,7 @@ public:
     void adjustTerrainPaintMaterial(int steps);
     bool manualTilePaintingEnabled() const;
     float terrainPaintStampSpacing() const;
+    bool terrainBrushProjectsToLand() const;
     void setDrawWater(bool bDraw = true);
     void setDrawLand(bool bDraw = true);
     bool drawWater() const { return m_bDrawWater; }
@@ -252,6 +253,7 @@ public:
     bool applyTerrainVerticalScalePreview(const STerrainVerticalScaleCommand& command,
                                           bool forward);
     bool applyTerrainTilePreview(const STerrainTileCommand& command, bool forward);
+    bool applyOverlaySurfacePreview(const SOverlaySurfaceCommand& command, bool forward);
     void loadSession();
     void setSessionWorkspaceIdentity(const QString& kind, const QString& identifier,
                                      const QString& displayName, const QString& mapZoneId);
@@ -532,6 +534,7 @@ private:
     QMap<qint32, int> m_terrainMaterialRepresentatives;
     QVector<STerrainTileDelta> m_terrainPaintAudit;
     STerrainTileCommand m_tileStrokeCommand;
+    SOverlaySurfaceCommand m_overlaySurfaceStrokeCommand;
     QVector<STerrainPaintAuditAction> m_terrainPaintActions;
     int m_terrainPaintActionId{0};
     quint32 m_terrainSemanticSeed{0};
