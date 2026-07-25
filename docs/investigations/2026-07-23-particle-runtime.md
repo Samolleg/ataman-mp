@@ -1777,3 +1777,98 @@ and `1487BD789EDD1B8D01310FF0EFA14E3FE086D5CE1ABB00E84CEA8384DC1DFEB9`.
 `Stun`, `Tornado`, `ZoneExit`, and `ChangeHero` were already fingerprinted;
 the selected archives confirm all six batch dependencies in both profiles.
 All findings above precede simulator and renderer changes.
+
+## Early spell reconstruction: Fireball through Geyser
+
+The fingerprinted executable closes six formerly preview-only factory paths.
+Fireball (8192 / `0x2000`) uses factory range
+`0x00485735..0x00485802`, callbacks `0x0048C800` and `0x0048CAD0`, the
+`FireSmoke` atlas, ordinary alpha, 88 percent birth probability, one minimum
+attempt, life and phase count 15, one-quant phases, factory size
+`.8 * authoredScale`, and size factor .94. Attempt zero is a
+`1.2 * factorySize` carrier-point head; later attempts are
+`.5 * factorySize` trail sprites placed from carrier velocity
+and its two transverse basis vectors. On its first update the head is halved.
+Every update advances the atlas phase, applies the .94 size factor, removes
+then reapplies the stored transverse offset for trails, and multiplies that
+offset by .95. A bare catalog record has zero carrier velocity, so the editor
+must truthfully exercise the stationary head path rather than inventing a
+projectile trail.
+
+Fireblast (8194 / `0x2002`) owns factory range
+`0x00485D58..0x004861D7`, callbacks `0x0048C090`, `0x0048C590`, and
+`0x0048C760`, and the ordinary-alpha `Explosion` atlas. This corrects the
+earlier naming ambiguity around callbacks also reused by Mushroom and
+Transform: Fireblast is the full 15-source explosion specialization, whereas
+those later types select the same callback family with different constructor
+state and `ChangeHero`. Fireblast creates 15 radial sources, 60 particles per
+quant, capacity 600, life 15, source random speed scaled by .8..1.2 and .8,
+source growth controls `(0,.4,.7)`, and per-source class controls 0..5 and
+.7..1.4. Source updates expand the shell, damp velocity by .75, subtract .03
+from vertical speed, and stop generation once phase exceeds six. Births split
+between central ball clouds and source trails; their exact phase, size,
+velocity damping, and the 16-entry alpha table
+`255,255,207,175,128,128,128,128,128,175,207,192,128,48,0,0` are pinned by
+the callback bytes. The editor may repeat the completed one-shot solely for
+catalog inspection.
+
+Healing (8198 / `0x2006`) uses factory range
+`0x004862B8..0x00486318`, callbacks `0x0048B630`, `0x0048BBE0`, and
+`0x0048BCE0`, additive `Healing`, life eight, and a required gameplay carrier.
+At first creation it derives
+`round(6 * (.5 * authoredScale) + 2)` spiral sources from the carrier bound.
+Sources start around the lower bound, expand then contract
+radially over 36 quants while turning ten degrees and rising each quant.
+One phase-0 anchor follows every source, cycles phases 0..7, grows for the
+first half and shrinks for the second half, then fades over eight quants.
+Additional eight-quant tail particles occupy phases 8..15 around the moving
+sources. The standalone control explicitly uses authored size as a synthetic
+spherical carrier bound; this is the same documented convention used for
+other carrier-required catalog effects.
+
+Poisonfog and Aggressionfog (8199 and 8200 / `0x2007` and `0x2008`) share
+factory range `0x00486319..0x00486371`, callbacks `0x0048B080` and
+`0x0048B570`, ordinary-alpha `PoisonCloud`, 50 percent probability, and one
+creation attempt. Their first callback fills a one-unit grid inside the
+authored radius, jitters X/Y by plus or minus .25, assigns size
+`1 + random(-.25,.25)`, and places Z one particle size above the sampled
+surface. Phases begin randomly in 0..14 and advance every quant. Poisonfog is
+white with alpha 160; its independent power field remains at the constructor
+default and is not changed by `PARTICL_SCALE`. Aggressionfog is
+opaque `(255,175,127)`. They remain persistent while generation is enabled;
+the callback's nine-alpha-step finish fade is therefore not active on a bare
+placed control.
+
+Geyser (8201 / `0x2009`) uses factory range
+`0x00486372..0x00486573`, callbacks `0x0048A8F0`, `0x0048ADA0`, and
+`0x0048AEC0`, additive `Fireworks`, 88 percent probability, 20 attempts, and
+three alternating local sources. The first particle is a persistent phase-15
+source flash whose size is rerolled from `.03..3 * authoredSize` each quant.
+Active sources emit phases 0..11 with `.2 * authoredSize` pending size,
+direction selected from source azimuth, 0..10 degree polar angle, radius
+.4..1, and speed `.3 * authoredScale`. Each update rotates within the particle's four-frame
+atlas row, multiplies size by .9, applies motion and `.3 * .06` downward
+acceleration, and subtracts nine alpha. Sources work for a random 1..7 quants,
+relax for 3..36, then choose a new direction. The stationary placed-record
+path supplies the native origin and needs no invented owner motion.
+
+The same pass independently closes Vulcansmoke's constructor and callbacks:
+factory `0x004861D8..0x004862B7`, creation `0x0048BD50`, and update
+`0x0048C010`. Its 60-percent upper-cloud and 40-percent rising-pillar split,
+phase delays, velocities, scale multipliers, and `Vulkan` resource name are
+confirmed. However, exhaustive read-only member scans of the selected Base
+and JMV resource sets find no `vulkan.mmp` payload. A borrowed atlas would be
+fabricated evidence, so texture fidelity remains explicitly unresolved even
+though the behavior is now closed.
+
+The active JMV archive pins `explosion.mmp`, `poisoncloud.mmp`, and
+`fireworks.mmp` as 1024-square, 11-mip DXT3 atlases with payload SHA-256
+`AF3356FCA6CE0B1B997E284E5DF757EE9B48A56A3EFA257AB6DC356ED68C2AA4`,
+`FCE07B6BABFFC1B03D29D99344723797B9B87E9C208A625C908BE3EA22177690`,
+and `F3A1D2A98A8BB87D1FE4FAD675904F0636F527CF107D46122134F2ABACE2B`.
+The Base variants are 256-square, three-mip `0x00004444` textures with hashes
+`241AAF55FD59944E7FC4214A0652F12CEEC348A8B90D1691C3FED95104420276`,
+`308D208BB558461FE2DD2D737749A122C6E2C987A2886A7EEAF2B913DE30F8D0`,
+and `8BF4915BD31A78854ABB98213F584E6436E767103E463F4954C57E95F7E92DDF`.
+`FireSmoke` and `Healing` were already fingerprinted. These executable and
+resource findings precede the simulator and renderer changes below.

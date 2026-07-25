@@ -273,6 +273,43 @@ class ParticleBinaryReportTests(unittest.TestCase):
         self.assertAlmostEqual(
             fixture["constants"]["starttrans_source_radius_step"]["value"],
             0.02)
+        self.assertEqual(
+            fixture["ranges"]["fireball_create_callback"]["start_va"],
+            "0x0048C800")
+        self.assertEqual(
+            fixture["ranges"]["fireblast_create_callback"]["start_va"],
+            "0x0048C090")
+        self.assertEqual(
+            fixture["ranges"]["healing_create_callback"]["start_va"],
+            "0x0048B630")
+        self.assertEqual(
+            fixture["ranges"]["poisonfog_create_callback"]["start_va"],
+            "0x0048B080")
+        self.assertEqual(
+            fixture["ranges"]["geyser_create_callback"]["start_va"],
+            "0x0048A8F0")
+        self.assertEqual(fixture["sites"]["fireworks_texture_name"]["bytes"],
+                         "46697265776F726B7300")
+        self.assertEqual(fixture["sites"]["poisoncloud_texture_name"]["bytes"],
+                         "506F69736F6E436C6F756400")
+        self.assertEqual(fixture["sites"]["vulkan_texture_name"]["bytes"],
+                         "56756C6B616E00")
+        self.assertEqual(fixture["sites"]["explosion_texture_name"]["bytes"],
+                         "4578706C6F73696F6E00")
+        self.assertEqual(
+            fixture["sites"]["fireblast_alpha_table"]["bytes"],
+            "FF000000FF000000CF000000AF00000080000000800000008000000080000000"
+            "80000000AF000000CF000000C000000080000000300000000000000000000000")
+        self.assertAlmostEqual(
+            fixture["constants"]["fireball_head_size_factor"]["value"], 1.2)
+        self.assertAlmostEqual(
+            fixture["constants"]["fireblast_flash_size_factor"]["value"], 2.3)
+        self.assertEqual(
+            fixture["constants"]["poisonfog_alpha_scale"]["value"], 160.0)
+        self.assertEqual(
+            fixture["constants"]["healing_source_count_scale"]["value"], 6.0)
+        self.assertAlmostEqual(
+            fixture["constants"]["geyser_gravity_factor"]["value"], 0.06)
         self.assertIn(
             "C7422C643B7F3F",
             fixture["sites"]["curseholder_tornado_reuse_and_controls"]["bytes"])

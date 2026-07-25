@@ -14,6 +14,11 @@ private slots:
     void schedulerUsesAttemptsRatherThanSlots();
     void prewarmedEmittersAreDeterministicAndBounded();
     void fireOnlyNeverReachesSmokeFrames();
+    void fireballUsesStationaryNativeHeadPath();
+    void fireBlastUsesFiniteFifteenSourceExplosion();
+    void healingUsesSyntheticCarrierSpiralsAndTails();
+    void poisonFogsUseNativeGridAndSubtypeColor();
+    void geyserUsesThreeCyclingBallisticSources();
     void tornadoUsesNativePopulationAndPhasePartitions();
     void lightningBlastIsFiniteAndRepeatingForPreview();
     void nukeUsesFiniteNativeBurstAndImpactPhases();
@@ -1160,6 +1165,141 @@ void ParticleAnimationTests::startTransUsesFiniteAnchorAndReturningTrails()
     QVERIFY(first.activeCount() > 10);
 }
 
+void ParticleAnimationTests::fireballUsesStationaryNativeHeadPath()
+{
+    ei::particle::FireballEmitter first;
+    ei::particle::FireballEmitter second;
+    const QVector3D origin(1.0f, -2.0f, 3.0f);
+    first.advanceTo(15, 8192u, origin, 2.0f);
+    second.advanceTo(15, 8192u, origin, 2.0f);
+    const auto a = first.samples();
+    const auto b = second.samples();
+    QCOMPARE(first.activeCount(), 15);
+    QCOMPARE(a.size(), b.size());
+    for(int index = 0; index < a.size(); ++index)
+    {
+        QCOMPARE(a[index].position, origin);
+        QCOMPARE(a[index].position, b[index].position);
+        QCOMPARE(a[index].scale, b[index].scale);
+        QCOMPARE(a[index].frame, b[index].frame);
+        QCOMPARE(a[index].alpha, 1.0f);
+        QVERIFY(a[index].frame >= 0 && a[index].frame <= 14);
+    }
+    QCOMPARE(a.last().scale, ei::particle::billboardDiameter(1.92f));
+}
+
+void ParticleAnimationTests::fireBlastUsesFiniteFifteenSourceExplosion()
+{
+    ei::particle::FireBlastEmitter first;
+    ei::particle::FireBlastEmitter second;
+    const QVector3D origin(0.0f, 0.0f, 1.0f);
+    first.advanceTo(7, 8194u, origin, 1.0f);
+    second.advanceTo(7, 8194u, origin, 1.0f);
+    const auto a = first.samples();
+    const auto b = second.samples();
+    QVERIFY(!first.generating());
+    QVERIFY(first.activeCount() > 100 && first.activeCount() <= 600);
+    QCOMPARE(a.size(), b.size());
+    for(int index = 0; index < a.size(); ++index)
+    {
+        QCOMPARE(a[index].position, b[index].position);
+        QCOMPARE(a[index].scale, b[index].scale);
+        QCOMPARE(a[index].frame, b[index].frame);
+        QCOMPARE(a[index].alpha, b[index].alpha);
+        QVERIFY(a[index].frame >= 0 && a[index].frame <= 15);
+        QVERIFY(a[index].alpha >= 0.0f && a[index].alpha <= 1.0f);
+    }
+    first.advanceTo(47, 8194u, origin, 1.0f);
+    QCOMPARE(first.activeCount(), 0);
+    first.advanceTo(49, 8194u, origin, 1.0f);
+    QVERIFY(first.activeCount() > 40);
+}
+
+void ParticleAnimationTests::healingUsesSyntheticCarrierSpiralsAndTails()
+{
+    ei::particle::HealingEmitter first;
+    ei::particle::HealingEmitter second;
+    const QVector3D origin(3.0f, 4.0f, 2.0f);
+    first.advanceTo(10, 8198u, origin, 1.0f);
+    second.advanceTo(10, 8198u, origin, 1.0f);
+    QCOMPARE(first.sourceCount(), 5);
+    const auto a = first.samples();
+    const auto b = second.samples();
+    QCOMPARE(a.size(), b.size());
+    QVERIFY(a.size() > 20);
+    bool anchorPhase = false;
+    bool tailPhase = false;
+    for(int index = 0; index < a.size(); ++index)
+    {
+        QCOMPARE(a[index].position, b[index].position);
+        QCOMPARE(a[index].scale, b[index].scale);
+        QCOMPARE(a[index].frame, b[index].frame);
+        QCOMPARE(a[index].alpha, b[index].alpha);
+        anchorPhase |= a[index].frame < 8;
+        tailPhase |= a[index].frame >= 8;
+    }
+    QVERIFY(anchorPhase);
+    QVERIFY(tailPhase);
+    first.advanceTo(55, 8198u, origin, 1.0f);
+    QCOMPARE(first.activeCount(), 0);
+}
+
+void ParticleAnimationTests::poisonFogsUseNativeGridAndSubtypeColor()
+{
+    ei::particle::PoisonFogEmitter poison;
+    ei::particle::PoisonFogEmitter aggression;
+    const QVector3D origin(-2.0f, 1.0f, 0.5f);
+    poison.advanceTo(1, 8199u, origin, 1.0f, false);
+    aggression.advanceTo(1, 8200u, origin, 1.0f, true);
+    const auto poisonSamples = poison.samples();
+    const auto aggressionSamples = aggression.samples();
+    QVERIFY(!poisonSamples.isEmpty());
+    QVERIFY(!aggressionSamples.isEmpty());
+    for(const auto& sample : poisonSamples)
+    {
+        QCOMPARE(sample.color, QVector3D(1.0f, 1.0f, 1.0f));
+        QCOMPARE(sample.alpha, 160.0f / 255.0f);
+        QVERIFY(sample.frame >= 0 && sample.frame < 15);
+        QVERIFY(sample.position.z() > origin.z());
+        const QVector2D offset(sample.position.x() - origin.x(),
+                               sample.position.y() - origin.y());
+        QVERIFY(offset.length() < 1.0f);
+    }
+    for(const auto& sample : aggressionSamples)
+    {
+        QCOMPARE(sample.color,
+                 QVector3D(1.0f, 175.0f / 255.0f, 127.0f / 255.0f));
+        QCOMPARE(sample.alpha, 1.0f);
+    }
+}
+
+void ParticleAnimationTests::geyserUsesThreeCyclingBallisticSources()
+{
+    ei::particle::GeyserEmitter first;
+    ei::particle::GeyserEmitter second;
+    const QVector3D origin(0.0f, 0.0f, 0.0f);
+    first.advanceTo(32, 8201u, origin, 1.0f);
+    second.advanceTo(32, 8201u, origin, 1.0f);
+    const auto a = first.samples();
+    const auto b = second.samples();
+    QVERIFY(first.activeCount() > 20 && first.activeCount() <= 500);
+    QCOMPARE(a.size(), b.size());
+    bool foundFlash = false;
+    bool foundStream = false;
+    for(int index = 0; index < a.size(); ++index)
+    {
+        QCOMPARE(a[index].position, b[index].position);
+        QCOMPARE(a[index].scale, b[index].scale);
+        QCOMPARE(a[index].frame, b[index].frame);
+        QCOMPARE(a[index].alpha, b[index].alpha);
+        foundFlash |= a[index].frame == 15 && a[index].position == origin;
+        foundStream |= a[index].frame < 12 && a[index].position != origin;
+        QVERIFY(a[index].frame >= 0 && a[index].frame <= 15);
+    }
+    QVERIFY(foundFlash);
+    QVERIFY(foundStream);
+}
+
 void ParticleAnimationTests::persistentEmittersBoundInitialWallClockReplay()
 {
     constexpr qint64 wallClockTick = 32000000000LL;
@@ -1172,6 +1312,11 @@ void ParticleAnimationTests::persistentEmittersBoundInitialWallClockReplay()
     ei::particle::FeetCloudEmitter feet;
     ei::particle::BallStarsEmitter ballStars;
     ei::particle::CurseStarsEmitter curseStars;
+    ei::particle::FireballEmitter fireball;
+    ei::particle::FireBlastEmitter fireBlast;
+    ei::particle::HealingEmitter healing;
+    ei::particle::PoisonFogEmitter poisonFog;
+    ei::particle::GeyserEmitter geyser;
     moshka.advanceTo(wallClockTick, 8252u, origin, 1.0f);
     vision.advanceTo(wallClockTick, 8260u, origin, 1.0f, 0);
     regeneration.advanceTo(wallClockTick, 8263u, origin, 1.0f);
@@ -1180,6 +1325,11 @@ void ParticleAnimationTests::persistentEmittersBoundInitialWallClockReplay()
     feet.advanceTo(wallClockTick, 8266u, origin, 1.0f, false);
     ballStars.advanceTo(wallClockTick, 8269u, origin, 1.0f);
     curseStars.advanceTo(wallClockTick, 8271u, origin, 1.0f);
+    fireball.advanceTo(wallClockTick, 8192u, origin, 1.0f);
+    fireBlast.advanceTo(wallClockTick, 8194u, origin, 1.0f);
+    healing.advanceTo(wallClockTick, 8198u, origin, 1.0f);
+    poisonFog.advanceTo(wallClockTick, 8199u, origin, 1.0f, false);
+    geyser.advanceTo(wallClockTick, 8201u, origin, 1.0f);
     QVERIFY(moshka.activeCount() > 0 && moshka.activeCount() <= 800);
     QCOMPARE(vision.activeCount(), 1);
     QCOMPARE(regeneration.activeCount(), 2);
@@ -1188,6 +1338,11 @@ void ParticleAnimationTests::persistentEmittersBoundInitialWallClockReplay()
     QVERIFY(feet.activeCount() > 50 && feet.activeCount() <= 300);
     QCOMPARE(ballStars.activeCount(), 21);
     QCOMPARE(curseStars.activeCount(), 168);
+    QCOMPARE(fireball.activeCount(), 15);
+    QVERIFY(fireBlast.activeCount() <= 600);
+    QVERIFY(healing.activeCount() <= 500);
+    QVERIFY(poisonFog.activeCount() > 0);
+    QVERIFY(geyser.activeCount() > 0 && geyser.activeCount() <= 500);
 }
 
 QTEST_APPLESS_MAIN(ParticleAnimationTests)

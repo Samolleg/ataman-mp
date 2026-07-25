@@ -26,6 +26,7 @@ class ParticleTextureReportTests(unittest.TestCase):
             "teleport.mmp", "stun.mmp", "zoneexit.mmp", "shapechange.mmp",
             "bag.mmp", "casting6.mmp", "casting2.mmp", "casting1.mmp",
             "visionfog.mmp", "healing.mmp", "rikarrowsmoke.mmp",
+            "explosion.mmp", "poisoncloud.mmp", "fireworks.mmp",
         })
         for name in ("tornado.mmp", "tendrilight.mmp", "firesmoke.mmp",
                      "banshee.mmp", "changehero.mmp", "firearrowsmoke.mmp",
@@ -33,7 +34,8 @@ class ParticleTextureReportTests(unittest.TestCase):
                      "clayring.mmp", "teleport.mmp", "stun.mmp",
                      "zoneexit.mmp", "shapechange.mmp", "bag.mmp",
                      "casting6.mmp", "casting2.mmp", "casting1.mmp",
-                     "visionfog.mmp", "healing.mmp", "rikarrowsmoke.mmp"):
+                     "visionfog.mmp", "healing.mmp", "rikarrowsmoke.mmp",
+                     "explosion.mmp", "poisoncloud.mmp", "fireworks.mmp"):
             item = by_name[name]
             self.assertEqual((item["width"], item["height"]), (1024, 1024))
             self.assertEqual(item["mipCount"], 11)
@@ -56,7 +58,7 @@ class ParticleTextureReportTests(unittest.TestCase):
         base_fixture = json.loads(base_path.read_text(encoding="utf-8"))
         self.assertEqual(base_fixture["source"]["sha256"],
                          MODULE.REFERENCE_BASE_TEXTURES_SHA256)
-        self.assertEqual(len(base_fixture["textures"]), 20)
+        self.assertEqual(len(base_fixture["textures"]), 24)
         base_by_name = {item["name"]: item for item in base_fixture["textures"]}
         self.assertEqual(set(base_by_name), {
             "stench.mmp", "link.mmp", "protectiona.mmp", "protectione.mmp",
@@ -66,6 +68,8 @@ class ParticleTextureReportTests(unittest.TestCase):
             "casting6.mmp", "casting2.mmp", "casting1.mmp",
             "visionfog.mmp", "healing.mmp", "rikarrowsmoke.mmp",
             "changehero.mmp", "tornado.mmp",
+            "explosion.mmp", "poisoncloud.mmp", "fireworks.mmp",
+            "firesmoke.mmp",
         })
         stench = base_by_name["stench.mmp"]
         self.assertEqual(stench["name"], "stench.mmp")

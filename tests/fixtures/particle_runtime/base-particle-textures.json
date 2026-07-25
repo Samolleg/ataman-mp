@@ -285,6 +285,62 @@
       "size": 172108,
       "textureFormat": "0x00004444",
       "width": 256
+    },
+    {
+      "atlas": {
+        "columns": 4,
+        "phaseCount": 16,
+        "rows": 4
+      },
+      "height": 256,
+      "mipCount": 3,
+      "name": "explosion.mmp",
+      "sha256": "241AAF55FD59944E7FC4214A0652F12CEEC348A8B90D1691C3FED95104420276",
+      "size": 172108,
+      "textureFormat": "0x00004444",
+      "width": 256
+    },
+    {
+      "atlas": {
+        "columns": 4,
+        "phaseCount": 16,
+        "rows": 4
+      },
+      "height": 256,
+      "mipCount": 3,
+      "name": "poisoncloud.mmp",
+      "sha256": "308D208BB558461FE2DD2D737749A122C6E2C987A2886A7EEAF2B913DE30F8D0",
+      "size": 172108,
+      "textureFormat": "0x00004444",
+      "width": 256
+    },
+    {
+      "atlas": {
+        "columns": 4,
+        "phaseCount": 16,
+        "rows": 4
+      },
+      "height": 256,
+      "mipCount": 3,
+      "name": "fireworks.mmp",
+      "sha256": "8BF4915BD31A78854ABB98213F584E6436E767103E463F4954C57E95F7E92DDF",
+      "size": 172108,
+      "textureFormat": "0x00004444",
+      "width": 256
+    },
+    {
+      "atlas": {
+        "columns": 4,
+        "phaseCount": 16,
+        "rows": 4
+      },
+      "height": 256,
+      "mipCount": 3,
+      "name": "firesmoke.mmp",
+      "sha256": "FBB634A3F11F6B1D783915F2A11DA4E99ACA71344FCBD057AA4BCC35C33C8ABD",
+      "size": 172108,
+      "textureFormat": "0x00004444",
+      "width": 256
     }
   ]
 }

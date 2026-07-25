@@ -56,7 +56,7 @@ covering the selected JMV corpus.
 |---:|---|---|---|
 | 8195 / `0x2003` | Fire | Uses the Tendri update path; particles terminate instead of entering smoke after the fire frames. | Independently pin its full constructor, texture selection, scheduler fields, blend state, and authored controls; add a fingerprinted placed control. |
 | 8196 / `0x2004` | Smoke | Tendri spawn starts at atlas frame 8 and uses the shared later-frame update behavior. | Independently pin construction, texture/tint/scale, cadence, and a placed control. Current editor style is not claimed exact. |
-| 8197 / `0x2005` | Vulcansmoke | The symbolic type and current Tendri-based editor presentation are known. | Establish its exact factory branch, starting frame, callbacks, texture, blend, and scale. The current smoke-only classification remains provisional. |
+| 8197 / `0x2005` | Vulcansmoke | Exact constructor and callbacks are pinned: a 60-percent upper cloud and 40-percent rising pillar use separate phase delays, motion, scale, and damping under ordinary alpha. | The executable requests `Vulkan`, but no `vulkan.mmp` exists in the fingerprinted Base or JMV resource sets. Resolve the missing shipped/resource provenance before replacing the texture; do not borrow an unrelated smoke atlas. |
 | internal `0x2010` | special Tendri wrapper | Has separate count/lifetime fields, a special spawn wrapper, world-height adjustment, and fire-only termination. | Identify the public effect/owner that constructs it and document its resource and attachment path. It must not be generalized to ordinary Campfire. |
 
 ## Reconstructed weather previews
@@ -70,6 +70,11 @@ covering the selected JMV corpus.
 
 | ID | Name | Implemented | Remaining control |
 |---:|---|---|---|
+| 8192 / `0x2000` | Fireball | Dedicated ordinary-alpha `FireSmoke` stationary-head path with native one-attempt fallback, lifetime/phases, first-update head contraction, .94 size evolution, and zero-speed carrier behavior. | Capture a moving projectile owner to validate carrier velocity and transverse trail bases; the truthful bare-record path is closed. |
+| 8194 / `0x2002` | Fireblast | Dedicated finite 15-source ordinary-alpha `Explosion` burst with 60 births per quant, native radial source initialization, shell growth, source motion, cloud/trail split, phase/size/velocity laws and exact alpha table. The editor repeats the completed burst for catalog inspection. | Capture the native spell-supplied origin/size; the stationary one-shot callback path is closed. |
+| 8198 / `0x2006` | Healing | Dedicated additive `Healing` spiral with `round(6*(.5*authoredScale)+2)` synthetic carrier sources, 36-quant expand/contract/rise motion, attached phase-0..7 anchors, phase-8..15 tails and native fade. | Capture a gameplay carrier's actual object bound; the catalog uses authored size as its explicit synthetic spherical bound. |
+| 8199–8200 / `0x2007`–`0x2008` | Poisonfog, Aggressionfog | Dedicated persistent ordinary-alpha `PoisonCloud` grids with native radius clipping, jitter, surface-relative Z, phase animation, poison opacity and aggression subtype color. | Validate terrain sampling on a non-flat control; the flat catalog path is closed. |
+| 8201 / `0x2009` | Geyser | Dedicated additive `Fireworks` effect with persistent phase-15 flash, three active/relax sources, native direction ranges, 20-attempt cadence, four-frame-row phase cycling, ballistic gravity, size decay and alpha loss. | Capture a native placed/spell control as a visual validation case; the stationary callback path is closed. |
 | 8203 / `0x200B` | Casting | Dedicated three-source orbiting and rising tails followed by the closing ring, native phase cadence, `FireSmoke` atlas, and ordinary alpha blending. The standalone catalog uses an explicit synthetic carrier bound equal to authored scale and repeats the finite sequence every 72 quants. | Capture attached carriers with different bounding volumes; the standalone bound is a documented editor control, not a native ownerless default. |
 | 8204 / `0x200C` | Nuke | Dedicated finite 13-quant generator with the native shrinking attempt count, cylindrical spawn volume, vertical attenuation and gravity, half-scale impact plane, radial impact motion, phase progression, expansion and alpha decay, using the `AcidRay` atlas and ordinary alpha blending. The editor repeats the completed burst every 80 quants. | Capture a native placed/spell control as a visual validation case; the stationary callback path itself is closed. |
 | 8205 / `0x200D` | Bansheecasting | Dedicated eight-quant elevated closing ring with native short-lived phase-advancing sprites, `Banshee` atlas, and ordinary alpha blending. The standalone catalog uses an explicit synthetic carrier bound equal to authored scale and repeats the finite sequence every 32 quants. | Capture attached carriers with different bounding volumes; the standalone bound is a documented editor control, not a native ownerless default. |
@@ -118,10 +123,7 @@ runtime behavior has not been reconstructed:
 
 | IDs | Names |
 |---|---|
-| 8192, 8194, 8231 | Fireball, Fireblast, Castingfire |
-| 8198 | Healing |
-| 8199 | Poisonfog |
-| 8200, 8201 | Aggressionfog, Geyser |
+| 8231 | Castingfire |
 | 8232–8239 | Elemental, divination, illusion, domination, enchantment, healing, and failed casting variants |
 
 Texture names used by these previews are limited to direct resource matches

@@ -377,6 +377,11 @@ private:
     bool m_particleInitializationAttempted{false};
     bool m_particleRendererReady{false};
     QHash<const CNode*, ei::particle::TendriEmitter> m_tendriEmitters;
+    QHash<const CNode*, ei::particle::FireballEmitter> m_fireballEmitters;
+    QHash<const CNode*, ei::particle::FireBlastEmitter> m_fireBlastEmitters;
+    QHash<const CNode*, ei::particle::HealingEmitter> m_healingEmitters;
+    QHash<const CNode*, ei::particle::PoisonFogEmitter> m_poisonFogEmitters;
+    QHash<const CNode*, ei::particle::GeyserEmitter> m_geyserEmitters;
     QHash<const CNode*, ei::particle::MushroomEmitter> m_mushroomEmitters;
     QHash<const CNode*, ei::particle::Blood1Emitter> m_blood1Emitters;
     QHash<const CNode*, ei::particle::A4BloodEmitter> m_a4BloodEmitters;
