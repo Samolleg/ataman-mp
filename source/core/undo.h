@@ -405,6 +405,7 @@ protected:
     QSharedPointer<IPropertyBase> m_oldModelParts;
     QSharedPointer<IPropertyBase> m_newModelParts;
     bool m_modelStateCaptured;
+    bool m_bodyPartStateCaptured;
 };
 
 class CResetIdCommand: public QObject, public QUndoCommand

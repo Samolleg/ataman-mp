@@ -12,6 +12,15 @@
 
 namespace {
 
+class CBodyPartStateItem final : public QTableWidgetItem
+{
+public:
+    bool operator<(const QTableWidgetItem& other) const override
+    {
+        return data(Qt::UserRole).toInt() < other.data(Qt::UserRole).toInt();
+    }
+};
+
 QString stateSearchText(Qt::CheckState state)
 {
     if(state == Qt::Checked)
@@ -66,15 +75,14 @@ void CBodyPartEditForm::populateTable()
             state = item.second->value() ? Qt::CheckState::Checked : Qt::CheckState::Unchecked;
         pCheck->setCheckState(state);
         ui->tablePart->setCellWidget(i, 1, pCheck);
-        QTableWidgetItem* checkSort = new QTableWidgetItem;
+        QTableWidgetItem* checkSort = new CBodyPartStateItem;
         checkSort->setData(Qt::UserRole, int(state));
-        checkSort->setText(stateSearchText(state));
+        checkSort->setFlags(checkSort->flags() & ~Qt::ItemIsEditable);
         ui->tablePart->setItem(i, 1, checkSort);
         connect(pCheck, &QCheckBox::stateChanged, this,
                 [this, checkSort](int changedState) {
             const Qt::CheckState state = Qt::CheckState(changedState);
             checkSort->setData(Qt::UserRole, int(state));
-            checkSort->setText(stateSearchText(state));
             applyFilter(ui->lineFilter->text());
         });
         const int occurrences = parts->serializedOccurrenceCount(item.first);
@@ -108,9 +116,16 @@ void CBodyPartEditForm::reset()
     header.append("Source");
     ui->tablePart->setHorizontalHeaderLabels(header);
     ui->tablePart->horizontalHeader()->setVisible(true);
-    ui->tablePart->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
-    ui->tablePart->horizontalHeader()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
-    ui->tablePart->setColumnWidth(1, 8);
+    QHeaderView* headerView = ui->tablePart->horizontalHeader();
+    headerView->setSectionResizeMode(QHeaderView::Interactive);
+    const QByteArray savedHeader = QSettings().value(
+        "ui/bodyPartEditorHeader").toByteArray();
+    if(savedHeader.isEmpty() || !headerView->restoreState(savedHeader))
+    {
+        ui->tablePart->setColumnWidth(0, 150);
+        ui->tablePart->setColumnWidth(1, 78);
+        ui->tablePart->setColumnWidth(2, 150);
+    }
     ui->tablePart->verticalHeader()->hide();
 }
 
@@ -224,7 +239,10 @@ void CBodyPartEditForm::applyFilter(const QString& text)
 
 void CBodyPartEditForm::closeEvent(QCloseEvent* event)
 {
-    QSettings().setValue("ui/bodyPartEditorSize", size());
+    QSettings settings;
+    settings.setValue("ui/bodyPartEditorSize", size());
+    settings.setValue("ui/bodyPartEditorHeader",
+                      ui->tablePart->horizontalHeader()->saveState());
     QWidget::closeEvent(event);
 }
 

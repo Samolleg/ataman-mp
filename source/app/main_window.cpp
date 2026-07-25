@@ -2585,19 +2585,26 @@ void MainWindow::updateMapTestAction()
     const SResourceProfileEvaluation profile = activeResourceProfile();
     const bool isJmv = profile.profileId.compare("jamais-vu", Qt::CaseInsensitive) == 0;
     const bool isBaseProbe = profile.profileId.compare("base-game", Qt::CaseInsensitive) == 0;
+    CMob* primaryMob = mapTestPrimaryMob();
     const bool hasMobs = m_pView && m_pView->hasActiveMob()
             && !m_pView->mobs().isEmpty() && CLandscape::getInstance()->isMprLoad();
     const bool looseCompositionValid = !isJmv || !m_mapTestEntry.zoneId.isEmpty()
-        || (m_pView && m_pView->mobs().size() == 1);
+        || (m_pView && m_pView->mobs().size() == 1 && primaryMob);
     const bool hasPair = hasMobs && (isJmv || m_pView->mobs().size() == 1)
-        && looseCompositionValid;
+        && looseCompositionValid && (!isJmv || primaryMob);
     const bool hasEntrance = selectedTravelZone() != nullptr;
     const bool customForCurrentMap = m_customSpawn.valid && m_customSpawn.custom
         && m_customSpawnContextKey == currentMapContextKey();
     QString autoSpellMobReason;
-    const bool hasAutoSpellMob = CJmvMapTestLauncher::hasAutoSpellMob(
+    bool hasAutoSpellMob = CJmvMapTestLauncher::hasAutoSpellMob(
         profile, m_mapTestEntry.zoneType, m_mapTestEntry.zoneId.isEmpty(),
         &autoSpellMobReason);
+    if(hasAutoSpellMob && isJmv && !primaryMob)
+    {
+        hasAutoSpellMob = false;
+        autoSpellMobReason = tr(
+            "Play from Here requires a primary map MOB. The loaded set contains only supplemental/Autozone MOBs.");
+    }
     const bool loosePairReady = isJmv && m_mapTestEntry.zoneId.isEmpty()
         && customForCurrentMap && !m_pickSpawnPending;
     const bool hasBootstrap = hasEntrance || loosePairReady;
@@ -2685,6 +2692,9 @@ void MainWindow::updateMapTestAction()
             : tr("The active runtime does not match an exact experimental manifest.\n%1")
                 .arg(detail));
     }
+    else if(isJmv && hasMobs && !primaryMob)
+        m_mapTestAction->setToolTip(tr(
+            "The loaded MOB set has no unambiguous primary map MOB. Load one SC_OBJECT_DB_FILE primary MOB; supplemental/Autozone MOBs cannot start a map test alone."));
     else if(!hasPair)
         m_mapTestAction->setToolTip(isJmv
             ? tr("Load one MPR and at least one MOB before launching a map test.")
@@ -2699,6 +2709,40 @@ void MainWindow::updateMapTestAction()
         m_mapTestAction->setToolTip(isBaseProbe
             ? tr("Runs the exact-hash Base EI direct-launch feasibility probe (Ctrl+F5).")
             : tr("Stages the current pair and launches it through JMV's normal single-player New Game path (Ctrl+F5)."));
+}
+
+CMob* MainWindow::mapTestPrimaryMob() const
+{
+    if(!m_pView)
+        return nullptr;
+
+    const QString expected = m_mapTestEntry.mobName.trimmed();
+    if(!expected.isEmpty())
+    {
+        for(CMob* candidate : m_pView->mobs())
+        {
+            if(!candidate)
+                continue;
+            const QFileInfo file(candidate->filePath());
+            if(file.completeBaseName().compare(expected, Qt::CaseInsensitive) == 0
+               || file.fileName().compare(expected, Qt::CaseInsensitive) == 0)
+                return candidate->isQuestMob() ? nullptr : candidate;
+        }
+    }
+
+    // SC_OBJECT_DB_FILE is the runtime primary-map declaration. PR_OBJECT_DB_FILE
+    // identifies supplemental/Autozone data. This survives Save As and copied or
+    // renamed maps, unlike filename-prefix inference.
+    CMob* structuralPrimary = nullptr;
+    for(CMob* candidate : m_pView->mobs())
+    {
+        if(!candidate || candidate->isQuestMob())
+            continue;
+        if(structuralPrimary)
+            return nullptr; // Ambiguous composition: do not guess a primary.
+        structuralPrimary = candidate;
+    }
+    return structuralPrimary;
 }
 
 void MainWindow::launchCurrentMapTest()
@@ -2803,21 +2847,13 @@ void MainWindow::launchCurrentMapTest()
     progress->setValue(3);
     QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
 
-    CMob* mob = loosePair ? m_pView->currentMob() : nullptr;
-    const QString expectedMain = entry.mobName;
-    for(CMob* candidate : m_pView->mobs())
+    CMob* mob = mapTestPrimaryMob();
+    if(!mob)
     {
-        if(candidate && (QFileInfo(candidate->filePath()).completeBaseName().compare(
-                             expectedMain, Qt::CaseInsensitive) == 0
-                          || QFileInfo(candidate->filePath()).fileName().compare(
-                              expectedMain, Qt::CaseInsensitive) == 0))
-        {
-            mob = candidate;
-            break;
-        }
+        QMessageBox::warning(this, tr("Map test launch"),
+            tr("The loaded MOB set has no unambiguous primary SC_OBJECT_DB_FILE MOB. Supplemental/Autozone MOBs cannot initialize a map test by themselves. Load the primary map MOB or a collection that contains it."));
+        return;
     }
-    if(!mob && !m_pView->mobs().isEmpty())
-        mob = m_pView->mobs().first();
     if(isBase && m_pView->mobs().size() != 1)
     {
         QMessageBox::warning(this, tr("Base EI feasibility probe"),

@@ -84,6 +84,7 @@ private slots:
     void differentLogicalNamesRemainIndependent();
     void missingScriptDependencyReportsExactReferenceSource();
     void separatelyLoadedMapSetsAreNotReportedAsOneFamily();
+    void multipleLoadedPrimaryMobsAreReported();
     void duplicateIdsWithinOneMobAreAuthoritativeWarnings();
 };
 
@@ -252,6 +253,33 @@ void MobFamilyValidationTests::duplicateIdsWithinOneMobAreAuthoritativeWarnings(
     QCOMPARE(finding->severity, EMobFamilyFindingSeverity::Warning);
     QVERIFY(finding->message.contains("NID 568 is used by 2 objects in duplicate.mob"));
     QCOMPARE(finding->locations.size(), 2);
+}
+
+void MobFamilyValidationTests::multipleLoadedPrimaryMobsAreReported()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString first = writeMob(directory.path(), "zone4.mob", mobWithObject(100));
+    const QString second = writeMob(directory.path(), "zone17.mob", mobWithObject(200));
+    QVERIFY(!first.isEmpty() && !second.isEmpty());
+
+    SMobFamilyValidationRequest request;
+    request.familyLabel = "mixed-workspace";
+    request.profileId = "test";
+    request.seedMobPaths << first << second;
+    request.mappedPrimaryMobPath = first;
+    request.workspaceRoots << directory.path();
+    request.includeProfileWideMobs = false;
+    const CMobFamilyValidationReport report = CMobFamilyValidator::validate(request);
+
+    const auto finding = std::find_if(report.findings.cbegin(), report.findings.cend(),
+        [](const SMobFamilyFinding& item)
+        { return item.code == "workspace.multiple_primary_mobs"; });
+    QVERIFY(finding != report.findings.cend());
+    QCOMPARE(finding->severity, EMobFamilyFindingSeverity::Warning);
+    QCOMPARE(finding->locations.size(), 2);
+    QVERIFY(finding->locations.contains(first));
+    QVERIFY(finding->locations.contains(second));
 }
 
 QTEST_APPLESS_MAIN(MobFamilyValidationTests)

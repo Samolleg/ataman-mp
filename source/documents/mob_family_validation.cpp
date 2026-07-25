@@ -656,6 +656,7 @@ CMobFamilyValidationReport CMobFamilyValidator::validate(
         }
         member.objects = document.objects();
         member.ranges = document.idRanges();
+        member.primaryMob = !document.isQuestMob();
         member.sourceSha256 = QCryptographicHash::hash(document.originalBytes(),
                                                         QCryptographicHash::Sha256);
         document.embeddedScript(&member.script, nullptr);
@@ -693,6 +694,26 @@ CMobFamilyValidationReport CMobFamilyValidator::validate(
             finding.locations << path;
             report.findings.append(finding);
         }
+    }
+
+    QStringList loadedPrimaryPaths;
+    for(const SMobFamilyMember& member : report.members)
+    {
+        if(member.primaryMob
+           && request.seedMobPaths.contains(member.path, Qt::CaseInsensitive))
+            loadedPrimaryPaths.append(member.path);
+    }
+    if(loadedPrimaryPaths.size() > 1)
+    {
+        SMobFamilyFinding finding;
+        finding.severity = EMobFamilyFindingSeverity::Warning;
+        finding.code = "workspace.multiple_primary_mobs";
+        finding.category = "Workspace composition";
+        finding.message = QString(
+            "%1 primary SC_OBJECT_DB_FILE MOBs are loaded; map ownership and Test Current Map are ambiguous")
+            .arg(loadedPrimaryPaths.size());
+        finding.locations = loadedPrimaryPaths;
+        report.findings.append(finding);
     }
 
     // A request can temporarily contain multiple map sets if a second load is

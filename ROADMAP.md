@@ -5,7 +5,7 @@ work is ordered from the newest planned minor line to the oldest completed one.
 An item is checked only after its implementation has landed and received the
 stated validation. Completed code should carry a commit, test, or release link.
 
-Current development line: `0.3.0-alpha.15` focused closed testing. Alpha.11
+Current development line: `0.3.0-alpha.16` focused closed testing. Alpha.11
 was withdrawn after its temporary-resource bootstrap passed the fixed world
 object's first word as the object pointer and crashed both normal and synthetic
 Test Current Map launches. Alpha.12 corrects the pointer contract and adds an
@@ -18,7 +18,11 @@ frame-rate independent. Alpha.14 preserves the complete serialized Parts array
 through editing/copying, restores renamed-primary validation overlays, and
 completes Loaded Map MOB context actions. Alpha.15 adds source/state filtering,
 sortable columns, saved Parts-window sizing, explicit unknown-token labeling,
-and the missing canonical humanoid `hr` option. This is a
+and the missing canonical humanoid `hr` option. Alpha.16 keeps state aliases
+filter-only, makes every Parts column resizable,
+uses exact serialized snapshots for Parts undo/redo and cross-MOB paste, warns
+when multiple structurally primary MOBs are loaded, and refuses to treat an
+Autozone-only set as a valid Test Current Map composition. This is a
 version reclassification of the feature set that outgrew the `0.2.1` label,
 not a serializer or compatibility reset. The remaining 0.3 release work is the
 final runtime/corpus matrix, focused confirmation of the new live-clock and
@@ -489,6 +493,13 @@ remain unchanged.
   provide a display-only Parts filter. Evidence:
   [body-part array preservation](docs/validation/BODYPART_ARRAY_PRESERVATION.md)
   and [`53da556`](https://github.com/Ilufus/ei-mapper-endurance/commit/53da556).
+- [x] Make Parts property operations transactional: exact-array cross-MOB
+  paste and exact before/after undo/redo snapshots, with checkbox-only state
+  display and resizable/persistent columns.
+- [x] Treat `SC_OBJECT_DB_FILE` as the structural primary-map declaration for
+  Test Current Map. Renamed copies remain supported, Autozone-only
+  `PR_OBJECT_DB_FILE` sets are rejected, and multiple loaded primaries produce
+  one non-blocking workspace validation warning.
 - [x] Complete Loaded Map MOB context actions for parameters, script, targeted
   Save/Save As, and dirty-aware Save enablement; duplicated catalog maps now
   offer to open the collection they create.

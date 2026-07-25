@@ -122,6 +122,15 @@ QSharedPointer<IPropertyBase> clonePropertyValue(const QSharedPointer<IPropertyB
     return QSharedPointer<IPropertyBase>(property->clone());
 }
 
+QSharedPointer<IPropertyBase> clonePropertyForPaste(
+    const QSharedPointer<IPropertyBase>& property)
+{
+    QSharedPointer<IPropertyBase> copy = clonePropertyValue(property);
+    if(propBodyPart* parts = dynamic_cast<propBodyPart*>(copy.get()))
+        parts->replaceSerializedValue(parts->effectiveSerializedValue());
+    return copy;
+}
+
 void copyProperty(const QSharedPointer<IPropertyBase>& property, const QString& displayText)
 {
     if(property.isNull())
@@ -656,7 +665,7 @@ bool CTableManager::buildPasteValues(const QList<int>& rows,
                 continue;
             }
             if(values)
-                values->append(clonePropertyValue(source));
+                values->append(clonePropertyForPaste(source));
         }
         return true;
     }
@@ -2004,7 +2013,7 @@ void CUnitStatItem::keyPressEvent(QKeyEvent* event)
             event->accept();
             return;
         }
-        m_pValue.reset(g_propertyClipboard.first()->clone());
+        m_pValue = clonePropertyForPaste(g_propertyClipboard.first());
         emit onParamChange(m_pValue);
         event->accept();
         return;
@@ -2054,7 +2063,7 @@ void CBodyPartItem::keyPressEvent(QKeyEvent* event)
             event->accept();
             return;
         }
-        m_pValue.reset(g_propertyClipboard.first()->clone());
+        m_pValue = clonePropertyForPaste(g_propertyClipboard.first());
         emit onParamChange(m_pValue);
         event->accept();
         return;
