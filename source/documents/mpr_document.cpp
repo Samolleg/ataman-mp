@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <limits>
 
 #include "endurance_document.h"
 
@@ -79,6 +80,12 @@ void writeF32(QByteArray* bytes, quint64 offset, float value)
     static_assert(sizeof(value) == sizeof(raw), "Unexpected float representation");
     std::memcpy(&raw, &value, sizeof(raw));
     qToLittleEndian<quint32>(raw,
+        reinterpret_cast<uchar*>(bytes->data() + offset));
+}
+
+void writeU32(QByteArray* bytes, quint64 offset, quint32 value)
+{
+    qToLittleEndian<quint32>(value,
         reinterpret_cast<uchar*>(bytes->data() + offset));
 }
 
@@ -497,8 +504,10 @@ bool CMprDocument::applyTransaction(const CMprEditTransaction& transaction,
         return true;
     }
 
-    QByteArray candidate = m_originalBytes;
+    QByteArray candidate;
     QSet<int> editedIndices;
+    QMap<int, QByteArray> replacements;
+    bool lengthChanging = false;
     for(const SMprMemberEdit& edit : transaction.edits())
     {
         const int index = uniqueMemberIndex(edit.memberName);
@@ -540,16 +549,85 @@ bool CMprDocument::applyTransaction(const CMprEditTransaction& transaction,
                             edit.memberName);
             return false;
         }
-        if(edit.replacementPayload.size() != member.payload.size())
+        if(quint64(edit.replacementPayload.size())
+           > quint64(std::numeric_limits<quint32>::max()))
         {
             if(report)
                 report->add("mpr.transaction_length", EValidationSeverity::Error,
-                            "Length-changing MPR edits remain disabled until archive relocation is proven",
+                            "The replacement payload exceeds the 32-bit archive format",
                             edit.memberName);
             return false;
         }
-        candidate.replace(member.dataOffset, member.dataSize, edit.replacementPayload);
+        replacements.insert(index, edit.replacementPayload);
+        lengthChanging |= edit.replacementPayload.size() != member.payload.size();
         editedIndices.insert(index);
+    }
+
+    if(!lengthChanging)
+    {
+        candidate = m_originalBytes;
+        for(auto it = replacements.constBegin(); it != replacements.constEnd(); ++it)
+        {
+            const SMprArchiveMember& member = m_members.at(it.key());
+            candidate.replace(member.dataOffset, member.dataSize, it.value());
+        }
+    }
+    else
+    {
+        // Preserve the complete original data area, including obsolete edited
+        // payloads, gaps, and padding. Length-changing replacements are added
+        // at aligned offsets and only their copied table entries are patched.
+        candidate = m_originalBytes.left(int(m_tableOffset));
+        QMap<int, quint32> relocatedOffsets;
+        for(auto it = replacements.constBegin(); it != replacements.constEnd(); ++it)
+        {
+            const SMprArchiveMember& member = m_members.at(it.key());
+            if(it.value().size() == member.payload.size())
+            {
+                candidate.replace(member.dataOffset, member.dataSize, it.value());
+                continue;
+            }
+            candidate.append(QByteArray((16 - (candidate.size() % 16)) % 16, '\0'));
+            if(quint64(candidate.size()) + quint64(it.value().size())
+               > quint64(std::numeric_limits<quint32>::max()))
+            {
+                if(report)
+                    report->add("mpr.transaction_archive_size", EValidationSeverity::Error,
+                                "The relocated MPR exceeds the 32-bit archive format",
+                                member.name);
+                return false;
+            }
+            relocatedOffsets.insert(it.key(), quint32(candidate.size()));
+            candidate.append(it.value());
+        }
+        candidate.append(QByteArray((16 - (candidate.size() % 16)) % 16, '\0'));
+        if(quint64(candidate.size()) > quint64(std::numeric_limits<quint32>::max()))
+            return false;
+        const quint32 newTableOffset = quint32(candidate.size());
+        candidate.append(m_originalBytes.mid(int(m_tableOffset)));
+        writeU32(&candidate, 8, newTableOffset);
+        for(auto it = relocatedOffsets.constBegin(); it != relocatedOffsets.constEnd(); ++it)
+        {
+            const quint64 entry = quint64(newTableOffset)
+                + quint64(it.key()) * kResEntrySize;
+            writeU32(&candidate, entry + 4, quint32(replacements.value(it.key()).size()));
+            writeU32(&candidate, entry + 8, it.value());
+        }
+    }
+
+    if(lengthChanging)
+    {
+        const quint64 tableBytes = quint64(m_members.size()) * kResEntrySize;
+        const quint64 originalNamesAndTrailer = quint64(m_tableOffset) + tableBytes;
+        const quint64 newNamesAndTrailer = quint64(readU32(candidate, 8)) + tableBytes;
+        if(candidate.mid(int(newNamesAndTrailer))
+           != m_originalBytes.mid(int(originalNamesAndTrailer)))
+        {
+            if(report)
+                report->add("mpr.transaction_filename_buffer", EValidationSeverity::Error,
+                            "Append-only relocation changed the filename buffer or archive trailer");
+            return false;
+        }
     }
 
     CValidationReport reopenedReport;
@@ -574,15 +652,23 @@ bool CMprDocument::applyTransaction(const CMprEditTransaction& transaction,
     {
         const SMprArchiveMember& before = m_members.at(index);
         const SMprArchiveMember& after = reopened.members().at(index);
-        const bool metadataEqual = before.tableIndex == after.tableIndex &&
+        const bool immutableMetadataEqual = before.tableIndex == after.tableIndex &&
             before.nextIndex == after.nextIndex &&
-            before.dataSize == after.dataSize &&
-            before.dataOffset == after.dataOffset &&
             before.lastWriteTime == after.lastWriteTime &&
             before.nameLength == after.nameLength &&
             before.nameOffset == after.nameOffset &&
             before.encodedName == after.encodedName;
-        if(!metadataEqual || (!editedIndices.contains(index) && before.payload != after.payload))
+        const bool edited = editedIndices.contains(index);
+        const bool payloadValid = edited
+            ? after.payload == replacements.value(index)
+            : before.payload == after.payload;
+        const bool locationValid = edited && lengthChanging
+            ? (before.payload.size() == after.payload.size()
+                ? before.dataSize == after.dataSize && before.dataOffset == after.dataOffset
+                : after.dataSize == quint32(after.payload.size())
+                    && after.dataOffset >= m_tableOffset)
+            : before.dataSize == after.dataSize && before.dataOffset == after.dataOffset;
+        if(!immutableMetadataEqual || !locationValid || !payloadValid)
         {
             if(report)
                 report->add("mpr.transaction_locality", EValidationSeverity::Error,
@@ -594,8 +680,12 @@ bool CMprDocument::applyTransaction(const CMprEditTransaction& transaction,
     *output = candidate;
     if(report)
         report->add("mpr.transaction", EValidationSeverity::Info,
-                    QString("Applied %1 provenance-checked same-length member patch(es)")
-                        .arg(editedIndices.size()), transaction.description());
+                    lengthChanging
+                        ? QString("Applied %1 provenance-checked append-only member replacement(s)")
+                              .arg(editedIndices.size())
+                        : QString("Applied %1 provenance-checked same-length member patch(es)")
+                              .arg(editedIndices.size()),
+                    transaction.description());
     return true;
 }
 
@@ -650,9 +740,18 @@ CMprSemanticDiff CMprSemanticDiff::compare(const CMprDocument& baseline,
     {
         const SMprArchiveMember& before = baseline.m_members.at(index);
         const SMprArchiveMember& after = candidate.m_members.at(index);
-        if(before.name != after.name || before.encodedName != after.encodedName ||
-           before.dataOffset != after.dataOffset || before.dataSize != after.dataSize ||
-           before.lastWriteTime != after.lastWriteTime || before.nextIndex != after.nextIndex)
+        const bool immutableMetadataChanged = before.name != after.name
+            || before.encodedName != after.encodedName
+            || before.lastWriteTime != after.lastWriteTime
+            || before.nextIndex != after.nextIndex
+            || before.nameLength != after.nameLength
+            || before.nameOffset != after.nameOffset;
+        const bool locationChanged = before.dataOffset != after.dataOffset
+            || before.dataSize != after.dataSize;
+        // A changed payload may move under the proven append-only contract;
+        // that relocation is represented by its single modified entry. A
+        // moved untouched payload remains a metadata violation.
+        if(immutableMetadataChanged || (locationChanged && before.payload == after.payload))
         {
             SMprDocumentDiffEntry entry;
             entry.kind = "metadata";
