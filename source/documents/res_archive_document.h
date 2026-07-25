@@ -39,6 +39,14 @@ public:
                        const QByteArray& replacementPayload, QByteArray* output,
                        QStringList* errors = nullptr) const;
 
+    // Builds a derived archive containing one additional member. This is for
+    // run-local resources only: payloads, names, ordering, and timestamps are
+    // preserved, but the hash table and payload layout are rebuilt so the game
+    // can resolve the new member through its normal archive lookup.
+    bool buildWithAppendedMember(const QString& name, const QByteArray& payload,
+                                 quint32 lastWriteTime, QByteArray* output,
+                                 QStringList* errors = nullptr) const;
+
     static bool validateReplacement(const CResArchiveDocument& baseline,
                                     const CResArchiveDocument& candidate,
                                     const QString& changedName,

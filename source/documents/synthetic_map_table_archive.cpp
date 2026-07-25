@@ -1,17 +1,72 @@
 #include "synthetic_map_table_archive.h"
 
 #include <QCryptographicHash>
+#include <QDataStream>
 #include <QRectF>
 
 #include "map_table_document.h"
 #include "res_archive_document.h"
 
 namespace {
+const char kPlaceholderTextureName[] = "enduranceplaceholder";
+
 void addError(QStringList* errors, const QString& text)
 {
     if(errors)
         errors->append(text);
 }
+
+QByteArray checkerboardMmp()
+{
+    constexpr int width = 256;
+    constexpr int height = 256;
+    QByteArray pixels;
+    pixels.reserve(width * height * 4);
+    for(int y = 0; y < height; ++y)
+    {
+        for(int x = 0; x < width; ++x)
+        {
+            const bool white = ((x / 16) + (y / 16)) % 2 == 0;
+            const char value = char(white ? 0xFF : 0xB0);
+            pixels.append(value); // B
+            pixels.append(value); // G
+            pixels.append(value); // R
+            pixels.append(char(0xFF));
+        }
+    }
+    QByteArray result;
+    QDataStream stream(&result, QIODevice::WriteOnly);
+    stream.setByteOrder(QDataStream::LittleEndian);
+    stream << quint32(0x00504D4D) << quint32(width) << quint32(height)
+           << quint32(pixels.size()) << quint32(0x33544E50) << quint32(32);
+    for(int index = 0; index < 13; ++index)
+        stream << quint32(0);
+    result.append(pixels);
+    return result;
+}
+}
+
+QString syntheticMapPlaceholderTextureName()
+{
+    return QString::fromLatin1(kPlaceholderTextureName);
+}
+
+bool buildSyntheticMapPlaceholderArchive(const QByteArray& sourceArchive,
+                                         const QString& sourceName,
+                                         QByteArray* outputArchive,
+                                         QStringList* errors)
+{
+    CResArchiveDocument baseline;
+    QStringList localErrors;
+    if(!baseline.loadBytes(sourceArchive, sourceName, &localErrors)
+       || !baseline.buildWithAppendedMember(
+           syntheticMapPlaceholderTextureName() + ".mmp", checkerboardMmp(),
+           0, outputArchive, &localErrors))
+    {
+        if(errors) errors->append(localErrors);
+        return false;
+    }
+    return true;
 }
 
 bool buildSyntheticMapTableArchive(const QByteArray& sourceArchive,
@@ -62,17 +117,15 @@ bool buildSyntheticMapTableArchive(const QByteArray& sourceArchive,
     zone.mprName = mapName;
     zone.mobName = mapName;
     // A gameplay-zone mission screen constructs its minimap immediately and
-    // expects both a valid map size and a successfully loaded minimap texture.
-    // battle00 is a base interface texture which is already required by the
-    // mission UI, so it is a safe neutral fallback without staging or replacing
-    // any installed texture archive. The objectives screen uses the second
-    // name lazily and receives the same owned fallback until generated map
+    // expects both a valid map size and a successfully loaded texture. A neutral
+    // generated checker is added to a run-local menus.res by the launcher. The
+    // objectives screen uses the same owned placeholder until generated map
     // captures are available.
     zone.maps.present = true;
     zone.maps.sectorWidth = mapSizeX;
     zone.maps.sectorHeight = mapSizeY;
-    zone.maps.minimapTexture = "battle00";
-    zone.maps.objectivesTexture = "battle00";
+    zone.maps.minimapTexture = syntheticMapPlaceholderTextureName();
+    zone.maps.objectivesTexture = syntheticMapPlaceholderTextureName();
     SMapTableExit exit;
     exit.exitId = 1;
     exit.destinationZoneId = "none";
@@ -125,8 +178,8 @@ bool buildSyntheticMapTableArchive(const QByteArray& sourceArchive,
            || !item.maps.present
            || item.maps.sectorWidth != mapSizeX
            || item.maps.sectorHeight != mapSizeY
-           || item.maps.minimapTexture.compare("battle00", Qt::CaseInsensitive) != 0
-           || item.maps.objectivesTexture.compare("battle00", Qt::CaseInsensitive) != 0
+           || item.maps.minimapTexture.compare(syntheticMapPlaceholderTextureName(), Qt::CaseInsensitive) != 0
+           || item.maps.objectivesTexture.compare(syntheticMapPlaceholderTextureName(), Qt::CaseInsensitive) != 0
            || item.exits.size() != 1)
             addError(&localErrors, "The staged synthetic zone failed semantic reopen validation.");
     }

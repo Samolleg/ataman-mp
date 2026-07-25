@@ -180,6 +180,9 @@ wchar_t g_supplementalMobDirectory[MAX_PATH * 4] = {};
 wchar_t g_mapTableSource[MAX_PATH * 4] = {};
 wchar_t g_mapTableStage[MAX_PATH * 4] = {};
 volatile LONG g_mapTableRedirectLogCount = 0;
+wchar_t g_placeholderResourceSource[MAX_PATH * 4] = {};
+wchar_t g_placeholderResourceStage[MAX_PATH * 4] = {};
+volatile LONG g_placeholderResourceRedirectLogCount = 0;
 wchar_t g_hotReloadRequestPath[MAX_PATH * 4] = {};
 wchar_t g_hotReloadThreadPath[MAX_PATH * 4] = {};
 wchar_t g_hotReloadRoot[MAX_PATH * 4] = {};
@@ -420,16 +423,13 @@ bool ConfigureSyntheticZone()
        || !std::isfinite(g_syntheticSpawnX) || !std::isfinite(g_syntheticSpawnY)
        || !g_sourceZone[0])
         return false;
-    const char* mapName = FileNamePartA(g_temporaryMpr);
-    char logicalMap[128]{};
-    if(!mapName || strcpy_s(logicalMap, mapName) != 0)
-        return false;
-    char* extension = std::strrchr(logicalMap, '.');
-    if(extension) *extension = '\0';
     // The launcher appends this exact random record to a run-local map.txt
     // before game.exe starts. Change numeric fields only; strings and container
-    // ownership remain exactly as constructed by the game parser.
-    unsigned char* zone = FindZoneCandidate(g_sourceZone, logicalMap, logicalMap);
+    // ownership remain exactly as constructed by the game parser. Hot-reload
+    // generation payloads deliberately use the generic names map.mpr/map.mob;
+    // those filesystem names are redirected by MapLoadDetour and are not the
+    // logical MPR/MOB names stored in the persistent synthetic map-table record.
+    unsigned char* zone = FindZoneCandidate(g_sourceZone, g_sourceZone, g_sourceZone);
     if(!zone)
     {
         Log(L"SYNTHETIC_MAP refused: the preloaded private zone record was not found");
@@ -1102,6 +1102,49 @@ bool RewriteMapTableA(LPCSTR path, char* output, size_t capacity)
         && !substituted;
 }
 
+bool RewritePlaceholderResourceW(LPCWSTR path, wchar_t* output, size_t capacity)
+{
+    if(!path || !output || !capacity || !g_placeholderResourceSource[0]
+       || !g_placeholderResourceStage[0])
+        return false;
+    wchar_t full[MAX_PATH * 4]{};
+    const DWORD length = GetFullPathNameW(
+        path, DWORD(sizeof(full) / sizeof(full[0])), full, nullptr);
+    if(!length || length >= sizeof(full) / sizeof(full[0]))
+        return false;
+    NormalizeSlashes(full);
+    if(_wcsicmp(full, g_placeholderResourceSource) != 0
+       || wcscpy_s(output, capacity, g_placeholderResourceStage) != 0)
+        return false;
+    const LONG sequence = InterlockedIncrement(&g_placeholderResourceRedirectLogCount);
+    if(sequence <= 8)
+    {
+        wchar_t message[1900]{};
+        _snwprintf_s(message, sizeof(message) / sizeof(message[0]), _TRUNCATE,
+                     L"PLACEHOLDER_RESOURCE_REDIRECT seq=%ld from=\"%s\" to=\"%s\"",
+                     sequence, full, output);
+        Log(message);
+    }
+    return true;
+}
+
+bool RewritePlaceholderResourceA(LPCSTR path, char* output, size_t capacity)
+{
+    if(!path || !output || !capacity)
+        return false;
+    wchar_t wide[MAX_PATH * 4]{};
+    wchar_t rewritten[MAX_PATH * 4]{};
+    if(!MultiByteToWideChar(CP_ACP, 0, path, -1, wide,
+                            int(sizeof(wide) / sizeof(wide[0])))
+       || !RewritePlaceholderResourceW(
+           wide, rewritten, sizeof(rewritten) / sizeof(rewritten[0])))
+        return false;
+    BOOL substituted = FALSE;
+    return WideCharToMultiByte(CP_ACP, WC_NO_BEST_FIT_CHARS, rewritten, -1,
+                               output, int(capacity), nullptr, &substituted) != 0
+        && !substituted;
+}
+
 bool CommitSaveGeneration(const HotReloadControl& request)
 {
     if(request.generation == g_saveGeneration)
@@ -1269,6 +1312,9 @@ HANDLE WINAPI HookCreateFileW(LPCWSTR path, DWORD access, DWORD share,
     if(RewriteMapTableW(selected, redirected,
                         sizeof(redirected) / sizeof(redirected[0])))
         selected = redirected;
+    else if(RewritePlaceholderResourceW(selected, redirected,
+                                         sizeof(redirected) / sizeof(redirected[0])))
+        selected = redirected;
     HANDLE result = g_originalCreateFileW(selected, access, share, security, creation, flags, templateFile);
     const DWORD error = GetLastError();
     Observe(L"CreateFileW", path, reinterpret_cast<ULONG_PTR>(result), error, caller, access, creation);
@@ -1289,6 +1335,8 @@ HANDLE WINAPI HookCreateFileA(LPCSTR path, DWORD access, DWORD share,
         || RewriteSupplementalMobA(path, owned, sizeof(owned))
         || RewriteOwnedPathA(path, owned, sizeof(owned))) ? owned : path;
     if(RewriteMapTableA(selected, redirected, sizeof(redirected)))
+        selected = redirected;
+    else if(RewritePlaceholderResourceA(selected, redirected, sizeof(redirected)))
         selected = redirected;
     HANDLE result = g_originalCreateFileA(selected, access, share, security, creation, flags, templateFile);
     const DWORD error = GetLastError();
@@ -1316,6 +1364,9 @@ DWORD WINAPI HookGetFileAttributesW(LPCWSTR path)
     if(RewriteMapTableW(selected, redirected,
                         sizeof(redirected) / sizeof(redirected[0])))
         selected = redirected;
+    else if(RewritePlaceholderResourceW(selected, redirected,
+                                         sizeof(redirected) / sizeof(redirected[0])))
+        selected = redirected;
     const DWORD result = g_originalGetFileAttributesW(selected);
     const DWORD error = GetLastError();
     Observe(L"GetFileAttributesW", path, result, error, caller);
@@ -1334,6 +1385,8 @@ DWORD WINAPI HookGetFileAttributesA(LPCSTR path)
         || RewriteSupplementalMobA(path, owned, sizeof(owned))
         || RewriteOwnedPathA(path, owned, sizeof(owned))) ? owned : path;
     if(RewriteMapTableA(selected, redirected, sizeof(redirected)))
+        selected = redirected;
+    else if(RewritePlaceholderResourceA(selected, redirected, sizeof(redirected)))
         selected = redirected;
     const DWORD result = g_originalGetFileAttributesA(selected);
     const DWORD error = GetLastError();
@@ -2049,6 +2102,37 @@ bool ReadDirectLaunchPaths()
         NormalizeSlashes(stageFull);
         wcscpy_s(g_mapTableSource, sourceFull);
         wcscpy_s(g_mapTableStage, stageFull);
+    }
+    GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_PLACEHOLDER_RESOURCE_SOURCE",
+                            g_placeholderResourceSource,
+                            DWORD(sizeof(g_placeholderResourceSource)
+                                  / sizeof(g_placeholderResourceSource[0])));
+    GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_PLACEHOLDER_RESOURCE_STAGE",
+                            g_placeholderResourceStage,
+                            DWORD(sizeof(g_placeholderResourceStage)
+                                  / sizeof(g_placeholderResourceStage[0])));
+    if(g_placeholderResourceSource[0] || g_placeholderResourceStage[0])
+    {
+        wchar_t sourceFull[MAX_PATH * 4]{};
+        wchar_t stageFull[MAX_PATH * 4]{};
+        const DWORD sourceLength = GetFullPathNameW(
+            g_placeholderResourceSource,
+            DWORD(sizeof(sourceFull) / sizeof(sourceFull[0])), sourceFull, nullptr);
+        const DWORD stageLength = GetFullPathNameW(
+            g_placeholderResourceStage,
+            DWORD(sizeof(stageFull) / sizeof(stageFull[0])), stageFull, nullptr);
+        if(!sourceLength || sourceLength >= sizeof(sourceFull) / sizeof(sourceFull[0])
+           || !stageLength || stageLength >= sizeof(stageFull) / sizeof(stageFull[0])
+           || GetFileAttributesW(sourceFull) == INVALID_FILE_ATTRIBUTES
+           || GetFileAttributesW(stageFull) == INVALID_FILE_ATTRIBUTES)
+        {
+            Log(L"DIRECT_LAUNCH disabled: placeholder resource source/stage paths are incomplete or unreadable");
+            return false;
+        }
+        NormalizeSlashes(sourceFull);
+        NormalizeSlashes(stageFull);
+        wcscpy_s(g_placeholderResourceSource, sourceFull);
+        wcscpy_s(g_placeholderResourceStage, stageFull);
     }
     GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_BOOTSTRAP_MPR", bootstrapMpr,
                             DWORD(sizeof(bootstrapMpr) / sizeof(bootstrapMpr[0])));

@@ -34,6 +34,24 @@ void writeU32(QByteArray* bytes, quint64 offset, quint32 value)
         reinterpret_cast<uchar*>(bytes->data() + offset));
 }
 
+void writeU16(QByteArray* bytes, quint64 offset, quint16 value)
+{
+    qToLittleEndian<quint16>(value,
+        reinterpret_cast<uchar*>(bytes->data() + offset));
+}
+
+quint32 resourceNameHash(const QByteArray& encodedName, quint32 tableSize)
+{
+    quint32 sum = 0;
+    QTextCodec* codec = QTextCodec::codecForName("CP1251");
+    const QByteArray normalized = codec
+        ? codec->fromUnicode(codec->toUnicode(encodedName).toLower())
+        : encodedName.toLower();
+    for(const unsigned char byte : normalized)
+        sum += byte;
+    return tableSize ? sum % tableSize : 0;
+}
+
 QByteArray digest(const QByteArray& bytes)
 {
     return QCryptographicHash::hash(bytes, QCryptographicHash::Sha256).toHex();
@@ -189,6 +207,146 @@ bool CResArchiveDocument::replaceMember(const QString& name,
     writeU32(&staged, 8, quint32(newTableOffset));
     if(output)
         *output = staged;
+    return true;
+}
+
+bool CResArchiveDocument::buildWithAppendedMember(const QString& name,
+                                                  const QByteArray& payload,
+                                                  quint32 lastWriteTime,
+                                                  QByteArray* output,
+                                                  QStringList* errors) const
+{
+    if(output)
+        output->clear();
+    if(name.isEmpty() || payload.isEmpty() || !output)
+    {
+        addError(errors, "A RES member name, payload, and output are required.");
+        return false;
+    }
+    if(uniqueMemberIndex(name) != -1)
+    {
+        addError(errors, QString("RES member %1 already exists or is ambiguous.").arg(name));
+        return false;
+    }
+    QTextCodec* codec = QTextCodec::codecForName("CP1251");
+    const QByteArray appendedName = codec ? codec->fromUnicode(name)
+                                          : name.toLatin1();
+    if(appendedName.isEmpty() || (codec && codec->toUnicode(appendedName) != name))
+    {
+        addError(errors, "The appended RES member name cannot round-trip through CP1251.");
+        return false;
+    }
+
+    struct BuildMember
+    {
+        QByteArray name;
+        QByteArray payload;
+        quint32 time{0};
+        quint32 offset{0};
+        quint32 nameOffset{0};
+    };
+    QVector<BuildMember> members;
+    members.reserve(m_members.size() + 1);
+    for(const SResArchiveMember& member : m_members)
+    {
+        BuildMember copy;
+        copy.name = member.encodedName;
+        copy.payload = member.payload;
+        copy.time = member.lastWriteTime;
+        members.append(copy);
+    }
+    BuildMember appended;
+    appended.name = appendedName;
+    appended.payload = payload;
+    appended.time = lastWriteTime;
+    members.append(appended);
+    const quint32 count = quint32(members.size());
+
+    QByteArray staged(int(kHeaderSize), '\0');
+    QByteArray names;
+    for(BuildMember& member : members)
+    {
+        staged.append(QByteArray((16 - (staged.size() % 16)) % 16, '\0'));
+        if(quint64(staged.size()) > quint64(std::numeric_limits<quint32>::max())
+           || quint64(member.payload.size()) > quint64(std::numeric_limits<quint32>::max()))
+        {
+            addError(errors, "The derived RES archive exceeds its 32-bit format.");
+            return false;
+        }
+        member.offset = quint32(staged.size());
+        member.nameOffset = quint32(names.size());
+        staged.append(member.payload);
+        names.append(member.name);
+    }
+    staged.append(QByteArray((16 - (staged.size() % 16)) % 16, '\0'));
+    const quint32 tableOffset = quint32(staged.size());
+
+    QVector<int> tableSlots(int(count), -1);
+    QVector<quint32> next(int(count), quint32(-1));
+    int lastFree = int(count) - 1;
+    for(int memberIndex = 0; memberIndex < members.size(); ++memberIndex)
+    {
+        int slot = int(resourceNameHash(members.at(memberIndex).name, count));
+        if(tableSlots.at(slot) >= 0)
+        {
+            while(next.at(slot) != quint32(-1))
+                slot = int(next.at(slot));
+            while(lastFree >= 0 && tableSlots.at(lastFree) >= 0)
+                --lastFree;
+            if(lastFree < 0)
+            {
+                addError(errors, "The derived RES hash table has no collision slot.");
+                return false;
+            }
+            next[slot] = quint32(lastFree);
+            slot = lastFree--;
+        }
+        tableSlots[slot] = memberIndex;
+    }
+
+    QByteArray table(int(quint64(count) * kEntrySize), '\0');
+    for(int slot = 0; slot < tableSlots.size(); ++slot)
+    {
+        if(tableSlots.at(slot) < 0)
+        {
+            addError(errors, "The derived RES hash table contains an empty slot.");
+            return false;
+        }
+        const BuildMember& member = members.at(tableSlots.at(slot));
+        const quint64 entry = quint64(slot) * kEntrySize;
+        writeU32(&table, entry, next.at(slot));
+        writeU32(&table, entry + 4, quint32(member.payload.size()));
+        writeU32(&table, entry + 8, member.offset);
+        writeU32(&table, entry + 12, member.time);
+        writeU16(&table, entry + 16, quint16(member.name.size()));
+        writeU32(&table, entry + 18, member.nameOffset);
+    }
+    staged.append(table);
+    staged.append(names);
+    writeU32(&staged, 0, kResSignature);
+    writeU32(&staged, 4, count);
+    writeU32(&staged, 8, tableOffset);
+    writeU32(&staged, 12, quint32(names.size()));
+
+    CResArchiveDocument reopened;
+    QStringList reopenErrors;
+    if(!reopened.loadBytes(staged, m_sourceName + " [derived]", &reopenErrors)
+       || reopened.members().size() != members.size()
+       || reopened.memberPayload(name) != payload)
+    {
+        if(errors) errors->append(reopenErrors);
+        addError(errors, "The derived RES archive failed structural reopen validation.");
+        return false;
+    }
+    for(const SResArchiveMember& original : m_members)
+    {
+        if(reopened.memberPayload(original.name) != original.payload)
+        {
+            addError(errors, QString("Derived RES changed untouched member %1.").arg(original.name));
+            return false;
+        }
+    }
+    *output = staged;
     return true;
 }
 

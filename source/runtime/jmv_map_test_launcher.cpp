@@ -1390,6 +1390,8 @@ bool CJmvMapTestLauncher::launch(const SJmvMapTestLaunchInput& input, QString* e
     m_liveGrpPath.clear();
     m_mapTableSourcePath.clear();
     m_stagedMapTablePath.clear();
+    m_placeholderResourceSourcePath.clear();
+    m_stagedPlaceholderResourcePath.clear();
     m_bridgeResultPath.clear();
     m_testSavesPath.clear();
     m_bridgeSha256.clear();
@@ -1398,6 +1400,8 @@ bool CJmvMapTestLauncher::launch(const SJmvMapTestLaunchInput& input, QString* e
     m_liveGrpSha256.clear();
     m_mapTableSourceSha256.clear();
     m_stagedMapTableSha256.clear();
+    m_placeholderResourceSourceSha256.clear();
+    m_stagedPlaceholderResourceSha256.clear();
     m_runtimeHostPath.clear();
     m_gamePidPath.clear();
     m_liveSavesPath.clear();
@@ -1483,6 +1487,13 @@ bool CJmvMapTestLauncher::launch(const SJmvMapTestLaunchInput& input, QString* e
                            m_mapTableSourcePath);
         environment.insert("EI_MAPPER_ENDURANCE_MAP_TABLE_STAGE",
                            m_stagedMapTablePath);
+    }
+    if(!m_placeholderResourceSourcePath.isEmpty())
+    {
+        environment.insert("EI_MAPPER_ENDURANCE_PLACEHOLDER_RESOURCE_SOURCE",
+                           m_placeholderResourceSourcePath);
+        environment.insert("EI_MAPPER_ENDURANCE_PLACEHOLDER_RESOURCE_STAGE",
+                           m_stagedPlaceholderResourcePath);
     }
     if(!m_supplementalMobDirectory.isEmpty())
         environment.insert("EI_MAPPER_ENDURANCE_SUPPLEMENTAL_MOB_DIR",
@@ -1942,6 +1953,52 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
         mapTableJournal.insert("syntheticZone", m_temporaryMapName);
         mapTableJournal.insert("installedArchiveModified", false);
         m_manifest.insert("syntheticMapTable", mapTableJournal);
+
+        if(input.syntheticMapIdentity)
+        {
+            m_placeholderResourceSourcePath = QFileInfo(
+                QDir(input.profile.gameRoot).filePath("Res/menus.res")).absoluteFilePath();
+            QByteArray menuArchive;
+            if(!QFileInfo(m_placeholderResourceSourcePath).isFile()
+               || !readFile(m_placeholderResourceSourcePath, &menuArchive, error))
+            {
+                if(error && error->isEmpty())
+                    *error = "The base menus.res could not be resolved for the synthetic map placeholder.";
+                return false;
+            }
+            QByteArray stagedMenuArchive;
+            QStringList placeholderErrors;
+            if(!buildSyntheticMapPlaceholderArchive(
+                menuArchive, m_placeholderResourceSourcePath,
+                &stagedMenuArchive, &placeholderErrors))
+            {
+                if(error) *error = "Could not stage the synthetic map placeholder:\n"
+                    + placeholderErrors.join('\n');
+                return false;
+            }
+            const QString placeholderDirectory = QDir(m_runRoot).filePath("placeholder-resource");
+            m_stagedPlaceholderResourcePath = QDir(placeholderDirectory).filePath("menus.res");
+            if(!QDir().mkpath(placeholderDirectory)
+               || !atomicWrite(m_stagedPlaceholderResourcePath, stagedMenuArchive, error))
+                return false;
+            m_placeholderResourceSourceSha256 = sha256(menuArchive);
+            m_stagedPlaceholderResourceSha256 = sha256(stagedMenuArchive);
+            if(fileSha256(m_stagedPlaceholderResourcePath)
+               != m_stagedPlaceholderResourceSha256)
+            {
+                if(error) *error = "The private staged menus.res failed its post-write hash check.";
+                return false;
+            }
+            QJsonObject placeholderJournal;
+            placeholderJournal.insert("policy", "read-only-exact-path-redirection");
+            placeholderJournal.insert("sourcePath", m_placeholderResourceSourcePath);
+            placeholderJournal.insert("sourceSha256", m_placeholderResourceSourceSha256);
+            placeholderJournal.insert("stagedPath", m_stagedPlaceholderResourcePath);
+            placeholderJournal.insert("stagedSha256", m_stagedPlaceholderResourceSha256);
+            placeholderJournal.insert("texture", syntheticMapPlaceholderTextureName());
+            placeholderJournal.insert("installedArchiveModified", false);
+            m_manifest.insert("syntheticMapPlaceholder", placeholderJournal);
+        }
     }
     if(graphSource.usesExternalGraph()
        && fileSha256(m_liveGrpPath).compare(m_liveGrpSha256, Qt::CaseInsensitive) != 0)
@@ -2070,6 +2127,11 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
                           QDir::toNativeSeparators(m_stagedMapTablePath),
                           m_stagedMapTableSha256,
                           m_temporaryMapName));
+    if(!m_stagedPlaceholderResourcePath.isEmpty())
+        appendRunLog(QString("Staged neutral synthetic-map checker source=%1 staged=%2 texture=%3 installedModified=false")
+                     .arg(QDir::toNativeSeparators(m_placeholderResourceSourcePath),
+                          QDir::toNativeSeparators(m_stagedPlaceholderResourcePath),
+                          syntheticMapPlaceholderTextureName()));
     appendRunLog(QString("Staged temporary map=%1 exit=%2 spawn=(%3,%4) clearance=%5")
                  .arg(m_temporaryMapName).arg(input.spawn.exitId)
                  .arg(x, y).arg(input.spawn.clearance, 0, 'f', 3));
