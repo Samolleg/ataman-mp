@@ -308,7 +308,13 @@ void ResArchiveDocumentTests::syntheticMapTableAddsOwnedMaplessZoneLosslessly()
 
 void ResArchiveDocumentTests::syntheticPlaceholderAddsResolvableCheckerWithoutChangingMembers()
 {
-    const QByteArray original = syntheticRes();
+    CResArchiveDocument menuFixture;
+    QVERIFY(menuFixture.loadBytes(syntheticRes(), "menus-base.res"));
+    QByteArray original;
+    QStringList fixtureErrors;
+    QVERIFY2(menuFixture.buildWithAppendedMember(
+        "mainmenu00.mmp", QByteArray(128, char(0x5A)), 0x11223344,
+        &original, &fixtureErrors), qPrintable(fixtureErrors.join('\n')));
     QByteArray staged;
     QStringList errors;
     QVERIFY2(buildSyntheticMapPlaceholderArchive(
@@ -318,9 +324,14 @@ void ResArchiveDocumentTests::syntheticPlaceholderAddsResolvableCheckerWithoutCh
     QVERIFY(baseline.loadBytes(original));
     QVERIFY2(candidate.loadBytes(staged, "menus.res [staged]", &errors),
              qPrintable(errors.join('\n')));
-    QCOMPARE(candidate.members().size(), baseline.members().size() + 1);
+    QCOMPARE(candidate.members().size(), baseline.members().size());
     for(const SResArchiveMember& member : baseline.members())
+    {
+        if(member.name.compare(syntheticMapPlaceholderTextureName() + ".mmp",
+                               Qt::CaseInsensitive) == 0)
+            continue;
         QCOMPARE(candidate.memberPayload(member.name), member.payload);
+    }
     const QByteArray checker = candidate.memberPayload(
         syntheticMapPlaceholderTextureName() + ".mmp");
     QCOMPARE(runtimeMemberPayload(
@@ -330,6 +341,9 @@ void ResArchiveDocumentTests::syntheticPlaceholderAddsResolvableCheckerWithoutCh
         reinterpret_cast<const uchar*>(checker.constData())), quint32(0x00504D4D));
     QCOMPARE(qFromLittleEndian<quint32>(
         reinterpret_cast<const uchar*>(checker.constData() + 4)), quint32(256));
+    QCOMPARE(qFromLittleEndian<quint32>(
+        reinterpret_cast<const uchar*>(checker.constData() + 12)),
+        quint32(256 * 256 * 4));
     QCOMPARE(qFromLittleEndian<quint32>(
         reinterpret_cast<const uchar*>(checker.constData() + 16)), quint32(0x33544E50));
 }

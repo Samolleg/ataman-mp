@@ -19,9 +19,9 @@ bool buildSyntheticMapTableArchive(const QByteArray& sourceArchive,
                                    QByteArray* outputArchive,
                                    QStringList* errors = nullptr);
 
-// Adds a neutral checkerboard MMP to a run-local copy of menus.res. The game's
-// texture manager mounts menus.res, whereas the map table's texts.res is not a
-// texture source.
+// Replaces one existing MMP with a neutral checkerboard in a run-local,
+// append-only copy of menus.res. This preserves the shipped hash table and
+// lookup chains; the installed archive remains untouched.
 bool buildSyntheticMapPlaceholderArchive(const QByteArray& sourceArchive,
                                          const QString& sourceName,
                                          QByteArray* outputArchive,

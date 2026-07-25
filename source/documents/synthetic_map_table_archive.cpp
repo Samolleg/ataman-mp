@@ -8,7 +8,12 @@
 #include "res_archive_document.h"
 
 namespace {
-const char kPlaceholderTextureName[] = "enduranceplaceholder";
+// Keep the original menus.res member table and hash chains intact. The shipped
+// game accepts the append-only replacement format already used for map.txt,
+// while a completely rebuilt menus.res table proved unstable at runtime.
+// mainmenu00 is only the transient main-menu background and can safely serve
+// as the private test run's synthetic minimap/objective alias.
+const char kPlaceholderTextureName[] = "mainmenu00";
 
 void addError(QStringList* errors, const QString& text)
 {
@@ -58,10 +63,33 @@ bool buildSyntheticMapPlaceholderArchive(const QByteArray& sourceArchive,
 {
     CResArchiveDocument baseline;
     QStringList localErrors;
-    if(!baseline.loadBytes(sourceArchive, sourceName, &localErrors)
-       || !baseline.buildWithAppendedMember(
-           syntheticMapPlaceholderTextureName() + ".mmp", checkerboardMmp(),
-           0, outputArchive, &localErrors))
+    if(!baseline.loadBytes(sourceArchive, sourceName, &localErrors))
+    {
+        if(errors) errors->append(localErrors);
+        return false;
+    }
+    const QString memberName = syntheticMapPlaceholderTextureName() + ".mmp";
+    const QByteArray original = baseline.memberPayload(memberName);
+    if(original.isEmpty())
+    {
+        addError(errors, QString("The placeholder source member %1 is missing.")
+                          .arg(memberName));
+        return false;
+    }
+    const QByteArray expectedHash = QCryptographicHash::hash(
+        original, QCryptographicHash::Sha256).toHex();
+    const QByteArray checker = checkerboardMmp();
+    if(!baseline.replaceMember(memberName, expectedHash, checker,
+                               outputArchive, &localErrors))
+    {
+        if(errors) errors->append(localErrors);
+        return false;
+    }
+    CResArchiveDocument candidate;
+    if(!candidate.loadBytes(*outputArchive, sourceName + " [placeholder]",
+                            &localErrors)
+       || !CResArchiveDocument::validateReplacement(
+           baseline, candidate, memberName, checker, &localErrors))
     {
         if(errors) errors->append(localErrors);
         return false;
@@ -118,9 +146,9 @@ bool buildSyntheticMapTableArchive(const QByteArray& sourceArchive,
     zone.mobName = mapName;
     // A gameplay-zone mission screen constructs its minimap immediately and
     // expects both a valid map size and a successfully loaded texture. A neutral
-    // generated checker is added to a run-local menus.res by the launcher. The
-    // objectives screen uses the same owned placeholder until generated map
-    // captures are available.
+    // generated checker replaces an existing texture only in a run-local,
+    // append-only menus.res derivative. The objectives screen uses the same
+    // owned placeholder until generated map captures are available.
     zone.maps.present = true;
     zone.maps.sectorWidth = mapSizeX;
     zone.maps.sectorHeight = mapSizeY;
