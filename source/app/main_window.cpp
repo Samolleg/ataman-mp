@@ -634,6 +634,7 @@ MainWindow::MainWindow(QWidget* parent) :
         }
         dialog.selectZoneById(zoneId);
         dialog.exec();
+        processMapTableSaveReports(dialog.saveReports());
     });
     connect(m_mapsBrowser, &CMapsBrowser::duplicateMapAsCollectionRequested,
             this, &MainWindow::duplicateMapAsCollection);
@@ -650,7 +651,7 @@ MainWindow::MainWindow(QWidget* parent) :
     connect(m_mapsBrowser, &CMapsBrowser::newCollectionRequested,
             this, &MainWindow::newCollection);
     connect(m_mapsBrowser, &CMapsBrowser::refreshRequested,
-            this, [this]() { refreshMapsBrowser(); refreshMapTestContext(); });
+            this, [this]() { refreshActiveCatalog(true); });
     m_externalScriptAction = new QAction(tr("Open MOB Script in External Editor"), this);
     m_ui->menuEdit->addAction(m_externalScriptAction);
     connect(m_externalScriptAction, &QAction::triggered, this, [this]()
@@ -731,6 +732,7 @@ MainWindow::MainWindow(QWidget* parent) :
     {
         CMapTableEditorDialog dialog(this);
         dialog.exec();
+        processMapTableSaveReports(dialog.saveReports());
     });
     connect(openBackupFolder, &QAction::triggered, this, [this]()
     {
@@ -1292,8 +1294,7 @@ MainWindow::MainWindow(QWidget* parent) :
     CObjectList::getInstance()->attachSettings(m_settings.get());
     m_createDialog.get()->attach(m_pView, m_undoStack);
     rebuildRecentFilesMenu();
-    refreshMapsBrowser();
-    refreshMapTestContext();
+    refreshActiveCatalog(false);
     updateMapTestAction();
     updateWindowTitle(eTitleTypeData::eTitleTypeDataMpr, QString());
     updateLoadedMapPanel();
@@ -2155,26 +2156,33 @@ void MainWindow::updateEntranceOverlays()
     updateCustomSpawnControls();
 }
 
-void MainWindow::refreshMapTestContext()
+void MainWindow::refreshMapTestContext(bool preserveWorkspaceState, bool reloadCatalog)
 {
+    const int previousEntranceIndex = m_entranceCombo
+        ? m_entranceCombo->currentData().toInt() : -1;
+    const QString previousRouteKey = mapTravelRouteKey(m_validEntrances,
+                                                        previousEntranceIndex);
     m_mapTestEntry = SMapCatalogEntry();
     m_borrowedMapIdentity = false;
-    m_customSpawn = SMapSpawnPlan();
-    m_customSpawnPosition = QVector3D();
-    m_customSpawnContextKey.clear();
-    m_pickSpawnPending = false;
-    m_movingCustomSpawn = false;
-    m_customSpawnSelected = false;
-    m_suppressSpawnRelease = false;
-    if(m_pView)
-        m_pView->clearTestSpawnMarker();
-    if(m_playFromHereButton)
+    if(!preserveWorkspaceState)
     {
-        const QSignalBlocker blocker(m_playFromHereButton);
-        m_playFromHereButton->setChecked(false);
+        m_customSpawn = SMapSpawnPlan();
+        m_customSpawnPosition = QVector3D();
+        m_customSpawnContextKey.clear();
+        m_pickSpawnPending = false;
+        m_movingCustomSpawn = false;
+        m_customSpawnSelected = false;
+        m_suppressSpawnRelease = false;
+        if(m_pView)
+            m_pView->clearTestSpawnMarker();
+        if(m_playFromHereButton)
+        {
+            const QSignalBlocker blocker(m_playFromHereButton);
+            m_playFromHereButton->setChecked(false);
+        }
+        if(m_spawnPositionLabel)
+            m_spawnPositionLabel->setText(tr("Entrance spawn"));
     }
-    if(m_spawnPositionLabel)
-        m_spawnPositionLabel->setText(tr("Entrance spawn"));
     updateOutlinerSelectionPath();
 
     QVector<QString> resources;
@@ -2183,7 +2191,8 @@ void MainWindow::refreshMapTestContext()
         resources = value->value();
     if(COptStringList* value = dynamic_cast<COptStringList*>(m_settings->opt(eOptSetResource, "mapRoots")))
         maps = value->value();
-    m_mapCatalog = CMapCatalog::load(resources, maps);
+    if(reloadCatalog)
+        m_mapCatalog = CMapCatalog::load(resources, maps);
     if(CLandscape::getInstance()->isMprLoad())
     {
         // An explicitly unmapped collection must stay unmapped. Do not infer
@@ -2218,6 +2227,16 @@ void MainWindow::refreshMapTestContext()
     if(m_pView)
         m_pView->setMapSkyType(m_mapTestEntry.skyType, m_mapTestEntry.zoneType);
     populateEntranceCombo();
+    if(preserveWorkspaceState && !previousRouteKey.isEmpty())
+    {
+        for(int index = 0; index < m_validEntrances.size(); ++index)
+            if(mapTravelRouteKey(m_validEntrances, index) == previousRouteKey)
+            {
+                m_entranceCombo->setCurrentIndex(m_entranceCombo->findData(index));
+                break;
+            }
+        updateEntranceOverlays();
+    }
     updateCustomSpawnControls();
     updateMapTestAction();
 }
@@ -3173,6 +3192,107 @@ void MainWindow::refreshMapsBrowser()
         maps = option->value();
     QDir().mkpath(CCollectionDocument::defaultDirectory());
     m_mapsBrowser->refresh(resources, maps, CCollectionDocument::defaultDirectory());
+}
+
+void MainWindow::refreshActiveCatalog(bool preserveWorkspaceState)
+{
+    QVector<QString> resources;
+    QVector<QString> maps;
+    if(COptStringList* option = dynamic_cast<COptStringList*>(
+           m_settings->opt(eOptSetResource, "resourceRoots")))
+        resources = option->value();
+    if(COptStringList* option = dynamic_cast<COptStringList*>(
+           m_settings->opt(eOptSetResource, "mapRoots")))
+        maps = option->value();
+
+    const SMapCatalogEntry previousEntry = m_mapTestEntry;
+    m_mapCatalog = CMapCatalog::load(resources, maps);
+    QDir().mkpath(CCollectionDocument::defaultDirectory());
+    if(m_mapsBrowser)
+        m_mapsBrowser->refresh(m_mapCatalog, CCollectionDocument::defaultDirectory());
+
+    if(!preserveWorkspaceState || !CLandscape::getInstance()->isMprLoad())
+    {
+        refreshMapTestContext(false, false);
+        return;
+    }
+
+    SMapCatalogEntry updatedEntry;
+    for(const SMapCatalogEntry& entry : m_mapCatalog.entries)
+        if(!m_openedMapZoneId.isEmpty()
+           && entry.zoneId.compare(m_openedMapZoneId, Qt::CaseInsensitive) == 0)
+        {
+            updatedEntry = entry;
+            break;
+        }
+    const QString loadedMpr = QFileInfo(
+        CLandscape::getInstance()->filePath()).absoluteFilePath();
+    CMob* primaryMob = mapTestStagingMob();
+    const QString loadedMob = primaryMob
+        ? primaryMob->filePath().absoluteFilePath() : QString();
+    const bool physicalMismatch = !updatedEntry.zoneId.isEmpty()
+        && (!updatedEntry.mprPath.isEmpty() || !updatedEntry.mobPath.isEmpty())
+        && (QFileInfo(updatedEntry.mprPath).absoluteFilePath().compare(
+                loadedMpr, Qt::CaseInsensitive) != 0
+            || QFileInfo(updatedEntry.mobPath).absoluteFilePath().compare(
+                loadedMob, Qt::CaseInsensitive) != 0);
+
+    if(physicalMismatch && m_workspaceIdentityKind.compare(
+           "map", Qt::CaseInsensitive) == 0)
+    {
+        const QMessageBox::StandardButton answer = QMessageBox::question(
+            this, tr("Catalog resources changed"),
+            tr("The active catalog now maps %1 to a different MPR or MOB. Reload the updated pair now?\n\n"
+               "Reload Now uses the normal unsaved-change checks. Keep Working preserves the current workspace; the catalog save is already complete.")
+                .arg(m_openedMapZoneId),
+            QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+        if(answer == QMessageBox::Yes)
+        {
+            openMapPair(updatedEntry.mprPath, updatedEntry.mobPath,
+                        updatedEntry.zoneId);
+            return;
+        }
+        m_mapTestEntry = SMapCatalogEntry();
+        populateEntranceCombo();
+        updateMapTestAction();
+        statusBar()->showMessage(
+            tr("Catalog changed — workspace refresh deferred; map testing is unavailable."),
+            8000);
+        return;
+    }
+
+    refreshMapTestContext(true, false);
+    if(physicalMismatch && !m_currentCollectionPath.isEmpty())
+        statusBar()->showMessage(tr(
+            "Catalog metadata refreshed. The collection keeps its explicit MPR/MOB composition, which now differs from map.txt."), 8000);
+    else if(!previousEntry.zoneId.isEmpty() && updatedEntry.zoneId.isEmpty()
+            && !m_openedMapZoneId.isEmpty())
+        statusBar()->showMessage(tr(
+            "Catalog refreshed; the loaded workspace identity is no longer registered."), 8000);
+}
+
+void MainWindow::processMapTableSaveReports(
+    const QVector<SMapTableSaveReport>& reports)
+{
+    if(reports.isEmpty())
+        return;
+    const QString activeArchive = QFileInfo(
+        m_mapCatalog.sourceArchive).absoluteFilePath();
+    const SMapTableSaveReport* activeReport = nullptr;
+    for(const SMapTableSaveReport& report : reports)
+        if(QFileInfo(report.destinationArchive).absoluteFilePath().compare(
+               activeArchive, Qt::CaseInsensitive) == 0)
+            activeReport = &report;
+    if(!activeReport)
+    {
+        statusBar()->showMessage(tr(
+            "Catalog saved outside the active resource profile; the active map list was not refreshed."), 7000);
+        return;
+    }
+    refreshActiveCatalog(true);
+    statusBar()->showMessage(tr("Active catalog refreshed: %1 (%2)")
+        .arg(activeReport->changes.affectedZoneIds().join(", "),
+             activeReport->changes.categories.join(", ")), 7000);
 }
 
 QVector<QString> MainWindow::activeMapRoots() const

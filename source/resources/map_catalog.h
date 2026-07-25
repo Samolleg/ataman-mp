@@ -31,6 +31,10 @@ struct SMapCatalogEntry
     QString mprPath;
     QString mobPath;
     QString sourceArchive;
+    int sectorWidth{0};
+    int sectorHeight{0};
+    QString minimapTexture;
+    QString objectivesTexture;
     QVector<SMapTravelZone> travelZones;
 
     bool isComplete() const { return !mprPath.isEmpty() && !mobPath.isEmpty(); }
@@ -42,6 +46,8 @@ struct SMapCatalogResult
     QString sourceArchive;
     QStringList messages;
 };
+
+QString mapTravelRouteKey(const QVector<SMapTravelZone>& routes, int index);
 
 class CMapCatalog
 {
