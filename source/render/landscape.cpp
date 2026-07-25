@@ -227,7 +227,7 @@ void CLandscape::readMap(const QFileInfo& path)
             secIndex.reset(x, y);
             QDataStream secStream(aComponent.take(innerMapName + genSectorSuffix(int(x), int(y)) + ".sec"));
             util::formatStream(secStream);
-            CSector* sector = new CSector(secStream, m_header.maxZ, texCount);
+            CSector* sector = new CSector(secStream, m_header.maxZ, texCount, &m_aMaterial);
             sector->setIndex(secIndex);
             xSec.append(sector);
             if(sector->existsTileIndices(m_arrIncorectTiles))

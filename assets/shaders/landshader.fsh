@@ -46,8 +46,6 @@ uniform float u_nearShadowSplit;
 uniform bool u_shadowCascadeDebug;
 uniform bool u_receiveStaticShadow;
 uniform bool u_receiveDynamicShadow;
-uniform bool u_animateLiquid;
-uniform float u_liquidTime;
 
 varying highp vec4 v_position;
 varying highp vec3 v_normal;
@@ -99,19 +97,7 @@ float cascadeVisibility(vec3 staticProjected, vec3 dynamicProjected,
 void main(void)
 {
   vec3 norm = normalize(v_normal);
-  vec2 sampledUv = v_texture;
-  if (u_animateLiquid)
-  {
-    // EI liquid overlays are authored in cells of the terrain atlas. Keep
-    // motion smaller than the four-pixel DXT border trimmed by CTile so a
-    // water/lava cell can never drift into its neighbour during a long run.
-    float phase = u_liquidTime * 1.15;
-    float wave = sin(v_worldPosition.x * 0.085 + phase)
-               + cos(v_worldPosition.y * 0.072 - phase * 0.78);
-    sampledUv += vec2(sin(phase) * 0.00042 + wave * 0.00012,
-                      cos(phase * 0.83) * 0.00042 + wave * 0.00010);
-  }
-  vec4 texColor = texture2D(qt_Texture0, sampledUv);
+  vec4 texColor = texture2D(qt_Texture0, v_texture);
   if (texColor.a <= 0.1)
     discard;
   vec3 light = vec3(1.0);
