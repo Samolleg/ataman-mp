@@ -63,7 +63,7 @@ enum class Family
 
 inline Family familyForKind(quint32 kind)
 {
-    if(kind == 0x2004u || kind == 0x2005u)
+    if(kind == 0x2004u)
         return Family::SmokeOnly;
     if(kind == 0x2003u)
         return Family::FireOnly;
@@ -411,6 +411,152 @@ struct FireballParticle
     int lifetime{15};
     int frame{0};
     bool head{true};
+};
+
+struct VulcanSmokeParticle
+{
+    QVector3D position;
+    QVector3D velocity;
+    float scale{0.0f};
+    float scaleFactor{1.0f};
+    float velocityDamping{1.0f};
+    int lifetime{0};
+    int frame{0};
+    int phaseDelay{0};
+    int phaseStep{0};
+};
+
+class VulcanSmokeEmitter
+{
+public:
+    void advanceTo(qint64 logicalTick, quint32 seed, const QVector3D& origin,
+                   float authoredScale)
+    {
+        if(!m_initialized || seed != m_seed || logicalTick < m_tick)
+            reset(logicalTick, seed, origin, authoredScale);
+        m_origin = origin;
+        while(m_tick < logicalTick)
+        {
+            advanceOne();
+            ++m_tick;
+        }
+    }
+
+    QVector<EffectRenderSample> samples() const
+    {
+        QVector<EffectRenderSample> result;
+        result.reserve(m_particles.size());
+        for(const VulcanSmokeParticle& particle : m_particles)
+        {
+            EffectRenderSample sample;
+            sample.position = particle.position;
+            sample.scale = billboardDiameter(particle.scale);
+            sample.alpha = 1.0f;
+            sample.frame = particle.frame;
+            result.append(sample);
+        }
+        return result;
+    }
+
+    int activeCount() const { return m_particles.size(); }
+
+private:
+    float randomRange(float low, float high)
+    {
+        return low + (high - low) * m_rng.unit();
+    }
+
+    void reset(qint64 logicalTick, quint32 seed, const QVector3D& origin,
+               float authoredScale)
+    {
+        m_seed = seed;
+        m_rng.reset(seed ^ 0x56554C43u);
+        m_origin = origin;
+        m_authoredScale = qMax(0.001f, qAbs(authoredScale));
+        m_particles.clear();
+        m_tick = qMax<qint64>(0, logicalTick - 1);
+        m_initialized = true;
+    }
+
+    void spawn()
+    {
+        VulcanSmokeParticle particle;
+        if((m_rng.next() % 100u) + 1u <= 60u)
+        {
+            particle.lifetime = 16 * 8;
+            particle.phaseDelay = particle.phaseStep = 8;
+            particle.position = m_origin + QVector3D(
+                0.0f, 0.0f, 4.0f * m_authoredScale
+                    + randomRange(-0.25f * m_authoredScale,
+                                  0.25f * m_authoredScale));
+            particle.scale = 2.5f * m_authoredScale;
+            particle.scaleFactor = 0.99f;
+            particle.velocityDamping = 0.965f;
+            const float angle = randomRange(0.0f, float(M_PI) * 2.0f);
+            particle.velocity = QVector3D(0.2f * m_authoredScale * qSin(angle),
+                                          0.2f * m_authoredScale * qCos(angle),
+                                          0.0f);
+        }
+        else
+        {
+            particle.lifetime = 16 * 4;
+            particle.phaseDelay = particle.phaseStep = 4;
+            const float radius = randomRange(0.0f, 0.3f * m_authoredScale);
+            const float angle = randomRange(0.0f, float(M_PI) * 2.0f);
+            particle.position = m_origin
+                + QVector3D(radius * qSin(angle), radius * qCos(angle), 0.0f);
+            particle.scale = 0.75f * m_authoredScale;
+            particle.scaleFactor = 1.02f;
+            particle.velocity = QVector3D(0.0f, 0.0f,
+                                          0.0625f * m_authoredScale);
+        }
+        m_particles.append(particle);
+    }
+
+    void advanceOne()
+    {
+        for(int i = m_particles.size() - 1; i >= 0; --i)
+        {
+            VulcanSmokeParticle& particle = m_particles[i];
+            if(--particle.lifetime == 0)
+            {
+                m_particles.removeAt(i);
+                continue;
+            }
+            if(--particle.phaseDelay == 0)
+            {
+                if(++particle.frame >= 16)
+                {
+                    m_particles.removeAt(i);
+                    continue;
+                }
+                particle.phaseDelay = particle.phaseStep;
+            }
+            particle.position += particle.velocity;
+            particle.scale *= particle.scaleFactor;
+            particle.velocity *= particle.velocityDamping;
+        }
+
+        int created = 0;
+        for(int attempt = 0; attempt < 2 && m_particles.size() < 400; ++attempt)
+        {
+            if((m_rng.next() % 100u) + 1u <= 88u)
+            {
+                spawn();
+                ++created;
+            }
+        }
+        if(created == 0 && m_particles.size() < 400)
+            spawn();
+    }
+
+    Isaac32 m_rng;
+    QVector<VulcanSmokeParticle> m_particles;
+    QVector3D m_origin;
+    float m_authoredScale{1.0f};
+    quint32 m_seed{0};
+    qint64 m_tick{0};
+    bool m_initialized{false};
 };
 
 class FireballEmitter
@@ -6185,6 +6331,521 @@ private:
     int m_totalCreated{0};
     int m_cycleTick{0};
     bool m_generating{true};
+    bool m_initialized{false};
+};
+
+struct CastingGatherSource
+{
+    QVector3D offset;
+    QVector3D velocity;
+};
+
+struct CastingGatherParticle
+{
+    QVector3D direction;
+    QVector3D position;
+    float radius{0.0f};
+    float radiusStep{0.0f};
+    float scale{0.0f};
+    float scaleGrowth{1.0f};
+    float alpha{0.0f};
+    int lifetime{13};
+    int frame{14};
+    bool flash{false};
+};
+
+class CastingGatherEmitter
+{
+public:
+    void advanceTo(qint64 logicalTick, quint32 seed, quint32 kind,
+                   const QVector3D& origin, float authoredScale)
+    {
+        if(!m_initialized || seed != m_seed || kind != m_kind
+                || logicalTick < m_tick)
+            reset(logicalTick, seed, kind, origin, authoredScale);
+        m_origin = origin;
+        while(m_tick < logicalTick)
+        {
+            advanceOne();
+            ++m_tick;
+        }
+    }
+
+    QVector<EffectRenderSample> samples() const
+    {
+        QVector<EffectRenderSample> result;
+        result.reserve(m_particles.size());
+        for(const CastingGatherParticle& particle : m_particles)
+        {
+            EffectRenderSample sample;
+            sample.position = particle.position;
+            sample.scale = billboardDiameter(particle.scale);
+            sample.alpha = particle.alpha;
+            sample.frame = particle.frame;
+            result.append(sample);
+        }
+        return result;
+    }
+
+    int activeCount() const { return m_particles.size(); }
+
+private:
+    float randomRange(float low, float high)
+    {
+        return low + (high - low) * m_rng.unit();
+    }
+
+    QVector3D randomBallPoint()
+    {
+        for(;;)
+        {
+            const QVector3D point(randomRange(-1.0f, 1.0f),
+                                  randomRange(-1.0f, 1.0f),
+                                  randomRange(-1.0f, 1.0f));
+            if(point.lengthSquared() > 0.0f && point.lengthSquared() <= 1.0f)
+                return point;
+        }
+    }
+
+    void reset(qint64 logicalTick, quint32 seed, quint32 kind,
+               const QVector3D& origin, float authoredScale)
+    {
+        m_seed = seed;
+        m_kind = kind;
+        m_rng.reset(seed ^ kind ^ 0x47415448u);
+        m_origin = origin;
+        m_authoredScale = qMax(0.001f, qAbs(authoredScale));
+        m_divination = kind == 8234u;
+        m_radius = m_authoredScale * 0.8f * (m_divination ? 2.0f : 3.0f);
+        m_attempts = m_divination ? 6 : 20;
+        m_phaseLife = (kind == 8231u || kind == 8233u) ? 5 : 1;
+        m_sources.clear();
+        m_particles.clear();
+        m_tick = qMax<qint64>(0, logicalTick - 1);
+        m_initialized = true;
+    }
+
+    void initializeSources()
+    {
+        for(int i = 0; i < 5; ++i)
+        {
+            CastingGatherSource source;
+            source.offset = randomBallPoint() * 10.0f;
+            source.velocity = randomBallPoint() * 0.1f;
+            m_sources.append(source);
+        }
+        if(m_divination)
+        {
+            CastingGatherParticle flash;
+            flash.position = m_origin;
+            flash.frame = 0;
+            flash.flash = true;
+            m_particles.append(flash);
+        }
+    }
+
+    void spawn()
+    {
+        QVector3D direction = randomBallPoint();
+        const int sourceChoice = int(m_rng.next()
+            % quint32(5 * m_phaseLife + 1));
+        if(sourceChoice > 0)
+            direction += m_sources[(sourceChoice - 1) % 5].offset;
+        if(qFuzzyIsNull(direction.lengthSquared()))
+            direction = QVector3D(0.0f, 0.0f, 1.0f);
+        direction.normalize();
+
+        CastingGatherParticle particle;
+        particle.direction = direction;
+        particle.radius = m_radius * 0.6f;
+        particle.radiusStep = particle.radius / (m_divination ? 26.0f : 13.0f);
+        particle.scale = particle.radius * (m_divination ? 0.07f : 0.08f)
+            * randomRange(0.6f, 1.4f);
+        particle.scaleGrowth = m_divination ? 1.05f : 1.07f;
+        particle.position = m_origin + particle.direction * particle.radius;
+        m_particles.append(particle);
+    }
+
+    static float gatherAlpha(bool divination, int lifetime)
+    {
+        static constexpr std::array<int, 15> divinationAlpha = {
+            0, 32, 64, 112, 160, 208, 255, 255, 224, 192, 128, 64, 32, 16, 0
+        };
+        static constexpr std::array<int, 15> elementAlpha = {
+            0, 255, 255, 255, 255, 255, 255, 255, 224, 192, 128, 64, 32, 16, 0
+        };
+        const int index = qBound(0, lifetime, 14);
+        return float((divination ? divinationAlpha : elementAlpha)[size_t(index)])
+            / 255.0f;
+    }
+
+    void updateParticles()
+    {
+        for(int i = m_particles.size() - 1; i >= 0; --i)
+        {
+            CastingGatherParticle& particle = m_particles[i];
+            if(particle.flash)
+            {
+                particle.position = m_origin;
+                particle.scale = m_radius * 0.3f * randomRange(0.85f, 1.15f);
+                particle.alpha = 1.0f;
+                continue;
+            }
+            if(--particle.lifetime == 0)
+            {
+                m_particles.removeAt(i);
+                continue;
+            }
+            particle.alpha = gatherAlpha(m_divination, particle.lifetime);
+            if(m_kind == 8231u && (particle.lifetime & 3) == 0)
+                ++particle.frame;
+            --particle.frame;
+            particle.radius -= particle.radiusStep;
+            particle.position = m_origin + particle.direction * particle.radius;
+            particle.scale *= particle.scaleGrowth;
+        }
+    }
+
+    void updateSources()
+    {
+        for(CastingGatherSource& source : m_sources)
+        {
+            source.offset += source.velocity;
+            source.velocity = source.velocity * 0.95f
+                + QVector3D(randomRange(-0.1f, 0.1f),
+                            randomRange(-0.1f, 0.1f),
+                            randomRange(-0.1f, 0.1f))
+                - source.offset * 0.0005f;
+        }
+    }
+
+    void advanceOne()
+    {
+        if(m_sources.isEmpty())
+            initializeSources();
+        updateParticles();
+        for(int attempt = 0; attempt < m_attempts
+                && m_particles.size() < 500; ++attempt)
+            spawn();
+        updateSources();
+    }
+
+    Isaac32 m_rng;
+    QVector<CastingGatherSource> m_sources;
+    QVector<CastingGatherParticle> m_particles;
+    QVector3D m_origin;
+    float m_authoredScale{1.0f};
+    float m_radius{1.0f};
+    quint32 m_seed{0};
+    quint32 m_kind{0};
+    qint64 m_tick{0};
+    int m_attempts{20};
+    int m_phaseLife{1};
+    bool m_divination{false};
+    bool m_initialized{false};
+};
+
+struct CastingRoundSource
+{
+    QVector3D offset;
+    QVector3D current;
+    QVector3D previous;
+    float rotation{0.3f};
+    float verticalStep{1.0f};
+};
+
+struct CastingRoundParticle
+{
+    QVector3D position;
+    QVector3D target;
+    float verticalStep{0.0f};
+    float scale{0.0f};
+    float alpha{1.0f};
+    int lifetime{28};
+    int frame{1};
+    int source{-1};
+    bool anchor{false};
+};
+
+class CastingStarRoundEmitter
+{
+public:
+    void advanceTo(qint64 logicalTick, quint32 seed, quint32 kind,
+                   const QVector3D& origin, float authoredScale)
+    {
+        if(!m_initialized || seed != m_seed || kind != m_kind
+                || logicalTick < m_tick)
+            reset(logicalTick, seed, kind, origin, authoredScale);
+        m_origin = origin;
+        while(m_tick < logicalTick)
+        {
+            advanceOne();
+            ++m_tick;
+        }
+    }
+
+    QVector<EffectRenderSample> samples() const
+    {
+        QVector<EffectRenderSample> result;
+        result.reserve(m_particles.size());
+        for(const CastingRoundParticle& particle : m_particles)
+        {
+            EffectRenderSample sample;
+            sample.position = particle.position;
+            sample.scale = billboardDiameter(particle.scale);
+            sample.alpha = particle.alpha;
+            sample.frame = particle.frame;
+            result.append(sample);
+        }
+        return result;
+    }
+
+    int activeCount() const { return m_particles.size(); }
+
+private:
+    float randomRange(float low, float high)
+    {
+        return low + (high - low) * m_rng.unit();
+    }
+
+    void reset(qint64 logicalTick, quint32 seed, quint32 kind,
+               const QVector3D& origin, float authoredScale)
+    {
+        m_seed = seed;
+        m_kind = kind;
+        m_rng.reset(seed ^ kind ^ 0x524F554Eu);
+        m_origin = origin;
+        m_authoredScale = qMax(0.001f, qAbs(authoredScale));
+        m_sourceCount = (kind == 8235u || kind == 8237u) ? 2 : 1;
+        m_sources.clear();
+        m_particles.clear();
+        m_tick = qMax<qint64>(0, logicalTick - 1);
+        m_initialized = true;
+    }
+
+    void createSource(int index)
+    {
+        const float angle = float(index) * float(M_PI) * 2.0f
+            / float(m_sourceCount);
+        CastingRoundSource source;
+        source.offset = QVector3D(0.5f * m_authoredScale * qCos(angle),
+                                  0.5f * m_authoredScale * qSin(angle), 0.0f);
+        source.rotation = (m_kind == 8236u || m_kind == 8238u) ? 0.5f : 0.3f;
+        source.offset.setZ((m_kind == 8236u ? 1.6f : 0.4f) * m_authoredScale);
+        source.verticalStep = m_authoredScale * (m_kind == 8236u ? -1.0f : 1.0f);
+        source.current = m_origin + source.offset;
+        source.previous = source.current;
+        m_sources.append(source);
+
+        CastingRoundParticle anchor;
+        anchor.position = source.current;
+        anchor.frame = 0;
+        anchor.source = index;
+        anchor.anchor = true;
+        m_particles.append(anchor);
+    }
+
+    void spawnTail()
+    {
+        const int sourceIndex = int(m_rng.next() % quint32(m_sources.size()));
+        const CastingRoundSource& source = m_sources[sourceIndex];
+        const QVector3D jitter(randomRange(-0.04f, 0.04f),
+                               randomRange(-0.04f, 0.04f),
+                               randomRange(-0.04f, 0.04f));
+        const float interpolation = m_rng.unit();
+        CastingRoundParticle particle;
+        particle.position = source.previous + jitter;
+        particle.target = jitter + source.previous * interpolation
+            + source.current * (1.0f - interpolation);
+        particle.verticalStep = 0.03f * source.verticalStep
+            * randomRange(0.85f, 1.2f);
+        particle.scale = 0.2f * m_authoredScale * randomRange(0.6f, 1.4f);
+        particle.source = sourceIndex;
+        m_particles.append(particle);
+    }
+
+    void updateParticles()
+    {
+        static constexpr std::array<int, 7> fade = {0, 32, 64, 112, 160, 208, 255};
+        for(int i = m_particles.size() - 1; i >= 0; --i)
+        {
+            CastingRoundParticle& particle = m_particles[i];
+            if(particle.anchor)
+            {
+                particle.position = m_sources[particle.source].current;
+                particle.scale = 0.4f * m_authoredScale * randomRange(0.8f, 1.2f);
+                particle.alpha = 1.0f;
+                continue;
+            }
+            if(--particle.lifetime == 0)
+            {
+                m_particles.removeAt(i);
+                continue;
+            }
+            if(particle.lifetime < 7)
+                particle.alpha = float(fade[size_t(particle.lifetime - 1)]) / 255.0f;
+            ++particle.frame;
+            if(particle.frame == 16)
+                particle.frame = 12;
+            particle.position = particle.target;
+            particle.scale *= 0.97f;
+            particle.target.setZ(particle.target.z() + particle.verticalStep);
+            particle.verticalStep *= 1.03f;
+        }
+    }
+
+    void updateSources()
+    {
+        for(CastingRoundSource& source : m_sources)
+        {
+            source.previous = source.current;
+            const float c = qCos(source.rotation);
+            const float s = qSin(source.rotation);
+            const float x = source.offset.x() * c + source.offset.y() * s;
+            const float y = -source.offset.x() * s + source.offset.y() * c;
+            source.offset.setX(x);
+            source.offset.setY(y);
+            source.current = m_origin + source.offset;
+        }
+    }
+
+    void advanceOne()
+    {
+        updateParticles();
+        for(int attempt = 0; attempt < 10 && m_particles.size() < 600; ++attempt)
+        {
+            if(m_sources.size() < m_sourceCount)
+                createSource(m_sources.size());
+            else
+                spawnTail();
+        }
+        updateSources();
+    }
+
+    Isaac32 m_rng;
+    QVector<CastingRoundSource> m_sources;
+    QVector<CastingRoundParticle> m_particles;
+    QVector3D m_origin;
+    float m_authoredScale{1.0f};
+    quint32 m_seed{0};
+    quint32 m_kind{0};
+    qint64 m_tick{0};
+    int m_sourceCount{1};
+    bool m_initialized{false};
+};
+
+struct CastingFailedParticle
+{
+    QVector3D offset;
+    QVector3D position;
+    float verticalStep{0.0f};
+    float scale{0.0f};
+    float alpha{1.0f};
+    int lifetime{13};
+    int frame{1};
+};
+
+class CastingFailedEmitter
+{
+public:
+    void advanceTo(qint64 logicalTick, quint32 seed, const QVector3D& origin,
+                   float authoredScale)
+    {
+        if(!m_initialized || seed != m_seed || logicalTick < m_tick)
+            reset(logicalTick, seed, origin, authoredScale);
+        m_origin = origin;
+        while(m_tick < logicalTick)
+        {
+            advanceOne();
+            ++m_tick;
+        }
+    }
+
+    QVector<EffectRenderSample> samples() const
+    {
+        QVector<EffectRenderSample> result;
+        result.reserve(m_particles.size());
+        for(const CastingFailedParticle& particle : m_particles)
+        {
+            EffectRenderSample sample;
+            sample.position = particle.position;
+            sample.scale = billboardDiameter(particle.scale);
+            sample.alpha = particle.alpha;
+            sample.frame = particle.frame;
+            result.append(sample);
+        }
+        return result;
+    }
+
+    int activeCount() const { return m_particles.size(); }
+
+private:
+    float randomRange(float low, float high)
+    {
+        return low + (high - low) * m_rng.unit();
+    }
+
+    void reset(qint64 logicalTick, quint32 seed, const QVector3D& origin,
+               float authoredScale)
+    {
+        m_seed = seed;
+        m_rng.reset(seed ^ 0x4641494Cu);
+        m_origin = origin;
+        m_authoredScale = qMax(0.001f, qAbs(authoredScale));
+        m_particles.clear();
+        m_tick = qMax<qint64>(0, logicalTick - 1);
+        m_initialized = true;
+    }
+
+    void spawn()
+    {
+        const float radius = randomRange(0.9f, 1.1f);
+        const float angle = randomRange(0.0f, float(M_PI) * 2.0f);
+        CastingFailedParticle particle;
+        particle.offset = QVector3D(qSin(angle) * radius, qCos(angle) * radius,
+                                    -0.6f * m_authoredScale);
+        particle.position = m_origin + particle.offset;
+        particle.verticalStep = 0.2f * m_authoredScale
+            * randomRange(0.7f, 1.3f);
+        particle.scale = 0.25f * m_authoredScale * randomRange(0.6f, 1.4f);
+        m_particles.append(particle);
+    }
+
+    static float alphaForLife(int lifetime)
+    {
+        if(lifetime >= 6)
+            return 1.0f;
+        static constexpr std::array<int, 6> fade = {0, 15, 63, 111, 159, 207};
+        return float(fade[size_t(qBound(0, lifetime, 5))]) / 255.0f;
+    }
+
+    void advanceOne()
+    {
+        for(int i = m_particles.size() - 1; i >= 0; --i)
+        {
+            CastingFailedParticle& particle = m_particles[i];
+            if(--particle.lifetime == 0)
+            {
+                m_particles.removeAt(i);
+                continue;
+            }
+            particle.alpha = alphaForLife(particle.lifetime);
+            ++particle.frame;
+            particle.position = m_origin + particle.offset;
+            particle.scale *= 0.97f;
+            particle.offset.setZ(particle.offset.z() + particle.verticalStep);
+            particle.verticalStep *= 1.05f;
+        }
+        for(int attempt = 0; attempt < 25 && m_particles.size() < 500; ++attempt)
+            spawn();
+    }
+
+    Isaac32 m_rng;
+    QVector<CastingFailedParticle> m_particles;
+    QVector3D m_origin;
+    float m_authoredScale{1.0f};
+    quint32 m_seed{0};
+    qint64 m_tick{0};
     bool m_initialized{false};
 };
 

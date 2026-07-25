@@ -213,11 +213,9 @@ SParticleVisualStyle particleVisualStyle(uint kind)
     case 8195:
     case 8208:
     case 8209:
-    case 8231:
     case 8257:
         return {nullptr, QVector4D(1.0f, 0.48f, 0.12f, 0.86f), 1.15f, 0.18f, true};
     case 8196:
-    case 8197:
         return {"tendrismoke", QVector4D(1.0f, 1.0f, 1.0f, 0.72f), 1.55f, 0.42f, false};
     case 8198:
         return {nullptr, QVector4D(0.28f, 1.0f, 0.42f, 0.70f), 1.1f, 0.26f, true};
@@ -240,14 +238,6 @@ SParticleVisualStyle particleVisualStyle(uint kind)
     case 8203:
     case 8204:
     case 8205:
-    case 8232:
-    case 8233:
-    case 8234:
-    case 8235:
-    case 8236:
-    case 8237:
-    case 8238:
-    case 8239:
         return {nullptr, QVector4D(0.66f, 0.52f, 1.0f, 0.76f), 1.15f, 0.24f, true};
     default:
         return {};
@@ -261,7 +251,7 @@ bool isPersistentFireParticle(uint kind)
 
 bool isPersistentSmokeParticle(uint kind)
 {
-    return kind == 8196u || kind == 8197u;
+    return kind == 8196u;
 }
 
 struct SSkyVertex
@@ -2637,6 +2627,9 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
     QOpenGLTexture* fireworksTexture = textures->texture("fireworks");
     if(fireworksTexture == fallbackTexture)
         fireworksTexture = nullptr;
+    QOpenGLTexture* vulkanTexture = textures->texture("vulkan");
+    if(vulkanTexture == fallbackTexture)
+        vulkanTexture = nullptr;
     QOpenGLTexture* clayRingTexture = textures->texture("clayring");
     if(clayRingTexture == fallbackTexture)
         clayRingTexture = nullptr;
@@ -2661,6 +2654,18 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
     QOpenGLTexture* casting1Texture = textures->texture("casting1");
     if(casting1Texture == fallbackTexture)
         casting1Texture = nullptr;
+    QOpenGLTexture* casting3Texture = textures->texture("casting3");
+    if(casting3Texture == fallbackTexture)
+        casting3Texture = nullptr;
+    QOpenGLTexture* casting4Texture = textures->texture("casting4");
+    if(casting4Texture == fallbackTexture)
+        casting4Texture = nullptr;
+    QOpenGLTexture* casting7Texture = textures->texture("casting7");
+    if(casting7Texture == fallbackTexture)
+        casting7Texture = nullptr;
+    QOpenGLTexture* casting8Texture = textures->texture("casting8");
+    if(casting8Texture == fallbackTexture)
+        casting8Texture = nullptr;
     QOpenGLTexture* visionFogTexture = textures->texture("visionfog");
     if(visionFogTexture == fallbackTexture)
         visionFogTexture = nullptr;
@@ -2821,6 +2826,18 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
                        fireSmokeTexture == nullptr, 0.18f);
     };
 
+    const auto drawVulcanSmoke = [&](const CNode* owner, const QVector3D& origin,
+                                     float authoredScale, uint seed)
+    {
+        ei::particle::VulcanSmokeEmitter& emitter = m_vulcanSmokeEmitters[owner];
+        emitter.advanceTo(logicalTick, seed, origin, authoredScale);
+        for(const ei::particle::EffectRenderSample& sample : emitter.samples())
+            drawSprite(sample.position, sample.scale, 1.0f, 0.0f,
+                       QVector4D(1.0f, 1.0f, 1.0f, sample.alpha), vulkanTexture,
+                       ei::particle::atlasUv(sample.frame), false,
+                       vulkanTexture == nullptr, 0.18f);
+    };
+
     const auto drawFireBlast = [&](const CNode* owner, const QVector3D& origin,
                                    float authoredScale, uint seed)
     {
@@ -2916,6 +2933,56 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
                        fireSmokeTexture, ei::particle::atlasUv(sample.frame), false,
                        fireSmokeTexture == nullptr, 0.18f);
         }
+    };
+
+    const auto drawCastingGather = [&](const CNode* owner, const QVector3D& origin,
+                                       float authoredScale, quint32 kind, uint seed)
+    {
+        ei::particle::CastingGatherEmitter& emitter = m_castingGatherEmitters[owner];
+        emitter.advanceTo(logicalTick, seed, kind, origin, authoredScale);
+        QOpenGLTexture* texture = fireSmokeTexture;
+        if(kind == 8232u)
+            texture = casting8Texture;
+        else if(kind == 8233u)
+            texture = casting7Texture;
+        else if(kind == 8234u)
+            texture = casting4Texture;
+        for(const ei::particle::EffectRenderSample& sample : emitter.samples())
+            drawSprite(sample.position, sample.scale, 1.0f, 0.0f,
+                       QVector4D(1.0f, 1.0f, 1.0f, sample.alpha), texture,
+                       ei::particle::atlasUv(sample.frame), kind == 8234u,
+                       texture == nullptr, 0.18f);
+    };
+
+    const auto drawCastingRound = [&](const CNode* owner, const QVector3D& origin,
+                                      float authoredScale, quint32 kind, uint seed)
+    {
+        ei::particle::CastingStarRoundEmitter& emitter = m_castingRoundEmitters[owner];
+        emitter.advanceTo(logicalTick, seed, kind, origin, authoredScale);
+        QOpenGLTexture* texture = casting2Texture;
+        if(kind == 8236u)
+            texture = casting3Texture;
+        else if(kind == 8237u)
+            texture = casting6Texture;
+        else if(kind == 8238u)
+            texture = casting1Texture;
+        for(const ei::particle::EffectRenderSample& sample : emitter.samples())
+            drawSprite(sample.position, sample.scale, 1.0f, 0.0f,
+                       QVector4D(1.0f, 1.0f, 1.0f, sample.alpha), texture,
+                       ei::particle::atlasUv(sample.frame), false,
+                       texture == nullptr, 0.18f);
+    };
+
+    const auto drawCastingFailed = [&](const CNode* owner, const QVector3D& origin,
+                                       float authoredScale, uint seed)
+    {
+        ei::particle::CastingFailedEmitter& emitter = m_castingFailedEmitters[owner];
+        emitter.advanceTo(logicalTick, seed, origin, authoredScale);
+        for(const ei::particle::EffectRenderSample& sample : emitter.samples())
+            drawSprite(sample.position, sample.scale, 1.0f, 0.0f,
+                       QVector4D(1.0f, 1.0f, 1.0f, sample.alpha), teleportTexture,
+                       ei::particle::atlasUv(sample.frame), false,
+                       teleportTexture == nullptr, 0.18f);
     };
 
     const auto drawNuke = [&](const CNode* owner, const QVector3D& origin,
@@ -3423,6 +3490,17 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
                 continue;
             }
 
+            if(particle->kind() == 8197u)
+            {
+                drawVulcanSmoke(particle, center, authoredScale, particle->mapId());
+                if(particle->nodeState() == ENodeState::eSelect)
+                    drawSprite(center, qMax(0.3f, authoredScale * 0.35f),
+                               1.0f, 0.0f,
+                               QVector4D(0.10f, 0.90f, 1.0f, 0.72f), nullptr,
+                               QVector4D(0.0f, 0.0f, 1.0f, 1.0f), false,
+                               true, 0.12f);
+                continue;
+            }
             if(isPersistentFireParticle(particle->kind())
                     || isPersistentSmokeParticle(particle->kind()))
             {
@@ -3777,6 +3855,35 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
                 if(particle->nodeState() == ENodeState::eSelect)
                     drawSprite(center, qMax(0.3f, qAbs(signedAuthoredScale) * 0.35f),
                                1.0f, 0.0f,
+                               QVector4D(0.10f, 0.90f, 1.0f, 0.72f), nullptr,
+                               QVector4D(0.0f, 0.0f, 1.0f, 1.0f), false, true, 0.12f);
+                continue;
+            }
+            if(particle->kind() >= 8231u && particle->kind() <= 8234u)
+            {
+                drawCastingGather(particle, center, authoredScale, particle->kind(),
+                                  particle->mapId());
+                if(particle->nodeState() == ENodeState::eSelect)
+                    drawSprite(center, qMax(0.3f, authoredScale * 0.35f), 1.0f, 0.0f,
+                               QVector4D(0.10f, 0.90f, 1.0f, 0.72f), nullptr,
+                               QVector4D(0.0f, 0.0f, 1.0f, 1.0f), false, true, 0.12f);
+                continue;
+            }
+            if(particle->kind() >= 8235u && particle->kind() <= 8238u)
+            {
+                drawCastingRound(particle, center, authoredScale, particle->kind(),
+                                 particle->mapId());
+                if(particle->nodeState() == ENodeState::eSelect)
+                    drawSprite(center, qMax(0.3f, authoredScale * 0.35f), 1.0f, 0.0f,
+                               QVector4D(0.10f, 0.90f, 1.0f, 0.72f), nullptr,
+                               QVector4D(0.0f, 0.0f, 1.0f, 1.0f), false, true, 0.12f);
+                continue;
+            }
+            if(particle->kind() == 8239u)
+            {
+                drawCastingFailed(particle, center, authoredScale, particle->mapId());
+                if(particle->nodeState() == ENodeState::eSelect)
+                    drawSprite(center, qMax(0.3f, authoredScale * 0.35f), 1.0f, 0.0f,
                                QVector4D(0.10f, 0.90f, 1.0f, 0.72f), nullptr,
                                QVector4D(0.0f, 0.0f, 1.0f, 1.0f), false, true, 0.12f);
                 continue;
@@ -6001,6 +6108,7 @@ bool CView::unloadMobDocument(CMob* mob, bool promptForSave)
         m_pUndoStack->clear();
     m_hiddenMobs.remove(mob);
     m_tendriEmitters.clear();
+    m_vulcanSmokeEmitters.clear();
     m_fireballEmitters.clear();
     m_fireBlastEmitters.clear();
     m_healingEmitters.clear();
@@ -6026,6 +6134,9 @@ bool CView::unloadMobDocument(CMob* mob, bool promptForSave)
     m_ballStarsEmitters.clear();
     m_curseStarsEmitters.clear();
     m_startTransEmitters.clear();
+    m_castingGatherEmitters.clear();
+    m_castingRoundEmitters.clear();
+    m_castingFailedEmitters.clear();
     m_fireArrowEmitters.clear();
     m_acidRayEmitters.clear();
     m_blueGasEmitters.clear();
@@ -6232,6 +6343,7 @@ void CView::unloadMob(QString mobName)
     if(m_pUndoStack)
         m_pUndoStack->clear();
     m_tendriEmitters.clear();
+    m_vulcanSmokeEmitters.clear();
     m_fireballEmitters.clear();
     m_fireBlastEmitters.clear();
     m_healingEmitters.clear();
@@ -6257,6 +6369,9 @@ void CView::unloadMob(QString mobName)
     m_ballStarsEmitters.clear();
     m_curseStarsEmitters.clear();
     m_startTransEmitters.clear();
+    m_castingGatherEmitters.clear();
+    m_castingRoundEmitters.clear();
+    m_castingFailedEmitters.clear();
     m_fireArrowEmitters.clear();
     m_acidRayEmitters.clear();
     m_blueGasEmitters.clear();

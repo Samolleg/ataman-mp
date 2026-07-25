@@ -869,11 +869,83 @@
       "size": 74,
       "start_va": "0x00486993"
     },
+    "casting_failed_create_callback": {
+      "end_va": "0x00491830",
+      "sha256": "6927FAB471F9C9886B69003CECAE6E634D38D79ED87B8972CA415E1CA659696E",
+      "size": 1040,
+      "start_va": "0x00491420"
+    },
+    "casting_failed_factory_branch": {
+      "end_va": "0x0048761F",
+      "sha256": "AB1008C656C1D1B9CCE2785F034D0B69AFE2A7910E70043C27CDC51BDB2789CE",
+      "size": 78,
+      "start_va": "0x004875D1"
+    },
+    "casting_failed_local_source_callback": {
+      "end_va": "0x004918E0",
+      "sha256": "EA980F466CFD691FD629E540375336F98E9F700E7019836E085025920DE92CA8",
+      "size": 16,
+      "start_va": "0x004918D0"
+    },
+    "casting_failed_update_callback": {
+      "end_va": "0x004918D0",
+      "sha256": "FEF126164E8678B820C5424FC94961DEC97DEC582B4F7C1426F0351F0AFC385D",
+      "size": 160,
+      "start_va": "0x00491830"
+    },
+    "casting_gather_create_callback": {
+      "end_va": "0x00492030",
+      "sha256": "8A01556E13C626DC2E85A6395F024508A4AFEA2E2FC794FC0828559AD31D997A",
+      "size": 1872,
+      "start_va": "0x004918E0"
+    },
+    "casting_gather_factory_branch": {
+      "end_va": "0x00487746",
+      "sha256": "A5AE5C6665F49CB7B947173B6BE7431749CF5DFCAC54FEDB9BA348B0B882FE72",
+      "size": 295,
+      "start_va": "0x0048761F"
+    },
+    "casting_gather_local_source_callback": {
+      "end_va": "0x004923B0",
+      "sha256": "4CB19105BC34BC8F812BA164299ED68D02609396B47216F738987B9A9FEA8EB7",
+      "size": 480,
+      "start_va": "0x004921D0"
+    },
+    "casting_gather_update_callback": {
+      "end_va": "0x004921D0",
+      "sha256": "0617F46E9E974572A5FEE54A0E8755A7BDC8ECF13C2FBED50653AEE6939BC745",
+      "size": 416,
+      "start_va": "0x00492030"
+    },
     "casting_local_source_callback": {
       "end_va": "0x00489BE0",
       "sha256": "06E4D6DF644057524D131C5274C8B210CD6A3AC844DBA8DC7A0D50E91BACE99B",
       "size": 160,
       "start_va": "0x00489B40"
+    },
+    "casting_star_round_create_callback": {
+      "end_va": "0x00491230",
+      "sha256": "7069992B09428D723A4A89DB072B3E39AA3CBD6EF6DB114A4904A943B00CC3DD",
+      "size": 1568,
+      "start_va": "0x00490C10"
+    },
+    "casting_star_round_factory_branch": {
+      "end_va": "0x004875D1",
+      "sha256": "FE58104760E268C8C717DA1878AF5E2E9E9861089FA4CBEE04E9DA195301C2A7",
+      "size": 288,
+      "start_va": "0x004874B1"
+    },
+    "casting_star_round_local_source_callback": {
+      "end_va": "0x00491420",
+      "sha256": "6EAE70E749EC56A2B7F7FE2CCE49173E222CC82205314C88A6B12F093EC8D5D1",
+      "size": 144,
+      "start_va": "0x00491390"
+    },
+    "casting_star_round_update_callback": {
+      "end_va": "0x00491390",
+      "sha256": "D302BA99B813279C5F8AE02B36CB4AC4A956925F3CD0A4A1B09402FAD731D6CC",
+      "size": 352,
+      "start_va": "0x00491230"
     },
     "casting_update_callback": {
       "end_va": "0x00489B40",
@@ -2001,13 +2073,49 @@
       "bytes": "43617374696E673200",
       "va": "0x0078AE1C"
     },
+    "casting3_texture_name": {
+      "bytes": "43617374696E673300",
+      "va": "0x0078AE04"
+    },
+    "casting4_texture_name": {
+      "bytes": "43617374696E673400",
+      "va": "0x0078ADD4"
+    },
     "casting6_texture_name": {
       "bytes": "43617374696E673600",
       "va": "0x0078AE10"
     },
+    "casting7_texture_name": {
+      "bytes": "43617374696E673700",
+      "va": "0x0078ADE0"
+    },
+    "casting8_texture_name": {
+      "bytes": "43617374696E673800",
+      "va": "0x0078ADEC"
+    },
     "casting_callback_selection": {
       "bytes": "0C0283C9FF894308C783D0000000FFFFFF7F898BEC00000089ABE4000000C783E001000020934800C783E4010000509A4800C783E8010000409B48008D942480000000BFE8AE7800EB48",
       "va": "0x00486993"
+    },
+    "casting_failed_alpha_table": {
+      "bytes": "FF000000FF000000FF000000FF000000FF000000FF000000CF0000009F0000006F0000003F0000000F00000000000000",
+      "va": "0x0078A934"
+    },
+    "casting_gather_divination_alpha_table": {
+      "bytes": "00000000200000004000000070000000A0000000D0000000FF000000FF000000E0000000C00000008000000040000000200000001000000000000000",
+      "va": "0x0078A980"
+    },
+    "casting_gather_element_alpha_table": {
+      "bytes": "00000000FF000000FF000000FF000000FF000000FF000000FF000000FF000000E0000000C00000008000000040000000200000001000000000000000",
+      "va": "0x0078A9BC"
+    },
+    "casting_gather_fade_table": {
+      "bytes": "00000000200000004000000070000000A0000000D0000000FF000000",
+      "va": "0x0078A964"
+    },
+    "casting_star_round_alpha_table": {
+      "bytes": "00000000200000004000000070000000A0000000D0000000FF000000",
+      "va": "0x0078A918"
     },
     "changehero_texture_name": {
       "bytes": "4368616E67654865726F00",

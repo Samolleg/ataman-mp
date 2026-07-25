@@ -178,6 +178,38 @@ class ParticleBinaryReportTests(unittest.TestCase):
                          "43617374696E673200")
         self.assertEqual(fixture["sites"]["casting1_texture_name"]["bytes"],
                          "43617374696E673100")
+        self.assertEqual(fixture["sites"]["casting3_texture_name"]["bytes"],
+                         "43617374696E673300")
+        self.assertEqual(fixture["sites"]["casting4_texture_name"]["bytes"],
+                         "43617374696E673400")
+        self.assertEqual(fixture["sites"]["casting7_texture_name"]["bytes"],
+                         "43617374696E673700")
+        self.assertEqual(fixture["sites"]["casting8_texture_name"]["bytes"],
+                         "43617374696E673800")
+        self.assertEqual(
+            fixture["ranges"]["casting_star_round_create_callback"]["start_va"],
+            "0x00490C10",
+        )
+        self.assertEqual(
+            fixture["ranges"]["casting_failed_create_callback"]["start_va"],
+            "0x00491420",
+        )
+        self.assertEqual(
+            fixture["ranges"]["casting_gather_create_callback"]["start_va"],
+            "0x004918E0",
+        )
+        self.assertEqual(
+            fixture["sites"]["casting_star_round_alpha_table"]["bytes"],
+            "00000000200000004000000070000000A0000000D0000000FF000000",
+        )
+        self.assertEqual(
+            fixture["sites"]["casting_failed_alpha_table"]["bytes"],
+            "FF000000" * 6 + "CF0000009F0000006F0000003F0000000F00000000000000",
+        )
+        self.assertEqual(
+            fixture["sites"]["casting_gather_fade_table"]["bytes"],
+            "00000000200000004000000070000000A0000000D0000000FF000000",
+        )
         self.assertEqual(fixture["ranges"]["portalstar_create_callback"]["start_va"],
                          "0x00493D10")
         self.assertEqual(fixture["ranges"]["portal_create_callback"]["start_va"],

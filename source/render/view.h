@@ -377,6 +377,7 @@ private:
     bool m_particleInitializationAttempted{false};
     bool m_particleRendererReady{false};
     QHash<const CNode*, ei::particle::TendriEmitter> m_tendriEmitters;
+    QHash<const CNode*, ei::particle::VulcanSmokeEmitter> m_vulcanSmokeEmitters;
     QHash<const CNode*, ei::particle::FireballEmitter> m_fireballEmitters;
     QHash<const CNode*, ei::particle::FireBlastEmitter> m_fireBlastEmitters;
     QHash<const CNode*, ei::particle::HealingEmitter> m_healingEmitters;
@@ -413,6 +414,9 @@ private:
     QHash<const CNode*, ei::particle::BallStarsEmitter> m_ballStarsEmitters;
     QHash<const CNode*, ei::particle::CurseStarsEmitter> m_curseStarsEmitters;
     QHash<const CNode*, ei::particle::StartTransEmitter> m_startTransEmitters;
+    QHash<const CNode*, ei::particle::CastingGatherEmitter> m_castingGatherEmitters;
+    QHash<const CNode*, ei::particle::CastingStarRoundEmitter> m_castingRoundEmitters;
+    QHash<const CNode*, ei::particle::CastingFailedEmitter> m_castingFailedEmitters;
     QHash<const CNode*, ei::particle::TornadoEmitter> m_tornadoEmitters;
     QHash<const CNode*, ei::particle::LightningBlastEmitter> m_lightningBlastEmitters;
     QHash<const CNode*, ei::particle::CastingEmitter> m_castingEmitters;

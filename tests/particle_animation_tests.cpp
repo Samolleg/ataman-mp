@@ -14,6 +14,7 @@ private slots:
     void schedulerUsesAttemptsRatherThanSlots();
     void prewarmedEmittersAreDeterministicAndBounded();
     void fireOnlyNeverReachesSmokeFrames();
+    void vulcanSmokeUsesSeparateCloudAndPillarLaws();
     void fireballUsesStationaryNativeHeadPath();
     void fireBlastUsesFiniteFifteenSourceExplosion();
     void healingUsesSyntheticCarrierSpiralsAndTails();
@@ -57,6 +58,9 @@ private slots:
     void curseStarsUseHealingPhasesAndDampedMotion();
     void curseHolderUsesShortDenseTornadoControls();
     void startTransUsesFiniteAnchorAndReturningTrails();
+    void castingGatherUsesElementSpecificSourcesAndFlash();
+    void castingRoundUsesSchoolSpecificOrbitControls();
+    void castingFailedUsesPersistentRisingTeleportRing();
     void persistentEmittersBoundInitialWallClockReplay();
 };
 
@@ -1165,6 +1169,28 @@ void ParticleAnimationTests::startTransUsesFiniteAnchorAndReturningTrails()
     QVERIFY(first.activeCount() > 10);
 }
 
+void ParticleAnimationTests::vulcanSmokeUsesSeparateCloudAndPillarLaws()
+{
+    const QVector3D origin(2.0f, 3.0f, 4.0f);
+    ei::particle::VulcanSmokeEmitter emitter;
+    emitter.advanceTo(100, 8197u, origin, 1.0f);
+    emitter.advanceTo(120, 8197u, origin, 1.0f);
+    QVERIFY(emitter.activeCount() > 20);
+    QVERIFY(emitter.activeCount() <= 400);
+    bool foundUpperCloud = false;
+    bool foundPillar = false;
+    for(const ei::particle::EffectRenderSample& sample : emitter.samples())
+    {
+        foundUpperCloud |= sample.position.z() - origin.z() > 3.5f
+            && sample.scale > 3.0f;
+        foundPillar |= sample.position.z() - origin.z() < 2.0f
+            && sample.scale < 3.0f;
+        QVERIFY(sample.frame >= 0 && sample.frame < 16);
+    }
+    QVERIFY(foundUpperCloud);
+    QVERIFY(foundPillar);
+}
+
 void ParticleAnimationTests::fireballUsesStationaryNativeHeadPath()
 {
     ei::particle::FireballEmitter first;
@@ -1300,6 +1326,88 @@ void ParticleAnimationTests::geyserUsesThreeCyclingBallisticSources()
     QVERIFY(foundStream);
 }
 
+void ParticleAnimationTests::castingGatherUsesElementSpecificSourcesAndFlash()
+{
+    const QVector3D origin(3.0f, 4.0f, 5.0f);
+    ei::particle::CastingGatherEmitter fire;
+    ei::particle::CastingGatherEmitter electricity;
+    ei::particle::CastingGatherEmitter divination;
+    fire.advanceTo(100, 8231u, 8231u, origin, 1.0f);
+    electricity.advanceTo(100, 8232u, 8232u, origin, 1.0f);
+    divination.advanceTo(100, 8234u, 8234u, origin, 1.0f);
+    QCOMPARE(fire.activeCount(), 20);
+    QCOMPARE(electricity.activeCount(), 20);
+    QCOMPARE(divination.activeCount(), 7);
+
+    bool foundFlash = false;
+    for(const ei::particle::EffectRenderSample& sample : divination.samples())
+    {
+        if(sample.frame == 0 && sample.position == origin)
+        {
+            foundFlash = true;
+            QVERIFY(sample.scale > 0.0f);
+        }
+    }
+    QVERIFY(foundFlash);
+
+    fire.advanceTo(101, 8231u, 8231u, origin, 1.0f);
+    electricity.advanceTo(101, 8232u, 8232u, origin, 1.0f);
+    bool fireHeldPhase = false;
+    bool electricityAdvanced = false;
+    for(const ei::particle::EffectRenderSample& sample : fire.samples())
+        fireHeldPhase |= sample.frame == 14;
+    for(const ei::particle::EffectRenderSample& sample : electricity.samples())
+        electricityAdvanced |= sample.frame == 13;
+    QVERIFY(fireHeldPhase);
+    QVERIFY(electricityAdvanced);
+}
+
+void ParticleAnimationTests::castingRoundUsesSchoolSpecificOrbitControls()
+{
+    const QVector3D origin(1.0f, 2.0f, 3.0f);
+    ei::particle::CastingStarRoundEmitter illusion;
+    ei::particle::CastingStarRoundEmitter domination;
+    illusion.advanceTo(200, 8235u, 8235u, origin, 2.0f);
+    domination.advanceTo(200, 8236u, 8236u, origin, 2.0f);
+    QCOMPARE(illusion.activeCount(), 10);
+    QCOMPARE(domination.activeCount(), 10);
+
+    int illusionAnchors = 0;
+    int dominationAnchors = 0;
+    float dominationAnchorHeight = 0.0f;
+    for(const ei::particle::EffectRenderSample& sample : illusion.samples())
+        illusionAnchors += sample.frame == 0 ? 1 : 0;
+    for(const ei::particle::EffectRenderSample& sample : domination.samples())
+    {
+        if(sample.frame == 0)
+        {
+            ++dominationAnchors;
+            dominationAnchorHeight = sample.position.z() - origin.z();
+        }
+    }
+    QCOMPARE(illusionAnchors, 2);
+    QCOMPARE(dominationAnchors, 1);
+    QVERIFY(qAbs(dominationAnchorHeight - 3.2f) < 0.0001f);
+}
+
+void ParticleAnimationTests::castingFailedUsesPersistentRisingTeleportRing()
+{
+    const QVector3D origin(0.0f, 0.0f, 2.0f);
+    ei::particle::CastingFailedEmitter emitter;
+    emitter.advanceTo(300, 8239u, origin, 1.5f);
+    QCOMPARE(emitter.activeCount(), 25);
+    const QVector<ei::particle::EffectRenderSample> first = emitter.samples();
+    QVERIFY(!first.isEmpty());
+    QCOMPARE(first[0].frame, 1);
+    const float firstScale = first[0].scale;
+    emitter.advanceTo(301, 8239u, origin, 1.5f);
+    QCOMPARE(emitter.activeCount(), 50);
+    const QVector<ei::particle::EffectRenderSample> second = emitter.samples();
+    QCOMPARE(second[0].frame, 2);
+    QVERIFY(second[0].scale < firstScale);
+    QVERIFY(second[0].position.z() < origin.z());
+}
+
 void ParticleAnimationTests::persistentEmittersBoundInitialWallClockReplay()
 {
     constexpr qint64 wallClockTick = 32000000000LL;
@@ -1317,6 +1425,10 @@ void ParticleAnimationTests::persistentEmittersBoundInitialWallClockReplay()
     ei::particle::HealingEmitter healing;
     ei::particle::PoisonFogEmitter poisonFog;
     ei::particle::GeyserEmitter geyser;
+    ei::particle::VulcanSmokeEmitter vulcanSmoke;
+    ei::particle::CastingGatherEmitter castingGather;
+    ei::particle::CastingStarRoundEmitter castingRound;
+    ei::particle::CastingFailedEmitter castingFailed;
     moshka.advanceTo(wallClockTick, 8252u, origin, 1.0f);
     vision.advanceTo(wallClockTick, 8260u, origin, 1.0f, 0);
     regeneration.advanceTo(wallClockTick, 8263u, origin, 1.0f);
@@ -1330,6 +1442,10 @@ void ParticleAnimationTests::persistentEmittersBoundInitialWallClockReplay()
     healing.advanceTo(wallClockTick, 8198u, origin, 1.0f);
     poisonFog.advanceTo(wallClockTick, 8199u, origin, 1.0f, false);
     geyser.advanceTo(wallClockTick, 8201u, origin, 1.0f);
+    vulcanSmoke.advanceTo(wallClockTick, 8197u, origin, 1.0f);
+    castingGather.advanceTo(wallClockTick, 8231u, 8231u, origin, 1.0f);
+    castingRound.advanceTo(wallClockTick, 8235u, 8235u, origin, 1.0f);
+    castingFailed.advanceTo(wallClockTick, 8239u, origin, 1.0f);
     QVERIFY(moshka.activeCount() > 0 && moshka.activeCount() <= 800);
     QCOMPARE(vision.activeCount(), 1);
     QCOMPARE(regeneration.activeCount(), 2);
@@ -1343,6 +1459,10 @@ void ParticleAnimationTests::persistentEmittersBoundInitialWallClockReplay()
     QVERIFY(healing.activeCount() <= 500);
     QVERIFY(poisonFog.activeCount() > 0);
     QVERIFY(geyser.activeCount() > 0 && geyser.activeCount() <= 500);
+    QVERIFY(vulcanSmoke.activeCount() > 0 && vulcanSmoke.activeCount() <= 400);
+    QVERIFY(castingGather.activeCount() > 0 && castingGather.activeCount() <= 500);
+    QVERIFY(castingRound.activeCount() > 0 && castingRound.activeCount() <= 600);
+    QVERIFY(castingFailed.activeCount() > 0 && castingFailed.activeCount() <= 500);
 }
 
 QTEST_APPLESS_MAIN(ParticleAnimationTests)

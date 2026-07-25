@@ -1,6 +1,6 @@
 # Evil Islands particle runtime evidence
 
-Last updated: 2026-07-24
+Last updated: 2026-07-25
 
 ## Purpose and method
 
@@ -1857,9 +1857,13 @@ factory `0x004861D8..0x004862B7`, creation `0x0048BD50`, and update
 `0x0048C010`. Its 60-percent upper-cloud and 40-percent rising-pillar split,
 phase delays, velocities, scale multipliers, and `Vulkan` resource name are
 confirmed. However, exhaustive read-only member scans of the selected Base
-and JMV resource sets find no `vulkan.mmp` payload. A borrowed atlas would be
-fabricated evidence, so texture fidelity remains explicitly unresolved even
-though the behavior is now closed.
+and JMV resource sets find no `vulkan.mmp` payload. A second installation-wide
+scan on 2026-07-25 parsed all 259 actual `.res` archives and all 208 `.mpr`
+archives beneath the read-only game installation without parser failures. It
+found no member containing either `vulkan` or `vulcan`, and the loose-file
+inventory found no matching filename. A borrowed atlas would be fabricated
+evidence, so texture fidelity remains explicitly unresolved even though the
+behavior is now closed.
 
 The active JMV archive pins `explosion.mmp`, `poisoncloud.mmp`, and
 `fireworks.mmp` as 1024-square, 11-mip DXT3 atlases with payload SHA-256
@@ -1872,3 +1876,67 @@ The Base variants are 256-square, three-mip `0x00004444` textures with hashes
 and `8BF4915BD31A78854ABB98213F584E6436E767103E463F4954C57E95F7E92DDF`.
 `FireSmoke` and `Healing` were already fingerprinted. These executable and
 resource findings precede the simulator and renderer changes below.
+
+## Casting specialization reconstruction
+
+The fingerprinted executable maps the nine remaining preview-only casting
+types to three separate callback families rather than to a recolored generic
+effect. Castingillusion, Castingdomination, Castingenchantment, and
+Castinghealing (8235--8238 / `0x202B`--`0x202E`) use factory range
+`0x004874B1..0x004875D0`, callbacks `0x00490C10`, `0x00491230`, and
+`0x00491390`, ordinary alpha, ten attempts, capacity 600, and a required
+carrier. Their atlases and source counts are type-specific: Illusion uses
+`Casting2` with two orbiting sources, Domination uses `Casting3` with one,
+Enchantment uses `Casting6` with two, and Healing uses `Casting1` with one.
+
+Each source begins on a half-radius horizontal ring. Illusion and Enchantment
+rotate by .3 radians per quant at .4 carrier-radius height; Domination rotates
+by .5 at 1.6 radius height and emits downward; Healing rotates by .5 at .4
+radius height and emits upward. Each source owns a persistent phase-zero
+anchor whose submitted size is `.4 * authoredScale * random(.8,1.2)`. Later
+particles choose a source, interpolate between its previous and current point,
+start at phase one with 28-quant life, rise with an initial vertical step
+`.03 * carrierRadius * sign * random(.85,1.2)` that grows by 1.03, contract
+their submitted size by .97, and cycle phases 12--15 after reaching phase 16.
+The exact seven-entry detach-alpha table is pinned in the fixture. A standalone
+catalog record uses its authored origin and scale as a stationary synthetic
+carrier bound.
+
+Castingfailed (8239 / `0x202F`) uses factory range
+`0x004875D1..0x0048761E`, callbacks `0x00491420`, `0x00491830`, and
+`0x004918D0`, ordinary-alpha `Teleport`, 25 attempts, and 13-quant births.
+Particles begin around a radius-.9..1.1 horizontal ring, use phase one,
+rise by `.1 * (2 * carrierRadius) * random(.7,1.3)` with 1.05 acceleration,
+contract by .97, advance one phase per quant, and follow the carrier origin.
+The exact twelve-entry alpha table is pinned. The standalone control again
+uses authored size as the synthetic carrier radius.
+
+Castingfire, Castingelectricity, Castingacid, and Castingdivination
+(8231--8234 / `0x2027`--`0x202A`) use factory range
+`0x0048761F..0x00487745` and callbacks `0x004918E0`, `0x00492030`, and
+`0x004921D0`. Fire, Electricity, and Acid use 20 attempts, life five local
+source populations, ordinary alpha, and respectively `FireSmoke`, `Casting8`,
+and `Casting7`; Fire and Acid hold a phase for five quants while Electricity
+advances every quant. Divination uses six attempts, five sources, additive
+`Casting4`, and a persistent central phase-zero flash.
+
+All gather-family births start at 60 percent of their synthetic carrier
+radius and contract inward over 13 updates (26 for Divination), with phase 14,
+life 13, and normalized directions perturbed by five wandering ten-unit local
+sources. Non-Divination size is `.08 * radius * random(.6,1.4)` and grows by
+1.07; Divination uses .07 and 1.05. The exact global-fade and two 15-entry
+alpha tables are fixture-pinned. Fire's callback compensates every fourth
+life step so its five-quant atlas timing remains exact.
+
+The selected JMV archive independently pins `casting3.mmp`, `casting4.mmp`,
+`casting7.mmp`, and `casting8.mmp` as 1024-square, 11-mip DXT3 atlases with
+payload hashes `D1A3DEA5E732233B9E62F7FEDC391AE6588AD854B27350F42DBB9FBF2D6E4319`,
+`99E7A0D94E00F5F11E4699F9EC8A019BB8A834C18F06448DD3A70AFF0007A3D5`,
+`86B7483B09CDDDC059A465CA732B25F68F6D9073090B3D300C4E555DF1E18A86`,
+and `7948829AE6636BCA5557A960B25C71D3E252372F38D6CD8C820F302F4C6BEAA4`.
+The Base variants are 256-square, three-mip `0x00004444` textures with hashes
+`6D0ED48BE10BFC981F50BD4693B74EC2A3C7DE80955283595C7DD3C154456FDA`,
+`8D62D43F6F5194FFFD844133D11B7BCAFFADEEBE9BB935AFD6A2F3DED47E7DE5`,
+`EDF9DE998B90AF338E00AEA294CB3AFADD34E03A139C4F513C8DE9D2FB727B37`,
+and `B412D2B1E2F7D6D0269359CDAD048D9623469DD58E83ADC246F2C50B0EE79108`.
+All executable and resource evidence above precedes implementation.

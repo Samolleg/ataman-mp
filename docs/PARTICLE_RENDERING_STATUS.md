@@ -50,13 +50,11 @@ factor, channelwise-maximum ambient/sun/local composition, generic-light
 runtime Z lift, fixed projected-shadow opacity, and a 64-light preview capacity
 covering the selected JMV corpus.
 
-## Partially reconstructed Tendri types
+## Remaining partial particle paths
 
 | ID | Name | Confirmed | Remaining before native-equivalent status |
 |---:|---|---|---|
-| 8195 / `0x2003` | Fire | Uses the Tendri update path; particles terminate instead of entering smoke after the fire frames. | Independently pin its full constructor, texture selection, scheduler fields, blend state, and authored controls; add a fingerprinted placed control. |
-| 8196 / `0x2004` | Smoke | Tendri spawn starts at atlas frame 8 and uses the shared later-frame update behavior. | Independently pin construction, texture/tint/scale, cadence, and a placed control. Current editor style is not claimed exact. |
-| 8197 / `0x2005` | Vulcansmoke | Exact constructor and callbacks are pinned: a 60-percent upper cloud and 40-percent rising pillar use separate phase delays, motion, scale, and damping under ordinary alpha. | The executable requests `Vulkan`, but no `vulkan.mmp` exists in the fingerprinted Base or JMV resource sets. Resolve the missing shipped/resource provenance before replacing the texture; do not borrow an unrelated smoke atlas. |
+| 8197 / `0x2005` | Vulcansmoke | Dedicated 88-percent/two-attempt, 400-cap simulator with the exact 60-percent upper cloud and 40-percent rising pillar split, separate phase delays, lifetimes, motion, scale and velocity damping, and ordinary alpha. | The executable requests `Vulkan`, but no `vulkan.mmp` exists in the fingerprinted Base or JMV resource sets. The behavior path is implemented; texture fidelity remains unresolved and no unrelated atlas is substituted. |
 | internal `0x2010` | special Tendri wrapper | Has separate count/lifetime fields, a special spawn wrapper, world-height adjustment, and fire-only termination. | Identify the public effect/owner that constructs it and document its resource and attachment path. It must not be generalized to ordinary Campfire. |
 
 ## Reconstructed weather previews
@@ -72,6 +70,7 @@ covering the selected JMV corpus.
 |---:|---|---|---|
 | 8192 / `0x2000` | Fireball | Dedicated ordinary-alpha `FireSmoke` stationary-head path with native one-attempt fallback, lifetime/phases, first-update head contraction, .94 size evolution, and zero-speed carrier behavior. | Capture a moving projectile owner to validate carrier velocity and transverse trail bases; the truthful bare-record path is closed. |
 | 8194 / `0x2002` | Fireblast | Dedicated finite 15-source ordinary-alpha `Explosion` burst with 60 births per quant, native radial source initialization, shell growth, source motion, cloud/trail split, phase/size/velocity laws and exact alpha table. The editor repeats the completed burst for catalog inspection. | Capture the native spell-supplied origin/size; the stationary one-shot callback path is closed. |
+| 8195–8196 / `0x2003`–`0x2004` | Fire, Smoke | Exact shared Tendri factory/scheduler/spawn/update replay with type-selected fire-only retirement or frame-eight smoke start, authored scale mutation of bounds/size/rise/wind response, native atlas cadence, cap, ordinary alpha, billboard conversion and logical interpolation. | The standalone authored controls are closed; moving/wind controls exercise the same confirmed callback fields. |
 | 8198 / `0x2006` | Healing | Dedicated additive `Healing` spiral with `round(6*(.5*authoredScale)+2)` synthetic carrier sources, 36-quant expand/contract/rise motion, attached phase-0..7 anchors, phase-8..15 tails and native fade. | Capture a gameplay carrier's actual object bound; the catalog uses authored size as its explicit synthetic spherical bound. |
 | 8199–8200 / `0x2007`–`0x2008` | Poisonfog, Aggressionfog | Dedicated persistent ordinary-alpha `PoisonCloud` grids with native radius clipping, jitter, surface-relative Z, phase animation, poison opacity and aggression subtype color. | Validate terrain sampling on a non-flat control; the flat catalog path is closed. |
 | 8201 / `0x2009` | Geyser | Dedicated additive `Fireworks` effect with persistent phase-15 flash, three active/relax sources, native direction ranges, 20-attempt cadence, four-frame-row phase cycling, ballistic gravity, size decay and alpha loss. | Capture a native placed/spell control as a visual validation case; the stationary callback path is closed. |
@@ -92,6 +91,9 @@ covering the selected JMV corpus.
 | 8217 / `0x2019` | Teleport | Dedicated finite signed radial column with native radial distribution, dual phase bands, vertical/alpha evolution, population limits and `Teleport` atlas using ordinary alpha blending. The editor repeats the completed one-shot for catalog inspection. | Capture a negative authored-scale game control; both signed callback paths are implemented from binary evidence. |
 | 8218 / `0x201A` | Antimagic | Dedicated short-lived rotating carrier shell with native 24-attempt cadence, four-quant life, six-entry scale table, rare size class, `AntiMagic` atlas and additive blending. The catalog uses authored scale as an explicit synthetic carrier bound. | Capture an attached carrier with a native bounding volume; the stationary synthetic-bound control is closed. |
 | 8219–8230 / `0x201B`–`0x2026` | Modifier1–Modifier12 | Dedicated finite carrier-source family with subtype phases/axes, signed contraction or expansion, anchor and trail populations, exact alpha/scale evolution, `Stun` atlas and additive blending. The catalog uses authored scale and identity orientation as an explicit synthetic carrier. | Capture representative attached carriers to validate their actual bounds and direction; the complete identity-carrier controls are implemented. |
+| 8231–8234 / `0x2027`–`0x202A` | Castingfire, Castingelectricity, Castingacid, Castingdivination | Dedicated inward-gathering synthetic-carrier shells with native source wandering, attempt counts, phase timing, contraction, size growth, alpha tables, the Divination center flash, type-selected `FireSmoke`/`Casting8`/`Casting7`/`Casting4` atlases, and the native Divination additive mode. | Validate gameplay cast/above-head attachment points and real carrier bounds; the stationary synthetic-carrier controls are closed. |
+| 8235–8238 / `0x202B`–`0x202E` | Castingillusion, Castingdomination, Castingenchantment, Castinghealing | Dedicated one- or two-source orbiting rings with type-specific height/direction/rotation, persistent anchors, interpolated rising trails, native phase wrap, size/alpha evolution, and `Casting2`/`Casting3`/`Casting6`/`Casting1` atlases using ordinary alpha. | Validate gameplay cast attachment points and detach fade; the stationary synthetic-carrier controls are closed. |
+| 8239 / `0x202F` | Castingfailed | Dedicated persistent ordinary-alpha `Teleport` ring with native 25-attempt cadence, carrier-relative base, rising acceleration, phase advance, contraction, and exact alpha fade. | Validate the gameplay carrier center/bound and detach timing; the synthetic spherical carrier control is closed. |
 | 8241–8243 / `0x2031`–`0x2033` | Blood2–Blood4 | Shared native Blood burst with subtype-specific RainSnow phases 13–15, finite source, motion/scale damping, gravity, alpha table and ordinary blending. The catalog uses authored scale as an explicit synthetic carrier bound. | Capture attached carriers with different bounds; the standalone phase-specialized controls are closed. |
 | 8244–8247 / `0x2034`–`0x2037` | A4bloodred/green/blue/black | Dedicated one-quant multi-source radial splatter with exact random ranges, gravity/terminal velocity, ground-zero retirement, phase-12 RainSnow atlas and additive blending. Bare records correctly remain the same white burst because color is supplied externally by gameplay owners. | Capture an owner-colored gameplay control for each external tint; the standalone factory path is closed. |
 | 8248 / `0x2038` | Zoneexit | Dedicated continuous rising phase-row column with the native fixed 25-birth cadence, lifetime/alpha sequence, size distribution, `ZoneExit` atlas and ordinary blending. Bare records retain the native zero planar basis; spread requires external owner parameters. | Capture an owner-configured exit zone to validate nonzero planar basis and wall-direction tint; the bare record path is closed. |
@@ -118,17 +120,9 @@ covering the selected JMV corpus.
 
 ## Preview-only families
 
-These IDs currently receive a recognizable editor style, but their native
-runtime behavior has not been reconstructed:
-
-| IDs | Names |
-|---|---|
-| 8231 | Castingfire |
-| 8232–8239 | Elemental, divination, illusion, domination, enchantment, healing, and failed casting variants |
-
-Texture names used by these previews are limited to direct resource matches
-where available. Procedural soft sprites are intentional placeholders rather
-than borrowed unrelated assets.
+No public catalog ID remains on the generic colored-circle particle preview.
+The unresolved rows above concern owner-dependent controls or missing authored
+resources rather than an unreconstructed callback family.
 
 ## Torch corpus audit
 
