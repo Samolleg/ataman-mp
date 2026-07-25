@@ -1,0 +1,8 @@
+EI Mapper: Endurance Edition 0.3.0-alpha.13
+Test candidate: AI graph eight-profile terrain and water policy R6
+Branch: feature/mpr-settings
+Commit: A870CD4
+Built with Qt 5.12.12 / MinGW 7.3 through the documented linked-worktree/ASCII-drive workflow.
+Automated evidence: AI graph tests 12 passed, 0 failed; Endurance document tests 63 passed, 0 failed, 3 fixture-dependent skips; release build passed.
+The editor was not launched interactively during automated validation.
+No game archive, map corpus, save, log, dump, or persisted Endurance options are included.
