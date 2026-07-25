@@ -10,9 +10,9 @@ preserves the user's landscape dock arrangement.
 - MPR dirty state is shown with an asterisk in Loaded Map.
 - **MPR Settings** is a persistent inspector: unloading shows **No MPR loaded**
   without removing the dock, and the same inspector updates on the next load.
-- Landscape Tools remembers its complete dock arrangement during the session,
-  including its position relative to MPR Settings, while still restoring the
-  ordinary workspace when landscape mode closes.
+- Landscape Tools now follows the same native Qt dock behavior as Maps and
+  Collections: toggling it changes visibility only and retains its own dock
+  slot without snapshotting or restoring the rest of the workspace.
 - Atlas Materials now explains that the displayed records are shared
   overlay/liquid parameter slots, not ground-texture choices. They remain
   read-only pending validated staged serialization.
