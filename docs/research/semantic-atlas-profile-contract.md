@@ -29,7 +29,19 @@ contain atlas imagery, MPR/SEC payloads, resource archives, or installation
 paths, and saving it does not modify an MPR, MMP, or RES archive. Manual atlas
 tile painting remains the fallback when no reviewed profile is available.
 
-This increment supplies the inference, validation, persistence, and approval
-gate. The editor review surface can edit family names, split/merge decisions,
-layer and underwater classification, then persist the reviewed profile through
-this contract without changing terrain resources.
+The Landscape Tools **Convert / review semantic atlas...** workflow presents
+the inferred families and their member slots beside an atlas-tile preview. It
+supports family renaming, slot-subset splitting, same-layer family merging,
+land/overlay and underwater classification, per-family and per-slot ambiguity
+review, and live missing-transition diagnostics. Drafts may be saved without
+enabling automatic painting. **Approve and save** succeeds only when every
+ambiguity is cleared, every signature stays within one layer, every family has
+a name and uniform paint tile, and the reviewed catalog can be constructed.
+
+Profiles are stored below the application's configuration directory in
+`terrain-atlas-profiles`, using a sanitized namespace plus a short namespace
+hash to avoid filename collisions, and atomic JSON replacement. On map load the editor revalidates namespace, decoded-pixel hash,
+and slot count before activating an approved profile. A mismatch keeps semantic
+auto-paint disabled and offers a fresh proposal for review; it never overwrites
+the mismatched profile silently. The atlas viewer labels its semantic state and
+adds family/signature review details to each tile tooltip.

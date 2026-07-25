@@ -56,11 +56,30 @@ struct STerrainAtlasProfile
     bool save(const QString& path, CValidationReport* report = nullptr) const;
     static bool load(const QString& path, STerrainAtlasProfile* profile,
                      CValidationReport* report = nullptr);
+    bool normalizeMembership(CValidationReport* report = nullptr);
+    bool mergeFamilies(const QVector<qint32>& familyIds, const QString& mergedName,
+                       CValidationReport* report = nullptr);
+    bool splitFamily(qint32 familyId, const QVector<int>& selectedSlots,
+                     const QString& newName,
+                     CValidationReport* report = nullptr);
     bool validateBinding(const QString& currentNamespace,
                          const QByteArray& currentAtlasPixelSha256,
                          int currentSlotCount,
                          CValidationReport* report = nullptr) const;
     STerrainAtlasAnalysis approvedAnalysis(CValidationReport* report = nullptr) const;
+};
+
+class CTerrainAtlasProfileStore
+{
+public:
+    static QString profilePath(const QString& mprNamespace,
+                               const QString& rootDirectory = QString());
+    static bool save(const STerrainAtlasProfile& profile,
+                     const QString& rootDirectory = QString(),
+                     CValidationReport* report = nullptr);
+    static bool load(const QString& mprNamespace, STerrainAtlasProfile* profile,
+                     const QString& rootDirectory = QString(),
+                     CValidationReport* report = nullptr);
 };
 
 class CTerrainAtlasProfileInference
