@@ -14,6 +14,12 @@ editor diagnostic and does not silently replace an embedded or external graph.
   depth with their own clearance, and the levitating profile follows the water
   surface;
 - active-profile `tileDesc.reg` speed and cost values define terrain quality;
+- visible FIG parts contribute their authored, complexion-adjusted navigation
+  bounds after current part pose, object scale, rotation, and position;
+- oriented authored footprints are rasterized directly instead of being widened
+  to world-axis mesh boxes;
+- `BASE*` parts provide a single bridge-deck navigation surface, while
+  `CROWN*` and `EMPTY*` parts retain their non-blocking classifications;
 - small, medium, and very-large footprint masks expand impassable terrain;
 - ordinary and levitating slope limits remain distinct;
 - graph-node placement prefers higher-quality terrain, and link weights include
@@ -23,18 +29,18 @@ editor diagnostic and does not silently replace an embedded or external graph.
 
 ## Deliberate diagnostic boundary
 
-The editor does not yet decode the authored navigation volumes attached to
-figures. Regeneration therefore rasterizes current rendered bounds as
-conservative hard obstacles. It cannot yet distinguish hard, soft, easy,
-danger, or bridge volumes, and cannot raise the navigation surface onto an
-authored bridge. Whenever such proxy bounds are present, the workflow log
-states that object collision is approximate. The loaded game graph remains the
-authoritative comparison for those cases.
+If a visible FIG part lacks authored bounds, regeneration still uses its
+rendered-volume bounds as a conservative fallback and reports that fallback in
+the workflow log. The graph format is 2.5D: one XY cell can carry one selected
+surface, so an elevated bridge deck and a simultaneous traversable underpass
+cannot both be represented. The higher overlapping bridge deck wins, matching
+the single-surface contract.
 
-Exact object parity requires an independently validated reader for authored
-collision volumes and passability classes. Until then, generated previews must
-not be described as source-exact around bridges, doors, overhangs, or complex
-multi-level objects.
+The currently selected body parts and current transient part poses are used.
+Changes that alter which collision assembly or door pose is active therefore
+require regeneration. The loaded game graph remains the authoritative
+comparison for unusual multi-level assemblies and any profile-specific object
+metadata that is not present in the loaded FIG assembly.
 
 ## Focused automated checks
 
@@ -43,8 +49,9 @@ multi-level objects.
 - deep water blocks all seven ordinary layers while preserving levitation;
 - configured impassable terrain types block every layer;
 - small, medium, and very-large profiles retain independent clearance;
-- fences, overhead clearance, walk slopes, and levitating slopes retain their
-  expected topology;
+- fences, authored overhead clearance, bridge decks over deep water, easy and
+  ignored parts, walk slopes, and levitating slopes retain their expected
+  topology;
 - synthetic terrain traversal registries are parsed without shipping private
   profile resources.
 
@@ -58,6 +65,8 @@ multi-level objects.
 3. Compare the mountain test location. Ordinary layers must not connect a
    summit directly down an inaccessible cliff; levitation may retain only links
    within its separate slope policy.
-4. Compare fence 568. A conservative regenerated block is expected. Treat any
-   bridge, doorway, or complex-volume mismatch as the documented object-metadata
-   boundary, not as evidence that water or terrain-profile policy is wrong.
+4. Compare fence 568 and a known bridge. The fence must block the same profile
+   layers as the loaded graph; the bridge must replace water/terrain height only
+   across its authored footprint. Treat a multi-level underpass mismatch as the
+   documented single-surface boundary, not as evidence that terrain policy is
+   wrong.

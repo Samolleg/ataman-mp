@@ -2,14 +2,28 @@
 #define AI_GRAPH_PREVIEW_BUILDER_H
 
 #include <QVector>
+#include <QVector2D>
 #include <QVector3D>
 
 #include "ai_graph_document.h"
 
+enum class EAiGraphObjectPassability : quint8
+{
+    Blocking,
+    Hard,
+    Easy,
+    Danger,
+    Bridge,
+    Ignored
+};
+
 struct SAiGraphCollisionProxy
 {
-    QVector3D minimum;
-    QVector3D maximum;
+    QVector<QVector2D> footprint;
+    float minimumZ{0.0f};
+    float maximumZ{0.0f};
+    EAiGraphObjectPassability passability{EAiGraphObjectPassability::Blocking};
+    bool authored{false};
     quint32 objectId{0};
 };
 
@@ -38,6 +52,8 @@ struct SAiGraphPreviewBuildResult
     CAiGraphDocument document;
     int blockedAiTiles{0};
     int collisionProxyCount{0};
+    int authoredCollisionProxyCount{0};
+    int bridgeAiTiles{0};
     int waterAiTiles{0};
     QStringList warnings;
 };

@@ -1462,11 +1462,29 @@ bool CView::captureAiGraphPreviewBuildInput(SAiGraphPreviewBuildInput* input,
                 for(const SNavigationCollisionProxy& source : object->navigationCollisionProxies())
                 {
                     SAiGraphCollisionProxy proxy;
-                    proxy.minimum = source.minimum;
-                    proxy.maximum = source.maximum;
+                    proxy.footprint = source.footprint;
+                    proxy.minimumZ = source.minimumZ;
+                    proxy.maximumZ = source.maximumZ;
+                    switch(source.kind)
+                    {
+                    case ENavigationVolumeKind::Hard:
+                        proxy.passability = EAiGraphObjectPassability::Hard; break;
+                    case ENavigationVolumeKind::Easy:
+                        proxy.passability = EAiGraphObjectPassability::Easy; break;
+                    case ENavigationVolumeKind::Danger:
+                        proxy.passability = EAiGraphObjectPassability::Danger; break;
+                    case ENavigationVolumeKind::Bridge:
+                        proxy.passability = EAiGraphObjectPassability::Bridge; break;
+                    case ENavigationVolumeKind::Ignored:
+                        proxy.passability = EAiGraphObjectPassability::Ignored; break;
+                    case ENavigationVolumeKind::Blocking:
+                    default:
+                        proxy.passability = EAiGraphObjectPassability::Blocking; break;
+                    }
+                    proxy.authored = source.authored;
                     proxy.objectId = source.objectId;
                     input->collisionProxies.append(proxy);
-                    input->collisionMetadataApproximate = true;
+                    input->collisionMetadataApproximate |= !source.authored;
                 }
             }
     return true;
@@ -1554,14 +1572,16 @@ void CView::startAiGraphPreviewRegeneration()
                 return;
             }
             m_aiGraphDocument = result.document;
-            m_aiGraphSource = tr("Regenerated: %1 collision parts, %2 water samples")
-                .arg(result.collisionProxyCount).arg(result.waterAiTiles);
+            m_aiGraphSource = tr("Regenerated: %1/%2 authored collision parts, %3 bridge cells, %4 water samples")
+                .arg(result.authoredCollisionProxyCount).arg(result.collisionProxyCount)
+                .arg(result.bridgeAiTiles).arg(result.waterAiTiles);
             m_aiGraphOverlayDirty = true;
             if(m_aiGraphPreviewToggle && !m_aiGraphPreviewToggle->isChecked())
                 m_aiGraphPreviewToggle->setChecked(true);
-            ei::log(eLogInfo, QString("AI graph diagnostic regeneration complete dimensions:%1x%2 proxies:%3 human_blocked_tiles:%4")
+            ei::log(eLogInfo, QString("AI graph diagnostic regeneration complete dimensions:%1x%2 proxies:%3 authored_proxies:%4 bridge_tiles:%5 human_blocked_tiles:%6")
                 .arg(result.document.width()).arg(result.document.height())
-                .arg(result.collisionProxyCount).arg(result.blockedAiTiles));
+                .arg(result.collisionProxyCount).arg(result.authoredCollisionProxyCount)
+                .arg(result.bridgeAiTiles).arg(result.blockedAiTiles));
             for(const QString& warning : result.warnings)
                 ei::log(eLogWarning, "AI graph preview: " + warning);
             syncAiGraphPreviewWidget();
