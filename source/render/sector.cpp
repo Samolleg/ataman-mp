@@ -208,6 +208,17 @@ bool CSector::previewCanonicalPayload(const QByteArray& payload)
     return true;
 }
 
+void CSector::setPreviewMaxZ(float maxZ)
+{
+    for(QVector<CTile>& row : m_arrLand)
+        for(CTile& tile : row)
+            tile.setMaxZ(maxZ);
+    for(QVector<CTile>& row : m_arrWater)
+        for(CTile& tile : row)
+            tile.setMaxZ(maxZ);
+    updateDrawData();
+}
+
 QByteArray CSector::serializeSector()
 {
     QByteArray secData;

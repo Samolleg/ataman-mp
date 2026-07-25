@@ -58,6 +58,7 @@ public:
     virtual int tileIndex() const;
     ushort tileRotation() const {return m_rotNum;}
     void setTile(int index, int rotNum);
+    void setMaxZ(float maxZ) { m_maxZ = maxZ; }
     const QVector<QVector<SSecVertex>>& arrVertex(){return m_arrVertex;}
     void setMaterialIndex(short matIndex) {m_materialIndex = matIndex;}
     short materialIndex() const {return m_materialIndex;}
