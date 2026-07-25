@@ -1405,27 +1405,50 @@ bool CView::captureAiGraphPreviewBuildInput(SAiGraphPreviewBuildInput* input,
     const int aiWidth = input->graphWidth * CAiGraphPreviewBuilder::AiTilesPerGraphCell;
     const int aiHeight = input->graphHeight * CAiGraphPreviewBuilder::AiTilesPerGraphCell;
     input->terrainHeights.resize(aiWidth * aiHeight);
-    const float maximumHeight = m_mprDocument.mapInfo().maxZ;
+    input->waterDepths.fill(0.0f, aiWidth * aiHeight);
+    input->terrainTypes.fill(quint8(eUndefined), aiWidth * aiHeight);
+    const QVector<SMaterial>& materials = m_pLand->materials();
     for(int y = 0; y < aiHeight; ++y)
         for(int x = 0; x < aiWidth; ++x)
         {
-            const float worldX = (x + 0.5f) * CAiGraphPreviewBuilder::AiTileWorldSize;
-            const float worldY = (y + 0.5f) * CAiGraphPreviewBuilder::AiTileWorldSize;
-            const int x0 = qBound(0, int(qFloor(worldX)), m_terrainEdit.vertexCountX() - 1);
-            const int y0 = qBound(0, int(qFloor(worldY)), m_terrainEdit.vertexCountY() - 1);
-            const int x1 = qMin(x0 + 1, m_terrainEdit.vertexCountX() - 1);
-            const int y1 = qMin(y0 + 1, m_terrainEdit.vertexCountY() - 1);
-            const float fx = qBound(0.0f, worldX - float(x0), 1.0f);
-            const float fy = qBound(0.0f, worldY - float(y0), 1.0f);
-            const float top = float(m_terrainEdit.height(x0, y0)) * (1.0f - fx)
-                            + float(m_terrainEdit.height(x1, y0)) * fx;
-            const float bottom = float(m_terrainEdit.height(x0, y1)) * (1.0f - fx)
-                               + float(m_terrainEdit.height(x1, y1)) * fx;
-            input->terrainHeights[y * aiWidth + x] =
-                (top * (1.0f - fy) + bottom * fy) * maximumHeight / 65535.0f;
+            const int index = y * aiWidth + x;
+            input->terrainHeights[index] = m_terrainEdit.navigationHeightSample(
+                x, y, ETerrainTileLayer::Land);
+            const int globalTileX = x / 4;
+            const int globalTileY = y / 4;
+            bool landAvailable = false;
+            const quint16 landPacked = m_terrainEdit.packedTile(
+                globalTileX, globalTileY, ETerrainTileLayer::Land, &landAvailable);
+            bool typeFound = false;
+            const qint32 terrainType = landAvailable
+                ? m_terrainEdit.tileType(landPacked, &typeFound) : qint32(eUndefined);
+            if(typeFound && terrainType >= 0 && terrainType < eLast)
+                input->terrainTypes[index] = quint8(terrainType);
+
+            bool overlayAvailable = false;
+            const qint16 materialIndex = m_terrainEdit.overlayMaterialIndex(
+                globalTileX, globalTileY, &overlayAvailable);
+            if(overlayAvailable && materialIndex >= 0 && materialIndex < materials.size()
+               && materials.at(materialIndex).type == eTerrainWater)
+            {
+                bool heightAvailable = false;
+                const float overlayHeight = m_terrainEdit.navigationHeightSample(
+                    x, y, ETerrainTileLayer::Overlay, &heightAvailable);
+                if(heightAvailable)
+                    input->waterDepths[index] = qMax(
+                        0.0f, overlayHeight - input->terrainHeights.at(index));
+            }
         }
 
+    QString traversalError;
+    input->terrainTraversal = CAiGraphPreviewBuilder::parseTerrainTraversalRegistry(
+        CObjectList::getInstance()->resourceData(QStringLiteral("tileDesc.reg")),
+        &traversalError);
+    if(input->terrainTraversal.isEmpty())
+        ei::log(eLogWarning, "AI graph preview: " + traversalError);
+
     input->collisionProxies.clear();
+    input->collisionMetadataApproximate = false;
     for(CMob* mob : m_aMob)
         if(mob)
             for(CNode* node : mob->nodes())
@@ -1443,6 +1466,7 @@ bool CView::captureAiGraphPreviewBuildInput(SAiGraphPreviewBuildInput* input,
                     proxy.maximum = source.maximum;
                     proxy.objectId = source.objectId;
                     input->collisionProxies.append(proxy);
+                    input->collisionMetadataApproximate = true;
                 }
             }
     return true;
@@ -1530,14 +1554,16 @@ void CView::startAiGraphPreviewRegeneration()
                 return;
             }
             m_aiGraphDocument = result.document;
-            m_aiGraphSource = tr("Regenerated: %1 collision parts")
-                .arg(result.collisionProxyCount);
+            m_aiGraphSource = tr("Regenerated: %1 collision parts, %2 water samples")
+                .arg(result.collisionProxyCount).arg(result.waterAiTiles);
             m_aiGraphOverlayDirty = true;
             if(m_aiGraphPreviewToggle && !m_aiGraphPreviewToggle->isChecked())
                 m_aiGraphPreviewToggle->setChecked(true);
             ei::log(eLogInfo, QString("AI graph diagnostic regeneration complete dimensions:%1x%2 proxies:%3 human_blocked_tiles:%4")
                 .arg(result.document.width()).arg(result.document.height())
                 .arg(result.collisionProxyCount).arg(result.blockedAiTiles));
+            for(const QString& warning : result.warnings)
+                ei::log(eLogWarning, "AI graph preview: " + warning);
             syncAiGraphPreviewWidget();
             update();
             if(m_aiGraphRegenerationPending && m_aiGraphRegenerationTimer)

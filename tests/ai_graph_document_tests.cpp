@@ -1,5 +1,6 @@
 #include <QtTest>
 #include <QDataStream>
+#include <QtEndian>
 
 #include "ai_graph_document.h"
 #include "ai_graph_preview_builder.h"
@@ -37,6 +38,35 @@ QByteArray syntheticGraph(int width, int height, bool trailing = false)
         data.append("opaque-tail", 11);
     return data;
 }
+
+void putU16(QByteArray* data, int offset, quint16 value)
+{
+    qToLittleEndian<quint16>(value, reinterpret_cast<uchar*>(data->data() + offset));
+}
+
+void putU32(QByteArray* data, int offset, quint32 value)
+{
+    qToLittleEndian<quint32>(value, reinterpret_cast<uchar*>(data->data() + offset));
+}
+
+QByteArray syntheticTraversalRegistry()
+{
+    QByteArray data(67, 0);
+    putU32(&data, 0, 0x45ab3efb);
+    putU16(&data, 4, 1);
+    putU16(&data, 6, 0xffff);
+    putU32(&data, 8, 12);
+    putU16(&data, 12, 2);
+    putU16(&data, 14, 1);
+    data[16] = '4';
+    putU16(&data, 17, 0xffff); putU32(&data, 19, 29);
+    putU16(&data, 23, 0xffff); putU32(&data, 25, 41);
+    data[41] = 0; putU16(&data, 42, 5); data.replace(44, 5, "Speed");
+    putU32(&data, 49, 700);
+    data[53] = 0; putU16(&data, 54, 7); data.replace(56, 7, "CostMul");
+    putU32(&data, 63, 50);
+    return data;
+}
 }
 
 class AiGraphDocumentTests : public QObject
@@ -50,6 +80,9 @@ private slots:
     void initializesDecodedPreviewWithSerializableBytes();
     void regenerationRespectsFenceAndVerticalClearanceProfiles();
     void regenerationRejectsGameScaleTerrainCliffs();
+    void regenerationAppliesWaterClearanceToEveryProfile();
+    void regenerationHonorsConfiguredTerrainTraversal();
+    void parsesProfileTerrainTraversalRegistry();
 };
 
 void AiGraphDocumentTests::parsesKindMajorPlanesAndSignedValues()
@@ -195,6 +228,71 @@ void AiGraphDocumentTests::regenerationRejectsGameScaleTerrainCliffs()
     QVERIFY2(flyCliff.valid, qPrintable(flyCliff.error));
     QCOMPARE(flyCliff.document.weight(0, 1, 1, 6), qint16(-1));
     QCOMPARE(flyCliff.document.weight(3, 1, 1, 6), qint16(-1));
+}
+
+void AiGraphDocumentTests::regenerationAppliesWaterClearanceToEveryProfile()
+{
+    SAiGraphPreviewBuildInput input;
+    input.graphWidth = 4;
+    input.graphHeight = 3;
+    const int aiWidth = input.graphWidth * CAiGraphPreviewBuilder::AiTilesPerGraphCell;
+    const int aiHeight = input.graphHeight * CAiGraphPreviewBuilder::AiTilesPerGraphCell;
+    input.terrainHeights.fill(0.0f, aiWidth * aiHeight);
+    input.waterDepths.fill(0.0f, aiWidth * aiHeight);
+    for(int y = 0; y < aiHeight; ++y)
+        for(int x = 15; x <= 17; ++x)
+            input.waterDepths[y * aiWidth + x] = 0.1f;
+
+    const SAiGraphPreviewBuildResult shallow = CAiGraphPreviewBuilder::build(input);
+    QVERIFY2(shallow.valid, qPrintable(shallow.error));
+    QCOMPARE(shallow.document.weight(1, 1, 1, 6), qint16(-1));
+    QVERIFY(shallow.document.weight(0, 1, 1, 6) >= 0);
+    QVERIFY(shallow.document.weight(2, 1, 1, 6) >= 0);
+
+    for(int y = 0; y < aiHeight; ++y)
+        for(int x = 15; x <= 17; ++x)
+            input.waterDepths[y * aiWidth + x] = 6.0f;
+    const SAiGraphPreviewBuildResult deep = CAiGraphPreviewBuilder::build(input);
+    QVERIFY2(deep.valid, qPrintable(deep.error));
+    QVERIFY(deep.document.weight(0, 1, 1, 6) >= 0);
+    for(int layer = 1; layer < CAiGraphDocument::LayerCount; ++layer)
+        QCOMPARE(deep.document.weight(layer, 1, 1, 6), qint16(-1));
+}
+
+void AiGraphDocumentTests::regenerationHonorsConfiguredTerrainTraversal()
+{
+    SAiGraphPreviewBuildInput input;
+    input.graphWidth = 4;
+    input.graphHeight = 3;
+    const int aiWidth = input.graphWidth * CAiGraphPreviewBuilder::AiTilesPerGraphCell;
+    const int aiHeight = input.graphHeight * CAiGraphPreviewBuilder::AiTilesPerGraphCell;
+    input.terrainHeights.fill(0.0f, aiWidth * aiHeight);
+    input.terrainTypes.fill(0, aiWidth * aiHeight);
+    input.terrainTraversal.resize(16);
+    input.terrainTraversal[0].speed = 1024;
+    input.terrainTraversal[0].cost = 1;
+    input.terrainTraversal[4].speed = -1;
+    input.terrainTraversal[4].cost = 1;
+    for(int y = 0; y < aiHeight; ++y)
+        for(int x = 15; x <= 17; ++x)
+            input.terrainTypes[y * aiWidth + x] = 4;
+    const SAiGraphPreviewBuildResult result = CAiGraphPreviewBuilder::build(input);
+    QVERIFY2(result.valid, qPrintable(result.error));
+    for(int layer = 0; layer < CAiGraphDocument::LayerCount; ++layer)
+        QCOMPARE(result.document.weight(layer, 1, 1, 6), qint16(-1));
+}
+
+void AiGraphDocumentTests::parsesProfileTerrainTraversalRegistry()
+{
+    QString error;
+    const QVector<SAiTerrainTraversal> traversal =
+        CAiGraphPreviewBuilder::parseTerrainTraversalRegistry(
+            syntheticTraversalRegistry(), &error);
+    QVERIFY2(!traversal.isEmpty(), qPrintable(error));
+    QCOMPARE(traversal.size(), 16);
+    QCOMPARE(traversal.at(4).speed, 700);
+    QCOMPARE(traversal.at(4).cost, 50);
+    QCOMPARE(traversal.at(3).speed, -1);
 }
 
 QTEST_APPLESS_MAIN(AiGraphDocumentTests)

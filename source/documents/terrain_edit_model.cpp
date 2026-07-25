@@ -466,6 +466,7 @@ bool CTerrainEditModel::load(const CMprDocument& document, CValidationReport* re
         source.sectorX = sector.sectorX;
         source.sectorY = sector.sectorY;
         source.type = sector.type;
+        source.overlayVertexOffset = sector.overlayVertexOffset;
         source.landTileOffset = sector.landTileOffset;
         source.overlayTileOffset = sector.overlayTileOffset;
         source.overlayMaterialOffset = sector.overlayMaterialOffset;
@@ -981,6 +982,95 @@ STerrainHeightCommand CTerrainEditModel::makeHeightmapImport(
         }
     }
     return command;
+}
+
+qint16 CTerrainEditModel::overlayMaterialIndex(int globalTileX, int globalTileY,
+                                               bool* available) const
+{
+    int sectorIndex = -1;
+    int localTile = -1;
+    if(!tileLocation(globalTileX, globalTileY, &sectorIndex, &localTile))
+    {
+        if(available)
+            *available = false;
+        return -1;
+    }
+    const SSector& sector = m_sectors.at(sectorIndex);
+    const bool present = overlayTileIsActive(sector, localTile);
+    if(available)
+        *available = present;
+    return present ? readOverlayMaterial(sector.currentPayload,
+                                         sector.source.overlayMaterialOffset,
+                                         localTile) : qint16(-1);
+}
+
+float CTerrainEditModel::navigationHeightSample(int aiTileX, int aiTileY,
+                                                ETerrainTileLayer layer,
+                                                bool* available) const
+{
+    if(available)
+        *available = false;
+    if(aiTileX < 0 || aiTileY < 0
+       || aiTileX >= (m_vertexCountX - 1) * 2
+       || aiTileY >= (m_vertexCountY - 1) * 2)
+        return 0.0f;
+
+    const int quadX = aiTileX / 2;
+    const int quadY = aiTileY / 2;
+    quint16 h00 = 0;
+    quint16 h10 = 0;
+    quint16 h01 = 0;
+    quint16 h11 = 0;
+    if(layer == ETerrainTileLayer::Land)
+    {
+        h00 = height(quadX, quadY);
+        h10 = height(quadX + 1, quadY);
+        h01 = height(quadX, quadY + 1);
+        h11 = height(quadX + 1, quadY + 1);
+    }
+    else
+    {
+        const int globalTileX = aiTileX / 4;
+        const int globalTileY = aiTileY / 4;
+        int sectorIndex = -1;
+        int localTile = -1;
+        if(!tileLocation(globalTileX, globalTileY, &sectorIndex, &localTile))
+            return 0.0f;
+        const SSector& sector = m_sectors.at(sectorIndex);
+        if(!overlayTileIsActive(sector, localTile) || sector.source.overlayVertexOffset == 0)
+            return 0.0f;
+        const int localQuadX = quadX - sector.source.sectorX * kSectorStride;
+        const int localQuadY = quadY - sector.source.sectorY * kSectorStride;
+        if(localQuadX < 0 || localQuadY < 0
+           || localQuadX >= kSectorStride || localQuadY >= kSectorStride)
+            return 0.0f;
+        const auto readOverlayHeight = [&](int x, int y)
+        {
+            const quint64 offset = sector.source.overlayVertexOffset
+                + quint64(y * kSectorVertices + x) * kVertexSize + 2;
+            return qFromLittleEndian<quint16>(reinterpret_cast<const uchar*>(
+                sector.currentPayload.constData() + offset));
+        };
+        h00 = readOverlayHeight(localQuadX, localQuadY);
+        h10 = readOverlayHeight(localQuadX + 1, localQuadY);
+        h01 = readOverlayHeight(localQuadX, localQuadY + 1);
+        h11 = readOverlayHeight(localQuadX + 1, localQuadY + 1);
+    }
+
+    const bool right = (aiTileX & 1) != 0;
+    const bool bottom = (aiTileY & 1) != 0;
+    float raw = 0.0f;
+    if(!right && !bottom)
+        raw = 0.5f * h00 + 0.25f * h10 + 0.25f * h01;
+    else if(right && !bottom)
+        raw = 0.5f * h10 + 0.25f * h00 + 0.25f * h11;
+    else if(!right && bottom)
+        raw = 0.5f * h01 + 0.25f * h00 + 0.25f * h11;
+    else
+        raw = 0.5f * h11 + 0.25f * h10 + 0.25f * h01;
+    if(available)
+        *available = true;
+    return raw * m_maxZ / 65535.0f;
 }
 
 STerrainVerticalScaleCommand CTerrainEditModel::makeVerticalScale(

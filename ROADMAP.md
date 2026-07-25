@@ -287,18 +287,26 @@ source-race refusal, pre-save backup, atomic replacement, post-commit byte and
 reopen verification, and canonical document rebinding. The legacy rebuilding
 serializer remains forbidden for every changed MPR.
 
-- [ ] Preserve untouched archive members, internal names, member order,
+The user-run baseline closure matrix passed on 2026-07-26. This closes the
+lossless sculpt/paint/save baseline, not every follow-up in this section. The
+semantic material definition bundled with Endurance is currently production-
+reviewed only for the Zone 1 atlas. Other zone or custom atlases remain usable
+through manual tile painting, but automatic material painting must stay gated
+until the built-in atlas conversion/review workflow has produced and validated
+their material tables.
+
+- [x] Preserve untouched archive members, internal names, member order,
   timestamps/metadata, alignment, unknown entries, and original MP/SEC
   namespaces.
-- [ ] Make unchanged Save As byte-identical even when the outer filename differs
+- [x] Make unchanged Save As byte-identical even when the outer filename differs
   from the embedded map name.
-- [ ] Patch only edited sector/overlay payloads and derive affected lengths and
+- [x] Patch only edited sector/overlay payloads and derive affected lengths and
   metadata from emitted content.
 - [x] Stage, freshly reopen, validate, back up, and atomically replace every
   changed MPR.
-- [ ] Add deterministic MPR/SEC semantic diff and untouched-member equality
+- [x] Add deterministic MPR/SEC semantic diff and untouched-member equality
   checks.
-- [ ] Validate changed MPRs on copied Base/JMV maps before enabling live-map
+- [x] Validate changed MPRs on copied Base/JMV maps before enabling live-map
   replacement.
 
 ## New MPR creation
@@ -337,7 +345,7 @@ serializer remains forbidden for every changed MPR.
 
 ## Heightmap editing
 
-- [ ] Replace the residual atlas-oriented parameters dialog with a consolidated
+- [x] Replace the residual atlas-oriented parameters dialog with a consolidated
   **MPR Settings** workflow following
   [`docs/MPR_SETTINGS_AND_HEIGHT_RANGE.md`](docs/MPR_SETTINGS_AND_HEIGHT_RANGE.md):
   map/profile/namespace summary, sector/tile/vertex dimensions, raw and world
@@ -353,23 +361,23 @@ serializer remains forbidden for every changed MPR.
 - [ ] Add existing-map crop/expand only as a structural, initially Save-As-only
   transaction. Preview discarded/initialized sectors and coordinate—but never
   silently invent—`map.txt` dimensions and minimap updates.
-- [ ] Refactor terrain ownership around each sector's canonical 33x33 vertex
+- [x] Refactor terrain ownership around each sector's canonical 33x33 vertex
   lattice rather than independently duplicated tile vertices.
-- [ ] Synchronize shared seams between adjacent sectors.
-- [ ] Add undoable raise/lower, flatten, smooth, and ramp tools.
-- [ ] Provide radius, strength, falloff, and numeric-height controls.
-- [ ] Recalculate only affected normals and preserve untouched packed vertex
+- [x] Synchronize shared seams between adjacent sectors.
+- [x] Add undoable raise/lower, flatten, smooth, and ramp tools.
+- [x] Provide radius, strength, falloff, and numeric-height controls.
+- [x] Recalculate only affected normals and preserve untouched packed vertex
   bits.
-- [ ] Warn before a height change requires lossy `maxZ` rescaling.
+- [x] Warn before a height change requires lossy `maxZ` rescaling.
 
 ## Terrain texture painting
 
-- [ ] Productionize the existing hidden tile brush with explicit atlas, layer,
+- [x] Productionize the existing hidden tile brush with explicit atlas, layer,
   category, rotation, brush shape, preview, and validation controls.
-- [ ] Implement visual blending through transition-tile painting and optional
+- [x] Implement visual blending through transition-tile painting and optional
   autotiling. SEC stores packed tile selection/rotation rather than arbitrary
   per-vertex blend weights.
-- [ ] Keep the terrain/tile atlas bound to the MPR's actual embedded namespace
+- [x] Keep the terrain/tile atlas bound to the MPR's actual embedded namespace
   and resource provenance.
 
 ## Overlay surfaces and materials
