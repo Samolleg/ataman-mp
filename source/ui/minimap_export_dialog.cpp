@@ -143,7 +143,8 @@ CMinimapExportDialog::CMinimapExportDialog(
 {
     setWindowTitle(tr("Export Minimap"));
     setWindowFlag(Qt::WindowContextHelpButtonHint, false);
-    setModal(true);
+    setModal(false);
+    setAttribute(Qt::WA_DeleteOnClose);
     QVBoxLayout* root = new QVBoxLayout(this);
 
     QLabel* summary = new QLabel(this);
@@ -211,31 +212,52 @@ CMinimapExportDialog::CMinimapExportDialog(
             this, &CMinimapExportDialog::regenerationRequested);
 
     QFormLayout* gradeForm = new QFormLayout;
-    const auto addGradeSlider = [this, gradeForm](const QString& name, int maximum,
-                                                  int value, QSlider** slider,
-                                                  QLabel** valueLabel) {
+    const auto addGradeSlider = [this, gradeForm](const QString& name, int minimum,
+                                                  int maximum, int value,
+                                                  const QString& suffix,
+                                                  QSlider** slider,
+                                                  QSpinBox** valueBox) {
         QWidget* row = new QWidget(this);
         QHBoxLayout* layout = new QHBoxLayout(row);
         layout->setContentsMargins(0, 0, 0, 0);
         *slider = new QSlider(Qt::Horizontal, row);
-        (*slider)->setRange(0, maximum);
+        (*slider)->setRange(minimum, maximum);
         (*slider)->setValue(value);
-        *valueLabel = new QLabel(QString::number(value) + "%", row);
-        (*valueLabel)->setMinimumWidth(42);
+        *valueBox = new QSpinBox(row);
+        (*valueBox)->setRange(minimum, maximum);
+        (*valueBox)->setValue(value);
+        (*valueBox)->setSuffix(suffix);
+        (*valueBox)->setMinimumWidth(74);
         layout->addWidget(*slider, 1);
-        layout->addWidget(*valueLabel);
+        layout->addWidget(*valueBox);
         gradeForm->addRow(name, row);
+        connect(*slider, &QSlider::valueChanged,
+                *valueBox, &QSpinBox::setValue);
+        connect(*valueBox, QOverload<int>::of(&QSpinBox::valueChanged),
+                *slider, &QSlider::setValue);
         connect(*slider, &QSlider::valueChanged,
                 this, &CMinimapExportDialog::updateGradePreview);
     };
-    addGradeSlider(tr("Shading intensity"), 100, m_grade.shadingPercent,
+    addGradeSlider(tr("Shading intensity"), 0, 150, m_grade.shadingPercent, "%",
                    &m_shading, &m_shadingValue);
-    addGradeSlider(tr("Saturation"), 200, m_grade.saturationPercent,
+    addGradeSlider(tr("Saturation"), 0, 200, m_grade.saturationPercent, "%",
                    &m_saturation, &m_saturationValue);
-    addGradeSlider(tr("Contrast"), 200, m_grade.contrastPercent,
+    addGradeSlider(tr("Contrast"), 0, 200, m_grade.contrastPercent, "%",
                    &m_contrast, &m_contrastValue);
-    addGradeSlider(tr("Brightness"), 200, m_grade.brightnessPercent,
+    addGradeSlider(tr("Brightness"), 0, 200, m_grade.brightnessPercent, "%",
                    &m_brightness, &m_brightnessValue);
+    addGradeSlider(tr("Hue"), -180, 180, m_grade.hueDegrees,
+                   QString::fromUtf8("\xC2\xB0"), &m_hue, &m_hueValue);
+    m_shading->setObjectName("minimapShadingSlider");
+    m_shadingValue->setObjectName("minimapShadingValue");
+    m_saturation->setObjectName("minimapSaturationSlider");
+    m_saturationValue->setObjectName("minimapSaturationValue");
+    m_contrast->setObjectName("minimapContrastSlider");
+    m_contrastValue->setObjectName("minimapContrastValue");
+    m_brightness->setObjectName("minimapBrightnessSlider");
+    m_brightnessValue->setObjectName("minimapBrightnessValue");
+    m_hue->setObjectName("minimapHueSlider");
+    m_hueValue->setObjectName("minimapHueValue");
     m_applyLockButton = new QPushButton(tr("Apply && Lock"), this);
     gradeForm->addRow(QString(), m_applyLockButton);
     root->addLayout(gradeForm);
@@ -286,11 +308,7 @@ CMinimapExportDialog::CMinimapExportDialog(
     connect(m_destination, &QLineEdit::textChanged, this, &CMinimapExportDialog::updateReadyState);
     if(m_generationLocked)
     {
-        for(QSlider* slider : {m_shading, m_saturation, m_contrast, m_brightness})
-            slider->setEnabled(false);
-        m_regenerateButton->setEnabled(false);
-        m_applyLockButton->setEnabled(false);
-        m_applyLockButton->setText(tr("Applied and locked"));
+        setGenerationLocked(true);
     }
     updateGradePreview();
     resize(1100, 860);
@@ -311,10 +329,7 @@ void CMinimapExportDialog::updateGradePreview()
     m_grade.saturationPercent = m_saturation->value();
     m_grade.contrastPercent = m_contrast->value();
     m_grade.brightnessPercent = m_brightness->value();
-    m_shadingValue->setText(QString::number(m_grade.shadingPercent) + "%");
-    m_saturationValue->setText(QString::number(m_grade.saturationPercent) + "%");
-    m_contrastValue->setText(QString::number(m_grade.contrastPercent) + "%");
-    m_brightnessValue->setText(QString::number(m_grade.brightnessPercent) + "%");
+    m_grade.hueDegrees = m_hue->value();
     m_gradedImage = gradeMinimapImage(
         m_capture.unlitGameImage, m_capture.bake.gameImage, m_grade);
     m_generatedPreview->setImage(m_gradedImage.mirrored(false, true));
@@ -324,15 +339,26 @@ void CMinimapExportDialog::applyAndLock()
 {
     updateGradePreview();
     m_lockRequested = true;
-    m_generationLocked = true;
-    for(QSlider* slider : {m_shading, m_saturation, m_contrast, m_brightness})
-        slider->setEnabled(false);
-    m_regenerateButton->setEnabled(false);
-    m_applyLockButton->setEnabled(false);
-    m_applyLockButton->setText(tr("Applied and locked"));
+    setGenerationLocked(true);
     m_status->setStyleSheet("color: #2e9d44;");
     m_status->setText(tr(
         "This graded minimap is applied and locked. Use Unlock in the viewport minimap to permit regeneration."));
+    emit appliedAndLocked();
+}
+
+void CMinimapExportDialog::setGenerationLocked(bool locked)
+{
+    m_generationLocked = locked;
+    for(QSlider* slider : {m_shading, m_saturation, m_contrast,
+                           m_brightness, m_hue})
+        slider->setEnabled(!locked);
+    for(QSpinBox* box : {m_shadingValue, m_saturationValue, m_contrastValue,
+                         m_brightnessValue, m_hueValue})
+        box->setEnabled(!locked);
+    m_regenerateButton->setEnabled(!locked);
+    m_applyLockButton->setEnabled(!locked);
+    m_applyLockButton->setText(locked ? tr("Applied and locked")
+                                      : tr("Apply && Lock"));
 }
 
 bool CMinimapExportDialog::catalogRegistrationRequested() const
@@ -486,5 +512,5 @@ void CMinimapExportDialog::exportTexture()
     m_textureName->setEnabled(false);
     m_destination->setEnabled(false);
     if(catalogRegistrationRequested())
-        accept();
+        emit catalogRegistrationReady(textureName());
 }

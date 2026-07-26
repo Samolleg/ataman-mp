@@ -52,13 +52,16 @@ struct SMinimapBakeOptions
 struct SMinimapGradeSettings
 {
     SMinimapGradeSettings(int shading = 65, int saturation = 110,
-                          int contrast = 100, int brightness = 106)
+                          int contrast = 100, int brightness = 106,
+                          int hue = 0)
         : shadingPercent(shading), saturationPercent(saturation),
-          contrastPercent(contrast), brightnessPercent(brightness) {}
+          contrastPercent(contrast), brightnessPercent(brightness),
+          hueDegrees(hue) {}
     int shadingPercent;
     int saturationPercent;
     int contrastPercent;
     int brightnessPercent;
+    int hueDegrees;
 };
 
 QImage gradeMinimapImage(const QImage& unlitImage, const QImage& shadedImage,

@@ -10,6 +10,7 @@ class QLabel;
 class QLineEdit;
 class QPushButton;
 class QSlider;
+class QSpinBox;
 class CZoomableMinimapView;
 
 class CMinimapExportDialog : public QDialog
@@ -34,9 +35,12 @@ public:
     SMinimapGradeSettings gradeSettings() const { return m_grade; }
     SMinimapSceneCaptureResult capture() const { return m_capture; }
     void setCapture(const SMinimapSceneCaptureResult& capture);
+    void setGenerationLocked(bool locked);
 
 signals:
     void regenerationRequested();
+    void appliedAndLocked();
+    void catalogRegistrationReady(const QString& textureName);
 
 private slots:
     void chooseDestination();
@@ -58,10 +62,12 @@ private:
     QSlider* m_saturation{nullptr};
     QSlider* m_contrast{nullptr};
     QSlider* m_brightness{nullptr};
-    QLabel* m_shadingValue{nullptr};
-    QLabel* m_saturationValue{nullptr};
-    QLabel* m_contrastValue{nullptr};
-    QLabel* m_brightnessValue{nullptr};
+    QSlider* m_hue{nullptr};
+    QSpinBox* m_shadingValue{nullptr};
+    QSpinBox* m_saturationValue{nullptr};
+    QSpinBox* m_contrastValue{nullptr};
+    QSpinBox* m_brightnessValue{nullptr};
+    QSpinBox* m_hueValue{nullptr};
     QPushButton* m_regenerateButton{nullptr};
     QPushButton* m_applyLockButton{nullptr};
     QLineEdit* m_textureName{nullptr};

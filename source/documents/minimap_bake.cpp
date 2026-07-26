@@ -1,6 +1,7 @@
 #include "minimap_bake.h"
 
 #include <QPainter>
+#include <QtMath>
 
 QImage gradeMinimapImage(const QImage& unlitImage, const QImage& shadedImage,
                          const SMinimapGradeSettings& settings)
@@ -11,7 +12,7 @@ QImage gradeMinimapImage(const QImage& unlitImage, const QImage& shadedImage,
         : shadedImage.convertToFormat(QImage::Format_ARGB32);
     const QImage shaded = shadedImage.convertToFormat(QImage::Format_ARGB32);
     QImage result(shaded.size(), QImage::Format_ARGB32);
-    const double shade = qBound(0, settings.shadingPercent, 100) / 100.0;
+    const double shade = qBound(0, settings.shadingPercent, 150) / 100.0;
     const double saturation = qBound(0, settings.saturationPercent, 200) / 100.0;
     const double contrast = qBound(0, settings.contrastPercent, 200) / 100.0;
     const double brightness = qBound(0, settings.brightnessPercent, 200) / 100.0;
@@ -26,6 +27,20 @@ QImage gradeMinimapImage(const QImage& unlitImage, const QImage& shadedImage,
                 qRed(raw[x]) + (qRed(lit[x]) - qRed(raw[x])) * shade,
                 qGreen(raw[x]) + (qGreen(lit[x]) - qGreen(raw[x])) * shade,
                 qBlue(raw[x]) + (qBlue(lit[x]) - qBlue(raw[x])) * shade};
+            QColor hueColor(qBound(0, qRound(channel[0]), 255),
+                            qBound(0, qRound(channel[1]), 255),
+                            qBound(0, qRound(channel[2]), 255));
+            qreal hue = hueColor.hslHueF();
+            if(hue >= 0.0 && settings.hueDegrees != 0)
+            {
+                hue += qBound(-180, settings.hueDegrees, 180) / 360.0;
+                hue -= qFloor(hue);
+                hueColor.setHslF(hue, hueColor.hslSaturationF(),
+                                 hueColor.lightnessF());
+                channel[0] = hueColor.red();
+                channel[1] = hueColor.green();
+                channel[2] = hueColor.blue();
+            }
             const double luma = 0.2126 * channel[0] + 0.7152 * channel[1]
                 + 0.0722 * channel[2];
             for(int component = 0; component < 3; ++component)

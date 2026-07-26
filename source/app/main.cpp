@@ -37,6 +37,8 @@
 #include <QWidget>
 #include <QVariant>
 #include <QSettings>
+#include <QSlider>
+#include <QSpinBox>
 #include <cstdio>
 #include <cstring>
 
@@ -49,6 +51,7 @@
 #include "ui/landscape_tools.h"
 #include "ui/bodypartedit_form.h"
 #include "ui/viewport_minimap_widget.h"
+#include "ui/minimap_export_dialog.h"
 #include "window_lifecycle.h"
 #include "settings.h"
 #include "endurance_ui_scale.h"
@@ -1098,6 +1101,37 @@ int runHeadlessCommand(QApplication& app)
         viewportMinimap.setGenerationLocked(false);
         const bool viewportMinimapUnlockWorks = minimapUnlockRequested
             && minimapRefresh->isEnabled() && minimapAuto->isEnabled();
+        SMinimapSceneCaptureResult exportCapture;
+        exportCapture.bake.success = true;
+        QImage gradeFixture(4, 4, QImage::Format_ARGB32);
+        gradeFixture.fill(Qt::darkGreen);
+        exportCapture.bake.gameImage = gradeFixture;
+        exportCapture.bake.reviewImage = gradeFixture;
+        exportCapture.unlitGameImage = gradeFixture;
+        exportCapture.sectorWidth = 2;
+        exportCapture.sectorHeight = 2;
+        exportCapture.exportProfileDescription = "synthetic";
+        CMinimapExportDialog* minimapExport = new CMinimapExportDialog(
+            exportCapture, QImage(), QString(), "syntheticmap", QString(),
+            SMinimapGradeSettings(), false);
+        minimapExport->setAttribute(Qt::WA_DeleteOnClose, false);
+        QSlider* shadingSlider = minimapExport->findChild<QSlider*>(
+            "minimapShadingSlider");
+        QSpinBox* shadingValue = minimapExport->findChild<QSpinBox*>(
+            "minimapShadingValue");
+        QSlider* hueSlider = minimapExport->findChild<QSlider*>(
+            "minimapHueSlider");
+        QSpinBox* hueValue = minimapExport->findChild<QSpinBox*>(
+            "minimapHueValue");
+        if(shadingValue) shadingValue->setValue(137);
+        if(hueSlider) hueSlider->setValue(-73);
+        const bool minimapExportIsModeless = !minimapExport->isModal();
+        const bool minimapTypedGradeControlsWork = shadingSlider && shadingValue
+            && hueSlider && hueValue && shadingSlider->maximum() == 150
+            && shadingSlider->value() == 137 && shadingValue->value() == 137
+            && hueSlider->minimum() == -180 && hueSlider->maximum() == 180
+            && hueSlider->value() == -73 && hueValue->value() == -73;
+        delete minimapExport;
         while(minimapSmaller
               && viewportMinimap.sizeLevel() > originalMinimapSizeLevel)
             minimapSmaller->click();
@@ -1420,6 +1454,8 @@ int runHeadlessCommand(QApplication& app)
                 && viewportMinimapHasThreeSizes
                 && viewportMinimapLockControlsWork
                 && viewportMinimapUnlockWorks
+                && minimapExportIsModeless
+                && minimapTypedGradeControlsWork
                 && semanticAtlasReviewButtonAvailable
                 && logicPointUndoAtomic && logicPointRedoAtomic
                 && viewportBackgroundConsumesClick && viewportChildConsumesClick
@@ -1508,6 +1544,8 @@ int runHeadlessCommand(QApplication& app)
                << " viewportMinimapHasThreeSizes=" << viewportMinimapHasThreeSizes
                << " viewportMinimapLockControlsWork=" << viewportMinimapLockControlsWork
                << " viewportMinimapUnlockWorks=" << viewportMinimapUnlockWorks
+               << " minimapExportIsModeless=" << minimapExportIsModeless
+               << " minimapTypedGradeControlsWork=" << minimapTypedGradeControlsWork
                << " semanticAtlasReviewButtonAvailable=" << semanticAtlasReviewButtonAvailable
                << " logicPointUndoAtomic=" << logicPointUndoAtomic
                << " logicPointRedoAtomic=" << logicPointRedoAtomic

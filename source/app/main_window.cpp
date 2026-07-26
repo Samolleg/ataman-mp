@@ -1049,6 +1049,8 @@ MainWindow::MainWindow(QWidget* parent) :
             this, [this]() {
         m_minimapGenerationLocked = false;
         m_viewportMinimap->setGenerationLocked(false);
+        if(m_minimapExportDialog)
+            m_minimapExportDialog->setGenerationLocked(false);
         statusBar()->showMessage(tr("Generated minimap unlocked."), 3000);
         if(m_viewportMinimap->autoRegenerationEnabled())
             scheduleViewportMinimapRefresh(0, true);
@@ -3300,6 +3302,8 @@ void MainWindow::refreshViewportMinimapSources()
     const bool contextChanged = context != m_minimapSourceContextKey;
     if(contextChanged)
     {
+        if(m_minimapExportDialog)
+            m_minimapExportDialog->close();
         m_minimapSourceContextKey = context;
         m_generatedMinimapMmp.clear();
         m_generatedMinimapImage = QImage();
@@ -3350,6 +3354,9 @@ void MainWindow::refreshViewportMinimapSources()
     m_embeddedMinimapSource = source;
     if(contextChanged)
         m_viewportMinimap->preferGenerated(embedded.isNull());
+    m_viewportMinimap->show();
+    positionViewportMinimap();
+    m_viewportMinimap->raise();
     scheduleViewportMinimapRefresh(0);
 }
 
@@ -3372,7 +3379,11 @@ void MainWindow::refreshViewportMinimap()
         m_minimapCaptureRunning = false;
         return;
     }
-    if(!applyMinimapCapture(capture, m_minimapGrade))
+    if(m_minimapExportDialog)
+        m_minimapExportDialog->setCapture(capture);
+    const SMinimapGradeSettings activeGrade = m_minimapExportDialog
+        ? m_minimapExportDialog->gradeSettings() : m_minimapGrade;
+    if(!applyMinimapCapture(capture, activeGrade))
     {
         m_minimapCaptureRunning = false;
         return;
@@ -3448,6 +3459,13 @@ void MainWindow::generateMinimap()
             tr("Load an MPR or collection before exporting a minimap."));
         return;
     }
+    if(m_minimapExportDialog)
+    {
+        m_minimapExportDialog->show();
+        m_minimapExportDialog->raise();
+        m_minimapExportDialog->activateWindow();
+        return;
+    }
     const bool includeLoadedStaticGeometry = !m_pView->mobs().isEmpty();
     SMinimapSceneCaptureResult capture;
     SMinimapGradeSettings dialogGrade = m_minimapGrade;
@@ -3488,33 +3506,43 @@ void MainWindow::generateMinimap()
     // generated default. Standalone/unregistered MPRs intentionally start
     // blank so the author must choose their namespace.
     const QString suggestedName = m_mapTestEntry.minimapTexture;
-    CMinimapExportDialog dialog(capture, m_embeddedMinimapImage,
-                                m_embeddedMinimapName, suggestedName,
-                                m_mapTestEntry.zoneId, dialogGrade,
-                                m_minimapGenerationLocked, this);
-    connect(&dialog, &CMinimapExportDialog::regenerationRequested,
-            this, [this, &dialog, includeLoadedStaticGeometry]() {
+    m_minimapExportDialog = new CMinimapExportDialog(
+        capture, m_embeddedMinimapImage, m_embeddedMinimapName, suggestedName,
+        m_mapTestEntry.zoneId, dialogGrade, m_minimapGenerationLocked, this);
+    connect(m_minimapExportDialog, &CMinimapExportDialog::regenerationRequested,
+            this, [this]() {
+        if(!m_minimapExportDialog || !m_pView
+           || !CLandscape::getInstance()->isMprLoad())
+            return;
         QApplication::setOverrideCursor(Qt::WaitCursor);
         SMinimapSceneCaptureResult refreshed = m_pView->captureMinimapScene(
-            includeLoadedStaticGeometry, m_minimapTargetTextureSize);
+            !m_pView->mobs().isEmpty(), m_minimapTargetTextureSize);
         QApplication::restoreOverrideCursor();
         refreshed.targetDxt1 = m_minimapTargetDxt1;
         refreshed.exportProfileDescription = m_minimapExportProfileDescription;
         if(refreshed.bake.success)
-            dialog.setCapture(refreshed);
+            m_minimapExportDialog->setCapture(refreshed);
     });
-    dialog.exec();
-
-    if(dialog.lockRequested()
-       && applyMinimapCapture(dialog.capture(), dialog.gradeSettings()))
-    {
+    connect(m_minimapExportDialog, &CMinimapExportDialog::appliedAndLocked,
+            this, [this]() {
+        if(!m_minimapExportDialog
+           || !applyMinimapCapture(m_minimapExportDialog->capture(),
+                                   m_minimapExportDialog->gradeSettings()))
+            return;
         m_minimapGenerationLocked = true;
         m_viewportMinimap->setGenerationLocked(true);
         statusBar()->showMessage(tr("Generated minimap applied and locked."), 5000);
-    }
+    });
+    connect(m_minimapExportDialog,
+            &CMinimapExportDialog::catalogRegistrationReady,
+            this, &MainWindow::registerExportedMinimap);
+    m_minimapExportDialog->show();
+    m_minimapExportDialog->raise();
+    m_minimapExportDialog->activateWindow();
+}
 
-    if(!dialog.catalogRegistrationRequested())
-        return;
+void MainWindow::registerExportedMinimap(const QString& textureName)
+{
     if(m_mapCatalog.sourceArchive.isEmpty())
     {
         QMessageBox::warning(this, tr("Register minimap"), tr(
@@ -3524,7 +3552,7 @@ void MainWindow::generateMinimap()
     CMapTableEditorDialog catalog(this);
     if(!catalog.openArchive(m_mapCatalog.sourceArchive)
        || !catalog.stageMinimapTextureForZone(m_mapTestEntry.zoneId,
-                                               dialog.textureName()))
+                                               textureName))
     {
         QMessageBox::warning(this, tr("Register minimap"), tr(
             "Texture export succeeded, but the selected zone could not be staged in Map Catalog Editor. No catalog reference was changed."));

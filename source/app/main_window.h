@@ -15,6 +15,7 @@
 #include <QVector3D>
 #include <QFutureWatcher>
 #include <QImage>
+#include <QPointer>
 #include "types.h"
 #include "map_catalog.h"
 #include "map_spawn_planner.h"
@@ -61,6 +62,7 @@ class QListWidget;
 class QSlider;
 class QDoubleSpinBox;
 class CViewportMinimapWidget;
+class CMinimapExportDialog;
 
 struct SWindowTitle
 {
@@ -110,6 +112,7 @@ private:
     bool applyMinimapCapture(const SMinimapSceneCaptureResult& capture,
                              const SMinimapGradeSettings& grade);
     bool ensureGeneratedMinimap();
+    void registerExportedMinimap(const QString& textureName);
     void positionViewportMinimap();
     void rememberRecentFile(const QFileInfo& fileName);
     void rebuildRecentFilesMenu();
@@ -347,6 +350,7 @@ private:
     QVector3D m_customSpawnPosition;
     QString m_customSpawnContextKey;
     CViewportMinimapWidget* m_viewportMinimap{nullptr};
+    QPointer<CMinimapExportDialog> m_minimapExportDialog;
     QTimer* m_minimapRefreshTimer{nullptr};
     QByteArray m_generatedMinimapMmp;
     QImage m_generatedMinimapImage;

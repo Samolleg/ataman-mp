@@ -230,6 +230,12 @@ void MinimapExportTests::gradesShadingAndColorDeterministically()
     settings.shadingPercent = 100;
     QCOMPARE(gradeMinimapImage(unlit, shaded, settings).pixelColor(0, 0),
              QColor(80, 50, 20));
+    settings.shadingPercent = 150;
+    QCOMPARE(gradeMinimapImage(unlit, shaded, settings).pixelColor(0, 0),
+             QColor(40, 25, 10));
+    settings = {0, 100, 100, 100, 120};
+    QCOMPARE(gradeMinimapImage(unlit, shaded, settings).pixelColor(0, 0),
+             QColor(40, 160, 100));
     settings = {50, 0, 100, 100};
     const QColor desaturated = gradeMinimapImage(unlit, shaded, settings)
         .pixelColor(0, 0);
