@@ -236,6 +236,10 @@ void CLandscapeTools::activateMode(ELandscapeEditMode mode, bool notify)
         m_editingActive = true;
     }
     updateModeVisibility();
+    // Programmatic mode changes block the combo-box signal, so refresh the
+    // layer-specific list explicitly. This prevents an overlay family from
+    // remaining selected while the view is already painting land.
+    refreshPaintTerrainTypes();
     if(notify)
         emit editingStateChanged();
 }

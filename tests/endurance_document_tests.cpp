@@ -2602,6 +2602,48 @@ void EnduranceDocumentTests::terrainTilePaintingIsUndoableLocalizedAndNamespaceS
     QVERIFY(!repeatedHardEdgeReport.hasErrors());
     QVERIFY(hardEdgeTerrain.apply(hardEdgePaint, false));
 
+    // A valid material must repair an unknown packed value inside the brush,
+    // while an unknown value in the transition ring remains untouched. This
+    // is the recovery contract for legacy/hand-authored or damaged cells.
+    CTerrainEditModel recoveryTerrain;
+    QVERIFY(recoveryTerrain.load(baseline));
+    STerrainTileBrush unknownPoint = boundedBrush;
+    unknownPoint.radius = 0.0f;
+    const quint16 unknownPacked = quint16(1 << 14); // valid slot/rotation, absent from catalog
+    STerrainTileCommand unknownCoreSetup = recoveryTerrain.makeTilePaint(
+        unknownPoint, ETerrainTileLayer::Land, 0, 0, 1);
+    QCOMPARE(unknownCoreSetup.deltas.size(), 1);
+    QVERIFY(recoveryTerrain.apply(unknownCoreSetup, true));
+    unknownPoint.centerX = 9.0f;
+    STerrainTileCommand unknownRingSetup = recoveryTerrain.makeTilePaint(
+        unknownPoint, ETerrainTileLayer::Land, 0, 0, 1);
+    QCOMPARE(unknownRingSetup.deltas.size(), 1);
+    QVERIFY(recoveryTerrain.apply(unknownRingSetup, true));
+    QCOMPARE(recoveryTerrain.packedTile(
+        8, 8, ETerrainTileLayer::Land), unknownPacked);
+    QCOMPARE(recoveryTerrain.packedTile(
+        9, 8, ETerrainTileLayer::Land), unknownPacked);
+    bool unknownIsAuthored = false;
+    hardEdgeCatalog.gridSignatureForPacked(unknownPacked, &unknownIsAuthored);
+    QVERIFY(!unknownIsAuthored);
+    unknownPoint.centerX = 8.0f;
+    CValidationReport recoveryReport;
+    const STerrainTileCommand recoveryPaint = recoveryTerrain.makeSemanticTilePaint(
+        unknownPoint, ETerrainTileLayer::Land, 2, hardEdgeCatalog,
+        0x5245434Fu, &recoveryReport);
+    QVERIFY2(!recoveryPaint.isEmpty(), qPrintable(recoveryReport.toText()));
+    QVERIFY(!recoveryReport.hasErrors());
+    QVERIFY(recoveryReport.toText().contains("terrain.semantic_unknown_recovery"));
+    QVERIFY(recoveryTerrain.apply(recoveryPaint, true));
+    bool recoveredFound = false;
+    const STerrainTransitionSignature recovered =
+        hardEdgeCatalog.gridSignatureForPacked(recoveryTerrain.packedTile(
+            8, 8, ETerrainTileLayer::Land), &recoveredFound);
+    QVERIFY(recoveredFound);
+    QCOMPARE(recovered.northWest, qint32(2));
+    QCOMPARE(recoveryTerrain.packedTile(
+        9, 8, ETerrainTileLayer::Land), unknownPacked);
+
     // A one-corner approximation is accepted only when it remains anchored to
     // the painted core, contains no new family, and every existing tile at the
     // changed outer vertex already supports the approximated material.
@@ -4325,6 +4367,44 @@ void EnduranceDocumentTests::overlayActivationDeactivationIsLosslessAndUndoable(
 
     CTerrainEditModel terrain;
     QVERIFY(terrain.load(baseline));
+
+    // The first multi-cell stroke that upgrades a type-0 SEC must populate
+    // every requested cell using the new layout offsets. No second click may
+    // be required to repair stale pre-upgrade offsets.
+    CTerrainEditModel firstStrokeTerrain;
+    QVERIFY(firstStrokeTerrain.load(baseline));
+    STerrainTileBrush firstStroke;
+    firstStroke.centerX = 8.0f;
+    firstStroke.centerY = 8.0f;
+    firstStroke.radius = 1.0f;
+    firstStroke.shape = ETerrainTileBrushShape::Circle;
+    CValidationReport firstStrokeReport;
+    const SOverlaySurfaceCommand firstStrokeActivation =
+        firstStrokeTerrain.makeOverlayActivation(
+            firstStroke, 1, 0, 1, 2, &firstStrokeReport);
+    QVERIFY2(!firstStrokeActivation.isEmpty(),
+             qPrintable(firstStrokeReport.toText()));
+    QVERIFY(firstStrokeTerrain.apply(firstStrokeActivation, true,
+                                     &firstStrokeReport));
+    int activeFirstStrokeCells = 0;
+    for(int y = 7; y <= 9; ++y)
+        for(int x = 7; x <= 9; ++x)
+        {
+            bool active = false;
+            const qint16 material = firstStrokeTerrain.overlayMaterialIndex(
+                x, y, &active);
+            const bool expected = qAbs(x - 8) + qAbs(y - 8) <= 1;
+            QCOMPARE(active, expected);
+            if(expected)
+            {
+                QCOMPARE(material, qint16(1));
+                ++activeFirstStrokeCells;
+            }
+        }
+    QCOMPARE(activeFirstStrokeCells, 5);
+    QVERIFY(firstStrokeTerrain.makeOverlayActivation(
+        firstStroke, 1, 0, 1, 2).isEmpty());
+
     STerrainTileBrush point;
     point.centerX = 2.0f;
     point.centerY = 3.0f;

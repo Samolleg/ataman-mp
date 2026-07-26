@@ -1177,10 +1177,7 @@ SOverlaySurfaceCommand CTerrainEditModel::makeOverlayActivation(
             int localTile = -1;
             if(!tileLocation(x, y, &sectorIndex, &localTile, report))
                 return SOverlaySurfaceCommand();
-            const SSector& sector = m_sectors.at(sectorIndex);
             QByteArray& payload = replacementFor(sectorIndex);
-            quint64 overlayTileOffset = sector.source.overlayTileOffset;
-            quint64 overlayMaterialOffset = sector.source.overlayMaterialOffset;
             if(quint8(payload.at(4)) == 0)
             {
                 const QByteArray landVertices = payload.mid(kLandVertexOffset, kVertexBlockSize);
@@ -1201,10 +1198,15 @@ SOverlaySurfaceCommand CTerrainEditModel::makeOverlayActivation(
                 upgraded.append(QByteArray(kTileBlockSize, char(0xFF)));
                 upgraded.append(trailing);
                 payload = upgraded;
-                overlayTileOffset = kLandVertexOffset + 2 * kVertexBlockSize
-                    + kTileBlockSize;
-                overlayMaterialOffset = overlayTileOffset + kTileBlockSize;
             }
+            // Earlier cells in this command may already have upgraded this
+            // detached payload. sector.source is reparsed only by apply(), so
+            // derive offsets from the replacement layout, not stale type-0
+            // metadata.
+            const quint64 overlayTileOffset = kLandVertexOffset
+                + 2 * kVertexBlockSize + kTileBlockSize;
+            const quint64 overlayMaterialOffset = overlayTileOffset
+                + kTileBlockSize;
             const bool wasActive = readOverlayMaterial(
                 payload, overlayMaterialOffset, localTile) >= 0;
             if(readPackedTile(payload, overlayTileOffset, localTile) == selected.encode()
@@ -2543,7 +2545,10 @@ STerrainTileCommand CTerrainEditModel::makeBoundedSemanticTilePaint(
     QMap<int, STerrainTransitionSignature> existingSignatures;
     QMap<int, quint16> existingTiles;
     QMap<qint32, int> backgroundCounts;
-    const auto decodeCell = [&](int index) -> bool {
+    QSet<int> unknownCore;
+    QSet<int> unknownBoundary;
+    QString firstUnknownLocation;
+    const auto decodeCell = [&](int index, bool core) -> bool {
         const int x = index % width;
         const int y = index / width;
         bool available = false;
@@ -2552,26 +2557,48 @@ STerrainTileCommand CTerrainEditModel::makeBoundedSemanticTilePaint(
         const STerrainTransitionSignature signature = available
             ? catalog.gridSignatureForPacked(packed, &found)
             : STerrainTransitionSignature();
-        if(!available || !found)
+        if(!available)
         {
             if(report)
                 report->add("terrain.semantic_catalog", EValidationSeverity::Error,
-                            "An editable tile is absent from the registered namespace template",
+                            "The semantic paint footprint contains an unavailable tile",
                             QString("%1,%2 packed:0x%3").arg(x).arg(y)
                                 .arg(packed, 4, 16, QLatin1Char('0')));
             return false;
         }
         existingTiles.insert(index, packed);
+        if(!found)
+        {
+            // Existing maps can contain hand-authored, legacy, or damaged
+            // packed values outside the approved atlas template. A valid
+            // brush must still paint over them. Unknown core cells are
+            // replaced; unknown ring cells stay frozen so recovery cannot
+            // spread beyond the requested footprint.
+            STerrainTransitionSignature unknown;
+            unknown.northWest = unknown.northEast = -1;
+            unknown.southEast = unknown.southWest = -1;
+            existingSignatures.insert(index, unknown);
+            if(core)
+                unknownCore.insert(index);
+            else
+                unknownBoundary.insert(index);
+            if(firstUnknownLocation.isEmpty())
+                firstUnknownLocation = QString("%1,%2 packed:0x%3")
+                    .arg(x).arg(y).arg(packed, 4, 16, QLatin1Char('0'));
+            return true;
+        }
         existingSignatures.insert(index, signature);
         return true;
     };
     for(int index : orderedPainted)
-        if(!decodeCell(index))
+        if(!decodeCell(index, true))
             return command;
     for(int index : orderedBoundary)
     {
-        if(!decodeCell(index))
+        if(!decodeCell(index, false))
             return command;
+        if(unknownBoundary.contains(index))
+            continue;
         const STerrainTransitionSignature signature = existingSignatures.value(index);
         const qint32 values[4] = {signature.northWest, signature.northEast,
                                   signature.southEast, signature.southWest};
@@ -2579,6 +2606,11 @@ STerrainTileCommand CTerrainEditModel::makeBoundedSemanticTilePaint(
             if(value != materialId)
                 backgroundCounts[value] += 1;
     }
+    if((!unknownCore.isEmpty() || !unknownBoundary.isEmpty()) && report)
+        report->add("terrain.semantic_unknown_recovery", EValidationSeverity::Warning,
+                    QString("Paint recovered %1 unknown core tile(s); %2 unknown boundary tile(s) were preserved")
+                        .arg(unknownCore.size()).arg(unknownBoundary.size()),
+                    firstUnknownLocation);
     qint32 backgroundMaterial = materialId;
     int backgroundSupport = -1;
     for(auto entry = backgroundCounts.constBegin(); entry != backgroundCounts.constEnd(); ++entry)
@@ -2694,6 +2726,8 @@ STerrainTileCommand CTerrainEditModel::makeBoundedSemanticTilePaint(
     };
     for(int index : orderedBoundary)
     {
+        if(unknownBoundary.contains(index))
+            continue;
         const int x = index % width;
         const int y = index / width;
         const int cornerKeys[4] = {y * (width + 1) + x,

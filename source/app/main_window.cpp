@@ -1192,6 +1192,13 @@ MainWindow::MainWindow(QWidget* parent) :
             const QSignalBlocker blocker(m_ui->tileBrushButton);
             m_ui->tileBrushButton->setChecked(visible);
         }
+        if(!visible)
+        {
+            // Layer isolation belongs to Landscape Tools. Closing it restores
+            // the ordinary viewport instead of leaving terrain hidden.
+            m_pView->setDrawLand(true);
+            m_pView->setDrawWater(true);
+        }
         m_pView->setLandscapeEditingEnabled(visible);
         if(visible)
             m_landscapeToolsDock->raise();
@@ -2457,10 +2464,6 @@ void MainWindow::createViewportToolbars()
                 return;
             if(operation.type == EButtonOpTilebrush)
             {
-                if(!m_landscapeToolsDock->isVisible())
-                {
-                    m_pView->prepareLandscapeTilePainting(false);
-                }
                 toggleLandscapeTools();
                 m_pView->setFocus();
                 return;

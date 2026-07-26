@@ -1027,7 +1027,14 @@ int runHeadlessCommand(QApplication& app)
         const bool overlaySurfaceToolSeparate = landscapeTools.overlaySurfaceEnabled()
             && landscapeTools.overlaySurfaceOperation()
                 == EOverlaySurfaceOperation::Activate
-            && !landscapeTools.manualTileSelectionEnabled();
+            && !landscapeTools.manualTileSelectionEnabled()
+            && landscapeTools.selectPaintTerrainType(5);
+        landscapeTools.activateMode(ELandscapeEditMode::TilePaint, false);
+        bool landModeSelectionValid = false;
+        const bool programmaticModeRefreshesMaterials =
+            !landscapeTools.selectPaintTerrainType(5)
+            && landscapeTools.paintTerrainType(&landModeSelectionValid) == 2
+            && landModeSelectionValid;
         bool semanticAtlasReviewRequested = false;
         QObject::connect(&landscapeTools, &CLandscapeTools::atlasProfileReviewRequested,
                          [&semanticAtlasReviewRequested]() {
@@ -1236,8 +1243,9 @@ int runHeadlessCommand(QApplication& app)
                 && underwaterFamiliesHiddenByDefault
                 && underwaterFamiliesCanBeShown
                 && landscapeLayersVisibleByDefault
-                && landscapeVisibilityControlsWork
-                && overlaySurfaceToolSeparate
+            && landscapeVisibilityControlsWork
+            && overlaySurfaceToolSeparate
+            && programmaticModeRefreshesMaterials
                 && semanticAtlasReviewButtonAvailable
                 && logicPointUndoAtomic && logicPointRedoAtomic;
         QTextStream output(stdout);
