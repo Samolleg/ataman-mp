@@ -1280,6 +1280,20 @@ int runHeadlessCommand(QApplication& app)
         const bool viewportChildConsumesClick = viewportChildPress.isAccepted()
                 && viewportProbe.presses == 0;
 
+        QPalette viewportPalette = viewportWidget.palette();
+        viewportPalette.setColor(QPalette::Window, QColor(24, 36, 48));
+        viewportWidget.setPalette(viewportPalette);
+        QImage viewportSurface(viewportWidget.size(), QImage::Format_ARGB32);
+        viewportSurface.fill(Qt::transparent);
+        viewportWidget.render(&viewportSurface);
+        const bool viewportSurfaceFullyOwned = viewportWidget.testAttribute(
+                    Qt::WA_OpaquePaintEvent)
+                && viewportWidget.testAttribute(Qt::WA_StyledBackground)
+                && viewportWidget.autoFillBackground()
+                && viewportSurface.pixelColor(1, 1).alpha() == 255
+                && viewportSurface.pixelColor(viewportSurface.width() - 2,
+                                              viewportSurface.height() - 2).alpha() == 255;
+
         const bool passed = prefixesOnly && valueStable && focusCancel && escapeCancel
                 && enterCommit && clickCommit && settingsTabsUsable && settingsShortcutsPersist
                 && autosaveSettingsPersist && settingsApplySignal && autosaveLiveReconfigure
@@ -1326,7 +1340,8 @@ int runHeadlessCommand(QApplication& app)
                 && landscapeLayersVisibleByDefault
                 && landscapeVisibilityControlsWork
                 && logicPointUndoAtomic && logicPointRedoAtomic
-                && viewportBackgroundConsumesClick && viewportChildConsumesClick;
+                && viewportBackgroundConsumesClick && viewportChildConsumesClick
+                && viewportSurfaceFullyOwned;
         QTextStream output(stdout);
         output << "asset-picker prefixes=" << completions.join(",") << "\n"
                << "prefixesOnly=" << prefixesOnly
@@ -1408,7 +1423,8 @@ int runHeadlessCommand(QApplication& app)
                << " logicPointUndoAtomic=" << logicPointUndoAtomic
                << " logicPointRedoAtomic=" << logicPointRedoAtomic
                << " viewportBackgroundConsumesClick=" << viewportBackgroundConsumesClick
-               << " viewportChildConsumesClick=" << viewportChildConsumesClick << "\n"
+               << " viewportChildConsumesClick=" << viewportChildConsumesClick
+               << " viewportSurfaceFullyOwned=" << viewportSurfaceFullyOwned << "\n"
                << (passed ? "PASS" : "FAIL")
                << ": widget interaction and secondary-window lifecycle checks\n";
         output.flush();
