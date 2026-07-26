@@ -3,6 +3,7 @@
 #include <QCryptographicHash>
 #include <QFile>
 #include <QDir>
+#include <QHash>
 #include <QSaveFile>
 #include <QTemporaryFile>
 #include <QDataStream>
@@ -114,14 +115,31 @@ SResTextureExportResult exportMmpToRes(const SResTextureExportRequest& request)
     const int expectedCount = baseline.members().size() + (memberExists ? 0 : 1);
     if(reopened.members().size() != expectedCount)
     { result.error = "RES member count changed unexpectedly."; return result; }
-    for(int index = 0; index < baseline.members().size(); ++index)
+    QHash<QString, const SResArchiveMember*> reopenedByName;
+    for(const SResArchiveMember& member : reopened.members())
     {
-        const auto& before = baseline.members().at(index);
-        const auto& after = reopened.members().at(index);
-        if(before.encodedName != after.encodedName
-           || before.lastWriteTime != after.lastWriteTime
+        const QString key = member.name.toCaseFolded();
+        if(reopenedByName.contains(key))
+        {
+            result.error = QString("Fresh RES reopen contains ambiguous duplicate member: %1")
+                .arg(member.name);
+            return result;
+        }
+        reopenedByName.insert(key, &member);
+    }
+    for(const SResArchiveMember& before : baseline.members())
+    {
+        const SResArchiveMember* after = reopenedByName.value(
+            before.name.toCaseFolded(), nullptr);
+        if(!after)
+        {
+            result.error = QString("Fresh RES reopen lost member: %1").arg(before.name);
+            return result;
+        }
+        if(before.encodedName != after->encodedName
+           || before.lastWriteTime != after->lastWriteTime
            || (before.name.compare(memberName, Qt::CaseInsensitive) != 0
-               && before.payload != after.payload))
+               && before.payload != after->payload))
         { result.error = QString("Untouched RES member changed: %1").arg(before.name); return result; }
     }
 #ifdef QT_TESTLIB_LIB

@@ -8,6 +8,71 @@
 #include "res_texture_export.h"
 
 namespace {
+class CZoomableMinimapView : public QGraphicsView
+{
+public:
+    explicit CZoomableMinimapView(QWidget* parent = nullptr)
+        : QGraphicsView(parent), m_scene(new QGraphicsScene(this))
+    {
+        setScene(m_scene);
+        setAlignment(Qt::AlignCenter);
+        setDragMode(QGraphicsView::ScrollHandDrag);
+        setTransformationAnchor(QGraphicsView::AnchorUnderMouse);
+        setResizeAnchor(QGraphicsView::AnchorViewCenter);
+        setBackgroundBrush(QColor(47, 47, 47));
+        setFrameShape(QFrame::StyledPanel);
+    }
+
+    void setImage(const QImage& image)
+    {
+        m_scene->clear();
+        m_item = m_scene->addPixmap(QPixmap::fromImage(image));
+        m_scene->setSceneRect(m_item->boundingRect());
+        fitImage();
+    }
+
+    void fitImage()
+    {
+        m_userSized = false;
+        if(m_item)
+            fitInView(m_item, Qt::KeepAspectRatio);
+    }
+
+    void actualSize()
+    {
+        m_userSized = true;
+        resetTransform();
+    }
+
+protected:
+    void wheelEvent(QWheelEvent* event) override
+    {
+        m_userSized = true;
+        const qreal factor = event->angleDelta().y() >= 0 ? 1.2 : (1.0 / 1.2);
+        scale(factor, factor);
+        event->accept();
+    }
+
+    void resizeEvent(QResizeEvent* event) override
+    {
+        QGraphicsView::resizeEvent(event);
+        if(!m_userSized)
+            fitImage();
+    }
+
+    void mousePressEvent(QMouseEvent* event) override
+    {
+        if(event->button() == Qt::LeftButton)
+            m_userSized = true;
+        QGraphicsView::mousePressEvent(event);
+    }
+
+private:
+    QGraphicsScene* m_scene{nullptr};
+    QGraphicsPixmapItem* m_item{nullptr};
+    bool m_userSized{false};
+};
+
 QString normalizedMemberName(QString name)
 {
     name = name.trimmed();
@@ -28,7 +93,8 @@ CMinimapExportDialog::CMinimapExportDialog(
     const QString& suggestedTextureName, const QString& zoneId, QWidget* parent)
     : QDialog(parent), m_capture(capture), m_zoneId(zoneId)
 {
-    setWindowTitle(tr("Generate Minimap"));
+    setWindowTitle(tr("Export Minimap"));
+    setWindowFlag(Qt::WindowContextHelpButtonHint, false);
     setModal(true);
     QVBoxLayout* root = new QVBoxLayout(this);
 
@@ -50,16 +116,26 @@ CMinimapExportDialog::CMinimapExportDialog(
     details->setTextInteractionFlags(Qt::TextSelectableByMouse);
     root->addWidget(details);
 
-    QLabel* preview = new QLabel(this);
-    preview->setAlignment(Qt::AlignCenter);
-    preview->setMinimumSize(300, 300);
-    preview->setPixmap(QPixmap::fromImage(capture.bake.gameImage).scaled(
-        384, 384, Qt::KeepAspectRatio, Qt::FastTransformation));
-    QScrollArea* scroll = new QScrollArea(this);
-    scroll->setWidget(preview);
-    scroll->setWidgetResizable(true);
-    scroll->setMinimumHeight(410);
-    root->addWidget(scroll, 1);
+    CZoomableMinimapView* preview = new CZoomableMinimapView(this);
+    preview->setObjectName("minimapExportPreview");
+    preview->setMinimumHeight(410);
+    preview->setImage(capture.bake.gameImage);
+    root->addWidget(preview, 1);
+    QHBoxLayout* previewControls = new QHBoxLayout;
+    QLabel* previewHint = new QLabel(
+        tr("256 x 256 game texture — mouse wheel zooms; drag to pan"), this);
+    QPushButton* fitPreview = new QPushButton(tr("Fit"), this);
+    QPushButton* actualPreview = new QPushButton(tr("100%"), this);
+    previewControls->addWidget(previewHint, 1);
+    previewControls->addWidget(fitPreview);
+    previewControls->addWidget(actualPreview);
+    root->addLayout(previewControls);
+    connect(fitPreview, &QPushButton::clicked, preview, [preview]() {
+        preview->fitImage();
+    });
+    connect(actualPreview, &QPushButton::clicked, preview, [preview]() {
+        preview->actualSize();
+    });
 
     QFormLayout* form = new QFormLayout;
     m_textureName = new QLineEdit(suggestedTextureName, this);
@@ -94,42 +170,17 @@ CMinimapExportDialog::CMinimapExportDialog(
     root->addWidget(m_status);
     QDialogButtonBox* buttons = new QDialogButtonBox(QDialogButtonBox::Close, this);
     QPushButton* savePng = buttons->addButton(tr("Save review PNG..."), QDialogButtonBox::ActionRole);
-    QPushButton* stagePreview = buttons->addButton(
-        tr("Stage for Next Test"), QDialogButtonBox::ActionRole);
-    stagePreview->setToolTip(tr(
-        "Uses the reviewed minimap through Endurance's run-owned temporary RES and private map table. No installed archive is changed."));
     m_exportButton = buttons->addButton(tr("Export to RES..."), QDialogButtonBox::AcceptRole);
     root->addWidget(buttons);
 
     connect(browse, &QPushButton::clicked, this, &CMinimapExportDialog::chooseDestination);
     connect(savePng, &QPushButton::clicked, this, &CMinimapExportDialog::saveReviewPng);
-    connect(stagePreview, &QPushButton::clicked,
-            this, &CMinimapExportDialog::stageTemporaryPreview);
     connect(m_exportButton, &QPushButton::clicked, this, &CMinimapExportDialog::exportTexture);
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
     connect(m_textureName, &QLineEdit::textChanged, this, &CMinimapExportDialog::updateReadyState);
     connect(m_destination, &QLineEdit::textChanged, this, &CMinimapExportDialog::updateReadyState);
     resize(760, 820);
     updateReadyState();
-}
-
-void CMinimapExportDialog::stageTemporaryPreview()
-{
-    if(!safeTextureName(textureName()))
-    {
-        QMessageBox::warning(this, tr("Generate Minimap"),
-            tr("Enter a texture name without whitespace or path characters before staging."));
-        return;
-    }
-    QString diagnostic;
-    m_encodedMmp = ei::encodeMmp8888(m_capture.bake.gameImage, &diagnostic);
-    if(m_encodedMmp.isEmpty())
-    {
-        m_status->setText(tr("MMP encoding failed: %1").arg(diagnostic));
-        return;
-    }
-    m_temporaryPreviewRequested = true;
-    accept();
 }
 
 bool CMinimapExportDialog::catalogRegistrationRequested() const
@@ -151,8 +202,15 @@ void CMinimapExportDialog::chooseDestination()
     const QString initial = m_destination->text().trimmed().isEmpty()
         ? QSettings().value("minimap/lastDestinationDirectory").toString()
         : m_destination->text().trimmed();
-    const QString path = QFileDialog::getSaveFileName(
-        this, tr("Select texture RES"), initial, tr("Evil Islands resource archive (*.res)"));
+    QFileDialog picker(this, tr("Select texture RES"), initial,
+                       tr("Evil Islands resource archive (*.res)"));
+    picker.setAcceptMode(QFileDialog::AcceptSave);
+    picker.setFileMode(QFileDialog::AnyFile);
+    picker.setDefaultSuffix("res");
+    picker.setOption(QFileDialog::DontConfirmOverwrite, true);
+    if(picker.exec() != QDialog::Accepted || picker.selectedFiles().isEmpty())
+        return;
+    const QString path = picker.selectedFiles().first();
     if(path.isEmpty()) return;
     m_destination->setText(path);
     QSettings().setValue("minimap/lastDestinationDirectory", QFileInfo(path).absolutePath());
@@ -178,7 +236,7 @@ void CMinimapExportDialog::exportTexture()
 {
     if(!safeTextureName(textureName()))
     {
-        QMessageBox::warning(this, tr("Generate Minimap"),
+        QMessageBox::warning(this, tr("Export Minimap"),
             tr("Enter a unique texture name without whitespace or path characters."));
         return;
     }
@@ -189,8 +247,6 @@ void CMinimapExportDialog::exportTexture()
         m_status->setText(tr("MMP encoding failed: %1").arg(diagnostic));
         return;
     }
-    m_encodedMmp = mmp;
-
     const QString member = normalizedMemberName(textureName());
     EResTextureConflictPolicy policy = EResTextureConflictPolicy::Refuse;
     const QString path = destinationArchive();
@@ -205,6 +261,16 @@ void CMinimapExportDialog::exportTexture()
                 QMessageBox::Yes | QMessageBox::No, QMessageBox::No)
                 != QMessageBox::Yes)
             return;
+        QProgressDialog inspectionProgress(
+            tr("Inspecting the selected RES for texture-name conflicts..."),
+            QString(), 0, 0, this);
+        inspectionProgress.setWindowTitle(tr("Inspecting destination RES"));
+        inspectionProgress.setCancelButton(nullptr);
+        inspectionProgress.setWindowModality(Qt::ApplicationModal);
+        inspectionProgress.setMinimumDuration(0);
+        inspectionProgress.setAutoClose(false);
+        inspectionProgress.show();
+        QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
         QFile input(path);
         QByteArray bytes;
         if(!input.open(QIODevice::ReadOnly))
@@ -224,6 +290,7 @@ void CMinimapExportDialog::exportTexture()
         for(const SResArchiveMember& existing : archive.members())
             memberExists = memberExists
                 || existing.name.compare(member, Qt::CaseInsensitive) == 0;
+        inspectionProgress.close();
         if(memberExists)
         {
             const auto answer = QMessageBox::warning(this, tr("Replace minimap texture?"),
@@ -235,14 +302,22 @@ void CMinimapExportDialog::exportTexture()
         }
     }
 
-    QApplication::setOverrideCursor(Qt::WaitCursor);
+    QProgressDialog progress(tr("Validating and rebuilding the destination RES..."),
+                             QString(), 0, 0, this);
+    progress.setWindowTitle(tr("Exporting minimap texture"));
+    progress.setCancelButton(nullptr);
+    progress.setWindowModality(Qt::ApplicationModal);
+    progress.setMinimumDuration(0);
+    progress.setAutoClose(false);
+    progress.show();
+    QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
     SResTextureExportRequest request;
     request.destination = QFileInfo(path);
     request.memberName = member;
     request.mmpPayload = mmp;
     request.conflictPolicy = policy;
     const SResTextureExportResult result = exportMmpToRes(request);
-    QApplication::restoreOverrideCursor();
+    progress.close();
     if(!result.success)
     {
         m_status->setStyleSheet("color: #b00020;");

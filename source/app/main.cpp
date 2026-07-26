@@ -48,6 +48,7 @@
 #include "layout_components/viewport_widget.h"
 #include "ui/landscape_tools.h"
 #include "ui/bodypartedit_form.h"
+#include "ui/viewport_minimap_widget.h"
 #include "window_lifecycle.h"
 #include "settings.h"
 #include "endurance_ui_scale.h"
@@ -1041,6 +1042,22 @@ int runHeadlessCommand(QApplication& app)
         landscapeTools.setTerrainVisibility(false, true);
         const bool landscapeVisibilityControlsWork =
             !landscapeTools.mainTerrainVisible() && landscapeTools.overlaysVisible();
+        CViewportMinimapWidget viewportMinimap;
+        QImage generatedMinimap(256, 256, QImage::Format_ARGB32);
+        generatedMinimap.fill(Qt::darkGreen);
+        QImage embeddedMinimap(256, 256, QImage::Format_ARGB32);
+        embeddedMinimap.fill(Qt::darkBlue);
+        viewportMinimap.setGeneratedPreview(generatedMinimap, false, "generated");
+        viewportMinimap.setEmbeddedPreview("zone1map", embeddedMinimap,
+                                           "C:/fixtures/textures.res");
+        viewportMinimap.preferGenerated(false);
+        const bool embeddedMinimapDefaultsWhenAvailable =
+            !viewportMinimap.usesGeneratedPreview();
+        viewportMinimap.preferGenerated(true);
+        const bool generatedMinimapCanBeSelected =
+            viewportMinimap.usesGeneratedPreview()
+            && viewportMinimap.hasGeneratedPreview()
+            && viewportMinimap.hasEmbeddedPreview();
         bool semanticAtlasReviewRequested = false;
         QObject::connect(&landscapeTools, &CLandscapeTools::atlasProfileReviewRequested,
                          [&semanticAtlasReviewRequested]() {
@@ -1355,6 +1372,8 @@ int runHeadlessCommand(QApplication& app)
                 && underwaterFamiliesCanBeShown
                 && landscapeLayersVisibleByDefault
                 && landscapeVisibilityControlsWork
+                && embeddedMinimapDefaultsWhenAvailable
+                && generatedMinimapCanBeSelected
                 && semanticAtlasReviewButtonAvailable
                 && logicPointUndoAtomic && logicPointRedoAtomic
                 && viewportBackgroundConsumesClick && viewportChildConsumesClick
@@ -1437,6 +1456,9 @@ int runHeadlessCommand(QApplication& app)
                << " underwaterFamiliesCanBeShown=" << underwaterFamiliesCanBeShown
                << " landscapeLayersVisibleByDefault=" << landscapeLayersVisibleByDefault
                << " landscapeVisibilityControlsWork=" << landscapeVisibilityControlsWork
+               << " embeddedMinimapDefaultsWhenAvailable="
+               << embeddedMinimapDefaultsWhenAvailable
+               << " generatedMinimapCanBeSelected=" << generatedMinimapCanBeSelected
                << " semanticAtlasReviewButtonAvailable=" << semanticAtlasReviewButtonAvailable
                << " logicPointUndoAtomic=" << logicPointUndoAtomic
                << " logicPointRedoAtomic=" << logicPointRedoAtomic

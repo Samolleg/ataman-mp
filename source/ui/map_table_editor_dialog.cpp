@@ -1,10 +1,12 @@
 #include "map_table_editor_dialog.h"
 
 #include <QCheckBox>
+#include <QApplication>
 #include <QCoreApplication>
 #include <QComboBox>
 #include <QCryptographicHash>
 #include <QDir>
+#include <QEventLoop>
 #include <QFile>
 #include <QFileDialog>
 #include <QFormLayout>
@@ -21,6 +23,7 @@
 #include <QMessageBox>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QProgressDialog>
 #include <QRegularExpression>
 #include <QSaveFile>
 #include <QSettings>
@@ -892,7 +895,17 @@ void CMapTableEditorDialog::saveArchiveAs()
     request.expectedMemberSha256 = QCryptographicHash::hash(
         currentPayload, QCryptographicHash::Sha256).toHex();
     request.replacementPayload = m_table.serialize();
+    QProgressDialog progress(tr("Validating and rebuilding the destination RES..."),
+                             QString(), 0, 0, this);
+    progress.setWindowTitle(tr("Saving verified map catalog"));
+    progress.setCancelButton(nullptr);
+    progress.setWindowModality(Qt::ApplicationModal);
+    progress.setMinimumDuration(0);
+    progress.setAutoClose(false);
+    progress.show();
+    QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
     const SResMemberSaveResult result = commitStagedResMemberReplacement(m_archive, request);
+    progress.close();
     if(!result.success)
     {
         setStatus(result.phase + ": " + result.error, true);
@@ -932,7 +945,9 @@ void CMapTableEditorDialog::viewExistingMinimap()
     const QByteArray bytes = CObjectList::getInstance()->resourceData(textureName, &source);
     if(bytes.isEmpty())
     {
-        setStatus(tr("The active resource profile could not resolve %1.").arg(textureName), true);
+        setStatus(tr(
+            "The active resource profile could not resolve %1. A texture exported to an editor-local RES remains unavailable here until that archive is added to the active profile; Test Current Map can instead use the generated viewport preview through its run-owned staging path.")
+            .arg(textureName), true);
         return;
     }
     const ei::SMmpInspection inspection = ei::inspectMmp(bytes);

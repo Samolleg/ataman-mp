@@ -57,6 +57,7 @@ class QScrollArea;
 class QListWidget;
 class QSlider;
 class QDoubleSpinBox;
+class CViewportMinimapWidget;
 
 struct SWindowTitle
 {
@@ -100,6 +101,11 @@ private:
     void closeAll();
     void showGameAndModSetup();
     void generateMinimap();
+    void scheduleViewportMinimapRefresh(int delayMs = 250);
+    void refreshViewportMinimap();
+    void refreshViewportMinimapSources();
+    bool ensureGeneratedMinimap();
+    void positionViewportMinimap();
     void rememberRecentFile(const QFileInfo& fileName);
     void rebuildRecentFilesMenu();
     void loadLastSession();
@@ -335,9 +341,12 @@ private:
     SMapSpawnPlan m_customSpawn;
     QVector3D m_customSpawnPosition;
     QString m_customSpawnContextKey;
-    QByteArray m_pendingMinimapMmp;
-    QString m_pendingMinimapTextureName;
-    QString m_pendingMinimapContextKey;
+    CViewportMinimapWidget* m_viewportMinimap{nullptr};
+    QTimer* m_minimapRefreshTimer{nullptr};
+    QByteArray m_generatedMinimapMmp;
+    QString m_generatedMinimapContextKey;
+    QString m_minimapSourceContextKey;
+    bool m_minimapCaptureRunning{false};
 };
 
 #endif // MAIN_WINDOW_H

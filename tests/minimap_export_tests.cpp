@@ -39,11 +39,13 @@ private slots:
     void composesTerrainOverlayAndStaticInOrder();
     void encodesInspectable256Mmp();
     void createsAddsReplacesAndRefusesCollision();
+    void appendValidationMatchesByNameAfterHashTableReorder();
     void validationFailureDoesNotPublish();
     void validationFailurePreservesExistingArchive();
     void registersCatalogOnlyAfterExportAndPreservesObjectives();
     void stagesReviewedTextureInRunOwnedArchive();
     void stagesTemporaryCatalogReferenceWithoutObjectivesMutation();
+    void temporaryRuntimeNameAvoidsInstalledTextureShadowing();
 };
 
 void MinimapExportTests::normalizesOrientationAndFramesWholeMpr()
@@ -170,6 +172,47 @@ void MinimapExportTests::validationFailureDoesNotPublish()
     QVERIFY(!QFileInfo::exists(path));
 }
 
+void MinimapExportTests::appendValidationMatchesByNameAfterHashTableReorder()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString path = directory.filePath("reordered.res");
+    SResTextureExportRequest request;
+    request.destination = QFileInfo(path);
+    request.backupRootOverride = directory.filePath("backups");
+    request.mmpPayload = ei::encodeMmp8888(
+        solid(QSize(256, 256), QColor(70, 80, 90)));
+    request.memberName = "seed_member";
+    QVERIFY(exportMmpToRes(request).success);
+
+    bool observedReorder = false;
+    for(int attempt = 0; attempt < 24 && !observedReorder; ++attempt)
+    {
+        QFile beforeFile(path);
+        QVERIFY(beforeFile.open(QIODevice::ReadOnly));
+        CResArchiveDocument before;
+        QVERIFY(before.loadBytes(beforeFile.readAll(), path));
+        beforeFile.close();
+        QStringList beforeOrder;
+        for(const SResArchiveMember& member : before.members())
+            beforeOrder.append(member.name);
+
+        request.memberName = QString("hash_shift_%1").arg(attempt);
+        const SResTextureExportResult added = exportMmpToRes(request);
+        QVERIFY2(added.success, qPrintable(added.phase + ": " + added.error));
+        QFile afterFile(path);
+        QVERIFY(afterFile.open(QIODevice::ReadOnly));
+        CResArchiveDocument after;
+        QVERIFY(after.loadBytes(afterFile.readAll(), path));
+        QStringList afterPrefix;
+        for(int index = 0; index < beforeOrder.size(); ++index)
+            afterPrefix.append(after.members().at(index).name);
+        observedReorder = beforeOrder != afterPrefix;
+    }
+    QVERIFY2(observedReorder,
+             "Synthetic append sequence did not exercise a RES hash-table reorder.");
+}
+
 void MinimapExportTests::validationFailurePreservesExistingArchive()
 {
     QTemporaryDir directory;
@@ -236,6 +279,19 @@ void MinimapExportTests::stagesTemporaryCatalogReferenceWithoutObjectivesMutatio
 
     // This helper consumes only an in-memory run-owned candidate.
     QCOMPARE(archiveWithMapTable(mapTable), source);
+}
+
+void MinimapExportTests::temporaryRuntimeNameAvoidsInstalledTextureShadowing()
+{
+    const QByteArray mmp = ei::encodeMmp8888(
+        solid(QSize(256, 256), QColor(31, 63, 127)));
+    const QString first = temporaryMinimapRuntimeTextureName(mmp, "run-a");
+    const QString repeated = temporaryMinimapRuntimeTextureName(mmp, "run-a");
+    const QString nextRun = temporaryMinimapRuntimeTextureName(mmp, "run-b");
+    QVERIFY(first.startsWith("eimmap_"));
+    QCOMPARE(first, repeated);
+    QVERIFY(first != nextRun);
+    QVERIFY(!first.contains("zone1map", Qt::CaseInsensitive));
 }
 
 void MinimapExportTests::registersCatalogOnlyAfterExportAndPreservesObjectives()

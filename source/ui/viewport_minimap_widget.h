@@ -1,0 +1,54 @@
+#ifndef VIEWPORT_MINIMAP_WIDGET_H
+#define VIEWPORT_MINIMAP_WIDGET_H
+
+#include <QFrame>
+#include <QImage>
+
+class QComboBox;
+class QLabel;
+class QToolButton;
+
+class CViewportMinimapWidget : public QFrame
+{
+    Q_OBJECT
+public:
+    explicit CViewportMinimapWidget(QWidget* parent = nullptr);
+
+    void setGeneratedPreview(const QImage& image, bool incomplete,
+                             const QString& detail);
+    void clearGeneratedPreview(const QString& detail = QString());
+    void setEmbeddedPreview(const QString& textureName, const QImage& image,
+                            const QString& source);
+    void clearEmbeddedPreview(const QString& textureName = QString());
+    void preferGenerated(bool generated);
+    bool usesGeneratedPreview() const;
+    bool hasGeneratedPreview() const { return !m_generated.isNull(); }
+    bool hasEmbeddedPreview() const { return !m_embedded.isNull(); }
+    bool isExpanded() const { return m_expanded; }
+
+signals:
+    void exportRequested();
+    void sourceModeChanged(bool generated);
+    void sizeModeChanged();
+
+private:
+    void updateSourceChoices(bool preserveSelection);
+    void updateDisplayedImage();
+    void setExpanded(bool expanded);
+
+    QComboBox* m_source{nullptr};
+    QLabel* m_image{nullptr};
+    QLabel* m_detail{nullptr};
+    QLabel* m_title{nullptr};
+    QToolButton* m_export{nullptr};
+    QToolButton* m_expand{nullptr};
+    QImage m_generated;
+    QImage m_embedded;
+    QString m_generatedDetail;
+    QString m_embeddedName;
+    QString m_embeddedSource;
+    bool m_generatedIncomplete{false};
+    bool m_expanded{true};
+};
+
+#endif

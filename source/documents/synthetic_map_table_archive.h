@@ -41,6 +41,11 @@ bool stageTemporaryMinimapReference(const QByteArray& stagedMapTableArchive,
                                     QByteArray* outputArchive,
                                     QStringList* errors = nullptr);
 
+// Produces a run-scoped texture name so the generated preview cannot be
+// shadowed by an identically named member already loaded from textures.res.
+QString temporaryMinimapRuntimeTextureName(const QByteArray& mmpPayload,
+                                           const QString& runId);
+
 QString syntheticMapPlaceholderTextureName();
 
 #endif // SYNTHETIC_MAP_TABLE_ARCHIVE_H

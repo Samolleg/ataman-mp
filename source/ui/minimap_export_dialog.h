@@ -23,15 +23,12 @@ public:
     bool catalogRegistrationRequested() const;
     QString textureName() const;
     QString destinationArchive() const;
-    bool temporaryPreviewRequested() const { return m_temporaryPreviewRequested; }
-    QByteArray encodedMmp() const { return m_encodedMmp; }
 
 private slots:
     void chooseDestination();
     void exportTexture();
     void saveReviewPng();
     void updateReadyState();
-    void stageTemporaryPreview();
 
 private:
     SMinimapSceneCaptureResult m_capture;
@@ -42,8 +39,6 @@ private:
     QCheckBox* m_registerCatalog{nullptr};
     QPushButton* m_exportButton{nullptr};
     bool m_exportSucceeded{false};
-    bool m_temporaryPreviewRequested{false};
-    QByteArray m_encodedMmp;
 };
 
 #endif

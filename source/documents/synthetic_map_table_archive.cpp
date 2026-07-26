@@ -56,6 +56,17 @@ QString syntheticMapPlaceholderTextureName()
     return QString::fromLatin1(kPlaceholderTextureName);
 }
 
+QString temporaryMinimapRuntimeTextureName(const QByteArray& mmpPayload,
+                                           const QString& runId)
+{
+    if(mmpPayload.isEmpty() || runId.trimmed().isEmpty())
+        return QString();
+    const QByteArray identity = runId.toUtf8() + QByteArray(1, '\0') + mmpPayload;
+    return QStringLiteral("eimmap_") + QString::fromLatin1(
+        QCryptographicHash::hash(identity, QCryptographicHash::Sha256)
+            .toHex().left(12));
+}
+
 bool buildSyntheticMapPlaceholderArchive(QByteArray* outputArchive,
                                          QStringList* errors)
 {

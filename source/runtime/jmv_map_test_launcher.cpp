@@ -1788,8 +1788,11 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
     QByteArray placeholderArchive;
     QStringList placeholderErrors;
     const bool hasTemporaryMinimap = !input.temporaryMinimapMmp.isEmpty();
+    const QString temporaryMinimapRuntimeName = hasTemporaryMinimap
+        ? temporaryMinimapRuntimeTextureName(input.temporaryMinimapMmp, m_runId)
+        : QString();
     const bool textureArchiveBuilt = hasTemporaryMinimap
-        ? buildSyntheticMapTextureArchive(input.temporaryMinimapTextureName,
+        ? buildSyntheticMapTextureArchive(temporaryMinimapRuntimeName,
                                           input.temporaryMinimapMmp,
                                           &placeholderArchive, &placeholderErrors)
         : buildSyntheticMapPlaceholderArchive(&placeholderArchive, &placeholderErrors);
@@ -2023,7 +2026,7 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
             QByteArray previewArchive;
             if(!stageTemporaryMinimapReference(
                    stagedArchive, m_mapTableSourcePath + " [minimap preview]",
-                   previewZone, input.temporaryMinimapTextureName,
+                   previewZone, temporaryMinimapRuntimeName,
                    &previewArchive, &minimapErrors))
             {
                 if(error) *error = "Could not stage the private minimap reference: "
@@ -2185,7 +2188,7 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
     appendRunLog(QString("Staged standalone temporary texture RES path=%1 sha256=%2 texture=%3 source=%4 registration=shared-owned-process-bridge installedArchivesModified=false")
                  .arg(QDir::toNativeSeparators(m_livePlaceholderResourcePath),
                       m_livePlaceholderResourceSha256,
-                      hasTemporaryMinimap ? input.temporaryMinimapTextureName
+                      hasTemporaryMinimap ? temporaryMinimapRuntimeName
                                           : syntheticMapPlaceholderTextureName(),
                       hasTemporaryMinimap ? "reviewed-minimap" : "neutral-checker"));
     appendRunLog(QString("Staged temporary map=%1 exit=%2 spawn=(%3,%4) clearance=%5")

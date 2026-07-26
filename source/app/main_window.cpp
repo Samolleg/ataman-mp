@@ -93,6 +93,9 @@
 #include "collection_editor_dialog.h"
 #include "map_table_editor_dialog.h"
 #include "minimap_export_dialog.h"
+#include "viewport_minimap_widget.h"
+#include "mmp_codec.h"
+#include "mmp_inspector.h"
 #include "script_reference_analyzer.h"
 #include "unit.h"
 
@@ -707,7 +710,7 @@ MainWindow::MainWindow(QWidget* parent) :
     QAction* validateSelectedMobs = new QAction(tr("Validate Selected MOB Files..."), this);
     QAction* repairMobFamily = new QAction(tr("Review and Repair NID Collisions..."), this);
     QAction* openMapCatalog = new QAction(tr("Map Catalog Editor..."), this);
-    QAction* generateMinimapAction = new QAction(tr("Generate Minimap..."), this);
+    QAction* generateMinimapAction = new QAction(tr("Export Minimap..."), this);
     m_mapTestAction = new QAction(tr("Test Current Map"), this);
     m_mapTestAction->setToolTip(tr("Stages unique temporary MPR/MOB copies and launches the active validated runtime profile. JMV uses hash-owned temporary aliases in the mod Maps directory; source maps are never overwritten."));
     m_stopMapTestAction = new QAction(tr("Stop Test"), this);
@@ -1026,6 +1029,33 @@ MainWindow::MainWindow(QWidget* parent) :
     m_pView->setMinimumSize(QSize(200, 200));
     m_pView->setMouseTracking(true);
     createViewportToolbars();
+    m_viewportMinimap = new CViewportMinimapWidget(m_pView);
+    m_viewportMinimap->hide();
+    m_minimapRefreshTimer = new QTimer(this);
+    m_minimapRefreshTimer->setSingleShot(true);
+    connect(m_minimapRefreshTimer, &QTimer::timeout,
+            this, &MainWindow::refreshViewportMinimap);
+    connect(m_viewportMinimap, &CViewportMinimapWidget::exportRequested,
+            this, &MainWindow::generateMinimap);
+    connect(m_viewportMinimap, &CViewportMinimapWidget::sizeModeChanged,
+            this, &MainWindow::positionViewportMinimap);
+    connect(m_viewportMinimap, &CViewportMinimapWidget::sourceModeChanged,
+            this, [this](bool generated) {
+        statusBar()->showMessage(generated
+            ? tr("Generated minimap preview will be staged automatically for Test Current Map.")
+            : tr("Embedded minimap selected; Test Current Map will use the active profile texture."),
+            5000);
+    });
+    connect(m_pView, &CView::loadedMapStateChanged,
+            this, [this]() { scheduleViewportMinimapRefresh(); });
+    connect(m_pView, &CView::mobStateChanged,
+            this, [this]() { scheduleViewportMinimapRefresh(); });
+    connect(m_pView, &CView::updateMainWindowTitle,
+            this, [this](eTitleTypeData type, const QString&) {
+        if(type == eTitleTypeData::eTitleTypeDataMprDirtyFlag
+           || type == eTitleTypeData::eTitleTypeDataDirtyFlag)
+            scheduleViewportMinimapRefresh();
+    });
     m_ui->workspaceSplitter->setStretchFactor(0, 1);
     if(firstRunSetup)
     {
@@ -1769,6 +1799,8 @@ void MainWindow::runUndoToIndex(int targetIndex)
 
 bool MainWindow::eventFilter(QObject* watched, QEvent* event)
 {
+    if(m_pView && watched == m_pView && event->type() == QEvent::Resize)
+        positionViewportMinimap();
     if(m_pView && watched == m_pView && event->type() == QEvent::KeyPress)
     {
         QKeyEvent* key = static_cast<QKeyEvent*>(event);
@@ -2244,6 +2276,7 @@ void MainWindow::refreshMapTestContext(bool preserveWorkspaceState, bool reloadC
     }
     updateCustomSpawnControls();
     updateMapTestAction();
+    refreshViewportMinimapSources();
 }
 
 void MainWindow::chooseBorrowedMapIdentity()
@@ -3142,13 +3175,18 @@ void MainWindow::launchCurrentMapTest()
     input.mapSizeX = int(landscape->widthInWorldUnits() / 32u);
     input.mapSizeY = int(landscape->heightInWorldUnits() / 32u);
     input.allowMissingAiGraph = allowMissingAiGraph;
-    const bool usesPendingMinimap = isJmv
-        && !m_pendingMinimapMmp.isEmpty()
-        && m_pendingMinimapContextKey == currentMapContextKey();
-    if(usesPendingMinimap)
+    const bool usesGeneratedMinimap = isJmv && !hotReloadRequested
+        && m_viewportMinimap && m_viewportMinimap->usesGeneratedPreview();
+    if(usesGeneratedMinimap && !ensureGeneratedMinimap())
     {
-        input.temporaryMinimapTextureName = m_pendingMinimapTextureName;
-        input.temporaryMinimapMmp = m_pendingMinimapMmp;
+        QMessageBox::warning(this, tr("Map test launch"), tr(
+            "Generated minimap mode is selected, but the current preview could not be captured. "
+            "Choose Embedded in the viewport minimap or resolve the capture error before testing."));
+        return;
+    }
+    if(usesGeneratedMinimap)
+    {
+        input.temporaryMinimapMmp = m_generatedMinimapMmp;
     }
     if(isBase && !hotReloadRequested)
     {
@@ -3180,13 +3218,10 @@ void MainWindow::launchCurrentMapTest()
     }
     else
     {
-        if(usesPendingMinimap)
+        if(usesGeneratedMinimap)
         {
-            m_pendingMinimapMmp.clear();
-            m_pendingMinimapTextureName.clear();
-            m_pendingMinimapContextKey.clear();
             statusBar()->showMessage(tr(
-                "The reviewed minimap was staged in this run's private texture RES and map table."),
+                "The generated minimap was staged under a run-unique texture name in this test's private RES and map table."),
                 7000);
         }
         if(hotReloadRequested)
@@ -3205,12 +3240,139 @@ void MainWindow::launchCurrentMapTest()
     updateMapTestAction();
 }
 
+void MainWindow::scheduleViewportMinimapRefresh(int delayMs)
+{
+    if(!m_minimapRefreshTimer || m_minimapCaptureRunning)
+        return;
+    if(m_workspaceLoadInProgress)
+    {
+        m_minimapRefreshTimer->stop();
+        return;
+    }
+    if(!CLandscape::getInstance()->isMprLoad())
+    {
+        m_generatedMinimapMmp.clear();
+        m_generatedMinimapContextKey.clear();
+        if(m_viewportMinimap)
+        {
+            m_viewportMinimap->clearGeneratedPreview();
+            m_viewportMinimap->hide();
+        }
+        return;
+    }
+    m_minimapRefreshTimer->start(qMax(0, delayMs));
+}
+
+void MainWindow::refreshViewportMinimapSources()
+{
+    if(!m_viewportMinimap)
+        return;
+    const QString context = currentMapContextKey();
+    const bool contextChanged = context != m_minimapSourceContextKey;
+    if(contextChanged)
+    {
+        m_minimapSourceContextKey = context;
+        m_generatedMinimapMmp.clear();
+        m_generatedMinimapContextKey.clear();
+        m_viewportMinimap->clearGeneratedPreview();
+        m_viewportMinimap->clearEmbeddedPreview();
+    }
+    QString textureName = m_mapTestEntry.minimapTexture.trimmed();
+    QString source;
+    QImage embedded;
+    if(!textureName.isEmpty())
+    {
+        QString memberName = textureName;
+        if(!memberName.endsWith(".mmp", Qt::CaseInsensitive))
+            memberName += ".mmp";
+        const QByteArray bytes = CObjectList::getInstance()->resourceData(memberName, &source);
+        const ei::SMmpInspection inspection = ei::inspectMmp(bytes);
+        if(inspection.valid)
+            embedded = inspection.baseImage;
+    }
+    if(!embedded.isNull())
+        m_viewportMinimap->setEmbeddedPreview(textureName, embedded, source);
+    else
+        m_viewportMinimap->clearEmbeddedPreview(textureName);
+    if(contextChanged)
+        m_viewportMinimap->preferGenerated(embedded.isNull());
+    scheduleViewportMinimapRefresh(0);
+}
+
+void MainWindow::refreshViewportMinimap()
+{
+    if(m_minimapCaptureRunning || !m_pView || !m_viewportMinimap
+       || !CLandscape::getInstance()->isMprLoad())
+        return;
+    m_minimapCaptureRunning = true;
+    const bool collectionCapture = m_workspaceIdentityKind.compare(
+        "collection", Qt::CaseInsensitive) == 0
+        && !m_currentCollectionPath.isEmpty();
+    const SMinimapSceneCaptureResult capture =
+        m_pView->captureMinimapScene(collectionCapture);
+    if(!capture.bake.success)
+    {
+        m_generatedMinimapMmp.clear();
+        m_generatedMinimapContextKey.clear();
+        m_viewportMinimap->clearGeneratedPreview(capture.bake.error);
+        m_minimapCaptureRunning = false;
+        return;
+    }
+    QString diagnostic;
+    const QByteArray mmp = ei::encodeMmp8888(capture.bake.gameImage, &diagnostic);
+    if(mmp.isEmpty())
+    {
+        m_generatedMinimapMmp.clear();
+        m_generatedMinimapContextKey.clear();
+        m_viewportMinimap->clearGeneratedPreview(
+            tr("Generated preview encoding failed: %1").arg(diagnostic));
+        m_minimapCaptureRunning = false;
+        return;
+    }
+    m_generatedMinimapMmp = mmp;
+    m_generatedMinimapContextKey = currentMapContextKey();
+    m_viewportMinimap->setGeneratedPreview(
+        capture.bake.gameImage, capture.bake.incomplete,
+        tr("Generated: %1 static objects; %2 units excluded")
+            .arg(capture.staticObjectCount).arg(capture.excludedDynamicUnitCount));
+    m_viewportMinimap->show();
+    positionViewportMinimap();
+    m_viewportMinimap->raise();
+    m_minimapCaptureRunning = false;
+}
+
+bool MainWindow::ensureGeneratedMinimap()
+{
+    if(m_minimapRefreshTimer && m_minimapRefreshTimer->isActive())
+    {
+        m_minimapRefreshTimer->stop();
+        refreshViewportMinimap();
+    }
+    if(!m_generatedMinimapMmp.isEmpty()
+       && m_generatedMinimapContextKey == currentMapContextKey())
+        return true;
+    refreshViewportMinimap();
+    return !m_generatedMinimapMmp.isEmpty()
+        && m_generatedMinimapContextKey == currentMapContextKey();
+}
+
+void MainWindow::positionViewportMinimap()
+{
+    if(!m_pView || !m_viewportMinimap)
+        return;
+    const int margin = 10;
+    m_viewportMinimap->move(
+        qMax(margin, m_pView->width() - m_viewportMinimap->width() - margin),
+        margin);
+    m_viewportMinimap->raise();
+}
+
 void MainWindow::generateMinimap()
 {
     if(!m_pView || !CLandscape::getInstance()->isMprLoad())
     {
-        QMessageBox::information(this, tr("Generate Minimap"),
-            tr("Load an MPR or collection before generating a minimap."));
+        QMessageBox::information(this, tr("Export Minimap"),
+            tr("Load an MPR or collection before exporting a minimap."));
         return;
     }
     const bool collectionCapture = m_workspaceIdentityKind.compare(
@@ -3222,7 +3384,7 @@ void MainWindow::generateMinimap()
     QApplication::restoreOverrideCursor();
     if(!capture.bake.success)
     {
-        QMessageBox::warning(this, tr("Generate Minimap"), capture.bake.error);
+        QMessageBox::warning(this, tr("Export Minimap"), capture.bake.error);
         return;
     }
 
@@ -3233,16 +3395,6 @@ void MainWindow::generateMinimap()
     CMinimapExportDialog dialog(capture, suggestedName,
                                 m_mapTestEntry.zoneId, this);
     dialog.exec();
-
-    if(dialog.temporaryPreviewRequested())
-    {
-        m_pendingMinimapMmp = dialog.encodedMmp();
-        m_pendingMinimapTextureName = dialog.textureName();
-        m_pendingMinimapContextKey = currentMapContextKey();
-        statusBar()->showMessage(tr(
-            "Reviewed minimap queued for the next JMV Test Current Map; no archive was modified."),
-            8000);
-    }
 
     if(!dialog.catalogRegistrationRequested())
         return;
@@ -4865,6 +5017,7 @@ void MainWindow::endWorkspaceLoad()
     ei::log(eLogInfo, "Workspace load finished");
     updateDocumentActionAvailability();
     updateMapTestAction();
+    refreshViewportMinimapSources();
 }
 
 void MainWindow::showLandscapeTools()
@@ -5728,6 +5881,7 @@ void MainWindow::resizeEvent(QResizeEvent* e)
     QMainWindow::resizeEvent(e);
     positionMapTestResultNotification();
     positionAutosaveNotification();
+    positionViewportMinimap();
 }
 
 void MainWindow::closeEvent(QCloseEvent *e)

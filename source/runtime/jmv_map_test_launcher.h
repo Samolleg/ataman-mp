@@ -56,7 +56,6 @@ struct SJmvMapTestLaunchInput
     int mapSizeY{0};
     bool allowMissingAiGraph{false};
     int baseProbeLevel{0};
-    QString temporaryMinimapTextureName;
     QByteArray temporaryMinimapMmp;
 };
 
