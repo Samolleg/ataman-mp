@@ -14,10 +14,12 @@
 #include <QStringList>
 #include <QVector3D>
 #include <QFutureWatcher>
+#include <QImage>
 #include "types.h"
 #include "map_catalog.h"
 #include "map_spawn_planner.h"
 #include "mob_family_validation.h"
+#include "minimap_bake.h"
 
 namespace Ui {
 class MainWindow;
@@ -43,6 +45,7 @@ class QComboBox;
 class QCheckBox;
 class QToolButton;
 class QLabel;
+struct SMinimapSceneCaptureResult;
 class QTreeWidget;
 class QTreeWidgetItem;
 class QTimer;
@@ -101,9 +104,11 @@ private:
     void closeAll();
     void showGameAndModSetup();
     void generateMinimap();
-    void scheduleViewportMinimapRefresh(int delayMs = 250);
+    void scheduleViewportMinimapRefresh(int delayMs = 250, bool force = false);
     void refreshViewportMinimap();
     void refreshViewportMinimapSources();
+    bool applyMinimapCapture(const SMinimapSceneCaptureResult& capture,
+                             const SMinimapGradeSettings& grade);
     bool ensureGeneratedMinimap();
     void positionViewportMinimap();
     void rememberRecentFile(const QFileInfo& fileName);
@@ -344,12 +349,18 @@ private:
     CViewportMinimapWidget* m_viewportMinimap{nullptr};
     QTimer* m_minimapRefreshTimer{nullptr};
     QByteArray m_generatedMinimapMmp;
+    QImage m_generatedMinimapImage;
+    QImage m_embeddedMinimapImage;
+    QString m_embeddedMinimapName;
+    QString m_embeddedMinimapSource;
+    SMinimapGradeSettings m_minimapGrade;
     QString m_generatedMinimapContextKey;
     int m_minimapTargetTextureSize{1024};
     bool m_minimapTargetDxt1{true};
     QString m_minimapExportProfileDescription;
     QString m_minimapSourceContextKey;
     bool m_minimapCaptureRunning{false};
+    bool m_minimapGenerationLocked{false};
 };
 
 #endif // MAIN_WINDOW_H

@@ -1039,6 +1039,20 @@ MainWindow::MainWindow(QWidget* parent) :
             this, &MainWindow::generateMinimap);
     connect(m_viewportMinimap, &CViewportMinimapWidget::sizeModeChanged,
             this, &MainWindow::positionViewportMinimap);
+    connect(m_viewportMinimap, &CViewportMinimapWidget::regenerationRequested,
+            this, [this]() { scheduleViewportMinimapRefresh(0, true); });
+    connect(m_viewportMinimap, &CViewportMinimapWidget::autoRegenerationChanged,
+            this, [this](bool enabled) {
+        if(enabled) scheduleViewportMinimapRefresh(0, true);
+    });
+    connect(m_viewportMinimap, &CViewportMinimapWidget::unlockRequested,
+            this, [this]() {
+        m_minimapGenerationLocked = false;
+        m_viewportMinimap->setGenerationLocked(false);
+        statusBar()->showMessage(tr("Generated minimap unlocked."), 3000);
+        if(m_viewportMinimap->autoRegenerationEnabled())
+            scheduleViewportMinimapRefresh(0, true);
+    });
     connect(m_viewportMinimap, &CViewportMinimapWidget::sourceModeChanged,
             this, [this](bool generated) {
         statusBar()->showMessage(generated
@@ -3242,9 +3256,13 @@ void MainWindow::launchCurrentMapTest()
     updateMapTestAction();
 }
 
-void MainWindow::scheduleViewportMinimapRefresh(int delayMs)
+void MainWindow::scheduleViewportMinimapRefresh(int delayMs, bool force)
 {
     if(!m_minimapRefreshTimer || m_minimapCaptureRunning)
+        return;
+    if(m_minimapGenerationLocked
+       || (!force && (!m_viewportMinimap
+                      || !m_viewportMinimap->autoRegenerationEnabled())))
         return;
     if(m_workspaceLoadInProgress)
     {
@@ -3254,7 +3272,10 @@ void MainWindow::scheduleViewportMinimapRefresh(int delayMs)
     if(!CLandscape::getInstance()->isMprLoad())
     {
         m_generatedMinimapMmp.clear();
+        m_generatedMinimapImage = QImage();
         m_generatedMinimapContextKey.clear();
+        m_minimapGenerationLocked = false;
+        m_viewportMinimap->setGenerationLocked(false);
         if(m_viewportMinimap)
         {
             m_viewportMinimap->clearGeneratedPreview();
@@ -3281,7 +3302,10 @@ void MainWindow::refreshViewportMinimapSources()
     {
         m_minimapSourceContextKey = context;
         m_generatedMinimapMmp.clear();
+        m_generatedMinimapImage = QImage();
         m_generatedMinimapContextKey.clear();
+        m_minimapGenerationLocked = false;
+        m_viewportMinimap->setGenerationLocked(false);
         m_viewportMinimap->clearGeneratedPreview();
         m_viewportMinimap->clearEmbeddedPreview();
     }
@@ -3321,6 +3345,9 @@ void MainWindow::refreshViewportMinimapSources()
         m_viewportMinimap->setEmbeddedPreview(textureName, embedded, source);
     else
         m_viewportMinimap->clearEmbeddedPreview(textureName);
+    m_embeddedMinimapImage = embedded;
+    m_embeddedMinimapName = textureName;
+    m_embeddedMinimapSource = source;
     if(contextChanged)
         m_viewportMinimap->preferGenerated(embedded.isNull());
     scheduleViewportMinimapRefresh(0);
@@ -3345,30 +3372,46 @@ void MainWindow::refreshViewportMinimap()
         m_minimapCaptureRunning = false;
         return;
     }
-    QString diagnostic;
-    const QByteArray mmp = m_minimapTargetDxt1
-        ? ei::encodeMmpDxt1(capture.bake.gameImage, &diagnostic)
-        : ei::encodeMmp8888(capture.bake.gameImage, &diagnostic);
-    if(mmp.isEmpty())
+    if(!applyMinimapCapture(capture, m_minimapGrade))
     {
-        m_generatedMinimapMmp.clear();
-        m_generatedMinimapContextKey.clear();
-        m_viewportMinimap->clearGeneratedPreview(
-            tr("Generated preview encoding failed: %1").arg(diagnostic));
         m_minimapCaptureRunning = false;
         return;
     }
-    m_generatedMinimapMmp = mmp;
-    m_generatedMinimapContextKey = currentMapContextKey();
-    m_viewportMinimap->setGeneratedPreview(
-        capture.bake.gameImage, capture.bake.incomplete,
-        tr("Generated: %1 static objects; %2 units excluded\n%3")
-            .arg(capture.staticObjectCount).arg(capture.excludedDynamicUnitCount)
-            .arg(m_minimapExportProfileDescription));
     m_viewportMinimap->show();
     positionViewportMinimap();
     m_viewportMinimap->raise();
     m_minimapCaptureRunning = false;
+}
+
+bool MainWindow::applyMinimapCapture(const SMinimapSceneCaptureResult& capture,
+                                     const SMinimapGradeSettings& grade)
+{
+    const QImage graded = gradeMinimapImage(
+        capture.unlitGameImage, capture.bake.gameImage, grade);
+    QString diagnostic;
+    const QByteArray mmp = m_minimapTargetDxt1
+        ? ei::encodeMmpDxt1(graded, &diagnostic)
+        : ei::encodeMmp8888(graded, &diagnostic);
+    if(mmp.isEmpty())
+    {
+        m_generatedMinimapMmp.clear();
+        m_generatedMinimapImage = QImage();
+        m_generatedMinimapContextKey.clear();
+        m_viewportMinimap->clearGeneratedPreview(
+            tr("Generated preview encoding failed: %1").arg(diagnostic));
+        return false;
+    }
+    m_minimapGrade = grade;
+    m_generatedMinimapMmp = mmp;
+    m_generatedMinimapImage = graded;
+    m_generatedMinimapContextKey = currentMapContextKey();
+    m_viewportMinimap->setGeneratedPreview(
+        graded, capture.bake.incomplete,
+        tr("Generated: %1 static objects; %2 hidden; %3 units excluded\n%4")
+            .arg(capture.staticObjectCount).arg(capture.hiddenStaticObjectCount)
+            .arg(capture.excludedDynamicUnitCount)
+            .arg(m_minimapExportProfileDescription));
+    return true;
 }
 
 bool MainWindow::ensureGeneratedMinimap()
@@ -3406,12 +3449,35 @@ void MainWindow::generateMinimap()
         return;
     }
     const bool includeLoadedStaticGeometry = !m_pView->mobs().isEmpty();
-    QApplication::setOverrideCursor(Qt::WaitCursor);
-    SMinimapSceneCaptureResult capture = m_pView->captureMinimapScene(
-        includeLoadedStaticGeometry, m_minimapTargetTextureSize);
-    capture.targetDxt1 = m_minimapTargetDxt1;
-    capture.exportProfileDescription = m_minimapExportProfileDescription;
-    QApplication::restoreOverrideCursor();
+    SMinimapSceneCaptureResult capture;
+    SMinimapGradeSettings dialogGrade = m_minimapGrade;
+    if(m_minimapGenerationLocked && !m_generatedMinimapImage.isNull())
+    {
+        capture.bake.success = true;
+        capture.bake.gameImage = m_generatedMinimapImage;
+        capture.bake.reviewImage = m_generatedMinimapImage;
+        capture.unlitGameImage = m_generatedMinimapImage;
+        CLandscape* landscape = CLandscape::getInstance();
+        capture.sectorWidth = landscape
+            ? int(landscape->widthInWorldUnits() / 32u) : 0;
+        capture.sectorHeight = landscape
+            ? int(landscape->heightInWorldUnits() / 32u) : 0;
+        capture.targetTextureSize = m_generatedMinimapImage.width();
+        capture.targetDxt1 = m_minimapTargetDxt1;
+        capture.exportProfileDescription = m_minimapExportProfileDescription;
+        capture.framingDescription = tr("Applied and locked generated texture");
+        capture.orientationDescription = tr("Game payload orientation; editor comparison is corrected vertically");
+        dialogGrade = {100, 100, 100, 100};
+    }
+    else
+    {
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        capture = m_pView->captureMinimapScene(
+            includeLoadedStaticGeometry, m_minimapTargetTextureSize);
+        QApplication::restoreOverrideCursor();
+        capture.targetDxt1 = m_minimapTargetDxt1;
+        capture.exportProfileDescription = m_minimapExportProfileDescription;
+    }
     if(!capture.bake.success)
     {
         QMessageBox::warning(this, tr("Export Minimap"), capture.bake.error);
@@ -3422,9 +3488,30 @@ void MainWindow::generateMinimap()
     // generated default. Standalone/unregistered MPRs intentionally start
     // blank so the author must choose their namespace.
     const QString suggestedName = m_mapTestEntry.minimapTexture;
-    CMinimapExportDialog dialog(capture, suggestedName,
-                                m_mapTestEntry.zoneId, this);
+    CMinimapExportDialog dialog(capture, m_embeddedMinimapImage,
+                                m_embeddedMinimapName, suggestedName,
+                                m_mapTestEntry.zoneId, dialogGrade,
+                                m_minimapGenerationLocked, this);
+    connect(&dialog, &CMinimapExportDialog::regenerationRequested,
+            this, [this, &dialog, includeLoadedStaticGeometry]() {
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        SMinimapSceneCaptureResult refreshed = m_pView->captureMinimapScene(
+            includeLoadedStaticGeometry, m_minimapTargetTextureSize);
+        QApplication::restoreOverrideCursor();
+        refreshed.targetDxt1 = m_minimapTargetDxt1;
+        refreshed.exportProfileDescription = m_minimapExportProfileDescription;
+        if(refreshed.bake.success)
+            dialog.setCapture(refreshed);
+    });
     dialog.exec();
+
+    if(dialog.lockRequested()
+       && applyMinimapCapture(dialog.capture(), dialog.gradeSettings()))
+    {
+        m_minimapGenerationLocked = true;
+        m_viewportMinimap->setGenerationLocked(true);
+        statusBar()->showMessage(tr("Generated minimap applied and locked."), 5000);
+    }
 
     if(!dialog.catalogRegistrationRequested())
         return;

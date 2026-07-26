@@ -2,6 +2,46 @@
 
 #include <QPainter>
 
+QImage gradeMinimapImage(const QImage& unlitImage, const QImage& shadedImage,
+                         const SMinimapGradeSettings& settings)
+{
+    if(shadedImage.isNull()) return QImage();
+    const QImage unlit = unlitImage.size() == shadedImage.size()
+        ? unlitImage.convertToFormat(QImage::Format_ARGB32)
+        : shadedImage.convertToFormat(QImage::Format_ARGB32);
+    const QImage shaded = shadedImage.convertToFormat(QImage::Format_ARGB32);
+    QImage result(shaded.size(), QImage::Format_ARGB32);
+    const double shade = qBound(0, settings.shadingPercent, 100) / 100.0;
+    const double saturation = qBound(0, settings.saturationPercent, 200) / 100.0;
+    const double contrast = qBound(0, settings.contrastPercent, 200) / 100.0;
+    const double brightness = qBound(0, settings.brightnessPercent, 200) / 100.0;
+    for(int y = 0; y < result.height(); ++y)
+    {
+        const QRgb* raw = reinterpret_cast<const QRgb*>(unlit.constScanLine(y));
+        const QRgb* lit = reinterpret_cast<const QRgb*>(shaded.constScanLine(y));
+        QRgb* output = reinterpret_cast<QRgb*>(result.scanLine(y));
+        for(int x = 0; x < result.width(); ++x)
+        {
+            double channel[3] = {
+                qRed(raw[x]) + (qRed(lit[x]) - qRed(raw[x])) * shade,
+                qGreen(raw[x]) + (qGreen(lit[x]) - qGreen(raw[x])) * shade,
+                qBlue(raw[x]) + (qBlue(lit[x]) - qBlue(raw[x])) * shade};
+            const double luma = 0.2126 * channel[0] + 0.7152 * channel[1]
+                + 0.0722 * channel[2];
+            for(int component = 0; component < 3; ++component)
+            {
+                channel[component] = luma + (channel[component] - luma) * saturation;
+                channel[component] = ((channel[component] / 255.0 - 0.5) * contrast
+                                      + 0.5) * 255.0 * brightness;
+                channel[component] = qBound(0.0, channel[component], 255.0);
+            }
+            output[x] = qRgba(qRound(channel[0]), qRound(channel[1]),
+                              qRound(channel[2]), qAlpha(lit[x]));
+        }
+    }
+    return result;
+}
+
 QPointF minimapWorldToReviewPixel(const QPointF& worldPosition,
                                   int sectorWidth, int sectorHeight)
 {

@@ -49,6 +49,21 @@ struct SMinimapBakeOptions
     int textureSize{256};
 };
 
+struct SMinimapGradeSettings
+{
+    SMinimapGradeSettings(int shading = 65, int saturation = 110,
+                          int contrast = 100, int brightness = 106)
+        : shadingPercent(shading), saturationPercent(saturation),
+          contrastPercent(contrast), brightnessPercent(brightness) {}
+    int shadingPercent;
+    int saturationPercent;
+    int contrastPercent;
+    int brightnessPercent;
+};
+
+QImage gradeMinimapImage(const QImage& unlitImage, const QImage& shadedImage,
+                         const SMinimapGradeSettings& settings);
+
 // Fixed full-MPR framing used by both the renderer capture and synthetic
 // orientation tests. The world rectangle starts at (0, 0), spans 32 units per
 // sector, and maps to 128 review pixels per sector without cropping.

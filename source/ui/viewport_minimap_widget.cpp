@@ -65,6 +65,23 @@ CViewportMinimapWidget::CViewportMinimapWidget(QWidget* parent)
     m_export = new QToolButton(this);
     m_export->setText(tr("Export..."));
     m_export->setToolTip(tr("Review and export the current generated minimap"));
+    m_refresh = new QToolButton(this);
+    m_refresh->setObjectName("viewportMinimapRefresh");
+    m_refresh->setText(QString::fromUtf8("\xE2\x86\xBB"));
+    m_refresh->setToolTip(tr("Regenerate now using current object visibility"));
+    m_autoRegenerate = new QToolButton(this);
+    m_autoRegenerate->setObjectName("viewportMinimapAutoRegenerate");
+    m_autoRegenerate->setText(tr("Auto"));
+    m_autoRegenerate->setCheckable(true);
+    m_autoRegenerate->setChecked(QSettings().value(
+        "minimap/autoRegenerate", false).toBool());
+    m_autoRegenerate->setToolTip(tr(
+        "Regenerate after map changes, including hide/unhide (off by default)"));
+    m_unlock = new QToolButton(this);
+    m_unlock->setObjectName("viewportMinimapUnlock");
+    m_unlock->setText(tr("Unlock"));
+    m_unlock->setToolTip(tr("Unlock the applied minimap so it can regenerate"));
+    m_unlock->hide();
     m_smaller = new QToolButton(this);
     m_smaller->setObjectName("viewportMinimapSmaller");
     m_smaller->setText(tr("-"));
@@ -79,6 +96,9 @@ CViewportMinimapWidget::CViewportMinimapWidget(QWidget* parent)
     header->addWidget(m_title);
     header->addStretch(1);
     header->addWidget(m_export);
+    header->addWidget(m_refresh);
+    header->addWidget(m_autoRegenerate);
+    header->addWidget(m_unlock);
     header->addWidget(m_smaller);
     header->addWidget(m_larger);
     header->addWidget(m_expand);
@@ -100,6 +120,14 @@ CViewportMinimapWidget::CViewportMinimapWidget(QWidget* parent)
 
     connect(m_export, &QToolButton::clicked,
             this, &CViewportMinimapWidget::exportRequested);
+    connect(m_refresh, &QToolButton::clicked,
+            this, &CViewportMinimapWidget::regenerationRequested);
+    connect(m_autoRegenerate, &QToolButton::toggled, this, [this](bool enabled) {
+        QSettings().setValue("minimap/autoRegenerate", enabled);
+        emit autoRegenerationChanged(enabled);
+    });
+    connect(m_unlock, &QToolButton::clicked,
+            this, &CViewportMinimapWidget::unlockRequested);
     connect(m_smaller, &QToolButton::clicked, this, [this]() {
         setSizeLevel(m_sizeLevel - 1);
     });
@@ -175,6 +203,23 @@ bool CViewportMinimapWidget::usesGeneratedPreview() const
     return m_source->currentData().toString() == "generated";
 }
 
+bool CViewportMinimapWidget::autoRegenerationEnabled() const
+{
+    return m_autoRegenerate && m_autoRegenerate->isChecked();
+}
+
+void CViewportMinimapWidget::setGenerationLocked(bool locked)
+{
+    m_generationLocked = locked;
+    m_unlock->setVisible(locked && m_expanded);
+    m_refresh->setEnabled(!locked);
+    m_autoRegenerate->setEnabled(!locked);
+    if(locked)
+        m_detail->setToolTip(tr("Applied and locked; unlock before regenerating."));
+    else
+        m_detail->setToolTip(QString());
+}
+
 void CViewportMinimapWidget::updateSourceChoices(bool preserveSelection)
 {
     const QString previous = preserveSelection
@@ -229,6 +274,9 @@ void CViewportMinimapWidget::setExpanded(bool expanded)
     m_expanded = expanded;
     m_title->setVisible(expanded);
     m_export->setVisible(expanded);
+    m_refresh->setVisible(expanded);
+    m_autoRegenerate->setVisible(expanded);
+    m_unlock->setVisible(expanded && m_generationLocked);
     m_smaller->setVisible(expanded);
     m_larger->setVisible(expanded);
     m_source->setVisible(expanded);

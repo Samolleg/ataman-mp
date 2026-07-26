@@ -1074,6 +1074,30 @@ int runHeadlessCommand(QApplication& app)
             && minimapSmallSize.width() < minimapMediumSize.width()
             && minimapMediumSize.width() < minimapLargeSize.width()
             && !minimapLarger->isEnabled();
+        QToolButton* minimapRefresh = viewportMinimap.findChild<QToolButton*>(
+            "viewportMinimapRefresh");
+        QToolButton* minimapAuto = viewportMinimap.findChild<QToolButton*>(
+            "viewportMinimapAutoRegenerate");
+        QToolButton* minimapUnlock = viewportMinimap.findChild<QToolButton*>(
+            "viewportMinimapUnlock");
+        bool minimapRefreshRequested = false;
+        bool minimapUnlockRequested = false;
+        QObject::connect(&viewportMinimap,
+                         &CViewportMinimapWidget::regenerationRequested,
+                         [&minimapRefreshRequested]() { minimapRefreshRequested = true; });
+        QObject::connect(&viewportMinimap,
+                         &CViewportMinimapWidget::unlockRequested,
+                         [&minimapUnlockRequested]() { minimapUnlockRequested = true; });
+        if(minimapRefresh) minimapRefresh->click();
+        viewportMinimap.setGenerationLocked(true);
+        const bool viewportMinimapLockControlsWork = minimapRefresh && minimapAuto
+            && minimapUnlock && minimapRefreshRequested
+            && !minimapRefresh->isEnabled() && !minimapAuto->isEnabled()
+            && !minimapUnlock->isHidden();
+        if(minimapUnlock) minimapUnlock->click();
+        viewportMinimap.setGenerationLocked(false);
+        const bool viewportMinimapUnlockWorks = minimapUnlockRequested
+            && minimapRefresh->isEnabled() && minimapAuto->isEnabled();
         while(minimapSmaller
               && viewportMinimap.sizeLevel() > originalMinimapSizeLevel)
             minimapSmaller->click();
@@ -1394,6 +1418,8 @@ int runHeadlessCommand(QApplication& app)
                 && embeddedMinimapDefaultsWhenAvailable
                 && generatedMinimapCanBeSelected
                 && viewportMinimapHasThreeSizes
+                && viewportMinimapLockControlsWork
+                && viewportMinimapUnlockWorks
                 && semanticAtlasReviewButtonAvailable
                 && logicPointUndoAtomic && logicPointRedoAtomic
                 && viewportBackgroundConsumesClick && viewportChildConsumesClick
@@ -1480,6 +1506,8 @@ int runHeadlessCommand(QApplication& app)
                << embeddedMinimapDefaultsWhenAvailable
                << " generatedMinimapCanBeSelected=" << generatedMinimapCanBeSelected
                << " viewportMinimapHasThreeSizes=" << viewportMinimapHasThreeSizes
+               << " viewportMinimapLockControlsWork=" << viewportMinimapLockControlsWork
+               << " viewportMinimapUnlockWorks=" << viewportMinimapUnlockWorks
                << " semanticAtlasReviewButtonAvailable=" << semanticAtlasReviewButtonAvailable
                << " logicPointUndoAtomic=" << logicPointUndoAtomic
                << " logicPointRedoAtomic=" << logicPointRedoAtomic

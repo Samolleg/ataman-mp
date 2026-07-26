@@ -388,7 +388,14 @@ QByteArray encodeMmpDxt1(const QImage& image, QString* diagnostic)
     stream.setByteOrder(QDataStream::LittleEndian);
     stream << quint32(0x00504d4d) << quint32(source.width())
            << quint32(source.height()) << quint32(1) << quint32(0x31545844);
-    for(int i = 0; i < 14; ++i) stream << quint32(0);
+    // EI's DXT reader still consumes the legacy DirectDraw RGB565 descriptor.
+    // A zero-filled tail decodes in our structural inspector but is rejected
+    // by the game texture path and produces an invisible minimap.
+    stream << quint32(4) << quint32(0x00008000) << quint32(15)
+           << quint32(1) << quint32(0x00007c00) << quint32(10)
+           << quint32(5) << quint32(0x000003e0) << quint32(5)
+           << quint32(5) << quint32(0x0000001f) << quint32(0)
+           << quint32(5) << quint32(0);
 
     for(int by = 0; by < source.height(); by += 4)
         for(int bx = 0; bx < source.width(); bx += 4)

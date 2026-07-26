@@ -40,6 +40,7 @@ private slots:
     void encodesInspectable256Mmp();
     void encodesDeterministicJmvDxt1Profile();
     void preservesHighResolutionAspectPadding();
+    void gradesShadingAndColorDeterministically();
     void createsAddsReplacesAndRefusesCollision();
     void appendValidationMatchesByNameAfterHashTableReorder();
     void validationFailureDoesNotPublish();
@@ -199,6 +200,10 @@ void MinimapExportTests::encodesDeterministicJmvDxt1Profile()
     QCOMPARE(inspection.formatName, QString("DXT1"));
     QCOMPARE(inspection.baseImage.size(), QSize(1024, 1024));
     QVERIFY(first.size() < image.sizeInBytes());
+    QCOMPARE(first.left(76).toHex(), QByteArray(
+        "4d4d50000004000000040000010000004458543104000000008000000f000000"
+        "01000000007c00000a00000005000000e003000005000000050000001f000000"
+        "000000000500000000000000"));
 }
 
 void MinimapExportTests::preservesHighResolutionAspectPadding()
@@ -213,6 +218,25 @@ void MinimapExportTests::preservesHighResolutionAspectPadding()
     QCOMPARE(result.gameImage.size(), QSize(1024, 1024));
     QCOMPARE(result.gameContentRect, QRect(0, 0, 1024, 838));
     QCOMPARE(result.gameImage.pixelColor(500, 900), QColor(Qt::black));
+}
+
+void MinimapExportTests::gradesShadingAndColorDeterministically()
+{
+    const QImage unlit = solid(QSize(4, 4), QColor(160, 100, 40));
+    const QImage shaded = solid(QSize(4, 4), QColor(80, 50, 20));
+    SMinimapGradeSettings settings{0, 100, 100, 100};
+    QCOMPARE(gradeMinimapImage(unlit, shaded, settings).pixelColor(0, 0),
+             QColor(160, 100, 40));
+    settings.shadingPercent = 100;
+    QCOMPARE(gradeMinimapImage(unlit, shaded, settings).pixelColor(0, 0),
+             QColor(80, 50, 20));
+    settings = {50, 0, 100, 100};
+    const QColor desaturated = gradeMinimapImage(unlit, shaded, settings)
+        .pixelColor(0, 0);
+    QCOMPARE(desaturated.red(), desaturated.green());
+    QCOMPARE(desaturated.green(), desaturated.blue());
+    QCOMPARE(gradeMinimapImage(unlit, shaded, settings),
+             gradeMinimapImage(unlit, shaded, settings));
 }
 
 void MinimapExportTests::appendValidationMatchesByNameAfterHashTableReorder()

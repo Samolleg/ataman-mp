@@ -88,9 +88,11 @@ struct SMobParameterState;
 struct SMinimapSceneCaptureResult
 {
     SMinimapBakeResult bake;
+    QImage unlitGameImage;
     int sectorWidth{0};
     int sectorHeight{0};
     int staticObjectCount{0};
+    int hiddenStaticObjectCount{0};
     int excludedDynamicUnitCount{0};
     bool staticGeometrySourcePresent{false};
     QString framingDescription;
@@ -504,6 +506,7 @@ private:
     bool m_gpuTimerPending;
     QMatrix4x4 m_projection;
     bool m_minimapCaptureActive{false};
+    bool m_minimapCaptureUnlitPass{false};
     bool m_minimapCaptureIncludeStaticGeometry{false};
     QMatrix4x4 m_minimapCaptureView;
     QVector3D m_minimapCaptureCameraPosition;

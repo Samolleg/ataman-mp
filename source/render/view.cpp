@@ -4812,7 +4812,8 @@ void CView::draw()
     // Minimap capture needs authored region/cave colors on every renderer.
     // ANGLE cannot use the shadow-atlas path, but capture disables shadows,
     // fog, sky, and point lights, leaving the compatible environment diffuse.
-    const int lightingMode = m_minimapCaptureActive ? 2
+    const int lightingMode = m_minimapCaptureActive
+        ? (m_minimapCaptureUnlitPass ? 0 : 2)
         : (m_openGlesCompatibility ? qMin(requestedLightingMode, 1)
                                    : requestedLightingMode);
     const bool environmentEnabled = lightingMode == 2;
@@ -4967,6 +4968,7 @@ void CView::draw()
         if(!m_minimapCaptureActive)
             return true;
         return m_minimapCaptureIncludeStaticGeometry
+            && node && node->nodeState() != ENodeState::eHidden
             && isMinimapStaticGeometry(node);
     };
     if(environmentEnabled && skyEnabled && !m_caveEnvironment)
@@ -5311,9 +5313,14 @@ SMinimapSceneCaptureResult CView::captureMinimapScene(
             }
             if(!isMinimapStaticGeometry(node))
                 continue;
+            if(node->nodeState() == ENodeState::eHidden)
+            {
+                ++result.hiddenStaticObjectCount;
+                continue;
+            }
             ++result.staticObjectCount;
             if(includeLoadedStaticGeometry
-               && node->nodeState() != ENodeState::eDraw)
+               && node->nodeState() == ENodeState::eSelect)
             {
                 restoredStates.insert(node, node->nodeState());
                 node->setState(ENodeState::eDraw);
@@ -5337,6 +5344,7 @@ SMinimapSceneCaptureResult CView::captureMinimapScene(
         m_bPreviewTile = previousPreviewTile;
         m_tileGridVisible = previousTileGrid;
         m_minimapCaptureActive = false;
+        m_minimapCaptureUnlitPass = false;
         m_minimapCaptureIncludeStaticGeometry = false;
         QOpenGLFramebufferObject::bindDefault();
         ei::gl::Viewport(0, 0, width(), height());
@@ -5383,8 +5391,15 @@ SMinimapSceneCaptureResult CView::captureMinimapScene(
     draw();
     glFinish();
     const QImage captured = target.toImage();
+    m_minimapCaptureUnlitPass = true;
+    ei::gl::Clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    draw();
+    glFinish();
+    const QImage unlitCaptured = target.toImage();
+    m_minimapCaptureUnlitPass = false;
     restore();
-    if(captured.isNull() || captured.size() != reviewSize)
+    if(captured.isNull() || captured.size() != reviewSize
+       || unlitCaptured.isNull() || unlitCaptured.size() != reviewSize)
     {
         result.bake.error = tr("The offscreen renderer returned an invalid minimap image.");
         return result;
@@ -5407,10 +5422,18 @@ SMinimapSceneCaptureResult CView::captureMinimapScene(
     bakeOptions.textureSize = targetTextureSize;
     result.bake = bakeMinimapLayers(result.sectorWidth, result.sectorHeight,
                                     layers, bakeOptions);
+    QVector<SMinimapBakeLayer> unlitLayers = layers;
+    unlitLayers[0].image = unlitCaptured;
+    const SMinimapBakeResult unlitBake = bakeMinimapLayers(
+        result.sectorWidth, result.sectorHeight, unlitLayers, bakeOptions);
+    if(unlitBake.success)
+        result.unlitGameImage = unlitBake.gameImage;
     if(result.bake.success)
     {
         result.bake.notes.append(tr("Excluded %1 dynamic unit(s).")
                                  .arg(result.excludedDynamicUnitCount));
+        result.bake.notes.append(tr("Excluded %1 hidden static object(s).")
+                                 .arg(result.hiddenStaticObjectCount));
         result.bake.notes.append(result.framingDescription);
         result.bake.notes.append(result.orientationDescription);
     }
@@ -11023,6 +11046,7 @@ void CView::hideSelectedNodes()
                 pNode->setState(ENodeState::eHidden);
     }
     viewParameters();
+    emit mobStateChanged();
 }
 
 void CView::unHideAll()
@@ -11035,7 +11059,7 @@ void CView::unHideAll()
         if(pNode->nodeState() == ENodeState::eHidden)
             pNode->setState(ENodeState::eDraw);
     }
-
+    emit mobStateChanged();
 }
 
 void CView::setDirtyMpr()

@@ -25,6 +25,8 @@ public:
     bool usesGeneratedPreview() const;
     bool hasGeneratedPreview() const { return !m_generated.isNull(); }
     bool hasEmbeddedPreview() const { return !m_embedded.isNull(); }
+    bool autoRegenerationEnabled() const;
+    void setGenerationLocked(bool locked);
     bool isExpanded() const { return m_expanded; }
     int sizeLevel() const { return m_sizeLevel; }
 
@@ -32,6 +34,9 @@ signals:
     void exportRequested();
     void sourceModeChanged(bool generated);
     void sizeModeChanged();
+    void regenerationRequested();
+    void autoRegenerationChanged(bool enabled);
+    void unlockRequested();
 
 private:
     void updateSourceChoices(bool preserveSelection);
@@ -45,6 +50,9 @@ private:
     QLabel* m_detail{nullptr};
     QLabel* m_title{nullptr};
     QToolButton* m_export{nullptr};
+    QToolButton* m_refresh{nullptr};
+    QToolButton* m_autoRegenerate{nullptr};
+    QToolButton* m_unlock{nullptr};
     QToolButton* m_expand{nullptr};
     QToolButton* m_smaller{nullptr};
     QToolButton* m_larger{nullptr};
@@ -54,6 +62,7 @@ private:
     QString m_embeddedName;
     QString m_embeddedSource;
     bool m_generatedIncomplete{false};
+    bool m_generationLocked{false};
     bool m_expanded{true};
     int m_sizeLevel{0};
     int m_sectorWidth{0};
