@@ -317,7 +317,7 @@ private:
     bool closeAllMobScriptWindows();
     bool confirmScriptReferencedObjectIds(const QVector<uint>& objectIds,
                                           const QString& operation);
-    void sculptTerrainAt(const QVector3D& position, float elapsedSeconds);
+    void sculptTerrainAt(const QVector3D& position, float stampFraction);
     void sculptTerrainTowardLatestPoint();
     void finishSculptStroke();
     void syncLandscapeToolState();
@@ -563,6 +563,8 @@ private:
     int m_tileStrokeSolverNodes{0};
     bool m_terrainPreviewBatchActive{false};
     QSet<QPair<int, int>> m_pendingTerrainPreviewSectors;
+    QSet<QPair<int, int>> m_pendingOverlayPreviewSectors;
+    QSet<QPair<int, int>> m_pendingTilePreviewSectors;
     bool m_sculptOutlineValid{false};
     QVector3D m_sculptOutlineCenter;
     bool m_sculptStrokeActive;

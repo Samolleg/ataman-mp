@@ -873,9 +873,17 @@ STerrainHeightCommand CTerrainEditModel::makeRaiseLower(
 {
     STerrainHeightCommand command;
     command.description = rawHeightDelta >= 0.0f ? "Raise terrain" : "Lower terrain";
-    for(int y = 0; y < m_vertexCountY; ++y)
+    if(brush.radius < 0.0f || m_vertexCountX <= 0 || m_vertexCountY <= 0)
+        return command;
+    const int minX = qMax(0, int(std::floor(brush.centerX - brush.radius)));
+    const int maxX = qMin(m_vertexCountX - 1,
+        int(std::ceil(brush.centerX + brush.radius)));
+    const int minY = qMax(0, int(std::floor(brush.centerY - brush.radius)));
+    const int maxY = qMin(m_vertexCountY - 1,
+        int(std::ceil(brush.centerY + brush.radius)));
+    for(int y = minY; y <= maxY; ++y)
     {
-        for(int x = 0; x < m_vertexCountX; ++x)
+        for(int x = minX; x <= maxX; ++x)
         {
             const float dx = float(x) - brush.centerX;
             const float dy = float(y) - brush.centerY;
@@ -903,9 +911,17 @@ STerrainHeightCommand CTerrainEditModel::makeBlendedCommand(
     STerrainHeightCommand command;
     command.description = description;
     strength = qBound(0.0f, strength, 1.0f);
-    for(int y = 0; y < m_vertexCountY; ++y)
+    if(brush.radius < 0.0f || m_vertexCountX <= 0 || m_vertexCountY <= 0)
+        return command;
+    const int minX = qMax(0, int(std::floor(brush.centerX - brush.radius)));
+    const int maxX = qMin(m_vertexCountX - 1,
+        int(std::ceil(brush.centerX + brush.radius)));
+    const int minY = qMax(0, int(std::floor(brush.centerY - brush.radius)));
+    const int maxY = qMin(m_vertexCountY - 1,
+        int(std::ceil(brush.centerY + brush.radius)));
+    for(int y = minY; y <= maxY; ++y)
     {
-        for(int x = 0; x < m_vertexCountX; ++x)
+        for(int x = minX; x <= maxX; ++x)
         {
             const float dx = float(x) - brush.centerX;
             const float dy = float(y) - brush.centerY;
@@ -938,9 +954,17 @@ STerrainHeightCommand CTerrainEditModel::makeSmooth(
     const STerrainBrush& brush, float strength) const
 {
     QVector<float> targets(m_heights.size(), 0.0f);
-    for(int y = 0; y < m_vertexCountY; ++y)
+    if(brush.radius < 0.0f || m_vertexCountX <= 0 || m_vertexCountY <= 0)
+        return STerrainHeightCommand();
+    const int minX = qMax(0, int(std::floor(brush.centerX - brush.radius)));
+    const int maxX = qMin(m_vertexCountX - 1,
+        int(std::ceil(brush.centerX + brush.radius)));
+    const int minY = qMax(0, int(std::floor(brush.centerY - brush.radius)));
+    const int maxY = qMin(m_vertexCountY - 1,
+        int(std::ceil(brush.centerY + brush.radius)));
+    for(int y = minY; y <= maxY; ++y)
     {
-        for(int x = 0; x < m_vertexCountX; ++x)
+        for(int x = minX; x <= maxX; ++x)
         {
             quint64 total = 0;
             int count = 0;

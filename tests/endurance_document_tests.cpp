@@ -444,29 +444,26 @@ void EnduranceDocumentTests::landscapeWheelDirectionUsesAvailableDelta()
 
 void EnduranceDocumentTests::sculptCadenceIsIndependentOfSpatialInterpolation()
 {
-    const float oneStepSeconds = landscapeSculptSubstepSeconds(50, 1);
-    const float eightStepSeconds = landscapeSculptSubstepSeconds(50, 8);
-    QCOMPARE(oneStepSeconds, 0.05f);
-    QVERIFY(qAbs(eightStepSeconds * 8.0f - oneStepSeconds) < 0.000001f);
+    const float oneStepFraction = landscapeSculptSubstepFraction(1);
+    const float eightStepFraction = landscapeSculptSubstepFraction(8);
+    QCOMPARE(oneStepFraction, 1.0f);
+    QVERIFY(qAbs(eightStepFraction * 8.0f - oneStepFraction) < 0.000001f);
 
-    const float rate = 5000.0f;
+    const float stepSize = 5000.0f;
     const float strength = 0.35f;
-    const float stationaryRaw = rate * strength * oneStepSeconds;
+    const float stationaryRaw = stepSize * strength * oneStepFraction;
     float movingRaw = 0.0f;
     for(int step = 0; step < 8; ++step)
-        movingRaw += rate * strength * eightStepSeconds;
-    QVERIFY(qAbs(stationaryRaw - 87.5f) < 0.0001f);
+        movingRaw += stepSize * strength * eightStepFraction;
+    QVERIFY(qAbs(stationaryRaw - 1750.0f) < 0.0001f);
     QVERIFY(qAbs(movingRaw - stationaryRaw) < 0.0001f);
 
-    const float oneSecondBlend = landscapeSculptEffectiveStrength(strength, 1.0f);
+    const float oneStampBlend = landscapeSculptEffectiveStrength(strength, 1.0f);
     float subdividedRemaining = 1.0f;
-    for(int tick = 0; tick < 20; ++tick)
-    {
-        for(int step = 0; step < 8; ++step)
-            subdividedRemaining *= 1.0f - landscapeSculptEffectiveStrength(
-                strength, eightStepSeconds);
-    }
-    QVERIFY(qAbs(oneSecondBlend - (1.0f - subdividedRemaining)) < 0.00001f);
+    for(int step = 0; step < 8; ++step)
+        subdividedRemaining *= 1.0f - landscapeSculptEffectiveStrength(
+            strength, eightStepFraction);
+    QVERIFY(qAbs(oneStampBlend - (1.0f - subdividedRemaining)) < 0.00001f);
 }
 
 void EnduranceDocumentTests::unchangedMobIsByteIdentical()

@@ -8849,7 +8849,7 @@ bool CView::applyTerrainTilePreview(const STerrainTileCommand& command, bool for
         sectors.insert(qMakePair(delta.globalX / 16, delta.globalY / 16));
     }
     if(m_terrainPreviewBatchActive)
-        m_pendingTerrainPreviewSectors.unite(sectors);
+        m_pendingTilePreviewSectors.unite(sectors);
     else
         for(const QPair<int, int>& sector : sectors)
             m_pLand->updateSectorDrawData(sector.first, sector.second);
@@ -8863,7 +8863,8 @@ bool CView::applyTerrainTilePreview(const STerrainTileCommand& command, bool for
             : tr("Painted %1 atlas tile(s), including bounded seam updates.")
                   .arg(command.deltas.size()));
     }
-    update();
+    if(!m_terrainPreviewBatchActive)
+        update();
     return true;
 }
 
@@ -8883,7 +8884,7 @@ bool CView::applyOverlaySurfacePreview(const SOverlaySurfaceCommand& command,
         const QPair<int, int> sector(delta.sectorX, delta.sectorY);
         if(m_terrainPreviewBatchActive)
         {
-            m_pendingTerrainPreviewSectors.insert(sector);
+            m_pendingOverlayPreviewSectors.insert(sector);
             continue;
         }
         if(!m_pLand->previewCanonicalOverlaySector(delta.sectorX, delta.sectorY,
@@ -8896,12 +8897,18 @@ bool CView::applyOverlaySurfacePreview(const SOverlaySurfaceCommand& command,
     m_aiGraphOverlayDirty = true;
     emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMprDirtyFlag,
                               m_terrainEdit.isDirty() ? "*" : "");
-    update();
+    if(!m_terrainPreviewBatchActive)
+        update();
     return true;
 }
 
 void CView::beginTerrainPreviewBatch()
 {
+    if(m_terrainPreviewBatchActive)
+        return;
+    m_pendingTerrainPreviewSectors.clear();
+    m_pendingOverlayPreviewSectors.clear();
+    m_pendingTilePreviewSectors.clear();
     m_terrainPreviewBatchActive = true;
 }
 
@@ -8910,16 +8917,38 @@ void CView::endTerrainPreviewBatch()
     if(!m_terrainPreviewBatchActive)
         return;
     m_terrainPreviewBatchActive = false;
-    const QSet<QPair<int, int>> sectors = m_pendingTerrainPreviewSectors;
+    const QSet<QPair<int, int>> terrainSectors = m_pendingTerrainPreviewSectors;
+    QSet<QPair<int, int>> overlaySectors = m_pendingOverlayPreviewSectors;
+    QSet<QPair<int, int>> tileSectors = m_pendingTilePreviewSectors;
     m_pendingTerrainPreviewSectors.clear();
-    for(const QPair<int, int>& sector : sectors)
-        if(!m_pLand->previewCanonicalOverlaySector(
+    m_pendingOverlayPreviewSectors.clear();
+    m_pendingTilePreviewSectors.clear();
+
+    for(const QPair<int, int>& sector : terrainSectors)
+    {
+        overlaySectors.remove(sector);
+        tileSectors.remove(sector);
+        if(!m_pLand->previewCanonicalSector(
             sector.first, sector.second,
             m_terrainEdit.sectorPayload(sector.first, sector.second)))
             ei::log(eLogWarning, QString(
                 "Batched terrain preview rejected sector %1,%2")
                     .arg(sector.first).arg(sector.second));
-    if(!sectors.isEmpty())
+    }
+    for(const QPair<int, int>& sector : overlaySectors)
+    {
+        tileSectors.remove(sector);
+        if(!m_pLand->previewCanonicalOverlaySector(
+            sector.first, sector.second,
+            m_terrainEdit.sectorPayload(sector.first, sector.second)))
+            ei::log(eLogWarning, QString(
+                "Batched overlay preview rejected sector %1,%2")
+                    .arg(sector.first).arg(sector.second));
+    }
+    for(const QPair<int, int>& sector : tileSectors)
+        m_pLand->updateSectorDrawData(sector.first, sector.second);
+
+    if(!terrainSectors.isEmpty() || !overlaySectors.isEmpty() || !tileSectors.isEmpty())
         update();
 }
 
@@ -9394,8 +9423,7 @@ void CView::mousePressEvent(QMouseEvent* event)
         m_sculptStrokeCommand.description = tr("Sculpt terrain");
         m_overlaySurfaceStrokeCommand = SOverlaySurfaceCommand();
         m_overlaySurfaceStrokeCommand.description = tr("Sculpt overlay height");
-        sculptTerrainAt(m_lastSculptPoint,
-            landscapeSculptSubstepSeconds(m_sculptRepeatTimer->interval(), 1));
+        sculptTerrainAt(m_lastSculptPoint, 1.0f);
         m_sculptRepeatTimer->start();
         event->accept();
         return;
@@ -9403,7 +9431,7 @@ void CView::mousePressEvent(QMouseEvent* event)
     m_pOp->mousePressEvent(event);
 }
 
-void CView::sculptTerrainAt(const QVector3D& position, float elapsedSeconds)
+void CView::sculptTerrainAt(const QVector3D& position, float stampFraction)
 {
     if(!m_terrainEditAvailable || !m_landscapeTools)
         return;
@@ -9414,9 +9442,9 @@ void CView::sculptTerrainAt(const QVector3D& position, float elapsedSeconds)
     brush.radius = m_landscapeTools->radius();
     brush.falloff = ETerrainBrushFalloff::Smooth;
     const float blendStrength = landscapeSculptEffectiveStrength(
-        m_landscapeTools->strength(), elapsedSeconds);
+        m_landscapeTools->strength(), stampFraction);
     const float rawDelta = m_landscapeTools->rawDelta()
-        * m_landscapeTools->strength() * elapsedSeconds;
+        * m_landscapeTools->strength() * stampFraction;
 
     if(m_landscapeTools->overlaySculptEnabled())
     {
@@ -9505,15 +9533,14 @@ void CView::sculptTerrainTowardLatestPoint()
     // events enqueue unbounded work. Stationary holds still receive one stamp.
     const int steps = distance > spacing
         ? qMin(8, qMax(1, int(std::ceil(distance / spacing)))) : 1;
-    const float substepSeconds = landscapeSculptSubstepSeconds(
-        m_sculptRepeatTimer->interval(), steps);
+    const float substepFraction = landscapeSculptSubstepFraction(steps);
     const QVector3D start = m_lastSculptStampPoint;
     beginTerrainPreviewBatch();
     for(int step = 1; step <= steps; ++step)
     {
         const float ratio = float(step) / float(steps);
         sculptTerrainAt(start * (1.0f - ratio) + m_lastSculptPoint * ratio,
-                        substepSeconds);
+                        substepFraction);
     }
     endTerrainPreviewBatch();
     m_lastSculptStampPoint = m_lastSculptPoint;
@@ -9583,7 +9610,8 @@ bool CView::applyTerrainHeightPreview(const STerrainHeightCommand& command, bool
         emit updateMsg(tr("Terrain preview changed %1 vertices in %2 sector(s); navigation data may need review.")
             .arg(command.deltas.size()).arg(sectors.size()));
     }
-    update();
+    if(!m_terrainPreviewBatchActive)
+        update();
     return true;
 }
 
@@ -10898,7 +10926,7 @@ void CView::finishSculptStroke()
             maximumRawDelta = qMax(maximumRawDelta,
                 qAbs(int(delta.after) - int(delta.before)));
         ei::log(eLogInfo, QString(
-            "Sculpt stroke diagnostic: rate=%1 raw/sec strength=%2 radius=%3 stamps=%4 vertices=%5 maxRawDelta=%6 maxSlope=%7 risk=%8")
+            "Sculpt stroke diagnostic: step=%1 raw strength=%2 radius=%3 stamps=%4 vertices=%5 maxRawDelta=%6 maxSlope=%7 risk=%8")
             .arg(m_landscapeTools ? m_landscapeTools->rawDelta() : 0.0f, 0, 'f', 2)
             .arg(m_landscapeTools ? m_landscapeTools->strength() : 0.0f, 0, 'f', 2)
             .arg(m_landscapeTools ? m_landscapeTools->radius() : 0.0f, 0, 'f', 2)
