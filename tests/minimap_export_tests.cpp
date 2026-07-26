@@ -1,6 +1,7 @@
 #include <QtTest>
 #include <QTemporaryDir>
 #include <QFile>
+#include <QDataStream>
 
 #include "minimap_bake.h"
 #include "minimap_catalog_registration.h"
@@ -8,10 +9,24 @@
 #include "mmp_inspector.h"
 #include "res_archive_document.h"
 #include "res_texture_export.h"
+#include "synthetic_map_table_archive.h"
 
 namespace {
 QImage solid(const QSize& size, const QColor& color)
 { QImage image(size, QImage::Format_ARGB32); image.fill(color); return image; }
+
+QByteArray archiveWithMapTable(const QByteArray& mapTable)
+{
+    QByteArray empty(16, '\0');
+    QDataStream header(&empty, QIODevice::WriteOnly);
+    header.setByteOrder(QDataStream::LittleEndian);
+    header << quint32(0x019ce23c) << quint32(0) << quint32(16) << quint32(0);
+    CResArchiveDocument baseline;
+    baseline.loadBytes(empty, "empty.res");
+    QByteArray result;
+    baseline.buildWithAppendedMember("map.txt", mapTable, 0, &result);
+    return result;
+}
 
 }
 
@@ -20,11 +35,49 @@ class MinimapExportTests : public QObject
     Q_OBJECT
 private slots:
     void bakes128PixelsPerSectorAndExcludesDynamic();
+    void normalizesOrientationAndFramesWholeMpr();
+    void composesTerrainOverlayAndStaticInOrder();
     void encodesInspectable256Mmp();
     void createsAddsReplacesAndRefusesCollision();
     void validationFailureDoesNotPublish();
+    void validationFailurePreservesExistingArchive();
     void registersCatalogOnlyAfterExportAndPreservesObjectives();
+    void stagesReviewedTextureInRunOwnedArchive();
+    void stagesTemporaryCatalogReferenceWithoutObjectivesMutation();
 };
+
+void MinimapExportTests::normalizesOrientationAndFramesWholeMpr()
+{
+    QCOMPARE(minimapWorldToReviewPixel(QPointF(0, 0), 2, 1), QPointF(0, 128));
+    QCOMPARE(minimapWorldToReviewPixel(QPointF(64, 32), 2, 1), QPointF(256, 0));
+
+    QImage source(128, 128, QImage::Format_ARGB32);
+    source.fill(Qt::black);
+    source.setPixelColor(0, 0, Qt::red); // renderer row for world south-west
+    SMinimapBakeOptions options;
+    options.sourceOrientation = EMinimapCaptureOrientation::PositiveYDown;
+    const auto result = bakeMinimapLayers(1, 1,
+        {{EMinimapBakeLayerKind::Terrain, "terrain", source}}, options);
+    QVERIFY(result.success);
+    QCOMPARE(result.reviewImage.pixelColor(0, 127), QColor(Qt::red));
+    QVERIFY(result.incomplete);
+}
+
+void MinimapExportTests::composesTerrainOverlayAndStaticInOrder()
+{
+    const QSize size(128, 128);
+    QImage overlay = solid(size, Qt::transparent);
+    overlay.setPixelColor(5, 6, QColor(0, 0, 255, 255));
+    QImage geometry = solid(size, Qt::transparent);
+    geometry.setPixelColor(5, 6, QColor(255, 0, 0, 255));
+    const auto result = bakeMinimapLayers(1, 1, {
+        {EMinimapBakeLayerKind::Terrain, "terrain", solid(size, Qt::green)},
+        {EMinimapBakeLayerKind::Overlay, "overlays", overlay},
+        {EMinimapBakeLayerKind::StaticGeometry, "collection mobs", geometry}});
+    QVERIFY(result.success);
+    QCOMPARE(result.reviewImage.pixelColor(5, 6), QColor(Qt::red));
+    QVERIFY(!result.incomplete);
+}
 
 void MinimapExportTests::bakes128PixelsPerSectorAndExcludesDynamic()
 {
@@ -115,6 +168,74 @@ void MinimapExportTests::validationFailureDoesNotPublish()
     const auto result = exportMmpToRes(request);
     QVERIFY(!result.success);
     QVERIFY(!QFileInfo::exists(path));
+}
+
+void MinimapExportTests::validationFailurePreservesExistingArchive()
+{
+    QTemporaryDir directory;
+    const QString path = directory.filePath("existing.res");
+    SResTextureExportRequest request;
+    request.destination = QFileInfo(path);
+    request.memberName = "first";
+    request.mmpPayload = ei::encodeMmp8888(solid(QSize(256, 256), Qt::red));
+    QVERIFY(exportMmpToRes(request).success);
+    QFile beforeFile(path);
+    QVERIFY(beforeFile.open(QIODevice::ReadOnly));
+    const QByteArray before = beforeFile.readAll();
+    beforeFile.close();
+
+    request.memberName = "second";
+    request.mmpPayload = ei::encodeMmp8888(solid(QSize(256, 256), Qt::blue));
+    request.simulateValidationFailure = true;
+    QVERIFY(!exportMmpToRes(request).success);
+    QFile afterFile(path);
+    QVERIFY(afterFile.open(QIODevice::ReadOnly));
+    QCOMPARE(afterFile.readAll(), before);
+}
+
+void MinimapExportTests::stagesReviewedTextureInRunOwnedArchive()
+{
+    const QByteArray mmp = ei::encodeMmp8888(
+        solid(QSize(256, 256), QColor(17, 33, 65)));
+    QByteArray archiveBytes;
+    QStringList errors;
+    QVERIFY2(buildSyntheticMapTextureArchive(
+        "reviewed_zone_map", mmp, &archiveBytes, &errors),
+        qPrintable(errors.join('\n')));
+    CResArchiveDocument archive;
+    QVERIFY2(archive.loadBytes(archiveBytes, "temporary-minimap.res", &errors),
+             qPrintable(errors.join('\n')));
+    QCOMPARE(archive.members().size(), 1);
+    QCOMPARE(archive.members().first().name, QString("reviewed_zone_map.mmp"));
+    QCOMPARE(archive.memberPayload("REVIEWED_ZONE_MAP.MMP"), mmp);
+
+    QByteArray repeated;
+    QVERIFY(buildSyntheticMapTextureArchive(
+        "reviewed_zone_map", mmp, &repeated, &errors));
+    QCOMPARE(repeated, archiveBytes);
+}
+
+void MinimapExportTests::stagesTemporaryCatalogReferenceWithoutObjectivesMutation()
+{
+    const QByteArray mapTable =
+        "#zone gz1g gipat game\r\n"
+        "#res\r\nzone1 zone1\r\n"
+        "#maps\r\n2 1\r\noldmap authoredquest\r\n";
+    const QByteArray source = archiveWithMapTable(mapTable);
+    QByteArray staged;
+    QStringList errors;
+    QVERIFY2(stageTemporaryMinimapReference(
+        source, "private-texts.res", "gz1g", "reviewedmap", &staged, &errors),
+        qPrintable(errors.join('\n')));
+    QVERIFY(staged != source);
+    CResArchiveDocument reopened;
+    QVERIFY(reopened.loadBytes(staged, "private-texts-reopen.res", &errors));
+    const QByteArray updated = reopened.memberPayload("map.txt");
+    QVERIFY(updated.contains("reviewedmap authoredquest\r\n"));
+    QVERIFY(!updated.contains("oldmap authoredquest"));
+
+    // This helper consumes only an in-memory run-owned candidate.
+    QCOMPARE(archiveWithMapTable(mapTable), source);
 }
 
 void MinimapExportTests::registersCatalogOnlyAfterExportAndPreservesObjectives()

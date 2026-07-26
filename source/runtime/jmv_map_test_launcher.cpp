@@ -1787,7 +1787,13 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
     m_liveGrpSha256 = graphSource.sha256;
     QByteArray placeholderArchive;
     QStringList placeholderErrors;
-    if(!buildSyntheticMapPlaceholderArchive(&placeholderArchive, &placeholderErrors))
+    const bool hasTemporaryMinimap = !input.temporaryMinimapMmp.isEmpty();
+    const bool textureArchiveBuilt = hasTemporaryMinimap
+        ? buildSyntheticMapTextureArchive(input.temporaryMinimapTextureName,
+                                          input.temporaryMinimapMmp,
+                                          &placeholderArchive, &placeholderErrors)
+        : buildSyntheticMapPlaceholderArchive(&placeholderArchive, &placeholderErrors);
+    if(!textureArchiveBuilt)
     {
         if(error) *error = "Could not build the run-owned placeholder texture archive:\n"
             + placeholderErrors.join('\n');
@@ -2009,6 +2015,23 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
                 + stagingErrors.join('\n');
             return false;
         }
+        if(hasTemporaryMinimap)
+        {
+            QStringList minimapErrors;
+            const QString previewZone = input.syntheticMapIdentity
+                ? m_temporaryMapName : input.mapEntry.zoneId;
+            QByteArray previewArchive;
+            if(!stageTemporaryMinimapReference(
+                   stagedArchive, m_mapTableSourcePath + " [minimap preview]",
+                   previewZone, input.temporaryMinimapTextureName,
+                   &previewArchive, &minimapErrors))
+            {
+                if(error) *error = "Could not stage the private minimap reference: "
+                    + minimapErrors.join(" | ");
+                return false;
+            }
+            stagedArchive = previewArchive;
+        }
         const QString mapTableDirectory = QDir(m_runRoot).filePath("map-table");
         m_stagedMapTablePath = QDir(mapTableDirectory).filePath("texts.res");
         if(!QDir().mkpath(mapTableDirectory)
@@ -2159,9 +2182,12 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
                           QDir::toNativeSeparators(m_stagedMapTablePath),
                           m_stagedMapTableSha256,
                           m_temporaryMapName));
-    appendRunLog(QString("Staged standalone temporary texture RES path=%1 sha256=%2 registration=shared-owned-process-bridge installedArchivesModified=false")
+    appendRunLog(QString("Staged standalone temporary texture RES path=%1 sha256=%2 texture=%3 source=%4 registration=shared-owned-process-bridge installedArchivesModified=false")
                  .arg(QDir::toNativeSeparators(m_livePlaceholderResourcePath),
-                      m_livePlaceholderResourceSha256));
+                      m_livePlaceholderResourceSha256,
+                      hasTemporaryMinimap ? input.temporaryMinimapTextureName
+                                          : syntheticMapPlaceholderTextureName(),
+                      hasTemporaryMinimap ? "reviewed-minimap" : "neutral-checker"));
     appendRunLog(QString("Staged temporary map=%1 exit=%2 spawn=(%3,%4) clearance=%5")
                  .arg(m_temporaryMapName).arg(input.spawn.exitId)
                  .arg(x, y).arg(input.spawn.clearance, 0, 'f', 3));

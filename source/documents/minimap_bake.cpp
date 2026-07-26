@@ -2,9 +2,20 @@
 
 #include <QPainter>
 
+QPointF minimapWorldToReviewPixel(const QPointF& worldPosition,
+                                  int sectorWidth, int sectorHeight)
+{
+    if(sectorWidth <= 0 || sectorHeight <= 0)
+        return QPointF();
+    const double pixelsPerWorldUnit = 4.0; // 128 pixels / 32 world units.
+    return QPointF(worldPosition.x() * pixelsPerWorldUnit,
+                   sectorHeight * 128.0 - worldPosition.y() * pixelsPerWorldUnit);
+}
+
 SMinimapBakeResult bakeMinimapLayers(
     int sectorWidth, int sectorHeight,
-    const QVector<SMinimapBakeLayer>& orderedLayers)
+    const QVector<SMinimapBakeLayer>& orderedLayers,
+    const SMinimapBakeOptions& options)
 {
     SMinimapBakeResult result;
     if(sectorWidth <= 0 || sectorHeight <= 0 || sectorWidth > 4096 || sectorHeight > 4096)
@@ -42,7 +53,10 @@ SMinimapBakeResult bakeMinimapLayers(
         terrain = terrain || layer.kind == EMinimapBakeLayerKind::Terrain;
         staticGeometry = staticGeometry
             || layer.kind == EMinimapBakeLayerKind::StaticGeometry;
-        painter.drawImage(0, 0, layer.image);
+        QImage normalized = layer.image;
+        if(options.sourceOrientation == EMinimapCaptureOrientation::PositiveYDown)
+            normalized = normalized.mirrored(false, true);
+        painter.drawImage(0, 0, normalized);
     }
     painter.end();
     if(!terrain)

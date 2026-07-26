@@ -31,6 +31,7 @@
 #include "particle_animation.h"
 #include "ai_graph_document.h"
 #include "ai_graph_preview_builder.h"
+#include "minimap_bake.h"
 
 class QLineEdit;
 class QFrame;
@@ -83,6 +84,18 @@ class CLandscape;
 class CExternalScriptWorkspaceManager;
 class CMobScriptWindow;
 struct SMobParameterState;
+
+struct SMinimapSceneCaptureResult
+{
+    SMinimapBakeResult bake;
+    int sectorWidth{0};
+    int sectorHeight{0};
+    int staticObjectCount{0};
+    int excludedDynamicUnitCount{0};
+    bool collectionStaticGeometryIncluded{false};
+    QString framingDescription;
+    QString orientationDescription;
+};
 namespace ei { struct SRenderEnvironment; struct SScenePointLight; }
 
 ///
@@ -201,6 +214,8 @@ public:
     void setCameraSpeedMultiplier(double multiplier);
     bool overridesWorldTime() const;
     double effectiveWorldTimeHours() const;
+    SMinimapSceneCaptureResult captureMinimapScene(
+        bool includeCollectionStaticGeometry);
     void addLogicPoint(bool bLookPoint = false);
     void copySelectedIDsToClipboard();
     void changeCurrentMob(CMob* pMob);
@@ -485,6 +500,10 @@ private:
     QOpenGLTimerQuery* m_gpuTimer;
     bool m_gpuTimerPending;
     QMatrix4x4 m_projection;
+    bool m_minimapCaptureActive{false};
+    bool m_minimapCaptureIncludeStaticGeometry{false};
+    QMatrix4x4 m_minimapCaptureView;
+    QVector3D m_minimapCaptureCameraPosition;
     QVector<CMob*> m_aMob;
     // World lighting belongs to the loaded map, not to whichever MOB happens
     // to be selected for editing. Keep the first loaded document as the
