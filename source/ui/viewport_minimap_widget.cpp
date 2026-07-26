@@ -160,6 +160,7 @@ CViewportMinimapWidget::CViewportMinimapWidget(QWidget* parent)
     : CViewportWidget(parent)
 {
     setObjectName("viewportMinimapWidget");
+    setViewportSurfaceColor(QColor(28, 28, 28));
     setFrameShape(QFrame::StyledPanel);
     setStyleSheet(
         "#viewportMinimapWidget { background: rgb(28, 28, 28); "
