@@ -111,6 +111,7 @@ private:
     void refreshViewportMinimapSources();
     bool applyMinimapCapture(const SMinimapSceneCaptureResult& capture,
                              const SMinimapGradeSettings& grade);
+    void setMinimapGenerationLocked(bool locked);
     bool ensureGeneratedMinimap();
     void registerExportedMinimap(const QString& textureName);
     void positionViewportMinimap();
@@ -352,6 +353,7 @@ private:
     CViewportMinimapWidget* m_viewportMinimap{nullptr};
     QPointer<CMinimapExportDialog> m_minimapExportDialog;
     QTimer* m_minimapRefreshTimer{nullptr};
+    QTimer* m_minimapCameraTimer{nullptr};
     QByteArray m_generatedMinimapMmp;
     QImage m_generatedMinimapImage;
     QImage m_embeddedMinimapImage;

@@ -26,10 +26,31 @@ public:
 
     void setImage(const QImage& image)
     {
+        const bool preserve = m_item && m_userSized;
+        const QRectF previousRect = m_scene->sceneRect();
+        const QPointF previousCenter = mapToScene(viewport()->rect().center());
+        const QTransform previousTransform = transform();
         m_scene->clear();
+        m_item = nullptr;
+        if(image.isNull())
+        {
+            m_scene->setSceneRect(QRectF());
+            return;
+        }
         m_item = m_scene->addPixmap(QPixmap::fromImage(image));
         m_scene->setSceneRect(m_item->boundingRect());
-        fitImage();
+        if(preserve && !previousRect.isEmpty())
+        {
+            setTransform(previousTransform);
+            const QPointF normalized(
+                (previousCenter.x() - previousRect.left()) / previousRect.width(),
+                (previousCenter.y() - previousRect.top()) / previousRect.height());
+            const QRectF currentRect = m_scene->sceneRect();
+            centerOn(currentRect.left() + normalized.x() * currentRect.width(),
+                     currentRect.top() + normalized.y() * currentRect.height());
+        }
+        else
+            fitImage();
     }
 
     void fitImage()
@@ -75,6 +96,16 @@ private:
 };
 
 namespace {
+
+QImage visibleMapTexture(const QImage& image, int sectorWidth, int sectorHeight)
+{
+    if(image.isNull() || sectorWidth <= 0 || sectorHeight <= 0
+       || image.width() != image.height() || sectorWidth == sectorHeight)
+        return image.mirrored(false, true);
+    const QRect content = minimapGameContentRect(
+        sectorWidth, sectorHeight, image.width());
+    return image.copy(content).mirrored(false, true);
+}
 
 struct SResInspection
 {
@@ -147,24 +178,26 @@ CMinimapExportDialog::CMinimapExportDialog(
     setAttribute(Qt::WA_DeleteOnClose);
     QVBoxLayout* root = new QVBoxLayout(this);
 
-    QLabel* summary = new QLabel(this);
-    summary->setWordWrap(true);
-    summary->setText(capture.bake.incomplete
+    m_sectorWidth = capture.sectorWidth;
+    m_sectorHeight = capture.sectorHeight;
+    m_summary = new QLabel(this);
+    m_summary->setWordWrap(true);
+    m_summary->setText(capture.bake.incomplete
         ? tr("Incomplete MPR-only capture. Terrain and overlays are included, but no MOB source is loaded. Load a MOB for a production minimap.")
         : tr("Complete MPR + MOB capture. Terrain, overlays, and %1 static objects are included; %2 dynamic units were excluded.")
             .arg(capture.staticObjectCount).arg(capture.excludedDynamicUnitCount));
-    summary->setStyleSheet(capture.bake.incomplete
+    m_summary->setStyleSheet(capture.bake.incomplete
         ? "QLabel { color: #e6a23c; font-weight: 600; }" : QString());
-    root->addWidget(summary);
+    root->addWidget(m_summary);
 
-    QLabel* details = new QLabel(tr(
+    m_details = new QLabel(tr(
         "Review: %1 x %2 (%3 x %4 sectors)\nOutput: %5\nFraming: %6\nOrientation: %7")
         .arg(capture.bake.reviewImage.width()).arg(capture.bake.reviewImage.height())
         .arg(capture.sectorWidth).arg(capture.sectorHeight)
         .arg(capture.exportProfileDescription, capture.framingDescription,
              capture.orientationDescription), this);
-    details->setTextInteractionFlags(Qt::TextSelectableByMouse);
-    root->addWidget(details);
+    m_details->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    root->addWidget(m_details);
 
     QSplitter* comparison = new QSplitter(Qt::Horizontal, this);
     QGroupBox* generatedGroup = new QGroupBox(tr("Generated"), comparison);
@@ -173,16 +206,16 @@ CMinimapExportDialog::CMinimapExportDialog(
     m_generatedPreview->setObjectName("minimapExportPreview");
     m_generatedPreview->setMinimumHeight(360);
     generatedLayout->addWidget(m_generatedPreview);
-    QGroupBox* embeddedGroup = new QGroupBox(
+    m_embeddedGroup = new QGroupBox(
         m_embeddedImage.isNull() ? tr("Embedded - no embedded minimap found")
                                  : tr("Embedded: %1").arg(m_embeddedName), comparison);
-    QVBoxLayout* embeddedLayout = new QVBoxLayout(embeddedGroup);
-    CZoomableMinimapView* embeddedPreview = new CZoomableMinimapView(embeddedGroup);
-    embeddedPreview->setImage(m_embeddedImage.isNull() ? QImage()
-                                                       : m_embeddedImage.mirrored(false, true));
-    embeddedLayout->addWidget(embeddedPreview);
+    QVBoxLayout* embeddedLayout = new QVBoxLayout(m_embeddedGroup);
+    m_embeddedPreview = new CZoomableMinimapView(m_embeddedGroup);
+    m_embeddedPreview->setImage(visibleMapTexture(
+        m_embeddedImage, m_sectorWidth, m_sectorHeight));
+    embeddedLayout->addWidget(m_embeddedPreview);
     comparison->addWidget(generatedGroup);
-    comparison->addWidget(embeddedGroup);
+    comparison->addWidget(m_embeddedGroup);
     comparison->setSizes({500, 500});
     root->addWidget(comparison, 1);
     QHBoxLayout* previewControls = new QHBoxLayout;
@@ -190,7 +223,9 @@ CMinimapExportDialog::CMinimapExportDialog(
         tr("%1 x %1 game texture - mouse wheel zooms; drag to pan")
             .arg(capture.bake.gameImage.width()), this);
     QPushButton* fitPreview = new QPushButton(tr("Fit"), this);
+    fitPreview->setObjectName("minimapFitPreview");
     QPushButton* actualPreview = new QPushButton(tr("100%"), this);
+    actualPreview->setObjectName("minimapActualPreview");
     m_regenerateButton = new QPushButton(QString::fromUtf8("\xE2\x86\xBB ")
                                          + tr("Regenerate"), this);
     previewControls->addWidget(previewHint, 1);
@@ -199,14 +234,14 @@ CMinimapExportDialog::CMinimapExportDialog(
     previewControls->addWidget(m_regenerateButton);
     root->addLayout(previewControls);
     connect(fitPreview, &QPushButton::clicked, this,
-            [this, embeddedPreview]() {
+            [this]() {
         m_generatedPreview->fitImage();
-        embeddedPreview->fitImage();
+        m_embeddedPreview->fitImage();
     });
     connect(actualPreview, &QPushButton::clicked, this,
-            [this, embeddedPreview]() {
+            [this]() {
         m_generatedPreview->actualSize();
-        embeddedPreview->actualSize();
+        m_embeddedPreview->actualSize();
     });
     connect(m_regenerateButton, &QPushButton::clicked,
             this, &CMinimapExportDialog::regenerationRequested);
@@ -259,10 +294,21 @@ CMinimapExportDialog::CMinimapExportDialog(
     m_hue->setObjectName("minimapHueSlider");
     m_hueValue->setObjectName("minimapHueValue");
     m_applyLockButton = new QPushButton(tr("Apply && Lock"), this);
-    gradeForm->addRow(QString(), m_applyLockButton);
+    m_applyLockButton->setObjectName("minimapApplyLock");
+    m_resetGradeButton = new QPushButton(tr("Reset settings"), this);
+    m_resetGradeButton->setObjectName("minimapResetGrade");
+    QWidget* gradeActions = new QWidget(this);
+    QHBoxLayout* gradeActionLayout = new QHBoxLayout(gradeActions);
+    gradeActionLayout->setContentsMargins(0, 0, 0, 0);
+    gradeActionLayout->addWidget(m_resetGradeButton);
+    gradeActionLayout->addStretch(1);
+    gradeActionLayout->addWidget(m_applyLockButton);
+    gradeForm->addRow(QString(), gradeActions);
     root->addLayout(gradeForm);
     connect(m_applyLockButton, &QPushButton::clicked,
             this, &CMinimapExportDialog::applyAndLock);
+    connect(m_resetGradeButton, &QPushButton::clicked,
+            this, &CMinimapExportDialog::resetGradeSettings);
 
     QFormLayout* form = new QFormLayout;
     m_textureName = new QLineEdit(suggestedTextureName, this);
@@ -274,9 +320,9 @@ CMinimapExportDialog::CMinimapExportDialog(
     m_destination = new QLineEdit(this);
     m_destination->setObjectName("minimapDestinationRes");
     m_destination->setPlaceholderText(tr("Choose an existing or new .res archive"));
-    QPushButton* browse = new QPushButton(tr("Browse..."), this);
+    m_browseButton = new QPushButton(tr("Browse..."), this);
     destinationLayout->addWidget(m_destination, 1);
-    destinationLayout->addWidget(browse);
+    destinationLayout->addWidget(m_browseButton);
     form->addRow(tr("Destination RES"), destinationRow);
     root->addLayout(form);
 
@@ -296,12 +342,15 @@ CMinimapExportDialog::CMinimapExportDialog(
     m_status->setTextInteractionFlags(Qt::TextSelectableByMouse);
     root->addWidget(m_status);
     QDialogButtonBox* buttons = new QDialogButtonBox(QDialogButtonBox::Close, this);
-    QPushButton* savePng = buttons->addButton(tr("Save review PNG..."), QDialogButtonBox::ActionRole);
+    m_savePngButton = buttons->addButton(
+        tr("Save review PNG..."), QDialogButtonBox::ActionRole);
     m_exportButton = buttons->addButton(tr("Export to RES..."), QDialogButtonBox::AcceptRole);
     root->addWidget(buttons);
 
-    connect(browse, &QPushButton::clicked, this, &CMinimapExportDialog::chooseDestination);
-    connect(savePng, &QPushButton::clicked, this, &CMinimapExportDialog::saveReviewPng);
+    connect(m_browseButton, &QPushButton::clicked,
+            this, &CMinimapExportDialog::chooseDestination);
+    connect(m_savePngButton, &QPushButton::clicked,
+            this, &CMinimapExportDialog::saveReviewPng);
     connect(m_exportButton, &QPushButton::clicked, this, &CMinimapExportDialog::exportTexture);
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
     connect(m_textureName, &QLineEdit::textChanged, this, &CMinimapExportDialog::updateReadyState);
@@ -311,7 +360,8 @@ CMinimapExportDialog::CMinimapExportDialog(
         setGenerationLocked(true);
     }
     updateGradePreview();
-    resize(1100, 860);
+    if(!restoreGeometry(QSettings().value("minimap/exportGeometry").toByteArray()))
+        resize(1100, 860);
     updateReadyState();
 }
 
@@ -319,7 +369,29 @@ void CMinimapExportDialog::setCapture(const SMinimapSceneCaptureResult& capture)
 {
     if(m_generationLocked) return;
     m_capture = capture;
+    m_available = capture.bake.success;
+    m_sectorWidth = capture.sectorWidth;
+    m_sectorHeight = capture.sectorHeight;
+    m_summary->setText(capture.bake.incomplete
+        ? tr("Incomplete MPR-only capture. Terrain and overlays are included, but no MOB source is loaded.")
+        : tr("Complete MPR + MOB capture. Terrain, overlays, and %1 static objects are included; %2 dynamic units were excluded.")
+            .arg(capture.staticObjectCount).arg(capture.excludedDynamicUnitCount));
+    m_summary->setStyleSheet(capture.bake.incomplete
+        ? "color: #e6a23c; font-weight: 600;" : QString());
+    m_details->setText(tr(
+        "Review: %1 x %2 (%3 x %4 sectors)\nOutput: %5\nFraming: %6\nOrientation: %7")
+        .arg(capture.bake.reviewImage.width()).arg(capture.bake.reviewImage.height())
+        .arg(capture.sectorWidth).arg(capture.sectorHeight)
+        .arg(capture.exportProfileDescription, capture.framingDescription,
+             capture.orientationDescription));
+    m_textureName->setEnabled(true);
+    m_destination->setEnabled(true);
+    m_browseButton->setEnabled(true);
+    m_savePngButton->setEnabled(true);
+    m_registerCatalog->setEnabled(!m_zoneId.isEmpty());
+    setGenerationLocked(false);
     updateGradePreview();
+    updateReadyState();
     m_status->setText(tr("Regenerated using current object visibility."));
 }
 
@@ -332,11 +404,17 @@ void CMinimapExportDialog::updateGradePreview()
     m_grade.hueDegrees = m_hue->value();
     m_gradedImage = gradeMinimapImage(
         m_capture.unlitGameImage, m_capture.bake.gameImage, m_grade);
-    m_generatedPreview->setImage(m_gradedImage.mirrored(false, true));
+    m_generatedPreview->setImage(visibleMapTexture(
+        m_gradedImage, m_sectorWidth, m_sectorHeight));
 }
 
 void CMinimapExportDialog::applyAndLock()
 {
+    if(m_generationLocked)
+    {
+        emit lockStateRequested(false);
+        return;
+    }
     updateGradePreview();
     m_lockRequested = true;
     setGenerationLocked(true);
@@ -355,10 +433,82 @@ void CMinimapExportDialog::setGenerationLocked(bool locked)
     for(QSpinBox* box : {m_shadingValue, m_saturationValue, m_contrastValue,
                          m_brightnessValue, m_hueValue})
         box->setEnabled(!locked);
-    m_regenerateButton->setEnabled(!locked);
-    m_applyLockButton->setEnabled(!locked);
-    m_applyLockButton->setText(locked ? tr("Applied and locked")
+    m_regenerateButton->setEnabled(m_available && !locked);
+    m_applyLockButton->setEnabled(m_available);
+    m_resetGradeButton->setEnabled(m_available && !locked);
+    m_applyLockButton->setText(locked ? tr("Unlock")
                                       : tr("Apply && Lock"));
+}
+
+void CMinimapExportDialog::resetGradeSettings()
+{
+    if(m_generationLocked || !m_available) return;
+    const SMinimapGradeSettings defaults;
+    m_shading->setValue(defaults.shadingPercent);
+    m_saturation->setValue(defaults.saturationPercent);
+    m_contrast->setValue(defaults.contrastPercent);
+    m_brightness->setValue(defaults.brightnessPercent);
+    m_hue->setValue(defaults.hueDegrees);
+    updateGradePreview();
+}
+
+void CMinimapExportDialog::setMapContext(
+    const QImage& embeddedImage, const QString& embeddedName,
+    const QString& zoneId, const QString& suggestedTextureName,
+    int sectorWidth, int sectorHeight)
+{
+    setUnavailable(tr("Waiting for the current map minimap capture."));
+    m_embeddedImage = embeddedImage;
+    m_embeddedName = embeddedName;
+    m_zoneId = zoneId;
+    m_sectorWidth = sectorWidth;
+    m_sectorHeight = sectorHeight;
+    m_embeddedGroup->setTitle(m_embeddedImage.isNull()
+        ? tr("Embedded - no embedded minimap found")
+        : tr("Embedded: %1").arg(m_embeddedName));
+    m_embeddedPreview->setImage(visibleMapTexture(
+        m_embeddedImage, m_sectorWidth, m_sectorHeight));
+    m_textureName->setText(suggestedTextureName);
+    m_registerCatalog->setText(tr(
+        "After export, open zone %1 in Map Catalog Editor with this minimap reference staged")
+        .arg(zoneId.isEmpty() ? tr("(unregistered)") : zoneId));
+    m_registerCatalog->setEnabled(!zoneId.isEmpty());
+    m_registerCatalog->setChecked(!zoneId.isEmpty());
+    m_exportSucceeded = false;
+    updateReadyState();
+}
+
+void CMinimapExportDialog::setUnavailable(const QString& reason)
+{
+    m_available = false;
+    m_capture = SMinimapSceneCaptureResult();
+    m_gradedImage = QImage();
+    m_generatedPreview->setImage(QImage());
+    m_embeddedPreview->setImage(QImage());
+    m_summary->setStyleSheet("color: #e6a23c; font-weight: 600;");
+    m_summary->setText(reason.isEmpty() ? tr("No map loaded.") : reason);
+    m_details->setText(tr("Load an MPR or collection to enable minimap generation and export."));
+    for(QSlider* slider : {m_shading, m_saturation, m_contrast,
+                           m_brightness, m_hue})
+        slider->setEnabled(false);
+    for(QSpinBox* box : {m_shadingValue, m_saturationValue, m_contrastValue,
+                         m_brightnessValue, m_hueValue})
+        box->setEnabled(false);
+    m_regenerateButton->setEnabled(false);
+    m_applyLockButton->setEnabled(false);
+    m_resetGradeButton->setEnabled(false);
+    m_textureName->setEnabled(false);
+    m_destination->setEnabled(false);
+    m_browseButton->setEnabled(false);
+    m_savePngButton->setEnabled(false);
+    m_registerCatalog->setEnabled(false);
+    m_exportButton->setEnabled(false);
+}
+
+void CMinimapExportDialog::closeEvent(QCloseEvent* event)
+{
+    QSettings().setValue("minimap/exportGeometry", saveGeometry());
+    QDialog::closeEvent(event);
 }
 
 bool CMinimapExportDialog::catalogRegistrationRequested() const
@@ -407,7 +557,7 @@ void CMinimapExportDialog::updateReadyState()
 {
     m_exportButton->setEnabled(safeTextureName(textureName())
                                && !m_destination->text().trimmed().isEmpty()
-                               && m_capture.bake.success);
+                               && m_available && m_capture.bake.success);
 }
 
 void CMinimapExportDialog::exportTexture()

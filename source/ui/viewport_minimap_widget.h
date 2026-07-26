@@ -3,6 +3,7 @@
 
 #include <QFrame>
 #include <QImage>
+#include <QPolygonF>
 
 class QComboBox;
 class QLabel;
@@ -25,8 +26,8 @@ public:
     bool usesGeneratedPreview() const;
     bool hasGeneratedPreview() const { return !m_generated.isNull(); }
     bool hasEmbeddedPreview() const { return !m_embedded.isNull(); }
-    bool autoRegenerationEnabled() const;
     void setGenerationLocked(bool locked);
+    void setCameraFootprint(const QPolygonF& normalizedFootprint);
     bool isExpanded() const { return m_expanded; }
     int sizeLevel() const { return m_sizeLevel; }
 
@@ -35,8 +36,8 @@ signals:
     void sourceModeChanged(bool generated);
     void sizeModeChanged();
     void regenerationRequested();
-    void autoRegenerationChanged(bool enabled);
-    void unlockRequested();
+    void generationLockRequested(bool locked);
+    void cameraMoveRequested(const QPointF& worldPosition);
 
 private:
     void updateSourceChoices(bool preserveSelection);
@@ -51,8 +52,7 @@ private:
     QLabel* m_title{nullptr};
     QToolButton* m_export{nullptr};
     QToolButton* m_refresh{nullptr};
-    QToolButton* m_autoRegenerate{nullptr};
-    QToolButton* m_unlock{nullptr};
+    QToolButton* m_lock{nullptr};
     QToolButton* m_expand{nullptr};
     QToolButton* m_smaller{nullptr};
     QToolButton* m_larger{nullptr};
@@ -67,6 +67,7 @@ private:
     int m_sizeLevel{0};
     int m_sectorWidth{0};
     int m_sectorHeight{0};
+    QPolygonF m_cameraFootprint;
 };
 
 #endif

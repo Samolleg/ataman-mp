@@ -1035,26 +1035,32 @@ MainWindow::MainWindow(QWidget* parent) :
     m_minimapRefreshTimer->setSingleShot(true);
     connect(m_minimapRefreshTimer, &QTimer::timeout,
             this, &MainWindow::refreshViewportMinimap);
+    m_minimapCameraTimer = new QTimer(this);
+    m_minimapCameraTimer->setInterval(75);
+    connect(m_minimapCameraTimer, &QTimer::timeout, this, [this]() {
+        if(!m_pView || !m_viewportMinimap
+           || !CLandscape::getInstance()->isMprLoad())
+            return;
+        const double worldWidth = CLandscape::getInstance()->widthInWorldUnits();
+        const double worldHeight = CLandscape::getInstance()->heightInWorldUnits();
+        if(worldWidth <= 0.0 || worldHeight <= 0.0) return;
+        QPolygonF normalized;
+        for(const QPointF& point : m_pView->minimapCameraFootprint())
+            normalized << QPointF(point.x() / worldWidth,
+                                  1.0 - point.y() / worldHeight);
+        m_viewportMinimap->setCameraFootprint(normalized);
+    });
+    m_minimapCameraTimer->start();
     connect(m_viewportMinimap, &CViewportMinimapWidget::exportRequested,
             this, &MainWindow::generateMinimap);
     connect(m_viewportMinimap, &CViewportMinimapWidget::sizeModeChanged,
             this, &MainWindow::positionViewportMinimap);
     connect(m_viewportMinimap, &CViewportMinimapWidget::regenerationRequested,
             this, [this]() { scheduleViewportMinimapRefresh(0, true); });
-    connect(m_viewportMinimap, &CViewportMinimapWidget::autoRegenerationChanged,
-            this, [this](bool enabled) {
-        if(enabled) scheduleViewportMinimapRefresh(0, true);
-    });
-    connect(m_viewportMinimap, &CViewportMinimapWidget::unlockRequested,
-            this, [this]() {
-        m_minimapGenerationLocked = false;
-        m_viewportMinimap->setGenerationLocked(false);
-        if(m_minimapExportDialog)
-            m_minimapExportDialog->setGenerationLocked(false);
-        statusBar()->showMessage(tr("Generated minimap unlocked."), 3000);
-        if(m_viewportMinimap->autoRegenerationEnabled())
-            scheduleViewportMinimapRefresh(0, true);
-    });
+    connect(m_viewportMinimap, &CViewportMinimapWidget::generationLockRequested,
+            this, &MainWindow::setMinimapGenerationLocked);
+    connect(m_viewportMinimap, &CViewportMinimapWidget::cameraMoveRequested,
+            m_pView, &CView::moveCameraToMinimapPoint);
     connect(m_viewportMinimap, &CViewportMinimapWidget::sourceModeChanged,
             this, [this](bool generated) {
         statusBar()->showMessage(generated
@@ -3260,11 +3266,10 @@ void MainWindow::launchCurrentMapTest()
 
 void MainWindow::scheduleViewportMinimapRefresh(int delayMs, bool force)
 {
+    Q_UNUSED(force);
     if(!m_minimapRefreshTimer || m_minimapCaptureRunning)
         return;
-    if(m_minimapGenerationLocked
-       || (!force && (!m_viewportMinimap
-                      || !m_viewportMinimap->autoRegenerationEnabled())))
+    if(m_minimapGenerationLocked)
         return;
     if(m_workspaceLoadInProgress)
     {
@@ -3278,11 +3283,15 @@ void MainWindow::scheduleViewportMinimapRefresh(int delayMs, bool force)
         m_generatedMinimapContextKey.clear();
         m_minimapGenerationLocked = false;
         m_viewportMinimap->setGenerationLocked(false);
+        if(m_minimapExportDialog)
+            m_minimapExportDialog->setGenerationLocked(false);
         if(m_viewportMinimap)
         {
             m_viewportMinimap->clearGeneratedPreview();
             m_viewportMinimap->hide();
         }
+        if(m_minimapExportDialog)
+            m_minimapExportDialog->setUnavailable(tr("No map loaded."));
         return;
     }
     m_minimapRefreshTimer->start(qMax(0, delayMs));
@@ -3302,16 +3311,24 @@ void MainWindow::refreshViewportMinimapSources()
     const bool contextChanged = context != m_minimapSourceContextKey;
     if(contextChanged)
     {
-        if(m_minimapExportDialog)
-            m_minimapExportDialog->close();
         m_minimapSourceContextKey = context;
         m_generatedMinimapMmp.clear();
         m_generatedMinimapImage = QImage();
         m_generatedMinimapContextKey.clear();
         m_minimapGenerationLocked = false;
         m_viewportMinimap->setGenerationLocked(false);
+        if(m_minimapExportDialog)
+            m_minimapExportDialog->setGenerationLocked(false);
         m_viewportMinimap->clearGeneratedPreview();
         m_viewportMinimap->clearEmbeddedPreview();
+    }
+    if(!landscape || !landscape->isMprLoad())
+    {
+        m_viewportMinimap->hide();
+        m_viewportMinimap->setCameraFootprint(QPolygonF());
+        if(m_minimapExportDialog)
+            m_minimapExportDialog->setUnavailable(tr("No map loaded."));
+        return;
     }
     QString textureName = m_mapTestEntry.minimapTexture.trimmed();
     QString source;
@@ -3352,6 +3369,14 @@ void MainWindow::refreshViewportMinimapSources()
     m_embeddedMinimapImage = embedded;
     m_embeddedMinimapName = textureName;
     m_embeddedMinimapSource = source;
+    if(m_minimapExportDialog)
+        m_minimapExportDialog->setMapContext(
+            embedded, textureName, m_mapTestEntry.zoneId,
+            m_mapTestEntry.minimapTexture,
+            landscape && landscape->isMprLoad()
+                ? int(landscape->widthInWorldUnits() / 32u) : 0,
+            landscape && landscape->isMprLoad()
+                ? int(landscape->heightInWorldUnits() / 32u) : 0);
     if(contextChanged)
         m_viewportMinimap->preferGenerated(embedded.isNull());
     m_viewportMinimap->show();
@@ -3423,6 +3448,24 @@ bool MainWindow::applyMinimapCapture(const SMinimapSceneCaptureResult& capture,
             .arg(capture.excludedDynamicUnitCount)
             .arg(m_minimapExportProfileDescription));
     return true;
+}
+
+void MainWindow::setMinimapGenerationLocked(bool locked)
+{
+    if(locked && (!m_viewportMinimap
+                  || !m_viewportMinimap->hasGeneratedPreview()))
+        locked = false;
+    m_minimapGenerationLocked = locked;
+    if(m_viewportMinimap)
+        m_viewportMinimap->setGenerationLocked(locked);
+    if(m_minimapExportDialog)
+        m_minimapExportDialog->setGenerationLocked(locked);
+    statusBar()->showMessage(locked
+        ? tr("Generated minimap locked; automatic regeneration is paused.")
+        : tr("Generated minimap unlocked; automatic regeneration is enabled."),
+        4000);
+    if(!locked)
+        scheduleViewportMinimapRefresh(0, true);
 }
 
 bool MainWindow::ensureGeneratedMinimap()
@@ -3530,9 +3573,12 @@ void MainWindow::generateMinimap()
                                    m_minimapExportDialog->gradeSettings()))
             return;
         m_minimapGenerationLocked = true;
-        m_viewportMinimap->setGenerationLocked(true);
+        m_viewportMinimap->preferGenerated(true);
+        setMinimapGenerationLocked(true);
         statusBar()->showMessage(tr("Generated minimap applied and locked."), 5000);
     });
+    connect(m_minimapExportDialog, &CMinimapExportDialog::lockStateRequested,
+            this, &MainWindow::setMinimapGenerationLocked);
     connect(m_minimapExportDialog,
             &CMinimapExportDialog::catalogRegistrationReady,
             this, &MainWindow::registerExportedMinimap);

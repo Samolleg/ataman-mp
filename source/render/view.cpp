@@ -30,6 +30,7 @@
 #include <limits>
 
 #include "view.h"
+#include "ui/viewport_overlay_style.h"
 #include "gl_dispatch.h"
 #include "render_scheduling.h"
 #include "camera.h"
@@ -1206,11 +1207,7 @@ void CView::initAiGraphPreviewWidget()
     m_aiGraphPreviewWidget->setObjectName(QStringLiteral("aiGraphPreviewWidget"));
     m_aiGraphPreviewWidget->setFixedWidth(520);
     m_aiGraphPreviewWidget->setFrameShape(QFrame::StyledPanel);
-    m_aiGraphPreviewWidget->setAttribute(Qt::WA_OpaquePaintEvent, true);
-    m_aiGraphPreviewWidget->setAutoFillBackground(true);
-    QPalette graphPalette = m_aiGraphPreviewWidget->palette();
-    graphPalette.setColor(QPalette::Window, QColor(25, 25, 25));
-    m_aiGraphPreviewWidget->setPalette(graphPalette);
+    configureViewportOverlaySurface(m_aiGraphPreviewWidget);
     m_aiGraphPreviewWidget->setStyleSheet(
         "QFrame#aiGraphPreviewWidget { background-color: rgb(25,25,25); color: white; border: 1px solid #777; }"
         "QWidget#aiGraphPreviewBody, QLabel { background-color: rgb(25,25,25); color: white; }"
@@ -11047,6 +11044,45 @@ void CView::hideSelectedNodes()
     }
     viewParameters();
     emit mobStateChanged();
+}
+
+QPolygonF CView::minimapCameraFootprint() const
+{
+    QPolygonF footprint;
+    if(!m_cam || width() <= 0 || height() <= 0)
+        return footprint;
+    const QRect viewport(0, 0, width(), height());
+    const QMatrix4x4 view = m_cam->viewMatrix();
+    const QPoint corners[] = {
+        QPoint(0, 0), QPoint(width(), 0),
+        QPoint(width(), height()), QPoint(0, height())};
+    for(const QPoint& corner : corners)
+    {
+        const float screenY = float(height() - corner.y());
+        const QVector3D nearPoint = QVector3D(float(corner.x()), screenY, 0.0f)
+            .unproject(view, m_projection, viewport);
+        const QVector3D farPoint = QVector3D(float(corner.x()), screenY, 1.0f)
+            .unproject(view, m_projection, viewport);
+        const QVector3D ray = farPoint - nearPoint;
+        if(qAbs(ray.z()) < 0.00001f)
+            return QPolygonF();
+        const float t = -nearPoint.z() / ray.z();
+        const QVector3D ground = nearPoint + ray * t;
+        footprint << QPointF(ground.x(), ground.y());
+    }
+    return footprint;
+}
+
+void CView::moveCameraToMinimapPoint(const QPointF& worldPosition)
+{
+    if(!m_cam) return;
+    QVector3D position;
+    QVector3D pivot;
+    QVector3D rotation;
+    m_cam->getLocation(position, pivot, rotation);
+    m_cam->moveTo(QVector3D(float(worldPosition.x()),
+                            float(worldPosition.y()), pivot.z()));
+    update();
 }
 
 void CView::unHideAll()

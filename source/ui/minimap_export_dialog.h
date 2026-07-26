@@ -11,6 +11,8 @@ class QLineEdit;
 class QPushButton;
 class QSlider;
 class QSpinBox;
+class QGroupBox;
+class QCloseEvent;
 class CZoomableMinimapView;
 
 class CMinimapExportDialog : public QDialog
@@ -36,10 +38,17 @@ public:
     SMinimapSceneCaptureResult capture() const { return m_capture; }
     void setCapture(const SMinimapSceneCaptureResult& capture);
     void setGenerationLocked(bool locked);
+    void setMapContext(const QImage& embeddedImage,
+                       const QString& embeddedName,
+                       const QString& zoneId,
+                       const QString& suggestedTextureName,
+                       int sectorWidth, int sectorHeight);
+    void setUnavailable(const QString& reason);
 
 signals:
     void regenerationRequested();
     void appliedAndLocked();
+    void lockStateRequested(bool locked);
     void catalogRegistrationReady(const QString& textureName);
 
 private slots:
@@ -49,6 +58,10 @@ private slots:
     void updateReadyState();
     void updateGradePreview();
     void applyAndLock();
+    void resetGradeSettings();
+
+protected:
+    void closeEvent(QCloseEvent* event) override;
 
 private:
     SMinimapSceneCaptureResult m_capture;
@@ -58,6 +71,10 @@ private:
     QImage m_gradedImage;
     SMinimapGradeSettings m_grade;
     CZoomableMinimapView* m_generatedPreview{nullptr};
+    CZoomableMinimapView* m_embeddedPreview{nullptr};
+    QGroupBox* m_embeddedGroup{nullptr};
+    QLabel* m_summary{nullptr};
+    QLabel* m_details{nullptr};
     QSlider* m_shading{nullptr};
     QSlider* m_saturation{nullptr};
     QSlider* m_contrast{nullptr};
@@ -70,6 +87,9 @@ private:
     QSpinBox* m_hueValue{nullptr};
     QPushButton* m_regenerateButton{nullptr};
     QPushButton* m_applyLockButton{nullptr};
+    QPushButton* m_resetGradeButton{nullptr};
+    QPushButton* m_browseButton{nullptr};
+    QPushButton* m_savePngButton{nullptr};
     QLineEdit* m_textureName{nullptr};
     QLineEdit* m_destination{nullptr};
     QLabel* m_status{nullptr};
@@ -78,6 +98,9 @@ private:
     bool m_exportSucceeded{false};
     bool m_lockRequested{false};
     bool m_generationLocked{false};
+    bool m_available{true};
+    int m_sectorWidth{0};
+    int m_sectorHeight{0};
 };
 
 #endif

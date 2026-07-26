@@ -3,6 +3,9 @@
 #include <QtWidgets>
 #include <QDir>
 #include <QSettings>
+#include <functional>
+
+#include "viewport_overlay_style.h"
 
 namespace {
 class CScaledImageLabel : public QLabel
@@ -20,11 +23,42 @@ public:
         updatePixmap();
     }
 
+    void setFootprint(const QPolygonF& footprint)
+    {
+        m_footprint = footprint;
+        updatePixmap();
+    }
+
+    void setClickHandler(const std::function<void(const QPointF&)>& handler)
+    { m_clickHandler = handler; }
+
 protected:
     void resizeEvent(QResizeEvent* event) override
     {
         QLabel::resizeEvent(event);
         updatePixmap();
+    }
+
+    void mousePressEvent(QMouseEvent* event) override
+    {
+        const QPixmap* displayed = pixmap();
+        if(event->button() == Qt::LeftButton && displayed && !displayed->isNull()
+           && m_clickHandler)
+        {
+            const QRect imageRect((width() - displayed->width()) / 2,
+                                  (height() - displayed->height()) / 2,
+                                  displayed->width(), displayed->height());
+            if(imageRect.contains(event->pos()))
+            {
+                const QPointF normalized(
+                    double(event->pos().x() - imageRect.left()) / imageRect.width(),
+                    double(event->pos().y() - imageRect.top()) / imageRect.height());
+                m_clickHandler(normalized);
+                event->accept();
+                return;
+            }
+        }
+        QLabel::mousePressEvent(event);
     }
 
 private:
@@ -35,10 +69,25 @@ private:
             clear();
             return;
         }
-        setPixmap(QPixmap::fromImage(m_image).scaled(
+        QImage decorated = m_image.convertToFormat(QImage::Format_ARGB32);
+        if(m_footprint.size() >= 3)
+        {
+            QPolygonF polygon;
+            for(const QPointF& point : m_footprint)
+                polygon << QPointF(point.x() * decorated.width(),
+                                   point.y() * decorated.height());
+            QPainter painter(&decorated);
+            painter.setRenderHint(QPainter::Antialiasing);
+            painter.setPen(QPen(QColor(40, 220, 255, 235), 3.0));
+            painter.setBrush(QColor(40, 180, 255, 35));
+            painter.drawPolygon(polygon);
+        }
+        setPixmap(QPixmap::fromImage(decorated).scaled(
             size(), Qt::KeepAspectRatio, Qt::FastTransformation));
     }
     QImage m_image;
+    QPolygonF m_footprint;
+    std::function<void(const QPointF&)> m_clickHandler;
 };
 }
 
@@ -46,9 +95,10 @@ CViewportMinimapWidget::CViewportMinimapWidget(QWidget* parent)
     : QFrame(parent)
 {
     setObjectName("viewportMinimapWidget");
+    configureViewportOverlaySurface(this, QColor(28, 28, 28));
     setFrameShape(QFrame::StyledPanel);
     setStyleSheet(
-        "#viewportMinimapWidget { background: rgba(28, 28, 28, 225); "
+        "#viewportMinimapWidget { background: rgb(28, 28, 28); "
         "border: 1px solid #666; border-radius: 4px; }"
         "#viewportMinimapWidget QLabel { color: white; }"
         "#viewportMinimapWidget QComboBox { background: #252525; color: white; }" );
@@ -69,19 +119,10 @@ CViewportMinimapWidget::CViewportMinimapWidget(QWidget* parent)
     m_refresh->setObjectName("viewportMinimapRefresh");
     m_refresh->setText(QString::fromUtf8("\xE2\x86\xBB"));
     m_refresh->setToolTip(tr("Regenerate now using current object visibility"));
-    m_autoRegenerate = new QToolButton(this);
-    m_autoRegenerate->setObjectName("viewportMinimapAutoRegenerate");
-    m_autoRegenerate->setText(tr("Auto"));
-    m_autoRegenerate->setCheckable(true);
-    m_autoRegenerate->setChecked(QSettings().value(
-        "minimap/autoRegenerate", false).toBool());
-    m_autoRegenerate->setToolTip(tr(
-        "Regenerate after map changes, including hide/unhide (off by default)"));
-    m_unlock = new QToolButton(this);
-    m_unlock->setObjectName("viewportMinimapUnlock");
-    m_unlock->setText(tr("Unlock"));
-    m_unlock->setToolTip(tr("Unlock the applied minimap so it can regenerate"));
-    m_unlock->hide();
+    m_lock = new QToolButton(this);
+    m_lock->setObjectName("viewportMinimapLock");
+    m_lock->setCheckable(true);
+    m_lock->setToolTip(tr("Lock or unlock generated minimap regeneration"));
     m_smaller = new QToolButton(this);
     m_smaller->setObjectName("viewportMinimapSmaller");
     m_smaller->setText(tr("-"));
@@ -97,8 +138,7 @@ CViewportMinimapWidget::CViewportMinimapWidget(QWidget* parent)
     header->addStretch(1);
     header->addWidget(m_export);
     header->addWidget(m_refresh);
-    header->addWidget(m_autoRegenerate);
-    header->addWidget(m_unlock);
+    header->addWidget(m_lock);
     header->addWidget(m_smaller);
     header->addWidget(m_larger);
     header->addWidget(m_expand);
@@ -113,6 +153,13 @@ CViewportMinimapWidget::CViewportMinimapWidget(QWidget* parent)
     m_image = new CScaledImageLabel(this);
     m_image->setObjectName("viewportMinimapImage");
     root->addWidget(m_image, 1);
+    static_cast<CScaledImageLabel*>(m_image)->setClickHandler(
+        [this](const QPointF& normalized) {
+            if(m_sectorWidth <= 0 || m_sectorHeight <= 0) return;
+            emit cameraMoveRequested(QPointF(
+                normalized.x() * m_sectorWidth * 32.0,
+                (1.0 - normalized.y()) * m_sectorHeight * 32.0));
+        });
     m_detail = new QLabel(tr("Load an MPR to generate a preview."), this);
     m_detail->setWordWrap(true);
     m_detail->setAlignment(Qt::AlignCenter);
@@ -122,12 +169,8 @@ CViewportMinimapWidget::CViewportMinimapWidget(QWidget* parent)
             this, &CViewportMinimapWidget::exportRequested);
     connect(m_refresh, &QToolButton::clicked,
             this, &CViewportMinimapWidget::regenerationRequested);
-    connect(m_autoRegenerate, &QToolButton::toggled, this, [this](bool enabled) {
-        QSettings().setValue("minimap/autoRegenerate", enabled);
-        emit autoRegenerationChanged(enabled);
-    });
-    connect(m_unlock, &QToolButton::clicked,
-            this, &CViewportMinimapWidget::unlockRequested);
+    connect(m_lock, &QToolButton::toggled, this,
+            &CViewportMinimapWidget::generationLockRequested);
     connect(m_smaller, &QToolButton::clicked, this, [this]() {
         setSizeLevel(m_sizeLevel - 1);
     });
@@ -145,6 +188,7 @@ CViewportMinimapWidget::CViewportMinimapWidget(QWidget* parent)
     updateSourceChoices(false);
     m_sizeLevel = qBound(0, QSettings().value(
         "ui/viewportMinimapSizeLevel", 0).toInt(), 2);
+    setGenerationLocked(false);
     setExpanded(true);
 }
 
@@ -203,21 +247,27 @@ bool CViewportMinimapWidget::usesGeneratedPreview() const
     return m_source->currentData().toString() == "generated";
 }
 
-bool CViewportMinimapWidget::autoRegenerationEnabled() const
-{
-    return m_autoRegenerate && m_autoRegenerate->isChecked();
-}
-
 void CViewportMinimapWidget::setGenerationLocked(bool locked)
 {
     m_generationLocked = locked;
-    m_unlock->setVisible(locked && m_expanded);
+    const QSignalBlocker blocker(m_lock);
+    m_lock->setChecked(locked);
+    m_lock->setText(locked ? QString::fromUtf8("\xF0\x9F\x94\x92")
+                           : QString::fromUtf8("\xF0\x9F\x94\x93"));
+    m_lock->setToolTip(locked ? tr("Locked: click to enable regeneration")
+                              : tr("Unlocked: changes regenerate automatically"));
     m_refresh->setEnabled(!locked);
-    m_autoRegenerate->setEnabled(!locked);
     if(locked)
         m_detail->setToolTip(tr("Applied and locked; unlock before regenerating."));
     else
         m_detail->setToolTip(QString());
+}
+
+void CViewportMinimapWidget::setCameraFootprint(
+    const QPolygonF& normalizedFootprint)
+{
+    m_cameraFootprint = normalizedFootprint;
+    static_cast<CScaledImageLabel*>(m_image)->setFootprint(m_cameraFootprint);
 }
 
 void CViewportMinimapWidget::updateSourceChoices(bool preserveSelection)
@@ -267,6 +317,7 @@ void CViewportMinimapWidget::updateDisplayedImage()
         m_detail->setStyleSheet(QString());
     }
     m_export->setEnabled(!m_generated.isNull());
+    m_lock->setEnabled(!m_generated.isNull());
 }
 
 void CViewportMinimapWidget::setExpanded(bool expanded)
@@ -275,8 +326,7 @@ void CViewportMinimapWidget::setExpanded(bool expanded)
     m_title->setVisible(expanded);
     m_export->setVisible(expanded);
     m_refresh->setVisible(expanded);
-    m_autoRegenerate->setVisible(expanded);
-    m_unlock->setVisible(expanded && m_generationLocked);
+    m_lock->setVisible(expanded);
     m_smaller->setVisible(expanded);
     m_larger->setVisible(expanded);
     m_source->setVisible(expanded);

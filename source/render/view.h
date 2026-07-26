@@ -16,6 +16,7 @@
 #include <QOpenGLBuffer>
 #include <QElapsedTimer>
 #include <QRectF>
+#include <QPolygonF>
 #include <QSet>
 #include <QStringList>
 #include <QFutureWatcher>
@@ -175,6 +176,8 @@ public:
     QVector3D getTerrainPos(const int cursorPosX, const int cursorPosY,
                             bool bLand = true, bool* hit = nullptr);
     bool terrainPositionAt(const QPoint& viewportPosition, QVector3D* position);
+    QPolygonF minimapCameraFootprint() const;
+    void moveCameraToMinimapPoint(const QPointF& worldPosition);
     QPoint operationAnchor() const;
     void setTestSpawnMarker(const QVector3D& position, bool adjusted = false);
     void setTestSpawnMarkerSelected(bool selected);
