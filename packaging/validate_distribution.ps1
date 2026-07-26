@@ -7,6 +7,25 @@ $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path -LiteralPath $PackageRoot).Path
 $failures = [System.Collections.Generic.List[string]]::new()
 
+$requiredFiles = @(
+    'EIMapperEndurance.exe',
+    'VERSION',
+    'Readme.md',
+    'LICENSE.txt',
+    'NOTICE.md',
+    'Qt5Core.dll',
+    'Qt5Gui.dll',
+    'Qt5Widgets.dll',
+    'Qt5OpenGL.dll',
+    'Qt5Concurrent.dll',
+    'platforms\qwindows.dll'
+)
+foreach ($relative in $requiredFiles) {
+    if (-not (Test-Path -LiteralPath (Join-Path $root $relative) -PathType Leaf)) {
+        $failures.Add("required runtime file is missing: $relative")
+    }
+}
+
 $bridge = Join-Path $root 'runtime\EIMapperEnduranceJmvBridge.plg'
 if (-not (Test-Path -LiteralPath $bridge -PathType Leaf)) {
     $failures.Add('packaged JMV launch bridge is missing: runtime\EIMapperEnduranceJmvBridge.plg')
@@ -24,17 +43,21 @@ foreach ($name in @('endurance-options.json', 'options.json')) {
     }
 }
 
-$logsRoot = Join-Path $root 'logs'
-if (Test-Path -LiteralPath $logsRoot) {
-    foreach ($file in Get-ChildItem -LiteralPath $logsRoot -Recurse -File) {
-        $failures.Add("runtime log included: $($file.FullName.Substring($root.Length + 1))")
-    }
+foreach ($artifact in Get-ChildItem -LiteralPath $root -Recurse -File | Where-Object {
+    $_.Extension -in @('.log', '.dmp', '.mdmp', '.sav')
+}) {
+    $failures.Add("private runtime artifact included: $($artifact.FullName.Substring($root.Length + 1))")
 }
 
-foreach ($dump in Get-ChildItem -LiteralPath $root -Recurse -File | Where-Object {
-    $_.Extension -in @('.dmp', '.mdmp', '.sav')
+foreach ($artifact in Get-ChildItem -LiteralPath $root -Recurse -File | Where-Object {
+    $_.Extension -in @('.o', '.obj', '.a', '.lib', '.exp', '.ilk', '.pdb', '.zip') -or
+    $_.Name -eq '.qmake.stash' -or
+    $_.Name -like 'Makefile*' -or
+    $_.Name -like 'moc_*.cpp' -or
+    $_.Name -like 'qrc_*.cpp' -or
+    $_.Name -like 'ui_*.h'
 }) {
-    $failures.Add("private runtime artifact included: $($dump.FullName.Substring($root.Length + 1))")
+    $failures.Add("compiler/archive debris included: $($artifact.FullName.Substring($root.Length + 1))")
 }
 
 $versionPath = Join-Path $root 'VERSION'
@@ -62,7 +85,7 @@ else {
 $checksums = Join-Path $root 'SHA256SUMS.txt'
 if(Test-Path -LiteralPath $checksums)
 {
-    $forbiddenManifestEntries = Select-String -LiteralPath $checksums -Pattern '(endurance-options\.json|options\.json)$|(\*|/)logs/.+|\.(dmp|mdmp|sav)$'
+    $forbiddenManifestEntries = Select-String -LiteralPath $checksums -Pattern '(endurance-options\.json|options\.json)$|\.log$|\.(dmp|mdmp|sav|o|obj|a|lib|exp|ilk|pdb|zip)$|(^|/)(Makefile[^/]*|\.qmake\.stash|moc_[^/]*\.cpp|qrc_[^/]*\.cpp|ui_[^/]*\.h)$'
     foreach($entry in $forbiddenManifestEntries)
     {
         $failures.Add("checksum manifest references a private/runtime artifact: $($entry.Line)")
@@ -78,4 +101,4 @@ if ($failures.Count -ne 0) {
     exit 1
 }
 
-Write-Output "PASS: package contains only its current changelist and no user settings, logs, saves, or crash dumps"
+Write-Output "PASS: complete runnable package contains one current changelist and no private/runtime or compiler debris"

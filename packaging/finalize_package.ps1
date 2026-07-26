@@ -22,15 +22,22 @@ foreach ($name in @('endurance-options.json', 'options.json')) {
     }
 }
 
-$logsRoot = Join-Path $root 'logs'
-if (Test-Path -LiteralPath $logsRoot) {
-    foreach ($file in Get-ChildItem -LiteralPath $logsRoot -Recurse -File) {
-        Remove-PackageFile $file
-    }
+foreach ($file in Get-ChildItem -LiteralPath $root -Recurse -File | Where-Object {
+    $_.Extension -in @('.log', '.dmp', '.mdmp', '.sav')
+}) {
+    Remove-PackageFile $file
 }
 
+# A tester folder is a runtime package, never a qmake/Make shadow directory.
+# Remove common compiler intermediates defensively; the strict validator below
+# will still reject anything this list does not recognize.
 foreach ($file in Get-ChildItem -LiteralPath $root -Recurse -File | Where-Object {
-    $_.Extension -in @('.dmp', '.mdmp', '.sav')
+    $_.Extension -in @('.o', '.obj', '.a', '.lib', '.exp', '.ilk', '.pdb', '.zip') -or
+    $_.Name -eq '.qmake.stash' -or
+    $_.Name -like 'Makefile*' -or
+    $_.Name -like 'moc_*.cpp' -or
+    $_.Name -like 'qrc_*.cpp' -or
+    $_.Name -like 'ui_*.h'
 }) {
     Remove-PackageFile $file
 }
