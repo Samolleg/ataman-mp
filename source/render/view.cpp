@@ -5242,6 +5242,18 @@ void CView::loadLandscape(const QFileInfo& filePath)
     {
         ei::log(eLogInfo, QString("Canonical terrain preview ready: %1 x %2 vertices")
             .arg(m_terrainEdit.vertexCountX()).arg(m_terrainEdit.vertexCountY()));
+        bool hasCanonicalWarning = false;
+        for(const SValidationFinding& finding : canonicalReport.findings())
+            hasCanonicalWarning = hasCanonicalWarning
+                || finding.severity == EValidationSeverity::Warning
+                || finding.severity == EValidationSeverity::Critical;
+        if(hasCanonicalWarning)
+        {
+            const QString warning = tr(
+                "MPR opened with pre-existing terrain warnings. Editing remains available; review the workflow log before saving.");
+            ei::log(eLogWarning, warning + "\n" + canonicalReport.toText());
+            emit updateMsg(warning);
+        }
     }
     for(CMob* mob : m_aMob)
         mob->reprojectForCurrentTerrain();
@@ -9382,7 +9394,8 @@ void CView::mousePressEvent(QMouseEvent* event)
         m_sculptStrokeCommand.description = tr("Sculpt terrain");
         m_overlaySurfaceStrokeCommand = SOverlaySurfaceCommand();
         m_overlaySurfaceStrokeCommand.description = tr("Sculpt overlay height");
-        sculptTerrainAt(m_lastSculptPoint);
+        sculptTerrainAt(m_lastSculptPoint,
+            landscapeSculptSubstepSeconds(m_sculptRepeatTimer->interval(), 1));
         m_sculptRepeatTimer->start();
         event->accept();
         return;
@@ -9390,7 +9403,7 @@ void CView::mousePressEvent(QMouseEvent* event)
     m_pOp->mousePressEvent(event);
 }
 
-void CView::sculptTerrainAt(const QVector3D& position)
+void CView::sculptTerrainAt(const QVector3D& position, float elapsedSeconds)
 {
     if(!m_terrainEditAvailable || !m_landscapeTools)
         return;
@@ -9400,6 +9413,10 @@ void CView::sculptTerrainAt(const QVector3D& position)
     brush.centerY = position.y();
     brush.radius = m_landscapeTools->radius();
     brush.falloff = ETerrainBrushFalloff::Smooth;
+    const float blendStrength = landscapeSculptEffectiveStrength(
+        m_landscapeTools->strength(), elapsedSeconds);
+    const float rawDelta = m_landscapeTools->rawDelta()
+        * m_landscapeTools->strength() * elapsedSeconds;
 
     if(m_landscapeTools->overlaySculptEnabled())
     {
@@ -9409,22 +9426,22 @@ void CView::sculptTerrainAt(const QVector3D& position)
         {
         case ELandscapeSculptTool::Raise:
             overlayCommand = m_terrainEdit.makeOverlayRaiseLower(
-                brush, m_landscapeTools->rawDelta() * m_landscapeTools->strength(),
+                brush, rawDelta,
                 &report);
             break;
         case ELandscapeSculptTool::Lower:
             overlayCommand = m_terrainEdit.makeOverlayRaiseLower(
-                brush, -m_landscapeTools->rawDelta() * m_landscapeTools->strength(),
+                brush, -rawDelta,
                 &report);
             break;
         case ELandscapeSculptTool::Flatten:
             overlayCommand = m_terrainEdit.makeOverlayFlatten(
                 brush, m_landscapeTools->flattenHeight(),
-                m_landscapeTools->strength(), &report);
+                blendStrength, &report);
             break;
         case ELandscapeSculptTool::Smooth:
             overlayCommand = m_terrainEdit.makeOverlaySmooth(
-                brush, m_landscapeTools->strength(), &report);
+                brush, blendStrength, &report);
             break;
         }
         if(overlayCommand.isEmpty())
@@ -9448,18 +9465,18 @@ void CView::sculptTerrainAt(const QVector3D& position)
     {
     case ELandscapeSculptTool::Raise:
         command = m_terrainEdit.makeRaiseLower(
-            brush, m_landscapeTools->rawDelta() * m_landscapeTools->strength());
+            brush, rawDelta);
         break;
     case ELandscapeSculptTool::Lower:
         command = m_terrainEdit.makeRaiseLower(
-            brush, -m_landscapeTools->rawDelta() * m_landscapeTools->strength());
+            brush, -rawDelta);
         break;
     case ELandscapeSculptTool::Flatten:
         command = m_terrainEdit.makeFlatten(
-            brush, m_landscapeTools->flattenHeight(), m_landscapeTools->strength());
+            brush, m_landscapeTools->flattenHeight(), blendStrength);
         break;
     case ELandscapeSculptTool::Smooth:
-        command = m_terrainEdit.makeSmooth(brush, m_landscapeTools->strength());
+        command = m_terrainEdit.makeSmooth(brush, blendStrength);
         break;
     }
     if(command.isEmpty())
@@ -9488,12 +9505,15 @@ void CView::sculptTerrainTowardLatestPoint()
     // events enqueue unbounded work. Stationary holds still receive one stamp.
     const int steps = distance > spacing
         ? qMin(8, qMax(1, int(std::ceil(distance / spacing)))) : 1;
+    const float substepSeconds = landscapeSculptSubstepSeconds(
+        m_sculptRepeatTimer->interval(), steps);
     const QVector3D start = m_lastSculptStampPoint;
     beginTerrainPreviewBatch();
     for(int step = 1; step <= steps; ++step)
     {
         const float ratio = float(step) / float(steps);
-        sculptTerrainAt(start * (1.0f - ratio) + m_lastSculptPoint * ratio);
+        sculptTerrainAt(start * (1.0f - ratio) + m_lastSculptPoint * ratio,
+                        substepSeconds);
     }
     endTerrainPreviewBatch();
     m_lastSculptStampPoint = m_lastSculptPoint;
@@ -10861,6 +10881,32 @@ void CView::finishSculptStroke()
     m_sculptRepeatTimer->stop();
     m_sculptStrokeActive = false;
     const bool overlayStroke = !m_overlaySurfaceStrokeCommand.isEmpty();
+    STerrainEditDiagnostics terrainDiagnostics;
+    int maximumRawDelta = 0;
+    if(!overlayStroke && !m_sculptStrokeCommand.isEmpty())
+    {
+        CTerrainEditModel baseline = m_terrainEdit;
+        CValidationReport restoreReport;
+        if(baseline.apply(m_sculptStrokeCommand, false, &restoreReport, false))
+        {
+            STerrainDiagnosticPolicy policy;
+            policy.steepSlopeDegrees = 60.0f;
+            terrainDiagnostics = baseline.diagnose(
+                m_sculptStrokeCommand, QVector<STerrainObjectHeightProbe>(), policy);
+        }
+        for(const STerrainHeightDelta& delta : m_sculptStrokeCommand.deltas)
+            maximumRawDelta = qMax(maximumRawDelta,
+                qAbs(int(delta.after) - int(delta.before)));
+        ei::log(eLogInfo, QString(
+            "Sculpt stroke diagnostic: rate=%1 raw/sec strength=%2 radius=%3 stamps=%4 vertices=%5 maxRawDelta=%6 maxSlope=%7 risk=%8")
+            .arg(m_landscapeTools ? m_landscapeTools->rawDelta() : 0.0f, 0, 'f', 2)
+            .arg(m_landscapeTools ? m_landscapeTools->strength() : 0.0f, 0, 'f', 2)
+            .arg(m_landscapeTools ? m_landscapeTools->radius() : 0.0f, 0, 'f', 2)
+            .arg(m_sculptStrokeStamps).arg(m_sculptStrokeVertices)
+            .arg(maximumRawDelta)
+            .arg(terrainDiagnostics.maximumSlopeAfterDegrees, 0, 'f', 2)
+            .arg(terrainDiagnostics.steepSlopeRisk ? "yes" : "no"));
+    }
     if(m_pUndoStack && overlayStroke)
         m_pUndoStack->push(new COverlaySurfacePreviewCommand(
             this, m_overlaySurfaceStrokeCommand, true));
@@ -10877,10 +10923,16 @@ void CView::finishSculptStroke()
         m_farStaticShadowFingerprint.clear();
         emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMprDirtyFlag,
                                   m_terrainEdit.isDirty() ? "*" : "");
-        emit updateMsg(overlayStroke
-            ? tr("Overlay sculpt stroke: %1 stamp(s), %2 sector update(s); liquid navigation may need review.")
-                .arg(m_sculptStrokeStamps).arg(m_sculptStrokeVertices)
-            : tr("Sculpt stroke: %1 stamp(s), %2 vertex updates; MOB placement and navigation may need review.")
+        if(overlayStroke)
+            emit updateMsg(tr("Overlay sculpt stroke: %1 stamp(s), %2 sector update(s); liquid navigation may need review.")
+                .arg(m_sculptStrokeStamps).arg(m_sculptStrokeVertices));
+        else if(terrainDiagnostics.steepSlopeRisk)
+            emit updateMsg(tr(
+                "Sculpt stroke created a steep local slope (%1 degrees, max raw change %2). Terrain remains seam-consistent, but inspect it for cliffs or exposed backfaces.")
+                .arg(terrainDiagnostics.maximumSlopeAfterDegrees, 0, 'f', 1)
+                .arg(maximumRawDelta));
+        else
+            emit updateMsg(tr("Sculpt stroke: %1 stamp(s), %2 vertex updates; MOB placement and navigation may need review.")
                 .arg(m_sculptStrokeStamps).arg(m_sculptStrokeVertices));
     }
 }

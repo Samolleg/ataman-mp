@@ -317,6 +317,7 @@ private slots:
     void persistentPaintOperationSurvivesDocumentTransition();
     void landscapeLayerChangesResetBrushSelection();
     void landscapeWheelDirectionUsesAvailableDelta();
+    void sculptCadenceIsIndependentOfSpatialInterpolation();
     void unchangedMobIsByteIdentical();
     void duplicateMobIdsAreWarningsOnly();
     void vulcansmokeIsACriticalNonBlockingFinding();
@@ -439,6 +440,33 @@ void EnduranceDocumentTests::landscapeWheelDirectionUsesAvailableDelta()
     QCOMPARE(landscapeWheelStep(0, 0, 7), 1);
     QCOMPARE(landscapeWheelStep(0, 0, -7), -1);
     QCOMPARE(landscapeWheelStep(0, 0, 0), 0);
+}
+
+void EnduranceDocumentTests::sculptCadenceIsIndependentOfSpatialInterpolation()
+{
+    const float oneStepSeconds = landscapeSculptSubstepSeconds(50, 1);
+    const float eightStepSeconds = landscapeSculptSubstepSeconds(50, 8);
+    QCOMPARE(oneStepSeconds, 0.05f);
+    QVERIFY(qAbs(eightStepSeconds * 8.0f - oneStepSeconds) < 0.000001f);
+
+    const float rate = 5000.0f;
+    const float strength = 0.35f;
+    const float stationaryRaw = rate * strength * oneStepSeconds;
+    float movingRaw = 0.0f;
+    for(int step = 0; step < 8; ++step)
+        movingRaw += rate * strength * eightStepSeconds;
+    QVERIFY(qAbs(stationaryRaw - 87.5f) < 0.0001f);
+    QVERIFY(qAbs(movingRaw - stationaryRaw) < 0.0001f);
+
+    const float oneSecondBlend = landscapeSculptEffectiveStrength(strength, 1.0f);
+    float subdividedRemaining = 1.0f;
+    for(int tick = 0; tick < 20; ++tick)
+    {
+        for(int step = 0; step < 8; ++step)
+            subdividedRemaining *= 1.0f - landscapeSculptEffectiveStrength(
+                strength, eightStepSeconds);
+    }
+    QVERIFY(qAbs(oneSecondBlend - (1.0f - subdividedRemaining)) < 0.00001f);
 }
 
 void EnduranceDocumentTests::unchangedMobIsByteIdentical()

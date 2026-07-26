@@ -317,7 +317,7 @@ private:
     bool closeAllMobScriptWindows();
     bool confirmScriptReferencedObjectIds(const QVector<uint>& objectIds,
                                           const QString& operation);
-    void sculptTerrainAt(const QVector3D& position);
+    void sculptTerrainAt(const QVector3D& position, float elapsedSeconds);
     void sculptTerrainTowardLatestPoint();
     void finishSculptStroke();
     void syncLandscapeToolState();

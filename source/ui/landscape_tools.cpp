@@ -70,7 +70,7 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     m_strength->setSingleStep(0.05);
     m_strength->setDecimals(2);
     m_delta->setRange(1.0, 10000.0);
-    m_delta->setValue(180.0);
+    m_delta->setValue(3600.0);
     m_flatten->setRange(0, 65535);
     m_flatten->setValue(20000);
 
@@ -79,14 +79,24 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
         settings.value("ui/landscape/sculptTool", 0).toInt(), m_tool->count() - 1));
     m_radius->setValue(settings.value("ui/landscape/sculptRadius", 4.0).toDouble());
     m_strength->setValue(settings.value("ui/landscape/sculptStrength", 0.35).toDouble());
-    m_delta->setValue(settings.value("ui/landscape/sculptDelta", 180.0).toDouble());
+    double savedRate = settings.value("ui/landscape/sculptRate", -1.0).toDouble();
+    if(savedRate < 0.0)
+    {
+        const double legacyStep = settings.value("ui/landscape/sculptDelta", 180.0).toDouble();
+        // The former default was 180 raw units per 50 ms stamp. Preserve that
+        // default's effective speed while interpreting deliberate custom
+        // values as the safer per-second rate.
+        savedRate = qFuzzyCompare(legacyStep + 1.0, 181.0) ? 3600.0 : legacyStep;
+        settings.setValue("ui/landscape/sculptRate", savedRate);
+    }
+    m_delta->setValue(savedRate);
     m_flatten->setValue(settings.value("ui/landscape/flattenHeight", 20000).toInt());
 
     QFormLayout* form = new QFormLayout(m_sculptControls);
     form->addRow(tr("Tool"), m_tool);
     form->addRow(tr("Radius (vertices)"), m_radius);
     form->addRow(tr("Strength"), m_strength);
-    form->addRow(tr("Raise/lower step"), m_delta);
+    form->addRow(tr("Raise/lower rate (raw/sec)"), m_delta);
     form->addRow(tr("Flatten target"), m_flatten);
     layout->addWidget(m_sculptControls);
 
@@ -193,7 +203,7 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     connect(m_strength, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this,
             [](double value) { QSettings().setValue("ui/landscape/sculptStrength", value); });
     connect(m_delta, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this,
-            [](double value) { QSettings().setValue("ui/landscape/sculptDelta", value); });
+            [](double value) { QSettings().setValue("ui/landscape/sculptRate", value); });
     connect(m_flatten, QOverload<int>::of(&QSpinBox::valueChanged), this,
             [](int value) { QSettings().setValue("ui/landscape/flattenHeight", value); });
     updateModeVisibility();
