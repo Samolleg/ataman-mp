@@ -5,7 +5,7 @@ work is ordered from the newest planned minor line to the oldest completed one.
 An item is checked only after its implementation has landed and received the
 stated validation. Completed code should carry a commit, test, or release link.
 
-Current development line: `0.3.0-alpha.19` focused closed testing. Alpha.11
+Current development line: `0.3.0-alpha.20` focused closed testing. Alpha.11
 was withdrawn after its temporary-resource bootstrap passed the fixed world
 object's first word as the object pointer and crashed both normal and synthetic
 Test Current Map launches. Alpha.12 corrects the pointer contract and adds an
@@ -34,9 +34,12 @@ selected normal entrance when a stale Play from Here marker cannot be applied,
 while Play from Here, Godmode, and time override alone remain unavailable. It
 also adds `enabled` and `disabled` as exact Parts checkbox-state filter aliases.
 The current line also integrates authored water-overlay material animation and
-its measured renderer-optimization plan. Alpha.19 adds live, persistent
+its measured renderer-optimization plan. Alpha.19 adds persistent
 75–200% UI scaling for fonts, menus, dialogs, docks, property tables, and
-cached viewport map labels. The remaining 0.3 release work is the
+cached viewport map labels. Alpha.20 propagates scale changes through already
+open editor windows, separates Apply from Save & Close in Settings, and keeps
+MMB camera orbit available during transforms and Play-from-Here movement. The
+remaining 0.3 release work is the
 final runtime/corpus matrix, focused confirmation of the live clock, startup
 splash, and merged overlay behavior, plus version/tag/package housekeeping
 rather than another editor architecture pass.
@@ -81,7 +84,8 @@ rather than another editor architecture pass.
   accessibility. Scale the application font and layout-derived controls, apply
   the saved value before first-run/setup UI appears, and rebuild cached
   viewport entrance/map labels immediately when the setting changes.
-  (`0.3.0-alpha.19`)
+  (`0.3.0-alpha.19`, live-window propagation corrected in
+  `0.3.0-alpha.20`)
 - [ ] Add a Russian translation and an in-app language switch.
 - [x] Render disabled menu items as a single ordinary grey label without
   Fusion's bright etched underlay or an alignment offset.

@@ -25,6 +25,7 @@ class QLineEdit;
 class CState : public QObject //base state class - interface
 {
     Q_OBJECT
+    friend class COperation;
   public:
     CState() = delete;
     CState(CView* pView) {m_pView = pView;}
@@ -38,6 +39,10 @@ class CState : public QObject //base state class - interface
     virtual void mouseMoveEvent(COperation *pOp, QMouseEvent* event) = 0;
     virtual void wheelEvent(COperation *pOp, QWheelEvent* event) = 0;
     virtual EOperationMethod operationMethod() = 0;
+    virtual void synchronizePointerAfterCameraNavigation(const QPoint& position)
+    {
+        m_lastPos = position;
+    }
 
 protected:
     CView* m_pView;
@@ -74,6 +79,8 @@ private:
     QSharedPointer<CKeyManager> m_keyManager;
     CCamera* m_pCam;
     QLineEdit* m_pMouseCoord;
+    bool m_cameraNavigationActive;
+    QPoint m_cameraNavigationLastPos;
 };
 
 class CSelect: public CState
@@ -109,6 +116,7 @@ public:
     void mouseReleaseEvent(COperation *pOp, QMouseEvent* pEvent) override final;
     void mouseMoveEvent(COperation *pOp, QMouseEvent* pEvent) override final;
     void wheelEvent(COperation *pOp, QWheelEvent* pEvent) override final {Q_UNUSED(pOp);;Q_UNUSED(pEvent);};
+    void synchronizePointerAfterCameraNavigation(const QPoint& position) override;
 private:
     EOperateAxis axis;
     QString value;
@@ -170,6 +178,7 @@ public:
     void mouseReleaseEvent(COperation *pOp, QMouseEvent* pEvent) override;
     void mouseMoveEvent(COperation *pOp, QMouseEvent* pEvent) override;
     void wheelEvent(COperation *pOp, QWheelEvent* pEvent) override final;
+    void synchronizePointerAfterCameraNavigation(const QPoint& position) override;
 private:
     QVector3D m_lastLandPos;
 };

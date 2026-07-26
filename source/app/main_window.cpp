@@ -1849,6 +1849,10 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event)
         if(event->type() == QEvent::MouseMove)
         {
             QMouseEvent* mouse = static_cast<QMouseEvent*>(event);
+            // MMB always belongs to viewport camera navigation. Do not move
+            // the provisional Play-from-Here marker while orbiting the view.
+            if(mouse->buttons().testFlag(Qt::MiddleButton))
+                return false;
             QVector3D preview;
             if(m_pView->terrainPositionAt(mouse->pos(), &preview))
                 m_pView->setTestSpawnMarker(preview, false);

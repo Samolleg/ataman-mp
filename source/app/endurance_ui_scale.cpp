@@ -6,6 +6,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QVariant>
+#include <QWidget>
 #include <QtMath>
 
 namespace ei {
@@ -43,6 +44,20 @@ void applyUiScalePercent(int percent)
         scaled.setPixelSize(qMax(1, qRound(baseFont.pixelSize() * normalized / 100.0)));
     QApplication::setFont(scaled);
     qApp->setProperty("enduranceUiScalePercent", normalized);
+
+    // QApplication's default font reliably affects newly created popups, but
+    // Qt 5 does not consistently propagate it into an already constructed
+    // top-level widget hierarchy. Setting the live window font updates all
+    // descendants that inherit from it while preserving intentionally
+    // customized child fonts (icons, headings, syntax highlighting, etc.).
+    for(QWidget* window : QApplication::topLevelWidgets())
+    {
+        if(!window)
+            continue;
+        window->setFont(scaled);
+        window->updateGeometry();
+        window->update();
+    }
 }
 
 double uiScaleFactor()

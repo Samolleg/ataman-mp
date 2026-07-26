@@ -23,6 +23,7 @@
 #include <QClipboard>
 #include <QMimeData>
 #include <QMenu>
+#include <QPushButton>
 #include <QContextMenuEvent>
 #include <QScrollBar>
 #include <QSlider>
@@ -1035,6 +1036,9 @@ int runHeadlessCommand(QApplication& app)
         bool uiScaleSettingsPersist = false;
         bool uiScaleLiveApply = false;
         bool uiScaleFontApplied = false;
+        bool uiScaleExistingWindowApplied = false;
+        bool settingsApplyKeepsOpen = false;
+        bool settingsSaveCloseWorks = false;
         bool settingsApplySignal = false;
         bool renderOptionsRegistered = false;
         {
@@ -1044,6 +1048,8 @@ int runHeadlessCommand(QApplication& app)
                 QDir::setCurrent(settingsDirectory.path());
             {
                 CSettings settingsWindow(&primaryWindow);
+                settingsWindow.setAttribute(Qt::WA_DontShowOnScreen);
+                settingsWindow.show();
                 QObject::connect(&settingsWindow, &CSettings::settingsApplied,
                                  [&settingsApplySignal]() { settingsApplySignal = true; });
                 QObject::connect(&settingsWindow, &CSettings::autosaveSettingsApplied,
@@ -1073,6 +1079,8 @@ int runHeadlessCommand(QApplication& app)
                 QSlider* uiScale = settingsWindow.findChild<QSlider*>("uiScalePercent");
                 QLabel* uiScaleValue = settingsWindow.findChild<QLabel*>(
                     "uiScalePercentValue");
+                QPushButton* saveCloseButton = settingsWindow.findChild<QPushButton*>(
+                    "buttonSaveClose");
                 COptBool* animateUnits = dynamic_cast<COptBool*>(
                     settingsWindow.opt(eOptSetRender, "animateUnits"));
                 COptBool* performanceCounters = dynamic_cast<COptBool*>(
@@ -1106,6 +1114,7 @@ int runHeadlessCommand(QApplication& app)
                     if(uiScale)
                         uiScale->setValue(150);
                     QMetaObject::invokeMethod(&settingsWindow, "on_buttonApply_clicked", Qt::DirectConnection);
+                    settingsApplyKeepsOpen = settingsWindow.isVisible();
                     COptString* saved = dynamic_cast<COptString*>(
                         settingsWindow.opt(eOptSetKeyBinding, "shortcutHistory"));
                     settingsShortcutsPersist = saved && saved->value() == "Alt+L"
@@ -1133,6 +1142,10 @@ int runHeadlessCommand(QApplication& app)
                             && uiScaleValue && uiScaleValue->text() == "150%"
                             && savedUiScale && savedUiScale->value() == 150
                             && ei::persistedUiScalePercent() == 150;
+                    QMetaObject::invokeMethod(&settingsWindow,
+                                              "on_buttonSaveClose_clicked",
+                                              Qt::DirectConnection);
+                    settingsSaveCloseWorks = saveCloseButton && !settingsWindow.isVisible();
                 }
             }
             QDir::setCurrent(previousDirectory);
@@ -1140,12 +1153,18 @@ int runHeadlessCommand(QApplication& app)
         const QFont unscaledFont = QApplication::font();
         ei::applyUiScalePercent(150);
         const QFont scaledFont = QApplication::font();
+        const QFont scaledExistingFont = primaryWindow.font();
         uiScaleFontApplied = qApp->property("enduranceUiScalePercent").toInt() == 150
             && ((unscaledFont.pointSizeF() > 0.0
                  && qAbs(scaledFont.pointSizeF()
                          - unscaledFont.pointSizeF() * 1.5) < 0.1)
                 || (unscaledFont.pixelSize() > 0
                     && scaledFont.pixelSize() > unscaledFont.pixelSize()));
+        uiScaleExistingWindowApplied =
+            (scaledFont.pointSizeF() > 0.0
+             && qAbs(scaledExistingFont.pointSizeF() - scaledFont.pointSizeF()) < 0.1)
+            || (scaledFont.pixelSize() > 0
+                && scaledExistingFont.pixelSize() == scaledFont.pixelSize());
         ei::applyUiScalePercent(100);
         QWidget ownedWindow(&primaryWindow, Qt::Window);
         QWidget orphanWindow(nullptr, Qt::Window);
@@ -1215,6 +1234,8 @@ int runHeadlessCommand(QApplication& app)
                 && autosaveSettingsPersist && settingsApplySignal && autosaveLiveReconfigure
                 && cameraSpeedSettingsPersist
                 && uiScaleSettingsPersist && uiScaleLiveApply && uiScaleFontApplied
+                && uiScaleExistingWindowApplied
+                && settingsApplyKeepsOpen && settingsSaveCloseWorks
                 && sessionIdentityRoundTrip
                 && renderOptionsRegistered
                 && secondaryWindowsClosed
@@ -1269,6 +1290,9 @@ int runHeadlessCommand(QApplication& app)
                << " uiScaleSettingsPersist=" << uiScaleSettingsPersist
                << " uiScaleLiveApply=" << uiScaleLiveApply
                << " uiScaleFontApplied=" << uiScaleFontApplied
+               << " uiScaleExistingWindowApplied=" << uiScaleExistingWindowApplied
+               << " settingsApplyKeepsOpen=" << settingsApplyKeepsOpen
+               << " settingsSaveCloseWorks=" << settingsSaveCloseWorks
                << " sessionIdentityRoundTrip=" << sessionIdentityRoundTrip
                << " settingsApplySignal=" << settingsApplySignal
                << " renderOptionsRegistered=" << renderOptionsRegistered

@@ -8465,7 +8465,10 @@ void CView::mousePressEvent(QMouseEvent* event)
     m_hasViewportMousePos = rect().contains(event->pos());
     if(m_landscapeInteractionSuspended)
     {
-        event->accept();
+        if(event->button() == Qt::MiddleButton)
+            m_pOp->mousePressEvent(event);
+        else
+            event->accept();
         return;
     }
     if(m_landscapeTools && m_landscapeTools->sculptEnabled()
@@ -8693,7 +8696,10 @@ void CView::mouseMoveEvent(QMouseEvent* event)
     m_hasViewportMousePos = rect().contains(event->pos());
     if(m_landscapeInteractionSuspended)
     {
-        event->accept();
+        if(event->buttons() & Qt::MiddleButton)
+            m_pOp->mouseMoveEvent(event);
+        else
+            event->accept();
         return;
     }
     if(m_landscapeTools && m_landscapeTools->sculptEnabled()
@@ -8722,7 +8728,10 @@ void CView::mouseReleaseEvent(QMouseEvent *event)
     m_hasViewportMousePos = rect().contains(event->pos());
     if(m_landscapeInteractionSuspended)
     {
-        event->accept();
+        if(event->button() == Qt::MiddleButton)
+            m_pOp->mouseReleaseEvent(event);
+        else
+            event->accept();
         return;
     }
     if(m_sculptStrokeActive && event->button() == Qt::LeftButton)

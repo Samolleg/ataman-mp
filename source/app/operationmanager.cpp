@@ -455,6 +455,12 @@ void CMoveAxis::mouseReleaseEvent(COperation *pOp, QMouseEvent *pEvent)
 
 }
 
+void CMoveAxis::synchronizePointerAfterCameraNavigation(const QPoint& position)
+{
+    m_lastPos = position;
+    lastLandPos = m_pView->getTerrainPos(position.x(), position.y());
+}
+
 void CMoveAxis::mouseMoveEvent(COperation *pOp, QMouseEvent *pEvent)
 {
     Q_UNUSED(pOp);
@@ -977,6 +983,7 @@ void CScaleAxis::mouseMoveEvent(COperation *pOp, QMouseEvent *pEvent)
 
 COperation::COperation(CState *s)
     : current(s)
+    ,m_cameraNavigationActive(false)
 {
     //create key manager
     m_keyManager.reset(new CKeyManager());
@@ -984,6 +991,7 @@ COperation::COperation(CState *s)
 
 void COperation::changeState(CState *state)
 {
+    m_cameraNavigationActive = false;
     if(nullptr!= current)
         delete current;
     current = state;
@@ -991,16 +999,60 @@ void COperation::changeState(CState *state)
 
 void COperation::mousePressEvent(QMouseEvent *pEvent)
 {
+    if(pEvent->button() == Qt::MiddleButton)
+    {
+        m_cameraNavigationActive = true;
+        m_cameraNavigationLastPos = pEvent->pos();
+        if(current && current->m_pView)
+            current->m_pView->anchorCameraRotationToViewportCenter();
+        pEvent->accept();
+        return;
+    }
     current->mousePressEvent(this, pEvent);
 }
 
 void COperation::mouseReleaseEvent(QMouseEvent *pEvent)
 {
+    if(pEvent->button() == Qt::MiddleButton && m_cameraNavigationActive)
+    {
+        m_cameraNavigationActive = false;
+        if(current)
+            current->synchronizePointerAfterCameraNavigation(pEvent->pos());
+        pEvent->accept();
+        return;
+    }
     current->mouseReleaseEvent(this, pEvent);
 }
 
 void COperation::mouseMoveEvent(QMouseEvent *pEvent)
 {
+    if(m_cameraNavigationActive)
+    {
+        if(!(pEvent->buttons() & Qt::MiddleButton))
+        {
+            m_cameraNavigationActive = false;
+            if(current)
+                current->synchronizePointerAfterCameraNavigation(pEvent->pos());
+        }
+        else
+        {
+            const int dx = pEvent->x() - m_cameraNavigationLastPos.x();
+            const int dy = pEvent->y() - m_cameraNavigationLastPos.y();
+            if(current && current->m_pView && m_pCam)
+            {
+                const COptInt* senseX = dynamic_cast<const COptInt*>(
+                    current->m_pView->settings()->opt(eOptSetGeneral, "mouseSenseX"));
+                const COptInt* senseY = dynamic_cast<const COptInt*>(
+                    current->m_pView->settings()->opt(eOptSetGeneral, "mouseSenseY"));
+                rotateAroundPivot(m_pCam, dx, dy,
+                                  senseX ? senseX->value() : 50,
+                                  senseY ? senseY->value() : 50);
+            }
+            m_cameraNavigationLastPos = pEvent->pos();
+            pEvent->accept();
+            return;
+        }
+    }
     current->mouseMoveEvent(this, pEvent);
 }
 
@@ -1135,6 +1187,14 @@ void CTileBrush::mouseReleaseEvent(COperation* pOp, QMouseEvent* pEvent)
         m_pView->updatePreviewTile(m_pView->getTerrainPos(pEvent->pos().x(), pEvent->pos().y(), bLand), bLand);
         m_lastLandPos = landPos;
     }
+}
+
+void CTileBrush::synchronizePointerAfterCameraNavigation(const QPoint& position)
+{
+    m_lastPos = position;
+    const bool land = CScene::getInstance()->isLandTileEditMode();
+    m_lastLandPos = m_pView->getTerrainPos(position.x(), position.y(), land);
+    m_pView->updatePreviewTile(m_lastLandPos, land);
 }
 
 void CTileBrush::mouseMoveEvent(COperation* pOp, QMouseEvent* pEvent)

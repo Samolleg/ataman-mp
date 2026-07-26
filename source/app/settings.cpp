@@ -179,24 +179,9 @@ COpt* CSettings::opt(EOptSet optSet, const char* name)
 
 void CSettings::onShow(EOptSet optSet)
 {
-    for(auto& optCategory: m_aOptCategory)
-    {
-        for(auto& option: optCategory)
-        {
-            //todo: choose tab index to find option
-            QLineEdit* le = ui->tabWidget->findChild<QLineEdit*>(option->name());
-            if(le != nullptr)
-            {
-                COptString* pOpt = dynamic_cast<COptString*>(option.get());
-                if(pOpt)
-                    le->setText(pOpt->value());
-
-                COptInt* pOptInt = dynamic_cast<COptInt*>(option.get());
-                if(pOptInt)
-                    le->setText(QString::number(pOptInt->value()));
-            }
-        }
-    }
+    // Reopen from the last applied model. This also discards slider,
+    // checkbox, combo, and key-binding edits abandoned through the window X.
+    updateOptUi();
     show();
     switch (optSet) {
     case eOptSetGeneral:
@@ -219,19 +204,21 @@ void CSettings::onShow(EOptSet optSet)
 
 bool CSettings::onClose()
 {
-    saveOptions();
-    return QWidget::close();
+    return close();
 }
 
 void CSettings::closeEvent(QCloseEvent* e)
 {
-    Q_UNUSED(e);
-    onClose();
+    // Closing never applies pending controls. Restore the applied model so a
+    // later reopen cannot expose abandoned values, then persist that model.
+    updateOptUi();
+    saveOptions();
+    QWidget::closeEvent(e);
 }
 
 bool CSettings::close()
 {
-    return onClose();
+    return QWidget::close();
 }
 
 void CSettings::on_buttonCancel_clicked()
@@ -745,6 +732,17 @@ void CSettings::saveOptions()
 
 void CSettings::on_buttonApply_clicked()
 {
+    applyUiOptions();
+}
+
+void CSettings::on_buttonSaveClose_clicked()
+{
+    applyUiOptions();
+    close();
+}
+
+void CSettings::applyUiOptions()
+{
     updateOptFromUi();
     const COptBool* autosaveEnabled = dynamic_cast<const COptBool*>(
         opt(eOptSetGeneral, "autosaveEnabled"));
@@ -758,7 +756,7 @@ void CSettings::on_buttonApply_clicked()
     emit shortcutsChanged();
     emit settingsApplied();
     emit renderSettingsChanged();
-    onClose();
+    saveOptions();
 }
 
 void CSettings::persistOptions()
