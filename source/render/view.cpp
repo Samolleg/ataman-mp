@@ -8655,6 +8655,27 @@ float CView::terrainPaintStampSpacing() const
     return qMax(2.0f, float(m_landscapeTools->paintRadius()) * 2.0f);
 }
 
+void CView::onLandscapeToolsShown()
+{
+    if(!m_terrainEditAvailable || !m_pLand || !m_pLand->isMprLoad()
+       || !m_pTileForm || m_pTileForm->tileImages().isEmpty()
+       || m_terrainAtlasAnalysis.usable)
+        return;
+    const QString binding = m_mprDocument.mapInfo().innerNamespace
+        + QLatin1Char(':')
+        + QString::fromLatin1(CTerrainAtlasProfileInference::pixelSha256(
+              m_pTileForm->tileImages()).toHex());
+    if(binding == m_lastAtlasReviewPromptBinding)
+        return;
+    m_lastAtlasReviewPromptBinding = binding;
+    if(QMessageBox::question(this, tr("Prepare terrain materials"), tr(
+        "This map's atlas does not yet have an approved semantic material profile. "
+        "Automatic terrain and overlay painting will remain unavailable; manual atlas-tile painting still works.\n\n"
+        "Generate the review proposal now? The review process only describes existing atlas tiles and does not modify the MPR or texture resources."),
+        QMessageBox::Yes | QMessageBox::No, QMessageBox::Yes) == QMessageBox::Yes)
+        reviewTerrainAtlasProfile();
+}
+
 bool CView::terrainBrushProjectsToLand() const
 {
     if(CScene::getInstance()->isLandTileEditMode())
@@ -8740,8 +8761,11 @@ bool CView::applyTerrainTilePreview(const STerrainTileCommand& command, bool for
             forward ? delta.after : delta.before, false);
         sectors.insert(qMakePair(delta.globalX / 16, delta.globalY / 16));
     }
-    for(const QPair<int, int>& sector : sectors)
-        m_pLand->updateSectorDrawData(sector.first, sector.second);
+    if(m_terrainPreviewBatchActive)
+        m_pendingTerrainPreviewSectors.unite(sectors);
+    else
+        for(const QPair<int, int>& sector : sectors)
+            m_pLand->updateSectorDrawData(sector.first, sector.second);
     m_pLand->setDirty(m_terrainEdit.isDirty());
     if(!m_tilePaintStrokeActive)
     {
@@ -8769,9 +8793,14 @@ bool CView::applyOverlaySurfacePreview(const SOverlaySurfaceCommand& command,
     }
     for(const SOverlaySectorDelta& delta : command.sectors)
     {
-        if(!m_pLand->previewCanonicalSector(
-            delta.sectorX, delta.sectorY,
-            m_terrainEdit.sectorPayload(delta.sectorX, delta.sectorY)))
+        const QPair<int, int> sector(delta.sectorX, delta.sectorY);
+        if(m_terrainPreviewBatchActive)
+        {
+            m_pendingTerrainPreviewSectors.insert(sector);
+            continue;
+        }
+        if(!m_pLand->previewCanonicalSector(delta.sectorX, delta.sectorY,
+                m_terrainEdit.sectorPayload(delta.sectorX, delta.sectorY)))
             ei::log(eLogWarning, QString(
                 "Overlay model changed but preview renderer rejected sector %1,%2")
                     .arg(delta.sectorX).arg(delta.sectorY));
@@ -8784,6 +8813,29 @@ bool CView::applyOverlaySurfacePreview(const SOverlaySurfaceCommand& command,
                               m_terrainEdit.isDirty() ? "*" : "");
     update();
     return true;
+}
+
+void CView::beginTerrainPreviewBatch()
+{
+    m_terrainPreviewBatchActive = true;
+}
+
+void CView::endTerrainPreviewBatch()
+{
+    if(!m_terrainPreviewBatchActive)
+        return;
+    m_terrainPreviewBatchActive = false;
+    const QSet<QPair<int, int>> sectors = m_pendingTerrainPreviewSectors;
+    m_pendingTerrainPreviewSectors.clear();
+    for(const QPair<int, int>& sector : sectors)
+        if(!m_pLand->previewCanonicalSector(
+            sector.first, sector.second,
+            m_terrainEdit.sectorPayload(sector.first, sector.second)))
+            ei::log(eLogWarning, QString(
+                "Batched terrain preview rejected sector %1,%2")
+                    .arg(sector.first).arg(sector.second));
+    if(!sectors.isEmpty())
+        update();
 }
 
 bool CView::onExit()
@@ -9364,11 +9416,13 @@ void CView::sculptTerrainTowardLatestPoint()
     const int steps = distance > spacing
         ? qMin(8, qMax(1, int(std::ceil(distance / spacing)))) : 1;
     const QVector3D start = m_lastSculptStampPoint;
+    beginTerrainPreviewBatch();
     for(int step = 1; step <= steps; ++step)
     {
         const float ratio = float(step) / float(steps);
         sculptTerrainAt(start * (1.0f - ratio) + m_lastSculptPoint * ratio);
     }
+    endTerrainPreviewBatch();
     m_lastSculptStampPoint = m_lastSculptPoint;
 }
 
@@ -9403,16 +9457,19 @@ bool CView::applyTerrainHeightPreview(const STerrainHeightCommand& command, bool
                 if(x >= 0 && y >= 0)
                     sectors.insert(qMakePair(x, y));
     }
-    for(const QPair<int, int>& sector : sectors)
-    {
-        if(!m_pLand->previewCanonicalSector(
-            sector.first, sector.second,
-            m_terrainEdit.sectorPayload(sector.first, sector.second)))
+    if(m_terrainPreviewBatchActive)
+        m_pendingTerrainPreviewSectors.unite(sectors);
+    else
+        for(const QPair<int, int>& sector : sectors)
         {
-            ei::log(eLogWarning, QString("Terrain preview renderer rejected sector %1,%2")
-                .arg(sector.first).arg(sector.second));
+            if(!m_pLand->previewCanonicalSector(
+                sector.first, sector.second,
+                m_terrainEdit.sectorPayload(sector.first, sector.second)))
+            {
+                ei::log(eLogWarning, QString("Terrain preview renderer rejected sector %1,%2")
+                    .arg(sector.first).arg(sector.second));
+            }
         }
-    }
     if(m_sculptStrokeActive)
     {
         m_sculptStrokeChanged = true;

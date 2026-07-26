@@ -92,6 +92,7 @@ private:
     QVector<SWaterVertexData> m_arrAnimatedWaterVrtData;
     QOpenGLBuffer m_waterVertexBuf;
     QOpenGLBuffer m_waterIndexBuf;
+    int m_waterIndexCount{0};
     const QVector<SMaterial>* m_materials{nullptr};
     QVector3D m_boundsCenter;
     float m_boundsRadius{0.0f};

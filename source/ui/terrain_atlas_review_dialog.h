@@ -26,6 +26,9 @@ private slots:
     void applyFamilyCellChange(int row, int column);
     void splitSelectedFamily();
     void mergeSelectedFamilies();
+    void markSelectedSlotsReviewed();
+    void markSelectedSlotsForReview();
+    void showGuide();
     void saveDraft();
     void approveAndSave();
 

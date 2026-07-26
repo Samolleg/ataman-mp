@@ -249,11 +249,14 @@ public:
     void pickQuickAccessTile(int index);
     void beginTileBrushGroup();
     void endTileBrushGroup();
+    void beginTerrainPreviewBatch();
+    void endTerrainPreviewBatch();
     bool applyTerrainHeightPreview(const STerrainHeightCommand& command, bool forward);
     bool applyTerrainVerticalScalePreview(const STerrainVerticalScaleCommand& command,
                                           bool forward);
     bool applyTerrainTilePreview(const STerrainTileCommand& command, bool forward);
     bool applyOverlaySurfacePreview(const SOverlaySurfaceCommand& command, bool forward);
+    void onLandscapeToolsShown();
     void loadSession();
     void setSessionWorkspaceIdentity(const QString& kind, const QString& identifier,
                                      const QString& displayName, const QString& mapZoneId);
@@ -531,6 +534,7 @@ private:
     CTerrainEditModel m_terrainEdit;
     STerrainAtlasAnalysis m_terrainAtlasAnalysis;
     STerrainAtlasProfile m_terrainAtlasProfile;
+    QString m_lastAtlasReviewPromptBinding;
     QMap<qint32, int> m_terrainMaterialRepresentatives;
     QVector<STerrainTileDelta> m_terrainPaintAudit;
     STerrainTileCommand m_tileStrokeCommand;
@@ -553,6 +557,8 @@ private:
     int m_tileStrokeRefused{0};
     int m_tileStrokeChangedTiles{0};
     int m_tileStrokeSolverNodes{0};
+    bool m_terrainPreviewBatchActive{false};
+    QSet<QPair<int, int>> m_pendingTerrainPreviewSectors;
     bool m_sculptOutlineValid{false};
     QVector3D m_sculptOutlineCenter;
     bool m_sculptStrokeActive;
