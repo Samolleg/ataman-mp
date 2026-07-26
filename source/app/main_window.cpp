@@ -53,6 +53,7 @@
 #include <QListWidget>
 #include <QGroupBox>
 #include <QPainter>
+#include <QPainterPath>
 #include <QPolygonF>
 #include <QVariant>
 #include <QGuiApplication>
@@ -105,11 +106,39 @@ constexpr int kLoadedMapPathRole = Qt::UserRole + 21;
 constexpr int kLoadedMapMpr = 1;
 constexpr int kLoadedMapMob = 2;
 
+QIcon entranceVisibilityIcon(bool visible, const QColor& color)
+{
+    QPixmap pixmap(24, 24);
+    pixmap.fill(Qt::transparent);
+    QPainter painter(&pixmap);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    painter.setPen(QPen(color, 1.8, Qt::SolidLine,
+                        Qt::RoundCap, Qt::RoundJoin));
+    painter.setBrush(Qt::NoBrush);
+
+    QPainterPath eye;
+    eye.moveTo(2.5, 12.0);
+    eye.cubicTo(7.0, 4.3, 17.0, 4.3, 21.5, 12.0);
+    eye.cubicTo(17.0, 19.7, 7.0, 19.7, 2.5, 12.0);
+    painter.drawPath(eye);
+    painter.setBrush(color);
+    painter.drawEllipse(QPointF(12.0, 12.0), 3.0, 3.0);
+    if(!visible)
+    {
+        painter.setBrush(Qt::NoBrush);
+        painter.setPen(QPen(color, 2.2, Qt::SolidLine,
+                            Qt::RoundCap, Qt::RoundJoin));
+        painter.drawLine(QPointF(4.0, 20.0), QPointF(20.0, 4.0));
+    }
+    return QIcon(pixmap);
+}
+
 void updateEntranceVisibilityButtonAppearance(QToolButton* button, bool visible)
 {
     if(!button)
         return;
-    button->setIcon(QIcon(visible ? ":/eye_open.svg" : ":/eye_closed.svg"));
+    button->setIcon(entranceVisibilityIcon(visible,
+        button->palette().color(QPalette::ButtonText)));
     button->setToolTip(visible
         ? QObject::tr("Hide map.txt entrance areas and labels in the viewport.")
         : QObject::tr("Show map.txt entrance areas and labels in the viewport."));
