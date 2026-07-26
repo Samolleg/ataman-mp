@@ -5,6 +5,7 @@
 #include <QIcon>
 #include <QCommandLineParser>
 #include <QFileInfo>
+#include <QFont>
 #include <QJsonDocument>
 #include <QJsonArray>
 #include <QJsonObject>
@@ -24,6 +25,7 @@
 #include <QMenu>
 #include <QContextMenuEvent>
 #include <QScrollBar>
+#include <QSlider>
 #include <QFormLayout>
 #include <QEventLoop>
 #include <QPainter>
@@ -45,6 +47,7 @@
 #include "ui/bodypartedit_form.h"
 #include "window_lifecycle.h"
 #include "settings.h"
+#include "endurance_ui_scale.h"
 #include "jmv_map_test_launcher.h"
 #include "render_scheduling.h"
 #include "utils.h"
@@ -1029,6 +1032,9 @@ int runHeadlessCommand(QApplication& app)
         bool autosaveSettingsPersist = false;
         bool autosaveLiveReconfigure = false;
         bool cameraSpeedSettingsPersist = false;
+        bool uiScaleSettingsPersist = false;
+        bool uiScaleLiveApply = false;
+        bool uiScaleFontApplied = false;
         bool settingsApplySignal = false;
         bool renderOptionsRegistered = false;
         {
@@ -1045,6 +1051,11 @@ int runHeadlessCommand(QApplication& app)
                     {
                         autosaveLiveReconfigure = enabled && intervalMinutes == 1;
                     });
+                QObject::connect(&settingsWindow, &CSettings::uiScaleApplied,
+                    [&uiScaleLiveApply](int percent)
+                    {
+                        uiScaleLiveApply = percent == 150;
+                    });
                 QTabWidget* settingsTabs = settingsWindow.findChild<QTabWidget*>("tabWidget");
                 if(settingsTabs && settingsTabs->count() > 1)
                 {
@@ -1059,6 +1070,9 @@ int runHeadlessCommand(QApplication& app)
                 QLineEdit* autosaveInterval = settingsWindow.findChild<QLineEdit*>("autosaveIntervalMinutes");
                 QComboBox* cameraWheelGesture = settingsWindow.findChild<QComboBox*>(
                     "cameraSpeedWheelGesture");
+                QSlider* uiScale = settingsWindow.findChild<QSlider*>("uiScalePercent");
+                QLabel* uiScaleValue = settingsWindow.findChild<QLabel*>(
+                    "uiScalePercentValue");
                 COptBool* animateUnits = dynamic_cast<COptBool*>(
                     settingsWindow.opt(eOptSetRender, "animateUnits"));
                 COptBool* performanceCounters = dynamic_cast<COptBool*>(
@@ -1089,6 +1103,8 @@ int runHeadlessCommand(QApplication& app)
                         autosaveInterval->setText("1");
                     if(cameraWheelGesture)
                         cameraWheelGesture->setCurrentIndex(2);
+                    if(uiScale)
+                        uiScale->setValue(150);
                     QMetaObject::invokeMethod(&settingsWindow, "on_buttonApply_clicked", Qt::DirectConnection);
                     COptString* saved = dynamic_cast<COptString*>(
                         settingsWindow.opt(eOptSetKeyBinding, "shortcutHistory"));
@@ -1109,10 +1125,28 @@ int runHeadlessCommand(QApplication& app)
                             && savedCameraGesture && savedCameraGesture->value() == "Shift+Wheel"
                             && savedCameraMultiplier
                             && qAbs(savedCameraMultiplier->value() - 1.0) < 0.001;
+                    COptInt* savedUiScale = dynamic_cast<COptInt*>(
+                        settingsWindow.opt(eOptSetGeneral, "uiScalePercent"));
+                    uiScaleSettingsPersist = uiScale && uiScale->minimum() == 75
+                            && uiScale->maximum() == 200
+                            && uiScale->singleStep() == 5
+                            && uiScaleValue && uiScaleValue->text() == "150%"
+                            && savedUiScale && savedUiScale->value() == 150
+                            && ei::persistedUiScalePercent() == 150;
                 }
             }
             QDir::setCurrent(previousDirectory);
         }
+        const QFont unscaledFont = QApplication::font();
+        ei::applyUiScalePercent(150);
+        const QFont scaledFont = QApplication::font();
+        uiScaleFontApplied = qApp->property("enduranceUiScalePercent").toInt() == 150
+            && ((unscaledFont.pointSizeF() > 0.0
+                 && qAbs(scaledFont.pointSizeF()
+                         - unscaledFont.pointSizeF() * 1.5) < 0.1)
+                || (unscaledFont.pixelSize() > 0
+                    && scaledFont.pixelSize() > unscaledFont.pixelSize()));
+        ei::applyUiScalePercent(100);
         QWidget ownedWindow(&primaryWindow, Qt::Window);
         QWidget orphanWindow(nullptr, Qt::Window);
         QPointer<QWidget> deletingWindow = new QWidget(nullptr, Qt::Window);
@@ -1180,6 +1214,7 @@ int runHeadlessCommand(QApplication& app)
                 && enterCommit && clickCommit && settingsTabsUsable && settingsShortcutsPersist
                 && autosaveSettingsPersist && settingsApplySignal && autosaveLiveReconfigure
                 && cameraSpeedSettingsPersist
+                && uiScaleSettingsPersist && uiScaleLiveApply && uiScaleFontApplied
                 && sessionIdentityRoundTrip
                 && renderOptionsRegistered
                 && secondaryWindowsClosed
@@ -1231,6 +1266,9 @@ int runHeadlessCommand(QApplication& app)
                << " autosaveSettingsPersist=" << autosaveSettingsPersist
                << " autosaveLiveReconfigure=" << autosaveLiveReconfigure
                << " cameraSpeedSettingsPersist=" << cameraSpeedSettingsPersist
+               << " uiScaleSettingsPersist=" << uiScaleSettingsPersist
+               << " uiScaleLiveApply=" << uiScaleLiveApply
+               << " uiScaleFontApplied=" << uiScaleFontApplied
                << " sessionIdentityRoundTrip=" << sessionIdentityRoundTrip
                << " settingsApplySignal=" << settingsApplySignal
                << " renderOptionsRegistered=" << renderOptionsRegistered
@@ -1518,6 +1556,11 @@ int main(int argc, char *argv[])
         "QToolButton:pressed { background-color: #3c583d; }"
         "QWidget:disabled { color: #808080; }"
         "QMenu::item:disabled { color: #808080; }");
+
+    // Apply the saved scale before constructing the splash, first-run dialogs,
+    // or main window so a high-DPI user never has to navigate an undersized
+    // setup flow just to reach the setting.
+    ei::applyUiScalePercent(ei::persistedUiScalePercent());
 
 
     CStartupSplash splash;

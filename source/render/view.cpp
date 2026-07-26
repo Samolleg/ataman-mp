@@ -42,6 +42,7 @@
 #include "key_manager.h"
 #include "log.h"
 #include "settings.h"
+#include "endurance_ui_scale.h"
 #include "undo.h"
 #include "objects/object_base.h"
 #include "objects/worldobj.h"
@@ -8855,29 +8856,44 @@ void CView::setTestEntranceOverlays(const QVector<QRectF>& rectangles,
     m_testEntranceLabelImages.clear();
     const QFont labelFont = font();
     const QFontMetrics metrics(labelFont);
+    const double scale = ei::uiScaleFactor();
+    const int horizontalPadding = qMax(6, qRound(6.0 * scale));
+    const int verticalPadding = qMax(4, qRound(4.0 * scale));
     for(const QString& label : labels)
     {
-        QRect bounds = metrics.boundingRect(QRect(0, 0, 240, 96),
+        QRect bounds = metrics.boundingRect(
+                                            QRect(0, 0, qRound(240.0 * scale),
+                                                  qRound(96.0 * scale)),
                                             Qt::AlignCenter | Qt::TextWordWrap,
                                             label);
-        bounds.setSize(bounds.size().expandedTo(QSize(36, metrics.height())));
-        QImage image(bounds.width() + 12, bounds.height() + 8,
+        bounds.setSize(bounds.size().expandedTo(
+            QSize(qRound(36.0 * scale), metrics.height())));
+        QImage image(bounds.width() + horizontalPadding * 2,
+                     bounds.height() + verticalPadding * 2,
                      QImage::Format_ARGB32_Premultiplied);
         image.fill(Qt::transparent);
         QPainter painter(&image);
         painter.setRenderHint(QPainter::Antialiasing);
         painter.setPen(Qt::NoPen);
         painter.setBrush(QColor(20, 20, 20, 180));
-        painter.drawRoundedRect(image.rect().adjusted(0, 0, -1, -1), 4, 4);
+        const int radius = qMax(4, qRound(4.0 * scale));
+        painter.drawRoundedRect(image.rect().adjusted(0, 0, -1, -1), radius, radius);
         painter.setFont(labelFont);
         painter.setPen(QColor(255, 245, 180));
-        painter.drawText(image.rect().adjusted(6, 4, -6, -4),
+        painter.drawText(image.rect().adjusted(horizontalPadding, verticalPadding,
+                                               -horizontalPadding, -verticalPadding),
                          Qt::AlignCenter | Qt::TextWordWrap, label);
         m_testEntranceLabelImages.append(image);
     }
     m_testEntranceLabelTexturesDirty = true;
     m_selectedTestEntrance = selectedIndex;
     update();
+}
+
+void CView::refreshUiScale()
+{
+    setTestEntranceOverlays(m_testEntranceRectangles, m_testEntranceLabels,
+                            m_selectedTestEntrance);
 }
 
 void CView::moveCameraToPoint(const QVector3D& position)

@@ -8,6 +8,7 @@
 #include <QKeySequenceEdit>
 #include <QHBoxLayout>
 #include <QPushButton>
+#include <QSlider>
 
 #include "settings.h"
 #include "ui_settings.h"
@@ -29,6 +30,40 @@ CSettings::CSettings(QWidget *parent) :
     };
     for(int index = 0; index < cameraWheelGestures.size(); ++index)
         ui->cameraSpeedWheelGesture->setItemData(index, cameraWheelGestures.at(index));
+
+    // Keep the General tab in a predictable top-to-bottom order. The legacy
+    // UI owns the first six rows plus the inactive polling row and spacer;
+    // move those two before adding Endurance's dynamic controls.
+    ui->gridLayout->removeItem(ui->horizontalLayout_8);
+    ui->gridLayout->addLayout(ui->horizontalLayout_8, 8, 0);
+    ui->gridLayout->removeItem(ui->verticalSpacer_2);
+    ui->gridLayout->addItem(ui->verticalSpacer_2, 13, 0, 1, 2);
+
+    QLabel* uiScaleLabel = new QLabel(tr("UI scale"), ui->tabGeneral);
+    uiScaleLabel->setToolTip(tr(
+        "Scales editor fonts, menus, dialogs, docks, property tables, and viewport text labels. "
+        "Applied immediately. Default: 100%."));
+    QSlider* uiScale = new QSlider(Qt::Horizontal, ui->tabGeneral);
+    uiScale->setObjectName("uiScalePercent");
+    uiScale->setRange(75, 200);
+    uiScale->setSingleStep(5);
+    uiScale->setPageStep(25);
+    uiScale->setTickInterval(25);
+    uiScale->setToolTip(uiScaleLabel->toolTip());
+    QLabel* uiScaleValue = new QLabel(QStringLiteral("100%"), ui->tabGeneral);
+    uiScaleValue->setObjectName("uiScalePercentValue");
+    uiScaleValue->setMinimumWidth(48);
+    uiScaleValue->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+    QHBoxLayout* uiScaleControls = new QHBoxLayout;
+    uiScaleControls->addWidget(uiScale, 1);
+    uiScaleControls->addWidget(uiScaleValue);
+    ui->gridLayout->addWidget(uiScaleLabel, 6, 0);
+    ui->gridLayout->addLayout(uiScaleControls, 6, 1);
+    connect(uiScale, &QSlider::valueChanged, this, [uiScaleValue](int value)
+    {
+        uiScaleValue->setText(QStringLiteral("%1%").arg(value));
+    });
+
     QLabel* editorLabel = new QLabel(tr("External script editor"), ui->tabGeneral);
     editorLabel->setToolTip(tr("Executable used to edit managed MOB scripts. Clear this field to use the Windows .lua file association."));
     QLineEdit* editorPath = new QLineEdit(ui->tabGeneral);
@@ -41,24 +76,22 @@ CSettings::CSettings(QWidget *parent) :
     editorControls->addWidget(editorPath, 1);
     editorControls->addWidget(browseEditor);
     editorControls->addWidget(clearEditor);
-    ui->gridLayout->addWidget(editorLabel, 6, 0);
-    ui->gridLayout->addLayout(editorControls, 6, 1);
+    ui->gridLayout->addWidget(editorLabel, 7, 0);
+    ui->gridLayout->addLayout(editorControls, 7, 1);
     QCheckBox* openLastSession = new QCheckBox(tr("Open last session on startup"),
                                                ui->tabGeneral);
     openLastSession->setObjectName("openLastSessionOnStartup");
     openLastSession->setToolTip(tr(
         "Automatically invokes File > Open Last Session after startup. "
         "Disabled by default; missing files are reported and skipped by the existing session loader."));
-    // Row 7 belongs to the inactive external-MPR polling control declared in
-    // settings.ui. Keep startup/session behavior on its own row.
-    ui->gridLayout->addWidget(openLastSession, 8, 0, 1, 2);
+    ui->gridLayout->addWidget(openLastSession, 9, 0, 1, 2);
     QCheckBox* autosaveEnabled = new QCheckBox(tr("Periodic recovery autosave"),
                                                ui->tabGeneral);
     autosaveEnabled->setObjectName("autosaveEnabled");
     autosaveEnabled->setToolTip(tr(
         "Writes validated, versioned recovery copies under the Endurance backup folder. "
         "It never replaces the open MOB/MPR or marks it saved."));
-    ui->gridLayout->addWidget(autosaveEnabled, 9, 0, 1, 2);
+    ui->gridLayout->addWidget(autosaveEnabled, 10, 0, 1, 2);
     QLabel* autosaveIntervalLabel = new QLabel(tr("Autosave interval (minutes)"),
                                                 ui->tabGeneral);
     autosaveIntervalLabel->setToolTip(tr(
@@ -67,8 +100,8 @@ CSettings::CSettings(QWidget *parent) :
     autosaveInterval->setObjectName("autosaveIntervalMinutes");
     autosaveInterval->setValidator(new QIntValidator(1, 120, autosaveInterval));
     autosaveInterval->setToolTip(autosaveIntervalLabel->toolTip());
-    ui->gridLayout->addWidget(autosaveIntervalLabel, 10, 0);
-    ui->gridLayout->addWidget(autosaveInterval, 10, 1);
+    ui->gridLayout->addWidget(autosaveIntervalLabel, 11, 0);
+    ui->gridLayout->addWidget(autosaveInterval, 11, 1);
     QPushButton* autosaveNow = new QPushButton(tr("Autosave Now"), ui->tabGeneral);
     autosaveNow->setToolTip(tr("Immediately create recovery generations for all dirty documents."));
     QPushButton* openBackupFolder = new QPushButton(tr("Open Backup Folder"), ui->tabGeneral);
@@ -77,7 +110,7 @@ CSettings::CSettings(QWidget *parent) :
     autosaveActions->addWidget(autosaveNow);
     autosaveActions->addWidget(openBackupFolder);
     autosaveActions->addStretch(1);
-    ui->gridLayout->addLayout(autosaveActions, 11, 0, 1, 2);
+    ui->gridLayout->addLayout(autosaveActions, 12, 0, 1, 2);
     connect(autosaveNow, &QPushButton::clicked, this, &CSettings::autosaveRequested);
     connect(openBackupFolder, &QPushButton::clicked, this, &CSettings::backupFolderRequested);
     connect(browseEditor, &QPushButton::clicked, this, [this, editorPath]()
@@ -472,6 +505,7 @@ void CSettings::initOptions()
     aOpt.append(QSharedPointer<COpt>(new COptInt("rangeIncrement", 999)));
     aOpt.append(QSharedPointer<COpt>(new COptInt("landCheckTime", 0)));
     aOpt.append(QSharedPointer<COpt>(new COptInt("undoHistoryLimit", 512)));
+    aOpt.append(QSharedPointer<COpt>(new COptInt("uiScalePercent", 100)));
     aOpt.append(QSharedPointer<COpt>(new COptInt("mapTestWarningVersion", 0)));
     aOpt.append(QSharedPointer<COpt>(new COptInt("autosaveIntervalMinutes", 5)));
     aOpt.append(QSharedPointer<COpt>(new COptInt("renderFpsCap", 0)));
@@ -716,8 +750,11 @@ void CSettings::on_buttonApply_clicked()
         opt(eOptSetGeneral, "autosaveEnabled"));
     const COptInt* autosaveInterval = dynamic_cast<const COptInt*>(
         opt(eOptSetGeneral, "autosaveIntervalMinutes"));
+    const COptInt* uiScale = dynamic_cast<const COptInt*>(
+        opt(eOptSetGeneral, "uiScalePercent"));
     emit autosaveSettingsApplied(autosaveEnabled && autosaveEnabled->value(),
                                  qBound(1, autosaveInterval ? autosaveInterval->value() : 5, 120));
+    emit uiScaleApplied(qBound(75, uiScale ? uiScale->value() : 100, 200));
     emit shortcutsChanged();
     emit settingsApplied();
     emit renderSettingsChanged();

@@ -57,6 +57,7 @@ signals:
     void autosaveSettingsApplied(bool enabled, int intervalMinutes);
     void autosaveRequested();
     void backupFolderRequested();
+    void uiScaleApplied(int percent);
     void renderSettingsChanged();
 
 private slots:

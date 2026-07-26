@@ -66,6 +66,7 @@
 #include "landscape.h"
 #include "node.h"
 #include "settings.h"
+#include "endurance_ui_scale.h"
 #include "select_window.h"
 #include "createobjectform.h"
 #include "randomize_form.h"
@@ -1135,6 +1136,14 @@ MainWindow::MainWindow(QWidget* parent) :
             m_pView->setFocus();
     });
     connect(m_settings.get(), &CSettings::shortcutsChanged, this, &MainWindow::initShortcuts);
+    connect(m_settings.get(), &CSettings::uiScaleApplied, this, [this](int percent)
+    {
+        ei::applyUiScalePercent(percent);
+        if(m_pView)
+            m_pView->refreshUiScale();
+        updateGeometry();
+        update();
+    });
     m_autosaveTimer = new QTimer(this);
     m_autosaveTimer->setTimerType(Qt::PreciseTimer);
     connect(m_autosaveTimer, &QTimer::timeout, this, &MainWindow::beginAutosaveCountdown);
