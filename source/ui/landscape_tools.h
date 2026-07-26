@@ -40,6 +40,7 @@ public:
     bool editingEnabled() const;
     bool tilePaintEnabled() const;
     bool overlayPaintEnabled() const;
+    bool overlaySurfaceEnabled() const;
     ELandscapeEditMode editMode() const;
     void activateMode(ELandscapeEditMode mode, bool notify = true);
     void setEditingEnabled(bool enabled, bool notify = true);

@@ -234,6 +234,7 @@ void appendOverlaySurfaceCommand(SOverlaySurfaceCommand* stroke,
         return;
     if(stroke->description.isEmpty())
         stroke->description = stamp.description;
+    stroke->heightClampedVertexCount += stamp.heightClampedVertexCount;
     for(const SOverlaySectorDelta& delta : stamp.sectors)
     {
         bool merged = false;
@@ -665,8 +666,8 @@ void CView::attachLandscapeTools(CLandscapeTools* tools)
             if(m_hasViewportMousePos)
             {
                 const bool land = CScene::getInstance()->isLandTileEditMode();
-                updatePreviewTile(getTerrainPos(m_lastViewportMousePos.x(),
-                                                 m_lastViewportMousePos.y(), land), land);
+                updatePreviewTile(getTerrainBrushPos(m_lastViewportMousePos.x(),
+                                                      m_lastViewportMousePos.y()), land);
             }
         });
         connect(m_landscapeTools, &CLandscapeTools::terrainVisibilityChanged,
@@ -791,6 +792,11 @@ void CView::syncLandscapeToolState()
         changeOperation(EButtonOpTilebrush);
         emit updateMsg(tr("Land tile painting enabled. Choose an atlas tile in Landscape Tools."));
         break;
+    case ELandscapeEditMode::OverlaySurface:
+        CScene::getInstance()->setLandTileEditMode(false);
+        changeOperation(EButtonOpTilebrush);
+        emit updateMsg(tr("Overlay surface coverage enabled. Add targets an existing overlay first and otherwise projects to land; Remove targets overlays only."));
+        break;
     case ELandscapeEditMode::OverlayPaint:
         CScene::getInstance()->setLandTileEditMode(false);
         changeOperation(EButtonOpTilebrush);
@@ -859,8 +865,8 @@ void CView::ensureManualTileSelection()
         if(m_hasViewportMousePos)
         {
             const bool land = layer == ETerrainTileLayer::Land;
-            updatePreviewTile(getTerrainPos(m_lastViewportMousePos.x(),
-                                            m_lastViewportMousePos.y(), land), land);
+            updatePreviewTile(getTerrainBrushPos(m_lastViewportMousePos.x(),
+                                                 m_lastViewportMousePos.y()), land);
         }
         return;
     }
@@ -6268,10 +6274,7 @@ void CView::drawTerrainPaintOutline(QOpenGLShaderProgram* program)
     }
     if(!m_terrainPaintOutlineValid || m_landscapeTools->manualTileSelectionEnabled())
         return;
-    const bool landLayer = m_landscapeTools->editMode() == ELandscapeEditMode::TilePaint
-        || (m_landscapeTools->editMode() == ELandscapeEditMode::OverlayPaint
-            && m_landscapeTools->overlaySurfaceOperation()
-                == EOverlaySurfaceOperation::Activate);
+    const bool landLayer = m_terrainPaintProjectionLand;
     const int radius = qMax(0, int(qRound(m_landscapeTools->paintRadius())));
     const ETerrainTileBrushShape shape = m_landscapeTools->paintShape();
     const auto included = [this, radius, shape](int x, int y)
@@ -6287,8 +6290,11 @@ void CView::drawTerrainPaintOutline(QOpenGLShaderProgram* program)
     {
         QVector3D first(x1, y1, 0.0f);
         QVector3D second(x2, y2, 0.0f);
-        if(!m_pLand->projectPt(first, landLayer)
-           || !m_pLand->projectPt(second, landLayer))
+        const bool firstProjected = m_pLand->projectPt(first, landLayer)
+            || (!landLayer && m_pLand->projectPt(first, true));
+        const bool secondProjected = m_pLand->projectPt(second, landLayer)
+            || (!landLayer && m_pLand->projectPt(second, true));
+        if(!firstProjected || !secondProjected)
             return;
         first.setZ(first.z() + 0.12f);
         second.setZ(second.z() + 0.12f);
@@ -6990,6 +6996,39 @@ QVector3D CView::getTerrainPos(bool bLand)
     QPoint globalCursorPos = QCursor::pos();
     QPoint localCursorPos = mapFromGlobal(globalCursorPos);
     return getTerrainPos(localCursorPos.x(), localCursorPos.y(), bLand);
+}
+
+QVector3D CView::getTerrainBrushPos(bool* hit)
+{
+    const QPoint localCursorPos = mapFromGlobal(QCursor::pos());
+    return getTerrainBrushPos(localCursorPos.x(), localCursorPos.y(), hit);
+}
+
+QVector3D CView::getTerrainBrushPos(const int cursorPosX, const int cursorPosY,
+                                    bool* hit)
+{
+    if(hit)
+        *hit = false;
+    const bool addingSurface = m_landscapeTools
+        && m_landscapeTools->editMode() == ELandscapeEditMode::OverlaySurface
+        && m_landscapeTools->overlaySurfaceOperation()
+            == EOverlaySurfaceOperation::Activate;
+    if(addingSurface)
+    {
+        bool overlayHit = false;
+        const QVector3D overlay = getTerrainPos(
+            cursorPosX, cursorPosY, false, &overlayHit);
+        if(overlayHit)
+        {
+            m_terrainPaintProjectionLand = false;
+            if(hit)
+                *hit = true;
+            return overlay;
+        }
+    }
+    m_terrainPaintProjectionLand = terrainBrushProjectsToLand();
+    return getTerrainPos(cursorPosX, cursorPosY,
+                         m_terrainPaintProjectionLand, hit);
 }
 
 bool CView::loadMob(QFileInfo &filePath)
@@ -8283,9 +8322,7 @@ void CView::pickTile(QVector3D posOnLand, bool bLand)
 
     CTile* pTile = nullptr;
     STileLocation tileLoc;
-    const bool pickLand = bLand || (!bLand && m_landscapeTools
-        && m_landscapeTools->overlaySurfaceOperation()
-            == EOverlaySurfaceOperation::Activate);
+    const bool pickLand = bLand || (!bLand && m_terrainPaintProjectionLand);
     if(!m_pLand->pickTile(posOnLand, pTile, tileLoc, pickLand))
         return;
 
@@ -8331,7 +8368,11 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
 
     CTile* pTile = nullptr;
     STileLocation tileLoc;
-    const bool pickLand = bLand || (!bLand && m_landscapeTools
+    // Coverage activation always resolves the logical cell from canonical
+    // land. The hover/outline may sit on an existing overlay, but choosing the
+    // cell through that thin/disconnected surface would make interpolated add
+    // strokes skip land gaps.
+    const bool pickLand = bLand || (!bLand
         && m_landscapeTools->overlaySurfaceOperation()
             == EOverlaySurfaceOperation::Activate);
     if(!m_pLand->pickTile(posOnLand, pTile, tileLoc, pickLand))
@@ -8405,6 +8446,9 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
         ++m_tileStrokeApplied;
         m_tileStrokeChangedTiles += surfaceCommand.sectors.size();
         appendOverlaySurfaceCommand(&m_overlaySurfaceStrokeCommand, surfaceCommand);
+        if(surfaceCommand.heightClampedVertexCount > 0)
+            emit updateMsg(tr("Added overlay surface; %1 vertex/vertices were clamped to MPR maxZ and may overlap the land until the terrain or maxZ is adjusted.")
+                               .arg(surfaceCommand.heightClampedVertexCount));
         return;
     }
     const ETerrainTileLayer layer = bLand
@@ -8598,9 +8642,7 @@ void CView::updatePreviewTile(QVector3D posOnLand, bool bLand)
 
     CTile* pTile = nullptr;
     STileLocation tileLoc;
-    const bool pickLand = bLand || (!bLand && m_landscapeTools
-        && m_landscapeTools->overlaySurfaceOperation()
-            == EOverlaySurfaceOperation::Activate);
+    const bool pickLand = bLand || (!bLand && m_terrainPaintProjectionLand);
     if(!m_pLand->pickTile(posOnLand, pTile, tileLoc, pickLand))
     {
         m_terrainPaintOutlineValid = false;
@@ -8702,6 +8744,7 @@ bool CView::terrainBrushProjectsToLand() const
     if(CScene::getInstance()->isLandTileEditMode())
         return true;
     return m_landscapeTools
+        && m_landscapeTools->editMode() == ELandscapeEditMode::OverlaySurface
         && m_landscapeTools->overlaySurfaceOperation()
             == EOverlaySurfaceOperation::Activate;
 }
@@ -10075,6 +10118,7 @@ void CView::changeOperation(EButtonOp type)
     cancelPendingOperation();
     if(type != EButtonOpTilebrush && m_landscapeTools
         && (m_landscapeTools->editMode() == ELandscapeEditMode::TilePaint
+            || m_landscapeTools->editMode() == ELandscapeEditMode::OverlaySurface
             || m_landscapeTools->editMode() == ELandscapeEditMode::OverlayPaint))
         m_landscapeTools->setEditingEnabled(false, false);
     switch (type) {

@@ -156,6 +156,9 @@ public:
     QVector3D getTerrainPos(bool bLand = true);
     QVector3D getTerrainPos(const int cursorPosX, const int cursorPosY,
                             bool bLand = true, bool* hit = nullptr);
+    QVector3D getTerrainBrushPos(bool* hit = nullptr);
+    QVector3D getTerrainBrushPos(const int cursorPosX, const int cursorPosY,
+                                 bool* hit = nullptr);
     bool terrainPositionAt(const QPoint& viewportPosition, QVector3D* position);
     QPoint operationAnchor() const;
     void setTestSpawnMarker(const QVector3D& position, bool adjusted = false);
@@ -546,6 +549,7 @@ private:
     bool m_landscapeInteractionSuspended{false};
     bool m_tilePaintStrokeActive{false};
     bool m_terrainPaintOutlineValid{false};
+    bool m_terrainPaintProjectionLand{true};
     int m_terrainPaintOutlineX{0};
     int m_terrainPaintOutlineY{0};
     QPoint m_lastTerrainPaintCenter;

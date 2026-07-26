@@ -1145,14 +1145,12 @@ SOverlaySurfaceCommand CTerrainEditModel::makeOverlayActivation(
     struct SActivatedCell
     {
         SActivatedCell() {}
-        SActivatedCell(int sector, int tile, int x, int y, bool restores)
-            : sectorIndex(sector), localTile(tile), globalX(x), globalY(y),
-              restoresOriginalSurface(restores) {}
+        SActivatedCell(int sector, int tile, int x, int y)
+            : sectorIndex(sector), localTile(tile), globalX(x), globalY(y) {}
         int sectorIndex{-1};
         int localTile{-1};
         int globalX{0};
         int globalY{0};
-        bool restoresOriginalSurface{false};
     };
     QMap<int, QByteArray> replacements;
     const auto replacementFor = [this, &replacements](int sectorIndex)
@@ -1213,28 +1211,20 @@ SOverlaySurfaceCommand CTerrainEditModel::makeOverlayActivation(
                && readOverlayMaterial(payload, overlayMaterialOffset, localTile)
                     == materialIndex)
                 continue;
-            bool restoresOriginalSurface = false;
-            if(!wasActive && sector.source.type == 3
-               && sector.source.overlayMaterialOffset > 0)
-            {
-                restoresOriginalSurface = readOverlayMaterial(
-                    sector.source.payload, sector.source.overlayMaterialOffset,
-                    localTile) >= 0;
-            }
             writePackedTile(payload, overlayTileOffset, localTile, selected.encode());
             writeOverlayMaterial(payload, overlayMaterialOffset, localTile, materialIndex);
             if(!wasActive)
-                activatedCells.append({sectorIndex, localTile, x, y,
-                                       restoresOriginalSurface});
+                activatedCells.append({sectorIndex, localTile, x, y});
         }
 
     // An inactive overlay record is not evidence of a usable surface plane.
     // Shipped maps may retain arbitrary/buried vertex data outside active
     // liquid cells. Initialize genuinely new cells from current land geometry,
     // with the smallest practical world-space clearance, while preserving an
-    // active neighbour or a surface removed earlier in this editing session.
+    // active neighbour. Re-adding a removed cell is a new authoring action:
+    // undo restores the old bytes exactly, while activation must not resurrect
+    // dormant/buried geometry from the original SEC.
     QSet<int> activatedVertices;
-    QSet<int> restoredVertices;
     for(const SActivatedCell& cell : activatedCells)
     {
         for(int vertexY = cell.globalY * 2;
@@ -1244,8 +1234,6 @@ SOverlaySurfaceCommand CTerrainEditModel::makeOverlayActivation(
             {
                 const int key = globalIndex(vertexX, vertexY);
                 activatedVertices.insert(key);
-                if(cell.restoresOriginalSurface)
-                    restoredVertices.insert(key);
             }
     }
     const auto sectorIndicesForVertex = [&](int globalX, int globalY) {
@@ -1307,7 +1295,6 @@ SOverlaySurfaceCommand CTerrainEditModel::makeOverlayActivation(
         const QVector<int> indices = sectorIndicesForVertex(globalX, globalY);
         QByteArray desired;
         bool activeSourceFound = false;
-        bool restoredSourceFound = false;
         for(int sectorIndex : indices)
         {
             const SSector& sector = m_sectors.at(sectorIndex);
@@ -1332,24 +1319,7 @@ SOverlaySurfaceCommand CTerrainEditModel::makeOverlayActivation(
                 activeSourceFound = true;
             }
         }
-        if(!activeSourceFound && restoredVertices.contains(key))
-        {
-            for(const SActivatedCell& cell : activatedCells)
-            {
-                if(!cell.restoresOriginalSurface
-                   || globalX < cell.globalX * 2 || globalX > cell.globalX * 2 + 2
-                   || globalY < cell.globalY * 2 || globalY > cell.globalY * 2 + 2)
-                    continue;
-                const SSector& sector = m_sectors.at(cell.sectorIndex);
-                const int localX = globalX - sector.source.sectorX * kSectorStride;
-                const int localY = globalY - sector.source.sectorY * kSectorStride;
-                desired = readVertexBytes(sector.source.payload,
-                    sector.source.overlayVertexOffset, localX, localY);
-                restoredSourceFound = true;
-                break;
-            }
-        }
-        if(!activeSourceFound && !restoredSourceFound)
+        if(!activeSourceFound)
         {
             if(indices.isEmpty())
                 continue;
@@ -1360,17 +1330,12 @@ SOverlaySurfaceCommand CTerrainEditModel::makeOverlayActivation(
                                       kLandVertexOffset, localX, localY);
             const quint16 landHeight = readVertexHeight(
                 sector.currentPayload, kLandVertexOffset, localX, localY);
-            if(landHeight > 65535 - rawClearance)
-            {
-                if(report)
-                    report->add("terrain.overlay_activation_range",
-                        EValidationSeverity::Error,
-                        "Overlay activation cannot place a new surface above the current land within the raw MPR height range",
-                        QString("%1,%2").arg(globalX).arg(globalY));
-                return SOverlaySurfaceCommand();
-            }
+            const bool clamped = landHeight > 65535 - rawClearance;
+            if(clamped)
+                ++command.heightClampedVertexCount;
             uchar encoded[2];
-            qToLittleEndian<quint16>(quint16(landHeight + rawClearance), encoded);
+            qToLittleEndian<quint16>(clamped
+                ? quint16(65535) : quint16(landHeight + rawClearance), encoded);
             desired[2] = char(encoded[0]);
             desired[3] = char(encoded[1]);
         }
@@ -1399,6 +1364,11 @@ SOverlaySurfaceCommand CTerrainEditModel::makeOverlayActivation(
         delta.afterPayload = it.value();
         command.sectors.append(delta);
     }
+    if(command.heightClampedVertexCount > 0 && report)
+        report->add("terrain.overlay_activation_range",
+            EValidationSeverity::Warning,
+            QString("%1 new overlay vertex/vertices were clamped to the current MPR maxZ; lower the land or increase maxZ if the surface overlaps it")
+                .arg(command.heightClampedVertexCount));
     return command;
 }
 

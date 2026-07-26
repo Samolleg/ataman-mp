@@ -4358,6 +4358,14 @@ void EnduranceDocumentTests::overlayActivationDeactivationIsLosslessAndUndoable(
     QCOMPARE(terrain.overlayMaterialIndex(3, 3, &available), qint16(-1));
     QVERIFY(!available);
     QVERIFY(terrain.makeOverlayActivation(point, 1, 0, 1, 2).isEmpty());
+    const SOverlaySurfaceCommand materialChange = terrain.makeOverlayActivation(
+        point, 0, 0, 1, 2);
+    QVERIFY(!materialChange.isEmpty());
+    QVERIFY(terrain.apply(materialChange, true));
+    QCOMPARE(terrain.overlayMaterialIndex(2, 3, &available), qint16(0));
+    QVERIFY(available);
+    QVERIFY(terrain.apply(materialChange, false));
+    QCOMPARE(terrain.overlayMaterialIndex(2, 3, &available), qint16(1));
 
     CMprEditTransaction transaction("activate one synthetic overlay cell");
     QVERIFY(terrain.appendSectorEdits(&transaction));
@@ -4409,6 +4417,52 @@ void EnduranceDocumentTests::overlayActivationDeactivationIsLosslessAndUndoable(
     QVERIFY(!terrain.apply(stale, true, &staleReport));
     QVERIFY(staleReport.hasErrors());
     QCOMPARE(terrain.sectorPayload(0, 0), beforeRejected);
+
+    // Re-adding a cell removed during the current edit session must initialize
+    // from current land, not resurrect arbitrary source overlay geometry.
+    QByteArray raisedSource = activation.sectors.front().afterPayload;
+    const int raisedOverlayVertex = 5 + 33 * 33 * 8 + (6 * 33 + 4) * 8 + 2;
+    raisedSource[raisedOverlayVertex] = char(0x60);
+    raisedSource[raisedOverlayVertex + 1] = char(0xEA); // 60000
+    CMprDocument dormantBaseline;
+    CValidationReport dormantReport;
+    QVERIFY2(dormantBaseline.loadBytes(syntheticMpr(raisedSource),
+                                       "overlay-dormant-source.mpr", &dormantReport),
+             qPrintable(dormantReport.toText()));
+    CTerrainEditModel dormantTerrain;
+    QVERIFY(dormantTerrain.load(dormantBaseline));
+    const SOverlaySurfaceCommand removeDormant =
+        dormantTerrain.makeOverlayDeactivation(point, &dormantReport);
+    QVERIFY(dormantTerrain.apply(removeDormant, true, &dormantReport));
+    const SOverlaySurfaceCommand recreateDormant = dormantTerrain.makeOverlayActivation(
+        point, 1, 0, 1, 2, &dormantReport);
+    QVERIFY2(!recreateDormant.isEmpty(), qPrintable(dormantReport.toText()));
+    QDataStream recreatedHeightStream(
+        recreateDormant.sectors.front().afterPayload.mid(raisedOverlayVertex, 2));
+    recreatedHeightStream.setByteOrder(QDataStream::LittleEndian);
+    quint16 recreatedHeight = 0;
+    recreatedHeightStream >> recreatedHeight;
+    QCOMPARE(recreatedHeight, quint16(1214));
+
+    // A maxed land vertex cannot receive positive raw clearance. Activation
+    // stays local and succeeds by clamping only the new overlay surface.
+    CMprDocument maxedBaseline;
+    CValidationReport maxedReport;
+    QVERIFY(maxedBaseline.loadBytes(syntheticMpr(syntheticLandSector(65535)),
+                                    "overlay-maxz.mpr", &maxedReport));
+    CTerrainEditModel maxedTerrain;
+    QVERIFY(maxedTerrain.load(maxedBaseline));
+    const SOverlaySurfaceCommand maxedActivation = maxedTerrain.makeOverlayActivation(
+        point, 1, 0, 1, 0, &maxedReport);
+    QVERIFY2(!maxedActivation.isEmpty(), qPrintable(maxedReport.toText()));
+    QVERIFY(!maxedReport.hasErrors());
+    QCOMPARE(maxedActivation.heightClampedVertexCount, 9);
+    QDataStream maxedHeightStream(
+        maxedActivation.sectors.front().afterPayload.mid(activatedOverlayVertex, 2));
+    maxedHeightStream.setByteOrder(QDataStream::LittleEndian);
+    quint16 maxedHeight = 0;
+    maxedHeightStream >> maxedHeight;
+    QCOMPARE(maxedHeight, quint16(65535));
 }
 
 void EnduranceDocumentTests::semanticAtlasTransitionsCannotTransitivelyMergeMaterialAnchors()

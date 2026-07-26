@@ -185,6 +185,7 @@ struct SOverlaySurfaceCommand
 {
     QString description;
     QVector<SOverlaySectorDelta> sectors;
+    int heightClampedVertexCount{0};
     bool isEmpty() const { return sectors.isEmpty(); }
 };
 

@@ -1023,6 +1023,11 @@ int runHeadlessCommand(QApplication& app)
         landscapeTools.setTerrainVisibility(false, true);
         const bool landscapeVisibilityControlsWork =
             !landscapeTools.mainTerrainVisible() && landscapeTools.overlaysVisible();
+        landscapeTools.activateMode(ELandscapeEditMode::OverlaySurface, false);
+        const bool overlaySurfaceToolSeparate = landscapeTools.overlaySurfaceEnabled()
+            && landscapeTools.overlaySurfaceOperation()
+                == EOverlaySurfaceOperation::Activate
+            && !landscapeTools.manualTileSelectionEnabled();
         bool semanticAtlasReviewRequested = false;
         QObject::connect(&landscapeTools, &CLandscapeTools::atlasProfileReviewRequested,
                          [&semanticAtlasReviewRequested]() {
@@ -1232,6 +1237,7 @@ int runHeadlessCommand(QApplication& app)
                 && underwaterFamiliesCanBeShown
                 && landscapeLayersVisibleByDefault
                 && landscapeVisibilityControlsWork
+                && overlaySurfaceToolSeparate
                 && semanticAtlasReviewButtonAvailable
                 && logicPointUndoAtomic && logicPointRedoAtomic;
         QTextStream output(stdout);
@@ -1305,6 +1311,7 @@ int runHeadlessCommand(QApplication& app)
                << " underwaterFamiliesCanBeShown=" << underwaterFamiliesCanBeShown
                << " landscapeLayersVisibleByDefault=" << landscapeLayersVisibleByDefault
                << " landscapeVisibilityControlsWork=" << landscapeVisibilityControlsWork
+               << " overlaySurfaceToolSeparate=" << overlaySurfaceToolSeparate
                << " semanticAtlasReviewButtonAvailable=" << semanticAtlasReviewButtonAvailable
                << " logicPointUndoAtomic=" << logicPointUndoAtomic
                << " logicPointRedoAtomic=" << logicPointRedoAtomic << "\n"

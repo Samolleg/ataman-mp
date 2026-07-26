@@ -5,6 +5,7 @@ enum class ELandscapeEditMode
 {
     Sculpt,
     TilePaint,
+    OverlaySurface,
     OverlayPaint,
     OverlaySculpt
 };

@@ -31,7 +31,7 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     , m_overlaySurfaceOperation(new QComboBox(this))
     , m_overlayMaterial(new QComboBox(this))
     , m_overlaySurfaceOperationLabel(new QLabel(tr("Overlay operation"), this))
-    , m_overlayMaterialLabel(new QLabel(tr("Liquid material"), this))
+    , m_overlayMaterialLabel(new QLabel(tr("Surface material (tint / animation)"), this))
     , m_showMainTerrain(new QCheckBox(tr("Show main terrain (M)"), this))
     , m_showOverlays(new QCheckBox(tr("Show overlays (J)"), this))
     , m_tilesetStatus(new QLabel(tr("Terrain materials are loaded from the MPR namespace template."), this))
@@ -51,6 +51,7 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
 
     m_mode->addItem(tr("Sculpt terrain"));
     m_mode->addItem(tr("Paint land tiles"));
+    m_mode->addItem(tr("Add / remove overlay surfaces"));
     m_mode->addItem(tr("Paint existing overlays"));
     m_mode->addItem(tr("Sculpt overlay surfaces"));
     QFormLayout* modeForm = new QFormLayout();
@@ -100,7 +101,8 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
         "Automatic mode always covers the brush core, uses an exact or constrained nearest authored seam when available, and otherwise leaves a hard edge. "
         "Manual mode paints the selected existing atlas tile and rotation without blending. Size 1 paints one core tile. Right-click samples from the map. "
         "Alt+Wheel changes brush size. Shift+Wheel selects the automatic material or rotates the manual tile; Wheel keeps camera zoom. "
-        "Overlay painting changes active cells. Add/Remove Surface explicitly changes overlay coverage; adding requires an existing liquid material and atlas family."), this);
+        "Overlay surface mode adds/removes coverage. Its Terrain material selects the atlas texture; its Surface material independently controls tint, opacity, illumination, waves, and texture warp. "
+        "Overlay painting only changes the atlas texture on cells that already exist."), this);
     paintHelp->setWordWrap(true);
     paintLayout->addWidget(paintHelp);
     m_tilesetStatus->setWordWrap(true);
@@ -111,11 +113,13 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     m_paintRadius->setDecimals(0);
     m_paintShape->addItem(tr("Circle"));
     m_paintShape->addItem(tr("Square"));
-    m_overlaySurfaceOperation->addItem(tr("Paint active surfaces"));
     m_overlaySurfaceOperation->addItem(tr("Add surface"));
     m_overlaySurfaceOperation->addItem(tr("Remove surface"));
+    m_overlayMaterial->setToolTip(tr(
+        "Selects the existing MPR material record stored on newly added overlay cells. "
+        "It controls liquid/surface rendering properties, not the atlas texture selected above."));
     QFormLayout* paintForm = new QFormLayout();
-    paintForm->addRow(tr("Terrain material"), m_paintTerrainType);
+    paintForm->addRow(tr("Atlas texture material"), m_paintTerrainType);
     paintForm->addRow(tr("Brush size (tiles)"), m_paintRadius);
     paintForm->addRow(tr("Brush shape"), m_paintShape);
     paintForm->addRow(m_manualTileSelection);
@@ -216,7 +220,13 @@ bool CLandscapeTools::tilePaintEnabled() const
 }
 bool CLandscapeTools::overlayPaintEnabled() const
 {
-    return editingEnabled() && editMode() == ELandscapeEditMode::OverlayPaint;
+    return editingEnabled()
+        && (editMode() == ELandscapeEditMode::OverlayPaint
+            || editMode() == ELandscapeEditMode::OverlaySurface);
+}
+bool CLandscapeTools::overlaySurfaceEnabled() const
+{
+    return editingEnabled() && editMode() == ELandscapeEditMode::OverlaySurface;
 }
 void CLandscapeTools::activateMode(ELandscapeEditMode mode, bool notify)
 {
@@ -247,17 +257,16 @@ void CLandscapeTools::updateModeVisibility()
         editMode() == ELandscapeEditMode::TilePaint);
     m_allowLandFamiliesInOverlay->setVisible(
         editMode() == ELandscapeEditMode::OverlayPaint);
-    const bool overlay = editMode() == ELandscapeEditMode::OverlayPaint;
-    m_overlaySurfaceOperation->setVisible(overlay);
-    m_overlaySurfaceOperationLabel->setVisible(overlay);
-    const bool activating = overlay
+    const bool overlaySurface = editMode() == ELandscapeEditMode::OverlaySurface;
+    m_overlaySurfaceOperation->setVisible(overlaySurface);
+    m_overlaySurfaceOperationLabel->setVisible(overlaySurface);
+    const bool activating = overlaySurface
         && overlaySurfaceOperation() == EOverlaySurfaceOperation::Activate;
     m_overlayMaterial->setVisible(activating);
     m_overlayMaterialLabel->setVisible(activating);
-    m_manualTileSelection->setEnabled(!overlay ||
-        overlaySurfaceOperation() != EOverlaySurfaceOperation::Deactivate);
-    m_paintTerrainType->setEnabled(!m_manualTileSelection->isChecked()
-        && (!overlay || overlaySurfaceOperation() != EOverlaySurfaceOperation::Deactivate));
+    m_manualTileSelection->setVisible(!overlaySurface);
+    m_paintTerrainType->setEnabled((overlaySurface || !m_manualTileSelection->isChecked())
+        && (!overlaySurface || activating));
 }
 ELandscapeSculptTool CLandscapeTools::sculptTool() const
 {
@@ -281,7 +290,8 @@ ETerrainTileBrushShape CLandscapeTools::paintShape() const
 }
 bool CLandscapeTools::manualTileSelectionEnabled() const
 {
-    return m_manualTileSelection->isChecked();
+    return editMode() != ELandscapeEditMode::OverlaySurface
+        && m_manualTileSelection->isChecked();
 }
 bool CLandscapeTools::landFamiliesAllowedInOverlay() const
 {
@@ -290,7 +300,11 @@ bool CLandscapeTools::landFamiliesAllowedInOverlay() const
 }
 EOverlaySurfaceOperation CLandscapeTools::overlaySurfaceOperation() const
 {
-    return static_cast<EOverlaySurfaceOperation>(m_overlaySurfaceOperation->currentIndex());
+    if(editMode() == ELandscapeEditMode::OverlayPaint)
+        return EOverlaySurfaceOperation::PaintExisting;
+    return m_overlaySurfaceOperation->currentIndex() == 0
+        ? EOverlaySurfaceOperation::Activate
+        : EOverlaySurfaceOperation::Deactivate;
 }
 qint16 CLandscapeTools::overlayMaterialIndex(bool* selected) const
 {
@@ -309,8 +323,15 @@ void CLandscapeTools::setOverlayMaterials(const QVector<SMaterial>& materials)
         const SMaterial& material = materials.at(index);
         const QString kind = material.type == eTerrainWater ? tr("water") : tr("surface");
         m_overlayMaterial->addItem(
-            tr("%1 — %2, opacity %3%").arg(index).arg(kind)
-                .arg(qRound(qBound(0.0f, material.A, 1.0f) * 100.0f)), index);
+            tr("%1 — %2; RGB %3/%4/%5, opacity %6%, light %7, wave %8, warp %9")
+                .arg(index).arg(kind)
+                .arg(qRound(qBound(0.0f, material.R, 1.0f) * 255.0f))
+                .arg(qRound(qBound(0.0f, material.G, 1.0f) * 255.0f))
+                .arg(qRound(qBound(0.0f, material.B, 1.0f) * 255.0f))
+                .arg(qRound(qBound(0.0f, material.A, 1.0f) * 100.0f))
+                .arg(material.selfIllumination, 0, 'f', 2)
+                .arg(material.waveMultiplier, 0, 'f', 2)
+                .arg(material.warpSpeed, 0, 'f', 2), index);
     }
     const int previousIndex = previous.isValid()
         ? m_overlayMaterial->findData(previous) : -1;
@@ -359,7 +380,8 @@ void CLandscapeTools::refreshPaintTerrainTypes()
 {
     const QVariant previous = m_paintTerrainType->currentData();
     QVector<QPair<qint32, QString>> terrainTypes =
-        editMode() == ELandscapeEditMode::OverlayPaint
+        (editMode() == ELandscapeEditMode::OverlayPaint
+         || editMode() == ELandscapeEditMode::OverlaySurface)
             ? m_overlayPaintTypes : m_landPaintTypes;
     if(editMode() == ELandscapeEditMode::TilePaint
        && m_showUnderwaterFamilies->isChecked())
