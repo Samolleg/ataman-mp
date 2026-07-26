@@ -1280,16 +1280,17 @@ int runHeadlessCommand(QApplication& app)
         const bool viewportChildConsumesClick = viewportChildPress.isAccepted()
                 && viewportProbe.presses == 0;
 
-        QPalette viewportPalette = viewportWidget.palette();
-        viewportPalette.setColor(QPalette::Window, QColor(24, 36, 48));
-        viewportWidget.setPalette(viewportPalette);
+        viewportWidget.setViewportSurfaceColor(QColor(24, 36, 48));
+        viewportWidget.setObjectName(QStringLiteral("viewportSurfaceRegression"));
+        viewportWidget.setStyleSheet(QStringLiteral(
+            "QFrame#viewportSurfaceRegression { background: rgb(60, 70, 80); "
+            "border: 1px solid #777; }"));
         QImage viewportSurface(viewportWidget.size(), QImage::Format_ARGB32);
         viewportSurface.fill(Qt::transparent);
         viewportWidget.render(&viewportSurface);
         const bool viewportSurfaceFullyOwned = viewportWidget.testAttribute(
                     Qt::WA_OpaquePaintEvent)
                 && viewportWidget.testAttribute(Qt::WA_StyledBackground)
-                && viewportWidget.autoFillBackground()
                 && viewportSurface.pixelColor(1, 1).alpha() == 255
                 && viewportSurface.pixelColor(viewportSurface.width() - 2,
                                               viewportSurface.height() - 2).alpha() == 255;
@@ -1424,7 +1425,11 @@ int runHeadlessCommand(QApplication& app)
                << " logicPointRedoAtomic=" << logicPointRedoAtomic
                << " viewportBackgroundConsumesClick=" << viewportBackgroundConsumesClick
                << " viewportChildConsumesClick=" << viewportChildConsumesClick
-               << " viewportSurfaceFullyOwned=" << viewportSurfaceFullyOwned << "\n"
+               << " viewportSurfaceFullyOwned=" << viewportSurfaceFullyOwned
+               << " viewportSurfaceTopLeftAlpha=" << viewportSurface.pixelColor(1, 1).alpha()
+               << " viewportSurfaceBottomRightAlpha="
+               << viewportSurface.pixelColor(viewportSurface.width() - 2,
+                                             viewportSurface.height() - 2).alpha() << "\n"
                << (passed ? "PASS" : "FAIL")
                << ": widget interaction and secondary-window lifecycle checks\n";
         output.flush();

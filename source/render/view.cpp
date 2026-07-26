@@ -987,7 +987,7 @@ void CView::initEnvironmentPreviewWidget()
     m_environmentPreviewWidget->setMinimumWidth(220);
     m_environmentPreviewWidget->setFrameShape(QFrame::StyledPanel);
     m_environmentPreviewWidget->setStyleSheet(
-        "QFrame#environmentPreviewWidget { background: rgba(25,25,25,210); color: white; border: 1px solid #777; border-radius: 4px; }"
+        "QFrame#environmentPreviewWidget { background: rgb(25,25,25); color: white; border: 1px solid #777; }"
         "QLabel, QComboBox, QToolButton { color: white; }");
     QVBoxLayout* outer = new QVBoxLayout(m_environmentPreviewWidget);
     outer->setContentsMargins(7, 5, 7, 6);
@@ -1018,7 +1018,7 @@ void CView::initEnvironmentPreviewWidget()
     m_timeOfDayWidget->setMinimumWidth(220);
     m_timeOfDayWidget->setFrameShape(QFrame::StyledPanel);
     m_timeOfDayWidget->setStyleSheet(
-        "QFrame#timeOfDayWidget { background: rgba(25,25,25,210); color: white; border: 1px solid #777; border-radius: 4px; }"
+        "QFrame#timeOfDayWidget { background: rgb(25,25,25); color: white; border: 1px solid #777; }"
         "QLabel { color: white; }");
     QVBoxLayout* timeOuter = new QVBoxLayout(m_timeOfDayWidget);
     timeOuter->setContentsMargins(7, 5, 7, 6);
@@ -1118,7 +1118,7 @@ void CView::initAiGraphPreviewWidget()
     graphPalette.setColor(QPalette::Window, QColor(25, 25, 25));
     m_aiGraphPreviewWidget->setPalette(graphPalette);
     m_aiGraphPreviewWidget->setStyleSheet(
-        "QFrame#aiGraphPreviewWidget { background-color: rgb(25,25,25); color: white; border: 1px solid #777; border-radius: 4px; }"
+        "QFrame#aiGraphPreviewWidget { background-color: rgb(25,25,25); color: white; border: 1px solid #777; }"
         "QWidget#aiGraphPreviewBody, QLabel { background-color: rgb(25,25,25); color: white; }"
         "QToolButton { color: white; }");
     QVBoxLayout* layout = new QVBoxLayout(m_aiGraphPreviewWidget);

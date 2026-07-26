@@ -2,6 +2,7 @@
 #define VIEWPORT_WIDGET_H
 
 #include <QContextMenuEvent>
+#include <QBrush>
 #include <QFrame>
 #include <QHideEvent>
 #include <QMouseEvent>
@@ -19,7 +20,8 @@ class CViewportWidget: public QFrame
 {
 public:
     explicit CViewportWidget(QWidget* parent = nullptr):
-        QFrame(parent)
+        QFrame(parent),
+        m_surfaceBrush(palette().brush(QPalette::Window))
     {
         // CView is an OpenGL surface.  Overlay widgets must own and paint every
         // pixel of their backing rectangle; otherwise an old GL frame can be
@@ -27,6 +29,14 @@ public:
         setAttribute(Qt::WA_OpaquePaintEvent, true);
         setAttribute(Qt::WA_StyledBackground, true);
         setAutoFillBackground(true);
+    }
+
+    void setViewportSurfaceColor(const QColor& color)
+    {
+        QColor opaque = color;
+        opaque.setAlpha(255);
+        m_surfaceBrush = QBrush(opaque);
+        update();
     }
 
 protected:
@@ -43,7 +53,10 @@ protected:
         // store.  Give the complete overlay a deterministic opaque base first.
         {
             QPainter painter(this);
-            painter.fillRect(rect(), palette().brush(QPalette::Window));
+            // Keep this independent from palette(). Stylesheets can replace
+            // QPalette::Window with a translucent rounded brush, which would
+            // reintroduce holes in the overlay's GL backing surface.
+            painter.fillRect(rect(), m_surfaceBrush);
         }
         QFrame::paintEvent(event);
     }
@@ -76,6 +89,8 @@ protected:
     }
 
 private:
+    QBrush m_surfaceBrush;
+
     void invalidateParent(const QRect& oldGeometry, const QRect& newGeometry)
     {
         QRegion dirty;
