@@ -5,7 +5,7 @@ work is ordered from the newest planned minor line to the oldest completed one.
 An item is checked only after its implementation has landed and received the
 stated validation. Completed code should carry a commit, test, or release link.
 
-Current development line: `0.3.0-alpha.21` focused closed testing. Alpha.11
+Current development line: `0.3.0-alpha.22` focused closed testing. Alpha.11
 was withdrawn after its temporary-resource bootstrap passed the fixed world
 object's first word as the object pointer and crashed both normal and synthetic
 Test Current Map launches. Alpha.12 corrects the pointer contract and adds an
