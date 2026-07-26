@@ -12,6 +12,10 @@
 The application target is `EIMapperEndurance.exe`. The upstream v0.3 binary and
 its `options.json` are not build inputs and are never overwritten.
 
+All local tester builds and handoffs must also follow
+[`TEST_BUILD_HANDOFF.md`](TEST_BUILD_HANDOFF.md). That contract is shared by
+main and every feature/integration worktree.
+
 ## Application
 
 Use the checked build wrapper from any PowerShell prompt:
@@ -93,6 +97,14 @@ This is mandatory for direct tester folders as well as ZIP releases. It removes
 regenerates `SHA256SUMS.txt`; and then runs the strict distribution validator.
 Never use a folder that has already been launched as an unsanitized package
 source. A fresh package must enter first-run game/mod setup.
+
+For a minor incremental correction to the same version and test scope, update
+the existing tester folder and run the finalizer again. Do not create a new
+folder for every tiny correction. Once a build has been distributed and must
+remain reproducible, preserve it and use a new version or explicit revision.
+
+The normal handoff is the unpacked, user-runnable folder. Do not create a ZIP or
+launch the packaged editor unless the user explicitly requests that action.
 
 `validate_distribution.ps1` remains the non-mutating CI check. It must pass
 after finalization; do not bypass either step for convenience builds.

@@ -5,6 +5,7 @@
 #include <QIcon>
 #include <QCommandLineParser>
 #include <QFileInfo>
+#include <QFont>
 #include <QJsonDocument>
 #include <QJsonArray>
 #include <QJsonObject>
@@ -23,8 +24,10 @@
 #include <QClipboard>
 #include <QMimeData>
 #include <QMenu>
+#include <QPushButton>
 #include <QContextMenuEvent>
 #include <QScrollBar>
+#include <QSlider>
 #include <QFormLayout>
 #include <QEventLoop>
 #include <QPainter>
@@ -42,10 +45,12 @@
 #include "resource_profile.h"
 #include "resourcemanager.h"
 #include "layout_components/tablemanager.h"
+#include "layout_components/viewport_widget.h"
 #include "ui/landscape_tools.h"
 #include "ui/bodypartedit_form.h"
 #include "window_lifecycle.h"
 #include "settings.h"
+#include "endurance_ui_scale.h"
 #include "jmv_map_test_launcher.h"
 #include "render_scheduling.h"
 #include "utils.h"
@@ -56,6 +61,19 @@
 #endif
 
 namespace {
+class CMousePressProbe final: public QWidget
+{
+public:
+    int presses = 0;
+
+protected:
+    void mousePressEvent(QMouseEvent* event) override
+    {
+        ++presses;
+        event->accept();
+    }
+};
+
 class CStartupSplash final: public QWidget
 {
 public:
@@ -1051,11 +1069,19 @@ int runHeadlessCommand(QApplication& app)
         semanticAtlasReviewButtonAvailable &= semanticAtlasReviewRequested;
 
         QWidget primaryWindow;
+        QLabel existingWindowChild(&primaryWindow);
         bool settingsTabsUsable = false;
         bool settingsShortcutsPersist = false;
         bool autosaveSettingsPersist = false;
         bool autosaveLiveReconfigure = false;
         bool cameraSpeedSettingsPersist = false;
+        bool uiScaleSettingsPersist = false;
+        bool uiScaleLiveApply = false;
+        bool uiScaleFontApplied = false;
+        bool uiScaleExistingWindowApplied = false;
+        bool settingsApplyKeepsOpen = false;
+        bool settingsSaveCloseWorks = false;
+        bool settingsButtonLayoutWorks = false;
         bool settingsApplySignal = false;
         bool renderOptionsRegistered = false;
         {
@@ -1065,12 +1091,19 @@ int runHeadlessCommand(QApplication& app)
                 QDir::setCurrent(settingsDirectory.path());
             {
                 CSettings settingsWindow(&primaryWindow);
+                settingsWindow.setAttribute(Qt::WA_DontShowOnScreen);
+                settingsWindow.show();
                 QObject::connect(&settingsWindow, &CSettings::settingsApplied,
                                  [&settingsApplySignal]() { settingsApplySignal = true; });
                 QObject::connect(&settingsWindow, &CSettings::autosaveSettingsApplied,
                     [&autosaveLiveReconfigure](bool enabled, int intervalMinutes)
                     {
                         autosaveLiveReconfigure = enabled && intervalMinutes == 1;
+                    });
+                QObject::connect(&settingsWindow, &CSettings::uiScaleApplied,
+                    [&uiScaleLiveApply](int percent)
+                    {
+                        uiScaleLiveApply = percent == 150;
                     });
                 QTabWidget* settingsTabs = settingsWindow.findChild<QTabWidget*>("tabWidget");
                 if(settingsTabs && settingsTabs->count() > 1)
@@ -1086,6 +1119,13 @@ int runHeadlessCommand(QApplication& app)
                 QLineEdit* autosaveInterval = settingsWindow.findChild<QLineEdit*>("autosaveIntervalMinutes");
                 QComboBox* cameraWheelGesture = settingsWindow.findChild<QComboBox*>(
                     "cameraSpeedWheelGesture");
+                QSlider* uiScale = settingsWindow.findChild<QSlider*>("uiScalePercent");
+                QLabel* uiScaleValue = settingsWindow.findChild<QLabel*>(
+                    "uiScalePercentValue");
+                QPushButton* saveCloseButton = settingsWindow.findChild<QPushButton*>(
+                    "buttonSaveClose");
+                QPushButton* applyButton = settingsWindow.findChild<QPushButton*>(
+                    "buttonApply");
                 COptBool* animateUnits = dynamic_cast<COptBool*>(
                     settingsWindow.opt(eOptSetRender, "animateUnits"));
                 COptBool* performanceCounters = dynamic_cast<COptBool*>(
@@ -1116,7 +1156,10 @@ int runHeadlessCommand(QApplication& app)
                         autosaveInterval->setText("1");
                     if(cameraWheelGesture)
                         cameraWheelGesture->setCurrentIndex(2);
+                    if(uiScale)
+                        uiScale->setValue(150);
                     QMetaObject::invokeMethod(&settingsWindow, "on_buttonApply_clicked", Qt::DirectConnection);
+                    settingsApplyKeepsOpen = settingsWindow.isVisible();
                     COptString* saved = dynamic_cast<COptString*>(
                         settingsWindow.opt(eOptSetKeyBinding, "shortcutHistory"));
                     settingsShortcutsPersist = saved && saved->value() == "Alt+L"
@@ -1136,10 +1179,48 @@ int runHeadlessCommand(QApplication& app)
                             && savedCameraGesture && savedCameraGesture->value() == "Shift+Wheel"
                             && savedCameraMultiplier
                             && qAbs(savedCameraMultiplier->value() - 1.0) < 0.001;
+                    COptInt* savedUiScale = dynamic_cast<COptInt*>(
+                        settingsWindow.opt(eOptSetGeneral, "uiScalePercent"));
+                    uiScaleSettingsPersist = uiScale && uiScale->minimum() == 75
+                            && uiScale->maximum() == 200
+                            && uiScale->singleStep() == 5
+                            && uiScaleValue && uiScaleValue->text() == "150%"
+                            && savedUiScale && savedUiScale->value() == 150
+                            && ei::persistedUiScalePercent() == 150;
+                    QMetaObject::invokeMethod(&settingsWindow,
+                                              "on_buttonSaveClose_clicked",
+                                              Qt::DirectConnection);
+                    settingsSaveCloseWorks = saveCloseButton && !settingsWindow.isVisible();
+                    settingsButtonLayoutWorks = applyButton && saveCloseButton
+                        && saveCloseButton->text() == "Save && Close"
+                        && applyButton->geometry().left() < saveCloseButton->geometry().left();
                 }
             }
             QDir::setCurrent(previousDirectory);
         }
+        const QFont unscaledFont = QApplication::font();
+        ei::applyUiScalePercent(150);
+        const QFont scaledFont = QApplication::font();
+        const QFont scaledExistingFont = primaryWindow.font();
+        const QFont scaledExistingChildFont = existingWindowChild.font();
+        uiScaleFontApplied = qApp->property("enduranceUiScalePercent").toInt() == 150
+            && ((unscaledFont.pointSizeF() > 0.0
+                 && qAbs(scaledFont.pointSizeF()
+                         - unscaledFont.pointSizeF() * 1.5) < 0.1)
+                || (unscaledFont.pixelSize() > 0
+                    && scaledFont.pixelSize() > unscaledFont.pixelSize()));
+        uiScaleExistingWindowApplied =
+            (scaledFont.pointSizeF() > 0.0
+             && qAbs(scaledExistingFont.pointSizeF() - scaledFont.pointSizeF()) < 0.1)
+            || (scaledFont.pixelSize() > 0
+                && scaledExistingFont.pixelSize() == scaledFont.pixelSize());
+        uiScaleExistingWindowApplied = uiScaleExistingWindowApplied
+            && ((scaledFont.pointSizeF() > 0.0
+                 && qAbs(scaledExistingChildFont.pointSizeF()
+                         - scaledFont.pointSizeF()) < 0.1)
+                || (scaledFont.pixelSize() > 0
+                    && scaledExistingChildFont.pixelSize() == scaledFont.pixelSize()));
+        ei::applyUiScalePercent(100);
         QWidget ownedWindow(&primaryWindow, Qt::Window);
         QWidget orphanWindow(nullptr, Qt::Window);
         QPointer<QWidget> deletingWindow = new QWidget(nullptr, Qt::Window);
@@ -1203,10 +1284,52 @@ int runHeadlessCommand(QApplication& app)
             && sessionMapZoneId == "zone7";
         sessionManager->reset();
 
+        CMousePressProbe viewportProbe;
+        viewportProbe.resize(240, 160);
+        CViewportWidget viewportWidget(&viewportProbe);
+        viewportWidget.setGeometry(20, 20, 180, 100);
+        QLabel viewportLabel(QStringLiteral("Viewport control"), &viewportWidget);
+        viewportLabel.setGeometry(10, 10, 120, 24);
+
+        QMouseEvent viewportBackgroundPress(QEvent::MouseButtonPress, QPointF(150, 70),
+                                            Qt::LeftButton, Qt::LeftButton,
+                                            Qt::NoModifier);
+        viewportBackgroundPress.setAccepted(false);
+        QApplication::sendEvent(&viewportWidget, &viewportBackgroundPress);
+        const bool viewportBackgroundConsumesClick = viewportBackgroundPress.isAccepted()
+                && viewportProbe.presses == 0;
+
+        QMouseEvent viewportChildPress(QEvent::MouseButtonPress, QPointF(5, 5),
+                                       Qt::LeftButton, Qt::LeftButton,
+                                       Qt::NoModifier);
+        viewportChildPress.setAccepted(false);
+        QApplication::sendEvent(&viewportLabel, &viewportChildPress);
+        const bool viewportChildConsumesClick = viewportChildPress.isAccepted()
+                && viewportProbe.presses == 0;
+
+        viewportWidget.setViewportSurfaceColor(QColor(24, 36, 48));
+        viewportWidget.setObjectName(QStringLiteral("viewportSurfaceRegression"));
+        viewportWidget.setStyleSheet(QStringLiteral(
+            "QFrame#viewportSurfaceRegression { background: rgb(60, 70, 80); "
+            "border: 1px solid #777; }"));
+        QImage viewportSurface(viewportWidget.size(), QImage::Format_ARGB32);
+        viewportSurface.fill(Qt::transparent);
+        viewportWidget.render(&viewportSurface);
+        const bool viewportSurfaceFullyOwned = viewportWidget.testAttribute(
+                    Qt::WA_OpaquePaintEvent)
+                && viewportWidget.testAttribute(Qt::WA_StyledBackground)
+                && viewportSurface.pixelColor(1, 1).alpha() == 255
+                && viewportSurface.pixelColor(viewportSurface.width() - 2,
+                                              viewportSurface.height() - 2).alpha() == 255;
+
         const bool passed = prefixesOnly && valueStable && focusCancel && escapeCancel
                 && enterCommit && clickCommit && settingsTabsUsable && settingsShortcutsPersist
                 && autosaveSettingsPersist && settingsApplySignal && autosaveLiveReconfigure
                 && cameraSpeedSettingsPersist
+                && uiScaleSettingsPersist && uiScaleLiveApply && uiScaleFontApplied
+                && uiScaleExistingWindowApplied
+                && settingsApplyKeepsOpen && settingsSaveCloseWorks
+                && settingsButtonLayoutWorks
                 && sessionIdentityRoundTrip
                 && renderOptionsRegistered
                 && secondaryWindowsClosed
@@ -1243,11 +1366,13 @@ int runHeadlessCommand(QApplication& app)
                 && underwaterFamiliesHiddenByDefault
                 && underwaterFamiliesCanBeShown
                 && landscapeLayersVisibleByDefault
-            && landscapeVisibilityControlsWork
-            && overlaySurfaceToolSeparate
-            && programmaticModeRefreshesMaterials
+                && landscapeVisibilityControlsWork
+                && overlaySurfaceToolSeparate
+                && programmaticModeRefreshesMaterials
                 && semanticAtlasReviewButtonAvailable
-                && logicPointUndoAtomic && logicPointRedoAtomic;
+                && logicPointUndoAtomic && logicPointRedoAtomic
+                && viewportBackgroundConsumesClick && viewportChildConsumesClick
+                && viewportSurfaceFullyOwned;
         QTextStream output(stdout);
         output << "asset-picker prefixes=" << completions.join(",") << "\n"
                << "prefixesOnly=" << prefixesOnly
@@ -1261,6 +1386,13 @@ int runHeadlessCommand(QApplication& app)
                << " autosaveSettingsPersist=" << autosaveSettingsPersist
                << " autosaveLiveReconfigure=" << autosaveLiveReconfigure
                << " cameraSpeedSettingsPersist=" << cameraSpeedSettingsPersist
+               << " uiScaleSettingsPersist=" << uiScaleSettingsPersist
+               << " uiScaleLiveApply=" << uiScaleLiveApply
+               << " uiScaleFontApplied=" << uiScaleFontApplied
+               << " uiScaleExistingWindowApplied=" << uiScaleExistingWindowApplied
+               << " settingsApplyKeepsOpen=" << settingsApplyKeepsOpen
+               << " settingsSaveCloseWorks=" << settingsSaveCloseWorks
+               << " settingsButtonLayoutWorks=" << settingsButtonLayoutWorks
                << " sessionIdentityRoundTrip=" << sessionIdentityRoundTrip
                << " settingsApplySignal=" << settingsApplySignal
                << " renderOptionsRegistered=" << renderOptionsRegistered
@@ -1322,7 +1454,14 @@ int runHeadlessCommand(QApplication& app)
                << " overlaySurfaceToolSeparate=" << overlaySurfaceToolSeparate
                << " semanticAtlasReviewButtonAvailable=" << semanticAtlasReviewButtonAvailable
                << " logicPointUndoAtomic=" << logicPointUndoAtomic
-               << " logicPointRedoAtomic=" << logicPointRedoAtomic << "\n"
+               << " logicPointRedoAtomic=" << logicPointRedoAtomic
+               << " viewportBackgroundConsumesClick=" << viewportBackgroundConsumesClick
+               << " viewportChildConsumesClick=" << viewportChildConsumesClick
+               << " viewportSurfaceFullyOwned=" << viewportSurfaceFullyOwned
+               << " viewportSurfaceTopLeftAlpha=" << viewportSurface.pixelColor(1, 1).alpha()
+               << " viewportSurfaceBottomRightAlpha="
+               << viewportSurface.pixelColor(viewportSurface.width() - 2,
+                                             viewportSurface.height() - 2).alpha() << "\n"
                << (passed ? "PASS" : "FAIL")
                << ": widget interaction and secondary-window lifecycle checks\n";
         output.flush();
@@ -1550,6 +1689,11 @@ int main(int argc, char *argv[])
         "QToolButton:pressed { background-color: #3c583d; }"
         "QWidget:disabled { color: #808080; }"
         "QMenu::item:disabled { color: #808080; }");
+
+    // Apply the saved scale before constructing the splash, first-run dialogs,
+    // or main window so a high-DPI user never has to navigate an undersized
+    // setup flow just to reach the setting.
+    ei::applyUiScalePercent(ei::persistedUiScalePercent());
 
 
     CStartupSplash splash;

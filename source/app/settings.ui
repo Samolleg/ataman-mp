@@ -1346,6 +1346,13 @@
       <number>0</number>
      </property>
      <item>
+      <widget class="QPushButton" name="buttonApply">
+       <property name="text">
+        <string>Apply</string>
+       </property>
+      </widget>
+     </item>
+     <item>
       <spacer name="horizontalSpacer">
        <property name="orientation">
         <enum>Qt::Horizontal</enum>
@@ -1359,9 +1366,9 @@
       </spacer>
      </item>
      <item>
-      <widget class="QPushButton" name="buttonApply">
+      <widget class="QPushButton" name="buttonSaveClose">
        <property name="text">
-        <string>Apply</string>
+        <string>Save &amp;&amp; Close</string>
        </property>
       </widget>
      </item>

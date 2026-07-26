@@ -57,10 +57,12 @@ signals:
     void autosaveSettingsApplied(bool enabled, int intervalMinutes);
     void autosaveRequested();
     void backupFolderRequested();
+    void uiScaleApplied(int percent);
     void renderSettingsChanged();
 
 private slots:
     void on_buttonApply_clicked();
+    void on_buttonSaveClose_clicked();
     void on_buttonCancel_clicked();
     void on_figPathAdd_clicked();
     void on_texPathAdd_clicked();
@@ -78,6 +80,7 @@ private:
     void updatePathOpt(const char* name, EOptSet optSet);
     void updateOptUi();
     void updateOptFromUi();
+    void applyUiOptions();
 
 private:
     Ui::CSettings *ui;

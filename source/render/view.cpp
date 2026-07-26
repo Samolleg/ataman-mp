@@ -42,6 +42,7 @@
 #include "key_manager.h"
 #include "log.h"
 #include "settings.h"
+#include "endurance_ui_scale.h"
 #include "undo.h"
 #include "objects/object_base.h"
 #include "objects/worldobj.h"
@@ -51,6 +52,7 @@
 #include "mob\mob_parameters.h"
 #include "layout_components/progressview.h"
 #include "layout_components/tablemanager.h"
+#include "layout_components/viewport_widget.h"
 #include "operationmanager.h"
 #include "ogl_utils.h"
 #include "scene.h"
@@ -1063,12 +1065,12 @@ void CView::initEnvironmentPreviewWidget()
 {
     if(m_environmentPreviewWidget || !m_pSettings)
         return;
-    m_environmentPreviewWidget = new QFrame(this);
+    m_environmentPreviewWidget = new CViewportWidget(this);
     m_environmentPreviewWidget->setObjectName("environmentPreviewWidget");
     m_environmentPreviewWidget->setMinimumWidth(220);
     m_environmentPreviewWidget->setFrameShape(QFrame::StyledPanel);
     m_environmentPreviewWidget->setStyleSheet(
-        "QFrame#environmentPreviewWidget { background: rgba(25,25,25,210); color: white; border: 1px solid #777; border-radius: 4px; }"
+        "QFrame#environmentPreviewWidget { background: rgb(25,25,25); color: white; border: 1px solid #777; }"
         "QLabel, QComboBox, QToolButton { color: white; }");
     QVBoxLayout* outer = new QVBoxLayout(m_environmentPreviewWidget);
     outer->setContentsMargins(7, 5, 7, 6);
@@ -1094,12 +1096,12 @@ void CView::initEnvironmentPreviewWidget()
     m_environmentPreviewMode->addItem(tr("Full environment"), 2);
     body->addWidget(m_environmentPreviewMode);
 
-    m_timeOfDayWidget = new QFrame(this);
+    m_timeOfDayWidget = new CViewportWidget(this);
     m_timeOfDayWidget->setObjectName("timeOfDayWidget");
     m_timeOfDayWidget->setMinimumWidth(220);
     m_timeOfDayWidget->setFrameShape(QFrame::StyledPanel);
     m_timeOfDayWidget->setStyleSheet(
-        "QFrame#timeOfDayWidget { background: rgba(25,25,25,210); color: white; border: 1px solid #777; border-radius: 4px; }"
+        "QFrame#timeOfDayWidget { background: rgb(25,25,25); color: white; border: 1px solid #777; }"
         "QLabel { color: white; }");
     QVBoxLayout* timeOuter = new QVBoxLayout(m_timeOfDayWidget);
     timeOuter->setContentsMargins(7, 5, 7, 6);
@@ -1189,7 +1191,7 @@ void CView::initAiGraphPreviewWidget()
 {
     if(m_aiGraphPreviewWidget)
         return;
-    m_aiGraphPreviewWidget = new QFrame(this);
+    m_aiGraphPreviewWidget = new CViewportWidget(this);
     m_aiGraphPreviewWidget->setObjectName(QStringLiteral("aiGraphPreviewWidget"));
     m_aiGraphPreviewWidget->setFixedWidth(520);
     m_aiGraphPreviewWidget->setFrameShape(QFrame::StyledPanel);
@@ -1199,7 +1201,7 @@ void CView::initAiGraphPreviewWidget()
     graphPalette.setColor(QPalette::Window, QColor(25, 25, 25));
     m_aiGraphPreviewWidget->setPalette(graphPalette);
     m_aiGraphPreviewWidget->setStyleSheet(
-        "QFrame#aiGraphPreviewWidget { background-color: rgb(25,25,25); color: white; border: 1px solid #777; border-radius: 4px; }"
+        "QFrame#aiGraphPreviewWidget { background-color: rgb(25,25,25); color: white; border: 1px solid #777; }"
         "QWidget#aiGraphPreviewBody, QLabel { background-color: rgb(25,25,25); color: white; }"
         "QToolButton { color: white; }");
     QVBoxLayout* layout = new QVBoxLayout(m_aiGraphPreviewWidget);
@@ -9406,7 +9408,10 @@ void CView::mousePressEvent(QMouseEvent* event)
     m_hasViewportMousePos = rect().contains(event->pos());
     if(m_landscapeInteractionSuspended)
     {
-        event->accept();
+        if(event->button() == Qt::MiddleButton)
+            m_pOp->mousePressEvent(event);
+        else
+            event->accept();
         return;
     }
     if(m_landscapeTools && m_landscapeTools->sculptEnabled()
@@ -9738,7 +9743,10 @@ void CView::mouseMoveEvent(QMouseEvent* event)
     m_hasViewportMousePos = rect().contains(event->pos());
     if(m_landscapeInteractionSuspended)
     {
-        event->accept();
+        if(event->buttons() & Qt::MiddleButton)
+            m_pOp->mouseMoveEvent(event);
+        else
+            event->accept();
         return;
     }
     if(m_landscapeTools && m_landscapeTools->sculptEnabled()
@@ -9769,7 +9777,10 @@ void CView::mouseReleaseEvent(QMouseEvent *event)
     m_hasViewportMousePos = rect().contains(event->pos());
     if(m_landscapeInteractionSuspended)
     {
-        event->accept();
+        if(event->button() == Qt::MiddleButton)
+            m_pOp->mouseReleaseEvent(event);
+        else
+            event->accept();
         return;
     }
     if(m_sculptStrokeActive && event->button() == Qt::LeftButton)
@@ -9903,29 +9914,57 @@ void CView::setTestEntranceOverlays(const QVector<QRectF>& rectangles,
     m_testEntranceLabelImages.clear();
     const QFont labelFont = font();
     const QFontMetrics metrics(labelFont);
+    const double scale = ei::uiScaleFactor();
+    const int horizontalPadding = qMax(6, qRound(6.0 * scale));
+    const int verticalPadding = qMax(4, qRound(4.0 * scale));
     for(const QString& label : labels)
     {
-        QRect bounds = metrics.boundingRect(QRect(0, 0, 240, 96),
-                                            Qt::AlignCenter | Qt::TextWordWrap,
-                                            label);
-        bounds.setSize(bounds.size().expandedTo(QSize(36, metrics.height())));
-        QImage image(bounds.width() + 12, bounds.height() + 8,
+        const int minimumTextWidth = qRound(36.0 * scale);
+        const int maximumTextWidth = qRound(240.0 * scale);
+        const int textWidth = qBound(minimumTextWidth,
+                                     metrics.horizontalAdvance(label),
+                                     maximumTextWidth);
+        QTextLayout textLayout(label, labelFont);
+        QTextOption textOption;
+        textOption.setAlignment(Qt::AlignCenter);
+        textOption.setWrapMode(QTextOption::WrapAtWordBoundaryOrAnywhere);
+        textLayout.setTextOption(textOption);
+        qreal textHeight = 0.0;
+        textLayout.beginLayout();
+        while(true)
+        {
+            QTextLine line = textLayout.createLine();
+            if(!line.isValid())
+                break;
+            line.setLineWidth(textWidth);
+            line.setPosition(QPointF(0.0, textHeight));
+            textHeight += line.height();
+        }
+        textLayout.endLayout();
+        const int contentHeight = qMax(metrics.height(), qCeil(textHeight));
+        QImage image(textWidth + horizontalPadding * 2,
+                     contentHeight + verticalPadding * 2,
                      QImage::Format_ARGB32_Premultiplied);
         image.fill(Qt::transparent);
         QPainter painter(&image);
         painter.setRenderHint(QPainter::Antialiasing);
         painter.setPen(Qt::NoPen);
         painter.setBrush(QColor(20, 20, 20, 180));
-        painter.drawRoundedRect(image.rect().adjusted(0, 0, -1, -1), 4, 4);
-        painter.setFont(labelFont);
+        const int radius = qMax(4, qRound(4.0 * scale));
+        painter.drawRoundedRect(image.rect().adjusted(0, 0, -1, -1), radius, radius);
         painter.setPen(QColor(255, 245, 180));
-        painter.drawText(image.rect().adjusted(6, 4, -6, -4),
-                         Qt::AlignCenter | Qt::TextWordWrap, label);
+        textLayout.draw(&painter, QPointF(horizontalPadding, verticalPadding));
         m_testEntranceLabelImages.append(image);
     }
     m_testEntranceLabelTexturesDirty = true;
     m_selectedTestEntrance = selectedIndex;
     update();
+}
+
+void CView::refreshUiScale()
+{
+    setTestEntranceOverlays(m_testEntranceRectangles, m_testEntranceLabels,
+                            m_selectedTestEntrance);
 }
 
 void CView::moveCameraToPoint(const QVector3D& position)

@@ -170,6 +170,7 @@ public:
     void setTestEntranceOverlays(const QVector<QRectF>& rectangles,
                                  const QStringList& labels,
                                  int selectedIndex);
+    void refreshUiScale();
     void moveCameraToPoint(const QVector3D& position);
     void anchorCameraRotationToViewportCenter();
     void changeOperation(EButtonOp type);
