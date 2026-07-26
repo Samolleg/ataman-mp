@@ -23,3 +23,10 @@ export at the only copy of an archive.
    Minimap reports: `Minimaps are not available in briefing zones.`
 8. Return to a gameplay zone and confirm embedded/generated sources and export
    become available again without restarting the editor.
+9. Confirm the smallest/default minimap is the former middle size, `+` advances
+   through the former largest size to the new 1.75x top size, and `-` reverses
+   through the same three levels.
+10. Collapse the minimap. Confirm only its compact title bar remains and no map
+    image is visible; expand it and confirm the previous size returns.
+11. Press and hold the left mouse button inside the minimap, then drag across
+    it. Confirm camera XY follows continuously rather than moving only once.

@@ -73,27 +73,58 @@ protected:
 
     void mousePressEvent(QMouseEvent* event) override
     {
-        const QPixmap* displayed = pixmap();
-        if(event->button() == Qt::LeftButton && displayed && !displayed->isNull()
-           && m_clickHandler)
+        if(event->button() == Qt::LeftButton && handlePointer(event->pos()))
         {
-            const QRect imageRect((width() - displayed->width()) / 2,
-                                  (height() - displayed->height()) / 2,
-                                  displayed->width(), displayed->height());
-            if(imageRect.contains(event->pos()))
-            {
-                const QPointF normalized(
-                    double(event->pos().x() - imageRect.left()) / imageRect.width(),
-                    double(event->pos().y() - imageRect.top()) / imageRect.height());
-                m_clickHandler(normalized);
-                event->accept();
-                return;
-            }
+            m_dragging = true;
+            event->accept();
+            return;
         }
         QLabel::mousePressEvent(event);
     }
 
+    void mouseMoveEvent(QMouseEvent* event) override
+    {
+        if(m_dragging && (event->buttons() & Qt::LeftButton))
+        {
+            handlePointer(event->pos());
+            event->accept();
+            return;
+        }
+        QLabel::mouseMoveEvent(event);
+    }
+
+    void mouseReleaseEvent(QMouseEvent* event) override
+    {
+        if(event->button() == Qt::LeftButton && m_dragging)
+        {
+            handlePointer(event->pos());
+            m_dragging = false;
+            event->accept();
+            return;
+        }
+        QLabel::mouseReleaseEvent(event);
+    }
+
 private:
+    bool handlePointer(const QPoint& position)
+    {
+        const QPixmap* displayed = pixmap();
+        if(!displayed || displayed->isNull() || !m_clickHandler)
+            return false;
+        const QRect imageRect((width() - displayed->width()) / 2,
+                              (height() - displayed->height()) / 2,
+                              displayed->width(), displayed->height());
+        if(!imageRect.contains(position))
+            return false;
+        const QPointF normalized(
+            qBound(0.0, double(position.x() - imageRect.left())
+                          / qMax(1, imageRect.width()), 1.0),
+            qBound(0.0, double(position.y() - imageRect.top())
+                          / qMax(1, imageRect.height()), 1.0));
+        m_clickHandler(normalized);
+        return true;
+    }
+
     void updatePixmap()
     {
         if(m_image.isNull())
@@ -123,6 +154,7 @@ private:
     QImage m_image;
     QPolygonF m_footprint;
     std::function<void(const QPointF&)> m_clickHandler;
+    bool m_dragging{false};
 };
 }
 
@@ -130,13 +162,14 @@ CViewportMinimapWidget::CViewportMinimapWidget(QWidget* parent)
     : QFrame(parent)
 {
     setObjectName("viewportMinimapWidget");
-    configureViewportOverlaySurface(this, QColor(28, 28, 28));
     setFrameShape(QFrame::StyledPanel);
     setStyleSheet(
         "#viewportMinimapWidget { background: rgb(28, 28, 28); "
         "border: 1px solid #666; border-radius: 4px; }"
         "#viewportMinimapWidget QLabel { color: white; }"
         "#viewportMinimapWidget QComboBox { background: #252525; color: white; }" );
+    ensurePolished();
+    configureViewportOverlaySurface(this, QColor(28, 28, 28));
 
     QVBoxLayout* root = new QVBoxLayout(this);
     root->setContentsMargins(5, 5, 5, 5);
@@ -144,6 +177,7 @@ CViewportMinimapWidget::CViewportMinimapWidget(QWidget* parent)
     QHBoxLayout* header = new QHBoxLayout;
     header->setContentsMargins(0, 0, 0, 0);
     m_title = new QLabel(tr("Minimap"), this);
+    m_title->setObjectName("viewportMinimapTitle");
     QFont titleFont = m_title->font();
     titleFont.setBold(true);
     m_title->setFont(titleFont);
@@ -170,6 +204,7 @@ CViewportMinimapWidget::CViewportMinimapWidget(QWidget* parent)
     m_larger->setText(tr("+"));
     m_larger->setToolTip(tr("Use a larger minimap"));
     m_expand = new QToolButton(this);
+    m_expand->setObjectName("viewportMinimapExpand");
     m_expand->setText(QString::fromUtf8("\xE2\x96\x81"));
     m_expand->setToolTip(tr("Minimize minimap"));
     header->addWidget(m_title);
@@ -193,10 +228,7 @@ CViewportMinimapWidget::CViewportMinimapWidget(QWidget* parent)
     root->addWidget(m_image, 1);
     static_cast<CScaledImageLabel*>(m_image)->setClickHandler(
         [this](const QPointF& normalized) {
-            if(m_sectorWidth <= 0 || m_sectorHeight <= 0) return;
-            emit cameraMoveRequested(QPointF(
-                normalized.x() * m_sectorWidth * 32.0,
-                (1.0 - normalized.y()) * m_sectorHeight * 32.0));
+            moveCameraFromNormalizedPoint(normalized);
         });
     m_detail = new QLabel(tr("Load an MPR to generate a preview."), this);
     m_detail->setWordWrap(true);
@@ -315,6 +347,18 @@ void CViewportMinimapWidget::setCameraFootprint(
     static_cast<CScaledImageLabel*>(m_image)->setFootprint(m_cameraFootprint);
 }
 
+void CViewportMinimapWidget::moveCameraFromNormalizedPoint(
+    const QPointF& normalizedPoint)
+{
+    if(m_sectorWidth <= 0 || m_sectorHeight <= 0)
+        return;
+    const QPointF normalized(qBound(0.0, normalizedPoint.x(), 1.0),
+                             qBound(0.0, normalizedPoint.y(), 1.0));
+    emit cameraMoveRequested(QPointF(
+        normalized.x() * m_sectorWidth * 32.0,
+        (1.0 - normalized.y()) * m_sectorHeight * 32.0));
+}
+
 void CViewportMinimapWidget::updateSourceChoices(bool preserveSelection)
 {
     const QString previous = preserveSelection
@@ -368,18 +412,20 @@ void CViewportMinimapWidget::updateDisplayedImage()
 void CViewportMinimapWidget::setExpanded(bool expanded)
 {
     m_expanded = expanded;
-    m_title->setVisible(expanded);
+    m_title->setVisible(true);
     m_export->setVisible(expanded);
     m_refresh->setVisible(expanded);
     m_lock->setVisible(expanded);
     m_smaller->setVisible(expanded);
     m_larger->setVisible(expanded);
     m_source->setVisible(expanded);
+    m_image->setVisible(expanded);
     m_detail->setVisible(expanded);
     m_expand->setText(expanded ? QString::fromUtf8("\xE2\x96\x81")
                                : QString::fromUtf8("\xE2\x96\xA1"));
     m_expand->setToolTip(expanded ? tr("Minimize minimap") : tr("Expand minimap"));
     setSizeLevel(m_sizeLevel);
+    configureViewportOverlaySurface(this, QColor(28, 28, 28));
 }
 
 void CViewportMinimapWidget::setSizeLevel(int level)
@@ -388,9 +434,9 @@ void CViewportMinimapWidget::setSizeLevel(int level)
     m_smaller->setEnabled(m_sizeLevel > 0);
     m_larger->setEnabled(m_sizeLevel < 2);
     static const QSize expandedSizes[] = {
-        QSize(270, 310), QSize(390, 430), QSize(520, 560)
+        QSize(390, 430), QSize(520, 560), QSize(910, 980)
     };
-    setFixedSize(m_expanded ? expandedSizes[m_sizeLevel] : QSize(78, 78));
+    setFixedSize(m_expanded ? expandedSizes[m_sizeLevel] : QSize(116, 38));
     QSettings().setValue("ui/viewportMinimapSizeLevel", m_sizeLevel);
     emit sizeModeChanged();
 }

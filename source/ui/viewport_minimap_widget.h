@@ -28,6 +28,7 @@ public:
     bool hasEmbeddedPreview() const { return !m_embedded.isNull(); }
     void setGenerationLocked(bool locked);
     void setCameraFootprint(const QPolygonF& normalizedFootprint);
+    void moveCameraFromNormalizedPoint(const QPointF& normalizedPoint);
     bool isExpanded() const { return m_expanded; }
     int sizeLevel() const { return m_sizeLevel; }
 
