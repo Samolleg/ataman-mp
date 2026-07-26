@@ -1058,6 +1058,15 @@ void COperation::mouseMoveEvent(QMouseEvent *pEvent)
 
 void COperation::wheelEvent(QWheelEvent* pEvent)
 {
+    // Camera zoom/height is independent of the current object transform.
+    // Tile Brush retains Shift/Alt wheel ownership for its own controls.
+    if(current && current->operationMethod() != eOperationMethodTileBrush)
+    {
+        if(m_pCam)
+            m_pCam->enlarge(pEvent->delta() > 0);
+        pEvent->accept();
+        return;
+    }
     current->wheelEvent(this, pEvent);
 }
 

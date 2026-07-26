@@ -5,7 +5,7 @@ work is ordered from the newest planned minor line to the oldest completed one.
 An item is checked only after its implementation has landed and received the
 stated validation. Completed code should carry a commit, test, or release link.
 
-Current development line: `0.3.0-alpha.20` focused closed testing. Alpha.11
+Current development line: `0.3.0-alpha.21` focused closed testing. Alpha.11
 was withdrawn after its temporary-resource bootstrap passed the fixed world
 object's first word as the object pointer and crashed both normal and synthetic
 Test Current Map launches. Alpha.12 corrects the pointer contract and adds an
@@ -39,7 +39,10 @@ its measured renderer-optimization plan. Alpha.19 adds persistent
 cached viewport map labels. Alpha.20 propagates scale changes through already
 open editor windows, separates Apply from Save & Close in Settings, and keeps
 MMB camera orbit available during transforms and Play-from-Here movement. The
-remaining 0.3 release work is the
+alpha.21 follow-up covers every existing child widget during live scaling,
+wraps long entrance labels, restores Esc cancellation and wheel camera control
+during transforms, and makes Play-from-Here selection exclusive. The remaining
+0.3 release work is the
 final runtime/corpus matrix, focused confirmation of the live clock, startup
 splash, and merged overlay behavior, plus version/tag/package housekeeping
 rather than another editor architecture pass.
@@ -85,7 +88,8 @@ rather than another editor architecture pass.
   the saved value before first-run/setup UI appears, and rebuild cached
   viewport entrance/map labels immediately when the setting changes.
   (`0.3.0-alpha.19`, live-window propagation corrected in
-  `0.3.0-alpha.20`)
+  `0.3.0-alpha.20` and existing-child coverage completed in
+  `0.3.0-alpha.21`)
 - [ ] Add a Russian translation and an in-app language switch.
 - [x] Render disabled menu items as a single ordinary grey label without
   Fusion's bright etched underlay or an alignment offset.

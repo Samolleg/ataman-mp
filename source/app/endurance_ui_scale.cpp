@@ -7,6 +7,7 @@
 #include <QJsonObject>
 #include <QVariant>
 #include <QWidget>
+#include <QVector>
 #include <QtMath>
 
 namespace ei {
@@ -36,7 +37,21 @@ void applyUiScalePercent(int percent)
         return;
 
     static const QFont baseFont = QApplication::font();
+    const int previous = normalizedUiScalePercent(
+        qApp->property("enduranceUiScalePercent").isValid()
+            ? qApp->property("enduranceUiScalePercent").toInt() : 100);
     const int normalized = normalizedUiScalePercent(percent);
+    const double liveRatio = double(normalized) / double(previous);
+    QVector<QPair<QWidget*, QFont>> liveFonts;
+    for(QWidget* window : QApplication::topLevelWidgets())
+    {
+        if(!window)
+            continue;
+        liveFonts.append(qMakePair(window, window->font()));
+        const QList<QWidget*> children = window->findChildren<QWidget*>();
+        for(QWidget* child : children)
+            liveFonts.append(qMakePair(child, child->font()));
+    }
     QFont scaled = baseFont;
     if(baseFont.pointSizeF() > 0.0)
         scaled.setPointSizeF(baseFont.pointSizeF() * normalized / 100.0);
@@ -47,16 +62,22 @@ void applyUiScalePercent(int percent)
 
     // QApplication's default font reliably affects newly created popups, but
     // Qt 5 does not consistently propagate it into an already constructed
-    // top-level widget hierarchy. Setting the live window font updates all
-    // descendants that inherit from it while preserving intentionally
-    // customized child fonts (icons, headings, syntax highlighting, etc.).
-    for(QWidget* window : QApplication::topLevelWidgets())
+    // widget hierarchy (notably menu bars and designer-created dock content).
+    // Scale snapshots of every live widget by the change ratio. This preserves
+    // bold/italic families and deliberately larger or smaller child fonts.
+    for(const auto& item : liveFonts)
     {
-        if(!window)
+        QWidget* widget = item.first;
+        if(!widget)
             continue;
-        window->setFont(scaled);
-        window->updateGeometry();
-        window->update();
+        QFont font = item.second;
+        if(font.pointSizeF() > 0.0)
+            font.setPointSizeF(qMax(1.0, font.pointSizeF() * liveRatio));
+        else if(font.pixelSize() > 0)
+            font.setPixelSize(qMax(1, qRound(font.pixelSize() * liveRatio)));
+        widget->setFont(font);
+        widget->updateGeometry();
+        widget->update();
     }
 }
 

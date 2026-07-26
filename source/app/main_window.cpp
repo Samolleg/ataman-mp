@@ -2258,6 +2258,10 @@ void MainWindow::setCustomSpawnPicking(bool enabled)
         statusBar()->showMessage(tr("Select a valid map.txt entrance before choosing a custom spawn."), 5000);
         return;
     }
+    // Play-from-Here is an exclusive viewport interaction. Do not leave an
+    // object selected behind its preview marker or an object transform active.
+    m_pView->cancelPendingOperation();
+    m_pView->clearObjectSelection();
     m_pView->setLandscapeInteractionSuspended(true);
     m_pickSpawnPending = true;
     m_movingCustomSpawn = false;
@@ -4696,6 +4700,15 @@ void MainWindow::handleEscapeShortcut()
         return;
     }
 
+    // A transient transform must be cancelled before unrelated persistent UI
+    // state (selected spawn marker or Landscape Tools visibility) consumes Esc.
+    if(m_pView->cancelPendingOperation())
+    {
+        CButtonConnector::getInstance()->pressButton(EButtonOpSelect);
+        m_pView->setFocus();
+        return;
+    }
+
     if(m_customSpawnSelected)
     {
         m_customSpawnSelected = false;
@@ -4716,8 +4729,7 @@ void MainWindow::handleEscapeShortcut()
         return;
     }
 
-    if(!m_pView->cancelPendingOperation())
-        m_pView->clearObjectSelection();
+    m_pView->clearObjectSelection();
     CButtonConnector::getInstance()->pressButton(EButtonOpSelect);
     m_pView->setFocus();
 }

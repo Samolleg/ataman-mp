@@ -8870,15 +8870,31 @@ void CView::setTestEntranceOverlays(const QVector<QRectF>& rectangles,
     const int verticalPadding = qMax(4, qRound(4.0 * scale));
     for(const QString& label : labels)
     {
-        QRect bounds = metrics.boundingRect(
-                                            QRect(0, 0, qRound(240.0 * scale),
-                                                  qRound(96.0 * scale)),
-                                            Qt::AlignCenter | Qt::TextWordWrap,
-                                            label);
-        bounds.setSize(bounds.size().expandedTo(
-            QSize(qRound(36.0 * scale), metrics.height())));
-        QImage image(bounds.width() + horizontalPadding * 2,
-                     bounds.height() + verticalPadding * 2,
+        const int minimumTextWidth = qRound(36.0 * scale);
+        const int maximumTextWidth = qRound(240.0 * scale);
+        const int textWidth = qBound(minimumTextWidth,
+                                     metrics.horizontalAdvance(label),
+                                     maximumTextWidth);
+        QTextLayout textLayout(label, labelFont);
+        QTextOption textOption;
+        textOption.setAlignment(Qt::AlignCenter);
+        textOption.setWrapMode(QTextOption::WrapAtWordBoundaryOrAnywhere);
+        textLayout.setTextOption(textOption);
+        qreal textHeight = 0.0;
+        textLayout.beginLayout();
+        while(true)
+        {
+            QTextLine line = textLayout.createLine();
+            if(!line.isValid())
+                break;
+            line.setLineWidth(textWidth);
+            line.setPosition(QPointF(0.0, textHeight));
+            textHeight += line.height();
+        }
+        textLayout.endLayout();
+        const int contentHeight = qMax(metrics.height(), qCeil(textHeight));
+        QImage image(textWidth + horizontalPadding * 2,
+                     contentHeight + verticalPadding * 2,
                      QImage::Format_ARGB32_Premultiplied);
         image.fill(Qt::transparent);
         QPainter painter(&image);
@@ -8887,11 +8903,8 @@ void CView::setTestEntranceOverlays(const QVector<QRectF>& rectangles,
         painter.setBrush(QColor(20, 20, 20, 180));
         const int radius = qMax(4, qRound(4.0 * scale));
         painter.drawRoundedRect(image.rect().adjusted(0, 0, -1, -1), radius, radius);
-        painter.setFont(labelFont);
         painter.setPen(QColor(255, 245, 180));
-        painter.drawText(image.rect().adjusted(horizontalPadding, verticalPadding,
-                                               -horizontalPadding, -verticalPadding),
-                         Qt::AlignCenter | Qt::TextWordWrap, label);
+        textLayout.draw(&painter, QPointF(horizontalPadding, verticalPadding));
         m_testEntranceLabelImages.append(image);
     }
     m_testEntranceLabelTexturesDirty = true;

@@ -1028,6 +1028,7 @@ int runHeadlessCommand(QApplication& app)
             !landscapeTools.mainTerrainVisible() && landscapeTools.overlaysVisible();
 
         QWidget primaryWindow;
+        QLabel existingWindowChild(&primaryWindow);
         bool settingsTabsUsable = false;
         bool settingsShortcutsPersist = false;
         bool autosaveSettingsPersist = false;
@@ -1039,6 +1040,7 @@ int runHeadlessCommand(QApplication& app)
         bool uiScaleExistingWindowApplied = false;
         bool settingsApplyKeepsOpen = false;
         bool settingsSaveCloseWorks = false;
+        bool settingsButtonLayoutWorks = false;
         bool settingsApplySignal = false;
         bool renderOptionsRegistered = false;
         {
@@ -1081,6 +1083,8 @@ int runHeadlessCommand(QApplication& app)
                     "uiScalePercentValue");
                 QPushButton* saveCloseButton = settingsWindow.findChild<QPushButton*>(
                     "buttonSaveClose");
+                QPushButton* applyButton = settingsWindow.findChild<QPushButton*>(
+                    "buttonApply");
                 COptBool* animateUnits = dynamic_cast<COptBool*>(
                     settingsWindow.opt(eOptSetRender, "animateUnits"));
                 COptBool* performanceCounters = dynamic_cast<COptBool*>(
@@ -1146,6 +1150,9 @@ int runHeadlessCommand(QApplication& app)
                                               "on_buttonSaveClose_clicked",
                                               Qt::DirectConnection);
                     settingsSaveCloseWorks = saveCloseButton && !settingsWindow.isVisible();
+                    settingsButtonLayoutWorks = applyButton && saveCloseButton
+                        && saveCloseButton->text() == "Save && Close"
+                        && applyButton->geometry().left() < saveCloseButton->geometry().left();
                 }
             }
             QDir::setCurrent(previousDirectory);
@@ -1154,6 +1161,7 @@ int runHeadlessCommand(QApplication& app)
         ei::applyUiScalePercent(150);
         const QFont scaledFont = QApplication::font();
         const QFont scaledExistingFont = primaryWindow.font();
+        const QFont scaledExistingChildFont = existingWindowChild.font();
         uiScaleFontApplied = qApp->property("enduranceUiScalePercent").toInt() == 150
             && ((unscaledFont.pointSizeF() > 0.0
                  && qAbs(scaledFont.pointSizeF()
@@ -1165,6 +1173,12 @@ int runHeadlessCommand(QApplication& app)
              && qAbs(scaledExistingFont.pointSizeF() - scaledFont.pointSizeF()) < 0.1)
             || (scaledFont.pixelSize() > 0
                 && scaledExistingFont.pixelSize() == scaledFont.pixelSize());
+        uiScaleExistingWindowApplied = uiScaleExistingWindowApplied
+            && ((scaledFont.pointSizeF() > 0.0
+                 && qAbs(scaledExistingChildFont.pointSizeF()
+                         - scaledFont.pointSizeF()) < 0.1)
+                || (scaledFont.pixelSize() > 0
+                    && scaledExistingChildFont.pixelSize() == scaledFont.pixelSize()));
         ei::applyUiScalePercent(100);
         QWidget ownedWindow(&primaryWindow, Qt::Window);
         QWidget orphanWindow(nullptr, Qt::Window);
@@ -1236,6 +1250,7 @@ int runHeadlessCommand(QApplication& app)
                 && uiScaleSettingsPersist && uiScaleLiveApply && uiScaleFontApplied
                 && uiScaleExistingWindowApplied
                 && settingsApplyKeepsOpen && settingsSaveCloseWorks
+                && settingsButtonLayoutWorks
                 && sessionIdentityRoundTrip
                 && renderOptionsRegistered
                 && secondaryWindowsClosed
@@ -1293,6 +1308,7 @@ int runHeadlessCommand(QApplication& app)
                << " uiScaleExistingWindowApplied=" << uiScaleExistingWindowApplied
                << " settingsApplyKeepsOpen=" << settingsApplyKeepsOpen
                << " settingsSaveCloseWorks=" << settingsSaveCloseWorks
+               << " settingsButtonLayoutWorks=" << settingsButtonLayoutWorks
                << " sessionIdentityRoundTrip=" << sessionIdentityRoundTrip
                << " settingsApplySignal=" << settingsApplySignal
                << " renderOptionsRegistered=" << renderOptionsRegistered
