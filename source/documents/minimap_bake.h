@@ -3,6 +3,7 @@
 
 #include <QImage>
 #include <QPointF>
+#include <QRect>
 #include <QSizeF>
 #include <QString>
 #include <QVector>
@@ -11,11 +12,11 @@ enum class EMinimapBakeLayerKind { Terrain, Overlay, StaticGeometry, DynamicObje
 
 enum class EMinimapCaptureOrientation
 {
-    // Review images use the ordinary top-left QImage origin. World +X points
-    // right and world +Y points toward the top of the image.
+    // The source image has world +Y toward its top edge. It is flipped into
+    // the game's minimap UV convention, where world +Y advances downward.
     PositiveYUp,
-    // Accepted for renderer/readback adapters whose rows still point with
-    // world +Y toward the bottom. The bake normalizes them before composition.
+    // The source already follows the game's top-left UV convention: world +X
+    // points right and world +Y points down.
     PositiveYDown
 };
 
@@ -38,6 +39,7 @@ struct SMinimapBakeResult
     QStringList notes;
     QImage reviewImage;
     QImage gameImage;
+    QRect gameContentRect;
 };
 
 struct SMinimapBakeOptions
@@ -51,6 +53,12 @@ struct SMinimapBakeOptions
 // sector, and maps to 128 review pixels per sector without cropping.
 QPointF minimapWorldToReviewPixel(const QPointF& worldPosition,
                                   int sectorWidth, int sectorHeight);
+
+// The game stores minimaps in a square texture but maps both world axes using
+// the larger #maps dimension. Non-square maps therefore occupy a top-left
+// active rectangle instead of being stretched to a square.
+QRect minimapGameContentRect(int sectorWidth, int sectorHeight,
+                             int textureSize = 256);
 
 SMinimapBakeResult bakeMinimapLayers(int sectorWidth, int sectorHeight,
                                      const QVector<SMinimapBakeLayer>& orderedLayers,

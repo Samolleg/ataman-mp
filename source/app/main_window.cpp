@@ -3175,7 +3175,7 @@ void MainWindow::launchCurrentMapTest()
     input.mapSizeX = int(landscape->widthInWorldUnits() / 32u);
     input.mapSizeY = int(landscape->heightInWorldUnits() / 32u);
     input.allowMissingAiGraph = allowMissingAiGraph;
-    const bool usesGeneratedMinimap = isJmv && !hotReloadRequested
+    const bool usesGeneratedMinimap = isJmv
         && m_viewportMinimap && m_viewportMinimap->usesGeneratedPreview();
     if(usesGeneratedMinimap && !ensureGeneratedMinimap())
     {
@@ -3221,7 +3221,9 @@ void MainWindow::launchCurrentMapTest()
         if(usesGeneratedMinimap)
         {
             statusBar()->showMessage(tr(
-                "The generated minimap was staged under a run-unique texture name in this test's private RES and map table."),
+                hotReloadRequested
+                    ? "The selected generated minimap was staged for this hot-reload generation."
+                    : "The generated minimap was staged under a run-unique texture name in this test's private RES and map table."),
                 7000);
         }
         if(hotReloadRequested)
@@ -3267,6 +3269,12 @@ void MainWindow::refreshViewportMinimapSources()
 {
     if(!m_viewportMinimap)
         return;
+    CLandscape* landscape = CLandscape::getInstance();
+    m_viewportMinimap->setMapDimensions(
+        landscape && landscape->isMprLoad()
+            ? int(landscape->widthInWorldUnits() / 32u) : 0,
+        landscape && landscape->isMprLoad()
+            ? int(landscape->heightInWorldUnits() / 32u) : 0);
     const QString context = currentMapContextKey();
     const bool contextChanged = context != m_minimapSourceContextKey;
     if(contextChanged)
@@ -3305,11 +3313,9 @@ void MainWindow::refreshViewportMinimap()
        || !CLandscape::getInstance()->isMprLoad())
         return;
     m_minimapCaptureRunning = true;
-    const bool collectionCapture = m_workspaceIdentityKind.compare(
-        "collection", Qt::CaseInsensitive) == 0
-        && !m_currentCollectionPath.isEmpty();
+    const bool includeLoadedStaticGeometry = !m_pView->mobs().isEmpty();
     const SMinimapSceneCaptureResult capture =
-        m_pView->captureMinimapScene(collectionCapture);
+        m_pView->captureMinimapScene(includeLoadedStaticGeometry);
     if(!capture.bake.success)
     {
         m_generatedMinimapMmp.clear();
@@ -3332,7 +3338,7 @@ void MainWindow::refreshViewportMinimap()
     m_generatedMinimapMmp = mmp;
     m_generatedMinimapContextKey = currentMapContextKey();
     m_viewportMinimap->setGeneratedPreview(
-        capture.bake.gameImage, capture.bake.incomplete,
+        capture.bake.reviewImage, capture.bake.incomplete,
         tr("Generated: %1 static objects; %2 units excluded")
             .arg(capture.staticObjectCount).arg(capture.excludedDynamicUnitCount));
     m_viewportMinimap->show();
@@ -3375,12 +3381,10 @@ void MainWindow::generateMinimap()
             tr("Load an MPR or collection before exporting a minimap."));
         return;
     }
-    const bool collectionCapture = m_workspaceIdentityKind.compare(
-        "collection", Qt::CaseInsensitive) == 0
-        && !m_currentCollectionPath.isEmpty();
+    const bool includeLoadedStaticGeometry = !m_pView->mobs().isEmpty();
     QApplication::setOverrideCursor(Qt::WaitCursor);
     const SMinimapSceneCaptureResult capture =
-        m_pView->captureMinimapScene(collectionCapture);
+        m_pView->captureMinimapScene(includeLoadedStaticGeometry);
     QApplication::restoreOverrideCursor();
     if(!capture.bake.success)
     {

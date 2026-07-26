@@ -92,7 +92,7 @@ struct SMinimapSceneCaptureResult
     int sectorHeight{0};
     int staticObjectCount{0};
     int excludedDynamicUnitCount{0};
-    bool collectionStaticGeometryIncluded{false};
+    bool staticGeometrySourcePresent{false};
     QString framingDescription;
     QString orientationDescription;
 };
@@ -215,7 +215,7 @@ public:
     bool overridesWorldTime() const;
     double effectiveWorldTimeHours() const;
     SMinimapSceneCaptureResult captureMinimapScene(
-        bool includeCollectionStaticGeometry);
+        bool includeLoadedStaticGeometry);
     void addLogicPoint(bool bLookPoint = false);
     void copySelectedIDsToClipboard();
     void changeCurrentMob(CMob* pMob);

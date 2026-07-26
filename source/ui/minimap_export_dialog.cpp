@@ -1,7 +1,9 @@
 #include "minimap_export_dialog.h"
 
 #include <QtWidgets>
+#include <QtConcurrent>
 #include <QCryptographicHash>
+#include <QFutureWatcher>
 
 #include "mmp_codec.h"
 #include "res_archive_document.h"
@@ -73,6 +75,45 @@ private:
     bool m_userSized{false};
 };
 
+struct SResInspection
+{
+    bool success{false};
+    bool memberExists{false};
+    QString error;
+};
+
+template<typename Result, typename Function>
+Result runAnimatedResOperation(QWidget* parent, const QString& title,
+                               const QString& label, Function function)
+{
+    QProgressDialog progress(label, QString(), 0, 100, parent);
+    progress.setWindowTitle(title);
+    progress.setCancelButton(nullptr);
+    progress.setWindowModality(Qt::ApplicationModal);
+    progress.setMinimumDuration(0);
+    progress.setAutoClose(false);
+    progress.setValue(0);
+
+    QFutureWatcher<Result> watcher;
+    QEventLoop loop;
+    QTimer animation;
+    animation.setInterval(70);
+    QObject::connect(&animation, &QTimer::timeout, &progress, [&progress]() {
+        progress.setValue(qMin(94, progress.value() + 1));
+    });
+    QObject::connect(&watcher, &QFutureWatcher<Result>::finished,
+                     &loop, &QEventLoop::quit);
+    watcher.setFuture(QtConcurrent::run(function));
+    progress.show();
+    animation.start();
+    loop.exec();
+    animation.stop();
+    progress.setValue(100);
+    QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+    progress.close();
+    return watcher.result();
+}
+
 QString normalizedMemberName(QString name)
 {
     name = name.trimmed();
@@ -101,8 +142,8 @@ CMinimapExportDialog::CMinimapExportDialog(
     QLabel* summary = new QLabel(this);
     summary->setWordWrap(true);
     summary->setText(capture.bake.incomplete
-        ? tr("Incomplete MPR-only capture. Terrain and overlays are included, but static collection geometry is absent. Load a collection for a production minimap.")
-        : tr("Complete collection capture. Terrain, overlays, and %1 static objects are included; %2 dynamic units were excluded.")
+        ? tr("Incomplete MPR-only capture. Terrain and overlays are included, but no MOB source is loaded. Load a MOB for a production minimap.")
+        : tr("Complete MPR + MOB capture. Terrain, overlays, and %1 static objects are included; %2 dynamic units were excluded.")
             .arg(capture.staticObjectCount).arg(capture.excludedDynamicUnitCount));
     summary->setStyleSheet(capture.bake.incomplete
         ? "QLabel { color: #e6a23c; font-weight: 600; }" : QString());
@@ -123,7 +164,7 @@ CMinimapExportDialog::CMinimapExportDialog(
     root->addWidget(preview, 1);
     QHBoxLayout* previewControls = new QHBoxLayout;
     QLabel* previewHint = new QLabel(
-        tr("256 x 256 game texture — mouse wheel zooms; drag to pan"), this);
+        tr("256 x 256 game texture - mouse wheel zooms; drag to pan"), this);
     QPushButton* fitPreview = new QPushButton(tr("Fit"), this);
     QPushButton* actualPreview = new QPushButton(tr("100%"), this);
     previewControls->addWidget(previewHint, 1);
@@ -261,37 +302,37 @@ void CMinimapExportDialog::exportTexture()
                 QMessageBox::Yes | QMessageBox::No, QMessageBox::No)
                 != QMessageBox::Yes)
             return;
-        QProgressDialog inspectionProgress(
-            tr("Inspecting the selected RES for texture-name conflicts..."),
-            QString(), 0, 0, this);
-        inspectionProgress.setWindowTitle(tr("Inspecting destination RES"));
-        inspectionProgress.setCancelButton(nullptr);
-        inspectionProgress.setWindowModality(Qt::ApplicationModal);
-        inspectionProgress.setMinimumDuration(0);
-        inspectionProgress.setAutoClose(false);
-        inspectionProgress.show();
-        QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
-        QFile input(path);
-        QByteArray bytes;
-        if(!input.open(QIODevice::ReadOnly))
+        const SResInspection inspection = runAnimatedResOperation<SResInspection>(
+            this, tr("Inspecting destination RES"),
+            tr("Reading and validating the selected RES..."),
+            [path, member]() {
+                SResInspection result;
+                QFile input(path);
+                if(!input.open(QIODevice::ReadOnly))
+                {
+                    result.error = input.errorString();
+                    return result;
+                }
+                CResArchiveDocument archive;
+                QStringList errors;
+                if(!archive.loadBytes(input.readAll(), path, &errors))
+                {
+                    result.error = errors.join(" | ");
+                    return result;
+                }
+                for(const SResArchiveMember& existing : archive.members())
+                    result.memberExists = result.memberExists
+                        || existing.name.compare(member, Qt::CaseInsensitive) == 0;
+                result.success = true;
+                return result;
+            });
+        if(!inspection.success)
         {
-            m_status->setText(tr("Could not inspect destination: %1").arg(input.errorString()));
+            m_status->setText(tr("Could not inspect destination: %1")
+                              .arg(inspection.error));
             return;
         }
-        bytes = input.readAll();
-        CResArchiveDocument archive;
-        QStringList errors;
-        if(!archive.loadBytes(bytes, path, &errors))
-        {
-            m_status->setText(tr("Destination is not a valid RES: %1").arg(errors.join(" | ")));
-            return;
-        }
-        bool memberExists = false;
-        for(const SResArchiveMember& existing : archive.members())
-            memberExists = memberExists
-                || existing.name.compare(member, Qt::CaseInsensitive) == 0;
-        inspectionProgress.close();
-        if(memberExists)
+        if(inspection.memberExists)
         {
             const auto answer = QMessageBox::warning(this, tr("Replace minimap texture?"),
                 tr("%1 already exists in %2. Replace that member after creating a verified backup?")
@@ -302,22 +343,16 @@ void CMinimapExportDialog::exportTexture()
         }
     }
 
-    QProgressDialog progress(tr("Validating and rebuilding the destination RES..."),
-                             QString(), 0, 0, this);
-    progress.setWindowTitle(tr("Exporting minimap texture"));
-    progress.setCancelButton(nullptr);
-    progress.setWindowModality(Qt::ApplicationModal);
-    progress.setMinimumDuration(0);
-    progress.setAutoClose(false);
-    progress.show();
-    QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
     SResTextureExportRequest request;
     request.destination = QFileInfo(path);
     request.memberName = member;
     request.mmpPayload = mmp;
     request.conflictPolicy = policy;
-    const SResTextureExportResult result = exportMmpToRes(request);
-    progress.close();
+    const SResTextureExportResult result =
+        runAnimatedResOperation<SResTextureExportResult>(
+            this, tr("Exporting minimap texture"),
+            tr("Backing up, rebuilding, and validating the destination RES..."),
+            [request]() { return exportMmpToRes(request); });
     if(!result.success)
     {
         m_status->setStyleSheet("color: #b00020;");

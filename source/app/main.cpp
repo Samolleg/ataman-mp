@@ -1058,6 +1058,25 @@ int runHeadlessCommand(QApplication& app)
             viewportMinimap.usesGeneratedPreview()
             && viewportMinimap.hasGeneratedPreview()
             && viewportMinimap.hasEmbeddedPreview();
+        QToolButton* minimapSmaller = viewportMinimap.findChild<QToolButton*>(
+            "viewportMinimapSmaller");
+        QToolButton* minimapLarger = viewportMinimap.findChild<QToolButton*>(
+            "viewportMinimapLarger");
+        const int originalMinimapSizeLevel = viewportMinimap.sizeLevel();
+        while(minimapSmaller && minimapSmaller->isEnabled())
+            minimapSmaller->click();
+        const QSize minimapSmallSize = viewportMinimap.size();
+        if(minimapLarger) minimapLarger->click();
+        const QSize minimapMediumSize = viewportMinimap.size();
+        if(minimapLarger) minimapLarger->click();
+        const QSize minimapLargeSize = viewportMinimap.size();
+        const bool viewportMinimapHasThreeSizes = minimapSmaller && minimapLarger
+            && minimapSmallSize.width() < minimapMediumSize.width()
+            && minimapMediumSize.width() < minimapLargeSize.width()
+            && !minimapLarger->isEnabled();
+        while(minimapSmaller
+              && viewportMinimap.sizeLevel() > originalMinimapSizeLevel)
+            minimapSmaller->click();
         bool semanticAtlasReviewRequested = false;
         QObject::connect(&landscapeTools, &CLandscapeTools::atlasProfileReviewRequested,
                          [&semanticAtlasReviewRequested]() {
@@ -1374,6 +1393,7 @@ int runHeadlessCommand(QApplication& app)
                 && landscapeVisibilityControlsWork
                 && embeddedMinimapDefaultsWhenAvailable
                 && generatedMinimapCanBeSelected
+                && viewportMinimapHasThreeSizes
                 && semanticAtlasReviewButtonAvailable
                 && logicPointUndoAtomic && logicPointRedoAtomic
                 && viewportBackgroundConsumesClick && viewportChildConsumesClick
@@ -1459,6 +1479,7 @@ int runHeadlessCommand(QApplication& app)
                << " embeddedMinimapDefaultsWhenAvailable="
                << embeddedMinimapDefaultsWhenAvailable
                << " generatedMinimapCanBeSelected=" << generatedMinimapCanBeSelected
+               << " viewportMinimapHasThreeSizes=" << viewportMinimapHasThreeSizes
                << " semanticAtlasReviewButtonAvailable=" << semanticAtlasReviewButtonAvailable
                << " logicPointUndoAtomic=" << logicPointUndoAtomic
                << " logicPointRedoAtomic=" << logicPointRedoAtomic

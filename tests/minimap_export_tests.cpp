@@ -50,14 +50,16 @@ private slots:
 
 void MinimapExportTests::normalizesOrientationAndFramesWholeMpr()
 {
-    QCOMPARE(minimapWorldToReviewPixel(QPointF(0, 0), 2, 1), QPointF(0, 128));
-    QCOMPARE(minimapWorldToReviewPixel(QPointF(64, 32), 2, 1), QPointF(256, 0));
+    QCOMPARE(minimapWorldToReviewPixel(QPointF(0, 0), 2, 1), QPointF(0, 0));
+    QCOMPARE(minimapWorldToReviewPixel(QPointF(64, 32), 2, 1), QPointF(256, 128));
+    QCOMPARE(minimapGameContentRect(11, 9), QRect(0, 0, 256, 209));
+    QCOMPARE(minimapGameContentRect(9, 11), QRect(0, 0, 209, 256));
 
     QImage source(128, 128, QImage::Format_ARGB32);
     source.fill(Qt::black);
-    source.setPixelColor(0, 0, Qt::red); // renderer row for world south-west
+    source.setPixelColor(0, 0, Qt::red); // renderer top edge is world north
     SMinimapBakeOptions options;
-    options.sourceOrientation = EMinimapCaptureOrientation::PositiveYDown;
+    options.sourceOrientation = EMinimapCaptureOrientation::PositiveYUp;
     const auto result = bakeMinimapLayers(1, 1,
         {{EMinimapBakeLayerKind::Terrain, "terrain", source}}, options);
     QVERIFY(result.success);
@@ -72,10 +74,12 @@ void MinimapExportTests::composesTerrainOverlayAndStaticInOrder()
     overlay.setPixelColor(5, 6, QColor(0, 0, 255, 255));
     QImage geometry = solid(size, Qt::transparent);
     geometry.setPixelColor(5, 6, QColor(255, 0, 0, 255));
+    SMinimapBakeOptions options;
+    options.sourceOrientation = EMinimapCaptureOrientation::PositiveYDown;
     const auto result = bakeMinimapLayers(1, 1, {
         {EMinimapBakeLayerKind::Terrain, "terrain", solid(size, Qt::green)},
         {EMinimapBakeLayerKind::Overlay, "overlays", overlay},
-        {EMinimapBakeLayerKind::StaticGeometry, "collection mobs", geometry}});
+        {EMinimapBakeLayerKind::StaticGeometry, "collection mobs", geometry}}, options);
     QVERIFY(result.success);
     QCOMPARE(result.reviewImage.pixelColor(5, 6), QColor(Qt::red));
     QVERIFY(!result.incomplete);
@@ -93,6 +97,12 @@ void MinimapExportTests::bakes128PixelsPerSectorAndExcludesDynamic()
     QVERIFY2(first.success, qPrintable(first.error));
     QCOMPARE(first.reviewImage.size(), size);
     QCOMPARE(first.gameImage.size(), QSize(256, 256));
+    QCOMPARE(first.gameContentRect, QRect(0, 0, 256, 128));
+    QCOMPARE(first.gameImage.pixelColor(0, 200).alpha(), 0);
+    QCOMPARE(first.gameImage.pixelColor(0, 0),
+             first.reviewImage.pixelColor(0, 0));
+    QCOMPARE(first.gameImage.pixelColor(255, 127),
+             first.reviewImage.pixelColor(255, 127));
     QCOMPARE(first.reviewImage, second.reviewImage);
     QVERIFY(first.reviewImage.pixelColor(0, 0).blue() == 0);
     QVERIFY(!first.incomplete);

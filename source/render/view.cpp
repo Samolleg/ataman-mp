@@ -4781,7 +4781,7 @@ void CView::draw()
     const COptBool* mipmappingOption = m_pSettings
         ? dynamic_cast<const COptBool*>(m_pSettings->opt("renderTextureMipmapping")) : nullptr;
     CTextureList::getInstance()->setTerrainMipmappingEnabled(
-        !mipmappingOption || mipmappingOption->value());
+        !m_minimapCaptureActive && (!mipmappingOption || mipmappingOption->value()));
     AnimationFrameContext::instance().beginFrame(cameraPosition,
         m_minimapCaptureActive ? 0 : QDateTime::currentMSecsSinceEpoch(),
         animationEnabled);
@@ -4809,15 +4809,17 @@ void CView::draw()
         ? dynamic_cast<const COptInt*>(m_pSettings->opt("renderLightingMode")) : nullptr;
     const int requestedLightingMode = qBound(0,
         lightingModeOption ? lightingModeOption->value() : 2, 2);
-    const int lightingMode = m_openGlesCompatibility
-        ? qMin(requestedLightingMode, 1) : requestedLightingMode;
+    const int lightingMode = m_minimapCaptureActive ? 0
+        : (m_openGlesCompatibility ? qMin(requestedLightingMode, 1)
+                                   : requestedLightingMode);
     const bool environmentEnabled = lightingMode == 2;
     // The viewport lighting-model selector owns environment activation. Keep
     // the resource sky in Full environment and out of the compatibility
     // modes instead of exposing a contradictory second Render setting.
     const bool skyEnabled = environmentEnabled && !m_minimapCaptureActive;
     const bool fogEnabled = !m_minimapCaptureActive && renderBool("renderFog", true);
-    const bool sceneLightsEnabled = renderBool("renderSceneLights", true);
+    const bool sceneLightsEnabled = !m_minimapCaptureActive
+        && renderBool("renderSceneLights", true);
     const COptInt* shadowQualityOption = m_pSettings
         ? dynamic_cast<const COptInt*>(m_pSettings->opt("renderShadowQuality")) : nullptr;
     const int shadowQuality = qBound(0,
@@ -5253,13 +5255,13 @@ void CView::draw()
 }
 
 SMinimapSceneCaptureResult CView::captureMinimapScene(
-    bool includeCollectionStaticGeometry)
+    bool includeLoadedStaticGeometry)
 {
     SMinimapSceneCaptureResult result;
     result.framingDescription = tr(
-        "Full MPR bounds, 128 pixels per 32-world-unit sector; no crop or padding");
+        "Full MPR bounds at 128 pixels per sector; square game texture uses the larger #maps dimension without stretching");
     result.orientationDescription = tr(
-        "Orthographic top-down: world +X is right and world +Y is up");
+        "Orthographic game orientation: world +X is right and world +Y is down");
     if(!m_pLand || !m_pLand->isMprLoad())
     {
         result.bake.error = tr("Load an MPR before generating a minimap.");
@@ -5306,7 +5308,7 @@ SMinimapSceneCaptureResult CView::captureMinimapScene(
             if(!isMinimapStaticGeometry(node))
                 continue;
             ++result.staticObjectCount;
-            if(includeCollectionStaticGeometry
+            if(includeLoadedStaticGeometry
                && node->nodeState() != ENodeState::eDraw)
             {
                 restoredStates.insert(node, node->nodeState());
@@ -5360,7 +5362,7 @@ SMinimapSceneCaptureResult CView::captureMinimapScene(
                        -worldHeight * 0.5f, worldHeight * 0.5f,
                        1.0f, 8192.0f);
     m_minimapCaptureActive = true;
-    m_minimapCaptureIncludeStaticGeometry = includeCollectionStaticGeometry;
+    m_minimapCaptureIncludeStaticGeometry = includeLoadedStaticGeometry;
     m_landscapeVisible = true;
     m_bDrawLand = true;
     m_bDrawWater = true;
@@ -5386,15 +5388,15 @@ SMinimapSceneCaptureResult CView::captureMinimapScene(
 
     QVector<SMinimapBakeLayer> layers;
     layers.append({EMinimapBakeLayerKind::Terrain,
-                   tr("loaded MPR terrain, overlays, and fixed noon lighting"), captured});
-    result.collectionStaticGeometryIncluded = includeCollectionStaticGeometry
-        && result.staticObjectCount > 0;
-    if(result.collectionStaticGeometryIncluded)
+                   tr("loaded MPR terrain and overlays with deterministic unlit capture"), captured});
+    result.staticGeometrySourcePresent = includeLoadedStaticGeometry
+        && !m_aMob.isEmpty();
+    if(result.staticGeometrySourcePresent)
     {
         QImage marker(reviewSize, QImage::Format_ARGB32_Premultiplied);
         marker.fill(Qt::transparent);
         layers.append({EMinimapBakeLayerKind::StaticGeometry,
-                       tr("%1 static object(s) from active collection")
+                       tr("%1 static object(s) from loaded MOB source(s)")
                            .arg(result.staticObjectCount), marker});
     }
     result.bake = bakeMinimapLayers(result.sectorWidth, result.sectorHeight, layers);

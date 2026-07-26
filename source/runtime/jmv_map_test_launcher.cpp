@@ -2279,6 +2279,14 @@ bool CJmvMapTestLauncher::hotReload(const SJmvMapTestLaunchInput& input,
     const QString payloadMob = QDir(reloadRoot).filePath("map.mob");
     const QString payloadGrp = graphSource.usesExternalGraph()
         ? QDir(reloadRoot).filePath("map.grp") : QString();
+    const bool hasGeneratedMinimap = !input.temporaryMinimapMmp.isEmpty();
+    const QString minimapTextureName = hasGeneratedMinimap
+        ? temporaryMinimapRuntimeTextureName(
+              input.temporaryMinimapMmp,
+              m_runId + ":" + QString::number(sequence))
+        : input.mapEntry.minimapTexture.trimmed();
+    const QString minimapResourcePath = hasGeneratedMinimap
+        ? QDir(reloadRoot).filePath("minimap.res") : QString();
     QJsonObject isolatedSaves = m_manifest.value("isolatedSaves").toObject();
     QJsonArray saveGenerations = isolatedSaves.value("generations").toArray();
     QJsonObject stagedGeneration;
@@ -2313,6 +2321,23 @@ bool CJmvMapTestLauncher::hotReload(const SJmvMapTestLaunchInput& input,
     if(graphSource.usesExternalGraph()
        && !atomicWrite(payloadGrp, graphSource.externalData, error))
         return false;
+    if(hasGeneratedMinimap)
+    {
+        QByteArray minimapArchive;
+        QStringList minimapErrors;
+        if(!buildSyntheticMapTextureArchive(minimapTextureName,
+                                            input.temporaryMinimapMmp,
+                                            &minimapArchive, &minimapErrors)
+           || !atomicWrite(minimapResourcePath, minimapArchive, error)
+           || fileSha256(minimapResourcePath).compare(
+                  sha256(minimapArchive), Qt::CaseInsensitive) != 0)
+        {
+            if(error && error->isEmpty())
+                *error = "The hot-reload minimap RES failed staged validation: "
+                    + minimapErrors.join(" | ");
+            return false;
+        }
+    }
     if(graphSource.usesExternalGraph()
        && fileSha256(payloadGrp).compare(graphSource.sha256, Qt::CaseInsensitive) != 0)
     {
@@ -2395,6 +2420,10 @@ bool CJmvMapTestLauncher::hotReload(const SJmvMapTestLaunchInput& input,
     request.bootstrapMobPath = bootstrapPath;
     request.bootstrapMobSha256 = bootstrapPath.isEmpty()
         ? QString() : fileSha256(bootstrapPath);
+    request.minimapTextureName = minimapTextureName;
+    request.minimapResourcePath = minimapResourcePath;
+    request.minimapResourceSha256 = minimapResourcePath.isEmpty()
+        ? QString() : fileSha256(minimapResourcePath);
     request.savePath = generationSavePath;
     // Position preservation requires a verified runtime position provider.
     // Until that provider exists, use normal entrance/custom-spawn bootstrap.
@@ -2528,6 +2557,9 @@ bool CJmvMapTestLauncher::hotReload(const SJmvMapTestLaunchInput& input,
         graphAudit.insert("shadowedExternalPath", graphSource.shadowedExternalPath);
     audit.insert("aiGraph", graphAudit);
     audit.insert("auditPath", auditPath);
+    audit.insert("minimapTextureName", minimapTextureName);
+    audit.insert("minimapResourcePath", minimapResourcePath);
+    audit.insert("minimapResourceSha256", request.minimapResourceSha256);
     audit.insert("queuedUtc", QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
     reloads.append(audit);
     m_manifest.insert("hotReloads", reloads);
@@ -2538,6 +2570,11 @@ bool CJmvMapTestLauncher::hotReload(const SJmvMapTestLaunchInput& input,
     writeManifest("running");
     appendRunLog(QString("Queued JMV hot reload sequence=%1 generation=%2 zone=%3 exit=%4")
                  .arg(sequence).arg(generation).arg(request.zoneId).arg(request.entranceId));
+    appendRunLog(QString("Hot reload generation=%1 minimap=%2 resource=%3")
+                 .arg(generation).arg(
+                     minimapTextureName.isEmpty() ? "unchanged" : minimapTextureName,
+                     minimapResourcePath.isEmpty()
+                         ? "active-profile" : QDir::toNativeSeparators(minimapResourcePath)));
     if(graphSource.usesExternalGraph())
         appendRunLog(QString("Hot reload generation=%1 staged external AI graph source=%2 sha256=%3")
                      .arg(generation)

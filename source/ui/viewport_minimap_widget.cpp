@@ -2,6 +2,7 @@
 
 #include <QtWidgets>
 #include <QDir>
+#include <QSettings>
 
 namespace {
 class CScaledImageLabel : public QLabel
@@ -64,12 +65,22 @@ CViewportMinimapWidget::CViewportMinimapWidget(QWidget* parent)
     m_export = new QToolButton(this);
     m_export->setText(tr("Export..."));
     m_export->setToolTip(tr("Review and export the current generated minimap"));
+    m_smaller = new QToolButton(this);
+    m_smaller->setObjectName("viewportMinimapSmaller");
+    m_smaller->setText(tr("-"));
+    m_smaller->setToolTip(tr("Use a smaller minimap"));
+    m_larger = new QToolButton(this);
+    m_larger->setObjectName("viewportMinimapLarger");
+    m_larger->setText(tr("+"));
+    m_larger->setToolTip(tr("Use a larger minimap"));
     m_expand = new QToolButton(this);
-    m_expand->setText(QString::fromUtf8("\xE2\x88\x92"));
+    m_expand->setText(QString::fromUtf8("\xE2\x96\x81"));
     m_expand->setToolTip(tr("Minimize minimap"));
     header->addWidget(m_title);
     header->addStretch(1);
     header->addWidget(m_export);
+    header->addWidget(m_smaller);
+    header->addWidget(m_larger);
     header->addWidget(m_expand);
     root->addLayout(header);
 
@@ -89,6 +100,12 @@ CViewportMinimapWidget::CViewportMinimapWidget(QWidget* parent)
 
     connect(m_export, &QToolButton::clicked,
             this, &CViewportMinimapWidget::exportRequested);
+    connect(m_smaller, &QToolButton::clicked, this, [this]() {
+        setSizeLevel(m_sizeLevel - 1);
+    });
+    connect(m_larger, &QToolButton::clicked, this, [this]() {
+        setSizeLevel(m_sizeLevel + 1);
+    });
     connect(m_expand, &QToolButton::clicked, this, [this]() {
         setExpanded(!m_expanded);
     });
@@ -98,7 +115,16 @@ CViewportMinimapWidget::CViewportMinimapWidget(QWidget* parent)
         emit sourceModeChanged(usesGeneratedPreview());
     });
     updateSourceChoices(false);
+    m_sizeLevel = qBound(0, QSettings().value(
+        "ui/viewportMinimapSizeLevel", 0).toInt(), 2);
     setExpanded(true);
+}
+
+void CViewportMinimapWidget::setMapDimensions(int sectorWidth, int sectorHeight)
+{
+    m_sectorWidth = qMax(0, sectorWidth);
+    m_sectorHeight = qMax(0, sectorHeight);
+    updateDisplayedImage();
 }
 
 void CViewportMinimapWidget::setGeneratedPreview(
@@ -174,16 +200,16 @@ void CViewportMinimapWidget::updateDisplayedImage()
     CScaledImageLabel* image = static_cast<CScaledImageLabel*>(m_image);
     if(usesGeneratedPreview() && !m_generated.isNull())
     {
-        image->setImage(m_generated);
+        image->setImage(visibleMapImage(m_generated));
         m_detail->setText(m_generatedIncomplete
-            ? tr("Generated (MPR-only: static collection geometry is missing)")
+            ? tr("Generated (MPR-only: no MOB source is loaded)")
             : (m_generatedDetail.isEmpty() ? tr("Generated preview")
                                             : m_generatedDetail));
         m_detail->setStyleSheet(m_generatedIncomplete ? "color: #f0b35a;" : QString());
     }
     else if(m_source->currentData().toString() == "embedded" && !m_embedded.isNull())
     {
-        image->setImage(m_embedded);
+        image->setImage(visibleMapImage(m_embedded));
         m_detail->setText(tr("Embedded profile texture\n%1")
                           .arg(QDir::toNativeSeparators(m_embeddedSource)));
         m_detail->setStyleSheet(QString());
@@ -203,11 +229,38 @@ void CViewportMinimapWidget::setExpanded(bool expanded)
     m_expanded = expanded;
     m_title->setVisible(expanded);
     m_export->setVisible(expanded);
+    m_smaller->setVisible(expanded);
+    m_larger->setVisible(expanded);
     m_source->setVisible(expanded);
     m_detail->setVisible(expanded);
-    m_expand->setText(expanded ? QString::fromUtf8("\xE2\x88\x92")
+    m_expand->setText(expanded ? QString::fromUtf8("\xE2\x96\x81")
                                : QString::fromUtf8("\xE2\x96\xA1"));
     m_expand->setToolTip(expanded ? tr("Minimize minimap") : tr("Expand minimap"));
-    setFixedSize(expanded ? QSize(270, 310) : QSize(78, 78));
+    setSizeLevel(m_sizeLevel);
+}
+
+void CViewportMinimapWidget::setSizeLevel(int level)
+{
+    m_sizeLevel = qBound(0, level, 2);
+    m_smaller->setEnabled(m_sizeLevel > 0);
+    m_larger->setEnabled(m_sizeLevel < 2);
+    static const QSize expandedSizes[] = {
+        QSize(270, 310), QSize(390, 430), QSize(520, 560)
+    };
+    setFixedSize(m_expanded ? expandedSizes[m_sizeLevel] : QSize(78, 78));
+    QSettings().setValue("ui/viewportMinimapSizeLevel", m_sizeLevel);
     emit sizeModeChanged();
+}
+
+QImage CViewportMinimapWidget::visibleMapImage(const QImage& image) const
+{
+    if(image.isNull() || m_sectorWidth <= 0 || m_sectorHeight <= 0
+       || image.width() != image.height() || m_sectorWidth == m_sectorHeight)
+        return image;
+    const int largest = qMax(m_sectorWidth, m_sectorHeight);
+    const int width = qBound(1,
+        qRound(double(image.width()) * m_sectorWidth / largest), image.width());
+    const int height = qBound(1,
+        qRound(double(image.height()) * m_sectorHeight / largest), image.height());
+    return image.copy(0, 0, width, height);
 }
