@@ -44,6 +44,7 @@
 #include "resource_profile.h"
 #include "resourcemanager.h"
 #include "layout_components/tablemanager.h"
+#include "layout_components/viewport_widget.h"
 #include "ui/landscape_tools.h"
 #include "ui/bodypartedit_form.h"
 #include "window_lifecycle.h"
@@ -59,6 +60,19 @@
 #endif
 
 namespace {
+class CMousePressProbe final: public QWidget
+{
+public:
+    int presses = 0;
+
+protected:
+    void mousePressEvent(QMouseEvent* event) override
+    {
+        ++presses;
+        event->accept();
+    }
+};
+
 class CStartupSplash final: public QWidget
 {
 public:
@@ -1243,6 +1257,29 @@ int runHeadlessCommand(QApplication& app)
             && sessionMapZoneId == "zone7";
         sessionManager->reset();
 
+        CMousePressProbe viewportProbe;
+        viewportProbe.resize(240, 160);
+        CViewportWidget viewportWidget(&viewportProbe);
+        viewportWidget.setGeometry(20, 20, 180, 100);
+        QLabel viewportLabel(QStringLiteral("Viewport control"), &viewportWidget);
+        viewportLabel.setGeometry(10, 10, 120, 24);
+
+        QMouseEvent viewportBackgroundPress(QEvent::MouseButtonPress, QPointF(150, 70),
+                                            Qt::LeftButton, Qt::LeftButton,
+                                            Qt::NoModifier);
+        viewportBackgroundPress.setAccepted(false);
+        QApplication::sendEvent(&viewportWidget, &viewportBackgroundPress);
+        const bool viewportBackgroundConsumesClick = viewportBackgroundPress.isAccepted()
+                && viewportProbe.presses == 0;
+
+        QMouseEvent viewportChildPress(QEvent::MouseButtonPress, QPointF(5, 5),
+                                       Qt::LeftButton, Qt::LeftButton,
+                                       Qt::NoModifier);
+        viewportChildPress.setAccepted(false);
+        QApplication::sendEvent(&viewportLabel, &viewportChildPress);
+        const bool viewportChildConsumesClick = viewportChildPress.isAccepted()
+                && viewportProbe.presses == 0;
+
         const bool passed = prefixesOnly && valueStable && focusCancel && escapeCancel
                 && enterCommit && clickCommit && settingsTabsUsable && settingsShortcutsPersist
                 && autosaveSettingsPersist && settingsApplySignal && autosaveLiveReconfigure
@@ -1288,7 +1325,8 @@ int runHeadlessCommand(QApplication& app)
                 && underwaterFamiliesCanBeShown
                 && landscapeLayersVisibleByDefault
                 && landscapeVisibilityControlsWork
-                && logicPointUndoAtomic && logicPointRedoAtomic;
+                && logicPointUndoAtomic && logicPointRedoAtomic
+                && viewportBackgroundConsumesClick && viewportChildConsumesClick;
         QTextStream output(stdout);
         output << "asset-picker prefixes=" << completions.join(",") << "\n"
                << "prefixesOnly=" << prefixesOnly
@@ -1368,7 +1406,9 @@ int runHeadlessCommand(QApplication& app)
                << " landscapeLayersVisibleByDefault=" << landscapeLayersVisibleByDefault
                << " landscapeVisibilityControlsWork=" << landscapeVisibilityControlsWork
                << " logicPointUndoAtomic=" << logicPointUndoAtomic
-               << " logicPointRedoAtomic=" << logicPointRedoAtomic << "\n"
+               << " logicPointRedoAtomic=" << logicPointRedoAtomic
+               << " viewportBackgroundConsumesClick=" << viewportBackgroundConsumesClick
+               << " viewportChildConsumesClick=" << viewportChildConsumesClick << "\n"
                << (passed ? "PASS" : "FAIL")
                << ": widget interaction and secondary-window lifecycle checks\n";
         output.flush();

@@ -52,6 +52,7 @@
 #include "mob\mob_parameters.h"
 #include "layout_components/progressview.h"
 #include "layout_components/tablemanager.h"
+#include "layout_components/viewport_widget.h"
 #include "operationmanager.h"
 #include "ogl_utils.h"
 #include "scene.h"
@@ -981,7 +982,7 @@ void CView::initEnvironmentPreviewWidget()
 {
     if(m_environmentPreviewWidget || !m_pSettings)
         return;
-    m_environmentPreviewWidget = new QFrame(this);
+    m_environmentPreviewWidget = new CViewportWidget(this);
     m_environmentPreviewWidget->setObjectName("environmentPreviewWidget");
     m_environmentPreviewWidget->setMinimumWidth(220);
     m_environmentPreviewWidget->setFrameShape(QFrame::StyledPanel);
@@ -1012,7 +1013,7 @@ void CView::initEnvironmentPreviewWidget()
     m_environmentPreviewMode->addItem(tr("Full environment"), 2);
     body->addWidget(m_environmentPreviewMode);
 
-    m_timeOfDayWidget = new QFrame(this);
+    m_timeOfDayWidget = new CViewportWidget(this);
     m_timeOfDayWidget->setObjectName("timeOfDayWidget");
     m_timeOfDayWidget->setMinimumWidth(220);
     m_timeOfDayWidget->setFrameShape(QFrame::StyledPanel);
@@ -1107,7 +1108,7 @@ void CView::initAiGraphPreviewWidget()
 {
     if(m_aiGraphPreviewWidget)
         return;
-    m_aiGraphPreviewWidget = new QFrame(this);
+    m_aiGraphPreviewWidget = new CViewportWidget(this);
     m_aiGraphPreviewWidget->setObjectName(QStringLiteral("aiGraphPreviewWidget"));
     m_aiGraphPreviewWidget->setFixedWidth(520);
     m_aiGraphPreviewWidget->setFrameShape(QFrame::StyledPanel);
