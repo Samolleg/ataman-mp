@@ -2357,6 +2357,12 @@ void EnduranceDocumentTests::terrainDiagnosticsArePreApplyAndPolicyExplicit()
     QCOMPARE(saturated.deltas.size(), 1);
     QVERIFY(saturated.requiresMaxZDecision());
 
+    const STerrainHeightCommand saturatedBrush = terrain.makeRaiseLower(
+        brush, -70000.0f, true);
+    QCOMPARE(saturatedBrush.deltas.size(), 1);
+    QVERIFY(!saturatedBrush.requiresMaxZDecision());
+    QCOMPARE(saturatedBrush.deltas.front().after, quint16(0));
+
     STerrainObjectHeightProbe object;
     object.identity = "synthetic object 7";
     object.positionX = 10.0f;
@@ -4855,6 +4861,45 @@ void EnduranceDocumentTests::overlaySculptSynchronizesSectorSeam()
     const int leftVertex = overlayBase + (7 * 33 + 32) * 8;
     const int rightVertex = overlayBase + (7 * 33) * 8;
     QCOMPARE(left.mid(leftVertex, 8), right.mid(rightVertex, 8));
+
+    // Shipped maps can retain two active overlay sheets that touch the same
+    // SEC-boundary coordinate with different heights or offsets. Sculpt the
+    // sheet beneath the brush instead of rejecting the complete stamp or
+    // silently welding the unrelated sheet to it.
+    SOverlaySurfaceCommand introduceConflict;
+    introduceConflict.description = QStringLiteral("synthetic overlay-sheet conflict");
+    SOverlaySectorDelta conflictDelta;
+    conflictDelta.sectorX = 1;
+    conflictDelta.sectorY = 0;
+    conflictDelta.beforePayload = terrain.sectorPayload(1, 0);
+    conflictDelta.afterPayload = conflictDelta.beforePayload;
+    const quint16 rightBefore = qFromLittleEndian<quint16>(
+        reinterpret_cast<const uchar*>(conflictDelta.afterPayload.constData()
+                                       + rightVertex + 2));
+    qToLittleEndian<quint16>(quint16(rightBefore + 1000),
+        reinterpret_cast<uchar*>(conflictDelta.afterPayload.data()
+                                 + rightVertex + 2));
+    introduceConflict.sectors.append(conflictDelta);
+    QVERIFY(terrain.apply(introduceConflict, true, &report));
+
+    brush.centerX = 31.5f; // Prefer the left connected sheet at the boundary.
+    CValidationReport conflictSculptReport;
+    const SOverlaySurfaceCommand conflictSculpt = terrain.makeOverlayRaiseLower(
+        brush, 200.0f, &conflictSculptReport, true);
+    QVERIFY2(!conflictSculpt.isEmpty(), qPrintable(conflictSculptReport.toText()));
+    QVERIFY2(!conflictSculptReport.hasErrors(),
+             qPrintable(conflictSculptReport.toText()));
+    QVERIFY(terrain.apply(conflictSculpt, true, &conflictSculptReport));
+    const QByteArray conflictLeft = terrain.sectorPayload(0, 0);
+    const QByteArray conflictRight = terrain.sectorPayload(1, 0);
+    const quint16 leftAfter = qFromLittleEndian<quint16>(
+        reinterpret_cast<const uchar*>(conflictLeft.constData()
+                                       + leftVertex + 2));
+    const quint16 rightAfter = qFromLittleEndian<quint16>(
+        reinterpret_cast<const uchar*>(conflictRight.constData()
+                                       + rightVertex + 2));
+    QCOMPARE(leftAfter, quint16(rightBefore + 200));
+    QCOMPARE(rightAfter, quint16(rightBefore + 1000));
 }
 
 void EnduranceDocumentTests::conflictingTerrainSeamIsPreservedAndNotEditable()

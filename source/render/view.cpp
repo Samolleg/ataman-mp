@@ -6259,20 +6259,22 @@ void CView::drawTerrainPaintOutline(QOpenGLShaderProgram* program)
         constexpr int segments = 64;
         circle.reserve(segments);
         const float radius = m_landscapeTools->radius();
+        const bool landSculpt = m_landscapeTools->editMode()
+            == ELandscapeEditMode::Sculpt;
         for(int segment = 0; segment < segments; ++segment)
         {
             const float angle = float(segment) * float(2.0 * M_PI / segments);
             QVector3D point(m_sculptOutlineCenter.x() + qCos(angle) * radius,
                             m_sculptOutlineCenter.y() + qSin(angle) * radius, 0.0f);
-            const bool landSculpt = m_landscapeTools->editMode()
-                == ELandscapeEditMode::Sculpt;
             if(!m_pLand->projectPt(point, landSculpt)
                && (landSculpt || !m_pLand->projectPt(point, true)))
                 continue;
             point.setZ(point.z() + 0.12f);
             circle.append(point);
         }
-        program->setUniformValue("customColor", QVector4D(1.0f, 0.52f, 0.10f, 0.95f));
+        program->setUniformValue("customColor", landSculpt
+            ? QVector4D(1.0f, 0.72f, 0.08f, 0.95f)
+            : QVector4D(0.10f, 0.82f, 1.0f, 0.95f));
         program->setAttributeArray(position, circle.constData());
         // Keep the complete footprint legible when an overlay is thinner
         // than the brush. Overlay points are preferred; land is only the
@@ -9455,12 +9457,12 @@ void CView::sculptTerrainAt(const QVector3D& position, float stampFraction)
         case ELandscapeSculptTool::Raise:
             overlayCommand = m_terrainEdit.makeOverlayRaiseLower(
                 brush, rawDelta,
-                &report);
+                &report, true);
             break;
         case ELandscapeSculptTool::Lower:
             overlayCommand = m_terrainEdit.makeOverlayRaiseLower(
                 brush, -rawDelta,
-                &report);
+                &report, true);
             break;
         case ELandscapeSculptTool::Flatten:
             overlayCommand = m_terrainEdit.makeOverlayFlatten(
@@ -9493,11 +9495,11 @@ void CView::sculptTerrainAt(const QVector3D& position, float stampFraction)
     {
     case ELandscapeSculptTool::Raise:
         command = m_terrainEdit.makeRaiseLower(
-            brush, rawDelta);
+            brush, rawDelta, true);
         break;
     case ELandscapeSculptTool::Lower:
         command = m_terrainEdit.makeRaiseLower(
-            brush, -rawDelta);
+            brush, -rawDelta, true);
         break;
     case ELandscapeSculptTool::Flatten:
         command = m_terrainEdit.makeFlatten(
@@ -9509,11 +9511,6 @@ void CView::sculptTerrainAt(const QVector3D& position, float stampFraction)
     }
     if(command.isEmpty())
         return;
-    if(command.requiresMaxZDecision())
-    {
-        emit updateMsg(tr("Sculpt stamp refused: it would clamp the MPR raw-height range."));
-        return;
-    }
     if(m_sculptStrokeActive)
     {
         if(applyTerrainHeightPreview(command, true))

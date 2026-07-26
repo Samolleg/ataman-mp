@@ -869,7 +869,8 @@ float CTerrainEditModel::brushWeight(float distance, float radius,
 }
 
 STerrainHeightCommand CTerrainEditModel::makeRaiseLower(
-    const STerrainBrush& brush, float rawHeightDelta) const
+    const STerrainBrush& brush, float rawHeightDelta,
+    bool allowSaturation) const
 {
     STerrainHeightCommand command;
     command.description = rawHeightDelta >= 0.0f ? "Raise terrain" : "Lower terrain";
@@ -896,7 +897,7 @@ STerrainHeightCommand CTerrainEditModel::makeRaiseLower(
             delta.globalY = y;
             delta.before = height(x, y);
             delta.after = clampedHeight(float(delta.before) + rawHeightDelta * weight,
-                                        &delta.clamped);
+                                        allowSaturation ? nullptr : &delta.clamped);
             if(delta.before != delta.after)
                 command.deltas.append(delta);
         }
@@ -1459,10 +1460,11 @@ SOverlaySurfaceCommand CTerrainEditModel::makeOverlayDeactivation(
 
 SOverlaySurfaceCommand CTerrainEditModel::makeOverlayRaiseLower(
     const STerrainBrush& brush, float rawHeightDelta,
-    CValidationReport* report) const
+    CValidationReport* report, bool allowSaturation) const
 {
     return makeOverlayHeightEdit(QStringLiteral("Sculpt overlay height"), brush,
-                                 0, rawHeightDelta, 1.0f, report);
+                                 0, rawHeightDelta, 1.0f, report,
+                                 allowSaturation);
 }
 
 SOverlaySurfaceCommand CTerrainEditModel::makeOverlayFlatten(
@@ -1484,7 +1486,7 @@ SOverlaySurfaceCommand CTerrainEditModel::makeOverlaySmooth(
 SOverlaySurfaceCommand CTerrainEditModel::makeOverlayHeightEdit(
     const QString& description, const STerrainBrush& brush,
     int operation, float value, float strength,
-    CValidationReport* report) const
+    CValidationReport* report, bool allowSaturation) const
 {
     SOverlaySurfaceCommand command;
     command.description = description;
@@ -1512,6 +1514,12 @@ SOverlaySurfaceCommand CTerrainEditModel::makeOverlayHeightEdit(
     QMap<int, qint8> yOffsets;
     QSet<int> activeVertices;
     QMap<int, QSet<int>> activeRefSectors;
+    QMap<int, QVector<SOverlayRef>> selectedRefs;
+    const int preferredSectorIndex = m_sectorLookup.value(
+        QPair<int, int>(qBound(0, int(std::floor(brush.centerX / kSectorStride)),
+                               m_sectorCountX - 1),
+                        qBound(0, int(std::floor(brush.centerY / kSectorStride)),
+                               m_sectorCountY - 1)), -1);
     const int minimumX = qMax(0, int(std::floor(brush.centerX - brush.radius)) - 1);
     const int maximumX = qMin(m_vertexCountX - 1,
                               int(std::ceil(brush.centerX + brush.radius)) + 1);
@@ -1592,22 +1600,23 @@ SOverlaySurfaceCommand CTerrainEditModel::makeOverlayHeightEdit(
         {
             if(!activeOwners.contains(ref.sectorIndex))
                 continue;
-            if(!selected)
+            if(!selected || ref.sectorIndex == preferredSectorIndex)
                 selected = &ref;
-            else if(selected->height != ref.height
-                    || selected->xOffset != ref.xOffset
-                    || selected->yOffset != ref.yOffset)
-            {
-                if(report)
-                    report->add("terrain.overlay_seam", EValidationSeverity::Error,
-                        "Overlay sculpting found conflicting active surface vertices",
-                        QString("%1,%2").arg(key % m_vertexCountX)
-                            .arg(key / m_vertexCountX));
-                return command;
-            }
+            if(ref.sectorIndex == preferredSectorIndex)
+                break;
         }
         if(!selected)
-            selected = &vertexRefs.front();
+            continue;
+        QVector<SOverlayRef> owners;
+        for(const SOverlayRef& ref : vertexRefs)
+            if(activeOwners.contains(ref.sectorIndex)
+               && ref.height == selected->height
+               && ref.xOffset == selected->xOffset
+               && ref.yOffset == selected->yOffset)
+                owners.append(ref);
+        if(owners.isEmpty())
+            continue;
+        selectedRefs.insert(key, owners);
         heights.insert(key, selected->height);
         xOffsets.insert(key, selected->xOffset);
         yOffsets.insert(key, selected->yOffset);
@@ -1654,7 +1663,8 @@ SOverlaySurfaceCommand CTerrainEditModel::makeOverlayHeightEdit(
                 target = before + (sum / float(samples) - before) * strength * weight;
         }
         bool clamped = false;
-        const quint16 after = clampedHeight(target, &clamped);
+        const quint16 after = clampedHeight(target,
+            allowSaturation ? nullptr : &clamped);
         if(clamped)
         {
             if(report)
@@ -1673,18 +1683,21 @@ SOverlaySurfaceCommand CTerrainEditModel::makeOverlayHeightEdit(
         return command;
 
     QMap<int, QByteArray> replacements;
-    const auto replacementFor = [&](int sectorIndex) {
-        return replacements.value(sectorIndex,
-                                  m_sectors.at(sectorIndex).currentPayload);
+    const auto replacementFor = [this, &replacements](int sectorIndex)
+        -> QByteArray& {
+        auto it = replacements.find(sectorIndex);
+        if(it == replacements.end())
+            it = replacements.insert(sectorIndex,
+                                     m_sectors.at(sectorIndex).currentPayload);
+        return it.value();
     };
     for(int key : changedVertices)
-        for(const SOverlayRef& ref : refs.value(key))
+        for(const SOverlayRef& ref : selectedRefs.value(key))
         {
-            QByteArray payload = replacementFor(ref.sectorIndex);
+            QByteArray& payload = replacementFor(ref.sectorIndex);
             writeVertexHeight(payload,
                 m_sectors.at(ref.sectorIndex).source.overlayVertexOffset,
                 ref.localX, ref.localY, afterHeights.value(key));
-            replacements.insert(ref.sectorIndex, payload);
         }
 
     QSet<int> affectedNormals;
@@ -1700,7 +1713,7 @@ SOverlaySurfaceCommand CTerrainEditModel::makeOverlayHeightEdit(
                 if(x < 0 || y < 0 || x >= m_vertexCountX || y >= m_vertexCountY)
                     continue;
                 const int key = globalIndex(x, y);
-                if(activeVertices.contains(key) && refs.contains(key))
+                if(activeVertices.contains(key) && selectedRefs.contains(key))
                     affectedNormals.insert(key);
             }
     }
@@ -1749,13 +1762,12 @@ SOverlaySurfaceCommand CTerrainEditModel::makeOverlayHeightEdit(
         const quint32 packedY = quint32(qBound(0, int(normal.y * 1000.0 + 1000.0), 2047));
         const quint32 packedZ = quint32(qBound(0, int(normal.z * 1000.0), 1023));
         const quint32 packed = (packedZ << 22) | (packedX << 11) | packedY;
-        for(const SOverlayRef& ref : refs.value(key))
+        for(const SOverlayRef& ref : selectedRefs.value(key))
         {
-            QByteArray payload = replacementFor(ref.sectorIndex);
+            QByteArray& payload = replacementFor(ref.sectorIndex);
             writeVertexNormal(payload,
                 m_sectors.at(ref.sectorIndex).source.overlayVertexOffset,
                 ref.localX, ref.localY, packed);
-            replacements.insert(ref.sectorIndex, payload);
         }
     }
 

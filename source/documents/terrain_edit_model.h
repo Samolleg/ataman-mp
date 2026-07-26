@@ -357,7 +357,8 @@ public:
         CValidationReport* report = nullptr) const;
     SOverlaySurfaceCommand makeOverlayRaiseLower(
         const STerrainBrush& brush, float rawHeightDelta,
-        CValidationReport* report = nullptr) const;
+        CValidationReport* report = nullptr,
+        bool allowSaturation = false) const;
     SOverlaySurfaceCommand makeOverlayFlatten(
         const STerrainBrush& brush, quint16 targetHeight, float strength,
         CValidationReport* report = nullptr) const;
@@ -366,7 +367,8 @@ public:
         CValidationReport* report = nullptr) const;
 
     STerrainHeightCommand makeRaiseLower(const STerrainBrush& brush,
-                                         float rawHeightDelta) const;
+                                         float rawHeightDelta,
+                                         bool allowSaturation = false) const;
     STerrainHeightCommand makeFlatten(const STerrainBrush& brush,
                                       quint16 targetHeight,
                                       float strength) const;
@@ -451,7 +453,7 @@ private:
     SOverlaySurfaceCommand makeOverlayHeightEdit(
         const QString& description, const STerrainBrush& brush,
         int operation, float value, float strength,
-        CValidationReport* report) const;
+        CValidationReport* report, bool allowSaturation = false) const;
     STerrainTileCommand makeBoundedSemanticTilePaint(
         const STerrainTileBrush& brush, ETerrainTileLayer layer,
         qint32 materialId, const CTerrainTransitionCatalog& catalog,
