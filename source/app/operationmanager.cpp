@@ -1234,6 +1234,7 @@ void CTileBrush::mouseMoveEvent(COperation* pOp, QMouseEvent* pEvent)
         const bool projectionLand = m_pView->terrainBrushProjectsToLand();
         const QVector3D landPos(m_pView->getTerrainPos(
             pEvent->x(), pEvent->y(), projectionLand));
+        m_pView->beginTerrainPreviewBatch();
         const float distance = landPos.distanceToPoint(m_lastLandPos);
         const float spacing = m_pView->terrainPaintStampSpacing();
         if(distance >= spacing)
@@ -1249,6 +1250,7 @@ void CTileBrush::mouseMoveEvent(COperation* pOp, QMouseEvent* pEvent)
             }
             m_lastLandPos = landPos;
         }
+        m_pView->endTerrainPreviewBatch();
         m_pView->updatePreviewTile(landPos, bLand);
 
     }

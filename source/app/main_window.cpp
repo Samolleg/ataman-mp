@@ -4789,10 +4789,14 @@ void MainWindow::showLandscapeTools()
     if(m_landscapeToolsDock->isVisible())
     {
         m_landscapeToolsDock->raise();
+        if(m_pView)
+            m_pView->onLandscapeToolsShown();
         return;
     }
     m_landscapeToolsDock->show();
     m_landscapeToolsDock->raise();
+    if(m_pView)
+        m_pView->onLandscapeToolsShown();
 }
 
 void MainWindow::hideLandscapeTools()
