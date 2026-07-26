@@ -4,7 +4,9 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDialogButtonBox>
+#include <QDir>
 #include <QFrame>
+#include <QFileDialog>
 #include <QHeaderView>
 #include <QHBoxLayout>
 #include <QInputDialog>
@@ -13,6 +15,8 @@
 #include <QMessageBox>
 #include <QPixmap>
 #include <QPushButton>
+#include <QSettings>
+#include <QSizePolicy>
 #include <QSet>
 #include <QTableWidget>
 #include <QVBoxLayout>
@@ -39,7 +43,7 @@ CTerrainAtlasReviewDialog::CTerrainAtlasReviewDialog(
       m_showAll(new QCheckBox(tr("Show all inferred families and slots"), this))
 {
     setWindowTitle(tr("Review semantic terrain atlas"));
-    resize(980, 680);
+    resize(1240, 760);
     QVBoxLayout* layout = new QVBoxLayout(this);
     QLabel* explanation = new QLabel(tr(
         "The editor has already assigned the corner families it can infer. This view shows only unresolved items by default. "
@@ -52,6 +56,12 @@ CTerrainAtlasReviewDialog::CTerrainAtlasReviewDialog(
         .arg(m_profile.mprNamespace).arg(m_profile.atlasSlotCount)
         .arg(QString::fromLatin1(m_profile.atlasPixelSha256)));
     layout->addWidget(m_binding);
+    QLabel* storage = new QLabel(tr("Editor profile location: %1")
+        .arg(QDir::toNativeSeparators(
+            CTerrainAtlasProfileStore::profilePath(m_profile.mprNamespace))), this);
+    storage->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    storage->setWordWrap(true);
+    layout->addWidget(storage);
 
     QHBoxLayout* body = new QHBoxLayout();
     QVBoxLayout* familySide = new QVBoxLayout();
@@ -62,7 +72,13 @@ CTerrainAtlasReviewDialog::CTerrainAtlasReviewDialog(
         tr("Underwater"), tr("Needs review"), tr("Slots")});
     m_families->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_families->setSelectionMode(QAbstractItemView::ExtendedSelection);
-    m_families->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
+    m_families->verticalHeader()->setVisible(false);
+    m_families->horizontalHeader()->setMinimumSectionSize(55);
+    for(int column = 0; column < m_families->columnCount(); ++column)
+        m_families->horizontalHeader()->setSectionResizeMode(column, QHeaderView::Interactive);
+    const int familyWidths[] = {55, 300, 120, 105, 115, 65};
+    for(int column = 0; column < m_families->columnCount(); ++column)
+        m_families->setColumnWidth(column, familyWidths[column]);
     familySide->addWidget(m_families, 2);
     QHBoxLayout* familyActions = new QHBoxLayout();
     QPushButton* split = new QPushButton(tr("Split selected slots..."), this);
@@ -79,7 +95,13 @@ CTerrainAtlasReviewDialog::CTerrainAtlasReviewDialog(
                                         tr("Status")});
     m_slots->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_slots->setSelectionMode(QAbstractItemView::ExtendedSelection);
-    m_slots->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
+    m_slots->verticalHeader()->setVisible(false);
+    m_slots->horizontalHeader()->setMinimumSectionSize(60);
+    for(int column = 0; column < m_slots->columnCount(); ++column)
+        m_slots->horizontalHeader()->setSectionResizeMode(column, QHeaderView::Interactive);
+    m_slots->setColumnWidth(0, 70);
+    m_slots->setColumnWidth(1, 310);
+    m_slots->setColumnWidth(2, 135);
     slotSide->addWidget(m_slots, 2);
     QHBoxLayout* slotActions = new QHBoxLayout();
     QPushButton* reviewed = new QPushButton(tr("Mark selected Reviewed"), this);
@@ -88,6 +110,7 @@ CTerrainAtlasReviewDialog::CTerrainAtlasReviewDialog(
     slotActions->addWidget(needsReview);
     slotSide->addLayout(slotActions);
     m_preview->setFixedSize(220, 220);
+    m_preview->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
     m_preview->setAlignment(Qt::AlignCenter);
     m_preview->setFrameStyle(QFrame::StyledPanel | QFrame::Sunken);
     slotSide->addWidget(m_preview);
@@ -98,10 +121,14 @@ CTerrainAtlasReviewDialog::CTerrainAtlasReviewDialog(
     layout->addWidget(m_diagnostics);
     QDialogButtonBox* buttons = new QDialogButtonBox(QDialogButtonBox::Cancel, this);
     QPushButton* draft = buttons->addButton(tr("Save draft"), QDialogButtonBox::ActionRole);
+    QPushButton* exportButton = buttons->addButton(
+        tr("Export profile copy..."), QDialogButtonBox::ActionRole);
     buttons->addButton(m_approve, QDialogButtonBox::AcceptRole);
     layout->addWidget(buttons);
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
     connect(draft, &QPushButton::clicked, this, &CTerrainAtlasReviewDialog::saveDraft);
+    connect(exportButton, &QPushButton::clicked,
+            this, &CTerrainAtlasReviewDialog::exportCopy);
     connect(m_approve, &QPushButton::clicked, this, &CTerrainAtlasReviewDialog::approveAndSave);
     connect(split, &QPushButton::clicked, this, &CTerrainAtlasReviewDialog::splitSelectedFamily);
     connect(merge, &QPushButton::clicked, this, &CTerrainAtlasReviewDialog::mergeSelectedFamilies);
@@ -118,6 +145,22 @@ CTerrainAtlasReviewDialog::CTerrainAtlasReviewDialog(
             this, &CTerrainAtlasReviewDialog::applyFamilyCellChange);
     connect(m_slots, &QTableWidget::itemSelectionChanged,
             this, &CTerrainAtlasReviewDialog::updatePreview);
+    QSettings settings;
+    restoreGeometry(settings.value(QStringLiteral("terrainAtlasReview/geometry")).toByteArray());
+    m_families->horizontalHeader()->restoreState(
+        settings.value(QStringLiteral("terrainAtlasReview/familyHeader")).toByteArray());
+    m_slots->horizontalHeader()->restoreState(
+        settings.value(QStringLiteral("terrainAtlasReview/slotHeader")).toByteArray());
+    connect(this, &QDialog::finished, this, [this](int) {
+        QSettings settings;
+        settings.setValue(QStringLiteral("terrainAtlasReview/geometry"), saveGeometry());
+        settings.setValue(QStringLiteral("terrainAtlasReview/familyHeader"),
+                          m_families->horizontalHeader()->saveState());
+        settings.setValue(QStringLiteral("terrainAtlasReview/slotHeader"),
+                          m_slots->horizontalHeader()->saveState());
+    });
+    if(m_profile.provenance.startsWith(QStringLiteral("authored-template:")))
+        m_showAll->setChecked(true);
     rebuildTables();
 }
 
@@ -405,6 +448,28 @@ void CTerrainAtlasReviewDialog::saveDraft()
 {
     m_profile.approved = false;
     accept();
+}
+
+void CTerrainAtlasReviewDialog::exportCopy()
+{
+    STerrainAtlasProfile exported = m_profile;
+    exported.approved = false;
+    const QString suggested = QStringLiteral("%1.semantic-atlas.json")
+        .arg(exported.mprNamespace.toLower());
+    const QString path = QFileDialog::getSaveFileName(this,
+        tr("Export semantic atlas profile copy"), suggested,
+        tr("Semantic atlas profiles (*.semantic-atlas.json);;JSON files (*.json)"));
+    if(path.isEmpty())
+        return;
+    CValidationReport report;
+    if(!exported.save(path, &report))
+    {
+        showReport(tr("Could not export semantic atlas profile"), report);
+        return;
+    }
+    QMessageBox::information(this, tr("Semantic atlas profile exported"),
+        tr("A draft copy was exported to:\n%1")
+            .arg(QDir::toNativeSeparators(path)));
 }
 
 void CTerrainAtlasReviewDialog::approveAndSave()

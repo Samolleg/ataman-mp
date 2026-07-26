@@ -331,6 +331,8 @@ private slots:
     void zone1NamespaceTemplateSeparatesLandOverlayAndVariants();
     void semanticAtlasProposalIsDeterministicAndApprovalGated();
     void semanticAtlasTransitionsCannotTransitivelyMergeMaterialAnchors();
+    void semanticAtlasTransitionsCrossTileTypeMetadata();
+    void authoredAtlasProfileMatchesZone1Catalog();
     void semanticAtlasProfileRejectsBindingMismatchAndAmbiguity();
     void semanticAtlasReviewEditsAndStoreAreDeterministic();
     void zone1NamespaceTemplateMatchesPrivateFixture();
@@ -4435,6 +4437,75 @@ void EnduranceDocumentTests::semanticAtlasTransitionsCannotTransitivelyMergeMate
     QVERIFY(lightFamily > 0);
     QVERIFY(darkFamily != lightFamily);
     QCOMPARE(profile.families.size(), 2);
+}
+
+void EnduranceDocumentTests::semanticAtlasTransitionsCrossTileTypeMetadata()
+{
+    const auto tile = [](const QColor& west, const QColor& east) {
+        QImage image(18, 18, QImage::Format_RGBA8888);
+        for(int y = 0; y < image.height(); ++y)
+            for(int x = 0; x < image.width(); ++x)
+                image.setPixelColor(x, y, x < image.width() / 2 ? west : east);
+        return image;
+    };
+    const QColor grass(20, 110, 30);
+    const QColor stone(175, 175, 165);
+    QVector<QImage> images({tile(grass, grass), tile(stone, stone),
+                            tile(grass, stone)});
+    QVector<qint32> tileTypes({0, 1, 6});
+    QVector<STerrainAtlasSlotUsage> usage(images.size());
+    for(STerrainAtlasSlotUsage& item : usage)
+        item.landCount = 1;
+    const STerrainAtlasProfile profile = CTerrainAtlasProfileInference::propose(
+        "cross_type", images, tileTypes, usage);
+    QCOMPARE(profile.provenance, CTerrainAtlasProfileInference::currentProvenance());
+    QCOMPARE(profile.families.size(), 2);
+    const STerrainTransitionSignature transition = profile.slotDefinitions.at(2).signature;
+    QVERIFY(transition.northWest != transition.northEast);
+    QCOMPARE(transition.northWest, transition.southWest);
+    QCOMPARE(transition.northEast, transition.southEast);
+    QVERIFY(CTerrainAtlasProfileInference::isCompatibleInferenceProvenance(
+        profile.provenance));
+    QVERIFY(!CTerrainAtlasProfileInference::isCompatibleInferenceProvenance(
+        "decoded-atlas-pixels+mpr-tile-types+observed-map-usage-v1"));
+    QVERIFY(CTerrainAtlasProfileInference::isCompatibleInferenceProvenance(
+        "user-authored-custom-profile"));
+}
+
+void EnduranceDocumentTests::authoredAtlasProfileMatchesZone1Catalog()
+{
+    CValidationReport report;
+    const STerrainAtlasAnalysis analysis = CTerrainAtlasAnalyzer::analyze(
+        "zone1", 512, &report);
+    QVERIFY2(analysis.usable, qPrintable(report.toText()));
+    const STerrainAtlasProfile profile =
+        CTerrainAtlasProfileInference::fromAuthoredAnalysis(
+            "zone1", QByteArray("synthetic-hash"), 512, analysis, &report);
+    QVERIFY2(profile.approved, qPrintable(report.toText()));
+    QCOMPARE(profile.slotDefinitions.size(), 512);
+    QVERIFY(profile.provenance.startsWith("authored-template:"));
+    for(int slot : {0, 134, 511})
+    {
+        SMprPackedTile packed;
+        packed.atlasIndex = quint8(slot / 64);
+        packed.tileIndex = quint8(slot % 64);
+        bool landFound = false, overlayFound = false;
+        const STerrainTransitionSignature land =
+            analysis.landCatalog.gridSignatureForPacked(packed.encode(), &landFound);
+        const STerrainTransitionSignature overlay =
+            analysis.overlayCatalog.gridSignatureForPacked(packed.encode(), &overlayFound);
+        QCOMPARE(landFound, !overlayFound);
+        const STerrainTransitionSignature expected = landFound ? land : overlay;
+        const STerrainTransitionSignature actual = profile.slotDefinitions.at(slot).signature;
+        QCOMPARE(actual.northWest, expected.northWest);
+        QCOMPARE(actual.northEast, expected.northEast);
+        QCOMPARE(actual.southEast, expected.southEast);
+        QCOMPARE(actual.southWest, expected.southWest);
+    }
+    QVERIFY(std::any_of(profile.families.cbegin(), profile.families.cend(),
+        [](const STerrainAtlasProfileFamily& family) {
+            return family.name == QStringLiteral("Stone / lime");
+        }));
 }
 
 void EnduranceDocumentTests::overlaySculptChangesOnlyActiveOverlayGeometry()
