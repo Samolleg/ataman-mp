@@ -87,6 +87,7 @@ public:
     void setAnimTils(const QVector<SAnimTile>& arrAnimTile) {m_aAnimTile = arrAnimTile;}
     void updateSectorDrawData(int xSec, int ySec);
     bool previewCanonicalSector(int xSec, int ySec, const QByteArray& payload);
+    bool previewCanonicalOverlaySector(int xSec, int ySec, const QByteArray& payload);
     bool previewCanonicalMaxZ(float maxZ);
     bool previewCanonicalTile(int globalX, int globalY, bool land, quint16 packedTile,
                               bool updateSector = true);

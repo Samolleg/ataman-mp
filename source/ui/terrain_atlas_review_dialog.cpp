@@ -35,16 +35,16 @@ CTerrainAtlasReviewDialog::CTerrainAtlasReviewDialog(
     : QDialog(parent), m_profile(profile), m_tileImages(tileImages),
       m_families(new QTableWidget(this)), m_slots(new QTableWidget(this)),
       m_preview(new QLabel(this)), m_binding(new QLabel(this)),
-      m_diagnostics(new QLabel(this)), m_approve(new QPushButton(tr("Approve and save"), this))
+      m_diagnostics(new QLabel(this)), m_approve(new QPushButton(tr("Approve and save"), this)),
+      m_showAll(new QCheckBox(tr("Show all inferred families and slots"), this))
 {
     setWindowTitle(tr("Review semantic terrain atlas"));
     resize(980, 680);
     QVBoxLayout* layout = new QVBoxLayout(this);
     QLabel* explanation = new QLabel(tr(
-        "1. Review each material family name and Land/Overlay classification. "
-        "2. Select a family, inspect its slot previews and corner labels, and mark correct slots Reviewed. "
-        "3. Split only when selected slots belong to a different visual material; merge only when two families are the same material. "
-        "4. Clear every justified Needs review flag, then approve. No atlas image or MPR data is modified."), this);
+        "The editor has already assigned the corner families it can infer. This view shows only unresolved items by default. "
+        "Confirm a highlighted family or slot when it is correct; split/merge only when the proposed material identity is wrong. "
+        "Use Show all for expert inspection. No atlas image or MPR data is modified."), this);
     explanation->setWordWrap(true);
     layout->addWidget(explanation);
     m_binding->setTextInteractionFlags(Qt::TextSelectableByMouse);
@@ -56,6 +56,7 @@ CTerrainAtlasReviewDialog::CTerrainAtlasReviewDialog(
     QHBoxLayout* body = new QHBoxLayout();
     QVBoxLayout* familySide = new QVBoxLayout();
     familySide->addWidget(new QLabel(tr("Material families"), this));
+    familySide->addWidget(m_showAll);
     m_families->setColumnCount(6);
     m_families->setHorizontalHeaderLabels({tr("ID"), tr("Name"), tr("Layer"),
         tr("Underwater"), tr("Needs review"), tr("Slots")});
@@ -66,10 +67,8 @@ CTerrainAtlasReviewDialog::CTerrainAtlasReviewDialog(
     QHBoxLayout* familyActions = new QHBoxLayout();
     QPushButton* split = new QPushButton(tr("Split selected slots..."), this);
     QPushButton* merge = new QPushButton(tr("Merge selected families..."), this);
-    QPushButton* guide = new QPushButton(tr("How to review..."), this);
     familyActions->addWidget(split);
     familyActions->addWidget(merge);
-    familyActions->addWidget(guide);
     familySide->addLayout(familyActions);
     body->addLayout(familySide, 3);
 
@@ -88,7 +87,7 @@ CTerrainAtlasReviewDialog::CTerrainAtlasReviewDialog(
     slotActions->addWidget(reviewed);
     slotActions->addWidget(needsReview);
     slotSide->addLayout(slotActions);
-    m_preview->setMinimumSize(180, 180);
+    m_preview->setFixedSize(220, 220);
     m_preview->setAlignment(Qt::AlignCenter);
     m_preview->setFrameStyle(QFrame::StyledPanel | QFrame::Sunken);
     slotSide->addWidget(m_preview);
@@ -110,7 +109,9 @@ CTerrainAtlasReviewDialog::CTerrainAtlasReviewDialog(
             &CTerrainAtlasReviewDialog::markSelectedSlotsReviewed);
     connect(needsReview, &QPushButton::clicked, this,
             &CTerrainAtlasReviewDialog::markSelectedSlotsForReview);
-    connect(guide, &QPushButton::clicked, this, &CTerrainAtlasReviewDialog::showGuide);
+    connect(m_showAll, &QCheckBox::toggled, this, [this](bool) {
+        rebuildTables(selectedFamilyId());
+    });
     connect(m_families, &QTableWidget::itemSelectionChanged,
             this, &CTerrainAtlasReviewDialog::refreshSlots);
     connect(m_families, &QTableWidget::cellChanged,
@@ -123,11 +124,29 @@ CTerrainAtlasReviewDialog::CTerrainAtlasReviewDialog(
 void CTerrainAtlasReviewDialog::rebuildTables(qint32 selectFamilyId)
 {
     m_rebuilding = true;
-    m_families->setRowCount(m_profile.families.size());
-    int selectedRow = 0;
-    for(int row = 0; row < m_profile.families.size(); ++row)
+    QVector<int> visibleFamilies;
+    for(int index = 0; index < m_profile.families.size(); ++index)
     {
-        const STerrainAtlasProfileFamily& family = m_profile.families.at(row);
+        const STerrainAtlasProfileFamily& family = m_profile.families.at(index);
+        bool unresolved = family.ambiguous;
+        for(const STerrainAtlasProfileSlot& slot : m_profile.slotDefinitions)
+        {
+            if(!slot.ambiguous)
+                continue;
+            const qint32 ids[] = {slot.signature.northWest, slot.signature.northEast,
+                                  slot.signature.southEast, slot.signature.southWest};
+            unresolved |= std::find(std::begin(ids), std::end(ids), family.id)
+                != std::end(ids);
+        }
+        if(m_showAll->isChecked() || unresolved)
+            visibleFamilies.append(index);
+    }
+    m_families->setRowCount(visibleFamilies.size());
+    int selectedRow = 0;
+    for(int row = 0; row < visibleFamilies.size(); ++row)
+    {
+        const STerrainAtlasProfileFamily& family =
+            m_profile.families.at(visibleFamilies.at(row));
         QTableWidgetItem* id = new QTableWidgetItem(QString::number(family.id));
         id->setData(Qt::UserRole, family.id);
         id->setFlags(id->flags() & ~Qt::ItemIsEditable);
@@ -157,7 +176,7 @@ void CTerrainAtlasReviewDialog::rebuildTables(qint32 selectFamilyId)
         if(family.id == selectFamilyId) selectedRow = row;
     }
     m_rebuilding = false;
-    if(!m_profile.families.isEmpty()) m_families->selectRow(selectedRow);
+    if(!visibleFamilies.isEmpty()) m_families->selectRow(selectedRow);
     refreshSlots();
     updateDiagnostics();
 }
@@ -226,7 +245,8 @@ void CTerrainAtlasReviewDialog::refreshSlots()
     {
         const qint32 ids[] = {slot.signature.northWest, slot.signature.northEast,
                               slot.signature.southEast, slot.signature.southWest};
-        if(std::find(std::begin(ids), std::end(ids), familyId) != std::end(ids))
+        if((m_showAll->isChecked() || slot.ambiguous)
+           && std::find(std::begin(ids), std::end(ids), familyId) != std::end(ids))
             matching.append(&slot);
     }
     m_slots->setRowCount(matching.size());
@@ -269,13 +289,22 @@ void CTerrainAtlasReviewDialog::updatePreview()
         return;
     }
     m_preview->setPixmap(QPixmap::fromImage(m_tileImages.at(selected.front())).scaled(
-        m_preview->size(), Qt::KeepAspectRatio, Qt::FastTransformation));
+        QSize(216, 216), Qt::KeepAspectRatio, Qt::FastTransformation));
 }
 
 void CTerrainAtlasReviewDialog::applyFamilyCellChange(int row, int column)
 {
-    if(m_rebuilding || row < 0 || row >= m_profile.families.size()) return;
-    STerrainAtlasProfileFamily& family = m_profile.families[row];
+    if(m_rebuilding || row < 0 || !m_families->item(row, 0)) return;
+    const qint32 familyId = m_families->item(row, 0)->data(Qt::UserRole).toInt();
+    int familyIndex = -1;
+    for(int index = 0; index < m_profile.families.size(); ++index)
+        if(m_profile.families.at(index).id == familyId)
+        {
+            familyIndex = index;
+            break;
+        }
+    if(familyIndex < 0) return;
+    STerrainAtlasProfileFamily& family = m_profile.families[familyIndex];
     if(column == 1 && m_families->item(row, 1))
         family.name = m_families->item(row, 1)->text().trimmed();
     else if(column == 2)
@@ -372,21 +401,6 @@ void CTerrainAtlasReviewDialog::markSelectedSlotsForReview()
     updateDiagnostics();
 }
 
-void CTerrainAtlasReviewDialog::showGuide()
-{
-    QMessageBox::information(this, tr("Semantic atlas review guide"), tr(
-        "The editor is converting atlas pictures into named paint materials; it is not generating or editing the atlas.\n\n"
-        "For each family:\n"
-        "- Give it a recognizable name such as Dark grass, Limestone, Water, or Swamp.\n"
-        "- Choose Land or Overlay. Underwater is only for land textures normally hidden below overlays.\n"
-        "- Inspect the listed slot pictures and their NW / NE / SE / SW corner-family labels.\n"
-        "- If a slot and its corner labels are correct, select it and click Mark selected Reviewed.\n"
-        "- If selected slots are visually a different material, split those slots into a new family.\n"
-        "- If two proposed families are actually the same material, select both family rows and merge them.\n"
-        "- Unused slots still require a decision because the editor cannot know whether an unused picture is a valid future brush or transition.\n\n"
-        "Approval is enabled only after every family and slot ambiguity has been explicitly resolved. Missing transitions are allowed: painting will use a hard edge instead of inventing atlas content."));
-}
-
 void CTerrainAtlasReviewDialog::saveDraft()
 {
     m_profile.approved = false;
@@ -395,13 +409,13 @@ void CTerrainAtlasReviewDialog::saveDraft()
 
 void CTerrainAtlasReviewDialog::approveAndSave()
 {
-    for(int row = 0; row < m_profile.families.size(); ++row)
-        if(m_profile.families.at(row).ambiguous)
+    for(const STerrainAtlasProfileFamily& family : m_profile.families)
+        if(family.ambiguous)
         {
-            m_families->selectRow(row);
+            rebuildTables(family.id);
             QMessageBox::warning(this, tr("Atlas review incomplete"),
                 tr("Material family '%1' still has Needs review checked. Inspect its name, layer, underwater classification, and member slots; then clear that family flag if the assignment is correct.")
-                    .arg(m_profile.families.at(row).name));
+                    .arg(family.name));
             return;
         }
     for(const STerrainAtlasProfileSlot& slot : m_profile.slotDefinitions)

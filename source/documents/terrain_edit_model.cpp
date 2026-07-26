@@ -26,6 +26,7 @@ const int kLandSectorSize = kLandVertexOffset + kVertexBlockSize + kTileBlockSiz
 const int kOverlaySectorSize = kLandVertexOffset + 2 * kVertexBlockSize
     + 3 * kTileBlockSize;
 const quint32 kSectorSignature = 0xCF4BF774;
+const double kNewOverlayClearanceWorld = 0.02;
 
 quint16 readHeight(const QByteArray& payload, int localX, int localY)
 {
@@ -124,6 +125,22 @@ void writeVertexNormal(QByteArray& payload, quint64 baseOffset,
     qToLittleEndian<quint32>(packed, encoded);
     for(int byte = 0; byte < 4; ++byte)
         payload[int(offset) + byte] = char(encoded[byte]);
+}
+
+QByteArray readVertexBytes(const QByteArray& payload, quint64 baseOffset,
+                           int localX, int localY)
+{
+    const quint64 offset = baseOffset
+        + quint64(localY * kSectorVertices + localX) * kVertexSize;
+    return payload.mid(int(offset), kVertexSize);
+}
+
+void writeVertexBytes(QByteArray& payload, quint64 baseOffset,
+                      int localX, int localY, const QByteArray& bytes)
+{
+    const quint64 offset = baseOffset
+        + quint64(localY * kSectorVertices + localX) * kVertexSize;
+    payload.replace(int(offset), kVertexSize, bytes.constData(), kVertexSize);
 }
 
 void writeOverlayMaterial(QByteArray& payload, quint64 baseOffset,
@@ -1125,7 +1142,20 @@ SOverlaySurfaceCommand CTerrainEditModel::makeOverlayActivation(
         return command;
     }
 
+    struct SActivatedCell
+    {
+        SActivatedCell() {}
+        SActivatedCell(int sector, int tile, int x, int y, bool restores)
+            : sectorIndex(sector), localTile(tile), globalX(x), globalY(y),
+              restoresOriginalSurface(restores) {}
+        int sectorIndex{-1};
+        int localTile{-1};
+        int globalX{0};
+        int globalY{0};
+        bool restoresOriginalSurface{false};
+    };
     QMap<int, QByteArray> replacements;
+    QVector<SActivatedCell> activatedCells;
     const int minimumX = qMax(0, int(std::ceil(brush.centerX - brush.radius)));
     const int maximumX = qMin(tileCountX() - 1,
                               int(std::floor(brush.centerX + brush.radius)));
@@ -1169,14 +1199,188 @@ SOverlaySurfaceCommand CTerrainEditModel::makeOverlayActivation(
                     + kTileBlockSize;
                 overlayMaterialOffset = overlayTileOffset + kTileBlockSize;
             }
+            const bool wasActive = readOverlayMaterial(
+                payload, overlayMaterialOffset, localTile) >= 0;
             if(readPackedTile(payload, overlayTileOffset, localTile) == selected.encode()
                && readOverlayMaterial(payload, overlayMaterialOffset, localTile)
                     == materialIndex)
                 continue;
+            bool restoresOriginalSurface = false;
+            if(!wasActive && sector.source.type == 3
+               && sector.source.overlayMaterialOffset > 0)
+            {
+                restoresOriginalSurface = readOverlayMaterial(
+                    sector.source.payload, sector.source.overlayMaterialOffset,
+                    localTile) >= 0;
+            }
             writePackedTile(payload, overlayTileOffset, localTile, selected.encode());
             writeOverlayMaterial(payload, overlayMaterialOffset, localTile, materialIndex);
             replacements.insert(sectorIndex, payload);
+            if(!wasActive)
+                activatedCells.append({sectorIndex, localTile, x, y,
+                                       restoresOriginalSurface});
         }
+
+    // An inactive overlay record is not evidence of a usable surface plane.
+    // Shipped maps may retain arbitrary/buried vertex data outside active
+    // liquid cells. Initialize genuinely new cells from current land geometry,
+    // with the smallest practical world-space clearance, while preserving an
+    // active neighbour or a surface removed earlier in this editing session.
+    QSet<int> activatedVertices;
+    QSet<int> restoredVertices;
+    for(const SActivatedCell& cell : activatedCells)
+    {
+        for(int vertexY = cell.globalY * 2;
+            vertexY <= cell.globalY * 2 + 2; ++vertexY)
+            for(int vertexX = cell.globalX * 2;
+                vertexX <= cell.globalX * 2 + 2; ++vertexX)
+            {
+                const int key = globalIndex(vertexX, vertexY);
+                activatedVertices.insert(key);
+                if(cell.restoresOriginalSurface)
+                    restoredVertices.insert(key);
+            }
+    }
+    const auto sectorIndicesForVertex = [&](int globalX, int globalY) {
+        QVector<int> indices;
+        QVector<int> sectorXs({globalX / kSectorStride});
+        QVector<int> sectorYs({globalY / kSectorStride});
+        if(globalX > 0 && globalX % kSectorStride == 0)
+            sectorXs.prepend(globalX / kSectorStride - 1);
+        if(globalY > 0 && globalY % kSectorStride == 0)
+            sectorYs.prepend(globalY / kSectorStride - 1);
+        for(int sectorY : sectorYs)
+            for(int sectorX : sectorXs)
+            {
+                const int index = m_sectorLookup.value(
+                    QPair<int, int>(sectorX, sectorY), -1);
+                if(index >= 0)
+                    indices.append(index);
+            }
+        return indices;
+    };
+    const auto vertexTouchesActiveCell = [&](const QByteArray& payload,
+                                              int localX, int localY) {
+        if(payload.size() < kOverlaySectorSize || quint8(payload.at(4)) != 3)
+            return false;
+        QVector<int> tileXs({qMin(kSectorTiles - 1, localX / 2)});
+        QVector<int> tileYs({qMin(kSectorTiles - 1, localY / 2)});
+        if(localX > 0 && localX < kSectorStride && localX % 2 == 0)
+            tileXs.prepend(localX / 2 - 1);
+        if(localY > 0 && localY < kSectorStride && localY % 2 == 0)
+            tileYs.prepend(localY / 2 - 1);
+        const quint64 materialOffset = kLandVertexOffset + 2 * kVertexBlockSize
+            + 2 * kTileBlockSize;
+        for(int tileY : tileYs)
+            for(int tileX : tileXs)
+                if(readOverlayMaterial(payload, materialOffset,
+                                       tileY * kSectorTiles + tileX) >= 0)
+                    return true;
+        return false;
+    };
+    const int rawClearance = m_maxZ > 0.0f
+        ? qMax(1, int(std::ceil(kNewOverlayClearanceWorld * 65535.0
+                               / double(m_maxZ))))
+        : 1;
+    for(int key : activatedVertices)
+    {
+        if(key < 0 || key >= m_conflictedVertices.size()
+           || m_conflictedVertices.at(key))
+        {
+            if(report)
+                report->add("terrain.overlay_activation_seam",
+                    EValidationSeverity::Error,
+                    "Overlay activation touches a conflicting land seam",
+                    QString("%1,%2").arg(key % m_vertexCountX)
+                        .arg(key / m_vertexCountX));
+            return SOverlaySurfaceCommand();
+        }
+        const int globalX = key % m_vertexCountX;
+        const int globalY = key / m_vertexCountX;
+        const QVector<int> indices = sectorIndicesForVertex(globalX, globalY);
+        QByteArray desired;
+        bool activeSourceFound = false;
+        bool restoredSourceFound = false;
+        for(int sectorIndex : indices)
+        {
+            const SSector& sector = m_sectors.at(sectorIndex);
+            const int localX = globalX - sector.source.sectorX * kSectorStride;
+            const int localY = globalY - sector.source.sectorY * kSectorStride;
+            if(sector.source.type == 3
+               && vertexTouchesActiveCell(sector.currentPayload, localX, localY))
+            {
+                const QByteArray candidate = readVertexBytes(
+                    sector.currentPayload, sector.source.overlayVertexOffset,
+                    localX, localY);
+                if(activeSourceFound && candidate.left(4) != desired.left(4))
+                {
+                    if(report)
+                        report->add("terrain.overlay_activation_seam",
+                            EValidationSeverity::Error,
+                            "Overlay activation found conflicting active surface vertices",
+                            QString("%1,%2").arg(globalX).arg(globalY));
+                    return SOverlaySurfaceCommand();
+                }
+                desired = candidate;
+                activeSourceFound = true;
+            }
+        }
+        if(!activeSourceFound && restoredVertices.contains(key))
+        {
+            for(const SActivatedCell& cell : activatedCells)
+            {
+                if(!cell.restoresOriginalSurface
+                   || globalX < cell.globalX * 2 || globalX > cell.globalX * 2 + 2
+                   || globalY < cell.globalY * 2 || globalY > cell.globalY * 2 + 2)
+                    continue;
+                const SSector& sector = m_sectors.at(cell.sectorIndex);
+                const int localX = globalX - sector.source.sectorX * kSectorStride;
+                const int localY = globalY - sector.source.sectorY * kSectorStride;
+                desired = readVertexBytes(sector.source.payload,
+                    sector.source.overlayVertexOffset, localX, localY);
+                restoredSourceFound = true;
+                break;
+            }
+        }
+        if(!activeSourceFound && !restoredSourceFound)
+        {
+            if(indices.isEmpty())
+                continue;
+            const SSector& sector = m_sectors.at(indices.front());
+            const int localX = globalX - sector.source.sectorX * kSectorStride;
+            const int localY = globalY - sector.source.sectorY * kSectorStride;
+            desired = readVertexBytes(sector.currentPayload,
+                                      kLandVertexOffset, localX, localY);
+            const quint16 landHeight = readVertexHeight(
+                sector.currentPayload, kLandVertexOffset, localX, localY);
+            if(landHeight > 65535 - rawClearance)
+            {
+                if(report)
+                    report->add("terrain.overlay_activation_range",
+                        EValidationSeverity::Error,
+                        "Overlay activation cannot place a new surface above the current land within the raw MPR height range",
+                        QString("%1,%2").arg(globalX).arg(globalY));
+                return SOverlaySurfaceCommand();
+            }
+            uchar encoded[2];
+            qToLittleEndian<quint16>(quint16(landHeight + rawClearance), encoded);
+            desired[2] = char(encoded[0]);
+            desired[3] = char(encoded[1]);
+        }
+        for(int sectorIndex : indices)
+        {
+            const SSector& sector = m_sectors.at(sectorIndex);
+            QByteArray payload = replacements.value(sectorIndex,
+                                                    sector.currentPayload);
+            if(payload.size() < kOverlaySectorSize || quint8(payload.at(4)) != 3)
+                continue;
+            const int localX = globalX - sector.source.sectorX * kSectorStride;
+            const int localY = globalY - sector.source.sectorY * kSectorStride;
+            writeVertexBytes(payload, kLandVertexOffset + kVertexBlockSize,
+                             localX, localY, desired);
+            replacements.insert(sectorIndex, payload);
+        }
+    }
 
     for(auto it = replacements.constBegin(); it != replacements.constEnd(); ++it)
     {
@@ -1282,20 +1486,50 @@ SOverlaySurfaceCommand CTerrainEditModel::makeOverlayHeightEdit(
         return command;
     }
 
-    struct SOverlayRef { int sectorIndex; int localX; int localY; };
+    struct SOverlayRef
+    {
+        int sectorIndex;
+        int localX;
+        int localY;
+        quint16 height;
+        qint8 xOffset;
+        qint8 yOffset;
+    };
     QMap<int, QVector<SOverlayRef>> refs;
     QMap<int, quint16> heights;
     QMap<int, qint8> xOffsets;
     QMap<int, qint8> yOffsets;
     QSet<int> activeVertices;
-    for(int sectorIndex = 0; sectorIndex < m_sectors.size(); ++sectorIndex)
+    QMap<int, QSet<int>> activeRefSectors;
+    const int minimumX = qMax(0, int(std::floor(brush.centerX - brush.radius)) - 1);
+    const int maximumX = qMin(m_vertexCountX - 1,
+                              int(std::ceil(brush.centerX + brush.radius)) + 1);
+    const int minimumY = qMax(0, int(std::floor(brush.centerY - brush.radius)) - 1);
+    const int maximumY = qMin(m_vertexCountY - 1,
+                              int(std::ceil(brush.centerY + brush.radius)) + 1);
+    const int minimumSectorX = minimumX / kSectorStride;
+    const int maximumSectorX = maximumX / kSectorStride;
+    const int minimumSectorY = minimumY / kSectorStride;
+    const int maximumSectorY = maximumY / kSectorStride;
+    for(int sectorY = minimumSectorY; sectorY <= maximumSectorY; ++sectorY)
+        for(int sectorX = minimumSectorX; sectorX <= maximumSectorX; ++sectorX)
     {
+        const int sectorIndex = m_sectorLookup.value(
+            QPair<int, int>(sectorX, sectorY), -1);
+        if(sectorIndex < 0)
+            continue;
         const SSector& sector = m_sectors.at(sectorIndex);
         if(sector.source.type != 3 || sector.source.overlayVertexOffset == 0)
             continue;
-        for(int localY = 0; localY < kSectorVertices; ++localY)
+        const int localMinimumX = qMax(0, minimumX - sectorX * kSectorStride);
+        const int localMaximumX = qMin(kSectorStride,
+            maximumX - sectorX * kSectorStride);
+        const int localMinimumY = qMax(0, minimumY - sectorY * kSectorStride);
+        const int localMaximumY = qMin(kSectorStride,
+            maximumY - sectorY * kSectorStride);
+        for(int localY = localMinimumY; localY <= localMaximumY; ++localY)
         {
-            for(int localX = 0; localX < kSectorVertices; ++localX)
+            for(int localX = localMinimumX; localX <= localMaximumX; ++localX)
             {
                 const int globalX = sector.source.sectorX * kSectorStride + localX;
                 const int globalY = sector.source.sectorY * kSectorStride + localY;
@@ -1309,21 +1543,8 @@ SOverlaySurfaceCommand CTerrainEditModel::makeOverlayHeightEdit(
                 const qint8 yOffset = readVertexOffset(
                     sector.currentPayload, sector.source.overlayVertexOffset,
                     localX, localY, 1);
-                if(heights.contains(key)
-                   && (heights.value(key) != height
-                       || xOffsets.value(key) != xOffset
-                       || yOffsets.value(key) != yOffset))
-                {
-                    if(report)
-                        report->add("terrain.overlay_seam", EValidationSeverity::Error,
-                                    "Overlay sculpting found a conflicting shared SEC vertex",
-                                    QString("%1,%2").arg(globalX).arg(globalY));
-                    return command;
-                }
-                heights.insert(key, height);
-                xOffsets.insert(key, xOffset);
-                yOffsets.insert(key, yOffset);
-                refs[key].append({sectorIndex, localX, localY});
+                refs[key].append({sectorIndex, localX, localY,
+                                  height, xOffset, yOffset});
             }
         }
         for(int tileY = 0; tileY < kSectorTiles; ++tileY)
@@ -1338,10 +1559,47 @@ SOverlaySurfaceCommand CTerrainEditModel::makeOverlayHeightEdit(
                     {
                         const int globalX = sector.source.sectorX * kSectorStride + vertexX;
                         const int globalY = sector.source.sectorY * kSectorStride + vertexY;
-                        activeVertices.insert(globalIndex(globalX, globalY));
+                        if(globalX < minimumX || globalX > maximumX
+                           || globalY < minimumY || globalY > maximumY)
+                            continue;
+                        const int key = globalIndex(globalX, globalY);
+                        activeVertices.insert(key);
+                        activeRefSectors[key].insert(sectorIndex);
                     }
             }
         }
+    }
+    for(auto it = refs.constBegin(); it != refs.constEnd(); ++it)
+    {
+        const int key = it.key();
+        const QVector<SOverlayRef>& vertexRefs = it.value();
+        if(vertexRefs.isEmpty())
+            continue;
+        const QSet<int> activeOwners = activeRefSectors.value(key);
+        const SOverlayRef* selected = nullptr;
+        for(const SOverlayRef& ref : vertexRefs)
+        {
+            if(!activeOwners.contains(ref.sectorIndex))
+                continue;
+            if(!selected)
+                selected = &ref;
+            else if(selected->height != ref.height
+                    || selected->xOffset != ref.xOffset
+                    || selected->yOffset != ref.yOffset)
+            {
+                if(report)
+                    report->add("terrain.overlay_seam", EValidationSeverity::Error,
+                        "Overlay sculpting found conflicting active surface vertices",
+                        QString("%1,%2").arg(key % m_vertexCountX)
+                            .arg(key / m_vertexCountX));
+                return command;
+            }
+        }
+        if(!selected)
+            selected = &vertexRefs.front();
+        heights.insert(key, selected->height);
+        xOffsets.insert(key, selected->xOffset);
+        yOffsets.insert(key, selected->yOffset);
     }
 
     QMap<int, quint16> afterHeights = heights;
@@ -1403,15 +1661,20 @@ SOverlaySurfaceCommand CTerrainEditModel::makeOverlayHeightEdit(
     if(changedVertices.isEmpty())
         return command;
 
-    QVector<QByteArray> replacements;
-    replacements.reserve(m_sectors.size());
-    for(const SSector& sector : m_sectors)
-        replacements.append(sector.currentPayload);
+    QMap<int, QByteArray> replacements;
+    const auto replacementFor = [&](int sectorIndex) {
+        return replacements.value(sectorIndex,
+                                  m_sectors.at(sectorIndex).currentPayload);
+    };
     for(int key : changedVertices)
         for(const SOverlayRef& ref : refs.value(key))
-            writeVertexHeight(replacements[ref.sectorIndex],
+        {
+            QByteArray payload = replacementFor(ref.sectorIndex);
+            writeVertexHeight(payload,
                 m_sectors.at(ref.sectorIndex).source.overlayVertexOffset,
                 ref.localX, ref.localY, afterHeights.value(key));
+            replacements.insert(ref.sectorIndex, payload);
+        }
 
     QSet<int> affectedNormals;
     for(int changed : changedVertices)
@@ -1476,20 +1739,25 @@ SOverlaySurfaceCommand CTerrainEditModel::makeOverlayHeightEdit(
         const quint32 packedZ = quint32(qBound(0, int(normal.z * 1000.0), 1023));
         const quint32 packed = (packedZ << 22) | (packedX << 11) | packedY;
         for(const SOverlayRef& ref : refs.value(key))
-            writeVertexNormal(replacements[ref.sectorIndex],
+        {
+            QByteArray payload = replacementFor(ref.sectorIndex);
+            writeVertexNormal(payload,
                 m_sectors.at(ref.sectorIndex).source.overlayVertexOffset,
                 ref.localX, ref.localY, packed);
+            replacements.insert(ref.sectorIndex, payload);
+        }
     }
 
-    for(int index = 0; index < replacements.size(); ++index)
+    for(auto it = replacements.constBegin(); it != replacements.constEnd(); ++it)
     {
-        if(replacements.at(index) == m_sectors.at(index).currentPayload)
+        const int index = it.key();
+        if(it.value() == m_sectors.at(index).currentPayload)
             continue;
         SOverlaySectorDelta delta;
         delta.sectorX = m_sectors.at(index).source.sectorX;
         delta.sectorY = m_sectors.at(index).source.sectorY;
         delta.beforePayload = m_sectors.at(index).currentPayload;
-        delta.afterPayload = replacements.at(index);
+        delta.afterPayload = it.value();
         command.sectors.append(delta);
     }
     return command;

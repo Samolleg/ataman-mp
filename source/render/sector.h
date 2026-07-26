@@ -60,10 +60,14 @@ public:
     bool existsTileIndices(const QVector<int>& arrInd); // function for find incorrect\coorrupt tile indices
     void updateDrawData();
     bool previewCanonicalPayload(const QByteArray& payload);
+    bool previewCanonicalOverlayPayload(const QByteArray& payload);
     void setPreviewMaxZ(float maxZ);
 
 private:
     void updatePosition();
+    void updateWaterDrawData();
+    void generateWaterVertexData();
+    void updateBounds();
     void makeVertexData(QVector<QVector<SSecVertex>>& aLandVertex, QVector<STile>& aLandTile, QVector<QVector<SSecVertex>>& aWaterVertex, QVector<STile>& aWaterTile, float maxZ, int texCount);
     void generateVertexDataFromTile();
 

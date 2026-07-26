@@ -9,23 +9,29 @@ land or overlay material and which corner transitions they contain.
 
 1. Open **Landscape Tools**. If the map has neither an authored template nor an
    approved profile, accept the prompt to generate a review proposal.
-2. Review each proposed material family:
+2. The proposal first finds uniform material tiles, then assigns transition
+   corners to those anchored materials. Transition tiles cannot merge two
+   material families merely because their colours form a gradual chain. By
+   default the dialog shows only genuinely unresolved families and slots; use
+   **Show all inferred families and slots** for expert inspection.
+3. Review each highlighted material family:
    - rename it to a recognizable material such as `Dark grass`, `Limestone`,
      `Water`, or `Swamp`;
    - choose **Land** or **Overlay**;
    - use **Underwater** only for land textures intended to sit below an overlay;
    - clear the family **Needs review** flag only after these choices are correct.
-3. Select a family and inspect every listed atlas slot. The preview is the
+4. Select a family and inspect every listed atlas slot. The preview is the
    actual decoded atlas image. `NW / NE / SE / SW` describes the material at
    each corner after the stored tile rotation is applied.
-4. When a slot preview and its four corner-family assignments are correct,
+5. When a slot preview and its four corner-family assignments are correct,
    select it and click **Mark selected Reviewed**.
-5. Use **Split selected slots** only when those pictures belong to a different
+6. Use **Split selected slots** only when those pictures belong to a different
    visual material from the rest of the family. Use **Merge selected families**
    only when two proposed families are the same material.
-6. Unused slots still need an explicit decision. Map usage cannot prove whether
-   an unused image is a future pure brush, a transition, or unused padding.
-7. **Save draft** preserves incomplete work without enabling automatic paint.
+7. An unused slot is inferred automatically when it matches observed material
+   anchors unambiguously. Only an unused material with no observed layer anchor,
+   or a corner with multiple equally plausible anchors, requires confirmation.
+8. **Save draft** preserves incomplete work without enabling automatic paint.
    **Approve and save** is available after every family and slot ambiguity has
    been resolved.
 

@@ -8801,7 +8801,7 @@ bool CView::applyOverlaySurfacePreview(const SOverlaySurfaceCommand& command,
             m_pendingTerrainPreviewSectors.insert(sector);
             continue;
         }
-        if(!m_pLand->previewCanonicalSector(delta.sectorX, delta.sectorY,
+        if(!m_pLand->previewCanonicalOverlaySector(delta.sectorX, delta.sectorY,
                 m_terrainEdit.sectorPayload(delta.sectorX, delta.sectorY)))
             ei::log(eLogWarning, QString(
                 "Overlay model changed but preview renderer rejected sector %1,%2")
@@ -8830,7 +8830,7 @@ void CView::endTerrainPreviewBatch()
     const QSet<QPair<int, int>> sectors = m_pendingTerrainPreviewSectors;
     m_pendingTerrainPreviewSectors.clear();
     for(const QPair<int, int>& sector : sectors)
-        if(!m_pLand->previewCanonicalSector(
+        if(!m_pLand->previewCanonicalOverlaySector(
             sector.first, sector.second,
             m_terrainEdit.sectorPayload(sector.first, sector.second)))
             ei::log(eLogWarning, QString(

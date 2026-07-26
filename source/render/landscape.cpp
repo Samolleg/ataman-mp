@@ -519,6 +519,15 @@ bool CLandscape::previewCanonicalSector(int xSec, int ySec, const QByteArray& pa
     return m_aSector[ySec][xSec]->previewCanonicalPayload(payload);
 }
 
+bool CLandscape::previewCanonicalOverlaySector(
+    int xSec, int ySec, const QByteArray& payload)
+{
+    if(ySec < 0 || ySec >= m_aSector.size() || xSec < 0
+        || xSec >= m_aSector.at(ySec).size() || !m_aSector.at(ySec).at(xSec))
+        return false;
+    return m_aSector[ySec][xSec]->previewCanonicalOverlayPayload(payload);
+}
+
 bool CLandscape::previewCanonicalMaxZ(float maxZ)
 {
     if(!std::isfinite(maxZ) || maxZ <= 0.0f || m_aSector.isEmpty())
