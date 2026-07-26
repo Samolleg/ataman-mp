@@ -968,6 +968,22 @@ void CMapTableEditorDialog::viewExistingMinimap()
     viewer.exec();
 }
 
+bool CMapTableEditorDialog::stageMinimapTextureForZone(
+    const QString& zoneId, const QString& textureName)
+{
+    if(!selectZoneById(zoneId) || textureName.trimmed().isEmpty())
+        return false;
+    if(!m_loadedMaps.present)
+    {
+        setStatus(tr("This zone has no authored #maps metadata. Minimap generation will not invent it."), true);
+        return false;
+    }
+    m_tabs->setCurrentIndex(1); // Minimap
+    m_minimapEdit->setText(textureName.trimmed());
+    setStatus(tr("Minimap reference staged. Review it, then use Save As to publish the verified catalog update."));
+    return true;
+}
+
 void CMapTableEditorDialog::setStatus(const QString& text, bool error)
 {
     m_statusEdit->setText(text.simplified());

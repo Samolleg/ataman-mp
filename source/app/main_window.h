@@ -99,6 +99,7 @@ private:
     bool isExitAllowed();
     void closeAll();
     void showGameAndModSetup();
+    void generateMinimap();
     void rememberRecentFile(const QFileInfo& fileName);
     void rebuildRecentFilesMenu();
     void loadLastSession();
@@ -334,6 +335,9 @@ private:
     SMapSpawnPlan m_customSpawn;
     QVector3D m_customSpawnPosition;
     QString m_customSpawnContextKey;
+    QByteArray m_pendingMinimapMmp;
+    QString m_pendingMinimapTextureName;
+    QString m_pendingMinimapContextKey;
 };
 
 #endif // MAIN_WINDOW_H

@@ -92,6 +92,7 @@
 #include "collection_document.h"
 #include "collection_editor_dialog.h"
 #include "map_table_editor_dialog.h"
+#include "minimap_export_dialog.h"
 #include "script_reference_analyzer.h"
 #include "unit.h"
 
@@ -706,6 +707,7 @@ MainWindow::MainWindow(QWidget* parent) :
     QAction* validateSelectedMobs = new QAction(tr("Validate Selected MOB Files..."), this);
     QAction* repairMobFamily = new QAction(tr("Review and Repair NID Collisions..."), this);
     QAction* openMapCatalog = new QAction(tr("Map Catalog Editor..."), this);
+    QAction* generateMinimapAction = new QAction(tr("Generate Minimap..."), this);
     m_mapTestAction = new QAction(tr("Test Current Map"), this);
     m_mapTestAction->setToolTip(tr("Stages unique temporary MPR/MOB copies and launches the active validated runtime profile. JMV uses hash-owned temporary aliases in the mod Maps directory; source maps are never overwritten."));
     m_stopMapTestAction = new QAction(tr("Stop Test"), this);
@@ -720,6 +722,7 @@ MainWindow::MainWindow(QWidget* parent) :
     m_ui->menuTools->addAction(validateSelectedMobs);
     m_ui->menuTools->addAction(repairMobFamily);
     m_ui->menuTools->addAction(openMapCatalog);
+    m_ui->menuTools->addAction(generateMinimapAction);
     m_ui->menuTools->addAction(m_mapTestAction);
     m_ui->menuTools->addAction(m_stopMapTestAction);
     m_ui->menuTools->addAction(openBackupFolder);
@@ -734,6 +737,8 @@ MainWindow::MainWindow(QWidget* parent) :
         dialog.exec();
         processMapTableSaveReports(dialog.saveReports());
     });
+    connect(generateMinimapAction, &QAction::triggered,
+            this, &MainWindow::generateMinimap);
     connect(openBackupFolder, &QAction::triggered, this, [this]()
     {
         QString error;
@@ -3137,6 +3142,14 @@ void MainWindow::launchCurrentMapTest()
     input.mapSizeX = int(landscape->widthInWorldUnits() / 32u);
     input.mapSizeY = int(landscape->heightInWorldUnits() / 32u);
     input.allowMissingAiGraph = allowMissingAiGraph;
+    const bool usesPendingMinimap = isJmv
+        && !m_pendingMinimapMmp.isEmpty()
+        && m_pendingMinimapContextKey == currentMapContextKey();
+    if(usesPendingMinimap)
+    {
+        input.temporaryMinimapTextureName = m_pendingMinimapTextureName;
+        input.temporaryMinimapMmp = m_pendingMinimapMmp;
+    }
     if(isBase && !hotReloadRequested)
     {
         const QStringList levels = {
@@ -3165,19 +3178,91 @@ void MainWindow::launchCurrentMapTest()
         QMessageBox::critical(this,
             hotReloadRequested ? tr("Hot reload") : tr("Map test launch"), error);
     }
-    else if(hotReloadRequested)
+    else
     {
-        // Keep this application-modal progress window alive until the bridge
-        // commits or rejects the staged generation. The launcher focuses the
-        // game only after hotReloadFinished, so editor input stays blocked.
-        progress->setRange(0, 0);
-        progress->setLabelText(tr("Applying the staged map generation in the game..."));
-        m_hotReloadProgress = progress.take();
-        statusBar()->showMessage(tr("Hot reload queued on the verified JMV game thread."), 6000);
+        if(usesPendingMinimap)
+        {
+            m_pendingMinimapMmp.clear();
+            m_pendingMinimapTextureName.clear();
+            m_pendingMinimapContextKey.clear();
+            statusBar()->showMessage(tr(
+                "The reviewed minimap was staged in this run's private texture RES and map table."),
+                7000);
+        }
+        if(hotReloadRequested)
+        {
+            // Keep this application-modal progress window alive until the bridge
+            // commits or rejects the staged generation. The launcher focuses the
+            // game only after hotReloadFinished, so editor input stays blocked.
+            progress->setRange(0, 0);
+            progress->setLabelText(tr("Applying the staged map generation in the game..."));
+            m_hotReloadProgress = progress.take();
+            statusBar()->showMessage(tr("Hot reload queued on the verified JMV game thread."), 6000);
+        }
     }
     if(progress)
         progress->setValue(6);
     updateMapTestAction();
+}
+
+void MainWindow::generateMinimap()
+{
+    if(!m_pView || !CLandscape::getInstance()->isMprLoad())
+    {
+        QMessageBox::information(this, tr("Generate Minimap"),
+            tr("Load an MPR or collection before generating a minimap."));
+        return;
+    }
+    const bool collectionCapture = m_workspaceIdentityKind.compare(
+        "collection", Qt::CaseInsensitive) == 0
+        && !m_currentCollectionPath.isEmpty();
+    QApplication::setOverrideCursor(Qt::WaitCursor);
+    const SMinimapSceneCaptureResult capture =
+        m_pView->captureMinimapScene(collectionCapture);
+    QApplication::restoreOverrideCursor();
+    if(!capture.bake.success)
+    {
+        QMessageBox::warning(this, tr("Generate Minimap"), capture.bake.error);
+        return;
+    }
+
+    // Reusing an authored catalog texture name is explicit provenance, not a
+    // generated default. Standalone/unregistered MPRs intentionally start
+    // blank so the author must choose their namespace.
+    const QString suggestedName = m_mapTestEntry.minimapTexture;
+    CMinimapExportDialog dialog(capture, suggestedName,
+                                m_mapTestEntry.zoneId, this);
+    dialog.exec();
+
+    if(dialog.temporaryPreviewRequested())
+    {
+        m_pendingMinimapMmp = dialog.encodedMmp();
+        m_pendingMinimapTextureName = dialog.textureName();
+        m_pendingMinimapContextKey = currentMapContextKey();
+        statusBar()->showMessage(tr(
+            "Reviewed minimap queued for the next JMV Test Current Map; no archive was modified."),
+            8000);
+    }
+
+    if(!dialog.catalogRegistrationRequested())
+        return;
+    if(m_mapCatalog.sourceArchive.isEmpty())
+    {
+        QMessageBox::warning(this, tr("Register minimap"), tr(
+            "Texture export succeeded, but the active catalog archive is unavailable. No catalog reference was changed."));
+        return;
+    }
+    CMapTableEditorDialog catalog(this);
+    if(!catalog.openArchive(m_mapCatalog.sourceArchive)
+       || !catalog.stageMinimapTextureForZone(m_mapTestEntry.zoneId,
+                                               dialog.textureName()))
+    {
+        QMessageBox::warning(this, tr("Register minimap"), tr(
+            "Texture export succeeded, but the selected zone could not be staged in Map Catalog Editor. No catalog reference was changed."));
+        return;
+    }
+    catalog.exec();
+    processMapTableSaveReports(catalog.saveReports());
 }
 
 void MainWindow::refreshMapsBrowser()
