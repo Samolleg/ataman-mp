@@ -30,7 +30,6 @@
 #include <limits>
 
 #include "view.h"
-#include "ui/viewport_overlay_style.h"
 #include "gl_dispatch.h"
 #include "render_scheduling.h"
 #include "camera.h"
@@ -1207,7 +1206,6 @@ void CView::initAiGraphPreviewWidget()
     m_aiGraphPreviewWidget->setObjectName(QStringLiteral("aiGraphPreviewWidget"));
     m_aiGraphPreviewWidget->setFixedWidth(520);
     m_aiGraphPreviewWidget->setFrameShape(QFrame::StyledPanel);
-    configureViewportOverlaySurface(m_aiGraphPreviewWidget);
     m_aiGraphPreviewWidget->setStyleSheet(
         "QFrame#aiGraphPreviewWidget { background-color: rgb(25,25,25); color: white; border: 1px solid #777; }"
         "QWidget#aiGraphPreviewBody, QLabel { background-color: rgb(25,25,25); color: white; }"

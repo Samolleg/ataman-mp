@@ -5,8 +5,6 @@
 #include <QSettings>
 #include <functional>
 
-#include "viewport_overlay_style.h"
-
 namespace {
 QIcon centeredLockIcon(bool locked)
 {
@@ -165,11 +163,10 @@ CViewportMinimapWidget::CViewportMinimapWidget(QWidget* parent)
     setFrameShape(QFrame::StyledPanel);
     setStyleSheet(
         "#viewportMinimapWidget { background: rgb(28, 28, 28); "
-        "border: 1px solid #666; border-radius: 4px; }"
+        "border: 1px solid #666; }"
         "#viewportMinimapWidget QLabel { color: white; }"
         "#viewportMinimapWidget QComboBox { background: #252525; color: white; }" );
     ensurePolished();
-    configureViewportOverlaySurface(this, QColor(28, 28, 28));
 
     QVBoxLayout* root = new QVBoxLayout(this);
     root->setContentsMargins(5, 5, 5, 5);
@@ -258,8 +255,11 @@ CViewportMinimapWidget::CViewportMinimapWidget(QWidget* parent)
         emit sourceModeChanged(usesGeneratedPreview());
     });
     updateSourceChoices(false);
+    // V2 intentionally starts at the new smallest useful size. The previous
+    // setting used different level meanings and could reopen this widget at
+    // what is now the maximum size.
     m_sizeLevel = qBound(0, QSettings().value(
-        "ui/viewportMinimapSizeLevel", 0).toInt(), 2);
+        "ui/viewportMinimapSizeLevelV2", 0).toInt(), 2);
     setGenerationLocked(false);
     setExpanded(true);
 }
@@ -425,7 +425,6 @@ void CViewportMinimapWidget::setExpanded(bool expanded)
                                : QString::fromUtf8("\xE2\x96\xA1"));
     m_expand->setToolTip(expanded ? tr("Minimize minimap") : tr("Expand minimap"));
     setSizeLevel(m_sizeLevel);
-    configureViewportOverlaySurface(this, QColor(28, 28, 28));
 }
 
 void CViewportMinimapWidget::setSizeLevel(int level)
@@ -437,7 +436,7 @@ void CViewportMinimapWidget::setSizeLevel(int level)
         QSize(390, 430), QSize(520, 560), QSize(910, 980)
     };
     setFixedSize(m_expanded ? expandedSizes[m_sizeLevel] : QSize(116, 38));
-    QSettings().setValue("ui/viewportMinimapSizeLevel", m_sizeLevel);
+    QSettings().setValue("ui/viewportMinimapSizeLevelV2", m_sizeLevel);
     emit sizeModeChanged();
 }
 

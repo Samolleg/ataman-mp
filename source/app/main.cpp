@@ -1046,6 +1046,13 @@ int runHeadlessCommand(QApplication& app)
         landscapeTools.setTerrainVisibility(false, true);
         const bool landscapeVisibilityControlsWork =
             !landscapeTools.mainTerrainVisible() && landscapeTools.overlaysVisible();
+        QSettings minimapSizeSettings;
+        const QVariant savedLegacyMinimapSize = minimapSizeSettings.value(
+            "ui/viewportMinimapSizeLevel");
+        const QVariant savedMinimapSizeV2 = minimapSizeSettings.value(
+            "ui/viewportMinimapSizeLevelV2");
+        minimapSizeSettings.setValue("ui/viewportMinimapSizeLevel", 2);
+        minimapSizeSettings.remove("ui/viewportMinimapSizeLevelV2");
         CViewportMinimapWidget viewportMinimap;
         QImage generatedMinimap(256, 256, QImage::Format_ARGB32);
         generatedMinimap.fill(Qt::darkGreen);
@@ -1068,6 +1075,9 @@ int runHeadlessCommand(QApplication& app)
         QToolButton* minimapLarger = viewportMinimap.findChild<QToolButton*>(
             "viewportMinimapLarger");
         const int originalMinimapSizeLevel = viewportMinimap.sizeLevel();
+        const bool viewportMinimapStartsAtSmallest =
+            originalMinimapSizeLevel == 0
+            && viewportMinimap.size() == QSize(390, 430);
         while(minimapSmaller && minimapSmaller->isEnabled())
             minimapSmaller->click();
         const QSize minimapSmallSize = viewportMinimap.size();
@@ -1146,17 +1156,34 @@ int runHeadlessCommand(QApplication& app)
             && !minimapRefresh->isEnabled();
         const bool minimapLockCheckedWhenLocked = minimapLock
             && minimapLock->isChecked();
+        const bool minimapLockSignalWhenLocked = minimapLockRequested;
+        QImage minimapSurface(viewportMinimap.size(), QImage::Format_ARGB32);
+        minimapSurface.fill(Qt::transparent);
+        viewportMinimap.render(&minimapSurface);
         const bool minimapOverlayPaintContract =
             viewportMinimap.testAttribute(Qt::WA_OpaquePaintEvent)
-            && viewportMinimap.autoFillBackground();
+            && viewportMinimap.testAttribute(Qt::WA_StyledBackground)
+            && minimapSurface.pixelColor(1, 1).alpha() == 255
+            && minimapSurface.pixelColor(minimapSurface.width() - 2,
+                                         minimapSurface.height() - 2).alpha() == 255;
         const bool viewportMinimapLockControlsWork = minimapRefresh && minimapLock
-            && minimapRefreshRequested && minimapLockRequested
+            && minimapRefreshRequested && minimapLockSignalWhenLocked
             && minimapRefreshDisabledWhenLocked && minimapLockCheckedWhenLocked
             && minimapOverlayPaintContract;
         if(minimapLock) minimapLock->click();
         viewportMinimap.setGenerationLocked(false);
         const bool viewportMinimapUnlockWorks = !minimapLockRequested
             && minimapRefresh->isEnabled() && !minimapLock->isChecked();
+        if(savedLegacyMinimapSize.isValid())
+            minimapSizeSettings.setValue("ui/viewportMinimapSizeLevel",
+                                         savedLegacyMinimapSize);
+        else
+            minimapSizeSettings.remove("ui/viewportMinimapSizeLevel");
+        if(savedMinimapSizeV2.isValid())
+            minimapSizeSettings.setValue("ui/viewportMinimapSizeLevelV2",
+                                         savedMinimapSizeV2);
+        else
+            minimapSizeSettings.remove("ui/viewportMinimapSizeLevelV2");
         SMinimapSceneCaptureResult exportCapture;
         exportCapture.bake.success = true;
         QImage gradeFixture(16, 16, QImage::Format_ARGB32);
@@ -1572,6 +1599,7 @@ int runHeadlessCommand(QApplication& app)
                 && landscapeVisibilityControlsWork
                 && embeddedMinimapDefaultsWhenAvailable
                 && generatedMinimapCanBeSelected
+                && viewportMinimapStartsAtSmallest
                 && viewportMinimapHasThreeSizes
                 && viewportMinimapCollapsesToTitle
                 && viewportMinimapDragNavigationWorks
@@ -1670,6 +1698,8 @@ int runHeadlessCommand(QApplication& app)
                << " embeddedMinimapDefaultsWhenAvailable="
                << embeddedMinimapDefaultsWhenAvailable
                << " generatedMinimapCanBeSelected=" << generatedMinimapCanBeSelected
+               << " viewportMinimapStartsAtSmallest="
+               << viewportMinimapStartsAtSmallest
                << " viewportMinimapHasThreeSizes=" << viewportMinimapHasThreeSizes
                << " viewportMinimapCollapsesToTitle=" << viewportMinimapCollapsesToTitle
                << " viewportMinimapDragNavigationWorks="
@@ -1678,6 +1708,12 @@ int runHeadlessCommand(QApplication& app)
                << " viewportMinimapBlocksClickThrough="
                << viewportMinimapBlocksClickThrough
                << " viewportMinimapLockControlsWork=" << viewportMinimapLockControlsWork
+               << " minimapRefreshRequested=" << minimapRefreshRequested
+               << " minimapLockSignalWhenLocked=" << minimapLockSignalWhenLocked
+               << " minimapRefreshDisabledWhenLocked="
+               << minimapRefreshDisabledWhenLocked
+               << " minimapLockCheckedWhenLocked=" << minimapLockCheckedWhenLocked
+               << " minimapOverlayPaintContract=" << minimapOverlayPaintContract
                << " minimapRefreshSelectsGenerated=" << minimapRefreshSelectsGenerated
                << " viewportMinimapUnlockWorks=" << viewportMinimapUnlockWorks
                << " minimapExportIsModeless=" << minimapExportIsModeless
