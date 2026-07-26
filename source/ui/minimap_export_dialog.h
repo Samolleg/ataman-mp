@@ -64,6 +64,8 @@ protected:
     void closeEvent(QCloseEvent* event) override;
 
 private:
+    void syncComparisonViews(CZoomableMinimapView* source,
+                             CZoomableMinimapView* destination);
     SMinimapSceneCaptureResult m_capture;
     QString m_zoneId;
     QImage m_embeddedImage;
@@ -86,6 +88,7 @@ private:
     QSpinBox* m_brightnessValue{nullptr};
     QSpinBox* m_hueValue{nullptr};
     QPushButton* m_regenerateButton{nullptr};
+    QPushButton* m_linkViewsButton{nullptr};
     QPushButton* m_applyLockButton{nullptr};
     QPushButton* m_resetGradeButton{nullptr};
     QPushButton* m_browseButton{nullptr};
@@ -99,6 +102,7 @@ private:
     bool m_lockRequested{false};
     bool m_generationLocked{false};
     bool m_available{true};
+    bool m_syncingComparisonViews{false};
     int m_sectorWidth{0};
     int m_sectorHeight{0};
 };

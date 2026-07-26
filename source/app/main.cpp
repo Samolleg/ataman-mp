@@ -1091,6 +1091,20 @@ int runHeadlessCommand(QApplication& app)
             && minimapTitle && minimapImage
             && !minimapTitle->isHidden() && minimapImage->isHidden()
             && viewportMinimap.size() == QSize(116, 38);
+        QMouseEvent minimapBackgroundPress(QEvent::MouseButtonPress,
+                                            QPointF(2, 2), Qt::LeftButton,
+                                            Qt::LeftButton, Qt::NoModifier);
+        minimapBackgroundPress.setAccepted(false);
+        QApplication::sendEvent(&viewportMinimap, &minimapBackgroundPress);
+        QMouseEvent minimapChildPress(QEvent::MouseButtonPress,
+                                     QPointF(2, 2), Qt::LeftButton,
+                                     Qt::LeftButton, Qt::NoModifier);
+        minimapChildPress.setAccepted(false);
+        if(minimapTitle)
+            QApplication::sendEvent(minimapTitle, &minimapChildPress);
+        const bool viewportMinimapBlocksClickThrough =
+            minimapBackgroundPress.isAccepted() && minimapTitle
+            && minimapChildPress.isAccepted();
         if(minimapExpand) minimapExpand->click();
         viewportMinimap.layout()->activate();
         QVector<QPointF> minimapDragPoints;
@@ -1155,7 +1169,7 @@ int runHeadlessCommand(QApplication& app)
         exportCapture.bake.gameContentRect = minimapGameContentRect(11, 9, 16);
         exportCapture.exportProfileDescription = "synthetic";
         CMinimapExportDialog* minimapExport = new CMinimapExportDialog(
-            exportCapture, QImage(), QString(), "syntheticmap", QString(),
+            exportCapture, gradeFixture, "embeddedmap", "syntheticmap", QString(),
             SMinimapGradeSettings(), false);
         minimapExport->setAttribute(Qt::WA_DeleteOnClose, false);
         QSlider* shadingSlider = minimapExport->findChild<QSlider*>(
@@ -1170,11 +1184,25 @@ int runHeadlessCommand(QApplication& app)
             "minimapResetGrade");
         QPushButton* actualPreview = minimapExport->findChild<QPushButton*>(
             "minimapActualPreview");
+        QPushButton* fitPreview = minimapExport->findChild<QPushButton*>(
+            "minimapFitPreview");
+        QPushButton* linkViews = minimapExport->findChild<QPushButton*>(
+            "minimapLinkViews");
         QGraphicsView* generatedPreview = minimapExport->findChild<QGraphicsView*>(
             "minimapExportPreview");
+        QGraphicsView* embeddedPreview = minimapExport->findChild<QGraphicsView*>(
+            "minimapEmbeddedPreview");
+        const auto normalizedViewCenter = [](QGraphicsView* view) {
+            if(!view || view->sceneRect().isEmpty()) return QPointF();
+            const QRectF rect = view->sceneRect();
+            const QPointF center = view->mapToScene(view->viewport()->rect().center());
+            return QPointF((center.x() - rect.left()) / rect.width(),
+                           (center.y() - rect.top()) / rect.height());
+        };
         if(actualPreview) actualPreview->click();
         const QTransform previewTransform = generatedPreview
             ? generatedPreview->transform() : QTransform();
+        const QPointF previewCenter = normalizedViewCenter(generatedPreview);
         if(shadingValue) shadingValue->setValue(137);
         if(hueSlider) hueSlider->setValue(-73);
         QPushButton* applyLock = minimapExport->findChild<QPushButton*>(
@@ -1193,7 +1221,32 @@ int runHeadlessCommand(QApplication& app)
             && hueSlider->value() == -73 && hueValue->value() == -73;
         const bool minimapPreviewCropAndViewPersist = generatedPreview
             && generatedPreview->sceneRect().size() == QSizeF(16, 13)
-            && generatedPreview->transform() == previewTransform;
+            && generatedPreview->transform() == previewTransform
+            && QLineF(normalizedViewCenter(generatedPreview), previewCenter).length()
+                < 0.001;
+        if(generatedPreview)
+        {
+            generatedPreview->scale(100.0, 100.0);
+            generatedPreview->horizontalScrollBar()->setValue(
+                generatedPreview->horizontalScrollBar()->maximum() / 3);
+            generatedPreview->verticalScrollBar()->setValue(
+                generatedPreview->verticalScrollBar()->maximum() * 2 / 3);
+        }
+        const bool minimapViewsLinkByDefault = linkViews && linkViews->isChecked()
+            && generatedPreview && embeddedPreview
+            && generatedPreview->transform() == embeddedPreview->transform()
+            && QLineF(normalizedViewCenter(generatedPreview),
+                      normalizedViewCenter(embeddedPreview)).length() < 0.02;
+        if(fitPreview) fitPreview->click();
+        const QTransform fittedTransform = generatedPreview
+            ? generatedPreview->transform() : QTransform();
+        const QPointF fittedCenter = normalizedViewCenter(generatedPreview);
+        if(shadingValue) shadingValue->setValue(111);
+        if(fitPreview) fitPreview->click();
+        const bool minimapFitDoesNotDrift = fitPreview && generatedPreview
+            && generatedPreview->transform() == fittedTransform
+            && QLineF(normalizedViewCenter(generatedPreview), fittedCenter).length()
+                < 0.001;
         if(resetGrade) resetGrade->click();
         const SMinimapGradeSettings defaultGrade;
         const bool minimapGradeResetWorks = resetGrade
@@ -1522,6 +1575,7 @@ int runHeadlessCommand(QApplication& app)
                 && viewportMinimapHasThreeSizes
                 && viewportMinimapCollapsesToTitle
                 && viewportMinimapDragNavigationWorks
+                && viewportMinimapBlocksClickThrough
                 && minimapRefreshSelectsGenerated
                 && viewportMinimapLockControlsWork
                 && viewportMinimapUnlockWorks
@@ -1529,6 +1583,8 @@ int runHeadlessCommand(QApplication& app)
                 && minimapTypedGradeControlsWork
                 && minimapGradeResetWorks
                 && minimapPreviewCropAndViewPersist
+                && minimapViewsLinkByDefault
+                && minimapFitDoesNotDrift
                 && semanticAtlasReviewButtonAvailable
                 && logicPointUndoAtomic && logicPointRedoAtomic
                 && viewportBackgroundConsumesClick && viewportChildConsumesClick
@@ -1619,6 +1675,8 @@ int runHeadlessCommand(QApplication& app)
                << " viewportMinimapDragNavigationWorks="
                << viewportMinimapDragNavigationWorks
                << " minimapDragPointCount=" << minimapDragPoints.size()
+               << " viewportMinimapBlocksClickThrough="
+               << viewportMinimapBlocksClickThrough
                << " viewportMinimapLockControlsWork=" << viewportMinimapLockControlsWork
                << " minimapRefreshSelectsGenerated=" << minimapRefreshSelectsGenerated
                << " viewportMinimapUnlockWorks=" << viewportMinimapUnlockWorks
@@ -1627,6 +1685,8 @@ int runHeadlessCommand(QApplication& app)
                << " minimapGradeResetWorks=" << minimapGradeResetWorks
                << " minimapPreviewCropAndViewPersist="
                << minimapPreviewCropAndViewPersist
+               << " minimapViewsLinkByDefault=" << minimapViewsLinkByDefault
+               << " minimapFitDoesNotDrift=" << minimapFitDoesNotDrift
                << " semanticAtlasReviewButtonAvailable=" << semanticAtlasReviewButtonAvailable
                << " logicPointUndoAtomic=" << logicPointUndoAtomic
                << " logicPointRedoAtomic=" << logicPointRedoAtomic

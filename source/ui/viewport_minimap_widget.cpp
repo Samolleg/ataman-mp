@@ -159,7 +159,7 @@ private:
 }
 
 CViewportMinimapWidget::CViewportMinimapWidget(QWidget* parent)
-    : QFrame(parent)
+    : CViewportWidget(parent)
 {
     setObjectName("viewportMinimapWidget");
     setFrameShape(QFrame::StyledPanel);

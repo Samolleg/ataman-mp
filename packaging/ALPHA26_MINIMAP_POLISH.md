@@ -30,3 +30,13 @@ export at the only copy of an archive.
     image is visible; expand it and confirm the previous size returns.
 11. Press and hold the left mouse button inside the minimap, then drag across
     it. Confirm camera XY follows continuously rather than moving only once.
+12. Open Export Minimap. Confirm Linked views is enabled by default. Zoom and
+    drag Generated, then Embedded; the other view must follow the same zoom and
+    normalized position in both directions. Disable linking and confirm they
+    can then be navigated independently.
+13. Pan to a recognizable point, change every grading parameter repeatedly,
+    and use Fit/100% several times. Confirm Generated never creeps or drifts
+    within its viewport and both linked views recenter identically.
+14. Click, double-click, right-click, wheel, and drag on blank minimap-widget
+    background and its controls. Confirm no selection, camera gesture, or object
+    transform begins in the 3D viewport underneath.

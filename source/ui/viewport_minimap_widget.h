@@ -1,15 +1,16 @@
 #ifndef VIEWPORT_MINIMAP_WIDGET_H
 #define VIEWPORT_MINIMAP_WIDGET_H
 
-#include <QFrame>
 #include <QImage>
 #include <QPolygonF>
+
+#include "layout_components/viewport_widget.h"
 
 class QComboBox;
 class QLabel;
 class QToolButton;
 
-class CViewportMinimapWidget : public QFrame
+class CViewportMinimapWidget : public CViewportWidget
 {
     Q_OBJECT
 public:

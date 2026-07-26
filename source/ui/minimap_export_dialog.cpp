@@ -4,6 +4,7 @@
 #include <QtConcurrent>
 #include <QCryptographicHash>
 #include <QFutureWatcher>
+#include <functional>
 
 #include "mmp_codec.h"
 #include "res_archive_document.h"
@@ -30,15 +31,28 @@ public:
         const QRectF previousRect = m_scene->sceneRect();
         const QPointF previousCenter = mapToScene(viewport()->rect().center());
         const QTransform previousTransform = transform();
-        m_scene->clear();
-        m_item = nullptr;
         if(image.isNull())
         {
+            m_scene->clear();
+            m_item = nullptr;
             m_scene->setSceneRect(QRectF());
             return;
         }
-        m_item = m_scene->addPixmap(QPixmap::fromImage(image));
-        m_scene->setSceneRect(m_item->boundingRect());
+        const QPixmap pixmap = QPixmap::fromImage(image);
+        const QRectF nextRect(QPointF(0.0, 0.0), QSizeF(pixmap.size()));
+        if(m_item && m_item->boundingRect() == nextRect)
+        {
+            // Grading replaces pixels, not view geometry. Keeping the same
+            // scene item avoids scrollbar rounding that otherwise accumulates
+            // as visible drift after repeated parameter changes.
+            m_item->setPixmap(pixmap);
+            return;
+        }
+        if(!m_item)
+            m_item = m_scene->addPixmap(pixmap);
+        else
+            m_item->setPixmap(pixmap);
+        m_scene->setSceneRect(nextRect);
         if(preserve && !previousRect.isEmpty())
         {
             setTransform(previousTransform);
@@ -57,13 +71,41 @@ public:
     {
         m_userSized = false;
         if(m_item)
+        {
             fitInView(m_item, Qt::KeepAspectRatio);
+            centerOn(m_item);
+        }
+        notifyViewChanged();
     }
 
     void actualSize()
     {
         m_userSized = true;
         resetTransform();
+        if(m_item)
+            centerOn(m_item);
+        notifyViewChanged();
+    }
+
+    void setViewChangedHandler(
+        const std::function<void(CZoomableMinimapView*)>& handler)
+    { m_viewChangedHandler = handler; }
+
+    void copyViewFrom(const CZoomableMinimapView& source)
+    {
+        if(!m_item || !source.m_item || source.m_scene->sceneRect().isEmpty())
+            return;
+        const QRectF sourceRect = source.m_scene->sceneRect();
+        const QPointF sourceCenter = source.mapToScene(
+            source.viewport()->rect().center());
+        const QPointF normalized(
+            (sourceCenter.x() - sourceRect.left()) / sourceRect.width(),
+            (sourceCenter.y() - sourceRect.top()) / sourceRect.height());
+        m_userSized = source.m_userSized;
+        setTransform(source.transform());
+        const QRectF destinationRect = m_scene->sceneRect();
+        centerOn(destinationRect.left() + normalized.x() * destinationRect.width(),
+                 destinationRect.top() + normalized.y() * destinationRect.height());
     }
 
 protected:
@@ -72,6 +114,7 @@ protected:
         m_userSized = true;
         const qreal factor = event->angleDelta().y() >= 0 ? 1.2 : (1.0 / 1.2);
         scale(factor, factor);
+        notifyViewChanged();
         event->accept();
     }
 
@@ -89,10 +132,23 @@ protected:
         QGraphicsView::mousePressEvent(event);
     }
 
+    void scrollContentsBy(int dx, int dy) override
+    {
+        QGraphicsView::scrollContentsBy(dx, dy);
+        notifyViewChanged();
+    }
+
 private:
+    void notifyViewChanged()
+    {
+        if(m_viewChangedHandler)
+            m_viewChangedHandler(this);
+    }
+
     QGraphicsScene* m_scene{nullptr};
     QGraphicsPixmapItem* m_item{nullptr};
     bool m_userSized{false};
+    std::function<void(CZoomableMinimapView*)> m_viewChangedHandler;
 };
 
 namespace {
@@ -214,6 +270,7 @@ CMinimapExportDialog::CMinimapExportDialog(
                                  : tr("Embedded: %1").arg(m_embeddedName), comparison);
     QVBoxLayout* embeddedLayout = new QVBoxLayout(m_embeddedGroup);
     m_embeddedPreview = new CZoomableMinimapView(m_embeddedGroup);
+    m_embeddedPreview->setObjectName("minimapEmbeddedPreview");
     m_embeddedPreview->setImage(visibleMapTexture(
         m_embeddedImage, m_sectorWidth, m_sectorHeight));
     embeddedLayout->addWidget(m_embeddedPreview);
@@ -229,11 +286,18 @@ CMinimapExportDialog::CMinimapExportDialog(
     fitPreview->setObjectName("minimapFitPreview");
     QPushButton* actualPreview = new QPushButton(tr("100%"), this);
     actualPreview->setObjectName("minimapActualPreview");
+    m_linkViewsButton = new QPushButton(tr("Linked views"), this);
+    m_linkViewsButton->setObjectName("minimapLinkViews");
+    m_linkViewsButton->setCheckable(true);
+    m_linkViewsButton->setChecked(true);
+    m_linkViewsButton->setToolTip(tr(
+        "Keep generated and embedded minimaps at the same zoom and position"));
     m_resetGradeButton = new QPushButton(tr("Reset settings"), this);
     m_resetGradeButton->setObjectName("minimapResetGrade");
     m_regenerateButton = new QPushButton(QString::fromUtf8("\xE2\x86\xBB ")
                                          + tr("Regenerate"), this);
     previewControls->addWidget(previewHint, 1);
+    previewControls->addWidget(m_linkViewsButton);
     previewControls->addWidget(fitPreview);
     previewControls->addWidget(actualPreview);
     previewControls->addWidget(m_resetGradeButton);
@@ -242,12 +306,28 @@ CMinimapExportDialog::CMinimapExportDialog(
     connect(fitPreview, &QPushButton::clicked, this,
             [this]() {
         m_generatedPreview->fitImage();
-        m_embeddedPreview->fitImage();
+        if(!m_linkViewsButton->isChecked())
+            m_embeddedPreview->fitImage();
     });
     connect(actualPreview, &QPushButton::clicked, this,
             [this]() {
         m_generatedPreview->actualSize();
-        m_embeddedPreview->actualSize();
+        if(!m_linkViewsButton->isChecked())
+            m_embeddedPreview->actualSize();
+    });
+    m_generatedPreview->setViewChangedHandler(
+        [this](CZoomableMinimapView* source) {
+            syncComparisonViews(source, m_embeddedPreview);
+        });
+    m_embeddedPreview->setViewChangedHandler(
+        [this](CZoomableMinimapView* source) {
+            syncComparisonViews(source, m_generatedPreview);
+        });
+    connect(m_linkViewsButton, &QPushButton::toggled, this, [this](bool linked) {
+        m_linkViewsButton->setText(linked ? tr("Linked views")
+                                          : tr("Independent views"));
+        if(linked)
+            syncComparisonViews(m_generatedPreview, m_embeddedPreview);
     });
     connect(m_regenerateButton, &QPushButton::clicked,
             this, &CMinimapExportDialog::regenerationRequested);
@@ -367,6 +447,16 @@ CMinimapExportDialog::CMinimapExportDialog(
     if(!restoreGeometry(QSettings().value("minimap/exportGeometry").toByteArray()))
         resize(1100, 860);
     updateReadyState();
+}
+
+void CMinimapExportDialog::syncComparisonViews(
+    CZoomableMinimapView* source, CZoomableMinimapView* destination)
+{
+    if(!m_linkViewsButton || !m_linkViewsButton->isChecked()
+       || m_syncingComparisonViews || !source || !destination)
+        return;
+    QScopedValueRollback<bool> guard(m_syncingComparisonViews, true);
+    destination->copyViewFrom(*source);
 }
 
 void CMinimapExportDialog::setCapture(const SMinimapSceneCaptureResult& capture)
