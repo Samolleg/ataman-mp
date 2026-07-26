@@ -150,10 +150,11 @@ CMinimapExportDialog::CMinimapExportDialog(
     root->addWidget(summary);
 
     QLabel* details = new QLabel(tr(
-        "Review: %1 x %2 (%3 x %4 sectors)\nFraming: %5\nOrientation: %6")
+        "Review: %1 x %2 (%3 x %4 sectors)\nOutput: %5\nFraming: %6\nOrientation: %7")
         .arg(capture.bake.reviewImage.width()).arg(capture.bake.reviewImage.height())
         .arg(capture.sectorWidth).arg(capture.sectorHeight)
-        .arg(capture.framingDescription, capture.orientationDescription), this);
+        .arg(capture.exportProfileDescription, capture.framingDescription,
+             capture.orientationDescription), this);
     details->setTextInteractionFlags(Qt::TextSelectableByMouse);
     root->addWidget(details);
 
@@ -164,7 +165,8 @@ CMinimapExportDialog::CMinimapExportDialog(
     root->addWidget(preview, 1);
     QHBoxLayout* previewControls = new QHBoxLayout;
     QLabel* previewHint = new QLabel(
-        tr("256 x 256 game texture - mouse wheel zooms; drag to pan"), this);
+        tr("%1 x %1 game texture - mouse wheel zooms; drag to pan")
+            .arg(capture.bake.gameImage.width()), this);
     QPushButton* fitPreview = new QPushButton(tr("Fit"), this);
     QPushButton* actualPreview = new QPushButton(tr("100%"), this);
     previewControls->addWidget(previewHint, 1);
@@ -282,7 +284,9 @@ void CMinimapExportDialog::exportTexture()
         return;
     }
     QString diagnostic;
-    const QByteArray mmp = ei::encodeMmp8888(m_capture.bake.gameImage, &diagnostic);
+    const QByteArray mmp = m_capture.targetDxt1
+        ? ei::encodeMmpDxt1(m_capture.bake.gameImage, &diagnostic)
+        : ei::encodeMmp8888(m_capture.bake.gameImage, &diagnostic);
     if(mmp.isEmpty())
     {
         m_status->setText(tr("MMP encoding failed: %1").arg(diagnostic));

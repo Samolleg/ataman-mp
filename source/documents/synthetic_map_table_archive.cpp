@@ -87,10 +87,12 @@ bool buildSyntheticMapTextureArchive(const QString& textureName,
     const ei::SMmpInspection inspection = ei::inspectMmp(mmpPayload);
     if(!outputArchive || normalizedName.isEmpty() || normalizedName.contains('/')
        || normalizedName.contains('\\') || !inspection.valid
-       || inspection.width != 256 || inspection.height != 256)
+        || inspection.width != inspection.height || inspection.width < 64
+        || inspection.width > 2048
+        || (inspection.width & (inspection.width - 1)) != 0)
     {
         addError(errors, inspection.valid
-            ? "A safe texture name, 256x256 MMP, and output RES are required."
+            ? "A safe texture name, square power-of-two MMP from 64 to 2048 pixels, and output RES are required."
             : "Temporary minimap MMP validation failed: " + inspection.diagnostic);
         return false;
     }

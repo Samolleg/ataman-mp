@@ -345,6 +345,9 @@ private:
     QTimer* m_minimapRefreshTimer{nullptr};
     QByteArray m_generatedMinimapMmp;
     QString m_generatedMinimapContextKey;
+    int m_minimapTargetTextureSize{1024};
+    bool m_minimapTargetDxt1{true};
+    QString m_minimapExportProfileDescription;
     QString m_minimapSourceContextKey;
     bool m_minimapCaptureRunning{false};
 };

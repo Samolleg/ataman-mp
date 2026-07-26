@@ -47,6 +47,10 @@ bool decodeDirectDrawImage(const QByteArray& descriptorAndPixels, int width, int
 // the explicit masks in the 76-byte MMP descriptor.
 QByteArray encodeMmp8888(const QImage& image, QString* diagnostic = nullptr);
 
+// Deterministic DXT1 writer for the high-resolution zone minimap profile used
+// by shipped JMV assets.
+QByteArray encodeMmpDxt1(const QImage& image, QString* diagnostic = nullptr);
+
 // Compose the shared humanoid atlas with the original 2dintmmx.dll formula.
 // PNT3 pixels are already premultiplied, so routing them through a generic
 // source-over painter would premultiply translucent armor edges twice.

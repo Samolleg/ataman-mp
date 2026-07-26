@@ -95,6 +95,9 @@ struct SMinimapSceneCaptureResult
     bool staticGeometrySourcePresent{false};
     QString framingDescription;
     QString orientationDescription;
+    int targetTextureSize{256};
+    bool targetDxt1{false};
+    QString exportProfileDescription;
 };
 namespace ei { struct SRenderEnvironment; struct SScenePointLight; }
 
@@ -215,7 +218,7 @@ public:
     bool overridesWorldTime() const;
     double effectiveWorldTimeHours() const;
     SMinimapSceneCaptureResult captureMinimapScene(
-        bool includeLoadedStaticGeometry);
+        bool includeLoadedStaticGeometry, int targetTextureSize = 256);
     void addLogicPoint(bool bLookPoint = false);
     void copySelectedIDsToClipboard();
     void changeCurrentMob(CMob* pMob);

@@ -256,11 +256,11 @@ QImage CViewportMinimapWidget::visibleMapImage(const QImage& image) const
 {
     if(image.isNull() || m_sectorWidth <= 0 || m_sectorHeight <= 0
        || image.width() != image.height() || m_sectorWidth == m_sectorHeight)
-        return image;
+        return image.mirrored(false, true);
     const int largest = qMax(m_sectorWidth, m_sectorHeight);
     const int width = qBound(1,
         qRound(double(image.width()) * m_sectorWidth / largest), image.width());
     const int height = qBound(1,
         qRound(double(image.height()) * m_sectorHeight / largest), image.height());
-    return image.copy(0, 0, width, height);
+    return image.copy(0, 0, width, height).mirrored(false, true);
 }

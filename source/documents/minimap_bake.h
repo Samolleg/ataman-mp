@@ -46,6 +46,7 @@ struct SMinimapBakeOptions
 {
     EMinimapCaptureOrientation sourceOrientation{
         EMinimapCaptureOrientation::PositiveYUp};
+    int textureSize{256};
 };
 
 // Fixed full-MPR framing used by both the renderer capture and synthetic
@@ -56,7 +57,8 @@ QPointF minimapWorldToReviewPixel(const QPointF& worldPosition,
 
 // The game stores minimaps in a square texture but maps both world axes using
 // the larger #maps dimension. Non-square maps therefore occupy a top-left
-// active rectangle instead of being stretched to a square.
+// active rectangle instead of being stretched to a square. Shipped maps use
+// several texture sizes, so callers must retain the selected export profile.
 QRect minimapGameContentRect(int sectorWidth, int sectorHeight,
                              int textureSize = 256);
 

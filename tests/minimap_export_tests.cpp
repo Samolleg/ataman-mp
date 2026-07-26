@@ -38,6 +38,8 @@ private slots:
     void normalizesOrientationAndFramesWholeMpr();
     void composesTerrainOverlayAndStaticInOrder();
     void encodesInspectable256Mmp();
+    void encodesDeterministicJmvDxt1Profile();
+    void preservesHighResolutionAspectPadding();
     void createsAddsReplacesAndRefusesCollision();
     void appendValidationMatchesByNameAfterHashTableReorder();
     void validationFailureDoesNotPublish();
@@ -98,7 +100,7 @@ void MinimapExportTests::bakes128PixelsPerSectorAndExcludesDynamic()
     QCOMPARE(first.reviewImage.size(), size);
     QCOMPARE(first.gameImage.size(), QSize(256, 256));
     QCOMPARE(first.gameContentRect, QRect(0, 0, 256, 128));
-    QCOMPARE(first.gameImage.pixelColor(0, 200).alpha(), 0);
+    QCOMPARE(first.gameImage.pixelColor(0, 200), QColor(Qt::black));
     QCOMPARE(first.gameImage.pixelColor(0, 0),
              first.reviewImage.pixelColor(0, 0));
     QCOMPARE(first.gameImage.pixelColor(255, 127),
@@ -180,6 +182,37 @@ void MinimapExportTests::validationFailureDoesNotPublish()
     const auto result = exportMmpToRes(request);
     QVERIFY(!result.success);
     QVERIFY(!QFileInfo::exists(path));
+}
+
+void MinimapExportTests::encodesDeterministicJmvDxt1Profile()
+{
+    QImage image(1024, 1024, QImage::Format_ARGB32);
+    for(int y = 0; y < image.height(); ++y)
+        for(int x = 0; x < image.width(); ++x)
+            image.setPixelColor(x, y, QColor(x / 4, y / 4, (x + y) / 8));
+    QString diagnostic;
+    const QByteArray first = ei::encodeMmpDxt1(image, &diagnostic);
+    const QByteArray second = ei::encodeMmpDxt1(image, &diagnostic);
+    QCOMPARE(first, second);
+    const auto inspection = ei::inspectMmp(first);
+    QVERIFY2(inspection.valid, qPrintable(inspection.diagnostic));
+    QCOMPARE(inspection.formatName, QString("DXT1"));
+    QCOMPARE(inspection.baseImage.size(), QSize(1024, 1024));
+    QVERIFY(first.size() < image.sizeInBytes());
+}
+
+void MinimapExportTests::preservesHighResolutionAspectPadding()
+{
+    SMinimapBakeOptions options;
+    options.sourceOrientation = EMinimapCaptureOrientation::PositiveYDown;
+    options.textureSize = 1024;
+    const auto result = bakeMinimapLayers(11, 9,
+        {{EMinimapBakeLayerKind::Terrain, "terrain",
+          solid(QSize(1408, 1152), QColor(40, 80, 120))}}, options);
+    QVERIFY2(result.success, qPrintable(result.error));
+    QCOMPARE(result.gameImage.size(), QSize(1024, 1024));
+    QCOMPARE(result.gameContentRect, QRect(0, 0, 1024, 838));
+    QCOMPARE(result.gameImage.pixelColor(500, 900), QColor(Qt::black));
 }
 
 void MinimapExportTests::appendValidationMatchesByNameAfterHashTableReorder()

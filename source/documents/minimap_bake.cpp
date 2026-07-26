@@ -33,6 +33,12 @@ SMinimapBakeResult bakeMinimapLayers(
         result.error = "Positive, bounded sector dimensions are required.";
         return result;
     }
+    if(options.textureSize < 64 || options.textureSize > 2048
+       || (options.textureSize & (options.textureSize - 1)) != 0)
+    {
+        result.error = "A power-of-two minimap texture size from 64 to 2048 is required.";
+        return result;
+    }
     const QSize reviewSize(sectorWidth * 128, sectorHeight * 128);
     QImage review(reviewSize, QImage::Format_ARGB32_Premultiplied);
     if(review.isNull())
@@ -78,11 +84,13 @@ SMinimapBakeResult bakeMinimapLayers(
     if(result.incomplete)
         result.notes.append("MPR-only bake: no MOB static-geometry source is loaded.");
     result.reviewImage = review;
-    result.gameContentRect = minimapGameContentRect(sectorWidth, sectorHeight);
-    result.gameImage = QImage(256, 256, QImage::Format_ARGB32_Premultiplied);
-    result.gameImage.fill(Qt::transparent);
+    result.gameContentRect = minimapGameContentRect(
+        sectorWidth, sectorHeight, options.textureSize);
+    result.gameImage = QImage(options.textureSize, options.textureSize,
+                              QImage::Format_ARGB32_Premultiplied);
+    result.gameImage.fill(Qt::black);
     QPainter gamePainter(&result.gameImage);
-    gamePainter.setRenderHint(QPainter::SmoothPixmapTransform, false);
+    gamePainter.setRenderHint(QPainter::SmoothPixmapTransform, true);
     gamePainter.drawImage(result.gameContentRect, review);
     gamePainter.end();
     result.success = !result.gameImage.isNull();

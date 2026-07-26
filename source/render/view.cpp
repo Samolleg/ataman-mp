@@ -4781,7 +4781,7 @@ void CView::draw()
     const COptBool* mipmappingOption = m_pSettings
         ? dynamic_cast<const COptBool*>(m_pSettings->opt("renderTextureMipmapping")) : nullptr;
     CTextureList::getInstance()->setTerrainMipmappingEnabled(
-        !m_minimapCaptureActive && (!mipmappingOption || mipmappingOption->value()));
+        m_minimapCaptureActive || (!mipmappingOption || mipmappingOption->value()));
     AnimationFrameContext::instance().beginFrame(cameraPosition,
         m_minimapCaptureActive ? 0 : QDateTime::currentMSecsSinceEpoch(),
         animationEnabled);
@@ -4809,7 +4809,10 @@ void CView::draw()
         ? dynamic_cast<const COptInt*>(m_pSettings->opt("renderLightingMode")) : nullptr;
     const int requestedLightingMode = qBound(0,
         lightingModeOption ? lightingModeOption->value() : 2, 2);
-    const int lightingMode = m_minimapCaptureActive ? 0
+    // Minimap capture needs authored region/cave colors on every renderer.
+    // ANGLE cannot use the shadow-atlas path, but capture disables shadows,
+    // fog, sky, and point lights, leaving the compatible environment diffuse.
+    const int lightingMode = m_minimapCaptureActive ? 2
         : (m_openGlesCompatibility ? qMin(requestedLightingMode, 1)
                                    : requestedLightingMode);
     const bool environmentEnabled = lightingMode == 2;
@@ -4834,11 +4837,11 @@ void CView::draw()
     // by default while allowing large-scene authors to tune the preview.
     const float maximumShadowDistance = float(qBound(1,
         shadowDistanceOption ? shadowDistanceOption->value() : 320, 1024));
-    const bool overrideWorldTime = m_minimapCaptureActive
-        || renderBool("overrideWorldTime", false);
+    const bool overrideWorldTime = !m_minimapCaptureActive
+        && renderBool("overrideWorldTime", false);
     const COptInt* timeOption = m_pSettings
         ? dynamic_cast<const COptInt*>(m_pSettings->opt("renderTimeOfDay")) : nullptr;
-    const float previewTime = m_minimapCaptureActive ? 12.0f : timeOption
+    const float previewTime = timeOption
         ? ei::clockValueToHours(timeOption->value()) : 12.0f;
     const CWorldSet* worldSet = m_environmentMob
         ? &m_environmentMob->worldSet() : nullptr;
@@ -5255,9 +5258,10 @@ void CView::draw()
 }
 
 SMinimapSceneCaptureResult CView::captureMinimapScene(
-    bool includeLoadedStaticGeometry)
+    bool includeLoadedStaticGeometry, int targetTextureSize)
 {
     SMinimapSceneCaptureResult result;
+    result.targetTextureSize = targetTextureSize;
     result.framingDescription = tr(
         "Full MPR bounds at 128 pixels per sector; square game texture uses the larger #maps dimension without stretching");
     result.orientationDescription = tr(
@@ -5388,7 +5392,7 @@ SMinimapSceneCaptureResult CView::captureMinimapScene(
 
     QVector<SMinimapBakeLayer> layers;
     layers.append({EMinimapBakeLayerKind::Terrain,
-                   tr("loaded MPR terrain and overlays with deterministic unlit capture"), captured});
+                   tr("loaded MPR terrain and overlays with authored environment lighting, without projected shadows"), captured});
     result.staticGeometrySourcePresent = includeLoadedStaticGeometry
         && !m_aMob.isEmpty();
     if(result.staticGeometrySourcePresent)
@@ -5399,7 +5403,10 @@ SMinimapSceneCaptureResult CView::captureMinimapScene(
                        tr("%1 static object(s) from loaded MOB source(s)")
                            .arg(result.staticObjectCount), marker});
     }
-    result.bake = bakeMinimapLayers(result.sectorWidth, result.sectorHeight, layers);
+    SMinimapBakeOptions bakeOptions;
+    bakeOptions.textureSize = targetTextureSize;
+    result.bake = bakeMinimapLayers(result.sectorWidth, result.sectorHeight,
+                                    layers, bakeOptions);
     if(result.bake.success)
     {
         result.bake.notes.append(tr("Excluded %1 dynamic unit(s).")

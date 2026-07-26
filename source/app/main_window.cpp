@@ -3288,15 +3288,34 @@ void MainWindow::refreshViewportMinimapSources()
     QString textureName = m_mapTestEntry.minimapTexture.trimmed();
     QString source;
     QImage embedded;
+    ei::SMmpInspection embeddedInspection;
     if(!textureName.isEmpty())
     {
         QString memberName = textureName;
         if(!memberName.endsWith(".mmp", Qt::CaseInsensitive))
             memberName += ".mmp";
         const QByteArray bytes = CObjectList::getInstance()->resourceData(memberName, &source);
-        const ei::SMmpInspection inspection = ei::inspectMmp(bytes);
-        if(inspection.valid)
-            embedded = inspection.baseImage;
+        embeddedInspection = ei::inspectMmp(bytes);
+        if(embeddedInspection.valid)
+            embedded = embeddedInspection.baseImage;
+    }
+    m_minimapTargetTextureSize = 1024;
+    m_minimapTargetDxt1 = true;
+    m_minimapExportProfileDescription = tr(
+        "1024 x 1024 DXT1 (JMV zone default; no embedded profile available)");
+    if(embeddedInspection.valid && embeddedInspection.width == embeddedInspection.height
+       && embeddedInspection.width >= 64 && embeddedInspection.width <= 2048
+       && (embeddedInspection.width & (embeddedInspection.width - 1)) == 0)
+    {
+        m_minimapTargetTextureSize = embeddedInspection.width;
+        m_minimapTargetDxt1 = embeddedInspection.formatName == QStringLiteral("DXT1");
+        if(embeddedInspection.formatName != QStringLiteral("DXT1")
+           && embeddedInspection.formatName != QStringLiteral("8888"))
+            m_minimapTargetDxt1 = true;
+        m_minimapExportProfileDescription = tr("%1 x %1 %2 (matched embedded %3)")
+            .arg(m_minimapTargetTextureSize)
+            .arg(m_minimapTargetDxt1 ? QStringLiteral("DXT1")
+                                      : QStringLiteral("8888"), textureName);
     }
     if(!embedded.isNull())
         m_viewportMinimap->setEmbeddedPreview(textureName, embedded, source);
@@ -3314,8 +3333,10 @@ void MainWindow::refreshViewportMinimap()
         return;
     m_minimapCaptureRunning = true;
     const bool includeLoadedStaticGeometry = !m_pView->mobs().isEmpty();
-    const SMinimapSceneCaptureResult capture =
-        m_pView->captureMinimapScene(includeLoadedStaticGeometry);
+    SMinimapSceneCaptureResult capture = m_pView->captureMinimapScene(
+        includeLoadedStaticGeometry, m_minimapTargetTextureSize);
+    capture.targetDxt1 = m_minimapTargetDxt1;
+    capture.exportProfileDescription = m_minimapExportProfileDescription;
     if(!capture.bake.success)
     {
         m_generatedMinimapMmp.clear();
@@ -3325,7 +3346,9 @@ void MainWindow::refreshViewportMinimap()
         return;
     }
     QString diagnostic;
-    const QByteArray mmp = ei::encodeMmp8888(capture.bake.gameImage, &diagnostic);
+    const QByteArray mmp = m_minimapTargetDxt1
+        ? ei::encodeMmpDxt1(capture.bake.gameImage, &diagnostic)
+        : ei::encodeMmp8888(capture.bake.gameImage, &diagnostic);
     if(mmp.isEmpty())
     {
         m_generatedMinimapMmp.clear();
@@ -3338,9 +3361,10 @@ void MainWindow::refreshViewportMinimap()
     m_generatedMinimapMmp = mmp;
     m_generatedMinimapContextKey = currentMapContextKey();
     m_viewportMinimap->setGeneratedPreview(
-        capture.bake.reviewImage, capture.bake.incomplete,
-        tr("Generated: %1 static objects; %2 units excluded")
-            .arg(capture.staticObjectCount).arg(capture.excludedDynamicUnitCount));
+        capture.bake.gameImage, capture.bake.incomplete,
+        tr("Generated: %1 static objects; %2 units excluded\n%3")
+            .arg(capture.staticObjectCount).arg(capture.excludedDynamicUnitCount)
+            .arg(m_minimapExportProfileDescription));
     m_viewportMinimap->show();
     positionViewportMinimap();
     m_viewportMinimap->raise();
@@ -3383,8 +3407,10 @@ void MainWindow::generateMinimap()
     }
     const bool includeLoadedStaticGeometry = !m_pView->mobs().isEmpty();
     QApplication::setOverrideCursor(Qt::WaitCursor);
-    const SMinimapSceneCaptureResult capture =
-        m_pView->captureMinimapScene(includeLoadedStaticGeometry);
+    SMinimapSceneCaptureResult capture = m_pView->captureMinimapScene(
+        includeLoadedStaticGeometry, m_minimapTargetTextureSize);
+    capture.targetDxt1 = m_minimapTargetDxt1;
+    capture.exportProfileDescription = m_minimapExportProfileDescription;
     QApplication::restoreOverrideCursor();
     if(!capture.bake.success)
     {

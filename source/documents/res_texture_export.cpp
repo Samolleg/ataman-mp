@@ -45,10 +45,11 @@ SResTextureExportResult exportMmpToRes(const SResTextureExportRequest& request)
     if(!memberName.endsWith(".mmp", Qt::CaseInsensitive)) memberName += ".mmp";
     const ei::SMmpInspection mmp = ei::inspectMmp(request.mmpPayload);
     if(request.destination.absoluteFilePath().isEmpty() || memberName == ".mmp"
-       || !mmp.valid || mmp.width != 256 || mmp.height != 256)
+       || !mmp.valid || mmp.width != mmp.height || mmp.width < 64
+       || mmp.width > 2048 || (mmp.width & (mmp.width - 1)) != 0)
     {
         result.error = mmp.valid
-            ? "Export requires a destination, texture name, and 256x256 MMP."
+            ? "Export requires a destination, texture name, and a square power-of-two MMP from 64 to 2048 pixels."
             : "MMP validation failed: " + mmp.diagnostic;
         return result;
     }
