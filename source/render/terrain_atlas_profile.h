@@ -85,7 +85,15 @@ public:
 class CTerrainAtlasProfileInference
 {
 public:
+    static QString currentProvenance();
+    static bool isCompatibleInferenceProvenance(const QString& provenance);
     static QByteArray pixelSha256(const QVector<QImage>& images);
+    static STerrainAtlasProfile fromAuthoredAnalysis(
+        const QString& mprNamespace,
+        const QByteArray& atlasPixelSha256,
+        int atlasSlotCount,
+        const STerrainAtlasAnalysis& analysis,
+        CValidationReport* report = nullptr);
     static STerrainAtlasProfile propose(
         const QString& mprNamespace,
         const QVector<QImage>& tileImages,

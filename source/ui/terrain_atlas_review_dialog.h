@@ -31,6 +31,7 @@ private slots:
     void markSelectedSlotsForReview();
     void saveDraft();
     void approveAndSave();
+    void exportCopy();
 
 private:
     void rebuildTables(qint32 selectFamilyId = -1);

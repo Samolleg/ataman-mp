@@ -575,6 +575,89 @@ QByteArray CTerrainAtlasProfileInference::pixelSha256(const QVector<QImage>& ima
     return hash.result().toHex();
 }
 
+QString CTerrainAtlasProfileInference::currentProvenance()
+{
+    return QStringLiteral(
+        "decoded-atlas-pixels+mpr-tile-types+observed-map-usage-v3-cross-type-anchors");
+}
+
+bool CTerrainAtlasProfileInference::isCompatibleInferenceProvenance(
+    const QString& provenance)
+{
+    return !provenance.startsWith(QStringLiteral("decoded-atlas-pixels+"))
+        || provenance == currentProvenance();
+}
+
+STerrainAtlasProfile CTerrainAtlasProfileInference::fromAuthoredAnalysis(
+    const QString& mprNamespace, const QByteArray& atlasPixelSha256,
+    int atlasSlotCount, const STerrainAtlasAnalysis& analysis,
+    CValidationReport* report)
+{
+    STerrainAtlasProfile profile;
+    profile.mprNamespace = mprNamespace;
+    profile.atlasPixelSha256 = atlasPixelSha256;
+    profile.atlasSlotCount = atlasSlotCount;
+    profile.provenance = QStringLiteral("authored-template:%1").arg(analysis.templateName);
+    profile.approved = analysis.usable;
+
+    QMap<qint32, STerrainAtlasProfileFamily> families;
+    for(const STerrainAtlasMaterial& material : analysis.materials)
+    {
+        STerrainAtlasProfileFamily family;
+        family.id = material.id;
+        family.name = material.name;
+        family.layer = material.layer;
+        family.underwater = material.underwater;
+        families.insert(family.id, family);
+    }
+    for(int slot = 0; slot < atlasSlotCount; ++slot)
+    {
+        SMprPackedTile packed;
+        packed.atlasIndex = quint8(slot / 64);
+        packed.tileIndex = quint8(slot % 64);
+        bool landFound = false;
+        bool overlayFound = false;
+        const STerrainTransitionSignature land =
+            analysis.landCatalog.gridSignatureForPacked(packed.encode(), &landFound);
+        const STerrainTransitionSignature overlay =
+            analysis.overlayCatalog.gridSignatureForPacked(packed.encode(), &overlayFound);
+        if(landFound == overlayFound)
+        {
+            if(report) report->add("terrain.atlas_authored_slot", EValidationSeverity::Error,
+                "Authored atlas slot must belong to exactly one surface layer",
+                QString::number(slot));
+            profile.approved = false;
+            continue;
+        }
+        STerrainAtlasProfileSlot definition;
+        definition.slot = slot;
+        definition.signature = landFound ? land : overlay;
+        profile.slotDefinitions.append(definition);
+        const qint32 ids[] = {definition.signature.northWest,
+                              definition.signature.northEast,
+                              definition.signature.southEast,
+                              definition.signature.southWest};
+        for(qint32 id : ids)
+        {
+            if(!families.contains(id))
+            {
+                STerrainAtlasProfileFamily family;
+                family.id = id;
+                family.name = QStringLiteral("Internal %1 family %2")
+                    .arg(landFound ? QStringLiteral("land")
+                                   : QStringLiteral("overlay"))
+                    .arg(id);
+                family.layer = landFound ? ETerrainAtlasLayer::Land
+                                         : ETerrainAtlasLayer::Overlay;
+                families.insert(id, family);
+            }
+        }
+    }
+    profile.families = families.values().toVector();
+    profile.normalizeMembership(report);
+    return profile;
+}
+
 STerrainAtlasProfile CTerrainAtlasProfileInference::propose(
     const QString& mprNamespace, const QVector<QImage>& images,
     const QVector<qint32>& tileTypes, const QVector<STerrainAtlasSlotUsage>& usage,
@@ -584,7 +667,7 @@ STerrainAtlasProfile CTerrainAtlasProfileInference::propose(
     result.mprNamespace = mprNamespace.trimmed();
     result.atlasPixelSha256 = pixelSha256(images);
     result.atlasSlotCount = images.size();
-    result.provenance = QStringLiteral("decoded-atlas-pixels+mpr-tile-types+observed-map-usage-v2-anchored");
+    result.provenance = currentProvenance();
     if(result.mprNamespace.isEmpty() || images.isEmpty() || tileTypes.size() != images.size()
        || usage.size() != images.size())
     {
@@ -654,8 +737,11 @@ STerrainAtlasProfile CTerrainAtlasProfileInference::propose(
         familyEvidence.append(detail);
         return family.id;
     };
-    const auto addAnchor = [&familyEvidence](int index, const SCornerColor& color) {
+    const auto addAnchor = [&result, &familyEvidence](int index, qint32 type,
+            const SCornerColor& color) {
         SFamilyEvidence& detail = familyEvidence[index];
+        if(result.families[index].tileType != type)
+            result.families[index].tileType = -1;
         detail.anchors.append(color);
         qint64 red = 0, green = 0, blue = 0;
         for(const SCornerColor& anchor : detail.anchors)
@@ -667,14 +753,14 @@ STerrainAtlasProfile CTerrainAtlasProfileInference::propose(
                                       int(blue / detail.anchors.size()));
     };
     const auto matchingFamily = [&result, &familyEvidence, familyThreshold,
-                                 ambiguityMargin](qint32 type,
-            ETerrainAtlasLayer layer, const SCornerColor& color,
+                                 ambiguityMargin](ETerrainAtlasLayer layer,
+            const SCornerColor& color,
             bool requireCompleteLink, bool* confident) {
         int best = -1, bestDistance = 0, secondDistance = 0;
         for(int index = 0; index < result.families.size(); ++index)
         {
             const STerrainAtlasProfileFamily& family = result.families.at(index);
-            if(family.tileType != type || family.layer != layer)
+            if(family.layer != layer)
                 continue;
             bool completeLink = true;
             if(requireCompleteLink)
@@ -704,14 +790,14 @@ STerrainAtlasProfile CTerrainAtlasProfileInference::propose(
         const SSlotEvidence& item = evidence.at(slot);
         if(!item.pure || !item.layerKnown)
             continue;
-        int family = matchingFamily(item.type, item.layer, item.corners[0], true, nullptr);
+        int family = matchingFamily(item.layer, item.corners[0], true, nullptr);
         if(family < 0)
         {
             appendFamily(item.type, item.layer, item.corners[0], false);
             family = result.families.size() - 1;
         }
         else
-            addAnchor(family, item.corners[0]);
+            addAnchor(family, item.type, item.corners[0]);
     }
 
     // If a layer has no observed uniform tile, retain a reviewable fallback
@@ -726,7 +812,7 @@ STerrainAtlasProfile CTerrainAtlasProfileInference::propose(
             layerValue <= int(ETerrainAtlasLayer::Overlay); ++layerValue)
         {
             bool confident = false;
-            const int candidate = matchingFamily(item.type,
+            const int candidate = matchingFamily(
                 ETerrainAtlasLayer(layerValue), item.corners[0], true, &confident);
             if(candidate >= 0)
             {
@@ -748,7 +834,7 @@ STerrainAtlasProfile CTerrainAtlasProfileInference::propose(
                                    QString::number(slot));
         }
         else
-            addAnchor(best, item.corners[0]);
+            addAnchor(best, item.type, item.corners[0]);
     }
 
     for(int slot = 0; slot < evidence.size(); ++slot)
@@ -767,8 +853,7 @@ STerrainAtlasProfile CTerrainAtlasProfileInference::propose(
             for(int family = 0; family < result.families.size(); ++family)
             {
                 const STerrainAtlasProfileFamily& candidate = result.families.at(family);
-                if(candidate.tileType != item.type
-                   || (item.layerKnown && candidate.layer != item.layer))
+                if(item.layerKnown && candidate.layer != item.layer)
                     continue;
                 const int distance = colorDistance(item.corners[corner],
                     familyEvidence.at(family).centroid);

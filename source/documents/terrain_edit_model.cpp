@@ -1155,6 +1155,14 @@ SOverlaySurfaceCommand CTerrainEditModel::makeOverlayActivation(
         bool restoresOriginalSurface{false};
     };
     QMap<int, QByteArray> replacements;
+    const auto replacementFor = [this, &replacements](int sectorIndex)
+        -> QByteArray& {
+        auto it = replacements.find(sectorIndex);
+        if(it == replacements.end())
+            it = replacements.insert(sectorIndex,
+                                     m_sectors.at(sectorIndex).currentPayload);
+        return it.value();
+    };
     QVector<SActivatedCell> activatedCells;
     const int minimumX = qMax(0, int(std::ceil(brush.centerX - brush.radius)));
     const int maximumX = qMin(tileCountX() - 1,
@@ -1172,7 +1180,7 @@ SOverlaySurfaceCommand CTerrainEditModel::makeOverlayActivation(
             if(!tileLocation(x, y, &sectorIndex, &localTile, report))
                 return SOverlaySurfaceCommand();
             const SSector& sector = m_sectors.at(sectorIndex);
-            QByteArray payload = replacements.value(sectorIndex, sector.currentPayload);
+            QByteArray& payload = replacementFor(sectorIndex);
             quint64 overlayTileOffset = sector.source.overlayTileOffset;
             quint64 overlayMaterialOffset = sector.source.overlayMaterialOffset;
             if(quint8(payload.at(4)) == 0)
@@ -1215,7 +1223,6 @@ SOverlaySurfaceCommand CTerrainEditModel::makeOverlayActivation(
             }
             writePackedTile(payload, overlayTileOffset, localTile, selected.encode());
             writeOverlayMaterial(payload, overlayMaterialOffset, localTile, materialIndex);
-            replacements.insert(sectorIndex, payload);
             if(!wasActive)
                 activatedCells.append({sectorIndex, localTile, x, y,
                                        restoresOriginalSurface});
@@ -1370,15 +1377,13 @@ SOverlaySurfaceCommand CTerrainEditModel::makeOverlayActivation(
         for(int sectorIndex : indices)
         {
             const SSector& sector = m_sectors.at(sectorIndex);
-            QByteArray payload = replacements.value(sectorIndex,
-                                                    sector.currentPayload);
+            QByteArray& payload = replacementFor(sectorIndex);
             if(payload.size() < kOverlaySectorSize || quint8(payload.at(4)) != 3)
                 continue;
             const int localX = globalX - sector.source.sectorX * kSectorStride;
             const int localY = globalY - sector.source.sectorY * kSectorStride;
             writeVertexBytes(payload, kLandVertexOffset + kVertexBlockSize,
                              localX, localY, desired);
-            replacements.insert(sectorIndex, payload);
         }
     }
 
@@ -1405,6 +1410,14 @@ SOverlaySurfaceCommand CTerrainEditModel::makeOverlayDeactivation(
     if(brush.radius < 0.0f)
         return command;
     QMap<int, QByteArray> replacements;
+    const auto replacementFor = [this, &replacements](int sectorIndex)
+        -> QByteArray& {
+        auto it = replacements.find(sectorIndex);
+        if(it == replacements.end())
+            it = replacements.insert(sectorIndex,
+                                     m_sectors.at(sectorIndex).currentPayload);
+        return it.value();
+    };
     const int minimumX = qMax(0, int(std::ceil(brush.centerX - brush.radius)));
     const int maximumX = qMin(tileCountX() - 1,
                               int(std::floor(brush.centerX + brush.radius)));
@@ -1423,15 +1436,17 @@ SOverlaySurfaceCommand CTerrainEditModel::makeOverlayDeactivation(
             const SSector& sector = m_sectors.at(sectorIndex);
             if(sector.source.type != 3)
                 continue;
-            QByteArray payload = replacements.value(sectorIndex, sector.currentPayload);
-            if(readOverlayMaterial(payload, sector.source.overlayMaterialOffset,
+            const auto existing = replacements.constFind(sectorIndex);
+            const QByteArray& current = existing == replacements.constEnd()
+                ? sector.currentPayload : existing.value();
+            if(readOverlayMaterial(current, sector.source.overlayMaterialOffset,
                                    localTile) == -1)
                 continue;
+            QByteArray& payload = replacementFor(sectorIndex);
             // Deactivation changes only the proven native sentinel. Tile and
             // vertex bytes remain available for exact undo or later reuse.
             writeOverlayMaterial(payload, sector.source.overlayMaterialOffset,
                                  localTile, -1);
-            replacements.insert(sectorIndex, payload);
         }
     for(auto it = replacements.constBegin(); it != replacements.constEnd(); ++it)
     {

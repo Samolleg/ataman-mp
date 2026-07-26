@@ -6248,15 +6248,20 @@ void CView::drawTerrainPaintOutline(QOpenGLShaderProgram* program)
             const float angle = float(segment) * float(2.0 * M_PI / segments);
             QVector3D point(m_sculptOutlineCenter.x() + qCos(angle) * radius,
                             m_sculptOutlineCenter.y() + qSin(angle) * radius, 0.0f);
-            if(!m_pLand->projectPt(point,
-                m_landscapeTools->editMode() == ELandscapeEditMode::Sculpt))
-                return;
+            const bool landSculpt = m_landscapeTools->editMode()
+                == ELandscapeEditMode::Sculpt;
+            if(!m_pLand->projectPt(point, landSculpt)
+               && (landSculpt || !m_pLand->projectPt(point, true)))
+                continue;
             point.setZ(point.z() + 0.12f);
             circle.append(point);
         }
         program->setUniformValue("customColor", QVector4D(1.0f, 0.52f, 0.10f, 0.95f));
         program->setAttributeArray(position, circle.constData());
-        glDepthFunc(GL_LEQUAL);
+        // Keep the complete footprint legible when an overlay is thinner
+        // than the brush. Overlay points are preferred; land is only the
+        // terrain-aligned visual fallback outside the active surface.
+        glDepthFunc(GL_ALWAYS);
         glLineWidth(2.0f);
         glDrawArrays(GL_LINE_LOOP, 0, circle.size());
         glLineWidth(1.0f);
@@ -6351,12 +6356,23 @@ void CView::rebuildTerrainAutoCatalog()
     const QString profilePath = CTerrainAtlasProfileStore::profilePath(mprNamespace);
     bool reviewedProfileActive = false;
     bool staleProfile = false;
-    if(QFileInfo::exists(profilePath))
+    // Authored namespace contracts are the primary truth. A generic inferred
+    // profile must never replace a known slot table merely because it was
+    // saved or approved previously.
+    m_terrainAtlasAnalysis = CTerrainAtlasAnalyzer::analyze(
+        mprNamespace, slotCount, &report);
+    const bool authoredTemplateActive = m_terrainAtlasAnalysis.usable;
+    if(authoredTemplateActive)
+        m_terrainAtlasProfile = CTerrainAtlasProfileInference::fromAuthoredAnalysis(
+            mprNamespace, atlasHash, slotCount, m_terrainAtlasAnalysis, &report);
+    else if(QFileInfo::exists(profilePath))
     {
         STerrainAtlasProfile stored;
         CValidationReport storedReport;
         if(CTerrainAtlasProfileStore::load(mprNamespace, &stored, QString(), &storedReport)
-           && stored.validateBinding(mprNamespace, atlasHash, slotCount, &storedReport))
+           && stored.validateBinding(mprNamespace, atlasHash, slotCount, &storedReport)
+           && CTerrainAtlasProfileInference::isCompatibleInferenceProvenance(
+                  stored.provenance))
         {
             m_terrainAtlasProfile = stored;
             if(stored.approved)
@@ -6375,9 +6391,8 @@ void CView::rebuildTerrainAutoCatalog()
         for(const SValidationFinding& finding : storedReport.findings())
             report.add(finding.code, finding.severity, finding.message, finding.location);
     }
-    if(!reviewedProfileActive)
-        m_terrainAtlasAnalysis = CTerrainAtlasAnalyzer::analyze(
-            mprNamespace, slotCount, &report);
+    if(!authoredTemplateActive && !reviewedProfileActive)
+        m_terrainAtlasAnalysis = STerrainAtlasAnalysis();
     if(m_terrainAtlasProfile.slotDefinitions.isEmpty())
         m_terrainAtlasProfile = CTerrainAtlasProfileInference::propose(
             mprNamespace, m_pTileForm->tileImages(),
@@ -6400,11 +6415,14 @@ void CView::rebuildTerrainAutoCatalog()
               .arg(landChoices.size()).arg(overlayChoices.size())
         : tr("No approved semantic profile is available for namespace '%1'. Automatic painting is disabled; manual atlas tile mode remains available.")
               .arg(mprNamespace);
-    if(reviewedProfileActive)
+    if(authoredTemplateActive)
+        status = tr("Authored atlas layout loaded: %1 land and %2 overlay materials.")
+            .arg(landChoices.size()).arg(overlayChoices.size());
+    else if(reviewedProfileActive)
         status = tr("Approved semantic profile loaded: %1 land and %2 overlay materials.")
             .arg(landChoices.size()).arg(overlayChoices.size());
     else if(staleProfile)
-        status += tr(" A saved profile failed its namespace/hash/slot binding or review contract; review conversion before use.");
+        status += tr(" A saved auto-inferred profile is obsolete or failed its namespace/hash/slot binding; review the new proposal before use.");
     else if(!m_terrainAtlasProfile.approved)
         status += tr(" An inference proposal is ready for review.");
     m_landscapeTools->setPaintTerrainTypes(
@@ -6473,9 +6491,12 @@ void CView::reviewTerrainAtlasProfile()
         return;
     }
     rebuildTerrainAutoCatalog();
+    const QString savedPath = CTerrainAtlasProfileStore::profilePath(mprNamespace);
     emit updateMsg(reviewed.approved
-        ? tr("The reviewed semantic atlas profile is approved and automatic painting is enabled.")
-        : tr("Semantic atlas draft saved. Automatic painting remains disabled until approval."));
+        ? tr("The reviewed semantic atlas profile is approved and automatic painting is enabled. Saved to %1")
+              .arg(QDir::toNativeSeparators(savedPath))
+        : tr("Semantic atlas draft saved to %1. Automatic painting remains disabled until approval.")
+              .arg(QDir::toNativeSeparators(savedPath)));
 }
 
 void CView::updateTerrainAtlasViewerAnnotations(const QString& status)
@@ -8809,8 +8830,6 @@ bool CView::applyOverlaySurfacePreview(const SOverlaySurfaceCommand& command,
     }
     m_pLand->setDirty(m_terrainEdit.isDirty());
     m_aiGraphOverlayDirty = true;
-    m_staticShadowFingerprint.clear();
-    m_farStaticShadowFingerprint.clear();
     emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMprDirtyFlag,
                               m_terrainEdit.isDirty() ? "*" : "");
     update();
