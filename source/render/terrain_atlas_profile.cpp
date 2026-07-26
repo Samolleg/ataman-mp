@@ -584,7 +584,7 @@ STerrainAtlasProfile CTerrainAtlasProfileInference::propose(
     result.mprNamespace = mprNamespace.trimmed();
     result.atlasPixelSha256 = pixelSha256(images);
     result.atlasSlotCount = images.size();
-    result.provenance = QStringLiteral("decoded-atlas-pixels+mpr-tile-types+observed-map-usage-v1");
+    result.provenance = QStringLiteral("decoded-atlas-pixels+mpr-tile-types+observed-map-usage-v2-anchored");
     if(result.mprNamespace.isEmpty() || images.isEmpty() || tileTypes.size() != images.size()
        || usage.size() != images.size())
     {
@@ -592,70 +592,223 @@ STerrainAtlasProfile CTerrainAtlasProfileInference::propose(
                                "Atlas inference requires one image, MPR tile category, and usage record per slot");
         return result;
     }
-    struct SNode { int slot; int corner; qint32 type; ETerrainAtlasLayer layer; bool ambiguous; SCornerColor color; };
-    QVector<SNode> nodes;
+    struct SSlotEvidence
+    {
+        qint32 type{-1};
+        ETerrainAtlasLayer layer{ETerrainAtlasLayer::Land};
+        bool layerKnown{false};
+        bool layerAmbiguous{false};
+        bool pure{false};
+        SCornerColor corners[4];
+    };
+    QVector<SSlotEvidence> evidence(images.size());
+    const int familyThreshold = 28 * 28 * 3;
+    const int pureTileThreshold = 12 * 12 * 3;
+    const int ambiguityMargin = 10 * 10 * 3;
     for(int slot = 0; slot < images.size(); ++slot)
     {
+        SSlotEvidence& item = evidence[slot];
+        item.type = tileTypes.at(slot);
         const bool land = usage.at(slot).landCount > 0;
         const bool overlay = usage.at(slot).overlayCount > 0;
-        const bool ambiguous = land == overlay; // both used, or unused
-        const ETerrainAtlasLayer layer = overlay && !land
-            ? ETerrainAtlasLayer::Overlay : ETerrainAtlasLayer::Land;
-        if(ambiguous && report)
-            report->add("terrain.atlas_inference_ambiguous_layer", EValidationSeverity::Warning,
-                        land ? "The atlas slot is used on both land and overlay surfaces"
-                             : "The atlas slot is unused; its proposed layer requires review",
-                        QString::number(slot));
+        item.layerKnown = land != overlay;
+        item.layerAmbiguous = land && overlay;
+        item.layer = overlay && !land ? ETerrainAtlasLayer::Overlay
+                                     : ETerrainAtlasLayer::Land;
+        int maximumCornerDistance = 0;
         for(int corner = 0; corner < 4; ++corner)
-            nodes.append({slot, corner, tileTypes.at(slot), layer, ambiguous,
-                          cornerColor(images.at(slot), corner)});
+            item.corners[corner] = cornerColor(images.at(slot), corner);
+        for(int a = 0; a < 4; ++a)
+            for(int b = a + 1; b < 4; ++b)
+                maximumCornerDistance = qMax(maximumCornerDistance,
+                    colorDistance(item.corners[a], item.corners[b]));
+        item.pure = maximumCornerDistance <= pureTileThreshold;
+        if(item.layerAmbiguous && report)
+            report->add("terrain.atlas_inference_ambiguous_layer", EValidationSeverity::Warning,
+                        "The atlas slot is used on both land and overlay surfaces",
+                        QString::number(slot));
     }
-    QVector<int> parent(nodes.size());
-    for(int i = 0; i < parent.size(); ++i) parent[i] = i;
-    const auto root = [&parent](int value) {
-        int current = value;
-        while(parent[current] != current) current = parent[current];
-        return current;
+
+    // Families are anchored only by uniform, observed material tiles. Transition
+    // corners may join an anchor, but never merge two anchors through a chain of
+    // intermediate colours.
+    struct SFamilyEvidence
+    {
+        QVector<SCornerColor> anchors;
+        SCornerColor centroid;
     };
-    struct SEdge { int distance; int a; int b; };
-    QVector<SEdge> edges;
-    const int threshold = 28 * 28 * 3;
-    for(int a = 0; a < nodes.size(); ++a)
-        for(int b = a + 1; b < nodes.size(); ++b)
-            if(nodes.at(a).type == nodes.at(b).type && nodes.at(a).layer == nodes.at(b).layer)
-            {
-                const int distance = colorDistance(nodes.at(a).color, nodes.at(b).color);
-                if(distance <= threshold) edges.append({distance, a, b});
-            }
-    std::sort(edges.begin(), edges.end(), [](const SEdge& a, const SEdge& b) {
-        if(a.distance != b.distance) return a.distance < b.distance;
-        if(a.a != b.a) return a.a < b.a;
-        return a.b < b.b;
-    });
-    for(const SEdge& edge : edges)
-    {
-        const int a = root(edge.a), b = root(edge.b);
-        if(a != b) parent[qMax(a, b)] = qMin(a, b);
-    }
-    QMap<int, qint32> familyForRoot;
-    for(int i = 0; i < nodes.size(); ++i)
-    {
-        const int nodeRoot = root(i);
-        if(!familyForRoot.contains(nodeRoot))
+    QVector<SFamilyEvidence> familyEvidence;
+    const auto appendFamily = [&result, &familyEvidence](qint32 type,
+            ETerrainAtlasLayer layer, const SCornerColor& color, bool ambiguous) {
+        STerrainAtlasProfileFamily family;
+        family.id = result.families.size() + 1;
+        family.name = QStringLiteral("Proposed %1 family %2")
+            .arg(layerName(layer)).arg(family.id);
+        family.layer = layer;
+        family.tileType = type;
+        family.ambiguous = ambiguous;
+        result.families.append(family);
+        SFamilyEvidence detail;
+        detail.anchors.append(color);
+        detail.centroid = color;
+        familyEvidence.append(detail);
+        return family.id;
+    };
+    const auto addAnchor = [&familyEvidence](int index, const SCornerColor& color) {
+        SFamilyEvidence& detail = familyEvidence[index];
+        detail.anchors.append(color);
+        qint64 red = 0, green = 0, blue = 0;
+        for(const SCornerColor& anchor : detail.anchors)
         {
-            STerrainAtlasProfileFamily family;
-            family.id = result.families.size() + 1;
-            family.name = QStringLiteral("Proposed %1 family %2")
-                .arg(layerName(nodes.at(i).layer)).arg(family.id);
-            family.layer = nodes.at(i).layer;
-            family.tileType = nodes.at(i).type;
-            familyForRoot.insert(nodeRoot, family.id);
-            result.families.append(family);
+            red += anchor.r; green += anchor.g; blue += anchor.b;
         }
-        STerrainAtlasProfileFamily& family = result.families[familyForRoot.value(nodeRoot) - 1];
-        family.ambiguous |= nodes.at(i).ambiguous;
-        if(!family.memberSlots.contains(nodes.at(i).slot)) family.memberSlots.append(nodes.at(i).slot);
+        detail.centroid = SCornerColor(int(red / detail.anchors.size()),
+                                      int(green / detail.anchors.size()),
+                                      int(blue / detail.anchors.size()));
+    };
+    const auto matchingFamily = [&result, &familyEvidence, familyThreshold,
+                                 ambiguityMargin](qint32 type,
+            ETerrainAtlasLayer layer, const SCornerColor& color,
+            bool requireCompleteLink, bool* confident) {
+        int best = -1, bestDistance = 0, secondDistance = 0;
+        for(int index = 0; index < result.families.size(); ++index)
+        {
+            const STerrainAtlasProfileFamily& family = result.families.at(index);
+            if(family.tileType != type || family.layer != layer)
+                continue;
+            bool completeLink = true;
+            if(requireCompleteLink)
+                for(const SCornerColor& anchor : familyEvidence.at(index).anchors)
+                    completeLink &= colorDistance(color, anchor) <= familyThreshold;
+            if(!completeLink)
+                continue;
+            const int distance = colorDistance(color, familyEvidence.at(index).centroid);
+            if(best < 0 || distance < bestDistance)
+            {
+                secondDistance = best < 0 ? 0 : bestDistance;
+                best = index;
+                bestDistance = distance;
+            }
+            else if(secondDistance == 0 || distance < secondDistance)
+                secondDistance = distance;
+        }
+        if(confident)
+            *confident = best >= 0 && bestDistance <= familyThreshold
+                && (secondDistance == 0 || secondDistance - bestDistance > ambiguityMargin);
+        return best;
+    };
+
+    // Known-layer pure tiles establish the material identities.
+    for(int slot = 0; slot < evidence.size(); ++slot)
+    {
+        const SSlotEvidence& item = evidence.at(slot);
+        if(!item.pure || !item.layerKnown)
+            continue;
+        int family = matchingFamily(item.type, item.layer, item.corners[0], true, nullptr);
+        if(family < 0)
+        {
+            appendFamily(item.type, item.layer, item.corners[0], false);
+            family = result.families.size() - 1;
+        }
+        else
+            addAnchor(family, item.corners[0]);
     }
+
+    // If a layer has no observed uniform tile, retain a reviewable fallback
+    // instead of silently inventing its identity.
+    for(int slot = 0; slot < evidence.size(); ++slot)
+    {
+        const SSlotEvidence& item = evidence.at(slot);
+        if(!item.pure || item.layerKnown)
+            continue;
+        int best = -1, bestDistance = 0;
+        for(int layerValue = int(ETerrainAtlasLayer::Land);
+            layerValue <= int(ETerrainAtlasLayer::Overlay); ++layerValue)
+        {
+            bool confident = false;
+            const int candidate = matchingFamily(item.type,
+                ETerrainAtlasLayer(layerValue), item.corners[0], true, &confident);
+            if(candidate >= 0)
+            {
+                const int distance = colorDistance(item.corners[0],
+                    familyEvidence.at(candidate).centroid);
+                if(best < 0 || distance < bestDistance)
+                {
+                    best = candidate;
+                    bestDistance = distance;
+                }
+            }
+        }
+        if(best < 0)
+        {
+            appendFamily(item.type, item.layer, item.corners[0], true);
+            if(report) report->add("terrain.atlas_inference_unanchored_material",
+                                   EValidationSeverity::Warning,
+                                   "An unused uniform material has no observed layer anchor",
+                                   QString::number(slot));
+        }
+        else
+            addAnchor(best, item.corners[0]);
+    }
+
+    for(int slot = 0; slot < evidence.size(); ++slot)
+    {
+        const SSlotEvidence& item = evidence.at(slot);
+        STerrainAtlasProfileSlot proposed;
+        proposed.slot = slot;
+        proposed.ambiguous = item.layerAmbiguous;
+        qint32* signatureCorners[] = {&proposed.signature.northWest,
+                                     &proposed.signature.northEast,
+                                     &proposed.signature.southEast,
+                                     &proposed.signature.southWest};
+        for(int corner = 0; corner < 4; ++corner)
+        {
+            int best = -1, bestDistance = 0, secondDistance = 0;
+            for(int family = 0; family < result.families.size(); ++family)
+            {
+                const STerrainAtlasProfileFamily& candidate = result.families.at(family);
+                if(candidate.tileType != item.type
+                   || (item.layerKnown && candidate.layer != item.layer))
+                    continue;
+                const int distance = colorDistance(item.corners[corner],
+                    familyEvidence.at(family).centroid);
+                if(best < 0 || distance < bestDistance)
+                {
+                    secondDistance = best < 0 ? 0 : bestDistance;
+                    best = family;
+                    bestDistance = distance;
+                }
+                else if(secondDistance == 0 || distance < secondDistance)
+                    secondDistance = distance;
+            }
+            if(best < 0)
+            {
+                appendFamily(item.type, item.layer, item.corners[corner], true);
+                best = result.families.size() - 1;
+            }
+            const bool confident = bestDistance <= familyThreshold
+                && (secondDistance == 0 || secondDistance - bestDistance > ambiguityMargin);
+            proposed.ambiguous |= !confident;
+            *signatureCorners[corner] = result.families.at(best).id;
+        }
+        if(item.pure && !item.layerKnown)
+        {
+            const qint32 familyId = proposed.signature.northWest;
+            for(const STerrainAtlasProfileFamily& family : result.families)
+                if(family.id == familyId)
+                    proposed.ambiguous |= family.ambiguous;
+        }
+        if(proposed.ambiguous && report)
+            report->add("terrain.atlas_inference_ambiguous_slot", EValidationSeverity::Warning,
+                        "Only this slot's corner assignment requires review",
+                        QString::number(slot));
+        result.slotDefinitions.append(proposed);
+    }
+
+    CValidationReport membershipReport;
+    if(!result.normalizeMembership(&membershipReport) && report)
+        for(const SValidationFinding& finding : membershipReport.findings())
+            report->add(finding.code, finding.severity, finding.message, finding.location);
     for(STerrainAtlasProfileFamily& family : result.families)
     {
         std::sort(family.memberSlots.begin(), family.memberSlots.end());
@@ -674,18 +827,6 @@ STerrainAtlasProfile CTerrainAtlasProfileInference::propose(
                                    "A proposed land family is used both below and outside overlays",
                                    family.name);
         }
-    }
-    for(int slot = 0; slot < images.size(); ++slot)
-    {
-        STerrainAtlasProfileSlot proposed;
-        proposed.slot = slot;
-        const int base = slot * 4;
-        proposed.signature.northWest = familyForRoot.value(root(base));
-        proposed.signature.northEast = familyForRoot.value(root(base + 1));
-        proposed.signature.southEast = familyForRoot.value(root(base + 2));
-        proposed.signature.southWest = familyForRoot.value(root(base + 3));
-        proposed.ambiguous = nodes.at(base).ambiguous;
-        result.slotDefinitions.append(proposed);
     }
     // A family pair with no authored mixed slot cannot be blended safely.
     for(int a = 0; a < result.families.size(); ++a)

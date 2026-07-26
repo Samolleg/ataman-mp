@@ -9,6 +9,7 @@
 class QLabel;
 class QPushButton;
 class QTableWidget;
+class QCheckBox;
 
 class CTerrainAtlasReviewDialog : public QDialog
 {
@@ -28,7 +29,6 @@ private slots:
     void mergeSelectedFamilies();
     void markSelectedSlotsReviewed();
     void markSelectedSlotsForReview();
-    void showGuide();
     void saveDraft();
     void approveAndSave();
 
@@ -48,6 +48,7 @@ private:
     QLabel* m_binding;
     QLabel* m_diagnostics;
     QPushButton* m_approve;
+    QCheckBox* m_showAll;
     bool m_rebuilding{false};
 };
 

@@ -330,6 +330,7 @@ private slots:
     void terrainHeightStrokeCompositionKeepsFirstAndFinalValues();
     void zone1NamespaceTemplateSeparatesLandOverlayAndVariants();
     void semanticAtlasProposalIsDeterministicAndApprovalGated();
+    void semanticAtlasTransitionsCannotTransitivelyMergeMaterialAnchors();
     void semanticAtlasProfileRejectsBindingMismatchAndAmbiguity();
     void semanticAtlasReviewEditsAndStoreAreDeterministic();
     void zone1NamespaceTemplateMatchesPrivateFixture();
@@ -4345,6 +4346,13 @@ void EnduranceDocumentTests::overlayActivationDeactivationIsLosslessAndUndoable(
         2, 3, ETerrainTileLayer::Overlay, &available);
     QVERIFY(available);
     QCOMPARE(SMprPackedTile::decode(activatedTile).rotation, quint8(2));
+    const QByteArray activatedPayload = terrain.sectorPayload(0, 0);
+    const int activatedOverlayVertex = 5 + 33 * 33 * 8 + (6 * 33 + 4) * 8 + 2;
+    QDataStream activatedHeightStream(activatedPayload.mid(activatedOverlayVertex, 2));
+    activatedHeightStream.setByteOrder(QDataStream::LittleEndian);
+    quint16 activatedHeight = 0;
+    activatedHeightStream >> activatedHeight;
+    QCOMPARE(activatedHeight, quint16(1214));
     QCOMPARE(terrain.overlayMaterialIndex(3, 3, &available), qint16(-1));
     QVERIFY(!available);
     QVERIFY(terrain.makeOverlayActivation(point, 1, 0, 1, 2).isEmpty());
@@ -4399,6 +4407,34 @@ void EnduranceDocumentTests::overlayActivationDeactivationIsLosslessAndUndoable(
     QVERIFY(!terrain.apply(stale, true, &staleReport));
     QVERIFY(staleReport.hasErrors());
     QCOMPARE(terrain.sectorPayload(0, 0), beforeRejected);
+}
+
+void EnduranceDocumentTests::semanticAtlasTransitionsCannotTransitivelyMergeMaterialAnchors()
+{
+    const auto tile = [](const QColor& west, const QColor& east) {
+        QImage image(18, 18, QImage::Format_RGBA8888);
+        for(int y = 0; y < image.height(); ++y)
+            for(int x = 0; x < image.width(); ++x)
+                image.setPixelColor(x, y, x < image.width() / 2 ? west : east);
+        return image;
+    };
+    const QColor dark(20, 20, 20), step1(40, 40, 40);
+    const QColor step2(60, 60, 60), light(80, 80, 80);
+    QVector<QImage> images;
+    images << tile(dark, dark) << tile(dark, step1)
+           << tile(step1, step2) << tile(step2, light)
+           << tile(light, light);
+    QVector<STerrainAtlasSlotUsage> usage(images.size());
+    for(STerrainAtlasSlotUsage& item : usage)
+        item.landCount = 1;
+    const STerrainAtlasProfile profile = CTerrainAtlasProfileInference::propose(
+        "synthetic_chain", images, QVector<qint32>(images.size(), 1), usage);
+    const qint32 darkFamily = profile.slotDefinitions.front().signature.northWest;
+    const qint32 lightFamily = profile.slotDefinitions.back().signature.northWest;
+    QVERIFY(darkFamily > 0);
+    QVERIFY(lightFamily > 0);
+    QVERIFY(darkFamily != lightFamily);
+    QCOMPARE(profile.families.size(), 2);
 }
 
 void EnduranceDocumentTests::overlaySculptChangesOnlyActiveOverlayGeometry()
