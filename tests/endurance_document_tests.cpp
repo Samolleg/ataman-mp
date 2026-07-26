@@ -115,14 +115,14 @@ QByteArray emptyMpr()
     return bytes;
 }
 
-QByteArray syntheticMp()
+QByteArray syntheticMp(quint32 sectorCountX = 1, quint32 sectorCountY = 1)
 {
     QByteArray bytes;
     QDataStream stream(&bytes, QIODevice::WriteOnly);
     stream.setByteOrder(QDataStream::LittleEndian);
     stream.setFloatingPointPrecision(QDataStream::SinglePrecision);
     stream << quint32(0xCE4AF672) << float(100.0f)
-           << quint32(1) << quint32(1)
+           << sectorCountX << sectorCountY
            << quint32(2) << quint32(512)
            << quint32(3) << quint32(64)
            << quint16(2) << quint32(0);
@@ -190,6 +190,50 @@ QByteArray syntheticMpr(const QByteArray& sectorPayload = syntheticOverlaySector
     }
     bytes.append(names);
     bytes.append("preserved-trailer");
+
+    QByteArray header;
+    QDataStream headerStream(&header, QIODevice::WriteOnly);
+    headerStream.setByteOrder(QDataStream::LittleEndian);
+    headerStream << quint32(0x019CE23C) << quint32(members.size())
+                 << tableOffset << quint32(names.size());
+    bytes.replace(0, header.size(), header);
+    return bytes;
+}
+
+QByteArray syntheticTwoSectorMpr(const QByteArray& leftSector,
+                                 const QByteArray& rightSector)
+{
+    struct Member
+    {
+        QByteArray name;
+        QByteArray payload;
+        quint32 timestamp;
+        quint32 offset;
+    };
+    QVector<Member> members;
+    members.append({QByteArray("CaveSet.MP"), syntheticMp(2, 1), 0x10203040, 0});
+    members.append({QByteArray("CaveSet000000.SEC"), leftSector, 0x50607080, 0});
+    members.append({QByteArray("CaveSet001000.SEC"), rightSector, 0x90A0B0C0, 0});
+
+    QByteArray bytes(16, '\0');
+    for(int index = 0; index < members.size(); ++index)
+    {
+        members[index].offset = quint32(bytes.size());
+        bytes.append(members.at(index).payload);
+        const int padding = (16 - (bytes.size() % 16)) % 16;
+        bytes.append(QByteArray(padding, char(0xC0 + index)));
+    }
+    const quint32 tableOffset = quint32(bytes.size());
+    QByteArray names;
+    QDataStream table(&bytes, QIODevice::Append);
+    table.setByteOrder(QDataStream::LittleEndian);
+    for(const Member& member : members)
+    {
+        table << quint32(-1) << quint32(member.payload.size()) << member.offset
+              << member.timestamp << quint16(member.name.size()) << quint32(names.size());
+        names.append(member.name);
+    }
+    bytes.append(names);
 
     QByteArray header;
     QDataStream headerStream(&header, QIODevice::WriteOnly);
@@ -1953,6 +1997,33 @@ void EnduranceDocumentTests::canonicalTerrainSeamsAreEditedAndUndoneTogether()
     for(int index = 0; index < firstTransaction.edits().size(); ++index)
         QCOMPARE(redoneTransaction.edits().at(index).replacementPayload,
                  firstTransaction.edits().at(index).replacementPayload);
+
+    // Fresh reopen alone is insufficient: a RES/MPR can parse while two SECs
+    // disagree about their shared land edge. Staging must reject a newly split
+    // seam before the candidate can replace or be saved beside the source.
+    CMprDocument seamBaseline;
+    CValidationReport seamBaselineReport;
+    QVERIFY2(seamBaseline.loadBytes(syntheticTwoSectorMpr(
+                sources.at(0).payload, sources.at(1).payload),
+            "synthetic-two-sector.mpr", &seamBaselineReport),
+        qPrintable(seamBaselineReport.toText()));
+    QByteArray brokenRight = sources.at(1).payload;
+    const int splitHeightOffset = 5 + (10 * 33) * 8 + 2;
+    brokenRight[splitHeightOffset] = char(0);
+    brokenRight[splitHeightOffset + 1] = char(0);
+    const SMprSectorInfo rightInfo = seamBaseline.sectors().at(1);
+    const SMprArchiveMember rightMember = seamBaseline.members().at(
+        rightInfo.memberIndex);
+    CMprEditTransaction splitSeam("reject split shared SEC seam");
+    splitSeam.replaceMemberPayload(rightMember.name, rightMember.sha256,
+                                   brokenRight);
+    QTemporaryDir seamStage;
+    QVERIFY(seamStage.isValid());
+    const SStagedMprTransactionValidation rejected =
+        validateStagedMprTransaction(seamBaseline, splitSeam,
+            QFileInfo(seamStage.filePath("split-seam.mpr")));
+    QVERIFY(!rejected.success);
+    QVERIFY(rejected.error.contains("conflicting shared SEC land vertices"));
 }
 
 void EnduranceDocumentTests::terrainBrushToolsAreDeterministicAndFailClosed()
@@ -4402,8 +4473,36 @@ void EnduranceDocumentTests::overlayActivationDeactivationIsLosslessAndUndoable(
             }
         }
     QCOMPARE(activeFirstStrokeCells, 5);
+    // Upgrading coverage is allowed to append an overlay vertex/tile/material
+    // layout, but the complete land vertex block is immutable. A historical
+    // multi-cell activation reused stale type-0 offsets after the first cell
+    // and wrote later overlay records into the SEC header/land vertices.
+    QCOMPARE(firstStrokeActivation.sectors.front().afterPayload.mid(
+                 5, 33 * 33 * 8),
+             landSector.mid(5, 33 * 33 * 8));
     QVERIFY(firstStrokeTerrain.makeOverlayActivation(
         firstStroke, 1, 0, 1, 2).isEmpty());
+
+    // Defense in depth: even a structurally sized overlay command must not be
+    // serializable if it detached land bytes from the canonical lattice.
+    SOverlaySurfaceCommand corruptLand;
+    corruptLand.description = QStringLiteral("synthetic corrupt overlay payload");
+    SOverlaySectorDelta corruptDelta;
+    corruptDelta.sectorX = 0;
+    corruptDelta.sectorY = 0;
+    corruptDelta.beforePayload = firstStrokeTerrain.sectorPayload(0, 0);
+    corruptDelta.afterPayload = corruptDelta.beforePayload;
+    const int corruptLandHeight = 5 + (4 * 33 + 4) * 8 + 2;
+    corruptDelta.afterPayload[corruptLandHeight] = char(
+        quint8(corruptDelta.afterPayload.at(corruptLandHeight)) ^ quint8(0x5A));
+    corruptLand.sectors.append(corruptDelta);
+    QVERIFY(firstStrokeTerrain.apply(corruptLand, true, &firstStrokeReport));
+    CMprEditTransaction corruptTransaction("reject detached overlay land bytes");
+    CValidationReport corruptSaveReport;
+    QVERIFY(!firstStrokeTerrain.appendSectorEdits(
+        &corruptTransaction, &corruptSaveReport));
+    QVERIFY(corruptSaveReport.toText().contains("terrain.land_vertex_integrity"));
+    QVERIFY(firstStrokeTerrain.apply(corruptLand, false, &firstStrokeReport));
 
     STerrainTileBrush point;
     point.centerX = 2.0f;

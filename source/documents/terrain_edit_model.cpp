@@ -3896,6 +3896,61 @@ bool CTerrainEditModel::appendSectorEdits(CMprEditTransaction* transaction,
             writePackedNormal(replacements[ref.sectorIndex], ref.localX, ref.localY, packed);
     }
 
+    // The canonical lattice, not a detached SEC payload, owns land geometry.
+    // Overlay activation may expand a type-0 SEC to type 3, but it must never
+    // alter the original land vertex block. Validate the final replacement
+    // payloads against canonical heights/offsets and the expected normal
+    // provenance before allowing them into a staged archive transaction.
+    // This is deliberately a save gate as well as an edit-time invariant: a
+    // malformed overlay command must not become a structurally valid-looking
+    // MPR with split sector seams.
+    for(int index = 0; index < m_heights.size(); ++index)
+    {
+        const int globalX = index % m_vertexCountX;
+        const int globalY = index / m_vertexCountX;
+        for(const SVertexRef& ref : m_refs.at(index))
+        {
+            const SSector& sector = m_sectors.at(ref.sectorIndex);
+            const QByteArray& replacement = replacements.at(ref.sectorIndex);
+            const QByteArray& original = sector.source.payload;
+            const quint16 expectedHeight = m_conflictedVertices.at(index)
+                ? readHeight(original, ref.localX, ref.localY)
+                : m_heights.at(index);
+            const qint8 expectedXOffset = m_conflictedVertices.at(index)
+                ? readOffset(original, ref.localX, ref.localY, 0)
+                : m_xOffsets.at(index);
+            const qint8 expectedYOffset = m_conflictedVertices.at(index)
+                ? readOffset(original, ref.localX, ref.localY, 1)
+                : m_yOffsets.at(index);
+            if(readHeight(replacement, ref.localX, ref.localY) != expectedHeight
+               || readOffset(replacement, ref.localX, ref.localY, 0) != expectedXOffset
+               || readOffset(replacement, ref.localX, ref.localY, 1) != expectedYOffset)
+            {
+                if(report)
+                    report->add("terrain.land_vertex_integrity",
+                        EValidationSeverity::Error,
+                        "A pending SEC replacement no longer matches the canonical land vertex lattice; saving is blocked",
+                        QString("%1 vertex %2,%3")
+                            .arg(sector.source.memberName).arg(globalX).arg(globalY));
+                return false;
+            }
+
+            const quint32 expectedNormal = affectedNormals.contains(index)
+                ? packedNormal(globalX, globalY)
+                : readPackedNormal(original, ref.localX, ref.localY);
+            if(readPackedNormal(replacement, ref.localX, ref.localY) != expectedNormal)
+            {
+                if(report)
+                    report->add("terrain.land_normal_integrity",
+                        EValidationSeverity::Error,
+                        "A pending SEC replacement changed a land normal outside the canonical terrain transaction; saving is blocked",
+                        QString("%1 vertex %2,%3")
+                            .arg(sector.source.memberName).arg(globalX).arg(globalY));
+                return false;
+            }
+        }
+    }
+
     int editedSectorCount = 0;
     for(int index = 0; index < m_sectors.size(); ++index)
     {

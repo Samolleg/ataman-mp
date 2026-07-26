@@ -8178,8 +8178,19 @@ void CView::openMapParameters()
             apply->setEnabled(false);
             return;
         }
-        const STerrainEditDiagnostics diagnostics = m_terrainEdit.diagnose(command);
-        if(!diagnostics.valid || command.requiresMaxZDecision())
+        CValidationReport diagnosticReport;
+        const STerrainEditDiagnostics diagnostics = m_terrainEdit.diagnose(
+            command, QVector<STerrainObjectHeightProbe>(),
+            STerrainDiagnosticPolicy(), &diagnosticReport);
+        if(!diagnostics.valid)
+        {
+            preview->setText(diagnosticReport.toText().trimmed().isEmpty()
+                ? tr("The requested operation is invalid for the current terrain.")
+                : diagnosticReport.toText().trimmed());
+            apply->setEnabled(false);
+            return;
+        }
+        if(command.requiresMaxZDecision())
         {
             preview->setText(tr(
                 "The requested operation would exceed the current raw range. "

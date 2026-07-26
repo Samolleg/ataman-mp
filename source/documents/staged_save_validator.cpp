@@ -10,6 +10,7 @@
 #include "backup_manager.h"
 #include "endurance_document.h"
 #include "mpr_document.h"
+#include "terrain_edit_model.h"
 
 namespace {
 bool readFileBytes(const QFileInfo& info, QByteArray* bytes, QString* error)
@@ -197,6 +198,32 @@ SStagedMprTransactionValidation validateStagedMprTransaction(
     {
         result.error = "The staged candidate failed semantic reopen:\n"
             + candidateReport.toText().trimmed();
+        result.candidateBytes.clear();
+        return result;
+    }
+
+    // A changed MPR must not introduce contradictory copies of a shared land
+    // vertex. The archive/member parser can reopen such a file successfully,
+    // but the renderer will split the terrain mesh and later sculpt commands
+    // must refuse the ambiguous vertex. Preserve pre-existing source conflicts
+    // losslessly, while rejecting any newly introduced conflict.
+    CTerrainEditModel baselineTerrain;
+    CTerrainEditModel candidateTerrain;
+    CValidationReport baselineTerrainReport;
+    CValidationReport candidateTerrainReport;
+    if(!baselineTerrain.load(baseline, &baselineTerrainReport)
+       || !candidateTerrain.load(candidate, &candidateTerrainReport))
+    {
+        result.error = "The staged candidate failed canonical terrain validation:\n"
+            + candidateTerrainReport.toText().trimmed();
+        result.candidateBytes.clear();
+        return result;
+    }
+    if(!baselineTerrain.hasSeamConflicts() && candidateTerrain.hasSeamConflicts())
+    {
+        result.error = QStringLiteral(
+            "The staged MPR introduced conflicting shared SEC land vertices. "
+            "Saving was blocked to prevent terrain holes or seams.");
         result.candidateBytes.clear();
         return result;
     }
