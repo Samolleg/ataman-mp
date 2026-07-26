@@ -1413,6 +1413,8 @@ MainWindow::MainWindow(QWidget* parent) :
 MainWindow::~MainWindow()
 {
     saveUiState();
+    delete m_minimapExportDialog;
+    m_minimapExportDialog = nullptr;
     if(m_pView && m_pView->prepareForApplicationShutdown())
         delete m_pView;
     else if(m_pView)
@@ -3294,6 +3296,21 @@ void MainWindow::scheduleViewportMinimapRefresh(int delayMs, bool force)
             m_minimapExportDialog->setUnavailable(tr("No map loaded."));
         return;
     }
+    if(m_mapTestEntry.isBriefing())
+    {
+        m_minimapRefreshTimer->stop();
+        m_generatedMinimapMmp.clear();
+        m_generatedMinimapImage = QImage();
+        m_generatedMinimapContextKey.clear();
+        m_viewportMinimap->clearGeneratedPreview(
+            tr("Minimaps are not available in briefing zones."));
+        m_viewportMinimap->setCameraFootprint(QPolygonF());
+        m_viewportMinimap->hide();
+        if(m_minimapExportDialog)
+            m_minimapExportDialog->setUnavailable(
+                tr("Minimaps are not available in briefing zones."));
+        return;
+    }
     m_minimapRefreshTimer->start(qMax(0, delayMs));
 }
 
@@ -3328,6 +3345,24 @@ void MainWindow::refreshViewportMinimapSources()
         m_viewportMinimap->setCameraFootprint(QPolygonF());
         if(m_minimapExportDialog)
             m_minimapExportDialog->setUnavailable(tr("No map loaded."));
+        return;
+    }
+    if(m_mapTestEntry.isBriefing())
+    {
+        m_generatedMinimapMmp.clear();
+        m_generatedMinimapImage = QImage();
+        m_generatedMinimapContextKey.clear();
+        m_embeddedMinimapImage = QImage();
+        m_embeddedMinimapName.clear();
+        m_embeddedMinimapSource.clear();
+        m_viewportMinimap->clearGeneratedPreview(
+            tr("Minimaps are not available in briefing zones."));
+        m_viewportMinimap->clearEmbeddedPreview();
+        m_viewportMinimap->setCameraFootprint(QPolygonF());
+        m_viewportMinimap->hide();
+        if(m_minimapExportDialog)
+            m_minimapExportDialog->setUnavailable(
+                tr("Minimaps are not available in briefing zones."));
         return;
     }
     QString textureName = m_mapTestEntry.minimapTexture.trimmed();
@@ -3388,7 +3423,8 @@ void MainWindow::refreshViewportMinimapSources()
 void MainWindow::refreshViewportMinimap()
 {
     if(m_minimapCaptureRunning || !m_pView || !m_viewportMinimap
-       || !CLandscape::getInstance()->isMprLoad())
+       || !CLandscape::getInstance()->isMprLoad()
+       || m_mapTestEntry.isBriefing())
         return;
     m_minimapCaptureRunning = true;
     const bool includeLoadedStaticGeometry = !m_pView->mobs().isEmpty();
@@ -3500,6 +3536,21 @@ void MainWindow::generateMinimap()
     {
         QMessageBox::information(this, tr("Export Minimap"),
             tr("Load an MPR or collection before exporting a minimap."));
+        return;
+    }
+    if(m_mapTestEntry.isBriefing())
+    {
+        if(m_minimapExportDialog)
+        {
+            m_minimapExportDialog->setUnavailable(
+                tr("Minimaps are not available in briefing zones."));
+            m_minimapExportDialog->show();
+            m_minimapExportDialog->raise();
+            m_minimapExportDialog->activateWindow();
+        }
+        else
+            QMessageBox::information(this, tr("Export Minimap"),
+                tr("Minimaps are not available in briefing zones."));
         return;
     }
     if(m_minimapExportDialog)

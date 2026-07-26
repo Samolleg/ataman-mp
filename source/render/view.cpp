@@ -11048,29 +11048,121 @@ void CView::hideSelectedNodes()
 
 QPolygonF CView::minimapCameraFootprint() const
 {
-    QPolygonF footprint;
+    QVector<QPointF> groundPoints;
     if(!m_cam || width() <= 0 || height() <= 0)
-        return footprint;
+        return QPolygonF();
     const QRect viewport(0, 0, width(), height());
     const QMatrix4x4 view = m_cam->viewMatrix();
-    const QPoint corners[] = {
-        QPoint(0, 0), QPoint(width(), 0),
-        QPoint(width(), height()), QPoint(0, height())};
-    for(const QPoint& corner : corners)
-    {
-        const float screenY = float(height() - corner.y());
-        const QVector3D nearPoint = QVector3D(float(corner.x()), screenY, 0.0f)
+    const auto appendGroundIntersection = [&](const QPointF& screen) {
+        const float screenY = float(height()) - float(screen.y());
+        const QVector3D nearPoint = QVector3D(float(screen.x()), screenY, 0.0f)
             .unproject(view, m_projection, viewport);
-        const QVector3D farPoint = QVector3D(float(corner.x()), screenY, 1.0f)
+        const QVector3D farPoint = QVector3D(float(screen.x()), screenY, 1.0f)
             .unproject(view, m_projection, viewport);
         const QVector3D ray = farPoint - nearPoint;
-        if(qAbs(ray.z()) < 0.00001f)
-            return QPolygonF();
+        if(qAbs(ray.z()) < 0.000001f)
+            return;
         const float t = -nearPoint.z() / ray.z();
+        if(t < 0.0f)
+            return; // This screen ray looks above the ground-plane horizon.
         const QVector3D ground = nearPoint + ray * t;
-        footprint << QPointF(ground.x(), ground.y());
+        if(qIsFinite(ground.x()) && qIsFinite(ground.y()))
+            groundPoints.append(QPointF(ground.x(), ground.y()));
+    };
+
+    // Sampling the viewport boundary handles a horizon that crosses a side of
+    // the screen. The visible ground is convex, so its hull cannot acquire the
+    // self-crossing bow-tie produced by joining four invalid corner rays.
+    const int edgeSteps = 32;
+    for(int i = 0; i <= edgeSteps; ++i)
+    {
+        const qreal u = qreal(i) / edgeSteps;
+        appendGroundIntersection(QPointF(u * width(), 0.0));
+        appendGroundIntersection(QPointF(width(), u * height()));
+        appendGroundIntersection(QPointF((1.0 - u) * width(), height()));
+        appendGroundIntersection(QPointF(0.0, (1.0 - u) * height()));
     }
-    return footprint;
+    if(groundPoints.size() < 3)
+        return QPolygonF();
+
+    std::sort(groundPoints.begin(), groundPoints.end(),
+              [](const QPointF& a, const QPointF& b) {
+        return a.x() < b.x() || (a.x() == b.x() && a.y() < b.y());
+    });
+    const auto cross = [](const QPointF& origin, const QPointF& a,
+                          const QPointF& b) {
+        return (a.x() - origin.x()) * (b.y() - origin.y())
+             - (a.y() - origin.y()) * (b.x() - origin.x());
+    };
+    QVector<QPointF> hull;
+    for(const QPointF& point : groundPoints)
+    {
+        while(hull.size() >= 2
+              && cross(hull[hull.size() - 2], hull.last(), point) <= 0.0)
+            hull.removeLast();
+        hull.append(point);
+    }
+    const int lowerSize = hull.size();
+    for(int i = groundPoints.size() - 2; i >= 0; --i)
+    {
+        const QPointF point = groundPoints[i];
+        while(hull.size() > lowerSize
+              && cross(hull[hull.size() - 2], hull.last(), point) <= 0.0)
+            hull.removeLast();
+        hull.append(point);
+    }
+    if(!hull.isEmpty())
+        hull.removeLast();
+
+    CLandscape* landscape = CLandscape::getInstance();
+    const qreal mapWidth = landscape ? landscape->widthInWorldUnits() : 0.0;
+    const qreal mapHeight = landscape ? landscape->heightInWorldUnits() : 0.0;
+    if(mapWidth <= 0.0 || mapHeight <= 0.0 || hull.size() < 3)
+        return QPolygonF(hull);
+
+    // Clip the convex footprint to the map. Apart from keeping the overlay on
+    // the texture, this bounds near-horizon intersections that approach infinity.
+    const auto clipEdge = [](const QVector<QPointF>& input,
+                             const std::function<bool(const QPointF&)>& inside,
+                             const std::function<QPointF(const QPointF&, const QPointF&)>& intersect) {
+        QVector<QPointF> output;
+        if(input.isEmpty()) return output;
+        QPointF previous = input.last();
+        bool previousInside = inside(previous);
+        for(const QPointF& current : input)
+        {
+            const bool currentInside = inside(current);
+            if(currentInside != previousInside)
+                output.append(intersect(previous, current));
+            if(currentInside)
+                output.append(current);
+            previous = current;
+            previousInside = currentInside;
+        }
+        return output;
+    };
+    QVector<QPointF> clipped = hull;
+    clipped = clipEdge(clipped, [](const QPointF& p) { return p.x() >= 0.0; },
+        [](const QPointF& a, const QPointF& b) {
+            const qreal t = -a.x() / (b.x() - a.x());
+            return QPointF(0.0, a.y() + t * (b.y() - a.y()));
+        });
+    clipped = clipEdge(clipped, [mapWidth](const QPointF& p) { return p.x() <= mapWidth; },
+        [mapWidth](const QPointF& a, const QPointF& b) {
+            const qreal t = (mapWidth - a.x()) / (b.x() - a.x());
+            return QPointF(mapWidth, a.y() + t * (b.y() - a.y()));
+        });
+    clipped = clipEdge(clipped, [](const QPointF& p) { return p.y() >= 0.0; },
+        [](const QPointF& a, const QPointF& b) {
+            const qreal t = -a.y() / (b.y() - a.y());
+            return QPointF(a.x() + t * (b.x() - a.x()), 0.0);
+        });
+    clipped = clipEdge(clipped, [mapHeight](const QPointF& p) { return p.y() <= mapHeight; },
+        [mapHeight](const QPointF& a, const QPointF& b) {
+            const qreal t = (mapHeight - a.y()) / (b.y() - a.y());
+            return QPointF(a.x() + t * (b.x() - a.x()), mapHeight);
+        });
+    return QPolygonF(clipped);
 }
 
 void CView::moveCameraToMinimapPoint(const QPointF& worldPosition)

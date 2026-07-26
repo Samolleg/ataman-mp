@@ -167,13 +167,16 @@ CMinimapExportDialog::CMinimapExportDialog(
     const QString& suggestedTextureName, const QString& zoneId,
     const SMinimapGradeSettings& initialGrade, bool generationLocked,
     QWidget* parent)
-    : QDialog(parent), m_capture(capture), m_zoneId(zoneId),
+    : QDialog(nullptr, Qt::Window | Qt::WindowSystemMenuHint
+                       | Qt::WindowMinMaxButtonsHint | Qt::WindowCloseButtonHint),
+      m_capture(capture), m_zoneId(zoneId),
       m_embeddedImage(embeddedImage), m_embeddedName(embeddedName),
       m_grade(initialGrade),
       m_generationLocked(generationLocked)
 {
+    Q_UNUSED(parent);
     setWindowTitle(tr("Export Minimap"));
-    setWindowFlag(Qt::WindowContextHelpButtonHint, false);
+    setWindowIcon(QApplication::windowIcon());
     setModal(false);
     setAttribute(Qt::WA_DeleteOnClose);
     QVBoxLayout* root = new QVBoxLayout(this);
@@ -226,11 +229,14 @@ CMinimapExportDialog::CMinimapExportDialog(
     fitPreview->setObjectName("minimapFitPreview");
     QPushButton* actualPreview = new QPushButton(tr("100%"), this);
     actualPreview->setObjectName("minimapActualPreview");
+    m_resetGradeButton = new QPushButton(tr("Reset settings"), this);
+    m_resetGradeButton->setObjectName("minimapResetGrade");
     m_regenerateButton = new QPushButton(QString::fromUtf8("\xE2\x86\xBB ")
                                          + tr("Regenerate"), this);
     previewControls->addWidget(previewHint, 1);
     previewControls->addWidget(fitPreview);
     previewControls->addWidget(actualPreview);
+    previewControls->addWidget(m_resetGradeButton);
     previewControls->addWidget(m_regenerateButton);
     root->addLayout(previewControls);
     connect(fitPreview, &QPushButton::clicked, this,
@@ -245,6 +251,8 @@ CMinimapExportDialog::CMinimapExportDialog(
     });
     connect(m_regenerateButton, &QPushButton::clicked,
             this, &CMinimapExportDialog::regenerationRequested);
+    connect(m_resetGradeButton, &QPushButton::clicked,
+            this, &CMinimapExportDialog::resetGradeSettings);
 
     QFormLayout* gradeForm = new QFormLayout;
     const auto addGradeSlider = [this, gradeForm](const QString& name, int minimum,
@@ -295,20 +303,16 @@ CMinimapExportDialog::CMinimapExportDialog(
     m_hueValue->setObjectName("minimapHueValue");
     m_applyLockButton = new QPushButton(tr("Apply && Lock"), this);
     m_applyLockButton->setObjectName("minimapApplyLock");
-    m_resetGradeButton = new QPushButton(tr("Reset settings"), this);
-    m_resetGradeButton->setObjectName("minimapResetGrade");
+    m_applyLockButton->setMinimumWidth(180);
     QWidget* gradeActions = new QWidget(this);
     QHBoxLayout* gradeActionLayout = new QHBoxLayout(gradeActions);
     gradeActionLayout->setContentsMargins(0, 0, 0, 0);
-    gradeActionLayout->addWidget(m_resetGradeButton);
     gradeActionLayout->addStretch(1);
     gradeActionLayout->addWidget(m_applyLockButton);
     gradeForm->addRow(QString(), gradeActions);
     root->addLayout(gradeForm);
     connect(m_applyLockButton, &QPushButton::clicked,
             this, &CMinimapExportDialog::applyAndLock);
-    connect(m_resetGradeButton, &QPushButton::clicked,
-            this, &CMinimapExportDialog::resetGradeSettings);
 
     QFormLayout* form = new QFormLayout;
     m_textureName = new QLineEdit(suggestedTextureName, this);

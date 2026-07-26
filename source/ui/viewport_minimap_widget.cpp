@@ -8,6 +8,38 @@
 #include "viewport_overlay_style.h"
 
 namespace {
+QIcon centeredLockIcon(bool locked)
+{
+    QPixmap pixmap(18, 18);
+    pixmap.fill(Qt::transparent);
+    QPainter painter(&pixmap);
+    painter.setRenderHint(QPainter::Antialiasing);
+    QPen pen(QColor(245, 245, 245));
+    pen.setWidthF(1.7);
+    pen.setCapStyle(Qt::RoundCap);
+    pen.setJoinStyle(Qt::RoundJoin);
+    painter.setPen(pen);
+    painter.setBrush(QColor(245, 245, 245));
+    painter.drawRoundedRect(QRectF(4.0, 8.0, 10.0, 7.0), 1.2, 1.2);
+    painter.setBrush(Qt::NoBrush);
+    QPainterPath shackle;
+    if(locked)
+    {
+        shackle.moveTo(6.0, 8.0);
+        shackle.lineTo(6.0, 6.4);
+        shackle.cubicTo(6.0, 2.9, 12.0, 2.9, 12.0, 6.4);
+        shackle.lineTo(12.0, 8.0);
+    }
+    else
+    {
+        shackle.moveTo(7.0, 8.0);
+        shackle.lineTo(7.0, 6.4);
+        shackle.cubicTo(7.0, 3.1, 12.8, 3.1, 12.8, 6.2);
+    }
+    painter.drawPath(shackle);
+    return QIcon(pixmap);
+}
+
 class CScaledImageLabel : public QLabel
 {
 public:
@@ -78,8 +110,11 @@ private:
                                    point.y() * decorated.height());
             QPainter painter(&decorated);
             painter.setRenderHint(QPainter::Antialiasing);
-            painter.setPen(QPen(QColor(40, 220, 255, 235), 3.0));
-            painter.setBrush(QColor(40, 180, 255, 35));
+            QPen framePen(Qt::white, 2.0);
+            framePen.setCosmetic(true);
+            framePen.setJoinStyle(Qt::RoundJoin);
+            painter.setPen(framePen);
+            painter.setBrush(Qt::NoBrush);
             painter.drawPolygon(polygon);
         }
         setPixmap(QPixmap::fromImage(decorated).scaled(
@@ -122,6 +157,9 @@ CViewportMinimapWidget::CViewportMinimapWidget(QWidget* parent)
     m_lock = new QToolButton(this);
     m_lock->setObjectName("viewportMinimapLock");
     m_lock->setCheckable(true);
+    m_lock->setFixedSize(29, 27);
+    m_lock->setIconSize(QSize(18, 18));
+    m_lock->setToolButtonStyle(Qt::ToolButtonIconOnly);
     m_lock->setToolTip(tr("Lock or unlock generated minimap regeneration"));
     m_smaller = new QToolButton(this);
     m_smaller->setObjectName("viewportMinimapSmaller");
@@ -167,8 +205,10 @@ CViewportMinimapWidget::CViewportMinimapWidget(QWidget* parent)
 
     connect(m_export, &QToolButton::clicked,
             this, &CViewportMinimapWidget::exportRequested);
-    connect(m_refresh, &QToolButton::clicked,
-            this, &CViewportMinimapWidget::regenerationRequested);
+    connect(m_refresh, &QToolButton::clicked, this, [this]() {
+        m_selectGeneratedAfterRefresh = true;
+        emit regenerationRequested();
+    });
     connect(m_lock, &QToolButton::toggled, this,
             &CViewportMinimapWidget::generationLockRequested);
     connect(m_smaller, &QToolButton::clicked, this, [this]() {
@@ -207,6 +247,11 @@ void CViewportMinimapWidget::setGeneratedPreview(
     m_generatedIncomplete = incomplete;
     m_generatedDetail = detail;
     updateSourceChoices(preserve);
+    if(m_selectGeneratedAfterRefresh)
+    {
+        m_selectGeneratedAfterRefresh = false;
+        preferGenerated(true);
+    }
 }
 
 void CViewportMinimapWidget::clearGeneratedPreview(const QString& detail)
@@ -252,8 +297,8 @@ void CViewportMinimapWidget::setGenerationLocked(bool locked)
     m_generationLocked = locked;
     const QSignalBlocker blocker(m_lock);
     m_lock->setChecked(locked);
-    m_lock->setText(locked ? QString::fromUtf8("\xF0\x9F\x94\x92")
-                           : QString::fromUtf8("\xF0\x9F\x94\x93"));
+    m_lock->setText(QString());
+    m_lock->setIcon(centeredLockIcon(locked));
     m_lock->setToolTip(locked ? tr("Locked: click to enable regeneration")
                               : tr("Unlocked: changes regenerate automatically"));
     m_refresh->setEnabled(!locked);

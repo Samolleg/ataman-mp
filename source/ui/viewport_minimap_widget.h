@@ -68,6 +68,7 @@ private:
     int m_sectorWidth{0};
     int m_sectorHeight{0};
     QPolygonF m_cameraFootprint;
+    bool m_selectGeneratedAfterRefresh{false};
 };
 
 #endif

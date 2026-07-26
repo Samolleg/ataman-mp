@@ -1092,7 +1092,12 @@ int runHeadlessCommand(QApplication& app)
                          [&minimapLockRequested](bool locked) {
             minimapLockRequested = locked;
         });
+        viewportMinimap.preferGenerated(false);
         if(minimapRefresh) minimapRefresh->click();
+        viewportMinimap.setGeneratedPreview(generatedMinimap, false,
+                                            "regenerated");
+        const bool minimapRefreshSelectsGenerated =
+            viewportMinimap.usesGeneratedPreview();
         if(minimapLock) minimapLock->click();
         viewportMinimap.setGenerationLocked(true);
         const bool viewportMinimapLockControlsWork = minimapRefresh && minimapLock
@@ -1138,7 +1143,15 @@ int runHeadlessCommand(QApplication& app)
             ? generatedPreview->transform() : QTransform();
         if(shadingValue) shadingValue->setValue(137);
         if(hueSlider) hueSlider->setValue(-73);
-        const bool minimapExportIsModeless = !minimapExport->isModal();
+        QPushButton* applyLock = minimapExport->findChild<QPushButton*>(
+            "minimapApplyLock");
+        const Qt::WindowFlags exportFlags = minimapExport->windowFlags();
+        const bool minimapExportIsModeless = !minimapExport->isModal()
+            && minimapExport->parentWidget() == nullptr
+            && (exportFlags & Qt::WindowMinMaxButtonsHint)
+            && (exportFlags & Qt::WindowCloseButtonHint)
+            && !minimapExport->windowIcon().isNull()
+            && applyLock && applyLock->minimumWidth() >= 180;
         const bool minimapTypedGradeControlsWork = shadingSlider && shadingValue
             && hueSlider && hueValue && shadingSlider->maximum() == 150
             && shadingSlider->value() == 137 && shadingValue->value() == 137
@@ -1473,6 +1486,7 @@ int runHeadlessCommand(QApplication& app)
                 && embeddedMinimapDefaultsWhenAvailable
                 && generatedMinimapCanBeSelected
                 && viewportMinimapHasThreeSizes
+                && minimapRefreshSelectsGenerated
                 && viewportMinimapLockControlsWork
                 && viewportMinimapUnlockWorks
                 && minimapExportIsModeless
@@ -1566,6 +1580,7 @@ int runHeadlessCommand(QApplication& app)
                << " generatedMinimapCanBeSelected=" << generatedMinimapCanBeSelected
                << " viewportMinimapHasThreeSizes=" << viewportMinimapHasThreeSizes
                << " viewportMinimapLockControlsWork=" << viewportMinimapLockControlsWork
+               << " minimapRefreshSelectsGenerated=" << minimapRefreshSelectsGenerated
                << " viewportMinimapUnlockWorks=" << viewportMinimapUnlockWorks
                << " minimapExportIsModeless=" << minimapExportIsModeless
                << " minimapTypedGradeControlsWork=" << minimapTypedGradeControlsWork

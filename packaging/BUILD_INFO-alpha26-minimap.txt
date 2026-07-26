@@ -1,0 +1,6 @@
+EI Mapper Endurance Edition 0.3.0-alpha.26
+Built: 2026-07-27
+Toolchain: Qt 5.12.12 / MinGW 7.3 x64 through documented ASCII subst wrapper
+Scope: minimap camera-frame, lock/layout, standalone export window, briefing gate
+Automated validation: UI widget check PASS; minimap 17/17; map catalog 8/8
+Runtime validation: pending tester checklist

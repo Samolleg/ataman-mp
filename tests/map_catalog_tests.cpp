@@ -12,6 +12,7 @@ private slots:
     void parsesTravelZoneSpawnData();
     void parsesSkyEnvironment();
     void parsesCompleteMapsIdentityAndRepeatedRoutes();
+    void identifiesBriefingZonesFromCatalogMetadata();
 };
 
 void MapCatalogTests::parsesResourcePairsOnly()
@@ -105,6 +106,17 @@ void MapCatalogTests::parsesCompleteMapsIdentityAndRepeatedRoutes()
              QString("1|bz1g|2|0"));
     QCOMPARE(mapTravelRouteKey(entries.first().travelZones, 1),
              QString("1|bz1g|2|1"));
+}
+
+void MapCatalogTests::identifiesBriefingZonesFromCatalogMetadata()
+{
+    SMapCatalogEntry briefing;
+    briefing.zoneType = QStringLiteral("BrIeF");
+    QVERIFY(briefing.isBriefing());
+
+    SMapCatalogEntry gameplay;
+    gameplay.zoneType = QStringLiteral("game");
+    QVERIFY(!gameplay.isBriefing());
 }
 
 QTEST_APPLESS_MAIN(MapCatalogTests)
