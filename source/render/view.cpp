@@ -9201,6 +9201,22 @@ void CView::endTileBrushGroup()
     if(m_tilePaintStrokeActive)
     {
         m_tilePaintStrokeActive = false;
+        if(!m_overlaySurfaceStrokeCommand.isEmpty())
+        {
+            CValidationReport report;
+            const SOverlaySurfaceCommand exactCommand =
+                m_terrainEdit.makeOverlaySurfaceCommand(
+                    m_overlaySurfaceStrokeBaseline,
+                    m_overlaySurfaceStrokeCommand.description, &report);
+            if(report.hasErrors())
+            {
+                ei::log(eLogWarning, "Overlay stroke snapshot reconciliation failed:\n"
+                    + report.toText());
+                emit updateMsg(report.toText());
+            }
+            else
+                m_overlaySurfaceStrokeCommand = exactCommand;
+        }
         if(m_pUndoStack && !m_overlaySurfaceStrokeCommand.isEmpty())
             m_pUndoStack->push(new COverlaySurfacePreviewCommand(
                 this, m_overlaySurfaceStrokeCommand, true));
@@ -9243,6 +9259,7 @@ void CView::beginTileBrushGroup()
     m_tileStrokeCommand = STerrainTileCommand();
     m_tileStrokeCommand.description = tr("Paint terrain tiles");
     m_overlaySurfaceStrokeCommand = SOverlaySurfaceCommand();
+    m_overlaySurfaceStrokeBaseline = m_terrainEdit.overlaySurfaceSnapshot();
     m_lastTerrainPaintCenterValid = false;
     m_tileStrokeActions = 0;
     m_tileStrokeApplied = 0;
@@ -9914,6 +9931,7 @@ void CView::mousePressEvent(QMouseEvent* event)
         m_sculptStrokeCommand.description = tr("Sculpt terrain");
         m_overlaySurfaceStrokeCommand = SOverlaySurfaceCommand();
         m_overlaySurfaceStrokeCommand.description = tr("Sculpt overlay height");
+        m_overlaySurfaceStrokeBaseline = m_terrainEdit.overlaySurfaceSnapshot();
         sculptTerrainAt(m_lastSculptPoint, 1.0f);
         m_sculptRepeatTimer->start();
         event->accept();
@@ -11682,6 +11700,22 @@ void CView::finishSculptStroke()
     m_sculptRepeatTimer->stop();
     m_sculptStrokeActive = false;
     m_sculptPointerValid = false;
+    if(!m_overlaySurfaceStrokeCommand.isEmpty())
+    {
+        CValidationReport report;
+        const SOverlaySurfaceCommand exactCommand =
+            m_terrainEdit.makeOverlaySurfaceCommand(
+                m_overlaySurfaceStrokeBaseline,
+                m_overlaySurfaceStrokeCommand.description, &report);
+        if(report.hasErrors())
+        {
+            ei::log(eLogWarning, "Overlay sculpt snapshot reconciliation failed:\n"
+                + report.toText());
+            emit updateMsg(report.toText());
+        }
+        else
+            m_overlaySurfaceStrokeCommand = exactCommand;
+    }
     const bool overlayStroke = !m_overlaySurfaceStrokeCommand.isEmpty();
     STerrainEditDiagnostics terrainDiagnostics;
     int maximumRawDelta = 0;

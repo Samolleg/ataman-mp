@@ -4542,6 +4542,62 @@ void EnduranceDocumentTests::overlayActivationDeactivationIsLosslessAndUndoable(
     QVERIFY(mergedStrokeTerrain.apply(mergedStroke, true));
     QCOMPARE(mergedStrokeTerrain.sectorPayload(0, 0), mergedFinal);
 
+    // A continuous Add Surface stroke may begin on land-only cells and then
+    // enter an already-active overlay, including across a SEC boundary. The
+    // whole gesture must remain one exactly reversible transaction.
+    CMprDocument mixedBaseline;
+    CValidationReport mixedReport;
+    QVERIFY2(mixedBaseline.loadBytes(syntheticTwoSectorMpr(
+                 syntheticLandSector(1200), syntheticLandSector(1200)),
+                 "overlay-mixed-stroke-baseline.mpr", &mixedReport),
+             qPrintable(mixedReport.toText()));
+    CTerrainEditModel mixedTerrain;
+    QVERIFY(mixedTerrain.load(mixedBaseline));
+    STerrainTileBrush existingOverlay;
+    existingOverlay.centerX = 24.0f;
+    existingOverlay.centerY = 8.0f;
+    existingOverlay.radius = 3.0f;
+    const SOverlaySurfaceCommand existingActivation =
+        mixedTerrain.makeOverlayActivation(existingOverlay, 1, 0, 1, 0,
+                                           &mixedReport);
+    QVERIFY2(!existingActivation.isEmpty(), qPrintable(mixedReport.toText()));
+    QVERIFY(mixedTerrain.apply(existingActivation, true, &mixedReport));
+    const QByteArray mixedInitialLeft = mixedTerrain.sectorPayload(0, 0);
+    const QByteArray mixedInitialRight = mixedTerrain.sectorPayload(1, 0);
+    const SOverlaySurfaceSnapshot mixedSnapshot =
+        mixedTerrain.overlaySurfaceSnapshot();
+
+    SOverlaySurfaceCommand mixedStroke;
+    for(int centerX = 8; centerX <= 24; ++centerX)
+    {
+        STerrainTileBrush stampBrush;
+        stampBrush.centerX = float(centerX);
+        stampBrush.centerY = 8.0f;
+        stampBrush.radius = 1.0f;
+        const SOverlaySurfaceCommand stamp = mixedTerrain.makeOverlayActivation(
+            stampBrush, 0, 0, 2, 0, &mixedReport);
+        if(stamp.isEmpty())
+            continue;
+        QVERIFY2(mixedTerrain.apply(stamp, true, &mixedReport),
+                 qPrintable(mixedReport.toText()));
+        appendOverlaySurfaceCommand(&mixedStroke, stamp);
+    }
+    QVERIFY(!mixedStroke.isEmpty());
+    const QByteArray mixedFinalLeft = mixedTerrain.sectorPayload(0, 0);
+    const QByteArray mixedFinalRight = mixedTerrain.sectorPayload(1, 0);
+    const SOverlaySurfaceCommand exactMixedStroke =
+        mixedTerrain.makeOverlaySurfaceCommand(
+            mixedSnapshot, QStringLiteral("mixed absent-to-existing stroke"),
+            &mixedReport);
+    QVERIFY2(!exactMixedStroke.isEmpty(), qPrintable(mixedReport.toText()));
+    QVERIFY(mixedTerrain.apply(exactMixedStroke, false, &mixedReport));
+    QCOMPARE(mixedTerrain.sectorPayload(0, 0), mixedInitialLeft);
+    QCOMPARE(mixedTerrain.sectorPayload(1, 0), mixedInitialRight);
+    QVERIFY2(mixedTerrain.apply(exactMixedStroke, true, &mixedReport),
+             qPrintable(mixedReport.toText()));
+    QCOMPARE(mixedTerrain.sectorPayload(0, 0), mixedFinalLeft);
+    QCOMPARE(mixedTerrain.sectorPayload(1, 0), mixedFinalRight);
+
     // Defense in depth: even a structurally sized overlay command must not be
     // serializable if it detached land bytes from the canonical lattice.
     SOverlaySurfaceCommand corruptLand;

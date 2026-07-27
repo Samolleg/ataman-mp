@@ -574,6 +574,7 @@ private:
     QVector<STerrainTileDelta> m_terrainPaintAudit;
     STerrainTileCommand m_tileStrokeCommand;
     SOverlaySurfaceCommand m_overlaySurfaceStrokeCommand;
+    SOverlaySurfaceSnapshot m_overlaySurfaceStrokeBaseline;
     QVector<STerrainPaintAuditAction> m_terrainPaintActions;
     int m_terrainPaintActionId{0};
     quint32 m_terrainSemanticSeed{0};

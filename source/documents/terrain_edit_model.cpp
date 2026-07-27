@@ -1507,6 +1507,65 @@ SOverlaySurfaceCommand CTerrainEditModel::makeOverlaySmooth(
                                  2, 0.0f, strength, report);
 }
 
+SOverlaySurfaceSnapshot CTerrainEditModel::overlaySurfaceSnapshot() const
+{
+    SOverlaySurfaceSnapshot snapshot;
+    snapshot.sectors.reserve(m_sectors.size());
+    for(const SSector& sector : m_sectors)
+    {
+        SOverlaySectorSnapshot state;
+        state.sectorX = sector.source.sectorX;
+        state.sectorY = sector.source.sectorY;
+        // QByteArray's implicit sharing keeps a complete stroke baseline
+        // cheap; only edited sector payloads detach from these source bytes.
+        state.payload = sector.currentPayload;
+        snapshot.sectors.append(state);
+    }
+    return snapshot;
+}
+
+SOverlaySurfaceCommand CTerrainEditModel::makeOverlaySurfaceCommand(
+    const SOverlaySurfaceSnapshot& before, const QString& description,
+    CValidationReport* report) const
+{
+    SOverlaySurfaceCommand command;
+    command.description = description;
+    QSet<QPair<int, int>> seen;
+    for(const SOverlaySectorSnapshot& state : before.sectors)
+    {
+        const QPair<int, int> key(state.sectorX, state.sectorY);
+        const int index = m_sectorLookup.value(key, -1);
+        if(index < 0 || seen.contains(key))
+        {
+            if(report)
+                report->add("terrain.overlay_snapshot", EValidationSeverity::Error,
+                            index < 0
+                                ? "Overlay stroke snapshot references a missing sector"
+                                : "Overlay stroke snapshot contains a sector more than once",
+                            QString("%1,%2").arg(state.sectorX).arg(state.sectorY));
+            return SOverlaySurfaceCommand();
+        }
+        seen.insert(key);
+        const QByteArray& current = m_sectors.at(index).currentPayload;
+        if(current == state.payload)
+            continue;
+        SOverlaySectorDelta delta;
+        delta.sectorX = state.sectorX;
+        delta.sectorY = state.sectorY;
+        delta.beforePayload = state.payload;
+        delta.afterPayload = current;
+        command.sectors.append(delta);
+    }
+    if(seen.size() != m_sectors.size())
+    {
+        if(report)
+            report->add("terrain.overlay_snapshot", EValidationSeverity::Error,
+                        "Overlay stroke snapshot does not cover the current terrain sector set");
+        return SOverlaySurfaceCommand();
+    }
+    return command;
+}
+
 SOverlaySurfaceCommand CTerrainEditModel::makeOverlayHeightEdit(
     const QString& description, const STerrainBrush& brush,
     int operation, float value, float strength,
@@ -3882,7 +3941,15 @@ bool CTerrainEditModel::apply(const SOverlaySurfaceCommand& command, bool forwar
             if(report)
                 report->add("terrain.overlay_provenance", EValidationSeverity::Error,
                             "Overlay command no longer matches the canonical SEC payload",
-                            m_sectors.at(index).source.memberName);
+                            QString("%1 expected=%2/%3 actual=%4/%5")
+                                .arg(m_sectors.at(index).source.memberName)
+                                .arg(expected.size())
+                                .arg(QString::fromLatin1(QCryptographicHash::hash(
+                                    expected, QCryptographicHash::Sha256).toHex()))
+                                .arg(m_sectors.at(index).currentPayload.size())
+                                .arg(QString::fromLatin1(QCryptographicHash::hash(
+                                    m_sectors.at(index).currentPayload,
+                                    QCryptographicHash::Sha256).toHex())));
             return false;
         }
         const QByteArray& replacement = forward ? delta.afterPayload : delta.beforePayload;

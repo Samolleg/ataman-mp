@@ -189,6 +189,18 @@ struct SOverlaySurfaceCommand
     bool isEmpty() const { return sectors.isEmpty(); }
 };
 
+struct SOverlaySectorSnapshot
+{
+    int sectorX{0};
+    int sectorY{0};
+    QByteArray payload;
+};
+
+struct SOverlaySurfaceSnapshot
+{
+    QVector<SOverlaySectorSnapshot> sectors;
+};
+
 // Compose sequential overlay surface stamps into one reversible sector
 // transaction. Repeated sectors retain their original payload and final
 // payload so a complete stroke always undoes byte-for-byte.
@@ -370,6 +382,11 @@ public:
         CValidationReport* report = nullptr) const;
     SOverlaySurfaceCommand makeOverlaySmooth(
         const STerrainBrush& brush, float strength,
+        CValidationReport* report = nullptr) const;
+    SOverlaySurfaceSnapshot overlaySurfaceSnapshot() const;
+    SOverlaySurfaceCommand makeOverlaySurfaceCommand(
+        const SOverlaySurfaceSnapshot& before,
+        const QString& description,
         CValidationReport* report = nullptr) const;
 
     STerrainHeightCommand makeRaiseLower(const STerrainBrush& brush,
