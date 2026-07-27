@@ -1,4 +1,4 @@
-# EI Mapper Endurance 0.3.0-alpha.26 semantic-atlas prototype R7
+# EI Mapper Endurance 0.3.0-alpha.26 semantic-atlas prototype R8
 
 ## What changed
 
@@ -34,9 +34,10 @@
 - A contextual card now retains that support through selection and painting.
   Clicking it places the exact four-tile motif shown by the card instead of a
   nearest-family approximation based on unrelated terrain underneath.
-- Sparse motifs cannot overlap unless the atlas contains the necessary
-  multi-corner transitions. An impossible touching click is rejected before
-  mutation with an actionable explanation instead of producing a checkerboard.
+- Sparse motifs still prefer exact multi-corner transitions. When a touching
+  click needs a transition the atlas does not contain, it now uses the closest
+  local authored tile that preserves the selected vertex, applies only to the
+  four incident cells, and reports a warning instead of refusing the stroke.
 - The headless UI check uses temporary settings and cannot read or overwrite an
   active editor's brush preferences.
 
@@ -61,9 +62,9 @@ remain tile-based and otherwise unchanged.
    the selected vertex into one coherent Ground center. Select `Stone on
    Ground` and confirm tile 448 likewise forms a coherent Stone center. The
    ordinary Stone card must remain available and continue to fill normally.
-   Try to place touching contextual motifs: they may join only when the atlas
-   has the exact required multi-corner transition; otherwise the click must
-   leave terrain unchanged and explain what is missing.
+   Try to place touching contextual motifs. Exact transitions must be used when
+   present; otherwise the second click must still paint, remain confined to its
+   four incident cells, and warn that a closest local authored tile was used.
 6. Paint Zone 2's underwater family over itself and confirm it remains
    selectable and blends as an ordinary ground-layer family.
 7. In Overlay mode, paint an atlas texture over an existing overlay surface.
@@ -77,7 +78,7 @@ remain tile-based and otherwise unchanged.
 ## Expected warning
 
 A 1-on-3 contextual card is a vertex motif, not proof that its center material
-can form a contiguous area on that support. Touching copies are refused unless
-the profile also contains the exact 2-corner, 3-corner, or uniform transitions
-needed at the resulting junctions. Add and assign those atlas tiles if the
-motif should support contiguous painting.
+can form a perfect contiguous area on that support. Without the exact 2-corner,
+3-corner, or uniform transitions, touching copies use a bounded closest-authored
+fallback and may retain a hard edge. The editor warns about this atlas limitation
+without blocking the paint action.
