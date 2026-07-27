@@ -9118,11 +9118,16 @@ bool CView::applyOverlaySurfacePreview(const SOverlaySurfaceCommand& command,
         const QPair<int, int> sector(delta.sectorX, delta.sectorY);
         if(m_terrainPreviewBatchActive)
         {
+            if(!m_pendingOverlayPreviewBefore.contains(sector))
+                m_pendingOverlayPreviewBefore.insert(
+                    sector, forward ? delta.beforePayload : delta.afterPayload);
             m_pendingOverlayPreviewSectors.insert(sector);
             continue;
         }
-        if(!m_pLand->previewCanonicalOverlaySector(delta.sectorX, delta.sectorY,
-                m_terrainEdit.sectorPayload(delta.sectorX, delta.sectorY)))
+        if(!m_pLand->previewCanonicalOverlaySectorDelta(
+                delta.sectorX, delta.sectorY,
+                forward ? delta.beforePayload : delta.afterPayload,
+                forward ? delta.afterPayload : delta.beforePayload))
             ei::log(eLogWarning, QString(
                 "Overlay model changed but preview renderer rejected sector %1,%2")
                     .arg(delta.sectorX).arg(delta.sectorY));
@@ -9142,6 +9147,7 @@ void CView::beginTerrainPreviewBatch()
         return;
     m_pendingTerrainPreviewSectors.clear();
     m_pendingOverlayPreviewSectors.clear();
+    m_pendingOverlayPreviewBefore.clear();
     m_pendingTilePreviewSectors.clear();
     m_terrainPreviewBatchActive = true;
 }
@@ -9153,9 +9159,12 @@ void CView::endTerrainPreviewBatch()
     m_terrainPreviewBatchActive = false;
     const QSet<QPair<int, int>> terrainSectors = m_pendingTerrainPreviewSectors;
     QSet<QPair<int, int>> overlaySectors = m_pendingOverlayPreviewSectors;
+    const QMap<QPair<int, int>, QByteArray> overlayBefore =
+        m_pendingOverlayPreviewBefore;
     QSet<QPair<int, int>> tileSectors = m_pendingTilePreviewSectors;
     m_pendingTerrainPreviewSectors.clear();
     m_pendingOverlayPreviewSectors.clear();
+    m_pendingOverlayPreviewBefore.clear();
     m_pendingTilePreviewSectors.clear();
 
     for(const QPair<int, int>& sector : terrainSectors)
@@ -9172,8 +9181,8 @@ void CView::endTerrainPreviewBatch()
     for(const QPair<int, int>& sector : overlaySectors)
     {
         tileSectors.remove(sector);
-        if(!m_pLand->previewCanonicalOverlaySector(
-            sector.first, sector.second,
+        if(!m_pLand->previewCanonicalOverlaySectorDelta(
+            sector.first, sector.second, overlayBefore.value(sector),
             m_terrainEdit.sectorPayload(sector.first, sector.second)))
             ei::log(eLogWarning, QString(
                 "Batched overlay preview rejected sector %1,%2")

@@ -307,6 +307,7 @@ private:
     QDoubleSpinBox* m_cameraSpeedSpin{nullptr};
     bool m_uiStateSaved{false};
     bool m_workspaceLoadInProgress{false};
+    bool m_shutdownInProgress{false};
     QString m_mapTestResultLogPath;
     ETransientNotificationAction m_transientNotificationAction{
         ETransientNotificationAction::None};

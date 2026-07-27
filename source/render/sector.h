@@ -8,6 +8,7 @@
 #include <QOpenGLBuffer>
 #include <QOpenGLShaderProgram>
 #include <QOpenGLTexture>
+#include <QSet>
 #include "types.h"
 #include "tile.h"
 
@@ -61,11 +62,14 @@ public:
     void updateDrawData();
     bool previewCanonicalPayload(const QByteArray& payload);
     bool previewCanonicalOverlayPayload(const QByteArray& payload);
+    bool previewCanonicalOverlayDelta(const QByteArray& beforePayload,
+                                      const QByteArray& afterPayload);
     void setPreviewMaxZ(float maxZ);
 
 private:
     void updatePosition();
-    void updateWaterDrawData();
+    void updateWaterDrawData(bool rebuildIndices = true);
+    void updateWaterTiles(const QSet<int>& localTiles, bool rebuildIndices);
     void generateWaterVertexData();
     void updateBounds();
     void makeVertexData(QVector<QVector<SSecVertex>>& aLandVertex, QVector<STile>& aLandTile, QVector<QVector<SSecVertex>>& aWaterVertex, QVector<STile>& aWaterTile, float maxZ, int texCount);

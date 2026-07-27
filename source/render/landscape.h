@@ -88,6 +88,9 @@ public:
     void updateSectorDrawData(int xSec, int ySec);
     bool previewCanonicalSector(int xSec, int ySec, const QByteArray& payload);
     bool previewCanonicalOverlaySector(int xSec, int ySec, const QByteArray& payload);
+    bool previewCanonicalOverlaySectorDelta(int xSec, int ySec,
+                                            const QByteArray& beforePayload,
+                                            const QByteArray& afterPayload);
     bool previewCanonicalMaxZ(float maxZ);
     bool previewCanonicalTile(int globalX, int globalY, bool land, quint16 packedTile,
                               bool updateSector = true);

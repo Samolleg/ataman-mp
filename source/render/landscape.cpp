@@ -528,6 +528,17 @@ bool CLandscape::previewCanonicalOverlaySector(
     return m_aSector[ySec][xSec]->previewCanonicalOverlayPayload(payload);
 }
 
+bool CLandscape::previewCanonicalOverlaySectorDelta(
+    int xSec, int ySec, const QByteArray& beforePayload,
+    const QByteArray& afterPayload)
+{
+    if(ySec < 0 || ySec >= m_aSector.size() || xSec < 0
+        || xSec >= m_aSector.at(ySec).size() || !m_aSector.at(ySec).at(xSec))
+        return false;
+    return m_aSector[ySec][xSec]->previewCanonicalOverlayDelta(
+        beforePayload, afterPayload);
+}
+
 bool CLandscape::previewCanonicalMaxZ(float maxZ)
 {
     if(!std::isfinite(maxZ) || maxZ <= 0.0f || m_aSector.isEmpty())

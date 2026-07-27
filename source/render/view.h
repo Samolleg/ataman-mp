@@ -593,6 +593,7 @@ private:
     bool m_terrainPreviewBatchActive{false};
     QSet<QPair<int, int>> m_pendingTerrainPreviewSectors;
     QSet<QPair<int, int>> m_pendingOverlayPreviewSectors;
+    QMap<QPair<int, int>, QByteArray> m_pendingOverlayPreviewBefore;
     QSet<QPair<int, int>> m_pendingTilePreviewSectors;
     bool m_sculptOutlineValid{false};
     QVector3D m_sculptOutlineCenter;

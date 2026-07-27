@@ -1,4 +1,6 @@
 #include <QtGlobal>
+#include <QtEndian>
+#include <cstring>
 
 #include "sector.h"
 #include "gl_dispatch.h"
@@ -334,6 +336,107 @@ bool CSector::previewCanonicalOverlayPayload(const QByteArray& payload)
     if(stream.status() != QDataStream::Ok)
         return false;
     updateWaterDrawData();
+    return true;
+}
+
+bool CSector::previewCanonicalOverlayDelta(const QByteArray& beforePayload,
+                                           const QByteArray& afterPayload)
+{
+    static const int vertexSize = 8;
+    static const int vertexBlockSize = nVertex * nVertex * vertexSize;
+    static const int tileBlockSize = nTile * nTile * int(sizeof(quint16));
+    static const int landVertexOffset = 5;
+    static const int overlayVertexOffset = landVertexOffset + vertexBlockSize;
+    static const int overlayTileOffset = landVertexOffset
+        + 2 * vertexBlockSize + tileBlockSize;
+    static const int overlayMaterialOffset = overlayTileOffset + tileBlockSize;
+    static const int overlaySectorSize = overlayMaterialOffset + tileBlockSize;
+
+    if(beforePayload.size() < 5 || afterPayload.size() < 5
+       || qFromLittleEndian<quint32>(reinterpret_cast<const uchar*>(
+              beforePayload.constData())) != secSignature
+       || qFromLittleEndian<quint32>(reinterpret_cast<const uchar*>(
+              afterPayload.constData())) != secSignature
+       || quint8(beforePayload.at(4)) != 3 || quint8(afterPayload.at(4)) != 3
+       || beforePayload.size() < overlaySectorSize
+       || afterPayload.size() < overlaySectorSize
+       || m_arrWater.size() != nTile)
+        return previewCanonicalOverlayPayload(afterPayload);
+
+    QSet<int> changedTiles;
+    bool rebuildIndices = false;
+    const auto addVertexTiles = [&changedTiles](int vertexX, int vertexY)
+    {
+        const int maximumTileX = qMin(nTile - 1, vertexX / 2);
+        const int maximumTileY = qMin(nTile - 1, vertexY / 2);
+        const int minimumTileX = vertexX > 0 && vertexX % 2 == 0
+            ? maximumTileX - 1 : maximumTileX;
+        const int minimumTileY = vertexY > 0 && vertexY % 2 == 0
+            ? maximumTileY - 1 : maximumTileY;
+        for(int tileY = qMax(0, minimumTileY); tileY <= maximumTileY; ++tileY)
+            for(int tileX = qMax(0, minimumTileX); tileX <= maximumTileX; ++tileX)
+                changedTiles.insert(tileY * nTile + tileX);
+    };
+    for(int vertex = 0; vertex < nVertex * nVertex; ++vertex)
+    {
+        const int offset = overlayVertexOffset + vertex * vertexSize;
+        if(std::memcmp(beforePayload.constData() + offset,
+                       afterPayload.constData() + offset, vertexSize) != 0)
+            addVertexTiles(vertex % nVertex, vertex / nVertex);
+    }
+    for(int tile = 0; tile < nTile * nTile; ++tile)
+    {
+        const int packedOffset = overlayTileOffset + tile * 2;
+        const int materialOffset = overlayMaterialOffset + tile * 2;
+        if(std::memcmp(beforePayload.constData() + packedOffset,
+                       afterPayload.constData() + packedOffset, 2) != 0)
+            changedTiles.insert(tile);
+        if(std::memcmp(beforePayload.constData() + materialOffset,
+                       afterPayload.constData() + materialOffset, 2) != 0)
+        {
+            changedTiles.insert(tile);
+            rebuildIndices = true;
+        }
+    }
+    if(changedTiles.isEmpty())
+        return true;
+
+    const auto readVertex = [&afterPayload](int x, int y)
+    {
+        const int offset = overlayVertexOffset + (y * nVertex + x) * vertexSize;
+        const uchar* bytes = reinterpret_cast<const uchar*>(
+            afterPayload.constData() + offset);
+        SSecVertex vertex;
+        vertex.xOffset = qint8(bytes[0]);
+        vertex.yOffset = qint8(bytes[1]);
+        vertex.z = qFromLittleEndian<quint16>(bytes + 2);
+        vertex.packedNormal = qFromLittleEndian<quint32>(bytes + 4);
+        vertex.normal.setX((int((vertex.packedNormal >> 11) & 0x7ff) - 1000) / 1000.0f);
+        vertex.normal.setY((int(vertex.packedNormal & 0x7ff) - 1000) / 1000.0f);
+        vertex.normal.setZ(int(vertex.packedNormal >> 22) / 1000.0f);
+        return vertex;
+    };
+    for(int tile : changedTiles)
+    {
+        const int row = tile / nTile;
+        const int col = tile % nTile;
+        QVector<SSecVertex> vertices;
+        vertices.reserve(9);
+        for(int y = row * 2; y <= row * 2 + 2; ++y)
+            for(int x = col * 2; x <= col * 2 + 2; ++x)
+                vertices.append(readVertex(x, y));
+        m_arrWater[row][col].resetVertices(vertices);
+        const uchar* packedBytes = reinterpret_cast<const uchar*>(
+            afterPayload.constData() + overlayTileOffset + tile * 2);
+        const STile packed(qFromLittleEndian<quint16>(packedBytes));
+        m_arrWater[row][col].setTile(
+            packed.m_index + packed.m_texture * 64, packed.m_rotation);
+        const uchar* materialBytes = reinterpret_cast<const uchar*>(
+            afterPayload.constData() + overlayMaterialOffset + tile * 2);
+        m_arrWater[row][col].setMaterialIndex(
+            qFromLittleEndian<qint16>(materialBytes));
+    }
+    updateWaterTiles(changedTiles, rebuildIndices);
     return true;
 }
 
@@ -729,7 +832,92 @@ void CSector::updateBounds()
     }
 }
 
-void CSector::updateWaterDrawData()
+void CSector::updateWaterTiles(const QSet<int>& localTiles, bool rebuildIndices)
+{
+    const int expectedVertices = nTile * nTile * 9;
+    if(m_arrWaterVrtData.size() != expectedVertices
+       || m_arrAnimatedWaterVrtData.size() != expectedVertices)
+    {
+        updateWaterDrawData(true);
+        return;
+    }
+    for(int tile : localTiles)
+    {
+        if(tile < 0 || tile >= nTile * nTile)
+            continue;
+        const int row = tile / nTile;
+        const int col = tile % nTile;
+        int vertexIndex = tile * 9;
+        if(m_arrWater.at(row).at(col).materialIndex() >= 0)
+            m_arrWater[row][col].generateDrawVertexData(
+                m_arrWaterVrtData, vertexIndex);
+        else
+            for(int vertex = 0; vertex < 9; ++vertex)
+                m_arrWaterVrtData[tile * 9 + vertex] = SVertexData();
+
+        const int materialIndex = m_arrWater.at(row).at(col).materialIndex();
+        const SMaterial* material = m_materials && materialIndex >= 0
+                && materialIndex < m_materials->size()
+            ? &m_materials->at(materialIndex) : nullptr;
+        const ei::SOverlayMaterialAnimation animation =
+            ei::overlayMaterialAnimation(material);
+        for(int vertex = 0; vertex < 9; ++vertex)
+        {
+            const int index = tile * 9 + vertex;
+            const SVertexData& source = m_arrWaterVrtData.at(index);
+            SWaterVertexData& target = m_arrAnimatedWaterVrtData[index];
+            target.position = source.position;
+            target.normal = source.normal;
+            target.texCoord = source.texCoord;
+            const int gridX = col * 2 + vertex % 3;
+            const int gridY = row * 2 + vertex / 3;
+            target.animation = QVector4D(animation.waveMultiplier,
+                animation.authoredWarpSpeed, ei::overlayWindNoise(gridX, gridY),
+                animation.animated ? 1.0f : 0.0f);
+            target.grid = QVector2D(float(gridX), float(gridY));
+        }
+    }
+    updateBounds();
+    m_waterVertexBuf.bind();
+    // Preserve the existing allocation and upload only the contiguous nine
+    // vertices belonging to each changed tile. Reallocating the complete
+    // animated overlay VBO on every stamp was the main GPU synchronization
+    // difference from ordinary terrain painting.
+    for(int tile : localTiles)
+    {
+        if(tile < 0 || tile >= nTile * nTile)
+            continue;
+        m_waterVertexBuf.write(tile * 9 * int(sizeof(SWaterVertexData)),
+            m_arrAnimatedWaterVrtData.constData() + tile * 9,
+            9 * int(sizeof(SWaterVertexData)));
+    }
+    m_waterVertexBuf.release();
+    if(!rebuildIndices)
+        return;
+
+    const QVector<ushort> tileIndices{
+        0,1,4, 0,4,3, 1,2,5, 1,5,4,
+        3,4,7, 3,7,6, 4,5,8, 4,8,7
+    };
+    QVector<ushort> waterIndices;
+    waterIndices.reserve(nTile * nTile * tileIndices.size());
+    for(int row = 0; row < nTile; ++row)
+        for(int col = 0; col < nTile; ++col)
+        {
+            if(m_arrWater.at(row).at(col).materialIndex() < 0)
+                continue;
+            const ushort tileOffset = ushort((row * nTile + col) * 9);
+            for(ushort index : tileIndices)
+                waterIndices.append(index + tileOffset);
+        }
+    m_waterIndexCount = waterIndices.size();
+    m_waterIndexBuf.bind();
+    m_waterIndexBuf.allocate(waterIndices.constData(),
+        waterIndices.size() * int(sizeof(ushort)));
+    m_waterIndexBuf.release();
+}
+
+void CSector::updateWaterDrawData(bool rebuildIndices)
 {
     generateWaterVertexData();
     updateBounds();
@@ -742,6 +930,8 @@ void CSector::updateWaterDrawData()
     m_waterVertexBuf.allocate(m_arrAnimatedWaterVrtData.data(),
         m_arrAnimatedWaterVrtData.count() * int(sizeof(SWaterVertexData)));
     m_waterVertexBuf.release();
+    if(!rebuildIndices)
+        return;
     const QVector<ushort> tileIndices{
         0,1,4, 0,4,3,
         1,2,5, 1,5,4,

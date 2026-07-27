@@ -1566,9 +1566,21 @@ SOverlaySurfaceCommand CTerrainEditModel::makeOverlayHeightEdit(
                                   height, xOffset, yOffset});
             }
         }
-        for(int tileY = 0; tileY < kSectorTiles; ++tileY)
+        // Only overlay cells whose 3x3 vertex footprint intersects the brush
+        // neighborhood can own a selected vertex. The previous implementation
+        // rescanned every one of the sector's 256 cells on every sculpt stamp,
+        // even for a radius-1 brush.
+        const int localMinimumTileX = qMax(0,
+            int(std::ceil((localMinimumX - 2) / 2.0)));
+        const int localMaximumTileX = qMin(kSectorTiles - 1,
+            int(std::floor(localMaximumX / 2.0)));
+        const int localMinimumTileY = qMax(0,
+            int(std::ceil((localMinimumY - 2) / 2.0)));
+        const int localMaximumTileY = qMin(kSectorTiles - 1,
+            int(std::floor(localMaximumY / 2.0)));
+        for(int tileY = localMinimumTileY; tileY <= localMaximumTileY; ++tileY)
         {
-            for(int tileX = 0; tileX < kSectorTiles; ++tileX)
+            for(int tileX = localMinimumTileX; tileX <= localMaximumTileX; ++tileX)
             {
                 const int localTile = tileY * kSectorTiles + tileX;
                 if(!overlayTileIsActive(sector, localTile))

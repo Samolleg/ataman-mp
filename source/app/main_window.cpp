@@ -5728,6 +5728,8 @@ void MainWindow::configureAutosaveTimer(bool enabled, int intervalMinutes)
 
 void MainWindow::beginAutosaveCountdown()
 {
+    if(m_shutdownInProgress)
+        return;
     if(!m_pView || m_pView->hasPendingOperation())
     {
         ei::log(eLogInfo, "Recovery autosave countdown deferred while an edit operation is pending");
@@ -5805,6 +5807,8 @@ void MainWindow::beginAutosaveCountdown()
 
 void MainWindow::performAutosave()
 {
+    if(m_shutdownInProgress)
+        return;
     ei::log(eLogInfo, QString("Recovery autosave tick active:%1 intervalMs:%2")
             .arg(m_autosaveTimer && m_autosaveTimer->isActive())
             .arg(m_autosaveTimer ? m_autosaveTimer->interval() : -1));
@@ -6157,6 +6161,17 @@ void MainWindow::closeEvent(QCloseEvent *e)
     // docks. Landscape Tools is intentionally normalized to closed by
     // saveUiState(); editing mode never resumes implicitly next session.
     saveUiState();
+    // Autosave owns callbacks which query the live document/view state. Stop
+    // both its long-period timer and any active countdown before the viewport
+    // is destroyed; a queued timeout after view teardown used to crash during
+    // otherwise clean shutdown.
+    m_shutdownInProgress = true;
+    if(m_autosaveTimer)
+        m_autosaveTimer->stop();
+    if(m_autosaveCountdownTimer)
+        m_autosaveCountdownTimer->stop();
+    if(m_autosaveNotification)
+        m_autosaveNotification->hide();
     ei::closeSecondaryWindows(this);
     // Remove the editor from the desktop before synchronous scene teardown.
     // Windows otherwise presents a still-visible window as unresponsive.
