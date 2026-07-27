@@ -5594,6 +5594,14 @@ void EnduranceDocumentTests::materialAtlasStoreLoadsOnlyExplicitLocalOverrides()
         "zone1", QByteArray(64, '0'), 512, &loaded, root.path(),
         &sourcePath, &mismatchReport));
     QVERIFY(mismatchReport.hasErrors());
+
+    CValidationReport removeReport;
+    QVERIFY2(CTerrainAtlasProfileStore::removeLocalOverride(
+        "zone1", root.path(), &removeReport), qPrintable(removeReport.toText()));
+    QVERIFY(!QFileInfo::exists(CTerrainAtlasProfileStore::profilePath(
+        "zone1", root.path())));
+    QVERIFY(CTerrainAtlasProfileStore::removeLocalOverride(
+        "zone1", root.path(), &removeReport));
 }
 
 void EnduranceDocumentTests::overlaySculptChangesOnlyActiveOverlayGeometry()

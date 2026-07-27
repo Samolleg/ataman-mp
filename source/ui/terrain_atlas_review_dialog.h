@@ -25,6 +25,7 @@ public:
 
     const STerrainAtlasProfile& reviewedProfile() const { return m_profile; }
     bool shouldPersistOverride() const { return m_persistOverride; }
+    bool shouldResetToDefault() const { return m_resetToDefault; }
 
 private slots:
     void selectTreeItem(QTreeWidgetItem* item);
@@ -38,6 +39,7 @@ private slots:
     void applyAndClose();
     void exportCopy();
     void openProfile();
+    void resetToDefault();
 
 private:
     void rebuildVisuals(qint32 selectFamilyId = -1, int selectSlot = -1);
@@ -80,6 +82,7 @@ private:
     bool m_rebuilding{false};
     bool m_modified{false};
     bool m_persistOverride{false};
+    bool m_resetToDefault{false};
 };
 
 #endif

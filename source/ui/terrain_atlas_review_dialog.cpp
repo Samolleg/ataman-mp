@@ -347,12 +347,16 @@ CTerrainAtlasReviewDialog::CTerrainAtlasReviewDialog(
     m_diagnostics->setWordWrap(true);
     layout->addWidget(m_diagnostics);
     QDialogButtonBox* buttons = new QDialogButtonBox(QDialogButtonBox::Cancel, this);
+    QPushButton* reset = buttons->addButton(tr("Reset to default"), QDialogButtonBox::ActionRole);
+    reset->setObjectName(QStringLiteral("resetMaterialAtlasToDefault"));
     QPushButton* open = buttons->addButton(tr("Load profile..."), QDialogButtonBox::ActionRole);
     QPushButton* copy = buttons->addButton(tr("Save copy..."), QDialogButtonBox::ActionRole);
     buttons->addButton(m_apply, QDialogButtonBox::AcceptRole);
     layout->addWidget(buttons);
 
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
+    connect(reset, &QPushButton::clicked, this,
+            &CTerrainAtlasReviewDialog::resetToDefault);
     connect(open, &QPushButton::clicked, this, &CTerrainAtlasReviewDialog::openProfile);
     connect(copy, &QPushButton::clicked, this, &CTerrainAtlasReviewDialog::exportCopy);
     connect(m_apply, &QPushButton::clicked, this, &CTerrainAtlasReviewDialog::applyAndClose);
@@ -369,6 +373,15 @@ CTerrainAtlasReviewDialog::CTerrainAtlasReviewDialog(
             this, &CTerrainAtlasReviewDialog::selectTreeItem);
     connect(m_unassigned, &QListWidget::itemSelectionChanged,
             this, &CTerrainAtlasReviewDialog::selectPoolItem);
+    CValidationReport defaultReport;
+    const STerrainAtlasProfile builtIn = CTerrainAtlasPresetCatalog::exactProfile(
+        m_profile.mprNamespace, m_profile.atlasPixelSha256,
+        m_profile.atlasSlotCount, &defaultReport);
+    reset->setEnabled(m_source.kind != ETerrainAtlasProfileSource::BuiltInDefault
+                      && !builtIn.slotDefinitions.isEmpty());
+    reset->setToolTip(builtIn.slotDefinitions.isEmpty()
+        ? tr("This custom atlas has no exact built-in default.")
+        : tr("Remove the managed local override and restore the shipped atlas assignments."));
     m_materials->tileDropped = [this](int tile, qint32 source, qint32 target) {
         assignTile(tile, source, target);
     };
@@ -977,6 +990,29 @@ void CTerrainAtlasReviewDialog::openProfile()
     m_modified = true;
     m_selectedSlot = -1;
     rebuildVisuals();
+}
+
+void CTerrainAtlasReviewDialog::resetToDefault()
+{
+    CValidationReport report;
+    const STerrainAtlasProfile builtIn = CTerrainAtlasPresetCatalog::exactProfile(
+        m_profile.mprNamespace, m_profile.atlasPixelSha256,
+        m_profile.atlasSlotCount, &report);
+    if(builtIn.slotDefinitions.isEmpty())
+    {
+        showReport(tr("No built-in default is available"), report);
+        return;
+    }
+    if(QMessageBox::question(this, tr("Reset Material atlas to default"),
+        tr("Discard the managed local override for this atlas and restore the shipped default?\n\n"
+           "Profile copies saved elsewhere will not be deleted."),
+        QMessageBox::Reset | QMessageBox::Cancel,
+        QMessageBox::Cancel) != QMessageBox::Reset)
+        return;
+    m_profile = builtIn;
+    m_resetToDefault = true;
+    m_persistOverride = false;
+    accept();
 }
 
 void CTerrainAtlasReviewDialog::markEdited()

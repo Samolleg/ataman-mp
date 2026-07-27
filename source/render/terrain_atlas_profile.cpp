@@ -914,6 +914,21 @@ bool CTerrainAtlasProfileStore::loadExplicitOverride(
     return true;
 }
 
+bool CTerrainAtlasProfileStore::removeLocalOverride(
+    const QString& mprNamespace, const QString& rootDirectory,
+    CValidationReport* report)
+{
+    const QString path = profilePath(mprNamespace, rootDirectory);
+    if(!QFileInfo::exists(path))
+        return true;
+    if(QFile::remove(path))
+        return true;
+    if(report) report->add("terrain.atlas_profile_remove",
+        EValidationSeverity::Error,
+        "Could not remove the local Material atlas override", path);
+    return false;
+}
+
 bool STerrainAtlasProfile::validateBinding(const QString& currentNamespace,
                                            const QByteArray& currentHash,
                                            int currentSlotCount,

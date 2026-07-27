@@ -131,6 +131,10 @@ public:
         const QString& rootDirectory = QString(),
         QString* sourcePath = nullptr,
         CValidationReport* report = nullptr);
+    static bool removeLocalOverride(
+        const QString& mprNamespace,
+        const QString& rootDirectory = QString(),
+        CValidationReport* report = nullptr);
 };
 
 class CTerrainAtlasProfileInference

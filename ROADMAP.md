@@ -465,7 +465,8 @@ must not independently change its shaders or animation policy.
   copies. All reviewed installed namespaces use exact shipped defaults; only an
   explicitly edited exact-bound local profile may override one. Show that source
   and path in the UI, never pre-ship local overrides, and never fall back to a
-  legacy authored slot table.
+  legacy authored slot table. Provide a visible reset action that deletes only
+  the managed override and restores the immutable default.
 - [x] Keep Material Atlas and paint-palette previews consistent: use a uniform
   four-corner tile when available, otherwise a vertex-centred 1-on-3 motif; do
   not expose unsupported corner-only families as unusable brushes.

@@ -6673,6 +6673,20 @@ void CView::reviewTerrainAtlasProfile()
     }
     CTerrainAtlasReviewDialog dialog(profile, m_pTileForm->tileImages(), source, this);
     if(dialog.exec() != QDialog::Accepted) return;
+    if(dialog.shouldResetToDefault())
+    {
+        CValidationReport removeReport;
+        if(!CTerrainAtlasProfileStore::removeLocalOverride(
+               mprNamespace, QString(), &removeReport))
+        {
+            QMessageBox::warning(this, tr("Could not reset Material atlas"),
+                                 removeReport.toText());
+            return;
+        }
+        rebuildTerrainAutoCatalog();
+        emit updateMsg(tr("Local Material atlas override removed; the built-in default is active."));
+        return;
+    }
     const STerrainAtlasProfile reviewed = dialog.reviewedProfile();
     if(!dialog.shouldPersistOverride())
     {

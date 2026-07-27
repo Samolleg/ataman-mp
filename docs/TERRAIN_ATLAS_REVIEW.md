@@ -110,6 +110,11 @@ action. Unassigned unusual tiles remain excluded. **Save copy...** chooses
 another location and **Load profile...** opens such a copy as an explicit local
 override.
 
+**Reset to default** removes only the managed local override for the current
+namespace and exact atlas, then immediately restores the shipped preset. Profile
+copies saved elsewhere are never deleted. The action is disabled for a custom
+atlas that has no exact built-in preset.
+
 Landscape Tools labels the active source beside **Material atlas...** as
 **Default atlas**, **Generated draft**, or **Local override: filename**. The
 dialog repeats that source and shows the full local path. Only an exact-bound
