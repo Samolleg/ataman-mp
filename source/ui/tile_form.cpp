@@ -728,7 +728,14 @@ bool KeyPressEventFilter::eventFilter(QObject* obj, QEvent* event)
         auto keyCode = EKeyCode(keyEvent->nativeVirtualKey());
         switch (keyCode)
         {
-        case eKey_1 ... eKey_8:
+        case eKey_1:
+        case eKey_2:
+        case eKey_3:
+        case eKey_4:
+        case eKey_5:
+        case eKey_6:
+        case eKey_7:
+        case eKey_8:
         {
             int id = keyCode-eKey_1;
             emit setQuick(id, m_pTable->currentRow(), m_pTable->currentColumn());

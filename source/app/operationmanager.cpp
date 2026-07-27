@@ -322,7 +322,16 @@ void CMoveAxis::keyPress(COperation *pOp, EKeyCode key)
         qDebug() << value << endl;
         break;
     }
-    case eKey_0 ... eKey_9:
+    case eKey_0:
+    case eKey_1:
+    case eKey_2:
+    case eKey_3:
+    case eKey_4:
+    case eKey_5:
+    case eKey_6:
+    case eKey_7:
+    case eKey_8:
+    case eKey_9:
     {
         //todo: show value in ui
         value += QString().number(key-eKey_0); //get key as digit
@@ -529,7 +538,16 @@ void CRotateAxis::keyPress(COperation *pOp, EKeyCode key)
         qDebug() << value << endl;
         break;
     }
-    case eKey_0 ... eKey_9:
+    case eKey_0:
+    case eKey_1:
+    case eKey_2:
+    case eKey_3:
+    case eKey_4:
+    case eKey_5:
+    case eKey_6:
+    case eKey_7:
+    case eKey_8:
+    case eKey_9:
     {
         value += QString().number(key-eKey_0); //get key as digit
         qDebug() << value << endl;
@@ -805,7 +823,16 @@ void CScaleAxis::keyPress(COperation *pOp, EKeyCode key)
         qDebug() << value << endl;
         break;
     }
-    case eKey_0 ... eKey_9:
+    case eKey_0:
+    case eKey_1:
+    case eKey_2:
+    case eKey_3:
+    case eKey_4:
+    case eKey_5:
+    case eKey_6:
+    case eKey_7:
+    case eKey_8:
+    case eKey_9:
     {
         value += QString().number(key-eKey_0); //get key as digit
         qDebug() << value << endl;
@@ -1067,7 +1094,14 @@ void CTileBrush::keyPress(COperation* pOp, EKeyCode key)
         m_pView->setDrawLand(!m_pView->drawLand());
         break;
     }
-    case eKey_1 ... eKey_8:
+    case eKey_1:
+    case eKey_2:
+    case eKey_3:
+    case eKey_4:
+    case eKey_5:
+    case eKey_6:
+    case eKey_7:
+    case eKey_8:
     {
         m_pView->pickQuickAccessTile(key-eKey_1);
         bool bLand = CScene::getInstance()->isLandTileEditMode();

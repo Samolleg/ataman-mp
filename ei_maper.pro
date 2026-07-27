@@ -45,7 +45,7 @@ SOURCES -= $$PWD/source/runtime/jmv_bridge/jmv_launch_bridge.cpp
 SOURCES -= $$PWD/source/runtime/base_runtime_host/base_runtime_host.cpp
 HEADERS += $$files($$PWD/source/*.h, true)
 FORMS += $$files($$PWD/source/*.ui, true)
-LIBS += -lglu32 -lopengl32 -ldbghelp
+LIBS += -lglu32 -lopengl32 -ldbghelp -luser32
 # Default rules for deployment.
 qnx: target.path = /tmp/$${TARGET}/bin
 else: unix:!android: target.path = /opt/$${TARGET}/bin
