@@ -103,8 +103,9 @@ all dependent memberships automatically.
 The built-in default is immutable and is not a local override. Opening it and
 choosing **Apply + Close** without editing creates no file and leaves the default
 active. Editing the default, applying a generated draft, or applying an already
-loaded local profile writes an explicit local override to the visible managed
-path and refreshes the paint palette. Approval is derived from whether its
+loaded local profile writes an explicit local override to the visible portable
+`terrain-atlas-profiles` folder beside the editor executable and refreshes the
+paint palette. Approval is derived from whether its
 active assignments are structurally valid; it is not a separate authoring
 action. Unassigned unusual tiles remain excluded. **Save copy...** chooses
 another location and **Load profile...** opens such a copy as an explicit local
@@ -119,8 +120,9 @@ Landscape Tools labels the active source beside **Material atlas...** as
 **Default atlas**, **Generated draft**, or **Local override: filename**. The
 dialog repeats that source and shows the full local path. Only an exact-bound
 profile with explicit user-authored provenance may override a built-in default;
-generated/default cache files from older builds are ignored. Distribution
-packages contain no local override profiles.
+generated/default cache files from older builds are ignored. AppData profiles
+from older builds are not migrated or loaded. Distribution packages contain no
+local override profiles.
 
 Profile schema 7 records tile-preview corner space explicitly as well as
 whether an authored internal family is paint selectable. Pixel-inferred legacy

@@ -49,8 +49,9 @@ The built-in catalog covers all 38 reviewed installed namespaces and stores
 derived names and corner-family IDs only. Profiles contain metadata only—never atlas imagery, MPR/SEC payloads, resource
 archives, or installation paths. Runtime never falls back to legacy authored
 slot tables when an exact preset is missing. The managed local override lives
-below the application configuration directory in `terrain-atlas-profiles`,
-under a sanitized namespace plus namespace hash. Built-in defaults do not
+in the portable editor's `terrain-atlas-profiles` folder beside the executable,
+under a sanitized namespace plus namespace hash. AppData profiles from older
+builds are deliberately not migrated or loaded. Built-in defaults do not
 create files when merely viewed or applied unchanged. Landscape Tools and the
 Material Atlas window identify the active source; a local override shows its
 path. The window can save and reopen profile copies at user-chosen locations.

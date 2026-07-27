@@ -5588,6 +5588,9 @@ void EnduranceDocumentTests::materialAtlasStoreLoadsOnlyExplicitLocalOverrides()
     QCOMPARE(loaded.families.front().name, QStringLiteral("User ground name"));
     QCOMPARE(sourcePath, CTerrainAtlasProfileStore::profilePath(
         "ZONE1", root.path()));
+    QVERIFY(CTerrainAtlasProfileStore::profilePath("zone1").startsWith(
+        QDir(QCoreApplication::applicationDirPath()).filePath(
+            QStringLiteral("terrain-atlas-profiles/"))));
 
     CValidationReport mismatchReport;
     QVERIFY(!CTerrainAtlasProfileStore::loadExplicitOverride(

@@ -1,6 +1,7 @@
 #include "terrain_atlas_profile.h"
 
 #include <QCryptographicHash>
+#include <QCoreApplication>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -10,7 +11,6 @@
 #include <QPainter>
 #include <QSaveFile>
 #include <QSet>
-#include <QStandardPaths>
 #include <QStringList>
 #include <QRegularExpression>
 #include <QTransform>
@@ -856,9 +856,11 @@ QString CTerrainAtlasProfileStore::profilePath(const QString& mprNamespace,
     if(safe.isEmpty()) safe = QStringLiteral("unnamed");
     const QByteArray namespaceSuffix = QCryptographicHash::hash(
         mprNamespace.trimmed().toLower().toUtf8(), QCryptographicHash::Sha256).toHex().left(12);
+    // Endurance is distributed as a portable editor. Keep authored atlas
+    // overrides with that editor instance so tester builds and installations
+    // cannot silently inherit profiles from a shared AppData location.
     const QString root = rootDirectory.isEmpty()
-        ? QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation)
-        : rootDirectory;
+        ? QCoreApplication::applicationDirPath() : rootDirectory;
     return QDir(root).filePath(QStringLiteral("terrain-atlas-profiles/%1-%2.semantic-atlas.json")
         .arg(safe, QString::fromLatin1(namespaceSuffix)));
 }
