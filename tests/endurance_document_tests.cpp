@@ -5441,9 +5441,19 @@ void EnduranceDocumentTests::authoredPresetCatalogCoversKnownAtlasesAndMatchesZo
         "zone1", hdHash, 512, &report);
     QVERIFY2(profile.approved, qPrintable(report.toText()));
     QCOMPARE(profile.provenance,
-             QStringLiteral("authored-preset:ei-hd-b8a3e768"));
+             QStringLiteral("built-in-material-atlas-v2"));
     QCOMPARE(profile.assignedSlotCount(), 512);
     QCOMPARE(profile.families.size(), 12);
+    QCOMPARE(std::count_if(profile.families.cbegin(), profile.families.cend(),
+        [](const STerrainAtlasProfileFamily& family) {
+            return !family.paintSelectable;
+        }), 3);
+    const auto wetRock = std::find_if(profile.families.cbegin(), profile.families.cend(),
+        [](const STerrainAtlasProfileFamily& family) {
+            return family.name == QStringLiteral("Rock / Wet");
+        });
+    QVERIFY(wetRock != profile.families.cend());
+    QVERIFY(!wetRock->paintSelectable);
     QCOMPARE(profile.slotDefinitions.at(50).signature.northWest, qint32(4));
     QCOMPARE(profile.slotDefinitions.at(50).signature.northEast, qint32(4));
     QCOMPARE(profile.slotDefinitions.at(50).signature.southEast, qint32(3));
@@ -5520,10 +5530,13 @@ void EnduranceDocumentTests::authoredPresetCatalogAllEntriesCompile()
 {
     QFile resource(QStringLiteral(":/terrain_atlas_presets.json"));
     QVERIFY(resource.open(QIODevice::ReadOnly));
-    const QJsonArray presets = QJsonDocument::fromJson(resource.readAll())
-        .object().value(QStringLiteral("presets")).toArray();
+    const QJsonObject catalog = QJsonDocument::fromJson(resource.readAll()).object();
+    QCOMPARE(catalog.value(QStringLiteral("provenance")).toString(),
+             QStringLiteral("built-in-material-atlas-v2"));
+    QVERIFY(!catalog.contains(QStringLiteral("attribution")));
+    const QJsonArray presets = catalog.value(QStringLiteral("presets")).toArray();
     QCOMPARE(presets.size(), 38);
-    int totalSlots = 0, bindings = 0;
+    int totalSlots = 0, bindings = 0, transitionSupportFamilies = 0;
     for(const QJsonValue& value : presets)
     {
         const QJsonObject preset = value.toObject();
@@ -5544,7 +5557,27 @@ void EnduranceDocumentTests::authoredPresetCatalogAllEntriesCompile()
             QVERIFY2(!family.name.startsWith(QStringLiteral("Land material")),
                      qPrintable(nameSpace));
             QVERIFY(!family.ambiguous);
+            bool expressibleBrush = false;
+            for(const STerrainAtlasProfileSlot& definition : profile.slotDefinitions)
+            {
+                const qint32 corners[] = {definition.signature.northWest,
+                                          definition.signature.northEast,
+                                          definition.signature.southEast,
+                                          definition.signature.southWest};
+                int count = 0;
+                QSet<qint32> others;
+                for(qint32 id : corners)
+                {
+                    if(id == family.id) ++count;
+                    else others.insert(id);
+                }
+                expressibleBrush |= count == 4 || (count == 1 && others.size() == 1);
+            }
+            QCOMPARE(family.paintSelectable, expressibleBrush);
+            transitionSupportFamilies += !family.paintSelectable;
         }
+        for(const QJsonValue& familyValue : preset.value(QStringLiteral("families")).toArray())
+            QVERIFY(!familyValue.toObject().contains(QStringLiteral("key")));
         const STerrainAtlasAnalysis analysis = profile.approvedAnalysis(&report);
         QVERIFY2(analysis.usable, qPrintable(nameSpace + QLatin1Char('\n') + report.toText()));
         QCOMPARE(analysis.describedSlots, slotCount);
@@ -5552,7 +5585,8 @@ void EnduranceDocumentTests::authoredPresetCatalogAllEntriesCompile()
         bindings += presetBindings.size();
     }
     QCOMPARE(totalSlots, 16576);
-    QCOMPARE(bindings, 58);
+    QCOMPARE(bindings, 76);
+    QCOMPARE(transitionSupportFamilies, 76);
 }
 
 void EnduranceDocumentTests::materialAtlasStoreLoadsOnlyExplicitLocalOverrides()

@@ -546,15 +546,19 @@ void CTerrainAtlasReviewDialog::rebuildVisuals(qint32 selectFamily, int selectSl
             ? 2 : (entry.underwaterRole == ETerrainAtlasUnderwaterRole::UnderwaterOnly ? 1 : 0);
         const int thumbnail = familyThumbnailSlot(entry.id);
         QTreeWidgetItem* familyItem = new QTreeWidgetItem(groups[group],
-            {entry.name + (entry.ambiguous ? tr("  • confirm") : QString()),
+            {entry.name + (!entry.paintSelectable ? tr("  (transition support)")
+                                                    : QString())
+                        + (entry.ambiguous ? tr("  • confirm") : QString()),
              tr("%1").arg(entry.memberSlots.size())});
         familyItem->setIcon(0, imageIcon(familyDisplayThumbnail(entry.id)));
         familyItem->setData(0, KindRole, FamilyKind);
         familyItem->setData(0, IdRole, entry.id);
         const QString sections = entry.landAllowed && entry.overlayAllowed
             ? tr("Ground + Overlay") : (entry.overlayAllowed ? tr("Overlay") : tr("Ground"));
-        familyItem->setToolTip(0, tr("%1 atlas slots assigned. Allowed section: %2. Drag this row onto a selected tile corner.")
-            .arg(entry.memberSlots.size()).arg(sections));
+        familyItem->setToolTip(0, entry.paintSelectable
+            ? tr("%1 atlas slots assigned. Allowed section: %2. Drag this row onto a selected tile corner.")
+                .arg(entry.memberSlots.size()).arg(sections)
+            : tr("Transition support: this component is required by exact tile corners, but the atlas has no uniform or one-on-three tile that can form a coherent brush. It remains available for corner editing."));
         for(int member : entry.memberSlots)
         {
             const STerrainAtlasProfileSlot* definition = slot(member);
@@ -722,6 +726,7 @@ void CTerrainAtlasReviewDialog::assignTile(int tileId, qint32 sourceFamily,
         showReport(tr("Tile was not moved"), report);
         return;
     }
+    refreshPaintSelectableFamilies();
     markEdited();
     rebuildVisuals(targetFamily, tileId);
 }
@@ -734,6 +739,7 @@ void CTerrainAtlasReviewDialog::unassignTile(int tileId)
         showReport(tr("Tile was not unassigned"), report);
         return;
     }
+    refreshPaintSelectableFamilies();
     markEdited();
     rebuildVisuals(-1, tileId);
 }
@@ -747,8 +753,37 @@ void CTerrainAtlasReviewDialog::assignCorner(int corner, qint32 familyId)
         showReport(tr("Corner assignment is not valid"), report);
         return;
     }
+    refreshPaintSelectableFamilies();
     markEdited();
     rebuildVisuals(familyId, m_selectedSlot);
+}
+
+void CTerrainAtlasReviewDialog::refreshPaintSelectableFamilies()
+{
+    for(STerrainAtlasProfileFamily& family : m_profile.families)
+    {
+        family.paintSelectable = false;
+        for(const STerrainAtlasProfileSlot& definition : m_profile.slotDefinitions)
+        {
+            if(!definition.assigned || definition.ambiguous) continue;
+            const qint32 corners[] = {definition.signature.northWest,
+                                      definition.signature.northEast,
+                                      definition.signature.southEast,
+                                      definition.signature.southWest};
+            int count = 0;
+            QSet<qint32> others;
+            for(qint32 id : corners)
+            {
+                if(id == family.id) ++count;
+                else others.insert(id);
+            }
+            if(count == 4 || (count == 1 && others.size() == 1))
+            {
+                family.paintSelectable = true;
+                break;
+            }
+        }
+    }
 }
 
 void CTerrainAtlasReviewDialog::chooseCornerMaterial(int corner)
@@ -810,6 +845,7 @@ void CTerrainAtlasReviewDialog::createMaterial()
     created.name = name;
     created.layer = ETerrainAtlasLayer::Land;
     created.ambiguous = true;
+    created.paintSelectable = false;
     m_profile.families.append(created);
     m_profile.approved = false;
     markEdited();

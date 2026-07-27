@@ -48,6 +48,7 @@ private:
     void assignTile(int slot, qint32 sourceFamily, qint32 targetFamily);
     void unassignTile(int slot);
     void assignCorner(int corner, qint32 familyId);
+    void refreshPaintSelectableFamilies();
     void chooseCornerMaterial(int corner);
     int familyThumbnailSlot(qint32 familyId) const;
     QImage familyDisplayThumbnail(qint32 familyId) const;

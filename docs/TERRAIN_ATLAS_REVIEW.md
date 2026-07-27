@@ -11,6 +11,15 @@ and thumbnails used by the paint palette. Other namespaces use the same parser
 and catalog; they do not require a per-zone painting algorithm. Legacy authored
 slot tables are not runtime fallbacks.
 
+Built-in defaults use two separate semantic passes. The exact-corner pass keeps
+every component required to reconstruct every atlas slot, including rare
+components that occur only inside transitions. The editor-material pass exposes
+a component in the paint palette only when the same atlas contains a uniform
+four-corner tile or a rotatable 1-on-3 vertex stamp for it. A component that
+fails that second test is labeled **transition support** in Material Atlas. It
+is not an unexplained internal brush: it remains visible solely because exact
+corner editing and slot reconstruction still depend on it.
+
 ## Painting
 
 Landscape Tools has separate **Ground** and **Overlay** modes. Ground and
@@ -27,8 +36,8 @@ includes a transition-only centre family
 ordinary uniform tiles but its support does not (for example, **Stone on
 Ground**). These cards rotate the one authored tile around a vertex to form the
 complete four-tile junction. A family with neither kind of authored support is
-kept for review/debug but is not offered as a brush. Contextual cards do not
-duplicate or merge profile assignments.
+labeled **transition support**, kept for exact corner review, and not offered as
+a brush. Contextual cards do not duplicate or merge profile assignments.
 Hovering shows the exact card name and assigned-slot count.
 
 All semantic material brushes operate on terrain vertices. Size 1 selects the

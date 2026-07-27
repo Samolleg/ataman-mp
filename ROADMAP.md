@@ -471,6 +471,11 @@ must not independently change its shaders or animation policy.
 - [x] Keep Material Atlas and paint-palette previews consistent: use a uniform
   four-corner tile when available, otherwise a vertex-centred 1-on-3 motif; do
   not expose unsupported corner-only families as unusable brushes.
+- [x] Separate exact atlas reconstruction from editor brush identity. Preserve
+  every exact corner component, label structurally inexpressible components as
+  transition support, and include only uniform or 1-on-3-capable materials in
+  the paint palette. Keep research-only source identities out of the shipped
+  profile payload and editor vocabulary.
 
 ## Overlay surfaces and materials
 

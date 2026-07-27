@@ -133,6 +133,26 @@ def underwater_role(recipe: dict, family_id: int) -> str:
     return "surface"
 
 
+def editor_material_is_paintable(recipe: dict, family_id: int) -> bool:
+    """Return whether the exact corner component can form a useful brush.
+
+    The first pass preserves every source component in every slot signature.
+    The editor palette is a second pass: a component is selectable only when
+    the atlas contains either a uniform tile or a one-on-three vertex stamp.
+    Other components remain available as transition support in the atlas
+    editor, but are not presented as brushes that cannot paint coherently.
+    """
+    for slot in recipe["slots"]:
+        corners = list(slot["signature"].values())
+        count = corners.count(family_id)
+        if count == 4:
+            return True
+        if count == 1 and len(set(corner for corner in corners
+                                  if corner != family_id)) == 1:
+            return True
+    return False
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--compiled", type=Path, required=True)
@@ -160,13 +180,14 @@ def main() -> int:
         families = []
         for family in recipe["families"]:
             families.append({
-                "id": family["id"], "key": family["sourceFamily"],
+                "id": family["id"],
                 "name": family["suggestedName"],
                 "allowedLayers": family["allowedLayers"],
                 "underwaterRole": underwater_role(recipe, family["id"]),
                 "tileType": family["tileType"],
                 "thumbnailSlot": family["thumbnailSlot"],
-                "paintSelectable": family["paintSelectable"],
+                "paintSelectable": editor_material_is_paintable(
+                    recipe, family["id"]),
             })
         presets.append({
             "namespace": namespace, "slotCount": recipe["slotCount"],
@@ -175,8 +196,7 @@ def main() -> int:
         })
     result = {
         "schemaVersion": 1,
-        "provenance": "authored-preset:ei-hd-b8a3e768",
-        "attribution": "Derived semantic metadata from aspadm/EI-HD-tiles",
+        "provenance": "built-in-material-atlas-v2",
         "presets": presets,
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)

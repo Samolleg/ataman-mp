@@ -89,7 +89,7 @@ STerrainAtlasProfile CTerrainAtlasPresetCatalog::exactProfile(
         profile.mprNamespace = requestedNamespace;
         profile.atlasPixelSha256 = requestedHash;
         profile.atlasSlotCount = atlasSlotCount;
-        profile.provenance = QStringLiteral("authored-preset:ei-hd-b8a3e768");
+        profile.provenance = QStringLiteral("built-in-material-atlas-v2");
         profile.approved = true;
         for(const QJsonValue& familyValue : preset.value(QStringLiteral("families")).toArray())
         {
