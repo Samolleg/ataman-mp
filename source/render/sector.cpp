@@ -879,34 +879,14 @@ void CSector::updateWaterTiles(const QSet<int>& localTiles, bool rebuildIndices)
         }
     }
     updateBounds();
-    QList<int> sortedTiles = localTiles.values();
-    std::sort(sortedTiles.begin(), sortedTiles.end());
     m_waterVertexBuf.bind();
-    // Preserve the existing allocation and upload only the contiguous nine
-    // vertices belonging to each changed tile. Reallocating the complete
-    // animated overlay VBO on every stamp was the main GPU synchronization
-    // difference from ordinary terrain painting.
-    for(int position = 0; position < sortedTiles.size();)
-    {
-        const int firstTile = sortedTiles.at(position);
-        if(firstTile < 0 || firstTile >= nTile * nTile)
-        {
-            ++position;
-            continue;
-        }
-        int lastTile = firstTile;
-        while(position + 1 < sortedTiles.size()
-              && sortedTiles.at(position + 1) == lastTile + 1)
-        {
-            ++position;
-            ++lastTile;
-        }
-        const int tileCount = lastTile - firstTile + 1;
-        m_waterVertexBuf.write(firstTile * 9 * int(sizeof(SWaterVertexData)),
-            m_arrAnimatedWaterVrtData.constData() + firstTile * 9,
-            tileCount * 9 * int(sizeof(SWaterVertexData)));
-        ++position;
-    }
+    // Match the fast terrain-sculpt ownership contract: glBufferData replaces
+    // (orphans) the live allocation so the GPU can finish drawing the previous
+    // frame without serializing against CPU writes. QOpenGLBuffer::write uses
+    // glBufferSubData on the buffer currently consumed by drawWater(), which
+    // caused a driver fence on every overlay stamp despite the small upload.
+    m_waterVertexBuf.allocate(m_arrAnimatedWaterVrtData.constData(),
+        m_arrAnimatedWaterVrtData.size() * int(sizeof(SWaterVertexData)));
     m_waterVertexBuf.release();
     if(!rebuildIndices)
         return;

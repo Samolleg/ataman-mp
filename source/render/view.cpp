@@ -9265,16 +9265,16 @@ bool CView::applyOverlaySurfacePreview(const SOverlaySurfaceCommand& command,
         const QPair<int, int> sector(delta.sectorX, delta.sectorY);
         if(m_terrainPreviewBatchActive)
         {
-            if(!m_pendingOverlayPreviewBefore.contains(sector))
-                m_pendingOverlayPreviewBefore.insert(
-                    sector, forward ? delta.beforePayload : delta.afterPayload);
             m_pendingOverlayPreviewSectors.insert(sector);
             continue;
         }
-        if(!m_pLand->previewCanonicalOverlaySectorDelta(
+        // Use the same proven full-sector renderer refresh as ordinary terrain
+        // sculpt. The former overlay-only delta path mutated a VBO that was
+        // still owned by the in-flight frame, creating a GPU synchronization
+        // point even though its CPU-side timing appeared cheap.
+        if(!m_pLand->previewCanonicalSector(
                 delta.sectorX, delta.sectorY,
-                forward ? delta.beforePayload : delta.afterPayload,
-                forward ? delta.afterPayload : delta.beforePayload))
+                m_terrainEdit.sectorPayload(delta.sectorX, delta.sectorY)))
             ei::log(eLogWarning, QString(
                 "Overlay model changed but preview renderer rejected sector %1,%2")
                     .arg(delta.sectorX).arg(delta.sectorY));
@@ -9288,8 +9288,11 @@ bool CView::applyOverlaySurfacePreview(const SOverlaySurfaceCommand& command,
     m_sculptOutlineGeometryDirty = true;
     m_terrainPaintOutlineGeometryDirty = true;
     m_aiGraphOverlayDirty = true;
-    emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMprDirtyFlag,
-                              m_terrainEdit.isDirty() ? "*" : "");
+    // Terrain sculpt already defers title/status work until stroke release.
+    // Keep overlay stamps on the same hot-path contract.
+    if(!m_sculptStrokeActive && !m_tilePaintStrokeActive)
+        emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMprDirtyFlag,
+                                  m_terrainEdit.isDirty() ? "*" : "");
     if(!m_terrainPreviewBatchActive)
         update();
     return true;
@@ -9301,7 +9304,6 @@ void CView::beginTerrainPreviewBatch()
         return;
     m_pendingTerrainPreviewSectors.clear();
     m_pendingOverlayPreviewSectors.clear();
-    m_pendingOverlayPreviewBefore.clear();
     m_pendingTilePreviewSectors.clear();
     m_terrainPreviewBatchActive = true;
 }
@@ -9313,12 +9315,9 @@ void CView::endTerrainPreviewBatch()
     m_terrainPreviewBatchActive = false;
     const QSet<QPair<int, int>> terrainSectors = m_pendingTerrainPreviewSectors;
     QSet<QPair<int, int>> overlaySectors = m_pendingOverlayPreviewSectors;
-    const QMap<QPair<int, int>, QByteArray> overlayBefore =
-        m_pendingOverlayPreviewBefore;
     QSet<QPair<int, int>> tileSectors = m_pendingTilePreviewSectors;
     m_pendingTerrainPreviewSectors.clear();
     m_pendingOverlayPreviewSectors.clear();
-    m_pendingOverlayPreviewBefore.clear();
     m_pendingTilePreviewSectors.clear();
 
     for(const QPair<int, int>& sector : terrainSectors)
@@ -9337,8 +9336,8 @@ void CView::endTerrainPreviewBatch()
         QElapsedTimer overlayRenderTimer;
         overlayRenderTimer.start();
         tileSectors.remove(sector);
-        if(!m_pLand->previewCanonicalOverlaySectorDelta(
-            sector.first, sector.second, overlayBefore.value(sector),
+        if(!m_pLand->previewCanonicalSector(
+            sector.first, sector.second,
             m_terrainEdit.sectorPayload(sector.first, sector.second)))
             ei::log(eLogWarning, QString(
                 "Batched overlay preview rejected sector %1,%2")
