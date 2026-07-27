@@ -15,6 +15,7 @@
 #include <limits>
 
 #include "endurance_document.h"
+#include "terrain_edit_model.h"
 
 namespace {
 const quint32 kResSignature = 0x019CE23C;
@@ -773,7 +774,8 @@ bool CMprDocument::buildResizedCanvas(const SMprCanvasResizeRequest& request,
     }
     if(request.sectorCountX == m_mapInfo.sectorCountX
        && request.sectorCountY == m_mapInfo.sectorCountY
-       && request.oldSectorOffsetX == 0 && request.oldSectorOffsetY == 0)
+       && request.oldTileOffsetX == 0 && request.oldTileOffsetY == 0
+       && !request.closeEdges)
     {
         *output = m_originalBytes;
         return true;
@@ -810,15 +812,23 @@ bool CMprDocument::buildResizedCanvas(const SMprCanvasResizeRequest& request,
             return fail("mpr.resize.missing_sector",
                         "The source canvas does not have exactly one SEC per coordinate.");
 
-    const int firstRetainedX = qMax(0, -request.oldSectorOffsetX);
-    const int firstRetainedY = qMax(0, -request.oldSectorOffsetY);
-    const int lastRetainedX = qMin(oldWidth,
-        int(request.sectorCountX) - request.oldSectorOffsetX);
-    const int lastRetainedY = qMin(oldHeight,
-        int(request.sectorCountY) - request.oldSectorOffsetY);
+    if(request.closeEdges && (request.edgeTaperTiles < 1
+                              || request.edgeTaperTiles > 16))
+        return fail("mpr.resize.edge_taper",
+                    "Closed-edge taper width must be between 1 and 16 tiles.");
+    const int oldTileWidth = oldWidth * 16;
+    const int oldTileHeight = oldHeight * 16;
+    const int newTileWidth = int(request.sectorCountX) * 16;
+    const int newTileHeight = int(request.sectorCountY) * 16;
+    const int firstRetainedX = qMax(0, -request.oldTileOffsetX);
+    const int firstRetainedY = qMax(0, -request.oldTileOffsetY);
+    const int lastRetainedX = qMin(oldTileWidth,
+        newTileWidth - request.oldTileOffsetX);
+    const int lastRetainedY = qMin(oldTileHeight,
+        newTileHeight - request.oldTileOffsetY);
     if(firstRetainedX >= lastRetainedX || firstRetainedY >= lastRetainedY)
         return fail("mpr.resize.empty_intersection",
-                    "The resized canvas must retain at least one source sector.");
+                    "The resized canvas must retain at least one source tile.");
 
     struct BuildMember
     {
@@ -886,14 +896,79 @@ bool CMprDocument::buildResizedCanvas(const SMprCanvasResizeRequest& request,
                            + (localY * 16 + localX) * int(kSectorTileSize),
                            int(kSectorTileSize));
     };
+    const auto sampledOverlayVertex = [&](int globalX, int globalY) {
+        if(globalX < 0 || globalY < 0
+           || globalX > oldWidth * 32 || globalY > oldHeight * 32)
+            return sampledLandVertex(globalX, globalY);
+        const int primaryX = qMin(globalX / 32, oldWidth - 1);
+        const int primaryY = qMin(globalY / 32, oldHeight - 1);
+        QVector<QPoint> owners;
+        owners.append(QPoint(primaryX, primaryY));
+        if(globalX % 32 == 0 && primaryX > 0)
+            owners.append(QPoint(primaryX - 1, primaryY));
+        if(globalY % 32 == 0 && primaryY > 0)
+            owners.append(QPoint(primaryX, primaryY - 1));
+        if(globalX % 32 == 0 && globalY % 32 == 0
+           && primaryX > 0 && primaryY > 0)
+            owners.append(QPoint(primaryX - 1, primaryY - 1));
+        for(const QPoint& owner : owners)
+        {
+            const SMprSectorInfo* sector = sourceSector(owner.x(), owner.y());
+            if(!sector->hasOverlay)
+                continue;
+            const int localX = globalX - owner.x() * 32;
+            const int localY = globalY - owner.y() * 32;
+            if(localX < 0 || localX > 32 || localY < 0 || localY > 32)
+                continue;
+            const QByteArray& payload = sourcePayload(sector);
+            return payload.mid(int(sector->overlayVertexOffset)
+                               + (localY * 33 + localX) * int(kSectorVertexSize),
+                               int(kSectorVertexSize));
+        }
+        return sampledLandVertex(globalX, globalY);
+    };
+    const auto sampledOverlayTile = [&](int globalX, int globalY,
+                                        QByteArray* tile, qint16* material) {
+        if(tile)
+            *tile = QByteArray(2, '\0');
+        if(material)
+            *material = -1;
+        if(globalX < 0 || globalY < 0
+           || globalX >= oldTileWidth || globalY >= oldTileHeight)
+            return false;
+        const int sectorX = globalX / 16;
+        const int sectorY = globalY / 16;
+        const int localX = globalX - sectorX * 16;
+        const int localY = globalY - sectorY * 16;
+        const int localTile = localY * 16 + localX;
+        const SMprSectorInfo* sector = sourceSector(sectorX, sectorY);
+        if(!sector->hasOverlay
+           || sector->overlayMaterialIndices.value(localTile, -1) < 0)
+            return false;
+        const QByteArray& payload = sourcePayload(sector);
+        if(tile)
+            *tile = payload.mid(int(sector->overlayTileOffset) + localTile * 2, 2);
+        if(material)
+            *material = sector->overlayMaterialIndices.at(localTile);
+        return true;
+    };
+    const auto destinationEdgeTile = [&](int x, int y) {
+        if(!request.closeEdges)
+            return false;
+        const int distance = qMin(qMin(x, y),
+            qMin(newTileWidth - 1 - x, newTileHeight - 1 - y));
+        return distance < request.edgeTaperTiles;
+    };
 
     QMap<QString, QByteArray> expectedRetainedPayloads;
     for(int destinationY = 0; destinationY < int(request.sectorCountY); ++destinationY)
     {
         for(int destinationX = 0; destinationX < int(request.sectorCountX); ++destinationX)
         {
-            const int oldX = destinationX - request.oldSectorOffsetX;
-            const int oldY = destinationY - request.oldSectorOffsetY;
+            const bool sectorAligned = request.oldTileOffsetX % 16 == 0
+                && request.oldTileOffsetY % 16 == 0;
+            const int oldX = destinationX - request.oldTileOffsetX / 16;
+            const int oldY = destinationY - request.oldTileOffsetY / 16;
             BuildMember built;
             const QString name = QString("%1%2%3.sec")
                 .arg(m_mapInfo.innerNamespace)
@@ -901,7 +976,8 @@ bool CMprDocument::buildResizedCanvas(const SMprCanvasResizeRequest& request,
                 .arg(destinationY, 3, 10, QChar('0'));
             built.name = cp1251->fromUnicode(name);
             built.timestamp = generatedTimestamp;
-            if(oldX >= 0 && oldX < oldWidth && oldY >= 0 && oldY < oldHeight)
+            if(sectorAligned && !request.closeEdges
+               && oldX >= 0 && oldX < oldWidth && oldY >= 0 && oldY < oldHeight)
             {
                 const SMprSectorInfo* retained = sourceSector(oldX, oldY);
                 built.payload = sourcePayload(retained);
@@ -910,31 +986,79 @@ bool CMprDocument::buildResizedCanvas(const SMprCanvasResizeRequest& request,
             }
             else
             {
-                built.payload = QByteArray(int(kLandSectorSize), '\0');
+                bool hasOverlay = false;
+                for(int localY = 0; localY < 16 && !hasOverlay; ++localY)
+                    for(int localX = 0; localX < 16 && !hasOverlay; ++localX)
+                    {
+                        const int destinationGlobalX = destinationX * 16 + localX;
+                        const int destinationGlobalY = destinationY * 16 + localY;
+                        if(destinationEdgeTile(destinationGlobalX, destinationGlobalY))
+                            continue;
+                        hasOverlay = sampledOverlayTile(
+                            destinationGlobalX - request.oldTileOffsetX,
+                            destinationGlobalY - request.oldTileOffsetY,
+                            nullptr, nullptr);
+                    }
+                built.payload = QByteArray(int(hasOverlay ? kOverlaySectorSize
+                                                          : kLandSectorSize), '\0');
                 writeU32(&built.payload, 0, kSectorSignature);
-                built.payload[4] = char(0);
+                built.payload[4] = char(hasOverlay ? 3 : 0);
                 for(int localY = 0; localY < 33; ++localY)
                     for(int localX = 0; localX < 33; ++localX)
                     {
                         const int sourceGlobalX = destinationX * 32 + localX
-                            - request.oldSectorOffsetX * 32;
+                            - request.oldTileOffsetX * 2;
                         const int sourceGlobalY = destinationY * 32 + localY
-                            - request.oldSectorOffsetY * 32;
+                            - request.oldTileOffsetY * 2;
                         built.payload.replace(5 + (localY * 33 + localX)
                                               * int(kSectorVertexSize),
                                               int(kSectorVertexSize),
                                               sampledLandVertex(sourceGlobalX, sourceGlobalY));
+                        if(hasOverlay)
+                            built.payload.replace(5 + int(kSectorVertexCount * kSectorVertexSize)
+                                                  + (localY * 33 + localX)
+                                                    * int(kSectorVertexSize),
+                                                  int(kSectorVertexSize),
+                                                  sampledOverlayVertex(sourceGlobalX,
+                                                                       sourceGlobalY));
                     }
-                const int tileOffset = 5 + int(kSectorVertexCount * kSectorVertexSize);
+                const int tileOffset = 5 + int(kSectorVertexCount * kSectorVertexSize)
+                    * (hasOverlay ? 2 : 1);
+                const int overlayTileOffset = tileOffset + int(kSectorTileCount * 2);
+                const int overlayMaterialOffset = overlayTileOffset
+                    + int(kSectorTileCount * 2);
+                if(hasOverlay)
+                    for(int tile = 0; tile < int(kSectorTileCount); ++tile)
+                        writeU16(&built.payload, overlayMaterialOffset + tile * 2,
+                                 quint16(0xffff));
                 for(int localY = 0; localY < 16; ++localY)
                     for(int localX = 0; localX < 16; ++localX)
                     {
-                        const int sourceGlobalX = destinationX * 16 + localX
-                            - request.oldSectorOffsetX * 16;
-                        const int sourceGlobalY = destinationY * 16 + localY
-                            - request.oldSectorOffsetY * 16;
+                        const int destinationGlobalX = destinationX * 16 + localX;
+                        const int destinationGlobalY = destinationY * 16 + localY;
+                        const int sourceGlobalX = destinationGlobalX
+                            - request.oldTileOffsetX;
+                        const int sourceGlobalY = destinationGlobalY
+                            - request.oldTileOffsetY;
                         built.payload.replace(tileOffset + (localY * 16 + localX) * 2,
                                               2, sampledLandTile(sourceGlobalX, sourceGlobalY));
+                        if(hasOverlay
+                           && !destinationEdgeTile(destinationGlobalX,
+                                                   destinationGlobalY))
+                        {
+                            QByteArray overlayTile;
+                            qint16 overlayMaterial = -1;
+                            if(sampledOverlayTile(sourceGlobalX, sourceGlobalY,
+                                                  &overlayTile, &overlayMaterial))
+                            {
+                                const int tile = localY * 16 + localX;
+                                built.payload.replace(overlayTileOffset + tile * 2,
+                                                      2, overlayTile);
+                                writeU16(&built.payload,
+                                         overlayMaterialOffset + tile * 2,
+                                         quint16(overlayMaterial));
+                            }
+                        }
                     }
             }
             buildMembers.append(built);
@@ -1020,6 +1144,65 @@ bool CMprDocument::buildResizedCanvas(const SMprCanvasResizeRequest& request,
         copyFindings(reopenedReport, report);
         return fail("mpr.resize.reopen", "The resized archive failed a fresh semantic reopen.");
     }
+    if(request.closeEdges)
+    {
+        CTerrainEditModel terrain;
+        CValidationReport taperReport;
+        if(!terrain.load(reopened, &taperReport) || taperReport.hasErrors())
+        {
+            copyFindings(taperReport, report);
+            return fail("mpr.resize.edge_taper_load",
+                        "The resized terrain could not be prepared for closed-edge tapering.");
+        }
+        STerrainHeightCommand taper;
+        taper.description = QStringLiteral("Close resized canvas edges");
+        const int maximumX = terrain.vertexCountX() - 1;
+        const int maximumY = terrain.vertexCountY() - 1;
+        const int width = request.edgeTaperTiles * 2;
+        for(int y = 0; y <= maximumY; ++y)
+            for(int x = 0; x <= maximumX; ++x)
+            {
+                const int distance = qMin(qMin(x, y),
+                                          qMin(maximumX - x, maximumY - y));
+                if(distance >= width)
+                    continue;
+                const quint16 before = terrain.height(x, y);
+                const double linear = qBound(0.0, double(distance) / double(width), 1.0);
+                const double smooth = linear * linear * (3.0 - 2.0 * linear);
+                const quint16 after = quint16(qBound<qint64>(
+                    0, qRound64(double(before) * smooth), 65535));
+                if(after == before)
+                    continue;
+                STerrainHeightDelta delta;
+                delta.globalX = x;
+                delta.globalY = y;
+                delta.before = before;
+                delta.after = after;
+                taper.deltas.append(delta);
+            }
+        if(!terrain.apply(taper, true, &taperReport, true))
+        {
+            copyFindings(taperReport, report);
+            return fail("mpr.resize.edge_taper_apply",
+                        "The closed-edge taper could not be applied seam-safely.");
+        }
+        CMprEditTransaction taperTransaction(QStringLiteral("closed-edge canvas taper"));
+        if(!terrain.appendSectorEdits(&taperTransaction, &taperReport)
+           || !reopened.applyTransaction(taperTransaction, &candidate, &taperReport))
+        {
+            copyFindings(taperReport, report);
+            return fail("mpr.resize.edge_taper_serialize",
+                        "The closed-edge taper failed staged SEC serialization.");
+        }
+        CValidationReport finalReport;
+        if(!reopened.loadBytes(candidate, QStringLiteral("tapered-resized-candidate.mpr"),
+                               &finalReport) || finalReport.hasErrors())
+        {
+            copyFindings(finalReport, report);
+            return fail("mpr.resize.edge_taper_reopen",
+                        "The tapered MPR failed a fresh semantic reopen.");
+        }
+    }
     if(reopened.mapInfo().sectorCountX != request.sectorCountX
        || reopened.mapInfo().sectorCountY != request.sectorCountY
        || reopened.sectors().size() != int(request.sectorCountX * request.sectorCountY))
@@ -1043,10 +1226,10 @@ bool CMprDocument::buildResizedCanvas(const SMprCanvasResizeRequest& request,
     *output = candidate;
     if(report)
         report->add("mpr.resize", EValidationSeverity::Info,
-                    QString("Prepared %1 x %2 sectors; old canvas offset %3, %4; "
+                    QString("Prepared %1 x %2 sectors; old canvas tile offset %3, %4; "
                             "%5 retained sector payload(s) stayed byte-identical.")
                         .arg(request.sectorCountX).arg(request.sectorCountY)
-                        .arg(request.oldSectorOffsetX).arg(request.oldSectorOffsetY)
+                        .arg(request.oldTileOffsetX).arg(request.oldTileOffsetY)
                         .arg(expectedRetainedPayloads.size()));
     return true;
 }

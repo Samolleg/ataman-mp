@@ -1304,6 +1304,8 @@ MainWindow::MainWindow(QWidget* parent) :
         if(m_ui->moveButton) m_ui->moveButton->setVisible(!visible);
         if(m_ui->rotateButton) m_ui->rotateButton->setVisible(!visible);
         if(m_ui->scaleButton) m_ui->scaleButton->setVisible(!visible);
+        if(!m_pView)
+            return;
         if(!visible)
         {
             // Layer isolation belongs to Landscape Tools. Closing it restores
@@ -1334,7 +1336,8 @@ MainWindow::MainWindow(QWidget* parent) :
                                     applyLandscapeVisibility]()
         {
             if(visibilityGeneration != m_landscapeVisibilityGeneration
-               || !m_landscapeToolsDock || m_landscapeToolsDock->isVisible())
+               || !m_pView || !m_landscapeToolsDock
+               || m_landscapeToolsDock->isVisible())
                 return;
             applyLandscapeVisibility(false);
         });

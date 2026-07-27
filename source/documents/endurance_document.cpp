@@ -2190,6 +2190,40 @@ bool CMobDocument::hasEmbeddedAiGraph() const
     return false;
 }
 
+bool CMobDocument::removeEmbeddedAiGraph(QByteArray* output,
+                                         CValidationReport* report) const
+{
+    if(!output)
+        return false;
+    output->clear();
+    bool removed = false;
+    for(const SMobSection& section : m_sections)
+    {
+        if(section.type == 0x31415926)
+        {
+            removed = true;
+            continue;
+        }
+        output->append(section.rawBytes);
+    }
+    if(!removed)
+    {
+        *output = m_originalBytes;
+        return true;
+    }
+    CMobDocument reopened;
+    CValidationReport reopenReport;
+    if(!reopened.loadBytes(*output, QStringLiteral("graphless-crop-candidate.mob"),
+                           &reopenReport) || reopened.hasEmbeddedAiGraph())
+    {
+        if(report)
+            *report = reopenReport;
+        output->clear();
+        return false;
+    }
+    return true;
+}
+
 bool CMobDocument::loadBytes(const QByteArray& bytes, const QString& sourceName,
                              CValidationReport* report)
 {

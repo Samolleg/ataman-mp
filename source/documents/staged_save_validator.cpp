@@ -496,7 +496,7 @@ SMprSaveCommitResult commitStagedMprCanvasResize(
         .arg(resizeBaseline.mapInfo().sectorCountX)
         .arg(resizeBaseline.mapInfo().sectorCountY)
         .arg(resize.sectorCountX).arg(resize.sectorCountY)
-        .arg(resize.oldSectorOffsetX).arg(resize.oldSectorOffsetY);
+        .arg(resize.oldTileOffsetX).arg(resize.oldTileOffsetY);
 
     result.phase = QStringLiteral("pre-backup-race-check");
     QByteArray currentSource;

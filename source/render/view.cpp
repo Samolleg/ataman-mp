@@ -87,6 +87,84 @@
 class CLogic;
 
 namespace {
+class CCanvasResizePreview final : public QGraphicsView
+{
+public:
+    explicit CCanvasResizePreview(QWidget* parent = nullptr)
+        : QGraphicsView(parent), m_scene(new QGraphicsScene(this))
+    {
+        setScene(m_scene);
+        setAlignment(Qt::AlignCenter);
+        setDragMode(QGraphicsView::ScrollHandDrag);
+        setTransformationAnchor(QGraphicsView::AnchorUnderMouse);
+        setResizeAnchor(QGraphicsView::AnchorViewCenter);
+        setBackgroundBrush(QColor(28, 28, 28));
+        setFrameShape(QFrame::StyledPanel);
+    }
+
+    void setImage(const QImage& image)
+    {
+        const bool preserveView = m_item && m_userSized;
+        const QPointF previousCenter = mapToScene(viewport()->rect().center());
+        const QRectF previousRect = m_scene->sceneRect();
+        const QTransform previousTransform = transform();
+        const QPixmap pixmap = QPixmap::fromImage(image);
+        if(!m_item)
+            m_item = m_scene->addPixmap(pixmap);
+        else
+            m_item->setPixmap(pixmap);
+        const QRectF nextRect(QPointF(0.0, 0.0), QSizeF(pixmap.size()));
+        m_scene->setSceneRect(nextRect);
+        if(preserveView && !previousRect.isEmpty())
+        {
+            setTransform(previousTransform);
+            const QPointF normalized((previousCenter.x() - previousRect.left())
+                                         / previousRect.width(),
+                                     (previousCenter.y() - previousRect.top())
+                                         / previousRect.height());
+            centerOn(nextRect.left() + normalized.x() * nextRect.width(),
+                     nextRect.top() + normalized.y() * nextRect.height());
+        }
+        else
+            fitImage();
+    }
+
+protected:
+    void wheelEvent(QWheelEvent* event) override
+    {
+        m_userSized = true;
+        const qreal factor = event->angleDelta().y() >= 0 ? 1.2 : 1.0 / 1.2;
+        scale(factor, factor);
+        event->accept();
+    }
+    void resizeEvent(QResizeEvent* event) override
+    {
+        QGraphicsView::resizeEvent(event);
+        if(!m_userSized)
+            fitImage();
+    }
+    void mousePressEvent(QMouseEvent* event) override
+    {
+        if(event->button() == Qt::LeftButton)
+            m_userSized = true;
+        QGraphicsView::mousePressEvent(event);
+    }
+
+private:
+    void fitImage()
+    {
+        m_userSized = false;
+        if(m_item)
+        {
+            fitInView(m_item, Qt::KeepAspectRatio);
+            centerOn(m_item);
+        }
+    }
+    QGraphicsScene* m_scene{nullptr};
+    QGraphicsPixmapItem* m_item{nullptr};
+    bool m_userSized{false};
+};
+
 bool isMinimapStaticGeometry(CNode* node)
 {
     if(!node || dynamic_cast<CUnit*>(node))
@@ -8481,24 +8559,47 @@ void CView::openMapParameters()
     QSpinBox* canvasHeight = new QSpinBox(canvasPage);
     canvasWidth->setRange(1, 32);
     canvasHeight->setRange(1, 32);
-    QComboBox* canvasAnchor = new QComboBox(canvasPage);
-    canvasAnchor->addItems({tr("Top left"), tr("Top center"), tr("Top right"),
-                            tr("Middle left"), tr("Center"), tr("Middle right"),
-                            tr("Bottom left"), tr("Bottom center"), tr("Bottom right")});
+    QSpinBox* canvasOffsetX = new QSpinBox(canvasPage);
+    QSpinBox* canvasOffsetY = new QSpinBox(canvasPage);
+    canvasOffsetX->setObjectName(QStringLiteral("mprCanvasOffsetX"));
+    canvasOffsetY->setObjectName(QStringLiteral("mprCanvasOffsetY"));
+    canvasOffsetX->setSuffix(tr(" tiles"));
+    canvasOffsetY->setSuffix(tr(" tiles"));
+    QCheckBox* closeCanvasEdges = new QCheckBox(
+        tr("Close outer edges by tapering land to raw height 0"), canvasPage);
+    QSpinBox* edgeTaperWidth = new QSpinBox(canvasPage);
+    edgeTaperWidth->setRange(1, 16);
+    edgeTaperWidth->setValue(2);
+    edgeTaperWidth->setSuffix(tr(" tiles"));
+    edgeTaperWidth->setEnabled(false);
     canvasForm->addRow(tr("New width (sectors)"), canvasWidth);
     canvasForm->addRow(tr("New height (sectors)"), canvasHeight);
-    canvasForm->addRow(tr("Keep old canvas anchored at"), canvasAnchor);
+    canvasForm->addRow(tr("Original map X offset"), canvasOffsetX);
+    canvasForm->addRow(tr("Original map Y offset"), canvasOffsetY);
+    canvasForm->addRow(closeCanvasEdges);
+    canvasForm->addRow(tr("Closed-edge width"), edgeTaperWidth);
+    QCheckBox* createCompanionMob = new QCheckBox(
+        tr("Create a translated companion MOB beside the resized MPR"), canvasPage);
+    QCheckBox* removeOutsideMobObjects = new QCheckBox(
+        tr("Remove objects whose origin lies outside the new canvas"), canvasPage);
+    removeOutsideMobObjects->setEnabled(false);
+    canvasForm->addRow(createCompanionMob);
+    canvasForm->addRow(removeOutsideMobObjects);
     canvasLayout->addLayout(canvasForm);
     QLabel* canvasExplanation = new QLabel(tr(
-        "Crop/expand is a structural Save As operation. Retained SEC payloads stay "
-        "byte-identical; expansion projects the nearest land boundary and does not "
-        "invent overlays. The initial 32 x 32 ceiling corresponds to the runtime's "
-        "256 x 256 navigation-grid limit."), canvasPage);
+        "Crop/expand is a structural Save As operation. Position the original map "
+        "directly on the resulting tile grid. Sector-aligned retained SEC payloads "
+        "stay byte-identical; other offsets are re-tiled and freshly validated. "
+        "Expansion projects the nearest land boundary and does not invent overlays. "
+        "Closed edges are explicitly lossy and deactivate overlays in the taper band. "
+        "The preview uses generated MPR terrain only; embedded minimaps and MOB geometry "
+        "are excluded. A companion MOB is always a new file; its objects are shifted "
+        "with the map, optionally clipped by object origin, and its stale embedded AI graph "
+        "is omitted. The 32 x 32 ceiling corresponds to the runtime's 256 x 256 "
+        "navigation-grid limit."), canvasPage);
     canvasExplanation->setWordWrap(true);
     canvasLayout->addWidget(canvasExplanation);
-    QLabel* canvasPreview = new QLabel(canvasPage);
-    canvasPreview->setAlignment(Qt::AlignCenter);
-    canvasPreview->setFrameShape(QFrame::StyledPanel);
+    CCanvasResizePreview* canvasPreview = new CCanvasResizePreview(canvasPage);
     canvasPreview->setMinimumSize(360, 250);
     canvasLayout->addWidget(canvasPreview, 1);
     QLabel* canvasSummary = new QLabel(canvasPage);
@@ -8510,21 +8611,20 @@ void CView::openMapParameters()
     tabs->addTab(canvasPage, tr("Canvas resize"));
 
     QSharedPointer<QImage> canvasSourcePreview(new QImage);
-    const auto canvasRequest = [this, canvasWidth, canvasHeight, canvasAnchor]() {
+    const auto canvasRequest = [canvasWidth, canvasHeight, canvasOffsetX,
+                                canvasOffsetY, closeCanvasEdges,
+                                edgeTaperWidth]() {
         SMprCanvasResizeRequest request;
         request.sectorCountX = quint32(canvasWidth->value());
         request.sectorCountY = quint32(canvasHeight->value());
-        const int deltaX = canvasWidth->value()
-            - int(m_mprDocument.mapInfo().sectorCountX);
-        const int deltaY = canvasHeight->value()
-            - int(m_mprDocument.mapInfo().sectorCountY);
-        const int column = canvasAnchor->currentIndex() % 3;
-        const int row = canvasAnchor->currentIndex() / 3;
-        request.oldSectorOffsetX = column == 0 ? 0 : column == 1 ? deltaX / 2 : deltaX;
-        request.oldSectorOffsetY = row == 0 ? 0 : row == 1 ? deltaY / 2 : deltaY;
+        request.oldTileOffsetX = canvasOffsetX->value();
+        request.oldTileOffsetY = canvasOffsetY->value();
+        request.closeEdges = closeCanvasEdges->isChecked();
+        request.edgeTaperTiles = edgeTaperWidth->value();
         return request;
     };
     const auto refreshCanvasPreview = [this, canvasWidth, canvasHeight,
+                                       canvasOffsetX, canvasOffsetY,
                                        canvasPreview, canvasSummary,
                                        saveResizedCanvas, canvasSourcePreview,
                                        canvasRequest]() {
@@ -8533,84 +8633,122 @@ void CView::openMapParameters()
         const SMprCanvasResizeRequest request = canvasRequest();
         const int oldWidth = int(m_mprDocument.mapInfo().sectorCountX);
         const int oldHeight = int(m_mprDocument.mapInfo().sectorCountY);
-        const int retainedX = qMax(0, qMin(oldWidth,
-            canvasWidth->value() - request.oldSectorOffsetX)
-            - qMax(0, -request.oldSectorOffsetX));
-        const int retainedY = qMax(0, qMin(oldHeight,
-            canvasHeight->value() - request.oldSectorOffsetY)
-            - qMax(0, -request.oldSectorOffsetY));
+        {
+            const QSignalBlocker xBlocker(canvasOffsetX);
+            const QSignalBlocker yBlocker(canvasOffsetY);
+            canvasOffsetX->setRange(1 - oldWidth * 16,
+                                    canvasWidth->value() * 16 - 1);
+            canvasOffsetY->setRange(1 - oldHeight * 16,
+                                    canvasHeight->value() * 16 - 1);
+        }
+        const int retainedX = qMax(0, qMin(oldWidth * 16,
+            canvasWidth->value() * 16 - request.oldTileOffsetX)
+            - qMax(0, -request.oldTileOffsetX));
+        const int retainedY = qMax(0, qMin(oldHeight * 16,
+            canvasHeight->value() * 16 - request.oldTileOffsetY)
+            - qMax(0, -request.oldTileOffsetY));
         const int retained = retainedX * retainedY;
-        const int added = canvasWidth->value() * canvasHeight->value() - retained;
-        const int removed = oldWidth * oldHeight - retained;
         canvasSummary->setText(tr(
-            "Old canvas offset: X %1, Y %2 sectors. Retain %3, add %4, remove %5 SEC member(s). "
-            "World bounds become %6 x %7 units. Output is a new MPR; the source is not overwritten.")
-            .arg(request.oldSectorOffsetX).arg(request.oldSectorOffsetY)
-            .arg(retained).arg(added).arg(removed)
-            .arg(canvasWidth->value() * 32).arg(canvasHeight->value() * 32));
+            "Original map offset: X %1, Y %2 tiles. Retain %3 x %4 (%5) source tile(s). "
+            "World bounds become %6 x %7 units.%8 Output is a new MPR; the source is not overwritten.")
+            .arg(request.oldTileOffsetX).arg(request.oldTileOffsetY)
+            .arg(retainedX).arg(retainedY).arg(retained)
+            .arg(canvasWidth->value() * 32).arg(canvasHeight->value() * 32)
+            .arg(request.closeEdges
+                 ? tr(" The outer %1 tile(s) will be tapered to raw 0.")
+                       .arg(request.edgeTaperTiles)
+                 : QString()));
         saveResizedCanvas->setEnabled(retained > 0
             && !(canvasWidth->value() == oldWidth
                  && canvasHeight->value() == oldHeight
-                 && request.oldSectorOffsetX == 0
-                 && request.oldSectorOffsetY == 0));
+                 && request.oldTileOffsetX == 0
+                 && request.oldTileOffsetY == 0
+                 && !request.closeEdges));
 
         if(canvasSourcePreview->isNull())
         {
             const SMinimapSceneCaptureResult capture = captureMinimapScene(false, 256);
             if(capture.bake.success)
-                *canvasSourcePreview = capture.bake.reviewImage;
+                *canvasSourcePreview = capture.bake.reviewImage.mirrored(false, true);
         }
         const QSize area(480, 300);
         QImage preview(area, QImage::Format_ARGB32_Premultiplied);
         preview.fill(QColor(28, 28, 28));
         QPainter painter(&preview);
-        const double scale = qMin(double(area.width() - 16) / canvasWidth->value(),
-                                  double(area.height() - 16) / canvasHeight->value());
-        const QRectF canvasRect(8, 8, canvasWidth->value() * scale,
-                                canvasHeight->value() * scale);
-        painter.fillRect(canvasRect, QColor(48, 48, 48));
+        const double scale = qMin(double(area.width() - 16)
+                                      / (canvasWidth->value() * 16),
+                                  double(area.height() - 16)
+                                      / (canvasHeight->value() * 16));
+        const QRectF tileCanvasRect(8, 8, canvasWidth->value() * 16 * scale,
+                                    canvasHeight->value() * 16 * scale);
+        painter.fillRect(tileCanvasRect, QColor(48, 48, 48));
         painter.save();
-        painter.setClipRect(canvasRect);
+        painter.setClipRect(tileCanvasRect);
         if(!canvasSourcePreview->isNull())
         {
-            const QRectF oldRect(canvasRect.left() + request.oldSectorOffsetX * scale,
-                                 canvasRect.top() + request.oldSectorOffsetY * scale,
-                                 oldWidth * scale, oldHeight * scale);
+            const QRectF oldRect(tileCanvasRect.left() + request.oldTileOffsetX * scale,
+                                 tileCanvasRect.top() + request.oldTileOffsetY * scale,
+                                 oldWidth * 16 * scale, oldHeight * 16 * scale);
             painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
             painter.drawImage(oldRect, *canvasSourcePreview);
         }
         painter.restore();
         painter.setPen(QPen(QColor(70, 185, 95), 2));
-        painter.drawRect(canvasRect);
-        if(scale >= 10.0)
+        painter.drawRect(tileCanvasRect);
+        if(scale * 16.0 >= 10.0)
         {
             painter.setPen(QPen(QColor(255, 255, 255, 45), 1));
             for(int x = 1; x < canvasWidth->value(); ++x)
-                painter.drawLine(QPointF(canvasRect.left() + x * scale, canvasRect.top()),
-                                 QPointF(canvasRect.left() + x * scale, canvasRect.bottom()));
+                painter.drawLine(QPointF(tileCanvasRect.left() + x * 16 * scale,
+                                         tileCanvasRect.top()),
+                                 QPointF(tileCanvasRect.left() + x * 16 * scale,
+                                         tileCanvasRect.bottom()));
             for(int y = 1; y < canvasHeight->value(); ++y)
-                painter.drawLine(QPointF(canvasRect.left(), canvasRect.top() + y * scale),
-                                 QPointF(canvasRect.right(), canvasRect.top() + y * scale));
+                painter.drawLine(QPointF(tileCanvasRect.left(),
+                                         tileCanvasRect.top() + y * 16 * scale),
+                                 QPointF(tileCanvasRect.right(),
+                                         tileCanvasRect.top() + y * 16 * scale));
         }
         painter.end();
-        canvasPreview->setPixmap(QPixmap::fromImage(preview));
+        canvasPreview->setImage(preview);
     };
     connect(canvasWidth, QOverload<int>::of(&QSpinBox::valueChanged), dock,
             [refreshCanvasPreview](int) { refreshCanvasPreview(); });
     connect(canvasHeight, QOverload<int>::of(&QSpinBox::valueChanged), dock,
             [refreshCanvasPreview](int) { refreshCanvasPreview(); });
-    connect(canvasAnchor, QOverload<int>::of(&QComboBox::currentIndexChanged), dock,
+    connect(canvasOffsetX, QOverload<int>::of(&QSpinBox::valueChanged), dock,
             [refreshCanvasPreview](int) { refreshCanvasPreview(); });
+    connect(canvasOffsetY, QOverload<int>::of(&QSpinBox::valueChanged), dock,
+            [refreshCanvasPreview](int) { refreshCanvasPreview(); });
+    connect(closeCanvasEdges, &QCheckBox::toggled, dock,
+            [edgeTaperWidth, refreshCanvasPreview](bool checked) {
+        edgeTaperWidth->setEnabled(checked);
+        refreshCanvasPreview();
+    });
+    connect(edgeTaperWidth, QOverload<int>::of(&QSpinBox::valueChanged), dock,
+            [refreshCanvasPreview](int) { refreshCanvasPreview(); });
+    connect(createCompanionMob, &QCheckBox::toggled, dock,
+            [removeOutsideMobObjects](bool checked) {
+        removeOutsideMobObjects->setEnabled(checked);
+    });
     connect(saveResizedCanvas, &QPushButton::clicked, dock,
-            [this, dock, canvasRequest, canvasSummary]() {
+            [this, dock, canvasRequest, canvasSummary, createCompanionMob,
+             removeOutsideMobObjects]() {
         const SMprCanvasResizeRequest resize = canvasRequest();
-        if((resize.oldSectorOffsetX != 0 || resize.oldSectorOffsetY != 0)
-           && !m_aMob.isEmpty())
+        if((resize.oldTileOffsetX != 0 || resize.oldTileOffsetY != 0)
+           && !m_aMob.isEmpty() && !createCompanionMob->isChecked())
         {
             QMessageBox::warning(dock, tr("MOB translation required"), tr(
-                "This anchor moves the map origin, but one or more MOB files are loaded. "
-                "The safe MOB translation/deletion companion is not enabled in this test slice. "
-                "Unload the MOB files or choose an origin-preserving anchor; no file was changed."));
+                "This tile offset moves the map origin, but one or more MOB files are loaded. "
+                "Create a translated companion MOB, unload the MOB files, or use zero offsets; "
+                "no file was changed."));
+            return;
+        }
+        if(createCompanionMob->isChecked() && !m_activeMob)
+        {
+            QMessageBox::warning(dock, tr("No companion MOB"), tr(
+                "Load and activate the MOB that should accompany this resized map, or disable "
+                "the companion MOB option. No file was changed."));
             return;
         }
         QByteArray currentBytes;
@@ -8637,10 +8775,44 @@ void CView::openMapParameters()
             dock, tr("Save resized MPR as..."), suggested, tr("Landscape (*.mpr)")));
         if(destination.filePath().isEmpty())
             return;
+        QFileInfo mobDestination;
+        QByteArray mobCandidate;
+        CMob::SCanvasCropResult mobCrop;
+        if(createCompanionMob->isChecked())
+        {
+            mobDestination = QFileInfo(QDir(destination.absolutePath()).filePath(
+                destination.completeBaseName() + QStringLiteral(".mob")));
+            if(mobDestination.exists())
+            {
+                QMessageBox::warning(dock, tr("Companion MOB already exists"), tr(
+                    "The companion operation never overwrites an existing MOB:\n%1\n\n"
+                    "Choose another resized MPR name. No file was changed.")
+                        .arg(mobDestination.absoluteFilePath()));
+                return;
+            }
+            CValidationReport mobReport;
+            if(!m_activeMob->buildCanvasCropCandidate(
+                   float(resize.oldTileOffsetX * 2),
+                   float(resize.oldTileOffsetY * 2),
+                   float(resize.sectorCountX * 32),
+                   float(resize.sectorCountY * 32),
+                   removeOutsideMobObjects->isChecked(),
+                   &mobCandidate, &mobCrop, &mobReport))
+            {
+                QMessageBox::critical(dock, tr("Cannot stage companion MOB"),
+                    mobReport.toText().trimmed());
+                return;
+            }
+        }
         if(QMessageBox::question(dock, tr("Create resized MPR"),
-            tr("%1\n\nCreate the separately named MPR now? Retained data will be staged, "
-               "freshly reopened, backed up if the destination exists, and replaced atomically.")
-                .arg(canvasSummary->text())) != QMessageBox::Yes)
+            tr("%1%2\n\nCreate the separately named output now? Retained data will be staged, "
+               "freshly reopened, backed up if the MPR destination exists, and replaced atomically.")
+                .arg(canvasSummary->text(), createCompanionMob->isChecked()
+                    ? tr("\nCompanion MOB: %1 (%2 translated, %3 removed; stale embedded graph omitted: %4)")
+                        .arg(mobDestination.absoluteFilePath())
+                        .arg(mobCrop.translatedObjects).arg(mobCrop.removedObjects)
+                        .arg(mobCrop.removedEmbeddedAiGraph ? tr("yes") : tr("not present"))
+                    : QString())) != QMessageBox::Yes)
             return;
 
         QProgressDialog progress(tr("Building resized MPR candidate..."), QString(),
@@ -8664,14 +8836,32 @@ void CView::openMapParameters()
                 tr("No source file was changed.\n\n%1").arg(result.error));
             return;
         }
+        if(createCompanionMob->isChecked())
+        {
+            QSaveFile mobOutput(mobDestination.absoluteFilePath());
+            if(!mobOutput.open(QIODevice::WriteOnly)
+               || mobOutput.write(mobCandidate) != mobCandidate.size()
+               || !mobOutput.commit())
+            {
+                QMessageBox::critical(dock, tr("Companion MOB write failed"), tr(
+                    "The resized MPR was created, but the new companion MOB could not be "
+                    "committed. The source MOB was not changed.\n\n%1")
+                        .arg(mobOutput.errorString()));
+                return;
+            }
+        }
         ei::log(eLogInfo, QString("MPR canvas resize committed path:%1 sha256:%2 %3")
             .arg(destination.absoluteFilePath(), result.candidateSha256,
                  result.semanticDiff));
         unloadLand(false);
         loadLandscape(destination);
         QMessageBox::information(dock, tr("Resized MPR created"),
-            tr("Created and opened:\n%1\n\nSHA-256: %2")
-                .arg(destination.absoluteFilePath(), result.candidateSha256));
+            tr("Created and opened:\n%1%2\n\nSHA-256: %3")
+                .arg(destination.absoluteFilePath(),
+                     createCompanionMob->isChecked()
+                         ? tr("\nCompanion MOB: %1").arg(mobDestination.absoluteFilePath())
+                         : QString(),
+                     result.candidateSha256));
     });
 
     QDialogButtonBox* buttons = new QDialogButtonBox(QDialogButtonBox::Close, panel);
@@ -8880,7 +9070,9 @@ void CView::openMapParameters()
     m_refreshMprSettingsDock = [this, statePages, panel, sourceValue,
                                 namespaceValue, refreshSummary, refreshPreview,
                                 scaleTarget, refreshScalePreview, canvasWidth,
-                                canvasHeight, canvasSourcePreview,
+                                canvasHeight, canvasOffsetX, canvasOffsetY,
+                                createCompanionMob, removeOutsideMobObjects,
+                                canvasSourcePreview,
                                 refreshCanvasPreview]() {
         const bool loaded = m_pLand->isMprLoad() && m_terrainEditAvailable;
         statePages->setCurrentIndex(loaded ? 1 : 0);
@@ -8896,6 +9088,12 @@ void CView::openMapParameters()
             scaleTarget->setValue(m_terrainEdit.maxZ());
         }
         refreshScalePreview();
+        createCompanionMob->setEnabled(m_activeMob != nullptr);
+        if(!m_activeMob)
+        {
+            createCompanionMob->setChecked(false);
+            removeOutsideMobObjects->setChecked(false);
+        }
         if(canvasWidth->value() < 1 || canvasHeight->value() < 1
            || canvasWidth->property("sourceWidth").toUInt()
                 != m_mprDocument.mapInfo().sectorCountX
@@ -8908,6 +9106,14 @@ void CView::openMapParameters()
             canvasHeight->setValue(int(m_mprDocument.mapInfo().sectorCountY));
             canvasWidth->setProperty("sourceWidth", m_mprDocument.mapInfo().sectorCountX);
             canvasHeight->setProperty("sourceHeight", m_mprDocument.mapInfo().sectorCountY);
+            const QSignalBlocker offsetXBlocker(canvasOffsetX);
+            const QSignalBlocker offsetYBlocker(canvasOffsetY);
+            canvasOffsetX->setRange(1 - int(m_mprDocument.mapInfo().sectorCountX) * 16,
+                                    canvasWidth->value() * 16 - 1);
+            canvasOffsetY->setRange(1 - int(m_mprDocument.mapInfo().sectorCountY) * 16,
+                                    canvasHeight->value() * 16 - 1);
+            canvasOffsetX->setValue(0);
+            canvasOffsetY->setValue(0);
             *canvasSourcePreview = QImage();
         }
         refreshCanvasPreview();

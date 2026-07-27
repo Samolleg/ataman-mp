@@ -93,19 +93,26 @@ The installed corpus currently reaches 16 x 16; game-side testing of a copied
 32 x 32 derivative decides whether the editor should expose a lower practical
 limit.
 
-The old canvas is placed inside the new canvas using a nine-point anchor. A
-positive old-canvas offset adds space before the source; a negative offset
-crops it there. Retained SEC payloads are copied byte-for-byte and renamed only
-when their coordinates move. New sectors contain land only and extend the
-nearest source boundary height, packed vertex data, and tile; overlays are not
-invented. Preservation-only archive members and archive trailer bytes remain
-unchanged. The member table is necessarily rebuilt because its modulus changes,
-using runtime-reachable CP1251 case-folded hash slots and collision chains.
+The old canvas is placed directly on the resulting grid with X/Y offsets in
+terrain tiles. Positive offsets add space before the source; negative offsets
+crop it there. Sector-aligned retained SEC payloads remain byte-identical.
+Partial-sector offsets are re-tiled from canonical land and overlay data and
+must pass the same fresh-reopen and seam validation. New space extends the
+nearest land boundary; overlays are never invented outside the source.
+Preservation-only archive members and archive trailer bytes remain unchanged.
+The member table is necessarily rebuilt because its modulus changes, using
+runtime-reachable CP1251 case-folded hash slots and collision chains.
 
-If loaded MOB data would need an origin translation, this initial slice refuses
-the operation. The follow-up companion must translate every proven spatial
-record, offer deletion of records outside the new bounds, and write a separately
-named MOB; it must never overwrite the source MOB.
+An optional, explicitly lossy closed-edge pass tapers a user-selected outer
+tile band to raw height zero and deactivates overlays inside that band. The
+preview is the generated MPR terrain only, shown with the same north-up
+orientation as the minimap; it is not embedded into the output.
+
+When one active MOB is loaded, resize can stage a separately named companion
+MOB. It translates root objects and dependent unit/trap spatial records by the
+same world offset, can delete objects whose origin lies outside the new bounds,
+and omits the stale embedded AI graph. The source MOB is restored in memory and
+is never overwritten by this operation.
 
 ## Planned MPR Settings presentation
 

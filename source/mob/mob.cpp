@@ -1975,6 +1975,105 @@ bool CMob::buildValidatedCandidate(QByteArray* data,
     return true;
 }
 
+bool CMob::buildCanvasCropCandidate(float offsetX, float offsetY,
+                                    float resultWidth, float resultHeight,
+                                    bool removeOutside, QByteArray* data,
+                                    SCanvasCropResult* result,
+                                    CValidationReport* report)
+{
+    if(!data || !result || resultWidth <= 0.0f || resultHeight <= 0.0f)
+        return false;
+    data->clear();
+    *result = SCanvasCropResult();
+    if(CScene::getInstance()->getMode() != eEditModeObjects)
+    {
+        if(report)
+            report->add("mob.canvas_crop.mode", EValidationSeverity::Error,
+                        "Switch from logic editing to object editing before creating a cropped companion MOB.",
+                        m_filePath.filePath());
+        return false;
+    }
+
+    struct Snapshot
+    {
+        CNode* node{nullptr};
+        int index{-1};
+        QVector3D position;
+        bool removed{false};
+    };
+    QVector<Snapshot> snapshots;
+    snapshots.reserve(m_aNode.size());
+    for(int index = 0; index < m_aNode.size(); ++index)
+    {
+        Snapshot snapshot;
+        snapshot.node = m_aNode.at(index);
+        snapshot.index = index;
+        snapshot.position = snapshot.node->position();
+        snapshots.append(snapshot);
+    }
+    const bool wasDirty = m_bDirty;
+    const auto restore = [this, &snapshots, wasDirty]() {
+        for(int index = snapshots.size() - 1; index >= 0; --index)
+            if(snapshots[index].removed)
+                restoreDeletedNode(snapshots[index].node, snapshots[index].index);
+        for(Snapshot& snapshot : snapshots)
+        {
+            QVector3D original = snapshot.position;
+            snapshot.node->updatePos(original);
+            snapshot.node->setPos(original);
+        }
+        m_bDirty = wasDirty;
+        logicNodesUpdate();
+    };
+
+    for(Snapshot& snapshot : snapshots)
+    {
+        QVector3D translated = snapshot.position;
+        translated.setX(translated.x() + offsetX);
+        translated.setY(translated.y() + offsetY);
+        snapshot.node->updatePos(translated);
+        translated.setZ(snapshot.position.z());
+        snapshot.node->setPos(translated);
+        ++result->translatedObjects;
+        if(removeOutside && (translated.x() < 0.0f || translated.y() < 0.0f
+                             || translated.x() > resultWidth
+                             || translated.y() > resultHeight))
+        {
+            deleteNode(snapshot.node);
+            snapshot.removed = true;
+            ++result->removedObjects;
+        }
+    }
+
+    QByteArray candidate;
+    QString saveClass;
+    const bool candidateReady = buildValidatedCandidate(&candidate, report, &saveClass);
+    if(!candidateReady)
+    {
+        restore();
+        return false;
+    }
+    CMobDocument document;
+    CValidationReport documentReport;
+    if(!document.loadBytes(candidate, QStringLiteral("canvas-crop-candidate.mob"),
+                           &documentReport))
+    {
+        if(report)
+            *report = documentReport;
+        restore();
+        return false;
+    }
+    result->removedEmbeddedAiGraph = document.hasEmbeddedAiGraph();
+    const bool stripped = document.removeEmbeddedAiGraph(data, report);
+    restore();
+    if(!stripped)
+        return false;
+    ei::log(eLogInfo, QString("Prepared companion MOB crop candidate path:%1 translated:%2 removed:%3 embeddedGraphRemoved:%4")
+        .arg(m_filePath.filePath()).arg(result->translatedObjects)
+        .arg(result->removedObjects).arg(result->removedEmbeddedAiGraph ? "true" : "false"));
+    return true;
+}
+
 bool CMob::saveAs(const QFileInfo& path, const SaveProgress& progress)
 {
     const QString filePath = path.filePath();

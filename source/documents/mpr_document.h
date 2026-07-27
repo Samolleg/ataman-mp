@@ -119,14 +119,17 @@ struct SMprDocumentDiffEntry
 };
 
 // Structural canvas changes are intentionally separate from ordinary member
-// edits. oldSectorOffset places the old canvas inside the new canvas: positive
-// values add sectors on the left/bottom, negative values crop them there.
+// edits. oldTileOffset places the old canvas inside the new canvas in the same
+// two-world-unit tiles used by the terrain grid. Positive values add space on
+// the west/north sides; negative values crop it there.
 struct SMprCanvasResizeRequest
 {
     quint32 sectorCountX{0};
     quint32 sectorCountY{0};
-    int oldSectorOffsetX{0};
-    int oldSectorOffsetY{0};
+    int oldTileOffsetX{0};
+    int oldTileOffsetY{0};
+    bool closeEdges{false};
+    int edgeTaperTiles{2};
 };
 
 class CMprSemanticDiff

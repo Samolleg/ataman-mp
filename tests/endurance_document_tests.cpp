@@ -366,6 +366,7 @@ private slots:
     void landscapeWheelDirectionUsesAvailableDelta();
     void sculptCadenceIsIndependentOfSpatialInterpolation();
     void unchangedMobIsByteIdentical();
+    void mobGraphRemovalPreservesAllOtherTopLevelBytes();
     void duplicateMobIdsAreWarningsOnly();
     void vulcansmokeIsACriticalNonBlockingFinding();
     void unknownLeafIsPreservedAsOpaque();
@@ -398,6 +399,8 @@ private slots:
     void unchangedMprIsByteIdentical();
     void mprCanvasResizeCropsAndRenamesRetainedSectorLosslessly();
     void mprCanvasResizeExpandsBoundaryWithRuntimeReachableMembers();
+    void mprCanvasResizeSupportsTileOffsetsWithoutSeams();
+    void mprCanvasResizeClosedEdgeTapersAndDeactivatesOverlay();
     void mprCanvasResizeAcceptsStructural32By32Ceiling();
     void mprCanvasResizeRejectsInvalidOrEmptyIntersection();
     void mprCanvasResizeCommitIsSaveAsOnlyAndAtomic();
@@ -538,6 +541,25 @@ void EnduranceDocumentTests::sculptCadenceIsIndependentOfSpatialInterpolation()
         subdividedRemaining *= 1.0f - landscapeSculptEffectiveStrength(
             strength, eightStepFraction);
     QVERIFY(qAbs(oneStampBlend - (1.0f - subdividedRemaining)) < 0.00001f);
+}
+
+void EnduranceDocumentTests::mobGraphRemovalPreservesAllOtherTopLevelBytes()
+{
+    const QByteArray root = validMob(section(0xB000, object(42, "bridge")));
+    const QByteArray graph = section(0x31415926, QByteArray(64, '\x5a'));
+    CMobDocument document;
+    CValidationReport loadReport;
+    QVERIFY2(document.loadBytes(root + graph, "graph-source.mob", &loadReport),
+             qPrintable(loadReport.toText()));
+    QVERIFY(document.hasEmbeddedAiGraph());
+    QByteArray candidate;
+    CValidationReport report;
+    QVERIFY2(document.removeEmbeddedAiGraph(&candidate, &report),
+             qPrintable(report.toText()));
+    QCOMPARE(candidate, root);
+    CMobDocument reopened;
+    QVERIFY(reopened.loadBytes(candidate, "graphless-result.mob", &report));
+    QVERIFY(!reopened.hasEmbeddedAiGraph());
 }
 
 void EnduranceDocumentTests::unchangedMobIsByteIdentical()
@@ -1405,7 +1427,7 @@ void EnduranceDocumentTests::mprCanvasResizeCropsAndRenamesRetainedSectorLossles
     SMprCanvasResizeRequest request;
     request.sectorCountX = 1;
     request.sectorCountY = 1;
-    request.oldSectorOffsetX = -1;
+    request.oldTileOffsetX = -16;
     QByteArray candidate;
     CValidationReport report;
     QVERIFY2(baseline.buildResizedCanvas(request, &candidate, &report),
@@ -1433,8 +1455,8 @@ void EnduranceDocumentTests::mprCanvasResizeExpandsBoundaryWithRuntimeReachableM
     SMprCanvasResizeRequest request;
     request.sectorCountX = 3;
     request.sectorCountY = 2;
-    request.oldSectorOffsetX = 1;
-    request.oldSectorOffsetY = 1;
+    request.oldTileOffsetX = 16;
+    request.oldTileOffsetY = 16;
     QByteArray candidate;
     CValidationReport report;
     QVERIFY2(baseline.buildResizedCanvas(request, &candidate, &report),
@@ -1453,6 +1475,65 @@ void EnduranceDocumentTests::mprCanvasResizeExpandsBoundaryWithRuntimeReachableM
 
     for(const SMprArchiveMember& member : reopened.members())
         QCOMPARE(runtimeMprLookup(candidate, member.name), member.payload);
+}
+
+void EnduranceDocumentTests::mprCanvasResizeSupportsTileOffsetsWithoutSeams()
+{
+    CMprDocument baseline;
+    CValidationReport loadReport;
+    QVERIFY2(baseline.loadBytes(syntheticTwoSectorMpr(
+                                    syntheticLandSector(1200),
+                                    syntheticLandSector(42000)),
+                                "tile-offset-source.mpr", &loadReport),
+             qPrintable(loadReport.toText()));
+
+    SMprCanvasResizeRequest request;
+    request.sectorCountX = 3;
+    request.sectorCountY = 1;
+    request.oldTileOffsetX = 3;
+    QByteArray candidate;
+    CValidationReport report;
+    QVERIFY2(baseline.buildResizedCanvas(request, &candidate, &report),
+             qPrintable(report.toText()));
+
+    CMprDocument reopened;
+    CValidationReport reopenReport;
+    QVERIFY2(reopened.loadBytes(candidate, "tile-offset-result.mpr", &reopenReport),
+             qPrintable(reopenReport.toText()));
+    QCOMPARE(sectorHeight(reopened.memberPayload("CaveSet000000.SEC"), 6, 10),
+             quint16(1200));
+    QCOMPARE(sectorHeight(reopened.memberPayload("CaveSet001000.SEC"), 6, 10),
+             quint16(42000));
+    QCOMPARE(sectorHeight(reopened.memberPayload("CaveSet000000.SEC"), 32, 10),
+             sectorHeight(reopened.memberPayload("CaveSet001000.SEC"), 0, 10));
+}
+
+void EnduranceDocumentTests::mprCanvasResizeClosedEdgeTapersAndDeactivatesOverlay()
+{
+    CMprDocument baseline;
+    CValidationReport loadReport;
+    QVERIFY2(baseline.loadBytes(syntheticMpr(), "taper-source.mpr", &loadReport),
+             qPrintable(loadReport.toText()));
+
+    SMprCanvasResizeRequest request;
+    request.sectorCountX = 1;
+    request.sectorCountY = 1;
+    request.closeEdges = true;
+    request.edgeTaperTiles = 2;
+    QByteArray candidate;
+    CValidationReport report;
+    QVERIFY2(baseline.buildResizedCanvas(request, &candidate, &report),
+             qPrintable(report.toText()));
+
+    CMprDocument reopened;
+    CValidationReport reopenReport;
+    QVERIFY2(reopened.loadBytes(candidate, "taper-result.mpr", &reopenReport),
+             qPrintable(reopenReport.toText()));
+    QCOMPARE(reopened.sectors().size(), 1);
+    const SMprSectorInfo& sector = reopened.sectors().first();
+    QVERIFY(sector.hasOverlay);
+    QCOMPARE(sector.overlayMaterialIndices.at(1), qint16(-1));
+    QVERIFY(sector.overlayMaterialIndices.at(5 * 16 + 5) >= 0);
 }
 
 void EnduranceDocumentTests::mprCanvasResizeAcceptsStructural32By32Ceiling()
@@ -1497,7 +1578,7 @@ void EnduranceDocumentTests::mprCanvasResizeRejectsInvalidOrEmptyIntersection()
     SMprCanvasResizeRequest empty;
     empty.sectorCountX = 1;
     empty.sectorCountY = 1;
-    empty.oldSectorOffsetX = 2;
+    empty.oldTileOffsetX = 32;
     QVERIFY(!baseline.buildResizedCanvas(empty, &candidate, &emptyReport));
     QVERIFY(candidate.isEmpty());
     QVERIFY(emptyReport.hasErrors());

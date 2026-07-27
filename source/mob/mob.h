@@ -42,6 +42,12 @@ struct SMobParameterState
 class CMob
 {
 public:
+    struct SCanvasCropResult
+    {
+        int translatedObjects{0};
+        int removedObjects{0};
+        bool removedEmbeddedAiGraph{false};
+    };
     using SaveProgress = std::function<void(const QString&, int, int)>;
     CMob();
     ~CMob();
@@ -53,6 +59,11 @@ public:
     bool buildValidatedCandidate(QByteArray* data,
                                  CValidationReport* report = nullptr,
                                  QString* saveClass = nullptr);
+    bool buildCanvasCropCandidate(float offsetX, float offsetY,
+                                  float resultWidth, float resultHeight,
+                                  bool removeOutside,
+                                  QByteArray* data, SCanvasCropResult* result,
+                                  CValidationReport* report = nullptr);
     void serializeJson(const QFileInfo& file);
     void serializeMob(QByteArray& data, bool writeLog = true);
     void addNode(QList<CNode*>& aNode) {m_aNode.append(aNode); }

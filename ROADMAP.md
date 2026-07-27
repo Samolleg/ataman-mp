@@ -461,11 +461,12 @@ must not independently change its shaders or animation policy.
   hash chains, freshly reopens, backs up, and atomically commits. The initial
   ceiling is 32x32 sectors for a 256x256 runtime graph; copied private runtime
   testing may lower it.
-- [ ] Add the explicit companion for origin-moving resize: translate all proven
+- [x] Add the explicit companion for origin-moving resize: translate all proven
   spatial MOB records into a separately named MOB and optionally delete
-  user-confirmed objects outside the new bounds. Until then, origin-moving
-  resize refuses while MOBs are loaded; map registration and minimap metadata
-  remain separate and are never invented.
+  user-confirmed objects outside the new bounds. Stale embedded AI graph data is
+  omitted, the source MOB is restored without mutation, and an existing MOB is
+  never overwritten. Map registration and minimap metadata remain separate and
+  are never invented.
 - [x] Refactor terrain ownership around each sector's canonical 33x33 vertex
   lattice rather than independently duplicated tile vertices.
 - [x] Synchronize shared seams between adjacent sectors.
