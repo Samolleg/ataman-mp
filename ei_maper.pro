@@ -55,5 +55,6 @@ RC_ICONS = icon.ico
 
 RESOURCES += \
     assets/resources/data.qrc \
+    assets/resources/semantic_atlas_presets.qrc \
     assets/resources/shaders.qrc \
     assets/resources/textures.qrc

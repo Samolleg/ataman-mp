@@ -6434,6 +6434,16 @@ void CView::rebuildTerrainAutoCatalog()
         for(const SValidationFinding& finding : storedReport.findings())
             report.add(finding.code, finding.severity, finding.message, finding.location);
     }
+    if(m_terrainAtlasProfile.slotDefinitions.isEmpty())
+    {
+        m_terrainAtlasProfile = CTerrainAtlasPresetCatalog::exactProfile(
+            mprNamespace, atlasHash, slotCount, &report);
+        if(!m_terrainAtlasProfile.slotDefinitions.isEmpty())
+        {
+            m_terrainAtlasAnalysis = m_terrainAtlasProfile.usableAnalysis(&report);
+            authoredTemplateActive = m_terrainAtlasAnalysis.usable;
+        }
+    }
     if(m_terrainAtlasProfile.slotDefinitions.isEmpty() && authoredTemplateAvailable)
     {
         m_terrainAtlasProfile = CTerrainAtlasProfileInference::fromAuthoredAnalysis(
@@ -6622,9 +6632,12 @@ void CView::reviewTerrainAtlasProfile()
     if(profile.slotDefinitions.isEmpty()
        || !profile.validateBinding(mprNamespace, hash, m_pTileForm->tileImages().size(), &report))
     {
-        profile = CTerrainAtlasProfileInference::propose(
-            mprNamespace, m_pTileForm->tileImages(), m_mprDocument.mapInfo().tileTypes,
-            terrainAtlasUsage(), &report);
+        profile = CTerrainAtlasPresetCatalog::exactProfile(
+            mprNamespace, hash, m_pTileForm->tileImages().size(), &report);
+        if(profile.slotDefinitions.isEmpty())
+            profile = CTerrainAtlasProfileInference::propose(
+                mprNamespace, m_pTileForm->tileImages(), m_mprDocument.mapInfo().tileTypes,
+                terrainAtlasUsage(), &report);
     }
     CTerrainAtlasReviewDialog dialog(profile, m_pTileForm->tileImages(), this);
     if(dialog.exec() != QDialog::Accepted) return;
@@ -8886,6 +8899,7 @@ void CView::onLandscapeToolsShown()
     if(!m_terrainEditAvailable || !m_pLand || !m_pLand->isMprLoad()
        || !m_pTileForm || m_pTileForm->tileImages().isEmpty()
        || m_terrainAtlasProfile.provenance.startsWith(QStringLiteral("authored-template:"))
+       || m_terrainAtlasProfile.provenance.startsWith(QStringLiteral("authored-preset:"))
        || m_terrainAtlasProfile.approved)
         return;
     const QString binding = m_mprDocument.mapInfo().innerNamespace

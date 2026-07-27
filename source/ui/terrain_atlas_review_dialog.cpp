@@ -284,8 +284,10 @@ CTerrainAtlasReviewDialog::CTerrainAtlasReviewDialog(
     familyActions->addWidget(remove);
     materialSide->addLayout(familyActions);
     m_familyClass->addItem(tr("Ground"), 0);
-    m_familyClass->addItem(tr("Underwater"), 1);
+    m_familyClass->addItem(tr("Underwater only"), 1);
     m_familyClass->addItem(tr("Overlay"), 2);
+    m_familyClass->addItem(tr("Ground + Overlay"), 3);
+    m_familyClass->addItem(tr("Ground (surface + underwater)"), 4);
     materialSide->addWidget(m_familyClass);
     m_familyReason->setWordWrap(true);
     materialSide->addWidget(m_familyReason);
@@ -448,8 +450,8 @@ void CTerrainAtlasReviewDialog::rebuildVisuals(qint32 selectFamily, int selectSl
     QTreeWidgetItem* selectItem = nullptr;
     for(const STerrainAtlasProfileFamily& entry : m_profile.families)
     {
-        const int group = entry.layer == ETerrainAtlasLayer::Overlay
-            ? 2 : (entry.underwater ? 1 : 0);
+        const int group = !entry.landAllowed && entry.overlayAllowed
+            ? 2 : (entry.underwaterRole == ETerrainAtlasUnderwaterRole::UnderwaterOnly ? 1 : 0);
         const int thumbnail = familyThumbnailSlot(entry.id);
         QTreeWidgetItem* familyItem = new QTreeWidgetItem(groups[group],
             {entry.name + (entry.ambiguous ? tr("  • confirm") : QString()),
@@ -457,8 +459,10 @@ void CTerrainAtlasReviewDialog::rebuildVisuals(qint32 selectFamily, int selectSl
         familyItem->setIcon(0, tileIcon(m_tileImages, thumbnail));
         familyItem->setData(0, KindRole, FamilyKind);
         familyItem->setData(0, IdRole, entry.id);
-        familyItem->setToolTip(0, tr("%1 atlas slots assigned. Drag this row onto a selected tile corner.")
-            .arg(entry.memberSlots.size()));
+        const QString sections = entry.landAllowed && entry.overlayAllowed
+            ? tr("Ground + Overlay") : (entry.overlayAllowed ? tr("Overlay") : tr("Ground"));
+        familyItem->setToolTip(0, tr("%1 atlas slots assigned. Allowed section: %2. Drag this row onto a selected tile corner.")
+            .arg(entry.memberSlots.size()).arg(sections));
         for(int member : entry.memberSlots)
         {
             const STerrainAtlasProfileSlot* definition = slot(member);
@@ -547,8 +551,10 @@ void CTerrainAtlasReviewDialog::updateInspector()
     m_rebuilding = true;
     if(selectedFamily)
     {
-        const int classification = selectedFamily->layer == ETerrainAtlasLayer::Overlay
-            ? 2 : (selectedFamily->underwater ? 1 : 0);
+        const int classification = selectedFamily->landAllowed && selectedFamily->overlayAllowed
+            ? 3 : (!selectedFamily->landAllowed && selectedFamily->overlayAllowed
+                ? 2 : (selectedFamily->underwaterRole == ETerrainAtlasUnderwaterRole::UnderwaterOnly
+                    ? 1 : (selectedFamily->underwaterRole == ETerrainAtlasUnderwaterRole::Mixed ? 4 : 0)));
         m_familyClass->setCurrentIndex(classification);
         m_familyClass->setEnabled(true);
         m_confirmFamily->setEnabled(selectedFamily->ambiguous);
@@ -665,7 +671,8 @@ void CTerrainAtlasReviewDialog::chooseCornerMaterial(int corner)
     QVector<qint32> ids;
     int currentIndex = 0;
     for(const STerrainAtlasProfileFamily& candidate : m_profile.families)
-        if(candidate.layer == current->layer)
+        if((candidate.landAllowed && current->landAllowed)
+           || (candidate.overlayAllowed && current->overlayAllowed))
         {
             if(candidate.id == current->id) currentIndex = names.size();
             names.append(candidate.name);
@@ -749,21 +756,34 @@ void CTerrainAtlasReviewDialog::changeSelectedClassification(int index)
     for(STerrainAtlasProfileFamily& entry : candidate.families)
         if(entry.id == selected->id) changed = &entry;
     if(!changed) return;
-    changed->layer = index == 2 ? ETerrainAtlasLayer::Overlay : ETerrainAtlasLayer::Land;
-    changed->underwater = index == 1;
+    changed->landAllowed = index != 2;
+    changed->overlayAllowed = index == 2 || index == 3;
+    changed->layer = !changed->landAllowed && changed->overlayAllowed
+        ? ETerrainAtlasLayer::Overlay : ETerrainAtlasLayer::Land;
+    changed->underwaterRole = index == 1
+        ? ETerrainAtlasUnderwaterRole::UnderwaterOnly
+        : (index == 4 ? ETerrainAtlasUnderwaterRole::Mixed
+                      : ETerrainAtlasUnderwaterRole::Surface);
+    changed->underwater = changed->underwaterRole
+        == ETerrainAtlasUnderwaterRole::UnderwaterOnly;
     CValidationReport report;
     const STerrainAtlasAnalysis analysis = candidate.usableAnalysis(&report);
     if(!analysis.usable && candidate.assignedSlotCount() > 0)
     {
         showReport(tr("Material section was not changed"), report);
         m_rebuilding = true;
-        m_familyClass->setCurrentIndex(selected->layer == ETerrainAtlasLayer::Overlay
-            ? 2 : (selected->underwater ? 1 : 0));
+        m_familyClass->setCurrentIndex(selected->landAllowed && selected->overlayAllowed
+            ? 3 : (!selected->landAllowed && selected->overlayAllowed
+                ? 2 : (selected->underwaterRole == ETerrainAtlasUnderwaterRole::UnderwaterOnly
+                    ? 1 : (selected->underwaterRole == ETerrainAtlasUnderwaterRole::Mixed ? 4 : 0))));
         m_rebuilding = false;
         return;
     }
     selected->layer = changed->layer;
     selected->underwater = changed->underwater;
+    selected->landAllowed = changed->landAllowed;
+    selected->overlayAllowed = changed->overlayAllowed;
+    selected->underwaterRole = changed->underwaterRole;
     selected->ambiguous = false;
     m_profile.approved = false;
     rebuildVisuals(selected->id);

@@ -1,9 +1,12 @@
 # Material atlas profile contract
 
-Endurance derives an editor material catalog only from the decoded atlas tiles,
-the MPR's per-slot category metadata, and packed tile usage observed in the open
-map. Zone 1's authored table is the behavioral oracle for translating those
-assignments into the painting solver. All profiles store the corners visibly
+Endurance first resolves an exact namespace, decoded-pixel hash, and slot-count
+binding against its compact known-map preset catalog. A matching preset is
+immediately approved and usable. Modified and custom atlases fall back to
+deterministic inference from decoded atlas tiles, the MPR's per-slot category
+metadata, and packed tile usage observed in the open map. Zone 1's authored
+table is the behavioral oracle for translating either source into the painting
+solver. All profiles store the corners visibly
 shown by the tile preview. Compilation reflects them once into paint-grid space
 and uses the renderer's single global packed-rotation convention.
 
@@ -24,8 +27,8 @@ The deterministic parser:
 - leaves ambiguous or cross-layer tiles unassigned; and
 - reports missing material combinations as hard-edge fallback diagnostics.
 
-JSON schema version 6 declares `tile-preview-nw-ne-se-sw-v1` corner space and
-stores exact material names, layers, underwater state,
+JSON schema version 7 declares `tile-preview-nw-ne-se-sw-v1` corner space and
+stores exact material names, allowed layers, surface/underwater-only/mixed role,
 member slots, per-slot corner signatures, assigned state, and an optional
 user-selected member thumbnail, plus whether an internal authored family is
 paint-selectable. Known authored legacy profiles receive one deterministic
@@ -40,7 +43,8 @@ excluded. A
 corrupt assigned slot that crosses Ground/Overlay boundaries is never admitted
 to a catalog, and visual editing rejects such a change before mutation.
 
-Profiles contain metadata only—never atlas imagery, MPR/SEC payloads, resource
+The built-in catalog covers all 38 reviewed installed namespaces and stores
+derived names and corner-family IDs only. Profiles contain metadata only—never atlas imagery, MPR/SEC payloads, resource
 archives, or installation paths. The managed profile lives below the
 application configuration directory in `terrain-atlas-profiles`, under a
 sanitized namespace plus namespace hash. The Material Atlas window shows that

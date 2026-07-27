@@ -137,6 +137,24 @@ SCornerColor cornerColor(const QImage& source, int corner)
             edgeCount ? int(edgeTotal / edgeCount) : 0,
             roughnessCount ? int(roughnessTotal / roughnessCount) : 0};
 }
+
+QString underwaterRoleName(ETerrainAtlasUnderwaterRole role)
+{
+    if(role == ETerrainAtlasUnderwaterRole::UnderwaterOnly)
+        return QStringLiteral("underwater-only");
+    if(role == ETerrainAtlasUnderwaterRole::Mixed)
+        return QStringLiteral("mixed");
+    return QStringLiteral("surface");
+}
+
+ETerrainAtlasUnderwaterRole parseUnderwaterRole(const QString& value, bool legacyUnderwater)
+{
+    if(value == QStringLiteral("underwater-only") || legacyUnderwater)
+        return ETerrainAtlasUnderwaterRole::UnderwaterOnly;
+    if(value == QStringLiteral("mixed"))
+        return ETerrainAtlasUnderwaterRole::Mixed;
+    return ETerrainAtlasUnderwaterRole::Surface;
+}
 }
 
 QImage terrainVertexJunctionThumbnail(
@@ -238,7 +256,7 @@ bool uniform(const STerrainTransitionSignature& signature)
 QJsonObject STerrainAtlasProfile::toJson() const
 {
     QJsonObject root;
-    root.insert(QStringLiteral("schemaVersion"), 6);
+    root.insert(QStringLiteral("schemaVersion"), 7);
     root.insert(QStringLiteral("cornerSpace"),
                 QStringLiteral("tile-preview-nw-ne-se-sw-v1"));
     root.insert(QStringLiteral("mprNamespace"), mprNamespace);
@@ -254,6 +272,12 @@ QJsonObject STerrainAtlasProfile::toJson() const
         object.insert(QStringLiteral("name"), family.name);
         object.insert(QStringLiteral("layer"), layerName(family.layer));
         object.insert(QStringLiteral("underwater"), family.underwater);
+        QJsonArray allowedLayers;
+        if(family.landAllowed) allowedLayers.append(QStringLiteral("land"));
+        if(family.overlayAllowed) allowedLayers.append(QStringLiteral("overlay"));
+        object.insert(QStringLiteral("allowedLayers"), allowedLayers);
+        object.insert(QStringLiteral("underwaterRole"),
+                      underwaterRoleName(family.underwaterRole));
         object.insert(QStringLiteral("ambiguous"), family.ambiguous);
         object.insert(QStringLiteral("paintSelectable"), family.paintSelectable);
         object.insert(QStringLiteral("tileType"), family.tileType);
@@ -283,7 +307,7 @@ bool STerrainAtlasProfile::fromJson(const QJsonObject& object,
                                     CValidationReport* report)
 {
     const int schemaVersion = object.value(QStringLiteral("schemaVersion")).toInt();
-    if(!profile || (schemaVersion < 1 || schemaVersion > 6)
+    if(!profile || (schemaVersion < 1 || schemaVersion > 7)
        || !object.value(QStringLiteral("families")).isArray()
        || !object.value(QStringLiteral("slots")).isArray())
     {
@@ -330,6 +354,30 @@ bool STerrainAtlasProfile::fromJson(const QJsonObject& object,
         }
         familyIds.insert(family.id);
         family.underwater = item.value(QStringLiteral("underwater")).toBool();
+        family.landAllowed = family.layer == ETerrainAtlasLayer::Land;
+        family.overlayAllowed = family.layer == ETerrainAtlasLayer::Overlay;
+        if(schemaVersion >= 7 && item.value(QStringLiteral("allowedLayers")).isArray())
+        {
+            family.landAllowed = false;
+            family.overlayAllowed = false;
+            for(const QJsonValue& layer : item.value(QStringLiteral("allowedLayers")).toArray())
+            {
+                family.landAllowed |= layer.toString() == QStringLiteral("land");
+                family.overlayAllowed |= layer.toString() == QStringLiteral("overlay");
+            }
+            if(!family.landAllowed && !family.overlayAllowed)
+            {
+                if(report) report->add("terrain.atlas_profile_family_layers",
+                    EValidationSeverity::Error,
+                    "A material family must allow Ground, Overlay, or both",
+                    family.name);
+                return false;
+            }
+        }
+        family.underwaterRole = parseUnderwaterRole(
+            item.value(QStringLiteral("underwaterRole")).toString(), family.underwater);
+        family.underwater = family.underwaterRole
+            == ETerrainAtlasUnderwaterRole::UnderwaterOnly;
         family.ambiguous = item.value(QStringLiteral("ambiguous")).toBool();
         family.paintSelectable = schemaVersion >= 3
             ? item.value(QStringLiteral("paintSelectable")).toBool(true) : true;
@@ -393,7 +441,7 @@ bool STerrainAtlasProfile::fromJson(const QJsonObject& object,
     }
     if(!parsed.normalizeMembership(report))
         return false;
-    parsed.schemaVersion = 6;
+    parsed.schemaVersion = 7;
     *profile = parsed;
     return true;
 }
@@ -442,6 +490,14 @@ bool STerrainAtlasProfile::normalizeMembership(CValidationReport* report)
         {
             if(report) report->add("terrain.atlas_profile_family_id", EValidationSeverity::Error,
                                    "Material family identifiers must be unique positive integers");
+            return false;
+        }
+        if(!families.at(index).landAllowed && !families.at(index).overlayAllowed)
+        {
+            if(report) report->add("terrain.atlas_profile_family_layers",
+                EValidationSeverity::Error,
+                "A material family must allow Ground, Overlay, or both",
+                families.at(index).name);
             return false;
         }
         familyIndex.insert(families.at(index).id, index);
@@ -496,14 +552,18 @@ bool STerrainAtlasProfile::mergeFamilies(const QVector<qint32>& requestedIds,
                                "A selected material family no longer exists");
         return false;
     }
-    const ETerrainAtlasLayer layer = families.at(indices.front()).layer;
+    bool allowLand = true, allowOverlay = true;
     for(int index : indices)
-        if(families.at(index).layer != layer)
-        {
-            if(report) report->add("terrain.atlas_profile_merge_layer", EValidationSeverity::Error,
-                                   "Land and overlay families cannot be merged");
-            return false;
-        }
+    {
+        allowLand &= families.at(index).landAllowed;
+        allowOverlay &= families.at(index).overlayAllowed;
+    }
+    if(!allowLand && !allowOverlay)
+    {
+        if(report) report->add("terrain.atlas_profile_merge_layer", EValidationSeverity::Error,
+                               "Land and overlay families cannot be merged because they do not share a compatible section");
+        return false;
+    }
     const qint32 targetId = *std::min_element(ids.constBegin(), ids.constEnd());
     for(STerrainAtlasProfileSlot& slot : slotDefinitions)
     {
@@ -518,6 +578,10 @@ bool STerrainAtlasProfile::mergeFamilies(const QVector<qint32>& requestedIds,
         if(family.id == targetId)
         {
             family.name = mergedName.trimmed();
+            family.landAllowed = allowLand;
+            family.overlayAllowed = allowOverlay;
+            family.layer = !allowLand && allowOverlay
+                ? ETerrainAtlasLayer::Overlay : ETerrainAtlasLayer::Land;
             family.ambiguous = true;
             break;
         }
@@ -609,9 +673,9 @@ bool STerrainAtlasProfile::replaceSlotFamily(int slotId, qint32 sourceFamilyId,
                                              qint32 targetFamilyId,
                                              CValidationReport* report)
 {
-    QMap<qint32, ETerrainAtlasLayer> layers;
+    QMap<qint32, QPair<bool, bool>> layers;
     for(const STerrainAtlasProfileFamily& family : families)
-        layers.insert(family.id, family.layer);
+        layers.insert(family.id, qMakePair(family.landAllowed, family.overlayAllowed));
     if(!layers.contains(targetFamilyId))
     {
         if(report) report->add("terrain.atlas_profile_replace_family",
@@ -643,9 +707,10 @@ bool STerrainAtlasProfile::replaceSlotFamily(int slotId, qint32 sourceFamilyId,
             }
             const qint32 ids[] = {replacement.northWest, replacement.northEast,
                                   replacement.southEast, replacement.southWest};
-            const ETerrainAtlasLayer layer = layers.value(ids[0]);
+            bool allowLand = true, allowOverlay = true;
             for(qint32 id : ids)
-                if(!layers.contains(id) || layers.value(id) != layer)
+            {
+                if(!layers.contains(id))
                 {
                     if(report) report->add("terrain.atlas_profile_replace_layer",
                         EValidationSeverity::Error,
@@ -653,6 +718,17 @@ bool STerrainAtlasProfile::replaceSlotFamily(int slotId, qint32 sourceFamilyId,
                         QString::number(slotId));
                     return false;
                 }
+                allowLand &= layers.value(id).first;
+                allowOverlay &= layers.value(id).second;
+            }
+            if(!allowLand && !allowOverlay)
+            {
+                if(report) report->add("terrain.atlas_profile_replace_layer",
+                    EValidationSeverity::Error,
+                    "These materials do not share a compatible Ground or Overlay section",
+                    QString::number(slotId));
+                return false;
+            }
             slot.signature = replacement;
             slot.assigned = true;
             slot.ambiguous = false;
@@ -669,9 +745,9 @@ bool STerrainAtlasProfile::setSlotCornerFamily(int slotId, int cornerIndex,
                                                qint32 familyId,
                                                CValidationReport* report)
 {
-    QMap<qint32, ETerrainAtlasLayer> layers;
+    QMap<qint32, QPair<bool, bool>> layers;
     for(const STerrainAtlasProfileFamily& family : families)
-        layers.insert(family.id, family.layer);
+        layers.insert(family.id, qMakePair(family.landAllowed, family.overlayAllowed));
     if(cornerIndex < 0 || cornerIndex > 3 || !layers.contains(familyId))
     {
         if(report) report->add("terrain.atlas_profile_corner",
@@ -687,9 +763,10 @@ bool STerrainAtlasProfile::setSlotCornerFamily(int slotId, int cornerIndex,
             *corners[cornerIndex] = familyId;
             const qint32 ids[] = {replacement.northWest, replacement.northEast,
                                   replacement.southEast, replacement.southWest};
-            const ETerrainAtlasLayer layer = layers.value(familyId);
+            bool allowLand = true, allowOverlay = true;
             for(qint32 id : ids)
-                if(!layers.contains(id) || layers.value(id) != layer)
+            {
+                if(!layers.contains(id))
                 {
                     if(report) report->add("terrain.atlas_profile_corner_layer",
                         EValidationSeverity::Error,
@@ -697,6 +774,17 @@ bool STerrainAtlasProfile::setSlotCornerFamily(int slotId, int cornerIndex,
                         QString::number(slotId));
                     return false;
                 }
+                allowLand &= layers.value(id).first;
+                allowOverlay &= layers.value(id).second;
+            }
+            if(!allowLand && !allowOverlay)
+            {
+                if(report) report->add("terrain.atlas_profile_corner_layer",
+                    EValidationSeverity::Error,
+                    "This corner would mix ground and overlay materials without a common section. Choose a compatible material.",
+                    QString::number(slotId));
+                return false;
+            }
             slot.signature = replacement;
             slot.assigned = true;
             slot.ambiguous = false;
@@ -891,19 +979,30 @@ STerrainAtlasAnalysis STerrainAtlasProfile::usableAnalysis(CValidationReport* re
                                    QString::number(slot.slot));
             continue;
         }
-        const ETerrainAtlasLayer layer = byId.value(slot.signature.northWest).layer;
         const qint32 ids[] = {slot.signature.northWest, slot.signature.northEast,
                               slot.signature.southEast, slot.signature.southWest};
+        bool allowLand = true;
+        bool allowOverlay = true;
         for(qint32 id : ids)
-            if(!byId.contains(id) || byId.value(id).layer != layer)
+            if(!byId.contains(id))
             {
                 if(report) report->add("terrain.atlas_profile_layer_mix", EValidationSeverity::Error,
-                                       "This tile combines ground and overlay materials. Move it to Unassigned, assign it to the correct layer, then refine its four corners.",
+                                       "This tile references a material that no longer exists. Move it to Unassigned or repair its four corners.",
                                        QString::number(slot.slot));
                 return STerrainAtlasAnalysis();
             }
-        CTerrainTransitionCatalog* catalog = layer == ETerrainAtlasLayer::Land
-            ? &result.landCatalog : &result.overlayCatalog;
+            else
+            {
+                allowLand &= byId.value(id).landAllowed;
+                allowOverlay &= byId.value(id).overlayAllowed;
+            }
+        if(!allowLand && !allowOverlay)
+        {
+            if(report) report->add("terrain.atlas_profile_layer_mix", EValidationSeverity::Error,
+                "This tile combines materials that do not share Ground or Overlay usage. Choose compatible materials for all four corners.",
+                QString::number(slot.slot));
+            return STerrainAtlasAnalysis();
+        }
         // Profile signatures are the corners visible in the tile preview.
         // Terrain grid row zero is the opposite vertical side, so painting
         // uses one explicit reflection at this boundary. The renderer's
@@ -921,7 +1020,8 @@ STerrainAtlasAnalysis STerrainAtlasProfile::usableAnalysis(CValidationReport* re
             variant.signature = CTerrainTransitionCatalog::rotated(
                 paintBase, -rotation);
             variant.packedTile = packed.encode();
-            if(!catalog->addVariant(variant, report)
+            if((allowLand && !result.landCatalog.addVariant(variant, report))
+               || (allowOverlay && !result.overlayCatalog.addVariant(variant, report))
                || !result.overlayCompatibleCatalog.addVariant(variant, report))
                 return STerrainAtlasAnalysis();
         }
@@ -942,8 +1042,8 @@ STerrainAtlasAnalysis STerrainAtlasProfile::usableAnalysis(CValidationReport* re
         STerrainAtlasMaterial material;
         material.id = family.id;
         material.name = family.name;
-        material.layer = family.layer;
-        material.underwater = family.underwater;
+        material.underwater = family.underwaterRole
+            == ETerrainAtlasUnderwaterRole::UnderwaterOnly;
         material.cornerOnly = !pureCounts.contains(family.id);
         if(material.cornerOnly)
         {
@@ -966,7 +1066,19 @@ STerrainAtlasAnalysis STerrainAtlasProfile::usableAnalysis(CValidationReport* re
         }
         material.pureVariantCount = pureCounts.value(family.id);
         if(material.representativeSlot >= 0)
-            result.materials.append(material);
+        {
+            if(family.landAllowed)
+            {
+                material.layer = ETerrainAtlasLayer::Land;
+                result.materials.append(material);
+            }
+            if(family.overlayAllowed)
+            {
+                material.layer = ETerrainAtlasLayer::Overlay;
+                material.underwater = false;
+                result.materials.append(material);
+            }
+        }
     }
     result.usable = !result.materials.isEmpty() && result.describedSlots > 0;
     if(!result.usable && report)
@@ -1027,6 +1139,11 @@ STerrainAtlasProfile CTerrainAtlasProfileInference::fromAuthoredAnalysis(
         family.name = material.name;
         family.layer = material.layer;
         family.underwater = material.underwater;
+        family.landAllowed = material.layer == ETerrainAtlasLayer::Land;
+        family.overlayAllowed = material.layer == ETerrainAtlasLayer::Overlay;
+        family.underwaterRole = material.underwater
+            ? ETerrainAtlasUnderwaterRole::UnderwaterOnly
+            : ETerrainAtlasUnderwaterRole::Surface;
         families.insert(family.id, family);
     }
     for(int slot = 0; slot < atlasSlotCount; ++slot)
@@ -1071,6 +1188,8 @@ STerrainAtlasProfile CTerrainAtlasProfileInference::fromAuthoredAnalysis(
                     .arg(id);
                 family.layer = landFound ? ETerrainAtlasLayer::Land
                                          : ETerrainAtlasLayer::Overlay;
+                family.landAllowed = landFound;
+                family.overlayAllowed = overlayFound;
                 family.paintSelectable = false;
                 families.insert(id, family);
             }
@@ -1156,6 +1275,8 @@ STerrainAtlasProfile CTerrainAtlasProfileInference::propose(
             ? QStringLiteral("Land material %1").arg(family.id)
             : QStringLiteral("Overlay material %1").arg(family.id);
         family.layer = layer;
+        family.landAllowed = layer == ETerrainAtlasLayer::Land;
+        family.overlayAllowed = layer == ETerrainAtlasLayer::Overlay;
         family.tileType = type;
         family.ambiguous = ambiguous;
         result.families.append(family);
@@ -1422,6 +1543,10 @@ STerrainAtlasProfile CTerrainAtlasProfileInference::propose(
         }
         family.underwater = family.layer == ETerrainAtlasLayer::Land
             && landUses > 0 && belowOverlay == landUses;
+        family.underwaterRole = family.underwater
+            ? ETerrainAtlasUnderwaterRole::UnderwaterOnly
+            : (belowOverlay > 0 ? ETerrainAtlasUnderwaterRole::Mixed
+                                : ETerrainAtlasUnderwaterRole::Surface);
         if(family.layer == ETerrainAtlasLayer::Land && belowOverlay > 0 && belowOverlay < landUses)
         {
             family.ambiguous = true;

@@ -3,6 +3,8 @@ CONFIG += testcase c++11 console
 TEMPLATE = app
 TARGET = endurance_document_tests
 
+RESOURCES += ../assets/resources/semantic_atlas_presets.qrc
+
 INCLUDEPATH += ../source/documents ../source/core ../source/render ../source/app
 SOURCES += \
     endurance_document_tests.cpp \
@@ -11,6 +13,7 @@ SOURCES += \
     ../source/documents/terrain_edit_model.cpp \
     ../source/render/terrain_atlas_analyzer.cpp \
     ../source/render/terrain_atlas_profile.cpp \
+    ../source/render/terrain_atlas_presets.cpp \
     ../source/documents/staged_save_validator.cpp \
     ../source/documents/backup_manager.cpp \
     ../source/core/log.cpp

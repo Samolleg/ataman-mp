@@ -18,17 +18,32 @@ struct STerrainAtlasSlotUsage
     qint64 landBelowOverlayCount{0};
 };
 
+enum class ETerrainAtlasUnderwaterRole
+{
+    Surface,
+    UnderwaterOnly,
+    Mixed
+};
+
 struct STerrainAtlasProfileFamily
 {
     qint32 id{0};
     QString name;
     ETerrainAtlasLayer layer{ETerrainAtlasLayer::Land};
     bool underwater{false};
+    bool landAllowed{true};
+    bool overlayAllowed{false};
+    ETerrainAtlasUnderwaterRole underwaterRole{ETerrainAtlasUnderwaterRole::Surface};
     bool ambiguous{false};
     bool paintSelectable{true};
     qint32 tileType{-1};
     int thumbnailSlot{-1};
     QVector<int> memberSlots;
+
+    bool allows(ETerrainAtlasLayer candidate) const
+    {
+        return candidate == ETerrainAtlasLayer::Land ? landAllowed : overlayAllowed;
+    }
 };
 
 struct STerrainAtlasProfileSlot
@@ -44,7 +59,7 @@ struct STerrainAtlasProfileSlot
 // unresolved entries remain unassigned until a user fixes or excludes them.
 struct STerrainAtlasProfile
 {
-    int schemaVersion{6};
+    int schemaVersion{7};
     QString mprNamespace;
     QByteArray atlasPixelSha256;
     int atlasSlotCount{0};
@@ -114,6 +129,17 @@ public:
         const QVector<qint32>& tileTypes,
         const QVector<STerrainAtlasSlotUsage>& usage,
         CValidationReport* report = nullptr);
+};
+
+class CTerrainAtlasPresetCatalog
+{
+public:
+    static STerrainAtlasProfile exactProfile(
+        const QString& mprNamespace,
+        const QByteArray& atlasPixelSha256,
+        int atlasSlotCount,
+        CValidationReport* report = nullptr);
+    static int presetCount(CValidationReport* report = nullptr);
 };
 
 QImage terrainVertexJunctionThumbnail(

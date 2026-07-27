@@ -338,6 +338,9 @@ private slots:
     void semanticAtlasInferenceUsesRendererOrientationAndPreservesCornerFamilies();
     void semanticAtlasTransitionsCrossTileTypeMetadata();
     void authoredAtlasProfileMatchesZone1Catalog();
+    void authoredPresetCatalogCoversKnownAtlasesAndMatchesZone1();
+    void authoredPresetCatalogAllEntriesCompile();
+    void authoredPresetSupportsZone18SharedLayers();
     void semanticAtlasProfileRejectsBindingMismatchAndAmbiguity();
     void semanticAtlasReviewEditsAndStoreAreDeterministic();
     void semanticAtlasPartialCatalogRejectsCrossLayerCornersInline();
@@ -3266,10 +3269,14 @@ void EnduranceDocumentTests::semanticAtlasReviewEditsAndStoreAreDeterministic()
 
     CValidationReport badMergeReport;
     profile.families[2].layer = ETerrainAtlasLayer::Overlay;
+    profile.families[2].landAllowed = false;
+    profile.families[2].overlayAllowed = true;
     QVERIFY(!profile.mergeFamilies(QVector<qint32>({1, 3}), "Invalid",
                                    &badMergeReport));
     QVERIFY(badMergeReport.toText().contains("Land and overlay"));
     profile.families[2].layer = ETerrainAtlasLayer::Land;
+    profile.families[2].landAllowed = true;
+    profile.families[2].overlayAllowed = false;
     CValidationReport mergeReport;
     QVERIFY2(profile.mergeFamilies(QVector<qint32>({1, 3}), "Soil and meadow",
                                    &mergeReport), qPrintable(mergeReport.toText()));
@@ -3313,6 +3320,8 @@ void EnduranceDocumentTests::semanticAtlasPartialCatalogRejectsCrossLayerCorners
     STerrainAtlasProfileFamily water;
     water.id = 3; water.name = "Water";
     water.layer = ETerrainAtlasLayer::Overlay;
+    water.landAllowed = false;
+    water.overlayAllowed = true;
     profile.families << stone << moss << water;
     const auto definition = [](int index, qint32 nw, qint32 ne,
                                qint32 se, qint32 sw, bool assigned) {
@@ -5223,7 +5232,7 @@ void EnduranceDocumentTests::semanticAtlasInferenceUsesRendererOrientationAndPre
     QVERIFY2(STerrainAtlasProfile::fromJson(legacyJson, &migrated,
                                             &migrationReport),
              qPrintable(migrationReport.toText()));
-    QCOMPARE(migrated.schemaVersion, 6);
+    QCOMPARE(migrated.schemaVersion, 7);
     QCOMPARE(migrated.slotDefinitions.at(1).signature.northWest, signature.northWest);
     QCOMPARE(migrated.slotDefinitions.at(1).signature.southWest, signature.southWest);
     const auto detail = std::find_if(analysis.materials.cbegin(), analysis.materials.cend(),
@@ -5409,7 +5418,7 @@ void EnduranceDocumentTests::authoredAtlasProfileMatchesZone1Catalog()
     QVERIFY2(STerrainAtlasProfile::fromJson(legacyAuthored, &migratedAuthored,
                                             &migrationReport),
              qPrintable(migrationReport.toText()));
-    QCOMPARE(migratedAuthored.schemaVersion, 6);
+    QCOMPARE(migratedAuthored.schemaVersion, 7);
     QCOMPARE(migratedAuthored.slotDefinitions.at(50).signature.northWest,
              qint32(4));
     QCOMPARE(migratedAuthored.slotDefinitions.at(50).signature.southWest,
@@ -5418,6 +5427,112 @@ void EnduranceDocumentTests::authoredAtlasProfileMatchesZone1Catalog()
         [](const STerrainAtlasProfileFamily& family) {
             return family.name == QStringLiteral("Stone / lime");
         }));
+}
+
+void EnduranceDocumentTests::authoredPresetCatalogCoversKnownAtlasesAndMatchesZone1()
+{
+    CValidationReport report;
+    QCOMPARE(CTerrainAtlasPresetCatalog::presetCount(&report), 38);
+    QVERIFY2(!report.hasErrors(), qPrintable(report.toText()));
+    const QByteArray hdHash =
+        "228a89743219b7aef9f8d920ec95b89e3bb2900ed692492963bf68cfb395e37a";
+    const STerrainAtlasProfile profile = CTerrainAtlasPresetCatalog::exactProfile(
+        "zone1", hdHash, 512, &report);
+    QVERIFY2(profile.approved, qPrintable(report.toText()));
+    QCOMPARE(profile.provenance,
+             QStringLiteral("authored-preset:ei-hd-b8a3e768"));
+    QCOMPARE(profile.assignedSlotCount(), 512);
+    QCOMPARE(profile.families.size(), 12);
+    QCOMPARE(profile.slotDefinitions.at(50).signature.northWest, qint32(4));
+    QCOMPARE(profile.slotDefinitions.at(50).signature.northEast, qint32(4));
+    QCOMPARE(profile.slotDefinitions.at(50).signature.southEast, qint32(3));
+    QCOMPARE(profile.slotDefinitions.at(50).signature.southWest, qint32(3));
+    const STerrainAtlasAnalysis compiled = profile.approvedAnalysis(&report);
+    QVERIFY2(compiled.usable, qPrintable(report.toText()));
+    QCOMPARE(compiled.describedSlots, 512);
+
+    const STerrainAtlasProfile mismatch = CTerrainAtlasPresetCatalog::exactProfile(
+        "zone1", QByteArray(64, '0'), 512, &report);
+    QVERIFY(mismatch.slotDefinitions.isEmpty());
+    const STerrainAtlasProfile wrongNamespace = CTerrainAtlasPresetCatalog::exactProfile(
+        "zone2", hdHash, 512, &report);
+    QVERIFY(wrongNamespace.slotDefinitions.isEmpty());
+}
+
+void EnduranceDocumentTests::authoredPresetSupportsZone18SharedLayers()
+{
+    CValidationReport report;
+    const STerrainAtlasProfile profile = CTerrainAtlasPresetCatalog::exactProfile(
+        "Zone18",
+        "f0cb6656c605cc69f1c27f32b4bd1122479526c17e24f8c3324625400e7f5a83",
+        512, &report);
+    QVERIFY2(profile.approved, qPrintable(report.toText()));
+    QCOMPARE(profile.assignedSlotCount(), 512);
+    int sharedFamilies = 0;
+    for(const STerrainAtlasProfileFamily& family : profile.families)
+        sharedFamilies += family.landAllowed && family.overlayAllowed;
+    QCOMPARE(sharedFamilies, 4);
+    STerrainAtlasProfile reopened;
+    QVERIFY2(STerrainAtlasProfile::fromJson(profile.toJson(), &reopened, &report),
+             qPrintable(report.toText()));
+    int reopenedSharedFamilies = 0;
+    for(const STerrainAtlasProfileFamily& family : reopened.families)
+        reopenedSharedFamilies += family.landAllowed && family.overlayAllowed;
+    QCOMPARE(reopenedSharedFamilies, 4);
+    QCOMPARE(reopened.schemaVersion, 7);
+    const STerrainAtlasAnalysis analysis = profile.approvedAnalysis(&report);
+    QVERIFY2(analysis.usable, qPrintable(report.toText()));
+    bool sharedSlot = false;
+    for(int slot = 0; slot < 512; ++slot)
+    {
+        SMprPackedTile packed;
+        packed.atlasIndex = quint8(slot / 64);
+        packed.tileIndex = quint8(slot % 64);
+        bool land = false, overlay = false;
+        analysis.landCatalog.gridSignatureForPacked(packed.encode(), &land);
+        analysis.overlayCatalog.gridSignatureForPacked(packed.encode(), &overlay);
+        sharedSlot |= land && overlay;
+    }
+    QVERIFY(sharedSlot);
+}
+
+void EnduranceDocumentTests::authoredPresetCatalogAllEntriesCompile()
+{
+    QFile resource(QStringLiteral(":/terrain_atlas_presets.json"));
+    QVERIFY(resource.open(QIODevice::ReadOnly));
+    const QJsonArray presets = QJsonDocument::fromJson(resource.readAll())
+        .object().value(QStringLiteral("presets")).toArray();
+    QCOMPARE(presets.size(), 38);
+    int totalSlots = 0, bindings = 0;
+    for(const QJsonValue& value : presets)
+    {
+        const QJsonObject preset = value.toObject();
+        const QString nameSpace = preset.value(QStringLiteral("namespace")).toString();
+        const int slotCount = preset.value(QStringLiteral("slotCount")).toInt();
+        const QJsonArray presetBindings = preset.value(QStringLiteral("bindings")).toArray();
+        QVERIFY2(!presetBindings.isEmpty(), qPrintable(nameSpace));
+        const QByteArray hash = presetBindings.first().toObject()
+            .value(QStringLiteral("pixelSha256")).toString().toLatin1();
+        QCOMPARE(hash.size(), 64);
+        CValidationReport report;
+        const STerrainAtlasProfile profile = CTerrainAtlasPresetCatalog::exactProfile(
+            nameSpace, hash, slotCount, &report);
+        QVERIFY2(profile.approved, qPrintable(nameSpace + QLatin1Char('\n') + report.toText()));
+        QCOMPARE(profile.assignedSlotCount(), slotCount);
+        for(const STerrainAtlasProfileFamily& family : profile.families)
+        {
+            QVERIFY2(!family.name.startsWith(QStringLiteral("Land material")),
+                     qPrintable(nameSpace));
+            QVERIFY(!family.ambiguous);
+        }
+        const STerrainAtlasAnalysis analysis = profile.approvedAnalysis(&report);
+        QVERIFY2(analysis.usable, qPrintable(nameSpace + QLatin1Char('\n') + report.toText()));
+        QCOMPARE(analysis.describedSlots, slotCount);
+        totalSlots += slotCount;
+        bindings += presetBindings.size();
+    }
+    QCOMPARE(totalSlots, 16576);
+    QCOMPARE(bindings, 58);
 }
 
 void EnduranceDocumentTests::overlaySculptChangesOnlyActiveOverlayGeometry()
