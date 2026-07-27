@@ -350,7 +350,7 @@ private:
     SMapSpawnPlan m_customSpawn;
     QVector3D m_customSpawnPosition;
     QString m_customSpawnContextKey;
-    CViewportMinimapWidget* m_viewportMinimap{nullptr};
+    QPointer<CViewportMinimapWidget> m_viewportMinimap;
     QPointer<CMinimapExportDialog> m_minimapExportDialog;
     QTimer* m_minimapRefreshTimer{nullptr};
     QTimer* m_minimapCameraTimer{nullptr};

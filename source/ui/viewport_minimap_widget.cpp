@@ -2,7 +2,6 @@
 
 #include <QtWidgets>
 #include <QDir>
-#include <QSettings>
 #include <functional>
 
 namespace {
@@ -256,11 +255,10 @@ CViewportMinimapWidget::CViewportMinimapWidget(QWidget* parent)
         emit sourceModeChanged(usesGeneratedPreview());
     });
     updateSourceChoices(false);
-    // V2 intentionally starts at the new smallest useful size. The previous
-    // setting used different level meanings and could reopen this widget at
-    // what is now the maximum size.
-    m_sizeLevel = qBound(0, QSettings().value(
-        "ui/viewportMinimapSizeLevelV2", 0).toInt(), 2);
+    // Viewport overlays are transient workspace aids. Always begin compact;
+    // +/- remains session-local and must not make the next editor start cover
+    // the viewport with a previously enlarged minimap.
+    m_sizeLevel = 0;
     setGenerationLocked(false);
     setExpanded(true);
 }
@@ -437,7 +435,6 @@ void CViewportMinimapWidget::setSizeLevel(int level)
         QSize(390, 430), QSize(520, 560), QSize(910, 980)
     };
     setFixedSize(m_expanded ? expandedSizes[m_sizeLevel] : QSize(116, 38));
-    QSettings().setValue("ui/viewportMinimapSizeLevelV2", m_sizeLevel);
     emit sizeModeChanged();
 }
 

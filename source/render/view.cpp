@@ -634,7 +634,10 @@ CView::CView(QWidget *parent, const QGLWidget *pShareWidget) : QGLWidget(parent,
     // A single cadence owns sculpt stamps. Mouse events only update the latest
     // target, preventing the timer and pointer stream from doing duplicate
     // canonical-sector rebuilds during a drag.
-    m_sculptRepeatTimer->setInterval(50);
+    // Keep sculpt feedback above the visibly choppy 20 Hz cadence. Overlay
+    // sectors now avoid inactive-tile and redundant land decoding work, so the
+    // same safe canonical transaction can be previewed at roughly 30 Hz.
+    m_sculptRepeatTimer->setInterval(33);
     connect(m_sculptRepeatTimer, &QTimer::timeout, this, [this]()
     {
         if(m_sculptStrokeActive)

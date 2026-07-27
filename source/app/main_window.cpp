@@ -6162,6 +6162,16 @@ void MainWindow::closeEvent(QCloseEvent *e)
     // Windows otherwise presents a still-visible window as unresponsive.
     hide();
     QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+    // The minimap is parented to the viewport while its cadence timers belong
+    // to MainWindow. Stop and disconnect them before deleting the viewport so
+    // no queued timeout can observe the already-destroyed child overlay during
+    // the remainder of shutdown. QPointer clears the child reference itself.
+    if(m_minimapRefreshTimer)
+        m_minimapRefreshTimer->stop();
+    if(m_minimapCameraTimer)
+        m_minimapCameraTimer->stop();
+    if(m_viewportMinimap)
+        m_viewportMinimap->disconnect(this);
     // Destroy the QGLWidget while the main window and its native child surface
     // are still alive. Waiting for MainWindow::~MainWindow() is too late on
     // Windows: Qt has already released the surface even though CView::isValid()
@@ -6173,6 +6183,7 @@ void MainWindow::closeEvent(QCloseEvent *e)
     ei::log(eLogInfo, "Shutdown live view deletion started");
     delete m_pView;
     m_pView = nullptr;
+    m_viewportMinimap = nullptr;
     ei::log(eLogInfo, QString("Shutdown live view deletion complete elapsedMs:%1")
             .arg(shutdownTimer.elapsed()));
     ei::setCrashContext("shutdown/view-deleted");

@@ -1064,7 +1064,9 @@ int runHeadlessCommand(QApplication& app)
         const QVariant savedMinimapSizeV2 = minimapSizeSettings.value(
             "ui/viewportMinimapSizeLevelV2");
         minimapSizeSettings.setValue("ui/viewportMinimapSizeLevel", 2);
-        minimapSizeSettings.remove("ui/viewportMinimapSizeLevelV2");
+        // A previous run may have persisted the largest V2 size. New editor
+        // sessions must still begin with the compact viewport minimap.
+        minimapSizeSettings.setValue("ui/viewportMinimapSizeLevelV2", 2);
         CViewportMinimapWidget viewportMinimap;
         QImage generatedMinimap(256, 256, QImage::Format_ARGB32);
         generatedMinimap.fill(Qt::darkGreen);

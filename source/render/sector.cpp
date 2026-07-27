@@ -272,10 +272,11 @@ bool CSector::previewCanonicalOverlayPayload(const QByteArray& payload)
         return false;
 
     QVector<QVector<SSecVertex>> waterVertex;
-    SSecVertex ignoredVertex;
-    for(int row = 0; row < nVertex; ++row)
-        for(int col = 0; col < nVertex; ++col)
-            stream >> ignoredVertex;
+    // Overlay-only previews never consume land vertices. Skipping their fixed
+    // native byte block avoids decoding 1,089 packed normals on every live
+    // overlay stamp.
+    if(stream.skipRawData(nVertex * nVertex * 8) != nVertex * nVertex * 8)
+        return false;
     if(type == 3)
     {
         waterVertex.resize(nVertex);
@@ -642,19 +643,26 @@ void CSector::generateWaterVertexData()
         return;
     }
     const int vertSize = m_arrWater.size() * m_arrWater.front().size() * 9;
-    m_arrWaterVrtData.resize(vertSize);
+    m_arrWaterVrtData.fill(SVertexData(), vertSize);
     int waterIndex = 0;
     for(int row = 0; row < m_arrWater.size(); ++row)
         for(int col = 0; col < m_arrWater.at(row).size(); ++col)
-            m_arrWater[row][col].generateDrawVertexData(
-                m_arrWaterVrtData, waterIndex);
+        {
+            if(m_arrWater.at(row).at(col).materialIndex() >= 0)
+                m_arrWater[row][col].generateDrawVertexData(
+                    m_arrWaterVrtData, waterIndex);
+            else
+                waterIndex += 9;
+        }
     Q_ASSERT(waterIndex == m_arrWaterVrtData.size());
 
-    m_arrAnimatedWaterVrtData.resize(m_arrWaterVrtData.size());
+    m_arrAnimatedWaterVrtData.fill(SWaterVertexData(), m_arrWaterVrtData.size());
     for(int row = 0; row < m_arrWater.size(); ++row)
         for(int col = 0; col < m_arrWater.at(row).size(); ++col)
         {
             const int materialIndex = m_arrWater.at(row).at(col).materialIndex();
+            if(materialIndex < 0)
+                continue;
             const SMaterial* material = m_materials && materialIndex >= 0
                     && materialIndex < m_materials->size()
                 ? &m_materials->at(materialIndex) : nullptr;
