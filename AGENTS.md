@@ -25,7 +25,9 @@ worktrees.
   implementation choice, ask the user instead of guessing. Concisely identify
   the source of confusion and the viable options with their practical effects.
   First resolve anything answerable through safe read-only inspection of files,
-  source, or documentation; ask only about the remaining user decision.
+  source, or documentation; ask only about the remaining user decision. This
+  requirement does not apply when the user explicitly authorizes best judgment,
+  reasonable assumptions, or autonomous selection among the available options.
 
 - Deliver an unpacked, user-runnable tester folder, not raw compiler output.
 - Do not launch the packaged editor interactively; the user runs it.
