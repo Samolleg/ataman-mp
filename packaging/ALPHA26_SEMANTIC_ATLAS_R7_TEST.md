@@ -1,4 +1,4 @@
-# EI Mapper Endurance 0.3.0-alpha.26 semantic-atlas prototype R6
+# EI Mapper Endurance 0.3.0-alpha.26 semantic-atlas prototype R7
 
 ## What changed
 
@@ -27,6 +27,10 @@
 - Palette thumbnails show the four tiles produced around a size-1 vertex.
   Transition-only families expose separate contextual cards for each authored
   1-on-3 support while retaining one underlying semantic family.
+- Every authored 1-on-3 relation now exposes a contextual vertex card, even
+  when the center material also has uniform tiles. Zone 2 therefore offers
+  both `Ground on Granite` and the inverse `Stone on Ground` motif while its
+  ordinary Stone area-fill brush remains a separate palette card.
 - A contextual card now retains that support through selection and painting.
   Clicking it places the exact four-tile motif shown by the card instead of a
   nearest-family approximation based on unrelated terrain underneath.
@@ -53,11 +57,13 @@ remain tile-based and otherwise unchanged.
 4. Paint each Zone 2 irregular contextual card with size 1 over a different
    underlying material. Each result must match that card's four-tile preview,
    including its named support, with no nearest-family checkerboard.
-5. Select the manually created Zone 2 `Ground` family. Its `Ground on Granite`
-   card must place one coherent center motif. Try to place a touching copy: it
-   must leave terrain unchanged and explain that the atlas lacks a required
-   multi-corner transition. A larger brush must still place only the center
-   motif.
+5. Select Zone 2's `Ground on Granite` card and confirm tile 502 rotates around
+   the selected vertex into one coherent Ground center. Select `Stone on
+   Ground` and confirm tile 448 likewise forms a coherent Stone center. The
+   ordinary Stone card must remain available and continue to fill normally.
+   Try to place touching contextual motifs: they may join only when the atlas
+   has the exact required multi-corner transition; otherwise the click must
+   leave terrain unchanged and explain what is missing.
 6. Paint Zone 2's underwater family over itself and confirm it remains
    selectable and blends as an ordinary ground-layer family.
 7. In Overlay mode, paint an atlas texture over an existing overlay surface.
@@ -70,7 +76,8 @@ remain tile-based and otherwise unchanged.
 
 ## Expected warning
 
-A custom/detail family that has no authored multi-corner junction is a vertex
-stamp, not an area-fill brush. Touching copies are refused, and larger sizes use
-only the center motif. Add and assign the missing 2-corner/3-corner atlas tiles
-if the family should support contiguous painting.
+A 1-on-3 contextual card is a vertex motif, not proof that its center material
+can form a contiguous area on that support. Touching copies are refused unless
+the profile also contains the exact 2-corner, 3-corner, or uniform transitions
+needed at the resulting junctions. Add and assign those atlas tiles if the
+motif should support contiguous painting.
