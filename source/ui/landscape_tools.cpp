@@ -217,7 +217,13 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     atlasRow->addWidget(m_atlasCoverage, 1);
     paintLayout->addLayout(atlasRow);
     QPushButton* exportDiagnostic = new QPushButton(tr("Export paint diagnostic..."), this);
+    QPushButton* finalizeAtlas = new QPushButton(
+        tr("Finalize map-specific atlas package..."), this);
+    finalizeAtlas->setToolTip(tr(
+        "Generate exact missing transitions, compact map-wide tile usage, and write "
+        "a portable isolated MPR + RES package. The validated ceiling is 512 slots."));
     paintLayout->addWidget(exportDiagnostic);
+    paintLayout->addWidget(finalizeAtlas);
     layout->addWidget(m_paintControls);
     layout->addSpacing(8);
     layout->addWidget(new QLabel(tr("Heightmap import"), this));
@@ -229,6 +235,7 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     connect(tilePicker, &QPushButton::clicked, this, &CLandscapeTools::tilePickerRequested);
     connect(reviewAtlas, &QPushButton::clicked, this, &CLandscapeTools::atlasProfileReviewRequested);
     connect(exportDiagnostic, &QPushButton::clicked, this, &CLandscapeTools::exportPaintDiagnosticRequested);
+    connect(finalizeAtlas, &QPushButton::clicked, this, &CLandscapeTools::finalizeVirtualAtlasRequested);
     connect(m_groundMaterialButtons, QOverload<int>::of(&QButtonGroup::buttonClicked),
             this, [this](int) {
                 bool selected = false;

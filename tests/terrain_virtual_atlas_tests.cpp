@@ -1,0 +1,375 @@
+#include <QtTest>
+#include <QtEndian>
+
+#include "endurance_document.h"
+#include "mmp_codec.h"
+#include "mmp_inspector.h"
+#include "mpr_document.h"
+#include "res_archive_document.h"
+#include "terrain_virtual_atlas.h"
+
+namespace {
+STerrainTransitionSignature signature(qint32 nw,qint32 ne,qint32 se,qint32 sw)
+{
+    STerrainTransitionSignature value;
+    value.northWest=nw; value.northEast=ne;
+    value.southEast=se; value.southWest=sw;
+    return value;
+}
+
+QImage solid(QRgb color)
+{
+    QImage image(8,8,QImage::Format_RGBA8888);
+    image.fill(QColor::fromRgba(color));
+    return image;
+}
+
+struct Fixture
+{
+    CTerrainTransitionCatalog catalog;
+    QVector<QImage> images;
+
+    Fixture(bool duplicatePixels=false)
+    {
+        images << solid(qRgba(220,20,20,255))
+               << solid(qRgba(20,220,20,255))
+               << solid(qRgba(20,20,220,255))
+               << solid(duplicatePixels?qRgba(20,20,220,255):qRgba(230,220,20,255));
+        for(int material=1;material<=4;++material)
+        {
+            STerrainTransitionVariant variant;
+            variant.signature=signature(material,material,material,material);
+            SMprPackedTile packed;
+            packed.tileIndex=quint8(material-1);
+            variant.packedTile=packed.encode();
+            catalog.addVariant(variant);
+        }
+    }
+};
+
+QByteArray portableMpr()
+{
+    QByteArray mp;
+    QDataStream stream(&mp,QIODevice::WriteOnly);
+    stream.setByteOrder(QDataStream::LittleEndian);
+    stream.setFloatingPointPrecision(QDataStream::SinglePrecision);
+    stream<<quint32(0xCE4AF672)<<float(100.0f)<<quint32(1)<<quint32(1)
+          <<quint32(4)<<quint32(64)<<quint32(4)<<quint32(8)
+          <<quint16(0)<<quint32(0);
+    stream<<qint32(1)<<qint32(2)<<qint32(3)<<qint32(4);
+    QByteArray sector;
+    QDataStream sec(&sector,QIODevice::WriteOnly);
+    sec.setByteOrder(QDataStream::LittleEndian);
+    sec<<quint32(0xCF4BF774)<<quint8(0);
+    sector.append(QByteArray(33*33*8,'\0'));
+    sector.append(QByteArray(16*16*2,'\0'));
+    QByteArray empty(16,'\0');
+    qToLittleEndian<quint32>(0x019CE23C,reinterpret_cast<uchar*>(empty.data()));
+    qToLittleEndian<quint32>(16,reinterpret_cast<uchar*>(empty.data()+8));
+    CResArchiveDocument archive;QStringList errors;
+    if(!archive.loadBytes(empty,"empty",&errors))return {};
+    QByteArray first;
+    if(!archive.buildWithAppendedMember("CaveSet.MP",mp,0,&first,&errors)
+       ||!archive.loadBytes(first,"first",&errors))return {};
+    QByteArray second;
+    return archive.buildWithAppendedMember("CaveSet000000.SEC",sector,0,&second,&errors)
+        ?second:QByteArray();
+}
+}
+
+class TerrainVirtualAtlasTests:public QObject
+{
+    Q_OBJECT
+private slots:
+    void virtualFieldPaintIsUnboundedByAtlas();
+    void exactAuthoredTileIsReused();
+    void generatesOneThreeTuple();
+    void generatesTwoTwoTuple();
+    void generatesFourFamilyTupleWithOrientation();
+    void generatedEdgesUseOnlyTheirTwoCornerMaterials();
+    void rotationsAndIdenticalPixelsAreDeduplicated();
+    void stableHashesAndNamespaceAreDeterministic();
+    void mapWideUsageAndUnusedCompaction();
+    void capacityRefusalNeverSubstitutes();
+    void pageOrientationMipmapsAlphaAndReopen();
+    void namespacesAreIsolated();
+    void exactOnlyNoOpPreservesPixels();
+    void portablePackageRemapsNamespaceAndReopens();
+    void virtualPaintPreviewAndUndoPreserveDesiredIdentity();
+    void preservedLayerSlotsArePinnedAndRemapped();
+    void gradedAlphaIsRefusedWithoutFlattening();
+};
+
+void TerrainVirtualAtlasTests::virtualFieldPaintIsUnboundedByAtlas()
+{
+    CTerrainVirtualMaterialField field;
+    QVERIFY(field.resize(3,3,1));
+    STerrainTileBrush brush;
+    brush.centerX=1.5f; brush.centerY=1.5f; brush.radius=2.0f;
+    QCOMPARE(field.paint(brush,99),12);
+    QCOMPARE(field.material(1,1),qint32(99));
+}
+
+void TerrainVirtualAtlasTests::exactAuthoredTileIsReused()
+{
+    Fixture fixture;
+    CTerrainVirtualAtlas atlas(fixture.catalog,fixture.images,7);
+    const STerrainVirtualTile tile=atlas.resolve(signature(2,2,2,2),4,9);
+    QVERIFY(tile.authored);
+    QCOMPARE(SMprPackedTile::decode(tile.authoredPacked).atlasSlot(),1);
+    QCOMPARE(atlas.generatedTiles().size(),0);
+}
+
+void TerrainVirtualAtlasTests::generatesOneThreeTuple()
+{
+    Fixture fixture;
+    CTerrainVirtualAtlas atlas(fixture.catalog,fixture.images);
+    const STerrainVirtualTile tile=atlas.resolve(signature(1,2,2,2),0,0);
+    QVERIFY(!tile.authored);
+    QVERIFY(tile.generatedIndex>=0);
+    QCOMPARE(atlas.generatedTiles().size(),1);
+}
+
+void TerrainVirtualAtlasTests::generatesTwoTwoTuple()
+{
+    Fixture fixture;
+    CTerrainVirtualAtlas atlas(fixture.catalog,fixture.images);
+    QVERIFY(atlas.resolve(signature(1,1,2,2),0,0).generatedIndex>=0);
+}
+
+void TerrainVirtualAtlasTests::generatesFourFamilyTupleWithOrientation()
+{
+    Fixture fixture;
+    CTerrainVirtualAtlas atlas(fixture.catalog,fixture.images);
+    const STerrainVirtualTile tile=atlas.resolve(signature(1,2,3,4),0,0);
+    const QImage image=atlas.generatedTiles().at(tile.generatedIndex).pixels;
+    // Grid Y is mirrored once at the image boundary: SW,NW,NE,SE become
+    // preview TL,BL,BR,TR respectively.
+    QCOMPARE(image.pixelColor(0,0),fixture.images[3].pixelColor(0,0));
+    QCOMPARE(image.pixelColor(7,0),fixture.images[2].pixelColor(7,0));
+    QCOMPARE(image.pixelColor(7,7),fixture.images[1].pixelColor(7,7));
+    QCOMPARE(image.pixelColor(0,7),fixture.images[0].pixelColor(0,7));
+}
+
+void TerrainVirtualAtlasTests::generatedEdgesUseOnlyTheirTwoCornerMaterials()
+{
+    Fixture fixture;
+    CTerrainVirtualAtlas atlas(fixture.catalog,fixture.images);
+    const STerrainVirtualTile tile=atlas.resolve(signature(1,2,3,4),0,0);
+    const QImage image=atlas.generatedTiles().at(tile.generatedIndex).pixels;
+    const QColor top=image.pixelColor(3,0);
+    QCOMPARE(top,QColor(140,134,106,255));
+    const QColor bottom=image.pixelColor(3,7);
+    QCOMPARE(bottom,QColor(134,106,20,255));
+}
+
+void TerrainVirtualAtlasTests::rotationsAndIdenticalPixelsAreDeduplicated()
+{
+    Fixture fixture;
+    CTerrainVirtualAtlas atlas(fixture.catalog,fixture.images);
+    const STerrainTransitionSignature base=signature(1,2,3,4);
+    const STerrainVirtualTile first=atlas.resolve(base,0,0);
+    const STerrainVirtualTile rotated=atlas.resolve(
+        CTerrainTransitionCatalog::rotated(base,1),1,0);
+    QCOMPARE(first.generatedIndex,rotated.generatedIndex);
+    QVERIFY(first.generatedRotation!=rotated.generatedRotation);
+
+    Fixture duplicate(true);
+    CTerrainVirtualAtlas duplicateAtlas(duplicate.catalog,duplicate.images);
+    const int a=duplicateAtlas.resolve(signature(1,2,3,3),0,0).generatedIndex;
+    const int b=duplicateAtlas.resolve(signature(1,2,4,4),1,0).generatedIndex;
+    QCOMPARE(a,b);
+}
+
+void TerrainVirtualAtlasTests::stableHashesAndNamespaceAreDeterministic()
+{
+    Fixture fixture;
+    CTerrainVirtualMaterialField field;
+    QVERIFY(field.resize(1,1,1));
+    field.setMaterial(1,0,2); field.setMaterial(1,1,3); field.setMaterial(0,1,4);
+    CTerrainVirtualAtlas first(fixture.catalog,fixture.images,42);
+    CTerrainVirtualAtlas second(fixture.catalog,fixture.images,42);
+    const STerrainAtlasFinalization a=first.finalize(field,"Zone2",512);
+    const STerrainAtlasFinalization b=second.finalize(field,"Zone2",512);
+    QVERIFY2(a.success,qPrintable(a.error));
+    QCOMPARE(a.stableSha256,b.stableSha256);
+    QCOMPARE(a.isolatedNamespace,b.isolatedNamespace);
+    QCOMPARE(a.pageMmpPayloads,b.pageMmpPayloads);
+}
+
+void TerrainVirtualAtlasTests::mapWideUsageAndUnusedCompaction()
+{
+    Fixture fixture;
+    CTerrainVirtualMaterialField field;
+    QVERIFY(field.resize(2,2,1));
+    field.setMaterial(1,1,2);
+    CTerrainVirtualAtlas atlas(fixture.catalog,fixture.images);
+    const STerrainAtlasFinalization result=atlas.finalize(field,"Zone2",512,{10,20,30,40});
+    QVERIFY2(result.success,qPrintable(result.error));
+    QCOMPARE(result.usage.cellCount,quint64(4));
+    QVERIFY(result.requiredSlots<fixture.images.size());
+    QCOMPARE(result.packedCells.size(),4);
+    QCOMPARE(result.tileTypes.size(),result.requiredSlots);
+}
+
+void TerrainVirtualAtlasTests::capacityRefusalNeverSubstitutes()
+{
+    Fixture fixture;
+    CTerrainVirtualMaterialField field;
+    QVERIFY(field.resize(2,1,1));
+    field.setMaterial(1,0,2);
+    field.setMaterial(2,0,3);
+    CTerrainVirtualAtlas atlas(fixture.catalog,fixture.images);
+    const STerrainAtlasFinalization result=atlas.finalize(field,"Zone15",1);
+    QVERIFY(!result.success);
+    QVERIFY(result.error.contains("exceeding"));
+    QVERIFY(result.error.contains("No material identity was substituted"));
+    QVERIFY(result.packedCells.isEmpty());
+}
+
+void TerrainVirtualAtlasTests::pageOrientationMipmapsAlphaAndReopen()
+{
+    Fixture fixture;
+    fixture.images[0].setPixelColor(0,0,QColor(255,0,0,0));
+    CTerrainVirtualMaterialField field;
+    QVERIFY(field.resize(1,1,1));
+    CTerrainVirtualAtlas atlas(fixture.catalog,fixture.images);
+    const STerrainAtlasFinalization result=atlas.finalize(field,"Zone1",512);
+    QVERIFY2(result.success,qPrintable(result.error));
+    QCOMPARE(result.pages.size(),1);
+    QCOMPARE(result.pages[0].pixelColor(0,7).alpha(),0);
+    const ei::SMmpInspection reopened=ei::inspectMmp(result.pageMmpPayloads[0]);
+    QVERIFY2(reopened.valid,qPrintable(reopened.diagnostic));
+    QCOMPARE(reopened.formatName,QString("DXT1"));
+    QVERIFY(reopened.authoredMipSizes.size()>1);
+    QCOMPARE(reopened.baseImage.pixelColor(0,7).alpha(),0);
+}
+
+void TerrainVirtualAtlasTests::namespacesAreIsolated()
+{
+    Fixture fixture;
+    CTerrainVirtualMaterialField field;
+    QVERIFY(field.resize(1,1,1));
+    CTerrainVirtualAtlas a(fixture.catalog,fixture.images);
+    CTerrainVirtualAtlas b(fixture.catalog,fixture.images);
+    const auto zone2=a.finalize(field,"Zone2",512);
+    const auto gz2g=b.finalize(field,"Gz2G",512);
+    QVERIFY(zone2.success&&gz2g.success);
+    QVERIFY(zone2.isolatedNamespace!=gz2g.isolatedNamespace);
+    QVERIFY(zone2.isolatedNamespace.startsWith("zone2_eime_"));
+}
+
+void TerrainVirtualAtlasTests::exactOnlyNoOpPreservesPixels()
+{
+    Fixture fixture;
+    CTerrainVirtualMaterialField field;
+    QVERIFY(field.resize(2,2,1));
+    CTerrainVirtualAtlas atlas(fixture.catalog,fixture.images);
+    const auto result=atlas.finalize(field,"Zone1",512,{77,88,99,111});
+    QVERIFY2(result.success,qPrintable(result.error));
+    QCOMPARE(result.requiredSlots,1);
+    QCOMPARE(result.tiles[0].pixels,fixture.images[0]);
+    QCOMPARE(result.tileTypes,QVector<qint32>({77}));
+    QCOMPARE(atlas.generatedTiles().size(),0);
+}
+
+void TerrainVirtualAtlasTests::portablePackageRemapsNamespaceAndReopens()
+{
+    CMprDocument source;CValidationReport report;
+    QVERIFY(source.loadBytes(portableMpr(),"portable-source.mpr",&report));
+    Fixture fixture;
+    CTerrainVirtualMaterialField field;
+    QVERIFY(field.resize(16,16,1));
+    field.setMaterial(8,8,2);
+    CTerrainVirtualAtlas atlas(fixture.catalog,fixture.images);
+    const auto finalization=atlas.finalize(field,"CaveSet",512,{1,2,3,4},&report);
+    QVERIFY2(finalization.success,qPrintable(finalization.error));
+    const auto package=CTerrainVirtualAtlas::buildPortablePackage(
+        source,finalization,ETerrainTileLayer::Land,&report);
+    QVERIFY2(package.success,qPrintable(package.error+"\n"+report.toText()));
+    CMprDocument reopened;
+    QVERIFY(reopened.loadBytes(package.mprBytes,"portable-result.mpr",&report));
+    QCOMPARE(reopened.mapInfo().innerNamespace,finalization.isolatedNamespace);
+    QCOMPARE(reopened.mapInfo().textureCount,quint32(finalization.textureCount));
+    QCOMPARE(reopened.mapInfo().tileCount,quint32(finalization.requiredSlots));
+    CResArchiveDocument resources;QStringList errors;
+    QVERIFY(resources.loadBytes(package.resourceArchiveBytes,"portable-atlas.res",&errors));
+    QCOMPARE(package.resourceMembers.size(),finalization.textureCount);
+    QVERIFY(!resources.memberPayload(package.resourceMembers.front()).isEmpty());
+}
+
+void TerrainVirtualAtlasTests::virtualPaintPreviewAndUndoPreserveDesiredIdentity()
+{
+    Fixture fixture;
+    STerrainTransitionVariant authored;
+    authored.signature=signature(1,1,2,1);
+    SMprPackedTile authoredPacked;authoredPacked.tileIndex=10;
+    authored.packedTile=authoredPacked.encode();
+    QVERIFY(fixture.catalog.addVariant(authored));
+    QByteArray payload;
+    QDataStream sec(&payload,QIODevice::WriteOnly);
+    sec.setByteOrder(QDataStream::LittleEndian);
+    sec<<quint32(0xCF4BF774)<<quint8(0);
+    payload.append(QByteArray(33*33*8,'\0'));
+    payload.append(QByteArray(16*16*2,'\0'));
+    STerrainSectorSource source;
+    source.memberName="CaveSet000000.SEC";source.sectorX=0;source.sectorY=0;
+    source.type=0;source.payload=payload;source.landTileOffset=5+33*33*8;
+    CTerrainEditModel model;CValidationReport report;
+    QVERIFY(model.loadSources(1,1,100.0f,{source},&report,1,
+                              QVector<qint32>(64,1),0));
+    STerrainTileBrush brush;brush.centerX=8;brush.centerY=8;brush.radius=1;
+    const STerrainTileCommand command=model.makeVirtualMaterialPaint(
+        8,8,brush,ETerrainTileLayer::Land,2,fixture.catalog,99,&report);
+    QVERIFY2(!command.isEmpty(),qPrintable(report.toText()));
+    QCOMPARE(command.virtualVertices.size(),5);
+    QCOMPARE(command.semanticAudit.solverMode,QString("virtual-unblended-preview"));
+    QVERIFY(!command.deltas.isEmpty());
+    SMprPackedTile pureSelected;pureSelected.tileIndex=1;
+    for(const STerrainTileDelta& delta:command.deltas)
+        QCOMPARE(delta.after,pureSelected.encode());
+    QVERIFY(model.apply(command,true,&report));
+    CTerrainVirtualMaterialField painted;
+    QVERIFY(model.copyVirtualMaterialField(ETerrainTileLayer::Land,&painted));
+    for(const auto& touched:command.virtualVertices)
+        QCOMPARE(painted.material(touched.globalX,touched.globalY),qint32(2));
+    QCOMPARE(painted.material(6,8),qint32(1));
+    const STerrainTileCommand resolved=model.makeVirtualStrokeResolution(
+        command,fixture.catalog,99,&report);
+    QCOMPARE(resolved.semanticAudit.solverMode,QString("virtual-release-exact"));
+    QVERIFY(!resolved.deltas.isEmpty());
+    QVERIFY(model.apply(resolved,true,&report));
+    CTerrainVirtualMaterialField afterResolution;
+    QVERIFY(model.copyVirtualMaterialField(ETerrainTileLayer::Land,&afterResolution));
+    for(const auto& touched:command.virtualVertices)
+        QCOMPARE(afterResolution.material(touched.globalX,touched.globalY),qint32(2));
+    QVERIFY(model.apply(resolved,false,&report));
+    QVERIFY(model.apply(command,false,&report));
+    CTerrainVirtualMaterialField undone;
+    QVERIFY(model.copyVirtualMaterialField(ETerrainTileLayer::Land,&undone));
+    QCOMPARE(undone.material(8,8),qint32(1));
+}
+
+void TerrainVirtualAtlasTests::preservedLayerSlotsArePinnedAndRemapped()
+{
+    Fixture fixture;CTerrainVirtualMaterialField field;QVERIFY(field.resize(1,1,1));
+    SMprPackedTile pinned;pinned.tileIndex=3;pinned.rotation=2;
+    CTerrainVirtualAtlas atlas(fixture.catalog,fixture.images);
+    const auto result=atlas.finalize(field,"Zone2",512,{10,20,30,40},nullptr,{pinned.encode()});
+    QVERIFY2(result.success,qPrintable(result.error));
+    QCOMPARE(result.requiredSlots,2);
+    QVERIFY(result.authoredSlotRemap.contains(0));
+    QVERIFY(result.authoredSlotRemap.contains(3));
+    QVERIFY(result.authoredSlotRemap.value(0)!=result.authoredSlotRemap.value(3));
+}
+
+void TerrainVirtualAtlasTests::gradedAlphaIsRefusedWithoutFlattening()
+{
+    QImage image(8,8,QImage::Format_ARGB32);image.fill(QColor(10,20,30,128));
+    QString diagnostic;
+    QVERIFY(ei::encodeMmpDxt1(image,true,&diagnostic).isEmpty());
+    QVERIFY(diagnostic.contains("graded alpha"));
+}
+
+QTEST_GUILESS_MAIN(TerrainVirtualAtlasTests)
+#include "terrain_virtual_atlas_tests.moc"

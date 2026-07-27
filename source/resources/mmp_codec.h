@@ -47,6 +47,13 @@ bool decodeDirectDrawImage(const QByteArray& descriptorAndPixels, int width, int
 // the explicit masks in the 76-byte MMP descriptor.
 QByteArray encodeMmp8888(const QImage& image, QString* diagnostic = nullptr);
 
+// Deterministic terrain-page encoder. The 76-byte EI header is followed by a
+// complete block-safe DXT1 mip chain. Alpha is preserved with DXT1's authored
+// one-bit transparency mode; terrain pages with graded alpha must use another
+// validated codec rather than being silently flattened.
+QByteArray encodeMmpDxt1(const QImage& image, bool generateMipmaps = true,
+                         QString* diagnostic = nullptr);
+
 // Compose the shared humanoid atlas with the original 2dintmmx.dll formula.
 // PNT3 pixels are already premultiplied, so routing them through a generic
 // source-over painter would premultiply translucent armor edges twice.

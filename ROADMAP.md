@@ -441,6 +441,29 @@ must not independently change its shaders or animation policy.
 
 ## Terrain texture painting
 
+The hybrid modern-editor MVP is specified in
+[`docs/MODERN_TERRAIN_EDITOR_MVP.md`](docs/MODERN_TERRAIN_EDITOR_MVP.md). It
+adds a virtual vertex-material field, release-time exact resolution,
+deterministic generation of absent exact corner tuples, map-wide usage
+compaction, and isolated portable atlas packaging. Its initial 512-slot ceiling
+is a validation gate rather than a claimed packed-format limit.
+
+- [x] Make one palette card equal one unique paintable vertex-material identity;
+  remove support/context brush variants.
+- [x] Preserve every touched vertex through drag, release resolution, undo, and
+  finalization. Best effort may affect support cells and physical tile choice,
+  never the requested identities.
+- [x] Reuse exact authored tuples and deterministically generate missing 1/3,
+  2/2, and multi-family tuples with rotation/pixel deduplication.
+- [x] Count map-wide use, remove only unused slots, remap both changed and
+  preserved layer references, rebuild MMP pages/mips, and freshly reopen the
+  isolated MPR/RES package.
+- [ ] Validate more than eight MMP pages in controlled shipped 9/16-page tests
+  and update the Endurance renderer where required before raising the 512-slot
+  release ceiling.
+- [ ] Extend one finalization transaction to simultaneous virtual land and
+  overlay edits and define inactive-overlay virtual baselines.
+
 - [x] Productionize the existing hidden tile brush with explicit atlas, layer,
   category, rotation, brush shape, preview, and validation controls.
 - [x] Implement visual blending through transition-tile painting and optional

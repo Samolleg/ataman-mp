@@ -326,6 +326,7 @@ private:
     void rebuildTerrainAutoCatalog();
     QVector<STerrainAtlasSlotUsage> terrainAtlasUsage() const;
     void reviewTerrainAtlasProfile();
+    void finalizeVirtualTerrainAtlas();
     void updateTerrainAtlasViewerAnnotations(const QString& status);
     void rebuildSpatialIndices();
     QVector<CNode*> spatiallyVisibleNodes(CMob* mob, const CViewFrustum* frustum,

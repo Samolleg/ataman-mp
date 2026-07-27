@@ -146,6 +146,12 @@ public:
     bool applyTransaction(const CMprEditTransaction& transaction,
                           QByteArray* output,
                           CValidationReport* report = nullptr) const;
+    // Applies payload edits and rebuilds the archive hash/name table with a
+    // deterministic private terrain namespace. Unknown member payloads and
+    // timestamps are preserved; only MP/SEC names are deliberately forked.
+    bool applyIsolatedNamespaceTransaction(
+        const CMprEditTransaction& transaction, const QString& isolatedNamespace,
+        QByteArray* output, CValidationReport* report = nullptr) const;
     bool appendMaxZEdit(float newMaxZ, CMprEditTransaction* transaction,
                         CValidationReport* report = nullptr) const;
     bool isDirty() const { return false; }

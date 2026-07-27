@@ -11,6 +11,7 @@
 #include <QVector>
 
 class CMprDocument;
+class CTerrainVirtualMaterialField;
 class CMprEditTransaction;
 class CValidationReport;
 
@@ -99,7 +100,16 @@ struct STerrainTileCommand
     QString description;
     QVector<STerrainTileDelta> deltas;
     STerrainSemanticPaintAudit semanticAudit;
-    bool isEmpty() const { return deltas.isEmpty(); }
+    struct SVirtualVertexDelta
+    {
+        int globalX{0};
+        int globalY{0};
+        ETerrainTileLayer layer{ETerrainTileLayer::Land};
+        qint32 before{0};
+        qint32 after{0};
+    };
+    QVector<SVirtualVertexDelta> virtualVertices;
+    bool isEmpty() const { return deltas.isEmpty() && virtualVertices.isEmpty(); }
 };
 
 // Compose sequential live-preview commands into one reversible before/after
@@ -421,6 +431,21 @@ public:
         quint32 distributionSeed,
         CValidationReport* report = nullptr,
         qint32 preferredSupportId = 0) const;
+    // Modern flow: material identity is committed to an independent vertex
+    // field. Drag preview is deliberately uniform; release prefers authored
+    // exact tiles, and absent tuples are generated only during finalization.
+    STerrainTileCommand makeVirtualMaterialPaint(
+        int selectedCellX, int selectedCellY,
+        const STerrainTileBrush& vertexBrush, ETerrainTileLayer layer,
+        qint32 materialId, const CTerrainTransitionCatalog& catalog,
+        quint32 distributionSeed, CValidationReport* report = nullptr);
+    STerrainTileCommand makeVirtualStrokeResolution(
+        const STerrainTileCommand& stroke,
+        const CTerrainTransitionCatalog& catalog, quint32 distributionSeed,
+        CValidationReport* report = nullptr) const;
+    bool copyVirtualMaterialField(ETerrainTileLayer layer,
+        CTerrainVirtualMaterialField* output) const;
+    bool virtualMaterialFieldActive(ETerrainTileLayer layer) const;
     STerrainTileCommand makeSemanticCornerMaterialPaint(
         int selectedCellX, int selectedCellY, int vertexX, int vertexY,
         ETerrainTileLayer layer, qint32 materialId,
@@ -487,6 +512,10 @@ private:
     QVector<bool> m_conflictedVertices;
     QVector<SSector> m_sectors;
     QMap<QPair<int, int>, int> m_sectorLookup;
+    QVector<qint32> m_virtualLandMaterials;
+    QVector<qint32> m_virtualOverlayMaterials;
+    QVector<qint32> m_originalVirtualLandMaterials;
+    QVector<qint32> m_originalVirtualOverlayMaterials;
 };
 
 class CTerrainTileEditHistory

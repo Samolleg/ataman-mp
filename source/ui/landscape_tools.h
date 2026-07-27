@@ -104,6 +104,7 @@ signals:
     void tilePickerRequested();
     void atlasProfileReviewRequested();
     void exportPaintDiagnosticRequested();
+    void finalizeVirtualAtlasRequested();
     void editingStateChanged();
     void paintTerrainTypeChanged(qint32 terrainType);
     void terrainVisibilityChanged(bool mainTerrainVisible, bool overlaysVisible);

@@ -30,6 +30,132 @@ QRgb decodeRgb565(quint16 value)
     return qRgba(red, green, blue, 255);
 }
 
+quint16 encodeRgb565(QRgb pixel)
+{
+    return quint16(((qRed(pixel) * 31 + 127) / 255) << 11)
+        | quint16(((qGreen(pixel) * 63 + 127) / 255) << 5)
+        | quint16((qBlue(pixel) * 31 + 127) / 255);
+}
+
+int colorDistance(QRgb left, QRgb right)
+{
+    const int dr = qRed(left) - qRed(right);
+    const int dg = qGreen(left) - qGreen(right);
+    const int db = qBlue(left) - qBlue(right);
+    return dr * dr + dg * dg + db * db;
+}
+
+QByteArray encodeDxt1Level(const QImage& input, QString* diagnostic)
+{
+    const QImage image = input.convertToFormat(QImage::Format_ARGB32);
+    QByteArray result;
+    result.reserve(qMax(1, (image.width()+3)/4)*qMax(1,(image.height()+3)/4)*8);
+    for(int blockY=0; blockY<image.height(); blockY+=4)
+        for(int blockX=0; blockX<image.width(); blockX+=4)
+        {
+            QRgb pixels[16];
+            bool transparent=false;
+            int opaqueCount=0;
+            for(int y=0;y<4;++y) for(int x=0;x<4;++x)
+            {
+                const QRgb pixel=image.pixel(qMin(blockX+x,image.width()-1),
+                                             qMin(blockY+y,image.height()-1));
+                pixels[y*4+x]=pixel;
+                if(qAlpha(pixel)<128) transparent=true; else ++opaqueCount;
+            }
+            if(opaqueCount==0)
+            {
+                result.append(QByteArray(4,'\0'));
+                result.append(QByteArray(4,char(0xFF)));
+                continue;
+            }
+            int darkest=-1,lightest=-1;
+            int minimumLuma=std::numeric_limits<int>::max();
+            int maximumLuma=std::numeric_limits<int>::min();
+            for(int index=0;index<16;++index)
+            {
+                if(qAlpha(pixels[index])<128) continue;
+                const int luma=qRed(pixels[index])*299+qGreen(pixels[index])*587+qBlue(pixels[index])*114;
+                if(luma<minimumLuma){minimumLuma=luma;darkest=index;}
+                if(luma>maximumLuma){maximumLuma=luma;lightest=index;}
+            }
+            quint16 endpoint0=encodeRgb565(pixels[lightest]);
+            quint16 endpoint1=encodeRgb565(pixels[darkest]);
+            if(transparent)
+            {
+                if(endpoint0>endpoint1) std::swap(endpoint0,endpoint1);
+            }
+            else if(endpoint0<=endpoint1)
+            {
+                std::swap(endpoint0,endpoint1);
+                if(endpoint0==endpoint1)
+                    endpoint0=endpoint0==0xFFFF?quint16(0xFFFE):quint16(endpoint0+1);
+            }
+            QRgb palette[4];
+            palette[0]=decodeRgb565(endpoint0); palette[1]=decodeRgb565(endpoint1);
+            if(endpoint0>endpoint1)
+            {
+                palette[2]=qRgb((2*qRed(palette[0])+qRed(palette[1]))/3,
+                                (2*qGreen(palette[0])+qGreen(palette[1]))/3,
+                                (2*qBlue(palette[0])+qBlue(palette[1]))/3);
+                palette[3]=qRgb((qRed(palette[0])+2*qRed(palette[1]))/3,
+                                (qGreen(palette[0])+2*qGreen(palette[1]))/3,
+                                (qBlue(palette[0])+2*qBlue(palette[1]))/3);
+            }
+            else
+            {
+                palette[2]=qRgb((qRed(palette[0])+qRed(palette[1]))/2,
+                                (qGreen(palette[0])+qGreen(palette[1]))/2,
+                                (qBlue(palette[0])+qBlue(palette[1]))/2);
+                palette[3]=qRgba(0,0,0,0);
+            }
+            quint32 indices=0;
+            for(int index=0;index<16;++index)
+            {
+                int selected=transparent&&qAlpha(pixels[index])<128?3:0;
+                int best=selected==3?0:std::numeric_limits<int>::max();
+                if(selected!=3)
+                {
+                    const int paletteCount=endpoint0>endpoint1?4:3;
+                    for(int candidate=0;candidate<paletteCount;++candidate)
+                    {
+                        const int distance=colorDistance(pixels[index],palette[candidate]);
+                        if(distance<best){best=distance;selected=candidate;}
+                    }
+                }
+                indices|=quint32(selected)<<(index*2);
+            }
+            uchar block[8];
+            qToLittleEndian<quint16>(endpoint0,block);
+            qToLittleEndian<quint16>(endpoint1,block+2);
+            qToLittleEndian<quint32>(indices,block+4);
+            result.append(reinterpret_cast<const char*>(block),8);
+        }
+    if(result.isEmpty()&&diagnostic)*diagnostic=QStringLiteral("DXT1 encoding produced no blocks.");
+    return result;
+}
+
+QImage downsamplePremultiplied(const QImage& input)
+{
+    const QImage source=input.convertToFormat(QImage::Format_ARGB32);
+    QImage output(qMax(1,source.width()/2),qMax(1,source.height()/2),QImage::Format_ARGB32);
+    for(int y=0;y<output.height();++y) for(int x=0;x<output.width();++x)
+    {
+        qint64 alpha=0,red=0,green=0,blue=0;
+        for(int dy=0;dy<2;++dy) for(int dx=0;dx<2;++dx)
+        {
+            const QRgb pixel=source.pixel(qMin(source.width()-1,x*2+dx),qMin(source.height()-1,y*2+dy));
+            const int a=qAlpha(pixel);
+            alpha+=a;red+=qRed(pixel)*a;green+=qGreen(pixel)*a;blue+=qBlue(pixel)*a;
+        }
+        const int outAlpha=int((alpha+2)/4);
+        output.setPixel(x,y,alpha==0?qRgba(0,0,0,0)
+            :qRgba(int((red+alpha/2)/alpha),int((green+alpha/2)/alpha),
+                    int((blue+alpha/2)/alpha),outAlpha));
+    }
+    return output;
+}
+
 QRgb interpolate(QRgb first, QRgb second, int firstWeight, int secondWeight,
                   int divisor, int alpha = 255)
 {
@@ -345,6 +471,47 @@ QByteArray encodeMmp8888(const QImage& image, QString* diagnostic)
     for(int y = 0; y < source.height(); ++y)
         for(int x = 0; x < source.width(); ++x)
             stream << quint32(source.pixel(x, y));
+    return result;
+}
+
+QByteArray encodeMmpDxt1(const QImage& image, bool generateMipmaps,
+                         QString* diagnostic)
+{
+    if(diagnostic) diagnostic->clear();
+    if(image.isNull() || image.width() <= 0 || image.height() <= 0
+       || (image.width() % 4) != 0 || (image.height() % 4) != 0)
+    {
+        if(diagnostic) *diagnostic = QStringLiteral(
+            "DXT1 terrain pages must be non-empty and divisible by four.");
+        return {};
+    }
+    for(int y=0;y<image.height();++y)for(int x=0;x<image.width();++x)
+    {
+        const int alpha=image.pixelColor(x,y).alpha();
+        if(alpha!=0&&alpha!=255)
+        {
+            if(diagnostic)*diagnostic=QStringLiteral(
+                "DXT1 terrain pages cannot preserve graded alpha; finalization was refused.");
+            return {};
+        }
+    }
+    QVector<QImage> levels;
+    levels.append(image.convertToFormat(QImage::Format_ARGB32));
+    if(generateMipmaps)
+        while(levels.back().width() >= 8 && levels.back().height() >= 8)
+            levels.append(downsamplePremultiplied(levels.back()));
+    QByteArray result;
+    QDataStream stream(&result,QIODevice::WriteOnly);
+    stream.setByteOrder(QDataStream::LittleEndian);
+    stream << quint32(0x00504d4d) << quint32(image.width()) << quint32(image.height())
+           << quint32(levels.size()) << quint32(0x31545844);
+    result.append(QByteArray(56,'\0'));
+    for(const QImage& level:levels)
+    {
+        const QByteArray encoded=encodeDxt1Level(level,diagnostic);
+        if(encoded.isEmpty()) return {};
+        result.append(encoded);
+    }
     return result;
 }
 
