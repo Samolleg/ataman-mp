@@ -8,6 +8,7 @@
 
 class CMprDocument;
 class CMprEditTransaction;
+struct SMprCanvasResizeRequest;
 
 struct SStagedSaveValidation
 {
@@ -77,6 +78,14 @@ SStagedMprTransactionValidation validateStagedMprTransaction(
 // contract. Source and destination may be the same path.
 SMprSaveCommitResult commitStagedMprTransaction(
     const CMprDocument& baseline, const CMprEditTransaction& transaction,
+    const SMprSaveCommitRequest& request);
+
+// Structural canvas saves always target a separate MPR. diskBaseline proves
+// the open source has not changed; resizeBaseline may include the editor's
+// already-validated unsaved terrain transaction.
+SMprSaveCommitResult commitStagedMprCanvasResize(
+    const CMprDocument& diskBaseline, const CMprDocument& resizeBaseline,
+    const SMprCanvasResizeRequest& resize,
     const SMprSaveCommitRequest& request);
 
 #endif // STAGED_SAVE_VALIDATOR_H

@@ -410,3 +410,186 @@ SMprSaveCommitResult commitStagedMprTransaction(
     result.success = true;
     return result;
 }
+
+SMprSaveCommitResult commitStagedMprCanvasResize(
+    const CMprDocument& diskBaseline, const CMprDocument& resizeBaseline,
+    const SMprCanvasResizeRequest& resize,
+    const SMprSaveCommitRequest& request)
+{
+    SMprSaveCommitResult result;
+    result.phase = QStringLiteral("source-check");
+    if(request.source.absoluteFilePath().isEmpty()
+       || request.destination.absoluteFilePath().isEmpty())
+    {
+        result.error = "Source and destination paths are required.";
+        return result;
+    }
+    if(QDir::cleanPath(request.source.absoluteFilePath()).compare(
+           QDir::cleanPath(request.destination.absoluteFilePath()),
+           Qt::CaseInsensitive) == 0)
+    {
+        result.error = "Canvas resize is Save As-only and cannot overwrite the open MPR.";
+        return result;
+    }
+
+    QByteArray sourceBytes;
+    if(!readFileBytes(request.source, &sourceBytes, &result.error))
+        return result;
+    if(sourceBytes != diskBaseline.originalBytes())
+    {
+        result.error = "The loaded source MPR changed on disk. Reopen it before resizing.";
+        return result;
+    }
+
+    const QFileInfo initialDestination(request.destination.absoluteFilePath());
+    const bool destinationExisted = initialDestination.exists();
+    QByteArray destinationBytes;
+    if(destinationExisted
+       && !readFileBytes(initialDestination, &destinationBytes, &result.error))
+    {
+        result.phase = QStringLiteral("destination-check");
+        return result;
+    }
+
+    result.phase = QStringLiteral("staging");
+    QByteArray candidateBytes;
+    CValidationReport resizeReport;
+    if(!resizeBaseline.buildResizedCanvas(resize, &candidateBytes, &resizeReport)
+       || resizeReport.hasErrors())
+    {
+        result.error = "The MPR canvas resize was refused:\n" + resizeReport.toText().trimmed();
+        return result;
+    }
+    const SStagedSaveValidation staged = validateStagedSave(
+        candidateBytes, request.destination);
+    result.candidateSha256 = staged.sha256;
+    if(!staged.success)
+    {
+        result.error = staged.error;
+        return result;
+    }
+
+    CMprDocument candidate;
+    CValidationReport candidateReport;
+    CTerrainEditModel baselineTerrain;
+    CTerrainEditModel candidateTerrain;
+    CValidationReport baselineTerrainReport;
+    CValidationReport candidateTerrainReport;
+    if(!candidate.loadBytes(candidateBytes, QStringLiteral("resized-stage.mpr"),
+                            &candidateReport)
+       || candidateReport.hasErrors()
+       || !baselineTerrain.load(resizeBaseline, &baselineTerrainReport)
+       || !candidateTerrain.load(candidate, &candidateTerrainReport))
+    {
+        result.error = "The resized MPR failed canonical terrain validation:\n"
+            + candidateReport.toText().trimmed() + "\n"
+            + candidateTerrainReport.toText().trimmed();
+        return result;
+    }
+    if(!baselineTerrain.hasSeamConflicts() && candidateTerrain.hasSeamConflicts())
+    {
+        result.error = "The resized MPR introduced conflicting shared SEC vertices.";
+        return result;
+    }
+    result.changedMembers.append(resizeBaseline.mapInfo().memberName);
+    result.semanticDiff = QString("canvas %1 x %2 -> %3 x %4; old canvas offset %5, %6")
+        .arg(resizeBaseline.mapInfo().sectorCountX)
+        .arg(resizeBaseline.mapInfo().sectorCountY)
+        .arg(resize.sectorCountX).arg(resize.sectorCountY)
+        .arg(resize.oldSectorOffsetX).arg(resize.oldSectorOffsetY);
+
+    result.phase = QStringLiteral("pre-backup-race-check");
+    QByteArray currentSource;
+    if(!readFileBytes(request.source, &currentSource, &result.error)
+       || currentSource != sourceBytes)
+    {
+        if(result.error.isEmpty())
+            result.error = "The source MPR changed while the resized candidate was staged.";
+        return result;
+    }
+    if(!destinationStillMatches(request.destination, destinationExisted,
+                                destinationBytes, &result.error))
+        return result;
+
+    if(destinationExisted)
+    {
+        result.phase = QStringLiteral("backup");
+        const SBackupResult backup =
+            CBackupManager(request.backupRootOverride).snapshotBeforeSave(initialDestination);
+        if(!backup.success)
+        {
+            result.error = backup.error;
+            return result;
+        }
+        const QString destinationSha256 = QString::fromLatin1(
+            QCryptographicHash::hash(destinationBytes, QCryptographicHash::Sha256).toHex());
+        if(backup.sha256.compare(destinationSha256, Qt::CaseInsensitive) != 0)
+        {
+            result.error = "The pre-save backup hash did not match the resize destination.";
+            return result;
+        }
+        result.backupPath = backup.backupPath;
+    }
+
+    result.phase = QStringLiteral("pre-commit-race-check");
+    if(!readFileBytes(request.source, &currentSource, &result.error)
+       || currentSource != sourceBytes)
+    {
+        if(result.error.isEmpty())
+            result.error = "The source MPR changed before atomic replacement.";
+        return result;
+    }
+    if(!destinationStillMatches(request.destination, destinationExisted,
+                                destinationBytes, &result.error))
+        return result;
+
+#ifdef QT_TESTLIB_LIB
+    if(request.simulateAtomicCommitFailure)
+    {
+        result.phase = QStringLiteral("atomic-replacement");
+        result.error = "Simulated atomic replacement failure.";
+        return result;
+    }
+#endif
+
+    result.phase = QStringLiteral("atomic-replacement");
+    QSaveFile output(request.destination.absoluteFilePath());
+    if(!output.open(QIODevice::WriteOnly))
+    {
+        result.error = output.errorString();
+        return result;
+    }
+    if(output.write(candidateBytes) != candidateBytes.size())
+    {
+        result.error = output.errorString();
+        output.cancelWriting();
+        return result;
+    }
+    if(!output.commit())
+    {
+        result.error = output.errorString();
+        return result;
+    }
+
+    result.phase = QStringLiteral("post-commit-validation");
+    QByteArray committedBytes;
+    if(!readFileBytes(request.destination, &committedBytes, &result.error))
+        return result;
+    if(committedBytes != candidateBytes)
+    {
+        result.error = "The committed resized MPR does not match the validated candidate.";
+        return result;
+    }
+    CMprDocument committed;
+    CValidationReport committedReport;
+    if(!committed.loadBytes(committedBytes, request.destination.absoluteFilePath(),
+                            &committedReport) || committedReport.hasErrors())
+    {
+        result.error = "The committed resized MPR failed a fresh reopen:\n"
+            + committedReport.toText().trimmed();
+        return result;
+    }
+    result.phase = QStringLiteral("complete");
+    result.success = true;
+    return result;
+}

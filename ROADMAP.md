@@ -454,9 +454,18 @@ must not independently change its shaders or animation policy.
   **Scale terrain** and **Preserve heights by requantizing** policies, preview
   rounding and clamp effects, and never disguise a scale migration as an
   ordinary maximum-height field.
-- [ ] Add existing-map crop/expand only as a structural, initially Save-As-only
-  transaction. Preview discarded/initialized sectors and coordinate—but never
-  silently invent—`map.txt` dimensions and minimap updates.
+- [x] Add the first existing-map crop/expand transaction as structural and
+  Save-As-only. MPR Settings previews the old generated map inside the new
+  sector canvas, reports retained/added/removed SEC members, extends nearest
+  land boundaries, preserves retained/unknown payloads, rebuilds runtime RES
+  hash chains, freshly reopens, backs up, and atomically commits. The initial
+  ceiling is 32x32 sectors for a 256x256 runtime graph; copied private runtime
+  testing may lower it.
+- [ ] Add the explicit companion for origin-moving resize: translate all proven
+  spatial MOB records into a separately named MOB and optionally delete
+  user-confirmed objects outside the new bounds. Until then, origin-moving
+  resize refuses while MOBs are loaded; map registration and minimap metadata
+  remain separate and are never invented.
 - [x] Refactor terrain ownership around each sector's canonical 33x33 vertex
   lattice rather than independently duplicated tile vertices.
 - [x] Synchronize shared seams between adjacent sectors.
@@ -590,10 +599,10 @@ The following items are deliberately not hidden inside the completed baseline:
 - [ ] Finish production semantic-atlas conversion/approval coverage beyond the
   reviewed Zone 1 definition. This remains isolated in the semantic-atlas
   workstream; manual tile painting remains the safe fallback meanwhile.
-- [ ] Implement existing-map crop/expand as a previewed, structural,
-  initially Save-As-only transaction. It may change sector membership, MP/SEC
-  namespaces, RES hash chains, catalog dimensions, minimap framing, graph
-  dimensions, and object coordinates; none may be silently inferred.
+- [x] Implement the MPR-only existing-map crop/expand baseline as a previewed,
+  structural, Save-As-only transaction with a 32x32 experimental ceiling.
+  Runtime testing and the separately saved MOB translation/deletion companion
+  remain before this can be treated as the complete derivative-map workflow.
 - [ ] Implement deterministic new-MPR creation using the runtime-compatible RES
   hash table and collision-chain contract described above.
 - [ ] Add source-accurate persistence/staging for regenerated AI graphs. Preserve

@@ -118,6 +118,17 @@ struct SMprDocumentDiffEntry
     QString details;
 };
 
+// Structural canvas changes are intentionally separate from ordinary member
+// edits. oldSectorOffset places the old canvas inside the new canvas: positive
+// values add sectors on the left/bottom, negative values crop them there.
+struct SMprCanvasResizeRequest
+{
+    quint32 sectorCountX{0};
+    quint32 sectorCountY{0};
+    int oldSectorOffsetX{0};
+    int oldSectorOffsetY{0};
+};
+
 class CMprSemanticDiff
 {
 public:
@@ -148,6 +159,9 @@ public:
                           CValidationReport* report = nullptr) const;
     bool appendMaxZEdit(float newMaxZ, CMprEditTransaction* transaction,
                         CValidationReport* report = nullptr) const;
+    bool buildResizedCanvas(const SMprCanvasResizeRequest& request,
+                            QByteArray* output,
+                            CValidationReport* report = nullptr) const;
     bool isDirty() const { return false; }
 
 private:

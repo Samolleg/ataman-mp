@@ -8471,13 +8471,208 @@ void CView::openMapParameters()
     scaleLayout->addWidget(scalePreview);
     QPushButton* applyScale = new QPushButton(tr("Apply undoable scale migration"), scalePage);
     scaleLayout->addWidget(applyScale, 0, Qt::AlignRight);
-    QLabel* resizeDeferred = new QLabel(tr(
-        "Crop/expand remains disabled: resizing changes SEC members and archive hash "
-        "chains and will be introduced as a separate Save As-only transaction."), scalePage);
-    resizeDeferred->setWordWrap(true);
-    scaleLayout->addWidget(resizeDeferred);
     scaleLayout->addStretch(1);
     tabs->addTab(scalePage, tr("Vertical scale"));
+
+    QWidget* canvasPage = new QWidget(tabs);
+    QVBoxLayout* canvasLayout = new QVBoxLayout(canvasPage);
+    QFormLayout* canvasForm = new QFormLayout;
+    QSpinBox* canvasWidth = new QSpinBox(canvasPage);
+    QSpinBox* canvasHeight = new QSpinBox(canvasPage);
+    canvasWidth->setRange(1, 32);
+    canvasHeight->setRange(1, 32);
+    QComboBox* canvasAnchor = new QComboBox(canvasPage);
+    canvasAnchor->addItems({tr("Top left"), tr("Top center"), tr("Top right"),
+                            tr("Middle left"), tr("Center"), tr("Middle right"),
+                            tr("Bottom left"), tr("Bottom center"), tr("Bottom right")});
+    canvasForm->addRow(tr("New width (sectors)"), canvasWidth);
+    canvasForm->addRow(tr("New height (sectors)"), canvasHeight);
+    canvasForm->addRow(tr("Keep old canvas anchored at"), canvasAnchor);
+    canvasLayout->addLayout(canvasForm);
+    QLabel* canvasExplanation = new QLabel(tr(
+        "Crop/expand is a structural Save As operation. Retained SEC payloads stay "
+        "byte-identical; expansion projects the nearest land boundary and does not "
+        "invent overlays. The initial 32 x 32 ceiling corresponds to the runtime's "
+        "256 x 256 navigation-grid limit."), canvasPage);
+    canvasExplanation->setWordWrap(true);
+    canvasLayout->addWidget(canvasExplanation);
+    QLabel* canvasPreview = new QLabel(canvasPage);
+    canvasPreview->setAlignment(Qt::AlignCenter);
+    canvasPreview->setFrameShape(QFrame::StyledPanel);
+    canvasPreview->setMinimumSize(360, 250);
+    canvasLayout->addWidget(canvasPreview, 1);
+    QLabel* canvasSummary = new QLabel(canvasPage);
+    canvasSummary->setWordWrap(true);
+    canvasLayout->addWidget(canvasSummary);
+    QPushButton* saveResizedCanvas = new QPushButton(
+        tr("Resize canvas and Save As..."), canvasPage);
+    canvasLayout->addWidget(saveResizedCanvas, 0, Qt::AlignRight);
+    tabs->addTab(canvasPage, tr("Canvas resize"));
+
+    QSharedPointer<QImage> canvasSourcePreview(new QImage);
+    const auto canvasRequest = [this, canvasWidth, canvasHeight, canvasAnchor]() {
+        SMprCanvasResizeRequest request;
+        request.sectorCountX = quint32(canvasWidth->value());
+        request.sectorCountY = quint32(canvasHeight->value());
+        const int deltaX = canvasWidth->value()
+            - int(m_mprDocument.mapInfo().sectorCountX);
+        const int deltaY = canvasHeight->value()
+            - int(m_mprDocument.mapInfo().sectorCountY);
+        const int column = canvasAnchor->currentIndex() % 3;
+        const int row = canvasAnchor->currentIndex() / 3;
+        request.oldSectorOffsetX = column == 0 ? 0 : column == 1 ? deltaX / 2 : deltaX;
+        request.oldSectorOffsetY = row == 0 ? 0 : row == 1 ? deltaY / 2 : deltaY;
+        return request;
+    };
+    const auto refreshCanvasPreview = [this, canvasWidth, canvasHeight,
+                                       canvasPreview, canvasSummary,
+                                       saveResizedCanvas, canvasSourcePreview,
+                                       canvasRequest]() {
+        if(!m_pLand->isMprLoad() || !m_mprDocument.mapInfo().valid)
+            return;
+        const SMprCanvasResizeRequest request = canvasRequest();
+        const int oldWidth = int(m_mprDocument.mapInfo().sectorCountX);
+        const int oldHeight = int(m_mprDocument.mapInfo().sectorCountY);
+        const int retainedX = qMax(0, qMin(oldWidth,
+            canvasWidth->value() - request.oldSectorOffsetX)
+            - qMax(0, -request.oldSectorOffsetX));
+        const int retainedY = qMax(0, qMin(oldHeight,
+            canvasHeight->value() - request.oldSectorOffsetY)
+            - qMax(0, -request.oldSectorOffsetY));
+        const int retained = retainedX * retainedY;
+        const int added = canvasWidth->value() * canvasHeight->value() - retained;
+        const int removed = oldWidth * oldHeight - retained;
+        canvasSummary->setText(tr(
+            "Old canvas offset: X %1, Y %2 sectors. Retain %3, add %4, remove %5 SEC member(s). "
+            "World bounds become %6 x %7 units. Output is a new MPR; the source is not overwritten.")
+            .arg(request.oldSectorOffsetX).arg(request.oldSectorOffsetY)
+            .arg(retained).arg(added).arg(removed)
+            .arg(canvasWidth->value() * 32).arg(canvasHeight->value() * 32));
+        saveResizedCanvas->setEnabled(retained > 0
+            && !(canvasWidth->value() == oldWidth
+                 && canvasHeight->value() == oldHeight
+                 && request.oldSectorOffsetX == 0
+                 && request.oldSectorOffsetY == 0));
+
+        if(canvasSourcePreview->isNull())
+        {
+            const SMinimapSceneCaptureResult capture = captureMinimapScene(false, 256);
+            if(capture.bake.success)
+                *canvasSourcePreview = capture.bake.reviewImage;
+        }
+        const QSize area(480, 300);
+        QImage preview(area, QImage::Format_ARGB32_Premultiplied);
+        preview.fill(QColor(28, 28, 28));
+        QPainter painter(&preview);
+        const double scale = qMin(double(area.width() - 16) / canvasWidth->value(),
+                                  double(area.height() - 16) / canvasHeight->value());
+        const QRectF canvasRect(8, 8, canvasWidth->value() * scale,
+                                canvasHeight->value() * scale);
+        painter.fillRect(canvasRect, QColor(48, 48, 48));
+        painter.save();
+        painter.setClipRect(canvasRect);
+        if(!canvasSourcePreview->isNull())
+        {
+            const QRectF oldRect(canvasRect.left() + request.oldSectorOffsetX * scale,
+                                 canvasRect.top() + request.oldSectorOffsetY * scale,
+                                 oldWidth * scale, oldHeight * scale);
+            painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
+            painter.drawImage(oldRect, *canvasSourcePreview);
+        }
+        painter.restore();
+        painter.setPen(QPen(QColor(70, 185, 95), 2));
+        painter.drawRect(canvasRect);
+        if(scale >= 10.0)
+        {
+            painter.setPen(QPen(QColor(255, 255, 255, 45), 1));
+            for(int x = 1; x < canvasWidth->value(); ++x)
+                painter.drawLine(QPointF(canvasRect.left() + x * scale, canvasRect.top()),
+                                 QPointF(canvasRect.left() + x * scale, canvasRect.bottom()));
+            for(int y = 1; y < canvasHeight->value(); ++y)
+                painter.drawLine(QPointF(canvasRect.left(), canvasRect.top() + y * scale),
+                                 QPointF(canvasRect.right(), canvasRect.top() + y * scale));
+        }
+        painter.end();
+        canvasPreview->setPixmap(QPixmap::fromImage(preview));
+    };
+    connect(canvasWidth, QOverload<int>::of(&QSpinBox::valueChanged), dock,
+            [refreshCanvasPreview](int) { refreshCanvasPreview(); });
+    connect(canvasHeight, QOverload<int>::of(&QSpinBox::valueChanged), dock,
+            [refreshCanvasPreview](int) { refreshCanvasPreview(); });
+    connect(canvasAnchor, QOverload<int>::of(&QComboBox::currentIndexChanged), dock,
+            [refreshCanvasPreview](int) { refreshCanvasPreview(); });
+    connect(saveResizedCanvas, &QPushButton::clicked, dock,
+            [this, dock, canvasRequest, canvasSummary]() {
+        const SMprCanvasResizeRequest resize = canvasRequest();
+        if((resize.oldSectorOffsetX != 0 || resize.oldSectorOffsetY != 0)
+           && !m_aMob.isEmpty())
+        {
+            QMessageBox::warning(dock, tr("MOB translation required"), tr(
+                "This anchor moves the map origin, but one or more MOB files are loaded. "
+                "The safe MOB translation/deletion companion is not enabled in this test slice. "
+                "Unload the MOB files or choose an origin-preserving anchor; no file was changed."));
+            return;
+        }
+        QByteArray currentBytes;
+        CValidationReport currentReport;
+        if(!buildValidatedLandscapeCandidate(&currentBytes, &currentReport))
+        {
+            QMessageBox::critical(dock, tr("Cannot stage current MPR"),
+                currentReport.toText().trimmed());
+            return;
+        }
+        CMprDocument resizeBaseline;
+        CValidationReport resizeBaselineReport;
+        if(!resizeBaseline.loadBytes(currentBytes, QStringLiteral("resize-baseline.mpr"),
+                                     &resizeBaselineReport)
+           || resizeBaselineReport.hasErrors())
+        {
+            QMessageBox::critical(dock, tr("Cannot stage current MPR"),
+                resizeBaselineReport.toText().trimmed());
+            return;
+        }
+        const QString suggested = QDir(m_pLand->filePath().absolutePath()).filePath(
+            m_pLand->filePath().completeBaseName() + QStringLiteral("-resized.mpr"));
+        const QFileInfo destination(QFileDialog::getSaveFileName(
+            dock, tr("Save resized MPR as..."), suggested, tr("Landscape (*.mpr)")));
+        if(destination.filePath().isEmpty())
+            return;
+        if(QMessageBox::question(dock, tr("Create resized MPR"),
+            tr("%1\n\nCreate the separately named MPR now? Retained data will be staged, "
+               "freshly reopened, backed up if the destination exists, and replaced atomically.")
+                .arg(canvasSummary->text())) != QMessageBox::Yes)
+            return;
+
+        QProgressDialog progress(tr("Building resized MPR candidate..."), QString(),
+                                 0, 0, dock);
+        progress.setWindowTitle(tr("Resizing MPR canvas"));
+        progress.setWindowModality(Qt::ApplicationModal);
+        progress.setCancelButton(nullptr);
+        progress.setMinimumDuration(0);
+        QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+        SMprSaveCommitRequest commitRequest;
+        commitRequest.source = m_pLand->filePath();
+        commitRequest.destination = destination;
+        const SMprSaveCommitResult result = commitStagedMprCanvasResize(
+            m_mprDocument, resizeBaseline, resize, commitRequest);
+        progress.close();
+        if(!result.success)
+        {
+            ei::log(eLogFatal, QString("MPR canvas resize failed phase:%1 error:%2")
+                .arg(result.phase, result.error));
+            QMessageBox::critical(dock, tr("MPR canvas resize failed"),
+                tr("No source file was changed.\n\n%1").arg(result.error));
+            return;
+        }
+        ei::log(eLogInfo, QString("MPR canvas resize committed path:%1 sha256:%2 %3")
+            .arg(destination.absoluteFilePath(), result.candidateSha256,
+                 result.semanticDiff));
+        unloadLand(false);
+        loadLandscape(destination);
+        QMessageBox::information(dock, tr("Resized MPR created"),
+            tr("Created and opened:\n%1\n\nSHA-256: %2")
+                .arg(destination.absoluteFilePath(), result.candidateSha256));
+    });
 
     QDialogButtonBox* buttons = new QDialogButtonBox(QDialogButtonBox::Close, panel);
     QPushButton* atlas = buttons->addButton(tr("Open Atlas Tiles..."),
@@ -8684,7 +8879,9 @@ void CView::openMapParameters()
     });
     m_refreshMprSettingsDock = [this, statePages, panel, sourceValue,
                                 namespaceValue, refreshSummary, refreshPreview,
-                                scaleTarget, refreshScalePreview]() {
+                                scaleTarget, refreshScalePreview, canvasWidth,
+                                canvasHeight, canvasSourcePreview,
+                                refreshCanvasPreview]() {
         const bool loaded = m_pLand->isMprLoad() && m_terrainEditAvailable;
         statePages->setCurrentIndex(loaded ? 1 : 0);
         panel->setEnabled(loaded);
@@ -8699,6 +8896,21 @@ void CView::openMapParameters()
             scaleTarget->setValue(m_terrainEdit.maxZ());
         }
         refreshScalePreview();
+        if(canvasWidth->value() < 1 || canvasHeight->value() < 1
+           || canvasWidth->property("sourceWidth").toUInt()
+                != m_mprDocument.mapInfo().sectorCountX
+           || canvasHeight->property("sourceHeight").toUInt()
+                != m_mprDocument.mapInfo().sectorCountY)
+        {
+            const QSignalBlocker widthBlocker(canvasWidth);
+            const QSignalBlocker heightBlocker(canvasHeight);
+            canvasWidth->setValue(int(m_mprDocument.mapInfo().sectorCountX));
+            canvasHeight->setValue(int(m_mprDocument.mapInfo().sectorCountY));
+            canvasWidth->setProperty("sourceWidth", m_mprDocument.mapInfo().sectorCountX);
+            canvasHeight->setProperty("sourceHeight", m_mprDocument.mapInfo().sectorCountY);
+            *canvasSourcePreview = QImage();
+        }
+        refreshCanvasPreview();
     };
     connect(m_pUndoStack, &QUndoStack::indexChanged, dock,
             [this](int) { refreshMprSettingsDock(); });

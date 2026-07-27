@@ -89,6 +89,24 @@ void writeU32(QByteArray* bytes, quint64 offset, quint32 value)
         reinterpret_cast<uchar*>(bytes->data() + offset));
 }
 
+void writeU16(QByteArray* bytes, quint64 offset, quint16 value)
+{
+    qToLittleEndian<quint16>(value,
+        reinterpret_cast<uchar*>(bytes->data() + offset));
+}
+
+quint32 resourceNameHash(const QByteArray& encodedName, quint32 tableSize)
+{
+    quint32 sum = 0;
+    QTextCodec* codec = QTextCodec::codecForName("CP1251");
+    const QByteArray normalized = codec
+        ? codec->fromUnicode(codec->toUnicode(encodedName).toLower())
+        : encodedName.toLower();
+    for(const unsigned char byte : normalized)
+        sum += byte;
+    return tableSize ? sum % tableSize : 0;
+}
+
 QString normalizedName(const QString& name)
 {
     return name.toCaseFolded();
@@ -728,6 +746,308 @@ bool CMprDocument::appendMaxZEdit(float newMaxZ,
     QByteArray replacement = member.payload;
     writeF32(&replacement, 4, newMaxZ);
     transaction->replaceMemberPayload(member.name, member.sha256, replacement);
+    return true;
+}
+
+bool CMprDocument::buildResizedCanvas(const SMprCanvasResizeRequest& request,
+                                      QByteArray* output,
+                                      CValidationReport* report) const
+{
+    if(output)
+        output->clear();
+    const auto fail = [report](const QString& code, const QString& message,
+                               const QString& location = QString()) {
+        if(report)
+            report->add(code, EValidationSeverity::Error, message, location);
+        return false;
+    };
+    if(!output)
+        return fail("mpr.resize.output", "No output buffer was supplied.");
+    if(!m_mapInfo.valid)
+        return fail("mpr.resize.map", "The MPR has no valid MP member.");
+    if(request.sectorCountX < 1 || request.sectorCountY < 1
+       || request.sectorCountX > 32 || request.sectorCountY > 32)
+    {
+        return fail("mpr.resize.dimensions",
+                    "MPR canvas dimensions must be between 1 and 32 sectors per axis.");
+    }
+    if(request.sectorCountX == m_mapInfo.sectorCountX
+       && request.sectorCountY == m_mapInfo.sectorCountY
+       && request.oldSectorOffsetX == 0 && request.oldSectorOffsetY == 0)
+    {
+        *output = m_originalBytes;
+        return true;
+    }
+
+    const int oldWidth = int(m_mapInfo.sectorCountX);
+    const int oldHeight = int(m_mapInfo.sectorCountY);
+    if(oldWidth < 1 || oldHeight < 1)
+        return fail("mpr.resize.source_dimensions", "The source canvas is empty.");
+
+    QVector<const SMprSectorInfo*> sourceGrid(oldWidth * oldHeight, nullptr);
+    for(const SMprSectorInfo& sector : m_sectors)
+    {
+        if(sector.sectorX < 0 || sector.sectorX >= oldWidth
+           || sector.sectorY < 0 || sector.sectorY >= oldHeight)
+        {
+            return fail("mpr.resize.extra_sector",
+                        "A namespace SEC lies outside the declared source canvas.",
+                        sector.memberName);
+        }
+        if(sector.type != 0 && sector.type != 3)
+            return fail("mpr.resize.unknown_sector",
+                        "Unknown SEC layouts are preservation-only and cannot be resized.",
+                        sector.memberName);
+        const int gridIndex = sector.sectorY * oldWidth + sector.sectorX;
+        if(sourceGrid.at(gridIndex))
+            return fail("mpr.resize.duplicate_sector",
+                        "The source canvas has duplicate SEC coordinates.",
+                        sector.memberName);
+        sourceGrid[gridIndex] = &sector;
+    }
+    for(int index = 0; index < sourceGrid.size(); ++index)
+        if(!sourceGrid.at(index))
+            return fail("mpr.resize.missing_sector",
+                        "The source canvas does not have exactly one SEC per coordinate.");
+
+    const int firstRetainedX = qMax(0, -request.oldSectorOffsetX);
+    const int firstRetainedY = qMax(0, -request.oldSectorOffsetY);
+    const int lastRetainedX = qMin(oldWidth,
+        int(request.sectorCountX) - request.oldSectorOffsetX);
+    const int lastRetainedY = qMin(oldHeight,
+        int(request.sectorCountY) - request.oldSectorOffsetY);
+    if(firstRetainedX >= lastRetainedX || firstRetainedY >= lastRetainedY)
+        return fail("mpr.resize.empty_intersection",
+                    "The resized canvas must retain at least one source sector.");
+
+    struct BuildMember
+    {
+        QByteArray name;
+        QByteArray payload;
+        quint32 timestamp{0};
+        quint32 dataOffset{0};
+        quint32 nameOffset{0};
+    };
+    QVector<BuildMember> buildMembers;
+    buildMembers.reserve(m_members.size() - m_sectors.size()
+                         + int(request.sectorCountX * request.sectorCountY));
+    QTextCodec* cp1251 = QTextCodec::codecForName("CP1251");
+    if(!cp1251)
+        return fail("mpr.resize.encoding", "The CP1251 codec is unavailable.");
+
+    const int mpIndex = uniqueMemberIndex(m_mapInfo.memberName);
+    if(mpIndex < 0)
+        return fail("mpr.resize.mp_member", "The MP member is missing or ambiguous.");
+    quint32 generatedTimestamp = m_members.at(mpIndex).lastWriteTime;
+    for(int index = 0; index < m_members.size(); ++index)
+    {
+        const SMprArchiveMember& member = m_members.at(index);
+        if(member.kind == EMprMemberKind::Sector)
+            continue;
+        BuildMember built;
+        built.name = member.encodedName;
+        built.payload = member.payload;
+        built.timestamp = member.lastWriteTime;
+        if(index == mpIndex)
+        {
+            writeU32(&built.payload, 8, request.sectorCountX);
+            writeU32(&built.payload, 12, request.sectorCountY);
+        }
+        buildMembers.append(built);
+    }
+
+    const auto sourceSector = [&](int x, int y) -> const SMprSectorInfo* {
+        return sourceGrid.at(y * oldWidth + x);
+    };
+    const auto sourcePayload = [&](const SMprSectorInfo* sector) -> const QByteArray& {
+        return m_members.at(sector->memberIndex).payload;
+    };
+    const auto sampledLandVertex = [&](int globalX, int globalY) {
+        const int clampedX = qBound(0, globalX, oldWidth * 32);
+        const int clampedY = qBound(0, globalY, oldHeight * 32);
+        const int sectorX = qMin(clampedX / 32, oldWidth - 1);
+        const int sectorY = qMin(clampedY / 32, oldHeight - 1);
+        const int localX = clampedX - sectorX * 32;
+        const int localY = clampedY - sectorY * 32;
+        const QByteArray& payload = sourcePayload(sourceSector(sectorX, sectorY));
+        return payload.mid(5 + (localY * 33 + localX) * int(kSectorVertexSize),
+                           int(kSectorVertexSize));
+    };
+    const auto sampledLandTile = [&](int globalX, int globalY) {
+        const int clampedX = qBound(0, globalX, oldWidth * 16 - 1);
+        const int clampedY = qBound(0, globalY, oldHeight * 16 - 1);
+        const int sectorX = clampedX / 16;
+        const int sectorY = clampedY / 16;
+        const int localX = clampedX - sectorX * 16;
+        const int localY = clampedY - sectorY * 16;
+        const SMprSectorInfo* sector = sourceSector(sectorX, sectorY);
+        const QByteArray& payload = sourcePayload(sector);
+        return payload.mid(int(sector->landTileOffset)
+                           + (localY * 16 + localX) * int(kSectorTileSize),
+                           int(kSectorTileSize));
+    };
+
+    QMap<QString, QByteArray> expectedRetainedPayloads;
+    for(int destinationY = 0; destinationY < int(request.sectorCountY); ++destinationY)
+    {
+        for(int destinationX = 0; destinationX < int(request.sectorCountX); ++destinationX)
+        {
+            const int oldX = destinationX - request.oldSectorOffsetX;
+            const int oldY = destinationY - request.oldSectorOffsetY;
+            BuildMember built;
+            const QString name = QString("%1%2%3.sec")
+                .arg(m_mapInfo.innerNamespace)
+                .arg(destinationX, 3, 10, QChar('0'))
+                .arg(destinationY, 3, 10, QChar('0'));
+            built.name = cp1251->fromUnicode(name);
+            built.timestamp = generatedTimestamp;
+            if(oldX >= 0 && oldX < oldWidth && oldY >= 0 && oldY < oldHeight)
+            {
+                const SMprSectorInfo* retained = sourceSector(oldX, oldY);
+                built.payload = sourcePayload(retained);
+                built.timestamp = m_members.at(retained->memberIndex).lastWriteTime;
+                expectedRetainedPayloads.insert(name.toCaseFolded(), built.payload);
+            }
+            else
+            {
+                built.payload = QByteArray(int(kLandSectorSize), '\0');
+                writeU32(&built.payload, 0, kSectorSignature);
+                built.payload[4] = char(0);
+                for(int localY = 0; localY < 33; ++localY)
+                    for(int localX = 0; localX < 33; ++localX)
+                    {
+                        const int sourceGlobalX = destinationX * 32 + localX
+                            - request.oldSectorOffsetX * 32;
+                        const int sourceGlobalY = destinationY * 32 + localY
+                            - request.oldSectorOffsetY * 32;
+                        built.payload.replace(5 + (localY * 33 + localX)
+                                              * int(kSectorVertexSize),
+                                              int(kSectorVertexSize),
+                                              sampledLandVertex(sourceGlobalX, sourceGlobalY));
+                    }
+                const int tileOffset = 5 + int(kSectorVertexCount * kSectorVertexSize);
+                for(int localY = 0; localY < 16; ++localY)
+                    for(int localX = 0; localX < 16; ++localX)
+                    {
+                        const int sourceGlobalX = destinationX * 16 + localX
+                            - request.oldSectorOffsetX * 16;
+                        const int sourceGlobalY = destinationY * 16 + localY
+                            - request.oldSectorOffsetY * 16;
+                        built.payload.replace(tileOffset + (localY * 16 + localX) * 2,
+                                              2, sampledLandTile(sourceGlobalX, sourceGlobalY));
+                    }
+            }
+            buildMembers.append(built);
+        }
+    }
+
+    QSet<QByteArray> uniqueNames;
+    for(const BuildMember& member : buildMembers)
+    {
+        const QByteArray folded = cp1251->fromUnicode(
+            cp1251->toUnicode(member.name).toCaseFolded());
+        if(member.name.isEmpty() || uniqueNames.contains(folded))
+            return fail("mpr.resize.member_names",
+                        "The resized archive has an empty or duplicate member name.");
+        uniqueNames.insert(folded);
+    }
+
+    QByteArray candidate(int(kResHeaderSize), '\0');
+    QByteArray names;
+    for(BuildMember& member : buildMembers)
+    {
+        candidate.append(QByteArray((16 - (candidate.size() % 16)) % 16, '\0'));
+        if(quint64(candidate.size()) + quint64(member.payload.size())
+           > quint64(std::numeric_limits<quint32>::max()))
+            return fail("mpr.resize.archive_size", "The resized archive exceeds 32-bit offsets.");
+        member.dataOffset = quint32(candidate.size());
+        member.nameOffset = quint32(names.size());
+        candidate.append(member.payload);
+        names.append(member.name);
+    }
+    candidate.append(QByteArray((16 - (candidate.size() % 16)) % 16, '\0'));
+    const quint32 tableOffset = quint32(candidate.size());
+    const quint32 count = quint32(buildMembers.size());
+    QVector<int> tableSlots(int(count), -1);
+    QVector<quint32> next(int(count), quint32(-1));
+    int lastFree = int(count) - 1;
+    for(int memberIndex = 0; memberIndex < buildMembers.size(); ++memberIndex)
+    {
+        int slot = int(resourceNameHash(buildMembers.at(memberIndex).name, count));
+        if(tableSlots.at(slot) >= 0)
+        {
+            while(next.at(slot) != quint32(-1))
+                slot = int(next.at(slot));
+            while(lastFree >= 0 && tableSlots.at(lastFree) >= 0)
+                --lastFree;
+            if(lastFree < 0)
+                return fail("mpr.resize.hash_table", "The RES hash table has no collision slot.");
+            next[slot] = quint32(lastFree);
+            slot = lastFree--;
+        }
+        tableSlots[slot] = memberIndex;
+    }
+    QByteArray table(int(quint64(count) * kResEntrySize), '\0');
+    for(int slot = 0; slot < tableSlots.size(); ++slot)
+    {
+        if(tableSlots.at(slot) < 0)
+            return fail("mpr.resize.hash_table", "The RES hash table contains an empty slot.");
+        const BuildMember& member = buildMembers.at(tableSlots.at(slot));
+        const quint64 entry = quint64(slot) * kResEntrySize;
+        writeU32(&table, entry, next.at(slot));
+        writeU32(&table, entry + 4, quint32(member.payload.size()));
+        writeU32(&table, entry + 8, member.dataOffset);
+        writeU32(&table, entry + 12, member.timestamp);
+        writeU16(&table, entry + 16, quint16(member.name.size()));
+        writeU32(&table, entry + 18, member.nameOffset);
+    }
+    candidate.append(table);
+    candidate.append(names);
+    const quint64 originalTrailerOffset = quint64(m_tableOffset)
+        + quint64(m_members.size()) * kResEntrySize + m_namesLength;
+    if(originalTrailerOffset < quint64(m_originalBytes.size()))
+        candidate.append(m_originalBytes.mid(int(originalTrailerOffset)));
+    writeU32(&candidate, 0, kResSignature);
+    writeU32(&candidate, 4, count);
+    writeU32(&candidate, 8, tableOffset);
+    writeU32(&candidate, 12, quint32(names.size()));
+
+    CMprDocument reopened;
+    CValidationReport reopenedReport;
+    if(!reopened.loadBytes(candidate, QStringLiteral("resized-candidate.mpr"),
+                           &reopenedReport) || reopenedReport.hasErrors())
+    {
+        copyFindings(reopenedReport, report);
+        return fail("mpr.resize.reopen", "The resized archive failed a fresh semantic reopen.");
+    }
+    if(reopened.mapInfo().sectorCountX != request.sectorCountX
+       || reopened.mapInfo().sectorCountY != request.sectorCountY
+       || reopened.sectors().size() != int(request.sectorCountX * request.sectorCountY))
+        return fail("mpr.resize.coverage", "The resized archive has incomplete sector coverage.");
+    for(const SMprArchiveMember& original : m_members)
+    {
+        if(original.kind != EMprMemberKind::Unknown)
+            continue;
+        if(reopened.memberPayload(original.name) != original.payload)
+            return fail("mpr.resize.unknown_member",
+                        "A preservation-only archive member changed.", original.name);
+    }
+    for(auto it = expectedRetainedPayloads.constBegin();
+        it != expectedRetainedPayloads.constEnd(); ++it)
+    {
+        if(reopened.memberPayload(it.key()) != it.value())
+            return fail("mpr.resize.retained_sector",
+                        "A retained SEC payload changed.", it.key());
+    }
+
+    *output = candidate;
+    if(report)
+        report->add("mpr.resize", EValidationSeverity::Info,
+                    QString("Prepared %1 x %2 sectors; old canvas offset %3, %4; "
+                            "%5 retained sector payload(s) stayed byte-identical.")
+                        .arg(request.sectorCountX).arg(request.sectorCountY)
+                        .arg(request.oldSectorOffsetX).arg(request.oldSectorOffsetY)
+                        .arg(expectedRetainedPayloads.size()));
     return true;
 }
 

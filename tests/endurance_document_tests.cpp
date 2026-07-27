@@ -3,6 +3,7 @@
 #include <QSet>
 #include <QTemporaryFile>
 #include <QTemporaryDir>
+#include <QTextCodec>
 
 #include <limits>
 
@@ -259,6 +260,50 @@ QByteArray syntheticLandSector(quint16 height)
     return bytes;
 }
 
+quint32 testReadU32(const QByteArray& bytes, int offset)
+{
+    QDataStream stream(bytes.mid(offset, 4));
+    stream.setByteOrder(QDataStream::LittleEndian);
+    quint32 value = 0;
+    stream >> value;
+    return value;
+}
+
+QByteArray runtimeMprLookup(const QByteArray& archive, const QString& requested)
+{
+    const quint32 count = testReadU32(archive, 4);
+    const quint32 tableOffset = testReadU32(archive, 8);
+    const quint32 namesLength = testReadU32(archive, 12);
+    if(!count || tableOffset + count * 22 + namesLength > quint32(archive.size()))
+        return {};
+    QTextCodec* codec = QTextCodec::codecForName("CP1251");
+    const QByteArray wanted = codec->fromUnicode(requested.toLower());
+    quint32 sum = 0;
+    for(const unsigned char byte : wanted)
+        sum += byte;
+    quint32 slot = sum % count;
+    QSet<quint32> visited;
+    while(slot != quint32(-1) && slot < count && !visited.contains(slot))
+    {
+        visited.insert(slot);
+        const int entry = int(tableOffset + slot * 22);
+        const quint32 next = testReadU32(archive, entry);
+        const quint32 size = testReadU32(archive, entry + 4);
+        const quint32 offset = testReadU32(archive, entry + 8);
+        QDataStream nameStream(archive.mid(entry + 16, 2));
+        nameStream.setByteOrder(QDataStream::LittleEndian);
+        quint16 nameLength = 0;
+        nameStream >> nameLength;
+        const quint32 nameOffset = testReadU32(archive, entry + 18);
+        const QByteArray encoded = archive.mid(
+            int(tableOffset + count * 22 + nameOffset), nameLength);
+        if(codec->toUnicode(encoded).compare(requested, Qt::CaseInsensitive) == 0)
+            return archive.mid(int(offset), int(size));
+        slot = next;
+    }
+    return {};
+}
+
 quint32 sectorPackedNormal(const QByteArray& sector, int x, int y)
 {
     const int offset = 5 + (y * 33 + x) * 8 + 4;
@@ -351,6 +396,11 @@ private slots:
     void transactionRejectsStaleProvenance();
     void cp1251EncodingIsStrict();
     void unchangedMprIsByteIdentical();
+    void mprCanvasResizeCropsAndRenamesRetainedSectorLosslessly();
+    void mprCanvasResizeExpandsBoundaryWithRuntimeReachableMembers();
+    void mprCanvasResizeAcceptsStructural32By32Ceiling();
+    void mprCanvasResizeRejectsInvalidOrEmptyIntersection();
+    void mprCanvasResizeCommitIsSaveAsOnlyAndAtomic();
     void syntheticMprPreservesArchiveNamespaceAndInactiveSentinel();
     void mprSectorPatchIsProvenanceCheckedAndLocal();
     void mprMaxZPatchIsProvenanceCheckedAndLocal();
@@ -1340,6 +1390,161 @@ void EnduranceDocumentTests::unchangedMprIsByteIdentical()
     QVERIFY(document.load(QFileInfo(file.fileName()), &report));
     QCOMPARE(document.serialize(), bytes);
     QVERIFY(!document.isDirty());
+}
+
+void EnduranceDocumentTests::mprCanvasResizeCropsAndRenamesRetainedSectorLosslessly()
+{
+    const QByteArray left = syntheticLandSector(1200);
+    const QByteArray right = syntheticLandSector(42000);
+    CMprDocument baseline;
+    CValidationReport loadReport;
+    QVERIFY2(baseline.loadBytes(syntheticTwoSectorMpr(left, right),
+                                "crop-source.mpr", &loadReport),
+             qPrintable(loadReport.toText()));
+
+    SMprCanvasResizeRequest request;
+    request.sectorCountX = 1;
+    request.sectorCountY = 1;
+    request.oldSectorOffsetX = -1;
+    QByteArray candidate;
+    CValidationReport report;
+    QVERIFY2(baseline.buildResizedCanvas(request, &candidate, &report),
+             qPrintable(report.toText()));
+    QVERIFY(candidate != baseline.originalBytes());
+
+    CMprDocument reopened;
+    CValidationReport reopenReport;
+    QVERIFY2(reopened.loadBytes(candidate, "crop-result.mpr", &reopenReport),
+             qPrintable(reopenReport.toText()));
+    QCOMPARE(reopened.mapInfo().sectorCountX, quint32(1));
+    QCOMPARE(reopened.mapInfo().sectorCountY, quint32(1));
+    QCOMPARE(reopened.memberPayload("CaveSet000000.SEC"), right);
+    QVERIFY(reopened.memberPayload("CaveSet001000.SEC").isEmpty());
+}
+
+void EnduranceDocumentTests::mprCanvasResizeExpandsBoundaryWithRuntimeReachableMembers()
+{
+    const QByteArray source = syntheticLandSector(17321);
+    CMprDocument baseline;
+    CValidationReport loadReport;
+    QVERIFY2(baseline.loadBytes(syntheticMpr(source), "expand-source.mpr", &loadReport),
+             qPrintable(loadReport.toText()));
+
+    SMprCanvasResizeRequest request;
+    request.sectorCountX = 3;
+    request.sectorCountY = 2;
+    request.oldSectorOffsetX = 1;
+    request.oldSectorOffsetY = 1;
+    QByteArray candidate;
+    CValidationReport report;
+    QVERIFY2(baseline.buildResizedCanvas(request, &candidate, &report),
+             qPrintable(report.toText()));
+
+    CMprDocument reopened;
+    CValidationReport reopenReport;
+    QVERIFY2(reopened.loadBytes(candidate, "expand-result.mpr", &reopenReport),
+             qPrintable(reopenReport.toText()));
+    QCOMPARE(reopened.mapInfo().sectorCountX, quint32(3));
+    QCOMPARE(reopened.mapInfo().sectorCountY, quint32(2));
+    QCOMPARE(reopened.memberPayload("unknown.bin"), QByteArray("opaque-unknown-payload"));
+    QCOMPARE(reopened.memberPayload("CaveSet001001.SEC"), source);
+    QCOMPARE(sectorHeight(reopened.memberPayload("CaveSet000000.SEC"), 0, 0),
+             quint16(17321));
+
+    for(const SMprArchiveMember& member : reopened.members())
+        QCOMPARE(runtimeMprLookup(candidate, member.name), member.payload);
+}
+
+void EnduranceDocumentTests::mprCanvasResizeAcceptsStructural32By32Ceiling()
+{
+    CMprDocument baseline;
+    CValidationReport loadReport;
+    QVERIFY2(baseline.loadBytes(syntheticMpr(syntheticLandSector(500)),
+                                "maximum-source.mpr", &loadReport),
+             qPrintable(loadReport.toText()));
+    SMprCanvasResizeRequest request;
+    request.sectorCountX = 32;
+    request.sectorCountY = 32;
+    QByteArray candidate;
+    CValidationReport report;
+    QVERIFY2(baseline.buildResizedCanvas(request, &candidate, &report),
+             qPrintable(report.toText()));
+    CMprDocument reopened;
+    CValidationReport reopenReport;
+    QVERIFY2(reopened.loadBytes(candidate, "maximum-result.mpr", &reopenReport),
+             qPrintable(reopenReport.toText()));
+    QCOMPARE(reopened.sectors().size(), 32 * 32);
+    QCOMPARE(reopened.mapInfo().sectorCountX * 8, quint32(256));
+    QCOMPARE(reopened.mapInfo().sectorCountY * 8, quint32(256));
+}
+
+void EnduranceDocumentTests::mprCanvasResizeRejectsInvalidOrEmptyIntersection()
+{
+    CMprDocument baseline;
+    CValidationReport loadReport;
+    QVERIFY(baseline.loadBytes(syntheticMpr(syntheticLandSector(500)),
+                               "refusal-source.mpr", &loadReport));
+    QByteArray candidate("must-clear");
+    CValidationReport tooLargeReport;
+    SMprCanvasResizeRequest tooLarge;
+    tooLarge.sectorCountX = 33;
+    tooLarge.sectorCountY = 1;
+    QVERIFY(!baseline.buildResizedCanvas(tooLarge, &candidate, &tooLargeReport));
+    QVERIFY(candidate.isEmpty());
+    QVERIFY(tooLargeReport.hasErrors());
+
+    CValidationReport emptyReport;
+    SMprCanvasResizeRequest empty;
+    empty.sectorCountX = 1;
+    empty.sectorCountY = 1;
+    empty.oldSectorOffsetX = 2;
+    QVERIFY(!baseline.buildResizedCanvas(empty, &candidate, &emptyReport));
+    QVERIFY(candidate.isEmpty());
+    QVERIFY(emptyReport.hasErrors());
+}
+
+void EnduranceDocumentTests::mprCanvasResizeCommitIsSaveAsOnlyAndAtomic()
+{
+    QTemporaryDir root;
+    QVERIFY(root.isValid());
+    const QFileInfo source(root.filePath("source.mpr"));
+    QFile sourceFile(source.absoluteFilePath());
+    QVERIFY(sourceFile.open(QIODevice::WriteOnly));
+    const QByteArray sourceBytes = syntheticMpr(syntheticLandSector(1000));
+    QCOMPARE(sourceFile.write(sourceBytes), qint64(sourceBytes.size()));
+    sourceFile.close();
+    CMprDocument baseline;
+    CValidationReport report;
+    QVERIFY(baseline.load(source, &report));
+
+    SMprCanvasResizeRequest resize;
+    resize.sectorCountX = 2;
+    resize.sectorCountY = 1;
+    SMprSaveCommitRequest overwriteSource;
+    overwriteSource.source = source;
+    overwriteSource.destination = source;
+    overwriteSource.backupRootOverride = root.filePath("backups");
+    const SMprSaveCommitResult refused = commitStagedMprCanvasResize(
+        baseline, baseline, resize, overwriteSource);
+    QVERIFY(!refused.success);
+    QFile unchanged(source.absoluteFilePath());
+    QVERIFY(unchanged.open(QIODevice::ReadOnly));
+    QCOMPARE(unchanged.readAll(), sourceBytes);
+
+    const QFileInfo destination(root.filePath("resized.mpr"));
+    SMprSaveCommitRequest commit;
+    commit.source = source;
+    commit.destination = destination;
+    commit.backupRootOverride = root.filePath("backups");
+    const SMprSaveCommitResult result = commitStagedMprCanvasResize(
+        baseline, baseline, resize, commit);
+    QVERIFY2(result.success, qPrintable(result.error));
+    QVERIFY(destination.exists());
+    CMprDocument reopened;
+    CValidationReport reopenReport;
+    QVERIFY2(reopened.load(destination, &reopenReport), qPrintable(reopenReport.toText()));
+    QCOMPARE(reopened.mapInfo().sectorCountX, quint32(2));
+    QCOMPARE(reopened.mapInfo().sectorCountY, quint32(1));
 }
 
 void EnduranceDocumentTests::syntheticMprPreservesArchiveNamespaceAndInactiveSentinel()

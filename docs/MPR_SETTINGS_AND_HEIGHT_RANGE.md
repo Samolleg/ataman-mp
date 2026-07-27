@@ -86,6 +86,27 @@ Existing-map resizing must initially be **Save As** only. It must never silently
 invent map registration, entrances, minimap identity, atlas imagery, overlay
 content, or catalog metadata.
 
+The first enabled slice accepts `1 x 1` through `32 x 32` sectors. The upper
+bound is experimental: 32 sectors produce 256 navigation cells per axis, the
+runtime graph-format ceiling independently confirmed from shipped behavior.
+The installed corpus currently reaches 16 x 16; game-side testing of a copied
+32 x 32 derivative decides whether the editor should expose a lower practical
+limit.
+
+The old canvas is placed inside the new canvas using a nine-point anchor. A
+positive old-canvas offset adds space before the source; a negative offset
+crops it there. Retained SEC payloads are copied byte-for-byte and renamed only
+when their coordinates move. New sectors contain land only and extend the
+nearest source boundary height, packed vertex data, and tile; overlays are not
+invented. Preservation-only archive members and archive trailer bytes remain
+unchanged. The member table is necessarily rebuilt because its modulus changes,
+using runtime-reachable CP1251 case-folded hash slots and collision chains.
+
+If loaded MOB data would need an origin translation, this initial slice refuses
+the operation. The follow-up companion must translate every proven spatial
+record, offer deletion of records outside the new bounds, and write a separately
+named MOB; it must never overwrite the source MOB.
+
 ## Planned MPR Settings presentation
 
 The settings window should separate:
@@ -114,7 +135,8 @@ types or silently modify atlas resources.
   backup, source-race refusal, and atomic replacement.
 - `maxZ` migration is enabled only through its dedicated undoable staged
   transaction, with synthetic reopen and untouched-member equality coverage.
-  Crop/expand remains disabled until its separate transaction proves runtime
-  hash-chain construction, untouched-member equality, and private copied
-  Base/JMV validation.
+  Crop/expand now has synthetic coverage for retained payload equality,
+  boundary projection, runtime hash reachability, the 32 x 32 structural limit,
+  invalid intersections, Save-As-only refusal, fresh reopen, and atomic commit.
+  Copied Base/JMV runtime validation remains a release gate.
 - Live installations and proprietary map corpora are never mutation targets.
