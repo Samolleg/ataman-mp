@@ -8790,7 +8790,17 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
     brush.centerX = tileLoc.xSec * 16 + tileLoc.col;
     brush.centerY = tileLoc.ySec * 16 + tileLoc.row;
     const QPoint brushCenter(brush.centerX, brush.centerY);
-    if(m_tilePaintStrokeActive && m_lastTerrainPaintCenterValid
+    // A press can miss a disconnected overlay while a later drag sample hits
+    // land or an existing surface. Never allow that first valid sample to
+    // mutate the canonical model without opening an undo-owned stroke.
+    beginTileBrushGroup();
+    if(!m_tileBrushStrokePolicy.isActive())
+    {
+        ei::log(eLogWarning,
+            "Terrain paint sample refused because no undo-owned stroke is active");
+        return;
+    }
+    if(m_tileBrushStrokePolicy.isActive() && m_lastTerrainPaintCenterValid
        && m_lastTerrainPaintCenter == brushCenter
        && m_lastTerrainPaintLayerLand == bLand)
         return;
@@ -8965,7 +8975,7 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
             ++m_tileStrokeNoOps;
         if(report.hasErrors())
             ei::log(eLogWarning, "Semantic terrain paint refused:\n" + report.toText());
-        if(!m_tilePaintStrokeActive || report.hasErrors())
+        if(!m_tileBrushStrokePolicy.isActive() || report.hasErrors())
             emit updateMsg(report.findings().isEmpty()
                 ? tr("The terrain material is already resolved at this brush position.")
                 : report.toText());
@@ -9007,7 +9017,7 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
             .arg(audit.semantic.solverMode).arg(audit.semantic.solverNodes);
     // The exported diagnostic retains every action. Keep synchronous workflow
     // logging off the pointer hot path and emit one summary on release.
-    if(!m_tilePaintStrokeActive || audit.outcome == QStringLiteral("refused"))
+    if(!m_tileBrushStrokePolicy.isActive() || audit.outcome == QStringLiteral("refused"))
         ei::log(audit.outcome == QStringLiteral("refused") ? eLogWarning : eLogInfo,
                 actionLog);
 }
@@ -9198,9 +9208,9 @@ void CView::pickQuickAccessTile(int index)
 
 void CView::endTileBrushGroup()
 {
-    if(m_tilePaintStrokeActive)
+    if(m_tileBrushStrokePolicy.finish())
     {
-        m_tilePaintStrokeActive = false;
+        const int undoIndexBefore = m_pUndoStack ? m_pUndoStack->index() : -1;
         if(!m_overlaySurfaceStrokeCommand.isEmpty())
         {
             CValidationReport report;
@@ -9217,12 +9227,33 @@ void CView::endTileBrushGroup()
             else
                 m_overlaySurfaceStrokeCommand = exactCommand;
         }
+        QString committedDescription;
+        int committedSectorCount = 0;
         if(m_pUndoStack && !m_overlaySurfaceStrokeCommand.isEmpty())
+        {
+            committedDescription = m_overlaySurfaceStrokeCommand.description;
+            committedSectorCount = m_overlaySurfaceStrokeCommand.sectors.size();
             m_pUndoStack->push(new COverlaySurfacePreviewCommand(
                 this, m_overlaySurfaceStrokeCommand, true));
+        }
         else if(m_pUndoStack && !m_tileStrokeCommand.isEmpty())
+        {
+            committedDescription = m_tileStrokeCommand.description;
             m_pUndoStack->push(new CTerrainTilePreviewCommand(
                 this, m_tileStrokeCommand, true));
+        }
+        const int undoIndexAfter = m_pUndoStack ? m_pUndoStack->index() : -1;
+        if(!committedDescription.isEmpty())
+            ei::log(eLogInfo, QString(
+                "Terrain stroke undo transaction committed: stroke=%1 description=%2 sectors=%3 history=%4->%5")
+                    .arg(m_tileBrushCommandId).arg(committedDescription)
+                    .arg(committedSectorCount).arg(undoIndexBefore)
+                    .arg(undoIndexAfter));
+        else if(m_tileStrokeApplied > 0)
+            ei::log(eLogFatal, QString(
+                "Terrain stroke safety invariant failed: stroke=%1 applied=%2 history=%3; no undo command was committed")
+                    .arg(m_tileBrushCommandId).arg(m_tileStrokeApplied)
+                    .arg(undoIndexBefore));
         m_pLand->setDirty(m_terrainEdit.isDirty());
         emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMprDirtyFlag,
                                   m_terrainEdit.isDirty() ? "*" : "");
@@ -9253,9 +9284,8 @@ void CView::endTileBrushGroup()
 
 void CView::beginTileBrushGroup()
 {
-    if(m_tilePaintStrokeActive || !m_pUndoStack)
+    if(!m_tileBrushStrokePolicy.ensureForValidSample(true, m_pUndoStack != nullptr))
         return;
-    m_tilePaintStrokeActive = true;
     m_tileStrokeCommand = STerrainTileCommand();
     m_tileStrokeCommand.description = tr("Paint terrain tiles");
     m_overlaySurfaceStrokeCommand = SOverlaySurfaceCommand();
@@ -9303,7 +9333,7 @@ bool CView::applyTerrainTilePreview(const STerrainTileCommand& command, bool for
                     "Tile model changed but preview renderer rejected sector %1,%2")
                         .arg(sector.first).arg(sector.second));
     m_pLand->setDirty(m_terrainEdit.isDirty());
-    if(!m_tilePaintStrokeActive)
+    if(!m_tileBrushStrokePolicy.isActive())
     {
         emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMprDirtyFlag,
                                   m_terrainEdit.isDirty() ? "*" : "");
@@ -9362,7 +9392,7 @@ bool CView::applyOverlaySurfacePreview(const SOverlaySurfaceCommand& command,
     m_aiGraphOverlayDirty = true;
     // Terrain sculpt already defers title/status work until stroke release.
     // Keep overlay stamps on the same hot-path contract.
-    if(!m_sculptStrokeActive && !m_tilePaintStrokeActive)
+    if(!m_sculptStrokeActive && !m_tileBrushStrokePolicy.isActive())
         emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMprDirtyFlag,
                                   m_terrainEdit.isDirty() ? "*" : "");
     if(!m_terrainPreviewBatchActive)

@@ -33,6 +33,7 @@
 #include "ai_graph_document.h"
 #include "ai_graph_preview_builder.h"
 #include "minimap_bake.h"
+#include "tile_brush_stroke_policy.h"
 
 class QLineEdit;
 class QFrame;
@@ -580,7 +581,7 @@ private:
     quint32 m_terrainSemanticSeed{0};
     bool m_terrainEditAvailable;
     bool m_landscapeInteractionSuspended{false};
-    bool m_tilePaintStrokeActive{false};
+    CTileBrushStrokePolicy m_tileBrushStrokePolicy;
     bool m_terrainPaintOutlineValid{false};
     bool m_terrainPaintOutlineGeometryDirty{true};
     QVector<QVector3D> m_terrainPaintOutlineVertices;

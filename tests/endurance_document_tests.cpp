@@ -9,6 +9,7 @@
 #include "endurance_document.h"
 #include "landscape_edit_policy.h"
 #include "operation_history_policy.h"
+#include "tile_brush_stroke_policy.h"
 #include "terrain_edit_model.h"
 #include "terrain_atlas_analyzer.h"
 #include "terrain_atlas_profile.h"
@@ -314,6 +315,7 @@ class EnduranceDocumentTests : public QObject
 
 private slots:
     void persistentPaintOperationSurvivesHistoryNavigation();
+    void tileBrushFirstValidSampleOwnsUndoStroke();
     void persistentPaintOperationSurvivesDocumentTransition();
     void landscapeLayerChangesResetBrushSelection();
     void landscapeWheelDirectionUsesAvailableDelta();
@@ -397,6 +399,28 @@ void EnduranceDocumentTests::persistentPaintOperationSurvivesHistoryNavigation()
     QVERIFY(!operationAllowsHistoryNavigation(eOperationMethodMoveAxis));
     QVERIFY(!operationAllowsHistoryNavigation(eOperationMethodRotateAxis));
     QVERIFY(!operationAllowsHistoryNavigation(eOperationMethodScaleAxis));
+}
+
+void EnduranceDocumentTests::tileBrushFirstValidSampleOwnsUndoStroke()
+{
+    CTileBrushStrokePolicy policy;
+    QVERIFY(!policy.ensureForValidSample(false, true));
+    QVERIFY(!policy.isActive());
+
+    // Regression: the press misses empty overlay space, then a move reaches an
+    // existing surface. That first valid move must open the transaction.
+    QVERIFY(policy.ensureForValidSample(true, true));
+    QVERIFY(policy.isActive());
+    QVERIFY(!policy.ensureForValidSample(true, true));
+    QVERIFY(policy.finish());
+    QVERIFY(!policy.isActive());
+
+    // A valid release after a missed press is also a complete one-sample
+    // stroke. With no history owner, no mutation may start.
+    QVERIFY(policy.ensureForValidSample(true, true));
+    QVERIFY(policy.finish());
+    QVERIFY(!policy.ensureForValidSample(true, false));
+    QVERIFY(!policy.isActive());
 }
 
 void EnduranceDocumentTests::landscapeLayerChangesResetBrushSelection()

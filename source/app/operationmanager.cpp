@@ -1196,7 +1196,12 @@ void CTileBrush::mouseReleaseEvent(COperation* pOp, QMouseEvent* pEvent)
         const QVector3D position = m_pView->getTerrainBrushPos(
             pEvent->pos().x(), pEvent->pos().y(), &hit, true);
         if(hit)
+        {
+            // The initial press may have missed a disconnected overlay. The
+            // first valid release sample still owns a complete undo stroke.
+            m_pView->beginTileBrushGroup();
             m_pView->setTile(position, bLand);
+        }
         m_pView->endTileBrushGroup();
     }
     if(!m_pView->isPreviewTile()) // if we finished brushing, we will come here
@@ -1252,6 +1257,10 @@ void CTileBrush::mouseMoveEvent(COperation* pOp, QMouseEvent* pEvent)
             return;
         }
         m_pView->beginTerrainPreviewBatch();
+        // A drag can enter a valid projected surface after its press missed.
+        // Begin is idempotent and guarantees every following stamp belongs to
+        // the release-owned undo transaction.
+        m_pView->beginTileBrushGroup();
         const float distance = m_lastLandPosValid
             ? landPos.distanceToPoint(m_lastLandPos) : 0.0f;
         const float spacing = m_pView->terrainPaintStampSpacing();

@@ -18,6 +18,7 @@ SOURCES += \
 HEADERS += \
     ../source/core/landscape_edit_policy.h \
     ../source/core/operation_history_policy.h \
+    ../source/core/tile_brush_stroke_policy.h \
     ../source/documents/endurance_document.h \
     ../source/documents/mpr_document.h \
     ../source/documents/terrain_edit_model.h \
