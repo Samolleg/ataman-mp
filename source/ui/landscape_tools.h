@@ -2,6 +2,7 @@
 #define LANDSCAPE_TOOLS_H
 
 #include <QWidget>
+#include <QImage>
 #include <QVector>
 
 #include "landscape_edit_policy.h"
@@ -11,8 +12,23 @@ class QCheckBox;
 class QComboBox;
 class QDoubleSpinBox;
 class QLabel;
+class QButtonGroup;
+class QGridLayout;
+class QSlider;
 class QSpinBox;
+class QTabWidget;
+class QToolButton;
 struct SMaterial;
+
+struct STerrainPaintMaterialChoice
+{
+    qint32 id{0};
+    qint32 supportId{0};
+    QString name;
+    QImage thumbnail;
+    int assignedSlots{0};
+    bool cornerOnly{false};
+};
 
 enum class EOverlaySurfaceOperation
 {
@@ -62,10 +78,16 @@ public:
     void adjustPaintSize(int steps);
     void adjustPaintTerrainType(int steps);
     qint32 paintTerrainType(bool* selected = nullptr) const;
+    qint32 paintTerrainSupport() const;
     void setPaintTerrainTypes(const QVector<QPair<qint32, QString>>& landTypes,
                               const QVector<QPair<qint32, QString>>& underwaterTypes,
                               const QVector<QPair<qint32, QString>>& overlayTypes,
                               const QString& status = QString());
+    void setPaintMaterials(const QVector<STerrainPaintMaterialChoice>& landTypes,
+                           const QVector<STerrainPaintMaterialChoice>& underwaterTypes,
+                           const QVector<STerrainPaintMaterialChoice>& overlayTypes,
+                           int assignedSlots, int totalSlots,
+                           const QString& status = QString());
     bool selectPaintTerrainType(qint32 terrainType);
     bool underwaterFamiliesVisible() const;
     void setUnderwaterFamiliesVisible(bool visible);
@@ -92,12 +114,19 @@ private:
     QDoubleSpinBox* m_delta;
     QSpinBox* m_flatten;
     QCheckBox* m_flipVertical;
-    QComboBox* m_paintTerrainType;
-    QDoubleSpinBox* m_paintRadius;
-    QComboBox* m_paintShape;
+    QTabWidget* m_materialTabs;
+    QWidget* m_groundMaterialPage;
+    QWidget* m_overlayMaterialPage;
+    QGridLayout* m_groundMaterialGrid;
+    QGridLayout* m_underwaterMaterialGrid;
+    QGridLayout* m_overlayMaterialGrid;
+    QButtonGroup* m_groundMaterialButtons;
+    QButtonGroup* m_overlayMaterialButtons;
+    QSlider* m_paintRadius;
+    QLabel* m_paintRadiusValue;
+    QToolButton* m_circlePaintShape;
+    QToolButton* m_squarePaintShape;
     QCheckBox* m_manualTileSelection;
-    QCheckBox* m_showUnderwaterFamilies;
-    QCheckBox* m_allowLandFamiliesInOverlay;
     QComboBox* m_overlaySurfaceOperation;
     QComboBox* m_overlayMaterial;
     QLabel* m_overlaySurfaceOperationLabel;
@@ -105,14 +134,16 @@ private:
     QCheckBox* m_showMainTerrain;
     QCheckBox* m_showOverlays;
     QLabel* m_tilesetStatus;
+    QLabel* m_atlasCoverage;
     QWidget* m_sculptControls;
     QWidget* m_paintControls;
-    QVector<QPair<qint32, QString>> m_landPaintTypes;
-    QVector<QPair<qint32, QString>> m_underwaterPaintTypes;
-    QVector<QPair<qint32, QString>> m_overlayPaintTypes;
+    QVector<STerrainPaintMaterialChoice> m_landPaintTypes;
+    QVector<STerrainPaintMaterialChoice> m_underwaterPaintTypes;
+    QVector<STerrainPaintMaterialChoice> m_overlayPaintTypes;
     QString m_paintCatalogStatus;
     void updateModeVisibility();
     void refreshPaintTerrainTypes();
+    void rebuildMaterialPalette();
 };
 
 #endif

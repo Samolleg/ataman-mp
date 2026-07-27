@@ -25,7 +25,9 @@ struct STerrainAtlasProfileFamily
     ETerrainAtlasLayer layer{ETerrainAtlasLayer::Land};
     bool underwater{false};
     bool ambiguous{false};
+    bool paintSelectable{true};
     qint32 tileType{-1};
+    int thumbnailSlot{-1};
     QVector<int> memberSlots;
 };
 
@@ -33,15 +35,16 @@ struct STerrainAtlasProfileSlot
 {
     int slot{-1};
     STerrainTransitionSignature signature;
+    bool assigned{true};
     bool ambiguous{false};
 };
 
 // A profile is always scoped to both an MPR namespace and the exact decoded
-// atlas pixels. Inferred profiles are proposals only; semantic painting must
-// remain disabled until a human has reviewed and approved one.
+// atlas pixels. Structurally valid inferred entries are immediately usable;
+// unresolved entries remain unassigned until a user fixes or excludes them.
 struct STerrainAtlasProfile
 {
-    int schemaVersion{1};
+    int schemaVersion{6};
     QString mprNamespace;
     QByteArray atlasPixelSha256;
     int atlasSlotCount{0};
@@ -62,10 +65,21 @@ struct STerrainAtlasProfile
     bool splitFamily(qint32 familyId, const QVector<int>& selectedSlots,
                      const QString& newName,
                      CValidationReport* report = nullptr);
+    bool assignSlotToFamily(int slot, qint32 familyId,
+                            CValidationReport* report = nullptr);
+    bool replaceSlotFamily(int slot, qint32 sourceFamilyId, qint32 targetFamilyId,
+                           CValidationReport* report = nullptr);
+    bool setSlotCornerFamily(int slot, int corner, qint32 familyId,
+                             CValidationReport* report = nullptr);
+    bool unassignSlot(int slot, CValidationReport* report = nullptr);
+    bool setFamilyThumbnail(qint32 familyId, int slot,
+                            CValidationReport* report = nullptr);
+    int assignedSlotCount() const;
     bool validateBinding(const QString& currentNamespace,
                          const QByteArray& currentAtlasPixelSha256,
                          int currentSlotCount,
                          CValidationReport* report = nullptr) const;
+    STerrainAtlasAnalysis usableAnalysis(CValidationReport* report = nullptr) const;
     STerrainAtlasAnalysis approvedAnalysis(CValidationReport* report = nullptr) const;
 };
 
@@ -101,5 +115,9 @@ public:
         const QVector<STerrainAtlasSlotUsage>& usage,
         CValidationReport* report = nullptr);
 };
+
+QImage terrainVertexJunctionThumbnail(
+    const QVector<QImage>& images, const CTerrainTransitionCatalog& catalog,
+    qint32 materialId, qint32 supportId, int fallbackSlot);
 
 #endif

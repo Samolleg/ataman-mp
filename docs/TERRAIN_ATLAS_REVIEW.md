@@ -1,54 +1,116 @@
-# Semantic terrain atlas review
+# Material atlas
 
-Endurance reads atlas images exactly as the game does. The review tool does not
-edit or generate texture atlases. It creates a namespace- and atlas-hash-bound
-description that tells automatic painting which existing slots represent each
-land or overlay material and which corner transitions they contain.
+Endurance reads the existing atlas images exactly as the game does. It does not
+edit or generate atlas imagery. It builds a material catalog describing which
+existing slots represent Ground, Underwater, or Overlay materials and which
+material appears at each tile corner.
 
-## Review workflow
+Zone 1 is the authored behavioral baseline. Its supplied definition opens with
+the same names, assignments, layers, and thumbnails used by the paint palette
+and can be saved unchanged. Other namespaces use the same parser and catalog;
+they do not require a per-zone painting algorithm.
 
-1. Open **Landscape Tools**. If the map has neither an authored template nor an
-   approved profile, accept the prompt to generate a review proposal.
-2. The proposal first finds uniform material tiles, then assigns transition
-   corners to those anchored materials. Transition tiles cannot merge two
-   material families merely because their colours form a gradual chain. By
-   default the dialog shows only genuinely unresolved families and slots; use
-   **Show all inferred families and slots** for expert inspection.
-   MPR tile type is retained as supporting metadata, but it is not treated as
-   material identity: a pure tile and its transition tiles may legitimately
-   carry different type values.
-3. Review each highlighted material family:
-   - rename it to a recognizable material such as `Dark grass`, `Limestone`,
-     `Water`, or `Swamp`;
-   - choose **Land** or **Overlay**;
-   - use **Underwater** only for land textures intended to sit below an overlay;
-   - clear the family **Needs review** flag only after these choices are correct.
-4. Select a family and inspect every listed atlas slot. The preview is the
-   actual decoded atlas image. `NW / NE / SE / SW` describes the material at
-   each corner after the stored tile rotation is applied.
-5. When a slot preview and its four corner-family assignments are correct,
-   select it and click **Mark selected Reviewed**.
-6. Use **Split selected slots** only when those pictures belong to a different
-   visual material from the rest of the family. Use **Merge selected families**
-   only when two proposed families are the same material.
-7. An unused slot is inferred automatically when it matches observed material
-   anchors unambiguously. Only an unused material with no observed layer anchor,
-   or a corner with multiple equally plausible anchors, requires confirmation.
-8. **Save draft** preserves incomplete work without enabling automatic paint.
-   **Approve and save** is available after every family and slot ambiguity has
-   been resolved.
-9. The dialog shows the exact editor-managed profile path. **Export profile
-   copy...** writes a non-approved JSON copy to a path you choose for review,
-   sharing, or backup; it does not change which profile the editor activates.
+## Painting
 
-Missing transitions do not prevent approval. They mean the atlas has no exact
-blend for that material combination; automatic painting keeps guaranteed brush
-coverage and uses a hard edge instead of inventing atlas content.
+Landscape Tools has separate **Ground** and **Overlay** modes. Ground and
+Underwater materials remain visible in their own palette sections. Overlay
+materials appear only in Overlay mode, so a ground texture cannot be painted as
+an overlay or vice versa.
 
-Profiles are stored outside the MPR and are accepted only for the same MPR
-namespace, decoded atlas pixel hash, and slot count. Changing the supplied atlas
-therefore requires a new review rather than silently reusing stale assignments.
-Known authored layouts such as Zone1 are authoritative and appear in this view
-with the same family names and corner table used by Landscape Tools. Other
-atlases become equivalent solver catalogs after their proposal is reviewed and
-approved; there is no separate painting algorithm to train per zone.
+Each material is a pressed thumbnail button. The palette composes four authored
+tiles around one painted vertex, so the preview shows the result of a size-1
+brush instead of one isolated atlas slot. A transition-only family with valid
+1-on-3 junctions against several support materials gets one contextual card per
+support (for example, **Irregular — on Dark** and **Irregular — on Stone**).
+Those cards share one semantic family identity; they do not duplicate or merge
+profile assignments. Hovering shows the exact card name and assigned-slot count.
+
+All semantic material brushes operate on terrain vertices. Size 1 selects the
+nearest vertex and resolves the maximum four tiles sharing it. Larger circles
+and squares select every vertex in the visible footprint; each affected tile is
+then chosen from its four requested corner materials and the authored atlas
+rotation. MPR storage, preview, save, and undo remain tile-based.
+
+Some authored detail materials have no uniform four-corner tile. Each contextual
+palette card therefore retains the exact support material shown in its preview.
+A click places the authored four-tile `detail on support` vertex motif, with the
+correct rotation in every incident tile; it never substitutes an unrelated
+nearest-family mixture from the terrain underneath. If two copies would touch
+but the atlas has no required 2-corner or 3-corner transition, the second click
+is refused before mutation with an actionable message. Larger brush sizes still
+place only the center motif for such a sparse family. This prevents an
+impossible area fill from degrading into a checkerboard while remaining honest
+about what the source atlas can represent. Ordinary materials retain the normal
+vertex-area brush and hard-edge fallback. No paint action expands beyond tiles
+incident to the requested vertices.
+
+The coverage label beside **Material atlas...** reports, for example,
+`509 / 512 assigned (3 unassigned)`. Deterministic, structurally valid
+assignments are usable immediately—even before explicit approval. Unassigned
+tiles are excluded from automatic painting. When a requested 3-way or 4-way
+transition does not exist, painting uses a hard edge and records a diagnostic;
+it never invents atlas content.
+
+## Visual editing
+
+The Material Atlas window has three material groups on the left and an
+unassigned tile pool on the right. Expand a material to see every assigned tile.
+A transition tile appears under each material referenced by its corners, but it
+counts only once in total coverage.
+
+- Drag an unassigned tile onto a material to assign all four corners uniformly.
+- Drag an assigned tile from one material to another to replace that material
+  wherever it appears on the tile.
+- Drag an assigned tile to the unassigned pool to exclude it from painting.
+- Select a tile, then drag a material row onto its **NW**, **NE**, **SE**, or
+  **SW** corner to build a two-, three-, or four-material transition.
+- Click a corner to choose a same-layer material from a list when drag-and-drop
+  is inconvenient.
+- Rename, create, classify, or delete unreferenced materials from the material
+  side. Palette names update from this single profile identity.
+- Select a uniform member tile and choose **Use selected tile as thumbnail** to
+  override the deterministic default.
+
+Review previews and schema-6 profiles use one literal visual contract: NW is
+the material visible at the upper-left of the displayed tile, and likewise for
+NE, SE, and SW. The paint compiler reflects that signature once into terrain
+grid space and applies the renderer's one fixed packed-rotation convention.
+Atlas content cannot redefine the meaning of the MPR rotation bits.
+Selecting a tile never recolours its texture. The thumbnail member is marked with a bold
+outlined **T** in the expanded material list; selecting only a material shows
+that thumbnail without selecting or editing a tile.
+
+Ground/Underwater and Overlay families cannot coexist in one tile. The editor
+rejects such a drop immediately, explains the conflict, and leaves the previous
+assignment unchanged. An unusual inferred tile that initially crosses layers
+stays unassigned; drag it to the correct material first, then refine corners
+within that layer.
+
+There are no family and slot “Needs review” checkboxes. Slot ambiguity is
+resolved by assigning or excluding the tile. If the parser could not prove a
+material's identity or classification, that material shows one explicit
+**Confirm material** action with the reason. Tile moves and corner edits update
+all dependent memberships automatically.
+
+## Saving and profile identity
+
+**Apply + Close** writes the current profile to the visible managed path and
+refreshes the paint palette. Approval is derived from whether its active
+assignments are structurally valid; it is not a separate authoring action.
+Unassigned unusual tiles remain excluded. **Save copy...** chooses another
+location and **Load profile...** reopens such a copy.
+
+Profile schema 6 records tile-preview corner space explicitly as well as
+whether an authored internal family is paint selectable. Pixel-inferred legacy
+profiles already contain visual corners and keep them unchanged. Known authored
+profiles are reflected once from their former paint-grid representation while
+preserving names, thumbnails, and user edits. A profile
+is accepted only when all three bindings match the loaded atlas:
+
+- internal MPR namespace;
+- SHA-256 of the decoded atlas pixels;
+- atlas slot count.
+
+“Profile does not match this atlas” therefore means the chosen profile belongs
+to another namespace or atlas revision, not that its outer filename differs.
+No profile silently transfers semantic meaning across those boundaries.

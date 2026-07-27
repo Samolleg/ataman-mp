@@ -115,7 +115,7 @@ QByteArray emptyMpr()
     return bytes;
 }
 
-QByteArray syntheticMp()
+QByteArray syntheticMp(int tileTypeCount = 3)
 {
     QByteArray bytes;
     QDataStream stream(&bytes, QIODevice::WriteOnly);
@@ -124,7 +124,7 @@ QByteArray syntheticMp()
     stream << quint32(0xCE4AF672) << float(100.0f)
            << quint32(1) << quint32(1)
            << quint32(2) << quint32(512)
-           << quint32(3) << quint32(64)
+           << quint32(tileTypeCount) << quint32(64)
            << quint16(2) << quint32(0);
     for(int material = 0; material < 2; ++material)
     {
@@ -133,7 +133,8 @@ QByteArray syntheticMp()
                << float(0.7f) << float(0.0f) << float(0.5f)
                << float(0.0f) << float(0.0f) << float(0.0f) << float(0.0f);
     }
-    stream << qint32(1) << qint32(2) << qint32(2);
+    for(int tile = 0; tile < tileTypeCount; ++tile)
+        stream << qint32(tile == 0 ? 1 : 2);
     return bytes;
 }
 
@@ -156,7 +157,9 @@ QByteArray syntheticOverlaySector()
     return bytes;
 }
 
-QByteArray syntheticMpr(const QByteArray& sectorPayload = syntheticOverlaySector())
+QByteArray syntheticMpr(
+    const QByteArray& sectorPayload = syntheticOverlaySector(),
+    const QByteArray& mpPayload = syntheticMp())
 {
     struct Member
     {
@@ -167,7 +170,7 @@ QByteArray syntheticMpr(const QByteArray& sectorPayload = syntheticOverlaySector
     };
     QVector<Member> members;
     members.append({QByteArray("unknown.bin"), QByteArray("opaque-unknown-payload"), 0x10203040, 0});
-    members.append({QByteArray("CaveSet.MP"), syntheticMp(), 0x50607080, 0});
+    members.append({QByteArray("CaveSet.MP"), mpPayload, 0x50607080, 0});
     members.append({QByteArray("CaveSet000000.SEC"), sectorPayload, 0x90A0B0C0, 0});
 
     QByteArray bytes(16, '\0');
@@ -331,10 +334,15 @@ private slots:
     void zone1NamespaceTemplateSeparatesLandOverlayAndVariants();
     void semanticAtlasProposalIsDeterministicAndApprovalGated();
     void semanticAtlasTransitionsCannotTransitivelyMergeMaterialAnchors();
+    void semanticAtlasPerceptualFamiliesSeparateHueAndWhiteTexture();
+    void semanticAtlasInferenceUsesRendererOrientationAndPreservesCornerFamilies();
     void semanticAtlasTransitionsCrossTileTypeMetadata();
     void authoredAtlasProfileMatchesZone1Catalog();
     void semanticAtlasProfileRejectsBindingMismatchAndAmbiguity();
     void semanticAtlasReviewEditsAndStoreAreDeterministic();
+    void semanticAtlasPartialCatalogRejectsCrossLayerCornersInline();
+    void cornerOnlyMaterialPaintUsesAuthoredContextAndStaysLocal();
+    void vertexMaterialBrushPaintsCircleAndConstrainsCornerOnlyFamilies();
     void zone1NamespaceTemplateMatchesPrivateFixture();
     void terrainHeightTransactionReopensAndPreservesOverlay();
     void overlayActivationDeactivationIsLosslessAndUndoable();
@@ -2901,12 +2909,12 @@ void EnduranceDocumentTests::zone1NamespaceTemplateSeparatesLandOverlayAndVarian
     packed.tileIndex = 50;
     bool found = false;
     const STerrainTransitionSignature signature =
-        analysis.landCatalog.signatureForPacked(packed.encode(), &found);
+        analysis.landCatalog.gridSignatureForPacked(packed.encode(), &found);
     QVERIFY(found);
-    QCOMPARE(signature.northWest, 4);
-    QCOMPARE(signature.northEast, 4);
-    QCOMPARE(signature.southEast, 3);
-    QCOMPARE(signature.southWest, 3);
+    QCOMPARE(signature.northWest, 3);
+    QCOMPARE(signature.northEast, 3);
+    QCOMPARE(signature.southEast, 4);
+    QCOMPARE(signature.southWest, 4);
     packed.tileIndex = 16;
     analysis.landCatalog.signatureForPacked(packed.encode(), &found);
     QVERIFY(!found);
@@ -3045,10 +3053,9 @@ void EnduranceDocumentTests::zone1NamespaceTemplateSeparatesLandOverlayAndVarian
     QCOMPARE(paintedSide.atlasSlot(), normalSide.atlasSlot());
     QCOMPARE(paintedSide.rotation, normalSide.rotation);
 
-    // Manual R14 evidence plus the renderer's row-zero geometry establish one
-    // conversion for every shape: catalog image Y is the reverse of terrain
-    // grid Y. This fixture-independent nine-cell contract fails under every
-    // rejected half-edge-only rotation workaround.
+    // The shared catalog now stores renderer-grid signatures directly. This
+    // fixture-independent nine-cell contract prevents either the authored or
+    // inferred path from reintroducing an internal Y reflection.
     for(int dy = -1; dy <= 1; ++dy)
     {
         for(int dx = -1; dx <= 1; ++dx)
@@ -3070,22 +3077,16 @@ void EnduranceDocumentTests::zone1NamespaceTemplateSeparatesLandOverlayAndVarian
             const STerrainTransitionSignature decoded =
                 analysis.landCatalog.signatureForPacked(paintedPacked, &decodedFound);
             QVERIFY(decodedFound);
-            QCOMPARE(decoded.northWest, stamp.southWest);
-            QCOMPARE(decoded.northEast, stamp.southEast);
-            QCOMPARE(decoded.southEast, stamp.northEast);
-            QCOMPARE(decoded.southWest, stamp.northWest);
-
-            // Apply the independently specified renderer grid-Y conversion:
-            // the visible result must equal the solver request at all corners.
-            STerrainTransitionSignature visible;
-            visible.northWest = decoded.southWest;
-            visible.northEast = decoded.southEast;
-            visible.southEast = decoded.northEast;
-            visible.southWest = decoded.northWest;
-            QCOMPARE(visible.northWest, stamp.northWest);
-            QCOMPARE(visible.northEast, stamp.northEast);
-            QCOMPARE(visible.southEast, stamp.southEast);
-            QCOMPARE(visible.southWest, stamp.southWest);
+            QCOMPARE(decoded.northWest, stamp.northWest);
+            QCOMPARE(decoded.northEast, stamp.northEast);
+            QCOMPARE(decoded.southEast, stamp.southEast);
+            QCOMPARE(decoded.southWest, stamp.southWest);
+            bool gridFound = false;
+            const STerrainTransitionSignature visible =
+                analysis.landCatalog.gridSignatureForPacked(
+                    paintedPacked, &gridFound);
+            QVERIFY(gridFound);
+            QCOMPARE(visible, stamp);
         }
     }
 
@@ -3150,6 +3151,7 @@ void EnduranceDocumentTests::semanticAtlasProposalIsDeterministicAndApprovalGate
         overlayFamilies += family.layer == ETerrainAtlasLayer::Overlay;
         underwaterFamilies += family.underwater;
         QVERIFY(!family.ambiguous);
+        QVERIFY(!family.name.contains("Proposed", Qt::CaseInsensitive));
     }
     QCOMPARE(overlayFamilies, 1);
     QCOMPARE(underwaterFamilies, 1);
@@ -3295,6 +3297,485 @@ void EnduranceDocumentTests::semanticAtlasReviewEditsAndStoreAreDeterministic()
     QVERIFY(!loaded.validateBinding(profile.mprNamespace, QByteArray(64, 'b'),
                                     profile.atlasSlotCount, &staleReport));
     QVERIFY(staleReport.toText().contains("pixels no longer match"));
+}
+
+void EnduranceDocumentTests::semanticAtlasPartialCatalogRejectsCrossLayerCornersInline()
+{
+    STerrainAtlasProfile profile;
+    profile.mprNamespace = "synthetic_partial";
+    profile.atlasPixelSha256 = QByteArray(64, 'c');
+    profile.atlasSlotCount = 3;
+    profile.provenance = CTerrainAtlasProfileInference::currentProvenance();
+    STerrainAtlasProfileFamily stone;
+    stone.id = 1; stone.name = "Stone";
+    STerrainAtlasProfileFamily moss;
+    moss.id = 2; moss.name = "Moss";
+    STerrainAtlasProfileFamily water;
+    water.id = 3; water.name = "Water";
+    water.layer = ETerrainAtlasLayer::Overlay;
+    profile.families << stone << moss << water;
+    const auto definition = [](int index, qint32 nw, qint32 ne,
+                               qint32 se, qint32 sw, bool assigned) {
+        STerrainAtlasProfileSlot value;
+        value.slot = index;
+        value.signature.northWest = nw;
+        value.signature.northEast = ne;
+        value.signature.southEast = se;
+        value.signature.southWest = sw;
+        value.assigned = assigned;
+        value.ambiguous = !assigned;
+        return value;
+    };
+    profile.slotDefinitions
+        << definition(0, 1, 1, 1, 1, true)
+        << definition(1, 3, 3, 3, 3, true)
+        << definition(2, 1, 3, 3, 1, false);
+    CValidationReport normalizeReport;
+    QVERIFY2(profile.normalizeMembership(&normalizeReport),
+             qPrintable(normalizeReport.toText()));
+    QCOMPARE(profile.assignedSlotCount(), 2);
+
+    CValidationReport usableReport;
+    const STerrainAtlasAnalysis partial = profile.usableAnalysis(&usableReport);
+    QVERIFY2(partial.usable, qPrintable(usableReport.toText()));
+    QCOMPARE(partial.describedSlots, 2);
+
+    CValidationReport assignReport;
+    QVERIFY2(profile.assignSlotToFamily(2, 1, &assignReport),
+             qPrintable(assignReport.toText()));
+    QCOMPARE(profile.assignedSlotCount(), 3);
+    QVERIFY(profile.families.at(0).memberSlots.contains(2));
+    QVERIFY(!profile.families.at(2).memberSlots.contains(2));
+    const STerrainTransitionSignature before = profile.slotDefinitions.at(2).signature;
+    CValidationReport crossLayerReport;
+    QVERIFY(!profile.setSlotCornerFamily(2, 1, 3, &crossLayerReport));
+    QVERIFY(crossLayerReport.toText().contains("mix ground and overlay"));
+    QCOMPARE(profile.slotDefinitions.at(2).signature.northEast, before.northEast);
+    QVERIFY(profile.slotDefinitions.at(2).assigned);
+
+    CValidationReport cornerReport;
+    QVERIFY2(profile.setSlotCornerFamily(2, 1, 2, &cornerReport),
+             qPrintable(cornerReport.toText()));
+    QCOMPARE(profile.slotDefinitions.at(2).signature.northEast, qint32(2));
+    QVERIFY(!profile.slotDefinitions.at(2).ambiguous);
+    QVERIFY(profile.families.at(1).memberSlots.contains(2));
+
+    profile.families[0].ambiguous = true;
+    profile.approved = true;
+    CValidationReport confirmationReport;
+    QVERIFY(!profile.approvedAnalysis(&confirmationReport).usable);
+    QVERIFY(confirmationReport.toText().contains("Confirm material"));
+    profile.families[0].ambiguous = false;
+    profile.approved = false;
+
+    CValidationReport thumbnailReport;
+    QVERIFY2(profile.setFamilyThumbnail(1, 0, &thumbnailReport),
+             qPrintable(thumbnailReport.toText()));
+    QCOMPARE(profile.families.at(0).thumbnailSlot, 0);
+    const QJsonObject json = profile.toJson();
+    STerrainAtlasProfile reopened;
+    CValidationReport reopenReport;
+    QVERIFY2(STerrainAtlasProfile::fromJson(json, &reopened, &reopenReport),
+             qPrintable(reopenReport.toText()));
+    QCOMPARE(reopened.toJson(), json);
+    QCOMPARE(reopened.families.at(0).thumbnailSlot, 0);
+}
+
+void EnduranceDocumentTests::cornerOnlyMaterialPaintUsesAuthoredContextAndStaysLocal()
+{
+    CMprDocument document;
+    CValidationReport loadReport;
+    QVERIFY2(document.loadBytes(syntheticMpr(syntheticLandSector(1200)),
+                                "corner-detail.mpr", &loadReport),
+             qPrintable(loadReport.toText()));
+    CTerrainEditModel terrain;
+    QVERIFY(terrain.load(document));
+
+    CTerrainTransitionCatalog catalog;
+    const auto add = [&catalog](qint32 nw, qint32 ne, qint32 se, qint32 sw,
+                                quint16 packed) {
+        STerrainTransitionVariant variant;
+        variant.signature.northWest = nw;
+        variant.signature.northEast = ne;
+        variant.signature.southEast = se;
+        variant.signature.southWest = sw;
+        variant.packedTile = packed;
+        return catalog.addVariant(variant);
+    };
+    QVERIFY(add(1, 1, 1, 1, 0));
+    QVERIFY(add(3, 3, 3, 3, 1));
+    const quint16 pureFourPacked = quint16(1 << 14);
+    QVERIFY(add(4, 4, 4, 4, pureFourPacked));
+    STerrainTransitionSignature detailOnGround;
+    detailOnGround.northWest = 2;
+    detailOnGround.northEast = 3;
+    detailOnGround.southEast = 3;
+    detailOnGround.southWest = 3;
+    STerrainTransitionSignature detailOnCommon;
+    detailOnCommon.northWest = 2;
+    detailOnCommon.northEast = 1;
+    detailOnCommon.southEast = 1;
+    detailOnCommon.southWest = 1;
+    for(int rotation = 0; rotation < 4; ++rotation)
+    {
+        const STerrainTransitionSignature onGround =
+            CTerrainTransitionCatalog::rotated(detailOnGround, rotation);
+        QVERIFY(add(onGround.northWest, onGround.northEast,
+                    onGround.southEast, onGround.southWest,
+                    quint16(2 | (rotation << 14))));
+        const STerrainTransitionSignature onCommon =
+            CTerrainTransitionCatalog::rotated(detailOnCommon, rotation);
+        QVERIFY(add(onCommon.northWest, onCommon.northEast,
+                    onCommon.southEast, onCommon.southWest,
+                    quint16(4 | (rotation << 14))));
+    }
+    STerrainTransitionSignature unavailableOnFour;
+    unavailableOnFour.northWest = 2;
+    unavailableOnFour.northEast = 4;
+    unavailableOnFour.southEast = 4;
+    unavailableOnFour.southWest = 4;
+    bool unavailableFound = true;
+    catalog.selectForPaint(unavailableOnFour, 8, 8, 0x434F524Eu,
+                           &unavailableFound);
+    QVERIFY(!unavailableFound);
+
+    // Put family 3 in all four cells sharing vertex (8, 8). Contextual corner
+    // paint must choose the family-2-on-family-3 authored rotations, not stamp
+    // one frozen thumbnail orientation.
+    for(const QPoint& cell : QVector<QPoint>({QPoint(8, 8), QPoint(7, 8),
+                                               QPoint(7, 7), QPoint(8, 7)}))
+    {
+        STerrainTileBrush setup;
+        setup.centerX = cell.x();
+        setup.centerY = cell.y();
+        setup.radius = 0.0f;
+        QVERIFY(terrain.apply(terrain.makeTilePaint(
+            setup, ETerrainTileLayer::Land, 0, 1, 0), true));
+    }
+    CValidationReport contextualReport;
+    const STerrainTileCommand contextual =
+        terrain.makeSemanticCornerMaterialPaint(
+            8, 8, 8, 8, ETerrainTileLayer::Land, 2, catalog,
+            0x434F524Eu, &contextualReport);
+    QVERIFY2(!contextualReport.hasErrors(), qPrintable(contextualReport.toText()));
+    QCOMPARE(contextual.deltas.size(), 4);
+    const QVector<QPoint> expectedCells({QPoint(8, 8), QPoint(7, 8),
+                                         QPoint(7, 7), QPoint(8, 7)});
+    const QSet<int> expectedCellKeys({8 * 16 + 8, 8 * 16 + 7,
+                                      7 * 16 + 7, 7 * 16 + 8});
+    QSet<int> changedCellKeys;
+    for(const STerrainTileDelta& delta : contextual.deltas)
+    {
+        changedCellKeys.insert(delta.globalY * 16 + delta.globalX);
+        bool found = false;
+        const STerrainTransitionSignature signature =
+            catalog.gridSignatureForPacked(delta.after, &found);
+        QVERIFY(found);
+        const QVector<qint32> corners({signature.northWest,
+                                      signature.northEast,
+                                      signature.southEast,
+                                      signature.southWest});
+        QCOMPARE(corners.count(2), 1);
+        QCOMPARE(corners.count(3), 3);
+    }
+    QCOMPARE(changedCellKeys, expectedCellKeys);
+    QVERIFY(terrain.apply(contextual, true));
+
+    // If the exact clicked combination does not exist, the clicked tile still
+    // changes to the closest authored corner signature. Adjacent cells never
+    // receive this approximation, so the incomplete atlas cannot spread it.
+    CTerrainEditModel fallbackTerrain;
+    QVERIFY(fallbackTerrain.load(document));
+    for(const QPoint& cell : expectedCells)
+    {
+        STerrainTileBrush setup;
+        setup.centerX = cell.x();
+        setup.centerY = cell.y();
+        setup.radius = 0.0f;
+        QVERIFY(fallbackTerrain.apply(fallbackTerrain.makeTilePaint(
+            setup, ETerrainTileLayer::Land, 0, 0, 1), true));
+        QCOMPARE(fallbackTerrain.packedTile(
+            cell.x(), cell.y(), ETerrainTileLayer::Land), pureFourPacked);
+    }
+    CValidationReport fallbackReport;
+    const STerrainTileCommand fallback =
+        fallbackTerrain.makeSemanticCornerMaterialPaint(
+            8, 8, 8, 8, ETerrainTileLayer::Land, 2, catalog,
+            0x434F524Eu, &fallbackReport);
+    QVERIFY2(!fallbackReport.hasErrors(), qPrintable(fallbackReport.toText()));
+    QVERIFY2(fallbackReport.toText().contains("terrain.semantic_vertex_fallback"),
+             qPrintable(fallbackReport.toText()));
+    QCOMPARE(fallback.deltas.size(), 4);
+    QSet<int> fallbackCells;
+    for(const STerrainTileDelta& delta : fallback.deltas)
+    {
+        fallbackCells.insert(delta.globalY * 16 + delta.globalX);
+        bool found = false;
+        const STerrainTransitionSignature signature =
+            catalog.gridSignatureForPacked(delta.after, &found);
+        QVERIFY(found);
+        const QVector<qint32> corners({signature.northWest,
+                                      signature.northEast,
+                                      signature.southEast,
+                                      signature.southWest});
+        QCOMPARE(corners.count(2), 1);
+    }
+    QCOMPARE(fallbackCells, expectedCellKeys);
+
+    // A palette card for a corner-only family carries the support shown by
+    // its four-tile thumbnail. Painting that card must place the exact motif
+    // even when the terrain underneath contains an unrelated material; a
+    // nearest-family fallback would produce the checkerboard seen with sparse
+    // real atlases such as Zone 2's two-slot Ground family.
+    STerrainTileBrush contextualBrush;
+    contextualBrush.centerX = 8.0f;
+    contextualBrush.centerY = 8.0f;
+    contextualBrush.radius = 0.0f;
+    CValidationReport explicitSupportReport;
+    const STerrainTileCommand explicitSupport =
+        fallbackTerrain.makeSemanticVertexPaint(
+            8, 8, contextualBrush, ETerrainTileLayer::Land, 2, catalog,
+            0x434F524Eu, &explicitSupportReport, 3);
+    QVERIFY2(!explicitSupportReport.hasErrors(),
+             qPrintable(explicitSupportReport.toText()));
+    QVERIFY2(!explicitSupportReport.toText().contains(
+                 "terrain.semantic_vertex_fallback"),
+             qPrintable(explicitSupportReport.toText()));
+    QCOMPARE(explicitSupport.semanticAudit.solverMode,
+             QStringLiteral("vertex-context-stamp"));
+    QCOMPARE(explicitSupport.semanticAudit.backgroundMaterialId, qint32(3));
+    QCOMPARE(explicitSupport.deltas.size(), 4);
+    for(const STerrainTileDelta& delta : explicitSupport.deltas)
+    {
+        bool found = false;
+        const STerrainTransitionSignature signature =
+            catalog.gridSignatureForPacked(delta.after, &found);
+        QVERIFY(found);
+        const QVector<qint32> corners({signature.northWest,
+                                      signature.northEast,
+                                      signature.southEast,
+                                      signature.southWest});
+        QCOMPARE(corners.count(2), 1);
+        QCOMPARE(corners.count(3), 3);
+    }
+    QVERIFY(fallbackTerrain.apply(explicitSupport, true));
+    contextualBrush.centerX = 9.0f;
+    CValidationReport overlapReport;
+    const STerrainTileCommand overlap = fallbackTerrain.makeSemanticVertexPaint(
+        9, 8, contextualBrush, ETerrainTileLayer::Land, 2, catalog,
+        0x434F524Eu, &overlapReport, 3);
+    QVERIFY(overlap.isEmpty());
+    QVERIFY2(overlapReport.hasErrors(), qPrintable(overlapReport.toText()));
+    QVERIFY2(overlapReport.toText().contains(
+                 "terrain.semantic_vertex_context_overlap"),
+             qPrintable(overlapReport.toText()));
+}
+
+void EnduranceDocumentTests::vertexMaterialBrushPaintsCircleAndConstrainsCornerOnlyFamilies()
+{
+    CMprDocument document;
+    CValidationReport loadReport;
+    QVERIFY2(document.loadBytes(syntheticMpr(
+                                    syntheticLandSector(1200), syntheticMp(16)),
+                                "vertex-circle.mpr", &loadReport),
+             qPrintable(loadReport.toText()));
+
+    CTerrainTransitionCatalog complete;
+    for(int mask = 0; mask < 16; ++mask)
+    {
+        STerrainTransitionVariant variant;
+        variant.signature.northWest = (mask & 1) ? 2 : 1;
+        variant.signature.northEast = (mask & 2) ? 2 : 1;
+        variant.signature.southEast = (mask & 4) ? 2 : 1;
+        variant.signature.southWest = (mask & 8) ? 2 : 1;
+        variant.packedTile = quint16(mask);
+        QVERIFY(complete.addVariant(variant));
+    }
+    CTerrainEditModel terrain;
+    QVERIFY(terrain.load(document));
+    STerrainTileBrush circle;
+    circle.centerX = 8.0f;
+    circle.centerY = 8.0f;
+    circle.radius = 1.0f;
+    circle.shape = ETerrainTileBrushShape::Circle;
+    CValidationReport circleReport;
+    const STerrainTileCommand paint = terrain.makeSemanticVertexPaint(
+        8, 8, circle, ETerrainTileLayer::Land, 2, complete,
+        0x56455254u, &circleReport);
+    QVERIFY2(!circleReport.hasErrors(), qPrintable(circleReport.toText()));
+    QCOMPARE(paint.semanticAudit.solverMode, QStringLiteral("vertex-exact"));
+    QCOMPARE(paint.semanticAudit.paintedVertices.size(), 5);
+    QCOMPARE(paint.deltas.size(), 12);
+    QVERIFY(terrain.apply(paint, true));
+    for(int y = 5; y <= 10; ++y)
+    {
+        for(int x = 5; x <= 10; ++x)
+        {
+            bool hereFound = false;
+            const STerrainTransitionSignature here = complete.gridSignatureForPacked(
+                terrain.packedTile(x, y, ETerrainTileLayer::Land), &hereFound);
+            QVERIFY(hereFound);
+            if(x + 1 < terrain.tileCountX())
+            {
+                bool eastFound = false;
+                const STerrainTransitionSignature east = complete.gridSignatureForPacked(
+                    terrain.packedTile(x + 1, y, ETerrainTileLayer::Land), &eastFound);
+                QVERIFY(eastFound);
+                QCOMPARE(here.northEast, east.northWest);
+                QCOMPARE(here.southEast, east.southWest);
+            }
+            if(y + 1 < terrain.tileCountY())
+            {
+                bool southFound = false;
+                const STerrainTransitionSignature south = complete.gridSignatureForPacked(
+                    terrain.packedTile(x, y + 1, ETerrainTileLayer::Land), &southFound);
+                QVERIFY(southFound);
+                QCOMPARE(here.southWest, south.northWest);
+                QCOMPARE(here.southEast, south.northEast);
+            }
+        }
+    }
+
+    // A vertex on a sector boundary is still one semantic paint target. Its
+    // four incident cells must be resolved together even though serialization
+    // later writes those cells back to two different SEC members.
+    QVector<STerrainSectorSource> seamSources = twoSectorTerrain(1200);
+    for(STerrainSectorSource& source : seamSources)
+        source.landTileOffset = 5 + 33 * 33 * 8;
+    CTerrainEditModel seamTerrain;
+    QVector<qint32> seamTileTypes(16, 1);
+    CValidationReport seamLoadReport;
+    QVERIFY2(seamTerrain.loadSources(2, 1, 100.0f, seamSources,
+                                     &seamLoadReport, 1, seamTileTypes, 2),
+             qPrintable(seamLoadReport.toText()));
+    STerrainTileBrush seamVertex = circle;
+    seamVertex.centerX = 16.0f;
+    seamVertex.centerY = 8.0f;
+    seamVertex.radius = 0.0f;
+    CValidationReport seamPaintReport;
+    const STerrainTileCommand seamPaint = seamTerrain.makeSemanticVertexPaint(
+        15, 8, seamVertex, ETerrainTileLayer::Land, 2, complete,
+        0x5345414Du, &seamPaintReport);
+    QVERIFY2(!seamPaintReport.hasErrors(), qPrintable(seamPaintReport.toText()));
+    QCOMPARE(seamPaint.semanticAudit.paintedVertices,
+             QVector<QPoint>({QPoint(16, 8)}));
+    QCOMPARE(seamPaint.deltas.size(), 4);
+    QSet<int> seamCells;
+    for(const STerrainTileDelta& delta : seamPaint.deltas)
+        seamCells.insert(delta.globalY * seamTerrain.tileCountX() + delta.globalX);
+    QCOMPARE(seamCells,
+             QSet<int>({7 * 32 + 15, 7 * 32 + 16,
+                        8 * 32 + 15, 8 * 32 + 16}));
+    QVERIFY(seamTerrain.apply(seamPaint, true));
+    QVERIFY(seamTerrain.sectorPayload(0, 0) != seamSources.at(0).payload);
+    QVERIFY(seamTerrain.sectorPayload(1, 0) != seamSources.at(1).payload);
+
+    // A family with only isolated one-corner signatures cannot fill all five
+    // vertices of this circle. The center remains mandatory and resolves all
+    // four incident cells; unsupported surrounding vertices are skipped.
+    CTerrainTransitionCatalog detail;
+    STerrainTransitionVariant common;
+    common.signature.northWest = common.signature.northEast = 1;
+    common.signature.southEast = common.signature.southWest = 1;
+    common.packedTile = 0;
+    QVERIFY(detail.addVariant(common));
+    STerrainTransitionSignature oneCorner;
+    oneCorner.northWest = 3;
+    oneCorner.northEast = oneCorner.southEast = oneCorner.southWest = 1;
+    for(int rotation = 0; rotation < 4; ++rotation)
+    {
+        STerrainTransitionVariant variant;
+        variant.signature = CTerrainTransitionCatalog::rotated(oneCorner, rotation);
+        variant.packedTile = quint16(1 | (rotation << 14));
+        QVERIFY(detail.addVariant(variant));
+    }
+    CTerrainEditModel detailTerrain;
+    QVERIFY(detailTerrain.load(document));
+    CValidationReport detailReport;
+    const STerrainTileCommand detailPaint = detailTerrain.makeSemanticVertexPaint(
+        8, 8, circle, ETerrainTileLayer::Land, 3, detail,
+        0x56455254u, &detailReport, 1);
+    QVERIFY2(!detailReport.hasErrors(), qPrintable(detailReport.toText()));
+    QCOMPARE(detailPaint.semanticAudit.solverMode,
+             QStringLiteral("vertex-context-stamp"));
+    QCOMPARE(detailPaint.semanticAudit.paintedVertices,
+             QVector<QPoint>({QPoint(8, 8)}));
+    QCOMPARE(detailPaint.deltas.size(), 4);
+    QVERIFY(detailReport.toText().contains("terrain.semantic_vertex_detail_limit"));
+
+    // Overlay texture painting uses the same vertex model but only resolves
+    // incident cells whose overlay surface is active.
+    CMprDocument overlayDocument;
+    QVERIFY(overlayDocument.loadBytes(syntheticMpr(), "overlay-vertex.mpr"));
+    CTerrainEditModel overlayTerrain;
+    QVERIFY(overlayTerrain.load(overlayDocument));
+    CTerrainTransitionCatalog overlayCatalog;
+    QVERIFY(overlayCatalog.addVariant(common));
+    STerrainTransitionSignature overlayCorner = oneCorner;
+    overlayCorner.northWest = 2;
+    for(int rotation = 0; rotation < 4; ++rotation)
+    {
+        STerrainTransitionVariant variant;
+        variant.signature = CTerrainTransitionCatalog::rotated(
+            overlayCorner, rotation);
+        variant.packedTile = quint16(1 | (rotation << 14));
+        QVERIFY(overlayCatalog.addVariant(variant));
+    }
+    STerrainTileBrush oneVertex = circle;
+    oneVertex.radius = 0.0f;
+    CValidationReport overlayReport;
+    const STerrainTileCommand overlayPaint = overlayTerrain.makeSemanticVertexPaint(
+        8, 8, oneVertex, ETerrainTileLayer::Overlay, 2, overlayCatalog,
+        0x4F564552u, &overlayReport);
+    QVERIFY2(!overlayReport.hasErrors(), qPrintable(overlayReport.toText()));
+    QCOMPARE(overlayPaint.semanticAudit.paintedVertices,
+             QVector<QPoint>({QPoint(8, 8)}));
+    QCOMPARE(overlayPaint.deltas.size(), 2);
+    for(const STerrainTileDelta& delta : overlayPaint.deltas)
+        QCOMPARE((delta.globalY * 16 + delta.globalX) % 3 == 0, false);
+
+    // The authored Zone 1 baseline must resolve an ordinary circular vertex
+    // brush without approximation. Ground/common and Grass/common provide the
+    // known-good two-family mask vocabulary used by the original maps.
+    CValidationReport zone1Report;
+    const STerrainAtlasAnalysis zone1 =
+        CTerrainAtlasAnalyzer::analyze("zone1", 512, &zone1Report);
+    QVERIFY2(zone1.usable, qPrintable(zone1Report.toText()));
+    const auto materialById = [&zone1](qint32 id) {
+        return std::find_if(zone1.materials.cbegin(), zone1.materials.cend(),
+            [id](const STerrainAtlasMaterial& material) {
+                return material.id == id;
+            });
+    };
+    const auto ground = materialById(2);
+    const auto grass = materialById(4);
+    QVERIFY(ground != zone1.materials.cend());
+    QVERIFY(grass != zone1.materials.cend());
+    CMprDocument zone1Document;
+    QVERIFY(zone1Document.loadBytes(syntheticMpr(
+        syntheticLandSector(1200), syntheticMp(512)), "zone1-vertex.mpr"));
+    CTerrainEditModel zone1Terrain;
+    QVERIFY(zone1Terrain.load(zone1Document));
+    STerrainTileBrush fill;
+    fill.centerX = fill.centerY = 7.5f;
+    fill.radius = 16.0f;
+    fill.shape = ETerrainTileBrushShape::Square;
+    const SMprPackedTile grassTile = SMprPackedTile::decode(
+        quint16(grass->representativeSlot & 0x3F)
+        | quint16((grass->representativeSlot / 64) << 6));
+    QVERIFY(zone1Terrain.apply(zone1Terrain.makeTilePaint(
+        fill, ETerrainTileLayer::Land, grassTile.atlasIndex,
+        grassTile.tileIndex, 0), true));
+    STerrainTileBrush zone1Circle = circle;
+    zone1Circle.radius = 2.0f;
+    CValidationReport zone1PaintReport;
+    const STerrainTileCommand zone1Paint = zone1Terrain.makeSemanticVertexPaint(
+        8, 8, zone1Circle, ETerrainTileLayer::Land, ground->id,
+        zone1.landCatalog, 0x5A4F4E31u, &zone1PaintReport);
+    QVERIFY2(!zone1PaintReport.hasErrors(), qPrintable(zone1PaintReport.toText()));
+    QCOMPARE(zone1Paint.semanticAudit.solverMode, QStringLiteral("vertex-exact"));
+    QCOMPARE(zone1Paint.semanticAudit.paintedVertices.size(), 13);
+    QVERIFY(!zone1Paint.isEmpty());
 }
 
 void EnduranceDocumentTests::terrainTileStrokeCompositionKeepsFirstAndFinalValues()
@@ -4573,6 +5054,160 @@ void EnduranceDocumentTests::semanticAtlasTransitionsCannotTransitivelyMergeMate
     QCOMPARE(profile.families.size(), 2);
 }
 
+void EnduranceDocumentTests::semanticAtlasPerceptualFamiliesSeparateHueAndWhiteTexture()
+{
+    const auto solid = [](const QColor& color) {
+        QImage image(24, 24, QImage::Format_RGBA8888);
+        image.fill(color);
+        return image;
+    };
+    const auto texture = [](const QColor& first, const QColor& second, int scale) {
+        QImage image(24, 24, QImage::Format_RGBA8888);
+        for(int y = 0; y < image.height(); ++y)
+            for(int x = 0; x < image.width(); ++x)
+                image.setPixelColor(x, y,
+                    (((x / scale) + (y / scale)) & 1) ? first : second);
+        return image;
+    };
+    QVector<QImage> images({
+        solid(QColor(25, 80, 30)),    // dark grass
+        solid(QColor(40, 125, 45)),   // normal grass
+        solid(QColor(80, 170, 55)),   // bright grass
+        solid(QColor(135, 125, 105)), // stone
+        solid(QColor(180, 175, 145)), // limestone
+        texture(QColor(226, 238, 246), QColor(248, 246, 242), 2), // coarse snow
+        texture(QColor(226, 238, 246), QColor(248, 246, 242), 1)  // fine ice
+    });
+    QVector<STerrainAtlasSlotUsage> usage(images.size());
+    for(STerrainAtlasSlotUsage& item : usage) item.landCount = 1;
+    const STerrainAtlasProfile profile = CTerrainAtlasProfileInference::propose(
+        "synthetic_hue_and_white", images,
+        QVector<qint32>(images.size(), 1), usage);
+    QCOMPARE(profile.families.size(), images.size());
+    QCOMPARE(profile.assignedSlotCount(), images.size());
+    QSet<qint32> ids;
+    for(const STerrainAtlasProfileSlot& definition : profile.slotDefinitions)
+    {
+        QVERIFY(definition.assigned);
+        QVERIFY(!definition.ambiguous);
+        QVERIFY(definition.signature.northWest == definition.signature.northEast);
+        QVERIFY(definition.signature.northWest == definition.signature.southEast);
+        QVERIFY(definition.signature.northWest == definition.signature.southWest);
+        ids.insert(definition.signature.northWest);
+    }
+    QCOMPARE(ids.size(), images.size());
+}
+
+void EnduranceDocumentTests::semanticAtlasInferenceUsesRendererOrientationAndPreservesCornerFamilies()
+{
+    const QColor ground(25, 80, 25), yellowDetail(185, 155, 35);
+    QImage uniform(24, 24, QImage::Format_RGBA8888);
+    uniform.fill(ground);
+    QImage transition = uniform;
+    for(int y = transition.height() / 2; y < transition.height(); ++y)
+        for(int x = 0; x < transition.width() / 2; ++x)
+            transition.setPixelColor(x, y, yellowDetail);
+    QVector<STerrainAtlasSlotUsage> usage(2);
+    usage[0].landCount = 20;
+    usage[1].landCount = 4;
+    CValidationReport report;
+    const STerrainAtlasProfile profile = CTerrainAtlasProfileInference::propose(
+        "synthetic_corner_detail", QVector<QImage>({uniform, transition}),
+        QVector<qint32>({0, 0}), usage, &report);
+    QCOMPARE(profile.families.size(), 2);
+    QCOMPARE(profile.assignedSlotCount(), 2);
+    const qint32 groundId = profile.slotDefinitions.at(0).signature.northWest;
+    const STerrainTransitionSignature signature = profile.slotDefinitions.at(1).signature;
+    // Inference stores exactly what the user sees in the tile preview.
+    QCOMPARE(signature.northWest, groundId);
+    QCOMPARE(signature.northEast, groundId);
+    QCOMPARE(signature.southEast, groundId);
+    QVERIFY(signature.southWest != groundId);
+    QVERIFY(report.toText().contains("corner material"));
+
+    CValidationReport analysisReport;
+    const STerrainAtlasAnalysis analysis = profile.usableAnalysis(&analysisReport);
+    QVERIFY2(analysis.usable, qPrintable(analysisReport.toText()));
+    QCOMPARE(analysis.materials.size(), 2);
+    bool gridFound = false;
+    SMprPackedTile packed;
+    packed.tileIndex = 1;
+    const STerrainTransitionSignature grid = analysis.landCatalog.gridSignatureForPacked(
+        packed.encode(), &gridFound);
+    QVERIFY(gridFound);
+    // The paint grid has the opposite vertical axis. The visible SW detail is
+    // therefore paint-grid NW, with exactly one conversion at compilation.
+    QVERIFY(grid.northWest != groundId);
+    QCOMPARE(grid.northEast, groundId);
+    QCOMPARE(grid.southEast, groundId);
+    QCOMPARE(grid.southWest, groundId);
+    packed.rotation = 1;
+    const STerrainTransitionSignature rotatedGrid =
+        analysis.landCatalog.gridSignatureForPacked(packed.encode(), &gridFound);
+    QVERIFY(gridFound);
+    const STerrainTransitionSignature paintBase =
+        CTerrainTransitionCatalog::mirroredGridY(signature);
+    const STerrainTransitionSignature expectedRotated =
+        CTerrainTransitionCatalog::rotated(paintBase, -1);
+    QCOMPARE(rotatedGrid.northWest, expectedRotated.northWest);
+    QCOMPARE(rotatedGrid.northEast, expectedRotated.northEast);
+    QCOMPARE(rotatedGrid.southEast, expectedRotated.southEast);
+    QCOMPARE(rotatedGrid.southWest, expectedRotated.southWest);
+
+    // Pixel-inferred legacy profiles already stored visible preview corners.
+    QJsonObject legacyJson = profile.toJson();
+    legacyJson.insert(QStringLiteral("schemaVersion"), 3);
+    legacyJson.remove(QStringLiteral("cornerSpace"));
+    STerrainAtlasProfile migrated;
+    CValidationReport migrationReport;
+    QVERIFY2(STerrainAtlasProfile::fromJson(legacyJson, &migrated,
+                                            &migrationReport),
+             qPrintable(migrationReport.toText()));
+    QCOMPARE(migrated.schemaVersion, 6);
+    QCOMPARE(migrated.slotDefinitions.at(1).signature.northWest, signature.northWest);
+    QCOMPARE(migrated.slotDefinitions.at(1).signature.southWest, signature.southWest);
+    const auto detail = std::find_if(analysis.materials.cbegin(), analysis.materials.cend(),
+        [groundId](const STerrainAtlasMaterial& material) {
+            return material.id != groundId;
+        });
+    QVERIFY(detail != analysis.materials.cend());
+    QVERIFY(detail->cornerOnly);
+    QCOMPARE(detail->pureVariantCount, 0);
+    QCOMPARE(detail->representativeSlot, 1);
+
+    // Packed rotation has one renderer-defined mapping for every atlas. Check
+    // all turns from a deliberately asymmetric preview signature so a mirror
+    // or chirality error cannot hide behind a uniform tile.
+    for(int rotation = 0; rotation < 4; ++rotation)
+    {
+        packed.rotation = quint8(rotation);
+        const STerrainTransitionSignature actual =
+            analysis.landCatalog.gridSignatureForPacked(packed.encode(), &gridFound);
+        QVERIFY(gridFound);
+        const STerrainTransitionSignature expected =
+            CTerrainTransitionCatalog::rotated(paintBase, -rotation);
+        QCOMPARE(actual.northWest, expected.northWest);
+        QCOMPARE(actual.northEast, expected.northEast);
+        QCOMPARE(actual.southEast, expected.southEast);
+        QCOMPARE(actual.southWest, expected.southWest);
+    }
+
+    const QImage thumbnail = terrainVertexJunctionThumbnail(
+        QVector<QImage>({uniform, transition}), analysis.landCatalog,
+        detail->id, groundId, detail->representativeSlot);
+    QCOMPARE(thumbnail.size(), QSize(48, 48));
+    // Every incident tile must put the detail into the shared center vertex.
+    for(const QPoint& point : {QPoint(22, 22), QPoint(25, 22),
+                               QPoint(25, 25), QPoint(22, 25)})
+        QCOMPARE(thumbnail.pixelColor(point), yellowDetail);
+    // The four exterior corners remain the supporting material. A mirrored
+    // or opposite-sign image rotation makes at least one of these eight pixel
+    // assertions fail and reproduces the incoherent Zone1 palette thumbnail.
+    for(const QPoint& point : {QPoint(2, 2), QPoint(45, 2),
+                               QPoint(45, 45), QPoint(2, 45)})
+        QCOMPARE(thumbnail.pixelColor(point), ground);
+}
+
 void EnduranceDocumentTests::semanticAtlasTransitionsCrossTileTypeMetadata()
 {
     const auto tile = [](const QColor& west, const QColor& east) {
@@ -4603,6 +5238,8 @@ void EnduranceDocumentTests::semanticAtlasTransitionsCrossTileTypeMetadata()
     QVERIFY(!CTerrainAtlasProfileInference::isCompatibleInferenceProvenance(
         "decoded-atlas-pixels+mpr-tile-types+observed-map-usage-v1"));
     QVERIFY(CTerrainAtlasProfileInference::isCompatibleInferenceProvenance(
+        "decoded-atlas-perceptual-texture+mpr-tile-types+observed-map-usage-v10-calibrated-packed-rotation"));
+    QVERIFY(CTerrainAtlasProfileInference::isCompatibleInferenceProvenance(
         "user-authored-custom-profile"));
 }
 
@@ -4617,25 +5254,106 @@ void EnduranceDocumentTests::authoredAtlasProfileMatchesZone1Catalog()
             "zone1", QByteArray("synthetic-hash"), 512, analysis, &report);
     QVERIFY2(profile.approved, qPrintable(report.toText()));
     QCOMPARE(profile.slotDefinitions.size(), 512);
+    QCOMPARE(profile.assignedSlotCount(), 512);
     QVERIFY(profile.provenance.startsWith("authored-template:"));
-    for(int slot : {0, 134, 511})
+    // Tile 50 is visibly Grass/common on its north edge and Grass/dark on
+    // its south edge. This explicit asymmetric fixture catches the exact UI
+    // inversion reported against the Material Atlas preview.
+    const STerrainTransitionSignature tile50 =
+        profile.slotDefinitions.at(50).signature;
+    QCOMPARE(tile50.northWest, qint32(4));
+    QCOMPARE(tile50.northEast, qint32(4));
+    QCOMPARE(tile50.southEast, qint32(3));
+    QCOMPARE(tile50.southWest, qint32(3));
+    CValidationReport roundTripReport;
+    const STerrainAtlasAnalysis roundTrip = profile.approvedAnalysis(&roundTripReport);
+    QVERIFY2(roundTrip.usable, qPrintable(roundTripReport.toText()));
+    QCOMPARE(roundTrip.describedSlots, analysis.describedSlots);
+    QCOMPARE(roundTrip.materials.size(), analysis.materials.size());
+    // The authored table is only a profile seed. Every slot and packed
+    // rotation must compile identically through the shared profile path used
+    // by inferred atlases such as Zone2 and Zone5_1.
+    for(int slot = 0; slot < 512; ++slot)
     {
-        SMprPackedTile packed;
-        packed.atlasIndex = quint8(slot / 64);
-        packed.tileIndex = quint8(slot % 64);
-        bool landFound = false, overlayFound = false;
-        const STerrainTransitionSignature land =
-            analysis.landCatalog.gridSignatureForPacked(packed.encode(), &landFound);
-        const STerrainTransitionSignature overlay =
-            analysis.overlayCatalog.gridSignatureForPacked(packed.encode(), &overlayFound);
-        QCOMPARE(landFound, !overlayFound);
-        const STerrainTransitionSignature expected = landFound ? land : overlay;
         const STerrainTransitionSignature actual = profile.slotDefinitions.at(slot).signature;
-        QCOMPARE(actual.northWest, expected.northWest);
-        QCOMPARE(actual.northEast, expected.northEast);
-        QCOMPARE(actual.southEast, expected.southEast);
-        QCOMPARE(actual.southWest, expected.southWest);
+        for(int rotation = 0; rotation < 4; ++rotation)
+        {
+            SMprPackedTile packed;
+            packed.atlasIndex = quint8(slot / 64);
+            packed.tileIndex = quint8(slot % 64);
+            packed.rotation = quint8(rotation);
+            bool authoredLand = false, authoredOverlay = false;
+            bool compiledLand = false, compiledOverlay = false;
+            const STerrainTransitionSignature authoredLandSignature =
+                analysis.landCatalog.gridSignatureForPacked(
+                    packed.encode(), &authoredLand);
+            const STerrainTransitionSignature authoredOverlaySignature =
+                analysis.overlayCatalog.gridSignatureForPacked(
+                    packed.encode(), &authoredOverlay);
+            const STerrainTransitionSignature compiledLandSignature =
+                roundTrip.landCatalog.gridSignatureForPacked(
+                    packed.encode(), &compiledLand);
+            const STerrainTransitionSignature compiledOverlaySignature =
+                roundTrip.overlayCatalog.gridSignatureForPacked(
+                    packed.encode(), &compiledOverlay);
+            QCOMPARE(authoredLand, compiledLand);
+            QCOMPARE(authoredOverlay, compiledOverlay);
+            QCOMPARE(authoredLand, !authoredOverlay);
+            const STerrainTransitionSignature authored = authoredLand
+                ? authoredLandSignature : authoredOverlaySignature;
+            const STerrainTransitionSignature compiled = compiledLand
+                ? compiledLandSignature : compiledOverlaySignature;
+            const STerrainTransitionSignature paintBase =
+                CTerrainTransitionCatalog::mirroredGridY(actual);
+            const STerrainTransitionSignature rotated =
+                CTerrainTransitionCatalog::rotated(paintBase, -rotation);
+            QCOMPARE(authored.northWest, compiled.northWest);
+            QCOMPARE(authored.northEast, compiled.northEast);
+            QCOMPARE(authored.southEast, compiled.southEast);
+            QCOMPARE(authored.southWest, compiled.southWest);
+            QCOMPARE(compiled.northWest, rotated.northWest);
+            QCOMPARE(compiled.northEast, rotated.northEast);
+            QCOMPARE(compiled.southEast, rotated.southEast);
+            QCOMPARE(compiled.southWest, rotated.southWest);
+        }
     }
+    // Authored profiles saved before preview-space schema 6 stored paint-grid
+    // corners. Migration must reflect them once while retaining user metadata.
+    QJsonObject legacyAuthored = profile.toJson();
+    legacyAuthored.insert(QStringLiteral("atlasPixelSha256"),
+                          QString(64, QLatin1Char('a')));
+    legacyAuthored.insert(QStringLiteral("schemaVersion"), 5);
+    legacyAuthored.insert(QStringLiteral("cornerSpace"),
+                          QStringLiteral("renderer-grid"));
+    QJsonArray legacySlots = legacyAuthored.value(QStringLiteral("slots")).toArray();
+    for(int index = 0; index < legacySlots.size(); ++index)
+    {
+        QJsonObject slot = legacySlots.at(index).toObject();
+        const QJsonObject visual =
+            slot.value(QStringLiteral("signature")).toObject();
+        QJsonObject paint;
+        paint.insert(QStringLiteral("northWest"),
+                     visual.value(QStringLiteral("southWest")));
+        paint.insert(QStringLiteral("northEast"),
+                     visual.value(QStringLiteral("southEast")));
+        paint.insert(QStringLiteral("southEast"),
+                     visual.value(QStringLiteral("northEast")));
+        paint.insert(QStringLiteral("southWest"),
+                     visual.value(QStringLiteral("northWest")));
+        slot.insert(QStringLiteral("signature"), paint);
+        legacySlots[index] = slot;
+    }
+    legacyAuthored.insert(QStringLiteral("slots"), legacySlots);
+    STerrainAtlasProfile migratedAuthored;
+    CValidationReport migrationReport;
+    QVERIFY2(STerrainAtlasProfile::fromJson(legacyAuthored, &migratedAuthored,
+                                            &migrationReport),
+             qPrintable(migrationReport.toText()));
+    QCOMPARE(migratedAuthored.schemaVersion, 6);
+    QCOMPARE(migratedAuthored.slotDefinitions.at(50).signature.northWest,
+             qint32(4));
+    QCOMPARE(migratedAuthored.slotDefinitions.at(50).signature.southWest,
+             qint32(3));
     QVERIFY(std::any_of(profile.families.cbegin(), profile.families.cend(),
         [](const STerrainAtlasProfileFamily& family) {
             return family.name == QStringLiteral("Stone / lime");

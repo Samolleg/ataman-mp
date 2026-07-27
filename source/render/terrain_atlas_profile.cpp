@@ -7,12 +7,15 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QMap>
+#include <QPainter>
 #include <QSaveFile>
 #include <QSet>
 #include <QStandardPaths>
 #include <QStringList>
 #include <QRegularExpression>
+#include <QTransform>
 #include <algorithm>
+#include <cmath>
 
 #include "endurance_document.h"
 
@@ -60,11 +63,20 @@ bool parseSignature(const QJsonObject& object, STerrainTransitionSignature* sign
 
 struct SCornerColor
 {
-    SCornerColor(int red = 0, int green = 0, int blue = 0)
-        : r(red), g(green), b(blue) {}
+    SCornerColor(int red = 0, int green = 0, int blue = 0,
+                 int redSpread = 0, int greenSpread = 0, int blueSpread = 0,
+                 int saturation = 0, int edge = 0, int roughness = 0)
+        : r(red), g(green), b(blue), rs(redSpread), gs(greenSpread), bs(blueSpread),
+          sat(saturation), edgeEnergy(edge), roughnessEnergy(roughness) {}
     int r;
     int g;
     int b;
+    int rs;
+    int gs;
+    int bs;
+    int sat;
+    int edgeEnergy;
+    int roughnessEnergy;
 };
 
 SCornerColor cornerColor(const QImage& source, int corner)
@@ -74,6 +86,8 @@ SCornerColor cornerColor(const QImage& source, int corner)
     const int x0 = (corner == 1 || corner == 2) ? image.width() - sample : 0;
     const int y0 = (corner >= 2) ? image.height() - sample : 0;
     qint64 red = 0, green = 0, blue = 0, weight = 0;
+    qint64 redSquared = 0, greenSquared = 0, blueSquared = 0;
+    qint64 saturation = 0;
     for(int y = y0; y < y0 + sample; ++y)
         for(int x = x0; x < x0 + sample; ++x)
         {
@@ -82,17 +96,135 @@ SCornerColor cornerColor(const QImage& source, int corner)
             red += qRed(pixel) * alpha;
             green += qGreen(pixel) * alpha;
             blue += qBlue(pixel) * alpha;
+            redSquared += qint64(qRed(pixel)) * qRed(pixel) * alpha;
+            greenSquared += qint64(qGreen(pixel)) * qGreen(pixel) * alpha;
+            blueSquared += qint64(qBlue(pixel)) * qBlue(pixel) * alpha;
+            saturation += (qMax(qRed(pixel), qMax(qGreen(pixel), qBlue(pixel)))
+                         - qMin(qRed(pixel), qMin(qGreen(pixel), qBlue(pixel)))) * alpha;
             weight += alpha;
         }
     if(weight == 0)
         return {};
-    return {int(red / weight), int(green / weight), int(blue / weight)};
+    const int meanRed = int(red / weight);
+    const int meanGreen = int(green / weight);
+    const int meanBlue = int(blue / weight);
+    const auto spread = [weight](qint64 squared, int mean) {
+        return int(std::sqrt(qMax(0.0, double(squared) / double(weight)
+                                      - double(mean * mean))));
+    };
+    const auto luminance = [&image](int x, int y) {
+        const QRgb pixel = image.pixel(x, y);
+        return (54 * qRed(pixel) + 183 * qGreen(pixel) + 19 * qBlue(pixel)) / 256;
+    };
+    qint64 edgeTotal = 0, edgeCount = 0, roughnessTotal = 0, roughnessCount = 0;
+    for(int y = y0; y < y0 + sample; ++y)
+        for(int x = x0; x < x0 + sample; ++x)
+        {
+            const int center = luminance(x, y);
+            if(x > x0) { edgeTotal += qAbs(center - luminance(x - 1, y)); ++edgeCount; }
+            if(y > y0) { edgeTotal += qAbs(center - luminance(x, y - 1)); ++edgeCount; }
+            if(x > x0 && x + 1 < x0 + sample && y > y0 && y + 1 < y0 + sample)
+            {
+                roughnessTotal += qAbs(4 * center - luminance(x - 1, y)
+                    - luminance(x + 1, y) - luminance(x, y - 1)
+                    - luminance(x, y + 1));
+                ++roughnessCount;
+            }
+        }
+    return {meanRed, meanGreen, meanBlue,
+            spread(redSquared, meanRed), spread(greenSquared, meanGreen),
+            spread(blueSquared, meanBlue), int(saturation / weight),
+            edgeCount ? int(edgeTotal / edgeCount) : 0,
+            roughnessCount ? int(roughnessTotal / roughnessCount) : 0};
 }
+}
+
+QImage terrainVertexJunctionThumbnail(
+    const QVector<QImage>& images, const CTerrainTransitionCatalog& catalog,
+    qint32 materialId, qint32 supportId, int fallbackSlot)
+{
+    if(images.isEmpty())
+        return QImage();
+    const int sourceSize = qMax(1, qMin(images.front().width(), images.front().height()));
+    QImage result(sourceSize * 2, sourceSize * 2, QImage::Format_RGBA8888);
+    result.fill(Qt::transparent);
+    QPainter painter(&result);
+    const auto drawCell = [&](int cellX, int cellY, int selectedCorner) {
+        STerrainTransitionSignature visualSignature;
+        visualSignature.northWest = visualSignature.northEast = supportId;
+        visualSignature.southEast = visualSignature.southWest = supportId;
+        if(selectedCorner == 0) visualSignature.northWest = materialId;
+        if(selectedCorner == 1) visualSignature.northEast = materialId;
+        if(selectedCorner == 2) visualSignature.southEast = materialId;
+        if(selectedCorner == 3) visualSignature.southWest = materialId;
+        const STerrainTransitionSignature paintSignature =
+            CTerrainTransitionCatalog::mirroredGridY(visualSignature);
+        bool found = false;
+        const quint16 packedValue = catalog.selectForPaint(
+            paintSignature, cellX, cellY, 0x54484D42u, &found);
+        const SMprPackedTile packed = SMprPackedTile::decode(packedValue);
+        const int slot = found ? packed.atlasSlot() : fallbackSlot;
+        if(slot < 0 || slot >= images.size())
+            return;
+        QImage tile = images.at(slot);
+        if(found && packed.rotation != 0)
+        {
+            QTransform rotation;
+            rotation.rotate(90.0 * packed.rotation);
+            tile = tile.transformed(rotation, Qt::SmoothTransformation);
+        }
+        painter.drawImage(QRect(cellX * sourceSize, cellY * sourceSize,
+                                sourceSize, sourceSize), tile);
+    };
+    if(supportId > 0 && supportId != materialId)
+    {
+        drawCell(0, 0, 2);
+        drawCell(1, 0, 3);
+        drawCell(1, 1, 0);
+        drawCell(0, 1, 1);
+    }
+    else
+    {
+        for(int y = 0; y < 2; ++y)
+            for(int x = 0; x < 2; ++x)
+                drawCell(x, y, -1);
+    }
+    painter.end();
+    return result;
+}
+
+namespace {
 
 int colorDistance(const SCornerColor& lhs, const SCornerColor& rhs)
 {
-    const int dr = lhs.r - rhs.r, dg = lhs.g - rhs.g, db = lhs.b - rhs.b;
-    return dr * dr + dg * dg + db * db;
+    const auto lab = [](const SCornerColor& color) {
+        auto linear = [](double channel) {
+            channel /= 255.0;
+            return channel <= 0.04045 ? channel / 12.92
+                                      : std::pow((channel + 0.055) / 1.055, 2.4);
+        };
+        const double red = linear(color.r), green = linear(color.g), blue = linear(color.b);
+        const double x = (red * 0.4124 + green * 0.3576 + blue * 0.1805) / 0.95047;
+        const double y = (red * 0.2126 + green * 0.7152 + blue * 0.0722);
+        const double z = (red * 0.0193 + green * 0.1192 + blue * 0.9505) / 1.08883;
+        auto curve = [](double value) {
+            return value > 0.008856 ? std::cbrt(value) : 7.787 * value + 16.0 / 116.0;
+        };
+        return QVector<double>({116.0 * curve(y) - 16.0,
+                                500.0 * (curve(x) - curve(y)),
+                                200.0 * (curve(y) - curve(z))});
+    };
+    const QVector<double> left = lab(lhs), right = lab(rhs);
+    const double dl = left[0] - right[0], da = left[1] - right[1],
+                 db = left[2] - right[2];
+    const int drs = lhs.rs - rhs.rs, dgs = lhs.gs - rhs.gs,
+              dbs = lhs.bs - rhs.bs;
+    const int dsat = lhs.sat - rhs.sat;
+    const int dedge = lhs.edgeEnergy - rhs.edgeEnergy;
+    const int drough = lhs.roughnessEnergy - rhs.roughnessEnergy;
+    return qRound((dl * dl + da * da + db * db) * 100.0)
+        + 24 * (drs * drs + dgs * dgs + dbs * dbs)
+        + 4 * dsat * dsat + 32 * dedge * dedge + 16 * drough * drough;
 }
 
 bool uniform(const STerrainTransitionSignature& signature)
@@ -106,7 +238,9 @@ bool uniform(const STerrainTransitionSignature& signature)
 QJsonObject STerrainAtlasProfile::toJson() const
 {
     QJsonObject root;
-    root.insert(QStringLiteral("schemaVersion"), schemaVersion);
+    root.insert(QStringLiteral("schemaVersion"), 6);
+    root.insert(QStringLiteral("cornerSpace"),
+                QStringLiteral("tile-preview-nw-ne-se-sw-v1"));
     root.insert(QStringLiteral("mprNamespace"), mprNamespace);
     root.insert(QStringLiteral("atlasPixelSha256"), QString::fromLatin1(atlasPixelSha256));
     root.insert(QStringLiteral("atlasSlotCount"), atlasSlotCount);
@@ -121,7 +255,9 @@ QJsonObject STerrainAtlasProfile::toJson() const
         object.insert(QStringLiteral("layer"), layerName(family.layer));
         object.insert(QStringLiteral("underwater"), family.underwater);
         object.insert(QStringLiteral("ambiguous"), family.ambiguous);
+        object.insert(QStringLiteral("paintSelectable"), family.paintSelectable);
         object.insert(QStringLiteral("tileType"), family.tileType);
+        object.insert(QStringLiteral("thumbnailSlot"), family.thumbnailSlot);
         QJsonArray slotsArray;
         for(int slot : family.memberSlots) slotsArray.append(slot);
         object.insert(QStringLiteral("slots"), slotsArray);
@@ -134,6 +270,7 @@ QJsonObject STerrainAtlasProfile::toJson() const
         QJsonObject object;
         object.insert(QStringLiteral("slot"), slot.slot);
         object.insert(QStringLiteral("signature"), signatureJson(slot.signature));
+        object.insert(QStringLiteral("assigned"), slot.assigned);
         object.insert(QStringLiteral("ambiguous"), slot.ambiguous);
         slotArray.append(object);
     }
@@ -145,7 +282,8 @@ bool STerrainAtlasProfile::fromJson(const QJsonObject& object,
                                     STerrainAtlasProfile* profile,
                                     CValidationReport* report)
 {
-    if(!profile || object.value(QStringLiteral("schemaVersion")).toInt() != 1
+    const int schemaVersion = object.value(QStringLiteral("schemaVersion")).toInt();
+    if(!profile || (schemaVersion < 1 || schemaVersion > 6)
        || !object.value(QStringLiteral("families")).isArray()
        || !object.value(QStringLiteral("slots")).isArray())
     {
@@ -159,6 +297,15 @@ bool STerrainAtlasProfile::fromJson(const QJsonObject& object,
     parsed.atlasSlotCount = object.value(QStringLiteral("atlasSlotCount")).toInt(-1);
     parsed.provenance = object.value(QStringLiteral("provenance")).toString();
     parsed.approved = object.value(QStringLiteral("approved")).toBool(false);
+    if(schemaVersion >= 6
+       && object.value(QStringLiteral("cornerSpace")).toString()
+            != QStringLiteral("tile-preview-nw-ne-se-sw-v1"))
+    {
+        if(report) report->add("terrain.atlas_profile_corner_space",
+                               EValidationSeverity::Error,
+                               "The semantic atlas profile uses an unsupported corner coordinate space");
+        return false;
+    }
     if(parsed.mprNamespace.trimmed().isEmpty() || parsed.atlasPixelSha256.size() != 64
        || parsed.atlasSlotCount < 1)
     {
@@ -184,7 +331,11 @@ bool STerrainAtlasProfile::fromJson(const QJsonObject& object,
         familyIds.insert(family.id);
         family.underwater = item.value(QStringLiteral("underwater")).toBool();
         family.ambiguous = item.value(QStringLiteral("ambiguous")).toBool();
+        family.paintSelectable = schemaVersion >= 3
+            ? item.value(QStringLiteral("paintSelectable")).toBool(true) : true;
         family.tileType = item.value(QStringLiteral("tileType")).toInt(-1);
+        family.thumbnailSlot = schemaVersion >= 2
+            ? item.value(QStringLiteral("thumbnailSlot")).toInt(-1) : -1;
         for(const QJsonValue& slot : item.value(QStringLiteral("slots")).toArray())
             family.memberSlots.append(slot.toInt(-1));
         parsed.families.append(family);
@@ -196,6 +347,9 @@ bool STerrainAtlasProfile::fromJson(const QJsonObject& object,
         STerrainAtlasProfileSlot slot;
         slot.slot = item.value(QStringLiteral("slot")).toInt(-1);
         slot.ambiguous = item.value(QStringLiteral("ambiguous")).toBool();
+        slot.assigned = schemaVersion >= 2
+            ? item.value(QStringLiteral("assigned")).toBool(!slot.ambiguous)
+            : !slot.ambiguous;
         if(slot.slot < 0 || slot.slot >= parsed.atlasSlotCount || slotIds.contains(slot.slot)
            || !parseSignature(item.value(QStringLiteral("signature")).toObject(), &slot.signature)
            || !familyIds.contains(slot.signature.northWest)
@@ -216,8 +370,30 @@ bool STerrainAtlasProfile::fromJson(const QJsonObject& object,
                                "The semantic atlas profile does not describe every atlas slot");
         return false;
     }
+    // Profiles produced by pixel inference already store the visible corners
+    // of CTileForm's preview images. Authored-template profiles through schema
+    // 5 instead stored the paint-grid signature, whose vertical axis is the
+    // opposite of the preview. Convert that known provenance exactly once;
+    // do not guess for third-party legacy profiles that lack a declared space.
+    if(schemaVersion < 6
+       && parsed.provenance.startsWith(QStringLiteral("authored-template:")))
+    {
+        for(STerrainAtlasProfileSlot& slot : parsed.slotDefinitions)
+            slot.signature = CTerrainTransitionCatalog::mirroredGridY(slot.signature);
+    }
+    else if(schemaVersion >= 4 && schemaVersion < 6
+            && !parsed.provenance.startsWith(QStringLiteral("decoded-atlas-"))
+            && !parsed.provenance.startsWith(
+                QStringLiteral("decoded-atlas-perceptual-texture+")))
+    {
+        if(report) report->add("terrain.atlas_profile_corner_space",
+                               EValidationSeverity::Error,
+                               "This legacy custom profile does not declare whether its corners follow the tile preview or the paint grid");
+        return false;
+    }
     if(!parsed.normalizeMembership(report))
         return false;
+    parsed.schemaVersion = 6;
     *profile = parsed;
     return true;
 }
@@ -273,6 +449,8 @@ bool STerrainAtlasProfile::normalizeMembership(CValidationReport* report)
     }
     for(const STerrainAtlasProfileSlot& slot : slotDefinitions)
     {
+        if(!slot.assigned)
+            continue;
         const qint32 ids[] = {slot.signature.northWest, slot.signature.northEast,
                               slot.signature.southEast, slot.signature.southWest};
         for(qint32 id : ids)
@@ -380,7 +558,10 @@ bool STerrainAtlasProfile::splitFamily(qint32 familyId,
     split.id = maximumId + 1;
     split.name = newName.trimmed();
     split.ambiguous = true;
+    split.thumbnailSlot = -1;
     split.memberSlots.clear();
+    if(requested.contains(families.at(familyIndex).thumbnailSlot))
+        families[familyIndex].thumbnailSlot = -1;
     families[familyIndex].ambiguous = true;
     families.append(split);
     for(STerrainAtlasProfileSlot& slot : slotDefinitions)
@@ -392,6 +573,191 @@ bool STerrainAtlasProfile::splitFamily(qint32 familyId,
     }
     approved = false;
     return normalizeMembership(report);
+}
+
+bool STerrainAtlasProfile::assignSlotToFamily(int slotId, qint32 familyId,
+                                              CValidationReport* report)
+{
+    bool familyFound = false;
+    for(const STerrainAtlasProfileFamily& family : families)
+        familyFound |= family.id == familyId;
+    if(!familyFound)
+    {
+        if(report) report->add("terrain.atlas_profile_assign_family",
+            EValidationSeverity::Error, "The target material does not exist");
+        return false;
+    }
+    for(STerrainAtlasProfileSlot& slot : slotDefinitions)
+        if(slot.slot == slotId)
+        {
+            slot.signature.northWest = familyId;
+            slot.signature.northEast = familyId;
+            slot.signature.southEast = familyId;
+            slot.signature.southWest = familyId;
+            slot.assigned = true;
+            slot.ambiguous = false;
+            approved = false;
+            return normalizeMembership(report);
+        }
+    if(report) report->add("terrain.atlas_profile_assign_slot",
+        EValidationSeverity::Error, "The atlas tile no longer exists",
+        QString::number(slotId));
+    return false;
+}
+
+bool STerrainAtlasProfile::replaceSlotFamily(int slotId, qint32 sourceFamilyId,
+                                             qint32 targetFamilyId,
+                                             CValidationReport* report)
+{
+    QMap<qint32, ETerrainAtlasLayer> layers;
+    for(const STerrainAtlasProfileFamily& family : families)
+        layers.insert(family.id, family.layer);
+    if(!layers.contains(targetFamilyId))
+    {
+        if(report) report->add("terrain.atlas_profile_replace_family",
+            EValidationSeverity::Error, "The target material does not exist");
+        return false;
+    }
+    for(STerrainAtlasProfileSlot& slot : slotDefinitions)
+        if(slot.slot == slotId)
+        {
+            if(sourceFamilyId <= 0)
+                return assignSlotToFamily(slotId, targetFamilyId, report);
+            STerrainTransitionSignature replacement = slot.signature;
+            qint32* corners[] = {&replacement.northWest, &replacement.northEast,
+                                 &replacement.southEast, &replacement.southWest};
+            bool changed = false;
+            for(qint32* corner : corners)
+                if(*corner == sourceFamilyId)
+                {
+                    *corner = targetFamilyId;
+                    changed = true;
+                }
+            if(!changed)
+            {
+                if(report) report->add("terrain.atlas_profile_replace_source",
+                    EValidationSeverity::Error,
+                    "The atlas tile does not reference the dragged material",
+                    QString::number(slotId));
+                return false;
+            }
+            const qint32 ids[] = {replacement.northWest, replacement.northEast,
+                                  replacement.southEast, replacement.southWest};
+            const ETerrainAtlasLayer layer = layers.value(ids[0]);
+            for(qint32 id : ids)
+                if(!layers.contains(id) || layers.value(id) != layer)
+                {
+                    if(report) report->add("terrain.atlas_profile_replace_layer",
+                        EValidationSeverity::Error,
+                        "A terrain tile cannot combine ground and overlay materials",
+                        QString::number(slotId));
+                    return false;
+                }
+            slot.signature = replacement;
+            slot.assigned = true;
+            slot.ambiguous = false;
+            approved = false;
+            return normalizeMembership(report);
+        }
+    if(report) report->add("terrain.atlas_profile_replace_slot",
+        EValidationSeverity::Error, "The atlas tile no longer exists",
+        QString::number(slotId));
+    return false;
+}
+
+bool STerrainAtlasProfile::setSlotCornerFamily(int slotId, int cornerIndex,
+                                               qint32 familyId,
+                                               CValidationReport* report)
+{
+    QMap<qint32, ETerrainAtlasLayer> layers;
+    for(const STerrainAtlasProfileFamily& family : families)
+        layers.insert(family.id, family.layer);
+    if(cornerIndex < 0 || cornerIndex > 3 || !layers.contains(familyId))
+    {
+        if(report) report->add("terrain.atlas_profile_corner",
+            EValidationSeverity::Error, "Choose an existing material and tile corner");
+        return false;
+    }
+    for(STerrainAtlasProfileSlot& slot : slotDefinitions)
+        if(slot.slot == slotId)
+        {
+            STerrainTransitionSignature replacement = slot.signature;
+            qint32* corners[] = {&replacement.northWest, &replacement.northEast,
+                                 &replacement.southEast, &replacement.southWest};
+            *corners[cornerIndex] = familyId;
+            const qint32 ids[] = {replacement.northWest, replacement.northEast,
+                                  replacement.southEast, replacement.southWest};
+            const ETerrainAtlasLayer layer = layers.value(familyId);
+            for(qint32 id : ids)
+                if(!layers.contains(id) || layers.value(id) != layer)
+                {
+                    if(report) report->add("terrain.atlas_profile_corner_layer",
+                        EValidationSeverity::Error,
+                        "This corner would mix ground and overlay materials. Choose a material from the same section, or move the whole tile first.",
+                        QString::number(slotId));
+                    return false;
+                }
+            slot.signature = replacement;
+            slot.assigned = true;
+            slot.ambiguous = false;
+            approved = false;
+            return normalizeMembership(report);
+        }
+    if(report) report->add("terrain.atlas_profile_corner_slot",
+        EValidationSeverity::Error, "The atlas tile no longer exists",
+        QString::number(slotId));
+    return false;
+}
+
+bool STerrainAtlasProfile::unassignSlot(int slotId, CValidationReport* report)
+{
+    for(STerrainAtlasProfileSlot& slot : slotDefinitions)
+        if(slot.slot == slotId)
+        {
+            slot.assigned = false;
+            slot.ambiguous = true;
+            approved = false;
+            return normalizeMembership(report);
+        }
+    if(report) report->add("terrain.atlas_profile_unassign_slot",
+        EValidationSeverity::Error, "The atlas tile no longer exists",
+        QString::number(slotId));
+    return false;
+}
+
+bool STerrainAtlasProfile::setFamilyThumbnail(qint32 familyId, int slotId,
+                                              CValidationReport* report)
+{
+    STerrainAtlasProfileFamily* target = nullptr;
+    for(STerrainAtlasProfileFamily& family : families)
+        if(family.id == familyId) target = &family;
+    const STerrainAtlasProfileSlot* slot = nullptr;
+    for(const STerrainAtlasProfileSlot& candidate : slotDefinitions)
+        if(candidate.slot == slotId) slot = &candidate;
+    const bool referencesFamily = slot && (
+        slot->signature.northWest == familyId
+        || slot->signature.northEast == familyId
+        || slot->signature.southEast == familyId
+        || slot->signature.southWest == familyId);
+    if(!target || !slot || !slot->assigned || !referencesFamily)
+    {
+        if(report) report->add("terrain.atlas_profile_thumbnail",
+            EValidationSeverity::Error,
+            "A palette thumbnail must be an assigned tile that contains that material",
+            QString::number(slotId));
+        return false;
+    }
+    target->thumbnailSlot = slotId;
+    approved = false;
+    return true;
+}
+
+int STerrainAtlasProfile::assignedSlotCount() const
+{
+    int count = 0;
+    for(const STerrainAtlasProfileSlot& slot : slotDefinitions)
+        count += slot.assigned;
+    return count;
 }
 
 QString CTerrainAtlasProfileStore::profilePath(const QString& mprNamespace,
@@ -442,41 +808,62 @@ bool STerrainAtlasProfile::validateBinding(const QString& currentNamespace,
     {
         valid = false;
         if(report) report->add("terrain.atlas_profile_namespace_mismatch", EValidationSeverity::Error,
-                               "The approved semantic atlas profile belongs to another MPR namespace",
+                               "This material atlas profile belongs to another MPR namespace",
                                currentNamespace);
     }
     if(atlasPixelSha256.toLower() != currentHash.toLower())
     {
         valid = false;
         if(report) report->add("terrain.atlas_profile_hash_mismatch", EValidationSeverity::Error,
-                               "The decoded atlas pixels no longer match the approved semantic profile");
+                               "The decoded atlas pixels no longer match this material atlas profile");
     }
     if(atlasSlotCount != currentSlotCount)
     {
         valid = false;
         if(report) report->add("terrain.atlas_profile_slot_mismatch", EValidationSeverity::Error,
-                               "The atlas slot count no longer matches the approved semantic profile");
+                               "The atlas slot count no longer matches this material atlas profile");
     }
     return valid;
 }
 
 STerrainAtlasAnalysis STerrainAtlasProfile::approvedAnalysis(CValidationReport* report) const
 {
-    STerrainAtlasAnalysis result;
     if(!approved)
     {
         if(report) report->add("terrain.atlas_profile_unapproved", EValidationSeverity::Error,
-                               "Semantic painting is gated until this atlas profile is approved");
-        return result;
+                                "This material atlas profile has not been explicitly approved. Its safe assignments remain usable for painting.");
+        return STerrainAtlasAnalysis();
     }
+    if(assignedSlotCount() == 0)
+    {
+        if(report) report->add("terrain.atlas_profile_no_safe_assignments",
+            EValidationSeverity::Error,
+            "This profile has no structurally safe tile assignments to apply");
+        return STerrainAtlasAnalysis();
+    }
+    QSet<qint32> usedFamilies;
+    for(const STerrainAtlasProfileSlot& slot : slotDefinitions)
+        if(slot.assigned && !slot.ambiguous)
+        {
+            usedFamilies.insert(slot.signature.northWest);
+            usedFamilies.insert(slot.signature.northEast);
+            usedFamilies.insert(slot.signature.southEast);
+            usedFamilies.insert(slot.signature.southWest);
+        }
     for(const STerrainAtlasProfileFamily& family : families)
-        if(family.ambiguous)
+        if(family.ambiguous && usedFamilies.contains(family.id))
         {
             if(report) report->add("terrain.atlas_profile_ambiguous", EValidationSeverity::Error,
-                                   "An approved atlas profile still contains an ambiguous material family",
-                                   family.name);
-            return result;
+                                    "This active material still needs confirmation. Select it, verify its name and Ground, Underwater, or Overlay section, then choose Confirm material.",
+                                    family.name);
+            return STerrainAtlasAnalysis();
         }
+    return usableAnalysis(report);
+}
+
+STerrainAtlasAnalysis STerrainAtlasProfile::usableAnalysis(CValidationReport* report) const
+{
+    STerrainAtlasAnalysis result;
     QMap<qint32, STerrainAtlasProfileFamily> byId;
     for(const STerrainAtlasProfileFamily& family : families)
     {
@@ -489,20 +876,20 @@ STerrainAtlasAnalysis STerrainAtlasProfile::approvedAnalysis(CValidationReport* 
         }
         byId.insert(family.id, family);
     }
-    result.templateName = QStringLiteral("Reviewed semantic profile for %1").arg(mprNamespace);
+    result.templateName = QStringLiteral("Material atlas profile for %1").arg(mprNamespace);
     result.expectedSlots = atlasSlotCount;
-    result.landCatalog.setMirrorPaintGridY(true);
-    result.overlayCatalog.setMirrorPaintGridY(true);
-    result.overlayCompatibleCatalog.setMirrorPaintGridY(true);
     QMap<qint32, int> pureCounts, representatives;
+    QMap<qint32, QSet<int>> uniformSlots;
     for(const STerrainAtlasProfileSlot& slot : slotDefinitions)
     {
+        if(!slot.assigned)
+            continue;
         if(slot.ambiguous)
         {
-            if(report) report->add("terrain.atlas_profile_ambiguous_slot", EValidationSeverity::Error,
-                                   "An approved atlas profile still contains an ambiguous slot",
+            if(report) report->add("terrain.atlas_profile_ambiguous_slot", EValidationSeverity::Warning,
+                                   "An unresolved atlas tile is excluded from automatic painting",
                                    QString::number(slot.slot));
-            return STerrainAtlasAnalysis();
+            continue;
         }
         const ETerrainAtlasLayer layer = byId.value(slot.signature.northWest).layer;
         const qint32 ids[] = {slot.signature.northWest, slot.signature.northEast,
@@ -511,12 +898,19 @@ STerrainAtlasAnalysis STerrainAtlasProfile::approvedAnalysis(CValidationReport* 
             if(!byId.contains(id) || byId.value(id).layer != layer)
             {
                 if(report) report->add("terrain.atlas_profile_layer_mix", EValidationSeverity::Error,
-                                       "A reviewed slot mixes land and overlay material families",
+                                       "This tile combines ground and overlay materials. Move it to Unassigned, assign it to the correct layer, then refine its four corners.",
                                        QString::number(slot.slot));
                 return STerrainAtlasAnalysis();
             }
         CTerrainTransitionCatalog* catalog = layer == ETerrainAtlasLayer::Land
             ? &result.landCatalog : &result.overlayCatalog;
+        // Profile signatures are the corners visible in the tile preview.
+        // Terrain grid row zero is the opposite vertical side, so painting
+        // uses one explicit reflection at this boundary. The renderer's
+        // packed quarter-turn then has the opposite chirality in paint space:
+        // M(R(v)) == R(-v)(M(v)). This rule is global, never atlas-specific.
+        const STerrainTransitionSignature paintBase =
+            CTerrainTransitionCatalog::mirroredGridY(slot.signature);
         for(int rotation = 0; rotation < 4; ++rotation)
         {
             SMprPackedTile packed;
@@ -524,7 +918,8 @@ STerrainAtlasAnalysis STerrainAtlasProfile::approvedAnalysis(CValidationReport* 
             packed.tileIndex = quint8(slot.slot % 64);
             packed.rotation = quint8(rotation);
             STerrainTransitionVariant variant;
-            variant.signature = CTerrainTransitionCatalog::rotated(slot.signature, rotation);
+            variant.signature = CTerrainTransitionCatalog::rotated(
+                paintBase, -rotation);
             variant.packedTile = packed.encode();
             if(!catalog->addVariant(variant, report)
                || !result.overlayCompatibleCatalog.addVariant(variant, report))
@@ -533,30 +928,51 @@ STerrainAtlasAnalysis STerrainAtlasProfile::approvedAnalysis(CValidationReport* 
         if(uniform(slot.signature))
         {
             ++pureCounts[slot.signature.northWest];
-            if(!representatives.contains(slot.signature.northWest))
+            uniformSlots[slot.signature.northWest].insert(slot.slot);
+            if(!representatives.contains(slot.signature.northWest)
+               || slot.slot < representatives.value(slot.signature.northWest))
                 representatives.insert(slot.signature.northWest, slot.slot);
         }
         ++result.describedSlots;
     }
     for(const STerrainAtlasProfileFamily& family : families)
     {
-        if(!pureCounts.contains(family.id))
-        {
-            if(report) report->add("terrain.atlas_profile_missing_uniform", EValidationSeverity::Error,
-                                   "A reviewed material family has no uniform atlas tile and cannot be painted safely",
-                                   family.name);
-            return STerrainAtlasAnalysis();
-        }
+        if(!family.paintSelectable)
+            continue;
         STerrainAtlasMaterial material;
         material.id = family.id;
         material.name = family.name;
         material.layer = family.layer;
         material.underwater = family.underwater;
-        material.representativeSlot = representatives.value(family.id, -1);
+        material.cornerOnly = !pureCounts.contains(family.id);
+        if(material.cornerOnly)
+        {
+            material.representativeSlot = family.thumbnailSlot >= 0
+                && family.memberSlots.contains(family.thumbnailSlot)
+                    ? family.thumbnailSlot
+                    : (family.memberSlots.isEmpty() ? -1 : family.memberSlots.front());
+            material.thumbnailSlot = material.representativeSlot;
+            if(report) report->add("terrain.atlas_profile_corner_only_material",
+                EValidationSeverity::Warning,
+                "This material has no uniform tile and paints contextually at terrain corners",
+                family.name);
+        }
+        else
+        {
+            material.representativeSlot = representatives.value(family.id, -1);
+            material.thumbnailSlot = family.thumbnailSlot >= 0
+                && family.memberSlots.contains(family.thumbnailSlot)
+                    ? family.thumbnailSlot : material.representativeSlot;
+        }
         material.pureVariantCount = pureCounts.value(family.id);
-        result.materials.append(material);
+        if(material.representativeSlot >= 0)
+            result.materials.append(material);
     }
-    result.usable = !result.materials.isEmpty() && result.describedSlots == result.expectedSlots;
+    result.usable = !result.materials.isEmpty() && result.describedSlots > 0;
+    if(!result.usable && report)
+        report->add("terrain.atlas_profile_no_safe_materials",
+            EValidationSeverity::Error,
+            "No structurally valid material assignments are available yet. Assign at least one atlas tile to a material before using this profile.");
     return result;
 }
 
@@ -578,14 +994,17 @@ QByteArray CTerrainAtlasProfileInference::pixelSha256(const QVector<QImage>& ima
 QString CTerrainAtlasProfileInference::currentProvenance()
 {
     return QStringLiteral(
-        "decoded-atlas-pixels+mpr-tile-types+observed-map-usage-v3-cross-type-anchors");
+        "decoded-atlas-perceptual-texture+mpr-tile-types+observed-map-usage-v11-preview-corners");
 }
 
 bool CTerrainAtlasProfileInference::isCompatibleInferenceProvenance(
     const QString& provenance)
 {
-    return !provenance.startsWith(QStringLiteral("decoded-atlas-pixels+"))
-        || provenance == currentProvenance();
+    const bool generated = provenance.startsWith(QStringLiteral("decoded-atlas-pixels+"))
+        || provenance.startsWith(QStringLiteral("decoded-atlas-perceptual-texture+"));
+    return !generated || provenance == currentProvenance()
+        || provenance == QStringLiteral(
+            "decoded-atlas-perceptual-texture+mpr-tile-types+observed-map-usage-v10-calibrated-packed-rotation");
 }
 
 STerrainAtlasProfile CTerrainAtlasProfileInference::fromAuthoredAnalysis(
@@ -631,7 +1050,10 @@ STerrainAtlasProfile CTerrainAtlasProfileInference::fromAuthoredAnalysis(
         }
         STerrainAtlasProfileSlot definition;
         definition.slot = slot;
-        definition.signature = landFound ? land : overlay;
+        // The authored catalog is the known-good paint-grid baseline. Profiles
+        // and the review UI store the corresponding visible preview corners.
+        definition.signature = CTerrainTransitionCatalog::mirroredGridY(
+            landFound ? land : overlay);
         profile.slotDefinitions.append(definition);
         const qint32 ids[] = {definition.signature.northWest,
                               definition.signature.northEast,
@@ -649,6 +1071,7 @@ STerrainAtlasProfile CTerrainAtlasProfileInference::fromAuthoredAnalysis(
                     .arg(id);
                 family.layer = landFound ? ETerrainAtlasLayer::Land
                                          : ETerrainAtlasLayer::Overlay;
+                family.paintSelectable = false;
                 families.insert(id, family);
             }
         }
@@ -685,9 +1108,13 @@ STerrainAtlasProfile CTerrainAtlasProfileInference::propose(
         SCornerColor corners[4];
     };
     QVector<SSlotEvidence> evidence(images.size());
-    const int familyThreshold = 28 * 28 * 3;
-    const int pureTileThreshold = 12 * 12 * 3;
-    const int ambiguityMargin = 10 * 10 * 3;
+    // Family creation is deliberately stricter than corner assignment. CIE
+    // Lab keeps grass/stone hue differences visible, while local colour spread
+    // separates low-saturation textures such as snow and ice.
+    const int familyThreshold = 6 * 6 * 100;
+    const int pureTileThreshold = 6 * 6 * 100;
+    const int ambiguityMargin = 3 * 3 * 100;
+    const int cornerNoveltyThreshold = 12 * 12 * 100;
     for(int slot = 0; slot < images.size(); ++slot)
     {
         SSlotEvidence& item = evidence[slot];
@@ -725,8 +1152,9 @@ STerrainAtlasProfile CTerrainAtlasProfileInference::propose(
             ETerrainAtlasLayer layer, const SCornerColor& color, bool ambiguous) {
         STerrainAtlasProfileFamily family;
         family.id = result.families.size() + 1;
-        family.name = QStringLiteral("Proposed %1 family %2")
-            .arg(layerName(layer)).arg(family.id);
+        family.name = layer == ETerrainAtlasLayer::Land
+            ? QStringLiteral("Land material %1").arg(family.id)
+            : QStringLiteral("Overlay material %1").arg(family.id);
         family.layer = layer;
         family.tileType = type;
         family.ambiguous = ambiguous;
@@ -744,13 +1172,25 @@ STerrainAtlasProfile CTerrainAtlasProfileInference::propose(
             result.families[index].tileType = -1;
         detail.anchors.append(color);
         qint64 red = 0, green = 0, blue = 0;
+        qint64 redSpread = 0, greenSpread = 0, blueSpread = 0;
+        qint64 saturation = 0, edge = 0, roughness = 0;
         for(const SCornerColor& anchor : detail.anchors)
         {
             red += anchor.r; green += anchor.g; blue += anchor.b;
+            redSpread += anchor.rs; greenSpread += anchor.gs; blueSpread += anchor.bs;
+            saturation += anchor.sat;
+            edge += anchor.edgeEnergy;
+            roughness += anchor.roughnessEnergy;
         }
         detail.centroid = SCornerColor(int(red / detail.anchors.size()),
                                       int(green / detail.anchors.size()),
-                                      int(blue / detail.anchors.size()));
+                                      int(blue / detail.anchors.size()),
+                                      int(redSpread / detail.anchors.size()),
+                                      int(greenSpread / detail.anchors.size()),
+                                      int(blueSpread / detail.anchors.size()),
+                                      int(saturation / detail.anchors.size()),
+                                      int(edge / detail.anchors.size()),
+                                      int(roughness / detail.anchors.size()));
     };
     const auto matchingFamily = [&result, &familyEvidence, familyThreshold,
                                  ambiguityMargin](ETerrainAtlasLayer layer,
@@ -779,7 +1219,7 @@ STerrainAtlasProfile CTerrainAtlasProfileInference::propose(
                 secondDistance = distance;
         }
         if(confident)
-            *confident = best >= 0 && bestDistance <= familyThreshold
+            *confident = best >= 0
                 && (secondDistance == 0 || secondDistance - bestDistance > ambiguityMargin);
         return best;
     };
@@ -842,7 +1282,47 @@ STerrainAtlasProfile CTerrainAtlasProfileInference::propose(
         const SSlotEvidence& item = evidence.at(slot);
         STerrainAtlasProfileSlot proposed;
         proposed.slot = slot;
-        proposed.ambiguous = item.layerAmbiguous;
+        ETerrainAtlasLayer inferredLayer = item.layer;
+        bool inferredLayerKnown = item.layerKnown;
+        if(!inferredLayerKnown && !item.layerAmbiguous)
+        {
+            qint64 layerScores[2] = {0, 0};
+            bool layerAvailable[2] = {false, false};
+            for(int layerValue = 0; layerValue < 2; ++layerValue)
+                for(int corner = 0; corner < 4; ++corner)
+                {
+                    int best = -1;
+                    for(int family = 0; family < result.families.size(); ++family)
+                    {
+                        if(int(result.families.at(family).layer) != layerValue) continue;
+                        const int distance = colorDistance(item.corners[corner],
+                            familyEvidence.at(family).centroid);
+                        if(best < 0 || distance < best) best = distance;
+                    }
+                    if(best >= 0)
+                    {
+                        layerAvailable[layerValue] = true;
+                        layerScores[layerValue] += best;
+                    }
+                }
+            if(layerAvailable[0] != layerAvailable[1])
+            {
+                inferredLayer = layerAvailable[1] ? ETerrainAtlasLayer::Overlay
+                                                  : ETerrainAtlasLayer::Land;
+                inferredLayerKnown = true;
+            }
+            else if(layerAvailable[0] && layerAvailable[1]
+                    && std::abs(layerScores[0] - layerScores[1]) > ambiguityMargin * 4)
+            {
+                inferredLayer = layerScores[1] < layerScores[0]
+                    ? ETerrainAtlasLayer::Overlay : ETerrainAtlasLayer::Land;
+                inferredLayerKnown = true;
+            }
+        }
+        proposed.ambiguous = item.layerAmbiguous || !inferredLayerKnown;
+        // CTileForm supplies renderer-oriented tile images. Profiles retain
+        // that order so review labels, previews, JSON, diagnostics, and the
+        // authored Zone 1 template all use one corner coordinate space.
         qint32* signatureCorners[] = {&proposed.signature.northWest,
                                      &proposed.signature.northEast,
                                      &proposed.signature.southEast,
@@ -853,7 +1333,7 @@ STerrainAtlasProfile CTerrainAtlasProfileInference::propose(
             for(int family = 0; family < result.families.size(); ++family)
             {
                 const STerrainAtlasProfileFamily& candidate = result.families.at(family);
-                if(item.layerKnown && candidate.layer != item.layer)
+                if(inferredLayerKnown && candidate.layer != inferredLayer)
                     continue;
                 const int distance = colorDistance(item.corners[corner],
                     familyEvidence.at(family).centroid);
@@ -868,10 +1348,22 @@ STerrainAtlasProfile CTerrainAtlasProfileInference::propose(
             }
             if(best < 0)
             {
-                appendFamily(item.type, item.layer, item.corners[corner], true);
+                appendFamily(item.type, inferredLayer, item.corners[corner], true);
                 best = result.families.size() - 1;
             }
-            const bool confident = bestDistance <= familyThreshold
+            else if(inferredLayerKnown && bestDistance > cornerNoveltyThreshold)
+            {
+                appendFamily(item.type, inferredLayer, item.corners[corner], false);
+                best = result.families.size() - 1;
+                bestDistance = 0;
+                secondDistance = 0;
+                if(report)
+                    report->add("terrain.atlas_inference_corner_only_material",
+                        EValidationSeverity::Warning,
+                        "A visually distinct corner material has no uniform four-corner tile; it was preserved as its own palette family",
+                        QString::number(slot));
+            }
+            const bool confident = best >= 0
                 && (secondDistance == 0 || secondDistance - bestDistance > ambiguityMargin);
             proposed.ambiguous |= !confident;
             *signatureCorners[corner] = result.families.at(best).id;
@@ -883,9 +1375,34 @@ STerrainAtlasProfile CTerrainAtlasProfileInference::propose(
                 if(family.id == familyId)
                     proposed.ambiguous |= family.ambiguous;
         }
+        const qint32 proposedIds[] = {proposed.signature.northWest,
+                                      proposed.signature.northEast,
+                                      proposed.signature.southEast,
+                                      proposed.signature.southWest};
+        ETerrainAtlasLayer proposedLayer = ETerrainAtlasLayer::Land;
+        bool proposedLayerKnown = false;
+        bool sameLayer = true;
+        for(qint32 id : proposedIds)
+            for(const STerrainAtlasProfileFamily& family : result.families)
+                if(family.id == id)
+                {
+                    if(!proposedLayerKnown)
+                    {
+                        proposedLayer = family.layer;
+                        proposedLayerKnown = true;
+                    }
+                    else
+                        sameLayer &= family.layer == proposedLayer;
+                    break;
+                }
+        proposed.assigned = !proposed.ambiguous && proposedLayerKnown && sameLayer;
+        if(!sameLayer)
+            proposed.ambiguous = true;
         if(proposed.ambiguous && report)
             report->add("terrain.atlas_inference_ambiguous_slot", EValidationSeverity::Warning,
-                        "Only this slot's corner assignment requires review",
+                        sameLayer
+                            ? "This unusual atlas tile was left unassigned"
+                            : "This atlas tile matched both ground and overlay materials and was left unassigned",
                         QString::number(slot));
         result.slotDefinitions.append(proposed);
     }

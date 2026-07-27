@@ -1005,17 +1005,26 @@ int runHeadlessCommand(QApplication& app)
             && pastedBodyPartValue->valueAppliedTo(QStringList{"bd"})
                 == exactSerializedParts;
 
+        QTemporaryDir landscapeSettingsDirectory;
+        if(landscapeSettingsDirectory.isValid())
+        {
+            QSettings::setDefaultFormat(QSettings::IniFormat);
+            QSettings::setPath(QSettings::IniFormat, QSettings::UserScope,
+                               landscapeSettingsDirectory.path());
+            QSettings::setPath(QSettings::NativeFormat, QSettings::UserScope,
+                               landscapeSettingsDirectory.path());
+        }
         CLandscapeTools landscapeTools;
         const bool minimumPaintBrushIsSingleTile = qFuzzyIsNull(
             landscapeTools.paintRadius());
         landscapeTools.setPaintTerrainTypes(
             {{2, "Ground"}}, {{1, "Underwater ground"}}, {{5, "Swamp"}});
         landscapeTools.activateMode(ELandscapeEditMode::TilePaint, false);
-        const bool underwaterFamiliesHiddenByDefault =
-            !landscapeTools.underwaterFamiliesVisible()
-            && !landscapeTools.selectPaintTerrainType(1);
-        landscapeTools.setUnderwaterFamiliesVisible(true);
-        const bool underwaterFamiliesCanBeShown =
+        const bool underwaterFamiliesVisibleByDefault =
+            landscapeTools.underwaterFamiliesVisible()
+            && landscapeTools.selectPaintTerrainType(1);
+        landscapeTools.setUnderwaterFamiliesVisible(false);
+        const bool underwaterFamiliesRemainVisible =
             landscapeTools.underwaterFamiliesVisible()
             && landscapeTools.selectPaintTerrainType(1);
         const bool landscapeLayersVisibleByDefault =
@@ -1033,22 +1042,37 @@ int runHeadlessCommand(QApplication& app)
         bool landModeSelectionValid = false;
         const bool programmaticModeRefreshesMaterials =
             !landscapeTools.selectPaintTerrainType(5)
-            && landscapeTools.paintTerrainType(&landModeSelectionValid) == 2
+            && landscapeTools.paintTerrainType(&landModeSelectionValid) == 1
             && landModeSelectionValid;
+        STerrainPaintMaterialChoice irregularOnDark;
+        irregularOnDark.id = 9;
+        irregularOnDark.name = "Irregular — on Dark";
+        irregularOnDark.cornerOnly = true;
+        STerrainPaintMaterialChoice irregularOnStone = irregularOnDark;
+        irregularOnStone.name = "Irregular — on Stone";
+        landscapeTools.setPaintMaterials(
+            {irregularOnDark, irregularOnStone}, {}, {}, 2, 2);
+        landscapeTools.activateMode(ELandscapeEditMode::TilePaint, false);
+        int irregularButtons = 0;
+        for(QToolButton* button : landscapeTools.findChildren<QToolButton*>())
+            irregularButtons += button->property("terrainMaterialId").toInt() == 9;
+        bool irregularSelected = false;
+        const bool contextualMaterialVariantsSelectable = irregularButtons == 2
+            && landscapeTools.selectPaintTerrainType(9)
+            && landscapeTools.paintTerrainType(&irregularSelected) == 9
+            && irregularSelected;
         bool semanticAtlasReviewRequested = false;
         QObject::connect(&landscapeTools, &CLandscapeTools::atlasProfileReviewRequested,
                          [&semanticAtlasReviewRequested]() {
             semanticAtlasReviewRequested = true;
         });
-        bool semanticAtlasReviewButtonAvailable = false;
-        for(QPushButton* button : landscapeTools.findChildren<QPushButton*>())
-            if(button->text().contains("review semantic atlas", Qt::CaseInsensitive))
-            {
-                semanticAtlasReviewButtonAvailable = true;
-                button->click();
-                break;
-            }
-        semanticAtlasReviewButtonAvailable &= semanticAtlasReviewRequested;
+        QPushButton* materialAtlasButton =
+            landscapeTools.findChild<QPushButton*>("materialAtlasButton");
+        const bool materialAtlasButtonAvailable = materialAtlasButton != nullptr;
+        if(materialAtlasButton)
+            materialAtlasButton->click();
+        const bool materialAtlasActionWorks = materialAtlasButtonAvailable
+            && semanticAtlasReviewRequested;
 
         QWidget primaryWindow;
         bool settingsTabsUsable = false;
@@ -1240,13 +1264,14 @@ int runHeadlessCommand(QApplication& app)
                 && bodyPartDeltaPreservesHiddenAndDuplicates
                 && bodyPartPropertyPasteIsExact
                 && minimumPaintBrushIsSingleTile
-                && underwaterFamiliesHiddenByDefault
-                && underwaterFamiliesCanBeShown
+                && underwaterFamiliesVisibleByDefault
+                && underwaterFamiliesRemainVisible
                 && landscapeLayersVisibleByDefault
             && landscapeVisibilityControlsWork
             && overlaySurfaceToolSeparate
             && programmaticModeRefreshesMaterials
-                && semanticAtlasReviewButtonAvailable
+            && contextualMaterialVariantsSelectable
+                && materialAtlasActionWorks
                 && logicPointUndoAtomic && logicPointRedoAtomic;
         QTextStream output(stdout);
         output << "asset-picker prefixes=" << completions.join(",") << "\n"
@@ -1315,12 +1340,16 @@ int runHeadlessCommand(QApplication& app)
                << bodyPartDeltaPreservesHiddenAndDuplicates
                << " bodyPartPropertyPasteIsExact=" << bodyPartPropertyPasteIsExact
                << " minimumPaintBrushIsSingleTile=" << minimumPaintBrushIsSingleTile
-               << " underwaterFamiliesHiddenByDefault=" << underwaterFamiliesHiddenByDefault
-               << " underwaterFamiliesCanBeShown=" << underwaterFamiliesCanBeShown
+               << " underwaterFamiliesVisibleByDefault=" << underwaterFamiliesVisibleByDefault
+               << " underwaterFamiliesRemainVisible=" << underwaterFamiliesRemainVisible
                << " landscapeLayersVisibleByDefault=" << landscapeLayersVisibleByDefault
                << " landscapeVisibilityControlsWork=" << landscapeVisibilityControlsWork
                << " overlaySurfaceToolSeparate=" << overlaySurfaceToolSeparate
-               << " semanticAtlasReviewButtonAvailable=" << semanticAtlasReviewButtonAvailable
+               << " programmaticModeRefreshesMaterials="
+               << programmaticModeRefreshesMaterials
+               << " contextualMaterialVariantsSelectable="
+               << contextualMaterialVariantsSelectable
+               << " materialAtlasActionWorks=" << materialAtlasActionWorks
                << " logicPointUndoAtomic=" << logicPointUndoAtomic
                << " logicPointRedoAtomic=" << logicPointRedoAtomic << "\n"
                << (passed ? "PASS" : "FAIL")

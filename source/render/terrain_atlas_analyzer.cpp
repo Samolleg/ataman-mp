@@ -94,13 +94,9 @@ STerrainAtlasAnalysis CTerrainAtlasAnalyzer::analyze(
     }
 
     result.templateName = QStringLiteral("Zone1 stock slot layout");
-    // The catalog describes decoded atlas-image rows, while the terrain
-    // renderer's grid row zero is the opposite vertical side. Convert only
-    // requested paint signatures at lookup; untouched packed MPR decoding is
-    // not reinterpreted.
-    result.landCatalog.setMirrorPaintGridY(true);
-    result.overlayCatalog.setMirrorPaintGridY(true);
-    result.overlayCompatibleCatalog.setMirrorPaintGridY(true);
+    // This compatibility catalog is the known-good Zone1 paint-grid baseline.
+    // Profile creation reflects it into the visible tile-preview corner space;
+    // compiling that profile reflects it back and must reproduce this catalog.
     result.expectedSlots = 512;
     if(atlasSlotCount != result.expectedSlots)
     {
@@ -125,13 +121,15 @@ STerrainAtlasAnalysis CTerrainAtlasAnalyzer::analyze(
     QMap<qint32, int> representatives;
     for(int slot = 0; slot < result.expectedSlots; ++slot)
     {
-        // The atlas builder flips the completed 8x8 atlas vertically. Undo
-        // that image-space transform before reasoning about map-space edges.
+        // These compatibility bytes are the proven Zone1 paint-grid
+        // NW/NE/SE/SW signature. Profile creation reflects them into the
+        // visible tile-preview space used by every authored and inferred
+        // profile; compilation reflects them back exactly once.
         STerrainTransitionSignature signature;
-        signature.northWest = quint8(signatures.at(slot * 4 + 3));
-        signature.northEast = quint8(signatures.at(slot * 4 + 2));
-        signature.southEast = quint8(signatures.at(slot * 4 + 1));
-        signature.southWest = quint8(signatures.at(slot * 4));
+        signature.northWest = quint8(signatures.at(slot * 4));
+        signature.northEast = quint8(signatures.at(slot * 4 + 1));
+        signature.southEast = quint8(signatures.at(slot * 4 + 2));
+        signature.southWest = quint8(signatures.at(slot * 4 + 3));
         const ETerrainAtlasLayer layer = materialLayer(signature.northWest);
         const bool sameLayer = materialLayer(signature.northEast) == layer
             && materialLayer(signature.southEast) == layer
@@ -154,10 +152,7 @@ STerrainAtlasAnalysis CTerrainAtlasAnalyzer::analyze(
             packed.tileIndex = quint8(slot % 64);
             packed.rotation = quint8(rotation);
             STerrainTransitionVariant variant;
-            // The vertical atlas flip conjugates the apparent image-space
-            // rotation. After converting the base signature to map space,
-            // packed quarter-turns use the catalog's clockwise convention.
-            variant.signature = CTerrainTransitionCatalog::rotated(signature, rotation);
+            variant.signature = CTerrainTransitionCatalog::rotated(signature, -rotation);
             variant.packedTile = packed.encode();
             if(!catalog->addVariant(variant, report))
                 return STerrainAtlasAnalysis();

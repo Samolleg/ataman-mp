@@ -1,54 +1,265 @@
 #include "terrain_atlas_review_dialog.h"
 
 #include <QAbstractItemView>
-#include <QCheckBox>
 #include <QComboBox>
 #include <QDialogButtonBox>
 #include <QDir>
-#include <QFrame>
+#include <QDrag>
+#include <QDragEnterEvent>
+#include <QDropEvent>
 #include <QFileDialog>
+#include <QFrame>
+#include <QGridLayout>
 #include <QHeaderView>
 #include <QHBoxLayout>
 #include <QInputDialog>
 #include <QLabel>
-#include <QLineEdit>
+#include <QListWidget>
 #include <QMessageBox>
+#include <QMimeData>
 #include <QPixmap>
 #include <QPushButton>
 #include <QSettings>
-#include <QSizePolicy>
 #include <QSet>
-#include <QTableWidget>
+#include <QTimer>
+#include <QTreeWidget>
 #include <QVBoxLayout>
-#include <algorithm>
+#include <functional>
 
 #include "endurance_document.h"
 
 namespace {
-QString signatureText(const STerrainTransitionSignature& signature)
+const char* FamilyMime = "application/x-endurance-atlas-family";
+const char* TileMime = "application/x-endurance-atlas-tile";
+const int KindRole = Qt::UserRole;
+const int IdRole = Qt::UserRole + 1;
+const int SourceFamilyRole = Qt::UserRole + 2;
+enum ETreeKind { GroupKind = 0, FamilyKind = 1, TileKind = 2 };
+
+QByteArray numberMime(qint32 number)
 {
-    return QStringLiteral("%1 / %2 / %3 / %4")
-        .arg(signature.northWest).arg(signature.northEast)
-        .arg(signature.southEast).arg(signature.southWest);
+    return QByteArray::number(number);
+}
+
+qint32 mimeNumber(const QMimeData* data, const char* type)
+{
+    bool ok = false;
+    const qint32 value = data->data(type).toInt(&ok);
+    return ok ? value : -1;
+}
+
+QIcon tileIcon(const QVector<QImage>& images, int slot)
+{
+    if(slot < 0 || slot >= images.size()) return QIcon();
+    const QPixmap pixmap = QPixmap::fromImage(images.at(slot)).scaled(
+        56, 56, Qt::KeepAspectRatio, Qt::FastTransformation);
+    QIcon icon;
+    icon.addPixmap(pixmap, QIcon::Normal);
+    icon.addPixmap(pixmap, QIcon::Active);
+    icon.addPixmap(pixmap, QIcon::Selected);
+    return icon;
 }
 }
+
+class CAtlasMaterialTree : public QTreeWidget
+{
+public:
+    explicit CAtlasMaterialTree(QWidget* parent = nullptr) : QTreeWidget(parent)
+    {
+        setHeaderLabels({tr("Materials and assigned tiles"), tr("Tiles")});
+        header()->setSectionResizeMode(0, QHeaderView::Stretch);
+        header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
+        setIconSize(QSize(56, 56));
+        setSelectionMode(QAbstractItemView::SingleSelection);
+        setDragDropMode(QAbstractItemView::DragDrop);
+        setDragEnabled(true);
+        setAcceptDrops(true);
+        setDropIndicatorShown(true);
+        setDefaultDropAction(Qt::MoveAction);
+    }
+
+    std::function<void(int, qint32, qint32)> tileDropped;
+
+protected:
+    void startDrag(Qt::DropActions) override
+    {
+        QTreeWidgetItem* selected = currentItem();
+        if(!selected) return;
+        QMimeData* mime = new QMimeData;
+        if(selected->data(0, KindRole).toInt() == FamilyKind)
+            mime->setData(FamilyMime, numberMime(selected->data(0, IdRole).toInt()));
+        else if(selected->data(0, KindRole).toInt() == TileKind)
+        {
+            mime->setData(TileMime, numberMime(selected->data(0, IdRole).toInt()));
+            mime->setData(FamilyMime,
+                numberMime(selected->data(0, SourceFamilyRole).toInt()));
+        }
+        else
+        {
+            delete mime;
+            return;
+        }
+        QDrag* drag = new QDrag(this);
+        drag->setMimeData(mime);
+        drag->exec(Qt::MoveAction);
+    }
+
+    void dragEnterEvent(QDragEnterEvent* event) override
+    {
+        if(event->mimeData()->hasFormat(TileMime)) event->acceptProposedAction();
+        else QTreeWidget::dragEnterEvent(event);
+    }
+
+    void dragMoveEvent(QDragMoveEvent* event) override
+    {
+        if(event->mimeData()->hasFormat(TileMime)) event->acceptProposedAction();
+        else QTreeWidget::dragMoveEvent(event);
+    }
+
+    void dropEvent(QDropEvent* event) override
+    {
+        if(!event->mimeData()->hasFormat(TileMime))
+        {
+            QTreeWidget::dropEvent(event);
+            return;
+        }
+        QTreeWidgetItem* target = itemAt(event->pos());
+        while(target && target->data(0, KindRole).toInt() != FamilyKind)
+            target = target->parent();
+        if(!target) return;
+        const int tile = mimeNumber(event->mimeData(), TileMime);
+        const qint32 source = mimeNumber(event->mimeData(), FamilyMime);
+        const qint32 destination = target->data(0, IdRole).toInt();
+        if(tile >= 0 && destination > 0 && tileDropped)
+        {
+            event->acceptProposedAction();
+            const auto callback = tileDropped;
+            QTimer::singleShot(0, this, [callback, tile, source, destination]() {
+                callback(tile, source, destination);
+            });
+        }
+    }
+};
+
+class CAtlasTilePool : public QListWidget
+{
+public:
+    explicit CAtlasTilePool(QWidget* parent = nullptr) : QListWidget(parent)
+    {
+        setViewMode(QListView::IconMode);
+        setResizeMode(QListView::Adjust);
+        setIconSize(QSize(72, 72));
+        setGridSize(QSize(96, 104));
+        setMovement(QListView::Static);
+        setDragEnabled(true);
+        setAcceptDrops(true);
+        setDropIndicatorShown(true);
+        setSelectionMode(QAbstractItemView::SingleSelection);
+        setDragDropMode(QAbstractItemView::DragDrop);
+        setDefaultDropAction(Qt::MoveAction);
+        viewport()->setAcceptDrops(true);
+    }
+
+    std::function<void(int)> tileDropped;
+
+protected:
+    void startDrag(Qt::DropActions) override
+    {
+        QListWidgetItem* selected = currentItem();
+        if(!selected) return;
+        QMimeData* mime = new QMimeData;
+        mime->setData(TileMime, numberMime(selected->data(IdRole).toInt()));
+        mime->setData(FamilyMime, numberMime(-1));
+        QDrag* drag = new QDrag(this);
+        drag->setMimeData(mime);
+        drag->exec(Qt::MoveAction);
+    }
+
+    void dragEnterEvent(QDragEnterEvent* event) override
+    {
+        if(event->mimeData()->hasFormat(TileMime)) event->acceptProposedAction();
+        else QListWidget::dragEnterEvent(event);
+    }
+
+    void dragMoveEvent(QDragMoveEvent* event) override
+    {
+        if(event->mimeData()->hasFormat(TileMime)) event->acceptProposedAction();
+        else QListWidget::dragMoveEvent(event);
+    }
+
+    void dropEvent(QDropEvent* event) override
+    {
+        const int tile = mimeNumber(event->mimeData(), TileMime);
+        if(tile >= 0 && tileDropped)
+        {
+            event->acceptProposedAction();
+            const auto callback = tileDropped;
+            QTimer::singleShot(0, this, [callback, tile]() { callback(tile); });
+        }
+    }
+};
+
+class CFamilyCornerButton : public QPushButton
+{
+public:
+    explicit CFamilyCornerButton(const QString& corner, QWidget* parent = nullptr)
+        : QPushButton(parent), m_corner(corner)
+    {
+        setAcceptDrops(true);
+        setMinimumSize(145, 72);
+    }
+
+    std::function<void(qint32)> familyDropped;
+
+    void setFamily(const QString& name)
+    {
+        setText(QStringLiteral("%1\n%2").arg(m_corner, name));
+    }
+
+protected:
+    void dragEnterEvent(QDragEnterEvent* event) override
+    {
+        if(event->mimeData()->hasFormat(FamilyMime)
+           && !event->mimeData()->hasFormat(TileMime))
+            event->acceptProposedAction();
+    }
+
+    void dropEvent(QDropEvent* event) override
+    {
+        const qint32 family = mimeNumber(event->mimeData(), FamilyMime);
+        if(family > 0 && familyDropped)
+        {
+            familyDropped(family);
+            event->acceptProposedAction();
+        }
+    }
+
+private:
+    QString m_corner;
+};
 
 CTerrainAtlasReviewDialog::CTerrainAtlasReviewDialog(
     const STerrainAtlasProfile& profile, const QVector<QImage>& tileImages,
     QWidget* parent)
     : QDialog(parent), m_profile(profile), m_tileImages(tileImages),
-      m_families(new QTableWidget(this)), m_slots(new QTableWidget(this)),
-      m_preview(new QLabel(this)), m_binding(new QLabel(this)),
-      m_diagnostics(new QLabel(this)), m_approve(new QPushButton(tr("Approve and save"), this)),
-      m_showAll(new QCheckBox(tr("Show all inferred families and slots"), this))
+      m_materials(new CAtlasMaterialTree(this)),
+      m_unassigned(new CAtlasTilePool(this)), m_preview(new QLabel(this)),
+      m_tileTitle(new QLabel(this)), m_tileHelp(new QLabel(this)),
+      m_binding(new QLabel(this)), m_storage(new QLabel(this)),
+      m_diagnostics(new QLabel(this)), m_familyReason(new QLabel(this)),
+      m_familyClass(new QComboBox(this)),
+      m_confirmFamily(new QPushButton(tr("Confirm material"), this)),
+      m_thumbnail(new QPushButton(tr("Use selected tile as thumbnail"), this)),
+      m_apply(new QPushButton(tr("Apply + Close"), this))
 {
-    setWindowTitle(tr("Review semantic terrain atlas"));
-    resize(1240, 760);
+    setWindowTitle(tr("Material atlas"));
+    setWindowFlag(Qt::WindowContextHelpButtonHint, false);
+    resize(1320, 820);
     QVBoxLayout* layout = new QVBoxLayout(this);
     QLabel* explanation = new QLabel(tr(
-        "The editor has already assigned the corner families it can infer. This view shows only unresolved items by default. "
-        "Confirm a highlighted family or slot when it is correct; split/merge only when the proposed material identity is wrong. "
-        "Use Show all for expert inspection. No atlas image or MPR data is modified."), this);
+        "The editor has already made every safe assignment it could. Painting can use those materials now. "
+        "Unusual tiles stay in the unassigned pool and never disable the valid palette. Drag a tile onto a material to assign it; "
+        "for transition tiles, select the tile and drag material rows onto its four corners. Missing transitions only produce hard paint edges."), this);
     explanation->setWordWrap(true);
     layout->addWidget(explanation);
     m_binding->setTextInteractionFlags(Qt::TextSelectableByMouse);
@@ -56,459 +267,603 @@ CTerrainAtlasReviewDialog::CTerrainAtlasReviewDialog(
         .arg(m_profile.mprNamespace).arg(m_profile.atlasSlotCount)
         .arg(QString::fromLatin1(m_profile.atlasPixelSha256)));
     layout->addWidget(m_binding);
-    QLabel* storage = new QLabel(tr("Editor profile location: %1")
-        .arg(QDir::toNativeSeparators(
-            CTerrainAtlasProfileStore::profilePath(m_profile.mprNamespace))), this);
-    storage->setTextInteractionFlags(Qt::TextSelectableByMouse);
-    storage->setWordWrap(true);
-    layout->addWidget(storage);
+    m_storage->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    m_storage->setWordWrap(true);
+    layout->addWidget(m_storage);
 
-    QHBoxLayout* body = new QHBoxLayout();
-    QVBoxLayout* familySide = new QVBoxLayout();
-    familySide->addWidget(new QLabel(tr("Material families"), this));
-    familySide->addWidget(m_showAll);
-    m_families->setColumnCount(6);
-    m_families->setHorizontalHeaderLabels({tr("ID"), tr("Name"), tr("Layer"),
-        tr("Underwater"), tr("Needs review"), tr("Slots")});
-    m_families->setSelectionBehavior(QAbstractItemView::SelectRows);
-    m_families->setSelectionMode(QAbstractItemView::ExtendedSelection);
-    m_families->verticalHeader()->setVisible(false);
-    m_families->horizontalHeader()->setMinimumSectionSize(55);
-    for(int column = 0; column < m_families->columnCount(); ++column)
-        m_families->horizontalHeader()->setSectionResizeMode(column, QHeaderView::Interactive);
-    const int familyWidths[] = {55, 300, 120, 105, 115, 65};
-    for(int column = 0; column < m_families->columnCount(); ++column)
-        m_families->setColumnWidth(column, familyWidths[column]);
-    familySide->addWidget(m_families, 2);
-    QHBoxLayout* familyActions = new QHBoxLayout();
-    QPushButton* split = new QPushButton(tr("Split selected slots..."), this);
-    QPushButton* merge = new QPushButton(tr("Merge selected families..."), this);
-    familyActions->addWidget(split);
-    familyActions->addWidget(merge);
-    familySide->addLayout(familyActions);
-    body->addLayout(familySide, 3);
+    QHBoxLayout* body = new QHBoxLayout;
+    QVBoxLayout* materialSide = new QVBoxLayout;
+    materialSide->addWidget(new QLabel(tr("Materials — drag a material row onto a tile corner"), this));
+    materialSide->addWidget(m_materials, 1);
+    QHBoxLayout* familyActions = new QHBoxLayout;
+    QPushButton* add = new QPushButton(tr("New"), this);
+    QPushButton* rename = new QPushButton(tr("Rename"), this);
+    QPushButton* remove = new QPushButton(tr("Delete empty"), this);
+    familyActions->addWidget(add);
+    familyActions->addWidget(rename);
+    familyActions->addWidget(remove);
+    materialSide->addLayout(familyActions);
+    m_familyClass->addItem(tr("Ground"), 0);
+    m_familyClass->addItem(tr("Underwater"), 1);
+    m_familyClass->addItem(tr("Overlay"), 2);
+    materialSide->addWidget(m_familyClass);
+    m_familyReason->setWordWrap(true);
+    materialSide->addWidget(m_familyReason);
+    materialSide->addWidget(m_confirmFamily);
+    body->addLayout(materialSide, 4);
 
-    QVBoxLayout* slotSide = new QVBoxLayout();
-    slotSide->addWidget(new QLabel(tr("Atlas slots in selected family"), this));
-    m_slots->setColumnCount(3);
-    m_slots->setHorizontalHeaderLabels({tr("Slot"), tr("Corner families (NW / NE / SE / SW)"),
-                                        tr("Status")});
-    m_slots->setSelectionBehavior(QAbstractItemView::SelectRows);
-    m_slots->setSelectionMode(QAbstractItemView::ExtendedSelection);
-    m_slots->verticalHeader()->setVisible(false);
-    m_slots->horizontalHeader()->setMinimumSectionSize(60);
-    for(int column = 0; column < m_slots->columnCount(); ++column)
-        m_slots->horizontalHeader()->setSectionResizeMode(column, QHeaderView::Interactive);
-    m_slots->setColumnWidth(0, 70);
-    m_slots->setColumnWidth(1, 310);
-    m_slots->setColumnWidth(2, 135);
-    slotSide->addWidget(m_slots, 2);
-    QHBoxLayout* slotActions = new QHBoxLayout();
-    QPushButton* reviewed = new QPushButton(tr("Mark selected Reviewed"), this);
-    QPushButton* needsReview = new QPushButton(tr("Mark selected Needs review"), this);
-    slotActions->addWidget(reviewed);
-    slotActions->addWidget(needsReview);
-    slotSide->addLayout(slotActions);
-    m_preview->setFixedSize(220, 220);
-    m_preview->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+    QVBoxLayout* inspector = new QVBoxLayout;
+    m_tileTitle->setAlignment(Qt::AlignCenter);
+    QFont titleFont = m_tileTitle->font();
+    titleFont.setBold(true);
+    m_tileTitle->setFont(titleFont);
+    inspector->addWidget(m_tileTitle);
+    m_preview->setFixedSize(260, 260);
     m_preview->setAlignment(Qt::AlignCenter);
     m_preview->setFrameStyle(QFrame::StyledPanel | QFrame::Sunken);
-    slotSide->addWidget(m_preview);
-    body->addLayout(slotSide, 2);
+    inspector->addWidget(m_preview, 0, Qt::AlignHCenter);
+    QGridLayout* corners = new QGridLayout;
+    m_corners[0] = new CFamilyCornerButton(tr("NW"), this);
+    m_corners[1] = new CFamilyCornerButton(tr("NE"), this);
+    m_corners[2] = new CFamilyCornerButton(tr("SE"), this);
+    m_corners[3] = new CFamilyCornerButton(tr("SW"), this);
+    corners->addWidget(m_corners[0], 0, 0);
+    corners->addWidget(m_corners[1], 0, 1);
+    corners->addWidget(m_corners[3], 1, 0);
+    corners->addWidget(m_corners[2], 1, 1);
+    inspector->addLayout(corners);
+    m_tileHelp->setWordWrap(true);
+    inspector->addWidget(m_tileHelp);
+    inspector->addWidget(m_thumbnail);
+    inspector->addStretch();
+    body->addLayout(inspector, 3);
+
+    QVBoxLayout* poolSide = new QVBoxLayout;
+    poolSide->addWidget(new QLabel(tr("Unassigned / unusual tiles"), this));
+    QLabel* poolHelp = new QLabel(tr(
+        "These tiles are excluded from automatic painting. Drag one to a material for a uniform assignment, then edit individual corners if it is a transition."), this);
+    poolHelp->setWordWrap(true);
+    poolSide->addWidget(poolHelp);
+    poolSide->addWidget(m_unassigned, 1);
+    body->addLayout(poolSide, 3);
     layout->addLayout(body, 1);
 
     m_diagnostics->setWordWrap(true);
     layout->addWidget(m_diagnostics);
     QDialogButtonBox* buttons = new QDialogButtonBox(QDialogButtonBox::Cancel, this);
-    QPushButton* draft = buttons->addButton(tr("Save draft"), QDialogButtonBox::ActionRole);
-    QPushButton* exportButton = buttons->addButton(
-        tr("Export profile copy..."), QDialogButtonBox::ActionRole);
-    buttons->addButton(m_approve, QDialogButtonBox::AcceptRole);
+    QPushButton* open = buttons->addButton(tr("Load profile..."), QDialogButtonBox::ActionRole);
+    QPushButton* copy = buttons->addButton(tr("Save copy..."), QDialogButtonBox::ActionRole);
+    buttons->addButton(m_apply, QDialogButtonBox::AcceptRole);
     layout->addWidget(buttons);
+
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
-    connect(draft, &QPushButton::clicked, this, &CTerrainAtlasReviewDialog::saveDraft);
-    connect(exportButton, &QPushButton::clicked,
-            this, &CTerrainAtlasReviewDialog::exportCopy);
-    connect(m_approve, &QPushButton::clicked, this, &CTerrainAtlasReviewDialog::approveAndSave);
-    connect(split, &QPushButton::clicked, this, &CTerrainAtlasReviewDialog::splitSelectedFamily);
-    connect(merge, &QPushButton::clicked, this, &CTerrainAtlasReviewDialog::mergeSelectedFamilies);
-    connect(reviewed, &QPushButton::clicked, this,
-            &CTerrainAtlasReviewDialog::markSelectedSlotsReviewed);
-    connect(needsReview, &QPushButton::clicked, this,
-            &CTerrainAtlasReviewDialog::markSelectedSlotsForReview);
-    connect(m_showAll, &QCheckBox::toggled, this, [this](bool) {
-        rebuildTables(selectedFamilyId());
-    });
-    connect(m_families, &QTableWidget::itemSelectionChanged,
-            this, &CTerrainAtlasReviewDialog::refreshSlots);
-    connect(m_families, &QTableWidget::cellChanged,
-            this, &CTerrainAtlasReviewDialog::applyFamilyCellChange);
-    connect(m_slots, &QTableWidget::itemSelectionChanged,
-            this, &CTerrainAtlasReviewDialog::updatePreview);
+    connect(open, &QPushButton::clicked, this, &CTerrainAtlasReviewDialog::openProfile);
+    connect(copy, &QPushButton::clicked, this, &CTerrainAtlasReviewDialog::exportCopy);
+    connect(m_apply, &QPushButton::clicked, this, &CTerrainAtlasReviewDialog::applyAndClose);
+    connect(add, &QPushButton::clicked, this, &CTerrainAtlasReviewDialog::createMaterial);
+    connect(rename, &QPushButton::clicked, this, &CTerrainAtlasReviewDialog::renameSelectedFamily);
+    connect(remove, &QPushButton::clicked, this, &CTerrainAtlasReviewDialog::deleteSelectedFamily);
+    connect(m_familyClass, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, &CTerrainAtlasReviewDialog::changeSelectedClassification);
+    connect(m_confirmFamily, &QPushButton::clicked,
+            this, &CTerrainAtlasReviewDialog::confirmSelectedFamily);
+    connect(m_thumbnail, &QPushButton::clicked,
+            this, &CTerrainAtlasReviewDialog::useSelectedTileAsThumbnail);
+    connect(m_materials, &QTreeWidget::itemClicked,
+            this, &CTerrainAtlasReviewDialog::selectTreeItem);
+    connect(m_unassigned, &QListWidget::itemSelectionChanged,
+            this, &CTerrainAtlasReviewDialog::selectPoolItem);
+    m_materials->tileDropped = [this](int tile, qint32 source, qint32 target) {
+        assignTile(tile, source, target);
+    };
+    m_unassigned->tileDropped = [this](int tile) { unassignTile(tile); };
+    for(int corner = 0; corner < 4; ++corner)
+    {
+        m_corners[corner]->familyDropped = [this, corner](qint32 id) {
+            assignCorner(corner, id);
+        };
+        connect(m_corners[corner], &QPushButton::clicked, this,
+                [this, corner]() { chooseCornerMaterial(corner); });
+    }
+
     QSettings settings;
     restoreGeometry(settings.value(QStringLiteral("terrainAtlasReview/geometry")).toByteArray());
-    m_families->horizontalHeader()->restoreState(
-        settings.value(QStringLiteral("terrainAtlasReview/familyHeader")).toByteArray());
-    m_slots->horizontalHeader()->restoreState(
-        settings.value(QStringLiteral("terrainAtlasReview/slotHeader")).toByteArray());
     connect(this, &QDialog::finished, this, [this](int) {
         QSettings settings;
         settings.setValue(QStringLiteral("terrainAtlasReview/geometry"), saveGeometry());
-        settings.setValue(QStringLiteral("terrainAtlasReview/familyHeader"),
-                          m_families->horizontalHeader()->saveState());
-        settings.setValue(QStringLiteral("terrainAtlasReview/slotHeader"),
-                          m_slots->horizontalHeader()->saveState());
     });
-    if(m_profile.provenance.startsWith(QStringLiteral("authored-template:")))
-        m_showAll->setChecked(true);
-    rebuildTables();
+    rebuildVisuals();
 }
 
-void CTerrainAtlasReviewDialog::rebuildTables(qint32 selectFamilyId)
+STerrainAtlasProfileFamily* CTerrainAtlasReviewDialog::family(qint32 id)
+{
+    for(STerrainAtlasProfileFamily& candidate : m_profile.families)
+        if(candidate.id == id) return &candidate;
+    return nullptr;
+}
+
+const STerrainAtlasProfileFamily* CTerrainAtlasReviewDialog::family(qint32 id) const
+{
+    for(const STerrainAtlasProfileFamily& candidate : m_profile.families)
+        if(candidate.id == id) return &candidate;
+    return nullptr;
+}
+
+STerrainAtlasProfileSlot* CTerrainAtlasReviewDialog::slot(int id)
+{
+    for(STerrainAtlasProfileSlot& candidate : m_profile.slotDefinitions)
+        if(candidate.slot == id) return &candidate;
+    return nullptr;
+}
+
+const STerrainAtlasProfileSlot* CTerrainAtlasReviewDialog::slot(int id) const
+{
+    for(const STerrainAtlasProfileSlot& candidate : m_profile.slotDefinitions)
+        if(candidate.slot == id) return &candidate;
+    return nullptr;
+}
+
+QString CTerrainAtlasReviewDialog::familyName(qint32 id) const
+{
+    const STerrainAtlasProfileFamily* found = family(id);
+    return found ? found->name : tr("Unknown material %1").arg(id);
+}
+
+int CTerrainAtlasReviewDialog::familyThumbnailSlot(qint32 familyId) const
+{
+    const STerrainAtlasProfileFamily* entry = family(familyId);
+    if(!entry) return -1;
+    if(entry->thumbnailSlot >= 0) return entry->thumbnailSlot;
+    for(int member : entry->memberSlots)
+    {
+        const STerrainAtlasProfileSlot* candidate = slot(member);
+        if(candidate && candidate->assigned
+           && candidate->signature.northWest == familyId
+           && candidate->signature.northEast == familyId
+           && candidate->signature.southEast == familyId
+           && candidate->signature.southWest == familyId)
+            return member;
+    }
+    return entry->memberSlots.isEmpty() ? -1 : entry->memberSlots.front();
+}
+
+void CTerrainAtlasReviewDialog::rebuildVisuals(qint32 selectFamily, int selectSlot)
 {
     m_rebuilding = true;
-    QVector<int> visibleFamilies;
-    for(int index = 0; index < m_profile.families.size(); ++index)
+    m_selectedSlot = selectSlot;
+    m_materials->clear();
+    m_unassigned->clear();
+    QTreeWidgetItem* groups[3];
+    const QString names[] = {tr("Ground"), tr("Underwater"), tr("Overlay")};
+    for(int group = 0; group < 3; ++group)
     {
-        const STerrainAtlasProfileFamily& family = m_profile.families.at(index);
-        bool unresolved = family.ambiguous;
-        for(const STerrainAtlasProfileSlot& slot : m_profile.slotDefinitions)
-        {
-            if(!slot.ambiguous)
-                continue;
-            const qint32 ids[] = {slot.signature.northWest, slot.signature.northEast,
-                                  slot.signature.southEast, slot.signature.southWest};
-            unresolved |= std::find(std::begin(ids), std::end(ids), family.id)
-                != std::end(ids);
-        }
-        if(m_showAll->isChecked() || unresolved)
-            visibleFamilies.append(index);
+        groups[group] = new QTreeWidgetItem(m_materials, {names[group]});
+        groups[group]->setData(0, KindRole, GroupKind);
+        groups[group]->setFlags(Qt::ItemIsEnabled);
+        QFont font = groups[group]->font(0);
+        font.setBold(true);
+        groups[group]->setFont(0, font);
+        groups[group]->setExpanded(true);
     }
-    m_families->setRowCount(visibleFamilies.size());
-    int selectedRow = 0;
-    for(int row = 0; row < visibleFamilies.size(); ++row)
+    QTreeWidgetItem* selectItem = nullptr;
+    for(const STerrainAtlasProfileFamily& entry : m_profile.families)
     {
-        const STerrainAtlasProfileFamily& family =
-            m_profile.families.at(visibleFamilies.at(row));
-        QTableWidgetItem* id = new QTableWidgetItem(QString::number(family.id));
-        id->setData(Qt::UserRole, family.id);
-        id->setFlags(id->flags() & ~Qt::ItemIsEditable);
-        m_families->setItem(row, 0, id);
-        m_families->setItem(row, 1, new QTableWidgetItem(family.name));
-        QComboBox* layer = new QComboBox(m_families);
-        layer->addItem(tr("Land"), int(ETerrainAtlasLayer::Land));
-        layer->addItem(tr("Overlay"), int(ETerrainAtlasLayer::Overlay));
-        layer->setCurrentIndex(family.layer == ETerrainAtlasLayer::Land ? 0 : 1);
-        m_families->setCellWidget(row, 2, layer);
-        QCheckBox* underwater = new QCheckBox(m_families);
-        underwater->setChecked(family.underwater);
-        underwater->setEnabled(family.layer == ETerrainAtlasLayer::Land);
-        m_families->setCellWidget(row, 3, underwater);
-        QCheckBox* ambiguous = new QCheckBox(m_families);
-        ambiguous->setChecked(family.ambiguous);
-        m_families->setCellWidget(row, 4, ambiguous);
-        QTableWidgetItem* count = new QTableWidgetItem(QString::number(family.memberSlots.size()));
-        count->setFlags(count->flags() & ~Qt::ItemIsEditable);
-        m_families->setItem(row, 5, count);
-        connect(layer, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
-                [this, row](int) { applyFamilyCellChange(row, 2); });
-        connect(underwater, &QCheckBox::toggled, this,
-                [this, row](bool) { applyFamilyCellChange(row, 3); });
-        connect(ambiguous, &QCheckBox::toggled, this,
-                [this, row](bool) { applyFamilyCellChange(row, 4); });
-        if(family.id == selectFamilyId) selectedRow = row;
-    }
-    m_rebuilding = false;
-    if(!visibleFamilies.isEmpty()) m_families->selectRow(selectedRow);
-    refreshSlots();
-    updateDiagnostics();
-}
-
-void CTerrainAtlasReviewDialog::updateDiagnostics()
-{
-    int ambiguousFamilies = 0, ambiguousSlots = 0, missingTransitions = 0;
-    for(const STerrainAtlasProfileFamily& family : m_profile.families)
-        ambiguousFamilies += family.ambiguous;
-    for(const STerrainAtlasProfileSlot& slot : m_profile.slotDefinitions)
-        ambiguousSlots += slot.ambiguous;
-    for(int a = 0; a < m_profile.families.size(); ++a)
-        for(int b = a + 1; b < m_profile.families.size(); ++b)
+        const int group = entry.layer == ETerrainAtlasLayer::Overlay
+            ? 2 : (entry.underwater ? 1 : 0);
+        const int thumbnail = familyThumbnailSlot(entry.id);
+        QTreeWidgetItem* familyItem = new QTreeWidgetItem(groups[group],
+            {entry.name + (entry.ambiguous ? tr("  • confirm") : QString()),
+             tr("%1").arg(entry.memberSlots.size())});
+        familyItem->setIcon(0, tileIcon(m_tileImages, thumbnail));
+        familyItem->setData(0, KindRole, FamilyKind);
+        familyItem->setData(0, IdRole, entry.id);
+        familyItem->setToolTip(0, tr("%1 atlas slots assigned. Drag this row onto a selected tile corner.")
+            .arg(entry.memberSlots.size()));
+        for(int member : entry.memberSlots)
         {
-            const auto& first = m_profile.families.at(a);
-            const auto& second = m_profile.families.at(b);
-            if(first.layer != second.layer) continue;
-            bool transition = false;
-            for(const STerrainAtlasProfileSlot& slot : m_profile.slotDefinitions)
+            const STerrainAtlasProfileSlot* definition = slot(member);
+            if(!definition || !definition->assigned) continue;
+            QTreeWidgetItem* tileItem = new QTreeWidgetItem(familyItem,
+                {member == thumbnail ? tr("Ⓣ  Tile %1").arg(member)
+                                     : tr("Tile %1").arg(member), QString()});
+            tileItem->setIcon(0, tileIcon(m_tileImages, member));
+            tileItem->setData(0, KindRole, TileKind);
+            tileItem->setData(0, IdRole, member);
+            tileItem->setData(0, SourceFamilyRole, entry.id);
+            tileItem->setToolTip(0, tr("NW %1 / NE %2 / SE %3 / SW %4")
+                .arg(familyName(definition->signature.northWest))
+                .arg(familyName(definition->signature.northEast))
+                .arg(familyName(definition->signature.southEast))
+                .arg(familyName(definition->signature.southWest)));
+            if(member == thumbnail)
             {
-                const qint32 ids[] = {slot.signature.northWest, slot.signature.northEast,
-                                      slot.signature.southEast, slot.signature.southWest};
-                bool hasFirst = false, hasSecond = false;
-                for(qint32 id : ids) { hasFirst |= id == first.id; hasSecond |= id == second.id; }
-                transition |= hasFirst && hasSecond;
+                QFont thumbnailFont = tileItem->font(0);
+                thumbnailFont.setBold(true);
+                tileItem->setFont(0, thumbnailFont);
+                tileItem->setToolTip(0, tr("Thumbnail tile for %1. %2")
+                    .arg(entry.name, tileItem->toolTip(0)));
             }
-            missingTransitions += !transition;
+            if(member == selectSlot) selectItem = tileItem;
         }
-    m_diagnostics->setText(tr(
-        "%1 family ambiguity flag(s), %2 slot ambiguity flag(s), %3 missing same-layer family transition(s). "
-        "Missing transitions are diagnostic: automatic painting keeps a hard edge instead of inventing a tile.")
-        .arg(ambiguousFamilies).arg(ambiguousSlots).arg(missingTransitions));
+        if(entry.id == selectFamily && selectSlot < 0) selectItem = familyItem;
+    }
+    for(const STerrainAtlasProfileSlot& definition : m_profile.slotDefinitions)
+        if(!definition.assigned || definition.ambiguous)
+        {
+            QListWidgetItem* item = new QListWidgetItem(
+                tileIcon(m_tileImages, definition.slot), tr("Tile %1").arg(definition.slot),
+                m_unassigned);
+            item->setData(IdRole, definition.slot);
+            item->setToolTip(tr("Parser proposal: NW %1 / NE %2 / SE %3 / SW %4")
+                .arg(familyName(definition.signature.northWest))
+                .arg(familyName(definition.signature.northEast))
+                .arg(familyName(definition.signature.southEast))
+                .arg(familyName(definition.signature.southWest)));
+            if(definition.slot == selectSlot) m_unassigned->setCurrentItem(item);
+        }
+    if(selectItem)
+    {
+        m_materials->setCurrentItem(selectItem);
+        QTreeWidgetItem* parent = selectItem->parent();
+        if(parent) parent->setExpanded(true);
+    }
+    m_storage->setText(tr("Active profile: %1   (Use Save copy/Load profile for another visible, reopenable location.)")
+        .arg(QDir::toNativeSeparators(
+            CTerrainAtlasProfileStore::profilePath(m_profile.mprNamespace))));
+    m_rebuilding = false;
+    updateInspector();
+    updateDiagnostics();
 }
 
 qint32 CTerrainAtlasReviewDialog::selectedFamilyId() const
 {
-    const int row = m_families->currentRow();
-    return row >= 0 && m_families->item(row, 0)
-        ? m_families->item(row, 0)->data(Qt::UserRole).toInt() : -1;
+    QTreeWidgetItem* item = m_materials->currentItem();
+    if(!item || !item->isSelected()) return -1;
+    while(item && item->data(0, KindRole).toInt() != FamilyKind) item = item->parent();
+    return item ? item->data(0, IdRole).toInt() : -1;
 }
 
-QVector<qint32> CTerrainAtlasReviewDialog::selectedFamilyIds() const
+void CTerrainAtlasReviewDialog::selectTreeItem(QTreeWidgetItem* item)
 {
-    QSet<int> rows;
-    for(const QModelIndex& index : m_families->selectionModel()->selectedRows()) rows.insert(index.row());
-    QVector<qint32> result;
-    for(int row : rows) result.append(m_families->item(row, 0)->data(Qt::UserRole).toInt());
-    std::sort(result.begin(), result.end());
-    return result;
+    if(m_rebuilding || !item) return;
+    m_unassigned->clearSelection();
+    m_selectedSlot = item->data(0, KindRole).toInt() == TileKind
+        ? item->data(0, IdRole).toInt() : -1;
+    updateInspector();
 }
 
-QVector<int> CTerrainAtlasReviewDialog::selectedSlotIds() const
+void CTerrainAtlasReviewDialog::selectPoolItem()
 {
-    QVector<int> result;
-    for(const QModelIndex& index : m_slots->selectionModel()->selectedRows())
-        result.append(m_slots->item(index.row(), 0)->data(Qt::UserRole).toInt());
-    std::sort(result.begin(), result.end());
-    return result;
+    if(m_rebuilding || !m_unassigned->currentItem()) return;
+    m_materials->clearSelection();
+    m_selectedSlot = m_unassigned->currentItem()->data(IdRole).toInt();
+    updateInspector();
 }
 
-void CTerrainAtlasReviewDialog::refreshSlots()
+void CTerrainAtlasReviewDialog::updateInspector()
 {
     const qint32 familyId = selectedFamilyId();
-    QVector<const STerrainAtlasProfileSlot*> matching;
-    for(const STerrainAtlasProfileSlot& slot : m_profile.slotDefinitions)
+    const STerrainAtlasProfileFamily* selectedFamily = family(familyId);
+    m_rebuilding = true;
+    if(selectedFamily)
     {
-        const qint32 ids[] = {slot.signature.northWest, slot.signature.northEast,
-                              slot.signature.southEast, slot.signature.southWest};
-        if((m_showAll->isChecked() || slot.ambiguous)
-           && std::find(std::begin(ids), std::end(ids), familyId) != std::end(ids))
-            matching.append(&slot);
+        const int classification = selectedFamily->layer == ETerrainAtlasLayer::Overlay
+            ? 2 : (selectedFamily->underwater ? 1 : 0);
+        m_familyClass->setCurrentIndex(classification);
+        m_familyClass->setEnabled(true);
+        m_confirmFamily->setEnabled(selectedFamily->ambiguous);
+        m_familyReason->setText(selectedFamily->ambiguous
+            ? tr("Confirmation needed: the parser could not prove this material's identity or classification. Check its name, section, thumbnail, and assigned tiles, then confirm once.")
+            : tr("This material is resolved. Moving or editing one of its tiles updates all dependent membership automatically."));
     }
-    m_slots->setRowCount(matching.size());
-    for(int row = 0; row < matching.size(); ++row)
+    else
     {
-        const STerrainAtlasProfileSlot& slot = *matching.at(row);
-        QTableWidgetItem* id = new QTableWidgetItem(QString::number(slot.slot));
-        id->setData(Qt::UserRole, slot.slot);
-        id->setFlags(id->flags() & ~Qt::ItemIsEditable);
-        m_slots->setItem(row, 0, id);
-        QTableWidgetItem* signature = new QTableWidgetItem(signatureText(slot.signature));
-        signature->setFlags(signature->flags() & ~Qt::ItemIsEditable);
-        m_slots->setItem(row, 1, signature);
-        QCheckBox* status = new QCheckBox(tr("Needs review"), m_slots);
-        status->setChecked(slot.ambiguous);
-        status->setProperty("atlasSlot", slot.slot);
-        m_slots->setCellWidget(row, 2, status);
-        connect(status, &QCheckBox::toggled, this, [this, status](bool checked) {
-            const int slotId = status->property("atlasSlot").toInt();
-            for(STerrainAtlasProfileSlot& candidate : m_profile.slotDefinitions)
-                if(candidate.slot == slotId)
-                {
-                    candidate.ambiguous = checked;
-                    m_profile.approved = false;
-                    updateDiagnostics();
-                    break;
-                }
-        });
+        m_familyClass->setEnabled(false);
+        m_confirmFamily->setEnabled(false);
+        m_familyReason->setText(tr("Select a material to rename, classify, confirm, or choose its thumbnail."));
     }
-    updatePreview();
-}
+    m_rebuilding = false;
 
-void CTerrainAtlasReviewDialog::updatePreview()
-{
-    const QVector<int> selected = selectedSlotIds();
-    if(selected.isEmpty() || selected.front() < 0 || selected.front() >= m_tileImages.size())
+    const STerrainAtlasProfileSlot* selected = slot(m_selectedSlot);
+    if(!selected)
     {
-        m_preview->setText(tr("Select an atlas slot to preview it."));
-        m_preview->setPixmap(QPixmap());
+        const int thumbnail = selectedFamily ? familyThumbnailSlot(selectedFamily->id) : -1;
+        m_tileTitle->setText(selectedFamily
+            ? tr("%1 — palette thumbnail").arg(selectedFamily->name)
+            : tr("Select a tile"));
+        if(thumbnail >= 0 && thumbnail < m_tileImages.size())
+            m_preview->setPixmap(QPixmap::fromImage(
+                m_tileImages.at(thumbnail)).scaled(
+                    256, 256, Qt::KeepAspectRatio, Qt::FastTransformation));
+        else
+        {
+            m_preview->setPixmap(QPixmap());
+            m_preview->setText(tr("Tile preview"));
+        }
+        m_tileHelp->setText(tr("A transition tile may reference two, three, or four materials. It appears under every material it references, but counts once in atlas coverage."));
+        m_thumbnail->setEnabled(false);
+        for(CFamilyCornerButton* corner : m_corners)
+        {
+            corner->setFamily(tr("—"));
+            corner->setEnabled(false);
+        }
         return;
     }
-    m_preview->setPixmap(QPixmap::fromImage(m_tileImages.at(selected.front())).scaled(
-        QSize(216, 216), Qt::KeepAspectRatio, Qt::FastTransformation));
+    m_tileTitle->setText(tr("Tile %1%2").arg(selected->slot)
+        .arg(selected->assigned ? QString() : tr(" — unassigned")));
+    if(selected->slot >= 0 && selected->slot < m_tileImages.size())
+        m_preview->setPixmap(QPixmap::fromImage(
+            m_tileImages.at(selected->slot)).scaled(
+            256, 256, Qt::KeepAspectRatio, Qt::FastTransformation));
+    else
+        m_preview->setText(tr("Preview unavailable"));
+    const qint32 ids[] = {selected->signature.northWest, selected->signature.northEast,
+                          selected->signature.southEast, selected->signature.southWest};
+    for(int corner = 0; corner < 4; ++corner)
+    {
+        m_corners[corner]->setFamily(familyName(ids[corner]));
+        m_corners[corner]->setEnabled(selected->assigned);
+    }
+    m_tileHelp->setText(selected->assigned
+        ? tr("Drag a material row onto a corner. Ground/underwater and overlay materials can never be mixed in one tile.")
+        : tr("This proposal is not used by painting. First drag the tile onto a material to choose its layer and base assignment; then refine individual corners."));
+    bool containsSelected = selectedFamily && selected->assigned;
+    bool foundSelected = false;
+    for(qint32 id : ids) foundSelected |= id == familyId;
+    m_thumbnail->setEnabled(containsSelected && foundSelected);
 }
 
-void CTerrainAtlasReviewDialog::applyFamilyCellChange(int row, int column)
+void CTerrainAtlasReviewDialog::assignTile(int tileId, qint32 sourceFamily,
+                                           qint32 targetFamily)
 {
-    if(m_rebuilding || row < 0 || !m_families->item(row, 0)) return;
-    const qint32 familyId = m_families->item(row, 0)->data(Qt::UserRole).toInt();
-    int familyIndex = -1;
-    for(int index = 0; index < m_profile.families.size(); ++index)
-        if(m_profile.families.at(index).id == familyId)
+    CValidationReport report;
+    const bool okay = sourceFamily > 0
+        ? m_profile.replaceSlotFamily(tileId, sourceFamily, targetFamily, &report)
+        : m_profile.assignSlotToFamily(tileId, targetFamily, &report);
+    if(!okay)
+    {
+        showReport(tr("Tile was not moved"), report);
+        return;
+    }
+    rebuildVisuals(targetFamily, tileId);
+}
+
+void CTerrainAtlasReviewDialog::unassignTile(int tileId)
+{
+    CValidationReport report;
+    if(!m_profile.unassignSlot(tileId, &report))
+    {
+        showReport(tr("Tile was not unassigned"), report);
+        return;
+    }
+    rebuildVisuals(-1, tileId);
+}
+
+void CTerrainAtlasReviewDialog::assignCorner(int corner, qint32 familyId)
+{
+    if(m_selectedSlot < 0) return;
+    CValidationReport report;
+    if(!m_profile.setSlotCornerFamily(m_selectedSlot, corner, familyId, &report))
+    {
+        showReport(tr("Corner assignment is not valid"), report);
+        return;
+    }
+    rebuildVisuals(familyId, m_selectedSlot);
+}
+
+void CTerrainAtlasReviewDialog::chooseCornerMaterial(int corner)
+{
+    const STerrainAtlasProfileSlot* selected = slot(m_selectedSlot);
+    if(!selected || !selected->assigned || corner < 0 || corner >= 4) return;
+    const qint32 cornerIds[] = {selected->signature.northWest,
+                                selected->signature.northEast,
+                                selected->signature.southEast,
+                                selected->signature.southWest};
+    const STerrainAtlasProfileFamily* current = family(cornerIds[corner]);
+    if(!current) return;
+    QStringList names;
+    QVector<qint32> ids;
+    int currentIndex = 0;
+    for(const STerrainAtlasProfileFamily& candidate : m_profile.families)
+        if(candidate.layer == current->layer)
         {
-            familyIndex = index;
+            if(candidate.id == current->id) currentIndex = names.size();
+            names.append(candidate.name);
+            ids.append(candidate.id);
+        }
+    bool okay = false;
+    const QString chosen = QInputDialog::getItem(this, tr("Assign tile corner"),
+        tr("Material"), names, currentIndex, false, &okay);
+    const int index = names.indexOf(chosen);
+    if(okay && index >= 0) assignCorner(corner, ids.at(index));
+}
+
+void CTerrainAtlasReviewDialog::renameSelectedFamily()
+{
+    STerrainAtlasProfileFamily* selected = family(selectedFamilyId());
+    if(!selected) return;
+    bool ok = false;
+    const QString name = QInputDialog::getText(this, tr("Rename material"),
+        tr("Material name (also shown in the paint palette)"), QLineEdit::Normal,
+        selected->name, &ok).trimmed();
+    if(!ok || name.isEmpty()) return;
+    const qint32 id = selected->id;
+    selected->name = name;
+    selected->ambiguous = false;
+    m_profile.approved = false;
+    rebuildVisuals(id);
+}
+
+void CTerrainAtlasReviewDialog::createMaterial()
+{
+    bool ok = false;
+    const QString name = QInputDialog::getText(this, tr("New material"),
+        tr("Material name"), QLineEdit::Normal, tr("New material"), &ok).trimmed();
+    if(!ok || name.isEmpty()) return;
+    qint32 id = 1;
+    for(const STerrainAtlasProfileFamily& entry : m_profile.families)
+        id = qMax(id, entry.id + 1);
+    STerrainAtlasProfileFamily created;
+    created.id = id;
+    created.name = name;
+    created.layer = ETerrainAtlasLayer::Land;
+    created.ambiguous = true;
+    m_profile.families.append(created);
+    m_profile.approved = false;
+    rebuildVisuals(id);
+}
+
+void CTerrainAtlasReviewDialog::deleteSelectedFamily()
+{
+    const qint32 id = selectedFamilyId();
+    if(id < 0) return;
+    for(const STerrainAtlasProfileSlot& definition : m_profile.slotDefinitions)
+    {
+        const qint32 ids[] = {definition.signature.northWest, definition.signature.northEast,
+                              definition.signature.southEast, definition.signature.southWest};
+        for(qint32 referenced : ids)
+            if(referenced == id)
+            {
+                QMessageBox::information(this, tr("Material is still referenced"),
+                    tr("Move or resolve every tile that references this material before deleting it."));
+                return;
+            }
+    }
+    for(int index = 0; index < m_profile.families.size(); ++index)
+        if(m_profile.families.at(index).id == id)
+        {
+            m_profile.families.removeAt(index);
+            m_profile.approved = false;
             break;
         }
-    if(familyIndex < 0) return;
-    STerrainAtlasProfileFamily& family = m_profile.families[familyIndex];
-    if(column == 1 && m_families->item(row, 1))
-        family.name = m_families->item(row, 1)->text().trimmed();
-    else if(column == 2)
-    {
-        QComboBox* layer = qobject_cast<QComboBox*>(m_families->cellWidget(row, 2));
-        family.layer = layer && layer->currentData().toInt() == int(ETerrainAtlasLayer::Overlay)
-            ? ETerrainAtlasLayer::Overlay : ETerrainAtlasLayer::Land;
-        QCheckBox* underwater = qobject_cast<QCheckBox*>(m_families->cellWidget(row, 3));
-        if(underwater)
-        {
-            underwater->setEnabled(family.layer == ETerrainAtlasLayer::Land);
-            if(family.layer == ETerrainAtlasLayer::Overlay) underwater->setChecked(false);
-        }
-    }
-    else if(column == 3)
-    {
-        QCheckBox* underwater = qobject_cast<QCheckBox*>(m_families->cellWidget(row, 3));
-        family.underwater = underwater && underwater->isChecked()
-            && family.layer == ETerrainAtlasLayer::Land;
-    }
-    else if(column == 4)
-    {
-        QCheckBox* ambiguous = qobject_cast<QCheckBox*>(m_families->cellWidget(row, 4));
-        family.ambiguous = ambiguous && ambiguous->isChecked();
-    }
-    m_profile.approved = false;
-    updateDiagnostics();
+    rebuildVisuals();
 }
 
-void CTerrainAtlasReviewDialog::splitSelectedFamily()
+void CTerrainAtlasReviewDialog::changeSelectedClassification(int index)
+{
+    if(m_rebuilding) return;
+    STerrainAtlasProfileFamily* selected = family(selectedFamilyId());
+    if(!selected) return;
+    STerrainAtlasProfile candidate = m_profile;
+    STerrainAtlasProfileFamily* changed = nullptr;
+    for(STerrainAtlasProfileFamily& entry : candidate.families)
+        if(entry.id == selected->id) changed = &entry;
+    if(!changed) return;
+    changed->layer = index == 2 ? ETerrainAtlasLayer::Overlay : ETerrainAtlasLayer::Land;
+    changed->underwater = index == 1;
+    CValidationReport report;
+    const STerrainAtlasAnalysis analysis = candidate.usableAnalysis(&report);
+    if(!analysis.usable && candidate.assignedSlotCount() > 0)
+    {
+        showReport(tr("Material section was not changed"), report);
+        m_rebuilding = true;
+        m_familyClass->setCurrentIndex(selected->layer == ETerrainAtlasLayer::Overlay
+            ? 2 : (selected->underwater ? 1 : 0));
+        m_rebuilding = false;
+        return;
+    }
+    selected->layer = changed->layer;
+    selected->underwater = changed->underwater;
+    selected->ambiguous = false;
+    m_profile.approved = false;
+    rebuildVisuals(selected->id);
+}
+
+void CTerrainAtlasReviewDialog::confirmSelectedFamily()
+{
+    STerrainAtlasProfileFamily* selected = family(selectedFamilyId());
+    if(!selected) return;
+    const qint32 id = selected->id;
+    selected->ambiguous = false;
+    m_profile.approved = false;
+    rebuildVisuals(id);
+}
+
+void CTerrainAtlasReviewDialog::useSelectedTileAsThumbnail()
 {
     const qint32 familyId = selectedFamilyId();
-    const QVector<int> selectedSlots = selectedSlotIds();
-    bool ok = false;
-    const QString name = QInputDialog::getText(this, tr("Split material family"),
-        tr("Name for the new family"), QLineEdit::Normal, tr("Split family"), &ok).trimmed();
-    if(!ok) return;
     CValidationReport report;
-    if(!m_profile.splitFamily(familyId, selectedSlots, name, &report))
+    if(!m_profile.setFamilyThumbnail(familyId, m_selectedSlot, &report))
     {
-        showReport(tr("Cannot split family"), report);
+        showReport(tr("Thumbnail was not changed"), report);
         return;
     }
-    rebuildTables(familyId);
+    rebuildVisuals(familyId, m_selectedSlot);
 }
 
-void CTerrainAtlasReviewDialog::mergeSelectedFamilies()
+void CTerrainAtlasReviewDialog::updateDiagnostics()
 {
-    const QVector<qint32> ids = selectedFamilyIds();
-    bool ok = false;
-    const QString name = QInputDialog::getText(this, tr("Merge material families"),
-        tr("Name for the merged family"), QLineEdit::Normal, tr("Merged family"), &ok).trimmed();
-    if(!ok) return;
+    int unresolvedMaterials = 0;
+    QSet<qint32> activeFamilies;
+    for(const STerrainAtlasProfileSlot& definition : m_profile.slotDefinitions)
+        if(definition.assigned && !definition.ambiguous)
+        {
+            activeFamilies.insert(definition.signature.northWest);
+            activeFamilies.insert(definition.signature.northEast);
+            activeFamilies.insert(definition.signature.southEast);
+            activeFamilies.insert(definition.signature.southWest);
+        }
+    for(const STerrainAtlasProfileFamily& entry : m_profile.families)
+        unresolvedMaterials += entry.ambiguous && activeFamilies.contains(entry.id);
+    const int assigned = m_profile.assignedSlotCount();
+    m_diagnostics->setText(tr(
+        "%1 / %2 atlas slots assigned (%3 unassigned). %4 active material confirmation(s) remain. "
+        "Unassigned tiles are a debug warning, not a painting blocker; they will use hard-edge fallback when no valid transition exists.")
+        .arg(assigned).arg(m_profile.atlasSlotCount)
+        .arg(qMax(0, m_profile.atlasSlotCount - assigned))
+        .arg(unresolvedMaterials));
+}
+
+void CTerrainAtlasReviewDialog::applyAndClose()
+{
+    // Approval is derived metadata, not a second user workflow. The profile is
+    // always saveable; incomplete/unusual slots remain visibly unassigned.
+    // Applying also promotes the profile above auto-inference provenance so a
+    // later parser revision never discards explicit names/corner corrections.
+    m_profile.provenance = QStringLiteral("user-authored-custom-profile");
+    m_profile.approved = true;
     CValidationReport report;
-    if(!m_profile.mergeFamilies(ids, name, &report))
-    {
-        showReport(tr("Cannot merge families"), report);
-        return;
-    }
-    rebuildTables(*std::min_element(ids.constBegin(), ids.constEnd()));
-}
-
-void CTerrainAtlasReviewDialog::markSelectedSlotsReviewed()
-{
-    const QVector<int> selectedSlots = selectedSlotIds();
-    if(selectedSlots.isEmpty())
-    {
-        QMessageBox::information(this, tr("Review atlas slots"),
-            tr("Select one or more slot rows first."));
-        return;
-    }
-    for(STerrainAtlasProfileSlot& slot : m_profile.slotDefinitions)
-        if(selectedSlots.contains(slot.slot))
-            slot.ambiguous = false;
-    m_profile.approved = false;
-    refreshSlots();
-    updateDiagnostics();
-}
-
-void CTerrainAtlasReviewDialog::markSelectedSlotsForReview()
-{
-    const QVector<int> selectedSlots = selectedSlotIds();
-    if(selectedSlots.isEmpty())
-    {
-        QMessageBox::information(this, tr("Review atlas slots"),
-            tr("Select one or more slot rows first."));
-        return;
-    }
-    for(STerrainAtlasProfileSlot& slot : m_profile.slotDefinitions)
-        if(selectedSlots.contains(slot.slot))
-            slot.ambiguous = true;
-    m_profile.approved = false;
-    refreshSlots();
-    updateDiagnostics();
-}
-
-void CTerrainAtlasReviewDialog::saveDraft()
-{
-    m_profile.approved = false;
+    if(!m_profile.approvedAnalysis(&report).usable)
+        m_profile.approved = false;
     accept();
 }
 
 void CTerrainAtlasReviewDialog::exportCopy()
 {
-    STerrainAtlasProfile exported = m_profile;
-    exported.approved = false;
     const QString suggested = QStringLiteral("%1.semantic-atlas.json")
-        .arg(exported.mprNamespace.toLower());
+        .arg(m_profile.mprNamespace.toLower());
     const QString path = QFileDialog::getSaveFileName(this,
-        tr("Export semantic atlas profile copy"), suggested,
-        tr("Semantic atlas profiles (*.semantic-atlas.json);;JSON files (*.json)"));
-    if(path.isEmpty())
-        return;
+        tr("Save material atlas profile copy"), suggested,
+        tr("Material atlas profiles (*.semantic-atlas.json);;JSON files (*.json)"));
+    if(path.isEmpty()) return;
     CValidationReport report;
-    if(!exported.save(path, &report))
+    if(!m_profile.save(path, &report))
     {
-        showReport(tr("Could not export semantic atlas profile"), report);
+        showReport(tr("Could not save material atlas profile"), report);
         return;
     }
-    QMessageBox::information(this, tr("Semantic atlas profile exported"),
-        tr("A draft copy was exported to:\n%1")
+    QMessageBox::information(this, tr("Profile copy saved"),
+        tr("Saved to:\n%1\n\nUse Load profile in this window to reopen it.")
             .arg(QDir::toNativeSeparators(path)));
 }
 
-void CTerrainAtlasReviewDialog::approveAndSave()
+void CTerrainAtlasReviewDialog::openProfile()
 {
-    for(const STerrainAtlasProfileFamily& family : m_profile.families)
-        if(family.ambiguous)
-        {
-            rebuildTables(family.id);
-            QMessageBox::warning(this, tr("Atlas review incomplete"),
-                tr("Material family '%1' still has Needs review checked. Inspect its name, layer, underwater classification, and member slots; then clear that family flag if the assignment is correct.")
-                    .arg(family.name));
-            return;
-        }
-    for(const STerrainAtlasProfileSlot& slot : m_profile.slotDefinitions)
-        if(slot.ambiguous)
-        {
-            qint32 familyId = slot.signature.northWest;
-            rebuildTables(familyId);
-            for(int row = 0; row < m_slots->rowCount(); ++row)
-                if(m_slots->item(row, 0)
-                   && m_slots->item(row, 0)->data(Qt::UserRole).toInt() == slot.slot)
-                {
-                    m_slots->selectRow(row);
-                    break;
-                }
-            QMessageBox::warning(this, tr("Atlas review incomplete"),
-                tr("Slot %1 still needs review. Its row is now selected. Inspect the preview and NW / NE / SE / SW labels. If they are correct, click Mark selected Reviewed. Split or merge only when the proposed family assignment is actually wrong.")
-                    .arg(slot.slot));
-            return;
-        }
-    m_profile.approved = true;
+    const QString path = QFileDialog::getOpenFileName(this, tr("Load material atlas profile"),
+        QString(), tr("Material atlas profiles (*.semantic-atlas.json *.json)"));
+    if(path.isEmpty()) return;
+    STerrainAtlasProfile loaded;
     CValidationReport report;
-    if(!m_profile.approvedAnalysis(&report).usable)
+    if(!STerrainAtlasProfile::load(path, &loaded, &report)
+       || !loaded.validateBinding(m_profile.mprNamespace, m_profile.atlasPixelSha256,
+                                  m_profile.atlasSlotCount, &report))
     {
-        m_profile.approved = false;
-        showReport(tr("Atlas profile cannot be approved"), report);
+        showReport(tr("Profile does not match this atlas"), report);
         return;
     }
-    accept();
+    m_profile = loaded;
+    m_selectedSlot = -1;
+    rebuildVisuals();
 }
 
 void CTerrainAtlasReviewDialog::showReport(const QString& title,

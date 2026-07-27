@@ -5,7 +5,7 @@ work is ordered from the newest planned minor line to the oldest completed one.
 An item is checked only after its implementation has landed and received the
 stated validation. Completed code should carry a commit, test, or release link.
 
-Current development line: `0.3.0-alpha.18` focused closed testing. Alpha.11
+Current development line: `0.3.0-alpha.26` focused closed testing. Alpha.11
 was withdrawn after its temporary-resource bootstrap passed the fixed world
 object's first word as the object pointer and crashed both normal and synthetic
 Test Current Map launches. Alpha.12 corrects the pointer contract and adds an
@@ -336,12 +336,11 @@ reopen verification, and canonical document rebinding. The legacy rebuilding
 serializer remains forbidden for every changed MPR.
 
 The user-run baseline closure matrix passed on 2026-07-26. This closes the
-lossless sculpt/paint/save baseline, not every follow-up in this section. The
-semantic material definition bundled with Endurance is currently production-
-reviewed only for the Zone 1 atlas. Other zone or custom atlases remain usable
-through manual tile painting, but automatic material painting must stay gated
-until the built-in atlas conversion/review workflow has produced and validated
-their material tables.
+lossless sculpt/paint/save baseline, not every follow-up in this section. Zone
+1 remains the authored semantic-atlas oracle. For other atlases, deterministic
+and structurally valid inferred materials are available immediately; unusual
+or cross-layer tiles stay unassigned and visible as diagnostics instead of
+disabling the valid palette.
 
 The user-run R5 matrix passed on 2026-07-26, closing whole-map offset, flatten,
 clamp, normalize/remap, and both explicit `maxZ` migration policies. R6 changed
@@ -449,6 +448,22 @@ must not independently change its shaders or animation policy.
   per-vertex blend weights.
 - [x] Keep the terrain/tile atlas bound to the MPR's actual embedded namespace
   and resource provenance.
+- [x] Replace material drop-downs with thumbnail palettes grouped into Ground,
+  Underwater, and a separate Overlay mode; expose brush shape as icon buttons,
+  brush size as a slider, selected material as pressed, and assigned-slot
+  coverage beside **Material atlas...**.
+- [x] Make generic atlas inference immediately useful as a partial catalog.
+  Deterministic assignments enter painting without an approval gate; ambiguous
+  and invalid cross-layer slots remain unassigned and cannot poison the valid
+  catalog. Neutral generated names are identical in the editor and palette.
+- [x] Replace raw family/slot review flags with a visual Material Atlas editor:
+  expandable material/tile groups, an unassigned pool, whole-tile drag/drop,
+  four droppable corner targets, inline layer validation, explicit material
+  confirmation, and persistent manually selected uniform thumbnails.
+- [x] Keep profiles exact-bound to namespace, decoded atlas hash, and slot
+  count; show the managed location and support saving/reopening chosen profile
+  copies. A supplied or authored Zone 1 profile opens saveable without changing
+  its parser-produced assignments.
 
 ## Overlay surfaces and materials
 

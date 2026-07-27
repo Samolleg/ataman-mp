@@ -2923,6 +2923,409 @@ STerrainTileCommand CTerrainEditModel::makeSemanticTilePaint(
 #endif
 }
 
+STerrainTileCommand CTerrainEditModel::makeSemanticVertexPaint(
+    int selectedCellX, int selectedCellY,
+    const STerrainTileBrush& vertexBrush, ETerrainTileLayer layer,
+    qint32 materialId, const CTerrainTransitionCatalog& catalog,
+    quint32 distributionSeed, CValidationReport* report,
+    qint32 preferredSupportId) const
+{
+    STerrainTileCommand command;
+    command.description = layer == ETerrainTileLayer::Land
+        ? QStringLiteral("Paint terrain material vertices")
+        : QStringLiteral("Paint overlay material vertices");
+    command.semanticAudit.valid = true;
+    command.semanticAudit.brush = vertexBrush;
+    command.semanticAudit.layer = layer;
+    command.semanticAudit.requestedMaterialId = materialId;
+    command.semanticAudit.solverMode = QStringLiteral("vertex-exact");
+    if(vertexBrush.radius < 0.0f || !catalog.hasMaterial(materialId)
+       || selectedCellX < 0 || selectedCellX >= tileCountX()
+       || selectedCellY < 0 || selectedCellY >= tileCountY())
+    {
+        if(report) report->add("terrain.semantic_vertex_input",
+            EValidationSeverity::Error,
+            "The selected material, brush, or terrain cell is unavailable");
+        return command;
+    }
+
+    const int width = tileCountX();
+    const int height = tileCountY();
+    const int vertexWidth = width + 1;
+    const int centerX = qBound(0, qRound(vertexBrush.centerX), width);
+    const int centerY = qBound(0, qRound(vertexBrush.centerY), height);
+    const int centerKey = centerY * vertexWidth + centerX;
+    const auto vertexKey = [vertexWidth](int x, int y) {
+        return y * vertexWidth + x;
+    };
+    const auto valuesOf = [](const STerrainTransitionSignature& signature) {
+        return QVector<qint32>({signature.northWest, signature.northEast,
+                                signature.southEast, signature.southWest});
+    };
+    const auto signatureOf = [](const QVector<qint32>& values) {
+        STerrainTransitionSignature signature;
+        signature.northWest = values.at(0);
+        signature.northEast = values.at(1);
+        signature.southEast = values.at(2);
+        signature.southWest = values.at(3);
+        return signature;
+    };
+    const auto cellCornerKeys = [vertexKey](int x, int y) {
+        return QVector<int>({vertexKey(x, y), vertexKey(x + 1, y),
+                             vertexKey(x + 1, y + 1), vertexKey(x, y + 1)});
+    };
+    const auto cornerForVertex = [](int cellX, int cellY,
+                                    int pointX, int pointY) {
+        if(pointY == cellY)
+            return pointX == cellX ? 0 : 1;
+        return pointX == cellX ? 3 : 2;
+    };
+
+    struct SVertexRequest
+    {
+        SVertexRequest() : x(0), y(0), distanceSquared(0) {}
+        SVertexRequest(int vertexX, int vertexY, int distance)
+            : x(vertexX), y(vertexY), distanceSquared(distance) {}
+        int x;
+        int y;
+        int distanceSquared;
+    };
+    QVector<SVertexRequest> requestedVertices;
+    const int minimumVertexX = qMax(0,
+        int(std::ceil(vertexBrush.centerX - vertexBrush.radius)));
+    const int maximumVertexX = qMin(width,
+        int(std::floor(vertexBrush.centerX + vertexBrush.radius)));
+    const int minimumVertexY = qMax(0,
+        int(std::ceil(vertexBrush.centerY - vertexBrush.radius)));
+    const int maximumVertexY = qMin(height,
+        int(std::floor(vertexBrush.centerY + vertexBrush.radius)));
+    for(int y = minimumVertexY; y <= maximumVertexY; ++y)
+    {
+        for(int x = minimumVertexX; x <= maximumVertexX; ++x)
+        {
+            const float dx = float(x) - vertexBrush.centerX;
+            const float dy = float(y) - vertexBrush.centerY;
+            const bool inside = vertexBrush.shape == ETerrainTileBrushShape::Square
+                ? qMax(std::fabs(dx), std::fabs(dy)) <= vertexBrush.radius
+                : std::sqrt(dx * dx + dy * dy) <= vertexBrush.radius;
+            if(inside)
+                requestedVertices.append({x, y,
+                    (x - centerX) * (x - centerX)
+                        + (y - centerY) * (y - centerY)});
+        }
+    }
+    if(requestedVertices.isEmpty())
+        requestedVertices.append({centerX, centerY, 0});
+    std::sort(requestedVertices.begin(), requestedVertices.end(),
+        [](const SVertexRequest& left, const SVertexRequest& right) {
+            if(left.distanceSquared != right.distanceSquared)
+                return left.distanceSquared < right.distanceSquared;
+            if(left.y != right.y)
+                return left.y < right.y;
+            return left.x < right.x;
+        });
+
+    QSet<int> affectedCells;
+    for(const SVertexRequest& vertex : requestedVertices)
+    {
+        for(int y : {vertex.y - 1, vertex.y})
+        {
+            for(int x : {vertex.x - 1, vertex.x})
+            {
+                if(x < 0 || x >= width || y < 0 || y >= height)
+                    continue;
+                bool available = false;
+                packedTile(x, y, layer, &available);
+                if(available)
+                    affectedCells.insert(y * width + x);
+            }
+        }
+    }
+    if(affectedCells.isEmpty())
+    {
+        if(report) report->add(layer == ETerrainTileLayer::Overlay
+                ? "terrain.overlay_vertex_inactive"
+                : "terrain.semantic_vertex_empty",
+            EValidationSeverity::Warning,
+            layer == ETerrainTileLayer::Overlay
+                ? "The vertex brush did not touch an active overlay tile"
+                : "The vertex brush did not touch editable terrain");
+        return command;
+    }
+
+    QMap<int, quint16> originalTiles;
+    QMap<int, STerrainTransitionSignature> scratch;
+    QSet<int> unknownCells;
+    for(int index : affectedCells)
+    {
+        const int x = index % width;
+        const int y = index / width;
+        bool available = false;
+        const quint16 packed = packedTile(x, y, layer, &available);
+        bool decoded = false;
+        const STerrainTransitionSignature signature = available
+            ? catalog.gridSignatureForPacked(packed, &decoded)
+            : STerrainTransitionSignature();
+        if(!available)
+            continue;
+        originalTiles.insert(index, packed);
+        if(decoded)
+            scratch.insert(index, signature);
+        else
+            unknownCells.insert(index);
+    }
+
+    STerrainTransitionSignature pure;
+    pure.northWest = pure.northEast = pure.southEast = pure.southWest = materialId;
+    bool pureAvailable = false;
+    catalog.selectForPaint(pure, 0, 0, distributionSeed, &pureAvailable);
+    const bool cornerOnly = !pureAvailable;
+    const bool contextualStamp = cornerOnly && preferredSupportId > 0
+        && preferredSupportId != materialId;
+    if(contextualStamp)
+    {
+        command.semanticAudit.backgroundMaterialId = preferredSupportId;
+        command.semanticAudit.materialPath = {materialId, preferredSupportId};
+    }
+    const QVector<STerrainTransitionSignature> authored = catalog.gridSignatures();
+    QSet<int> acceptedVertices;
+    int skippedVertices = 0;
+    int fallbackCells = 0;
+    int candidateChecks = 0;
+
+    const auto chooseClosest = [&](int cellX, int cellY,
+            const QVector<qint32>& desired, const QSet<int>& requiredVertices,
+            STerrainTransitionSignature* selected) {
+        const QVector<int> keys = cellCornerKeys(cellX, cellY);
+        QSet<qint32> existingFamilies;
+        for(qint32 value : desired)
+            if(value >= 0)
+                existingFamilies.insert(value);
+        bool found = false;
+        int bestCost = std::numeric_limits<int>::max();
+        STerrainTransitionSignature best;
+        for(const STerrainTransitionSignature& candidate : authored)
+        {
+            ++candidateChecks;
+            const QVector<qint32> values = valuesOf(candidate);
+            bool compatible = true;
+            int cost = 0;
+            for(int corner = 0; corner < 4; ++corner)
+            {
+                const bool required = requiredVertices.contains(keys.at(corner));
+                if(required && values.at(corner) != materialId)
+                {
+                    compatible = false;
+                    break;
+                }
+                if(desired.at(corner) >= 0
+                   && values.at(corner) != desired.at(corner))
+                    cost += existingFamilies.contains(values.at(corner)) ? 4 : 32;
+                if(!required && values.at(corner) == materialId
+                   && desired.at(corner) != materialId)
+                    cost += 2;
+            }
+            if(compatible && (!found || cost < bestCost))
+            {
+                found = true;
+                bestCost = cost;
+                best = candidate;
+            }
+        }
+        if(found && selected)
+            *selected = best;
+        return found;
+    };
+
+    for(const SVertexRequest& vertex : requestedVertices)
+    {
+        const int key = vertexKey(vertex.x, vertex.y);
+        const bool centerVertex = key == centerKey;
+        const bool contextualCenter = contextualStamp && centerVertex;
+        struct SPlannedCell
+        {
+            SPlannedCell() : index(0), fallback(false) {}
+            SPlannedCell(int cellIndex,
+                         const STerrainTransitionSignature& cellSignature,
+                         bool usedFallback)
+                : index(cellIndex), signature(cellSignature),
+                  fallback(usedFallback) {}
+            int index;
+            STerrainTransitionSignature signature;
+            bool fallback;
+        };
+        QVector<SPlannedCell> planned;
+        bool vertexExact = true;
+        bool vertexPossible = true;
+        bool constrainedDetailRejected = false;
+        for(int y : {vertex.y - 1, vertex.y})
+        {
+            for(int x : {vertex.x - 1, vertex.x})
+            {
+                if(x < 0 || x >= width || y < 0 || y >= height)
+                    continue;
+                const int index = y * width + x;
+                if(!originalTiles.contains(index))
+                    continue;
+                QVector<qint32> desired = contextualCenter
+                    ? QVector<qint32>({preferredSupportId, preferredSupportId,
+                                      preferredSupportId, preferredSupportId})
+                    : scratch.contains(index)
+                        ? valuesOf(scratch.value(index))
+                        : QVector<qint32>({-1, -1, -1, -1});
+                if(contextualCenter && scratch.contains(index))
+                {
+                    const QVector<qint32> existing = valuesOf(scratch.value(index));
+                    for(int existingCorner = 0; existingCorner < 4; ++existingCorner)
+                        if(existing.at(existingCorner) == materialId)
+                            desired[existingCorner] = materialId;
+                }
+                const int corner = cornerForVertex(x, y, vertex.x, vertex.y);
+                desired[corner] = materialId;
+                const STerrainTransitionSignature exact = signatureOf(desired);
+                bool exactFound = false;
+                catalog.selectForPaint(exact, x, y, distributionSeed, &exactFound);
+                if(exactFound)
+                {
+                    planned.append({index, exact, false});
+                    continue;
+                }
+                vertexExact = false;
+                if(contextualCenter)
+                {
+                    vertexPossible = false;
+                    break;
+                }
+                // Transition-only families may cover a larger brush only
+                // while every incident tile remains exact. Avoid an atlas-wide
+                // nearest-candidate scan for a vertex that must be skipped.
+                if(cornerOnly && !centerVertex)
+                {
+                    constrainedDetailRejected = true;
+                    break;
+                }
+                QSet<int> required = acceptedVertices;
+                required.insert(key);
+                STerrainTransitionSignature closest;
+                if(!chooseClosest(x, y, desired, required, &closest))
+                {
+                    vertexPossible = false;
+                    break;
+                }
+                planned.append({index, closest, true});
+            }
+            if(!vertexPossible || constrainedDetailRejected)
+                break;
+        }
+
+        if(!vertexPossible || constrainedDetailRejected
+           || (cornerOnly && !centerVertex && !vertexExact))
+        {
+            ++skippedVertices;
+            continue;
+        }
+        for(const SPlannedCell& cell : planned)
+        {
+            scratch.insert(cell.index, cell.signature);
+            fallbackCells += cell.fallback ? 1 : 0;
+        }
+        acceptedVertices.insert(key);
+        command.semanticAudit.paintedVertices.append(QPoint(vertex.x, vertex.y));
+    }
+
+    if(!acceptedVertices.contains(centerKey))
+    {
+        if(report)
+        {
+            if(contextualStamp)
+                report->add("terrain.semantic_vertex_context_overlap",
+                    EValidationSeverity::Error,
+                    "This corner-only atlas motif cannot touch the existing copy because the Material atlas lacks the required multi-corner transition. Paint it farther away or assign the missing transition tiles.");
+            else
+                report->add("terrain.semantic_vertex_center",
+                    EValidationSeverity::Error,
+                    "No authored atlas combination can place this material at the selected terrain vertex");
+        }
+        return command;
+    }
+
+    QVector<int> orderedCells = scratch.keys().toVector();
+    std::sort(orderedCells.begin(), orderedCells.end());
+    for(int index : orderedCells)
+    {
+        const int x = index % width;
+        const int y = index / width;
+        const STerrainTransitionSignature selected = scratch.value(index);
+        bool found = false;
+        const quint16 after = catalog.selectForPaint(
+            selected, x, y, distributionSeed, &found);
+        if(!found)
+        {
+            if(report) report->add("terrain.semantic_vertex_internal",
+                EValidationSeverity::Error,
+                "The vertex resolver selected a signature absent from the Material atlas",
+                QString("%1,%2").arg(x).arg(y));
+            command.deltas.clear();
+            return command;
+        }
+        command.semanticAudit.affectedCells.append(QPoint(x, y));
+        const quint16 before = originalTiles.value(index);
+        if(after == before)
+            continue;
+        STerrainTileDelta delta;
+        delta.globalX = x;
+        delta.globalY = y;
+        delta.layer = layer;
+        delta.before = before;
+        delta.after = after;
+        delta.hasSemanticRequest = true;
+        delta.brushCenterX = centerX;
+        delta.brushCenterY = centerY;
+        delta.requestedMaterialId = materialId;
+        delta.requestedSignature = selected;
+        command.deltas.append(delta);
+    }
+    command.semanticAudit.solverNodes = candidateChecks;
+    command.semanticAudit.solverMode = contextualStamp
+        ? QStringLiteral("vertex-context-stamp")
+        : fallbackCells > 0
+        ? QStringLiteral("vertex-bounded-fallback")
+        : skippedVertices > 0
+            ? QStringLiteral("vertex-constrained-detail")
+            : QStringLiteral("vertex-exact");
+    if(!unknownCells.isEmpty() && report)
+        report->add("terrain.semantic_vertex_unknown_recovery",
+            EValidationSeverity::Warning,
+            "The vertex brush replaced atlas tiles that were not described by the active profile",
+            QString::number(unknownCells.size()));
+    if(fallbackCells > 0 && report)
+        report->add("terrain.semantic_vertex_fallback",
+            EValidationSeverity::Warning,
+            "The atlas lacks some requested vertex combinations; the brush used the closest local authored tiles",
+            QString::number(fallbackCells));
+    if(skippedVertices > 0 && report)
+        report->add("terrain.semantic_vertex_detail_limit",
+            EValidationSeverity::Warning,
+            "This detail material cannot occupy every requested vertex because the atlas lacks the required multi-corner tiles",
+            QString::number(skippedVertices));
+    return command;
+}
+
+STerrainTileCommand CTerrainEditModel::makeSemanticCornerMaterialPaint(
+    int selectedCellX, int selectedCellY, int vertexX, int vertexY,
+    ETerrainTileLayer layer, qint32 materialId,
+    const CTerrainTransitionCatalog& catalog, quint32 distributionSeed,
+    CValidationReport* report) const
+{
+    STerrainTileBrush vertexBrush;
+    vertexBrush.centerX = vertexX;
+    vertexBrush.centerY = vertexY;
+    vertexBrush.radius = 0.0f;
+    return makeSemanticVertexPaint(
+        selectedCellX, selectedCellY, vertexBrush, layer, materialId,
+        catalog, distributionSeed, report);
+}
+
 #if 0
 STerrainTileCommand CTerrainEditModel::makeSemanticTilePaintAttempt(
     const STerrainTileBrush& brush, ETerrainTileLayer layer,

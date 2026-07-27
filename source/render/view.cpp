@@ -6285,22 +6285,54 @@ void CView::drawTerrainPaintOutline(QOpenGLShaderProgram* program)
             ? qMax(dx, dy) <= radius
             : dx * dx + dy * dy <= radius * radius;
     };
-    QVector<QVector3D> lines;
-    const auto appendEdge = [this, &lines, landLayer](float x1, float y1, float x2, float y2)
+    const auto projected = [this, landLayer](float x, float y,
+                                             QVector3D* result)
     {
-        QVector3D first(x1, y1, 0.0f);
-        QVector3D second(x2, y2, 0.0f);
-        const bool firstProjected = m_pLand->projectPt(first, landLayer)
-            || (!landLayer && m_pLand->projectPt(first, true));
-        const bool secondProjected = m_pLand->projectPt(second, landLayer)
-            || (!landLayer && m_pLand->projectPt(second, true));
-        if(!firstProjected || !secondProjected)
-            return;
-        first.setZ(first.z() + 0.12f);
-        second.setZ(second.z() + 0.12f);
-        lines.append(first);
-        lines.append(second);
+        QVector3D point(x, y, 0.0f);
+        if(!m_pLand->projectPt(point, landLayer)
+           && (landLayer || !m_pLand->projectPt(point, true)))
+            return false;
+        point.setZ(point.z() + 0.12f);
+        *result = point;
+        return true;
     };
+
+    // The solver samples discrete vertices, but the brush itself is a true
+    // circle/square centered on the snapped vertex. Half a vertex interval is
+    // included so size 1 remains visible around its single selected junction.
+    const float centerX = float(m_terrainPaintOutlineX * 2);
+    const float centerY = float(m_terrainPaintOutlineY * 2);
+    const float footprintRadius = float(radius * 2 + 1);
+    QVector<QVector3D> boundary;
+    if(shape == ETerrainTileBrushShape::Circle)
+    {
+        const int segments = qMax(48, 16 + radius * 12);
+        for(int segment = 0; segment < segments; ++segment)
+        {
+            const float angle = float(segment) * float(2.0 * M_PI / segments);
+            QVector3D point;
+            if(projected(centerX + qCos(angle) * footprintRadius,
+                         centerY + qSin(angle) * footprintRadius, &point))
+                boundary.append(point);
+        }
+    }
+    else
+    {
+        const QPointF corners[] = {
+            {centerX - footprintRadius, centerY - footprintRadius},
+            {centerX + footprintRadius, centerY - footprintRadius},
+            {centerX + footprintRadius, centerY + footprintRadius},
+            {centerX - footprintRadius, centerY + footprintRadius}
+        };
+        for(const QPointF& corner : corners)
+        {
+            QVector3D point;
+            if(projected(float(corner.x()), float(corner.y()), &point))
+                boundary.append(point);
+        }
+    }
+
+    QVector<QVector3D> vertices;
     for(int y = m_terrainPaintOutlineY - radius;
         y <= m_terrainPaintOutlineY + radius; ++y)
     {
@@ -6309,26 +6341,34 @@ void CView::drawTerrainPaintOutline(QOpenGLShaderProgram* program)
         {
             if(!included(x, y))
                 continue;
-            const float left = float(x * 2);
-            const float right = left + 2.0f;
-            const float bottom = float(y * 2);
-            const float top = bottom + 2.0f;
-            if(!included(x, y - 1)) appendEdge(left, bottom, right, bottom);
-            if(!included(x + 1, y)) appendEdge(right, bottom, right, top);
-            if(!included(x, y + 1)) appendEdge(right, top, left, top);
-            if(!included(x - 1, y)) appendEdge(left, top, left, bottom);
+            QVector3D point;
+            if(projected(float(x * 2), float(y * 2), &point))
+            {
+                point.setZ(point.z() + 0.04f);
+                vertices.append(point);
+            }
         }
     }
-    if(lines.isEmpty())
+    if(boundary.isEmpty() && vertices.isEmpty())
         return;
     program->setUniformValue("customColor", landLayer
         ? QVector4D(1.0f, 0.72f, 0.08f, 0.95f)
         : QVector4D(0.10f, 0.82f, 1.0f, 0.95f));
-    program->setAttributeArray(position, lines.constData());
-    glDepthFunc(GL_LEQUAL);
-    glLineWidth(2.0f);
-    glDrawArrays(GL_LINES, 0, lines.size());
-    glLineWidth(1.0f);
+    glDepthFunc(GL_ALWAYS);
+    if(boundary.size() >= 3)
+    {
+        program->setAttributeArray(position, boundary.constData());
+        glLineWidth(2.0f);
+        glDrawArrays(GL_LINE_LOOP, 0, boundary.size());
+        glLineWidth(1.0f);
+    }
+    if(!vertices.isEmpty())
+    {
+        program->setAttributeArray(position, vertices.constData());
+        glPointSize(7.0f);
+        glDrawArrays(GL_POINTS, 0, vertices.size());
+        glPointSize(1.0f);
+    }
     glDepthFunc(GL_LESS);
 }
 
@@ -6359,17 +6399,15 @@ void CView::rebuildTerrainAutoCatalog()
         m_pTileForm->tileImages());
     const QString profilePath = CTerrainAtlasProfileStore::profilePath(mprNamespace);
     bool reviewedProfileActive = false;
+    bool provisionalProfileActive = false;
     bool staleProfile = false;
-    // Authored namespace contracts are the primary truth. A generic inferred
-    // profile must never replace a known slot table merely because it was
-    // saved or approved previously.
-    m_terrainAtlasAnalysis = CTerrainAtlasAnalyzer::analyze(
+    // The authored table is the first-run oracle. An exact-bound saved profile
+    // may intentionally customize it and therefore takes precedence on reopen.
+    const STerrainAtlasAnalysis authoredAnalysis = CTerrainAtlasAnalyzer::analyze(
         mprNamespace, slotCount, &report);
-    const bool authoredTemplateActive = m_terrainAtlasAnalysis.usable;
-    if(authoredTemplateActive)
-        m_terrainAtlasProfile = CTerrainAtlasProfileInference::fromAuthoredAnalysis(
-            mprNamespace, atlasHash, slotCount, m_terrainAtlasAnalysis, &report);
-    else if(QFileInfo::exists(profilePath))
+    const bool authoredTemplateAvailable = authoredAnalysis.usable;
+    bool authoredTemplateActive = false;
+    if(QFileInfo::exists(profilePath))
     {
         STerrainAtlasProfile stored;
         CValidationReport storedReport;
@@ -6379,15 +6417,16 @@ void CView::rebuildTerrainAutoCatalog()
                   stored.provenance))
         {
             m_terrainAtlasProfile = stored;
-            if(stored.approved)
+            m_terrainAtlasAnalysis =
+                m_terrainAtlasProfile.usableAnalysis(&storedReport);
+            reviewedProfileActive = m_terrainAtlasAnalysis.usable;
+            provisionalProfileActive = reviewedProfileActive
+                && (!stored.approved
+                    || stored.assignedSlotCount() < stored.atlasSlotCount);
+            if(stored.approved && !reviewedProfileActive)
             {
-                m_terrainAtlasAnalysis = stored.approvedAnalysis(&storedReport);
-                reviewedProfileActive = m_terrainAtlasAnalysis.usable;
-                if(!reviewedProfileActive)
-                {
-                    m_terrainAtlasProfile.approved = false;
-                    staleProfile = true;
-                }
+                m_terrainAtlasProfile.approved = false;
+                staleProfile = true;
             }
         }
         else
@@ -6395,42 +6434,124 @@ void CView::rebuildTerrainAutoCatalog()
         for(const SValidationFinding& finding : storedReport.findings())
             report.add(finding.code, finding.severity, finding.message, finding.location);
     }
-    if(!authoredTemplateActive && !reviewedProfileActive)
-        m_terrainAtlasAnalysis = STerrainAtlasAnalysis();
+    if(m_terrainAtlasProfile.slotDefinitions.isEmpty() && authoredTemplateAvailable)
+    {
+        m_terrainAtlasProfile = CTerrainAtlasProfileInference::fromAuthoredAnalysis(
+            mprNamespace, atlasHash, slotCount, authoredAnalysis, &report);
+        m_terrainAtlasAnalysis =
+            m_terrainAtlasProfile.usableAnalysis(&report);
+        authoredTemplateActive = true;
+    }
     if(m_terrainAtlasProfile.slotDefinitions.isEmpty())
+    {
         m_terrainAtlasProfile = CTerrainAtlasProfileInference::propose(
             mprNamespace, m_pTileForm->tileImages(),
             m_mprDocument.mapInfo().tileTypes, terrainAtlasUsage(), &report);
-    QVector<QPair<qint32, QString>> landChoices;
-    QVector<QPair<qint32, QString>> underwaterChoices;
-    QVector<QPair<qint32, QString>> overlayChoices;
+        m_terrainAtlasAnalysis =
+            m_terrainAtlasProfile.usableAnalysis(&report);
+        reviewedProfileActive = m_terrainAtlasAnalysis.usable;
+        provisionalProfileActive = reviewedProfileActive;
+    }
+    else if(!authoredTemplateActive && !reviewedProfileActive)
+        m_terrainAtlasAnalysis = STerrainAtlasAnalysis();
+    QVector<STerrainPaintMaterialChoice> landChoices;
+    QVector<STerrainPaintMaterialChoice> underwaterChoices;
+    QVector<STerrainPaintMaterialChoice> overlayChoices;
+    QMap<qint32, int> assignedByFamily;
+    QMap<qint32, QString> nameByFamily;
+    QMap<qint32, int> pureVariantsByFamily;
+    for(const STerrainAtlasProfileFamily& family : m_terrainAtlasProfile.families)
+    {
+        assignedByFamily.insert(family.id, family.memberSlots.size());
+        nameByFamily.insert(family.id, family.name);
+    }
+    for(const STerrainAtlasMaterial& material : m_terrainAtlasAnalysis.materials)
+        pureVariantsByFamily.insert(material.id, material.pureVariantCount);
     for(const STerrainAtlasMaterial& material : m_terrainAtlasAnalysis.materials)
     {
-        QVector<QPair<qint32, QString>>& choices = material.layer == ETerrainAtlasLayer::Overlay
+        QVector<STerrainPaintMaterialChoice>& choices = material.layer == ETerrainAtlasLayer::Overlay
             ? overlayChoices : (material.underwater ? underwaterChoices : landChoices);
-        choices.append(qMakePair(material.id,
-            tr("%1 (%2 natural variant(s))")
-                .arg(material.name).arg(material.pureVariantCount)));
+        const int thumbnailSlot = material.thumbnailSlot >= 0
+            ? material.thumbnailSlot : material.representativeSlot;
+        const CTerrainTransitionCatalog& catalog =
+            material.layer == ETerrainAtlasLayer::Overlay
+                ? m_terrainAtlasAnalysis.overlayCatalog
+                : m_terrainAtlasAnalysis.landCatalog;
+        QSet<qint32> supportSet;
+        for(const STerrainTransitionSignature& signature : catalog.gridSignatures())
+        {
+            const qint32 corners[] = {signature.northWest, signature.northEast,
+                                      signature.southEast, signature.southWest};
+            int selectedCount = 0;
+            qint32 support = 0;
+            bool oneSupport = true;
+            for(qint32 corner : corners)
+            {
+                if(corner == material.id)
+                    ++selectedCount;
+                else if(support == 0)
+                    support = corner;
+                else
+                    oneSupport &= support == corner;
+            }
+            if(selectedCount == 1 && oneSupport && support > 0)
+                supportSet.insert(support);
+        }
+        QVector<qint32> supports = supportSet.values().toVector();
+        std::sort(supports.begin(), supports.end(),
+            [&pureVariantsByFamily](qint32 left, qint32 right) {
+                const int leftPure = pureVariantsByFamily.value(left);
+                const int rightPure = pureVariantsByFamily.value(right);
+                return leftPure != rightPure ? leftPure > rightPure : left < right;
+            });
+        if(!material.cornerOnly && supports.size() > 1)
+            supports.resize(1);
+        if(supports.isEmpty())
+            supports.append(material.id);
+        for(qint32 support : supports)
+        {
+            STerrainPaintMaterialChoice choice;
+            choice.id = material.id;
+            choice.supportId = support;
+            choice.name = material.name;
+            if(material.cornerOnly && support != material.id)
+                choice.name = tr("%1 — on %2")
+                    .arg(material.name, nameByFamily.value(
+                        support, tr("material %1").arg(support)));
+            choice.assignedSlots = assignedByFamily.value(material.id);
+            choice.cornerOnly = material.cornerOnly;
+            choice.thumbnail = terrainVertexJunctionThumbnail(
+                m_pTileForm->tileImages(), catalog, material.id, support,
+                thumbnailSlot);
+            choices.append(choice);
+        }
         m_terrainMaterialRepresentatives.insert(material.id, material.representativeSlot);
     }
     QString status = m_terrainAtlasAnalysis.usable
         ? tr("%1 loaded: %2 land and %3 overlay materials.")
               .arg(m_terrainAtlasAnalysis.templateName)
               .arg(landChoices.size()).arg(overlayChoices.size())
-        : tr("No approved semantic profile is available for namespace '%1'. Automatic painting is disabled; manual atlas tile mode remains available.")
+        : tr("No structurally valid material is available for namespace '%1'. Open Material atlas to assign one; manual atlas tile mode remains available.")
               .arg(mprNamespace);
     if(authoredTemplateActive)
         status = tr("Authored atlas layout loaded: %1 land and %2 overlay materials.")
             .arg(landChoices.size()).arg(overlayChoices.size());
     else if(reviewedProfileActive)
-        status = tr("Approved semantic profile loaded: %1 land and %2 overlay materials.")
-            .arg(landChoices.size()).arg(overlayChoices.size());
+        status = provisionalProfileActive
+            ? tr("Generated material atlas ready: %1 land and %2 overlay materials; %3 of %4 atlas slots assigned.")
+                .arg(landChoices.size()).arg(overlayChoices.size())
+                .arg(m_terrainAtlasProfile.assignedSlotCount())
+                .arg(m_terrainAtlasProfile.atlasSlotCount)
+            : tr("Saved material atlas loaded: %1 land and %2 overlay materials.")
+                .arg(landChoices.size()).arg(overlayChoices.size());
     else if(staleProfile)
         status += tr(" A saved auto-inferred profile is obsolete or failed its namespace/hash/slot binding; review the new proposal before use.");
-    else if(!m_terrainAtlasProfile.approved)
-        status += tr(" An inference proposal is ready for review.");
-    m_landscapeTools->setPaintTerrainTypes(
-        landChoices, underwaterChoices, overlayChoices, status);
+    else if(!m_terrainAtlasProfile.slotDefinitions.isEmpty())
+        status += tr(" No safe uniform material could be identified; open Material atlas to assign one.");
+    m_landscapeTools->setPaintMaterials(
+        landChoices, underwaterChoices, overlayChoices,
+        m_terrainAtlasProfile.assignedSlotCount(),
+        m_terrainAtlasProfile.atlasSlotCount, status);
     updateTerrainAtlasViewerAnnotations(status);
     ei::log(report.hasErrors() ? eLogWarning : eLogInfo,
         QString("Terrain namespace template: %1, %2 land materials, %3 overlay materials, %4/%5 described slots%6")
@@ -6497,9 +6618,9 @@ void CView::reviewTerrainAtlasProfile()
     rebuildTerrainAutoCatalog();
     const QString savedPath = CTerrainAtlasProfileStore::profilePath(mprNamespace);
     emit updateMsg(reviewed.approved
-        ? tr("The reviewed semantic atlas profile is approved and automatic painting is enabled. Saved to %1")
+        ? tr("Material atlas applied and saved to %1.")
               .arg(QDir::toNativeSeparators(savedPath))
-        : tr("Semantic atlas draft saved to %1. Automatic painting remains disabled until approval.")
+        : tr("Material atlas applied and saved to %1. Unassigned or unconfirmed items remain excluded from painting.")
               .arg(QDir::toNativeSeparators(savedPath)));
 }
 
@@ -6520,12 +6641,12 @@ void CView::updateTerrainAtlasViewerAnnotations(const QString& status)
             names.append(families.contains(id) ? families.value(id).name : QString::number(id));
         annotations.append(tr("Slot %1\nNW / NE / SE / SW: %2\n%3")
             .arg(slot.slot).arg(names.join(QStringLiteral(" / ")))
-            .arg(slot.ambiguous ? tr("Needs review") : tr("Reviewed")));
+            .arg(!slot.assigned || slot.ambiguous ? tr("Unassigned") : tr("Assigned")));
     }
     m_pTileForm->setSemanticAnnotations(annotations,
-        m_terrainAtlasProfile.approved ? tr("semantic profile approved")
-        : (m_terrainAtlasAnalysis.usable ? tr("authored semantic template active")
-                                         : tr("semantic profile draft — automatic paint disabled")));
+        m_terrainAtlasProfile.approved ? tr("material atlas approved")
+        : (m_terrainAtlasAnalysis.usable ? tr("material atlas available")
+                                         : tr("no safe material assignments")));
     Q_UNUSED(status);
 }
 
@@ -6559,7 +6680,8 @@ void CView::exportTerrainPaintDiagnostic()
             : QStringLiteral("manual-atlas-only")));
     root.insert("semanticProfileApproved", m_terrainAtlasProfile.approved);
     root.insert("semanticProfileProvenance", m_terrainAtlasProfile.provenance);
-    root.insert("paintLookupTransform", "mirror-grid-y-v1");
+    root.insert("profileCornerSpace", "tile-preview-nw-ne-se-sw-v1");
+    root.insert("paintLookupTransform", "preview-mirror-y-fixed-rotation-v1");
     root.insert("templateName", m_terrainAtlasAnalysis.templateName);
     root.insert("registeredMaterialCount", m_terrainAtlasAnalysis.materials.size());
     root.insert("describedAtlasSlots", m_terrainAtlasAnalysis.describedSlots);
@@ -6599,6 +6721,7 @@ void CView::exportTerrainPaintDiagnostic()
             return result;
         };
         object.insert("paintedCoreCells", cellsJson(action.semantic.paintedCoreCells));
+        object.insert("paintedVertices", cellsJson(action.semantic.paintedVertices));
         object.insert("affectedCells", cellsJson(action.semantic.affectedCells));
         QJsonArray changedCells;
         QJsonArray changedTiles;
@@ -6757,19 +6880,15 @@ void CView::exportTerrainPaintDiagnostic()
         current.insert("packed", packedTerrainTileJson(packed));
         const CTerrainTransitionCatalog& catalog = m_terrainAtlasAnalysis.catalog(cell.layer);
         bool found = false;
-        const STerrainTransitionSignature catalogSignature =
-            catalog.signatureForPacked(packed, &found);
+        const STerrainTransitionSignature paintSignature =
+            catalog.gridSignatureForPacked(packed, &found);
         current.insert("catalogRecognized", found);
         if(found)
         {
-            current.insert("catalogGridCorners",
-                           terrainGridSignatureJson(catalogSignature));
-            bool gridFound = false;
-            const STerrainTransitionSignature gridSignature =
-                catalog.gridSignatureForPacked(packed, &gridFound);
-            if(gridFound)
-                current.insert("visibleGridCorners",
-                               terrainGridSignatureJson(gridSignature));
+            current.insert("paintGridCorners",
+                           terrainGridSignatureJson(paintSignature));
+            current.insert("previewImageCorners", terrainGridSignatureJson(
+                CTerrainTransitionCatalog::mirroredGridY(paintSignature)));
         }
         currentTiles.append(current);
     }
@@ -8381,7 +8500,22 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
     STerrainTileBrush brush;
     brush.centerX = tileLoc.xSec * 16 + tileLoc.col;
     brush.centerY = tileLoc.ySec * 16 + tileLoc.row;
-    const QPoint brushCenter(brush.centerX, brush.centerY);
+    bool preselectedMaterial = false;
+    qint32 preselectedTerrainType = -1;
+    qint32 preselectedTerrainSupport = 0;
+    const bool semanticPaint = !m_landscapeTools->manualTileSelectionEnabled()
+        && (bLand || m_landscapeTools->overlaySurfaceOperation()
+                        == EOverlaySurfaceOperation::PaintExisting);
+    if(semanticPaint)
+    {
+        preselectedTerrainType = m_landscapeTools->paintTerrainType(&preselectedMaterial);
+        preselectedTerrainSupport = m_landscapeTools->paintTerrainSupport();
+    }
+    const QPoint detailVertex(
+        tileLoc.xSec * 16 + qBound(0, qRound(posOnLand.x() / 2.0f), 16),
+        tileLoc.ySec * 16 + qBound(0, qRound(posOnLand.y() / 2.0f), 16));
+    const QPoint brushCenter = semanticPaint
+        ? detailVertex : QPoint(qRound(brush.centerX), qRound(brush.centerY));
     if(m_tilePaintStrokeActive && m_lastTerrainPaintCenterValid
        && m_lastTerrainPaintCenter == brushCenter
        && m_lastTerrainPaintLayerLand == bLand)
@@ -8505,8 +8639,8 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
     }
     else
     {
-        bool materialSelected = false;
-        terrainType = m_landscapeTools->paintTerrainType(&materialSelected);
+        const bool materialSelected = preselectedMaterial;
+        terrainType = preselectedTerrainType;
         if(!materialSelected)
         {
             emit updateMsg(m_terrainAtlasAnalysis.usable
@@ -8514,9 +8648,13 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
                 : tr("No authored slot template is registered for this atlas namespace."));
             return;
         }
-        command = m_terrainEdit.makeSemanticTilePaint(
-            brush, layer, terrainType, semanticCatalog,
-            m_terrainSemanticSeed, &report);
+        STerrainTileBrush vertexBrush = brush;
+        vertexBrush.centerX = detailVertex.x();
+        vertexBrush.centerY = detailVertex.y();
+        command = m_terrainEdit.makeSemanticVertexPaint(
+            qRound(brush.centerX), qRound(brush.centerY), vertexBrush,
+            layer, terrainType, semanticCatalog,
+            m_terrainSemanticSeed, &report, preselectedTerrainSupport);
     }
     STerrainPaintAuditAction audit;
     audit.actionId = m_terrainPaintActionId++;
@@ -8569,12 +8707,13 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
             appendTerrainTileCommand(&m_tileStrokeCommand, command);
         }
     }
-    const QString actionLog = QString("Terrain paint action %1 stroke %2: %3, layer=%4 material=%5 center=%6,%7 radius=%8 core=%9 affected=%10 changed=%11 solver=%12 nodes=%13")
+    const QString actionLog = QString("Terrain paint action %1 stroke %2: %3, layer=%4 material=%5 center=%6,%7 radius=%8 core=%9 vertices=%10 affected=%11 changed=%12 solver=%13 nodes=%14")
             .arg(audit.actionId).arg(audit.strokeId).arg(audit.outcome)
             .arg(bLand ? "land" : "overlay")
             .arg(manual ? QStringLiteral("manual") : QString::number(terrainType))
             .arg(brush.centerX).arg(brush.centerY).arg(brush.radius)
             .arg(audit.semantic.paintedCoreCells.size())
+            .arg(audit.semantic.paintedVertices.size())
             .arg(audit.semantic.affectedCells.size()).arg(audit.deltas.size())
             .arg(audit.semantic.solverMode).arg(audit.semantic.solverNodes);
     // The exported diagnostic retains every action. Keep synchronous workflow
@@ -8651,8 +8790,12 @@ void CView::updatePreviewTile(QVector3D posOnLand, bool bLand)
 
     if(!manualTilePaintingEnabled())
     {
-        m_terrainPaintOutlineX = tileLoc.xSec * 16 + tileLoc.col;
-        m_terrainPaintOutlineY = tileLoc.ySec * 16 + tileLoc.row;
+        // pickTile converts the point to sector-local coordinates. Match the
+        // paint path by snapping that hit to the nearest global terrain vertex.
+        m_terrainPaintOutlineX = tileLoc.xSec * 16
+            + qBound(0, qRound(posOnLand.x() / 2.0f), 16);
+        m_terrainPaintOutlineY = tileLoc.ySec * 16
+            + qBound(0, qRound(posOnLand.y() / 2.0f), 16);
         m_terrainPaintOutlineValid = true;
         setPreviewTile(false);
         unsetCursor();
@@ -8722,7 +8865,8 @@ void CView::onLandscapeToolsShown()
 {
     if(!m_terrainEditAvailable || !m_pLand || !m_pLand->isMprLoad()
        || !m_pTileForm || m_pTileForm->tileImages().isEmpty()
-       || m_terrainAtlasAnalysis.usable)
+       || m_terrainAtlasProfile.provenance.startsWith(QStringLiteral("authored-template:"))
+       || m_terrainAtlasProfile.approved)
         return;
     const QString binding = m_mprDocument.mapInfo().innerNamespace
         + QLatin1Char(':')
@@ -8731,10 +8875,15 @@ void CView::onLandscapeToolsShown()
     if(binding == m_lastAtlasReviewPromptBinding)
         return;
     m_lastAtlasReviewPromptBinding = binding;
-    if(QMessageBox::question(this, tr("Prepare terrain materials"), tr(
-        "This map's atlas does not yet have an approved semantic material profile. "
-        "Automatic terrain and overlay painting will remain unavailable; manual atlas-tile painting still works.\n\n"
-        "Generate the review proposal now? The review process only describes existing atlas tiles and does not modify the MPR or texture resources."),
+    const int assigned = m_terrainAtlasProfile.assignedSlotCount();
+    const int total = m_terrainAtlasProfile.atlasSlotCount;
+    const QString result = m_terrainAtlasAnalysis.usable
+        ? tr("Endurance identified usable materials in this map's atlas. Painting is already available for the resolved tiles.")
+        : tr("Endurance could not prove a safe uniform material in this atlas. This usually indicates an unusual custom tileset or a parser gap; manual tile painting remains available.");
+    if(QMessageBox::question(this, tr("Review generated Material atlas"), tr(
+        "%1\n\n%2 of %3 atlas tiles are assigned; %4 unusual tile(s) remain unassigned. "
+        "Open Material atlas now to review names, thumbnails, and assignments? This does not modify the MPR or texture resources.")
+            .arg(result).arg(assigned).arg(total).arg(qMax(0, total - assigned)),
         QMessageBox::Yes | QMessageBox::No, QMessageBox::Yes) == QMessageBox::Yes)
         reviewTerrainAtlasProfile();
 }
@@ -8825,11 +8974,11 @@ bool CView::applyTerrainTilePreview(const STerrainTileCommand& command, bool for
             forward ? delta.after : delta.before, false);
         sectors.insert(qMakePair(delta.globalX / 16, delta.globalY / 16));
     }
-    if(m_terrainPreviewBatchActive)
-        m_pendingTerrainPreviewSectors.unite(sectors);
-    else
-        for(const QPair<int, int>& sector : sectors)
-            m_pLand->updateSectorDrawData(sector.first, sector.second);
+    // Tile painting is never part of the sculpt/overlay preview batch. Rebuild
+    // every touched sector immediately so a live stroke and its later
+    // undo/redo use the same visible update path.
+    for(const QPair<int, int>& sector : sectors)
+        m_pLand->updateSectorDrawData(sector.first, sector.second);
     m_pLand->setDirty(m_terrainEdit.isDirty());
     if(!m_tilePaintStrokeActive)
     {

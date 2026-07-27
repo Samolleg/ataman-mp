@@ -86,6 +86,7 @@ struct STerrainSemanticPaintAudit
     qint32 backgroundMaterialId{0};
     QVector<qint32> materialPath;
     QVector<QPoint> paintedCoreCells;
+    QVector<QPoint> paintedVertices;
     QVector<QPoint> affectedCells;
     QString solverMode{"not-run"};
     int junctionPadding{0};
@@ -412,6 +413,18 @@ public:
         const STerrainTileBrush& brush, ETerrainTileLayer layer,
         qint32 materialId, const CTerrainTransitionCatalog& catalog,
         quint32 distributionSeed,
+        CValidationReport* report = nullptr) const;
+    STerrainTileCommand makeSemanticVertexPaint(
+        int selectedCellX, int selectedCellY,
+        const STerrainTileBrush& vertexBrush, ETerrainTileLayer layer,
+        qint32 materialId, const CTerrainTransitionCatalog& catalog,
+        quint32 distributionSeed,
+        CValidationReport* report = nullptr,
+        qint32 preferredSupportId = 0) const;
+    STerrainTileCommand makeSemanticCornerMaterialPaint(
+        int selectedCellX, int selectedCellY, int vertexX, int vertexY,
+        ETerrainTileLayer layer, qint32 materialId,
+        const CTerrainTransitionCatalog& catalog, quint32 distributionSeed,
         CValidationReport* report = nullptr) const;
     bool apply(const STerrainTileCommand& command, bool forward,
                CValidationReport* report = nullptr);
