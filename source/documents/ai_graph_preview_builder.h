@@ -55,6 +55,7 @@ struct SAiGraphPreviewBuildResult
     int authoredCollisionProxyCount{0};
     int bridgeAiTiles{0};
     int waterAiTiles{0};
+    qint64 collisionCoverageTests{0};
     QStringList warnings;
 };
 

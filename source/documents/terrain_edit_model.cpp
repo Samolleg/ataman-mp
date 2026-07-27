@@ -235,6 +235,30 @@ void appendTerrainTileCommand(STerrainTileCommand* stroke,
     }
 }
 
+void appendOverlaySurfaceCommand(SOverlaySurfaceCommand* stroke,
+                                 const SOverlaySurfaceCommand& stamp)
+{
+    if(!stroke)
+        return;
+    if(stroke->description.isEmpty())
+        stroke->description = stamp.description;
+    stroke->heightClampedVertexCount += stamp.heightClampedVertexCount;
+    for(const SOverlaySectorDelta& delta : stamp.sectors)
+    {
+        bool merged = false;
+        for(SOverlaySectorDelta& existing : stroke->sectors)
+        {
+            if(existing.sectorX != delta.sectorX || existing.sectorY != delta.sectorY)
+                continue;
+            existing.afterPayload = delta.afterPayload;
+            merged = true;
+            break;
+        }
+        if(!merged)
+            stroke->sectors.append(delta);
+    }
+}
+
 void appendTerrainHeightCommand(STerrainHeightCommand* stroke,
                                 const STerrainHeightCommand& stamp)
 {

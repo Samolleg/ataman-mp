@@ -199,38 +199,69 @@ void assignComponents(SAiGraphLayer* layer, int width, int height)
     }
 }
 
-bool crossesGraphCell(const QVector<quint8>& quality, int aiWidth, int aiHeight,
-                      int graphX, int graphY, int start)
+QVector<bool> graphCellCrossingCandidates(const QVector<quint8>& quality,
+                                          int aiWidth, int aiHeight,
+                                          int graphX, int graphY)
 {
     const int lowX = graphX * CAiGraphPreviewBuilder::AiTilesPerGraphCell;
     const int lowY = graphY * CAiGraphPreviewBuilder::AiTilesPerGraphCell;
     const int highX = qMin(aiWidth - 1, lowX + CAiGraphPreviewBuilder::AiTilesPerGraphCell);
     const int highY = qMin(aiHeight - 1, lowY + CAiGraphPreviewBuilder::AiTilesPerGraphCell);
-    QVector<bool> visited((highX - lowX + 1) * (highY - lowY + 1), false);
+    const int localWidth = highX - lowX + 1;
+    const int localHeight = highY - lowY + 1;
+    QVector<int> components(localWidth * localHeight, -1);
+    QVector<bool> componentCrosses;
     const auto localIndex = [=](int x, int y)
-    { return (y - lowY) * (highX - lowX + 1) + x - lowX; };
+    { return (y - lowY) * localWidth + x - lowX; };
     QQueue<int> queue;
-    queue.enqueue(start);
-    visited[localIndex(start % aiWidth, start / aiWidth)] = true;
-    bool left = false, right = false, top = false, bottom = false;
-    while(!queue.isEmpty())
-    {
-        const int current = queue.dequeue();
-        const int x = current % aiWidth, y = current / aiWidth;
-        left |= x == lowX; right |= x == highX; top |= y == lowY; bottom |= y == highY;
-        const QPoint cardinal[] = {QPoint(-1,0), QPoint(1,0), QPoint(0,-1), QPoint(0,1)};
-        for(const QPoint& delta : cardinal)
+    for(int startY = lowY; startY <= highY; ++startY)
+        for(int startX = lowX; startX <= highX; ++startX)
         {
-            const int nx = x + delta.x(), ny = y + delta.y();
-            if(nx < lowX || nx > highX || ny < lowY || ny > highY
-               || !quality.at(tileIndex(nx, ny, aiWidth)))
+            const int startLocal = localIndex(startX, startY);
+            if(components.at(startLocal) >= 0
+               || !quality.at(tileIndex(startX, startY, aiWidth)))
                 continue;
-            const int local = localIndex(nx, ny);
-            if(!visited.at(local))
-            { visited[local] = true; queue.enqueue(tileIndex(nx, ny, aiWidth)); }
+            const int component = componentCrosses.size();
+            components[startLocal] = component;
+            queue.enqueue(tileIndex(startX, startY, aiWidth));
+            bool left = false, right = false, top = false, bottom = false;
+            while(!queue.isEmpty())
+            {
+                const int current = queue.dequeue();
+                const int x = current % aiWidth, y = current / aiWidth;
+                left |= x == lowX; right |= x == highX;
+                top |= y == lowY; bottom |= y == highY;
+                const QPoint cardinal[] = {
+                    QPoint(-1,0), QPoint(1,0), QPoint(0,-1), QPoint(0,1)};
+                for(const QPoint& delta : cardinal)
+                {
+                    const int nx = x + delta.x(), ny = y + delta.y();
+                    if(nx < lowX || nx > highX || ny < lowY || ny > highY
+                       || !quality.at(tileIndex(nx, ny, aiWidth)))
+                        continue;
+                    const int local = localIndex(nx, ny);
+                    if(components.at(local) < 0)
+                    {
+                        components[local] = component;
+                        queue.enqueue(tileIndex(nx, ny, aiWidth));
+                    }
+                }
+            }
+            componentCrosses.append((left && right) || (top && bottom));
         }
-    }
-    return (left && right) || (top && bottom);
+
+    QVector<bool> result(CAiGraphPreviewBuilder::AiTilesPerGraphCell
+                         * CAiGraphPreviewBuilder::AiTilesPerGraphCell, false);
+    for(int localY = 0; localY < CAiGraphPreviewBuilder::AiTilesPerGraphCell; ++localY)
+        for(int localX = 0; localX < CAiGraphPreviewBuilder::AiTilesPerGraphCell; ++localX)
+        {
+            const int component = components.at(localIndex(
+                lowX + localX, lowY + localY));
+            if(component >= 0)
+                result[localY * CAiGraphPreviewBuilder::AiTilesPerGraphCell + localX]
+                    = componentCrosses.at(component);
+        }
+    return result;
 }
 
 void makeConsistent(SAiGraphLayer* layer, int width, int height)
@@ -352,23 +383,63 @@ SAiGraphPreviewBuildResult CAiGraphPreviewBuilder::build(const SAiGraphPreviewBu
     if(navigationWater.isEmpty())
         navigationWater.fill(0.0f, aiCount);
     QVector<bool> bridgeTiles(aiCount, false);
-    for(const SAiGraphCollisionProxy& volume : input.collisionProxies)
+    // Resolve polygon/tile coverage once. The earlier source-correct object
+    // pass repeated the same polygon test for every profile and every AI tile
+    // (and performed a second full scan for bridges). A populated map such as
+    // gz1g has thousands of proxies, turning that into billions of identical
+    // tests. Indexing each proxy only over its bounded tile rectangle preserves
+    // the exact coverage predicate while making the eight profile passes local.
+    QVector<QVector<int>> collisionProxiesByTile(aiCount);
+    for(int proxyIndex = 0; proxyIndex < input.collisionProxies.size(); ++proxyIndex)
     {
+        const SAiGraphCollisionProxy& volume = input.collisionProxies.at(proxyIndex);
         if(volume.authored)
             ++result.authoredCollisionProxyCount;
-        if(volume.passability != EAiGraphObjectPassability::Bridge)
+        if(volume.footprint.size() < 3
+           || volume.passability == EAiGraphObjectPassability::Ignored
+           || volume.passability == EAiGraphObjectPassability::Easy)
             continue;
-        for(int y = 0; y < aiHeight; ++y)
-            for(int x = 0; x < aiWidth; ++x)
-                if(volumeCoversAiTile(volume, x, y))
+        float minimumX = volume.footprint.front().x();
+        float maximumX = minimumX;
+        float minimumY = volume.footprint.front().y();
+        float maximumY = minimumY;
+        for(const QVector2D& point : volume.footprint)
+        {
+            minimumX = qMin(minimumX, point.x());
+            maximumX = qMax(maximumX, point.x());
+            minimumY = qMin(minimumY, point.y());
+            maximumY = qMax(maximumY, point.y());
+        }
+        // Include the tile immediately before an exact boundary because the
+        // original inclusive predicate treats edge contact as coverage.
+        const int firstX = qBound(0, int(std::floor(
+            minimumX / AiTileWorldSize)) - 1, aiWidth - 1);
+        const int lastX = qBound(0, int(std::floor(
+            maximumX / AiTileWorldSize)), aiWidth - 1);
+        const int firstY = qBound(0, int(std::floor(
+            minimumY / AiTileWorldSize)) - 1, aiHeight - 1);
+        const int lastY = qBound(0, int(std::floor(
+            maximumY / AiTileWorldSize)), aiHeight - 1);
+        if(firstX > lastX || firstY > lastY)
+            continue;
+        for(int y = firstY; y <= lastY; ++y)
+            for(int x = firstX; x <= lastX; ++x)
+            {
+                ++result.collisionCoverageTests;
+                if(!volumeCoversAiTile(volume, x, y))
+                    continue;
+                const int index = tileIndex(x, y, aiWidth);
+                if(volume.passability != EAiGraphObjectPassability::Bridge)
+                    collisionProxiesByTile[index].append(proxyIndex);
+                else
                 {
-                    const int index = tileIndex(x, y, aiWidth);
                     navigationHeights[index] = qMax(navigationHeights.at(index), volume.maximumZ);
                     navigationWater[index] = 0.0f;
                     if(!bridgeTiles.at(index))
                         ++result.bridgeAiTiles;
                     bridgeTiles[index] = true;
                 }
+            }
     }
 
     QVector<bool> walkSlopeBlocked(aiCount, false);
@@ -418,15 +489,16 @@ SAiGraphPreviewBuildResult CAiGraphPreviewBuilder::build(const SAiGraphPreviewBu
                 const float ground = navigationHeights.at(index)
                     + (layerIndex == 0 ? depth : 0.0f);
                 const float top = ground + ProfileHeights[layerIndex];
-                for(const SAiGraphCollisionProxy& proxy : input.collisionProxies)
-                    if(volumeCoversAiTile(proxy, x, y))
-                    {
-                        quality = applyObstacleQuality(quint8(quality), proxy.passability,
-                                                       proxy.minimumZ, proxy.maximumZ,
-                                                       ground + 0.05f, top);
-                        if(quality <= 0)
-                            break;
-                    }
+                for(const int proxyIndex : collisionProxiesByTile.at(index))
+                {
+                    const SAiGraphCollisionProxy& proxy =
+                        input.collisionProxies.at(proxyIndex);
+                    quality = applyObstacleQuality(quint8(quality), proxy.passability,
+                                                   proxy.minimumZ, proxy.maximumZ,
+                                                   ground + 0.05f, top);
+                    if(quality <= 0)
+                        break;
+                }
                 rawQuality[index] = quint8(quality);
             }
 
@@ -476,6 +548,9 @@ SAiGraphPreviewBuildResult CAiGraphPreviewBuilder::build(const SAiGraphPreviewBu
         for(int gy = 0; gy < input.graphHeight; ++gy)
             for(int gx = 0; gx < input.graphWidth; ++gx)
             {
+                const QVector<bool> crossingCandidates =
+                    graphCellCrossingCandidates(
+                        quality, aiWidth, aiHeight, gx, gy);
                 int best = -1;
                 int bestQuality = -1;
                 int bestDistance = std::numeric_limits<int>::max();
@@ -489,8 +564,8 @@ SAiGraphPreviewBuildResult CAiGraphPreviewBuilder::build(const SAiGraphPreviewBu
                                            + (ly * 2 - 7) * (ly * 2 - 7);
                         if(candidateQuality <= 0)
                             continue;
-                        const bool crosses = crossesGraphCell(
-                            quality, aiWidth, aiHeight, gx, gy, candidate);
+                        const bool crosses = crossingCandidates.at(
+                            ly * AiTilesPerGraphCell + lx);
                         if((crosses && !bestCrosses)
                            || (crosses == bestCrosses && (candidateQuality > bestQuality
                                || (candidateQuality == bestQuality && distance < bestDistance))))

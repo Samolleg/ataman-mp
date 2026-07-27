@@ -189,6 +189,12 @@ struct SOverlaySurfaceCommand
     bool isEmpty() const { return sectors.isEmpty(); }
 };
 
+// Compose sequential overlay surface stamps into one reversible sector
+// transaction. Repeated sectors retain their original payload and final
+// payload so a complete stroke always undoes byte-for-byte.
+void appendOverlaySurfaceCommand(SOverlaySurfaceCommand* stroke,
+                                 const SOverlaySurfaceCommand& stamp);
+
 struct STerrainHeightRange
 {
     int vertexCount{0};

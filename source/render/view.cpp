@@ -246,30 +246,6 @@ private:
     bool m_skipInitialRedo{false};
 };
 
-void appendOverlaySurfaceCommand(SOverlaySurfaceCommand* stroke,
-                                 const SOverlaySurfaceCommand& stamp)
-{
-    if(!stroke)
-        return;
-    if(stroke->description.isEmpty())
-        stroke->description = stamp.description;
-    stroke->heightClampedVertexCount += stamp.heightClampedVertexCount;
-    for(const SOverlaySectorDelta& delta : stamp.sectors)
-    {
-        bool merged = false;
-        for(SOverlaySectorDelta& existing : stroke->sectors)
-        {
-            if(existing.sectorX != delta.sectorX || existing.sectorY != delta.sectorY)
-                continue;
-            existing.afterPayload = delta.afterPayload;
-            merged = true;
-            break;
-        }
-        if(!merged)
-            stroke->sectors.append(delta);
-    }
-}
-
 QString openGlErrorName(GLenum error)
 {
     switch(error)
@@ -662,7 +638,7 @@ CView::CView(QWidget *parent, const QGLWidget *pShareWidget) : QGLWidget(parent,
             return;
         }
         m_aiGraphRegenerationPending = false;
-        startAiGraphPreviewRegeneration();
+        beginAiGraphPreviewRegeneration(false);
     });
 }
 
@@ -1345,12 +1321,26 @@ void CView::initAiGraphPreviewWidget()
         update();
     });
     connect(m_aiGraphRegenerateButton, &QToolButton::clicked,
-            this, &CView::startAiGraphPreviewRegeneration);
+            this, [this]() { startAiGraphPreviewRegeneration(); });
     connect(m_aiGraphUseLoadedButton, &QToolButton::clicked, this, [this](bool loaded)
     {
         if(!loaded)
         {
-            startAiGraphPreviewRegeneration();
+            m_aiGraphLoadedOverride = false;
+            if(m_aiGraphRegeneratedDocument.isValid())
+            {
+                m_aiGraphDocument = m_aiGraphRegeneratedDocument;
+                m_aiGraphSource = m_aiGraphRegeneratedSource;
+                m_aiGraphOverlayDirty = true;
+            }
+            if(!m_aiGraphRegeneratedFresh
+               && (!m_aiGraphBuildWatcher || !m_aiGraphBuildWatcher->isRunning()))
+                beginAiGraphPreviewRegeneration(false);
+            else
+            {
+                syncAiGraphPreviewWidget();
+                update();
+            }
             return;
         }
         if(!m_aiGraphLoadedDocument.isValid())
@@ -1358,11 +1348,7 @@ void CView::initAiGraphPreviewWidget()
             m_aiGraphUseLoadedButton->setChecked(false);
             return;
         }
-        ++m_aiGraphBuildRequest;
-        m_aiGraphAutoRegenerationEnabled = false;
-        m_aiGraphRegenerationPending = false;
-        if(m_aiGraphRegenerationTimer)
-            m_aiGraphRegenerationTimer->stop();
+        m_aiGraphLoadedOverride = true;
         m_aiGraphDocument = m_aiGraphLoadedDocument;
         m_aiGraphSource = m_aiGraphLoadedSource;
         m_aiGraphOverlayDirty = true;
@@ -1410,15 +1396,19 @@ void CView::syncAiGraphPreviewWidget()
         ? tr("Show or hide the current AI graph layer in the viewport (N).")
         : tr("Load a MOB with an embedded graph or a matching external .grp file."));
     if(m_aiGraphRegenerateButton)
-        m_aiGraphRegenerateButton->setEnabled(m_terrainEditAvailable
-            && (!m_aiGraphBuildWatcher || !m_aiGraphBuildWatcher->isRunning()));
+    {
+        const bool running = m_aiGraphBuildWatcher && m_aiGraphBuildWatcher->isRunning();
+        m_aiGraphRegenerateButton->setEnabled(m_terrainEditAvailable);
+        m_aiGraphRegenerateButton->setText(running
+            ? (m_aiGraphRegenerationPending ? tr("Regeneration queued")
+                                            : tr("Regenerate again"))
+            : tr("Regenerate preview"));
+    }
     if(m_aiGraphUseLoadedButton)
     {
-        const bool loadedOverride = m_aiGraphLoadedDocument.isValid()
-            && m_aiGraphSource == m_aiGraphLoadedSource;
         const QSignalBlocker blocker(m_aiGraphUseLoadedButton);
-        m_aiGraphUseLoadedButton->setChecked(loadedOverride);
-        m_aiGraphUseLoadedButton->setText(loadedOverride
+        m_aiGraphUseLoadedButton->setChecked(m_aiGraphLoadedOverride);
+        m_aiGraphUseLoadedButton->setText(m_aiGraphLoadedOverride
             ? tr("Loaded graph override: ON")
             : tr("Loaded graph override: OFF"));
         m_aiGraphUseLoadedButton->setEnabled(m_aiGraphLoadedDocument.isValid());
@@ -1439,8 +1429,12 @@ void CView::refreshAiGraphPreviewSource()
         m_aiGraphRegenerationTimer->stop();
     m_aiGraphDocument.clear();
     m_aiGraphLoadedDocument.clear();
+    m_aiGraphRegeneratedDocument.clear();
     m_aiGraphSource.clear();
     m_aiGraphLoadedSource.clear();
+    m_aiGraphRegeneratedSource.clear();
+    m_aiGraphRegeneratedFresh = false;
+    m_aiGraphLoadedOverride = false;
     m_aiGraphOpenLinks.clear();
     m_aiGraphNodes.clear();
     m_aiGraphIsolatedNodes.clear();
@@ -1650,13 +1644,38 @@ bool CView::buildGeneratedAiGraphCandidate(QByteArray* data, QString* error)
 void CView::startAiGraphPreviewRegeneration()
 {
     if(m_aiGraphBuildWatcher && m_aiGraphBuildWatcher->isRunning())
-        return;
-    if(m_aiGraphUseLoadedButton)
     {
-        const QSignalBlocker blocker(m_aiGraphUseLoadedButton);
-        m_aiGraphUseLoadedButton->setChecked(false);
-        m_aiGraphUseLoadedButton->setText(tr("Loaded graph override: OFF"));
+        // The QtConcurrent builder cannot be interrupted safely. Supersede its
+        // input revision and coalesce one fresh run instead of starting a
+        // second expensive job or leaving the button apparently inert.
+        ++m_aiGraphBuildRequest;
+        m_aiGraphRegeneratedFresh = false;
+        m_aiGraphRegenerationPending = true;
+        m_aiGraphLoadedOverride = false;
+        if(m_aiGraphRegeneratedDocument.isValid())
+        {
+            m_aiGraphDocument = m_aiGraphRegeneratedDocument;
+            m_aiGraphSource = m_aiGraphRegeneratedSource;
+            m_aiGraphOverlayDirty = true;
+        }
+        syncAiGraphPreviewWidget();
+        return;
     }
+    ++m_aiGraphBuildRequest;
+    m_aiGraphRegeneratedFresh = false;
+    beginAiGraphPreviewRegeneration(true);
+}
+
+void CView::beginAiGraphPreviewRegeneration(bool selectRegenerated)
+{
+    if(m_aiGraphBuildWatcher && m_aiGraphBuildWatcher->isRunning())
+    {
+        m_aiGraphRegenerationPending = true;
+        syncAiGraphPreviewWidget();
+        return;
+    }
+    if(selectRegenerated)
+        m_aiGraphLoadedOverride = false;
     m_aiGraphRegenerationPending = false;
     if(m_aiGraphRegenerationTimer)
         m_aiGraphRegenerationTimer->stop();
@@ -1677,7 +1696,7 @@ void CView::startAiGraphPreviewRegeneration()
         {
             const quint64 request = m_aiGraphBuildWatcher->property("requestId").toULongLong();
             const SAiGraphPreviewBuildResult result = m_aiGraphBuildWatcher->result();
-            if(request != m_aiGraphBuildRequest)
+            if(request != m_aiGraphBuildRequest || m_aiGraphRegenerationPending)
             {
                 syncAiGraphPreviewWidget();
                 if(m_aiGraphRegenerationPending && m_aiGraphRegenerationTimer)
@@ -1692,17 +1711,24 @@ void CView::startAiGraphPreviewRegeneration()
                     m_aiGraphRegenerationTimer->start();
                 return;
             }
-            m_aiGraphDocument = result.document;
-            m_aiGraphSource = tr("Regenerated: %1/%2 authored collision parts, %3 bridge cells, %4 water samples")
+            m_aiGraphRegeneratedDocument = result.document;
+            m_aiGraphRegeneratedSource = tr("Regenerated: %1/%2 authored collision parts, %3 bridge cells, %4 water samples")
                 .arg(result.authoredCollisionProxyCount).arg(result.collisionProxyCount)
                 .arg(result.bridgeAiTiles).arg(result.waterAiTiles);
-            m_aiGraphOverlayDirty = true;
-            if(m_aiGraphPreviewToggle && !m_aiGraphPreviewToggle->isChecked())
-                m_aiGraphPreviewToggle->setChecked(true);
-            ei::log(eLogInfo, QString("AI graph diagnostic regeneration complete dimensions:%1x%2 proxies:%3 authored_proxies:%4 bridge_tiles:%5 human_blocked_tiles:%6")
+            m_aiGraphRegeneratedFresh = true;
+            if(!m_aiGraphLoadedOverride)
+            {
+                m_aiGraphDocument = m_aiGraphRegeneratedDocument;
+                m_aiGraphSource = m_aiGraphRegeneratedSource;
+                m_aiGraphOverlayDirty = true;
+                if(m_aiGraphPreviewToggle && !m_aiGraphPreviewToggle->isChecked())
+                    m_aiGraphPreviewToggle->setChecked(true);
+            }
+            ei::log(eLogInfo, QString("AI graph diagnostic regeneration complete dimensions:%1x%2 proxies:%3 authored_proxies:%4 bridge_tiles:%5 human_blocked_tiles:%6 coverage_tests:%7")
                 .arg(result.document.width()).arg(result.document.height())
                 .arg(result.collisionProxyCount).arg(result.authoredCollisionProxyCount)
-                .arg(result.bridgeAiTiles).arg(result.blockedAiTiles));
+                .arg(result.bridgeAiTiles).arg(result.blockedAiTiles)
+                .arg(result.collisionCoverageTests));
             for(const QString& warning : result.warnings)
                 ei::log(eLogWarning, "AI graph preview: " + warning);
             syncAiGraphPreviewWidget();
@@ -1711,9 +1737,10 @@ void CView::startAiGraphPreviewRegeneration()
                 m_aiGraphRegenerationTimer->start();
         });
     }
-    const quint64 request = ++m_aiGraphBuildRequest;
+    const quint64 request = m_aiGraphBuildRequest;
     m_aiGraphBuildWatcher->setProperty("requestId", QVariant::fromValue(request));
-    m_aiGraphRegenerateButton->setEnabled(false);
+    m_aiGraphRegenerateButton->setEnabled(true);
+    m_aiGraphRegenerateButton->setText(tr("Regenerate again"));
     m_aiGraphSourceLabel->setText(tr("Regenerating diagnostic graph..."));
     ei::log(eLogInfo, QString("AI graph diagnostic regeneration started dimensions:%1x%2 proxies:%3")
         .arg(input.graphWidth).arg(input.graphHeight).arg(input.collisionProxies.size()));
@@ -1728,6 +1755,8 @@ void CView::scheduleAiGraphPreviewRegeneration()
     if(!m_aiGraphAutoRegenerationEnabled || !m_terrainEditAvailable
        || !m_aiGraphRegenerationTimer)
         return;
+    ++m_aiGraphBuildRequest;
+    m_aiGraphRegeneratedFresh = false;
     m_aiGraphRegenerationPending = true;
     m_aiGraphRegenerationTimer->start();
 }
@@ -7328,7 +7357,8 @@ QVector3D CView::getTerrainBrushPos(const int cursorPosX, const int cursorPosY,
         // tool only commits on the brush cadence, so reuse a very recent CPU
         // pick while dragging and force an exact pick on press/release.
         if(!forcePick && m_overlayBrushPickTimer.isValid()
-           && m_overlayBrushPickTimer.elapsed() < 16)
+           && m_overlayBrushPickTimer.elapsed() < 16
+           && m_overlayBrushPickCursor == QPoint(cursorPosX, cursorPosY))
         {
             if(m_terrainPaintProjectionLand != m_overlayBrushPickProjectionLand)
                 m_terrainPaintOutlineGeometryDirty = true;
@@ -7379,6 +7409,7 @@ QVector3D CView::getTerrainBrushPos(const int cursorPosX, const int cursorPosY,
         m_overlayPickNsecs += pickTimer.nsecsElapsed();
         ++m_overlayPickCount;
         m_overlayBrushPickPosition = pickedPosition;
+        m_overlayBrushPickCursor = QPoint(cursorPosX, cursorPosY);
         m_overlayBrushPickValid = picked;
         m_overlayBrushPickProjectionLand = pickedLand;
         m_overlayBrushPickTimer.restart();
@@ -8763,6 +8794,23 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
        && m_lastTerrainPaintCenter == brushCenter
        && m_lastTerrainPaintLayerLand == bLand)
         return;
+    if(m_lastTerrainPaintCenterValid)
+        m_tileStrokeMaximumCenterJump = qMax(m_tileStrokeMaximumCenterJump,
+            qMax(qAbs(brushCenter.x() - m_lastTerrainPaintCenter.x()),
+                 qAbs(brushCenter.y() - m_lastTerrainPaintCenter.y())));
+    if(!m_tileStrokeBoundsValid)
+    {
+        m_tileStrokeMinimumX = m_tileStrokeMaximumX = brushCenter.x();
+        m_tileStrokeMinimumY = m_tileStrokeMaximumY = brushCenter.y();
+        m_tileStrokeBoundsValid = true;
+    }
+    else
+    {
+        m_tileStrokeMinimumX = qMin(m_tileStrokeMinimumX, brushCenter.x());
+        m_tileStrokeMinimumY = qMin(m_tileStrokeMinimumY, brushCenter.y());
+        m_tileStrokeMaximumX = qMax(m_tileStrokeMaximumX, brushCenter.x());
+        m_tileStrokeMaximumY = qMax(m_tileStrokeMaximumY, brushCenter.y());
+    }
     m_lastTerrainPaintCenter = brushCenter;
     m_lastTerrainPaintCenterValid = true;
     m_lastTerrainPaintLayerLand = bLand;
@@ -9173,12 +9221,15 @@ void CView::endTileBrushGroup()
                 .arg(m_tileStrokeSolverNodes));
         if(!m_overlaySurfaceStrokeCommand.isEmpty())
             ei::log(eLogInfo, QString(
-                "Overlay paint timing: commandMs=%1 modelMs=%2 renderMs=%3 pickMs=%4 picks=%5 previewSectors=%6")
+                "Overlay paint timing: commandMs=%1 modelMs=%2 renderMs=%3 pickMs=%4 picks=%5 previewSectors=%6 footprint=%7,%8-%9,%10 maxCenterJump=%11")
                 .arg(double(m_overlayCommandNsecs) / 1000000.0, 0, 'f', 2)
                 .arg(double(m_overlayModelNsecs) / 1000000.0, 0, 'f', 2)
                 .arg(double(m_overlayRenderNsecs) / 1000000.0, 0, 'f', 2)
                 .arg(double(m_overlayPickNsecs) / 1000000.0, 0, 'f', 2)
-                .arg(m_overlayPickCount).arg(m_overlayPreviewSectorCount));
+                .arg(m_overlayPickCount).arg(m_overlayPreviewSectorCount)
+                .arg(m_tileStrokeMinimumX).arg(m_tileStrokeMinimumY)
+                .arg(m_tileStrokeMaximumX).arg(m_tileStrokeMaximumY)
+                .arg(m_tileStrokeMaximumCenterJump));
     }
     m_lastTerrainPaintCenterValid = false;
     ++m_tileBrushCommandId;
@@ -9199,6 +9250,8 @@ void CView::beginTileBrushGroup()
     m_tileStrokeRefused = 0;
     m_tileStrokeChangedTiles = 0;
     m_tileStrokeSolverNodes = 0;
+    m_tileStrokeBoundsValid = false;
+    m_tileStrokeMaximumCenterJump = 0;
     m_overlayCommandNsecs = 0;
     m_overlayModelNsecs = 0;
     m_overlayRenderNsecs = 0;
@@ -9220,16 +9273,18 @@ bool CView::applyTerrainTilePreview(const STerrainTileCommand& command, bool for
     QSet<QPair<int, int>> sectors;
     for(const STerrainTileDelta& delta : command.deltas)
     {
-        m_pLand->previewCanonicalTile(delta.globalX, delta.globalY,
-            delta.layer == ETerrainTileLayer::Land,
-            forward ? delta.after : delta.before, false);
         sectors.insert(qMakePair(delta.globalX / 16, delta.globalY / 16));
     }
     if(m_terrainPreviewBatchActive)
         m_pendingTilePreviewSectors.unite(sectors);
     else
         for(const QPair<int, int>& sector : sectors)
-            m_pLand->updateSectorDrawData(sector.first, sector.second);
+            if(!m_pLand->previewCanonicalSector(
+                    sector.first, sector.second,
+                    m_terrainEdit.sectorPayload(sector.first, sector.second)))
+                ei::log(eLogWarning, QString(
+                    "Tile model changed but preview renderer rejected sector %1,%2")
+                        .arg(sector.first).arg(sector.second));
     m_pLand->setDirty(m_terrainEdit.isDirty());
     if(!m_tilePaintStrokeActive)
     {
@@ -9346,7 +9401,12 @@ void CView::endTerrainPreviewBatch()
         ++m_overlayPreviewSectorCount;
     }
     for(const QPair<int, int>& sector : tileSectors)
-        m_pLand->updateSectorDrawData(sector.first, sector.second);
+        if(!m_pLand->previewCanonicalSector(
+                sector.first, sector.second,
+                m_terrainEdit.sectorPayload(sector.first, sector.second)))
+            ei::log(eLogWarning, QString(
+                "Batched tile preview rejected sector %1,%2")
+                    .arg(sector.first).arg(sector.second));
 
     if(!terrainSectors.isEmpty() || !overlaySectors.isEmpty() || !tileSectors.isEmpty())
         update();

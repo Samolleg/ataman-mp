@@ -4514,6 +4514,34 @@ void EnduranceDocumentTests::overlayActivationDeactivationIsLosslessAndUndoable(
     QVERIFY(firstStrokeTerrain.makeOverlayActivation(
         firstStroke, 1, 0, 1, 2).isEmpty());
 
+    // A live stroke may touch the same SEC many times. Its merged undo command
+    // must retain the first byte payload and the final byte payload exactly;
+    // otherwise material recolors from a later stamp can survive full undo.
+    CTerrainEditModel mergedStrokeTerrain;
+    QVERIFY(mergedStrokeTerrain.load(baseline));
+    SOverlaySurfaceCommand mergedStroke;
+    const SOverlaySurfaceCommand mergedFirst =
+        mergedStrokeTerrain.makeOverlayActivation(firstStroke, 1, 0, 1, 2);
+    QVERIFY(!mergedFirst.isEmpty());
+    QVERIFY(mergedStrokeTerrain.apply(mergedFirst, true));
+    appendOverlaySurfaceCommand(&mergedStroke, mergedFirst);
+    STerrainTileBrush recolorPoint;
+    recolorPoint.centerX = 8.0f;
+    recolorPoint.centerY = 8.0f;
+    const SOverlaySurfaceCommand mergedSecond =
+        mergedStrokeTerrain.makeOverlayActivation(recolorPoint, 0, 0, 2, 1);
+    QVERIFY(!mergedSecond.isEmpty());
+    QVERIFY(mergedStrokeTerrain.apply(mergedSecond, true));
+    appendOverlaySurfaceCommand(&mergedStroke, mergedSecond);
+    QCOMPARE(mergedStroke.sectors.size(), 1);
+    QCOMPARE(mergedStroke.sectors.front().beforePayload, landSector);
+    const QByteArray mergedFinal = mergedStrokeTerrain.sectorPayload(0, 0);
+    QCOMPARE(mergedStroke.sectors.front().afterPayload, mergedFinal);
+    QVERIFY(mergedStrokeTerrain.apply(mergedStroke, false));
+    QCOMPARE(mergedStrokeTerrain.sectorPayload(0, 0), landSector);
+    QVERIFY(mergedStrokeTerrain.apply(mergedStroke, true));
+    QCOMPARE(mergedStrokeTerrain.sectorPayload(0, 0), mergedFinal);
+
     // Defense in depth: even a structurally sized overlay command must not be
     // serializable if it detached land bytes from the canonical lattice.
     SOverlaySurfaceCommand corruptLand;

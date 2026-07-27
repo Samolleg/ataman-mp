@@ -370,6 +370,7 @@ private:
     void syncAiGraphPreviewWidget();
     void rebuildAiGraphOverlayGeometry();
     void startAiGraphPreviewRegeneration();
+    void beginAiGraphPreviewRegeneration(bool selectRegenerated);
     void scheduleAiGraphPreviewRegeneration();
     bool captureAiGraphPreviewBuildInput(SAiGraphPreviewBuildInput* input,
                                          QString* error);
@@ -594,6 +595,12 @@ private:
     int m_tileStrokeRefused{0};
     int m_tileStrokeChangedTiles{0};
     int m_tileStrokeSolverNodes{0};
+    int m_tileStrokeMinimumX{0};
+    int m_tileStrokeMinimumY{0};
+    int m_tileStrokeMaximumX{0};
+    int m_tileStrokeMaximumY{0};
+    int m_tileStrokeMaximumCenterJump{0};
+    bool m_tileStrokeBoundsValid{false};
     qint64 m_overlayCommandNsecs{0};
     qint64 m_overlayModelNsecs{0};
     qint64 m_overlayRenderNsecs{0};
@@ -601,6 +608,7 @@ private:
     int m_overlayPickCount{0};
     int m_overlayPreviewSectorCount{0};
     QElapsedTimer m_overlayBrushPickTimer;
+    QPoint m_overlayBrushPickCursor;
     QVector3D m_overlayBrushPickPosition;
     bool m_overlayBrushPickValid{false};
     bool m_overlayBrushPickProjectionLand{true};
@@ -659,13 +667,17 @@ private:
     QLabel* m_aiGraphSourceLabel{nullptr};
     CAiGraphDocument m_aiGraphDocument;
     CAiGraphDocument m_aiGraphLoadedDocument;
+    CAiGraphDocument m_aiGraphRegeneratedDocument;
     QString m_aiGraphSource;
     QString m_aiGraphLoadedSource;
+    QString m_aiGraphRegeneratedSource;
     QFutureWatcher<SAiGraphPreviewBuildResult>* m_aiGraphBuildWatcher{nullptr};
     QTimer* m_aiGraphRegenerationTimer{nullptr};
     quint64 m_aiGraphBuildRequest{0};
     bool m_aiGraphAutoRegenerationEnabled{false};
     bool m_aiGraphRegenerationPending{false};
+    bool m_aiGraphRegeneratedFresh{false};
+    bool m_aiGraphLoadedOverride{false};
     bool m_aiGraphPreviewVisible{false};
     bool m_aiGraphOverlayDirty{true};
     QVector<QVector3D> m_aiGraphOpenLinks;

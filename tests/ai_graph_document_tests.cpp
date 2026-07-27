@@ -98,6 +98,8 @@ private slots:
     void regenerationAppliesWaterClearanceToEveryProfile();
     void regenerationUsesBridgeSurfaceAndObjectSemantics();
     void regenerationHonorsConfiguredTerrainTraversal();
+    void regenerationIndexesCollisionCoverageOnce();
+    void regenerationHandlesPopulatedMapScale();
     void parsesProfileTerrainTraversalRegistry();
 };
 
@@ -341,6 +343,55 @@ void AiGraphDocumentTests::regenerationHonorsConfiguredTerrainTraversal()
     QVERIFY2(result.valid, qPrintable(result.error));
     for(int layer = 0; layer < CAiGraphDocument::LayerCount; ++layer)
         QCOMPARE(result.document.weight(layer, 1, 1, 6), qint16(-1));
+}
+
+void AiGraphDocumentTests::regenerationIndexesCollisionCoverageOnce()
+{
+    SAiGraphPreviewBuildInput input;
+    input.graphWidth = 8;
+    input.graphHeight = 8;
+    const int aiWidth = input.graphWidth * CAiGraphPreviewBuilder::AiTilesPerGraphCell;
+    const int aiHeight = input.graphHeight * CAiGraphPreviewBuilder::AiTilesPerGraphCell;
+    input.terrainHeights.fill(0.0f, aiWidth * aiHeight);
+    for(int index = 0; index < 200; ++index)
+    {
+        const float x = float((index * 7) % 50) * 0.5f;
+        const float y = float((index * 11) % 50) * 0.5f;
+        input.collisionProxies.append(boxVolume(
+            x, y, 0.0f, x + 0.4f, y + 0.4f, 2.0f));
+    }
+    const SAiGraphPreviewBuildResult result = CAiGraphPreviewBuilder::build(input);
+    QVERIFY2(result.valid, qPrintable(result.error));
+    QCOMPARE(result.collisionProxyCount, input.collisionProxies.size());
+    QVERIFY(result.collisionCoverageTests > 0);
+    // The legacy all-proxy/all-tile/eight-layer loop would execute more than
+    // six million polygon tests here. Bounded one-time indexing stays local.
+    QVERIFY2(result.collisionCoverageTests < 5000,
+             qPrintable(QString::number(result.collisionCoverageTests)));
+}
+
+void AiGraphDocumentTests::regenerationHandlesPopulatedMapScale()
+{
+    SAiGraphPreviewBuildInput input;
+    input.graphWidth = 88;
+    input.graphHeight = 72;
+    const int aiWidth = input.graphWidth * CAiGraphPreviewBuilder::AiTilesPerGraphCell;
+    const int aiHeight = input.graphHeight * CAiGraphPreviewBuilder::AiTilesPerGraphCell;
+    input.terrainHeights.fill(0.0f, aiWidth * aiHeight);
+    for(int index = 0; index < 2266; ++index)
+    {
+        const float x = float((index * 37) % (aiWidth - 4)) * 0.5f;
+        const float y = float((index * 53) % (aiHeight - 4)) * 0.5f;
+        input.collisionProxies.append(boxVolume(
+            x, y, 0.0f, x + 0.8f, y + 0.8f, 2.0f));
+    }
+    const SAiGraphPreviewBuildResult result = CAiGraphPreviewBuilder::build(input);
+    QVERIFY2(result.valid, qPrintable(result.error));
+    QCOMPARE(result.document.width(), input.graphWidth);
+    QCOMPARE(result.document.height(), input.graphHeight);
+    QCOMPARE(result.collisionProxyCount, input.collisionProxies.size());
+    QVERIFY2(result.collisionCoverageTests < 100000,
+             qPrintable(QString::number(result.collisionCoverageTests)));
 }
 
 void AiGraphDocumentTests::parsesProfileTerrainTraversalRegistry()
