@@ -178,7 +178,8 @@ public:
     QVector3D getTerrainBrushPos(bool* hit = nullptr);
     QVector3D getTerrainBrushPos(const int cursorPosX, const int cursorPosY,
                                  bool* hit = nullptr);
-    bool terrainPositionAt(const QPoint& viewportPosition, QVector3D* position);
+    bool terrainPositionAt(const QPoint& viewportPosition, QVector3D* position,
+                           bool land = true);
     QPolygonF minimapCameraFootprint() const;
     void moveCameraToMinimapPoint(const QPointF& worldPosition);
     QPoint operationAnchor() const;
@@ -590,6 +591,10 @@ private:
     int m_tileStrokeRefused{0};
     int m_tileStrokeChangedTiles{0};
     int m_tileStrokeSolverNodes{0};
+    qint64 m_overlayCommandNsecs{0};
+    qint64 m_overlayModelNsecs{0};
+    qint64 m_overlayRenderNsecs{0};
+    int m_overlayPreviewSectorCount{0};
     bool m_terrainPreviewBatchActive{false};
     QSet<QPair<int, int>> m_pendingTerrainPreviewSectors;
     QSet<QPair<int, int>> m_pendingOverlayPreviewSectors;
@@ -598,6 +603,7 @@ private:
     bool m_sculptOutlineValid{false};
     QVector3D m_sculptOutlineCenter;
     bool m_sculptStrokeActive;
+    bool m_sculptPointerValid{false};
     STerrainHeightCommand m_sculptStrokeCommand;
     QVector3D m_lastSculptPoint;
     QVector3D m_lastSculptStampPoint;

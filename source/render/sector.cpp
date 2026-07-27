@@ -1,5 +1,6 @@
 #include <QtGlobal>
 #include <QtEndian>
+#include <algorithm>
 #include <cstring>
 
 #include "sector.h"
@@ -878,18 +879,33 @@ void CSector::updateWaterTiles(const QSet<int>& localTiles, bool rebuildIndices)
         }
     }
     updateBounds();
+    QList<int> sortedTiles = localTiles.values();
+    std::sort(sortedTiles.begin(), sortedTiles.end());
     m_waterVertexBuf.bind();
     // Preserve the existing allocation and upload only the contiguous nine
     // vertices belonging to each changed tile. Reallocating the complete
     // animated overlay VBO on every stamp was the main GPU synchronization
     // difference from ordinary terrain painting.
-    for(int tile : localTiles)
+    for(int position = 0; position < sortedTiles.size();)
     {
-        if(tile < 0 || tile >= nTile * nTile)
+        const int firstTile = sortedTiles.at(position);
+        if(firstTile < 0 || firstTile >= nTile * nTile)
+        {
+            ++position;
             continue;
-        m_waterVertexBuf.write(tile * 9 * int(sizeof(SWaterVertexData)),
-            m_arrAnimatedWaterVrtData.constData() + tile * 9,
-            9 * int(sizeof(SWaterVertexData)));
+        }
+        int lastTile = firstTile;
+        while(position + 1 < sortedTiles.size()
+              && sortedTiles.at(position + 1) == lastTile + 1)
+        {
+            ++position;
+            ++lastTile;
+        }
+        const int tileCount = lastTile - firstTile + 1;
+        m_waterVertexBuf.write(firstTile * 9 * int(sizeof(SWaterVertexData)),
+            m_arrAnimatedWaterVrtData.constData() + firstTile * 9,
+            tileCount * 9 * int(sizeof(SWaterVertexData)));
+        ++position;
     }
     m_waterVertexBuf.release();
     if(!rebuildIndices)

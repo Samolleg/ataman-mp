@@ -6172,6 +6172,9 @@ void MainWindow::closeEvent(QCloseEvent *e)
         m_autosaveCountdownTimer->stop();
     if(m_autosaveNotification)
         m_autosaveNotification->hide();
+    // The process-wide button connector outlives MainWindow and otherwise
+    // retains a dangling viewport pointer while tool buttons are destroyed.
+    CButtonConnector::getInstance()->attach(nullptr);
     ei::closeSecondaryWindows(this);
     // Remove the editor from the desktop before synchronous scene teardown.
     // Windows otherwise presents a still-visible window as unresponsive.

@@ -640,7 +640,7 @@ CView::CView(QWidget *parent, const QGLWidget *pShareWidget) : QGLWidget(parent,
     m_sculptRepeatTimer->setInterval(33);
     connect(m_sculptRepeatTimer, &QTimer::timeout, this, [this]()
     {
-        if(m_sculptStrokeActive)
+        if(m_sculptStrokeActive && m_sculptPointerValid)
             sculptTerrainTowardLatestPoint();
     });
     m_aiGraphRegenerationTimer = new QTimer(this);
@@ -7261,6 +7261,28 @@ QVector3D CView::getTerrainBrushPos(const int cursorPosX, const int cursorPosY,
             == EOverlaySurfaceOperation::Activate;
     if(addingSurface)
     {
+        // Adding overlays is cell-based. Resolve the land ray once on the CPU,
+        // then locally project that XY onto an existing overlay when present.
+        // The former overlay-first path redrew the complete overlay pass and,
+        // on empty terrain, the complete land pass as well, with a synchronous
+        // depth readback after each draw for every pointer event.
+        QVector3D ground;
+        if(terrainPositionAt(QPoint(cursorPosX, cursorPosY), &ground, true))
+        {
+            QVector3D overlay = ground;
+            if(m_pLand->projectPt(overlay, false))
+            {
+                m_terrainPaintProjectionLand = false;
+                if(hit)
+                    *hit = true;
+                return overlay;
+            }
+            m_terrainPaintProjectionLand = true;
+            if(hit)
+                *hit = true;
+            return ground;
+        }
+        // Preserve support for a disconnected overlay with no land beneath it.
         bool overlayHit = false;
         const QVector3D overlay = getTerrainPos(
             cursorPosX, cursorPosY, false, &overlayHit);
@@ -7271,6 +7293,7 @@ QVector3D CView::getTerrainBrushPos(const int cursorPosX, const int cursorPosY,
                 *hit = true;
             return overlay;
         }
+        return QVector3D();
     }
     m_terrainPaintProjectionLand = terrainBrushProjectsToLand();
     return getTerrainPos(cursorPosX, cursorPosY,
@@ -8652,6 +8675,8 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
     if(!bLand && m_landscapeTools->overlaySurfaceOperation()
                      != EOverlaySurfaceOperation::PaintExisting)
     {
+        QElapsedTimer overlayCommandTimer;
+        overlayCommandTimer.start();
         SOverlaySurfaceCommand surfaceCommand;
         if(m_landscapeTools->overlaySurfaceOperation()
            == EOverlaySurfaceOperation::Deactivate)
@@ -8682,6 +8707,7 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
                 brush, material, quint8(selectedIndex / 64), quint8(selectedIndex % 64),
                 quint8(selectedRotation & 3), &report);
         }
+        m_overlayCommandNsecs += overlayCommandTimer.nsecsElapsed();
         ++m_tileStrokeActions;
         if(surfaceCommand.isEmpty())
         {
@@ -9042,6 +9068,13 @@ void CView::endTileBrushGroup()
                 .arg(m_tileStrokeApplied).arg(m_tileStrokeNoOps)
                 .arg(m_tileStrokeRefused).arg(m_tileStrokeChangedTiles)
                 .arg(m_tileStrokeSolverNodes));
+        if(!m_overlaySurfaceStrokeCommand.isEmpty())
+            ei::log(eLogInfo, QString(
+                "Overlay paint timing: commandMs=%1 modelMs=%2 renderMs=%3 previewSectors=%4")
+                .arg(double(m_overlayCommandNsecs) / 1000000.0, 0, 'f', 2)
+                .arg(double(m_overlayModelNsecs) / 1000000.0, 0, 'f', 2)
+                .arg(double(m_overlayRenderNsecs) / 1000000.0, 0, 'f', 2)
+                .arg(m_overlayPreviewSectorCount));
     }
     m_lastTerrainPaintCenterValid = false;
     ++m_tileBrushCommandId;
@@ -9062,6 +9095,10 @@ void CView::beginTileBrushGroup()
     m_tileStrokeRefused = 0;
     m_tileStrokeChangedTiles = 0;
     m_tileStrokeSolverNodes = 0;
+    m_overlayCommandNsecs = 0;
+    m_overlayModelNsecs = 0;
+    m_overlayRenderNsecs = 0;
+    m_overlayPreviewSectorCount = 0;
 }
 
 bool CView::applyTerrainTilePreview(const STerrainTileCommand& command, bool forward)
@@ -9107,12 +9144,16 @@ bool CView::applyOverlaySurfacePreview(const SOverlaySurfaceCommand& command,
 {
     if(!m_terrainEditAvailable)
         return false;
+    QElapsedTimer phaseTimer;
+    phaseTimer.start();
     CValidationReport report;
     if(!m_terrainEdit.apply(command, forward, &report))
     {
         ei::log(eLogWarning, "Overlay surface preview command refused:\n" + report.toText());
         return false;
     }
+    m_overlayModelNsecs += phaseTimer.nsecsElapsed();
+    phaseTimer.restart();
     for(const SOverlaySectorDelta& delta : command.sectors)
     {
         const QPair<int, int> sector(delta.sectorX, delta.sectorY);
@@ -9131,6 +9172,11 @@ bool CView::applyOverlaySurfacePreview(const SOverlaySurfaceCommand& command,
             ei::log(eLogWarning, QString(
                 "Overlay model changed but preview renderer rejected sector %1,%2")
                     .arg(delta.sectorX).arg(delta.sectorY));
+    }
+    if(!m_terrainPreviewBatchActive)
+    {
+        m_overlayRenderNsecs += phaseTimer.nsecsElapsed();
+        m_overlayPreviewSectorCount += command.sectors.size();
     }
     m_pLand->setDirty(m_terrainEdit.isDirty());
     m_aiGraphOverlayDirty = true;
@@ -9180,6 +9226,8 @@ void CView::endTerrainPreviewBatch()
     }
     for(const QPair<int, int>& sector : overlaySectors)
     {
+        QElapsedTimer overlayRenderTimer;
+        overlayRenderTimer.start();
         tileSectors.remove(sector);
         if(!m_pLand->previewCanonicalOverlaySectorDelta(
             sector.first, sector.second, overlayBefore.value(sector),
@@ -9187,6 +9235,8 @@ void CView::endTerrainPreviewBatch()
             ei::log(eLogWarning, QString(
                 "Batched overlay preview rejected sector %1,%2")
                     .arg(sector.first).arg(sector.second));
+        m_overlayRenderNsecs += overlayRenderTimer.nsecsElapsed();
+        ++m_overlayPreviewSectorCount;
     }
     for(const QPair<int, int>& sector : tileSectors)
         m_pLand->updateSectorDrawData(sector.first, sector.second);
@@ -9657,14 +9707,29 @@ void CView::mousePressEvent(QMouseEvent* event)
         && m_terrainEditAvailable && event->button() == Qt::LeftButton)
     {
         const bool overlaySculpt = m_landscapeTools->overlaySculptEnabled();
+        QVector3D position;
+        const bool positionValid = overlaySculpt
+            ? terrainPositionAt(event->pos(), &position, false)
+            : (position = getTerrainPos(event->x(), event->y(), true), true);
+        if(!positionValid)
+        {
+            m_sculptOutlineValid = false;
+            event->accept();
+            return;
+        }
         m_sculptStrokeActive = true;
-        m_lastSculptPoint = getTerrainPos(event->x(), event->y(), !overlaySculpt);
+        m_sculptPointerValid = true;
+        m_lastSculptPoint = position;
         m_sculptOutlineCenter = m_lastSculptPoint;
         m_sculptOutlineValid = true;
         m_lastSculptStampPoint = m_lastSculptPoint;
         m_sculptStrokeChanged = false;
         m_sculptStrokeStamps = 0;
         m_sculptStrokeVertices = 0;
+        m_overlayCommandNsecs = 0;
+        m_overlayModelNsecs = 0;
+        m_overlayRenderNsecs = 0;
+        m_overlayPreviewSectorCount = 0;
         m_sculptStrokeCommand = STerrainHeightCommand();
         m_sculptStrokeCommand.description = tr("Sculpt terrain");
         m_overlaySurfaceStrokeCommand = SOverlaySurfaceCommand();
@@ -9694,6 +9759,8 @@ void CView::sculptTerrainAt(const QVector3D& position, float stampFraction)
 
     if(m_landscapeTools->overlaySculptEnabled())
     {
+        QElapsedTimer overlayCommandTimer;
+        overlayCommandTimer.start();
         CValidationReport report;
         SOverlaySurfaceCommand overlayCommand;
         switch(m_landscapeTools->sculptTool())
@@ -9718,6 +9785,7 @@ void CView::sculptTerrainAt(const QVector3D& position, float stampFraction)
                 brush, blendStrength, &report);
             break;
         }
+        m_overlayCommandNsecs += overlayCommandTimer.nsecsElapsed();
         if(overlayCommand.isEmpty())
         {
             if(report.hasErrors())
@@ -10034,20 +10102,25 @@ void CView::mouseMoveEvent(QMouseEvent* event)
        && m_terrainEditAvailable)
     {
         const bool overlaySculpt = m_landscapeTools->overlaySculptEnabled();
-        m_sculptOutlineCenter = getTerrainPos(event->x(), event->y(), !overlaySculpt);
-        m_sculptOutlineValid = true;
+        QVector3D position;
+        const bool positionValid = overlaySculpt
+            ? terrainPositionAt(event->pos(), &position, false)
+            : (position = getTerrainPos(event->x(), event->y(), true), true);
+        m_sculptPointerValid = positionValid;
+        if(positionValid)
+            m_sculptOutlineCenter = position;
+        m_sculptOutlineValid = positionValid;
         update();
-    }
-    if(m_sculptStrokeActive && (event->buttons() & Qt::LeftButton)
-        && m_landscapeTools && m_terrainEditAvailable)
-    {
-        const bool overlaySculpt = m_landscapeTools->overlaySculptEnabled();
-        const QVector3D position = getTerrainPos(event->x(), event->y(), !overlaySculpt);
-        m_lastSculptPoint = position;
-        // The repeat timer applies the latest point. This keeps pointer input
-        // responsive and caps canonical preview work to one stamp per tick.
-        event->accept();
-        return;
+        if(m_sculptStrokeActive && (event->buttons() & Qt::LeftButton))
+        {
+            if(positionValid)
+                m_lastSculptPoint = position;
+            // The repeat timer applies the latest valid point. This keeps
+            // pointer input responsive and prevents a stale overlay point from
+            // continuing to sculpt after the cursor leaves the surface.
+            event->accept();
+            return;
+        }
     }
     m_pOp->mouseMoveEvent(event);
 }
@@ -10066,7 +10139,8 @@ void CView::mouseReleaseEvent(QMouseEvent *event)
     }
     if(m_sculptStrokeActive && event->button() == Qt::LeftButton)
     {
-        if(m_lastSculptPoint.distanceToPoint(m_lastSculptStampPoint) > 0.01f)
+        if(m_sculptPointerValid
+           && m_lastSculptPoint.distanceToPoint(m_lastSculptStampPoint) > 0.01f)
             sculptTerrainTowardLatestPoint();
         finishSculptStroke();
         event->accept();
@@ -10258,7 +10332,8 @@ void CView::moveCameraToPoint(const QVector3D& position)
     }
 }
 
-bool CView::terrainPositionAt(const QPoint& viewportPosition, QVector3D* position)
+bool CView::terrainPositionAt(const QPoint& viewportPosition, QVector3D* position,
+                              bool land)
 {
     if(!position || !m_pLand || !m_pLand->isMprLoad()
        || !rect().contains(viewportPosition) || width() <= 0 || height() <= 0)
@@ -10281,7 +10356,7 @@ bool CView::terrainPositionAt(const QPoint& viewportPosition, QVector3D* positio
         const float t = float(step) / float(steps);
         const QVector3D rayPoint = rayStart + (rayEnd - rayStart) * t;
         QVector3D terrain(rayPoint.x(), rayPoint.y(), 0.0f);
-        if(!CLandscape::getInstance()->projectPt(terrain))
+        if(!CLandscape::getInstance()->projectPt(terrain, land))
         {
             havePrevious = false;
             continue;
@@ -10297,7 +10372,7 @@ bool CView::terrainPositionAt(const QPoint& viewportPosition, QVector3D* positio
                 const float middle = (low + high) * 0.5f;
                 const QVector3D sample = rayStart + (rayEnd - rayStart) * middle;
                 QVector3D ground(sample.x(), sample.y(), 0.0f);
-                if(!CLandscape::getInstance()->projectPt(ground))
+                if(!CLandscape::getInstance()->projectPt(ground, land))
                 {
                     low = middle;
                     continue;
@@ -11357,6 +11432,7 @@ void CView::finishSculptStroke()
         return;
     m_sculptRepeatTimer->stop();
     m_sculptStrokeActive = false;
+    m_sculptPointerValid = false;
     const bool overlayStroke = !m_overlaySurfaceStrokeCommand.isEmpty();
     STerrainEditDiagnostics terrainDiagnostics;
     int maximumRawDelta = 0;
@@ -11401,8 +11477,16 @@ void CView::finishSculptStroke()
         emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMprDirtyFlag,
                                   m_terrainEdit.isDirty() ? "*" : "");
         if(overlayStroke)
+        {
             emit updateMsg(tr("Overlay sculpt stroke: %1 stamp(s), %2 sector update(s); liquid navigation may need review.")
                 .arg(m_sculptStrokeStamps).arg(m_sculptStrokeVertices));
+            ei::log(eLogInfo, QString(
+                "Overlay sculpt timing: commandMs=%1 modelMs=%2 renderMs=%3 previewSectors=%4 stamps=%5")
+                .arg(double(m_overlayCommandNsecs) / 1000000.0, 0, 'f', 2)
+                .arg(double(m_overlayModelNsecs) / 1000000.0, 0, 'f', 2)
+                .arg(double(m_overlayRenderNsecs) / 1000000.0, 0, 'f', 2)
+                .arg(m_overlayPreviewSectorCount).arg(m_sculptStrokeStamps));
+        }
         else if(terrainDiagnostics.steepSlopeRisk)
             emit updateMsg(tr(
                 "Sculpt stroke created a steep local slope (%1 degrees, max raw change %2). Terrain remains seam-consistent, but inspect it for cliffs or exposed backfaces.")

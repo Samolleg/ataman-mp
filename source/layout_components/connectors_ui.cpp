@@ -89,7 +89,8 @@ void CButtonConnector::clickButton(EButtonOp btnType)
     {
         pair.second->setChecked(pair.first == btnType);
     }
-    m_pView->changeOperation(btnType);
+    if(m_pView)
+        m_pView->changeOperation(btnType);
     //todo: insert GIZMO for operation
 }
 
