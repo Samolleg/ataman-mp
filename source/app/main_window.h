@@ -14,10 +14,13 @@
 #include <QStringList>
 #include <QVector3D>
 #include <QFutureWatcher>
+#include <QImage>
+#include <QPointer>
 #include "types.h"
 #include "map_catalog.h"
 #include "map_spawn_planner.h"
 #include "mob_family_validation.h"
+#include "minimap_bake.h"
 
 namespace Ui {
 class MainWindow;
@@ -43,6 +46,7 @@ class QComboBox;
 class QCheckBox;
 class QToolButton;
 class QLabel;
+struct SMinimapSceneCaptureResult;
 class QTreeWidget;
 class QTreeWidgetItem;
 class QTimer;
@@ -57,6 +61,8 @@ class QScrollArea;
 class QListWidget;
 class QSlider;
 class QDoubleSpinBox;
+class CViewportMinimapWidget;
+class CMinimapExportDialog;
 
 struct SWindowTitle
 {
@@ -99,6 +105,16 @@ private:
     bool isExitAllowed();
     void closeAll();
     void showGameAndModSetup();
+    void generateMinimap();
+    void scheduleViewportMinimapRefresh(int delayMs = 250, bool force = false);
+    void refreshViewportMinimap();
+    void refreshViewportMinimapSources();
+    bool applyMinimapCapture(const SMinimapSceneCaptureResult& capture,
+                             const SMinimapGradeSettings& grade);
+    void setMinimapGenerationLocked(bool locked);
+    bool ensureGeneratedMinimap();
+    void registerExportedMinimap(const QString& textureName);
+    void positionViewportMinimap();
     void rememberRecentFile(const QFileInfo& fileName);
     void rebuildRecentFilesMenu();
     void loadLastSession();
@@ -334,6 +350,23 @@ private:
     SMapSpawnPlan m_customSpawn;
     QVector3D m_customSpawnPosition;
     QString m_customSpawnContextKey;
+    CViewportMinimapWidget* m_viewportMinimap{nullptr};
+    QPointer<CMinimapExportDialog> m_minimapExportDialog;
+    QTimer* m_minimapRefreshTimer{nullptr};
+    QTimer* m_minimapCameraTimer{nullptr};
+    QByteArray m_generatedMinimapMmp;
+    QImage m_generatedMinimapImage;
+    QImage m_embeddedMinimapImage;
+    QString m_embeddedMinimapName;
+    QString m_embeddedMinimapSource;
+    SMinimapGradeSettings m_minimapGrade;
+    QString m_generatedMinimapContextKey;
+    int m_minimapTargetTextureSize{1024};
+    bool m_minimapTargetDxt1{true};
+    QString m_minimapExportProfileDescription;
+    QString m_minimapSourceContextKey;
+    bool m_minimapCaptureRunning{false};
+    bool m_minimapGenerationLocked{false};
 };
 
 #endif // MAIN_WINDOW_H

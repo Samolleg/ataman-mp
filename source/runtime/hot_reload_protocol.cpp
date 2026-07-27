@@ -40,6 +40,9 @@ QJsonObject mapHotReloadRequestToJson(const SMapHotReloadRequest& request)
     object.insert("mobSha256", request.mobSha256);
     object.insert("bootstrapMobPath", request.bootstrapMobPath);
     object.insert("bootstrapMobSha256", request.bootstrapMobSha256);
+    object.insert("minimapTextureName", request.minimapTextureName);
+    object.insert("minimapResourcePath", request.minimapResourcePath);
+    object.insert("minimapResourceSha256", request.minimapResourceSha256);
     object.insert("savePath", request.savePath);
     object.insert("preservePosition", request.preservePosition);
     object.insert("graphless", request.graphless);
@@ -79,6 +82,9 @@ bool mapHotReloadRequestFromJson(const QJsonObject& object,
     parsed.mobSha256 = object.value("mobSha256").toString();
     parsed.bootstrapMobPath = object.value("bootstrapMobPath").toString();
     parsed.bootstrapMobSha256 = object.value("bootstrapMobSha256").toString();
+    parsed.minimapTextureName = object.value("minimapTextureName").toString();
+    parsed.minimapResourcePath = object.value("minimapResourcePath").toString();
+    parsed.minimapResourceSha256 = object.value("minimapResourceSha256").toString();
     parsed.savePath = object.value("savePath").toString();
     parsed.preservePosition = object.value("preservePosition").toBool();
     parsed.graphless = object.value("graphless").toBool();
@@ -99,11 +105,14 @@ bool validateMapHotReloadRequest(const SMapHotReloadRequest& request,
                                  QStringList* errors)
 {
     QStringList local;
-    if(request.protocolVersion != 3) local.append("Unsupported hot-reload protocol version.");
+    if(request.protocolVersion != 4) local.append("Unsupported hot-reload protocol version.");
     if(request.sequence == 0) local.append("Hot-reload sequence must be positive.");
     if(request.generation == 0) local.append("Hot-reload generation must be positive.");
     if(request.runId.isEmpty() || request.profileId.isEmpty() || request.zoneId.isEmpty())
         local.append("Run, profile, and zone identities are required.");
+    if(request.sourceZoneId.isEmpty() || request.bootstrapMprName.isEmpty()
+       || request.bootstrapMobName.isEmpty())
+        local.append("The source zone and bootstrap MPR/MOB identities are required.");
     if(request.entranceId <= 0) local.append("A valid map-table entrance is required.");
     if(!isOwnedPath(request.mprPath, ownedRunRoot)
        || !isOwnedPath(request.mobPath, ownedRunRoot)
@@ -112,6 +121,9 @@ bool validateMapHotReloadRequest(const SMapHotReloadRequest& request,
     if(!request.bootstrapMobPath.isEmpty()
        && !isOwnedPath(request.bootstrapMobPath, ownedRunRoot))
         local.append("The hot-reload bootstrap MOB must remain inside the owned test-run directory.");
+    if(!request.minimapResourcePath.isEmpty()
+       && !isOwnedPath(request.minimapResourcePath, ownedRunRoot))
+        local.append("The hot-reload minimap RES must remain inside the owned test-run directory.");
     if(!QFileInfo::exists(request.mprPath) || !QFileInfo::exists(request.mobPath))
         local.append("Hot-reload payload files are missing.");
     if(!QFileInfo(request.savePath).isDir())
@@ -131,6 +143,14 @@ bool validateMapHotReloadRequest(const SMapHotReloadRequest& request,
         local.append("Synthetic-map dimensions or entrance coordinates are invalid.");
     if(!request.bootstrapMobPath.isEmpty() && !QFileInfo::exists(request.bootstrapMobPath))
         local.append("The hot-reload bootstrap MOB is missing.");
+    const QRegularExpression textureName("^[A-Za-z0-9_.-]+$");
+    if(!request.minimapTextureName.isEmpty()
+       && !textureName.match(request.minimapTextureName).hasMatch())
+        local.append("The hot-reload minimap texture name is unsafe.");
+    if(!request.minimapResourcePath.isEmpty()
+       && (request.minimapTextureName.isEmpty()
+           || !QFileInfo::exists(request.minimapResourcePath)))
+        local.append("The hot-reload minimap RES or texture identity is missing.");
     const QRegularExpression hash("^[0-9a-f]{64}$", QRegularExpression::CaseInsensitiveOption);
     if(!hash.match(request.mprSha256).hasMatch()
        || !hash.match(request.mobSha256).hasMatch())
@@ -138,6 +158,9 @@ bool validateMapHotReloadRequest(const SMapHotReloadRequest& request,
     if(!request.bootstrapMobPath.isEmpty()
        && !hash.match(request.bootstrapMobSha256).hasMatch())
         local.append("The hot-reload bootstrap MOB hash is invalid.");
+    if(!request.minimapResourcePath.isEmpty()
+       && !hash.match(request.minimapResourceSha256).hasMatch())
+        local.append("The hot-reload minimap RES hash is invalid.");
     if(errors) errors->append(local);
     return local.isEmpty();
 }
@@ -171,6 +194,9 @@ QByteArray mapHotReloadRequestToControlBytes(const SMapHotReloadRequest& request
     line("mobSha256", request.mobSha256.toLower());
     line("bootstrapMob", QDir::toNativeSeparators(request.bootstrapMobPath));
     line("bootstrapMobSha256", request.bootstrapMobSha256.toLower());
+    line("minimapTexture", request.minimapTextureName);
+    line("minimapResource", QDir::toNativeSeparators(request.minimapResourcePath));
+    line("minimapResourceSha256", request.minimapResourceSha256.toLower());
     line("savePath", QDir::toNativeSeparators(request.savePath));
     line("preservePosition", request.preservePosition ? "1" : "0");
     line("graphless", request.graphless ? "1" : "0");
@@ -227,6 +253,9 @@ bool mapHotReloadRequestFromControlBytes(const QByteArray& bytes,
     parsed.mobSha256 = values.value("mobSha256");
     parsed.bootstrapMobPath = QDir::fromNativeSeparators(values.value("bootstrapMob"));
     parsed.bootstrapMobSha256 = values.value("bootstrapMobSha256");
+    parsed.minimapTextureName = values.value("minimapTexture");
+    parsed.minimapResourcePath = QDir::fromNativeSeparators(values.value("minimapResource"));
+    parsed.minimapResourceSha256 = values.value("minimapResourceSha256");
     parsed.savePath = QDir::fromNativeSeparators(values.value("savePath"));
     parsed.preservePosition = values.value("preservePosition") == "1";
     parsed.graphless = values.value("graphless") == "1";

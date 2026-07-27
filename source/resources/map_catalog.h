@@ -38,6 +38,8 @@ struct SMapCatalogEntry
     QVector<SMapTravelZone> travelZones;
 
     bool isComplete() const { return !mprPath.isEmpty() && !mobPath.isEmpty(); }
+    bool isBriefing() const
+    { return zoneType.compare(QStringLiteral("brief"), Qt::CaseInsensitive) == 0; }
 };
 
 struct SMapCatalogResult

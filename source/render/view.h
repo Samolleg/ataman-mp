@@ -16,6 +16,7 @@
 #include <QOpenGLBuffer>
 #include <QElapsedTimer>
 #include <QRectF>
+#include <QPolygonF>
 #include <QSet>
 #include <QStringList>
 #include <QFutureWatcher>
@@ -31,6 +32,7 @@
 #include "particle_animation.h"
 #include "ai_graph_document.h"
 #include "ai_graph_preview_builder.h"
+#include "minimap_bake.h"
 
 class QLineEdit;
 class QFrame;
@@ -83,6 +85,23 @@ class CLandscape;
 class CExternalScriptWorkspaceManager;
 class CMobScriptWindow;
 struct SMobParameterState;
+
+struct SMinimapSceneCaptureResult
+{
+    SMinimapBakeResult bake;
+    QImage unlitGameImage;
+    int sectorWidth{0};
+    int sectorHeight{0};
+    int staticObjectCount{0};
+    int hiddenStaticObjectCount{0};
+    int excludedDynamicUnitCount{0};
+    bool staticGeometrySourcePresent{false};
+    QString framingDescription;
+    QString orientationDescription;
+    int targetTextureSize{256};
+    bool targetDxt1{false};
+    QString exportProfileDescription;
+};
 namespace ei { struct SRenderEnvironment; struct SScenePointLight; }
 
 ///
@@ -160,6 +179,8 @@ public:
     QVector3D getTerrainBrushPos(const int cursorPosX, const int cursorPosY,
                                  bool* hit = nullptr);
     bool terrainPositionAt(const QPoint& viewportPosition, QVector3D* position);
+    QPolygonF minimapCameraFootprint() const;
+    void moveCameraToMinimapPoint(const QPointF& worldPosition);
     QPoint operationAnchor() const;
     void setTestSpawnMarker(const QVector3D& position, bool adjusted = false);
     void setTestSpawnMarkerSelected(bool selected);
@@ -204,6 +225,8 @@ public:
     void setCameraSpeedMultiplier(double multiplier);
     bool overridesWorldTime() const;
     double effectiveWorldTimeHours() const;
+    SMinimapSceneCaptureResult captureMinimapScene(
+        bool includeLoadedStaticGeometry, int targetTextureSize = 256);
     void addLogicPoint(bool bLookPoint = false);
     void copySelectedIDsToClipboard();
     void changeCurrentMob(CMob* pMob);
@@ -488,6 +511,11 @@ private:
     QOpenGLTimerQuery* m_gpuTimer;
     bool m_gpuTimerPending;
     QMatrix4x4 m_projection;
+    bool m_minimapCaptureActive{false};
+    bool m_minimapCaptureUnlitPass{false};
+    bool m_minimapCaptureIncludeStaticGeometry{false};
+    QMatrix4x4 m_minimapCaptureView;
+    QVector3D m_minimapCaptureCameraPosition;
     QVector<CMob*> m_aMob;
     // World lighting belongs to the loaded map, not to whichever MOB happens
     // to be selected for editing. Keep the first loaded document as the

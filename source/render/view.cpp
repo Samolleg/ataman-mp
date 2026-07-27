@@ -86,6 +86,23 @@
 class CLogic;
 
 namespace {
+bool isMinimapStaticGeometry(CNode* node)
+{
+    if(!node || dynamic_cast<CUnit*>(node))
+        return false;
+    switch(node->nodeType())
+    {
+    case ENodeType::eBaseType:
+    case ENodeType::eWorldObject:
+    case ENodeType::eTorch:
+    case ENodeType::eMagicTrap:
+    case ENodeType::eLever:
+        return true;
+    default:
+        return false;
+    }
+}
+
 QVector4D aiGraphLayerColor(int layer)
 {
     static const QVector4D colors[CAiGraphDocument::LayerCount] = {
@@ -1195,11 +1212,6 @@ void CView::initAiGraphPreviewWidget()
     m_aiGraphPreviewWidget->setObjectName(QStringLiteral("aiGraphPreviewWidget"));
     m_aiGraphPreviewWidget->setFixedWidth(520);
     m_aiGraphPreviewWidget->setFrameShape(QFrame::StyledPanel);
-    m_aiGraphPreviewWidget->setAttribute(Qt::WA_OpaquePaintEvent, true);
-    m_aiGraphPreviewWidget->setAutoFillBackground(true);
-    QPalette graphPalette = m_aiGraphPreviewWidget->palette();
-    graphPalette.setColor(QPalette::Window, QColor(25, 25, 25));
-    m_aiGraphPreviewWidget->setPalette(graphPalette);
     m_aiGraphPreviewWidget->setStyleSheet(
         "QFrame#aiGraphPreviewWidget { background-color: rgb(25,25,25); color: white; border: 1px solid #777; }"
         "QWidget#aiGraphPreviewBody, QLabel { background-color: rgb(25,25,25); color: white; }"
@@ -4754,21 +4766,26 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
 void CView::draw()
 {
 
-    QMatrix4x4 camMatrix = m_cam->update();
+    QMatrix4x4 camMatrix = m_minimapCaptureActive
+        ? m_minimapCaptureView : m_cam->update();
     QVector3D cameraAnchor, cameraPivot, cameraRotation;
     m_cam->getLocation(cameraAnchor, cameraPivot, cameraRotation);
     bool cameraEyeOk = false;
     const QVector3D renderedCameraEye = ei::cameraEyeFromView(camMatrix, &cameraEyeOk);
-    const QVector3D cameraPosition = cameraEyeOk ? renderedCameraEye : cameraAnchor;
+    const QVector3D cameraPosition = m_minimapCaptureActive
+        ? m_minimapCaptureCameraPosition
+        : (cameraEyeOk ? renderedCameraEye : cameraAnchor);
     const COptBool* animationOption = m_pSettings
         ? dynamic_cast<const COptBool*>(m_pSettings->opt("animateUnits")) : nullptr;
-    const bool animationEnabled = !animationOption || animationOption->value();
+    const bool animationEnabled = !m_minimapCaptureActive
+        && (!animationOption || animationOption->value());
     const COptBool* mipmappingOption = m_pSettings
         ? dynamic_cast<const COptBool*>(m_pSettings->opt("renderTextureMipmapping")) : nullptr;
     CTextureList::getInstance()->setTerrainMipmappingEnabled(
-        !mipmappingOption || mipmappingOption->value());
+        m_minimapCaptureActive || (!mipmappingOption || mipmappingOption->value()));
     AnimationFrameContext::instance().beginFrame(cameraPosition,
-        QDateTime::currentMSecsSinceEpoch(), animationEnabled);
+        m_minimapCaptureActive ? 0 : QDateTime::currentMSecsSinceEpoch(),
+        animationEnabled);
     const COptBool* cullingOption = m_pSettings
         ? dynamic_cast<const COptBool*>(m_pSettings->opt("frustumCulling")) : nullptr;
     const bool cullingEnabled = !cullingOption || cullingOption->value();
@@ -4777,8 +4794,10 @@ void CView::draw()
         ? dynamic_cast<const COptBool*>(m_pSettings->opt("drawLogic")) : nullptr;
     const COptBool* drawHelpOption = m_pSettings
         ? dynamic_cast<const COptBool*>(m_pSettings->opt("drawHelp")) : nullptr;
-    const bool drawLogic = drawLogicOption && drawLogicOption->value();
-    const bool drawHelp = drawHelpOption && drawHelpOption->value();
+    const bool drawLogic = !m_minimapCaptureActive
+        && drawLogicOption && drawLogicOption->value();
+    const bool drawHelp = !m_minimapCaptureActive
+        && drawHelpOption && drawHelpOption->value();
     const bool logicMode = CScene::getInstance()->getMode() == eEditModeLogic;
     const bool traverseHelpers = drawLogic || drawHelp || logicMode;
     const auto renderBool = [this](const char* name, bool fallback)
@@ -4791,20 +4810,27 @@ void CView::draw()
         ? dynamic_cast<const COptInt*>(m_pSettings->opt("renderLightingMode")) : nullptr;
     const int requestedLightingMode = qBound(0,
         lightingModeOption ? lightingModeOption->value() : 2, 2);
-    const int lightingMode = m_openGlesCompatibility
-        ? qMin(requestedLightingMode, 1) : requestedLightingMode;
+    // Minimap capture needs authored region/cave colors on every renderer.
+    // ANGLE cannot use the shadow-atlas path, but capture disables shadows,
+    // fog, sky, and point lights, leaving the compatible environment diffuse.
+    const int lightingMode = m_minimapCaptureActive
+        ? (m_minimapCaptureUnlitPass ? 0 : 2)
+        : (m_openGlesCompatibility ? qMin(requestedLightingMode, 1)
+                                   : requestedLightingMode);
     const bool environmentEnabled = lightingMode == 2;
     // The viewport lighting-model selector owns environment activation. Keep
     // the resource sky in Full environment and out of the compatibility
     // modes instead of exposing a contradictory second Render setting.
-    const bool skyEnabled = environmentEnabled;
-    const bool fogEnabled = renderBool("renderFog", true);
-    const bool sceneLightsEnabled = renderBool("renderSceneLights", true);
+    const bool skyEnabled = environmentEnabled && !m_minimapCaptureActive;
+    const bool fogEnabled = !m_minimapCaptureActive && renderBool("renderFog", true);
+    const bool sceneLightsEnabled = !m_minimapCaptureActive
+        && renderBool("renderSceneLights", true);
     const COptInt* shadowQualityOption = m_pSettings
         ? dynamic_cast<const COptInt*>(m_pSettings->opt("renderShadowQuality")) : nullptr;
     const int shadowQuality = qBound(0,
         shadowQualityOption ? shadowQualityOption->value() : 2, 2);
-    const bool shadowsEnabled = environmentEnabled && !m_openGlesCompatibility
+    const bool shadowsEnabled = !m_minimapCaptureActive
+        && environmentEnabled && !m_openGlesCompatibility
         && shadowQuality > 0
         && ensureShadowFramebuffers(shadowQuality);
     const COptInt* shadowDistanceOption = m_pSettings
@@ -4813,7 +4839,8 @@ void CView::draw()
     // by default while allowing large-scene authors to tune the preview.
     const float maximumShadowDistance = float(qBound(1,
         shadowDistanceOption ? shadowDistanceOption->value() : 320, 1024));
-    const bool overrideWorldTime = renderBool("overrideWorldTime", false);
+    const bool overrideWorldTime = !m_minimapCaptureActive
+        && renderBool("overrideWorldTime", false);
     const COptInt* timeOption = m_pSettings
         ? dynamic_cast<const COptInt*>(m_pSettings->opt("renderTimeOfDay")) : nullptr;
     const float previewTime = timeOption
@@ -4919,6 +4946,8 @@ void CView::draw()
 
     const auto visibleNodes = [this, &frustum, cullingEnabled, &performance](CMob* mob)
     {
+        if(m_minimapCaptureActive)
+            return mob ? mob->nodes().toVector() : QVector<CNode*>();
         SSpatialQueryStats stats;
         const QVector<CNode*> result = spatiallyVisibleNodes(
             mob, cullingEnabled ? &frustum : nullptr, &stats);
@@ -4934,6 +4963,14 @@ void CView::draw()
             performance.counters().spatialOverflowEntries += m_spatialOverflowNodes.value(mob).size();
         }
         return result;
+    };
+    const auto captureAllowsNode = [this](CNode* node)
+    {
+        if(!m_minimapCaptureActive)
+            return true;
+        return m_minimapCaptureIncludeStaticGeometry
+            && node && node->nodeState() != ENodeState::eHidden
+            && isMinimapStaticGeometry(node);
     };
     if(environmentEnabled && skyEnabled && !m_caveEnvironment)
         drawSkybox(camMatrix, environment);
@@ -5019,7 +5056,7 @@ void CView::draw()
         QSet<CNode*> colorSubmittedNodes;
         for(auto& mob: m_aMob) //TODO: draw inactive mobs with custom color|alfa or something
         {
-            if(!isMobVisible(mob))
+            if(!m_minimapCaptureActive && !isMobVisible(mob))
                 continue;
             if(mob->mobName() == m_activeMob->mobName())
                 continue; //skip drawing active mob
@@ -5027,9 +5064,12 @@ void CView::draw()
             const QVector<CNode*> candidates = visibleNodes(mob);
             for(CNode* node : candidates)
             {
+                if(!captureAllowsNode(node))
+                    continue;
                 // Selected nodes from every visible MOB are rendered in the
                 // final depth pass below, including locked MOBs.
-                if(node->nodeState() == ENodeState::eSelect)
+                if(!m_minimapCaptureActive
+                   && node->nodeState() == ENodeState::eSelect)
                     continue;
                 node->drawObjectVisual(false, &m_program);
                 colorSubmittedNodes.insert(node);
@@ -5056,7 +5096,10 @@ void CView::draw()
         const QVector<CNode*> activeCandidates = visibleNodes(m_activeMob);
         for(CNode* node : activeCandidates)
         {
-            if(isMobVisible(m_activeMob) && node->nodeState() != ENodeState::eSelect)
+            if((m_minimapCaptureActive || isMobVisible(m_activeMob))
+               && captureAllowsNode(node)
+               && (m_minimapCaptureActive
+                   || node->nodeState() != ENodeState::eSelect))
             {
                 node->drawObjectVisual(true, &m_program);
                 colorSubmittedNodes.insert(node);
@@ -5081,7 +5124,7 @@ void CView::draw()
                 * maximumShadowDistance;
             for(CMob* mob : m_aMob)
             {
-                if(!isMobVisible(mob))
+                if(!m_minimapCaptureActive && !isMobVisible(mob))
                     continue;
                 if(m_spatialIndexDirty)
                     rebuildSpatialIndices();
@@ -5130,7 +5173,7 @@ void CView::draw()
         logOpenGlErrors(QStringLiteral("draw/object-queue"));
         ei::gl::DepthFunc(GL_LEQUAL);
         for(CMob* mob : m_aMob)
-            if(isMobVisible(mob))
+            if(!m_minimapCaptureActive && isMobVisible(mob))
                 for(CNode* node : mob->nodes())
                     if(node->nodeState() == ENodeState::eSelect)
                     {
@@ -5180,9 +5223,10 @@ void CView::draw()
             ? overlayWorldSet->data(eWsTypeWindStr).toFloat() : 0.0f;
         const bool landscapeEditing = m_landscapeTools
             && m_landscapeTools->editingEnabled();
-        m_landProgram.setUniformValue("u_overlayMotionEnabled", !landscapeEditing);
+        m_landProgram.setUniformValue("u_overlayMotionEnabled",
+            !m_minimapCaptureActive && !landscapeEditing);
         m_landProgram.setUniformValue("u_overlayTimeSeconds",
-            m_overlayAnimationTimer.isValid()
+            !m_minimapCaptureActive && m_overlayAnimationTimer.isValid()
                 ? float(m_overlayAnimationTimer.elapsed()) / 1000.0f : 0.0f);
         m_landProgram.setUniformValue("u_overlayWindDirection", overlayWindDirection);
         m_landProgram.setUniformValue("u_overlayWindStrength", overlayWindStrength);
@@ -5196,7 +5240,8 @@ void CView::draw()
         m_landProgram.setUniformValue("transparency", 0.0f);
     }
 
-    drawParticles(camMatrix, cullingEnabled ? &frustum : nullptr);
+    if(!m_minimapCaptureActive)
+        drawParticles(camMatrix, cullingEnabled ? &frustum : nullptr);
     logOpenGlErrors(QStringLiteral("draw/particles"));
 
 
@@ -5204,7 +5249,8 @@ void CView::draw()
     if (!m_program.bind())
         close();
 
-    if (m_pLand && m_pLand->isMprLoad() && !m_aMob.isEmpty())
+    if (!m_minimapCaptureActive && m_pLand && m_pLand->isMprLoad()
+        && !m_aMob.isEmpty())
     {
         QMatrix4x4 mtrx;
         mtrx.setToIdentity();
@@ -5212,6 +5258,187 @@ void CView::draw()
         m_program.setUniformValue("u_viewMmatrix", mtrx);
         m_selectFrame->draw(&m_program);
     }
+}
+
+SMinimapSceneCaptureResult CView::captureMinimapScene(
+    bool includeLoadedStaticGeometry, int targetTextureSize)
+{
+    SMinimapSceneCaptureResult result;
+    result.targetTextureSize = targetTextureSize;
+    result.framingDescription = tr(
+        "Full MPR bounds at 128 pixels per sector; square game texture uses the larger #maps dimension without stretching");
+    result.orientationDescription = tr(
+        "Orthographic game orientation: world +X is right and world +Y is down");
+    if(!m_pLand || !m_pLand->isMprLoad())
+    {
+        result.bake.error = tr("Load an MPR before generating a minimap.");
+        return result;
+    }
+    result.sectorWidth = int(m_pLand->widthInWorldUnits() / 32u);
+    result.sectorHeight = int(m_pLand->heightInWorldUnits() / 32u);
+    const QSize reviewSize(result.sectorWidth * 128, result.sectorHeight * 128);
+    if(reviewSize.isEmpty())
+    {
+        result.bake.error = tr("The loaded MPR has invalid sector dimensions.");
+        return result;
+    }
+    if(!isValid())
+    {
+        result.bake.error = tr("The viewport renderer is not initialized.");
+        return result;
+    }
+
+    makeCurrent();
+    GLint maximumTextureSize = 0;
+    ei::gl::GetIntegerv(GL_MAX_TEXTURE_SIZE, &maximumTextureSize);
+    if(maximumTextureSize <= 0 || reviewSize.width() > maximumTextureSize
+       || reviewSize.height() > maximumTextureSize)
+    {
+        result.bake.error = tr(
+            "The %1 x %2 full-resolution review exceeds this renderer's %3-pixel texture limit.")
+            .arg(reviewSize.width()).arg(reviewSize.height())
+            .arg(maximumTextureSize);
+        return result;
+    }
+
+    QHash<CNode*, ENodeState> restoredStates;
+    for(CMob* mob : m_aMob)
+        for(CNode* node : mob->nodes())
+        {
+            if(!node || node->isMarkDeleted())
+                continue;
+            if(dynamic_cast<CUnit*>(node))
+            {
+                ++result.excludedDynamicUnitCount;
+                continue;
+            }
+            if(!isMinimapStaticGeometry(node))
+                continue;
+            if(node->nodeState() == ENodeState::eHidden)
+            {
+                ++result.hiddenStaticObjectCount;
+                continue;
+            }
+            ++result.staticObjectCount;
+            if(includeLoadedStaticGeometry
+               && node->nodeState() == ENodeState::eSelect)
+            {
+                restoredStates.insert(node, node->nodeState());
+                node->setState(ENodeState::eDraw);
+            }
+        }
+
+    const QMatrix4x4 previousProjection = m_projection;
+    const bool previousLandscapeVisible = m_landscapeVisible;
+    const bool previousDrawLand = m_bDrawLand;
+    const bool previousDrawWater = m_bDrawWater;
+    const bool previousPreviewTile = m_bPreviewTile;
+    const bool previousTileGrid = m_tileGridVisible;
+    const auto restore = [&]()
+    {
+        for(auto state = restoredStates.constBegin(); state != restoredStates.constEnd(); ++state)
+            state.key()->setState(state.value());
+        m_projection = previousProjection;
+        m_landscapeVisible = previousLandscapeVisible;
+        m_bDrawLand = previousDrawLand;
+        m_bDrawWater = previousDrawWater;
+        m_bPreviewTile = previousPreviewTile;
+        m_tileGridVisible = previousTileGrid;
+        m_minimapCaptureActive = false;
+        m_minimapCaptureUnlitPass = false;
+        m_minimapCaptureIncludeStaticGeometry = false;
+        QOpenGLFramebufferObject::bindDefault();
+        ei::gl::Viewport(0, 0, width(), height());
+        update();
+    };
+
+    QOpenGLFramebufferObjectFormat format;
+    format.setAttachment(QOpenGLFramebufferObject::CombinedDepthStencil);
+    format.setSamples(0);
+    QOpenGLFramebufferObject target(reviewSize, format);
+    if(!target.isValid() || !target.bind())
+    {
+        restore();
+        result.bake.error = tr("Could not allocate the offscreen minimap capture target.");
+        return result;
+    }
+
+    const float worldWidth = float(m_pLand->widthInWorldUnits());
+    const float worldHeight = float(m_pLand->heightInWorldUnits());
+    const QVector3D center(worldWidth * 0.5f, worldHeight * 0.5f, 0.0f);
+    m_minimapCaptureCameraPosition = center + QVector3D(0.0f, 0.0f, 4096.0f);
+    m_minimapCaptureView.setToIdentity();
+    m_minimapCaptureView.lookAt(m_minimapCaptureCameraPosition, center,
+                                QVector3D(0.0f, 1.0f, 0.0f));
+    m_projection.setToIdentity();
+    m_projection.ortho(-worldWidth * 0.5f, worldWidth * 0.5f,
+                       -worldHeight * 0.5f, worldHeight * 0.5f,
+                       1.0f, 8192.0f);
+    m_minimapCaptureActive = true;
+    m_minimapCaptureIncludeStaticGeometry = includeLoadedStaticGeometry;
+    m_landscapeVisible = true;
+    m_bDrawLand = true;
+    m_bDrawWater = true;
+    m_bPreviewTile = false;
+    m_tileGridVisible = false;
+
+    ei::gl::Viewport(0, 0, reviewSize.width(), reviewSize.height());
+    ei::gl::Enable(GL_DEPTH_TEST);
+    ei::gl::DepthMask(GL_TRUE);
+    ei::gl::Enable(GL_BLEND);
+    ei::gl::BlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    ei::gl::ClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    ei::gl::Clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    draw();
+    glFinish();
+    const QImage captured = target.toImage();
+    m_minimapCaptureUnlitPass = true;
+    ei::gl::Clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    draw();
+    glFinish();
+    const QImage unlitCaptured = target.toImage();
+    m_minimapCaptureUnlitPass = false;
+    restore();
+    if(captured.isNull() || captured.size() != reviewSize
+       || unlitCaptured.isNull() || unlitCaptured.size() != reviewSize)
+    {
+        result.bake.error = tr("The offscreen renderer returned an invalid minimap image.");
+        return result;
+    }
+
+    QVector<SMinimapBakeLayer> layers;
+    layers.append({EMinimapBakeLayerKind::Terrain,
+                   tr("loaded MPR terrain and overlays with authored environment lighting, without projected shadows"), captured});
+    result.staticGeometrySourcePresent = includeLoadedStaticGeometry
+        && !m_aMob.isEmpty();
+    if(result.staticGeometrySourcePresent)
+    {
+        QImage marker(reviewSize, QImage::Format_ARGB32_Premultiplied);
+        marker.fill(Qt::transparent);
+        layers.append({EMinimapBakeLayerKind::StaticGeometry,
+                       tr("%1 static object(s) from loaded MOB source(s)")
+                           .arg(result.staticObjectCount), marker});
+    }
+    SMinimapBakeOptions bakeOptions;
+    bakeOptions.textureSize = targetTextureSize;
+    result.bake = bakeMinimapLayers(result.sectorWidth, result.sectorHeight,
+                                    layers, bakeOptions);
+    QVector<SMinimapBakeLayer> unlitLayers = layers;
+    unlitLayers[0].image = unlitCaptured;
+    const SMinimapBakeResult unlitBake = bakeMinimapLayers(
+        result.sectorWidth, result.sectorHeight, unlitLayers, bakeOptions);
+    if(unlitBake.success)
+        result.unlitGameImage = unlitBake.gameImage;
+    if(result.bake.success)
+    {
+        result.bake.notes.append(tr("Excluded %1 dynamic unit(s).")
+                                 .arg(result.excludedDynamicUnitCount));
+        result.bake.notes.append(tr("Excluded %1 hidden static object(s).")
+                                 .arg(result.hiddenStaticObjectCount));
+        result.bake.notes.append(result.framingDescription);
+        result.bake.notes.append(result.orientationDescription);
+    }
+    return result;
 }
 
 void CView::loadLandscape(const QFileInfo& filePath)
@@ -9495,6 +9722,48 @@ void CView::sculptTerrainAt(const QVector3D& position, float stampFraction)
         return;
     }
 
+    if(m_landscapeTools->overlaySculptEnabled())
+    {
+        CValidationReport report;
+        SOverlaySurfaceCommand overlayCommand;
+        switch(m_landscapeTools->sculptTool())
+        {
+        case ELandscapeSculptTool::Raise:
+            overlayCommand = m_terrainEdit.makeOverlayRaiseLower(
+                brush, m_landscapeTools->rawDelta() * m_landscapeTools->strength(),
+                &report);
+            break;
+        case ELandscapeSculptTool::Lower:
+            overlayCommand = m_terrainEdit.makeOverlayRaiseLower(
+                brush, -m_landscapeTools->rawDelta() * m_landscapeTools->strength(),
+                &report);
+            break;
+        case ELandscapeSculptTool::Flatten:
+            overlayCommand = m_terrainEdit.makeOverlayFlatten(
+                brush, m_landscapeTools->flattenHeight(),
+                m_landscapeTools->strength(), &report);
+            break;
+        case ELandscapeSculptTool::Smooth:
+            overlayCommand = m_terrainEdit.makeOverlaySmooth(
+                brush, m_landscapeTools->strength(), &report);
+            break;
+        }
+        if(overlayCommand.isEmpty())
+        {
+            if(report.hasErrors())
+                emit updateMsg(report.toText());
+            return;
+        }
+        if(applyOverlaySurfacePreview(overlayCommand, true))
+        {
+            appendOverlaySurfaceCommand(&m_overlaySurfaceStrokeCommand, overlayCommand);
+            m_sculptStrokeChanged = true;
+            ++m_sculptStrokeStamps;
+            m_sculptStrokeVertices += overlayCommand.sectors.size();
+        }
+        return;
+    }
+
     STerrainHeightCommand command;
     switch(m_landscapeTools->sculptTool())
     {
@@ -10914,6 +11183,138 @@ void CView::hideSelectedNodes()
                 pNode->setState(ENodeState::eHidden);
     }
     viewParameters();
+    emit mobStateChanged();
+}
+
+QPolygonF CView::minimapCameraFootprint() const
+{
+    QVector<QPointF> groundPoints;
+    if(!m_cam || width() <= 0 || height() <= 0)
+        return QPolygonF();
+    const QRect viewport(0, 0, width(), height());
+    const QMatrix4x4 view = m_cam->viewMatrix();
+    const auto appendGroundIntersection = [&](const QPointF& screen) {
+        const float screenY = float(height()) - float(screen.y());
+        const QVector3D nearPoint = QVector3D(float(screen.x()), screenY, 0.0f)
+            .unproject(view, m_projection, viewport);
+        const QVector3D farPoint = QVector3D(float(screen.x()), screenY, 1.0f)
+            .unproject(view, m_projection, viewport);
+        const QVector3D ray = farPoint - nearPoint;
+        if(qAbs(ray.z()) < 0.000001f)
+            return;
+        const float t = -nearPoint.z() / ray.z();
+        if(t < 0.0f)
+            return; // This screen ray looks above the ground-plane horizon.
+        const QVector3D ground = nearPoint + ray * t;
+        if(qIsFinite(ground.x()) && qIsFinite(ground.y()))
+            groundPoints.append(QPointF(ground.x(), ground.y()));
+    };
+
+    // Sampling the viewport boundary handles a horizon that crosses a side of
+    // the screen. The visible ground is convex, so its hull cannot acquire the
+    // self-crossing bow-tie produced by joining four invalid corner rays.
+    const int edgeSteps = 32;
+    for(int i = 0; i <= edgeSteps; ++i)
+    {
+        const qreal u = qreal(i) / edgeSteps;
+        appendGroundIntersection(QPointF(u * width(), 0.0));
+        appendGroundIntersection(QPointF(width(), u * height()));
+        appendGroundIntersection(QPointF((1.0 - u) * width(), height()));
+        appendGroundIntersection(QPointF(0.0, (1.0 - u) * height()));
+    }
+    if(groundPoints.size() < 3)
+        return QPolygonF();
+
+    std::sort(groundPoints.begin(), groundPoints.end(),
+              [](const QPointF& a, const QPointF& b) {
+        return a.x() < b.x() || (a.x() == b.x() && a.y() < b.y());
+    });
+    const auto cross = [](const QPointF& origin, const QPointF& a,
+                          const QPointF& b) {
+        return (a.x() - origin.x()) * (b.y() - origin.y())
+             - (a.y() - origin.y()) * (b.x() - origin.x());
+    };
+    QVector<QPointF> hull;
+    for(const QPointF& point : groundPoints)
+    {
+        while(hull.size() >= 2
+              && cross(hull[hull.size() - 2], hull.last(), point) <= 0.0)
+            hull.removeLast();
+        hull.append(point);
+    }
+    const int lowerSize = hull.size();
+    for(int i = groundPoints.size() - 2; i >= 0; --i)
+    {
+        const QPointF point = groundPoints[i];
+        while(hull.size() > lowerSize
+              && cross(hull[hull.size() - 2], hull.last(), point) <= 0.0)
+            hull.removeLast();
+        hull.append(point);
+    }
+    if(!hull.isEmpty())
+        hull.removeLast();
+
+    CLandscape* landscape = CLandscape::getInstance();
+    const qreal mapWidth = landscape ? landscape->widthInWorldUnits() : 0.0;
+    const qreal mapHeight = landscape ? landscape->heightInWorldUnits() : 0.0;
+    if(mapWidth <= 0.0 || mapHeight <= 0.0 || hull.size() < 3)
+        return QPolygonF(hull);
+
+    // Clip the convex footprint to the map. Apart from keeping the overlay on
+    // the texture, this bounds near-horizon intersections that approach infinity.
+    const auto clipEdge = [](const QVector<QPointF>& input,
+                             const std::function<bool(const QPointF&)>& inside,
+                             const std::function<QPointF(const QPointF&, const QPointF&)>& intersect) {
+        QVector<QPointF> output;
+        if(input.isEmpty()) return output;
+        QPointF previous = input.last();
+        bool previousInside = inside(previous);
+        for(const QPointF& current : input)
+        {
+            const bool currentInside = inside(current);
+            if(currentInside != previousInside)
+                output.append(intersect(previous, current));
+            if(currentInside)
+                output.append(current);
+            previous = current;
+            previousInside = currentInside;
+        }
+        return output;
+    };
+    QVector<QPointF> clipped = hull;
+    clipped = clipEdge(clipped, [](const QPointF& p) { return p.x() >= 0.0; },
+        [](const QPointF& a, const QPointF& b) {
+            const qreal t = -a.x() / (b.x() - a.x());
+            return QPointF(0.0, a.y() + t * (b.y() - a.y()));
+        });
+    clipped = clipEdge(clipped, [mapWidth](const QPointF& p) { return p.x() <= mapWidth; },
+        [mapWidth](const QPointF& a, const QPointF& b) {
+            const qreal t = (mapWidth - a.x()) / (b.x() - a.x());
+            return QPointF(mapWidth, a.y() + t * (b.y() - a.y()));
+        });
+    clipped = clipEdge(clipped, [](const QPointF& p) { return p.y() >= 0.0; },
+        [](const QPointF& a, const QPointF& b) {
+            const qreal t = -a.y() / (b.y() - a.y());
+            return QPointF(a.x() + t * (b.x() - a.x()), 0.0);
+        });
+    clipped = clipEdge(clipped, [mapHeight](const QPointF& p) { return p.y() <= mapHeight; },
+        [mapHeight](const QPointF& a, const QPointF& b) {
+            const qreal t = (mapHeight - a.y()) / (b.y() - a.y());
+            return QPointF(a.x() + t * (b.x() - a.x()), mapHeight);
+        });
+    return QPolygonF(clipped);
+}
+
+void CView::moveCameraToMinimapPoint(const QPointF& worldPosition)
+{
+    if(!m_cam) return;
+    QVector3D position;
+    QVector3D pivot;
+    QVector3D rotation;
+    m_cam->getLocation(position, pivot, rotation);
+    m_cam->moveTo(QVector3D(float(worldPosition.x()),
+                            float(worldPosition.y()), pivot.z()));
+    update();
 }
 
 void CView::unHideAll()
@@ -10926,7 +11327,7 @@ void CView::unHideAll()
         if(pNode->nodeState() == ENodeState::eHidden)
             pNode->setState(ENodeState::eDraw);
     }
-
+    emit mobStateChanged();
 }
 
 void CView::setDirtyMpr()

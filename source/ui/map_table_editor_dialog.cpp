@@ -1,10 +1,12 @@
 #include "map_table_editor_dialog.h"
 
 #include <QCheckBox>
+#include <QApplication>
 #include <QCoreApplication>
 #include <QComboBox>
 #include <QCryptographicHash>
 #include <QDir>
+#include <QEventLoop>
 #include <QFile>
 #include <QFileDialog>
 #include <QFormLayout>
@@ -21,6 +23,7 @@
 #include <QMessageBox>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QProgressDialog>
 #include <QRegularExpression>
 #include <QSaveFile>
 #include <QSettings>
@@ -892,7 +895,17 @@ void CMapTableEditorDialog::saveArchiveAs()
     request.expectedMemberSha256 = QCryptographicHash::hash(
         currentPayload, QCryptographicHash::Sha256).toHex();
     request.replacementPayload = m_table.serialize();
+    QProgressDialog progress(tr("Validating and rebuilding the destination RES..."),
+                             QString(), 0, 0, this);
+    progress.setWindowTitle(tr("Saving verified map catalog"));
+    progress.setCancelButton(nullptr);
+    progress.setWindowModality(Qt::ApplicationModal);
+    progress.setMinimumDuration(0);
+    progress.setAutoClose(false);
+    progress.show();
+    QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
     const SResMemberSaveResult result = commitStagedResMemberReplacement(m_archive, request);
+    progress.close();
     if(!result.success)
     {
         setStatus(result.phase + ": " + result.error, true);
@@ -932,7 +945,9 @@ void CMapTableEditorDialog::viewExistingMinimap()
     const QByteArray bytes = CObjectList::getInstance()->resourceData(textureName, &source);
     if(bytes.isEmpty())
     {
-        setStatus(tr("The active resource profile could not resolve %1.").arg(textureName), true);
+        setStatus(tr(
+            "The active resource profile could not resolve %1. A texture exported to an editor-local RES remains unavailable here until that archive is added to the active profile; Test Current Map can instead use the generated viewport preview through its run-owned staging path.")
+            .arg(textureName), true);
         return;
     }
     const ei::SMmpInspection inspection = ei::inspectMmp(bytes);
@@ -966,6 +981,22 @@ void CMapTableEditorDialog::viewExistingMinimap()
     viewer.resize(qBound(560, inspection.width + 80, 1200),
                   qBound(500, inspection.height + 180, 900));
     viewer.exec();
+}
+
+bool CMapTableEditorDialog::stageMinimapTextureForZone(
+    const QString& zoneId, const QString& textureName)
+{
+    if(!selectZoneById(zoneId) || textureName.trimmed().isEmpty())
+        return false;
+    if(!m_loadedMaps.present)
+    {
+        setStatus(tr("This zone has no authored #maps metadata. Minimap generation will not invent it."), true);
+        return false;
+    }
+    m_tabs->setCurrentIndex(1); // Minimap
+    m_minimapEdit->setText(textureName.trimmed());
+    setStatus(tr("Minimap reference staged. Review it, then use Save As to publish the verified catalog update."));
+    return true;
 }
 
 void CMapTableEditorDialog::setStatus(const QString& text, bool error)
