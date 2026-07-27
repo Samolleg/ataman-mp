@@ -6213,6 +6213,7 @@ void MainWindow::closeEvent(QCloseEvent *e)
     QElapsedTimer shutdownTimer;
     shutdownTimer.start();
     ei::log(eLogInfo, "Shutdown live view deletion started");
+    m_pView->prepareForApplicationShutdown();
     delete m_pView;
     m_pView = nullptr;
     m_viewportMinimap = nullptr;

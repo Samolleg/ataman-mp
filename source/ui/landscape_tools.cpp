@@ -190,7 +190,15 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     connect(m_tool, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
             [](int value) { QSettings().setValue("ui/landscape/sculptTool", value); });
     connect(m_radius, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this,
-            [](double value) { QSettings().setValue("ui/landscape/sculptRadius", value); });
+            [this](double value)
+    {
+        QSettings().setValue("ui/landscape/sculptRadius", value);
+        emit brushGeometryChanged();
+    });
+    connect(m_paintRadius, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+            this, [this](double) { emit brushGeometryChanged(); });
+    connect(m_paintShape, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, [this](int) { emit brushGeometryChanged(); });
     connect(m_strength, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this,
             [](double value) { QSettings().setValue("ui/landscape/sculptStrength", value); });
     connect(m_delta, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this,

@@ -682,6 +682,13 @@ void CView::attachLandscapeTools(CLandscapeTools* tools)
                 this, &CView::exportTerrainPaintDiagnostic);
         connect(m_landscapeTools, &CLandscapeTools::editingStateChanged,
                 this, &CView::syncLandscapeToolState);
+        connect(m_landscapeTools, &CLandscapeTools::brushGeometryChanged,
+                this, [this]()
+        {
+            m_terrainPaintOutlineGeometryDirty = true;
+            m_sculptOutlineGeometryDirty = true;
+            update();
+        });
         connect(m_landscapeTools, &CLandscapeTools::paintTerrainTypeChanged,
                 this, [this](qint32 terrainType)
         {
@@ -790,6 +797,8 @@ void CView::syncLandscapeToolState()
 {
     finishSculptStroke();
     m_overlayPointerTimer->stop();
+    m_sculptOutlineGeometryDirty = true;
+    m_terrainPaintOutlineGeometryDirty = true;
     if(m_landscapeTools)
     {
         const ELandscapeEditMode current = m_landscapeTools->editMode();
@@ -914,6 +923,25 @@ CView::~CView()
     shutdownTimer.start();
     m_sculptRepeatTimer->stop();
     m_overlayPointerTimer->stop();
+    if(m_aiGraphRegenerationTimer)
+        m_aiGraphRegenerationTimer->stop();
+    if(m_aiGraphBuildWatcher)
+    {
+        QObject::disconnect(m_aiGraphBuildWatcher, nullptr, this, nullptr);
+        if(m_aiGraphBuildWatcher->isRunning())
+        {
+            m_aiGraphBuildWatcher->cancel();
+            m_aiGraphBuildWatcher->waitForFinished();
+        }
+        delete m_aiGraphBuildWatcher;
+        m_aiGraphBuildWatcher = nullptr;
+    }
+    if(m_aiGraphPreviewWidget)
+    {
+        m_aiGraphPreviewWidget->disconnect(this);
+        delete m_aiGraphPreviewWidget;
+        m_aiGraphPreviewWidget = nullptr;
+    }
     closeMprSettingsDock();
 //    for(auto& param : m_arrParamWindow)
 //    {
@@ -2905,6 +2933,20 @@ bool CView::prepareForApplicationShutdown()
         m_mprModifyTimer->stop();
     m_sculptRepeatTimer->stop();
     m_overlayPointerTimer->stop();
+    ++m_aiGraphBuildRequest;
+    m_aiGraphAutoRegenerationEnabled = false;
+    m_aiGraphRegenerationPending = false;
+    if(m_aiGraphRegenerationTimer)
+        m_aiGraphRegenerationTimer->stop();
+    if(m_aiGraphBuildWatcher)
+    {
+        QObject::disconnect(m_aiGraphBuildWatcher, nullptr, this, nullptr);
+        if(m_aiGraphBuildWatcher->isRunning())
+        {
+            m_aiGraphBuildWatcher->cancel();
+            m_aiGraphBuildWatcher->waitForFinished();
+        }
+    }
     if(!isValid())
         return false;
     makeCurrent();
@@ -6499,33 +6541,37 @@ void CView::drawTerrainPaintOutline(QOpenGLShaderProgram* program)
     {
         if(!m_sculptOutlineValid)
             return;
-        QVector<QVector3D> circle;
-        constexpr int segments = 64;
-        circle.reserve(segments);
-        const float radius = m_landscapeTools->radius();
         const bool landSculpt = m_landscapeTools->editMode()
             == ELandscapeEditMode::Sculpt;
-        for(int segment = 0; segment < segments; ++segment)
+        if(m_sculptOutlineGeometryDirty)
         {
-            const float angle = float(segment) * float(2.0 * M_PI / segments);
-            QVector3D point(m_sculptOutlineCenter.x() + qCos(angle) * radius,
-                            m_sculptOutlineCenter.y() + qSin(angle) * radius, 0.0f);
-            if(!m_pLand->projectPt(point, landSculpt)
-               && (landSculpt || !m_pLand->projectPt(point, true)))
-                continue;
-            point.setZ(point.z() + 0.12f);
-            circle.append(point);
+            m_sculptOutlineVertices.clear();
+            constexpr int segments = 64;
+            m_sculptOutlineVertices.reserve(segments);
+            const float radius = m_landscapeTools->radius();
+            for(int segment = 0; segment < segments; ++segment)
+            {
+                const float angle = float(segment) * float(2.0 * M_PI / segments);
+                QVector3D point(m_sculptOutlineCenter.x() + qCos(angle) * radius,
+                                m_sculptOutlineCenter.y() + qSin(angle) * radius, 0.0f);
+                if(!m_pLand->projectPt(point, landSculpt)
+                   && (landSculpt || !m_pLand->projectPt(point, true)))
+                    continue;
+                point.setZ(point.z() + 0.12f);
+                m_sculptOutlineVertices.append(point);
+            }
+            m_sculptOutlineGeometryDirty = false;
         }
         program->setUniformValue("customColor", landSculpt
             ? QVector4D(1.0f, 0.72f, 0.08f, 0.95f)
             : QVector4D(0.10f, 0.82f, 1.0f, 0.95f));
-        program->setAttributeArray(position, circle.constData());
+        program->setAttributeArray(position, m_sculptOutlineVertices.constData());
         // Keep the complete footprint legible when an overlay is thinner
         // than the brush. Overlay points are preferred; land is only the
         // terrain-aligned visual fallback outside the active surface.
         glDepthFunc(GL_ALWAYS);
         glLineWidth(2.0f);
-        glDrawArrays(GL_LINE_LOOP, 0, circle.size());
+        glDrawArrays(GL_LINE_LOOP, 0, m_sculptOutlineVertices.size());
         glLineWidth(1.0f);
         glDepthFunc(GL_LESS);
         return;
@@ -6543,49 +6589,54 @@ void CView::drawTerrainPaintOutline(QOpenGLShaderProgram* program)
             ? qMax(dx, dy) <= radius
             : dx * dx + dy * dy <= radius * radius;
     };
-    QVector<QVector3D> lines;
-    const auto appendEdge = [this, &lines, landLayer](float x1, float y1, float x2, float y2)
+    if(m_terrainPaintOutlineGeometryDirty)
     {
-        QVector3D first(x1, y1, 0.0f);
-        QVector3D second(x2, y2, 0.0f);
-        const bool firstProjected = m_pLand->projectPt(first, landLayer)
-            || (!landLayer && m_pLand->projectPt(first, true));
-        const bool secondProjected = m_pLand->projectPt(second, landLayer)
-            || (!landLayer && m_pLand->projectPt(second, true));
-        if(!firstProjected || !secondProjected)
-            return;
-        first.setZ(first.z() + 0.12f);
-        second.setZ(second.z() + 0.12f);
-        lines.append(first);
-        lines.append(second);
-    };
-    for(int y = m_terrainPaintOutlineY - radius;
-        y <= m_terrainPaintOutlineY + radius; ++y)
-    {
-        for(int x = m_terrainPaintOutlineX - radius;
-            x <= m_terrainPaintOutlineX + radius; ++x)
+        m_terrainPaintOutlineVertices.clear();
+        const auto appendEdge = [this, landLayer](float x1, float y1,
+                                                  float x2, float y2)
         {
-            if(!included(x, y))
-                continue;
-            const float left = float(x * 2);
-            const float right = left + 2.0f;
-            const float bottom = float(y * 2);
-            const float top = bottom + 2.0f;
-            if(!included(x, y - 1)) appendEdge(left, bottom, right, bottom);
-            if(!included(x + 1, y)) appendEdge(right, bottom, right, top);
-            if(!included(x, y + 1)) appendEdge(right, top, left, top);
-            if(!included(x - 1, y)) appendEdge(left, top, left, bottom);
+            QVector3D first(x1, y1, 0.0f);
+            QVector3D second(x2, y2, 0.0f);
+            const bool firstProjected = m_pLand->projectPt(first, landLayer)
+                || (!landLayer && m_pLand->projectPt(first, true));
+            const bool secondProjected = m_pLand->projectPt(second, landLayer)
+                || (!landLayer && m_pLand->projectPt(second, true));
+            if(!firstProjected || !secondProjected)
+                return;
+            first.setZ(first.z() + 0.12f);
+            second.setZ(second.z() + 0.12f);
+            m_terrainPaintOutlineVertices.append(first);
+            m_terrainPaintOutlineVertices.append(second);
+        };
+        for(int y = m_terrainPaintOutlineY - radius;
+            y <= m_terrainPaintOutlineY + radius; ++y)
+        {
+            for(int x = m_terrainPaintOutlineX - radius;
+                x <= m_terrainPaintOutlineX + radius; ++x)
+            {
+                if(!included(x, y))
+                    continue;
+                const float left = float(x * 2);
+                const float right = left + 2.0f;
+                const float bottom = float(y * 2);
+                const float top = bottom + 2.0f;
+                if(!included(x, y - 1)) appendEdge(left, bottom, right, bottom);
+                if(!included(x + 1, y)) appendEdge(right, bottom, right, top);
+                if(!included(x, y + 1)) appendEdge(right, top, left, top);
+                if(!included(x - 1, y)) appendEdge(left, top, left, bottom);
+            }
         }
+        m_terrainPaintOutlineGeometryDirty = false;
     }
-    if(lines.isEmpty())
+    if(m_terrainPaintOutlineVertices.isEmpty())
         return;
     program->setUniformValue("customColor", landLayer
         ? QVector4D(1.0f, 0.72f, 0.08f, 0.95f)
         : QVector4D(0.10f, 0.82f, 1.0f, 0.95f));
-    program->setAttributeArray(position, lines.constData());
+    program->setAttributeArray(position, m_terrainPaintOutlineVertices.constData());
     glDepthFunc(GL_LEQUAL);
     glLineWidth(2.0f);
-    glDrawArrays(GL_LINES, 0, lines.size());
+    glDrawArrays(GL_LINES, 0, m_terrainPaintOutlineVertices.size());
     glLineWidth(1.0f);
     glDepthFunc(GL_LESS);
 }
@@ -7279,6 +7330,8 @@ QVector3D CView::getTerrainBrushPos(const int cursorPosX, const int cursorPosY,
         if(!forcePick && m_overlayBrushPickTimer.isValid()
            && m_overlayBrushPickTimer.elapsed() < 16)
         {
+            if(m_terrainPaintProjectionLand != m_overlayBrushPickProjectionLand)
+                m_terrainPaintOutlineGeometryDirty = true;
             m_terrainPaintProjectionLand = m_overlayBrushPickProjectionLand;
             if(hit)
                 *hit = m_overlayBrushPickValid;
@@ -7329,12 +7382,17 @@ QVector3D CView::getTerrainBrushPos(const int cursorPosX, const int cursorPosY,
         m_overlayBrushPickValid = picked;
         m_overlayBrushPickProjectionLand = pickedLand;
         m_overlayBrushPickTimer.restart();
+        if(m_terrainPaintProjectionLand != pickedLand)
+            m_terrainPaintOutlineGeometryDirty = true;
         m_terrainPaintProjectionLand = pickedLand;
         if(hit)
             *hit = picked;
         return pickedPosition;
     }
-    m_terrainPaintProjectionLand = terrainBrushProjectsToLand();
+    const bool projectToLand = terrainBrushProjectsToLand();
+    if(m_terrainPaintProjectionLand != projectToLand)
+        m_terrainPaintOutlineGeometryDirty = true;
+    m_terrainPaintProjectionLand = projectToLand;
     return getTerrainPos(cursorPosX, cursorPosY,
                          m_terrainPaintProjectionLand, hit);
 }
@@ -8973,8 +9031,14 @@ void CView::updatePreviewTile(QVector3D posOnLand, bool bLand)
 
     if(!manualTilePaintingEnabled())
     {
-        m_terrainPaintOutlineX = tileLoc.xSec * 16 + tileLoc.col;
-        m_terrainPaintOutlineY = tileLoc.ySec * 16 + tileLoc.row;
+        const int outlineX = tileLoc.xSec * 16 + tileLoc.col;
+        const int outlineY = tileLoc.ySec * 16 + tileLoc.row;
+        if(!m_terrainPaintOutlineValid
+           || m_terrainPaintOutlineX != outlineX
+           || m_terrainPaintOutlineY != outlineY)
+            m_terrainPaintOutlineGeometryDirty = true;
+        m_terrainPaintOutlineX = outlineX;
+        m_terrainPaintOutlineY = outlineY;
         m_terrainPaintOutlineValid = true;
         setPreviewTile(false);
         unsetCursor();
@@ -9221,6 +9285,8 @@ bool CView::applyOverlaySurfacePreview(const SOverlaySurfaceCommand& command,
         m_overlayPreviewSectorCount += command.sectors.size();
     }
     m_pLand->setDirty(m_terrainEdit.isDirty());
+    m_sculptOutlineGeometryDirty = true;
+    m_terrainPaintOutlineGeometryDirty = true;
     m_aiGraphOverlayDirty = true;
     emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMprDirtyFlag,
                               m_terrainEdit.isDirty() ? "*" : "");
@@ -9779,6 +9845,7 @@ void CView::mousePressEvent(QMouseEvent* event)
         m_sculptPointerValid = true;
         m_lastSculptPoint = position;
         m_sculptOutlineCenter = m_lastSculptPoint;
+        m_sculptOutlineGeometryDirty = true;
         m_sculptOutlineValid = true;
         m_lastSculptStampPoint = m_lastSculptPoint;
         m_sculptStrokeChanged = false;
@@ -10007,6 +10074,8 @@ bool CView::applyTerrainHeightPreview(const STerrainHeightCommand& command, bool
             mob->reprojectForCurrentTerrain();
     }
     m_pLand->setDirty(m_terrainEdit.isDirty());
+    m_sculptOutlineGeometryDirty = true;
+    m_terrainPaintOutlineGeometryDirty = true;
     m_aiGraphOverlayDirty = true;
     if(!m_sculptStrokeActive)
     {
@@ -10155,6 +10224,9 @@ void CView::updateOverlaySculptPointer()
     m_sculptPointerValid = valid;
     if(valid)
     {
+        if(!m_sculptOutlineValid
+           || (m_sculptOutlineCenter - position).lengthSquared() > 0.000001f)
+            m_sculptOutlineGeometryDirty = true;
         m_sculptOutlineCenter = position;
         if(m_sculptStrokeActive)
             m_lastSculptPoint = position;
@@ -10196,7 +10268,12 @@ void CView::mouseMoveEvent(QMouseEvent* event)
             event->x(), event->y(), true), true);
         m_sculptPointerValid = positionValid;
         if(positionValid)
+        {
+            if(!m_sculptOutlineValid
+               || (m_sculptOutlineCenter - position).lengthSquared() > 0.000001f)
+                m_sculptOutlineGeometryDirty = true;
             m_sculptOutlineCenter = position;
+        }
         m_sculptOutlineValid = positionValid;
         update();
         if(m_sculptStrokeActive && (event->buttons() & Qt::LeftButton))

@@ -580,6 +580,8 @@ private:
     bool m_landscapeInteractionSuspended{false};
     bool m_tilePaintStrokeActive{false};
     bool m_terrainPaintOutlineValid{false};
+    bool m_terrainPaintOutlineGeometryDirty{true};
+    QVector<QVector3D> m_terrainPaintOutlineVertices;
     bool m_terrainPaintProjectionLand{true};
     int m_terrainPaintOutlineX{0};
     int m_terrainPaintOutlineY{0};
@@ -608,6 +610,8 @@ private:
     QMap<QPair<int, int>, QByteArray> m_pendingOverlayPreviewBefore;
     QSet<QPair<int, int>> m_pendingTilePreviewSectors;
     bool m_sculptOutlineValid{false};
+    bool m_sculptOutlineGeometryDirty{true};
+    QVector<QVector3D> m_sculptOutlineVertices;
     QVector3D m_sculptOutlineCenter;
     bool m_sculptStrokeActive;
     bool m_sculptPointerValid{false};

@@ -80,6 +80,7 @@ signals:
     void atlasProfileReviewRequested();
     void exportPaintDiagnosticRequested();
     void editingStateChanged();
+    void brushGeometryChanged();
     void paintTerrainTypeChanged(qint32 terrainType);
     void terrainVisibilityChanged(bool mainTerrainVisible, bool overlaysVisible);
 

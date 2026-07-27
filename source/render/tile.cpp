@@ -129,16 +129,19 @@ bool CTile::isProjectPoint(QVector3D& outPoint)
 {
     float u,v,t;
     QVector3D dir(0.0f, 0.0f, 1.0f);
-    QVector<int> arrTriangleId = {0, 1, 3, 3, 1, 4, 1, 2, 4, 4, 2, 5, 3, 4, 6, 6, 4, 7, 4, 5, 7, 7, 5, 8};
-    QVector3D pt1;
-    QVector3D pt2;
-    QVector3D pt3;
-    for(int i(0); i<arrTriangleId.size(); i+=3)
+    static const int triangleIds[] = {
+        0, 1, 3, 3, 1, 4, 1, 2, 4, 4, 2, 5,
+        3, 4, 6, 6, 4, 7, 4, 5, 7, 7, 5, 8
+    };
+    QVector3D points[9];
+    for(int point = 0; point < 9; ++point)
+        points[point] = pos(point / 3, point % 3);
+    for(int i = 0; i < 24; i += 3)
     {
-        pt1 = pos(arrTriangleId[(i+0)]/3, arrTriangleId[(i+0)]%3);
-        pt2 = pos(arrTriangleId[(i+1)]/3, arrTriangleId[(i+1)]%3);
-        pt3 = pos(arrTriangleId[(i+2)]/3, arrTriangleId[(i+2)]%3);
-        if (util::ptToTriangle(t, u, v, outPoint, dir, pt1, pt2, pt3))
+        if(util::ptToTriangle(t, u, v, outPoint, dir,
+                              points[triangleIds[i]],
+                              points[triangleIds[i + 1]],
+                              points[triangleIds[i + 2]]))
         {
             outPoint.setZ(outPoint.z() + t);
             return true;
