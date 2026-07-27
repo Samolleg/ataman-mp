@@ -1163,7 +1163,7 @@ void CTileBrush::mousePressEvent(COperation* pOp, QMouseEvent* pEvent)
     bool bLand = CScene::getInstance()->isLandTileEditMode();
     bool hit = false;
     m_lastLandPos = m_pView->getTerrainBrushPos(
-        pEvent->x(), pEvent->y(), &hit);
+        pEvent->x(), pEvent->y(), &hit, true);
     m_lastLandPosValid = hit;
     //m_lastLandPos = QVector3D(0.0f, 0.0f, 0.0f);// make sure that next mouse move apply tile brushing
 
@@ -1194,7 +1194,7 @@ void CTileBrush::mouseReleaseEvent(COperation* pOp, QMouseEvent* pEvent)
         // unchanged center, while a short/fast gesture cannot lose its tail.
         bool hit = false;
         const QVector3D position = m_pView->getTerrainBrushPos(
-            pEvent->pos().x(), pEvent->pos().y(), &hit);
+            pEvent->pos().x(), pEvent->pos().y(), &hit, true);
         if(hit)
             m_pView->setTile(position, bLand);
         m_pView->endTileBrushGroup();

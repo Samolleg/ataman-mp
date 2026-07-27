@@ -601,6 +601,7 @@ CView::CView(QWidget *parent, const QGLWidget *pShareWidget) : QGLWidget(parent,
   ,m_terrainEditAvailable(false)
   ,m_sculptStrokeActive(false)
   ,m_sculptRepeatTimer(new QTimer(this))
+  ,m_overlayPointerTimer(new QTimer(this))
   ,m_tileGridVisible(false)
   ,m_lastLandscapeEditMode(-1)
   ,m_hasViewportMousePos(false)
@@ -643,6 +644,11 @@ CView::CView(QWidget *parent, const QGLWidget *pShareWidget) : QGLWidget(parent,
         if(m_sculptStrokeActive && m_sculptPointerValid)
             sculptTerrainTowardLatestPoint();
     });
+    m_overlayPointerTimer->setSingleShot(true);
+    m_overlayPointerTimer->setTimerType(Qt::PreciseTimer);
+    m_overlayPointerTimer->setInterval(16);
+    connect(m_overlayPointerTimer, &QTimer::timeout,
+            this, &CView::updateOverlaySculptPointer);
     m_aiGraphRegenerationTimer = new QTimer(this);
     m_aiGraphRegenerationTimer->setSingleShot(true);
     m_aiGraphRegenerationTimer->setInterval(500);
@@ -763,6 +769,7 @@ void CView::setLandscapeInteractionSuspended(bool suspended)
     finishSculptStroke();
     endTileBrushGroup();
     m_sculptRepeatTimer->stop();
+    m_overlayPointerTimer->stop();
     m_sculptOutlineValid = false;
     m_terrainPaintOutlineValid = false;
     setPreviewTile(false);
@@ -782,6 +789,7 @@ void CView::closeLandscapeTools()
 void CView::syncLandscapeToolState()
 {
     finishSculptStroke();
+    m_overlayPointerTimer->stop();
     if(m_landscapeTools)
     {
         const ELandscapeEditMode current = m_landscapeTools->editMode();
@@ -904,6 +912,8 @@ CView::~CView()
 {
     QElapsedTimer shutdownTimer;
     shutdownTimer.start();
+    m_sculptRepeatTimer->stop();
+    m_overlayPointerTimer->stop();
     closeMprSettingsDock();
 //    for(auto& param : m_arrParamWindow)
 //    {
@@ -2893,6 +2903,8 @@ bool CView::prepareForApplicationShutdown()
         m_timer->stop();
     if(m_mprModifyTimer)
         m_mprModifyTimer->stop();
+    m_sculptRepeatTimer->stop();
+    m_overlayPointerTimer->stop();
     if(!isValid())
         return false;
     makeCurrent();
@@ -7251,7 +7263,7 @@ QVector3D CView::getTerrainBrushPos(bool* hit)
 }
 
 QVector3D CView::getTerrainBrushPos(const int cursorPosX, const int cursorPosY,
-                                    bool* hit)
+                                    bool* hit, bool forcePick)
 {
     if(hit)
         *hit = false;
@@ -7261,6 +7273,22 @@ QVector3D CView::getTerrainBrushPos(const int cursorPosX, const int cursorPosY,
             == EOverlaySurfaceOperation::Activate;
     if(addingSurface)
     {
+        // Windows can deliver hundreds of pointer events per second. The add
+        // tool only commits on the brush cadence, so reuse a very recent CPU
+        // pick while dragging and force an exact pick on press/release.
+        if(!forcePick && m_overlayBrushPickTimer.isValid()
+           && m_overlayBrushPickTimer.elapsed() < 16)
+        {
+            m_terrainPaintProjectionLand = m_overlayBrushPickProjectionLand;
+            if(hit)
+                *hit = m_overlayBrushPickValid;
+            return m_overlayBrushPickPosition;
+        }
+        QElapsedTimer pickTimer;
+        pickTimer.start();
+        QVector3D pickedPosition;
+        bool picked = false;
+        bool pickedLand = true;
         // Adding overlays is cell-based. Resolve the land ray once on the CPU,
         // then locally project that XY onto an existing overlay when present.
         // The former overlay-first path redrew the complete overlay pass and,
@@ -7272,28 +7300,39 @@ QVector3D CView::getTerrainBrushPos(const int cursorPosX, const int cursorPosY,
             QVector3D overlay = ground;
             if(m_pLand->projectPt(overlay, false))
             {
-                m_terrainPaintProjectionLand = false;
-                if(hit)
-                    *hit = true;
-                return overlay;
+                pickedPosition = overlay;
+                picked = true;
+                pickedLand = false;
             }
-            m_terrainPaintProjectionLand = true;
-            if(hit)
-                *hit = true;
-            return ground;
+            else
+            {
+                pickedPosition = ground;
+                picked = true;
+            }
         }
-        // Preserve support for a disconnected overlay with no land beneath it.
-        bool overlayHit = false;
-        const QVector3D overlay = getTerrainPos(
-            cursorPosX, cursorPosY, false, &overlayHit);
-        if(overlayHit)
+        if(!picked)
         {
-            m_terrainPaintProjectionLand = false;
-            if(hit)
-                *hit = true;
-            return overlay;
+            // Preserve support for a disconnected overlay with no land beneath it.
+            bool overlayHit = false;
+            const QVector3D overlay = getTerrainPos(
+                cursorPosX, cursorPosY, false, &overlayHit);
+            if(overlayHit)
+            {
+                pickedPosition = overlay;
+                picked = true;
+                pickedLand = false;
+            }
         }
-        return QVector3D();
+        m_overlayPickNsecs += pickTimer.nsecsElapsed();
+        ++m_overlayPickCount;
+        m_overlayBrushPickPosition = pickedPosition;
+        m_overlayBrushPickValid = picked;
+        m_overlayBrushPickProjectionLand = pickedLand;
+        m_overlayBrushPickTimer.restart();
+        m_terrainPaintProjectionLand = pickedLand;
+        if(hit)
+            *hit = picked;
+        return pickedPosition;
     }
     m_terrainPaintProjectionLand = terrainBrushProjectsToLand();
     return getTerrainPos(cursorPosX, cursorPosY,
@@ -9070,11 +9109,12 @@ void CView::endTileBrushGroup()
                 .arg(m_tileStrokeSolverNodes));
         if(!m_overlaySurfaceStrokeCommand.isEmpty())
             ei::log(eLogInfo, QString(
-                "Overlay paint timing: commandMs=%1 modelMs=%2 renderMs=%3 previewSectors=%4")
+                "Overlay paint timing: commandMs=%1 modelMs=%2 renderMs=%3 pickMs=%4 picks=%5 previewSectors=%6")
                 .arg(double(m_overlayCommandNsecs) / 1000000.0, 0, 'f', 2)
                 .arg(double(m_overlayModelNsecs) / 1000000.0, 0, 'f', 2)
                 .arg(double(m_overlayRenderNsecs) / 1000000.0, 0, 'f', 2)
-                .arg(m_overlayPreviewSectorCount));
+                .arg(double(m_overlayPickNsecs) / 1000000.0, 0, 'f', 2)
+                .arg(m_overlayPickCount).arg(m_overlayPreviewSectorCount));
     }
     m_lastTerrainPaintCenterValid = false;
     ++m_tileBrushCommandId;
@@ -9098,6 +9138,8 @@ void CView::beginTileBrushGroup()
     m_overlayCommandNsecs = 0;
     m_overlayModelNsecs = 0;
     m_overlayRenderNsecs = 0;
+    m_overlayPickNsecs = 0;
+    m_overlayPickCount = 0;
     m_overlayPreviewSectorCount = 0;
 }
 
@@ -9707,10 +9749,26 @@ void CView::mousePressEvent(QMouseEvent* event)
         && m_terrainEditAvailable && event->button() == Qt::LeftButton)
     {
         const bool overlaySculpt = m_landscapeTools->overlaySculptEnabled();
+        if(overlaySculpt)
+            m_overlayPointerTimer->stop();
+        m_overlayCommandNsecs = 0;
+        m_overlayModelNsecs = 0;
+        m_overlayRenderNsecs = 0;
+        m_overlayPickNsecs = 0;
+        m_overlayPickCount = 0;
+        m_overlayPreviewSectorCount = 0;
         QVector3D position;
+        QElapsedTimer pickTimer;
+        if(overlaySculpt)
+            pickTimer.start();
         const bool positionValid = overlaySculpt
             ? terrainPositionAt(event->pos(), &position, false)
             : (position = getTerrainPos(event->x(), event->y(), true), true);
+        if(overlaySculpt)
+        {
+            m_overlayPickNsecs += pickTimer.nsecsElapsed();
+            ++m_overlayPickCount;
+        }
         if(!positionValid)
         {
             m_sculptOutlineValid = false;
@@ -9726,10 +9784,6 @@ void CView::mousePressEvent(QMouseEvent* event)
         m_sculptStrokeChanged = false;
         m_sculptStrokeStamps = 0;
         m_sculptStrokeVertices = 0;
-        m_overlayCommandNsecs = 0;
-        m_overlayModelNsecs = 0;
-        m_overlayRenderNsecs = 0;
-        m_overlayPreviewSectorCount = 0;
         m_sculptStrokeCommand = STerrainHeightCommand();
         m_sculptStrokeCommand.description = tr("Sculpt terrain");
         m_overlaySurfaceStrokeCommand = SOverlaySurfaceCommand();
@@ -10086,6 +10140,29 @@ void CView::importTerrainHeightmap()
     m_pUndoStack->push(new CTerrainHeightPreviewCommand(this, command));
 }
 
+void CView::updateOverlaySculptPointer()
+{
+    if(!m_landscapeTools || !m_landscapeTools->overlaySculptEnabled()
+       || !m_terrainEditAvailable || m_landscapeInteractionSuspended
+       || !m_hasViewportMousePos)
+        return;
+    QElapsedTimer pickTimer;
+    pickTimer.start();
+    QVector3D position;
+    const bool valid = terrainPositionAt(m_lastViewportMousePos, &position, false);
+    m_overlayPickNsecs += pickTimer.nsecsElapsed();
+    ++m_overlayPickCount;
+    m_sculptPointerValid = valid;
+    if(valid)
+    {
+        m_sculptOutlineCenter = position;
+        if(m_sculptStrokeActive)
+            m_lastSculptPoint = position;
+    }
+    m_sculptOutlineValid = valid;
+    update();
+}
+
 void CView::mouseMoveEvent(QMouseEvent* event)
 {
     m_lastViewportMousePos = event->pos();
@@ -10102,10 +10179,21 @@ void CView::mouseMoveEvent(QMouseEvent* event)
        && m_terrainEditAvailable)
     {
         const bool overlaySculpt = m_landscapeTools->overlaySculptEnabled();
+        if(overlaySculpt)
+        {
+            if(!m_overlayPointerTimer->isActive())
+                m_overlayPointerTimer->start();
+            if(m_sculptStrokeActive && (event->buttons() & Qt::LeftButton))
+            {
+                event->accept();
+                return;
+            }
+            m_pOp->mouseMoveEvent(event);
+            return;
+        }
         QVector3D position;
-        const bool positionValid = overlaySculpt
-            ? terrainPositionAt(event->pos(), &position, false)
-            : (position = getTerrainPos(event->x(), event->y(), true), true);
+        const bool positionValid = (position = getTerrainPos(
+            event->x(), event->y(), true), true);
         m_sculptPointerValid = positionValid;
         if(positionValid)
             m_sculptOutlineCenter = position;
@@ -10139,6 +10227,11 @@ void CView::mouseReleaseEvent(QMouseEvent *event)
     }
     if(m_sculptStrokeActive && event->button() == Qt::LeftButton)
     {
+        if(m_landscapeTools && m_landscapeTools->overlaySculptEnabled())
+        {
+            m_overlayPointerTimer->stop();
+            updateOverlaySculptPointer();
+        }
         if(m_sculptPointerValid
            && m_lastSculptPoint.distanceToPoint(m_lastSculptStampPoint) > 0.01f)
             sculptTerrainTowardLatestPoint();
@@ -10347,14 +10440,34 @@ bool CView::terrainPositionAt(const QPoint& viewportPosition, QVector3D* positio
     const QVector3D rayEnd = QVector3D(float(viewportPosition.x()), screenY, 1.0f)
         .unproject(view, m_projection, viewport);
 
+    const QVector3D ray = rayEnd - rayStart;
+    float firstT = 0.0f;
+    float lastT = 1.0f;
+    const float minimumTerrainZ = -2.0f;
+    const float maximumTerrainZ = m_terrainEditAvailable
+        ? m_terrainEdit.maxZ() + 2.0f : 65537.0f;
+    if(qAbs(ray.z()) > 0.00001f)
+    {
+        const float lowerT = (minimumTerrainZ - rayStart.z()) / ray.z();
+        const float upperT = (maximumTerrainZ - rayStart.z()) / ray.z();
+        firstT = qMax(0.0f, qMin(lowerT, upperT));
+        lastT = qMin(1.0f, qMax(lowerT, upperT));
+        if(firstT > lastT)
+            return false;
+    }
+    const QVector3D firstPoint = rayStart + ray * firstT;
+    const QVector3D lastPoint = rayStart + ray * lastT;
+    const float planarDistance = QVector2D(lastPoint - firstPoint).length();
+    const int steps = qBound(32, int(std::ceil(planarDistance / 0.75f)), 256);
+
     bool havePrevious = false;
-    float previousT = 0.0f;
+    float previousT = firstT;
     float previousDelta = 0.0f;
-    constexpr int steps = 512;
     for(int step = 0; step <= steps; ++step)
     {
-        const float t = float(step) / float(steps);
-        const QVector3D rayPoint = rayStart + (rayEnd - rayStart) * t;
+        const float ratio = float(step) / float(steps);
+        const float t = firstT + (lastT - firstT) * ratio;
+        const QVector3D rayPoint = rayStart + ray * t;
         QVector3D terrain(rayPoint.x(), rayPoint.y(), 0.0f);
         if(!CLandscape::getInstance()->projectPt(terrain, land))
         {
@@ -10370,7 +10483,7 @@ bool CView::terrainPositionAt(const QPoint& viewportPosition, QVector3D* positio
             for(int iteration = 0; iteration < 14; ++iteration)
             {
                 const float middle = (low + high) * 0.5f;
-                const QVector3D sample = rayStart + (rayEnd - rayStart) * middle;
+                const QVector3D sample = rayStart + ray * middle;
                 QVector3D ground(sample.x(), sample.y(), 0.0f);
                 if(!CLandscape::getInstance()->projectPt(ground, land))
                 {
@@ -11481,11 +11594,13 @@ void CView::finishSculptStroke()
             emit updateMsg(tr("Overlay sculpt stroke: %1 stamp(s), %2 sector update(s); liquid navigation may need review.")
                 .arg(m_sculptStrokeStamps).arg(m_sculptStrokeVertices));
             ei::log(eLogInfo, QString(
-                "Overlay sculpt timing: commandMs=%1 modelMs=%2 renderMs=%3 previewSectors=%4 stamps=%5")
+                "Overlay sculpt timing: commandMs=%1 modelMs=%2 renderMs=%3 pickMs=%4 picks=%5 previewSectors=%6 stamps=%7")
                 .arg(double(m_overlayCommandNsecs) / 1000000.0, 0, 'f', 2)
                 .arg(double(m_overlayModelNsecs) / 1000000.0, 0, 'f', 2)
                 .arg(double(m_overlayRenderNsecs) / 1000000.0, 0, 'f', 2)
-                .arg(m_overlayPreviewSectorCount).arg(m_sculptStrokeStamps));
+                .arg(double(m_overlayPickNsecs) / 1000000.0, 0, 'f', 2)
+                .arg(m_overlayPickCount).arg(m_overlayPreviewSectorCount)
+                .arg(m_sculptStrokeStamps));
         }
         else if(terrainDiagnostics.steepSlopeRisk)
             emit updateMsg(tr(

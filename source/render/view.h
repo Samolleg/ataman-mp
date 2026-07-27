@@ -177,7 +177,7 @@ public:
                             bool bLand = true, bool* hit = nullptr);
     QVector3D getTerrainBrushPos(bool* hit = nullptr);
     QVector3D getTerrainBrushPos(const int cursorPosX, const int cursorPosY,
-                                 bool* hit = nullptr);
+                                 bool* hit = nullptr, bool forcePick = false);
     bool terrainPositionAt(const QPoint& viewportPosition, QVector3D* position,
                            bool land = true);
     QPolygonF minimapCameraFootprint() const;
@@ -344,6 +344,7 @@ private:
                                           const QString& operation);
     void sculptTerrainAt(const QVector3D& position, float stampFraction);
     void sculptTerrainTowardLatestPoint();
+    void updateOverlaySculptPointer();
     void finishSculptStroke();
     void syncLandscapeToolState();
     void clearLandscapeBrushSelection();
@@ -594,7 +595,13 @@ private:
     qint64 m_overlayCommandNsecs{0};
     qint64 m_overlayModelNsecs{0};
     qint64 m_overlayRenderNsecs{0};
+    qint64 m_overlayPickNsecs{0};
+    int m_overlayPickCount{0};
     int m_overlayPreviewSectorCount{0};
+    QElapsedTimer m_overlayBrushPickTimer;
+    QVector3D m_overlayBrushPickPosition;
+    bool m_overlayBrushPickValid{false};
+    bool m_overlayBrushPickProjectionLand{true};
     bool m_terrainPreviewBatchActive{false};
     QSet<QPair<int, int>> m_pendingTerrainPreviewSectors;
     QSet<QPair<int, int>> m_pendingOverlayPreviewSectors;
@@ -611,6 +618,7 @@ private:
     int m_sculptStrokeStamps{0};
     int m_sculptStrokeVertices{0};
     QTimer* m_sculptRepeatTimer;
+    QTimer* m_overlayPointerTimer;
     bool m_tileGridVisible;
     int m_lastLandscapeEditMode;
     QPoint m_lastViewportMousePos;

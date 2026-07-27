@@ -6170,6 +6170,12 @@ void MainWindow::closeEvent(QCloseEvent *e)
         m_autosaveTimer->stop();
     if(m_autosaveCountdownTimer)
         m_autosaveCountdownTimer->stop();
+    if(m_validationTimer)
+        m_validationTimer->stop();
+    if(m_mapTestResultTimer)
+        m_mapTestResultTimer->stop();
+    if(m_cameraSpeedPersistTimer)
+        m_cameraSpeedPersistTimer->stop();
     if(m_autosaveNotification)
         m_autosaveNotification->hide();
     // The process-wide button connector outlives MainWindow and otherwise
@@ -6190,6 +6196,14 @@ void MainWindow::closeEvent(QCloseEvent *e)
         m_minimapCameraTimer->stop();
     if(m_viewportMinimap)
         m_viewportMinimap->disconnect(this);
+    if(m_pView)
+    {
+        // A long GL teardown gives already-posted viewport/UI callbacks ample
+        // time to become stale. Drain them and sever view-to-window delivery
+        // before the pointer is cleared.
+        QObject::disconnect(m_pView, nullptr, this, nullptr);
+        QCoreApplication::removePostedEvents(m_pView);
+    }
     // Destroy the QGLWidget while the main window and its native child surface
     // are still alive. Waiting for MainWindow::~MainWindow() is too late on
     // Windows: Qt has already released the surface even though CView::isValid()
@@ -6214,6 +6228,9 @@ void MainWindow::closeEvent(QCloseEvent *e)
         else
             ei::log(eLogInfo, "Editor backup session marked clean");
     }
+    // No deferred MainWindow callback may run after closeEvent returns with a
+    // null viewport. Child destruction is synchronous from this point.
+    QCoreApplication::removePostedEvents(this);
     e->accept();
 }
 
