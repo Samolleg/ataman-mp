@@ -1,5 +1,7 @@
 #include "ai_graph_document.h"
 
+#include <QHash>
+#include <QQueue>
 #include <QtEndian>
 
 namespace {
@@ -200,6 +202,107 @@ QByteArray CAiGraphDocument::serialize(QString* error) const
         }
     }
     return bytes;
+}
+
+bool CAiGraphDocument::validateRuntimeCompatibility(
+    int expectedWidth, int expectedHeight, QString* error) const
+{
+    if(error)
+        error->clear();
+    const auto fail = [error](const QString& message) {
+        if(error)
+            *error = message;
+        return false;
+    };
+    if(!m_valid || m_width != expectedWidth || m_height != expectedHeight
+       || m_layers.size() != LayerCount)
+        return fail(QStringLiteral("AI graph dimensions do not match the staged map."));
+
+    const int cells = m_width * m_height;
+    for(int layerIndex = 0; layerIndex < LayerCount; ++layerIndex)
+    {
+        const SAiGraphLayer& layer = m_layers.at(layerIndex);
+        if(layer.weights.size() != cells * DirectionCount
+           || layer.packedPositions.size() != cells
+           || layer.components.size() != cells)
+            return fail(QStringLiteral("AI graph layer %1 has inconsistent plane sizes.")
+                        .arg(layerIndex));
+        for(int cell = 0; cell < cells; ++cell)
+        {
+            const quint8 packed = quint8(layer.packedPositions.at(cell));
+            if((packed & 0x0f) > 7 || ((packed >> 4) & 0x0f) > 7)
+                return fail(QStringLiteral("AI graph layer %1 cell %2 has an invalid local position.")
+                            .arg(layerIndex).arg(cell));
+            if(layer.components.at(cell) == 0)
+                return fail(QStringLiteral("AI graph layer %1 cell %2 has no component ID.")
+                            .arg(layerIndex).arg(cell));
+            const int x = cell % m_width;
+            const int y = cell / m_width;
+            for(int direction = 0; direction < DirectionCount; ++direction)
+            {
+                const qint16 weight = layer.weights.at(
+                    cell * DirectionCount + direction);
+                if(weight == -1)
+                    continue;
+                if(weight < 0)
+                    return fail(QStringLiteral("AI graph layer %1 cell %2 has an unsupported negative weight.")
+                                .arg(layerIndex).arg(cell));
+                const QPoint delta = directionDelta(direction);
+                const int nx = x + delta.x(), ny = y + delta.y();
+                if(nx < 0 || ny < 0 || nx >= m_width || ny >= m_height)
+                    return fail(QStringLiteral("AI graph layer %1 links outside the map at cell %2.")
+                                .arg(layerIndex).arg(cell));
+                int opposite = -1;
+                for(int candidate = 0; candidate < DirectionCount; ++candidate)
+                    if(directionDelta(candidate) == -delta)
+                    { opposite = candidate; break; }
+                const int neighbor = ny * m_width + nx;
+                if(opposite < 0 || layer.weights.at(
+                       neighbor * DirectionCount + opposite) != weight)
+                    return fail(QStringLiteral("AI graph layer %1 has a non-reciprocal edge at cell %2.")
+                                .arg(layerIndex).arg(cell));
+                if(layer.components.at(neighbor) != layer.components.at(cell))
+                    return fail(QStringLiteral("AI graph layer %1 links different components at cell %2.")
+                                .arg(layerIndex).arg(cell));
+            }
+        }
+
+        QVector<bool> visited(cells, false);
+        QHash<quint16, int> componentRegion;
+        int region = 0;
+        for(int start = 0; start < cells; ++start)
+        {
+            if(visited.at(start))
+                continue;
+            const quint16 component = layer.components.at(start);
+            if(componentRegion.contains(component))
+                return fail(QStringLiteral("AI graph layer %1 reuses component %2 for disconnected regions.")
+                            .arg(layerIndex).arg(component));
+            componentRegion.insert(component, region++);
+            QQueue<int> pending;
+            pending.enqueue(start);
+            visited[start] = true;
+            while(!pending.isEmpty())
+            {
+                const int cell = pending.dequeue();
+                const int x = cell % m_width, y = cell / m_width;
+                for(int direction = 0; direction < DirectionCount; ++direction)
+                {
+                    if(layer.weights.at(cell * DirectionCount + direction) < 0)
+                        continue;
+                    const QPoint delta = directionDelta(direction);
+                    const int neighbor = (y + delta.y()) * m_width
+                        + x + delta.x();
+                    if(!visited.at(neighbor))
+                    {
+                        visited[neighbor] = true;
+                        pending.enqueue(neighbor);
+                    }
+                }
+            }
+        }
+    }
+    return true;
 }
 
 int CAiGraphDocument::index(int x, int y) const

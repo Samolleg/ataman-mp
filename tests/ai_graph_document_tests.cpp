@@ -93,6 +93,7 @@ private slots:
     void rejectsMalformedDimensionsAndTruncation();
     void exposesStableLayerAndDirectionDefinitions();
     void initializesDecodedPreviewWithSerializableBytes();
+    void generatedGraphMeetsRuntimeStagingContract();
     void regenerationRespectsFenceAndVerticalClearanceProfiles();
     void regenerationRejectsGameScaleTerrainCliffs();
     void regenerationAppliesWaterClearanceToEveryProfile();
@@ -183,6 +184,33 @@ void AiGraphDocumentTests::initializesDecodedPreviewWithSerializableBytes()
     QCOMPARE(reopened.packedPosition(0, 0, 0), quint8(0x33));
     QCOMPARE(reopened.component(0, 0, 0), quint16(1));
     QCOMPARE(reopened.serialize(&error), serialized);
+}
+
+void AiGraphDocumentTests::generatedGraphMeetsRuntimeStagingContract()
+{
+    SAiGraphPreviewBuildInput input;
+    input.graphWidth = 4;
+    input.graphHeight = 4;
+    input.terrainHeights.fill(0.0f, 32 * 32);
+    input.collisionProxies.append(boxVolume(
+        4.0f, 4.0f, 0.0f, 8.0f, 8.0f, 10.0f));
+    const SAiGraphPreviewBuildResult result = CAiGraphPreviewBuilder::build(input);
+    QVERIFY2(result.valid, qPrintable(result.error));
+    QString error;
+    QVERIFY2(result.document.validateRuntimeCompatibility(4, 4, &error),
+             qPrintable(error));
+    QCOMPARE(result.document.packedPosition(3, 1, 1), quint8(0x33));
+
+    const QByteArray bytes = result.document.serialize(&error);
+    QVERIFY2(!bytes.isEmpty(), qPrintable(error));
+    CAiGraphDocument reopened;
+    QVERIFY2(reopened.parse(bytes, &error), qPrintable(error));
+    QVERIFY2(reopened.validateRuntimeCompatibility(4, 4, &error),
+             qPrintable(error));
+
+    CAiGraphDocument structurallyParseable;
+    QVERIFY(structurallyParseable.parse(syntheticGraph(2, 2), &error));
+    QVERIFY(!structurallyParseable.validateRuntimeCompatibility(2, 2, &error));
 }
 
 void AiGraphDocumentTests::regenerationRespectsFenceAndVerticalClearanceProfiles()

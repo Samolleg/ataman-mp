@@ -282,8 +282,9 @@ void makeConsistent(SAiGraphLayer* layer, int width, int height)
                     continue;
                 qint16& forward = layer->weights[tileIndex(x, y, width) * DirectionCount + direction];
                 qint16& reverse = layer->weights[tileIndex(nx, ny, width) * DirectionCount + opposite];
-                if(forward < 0 || reverse < 0)
-                    forward = reverse = -1;
+                const qint16 consistent = qMin(forward, reverse);
+                forward = consistent;
+                reverse = consistent;
             }
 }
 
@@ -543,7 +544,10 @@ SAiGraphPreviewBuildResult CAiGraphPreviewBuilder::build(const SAiGraphPreviewBu
 
         SAiGraphLayer& layer = layers[layerIndex];
         layer.weights.fill(qint16(-1), input.graphWidth * input.graphHeight * DirectionCount);
-        layer.packedPositions.fill(char(0xff), input.graphWidth * input.graphHeight);
+        // A graph cell without a passable representative still needs a legal
+        // in-cell position. The runtime generator uses the central (3,3)
+        // fallback; 0xff points outside the 8x8 cell and is not stageable.
+        layer.packedPositions.fill(char(0x33), input.graphWidth * input.graphHeight);
         QVector<int> representative(input.graphWidth * input.graphHeight, -1);
         for(int gy = 0; gy < input.graphHeight; ++gy)
             for(int gx = 0; gx < input.graphWidth; ++gx)

@@ -1977,11 +1977,13 @@ bool CMob::buildValidatedCandidate(QByteArray* data,
 
 bool CMob::buildCanvasCropCandidate(float offsetX, float offsetY,
                                     float resultWidth, float resultHeight,
-                                    bool removeOutside, QByteArray* data,
+                                    bool removeOutside, float closedEdgeWidth,
+                                    QByteArray* data,
                                     SCanvasCropResult* result,
                                     CValidationReport* report)
 {
-    if(!data || !result || resultWidth <= 0.0f || resultHeight <= 0.0f)
+    if(!data || !result || resultWidth <= 0.0f || resultHeight <= 0.0f
+       || closedEdgeWidth < 0.0f)
         return false;
     data->clear();
     *result = SCanvasCropResult();
@@ -2035,13 +2037,19 @@ bool CMob::buildCanvasCropCandidate(float offsetX, float offsetY,
         translated.setZ(snapshot.position.z());
         snapshot.node->setPos(translated);
         ++result->translatedObjects;
-        if(removeOutside && (translated.x() < 0.0f || translated.y() < 0.0f
-                             || translated.x() > resultWidth
-                             || translated.y() > resultHeight))
+        const bool outside = translated.x() < 0.0f || translated.y() < 0.0f
+            || translated.x() > resultWidth || translated.y() > resultHeight;
+        const bool onClosedEdge = !outside && closedEdgeWidth > 0.0f
+            && (translated.x() < closedEdgeWidth || translated.y() < closedEdgeWidth
+                || translated.x() > resultWidth - closedEdgeWidth
+                || translated.y() > resultHeight - closedEdgeWidth);
+        if((removeOutside && outside) || onClosedEdge)
         {
             deleteNode(snapshot.node);
             snapshot.removed = true;
             ++result->removedObjects;
+            if(onClosedEdge)
+                ++result->removedTaperObjects;
         }
     }
 
@@ -2068,9 +2076,10 @@ bool CMob::buildCanvasCropCandidate(float offsetX, float offsetY,
     restore();
     if(!stripped)
         return false;
-    ei::log(eLogInfo, QString("Prepared companion MOB crop candidate path:%1 translated:%2 removed:%3 embeddedGraphRemoved:%4")
+    ei::log(eLogInfo, QString("Prepared companion MOB crop candidate path:%1 translated:%2 removed:%3 taperRemoved:%4 embeddedGraphRemoved:%5")
         .arg(m_filePath.filePath()).arg(result->translatedObjects)
-        .arg(result->removedObjects).arg(result->removedEmbeddedAiGraph ? "true" : "false"));
+        .arg(result->removedObjects).arg(result->removedTaperObjects)
+        .arg(result->removedEmbeddedAiGraph ? "true" : "false"));
     return true;
 }
 

@@ -102,6 +102,15 @@ public:
         setFrameShape(QFrame::StyledPanel);
     }
 
+    void setPlacementDrag(double pixelsPerTile, int offsetX, int offsetY,
+                          const std::function<void(int, int)>& handler)
+    {
+        m_pixelsPerTile = pixelsPerTile;
+        m_offsetX = offsetX;
+        m_offsetY = offsetY;
+        m_placementHandler = handler;
+    }
+
     void setImage(const QImage& image)
     {
         const bool preserveView = m_item && m_userSized;
@@ -145,9 +154,45 @@ protected:
     }
     void mousePressEvent(QMouseEvent* event) override
     {
+        if(event->button() == Qt::RightButton && m_placementHandler
+           && m_pixelsPerTile > 0.0)
+        {
+            m_rightDragging = true;
+            m_rightDragStart = event->pos();
+            m_rightDragOffsetX = m_offsetX;
+            m_rightDragOffsetY = m_offsetY;
+            viewport()->setCursor(Qt::ClosedHandCursor);
+            event->accept();
+            return;
+        }
         if(event->button() == Qt::LeftButton)
             m_userSized = true;
         QGraphicsView::mousePressEvent(event);
+    }
+    void mouseMoveEvent(QMouseEvent* event) override
+    {
+        if(m_rightDragging && m_placementHandler)
+        {
+            const QPointF delta = mapToScene(event->pos())
+                - mapToScene(m_rightDragStart);
+            m_placementHandler(
+                m_rightDragOffsetX + qRound(delta.x() / m_pixelsPerTile),
+                m_rightDragOffsetY + qRound(delta.y() / m_pixelsPerTile));
+            event->accept();
+            return;
+        }
+        QGraphicsView::mouseMoveEvent(event);
+    }
+    void mouseReleaseEvent(QMouseEvent* event) override
+    {
+        if(event->button() == Qt::RightButton && m_rightDragging)
+        {
+            m_rightDragging = false;
+            viewport()->unsetCursor();
+            event->accept();
+            return;
+        }
+        QGraphicsView::mouseReleaseEvent(event);
     }
 
 private:
@@ -163,6 +208,14 @@ private:
     QGraphicsScene* m_scene{nullptr};
     QGraphicsPixmapItem* m_item{nullptr};
     bool m_userSized{false};
+    bool m_rightDragging{false};
+    QPoint m_rightDragStart;
+    int m_rightDragOffsetX{0};
+    int m_rightDragOffsetY{0};
+    int m_offsetX{0};
+    int m_offsetY{0};
+    double m_pixelsPerTile{0.0};
+    std::function<void(int, int)> m_placementHandler;
 };
 
 bool isMinimapStaticGeometry(CNode* node)
@@ -1704,17 +1757,44 @@ bool CView::buildGeneratedAiGraphCandidate(QByteArray* data, QString* error)
             *error = tr("No generated AI graph output buffer was provided.");
         return false;
     }
-    SAiGraphPreviewBuildInput input;
-    if(!captureAiGraphPreviewBuildInput(&input, error))
-        return false;
-    const SAiGraphPreviewBuildResult result = CAiGraphPreviewBuilder::build(input);
-    if(!result.valid)
+    if(!m_terrainEditAvailable || m_terrainEdit.vertexCountX() < 2
+       || m_terrainEdit.vertexCountY() < 2
+       || (m_terrainEdit.vertexCountX() - 1) % 4 != 0
+       || (m_terrainEdit.vertexCountY() - 1) % 4 != 0)
     {
         if(error)
-            *error = result.error;
+            *error = tr("The canonical terrain dimensions cannot produce a runtime AI graph.");
         return false;
     }
-    const QByteArray candidate = result.document.serialize(error);
+    const int expectedWidth = (m_terrainEdit.vertexCountX() - 1) / 4;
+    const int expectedHeight = (m_terrainEdit.vertexCountY() - 1) / 4;
+    CAiGraphDocument generated;
+    if(m_aiGraphRegeneratedFresh && m_aiGraphRegeneratedDocument.isValid())
+        generated = m_aiGraphRegeneratedDocument;
+    else
+    {
+        SAiGraphPreviewBuildInput input;
+        if(!captureAiGraphPreviewBuildInput(&input, error))
+            return false;
+        const SAiGraphPreviewBuildResult result = CAiGraphPreviewBuilder::build(input);
+        if(!result.valid)
+        {
+            if(error)
+                *error = result.error;
+            return false;
+        }
+        generated = result.document;
+    }
+    QString compatibilityError;
+    if(!generated.validateRuntimeCompatibility(expectedWidth, expectedHeight,
+                                                &compatibilityError))
+    {
+        if(error)
+            *error = tr("Generated AI graph is not runtime-compatible: %1")
+                .arg(compatibilityError);
+        return false;
+    }
+    const QByteArray candidate = generated.serialize(error);
     if(candidate.isEmpty())
         return false;
     CAiGraphDocument reopened;
@@ -1723,6 +1803,14 @@ bool CView::buildGeneratedAiGraphCandidate(QByteArray* data, QString* error)
     {
         if(error)
             *error = tr("Generated AI graph failed fresh validation: %1")
+                .arg(reopenError);
+        return false;
+    }
+    if(!reopened.validateRuntimeCompatibility(expectedWidth, expectedHeight,
+                                               &reopenError))
+    {
+        if(error)
+            *error = tr("Generated AI graph failed runtime validation after reopen: %1")
                 .arg(reopenError);
         return false;
     }
@@ -8574,8 +8662,8 @@ void CView::openMapParameters()
     edgeTaperWidth->setEnabled(false);
     canvasForm->addRow(tr("New width (sectors)"), canvasWidth);
     canvasForm->addRow(tr("New height (sectors)"), canvasHeight);
-    canvasForm->addRow(tr("Original map X offset"), canvasOffsetX);
-    canvasForm->addRow(tr("Original map Y offset"), canvasOffsetY);
+    canvasForm->addRow(tr("Original map left offset"), canvasOffsetX);
+    canvasForm->addRow(tr("Original map top offset"), canvasOffsetY);
     canvasForm->addRow(closeCanvasEdges);
     canvasForm->addRow(tr("Closed-edge width"), edgeTaperWidth);
     QCheckBox* createCompanionMob = new QCheckBox(
@@ -8588,7 +8676,8 @@ void CView::openMapParameters()
     canvasLayout->addLayout(canvasForm);
     QLabel* canvasExplanation = new QLabel(tr(
         "Crop/expand is a structural Save As operation. Position the original map "
-        "directly on the resulting tile grid. Sector-aligned retained SEC payloads "
+        "directly on the resulting tile grid; right-drag the map in the preview or "
+        "enter its left/top tile offsets. Sector-aligned retained SEC payloads "
         "stay byte-identical; other offsets are re-tiled and freshly validated. "
         "Expansion projects the nearest land boundary and does not invent overlays. "
         "Closed edges are explicitly lossy and deactivate overlays in the taper band. "
@@ -8611,14 +8700,19 @@ void CView::openMapParameters()
     tabs->addTab(canvasPage, tr("Canvas resize"));
 
     QSharedPointer<QImage> canvasSourcePreview(new QImage);
-    const auto canvasRequest = [canvasWidth, canvasHeight, canvasOffsetX,
+    const auto canvasRequest = [this, canvasWidth, canvasHeight, canvasOffsetX,
                                 canvasOffsetY, closeCanvasEdges,
                                 edgeTaperWidth]() {
         SMprCanvasResizeRequest request;
         request.sectorCountX = quint32(canvasWidth->value());
         request.sectorCountY = quint32(canvasHeight->value());
         request.oldTileOffsetX = canvasOffsetX->value();
-        request.oldTileOffsetY = canvasOffsetY->value();
+        // The MPR/world Y axis grows northward, while the preview and user-facing
+        // placement grid grow downward from the top edge. Convert once here so
+        // preview placement, terrain sectors, and companion MOB translation agree.
+        const int oldTileHeight = int(m_mprDocument.mapInfo().sectorCountY) * 16;
+        request.oldTileOffsetY = canvasHeight->value() * 16 - oldTileHeight
+            - canvasOffsetY->value();
         request.closeEdges = closeCanvasEdges->isChecked();
         request.edgeTaperTiles = edgeTaperWidth->value();
         return request;
@@ -8641,17 +8735,19 @@ void CView::openMapParameters()
             canvasOffsetY->setRange(1 - oldHeight * 16,
                                     canvasHeight->value() * 16 - 1);
         }
+        const int visualOffsetX = canvasOffsetX->value();
+        const int visualOffsetY = canvasOffsetY->value();
         const int retainedX = qMax(0, qMin(oldWidth * 16,
-            canvasWidth->value() * 16 - request.oldTileOffsetX)
-            - qMax(0, -request.oldTileOffsetX));
+            canvasWidth->value() * 16 - visualOffsetX)
+            - qMax(0, -visualOffsetX));
         const int retainedY = qMax(0, qMin(oldHeight * 16,
-            canvasHeight->value() * 16 - request.oldTileOffsetY)
-            - qMax(0, -request.oldTileOffsetY));
+            canvasHeight->value() * 16 - visualOffsetY)
+            - qMax(0, -visualOffsetY));
         const int retained = retainedX * retainedY;
         canvasSummary->setText(tr(
             "Original map offset: X %1, Y %2 tiles. Retain %3 x %4 (%5) source tile(s). "
             "World bounds become %6 x %7 units.%8 Output is a new MPR; the source is not overwritten.")
-            .arg(request.oldTileOffsetX).arg(request.oldTileOffsetY)
+            .arg(visualOffsetX).arg(visualOffsetY)
             .arg(retainedX).arg(retainedY).arg(retained)
             .arg(canvasWidth->value() * 32).arg(canvasHeight->value() * 32)
             .arg(request.closeEdges
@@ -8686,8 +8782,8 @@ void CView::openMapParameters()
         painter.setClipRect(tileCanvasRect);
         if(!canvasSourcePreview->isNull())
         {
-            const QRectF oldRect(tileCanvasRect.left() + request.oldTileOffsetX * scale,
-                                 tileCanvasRect.top() + request.oldTileOffsetY * scale,
+            const QRectF oldRect(tileCanvasRect.left() + visualOffsetX * scale,
+                                 tileCanvasRect.top() + visualOffsetY * scale,
                                  oldWidth * 16 * scale, oldHeight * 16 * scale);
             painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
             painter.drawImage(oldRect, *canvasSourcePreview);
@@ -8711,6 +8807,11 @@ void CView::openMapParameters()
         }
         painter.end();
         canvasPreview->setImage(preview);
+        canvasPreview->setPlacementDrag(scale, visualOffsetX, visualOffsetY,
+            [canvasOffsetX, canvasOffsetY](int x, int y) {
+                canvasOffsetX->setValue(x);
+                canvasOffsetY->setValue(y);
+            });
     };
     connect(canvasWidth, QOverload<int>::of(&QSpinBox::valueChanged), dock,
             [refreshCanvasPreview](int) { refreshCanvasPreview(); });
@@ -8735,15 +8836,6 @@ void CView::openMapParameters()
             [this, dock, canvasRequest, canvasSummary, createCompanionMob,
              removeOutsideMobObjects]() {
         const SMprCanvasResizeRequest resize = canvasRequest();
-        if((resize.oldTileOffsetX != 0 || resize.oldTileOffsetY != 0)
-           && !m_aMob.isEmpty() && !createCompanionMob->isChecked())
-        {
-            QMessageBox::warning(dock, tr("MOB translation required"), tr(
-                "This tile offset moves the map origin, but one or more MOB files are loaded. "
-                "Create a translated companion MOB, unload the MOB files, or use zero offsets; "
-                "no file was changed."));
-            return;
-        }
         if(createCompanionMob->isChecked() && !m_activeMob)
         {
             QMessageBox::warning(dock, tr("No companion MOB"), tr(
@@ -8751,6 +8843,14 @@ void CView::openMapParameters()
                 "the companion MOB option. No file was changed."));
             return;
         }
+        QProgressDialog progress(tr("Validating the current MPR..."), QString(),
+                                 0, 8, dock);
+        progress.setWindowTitle(tr("Resizing MPR canvas"));
+        progress.setWindowModality(Qt::ApplicationModal);
+        progress.setCancelButton(nullptr);
+        progress.setMinimumDuration(0);
+        progress.setValue(0);
+        QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
         QByteArray currentBytes;
         CValidationReport currentReport;
         if(!buildValidatedLandscapeCandidate(&currentBytes, &currentReport))
@@ -8759,6 +8859,9 @@ void CView::openMapParameters()
                 currentReport.toText().trimmed());
             return;
         }
+        progress.setLabelText(tr("Reopening the validated resize baseline..."));
+        progress.setValue(1);
+        QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
         CMprDocument resizeBaseline;
         CValidationReport resizeBaselineReport;
         if(!resizeBaseline.loadBytes(currentBytes, QStringLiteral("resize-baseline.mpr"),
@@ -8769,6 +8872,8 @@ void CView::openMapParameters()
                 resizeBaselineReport.toText().trimmed());
             return;
         }
+        progress.setValue(2);
+        progress.hide();
         const QString suggested = QDir(m_pLand->filePath().absolutePath()).filePath(
             m_pLand->filePath().completeBaseName() + QStringLiteral("-resized.mpr"));
         const QFileInfo destination(QFileDialog::getSaveFileName(
@@ -8790,6 +8895,10 @@ void CView::openMapParameters()
                         .arg(mobDestination.absoluteFilePath()));
                 return;
             }
+            progress.setLabelText(tr("Building and validating the companion MOB..."));
+            progress.setValue(3);
+            progress.show();
+            QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
             CValidationReport mobReport;
             if(!m_activeMob->buildCanvasCropCandidate(
                    float(resize.oldTileOffsetX * 2),
@@ -8797,6 +8906,7 @@ void CView::openMapParameters()
                    float(resize.sectorCountX * 32),
                    float(resize.sectorCountY * 32),
                    removeOutsideMobObjects->isChecked(),
+                   resize.closeEdges ? float(resize.edgeTaperTiles * 2) : 0.0f,
                    &mobCandidate, &mobCrop, &mobReport))
             {
                 QMessageBox::critical(dock, tr("Cannot stage companion MOB"),
@@ -8804,30 +8914,34 @@ void CView::openMapParameters()
                 return;
             }
         }
+        progress.hide();
+        const QString ignoredMobNotice = !m_aMob.isEmpty()
+            && !createCompanionMob->isChecked()
+            ? tr("\nLoaded MOB files will be ignored. Their files and object coordinates "
+                 "will remain unchanged.")
+            : QString();
         if(QMessageBox::question(dock, tr("Create resized MPR"),
-            tr("%1%2\n\nCreate the separately named output now? Retained data will be staged, "
+            tr("%1%2%3\n\nCreate the separately named output now? Retained data will be staged, "
                "freshly reopened, backed up if the MPR destination exists, and replaced atomically.")
                 .arg(canvasSummary->text(), createCompanionMob->isChecked()
-                    ? tr("\nCompanion MOB: %1 (%2 translated, %3 removed; stale embedded graph omitted: %4)")
+                    ? tr("\nCompanion MOB: %1 (%2 translated, %3 removed; %4 on the closed-edge band; stale embedded graph omitted: %5)")
                         .arg(mobDestination.absoluteFilePath())
                         .arg(mobCrop.translatedObjects).arg(mobCrop.removedObjects)
+                        .arg(mobCrop.removedTaperObjects)
                         .arg(mobCrop.removedEmbeddedAiGraph ? tr("yes") : tr("not present"))
-                    : QString())) != QMessageBox::Yes)
+                    : QString(), ignoredMobNotice)) != QMessageBox::Yes)
             return;
 
-        QProgressDialog progress(tr("Building resized MPR candidate..."), QString(),
-                                 0, 0, dock);
-        progress.setWindowTitle(tr("Resizing MPR canvas"));
-        progress.setWindowModality(Qt::ApplicationModal);
-        progress.setCancelButton(nullptr);
-        progress.setMinimumDuration(0);
+        progress.setLabelText(tr("Building resized MPR candidate..."));
+        progress.setValue(4);
+        progress.show();
         QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
         SMprSaveCommitRequest commitRequest;
         commitRequest.source = m_pLand->filePath();
         commitRequest.destination = destination;
         const SMprSaveCommitResult result = commitStagedMprCanvasResize(
             m_mprDocument, resizeBaseline, resize, commitRequest);
-        progress.close();
+        progress.setValue(6);
         if(!result.success)
         {
             ei::log(eLogFatal, QString("MPR canvas resize failed phase:%1 error:%2")
@@ -8836,8 +8950,12 @@ void CView::openMapParameters()
                 tr("No source file was changed.\n\n%1").arg(result.error));
             return;
         }
+        CMob* companionSourceMob = createCompanionMob->isChecked() ? m_activeMob : nullptr;
         if(createCompanionMob->isChecked())
         {
+            progress.setLabelText(tr("Committing the companion MOB..."));
+            progress.setValue(7);
+            QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
             QSaveFile mobOutput(mobDestination.absoluteFilePath());
             if(!mobOutput.open(QIODevice::WriteOnly)
                || mobOutput.write(mobCandidate) != mobCandidate.size()
@@ -8853,13 +8971,32 @@ void CView::openMapParameters()
         ei::log(eLogInfo, QString("MPR canvas resize committed path:%1 sha256:%2 %3")
             .arg(destination.absoluteFilePath(), result.candidateSha256,
                  result.semanticDiff));
+        progress.setLabelText(tr("Opening the resized map files..."));
+        QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
         unloadLand(false);
         loadLandscape(destination);
+        bool companionReloaded = false;
+        if(companionSourceMob)
+        {
+            QFileInfo companionPath(mobDestination);
+            companionReloaded = loadMob(companionPath);
+            if(companionReloaded)
+                unloadMobDocument(companionSourceMob, false);
+            else
+                ei::log(eLogWarning, QString(
+                    "Resized companion MOB was committed but could not be loaded path:%1")
+                    .arg(mobDestination.absoluteFilePath()));
+        }
+        progress.setValue(8);
+        progress.close();
         QMessageBox::information(dock, tr("Resized MPR created"),
             tr("Created and opened:\n%1%2\n\nSHA-256: %3")
                 .arg(destination.absoluteFilePath(),
                      createCompanionMob->isChecked()
-                         ? tr("\nCompanion MOB: %1").arg(mobDestination.absoluteFilePath())
+                         ? tr("\nCompanion MOB: %1 (%2)")
+                               .arg(mobDestination.absoluteFilePath(),
+                                    companionReloaded ? tr("loaded")
+                                                      : tr("created; load manually"))
                          : QString(),
                      result.candidateSha256));
     });

@@ -1746,7 +1746,7 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
                               input.profile.mapDirectories,
                               &graphSource, error))
         return false;
-    if(graphSource.missing && !input.generatedAiGraphData.isEmpty())
+    if(!input.generatedAiGraphData.isEmpty())
     {
         QString graphError;
         if(!validateExternalGraph(input.generatedAiGraphData, &graphError))
@@ -1754,6 +1754,9 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
             if(error) *error = "The generated test AI graph is invalid: " + graphError;
             return false;
         }
+        if(graphSource.usesExternalGraph())
+            graphSource.shadowedExternalPath = graphSource.externalPath;
+        graphSource.embedded = false;
         graphSource.missing = false;
         graphSource.externalPath = "<Endurance generated graph>";
         graphSource.externalData = input.generatedAiGraphData;
@@ -2250,7 +2253,7 @@ bool CJmvMapTestLauncher::hotReload(const SJmvMapTestLaunchInput& input,
                               input.profile.mapDirectories,
                               &graphSource, error))
         return false;
-    if(graphSource.missing && !input.generatedAiGraphData.isEmpty())
+    if(!input.generatedAiGraphData.isEmpty())
     {
         QString graphError;
         if(!validateExternalGraph(input.generatedAiGraphData, &graphError))
@@ -2258,6 +2261,9 @@ bool CJmvMapTestLauncher::hotReload(const SJmvMapTestLaunchInput& input,
             if(error) *error = "The generated hot-reload AI graph is invalid: " + graphError;
             return false;
         }
+        if(graphSource.usesExternalGraph())
+            graphSource.shadowedExternalPath = graphSource.externalPath;
+        graphSource.embedded = false;
         graphSource.missing = false;
         graphSource.externalPath = "<Endurance generated graph>";
         graphSource.externalData = input.generatedAiGraphData;

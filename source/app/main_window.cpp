@@ -3062,62 +3062,35 @@ void MainWindow::launchCurrentMapTest()
             tr("The current MOB edits could not be staged safely:\n\n%1").arg(mobReport.toText()));
         return;
     }
-    SMapGraphSource graphSource;
-    QString graphError;
-    if(!CJmvMapTestLauncher::resolveMapGraphSource(
-           mobData, landscape->filePath(), entry.mprName,
-           profile.mapDirectories, &graphSource, &graphError))
+    progress->setLabelText(tr("Generating and validating the run-local AI graph..."));
+    QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+    QByteArray generatedAiGraphData;
+    QString generatedGraphError;
+    if(!m_pView->buildGeneratedAiGraphCandidate(
+           &generatedAiGraphData, &generatedGraphError))
     {
-        QMessageBox::critical(this, tr("Map test launch"), graphError);
+        QMessageBox::critical(this, tr("Map test launch"),
+            tr("Endurance could not generate a runtime-compatible AI graph for "
+               "the current terrain and objects:\n\n%1")
+                .arg(generatedGraphError));
         return;
     }
-    bool allowMissingAiGraph = false;
-    QByteArray generatedAiGraphData;
-    if(graphSource.missing)
+    CMobDocument stagedMobDocument;
+    CValidationReport stagedMobReport;
+    if(!stagedMobDocument.loadBytes(mobData, mob->filePath().fileName(),
+                                    &stagedMobReport)
+       || stagedMobReport.hasErrors()
+       || !stagedMobDocument.removeEmbeddedAiGraph(&mobData, &stagedMobReport)
+       || stagedMobReport.hasErrors())
     {
-        if(mob->nodes().isEmpty())
-        {
-            progress->setLabelText(tr("Generating a temporary AI graph for the empty MOB..."));
-            progress->setValue(4);
-            QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
-            QString generatedGraphError;
-            if(!m_pView->buildGeneratedAiGraphCandidate(
-                   &generatedAiGraphData, &generatedGraphError))
-            {
-                QMessageBox::critical(this, tr("Map test launch"),
-                    tr("The zero-object MOB has no AI graph, and Endurance could not generate a safe run-local graph:\n\n%1")
-                        .arg(generatedGraphError));
-                return;
-            }
-            ei::log(eLogInfo, QString("Generated run-local AI graph for zero-object MOB bytes:%1")
-                .arg(generatedAiGraphData.size()));
-        }
-        else
-        {
-            progress->hide();
-            QMessageBox graphWarning(QMessageBox::Warning,
-            tr("AI graph not found"),
-            tr("The primary MOB has no embedded AI_GRAPH and no matching %1.grp was found beside the open MPR or in the active profile Maps folders.\n\n"
-               "Endurance can temporarily use the runtime's graph-generator loading exception for this owned test process. It does not generate a graph: AI navigation and graph-dependent behavior may be unavailable or unreliable. The source map will not be changed.\n\n"
-               "Start anyway?")
-                .arg(landscape->filePath().completeBaseName()),
-            QMessageBox::NoButton, this);
-            QPushButton* startAnyway = graphWarning.addButton(
-                tr("Start Anyway"), QMessageBox::AcceptRole);
-            graphWarning.addButton(QMessageBox::Cancel);
-            graphWarning.setDefaultButton(QMessageBox::Cancel);
-            graphWarning.exec();
-            if(graphWarning.clickedButton() != startAnyway)
-                return;
-            allowMissingAiGraph = true;
-            ei::log(eLogWarning,
-                QString("User accepted graphless %1 for MPR:%2 primary-MOB:%3")
-                .arg(hotReloadRequested ? "hot reload" : "map test",
-                     landscape->filePath().absoluteFilePath(),
-                     mob->filePath().absoluteFilePath()));
-            progress->show();
-        }
+        QMessageBox::critical(this, tr("Map test launch"),
+            tr("The run-local MOB copy could not be prepared for the generated AI graph:\n\n%1")
+                .arg(stagedMobReport.toText().trimmed()));
+        return;
     }
+    ei::log(eLogInfo, QString(
+        "Prepared authoritative run-local AI graph bytes:%1 primaryMobGraphStripped:true")
+        .arg(generatedAiGraphData.size()));
     QVector<SJmvSupplementalMobInput> supplementalMobs;
     for(CMob* supplemental : m_pView->mobs())
     {
@@ -3208,7 +3181,7 @@ void MainWindow::launchCurrentMapTest()
     input.syntheticMapIdentity = loosePair;
     input.mapSizeX = int(landscape->widthInWorldUnits() / 32u);
     input.mapSizeY = int(landscape->heightInWorldUnits() / 32u);
-    input.allowMissingAiGraph = allowMissingAiGraph;
+    input.allowMissingAiGraph = false;
     const bool usesGeneratedMinimap = isJmv
         && m_viewportMinimap && m_viewportMinimap->usesGeneratedPreview();
     if(usesGeneratedMinimap && !ensureGeneratedMinimap())

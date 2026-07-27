@@ -13,6 +13,7 @@ SOURCES += \
     ../source/documents/mpr_document.cpp \
     ../source/documents/res_archive_document.cpp \
     ../source/documents/synthetic_map_table_archive.cpp \
+    ../source/documents/terrain_edit_model.cpp \
     ../source/resources/mmp_codec.cpp \
     ../source/resources/mmp_inspector.cpp \
     ../source/runtime/current_session_backup.cpp \
@@ -27,6 +28,7 @@ HEADERS += \
     ../source/documents/mpr_document.h \
     ../source/documents/res_archive_document.h \
     ../source/documents/synthetic_map_table_archive.h \
+    ../source/documents/terrain_edit_model.h \
     ../source/resources/mmp_codec.h \
     ../source/resources/mmp_inspector.h \
     ../source/runtime/current_session_backup.h \

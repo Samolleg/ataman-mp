@@ -46,6 +46,7 @@ public:
     {
         int translatedObjects{0};
         int removedObjects{0};
+        int removedTaperObjects{0};
         bool removedEmbeddedAiGraph{false};
     };
     using SaveProgress = std::function<void(const QString&, int, int)>;
@@ -61,7 +62,7 @@ public:
                                  QString* saveClass = nullptr);
     bool buildCanvasCropCandidate(float offsetX, float offsetY,
                                   float resultWidth, float resultHeight,
-                                  bool removeOutside,
+                                  bool removeOutside, float closedEdgeWidth,
                                   QByteArray* data, SCanvasCropResult* result,
                                   CValidationReport* report = nullptr);
     void serializeJson(const QFileInfo& file);

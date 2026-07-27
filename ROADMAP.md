@@ -602,16 +602,18 @@ The following items are deliberately not hidden inside the completed baseline:
   workstream; manual tile painting remains the safe fallback meanwhile.
 - [x] Implement the MPR-only existing-map crop/expand baseline as a previewed,
   structural, Save-As-only transaction with a 32x32 experimental ceiling.
-  Runtime testing and the separately saved MOB translation/deletion companion
-  remain before this can be treated as the complete derivative-map workflow.
+  The companion workflow now translates/deletes MOB objects, removes objects
+  left on a lossy closed-edge taper, and opens the separately saved MPR/MOB
+  pair after commit. Copied-map runtime testing at the experimental ceiling
+  remains before this is the complete derivative-map workflow.
 - [ ] Implement deterministic new-MPR creation using the runtime-compatible RES
   hash table and collision-chain contract described above.
-- [ ] Add source-accurate persistence/staging for regenerated AI graphs. Preserve
-  all eight profiles and 16-bit/auxiliary planes, validate dimensions and
-  connectivity, write a same-basename external `.grp` or explicitly selected
-  embedded owner, freshly reopen it, and stage the chosen source for Test
-  Current Map. Preview regeneration remains non-saving until this transaction
-  passes copied-fixture and game-side validation.
+- [ ] Add persistent export/ownership for regenerated AI graphs. Test Current
+  Map now generates, freshly reopens, structurally validates, and authoritatively
+  stages all eight profiles as its run-local same-basename `.grp`, stripping the
+  embedded graph only from the temporary MOB copy so stale data cannot shadow
+  it. Still pending: user-selected external `.grp` export or embedding into the
+  chosen MOB owner, atomic persistence, and copied-fixture/game-side validation.
 - [ ] Replace Play from Here's terrain-only clearance probe with nearest valid
   placement from the active, non-stale regenerated graph.
 - [ ] Add recovery autosave for dirty canonical MPR transactions without using

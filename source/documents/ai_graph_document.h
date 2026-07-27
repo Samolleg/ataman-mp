@@ -34,6 +34,8 @@ public:
     const QByteArray& rawBytes() const { return m_rawBytes; }
     QByteArray serializeNoOp() const { return m_rawBytes; }
     QByteArray serialize(QString* error = nullptr) const;
+    bool validateRuntimeCompatibility(int expectedWidth, int expectedHeight,
+                                      QString* error = nullptr) const;
 
     qint16 weight(int layer, int x, int y, int direction) const;
     quint8 packedPosition(int layer, int x, int y) const;

@@ -94,8 +94,10 @@ The installed corpus currently reaches 16 x 16; game-side testing of a copied
 limit.
 
 The old canvas is placed directly on the resulting grid with X/Y offsets in
-terrain tiles. Positive offsets add space before the source; negative offsets
-crop it there. Sector-aligned retained SEC payloads remain byte-identical.
+terrain tiles. The UI uses left/top screen offsets and converts its top-down Y
+axis once to the northward MPR/world axis. Positive offsets add space before
+the source in the preview; negative offsets crop it there. The map can also be
+right-dragged on the preview grid. Sector-aligned retained SEC payloads remain byte-identical.
 Partial-sector offsets are re-tiled from canonical land and overlay data and
 must pass the same fresh-reopen and seam validation. New space extends the
 nearest land boundary; overlays are never invented outside the source.
@@ -111,8 +113,11 @@ orientation as the minimap; it is not embedded into the output.
 When one active MOB is loaded, resize can stage a separately named companion
 MOB. It translates root objects and dependent unit/trap spatial records by the
 same world offset, can delete objects whose origin lies outside the new bounds,
-and omits the stale embedded AI graph. The source MOB is restored in memory and
-is never overwritten by this operation.
+always deletes objects whose origin remains on a requested closed-edge taper,
+and omits the stale embedded AI graph. The separately named MPR/MOB result is
+opened together after commit. If companion generation is disabled, resize still
+proceeds as MPR-only Save As and every loaded MOB remains untouched. The source
+MOB is restored in memory and is never overwritten by this operation.
 
 ## Planned MPR Settings presentation
 
