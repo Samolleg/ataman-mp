@@ -341,6 +341,7 @@ private slots:
     void authoredPresetCatalogCoversKnownAtlasesAndMatchesZone1();
     void authoredPresetCatalogAllEntriesCompile();
     void authoredPresetSupportsZone18SharedLayers();
+    void materialAtlasStoreLoadsOnlyExplicitLocalOverrides();
     void semanticAtlasProfileRejectsBindingMismatchAndAmbiguity();
     void semanticAtlasReviewEditsAndStoreAreDeterministic();
     void semanticAtlasPartialCatalogRejectsCrossLayerCornersInline();
@@ -5435,7 +5436,7 @@ void EnduranceDocumentTests::authoredPresetCatalogCoversKnownAtlasesAndMatchesZo
     QCOMPARE(CTerrainAtlasPresetCatalog::presetCount(&report), 38);
     QVERIFY2(!report.hasErrors(), qPrintable(report.toText()));
     const QByteArray hdHash =
-        "228a89743219b7aef9f8d920ec95b89e3bb2900ed692492963bf68cfb395e37a";
+        "35cc3b90985888b5c5206f8c5980321beb46f0be7b1e96b4a3467677ac2a4665";
     const STerrainAtlasProfile profile = CTerrainAtlasPresetCatalog::exactProfile(
         "zone1", hdHash, 512, &report);
     QVERIFY2(profile.approved, qPrintable(report.toText()));
@@ -5457,6 +5458,25 @@ void EnduranceDocumentTests::authoredPresetCatalogCoversKnownAtlasesAndMatchesZo
     const STerrainAtlasProfile wrongNamespace = CTerrainAtlasPresetCatalog::exactProfile(
         "zone2", hdHash, 512, &report);
     QVERIFY(wrongNamespace.slotDefinitions.isEmpty());
+
+    struct CapturedBinding { const char* nameSpace; const char* hash; int slotCount; };
+    const CapturedBinding captured[] = {
+        {"Zone2", "ed0bc69bd4abbb8f9f90fab44574a24b0b806521b6bc36501eea7c5add258612", 512},
+        {"Zone3Obr", "33d297edc193f88356c766772a84f5c6db27cf6cd9831d241cdafa9497cb5b4a", 512},
+        {"Zone5_1", "2908a9617277f4e0ff663bf032325941fc57879af573c918e13f249e4de54635", 192}
+    };
+    for(const auto& item : captured)
+    {
+        CValidationReport capturedReport;
+        const STerrainAtlasProfile capturedProfile =
+            CTerrainAtlasPresetCatalog::exactProfile(
+                QString::fromLatin1(item.nameSpace), QByteArray(item.hash),
+                item.slotCount, &capturedReport);
+        QVERIFY2(capturedProfile.approved,
+                 qPrintable(QString::fromLatin1(item.nameSpace)
+                    + QLatin1Char('\n') + capturedReport.toText()));
+        QCOMPARE(capturedProfile.assignedSlotCount(), item.slotCount);
+    }
 }
 
 void EnduranceDocumentTests::authoredPresetSupportsZone18SharedLayers()
@@ -5464,7 +5484,7 @@ void EnduranceDocumentTests::authoredPresetSupportsZone18SharedLayers()
     CValidationReport report;
     const STerrainAtlasProfile profile = CTerrainAtlasPresetCatalog::exactProfile(
         "Zone18",
-        "f0cb6656c605cc69f1c27f32b4bd1122479526c17e24f8c3324625400e7f5a83",
+        "8628607116ecfbc4fedd1c20e97690b3c55088d433c9719d6e95f650cfd73e81",
         512, &report);
     QVERIFY2(profile.approved, qPrintable(report.toText()));
     QCOMPARE(profile.assignedSlotCount(), 512);
@@ -5533,6 +5553,47 @@ void EnduranceDocumentTests::authoredPresetCatalogAllEntriesCompile()
     }
     QCOMPARE(totalSlots, 16576);
     QCOMPARE(bindings, 58);
+}
+
+void EnduranceDocumentTests::materialAtlasStoreLoadsOnlyExplicitLocalOverrides()
+{
+    QTemporaryDir root;
+    QVERIFY(root.isValid());
+    const QByteArray hash =
+        "35cc3b90985888b5c5206f8c5980321beb46f0be7b1e96b4a3467677ac2a4665";
+    CValidationReport presetReport;
+    STerrainAtlasProfile profile = CTerrainAtlasPresetCatalog::exactProfile(
+        "zone1", hash, 512, &presetReport);
+    QVERIFY2(profile.approved, qPrintable(presetReport.toText()));
+    QVERIFY(CTerrainAtlasProfileStore::save(profile, root.path(), &presetReport));
+
+    STerrainAtlasProfile loaded;
+    QString sourcePath;
+    CValidationReport defaultReport;
+    QVERIFY(!CTerrainAtlasProfileStore::loadExplicitOverride(
+        "zone1", hash, 512, &loaded, root.path(), &sourcePath,
+        &defaultReport));
+    QVERIFY(defaultReport.toText().contains(
+        QStringLiteral("only an explicitly edited local profile")));
+
+    profile.provenance = QStringLiteral("user-authored-custom-profile");
+    profile.families.front().name = QStringLiteral("User ground name");
+    CValidationReport saveReport;
+    QVERIFY2(CTerrainAtlasProfileStore::save(profile, root.path(), &saveReport),
+             qPrintable(saveReport.toText()));
+    CValidationReport overrideReport;
+    QVERIFY2(CTerrainAtlasProfileStore::loadExplicitOverride(
+        "ZONE1", hash, 512, &loaded, root.path(), &sourcePath,
+        &overrideReport), qPrintable(overrideReport.toText()));
+    QCOMPARE(loaded.families.front().name, QStringLiteral("User ground name"));
+    QCOMPARE(sourcePath, CTerrainAtlasProfileStore::profilePath(
+        "ZONE1", root.path()));
+
+    CValidationReport mismatchReport;
+    QVERIFY(!CTerrainAtlasProfileStore::loadExplicitOverride(
+        "zone1", QByteArray(64, '0'), 512, &loaded, root.path(),
+        &sourcePath, &mismatchReport));
+    QVERIFY(mismatchReport.hasErrors());
 }
 
 void EnduranceDocumentTests::overlaySculptChangesOnlyActiveOverlayGeometry()

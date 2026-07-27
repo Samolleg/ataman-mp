@@ -25,6 +25,20 @@ enum class ETerrainAtlasUnderwaterRole
     Mixed
 };
 
+enum class ETerrainAtlasProfileSource
+{
+    None,
+    BuiltInDefault,
+    LocalOverride,
+    GeneratedDraft
+};
+
+struct STerrainAtlasProfileSource
+{
+    ETerrainAtlasProfileSource kind{ETerrainAtlasProfileSource::None};
+    QString path;
+};
+
 struct STerrainAtlasProfileFamily
 {
     qint32 id{0};
@@ -109,6 +123,14 @@ public:
     static bool load(const QString& mprNamespace, STerrainAtlasProfile* profile,
                      const QString& rootDirectory = QString(),
                      CValidationReport* report = nullptr);
+    static bool loadExplicitOverride(
+        const QString& mprNamespace,
+        const QByteArray& atlasPixelSha256,
+        int atlasSlotCount,
+        STerrainAtlasProfile* profile,
+        const QString& rootDirectory = QString(),
+        QString* sourcePath = nullptr,
+        CValidationReport* report = nullptr);
 };
 
 class CTerrainAtlasProfileInference

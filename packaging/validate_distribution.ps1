@@ -37,6 +37,10 @@ foreach ($dump in Get-ChildItem -LiteralPath $root -Recurse -File | Where-Object
     $failures.Add("private runtime artifact included: $($dump.FullName.Substring($root.Length + 1))")
 }
 
+foreach ($profile in Get-ChildItem -LiteralPath $root -Recurse -File -Filter '*.semantic-atlas.json') {
+    $failures.Add("pre-shipped local Material atlas override included: $($profile.FullName.Substring($root.Length + 1))")
+}
+
 $versionPath = Join-Path $root 'VERSION'
 if (-not (Test-Path -LiteralPath $versionPath -PathType Leaf)) {
     $failures.Add('VERSION is missing')

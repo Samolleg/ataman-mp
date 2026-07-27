@@ -24,6 +24,7 @@
 #include <QTimer>
 #include <QTreeWidget>
 #include <QVBoxLayout>
+#include <algorithm>
 #include <functional>
 
 #include "endurance_document.h"
@@ -52,6 +53,18 @@ QIcon tileIcon(const QVector<QImage>& images, int slot)
 {
     if(slot < 0 || slot >= images.size()) return QIcon();
     const QPixmap pixmap = QPixmap::fromImage(images.at(slot)).scaled(
+        56, 56, Qt::KeepAspectRatio, Qt::FastTransformation);
+    QIcon icon;
+    icon.addPixmap(pixmap, QIcon::Normal);
+    icon.addPixmap(pixmap, QIcon::Active);
+    icon.addPixmap(pixmap, QIcon::Selected);
+    return icon;
+}
+
+QIcon imageIcon(const QImage& image)
+{
+    if(image.isNull()) return QIcon();
+    const QPixmap pixmap = QPixmap::fromImage(image).scaled(
         56, 56, Qt::KeepAspectRatio, Qt::FastTransformation);
     QIcon icon;
     icon.addPixmap(pixmap, QIcon::Normal);
@@ -240,8 +253,8 @@ private:
 
 CTerrainAtlasReviewDialog::CTerrainAtlasReviewDialog(
     const STerrainAtlasProfile& profile, const QVector<QImage>& tileImages,
-    QWidget* parent)
-    : QDialog(parent), m_profile(profile), m_tileImages(tileImages),
+    const STerrainAtlasProfileSource& source, QWidget* parent)
+    : QDialog(parent), m_profile(profile), m_source(source), m_tileImages(tileImages),
       m_materials(new CAtlasMaterialTree(this)),
       m_unassigned(new CAtlasTilePool(this)), m_preview(new QLabel(this)),
       m_tileTitle(new QLabel(this)), m_tileHelp(new QLabel(this)),
@@ -269,6 +282,7 @@ CTerrainAtlasReviewDialog::CTerrainAtlasReviewDialog(
     layout->addWidget(m_binding);
     m_storage->setTextInteractionFlags(Qt::TextSelectableByMouse);
     m_storage->setWordWrap(true);
+    m_storage->setObjectName(QStringLiteral("materialAtlasSource"));
     layout->addWidget(m_storage);
 
     QHBoxLayout* body = new QHBoxLayout;
@@ -429,6 +443,71 @@ int CTerrainAtlasReviewDialog::familyThumbnailSlot(qint32 familyId) const
     return entry->memberSlots.isEmpty() ? -1 : entry->memberSlots.front();
 }
 
+QImage CTerrainAtlasReviewDialog::familyDisplayThumbnail(qint32 familyId) const
+{
+    CValidationReport report;
+    const STerrainAtlasAnalysis analysis = m_profile.usableAnalysis(&report);
+    const STerrainAtlasMaterial* material = nullptr;
+    for(const STerrainAtlasMaterial& candidate : analysis.materials)
+        if(candidate.id == familyId)
+        {
+            material = &candidate;
+            break;
+        }
+    const int fallback = familyThumbnailSlot(familyId);
+    if(!material)
+        return fallback >= 0 && fallback < m_tileImages.size()
+            ? m_tileImages.at(fallback) : QImage();
+
+    int uniformThumbnail = material->representativeSlot;
+    const STerrainAtlasProfileSlot* preferred = slot(material->thumbnailSlot);
+    if(preferred
+       && preferred->signature.northWest == familyId
+       && preferred->signature.northEast == familyId
+       && preferred->signature.southEast == familyId
+       && preferred->signature.southWest == familyId)
+        uniformThumbnail = preferred->slot;
+    if(!material->cornerOnly && uniformThumbnail >= 0
+       && uniformThumbnail < m_tileImages.size())
+        return m_tileImages.at(uniformThumbnail);
+
+    const CTerrainTransitionCatalog& catalog = material->layer
+            == ETerrainAtlasLayer::Overlay
+        ? analysis.overlayCatalog : analysis.landCatalog;
+    QMap<qint32, int> pureCounts;
+    for(const STerrainAtlasMaterial& candidate : analysis.materials)
+        pureCounts.insert(candidate.id, candidate.pureVariantCount);
+    QSet<qint32> supports;
+    for(const STerrainTransitionSignature& signature : catalog.gridSignatures())
+    {
+        const qint32 corners[] = {signature.northWest, signature.northEast,
+                                  signature.southEast, signature.southWest};
+        int selectedCount = 0;
+        qint32 support = 0;
+        bool oneSupport = true;
+        for(qint32 corner : corners)
+            if(corner == familyId)
+                ++selectedCount;
+            else if(support == 0)
+                support = corner;
+            else
+                oneSupport &= support == corner;
+        if(selectedCount == 1 && oneSupport && support > 0)
+            supports.insert(support);
+    }
+    QVector<qint32> ordered = supports.values().toVector();
+    std::sort(ordered.begin(), ordered.end(), [&pureCounts](qint32 left, qint32 right) {
+        const int leftPure = pureCounts.value(left);
+        const int rightPure = pureCounts.value(right);
+        return leftPure != rightPure ? leftPure > rightPure : left < right;
+    });
+    if(ordered.isEmpty())
+        return fallback >= 0 && fallback < m_tileImages.size()
+            ? m_tileImages.at(fallback) : QImage();
+    return terrainVertexJunctionThumbnail(
+        m_tileImages, catalog, familyId, ordered.front(), fallback);
+}
+
 void CTerrainAtlasReviewDialog::rebuildVisuals(qint32 selectFamily, int selectSlot)
 {
     m_rebuilding = true;
@@ -456,7 +535,7 @@ void CTerrainAtlasReviewDialog::rebuildVisuals(qint32 selectFamily, int selectSl
         QTreeWidgetItem* familyItem = new QTreeWidgetItem(groups[group],
             {entry.name + (entry.ambiguous ? tr("  • confirm") : QString()),
              tr("%1").arg(entry.memberSlots.size())});
-        familyItem->setIcon(0, tileIcon(m_tileImages, thumbnail));
+        familyItem->setIcon(0, imageIcon(familyDisplayThumbnail(entry.id)));
         familyItem->setData(0, KindRole, FamilyKind);
         familyItem->setData(0, IdRole, entry.id);
         const QString sections = entry.landAllowed && entry.overlayAllowed
@@ -511,9 +590,7 @@ void CTerrainAtlasReviewDialog::rebuildVisuals(qint32 selectFamily, int selectSl
         QTreeWidgetItem* parent = selectItem->parent();
         if(parent) parent->setExpanded(true);
     }
-    m_storage->setText(tr("Active profile: %1   (Use Save copy/Load profile for another visible, reopenable location.)")
-        .arg(QDir::toNativeSeparators(
-            CTerrainAtlasProfileStore::profilePath(m_profile.mprNamespace))));
+    updateStorage();
     m_rebuilding = false;
     updateInspector();
     updateDiagnostics();
@@ -577,9 +654,10 @@ void CTerrainAtlasReviewDialog::updateInspector()
         m_tileTitle->setText(selectedFamily
             ? tr("%1 — palette thumbnail").arg(selectedFamily->name)
             : tr("Select a tile"));
-        if(thumbnail >= 0 && thumbnail < m_tileImages.size())
-            m_preview->setPixmap(QPixmap::fromImage(
-                m_tileImages.at(thumbnail)).scaled(
+        const QImage display = selectedFamily
+            ? familyDisplayThumbnail(selectedFamily->id) : QImage();
+        if(!display.isNull())
+            m_preview->setPixmap(QPixmap::fromImage(display).scaled(
                     256, 256, Qt::KeepAspectRatio, Qt::FastTransformation));
         else
         {
@@ -631,6 +709,7 @@ void CTerrainAtlasReviewDialog::assignTile(int tileId, qint32 sourceFamily,
         showReport(tr("Tile was not moved"), report);
         return;
     }
+    markEdited();
     rebuildVisuals(targetFamily, tileId);
 }
 
@@ -642,6 +721,7 @@ void CTerrainAtlasReviewDialog::unassignTile(int tileId)
         showReport(tr("Tile was not unassigned"), report);
         return;
     }
+    markEdited();
     rebuildVisuals(-1, tileId);
 }
 
@@ -654,6 +734,7 @@ void CTerrainAtlasReviewDialog::assignCorner(int corner, qint32 familyId)
         showReport(tr("Corner assignment is not valid"), report);
         return;
     }
+    markEdited();
     rebuildVisuals(familyId, m_selectedSlot);
 }
 
@@ -698,6 +779,7 @@ void CTerrainAtlasReviewDialog::renameSelectedFamily()
     selected->name = name;
     selected->ambiguous = false;
     m_profile.approved = false;
+    markEdited();
     rebuildVisuals(id);
 }
 
@@ -717,6 +799,7 @@ void CTerrainAtlasReviewDialog::createMaterial()
     created.ambiguous = true;
     m_profile.families.append(created);
     m_profile.approved = false;
+    markEdited();
     rebuildVisuals(id);
 }
 
@@ -741,6 +824,7 @@ void CTerrainAtlasReviewDialog::deleteSelectedFamily()
         {
             m_profile.families.removeAt(index);
             m_profile.approved = false;
+            markEdited();
             break;
         }
     rebuildVisuals();
@@ -786,6 +870,7 @@ void CTerrainAtlasReviewDialog::changeSelectedClassification(int index)
     selected->underwaterRole = changed->underwaterRole;
     selected->ambiguous = false;
     m_profile.approved = false;
+    markEdited();
     rebuildVisuals(selected->id);
 }
 
@@ -796,6 +881,7 @@ void CTerrainAtlasReviewDialog::confirmSelectedFamily()
     const qint32 id = selected->id;
     selected->ambiguous = false;
     m_profile.approved = false;
+    markEdited();
     rebuildVisuals(id);
 }
 
@@ -808,6 +894,7 @@ void CTerrainAtlasReviewDialog::useSelectedTileAsThumbnail()
         showReport(tr("Thumbnail was not changed"), report);
         return;
     }
+    markEdited();
     rebuildVisuals(familyId, m_selectedSlot);
 }
 
@@ -836,11 +923,14 @@ void CTerrainAtlasReviewDialog::updateDiagnostics()
 
 void CTerrainAtlasReviewDialog::applyAndClose()
 {
-    // Approval is derived metadata, not a second user workflow. The profile is
-    // always saveable; incomplete/unusual slots remain visibly unassigned.
-    // Applying also promotes the profile above auto-inference provenance so a
-    // later parser revision never discards explicit names/corner corrections.
-    m_profile.provenance = QStringLiteral("user-authored-custom-profile");
+    // Approval is derived metadata, not a second user workflow. Applying an
+    // untouched built-in default is a no-op; edits and generated drafts become
+    // explicit local overrides so later inference never discards them.
+    m_persistOverride = m_modified
+        || m_source.kind == ETerrainAtlasProfileSource::LocalOverride
+        || m_source.kind == ETerrainAtlasProfileSource::GeneratedDraft;
+    if(m_persistOverride)
+        m_profile.provenance = QStringLiteral("user-authored-custom-profile");
     m_profile.approved = true;
     CValidationReport report;
     if(!m_profile.approvedAnalysis(&report).usable)
@@ -882,8 +972,42 @@ void CTerrainAtlasReviewDialog::openProfile()
         return;
     }
     m_profile = loaded;
+    m_source.kind = ETerrainAtlasProfileSource::LocalOverride;
+    m_source.path = path;
+    m_modified = true;
     m_selectedSlot = -1;
     rebuildVisuals();
+}
+
+void CTerrainAtlasReviewDialog::markEdited()
+{
+    m_modified = true;
+    updateStorage();
+}
+
+void CTerrainAtlasReviewDialog::updateStorage()
+{
+    const QString overridePath = CTerrainAtlasProfileStore::profilePath(
+        m_profile.mprNamespace);
+    if(m_source.kind == ETerrainAtlasProfileSource::LocalOverride)
+    {
+        const QString path = m_source.path.isEmpty() ? overridePath : m_source.path;
+        m_storage->setText(tr("Source: Local override — %1")
+            .arg(QDir::toNativeSeparators(path)));
+    }
+    else if(m_source.kind == ETerrainAtlasProfileSource::BuiltInDefault)
+    {
+        m_storage->setText(m_modified
+            ? tr("Source: Built-in default (edited). Apply + Close will create a local override at %1.")
+                .arg(QDir::toNativeSeparators(overridePath))
+            : tr("Source: Built-in default. No local override is loaded. Editing and applying will create one at %1.")
+                .arg(QDir::toNativeSeparators(overridePath)));
+    }
+    else
+    {
+        m_storage->setText(tr("Source: Generated draft for this atlas. Apply + Close will create a local override at %1.")
+            .arg(QDir::toNativeSeparators(overridePath)));
+    }
 }
 
 void CTerrainAtlasReviewDialog::showReport(const QString& title,

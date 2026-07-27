@@ -886,6 +886,34 @@ bool CTerrainAtlasProfileStore::load(const QString& mprNamespace,
     return STerrainAtlasProfile::load(profilePath(mprNamespace, rootDirectory), profile, report);
 }
 
+bool CTerrainAtlasProfileStore::loadExplicitOverride(
+    const QString& mprNamespace, const QByteArray& atlasPixelSha256,
+    int atlasSlotCount, STerrainAtlasProfile* profile,
+    const QString& rootDirectory, QString* sourcePath,
+    CValidationReport* report)
+{
+    const QString path = profilePath(mprNamespace, rootDirectory);
+    if(!QFileInfo::exists(path) || !profile)
+        return false;
+    STerrainAtlasProfile loaded;
+    if(!STerrainAtlasProfile::load(path, &loaded, report))
+        return false;
+    if(loaded.provenance != QStringLiteral("user-authored-custom-profile"))
+    {
+        if(report) report->add("terrain.atlas_profile_not_explicit_override",
+            EValidationSeverity::Warning,
+            "A stored generated/default profile was ignored; only an explicitly edited local profile may override the built-in Material atlas",
+            path);
+        return false;
+    }
+    if(!loaded.validateBinding(mprNamespace, atlasPixelSha256,
+                               atlasSlotCount, report))
+        return false;
+    *profile = loaded;
+    if(sourcePath) *sourcePath = path;
+    return true;
+}
+
 bool STerrainAtlasProfile::validateBinding(const QString& currentNamespace,
                                            const QByteArray& currentHash,
                                            int currentSlotCount,

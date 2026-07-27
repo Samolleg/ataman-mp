@@ -20,9 +20,11 @@ class CTerrainAtlasReviewDialog : public QDialog
 public:
     CTerrainAtlasReviewDialog(const STerrainAtlasProfile& profile,
                               const QVector<QImage>& tileImages,
+                              const STerrainAtlasProfileSource& source = STerrainAtlasProfileSource(),
                               QWidget* parent = nullptr);
 
     const STerrainAtlasProfile& reviewedProfile() const { return m_profile; }
+    bool shouldPersistOverride() const { return m_persistOverride; }
 
 private slots:
     void selectTreeItem(QTreeWidgetItem* item);
@@ -46,6 +48,7 @@ private:
     void assignCorner(int corner, qint32 familyId);
     void chooseCornerMaterial(int corner);
     int familyThumbnailSlot(qint32 familyId) const;
+    QImage familyDisplayThumbnail(qint32 familyId) const;
     qint32 selectedFamilyId() const;
     STerrainAtlasProfileFamily* family(qint32 id);
     const STerrainAtlasProfileFamily* family(qint32 id) const;
@@ -53,8 +56,11 @@ private:
     const STerrainAtlasProfileSlot* slot(int id) const;
     QString familyName(qint32 id) const;
     void showReport(const QString& title, const CValidationReport& report);
+    void markEdited();
+    void updateStorage();
 
     STerrainAtlasProfile m_profile;
+    STerrainAtlasProfileSource m_source;
     QVector<QImage> m_tileImages;
     CAtlasMaterialTree* m_materials;
     CAtlasTilePool* m_unassigned;
@@ -72,6 +78,8 @@ private:
     CFamilyCornerButton* m_corners[4];
     int m_selectedSlot{-1};
     bool m_rebuilding{false};
+    bool m_modified{false};
+    bool m_persistOverride{false};
 };
 
 #endif

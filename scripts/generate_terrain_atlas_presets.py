@@ -52,9 +52,14 @@ def read_member(path: Path, record: dict) -> bytes:
 
 def rgb565(values: np.ndarray) -> np.ndarray:
     values = values.astype(np.uint16)
-    red = (((values >> 11) & 31).astype(np.uint16) * 255 + 15) // 31
-    green = (((values >> 5) & 63).astype(np.uint16) * 255 + 31) // 63
-    blue = ((values & 31).astype(np.uint16) * 255 + 15) // 31
+    # Match resourcemanager.cpp's extractColor exactly. Its operands are
+    # integers, so the division truncates before the nominal +0.5 is applied.
+    # Rounding here produces visually indistinguishable pixels but a different
+    # exact binding hash, causing every shipped preset to be rejected at run
+    # time and silently replaced by inference or a legacy namespace table.
+    red = (((values >> 11) & 31).astype(np.uint16) * 255) // 31
+    green = (((values >> 5) & 63).astype(np.uint16) * 255) // 63
+    blue = ((values & 31).astype(np.uint16) * 255) // 31
     alpha = np.full_like(red, 255)
     return np.stack((red, green, blue, alpha), axis=1).astype(np.uint8)
 

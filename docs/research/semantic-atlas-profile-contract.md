@@ -1,8 +1,10 @@
 # Material atlas profile contract
 
-Endurance first resolves an exact namespace, decoded-pixel hash, and slot-count
-binding against its compact known-map preset catalog. A matching preset is
-immediately approved and usable. Modified and custom atlases fall back to
+Endurance first checks for an exact-bound explicitly user-authored local
+override, then resolves the namespace, decoded-pixel hash, and slot-count
+binding against its compact known-map preset catalog. A matching preset is the
+immutable built-in default and is immediately approved and usable. Modified and
+custom atlases fall back to
 deterministic inference from decoded atlas tiles, the MPR's per-slot category
 metadata, and packed tile usage observed in the open map. Zone 1's authored
 table is the behavioral oracle for translating either source into the painting
@@ -45,19 +47,28 @@ to a catalog, and visual editing rejects such a change before mutation.
 
 The built-in catalog covers all 38 reviewed installed namespaces and stores
 derived names and corner-family IDs only. Profiles contain metadata only—never atlas imagery, MPR/SEC payloads, resource
-archives, or installation paths. The managed profile lives below the
-application configuration directory in `terrain-atlas-profiles`, under a
-sanitized namespace plus namespace hash. The Material Atlas window shows that
-path and can save and reopen profile copies at user-chosen locations. Loading a
-copy revalidates all three binding fields; its outer filename is irrelevant.
+archives, or installation paths. Runtime never falls back to legacy authored
+slot tables when an exact preset is missing. The managed local override lives
+below the application configuration directory in `terrain-atlas-profiles`,
+under a sanitized namespace plus namespace hash. Built-in defaults do not
+create files when merely viewed or applied unchanged. Landscape Tools and the
+Material Atlas window identify the active source; a local override shows its
+path. The window can save and reopen profile copies at user-chosen locations.
+Loading a copy revalidates all three binding fields; its outer filename is
+irrelevant. Only `user-authored-custom-profile` provenance can override a
+built-in default, and distribution packages must contain no local override
+files.
 
 The editor uses a visual material tree, assigned tile thumbnails, an unassigned
 pool, and four droppable/clickable corner targets. Material confirmation is a single
 explicit action only when identity or classification remains unresolved. Whole
 tile moves and corner changes recompute family membership automatically. Paint
-palette previews are four-tile size-1 vertex junctions. When a transition-only
-family has several authored 1-on-3 supports, the UI exposes contextual cards
-under one profile family ID rather than inventing duplicate semantic families.
+palette previews use the lowest uniform four-corner tile when one exists. A
+transition-only family instead uses a four-tile size-1 vertex junction when a
+valid 1-on-3 support exists. When several supports exist, the UI exposes
+contextual cards under one profile family ID rather than inventing duplicate
+semantic families. A family with neither uniform nor 1-on-3 support remains
+visible for review/debug but does not become an unusable palette brush.
 
 Semantic painting uses one shared vertex-region resolver for ordinary and
 transition-only families. The brush assigns material identities to terrain

@@ -88,7 +88,9 @@ public:
                            const QVector<STerrainPaintMaterialChoice>& underwaterTypes,
                            const QVector<STerrainPaintMaterialChoice>& overlayTypes,
                            int assignedSlots, int totalSlots,
-                           const QString& status = QString());
+                           const QString& status = QString(),
+                           const QString& atlasSource = QString(),
+                           const QString& atlasSourcePath = QString());
     bool selectPaintTerrainType(qint32 terrainType);
     bool underwaterFamiliesVisible() const;
     void setUnderwaterFamiliesVisible(bool visible);

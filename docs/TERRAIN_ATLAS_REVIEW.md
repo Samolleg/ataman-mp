@@ -5,10 +5,11 @@ edit or generate atlas imagery. It builds a material catalog describing which
 existing slots represent Ground, Underwater, or Overlay materials and which
 material appears at each tile corner.
 
-Zone 1 is the authored behavioral baseline. Its supplied definition opens with
-the same names, assignments, layers, and thumbnails used by the paint palette
-and can be saved unchanged. Other namespaces use the same parser and catalog;
-they do not require a per-zone painting algorithm.
+Zone 1 is the authored behavioral baseline. Every reviewed installed namespace
+has an exact-bound built-in default with the same names, assignments, layers,
+and thumbnails used by the paint palette. Other namespaces use the same parser
+and catalog; they do not require a per-zone painting algorithm. Legacy authored
+slot tables are not runtime fallbacks.
 
 ## Painting
 
@@ -17,14 +18,17 @@ Underwater materials remain visible in their own palette sections. Overlay
 materials appear only in Overlay mode, so a ground texture cannot be painted as
 an overlay or vice versa.
 
-Each material is a pressed thumbnail button. The palette composes four authored
-tiles around one painted vertex, so the preview shows the result of a size-1
-brush instead of one isolated atlas slot. Every valid 1-on-3 relationship can
-produce a contextual vertex card. This includes a transition-only center family
+Each material is a pressed thumbnail button. A family with a uniform four-corner
+tile uses the lowest valid uniform slot as its default thumbnail (or the user's
+chosen uniform slot). A family with no uniform tile but a valid 1-on-3
+relationship uses a four-tile vertex-centred preview of its size-1 stamp. This
+includes a transition-only centre family
 (for example, **Irregular on Dark**) and the inverse case where the center has
 ordinary uniform tiles but its support does not (for example, **Stone on
 Ground**). These cards rotate the one authored tile around a vertex to form the
-complete four-tile junction. They do not duplicate or merge profile assignments.
+complete four-tile junction. A family with neither kind of authored support is
+kept for review/debug but is not offered as a brush. Contextual cards do not
+duplicate or merge profile assignments.
 Hovering shows the exact card name and assigned-slot count.
 
 All semantic material brushes operate on terrain vertices. Size 1 selects the
@@ -96,13 +100,24 @@ all dependent memberships automatically.
 
 ## Saving and profile identity
 
-**Apply + Close** writes the current profile to the visible managed path and
-refreshes the paint palette. Approval is derived from whether its active
-assignments are structurally valid; it is not a separate authoring action.
-Unassigned unusual tiles remain excluded. **Save copy...** chooses another
-location and **Load profile...** reopens such a copy.
+The built-in default is immutable and is not a local override. Opening it and
+choosing **Apply + Close** without editing creates no file and leaves the default
+active. Editing the default, applying a generated draft, or applying an already
+loaded local profile writes an explicit local override to the visible managed
+path and refreshes the paint palette. Approval is derived from whether its
+active assignments are structurally valid; it is not a separate authoring
+action. Unassigned unusual tiles remain excluded. **Save copy...** chooses
+another location and **Load profile...** opens such a copy as an explicit local
+override.
 
-Profile schema 6 records tile-preview corner space explicitly as well as
+Landscape Tools labels the active source beside **Material atlas...** as
+**Default atlas**, **Generated draft**, or **Local override: filename**. The
+dialog repeats that source and shows the full local path. Only an exact-bound
+profile with explicit user-authored provenance may override a built-in default;
+generated/default cache files from older builds are ignored. Distribution
+packages contain no local override profiles.
+
+Profile schema 7 records tile-preview corner space explicitly as well as
 whether an authored internal family is paint selectable. Pixel-inferred legacy
 profiles already contain visual corners and keep them unchanged. Known authored
 profiles are reflected once from their former paint-grid representation while

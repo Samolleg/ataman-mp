@@ -6376,6 +6376,7 @@ void CView::rebuildTerrainAutoCatalog()
 {
     m_terrainAtlasAnalysis = STerrainAtlasAnalysis();
     m_terrainAtlasProfile = STerrainAtlasProfile();
+    m_terrainAtlasProfileSource = STerrainAtlasProfileSource();
     m_terrainMaterialRepresentatives.clear();
     m_terrainPaintAudit.clear();
     m_terrainPaintActions.clear();
@@ -6401,39 +6402,39 @@ void CView::rebuildTerrainAutoCatalog()
     bool reviewedProfileActive = false;
     bool provisionalProfileActive = false;
     bool staleProfile = false;
-    // The authored table is the first-run oracle. An exact-bound saved profile
-    // may intentionally customize it and therefore takes precedence on reopen.
-    const STerrainAtlasAnalysis authoredAnalysis = CTerrainAtlasAnalyzer::analyze(
-        mprNamespace, slotCount, &report);
-    const bool authoredTemplateAvailable = authoredAnalysis.usable;
-    bool authoredTemplateActive = false;
-    if(QFileInfo::exists(profilePath))
+    bool builtInDefaultActive = false;
+
+    // Shipped presets are immutable defaults. Only a profile explicitly
+    // promoted by Material Atlas editing may override one, and its local path
+    // remains visible in both Landscape Tools and the review window.
+    STerrainAtlasProfile stored;
+    QString storedPath;
+    CValidationReport storedReport;
+    if(CTerrainAtlasProfileStore::loadExplicitOverride(
+           mprNamespace, atlasHash, slotCount, &stored, QString(),
+           &storedPath, &storedReport))
     {
-        STerrainAtlasProfile stored;
-        CValidationReport storedReport;
-        if(CTerrainAtlasProfileStore::load(mprNamespace, &stored, QString(), &storedReport)
-           && stored.validateBinding(mprNamespace, atlasHash, slotCount, &storedReport)
-           && CTerrainAtlasProfileInference::isCompatibleInferenceProvenance(
-                  stored.provenance))
+        m_terrainAtlasProfile = stored;
+        m_terrainAtlasAnalysis = m_terrainAtlasProfile.usableAnalysis(&storedReport);
+        reviewedProfileActive = m_terrainAtlasAnalysis.usable;
+        provisionalProfileActive = reviewedProfileActive
+            && (!stored.approved || stored.assignedSlotCount() < stored.atlasSlotCount);
+        m_terrainAtlasProfileSource.kind = ETerrainAtlasProfileSource::LocalOverride;
+        m_terrainAtlasProfileSource.path = storedPath;
+        if(!reviewedProfileActive)
         {
-            m_terrainAtlasProfile = stored;
-            m_terrainAtlasAnalysis =
-                m_terrainAtlasProfile.usableAnalysis(&storedReport);
-            reviewedProfileActive = m_terrainAtlasAnalysis.usable;
-            provisionalProfileActive = reviewedProfileActive
-                && (!stored.approved
-                    || stored.assignedSlotCount() < stored.atlasSlotCount);
-            if(stored.approved && !reviewedProfileActive)
-            {
-                m_terrainAtlasProfile.approved = false;
-                staleProfile = true;
-            }
-        }
-        else
+            m_terrainAtlasProfile.approved = false;
             staleProfile = true;
-        for(const SValidationFinding& finding : storedReport.findings())
-            report.add(finding.code, finding.severity, finding.message, finding.location);
+            m_terrainAtlasProfile = STerrainAtlasProfile();
+            m_terrainAtlasAnalysis = STerrainAtlasAnalysis();
+            m_terrainAtlasProfileSource = STerrainAtlasProfileSource();
+        }
     }
+    else
+        staleProfile = QFileInfo::exists(profilePath);
+    for(const SValidationFinding& finding : storedReport.findings())
+        report.add(finding.code, finding.severity, finding.message, finding.location);
+
     if(m_terrainAtlasProfile.slotDefinitions.isEmpty())
     {
         m_terrainAtlasProfile = CTerrainAtlasPresetCatalog::exactProfile(
@@ -6441,16 +6442,10 @@ void CView::rebuildTerrainAutoCatalog()
         if(!m_terrainAtlasProfile.slotDefinitions.isEmpty())
         {
             m_terrainAtlasAnalysis = m_terrainAtlasProfile.usableAnalysis(&report);
-            authoredTemplateActive = m_terrainAtlasAnalysis.usable;
+            builtInDefaultActive = m_terrainAtlasAnalysis.usable;
+            m_terrainAtlasProfileSource.kind =
+                ETerrainAtlasProfileSource::BuiltInDefault;
         }
-    }
-    if(m_terrainAtlasProfile.slotDefinitions.isEmpty() && authoredTemplateAvailable)
-    {
-        m_terrainAtlasProfile = CTerrainAtlasProfileInference::fromAuthoredAnalysis(
-            mprNamespace, atlasHash, slotCount, authoredAnalysis, &report);
-        m_terrainAtlasAnalysis =
-            m_terrainAtlasProfile.usableAnalysis(&report);
-        authoredTemplateActive = true;
     }
     if(m_terrainAtlasProfile.slotDefinitions.isEmpty())
     {
@@ -6461,8 +6456,10 @@ void CView::rebuildTerrainAutoCatalog()
             m_terrainAtlasProfile.usableAnalysis(&report);
         reviewedProfileActive = m_terrainAtlasAnalysis.usable;
         provisionalProfileActive = reviewedProfileActive;
+        m_terrainAtlasProfileSource.kind =
+            ETerrainAtlasProfileSource::GeneratedDraft;
     }
-    else if(!authoredTemplateActive && !reviewedProfileActive)
+    else if(!builtInDefaultActive && !reviewedProfileActive)
         m_terrainAtlasAnalysis = STerrainAtlasAnalysis();
     QVector<STerrainPaintMaterialChoice> landChoices;
     QVector<STerrainPaintMaterialChoice> underwaterChoices;
@@ -6517,8 +6514,6 @@ void CView::rebuildTerrainAutoCatalog()
         QVector<QPair<qint32, bool>> displayedSupports;
         if(material.cornerOnly)
         {
-            if(supports.isEmpty())
-                supports.append(material.id);
             for(qint32 support : supports)
                 displayedSupports.append(qMakePair(support, true));
         }
@@ -6550,9 +6545,27 @@ void CView::rebuildTerrainAutoCatalog()
                         support, tr("material %1").arg(support)));
             choice.assignedSlots = assignedByFamily.value(material.id);
             choice.cornerOnly = material.cornerOnly;
-            choice.thumbnail = terrainVertexJunctionThumbnail(
-                m_pTileForm->tileImages(), catalog, material.id, support,
-                thumbnailSlot);
+            int uniformThumbnail = material.representativeSlot;
+            if(material.thumbnailSlot >= 0)
+                for(const STerrainAtlasProfileSlot& definition :
+                    m_terrainAtlasProfile.slotDefinitions)
+                    if(definition.slot == material.thumbnailSlot
+                       && definition.signature.northWest == material.id
+                       && definition.signature.northEast == material.id
+                       && definition.signature.southEast == material.id
+                       && definition.signature.southWest == material.id)
+                    {
+                        uniformThumbnail = material.thumbnailSlot;
+                        break;
+                    }
+            if(!choice.contextualStamp && uniformThumbnail >= 0
+               && uniformThumbnail < m_pTileForm->tileImages().size())
+                choice.thumbnail = m_pTileForm->tileImages().at(
+                    uniformThumbnail);
+            else
+                choice.thumbnail = terrainVertexJunctionThumbnail(
+                    m_pTileForm->tileImages(), catalog, material.id, support,
+                    thumbnailSlot);
             choices.append(choice);
         }
         m_terrainMaterialRepresentatives.insert(material.id, material.representativeSlot);
@@ -6563,28 +6576,41 @@ void CView::rebuildTerrainAutoCatalog()
               .arg(landChoices.size()).arg(overlayChoices.size())
         : tr("No structurally valid material is available for namespace '%1'. Open Material atlas to assign one; manual atlas tile mode remains available.")
               .arg(mprNamespace);
-    if(authoredTemplateActive)
-        status = tr("Authored atlas layout loaded: %1 land and %2 overlay materials.")
+    if(builtInDefaultActive)
+        status = tr("Default Material atlas loaded: %1 land and %2 overlay materials.")
             .arg(landChoices.size()).arg(overlayChoices.size());
     else if(reviewedProfileActive)
-        status = provisionalProfileActive
+        status = m_terrainAtlasProfileSource.kind
+                    == ETerrainAtlasProfileSource::LocalOverride
+            ? tr("Local Material atlas override loaded: %1 land and %2 overlay materials.")
+                .arg(landChoices.size()).arg(overlayChoices.size())
+            : (provisionalProfileActive
             ? tr("Generated material atlas ready: %1 land and %2 overlay materials; %3 of %4 atlas slots assigned.")
                 .arg(landChoices.size()).arg(overlayChoices.size())
                 .arg(m_terrainAtlasProfile.assignedSlotCount())
                 .arg(m_terrainAtlasProfile.atlasSlotCount)
             : tr("Saved material atlas loaded: %1 land and %2 overlay materials.")
-                .arg(landChoices.size()).arg(overlayChoices.size());
+                .arg(landChoices.size()).arg(overlayChoices.size()));
     else if(staleProfile)
         status += tr(" A saved auto-inferred profile is obsolete or failed its namespace/hash/slot binding; review the new proposal before use.");
     else if(!m_terrainAtlasProfile.slotDefinitions.isEmpty())
         status += tr(" No safe uniform material could be identified; open Material atlas to assign one.");
+    QString sourceLabel;
+    if(m_terrainAtlasProfileSource.kind == ETerrainAtlasProfileSource::BuiltInDefault)
+        sourceLabel = tr("Default atlas");
+    else if(m_terrainAtlasProfileSource.kind == ETerrainAtlasProfileSource::LocalOverride)
+        sourceLabel = tr("Local override: %1").arg(
+            QFileInfo(m_terrainAtlasProfileSource.path).fileName());
+    else if(m_terrainAtlasProfileSource.kind == ETerrainAtlasProfileSource::GeneratedDraft)
+        sourceLabel = tr("Generated draft");
     m_landscapeTools->setPaintMaterials(
         landChoices, underwaterChoices, overlayChoices,
         m_terrainAtlasProfile.assignedSlotCount(),
-        m_terrainAtlasProfile.atlasSlotCount, status);
+        m_terrainAtlasProfile.atlasSlotCount, status, sourceLabel,
+        m_terrainAtlasProfileSource.path);
     updateTerrainAtlasViewerAnnotations(status);
     ei::log(report.hasErrors() ? eLogWarning : eLogInfo,
-        QString("Terrain namespace template: %1, %2 land materials, %3 overlay materials, %4/%5 described slots%6")
+        QString("Material atlas source: %1, %2 land materials, %3 overlay materials, %4/%5 described slots%6")
             .arg(m_terrainAtlasAnalysis.templateName)
             .arg(landChoices.size()).arg(overlayChoices.size())
             .arg(m_terrainAtlasAnalysis.describedSlots).arg(m_terrainAtlasAnalysis.expectedSlots)
@@ -6628,20 +6654,32 @@ void CView::reviewTerrainAtlasProfile()
     const QString mprNamespace = m_mprDocument.mapInfo().innerNamespace;
     const QByteArray hash = CTerrainAtlasProfileInference::pixelSha256(m_pTileForm->tileImages());
     STerrainAtlasProfile profile = m_terrainAtlasProfile;
+    STerrainAtlasProfileSource source = m_terrainAtlasProfileSource;
     CValidationReport report;
     if(profile.slotDefinitions.isEmpty()
        || !profile.validateBinding(mprNamespace, hash, m_pTileForm->tileImages().size(), &report))
     {
         profile = CTerrainAtlasPresetCatalog::exactProfile(
             mprNamespace, hash, m_pTileForm->tileImages().size(), &report);
+        source.kind = ETerrainAtlasProfileSource::BuiltInDefault;
+        source.path.clear();
         if(profile.slotDefinitions.isEmpty())
+        {
             profile = CTerrainAtlasProfileInference::propose(
                 mprNamespace, m_pTileForm->tileImages(), m_mprDocument.mapInfo().tileTypes,
                 terrainAtlasUsage(), &report);
+            source.kind = ETerrainAtlasProfileSource::GeneratedDraft;
+        }
     }
-    CTerrainAtlasReviewDialog dialog(profile, m_pTileForm->tileImages(), this);
+    CTerrainAtlasReviewDialog dialog(profile, m_pTileForm->tileImages(), source, this);
     if(dialog.exec() != QDialog::Accepted) return;
     const STerrainAtlasProfile reviewed = dialog.reviewedProfile();
+    if(!dialog.shouldPersistOverride())
+    {
+        rebuildTerrainAutoCatalog();
+        emit updateMsg(tr("Built-in Material atlas remains active; no local override was created."));
+        return;
+    }
     CValidationReport saveReport;
     if(!CTerrainAtlasProfileStore::save(reviewed, QString(), &saveReport))
     {

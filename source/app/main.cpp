@@ -17,6 +17,7 @@
 #include <QHeaderView>
 #include <QKeySequenceEdit>
 #include <QLineEdit>
+#include <QLabel>
 #include <QTemporaryDir>
 #include <QUndoCommand>
 #include <QUndoStack>
@@ -1061,6 +1062,23 @@ int runHeadlessCommand(QApplication& app)
             && landscapeTools.selectPaintTerrainType(9)
             && landscapeTools.paintTerrainType(&irregularSelected) == 9
             && irregularSelected;
+        QLabel* atlasSourceStatus =
+            landscapeTools.findChild<QLabel*>("materialAtlasSourceStatus");
+        landscapeTools.setPaintMaterials(
+            {irregularOnDark}, {}, {}, 512, 512, QString(),
+            QStringLiteral("Default atlas"));
+        const bool defaultAtlasSourceVisible = atlasSourceStatus
+            && atlasSourceStatus->text().contains(QStringLiteral("Default atlas"));
+        const QString localAtlasPath = QStringLiteral(
+            "C:/test/profiles/zone2.semantic-atlas.json");
+        landscapeTools.setPaintMaterials(
+            {irregularOnDark}, {}, {}, 512, 512, QString(),
+            QStringLiteral("Local override: zone2.semantic-atlas.json"),
+            localAtlasPath);
+        const bool localAtlasSourceVisible = atlasSourceStatus
+            && atlasSourceStatus->text().contains(QStringLiteral("Local override"))
+            && atlasSourceStatus->toolTip().contains(
+                QDir::toNativeSeparators(localAtlasPath));
         bool semanticAtlasReviewRequested = false;
         QObject::connect(&landscapeTools, &CLandscapeTools::atlasProfileReviewRequested,
                          [&semanticAtlasReviewRequested]() {
@@ -1271,6 +1289,8 @@ int runHeadlessCommand(QApplication& app)
             && overlaySurfaceToolSeparate
             && programmaticModeRefreshesMaterials
             && contextualMaterialVariantsSelectable
+            && defaultAtlasSourceVisible
+            && localAtlasSourceVisible
                 && materialAtlasActionWorks
                 && logicPointUndoAtomic && logicPointRedoAtomic;
         QTextStream output(stdout);
@@ -1349,6 +1369,8 @@ int runHeadlessCommand(QApplication& app)
                << programmaticModeRefreshesMaterials
                << " contextualMaterialVariantsSelectable="
                << contextualMaterialVariantsSelectable
+               << " defaultAtlasSourceVisible=" << defaultAtlasSourceVisible
+               << " localAtlasSourceVisible=" << localAtlasSourceVisible
                << " materialAtlasActionWorks=" << materialAtlasActionWorks
                << " logicPointUndoAtomic=" << logicPointUndoAtomic
                << " logicPointRedoAtomic=" << logicPointRedoAtomic << "\n"

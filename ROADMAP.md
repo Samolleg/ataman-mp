@@ -462,8 +462,13 @@ must not independently change its shaders or animation policy.
   confirmation, and persistent manually selected uniform thumbnails.
 - [x] Keep profiles exact-bound to namespace, decoded atlas hash, and slot
   count; show the managed location and support saving/reopening chosen profile
-  copies. A supplied or authored Zone 1 profile opens saveable without changing
-  its parser-produced assignments.
+  copies. All reviewed installed namespaces use exact shipped defaults; only an
+  explicitly edited exact-bound local profile may override one. Show that source
+  and path in the UI, never pre-ship local overrides, and never fall back to a
+  legacy authored slot table.
+- [x] Keep Material Atlas and paint-palette previews consistent: use a uniform
+  four-corner tile when available, otherwise a vertex-centred 1-on-3 motif; do
+  not expose unsupported corner-only families as unusable brushes.
 
 ## Overlay surfaces and materials
 

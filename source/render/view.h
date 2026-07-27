@@ -537,6 +537,7 @@ private:
     CTerrainEditModel m_terrainEdit;
     STerrainAtlasAnalysis m_terrainAtlasAnalysis;
     STerrainAtlasProfile m_terrainAtlasProfile;
+    STerrainAtlasProfileSource m_terrainAtlasProfileSource;
     QString m_lastAtlasReviewPromptBinding;
     QMap<qint32, int> m_terrainMaterialRepresentatives;
     QVector<STerrainTileDelta> m_terrainPaintAudit;

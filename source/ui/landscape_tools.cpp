@@ -5,6 +5,7 @@
 #include <QButtonGroup>
 #include <QComboBox>
 #include <QDoubleSpinBox>
+#include <QDir>
 #include <QFormLayout>
 #include <QGridLayout>
 #include <QHBoxLayout>
@@ -381,6 +382,7 @@ quint16 CLandscapeTools::flattenHeight() const { return quint16(m_flatten->value
 bool CLandscapeTools::flipHeightmapVertically() const { return m_flipVertical->isChecked(); }
 float CLandscapeTools::paintRadius() const
 {
+    m_atlasCoverage->setObjectName(QStringLiteral("materialAtlasSourceStatus"));
     // UI size 1 is one terrain vertex. The terrain model uses a zero-based
     // radius so subsequent integer sizes grow symmetrically around it.
     return float(m_paintRadius->value() - 1.0);
@@ -508,18 +510,25 @@ void CLandscapeTools::setPaintMaterials(
     const QVector<STerrainPaintMaterialChoice>& landTypes,
     const QVector<STerrainPaintMaterialChoice>& underwaterTypes,
     const QVector<STerrainPaintMaterialChoice>& overlayTypes,
-    int assignedSlots, int totalSlots, const QString& status)
+    int assignedSlots, int totalSlots, const QString& status,
+    const QString& atlasSource, const QString& atlasSourcePath)
 {
     m_landPaintTypes = landTypes;
     m_underwaterPaintTypes = underwaterTypes;
     m_overlayPaintTypes = overlayTypes;
     m_paintCatalogStatus = status;
-    m_atlasCoverage->setText(totalSlots > 0
+    QString coverage = totalSlots > 0
         ? tr("%1 / %2 assigned%3").arg(assignedSlots).arg(totalSlots)
               .arg(assignedSlots < totalSlots
                    ? tr(" (%1 unassigned)").arg(totalSlots - assignedSlots)
                    : QString())
-        : tr("No atlas loaded"));
+        : tr("No atlas loaded");
+    if(!atlasSource.isEmpty())
+        coverage += QStringLiteral("  ·  ") + atlasSource;
+    m_atlasCoverage->setText(coverage);
+    m_atlasCoverage->setToolTip(atlasSourcePath.isEmpty()
+        ? atlasSource : tr("Local override:\n%1").arg(
+              QDir::toNativeSeparators(atlasSourcePath)));
     rebuildMaterialPalette();
     refreshPaintTerrainTypes();
 }
