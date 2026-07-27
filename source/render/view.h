@@ -302,6 +302,7 @@ protected:
     void resizeGL(int width, int height) override;
     void keyPressEvent(QKeyEvent* event) override;
     void keyReleaseEvent(QKeyEvent* event) override;
+    bool eventFilter(QObject* watched, QEvent* event) override;
     void mousePressEvent(QMouseEvent* event) override;
     void mouseMoveEvent(QMouseEvent* event) override;
     void mouseReleaseEvent(QMouseEvent* event) override;
@@ -350,6 +351,7 @@ private:
     quint16 rawTerrainHeight(float worldHeight) const;
     void finishSculptStroke();
     void syncLandscapeToolState();
+    bool handleLandscapeShortcut(QKeyEvent* event, bool pressed);
     void clearLandscapeBrushSelection();
     void ensureManualTileSelection();
     void rebuildTerrainAutoCatalog();

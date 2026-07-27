@@ -62,10 +62,11 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     modeForm->addRow(tr("Landscape tool"), m_mode);
     layout->addLayout(modeForm);
 
-    m_tool->addItem(tr("Raise"));
-    m_tool->addItem(tr("Lower"));
-    m_tool->addItem(tr("Flatten"));
-    m_tool->addItem(tr("Smooth"));
+    m_tool->setObjectName(QStringLiteral("landscapeSculptTool"));
+    m_tool->addItem(tr("Raise"), int(ELandscapeSculptTool::Raise));
+    m_tool->addItem(tr("Lower"), int(ELandscapeSculptTool::Lower));
+    m_tool->addItem(tr("Smooth"), int(ELandscapeSculptTool::Smooth));
+    m_tool->addItem(tr("Flatten"), int(ELandscapeSculptTool::Flatten));
     m_radius->setRange(0.5, 64.0);
     m_radius->setValue(4.0);
     m_radius->setSingleStep(0.5);
@@ -75,9 +76,11 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     m_strength->setDecimals(2);
     m_delta->setRange(1.0, 10000.0);
     m_delta->setValue(180.0);
-    m_delta->setSingleStep(10.0);
+    m_delta->setSingleStep(100.0);
+    m_delta->setObjectName(QStringLiteral("landscapeRaiseLowerStep"));
     m_flatten->setRange(0, 65535);
     m_flatten->setValue(20000);
+    m_flatten->setSingleStep(100);
     m_falloff->addItem(tr("Smooth"), int(ETerrainBrushFalloff::Smooth));
     m_falloff->addItem(tr("Linear"), int(ETerrainBrushFalloff::Linear));
     m_falloff->addItem(tr("Constant"), int(ETerrainBrushFalloff::Constant));
@@ -88,8 +91,28 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     m_falloff->setObjectName(QStringLiteral("landscapeSculptFalloff"));
 
     QSettings settings;
-    m_tool->setCurrentIndex(qBound(0,
-        settings.value("ui/landscape/sculptTool", 0).toInt(), m_tool->count() - 1));
+    int savedTool = int(ELandscapeSculptTool::Raise);
+    if(settings.contains("ui/landscape/sculptToolValueV2"))
+    {
+        savedTool = settings.value("ui/landscape/sculptToolValueV2").toInt();
+    }
+    else
+    {
+        // Migrate the original combo-index setting. The old display order was
+        // Raise, Lower, Flatten, Smooth; the new order puts Smooth before
+        // Flatten without reinterpreting a user's last selected tool.
+        const int legacyIndex = qBound(0,
+            settings.value("ui/landscape/sculptTool", 0).toInt(), 3);
+        const ELandscapeSculptTool legacyTools[] = {
+            ELandscapeSculptTool::Raise,
+            ELandscapeSculptTool::Lower,
+            ELandscapeSculptTool::Flatten,
+            ELandscapeSculptTool::Smooth
+        };
+        savedTool = int(legacyTools[legacyIndex]);
+    }
+    const int savedToolIndex = m_tool->findData(savedTool);
+    m_tool->setCurrentIndex(savedToolIndex >= 0 ? savedToolIndex : 0);
     m_radius->setValue(settings.value("ui/landscape/sculptRadius", 4.0).toDouble());
     m_strength->setValue(settings.value("ui/landscape/sculptStrength", 0.35).toDouble());
     m_delta->setValue(settings.value("ui/landscape/sculptDelta",
@@ -107,8 +130,8 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
 
     QLabel* help = new QLabel(tr(
         "Left-drag sculpts; right-click samples the raw height as the Flatten target. "
-        "Alt+Wheel changes radius; Shift+Wheel changes strength; Alt+Shift+Wheel changes raise/lower step. "
-        "Z/X/C/V select Raise/Lower/Flatten/Smooth. Wheel keeps camera zoom. Each drag is one undo step."), this);
+        "Alt+Wheel changes radius; Shift+Wheel changes strength; Alt+Shift+Wheel changes raise/lower step or the Flatten target. "
+        "Z/X/C/V select Raise/Lower/Smooth/Flatten. Wheel keeps camera zoom. Each drag is one undo step."), this);
     help->setWordWrap(true);
     form->addRow(help);
 
@@ -209,9 +232,10 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
         emit editingStateChanged();
     });
     connect(m_tool, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
-            [this](int value)
+            [this](int)
     {
-        QSettings().setValue("ui/landscape/sculptTool", value);
+        QSettings().setValue("ui/landscape/sculptToolValueV2",
+                             m_tool->currentData().toInt());
         updateModeVisibility();
         emit editingStateChanged();
     });
@@ -322,18 +346,20 @@ void CLandscapeTools::updateModeVisibility()
         || tool == ELandscapeSculptTool::Lower;
     m_flatten->setVisible(flatten);
     m_flattenLabel->setVisible(flatten);
-    m_falloff->setVisible(!flatten);
-    m_falloffLabel->setVisible(!flatten);
+    m_falloff->setVisible(sculpt);
+    m_falloffLabel->setVisible(sculpt);
     m_delta->setVisible(raiseLower);
     m_deltaLabel->setVisible(raiseLower);
 }
 ELandscapeSculptTool CLandscapeTools::sculptTool() const
 {
-    return static_cast<ELandscapeSculptTool>(m_tool->currentIndex());
+    return static_cast<ELandscapeSculptTool>(m_tool->currentData().toInt());
 }
 void CLandscapeTools::setSculptTool(ELandscapeSculptTool tool)
 {
-    m_tool->setCurrentIndex(int(tool));
+    const int index = m_tool->findData(int(tool));
+    if(index >= 0)
+        m_tool->setCurrentIndex(index);
 }
 float CLandscapeTools::radius() const { return float(m_radius->value()); }
 float CLandscapeTools::strength() const { return float(m_strength->value()); }
@@ -419,6 +445,10 @@ void CLandscapeTools::adjustSculptStrength(int steps)
 void CLandscapeTools::adjustRawDelta(int steps)
 {
     m_delta->setValue(m_delta->value() + steps * m_delta->singleStep());
+}
+void CLandscapeTools::adjustFlattenHeight(int steps)
+{
+    m_flatten->setValue(m_flatten->value() + steps * m_flatten->singleStep());
 }
 void CLandscapeTools::adjustPaintSize(int steps)
 {

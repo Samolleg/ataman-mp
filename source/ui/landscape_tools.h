@@ -63,6 +63,7 @@ public:
     void adjustSculptRadius(int steps);
     void adjustSculptStrength(int steps);
     void adjustRawDelta(int steps);
+    void adjustFlattenHeight(int steps);
     void adjustPaintSize(int steps);
     void adjustPaintTerrainType(int steps);
     qint32 paintTerrainType(bool* selected = nullptr) const;

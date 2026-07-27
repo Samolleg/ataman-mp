@@ -648,6 +648,10 @@ void CView::attachLandscapeTools(CLandscapeTools* tools)
     m_landscapeTools = tools;
     if(m_landscapeTools)
     {
+        // Landscape controls remain active while focus is in their dock. An
+        // application event filter also lets the physical Z/X/C/V positions
+        // work under non-Latin keyboard layouts.
+        qApp->installEventFilter(this);
         m_lastLandscapeEditMode = int(m_landscapeTools->editMode());
         connect(m_landscapeTools, &CLandscapeTools::importHeightmapRequested,
                 this, &CView::importTerrainHeightmap);
@@ -804,7 +808,7 @@ void CView::syncLandscapeToolState()
             changeOperation(EButtonOpSelect);
         setPreviewTile(false);
         CStatusConnector::getInstance()->updateStatus("landscape.ico",
-            "LMB-sculpt, RMB-sample raw height, Z/X/C/V-Raise/Lower/Flatten/Smooth, Alt+Wheel-radius, Shift+Wheel-strength, Alt+Shift+Wheel-step, M/O-main terrain/overlays, L/Esc-close.");
+            "LMB-sculpt, RMB-sample raw height, Z/X/C/V-Raise/Lower/Smooth/Flatten, Alt+Wheel-radius, Shift+Wheel-strength, Alt+Shift+Wheel-step/flatten target, M/O-main terrain/overlays, L/Esc-close.");
         emit updateMsg(tr("Landscape sculpt mode enabled."));
         break;
     case ELandscapeEditMode::TilePaint:
@@ -828,7 +832,7 @@ void CView::syncLandscapeToolState()
         CScene::getInstance()->setLandTileEditMode(false);
         setPreviewTile(false);
         CStatusConnector::getInstance()->updateStatus("landscape.ico",
-            "LMB-sculpt overlay, RMB-sample raw overlay height, Z/X/C/V-Raise/Lower/Flatten/Smooth, Alt+Wheel-radius, Shift+Wheel-strength, Alt+Shift+Wheel-step, M/O-main terrain/overlays, L/Esc-close.");
+            "LMB-sculpt overlay, RMB-sample raw overlay height, Z/X/C/V-Raise/Lower/Smooth/Flatten, Alt+Wheel-radius, Shift+Wheel-strength, Alt+Shift+Wheel-step/flatten target, M/O-main terrain/overlays, L/Esc-close.");
         emit updateMsg(tr("Overlay-only sculpting enabled for active surfaces."));
         break;
     }
@@ -5671,19 +5675,22 @@ void CView::saveLandAs()
 
     if(m_pLand->isDirty())
     {
-        const QString sourcePath = QDir::cleanPath(m_pLand->filePath().absoluteFilePath());
-        const QString destinationPath = QDir::cleanPath(fileName.absoluteFilePath());
-        const bool samePath = QString::compare(sourcePath, destinationPath,
-                                               Qt::CaseInsensitive) == 0;
-        saveChangedLandscapeDocument(fileName, samePath);
+        // Save As follows normal document semantics: after the candidate is
+        // staged, committed, freshly reopened, and verified, the destination
+        // becomes the active MPR baseline. A copy-only export, if added, must
+        // be a separately named command rather than surprising Save As users.
+        saveChangedLandscapeDocument(fileName, true);
         return;
     }
     //QFileInfo fileName("c:\\konst\\Проклятые Земли (Дополнение)\\Mods\\ferneo_mod\\Maps\\zone1gTest.mpr");
 
     if(saveLandscapeDocument(fileName))
     {
-        emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMpr, fileName.baseName());
-        emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMprDirtyFlag, "");
+        SMprSaveCommitResult unchangedSave;
+        unchangedSave.candidateSha256 = QString::fromLatin1(
+            QCryptographicHash::hash(m_mprDocument.originalBytes(),
+                                     QCryptographicHash::Sha256).toHex());
+        adoptCommittedLandscapeBaseline(fileName, unchangedSave);
     }
 }
 
@@ -5931,6 +5938,8 @@ bool CView::adoptCommittedLandscapeBaseline(const QFileInfo& destination,
     emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMpr,
                               destination.baseName());
     emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMprDirtyFlag, "");
+    refreshMprSettingsDock();
+    emit loadedMapStateChanged();
     return true;
 }
 
@@ -10008,8 +10017,7 @@ void CView::sculptTerrainAt(const QVector3D& position, float stampFraction)
     brush.centerX = position.x();
     brush.centerY = position.y();
     brush.radius = m_landscapeTools->radius();
-    brush.falloff = m_landscapeTools->sculptTool() == ELandscapeSculptTool::Flatten
-        ? ETerrainBrushFalloff::Smooth : m_landscapeTools->falloff();
+    brush.falloff = m_landscapeTools->falloff();
     const float blendStrength = landscapeSculptEffectiveStrength(
         m_landscapeTools->strength(), stampFraction);
     const float rawDelta = m_landscapeTools->rawDelta()
@@ -10772,9 +10780,23 @@ void CView::wheelEvent(QWheelEvent* event)
             if((event->modifiers() & (Qt::AltModifier | Qt::ShiftModifier))
                == (Qt::AltModifier | Qt::ShiftModifier))
             {
-                m_landscapeTools->adjustRawDelta(step);
-                emit updateMsg(tr("Raise/lower step: %1 raw units").arg(
-                    m_landscapeTools->rawDelta(), 0, 'f', 0));
+                if(m_landscapeTools->sculptTool() == ELandscapeSculptTool::Flatten)
+                {
+                    m_landscapeTools->adjustFlattenHeight(step);
+                    emit updateMsg(tr("Flatten target: %1 raw units").arg(
+                        m_landscapeTools->flattenHeight()));
+                }
+                else if(m_landscapeTools->sculptTool() == ELandscapeSculptTool::Raise
+                        || m_landscapeTools->sculptTool() == ELandscapeSculptTool::Lower)
+                {
+                    m_landscapeTools->adjustRawDelta(step);
+                    emit updateMsg(tr("Raise/lower step: %1 raw units").arg(
+                        m_landscapeTools->rawDelta(), 0, 'f', 0));
+                }
+                else
+                {
+                    emit updateMsg(tr("Smooth has no height-step control."));
+                }
             }
             else if(event->modifiers() & Qt::ShiftModifier)
             {

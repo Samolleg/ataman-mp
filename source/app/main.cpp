@@ -39,6 +39,7 @@
 #include <QSettings>
 #include <QSlider>
 #include <QSpinBox>
+#include <QDoubleSpinBox>
 #include <QGraphicsView>
 #include <cstdio>
 #include <cstring>
@@ -1063,6 +1064,10 @@ int runHeadlessCommand(QApplication& app)
             QStringLiteral("landscapeFlattenTarget"));
         QComboBox* sculptFalloff = landscapeTools.findChild<QComboBox*>(
             QStringLiteral("landscapeSculptFalloff"));
+        QComboBox* sculptTool = landscapeTools.findChild<QComboBox*>(
+            QStringLiteral("landscapeSculptTool"));
+        QDoubleSpinBox* raiseLowerStep = landscapeTools.findChild<QDoubleSpinBox*>(
+            QStringLiteral("landscapeRaiseLowerStep"));
         const ELandscapeSculptTool initialSculptTool = landscapeTools.sculptTool();
         const quint16 initialFlattenHeight = landscapeTools.flattenHeight();
         landscapeTools.setSculptTool(ELandscapeSculptTool::Raise);
@@ -1070,12 +1075,27 @@ int runHeadlessCommand(QApplication& app)
             && flattenTarget->isHidden() && !sculptFalloff->isHidden();
         landscapeTools.setSculptTool(ELandscapeSculptTool::Flatten);
         const bool sculptFlattenShowsTarget = flattenTarget && sculptFalloff
-            && !flattenTarget->isHidden() && sculptFalloff->isHidden();
+            && !flattenTarget->isHidden() && !sculptFalloff->isHidden();
+        const bool sculptToolOrderMatchesShortcuts = sculptTool
+            && sculptTool->count() == 4
+            && sculptTool->itemData(0).toInt() == int(ELandscapeSculptTool::Raise)
+            && sculptTool->itemData(1).toInt() == int(ELandscapeSculptTool::Lower)
+            && sculptTool->itemData(2).toInt() == int(ELandscapeSculptTool::Smooth)
+            && sculptTool->itemData(3).toInt() == int(ELandscapeSculptTool::Flatten);
         landscapeTools.setFlattenHeight(43210);
         const bool flattenHeightCanBeSampled = landscapeTools.flattenHeight() == 43210;
+        if(raiseLowerStep)
+            raiseLowerStep->setValue(500.0);
         const float priorDelta = landscapeTools.rawDelta();
         landscapeTools.adjustRawDelta(1);
-        const bool sculptDeltaWheelAdjustmentWorks = landscapeTools.rawDelta() > priorDelta;
+        const bool sculptDeltaWheelAdjustmentWorks =
+            raiseLowerStep
+            && qFuzzyCompare(landscapeTools.rawDelta() + 1.0f,
+                             priorDelta + 101.0f);
+        const quint16 priorFlattenHeight = landscapeTools.flattenHeight();
+        landscapeTools.adjustFlattenHeight(1);
+        const bool flattenTargetWheelAdjustmentWorks =
+            landscapeTools.flattenHeight() == priorFlattenHeight + 100;
         bool mprSettingsRequested = false;
         QObject::connect(&landscapeTools, &CLandscapeTools::openMprSettingsRequested,
                          [&mprSettingsRequested]() { mprSettingsRequested = true; });
@@ -1643,8 +1663,10 @@ int runHeadlessCommand(QApplication& app)
                 && programmaticModeRefreshesMaterials
                 && sculptRaiseShowsFalloff
                 && sculptFlattenShowsTarget
+                && sculptToolOrderMatchesShortcuts
                 && flattenHeightCanBeSampled
                 && sculptDeltaWheelAdjustmentWorks
+                && flattenTargetWheelAdjustmentWorks
                 && landscapeMprSettingsButtonWorks
                 && embeddedMinimapDefaultsWhenAvailable
                 && generatedMinimapCanBeSelected
@@ -1749,9 +1771,13 @@ int runHeadlessCommand(QApplication& app)
                << programmaticModeRefreshesMaterials
                << " sculptRaiseShowsFalloff=" << sculptRaiseShowsFalloff
                << " sculptFlattenShowsTarget=" << sculptFlattenShowsTarget
+               << " sculptToolOrderMatchesShortcuts="
+               << sculptToolOrderMatchesShortcuts
                << " flattenHeightCanBeSampled=" << flattenHeightCanBeSampled
                << " sculptDeltaWheelAdjustmentWorks="
                << sculptDeltaWheelAdjustmentWorks
+               << " flattenTargetWheelAdjustmentWorks="
+               << flattenTargetWheelAdjustmentWorks
                << " landscapeMprSettingsButtonWorks="
                << landscapeMprSettingsButtonWorks
                << " embeddedMinimapDefaultsWhenAvailable="
