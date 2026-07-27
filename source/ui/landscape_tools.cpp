@@ -20,6 +20,10 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     , m_strength(new QDoubleSpinBox(this))
     , m_delta(new QDoubleSpinBox(this))
     , m_flatten(new QSpinBox(this))
+    , m_falloff(new QComboBox(this))
+    , m_deltaLabel(new QLabel(tr("Raise/lower step"), this))
+    , m_flattenLabel(new QLabel(tr("Flatten target"), this))
+    , m_falloffLabel(new QLabel(tr("Falloff"), this))
     , m_flipVertical(new QCheckBox(tr("Flip image vertically"), this))
     , m_paintTerrainType(new QComboBox(this))
     , m_paintRadius(new QDoubleSpinBox(this))
@@ -33,7 +37,7 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     , m_overlaySurfaceOperationLabel(new QLabel(tr("Overlay operation"), this))
     , m_overlayMaterialLabel(new QLabel(tr("Surface material (tint / animation)"), this))
     , m_showMainTerrain(new QCheckBox(tr("Show main terrain (M)"), this))
-    , m_showOverlays(new QCheckBox(tr("Show overlays (J)"), this))
+    , m_showOverlays(new QCheckBox(tr("Show overlays (O)"), this))
     , m_tilesetStatus(new QLabel(tr("Terrain materials are loaded from the MPR namespace template."), this))
     , m_sculptControls(new QWidget(this))
     , m_paintControls(new QWidget(this))
@@ -71,8 +75,17 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     m_strength->setDecimals(2);
     m_delta->setRange(1.0, 10000.0);
     m_delta->setValue(180.0);
+    m_delta->setSingleStep(10.0);
     m_flatten->setRange(0, 65535);
     m_flatten->setValue(20000);
+    m_falloff->addItem(tr("Smooth"), int(ETerrainBrushFalloff::Smooth));
+    m_falloff->addItem(tr("Linear"), int(ETerrainBrushFalloff::Linear));
+    m_falloff->addItem(tr("Constant"), int(ETerrainBrushFalloff::Constant));
+    m_falloff->setCurrentIndex(qBound(0,
+        QSettings().value("ui/landscape/sculptFalloff", 0).toInt(),
+        m_falloff->count() - 1));
+    m_flatten->setObjectName(QStringLiteral("landscapeFlattenTarget"));
+    m_falloff->setObjectName(QStringLiteral("landscapeSculptFalloff"));
 
     QSettings settings;
     m_tool->setCurrentIndex(qBound(0,
@@ -87,12 +100,15 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     form->addRow(tr("Tool"), m_tool);
     form->addRow(tr("Radius (vertices)"), m_radius);
     form->addRow(tr("Strength"), m_strength);
-    form->addRow(tr("Raise/lower step"), m_delta);
-    form->addRow(tr("Flatten target"), m_flatten);
+    form->addRow(m_deltaLabel, m_delta);
+    form->addRow(m_flattenLabel, m_flatten);
+    form->addRow(m_falloffLabel, m_falloff);
     layout->addWidget(m_sculptControls);
 
     QLabel* help = new QLabel(tr(
-        "Left-drag sculpts. Alt+Wheel changes radius; Shift+Wheel changes strength; Wheel keeps camera zoom. Each drag is one undo step."), this);
+        "Left-drag sculpts; right-click samples the raw height as the Flatten target. "
+        "Alt+Wheel changes radius; Shift+Wheel changes strength; Alt+Shift+Wheel changes raise/lower step. "
+        "Z/X/C/V select Raise/Lower/Flatten/Smooth. Wheel keeps camera zoom. Each drag is one undo step."), this);
     help->setWordWrap(true);
     form->addRow(help);
 
@@ -144,8 +160,13 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     layout->addWidget(m_flipVertical);
     QPushButton* importButton = new QPushButton(tr("Import grayscale heightmap..."), this);
     layout->addWidget(importButton);
+    QPushButton* mprSettingsButton = new QPushButton(tr("Open MPR Settings..."), this);
+    mprSettingsButton->setObjectName(QStringLiteral("openMprSettingsFromLandscape"));
+    layout->addWidget(mprSettingsButton);
     layout->addStretch(1);
     connect(importButton, &QPushButton::clicked, this, &CLandscapeTools::importHeightmapRequested);
+    connect(mprSettingsButton, &QPushButton::clicked,
+            this, &CLandscapeTools::openMprSettingsRequested);
     connect(tilePicker, &QPushButton::clicked, this, &CLandscapeTools::tilePickerRequested);
     connect(reviewAtlas, &QPushButton::clicked, this, &CLandscapeTools::atlasProfileReviewRequested);
     connect(exportDiagnostic, &QPushButton::clicked, this, &CLandscapeTools::exportPaintDiagnosticRequested);
@@ -188,7 +209,18 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
         emit editingStateChanged();
     });
     connect(m_tool, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
-            [](int value) { QSettings().setValue("ui/landscape/sculptTool", value); });
+            [this](int value)
+    {
+        QSettings().setValue("ui/landscape/sculptTool", value);
+        updateModeVisibility();
+        emit editingStateChanged();
+    });
+    connect(m_falloff, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
+            [this](int value)
+    {
+        QSettings().setValue("ui/landscape/sculptFalloff", value);
+        emit brushGeometryChanged();
+    });
     connect(m_radius, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this,
             [this](double value)
     {
@@ -284,15 +316,37 @@ void CLandscapeTools::updateModeVisibility()
     m_manualTileSelection->setVisible(!overlaySurface);
     m_paintTerrainType->setEnabled((overlaySurface || !m_manualTileSelection->isChecked())
         && (!overlaySurface || activating));
+    const ELandscapeSculptTool tool = sculptTool();
+    const bool flatten = tool == ELandscapeSculptTool::Flatten;
+    const bool raiseLower = tool == ELandscapeSculptTool::Raise
+        || tool == ELandscapeSculptTool::Lower;
+    m_flatten->setVisible(flatten);
+    m_flattenLabel->setVisible(flatten);
+    m_falloff->setVisible(!flatten);
+    m_falloffLabel->setVisible(!flatten);
+    m_delta->setVisible(raiseLower);
+    m_deltaLabel->setVisible(raiseLower);
 }
 ELandscapeSculptTool CLandscapeTools::sculptTool() const
 {
     return static_cast<ELandscapeSculptTool>(m_tool->currentIndex());
 }
+void CLandscapeTools::setSculptTool(ELandscapeSculptTool tool)
+{
+    m_tool->setCurrentIndex(int(tool));
+}
 float CLandscapeTools::radius() const { return float(m_radius->value()); }
 float CLandscapeTools::strength() const { return float(m_strength->value()); }
 float CLandscapeTools::rawDelta() const { return float(m_delta->value()); }
 quint16 CLandscapeTools::flattenHeight() const { return quint16(m_flatten->value()); }
+void CLandscapeTools::setFlattenHeight(quint16 height)
+{
+    m_flatten->setValue(int(height));
+}
+ETerrainBrushFalloff CLandscapeTools::falloff() const
+{
+    return static_cast<ETerrainBrushFalloff>(m_falloff->currentData().toInt());
+}
 bool CLandscapeTools::flipHeightmapVertically() const { return m_flipVertical->isChecked(); }
 float CLandscapeTools::paintRadius() const
 {
@@ -361,6 +415,10 @@ void CLandscapeTools::adjustSculptRadius(int steps)
 void CLandscapeTools::adjustSculptStrength(int steps)
 {
     m_strength->setValue(m_strength->value() + steps * m_strength->singleStep());
+}
+void CLandscapeTools::adjustRawDelta(int steps)
+{
+    m_delta->setValue(m_delta->value() + steps * m_delta->singleStep());
 }
 void CLandscapeTools::adjustPaintSize(int steps)
 {

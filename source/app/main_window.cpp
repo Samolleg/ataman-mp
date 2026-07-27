@@ -1300,6 +1300,10 @@ MainWindow::MainWindow(QWidget* parent) :
             const QSignalBlocker blocker(m_ui->tileBrushButton);
             m_ui->tileBrushButton->setChecked(visible);
         }
+        if(m_ui->selectButton) m_ui->selectButton->setVisible(!visible);
+        if(m_ui->moveButton) m_ui->moveButton->setVisible(!visible);
+        if(m_ui->rotateButton) m_ui->rotateButton->setVisible(!visible);
+        if(m_ui->scaleButton) m_ui->scaleButton->setVisible(!visible);
         if(!visible)
         {
             // Layer isolation belongs to Landscape Tools. Closing it restores

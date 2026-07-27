@@ -1058,6 +1058,34 @@ int runHeadlessCommand(QApplication& app)
             !landscapeTools.selectPaintTerrainType(5)
             && landscapeTools.paintTerrainType(&landModeSelectionValid) == 2
             && landModeSelectionValid;
+        landscapeTools.activateMode(ELandscapeEditMode::Sculpt, false);
+        QSpinBox* flattenTarget = landscapeTools.findChild<QSpinBox*>(
+            QStringLiteral("landscapeFlattenTarget"));
+        QComboBox* sculptFalloff = landscapeTools.findChild<QComboBox*>(
+            QStringLiteral("landscapeSculptFalloff"));
+        const ELandscapeSculptTool initialSculptTool = landscapeTools.sculptTool();
+        const quint16 initialFlattenHeight = landscapeTools.flattenHeight();
+        landscapeTools.setSculptTool(ELandscapeSculptTool::Raise);
+        const bool sculptRaiseShowsFalloff = flattenTarget && sculptFalloff
+            && flattenTarget->isHidden() && !sculptFalloff->isHidden();
+        landscapeTools.setSculptTool(ELandscapeSculptTool::Flatten);
+        const bool sculptFlattenShowsTarget = flattenTarget && sculptFalloff
+            && !flattenTarget->isHidden() && sculptFalloff->isHidden();
+        landscapeTools.setFlattenHeight(43210);
+        const bool flattenHeightCanBeSampled = landscapeTools.flattenHeight() == 43210;
+        const float priorDelta = landscapeTools.rawDelta();
+        landscapeTools.adjustRawDelta(1);
+        const bool sculptDeltaWheelAdjustmentWorks = landscapeTools.rawDelta() > priorDelta;
+        bool mprSettingsRequested = false;
+        QObject::connect(&landscapeTools, &CLandscapeTools::openMprSettingsRequested,
+                         [&mprSettingsRequested]() { mprSettingsRequested = true; });
+        if(QPushButton* button = landscapeTools.findChild<QPushButton*>(
+               QStringLiteral("openMprSettingsFromLandscape")))
+            button->click();
+        const bool landscapeMprSettingsButtonWorks = mprSettingsRequested;
+        landscapeTools.adjustRawDelta(-1);
+        landscapeTools.setFlattenHeight(initialFlattenHeight);
+        landscapeTools.setSculptTool(initialSculptTool);
         QSettings minimapSizeSettings;
         const QVariant savedLegacyMinimapSize = minimapSizeSettings.value(
             "ui/viewportMinimapSizeLevel");
@@ -1613,6 +1641,11 @@ int runHeadlessCommand(QApplication& app)
                 && landscapeVisibilityControlsWork
                 && overlaySurfaceToolSeparate
                 && programmaticModeRefreshesMaterials
+                && sculptRaiseShowsFalloff
+                && sculptFlattenShowsTarget
+                && flattenHeightCanBeSampled
+                && sculptDeltaWheelAdjustmentWorks
+                && landscapeMprSettingsButtonWorks
                 && embeddedMinimapDefaultsWhenAvailable
                 && generatedMinimapCanBeSelected
                 && viewportMinimapStartsAtSmallest
@@ -1714,6 +1747,13 @@ int runHeadlessCommand(QApplication& app)
                << " overlaySurfaceToolSeparate=" << overlaySurfaceToolSeparate
                << " programmaticModeRefreshesMaterials="
                << programmaticModeRefreshesMaterials
+               << " sculptRaiseShowsFalloff=" << sculptRaiseShowsFalloff
+               << " sculptFlattenShowsTarget=" << sculptFlattenShowsTarget
+               << " flattenHeightCanBeSampled=" << flattenHeightCanBeSampled
+               << " sculptDeltaWheelAdjustmentWorks="
+               << sculptDeltaWheelAdjustmentWorks
+               << " landscapeMprSettingsButtonWorks="
+               << landscapeMprSettingsButtonWorks
                << " embeddedMinimapDefaultsWhenAvailable="
                << embeddedMinimapDefaultsWhenAvailable
                << " generatedMinimapCanBeSelected=" << generatedMinimapCanBeSelected

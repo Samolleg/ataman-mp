@@ -51,6 +51,7 @@
 #include "objects/magictrap.h"
 #include "mob\mob_parameters.h"
 #include "layout_components/progressview.h"
+#include "layout_components/connectors_ui.h"
 #include "layout_components/tablemanager.h"
 #include "layout_components/viewport_widget.h"
 #include "operationmanager.h"
@@ -656,6 +657,8 @@ void CView::attachLandscapeTools(CLandscapeTools* tools)
                 this, &CView::reviewTerrainAtlasProfile);
         connect(m_landscapeTools, &CLandscapeTools::exportPaintDiagnosticRequested,
                 this, &CView::exportTerrainPaintDiagnostic);
+        connect(m_landscapeTools, &CLandscapeTools::openMprSettingsRequested,
+                this, &CView::openMapParameters);
         connect(m_landscapeTools, &CLandscapeTools::editingStateChanged,
                 this, &CView::syncLandscapeToolState);
         connect(m_landscapeTools, &CLandscapeTools::brushGeometryChanged,
@@ -800,6 +803,8 @@ void CView::syncLandscapeToolState()
         if(m_pOp && m_pOp->operationMethod() == eOperationMethodTileBrush)
             changeOperation(EButtonOpSelect);
         setPreviewTile(false);
+        CStatusConnector::getInstance()->updateStatus("landscape.ico",
+            "LMB-sculpt, RMB-sample raw height, Z/X/C/V-Raise/Lower/Flatten/Smooth, Alt+Wheel-radius, Shift+Wheel-strength, Alt+Shift+Wheel-step, M/O-main terrain/overlays, L/Esc-close.");
         emit updateMsg(tr("Landscape sculpt mode enabled."));
         break;
     case ELandscapeEditMode::TilePaint:
@@ -822,6 +827,8 @@ void CView::syncLandscapeToolState()
             changeOperation(EButtonOpSelect);
         CScene::getInstance()->setLandTileEditMode(false);
         setPreviewTile(false);
+        CStatusConnector::getInstance()->updateStatus("landscape.ico",
+            "LMB-sculpt overlay, RMB-sample raw overlay height, Z/X/C/V-Raise/Lower/Flatten/Smooth, Alt+Wheel-radius, Shift+Wheel-strength, Alt+Shift+Wheel-step, M/O-main terrain/overlays, L/Esc-close.");
         emit updateMsg(tr("Overlay-only sculpting enabled for active surfaces."));
         break;
     }
@@ -9918,6 +9925,28 @@ void CView::mousePressEvent(QMouseEvent* event)
         return;
     }
     if(m_landscapeTools && m_landscapeTools->sculptEnabled()
+        && m_terrainEditAvailable && event->button() == Qt::RightButton)
+    {
+        QVector3D position;
+        bool positionValid = false;
+        if(m_landscapeTools->overlaySculptEnabled())
+            positionValid = terrainPositionAt(event->pos(), &position, false);
+        else
+            position = getTerrainPos(event->x(), event->y(), true, &positionValid);
+        updateLandscapeSculptCoordinates(position, positionValid);
+        if(positionValid)
+        {
+            const quint16 rawHeight = rawTerrainHeight(position.z());
+            m_landscapeTools->setFlattenHeight(rawHeight);
+            emit updateMsg(tr("Sampled %1 raw height %2 as the Flatten target.")
+                .arg(m_landscapeTools->overlaySculptEnabled()
+                     ? tr("overlay") : tr("terrain"))
+                .arg(rawHeight));
+        }
+        event->accept();
+        return;
+    }
+    if(m_landscapeTools && m_landscapeTools->sculptEnabled()
         && m_terrainEditAvailable && event->button() == Qt::LeftButton)
     {
         const bool overlaySculpt = m_landscapeTools->overlaySculptEnabled();
@@ -9979,7 +10008,8 @@ void CView::sculptTerrainAt(const QVector3D& position, float stampFraction)
     brush.centerX = position.x();
     brush.centerY = position.y();
     brush.radius = m_landscapeTools->radius();
-    brush.falloff = ETerrainBrushFalloff::Smooth;
+    brush.falloff = m_landscapeTools->sculptTool() == ELandscapeSculptTool::Flatten
+        ? ETerrainBrushFalloff::Smooth : m_landscapeTools->falloff();
     const float blendStrength = landscapeSculptEffectiveStrength(
         m_landscapeTools->strength(), stampFraction);
     const float rawDelta = m_landscapeTools->rawDelta()
@@ -10339,7 +10369,30 @@ void CView::updateOverlaySculptPointer()
             m_lastSculptPoint = position;
     }
     m_sculptOutlineValid = valid;
+    updateLandscapeSculptCoordinates(position, valid);
     update();
+}
+
+quint16 CView::rawTerrainHeight(float worldHeight) const
+{
+    if(m_terrainEdit.maxZ() <= 0.0f)
+        return 0;
+    return quint16(qBound(0, qRound(double(worldHeight) * 65535.0
+                                    / double(m_terrainEdit.maxZ())), 65535));
+}
+
+void CView::updateLandscapeSculptCoordinates(const QVector3D& position, bool valid)
+{
+    if(!m_pOp)
+        return;
+    if(!valid)
+    {
+        m_pOp->updateMouseCoords(tr("not defined"));
+        return;
+    }
+    m_pOp->updateMouseCoords(tr("%1 | Raw: %2")
+        .arg(util::makeString(position, true))
+        .arg(rawTerrainHeight(position.z())));
 }
 
 void CView::mouseMoveEvent(QMouseEvent* event)
@@ -10371,8 +10424,8 @@ void CView::mouseMoveEvent(QMouseEvent* event)
             return;
         }
         QVector3D position;
-        const bool positionValid = (position = getTerrainPos(
-            event->x(), event->y(), true), true);
+        bool positionValid = false;
+        position = getTerrainPos(event->x(), event->y(), true, &positionValid);
         m_sculptPointerValid = positionValid;
         if(positionValid)
         {
@@ -10380,7 +10433,10 @@ void CView::mouseMoveEvent(QMouseEvent* event)
                || (m_sculptOutlineCenter - position).lengthSquared() > 0.000001f)
                 m_sculptOutlineGeometryDirty = true;
             m_sculptOutlineCenter = position;
+            updateLandscapeSculptCoordinates(position, true);
         }
+        else
+            updateLandscapeSculptCoordinates(position, false);
         m_sculptOutlineValid = positionValid;
         update();
         if(m_sculptStrokeActive && (event->buttons() & Qt::LeftButton))
@@ -10713,7 +10769,14 @@ void CView::wheelEvent(QWheelEvent* event)
                                                 event->delta(), event->pixelDelta().y());
             if(step == 0)
                 return;
-            if(event->modifiers() & Qt::ShiftModifier)
+            if((event->modifiers() & (Qt::AltModifier | Qt::ShiftModifier))
+               == (Qt::AltModifier | Qt::ShiftModifier))
+            {
+                m_landscapeTools->adjustRawDelta(step);
+                emit updateMsg(tr("Raise/lower step: %1 raw units").arg(
+                    m_landscapeTools->rawDelta(), 0, 'f', 0));
+            }
+            else if(event->modifiers() & Qt::ShiftModifier)
             {
                 m_landscapeTools->adjustSculptStrength(step);
                 emit updateMsg(tr("Sculpt strength: %1").arg(

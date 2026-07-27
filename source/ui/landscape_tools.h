@@ -45,10 +45,13 @@ public:
     void activateMode(ELandscapeEditMode mode, bool notify = true);
     void setEditingEnabled(bool enabled, bool notify = true);
     ELandscapeSculptTool sculptTool() const;
+    void setSculptTool(ELandscapeSculptTool tool);
     float radius() const;
     float strength() const;
     float rawDelta() const;
     quint16 flattenHeight() const;
+    void setFlattenHeight(quint16 height);
+    ETerrainBrushFalloff falloff() const;
     bool flipHeightmapVertically() const;
     float paintRadius() const;
     ETerrainTileBrushShape paintShape() const;
@@ -59,6 +62,7 @@ public:
     void setOverlayMaterials(const QVector<SMaterial>& materials);
     void adjustSculptRadius(int steps);
     void adjustSculptStrength(int steps);
+    void adjustRawDelta(int steps);
     void adjustPaintSize(int steps);
     void adjustPaintTerrainType(int steps);
     qint32 paintTerrainType(bool* selected = nullptr) const;
@@ -79,6 +83,7 @@ signals:
     void tilePickerRequested();
     void atlasProfileReviewRequested();
     void exportPaintDiagnosticRequested();
+    void openMprSettingsRequested();
     void editingStateChanged();
     void brushGeometryChanged();
     void paintTerrainTypeChanged(qint32 terrainType);
@@ -92,6 +97,10 @@ private:
     QDoubleSpinBox* m_strength;
     QDoubleSpinBox* m_delta;
     QSpinBox* m_flatten;
+    QComboBox* m_falloff;
+    QLabel* m_deltaLabel;
+    QLabel* m_flattenLabel;
+    QLabel* m_falloffLabel;
     QCheckBox* m_flipVertical;
     QComboBox* m_paintTerrainType;
     QDoubleSpinBox* m_paintRadius;

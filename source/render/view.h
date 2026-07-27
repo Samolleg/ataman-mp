@@ -346,6 +346,8 @@ private:
     void sculptTerrainAt(const QVector3D& position, float stampFraction);
     void sculptTerrainTowardLatestPoint();
     void updateOverlaySculptPointer();
+    void updateLandscapeSculptCoordinates(const QVector3D& position, bool valid);
+    quint16 rawTerrainHeight(float worldHeight) const;
     void finishSculptStroke();
     void syncLandscapeToolState();
     void clearLandscapeBrushSelection();

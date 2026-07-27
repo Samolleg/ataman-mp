@@ -1093,7 +1093,7 @@ CSelect::CSelect(CView *pView):
     if(CScene::getInstance()->getMode()==eEditModeLogic)
         CStatusConnector::getInstance()->updateStatus("select.ico", "LMB-Select object, Shift+LMB-Add to select, MMB-camera rotation, G-Move, P-Add Patrol(trap zone), L-Add look(cast point), CTLR+Tab-change mode");
     else
-        CStatusConnector::getInstance()->updateStatus("select.ico", "LMB-Select object, Shift+LMB-Add to select, MMB-camera rotation, G-Move, T-Scale, R-Rotate, B-Landscape tile painting, L-Landscape Tools, CTRL+Tab-change mode");
+        CStatusConnector::getInstance()->updateStatus("select.ico", "LMB-Select object, Shift+LMB-Add to select, MMB-camera rotation, G-Move, T-Scale, R-Rotate, L-Landscape Tools, CTRL+Tab-change mode");
     CButtonConnector::getInstance()->pressButton(EButtonOpSelect);
 }
 
@@ -1101,7 +1101,7 @@ CTileBrush::CTileBrush(CView* pView)
     :CState(pView)
 {
     qDebug()<< "CTileBrush init ";
-    CStatusConnector::getInstance()->updateStatus("brush.ico", "Esc-Cancel, LMB-paint, RMB-pick tile, Alt+Wheel-size, Shift+Wheel-material/rotate, Wheel-camera. Choose Land/Overlay in Landscape Tools; M/J toggle visibility.");
+    CStatusConnector::getInstance()->updateStatus("brush.ico", "Esc-Cancel, LMB-paint, RMB-pick tile, Alt+Wheel-size, Shift+Wheel-material/rotate, Wheel-camera. M/O toggle main terrain/overlays.");
     CButtonConnector::getInstance()->pressButton(EButtonOpTilebrush);
     m_pView->showOutliner(false);
 }
@@ -1116,16 +1116,6 @@ void CTileBrush::keyPress(COperation* pOp, EKeyCode key)
         m_pView->setPreviewTile(false);
         m_pView->showOutliner(true);
         m_pView->closeLandscapeTools();
-        break;
-    }
-    case eKey_J:
-    {
-        m_pView->setDrawWater(!m_pView->drawWater());
-        break;
-    }
-    case eKey_M:
-    {
-        m_pView->setDrawLand(!m_pView->drawLand());
         break;
     }
     case eKey_1 ... eKey_8:
