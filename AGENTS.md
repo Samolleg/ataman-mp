@@ -27,7 +27,19 @@ worktrees.
   First resolve anything answerable through safe read-only inspection of files,
   source, or documentation; ask only about the remaining user decision. This
   requirement does not apply when the user explicitly authorizes best judgment,
-  reasonable assumptions, or autonomous selection among the available options.
+reasonable assumptions, or autonomous selection among the available options.
+
+## Parallel thread workers
+
+- Read `docs/PARALLEL_THREAD_WORKERS.md` before creating a parallel Endurance
+  implementation task.
+- Create worktree workers through the saved Endurance Codex project, never from
+  the non-repository parent workspace. Use `list_projects`, then `create_thread`
+  with the Endurance `projectId` and `environment: worktree`.
+- Wait for worktree setup to complete before sending follow-up work. Do not use
+  same-directory forks for parallel edits.
+
+## Tester build handoff
 
 - Deliver an unpacked, user-runnable tester folder, not raw compiler output.
 - Do not launch the packaged editor interactively; the user runs it.
