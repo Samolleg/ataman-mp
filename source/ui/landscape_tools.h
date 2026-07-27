@@ -28,6 +28,7 @@ struct STerrainPaintMaterialChoice
     QImage thumbnail;
     int assignedSlots{0};
     bool cornerOnly{false};
+    bool contextualStamp{false};
 };
 
 enum class EOverlaySurfaceOperation

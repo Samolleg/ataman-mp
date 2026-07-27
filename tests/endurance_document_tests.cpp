@@ -3569,6 +3569,46 @@ void EnduranceDocumentTests::cornerOnlyMaterialPaintUsesAuthoredContextAndStaysL
     QVERIFY2(overlapReport.toText().contains(
                  "terrain.semantic_vertex_context_overlap"),
              qPrintable(overlapReport.toText()));
+
+    // The inverse 1-on-3 relationship is also a complete vertex motif. A
+    // material that has ordinary pure tiles (family 4) must still be able to
+    // paint its explicit contextual card on a corner-only support (family 2).
+    STerrainTransitionSignature stoneOnDetail;
+    stoneOnDetail.northWest = 4;
+    stoneOnDetail.northEast = stoneOnDetail.southEast =
+        stoneOnDetail.southWest = 2;
+    for(int rotation = 0; rotation < 4; ++rotation)
+    {
+        const STerrainTransitionSignature rotated =
+            CTerrainTransitionCatalog::rotated(stoneOnDetail, rotation);
+        QVERIFY(add(rotated.northWest, rotated.northEast,
+                    rotated.southEast, rotated.southWest,
+                    quint16(6 | (rotation << 14))));
+    }
+    CTerrainEditModel inverseTerrain;
+    QVERIFY(inverseTerrain.load(document));
+    contextualBrush.centerX = 8.0f;
+    CValidationReport inverseReport;
+    const STerrainTileCommand inverse = inverseTerrain.makeSemanticVertexPaint(
+        8, 8, contextualBrush, ETerrainTileLayer::Land, 4, catalog,
+        0x494E5652u, &inverseReport, 2);
+    QVERIFY2(!inverseReport.hasErrors(), qPrintable(inverseReport.toText()));
+    QCOMPARE(inverse.semanticAudit.solverMode,
+             QStringLiteral("vertex-context-stamp"));
+    QCOMPARE(inverse.deltas.size(), 4);
+    for(const STerrainTileDelta& delta : inverse.deltas)
+    {
+        bool found = false;
+        const STerrainTransitionSignature signature =
+            catalog.gridSignatureForPacked(delta.after, &found);
+        QVERIFY(found);
+        const QVector<qint32> corners({signature.northWest,
+                                      signature.northEast,
+                                      signature.southEast,
+                                      signature.southWest});
+        QCOMPARE(corners.count(4), 1);
+        QCOMPARE(corners.count(2), 3);
+    }
 }
 
 void EnduranceDocumentTests::vertexMaterialBrushPaintsCircleAndConstrainsCornerOnlyFamilies()

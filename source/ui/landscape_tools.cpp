@@ -480,7 +480,8 @@ qint32 CLandscapeTools::paintTerrainSupport() const
                                  || editMode() == ELandscapeEditMode::OverlaySurface)
         ? m_overlayMaterialButtons : m_groundMaterialButtons;
     const QAbstractButton* button = group->checkedButton();
-    return button ? button->property("terrainSupportMaterialId").toInt() : 0;
+    return button && button->property("terrainContextualStamp").toBool()
+        ? button->property("terrainSupportMaterialId").toInt() : 0;
 }
 void CLandscapeTools::setPaintTerrainTypes(
     const QVector<QPair<qint32, QString>>& landTypes,
@@ -551,10 +552,11 @@ void CLandscapeTools::rebuildMaterialPalette()
             QToolButton* button = new QToolButton(this);
             button->setProperty("terrainMaterialId", choice.id);
             button->setProperty("terrainSupportMaterialId", choice.supportId);
+            button->setProperty("terrainContextualStamp", choice.contextualStamp);
             button->setCheckable(true);
             button->setAutoRaise(false);
-            button->setToolTip(choice.cornerOnly
-                ? tr("%1 - %2 atlas slot(s) assigned. This family has no uniform tile. A click places the exact four-tile corner motif shown here; copies cannot touch unless the atlas also contains the required multi-corner transitions.")
+            button->setToolTip(choice.contextualStamp
+                ? tr("%1 - %2 atlas slot(s) assigned. This card is an authored material-on-support junction. A click places the exact four-tile corner motif shown here; copies can touch only when the atlas also contains the required multi-corner transitions.")
                     .arg(choice.name).arg(choice.assignedSlots)
                 : tr("%1 - %2 atlas slot(s) assigned")
                     .arg(choice.name).arg(choice.assignedSlots));

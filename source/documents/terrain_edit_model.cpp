@@ -3080,7 +3080,7 @@ STerrainTileCommand CTerrainEditModel::makeSemanticVertexPaint(
     bool pureAvailable = false;
     catalog.selectForPaint(pure, 0, 0, distributionSeed, &pureAvailable);
     const bool cornerOnly = !pureAvailable;
-    const bool contextualStamp = cornerOnly && preferredSupportId > 0
+    const bool contextualStamp = preferredSupportId > 0
         && preferredSupportId != materialId;
     if(contextualStamp)
     {
@@ -3199,7 +3199,7 @@ STerrainTileCommand CTerrainEditModel::makeSemanticVertexPaint(
                 // Transition-only families may cover a larger brush only
                 // while every incident tile remains exact. Avoid an atlas-wide
                 // nearest-candidate scan for a vertex that must be skipped.
-                if(cornerOnly && !centerVertex)
+                if((cornerOnly || contextualStamp) && !centerVertex)
                 {
                     constrainedDetailRejected = true;
                     break;
@@ -3219,7 +3219,7 @@ STerrainTileCommand CTerrainEditModel::makeSemanticVertexPaint(
         }
 
         if(!vertexPossible || constrainedDetailRejected
-           || (cornerOnly && !centerVertex && !vertexExact))
+           || ((cornerOnly || contextualStamp) && !centerVertex && !vertexExact))
         {
             ++skippedVertices;
             continue;
@@ -3240,7 +3240,7 @@ STerrainTileCommand CTerrainEditModel::makeSemanticVertexPaint(
             if(contextualStamp)
                 report->add("terrain.semantic_vertex_context_overlap",
                     EValidationSeverity::Error,
-                    "This corner-only atlas motif cannot touch the existing copy because the Material atlas lacks the required multi-corner transition. Paint it farther away or assign the missing transition tiles.");
+                    "This contextual atlas motif cannot touch the existing copy because the Material atlas lacks the required multi-corner transition. Paint it farther away or assign the missing transition tiles.");
             else
                 report->add("terrain.semantic_vertex_center",
                     EValidationSeverity::Error,

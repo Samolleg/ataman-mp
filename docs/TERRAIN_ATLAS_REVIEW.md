@@ -19,11 +19,13 @@ an overlay or vice versa.
 
 Each material is a pressed thumbnail button. The palette composes four authored
 tiles around one painted vertex, so the preview shows the result of a size-1
-brush instead of one isolated atlas slot. A transition-only family with valid
-1-on-3 junctions against several support materials gets one contextual card per
-support (for example, **Irregular — on Dark** and **Irregular — on Stone**).
-Those cards share one semantic family identity; they do not duplicate or merge
-profile assignments. Hovering shows the exact card name and assigned-slot count.
+brush instead of one isolated atlas slot. Every valid 1-on-3 relationship can
+produce a contextual vertex card. This includes a transition-only center family
+(for example, **Irregular on Dark**) and the inverse case where the center has
+ordinary uniform tiles but its support does not (for example, **Stone on
+Ground**). These cards rotate the one authored tile around a vertex to form the
+complete four-tile junction. They do not duplicate or merge profile assignments.
+Hovering shows the exact card name and assigned-slot count.
 
 All semantic material brushes operate on terrain vertices. Size 1 selects the
 nearest vertex and resolves the maximum four tiles sharing it. Larger circles

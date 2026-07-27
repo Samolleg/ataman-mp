@@ -6504,17 +6504,37 @@ void CView::rebuildTerrainAutoCatalog()
                 const int rightPure = pureVariantsByFamily.value(right);
                 return leftPure != rightPure ? leftPure > rightPure : left < right;
             });
-        if(!material.cornerOnly && supports.size() > 1)
-            supports.resize(1);
-        if(supports.isEmpty())
-            supports.append(material.id);
-        for(qint32 support : supports)
+        QVector<QPair<qint32, bool>> displayedSupports;
+        if(material.cornerOnly)
         {
+            if(supports.isEmpty())
+                supports.append(material.id);
+            for(qint32 support : supports)
+                displayedSupports.append(qMakePair(support, true));
+        }
+        else
+        {
+            // Keep one ordinary area-brush card, then expose every authored
+            // 1-on-3 junction whose support has no uniform tile. The inverse
+            // side of a sparse relationship is still a complete vertex motif
+            // (for example Stone on Ground), even when Stone is independently
+            // available as an ordinary fill material.
+            const qint32 ordinarySupport = supports.isEmpty()
+                ? material.id : supports.front();
+            displayedSupports.append(qMakePair(ordinarySupport, false));
+            for(qint32 support : supports)
+                if(pureVariantsByFamily.value(support) == 0)
+                    displayedSupports.append(qMakePair(support, true));
+        }
+        for(const QPair<qint32, bool>& displayed : displayedSupports)
+        {
+            const qint32 support = displayed.first;
             STerrainPaintMaterialChoice choice;
             choice.id = material.id;
             choice.supportId = support;
             choice.name = material.name;
-            if(material.cornerOnly && support != material.id)
+            choice.contextualStamp = displayed.second;
+            if(choice.contextualStamp && support != material.id)
                 choice.name = tr("%1 — on %2")
                     .arg(material.name, nameByFamily.value(
                         support, tr("material %1").arg(support)));
