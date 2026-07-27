@@ -35,16 +35,16 @@ rotation. MPR storage, preview, save, and undo remain tile-based.
 
 Some authored detail materials have no uniform four-corner tile. Each contextual
 palette card therefore retains the exact support material shown in its preview.
-A click places the authored four-tile `detail on support` vertex motif, with the
-correct rotation in every incident tile; it never substitutes an unrelated
-nearest-family mixture from the terrain underneath. If two copies would touch
-but the atlas has no required 2-corner or 3-corner transition, the second click
-is refused before mutation with an actionable message. Larger brush sizes still
-place only the center motif for such a sparse family. This prevents an
-impossible area fill from degrading into a checkerboard while remaining honest
-about what the source atlas can represent. Ordinary materials retain the normal
-vertex-area brush and hard-edge fallback. No paint action expands beyond tiles
-incident to the requested vertices.
+A click first places the authored four-tile `detail on support` vertex motif,
+with the correct rotation in every incident tile. If two copies touch but the
+atlas has no required 2-corner or 3-corner transition, the later click remains
+paintable: each missing incident tile uses the closest local authored signature
+that still contains the selected material at the selected vertex, and the
+editor reports a diagnostic warning. Larger brush sizes still place only the
+center motif for a sparse family. This keeps the result bounded and makes the
+atlas limitation visible without turning it into a workflow blocker. Ordinary
+materials retain the normal vertex-area brush and hard-edge fallback. No paint
+action expands beyond tiles incident to the requested vertices.
 
 The coverage label beside **Material atlas...** reports, for example,
 `509 / 512 assigned (3 unassigned)`. Deterministic, structurally valid

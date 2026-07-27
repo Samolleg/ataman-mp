@@ -3564,11 +3564,31 @@ void EnduranceDocumentTests::cornerOnlyMaterialPaintUsesAuthoredContextAndStaysL
     const STerrainTileCommand overlap = fallbackTerrain.makeSemanticVertexPaint(
         9, 8, contextualBrush, ETerrainTileLayer::Land, 2, catalog,
         0x434F524Eu, &overlapReport, 3);
-    QVERIFY(overlap.isEmpty());
-    QVERIFY2(overlapReport.hasErrors(), qPrintable(overlapReport.toText()));
+    QVERIFY2(!overlap.isEmpty(), qPrintable(overlapReport.toText()));
+    QVERIFY2(!overlapReport.hasErrors(), qPrintable(overlapReport.toText()));
     QVERIFY2(overlapReport.toText().contains(
-                 "terrain.semantic_vertex_context_overlap"),
+                 "terrain.semantic_vertex_fallback"),
              qPrintable(overlapReport.toText()));
+    QCOMPARE(overlap.semanticAudit.paintedVertices,
+             QVector<QPoint>({QPoint(9, 8)}));
+    QVERIFY(overlap.deltas.size() <= 4);
+    for(const STerrainTileDelta& delta : overlap.deltas)
+    {
+        QVERIFY(delta.globalX == 8 || delta.globalX == 9);
+        QVERIFY(delta.globalY == 7 || delta.globalY == 8);
+        bool found = false;
+        const STerrainTransitionSignature signature =
+            catalog.gridSignatureForPacked(delta.after, &found);
+        QVERIFY(found);
+        const int corner = delta.globalX == 8
+            ? (delta.globalY == 7 ? 2 : 1)
+            : (delta.globalY == 7 ? 3 : 0);
+        const QVector<qint32> corners({signature.northWest,
+                                      signature.northEast,
+                                      signature.southEast,
+                                      signature.southWest});
+        QCOMPARE(corners.at(corner), qint32(2));
+    }
 
     // The inverse 1-on-3 relationship is also a complete vertex motif. A
     // material that has ordinary pure tiles (family 4) must still be able to

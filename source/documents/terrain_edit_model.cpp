@@ -3191,11 +3191,6 @@ STerrainTileCommand CTerrainEditModel::makeSemanticVertexPaint(
                     continue;
                 }
                 vertexExact = false;
-                if(contextualCenter)
-                {
-                    vertexPossible = false;
-                    break;
-                }
                 // Transition-only families may cover a larger brush only
                 // while every incident tile remains exact. Avoid an atlas-wide
                 // nearest-candidate scan for a vertex that must be skipped.
@@ -3237,14 +3232,9 @@ STerrainTileCommand CTerrainEditModel::makeSemanticVertexPaint(
     {
         if(report)
         {
-            if(contextualStamp)
-                report->add("terrain.semantic_vertex_context_overlap",
-                    EValidationSeverity::Error,
-                    "This contextual atlas motif cannot touch the existing copy because the Material atlas lacks the required multi-corner transition. Paint it farther away or assign the missing transition tiles.");
-            else
-                report->add("terrain.semantic_vertex_center",
-                    EValidationSeverity::Error,
-                    "No authored atlas combination can place this material at the selected terrain vertex");
+            report->add("terrain.semantic_vertex_center",
+                EValidationSeverity::Error,
+                "No authored atlas combination can place this material at the selected terrain vertex");
         }
         return command;
     }

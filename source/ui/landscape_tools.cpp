@@ -556,7 +556,7 @@ void CLandscapeTools::rebuildMaterialPalette()
             button->setCheckable(true);
             button->setAutoRaise(false);
             button->setToolTip(choice.contextualStamp
-                ? tr("%1 - %2 atlas slot(s) assigned. This card is an authored material-on-support junction. A click places the exact four-tile corner motif shown here; copies can touch only when the atlas also contains the required multi-corner transitions.")
+                ? tr("%1 - %2 atlas slot(s) assigned. This card is an authored material-on-support junction. A click places the exact four-tile corner motif shown here; where a neighboring motif needs a missing transition, the editor uses the closest local authored tile and reports a warning.")
                     .arg(choice.name).arg(choice.assignedSlots)
                 : tr("%1 - %2 atlas slot(s) assigned")
                     .arg(choice.name).arg(choice.assignedSlots));
