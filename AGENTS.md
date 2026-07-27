@@ -21,6 +21,11 @@ worktrees.
   public/test artifact.
 - Delegation prompts must state read permissions and write restrictions
   separately. Never use ambiguous standalone "do not touch" wording.
+- If there is material ambiguity about intent, workflow, scope, evidence, or
+  implementation choice, ask the user instead of guessing. Concisely identify
+  the source of confusion and the viable options with their practical effects.
+  First resolve anything answerable through safe read-only inspection of files,
+  source, or documentation; ask only about the remaining user decision.
 
 - Deliver an unpacked, user-runnable tester folder, not raw compiler output.
 - Do not launch the packaged editor interactively; the user runs it.
