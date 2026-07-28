@@ -118,11 +118,20 @@ public:
         const QRectF previousRect = m_scene->sceneRect();
         const QTransform previousTransform = transform();
         const QPixmap pixmap = QPixmap::fromImage(image);
+        const QRectF nextRect(QPointF(0.0, 0.0), QSizeF(pixmap.size()));
+        if(m_item && m_item->boundingRect() == nextRect)
+        {
+            // Placement and resize controls replace preview pixels without
+            // changing its geometry. Avoid re-centering the view here: integer
+            // scrollbar rounding otherwise accumulates into visible drift and
+            // also changes the scene-space delta during right-button dragging.
+            m_item->setPixmap(pixmap);
+            return;
+        }
         if(!m_item)
             m_item = m_scene->addPixmap(pixmap);
         else
             m_item->setPixmap(pixmap);
-        const QRectF nextRect(QPointF(0.0, 0.0), QSizeF(pixmap.size()));
         m_scene->setSceneRect(nextRect);
         if(preserveView && !previousRect.isEmpty())
         {
