@@ -148,6 +148,18 @@ rather than another editor architecture pass.
 - [ ] Convert concrete regressions into minimized synthetic fixtures whenever
   the format permits this without distributing game or JMV assets.
 
+## Script-authoring conveniences
+
+- [ ] Add a viewport action such as **Copy Current Camera Transform as Script**.
+  Capture the current editor camera using the verified game-compatible
+  coordinate, handedness, orientation, and argument-order convention, then copy
+  ready-to-paste `SetCameraPosition(...)` and `SetCameraOrientation(...)` calls
+  with documented numeric precision. Give the action a short tooltip stating
+  exactly what is copied. Cameras are runtime/script state, not MOB object
+  types, so do not invent camera objects or serialize them into a MOB. Direct
+  insertion at the script cursor and assisted `PlayCamera` flow authoring are
+  possible later extensions; clipboard export is the low-priority baseline.
+
 ## Object authoring conveniences
 
 - [x] Add an explicit **Convert World Object to Lever...** transaction.
