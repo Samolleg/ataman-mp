@@ -27,7 +27,12 @@ worktrees.
   First resolve anything answerable through safe read-only inspection of files,
   source, or documentation; ask only about the remaining user decision. This
   requirement does not apply when the user explicitly authorizes best judgment,
-reasonable assumptions, or autonomous selection among the available options.
+  reasonable assumptions, or autonomous selection among the available options.
+- Before every substantive handoff, ask: "While working on this, which choices
+  did I make that I am not confident of? List all." Report all material
+  low-confidence choices, assumptions, evidence gaps, and unverified
+  interpretations; state briefly when there are none. Do not defer a material
+  ambiguity to this audit when it should have been raised before implementation.
 
 ## Parallel thread workers
 
