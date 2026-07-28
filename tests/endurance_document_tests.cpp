@@ -496,6 +496,7 @@ private slots:
     void conflictingTerrainSeamIsPreservedAndNotEditable();
     void malformedMprTableIsRejected();
     void stagedMobIsReopenedWithoutCreatingDestination();
+    void generatedMobCommitIsValidatedBackedUpAndAtomic();
 };
 
 void EnduranceDocumentTests::persistentPaintOperationSurvivesHistoryNavigation()
@@ -613,6 +614,7 @@ void EnduranceDocumentTests::mobGraphRemovalPreservesAllOtherTopLevelBytes()
     CMobDocument reopened;
     QVERIFY(reopened.loadBytes(candidate, "graphless-result.mob", &report));
     QVERIFY(!reopened.hasEmbeddedAiGraph());
+    QVERIFY(!reopened.hasSection(0x1E00)); // VSS_SECTION is deliberately absent.
 }
 
 void EnduranceDocumentTests::mobGraphReplacementAndInsertionAreExact()
@@ -5806,6 +5808,58 @@ void EnduranceDocumentTests::stagedMobIsReopenedWithoutCreatingDestination()
     QCOMPARE(result.size, qint64(bytes.size()));
     QVERIFY(!destination.exists());
     QCOMPARE(QDir(dir.path()).entryList(QDir::Files).size(), 0);
+}
+
+void EnduranceDocumentTests::generatedMobCommitIsValidatedBackedUpAndAtomic()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QFileInfo destination(dir.filePath("new-autozone.mob"));
+    const QFileInfo backupRoot(dir.filePath("backups"));
+
+    const QByteArray range = section(0xFF02,
+        section(0xFF05, u32(1000)) + section(0xFF06, u32(1999)));
+    const QByteArray candidate = validMob(
+        section(0xD000) + section(0xFF00, range));
+
+    SMobSaveCommitRequest request;
+    request.destination = destination;
+    request.backupRootOverride = backupRoot.absoluteFilePath();
+    const SMobSaveCommitResult created = commitGeneratedMob(candidate, request);
+    QVERIFY2(created.success, qPrintable(created.error));
+    QCOMPARE(created.phase, QStringLiteral("complete"));
+    QVERIFY(created.backupPath.isEmpty());
+
+    CMobDocument reopened;
+    CValidationReport report;
+    QVERIFY(reopened.load(destination, &report));
+    QVERIFY2(!report.hasErrors(), qPrintable(report.toText()));
+    QVERIFY(reopened.isQuestMob());
+    QCOMPARE(reopened.objects().size(), 0);
+    QCOMPARE(reopened.idRanges().size(), 1);
+    QVERIFY(!reopened.hasEmbeddedAiGraph());
+
+    const QByteArray replacement = validMob(
+        section(0xD000) + section(0xFF00,
+            section(0xFF02, section(0xFF05, u32(2000))
+                              + section(0xFF06, u32(2999)))));
+    const SMobSaveCommitResult replaced = commitGeneratedMob(replacement, request);
+    QVERIFY2(replaced.success, qPrintable(replaced.error));
+    QVERIFY(!replaced.backupPath.isEmpty());
+    QVERIFY(QFileInfo::exists(replaced.backupPath));
+
+#ifdef QT_TESTLIB_LIB
+    request.simulateAtomicCommitFailure = true;
+    QFile current(destination.absoluteFilePath());
+    QVERIFY(current.open(QIODevice::ReadOnly));
+    const QByteArray committedBeforeFailure = current.readAll();
+    current.close();
+    const SMobSaveCommitResult failed = commitGeneratedMob(candidate, request);
+    QVERIFY(!failed.success);
+    QFile after(destination.absoluteFilePath());
+    QVERIFY(after.open(QIODevice::ReadOnly));
+    QCOMPARE(after.readAll(), committedBeforeFailure);
+#endif
 }
 
 QTEST_APPLESS_MAIN(EnduranceDocumentTests)

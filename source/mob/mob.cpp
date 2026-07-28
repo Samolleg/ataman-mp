@@ -37,6 +37,7 @@
 CMob::CMob():
     m_view(nullptr)
   ,m_pProgress(nullptr)
+  ,m_scriptKey(0)
   ,m_hasVssSection(false)
   ,m_bDirty(false)
   ,m_activeRangeId(0)

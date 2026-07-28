@@ -60,6 +60,24 @@ struct SMprSaveCommitResult
     QString semanticDiff;
 };
 
+struct SMobSaveCommitRequest
+{
+    QFileInfo destination;
+    QString backupRootOverride;
+#ifdef QT_TESTLIB_LIB
+    bool simulateAtomicCommitFailure{false};
+#endif
+};
+
+struct SMobSaveCommitResult
+{
+    bool success{false};
+    QString phase;
+    QString error;
+    QString candidateSha256;
+    QString backupPath;
+};
+
 SExistingFileComparison compareExistingFile(const QFileInfo& file,
                                              const QByteArray& expectedBytes);
 
@@ -94,5 +112,12 @@ SMprSaveCommitResult commitStagedMprCanvasResize(
 SMprSaveCommitResult commitGeneratedMpr(
     const QByteArray& candidateBytes,
     const SMprSaveCommitRequest& request);
+
+// Publishes a freshly generated canonical MOB. This path is intentionally
+// separate from changed-MOB saving because a new document has no raw baseline
+// whose unknown sections can be preserved.
+SMobSaveCommitResult commitGeneratedMob(
+    const QByteArray& candidateBytes,
+    const SMobSaveCommitRequest& request);
 
 #endif // STAGED_SAVE_VALIDATOR_H

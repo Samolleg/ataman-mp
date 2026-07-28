@@ -62,6 +62,7 @@
 #include <QScreen>
 #include <QImage>
 #include <QImageReader>
+#include <QRegularExpressionValidator>
 #include <QtConcurrent/QtConcurrentRun>
 
 #include <cmath>
@@ -5534,6 +5535,7 @@ void MainWindow::updateDocumentActionAvailability()
     const bool dirtyMpr = hasMpr && CLandscape::getInstance()->isDirty();
     m_ui->actionOpen->setEnabled(idle);
     m_ui->actionNew_MPR->setEnabled(idle);
+    m_ui->actionNew_MOB->setEnabled(idle);
     m_ui->actionOpen_MPR->setEnabled(idle);
     m_ui->actionOpen_MOB->setEnabled(idle);
     m_ui->actionOpen_recent->setEnabled(idle);
@@ -6633,6 +6635,295 @@ void MainWindow::on_actionNew_MPR_triggered()
             dialog.accept();
             return;
         }
+        statusBar()->showMessage(tr("Created and opened %1")
+            .arg(destination.fileName()), 5000);
+        dialog.accept();
+    });
+    dialog.exec();
+}
+
+void MainWindow::on_actionNew_MOB_triggered()
+{
+    QDialog dialog(this);
+    dialog.setWindowTitle(tr("Create New MOB"));
+    dialog.setWindowFlag(Qt::WindowContextHelpButtonHint, false);
+    dialog.resize(650, 560);
+    QVBoxLayout* root = new QVBoxLayout(&dialog);
+    QLabel* introduction = new QLabel(tr(
+        "Create an empty, runtime-valid MOB. Objects, embedded AI graph, VSS, and "
+        "editor-only directory data are never copied. The normal script and "
+        "selected map metadata can be copied explicitly."), &dialog);
+    introduction->setWordWrap(true);
+    root->addWidget(introduction);
+
+    QFormLayout* form = new QFormLayout;
+    QComboBox* role = new QComboBox(&dialog);
+    role->addItem(tr("Primary map MOB (SC_OBJECT_DB_FILE)"));
+    role->addItem(tr("Supplemental / AutoZone MOB (PR_OBJECT_DB_FILE)"));
+    role->setCurrentIndex(1);
+    role->setToolTip(tr(
+        "Primary MOBs own world settings and normally anchor a map. Supplemental "
+        "MOBs are the usual choice for AutoZones and optional map states."));
+    form->addRow(tr("MOB role"), role);
+
+    QComboBox* templateMob = new QComboBox(&dialog);
+    templateMob->addItem(tr("Do not copy from a loaded MOB"), qulonglong(0));
+    if(m_pView)
+    {
+        for(CMob* mob : m_pView->mobs())
+        {
+            if(mob)
+                templateMob->addItem(mob->filePath().fileName(),
+                                     qulonglong(reinterpret_cast<quintptr>(mob)));
+        }
+    }
+    templateMob->setToolTip(tr(
+        "Only explicitly selected fields are copied. Objects, graphs, VSS, and "
+        "editor metadata are always omitted."));
+    form->addRow(tr("Copy settings from"), templateMob);
+
+    QCheckBox* copyRanges = new QCheckBox(tr("Copy the source MOB's active ID ranges"), &dialog);
+    QCheckBox* copyScript = new QCheckBox(tr("Copy normal script (SS_TEXT)"), &dialog);
+    QCheckBox* copyDiplomacy = new QCheckBox(tr("Copy diplomacy table and player names"), &dialog);
+    QCheckBox* copyWorld = new QCheckBox(tr("Copy primary world settings"), &dialog);
+    for(QCheckBox* box : {copyRanges, copyScript, copyDiplomacy, copyWorld})
+        box->setEnabled(false);
+    form->addRow(QString(), copyRanges);
+    form->addRow(QString(), copyScript);
+    form->addRow(QString(), copyDiplomacy);
+    form->addRow(QString(), copyWorld);
+
+    QRegularExpressionValidator* unsignedValidator = new QRegularExpressionValidator(
+        QRegularExpression(QStringLiteral("[0-9]{1,10}")), &dialog);
+    QLineEdit* rangeMinimum = new QLineEdit(QStringLiteral("1"), &dialog);
+    QLineEdit* rangeMaximum = new QLineEdit(QStringLiteral("999999"), &dialog);
+    rangeMinimum->setValidator(unsignedValidator);
+    rangeMaximum->setValidator(unsignedValidator);
+    rangeMinimum->setToolTip(tr(
+        "First object ID reserved for this MOB. Verify that it does not overlap "
+        "another MOB used by the same map state."));
+    rangeMaximum->setToolTip(tr(
+        "Last object ID reserved for this MOB. The range is required even for an "
+        "initially empty MOB so future object creation is deterministic."));
+    form->addRow(tr("ID range minimum"), rangeMinimum);
+    form->addRow(tr("ID range maximum"), rangeMaximum);
+
+    QCheckBox* createDiplomacy = new QCheckBox(
+        tr("Create a neutral 32-player diplomacy table"), &dialog);
+    createDiplomacy->setToolTip(tr(
+        "Creates the standard 32 by 32 zero-valued table with Player-0 through "
+        "Player-31 names. Leave disabled to omit diplomacy metadata."));
+    form->addRow(QString(), createDiplomacy);
+    root->addLayout(form);
+
+    QGroupBox* worldGroup = new QGroupBox(tr("Initial primary world settings"), &dialog);
+    QFormLayout* worldForm = new QFormLayout(worldGroup);
+    QDoubleSpinBox* windX = new QDoubleSpinBox(worldGroup);
+    QDoubleSpinBox* windY = new QDoubleSpinBox(worldGroup);
+    QDoubleSpinBox* windZ = new QDoubleSpinBox(worldGroup);
+    QDoubleSpinBox* windStrength = new QDoubleSpinBox(worldGroup);
+    QDoubleSpinBox* time = new QDoubleSpinBox(worldGroup);
+    QDoubleSpinBox* ambient = new QDoubleSpinBox(worldGroup);
+    QDoubleSpinBox* sunlight = new QDoubleSpinBox(worldGroup);
+    for(QDoubleSpinBox* value : {windX, windY, windZ, windStrength,
+                                 time, ambient, sunlight})
+    {
+        value->setRange(-1000000.0, 1000000.0);
+        value->setDecimals(4);
+    }
+    time->setValue(12.0);
+    time->setToolTip(tr("Initial game time stored in WORLD_SET."));
+    ambient->setToolTip(tr("Initial ambient-light scalar stored in WORLD_SET."));
+    sunlight->setToolTip(tr("Initial sun-light scalar stored in WORLD_SET."));
+    worldForm->addRow(tr("Wind direction X"), windX);
+    worldForm->addRow(tr("Wind direction Y"), windY);
+    worldForm->addRow(tr("Wind direction Z"), windZ);
+    worldForm->addRow(tr("Wind strength"), windStrength);
+    worldForm->addRow(tr("Time"), time);
+    worldForm->addRow(tr("Ambient"), ambient);
+    worldForm->addRow(tr("Sun light"), sunlight);
+    root->addWidget(worldGroup);
+
+    QCheckBox* openParameters = new QCheckBox(
+        tr("Open MOB Parameters after creation"), &dialog);
+    openParameters->setChecked(true);
+    root->addWidget(openParameters);
+
+    const auto selectedTemplate = [&]() -> CMob* {
+        return reinterpret_cast<CMob*>(quintptr(templateMob->currentData().toULongLong()));
+    };
+    const auto refreshControls = [&]() {
+        const bool hasTemplate = selectedTemplate() != nullptr;
+        const bool primary = role->currentIndex() == 0;
+        copyRanges->setEnabled(hasTemplate);
+        copyScript->setEnabled(hasTemplate);
+        copyDiplomacy->setEnabled(hasTemplate);
+        copyWorld->setEnabled(hasTemplate && primary
+                              && !selectedTemplate()->isQuestMob());
+        if(!copyWorld->isEnabled())
+            copyWorld->setChecked(false);
+        worldGroup->setEnabled(primary && !copyWorld->isChecked());
+        rangeMinimum->setEnabled(!copyRanges->isChecked());
+        rangeMaximum->setEnabled(!copyRanges->isChecked());
+        createDiplomacy->setEnabled(!copyDiplomacy->isChecked());
+    };
+    connect(templateMob, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            &dialog, [&](int) { refreshControls(); });
+    connect(role, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            &dialog, [&](int) { refreshControls(); });
+    connect(copyRanges, &QCheckBox::toggled, &dialog,
+            [&](bool) { refreshControls(); });
+    connect(copyDiplomacy, &QCheckBox::toggled, &dialog,
+            [&](bool) { refreshControls(); });
+    connect(copyWorld, &QCheckBox::toggled, &dialog,
+            [&](bool) { refreshControls(); });
+    refreshControls();
+
+    QDialogButtonBox* buttons = new QDialogButtonBox(
+        QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    buttons->button(QDialogButtonBox::Ok)->setText(tr("Create and Open..."));
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    root->addWidget(buttons);
+    connect(buttons->button(QDialogButtonBox::Ok), &QPushButton::clicked,
+            &dialog, [&]() {
+        const bool supplemental = role->currentIndex() == 1;
+        CMob* source = selectedTemplate();
+        const SMobParameterState sourceState = source
+            ? source->parameterState() : SMobParameterState();
+        QVector<SRange> ranges;
+        if(copyRanges->isChecked() && source)
+            ranges = sourceState.questMob ? sourceState.secondaryRanges
+                                          : sourceState.mainRanges;
+        else
+        {
+            bool minimumOk = false;
+            bool maximumOk = false;
+            const qulonglong minimum = rangeMinimum->text().toULongLong(&minimumOk);
+            const qulonglong maximum = rangeMaximum->text().toULongLong(&maximumOk);
+            if(!minimumOk || !maximumOk || minimum == 0 || minimum > 0xFFFFFFFFull
+               || maximum > 0xFFFFFFFFull || minimum > maximum)
+            {
+                QMessageBox::warning(&dialog, tr("Create New MOB"), tr(
+                    "Enter an ID range between 1 and 4294967295, with the minimum "
+                    "not greater than the maximum."));
+                rangeMinimum->setFocus();
+                return;
+            }
+            ranges.append(SRange(uint(minimum), uint(maximum)));
+        }
+        if(ranges.isEmpty())
+        {
+            QMessageBox::warning(&dialog, tr("Create New MOB"), tr(
+                "The selected source has no active ID range to copy. Enter a new "
+                "range instead."));
+            copyRanges->setChecked(false);
+            return;
+        }
+
+        CMob generated;
+        generated.setQuestMob(supplemental);
+        generated.setRanges(!supplemental, ranges);
+        if(copyScript->isChecked() && source)
+            generated.setScript(sourceState.script);
+        if(copyDiplomacy->isChecked() && source)
+        {
+            generated.setDiplomacyField(sourceState.diplomacy);
+            generated.setDiplomacyNames(sourceState.diplomacyNames);
+        }
+        else if(createDiplomacy->isChecked())
+            generated.generateDiplomacyTable();
+        if(!supplemental)
+        {
+            CWorldSet world;
+            if(copyWorld->isChecked() && source)
+                world = sourceState.worldSet;
+            else
+            {
+                world.setData(eWsTypeWindDir, QStringLiteral("(%1,%2,%3)")
+                    .arg(windX->value(), 0, 'g', 9)
+                    .arg(windY->value(), 0, 'g', 9)
+                    .arg(windZ->value(), 0, 'g', 9));
+                world.setData(eWsTypeWindStr, QString::number(windStrength->value(), 'g', 9));
+                world.setData(eWsTypeTime, QString::number(time->value(), 'g', 9));
+                world.setData(eWsTypeAmbient, QString::number(ambient->value(), 'g', 9));
+                world.setData(eWsTypeSunLight, QString::number(sunlight->value(), 'g', 9));
+            }
+            generated.setWorldSet(world);
+        }
+
+        QByteArray candidate;
+        generated.serializeMob(candidate, false);
+        CMobDocument candidateDocument;
+        CValidationReport candidateReport;
+        if(!candidateDocument.loadBytes(candidate, QStringLiteral("new.mob"),
+                                         &candidateReport)
+           || candidateReport.hasErrors()
+           || candidateDocument.isQuestMob() != supplemental
+           || !candidateDocument.objects().isEmpty()
+           || candidateDocument.hasEmbeddedAiGraph()
+           || candidateDocument.hasSection(0x1E00))
+        {
+            QMessageBox::critical(&dialog, tr("Create New MOB"), tr(
+                "The generated MOB failed its fresh validation and was not written.\n\n%1")
+                .arg(candidateReport.toText()));
+            return;
+        }
+
+        COptString* opt = dynamic_cast<COptString*>(
+            m_settings->opt(eOptSetGeneral, "lastVisitedFolder"));
+        const QString startFolder = opt ? opt->value() : QDir::currentPath();
+        QString suggestedName = supplemental
+            ? QStringLiteral("autozone-new.mob") : QStringLiteral("zone-new.mob");
+        QString destinationPath = QFileDialog::getSaveFileName(&dialog,
+            tr("Save New MOB"), QDir(startFolder).filePath(suggestedName),
+            tr("MOB (*.mob)"));
+        if(destinationPath.isEmpty())
+            return;
+        if(!destinationPath.endsWith(QStringLiteral(".mob"), Qt::CaseInsensitive))
+            destinationPath += QStringLiteral(".mob");
+        const QFileInfo destination(destinationPath);
+        if(m_pView)
+        {
+            for(CMob* loaded : m_pView->mobs())
+            {
+                if(loaded && loaded->filePath().absoluteFilePath().compare(
+                       destination.absoluteFilePath(), Qt::CaseInsensitive) == 0)
+                {
+                    QMessageBox::warning(&dialog, tr("Create New MOB"), tr(
+                        "%1 is currently loaded. Unload it before replacing it with "
+                        "a newly generated MOB.").arg(destination.fileName()));
+                    return;
+                }
+            }
+        }
+        if(destination.exists()
+           && QMessageBox::question(&dialog, tr("Replace MOB"),
+                tr("%1 already exists. Back it up and replace it?")
+                    .arg(destination.fileName())) != QMessageBox::Yes)
+            return;
+
+        SMobSaveCommitRequest commit;
+        commit.destination = destination;
+        const SMobSaveCommitResult result = commitGeneratedMob(candidate, commit);
+        if(!result.success)
+        {
+            QMessageBox::critical(&dialog, tr("Create New MOB"), tr(
+                "The generated MOB was not committed.\n\n%1").arg(result.error));
+            return;
+        }
+        if(opt)
+            opt->setValue(destination.absolutePath());
+        if(!loadMobWithProgress(destination))
+        {
+            QMessageBox::information(&dialog, tr("New MOB Created"), tr(
+                "The validated MOB was created at:\n%1\n\nIt could not be opened automatically.")
+                .arg(destination.absoluteFilePath()));
+            dialog.accept();
+            return;
+        }
+        rememberRecentFile(destination);
+        if(openParameters->isChecked())
+            m_pView->openActiveMobEditParams();
         statusBar()->showMessage(tr("Created and opened %1")
             .arg(destination.fileName()), 5000);
         dialog.accept();

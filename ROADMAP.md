@@ -639,6 +639,13 @@ The following items are deliberately not hidden inside the completed baseline:
   placement from the active, non-stale regenerated graph.
 - [x] Add recovery autosave for dirty canonical MPR transactions without using
   the forbidden legacy serializer.
+- [x] Add explicit new-MOB creation for primary map MOBs and supplemental /
+  AutoZone MOBs. Generated files require an active ID range, expose primary
+  world settings, optionally create/copy diplomacy metadata, and may copy only
+  the normal script and user-selected settings from a loaded MOB. Objects,
+  embedded AI graphs, VSS, and editor directory metadata are never copied.
+  Creation uses fresh reopen validation, backup, race checks, and atomic
+  replacement rather than weakening the changed-MOB preservation path.
 - [ ] Complete typed overlay-material editing/presets and the final Base/JMV
   overlay runtime matrix.
 

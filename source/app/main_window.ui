@@ -331,6 +331,7 @@
     </property>
     <addaction name="actionOpen"/>
     <addaction name="actionNew_MPR"/>
+    <addaction name="actionNew_MOB"/>
     <addaction name="actionOpen_MPR"/>
     <addaction name="actionOpen_MOB"/>
     <addaction name="actionOpen_recent"/>
@@ -423,6 +424,11 @@
   <action name="actionNew_MPR">
    <property name="text">
     <string>New MPR from Terrain Template...</string>
+   </property>
+  </action>
+  <action name="actionNew_MOB">
+   <property name="text">
+    <string>New MOB...</string>
    </property>
   </action>
   <action name="actionOpen_MOB">

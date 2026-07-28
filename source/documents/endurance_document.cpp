@@ -2190,6 +2190,13 @@ bool CMobDocument::hasEmbeddedAiGraph() const
     return false;
 }
 
+bool CMobDocument::hasSection(quint32 type) const
+{
+    QVector<const SMobSection*> matches;
+    collectSections(m_sections, type, matches);
+    return !matches.isEmpty();
+}
+
 bool CMobDocument::embeddedAiGraph(QByteArray* graph,
                                    CValidationReport* report) const
 {

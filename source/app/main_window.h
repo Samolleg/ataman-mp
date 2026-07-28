@@ -205,6 +205,7 @@ private slots:
     void on_actionExit_triggered();
     void on_actionOpen_triggered();
     void on_actionNew_MPR_triggered();
+    void on_actionNew_MOB_triggered();
     void on_actionOpen_MPR_triggered();
     void on_actionOpen_MOB_triggered();
     void on_actionSettings_triggered();
