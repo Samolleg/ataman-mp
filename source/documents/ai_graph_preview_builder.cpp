@@ -214,6 +214,8 @@ struct SSampledCollisionInterval
 {
     float minimumHeight{std::numeric_limits<float>::max()};
     float maximumHeight{-std::numeric_limits<float>::max()};
+    bool hasMinimum{false};
+    bool hasMaximum{false};
 };
 
 QHash<int, SSampledCollisionInterval> sampleCollisionBoxFaces(
@@ -232,6 +234,15 @@ QHash<int, SSampledCollisionInterval> sampleCollisionBoxFaces(
         const QVector3D center = volume.boxCorners.at(faceWalk[face]);
         const QVector3D axisA = volume.boxCorners.at(faceWalk[face - 1]) - center;
         const QVector3D axisB = volume.boxCorners.at(faceWalk[face + 1]) - center;
+        // The navigation raster does not treat every box-face sample as both
+        // ends of an obstacle interval. Upward-facing samples establish the
+        // walkable/top height; downward and side-facing samples establish the
+        // lower height. Keeping those streams separate is especially important
+        // at bridge ends, where a side-face-only cell is not a valid deck cell.
+        QVector3D normal = QVector3D::crossProduct(axisA, axisB);
+        if((face & 1) != 0)
+            normal = -normal;
+        const bool upperFace = normal.z() > 0.0f;
         const float projectedA = qSqrt(axisA.x() * axisA.x() + axisA.y() * axisA.y());
         const float projectedB = qSqrt(axisB.x() * axisB.x() + axisB.y() * axisB.y());
         const int stepsA = qMax(2, qRound(projectedA / CAiGraphPreviewBuilder::AiTileWorldSize
@@ -251,8 +262,16 @@ QHash<int, SSampledCollisionInterval> sampleCollisionBoxFaces(
                 if(x < 0 || y < 0 || x >= aiWidth || y >= aiHeight)
                     continue;
                 SSampledCollisionInterval& interval = intervals[tileIndex(x, y, aiWidth)];
-                interval.minimumHeight = qMin(interval.minimumHeight, point.z());
-                interval.maximumHeight = qMax(interval.maximumHeight, point.z());
+                if(upperFace)
+                {
+                    interval.maximumHeight = qMax(interval.maximumHeight, point.z());
+                    interval.hasMaximum = true;
+                }
+                else
+                {
+                    interval.minimumHeight = qMin(interval.minimumHeight, point.z());
+                    interval.hasMinimum = true;
+                }
             }
     }
     return intervals;
@@ -703,6 +722,9 @@ SAiGraphPreviewBuildResult CAiGraphPreviewBuilder::build(const SAiGraphPreviewBu
                 sample != sampledIntervals.constEnd(); ++sample)
             {
                 const int index = sample.key();
+                if(!sample.value().hasMinimum || !sample.value().hasMaximum
+                   || sample.value().minimumHeight >= sample.value().maximumHeight)
+                    continue;
                 const float localMinimumZ = sample.value().minimumHeight;
                 const float localMaximumZ = sample.value().maximumHeight;
                 if(volume.passability != EAiGraphObjectPassability::Bridge)

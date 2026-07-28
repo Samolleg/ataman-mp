@@ -107,6 +107,7 @@ private slots:
     void regenerationRejectsGameScaleTerrainCliffs();
     void regenerationAppliesWaterClearanceToEveryProfile();
     void regenerationUsesBridgeSurfaceAndObjectSemantics();
+    void regenerationRejectsSideOnlyBridgeFringeCells();
     void regenerationKeepsNarrowBridgeCorridorInCoarseGraph();
     void regeneratedHumanProjectionUsesPassableBridgeSurface();
     void regenerationPreservesAuthoredNarrowObjectOpening();
@@ -333,6 +334,27 @@ void AiGraphDocumentTests::regenerationUsesBridgeSurfaceAndObjectSemantics()
     QVERIFY2(ignored.valid, qPrintable(ignored.error));
     for(int layer = 0; layer < CAiGraphDocument::LayerCount; ++layer)
         QVERIFY(ignored.document.weight(layer, 1, 1, 6) >= 0);
+}
+
+void AiGraphDocumentTests::regenerationRejectsSideOnlyBridgeFringeCells()
+{
+    SAiGraphPreviewBuildInput input;
+    input.graphWidth = 3;
+    input.graphHeight = 2;
+    const int aiWidth = input.graphWidth * CAiGraphPreviewBuilder::AiTilesPerGraphCell;
+    const int aiHeight = input.graphHeight * CAiGraphPreviewBuilder::AiTilesPerGraphCell;
+    input.terrainHeights.fill(0.0f, aiWidth * aiHeight);
+    input.waterDepths.fill(6.0f, aiWidth * aiHeight);
+    input.collisionProxies.append(boxVolume(
+        0.0f, 0.0f, 0.0f, 8.0f, 1.0f, 1.0f,
+        EAiGraphObjectPassability::Bridge));
+
+    const SAiGraphPreviewBuildResult result = CAiGraphPreviewBuilder::build(input);
+    QVERIFY2(result.valid, qPrintable(result.error));
+    // The upward face covers 16x2 half-metre cells. Samples from the vertical
+    // end faces land on the next raster coordinate, but they do not describe a
+    // walkable deck and must not extend the bridge.
+    QCOMPARE(result.bridgeAiTiles, 32);
 }
 
 void AiGraphDocumentTests::regenerationKeepsNarrowBridgeCorridorInCoarseGraph()
