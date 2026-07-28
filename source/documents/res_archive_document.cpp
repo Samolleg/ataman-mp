@@ -1,6 +1,7 @@
 #include "res_archive_document.h"
 
 #include <QCryptographicHash>
+#include <QSet>
 #include <QTextCodec>
 #include <QtEndian>
 
@@ -216,26 +217,25 @@ bool CResArchiveDocument::buildWithAppendedMember(const QString& name,
                                                   QByteArray* output,
                                                   QStringList* errors) const
 {
+    SResArchiveNewMember member;
+    member.name = name;
+    member.payload = payload;
+    member.lastWriteTime = lastWriteTime;
+    return buildWithAppendedMembers({member}, output, errors);
+}
+
+bool CResArchiveDocument::buildWithAppendedMembers(
+    const QVector<SResArchiveNewMember>& appendedMembers,
+    QByteArray* output, QStringList* errors) const
+{
     if(output)
         output->clear();
-    if(name.isEmpty() || payload.isEmpty() || !output)
+    if(appendedMembers.isEmpty() || !output)
     {
-        addError(errors, "A RES member name, payload, and output are required.");
-        return false;
-    }
-    if(uniqueMemberIndex(name) != -1)
-    {
-        addError(errors, QString("RES member %1 already exists or is ambiguous.").arg(name));
+        addError(errors, "One or more RES members and an output are required.");
         return false;
     }
     QTextCodec* codec = QTextCodec::codecForName("CP1251");
-    const QByteArray appendedName = codec ? codec->fromUnicode(name)
-                                          : name.toLatin1();
-    if(appendedName.isEmpty() || (codec && codec->toUnicode(appendedName) != name))
-    {
-        addError(errors, "The appended RES member name cannot round-trip through CP1251.");
-        return false;
-    }
 
     struct BuildMember
     {
@@ -246,7 +246,7 @@ bool CResArchiveDocument::buildWithAppendedMember(const QString& name,
         quint32 nameOffset{0};
     };
     QVector<BuildMember> members;
-    members.reserve(m_members.size() + 1);
+    members.reserve(m_members.size() + appendedMembers.size());
     for(const SResArchiveMember& member : m_members)
     {
         BuildMember copy;
@@ -255,11 +255,32 @@ bool CResArchiveDocument::buildWithAppendedMember(const QString& name,
         copy.time = member.lastWriteTime;
         members.append(copy);
     }
-    BuildMember appended;
-    appended.name = appendedName;
-    appended.payload = payload;
-    appended.time = lastWriteTime;
-    members.append(appended);
+    QSet<QString> appendedNames;
+    for(const SResArchiveNewMember& requested : appendedMembers)
+    {
+        if(requested.name.isEmpty() || requested.payload.isEmpty()
+           || uniqueMemberIndex(requested.name) != -1
+           || appendedNames.contains(requested.name.toCaseFolded()))
+        {
+            addError(errors, QString("RES member %1 is empty, duplicated, or already exists.")
+                     .arg(requested.name));
+            return false;
+        }
+        const QByteArray encodedName = codec ? codec->fromUnicode(requested.name)
+                                             : requested.name.toLatin1();
+        if(encodedName.isEmpty()
+           || (codec && codec->toUnicode(encodedName) != requested.name))
+        {
+            addError(errors, "An appended RES member name cannot round-trip through CP1251.");
+            return false;
+        }
+        appendedNames.insert(requested.name.toCaseFolded());
+        BuildMember appended;
+        appended.name = encodedName;
+        appended.payload = requested.payload;
+        appended.time = requested.lastWriteTime;
+        members.append(appended);
+    }
     const quint32 count = quint32(members.size());
 
     QByteArray staged(int(kHeaderSize), '\0');
@@ -331,12 +352,20 @@ bool CResArchiveDocument::buildWithAppendedMember(const QString& name,
     CResArchiveDocument reopened;
     QStringList reopenErrors;
     if(!reopened.loadBytes(staged, m_sourceName + " [derived]", &reopenErrors)
-       || reopened.members().size() != members.size()
-       || reopened.memberPayload(name) != payload)
+       || reopened.members().size() != members.size())
     {
         if(errors) errors->append(reopenErrors);
         addError(errors, "The derived RES archive failed structural reopen validation.");
         return false;
+    }
+    for(const SResArchiveNewMember& appended : appendedMembers)
+    {
+        if(reopened.memberPayload(appended.name) != appended.payload)
+        {
+            addError(errors, QString("Derived RES changed appended member %1.")
+                     .arg(appended.name));
+            return false;
+        }
     }
     for(const SResArchiveMember& original : m_members)
     {

@@ -21,6 +21,13 @@ struct SResArchiveMember
     QByteArray sha256;
 };
 
+struct SResArchiveNewMember
+{
+    QString name;
+    QByteArray payload;
+    quint32 lastWriteTime{0};
+};
+
 // Lossless reader and append-only member replacement for Evil Islands RES
 // archives. Existing bytes are retained verbatim; a changed payload and a
 // minimally patched copy of the original table are appended to the archive.
@@ -46,6 +53,9 @@ public:
     bool buildWithAppendedMember(const QString& name, const QByteArray& payload,
                                  quint32 lastWriteTime, QByteArray* output,
                                  QStringList* errors = nullptr) const;
+    bool buildWithAppendedMembers(const QVector<SResArchiveNewMember>& appended,
+                                  QByteArray* output,
+                                  QStringList* errors = nullptr) const;
 
     static bool validateReplacement(const CResArchiveDocument& baseline,
                                     const CResArchiveDocument& candidate,

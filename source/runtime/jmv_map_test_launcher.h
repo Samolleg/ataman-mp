@@ -55,6 +55,7 @@ struct SJmvMapTestLaunchInput
     SMapSpawnPlan spawn;
     double spawnZ{0.0};
     bool godmode{false};
+    bool forceDrawall{false};
     bool overrideWorldTime{false};
     double worldTimeHours{12.0};
     bool borrowedMapIdentity{false};
@@ -138,6 +139,12 @@ public:
                                          bool godmode,
                                          QJsonObject* manifest,
                                          QString* error = nullptr);
+    static bool prepareRunOwnedDrawallAutoexec(const QString& sourcePath,
+                                               const QString& runRoot,
+                                               bool forceDrawall,
+                                               QJsonObject* manifest,
+                                               QString* outputPath,
+                                               QString* error = nullptr);
     static bool prepareGodmodeBootstrap(const QStringList& mapDirectories,
                                         const QString& runRoot,
                                         const SMapSpawnPlan& spawn,
@@ -187,6 +194,7 @@ private:
     QString m_mapTableSourcePath;
     QString m_stagedMapTablePath;
     QString m_livePlaceholderResourcePath;
+    QString m_drawallAutoexecPath;
     QString m_bridgeSourcePath;
     QString m_bridgeLivePath;
     QString m_bridgeResultPath;

@@ -677,25 +677,30 @@ bool CJmvMapTestLauncher::rebaseRuntimeTerrainAtlas(
         return false;
     }
     QStringList runtimeMembers;
+    QVector<SResArchiveNewMember> appendedMembers;
+    appendedMembers.reserve(sourceMembers.size());
     for(int page = 0; page < sourceMembers.size(); ++page)
     {
         const QByteArray payload = sourceArchive.memberPayload(sourceMembers.at(page));
         const QString memberName = QStringLiteral("%1%2.mmp")
             .arg(runtimeNamespace).arg(page, 3, 10, QLatin1Char('0'));
-        QByteArray next;
-        if(payload.isEmpty()
-           || !destinationArchive.buildWithAppendedMember(
-               memberName, payload, 0, &next, &archiveErrors)
-           || !destinationArchive.loadBytes(
-               next, QStringLiteral("runtime-atlas-rebased.res"),
-               &archiveErrors))
+        if(payload.isEmpty())
         {
-            if(error) *error = "Could not rebase a run-owned terrain atlas page:\n"
-                + archiveErrors.join('\n');
+            if(error) *error = "A run-owned terrain atlas page is empty.";
             return false;
         }
-        runtimeArchive = next;
+        SResArchiveNewMember appended;
+        appended.name = memberName;
+        appended.payload = payload;
+        appendedMembers.append(appended);
         runtimeMembers.append(memberName);
+    }
+    if(!destinationArchive.buildWithAppendedMembers(
+           appendedMembers, &runtimeArchive, &archiveErrors))
+    {
+        if(error) *error = "Could not bulk-rebase the run-owned terrain atlas pages:\n"
+            + archiveErrors.join('\n');
+        return false;
     }
     *rebasedMpr = runtimeMpr;
     *rebasedAtlasRes = runtimeArchive;
@@ -1067,6 +1072,19 @@ QJsonObject CJmvMapTestLauncher::buildAuthoritativeResult(
     const bool expandedAtlasContractValidated = !expandedAtlasRequested
         || (customAtlasContractValidated && atlasPages > 8 && atlasSlots > 512
             && atlasProbe.value("exceedsLegacyEightPages").toBool());
+    const QJsonObject drawall = manifest.value("drawallStress").toObject();
+    const bool drawallRequested = drawall.value("requested").toBool();
+    const bool drawallAutoexecRedirected = !drawallRequested
+        || bridgeResult.contains("DRAWALL_AUTOEXEC redirect");
+    const QString drawallHash = drawall.value("ownedSha256").toString();
+    const bool drawallAutoexecConsumed = !drawallRequested
+        || (!drawallHash.isEmpty() && bridgeResult.contains(
+            QRegularExpression(QStringLiteral("DRAWALL_AUTOEXEC consumed.*sha256=")
+                + QRegularExpression::escape(drawallHash))));
+    const bool drawallContractValidated = !drawallRequested
+        || (!drawall.value("installedConfigurationModified").toBool()
+            && drawall.value("command").toString() == QStringLiteral("drawall 1")
+            && drawallAutoexecRedirected && drawallAutoexecConsumed);
     const bool actualMprMatchesOwnedPayload = !actualMprPath.isEmpty()
         && QFileInfo(actualMprPath).absoluteFilePath().compare(
             QFileInfo(expectedMprPath).absoluteFilePath(),
@@ -1135,11 +1153,13 @@ QJsonObject CJmvMapTestLauncher::buildAuthoritativeResult(
     if(atlasProbeRequested && !textureRequestObservationArmed)
         addUnique(&errors, "The runtime did not arm actual terrain texture-request observation.");
     if(atlasProbeRequested && !allTerrainPageRequestsResolved)
-        addUnique(&errors, "The terrain renderer did not request and resolve every expected run-owned atlas page.");
+        addUnique(&errors, "The runtime workload did not request and resolve every expected run-owned atlas page.");
     if(atlasProbeRequested && !customAtlasContractValidated)
         addUnique(&errors, "The custom terrain atlas runtime contract was not proven.");
     if(expandedAtlasRequested && !expandedAtlasContractValidated)
         addUnique(&errors, "The expanded terrain atlas runtime contract was not proven.");
+    if(drawallRequested && !drawallContractValidated)
+        addUnique(&errors, "The run-owned Zone18 drawall staging contract was not proven.");
     if(stagedLoaderObserved && !payloadHashesValidated)
         addUnique(&errors, "The runtime loader paths could not be matched to the hash-verified staged payloads.");
     if(actualZone.isEmpty())
@@ -1209,6 +1229,10 @@ QJsonObject CJmvMapTestLauncher::buildAuthoritativeResult(
     report.insert("customAtlasContractValidated", customAtlasContractValidated);
     report.insert("expandedAtlasRequested", expandedAtlasRequested);
     report.insert("expandedAtlasContractValidated", expandedAtlasContractValidated);
+    report.insert("drawallRequested", drawallRequested);
+    report.insert("drawallAutoexecRedirected", drawallAutoexecRedirected);
+    report.insert("drawallAutoexecConsumed", drawallAutoexecConsumed);
+    report.insert("drawallContractValidated", drawallContractValidated);
     report.insert("playerInitializationCount", playerInitializations);
     report.insert("reportedPlayerCount", playerInitializations > 0 ? 1 : -1);
     report.insert("playerCountEvidence", playerInitializations > 0
@@ -1247,6 +1271,9 @@ bool CJmvMapTestLauncher::validateAutomatedResult(const QJsonObject& report,
     if(report.value("expandedAtlasRequested").toBool()
        && !report.value("expandedAtlasContractValidated").toBool())
         local.append("The expanded terrain atlas runtime contract was not validated.");
+    if(report.value("drawallRequested").toBool()
+       && !report.value("drawallContractValidated").toBool())
+        local.append("The run-owned Zone18 drawall staging contract was not validated.");
     if(report.value("actualZone").toString().isEmpty())
         local.append("The actually loaded zone is missing.");
     if(!report.value("sourceFilesUnchanged").toBool())
@@ -1484,6 +1511,49 @@ bool CJmvMapTestLauncher::prepareTemporaryAutoexec(const QString& engineDirector
     return true;
 }
 
+bool CJmvMapTestLauncher::prepareRunOwnedDrawallAutoexec(
+    const QString& sourcePath, const QString& runRoot, bool forceDrawall,
+    QJsonObject* manifest, QString* outputPath, QString* error)
+{
+    if(outputPath)
+        outputPath->clear();
+    if(!forceDrawall)
+        return true;
+    if(!manifest || !outputPath || sourcePath.isEmpty() || runRoot.isEmpty())
+    {
+        if(error) *error = "Run-owned drawall autoexec paths are incomplete.";
+        return false;
+    }
+    QByteArray original;
+    if(!readFile(sourcePath, &original, error))
+        return false;
+    QByteArray patched = original;
+    if(!patched.isEmpty() && !patched.endsWith('\n'))
+        patched.append("\r\n");
+    patched.append("// EI Mapper Endurance run-owned Zone18 stress command\r\n"
+                   "drawall 1\r\n");
+    const QString ownedPath = QDir(runRoot).filePath("drawall/2utoexec.cfg");
+    if(!QDir().mkpath(QFileInfo(ownedPath).absolutePath())
+       || !atomicWrite(ownedPath, patched, error)
+       || fileSha256(ownedPath).compare(sha256(patched), Qt::CaseInsensitive) != 0)
+    {
+        if(error && error->isEmpty())
+            *error = "The run-owned drawall autoexec failed verification.";
+        return false;
+    }
+    QJsonObject drawall;
+    drawall.insert("requested", true);
+    drawall.insert("command", "drawall 1");
+    drawall.insert("sourcePath", QFileInfo(sourcePath).absoluteFilePath());
+    drawall.insert("sourceSha256", sha256(original));
+    drawall.insert("ownedPath", ownedPath);
+    drawall.insert("ownedSha256", sha256(patched));
+    drawall.insert("installedConfigurationModified", false);
+    manifest->insert("drawallStress", drawall);
+    *outputPath = ownedPath;
+    return true;
+}
+
 bool CJmvMapTestLauncher::prepareGodmodeBootstrap(
     const QStringList& mapDirectories, const QString& runRoot,
     const SMapSpawnPlan& spawn, double spawnZ, bool godmode,
@@ -1644,6 +1714,7 @@ bool CJmvMapTestLauncher::launch(const SJmvMapTestLaunchInput& input, QString* e
     m_mapTableSourcePath.clear();
     m_stagedMapTablePath.clear();
     m_livePlaceholderResourcePath.clear();
+    m_drawallAutoexecPath.clear();
     m_bridgeResultPath.clear();
     m_testSavesPath.clear();
     m_bridgeSha256.clear();
@@ -1749,6 +1820,18 @@ bool CJmvMapTestLauncher::launch(const SJmvMapTestLaunchInput& input, QString* e
         if(!textureProbeMemberName.isEmpty())
             environment.insert("EI_MAPPER_ENDURANCE_TEXTURE_PROBE_NAME",
                                textureProbeMemberName);
+        environment.insert("EI_MAPPER_ENDURANCE_TEXTURE_PAGE_COUNT",
+                           QString::number(input.expectedTerrainAtlasPages));
+    }
+    const QJsonObject drawall = m_manifest.value("drawallStress").toObject();
+    if(!m_drawallAutoexecPath.isEmpty())
+    {
+        environment.insert("EI_MAPPER_ENDURANCE_DRAWALL_AUTOEXEC_SOURCE",
+                           drawall.value("sourcePath").toString());
+        environment.insert("EI_MAPPER_ENDURANCE_DRAWALL_AUTOEXEC",
+                           m_drawallAutoexecPath);
+        environment.insert("EI_MAPPER_ENDURANCE_DRAWALL_AUTOEXEC_SHA256",
+                           drawall.value("ownedSha256").toString());
     }
     if(!m_supplementalMobDirectory.isEmpty())
         environment.insert("EI_MAPPER_ENDURANCE_SUPPLEMENTAL_MOB_DIR",
@@ -2364,12 +2447,25 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
     request.sessionSettings.insert("requestedSpawnY", input.spawn.requestedPosition.y());
     request.sessionSettings.insert("spawnAdjusted", input.spawn.adjusted);
     request.sessionSettings.insert("godmode", input.godmode);
+    request.sessionSettings.insert("forceDrawall", input.forceDrawall);
     request.sessionSettings.insert("overrideWorldTime", input.overrideWorldTime);
     request.sessionSettings.insert("worldTimeHours", input.worldTimeHours);
     request.sessionSettings.insert("borrowedMapIdentity", input.borrowedMapIdentity);
     request.sessionSettings.insert("baseProbeLevel", input.baseProbeLevel);
     request.sessionSettings.insert("clearance", input.spawn.clearance);
     request.sessionSettings.insert("unobstructed", input.spawn.unobstructed);
+    if(isJmv && !prepareRunOwnedDrawallAutoexec(
+           QDir(m_engineDirectory).filePath("2utoexec.cfg"), m_runRoot,
+           input.forceDrawall, &m_manifest, &m_drawallAutoexecPath, error))
+        return false;
+    if(!m_drawallAutoexecPath.isEmpty())
+    {
+        const QJsonObject drawall = m_manifest.value("drawallStress").toObject();
+        request.sourceSha256.insert(drawall.value("sourcePath").toString(),
+                                    drawall.value("sourceSha256").toString());
+        appendRunLog(QString("Staged run-owned drawall autoexec path=%1 command=drawall 1 installedModified=false")
+                     .arg(QDir::toNativeSeparators(m_drawallAutoexecPath)));
+    }
     request.logPath = m_runLogPath;
     request.resultPath = QDir(m_runRoot).filePath("result.json");
     QStringList requestErrors;

@@ -1037,21 +1037,21 @@ STerrainPortableAtlasPackage CTerrainVirtualAtlas::buildPortablePackage(
     if(!archive.loadBytes(empty,QStringLiteral("generated-atlas.res"),&errors)){
         result.error=errors.join(QStringLiteral("\n"));return result;
     }
-    QByteArray archiveBytes=empty;
+    QVector<SResArchiveNewMember> appendedMembers;
+    appendedMembers.reserve(finalization.pageMmpPayloads.size());
     for(int page=0;page<finalization.pageMmpPayloads.size();++page){
         const QString member=QStringLiteral("%1%2.mmp")
             .arg(finalization.isolatedNamespace.toLower())
             .arg(page,3,10,QLatin1Char('0'));
-        QByteArray next;
-        if(!archive.buildWithAppendedMember(member,finalization.pageMmpPayloads.at(page),
-                                             0,&next,&errors)){
-            result.error=errors.join(QStringLiteral("\n"));return result;
-        }
-        archiveBytes=next;
-        if(!archive.loadBytes(archiveBytes,QStringLiteral("generated-atlas.res"),&errors)){
-            result.error=errors.join(QStringLiteral("\n"));return result;
-        }
+        SResArchiveNewMember appended;
+        appended.name=member;
+        appended.payload=finalization.pageMmpPayloads.at(page);
+        appendedMembers.append(appended);
         result.resourceMembers.append(member);
+    }
+    QByteArray archiveBytes;
+    if(!archive.buildWithAppendedMembers(appendedMembers,&archiveBytes,&errors)){
+        result.error=errors.join(QStringLiteral("\n"));return result;
     }
     CMprDocument reopenedMpr;CValidationReport reopenReport;
     CResArchiveDocument reopenedRes;

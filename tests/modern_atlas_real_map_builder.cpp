@@ -67,6 +67,15 @@ bool readMember(const Archive& archive, const QString& name, QByteArray* bytes)
     return bytes->size() == found->size;
 }
 
+QByteArray fileSha256(const QString& path)
+{
+    QFile file(path);
+    if(!file.open(QIODevice::ReadOnly)) return {};
+    QCryptographicHash digest(QCryptographicHash::Sha256);
+    while(!file.atEnd()) digest.addData(file.read(1024 * 1024));
+    return digest.result().toHex();
+}
+
 QVector<QImage> splitAtlasPages(const QVector<QImage>& decodedPages,
                                 int slotCount)
 {
@@ -488,7 +497,8 @@ BuiltMap buildMap(const QString& sourcePath, const QString& nameSpace,
 }
 
 BuiltMap buildExpandedRuntimeProbe(
-    const QString& sourcePath, const QString& nameSpace, int targetPages,
+    const QString& sourcePath, const QString& sourceMobPath,
+    const QString& nameSpace, int targetPages,
     const QVector<qint32>& materialIds,
     const QMap<qint32, QImage>& externalSources,
     const Atlas& sourceAtlas, const QString& outputDirectory)
@@ -537,37 +547,60 @@ BuiltMap buildExpandedRuntimeProbe(
     QCryptographicHash stable(QCryptographicHash::Sha256);
     stable.addData(nameSpace.toLower().toUtf8());
     stable.addData(QByteArray::number(targetPages));
-    best.tiles.reserve(requiredSlots);
     best.tileTypes.reserve(requiredSlots);
     for(int slot = 0; slot < requiredSlots; ++slot)
-    {
-        QImage pixels = sourceAtlas.tiles.at(slot % sourceAtlas.tiles.size())
-            .convertToFormat(QImage::Format_RGBA8888);
-        // Encode a tiny deterministic interior marker so every physical slot
-        // remains diagnostically distinguishable while retaining stock JMV
-        // material imagery and untouched tile edges.
-        for(int bit = 0; bit < 10; ++bit)
-        {
-            const int x = tileSize / 2 - 5 + bit;
-            const int y = tileSize / 2 + (bit & 1);
-            QColor color = pixels.pixelColor(x, y);
-            color.setRed((color.red() + ((slot >> bit) & 1 ? 71 : 19)) & 255);
-            color.setBlue((color.blue() + ((slot >> bit) & 1 ? 29 : 83)) & 255);
-            pixels.setPixelColor(x, y, color);
-        }
-        STerrainFinalizedTile tile;
-        tile.pixels = pixels;
-        tile.pixelSha256 = QCryptographicHash::hash(
-            QByteArray(reinterpret_cast<const char*>(pixels.constBits()),
-                       int(pixels.sizeInBytes())), QCryptographicHash::Sha256).toHex();
-        tile.authored = slot < sourceAtlas.tiles.size();
-        tile.sourceSlot = tile.authored ? slot : -1;
-        best.tiles.append(tile);
         best.tileTypes.append(document.mapInfo().tileTypes.isEmpty() ? 0
             : document.mapInfo().tileTypes.at(
                   slot % document.mapInfo().tileTypes.size()));
-        if(tile.authored) best.authoredSlotRemap.insert(slot, slot);
-        stable.addData(tile.pixelSha256);
+    for(int slot = 0; slot < sourceAtlas.tiles.size(); ++slot)
+        best.authoredSlotRemap.insert(slot, slot);
+    for(int page = 0; page < targetPages; ++page)
+    {
+        QVector<QImage> pageTiles;
+        pageTiles.reserve(64);
+        for(int local = 0; local < 64; ++local)
+        {
+            const int slot = page * 64 + local;
+            QImage pixels = sourceAtlas.tiles.at(slot % sourceAtlas.tiles.size())
+                .convertToFormat(QImage::Format_RGBA8888);
+            // Keep stock JMV imagery and untouched tile edges. A tiny interior
+            // marker makes all 16,384 physical identities deterministic.
+            for(int bit = 0; bit < 14; ++bit)
+            {
+                const int x = tileSize / 2 - 7 + bit;
+                const int y = tileSize / 2 + (bit & 1);
+                QColor color = pixels.pixelColor(x, y);
+                color.setRed((color.red() + ((slot >> bit) & 1 ? 71 : 19)) & 255);
+                color.setBlue((color.blue() + ((slot >> bit) & 1 ? 29 : 83)) & 255);
+                pixels.setPixelColor(x, y, color);
+            }
+            const QByteArray pixelSha256 = QCryptographicHash::hash(
+                QByteArray(reinterpret_cast<const char*>(pixels.constBits()),
+                           int(pixels.sizeInBytes())),
+                QCryptographicHash::Sha256).toHex();
+            stable.addData(pixelSha256);
+            if(best.tiles.isEmpty())
+            {
+                STerrainFinalizedTile first;
+                first.pixels = pixels;
+                first.pixelSha256 = pixelSha256;
+                first.authored = true;
+                first.sourceSlot = 0;
+                best.tiles.append(first);
+            }
+            pageTiles.append(pixels);
+        }
+        const QImage image = CTerrainVirtualAtlas::composePage(pageTiles, 0, tileSize);
+        QString diagnostic;
+        const QByteArray mmp = ei::encodeMmpDxt1(image, true, &diagnostic);
+        if(mmp.isEmpty())
+        {
+            result.error = QStringLiteral("Could not encode runtime atlas page: %1")
+                .arg(diagnostic);
+            return result;
+        }
+        if(best.pages.isEmpty()) best.pages.append(image);
+        best.pageMmpPayloads.append(mmp);
     }
     best.packedCells.reserve(cellCount);
     for(int cell = 0; cell < cellCount; ++cell)
@@ -581,23 +614,6 @@ BuiltMap buildExpandedRuntimeProbe(
         char bytes[2];
         qToLittleEndian<quint16>(encoded, reinterpret_cast<uchar*>(bytes));
         stable.addData(bytes, 2);
-    }
-    for(int page = 0; page < targetPages; ++page)
-    {
-        const QImage image = CTerrainVirtualAtlas::composePage(
-            [&best]() { QVector<QImage> images; images.reserve(best.tiles.size());
-                for(const STerrainFinalizedTile& tile : best.tiles)
-                    images.append(tile.pixels); return images; }(), page * 64, tileSize);
-        QString diagnostic;
-        const QByteArray mmp = ei::encodeMmpDxt1(image, true, &diagnostic);
-        if(mmp.isEmpty())
-        {
-            result.error = QStringLiteral("Could not encode runtime atlas page: %1")
-                .arg(diagnostic);
-            return result;
-        }
-        best.pages.append(image);
-        best.pageMmpPayloads.append(mmp);
     }
     best.stableSha256 = stable.result().toHex();
     best.isolatedNamespace = QStringLiteral("%1_runtime_%2p_%3")
@@ -642,6 +658,11 @@ BuiltMap buildExpandedRuntimeProbe(
     QJsonObject manifest;
     manifest.insert("schema", "ei-expanded-atlas-runtime-probe-v1");
     manifest.insert("source_mpr", QFileInfo(sourcePath).fileName());
+    manifest.insert("source_mpr_sha256", QString::fromLatin1(fileSha256(sourcePath)));
+    manifest.insert("source_mob", QFileInfo(sourceMobPath).fileName());
+    manifest.insert("source_mob_sha256", QString::fromLatin1(fileSha256(sourceMobPath)));
+    manifest.insert("workload", "installed-zone18-mpr-mob-with-drawall");
+    manifest.insert("drawall_required", true);
     manifest.insert("isolated_namespace", baseName);
     manifest.insert("mpr_file", baseName + QStringLiteral(".mpr"));
     manifest.insert("atlas_file", baseName + QStringLiteral("-atlas.res"));
@@ -670,9 +691,9 @@ int main(int argc, char** argv)
     QCoreApplication application(argc, argv);
     QTextStream out(stdout);
     QTextStream err(stderr);
-    if(application.arguments().size() != 3)
+    if(application.arguments().size() < 3 || application.arguments().size() > 4)
     {
-        err << "usage: modern_atlas_real_map_builder <output> <JamaisVu135-root>\n";
+        err << "usage: modern_atlas_real_map_builder <output> <JamaisVu135-root> [--runtime-only]\n";
         return 2;
     }
     const QString outputRoot = QDir::cleanPath(application.arguments().at(1));
@@ -683,6 +704,53 @@ int main(int argc, char** argv)
     {
         err << error << '\n';
         return 3;
+    }
+    const bool runtimeOnly = application.arguments().contains(
+        QStringLiteral("--runtime-only"));
+    if(runtimeOnly)
+    {
+        const QString sourceMpr = QDir(jmvRoot).filePath("Maps/zone18.mpr");
+        const QString sourceMob = QDir(jmvRoot).filePath("Maps/zone18.mob");
+        Atlas zone18 = assets.atlas(QStringLiteral("Zone18"), 512, &error);
+        if(!zone18.valid || !QFileInfo::exists(sourceMpr)
+           || !QFileInfo::exists(sourceMob))
+        {
+            err << "Zone18 runtime source unavailable: " << error << '\n';
+            return 4;
+        }
+        QJsonArray probes;
+        for(int pages : {16, 32, 64, 128, 256})
+        {
+            const QString directory = QDir(outputRoot).filePath(
+                QStringLiteral("runtime-atlas-probes/page-%1")
+                    .arg(pages, 2, 10, QLatin1Char('0')));
+            const BuiltMap probe = buildExpandedRuntimeProbe(
+                sourceMpr, sourceMob, QStringLiteral("Zone18"), pages,
+                {}, {}, zone18, directory);
+            if(!probe.success)
+            {
+                err << "runtime-probe-" << pages << ": " << probe.error << '\n';
+                return 8;
+            }
+            probes.append(probe.manifest);
+            out << "runtime-probe-" << pages << ": slots="
+                << probe.manifest.value("active_slots").toInt() << '\n';
+            out.flush();
+        }
+        QJsonObject root;
+        root.insert("schema", "ei-zone18-expanded-atlas-fixtures-v1");
+        root.insert("asset_policy", "Installed JMV assets used directly; live files unmodified.");
+        root.insert("runtime_atlas_probes", probes);
+        root.insert("source_mpr_sha256", QString::fromLatin1(fileSha256(sourceMpr)));
+        root.insert("source_mob_sha256", QString::fromLatin1(fileSha256(sourceMob)));
+        QDir().mkpath(outputRoot);
+        if(!writeBytes(QDir(outputRoot).filePath("manifest.json"),
+                       QJsonDocument(root).toJson(QJsonDocument::Indented), &error))
+        {
+            err << error << '\n';
+            return 9;
+        }
+        return 0;
     }
     const QVector<STerrainGlobalMaterialFamily> globalFamilies =
         CTerrainAtlasPresetCatalog::globalUniformFamilies(nullptr);
@@ -704,9 +772,11 @@ int main(int argc, char** argv)
     const Zone zones[] = {
         {"Zone1", "zone1.mpr", 512}, {"Zone2", "zone2.mpr", 512},
         {"Zone5_1", "zone5_1.mpr", 192}, {"Zone11", "zone11.mpr", 512},
-        {"Zone16", "zone16.mpr", 256}, {"Zone17", "zone17.mpr", 256}
+        {"Zone16", "zone16.mpr", 256}, {"Zone17", "zone17.mpr", 256},
+        {"Zone18", "zone18.mpr", 512}
     };
     Atlas zone2;
+    Atlas zone18;
     QMap<qint32, QImage> zone2External;
     QJsonArray outputs;
     QJsonArray sourceManifest;
@@ -721,6 +791,9 @@ int main(int argc, char** argv)
         const bool isZone2 = QString::fromLatin1(zone.nameSpace).compare(
             QStringLiteral("Zone2"), Qt::CaseInsensitive) == 0;
         if(isZone2) zone2 = sourceAtlas;
+        const bool isZone18 = QString::fromLatin1(zone.nameSpace).compare(
+            QStringLiteral("Zone18"), Qt::CaseInsensitive) == 0;
+        if(isZone18) zone18 = sourceAtlas;
         QJsonArray* sourcesForManifest = isZone2 ? &sourceManifest : nullptr;
         const QMap<qint32, QImage> external = globalSources(
             globalFamilies, &assets, sourceAtlas.tiles.front().size(),
@@ -766,15 +839,24 @@ int main(int argc, char** argv)
         return 7;
     }
     outputs.append(full.manifest);
+    const QString zone18Source = QDir(jmvRoot).filePath(
+        QStringLiteral("Maps/zone18.mpr"));
+    const QString zone18Mob = QDir(jmvRoot).filePath(
+        QStringLiteral("Maps/zone18.mob"));
+    if(!zone18.valid || !QFileInfo::exists(zone18Mob))
+    {
+        err << "Zone18 MPR/MOB or its authored atlas is unavailable.\n";
+        return 8;
+    }
     QJsonArray runtimeProbes;
-    for(int pages : {8, 9, 16})
+    for(int pages : {16, 32, 64, 128, 256})
     {
         const QString probeDirectory = QDir(outputRoot).filePath(
             QStringLiteral("runtime-atlas-probes/page-%1")
                 .arg(pages, 2, 10, QLatin1Char('0')));
         const BuiltMap probe = buildExpandedRuntimeProbe(
-            fullSource, QStringLiteral("Zone2"), pages, globalLandIds,
-            zone2External, zone2, probeDirectory);
+            zone18Source, zone18Mob, QStringLiteral("Zone18"), pages,
+            globalLandIds, QMap<qint32, QImage>(), zone18, probeDirectory);
         if(!probe.success)
         {
             err << "runtime-probe-" << pages << ": " << probe.error << '\n';

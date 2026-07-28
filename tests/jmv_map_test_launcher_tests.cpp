@@ -45,6 +45,7 @@ private slots:
     void resolvesActualZone6ExternalGraph();
     void resolvesHostedGamePidForHotReload();
     void preparesOwnedGodmodeAutoexec();
+    void preparesRunOwnedDrawallAutoexec();
     void preservesExistingAutoexecForRecovery();
     void recoveryRemovesAutoexecCreatedByEndurance();
     void recoveryRestoresPreexistingAutoexec();
@@ -63,6 +64,7 @@ private slots:
     void currentSessionSnapshotRejectsUnsafePath();
     void authoritativeResultAcceptsVerifiedRun();
     void authoritativeResultRequiresExpandedAtlasRegistration();
+    void authoritativeResultRequiresDrawallStagingEvidence();
     void authoritativeResultAcceptsLatestHotReloadGeneration();
     void authoritativeResultRejectsWrongZone();
     void analyzesPersistedAuthoritativeResult();
@@ -212,6 +214,13 @@ struct RuntimeMemorySample
     quint64 reportedPeakWorkingSetBytes{0};
     quint64 privateBytes{0};
     quint64 pagefileBytes{0};
+    quint64 committedAddressBytes{0};
+    quint64 reservedAddressBytes{0};
+    quint64 freeAddressBytes{0};
+    quint64 largestFreeRegionBytes{0};
+    quint64 mappedAddressBytes{0};
+    quint64 imageAddressBytes{0};
+    quint64 privateAddressBytes{0};
 };
 
 static bool sampleRuntimeMemory(qint64 processId, qint64 elapsedMs,
@@ -229,15 +238,52 @@ static bool sampleRuntimeMemory(qint64 processId, qint64 elapsedMs,
     const bool ok = GetProcessMemoryInfo(process,
         reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&counters),
         DWORD(sizeof(counters))) != FALSE;
-    CloseHandle(process);
     if(!ok)
+    {
+        CloseHandle(process);
         return false;
+    }
     sample->elapsedMs = elapsedMs;
     sample->phase = phase;
     sample->workingSetBytes = quint64(counters.WorkingSetSize);
     sample->reportedPeakWorkingSetBytes = quint64(counters.PeakWorkingSetSize);
     sample->privateBytes = quint64(counters.PrivateUsage);
     sample->pagefileBytes = quint64(counters.PagefileUsage);
+    // game.exe is a 32-bit process. Walk its complete 4-GiB user address map so
+    // atlas tests distinguish physical-memory growth from VA fragmentation.
+    const quint64 addressLimit = quint64(1) << 32;
+    quint64 address = 0;
+    while(address < addressLimit)
+    {
+        MEMORY_BASIC_INFORMATION region{};
+        const SIZE_T queried = VirtualQueryEx(process,
+            reinterpret_cast<LPCVOID>(quintptr(address)), &region, sizeof(region));
+        if(queried == 0)
+            break;
+        const quint64 bytes = qMin<quint64>(quint64(region.RegionSize),
+                                            addressLimit - address);
+        if(region.State == MEM_FREE)
+        {
+            sample->freeAddressBytes += bytes;
+            sample->largestFreeRegionBytes = qMax(
+                sample->largestFreeRegionBytes, bytes);
+        }
+        else if(region.State == MEM_RESERVE)
+            sample->reservedAddressBytes += bytes;
+        else if(region.State == MEM_COMMIT)
+        {
+            sample->committedAddressBytes += bytes;
+            if(region.Type == MEM_MAPPED) sample->mappedAddressBytes += bytes;
+            else if(region.Type == MEM_IMAGE) sample->imageAddressBytes += bytes;
+            else if(region.Type == MEM_PRIVATE) sample->privateAddressBytes += bytes;
+        }
+        const quint64 next = quint64(reinterpret_cast<quintptr>(region.BaseAddress))
+            + quint64(region.RegionSize);
+        if(next <= address)
+            break;
+        address = next;
+    }
+    CloseHandle(process);
     return true;
 }
 
@@ -245,8 +291,8 @@ static QJsonObject summarizeRuntimeMemory(
     const QVector<RuntimeMemorySample>& samples, int atlasPages, int atlasSlots)
 {
     QJsonObject result;
-    result.insert("schema", "ei-runtime-memory-evidence-v1");
-    result.insert("source", "GetProcessMemoryInfo");
+    result.insert("schema", "ei-runtime-memory-evidence-v2");
+    result.insert("source", "GetProcessMemoryInfo + VirtualQueryEx (32-bit address space)");
     result.insert("atlasPages", atlasPages);
     result.insert("atlasSlots", atlasSlots);
     result.insert("sampleCount", samples.size());
@@ -254,6 +300,11 @@ static QJsonObject summarizeRuntimeMemory(
     quint64 reportedPeakWorkingSet = 0;
     quint64 peakPrivate = 0;
     quint64 peakPagefile = 0;
+    quint64 peakCommittedAddress = 0;
+    quint64 peakMappedAddress = 0;
+    quint64 peakPrivateAddress = 0;
+    quint64 minimumFreeAddress = quint64(-1);
+    quint64 minimumLargestFreeRegion = quint64(-1);
     const RuntimeMemorySample* gameplayReady = nullptr;
     QJsonArray serialized;
     for(const RuntimeMemorySample& sample : samples)
@@ -264,6 +315,12 @@ static QJsonObject summarizeRuntimeMemory(
                                       sample.reportedPeakWorkingSetBytes);
         peakPrivate = qMax(peakPrivate, sample.privateBytes);
         peakPagefile = qMax(peakPagefile, sample.pagefileBytes);
+        peakCommittedAddress = qMax(peakCommittedAddress, sample.committedAddressBytes);
+        peakMappedAddress = qMax(peakMappedAddress, sample.mappedAddressBytes);
+        peakPrivateAddress = qMax(peakPrivateAddress, sample.privateAddressBytes);
+        minimumFreeAddress = qMin(minimumFreeAddress, sample.freeAddressBytes);
+        minimumLargestFreeRegion = qMin(minimumLargestFreeRegion,
+                                        sample.largestFreeRegionBytes);
         if(!gameplayReady && sample.phase != QStringLiteral("loading"))
             gameplayReady = &sample;
         QJsonObject item;
@@ -272,6 +329,13 @@ static QJsonObject summarizeRuntimeMemory(
         item.insert("workingSetBytes", qint64(sample.workingSetBytes));
         item.insert("privateBytes", qint64(sample.privateBytes));
         item.insert("pagefileBytes", qint64(sample.pagefileBytes));
+        item.insert("committedAddressBytes", qint64(sample.committedAddressBytes));
+        item.insert("reservedAddressBytes", qint64(sample.reservedAddressBytes));
+        item.insert("freeAddressBytes", qint64(sample.freeAddressBytes));
+        item.insert("largestFreeRegionBytes", qint64(sample.largestFreeRegionBytes));
+        item.insert("mappedAddressBytes", qint64(sample.mappedAddressBytes));
+        item.insert("imageAddressBytes", qint64(sample.imageAddressBytes));
+        item.insert("privateAddressBytes", qint64(sample.privateAddressBytes));
         serialized.append(item);
     }
     result.insert("samples", serialized);
@@ -279,18 +343,34 @@ static QJsonObject summarizeRuntimeMemory(
     result.insert("reportedPeakWorkingSetBytes", qint64(reportedPeakWorkingSet));
     result.insert("peakPrivateBytes", qint64(peakPrivate));
     result.insert("peakPagefileBytes", qint64(peakPagefile));
+    result.insert("peakCommittedAddressBytes", qint64(peakCommittedAddress));
+    result.insert("peakMappedAddressBytes", qint64(peakMappedAddress));
+    result.insert("peakPrivateAddressBytes", qint64(peakPrivateAddress));
+    result.insert("minimumFreeAddressBytes", qint64(samples.isEmpty() ? 0 : minimumFreeAddress));
+    result.insert("minimumLargestFreeRegionBytes",
+                  qint64(samples.isEmpty() ? 0 : minimumLargestFreeRegion));
     if(gameplayReady)
     {
         result.insert("gameplayReadyWorkingSetBytes",
                       qint64(gameplayReady->workingSetBytes));
         result.insert("gameplayReadyPrivateBytes",
                       qint64(gameplayReady->privateBytes));
+        result.insert("gameplayReadyCommittedAddressBytes",
+                      qint64(gameplayReady->committedAddressBytes));
+        result.insert("gameplayReadyMappedAddressBytes",
+                      qint64(gameplayReady->mappedAddressBytes));
     }
     if(!samples.isEmpty())
     {
         const RuntimeMemorySample& final = samples.back();
         result.insert("finalWorkingSetBytes", qint64(final.workingSetBytes));
         result.insert("finalPrivateBytes", qint64(final.privateBytes));
+        result.insert("finalCommittedAddressBytes",
+                      qint64(final.committedAddressBytes));
+        result.insert("finalMappedAddressBytes", qint64(final.mappedAddressBytes));
+        result.insert("finalFreeAddressBytes", qint64(final.freeAddressBytes));
+        result.insert("finalLargestFreeRegionBytes",
+                      qint64(final.largestFreeRegionBytes));
         result.insert("durationMs", final.elapsedMs);
     }
     return result;
@@ -524,12 +604,15 @@ void JmvMapTestLauncherTests::memoryEvidenceSummarizesComparableSamples()
 {
 #ifdef Q_OS_WIN
     QVector<RuntimeMemorySample> samples;
-    samples.append({100, QStringLiteral("loading"), 100, 120, 80, 80});
-    samples.append({500, QStringLiteral("gameplay-ready"), 180, 200, 140, 140});
-    samples.append({900, QStringLiteral("dwell"), 170, 210, 160, 160});
+    samples.append({100, QStringLiteral("loading"), 100, 120, 80, 80,
+                    300, 40, 700, 400, 50, 30, 220});
+    samples.append({500, QStringLiteral("gameplay-ready"), 180, 200, 140, 140,
+                    420, 50, 530, 260, 90, 40, 290});
+    samples.append({900, QStringLiteral("dwell"), 170, 210, 160, 160,
+                    460, 50, 490, 220, 110, 40, 310});
     const QJsonObject evidence = summarizeRuntimeMemory(samples, 9, 576);
     QCOMPARE(evidence.value("schema").toString(),
-             QString("ei-runtime-memory-evidence-v1"));
+             QString("ei-runtime-memory-evidence-v2"));
     QCOMPARE(evidence.value("atlasPages").toInt(), 9);
     QCOMPARE(evidence.value("atlasSlots").toInt(), 576);
     QCOMPARE(evidence.value("sampleCount").toInt(), 3);
@@ -543,6 +626,12 @@ void JmvMapTestLauncherTests::memoryEvidenceSummarizesComparableSamples()
              quint64(140));
     QCOMPARE(evidence.value("finalPrivateBytes").toVariant().toULongLong(),
              quint64(160));
+    QCOMPARE(evidence.value("peakCommittedAddressBytes").toVariant().toULongLong(),
+             quint64(460));
+    QCOMPARE(evidence.value("peakMappedAddressBytes").toVariant().toULongLong(),
+             quint64(110));
+    QCOMPARE(evidence.value("minimumLargestFreeRegionBytes").toVariant().toULongLong(),
+             quint64(220));
     QCOMPARE(evidence.value("samples").toArray().size(), 3);
 #else
     QSKIP("Runtime memory evidence is implemented for the shipped Windows game.");
@@ -645,6 +734,8 @@ void JmvMapTestLauncherTests::runtimeSmokeReachesGameplayReady()
         input.mapSizeY = 5;
     input.allowMissingAiGraph = qEnvironmentVariableIntValue(
         "EI_ENDURANCE_RUNTIME_SMOKE_ALLOW_GRAPHLESS") != 0;
+    input.forceDrawall = qEnvironmentVariableIntValue(
+        "EI_ENDURANCE_RUNTIME_SMOKE_DRAWALL") != 0;
     const QString graphPath = qEnvironmentVariable("EI_ENDURANCE_RUNTIME_SMOKE_GRAPH");
     if(!graphPath.isEmpty())
         input.generatedAiGraphData = readAll(graphPath);
@@ -671,15 +762,38 @@ void JmvMapTestLauncherTests::runtimeSmokeReachesGameplayReady()
         "EI_ENDURANCE_RUNTIME_SMOKE_DUMP_DIR",
         QDir(gameRoot).filePath("Starter/Dumps"));
     const QHash<QString, DumpStamp> dumpsBefore = snapshotDumps(dumpDirectory);
+    const QString externalMemoryEvidencePath = qEnvironmentVariable(
+        "EI_ENDURANCE_RUNTIME_SMOKE_MEMORY_EVIDENCE");
 
     CJmvMapTestLauncher launcher;
     QString error;
     QVERIFY2(launcher.launch(input, &error), qPrintable(error));
+    const QString runId = launcher.runId();
+    const QString runRoot = QDir(CJmvMapTestLauncher::testRunsRootPath())
+        .filePath(runId);
 #ifdef Q_OS_WIN
     QElapsedTimer memoryClock;
     memoryClock.start();
     QVector<RuntimeMemorySample> memorySamples;
     qint64 lastMemorySampleMs = -1000;
+    qint64 lastMemoryPersistMs = -1000;
+    const auto persistMemory = [&](bool force) {
+        const qint64 elapsed = memoryClock.elapsed();
+        if(!force && elapsed - lastMemoryPersistMs < 1000)
+            return;
+        const QByteArray bytes = QJsonDocument(summarizeRuntimeMemory(
+            memorySamples, input.expectedTerrainAtlasPages,
+            input.expectedTerrainAtlasSlots)).toJson(QJsonDocument::Indented);
+        const auto writeSnapshot = [&bytes](const QString& path) {
+            if(path.isEmpty()) return true;
+            QSaveFile file(path);
+            return file.open(QIODevice::WriteOnly)
+                && file.write(bytes) == bytes.size() && file.commit();
+        };
+        writeSnapshot(QDir(runRoot).filePath("runtime-memory-evidence.json"));
+        writeSnapshot(externalMemoryEvidencePath);
+        lastMemoryPersistMs = elapsed;
+    };
     const auto collectMemory = [&](const QString& phase, bool force = false) {
         const qint64 elapsed = memoryClock.elapsed();
         if(!force && elapsed - lastMemorySampleMs < 250)
@@ -690,6 +804,7 @@ void JmvMapTestLauncherTests::runtimeSmokeReachesGameplayReady()
         {
             memorySamples.append(sample);
             lastMemorySampleMs = elapsed;
+            persistMemory(force);
         }
     };
 #endif
@@ -732,14 +847,19 @@ void JmvMapTestLauncherTests::runtimeSmokeReachesGameplayReady()
     const bool survivedDwell = launcher.isRunning()
         && launcher.runtimeState() == "GameplayReady"
         && responsiveDuringDwell;
-    const QString runId = launcher.runId();
-    const QString runRoot = QDir(CJmvMapTestLauncher::testRunsRootPath())
-        .filePath(runId);
     bool renderedTerrain = true;
     double dominantColorRatio = 0.0;
     int renderedColorBuckets = 0;
 #ifdef Q_OS_WIN
     collectMemory(QStringLiteral("capture"), true);
+    const HWND evidenceWindow = runtimeWindow(launcher.activeGameProcessId());
+    if(evidenceWindow && IsIconic(evidenceWindow))
+    {
+        ShowWindowAsync(evidenceWindow, SW_RESTORE);
+        SetForegroundWindow(evidenceWindow);
+        QTest::qWait(1500);
+        collectMemory(QStringLiteral("capture-restored"), true);
+    }
     const QImage runtimeFrame = captureRuntimeWindow(launcher.activeGameProcessId());
     renderedTerrain = hasRenderedTerrainEvidence(runtimeFrame,
         &dominantColorRatio, &renderedColorBuckets);
@@ -794,8 +914,6 @@ void JmvMapTestLauncherTests::runtimeSmokeReachesGameplayReady()
         "runtime-memory-evidence.json");
     QVERIFY2(writeMemoryEvidence(runMemoryEvidencePath),
              "Could not preserve run-local memory evidence.");
-    const QString externalMemoryEvidencePath = qEnvironmentVariable(
-        "EI_ENDURANCE_RUNTIME_SMOKE_MEMORY_EVIDENCE");
     QVERIFY2(writeMemoryEvidence(externalMemoryEvidencePath),
              "Could not preserve requested external memory evidence.");
     const double mib = 1024.0 * 1024.0;
@@ -860,6 +978,12 @@ void JmvMapTestLauncherTests::runtimeSmokeReachesGameplayReady()
         if(input.expectedTerrainAtlasPages > 8
            || input.expectedTerrainAtlasSlots > 512)
             QVERIFY(authoritative.value("expandedAtlasContractValidated").toBool());
+    }
+    if(input.forceDrawall)
+    {
+        QVERIFY(authoritative.value("drawallAutoexecRedirected").toBool());
+        QVERIFY(authoritative.value("drawallAutoexecConsumed").toBool());
+        QVERIFY(authoritative.value("drawallContractValidated").toBool());
     }
 }
 
@@ -1211,6 +1335,74 @@ void JmvMapTestLauncherTests::authoritativeResultRequiresExpandedAtlasRegistrati
     QStringList findings;
     QVERIFY2(CJmvMapTestLauncher::validateAutomatedResult(accepted, &findings),
              qPrintable(findings.join('\n')));
+}
+
+void JmvMapTestLauncherTests::authoritativeResultRequiresDrawallStagingEvidence()
+{
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+    const QString source = QDir(temp.path()).filePath("source.mob");
+    writeFile(source, QByteArray("source map"));
+    QJsonObject manifest = resultManifest(temp.path(), source);
+    QJsonObject drawall;
+    drawall.insert("requested", true);
+    drawall.insert("command", "drawall 1");
+    drawall.insert("installedConfigurationModified", false);
+    drawall.insert("ownedPath", QDir(temp.path()).filePath("2utoexec.cfg"));
+    drawall.insert("ownedSha256", "drawall-owned-hash");
+    manifest.insert("drawallStress", drawall);
+
+    const QString baseEvidence = successfulBridgeEvidence(temp.path());
+    const QJsonObject rejected = CJmvMapTestLauncher::buildAuthoritativeResult(
+        manifest, baseEvidence, 0, int(QProcess::NormalExit), false,
+        "Removed all owned runtime artifacts");
+    QVERIFY(!rejected.value("passed").toBool());
+    QVERIFY(!rejected.value("drawallContractValidated").toBool());
+
+    const QString drawallEvidence =
+        "DRAWALL_AUTOEXEC redirect from=\"D:\\\\Evil Islands\\\\Starter\\\\Engine\\\\2utoexec.cfg\" "
+        "to=\"C:\\\\owned\\\\2utoexec.cfg\" command=\"drawall 1\" installed_modified=false\n"
+        "DRAWALL_AUTOEXEC consumed bytes=91 sha256=drawall-owned-hash\n";
+    const QJsonObject accepted = CJmvMapTestLauncher::buildAuthoritativeResult(
+        manifest, drawallEvidence + baseEvidence, 0, int(QProcess::NormalExit), false,
+        "Removed all owned runtime artifacts");
+    QVERIFY(accepted.value("drawallRequested").toBool());
+    QVERIFY(accepted.value("drawallAutoexecRedirected").toBool());
+    QVERIFY(accepted.value("drawallAutoexecConsumed").toBool());
+    QVERIFY(accepted.value("drawallContractValidated").toBool());
+    QVERIFY(accepted.value("passed").toBool());
+}
+
+void JmvMapTestLauncherTests::preparesRunOwnedDrawallAutoexec()
+{
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+    const QString source = QDir(temp.path()).filePath("installed/2utoexec.cfg");
+    QVERIFY(QDir().mkpath(QFileInfo(source).absolutePath()));
+    const QByteArray original("thingamabob\r\nfps 0\r\n");
+    writeFile(source, original);
+    const QString runRoot = QDir(temp.path()).filePath("run");
+    QVERIFY(QDir().mkpath(runRoot));
+    QJsonObject manifest;
+    QString owned;
+    QString error;
+    QVERIFY2(CJmvMapTestLauncher::prepareRunOwnedDrawallAutoexec(
+                 source, runRoot, true, &manifest, &owned, &error),
+             qPrintable(error));
+    QFile unchanged(source);
+    QVERIFY(unchanged.open(QIODevice::ReadOnly));
+    QCOMPARE(unchanged.readAll(), original);
+    QFile staged(owned);
+    QVERIFY(staged.open(QIODevice::ReadOnly));
+    const QByteArray stagedBytes = staged.readAll();
+    QVERIFY(stagedBytes.startsWith(original));
+    QVERIFY(stagedBytes.contains("drawall 1"));
+    const QJsonObject drawall = manifest.value("drawallStress").toObject();
+    QVERIFY(drawall.value("requested").toBool());
+    QCOMPARE(drawall.value("command").toString(), QString("drawall 1"));
+    QCOMPARE(drawall.value("sourceSha256").toString(), hash(original));
+    QCOMPARE(drawall.value("ownedSha256").toString(), hash(stagedBytes));
+    QVERIFY(!drawall.value("installedConfigurationModified").toBool());
 }
 
 void JmvMapTestLauncherTests::authoritativeResultAcceptsLatestHotReloadGeneration()

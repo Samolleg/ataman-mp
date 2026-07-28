@@ -107,6 +107,7 @@ private slots:
     void sourceRaceRefusesSave();
     void syntheticMapTableAddsOwnedMaplessZoneLosslessly();
     void syntheticPlaceholderBuildsStandaloneResolvableChecker();
+    void bulkAppendBuildsAllMembersInOneDerivedArchive();
 };
 
 void ResArchiveDocumentTests::noOpIsByteIdentical()
@@ -326,6 +327,31 @@ void ResArchiveDocumentTests::syntheticMapTableAddsOwnedMaplessZoneLosslessly()
         QCOMPARE(zone.maps.objectivesTexture, QString("customatlas007"));
     }
     QCOMPARE(customMatches, 1);
+}
+
+void ResArchiveDocumentTests::bulkAppendBuildsAllMembersInOneDerivedArchive()
+{
+    CResArchiveDocument baseline;
+    QVERIFY(baseline.loadBytes(syntheticRes()));
+    QVector<SResArchiveNewMember> appended;
+    for(int page = 0; page < 16; ++page)
+    {
+        SResArchiveNewMember member;
+        member.name = QString("edstress00%1.mmp").arg(page, 3, 10, QLatin1Char('0'));
+        member.payload = QByteArray(257 + page, char(page));
+        appended.append(member);
+    }
+    QByteArray output;
+    QStringList errors;
+    QVERIFY2(baseline.buildWithAppendedMembers(appended, &output, &errors),
+             qPrintable(errors.join('\n')));
+    CResArchiveDocument reopened;
+    QVERIFY2(reopened.loadBytes(output, "bulk.res", &errors),
+             qPrintable(errors.join('\n')));
+    QCOMPARE(reopened.members().size(), baseline.members().size() + appended.size());
+    QCOMPARE(reopened.memberPayload("opaque.bin"), baseline.memberPayload("opaque.bin"));
+    for(const SResArchiveNewMember& member : appended)
+        QCOMPARE(reopened.memberPayload(member.name), member.payload);
 }
 
 void ResArchiveDocumentTests::syntheticPlaceholderBuildsStandaloneResolvableChecker()

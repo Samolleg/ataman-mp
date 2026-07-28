@@ -297,12 +297,17 @@ int wmain(int argc, wchar_t** argv)
     {
         uintptr_t imageBase = 0;
         uint64_t initialFingerprint = 0;
-        if(mainModuleBase(process.dwProcessId, &imageBase)
-           && executableFingerprint(process.hProcess, imageBase, &initialFingerprint)
-           && ResumeThread(process.hThread) != DWORD(-1)
-           && waitForJmvPatchQuiescence(process.hProcess, imageBase,
-                                        initialFingerprint, logPath)
-           && SuspendThread(process.hThread) != DWORD(-1))
+        const bool quiescent = mainModuleBase(process.dwProcessId, &imageBase)
+            && executableFingerprint(process.hProcess, imageBase, &initialFingerprint)
+            && ResumeThread(process.hThread) != DWORD(-1)
+            && waitForJmvPatchQuiescence(process.hProcess, imageBase,
+                                         initialFingerprint, logPath);
+        // Patch-byte quiescence can precede completion of a module-loader
+        // callback by a few milliseconds. Suspending in that window leaves the
+        // remote activation thread blocked behind the loader lock.
+        if(quiescent)
+            Sleep(500);
+        if(quiescent && SuspendThread(process.hThread) != DWORD(-1))
         {
             activated = invokeBridgeExport(process.hProcess, remoteBridge, bridgePath,
                                            "EnduranceActivateRuntime", logPath);
