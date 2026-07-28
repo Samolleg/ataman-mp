@@ -39,8 +39,15 @@ struct SJmvMapTestLaunchInput
     SResourceProfileEvaluation profile;
     QFileInfo sourceMpr;
     QFileInfo sourceMob;
+    QFileInfo sourceTerrainTextureResource;
     QByteArray mprData;
     QByteArray mobData;
+    // Optional complete run-owned RES containing the isolated terrain MMP
+    // pages referenced by mprData. When absent, the ordinary placeholder
+    // archive is staged for maps that use installed terrain resources.
+    QByteArray terrainTextureResourceData;
+    int expectedTerrainAtlasPages{0};
+    int expectedTerrainAtlasSlots{0};
     QByteArray generatedAiGraphData;
     QVector<SJmvSupplementalMobInput> supplementalMobs;
     QString embeddedScript;
@@ -76,6 +83,7 @@ public:
     quint64 saveGeneration() const { return m_saveGeneration; }
     QString runId() const { return m_runId; }
     QString temporaryMapName() const { return m_temporaryMapName; }
+    qint64 activeGameProcessId() const { return runtimeGameProcessId(); }
     void stop();
 
     static QString testRunsRootPath();
@@ -108,6 +116,14 @@ public:
     static bool analyzeCompletedRun(const QString& runRoot,
                                     QJsonObject* report,
                                     QStringList* findings = nullptr);
+    static bool rebaseRuntimeTerrainAtlas(const QByteArray& sourceMpr,
+                                          const QByteArray& sourceAtlasRes,
+                                          const QString& runtimeNamespace,
+                                          int expectedPages,
+                                          QByteArray* rebasedMpr,
+                                          QByteArray* rebasedAtlasRes,
+                                          QStringList* rebasedMmpMembers,
+                                          QString* error = nullptr);
     static QString recoverInterruptedRuns(bool* pending = nullptr);
     static bool hasActiveInterruptedRun(QString* description = nullptr);
     static bool requestCloseActiveInterruptedRun(QString* error = nullptr);

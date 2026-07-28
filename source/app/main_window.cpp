@@ -3037,6 +3037,28 @@ void MainWindow::launchCurrentMapTest()
     input.sourceMob = mob->filePath();
     input.mprData = mprData;
     input.mobData = mobData;
+    const QFileInfo terrainAtlasResource(
+        input.sourceMpr.dir().filePath(input.sourceMpr.completeBaseName()
+                                      + QStringLiteral("-atlas.res")));
+    if(terrainAtlasResource.isFile())
+    {
+        QFile archive(terrainAtlasResource.absoluteFilePath());
+        CMprDocument stagedMpr;
+        CValidationReport stagedMprReport;
+        if(!archive.open(QIODevice::ReadOnly)
+           || !stagedMpr.loadBytes(mprData, input.sourceMpr.absoluteFilePath(),
+                                   &stagedMprReport))
+        {
+            QMessageBox::warning(this, tr("Map test launch"),
+                tr("The map-specific terrain atlas package could not be read or "
+                   "matched to the staged MPR. No game process was started."));
+            return;
+        }
+        input.sourceTerrainTextureResource = terrainAtlasResource;
+        input.terrainTextureResourceData = archive.readAll();
+        input.expectedTerrainAtlasPages = int(stagedMpr.mapInfo().textureCount);
+        input.expectedTerrainAtlasSlots = int(stagedMpr.mapInfo().tileCount);
+    }
     input.generatedAiGraphData = generatedAiGraphData;
     input.supplementalMobs = supplementalMobs;
     input.embeddedScript = mob->script();

@@ -27,10 +27,11 @@ pixels are deduplicated, and page mipmaps use premultiplied downsampling.
 DXT1 binary alpha is preserved; graded alpha is refused rather than flattened.
 
 Only map-wide used slots plus slots referenced by the preserved opposite layer
-survive dense repacking. Every SEC reference is remapped. The MVP refuses a
-result above 512 slots and never substitutes a different material. The packed
-format can address more, but enabling 9- or 16-page output requires controlled
-shipped-runtime and Endurance-renderer validation first.
+survive dense repacking. Every SEC reference is remapped. Painting remains
+independent of physical capacity. Finalization currently accepts up to 1,024
+slots (16 pages), the ceiling proven by controlled shipped-runtime tests, and
+never substitutes a different material. The packed format can address more,
+but a higher finalization ceiling requires a new controlled runtime gate.
 
 ## Portable isolation
 

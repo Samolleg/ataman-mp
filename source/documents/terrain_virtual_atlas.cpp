@@ -90,6 +90,179 @@ quint32 transitionNoiseSeed(const QVector<qint32>& ids,
     return result;
 }
 
+int terrainBlendStylePriority(ETerrainBlendStyle style)
+{
+    switch(style)
+    {
+    case ETerrainBlendStyle::Water: return 110;
+    case ETerrainBlendStyle::Snow: return 100;
+    case ETerrainBlendStyle::Grass: return 90;
+    case ETerrainBlendStyle::Sand: return 80;
+    case ETerrainBlendStyle::Gravel: return 70;
+    case ETerrainBlendStyle::Lava: return 60;
+    case ETerrainBlendStyle::Ice: return 50;
+    case ETerrainBlendStyle::Swamp: return 40;
+    case ETerrainBlendStyle::Stone: return 30;
+    case ETerrainBlendStyle::Paving: return 20;
+    case ETerrainBlendStyle::Soil: return 10;
+    case ETerrainBlendStyle::Organic: return 0;
+    }
+    return 0;
+}
+
+double terrainTriangleWave(double value)
+{
+    const double fraction = value - std::floor(value);
+    return 1.0 - 4.0 * std::fabs(fraction - 0.5);
+}
+
+void terrainBlendDisplacement(ETerrainBlendStyle style, double u, double v,
+                              quint32 seed, int variation,
+                              double* dx, double* dy, double* sharpness)
+{
+    const double tau = 6.28318530717958647692;
+    const double phase = (double(seed & 0xffffu) / 65535.0
+                         + double(variation) * 0.193) * tau;
+    const double coarseX = terrainValueNoise(u * 2.25, v * 2.25, seed) - 0.5;
+    const double coarseY = terrainValueNoise(u * 2.25, v * 2.25,
+                                              seed ^ 0x68bc21ebu) - 0.5;
+    const double detailX = terrainValueNoise(u * 6.5, v * 6.5,
+                                              seed ^ 0x02e5be93u) - 0.5;
+    const double detailY = terrainValueNoise(u * 6.5, v * 6.5,
+                                              seed ^ 0x967a889bu) - 0.5;
+    *sharpness = 9.0;
+    switch(style)
+    {
+    case ETerrainBlendStyle::Grass:
+    {
+        const double strandsX = std::sin((v * (10.0 + variation) + u * 1.5) * tau + phase);
+        const double strandsY = std::sin((u * (9.0 + variation) - v * 1.2) * tau + phase * 1.37);
+        const double patches = terrainValueNoise(u * 4.0, v * 4.0,
+                                                  seed ^ 0x4f1bbcdcu) - 0.5;
+        *dx = coarseX * 0.30 + strandsX * 0.24 + patches * 0.38;
+        *dy = coarseY * 0.30 + strandsY * 0.24 + patches * 0.32;
+        *sharpness = 13.0 + std::fabs(patches) * 7.0;
+        break;
+    }
+    case ETerrainBlendStyle::Sand:
+    {
+        const double grainX = terrainValueNoise(u * (18.0 + variation * 2.0),
+            v * (18.0 + variation * 2.0), seed ^ 0xa0761d65u) - 0.5;
+        const double grainY = terrainValueNoise(u * (20.0 + variation * 2.0),
+            v * (20.0 + variation * 2.0), seed ^ 0xe7037ed1u) - 0.5;
+        *dx = coarseX * 0.12 + grainX * 0.20;
+        *dy = coarseY * 0.12 + grainY * 0.20;
+        *sharpness = 7.5;
+        break;
+    }
+    case ETerrainBlendStyle::Gravel:
+    {
+        const double chunksX = terrainValueNoise(u * (7.0 + variation),
+            v * (6.0 + variation), seed ^ 0x8ebc6af1u) - 0.5;
+        const double chunksY = terrainValueNoise(u * (6.0 + variation),
+            v * (8.0 + variation), seed ^ 0x589965cdu) - 0.5;
+        *dx = coarseX * 0.22 + chunksX * 0.64 + detailX * 0.24;
+        *dy = coarseY * 0.22 + chunksY * 0.64 + detailY * 0.24;
+        *sharpness = 14.0 + std::fabs(chunksX + chunksY) * 5.0;
+        break;
+    }
+    case ETerrainBlendStyle::Snow:
+    {
+        const double clumpX = std::sin((u * (3.0 + variation * 0.5)
+                                       + v * 2.0) * tau + phase);
+        const double clumpY = std::sin((v * (3.5 + variation * 0.5)
+                                       - u * 1.75) * tau + phase * 1.21);
+        const double powder = terrainValueNoise(u * 5.0, v * 5.0,
+                                                 seed ^ 0xd1b54a35u) - 0.5;
+        *dx = coarseX * 0.28 + clumpX * 0.25 + powder * 0.25;
+        *dy = coarseY * 0.28 + clumpY * 0.25 + powder * 0.25;
+        *sharpness = 10.5 + (clumpX + 1.0) * 1.5;
+        break;
+    }
+    case ETerrainBlendStyle::Stone:
+    {
+        const double crackX = terrainTriangleWave(u * (5.0 + variation)
+                                                   + v * 1.7 + phase / tau);
+        const double crackY = terrainTriangleWave(v * (5.0 + variation)
+                                                   - u * 1.3 + phase / tau);
+        *dx = coarseX * 0.22 + crackX * 0.38 + detailX * 0.20;
+        *dy = coarseY * 0.22 + crackY * 0.38 + detailY * 0.20;
+        *sharpness = 15.0 + std::fabs(crackX * crackY) * 6.0;
+        break;
+    }
+    case ETerrainBlendStyle::Water:
+    {
+        const double ripple = std::sin((v * (4.0 + variation * 0.75)
+                                       + u * 0.65) * tau + phase);
+        const double crossRipple = std::sin((u * 2.25 - v * 3.0) * tau
+                                            + phase * 1.43);
+        *dx = coarseX * 0.12 + ripple * 0.18;
+        *dy = coarseY * 0.12 + ripple * 0.42 + crossRipple * 0.12;
+        *sharpness = 8.5;
+        break;
+    }
+    case ETerrainBlendStyle::Ice:
+    {
+        const double fractureX = terrainTriangleWave(u * (7.0 + variation)
+                                                      + v * 3.0 + phase / tau);
+        const double fractureY = terrainTriangleWave(v * (8.0 + variation)
+                                                      - u * 2.0 + phase / tau);
+        *dx = coarseX * 0.16 + fractureX * 0.36 + detailX * 0.16;
+        *dy = coarseY * 0.16 + fractureY * 0.36 + detailY * 0.16;
+        *sharpness = 12.5;
+        break;
+    }
+    case ETerrainBlendStyle::Paving:
+    {
+        const double courses = terrainTriangleWave(v * (5.0 + variation)
+                                                    + phase / tau);
+        const double joints = terrainTriangleWave(u * (6.0 + variation)
+                                                   + (int(v * 6.0) & 1) * 0.5);
+        *dx = coarseX * 0.10 + joints * 0.25;
+        *dy = coarseY * 0.10 + courses * 0.25;
+        *sharpness = 16.0;
+        break;
+    }
+    case ETerrainBlendStyle::Lava:
+    {
+        const double flow = std::sin((u * 1.4 + v * (4.0 + variation))
+                                     * tau + phase);
+        const double branch = terrainValueNoise(u * 5.5, v * 5.5,
+                                                 seed ^ 0x94d049bbu) - 0.5;
+        *dx = coarseX * 0.32 + flow * 0.22 + branch * 0.35;
+        *dy = coarseY * 0.32 + flow * 0.45 + branch * 0.25;
+        *sharpness = 12.0 + std::fabs(flow) * 4.0;
+        break;
+    }
+    case ETerrainBlendStyle::Swamp:
+    {
+        const double pools = terrainValueNoise(u * (3.0 + variation * 0.4),
+            v * (3.0 + variation * 0.4), seed ^ 0x369dea0fu) - 0.5;
+        const double reeds = std::sin((u * 8.0 + v * 1.25) * tau + phase);
+        *dx = coarseX * 0.30 + pools * 0.42 + reeds * 0.12;
+        *dy = coarseY * 0.30 + pools * 0.42 + reeds * 0.18;
+        *sharpness = 9.5 + std::fabs(pools) * 5.0;
+        break;
+    }
+    case ETerrainBlendStyle::Soil:
+        *dx = coarseX * 0.52 + detailX * 0.24;
+        *dy = coarseY * 0.52 + detailY * 0.24;
+        *sharpness = 10.0;
+        break;
+    case ETerrainBlendStyle::Organic:
+    default:
+    {
+        const double sweepX = std::sin(v * tau + phase)
+                            + 0.45 * std::sin(v * 2.5 * tau + phase * 1.71);
+        const double sweepY = std::sin(u * tau + phase * 1.31)
+                            + 0.45 * std::sin(u * 2.5 * tau + phase * 0.73);
+        *dx = coarseX * 0.60 + detailX * 0.20 + sweepX * 0.20;
+        *dy = coarseY * 0.60 + detailY * 0.20 + sweepY * 0.20;
+        break;
+    }
+    }
+}
+
 QRgb premultipliedBlend(const QRgb samples[4], const double weights[4])
 {
     double alpha = 0.0;
@@ -233,11 +406,69 @@ bool CTerrainEditModel::copyVirtualMaterialField(
     return true;
 }
 
+ETerrainBlendStyle CTerrainVirtualAtlas::blendStyleForMaterialName(
+    const QString& name)
+{
+    const QString normalized = name.trimmed().toCaseFolded();
+    if(normalized.startsWith(QStringLiteral("grass")))
+        return ETerrainBlendStyle::Grass;
+    if(normalized.contains(QStringLiteral("snow")))
+        return ETerrainBlendStyle::Snow;
+    if(normalized.startsWith(QStringLiteral("sand")))
+        return ETerrainBlendStyle::Sand;
+    if(normalized.startsWith(QStringLiteral("rubble"))
+       || normalized.contains(QStringLiteral("gravel")))
+        return ETerrainBlendStyle::Gravel;
+    if(normalized.startsWith(QStringLiteral("water"))
+       || normalized.contains(QStringLiteral("/ water")))
+        return ETerrainBlendStyle::Water;
+    if(normalized.startsWith(QStringLiteral("ice")))
+        return ETerrainBlendStyle::Ice;
+    if(normalized.startsWith(QStringLiteral("lava")))
+        return ETerrainBlendStyle::Lava;
+    if(normalized.startsWith(QStringLiteral("swamp")))
+        return ETerrainBlendStyle::Swamp;
+    if(normalized.startsWith(QStringLiteral("paving"))
+       || normalized.startsWith(QStringLiteral("slabs")))
+        return ETerrainBlendStyle::Paving;
+    if(normalized.startsWith(QStringLiteral("stone"))
+       || normalized.startsWith(QStringLiteral("rock")))
+        return ETerrainBlendStyle::Stone;
+    if(normalized.startsWith(QStringLiteral("ground"))
+       || normalized.contains(QStringLiteral("soil"))
+       || normalized.contains(QStringLiteral("dirt"))
+       || normalized.contains(QStringLiteral("mud")))
+        return ETerrainBlendStyle::Soil;
+    return ETerrainBlendStyle::Organic;
+}
+
+QString CTerrainVirtualAtlas::blendStyleName(ETerrainBlendStyle style)
+{
+    switch(style)
+    {
+    case ETerrainBlendStyle::Grass: return QStringLiteral("grass-strands");
+    case ETerrainBlendStyle::Soil: return QStringLiteral("soil-mottle");
+    case ETerrainBlendStyle::Ice: return QStringLiteral("ice-fracture");
+    case ETerrainBlendStyle::Lava: return QStringLiteral("lava-flow");
+    case ETerrainBlendStyle::Paving: return QStringLiteral("paving-courses");
+    case ETerrainBlendStyle::Stone: return QStringLiteral("stone-fracture");
+    case ETerrainBlendStyle::Gravel: return QStringLiteral("gravel-chunks");
+    case ETerrainBlendStyle::Sand: return QStringLiteral("sand-grain");
+    case ETerrainBlendStyle::Snow: return QStringLiteral("snow-clumps");
+    case ETerrainBlendStyle::Swamp: return QStringLiteral("swamp-pools");
+    case ETerrainBlendStyle::Water: return QStringLiteral("water-ripples");
+    case ETerrainBlendStyle::Organic: return QStringLiteral("organic-fallback");
+    }
+    return QStringLiteral("organic-fallback");
+}
+
 CTerrainVirtualAtlas::CTerrainVirtualAtlas(
     const CTerrainTransitionCatalog& catalog,
     const QVector<QImage>& authoredTiles, quint32 distributionSeed,
-    const QMap<qint32, QImage>& externalMaterialSources)
+    const QMap<qint32, QImage>& externalMaterialSources,
+    const QMap<qint32, ETerrainBlendStyle>& materialBlendStyles)
     : m_catalog(catalog), m_authoredTiles(authoredTiles),
+      m_materialBlendStyles(materialBlendStyles),
       m_distributionSeed(distributionSeed)
 {
     if(authoredTiles.isEmpty())
@@ -323,8 +554,45 @@ STerrainTransitionSignature CTerrainVirtualAtlas::canonicalSignature(
     return best;
 }
 
+ETerrainBlendStyle CTerrainVirtualAtlas::blendStyleForSignature(
+    const STerrainTransitionSignature& signature) const
+{
+    QMap<qint32, int> counts;
+    for(qint32 material : corners(signature))
+        ++counts[material];
+    int selectedCount = 5;
+    int selectedPriority = -1;
+    ETerrainBlendStyle selected = ETerrainBlendStyle::Organic;
+    for(auto it = counts.constBegin(); it != counts.constEnd(); ++it)
+    {
+        const ETerrainBlendStyle style = m_materialBlendStyles.value(
+            it.key(), ETerrainBlendStyle::Organic);
+        const int priority = terrainBlendStylePriority(style);
+        // A one-corner material is normally the newly entering edge and owns
+        // the visual language. Balanced tuples use a stable material priority.
+        if(it.value() < selectedCount
+           || (it.value() == selectedCount && priority > selectedPriority))
+        {
+            selectedCount = it.value();
+            selectedPriority = priority;
+            selected = style;
+        }
+    }
+    return selected;
+}
+
+int CTerrainVirtualAtlas::blendVariation(int cellX, int cellY,
+                                         ETerrainBlendStyle style) const
+{
+    const quint32 origin = terrainNoiseHash(m_distributionSeed
+        ^ quint32(terrainBlendStylePriority(style) + 1) * 0xc2b2ae35u);
+    return int((origin + quint32(cellX) + quint32(cellY) * 3u)
+               % quint32(blendVariationCount()));
+}
+
 QImage CTerrainVirtualAtlas::generateTile(
     const STerrainTransitionSignature& gridSignature,
+    ETerrainBlendStyle style, int variation,
     CValidationReport* report) const
 {
     // Atlas thumbnails are vertically opposite the canonical terrain grid.
@@ -345,6 +613,8 @@ QImage CTerrainVirtualAtlas::generateTile(
     const int size = m_authoredTiles.front().width();
     const quint32 noiseSeed = transitionNoiseSeed(
         ids, m_materialSources, m_distributionSeed);
+    const quint32 variantSeed = terrainNoiseHash(noiseSeed
+        ^ quint32(variation + 1) * 0x9e3779b9u);
     QImage result(size, size, QImage::Format_RGBA8888);
     for(int y = 0; y < size; ++y)
     {
@@ -359,28 +629,16 @@ QImage CTerrainVirtualAtlas::generateTile(
             // instead of dividing the tile into four geometric quadrants.
             const double envelope = std::sin(u * 3.14159265358979323846)
                                   * std::sin(v * 3.14159265358979323846);
-            const double coarseX = terrainValueNoise(u * 2.25, v * 2.25,
-                                                       noiseSeed) - 0.5;
-            const double coarseY = terrainValueNoise(u * 2.25, v * 2.25,
-                                                       noiseSeed ^ 0x68bc21ebu) - 0.5;
-            const double detailX = terrainValueNoise(u * 5.0, v * 5.0,
-                                                       noiseSeed ^ 0x02e5be93u) - 0.5;
-            const double detailY = terrainValueNoise(u * 5.0, v * 5.0,
-                                                       noiseSeed ^ 0x967a889bu) - 0.5;
-            const double phase = double(noiseSeed & 0xffffu) / 65535.0
-                               * 6.28318530717958647692;
-            const double sweepX = std::sin(v * 6.28318530717958647692 + phase)
-                                + 0.45 * std::sin(v * 15.7079632679489661923
-                                                + phase * 1.71);
-            const double sweepY = std::sin(u * 6.28318530717958647692 + phase * 1.31)
-                                + 0.45 * std::sin(u * 15.7079632679489661923
-                                                + phase * 0.73);
+            double displacementX = 0.0;
+            double displacementY = 0.0;
+            double sharpness = 9.0;
+            terrainBlendDisplacement(style, u, v, variantSeed, variation,
+                                     &displacementX, &displacementY,
+                                     &sharpness);
             const double warpedU = qBound(0.0,
-                u + envelope * (coarseX * 0.60 + detailX * 0.20
-                                + sweepX * 0.20), 1.0);
+                u + envelope * displacementX, 1.0);
             const double warpedV = qBound(0.0,
-                v + envelope * (coarseY * 0.60 + detailY * 0.20
-                                + sweepY * 0.20), 1.0);
+                v + envelope * displacementY, 1.0);
             const double bilinear[4] = {
                 (1.0 - warpedU) * (1.0 - warpedV),
                 warpedU * (1.0 - warpedV),
@@ -407,7 +665,12 @@ QImage CTerrainVirtualAtlas::generateTile(
                     }
                 if(first)
                 {
-                    weights[corner] = std::pow(materialWeight, 8.0);
+                    // Style-specific sharpness is also faded out at edges so
+                    // independently selected variants remain byte-seamless.
+                    const double edgeSafeSharpness = 9.0
+                        + envelope * (sharpness - 9.0);
+                    weights[corner] = std::pow(materialWeight,
+                                                edgeSafeSharpness);
                     total += weights[corner];
                 }
             }
@@ -445,11 +708,15 @@ STerrainVirtualTile CTerrainVirtualAtlas::resolve(
     quint8 rotation = 0;
     const STerrainTransitionSignature canonical =
         canonicalSignature(signature, &rotation);
-    const QByteArray key = signatureKey(canonical);
+    const ETerrainBlendStyle style = blendStyleForSignature(canonical);
+    const int variation = blendVariation(cellX, cellY, style);
+    QByteArray key = signatureKey(canonical);
+    key.append(char(terrainBlendStylePriority(style)));
+    key.append(char(variation));
     int index = m_generatedBySignature.value(key, -1);
     if(index < 0)
     {
-        const QImage pixels = generateTile(canonical, report);
+        const QImage pixels = generateTile(canonical, style, variation, report);
         if(pixels.isNull())
             return result;
         const QByteArray pixelsHash = imageHash(pixels);
@@ -808,7 +1075,8 @@ CTerrainWorkingAtlas::CTerrainWorkingAtlas(
     const CTerrainTransitionCatalog& authoredCatalog,
     const QVector<QImage>& authoredTiles, quint32 distributionSeed,
     int capacityLimit,
-    const QMap<qint32, QImage>& externalMaterialSources)
+    const QMap<qint32, QImage>& externalMaterialSources,
+    const QMap<qint32, ETerrainBlendStyle>& materialBlendStyles)
     : m_authoredCatalog(authoredCatalog), m_workingCatalog(authoredCatalog),
       m_authoredImages(authoredTiles), m_workingImages(authoredTiles),
       m_capacityLimit(qBound(authoredTiles.size(), capacityLimit, 16384))
@@ -823,7 +1091,7 @@ CTerrainWorkingAtlas::CTerrainWorkingAtlas(
     }
     m_resolver.reset(new CTerrainVirtualAtlas(
         m_authoredCatalog, m_authoredImages, distributionSeed,
-        externalMaterialSources));
+        externalMaterialSources, materialBlendStyles));
     for(int slot = 0; slot < m_authoredImages.size(); ++slot)
     {
         const QPair<int, int> key(0, slot);

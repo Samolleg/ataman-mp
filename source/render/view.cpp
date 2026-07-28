@@ -140,6 +140,16 @@ QImage loadGlobalUniformSource(const STerrainGlobalMaterialFamily& family,
         requiredSize, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
 }
 
+QMap<qint32, ETerrainBlendStyle> globalMaterialBlendStyles(
+    const QVector<STerrainGlobalMaterialFamily>& families)
+{
+    QMap<qint32, ETerrainBlendStyle> result;
+    for(const STerrainGlobalMaterialFamily& family : families)
+        result.insert(family.id,
+            CTerrainVirtualAtlas::blendStyleForMaterialName(family.name));
+    return result;
+}
+
 QVector4D aiGraphLayerColor(int layer)
 {
     static const QVector4D colors[CAiGraphDocument::LayerCount] = {
@@ -6714,7 +6724,8 @@ void CView::rebuildTerrainAutoCatalog()
         m_workingTerrainAtlas.reset(new CTerrainWorkingAtlas(
             m_terrainAtlasAnalysis.overlayCatalogWithLandFamilies(),
             m_authoredTerrainTileImages, m_terrainSemanticSeed, 4096,
-            m_terrainGlobalMaterialSources));
+            m_terrainGlobalMaterialSources,
+            globalMaterialBlendStyles(m_terrainGlobalFamilies)));
         m_terrainEdit.enableWorkingAtlasSlots(
             m_workingTerrainAtlas->capacityLimit());
         if(m_landscapeTools)
@@ -7353,9 +7364,11 @@ void CView::finalizeVirtualTerrainAtlas()
     const QVector<QImage>& authoredImages=m_authoredTerrainTileImages.isEmpty()
         ?m_pTileForm->tileImages():m_authoredTerrainTileImages;
     CTerrainVirtualAtlas atlas(catalog, authoredImages, m_terrainSemanticSeed,
-                               m_terrainGlobalMaterialSources);
+                               m_terrainGlobalMaterialSources,
+                               globalMaterialBlendStyles(m_terrainGlobalFamilies));
     const STerrainAtlasFinalization finalized=atlas.finalize(
-        field,m_mprDocument.mapInfo().innerNamespace,512,
+        field,m_mprDocument.mapInfo().innerNamespace,
+        kValidatedShippedTerrainAtlasSlotLimit,
         m_mprDocument.mapInfo().tileTypes,&report,pinned);
     if(!finalized.success)
     {

@@ -186,10 +186,13 @@ private slots:
     void generatedEdgesUseOnlyTheirTwoCornerMaterials();
     void generatedTransitionRetainsSourceTextureIdentity();
     void generatedTransitionBoundaryIsOrganicRatherThanQuadrants();
+    void materialNamesSelectExplicitBlendStyles();
+    void materialBlendStylesProvideFourDistinctVariants();
     void generatedNeighbourEdgesArePixelContinuous();
     void rotationsAndIdenticalPixelsAreDeduplicated();
     void stableHashesAndNamespaceAreDeterministic();
     void mapWideUsageAndUnusedCompaction();
+    void finalizesAtValidatedRuntimeCeilingBeyond512();
     void capacityRefusalNeverSubstitutes();
     void rawPageCompositionPreservesEveryUntouchedSlot();
     void pageOrientationMipmapsAlphaAndReopen();
@@ -200,6 +203,7 @@ private slots:
     void preservedLayerSlotsArePinnedAndRemapped();
     void inactiveOverlaySentinelSurvivesLandFinalization();
     void gradedAlphaIsRefusedWithoutFlattening();
+    void dxt1TerrainPagesMatchShippedMipContract();
     void workingAtlasGeneratesImmediatelyAndReusesTuple();
     void workingAtlasNeverReplacesAuthoredPixels();
     void repeatedGeneratedStampsNeverMutateAuthoredAtlas();
@@ -343,6 +347,81 @@ void TerrainVirtualAtlasTests::generatedTransitionBoundaryIsOrganicRatherThanQua
              "Generated transition is still a straight quadrant cut");
 }
 
+void TerrainVirtualAtlasTests::materialNamesSelectExplicitBlendStyles()
+{
+    QCOMPARE(CTerrainVirtualAtlas::blendStyleForMaterialName("Grass / Dark"),
+             ETerrainBlendStyle::Grass);
+    QCOMPARE(CTerrainVirtualAtlas::blendStyleForMaterialName("Ground / Dirt"),
+             ETerrainBlendStyle::Soil);
+    QCOMPARE(CTerrainVirtualAtlas::blendStyleForMaterialName("Ground / Gravel"),
+             ETerrainBlendStyle::Gravel);
+    QCOMPARE(CTerrainVirtualAtlas::blendStyleForMaterialName("Ground / Water"),
+             ETerrainBlendStyle::Water);
+    QCOMPARE(CTerrainVirtualAtlas::blendStyleForMaterialName("Ice / Cracked"),
+             ETerrainBlendStyle::Ice);
+    QCOMPARE(CTerrainVirtualAtlas::blendStyleForMaterialName("Lava"),
+             ETerrainBlendStyle::Lava);
+    QCOMPARE(CTerrainVirtualAtlas::blendStyleForMaterialName("Paving / Radial"),
+             ETerrainBlendStyle::Paving);
+    QCOMPARE(CTerrainVirtualAtlas::blendStyleForMaterialName("Slabs / Carved"),
+             ETerrainBlendStyle::Paving);
+    QCOMPARE(CTerrainVirtualAtlas::blendStyleForMaterialName("Rock / Snow"),
+             ETerrainBlendStyle::Snow);
+    QCOMPARE(CTerrainVirtualAtlas::blendStyleForMaterialName("Stone / Weathered"),
+             ETerrainBlendStyle::Stone);
+    QCOMPARE(CTerrainVirtualAtlas::blendStyleForMaterialName("Rubble / Red"),
+             ETerrainBlendStyle::Gravel);
+    QCOMPARE(CTerrainVirtualAtlas::blendStyleForMaterialName("Sand / Gravel"),
+             ETerrainBlendStyle::Sand);
+    QCOMPARE(CTerrainVirtualAtlas::blendStyleForMaterialName("Snow / Common"),
+             ETerrainBlendStyle::Snow);
+    QCOMPARE(CTerrainVirtualAtlas::blendStyleForMaterialName("Swamp"),
+             ETerrainBlendStyle::Swamp);
+    QCOMPARE(CTerrainVirtualAtlas::blendStyleForMaterialName("Water / Waves"),
+             ETerrainBlendStyle::Water);
+    QCOMPARE(CTerrainVirtualAtlas::blendStyleForMaterialName("Future material"),
+             ETerrainBlendStyle::Organic);
+}
+
+void TerrainVirtualAtlasTests::materialBlendStylesProvideFourDistinctVariants()
+{
+    const QVector<ETerrainBlendStyle> styles = {
+        ETerrainBlendStyle::Grass, ETerrainBlendStyle::Soil,
+        ETerrainBlendStyle::Ice, ETerrainBlendStyle::Lava,
+        ETerrainBlendStyle::Paving, ETerrainBlendStyle::Stone,
+        ETerrainBlendStyle::Gravel, ETerrainBlendStyle::Sand,
+        ETerrainBlendStyle::Snow, ETerrainBlendStyle::Swamp,
+        ETerrainBlendStyle::Water, ETerrainBlendStyle::Organic
+    };
+    QSet<QByteArray> styleFingerprints;
+    for(ETerrainBlendStyle style : styles)
+    {
+        Fixture fixture;
+        for(QImage& image : fixture.images)
+            image = image.scaled(64, 64, Qt::IgnoreAspectRatio,
+                                 Qt::FastTransformation);
+        QMap<qint32, ETerrainBlendStyle> descriptors;
+        descriptors.insert(1, style);
+        descriptors.insert(2, ETerrainBlendStyle::Soil);
+        CTerrainVirtualAtlas atlas(fixture.catalog, fixture.images, 0x51a7u,
+                                   {}, descriptors);
+        for(int y = 0; y < 16 && atlas.generatedTiles().size() < 4; ++y)
+            for(int x = 0; x < 16 && atlas.generatedTiles().size() < 4; ++x)
+                QVERIFY(atlas.resolve(signature(1,2,2,2), x, y).generatedIndex >= 0);
+        QCOMPARE(atlas.generatedTiles().size(),
+                 CTerrainVirtualAtlas::blendVariationCount());
+        QList<QByteArray> hashes;
+        for(const STerrainFinalizedTile& tile : atlas.generatedTiles())
+            hashes.append(tile.pixelSha256);
+        std::sort(hashes.begin(), hashes.end());
+        QByteArray fingerprint;
+        for(const QByteArray& hash : hashes) fingerprint += hash + '\n';
+        QVERIFY(!styleFingerprints.contains(fingerprint));
+        styleFingerprints.insert(fingerprint);
+    }
+    QCOMPARE(styleFingerprints.size(), styles.size());
+}
+
 void TerrainVirtualAtlasTests::generatedNeighbourEdgesArePixelContinuous()
 {
     Fixture fixture;
@@ -372,14 +451,14 @@ void TerrainVirtualAtlasTests::rotationsAndIdenticalPixelsAreDeduplicated()
     const STerrainTransitionSignature base=signature(1,2,3,4);
     const STerrainVirtualTile first=atlas.resolve(base,0,0);
     const STerrainVirtualTile rotated=atlas.resolve(
-        CTerrainTransitionCatalog::rotated(base,1),1,0);
+        CTerrainTransitionCatalog::rotated(base,1),0,0);
     QCOMPARE(first.generatedIndex,rotated.generatedIndex);
     QVERIFY(first.generatedRotation!=rotated.generatedRotation);
 
     Fixture duplicate(true);
     CTerrainVirtualAtlas duplicateAtlas(duplicate.catalog,duplicate.images);
     const int a=duplicateAtlas.resolve(signature(1,2,3,3),0,0).generatedIndex;
-    const int b=duplicateAtlas.resolve(signature(1,2,4,4),1,0).generatedIndex;
+    const int b=duplicateAtlas.resolve(signature(1,2,4,4),0,0).generatedIndex;
     QCOMPARE(a,b);
 }
 
@@ -412,6 +491,45 @@ void TerrainVirtualAtlasTests::mapWideUsageAndUnusedCompaction()
     QVERIFY(result.requiredSlots<fixture.images.size());
     QCOMPARE(result.packedCells.size(),4);
     QCOMPARE(result.tileTypes.size(),result.requiredSlots);
+}
+
+void TerrainVirtualAtlasTests::finalizesAtValidatedRuntimeCeilingBeyond512()
+{
+    CTerrainTransitionCatalog catalog;
+    QVector<QImage> images;
+    QVector<qint32> tileTypes;
+    QVector<quint16> pinned;
+    constexpr int requiredSlots = 513;
+    images.reserve(requiredSlots);
+    tileTypes.reserve(requiredSlots);
+    pinned.reserve(requiredSlots);
+    for(int slot = 0; slot < requiredSlots; ++slot)
+    {
+        const qint32 material = slot + 1;
+        QImage image(8, 8, QImage::Format_RGBA8888);
+        image.fill(QColor(slot & 255, (slot >> 8) & 255,
+                          (slot * 37) & 255, 255));
+        images.append(image);
+        tileTypes.append(slot);
+        SMprPackedTile packed;
+        packed.tileIndex = quint8(slot % 64);
+        packed.atlasIndex = quint8(slot / 64);
+        STerrainTransitionVariant variant;
+        variant.signature = signature(material, material, material, material);
+        variant.packedTile = packed.encode();
+        catalog.addVariant(variant);
+        pinned.append(variant.packedTile);
+    }
+    CTerrainVirtualMaterialField field;
+    QVERIFY(field.resize(1, 1, 1));
+    CTerrainVirtualAtlas atlas(catalog, images);
+    const STerrainAtlasFinalization result = atlas.finalize(
+        field, "ExpandedValidated", kValidatedShippedTerrainAtlasSlotLimit,
+        tileTypes, nullptr, pinned);
+    QVERIFY2(result.success, qPrintable(result.error));
+    QCOMPARE(result.capacityLimit, kValidatedShippedTerrainAtlasSlotLimit);
+    QCOMPARE(result.requiredSlots, requiredSlots);
+    QCOMPARE(result.textureCount, 9);
 }
 
 void TerrainVirtualAtlasTests::capacityRefusalNeverSubstitutes()
@@ -640,10 +758,13 @@ void TerrainVirtualAtlasTests::externalUniformFamilyPaintsAndBlendsWithoutAuthor
         field, "GlobalFamily", 64, {1, 1, 1, 1}, &report);
     QVERIFY2(finalized.success,
              qPrintable(finalized.error + QStringLiteral("\n") + report.toText()));
-    // The four incident mixed cells are rotations of one canonical tuple and
-    // must deduplicate. The separately resolved pure source remains cached but
-    // is not counted as map usage because this field has no all-external cell.
-    QCOMPARE(finalized.usage.generatedTiles.size(), 1);
+    // The four incident cells retain one exact canonical tuple but may select
+    // multiple deterministic artistic variants. The separately resolved pure
+    // source remains cached and is not counted because the field has no
+    // all-external cell.
+    QVERIFY(finalized.usage.generatedTiles.size() >= 1);
+    QVERIFY(finalized.usage.generatedTiles.size()
+            <= CTerrainVirtualAtlas::blendVariationCount());
     QVERIFY(atlas.generatedTiles().size() >= 2);
     for(int y = 0; y < field.tileHeight(); ++y)
         for(int x = 0; x < field.tileWidth(); ++x)
@@ -705,6 +826,25 @@ void TerrainVirtualAtlasTests::gradedAlphaIsRefusedWithoutFlattening()
     QVERIFY(diagnostic.contains("graded alpha"));
 }
 
+void TerrainVirtualAtlasTests::dxt1TerrainPagesMatchShippedMipContract()
+{
+    QImage image(2048, 2048, QImage::Format_ARGB32);
+    image.fill(QColor(35, 95, 45, 255));
+    QString diagnostic;
+    const QByteArray encoded = ei::encodeMmpDxt1(image, true, &diagnostic);
+    QVERIFY2(!encoded.isEmpty(), qPrintable(diagnostic));
+    QCOMPARE(qFromLittleEndian<quint32>(reinterpret_cast<const uchar*>(
+                 encoded.constData() + 12)), quint32(12));
+    QCOMPARE(qFromLittleEndian<quint32>(reinterpret_cast<const uchar*>(
+                 encoded.constData() + 20)), quint32(4));
+    const ei::SMmpInspection inspected = ei::inspectMmp(encoded);
+    QVERIFY2(inspected.valid, qPrintable(inspected.diagnostic));
+    QCOMPARE(inspected.authoredMipSizes.front(), QSize(2048, 2048));
+    QCOMPARE(inspected.authoredMipSizes.back(), QSize(1, 1));
+    QCOMPARE(inspected.authoredMipSizes.size(), 12);
+    QCOMPARE(encoded.size(), 2796292);
+}
+
 void TerrainVirtualAtlasTests::workingAtlasGeneratesImmediatelyAndReusesTuple()
 {
     Fixture fixture;
@@ -722,7 +862,7 @@ void TerrainVirtualAtlasTests::workingAtlasGeneratesImmediatelyAndReusesTuple()
     QCOMPARE(SMprPackedTile::decode(first).atlasSlot(),4);
     QVERIFY(working.takeChangedSlots().contains(4));
     usage[4]=1;
-    const quint16 reused=working.resolve(missing,9,10,&usage,protectedSlots,
+    const quint16 reused=working.resolve(missing,7,8,&usage,protectedSlots,
                                          &generated,&report);
     QCOMPARE(reused,first);
     QCOMPARE(working.generatedTileCount(),1);

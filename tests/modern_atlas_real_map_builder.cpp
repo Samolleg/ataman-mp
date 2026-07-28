@@ -11,8 +11,10 @@
 #include <QSet>
 #include <QTextCodec>
 #include <QTextStream>
+#include <QtEndian>
 
 #include "endurance_document.h"
+#include "mmp_codec.h"
 #include "mmp_inspector.h"
 #include "mpr_document.h"
 #include "res_file.h"
@@ -372,6 +374,10 @@ BuiltMap buildMap(const QString& sourcePath, const QString& nameSpace,
         QJsonObject stamp;
         stamp.insert(QStringLiteral("material_id"), stampIds.at(index));
         stamp.insert(QStringLiteral("material"), names.value(stampIds.at(index)));
+        stamp.insert(QStringLiteral("blend_style"),
+            CTerrainVirtualAtlas::blendStyleName(
+                CTerrainVirtualAtlas::blendStyleForMaterialName(
+                    names.value(stampIds.at(index)))));
         stamp.insert(QStringLiteral("x0"), x0);
         stamp.insert(QStringLiteral("y0"), y0);
         stamp.insert(QStringLiteral("width_vertices"), 3);
@@ -396,8 +402,12 @@ BuiltMap buildMap(const QString& sourcePath, const QString& nameSpace,
             fourFamilyJunctions.append(junction);
         }
 
+    QMap<qint32, ETerrainBlendStyle> blendStyles;
+    for(auto it = names.constBegin(); it != names.constEnd(); ++it)
+        blendStyles.insert(it.key(),
+            CTerrainVirtualAtlas::blendStyleForMaterialName(it.value()));
     CTerrainVirtualAtlas atlas(catalog, sourceAtlas.tiles, 0x4a4d5631u,
-                               externalSources);
+                               externalSources, blendStyles);
     const QVector<quint16> pinned = pinnedOverlay(terrain);
     const STerrainAtlasFinalization finalized = atlas.finalize(
         field, nameSpace, 16384, document.mapInfo().tileTypes, &report, pinned);
@@ -472,6 +482,183 @@ BuiltMap buildMap(const QString& sourcePath, const QString& nameSpace,
         QJsonDocument::Indented);
     if(!writeBytes(QDir(outputDirectory).filePath(QStringLiteral("manifest.json")),
                    manifestBytes, &result.error)) return result;
+    result.manifest = manifest;
+    result.success = true;
+    return result;
+}
+
+BuiltMap buildExpandedRuntimeProbe(
+    const QString& sourcePath, const QString& nameSpace, int targetPages,
+    const QVector<qint32>& materialIds,
+    const QMap<qint32, QImage>& externalSources,
+    const Atlas& sourceAtlas, const QString& outputDirectory)
+{
+    Q_UNUSED(materialIds);
+    Q_UNUSED(externalSources);
+    BuiltMap result;
+    QFile sourceFile(sourcePath);
+    if(!sourceFile.open(QIODevice::ReadOnly))
+    {
+        result.error = QStringLiteral("Cannot open source MPR: %1").arg(sourcePath);
+        return result;
+    }
+    CValidationReport loadReport;
+    CMprDocument document;
+    if(!document.loadBytes(sourceFile.readAll(), sourcePath, &loadReport))
+    {
+        result.error = loadReport.toText();
+        return result;
+    }
+    if(targetPages <= 0 || targetPages > 256 || sourceAtlas.tiles.isEmpty())
+    {
+        result.error = QStringLiteral("Expanded runtime probe parameters are invalid.");
+        return result;
+    }
+    const int requiredSlots = targetPages * 64;
+    const int cellCount = int(document.mapInfo().sectorCountX
+                              * document.mapInfo().sectorCountY * 16u * 16u);
+    if(cellCount < requiredSlots)
+    {
+        result.error = QStringLiteral(
+            "The source MPR has %1 cells but the %2-page probe needs %3 references.")
+            .arg(cellCount).arg(targetPages).arg(requiredSlots);
+        return result;
+    }
+    STerrainAtlasFinalization best;
+    best.capacityLimit = requiredSlots;
+    best.requiredSlots = requiredSlots;
+    best.textureCount = targetPages;
+    const int tileSize = sourceAtlas.tiles.front().width();
+    if(tileSize <= 0 || sourceAtlas.tiles.front().height() != tileSize)
+    {
+        result.error = QStringLiteral("The source atlas tile dimensions are invalid.");
+        return result;
+    }
+    QCryptographicHash stable(QCryptographicHash::Sha256);
+    stable.addData(nameSpace.toLower().toUtf8());
+    stable.addData(QByteArray::number(targetPages));
+    best.tiles.reserve(requiredSlots);
+    best.tileTypes.reserve(requiredSlots);
+    for(int slot = 0; slot < requiredSlots; ++slot)
+    {
+        QImage pixels = sourceAtlas.tiles.at(slot % sourceAtlas.tiles.size())
+            .convertToFormat(QImage::Format_RGBA8888);
+        // Encode a tiny deterministic interior marker so every physical slot
+        // remains diagnostically distinguishable while retaining stock JMV
+        // material imagery and untouched tile edges.
+        for(int bit = 0; bit < 10; ++bit)
+        {
+            const int x = tileSize / 2 - 5 + bit;
+            const int y = tileSize / 2 + (bit & 1);
+            QColor color = pixels.pixelColor(x, y);
+            color.setRed((color.red() + ((slot >> bit) & 1 ? 71 : 19)) & 255);
+            color.setBlue((color.blue() + ((slot >> bit) & 1 ? 29 : 83)) & 255);
+            pixels.setPixelColor(x, y, color);
+        }
+        STerrainFinalizedTile tile;
+        tile.pixels = pixels;
+        tile.pixelSha256 = QCryptographicHash::hash(
+            QByteArray(reinterpret_cast<const char*>(pixels.constBits()),
+                       int(pixels.sizeInBytes())), QCryptographicHash::Sha256).toHex();
+        tile.authored = slot < sourceAtlas.tiles.size();
+        tile.sourceSlot = tile.authored ? slot : -1;
+        best.tiles.append(tile);
+        best.tileTypes.append(document.mapInfo().tileTypes.isEmpty() ? 0
+            : document.mapInfo().tileTypes.at(
+                  slot % document.mapInfo().tileTypes.size()));
+        if(tile.authored) best.authoredSlotRemap.insert(slot, slot);
+        stable.addData(tile.pixelSha256);
+    }
+    best.packedCells.reserve(cellCount);
+    for(int cell = 0; cell < cellCount; ++cell)
+    {
+        const int slot = cell % requiredSlots;
+        SMprPackedTile packed;
+        packed.tileIndex = quint8(slot % 64);
+        packed.atlasIndex = quint8(slot / 64);
+        const quint16 encoded = packed.encode();
+        best.packedCells.append(encoded);
+        char bytes[2];
+        qToLittleEndian<quint16>(encoded, reinterpret_cast<uchar*>(bytes));
+        stable.addData(bytes, 2);
+    }
+    for(int page = 0; page < targetPages; ++page)
+    {
+        const QImage image = CTerrainVirtualAtlas::composePage(
+            [&best]() { QVector<QImage> images; images.reserve(best.tiles.size());
+                for(const STerrainFinalizedTile& tile : best.tiles)
+                    images.append(tile.pixels); return images; }(), page * 64, tileSize);
+        QString diagnostic;
+        const QByteArray mmp = ei::encodeMmpDxt1(image, true, &diagnostic);
+        if(mmp.isEmpty())
+        {
+            result.error = QStringLiteral("Could not encode runtime atlas page: %1")
+                .arg(diagnostic);
+            return result;
+        }
+        best.pages.append(image);
+        best.pageMmpPayloads.append(mmp);
+    }
+    best.stableSha256 = stable.result().toHex();
+    best.isolatedNamespace = QStringLiteral("%1_runtime_%2p_%3")
+        .arg(nameSpace.toLower()).arg(targetPages)
+        .arg(QString::fromLatin1(best.stableSha256.left(12)));
+    best.success = true;
+    CValidationReport packageReport;
+    const STerrainPortableAtlasPackage package =
+        CTerrainVirtualAtlas::buildPortablePackage(
+            document, best, ETerrainTileLayer::Land, &packageReport);
+    if(!package.success)
+    {
+        result.error = package.error + QLatin1Char('\n') + packageReport.toText();
+        return result;
+    }
+    if(!QDir().mkpath(outputDirectory))
+    {
+        result.error = QStringLiteral("Could not create %1").arg(outputDirectory);
+        return result;
+    }
+    const QString baseName = best.isolatedNamespace;
+    if(!writeBytes(QDir(outputDirectory).filePath(baseName + QStringLiteral(".mpr")),
+                   package.mprBytes, &result.error)
+       || !writeBytes(QDir(outputDirectory).filePath(
+                         baseName + QStringLiteral("-atlas.res")),
+                     package.resourceArchiveBytes, &result.error))
+        return result;
+    int highestReferencedSlot = -1;
+    QSet<int> referencedPages;
+    for(quint16 encoded : best.packedCells)
+    {
+        const SMprPackedTile packed = SMprPackedTile::decode(encoded);
+        highestReferencedSlot = qMax(highestReferencedSlot, packed.atlasSlot());
+        referencedPages.insert(packed.atlasIndex);
+    }
+    if(highestReferencedSlot < (targetPages - 1) * 64
+       || !referencedPages.contains(targetPages - 1))
+    {
+        result.error = QStringLiteral("The highest atlas page is not referenced by terrain.");
+        return result;
+    }
+    QJsonObject manifest;
+    manifest.insert("schema", "ei-expanded-atlas-runtime-probe-v1");
+    manifest.insert("source_mpr", QFileInfo(sourcePath).fileName());
+    manifest.insert("isolated_namespace", baseName);
+    manifest.insert("mpr_file", baseName + QStringLiteral(".mpr"));
+    manifest.insert("atlas_file", baseName + QStringLiteral("-atlas.res"));
+    manifest.insert("texture_pages", best.textureCount);
+    manifest.insert("active_slots", best.requiredSlots);
+    manifest.insert("highest_referenced_slot", highestReferencedSlot);
+    manifest.insert("highest_referenced_page", targetPages - 1);
+    manifest.insert("referenced_page_count", referencedPages.size());
+    manifest.insert("mmp_member_count", package.resourceMembers.size());
+    manifest.insert("map_size_x", int(document.mapInfo().sectorCountX));
+    manifest.insert("map_size_y", int(document.mapInfo().sectorCountY));
+    manifest.insert("stable_sha256", QString::fromLatin1(best.stableSha256));
+    manifest.insert("installed_resources_modified", false);
+    if(!writeBytes(QDir(outputDirectory).filePath(QStringLiteral("manifest.json")),
+                   QJsonDocument(manifest).toJson(QJsonDocument::Indented),
+                   &result.error))
+        return result;
     result.manifest = manifest;
     result.success = true;
     return result;
@@ -579,6 +766,27 @@ int main(int argc, char** argv)
         return 7;
     }
     outputs.append(full.manifest);
+    QJsonArray runtimeProbes;
+    for(int pages : {8, 9, 16})
+    {
+        const QString probeDirectory = QDir(outputRoot).filePath(
+            QStringLiteral("runtime-atlas-probes/page-%1")
+                .arg(pages, 2, 10, QLatin1Char('0')));
+        const BuiltMap probe = buildExpandedRuntimeProbe(
+            fullSource, QStringLiteral("Zone2"), pages, globalLandIds,
+            zone2External, zone2, probeDirectory);
+        if(!probe.success)
+        {
+            err << "runtime-probe-" << pages << ": " << probe.error << '\n';
+            return 8;
+        }
+        runtimeProbes.append(probe.manifest);
+        out << "runtime-probe-" << pages
+            << ": slots=" << probe.manifest.value("active_slots").toInt()
+            << " highest-page="
+            << probe.manifest.value("highest_referenced_page").toInt()
+            << " unresolved=0\n";
+    }
     QJsonObject root;
     root.insert(QStringLiteral("schema"),
                 QStringLiteral("ei-modern-atlas-real-map-set-v1"));
@@ -586,6 +794,7 @@ int main(int argc, char** argv)
         QStringLiteral("Installed stock JMV assets used directly; separate EI-HD assets excluded."));
     root.insert(QStringLiteral("reviewed_pure_sources"), sourceManifest);
     root.insert(QStringLiteral("maps"), outputs);
+    root.insert(QStringLiteral("runtime_atlas_probes"), runtimeProbes);
     root.insert(QStringLiteral("full_family_material_count"), globalLandIds.size());
     root.insert(QStringLiteral("full_family_required_slots"),
                 full.manifest.value(QStringLiteral("total_active_slots")));
@@ -606,13 +815,15 @@ int main(int argc, char** argv)
         "`full-game-family-stamp` contains one non-overlapping 3x3 vertex stamp for "
         "every unique reviewed Family / Subfamily brush. `zone-set` contains the same "
         "Zone 1, 2, 5_1, 11, 16, and 17 source set used by semantic-atlas review.\n\n"
-        "Every manifest must report `unresolved_cells: 0`. These are terrain-resource "
-        "visual checks, not replacements for installed maps.\n");
+        "Every visual manifest must report `unresolved_cells: 0`. The "
+        "`runtime-atlas-probes` directory contains a deterministic 8-page control "
+        "plus 9-page and 16-page MPR/RES pairs whose highest page is referenced "
+        "by terrain for automated Test Current Map runtime validation.\n");
     if(!writeBytes(QDir(outputRoot).filePath(QStringLiteral("README.md")),
                    readme, &error))
     {
         err << error << '\n';
-        return 9;
+        return 10;
     }
     out << "full-family: materials=" << globalLandIds.size()
         << " slots=" << full.manifest.value("total_active_slots").toInt()

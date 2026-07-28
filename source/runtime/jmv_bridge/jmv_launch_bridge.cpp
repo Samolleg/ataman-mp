@@ -58,6 +58,8 @@ using GameStringAssignFn = void (__thiscall*)(void*, const char*);
 using GetZoneByNameFn = unsigned char* (__thiscall*)(void*, const char*);
 using GetTextureManagerFn = void* (__thiscall*)(void*);
 using AddTextureResourceFn = int (__thiscall*)(void*, const char*);
+using GetTextureDataFn = unsigned char* (__thiscall*)(void*, const char*);
+using GetTextureDataVirtualFn = unsigned char* (__thiscall*)(void*, const char*, int);
 enum class RuntimeBuild { Unsupported, JmvStarter, BaseEi };
 
 HMODULE g_instance = nullptr;
@@ -117,6 +119,7 @@ constexpr DWORD kGraphRequirementRva = 0x001955CC;
 constexpr DWORD kWorldClientGlobalRva = 0x003AF5B8;
 constexpr DWORD kWorldGetTextureManagerRva = 0x00161990;
 constexpr DWORD kTextureManagerAddResourceRva = 0x00275050;
+constexpr DWORD kTextureManagerGetDataRva = 0x00291CF0;
 constexpr UINT kDirectLaunchMessage = WM_APP + 0x45D;
 constexpr UINT kHotReloadMessage = WM_APP + 0x45E;
 constexpr unsigned char kMapLoadEntryBytes[6] = {
@@ -145,6 +148,10 @@ constexpr unsigned char kGetZoneByNameBytes[15] = {
 constexpr unsigned char kTextureManagerAddResourceBytes[8] = {
     0x6A, 0xFF, 0x68, 0xBC, 0x15, 0x73, 0x00, 0x64
 };
+constexpr unsigned char kTextureManagerGetDataBytes[15] = {
+    0x8B, 0x54, 0x24, 0x04, 0x8B, 0x01, 0x6A, 0x00,
+    0x52, 0xFF, 0x50, 0x4C, 0xC2, 0x04, 0x00
+};
 constexpr unsigned char kWorldGetTextureManagerBytes[7] = {
     0x8B, 0x81, 0x8C, 0x01, 0x00, 0x00, 0xC3
 };
@@ -163,6 +170,7 @@ enum class RuntimeState : LONG
 MapLoadFn g_originalMapLoad = nullptr;
 ZoneTransitionFn g_originalZoneTransition = nullptr;
 PlayerDefaultsResetFn g_originalPlayerDefaultsReset = nullptr;
+GetTextureDataVirtualFn g_originalGetTextureDataVirtual = nullptr;
 HMODULE g_gameModule = nullptr;
 HHOOK g_directLaunchHook = nullptr;
 volatile LONG g_directLaunchState = 0;
@@ -192,7 +200,10 @@ wchar_t g_mapTableSource[MAX_PATH * 4] = {};
 wchar_t g_mapTableStage[MAX_PATH * 4] = {};
 volatile LONG g_mapTableRedirectLogCount = 0;
 wchar_t g_temporaryTextureResource[MAX_PATH * 4] = {};
+char g_textureProbeName[128] = {};
 volatile LONG g_temporaryTextureResourceRegistered = 0;
+volatile LONG g_textureRequestObservationArmed = 0;
+volatile LONG g_textureRequestObservationCount = 0;
 wchar_t g_hotReloadRequestPath[MAX_PATH * 4] = {};
 wchar_t g_hotReloadThreadPath[MAX_PATH * 4] = {};
 wchar_t g_hotReloadRoot[MAX_PATH * 4] = {};
@@ -473,6 +484,75 @@ bool ConfigureSyntheticZone()
     return true;
 }
 
+unsigned char* __fastcall TextureDataObservationDetour(
+    void* self, void*, const char* requestedName, int mode)
+{
+    unsigned char* result = g_originalGetTextureDataVirtual
+        ? g_originalGetTextureDataVirtual(self, requestedName, mode) : nullptr;
+    if(InterlockedCompareExchange(&g_textureRequestObservationArmed, 0, 0))
+    {
+        char name[256]{};
+        if(ReadBoundedCString(requestedName, name, sizeof(name))
+           && g_sourceZone[0]
+           && _strnicmp(name, g_sourceZone, std::strlen(g_sourceZone)) == 0
+           && InterlockedIncrement(&g_textureRequestObservationCount) <= 128)
+        {
+            unsigned width = 0;
+            unsigned height = 0;
+            if(result && IsReadableRange(result, 12))
+            {
+                width = *reinterpret_cast<const unsigned*>(result + 4);
+                height = *reinterpret_cast<const unsigned*>(result + 8);
+            }
+            wchar_t message[768]{};
+            _snwprintf_s(message, sizeof(message) / sizeof(message[0]), _TRUNCATE,
+                         L"TERRAIN_TEXTURE_REQUEST name=\"%S\" result=%s width=%u height=%u",
+                         name, result ? L"resolved" : L"missing", width, height);
+            Log(message);
+        }
+    }
+    return result;
+}
+
+bool InstallTextureDataObservationDetour(void* manager)
+{
+    if(g_originalGetTextureDataVirtual)
+        return true;
+    if(!manager || !IsReadableRange(manager, sizeof(void*)))
+    {
+        Log(L"TEMP_TEXTURE_RES refused: texture-request observation manager is invalid");
+        return false;
+    }
+    auto** vtable = *reinterpret_cast<void***>(manager);
+    constexpr size_t slotIndex = 0x4C / sizeof(void*);
+    if(!IsReadableRange(vtable, (slotIndex + 1) * sizeof(void*)))
+    {
+        Log(L"TEMP_TEXTURE_RES refused: texture-request observation vtable is invalid");
+        return false;
+    }
+    void** slot = vtable + slotIndex;
+    g_originalGetTextureDataVirtual = reinterpret_cast<GetTextureDataVirtualFn>(*slot);
+    if(!g_originalGetTextureDataVirtual)
+    {
+        Log(L"TEMP_TEXTURE_RES refused: texture-request observation target is null");
+        return false;
+    }
+    DWORD oldProtect = 0;
+    if(!VirtualProtect(slot, sizeof(*slot), PAGE_EXECUTE_READWRITE, &oldProtect))
+    {
+        g_originalGetTextureDataVirtual = nullptr;
+        Log(L"TEMP_TEXTURE_RES refused: texture-request observation protection change failed");
+        return false;
+    }
+    *slot = reinterpret_cast<void*>(&TextureDataObservationDetour);
+    DWORD ignored = 0;
+    VirtualProtect(slot, sizeof(*slot), oldProtect, &ignored);
+    InterlockedExchange(&g_textureRequestObservationCount, 0);
+    InterlockedExchange(&g_textureRequestObservationArmed, 1);
+    Log(L"TEMP_TEXTURE_RES armed terrain texture-request observation");
+    return true;
+}
+
 bool RegisterTemporaryTextureResource()
 {
     if(!g_temporaryTextureResource[0]
@@ -485,7 +565,11 @@ bool RegisterTemporaryTextureResource()
                       sizeof(kWorldGetTextureManagerBytes)) != 0
        || std::memcmp(game + kTextureManagerAddResourceRva,
                       kTextureManagerAddResourceBytes,
-                      sizeof(kTextureManagerAddResourceBytes)) != 0)
+                      sizeof(kTextureManagerAddResourceBytes)) != 0
+       || (g_textureProbeName[0]
+           && std::memcmp(game + kTextureManagerGetDataRva,
+                          kTextureManagerGetDataBytes,
+                          sizeof(kTextureManagerGetDataBytes)) != 0))
     {
         Log(L"TEMP_TEXTURE_RES refused: texture resource registration signature does not match");
         return false;
@@ -528,6 +612,32 @@ bool RegisterTemporaryTextureResource()
         Log(L"TEMP_TEXTURE_RES refused: game texture manager rejected the run-owned archive");
         return false;
     }
+    if(g_textureProbeName[0])
+    {
+        const auto getTextureData = reinterpret_cast<GetTextureDataFn>(
+            game + kTextureManagerGetDataRva);
+        unsigned char* texture = getTextureData(manager, g_textureProbeName);
+        if(!texture || !IsReadableRange(texture, 0x4C))
+        {
+            Log(L"TEMP_TEXTURE_RES refused: highest-page texture probe did not resolve from the run-owned archive");
+            return false;
+        }
+        const unsigned width = *reinterpret_cast<const unsigned*>(texture + 4);
+        const unsigned height = *reinterpret_cast<const unsigned*>(texture + 8);
+        if(width == 0 || height == 0 || width > 16384 || height > 16384)
+        {
+            Log(L"TEMP_TEXTURE_RES refused: resolved texture probe has invalid dimensions");
+            return false;
+        }
+        wchar_t probeMessage[512]{};
+        _snwprintf_s(probeMessage,
+                     sizeof(probeMessage) / sizeof(probeMessage[0]), _TRUNCATE,
+                     L"TEMP_TEXTURE_RES probe resolved name=\"%S\" width=%u height=%u source=run-owned",
+                     g_textureProbeName, width, height);
+        Log(probeMessage);
+    }
+    if(!InstallTextureDataObservationDetour(manager))
+        return false;
     InterlockedExchange(&g_temporaryTextureResourceRegistered, 1);
     wchar_t message[1800]{};
     _snwprintf_s(message, sizeof(message) / sizeof(message[0]), _TRUNCATE,
@@ -2143,6 +2253,24 @@ bool ReadDirectLaunchPaths()
         }
         NormalizeSlashes(full);
         wcscpy_s(g_temporaryTextureResource, full);
+    }
+    const DWORD textureProbeLength = GetEnvironmentVariableA(
+        "EI_MAPPER_ENDURANCE_TEXTURE_PROBE_NAME", g_textureProbeName,
+        DWORD(sizeof(g_textureProbeName)));
+    if(textureProbeLength >= sizeof(g_textureProbeName)
+       || (textureProbeLength && !g_temporaryTextureResource[0]))
+    {
+        Log(L"DIRECT_LAUNCH disabled: custom texture probe identity is invalid");
+        return false;
+    }
+    for(DWORD i = 0; i < textureProbeLength; ++i)
+    {
+        const unsigned char value = static_cast<unsigned char>(g_textureProbeName[i]);
+        if(!std::isalnum(value) && value != '_' && value != '-' && value != '.')
+        {
+            Log(L"DIRECT_LAUNCH disabled: custom texture probe identity is unsafe");
+            return false;
+        }
     }
     GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_BOOTSTRAP_MPR", bootstrapMpr,
                             DWORD(sizeof(bootstrapMpr) / sizeof(bootstrapMpr[0])));

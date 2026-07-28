@@ -304,6 +304,28 @@ void ResArchiveDocumentTests::syntheticMapTableAddsOwnedMaplessZoneLosslessly()
         QCOMPARE(zone.exits.first().deployRectangle.center(), QPointF(12.5, 18.25));
     }
     QCOMPARE(matches, 1);
+
+    QByteArray customStaged;
+    errors.clear();
+    QVERIFY2(buildSyntheticMapTableArchive(
+        original, "texts.res", "ed5678abcd", "island", "ed5678abcd",
+        7, 5, QPointF(12.5, 18.25), &customStaged, &errors,
+        "customatlas007"), qPrintable(errors.join('\n')));
+    CResArchiveDocument customCandidate;
+    QVERIFY(customCandidate.loadBytes(customStaged));
+    CMapTableDocument customTable;
+    QVERIFY2(customTable.loadBytes(customCandidate.memberPayload("map.txt"), &errors),
+             qPrintable(errors.join('\n')));
+    int customMatches = 0;
+    for(const SMapTableZone& zone : customTable.zones())
+    {
+        if(zone.zoneId != "ed5678abcd")
+            continue;
+        ++customMatches;
+        QCOMPARE(zone.maps.minimapTexture, QString("customatlas007"));
+        QCOMPARE(zone.maps.objectivesTexture, QString("customatlas007"));
+    }
+    QCOMPARE(customMatches, 1);
 }
 
 void ResArchiveDocumentTests::syntheticPlaceholderBuildsStandaloneResolvableChecker()

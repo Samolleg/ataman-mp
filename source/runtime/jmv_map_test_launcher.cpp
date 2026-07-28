@@ -19,11 +19,13 @@
 #include <QTimer>
 #include <QProcessEnvironment>
 #include <QtEndian>
+#include <algorithm>
 #include <cmath>
 
 #include "endurance_document.h"
 #include "current_session_backup.h"
 #include "hot_reload_protocol.h"
+#include "res_archive_document.h"
 #include "runtime_providers.h"
 #include "synthetic_map_table_archive.h"
 
@@ -600,6 +602,107 @@ QString CJmvMapTestLauncher::testRunsRootPath()
     return testRunsRoot();
 }
 
+bool CJmvMapTestLauncher::rebaseRuntimeTerrainAtlas(
+    const QByteArray& sourceMpr,
+    const QByteArray& sourceAtlasRes,
+    const QString& runtimeNamespace,
+    int expectedPages,
+    QByteArray* rebasedMpr,
+    QByteArray* rebasedAtlasRes,
+    QStringList* rebasedMmpMembers,
+    QString* error)
+{
+    if(!rebasedMpr || !rebasedAtlasRes || !rebasedMmpMembers
+       || sourceMpr.isEmpty() || sourceAtlasRes.isEmpty()
+       || expectedPages <= 0 || runtimeNamespace.isEmpty())
+    {
+        if(error) *error = "The runtime terrain-atlas rebase request is incomplete.";
+        return false;
+    }
+    QStringList archiveErrors;
+    CResArchiveDocument sourceArchive;
+    if(!sourceArchive.loadBytes(sourceAtlasRes,
+                                QStringLiteral("run-owned-terrain-atlas.res"),
+                                &archiveErrors))
+    {
+        if(error) *error = "The run-owned terrain atlas RES is invalid:\n"
+            + archiveErrors.join('\n');
+        return false;
+    }
+    QStringList sourceMembers;
+    for(const SResArchiveMember& member : sourceArchive.members())
+        if(member.name.endsWith(QStringLiteral(".mmp"), Qt::CaseInsensitive))
+            sourceMembers.append(member.name);
+    std::sort(sourceMembers.begin(), sourceMembers.end(),
+              [](const QString& left, const QString& right) {
+        return QString::compare(left, right, Qt::CaseInsensitive) < 0;
+    });
+    if(sourceMembers.size() != expectedPages)
+    {
+        if(error) *error = QString(
+            "The run-owned terrain atlas contains %1 MMP page(s), expected %2.")
+            .arg(sourceMembers.size()).arg(expectedPages);
+        return false;
+    }
+
+    CMprDocument namespaceSource;
+    CValidationReport namespaceReport;
+    CMprEditTransaction namespaceTransaction(
+        QStringLiteral("Rebase runtime terrain atlas namespace"));
+    QByteArray runtimeMpr = sourceMpr;
+    if(!namespaceSource.loadBytes(runtimeMpr,
+                                  QStringLiteral("runtime-atlas-source.mpr"),
+                                  &namespaceReport)
+       || !namespaceSource.applyIsolatedNamespaceTransaction(
+           namespaceTransaction, runtimeNamespace,
+           &runtimeMpr, &namespaceReport))
+    {
+        if(error) *error = "The run-owned MPR could not be rebased to its temporary runtime namespace:\n"
+            + namespaceReport.toText();
+        return false;
+    }
+
+    QByteArray runtimeArchive(16, '\0');
+    qToLittleEndian<quint32>(0x019CE23C,
+        reinterpret_cast<uchar*>(runtimeArchive.data()));
+    qToLittleEndian<quint32>(16,
+        reinterpret_cast<uchar*>(runtimeArchive.data() + 8));
+    CResArchiveDocument destinationArchive;
+    if(!destinationArchive.loadBytes(runtimeArchive,
+                                     QStringLiteral("runtime-atlas-empty.res"),
+                                     &archiveErrors))
+    {
+        if(error) *error = "Could not initialize the rebased terrain atlas RES:\n"
+            + archiveErrors.join('\n');
+        return false;
+    }
+    QStringList runtimeMembers;
+    for(int page = 0; page < sourceMembers.size(); ++page)
+    {
+        const QByteArray payload = sourceArchive.memberPayload(sourceMembers.at(page));
+        const QString memberName = QStringLiteral("%1%2.mmp")
+            .arg(runtimeNamespace).arg(page, 3, 10, QLatin1Char('0'));
+        QByteArray next;
+        if(payload.isEmpty()
+           || !destinationArchive.buildWithAppendedMember(
+               memberName, payload, 0, &next, &archiveErrors)
+           || !destinationArchive.loadBytes(
+               next, QStringLiteral("runtime-atlas-rebased.res"),
+               &archiveErrors))
+        {
+            if(error) *error = "Could not rebase a run-owned terrain atlas page:\n"
+                + archiveErrors.join('\n');
+            return false;
+        }
+        runtimeArchive = next;
+        runtimeMembers.append(memberName);
+    }
+    *rebasedMpr = runtimeMpr;
+    *rebasedAtlasRes = runtimeArchive;
+    *rebasedMmpMembers = runtimeMembers;
+    return true;
+}
+
 QString CJmvMapTestLauncher::generationSavesPath(const QString& runRoot,
                                                  quint64 generation)
 {
@@ -905,6 +1008,65 @@ QJsonObject CJmvMapTestLauncher::buildAuthoritativeResult(
     const bool stagedLoaderObserved = bridgeResult.contains(
         "DIRECT_LAUNCH staged map loader returned result=1")
         || completedReloadSequence != 0;
+    const QJsonObject atlasProbe = manifest.value(
+        "terrainAtlasRuntimeProbe").toObject();
+    const bool atlasProbeRequested = !atlasProbe.isEmpty();
+    const int atlasPages = atlasProbe.value("texturePages").toInt();
+    const int atlasSlots = atlasProbe.value("activeSlots").toInt();
+    const QString textureProbeName = atlasProbe.value("textureProbeName").toString();
+    const QString textureProbeMemberName = atlasProbe.value(
+        "textureProbeMemberName").toString();
+    const QString runtimeAtlasNamespace = atlasProbe.value(
+        "runtimeNamespace").toString();
+    const QString temporaryMapName = manifest.value("temporaryMapName").toString();
+    const bool runtimeNamespaceAligned = !atlasProbeRequested
+        || (!runtimeAtlasNamespace.isEmpty() && !temporaryMapName.isEmpty()
+            && runtimeAtlasNamespace.compare(
+                temporaryMapName, Qt::CaseInsensitive) == 0);
+    const bool textureResourceRegistered = bridgeResult.contains(
+        "TEMP_TEXTURE_RES registered");
+    const bool textureProbeResolved = !atlasProbeRequested
+        || (!textureProbeMemberName.isEmpty() && bridgeResult.contains(
+            QRegularExpression(QStringLiteral(
+                "TEMP_TEXTURE_RES probe resolved name=\\\"")
+                + QRegularExpression::escape(textureProbeMemberName)
+                + QStringLiteral("\\\""))));
+    const bool textureRequestObservationArmed = !atlasProbeRequested
+        || bridgeResult.contains(
+            "TEMP_TEXTURE_RES armed terrain texture-request observation");
+    bool allTerrainPageRequestsResolved = !atlasProbeRequested;
+    int resolvedTerrainPageRequests = 0;
+    if(atlasProbeRequested && atlasPages > 0 && !runtimeAtlasNamespace.isEmpty())
+    {
+        allTerrainPageRequestsResolved = true;
+        for(int page = 0; page < atlasPages; ++page)
+        {
+            const QString memberName = QStringLiteral("%1%2.mmp")
+                .arg(runtimeAtlasNamespace).arg(page, 3, 10, QLatin1Char('0'));
+            const QRegularExpression requestPattern(
+                QStringLiteral("TERRAIN_TEXTURE_REQUEST name=\\\"")
+                + QRegularExpression::escape(memberName)
+                + QStringLiteral("\\\" result=resolved"));
+            if(bridgeResult.contains(requestPattern))
+                ++resolvedTerrainPageRequests;
+            else
+                allTerrainPageRequestsResolved = false;
+        }
+    }
+    const bool customAtlasContractValidated = !atlasProbeRequested
+        || (atlasPages > 0 && atlasSlots > 0
+            && atlasProbe.value("resourceMmpMembers").toInt() == atlasPages
+            && runtimeNamespaceAligned
+            && !atlasProbe.value("installedArchivesModified").toBool()
+            && textureResourceRegistered && textureProbeResolved
+            && textureRequestObservationArmed
+            && allTerrainPageRequestsResolved
+            && stagedLoaderObserved && gameplayReady);
+    const bool expandedAtlasRequested = atlasProbeRequested
+        && (atlasPages > 8 || atlasSlots > 512);
+    const bool expandedAtlasContractValidated = !expandedAtlasRequested
+        || (customAtlasContractValidated && atlasPages > 8 && atlasSlots > 512
+            && atlasProbe.value("exceedsLegacyEightPages").toBool());
     const bool actualMprMatchesOwnedPayload = !actualMprPath.isEmpty()
         && QFileInfo(actualMprPath).absoluteFilePath().compare(
             QFileInfo(expectedMprPath).absoluteFilePath(),
@@ -966,6 +1128,18 @@ QJsonObject CJmvMapTestLauncher::buildAuthoritativeResult(
         addUnique(&errors, "The runtime bridge produced no result evidence.");
     if(!gameplayReady || !stagedLoaderObserved)
         addUnique(&errors, "The runtime did not prove a completed staged gameplay load.");
+    if(atlasProbeRequested && !textureResourceRegistered)
+        addUnique(&errors, "The runtime did not register the run-owned terrain atlas RES.");
+    if(atlasProbeRequested && !textureProbeResolved)
+        addUnique(&errors, "The runtime did not resolve the highest-page texture from the run-owned terrain atlas RES.");
+    if(atlasProbeRequested && !textureRequestObservationArmed)
+        addUnique(&errors, "The runtime did not arm actual terrain texture-request observation.");
+    if(atlasProbeRequested && !allTerrainPageRequestsResolved)
+        addUnique(&errors, "The terrain renderer did not request and resolve every expected run-owned atlas page.");
+    if(atlasProbeRequested && !customAtlasContractValidated)
+        addUnique(&errors, "The custom terrain atlas runtime contract was not proven.");
+    if(expandedAtlasRequested && !expandedAtlasContractValidated)
+        addUnique(&errors, "The expanded terrain atlas runtime contract was not proven.");
     if(stagedLoaderObserved && !payloadHashesValidated)
         addUnique(&errors, "The runtime loader paths could not be matched to the hash-verified staged payloads.");
     if(actualZone.isEmpty())
@@ -1020,6 +1194,21 @@ QJsonObject CJmvMapTestLauncher::buildAuthoritativeResult(
     report.insert("gameplayReady", gameplayReady);
     report.insert("stagedLoaderObserved", stagedLoaderObserved);
     report.insert("payloadHashesValidated", payloadHashesValidated);
+    report.insert("terrainAtlasProbeRequested", atlasProbeRequested);
+    report.insert("terrainAtlasPages", atlasPages);
+    report.insert("terrainAtlasSlots", atlasSlots);
+    report.insert("textureProbeName", textureProbeName);
+    report.insert("textureProbeMemberName", textureProbeMemberName);
+    report.insert("runtimeAtlasNamespace", runtimeAtlasNamespace);
+    report.insert("runtimeNamespaceAligned", runtimeNamespaceAligned);
+    report.insert("textureResourceRegistered", textureResourceRegistered);
+    report.insert("textureProbeResolved", textureProbeResolved);
+    report.insert("textureRequestObservationArmed", textureRequestObservationArmed);
+    report.insert("resolvedTerrainPageRequests", resolvedTerrainPageRequests);
+    report.insert("allTerrainPageRequestsResolved", allTerrainPageRequestsResolved);
+    report.insert("customAtlasContractValidated", customAtlasContractValidated);
+    report.insert("expandedAtlasRequested", expandedAtlasRequested);
+    report.insert("expandedAtlasContractValidated", expandedAtlasContractValidated);
     report.insert("playerInitializationCount", playerInitializations);
     report.insert("reportedPlayerCount", playerInitializations > 0 ? 1 : -1);
     report.insert("playerCountEvidence", playerInitializations > 0
@@ -1052,6 +1241,12 @@ bool CJmvMapTestLauncher::validateAutomatedResult(const QJsonObject& report,
         local.append("The staged loader was not observed.");
     if(!report.value("payloadHashesValidated").toBool())
         local.append("The loaded payload hashes were not validated.");
+    if(report.value("terrainAtlasProbeRequested").toBool()
+       && !report.value("customAtlasContractValidated").toBool())
+        local.append("The custom terrain atlas runtime contract was not validated.");
+    if(report.value("expandedAtlasRequested").toBool()
+       && !report.value("expandedAtlasContractValidated").toBool())
+        local.append("The expanded terrain atlas runtime contract was not validated.");
     if(report.value("actualZone").toString().isEmpty())
         local.append("The actually loaded zone is missing.");
     if(!report.value("sourceFilesUnchanged").toBool())
@@ -1545,8 +1740,16 @@ bool CJmvMapTestLauncher::launch(const SJmvMapTestLaunchInput& input, QString* e
                            m_stagedMapTablePath);
     }
     if(!m_livePlaceholderResourcePath.isEmpty())
+    {
         environment.insert("EI_MAPPER_ENDURANCE_TEMP_TEXTURE_RES",
                            m_livePlaceholderResourcePath);
+        const QString textureProbeMemberName = m_manifest.value(
+            "terrainAtlasRuntimeProbe").toObject().value(
+                "textureProbeMemberName").toString();
+        if(!textureProbeMemberName.isEmpty())
+            environment.insert("EI_MAPPER_ENDURANCE_TEXTURE_PROBE_NAME",
+                               textureProbeMemberName);
+    }
     if(!m_supplementalMobDirectory.isEmpty())
         environment.insert("EI_MAPPER_ENDURANCE_SUPPLEMENTAL_MOB_DIR",
                            m_supplementalMobDirectory);
@@ -1782,17 +1985,43 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
 
     // Journal every live artifact before creating it. A crash at any later
     // staging point can therefore be recovered without guessing ownership.
-    m_liveMprSha256 = sha256(input.mprData);
+    QByteArray runtimeMprData = input.mprData;
     m_liveMobSha256 = sha256(input.mobData);
     m_liveGrpSha256 = graphSource.sha256;
     QByteArray placeholderArchive;
     QStringList placeholderErrors;
-    if(!buildSyntheticMapPlaceholderArchive(&placeholderArchive, &placeholderErrors))
+    int stagedTextureMmpMembers = 0;
+    QString terrainTextureProbeName = syntheticMapPlaceholderTextureName();
+    QString terrainTextureProbeMemberName = terrainTextureProbeName + ".mmp";
+    if(!input.terrainTextureResourceData.isEmpty())
+    {
+        // The shipped terrain loader derives MP/SEC and page names from the
+        // staged MPR filename. Rebase both archives to the same random owned
+        // identity; merely registering pages under the finalized source
+        // namespace loads geometry with untextured terrain.
+        QStringList runtimeMmpMembers;
+        if(!rebaseRuntimeTerrainAtlas(input.mprData,
+                                      input.terrainTextureResourceData,
+                                      m_temporaryMapName,
+                                      input.expectedTerrainAtlasPages,
+                                      &runtimeMprData,
+                                      &placeholderArchive,
+                                      &runtimeMmpMembers,
+                                      error))
+            return false;
+        stagedTextureMmpMembers = runtimeMmpMembers.size();
+        terrainTextureProbeMemberName = runtimeMmpMembers.constLast();
+        terrainTextureProbeName = QFileInfo(
+            terrainTextureProbeMemberName).completeBaseName();
+    }
+    else if(!buildSyntheticMapPlaceholderArchive(&placeholderArchive,
+                                                  &placeholderErrors))
     {
         if(error) *error = "Could not build the run-owned placeholder texture archive:\n"
             + placeholderErrors.join('\n');
         return false;
     }
+    m_liveMprSha256 = sha256(runtimeMprData);
     const QString resourcesDirectory = QDir(input.profile.gameRoot).filePath("Res");
     m_livePlaceholderResourcePath = QDir(resourcesDirectory).filePath(
         "EIMapperEndurance-" + m_runId + ".res");
@@ -1891,7 +2120,7 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
     const QString stagedGrpPath = graphSource.usesExternalGraph()
         ? QDir(payloadDirectory).filePath(m_temporaryMapName + ".grp")
         : QString();
-    if(!atomicWrite(stagedMprPath, input.mprData, error) ||
+    if(!atomicWrite(stagedMprPath, runtimeMprData, error) ||
        !atomicWrite(stagedMobPath, stagedMob, error))
         return false;
     if(graphSource.usesExternalGraph()
@@ -1902,6 +2131,40 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
     {
         if(error) *error = "The staged MPR failed validation:\n" + report.toText();
         return false;
+    }
+    if(!input.terrainTextureResourceData.isEmpty())
+    {
+        const int pages = int(mprDocument.mapInfo().textureCount);
+        const int activeSlots = int(mprDocument.mapInfo().tileCount);
+        const QString runtimeNamespace = mprDocument.mapInfo().innerNamespace;
+        if(runtimeNamespace.compare(m_temporaryMapName,
+                                    Qt::CaseInsensitive) != 0
+           || pages != input.expectedTerrainAtlasPages
+           || activeSlots != input.expectedTerrainAtlasSlots
+           || pages != stagedTextureMmpMembers)
+        {
+            if(error) *error = QString(
+                "The staged MPR/RES terrain atlas contract differs: "
+                "namespace=%1 expected namespace=%2, MPR pages=%3 slots=%4, "
+                "RES pages=%5, expected pages=%6 slots=%7.")
+                .arg(runtimeNamespace, m_temporaryMapName)
+                .arg(pages).arg(activeSlots).arg(stagedTextureMmpMembers)
+                .arg(input.expectedTerrainAtlasPages)
+                .arg(input.expectedTerrainAtlasSlots);
+            return false;
+        }
+        QJsonObject atlasProbe;
+        atlasProbe.insert("mode", "run-owned-expanded-terrain-atlas");
+        atlasProbe.insert("texturePages", pages);
+        atlasProbe.insert("activeSlots", activeSlots);
+        atlasProbe.insert("resourceMmpMembers", stagedTextureMmpMembers);
+        atlasProbe.insert("resourceSha256", m_livePlaceholderResourceSha256);
+        atlasProbe.insert("textureProbeName", terrainTextureProbeName);
+        atlasProbe.insert("textureProbeMemberName", terrainTextureProbeMemberName);
+        atlasProbe.insert("runtimeNamespace", runtimeNamespace);
+        atlasProbe.insert("exceedsLegacyEightPages", pages > 8);
+        atlasProbe.insert("installedArchivesModified", false);
+        m_manifest.insert("terrainAtlasRuntimeProbe", atlasProbe);
     }
     CMobDocument mobDocument;
     if(!mobDocument.load(QFileInfo(stagedMobPath), &report))
@@ -1963,7 +2226,7 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
     liveFiles.insert("placeholderResPath", m_livePlaceholderResourcePath);
     liveFiles.insert("placeholderResSha256", m_livePlaceholderResourceSha256);
     m_manifest.insert("liveFiles", liveFiles);
-    if(!atomicWrite(m_liveMprPath, input.mprData, error) ||
+    if(!atomicWrite(m_liveMprPath, runtimeMprData, error) ||
        !atomicWrite(m_liveMobPath, stagedMob, error) ||
        !atomicWrite(m_livePlaceholderResourcePath, placeholderArchive, error))
         return false;
@@ -2003,7 +2266,8 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
                                           input.mapSizeX,
                                           input.mapSizeY,
                                           input.spawn.position,
-                                          &stagedArchive, &stagingErrors))
+                                          &stagedArchive, &stagingErrors,
+                                          terrainTextureProbeName))
         {
             if(error) *error = "Could not stage the private test map table:\n"
                 + stagingErrors.join('\n');
@@ -2045,7 +2309,8 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
     request.runtimeManifestId = input.profile.runtimeManifestId;
     request.runtimeComponentHashes = runtimeHashes(input.profile);
     request.stagedMprPath = stagedMprPath;
-    request.internalMapName = input.mapEntry.mprName;
+    request.internalMapName = input.syntheticMapIdentity
+        ? m_temporaryMapName : input.mapEntry.mprName;
     request.orderedStagedMobPaths << stagedMobPath;
     request.orderedStagedMobPaths << stagedSupplementalPaths;
     request.activeMobPath = stagedMobPath;
@@ -2053,6 +2318,11 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
                                 fileSha256(input.sourceMpr.absoluteFilePath()));
     request.sourceSha256.insert(input.sourceMob.absoluteFilePath(),
                                 fileSha256(input.sourceMob.absoluteFilePath()));
+    if(!input.terrainTextureResourceData.isEmpty()
+       && input.sourceTerrainTextureResource.isFile())
+        request.sourceSha256.insert(
+            input.sourceTerrainTextureResource.absoluteFilePath(),
+            fileSha256(input.sourceTerrainTextureResource.absoluteFilePath()));
     // A generated graph is an owned staged payload, not a source file. Do not
     // put its diagnostic pseudo-path into the source-integrity inventory.
     if(graphSource.usesExternalGraph() && QFileInfo(graphSource.externalPath).isFile())
@@ -2159,9 +2429,14 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
                           QDir::toNativeSeparators(m_stagedMapTablePath),
                           m_stagedMapTableSha256,
                           m_temporaryMapName));
-    appendRunLog(QString("Staged standalone temporary texture RES path=%1 sha256=%2 registration=shared-owned-process-bridge installedArchivesModified=false")
+    appendRunLog(QString("Staged standalone temporary texture RES path=%1 sha256=%2 pages=%3 slots=%4 mode=%5 registration=shared-owned-process-bridge installedArchivesModified=false")
                  .arg(QDir::toNativeSeparators(m_livePlaceholderResourcePath),
-                      m_livePlaceholderResourceSha256));
+                      m_livePlaceholderResourceSha256)
+                 .arg(input.expectedTerrainAtlasPages)
+                 .arg(input.expectedTerrainAtlasSlots)
+                 .arg(input.terrainTextureResourceData.isEmpty()
+                      ? QStringLiteral("placeholder")
+                      : QStringLiteral("expanded-terrain-atlas")));
     appendRunLog(QString("Staged temporary map=%1 exit=%2 spawn=(%3,%4) clearance=%5")
                  .arg(m_temporaryMapName).arg(input.spawn.exitId)
                  .arg(x, y).arg(input.spawn.clearance, 0, 'f', 3));

@@ -5680,6 +5680,7 @@ void EnduranceDocumentTests::globalMaterialVariantsUseOnlyUniformAnchorsAndShare
     int darkGrassSources = 0;
     int grassVariantCount = 0;
     int landFamilyCount = 0;
+    QSet<int> blendStyles;
     for(const STerrainGlobalMaterialFamily& family : families)
     {
         QVERIFY(family.id > 255);
@@ -5687,6 +5688,12 @@ void EnduranceDocumentTests::globalMaterialVariantsUseOnlyUniformAnchorsAndShare
         identities.insert(family.id);
         QVERIFY(!family.theme.isEmpty());
         QVERIFY(!family.sources.isEmpty());
+        const ETerrainBlendStyle blendStyle =
+            CTerrainVirtualAtlas::blendStyleForMaterialName(family.name);
+        QVERIFY2(blendStyle != ETerrainBlendStyle::Organic,
+                 qPrintable(QStringLiteral("Unclassified stock JMV material: %1")
+                            .arg(family.name)));
+        blendStyles.insert(int(blendStyle));
         if(family.layer == ETerrainAtlasLayer::Land) ++landFamilyCount;
         for(const STerrainGlobalMaterialSource& source : family.sources)
         {
@@ -5735,6 +5742,9 @@ void EnduranceDocumentTests::globalMaterialVariantsUseOnlyUniformAnchorsAndShare
     // This is the reviewed Family/Subfamily palette, after collapsing atlas
     // variants and excluding transition-only/mixed imagery.
     QCOMPARE(landFamilyCount, 71);
+    // Every currently shipped paintable JMV class has an intentional visual
+    // language; Organic remains only the forward-compatible fallback.
+    QCOMPARE(blendStyles.size(), 11);
 }
 
 void EnduranceDocumentTests::workingAtlasRealizesExactTransitionsBeyond512Slots()

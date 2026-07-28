@@ -241,7 +241,8 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
         tr("Finalize map-specific atlas package..."), this);
     finalizeAtlas->setToolTip(tr(
         "Generate exact missing transitions, compact map-wide tile usage, and write "
-        "a portable isolated MPR + RES package. The validated ceiling is 512 slots."));
+        "a portable isolated MPR + RES package. The shipped-runtime validated ceiling "
+        "is 1,024 slots (16 texture pages)."));
     paintLayout->addWidget(exportDiagnostic);
     paintLayout->addWidget(finalizeAtlas);
     layout->addWidget(m_paintControls);

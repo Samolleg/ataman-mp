@@ -498,14 +498,16 @@ QByteArray encodeMmpDxt1(const QImage& image, bool generateMipmaps,
     QVector<QImage> levels;
     levels.append(image.convertToFormat(QImage::Format_ARGB32));
     if(generateMipmaps)
-        while(levels.back().width() >= 8 && levels.back().height() >= 8)
+        while(levels.back().width() > 1 || levels.back().height() > 1)
             levels.append(downsamplePremultiplied(levels.back()));
     QByteArray result;
     QDataStream stream(&result,QIODevice::WriteOnly);
     stream.setByteOrder(QDataStream::LittleEndian);
     stream << quint32(0x00504d4d) << quint32(image.width()) << quint32(image.height())
            << quint32(levels.size()) << quint32(0x31545844);
-    result.append(QByteArray(56,'\0'));
+    QByteArray descriptor(56, '\0');
+    qToLittleEndian<quint32>(4u, reinterpret_cast<uchar*>(descriptor.data()));
+    result.append(descriptor);
     for(const QImage& level:levels)
     {
         const QByteArray encoded=encodeDxt1Level(level,diagnostic);

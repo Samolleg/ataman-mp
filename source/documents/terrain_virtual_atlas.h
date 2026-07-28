@@ -16,6 +16,27 @@
 class CValidationReport;
 class CMprDocument;
 
+// Shipped JMV runtime validation covers complete custom terrain atlases through
+// 16 pages. Keep this separate from the 16,384-slot packed-format maximum so a
+// future higher limit requires its own controlled runtime proof.
+constexpr int kValidatedShippedTerrainAtlasSlotLimit = 1024;
+
+enum class ETerrainBlendStyle
+{
+    Organic,
+    Grass,
+    Soil,
+    Ice,
+    Lava,
+    Paving,
+    Stone,
+    Gravel,
+    Sand,
+    Snow,
+    Swamp,
+    Water
+};
+
 struct STerrainVirtualTile
 {
     STerrainTransitionSignature signature;
@@ -46,7 +67,7 @@ struct STerrainAtlasFinalization
     bool success{false};
     QString error;
     QString isolatedNamespace;
-    int capacityLimit{512};
+    int capacityLimit{kValidatedShippedTerrainAtlasSlotLimit};
     int requiredSlots{0};
     int textureCount{0};
     QVector<quint16> packedCells;
@@ -101,7 +122,12 @@ public:
     CTerrainVirtualAtlas(const CTerrainTransitionCatalog& catalog,
                          const QVector<QImage>& authoredTiles,
                          quint32 distributionSeed = 0,
-                         const QMap<qint32, QImage>& externalMaterialSources = {});
+                         const QMap<qint32, QImage>& externalMaterialSources = {},
+                         const QMap<qint32, ETerrainBlendStyle>& materialBlendStyles = {});
+
+    static ETerrainBlendStyle blendStyleForMaterialName(const QString& name);
+    static QString blendStyleName(ETerrainBlendStyle style);
+    static int blendVariationCount() { return 4; }
 
     bool isValid() const { return m_valid; }
     QString error() const { return m_error; }
@@ -113,7 +139,7 @@ public:
 
     STerrainAtlasFinalization finalize(const CTerrainVirtualMaterialField& field,
                                        const QString& sourceNamespace,
-                                       int capacityLimit = 512,
+                                       int capacityLimit = kValidatedShippedTerrainAtlasSlotLimit,
                                        const QVector<qint32>& sourceTileTypes = {},
                                        CValidationReport* report = nullptr,
                                        const QVector<quint16>& pinnedPackedTiles = {});
@@ -129,12 +155,18 @@ private:
     STerrainTransitionSignature canonicalSignature(
         const STerrainTransitionSignature& signature, quint8* rotation) const;
     QImage generateTile(const STerrainTransitionSignature& gridSignature,
+                        ETerrainBlendStyle style, int variation,
                         CValidationReport* report) const;
+    ETerrainBlendStyle blendStyleForSignature(
+        const STerrainTransitionSignature& signature) const;
+    int blendVariation(int cellX, int cellY,
+                       ETerrainBlendStyle style) const;
 
     const CTerrainTransitionCatalog& m_catalog;
     QVector<QImage> m_authoredTiles;
     QMap<qint32, QImage> m_materialSources;
     QMap<qint32, int> m_materialSourceSlots;
+    QMap<qint32, ETerrainBlendStyle> m_materialBlendStyles;
     QMap<QByteArray, int> m_generatedBySignature;
     QMap<QByteArray, int> m_generatedByPixels;
     QVector<STerrainFinalizedTile> m_generatedTiles;
@@ -154,7 +186,8 @@ public:
                          const QVector<QImage>& authoredTiles,
                          quint32 distributionSeed = 0,
                          int capacityLimit = 512,
-                         const QMap<qint32, QImage>& externalMaterialSources = {});
+                         const QMap<qint32, QImage>& externalMaterialSources = {},
+                         const QMap<qint32, ETerrainBlendStyle>& materialBlendStyles = {});
 
     bool isValid() const;
     QString error() const;
