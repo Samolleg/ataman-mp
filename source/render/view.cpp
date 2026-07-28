@@ -9379,8 +9379,19 @@ bool CView::applyTerrainTilePreview(const STerrainTileCommand& command, bool for
     // Tile painting is never part of the sculpt/overlay preview batch. Rebuild
     // every touched sector immediately so a live stroke and its later
     // undo/redo use the same visible update path.
+    // A generated exact tile can upload a replacement atlas immediately before
+    // this command.  That upload deliberately releases the widget context, but
+    // updateSectorDrawData rebuilds OpenGL buffers and therefore cannot be left
+    // to run context-free.  Otherwise the CPU tile changes on button release
+    // while the old four-corner VBO remains visible until the next interaction.
+    const bool acquireContext = isValid()
+        && QGLContext::currentContext() != context();
+    if(acquireContext)
+        makeCurrent();
     for(const QPair<int, int>& sector : sectors)
         m_pLand->updateSectorDrawData(sector.first, sector.second);
+    if(acquireContext)
+        doneCurrent();
     m_pLand->setDirty(m_terrainEdit.isDirty());
     if(!m_tilePaintStrokeActive)
     {
