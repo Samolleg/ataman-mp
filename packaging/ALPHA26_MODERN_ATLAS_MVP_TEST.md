@@ -6,8 +6,8 @@
   previews that material unblended, and every touched vertex remains mandatory
   when the stroke resolves on release.
 - Exact authored four-corner tiles are reused first. Missing 1/3, 2/2,
-  three-family, and four-family tuples remain exact virtual identities and are
-  generated deterministically during atlas finalization.
+  three-family, and four-family tuples are generated automatically on stroke
+  release, installed in the live working atlas, and reused by later strokes.
 - Finalization deduplicates rotations and identical pixels, rebuilds external
   MMP pages and mipmaps, remaps every used terrain reference, and writes a
   deterministic map-specific MPR/RES namespace without replacing the loaded or
@@ -25,14 +25,17 @@
    vertex must remain that material. Undo and redo should treat the stroke as
    one action.
 3. Repeat in Zone 2 with several incomplete/mixed material families, including
-   adjacent strokes. Missing transitions must not drop a requested vertex or
-   replace its identity merely because the shipped atlas lacks that tuple.
+   adjacent strokes. The exact edge/junction blend should appear immediately
+   on release and be reused; it must not drop a requested vertex or substitute
+   another identity merely because the shipped atlas lacks that tuple.
 4. Use **Finalize virtual atlas** and choose a new empty output location. Confirm
    that it creates an isolated renamed MPR, an `-atlas.res` resource archive,
    and an audit manifest, while leaving the original map and shared resources
    unchanged.
 5. Reopen the generated MPR in the editor and inspect painted seams and rotated
    transitions at multiple zoom levels.
+6. The `terrain-atlas-autotest` folder contains the raw 62-scenario report and
+   every generated MPR/atlas RES pair used by the automated reopen oracle.
 
 ## Known limitations
 
