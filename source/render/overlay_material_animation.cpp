@@ -99,6 +99,35 @@ QVector3D terrainMaterialEmission(const SMaterial* material)
                      qBound(0.0f, material->B * strength, 1.0f));
 }
 
+QVector<QVector3D> sharedTerrainEmissionGrid(
+    const QVector<QVector3D>& tileEmissions,
+    int tileRows,
+    int tileColumns)
+{
+    if(tileRows <= 0 || tileColumns <= 0
+       || tileEmissions.size() != tileRows * tileColumns)
+        return {};
+
+    const int gridWidth = tileColumns * 2 + 1;
+    const int gridHeight = tileRows * 2 + 1;
+    QVector<QVector3D> result(gridWidth * gridHeight, QVector3D());
+    for(int row = 0; row < tileRows; ++row)
+        for(int column = 0; column < tileColumns; ++column)
+        {
+            const QVector3D emission = tileEmissions.at(row * tileColumns + column);
+            for(int localY = 0; localY < 3; ++localY)
+                for(int localX = 0; localX < 3; ++localX)
+                {
+                    QVector3D& target = result[(row * 2 + localY) * gridWidth
+                        + column * 2 + localX];
+                    target.setX(qMax(target.x(), emission.x()));
+                    target.setY(qMax(target.y(), emission.y()));
+                    target.setZ(qMax(target.z(), emission.z()));
+                }
+        }
+    return result;
+}
+
 SOverlayWindAnimation overlayWindAnimation(const QVector3D& authoredDirection,
                                             float authoredStrength,
                                             float elapsedSeconds,

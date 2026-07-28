@@ -11,6 +11,12 @@ Evil Islands has two independent authored emissive channels.
    channel-wise maximum of its own emission and the overlay emission. This is
    the red illumination visible on exposed terrain immediately below lava; it
    is not a generated omnidirectional point light or screen-space bloom.
+   Overlay contributions are accumulated on the sector's shared 33-by-33
+   terrain-vertex lattice. Adjacent tiles read the same value at a common edge,
+   so ordinary triangle interpolation blends from that edge into a neighboring
+   non-emissive tile. Assigning the value independently to all nine duplicated
+   draw vertices of only the emitting tile creates the incorrect hard,
+   stair-stepped boundary seen in the initial Endurance implementation.
 2. The physical-material archive supplies an emissive RGBA member for figure
    materials. In the shipped archive, only `magic.mat` is nonzero. The runtime
    promotes the Magic material's emissive RGB to `(1, 1, 1)` after loading it;
@@ -74,8 +80,10 @@ No installed game, map, archive, database, or private reference was modified.
 ## Endurance implementation
 
 - The terrain VBO carries a static RGB emission attribute for both overlay and
-  land-underlay vertices. It is derived once from the referenced MPR material;
-  no per-frame buffer rebuild is introduced.
+  land-underlay vertices. Material emission is combined channel-wise on the
+  shared sector lattice, then copied into each tile's duplicated draw vertices
+  so their common edges agree. It is derived once from the referenced MPR
+  materials; no per-frame buffer rebuild is introduced.
 - Full-environment lighting saturating-adds emission to direct light, then
   takes the existing channel-wise maximum with ambient and point-light
   candidates. The existing projected-shadow and fog stages remain in place.
