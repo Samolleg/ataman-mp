@@ -34,6 +34,15 @@ worktrees.
   interpretations; state briefly when there are none. Do not defer a material
   ambiguity to this audit when it should have been raised before implementation.
 
+## Root-cause implementation and debugging
+
+- Before changing code, capture the original issue as a repeatable test with
+  explicit expected results. Trace the pipeline to the first incorrect value,
+  state, ownership transition, or decision. A fix is complete only when the
+  original test passes and proportionate regression checks remain clean.
+  Fixing only a side effect, hiding a symptom, or repairing a newly introduced
+  problem does not count as resolving the original issue.
+
 ## Parallel thread workers
 
 - Read `docs/PARALLEL_THREAD_WORKERS.md` before creating a parallel Endurance
