@@ -593,3 +593,108 @@ SMprSaveCommitResult commitStagedMprCanvasResize(
     result.success = true;
     return result;
 }
+
+SMprSaveCommitResult commitGeneratedMpr(
+    const QByteArray& candidateBytes,
+    const SMprSaveCommitRequest& request)
+{
+    SMprSaveCommitResult result;
+    result.phase = QStringLiteral("validation");
+    if(request.destination.absoluteFilePath().isEmpty() || candidateBytes.isEmpty())
+    {
+        result.error = "A destination and generated MPR payload are required.";
+        return result;
+    }
+    const SStagedSaveValidation staged = validateStagedSave(
+        candidateBytes, request.destination);
+    result.candidateSha256 = staged.sha256;
+    if(!staged.success)
+    {
+        result.error = staged.error;
+        return result;
+    }
+    CMprDocument reopened;
+    CTerrainEditModel terrain;
+    CValidationReport reopenReport;
+    CValidationReport terrainReport;
+    if(!reopened.loadBytes(candidateBytes, QStringLiteral("generated-stage.mpr"),
+                           &reopenReport) || reopenReport.hasErrors()
+       || !terrain.load(reopened, &terrainReport) || terrainReport.hasErrors()
+       || terrain.hasSeamConflicts())
+    {
+        result.error = "The generated MPR failed canonical terrain validation:\n"
+            + reopenReport.toText().trimmed() + "\n"
+            + terrainReport.toText().trimmed();
+        return result;
+    }
+
+    const QFileInfo destination(request.destination.absoluteFilePath());
+    const bool existed = destination.exists();
+    QByteArray original;
+    if(existed && !readFileBytes(destination, &original, &result.error))
+    {
+        result.phase = QStringLiteral("destination-check");
+        return result;
+    }
+    if(existed)
+    {
+        result.phase = QStringLiteral("backup");
+        const SBackupResult backup = CBackupManager(
+            request.backupRootOverride).snapshotBeforeSave(destination);
+        if(!backup.success)
+        {
+            result.error = backup.error;
+            return result;
+        }
+        const QString originalSha256 = QString::fromLatin1(
+            QCryptographicHash::hash(original, QCryptographicHash::Sha256).toHex());
+        if(backup.sha256.compare(originalSha256, Qt::CaseInsensitive) != 0)
+        {
+            result.error = "The pre-save backup hash did not match the generated-MPR destination.";
+            return result;
+        }
+        result.backupPath = backup.backupPath;
+    }
+    result.phase = QStringLiteral("race-check");
+    if(!destinationStillMatches(destination, existed, original, &result.error))
+        return result;
+#ifdef QT_TESTLIB_LIB
+    if(request.simulateAtomicCommitFailure)
+    {
+        result.phase = QStringLiteral("atomic-replacement");
+        result.error = "Simulated atomic replacement failure.";
+        return result;
+    }
+#endif
+    result.phase = QStringLiteral("atomic-replacement");
+    QSaveFile output(destination.absoluteFilePath());
+    if(!output.open(QIODevice::WriteOnly)
+       || output.write(candidateBytes) != candidateBytes.size()
+       || !output.commit())
+    {
+        result.error = output.errorString();
+        return result;
+    }
+    result.phase = QStringLiteral("post-commit-validation");
+    QByteArray committed;
+    if(!readFileBytes(destination, &committed, &result.error)
+       || committed != candidateBytes)
+    {
+        if(result.error.isEmpty())
+            result.error = "The committed generated MPR differs from its validated candidate.";
+        return result;
+    }
+    CMprDocument committedDocument;
+    CValidationReport committedReport;
+    if(!committedDocument.loadBytes(committed, destination.absoluteFilePath(),
+                                    &committedReport)
+       || committedReport.hasErrors())
+    {
+        result.error = "The committed generated MPR failed a fresh reopen:\n"
+            + committedReport.toText().trimmed();
+        return result;
+    }
+    result.phase = QStringLiteral("complete");
+    result.success = true;
+    return result;
+}

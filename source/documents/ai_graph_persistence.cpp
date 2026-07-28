@@ -66,6 +66,36 @@ QString aiGraphSharedMobWarning(const QString& mobFileName,
         .arg(mobFileName).arg(mapOwners.size()).arg(mapOwners.join(", "));
 }
 
+SAiGraphPreviewSource selectAiGraphPreviewSource(
+    const QByteArray& primaryEmbeddedGraph,
+    const QString& primaryMobFileName,
+    const QFileInfo& activeMpr)
+{
+    SAiGraphPreviewSource result;
+    if(!primaryEmbeddedGraph.isEmpty())
+    {
+        result.bytes = primaryEmbeddedGraph;
+        result.embedded = true;
+        result.label = QStringLiteral("Embedded: %1").arg(primaryMobFileName);
+        return result;
+    }
+    const QString externalPath = aiGraphRuntimeSiblingPath(activeMpr);
+    if(externalPath.isEmpty())
+        return result;
+    QFile external(externalPath);
+    if(!external.open(QIODevice::ReadOnly))
+        return result;
+    result.bytes = external.readAll();
+    if(external.error() != QFileDevice::NoError)
+    {
+        result.bytes.clear();
+        return result;
+    }
+    result.path = externalPath;
+    result.label = QStringLiteral("External: %1").arg(QFileInfo(externalPath).fileName());
+    return result;
+}
+
 SAiGraphFileCommitResult commitValidatedAiGraphFile(
     const SAiGraphFileCommitRequest& request)
 {

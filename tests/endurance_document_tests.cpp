@@ -18,6 +18,7 @@
 #include "terrain_atlas_analyzer.h"
 #include "terrain_atlas_profile.h"
 #include "staged_save_validator.h"
+#include "backup_manager.h"
 
 namespace {
 QByteArray section(quint32 type, const QByteArray& payload = QByteArray())
@@ -402,6 +403,7 @@ private slots:
     void mobGraphRemovalPreservesAllOtherTopLevelBytes();
     void mobGraphReplacementAndInsertionAreExact();
     void aiGraphPersistenceUsesExactMprBasenameAndReportsShadowing();
+    void aiGraphPreviewSelectsExactExternalUnlessPrimaryEmbeddedShadowsIt();
     void aiGraphFileCommitIsValidatedBackedUpAndAtomic();
     void duplicateMobIdsAreWarningsOnly();
     void vulcansmokeIsACriticalNonBlockingFinding();
@@ -440,6 +442,10 @@ private slots:
     void mprCanvasResizeAcceptsStructural32By32Ceiling();
     void mprCanvasResizeRejectsInvalidOrEmptyIntersection();
     void mprCanvasResizeCommitIsSaveAsOnlyAndAtomic();
+    void newMprFromTemplateIsDeterministicSeamSafeAndRuntimeReachable();
+    void newMprRejectsInventedNamespaceAndInvalidDimensions();
+    void generatedMprCommitIsValidatedBackedUpAndAtomic();
+    void mprRecoveryAutosaveUsesValidatedCandidateAndLeavesSourceUntouched();
     void syntheticMprPreservesArchiveNamespaceAndInactiveSentinel();
     void mprSectorPatchIsProvenanceCheckedAndLocal();
     void mprMaxZPatchIsProvenanceCheckedAndLocal();
@@ -644,6 +650,37 @@ void EnduranceDocumentTests::aiGraphPersistenceUsesExactMprBasenameAndReportsSha
     QVERIFY(warning.contains("zone6.mob"));
     QVERIFY(warning.contains("zone6_2"));
     QVERIFY(warning.contains("both", Qt::CaseInsensitive));
+}
+
+void EnduranceDocumentTests::aiGraphPreviewSelectsExactExternalUnlessPrimaryEmbeddedShadowsIt()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QByteArray externalGraph = syntheticValidAiGraph(0x31, 3);
+    const QByteArray embeddedGraph = syntheticValidAiGraph(0x42, 4);
+    QFile external(directory.filePath("zone6_2.grp"));
+    QVERIFY(external.open(QIODevice::WriteOnly));
+    QCOMPARE(external.write(externalGraph), qint64(externalGraph.size()));
+    external.close();
+    QFile wrong(directory.filePath("zone6.grp"));
+    QVERIFY(wrong.open(QIODevice::WriteOnly));
+    QCOMPARE(wrong.write(embeddedGraph), qint64(embeddedGraph.size()));
+    wrong.close();
+
+    const QFileInfo mpr(directory.filePath("zone6_2.mpr"));
+    const SAiGraphPreviewSource selected = selectAiGraphPreviewSource(
+        QByteArray(), QStringLiteral("secondary.mob"), mpr);
+    QCOMPARE(selected.bytes, externalGraph);
+    QCOMPARE(selected.path, QDir::cleanPath(directory.filePath("zone6_2.grp")));
+    QVERIFY(selected.label.contains("zone6_2.grp"));
+    QVERIFY(!selected.embedded);
+
+    const SAiGraphPreviewSource shadowed = selectAiGraphPreviewSource(
+        embeddedGraph, QStringLiteral("zone6.mob"), mpr);
+    QCOMPARE(shadowed.bytes, embeddedGraph);
+    QVERIFY(shadowed.embedded);
+    QVERIFY(shadowed.path.isEmpty());
+    QVERIFY(shadowed.label.contains("zone6.mob"));
 }
 
 void EnduranceDocumentTests::aiGraphFileCommitIsValidatedBackedUpAndAtomic()
@@ -1755,6 +1792,168 @@ void EnduranceDocumentTests::mprCanvasResizeCommitIsSaveAsOnlyAndAtomic()
     QVERIFY2(reopened.load(destination, &reopenReport), qPrintable(reopenReport.toText()));
     QCOMPARE(reopened.mapInfo().sectorCountX, quint32(2));
     QCOMPARE(reopened.mapInfo().sectorCountY, quint32(1));
+}
+
+void EnduranceDocumentTests::newMprFromTemplateIsDeterministicSeamSafeAndRuntimeReachable()
+{
+    CMprDocument terrainTemplate;
+    CValidationReport templateReport;
+    QVERIFY2(terrainTemplate.loadBytes(syntheticMpr(), "template.mpr", &templateReport),
+             qPrintable(templateReport.toText()));
+    SMprCreationRequest request;
+    request.innerNamespace = QStringLiteral("NewLand");
+    request.sectorCountX = 2;
+    request.sectorCountY = 2;
+    request.maxZ = 250.0f;
+    request.flatRawHeight = 23456;
+    SMprPackedTile initialTile;
+    initialTile.tileIndex = 1;
+    initialTile.atlasIndex = 0;
+    initialTile.rotation = 2;
+    request.initialPackedTile = initialTile.encode();
+    request.closeEdges = true;
+    request.edgeTaperTiles = 2;
+    QByteArray first;
+    QByteArray second;
+    CValidationReport firstReport;
+    CValidationReport secondReport;
+    QVERIFY2(terrainTemplate.buildNewCanvas(request, &first, &firstReport),
+             qPrintable(firstReport.toText()));
+    QVERIFY2(terrainTemplate.buildNewCanvas(request, &second, &secondReport),
+             qPrintable(secondReport.toText()));
+    QCOMPARE(first, second);
+
+    CMprDocument created;
+    CValidationReport createdReport;
+    QVERIFY2(created.loadBytes(first, "created.mpr", &createdReport),
+             qPrintable(createdReport.toText()));
+    QCOMPARE(created.mapInfo().innerNamespace, QStringLiteral("NewLand"));
+    QCOMPARE(created.mapInfo().sectorCountX, quint32(2));
+    QCOMPARE(created.mapInfo().sectorCountY, quint32(2));
+    QCOMPARE(created.mapInfo().maxZ, 250.0f);
+    QCOMPARE(created.mapInfo().textureCount, terrainTemplate.mapInfo().textureCount);
+    QCOMPARE(created.mapInfo().materialCount, terrainTemplate.mapInfo().materialCount);
+    QCOMPARE(created.mapInfo().tileTypes, terrainTemplate.mapInfo().tileTypes);
+    QCOMPARE(created.sectors().size(), 4);
+    CTerrainEditModel terrain;
+    CValidationReport terrainReport;
+    QVERIFY2(terrain.load(created, &terrainReport), qPrintable(terrainReport.toText()));
+    QVERIFY(!terrain.hasSeamConflicts());
+    QCOMPARE(sectorHeight(created.memberPayload("NewLand000000.SEC"), 32, 20),
+             sectorHeight(created.memberPayload("NewLand001000.SEC"), 0, 20));
+    QVERIFY(terrain.height(0, 0) < request.flatRawHeight);
+    QCOMPARE(terrain.height(32, 32), request.flatRawHeight);
+    for(const SMprArchiveMember& member : created.members())
+        QCOMPARE(runtimeMprLookup(first, member.name), member.payload);
+
+    SMprCreationRequest heightmapRequest = request;
+    heightmapRequest.closeEdges = false;
+    heightmapRequest.heightmapWidth = 2;
+    heightmapRequest.heightmapHeight = 2;
+    heightmapRequest.heightmapSamples = {0.0f, 1.0f, 0.25f, 0.75f};
+    heightmapRequest.heightmapMinimumRaw = 1000.0f;
+    heightmapRequest.heightmapMaximumRaw = 5000.0f;
+    QByteArray heightmapped;
+    CValidationReport heightmapReport;
+    QVERIFY2(terrainTemplate.buildNewCanvas(heightmapRequest, &heightmapped,
+                                             &heightmapReport),
+             qPrintable(heightmapReport.toText()));
+    CMprDocument heightmappedDocument;
+    QVERIFY(heightmappedDocument.loadBytes(heightmapped, "heightmapped.mpr",
+                                            &heightmapReport));
+    CTerrainEditModel heightmappedTerrain;
+    QVERIFY(heightmappedTerrain.load(heightmappedDocument, &heightmapReport));
+    QCOMPARE(heightmappedTerrain.height(0, 0), quint16(1000));
+    QCOMPARE(heightmappedTerrain.height(64, 0), quint16(5000));
+    QCOMPARE(heightmappedTerrain.height(0, 64), quint16(2000));
+    QCOMPARE(heightmappedTerrain.height(64, 64), quint16(4000));
+    QVERIFY(!heightmappedTerrain.hasSeamConflicts());
+}
+
+void EnduranceDocumentTests::newMprRejectsInventedNamespaceAndInvalidDimensions()
+{
+    CMprDocument terrainTemplate;
+    CValidationReport templateReport;
+    QVERIFY(terrainTemplate.loadBytes(syntheticMpr(), "template.mpr", &templateReport));
+    QByteArray candidate("must-clear");
+    SMprCreationRequest invalid;
+    invalid.innerNamespace = QStringLiteral("bad/name");
+    CValidationReport namespaceReport;
+    QVERIFY(!terrainTemplate.buildNewCanvas(invalid, &candidate, &namespaceReport));
+    QVERIFY(candidate.isEmpty());
+    QVERIFY(namespaceReport.hasErrors());
+    invalid.innerNamespace = QStringLiteral("valid");
+    invalid.sectorCountX = 33;
+    CValidationReport dimensionReport;
+    QVERIFY(!terrainTemplate.buildNewCanvas(invalid, &candidate, &dimensionReport));
+    QVERIFY(candidate.isEmpty());
+}
+
+void EnduranceDocumentTests::generatedMprCommitIsValidatedBackedUpAndAtomic()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    CMprDocument terrainTemplate;
+    CValidationReport report;
+    QVERIFY(terrainTemplate.loadBytes(syntheticMpr(), "template.mpr", &report));
+    SMprCreationRequest request;
+    request.innerNamespace = QStringLiteral("Created");
+    QByteArray candidate;
+    QVERIFY2(terrainTemplate.buildNewCanvas(request, &candidate, &report),
+             qPrintable(report.toText()));
+    const QFileInfo destination(directory.filePath("created.mpr"));
+    SMprSaveCommitRequest commit;
+    commit.destination = destination;
+    commit.backupRootOverride = directory.filePath("backups");
+    const SMprSaveCommitResult created = commitGeneratedMpr(candidate, commit);
+    QVERIFY2(created.success, qPrintable(created.error));
+    QVERIFY(created.backupPath.isEmpty());
+    QFile result(destination.absoluteFilePath());
+    QVERIFY(result.open(QIODevice::ReadOnly));
+    QCOMPARE(result.readAll(), candidate);
+    result.close();
+
+    QByteArray replacement = candidate;
+    replacement.append('x');
+    commit.simulateAtomicCommitFailure = true;
+    const SMprSaveCommitResult failed = commitGeneratedMpr(replacement, commit);
+    QVERIFY(!failed.success);
+    QFile unchanged(destination.absoluteFilePath());
+    QVERIFY(unchanged.open(QIODevice::ReadOnly));
+    QCOMPARE(unchanged.readAll(), candidate);
+}
+
+void EnduranceDocumentTests::mprRecoveryAutosaveUsesValidatedCandidateAndLeavesSourceUntouched()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QByteArray original = syntheticMpr(syntheticLandSector(1000));
+    const QFileInfo source(directory.filePath("source.mpr"));
+    QFile sourceFile(source.absoluteFilePath());
+    QVERIFY(sourceFile.open(QIODevice::WriteOnly));
+    QCOMPARE(sourceFile.write(original), qint64(original.size()));
+    sourceFile.close();
+    CMprDocument baseline;
+    CValidationReport report;
+    QVERIFY(baseline.load(source, &report));
+    CTerrainEditModel terrain;
+    QVERIFY(terrain.load(baseline, &report));
+    const STerrainHeightCommand flatten = terrain.makeGlobalFlatten(2222);
+    QVERIFY(terrain.apply(flatten, true, &report, true));
+    CMprEditTransaction transaction(QStringLiteral("autosave terrain"));
+    QVERIFY(terrain.appendSectorEdits(&transaction, &report));
+    QByteArray candidate;
+    QVERIFY(baseline.applyTransaction(transaction, &candidate, &report));
+    QVERIFY(candidate != original);
+    const SBackupResult snapshot = CBackupManager(
+        directory.filePath("backups")).snapshotAutosave(source, candidate);
+    QVERIFY2(snapshot.success, qPrintable(snapshot.error));
+    QFile autosave(snapshot.backupPath);
+    QVERIFY(autosave.open(QIODevice::ReadOnly));
+    QCOMPARE(autosave.readAll(), candidate);
+    QFile untouched(source.absoluteFilePath());
+    QVERIFY(untouched.open(QIODevice::ReadOnly));
+    QCOMPARE(untouched.readAll(), original);
 }
 
 void EnduranceDocumentTests::syntheticMprPreservesArchiveNamespaceAndInactiveSentinel()

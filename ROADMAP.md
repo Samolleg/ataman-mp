@@ -251,6 +251,9 @@ generated graph persistence remains disabled.
 
 ## Visualization and validation
 
+- [x] Preview the exact same-basename sibling `.grp` when the primary MOB does
+  not contain an embedded `AI_GRAPH`; keep primary embedded ownership explicit
+  and authoritative when it is present instead of silently mixing sources.
 - [ ] Add a Navigation viewport mode with per-slot and combined overlays,
   directional edges, full 16-bit cost colouring, blocked connections, and a
   hover inspector exposing coordinates, source offsets, raw values, and hashes.
@@ -415,32 +418,32 @@ must not independently change its shaders or animation policy.
 
 ## New MPR creation
 
-- [ ] Add a user-facing **Create New MPR...** workflow that is independent from
+- [x] Add a user-facing **Create New MPR...** workflow that is independent from
   `map.txt` registration. Creating terrain must not silently invent zone IDs,
   entrances, minimap, music, quest, objectives, or other catalog metadata.
-- [ ] Let the author choose the map dimensions/sector layout, initial flat
+- [x] Let the author choose the map dimensions/sector layout, initial flat
   height, initial land material, active Base/JMV profile, and a supplied terrain
   atlas namespace. Endurance reads compatible atlases but does not author or
   bundle atlas imagery.
-- [ ] Generate deterministic MP/SEC members with canonical 33x33 sector vertex
+- [x] Generate deterministic MP/SEC members with canonical 33x33 sector vertex
   ownership, synchronized shared seams, explicit land/overlay initialization,
   and names derived from the chosen internal MPR namespace.
-- [ ] Construct a game-compatible MPR/RES member table. Lowercase each member
+- [x] Construct a game-compatible MPR/RES member table. Lowercase each member
   name, encode it as CP1251, place it in its native hash slot, and preserve
   deterministic `NextIndex` collision chains; a linear member inventory alone
   is not runtime validation.
-- [ ] Before packaging or Test Current Map, resolve every generated MP/SEC member
+- [x] Before packaging or Test Current Map, resolve every generated MP/SEC member
   through the runtime-style hash slot and chain. Reject case-insensitive
   duplicate names, cycles, out-of-range links, unreachable members, invalid
   dimensions/namespaces, and missing required sectors.
-- [ ] Apply the changed-MPR save contract to the initial archive: stage outside
+- [x] Apply the changed-MPR save contract to the initial archive: stage outside
   the destination, freshly reopen, validate archive reachability and terrain
   semantics, create a backup when replacing an existing path, and publish with
   atomic replacement only after every check passes.
 - [ ] Offer explicit follow-up registration through the `map.txt` editor after
   the MPR validates. Cancelling registration must leave the standalone MPR
   usable and must not create partial catalog or texture-resource changes.
-- [ ] Add minimized synthetic tests for 1x1 and multi-sector maps, deterministic
+- [x] Add minimized synthetic tests for 1x1 and multi-sector maps, deterministic
   repeat generation, seam equality, initial height/material selection, supplied
   atlas namespaces, deliberate hash collisions, uppercase runtime lookup,
   unreachable/cyclic chain rejection, failed destination replacement, and
@@ -614,7 +617,7 @@ The following items are deliberately not hidden inside the completed baseline:
   left on a lossy closed-edge taper, and opens the separately saved MPR/MOB
   pair after commit. Copied-map runtime testing at the experimental ceiling
   remains before this is the complete derivative-map workflow.
-- [ ] Implement deterministic new-MPR creation using the runtime-compatible RES
+- [x] Implement deterministic new-MPR creation using the runtime-compatible RES
   hash table and collision-chain contract described above.
 - [x] Add persistent export/ownership for loaded or regenerated AI graphs. The
   viewport and Tools menu now share one Bake / Export flow that writes the exact
@@ -626,7 +629,7 @@ The following items are deliberately not hidden inside the completed baseline:
   copied-fixture game-side test for distinct `zone6.grp` and `zone6_2.grp` states.
 - [ ] Replace Play from Here's terrain-only clearance probe with nearest valid
   placement from the active, non-stale regenerated graph.
-- [ ] Add recovery autosave for dirty canonical MPR transactions without using
+- [x] Add recovery autosave for dirty canonical MPR transactions without using
   the forbidden legacy serializer.
 - [ ] Complete typed overlay-material editing/presets and the final Base/JMV
   overlay runtime matrix.

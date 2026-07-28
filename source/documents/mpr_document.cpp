@@ -1234,6 +1234,251 @@ bool CMprDocument::buildResizedCanvas(const SMprCanvasResizeRequest& request,
     return true;
 }
 
+bool CMprDocument::buildNewCanvas(const SMprCreationRequest& request,
+                                  QByteArray* output,
+                                  CValidationReport* report) const
+{
+    if(output)
+        output->clear();
+    const auto fail = [report](const QString& code, const QString& message,
+                               const QString& location = QString()) {
+        if(report)
+            report->add(code, EValidationSeverity::Error, message, location);
+        return false;
+    };
+    if(!output)
+        return fail("mpr.create.output", "No output buffer was supplied.");
+    if(!m_mapInfo.valid)
+        return fail("mpr.create.template", "The terrain template has no valid MP member.");
+    if(request.sectorCountX < 1 || request.sectorCountY < 1
+       || request.sectorCountX > 32 || request.sectorCountY > 32)
+        return fail("mpr.create.dimensions",
+                    "New MPR dimensions must be between 1 and 32 sectors per axis.");
+    if(!std::isfinite(request.maxZ) || request.maxZ <= 0.0f)
+        return fail("mpr.create.maxz", "New MPR maxZ must be finite and positive.");
+    if(request.closeEdges
+       && (request.edgeTaperTiles < 1 || request.edgeTaperTiles > 16))
+        return fail("mpr.create.edge_taper",
+                    "Closed-edge taper width must be between 1 and 16 tiles.");
+    const bool hasHeightmap = !request.heightmapSamples.isEmpty();
+    if(hasHeightmap
+       && (request.heightmapWidth <= 0 || request.heightmapHeight <= 0
+           || request.heightmapSamples.size()
+              != request.heightmapWidth * request.heightmapHeight
+           || request.heightmapMinimumRaw < 0.0f
+           || request.heightmapMaximumRaw > 65535.0f
+           || request.heightmapMaximumRaw < request.heightmapMinimumRaw))
+        return fail("mpr.create.heightmap",
+                    "New MPR heightmap dimensions or raw range are invalid.");
+
+    const QString nameSpace = request.innerNamespace.trimmed();
+    if(nameSpace.isEmpty() || nameSpace.contains('.') || nameSpace.contains('/')
+       || nameSpace.contains('\\'))
+        return fail("mpr.create.namespace",
+                    "The terrain namespace must be a non-empty resource stem without path separators or dots.");
+    QTextCodec* cp1251 = QTextCodec::codecForName("CP1251");
+    if(!cp1251)
+        return fail("mpr.create.encoding", "The CP1251 codec is unavailable.");
+    const QByteArray encodedNamespace = cp1251->fromUnicode(nameSpace);
+    if(cp1251->toUnicode(encodedNamespace) != nameSpace)
+        return fail("mpr.create.encoding",
+                    "The terrain namespace cannot be represented exactly in CP1251.",
+                    nameSpace);
+    const SMprPackedTile decoded = SMprPackedTile::decode(request.initialPackedTile);
+    if(decoded.atlasIndex >= m_mapInfo.textureCount)
+        return fail("mpr.create.tile",
+                    QString("Initial tile references atlas %1, outside template namespace count %2.")
+                        .arg(decoded.atlasIndex).arg(m_mapInfo.textureCount));
+
+    const int mpIndex = uniqueMemberIndex(m_mapInfo.memberName);
+    if(mpIndex < 0)
+        return fail("mpr.create.template_mp", "The template MP member is missing or ambiguous.");
+    QByteArray mp = m_members.at(mpIndex).payload;
+    writeF32(&mp, 4, request.maxZ);
+    writeU32(&mp, 8, request.sectorCountX);
+    writeU32(&mp, 12, request.sectorCountY);
+
+    struct BuildMember
+    {
+        QByteArray name;
+        QByteArray payload;
+        quint32 dataOffset{0};
+        quint32 nameOffset{0};
+    };
+    QVector<BuildMember> members;
+    members.reserve(1 + int(request.sectorCountX * request.sectorCountY));
+    BuildMember mpMember;
+    mpMember.name = encodedNamespace + ".MP";
+    mpMember.payload = mp;
+    members.append(mpMember);
+    const quint32 flatNormal = (1000u << 22) | (1000u << 11) | 1000u;
+    for(quint32 y = 0; y < request.sectorCountY; ++y)
+        for(quint32 x = 0; x < request.sectorCountX; ++x)
+        {
+            QByteArray sec(int(kLandSectorSize), '\0');
+            writeU32(&sec, 0, kSectorSignature);
+            sec[4] = char(0);
+            for(quint64 vertex = 0; vertex < kSectorVertexCount; ++vertex)
+            {
+                const quint64 offset = 5 + vertex * kSectorVertexSize;
+                writeU16(&sec, offset + 2, request.flatRawHeight);
+                writeU32(&sec, offset + 4, flatNormal);
+            }
+            const quint64 tileOffset = 5 + kSectorVertexCount * kSectorVertexSize;
+            for(quint64 tile = 0; tile < kSectorTileCount; ++tile)
+                writeU16(&sec, tileOffset + tile * kSectorTileSize,
+                         request.initialPackedTile);
+            const QString sectorName = QString("%1%2%3.SEC")
+                .arg(nameSpace).arg(x, 3, 10, QChar('0'))
+                .arg(y, 3, 10, QChar('0'));
+            const QByteArray encodedName = cp1251->fromUnicode(sectorName);
+            if(cp1251->toUnicode(encodedName) != sectorName)
+                return fail("mpr.create.encoding",
+                            "A generated SEC name cannot be represented exactly in CP1251.",
+                            sectorName);
+            BuildMember secMember;
+            secMember.name = encodedName;
+            secMember.payload = sec;
+            members.append(secMember);
+        }
+
+    QByteArray candidate(int(kResHeaderSize), '\0');
+    QByteArray names;
+    for(BuildMember& member : members)
+    {
+        candidate.append(QByteArray((16 - candidate.size() % 16) % 16, '\0'));
+        if(quint64(candidate.size()) + quint64(member.payload.size())
+           > quint64(std::numeric_limits<quint32>::max()))
+            return fail("mpr.create.archive_size", "The generated archive exceeds 32-bit offsets.");
+        member.dataOffset = quint32(candidate.size());
+        member.nameOffset = quint32(names.size());
+        candidate.append(member.payload);
+        names.append(member.name);
+    }
+    candidate.append(QByteArray((16 - candidate.size() % 16) % 16, '\0'));
+    const quint32 tableOffset = quint32(candidate.size());
+    const quint32 count = quint32(members.size());
+    QVector<int> tableSlots(int(count), -1);
+    QVector<quint32> next(int(count), quint32(-1));
+    int lastFree = int(count) - 1;
+    for(int memberIndex = 0; memberIndex < members.size(); ++memberIndex)
+    {
+        int slot = int(resourceNameHash(members.at(memberIndex).name, count));
+        if(tableSlots.at(slot) >= 0)
+        {
+            while(next.at(slot) != quint32(-1))
+                slot = int(next.at(slot));
+            while(lastFree >= 0 && tableSlots.at(lastFree) >= 0)
+                --lastFree;
+            if(lastFree < 0)
+                return fail("mpr.create.hash_table", "The RES hash table has no collision slot.");
+            next[slot] = quint32(lastFree);
+            slot = lastFree--;
+        }
+        tableSlots[slot] = memberIndex;
+    }
+    QByteArray table(int(quint64(count) * kResEntrySize), '\0');
+    for(int slot = 0; slot < tableSlots.size(); ++slot)
+    {
+        if(tableSlots.at(slot) < 0)
+            return fail("mpr.create.hash_table", "The RES hash table contains an empty slot.");
+        const BuildMember& member = members.at(tableSlots.at(slot));
+        const quint64 entry = quint64(slot) * kResEntrySize;
+        writeU32(&table, entry, next.at(slot));
+        writeU32(&table, entry + 4, quint32(member.payload.size()));
+        writeU32(&table, entry + 8, member.dataOffset);
+        writeU32(&table, entry + 12, 0);
+        writeU16(&table, entry + 16, quint16(member.name.size()));
+        writeU32(&table, entry + 18, member.nameOffset);
+    }
+    candidate.append(table);
+    candidate.append(names);
+    writeU32(&candidate, 0, kResSignature);
+    writeU32(&candidate, 4, count);
+    writeU32(&candidate, 8, tableOffset);
+    writeU32(&candidate, 12, quint32(names.size()));
+
+    CMprDocument reopened;
+    CValidationReport reopenedReport;
+    if(!reopened.loadBytes(candidate, QStringLiteral("new-candidate.mpr"),
+                           &reopenedReport) || reopenedReport.hasErrors())
+    {
+        copyFindings(reopenedReport, report);
+        return fail("mpr.create.reopen", "The generated MPR failed a fresh semantic reopen.");
+    }
+    if(hasHeightmap || request.closeEdges)
+    {
+        CTerrainEditModel terrain;
+        CValidationReport taperReport;
+        if(!terrain.load(reopened, &taperReport) || taperReport.hasErrors())
+            return fail("mpr.create.edge_taper_load",
+                        "The generated terrain could not be prepared for height initialization.");
+        if(hasHeightmap)
+        {
+            STerrainHeightmapGrid grid;
+            grid.width = request.heightmapWidth;
+            grid.height = request.heightmapHeight;
+            grid.samples = request.heightmapSamples;
+            STerrainHeightmapImportSettings settings;
+            settings.placement = ETerrainHeightmapPlacement::StretchToTerrain;
+            settings.minimumRawHeight = request.heightmapMinimumRaw;
+            settings.maximumRawHeight = request.heightmapMaximumRaw;
+            settings.strength = 1.0f;
+            const STerrainHeightCommand import = terrain.makeHeightmapImport(
+                grid, settings, &taperReport);
+            if(import.requiresMaxZDecision()
+               || (!import.isEmpty()
+                   && !terrain.apply(import, true, &taperReport, true)))
+                return fail("mpr.create.heightmap_apply",
+                            "The new MPR heightmap could not be applied seam-safely.");
+        }
+        STerrainHeightCommand taper;
+        taper.description = QStringLiteral("Close new canvas edges");
+        const int maximumX = terrain.vertexCountX() - 1;
+        const int maximumY = terrain.vertexCountY() - 1;
+        const int width = request.edgeTaperTiles * 2;
+        if(request.closeEdges)
+        for(int y = 0; y <= maximumY; ++y)
+            for(int x = 0; x <= maximumX; ++x)
+            {
+                const int distance = qMin(qMin(x, y), qMin(maximumX - x, maximumY - y));
+                if(distance >= width)
+                    continue;
+                const double linear = qBound(0.0, double(distance) / double(width), 1.0);
+                const double smooth = linear * linear * (3.0 - 2.0 * linear);
+                const quint16 before = terrain.height(x, y);
+                const quint16 after = quint16(qRound64(double(before) * smooth));
+                if(after == before)
+                    continue;
+                STerrainHeightDelta delta;
+                delta.globalX = x;
+                delta.globalY = y;
+                delta.before = before;
+                delta.after = after;
+                taper.deltas.append(delta);
+            }
+        if(request.closeEdges && !terrain.apply(taper, true, &taperReport, true))
+            return fail("mpr.create.edge_taper_apply",
+                        "The generated edge taper could not be applied seam-safely.");
+        CMprEditTransaction transaction(QStringLiteral("new-canvas edge taper"));
+        if(!terrain.appendSectorEdits(&transaction, &taperReport)
+           || !reopened.applyTransaction(transaction, &candidate, &taperReport))
+            return fail("mpr.create.edge_taper_serialize",
+                        "The generated edge taper failed staged SEC serialization.");
+        CValidationReport finalReport;
+        if(!reopened.loadBytes(candidate, QStringLiteral("new-tapered-candidate.mpr"),
+                               &finalReport) || finalReport.hasErrors())
+            return fail("mpr.create.edge_taper_reopen",
+                        "The tapered new MPR failed a fresh semantic reopen.");
+    }
+    *output = candidate;
+    if(report)
+        report->add("mpr.create", EValidationSeverity::Info,
+                    QString("Prepared deterministic %1 x %2 MPR namespace %3 from validated template atlas metadata.")
+                        .arg(request.sectorCountX).arg(request.sectorCountY).arg(nameSpace));
+    return true;
+}
+
 CMprSemanticDiff CMprSemanticDiff::compare(const CMprDocument& baseline,
                                            const CMprDocument& candidate)
 {

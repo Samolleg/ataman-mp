@@ -88,4 +88,11 @@ SMprSaveCommitResult commitStagedMprCanvasResize(
     const SMprCanvasResizeRequest& resize,
     const SMprSaveCommitRequest& request);
 
+// Publishes a freshly generated, already deterministic MPR. There is no source
+// race to check, but an existing destination is still backed up and guarded
+// against change before atomic replacement.
+SMprSaveCommitResult commitGeneratedMpr(
+    const QByteArray& candidateBytes,
+    const SMprSaveCommitRequest& request);
+
 #endif // STAGED_SAVE_VALIDATOR_H

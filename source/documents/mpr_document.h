@@ -132,6 +132,23 @@ struct SMprCanvasResizeRequest
     int edgeTaperTiles{2};
 };
 
+struct SMprCreationRequest
+{
+    QString innerNamespace;
+    quint32 sectorCountX{1};
+    quint32 sectorCountY{1};
+    float maxZ{100.0f};
+    quint16 flatRawHeight{0};
+    quint16 initialPackedTile{0};
+    bool closeEdges{false};
+    int edgeTaperTiles{2};
+    int heightmapWidth{0};
+    int heightmapHeight{0};
+    QVector<float> heightmapSamples;
+    float heightmapMinimumRaw{0.0f};
+    float heightmapMaximumRaw{65535.0f};
+};
+
 class CMprSemanticDiff
 {
 public:
@@ -165,6 +182,11 @@ public:
     bool buildResizedCanvas(const SMprCanvasResizeRequest& request,
                             QByteArray* output,
                             CValidationReport* report = nullptr) const;
+    // Uses this document only as a validated atlas/material template. The new
+    // archive contains a freshly named MP and deterministic flat SEC members.
+    bool buildNewCanvas(const SMprCreationRequest& request,
+                        QByteArray* output,
+                        CValidationReport* report = nullptr) const;
     bool isDirty() const { return false; }
 
 private:

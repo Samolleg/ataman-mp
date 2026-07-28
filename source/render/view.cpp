@@ -83,6 +83,7 @@
 #include "terrain_atlas_profile.h"
 #include "terrain_atlas_review_dialog.h"
 #include "ai_graph_document.h"
+#include "ai_graph_persistence.h"
 #include "ai_graph_preview_builder.h"
 
 class CLogic;
@@ -1607,26 +1608,12 @@ void CView::refreshAiGraphPreviewSource()
     m_aiGraphIsolatedNodes.clear();
     m_aiGraphOverlayDirty = true;
 
-    QByteArray sourceBytes;
-    CMob* sourceMob = nullptr;
-    if(m_environmentMob && !m_environmentMob->aiGraphData().isEmpty())
-        sourceMob = m_environmentMob;
-    if(sourceMob)
-    {
-        sourceBytes = sourceMob->aiGraphData();
-        m_aiGraphSource = tr("Embedded: %1").arg(sourceMob->filePath().fileName());
-    }
-    else if(m_pLand && m_pLand->isMprLoad())
-    {
-        const QFileInfo mpr = m_pLand->filePath();
-        const QFileInfo external(QDir(mpr.absolutePath()).filePath(mpr.completeBaseName() + ".grp"));
-        QFile file(external.absoluteFilePath());
-        if(file.open(QIODevice::ReadOnly))
-        {
-            sourceBytes = file.readAll();
-            m_aiGraphSource = tr("External: %1").arg(external.fileName());
-        }
-    }
+    const SAiGraphPreviewSource selected = selectAiGraphPreviewSource(
+        m_environmentMob ? m_environmentMob->aiGraphData() : QByteArray(),
+        m_environmentMob ? m_environmentMob->filePath().fileName() : QString(),
+        (m_pLand && m_pLand->isMprLoad()) ? m_pLand->filePath() : QFileInfo());
+    const QByteArray sourceBytes = selected.bytes;
+    m_aiGraphSource = selected.label;
 
     if(!sourceBytes.isEmpty())
     {
@@ -11689,7 +11676,14 @@ bool CView::cancelPendingOperation()
 
 bool CView::hasPendingOperation() const
 {
-    return m_pOp && m_pOp->operationMethod() != eOperationMethodSelect;
+    if(!m_pOp || m_pOp->operationMethod() == eOperationMethodSelect)
+        return false;
+    // Landscape editing is a persistent selected tool. It is only unsafe to
+    // snapshot while a mouse stroke is actively accumulating; merely leaving
+    // Landscape Tools open must not suppress recovery autosaves indefinitely.
+    if(m_pOp->operationMethod() == eOperationMethodTileBrush)
+        return m_sculptStrokeActive || m_tileBrushStrokePolicy.isActive();
+    return true;
 }
 
 bool CView::prepareDocumentTransition()

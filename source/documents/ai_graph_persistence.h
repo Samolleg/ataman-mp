@@ -11,6 +11,21 @@ bool aiGraphEmbeddedSourceShadowsExternal(bool primaryMobHasEmbeddedGraph);
 QString aiGraphSharedMobWarning(const QString& mobFileName,
                                 const QStringList& mapOwners);
 
+struct SAiGraphPreviewSource
+{
+    QByteArray bytes;
+    QString label;
+    QString path;
+    bool embedded{false};
+};
+
+// Runtime ownership is explicit: only the primary MOB's embedded graph may
+// shadow the exact same-basename sibling GRP. Secondary MOBs are not inputs.
+SAiGraphPreviewSource selectAiGraphPreviewSource(
+    const QByteArray& primaryEmbeddedGraph,
+    const QString& primaryMobFileName,
+    const QFileInfo& activeMpr);
+
 struct SAiGraphFileCommitRequest
 {
     QFileInfo destination;

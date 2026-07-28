@@ -28,10 +28,12 @@
 #include <QComboBox>
 #include <QSlider>
 #include <QDoubleSpinBox>
+#include <QSpinBox>
 #include <QSignalBlocker>
 #include <QLabel>
 #include <QHBoxLayout>
 #include <QVBoxLayout>
+#include <QFormLayout>
 #include <QActionGroup>
 #include <QInputDialog>
 #include <QTreeWidget>
@@ -58,6 +60,7 @@
 #include <QVariant>
 #include <QGuiApplication>
 #include <QScreen>
+#include <QImage>
 #include <QtConcurrent/QtConcurrentRun>
 
 #include <cmath>
@@ -89,6 +92,9 @@
 #include "resource_profile.h"
 #include "endurance_document.h"
 #include "ai_graph_persistence.h"
+#include "mpr_document.h"
+#include "terrain_edit_model.h"
+#include "staged_save_validator.h"
 #include "landscape_tools.h"
 #include "collection_document.h"
 #include "collection_editor_dialog.h"
@@ -5402,6 +5408,7 @@ void MainWindow::updateDocumentActionAvailability()
     const bool hasMpr = CLandscape::getInstance()->isMprLoad();
     const bool dirtyMpr = hasMpr && CLandscape::getInstance()->isDirty();
     m_ui->actionOpen->setEnabled(idle);
+    m_ui->actionNew_MPR->setEnabled(idle);
     m_ui->actionOpen_MPR->setEnabled(idle);
     m_ui->actionOpen_MOB->setEnabled(idle);
     m_ui->actionOpen_recent->setEnabled(idle);
@@ -6020,12 +6027,33 @@ void MainWindow::performAutosave()
     CLandscape* landscape = CLandscape::getInstance();
     if(landscape->isMprLoad() && landscape->isDirty())
     {
-        // A changed MPR may only be emitted through CView's provenance-checked
-        // MprDocument/SEC transaction path. CLandscape's inherited rebuilding
-        // serializer is intentionally not exposed to recovery autosave.
-        ++failed;
-        ei::log(eLogWarning, QString("Recovery autosave skipped changed MPR until the lossless transaction path is available path:%1")
-            .arg(landscape->filePath().absoluteFilePath()));
+        QByteArray candidate;
+        CValidationReport report;
+        if(!m_pView->buildValidatedLandscapeCandidate(&candidate, &report))
+        {
+            ++failed;
+            ei::log(eLogWarning, QString("Recovery autosave skipped unsafe MPR path:%1 findings:%2")
+                .arg(landscape->filePath().absoluteFilePath(),
+                     report.toText().trimmed()));
+        }
+        else
+        {
+            const SBackupResult result = manager.snapshotAutosave(
+                landscape->filePath(), candidate);
+            if(result.success)
+            {
+                written += result.skipped ? 0 : 1;
+                ei::log(eLogInfo, QString("Recovery autosave MPR path:%1 sha256:%2 skipped:%3")
+                    .arg(landscape->filePath().absoluteFilePath(),
+                         result.sha256).arg(result.skipped));
+            }
+            else
+            {
+                ++failed;
+                ei::log(eLogWarning, QString("Recovery autosave failed MPR path:%1 error:%2")
+                    .arg(landscape->filePath().absoluteFilePath(), result.error));
+            }
+        }
     }
     if(written > 0)
         statusBar()->showMessage(tr("Recovery autosave created %1 new generation(s).").arg(written), 4000);
@@ -6068,6 +6096,224 @@ void MainWindow::on_actionOpen_MPR_triggered()
     opt->setValue(fileName.dir().path());
     if(replaceLoadedLandscape(fileName))
         rememberRecentFile(fileName);
+}
+
+void MainWindow::on_actionNew_MPR_triggered()
+{
+    QDialog dialog(this);
+    dialog.setWindowTitle(tr("Create New MPR"));
+    dialog.resize(620, 0);
+    QVBoxLayout* root = new QVBoxLayout(&dialog);
+    QLabel* explanation = new QLabel(tr(
+        "A new landscape reuses the exact atlas, material, and animation metadata from a proven template MPR. "
+        "Endurance creates fresh MP/SEC members and does not invent a MOB or map.txt registration. "
+        "If you change the namespace, matching atlas textures must already exist in the active resource profile."), &dialog);
+    explanation->setWordWrap(true);
+    root->addWidget(explanation);
+    QFormLayout* form = new QFormLayout;
+    root->addLayout(form);
+
+    QLineEdit* templatePath = new QLineEdit(&dialog);
+    QPushButton* browseTemplate = new QPushButton(tr("Browse..."), &dialog);
+    QWidget* templateRow = new QWidget(&dialog);
+    QHBoxLayout* templateLayout = new QHBoxLayout(templateRow);
+    templateLayout->setContentsMargins(0, 0, 0, 0);
+    templateLayout->addWidget(templatePath, 1);
+    templateLayout->addWidget(browseTemplate);
+    form->addRow(tr("Terrain template MPR"), templateRow);
+
+    QLineEdit* nameSpace = new QLineEdit(&dialog);
+    form->addRow(tr("MPR namespace"), nameSpace);
+    QSpinBox* sectorsX = new QSpinBox(&dialog);
+    QSpinBox* sectorsY = new QSpinBox(&dialog);
+    sectorsX->setRange(1, 32);
+    sectorsY->setRange(1, 32);
+    sectorsX->setValue(4);
+    sectorsY->setValue(4);
+    form->addRow(tr("Width (16-tile sectors)"), sectorsX);
+    form->addRow(tr("Height (16-tile sectors)"), sectorsY);
+    QDoubleSpinBox* maxZ = new QDoubleSpinBox(&dialog);
+    maxZ->setRange(0.001, 1000000.0);
+    maxZ->setDecimals(3);
+    maxZ->setValue(100.0);
+    form->addRow(tr("Vertical scale (maxZ)"), maxZ);
+    QSpinBox* flatRaw = new QSpinBox(&dialog);
+    flatRaw->setRange(0, 65535);
+    flatRaw->setValue(32768);
+    form->addRow(tr("Flat raw height"), flatRaw);
+    QSpinBox* atlasSlot = new QSpinBox(&dialog);
+    atlasSlot->setRange(0, 16383);
+    form->addRow(tr("Initial atlas slot"), atlasSlot);
+    QComboBox* rotation = new QComboBox(&dialog);
+    rotation->addItems({tr("0 degrees"), tr("90 degrees"),
+                        tr("180 degrees"), tr("270 degrees")});
+    form->addRow(tr("Initial tile rotation"), rotation);
+    QCheckBox* closeEdges = new QCheckBox(tr("Taper the outside edge down to raw height 0"), &dialog);
+    closeEdges->setChecked(true);
+    form->addRow(QString(), closeEdges);
+    QSpinBox* taperTiles = new QSpinBox(&dialog);
+    taperTiles->setRange(1, 16);
+    taperTiles->setValue(2);
+    form->addRow(tr("Edge taper width (tiles)"), taperTiles);
+
+    QLineEdit* heightmapPath = new QLineEdit(&dialog);
+    heightmapPath->setPlaceholderText(tr("Optional; leave blank for a flat map"));
+    QPushButton* browseHeightmap = new QPushButton(tr("Browse..."), &dialog);
+    QWidget* heightmapRow = new QWidget(&dialog);
+    QHBoxLayout* heightmapLayout = new QHBoxLayout(heightmapRow);
+    heightmapLayout->setContentsMargins(0, 0, 0, 0);
+    heightmapLayout->addWidget(heightmapPath, 1);
+    heightmapLayout->addWidget(browseHeightmap);
+    form->addRow(tr("Heightmap"), heightmapRow);
+    QSpinBox* heightmapMinimum = new QSpinBox(&dialog);
+    QSpinBox* heightmapMaximum = new QSpinBox(&dialog);
+    heightmapMinimum->setRange(0, 65535);
+    heightmapMaximum->setRange(0, 65535);
+    heightmapMaximum->setValue(65535);
+    form->addRow(tr("Heightmap black raw height"), heightmapMinimum);
+    form->addRow(tr("Heightmap white raw height"), heightmapMaximum);
+    QCheckBox* flipHeightmap = new QCheckBox(tr("Flip heightmap vertically"), &dialog);
+    form->addRow(QString(), flipHeightmap);
+
+    const QFileInfo currentTemplate = CLandscape::getInstance()->isMprLoad()
+        ? CLandscape::getInstance()->filePath() : QFileInfo();
+    if(currentTemplate.exists())
+    {
+        templatePath->setText(currentTemplate.absoluteFilePath());
+        CMprDocument current;
+        CValidationReport report;
+        if(current.load(currentTemplate, &report))
+        {
+            nameSpace->setText(current.mapInfo().innerNamespace);
+            maxZ->setValue(current.mapInfo().maxZ);
+            const quint32 atlasCount = qMin<quint32>(256, current.mapInfo().textureCount);
+            atlasSlot->setMaximum(qMax(0, int(atlasCount * 64) - 1));
+        }
+    }
+    connect(browseTemplate, &QPushButton::clicked, &dialog, [&]() {
+        const QString path = QFileDialog::getOpenFileName(&dialog,
+            tr("Choose Terrain Template MPR"), templatePath->text(), tr("MPR (*.mpr)"));
+        if(path.isEmpty())
+            return;
+        templatePath->setText(path);
+        CMprDocument candidateTemplate;
+        CValidationReport report;
+        if(candidateTemplate.load(QFileInfo(path), &report))
+        {
+            nameSpace->setText(candidateTemplate.mapInfo().innerNamespace);
+            maxZ->setValue(candidateTemplate.mapInfo().maxZ);
+            const quint32 atlasCount = qMin<quint32>(
+                256, candidateTemplate.mapInfo().textureCount);
+            atlasSlot->setMaximum(qMax(0, int(atlasCount * 64) - 1));
+        }
+    });
+    connect(browseHeightmap, &QPushButton::clicked, &dialog, [&]() {
+        const QString path = QFileDialog::getOpenFileName(&dialog,
+            tr("Choose Grayscale Heightmap"), heightmapPath->text(),
+            tr("Heightmaps (*.png *.bmp *.tif *.tiff);;Images (*)"));
+        if(!path.isEmpty())
+            heightmapPath->setText(path);
+    });
+    connect(closeEdges, &QCheckBox::toggled, taperTiles, &QSpinBox::setEnabled);
+
+    QDialogButtonBox* buttons = new QDialogButtonBox(
+        QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    buttons->button(QDialogButtonBox::Ok)->setText(tr("Create and Open..."));
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    root->addWidget(buttons);
+    if(dialog.exec() != QDialog::Accepted)
+        return;
+
+    CMprDocument terrainTemplate;
+    CValidationReport report;
+    const QFileInfo templateFile(templatePath->text());
+    if(!terrainTemplate.load(templateFile, &report) || report.hasErrors())
+    {
+        QMessageBox::warning(this, tr("Create New MPR"),
+            tr("The terrain template could not be validated.\n\n%1").arg(report.toText()));
+        return;
+    }
+    SMprCreationRequest request;
+    request.innerNamespace = nameSpace->text().trimmed();
+    request.sectorCountX = quint32(sectorsX->value());
+    request.sectorCountY = quint32(sectorsY->value());
+    request.maxZ = float(maxZ->value());
+    request.flatRawHeight = quint16(flatRaw->value());
+    SMprPackedTile tile;
+    tile.atlasIndex = quint8(atlasSlot->value() / 64);
+    tile.tileIndex = quint8(atlasSlot->value() % 64);
+    tile.rotation = quint8(rotation->currentIndex());
+    request.initialPackedTile = tile.encode();
+    request.closeEdges = closeEdges->isChecked();
+    request.edgeTaperTiles = taperTiles->value();
+    if(!heightmapPath->text().trimmed().isEmpty())
+    {
+        QImage image(heightmapPath->text().trimmed());
+        if(image.isNull() || heightmapMaximum->value() < heightmapMinimum->value())
+        {
+            QMessageBox::warning(this, tr("Create New MPR"),
+                tr("The heightmap could not be decoded, or its raw range is invalid."));
+            return;
+        }
+        request.heightmapWidth = image.width();
+        request.heightmapHeight = image.height();
+        request.heightmapMinimumRaw = float(heightmapMinimum->value());
+        request.heightmapMaximumRaw = float(heightmapMaximum->value());
+        request.heightmapSamples.reserve(image.width() * image.height());
+        for(int outputY = 0; outputY < image.height(); ++outputY)
+        {
+            const int imageY = flipHeightmap->isChecked()
+                ? image.height() - 1 - outputY : outputY;
+            for(int x = 0; x < image.width(); ++x)
+                request.heightmapSamples.append(
+                    float(qGray(image.pixel(x, imageY))) / 255.0f);
+        }
+    }
+    QByteArray candidate;
+    report = CValidationReport();
+    if(!terrainTemplate.buildNewCanvas(request, &candidate, &report))
+    {
+        QMessageBox::warning(this, tr("Create New MPR"),
+            tr("The new landscape could not be generated.\n\n%1").arg(report.toText()));
+        return;
+    }
+    COptString* opt = dynamic_cast<COptString*>(
+        m_settings->opt(eOptSetGeneral, "lastVisitedFolder"));
+    const QString startFolder = opt ? opt->value() : templateFile.absolutePath();
+    QString destinationPath = QFileDialog::getSaveFileName(this, tr("Save New MPR"),
+        QDir(startFolder).filePath(request.innerNamespace + QStringLiteral(".mpr")),
+        tr("MPR (*.mpr)"));
+    if(destinationPath.isEmpty())
+        return;
+    if(!destinationPath.endsWith(".mpr", Qt::CaseInsensitive))
+        destinationPath += QStringLiteral(".mpr");
+    const QFileInfo destination(destinationPath);
+    if(destination.exists()
+       && QMessageBox::question(this, tr("Replace MPR"),
+            tr("%1 already exists. Back it up and replace it?").arg(destination.fileName()))
+          != QMessageBox::Yes)
+        return;
+    SMprSaveCommitRequest commit;
+    commit.destination = destination;
+    const SMprSaveCommitResult result = commitGeneratedMpr(candidate, commit);
+    if(!result.success)
+    {
+        QMessageBox::critical(this, tr("Create New MPR"),
+            tr("The generated MPR was not committed.\n\n%1").arg(result.error));
+        return;
+    }
+    if(opt)
+        opt->setValue(destination.absolutePath());
+    rememberRecentFile(destination);
+    if(!replaceLoadedLandscape(destination))
+    {
+        QMessageBox::information(this, tr("New MPR Created"),
+            tr("The validated MPR was created at:\n%1\n\nIt was not opened because the current document transition was cancelled.")
+                .arg(destination.absoluteFilePath()));
+        return;
+    }
+    statusBar()->showMessage(tr("Created and opened %1").arg(destination.fileName()), 5000);
 }
 
 void MainWindow::on_actionOpen_MOB_triggered()
