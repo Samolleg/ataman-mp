@@ -27,6 +27,9 @@ if (Test-Path -LiteralPath $logsRoot) {
     foreach ($file in Get-ChildItem -LiteralPath $logsRoot -Recurse -File) {
         Remove-PackageFile $file
     }
+    if (-not (Get-ChildItem -LiteralPath $logsRoot -Force)) {
+        Remove-Item -LiteralPath $logsRoot -Force
+    }
 }
 
 foreach ($file in Get-ChildItem -LiteralPath $root -Recurse -File | Where-Object {
