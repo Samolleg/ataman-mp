@@ -65,6 +65,8 @@ public:
                                   bool removeOutside, float closedEdgeWidth,
                                   QByteArray* data, SCanvasCropResult* result,
                                   CValidationReport* report = nullptr);
+    bool persistAiGraph(const QByteArray* graph, QString* error = nullptr,
+                        const SaveProgress& progress = SaveProgress());
     void serializeJson(const QFileInfo& file);
     void serializeMob(QByteArray& data, bool writeLog = true);
     void addNode(QList<CNode*>& aNode) {m_aNode.append(aNode); }

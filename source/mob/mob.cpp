@@ -32,6 +32,7 @@
 #include "backup_manager.h"
 #include "staged_save_validator.h"
 #include "endurance_document.h"
+#include "ai_graph_document.h"
 
 CMob::CMob():
     m_view(nullptr)
@@ -2165,6 +2166,119 @@ bool CMob::save(const SaveProgress& progress)
 {
     return saveAs(m_filePath, progress);
 }
+
+bool CMob::persistAiGraph(const QByteArray* graph, QString* error,
+                          const SaveProgress& progress)
+{
+    if(graph)
+    {
+        CAiGraphDocument graphDocument;
+        QString graphError;
+        if(!graphDocument.parse(*graph, &graphError)
+           || !graphDocument.validateRuntimeCompatibility(
+               graphDocument.width(), graphDocument.height(), &graphError))
+        {
+            if(error) *error = QString("The selected AI graph is not runtime-compatible: %1")
+                .arg(graphError);
+            return false;
+        }
+    }
+    QByteArray currentCandidate;
+    CValidationReport report;
+    QString saveClass;
+    if(progress) progress("Serializing current verified MOB edits...", 0, 6);
+    if(!buildValidatedCandidate(&currentCandidate, &report, &saveClass))
+    {
+        if(error) *error = report.toText().trimmed();
+        return false;
+    }
+
+    CMobDocument document;
+    if(!document.loadBytes(currentCandidate, m_filePath.filePath(), &report))
+    {
+        if(error) *error = report.toText().trimmed();
+        return false;
+    }
+    QByteArray finalCandidate;
+    if(progress) progress(graph ? "Embedding the selected AI graph..."
+                                : "Removing the embedded AI graph...", 1, 6);
+    const bool transformed = graph
+        ? document.replaceEmbeddedAiGraph(*graph, &finalCandidate, &report)
+        : document.removeEmbeddedAiGraph(&finalCandidate, &report);
+    if(!transformed)
+    {
+        if(error) *error = report.toText().trimmed();
+        return false;
+    }
+
+    if(progress) progress("Freshly validating the staged MOB...", 2, 6);
+    const SStagedSaveValidation validation = validateStagedSave(
+        finalCandidate, m_filePath);
+    if(!validation.success)
+    {
+        if(error) *error = validation.error;
+        return false;
+    }
+    CMobDocument reopened;
+    CValidationReport reopenReport;
+    QByteArray reopenedGraph;
+    if(!reopened.loadBytes(finalCandidate, "ai-graph-save-candidate.mob",
+                           &reopenReport)
+       || (graph && (!reopened.embeddedAiGraph(&reopenedGraph, &reopenReport)
+                     || reopenedGraph != *graph))
+       || (!graph && reopened.hasEmbeddedAiGraph()))
+    {
+        if(error) *error = reopenReport.toText().trimmed();
+        return false;
+    }
+
+    if(progress) progress("Checking the source and creating a backup...", 3, 6);
+    QFile source(m_filePath.absoluteFilePath());
+    if(!source.open(QIODevice::ReadOnly))
+    {
+        if(error) *error = source.errorString();
+        return false;
+    }
+    const QByteArray diskBytes = source.readAll();
+    source.close();
+    if(diskBytes != m_originalData)
+    {
+        if(error) *error = "The primary MOB changed on disk. Reopen it before saving the AI graph.";
+        return false;
+    }
+    const SBackupResult backup = CBackupManager().snapshotBeforeSave(m_filePath);
+    if(!backup.success)
+    {
+        if(error) *error = backup.error;
+        return false;
+    }
+    QFile raceCheck(m_filePath.absoluteFilePath());
+    if(!raceCheck.open(QIODevice::ReadOnly) || raceCheck.readAll() != diskBytes)
+    {
+        if(error) *error = "The primary MOB changed while the AI graph save was staged.";
+        return false;
+    }
+
+    if(progress) progress("Atomically replacing the primary MOB...", 4, 6);
+    QSaveFile output(m_filePath.absoluteFilePath());
+    if(!output.open(QIODevice::WriteOnly)
+       || output.write(finalCandidate) != finalCandidate.size()
+       || !output.commit())
+    {
+        if(error) *error = output.errorString();
+        return false;
+    }
+    m_aiGraph = graph ? *graph : QByteArray();
+    m_originalData = finalCandidate;
+    captureCleanProjection();
+    if(progress) progress("Rebinding saved MOB provenance...", 5, 6);
+    if(!rebindRawObjectProvenance())
+        ei::log(eLogWarning, QString("AI graph MOB save could not rebind raw object provenance path:%1")
+                .arg(m_filePath.absoluteFilePath()));
+    if(progress) progress("AI graph MOB save complete.", 6, 6);
+    return true;
+}
+
 bool SMobParameterState::operator==(const SMobParameterState& other) const
 {
     if(questMob != other.questMob || mainRanges != other.mainRanges

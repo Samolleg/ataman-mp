@@ -9,6 +9,8 @@
 #include <limits>
 
 #include "endurance_document.h"
+#include "ai_graph_document.h"
+#include "ai_graph_persistence.h"
 #include "landscape_edit_policy.h"
 #include "operation_history_policy.h"
 #include "tile_brush_stroke_policy.h"
@@ -367,6 +369,22 @@ const SMobSection* firstSectionOfType(const QVector<SMobSection>& sections, quin
     }
     return nullptr;
 }
+
+QByteArray syntheticValidAiGraph(quint8 localPosition, quint16 component)
+{
+    QVector<SAiGraphLayer> layers(CAiGraphDocument::LayerCount);
+    for(SAiGraphLayer& layer : layers)
+    {
+        layer.weights.fill(qint16(-1), CAiGraphDocument::DirectionCount);
+        layer.packedPositions = QByteArray(1, char(localPosition));
+        layer.components.fill(component, 1);
+    }
+    CAiGraphDocument graph;
+    QString error;
+    if(!graph.initializePreview(1, 1, layers, &error))
+        return QByteArray();
+    return graph.serialize(&error);
+}
 }
 
 class EnduranceDocumentTests : public QObject
@@ -382,6 +400,9 @@ private slots:
     void sculptCadenceIsIndependentOfSpatialInterpolation();
     void unchangedMobIsByteIdentical();
     void mobGraphRemovalPreservesAllOtherTopLevelBytes();
+    void mobGraphReplacementAndInsertionAreExact();
+    void aiGraphPersistenceUsesExactMprBasenameAndReportsShadowing();
+    void aiGraphFileCommitIsValidatedBackedUpAndAtomic();
     void duplicateMobIdsAreWarningsOnly();
     void vulcansmokeIsACriticalNonBlockingFinding();
     void unknownLeafIsPreservedAsOpaque();
@@ -576,6 +597,98 @@ void EnduranceDocumentTests::mobGraphRemovalPreservesAllOtherTopLevelBytes()
     CMobDocument reopened;
     QVERIFY(reopened.loadBytes(candidate, "graphless-result.mob", &report));
     QVERIFY(!reopened.hasEmbeddedAiGraph());
+}
+
+void EnduranceDocumentTests::mobGraphReplacementAndInsertionAreExact()
+{
+    const QByteArray root = validMob(section(0xB000, object(42, "bridge")));
+    const QByteArray oldGraph(64, '\x2a');
+    const QByteArray newGraph(96, '\x5b');
+
+    CMobDocument withGraph;
+    CValidationReport report;
+    QVERIFY2(withGraph.loadBytes(root + section(0x31415926, oldGraph),
+                                 "graph-source.mob", &report),
+             qPrintable(report.toText()));
+    QByteArray replaced;
+    QVERIFY2(withGraph.replaceEmbeddedAiGraph(newGraph, &replaced, &report),
+             qPrintable(report.toText()));
+    QCOMPARE(replaced, root + section(0x31415926, newGraph));
+
+    CMobDocument reopenedReplacement;
+    QVERIFY(reopenedReplacement.loadBytes(replaced, "graph-replaced.mob", &report));
+    QByteArray extracted;
+    QVERIFY(reopenedReplacement.embeddedAiGraph(&extracted, &report));
+    QCOMPARE(extracted, newGraph);
+
+    CMobDocument graphless;
+    QVERIFY(graphless.loadBytes(root, "graphless-source.mob", &report));
+    QByteArray inserted;
+    QVERIFY2(graphless.replaceEmbeddedAiGraph(newGraph, &inserted, &report),
+             qPrintable(report.toText()));
+    QCOMPARE(inserted, root + section(0x31415926, newGraph));
+}
+
+void EnduranceDocumentTests::aiGraphPersistenceUsesExactMprBasenameAndReportsShadowing()
+{
+    const QFileInfo zone6("C:/maps/zone6.mpr");
+    const QFileInfo frozen("C:/maps/zone6_2.mpr");
+    QCOMPARE(aiGraphRuntimeSiblingPath(zone6), QString("C:/maps/zone6.grp"));
+    QCOMPARE(aiGraphRuntimeSiblingPath(frozen), QString("C:/maps/zone6_2.grp"));
+    QVERIFY(aiGraphEmbeddedSourceShadowsExternal(true));
+    QVERIFY(!aiGraphEmbeddedSourceShadowsExternal(false));
+
+    const QString warning = aiGraphSharedMobWarning(
+        QStringLiteral("zone6.mob"),
+        QStringList() << "gz6g / zone6" << "gz6f / zone6_2");
+    QVERIFY(warning.contains("zone6.mob"));
+    QVERIFY(warning.contains("zone6_2"));
+    QVERIFY(warning.contains("both", Qt::CaseInsensitive));
+}
+
+void EnduranceDocumentTests::aiGraphFileCommitIsValidatedBackedUpAndAtomic()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QByteArray original = syntheticValidAiGraph(0x11, 1);
+    const QByteArray replacement = syntheticValidAiGraph(0x22, 2);
+    QVERIFY(!original.isEmpty());
+    QVERIFY(!replacement.isEmpty());
+    QVERIFY(original != replacement);
+
+    const QFileInfo destination(directory.filePath("zone6_2.grp"));
+    QFile file(destination.absoluteFilePath());
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    QCOMPARE(file.write(original), qint64(original.size()));
+    file.close();
+
+    SAiGraphFileCommitRequest request;
+    request.destination = destination;
+    request.graphBytes = replacement;
+    request.backupRootOverride = directory.filePath("backups");
+    const SAiGraphFileCommitResult committed = commitValidatedAiGraphFile(request);
+    QVERIFY2(committed.success, qPrintable(committed.error));
+    QVERIFY(!committed.noOp);
+    QVERIFY(QFileInfo::exists(committed.backupPath));
+    QFile reopened(destination.absoluteFilePath());
+    QVERIFY(reopened.open(QIODevice::ReadOnly));
+    QCOMPARE(reopened.readAll(), replacement);
+
+    request.graphBytes = original;
+    request.simulateAtomicCommitFailure = true;
+    const SAiGraphFileCommitResult failed = commitValidatedAiGraphFile(request);
+    QVERIFY(!failed.success);
+    QCOMPARE(failed.phase, QString("atomic-replacement"));
+    QFile unchanged(destination.absoluteFilePath());
+    QVERIFY(unchanged.open(QIODevice::ReadOnly));
+    QCOMPARE(unchanged.readAll(), replacement);
+
+    SAiGraphFileCommitRequest invalid;
+    invalid.destination = QFileInfo(directory.filePath("invalid.grp"));
+    invalid.graphBytes = QByteArray("not-a-graph");
+    const SAiGraphFileCommitResult refused = commitValidatedAiGraphFile(invalid);
+    QVERIFY(!refused.success);
+    QVERIFY(!invalid.destination.exists());
 }
 
 void EnduranceDocumentTests::unchangedMobIsByteIdentical()

@@ -616,12 +616,14 @@ The following items are deliberately not hidden inside the completed baseline:
   remains before this is the complete derivative-map workflow.
 - [ ] Implement deterministic new-MPR creation using the runtime-compatible RES
   hash table and collision-chain contract described above.
-- [ ] Add persistent export/ownership for regenerated AI graphs. Test Current
-  Map now generates, freshly reopens, structurally validates, and authoritatively
-  stages all eight profiles as its run-local same-basename `.grp`, stripping the
-  embedded graph only from the temporary MOB copy so stale data cannot shadow
-  it. Still pending: user-selected external `.grp` export or embedding into the
-  chosen MOB owner, atomic persistence, and copied-fixture/game-side validation.
+- [x] Add persistent export/ownership for loaded or regenerated AI graphs. The
+  viewport and Tools menu now share one Bake / Export flow that writes the exact
+  active-MPR sibling `.grp`, embeds into the primary MOB, or atomically switches
+  a primary MOB from embedded to external ownership. Every changed artifact is
+  staged, freshly reopened, runtime-validated, backed up, race-checked, and
+  atomically replaced; shared-MOB registrations and embedded-graph shadowing are
+  called out before mutation. Zone 6 / Zone 6 frozen remain the controlled
+  copied-fixture game-side test for distinct `zone6.grp` and `zone6_2.grp` states.
 - [ ] Replace Play from Here's terrain-only clearance probe with nearest valid
   placement from the active, non-stale regenerated graph.
 - [ ] Add recovery autosave for dirty canonical MPR transactions without using

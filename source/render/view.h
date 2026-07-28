@@ -136,6 +136,7 @@ public:
     bool buildGeneratedAiGraphCandidate(QByteArray* data,
                                         QString* error = nullptr,
                                         QString* sourceDescription = nullptr);
+    void refreshAiGraphOwnership();
     bool loadMob(QFileInfo& filePath);
     void saveMobAs();
     void saveActiveMob();
@@ -440,6 +441,7 @@ signals:
     void nidChangeProposed(quint32 nid, const QString& mobPath);
     void nidAllocationRequested(const QString& mobPath, quint32* suggestion);
     void cameraSpeedMultiplierChanged(double multiplier);
+    void aiGraphPersistenceRequested();
 
 private:
     int m_height; //for redraw window
@@ -672,6 +674,7 @@ private:
     QToolButton* m_aiGraphPreviewCollapse{nullptr};
     QToolButton* m_aiGraphRegenerateButton{nullptr};
     QToolButton* m_aiGraphUseLoadedButton{nullptr};
+    QToolButton* m_aiGraphPersistButton{nullptr};
     QSlider* m_aiGraphLayerSlider{nullptr};
     QLabel* m_aiGraphLayerLabel{nullptr};
     QLabel* m_aiGraphSourceLabel{nullptr};

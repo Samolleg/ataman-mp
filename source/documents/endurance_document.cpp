@@ -2190,6 +2190,92 @@ bool CMobDocument::hasEmbeddedAiGraph() const
     return false;
 }
 
+bool CMobDocument::embeddedAiGraph(QByteArray* graph,
+                                   CValidationReport* report) const
+{
+    if(!graph)
+        return false;
+    graph->clear();
+    int matches = 0;
+    for(const SMobSection& section : m_sections)
+    {
+        if(section.type != 0x31415926)
+            continue;
+        ++matches;
+        if(section.rawBytes.size() < 8)
+        {
+            if(report)
+                report->add("mob.ai_graph.section", EValidationSeverity::Error,
+                            "The embedded AI_GRAPH section is truncated.", section.path);
+            return false;
+        }
+        *graph = section.rawBytes.mid(8);
+    }
+    if(matches > 1)
+    {
+        if(report)
+            report->add("mob.ai_graph.duplicate", EValidationSeverity::Error,
+                        "The MOB contains more than one top-level AI_GRAPH section.");
+        graph->clear();
+        return false;
+    }
+    return matches == 1;
+}
+
+bool CMobDocument::replaceEmbeddedAiGraph(const QByteArray& graph,
+                                          QByteArray* output,
+                                          CValidationReport* report) const
+{
+    if(!output || graph.isEmpty())
+    {
+        if(report)
+            report->add("mob.ai_graph.replacement", EValidationSeverity::Error,
+                        "A non-empty AI graph payload is required.");
+        return false;
+    }
+    output->clear();
+    QByteArray replacement;
+    appendU32(replacement, 0x31415926);
+    appendU32(replacement, quint32(8 + graph.size()));
+    replacement.append(graph);
+
+    int replaced = 0;
+    for(const SMobSection& section : m_sections)
+    {
+        if(section.type == 0x31415926)
+        {
+            if(++replaced > 1)
+            {
+                if(report)
+                    report->add("mob.ai_graph.duplicate", EValidationSeverity::Error,
+                                "The MOB contains more than one top-level AI_GRAPH section.");
+                output->clear();
+                return false;
+            }
+            output->append(replacement);
+        }
+        else
+            output->append(section.rawBytes);
+    }
+    if(replaced == 0)
+        output->append(replacement);
+
+    CMobDocument reopened;
+    CValidationReport reopenReport;
+    QByteArray reopenedGraph;
+    if(!reopened.loadBytes(*output, QStringLiteral("ai-graph-candidate.mob"),
+                           &reopenReport)
+       || !reopened.embeddedAiGraph(&reopenedGraph, &reopenReport)
+       || reopenedGraph != graph)
+    {
+        if(report)
+            *report = reopenReport;
+        output->clear();
+        return false;
+    }
+    return true;
+}
+
 bool CMobDocument::removeEmbeddedAiGraph(QByteArray* output,
                                          CValidationReport* report) const
 {

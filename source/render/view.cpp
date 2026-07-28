@@ -1437,8 +1437,14 @@ void CView::initAiGraphPreviewWidget()
     m_aiGraphUseLoadedButton->setToolTip(tr(
         "Toggle between the graph loaded from the map and the regenerated preview. "
         "Test Current Map and Hot Reload stage the selected graph."));
+    m_aiGraphPersistButton = new QToolButton(m_aiGraphPreviewBody);
+    m_aiGraphPersistButton->setText(tr("Bake / Export..."));
+    m_aiGraphPersistButton->setToolTip(tr(
+        "Persist the selected loaded or regenerated graph as an exact runtime .grp, "
+        "embed it into the primary MOB, or switch the primary MOB to external graph ownership."));
     actions->addWidget(m_aiGraphUseLoadedButton);
     actions->addWidget(m_aiGraphRegenerateButton);
+    actions->addWidget(m_aiGraphPersistButton);
     body->addLayout(actions);
     layout->addWidget(m_aiGraphPreviewBody);
 
@@ -1475,6 +1481,8 @@ void CView::initAiGraphPreviewWidget()
     });
     connect(m_aiGraphRegenerateButton, &QToolButton::clicked,
             this, [this]() { startAiGraphPreviewRegeneration(); });
+    connect(m_aiGraphPersistButton, &QToolButton::clicked,
+            this, &CView::aiGraphPersistenceRequested);
     connect(m_aiGraphUseLoadedButton, &QToolButton::clicked, this, [this](bool loaded)
     {
         if(!loaded)
@@ -1566,6 +1574,10 @@ void CView::syncAiGraphPreviewWidget()
             : tr("Loaded preview override: OFF"));
         m_aiGraphUseLoadedButton->setEnabled(m_aiGraphLoadedDocument.isValid());
     }
+    if(m_aiGraphPersistButton)
+        m_aiGraphPersistButton->setEnabled(
+            m_terrainEditAvailable && (m_aiGraphLoadedDocument.isValid()
+                                       || m_aiGraphRegeneratedDocument.isValid()));
     if(m_aiGraphPreviewBody->layout())
         m_aiGraphPreviewBody->layout()->activate();
     m_aiGraphPreviewWidget->adjustSize();
@@ -1887,6 +1899,11 @@ void CView::startAiGraphPreviewRegeneration()
     ++m_aiGraphBuildRequest;
     m_aiGraphRegeneratedFresh = false;
     beginAiGraphPreviewRegeneration(true);
+}
+
+void CView::refreshAiGraphOwnership()
+{
+    refreshAiGraphPreviewSource();
 }
 
 void CView::beginAiGraphPreviewRegeneration(bool selectRegenerated)

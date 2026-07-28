@@ -7,6 +7,8 @@ INCLUDEPATH += ../source/documents ../source/core ../source/render ../source/app
 SOURCES += \
     endurance_document_tests.cpp \
     ../source/documents/endurance_document.cpp \
+    ../source/documents/ai_graph_persistence.cpp \
+    ../source/documents/ai_graph_document.cpp \
     ../source/documents/mpr_document.cpp \
     ../source/documents/terrain_edit_model.cpp \
     ../source/render/terrain_atlas_analyzer.cpp \
@@ -20,6 +22,8 @@ HEADERS += \
     ../source/core/operation_history_policy.h \
     ../source/core/tile_brush_stroke_policy.h \
     ../source/documents/endurance_document.h \
+    ../source/documents/ai_graph_persistence.h \
+    ../source/documents/ai_graph_document.h \
     ../source/documents/mpr_document.h \
     ../source/documents/terrain_edit_model.h \
     ../source/render/terrain_atlas_analyzer.h \

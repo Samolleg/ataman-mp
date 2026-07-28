@@ -205,6 +205,10 @@ public:
     const QByteArray& originalBytes() const { return m_originalBytes; }
     const QVector<SMobSection>& sections() const { return m_sections; }
     bool hasEmbeddedAiGraph() const;
+    bool embeddedAiGraph(QByteArray* graph,
+                         CValidationReport* report = nullptr) const;
+    bool replaceEmbeddedAiGraph(const QByteArray& graph, QByteArray* output,
+                                CValidationReport* report = nullptr) const;
     bool removeEmbeddedAiGraph(QByteArray* output,
                                CValidationReport* report = nullptr) const;
     const QVector<SMobObjectSnapshot>& objects() const { return m_objects; }

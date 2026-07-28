@@ -88,6 +88,7 @@
 #include "jmv_map_test_launcher.h"
 #include "resource_profile.h"
 #include "endurance_document.h"
+#include "ai_graph_persistence.h"
 #include "landscape_tools.h"
 #include "collection_document.h"
 #include "collection_editor_dialog.h"
@@ -711,6 +712,7 @@ MainWindow::MainWindow(QWidget* parent) :
     QAction* repairMobFamily = new QAction(tr("Review and Repair NID Collisions..."), this);
     QAction* openMapCatalog = new QAction(tr("Map Catalog Editor..."), this);
     QAction* generateMinimapAction = new QAction(tr("Export Minimap..."), this);
+    QAction* persistAiGraphAction = new QAction(tr("Bake / Export AI Graph..."), this);
     m_mapTestAction = new QAction(tr("Test Current Map"), this);
     m_mapTestAction->setToolTip(tr("Stages unique temporary MPR/MOB copies and launches the active validated runtime profile. JMV uses hash-owned temporary aliases in the mod Maps directory; source maps are never overwritten."));
     m_stopMapTestAction = new QAction(tr("Stop Test"), this);
@@ -726,6 +728,7 @@ MainWindow::MainWindow(QWidget* parent) :
     m_ui->menuTools->addAction(repairMobFamily);
     m_ui->menuTools->addAction(openMapCatalog);
     m_ui->menuTools->addAction(generateMinimapAction);
+    m_ui->menuTools->addAction(persistAiGraphAction);
     m_ui->menuTools->addAction(m_mapTestAction);
     m_ui->menuTools->addAction(m_stopMapTestAction);
     m_ui->menuTools->addAction(openBackupFolder);
@@ -742,6 +745,8 @@ MainWindow::MainWindow(QWidget* parent) :
     });
     connect(generateMinimapAction, &QAction::triggered,
             this, &MainWindow::generateMinimap);
+    connect(persistAiGraphAction, &QAction::triggered,
+            this, &MainWindow::persistAiGraph);
     connect(openBackupFolder, &QAction::triggered, this, [this]()
     {
         QString error;
@@ -1070,6 +1075,8 @@ MainWindow::MainWindow(QWidget* parent) :
     });
     connect(m_pView, &CView::loadedMapStateChanged,
             this, [this]() { scheduleViewportMinimapRefresh(); });
+    connect(m_pView, &CView::aiGraphPersistenceRequested,
+            this, &MainWindow::persistAiGraph);
     connect(m_pView, &CView::mobStateChanged,
             this, [this]() { scheduleViewportMinimapRefresh(); });
     connect(m_pView, &CView::updateMainWindowTitle,
@@ -3540,6 +3547,163 @@ void MainWindow::positionViewportMinimap()
         qMax(margin, m_pView->width() - m_viewportMinimap->width() - margin),
         margin);
     m_viewportMinimap->raise();
+}
+
+void MainWindow::persistAiGraph()
+{
+    if(!m_pView || !CLandscape::getInstance()->isMprLoad())
+    {
+        QMessageBox::information(this, tr("Bake / Export AI Graph"),
+            tr("Load an MPR and its primary MOB before persisting an AI graph."));
+        return;
+    }
+    CMob* primaryMob = mapTestStagingMob();
+    if(!primaryMob)
+    {
+        QMessageBox::information(this, tr("Bake / Export AI Graph"),
+            tr("Load the primary MOB before baking or exporting an AI graph."));
+        return;
+    }
+
+    QByteArray graphBytes;
+    QString graphError;
+    QString graphSource;
+    if(!m_pView->buildGeneratedAiGraphCandidate(
+           &graphBytes, &graphError, &graphSource))
+    {
+        QMessageBox::critical(this, tr("Bake / Export AI Graph"),
+            tr("Endurance could not prepare a runtime-compatible AI graph:\n\n%1")
+                .arg(graphError));
+        return;
+    }
+
+    const QFileInfo activeMpr(CLandscape::getInstance()->filePath());
+    const QString externalPath = aiGraphRuntimeSiblingPath(activeMpr);
+    const bool embedded = !primaryMob->aiGraphData().isEmpty();
+    QStringList mapOwners;
+    const QString primaryBase = primaryMob->filePath().completeBaseName();
+    for(const SMapCatalogEntry& entry : m_mapCatalog.entries)
+    {
+        const QString registeredMob = QFileInfo(entry.mobName).completeBaseName();
+        if(!registeredMob.isEmpty()
+           && registeredMob.compare(primaryBase, Qt::CaseInsensitive) == 0)
+            mapOwners.append(QStringLiteral("%1 / %2")
+                .arg(entry.zoneId, entry.mprName));
+    }
+    mapOwners.removeDuplicates();
+    const QString sharedWarning = aiGraphSharedMobWarning(
+        primaryMob->filePath().fileName(), mapOwners);
+
+    QString detail = tr(
+        "Selected graph: %1\n"
+        "Active MPR: %2\n"
+        "Runtime external graph: %3\n"
+        "Primary MOB: %4\n\n"
+        "Runtime priority is the primary MOB's embedded graph first, then the exact active-MPR sibling .grp.")
+        .arg(graphSource, activeMpr.fileName(), externalPath,
+             primaryMob->filePath().absoluteFilePath());
+    if(embedded)
+        detail += tr("\n\nThe primary MOB currently has an embedded graph. Exporting only the .grp is safe, but that file remains shadowed until embedded ownership is removed.");
+    if(primaryMob->isDirty())
+        detail += tr("\n\nThe primary MOB has unsaved edits. Bake or Switch will commit those edits together with the graph through the verified MOB save path.");
+    if(!sharedWarning.isEmpty())
+        detail += QStringLiteral("\n\n") + sharedWarning;
+
+    QMessageBox prompt(this);
+    prompt.setWindowTitle(tr("Bake / Export AI Graph"));
+    prompt.setIcon(QMessageBox::Question);
+    prompt.setText(tr("Choose how the selected AI graph should be persisted."));
+    prompt.setInformativeText(detail);
+    QPushButton* exportButton = prompt.addButton(
+        tr("Export Runtime .grp"), QMessageBox::AcceptRole);
+    QPushButton* bakeButton = prompt.addButton(
+        tr("Bake into Primary MOB"), QMessageBox::ActionRole);
+    QPushButton* switchButton = prompt.addButton(
+        tr("Switch MOB to External .grp"), QMessageBox::ActionRole);
+    prompt.addButton(QMessageBox::Cancel);
+    prompt.exec();
+    QAbstractButton* selected = prompt.clickedButton();
+    if(selected != exportButton && selected != bakeButton
+       && selected != switchButton)
+        return;
+
+    QProgressDialog progress(tr("Preparing AI graph persistence..."), QString(),
+                             0, 6, this);
+    configureBlockingProgress(&progress);
+    progress.show();
+    const auto updateProgress = [&progress](const QString& message,
+                                             int value, int maximum)
+    {
+        progress.setMaximum(maximum);
+        progress.setValue(value);
+        progress.setLabelText(message);
+        QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+    };
+    const auto exportExternal = [&]() -> SAiGraphFileCommitResult
+    {
+        updateProgress(tr("Staging and validating %1...")
+                           .arg(QFileInfo(externalPath).fileName()), 1, 6);
+        SAiGraphFileCommitRequest request;
+        request.destination = QFileInfo(externalPath);
+        request.graphBytes = graphBytes;
+        return commitValidatedAiGraphFile(request);
+    };
+
+    QString successText;
+    QString failureText;
+    if(selected == exportButton)
+    {
+        const SAiGraphFileCommitResult result = exportExternal();
+        if(!result.success)
+            failureText = tr("The runtime .grp was not changed.\n\nPhase: %1\n%2")
+                .arg(result.phase, result.error);
+        else
+        {
+            successText = result.noOp
+                ? tr("The exact runtime .grp already contained the selected graph:\n%1")
+                    .arg(externalPath)
+                : tr("Exported and freshly validated the exact runtime .grp:\n%1")
+                    .arg(externalPath);
+            if(embedded)
+                successText += tr("\n\nIt is currently shadowed by the primary MOB's embedded graph.");
+        }
+    }
+    else if(selected == bakeButton)
+    {
+        if(!primaryMob->persistAiGraph(&graphBytes, &graphError, updateProgress))
+            failureText = tr("The primary MOB was not changed.\n\n%1")
+                .arg(graphError);
+        else
+            successText = tr("Baked the selected graph into %1. It now has runtime priority over any sibling .grp.")
+                .arg(primaryMob->filePath().fileName());
+    }
+    else
+    {
+        const SAiGraphFileCommitResult result = exportExternal();
+        if(!result.success)
+            failureText = tr("The runtime .grp could not be committed, so the embedded graph was left untouched.\n\nPhase: %1\n%2")
+                .arg(result.phase, result.error);
+        else if(!primaryMob->persistAiGraph(nullptr, &graphError, updateProgress))
+            failureText = tr("The exact runtime .grp was safely written, but the embedded graph could not be removed. The MOB still shadows the external file, so runtime ownership has not changed.\n\n%1")
+                .arg(graphError);
+        else
+            successText = tr("Exported %1 and removed the embedded graph from %2. The active MPR now resolves the exact sibling .grp at runtime.")
+                .arg(externalPath, primaryMob->filePath().fileName());
+    }
+    progress.setValue(progress.maximum());
+    progress.close();
+
+    if(!failureText.isEmpty())
+    {
+        QMessageBox::critical(this, tr("Bake / Export AI Graph"), failureText);
+        return;
+    }
+    m_pView->refreshAiGraphOwnership();
+    if(primaryMob == m_pView->currentMob())
+        m_pView->changeCurrentMob(primaryMob);
+    else
+        updateLoadedMapPanel();
+    QMessageBox::information(this, tr("Bake / Export AI Graph"), successText);
 }
 
 void MainWindow::generateMinimap()
