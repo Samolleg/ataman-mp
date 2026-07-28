@@ -1062,6 +1062,26 @@ int runHeadlessCommand(QApplication& app)
             && landscapeTools.selectPaintTerrainType(9)
             && landscapeTools.paintTerrainType(&irregularSelected) == 9
             && irregularSelected;
+        STerrainPaintMaterialChoice darkGrass;
+        darkGrass.id = 101;
+        darkGrass.name = "Grass / Dark";
+        darkGrass.familyName = "Grass";
+        STerrainPaintMaterialChoice freshGrass = darkGrass;
+        freshGrass.id = 102;
+        freshGrass.name = "Grass / Fresh";
+        landscapeTools.setPaintMaterials(
+            {darkGrass, freshGrass}, {}, {}, 2, 2);
+        int grassVariantButtons = 0;
+        int grassFamilyHeadings = 0;
+        for(QToolButton* button : landscapeTools.findChildren<QToolButton*>())
+            grassVariantButtons += button->property("terrainMaterialId").toInt() == 101
+                || button->property("terrainMaterialId").toInt() == 102;
+        for(QLabel* label : landscapeTools.findChildren<QLabel*>())
+            grassFamilyHeadings += label->text() == QStringLiteral("Grass");
+        const bool materialVariantsRemainDistinctAndGrouped =
+            grassVariantButtons == 2 && grassFamilyHeadings == 1
+            && landscapeTools.selectPaintTerrainType(101)
+            && landscapeTools.selectPaintTerrainType(102);
         QLabel* atlasSourceStatus =
             landscapeTools.findChild<QLabel*>("materialAtlasSourceStatus");
         landscapeTools.setPaintMaterials(
@@ -1294,6 +1314,7 @@ int runHeadlessCommand(QApplication& app)
             && overlaySurfaceToolSeparate
             && programmaticModeRefreshesMaterials
             && uniqueMaterialPaletteCards
+            && materialVariantsRemainDistinctAndGrouped
             && defaultAtlasSourceVisible
             && localAtlasSourceVisible
             && generatedAtlasCountVisible
@@ -1375,6 +1396,8 @@ int runHeadlessCommand(QApplication& app)
                << programmaticModeRefreshesMaterials
                << " uniqueMaterialPaletteCards="
                << uniqueMaterialPaletteCards
+               << " materialVariantsRemainDistinctAndGrouped="
+               << materialVariantsRemainDistinctAndGrouped
                << " defaultAtlasSourceVisible=" << defaultAtlasSourceVisible
                << " localAtlasSourceVisible=" << localAtlasSourceVisible
                << " generatedAtlasCountVisible=" << generatedAtlasCountVisible

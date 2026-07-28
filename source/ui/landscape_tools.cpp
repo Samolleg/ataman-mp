@@ -595,35 +595,45 @@ void CLandscapeTools::rebuildMaterialPalette()
           QLabel* heading = new QLabel(title, this);
           heading->setStyleSheet(QStringLiteral("QLabel { font-weight: bold; margin-top: 5px; }"));
           grid->addWidget(heading, row++, 0, 1, 5);
-          int index = 0;
+          QMap<QString, QVector<STerrainPaintMaterialChoice>> byFamily;
           for(const STerrainPaintMaterialChoice& choice : section)
+              byFamily[choice.familyName.isEmpty() ? choice.name
+                                                   : choice.familyName].append(choice);
+          for(auto family = byFamily.cbegin(); family != byFamily.cend(); ++family)
           {
-            QToolButton* button = new QToolButton(this);
-            button->setProperty("terrainMaterialId", choice.id);
-            button->setProperty("terrainSupportMaterialId", choice.supportId);
-            button->setProperty("terrainContextualStamp", choice.contextualStamp);
-            button->setCheckable(true);
-            button->setAutoRaise(false);
-            button->setToolTip(tr("%1 family - %2 atlas variant(s). %3")
-                .arg(choice.name).arg(choice.assignedSlots)
-                .arg(used ? tr("Currently used on this map.")
-                          : tr("Unused on this map; painting adds it and generates exact blends as needed.")));
-            if(!choice.thumbnail.isNull())
+            QLabel* familyHeading = new QLabel(family.key(), this);
+            familyHeading->setStyleSheet(QStringLiteral("QLabel { margin-top: 3px; color: palette(mid); }"));
+            grid->addWidget(familyHeading, row++, 0, 1, 5);
+            int index = 0;
+            for(const STerrainPaintMaterialChoice& choice : family.value())
             {
-                button->setIcon(QPixmap::fromImage(choice.thumbnail));
-                button->setIconSize(QSize(52, 52));
+              QToolButton* button = new QToolButton(this);
+              button->setProperty("terrainMaterialId", choice.id);
+              button->setProperty("terrainSupportMaterialId", choice.supportId);
+              button->setProperty("terrainContextualStamp", choice.contextualStamp);
+              button->setCheckable(true);
+              button->setAutoRaise(false);
+              button->setToolTip(tr("%1 - %2 authored uniform source(s). %3")
+                  .arg(choice.name).arg(choice.assignedSlots)
+                  .arg(used ? tr("Currently used on this map.")
+                            : tr("Unused on this map; painting adds this material and generates exact blends as needed.")));
+              if(!choice.thumbnail.isNull())
+              {
+                  button->setIcon(QPixmap::fromImage(choice.thumbnail));
+                  button->setIconSize(QSize(52, 52));
+              }
+              else
+                  button->setText(choice.name.left(2).toUpper());
+              button->setFixedSize(64, 64);
+              group->addButton(button);
+              grid->addWidget(button, row + index / 5, index % 5);
+              ++index;
             }
-            else
-                button->setText(choice.name.left(2).toUpper());
-            button->setFixedSize(64, 64);
-            group->addButton(button);
-            grid->addWidget(button, row + index / 5, index % 5);
-            ++index;
+            row += (family.value().size() + 4) / 5;
           }
-          row += (section.size() + 4) / 5;
         };
         addSection(true, tr("Used on this map"));
-        addSection(false, tr("Unused families"));
+        addSection(false, tr("Unused materials"));
         grid->setColumnStretch(5, 1);
     };
     populate(m_groundMaterialGrid, m_groundMaterialButtons, m_landPaintTypes);

@@ -340,7 +340,7 @@ private slots:
     void authoredAtlasProfileMatchesZone1Catalog();
     void authoredPresetCatalogCoversKnownAtlasesAndMatchesZone1();
     void authoredPresetCatalogAllEntriesCompile();
-    void globalMaterialFamiliesUseOnlyUniformAnchorsAndMergeVariants();
+    void globalMaterialVariantsUseOnlyUniformAnchorsAndShareThemeGroups();
     void zone2TransitionOnlyGrassMapsToGlobalUniformFamily();
     void authoredPresetSupportsZone18SharedLayers();
     void materialAtlasStoreLoadsOnlyExplicitLocalOverrides();
@@ -5591,7 +5591,7 @@ void EnduranceDocumentTests::authoredPresetCatalogAllEntriesCompile()
     QCOMPARE(transitionSupportFamilies, 76);
 }
 
-void EnduranceDocumentTests::globalMaterialFamiliesUseOnlyUniformAnchorsAndMergeVariants()
+void EnduranceDocumentTests::globalMaterialVariantsUseOnlyUniformAnchorsAndShareThemeGroups()
 {
     CValidationReport report;
     const QVector<STerrainGlobalMaterialFamily> families =
@@ -5599,38 +5599,42 @@ void EnduranceDocumentTests::globalMaterialFamiliesUseOnlyUniformAnchorsAndMerge
     QVERIFY2(!report.hasErrors(), qPrintable(report.toText()));
     QVERIFY(families.size() >= 10);
     QSet<qint32> identities;
-    const STerrainGlobalMaterialFamily* grass = nullptr;
-    const STerrainGlobalMaterialFamily* stone = nullptr;
+    const STerrainGlobalMaterialFamily* darkGrass = nullptr;
+    const STerrainGlobalMaterialFamily* freshGrass = nullptr;
+    int grassVariantCount = 0;
     for(const STerrainGlobalMaterialFamily& family : families)
     {
         QVERIFY(family.id > 255);
         QVERIFY(!identities.contains(family.id));
         identities.insert(family.id);
-        QVERIFY(!family.name.contains('/'));
+        QVERIFY(!family.theme.isEmpty());
         QVERIFY(!family.sources.isEmpty());
         for(const STerrainGlobalMaterialSource& source : family.sources)
         {
             QVERIFY(source.uniformSlot >= 0);
             QVERIFY(source.textureCount > source.uniformSlot / 64);
             QVERIFY(!source.variantName.isEmpty());
+            QCOMPARE(source.variantName, family.name);
             QCOMPARE(CTerrainAtlasPresetCatalog::materialTheme(
-                         source.variantName), family.name);
+                         source.variantName), family.theme);
         }
         if(family.layer == ETerrainAtlasLayer::Land
-           && family.name == QStringLiteral("Grass")) grass = &family;
+           && family.theme == QStringLiteral("Grass")) ++grassVariantCount;
         if(family.layer == ETerrainAtlasLayer::Land
-           && family.name == QStringLiteral("Stone")) stone = &family;
+           && family.name == QStringLiteral("Grass / Dark")) darkGrass = &family;
+        if(family.layer == ETerrainAtlasLayer::Land
+           && family.name == QStringLiteral("Grass / Fresh")) freshGrass = &family;
     }
-    QVERIFY(grass);
-    QVERIFY(stone);
-    QVERIFY(grass->sources.size() > 20);
-    QVERIFY(stone->sources.size() > 20);
-    QCOMPARE(grass->id, CTerrainAtlasPresetCatalog::globalMaterialId(
+    QVERIFY(darkGrass);
+    QVERIFY(freshGrass);
+    QVERIFY(grassVariantCount >= 4);
+    QCOMPARE(darkGrass->theme, QStringLiteral("Grass"));
+    QCOMPARE(freshGrass->theme, QStringLiteral("Grass"));
+    QCOMPARE(darkGrass->id, CTerrainAtlasPresetCatalog::globalMaterialId(
         QStringLiteral("Grass / Dark"), ETerrainAtlasLayer::Land));
-    QCOMPARE(grass->id, CTerrainAtlasPresetCatalog::globalMaterialId(
+    QCOMPARE(freshGrass->id, CTerrainAtlasPresetCatalog::globalMaterialId(
         QStringLiteral("Grass / Fresh"), ETerrainAtlasLayer::Land));
-    QVERIFY(grass->id != CTerrainAtlasPresetCatalog::globalMaterialId(
-        QStringLiteral("Stone / Gray"), ETerrainAtlasLayer::Land));
+    QVERIFY(darkGrass->id != freshGrass->id);
 }
 
 void EnduranceDocumentTests::zone2TransitionOnlyGrassMapsToGlobalUniformFamily()
@@ -5647,7 +5651,14 @@ void EnduranceDocumentTests::zone2TransitionOnlyGrassMapsToGlobalUniformFamily()
         CTerrainAtlasPresetCatalog::globalizedCatalog(
             profile, local.landCatalog);
     const qint32 grassId = CTerrainAtlasPresetCatalog::globalMaterialId(
-        QStringLiteral("Grass"), ETerrainAtlasLayer::Land);
+        QStringLiteral("Grass / Irregular"), ETerrainAtlasLayer::Land);
+    const QVector<STerrainGlobalMaterialFamily> materials =
+        CTerrainAtlasPresetCatalog::globalUniformFamilies(&report);
+    const auto grassSource = std::find_if(materials.cbegin(), materials.cend(),
+        [grassId](const STerrainGlobalMaterialFamily& material) {
+            return material.id == grassId && !material.sources.isEmpty();
+        });
+    QVERIFY(grassSource != materials.cend());
     bool sawTransitionOnlyIrregular = false;
     for(int slot = 0; slot < 512; ++slot)
     {

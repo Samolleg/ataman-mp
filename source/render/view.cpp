@@ -6635,6 +6635,7 @@ void CView::rebuildTerrainAutoCatalog()
             STerrainPaintMaterialChoice choice;
             choice.id = family.id;
             choice.name = family.name;
+            choice.familyName = family.theme;
             choice.thumbnail = source;
             choice.assignedSlots = family.sources.size();
             if(family.layer == ETerrainAtlasLayer::Land)

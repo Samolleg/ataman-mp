@@ -26,6 +26,7 @@ struct STerrainPaintMaterialChoice
     qint32 id{0};
     qint32 supportId{0};
     QString name;
+    QString familyName;
     QImage thumbnail;
     int assignedSlots{0};
     bool cornerOnly{false};

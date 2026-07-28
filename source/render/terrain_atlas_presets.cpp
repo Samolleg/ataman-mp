@@ -66,7 +66,7 @@ qint32 CTerrainAtlasPresetCatalog::globalMaterialId(
 {
     const QByteArray key = (layer == ETerrainAtlasLayer::Land
         ? QByteArrayLiteral("land:") : QByteArrayLiteral("overlay:"))
-        + materialTheme(variantName).toCaseFolded().toUtf8();
+        + variantName.trimmed().toCaseFolded().toUtf8();
     quint32 hash = 2166136261u;
     for(char byte : key)
     {
@@ -116,7 +116,7 @@ CTerrainAtlasPresetCatalog::globalUniformFamilies(CValidationReport* report)
             if(uniformSlot < 0)
                 continue; // transition evidence is not a paint family
             const QString theme = materialTheme(variantName);
-            if(theme.isEmpty())
+            if(theme.isEmpty() || variantName.trimmed().isEmpty())
                 continue;
             const QJsonArray layers = familyObject.value(
                 QStringLiteral("allowedLayers")).toArray();
@@ -127,13 +127,14 @@ CTerrainAtlasPresetCatalog::globalUniformFamilies(CValidationReport* report)
                     ? ETerrainAtlasLayer::Overlay : ETerrainAtlasLayer::Land;
                 const QString key = QString(layer == ETerrainAtlasLayer::Land
                     ? QStringLiteral("L:%1") : QStringLiteral("O:%1"))
-                    .arg(theme.toCaseFolded());
+                    .arg(variantName.trimmed().toCaseFolded());
                 STerrainGlobalMaterialFamily& global = grouped[key];
                 if(global.name.isEmpty())
                 {
-                    global.name = theme;
+                    global.name = variantName.trimmed();
+                    global.theme = theme;
                     global.layer = layer;
-                    global.id = globalMaterialId(theme, layer);
+                    global.id = globalMaterialId(global.name, layer);
                     const QString previous = identityKeys.value(global.id);
                     if(!previous.isEmpty() && previous != key)
                     {
@@ -167,6 +168,8 @@ CTerrainAtlasPresetCatalog::globalUniformFamilies(CValidationReport* report)
         const STerrainGlobalMaterialFamily& right) {
         if(left.layer != right.layer)
             return left.layer == ETerrainAtlasLayer::Land;
+        const int themeOrder = left.theme.localeAwareCompare(right.theme);
+        if(themeOrder != 0) return themeOrder < 0;
         return left.name.localeAwareCompare(right.name) < 0;
     });
     return result;

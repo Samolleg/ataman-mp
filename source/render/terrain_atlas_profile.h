@@ -39,10 +39,10 @@ struct STerrainAtlasProfileSource
     QString path;
 };
 
-// A paint family is a game-wide material theme backed by at least one real
-// four-identical-corner tile. Atlas-specific visual variants (for example
-// dark/common/fresh grass) are sources within one family, never independent
-// vertex identities.
+// A paint material is a visually distinct game-wide variant backed by at least
+// one real four-identical-corner tile. Variants share a palette theme (for
+// example Grass) but retain independent vertex identities (for example Grass /
+// Dark and Grass / Fresh).
 struct STerrainGlobalMaterialSource
 {
     QString mprNamespace;
@@ -55,6 +55,7 @@ struct STerrainGlobalMaterialFamily
 {
     qint32 id{0};
     QString name;
+    QString theme;
     ETerrainAtlasLayer layer{ETerrainAtlasLayer::Land};
     QVector<STerrainGlobalMaterialSource> sources;
 };

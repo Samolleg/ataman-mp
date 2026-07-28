@@ -1279,8 +1279,10 @@ int CTextureList::extractMmpToDxt1(QImage& outImage, const QString textureName)
     QStringList arrTexName;
     arrTexName.append(textureName);
     int res = extractMmpToDxt1(arrImage, arrTexName);
-    if(res == 0)
+    if(res != 0 && !arrImage.isEmpty())
         outImage = arrImage.front();
+    else
+        outImage = QImage();
     return res;
 }
 
