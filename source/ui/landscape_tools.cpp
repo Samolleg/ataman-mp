@@ -14,6 +14,7 @@
 #include <QPushButton>
 #include <QResizeEvent>
 #include <QScrollArea>
+#include <QSizePolicy>
 #include <QSlider>
 #include <QSettings>
 #include <QSet>
@@ -646,10 +647,12 @@ void CLandscapeTools::rebuildMaterialPalette()
               }
               else
                   button->setText(choice.name.left(2).toUpper());
-              button->setFixedSize(64, 64);
+              button->setMinimumSize(64, 64);
+              button->setMaximumHeight(64);
+              button->setSizePolicy(QSizePolicy::Expanding,
+                                    QSizePolicy::Fixed);
               group->addButton(button);
-              grid->addWidget(button, row + index / columns, index % columns,
-                              Qt::AlignHCenter);
+              grid->addWidget(button, row + index / columns, index % columns);
               ++index;
             }
             row += (family.value().size() + columns - 1) / columns;

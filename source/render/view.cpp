@@ -110,6 +110,7 @@ QImage loadGlobalUniformSource(const STerrainGlobalMaterialFamily& family,
                 preferredNamespace, Qt::CaseInsensitive) == 0;
             return leftPreferred && !rightPreferred;
         });
+    QImage fallback;
     for(const STerrainGlobalMaterialSource& source : sources)
     {
         const QStringList names = ei::terrainTextureResourceNames(
@@ -130,8 +131,13 @@ QImage loadGlobalUniformSource(const STerrainGlobalMaterialFamily& family,
                       .convertToFormat(QImage::Format_RGBA8888);
         if(requiredSize.isEmpty() || tile.size() == requiredSize)
             return tile;
+        if(fallback.isNull()) fallback = tile;
     }
-    return {};
+    // Material identity is independent of a map atlas's native tile
+    // resolution. Prefer a same-size reviewed anchor above, but do not make a
+    // valid stock JMV family unpaintable when only another resolution exists.
+    return fallback.isNull() ? QImage() : fallback.scaled(
+        requiredSize, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
 }
 
 QVector4D aiGraphLayerColor(int layer)
@@ -7336,7 +7342,12 @@ void CView::finalizeVirtualTerrainAtlas()
         {
             bool available=false;
             const quint16 packed=originalTerrain.packedTile(x,y,preserved,&available);
-            if(available)pinned.append(packed);
+            // 0xffff is the inactive-overlay sentinel, not atlas slot 16383.
+            // Pinning it caused valid land finalization to fail with the
+            // misleading "slot 16383 was not pinned" error.
+            if(available && !(preserved==ETerrainTileLayer::Overlay
+                              && packed==0xffffu))
+                pinned.append(packed);
         }
     CValidationReport report;
     const QVector<QImage>& authoredImages=m_authoredTerrainTileImages.isEmpty()

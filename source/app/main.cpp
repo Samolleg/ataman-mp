@@ -1090,6 +1090,8 @@ int runHeadlessCommand(QApplication& app)
             landscapeTools.findChild<QScrollArea*>("groundMaterialScroll");
         QScrollArea* overlayMaterialScroll =
             landscapeTools.findChild<QScrollArea*>("overlayMaterialScroll");
+        const QList<QToolButton*> paletteButtons =
+            landscapeTools.findChildren<QToolButton*>();
         const bool materialPaletteScrollsAndFillsWidth = groundMaterialScroll
             && overlayMaterialScroll && groundMaterialScroll->widgetResizable()
             && overlayMaterialScroll->widgetResizable()
@@ -1098,7 +1100,13 @@ int runHeadlessCommand(QApplication& app)
             && overlayMaterialScroll->horizontalScrollBarPolicy()
                 == Qt::ScrollBarAlwaysOff
             && groundMaterialScroll->widget()->width()
-                >= groundMaterialScroll->viewport()->width();
+                >= groundMaterialScroll->viewport()->width()
+            && std::all_of(paletteButtons.cbegin(), paletteButtons.cend(),
+                [](const QToolButton* button) {
+                    return !button->property("terrainMaterialId").isValid()
+                        || button->sizePolicy().horizontalPolicy()
+                            == QSizePolicy::Expanding;
+                });
         landscapeTools.hide();
         QLabel* atlasSourceStatus =
             landscapeTools.findChild<QLabel*>("materialAtlasSourceStatus");

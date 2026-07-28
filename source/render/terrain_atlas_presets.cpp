@@ -97,11 +97,11 @@ qint32 CTerrainAtlasPresetCatalog::globalMaterialId(
     const QString& variantName, ETerrainAtlasLayer layer,
     const QByteArray& atlasIdentity, qint32 localFamilyId)
 {
+    Q_UNUSED(atlasIdentity);
+    Q_UNUSED(localFamilyId);
     const QByteArray key = (layer == ETerrainAtlasLayer::Land
         ? QByteArrayLiteral("land:") : QByteArrayLiteral("overlay:"))
-        + (atlasIdentity.isEmpty()
-            ? variantName.trimmed().toCaseFolded().toUtf8()
-            : atlasIdentity.toLower() + ':' + QByteArray::number(localFamilyId));
+        + variantName.trimmed().toCaseFolded().toUtf8();
     quint32 hash = 2166136261u;
     for(char byte : key)
     {
@@ -140,26 +140,19 @@ CTerrainAtlasPresetCatalog::globalUniformFamilies(CValidationReport* report)
                 continue;
             const int thumbnailSlot = familyObject.value(
                 QStringLiteral("thumbnailSlot")).toInt(-1);
-            int uniformSlot = -1;
-            for(int slot = 0; slot < slotCount; ++slot)
-            {
-                const int offset = slot * 4;
-                if(quint8(signatures.at(offset)) == localId
-                   && quint8(signatures.at(offset + 1)) == localId
-                   && quint8(signatures.at(offset + 2)) == localId
-                   && quint8(signatures.at(offset + 3)) == localId)
-                {
-                    if(uniformSlot < 0)
-                        uniformSlot = slot;
-                    if(slot == thumbnailSlot)
-                    {
-                        uniformSlot = slot;
-                        break;
-                    }
-                }
-            }
-            if(uniformSlot < 0)
+            // A brush may only come from the reviewed pure anchor selected for
+            // the family. Falling back to any tuple merely labelled uniform
+            // allowed visually mixed transition imagery to leak into the
+            // palette when an old corner classification was wrong.
+            if(thumbnailSlot < 0 || thumbnailSlot >= slotCount)
+                continue;
+            const int anchorOffset = thumbnailSlot * 4;
+            if(quint8(signatures.at(anchorOffset)) != localId
+               || quint8(signatures.at(anchorOffset + 1)) != localId
+               || quint8(signatures.at(anchorOffset + 2)) != localId
+               || quint8(signatures.at(anchorOffset + 3)) != localId)
                 continue; // transition evidence is not a paint family
+            const int uniformSlot = thumbnailSlot;
             const QString theme = materialTheme(variantName);
             if(theme.isEmpty() || variantName.trimmed().isEmpty())
                 continue;
@@ -171,8 +164,8 @@ CTerrainAtlasPresetCatalog::globalUniformFamilies(CValidationReport* report)
                     layerValue.toString() == QStringLiteral("overlay")
                     ? ETerrainAtlasLayer::Overlay : ETerrainAtlasLayer::Land;
                 const QString key = QString(layer == ETerrainAtlasLayer::Land
-                    ? QStringLiteral("L:%1:%2") : QStringLiteral("O:%1:%2"))
-                    .arg(QString::fromLatin1(atlasIdentity)).arg(localId);
+                    ? QStringLiteral("L:%1") : QStringLiteral("O:%1"))
+                    .arg(variantName.trimmed().toCaseFolded());
                 STerrainGlobalMaterialFamily& global = grouped[key];
                 if(global.name.isEmpty())
                 {
@@ -210,25 +203,6 @@ CTerrainAtlasPresetCatalog::globalUniformFamilies(CValidationReport* report)
         }
     }
     QVector<STerrainGlobalMaterialFamily> result = grouped.values().toVector();
-    QMap<QString, int> duplicateNames;
-    for(const STerrainGlobalMaterialFamily& family : result)
-        ++duplicateNames[QString::number(int(family.layer)) + QLatin1Char(':')
-                         + family.name.toCaseFolded()];
-    for(STerrainGlobalMaterialFamily& family : result)
-    {
-        const QString duplicateKey = QString::number(int(family.layer))
-            + QLatin1Char(':') + family.name.toCaseFolded();
-        if(duplicateNames.value(duplicateKey) <= 1 || family.sources.isEmpty())
-            continue;
-        QString label = family.sources.front().mprNamespace;
-        for(const STerrainGlobalMaterialSource& source : family.sources)
-            if(source.mprNamespace.startsWith(QStringLiteral("Zone"),
-                                              Qt::CaseInsensitive)
-               && !label.startsWith(QStringLiteral("Zone"),
-                                    Qt::CaseInsensitive))
-                label = source.mprNamespace;
-        family.name += QStringLiteral(" — ") + label;
-    }
     std::sort(result.begin(), result.end(), [](
         const STerrainGlobalMaterialFamily& left,
         const STerrainGlobalMaterialFamily& right) {
