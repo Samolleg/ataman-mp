@@ -1957,7 +1957,13 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event)
                 return false;
             QVector3D preview;
             if(m_pView->terrainPositionAt(mouse->pos(), &preview))
+            {
+                QVector3D navigationPreview;
+                if(m_pView->projectToRegeneratedNavigation(
+                       QPointF(preview.x(), preview.y()), &navigationPreview))
+                    preview = navigationPreview;
                 m_pView->setTestSpawnMarker(preview, false);
+            }
             else
                 m_pView->clearTestSpawnMarker();
         }
@@ -1983,9 +1989,29 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event)
                     entrance ? entrance->exitId : 1,
                     mapTestObstacles());
                 QVector3D resolved(plan.position.x(), plan.position.y(), 0.0f);
-                if(!plan.valid || !CLandscape::getInstance()->projectPt(resolved))
+                QVector3D navigationResolved;
+                if(m_pView->projectToRegeneratedNavigation(
+                       QPointF(requested.x(), requested.y()), &navigationResolved))
                 {
-                    statusBar()->showMessage(tr("No clear terrain spawn was found near that point. Pick another location."), 5000);
+                    resolved = navigationResolved;
+                    plan.valid = true;
+                    plan.unobstructed = true;
+                    plan.position = QPointF(resolved.x(), resolved.y());
+                    plan.requestedPosition = QPointF(requested.x(), requested.y());
+                    plan.custom = true;
+                    plan.exitId = entrance ? entrance->exitId : 1;
+                    const QPointF graphAdjustment = plan.position - plan.requestedPosition;
+                    plan.adjusted = graphAdjustment.x() * graphAdjustment.x()
+                        + graphAdjustment.y() * graphAdjustment.y() > 0.0001;
+                    plan.reason = plan.adjusted
+                        ? tr("The regenerated navigation preview moved the spawn to the nearest passable point.")
+                        : tr("The regenerated navigation preview confirms this passable point.");
+                }
+                else if(plan.valid && !CLandscape::getInstance()->projectPt(resolved))
+                    plan.valid = false;
+                if(!plan.valid)
+                {
+                    statusBar()->showMessage(tr("No passable spawn was found near that point. Pick another location."), 5000);
                     return true;
                 }
                 m_customSpawn = plan;
@@ -3165,8 +3191,10 @@ void MainWindow::launchCurrentMapTest()
     input.embeddedScript = mob->script();
     input.mapEntry = entry;
     input.spawn = spawn;
-    QVector3D runtimeSpawn(spawn.position.x(), spawn.position.y(), 0.0f);
-    if(!CLandscape::getInstance()->projectPt(runtimeSpawn))
+    QVector3D runtimeSpawn = customForCurrentMap
+        ? m_customSpawnPosition
+        : QVector3D(spawn.position.x(), spawn.position.y(), 0.0f);
+    if(!customForCurrentMap && !CLandscape::getInstance()->projectPt(runtimeSpawn))
     {
         QMessageBox::warning(this, tr("Map test launch"),
             tr("The selected entrance could not be projected onto the loaded terrain."));

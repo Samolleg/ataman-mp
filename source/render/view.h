@@ -181,6 +181,9 @@ public:
                                  bool* hit = nullptr, bool forcePick = false);
     bool terrainPositionAt(const QPoint& viewportPosition, QVector3D* position,
                            bool land = true);
+    bool projectToRegeneratedNavigation(const QPointF& requested,
+                                        QVector3D* position,
+                                        float maximumDistance = 8.0f) const;
     QPolygonF minimapCameraFootprint() const;
     void moveCameraToMinimapPoint(const QPointF& worldPosition);
     QPoint operationAnchor() const;
@@ -674,6 +677,7 @@ private:
     CAiGraphDocument m_aiGraphDocument;
     CAiGraphDocument m_aiGraphLoadedDocument;
     CAiGraphDocument m_aiGraphRegeneratedDocument;
+    SAiGraphPreviewBuildResult m_aiGraphRegeneratedResult;
     QString m_aiGraphSource;
     QString m_aiGraphLoadedSource;
     QString m_aiGraphRegeneratedSource;

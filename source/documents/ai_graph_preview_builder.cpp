@@ -78,18 +78,7 @@ bool segmentsIntersect(const QVector2D& a, const QVector2D& b,
                                      || (abC > epsilon && abD < -epsilon))
         && ((cdA < -epsilon && cdB > epsilon)
             || (cdA > epsilon && cdB < -epsilon));
-    if(properIntersection)
-        return true;
-    const auto onSegment = [epsilon](const QVector2D& start, const QVector2D& end,
-                                     const QVector2D& point) {
-        return qAbs(cross2d(start, end, point)) <= epsilon
-            && point.x() >= qMin(start.x(), end.x()) - epsilon
-            && point.x() <= qMax(start.x(), end.x()) + epsilon
-            && point.y() >= qMin(start.y(), end.y()) - epsilon
-            && point.y() <= qMax(start.y(), end.y()) + epsilon;
-    };
-    return onSegment(a, b, c) || onSegment(a, b, d)
-        || onSegment(c, d, a) || onSegment(c, d, b);
+    return properIntersection;
 }
 
 bool volumeCoversAiTile(const SAiGraphCollisionProxy& volume, int x, int y)
@@ -102,18 +91,25 @@ bool volumeCoversAiTile(const SAiGraphCollisionProxy& volume, int x, int y)
     const float bottom = top + CAiGraphPreviewBuilder::AiTileWorldSize;
     float minX = volume.footprint.front().x(), maxX = minX;
     float minY = volume.footprint.front().y(), maxY = minY;
+    constexpr float halfOpenEpsilon = 1.0e-5f;
     for(const QVector2D& point : volume.footprint)
     {
         minX = qMin(minX, point.x()); maxX = qMax(maxX, point.x());
         minY = qMin(minY, point.y()); maxY = qMax(maxY, point.y());
-        if(point.x() >= left && point.x() <= right
-           && point.y() >= top && point.y() <= bottom)
+        // AI tiles are a half-open raster. Merely touching the right/bottom
+        // boundary belongs to the adjacent tile and must not thicken a wall
+        // or close a narrow doorway by one extra 0.5 m sample.
+        if(point.x() >= left && point.x() < right - halfOpenEpsilon
+           && point.y() >= top && point.y() < bottom - halfOpenEpsilon)
             return true;
     }
     if(maxX < left || minX > right || maxY < top || minY > bottom)
         return false;
-    const QVector2D square[] = {QVector2D(left, top), QVector2D(right, top),
-                                QVector2D(right, bottom), QVector2D(left, bottom)};
+    const QVector2D square[] = {
+        QVector2D(left + halfOpenEpsilon, top + halfOpenEpsilon),
+        QVector2D(right - halfOpenEpsilon, top + halfOpenEpsilon),
+        QVector2D(right - halfOpenEpsilon, bottom - halfOpenEpsilon),
+        QVector2D(left + halfOpenEpsilon, bottom - halfOpenEpsilon)};
     for(const QVector2D& point : square)
         if(pointInConvexPolygon(volume.footprint, point))
             return true;
@@ -228,6 +224,11 @@ int quantizedDepth(float worldDepth, float maximumTerrainHeight)
     const int depth = quantizedHeight(worldDepth, maximumTerrainHeight,
                                       MaximumObjectHeight);
     return depth > MaximumAiDepth ? MaximumAiDepth + 1 : depth;
+}
+
+float dequantizedHeight(int height, float maximumTerrainHeight)
+{
+    return float(height) * maximumTerrainHeight / float(MaximumAiHeight);
 }
 
 int elevationMultiplier(int heightDelta, float maximumTerrainHeight, bool flying)
@@ -478,6 +479,54 @@ quint32 readU32(const QByteArray& data, int offset)
 }
 }
 
+bool SAiGraphPreviewBuildResult::projectHumanPosition(
+    const QPointF& requested, QVector3D* projected, float maximumDistance) const
+{
+    if(!projected || !valid || !document.isValid()
+       || !qIsFinite(requested.x()) || !qIsFinite(requested.y())
+       || !qIsFinite(maximumDistance) || maximumDistance < 0.0f)
+        return false;
+    const int aiWidth = document.width() * CAiGraphPreviewBuilder::AiTilesPerGraphCell;
+    const int aiHeight = document.height() * CAiGraphPreviewBuilder::AiTilesPerGraphCell;
+    const int aiCount = aiWidth * aiHeight;
+    if(humanPassability.size() != aiCount
+       || navigationSurfaceHeights.size() != aiCount)
+        return false;
+
+    const float tileSize = CAiGraphPreviewBuilder::AiTileWorldSize;
+    const int radius = qCeil(maximumDistance / tileSize);
+    const int centerX = qBound(0, qFloor(requested.x() / tileSize), aiWidth - 1);
+    const int centerY = qBound(0, qFloor(requested.y() / tileSize), aiHeight - 1);
+    const float maximumDistanceSquared = maximumDistance * maximumDistance;
+    float bestDistanceSquared = std::numeric_limits<float>::max();
+    int best = -1;
+    for(int y = qMax(0, centerY - radius); y <= qMin(aiHeight - 1, centerY + radius); ++y)
+        for(int x = qMax(0, centerX - radius); x <= qMin(aiWidth - 1, centerX + radius); ++x)
+        {
+            const int index = tileIndex(x, y, aiWidth);
+            if(humanPassability.at(index) == 0)
+                continue;
+            const float worldX = (float(x) + 0.5f) * tileSize;
+            const float worldY = (float(y) + 0.5f) * tileSize;
+            const float dx = worldX - requested.x();
+            const float dy = worldY - requested.y();
+            const float distanceSquared = dx * dx + dy * dy;
+            if(distanceSquared > maximumDistanceSquared
+               || distanceSquared >= bestDistanceSquared)
+                continue;
+            bestDistanceSquared = distanceSquared;
+            best = index;
+        }
+    if(best < 0)
+        return false;
+    const int bestX = best % aiWidth;
+    const int bestY = best / aiWidth;
+    *projected = QVector3D((float(bestX) + 0.5f) * tileSize,
+                           (float(bestY) + 0.5f) * tileSize,
+                           navigationSurfaceHeights.at(best));
+    return true;
+}
+
 QVector<SAiTerrainTraversal> CAiGraphPreviewBuilder::parseTerrainTraversalRegistry(
     const QByteArray& registry, QString* error)
 {
@@ -659,6 +708,14 @@ SAiGraphPreviewBuildResult CAiGraphPreviewBuilder::build(const SAiGraphPreviewBu
             }
     }
     result.collisionRasterMilliseconds = collisionTimer.elapsed();
+    result.navigationSurfaceHeights.resize(aiCount);
+    result.bridgeMask.resize(aiCount);
+    for(int index = 0; index < aiCount; ++index)
+    {
+        result.navigationSurfaceHeights[index] = dequantizedHeight(
+            navigationHeights.at(index), input.maximumTerrainHeight);
+        result.bridgeMask[index] = bridgeTiles.at(index) ? quint8(1) : quint8(0);
+    }
 
     QVector<bool> walkSlopeBlocked(aiCount, false);
     QVector<bool> flySlopeBlocked(aiCount, false);
@@ -803,6 +860,7 @@ SAiGraphPreviewBuildResult CAiGraphPreviewBuilder::build(const SAiGraphPreviewBu
                 int best = tileIndex(gx * 8 + 3, gy * 8 + 3, aiWidth);
                 int bestQuality = 0;
                 bool foundCrossing = false;
+                bool foundCrossingBridge = false;
                 for(int size = 2; size <= AiTilesPerGraphCell; size += 2)
                 {
                     const int offset = (AiTilesPerGraphCell - size) / 2;
@@ -813,15 +871,20 @@ SAiGraphPreviewBuildResult CAiGraphPreviewBuilder::build(const SAiGraphPreviewBu
                         const int candidateQuality = quality.at(candidate);
                         if(candidateQuality <= 0)
                             continue;
-                        if(candidateQuality > bestQuality || !foundCrossing)
+                        const bool crosses = crossingCandidates.at(
+                            ly * AiTilesPerGraphCell + lx);
+                        const bool crossingBridge = crosses
+                            && bridgeTiles.at(candidate);
+                        if((crossingBridge && !foundCrossingBridge)
+                           || (!foundCrossingBridge
+                               && (candidateQuality > bestQuality || !foundCrossing)))
                         {
-                            const bool crosses = crossingCandidates.at(
-                                ly * AiTilesPerGraphCell + lx);
                             if(crosses || !foundCrossing)
                             {
                                 best = candidate;
                                 bestQuality = candidateQuality;
                                 foundCrossing = crosses;
+                                foundCrossingBridge = crossingBridge;
                             }
                         }
                     }
@@ -920,7 +983,10 @@ SAiGraphPreviewBuildResult CAiGraphPreviewBuilder::build(const SAiGraphPreviewBu
         makeConsistent(&layer, input.graphWidth, input.graphHeight);
         assignComponents(&layer, input.graphWidth, input.graphHeight);
         if(layerIndex == 3)
+        {
             result.blockedAiTiles = int(std::count(quality.cbegin(), quality.cend(), quint8(0)));
+            result.humanPassability = quality;
+        }
     }
     result.routeBuildMilliseconds = routeTimer.elapsed();
 

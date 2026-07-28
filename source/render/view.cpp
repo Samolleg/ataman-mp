@@ -1432,9 +1432,10 @@ void CView::initAiGraphPreviewWidget()
         "Build a non-saving diagnostic graph from current terrain and static-object collision proxies."));
     m_aiGraphUseLoadedButton = new QToolButton(m_aiGraphPreviewBody);
     m_aiGraphUseLoadedButton->setCheckable(true);
-    m_aiGraphUseLoadedButton->setText(tr("Loaded graph override: OFF"));
+    m_aiGraphUseLoadedButton->setText(tr("Loaded preview override: OFF"));
     m_aiGraphUseLoadedButton->setToolTip(tr(
-        "Toggle between the graph loaded from the map and a regenerated diagnostic preview."));
+        "Viewport only: toggle between the graph loaded from the map and the regenerated preview. "
+        "Test Current Map always stages a freshly validated regenerated graph."));
     actions->addWidget(m_aiGraphUseLoadedButton);
     actions->addWidget(m_aiGraphRegenerateButton);
     body->addLayout(actions);
@@ -1560,8 +1561,8 @@ void CView::syncAiGraphPreviewWidget()
         const QSignalBlocker blocker(m_aiGraphUseLoadedButton);
         m_aiGraphUseLoadedButton->setChecked(m_aiGraphLoadedOverride);
         m_aiGraphUseLoadedButton->setText(m_aiGraphLoadedOverride
-            ? tr("Loaded graph override: ON")
-            : tr("Loaded graph override: OFF"));
+            ? tr("Loaded preview override: ON")
+            : tr("Loaded preview override: OFF"));
         m_aiGraphUseLoadedButton->setEnabled(m_aiGraphLoadedDocument.isValid());
     }
     if(m_aiGraphPreviewBody->layout())
@@ -1581,6 +1582,7 @@ void CView::refreshAiGraphPreviewSource()
     m_aiGraphDocument.clear();
     m_aiGraphLoadedDocument.clear();
     m_aiGraphRegeneratedDocument.clear();
+    m_aiGraphRegeneratedResult = SAiGraphPreviewBuildResult();
     m_aiGraphSource.clear();
     m_aiGraphLoadedSource.clear();
     m_aiGraphRegeneratedSource.clear();
@@ -1913,6 +1915,7 @@ void CView::beginAiGraphPreviewRegeneration(bool selectRegenerated)
                 return;
             }
             m_aiGraphRegeneratedDocument = result.document;
+            m_aiGraphRegeneratedResult = result;
             m_aiGraphRegeneratedSource = tr("Regenerated: %1/%2 authored collision parts, %3 bridge cells, %4 water samples")
                 .arg(result.authoredCollisionProxyCount).arg(result.collisionProxyCount)
                 .arg(result.bridgeAiTiles).arg(result.waterAiTiles);
@@ -3211,6 +3214,20 @@ void CView::rebuildAiGraphOverlayGeometry()
                                (y * 8 + localY + 0.5f) * 0.5f, 0.0f);
             if(!m_pLand->projectPt(position))
                 continue;
+            if(!m_aiGraphLoadedOverride && m_aiGraphRegeneratedFresh
+               && m_aiGraphRegeneratedResult.valid)
+            {
+                const int aiWidth = width * CAiGraphPreviewBuilder::AiTilesPerGraphCell;
+                const int aiX = x * CAiGraphPreviewBuilder::AiTilesPerGraphCell + localX;
+                const int aiY = y * CAiGraphPreviewBuilder::AiTilesPerGraphCell + localY;
+                const int aiIndex = aiY * aiWidth + aiX;
+                if(aiIndex >= 0
+                   && aiIndex < m_aiGraphRegeneratedResult.navigationSurfaceHeights.size()
+                   && aiIndex < m_aiGraphRegeneratedResult.bridgeMask.size()
+                   && m_aiGraphRegeneratedResult.bridgeMask.at(aiIndex))
+                    position.setZ(qMax(position.z(),
+                        m_aiGraphRegeneratedResult.navigationSurfaceHeights.at(aiIndex)));
+            }
             position.setZ(position.z() + 0.20f);
             const int cell = y * width + x;
             positions[cell] = position;
@@ -11333,6 +11350,16 @@ bool CView::terrainPositionAt(const QPoint& viewportPosition, QVector3D* positio
         previousDelta = delta;
     }
     return false;
+}
+
+bool CView::projectToRegeneratedNavigation(const QPointF& requested,
+                                           QVector3D* position,
+                                           float maximumDistance) const
+{
+    if(!m_aiGraphRegeneratedFresh || !m_aiGraphRegeneratedResult.valid)
+        return false;
+    return m_aiGraphRegeneratedResult.projectHumanPosition(
+        requested, position, maximumDistance);
 }
 
 void CView::anchorCameraRotationToViewportCenter()

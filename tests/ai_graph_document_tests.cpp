@@ -98,6 +98,9 @@ private slots:
     void regenerationRejectsGameScaleTerrainCliffs();
     void regenerationAppliesWaterClearanceToEveryProfile();
     void regenerationUsesBridgeSurfaceAndObjectSemantics();
+    void regenerationKeepsNarrowBridgeCorridorInCoarseGraph();
+    void regeneratedHumanProjectionUsesPassableBridgeSurface();
+    void regenerationPreservesAuthoredNarrowObjectOpening();
     void regenerationRasterizesSlopedBridgeHeightsPerTile();
     void regenerationHonorsConfiguredTerrainTraversal();
     void regenerationUsesRuntimeRouteWeightScale();
@@ -321,6 +324,66 @@ void AiGraphDocumentTests::regenerationUsesBridgeSurfaceAndObjectSemantics()
     QVERIFY2(ignored.valid, qPrintable(ignored.error));
     for(int layer = 0; layer < CAiGraphDocument::LayerCount; ++layer)
         QVERIFY(ignored.document.weight(layer, 1, 1, 6) >= 0);
+}
+
+void AiGraphDocumentTests::regenerationKeepsNarrowBridgeCorridorInCoarseGraph()
+{
+    SAiGraphPreviewBuildInput input;
+    input.graphWidth = 3;
+    input.graphHeight = 3;
+    const int aiWidth = input.graphWidth * CAiGraphPreviewBuilder::AiTilesPerGraphCell;
+    const int aiHeight = input.graphHeight * CAiGraphPreviewBuilder::AiTilesPerGraphCell;
+    input.terrainHeights.fill(0.0f, aiWidth * aiHeight);
+    input.waterDepths.fill(6.0f, aiWidth * aiHeight);
+    input.collisionProxies.append(boxVolume(
+        0.0f, 5.0f, 1.8f, 12.0f, 7.0f, 2.0f,
+        EAiGraphObjectPassability::Bridge));
+
+    const SAiGraphPreviewBuildResult result = CAiGraphPreviewBuilder::build(input);
+    QVERIFY2(result.valid, qPrintable(result.error));
+    QVERIFY(result.document.weight(3, 0, 1, 6) >= 0);
+    QVERIFY(result.document.weight(3, 1, 1, 6) >= 0);
+    const int middleLocalY = result.document.localY(3, 1, 1);
+    QVERIFY(middleLocalY >= 2 && middleLocalY <= 6);
+}
+
+void AiGraphDocumentTests::regeneratedHumanProjectionUsesPassableBridgeSurface()
+{
+    SAiGraphPreviewBuildInput input;
+    input.graphWidth = 3;
+    input.graphHeight = 3;
+    const int aiWidth = input.graphWidth * CAiGraphPreviewBuilder::AiTilesPerGraphCell;
+    const int aiHeight = input.graphHeight * CAiGraphPreviewBuilder::AiTilesPerGraphCell;
+    input.terrainHeights.fill(0.0f, aiWidth * aiHeight);
+    input.waterDepths.fill(6.0f, aiWidth * aiHeight);
+    input.collisionProxies.append(boxVolume(
+        0.0f, 5.0f, 1.8f, 12.0f, 7.0f, 2.0f,
+        EAiGraphObjectPassability::Bridge));
+
+    const SAiGraphPreviewBuildResult result = CAiGraphPreviewBuilder::build(input);
+    QVERIFY2(result.valid, qPrintable(result.error));
+    QVector3D projected;
+    QVERIFY(result.projectHumanPosition(QPointF(6.0f, 6.0f), &projected, 2.0f));
+    QVERIFY(projected.z() > 1.8f);
+    QVERIFY(!result.projectHumanPosition(QPointF(6.0f, 0.5f), &projected, 1.0f));
+}
+
+void AiGraphDocumentTests::regenerationPreservesAuthoredNarrowObjectOpening()
+{
+    SAiGraphPreviewBuildInput input;
+    input.graphWidth = 3;
+    input.graphHeight = 3;
+    const int aiWidth = input.graphWidth * CAiGraphPreviewBuilder::AiTilesPerGraphCell;
+    const int aiHeight = input.graphHeight * CAiGraphPreviewBuilder::AiTilesPerGraphCell;
+    input.terrainHeights.fill(0.0f, aiWidth * aiHeight);
+    input.collisionProxies.append(boxVolume(5.5f, 0.0f, 0.0f, 6.5f, 5.0f, 3.0f));
+    input.collisionProxies.append(boxVolume(5.5f, 7.0f, 0.0f, 6.5f, 12.0f, 3.0f));
+
+    const SAiGraphPreviewBuildResult result = CAiGraphPreviewBuilder::build(input);
+    QVERIFY2(result.valid, qPrintable(result.error));
+    QVector3D projected;
+    QVERIFY(result.projectHumanPosition(QPointF(6.0f, 6.0f), &projected, 0.5f));
+    QVERIFY(qAbs(projected.y() - 6.0f) <= 0.5f);
 }
 
 void AiGraphDocumentTests::regenerationRasterizesSlopedBridgeHeightsPerTile()

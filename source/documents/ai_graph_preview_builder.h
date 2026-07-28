@@ -4,6 +4,7 @@
 #include <QVector>
 #include <QVector2D>
 #include <QVector3D>
+#include <QPointF>
 
 #include "ai_graph_document.h"
 
@@ -63,7 +64,13 @@ struct SAiGraphPreviewBuildResult
     qint64 buildMilliseconds{0};
     qint64 collisionRasterMilliseconds{0};
     qint64 routeBuildMilliseconds{0};
+    QVector<float> navigationSurfaceHeights;
+    QVector<quint8> humanPassability;
+    QVector<quint8> bridgeMask;
     QStringList warnings;
+
+    bool projectHumanPosition(const QPointF& requested, QVector3D* projected,
+                              float maximumDistance = 8.0f) const;
 };
 
 class CAiGraphPreviewBuilder
